@@ -1,1 +1,0 @@
-# powershell 白名单
