@@ -1,0 +1,37 @@
+---
+description: 按语义显式写分支，禁止无意义空 else
+alwaysApply: true
+---
+
+# 分支可读性规则（全局）
+
+适用于仓库内所有可维护源码（Python、脚本、前端等；第三方拷贝与纯生成物除外）。
+
+## 要求
+
+- 对于“明显互斥且都需要理解”的业务分支，必须显式写出 `else`（或完整 `if / elif / else`）。
+  - 典型场景：类型分流、状态机分流、协议分流（例如 `tool_result` 的“单条 vs 列表”）。
+- 对于无业务语义的空分支，不要强行保留 `else`。
+  - 禁止仅用于占位的空逻辑（如 `else: pass`、仅注释无动作的 `else`）。
+- 允许在逻辑已清晰时省略 `else`，但不能牺牲可读性；若省略会让读者疑惑，应改为显式 `else`。
+
+## 目的
+
+- 保留“该显式时显式”的分支可读性，避免隐式路径让读者猜测。
+- 去掉机械空分支，减少噪音，降低维护成本。
+
+## 示例
+
+```python
+# ❌ 不推荐：无意义空分支
+if ready:
+    process()
+else:
+    pass
+
+# ✅ 推荐：互斥语义明确时显式 else
+if isinstance(raw_results, list):
+    handle_batch(raw_results)
+else:
+    handle_single(raw_results)
+```

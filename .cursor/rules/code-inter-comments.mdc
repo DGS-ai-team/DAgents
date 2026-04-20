@@ -1,0 +1,40 @@
+---
+description: 全局要求——代码间注释充分，便于后续阅读逻辑
+alwaysApply: true
+---
+
+# 代码间注释（全局）
+
+适用于仓库内**所有可维护源码**（含 Python、配置脚本、前端等；纯生成物或第三方拷贝除外）。
+
+## 要求
+
+- **方法级说明**仍遵循既有规则（如 `method-docstring-standard.mdc`）；本规则补充的是**方法体内部**的**代码间注释**。
+- 在**非平凡逻辑**处用简短中文注释说明「**为什么这样做 / 与谁配合 / 关键分支含义**」，使读者**不依赖对话上下文**也能跟上主流程。
+- 至少覆盖：
+  - **多步流水线**：在主要步骤前用 1 行注释标出阶段（与 docstring 里的「执行顺序」可呼应，避免重复贴大段文字）。
+  - **分支与边界**：`if/else`、`try/except`、提前 `return`、`continue`、队列/异步取消等，注释**判定意图**或**不满足时的后果**。
+  - **跨模块约定**：调用外部 API、写库、与 OpenAI 消息序列/审批流等强约定相关的写入，用注释点明**协议或不变量**。
+- **禁止**：无信息量的注释（如「循环列表」）、与代码字面完全重复的注释、大段复制 docstring。
+
+## 示例（Python）
+
+```python
+# ❌ 过稀：连续数十行无注释，读者难以分段
+for item in pending:
+    ctx.messages.append({"role": "tool", "tool_call_id": item.call_id, "content": text})
+    ctx.pending_tool_calls = [p for p in ctx.pending_tool_calls if p.call_id != item.call_id]
+
+# ✅ 在阶段与非常规分支处点睛
+# 每条 pending 对应 OpenAI 一条 role=tool；必须先写满再进入下一轮模型请求，否则 API 拒收。
+for item in list(ctx.pending_tool_calls):
+    ctx.messages.append({...})
+    # 仅从内存 pending 移除；messages 已为权威历史。
+    ctx.pending_tool_calls = [p for p in ctx.pending_tool_calls if p.call_id != item.call_id]
+```
+
+## 与 Agent `@tool` 文档、文件夹 README 的关系
+
+- **`@tool` 的 docstring** 仍按 `agent-tool-docstring-brief.mdc`（面向调用契约，不写实现细节）。
+- **目录 README / REFERENCE** 仍按 `folder-readme.mdc`。
+- **本规则**只约束**源码内部的行内/块注释**密度与信息质量，不替代上述文档。
