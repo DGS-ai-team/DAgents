@@ -9,10 +9,9 @@ from typing import Any, Awaitable, Callable, Literal
 from uuid import uuid4
 
 from app.config.settings import get_settings
-from app.context.models import OpenAIConversationContext, SummaryCompressionPhase
+from app.context.models import OpenAIConversationContext
 from app.core.main_agent.model import get_model_config
 from app.core.main_agent.agent import MainAgentTurnOrchestrator
-from app.core.summary_agent.agent import init_agent as init_summary_agent
 from app.harness.memory.store import SqliteMessageStore
 from app.harness.queue.message_queue import MessageEnvelope, MessagePriority, MessageQueue
 from app.harness.service.interface import AgentEventEnvelope
@@ -58,23 +57,13 @@ class AgentService:
             message_store: 可选注入存储（单测可传入或关闭）。
         """
         self._runtime: Any | None = None
-        self._summary_runtime: Any | None = None
         self._stop_event = asyncio.Event()
         settings = get_settings()
         self._max_queue_size = max_queue_size
         self._max_active_session_queues = max(1, int(settings.agent_max_active_session_queues))
         self._session_idle_evict_seconds = max(0, int(settings.agent_session_idle_evict_seconds))
-        self._summary_silent_trigger_tokens = max(
-            0,
-            int(settings.summary_compression_silent_trigger_tokens),
-        )
-        self._summary_blocking_trigger_tokens = max(
-            0,
-            int(settings.summary_compression_blocking_trigger_tokens),
-        )
         self._session_queues: dict[str, MessageQueue[MessageEnvelope]] = {}
         self._session_contexts: dict[str, OpenAIConversationContext] = {}
-        self._session_summary_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_last_activity: dict[str, float] = {}
         self._session_consumer_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_active_handles: dict[str, asyncio.Task[None] | None] = {}
@@ -85,6 +74,7 @@ class AgentService:
             submit_message=self.submit_message,
             emit_envelope=self._emit_envelope,
             tool_map=self._tool_map,
+            log=self._log,
         )
         if message_store is not None:
             self._message_store = message_store
@@ -128,16 +118,7 @@ class AgentService:
                     pass
 
         # 结束静默压缩后台任务，防止 stop 后仍持有旧 context 写入压缩状态。
-        for st in list(self._session_summary_tasks.values()):
-            if st is not None and not st.done():
-                st.cancel()
-        for st in list(self._session_summary_tasks.values()):
-            if st is None:
-                continue
-            try:
-                await st
-            except asyncio.CancelledError:
-                pass
+        await self._turn_orchestrator.cancel_all_summary_tasks()
 
         # 再停「每 session 的 receive 循环」，避免 stop 后仍从已关闭队列取消息。
         for t in list(self._session_consumer_tasks.values()):
@@ -152,7 +133,6 @@ class AgentService:
 
         self._session_consumer_tasks.clear()
         self._session_active_handles.clear()
-        self._session_summary_tasks.clear()
         self._async_store.register_message_queue_sender(None)
         for q in self._session_queues.values():
             await q.stop()
@@ -362,10 +342,6 @@ class AgentService:
         self._touch_session_activity(env.session_id)
         runtime = self._get_runtime()
         try:
-            # 每轮入口先尝试应用已完成压缩，再做阻塞阈值判定，最后再考虑启动新一轮静默压缩。
-            await self._try_apply_ready_compression_result(env.session_id, ctx)
-            await self._maybe_run_blocking_compression(env.session_id, ctx)
-            await self._maybe_start_silent_compression(env.session_id, ctx)
             base_meta = self._stream_base_meta(env)
             await self._turn_orchestrator.handle_message(
                 ctx=ctx,
@@ -432,182 +408,6 @@ class AgentService:
             self._runtime = init_agent()
         return self._runtime
 
-    def _get_summary_runtime(self) -> Any:
-        """懒加载并复用 summary 压缩 runtime。"""
-        if self._summary_runtime is None:
-            self._summary_runtime = init_summary_agent()
-        return self._summary_runtime
-
-    async def _try_apply_ready_compression_result(
-        self,
-        session_id: str,
-        ctx: OpenAIConversationContext,
-    ) -> None:
-        """在每轮入口尝试应用已完成的压缩结果。
-
-        逻辑：
-        1. 若该 session 存在静默压缩 task 且已结束，先 `await` 回收 task 并移除映射；
-        2. 当 `summary_compression_phase` 已回到 `IDLE` 且存在 `summary_compressed_message` 时，执行区间替换；
-        3. 替换成功后压缩计划会由 runtime 清空并回到 `NOT_STARTED`，避免重复替换。
-
-        关键边界：
-        - 任务失败不向外抛错，仅记录日志并允许主流程继续；
-        - 若压缩结果无效（区间不合法/内容为空）则本轮跳过替换。
-        """
-        task = self._session_summary_tasks.get(session_id)
-        if task is not None and task.done():
-            self._session_summary_tasks.pop(session_id, None)
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception as exc:  # noqa: BLE001
-                self._log("summary", session_id, f"silent compression failed: {exc}")
-
-        if ctx.summary_compression_phase != SummaryCompressionPhase.IDLE:
-            return
-        if not ctx.summary_compressed_message:
-            # `IDLE` 表示“已压缩完成待替换”；若消息为空，重置为 `NOT_STARTED` 以允许后续重新压缩。
-            ctx.summary_compression_phase = SummaryCompressionPhase.NOT_STARTED
-            return
-        summary_runtime = self._get_summary_runtime()
-        if summary_runtime.replace_messages_with_compressed_message(ctx):
-            self._log("summary", session_id, "applied compressed message block")
-        else:
-            ctx.summary_compression_phase = SummaryCompressionPhase.NOT_STARTED
-            ctx.summary_compression_range_start = -1
-            ctx.summary_compression_range_end = -1
-            ctx.summary_compressed_message = {}
-
-    async def _maybe_run_blocking_compression(self, session_id: str, ctx: OpenAIConversationContext) -> None:
-        """按阻塞阈值在每轮入口执行串行压缩。
-
-        逻辑：
-        1. 阈值关闭时直接返回；
-        2. 若 token 估算未达阻塞阈值，返回；
-        3. 若已有静默压缩任务在跑，则等待其结束并尝试替换结果；
-        4. 否则在当前协程串行执行“选区间→准备文本块→run_turn→替换”。
-
-        关键边界：
-        - 压缩异常仅记录日志，不中断主消息处理；
-        - 若当前 `summary_compression_phase` 非 `NOT_STARTED` 且无任务可等待，跳过本轮阻塞压缩，避免并发竞态。
-        """
-        threshold = self._summary_blocking_trigger_tokens
-        if threshold <= 0:
-            return
-        summary_runtime = self._get_summary_runtime()
-        total_tokens = int(summary_runtime.estimate_message_tokens(ctx.messages))
-        if total_tokens < threshold:
-            return
-
-        running_task = self._session_summary_tasks.get(session_id)
-        if running_task is not None and not running_task.done():
-            try:
-                await running_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as exc:  # noqa: BLE001
-                self._log("summary", session_id, f"blocking wait silent task failed: {exc}")
-            await self._try_apply_ready_compression_result(session_id, ctx)
-            return
-
-        if ctx.summary_compression_phase != SummaryCompressionPhase.NOT_STARTED:
-            return
-        if not summary_runtime.should_compress(ctx, trigger_tokens=threshold):
-            return
-
-        prepared = summary_runtime.prepare_compression_block(ctx)
-        if not bool(prepared.get("ok")):
-            return
-        block = str(prepared.get("block") or "").strip()
-        if not block:
-            return
-
-        try:
-            await summary_runtime.run_turn(
-                ctx,
-                request_type="human_message",
-                content=block,
-            )
-            if summary_runtime.replace_messages_with_compressed_message(ctx):
-                self._log("summary", session_id, "blocking compression completed and applied")
-        except asyncio.CancelledError:
-            flush = getattr(summary_runtime, "flush_cancelled_turn", None)
-            if callable(flush):
-                flush(ctx)
-            raise
-        except Exception as exc:  # noqa: BLE001
-            self._log("summary", session_id, f"blocking compression failed: {exc}")
-
-    async def _maybe_start_silent_compression(self, session_id: str, ctx: OpenAIConversationContext) -> None:
-        """按静默阈值在每轮入口触发并行压缩任务。
-
-        逻辑：
-        1. 阈值关闭、已有任务运行、或当前 phase 非 `NOT_STARTED` 时不启动；
-        2. 达阈值后先在主协程内完成区间判定与文本块准备，固定本次压缩输入；
-        3. 创建后台 task 仅执行 `run_turn`，结果在后续 `handle_message` 入口统一替换。
-
-        关键边界：
-        - 静默任务不直接替换 `ctx.messages`，避免与主流程竞争写同一列表；
-        - 若准备阶段失败（无合法区间/文本空），本轮静默压缩放弃。
-        """
-        threshold = self._summary_silent_trigger_tokens
-        if threshold <= 0:
-            return
-        running_task = self._session_summary_tasks.get(session_id)
-        if running_task is not None and not running_task.done():
-            return
-        if ctx.summary_compression_phase != SummaryCompressionPhase.NOT_STARTED:
-            return
-
-        summary_runtime = self._get_summary_runtime()
-        if not summary_runtime.should_compress(ctx, trigger_tokens=threshold):
-            return
-        prepared = summary_runtime.prepare_compression_block(ctx)
-        if not bool(prepared.get("ok")):
-            return
-        block = str(prepared.get("block") or "").strip()
-        if not block:
-            return
-
-        self._session_summary_tasks[session_id] = asyncio.create_task(
-            self._run_silent_compression_task(
-                session_id=session_id,
-                ctx=ctx,
-                block=block,
-            )
-        )
-
-    async def _run_silent_compression_task(
-        self,
-        *,
-        session_id: str,
-        ctx: OpenAIConversationContext,
-        block: str,
-    ) -> None:
-        """后台执行单次静默压缩（不替换消息，仅产出压缩结果）。
-
-        逻辑：
-        1. 调用 summary runtime 的 `run_turn` 生成 `summary_compressed_message`；
-        2. 不在该任务中替换 `ctx.messages`，替换动作由下一次 `handle_message` 入口触发；
-        3. 任务失败仅记录日志，不向外传播到主消费循环。
-        """
-        summary_runtime = self._get_summary_runtime()
-        try:
-            await summary_runtime.run_turn(
-                ctx,
-                request_type="human_message",
-                content=block,
-            )
-            self._log("summary", session_id, "silent compression completed")
-        except asyncio.CancelledError:
-            flush = getattr(summary_runtime, "flush_cancelled_turn", None)
-            if callable(flush):
-                flush(ctx)
-            raise
-        except Exception as exc:  # noqa: BLE001
-            self._log("summary", session_id, f"silent compression failed: {exc}")
-
     def _touch_session_activity(self, session_id: str) -> None:
         """更新指定 session 的最后活动时间（Unix 秒）。
 
@@ -670,14 +470,7 @@ class AgentService:
             except asyncio.CancelledError:
                 pass
 
-        st = self._session_summary_tasks.get(session_id)
-        if st is not None and not st.done():
-            st.cancel()
-        if st is not None:
-            try:
-                await st
-            except asyncio.CancelledError:
-                pass
+        await self._turn_orchestrator.cancel_session_summary_task(session_id=session_id)
 
         t = self._session_consumer_tasks.get(session_id)
         if t is not None and not t.done():
@@ -690,7 +483,6 @@ class AgentService:
 
         self._session_consumer_tasks.pop(session_id, None)
         self._session_active_handles.pop(session_id, None)
-        self._session_summary_tasks.pop(session_id, None)
         self._session_contexts.pop(session_id, None)
         self._session_last_activity.pop(session_id, None)
 

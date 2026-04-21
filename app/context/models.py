@@ -81,7 +81,7 @@ class ConversationContext(BaseModel):
     逻辑：
     1. `history` 保存人类可读历史；
     2. `openai_messages` / `pending_tool_calls` / `run_turn_phase` / `tool_loop_count` 为主流程字段；
-    3. `summary_*` 为压缩流程常驻字段，不再通过 `extras` 承载。
+    3. 仅保留主流程常驻字段；summary 压缩态由编排层内存维护，不持久化。
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -96,15 +96,9 @@ class ConversationContext(BaseModel):
         description="待执行/待审批工具规格（dict 形态，含 call_id/name/arguments）。",
     )
     run_turn_phase: RunTurnPhase = Field(default=RunTurnPhase.IDLE, description="持久化态 run_turn 阶段。")
-    summary_compression_phase: SummaryCompressionPhase = Field(
-        default=SummaryCompressionPhase.NOT_STARTED,
-        description="持久化态 summary 压缩阶段。",
-    )
-    summary_compression_range_start: int = Field(default=-1, description="待压缩区间起始下标（含）。")
-    summary_compression_range_end: int = Field(default=-1, description="待压缩区间结束下标（含）。")
-    summary_compressed_message: dict[str, Any] = Field(
-        default_factory=dict,
-        description="压缩后的单条 human_message（dict 形态）。",
+    messages_total_tokens: int = Field(
+        default=0,
+        description="当前 `openai_messages` 的粗略 token 总量（由运行时维护）。",
     )
     tool_loop_count: int = Field(default=0, description="跨回合累计工具循环计数。")
 
@@ -120,10 +114,7 @@ class ConversationContext(BaseModel):
     ) -> tuple[
         list[dict[str, Any]],
         list[dict[str, Any]],
-        SummaryCompressionPhase,
         int,
-        int,
-        dict[str, Any],
     ]:
         """解析为 OpenAI runtime 使用的常驻字段。"""
         messages: list[dict[str, Any]] = []
@@ -151,10 +142,7 @@ class ConversationContext(BaseModel):
         return (
             messages,
             pending_specs,
-            self.summary_compression_phase,
-            max(-1, int(self.summary_compression_range_start)),
-            max(-1, int(self.summary_compression_range_end)),
-            copy.deepcopy(self.summary_compressed_message),
+            max(0, int(self.messages_total_tokens)),
         )
 
     @classmethod
@@ -164,10 +152,7 @@ class ConversationContext(BaseModel):
         openai_messages: list[dict[str, Any]],
         pending_tool_calls: list[dict[str, Any]],
         run_turn_phase: RunTurnPhase = RunTurnPhase.IDLE,
-        summary_compression_phase: SummaryCompressionPhase = SummaryCompressionPhase.NOT_STARTED,
-        summary_compression_range_start: int = -1,
-        summary_compression_range_end: int = -1,
-        summary_compressed_message: dict[str, Any] | None = None,
+        messages_total_tokens: int = 0,
         tool_loop_count: int = 0,
     ) -> 'ConversationContext':
         """由 runtime 内存态组装可写入 sqlite 的 `ConversationContext`。"""
@@ -177,10 +162,7 @@ class ConversationContext(BaseModel):
             openai_messages=_json_safe_deep(openai_messages),
             pending_tool_calls=_json_safe_deep(pending_tool_calls),
             run_turn_phase=run_turn_phase,
-            summary_compression_phase=summary_compression_phase,
-            summary_compression_range_start=max(-1, int(summary_compression_range_start)),
-            summary_compression_range_end=max(-1, int(summary_compression_range_end)),
-            summary_compressed_message=dict(summary_compressed_message or {}),
+            messages_total_tokens=max(0, int(messages_total_tokens)),
             tool_loop_count=max(0, int(tool_loop_count)),
         )
 
@@ -210,15 +192,9 @@ class OpenAIConversationContext(BaseModel):
         description="待执行/待审批的工具调用队列。",
     )
     run_turn_phase: RunTurnPhase = Field(default=RunTurnPhase.IDLE, description="当前 run_turn 所处阶段。")
-    summary_compression_phase: SummaryCompressionPhase = Field(
-        default=SummaryCompressionPhase.NOT_STARTED,
-        description="summary 压缩阶段（独立状态机，供异步压缩流程观测）。",
-    )
-    summary_compression_range_start: int = Field(default=-1, description="待压缩区间起始下标（含）。")
-    summary_compression_range_end: int = Field(default=-1, description="待压缩区间结束下标（含）。")
-    summary_compressed_message: dict[str, Any] = Field(
-        default_factory=dict,
-        description="压缩后的单条 human_message（dict 形态）。",
+    messages_total_tokens: int = Field(
+        default=0,
+        description="当前 `messages` 的粗略 token 总量（由运行时维护）。",
     )
     tool_loop_count: int = Field(default=0, description="跨 run_turn 累积的工具循环计数。")
     assistant_stream_buffer: str = Field(default="", repr=False, description="流式输出增量缓冲。")
@@ -235,9 +211,7 @@ class OpenAIConversationContext(BaseModel):
     @classmethod
     def from_conversation_context(cls, cc: ConversationContext) -> 'OpenAIConversationContext':
         """从持久化态 `ConversationContext` 还原为推理上下文。"""
-        messages, pending_specs, summary_phase, summary_start, summary_end, summary_message = (
-            cc.unpack_for_openai_runtime()
-        )
+        messages, pending_specs, total_tokens = cc.unpack_for_openai_runtime()
         pending = [
             PendingToolCall(
                 call_id=str(s["call_id"]),
@@ -251,10 +225,7 @@ class OpenAIConversationContext(BaseModel):
             messages=messages,
             pending_tool_calls=pending,
             run_turn_phase=cc.run_turn_phase,
-            summary_compression_phase=summary_phase,
-            summary_compression_range_start=max(-1, int(summary_start)),
-            summary_compression_range_end=max(-1, int(summary_end)),
-            summary_compressed_message=dict(summary_message),
+            messages_total_tokens=max(0, int(total_tokens)),
             tool_loop_count=max(0, int(cc.tool_loop_count)),
         )
 
@@ -267,9 +238,6 @@ class OpenAIConversationContext(BaseModel):
             openai_messages=self.messages,
             pending_tool_calls=specs,
             run_turn_phase=self.normalized_run_turn_phase_for_persist(),
-            summary_compression_phase=self.summary_compression_phase,
-            summary_compression_range_start=int(self.summary_compression_range_start),
-            summary_compression_range_end=int(self.summary_compression_range_end),
-            summary_compressed_message=dict(self.summary_compressed_message),
+            messages_total_tokens=max(0, int(self.messages_total_tokens)),
             tool_loop_count=max(0, int(self.tool_loop_count)),
         )

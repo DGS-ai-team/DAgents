@@ -129,6 +129,7 @@ class OpenAIImplicitReActRuntime:
         ctx.tool_loop_count += 1
         ctx.run_turn_phase = RunTurnPhase.MODEL_STREAMING
         model_msg = None
+        latest_total_tokens: int | None = None
         ctx.assistant_stream_buffer = ""
         # 流式阶段：同步写入 ctx.assistant_stream_buffer，供上层 Cancelled 后 flush 为合法 assistant 行。
         try:
@@ -148,11 +149,21 @@ class OpenAIImplicitReActRuntime:
                         yield self._ev("reasoning", {"content": reasoning_text})
                     continue
                 elif event_kind == "usage":
+                    prompt_tokens = int(model_event.get("prompt_tokens", 0))
+                    completion_tokens = int(model_event.get("completion_tokens", 0))
+                    total_tokens = int(model_event.get("total_tokens") or 0)
+                    # 优先使用 total_tokens；缺失时退化为 input+output（prompt+completion）。
+                    if total_tokens > 0:
+                        latest_total_tokens = total_tokens
+                    else:
+                        merged_tokens = prompt_tokens + completion_tokens
+                        if merged_tokens > 0:
+                            latest_total_tokens = merged_tokens
                     yield self._ev(
                         "usage",
                         {
-                            "prompt_tokens": int(model_event.get("prompt_tokens", 0)),
-                            "completion_tokens": int(model_event.get("completion_tokens", 0)),
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
                             "total_tokens": model_event.get("total_tokens"),
                         },
                     )
@@ -172,6 +183,9 @@ class OpenAIImplicitReActRuntime:
             yield self._ev("error", {"message": "模型流式响应解析失败。"})
             yield self._ev("done", {})
             return
+        # 本轮 AI 响应返回后，使用 usage 总量刷新消息总 token（仅在元数据可用时更新）。
+        if latest_total_tokens is not None and latest_total_tokens >= 0:
+            ctx.messages_total_tokens = latest_total_tokens
         assistant_content = model_msg.get("content", "") or ""
         tool_calls = model_msg.get("tool_calls", [])
         # ----- 子分支：模型要求调用工具（此处仍不 invoke，只登记 + 等人批）----- #
