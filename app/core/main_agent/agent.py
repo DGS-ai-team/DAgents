@@ -76,6 +76,7 @@ class MainAgentTurnOrchestrator:
             ctx.messages,
             silent_trigger_tokens=self._summary_silent_trigger_tokens,
             blocking_trigger_tokens=self._summary_blocking_trigger_tokens,
+            messages_total_tokens=int(ctx.messages_total_tokens),
         )
         should_compress = bool(decision.get("should_compress"))
         trigger_level = str(decision.get("trigger_level") or "none")
@@ -196,10 +197,12 @@ class MainAgentTurnOrchestrator:
         if start < 0 or end < start or end >= len(ctx.messages) or not block:
             return False
         try:
+            follow_content = summary_runtime.build_follow_content(ctx.messages, end=end)
             summary_text = await summary_runtime.run_turn(
                 ctx,
                 request_type="human_message",
                 content=block,
+                follow_content=follow_content,
             )
         except asyncio.CancelledError:
             flush = getattr(summary_runtime, "flush_cancelled_turn", None)

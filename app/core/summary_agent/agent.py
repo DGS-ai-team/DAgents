@@ -39,7 +39,8 @@ class SummaryContextCompressionRuntime:
             "要求：\n"
             "- 不要编造不存在的信息；\n"
             "- 文件/资源尽量用路径或明确名称；\n"
-            "- 每段内容简洁但可执行。\n"
+            "- 每段内容简洁但可执行；\n"
+            "- 你会同时收到“待压缩文本块”和“后续文本”，摘要时必须结合后续文本保证信息衔接自然。\n"
             "示例：\n"
             "输入消息块（节选）：\n"
             "[1] role=user content=请修复登录超时问题并补测试\n"
@@ -66,12 +67,13 @@ class SummaryContextCompressionRuntime:
         *,
         request_type: str,
         content: str | None = None,
+        follow_content: str | None = None,
     ) -> str | None:
         """执行单轮摘要：仅消费外部准备好的文本块并返回摘要文本。
 
         逻辑：
         1. 校验输入；
-        2. 将 `content` 视为“已格式化完成的待压缩文本块”；
+        2. 将 `content` 与 `follow_content` 拼成统一输入（待压缩文本块 + 后续文本）；
         3. 调模型生成结构化摘要；
         4. 返回摘要文本，失败返回 `None`。
 
@@ -86,8 +88,29 @@ class SummaryContextCompressionRuntime:
         if request_type not in {"human_message", "tool_message"}:
             raise ValueError(f"summary runtime 不支持的 request_type: {request_type}")
 
+        follow_text = str(follow_content or "").strip() or "（无后续文本）"
+        merged_human_block = f"待压缩文本块：{str(content).strip()}；后续文本为：{follow_text}"
         try:
-            return await self._summarize_block(str(content))
+            kwargs: dict[str, Any] = {
+                "model": self._model_cfg["model"],
+                "messages": [
+                    {"role": "system", "content": self._summary_system_prompt},
+                    {"role": "user", "content": merged_human_block},
+                ],
+                "temperature": self._model_cfg["temperature"],
+            }
+            extra_body = self._model_cfg.get("extra_body") or {}
+            if extra_body:
+                kwargs["extra_body"] = extra_body
+            resp = await self._client.chat.completions.create(**kwargs)
+            choices = getattr(resp, "choices", None) or []
+            if not choices:
+                return None
+            message = getattr(choices[0], "message", None)
+            text = str(getattr(message, "content", "") if message is not None else "").strip()
+            if text:
+                return text
+            return None
         except asyncio.CancelledError:
             raise
 
@@ -125,17 +148,40 @@ class SummaryContextCompressionRuntime:
             "compressed_message_count": len(picked),
         }
 
+    def build_follow_content(self, messages: list[dict[str, Any]], *, end: int) -> str:
+        """按压缩区间终点构造“后续文本”输入块。
+
+        逻辑：
+        1. 取 `messages[end+1:]` 作为后续候选；
+        2. 过滤非 dict 与 `system`；
+        3. 使用与压缩块一致的序列化格式输出。
+
+        关键边界：
+        - `end` 越界或无可用后续消息时返回 `（无后续文本）`。
+        """
+        if end < -1 or end >= len(messages):
+            return "（无后续文本）"
+        follow = [
+            msg
+            for msg in messages[end + 1 :]
+            if isinstance(msg, dict) and str(msg.get("role") or "") != "system"
+        ]
+        if not follow:
+            return "（无后续文本）"
+        return self._build_human_message_block(follow)
+
     def should_compress(
         self,
         messages: list[dict[str, Any]],
         *,
         silent_trigger_tokens: int,
         blocking_trigger_tokens: int,
+        messages_total_tokens: int,
     ) -> dict[str, Any]:
         """判断是否需要压缩，并识别触发的是静默阈值还是阻塞阈值。
 
         逻辑：
-        1. 统一估算当前 token，并按“阻塞优先于静默”判定触发层级；
+        1. 使用外部传入的消息总 token，并按“阻塞优先于静默”判定触发层级；
         2. 未触发任何阈值时返回 `none`；
         3. 触发阈值后尝试选区间，失败则返回 `should_compress=False`。
 
@@ -145,7 +191,7 @@ class SummaryContextCompressionRuntime:
         """
         silent_threshold = max(0, int(silent_trigger_tokens))
         blocking_threshold = max(0, int(blocking_trigger_tokens))
-        total_tokens = self._estimate_message_tokens(messages)
+        total_tokens = max(0, int(messages_total_tokens))
 
         # 触发层级判定遵循“阻塞优先”：同时命中时按 blocking 处理。
         if blocking_threshold > 0 and total_tokens >= blocking_threshold:
@@ -174,10 +220,6 @@ class SummaryContextCompressionRuntime:
             "trigger_level": trigger_level,
             "total_tokens": total_tokens,
         }
-
-    def estimate_message_tokens(self, messages: list[dict[str, Any]]) -> int:
-        """对消息列表做粗略 token 估算（供外层阈值判定）。"""
-        return self._estimate_message_tokens(messages)
 
     @staticmethod
     def _select_compress_range(messages: list[dict[str, Any]]) -> tuple[int, int, list[dict[str, Any]]] | None:
@@ -213,16 +255,6 @@ class SummaryContextCompressionRuntime:
         end = int(candidates[-1][0])
         selected = [m for _, m in candidates]
         return start, end, selected
-
-    @staticmethod
-    def _estimate_message_tokens(messages: list[dict[str, Any]]) -> int:
-        """粗略估算消息 token 数（基于 JSON 文本长度）。"""
-        total = 0
-        for msg in messages:
-            if not isinstance(msg, dict):
-                continue
-            total += max(1, len(json.dumps(msg, ensure_ascii=False)) // 4)
-        return total
 
     @staticmethod
     def _assistant_tool_pairs_complete(messages: list[dict[str, Any]]) -> bool:
@@ -272,30 +304,6 @@ class SummaryContextCompressionRuntime:
             lines.append("content=" + content)
             lines.append("")
         return "\n".join(lines).strip()
-
-    async def _summarize_block(self, human_block: str) -> str | None:
-        """调用模型生成结构化摘要文本；失败时返回 `None`。"""
-        kwargs: dict[str, Any] = {
-            "model": self._model_cfg["model"],
-            "messages": [
-                {"role": "system", "content": self._summary_system_prompt},
-                {"role": "user", "content": human_block},
-            ],
-            "temperature": self._model_cfg["temperature"],
-        }
-        extra_body = self._model_cfg.get("extra_body") or {}
-        if extra_body:
-            kwargs["extra_body"] = extra_body
-        resp = await self._client.chat.completions.create(**kwargs)
-        choices = getattr(resp, "choices", None) or []
-        if not choices:
-            return None
-        message = getattr(choices[0], "message", None)
-        content = getattr(message, "content", "") if message is not None else ""
-        text = str(content or "").strip()
-        if text:
-            return text
-        return None
 
 def init_agent() -> SummaryContextCompressionRuntime:
     """创建上下文压缩 runtime 实例。"""
