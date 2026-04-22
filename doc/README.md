@@ -8,13 +8,18 @@
 |------|------|
 | **`app/config/`** | **`Settings`** / **`get_settings`**；**`load_env`**（`.env`） |
 | **`app/core/main_agent/`** | 主 Agent：`init_agent()`、`model`、`prompt` 等 |
-| **`app/harness/`** | 工具、CLI、memory/ui 占位等（无独立 `graph.py` 时组装在 **`main_agent/agent.py`**） |
+| **`app/harness/`** | 工具、CLI、memory、服务与 API 等能力（无独立 `graph.py` 时组装在 **`main_agent/agent.py`**） |
 | **`app/harness/tools/`** | `get_tools()` |
-| **`app/harness/memory/`** | 记忆层扩展点（当前占位） |
+| **`app/harness/memory/`** | SQLite 记忆存储（`SqliteMessageStore`） |
 | **`app/harness/cli/`** | 命令行入口 `main()` |
-| **`app/harness/ui/`** | 界面扩展点（当前占位） |
 
-启动脚本：**仓库根 `run_agent.py`**。独立服务 **`register-center/`** 已落地实现，可通过 **`run_register_center.py`** 启动。
+启动脚本：
+
+- **`run_agent.py`**（CLI）
+- **`run_agent_api.py`**（FastAPI）
+- **`run_register_center.py`**（Register Center）
+- **`run_dev_stack.py`**（本地联调：统一拉起 API + Register Center + Frontend）
+- **`export_openapi_schema.py`**（导出 OpenAPI 到 `frontend/openapi.json`）
 
 ---
 

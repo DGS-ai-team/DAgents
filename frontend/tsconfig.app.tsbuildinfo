@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/mock-workbench-state.ts","./src/ui-contracts.ts","./src/components/ApprovalToolBubble.tsx","./src/components/MainChatPanel.tsx","./src/components/RuntimeStatusPanel.tsx","./src/components/SubAgentThreadTabs.tsx","./src/components/SubAgentThreadView.tsx","./src/components/ui.tsx","./src/pages/ChatWorkbench.tsx"],"version":"5.9.3"}

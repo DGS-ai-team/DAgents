@@ -26,6 +26,8 @@ DAgents/
 ├── run_register_center.py       # Register Center 启动入口
 ├── requirements.txt
 ├── .env.example
+├── frontend/                    # React 前端（新增，Web UI）
+├── desktop/                     # 桌面壳预留（如 Tauri）
 ├── prompt_context/              # 系统提示上下文侧车文件
 ├── register-center/             # Register Center 实现
 ├── app/
@@ -42,6 +44,8 @@ DAgents/
 
 - Python 3.11+（推荐）
 - pip
+- Node.js 20.19+（推荐使用 `.nvmrc` 固定的 `v24.15.0`）
+- pnpm 9+
 - Linux / macOS / WSL（Windows 原生未完整验证）
 
 ## 快速开始
@@ -75,6 +79,27 @@ python run_agent_api.py
 - **API 服务**：`python run_agent_api.py`
 - **CLI 客户端**：`python run_agent.py`
 - **Register Center**：`python run_register_center.py`
+- **一键开发栈（推荐本地联调）**：`python run_dev_stack.py`（默认同时启动 API + Register Center + Frontend）
+- **Web 前端（开发中）**：
+  ```bash
+  cd frontend
+  pnpm install
+  pnpm dev
+  ```
+
+## 前端开发（React + Vite）
+
+- 前端代码位于 `frontend/`，当前已完成基础工程初始化与 `ChatWorkbench` 页面骨架。
+- 运行后默认地址为 `http://localhost:5173/`。
+- 前后端通信目标为：
+  - `POST /v1/messages`
+  - `GET /v1/streams/{request_id}`（SSE 流式事件）
+- 前后端契约建议以后端 OpenAPI 为单一来源：
+  - 导出：`python export_openapi_schema.py`
+  - 输出：`frontend/openapi.json`
+  - 生成 TS 类型：`cd frontend && pnpm gen:types`
+  - 生成文件：`frontend/src/api/types.ts`
+- 详细结构说明见 `frontend/README.md` 与 `frontend/src/README.md`。
 
 ## API 说明（简版）
 
@@ -87,6 +112,8 @@ python run_agent_api.py
 ## 开发说明
 
 - 代码主入口在 `app/` 下，按目录维护 `README.md` 与 `REFERENCE.md`。
+- `register-center/` 目录名含连字符，`run_register_center.py` 当前通过 `importlib` 按文件路径加载 `rc_app.py`；后续如统一为 Python 包命名，可迁移为 `register_center/`。
+- 前端构建产物位于 `frontend/dist/`，本地依赖位于 `frontend/node_modules/`，默认不作为源码提交对象。
 - 运行测试（如果本地已安装测试依赖）：
 
 ```bash

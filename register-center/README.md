@@ -20,6 +20,12 @@ Register Center 的实现目录（MVP：FastAPI + 内存存储）。
 python run_register_center.py
 ```
 
+说明：
+
+- 当前目录名为 `register-center`（含连字符），不便于作为常规 Python 包直接导入。
+- 因此启动脚本 `run_register_center.py` 采用 `importlib` 按文件路径加载 `rc_app.py`。
+- 这是现阶段兼容方案；后续若目录重命名为 `register_center`，可切换为常规包导入方式。
+
 默认监听 `0.0.0.0:8010`，可通过环境变量覆盖：
 
 - `REGISTER_CENTER_HOST`
