@@ -62,7 +62,10 @@ class InMemoryEventBus:
     def __init__(self) -> None:
         """初始化内存流容器。"""
         self._streams: dict[str, _RequestStream] = {}
-        self._global_subscribers: set[asyncio.Queue[StreamEvent]] = set()
+        # P0 优化：按 client_id 分桶订阅者，publish 时只投递目标桶，避免全量轮询。
+        self._subscribers_by_client: dict[str, set[asyncio.Queue[StreamEvent]]] = {}
+        # 兼容未指定 client_id 的全量订阅（调试/观测场景）。
+        self._all_subscribers: set[asyncio.Queue[StreamEvent]] = set()
         self._client_seq: dict[str, int] = {}
 
     def create_stream(self, *, session_id: str, client_id: str) -> str:
@@ -83,7 +86,7 @@ class InMemoryEventBus:
         逻辑：
         1. 读取流状态并构造 `StreamEvent`（含当前 `seq` 与 UTC 时间戳）；
         2. 更新 `client_id` 维度序号；
-        3. 广播到全部全局订阅者队列；
+        3. 广播到目标 `client_id` 订阅桶（及全量订阅桶）；
         4. 返回事件对象。
         """
         stream = self._streams[stream_id]
@@ -97,8 +100,10 @@ class InMemoryEventBus:
             data=data,
         )
         self._client_seq[stream.client_id] = current_seq + 1
-        # 全局订阅者用于“单通道接收所有 session 事件”的前端模式。
-        for subscriber_queue in list(self._global_subscribers):
+        client_subscribers = self._subscribers_by_client.get(stream.client_id, set())
+        for subscriber_queue in list(client_subscribers):
+            subscriber_queue.put_nowait(event)
+        for subscriber_queue in list(self._all_subscribers):
             subscriber_queue.put_nowait(event)
         return event
 
@@ -107,7 +112,7 @@ class InMemoryEventBus:
 
         逻辑：
         1. 为当前订阅者创建独立 queue；
-        2. 将 queue 注册到 `_global_subscribers`；
+        2. 若指定 `client_id`，注册到对应分桶；否则注册到全量分桶；
         3. 持续读取 queue 并按到达顺序输出事件；
         4. 订阅结束时注销 queue，避免内存泄漏。
 
@@ -122,17 +127,28 @@ class InMemoryEventBus:
         - 调用方取消订阅时（CancelledError）会进入 finally 并清理订阅者。
 
         副作用说明：
-        - 会临时向 `_global_subscribers` 注册当前订阅者队列。
+        - 会临时向 `client_id` 对应订阅桶（或 `_all_subscribers`）注册当前队列。
         """
         queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
-        self._global_subscribers.add(queue)
+        final_client_id = (client_id or "").strip()
+        if final_client_id:
+            bucket = self._subscribers_by_client.get(final_client_id)
+            if bucket is None:
+                bucket = set()
+                self._subscribers_by_client[final_client_id] = bucket
+            bucket.add(queue)
+        else:
+            self._all_subscribers.add(queue)
         try:
             while True:
                 item = await queue.get()
-                if client_id is None or item.client_id == client_id:
-                    yield item
-                else:
-                    continue
+                yield item
         finally:
-            if queue in self._global_subscribers:
-                self._global_subscribers.remove(queue)
+            if final_client_id:
+                bucket = self._subscribers_by_client.get(final_client_id)
+                if bucket is not None and queue in bucket:
+                    bucket.remove(queue)
+                if bucket is not None and not bucket:
+                    self._subscribers_by_client.pop(final_client_id, None)
+            elif queue in self._all_subscribers:
+                self._all_subscribers.remove(queue)
