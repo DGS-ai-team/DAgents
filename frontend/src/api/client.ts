@@ -11,9 +11,13 @@ export interface ApiClientOptions {
   fetchImpl?: typeof fetch;
 }
 
-export interface StreamEventEnvelope<T = unknown> {
-  type: string;
-  data: T;
+function debugLog(scope: string, message: string, payload?: unknown): void {
+  const now = new Date().toISOString();
+  if (payload === undefined) {
+    console.log(`[DAgents:${scope}] ${now} ${message}`);
+  } else {
+    console.log(`[DAgents:${scope}] ${now} ${message}`, payload);
+  }
 }
 
 function buildUrl(baseUrl: string, path: string): string {
@@ -50,34 +54,70 @@ export class DAgentsApiClient {
 
   constructor(options: ApiClientOptions = {}) {
     this.baseUrl = options.baseUrl ?? "";
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    if (options.fetchImpl) {
+      this.fetchImpl = options.fetchImpl;
+    } else {
+      // In browser, calling detached `fetch` can throw Illegal invocation.
+      this.fetchImpl = globalThis.fetch.bind(globalThis);
+    }
+    debugLog("api-client", "initialized", {
+      baseUrl: this.baseUrl,
+      hasCustomFetch: Boolean(options.fetchImpl),
+    });
+  }
+
+  private async postJson<T>(path: string, body: unknown): Promise<T> {
+    const url = buildUrl(this.baseUrl, path);
+    const startedAt = Date.now();
+    debugLog("http", "request:start", {
+      method: "POST",
+      url,
+      body,
+    });
+    try {
+      const response = await this.fetchImpl(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const elapsedMs = Date.now() - startedAt;
+      debugLog("http", "request:done", {
+        method: "POST",
+        url,
+        status: response.status,
+        ok: response.ok,
+        elapsedMs,
+      });
+      return parseJsonOrThrow<T>(response);
+    } catch (error) {
+      const elapsedMs = Date.now() - startedAt;
+      debugLog("http", "request:error", {
+        method: "POST",
+        url,
+        elapsedMs,
+        error: String(error),
+      });
+      throw error;
+    }
   }
 
   async createSession(body: SessionCreateIn = {}): Promise<SessionCreateResult> {
-    const response = await this.fetchImpl(buildUrl(this.baseUrl, "/v1/sessions"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return parseJsonOrThrow<SessionCreateResult>(response);
+    return this.postJson<SessionCreateResult>("/v1/sessions", body);
   }
 
   async submitMessage(body: MessageIn): Promise<SubmitResult> {
-    const response = await this.fetchImpl(buildUrl(this.baseUrl, "/v1/messages"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return parseJsonOrThrow<SubmitResult>(response);
+    return this.postJson<SubmitResult>("/v1/messages", body);
   }
 
   async submitResume(
     sessionId: string,
     resumeValue: unknown,
     source = "frontend",
+    clientId = "default",
   ): Promise<SubmitResult> {
     return this.submitMessage({
       session_id: sessionId,
+      client_id: clientId,
       request_type: "resume",
       resume_value: resumeValue,
       source,
@@ -95,12 +135,21 @@ export class DAgentsApiClient {
           method: "POST",
         },
       );
+      debugLog("http", "request:done", {
+        method: "POST",
+        url: buildUrl(this.baseUrl, `/v1/sessions/${encodeURIComponent(sid)}/cancel`),
+        status: response.status,
+        ok: response.ok,
+      });
       return parseJsonOrThrow<CancelTurnResult>(response);
     }
   }
 
-  streamUrl(requestId: string): string {
-    return buildUrl(this.baseUrl, `/v1/streams/${encodeURIComponent(requestId)}`);
+  streamAllUrl(clientId: string): string {
+    const query = `client_id=${encodeURIComponent(clientId)}`;
+    const url = buildUrl(this.baseUrl, `/v1/streams?${query}`);
+    debugLog("sse", "stream-all:url", { clientId, url });
+    return url;
   }
 }
 

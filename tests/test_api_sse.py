@@ -28,14 +28,19 @@ class ApiSseTestCase(unittest.TestCase):
 
             resp = client.post(
                 "/v1/messages",
-                json={"session_id": "sse-test", "content": "hello", "source": "test", "priority": "other"},
+                json={
+                    "session_id": "sse-test",
+                    "client_id": "test-client",
+                    "content": "hello",
+                    "source": "test",
+                    "priority": "other",
+                },
             )
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
             self.assertTrue(body["accepted"])
-            request_id = body["request_id"]
 
-            with client.stream("GET", f"/v1/streams/{request_id}") as sse_resp:
+            with client.stream("GET", "/v1/streams?client_id=test-client") as sse_resp:
                 self.assertEqual(sse_resp.status_code, 200)
                 chunks = []
                 for line in sse_resp.iter_lines():

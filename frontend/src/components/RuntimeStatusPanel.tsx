@@ -1,41 +1,31 @@
 import type { RuntimeStatusPanelProps } from "../ui-contracts";
-import { RequestStatusPill, formatNumber } from "./ui";
+import { formatNumber } from "./ui";
 
 export function RuntimeStatusPanel({
   runtime,
-  latestToolCalls,
   latestError,
+  sseConnected,
 }: RuntimeStatusPanelProps) {
   const errorText = latestError || runtime.errorMessage;
 
   return (
-    <section className="panel">
+    <section className="panel runtime-panel--compact">
       <header className="panel__header">
         <div className="panel__title">运行状态</div>
-        <RequestStatusPill status={runtime.status} />
       </header>
-      <div className="panel__body">
-        <div className="runtime__row">
-          <span className="runtime__label">模型</span>
-          <span className="runtime__value">{runtime.model || "-"}</span>
-        </div>
-        <div className="runtime__row">
-          <span className="runtime__label">最近工具调用</span>
-          <span className="runtime__value">{latestToolCalls.length}</span>
-        </div>
-
-        <div className="stats">
-          <div className="stat">
-            <span className="stat__label">Input</span>
-            <span className="stat__value">{formatNumber(runtime.usage.inputTokens)}</span>
+      <div className="panel__body runtime-panel__body--compact">
+        <div className="runtime-compact-grid">
+          <div className="runtime-compact-card">
+            <span className="runtime-compact-card__label">Total tokens</span>
+            <span className="runtime-compact-card__value">{formatNumber(runtime.usage.totalTokens)}</span>
           </div>
-          <div className="stat">
-            <span className="stat__label">Output</span>
-            <span className="stat__value">{formatNumber(runtime.usage.outputTokens)}</span>
-          </div>
-          <div className="stat stat--wide">
-            <span className="stat__label">Total tokens</span>
-            <span className="stat__value">{formatNumber(runtime.usage.totalTokens)}</span>
+          <div className="runtime-compact-card">
+            <span className="runtime-compact-card__label">SSE 连接</span>
+            <span
+              className={`runtime-sse-status ${sseConnected ? "runtime-sse-status--online" : "runtime-sse-status--offline"}`}
+            >
+              {sseConnected ? "已连接" : "已断开"}
+            </span>
           </div>
         </div>
 

@@ -184,6 +184,8 @@ class Settings(BaseModel):
     # --- CLI（方案二：HTTP 客户端）---
     agent_cli_mode: str = "api"
     agent_api_base: str = "http://127.0.0.1:8000"
+    # API CORS 允许来源（逗号分隔）；用于浏览器开发调试
+    api_cors_allow_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     agent_id: str = ""
     agent_id_file_path: str = ".runtime/agent/agent_id"
     registry_url: str = ""
@@ -230,6 +232,10 @@ class Settings(BaseModel):
             agent_session_idle_evict_seconds=_env_int("AGENT_SESSION_IDLE_EVICT_SECONDS", 300),
             agent_cli_mode=_env_str("AGENT_CLI_MODE") or "api",
             agent_api_base=_env_str("AGENT_API_BASE") or "http://127.0.0.1:8000",
+            api_cors_allow_origins=(
+                _env_csv("API_CORS_ALLOW_ORIGINS")
+                or ["http://localhost:5173", "http://127.0.0.1:5173"]
+            ),
             agent_id=agent_id,
             agent_id_file_path=agent_id_file_path,
             registry_url=_env_str("REGISTRY_URL"),

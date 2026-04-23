@@ -34,12 +34,12 @@ async def _broadcast_to_agent(
     逻辑：
     1. 以目标 `base_url` 拼接 `/v1/messages`；
     2. 生成唯一 `session_id`，避免不同目标间会话冲突；
-    3. 发送消息并解析响应，提取 `request_id` 供调用方追踪。
+    3. 发送消息并解析响应，记录 `session_id/client_id` 供调用方追踪流通道。
 
     关键分支/边界：
     - HTTP 状态码非 2xx 视为失败并记录响应体摘要；
     - 网络异常（超时、连接失败）会被捕获并转为失败结果；
-    - 下游响应中未包含 `request_id` 时允许返回 `None`。
+    - 下游响应异常时保留本地生成的 `session_id/client_id`，便于调用方排查。
 
     与外部交互：
     - 通过 HTTP 调用下游 Agent 的 `/v1/messages` 接口。
@@ -53,9 +53,11 @@ async def _broadcast_to_agent(
     """
 
     session_id = f"broadcast-{agent.agent_id}-{uuid.uuid4().hex[:8]}"
+    client_id = f"broadcast-{uuid.uuid4().hex}"
     target_url = f"{agent.base_url}/v1/messages"
     payload = {
         "session_id": session_id,
+        "client_id": client_id,
         "request_type": "message",
         "content": message,
         "source": source,
@@ -63,12 +65,9 @@ async def _broadcast_to_agent(
     }
     try:
         resp = await client.post(target_url, json=payload)
-        request_id = None
         detail = None
         try:
             body = resp.json()
-            if isinstance(body, dict):
-                request_id = body.get("request_id")
         except Exception:
             # 响应不是 JSON 时退化为文本摘要，便于调用方定位下游报错。
             body = None
@@ -80,7 +79,8 @@ async def _broadcast_to_agent(
                 discovery_group=agent.discovery_group,
                 ok=False,
                 status_code=resp.status_code,
-                request_id=request_id,
+                session_id=session_id,
+                client_id=client_id,
                 detail=detail,
             )
         return BroadcastResultItem(
@@ -89,7 +89,8 @@ async def _broadcast_to_agent(
             discovery_group=agent.discovery_group,
             ok=True,
             status_code=resp.status_code,
-            request_id=request_id,
+            session_id=session_id,
+            client_id=client_id,
             detail=None if body is not None else "下游返回非 JSON 响应",
         )
     except Exception as exc:
@@ -99,7 +100,8 @@ async def _broadcast_to_agent(
             discovery_group=agent.discovery_group,
             ok=False,
             status_code=None,
-            request_id=None,
+            session_id=session_id,
+            client_id=client_id,
             detail=str(exc),
         )
 
@@ -342,12 +344,12 @@ def create_app() -> FastAPI:
         1. 读取并校验目标 Agent 是否存在；
         2. 若 `caller_groups` 非空，则校验与目标分组有交集；
         3. 透传消息字段调用目标 `/v1/messages`；
-        4. 回传中继结果与下游 `request_id`。
+        4. 回传中继结果与 `session_id/client_id`（用于 SSE 跟踪）。
 
         关键分支/边界：
         - 目标不存在或分组不可见时返回 404；
         - 下游返回非 2xx 时转为 502，附带错误摘要；
-        - 下游响应缺少 `request_id` 时允许返回 `null`。
+        - 下游响应仅依赖 `session_id/client_id`，调用方据此建立并过滤 SSE。
 
         与外部交互：
         - 读取本地仓库；
@@ -370,6 +372,7 @@ def create_app() -> FastAPI:
         target_url = f"{target.base_url}/v1/messages"
         forward_payload = {
             "session_id": payload.session_id,
+            "client_id": payload.client_id,
             "request_type": payload.request_type,
             "content": payload.content,
             "source": payload.source,
@@ -386,12 +389,12 @@ def create_app() -> FastAPI:
             body = resp.json()
         except Exception:
             body = {}
-        request_id = body.get("request_id") if isinstance(body, dict) else None
         return RelayResponse(
             accepted=True,
             target_agent_id=target.agent_id,
             target_base_url=target.base_url,
-            request_id=request_id,
+            session_id=payload.session_id,
+            client_id=payload.client_id,
         )
 
     return app

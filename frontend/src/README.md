@@ -16,7 +16,6 @@
 - `components/ui.tsx`：通用 UI 小组件（状态 pill、risk badge 等）。
 - `api/`：API 契约与调用封装（`types.ts` 自动生成，`client.ts` 手写封装）。
 - `ui-contracts.ts`：前端 UI 类型契约与事件类型。
-- `mock-workbench-state.ts`：本地演示状态数据。
 
 ## 契约范围（当前）
 

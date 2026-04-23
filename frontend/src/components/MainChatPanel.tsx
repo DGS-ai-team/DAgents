@@ -5,44 +5,35 @@ import type {
   ChatMessage,
   MainChatPanelProps,
   MessageRole,
+  ToolExecutionRecord,
 } from "../ui-contracts";
 import { ApprovalToolBubble } from "./ApprovalToolBubble";
-import { initialsOf } from "./ui";
+import { ToolExecutionBubble } from "./ToolExecutionBubble";
 
-const ROLE_LABEL: Record<MessageRole, string> = {
-  user: "你",
-  assistant: "助手",
-  tool: "工具",
-  reasoning: "推理",
-  system: "系统",
-};
-
-const ROLE_INITIALS: Record<MessageRole, string> = {
-  user: "我",
-  assistant: "AI",
-  tool: "TL",
-  reasoning: "R",
-  system: "S",
+const ROLE_HINT: Partial<Record<MessageRole, string>> = {
+  user: "you",
+  reasoning: "thinking",
+  tool: "tool",
+  system: "system",
 };
 
 function MessageBubble({ message }: { message: ChatMessage }) {
+  const hint = ROLE_HINT[message.role];
   if (message.role === "tool") {
     return (
       <div className="msg msg--tool-centered">
         <div className="msg__body msg__body--wide">
-          <span className="msg__role">{ROLE_LABEL[message.role] ?? message.role}</span>
+          {hint ? <div className="msg__hint">{hint}</div> : null}
           <div className="msg__bubble msg__bubble--tool-centered">{message.content}</div>
         </div>
       </div>
     );
   }
 
-  const initials = ROLE_INITIALS[message.role] ?? initialsOf(message.role);
   return (
     <div className={`msg msg--${message.role}`}>
-      <div className="msg__avatar">{initials}</div>
       <div className="msg__body">
-        <span className="msg__role">{ROLE_LABEL[message.role] ?? message.role}</span>
+        {hint ? <div className="msg__hint">{hint}</div> : null}
         <div className="msg__bubble">{message.content}</div>
       </div>
     </div>
@@ -51,6 +42,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
 type StreamItem =
   | { key: string; ts: number; kind: "message"; message: ChatMessage }
+  | { key: string; ts: number; kind: "tool_execution"; execution: ToolExecutionRecord }
   | {
       key: string;
       ts: number;
@@ -61,10 +53,22 @@ type StreamItem =
 function buildStream(
   messages: ChatMessage[],
   approvals: ApprovalTask[],
+  toolExecutions: ToolExecutionRecord[],
 ): StreamItem[] {
   const items: StreamItem[] = [];
   for (const m of messages) {
+    if (!String(m.content ?? "").trim()) {
+      continue;
+    }
     items.push({ key: `m:${m.id}`, ts: m.createdAt, kind: "message", message: m });
+  }
+  for (const execution of toolExecutions) {
+    items.push({
+      key: `x:${execution.id}`,
+      ts: execution.createdAt,
+      kind: "tool_execution",
+      execution,
+    });
   }
   for (const t of approvals) {
     items.push({ key: `a:${t.id}`, ts: t.createdAt, kind: "approval", task: t });
@@ -74,9 +78,9 @@ function buildStream(
 }
 
 export function MainChatPanel({
-  sessionId,
   messages,
   approvals = [],
+  toolExecutions = [],
   submittingToolCallIds,
   runningToolCallIds,
   completedToolCallIds,
@@ -89,8 +93,8 @@ export function MainChatPanel({
   const streamRef = useRef<HTMLDivElement | null>(null);
 
   const stream = useMemo(
-    () => buildStream(messages, approvals),
-    [messages, approvals],
+    () => buildStream(messages, approvals, toolExecutions),
+    [messages, approvals, toolExecutions],
   );
 
   useEffect(() => {
@@ -110,9 +114,11 @@ export function MainChatPanel({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    if (event.key === "Enter" && !event.ctrlKey) {
       event.preventDefault();
       void onSubmit();
+    } else {
+      // Ctrl+Enter 保持 textarea 默认行为（插入换行）。
     }
   };
 
@@ -128,7 +134,7 @@ export function MainChatPanel({
       <header className="chat__header">
         <div className="chat__title">
           <span className="chat__title-main">主对话</span>
-          <span className="chat__title-sub">会话 {sessionId || "(未选择)"}</span>
+          <span className="chat__title-sub">当前对话</span>
         </div>
         <div className="chat__header-meta">
           {pendingApprovalCount > 0 && (
@@ -146,6 +152,9 @@ export function MainChatPanel({
             if (item.kind === "message") {
               return <MessageBubble key={item.key} message={item.message} />;
             }
+            if (item.kind === "tool_execution") {
+              return <ToolExecutionBubble key={item.key} item={item.execution} />;
+            }
             return (
               <ApprovalToolBubble
                 key={item.key}
@@ -161,15 +170,17 @@ export function MainChatPanel({
       </div>
 
       <div className="chat__composer">
-        <textarea
-          className="chat__textarea"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          rows={2}
-          placeholder="输入消息（⌘/Ctrl + Enter 发送）"
-          disabled={disabled || sending}
-        />
+        <div className="chat__composer-input">
+          <textarea
+            className="chat__textarea"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={2}
+            placeholder="输入消息（Enter 发送，Ctrl+Enter 换行）"
+            disabled={disabled || sending}
+          />
+        </div>
         <button
           type="button"
           className="btn btn--primary"

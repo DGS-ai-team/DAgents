@@ -95,13 +95,12 @@
   "content": "你好，",
   "meta": {
     "session_id": "…",
-    "request_id": "…",
     "model": "…"
   }
 }
 ```
 
-`meta` 由 **`AgentService`** 注入公共字段（`session_id` / `request_id` / `model`），并与 runtime 信封上的 **`envelope.meta`** 合并（后者当前多为空）。
+`meta` 由 **`AgentService`** 注入公共字段（`session_id` / `model`），并与 runtime 信封上的 **`envelope.meta`** 合并（后者当前多为空）。
 
 ### 4.2 `reasoning`
 
@@ -110,7 +109,6 @@
   "content": "我需要先确认工具能力。",
   "meta": {
     "session_id": "…",
-    "request_id": "…",
     "model": "…"
   }
 }
@@ -125,7 +123,6 @@
   "total_tokens": 1210,
   "meta": {
     "session_id": "…",
-    "request_id": "…",
     "model": "…"
   }
 }
@@ -150,7 +147,6 @@
   ],
   "meta": {
     "session_id": "…",
-    "request_id": "…",
     "model": "…"
   }
 }
@@ -165,7 +161,6 @@
   "content": "Linux ...",
   "meta": {
     "session_id": "…",
-    "request_id": "…",
     "model": "…"
   }
 }
@@ -192,7 +187,6 @@
   "approval_id": null,
   "meta": {
     "session_id": "…",
-    "request_id": "…",
     "model": "…"
   }
 }
@@ -204,7 +198,6 @@
 {
   "meta": {
     "session_id": "…",
-    "request_id": "…",
     "model": "…"
   }
 }

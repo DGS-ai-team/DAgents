@@ -68,7 +68,7 @@ class AgentPeerToolsTestCase(unittest.TestCase):
     def test_agent_send_message_success(self) -> None:
         target = {"agent_id": "a2", "base_url": "http://a2.local", "discovery_group": ["team-a"]}
         fake_resp = MagicMock()
-        fake_resp.json.return_value = {"accepted": True, "request_id": "req-1"}
+        fake_resp.json.return_value = {"accepted": True, "session_id": "s-peer"}
         fake_resp.raise_for_status.return_value = None
         fake_client_ctx = MagicMock()
         fake_client = fake_client_ctx.__aenter__.return_value
@@ -87,7 +87,7 @@ class AgentPeerToolsTestCase(unittest.TestCase):
                             context=OpenAIConversationContext(session_id="s-peer"),
                         )
             body = json.loads(raw)
-            self.assertEqual(body["task"]["task_id"], "req-1")
+            self.assertTrue(str(body["task"]["task_id"]).startswith("peer-trace-"))
             self.assertEqual(body["task"]["state"], "queued")
             self.assertEqual(body["payload"]["content"]["stream_output"], "assistant: hello")
 
@@ -101,7 +101,8 @@ class AgentPeerToolsTestCase(unittest.TestCase):
             "accepted": True,
             "target_agent_id": "a2",
             "target_base_url": "http://relay-a2.local",
-            "request_id": "req-relay-1",
+            "session_id": "s-peer",
+            "client_id": "peer-client-1",
         }
         fake_resp.raise_for_status.return_value = None
         fake_client_ctx = MagicMock()
@@ -122,7 +123,7 @@ class AgentPeerToolsTestCase(unittest.TestCase):
                                 context=OpenAIConversationContext(session_id="s-peer"),
                             )
             body = json.loads(raw)
-            self.assertEqual(body["task"]["task_id"], "req-relay-1")
+            self.assertTrue(str(body["task"]["task_id"]).startswith("peer-trace-"))
             self.assertEqual(body["payload"]["content"]["target_base_url"], "http://relay-a2.local")
             self.assertEqual(body["payload"]["content"]["stream_output"], "relay: ok")
 

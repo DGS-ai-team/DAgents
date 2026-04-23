@@ -354,18 +354,20 @@ def _extract_sse_text_from_event(event_name: str, payload: dict[str, Any]) -> st
 async def _collect_peer_stream_output(
     *,
     base_url: str,
-    request_id: str,
+    client_id: str,
+    session_id: str,
     timeout_seconds: float,
 ) -> tuple[str, bool]:
     """拉取远端 SSE 并汇总当前已产出的正文。
 
     逻辑：
-    1. 连接 `{base_url}/v1/streams/{request_id}` 订阅事件；
+    1. 连接 `{base_url}/v1/streams?client_id=...` 订阅事件；
     2. 解析 `event/data` 行并抽取可读正文；
-    3. 遇到 `done` 正常结束；超时则截断并返回已采集内容。
+    3. 仅处理目标 `session_id` 的事件；
+    4. 遇到 `done` 正常结束；超时则截断并返回已采集内容。
 
     关键分支/边界：
-    - `request_id` 为空直接返回空输出；
+    - `client_id`/`session_id` 任一为空直接返回空输出；
     - 连接失败时返回错误提示文本；
     - 超时返回 `truncated=True`，正文保留截至当前的已收集片段。
 
@@ -379,8 +381,9 @@ async def _collect_peer_stream_output(
     - 无。
     """
     final_base_url = base_url.strip().rstrip("/")
-    final_request_id = request_id.strip()
-    if not final_base_url or not final_request_id:
+    final_client_id = client_id.strip()
+    final_session_id = session_id.strip()
+    if not final_base_url or not final_client_id or not final_session_id:
         return "", False
     collected_lines: list[str] = []
     event_name = ""
@@ -388,7 +391,8 @@ async def _collect_peer_stream_output(
     try:
         async with asyncio.timeout(max(1.0, timeout_seconds)):
             async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream("GET", f"{final_base_url}/v1/streams/{final_request_id}") as resp:
+                stream_url = f"{final_base_url}/v1/streams?client_id={final_client_id}"
+                async with client.stream("GET", stream_url) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
                         if line.startswith("event:"):
@@ -407,6 +411,10 @@ async def _collect_peer_stream_output(
                             payload = json.loads(raw_data)
                         except Exception:
                             payload = {}
+                        if str(payload.get("session_id", "")).strip() != final_session_id:
+                            event_name = ""
+                            data_lines = []
+                            continue
                         stream_event_name = event_name or str(payload.get("type", "") or "")
                         text_piece = _extract_sse_text_from_event(stream_event_name, payload)
                         if text_piece:
@@ -631,7 +639,7 @@ async def agent_send_message(
     字段说明：
     - `target_agent_id`：目标 Agent ID（必填）。
     - `message`：发送给目标 Agent 的消息正文（必填）。
-    - `require_ack`：是否要求返回 request_id 作为排队确认（可选，默认 `true`）。
+    - `require_ack`：是否要求目标返回 `accepted=true` 作为入队确认（可选，默认 `true`）。
 
     返回说明：
     - 成功：返回 JSON 文本，正文包含 `ok=true`、目标地址、提交回执与远端 SSE 已输出内容。
@@ -695,8 +703,10 @@ async def agent_send_message(
             payload_content_type="text/plain",
             trace_id=trace_id,
         )
+        peer_client_id = f"peer-{uuid.uuid4().hex}"
         body = {
             "session_id": session_id,
+            "client_id": peer_client_id,
             "request_type": "message",
             "content": _json_text(req_env.model_dump()),
             "source": "agent-peer",
@@ -716,6 +726,7 @@ async def agent_send_message(
                     "target_agent_id": target_id,
                     "caller_groups": _stable_groups(s.discovery_groups),
                     "session_id": session_id,
+                    "client_id": peer_client_id,
                     "request_type": "message",
                     "content": _json_text(req_env.model_dump()),
                     "source": "agent-peer-relay",
@@ -726,12 +737,13 @@ async def agent_send_message(
             submit = resp.json()
             if final_delivery_mode == "relay":
                 target_base_url = str(submit.get("target_base_url") or "").strip().rstrip("/")
-        request_id = str(submit.get("request_id") or "")
-        if require_ack and not request_id:
-            raise ValueError("目标 Agent 未返回 request_id，无法确认任务已入队")
+        accepted = bool(submit.get("accepted", False))
+        if require_ack and not accepted:
+            raise ValueError("目标 Agent 未确认入队（accepted=false）")
         stream_text, stream_truncated = await _collect_peer_stream_output(
             base_url=target_base_url,
-            request_id=request_id,
+            client_id=peer_client_id,
+            session_id=session_id,
             timeout_seconds=float(max(1, int(s.agent_peer_stream_timeout_seconds))),
         )
         ack_env = build_agent_peer_envelope(
@@ -751,7 +763,7 @@ async def agent_send_message(
             payload_content_type="application/json",
             trace_id=trace_id,
             task=AgentPeerTask(
-                task_id=request_id or f"pending-{int(time.time())}",
+                task_id=f"peer-{trace_id}",
                 state="queued",
                 artifact_refs=[],
             ),
@@ -845,8 +857,9 @@ async def agent_broadcast(
                 continue
             agent_id = str(item.get("agent_id") or "").strip()
             base_url = str(item.get("base_url") or "").strip()
-            request_id = str(item.get("request_id") or "").strip()
-            if not agent_id or not base_url or not request_id:
+            peer_client_id = str(item.get("client_id") or "").strip()
+            peer_session_id = str(item.get("session_id") or "").strip()
+            if not agent_id or not base_url or not peer_client_id or not peer_session_id:
                 continue
             remaining = stream_deadline - time.monotonic()
             if remaining <= 0:
@@ -854,13 +867,15 @@ async def agent_broadcast(
                 break
             output_text, truncated = await _collect_peer_stream_output(
                 base_url=base_url,
-                request_id=request_id,
+                client_id=peer_client_id,
+                session_id=peer_session_id,
                 timeout_seconds=remaining,
             )
             stream_outputs.append(
                 {
                     "agent_id": agent_id,
-                    "request_id": request_id,
+                    "client_id": peer_client_id,
+                    "session_id": peer_session_id,
                     "output": output_text,
                     "truncated": truncated,
                 }

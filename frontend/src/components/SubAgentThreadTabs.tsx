@@ -1,6 +1,14 @@
 import type { SubAgentThreadTabsProps } from "../ui-contracts";
 import { SubAgentStatusPill } from "./ui";
 
+function IconThread() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="thread-tab__icon">
+      <path d="M4 6h16M4 12h11M4 18h8" />
+    </svg>
+  );
+}
+
 export function SubAgentThreadTabs({
   threads,
   activeThreadId,
@@ -21,6 +29,7 @@ export function SubAgentThreadTabs({
             className={`tab${isActive ? " tab--active" : ""}`}
             onClick={() => onSwitchThread(thread.id)}
           >
+            <IconThread />
             <span>{thread.title || thread.agentId}</span>
             <SubAgentStatusPill status={thread.status} />
           </button>

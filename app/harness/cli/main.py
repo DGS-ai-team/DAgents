@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import json
 import sys
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -211,18 +210,21 @@ def _use_prompt_toolkit_layout() -> bool:
 async def _wait_line_or_stream_end(
     stream_task: asyncio.Task | None,
     *,
+    turn_done_event: asyncio.Event | None = None,
     prompt_session: object | None,
     stdin_queue: asyncio.Queue[str] | None,
     prompt_text: str = "> ",
-) -> tuple[Literal["line", "stream_end"], str]:
-    """阻塞直到有一行输入，或当前 `stream_task` 结束（二者先发生者）。
+) -> tuple[Literal["line", "stream_end", "turn_done"], str]:
+    """阻塞直到有一行输入、当前回合 done，或流任务结束（三者先发生者）。
 
     逻辑：
     1. **TTY**：**`prompt_session.prompt_async(prompt_text)`** 任务（与 **`patch_stdout`** 配合，输出在输入行之上）；
     2. **非 TTY**：**`stdin_queue.get()`**；
-    3. 若 **`stream_task`** 非空，与 line 任务 **`asyncio.wait(FIRST_COMPLETED)`**；
+    3. 若传入 **`turn_done_event`**，并发等待回合结束信号；
+    4. 若 **`stream_task`** 非空，并发等待任务结束；
     4. line 先完成：返回 **`("line", raw)`**（统一为含 `\\n` 的串，便于与 `readline` 语义对齐；**`prompt` 返回 `None` 视为 EOF，raw=`""`**）；
-    5. stream 先完成：取消 line 任务，返回 **`("stream_end", "")`**。
+    5. done 信号先到：取消 line 任务，返回 **`("turn_done", "")`**；
+    6. stream 先完成：取消 line 任务，返回 **`("stream_end", "")`**。
 
     关键边界：
     - **`prompt_session` 与 `stdin_queue` 二选一**；
@@ -234,23 +236,36 @@ async def _wait_line_or_stream_end(
         assert stdin_queue is not None
         line_task = asyncio.create_task(stdin_queue.get())
 
-    if stream_task is None:
+    wait_tasks: set[asyncio.Task] = {line_task}
+    done_task: asyncio.Task | None = None
+    if turn_done_event is not None:
+        done_task = asyncio.create_task(turn_done_event.wait())
+        wait_tasks.add(done_task)
+    if stream_task is not None:
+        wait_tasks.add(stream_task)
+    if len(wait_tasks) == 1:
         try:
             got = await line_task
         except asyncio.CancelledError:
             return ("line", "")
         return ("line", _normalize_cli_line_result(got, prompt_session is not None))
 
-    done, _pending = await asyncio.wait(
-        {line_task, stream_task},
-        return_when=asyncio.FIRST_COMPLETED,
-    )
+    done, _pending = await asyncio.wait(wait_tasks, return_when=asyncio.FIRST_COMPLETED)
     if line_task in done:
         try:
             got = line_task.result()
         except asyncio.CancelledError:
             return ("line", "")
+        if done_task is not None and not done_task.done():
+            done_task.cancel()
         return ("line", _normalize_cli_line_result(got, prompt_session is not None))
+    if done_task is not None and done_task in done:
+        line_task.cancel()
+        try:
+            await line_task
+        except asyncio.CancelledError:
+            pass
+        return ("turn_done", "")
     line_task.cancel()
     try:
         await line_task
@@ -279,38 +294,31 @@ async def _cancel_stream_task(task: asyncio.Task | None) -> None:
         pass
 
 
-def _stream_task_approvals(task: asyncio.Task) -> list[dict]:
-    """读取已结束（或已取消）的流任务的审批列表。"""
-    try:
-        return task.result()
-    except asyncio.CancelledError:
-        return []
-
-
 async def _consume_stream_print(
     client: HttpAgentServiceClient,
-    request_id: str,
+    session_id: str,
     *,
     approval_seen_flag: list[bool] | None = None,
-) -> list[dict]:
-    """仅消费 SSE：打印事件并收集 `approval_required` 载荷。
+    approvals_buffer: list[dict] | None = None,
+    turn_done_event: asyncio.Event | None = None,
+) -> None:
+    """常驻消费 SSE：打印事件并缓存 `approval_required` 载荷。
 
     逻辑：
     1. 若传入 **`approval_seen_flag`**，先置 **`[0]=False`**，在本流中首次解析到 **`approval_required`** 时置 **`True`**（供 CLI 识别「用户可能在 `done` 前输入 `/yes`/`/no`」的窗口）；
     2. `async for` **`client.stream`**；
     3. `assistant`/`reasoning` 行内拼接；**`usage`** 忽略；其余事件换行打印；
-    4. 遇 **`done`** 或迭代结束退出；
-    5. 任务被取消时 **`async for`** 抛 **`CancelledError`**，由调用方 **`_stream_task_approvals`** 转为空列表。
+    4. 遇 **`approval_required`** 时写入 `approvals_buffer`；
+    5. 遇 **`done`** 时触发 `turn_done_event`，但不退出消费循环（保持 SSE 常驻）。
 
     与外部交互：
     - HTTP SSE 长连接；取消任务会中断读取。
     """
     if approval_seen_flag is not None:
         approval_seen_flag[0] = False
-    approvals: list[dict] = []
     stream_active: list[str | None] = [None]
     try:
-        async for ev in client.stream(request_id):
+        async for ev in client.stream(session_id):
             if ev.type == "usage":
                 continue
             if ev.type in ("assistant", "reasoning"):
@@ -324,14 +332,19 @@ async def _consume_stream_print(
                 print(_format_event(ev), flush=True)
             payload = _extract_approval_payload(ev)
             if payload is not None:
-                approvals.append(payload)
+                if approvals_buffer is not None:
+                    approvals_buffer.append(payload)
                 if approval_seen_flag is not None:
                     approval_seen_flag[0] = True
             if ev.type == "done":
-                break
+                if turn_done_event is not None:
+                    turn_done_event.set()
+                else:
+                    # 无回合事件时仅继续常驻消费。
+                    pass
     finally:
         _end_stream_if_any(stream_active)
-    return approvals
+    return None
 
 
 async def _async_resume_decision(
@@ -351,7 +364,7 @@ async def _async_resume_decision(
 
     关键边界：
     - 返回 **`str`** 时调用方**不得**再发 **`request_type=resume`**；
-    - 此阶段 **`stream_task` 应为 `None`**。
+    - 此阶段允许常驻 `stream_task` 继续运行，输入读取与流输出并发进行。
     """
     atype = str(approval_payload.get("approval_type", "approval_required"))
     print(
@@ -415,78 +428,61 @@ async def _run_http_cli(project_root: Path) -> None:
         out_cm = patch_stdout()
 
     stream_task: asyncio.Task | None = None
-    # 已在服务端入队、但尚未在本机订阅 SSE 的 request_id（FIFO，须与 session 消费顺序一致）。
-    pending_stream_rids: deque[str] = deque()
+    # 已在服务端入队、但尚未在本机收到 done 的请求数量（同一 session 按 FIFO 处理）。
+    pending_stream_count = 0
+    # 常驻流消费在收到 done 时置位，主循环据此触发审批与回合切换。
+    turn_done_event = asyncio.Event()
+    # 常驻流消费收集到的审批载荷，由主循环在 turn_done 后处理。
+    approvals_buffer: list[dict] = []
     # 当前 SSE 中是否已收到过 `approval_required`（用于「打印了审批提示但 `done` 尚未到达」时的 /yes /no 预填）。
     approval_seen_in_stream: list[bool] = [False]
-    # 用户在流未结束时输入的 /yes /no，在 `stream_end` 后用于首条审批，避免与 **`_wait_line_or_stream_end`** 竞态。
+    # 用户在流未结束时输入的 /yes /no，在 turn_done 后用于首条审批，避免与 **`_wait_line_or_stream_end`** 竞态。
     pre_decided_resume: list[dict | None] = [None]
 
-    def start_stream_consumer(request_id: str) -> None:
-        """为本 **`request_id`** 启动 **`_consume_stream_print`**，并重置审批可见标志。
+    def ensure_stream_consumer_running() -> None:
+        """确保当前 session 常驻 SSE 消费已启动。
 
         副作用：赋值 **`stream_task`**。
         """
         nonlocal stream_task
-        approval_seen_in_stream[0] = False
+        if stream_task is not None and not stream_task.done():
+            return
         stream_task = asyncio.create_task(
             _consume_stream_print(
                 client,
-                request_id,
+                session_id,
                 approval_seen_flag=approval_seen_in_stream,
+                approvals_buffer=approvals_buffer,
+                turn_done_event=turn_done_event,
             )
         )
 
-    def start_next_stream_from_pending() -> None:
-        """若当前无在跑的消费 task，则从 **`pending_stream_rids`** 队首启动一条 SSE 消费。
-
-        逻辑：
-        1. **`stream_task` 仍在跑则直接返回**（避免重复订阅）；
-        2. 队列为空则返回；
-        3. **`popleft`** 并 **`create_task(_consume_stream_print)`**。
-
-        副作用：可能新建 **`stream_task`**。
-        """
-        nonlocal stream_task
-        if stream_task is not None and not stream_task.done():
-            return
-        if not pending_stream_rids:
-            return
-        rid = pending_stream_rids.popleft()
-        start_stream_consumer(rid)
-
     async def handle_cancel() -> None:
-        """仅取消：打断服务端 turn 与本地 SSE，再尝试拉取队列中下一则已入队请求的流。"""
-        nonlocal stream_task
+        """仅取消：请求服务端打断当前 turn，本地 SSE 常驻不关闭。"""
         try:
             cr = await client.cancel_current_turn(session_id)
             print(f"[cli] cancel_turn cancelled={cr.cancelled}", flush=True)
         except Exception as exc:
             print(f"[cli] cancel_turn failed: {exc}", flush=True)
-        await _cancel_stream_task(stream_task)
-        stream_task = None
-        start_next_stream_from_pending()
 
     async def submit_user_text(text: str, *, interrupt: bool = False) -> None:
         """提交用户主消息；是否打断在途 turn 由 **`interrupt`** 决定。
 
         逻辑：
-        1. **`client.submit`** 入队（`priority=human`），得到 **`request_id`**；
-        2. 若本地仍有未结束的 SSE 消费 task：
-           - **`interrupt=False`**（普通用户消息）：仅 **`pending_stream_rids.append(rid)`**，**不**调用 **`cancel_current_turn`**，当前输出继续；
-           - **`interrupt=True`**（**`/cancel …`**）：**`append(rid)`** 后 **`cancel_current_turn`**，取消本地旧 SSE，再 **`start_next_stream_from_pending()`**（按 FIFO 订阅，含此前排队请求）；
-        3. 若当前无在跑的消费 task：**`await _cancel_stream_task`** 清理已完成的引用，再 **`create_task`** 直接消费本 **`rid`**（**`interrupt`** 仅决定是否多打一次 cancel API）。
+        1. **`client.submit`** 入队（`priority=human`）；
+        2. pending 计数 +1，并确保常驻 SSE 已启动；
+        3. **`interrupt=True`**（**`/cancel …`**）时额外调用 **`cancel_current_turn`**，但不关闭本地 SSE。
 
         边界：**`submit` 失败则整段返回**；无在途 turn 时 cancel 为 no-op。
 
-        说明：普通消息不打断时，多条入队会按顺序在 **`pending_stream_rids`** 中排队，待当前 SSE **`done`** 后由主循环末尾 **`start_next_stream_from_pending`** 接续。
+        说明：普通消息不打断时，多条入队会按提交顺序在服务端队列排队；本地通过 pending 计数在每次 `done` 后推进状态。
         """
-        nonlocal stream_task
-        had_active_stream = stream_task is not None and not stream_task.done()
+        nonlocal pending_stream_count
         try:
-            result = await client.submit(
+            await client.submit(
                 AgentSubmitRequest(
                     session_id=session_id,
+                    client_id=client.client_id,
                     request_type="message",
                     content=text,
                     source="cli",
@@ -496,26 +492,13 @@ async def _run_http_cli(project_root: Path) -> None:
         except Exception as exc:
             print(f"[submit] failed: {exc}", flush=True)
             return
-        rid = result.request_id
-        if had_active_stream:
-            pending_stream_rids.append(rid)
-            if interrupt:
-                try:
-                    await client.cancel_current_turn(session_id)
-                except Exception as exc:
-                    print(f"[cli] cancel_turn after submit failed: {exc}", flush=True)
-                await _cancel_stream_task(stream_task)
-                stream_task = None
-                start_next_stream_from_pending()
-            return
-        await _cancel_stream_task(stream_task)
-        stream_task = None
+        pending_stream_count += 1
+        ensure_stream_consumer_running()
         if interrupt:
             try:
                 await client.cancel_current_turn(session_id)
             except Exception as exc:
                 print(f"[cli] cancel_turn after submit failed: {exc}", flush=True)
-        start_stream_consumer(rid)
 
     wait_kw = {"prompt_session": pt_session, "stdin_queue": stdin_queue}
 
@@ -574,37 +557,51 @@ async def _run_http_cli(project_root: Path) -> None:
                 f" api_base={s.agent_api_base.rstrip('/')} session_id={session_id}",
                 flush=True,
             )
+            ensure_stream_consumer_running()
             while True:
                 kind, raw_line = await _wait_line_or_stream_end(
                     stream_task,
+                    turn_done_event=turn_done_event,
                     prompt_text="> ",
                     **wait_kw,
                 )
 
                 if kind == "stream_end":
-                    approvals = _stream_task_approvals(stream_task)  # type: ignore[arg-type]
+                    # 常驻流异常结束时重启；若重启失败由下一轮输入/提交再触发。
                     stream_task = None
-                    if not approvals:
+                    ensure_stream_consumer_running()
+                    continue
+
+                if kind == "turn_done":
+                    turn_done_event.clear()
+                    if pending_stream_count > 0:
+                        pending_stream_count -= 1
+                    else:
+                        # 兜底：避免计数被减成负值。
+                        pending_stream_count = 0
+                    if not approvals_buffer:
                         pre_decided_resume[0] = None
-                    while approvals:
+                    while approvals_buffer:
+                        approval_payload = approvals_buffer.pop(0)
                         buf = pre_decided_resume[0]
                         if buf is not None:
                             chosen: dict | str = buf
                             pre_decided_resume[0] = None
                         else:
                             chosen = await _async_resume_decision(
-                                approvals[0],
+                                approval_payload,
                                 prompt_session=pt_session,
                                 stdin_queue=stdin_queue,
                             )
                         if isinstance(chosen, str):
                             await submit_user_text(chosen, interrupt=False)
-                            approvals.clear()
+                            approvals_buffer.clear()
                             break
                         try:
-                            res = await client.submit(
+                            await client.submit(
                                 AgentSubmitRequest(
                                     session_id=session_id,
+                                    client_id=client.client_id,
                                     request_type="resume",
                                     resume_value=chosen,
                                     source="cli",
@@ -614,23 +611,9 @@ async def _run_http_cli(project_root: Path) -> None:
                         except Exception as exc:
                             print(f"[resume] failed: {exc}", flush=True)
                             break
-                        start_stream_consumer(res.request_id)
-                        while True:
-                            inner_kind, inner_line = await _wait_line_or_stream_end(
-                                stream_task,
-                                prompt_text="> ",
-                                **wait_kw,
-                            )
-                            if inner_kind == "stream_end":
-                                approvals = _stream_task_approvals(stream_task)
-                                stream_task = None
-                                break
-                            if inner_line == "":
-                                await _cancel_stream_task(stream_task)
-                                stream_task = None
-                                return
-                            await dispatch_line(inner_line)
-                    start_next_stream_from_pending()
+                        pending_stream_count += 1
+                        # resume 提交后等待下一次 done，再决定是否继续处理后续审批。
+                        break
                     continue
 
                 if raw_line == "":

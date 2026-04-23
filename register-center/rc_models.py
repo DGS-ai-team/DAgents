@@ -328,7 +328,8 @@ class BroadcastResultItem(BaseModel):
     discovery_group: list[str]
     ok: bool
     status_code: int | None = None
-    request_id: str | None = None
+    session_id: str | None = None
+    client_id: str | None = None
     detail: str | None = None
 
 
@@ -360,6 +361,7 @@ class RelayRequest(BaseModel):
     target_agent_id: str = Field(description="目标 Agent ID。")
     caller_groups: list[str] = Field(default_factory=list, description="调用方可见分组列表。")
     session_id: str = Field(description="透传到目标 Agent 的会话 ID。")
+    client_id: str = Field(description="透传到目标 Agent 的 SSE 客户端通道 ID。")
     request_type: str = Field(description="透传到目标 Agent 的请求类型。")
     content: str = Field(description="透传到目标 Agent 的消息内容。")
     source: str = Field(default="agent-peer-relay", description="透传消息来源标识。")
@@ -373,7 +375,7 @@ class RelayRequest(BaseModel):
             raise ValueError("target_agent_id 不能为空")
         return cleaned
 
-    @field_validator("session_id", "request_type", "content", "source", "priority")
+    @field_validator("session_id", "client_id", "request_type", "content", "source", "priority")
     @classmethod
     def validate_non_empty_text_fields(cls, value: str) -> str:
         cleaned = value.strip()
@@ -401,4 +403,5 @@ class RelayResponse(BaseModel):
     accepted: bool
     target_agent_id: str
     target_base_url: str
-    request_id: str | None = None
+    session_id: str
+    client_id: str

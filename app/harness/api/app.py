@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
@@ -20,6 +21,7 @@ from app.observability.metrics import metrics_text
 
 class MessageIn(BaseModel):
     session_id: str = Field(min_length=1)
+    client_id: str = Field(min_length=1, default="default")
     request_type: Literal["message", "resume"] = "message"
     content: str | None = None
     resume_value: Any | None = None
@@ -38,7 +40,6 @@ class MessageIn(BaseModel):
 
 class SubmitResult(BaseModel):
     accepted: bool
-    request_id: str
     session_id: str
     priority: MessagePriority
 
@@ -150,8 +151,8 @@ async def lifespan(app: FastAPI):
     s = get_settings(reload=True)
     bus = InMemoryEventBus()
 
-    async def on_stream_event(request_id: str, event_type: str, data: dict):
-        bus.publish(request_id=request_id, event_type=event_type, data=data)
+    async def on_stream_event(stream_id: str, event_type: str, data: dict):
+        bus.publish(stream_id=stream_id, event_type=event_type, data=data)
 
     service = AgentService(max_queue_size=s.max_queue_size, on_stream_event=on_stream_event)
     await service.start()
@@ -176,8 +177,40 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """创建并配置 FastAPI 应用实例。
+
+    逻辑：
+    1. 读取全局配置并实例化应用；
+    2. 按配置安装 CORS 中间件，确保本地前端可完成预检请求；
+    3. 注册 health/metrics/session/message/stream 路由。
+
+    关键分支/边界：
+    - `api_cors_allow_origins` 为空时回退到本地默认来源；
+    - 配置为 `*` 时启用全开放来源（仅建议本地调试）；
+    - CORS 仅影响浏览器跨域访问，不影响服务间直连调用。
+
+    与外部交互：
+    - 暴露 HTTP API 路由；
+    - CORS 中间件会处理浏览器预检请求（OPTIONS）。
+
+    异常说明：
+    - 本方法不主动吞异常，框架层异常由 FastAPI/Uvicorn 处理。
+
+    副作用说明：
+    - 启动时会向应用实例挂载路由与中间件。
+    """
     s = get_settings()
     app = FastAPI(title="DAgents API", version="0.1.0", lifespan=lifespan)
+    cors_origins = s.api_cors_allow_origins or ["http://localhost:5173", "http://127.0.0.1:5173"]
+    allow_all_origins = "*" in cors_origins
+    # 允许前端 dev server 进行跨域预检与正式请求；当前不依赖 cookie 凭证。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"] if allow_all_origins else cors_origins,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -213,7 +246,7 @@ def create_app() -> FastAPI:
     async def submit_message(body: MessageIn) -> SubmitResult:
         service: AgentService = app.state.service
         bus: InMemoryEventBus = app.state.bus
-        request_id = bus.create_request(session_id=body.session_id)
+        stream_id = bus.create_stream(session_id=body.session_id, client_id=body.client_id)
         try:
             if body.request_type == "resume":
                 await service.submit_resume(
@@ -221,7 +254,7 @@ def create_app() -> FastAPI:
                     resume_value=body.resume_value,
                     source=body.source,
                     priority=body.priority,
-                    request_id=request_id,
+                    stream_id=stream_id,
                 )
             else:
                 if not body.content or not body.content.strip():
@@ -231,7 +264,7 @@ def create_app() -> FastAPI:
                     content=body.content,
                     source=body.source,
                     priority=body.priority,
-                    request_id=request_id,
+                    stream_id=stream_id,
                 )
         except HTTPException:
             raise
@@ -239,19 +272,27 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return SubmitResult(
             accepted=True,
-            request_id=request_id,
             session_id=body.session_id,
             priority=body.priority,
         )
 
-    @app.get("/v1/streams/{request_id}")
-    async def stream(request_id: str):
+    @app.get("/v1/streams")
+    async def stream_all(client_id: str):
+        """订阅全局 SSE 流（跨 session/request 的实时事件）。
+
+        逻辑：
+        1. 连接建立后持续读取事件总线 `subscribe_all()`；
+        2. 每条事件均透传为标准 SSE 包；
+        3. 连接断开由客户端主动关闭或网络中断触发。
+
+        关键边界：
+        - 该接口仅推送连接建立后的实时事件，不回放历史；
+        - 同一前端可复用一个连接并按 `session_id` 在本地分流展示。
+        """
         bus: InMemoryEventBus = app.state.bus
-        if not bus.has_request(request_id):
-            raise HTTPException(status_code=404, detail="request_id not found")
 
         async def event_iter():
-            async for event in bus.subscribe(request_id=request_id):
+            async for event in bus.subscribe_all(client_id=client_id):
                 yield _to_sse(event)
 
         return StreamingResponse(event_iter(), media_type="text/event-stream")

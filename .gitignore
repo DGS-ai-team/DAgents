@@ -17,4 +17,8 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/openapi.json
+frontend/package-lock.json
+frontend/vite.config.js
+frontend/vite.config.d.ts
+frontend/*.tsbuildinfo
 .pnpm-store/

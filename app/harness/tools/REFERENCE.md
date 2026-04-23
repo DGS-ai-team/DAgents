@@ -22,7 +22,7 @@
 - **`agent_discover`**：按分组发现可协作 Agent（支持可选能力标签过滤，并内联固定结构 `agent_card`）
 - **`agent_send_message`**：异步点对点向目标 Agent 提交消息（投递链路由配置 `AGENT_PEER_DELIVERY_MODE` 控制）
 - **`agent_broadcast`**：异步调用 register-center 广播接口进行分组广播
-- **`_collect_peer_stream_output`**：读取目标 `/v1/streams/{request_id}` 并汇总可读输出，支持超时截断
+- **`_collect_peer_stream_output`**：读取目标 `/v1/streams?client_id=...` 并按 `session_id` 汇总可读输出，支持超时截断
 - **`_extract_sse_text_from_event`**：从单条 SSE 事件中提取对 Agent 可读正文
 - **`_session_id_from_context`**：从 `OpenAIConversationContext` 解析会话 ID，缺失时回退生成。
 - **`_cache_agent_list`**：刷新进程内 agent 列表缓存（按 `agent_id` 去重）。

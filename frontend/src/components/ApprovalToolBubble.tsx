@@ -1,5 +1,4 @@
 import type { ApprovalTask, ToolCallDecision, ToolCallItem } from "../ui-contracts";
-import { RiskBadge } from "./ui";
 
 export interface ApprovalToolBubbleProps {
   task: ApprovalTask;
@@ -45,18 +44,18 @@ function ToolStatusPill({
   completed: boolean;
 }) {
   if (decision === "reject") {
-    return <span className="pill pill--error">已拒绝</span>;
+    return <span className="tool-status-chip tool-status-chip--reject">已拒绝</span>;
   }
   if (completed) {
-    return <span className="pill pill--success">已返回</span>;
+    return <span className="tool-status-chip tool-status-chip--done">已返回</span>;
   }
   if (running) {
-    return <span className="pill pill--running">执行中</span>;
+    return <span className="tool-status-chip tool-status-chip--running">执行中</span>;
   }
   if (decision === "approve") {
-    return <span className="pill">已批准</span>;
+    return <span className="tool-status-chip tool-status-chip--approved">已批准</span>;
   }
-  return <span className="pill pill--warn">待审批</span>;
+  return <span className="tool-status-chip tool-status-chip--pending">待审批</span>;
 }
 
 function ToolCallRow({
@@ -86,36 +85,35 @@ function ToolCallRow({
       <header className="approval-tool-item__head">
         <div className="approval-bubble__title">
           <span className="approval-bubble__name">{toolCall.name}</span>
-          <RiskBadge level={toolCall.riskLevel} />
         </div>
-        <ToolStatusPill decision={decision} running={running} completed={completed} />
+        <div className="approval-tool-item__right">
+          <ToolStatusPill decision={decision} running={running} completed={completed} />
+          {!handled && onDecide ? (
+            <div className="approval-tool-item__inline-actions">
+              <button
+                type="button"
+                className="approval-action-btn approval-action-btn--reject"
+                disabled={submitting}
+                onClick={() => void onDecide(task.id, toolCall.id, "reject")}
+              >
+                拒绝
+              </button>
+              <button
+                type="button"
+                className="approval-action-btn approval-action-btn--approve"
+                disabled={submitting}
+                onClick={() => void onDecide(task.id, toolCall.id, "approve")}
+              >
+                {submitting ? "处理中…" : "批准"}
+              </button>
+            </div>
+          ) : null}
+        </div>
       </header>
-      <div className="approval-bubble__id">call_id: {toolCall.id}</div>
 
       <pre className="tool-card__args tool-card__args--compact">
         {JSON.stringify(toolCall.arguments, null, 2)}
       </pre>
-
-      {!handled && onDecide && (
-        <footer className="approval-bubble__actions">
-          <button
-            type="button"
-            className="btn btn--sm btn--danger"
-            disabled={submitting}
-            onClick={() => void onDecide(task.id, toolCall.id, "reject")}
-          >
-            拒绝
-          </button>
-          <button
-            type="button"
-            className="btn btn--sm btn--primary"
-            disabled={submitting}
-            onClick={() => void onDecide(task.id, toolCall.id, "approve")}
-          >
-            {submitting ? "处理中…" : "批准"}
-          </button>
-        </footer>
-      )}
     </li>
   );
 }
@@ -134,8 +132,8 @@ export function ApprovalToolBubble({
   return (
     <div className="msg msg--approval">
       <div className="msg__body msg__body--wide">
+        <div className="msg__hint">tool_call</div>
         <div className="approval-bubble">
-          <div className="approval-bubble__intro">工具调用</div>
           <ul className="approval-tool-list">
             {task.payload.args.tool_calls.map((toolCall) => (
               <ToolCallRow

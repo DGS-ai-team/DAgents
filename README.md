@@ -66,13 +66,18 @@ cp .env.example .env
 
 常用配置项与默认值可参考 `app/config/settings.py` 中的 `Settings`。
 
+前后端连接建议统一通过 `.env` 配置：
+
+- `API_HOST` / `API_PORT`：后端 API 监听地址（`run_agent_api.py` 使用）
+- `VITE_API_BASE_URL`：前端请求后端地址（`ChatWorkbench` 使用）
+
 ### 3) 启动服务（推荐 API 模式）
 
 ```bash
 python run_agent_api.py
 ```
 
-默认监听 `0.0.0.0:8000`。
+默认监听 `127.0.0.1:8000`。
 
 ## 运行方式
 
@@ -80,6 +85,7 @@ python run_agent_api.py
 - **CLI 客户端**：`python run_agent.py`
 - **Register Center**：`python run_register_center.py`
 - **一键开发栈（推荐本地联调）**：`python run_dev_stack.py`（默认同时启动 API + Register Center + Frontend）
+- **前端入口（自动检查后端）**：`python run_frontend_with_backend.py`（后端未启动时先拉起 API，再启动前端）
 - **Web 前端（开发中）**：
   ```bash
   cd frontend

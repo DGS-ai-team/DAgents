@@ -11,6 +11,7 @@ import httpx
 
 BASE_URL = "http://127.0.0.1:8000"
 SESSION_ID = "demo-session"
+CLIENT_ID = "demo-client"
 AUTO_RESUME_ON_INTERRUPT = True
 RAW_STREAM_LOG = Path(__file__).resolve().parent / "call_agent_api_raw_stream.jsonl"
 TYPEWRITER_CPS = 10
@@ -147,11 +148,12 @@ def _format_tool_buffers_line(buffers: dict[int, dict[str, str]]) -> str:
     return " | ".join(parts)
 
 
-async def _submit_message(client: httpx.AsyncClient, *, content: str) -> str:
+async def _submit_message(client: httpx.AsyncClient, *, content: str) -> None:
     resp = await client.post(
         f"{BASE_URL}/v1/messages",
         json={
             "session_id": SESSION_ID,
+            "client_id": CLIENT_ID,
             "request_type": "message",
             "content": content,
             "source": "script",
@@ -159,16 +161,15 @@ async def _submit_message(client: httpx.AsyncClient, *, content: str) -> str:
         },
     )
     resp.raise_for_status()
-    submit_data = resp.json()
-    request_id = submit_data["request_id"]
-    return request_id
+    _ = resp.json()
 
 
-async def _submit_resume(client: httpx.AsyncClient, *, resume_value: Any) -> str:
+async def _submit_resume(client: httpx.AsyncClient, *, resume_value: Any) -> None:
     resp = await client.post(
         f"{BASE_URL}/v1/messages",
         json={
             "session_id": SESSION_ID,
+            "client_id": CLIENT_ID,
             "request_type": "resume",
             "resume_value": resume_value,
             "source": "script",
@@ -176,12 +177,10 @@ async def _submit_resume(client: httpx.AsyncClient, *, resume_value: Any) -> str
         },
     )
     resp.raise_for_status()
-    submit_data = resp.json()
-    request_id = submit_data["request_id"]
-    return request_id
+    _ = resp.json()
 
 
-async def _stream_request(client: httpx.AsyncClient, *, request_id: str) -> dict[str, Any]:
+async def _stream_request(client: httpx.AsyncClient) -> dict[str, Any]:
     assembled = ""
     tool_call_buffers: dict[int, dict[str, str]] = {}
     tool_call_header_printed: set[int] = set()
@@ -190,7 +189,7 @@ async def _stream_request(client: httpx.AsyncClient, *, request_id: str) -> dict
     current_event = ""
     ai_queue: asyncio.Queue[str | None] = asyncio.Queue()
     ai_task = asyncio.create_task(_run_typewriter(ai_queue, cps=TYPEWRITER_CPS))
-    async with client.stream("GET", f"{BASE_URL}/v1/streams/{request_id}") as sse_resp:
+    async with client.stream("GET", f"{BASE_URL}/v1/streams?client_id={CLIENT_ID}") as sse_resp:
         sse_resp.raise_for_status()
         async for line in sse_resp.aiter_lines():
             if not line:
@@ -207,10 +206,12 @@ async def _stream_request(client: httpx.AsyncClient, *, request_id: str) -> dict
 
             raw_json = line.split("data: ", 1)[1]
             payload = json.loads(raw_json)
+            if str(payload.get("session_id", "")).strip() != SESSION_ID:
+                continue
             _append_raw_log(
                 {
                     "ts": datetime.now(timezone.utc).isoformat(),
-                    "request_id": request_id,
+                    "client_id": CLIENT_ID,
                     "event": current_event,
                     "raw_payload": payload,
                 }
@@ -281,16 +282,16 @@ async def _stream_request(client: httpx.AsyncClient, *, request_id: str) -> dict
 
 async def main() -> None:
     async with httpx.AsyncClient(timeout=60) as client:
-        request_id = await _submit_message(client, content="计算以下两个数字之和：1 + 2")
-        first_round = await _stream_request(client, request_id=request_id)
+        await _submit_message(client, content="计算以下两个数字之和：1 + 2")
+        first_round = await _stream_request(client)
 
         if AUTO_RESUME_ON_INTERRUPT and first_round.get("interrupt"):
             # 示例：收到 interrupt 后自动同意继续，resume_value 可按业务改成 reject/自定义参数。
-            resume_request_id = await _submit_resume(
+            await _submit_resume(
                 client,
                 resume_value={"type": "approve"},
             )
-            await _stream_request(client, request_id=resume_request_id)
+            await _stream_request(client)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from app.context.models import OpenAIConversationContext
 from app.harness.service.agent_service import AgentService
 from app.harness.service.interface import AgentEventEnvelope, AgentSubmitRequest
 
-_MAP_BASE_META = {"session_id": "s", "request_id": "r", "model": "unit-model"}
+_MAP_BASE_META = {"session_id": "s", "model": "unit-model"}
 
 
 class AgentSubmitRequestPriorityTestCase(unittest.TestCase):
@@ -152,8 +152,8 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
         fake_runtime = FakeRuntime()
         events: list[tuple[str, str, dict]] = []
 
-        async def on_stream_event(request_id: str, event_type: str, data: dict):
-            events.append((request_id, event_type, data))
+        async def on_stream_event(stream_id: str, event_type: str, data: dict):
+            events.append((stream_id, event_type, data))
 
         service = AgentService(max_queue_size=0, on_stream_event=on_stream_event)
         service._message_store = None
@@ -165,22 +165,20 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
                 session_id="s-event",
                 content="ping",
                 source="unit-test",
-                request_id="req-1",
+                stream_id="stream-1",
             )
             await asyncio.sleep(0.1)
             await service.stop()
 
         self.assertTrue(events)
-        self.assertEqual(events[0][0], "req-1")
+        self.assertEqual(events[0][0], "stream-1")
         self.assertEqual(events[0][1], "assistant")
         self.assertEqual(events[0][2]["meta"]["session_id"], "s-event")
-        self.assertEqual(events[0][2]["meta"]["request_id"], "req-1")
         self.assertIn("model", events[0][2]["meta"])
         self.assertEqual(events[1][1], "approval_required")
         self.assertEqual(events[1][2]["approval_type"], "execute_tool")
         self.assertEqual(events[1][2]["meta"]["session_id"], "s-event")
         self.assertEqual(events[-1][1], "done")
-        self.assertEqual(events[-1][2]["meta"]["request_id"], "req-1")
 
     async def test_human_priority_does_not_auto_cancel_in_flight_turn(self) -> None:
         """仅 human 入队不会打断在途 turn；显式 cancel 后第二条才会执行。"""
@@ -196,7 +194,7 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
                 content="first",
                 source="unit-test",
                 priority="other",
-                request_id="r1",
+                stream_id="stream-r1",
             )
             for _ in range(200):
                 if rt.run_turn_calls >= 1:
@@ -208,7 +206,7 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
                 content="second",
                 source="unit-test",
                 priority="human",
-                request_id="r2",
+                stream_id="stream-r2",
             )
             for _ in range(50):
                 await asyncio.sleep(0.02)
@@ -341,7 +339,7 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event_type, "tool_result")
         self.assertEqual(data["tool_call_id"], "tc1")
         self.assertTrue(data["partial"])
-        self.assertEqual(data["meta"]["request_id"], "r")
+        self.assertEqual(data["meta"]["session_id"], "s")
 
     def test_map_event_envelope_reasoning_shape(self) -> None:
         event_type, data = AgentService._map_event_envelope_to_stream(

@@ -160,7 +160,7 @@ class AgentService:
             async_tool_result=dict(payload),
             source="async-store",
             priority="tool_result",
-            request_id=None,
+            stream_id=None,
         )
 
     async def run_forever(self) -> None:
@@ -200,7 +200,7 @@ class AgentService:
         tool_result: dict[str, Any] | None = None,
         source: str = "service",
         priority: MessagePriority = "other",
-        request_id: str | None = None,
+        stream_id: str | None = None,
     ) -> None:
         """对外投递入口：按 session 入队一条消息。
 
@@ -238,7 +238,7 @@ class AgentService:
                 async_tool_result=async_tool_result,
                 tool_result=tool_result,
                 source=source,
-                request_id=request_id,
+                stream_id=stream_id,
             ),
             priority=effective_priority,
         )
@@ -250,7 +250,7 @@ class AgentService:
         resume_value: Any,
         source: str = "service",
         priority: MessagePriority = "resume",
-        request_id: str | None = None,
+        stream_id: str | None = None,
     ) -> None:
         """投递 resume 请求：将 `resume_value` 入队并交由消费者触发 `Command(resume=...)`。
 
@@ -266,7 +266,7 @@ class AgentService:
                 request_type="resume",
                 resume_value=resume_value,
                 source=source,
-                request_id=request_id,
+                stream_id=stream_id,
             ),
             priority=priority,
         )
@@ -387,7 +387,7 @@ class AgentService:
         逻辑：
         1. 用 `_map_event_envelope_to_stream` 转为 SSE 事件形态；
         2. 记录统一日志；
-        3. 若存在 `request_id` 则通过 `_emit_stream_event` 推送给订阅方。
+        3. 若存在 `stream_id` 则通过 `_emit_stream_event` 推送给订阅方。
         """
         stream_type, stream_data = self._map_event_envelope_to_stream(
             envelope,
@@ -603,19 +603,15 @@ class AgentService:
         print(f"[agent-service][{kind}] session={session_id}: {body}", flush=True)
 
     def _stream_base_meta(self, env: MessageEnvelope) -> dict[str, Any]:
-        """构造每条 SSE `data.meta` 的公共字段（会话、请求、当前模型）。
+        """构造每条 SSE `data.meta` 的公共字段（会话、当前模型）。
 
         逻辑：
         1. 从 **`get_model_config()`** 取 **`model`** 字符串；
-        2. 与 **`env.session_id`**、**`env.request_id`** 组成 dict。
-
-        关键边界：
-        - **`request_id`** 可能为空（无订阅方），仍写入 meta 便于日志对齐。
+        2. 与 **`env.session_id`** 组成 dict。
         """
         cfg = get_model_config()
         return {
             "session_id": env.session_id,
-            "request_id": env.request_id or "",
             "model": str(cfg.get("model") or ""),
         }
 
@@ -628,10 +624,10 @@ class AgentService:
     ) -> None:
         if self._on_stream_event is None:
             return
-        # 无 request_id 时无法关联 HTTP/SSE 订阅方，仅打日志（见 _handle_message 内 _log）。
-        if not env.request_id:
+        # 无 stream_id 时无法关联 HTTP/SSE 订阅方，仅打日志（见 _handle_message 内 _log）。
+        if not env.stream_id:
             return
-        await self._on_stream_event(env.request_id, event_type, data)
+        await self._on_stream_event(env.stream_id, event_type, data)
 
     @staticmethod
     def _map_event_envelope_to_stream(

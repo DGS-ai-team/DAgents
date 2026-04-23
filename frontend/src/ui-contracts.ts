@@ -63,6 +63,19 @@ export interface ApprovalTask extends UiMeta {
   rejectedIds?: string[];
 }
 
+export type ToolExecutionStatus = "running" | "success" | "rejected" | "error";
+
+export interface ToolExecutionRecord extends UiMeta {
+  id: string;
+  toolCallId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  status: ToolExecutionStatus;
+  summary?: string;
+  detail?: string;
+  finishedAt?: number;
+}
+
 export interface UsageStats {
   inputTokens: number;
   outputTokens: number;
@@ -133,6 +146,7 @@ export interface MainChatPanelProps {
   sessionId: string;
   messages: ChatMessage[];
   approvals?: ApprovalTask[];
+  toolExecutions?: ToolExecutionRecord[];
   submittingToolCallIds?: string[];
   runningToolCallIds?: string[];
   completedToolCallIds?: string[];
@@ -164,8 +178,8 @@ export interface SubTaskSummaryCardProps {
 
 export interface RuntimeStatusPanelProps {
   runtime: RuntimeState;
-  latestToolCalls: ToolCallItem[];
   latestError?: string;
+  sseConnected: boolean;
 }
 
 // ---------------------------

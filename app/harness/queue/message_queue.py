@@ -51,7 +51,7 @@ class MessageEnvelope(BaseModel):
     async_tool_result: dict[str, Any] | None = None
     tool_result: dict[str, Any] | None = None
     source: str = "cli"
-    request_id: str | None = None
+    stream_id: str | None = None
 
 
 EnvelopeT = TypeVar("EnvelopeT")

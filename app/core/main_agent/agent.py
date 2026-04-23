@@ -341,7 +341,7 @@ class MainAgentTurnOrchestrator:
             },
             source="service",
             priority="tool_result",
-            request_id=env.request_id,
+            stream_id=env.stream_id,
         )
         ctx.pending_tool_calls.clear()
 
@@ -658,7 +658,7 @@ class MainAgentTurnOrchestrator:
             },
             source="service",
             priority="tool_result",
-            request_id=env.request_id,
+            stream_id=env.stream_id,
         )
 
     @staticmethod

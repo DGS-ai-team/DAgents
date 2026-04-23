@@ -10,12 +10,15 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from app.config.env import load_env
 
 
 @dataclass
@@ -88,7 +91,56 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_commands(root: Path, args: argparse.Namespace) -> list[tuple[str, list[str], Path]]:
+def _resolve_vite_api_base_from_env() -> str:
+    """解析前端注入用 `VITE_API_BASE_URL`。
+
+    逻辑：
+    1. 优先读取 `VITE_API_BASE_URL`；
+    2. 其次读取 `AGENT_API_BASE`；
+    3. 最后按 `API_PORT` 组装本地地址。
+
+    关键分支/边界：
+    - 地址统一去掉末尾 `/`；
+    - 端口非法时回退 8000。
+
+    与外部交互：
+    - 读取环境变量（已由 `.env` 注入）。
+
+    异常说明：
+    - 无显式异常抛出。
+
+    副作用说明：
+    - 无。
+    """
+
+    explicit = (os.getenv("VITE_API_BASE_URL", "") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    else:
+        pass
+
+    agent_api_base = (os.getenv("AGENT_API_BASE", "") or "").strip()
+    if agent_api_base:
+        return agent_api_base.rstrip("/")
+    else:
+        pass
+
+    raw_port = (os.getenv("API_PORT", "8000") or "8000").strip()
+    try:
+        port = int(raw_port)
+        if not (1 <= port <= 65535):
+            port = 8000
+        else:
+            pass
+    except ValueError:
+        port = 8000
+    return f"http://127.0.0.1:{port}"
+
+
+def build_commands(
+    root: Path,
+    args: argparse.Namespace,
+) -> list[tuple[str, list[str], Path, dict[str, str] | None]]:
     """按参数构造待启动命令列表。
 
     逻辑：
@@ -110,25 +162,27 @@ def build_commands(root: Path, args: argparse.Namespace) -> list[tuple[str, list
     - 无。
     """
 
-    commands: list[tuple[str, list[str], Path]] = []
+    commands: list[tuple[str, list[str], Path, dict[str, str] | None]] = []
     if not args.no_register:
         commands.append(
-            ("register-center", [sys.executable, "run_register_center.py"], root),
+            ("register-center", [sys.executable, "run_register_center.py"], root, None),
         )
     else:
         pass
 
     if not args.no_api:
-        commands.append(("api", [sys.executable, "run_agent_api.py"], root))
+        commands.append(("api", [sys.executable, "run_agent_api.py"], root, None))
     else:
         pass
 
     if not args.no_frontend:
+        vite_api_base = _resolve_vite_api_base_from_env()
         commands.append(
             (
                 "frontend",
                 [args.frontend_cmd, "run", "--prefix", "frontend", "dev"],
                 root,
+                {"VITE_API_BASE_URL": vite_api_base},
             ),
         )
     else:
@@ -136,7 +190,9 @@ def build_commands(root: Path, args: argparse.Namespace) -> list[tuple[str, list
     return commands
 
 
-def start_processes(commands: list[tuple[str, list[str], Path]]) -> list[ManagedProcess]:
+def start_processes(
+    commands: list[tuple[str, list[str], Path, dict[str, str] | None]],
+) -> list[ManagedProcess]:
     """启动所有子进程并返回句柄列表。
 
     逻辑：
@@ -159,11 +215,17 @@ def start_processes(commands: list[tuple[str, list[str], Path]]) -> list[Managed
     """
 
     managed: list[ManagedProcess] = []
-    for name, cmd, cwd in commands:
+    for name, cmd, cwd, env_overrides in commands:
         print(f"[dev-stack] starting {name}: {shlex.join(cmd)}")
+        child_env = os.environ.copy()
+        if env_overrides:
+            child_env.update(env_overrides)
+        else:
+            pass
         popen = subprocess.Popen(
             cmd,
             cwd=str(cwd),
+            env=child_env,
             text=True,
             stdout=None,
             stderr=None,
@@ -274,6 +336,7 @@ def main() -> int:
     """
 
     root = Path(__file__).resolve().parent
+    load_env(root)
     args = parse_args()
     commands = build_commands(root=root, args=args)
     if not commands:
