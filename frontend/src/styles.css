@@ -627,6 +627,35 @@ input {
   color: var(--color-text-muted);
 }
 
+.tool-exec-bubble__terminal,
+.tool-exec-bubble__code {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-exec-bubble__code {
+  background: #111827;
+}
+
+.tool-exec-bubble__image {
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  object-fit: contain;
+  background: #ffffff;
+}
+
 .tool-exec-bubble__details summary {
   cursor: pointer;
   font-size: 12px;

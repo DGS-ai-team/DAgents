@@ -1,4 +1,26 @@
+import type { ReactNode } from "react";
 import type { ToolExecutionRecord } from "../ui-contracts";
+
+function renderByDisplayType(item: ToolExecutionRecord): ReactNode {
+  const displayType = item.displayType ?? "normal_text";
+  const summary = (item.summary ?? "").trim();
+  const resultContent = (item.resultContent ?? "").trim();
+  const displayText = resultContent || summary;
+  if (!displayText) {
+    return null;
+  }
+  if (displayType === "terminal") {
+    return <pre className="tool-exec-bubble__terminal">{displayText}</pre>;
+  }
+  if (displayType === "code") {
+    return <pre className="tool-exec-bubble__code">{displayText}</pre>;
+  }
+  if (displayType === "image") {
+    const imageUrl = displayText;
+    return <img src={imageUrl} alt="tool result" className="tool-exec-bubble__image" />;
+  }
+  return <div className="tool-exec-bubble__summary">{summary || displayText}</div>;
+}
 
 export function ToolExecutionBubble({ item }: { item: ToolExecutionRecord }) {
   const isRunning = item.status === "running";
@@ -12,7 +34,7 @@ export function ToolExecutionBubble({ item }: { item: ToolExecutionRecord }) {
       : isRejected
         ? "已拒绝"
         : "失败";
-  const summary = (item.summary ?? "").trim() || "无摘要";
+  const summaryNode = renderByDisplayType(item);
 
   return (
     <div className="msg msg--tool-centered">
@@ -36,7 +58,7 @@ export function ToolExecutionBubble({ item }: { item: ToolExecutionRecord }) {
             </span>
           </div>
 
-          <div className="tool-exec-bubble__summary">{summary}</div>
+          {summaryNode ?? <div className="tool-exec-bubble__summary">无摘要</div>}
 
           <details className="tool-exec-bubble__details">
             <summary>查看详情</summary>

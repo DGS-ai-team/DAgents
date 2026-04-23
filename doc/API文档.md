@@ -158,9 +158,10 @@ data: {"client_id":"...","session_id":"...","type":"...","seq":0,"ts":"...","dat
   - `data.assistant_content: string`
   - `data.tool_calls: array`
 - `tool_result`
-  - `data.content: string`
+  - `data.content: string`（工具执行结果正文；失败时为错误信息或拒绝/打断提示）
   - `data.tool_call_id: string | null`
   - `data.tool_name: string | null`
+  - `data.display_type: "terminal" | "code" | "normal_text" | "image"`
   - `data.rejected: bool`
   - `data.interrupted_by_user_message: bool`
   - `data.partial: bool`

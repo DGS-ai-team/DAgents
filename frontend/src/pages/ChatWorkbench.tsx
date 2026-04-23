@@ -11,6 +11,7 @@ import type {
   RuntimeState,
   SubAgentThread,
   ToolExecutionRecord,
+  ToolResultDisplayType,
   ToolCallDecision,
   ToolCallItem,
 } from "../ui-contracts";
@@ -69,6 +70,14 @@ function buildToolExecutionSummary(
   const compact = text.replace(/\s+/g, " ");
   const clipped = compact.length > 56 ? `${compact.slice(0, 56)}...` : compact;
   return `${name}：${clipped}`;
+}
+
+function normalizeDisplayType(value: unknown): ToolResultDisplayType {
+  const raw = String(value ?? "").trim();
+  if (raw === "terminal" || raw === "code" || raw === "normal_text" || raw === "image") {
+    return raw;
+  }
+  return "normal_text";
 }
 
 function IconPlus() {
@@ -469,6 +478,7 @@ export function ChatWorkbench() {
         const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "tool";
         const toolCallId = typeof payload.tool_call_id === "string" ? payload.tool_call_id : "";
         const rejected = Boolean(payload.rejected);
+        const displayType = normalizeDisplayType(payload.display_type);
         if (!toolCallId) {
           return;
         } else {
@@ -498,6 +508,8 @@ export function ChatWorkbench() {
                   rejected ? "rejected" : "success",
                   content,
                 ),
+                resultContent: content,
+                displayType,
                 detail: JSON.stringify(payload, null, 2),
                 finishedAt: Date.now(),
               };
@@ -512,6 +524,8 @@ export function ChatWorkbench() {
                   rejected ? "rejected" : "success",
                   content,
                 ),
+                resultContent: content,
+                displayType,
                 detail: JSON.stringify(payload, null, 2),
                 finishedAt: Date.now(),
               };

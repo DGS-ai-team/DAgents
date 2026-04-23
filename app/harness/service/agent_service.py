@@ -679,6 +679,7 @@ class AgentService:
                     "content": payload.get("content", ""),
                     "tool_call_id": payload.get("tool_call_id"),
                     "tool_name": payload.get("tool_name"),
+                    "display_type": payload.get("display_type", "normal_text"),
                     "rejected": bool(payload.get("rejected", False)),
                     "interrupted_by_user_message": bool(payload.get("interrupted_by_user_message", False)),
                     "partial": bool(payload.get("partial", False)),

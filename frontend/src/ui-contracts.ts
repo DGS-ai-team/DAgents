@@ -64,6 +64,7 @@ export interface ApprovalTask extends UiMeta {
 }
 
 export type ToolExecutionStatus = "running" | "success" | "rejected" | "error";
+export type ToolResultDisplayType = "terminal" | "code" | "normal_text" | "image";
 
 export interface ToolExecutionRecord extends UiMeta {
   id: string;
@@ -72,7 +73,9 @@ export interface ToolExecutionRecord extends UiMeta {
   arguments: Record<string, unknown>;
   status: ToolExecutionStatus;
   summary?: string;
+  resultContent?: string;
   detail?: string;
+  displayType?: ToolResultDisplayType;
   finishedAt?: number;
 }
 
@@ -126,7 +129,15 @@ export type StreamEvent =
   | { type: "assistant"; data: { content: string } }
   | { type: "reasoning"; data: { content: string } }
   | { type: "tool_call"; data: { assistant_content?: string; tool_calls: ToolCallItem[] } }
-  | { type: "tool_result"; data: { tool_name?: string; tool_call_id?: string; content?: string } }
+  | {
+      type: "tool_result";
+      data: {
+        tool_name?: string;
+        tool_call_id?: string;
+        content?: string;
+        display_type?: ToolResultDisplayType;
+      };
+    }
   | { type: "approval_required"; data: ApprovalRequiredPayload }
   | { type: "usage"; data: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }
   | { type: "done"; data: Record<string, unknown> }

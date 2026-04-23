@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any, Awaitable, Callable, Literal
 
 from app.config.settings import get_settings
@@ -315,6 +316,8 @@ class MainAgentTurnOrchestrator:
                     {
                         "tool_name": item.name,
                         "tool_call_id": item.call_id,
+                        "content": result_text,
+                        "display_type": self._infer_tool_result_display_type(item.name, result_text),
                     }
                 )
             elif call_id in rejected_ids:
@@ -404,9 +407,10 @@ class MainAgentTurnOrchestrator:
                 payload={
                     "tool_name": tool_name,
                     "tool_call_id": tool_call_id,
-                    "content": "",
+                    "content": tool_text,
                     "partial": False,
                     "async_status": status,
+                    "display_type": self._infer_tool_result_display_type(tool_name, tool_text),
                 },
                 meta={},
             ),
@@ -436,30 +440,46 @@ class MainAgentTurnOrchestrator:
         raw_results = payload.get("results")
         if isinstance(raw_results, list):
             for item in raw_results:
+                result_content = str(item.get("content", "") or "")
+                tool_name = str(item.get("tool_name", "") or "")
+                display_type_raw = str(item.get("display_type", "") or "")
+                if display_type_raw in {"terminal", "code", "normal_text", "image"}:
+                    display_type = display_type_raw
+                else:
+                    display_type = self._infer_tool_result_display_type(tool_name, result_content)
                 await self._emit_envelope(
                     env=env,
                     envelope=AgentEventEnvelope(
                         event_type="tool_result",
                         payload={
-                            "tool_name": str(item.get("tool_name", "") or ""),
+                            "tool_name": tool_name,
                             "tool_call_id": str(item.get("tool_call_id", "") or "").strip(),
-                            "content": "",
+                            "content": result_content,
                             "partial": False,
+                            "display_type": display_type,
                         },
                         meta={},
                     ),
                     base_meta=base_meta,
                 )
         else:
+            result_content = str(payload.get("content", "") or "")
+            tool_name = str(payload.get("tool_name", "") or "")
+            display_type_raw = str(payload.get("display_type", "") or "")
+            if display_type_raw in {"terminal", "code", "normal_text", "image"}:
+                display_type = display_type_raw
+            else:
+                display_type = self._infer_tool_result_display_type(tool_name, result_content)
             await self._emit_envelope(
                 env=env,
                 envelope=AgentEventEnvelope(
                     event_type="tool_result",
                     payload={
-                        "tool_name": str(payload.get("tool_name", "") or ""),
+                        "tool_name": tool_name,
                         "tool_call_id": str(payload.get("tool_call_id", "") or "").strip(),
-                        "content": "",
+                        "content": result_content,
                         "partial": False,
+                        "display_type": display_type,
                     },
                     meta={},
                 ),
@@ -503,6 +523,7 @@ class MainAgentTurnOrchestrator:
                         "content": self._TOOL_USER_INTERRUPTED_MESSAGE,
                         "interrupted_by_user_message": True,
                         "partial": False,
+                        "display_type": "normal_text",
                     },
                     meta={},
                 ),
@@ -623,6 +644,8 @@ class MainAgentTurnOrchestrator:
                     {
                         "tool_name": item.name,
                         "tool_call_id": item.call_id,
+                        "content": result_text,
+                        "display_type": self._infer_tool_result_display_type(item.name, result_text),
                     }
                     for item, result_text in zip(auto_exec_calls, auto_exec_results)
                 ]
@@ -639,6 +662,8 @@ class MainAgentTurnOrchestrator:
             {
                 "tool_name": item.name,
                 "tool_call_id": item.call_id,
+                "content": result_text,
+                "display_type": self._infer_tool_result_display_type(item.name, result_text),
             }
             for item, result_text in zip(auto_exec_calls, auto_exec_results)
         ]
@@ -747,6 +772,46 @@ class MainAgentTurnOrchestrator:
         }
         user_message = {"role": "user", "content": user_text}
         return user_message, assistant_message, tool_message, tool_name, tool_call_id, status
+
+    @staticmethod
+    def _infer_tool_result_display_type(
+        tool_name: str,
+        content: str,
+    ) -> Literal["terminal", "code", "normal_text", "image"]:
+        """根据工具名与结果文本推断前端展示类型。
+
+        逻辑：
+        1. 命中图片 URL/data URI/markdown image 时返回 `image`；
+        2. 命中 shell/terminal 相关工具名时返回 `terminal`；
+        3. 命中代码围栏或代码类工具名时返回 `code`；
+        4. 其余返回 `normal_text`。
+        """
+        final_tool_name = str(tool_name or "").strip().lower()
+        final_content = str(content or "").strip()
+        if not final_content:
+            return "normal_text"
+        image_ext_pattern = r"https?://\S+\.(png|jpg|jpeg|gif|webp|bmp|svg)(\?\S*)?$"
+        if (
+            final_content.startswith("data:image/")
+            or "![](" in final_content
+            or re.search(image_ext_pattern, final_content, flags=re.IGNORECASE) is not None
+        ):
+            return "image"
+        terminal_tool_names = {"bash_run", "shell_run", "terminal_run", "cmd_run", "powershell_run"}
+        if final_tool_name in terminal_tool_names:
+            return "terminal"
+        code_tool_names = {
+            "fs_read",
+            "fs_edit",
+            "fs_write",
+            "python_run",
+            "javascript_run",
+            "typescript_run",
+            "code_run",
+        }
+        if "```" in final_content or final_tool_name in code_tool_names:
+            return "code"
+        return "normal_text"
 
     @staticmethod
     def _stalled_tool_call_specs(ctx: OpenAIConversationContext) -> list[tuple[str, str]]:
