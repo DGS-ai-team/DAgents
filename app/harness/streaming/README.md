@@ -8,12 +8,12 @@
 
 ## 当前 SSE 设计（2026-04）
 
-当前采用 **单连接 SSE + `client_id` 过滤** 的模式：
+当前采用 **单连接 SSE + `client_id` 分桶投递** 的模式：
 
 - 客户端建立 `GET /v1/streams?client_id=...` 长连接。
 - 发送 `POST /v1/messages` 时携带相同 `client_id` 与目标 `session_id`。
 - 服务端内部为每次提交生成 `stream_id`（仅内部关联键），并将后续事件发布到总线。
-- 总线把事件广播给所有全局订阅队列；每个连接按自身 `client_id` 过滤后再下发。
+- 总线仅把事件投递到目标 `client_id` 对应的订阅桶（可选再投递给全量订阅桶）。
 - `done` 事件保留，但 **不**用于断开 SSE；连接只在客户端关闭/网络中断时结束。
 
 ## 关键字段
@@ -43,13 +43,11 @@
 
 ## 不同 `client_id` 的流管理方式
 
-当前并不维护 `client_id -> 生成器` 的全局映射，而是 **连接级队列 + 运行时过滤**：
+当前并不维护 `client_id -> 生成器` 的全局映射，而是 **连接级队列 + `client_id` 分桶**：
 
-1. 每个 `/v1/streams` 连接都会创建一个独立 `queue` 并注册到 `_global_subscribers`。
-2. `publish(...)` 会广播到所有订阅队列。
-3. 每个连接在 `subscribe_all(client_id=...)` 内判断 `item.client_id`：
-   - 相等：下发给该连接；
-   - 不相等：丢弃。
+1. 每个 `/v1/streams` 连接都会创建一个独立 `queue`。
+2. 带 `client_id` 的连接会注册到 `_subscribers_by_client[client_id]`；未传 `client_id` 的连接注册到 `_all_subscribers`。
+3. `publish(...)` 只投递到目标 `client_id` 桶和 `_all_subscribers`，不再全量轮询所有连接。
 4. 连接断开时在 `finally` 中注销对应 queue，避免泄漏。
 
 ## 端到端时序图
