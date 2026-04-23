@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Protocol
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StreamEvent(BaseModel):
@@ -18,12 +18,12 @@ class StreamEvent(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    client_id: str
-    session_id: str
-    type: str
-    seq: int
-    ts: str
-    data: dict[str, Any]
+    client_id: str = Field(description="事件归属的客户端通道 ID。")
+    session_id: str = Field(description="事件所属会话 ID。")
+    type: str = Field(description="事件类型（如 assistant/reasoning/tool_call/done）。")
+    seq: int = Field(description="同一 client_id 维度递增的事件序号。")
+    ts: str = Field(description="事件生成时间（ISO 8601 UTC 字符串）。")
+    data: dict[str, Any] = Field(description="事件业务载荷。")
 
     def to_dict(self) -> dict[str, Any]:
         """转为可序列化字典（供 SSE JSON 编码）。"""
@@ -37,16 +37,8 @@ class EventBus(Protocol):
         """创建事件流并返回内部 `stream_id`。"""
         ...
 
-    def has_stream(self, stream_id: str) -> bool:
-        """判断 `stream_id` 是否存在。"""
-        ...
-
     def publish(self, *, stream_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
         """发布一条事件到指定流并返回标准化事件对象。"""
-        ...
-
-    async def subscribe(self, *, stream_id: str) -> AsyncIterator[StreamEvent]:
-        """订阅指定流，按顺序异步产出事件。"""
         ...
 
     async def subscribe_all(self, *, client_id: str | None = None) -> AsyncIterator[StreamEvent]:
@@ -55,17 +47,13 @@ class EventBus(Protocol):
 
 
 class _RequestStream:
-    """单条流的内存缓冲（非 Pydantic：内含 `asyncio.Queue` 与可变 seq）。"""
+    """单条流的内存元信息（仅保存会话与客户端归属）。"""
 
-    __slots__ = ("session_id", "client_id", "seq", "closed", "history", "queue")
+    __slots__ = ("session_id", "client_id")
 
     def __init__(self, *, session_id: str, client_id: str) -> None:
         self.session_id = session_id
         self.client_id = client_id
-        self.seq = 0
-        self.closed = False
-        self.history: list[StreamEvent] = []
-        self.queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
 
 
 class InMemoryEventBus:
@@ -89,19 +77,14 @@ class InMemoryEventBus:
         self._streams[stream_id] = _RequestStream(session_id=session_id, client_id=client_id)
         return stream_id
 
-    def has_stream(self, stream_id: str) -> bool:
-        """检查事件流是否存在。"""
-        return stream_id in self._streams
-
     def publish(self, *, stream_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
         """发布事件到指定流。
 
         逻辑：
         1. 读取流状态并构造 `StreamEvent`（含当前 `seq` 与 UTC 时间戳）；
-        2. `seq` 自增；
-        3. 写入 `history`（供后续订阅者补发）与 `queue`（供实时消费）；
-        4. 若事件为 `done`，标记流已关闭；
-        5. 返回事件对象。
+        2. 更新 `client_id` 维度序号；
+        3. 广播到全部全局订阅者队列；
+        4. 返回事件对象。
         """
         stream = self._streams[stream_id]
         current_seq = self._client_seq.get(stream.client_id, 0)
@@ -113,33 +96,11 @@ class InMemoryEventBus:
             ts=datetime.now(timezone.utc).isoformat(),
             data=data,
         )
-        stream.seq += 1
         self._client_seq[stream.client_id] = current_seq + 1
-        stream.history.append(event)
-        stream.queue.put_nowait(event)
         # 全局订阅者用于“单通道接收所有 session 事件”的前端模式。
         for subscriber_queue in list(self._global_subscribers):
             subscriber_queue.put_nowait(event)
-        if event_type == "done":
-            stream.closed = True
         return event
-
-    async def subscribe(self, *, stream_id: str) -> AsyncIterator[StreamEvent]:
-        """订阅事件流（先补历史，再读实时队列）。
-
-        逻辑：
-        1. 先顺序输出 `history`，保证后来订阅者能补到已产生事件；
-        2. 再阻塞读取实时 `queue`；
-        3. 读到 `done` 事件后结束迭代。
-        """
-        stream = self._streams[stream_id]
-        for item in stream.history:
-            yield item
-        while True:
-            item = await stream.queue.get()
-            yield item
-            if item.type == "done":
-                break
 
     async def subscribe_all(self, *, client_id: str | None = None) -> AsyncIterator[StreamEvent]:
         """订阅全局事件流（仅实时，不补历史）。
