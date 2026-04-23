@@ -22,3 +22,16 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 frontend/*.tsbuildinfo
 .pnpm-store/
+
+# tauri/windows build artifacts
+frontend/src-tauri/target/
+frontend/src-tauri/gen/
+*.msi
+*.exe
+
+# frontend tool cache & logs
+frontend/.vite/
+pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
