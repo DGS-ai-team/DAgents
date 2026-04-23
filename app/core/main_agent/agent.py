@@ -334,6 +334,7 @@ class MainAgentTurnOrchestrator:
 
         await self._submit_message(
             session_id=env.session_id,
+            client_id=env.client_id,
             content="",
             request_type="tool_result",
             tool_result={
@@ -341,7 +342,6 @@ class MainAgentTurnOrchestrator:
             },
             source="service",
             priority="tool_result",
-            stream_id=env.stream_id,
         )
         ctx.pending_tool_calls.clear()
 
@@ -651,6 +651,7 @@ class MainAgentTurnOrchestrator:
         ctx.pending_tool_calls.clear()
         await self._submit_message(
             session_id=env.session_id,
+            client_id=env.client_id,
             content="",
             request_type="tool_result",
             tool_result={
@@ -658,7 +659,6 @@ class MainAgentTurnOrchestrator:
             },
             source="service",
             priority="tool_result",
-            stream_id=env.stream_id,
         )
 
     @staticmethod

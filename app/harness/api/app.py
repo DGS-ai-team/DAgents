@@ -151,8 +151,8 @@ async def lifespan(app: FastAPI):
     s = get_settings(reload=True)
     bus = InMemoryEventBus()
 
-    async def on_stream_event(stream_id: str, event_type: str, data: dict):
-        bus.publish(stream_id=stream_id, event_type=event_type, data=data)
+    async def on_stream_event(client_id: str, session_id: str, event_type: str, data: dict):
+        bus.publish(client_id=client_id, session_id=session_id, event_type=event_type, data=data)
 
     service = AgentService(max_queue_size=s.max_queue_size, on_stream_event=on_stream_event)
     await service.start()
@@ -245,26 +245,24 @@ def create_app() -> FastAPI:
     @app.post("/v1/messages", response_model=SubmitResult)
     async def submit_message(body: MessageIn) -> SubmitResult:
         service: AgentService = app.state.service
-        bus: InMemoryEventBus = app.state.bus
-        stream_id = bus.create_stream(session_id=body.session_id, client_id=body.client_id)
         try:
             if body.request_type == "resume":
                 await service.submit_resume(
                     session_id=body.session_id,
+                    client_id=body.client_id,
                     resume_value=body.resume_value,
                     source=body.source,
                     priority=body.priority,
-                    stream_id=stream_id,
                 )
             else:
                 if not body.content or not body.content.strip():
                     raise HTTPException(status_code=422, detail="content is required for request_type=message")
                 await service.submit_message(
                     session_id=body.session_id,
+                    client_id=body.client_id,
                     content=body.content,
                     source=body.source,
                     priority=body.priority,
-                    stream_id=stream_id,
                 )
         except HTTPException:
             raise

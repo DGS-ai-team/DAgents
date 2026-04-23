@@ -12,7 +12,7 @@
 
 - 客户端建立 `GET /v1/streams?client_id=...` 长连接。
 - 发送 `POST /v1/messages` 时携带相同 `client_id` 与目标 `session_id`。
-- 服务端内部为每次提交生成 `stream_id`（仅内部关联键），并将后续事件发布到总线。
+- 服务端在处理链路中透传 `client_id + session_id`，并将后续事件发布到总线。
 - 总线仅把事件投递到目标 `client_id` 对应的订阅桶（可选再投递给全量订阅桶）。
 - `done` 事件保留，但 **不**用于断开 SSE；连接只在客户端关闭/网络中断时结束。
 
@@ -39,7 +39,7 @@
 - `session_id`
 - `model`
 
-说明：`stream_id` 是服务端内部事件流关联键，不对外暴露；客户端只需要关注 `session_id + client_id`。
+说明：客户端与服务端统一使用 `session_id + client_id` 作为事件归属键。
 
 ## 不同 `client_id` 的流管理方式
 
@@ -66,12 +66,11 @@ sequenceDiagram
     Note over API,BUS: 建立长连接；done 不断开连接
 
     C->>API: POST /v1/messages {session_id, client_id=cid, ...}
-    API->>BUS: stream_id = create_stream(session_id, client_id)
-    API->>S: submit_message(..., stream_id)
+    API->>S: submit_message(..., client_id, session_id)
 
     S->>R: 处理一轮消息
     R-->>S: AgentEventEnvelope(type, payload)
-    S->>BUS: publish(stream_id, event_type, data)
+    S->>BUS: publish(client_id, session_id, event_type, data)
     BUS-->>API: StreamEvent(client_id,session_id,type,seq,ts,data)
     API-->>C: SSE(event:type, data:json)
 

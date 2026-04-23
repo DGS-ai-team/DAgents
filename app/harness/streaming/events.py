@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Protocol
-from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,74 +32,47 @@ class StreamEvent(BaseModel):
 class EventBus(Protocol):
     """事件总线协议：后续可替换为 Redis 实现。"""
 
-    def create_stream(self, *, session_id: str, client_id: str) -> str:
-        """创建事件流并返回内部 `stream_id`。"""
-        ...
-
-    def publish(self, *, stream_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
-        """发布一条事件到指定流并返回标准化事件对象。"""
+    def publish(self, *, client_id: str, session_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
+        """发布一条事件并返回标准化事件对象。"""
         ...
 
     async def subscribe_all(self, *, client_id: str | None = None) -> AsyncIterator[StreamEvent]:
         """订阅全局事件流，按发布顺序异步产出事件。"""
         ...
 
-
-class _RequestStream:
-    """单条流的内存元信息（仅保存会话与客户端归属）。"""
-
-    __slots__ = ("session_id", "client_id")
-
-    def __init__(self, *, session_id: str, client_id: str) -> None:
-        self.session_id = session_id
-        self.client_id = client_id
-
-
 class InMemoryEventBus:
     """内存事件总线（单进程）。"""
 
     def __init__(self) -> None:
         """初始化内存流容器。"""
-        self._streams: dict[str, _RequestStream] = {}
         # P0 优化：按 client_id 分桶订阅者，publish 时只投递目标桶，避免全量轮询。
         self._subscribers_by_client: dict[str, set[asyncio.Queue[StreamEvent]]] = {}
         # 兼容未指定 client_id 的全量订阅（调试/观测场景）。
         self._all_subscribers: set[asyncio.Queue[StreamEvent]] = set()
         self._client_seq: dict[str, int] = {}
 
-    def create_stream(self, *, session_id: str, client_id: str) -> str:
-        """创建新的事件流。
+    def publish(self, *, client_id: str, session_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
+        """发布事件到指定 `client_id/session_id`。
 
         逻辑：
-        1. 生成 `stream_id`；
-        2. 初始化该流的序号、历史列表与实时队列；
-        3. 写入 `_streams` 并返回 `stream_id`。
-        """
-        stream_id = str(uuid4())
-        self._streams[stream_id] = _RequestStream(session_id=session_id, client_id=client_id)
-        return stream_id
-
-    def publish(self, *, stream_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
-        """发布事件到指定流。
-
-        逻辑：
-        1. 读取流状态并构造 `StreamEvent`（含当前 `seq` 与 UTC 时间戳）；
+        1. 基于 `client_id/session_id` 构造 `StreamEvent`（含当前 `seq` 与 UTC 时间戳）；
         2. 更新 `client_id` 维度序号；
         3. 广播到目标 `client_id` 订阅桶（及全量订阅桶）；
         4. 返回事件对象。
         """
-        stream = self._streams[stream_id]
-        current_seq = self._client_seq.get(stream.client_id, 0)
+        final_client_id = str(client_id or "").strip()
+        final_session_id = str(session_id or "").strip()
+        current_seq = self._client_seq.get(final_client_id, 0)
         event = StreamEvent(
-            client_id=stream.client_id,
-            session_id=stream.session_id,
+            client_id=final_client_id,
+            session_id=final_session_id,
             type=event_type,
             seq=current_seq,
             ts=datetime.now(timezone.utc).isoformat(),
             data=data,
         )
-        self._client_seq[stream.client_id] = current_seq + 1
-        client_subscribers = self._subscribers_by_client.get(stream.client_id, set())
+        self._client_seq[final_client_id] = current_seq + 1
+        client_subscribers = self._subscribers_by_client.get(final_client_id, set())
         for subscriber_queue in list(client_subscribers):
             subscriber_queue.put_nowait(event)
         for subscriber_queue in list(self._all_subscribers):

@@ -36,7 +36,7 @@ class AgentService:
         self,
         *,
         max_queue_size: int = 0,
-        on_stream_event: Callable[[str, str, dict[str, Any]], Awaitable[None]] | None = None,
+        on_stream_event: Callable[[str, str, str, dict[str, Any]], Awaitable[None]] | None = None,
         message_store: SqliteMessageStore | None = None,
     ) -> None:
         """初始化服务状态；不启动任何消费者、不预建 session 队列。
@@ -160,7 +160,7 @@ class AgentService:
             async_tool_result=dict(payload),
             source="async-store",
             priority="tool_result",
-            stream_id=None,
+            client_id=None,
         )
 
     async def run_forever(self) -> None:
@@ -200,7 +200,7 @@ class AgentService:
         tool_result: dict[str, Any] | None = None,
         source: str = "service",
         priority: MessagePriority = "other",
-        stream_id: str | None = None,
+        client_id: str | None = None,
     ) -> None:
         """对外投递入口：按 session 入队一条消息。
 
@@ -238,7 +238,7 @@ class AgentService:
                 async_tool_result=async_tool_result,
                 tool_result=tool_result,
                 source=source,
-                stream_id=stream_id,
+                client_id=client_id,
             ),
             priority=effective_priority,
         )
@@ -250,7 +250,7 @@ class AgentService:
         resume_value: Any,
         source: str = "service",
         priority: MessagePriority = "resume",
-        stream_id: str | None = None,
+        client_id: str | None = None,
     ) -> None:
         """投递 resume 请求：将 `resume_value` 入队并交由消费者触发 `Command(resume=...)`。
 
@@ -266,7 +266,7 @@ class AgentService:
                 request_type="resume",
                 resume_value=resume_value,
                 source=source,
-                stream_id=stream_id,
+                client_id=client_id,
             ),
             priority=priority,
         )
@@ -387,7 +387,7 @@ class AgentService:
         逻辑：
         1. 用 `_map_event_envelope_to_stream` 转为 SSE 事件形态；
         2. 记录统一日志；
-        3. 若存在 `stream_id` 则通过 `_emit_stream_event` 推送给订阅方。
+        3. 若存在 `client_id` 则通过 `_emit_stream_event` 推送给订阅方。
         """
         stream_type, stream_data = self._map_event_envelope_to_stream(
             envelope,
@@ -624,10 +624,10 @@ class AgentService:
     ) -> None:
         if self._on_stream_event is None:
             return
-        # 无 stream_id 时无法关联 HTTP/SSE 订阅方，仅打日志（见 _handle_message 内 _log）。
-        if not env.stream_id:
+        # 无 client_id 时无法关联 HTTP/SSE 订阅方，仅打日志（见 _handle_message 内 _log）。
+        if not env.client_id:
             return
-        await self._on_stream_event(env.stream_id, event_type, data)
+        await self._on_stream_event(env.client_id, env.session_id, event_type, data)
 
     @staticmethod
     def _map_event_envelope_to_stream(

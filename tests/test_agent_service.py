@@ -152,8 +152,8 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
         fake_runtime = FakeRuntime()
         events: list[tuple[str, str, dict]] = []
 
-        async def on_stream_event(stream_id: str, event_type: str, data: dict):
-            events.append((stream_id, event_type, data))
+        async def on_stream_event(client_id: str, session_id: str, event_type: str, data: dict):
+            events.append((client_id, session_id, event_type, data))
 
         service = AgentService(max_queue_size=0, on_stream_event=on_stream_event)
         service._message_store = None
@@ -163,22 +163,23 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
             await service.start()
             await service.submit_message(
                 session_id="s-event",
+                client_id="client-1",
                 content="ping",
                 source="unit-test",
-                stream_id="stream-1",
             )
             await asyncio.sleep(0.1)
             await service.stop()
 
         self.assertTrue(events)
-        self.assertEqual(events[0][0], "stream-1")
-        self.assertEqual(events[0][1], "assistant")
-        self.assertEqual(events[0][2]["meta"]["session_id"], "s-event")
-        self.assertIn("model", events[0][2]["meta"])
-        self.assertEqual(events[1][1], "approval_required")
-        self.assertEqual(events[1][2]["approval_type"], "execute_tool")
-        self.assertEqual(events[1][2]["meta"]["session_id"], "s-event")
-        self.assertEqual(events[-1][1], "done")
+        self.assertEqual(events[0][0], "client-1")
+        self.assertEqual(events[0][1], "s-event")
+        self.assertEqual(events[0][2], "assistant")
+        self.assertEqual(events[0][3]["meta"]["session_id"], "s-event")
+        self.assertIn("model", events[0][3]["meta"])
+        self.assertEqual(events[1][2], "approval_required")
+        self.assertEqual(events[1][3]["approval_type"], "execute_tool")
+        self.assertEqual(events[1][3]["meta"]["session_id"], "s-event")
+        self.assertEqual(events[-1][2], "done")
 
     async def test_human_priority_does_not_auto_cancel_in_flight_turn(self) -> None:
         """仅 human 入队不会打断在途 turn；显式 cancel 后第二条才会执行。"""
@@ -191,10 +192,10 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
             await service.start()
             await service.submit_message(
                 session_id="s-human",
+                client_id="client-h",
                 content="first",
                 source="unit-test",
                 priority="other",
-                stream_id="stream-r1",
             )
             for _ in range(200):
                 if rt.run_turn_calls >= 1:
@@ -203,10 +204,10 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(rt.run_turn_calls, 1)
             await service.submit_message(
                 session_id="s-human",
+                client_id="client-h",
                 content="second",
                 source="unit-test",
                 priority="human",
-                stream_id="stream-r2",
             )
             for _ in range(50):
                 await asyncio.sleep(0.02)
