@@ -53,10 +53,6 @@
 
 - **`fs_read`**、**`fs_write`**、**`fs_edit`**
 
-## `harness/tools/common.py`
-
-- **`placeholder_common_tool`**
-
 ## `harness/queue/message_queue.py`
 
 - **`MessageEnvelope`**（**Pydantic frozen**）、**`MessageQueue[EnvelopeT]`**（`enqueue` / `await receive` / `pause` / `resume` / `stop`；消费者由上层实现）

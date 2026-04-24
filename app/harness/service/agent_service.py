@@ -190,6 +190,39 @@ class AgentService:
             self._session_contexts[sid] = self._load_context_from_store_sync(sid)
         return sid
 
+    async def release_session(self, session_id: str, *, clear_persisted: bool = True) -> bool:
+        """释放指定会话占用的服务端资源（内存 + 可选持久化）。
+
+        逻辑：
+        1. 规范化并校验 `session_id`，空值直接抛 `ValueError`；
+        2. 若该会话当前存在队列/消费者/在途 turn，则复用 `_evict_session_for_capacity` 做统一拆除；
+        3. 否则兜底清理内存映射（避免异常路径残留键）；
+        4. `clear_persisted=True` 且启用 sqlite 时，在线程池调用 `clear_session` 删除持久化行。
+
+        关键分支/边界：
+        - 本方法幂等：会话不存在时也可安全调用；
+        - 正在执行中的 turn 会被取消，取消后的上下文由 `_handle_message` 的取消收口逻辑处理；
+        - 持久化清理失败将向上抛出异常，由 API 层统一转为 400。
+
+        副作用说明：
+        - 可能取消任务、停止队列、删除会话缓存及 sqlite 中的会话记录。
+        """
+        sid = (session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id 不能为空。")
+        existed_in_memory = sid in self._session_queues or sid in self._session_contexts
+        if sid in self._session_queues:
+            await self._evict_session_for_capacity(sid)
+        else:
+            self._session_consumer_tasks.pop(sid, None)
+            self._session_active_handles.pop(sid, None)
+            self._session_contexts.pop(sid, None)
+            self._session_last_activity.pop(sid, None)
+        if clear_persisted and self._message_store is not None:
+            await asyncio.to_thread(self._message_store.clear_session, sid)
+            return True
+        return existed_in_memory
+
     async def submit_message(
         self,
         *,

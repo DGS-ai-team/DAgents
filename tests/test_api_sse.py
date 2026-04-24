@@ -4,7 +4,6 @@ import sys
 import unittest
 from pathlib import Path
 
-from langchain_core.messages import AIMessage
 from fastapi.testclient import TestClient
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -14,15 +13,38 @@ from app.harness.api.app import create_app
 
 
 class ApiSseTestCase(unittest.TestCase):
+    def test_release_session_api(self) -> None:
+        app = create_app()
+        with TestClient(app) as client:
+            create_resp = client.post("/v1/sessions", json={"session_id": "release-test"})
+            self.assertEqual(create_resp.status_code, 200)
+            self.assertEqual(create_resp.json()["session_id"], "release-test")
+            self.assertIn("release-test", app.state.service._session_queues)
+
+            release_resp = client.delete("/v1/sessions/release-test")
+            self.assertEqual(release_resp.status_code, 200)
+            body = release_resp.json()
+            self.assertEqual(body["session_id"], "release-test")
+            self.assertTrue(body["released"])
+            self.assertNotIn("release-test", app.state.service._session_queues)
+            self.assertNotIn("release-test", app.state.service._session_contexts)
+            self.assertNotIn("release-test", app.state.service._session_consumer_tasks)
+
     def test_submit_and_stream_sse(self) -> None:
         app = create_app()
         with TestClient(app) as client:
+            class _FakeAssistantChunk:
+                __slots__ = ("content",)
+
+                def __init__(self, content: str) -> None:
+                    self.content = content
+
             class FakeGraph:
                 async def astream(self, payload, config=None, stream_mode=None):
                     assert isinstance(config, dict)
                     assert isinstance(config.get("configurable"), dict)
                     assert stream_mode == ["messages", "updates"]
-                    yield {"messages": [AIMessage(content="pong")]}
+                    yield {"messages": [_FakeAssistantChunk(content="pong")]}
 
             app.state.service._get_graph = lambda: FakeGraph()  # type: ignore[method-assign]
 

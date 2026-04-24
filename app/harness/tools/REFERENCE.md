@@ -71,7 +71,3 @@
 
 - **`fs_read`**、**`fs_write`**、**`fs_edit`**
 
-## `common.py`
-
-- **`calc_add`**
-

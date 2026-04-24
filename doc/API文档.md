@@ -58,7 +58,21 @@
 
 ---
 
-### 3.3 提交消息 / 恢复执行
+### 3.3 释放会话
+
+- `DELETE /v1/sessions/{session_id}`
+- 路径参数：
+  - `session_id: string`
+- 用途：
+  - 释放服务端该会话的内存资源（队列、消费者、上下文）；
+  - 清理该会话在 sqlite 中的持久化记录（若已启用会话持久化）。
+- 响应体：
+  - `session_id: string`
+  - `released: bool`（幂等语义；已释放或无需释放都会返回 `true`）
+
+---
+
+### 3.4 提交消息 / 恢复执行
 
 - `POST /v1/messages`
 - 请求体字段：
@@ -113,7 +127,7 @@
 
 ---
 
-### 3.4 取消当前推理
+### 3.5 取消当前推理
 
 - `POST /v1/sessions/{session_id}/cancel`
 - 路径参数：
@@ -124,7 +138,7 @@
 
 ---
 
-### 3.5 全局 SSE（推荐前端单连接）
+### 3.6 全局 SSE（推荐前端单连接）
 
 - `GET /v1/streams?client_id=<your_client_id>`
 - 用途：单连接接收同一 `client_id` 下所有 session 的实时事件

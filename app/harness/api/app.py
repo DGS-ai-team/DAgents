@@ -53,6 +53,11 @@ class SessionCreateResult(BaseModel):
     created: bool
 
 
+class SessionReleaseResult(BaseModel):
+    session_id: str
+    released: bool
+
+
 class CancelTurnResult(BaseModel):
     """取消当前推理 turn 的响应（无在途任务时 `cancelled=false`）。"""
 
@@ -241,6 +246,19 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=422, detail="session_id is empty")
         ok = service.cancel_current_turn(sid)
         return CancelTurnResult(session_id=sid, cancelled=ok)
+
+    @app.delete("/v1/sessions/{session_id}", response_model=SessionReleaseResult)
+    async def release_session(session_id: str) -> SessionReleaseResult:
+        """释放指定 session 的服务端资源，并删除该会话持久化记录。"""
+        service: AgentService = app.state.service
+        sid = session_id.strip()
+        if not sid:
+            raise HTTPException(status_code=422, detail="session_id is empty")
+        try:
+            released = await service.release_session(sid, clear_persisted=True)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return SessionReleaseResult(session_id=sid, released=released)
 
     @app.post("/v1/messages", response_model=SubmitResult)
     async def submit_message(body: MessageIn) -> SubmitResult:

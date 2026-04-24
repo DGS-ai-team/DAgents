@@ -83,7 +83,7 @@ def _tool_to_spec(tool_obj: Any) -> OpenAIToolSpec:
     accepts_context = "context" in fn_sig.parameters
 
     def _invoke(args: dict[str, Any], context: OpenAIConversationContext | None = None) -> Any:
-        # langchain StructuredTool.invoke 期望 dict；普通函数支持关键字调用。
+        # 带 `invoke` 的工具对象走统一入口；否则按 Python 关键字展开（可注入 `context`）。
         if getattr(tool_obj, "invoke", None):
             return tool_obj.invoke(args)
         final_kwargs = dict(args)

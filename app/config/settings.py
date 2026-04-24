@@ -201,7 +201,6 @@ class Settings(BaseModel):
 
     # --- 兼容旧变量 ---
     openai_api_key: str = ""
-    langchain_openai_model: str = "gpt-4o-mini"
 
     @classmethod
     def load(cls) -> Self:
@@ -250,7 +249,6 @@ class Settings(BaseModel):
             ),
             agent_session_store_path=_agent_session_store_path(),
             openai_api_key=_env_str("OPENAI_API_KEY"),
-            langchain_openai_model=_env_str("LANGCHAIN_OPENAI_MODEL") or "gpt-4o-mini",
         )
 
 

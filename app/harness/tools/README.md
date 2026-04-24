@@ -10,5 +10,4 @@
 | **`tooling.py`** | 项目内工具装饰器 **`tool`**（统一向工具注入 `OpenAIConversationContext`） |
 | **`async_store.py`** | 异步工具结果仓库：托管后台协程任务，记录 `job_id/status/result/error` |
 | **`openai_tools.py`** | OpenAI tool calling 适配层：将本目录工具转换为 OpenAI tools 规格并执行 |
-| **`common.py`** | 常用工具占位模块（用于你后续新增测试工具） |
 | **`REFERENCE.md`** | 本目录 Python 符号索引 |
