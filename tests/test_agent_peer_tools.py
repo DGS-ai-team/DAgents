@@ -39,12 +39,12 @@ class AgentPeerToolsTestCase(unittest.TestCase):
         get_settings(reload=True)
         _clear_agent_list_cache()
 
-    def test_agent_discover_with_capability_filter(self) -> None:
+    def test_agent_discover_uses_configured_discovery_groups(self) -> None:
         agents = [
             {"agent_id": "a1", "base_url": "http://a1", "discovery_group": ["team-a"], "capabilities_hint": ["code"]},
             {"agent_id": "a2", "base_url": "http://a2", "discovery_group": ["team-a"], "capabilities_hint": ["review"]},
         ]
-        with patch("app.harness.tools.agent_peer._discover_agents_by_groups", return_value=agents):
+        with patch("app.harness.tools.agent_peer._discover_agents_by_groups", return_value=agents) as mocked_discover:
             with patch(
                 "app.harness.tools.agent_peer._attach_agent_card_summary",
                 side_effect=lambda item: {
@@ -59,11 +59,13 @@ class AgentPeerToolsTestCase(unittest.TestCase):
                     },
                 },
             ):
-                raw = agent_discover(discovery_groups=["team-a"], capability_tags=["review"])
+                raw = agent_discover()
         body = json.loads(raw)
-        self.assertEqual(len(body["payload"]["content"]["agents"]), 1)
-        self.assertEqual(body["payload"]["content"]["agents"][0]["agent_id"], "a2")
-        self.assertEqual(body["payload"]["content"]["agents"][0]["agent_card"]["card_payload"]["name"], "a2")
+        self.assertEqual(body["payload"]["content"]["requested_groups"], ["team-a", "team-b"])
+        self.assertEqual(len(body["payload"]["content"]["agents"]), 2)
+        self.assertEqual(body["payload"]["content"]["agents"][1]["agent_id"], "a2")
+        self.assertEqual(body["payload"]["content"]["agents"][1]["agent_card"]["card_payload"]["name"], "a2")
+        mocked_discover.assert_called_once_with(["team-a", "team-b"])
 
     def test_agent_send_message_success(self) -> None:
         target = {"agent_id": "a2", "base_url": "http://a2.local", "discovery_group": ["team-a"]}
@@ -136,7 +138,7 @@ class AgentPeerToolsTestCase(unittest.TestCase):
         ]
         with patch("app.harness.tools.agent_peer._discover_agents_by_groups", return_value=agents):
             with patch("app.harness.tools.agent_peer._attach_agent_card_summary", side_effect=lambda item: item):
-                _ = agent_discover(discovery_groups=["team-a"])
+                _ = agent_discover()
         # 若这里还回源网络，测试应失败；命中缓存则不会触发 side_effect。
         with patch("app.harness.tools.agent_peer._discover_agents_by_groups", side_effect=AssertionError("should not call")):
             target = _resolve_target_agent("a2")
@@ -151,7 +153,7 @@ class AgentPeerToolsTestCase(unittest.TestCase):
         ]
         with patch("app.harness.tools.agent_peer._discover_agents_by_groups", return_value=stale_agents):
             with patch("app.harness.tools.agent_peer._attach_agent_card_summary", side_effect=lambda item: item):
-                _ = agent_discover(discovery_groups=["team-a"])
+                _ = agent_discover()
         with patch("app.harness.tools.agent_peer._is_agent_list_cache_stale", return_value=True):
             with patch("app.harness.tools.agent_peer._discover_agents_by_groups", return_value=fresh_agents) as mocked:
                 target = _resolve_target_agent("a1")

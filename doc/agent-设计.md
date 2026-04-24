@@ -38,7 +38,7 @@ flowchart TD
 - 服务编排：`app/harness/service/agent_service.py`
 - API：`app/harness/api/app.py`
 - CLI：`app/harness/cli/main.py`
-- 工具适配：`app/harness/tools/openai_tools.py`
+- 工具适配：`app/harness/tools/tool.py`
 
 ---
 
@@ -102,7 +102,7 @@ flowchart TD
 - 工具注册由 `get_tools()` 提供，当前主用：
   - `bash_run`
   - `host_platform`
-- `openai_tools.py` 负责：
+- `tool.py` 负责：
   - 从 Python 工具生成 OpenAI tools schema；
   - 建立 `tool_name -> invoke` 映射；
   - 解析 tool arguments。

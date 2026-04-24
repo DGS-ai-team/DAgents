@@ -14,7 +14,7 @@ import httpx
 from app.context.models import OpenAIConversationContext
 from app.config.settings import get_settings
 from app.schemas.agent_peer import AgentPeerError, AgentPeerTask, build_agent_peer_envelope
-from app.harness.tools.tooling import tool
+from app.harness.tools.tool import tool
 
 _DEFAULT_HTTP_TIMEOUT_SECONDS = 15.0
 _AGENT_LIST_CACHE: list[dict[str, Any]] = []
@@ -548,28 +548,24 @@ def _resolve_target_agent(target_agent_id: str) -> dict[str, Any]:
 
 @tool("agent_discover")
 def agent_discover(
-    discovery_groups: list[str],
-    capability_tags: list[str] | None = None,
     context: OpenAIConversationContext | None = None,
 ) -> str:
-    """使用场景：根据 discovery_group 发现可协作 Agent，并附带每个 Agent 的 card 摘要；不用于发送消息本身。
+    """使用场景：发现与当前 Agent 同组的可协作 Agent，并附带每个 Agent 的 card 摘要；不用于发送消息本身。
 
     字段说明：
-    - `discovery_groups`：目标分组列表（必填，至少一项有效值）。
-    - `capability_tags`：能力标签过滤（可选，当前基于 `capabilities_hint` 进行包含匹配）。
+    - 无业务入参：分组范围固定取当前 Agent 配置 `DISCOVERY_GROUPS`。
 
     返回说明：
-    - 成功：返回 JSON 文本，正文包含 `ok/requested_groups/capability_tags/agents`。
+    - 成功：返回 JSON 文本，正文包含 `ok/requested_groups/agents`。
     - 失败：返回 JSON 文本，正文包含失败原因（`ok=false` 与错误信息）。
 
     调用范例：
-    - `agent_discover({"discovery_groups":["team-a"]})`
-    - `agent_discover({"discovery_groups":["team-a","team-b"],"capability_tags":["code","review"]})`
+    - `agent_discover({})`
     """
 
     s = get_settings()
     session_id = _session_id_from_context(context, "discover")
-    groups = _stable_groups(discovery_groups)
+    groups = _stable_groups(s.discovery_groups)
     if not groups:
         return _build_error_envelope_text(
             intent="ask",
@@ -585,15 +581,6 @@ def agent_discover(
         # 发现成功后刷新缓存，后续 `agent_send_message` 可直接命中。
         _cache_agent_list(discovered_agents)
         agents = list(discovered_agents)
-        tags = _stable_groups(capability_tags or [])
-        if tags:
-            # 能力过滤采用“至少命中一个标签”策略，便于快速初筛。
-            filtered: list[dict[str, Any]] = []
-            for item in agents:
-                hints = [str(x).strip() for x in (item.get("capabilities_hint") or []) if str(x).strip()]
-                if any(tag in hints for tag in tags):
-                    filtered.append(item)
-            agents = filtered
         # 在 discover 阶段补齐 card 摘要，避免额外工具往返。
         enriched_agents: list[dict[str, Any]] = []
         for item in agents:
@@ -609,7 +596,6 @@ def agent_discover(
             payload_content={
                 "ok": True,
                 "requested_groups": groups,
-                "capability_tags": tags,
                 "agents": agents,
             },
             payload_content_type="application/json",
@@ -631,7 +617,6 @@ def agent_discover(
 async def agent_send_message(
     target_agent_id: str,
     message: str,
-    require_ack: bool = True,
     context: OpenAIConversationContext | None = None,
 ) -> str:
     """使用场景：向指定 Agent 发起点对点委托请求（异步后台执行）；不用于按分组群发。
@@ -639,7 +624,6 @@ async def agent_send_message(
     字段说明：
     - `target_agent_id`：目标 Agent ID（必填）。
     - `message`：发送给目标 Agent 的消息正文（必填）。
-    - `require_ack`：是否要求目标返回 `accepted=true` 作为入队确认（可选，默认 `true`）。
 
     返回说明：
     - 成功：返回 JSON 文本，正文包含 `ok=true`、目标地址、提交回执与远端 SSE 已输出内容。
@@ -647,7 +631,6 @@ async def agent_send_message(
 
     调用范例：
     - `agent_send_message({"target_agent_id":"agent-b","message":"请总结日报"})`
-    - `agent_send_message({"target_agent_id":"agent-b","message":"继续上次任务","require_ack":false})`
     """
 
     s = get_settings()
@@ -738,7 +721,7 @@ async def agent_send_message(
             if final_delivery_mode == "relay":
                 target_base_url = str(submit.get("target_base_url") or "").strip().rstrip("/")
         accepted = bool(submit.get("accepted", False))
-        if require_ack and not accepted:
+        if not accepted:
             raise ValueError("目标 Agent 未确认入队（accepted=false）")
         stream_text, stream_truncated = await _collect_peer_stream_output(
             base_url=target_base_url,

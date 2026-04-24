@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.context.models import OpenAIConversationContext
-from app.harness.tools.tooling import tool
+from app.harness.tools.tool import tool
 
 DEFAULT_MAX_READ_BYTES = 3000
 DEFAULT_LINE_OFFSET = 1

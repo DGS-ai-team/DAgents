@@ -15,7 +15,7 @@ from app.core.main_agent.agent import MainAgentTurnOrchestrator
 from app.harness.memory.store import SqliteMessageStore
 from app.harness.queue.message_queue import MessageEnvelope, MessagePriority, MessageQueue
 from app.harness.service.interface import AgentEventEnvelope
-from app.harness.tools.openai_tools import build_openai_toolkit
+from app.harness.tools.tool import build_openai_toolkit
 from app.harness.tools.async_store import get_async_tool_result_store
 
 

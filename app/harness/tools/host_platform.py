@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Any
 
 from app.context.models import OpenAIConversationContext
-from app.harness.tools.tooling import tool
+from app.harness.tools.tool import tool
 
 
 class HostOsKind(str, Enum):

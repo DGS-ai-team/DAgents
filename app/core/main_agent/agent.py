@@ -11,6 +11,7 @@ from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext, PendingToolCall, RunTurnPhase
 from app.harness.queue.message_queue import MessageEnvelope
 from app.harness.service.interface import AgentEventEnvelope
+from app.harness.tools.tool import should_require_tool_approval
 from app.schemas.approval import (
     ApprovalRequiredEnvelopePayload,
     ApprovalToolCallsArgs,
@@ -567,7 +568,12 @@ class MainAgentTurnOrchestrator:
             if item is None:
                 continue
             call_args = item.arguments if isinstance(item.arguments, dict) else {}
-            requires_approval = bool(call_args.get("requires_approval", True))
+            # 审批策略统一收敛到工具层入口，便于后续按工具/参数逐步细化规则。
+            requires_approval = should_require_tool_approval(
+                tool_name=item.name,
+                tool_args=call_args,
+                context=ctx,
+            )
             if requires_approval:
                 need_approval_calls.append(item)
             else:

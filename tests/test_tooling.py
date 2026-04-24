@@ -11,7 +11,7 @@ sys.path.insert(0, str(_ROOT))
 
 from app.context.models import OpenAIConversationContext  # noqa: E402
 from app.harness.tools.async_store import AsyncToolResultStore, get_async_tool_result_store  # noqa: E402
-from app.harness.tools.tooling import tool  # noqa: E402
+from app.harness.tools.tool import tool  # noqa: E402
 
 
 class ToolingDecoratorTestCase(unittest.TestCase):

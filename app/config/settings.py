@@ -195,6 +195,8 @@ class Settings(BaseModel):
     agent_peer_delivery_mode: str = "direct"
     agent_peer_stream_timeout_seconds: int = 60
     agent_peer_broadcast_stream_timeout_seconds: int = 20
+    # 全局工具审批模式：always（总是审批）/ never（永不审批）/ rule（按规则函数判断）
+    agent_tool_approval_mode: str = "rule"
 
     # --- 会话消息落盘 ---
     agent_session_store_path: str = ".runtime/memory/session.sqlite3"
@@ -247,6 +249,7 @@ class Settings(BaseModel):
                 "AGENT_PEER_BROADCAST_STREAM_TIMEOUT_SECONDS",
                 20,
             ),
+            agent_tool_approval_mode=_env_str("AGENT_TOOL_APPROVAL_MODE", "rule") or "rule",
             agent_session_store_path=_agent_session_store_path(),
             openai_api_key=_env_str("OPENAI_API_KEY"),
         )

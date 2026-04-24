@@ -10,7 +10,7 @@ from app.context.models import OpenAIConversationContext, PendingToolCall, RunTu
 from app.core.main_agent.model import get_model_config, get_openai_client
 from app.core.main_agent.prompt import get_system_prompt
 from app.harness.service.interface import AgentEventEnvelope
-from app.harness.tools.openai_tools import build_openai_toolkit, parse_tool_arguments
+from app.harness.tools.tool import build_openai_toolkit, parse_tool_arguments
 from app.observability.metrics import record_llm_token_usage, usage_fields_from_openai_usage
 
 

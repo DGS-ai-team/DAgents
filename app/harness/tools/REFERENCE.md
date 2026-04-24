@@ -3,12 +3,13 @@
 ## `tool.py`
 
 - **`get_tools`**
-
-## `tooling.py`
-
 - **`tool`**：项目内工具装饰器，为函数挂载 `name/description` 供注册层读取。
 - **`_decorate_sync_tool`**：同步工具装饰路径，仅注入元数据。
 - **`_decorate_async_tool`**：异步工具装饰路径，提交后台任务并返回 ACK。
+- **`should_require_tool_approval`**：统一审批入口；按全局模式、工具策略与 shell 策略决定是否审批。
+- **`OpenAIToolSpec`**：**Pydantic `BaseModel`（frozen，`arbitrary_types_allowed`）**；工具规格与 `invoke` 绑定。
+- **`build_openai_toolkit`**：构建 OpenAI tools payload 与执行映射。
+- **`parse_tool_arguments`**：解析 tool arguments（JSON 字符串/对象）。
 
 ## `async_store.py`
 
@@ -38,26 +39,14 @@
 
 - **`_clip_text`**：按字符上限裁剪输出文本。
 - **`CommandAstNode`**：**Pydantic `BaseModel`（frozen）**；轻量 AST 节点（解析器、片段原文、命令首词）
-- **`_policy_dir`**：返回策略目录（`SHELL_POLICY_DIR` 或默认 `.agent/policy/shell`）。
-- **`_ensure_policy_files`**：确保三套 shell（bash/cmd/powershell）策略文件存在。
-- **`_read_roots_file`**：从文本名单文件读取命令首词集合。
-- **`_load_policy_sets`**：按 shell 类型加载 `allow/deny` 集合。
 - **`_split_bash_statements`**：按 bash 规则切分命令片段。
 - **`_split_cmd_statements`**：按 cmd 规则切分命令片段。
 - **`_split_powershell_statements`**：按 powershell 规则切分命令片段。
 - **`_extract_root_for_shell`**：按 shell 类型提取命令首词。
 - **`_parse_command_ast`**：将命令解析为轻量 AST 节点列表。
-- **`_validate_command_policy`**：基于文件黑白名单校验命令，并返回待确认命令。
-- **`_confirm_non_whitelist_commands`**：对白名单外命令发起 `interrupt` 人工确认。
 - **`_run_bash_command`**、**`_run_cmd_command`**、**`_run_powershell_command`**：三种 shell 的独立执行方法。
 - **`_run_by_shell_type`**：按 shell 类型分发执行方法。
 - **`bash_run`**：统一入口，支持 `shell_type` 选择执行器并返回结构化结果。
-
-## `openai_tools.py`
-
-- **`OpenAIToolSpec`**：**Pydantic `BaseModel`（frozen，`arbitrary_types_allowed`）**；工具规格与 `invoke` 绑定
-- **`build_openai_toolkit`**：构建 OpenAI tools payload 与执行映射。
-- **`parse_tool_arguments`**：解析 tool arguments（JSON 字符串/对象）。
 
 ## `host_platform.py`
 

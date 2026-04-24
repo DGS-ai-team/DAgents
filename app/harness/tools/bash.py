@@ -5,33 +5,28 @@
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
-from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.host_platform import HostOsKind, detect_host_os
-from app.harness.tools.tooling import tool
+from app.harness.tools.tool import tool
 
 ShellType = Literal["bash", "cmd", "powershell"]
 
 DEFAULT_BASH_TIMEOUT_SECONDS = 30
 MAX_BASH_TIMEOUT_SECONDS = 600
 MAX_BASH_OUTPUT_CHARS = 12000
-DEFAULT_SHELL_POLICY_DIR = ".agent/policy/shell"
-
-
 class CommandAstNode(BaseModel):
     """命令 AST 节点（轻量版）。
 
     逻辑：
     1. 用于承载每个命令片段的原文和首命令词；
     2. `parser` 记录由哪种 shell 解析器得到；
-    3. 上层基于 `root` 做黑白名单判断与审批提示。
+    3. 上层基于 `root` 做审批策略判断。
 
     关键边界：
     - `root` 可能为空串（解析失败或片段无可执行词）；
@@ -59,78 +54,6 @@ def _clip_text(text: str, max_chars: int) -> tuple[str, bool]:
     if len(text) <= max_chars:
         return text, False
     return text[:max_chars], True
-
-
-def _policy_dir() -> Path:
-    """返回策略目录路径。
-
-    逻辑：
-    1. 优先读取 `SHELL_POLICY_DIR`；
-    2. 未设置时使用默认 `.agent/policy/shell`；
-    3. 统一展开为绝对路径。
-    """
-    raw = os.environ.get("SHELL_POLICY_DIR", "").strip()
-    chosen = raw or DEFAULT_SHELL_POLICY_DIR
-    return Path(chosen).expanduser().resolve()
-
-
-def _ensure_policy_files() -> Path:
-    """确保策略目录与 3 套黑白名单文件存在。
-
-    逻辑：
-    1. 创建策略目录；
-    2. 为 `bash/cmd/powershell` 各自创建 `*.allow.txt` 与 `*.deny.txt`（若不存在）；
-    3. 返回策略目录路径。
-
-    副作用：
-    - 可能在文件系统中创建目录与空文件。
-    """
-    d = _policy_dir()
-    d.mkdir(parents=True, exist_ok=True)
-    for shell in ("bash", "cmd", "powershell"):
-        for suffix in ("allow", "deny"):
-            fp = d / f"{shell}.{suffix}.txt"
-            if not fp.exists():
-                fp.write_text("", encoding="utf-8")
-    return d
-
-
-def _read_roots_file(path: Path) -> set[str]:
-    """读取命令首词名单文件并返回集合。
-
-    逻辑：
-    1. 文件不存在时返回空集合；
-    2. 按行读取 UTF-8 内容；
-    3. 忽略空行和 `#` 注释行；
-    4. 标准化为小写集合。
-    """
-    if not path.is_file():
-        return set()
-    roots: set[str] = set()
-    text = path.read_text(encoding="utf-8", errors="replace")
-    for line in text.splitlines():
-        s = line.strip()
-        if not s or s.startswith("#"):
-            continue
-        roots.add(s.lower())
-    return roots
-
-
-def _load_policy_sets(shell_type: ShellType) -> tuple[set[str], set[str]]:
-    """按 shell 类型加载 allow/deny 集合。
-
-    逻辑：
-    1. 确保策略目录和对应文件存在；
-    2. 读取 `<shell>.allow.txt` 与 `<shell>.deny.txt`；
-    3. 返回 `(allow_set, deny_set)`。
-
-    Args:
-        shell_type: 目标 shell（bash/cmd/powershell）。
-    """
-    d = _ensure_policy_files()
-    allow_set = _read_roots_file(d / f"{shell_type}.allow.txt")
-    deny_set = _read_roots_file(d / f"{shell_type}.deny.txt")
-    return allow_set, deny_set
 
 
 def _split_bash_statements(command: str) -> list[str]:
@@ -332,7 +255,7 @@ def _parse_command_ast(command: str, shell_type: ShellType) -> list[CommandAstNo
     3. 组装 `CommandAstNode` 列表并返回。
 
     关键边界：
-    - root 可能为空，后续策略校验会拒绝。
+    - root 可能为空，调用方需自行决定如何处理。
     """
     if shell_type == "bash":
         parts = _split_bash_statements(command)
@@ -344,53 +267,6 @@ def _parse_command_ast(command: str, shell_type: ShellType) -> list[CommandAstNo
         CommandAstNode(parser=shell_type, raw=part, root=_extract_root_for_shell(part, shell_type))
         for part in parts
     ]
-
-
-def _validate_command_policy(command: str, shell_type: ShellType) -> tuple[Optional[str], list[str]]:
-    """执行策略校验，返回阻断错误和待确认命令。
-
-    逻辑：
-    1. 解析指定 shell 的 AST 节点；
-    2. 加载该 shell 的 allow/deny 集合；
-    3. 命中 deny 立即拒绝；
-    4. 不在 allow 的命令加入待确认列表。
-
-    Returns:
-        `(error, need_confirm_roots)`。
-    """
-    nodes = _parse_command_ast(command, shell_type)
-    if not nodes:
-        return "命令为空或仅包含分隔符。", []
-    allow_set, deny_set = _load_policy_sets(shell_type)
-    need_confirm: list[str] = []
-    for node in nodes:
-        if not node.root:
-            return f"无法识别命令片段：{node.raw!r}", []
-        if node.root in deny_set:
-            return f"命令被黑名单拦截：{node.root!r}", []
-        if node.root not in allow_set and node.root not in need_confirm:
-            need_confirm.append(node.root)
-    return None, need_confirm
-
-
-def _confirm_non_whitelist_commands(
-    command: str,
-    cwd: str,
-    timeout_seconds: int,
-    shell_type: ShellType,
-    roots: list[str],
-) -> bool:
-    """对白名单外命令做放行判断（审批由 runtime 统一处理）。
-
-    逻辑：
-    1. roots 为空则直接放行；
-    2. roots 非空时也返回 True，由上层 runtime 的统一审批流程负责拦截与确认。
-
-    关键边界：
-    - 在 OpenAI 直连运行时中，工具层不再直接触发 `interrupt`，避免多处审批分支。
-    """
-    del command, cwd, timeout_seconds, shell_type
-    return True
 
 
 def _run_bash_command(command: str, cwd: str, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
@@ -525,7 +401,7 @@ def bash_run(
     返回说明：
     - 成功或非零退出：返回结构化文本，含 `status`、`exit_code`、`stdout`、`stderr`。
     - 失败：返回 `ERROR: ...`；超时返回 `status=TIMEOUT`。
-    - 白名单外命令：由 runtime 上层统一审批，本工具只执行策略解析与命令执行。
+    - 是否审批：由 `tool.should_require_tool_approval` 统一判断，本工具只负责命令执行。
 
     调用范例：
     - `bash_run({"command":"git status"})`
@@ -548,18 +424,6 @@ def bash_run(
         resolved_shell_type = _resolve_shell_type(shell_type)
         if resolved_shell_type not in ("bash", "cmd", "powershell"):
             return f"ERROR: 不支持的 shell_type：{shell_type!r}"
-
-        policy_error, need_confirm_roots = _validate_command_policy(cmd, resolved_shell_type)
-        if policy_error:
-            return f"ERROR: {policy_error}"
-        if not _confirm_non_whitelist_commands(
-            command=cmd,
-            cwd=str(run_cwd),
-            timeout_seconds=timeout,
-            shell_type=resolved_shell_type,
-            roots=need_confirm_roots,
-        ):
-            return "用户拒绝执行工具调用"
 
         try:
             completed = _run_by_shell_type(resolved_shell_type, cmd, str(run_cwd), timeout)
