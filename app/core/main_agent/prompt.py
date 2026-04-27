@@ -6,6 +6,15 @@ import sys
 from pathlib import Path
 from typing import Tuple
 
+from app.config.settings import get_settings
+from app.context.models import OpenAIConversationContext
+from app.harness.skills.skills import (
+    list_enabled_skill_metadata,
+    render_skill_metadata_prompt,
+    render_skills_prompt,
+    select_skill_by_id,
+)
+
 # 记忆文件缓存：key -> (content, mtime)，文件未修改时直接返回缓存，避免重复读盘
 _memory_file_cache: dict[Tuple[str, ...], Tuple[str, float]] = {}
 
@@ -107,25 +116,29 @@ def _current_os_kind() -> str:
     return "other"
 
 
-def get_system_prompt(context: str | None = None) -> str:
+def get_system_prompt(
+    context: OpenAIConversationContext,
+) -> str:
     """动态系统提示词：静态规则 + 侧车 Markdown + 可选运行时上下文 + OS。
 
     逻辑：
     1. 获取静态系统提示词并去掉尾部空白；
     2. 读取仓库根下 **`prompt_context/soul.md`**，非空则追加 **`## 智能体设定`** 与正文；
     3. 读取仓库根下 **`prompt_context/user.md`**，非空则追加 **`## 用户偏好`** 与正文；
-    4. 若 **`context`** 非空（`strip()` 后），追加 **`## 以下是会话/任务上下文`**；
-    5. 读取当前运行环境 OS 类型，追加 **`## 当前运行环境为`**；
-    6. 读取 **`prompt_context/custom.md`**，非空则追加 **`## 自定义补充`**（**整条 system prompt 最末**）。
+    4. 当启用 skills 功能时，先常驻追加 skills 元数据清单；
+    5. 再按 `context.loaded_skills` 追加技能正文片段；
+    6. 读取当前运行环境 OS 类型，追加 **`## 当前运行环境为`**；
+    7. 读取 **`prompt_context/custom.md`**，非空则追加 **`## 自定义补充`**（**整条 system prompt 最末**）。
 
     关键边界：
     - 侧车文件不存在或为空：跳过该节，不报错；
     - 侧车内容按 **mtime** 缓存于 **`_prompt_context_file_cache`**；
-    - **`context`** 应由调用方自行脱敏/截断；
-    - OS 信息基于当前 Python 进程。
+    - OS 信息基于当前 Python 进程；
+    - skills 注入受配置项控制，未加载时不追加正文片段；
+    - skills 元数据清单在启用时常驻注入。
 
     Args:
-        context: 可选运行时补充（如本轮会话摘要），拼在 **`user.md`** 之后、**运行环境**与 **`custom.md`** 之前。
+        context: 会话上下文（必填）；用于读取已加载技能（`loaded_skills`）。
 
     副作用：
     - 可能读盘并更新 **`_prompt_context_file_cache`**。
@@ -137,12 +150,55 @@ def get_system_prompt(context: str | None = None) -> str:
         parts.append(f"\n\n## 以下是你的设定：\n\n{soul}\n")
     user = _read_prompt_context_markdown(USER_MD)
     if user:
-        parts.append(f"\n\n## 以下是用户的信息以及偏好：\n\n{user}\n")
-    if context is not None and context.strip():
-        parts.append(f"\n\n## 以下是会话/任务上下文：\n{context.strip()}\n")
+        parts.append(
+            f"\n\n## 以下是用户信息与偏好：\n\n{user}\n"
+        )
+    settings = get_settings()
+    if settings.agent_skills_enabled:
+        skill_meta_prompt = render_skill_metadata_prompt(list_enabled_skill_metadata())
+        if skill_meta_prompt:
+            parts.append(
+                f"\n\n## 以下是可用技能的目录：\n\n{skill_meta_prompt}\n"
+            )
+        else:
+            pass
+        max_skills = max(0, int(settings.agent_skills_max_in_prompt))
+        selected_skills = []
+        loaded_skill_ids = [
+            str(item.get("id", "") or "")
+            for item in context.loaded_skills
+            if isinstance(item, dict)
+        ]
+        seen: set[str] = set()
+        for raw_id in loaded_skill_ids:
+            skill_id = str(raw_id or "").strip()
+            if not skill_id:
+                continue
+            if skill_id in seen:
+                continue
+            seen.add(skill_id)
+            skill = select_skill_by_id(skill_id)
+            if skill is None:
+                continue
+            selected_skills.append(skill)
+            if len(selected_skills) >= max_skills:
+                break
+        skills_prompt = render_skills_prompt(selected_skills)
+        if skills_prompt:
+            parts.append(
+                f"\n\n## 以下是当前会话已加载技能的具体执行规则：\n\n{skills_prompt}\n"
+            )
+        else:
+            pass
+    else:
+        pass
     os_kind = _current_os_kind()
-    parts.append(f"\n\n## 当前运行环境为：{os_kind}\n")
+    parts.append(
+        f"\n\n## 以下是当前运行环境：\n\n{os_kind}\n"
+    )
     custom = _read_prompt_context_markdown(CUSTOM_MD)
     if custom:
-        parts.append(f"\n\n## 自定义补充\n\n{custom}\n")
+        parts.append(
+            f"\n\n## 以下是项目或部署侧追加的临时/专项指令：\n\n{custom}\n"
+        )
     return "".join(parts)

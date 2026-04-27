@@ -60,3 +60,7 @@
 
 - **`fs_read`**、**`fs_write`**、**`fs_edit`**
 
+## `skills.py`
+
+- **`load_skills`**：按 `skill_ids` 数组加载会话技能；返回 `loaded_skills` 与 `available_skills` 元数据 JSON
+

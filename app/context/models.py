@@ -101,6 +101,10 @@ class ConversationContext(BaseModel):
         description="当前 `openai_messages` 的粗略 token 总量（由运行时维护）。",
     )
     tool_loop_count: int = Field(default=0, description="跨回合累计工具循环计数。")
+    loaded_skills: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="已加载技能列表（`id/name/description`），用于持久化当前会话技能态。",
+    )
 
     def add_turn(self, *, role: str, content: str, meta: dict[str, Any] | None = None) -> None:
         """向 `history` 末尾追加一条消息（仅内存，不写库）。"""
@@ -115,6 +119,7 @@ class ConversationContext(BaseModel):
         list[dict[str, Any]],
         list[dict[str, Any]],
         int,
+        list[dict[str, str]],
     ]:
         """解析为 OpenAI runtime 使用的常驻字段。"""
         messages: list[dict[str, Any]] = []
@@ -139,10 +144,21 @@ class ConversationContext(BaseModel):
                     "arguments": dict(args),
                 }
             )
+        loaded_skills: list[dict[str, str]] = []
+        for item in self.loaded_skills:
+            if not isinstance(item, dict):
+                continue
+            skill_id = str(item.get("id", "") or "").strip()
+            name = str(item.get("name", "") or "").strip()
+            description = str(item.get("description", "") or "").strip()
+            if not skill_id:
+                continue
+            loaded_skills.append({"id": skill_id, "name": name, "description": description})
         return (
             messages,
             pending_specs,
             max(0, int(self.messages_total_tokens)),
+            loaded_skills,
         )
 
     @classmethod
@@ -154,6 +170,7 @@ class ConversationContext(BaseModel):
         run_turn_phase: RunTurnPhase = RunTurnPhase.IDLE,
         messages_total_tokens: int = 0,
         tool_loop_count: int = 0,
+        loaded_skills: list[dict[str, str]] | None = None,
     ) -> 'ConversationContext':
         """由 runtime 内存态组装可写入 sqlite 的 `ConversationContext`。"""
         history = _openai_messages_to_message_records(openai_messages)
@@ -164,6 +181,7 @@ class ConversationContext(BaseModel):
             run_turn_phase=run_turn_phase,
             messages_total_tokens=max(0, int(messages_total_tokens)),
             tool_loop_count=max(0, int(tool_loop_count)),
+            loaded_skills=_json_safe_deep(list(loaded_skills or [])),
         )
 
 
@@ -197,6 +215,10 @@ class OpenAIConversationContext(BaseModel):
         description="当前 `messages` 的粗略 token 总量（由运行时维护）。",
     )
     tool_loop_count: int = Field(default=0, description="跨 run_turn 累积的工具循环计数。")
+    loaded_skills: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="当前会话已加载技能列表（`id/name/description`）。",
+    )
     assistant_stream_buffer: str = Field(default="", repr=False, description="流式输出增量缓冲。")
 
     def normalized_run_turn_phase_for_persist(self) -> RunTurnPhase:
@@ -211,7 +233,7 @@ class OpenAIConversationContext(BaseModel):
     @classmethod
     def from_conversation_context(cls, cc: ConversationContext) -> 'OpenAIConversationContext':
         """从持久化态 `ConversationContext` 还原为推理上下文。"""
-        messages, pending_specs, total_tokens = cc.unpack_for_openai_runtime()
+        messages, pending_specs, total_tokens, loaded_skills = cc.unpack_for_openai_runtime()
         pending = [
             PendingToolCall(
                 call_id=str(s["call_id"]),
@@ -227,6 +249,7 @@ class OpenAIConversationContext(BaseModel):
             run_turn_phase=cc.run_turn_phase,
             messages_total_tokens=max(0, int(total_tokens)),
             tool_loop_count=max(0, int(cc.tool_loop_count)),
+            loaded_skills=list(loaded_skills),
         )
 
     def to_conversation_context(self) -> ConversationContext:
@@ -240,4 +263,5 @@ class OpenAIConversationContext(BaseModel):
             run_turn_phase=self.normalized_run_turn_phase_for_persist(),
             messages_total_tokens=max(0, int(self.messages_total_tokens)),
             tool_loop_count=max(0, int(self.tool_loop_count)),
+            loaded_skills=list(self.loaded_skills),
         )

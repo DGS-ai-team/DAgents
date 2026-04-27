@@ -171,6 +171,12 @@ class Settings(BaseModel):
     summary_compression_blocking_trigger_tokens: int = 8000
     # 流式 completions 是否请求末尾 chunk 携带 usage（部分兼容网关不支持 `stream_options`）
     llm_stream_include_usage: bool = True
+    # 是否启用 skills 动态注入 system prompt
+    agent_skills_enabled: bool = True
+    # skills 根目录（默认仓库根目录下 `skills/`）
+    agent_skills_dir: str = "skills"
+    # 单轮最多注入多少个匹配 skill
+    agent_skills_max_in_prompt: int = 3
 
     # --- 可观测性 ---
     metrics_enabled: bool = True
@@ -227,6 +233,9 @@ class Settings(BaseModel):
                 8000,
             ),
             llm_stream_include_usage=_env_bool("LLM_STREAM_INCLUDE_USAGE", True),
+            agent_skills_enabled=_env_bool("AGENT_SKILLS_ENABLED", True),
+            agent_skills_dir=_env_str("AGENT_SKILLS_DIR", "skills") or "skills",
+            agent_skills_max_in_prompt=_env_int("AGENT_SKILLS_MAX_IN_PROMPT", 3),
             metrics_enabled=_env_bool("METRICS_ENABLED", True),
             max_queue_size=_env_int("MAX_QUEUE_SIZE", 0),
             agent_max_active_session_queues=_env_int("AGENT_MAX_ACTIVE_SESSION_QUEUES", 3),

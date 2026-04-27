@@ -20,7 +20,7 @@
 - **`_read_prompt_context_markdown`**：读该目录下 **`.md`**（mtime 缓存）
 - **`get_static_system_prompt`**
 - **`_current_os_kind`**
-- **`get_system_prompt(context=None)`**：静态 + **`soul.md`** + **`user.md`** + 可选 **`context`** + 运行环境 + **`custom.md`**（**`## 自定义补充`**，最末）
+- **`get_system_prompt(context)`**：静态 + **`soul.md`** + **`user.md`** +（从 `context.loaded_skills` 读取）skills 元数据/正文 + 运行环境 + **`custom.md`**（**`## 自定义补充`**，最末）
 - **`read_memory_file_cached`**
 
 侧车目录 **`prompt_context/`** 不在本包内，见仓库根目录 **`prompt_context/README.md`**。

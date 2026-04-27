@@ -31,7 +31,6 @@ class OpenAIImplicitReActRuntime:
         settings = get_settings()
         self._client = get_openai_client()
         self._model_cfg = get_model_config()
-        self._system_prompt = get_system_prompt()
         self._tools_payload, _ = build_openai_toolkit()
         self._max_tool_loops = max(1, int(settings.llm_max_tool_loops))
         self._stream_include_usage = bool(settings.llm_stream_include_usage)
@@ -128,13 +127,18 @@ class OpenAIImplicitReActRuntime:
         # 每次 run_turn 最多消耗一次“模型轮次预算”；若中途因审批中断，该计数留给后续回合继续累计。
         ctx.tool_loop_count += 1
         ctx.run_turn_phase = RunTurnPhase.MODEL_STREAMING
+        if request_type == "human_message":
+            # human_message 阶段不再按查询自动选技能；仅消费上下文中已加载 skills。
+            dynamic_system_prompt = get_system_prompt(context=ctx)
+        else:
+            dynamic_system_prompt = get_system_prompt(context=ctx)
         model_msg = None
         latest_total_tokens: int | None = None
         ctx.assistant_stream_buffer = ""
         # 流式阶段：同步写入 ctx.assistant_stream_buffer，供上层 Cancelled 后 flush 为合法 assistant 行。
         try:
             # tool_call_delta 由 _request_model_stream 产出但此处不消费；权威 tool_calls 仅来自 final 整包。
-            async for model_event in self._request_model_stream(ctx.messages):
+            async for model_event in self._request_model_stream(ctx.messages, dynamic_system_prompt):
                 event_kind = str(model_event.get("kind") or "")
                 if event_kind == "assistant_delta":
                     delta_text = str(model_event.get("text", ""))
@@ -222,7 +226,11 @@ class OpenAIImplicitReActRuntime:
         ctx.run_turn_phase = RunTurnPhase.IDLE
         yield self._ev("done", {})
 
-    async def _request_model_stream(self, messages: list[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
+    async def _request_model_stream(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+    ) -> AsyncIterator[dict[str, Any]]:
         """发起一次流式模型请求，逐步产出 delta 并在末尾给出最终消息对象。
 
         逻辑：
@@ -242,7 +250,7 @@ class OpenAIImplicitReActRuntime:
         """
         kwargs: dict[str, Any] = {
             "model": self._model_cfg["model"],
-            "messages": [{"role": "system", "content": self._system_prompt}, *messages],
+            "messages": [{"role": "system", "content": system_prompt}, *messages],
             "tools": self._tools_payload,
             "temperature": self._model_cfg["temperature"],
             "stream": True,
