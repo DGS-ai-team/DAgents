@@ -11,10 +11,10 @@ FastAPI 接入层：统一对外入口（UI/CLI 等客户端通过 HTTP 调用�
 - 推荐以后端 OpenAPI 作为前后端契约单一来源。
 - 在仓库根目录执行：
   - `python export_openapi_schema.py`
-- 默认导出到：
-  - `frontend/openapi.json`
-- 在 `frontend/` 目录生成前端类型：
+- 建议导出到前端仓库：
+  - `python export_openapi_schema.py --output /path/to/frontend-repo/openapi.json`
+- 在前端仓库目录生成前端类型：
   - `pnpm gen:types`
 - 生成文件：
-  - `frontend/src/api/types.ts`
+  - `src/api/types.ts`
 

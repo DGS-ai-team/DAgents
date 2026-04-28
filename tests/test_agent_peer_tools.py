@@ -14,11 +14,13 @@ sys.path.insert(0, str(_ROOT))
 from app.config.settings import get_settings  # noqa: E402
 from app.context.models import OpenAIConversationContext  # noqa: E402
 from app.harness.tools.agent_peer import (  # noqa: E402
+    PeerStreamSummary,
     _cache_agent_list,
     _clear_agent_list_cache,
     _is_agent_list_cache_stale,
     _resolve_target_agent,
     agent_discover,
+    agent_peer_approve_tools,
     agent_send_message,
 )
 
@@ -75,13 +77,14 @@ class AgentPeerToolsTestCase(unittest.TestCase):
         fake_client_ctx = MagicMock()
         fake_client = fake_client_ctx.__aenter__.return_value
         fake_client.post = AsyncMock(return_value=fake_resp)
+        fake_summary = PeerStreamSummary(text="assistant: hello", final_state="succeeded")
 
         async def _run() -> None:
             with patch("app.harness.tools.agent_peer._resolve_target_agent", return_value=target):
                 with patch("app.harness.tools.agent_peer.httpx.AsyncClient", return_value=fake_client_ctx):
                     with patch(
-                        "app.harness.tools.agent_peer._collect_peer_stream_output",
-                        new=AsyncMock(return_value=("assistant: hello", False)),
+                        "app.harness.tools.agent_peer._collect_peer_stream_summary",
+                        new=AsyncMock(return_value=fake_summary),
                     ):
                         raw = await agent_send_message.__wrapped__(  # type: ignore[attr-defined]
                             target_agent_id="a2",
@@ -90,8 +93,55 @@ class AgentPeerToolsTestCase(unittest.TestCase):
                         )
             body = json.loads(raw)
             self.assertTrue(str(body["task"]["task_id"]).startswith("peer-trace-"))
-            self.assertEqual(body["task"]["state"], "queued")
+            self.assertEqual(body["task"]["state"], "succeeded")
             self.assertEqual(body["payload"]["content"]["stream_output"], "assistant: hello")
+            # 对端会话独立命名，避免复用调用方 session_id。
+            self.assertTrue(str(body["payload"]["content"]["target_session_id"]).startswith("peer-s-peer-a2-"))
+            self.assertEqual(body["payload"]["content"]["final_state"], "succeeded")
+
+        asyncio.run(_run())
+
+    def test_agent_send_message_surfaces_pending_approval(self) -> None:
+        target = {"agent_id": "a2", "base_url": "http://a2.local", "discovery_group": ["team-a"]}
+        fake_resp = MagicMock()
+        fake_resp.json.return_value = {"accepted": True}
+        fake_resp.raise_for_status.return_value = None
+        fake_client_ctx = MagicMock()
+        fake_client = fake_client_ctx.__aenter__.return_value
+        fake_client.post = AsyncMock(return_value=fake_resp)
+        fake_summary = PeerStreamSummary(
+            text="",
+            approvals=[
+                {
+                    "target_session_id": "peer-foo",
+                    "approval_id": "appr-1",
+                    "approval_type": "execute_tool",
+                    "content": "等待审批",
+                    "description": "OpenAI tool calling 审批",
+                    "approval_args": {"tool_calls": [{"id": "call_a", "name": "bash_run", "arguments": {}}]},
+                }
+            ],
+            final_state="requires_input",
+        )
+
+        async def _run() -> None:
+            with patch("app.harness.tools.agent_peer._resolve_target_agent", return_value=target):
+                with patch("app.harness.tools.agent_peer.httpx.AsyncClient", return_value=fake_client_ctx):
+                    with patch(
+                        "app.harness.tools.agent_peer._collect_peer_stream_summary",
+                        new=AsyncMock(return_value=fake_summary),
+                    ):
+                        raw = await agent_send_message.__wrapped__(  # type: ignore[attr-defined]
+                            target_agent_id="a2",
+                            message="hello",
+                            context=OpenAIConversationContext(session_id="s-peer"),
+                        )
+            body = json.loads(raw)
+            self.assertEqual(body["task"]["state"], "requires_input")
+            approvals = body["payload"]["content"]["approvals"]
+            self.assertEqual(len(approvals), 1)
+            self.assertEqual(approvals[0]["approval_id"], "appr-1")
+            self.assertEqual(approvals[0]["approval_args"]["tool_calls"][0]["id"], "call_a")
 
         asyncio.run(_run())
 
@@ -110,14 +160,15 @@ class AgentPeerToolsTestCase(unittest.TestCase):
         fake_client_ctx = MagicMock()
         fake_client = fake_client_ctx.__aenter__.return_value
         fake_client.post = AsyncMock(return_value=fake_resp)
+        fake_summary = PeerStreamSummary(text="relay: ok", final_state="succeeded")
 
         async def _run() -> None:
             with patch("app.harness.tools.agent_peer._resolve_target_agent", side_effect=AssertionError("should not call")):
                 with patch("app.harness.tools.agent_peer._require_registry_url", return_value="http://registry.local"):
                     with patch("app.harness.tools.agent_peer.httpx.AsyncClient", return_value=fake_client_ctx):
                         with patch(
-                            "app.harness.tools.agent_peer._collect_peer_stream_output",
-                            new=AsyncMock(return_value=("relay: ok", False)),
+                            "app.harness.tools.agent_peer._collect_peer_stream_summary",
+                            new=AsyncMock(return_value=fake_summary),
                         ):
                             raw = await agent_send_message.__wrapped__(  # type: ignore[attr-defined]
                                 target_agent_id="a2",
@@ -126,8 +177,70 @@ class AgentPeerToolsTestCase(unittest.TestCase):
                             )
             body = json.loads(raw)
             self.assertTrue(str(body["task"]["task_id"]).startswith("peer-trace-"))
+            self.assertEqual(body["task"]["state"], "succeeded")
             self.assertEqual(body["payload"]["content"]["target_base_url"], "http://relay-a2.local")
             self.assertEqual(body["payload"]["content"]["stream_output"], "relay: ok")
+
+        asyncio.run(_run())
+
+    def test_agent_peer_approve_tools_approve(self) -> None:
+        target = {"agent_id": "a2", "base_url": "http://a2.local", "discovery_group": ["team-a"]}
+        fake_resp = MagicMock()
+        fake_resp.json.return_value = {"accepted": True}
+        fake_resp.raise_for_status.return_value = None
+        fake_client_ctx = MagicMock()
+        fake_client = fake_client_ctx.__aenter__.return_value
+        fake_client.post = AsyncMock(return_value=fake_resp)
+        fake_summary = PeerStreamSummary(text="tool result: ok", final_state="succeeded")
+
+        async def _run() -> None:
+            with patch("app.harness.tools.agent_peer._resolve_target_agent", return_value=target):
+                with patch("app.harness.tools.agent_peer.httpx.AsyncClient", return_value=fake_client_ctx):
+                    with patch(
+                        "app.harness.tools.agent_peer._collect_peer_stream_summary",
+                        new=AsyncMock(return_value=fake_summary),
+                    ):
+                        raw = await agent_peer_approve_tools.__wrapped__(  # type: ignore[attr-defined]
+                            target_agent_id="a2",
+                            target_session_id="peer-foo",
+                            decision="approve",
+                            context=OpenAIConversationContext(session_id="s-peer"),
+                        )
+            body = json.loads(raw)
+            self.assertEqual(body["task"]["state"], "succeeded")
+            self.assertEqual(body["payload"]["content"]["decision"], {"type": "approve"})
+            # 校验真的对目标发了一次 resume 请求。
+            posted_kwargs = fake_client.post.await_args_list[0].kwargs
+            self.assertEqual(posted_kwargs["json"]["request_type"], "resume")
+            self.assertEqual(posted_kwargs["json"]["resume_value"], {"type": "approve"})
+
+        asyncio.run(_run())
+
+    def test_agent_peer_approve_tools_selection_validation(self) -> None:
+        async def _run() -> None:
+            raw = await agent_peer_approve_tools.__wrapped__(  # type: ignore[attr-defined]
+                target_agent_id="a2",
+                target_session_id="peer-foo",
+                decision="selection",
+                approved_call_ids=["call_a"],
+                rejected_call_ids=["call_a"],
+                context=OpenAIConversationContext(session_id="s-peer"),
+            )
+            body = json.loads(raw)
+            self.assertEqual(body["error"]["code"], "invalid_decision")
+
+        asyncio.run(_run())
+
+    def test_agent_peer_approve_tools_unknown_decision(self) -> None:
+        async def _run() -> None:
+            raw = await agent_peer_approve_tools.__wrapped__(  # type: ignore[attr-defined]
+                target_agent_id="a2",
+                target_session_id="peer-foo",
+                decision="maybe",
+                context=OpenAIConversationContext(session_id="s-peer"),
+            )
+            body = json.loads(raw)
+            self.assertEqual(body["error"]["code"], "invalid_decision")
 
         asyncio.run(_run())
 

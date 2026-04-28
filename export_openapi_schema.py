@@ -3,7 +3,7 @@
 
 用法（在 DAgents 根目录）:
   python export_openapi_schema.py
-  python export_openapi_schema.py --output frontend/openapi.json
+  python export_openapi_schema.py --output /path/to/frontend-repo/openapi.json
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
 
     逻辑：
     1. 定义输出文件路径参数；
-    2. 提供默认输出到 `frontend/openapi.json`；
+    2. 提供默认输出到仓库根 `openapi.json`；
     3. 返回参数供导出逻辑使用。
 
     关键分支/边界：
@@ -39,8 +39,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export OpenAPI schema for frontend")
     parser.add_argument(
         "--output",
-        default="frontend/openapi.json",
-        help="导出文件路径（默认 frontend/openapi.json）",
+        default="openapi.json",
+        help="导出文件路径（默认 openapi.json）",
     )
     return parser.parse_args()
 

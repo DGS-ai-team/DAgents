@@ -1,16 +1,14 @@
 """
-本地一键启动开发栈（API + Register Center + Frontend）。
+本地一键启动开发栈（API + Register Center）。
 
 用法（在 DAgents 根目录）:
   python run_dev_stack.py
   python run_dev_stack.py --no-register
-  python run_dev_stack.py --frontend-cmd npm
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import shlex
 import subprocess
 import sys
@@ -52,13 +50,12 @@ def parse_args() -> argparse.Namespace:
     """解析命令行参数。
 
     逻辑：
-    1. 定义需要启动的进程开关（api/register/frontend）；
-    2. 定义前端包管理命令（pnpm/npm）；
-    3. 返回解析后的命名空间供主流程使用。
+    1. 定义需要启动的进程开关（api/register）；
+    2. 返回解析后的命名空间供主流程使用。
 
     关键分支/边界：
     - 默认启动全部组件；
-    - `--frontend-cmd` 仅允许 pnpm 或 npm，避免拼写导致运行失败。
+    - 当前版本不再负责前端进程管理。
 
     与外部交互：
     - 读取命令行参数。
@@ -77,80 +74,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="不启动 Register Center",
     )
-    parser.add_argument(
-        "--no-frontend",
-        action="store_true",
-        help="不启动 Frontend dev server",
-    )
-    parser.add_argument(
-        "--frontend-cmd",
-        choices=["pnpm", "npm"],
-        default="pnpm",
-        help="前端包管理命令（默认 pnpm）",
-    )
     return parser.parse_args()
-
-
-def _resolve_vite_api_base_from_env() -> str:
-    """解析前端注入用 `VITE_API_BASE_URL`。
-
-    逻辑：
-    1. 优先读取 `VITE_API_BASE_URL`；
-    2. 其次读取 `AGENT_API_BASE`；
-    3. 最后按 `API_PORT` 组装本地地址。
-
-    关键分支/边界：
-    - 地址统一去掉末尾 `/`；
-    - 端口非法时回退 8000。
-
-    与外部交互：
-    - 读取环境变量（已由 `.env` 注入）。
-
-    异常说明：
-    - 无显式异常抛出。
-
-    副作用说明：
-    - 无。
-    """
-
-    explicit = (os.getenv("VITE_API_BASE_URL", "") or "").strip()
-    if explicit:
-        return explicit.rstrip("/")
-    else:
-        pass
-
-    agent_api_base = (os.getenv("AGENT_API_BASE", "") or "").strip()
-    if agent_api_base:
-        return agent_api_base.rstrip("/")
-    else:
-        pass
-
-    raw_port = (os.getenv("API_PORT", "8000") or "8000").strip()
-    try:
-        port = int(raw_port)
-        if not (1 <= port <= 65535):
-            port = 8000
-        else:
-            pass
-    except ValueError:
-        port = 8000
-    return f"http://127.0.0.1:{port}"
 
 
 def build_commands(
     root: Path,
     args: argparse.Namespace,
-) -> list[tuple[str, list[str], Path, dict[str, str] | None]]:
+) -> list[tuple[str, list[str], Path]]:
     """按参数构造待启动命令列表。
 
     逻辑：
     1. 根据 `--no-*` 开关决定是否加入对应进程；
     2. 为每个进程指定命令与工作目录；
-    3. 以稳定顺序返回命令列表（register -> api -> frontend）。
+    3. 以稳定顺序返回命令列表（register -> api）。
 
     关键分支/边界：
     - 若用户关闭全部进程，返回空列表，由主流程统一处理；
-    - Frontend 命令使用 `--prefix frontend`，无需切换目录。
+    - 当前不启动前端进程。
 
     与外部交互：
     - 无直接外部交互，仅生成命令数据。
@@ -162,36 +102,23 @@ def build_commands(
     - 无。
     """
 
-    commands: list[tuple[str, list[str], Path, dict[str, str] | None]] = []
+    commands: list[tuple[str, list[str], Path]] = []
     if not args.no_register:
         commands.append(
-            ("register-center", [sys.executable, "run_register_center.py"], root, None),
+            ("register-center", [sys.executable, "run_register_center.py"], root),
         )
     else:
         pass
 
     if not args.no_api:
-        commands.append(("api", [sys.executable, "run_agent_api.py"], root, None))
-    else:
-        pass
-
-    if not args.no_frontend:
-        vite_api_base = _resolve_vite_api_base_from_env()
-        commands.append(
-            (
-                "frontend",
-                [args.frontend_cmd, "run", "--prefix", "frontend", "dev"],
-                root,
-                {"VITE_API_BASE_URL": vite_api_base},
-            ),
-        )
+        commands.append(("api", [sys.executable, "run_agent_api.py"], root))
     else:
         pass
     return commands
 
 
 def start_processes(
-    commands: list[tuple[str, list[str], Path, dict[str, str] | None]],
+    commands: list[tuple[str, list[str], Path]],
 ) -> list[ManagedProcess]:
     """启动所有子进程并返回句柄列表。
 
@@ -215,17 +142,11 @@ def start_processes(
     """
 
     managed: list[ManagedProcess] = []
-    for name, cmd, cwd, env_overrides in commands:
+    for name, cmd, cwd in commands:
         print(f"[dev-stack] starting {name}: {shlex.join(cmd)}")
-        child_env = os.environ.copy()
-        if env_overrides:
-            child_env.update(env_overrides)
-        else:
-            pass
         popen = subprocess.Popen(
             cmd,
             cwd=str(cwd),
-            env=child_env,
             text=True,
             stdout=None,
             stderr=None,
@@ -326,7 +247,7 @@ def main() -> int:
     - 启动阶段异常时也会触发清理逻辑。
 
     与外部交互：
-    - 创建并管理多个长期运行进程（API / Register / Frontend）。
+    - 创建并管理多个长期运行进程（API / Register）。
 
     异常说明：
     - 不吞关键异常，统一转换为退出码并打印错误。

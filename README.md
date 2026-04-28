@@ -26,7 +26,6 @@ DAgents/
 ├── run_register_center.py       # Register Center 启动入口
 ├── requirements.txt
 ├── .env.example
-├── frontend/                    # React 前端（新增，Web UI）
 ├── desktop/                     # 桌面壳预留（如 Tauri）
 ├── prompt_context/              # 系统提示上下文侧车文件
 ├── register-center/             # Register Center 实现
@@ -44,8 +43,6 @@ DAgents/
 
 - Python 3.11+（推荐）
 - pip
-- Node.js 20.19+（推荐使用 `.nvmrc` 固定的 `v24.15.0`）
-- pnpm 9+
 - Linux / macOS / WSL（Windows 原生未完整验证）
 
 ## 快速开始
@@ -66,10 +63,9 @@ cp .env.example .env
 
 常用配置项与默认值可参考 `app/config/settings.py` 中的 `Settings`。
 
-前后端连接建议统一通过 `.env` 配置：
+后端运行建议通过 `.env` 配置：
 
 - `API_HOST` / `API_PORT`：后端 API 监听地址（`run_agent_api.py` 使用）
-- `VITE_API_BASE_URL`：前端请求后端地址（`ChatWorkbench` 使用）
 
 ### 3) 启动服务（推荐 API 模式）
 
@@ -84,28 +80,16 @@ python run_agent_api.py
 - **API 服务**：`python run_agent_api.py`
 - **CLI 客户端**：`python run_agent.py`
 - **Register Center**：`python run_register_center.py`
-- **一键开发栈（推荐本地联调）**：`python run_dev_stack.py`（默认同时启动 API + Register Center + Frontend）
-- **前端入口（自动检查后端）**：`python run_frontend_with_backend.py`（后端未启动时先拉起 API，再启动前端）
-- **Web 前端（开发中）**：
-  ```bash
-  cd frontend
-  pnpm install
-  pnpm dev
-  ```
+- **一键开发栈（后端）**：`python run_dev_stack.py`（默认同时启动 API + Register Center）
 
-## 前端开发（React + Vite）
+## 前后端分仓说明
 
-- 前端代码位于 `frontend/`，当前已完成基础工程初始化与 `ChatWorkbench` 页面骨架。
-- 运行后默认地址为 `http://localhost:5173/`。
-- 前后端通信目标为：
-  - `POST /v1/messages`
-  - `GET /v1/streams/{request_id}`（SSE 流式事件）
-- 前后端契约建议以后端 OpenAPI 为单一来源：
-  - 导出：`python export_openapi_schema.py`
-  - 输出：`frontend/openapi.json`
-  - 生成 TS 类型：`cd frontend && pnpm gen:types`
-  - 生成文件：`frontend/src/api/types.ts`
-- 详细结构说明见 `frontend/README.md` 与 `frontend/src/README.md`。
+- 后端仓库（本仓）负责 API、Agent Runtime、Register Center 与相关文档。
+- 前端仓库（`DAgentsUI`）负责 React UI、SSE 消费与审批交互体验。
+- 若你将 `DAgentsUI` 迁出本仓，建议在前端仓库中保留以下对接流程：
+  - 从后端导出 OpenAPI：`python export_openapi_schema.py --output <前端仓库路径>/openapi.json`
+  - 在前端仓库生成 TS 类型：`pnpm gen:types`
+  - 对接 API：`POST /v1/messages`、`GET /v1/streams?client_id=...`
 
 ## API 说明（简版）
 
@@ -119,7 +103,7 @@ python run_agent_api.py
 
 - 代码主入口在 `app/` 下，按目录维护 `README.md` 与 `REFERENCE.md`。
 - `register-center/` 目录名含连字符，`run_register_center.py` 当前通过 `importlib` 按文件路径加载 `rc_app.py`；后续如统一为 Python 包命名，可迁移为 `register_center/`。
-- 前端构建产物位于 `frontend/dist/`，本地依赖位于 `frontend/node_modules/`，默认不作为源码提交对象。
+- 若前端仍在同仓，仅保留源码目录；后端仓库不再负责前端进程管理。
 - 运行测试（如果本地已安装测试依赖）：
 
 ```bash

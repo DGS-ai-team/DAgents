@@ -117,6 +117,7 @@ class AgentPeerEnvelope(BaseModel):
     - `target` 的“单 Agent/多分组”互斥由 `AgentPeerTarget` 保证；
     - `intent=task_update` 时建议携带 `task` 字段；
     - `payload.content_type=application/json` 时建议 `content` 为对象。
+    - 当前版本中，`intent` 主要用于协议语义与观测，尚未作为运行时路由分支条件消费。
 
     与外部交互：
     - 作为 HTTP body/工具输出/日志追踪的统一格式。
@@ -175,6 +176,19 @@ def build_agent_peer_envelope(
 
     副作用说明：
     - 无。
+
+    Args:
+    - caller_agent_id: 发起方 Agent 唯一标识，写入 `caller.agent_id`。
+    - caller_session_id: 发起方会话 ID，写入 `caller.session_id`，用于串联同一会话内上下文。
+    - caller_groups: 发起方所属发现分组列表，写入 `caller.discovery_groups`。
+    - target_agent_id: 目标 Agent ID；用于点对点路由，和 `target_groups` 二选一。
+    - target_groups: 目标发现分组列表；用于广播/组路由，和 `target_agent_id` 二选一。
+    - intent: 交互意图类型（如 ask/delegate/notify/broadcast/task_update）；当前主要用于语义标记与观测，尚未被运行时分支逻辑消费。
+    - payload_content: 业务载荷主体，可为文本或 JSON 对象。
+    - payload_content_type: 载荷类型声明，决定 `payload.content` 的解释方式。
+    - trace_id: 链路追踪 ID；为空时自动生成 `trace-<uuid>`。
+    - task: 可选任务语义字段，用于回传异步状态与任务标识。
+    - error: 可选错误语义字段，用于回传失败码、失败原因与是否可重试。
     """
 
     final_trace_id = (trace_id or "").strip() or f"trace-{uuid.uuid4().hex}"

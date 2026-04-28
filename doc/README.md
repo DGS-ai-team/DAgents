@@ -18,8 +18,8 @@
 - **`run_agent.py`**（CLI）
 - **`run_agent_api.py`**（FastAPI）
 - **`run_register_center.py`**（Register Center）
-- **`run_dev_stack.py`**（本地联调：统一拉起 API + Register Center + Frontend）
-- **`export_openapi_schema.py`**（导出 OpenAPI 到 `frontend/openapi.json`）
+- **`run_dev_stack.py`**（后端本地联调：统一拉起 API + Register Center）
+- **`export_openapi_schema.py`**（导出 OpenAPI；分仓场景请显式传 `--output` 到前端仓库）
 
 ---
 

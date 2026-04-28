@@ -20,17 +20,19 @@
 
 ## `agent_peer.py`
 
-- **`agent_discover`**：按分组发现可协作 Agent（支持可选能力标签过滤，并内联固定结构 `agent_card`）
-- **`agent_send_message`**：异步点对点向目标 Agent 提交消息（投递链路由配置 `AGENT_PEER_DELIVERY_MODE` 控制）
-- **`agent_broadcast`**：异步调用 register-center 广播接口进行分组广播
-- **`_collect_peer_stream_output`**：读取目标 `/v1/streams?client_id=...` 并按 `session_id` 汇总可读输出，支持超时截断
-- **`_extract_sse_text_from_event`**：从单条 SSE 事件中提取对 Agent 可读正文
-- **`_session_id_from_context`**：从 `OpenAIConversationContext` 解析会话 ID，缺失时回退生成。
-- **`_cache_agent_list`**：刷新进程内 agent 列表缓存（按 `agent_id` 去重）。
-- **`_is_agent_list_cache_stale`**：按 TTL 判断 agent 列表缓存是否过期。
-- **`_refresh_agent_list_for_visible_groups`**：按可见分组回源刷新缓存。
-- **`_resolve_target_agent_from_cache`**：按可见分组从缓存中解析目标 Agent。
-- **`_clear_agent_list_cache`**：清空缓存（测试隔离）。
+- **`PeerApprovalEntry`**：**Pydantic `BaseModel`**；对端 `approval_required` 事件结构化条目（含 `target_session_id/approval_id/approval_args` 等）。
+- **`PeerStreamSummary`**：**Pydantic `BaseModel`**；单次远端 SSE 拉取汇总（`text/approvals/errors/final_state/truncated`）。
+- **`agent_discover`**：按分组发现可协作 Agent（内联固定结构 `agent_card`）
+- **`agent_send_message`**：点对点向目标 Agent 提交消息；返回信封含 `target_session_id/approvals/final_state` 与真实 `task.state`
+- **`agent_broadcast`**：调用 register-center 广播并并发收集每个目标 SSE，聚合 `approvals` 与广播级 `task.state`
+- **`agent_peer_approve_tools`**：对端 `approval_required` 后向其提交 `approve/reject/selection` 决策的 `resume`，再收集后续 SSE
+- **`_collect_peer_stream_summary`**：读取目标 `/v1/streams?client_id=...` 并按 `session_id` 汇总文本/审批/错误，超时返回 `truncated`
+- **`_approval_entry_from_event`**：把 SSE `approval_required` 的 `data` 转为 `PeerApprovalEntry`
+- **`_peer_state_to_task_state`**：把 `PeerStreamSummary.final_state` 映射到 `AgentPeerTaskState`
+- **`_build_resume_value`**：按 `decision` 构造与 `app.schemas.approval` 对齐的 `resume_value`（`approve/reject/selection`）
+- **`_new_peer_session_id`**：为单次点对点请求生成隔离的对端会话 ID（`peer-<caller>-<target>-<short>`）
+- **`_session_id_from_context`**：从 `OpenAIConversationContext` 解析调用方会话 ID，缺失时回退生成
+- **`_cache_agent_list`** / **`_is_agent_list_cache_stale`** / **`_refresh_agent_list_for_visible_groups`** / **`_resolve_target_agent_from_cache`** / **`_clear_agent_list_cache`**：进程内 agent 目录缓存与 TTL 维护
 - **`_discover_agents_by_groups`**：按分组聚合目录查询结果并去重
 - **`_attach_agent_card_summary`**：为发现结果补充固定结构 `agent_card`（含访问 URL/端口、card 内容与错误字段）
 - **`_resolve_target_agent`**：在调用方可见分组内解析目标 Agent

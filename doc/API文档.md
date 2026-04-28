@@ -99,7 +99,7 @@
   "client_id": "client-001",
   "request_type": "message",
   "content": "你好",
-  "source": "frontend"
+  "source": "client"
 }
 ```
 
@@ -115,7 +115,7 @@
     "approved": ["tool-call-id-1"],
     "rejected": ["tool-call-id-2"]
   },
-  "source": "frontend"
+  "source": "client"
 }
 ```
 

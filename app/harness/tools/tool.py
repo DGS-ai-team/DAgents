@@ -347,6 +347,7 @@ def get_tools() -> list[Any]:
     from app.harness.tools.agent_peer import (
         agent_broadcast,
         agent_discover,
+        agent_peer_approve_tools,
         agent_send_message,
     )
     from app.harness.tools.bash import bash_run
@@ -359,6 +360,7 @@ def get_tools() -> list[Any]:
         agent_discover,
         agent_send_message,
         agent_broadcast,
+        agent_peer_approve_tools,
     ]
 
 
