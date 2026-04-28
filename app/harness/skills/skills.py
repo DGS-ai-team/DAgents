@@ -5,11 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from app.config.env import resolve_runtime_root
 from app.config.settings import get_settings
 from pydantic import BaseModel, ConfigDict, Field
 
-# skills 根目录：与 `app/` 同级的仓库根目录下 `skills/`
-SKILLS_DIR = Path(__file__).resolve().parents[2].parent / "skills"
+# skills 根目录（默认）：
+# - 源码模式：仓库根目录下 `skills/`
+# - 打包模式：可执行文件同级目录下 `skills/`
+SKILLS_DIR = resolve_runtime_root() / "skills"
 
 _skill_meta_cache: dict[str, tuple[dict[str, Any], float]] = {}
 _skill_markdown_cache: dict[str, tuple[str, float]] = {}
@@ -42,7 +45,7 @@ def _resolve_skills_dir() -> Path:
     逻辑：
     1. 读取配置 `AGENT_SKILLS_DIR`；
     2. 若为绝对路径则直接使用；
-    3. 若为相对路径则以仓库根为基准拼接。
+    3. 若为相对路径则以运行根目录为基准拼接。
 
     关键边界：
     - 配置为空时回退默认目录；
@@ -55,7 +58,7 @@ def _resolve_skills_dir() -> Path:
     candidate = Path(configured).expanduser()
     if candidate.is_absolute():
         return candidate
-    return (Path(__file__).resolve().parents[2].parent / candidate).resolve()
+    return (resolve_runtime_root() / candidate).resolve()
 
 
 def _parse_skill_frontmatter(meta_text: str) -> dict[str, Any]:

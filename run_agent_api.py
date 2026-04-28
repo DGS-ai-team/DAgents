@@ -16,7 +16,7 @@ import uvicorn
 _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
-from app.config.env import load_env  # noqa: E402
+from app.config.env import load_env, resolve_runtime_root  # noqa: E402
 from app.harness.api.app import app  # noqa: E402
 
 
@@ -56,7 +56,7 @@ def _resolve_api_host_port() -> tuple[str, int]:
 
 
 def main() -> None:
-    load_env(_ROOT)
+    load_env(resolve_runtime_root())
     host, port = _resolve_api_host_port()
     # 直接传入 app 对象，避免在打包产物中依赖字符串动态导入。
     uvicorn.run(app, host=host, port=port, reload=False)
