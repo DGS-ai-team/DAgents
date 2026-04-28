@@ -18,9 +18,24 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  build-linux:
-    name: Build Linux Binary
-    runs-on: ubuntu-22.04
+  build-bundle:
+    name: Build Bundle (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            os: ubuntu-22.04
+            bin_name: dagents-api
+            archive_name: dagents-api-linux-x64.zip
+            pyinstaller_args: --onefile --name dagents-api run_agent_api.py
+          - target: windows-x64
+            os: windows-2022
+            bin_name: dagents-api.exe
+            archive_name: dagents-api-windows-x64.zip
+            pyinstaller_args: --onefile --name dagents-api run_agent_api.py
 
     steps:
       - name: Checkout
@@ -44,30 +59,60 @@ jobs:
 
       - name: Build single-file binary
         run: |
-          pyinstaller --onefile --name dagents-api run_agent_api.py
+          pyinstaller ${{ matrix.pyinstaller_args }}
 
-      - name: Upload build artifact
+      - name: Prepare runtime bundle (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p bundle
+          cp "dist/${{ matrix.bin_name }}" bundle/
+          cp .env.example bundle/
+          cp README.md bundle/
+          cp -r skills bundle/skills
+          cp -r prompt_context bundle/prompt_context
+          cd bundle
+          zip -r "../${{ matrix.archive_name }}" .
+
+      - name: Prepare runtime bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bundle | Out-Null
+          Copy-Item "dist/${{ matrix.bin_name }}" "bundle/"
+          Copy-Item ".env.example" "bundle/"
+          Copy-Item "README.md" "bundle/"
+          Copy-Item "skills" "bundle/skills" -Recurse
+          Copy-Item "prompt_context" "bundle/prompt_context" -Recurse
+          Compress-Archive -Path bundle/* -DestinationPath "${{ matrix.archive_name }}" -Force
+
+      - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dagents-api-linux
-          path: dist/dagents-api
+          name: ${{ matrix.archive_name }}
+          path: ${{ matrix.archive_name }}
           if-no-files-found: error
 
   release:
     name: Create GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-linux
+    needs: build-bundle
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Download build artifact
+      - name: Download all bundle artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dagents-api-linux
+          pattern: dagents-api-*.zip
+          merge-multiple: true
           path: dist
 
-      - name: Create release and upload binary
+      - name: List release assets
+        run: ls -la dist
+
+      - name: Create release and upload bundles
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/dagents-api
+          files: |
+            dist/dagents-api-linux-x64.zip
+            dist/dagents-api-windows-x64.zip
           generate_release_notes: true
