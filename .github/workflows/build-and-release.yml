@@ -66,6 +66,8 @@ jobs:
         run: |
           mkdir -p bundle
           cp "dist/${{ matrix.bin_name }}" bundle/
+          cp startup_scripts/linux/start.sh bundle/
+          chmod +x bundle/start.sh
           cp .env.example bundle/
           cp README.md bundle/
           cp -r skills bundle/skills
@@ -79,6 +81,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path bundle | Out-Null
           Copy-Item "dist/${{ matrix.bin_name }}" "bundle/"
+          Copy-Item "startup_scripts/windows/start.bat" "bundle/"
           Copy-Item ".env.example" "bundle/"
           Copy-Item "README.md" "bundle/"
           Copy-Item "skills" "bundle/skills" -Recurse
