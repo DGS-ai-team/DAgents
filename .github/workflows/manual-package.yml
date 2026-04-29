@@ -21,14 +21,14 @@ jobs:
             rc_bin_name: dagents-register-center
             archive_name: dagents-api-linux-x64.zip
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents-register-center --add-data=register-center:register-center run_register_center.py
+            rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data=register-center:register-center run_register_center.py
           - target: windows-x64
             os: windows-2022
             api_bin_name: dagents-api.exe
             rc_bin_name: dagents-register-center.exe
             archive_name: dagents-api-windows-x64.zip
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents-register-center --add-data="register-center;register-center" run_register_center.py
+            rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data="register-center;register-center" run_register_center.py
 
     steps:
       - name: Checkout
