@@ -4,5 +4,5 @@
 
 | 子目录 | 说明 |
 |---|---|
-| `linux/` | Linux 启动脚本 `start.sh`，用于启动 `dagents-api` |
-| `windows/` | Windows 启动脚本 `start.bat`，用于启动 `dagents-api.exe` |
+| `linux/` | Linux 启动脚本：`start.sh`（API）、`start-register-center.sh`（Register Center） |
+| `windows/` | Windows 启动脚本：`start.bat`（API）、`start-register-center.bat`（Register Center） |
