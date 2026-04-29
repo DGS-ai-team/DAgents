@@ -14,8 +14,5 @@ if [[ ! -x "./dagents-api" ]]; then
   exit 1
 fi
 
-export API_HOST="${API_HOST:-127.0.0.1}"
-export API_PORT="${API_PORT:-8000}"
-
-echo "[startup] starting dagents-api on ${API_HOST}:${API_PORT}"
+echo "[startup] starting dagents-api (host/port 由 .env 或程序默认值决定)"
 exec ./dagents-api

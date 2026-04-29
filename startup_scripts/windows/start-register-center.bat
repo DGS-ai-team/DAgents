@@ -13,9 +13,6 @@ if not exist "dagents-register-center.exe" (
   exit /b 1
 )
 
-if "%REGISTER_CENTER_HOST%"=="" set REGISTER_CENTER_HOST=0.0.0.0
-if "%REGISTER_CENTER_PORT%"=="" set REGISTER_CENTER_PORT=8010
-
-echo [startup] starting dagents-register-center on %REGISTER_CENTER_HOST%:%REGISTER_CENTER_PORT%
+echo [startup] starting dagents-register-center (host/port 由 .env 或程序默认值决定)
 dagents-register-center.exe
 exit /b %ERRORLEVEL%

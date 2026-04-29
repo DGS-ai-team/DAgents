@@ -13,9 +13,6 @@ if not exist "dagents-api.exe" (
   exit /b 1
 )
 
-if "%API_HOST%"=="" set API_HOST=127.0.0.1
-if "%API_PORT%"=="" set API_PORT=8000
-
-echo [startup] starting dagents-api on %API_HOST%:%API_PORT%
+echo [startup] starting dagents-api (host/port 由 .env 或程序默认值决定)
 dagents-api.exe
 exit /b %ERRORLEVEL%

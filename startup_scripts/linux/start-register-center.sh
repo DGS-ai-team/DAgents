@@ -14,8 +14,5 @@ if [[ ! -x "./dagents-register-center" ]]; then
   exit 1
 fi
 
-export REGISTER_CENTER_HOST="${REGISTER_CENTER_HOST:-0.0.0.0}"
-export REGISTER_CENTER_PORT="${REGISTER_CENTER_PORT:-8010}"
-
-echo "[startup] starting dagents-register-center on ${REGISTER_CENTER_HOST}:${REGISTER_CENTER_PORT}"
+echo "[startup] starting dagents-register-center (host/port 由 .env 或程序默认值决定)"
 exec ./dagents-register-center
