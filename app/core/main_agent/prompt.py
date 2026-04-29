@@ -160,8 +160,6 @@ def get_system_prompt(
             parts.append(
                 f"\n\n## 以下是可用技能的目录：\n\n{skill_meta_prompt}\n"
             )
-        else:
-            pass
         max_skills = max(0, int(settings.agent_skills_max_in_prompt))
         selected_skills = []
         loaded_skill_ids = [
@@ -188,10 +186,6 @@ def get_system_prompt(
             parts.append(
                 f"\n\n## 以下是当前会话已加载技能的具体执行规则：\n\n{skills_prompt}\n"
             )
-        else:
-            pass
-    else:
-        pass
     os_kind = _current_os_kind()
     parts.append(
         f"\n\n## 以下是当前运行环境：\n\n{os_kind}\n"
