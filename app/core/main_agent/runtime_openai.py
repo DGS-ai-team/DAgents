@@ -265,11 +265,7 @@ class OpenAIImplicitReActRuntime:
         full_content: str = ""
         tool_calls_acc: dict[int, dict[str, Any]] = {}
         model_name = str(self._model_cfg.get("model") or "")
-        chunk_index = 0
         async for chunk in stream:
-            # 直接打印模型原始 chunk，便于排查网关返回结构与前端事件映射差异。
-            print(f"[openai-raw-stream] chunk#{chunk_index}: {chunk!r}", flush=True)
-            chunk_index += 1
             usage = getattr(chunk, "usage", None)
             if usage is not None:
                 fields = usage_fields_from_openai_usage(usage)
