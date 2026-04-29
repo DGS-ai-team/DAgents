@@ -35,5 +35,13 @@ def load_env(project_root: Path | None = None) -> None:
 
     root = project_root or resolve_runtime_root()
     env_file = root / ".env"
-    if env_file.is_file():
+    exists = env_file.is_file()
+    print(
+        f"[env] resolve root={root} env_file={env_file} exists={exists}",
+        flush=True,
+    )
+    if exists:
         load_dotenv(env_file, override=False)
+        print(f"[env] loaded .env from {env_file}", flush=True)
+    else:
+        print("[env] .env not found, skip loading", flush=True)
