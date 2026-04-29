@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
