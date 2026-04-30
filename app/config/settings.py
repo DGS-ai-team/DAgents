@@ -203,6 +203,8 @@ class Settings(BaseModel):
     agent_peer_broadcast_stream_timeout_seconds: int = 20
     # 全局工具审批模式：always（总是审批）/ never（永不审批）/ rule（按规则函数判断）
     agent_tool_approval_mode: str = "rule"
+    # bash_run/cmd/powershell 输出解码编码（Windows 中文环境可用 gbk/cp936）
+    bash_output_encoding: str = "utf-8"
 
     # --- 会话消息落盘 ---
     agent_session_store_path: str = ".runtime/memory/session.sqlite3"
@@ -259,6 +261,7 @@ class Settings(BaseModel):
                 20,
             ),
             agent_tool_approval_mode=_env_str("AGENT_TOOL_APPROVAL_MODE", "rule") or "rule",
+            bash_output_encoding=_env_str("BASH_OUTPUT_ENCODING", "utf-8") or "utf-8",
             agent_session_store_path=_agent_session_store_path(),
             openai_api_key=_env_str("OPENAI_API_KEY"),
         )

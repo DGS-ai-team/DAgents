@@ -12,6 +12,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
+from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.host_platform import HostOsKind, detect_host_os
 from app.harness.tools.tool import tool
@@ -21,6 +22,25 @@ ShellType = Literal["bash", "cmd", "powershell"]
 DEFAULT_BASH_TIMEOUT_SECONDS = 30
 MAX_BASH_TIMEOUT_SECONDS = 600
 MAX_BASH_OUTPUT_CHARS = 12000
+
+
+def _resolve_shell_output_encoding() -> str:
+    """解析 shell 输出解码编码。
+
+    逻辑：
+    1. 读取配置 `BASH_OUTPUT_ENCODING`；
+    2. 校验编码名是否可用；
+    3. 不可用时回退 `utf-8`，避免命令执行阶段抛异常。
+    """
+
+    configured = (get_settings().bash_output_encoding or "").strip() or "utf-8"
+    try:
+        "".encode(configured)
+        return configured
+    except LookupError:
+        return "utf-8"
+
+
 class CommandAstNode(BaseModel):
     """命令 AST 节点（轻量版）。
 
@@ -270,7 +290,9 @@ def _parse_command_ast(command: str, shell_type: ShellType) -> list[CommandAstNo
     ]
 
 
-def _run_bash_command(command: str, cwd: str, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+def _run_bash_command(
+    command: str, cwd: str, timeout_seconds: int, output_encoding: str
+) -> subprocess.CompletedProcess[str]:
     """执行 bash 命令。
 
     逻辑：
@@ -283,14 +305,16 @@ def _run_bash_command(command: str, cwd: str, timeout_seconds: int) -> subproces
         cwd=cwd,
         capture_output=True,
         text=True,
-        encoding="utf-8",
+        encoding=output_encoding,
         errors="replace",
         timeout=timeout_seconds,
         check=False,
     )
 
 
-def _run_cmd_command(command: str, cwd: str, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+def _run_cmd_command(
+    command: str, cwd: str, timeout_seconds: int, output_encoding: str
+) -> subprocess.CompletedProcess[str]:
     """执行 cmd 命令。
 
     逻辑：
@@ -305,14 +329,16 @@ def _run_cmd_command(command: str, cwd: str, timeout_seconds: int) -> subprocess
         cwd=cwd,
         capture_output=True,
         text=True,
-        encoding="utf-8",
+        encoding=output_encoding,
         errors="replace",
         timeout=timeout_seconds,
         check=False,
     )
 
 
-def _run_powershell_command(command: str, cwd: str, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+def _run_powershell_command(
+    command: str, cwd: str, timeout_seconds: int, output_encoding: str
+) -> subprocess.CompletedProcess[str]:
     """执行 powershell 命令。
 
     逻辑：
@@ -327,7 +353,7 @@ def _run_powershell_command(command: str, cwd: str, timeout_seconds: int) -> sub
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                encoding="utf-8",
+                encoding=output_encoding,
                 errors="replace",
                 timeout=timeout_seconds,
                 check=False,
@@ -342,6 +368,7 @@ def _run_by_shell_type(
     command: str,
     cwd: str,
     timeout_seconds: int,
+    output_encoding: str,
 ) -> subprocess.CompletedProcess[str]:
     """根据 shell 类型分发到对应执行方法。
 
@@ -351,10 +378,10 @@ def _run_by_shell_type(
     3. `powershell` 调用 `_run_powershell_command`。
     """
     if shell_type == "bash":
-        return _run_bash_command(command, cwd, timeout_seconds)
+        return _run_bash_command(command, cwd, timeout_seconds, output_encoding)
     if shell_type == "cmd":
-        return _run_cmd_command(command, cwd, timeout_seconds)
-    return _run_powershell_command(command, cwd, timeout_seconds)
+        return _run_cmd_command(command, cwd, timeout_seconds, output_encoding)
+    return _run_powershell_command(command, cwd, timeout_seconds, output_encoding)
 
 
 def _resolve_shell_type(shell_type: Optional[ShellType]) -> ShellType:
@@ -425,9 +452,16 @@ def bash_run(
         resolved_shell_type = _resolve_shell_type(shell_type)
         if resolved_shell_type not in ("bash", "cmd", "powershell"):
             return f"ERROR: 不支持的 shell_type：{shell_type!r}"
+        output_encoding = _resolve_shell_output_encoding()
 
         try:
-            completed = _run_by_shell_type(resolved_shell_type, cmd, str(run_cwd), timeout)
+            completed = _run_by_shell_type(
+                resolved_shell_type,
+                cmd,
+                str(run_cwd),
+                timeout,
+                output_encoding,
+            )
             stdout = completed.stdout or ""
             stderr = completed.stderr or ""
             status = "OK" if completed.returncode == 0 else "NON_ZERO_EXIT"
@@ -446,6 +480,7 @@ def bash_run(
             f"[BASH_RESULT] shell_type={resolved_shell_type} status={status} exit_code={exit_code}",
             f"cwd={str(run_cwd)!r}",
             f"timeout_seconds={timeout}",
+            f"output_encoding={output_encoding}",
             "--- STDOUT ---",
             stdout,
             "--- STDERR ---",
