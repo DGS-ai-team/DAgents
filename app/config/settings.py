@@ -173,6 +173,8 @@ class Settings(BaseModel):
     llm_stream_include_usage: bool = True
     # 是否启用 skills 动态注入 system prompt
     agent_skills_enabled: bool = True
+    # 是否允许 agent 自主创建/修改 skills
+    agent_skills_allow_create: bool = False
     # skills 根目录（默认仓库根目录下 `skills/`）
     agent_skills_dir: str = "skills"
     # 单轮最多注入多少个匹配 skill
@@ -236,6 +238,7 @@ class Settings(BaseModel):
             ),
             llm_stream_include_usage=_env_bool("LLM_STREAM_INCLUDE_USAGE", True),
             agent_skills_enabled=_env_bool("AGENT_SKILLS_ENABLED", True),
+            agent_skills_allow_create=_env_bool("AGENT_SKILLS_ALLOW_CREATE", False),
             agent_skills_dir=_env_str("AGENT_SKILLS_DIR", "skills") or "skills",
             agent_skills_max_in_prompt=_env_int("AGENT_SKILLS_MAX_IN_PROMPT", 3),
             metrics_enabled=_env_bool("METRICS_ENABLED", True),

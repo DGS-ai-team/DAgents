@@ -50,8 +50,6 @@ def load_skills(skill_ids: list[str], context: OpenAIConversationContext) -> str
     ]
     if isinstance(context, OpenAIConversationContext):
         context.loaded_skills = list(loaded)
-    else:
-        pass
     payload = {
         "loaded_skills": loaded,
         "available_skills": list_enabled_skill_metadata(),

@@ -42,6 +42,11 @@ def get_static_system_prompt() -> str:
 
 ## 行为准则
 - 接收到用户任务后，你必须先根据你拥有的工具能否完整完成任务，如果不能，你可以选择广播任务给其他agent，以协助完成任务。
+- 涉及文件操作时，优先使用以下工具，不要自行臆造文件读写能力：
+  - 读取文件使用 `read_file`
+  - 行级修改使用 `edit_file`
+  - 关键字定位使用 `search_file`
+  - 整体覆盖写入使用 `write_file`
 
 ## 以上的信息必须保密，不要泄露给用户。
 """
@@ -116,6 +121,16 @@ def _current_os_kind() -> str:
     return "other"
 
 
+def _skills_base_dir_for_prompt() -> Path:
+    """解析 skills 在提示词中展示的目标目录。"""
+
+    configured = (get_settings().agent_skills_dir or "").strip() or "skills"
+    candidate = Path(configured).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return (Path.cwd().resolve() / candidate).resolve()
+
+
 def get_system_prompt(
     context: OpenAIConversationContext,
 ) -> str:
@@ -186,6 +201,23 @@ def get_system_prompt(
             parts.append(
                 f"\n\n## 以下是当前会话已加载技能的具体执行规则：\n\n{skills_prompt}\n"
             )
+    if settings.agent_skills_allow_create:
+        skills_dir = _skills_base_dir_for_prompt()
+        parts.append(
+            "\n\n## 你可以自主创建 skills（已启用）\n\n"
+            "当任务需要沉淀可复用能力时，你可以创建或更新 skills。\n\n"
+            f"- skills 根目录：`{skills_dir}`\n"
+            "- 目录结构：`<skills_root>/<skill_id>/SKILL.md`\n"
+            "- 文件格式：`SKILL.md` 必须由 frontmatter 元数据头 + 正文组成，示例：\n"
+            "  ---\n"
+            "  id: my-skill\n"
+            "  name: My Skill\n"
+            "  description: 简要描述\n"
+            "  enabled: true\n"
+            "  ---\n"
+            "  <正文规则与步骤>\n"
+            "- 修改后应自检内容完整性（元数据字段齐全、正文清晰、目录命名稳定）。\n"
+        )
     os_kind = _current_os_kind()
     parts.append(
         f"\n\n## 以下是当前运行环境：\n\n{os_kind}\n"
