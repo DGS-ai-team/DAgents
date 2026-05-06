@@ -53,7 +53,7 @@ jobs:
             rc_bin_name: dagents-register-center
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data=register-center:register-center run_register_center.py
-          # linux-x86：在 amd64 runner 上用 linux/386 容器构建 i686 可执行文件（容器内 Python 版本随镜像软件源，可能与 x64 的 3.13 不一致）
+          # linux-x86：Docker Hub 的 i386/ubuntu 无 jammy/22.04 标签；使用 focal（20.04）i386 根文件系统构建（容器内 Python 版本随镜像，与 x64 的 3.13 不一致）
           - target: linux-x86
             os: ubuntu-22.04
             build_kind: docker-i386
@@ -118,29 +118,23 @@ jobs:
           pyinstaller ${{ matrix.api_pyinstaller_args }}
           pyinstaller ${{ matrix.rc_pyinstaller_args }}
 
-      - name: Build single-file binaries (Linux i386 / x86 via Docker)
+      - name: Build single-file binaries (Linux i386 / x86 via Docker + pyenv)
         if: matrix.build_kind == 'docker-i386'
+        timeout-minutes: 120
         shell: bash
         env:
           API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
           RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
+          # 与原生矩阵 Python 对齐；可在不改脚本情况下仅此变量升降级。
+          PYENV_PYTHON_VERSION: "3.13.2"
         run: |
           set -euxo pipefail
-          # 官方 library/ubuntu 无 linux/386 manifest；使用 i386/ubuntu 多架构仓库中的 32 位 rootfs。
+          # i386/ubuntu:focal + pyenv 源码编译 32 位 Python（deadsnakes 无 i386 deb）。
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e API_PI_ARGS -e RC_PI_ARGS \
-            i386/ubuntu:22.04 \
-            bash -lc '
-              set -euxo pipefail
-              apt-get update
-              DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip build-essential zlib1g-dev
-              cd /src
-              python3 -m pip install --upgrade pip
-              python3 -m pip install -r requirements.txt pyinstaller
-              eval python3 -m PyInstaller ${API_PI_ARGS}
-              eval python3 -m PyInstaller ${RC_PI_ARGS}
-            '
+            -e API_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
+            i386/ubuntu:focal \
+            bash /src/scripts/ci/build_linux_i386_pyenv.sh
 
       - name: Prepare runtime bundle (Linux)
         if: runner.os == 'Linux'

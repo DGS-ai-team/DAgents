@@ -88,28 +88,21 @@ jobs:
           pyinstaller ${{ matrix.api_pyinstaller_args }}
           pyinstaller ${{ matrix.rc_pyinstaller_args }}
 
-      - name: Build single-file binaries (Linux i386 / x86 via Docker)
+      - name: Build single-file binaries (Linux i386 / x86 via Docker + pyenv)
         if: matrix.build_kind == 'docker-i386'
+        timeout-minutes: 120
         shell: bash
         env:
           API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
           RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
+          PYENV_PYTHON_VERSION: "3.13.2"
         run: |
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e API_PI_ARGS -e RC_PI_ARGS \
-            i386/ubuntu:22.04 \
-            bash -lc '
-              set -euxo pipefail
-              apt-get update
-              DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip build-essential zlib1g-dev
-              cd /src
-              python3 -m pip install --upgrade pip
-              python3 -m pip install -r requirements.txt pyinstaller
-              eval python3 -m PyInstaller ${API_PI_ARGS}
-              eval python3 -m PyInstaller ${RC_PI_ARGS}
-            '
+            -e API_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
+            i386/ubuntu:focal \
+            bash /src/scripts/ci/build_linux_i386_pyenv.sh
 
       - name: Prepare runtime bundle (Linux)
         if: runner.os == 'Linux'
