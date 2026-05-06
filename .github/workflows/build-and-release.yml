@@ -126,10 +126,11 @@ jobs:
           RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
         run: |
           set -euxo pipefail
-          docker run --rm --platform linux/386 \
+          # 官方 library/ubuntu 无 linux/386 manifest；使用 i386/ubuntu 多架构仓库中的 32 位 rootfs。
+          docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
             -e API_PI_ARGS -e RC_PI_ARGS \
-            ubuntu:22.04 \
+            i386/ubuntu:22.04 \
             bash -lc '
               set -euxo pipefail
               apt-get update
