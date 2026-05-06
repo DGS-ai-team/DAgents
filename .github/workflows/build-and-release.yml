@@ -20,18 +20,42 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # linux-x64：宿主 amd64，Python 3.13 与产物均为 x86_64
           - target: linux-x64
             os: ubuntu-22.04
+            build_kind: native
+            python_arch: x64
+            archive_name: dagents-api-linux-x64.zip
             api_bin_name: dagents-api
             rc_bin_name: dagents-register-center
-            archive_name: dagents-api-linux-x64.zip
+            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
+            rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data=register-center:register-center run_register_center.py
+          # linux-x86：在 amd64 runner 上用 linux/386 容器构建 i686 可执行文件（容器内 Python 版本随镜像软件源，可能与 x64 的 3.13 不一致）
+          - target: linux-x86
+            os: ubuntu-22.04
+            build_kind: docker-i386
+            python_arch: x86
+            archive_name: dagents-api-linux-x86.zip
+            api_bin_name: dagents-api
+            rc_bin_name: dagents-register-center
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data=register-center:register-center run_register_center.py
           - target: windows-x64
             os: windows-2022
+            build_kind: native
+            python_arch: x64
+            archive_name: dagents-api-windows-x64.zip
             api_bin_name: dagents-api.exe
             rc_bin_name: dagents-register-center.exe
-            archive_name: dagents-api-windows-x64.zip
+            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
+            rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data="register-center;register-center" run_register_center.py
+          - target: windows-x86
+            os: windows-2022
+            build_kind: native
+            python_arch: x86
+            archive_name: dagents-api-windows-x86.zip
+            api_bin_name: dagents-api.exe
+            rc_bin_name: dagents-register-center.exe
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data="register-center;register-center" run_register_center.py
 
@@ -39,26 +63,74 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Echo matrix (OS / 位数 / 构建方式)
+        shell: bash
+        run: |
+          echo "target=${{ matrix.target }} build_kind=${{ matrix.build_kind }} python_arch=${{ matrix.python_arch }}"
+
+      - name: Set up QEMU (Docker linux/386)
+        if: matrix.build_kind == 'docker-i386'
+        uses: docker/setup-qemu-action@v3
+
+      # docker-i386：宿主仍用 3.13 跑单测；位数相关打包在容器内完成。
+      - name: Setup Python (host, for tests / linux-x64 & Windows 原生构建)
+        if: matrix.build_kind == 'docker-i386'
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          cache: "pip"
+          cache: pip
 
-      - name: Install dependencies
+      - name: Setup Python (目标架构：x64 / x86)
+        if: matrix.build_kind == 'native'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.python_arch }}
+          cache: pip
+
+      - name: Install dependencies (Python packages)
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          if [ "${{ matrix.build_kind }}" != "docker-i386" ]; then
+            pip install pyinstaller
+          fi
 
       - name: Run unit tests (stable subset)
+        shell: bash
         run: |
           python -m unittest tests.test_agent_service tests.test_message_queue -v
 
-      - name: Build single-file binaries
+      - name: Build single-file binaries (native PyInstaller)
+        if: matrix.build_kind == 'native'
+        shell: bash
         run: |
           pyinstaller ${{ matrix.api_pyinstaller_args }}
           pyinstaller ${{ matrix.rc_pyinstaller_args }}
+
+      - name: Build single-file binaries (Linux i386 / x86 via Docker)
+        if: matrix.build_kind == 'docker-i386'
+        shell: bash
+        env:
+          API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
+          RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
+        run: |
+          set -euxo pipefail
+          docker run --rm --platform linux/386 \
+            -v "${GITHUB_WORKSPACE}:/src" -w /src \
+            -e API_PI_ARGS -e RC_PI_ARGS \
+            ubuntu:22.04 \
+            bash -lc '
+              set -euxo pipefail
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip build-essential zlib1g-dev
+              cd /src
+              python3 -m pip install --upgrade pip
+              python3 -m pip install -r requirements.txt pyinstaller
+              eval python3 -m PyInstaller ${API_PI_ARGS}
+              eval python3 -m PyInstaller ${RC_PI_ARGS}
+            '
 
       - name: Prepare runtime bundle (Linux)
         if: runner.os == 'Linux'
@@ -119,7 +191,5 @@ jobs:
       - name: Create release and upload bundles
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/dagents-api-linux-x64.zip
-            dist/dagents-api-windows-x64.zip
+          files: dist/dagents-api-*.zip
           generate_release_notes: true

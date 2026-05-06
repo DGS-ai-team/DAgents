@@ -19,7 +19,8 @@
 
 ## `test_api_sse.py`
 
-- **`ApiSseTestCase`**：验证 `/v1/messages` 与 `/v1/streams/{request_id}` 的 SSE 回传链路
+- **`_SseFakeRuntime`**：注入 `AgentService._runtime`，模拟 `assistant` + `done` 事件
+- **`ApiSseTestCase`**：验证 `/v1/messages` 与 `GET /v1/streams?client_id=...` 的 SSE 回传链路
 
 ## `test_api_cancel_turn.py`
 
@@ -33,4 +34,8 @@
 
 - **`main`**：直接调用 `_request_model_stream`，打印 OpenAI 原始 chunk 与 runtime 事件
 - **`_chunk_to_json`**：将 SDK chunk 转为单行 JSON 字符串，便于日志分析
+
+## `integration/`
+
+详见 `integration/REFERENCE.md`（`test_llm_live`：可选真实 LLM 冒烟）。
 

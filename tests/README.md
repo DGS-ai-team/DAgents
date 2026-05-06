@@ -12,13 +12,26 @@
 | **`test_api_cancel_turn.py`** | 验证 **`POST /v1/sessions/{session_id}/cancel`**（无在途 turn 时 **`cancelled=false`**） |
 | **`call_agent_api.py`** | 手动联调脚本：调用 `/v1/messages` 并订阅 SSE 流 |
 | **`call_runtime_request_model_stream.py`** | 手动调试脚本：直接调用 `_request_model_stream`，同时打印 OpenAI 原始 chunk 与 runtime 事件 |
+| **`integration/`** | 可选联网集成测试（默认跳过）；说明见子目录 `README.md` |
+
+CI：向默认分支提交的 **Pull Request** 会由 `.github/workflows/pr-tests.yml` 在 **Python 3.13** 下执行：
+
+`python -m unittest discover -s tests -p "test_*.py" -v`
+
+（`tests/integration/` 内测试默认跳过，不消耗密钥。）
 
 运行方式（仓库根目录）：
 
 ```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+
 python -m unittest tests.test_agent_service
 python -m unittest tests.test_message_queue
 python -m unittest tests.test_api_sse
+
+# 可选：真实 LLM 联网冒烟（需密钥，见 tests/integration/README.md）
+# export RUN_LIVE_LLM_TESTS=1 LLM_API_KEY=...
+# python -m unittest tests.integration.test_llm_live -v
 
 # 手动联调（需先启动 run_agent_api.py）
 python tests/call_agent_api.py

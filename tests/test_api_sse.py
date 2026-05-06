@@ -9,7 +9,27 @@ from fastapi.testclient import TestClient
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
+from app.context.models import OpenAIConversationContext
 from app.harness.api.app import create_app
+from app.harness.service.interface import AgentEventEnvelope
+
+
+class _SseFakeRuntime:
+    """与当前 `AgentService` 编排一致：仅实现 `run_turn` + `flush_cancelled_turn`。"""
+
+    async def run_turn(
+        self,
+        ctx: OpenAIConversationContext,
+        *,
+        request_type: str,
+        content: str | None = None,
+        resume_value: object | None = None,
+    ):
+        yield AgentEventEnvelope(event_type="assistant", payload={"content": "pong"}, meta={})
+        yield AgentEventEnvelope(event_type="done", payload={}, meta={})
+
+    def flush_cancelled_turn(self, ctx: OpenAIConversationContext) -> None:
+        pass
 
 
 class ApiSseTestCase(unittest.TestCase):
@@ -33,20 +53,8 @@ class ApiSseTestCase(unittest.TestCase):
     def test_submit_and_stream_sse(self) -> None:
         app = create_app()
         with TestClient(app) as client:
-            class _FakeAssistantChunk:
-                __slots__ = ("content",)
-
-                def __init__(self, content: str) -> None:
-                    self.content = content
-
-            class FakeGraph:
-                async def astream(self, payload, config=None, stream_mode=None):
-                    assert isinstance(config, dict)
-                    assert isinstance(config.get("configurable"), dict)
-                    assert stream_mode == ["messages", "updates"]
-                    yield {"messages": [_FakeAssistantChunk(content="pong")]}
-
-            app.state.service._get_graph = lambda: FakeGraph()  # type: ignore[method-assign]
+            # 覆盖懒加载 runtime，避免走真实 OpenAI；SSE 事件名与 `_map_event_envelope_to_stream` 一致。
+            app.state.service._runtime = _SseFakeRuntime()
 
             resp = client.post(
                 "/v1/messages",
@@ -72,7 +80,7 @@ class ApiSseTestCase(unittest.TestCase):
                         break
 
             joined = "\n".join(str(x) for x in chunks)
-            self.assertIn("event: chunk", joined)
+            self.assertIn("event: assistant", joined)
             self.assertIn("event: done", joined)
 
 
