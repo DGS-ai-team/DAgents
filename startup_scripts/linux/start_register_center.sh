@@ -9,10 +9,10 @@ if [[ ! -f ".env" ]]; then
   echo "[startup] 如需自定义配置，请先复制：cp .env.example .env"
 fi
 
-if [[ ! -x "./dagents-register-center" ]]; then
-  echo "[startup] 未找到可执行文件 ./dagents-register-center"
+if [[ ! -x "./dagents_register_center" ]]; then
+  echo "[startup] 未找到可执行文件 ./dagents_register_center"
   exit 1
 fi
 
-echo "[startup] starting dagents-register-center (host/port 由 .env 或程序默认值决定)"
-exec ./dagents-register-center
+echo "[startup] starting dagents_register_center (host/port 由 .env 或程序默认值决定)"
+exec ./dagents_register_center

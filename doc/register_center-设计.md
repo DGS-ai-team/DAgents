@@ -4,7 +4,7 @@
 
 | 项 | 说明 |
 |----|------|
-| **目标读者** | 实现 `register-center/` 服务、以及在 DAgents 中对接注册发现的开发者 |
+| **目标读者** | 实现 `register_center/` 服务、以及在 DAgents 中对接注册发现的开发者 |
 | **与 A2A 关系** | 对齐 **Registries / Catalogs** 的「目录」职责；**不**实现 A2A JSON-RPC 任务协议本身 |
 | **MVP 范围** | 单进程、内存存储、无鉴权；可独立部署，与 **`app/`** 内 Agent 服务通过 HTTP 解耦 |
 
@@ -12,7 +12,7 @@
 
 ## 1. 定位
 
-**Register 中心**（计划实现于仓库根目录 **`register-center/`**）承担 **策展型 Agent 目录** 角色：
+**Register 中心**（实现于仓库根目录 **`register_center/`**）承担 **策展型 Agent 目录** 角色：
 
 - 为客户端提供 **「逻辑 `agent_id` → 可连接的 `base_url`」** 的映射；
 - 客户端拿到 `base_url` 后，自行请求 **`{base_url}/.well-known/agent-card.json`**（或你们约定的 Well-Known 路径），**本服务不代理、不缓存 Card**（MVP）；
@@ -121,7 +121,7 @@
 
 ```
 ┌─────────────┐      POST/GET            ┌──────────────────┐
-│ Agent 进程   │ ───────────────────────► │ register-center  │
+│ Agent 进程   │ ───────────────────────► │ register_center  │
 │ (DAgents     │     /v1/agents           │ FastAPI + 内存    │
 │  run_agent_api)│                         │ dict[agent_id]   │
 └─────────────┘                           └────────┬─────────┘
@@ -134,7 +134,7 @@
 ```
 
 - **存储**：`dict[str, AgentRecord]` + 异步锁或同步锁；无持久化；
-- **进程模型**：与 **`run_agent_api.py`** 类似，独立 **`uvicorn`** 入口（如 **`register-center/run.py`** 或根目录 **`run_register_center.py`**）；
+- **进程模型**：与 **`run_agent_api.py`** 类似，独立 **`uvicorn`** 入口（仓库根目录 **`run_register_center.py`**，加载 **`register_center/rc_app.py`**）；
 - **配置**：**`HOST`/`PORT`**、（后续）**`REGISTRY_ADMIN_TOKEN`**。
 
 ---
@@ -175,7 +175,7 @@
 
 ## 9. 实现清单（建议 PR 拆分）
 
-1. **`register-center/`** 包：`models.py`（Pydantic）、`store.py`（内存表）、`app.py`（FastAPI 路由）；
+1. **`register_center/`**：`rc_models.py`（Pydantic）、`rc_store.py`（内存表）、`rc_app.py`（FastAPI 路由）；
 2. **入口脚本** + **`requirements`** 或与主仓库共用 **`requirements.txt`**（若只多 `fastapi/uvicorn` 而已有则复用）；
 3. **单元测试**：POST 覆盖、GET 筛选、DELETE、URL 规范化；
 4. **（可选）** DAgents **`app/config/settings.py`** 增加 **`registry_url`** / **`discovery_group`** / **`agent_public_base_url`**，并在 API lifespan 钩子中自登记。

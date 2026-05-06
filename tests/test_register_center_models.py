@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_ROOT / "register-center"))
+sys.path.insert(0, str(_ROOT / "register_center"))
 
 from rc_models import AgentUpsertRequest  # noqa: E402
 

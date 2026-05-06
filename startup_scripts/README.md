@@ -4,5 +4,5 @@
 
 | 子目录 | 说明 |
 |---|---|
-| `linux/` | Linux 启动脚本：`start.sh`（API）、`start-register-center.sh`（Register Center） |
-| `windows/` | Windows 启动脚本：`start.bat`（API）、`start-register-center.bat`（Register Center） |
+| `linux/` | Linux 启动脚本：`start.sh`（API）、`start_register_center.sh`（Register Center） |
+| `windows/` | Windows 启动脚本：`start.bat`（API）、`start_register_center.bat`（Register Center） |

@@ -1,4 +1,4 @@
-# register-center / REFERENCE
+# register_center / REFERENCE
 
 ## `__init__.py`
 

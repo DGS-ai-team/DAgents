@@ -21,8 +21,8 @@
 
 - `REGISTRY_URL`：Register Center 地址（供 `agent_discover/agent_send_message/agent_broadcast` 使用）
 - `DISCOVERY_GROUPS`：当前 Agent 所属分组（逗号分隔，运行时解析为列表）
-- `AGENT_PUBLIC_BASE_URL`：当前 Agent 对外可访问地址（用于 API 启动时向 register-center 自登记）
+- `AGENT_PUBLIC_BASE_URL`：当前 Agent 对外可访问地址（用于 API 启动时向 Register Center 自登记）
 - `AGENT_PEER_CACHE_TTL_SECONDS`：`agent_peer` 中 agent 列表缓存 TTL 秒数（默认 `60`）
-- `AGENT_PEER_DELIVERY_MODE`：`agent_send_message` 投递模式（`direct` 直连目标，`relay` 经 register-center 中继；默认 `direct`）
+- `AGENT_PEER_DELIVERY_MODE`：`agent_send_message` 投递模式（`direct` 直连目标，`relay` 经 Register Center 中继；默认 `direct`）
 - `AGENT_PEER_STREAM_TIMEOUT_SECONDS`：`agent_send_message` 拉取对端 SSE 输出的超时秒数（默认 `60`）
 - `AGENT_PEER_BROADCAST_STREAM_TIMEOUT_SECONDS`：`agent_broadcast` 汇总多目标 SSE 输出的总超时秒数（默认 `20`，超时截断已收集内容）

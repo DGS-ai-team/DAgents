@@ -24,7 +24,7 @@
 - **`PeerStreamSummary`**：**Pydantic `BaseModel`**；单次远端 SSE 拉取汇总（`text/approvals/errors/final_state/truncated`）。
 - **`agent_discover`**：按分组发现可协作 Agent（内联固定结构 `agent_card`）
 - **`agent_send_message`**：点对点向目标 Agent 提交消息；返回信封含 `target_session_id/approvals/final_state` 与真实 `task.state`
-- **`agent_broadcast`**：调用 register-center 广播并并发收集每个目标 SSE，聚合 `approvals` 与广播级 `task.state`
+- **`agent_broadcast`**：调用 Register Center 广播并并发收集每个目标 SSE，聚合 `approvals` 与广播级 `task.state`
 - **`agent_peer_approve_tools`**：对端 `approval_required` 后向其提交 `approve/reject/selection` 决策的 `resume`，再收集后续 SSE
 - **`_collect_peer_stream_summary`**：读取目标 `/v1/streams?client_id=...` 并按 `session_id` 汇总文本/审批/错误，超时返回 `truncated`
 - **`_approval_entry_from_event`**：把 SSE `approval_required` 的 `data` 转为 `PeerApprovalEntry`

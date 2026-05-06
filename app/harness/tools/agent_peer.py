@@ -250,7 +250,7 @@ def _require_registry_url() -> str:
 
 
 def _discover_agents_by_groups(groups: list[str]) -> list[dict[str, Any]]:
-    """按分组查询 register-center 并聚合去重。"""
+    """按分组查询 Register Center 并聚合去重。"""
 
     final_groups = _stable_groups(groups)
     if not final_groups:
@@ -994,7 +994,7 @@ async def agent_peer_approve_tools(
             trace_id=trace_id,
         )
     try:
-        # 审批 resume 走 direct：register-center 中继不透传 resume_value，仅消息分支可用。
+        # 审批 resume 走 direct：Register Center 中继不透传 resume_value，仅消息分支可用。
         target = _resolve_target_agent(target_id)
         target_base_url = str(target.get("base_url") or "").strip().rstrip("/")
         if not target_base_url:

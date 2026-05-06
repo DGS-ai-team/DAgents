@@ -12,6 +12,7 @@
 | **`app/harness/tools/`** | `get_tools()` |
 | **`app/harness/memory/`** | SQLite 记忆存储（`SqliteMessageStore`） |
 | **`app/harness/cli/`** | 命令行入口 `main()` |
+| **`register_center/`** | Register Center：登记/发现/广播/中继（`rc_app.py` 等；设计见 [register_center-设计.md](./register_center-设计.md)） |
 
 启动脚本：
 

@@ -173,7 +173,7 @@ flowchart TD
 
 - `agent_discover`：按组发现 Agent（支持 `capabilities_hint` 过滤，并在 `agents` 中内联固定结构 `agent_card`，含访问 URL 与端口）
 - `agent_send_message`：异步点对点发送（`session_id` 从 `context` 解析）并汇总对端 SSE 已输出内容
-- `agent_broadcast`：异步通过 register-center 分组广播，并在超时阈值内汇总各目标 SSE 输出（超时截断）
+- `agent_broadcast`：异步通过 Register Center 分组广播，并在超时阈值内汇总各目标 SSE 输出（超时截断）
 
 ### 10.3 Runtime 映射约定
 

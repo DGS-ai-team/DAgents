@@ -253,7 +253,7 @@ class BroadcastRequest(BaseModel):
         min_length=1,
         description="目标发现分组 ID 列表；命中任一分组即会接收广播。",
     )
-    source: str = Field(default="register-center-broadcast", description="转发消息来源标识。")
+    source: str = Field(default="register_center_broadcast", description="转发消息来源标识。")
 
     @field_validator("message")
     @classmethod

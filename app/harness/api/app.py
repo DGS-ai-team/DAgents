@@ -66,7 +66,7 @@ class CancelTurnResult(BaseModel):
 
 
 async def _register_self_to_registry() -> tuple[bool, str, str]:
-    """在 Agent 启动阶段向 register-center 登记当前实例。
+    """在 Agent 启动阶段向 Register Center 登记当前实例。
 
     逻辑：
     1. 读取配置中的 `registry_url/agent_public_base_url/discovery_groups/agent_id`；
@@ -79,13 +79,13 @@ async def _register_self_to_registry() -> tuple[bool, str, str]:
     - 网络异常不会中断 API 启动，返回失败原因供日志排查。
 
     与外部交互：
-    - 对 register-center 发起 HTTP POST 请求。
+    - 对 Register Center 发起 HTTP POST 请求。
 
     异常说明：
     - 内部吞掉网络异常并转为 `(False, reason, url)`。
 
     副作用说明：
-    - 成功时会在 register-center 新增或覆盖当前 agent 记录。
+    - 成功时会在 Register Center 新增或覆盖当前 agent 记录。
     """
     s = get_settings()
     registry_url = (s.registry_url or "").strip().rstrip("/")
@@ -115,7 +115,7 @@ async def _register_self_to_registry() -> tuple[bool, str, str]:
 
 
 async def _unregister_self_from_registry(registry_url: str) -> tuple[bool, str]:
-    """在 Agent 关闭阶段从 register-center 注销当前实例。
+    """在 Agent 关闭阶段从 Register Center 注销当前实例。
 
     逻辑：
     1. 校验 `registry_url` 与 `agent_id`；
@@ -128,13 +128,13 @@ async def _unregister_self_from_registry(registry_url: str) -> tuple[bool, str]:
     - 网络异常不阻断主进程退出。
 
     与外部交互：
-    - 对 register-center 发起 HTTP DELETE 请求。
+    - 对 Register Center 发起 HTTP DELETE 请求。
 
     异常说明：
     - 内部吞掉网络异常并转为 `(False, reason)`。
 
     副作用说明：
-    - 成功时会移除 register-center 中当前 agent 的目录记录。
+    - 成功时会移除 Register Center 中当前 agent 的目录记录。
     """
     s = get_settings()
     agent_id = (s.agent_id or "").strip()

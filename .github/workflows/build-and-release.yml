@@ -43,16 +43,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # linux-x64：宿主 amd64，Python 3.13 与产物均为 x86_64
+          # linux-x64：在 **ubuntu:20.04** 容器内用 deadsnakes 3.13 打包，降低 glibc 要求（避免 22.04 宿主编译导致旧系统缺 GLIBC_2.3x）
           - target: linux-x64
             os: ubuntu-22.04
-            build_kind: native
+            build_kind: docker-focal-amd64
             python_arch: x64
             archive_name: dagents-api-linux-x64.zip
             api_bin_name: dagents-api
-            rc_bin_name: dagents-register-center
+            rc_bin_name: dagents_register_center
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data=register-center:register-center run_register_center.py
+            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
           # linux-x86：Docker Hub 的 i386/ubuntu 无 jammy/22.04 标签；使用 focal（20.04）i386 根文件系统构建（容器内 Python 版本随镜像，与 x64 的 3.13 不一致）
           - target: linux-x86
             os: ubuntu-22.04
@@ -60,27 +60,27 @@ jobs:
             python_arch: x86
             archive_name: dagents-api-linux-x86.zip
             api_bin_name: dagents-api
-            rc_bin_name: dagents-register-center
+            rc_bin_name: dagents_register_center
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data=register-center:register-center run_register_center.py
+            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
           - target: windows-x64
             os: windows-2022
             build_kind: native
             python_arch: x64
             archive_name: dagents-api-windows-x64.zip
             api_bin_name: dagents-api.exe
-            rc_bin_name: dagents-register-center.exe
+            rc_bin_name: dagents_register_center.exe
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data="register-center;register-center" run_register_center.py
+            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
           - target: windows-x86
             os: windows-2022
             build_kind: native
             python_arch: x86
             archive_name: dagents-api-windows-x86.zip
             api_bin_name: dagents-api.exe
-            rc_bin_name: dagents-register-center.exe
+            rc_bin_name: dagents_register_center.exe
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents-register-center --hidden-import=httpx --hidden-import=fastapi --add-data="register-center;register-center" run_register_center.py
+            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
 
     steps:
       - name: Checkout
@@ -118,6 +118,21 @@ jobs:
           pyinstaller ${{ matrix.api_pyinstaller_args }}
           pyinstaller ${{ matrix.rc_pyinstaller_args }}
 
+      - name: Build single-file binaries (Linux x64 via Ubuntu 20.04 Docker + deadsnakes)
+        if: matrix.build_kind == 'docker-focal-amd64'
+        timeout-minutes: 90
+        shell: bash
+        env:
+          API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
+          RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
+        run: |
+          set -euxo pipefail
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/src" -w /src \
+            -e API_PI_ARGS -e RC_PI_ARGS \
+            ubuntu:20.04 \
+            bash /src/scripts/ci/build_linux_amd64_focal_deadsnakes.sh
+
       - name: Build single-file binaries (Linux i386 / x86 via Docker + pyenv)
         if: matrix.build_kind == 'docker-i386'
         timeout-minutes: 120
@@ -143,9 +158,9 @@ jobs:
           cp "dist/${{ matrix.api_bin_name }}" bundle/
           cp "dist/${{ matrix.rc_bin_name }}" bundle/
           cp startup_scripts/linux/start.sh bundle/
-          cp startup_scripts/linux/start-register-center.sh bundle/
+          cp startup_scripts/linux/start_register_center.sh bundle/
           chmod +x bundle/start.sh
-          chmod +x bundle/start-register-center.sh
+          chmod +x bundle/start_register_center.sh
           cp .env.example bundle/
           cp README.md bundle/
           cp -r skills bundle/skills
@@ -161,7 +176,7 @@ jobs:
           Copy-Item "dist/${{ matrix.api_bin_name }}" "bundle/"
           Copy-Item "dist/${{ matrix.rc_bin_name }}" "bundle/"
           Copy-Item "startup_scripts/windows/start.bat" "bundle/"
-          Copy-Item "startup_scripts/windows/start-register-center.bat" "bundle/"
+          Copy-Item "startup_scripts/windows/start_register_center.bat" "bundle/"
           Copy-Item ".env.example" "bundle/"
           Copy-Item "README.md" "bundle/"
           Copy-Item "skills" "bundle/skills" -Recurse

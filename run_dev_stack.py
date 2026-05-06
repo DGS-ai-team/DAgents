@@ -105,7 +105,7 @@ def build_commands(
     commands: list[tuple[str, list[str], Path]] = []
     if not args.no_register:
         commands.append(
-            ("register-center", [sys.executable, "run_register_center.py"], root),
+            ("register_center", [sys.executable, "run_register_center.py"], root),
         )
     else:
         pass
