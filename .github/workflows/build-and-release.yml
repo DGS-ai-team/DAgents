@@ -12,8 +12,31 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  # 与矩阵打包分离：先在同一 workflow 内跑单测，通过后再构建（release 仍依赖 build-bundle）。
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unittest discovery
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
   build-bundle:
     name: Build Bundle (${{ matrix.target }})
+    needs: unit-tests
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -72,14 +95,6 @@ jobs:
         if: matrix.build_kind == 'docker-i386'
         uses: docker/setup-qemu-action@v3
 
-      # docker-i386：宿主仍用 3.13 跑单测；位数相关打包在容器内完成。
-      - name: Setup Python (host, for tests / linux-x64 & Windows 原生构建)
-        if: matrix.build_kind == 'docker-i386'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-
       - name: Setup Python (目标架构：x64 / x86)
         if: matrix.build_kind == 'native'
         uses: actions/setup-python@v5
@@ -88,19 +103,13 @@ jobs:
           architecture: ${{ matrix.python_arch }}
           cache: pip
 
-      - name: Install dependencies (Python packages)
+      - name: Install dependencies (Python packages, native build only)
+        if: matrix.build_kind == 'native'
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          if [ "${{ matrix.build_kind }}" != "docker-i386" ]; then
-            pip install pyinstaller
-          fi
-
-      - name: Run unit tests (stable subset)
-        shell: bash
-        run: |
-          python -m unittest tests.test_agent_service tests.test_message_queue -v
+          pip install pyinstaller
 
       - name: Build single-file binaries (native PyInstaller)
         if: matrix.build_kind == 'native'
