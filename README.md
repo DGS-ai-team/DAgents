@@ -1,64 +1,60 @@
 # DAgents
 
-DAgents 是一个面向多 Agent / 工具调用场景的 Python 实验项目，提供：
+**本仓库为 DAgents 后端**：多 Agent / 工具调用场景下的 Python 运行时，提供 FastAPI 服务、CLI、注册中心（Register Center）与相关设计文档。  
+**协议**：[MIT License](LICENSE)。**Web 前端**已独立，见 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI)。
 
-- 会话化 Agent 运行时（含工具调用、审批、流式输出）
-- API 服务与 CLI 客户端
-- 本地持久化（SQLite）与可观测性（Prometheus metrics）
-- 可扩展的注册中心（Register Center）
+- 会话化 Agent 运行时（工具调用、审批、流式输出）
+- API 与 CLI、SQLite 可选持久化、Prometheus 指标（`/metrics`）
+- 可独立部署的注册中心 **`register_center/`**（Agent 登记、发现、分组广播与中继）
 
-> 当前项目处于持续迭代阶段，接口与内部实现可能发生变化。
+> 项目持续迭代中，接口与实现可能变化。
 
 ## 功能概览
 
-- **消息编排**：按 session 串行处理消息，支持 `human_message`、`tool_result`、`resume` 等流程。
-- **工具调用**：支持 OpenAI tool calling、审批执行、异步工具结果回灌。
-- **上下文压缩**：支持静默/阻塞双阈值压缩，降低长会话上下文成本。
-- **流式输出**：支持事件流（SSE）返回 assistant/reasoning/usage/tool 事件。
+- **消息编排**：按 `session` 串行处理，支持 `human_message`、`tool_result`、`resume` 等。
+- **工具调用**：OpenAI tool calling、审批执行、异步工具结果回灌。
+- **上下文压缩**：静默 / 阻塞双阈值压缩，降低长会话成本。
+- **流式输出**：SSE 返回 assistant / reasoning / usage / tool 等事件。
 - **持久化**：可选 SQLite 会话存储，重启后可恢复上下文。
+- **多 Agent 协作**：通过配置连接 Register Center，支持发现、广播与点对点投递（见 `app/harness/tools/`）。
 
-## 项目结构
+## 项目结构（根目录）
 
 ```text
 DAgents/
-├── run_agent.py                 # CLI 启动入口
-├── run_agent_api.py             # FastAPI 启动入口
-├── run_register_center.py       # Register Center 启动入口
+├── LICENSE                      # MIT
 ├── requirements.txt
-├── .env.example
-├── scripts/                     # 辅助脚本（如 CI 用 `scripts/ci/`）
-├── packaging/                   # 分发说明模板（如离线安装摘要 OFFLINE_INSTALL.md）
-├── .github/workflows/           # CI（单测、PyInstaller 打包等）
-├── desktop/                     # 桌面壳预留（如 Tauri）
-├── prompt_context/              # 系统提示上下文侧车文件
-├── register_center/              # Register Center 实现
-├── app/
-│   ├── config/                  # 配置与环境变量加载
-│   ├── context/                 # 会话上下文模型
-│   ├── core/                    # 主 Agent 与摘要压缩核心逻辑
-│   ├── harness/                 # API/CLI/服务/工具/队列/存储
-│   ├── observability/           # 指标与观测
-│   └── schemas/                 # 协议/数据模型
-└── doc/                         # 设计与实现文档
+├── .env.example                 # 环境变量模板（复制为 .env）
+├── run_agent.py                 # CLI
+├── run_agent_api.py             # FastAPI（Agent API）
+├── run_register_center.py       # Register Center
+├── run_dev_stack.py             # 本地同时拉起 API + Register Center
+├── export_openapi_schema.py     # 导出 OpenAPI（前后端契约）
+├── app/                         # 核心代码（config / core / harness / …）
+├── register_center/             # Register Center 实现（FastAPI + 内存表）
+├── tests/                       # 单元测试（`unittest`）
+├── startup_scripts/             # 预编译包用：`start.sh`、`start_register_center.*`
+├── scripts/                     # 辅助脚本（含 CI 构建）
+├── packaging/                   # 离线安装说明等
+├── prompt_context/              # 系统提示侧车文件
+├── skills/                      # Agent / Cursor 技能等资源（按需）
+├── doc/                         # 设计与实现文档
+└── .github/workflows/           # CI（单测、PyInstaller 打包）
 ```
 
 ## 环境要求（概要）
 
-下表按「如何拿到软件」区分；**请优先看你采用的安装方式那一列**。
+| 安装方式 | Python | 其它 | 典型场景 |
+|----------|--------|------|----------|
+| **源码 + 在线 pip** | **3.11+**（CI 常用 **3.13**） | pip、可访问 PyPI | 开发 / 有外网服务器 |
+| **源码 + 离线 wheels** | 与下载 wheel 时 **次版本一致** | wheel 与 OS/架构绑定 | 内网、隔离环境 |
+| **PyInstaller 发布包** | **无需** Python | Linux 需兼容构建环境的 **glibc** | 解压即用 |
 
-| 安装方式 | Python | 其它运行时要求 | 典型场景 |
-|----------|--------|----------------|----------|
-| **源码 + 在线 pip** | **3.11+**（开发与 CI 常用 **3.13**） | pip，可访问 PyPI | 开发机、有外网服务器 |
-| **源码 + 自下载离线 wheels** | 与 `pip download` 时使用的 **Python 次版本** 一致（如 **3.13**） | pip；wheel 与 **OS/架构** 绑定，须在目标同类环境或联网机为该平台预下载 | 内网、隔离环境 |
-| **PyInstaller 单文件 / 发布压缩包** | **无需**安装 Python | **Linux**：宿主 **glibc** 需不低于构建环境（在较新 Ubuntu 上打的包通常要求 **≥ Ubuntu 20.04 / glibc 2.31 一类**，更旧系统可能报 `GLIBC_x.xx not found`）；**Windows**：对应位数系统 | 解压即用 |
+离线 wheel 说明见 **`packaging/OFFLINE_INSTALL.md`**。
 
-**补充**：离线 wheel **与 Python 次版本、操作系统、CPU 架构绑定**；更换版本或平台需在可联网机器上用 **目标环境的 Python** 重新执行 `pip download`（步骤见下文 B）及 `packaging/OFFLINE_INSTALL.md`）。
-
-## 安装与运行方式
+## 安装与运行
 
 ### A）源码 + 在线 pip（推荐开发）
-
-**环境**：Python **3.11+**，pip，可访问 PyPI。
 
 ```bash
 python -m venv .venv
@@ -68,90 +64,75 @@ cp .env.example .env
 python run_agent_api.py
 ```
 
-常用配置见 `app/config/settings.py`；`API_HOST` / `API_PORT` 等可通过 `.env` 设置。
+常用配置见 **`app/config/settings.py`**；监听地址可通过 **`API_HOST`** / **`API_PORT`**（默认 **`127.0.0.1:8000`**）等在 `.env` 中设置。
 
-### B）源码 + 离线依赖（自行 `pip download`）
+### B）源码 + 离线依赖
 
-在无 PyPI 的机器上运行前，请在 **可联网**、且 **Python 次版本 / OS / 架构与目标机一致**（或兼容）的环境下预先下载依赖 wheel。
+在可联网且与目标机 Python 次版本 / OS / 架构一致的环境执行 `pip download -r requirements.txt`，将源码与 `wheels/` 拷至离线机后 `pip install --no-index --find-links=wheels -r requirements.txt`。步骤细节见 **`packaging/OFFLINE_INSTALL.md`**。
 
-**1）联网机上下载 wheel（示例以 Linux + Python 3.13，仓库根目录为准）：**
+### C）预编译二进制（PyInstaller）
 
-```bash
-python3.13 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install --upgrade pip wheel
-mkdir -p wheels
-pip download -r requirements.txt -d wheels
-```
+无需 Python；Linux 注意 glibc 兼容性。解压后配置 `.env`，运行：
 
-**2）将本仓库源码（可用 `git clone` / 拷贝，排除 `.git` 与 `.venv` 亦可）与 `wheels/` 目录一并拷到离线机。**
+- **`dagents-api`** / **`dagents-api.exe`**：Agent API  
+- **`dagents_register_center`** / **`dagents_register_center.exe`**：Register Center  
 
-**3）离线机安装与启动：**
+可选用 **`startup_scripts/linux/`**、**`startup_scripts/windows/`** 下的启动脚本。
 
-```bash
-python3.13 -m venv .venv && source .venv/bin/activate
-pip install --no-index --find-links=wheels -r requirements.txt
-cp .env.example .env
-python run_agent_api.py
-```
+### 常用启动命令（源码）
 
-若目标为 **其它 Python 版本**（如 3.12）或 **Windows/macOS**，不可用为他平台下载的 wheel，须在对应环境的联网机上用该环境的 Python **重新执行** `pip download`。更完整的说明见 **`packaging/OFFLINE_INSTALL.md`**。
+| 用途 | 命令 |
+|------|------|
+| Agent API | `python run_agent_api.py` |
+| CLI | `python run_agent.py` |
+| Register Center | `python run_register_center.py`（默认约 **`0.0.0.0:8010`**，见 `.env` / `REGISTER_CENTER_*`） |
+| 本地联调（API + Register Center） | `python run_dev_stack.py` |
 
-### C）预编译二进制（PyInstaller 发布包）
+## 与前端（DAgentsUI）对接
 
-**环境**：无需 Python；Linux 用户需满足 **与构建机兼容的 glibc**（过旧发行版会出现 `libpython… GLIBC_x.xx not found`）。详见发布页说明；启动可使用 `startup_scripts/` 下脚本。
+前端仓库：**[github.com/DGS-ai-team/DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI)**。
 
-解压后配置 `.env`，运行目录中的 `dagents-api` / `dagents_register_center`（或对应 `.exe`）。
+建议流程：
 
-### 启动命令（源码方式）
-
-- **API 服务**：`python run_agent_api.py`
-- **CLI 客户端**：`python run_agent.py`
-- **Register Center**：`python run_register_center.py`
-- **一键开发栈（后端）**：`python run_dev_stack.py`（默认同时启动 API + Register Center）
-
-默认 API 监听 `127.0.0.1:8000`。
-
-## 前后端分仓说明
-
-- **后端**：本仓库负责 API、Agent Runtime、`register_center/`（Register Center）与相关文档。
-- **前端**：已独立为 **[DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI)**（React UI、SSE 消费与审批交互）；请在浏览器打开该仓库查看开发与对接说明。
-- **前后端对接流程（建议保留在前端仓库文档或 CI 中）**：
-  - 从后端导出 OpenAPI：`python export_openapi_schema.py --output <前端仓库路径>/openapi.json`
-  - 在前端仓库生成 TS 类型：`pnpm gen:types`
-  - 对接 API：`POST /v1/messages`、`GET /v1/streams?client_id=...`
+1. 在本仓库根目录导出 OpenAPI：  
+   `python export_openapi_schema.py --output <前端仓库路径>/openapi.json`
+2. 在前端仓库生成类型（若前端已配置）：`pnpm gen:types`
+3. 典型 HTTP：`POST /v1/messages`、SSE 相关路由（见下文与 **`app/harness/api/README.md`**）
 
 ## API 说明（简版）
 
-- `POST /v1/messages`：提交消息
-- `GET /v1/streams/{request_id}`：订阅 SSE 事件流
-- 其他接口：待补充
+更完整的契约与路由说明见 **`app/harness/api/README.md`** 与 OpenAPI 导出。
 
-详细接口说明请参考 `app/harness/api/README.md` 与实现代码。
+| 能力 | 路径（示例） |
+|------|----------------|
+| 健康检查 | `GET /health` |
+| 创建会话 | `POST /v1/sessions` |
+| 提交消息 | `POST /v1/messages` |
+| 全局 SSE（按 client_id） | `GET /v1/streams?client_id=...` |
+| 取消当前 turn | `POST /v1/sessions/{session_id}/cancel` |
+| 释放会话 | `DELETE /v1/sessions/{session_id}` |
+| 指标 | `GET /metrics`（若启用） |
+
+Register Center 的 REST 约定见 **`register_center/README.md`** 与 **`doc/register_center-设计.md`**。
 
 ## 开发说明
 
-- 代码主入口在 `app/` 下，按目录维护 `README.md` 与 `REFERENCE.md`。
-- `register_center/` 与根目录 `run_register_center.py` 配套；启动脚本通过 `importlib` 按文件路径加载 `rc_app.py`（便于在未安装为 site-package 时运行）。
-- 运行测试（需先 `pip install -r requirements.txt`）：
+- **`app/`** 与各子目录维护 **`README.md`** / **`REFERENCE.md`**（约定见 `.cursor/rules/`）。
+- **`register_center/`** 由根目录 **`run_register_center.py`** 通过 `importlib` 加载 **`rc_app.py`**，便于不经安装直接运行。
+- 运行测试：
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-- 指标相关可参考 `app/observability/metrics.py` 与 `/metrics` 暴露逻辑。
+部分用例依赖 **`OPENAI_API_KEY`** 或实时 LLM（见测试文件中的 skip 条件）；CI 安装依赖后应与发布流程一致。
+
+- 指标实现见 **`app/observability/metrics.py`**。
 
 ## 配置与安全
 
-- 请勿提交 `.env`、密钥、令牌等敏感信息。
-- 建议在开发环境使用独立数据库与隔离 API Key。
-
-## 路线图（Roadmap）
-
-- [ ] 完整 API 文档与错误码说明
-- [ ] 更细粒度的压缩策略与回归测试
-- [ ] 更完善的部署脚本（Docker/Compose，待补充）
-- [ ] 权限与多租户能力（待补充）
+- 勿将 **`.env`**、密钥、令牌提交到版本库。
+- 开发环境建议使用独立凭据与隔离的 API Key。
 
 ## 文档入口
 

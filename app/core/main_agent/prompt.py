@@ -12,7 +12,7 @@ from app.harness.skills.skills import (
     list_enabled_skill_metadata,
     render_skill_metadata_prompt,
     render_skills_prompt,
-    select_skill_by_id,
+    select_skill_by_name,
 )
 
 # 记忆文件缓存：key -> (content, mtime)，文件未修改时直接返回缓存，避免重复读盘
@@ -177,20 +177,20 @@ def get_system_prompt(
             )
         max_skills = max(0, int(settings.agent_skills_max_in_prompt))
         selected_skills = []
-        loaded_skill_ids = [
-            str(item.get("id", "") or "")
+        loaded_skill_names = [
+            str(item.get("skill_name") or "")
             for item in context.loaded_skills
             if isinstance(item, dict)
         ]
         seen: set[str] = set()
-        for raw_id in loaded_skill_ids:
-            skill_id = str(raw_id or "").strip()
-            if not skill_id:
+        for raw_name in loaded_skill_names:
+            skill_name = str(raw_name or "").strip()
+            if not skill_name:
                 continue
-            if skill_id in seen:
+            if skill_name in seen:
                 continue
-            seen.add(skill_id)
-            skill = select_skill_by_id(skill_id)
+            seen.add(skill_name)
+            skill = select_skill_by_name(skill_name)
             if skill is None:
                 continue
             selected_skills.append(skill)
@@ -207,12 +207,10 @@ def get_system_prompt(
             "\n\n## 你可以自主创建 skills（已启用）\n\n"
             "当任务需要沉淀可复用能力时，你可以创建或更新 skills。\n\n"
             f"- skills 根目录：`{skills_dir}`\n"
-            "- 目录结构：`<skills_root>/<skill_id>/SKILL.md`\n"
+            "- 目录结构：`<skills_root>/<skill_name>/SKILL.md`（目录名即唯一技能名）\n"
             "- 文件格式：`SKILL.md` 必须由 frontmatter 元数据头 + 正文组成，示例：\n"
             "  ---\n"
-            "  id: my-skill\n"
-            "  name: My Skill\n"
-            "  description: 简要描述\n"
+            "  description: 简要描述（单行）\n"
             "  enabled: true\n"
             "  ---\n"
             "  <正文规则与步骤>\n"

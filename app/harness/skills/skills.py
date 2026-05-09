@@ -22,18 +22,18 @@ class SkillDefinition(BaseModel):
     """技能定义（元信息 + markdown 内容）。
 
     逻辑：
-    1. `id` 来自技能目录名，`name/description/enabled` 来自 `SKILL.md` 头部元数据；
-    2. `content` 来自 `SKILL.md` 正文；
-    3. 匹配阶段只读该结构，不再访问文件系统。
+    1. **`skill_name`** 仅来自技能目录名（与磁盘路径一致），作为唯一标识；
+    2. **`description`/`enabled`** 来自 `SKILL.md` frontmatter（不再使用单独的展示名，避免与目录名重复）；
+    3. **`content`** 来自正文段。
 
     关键边界：
-    - `content` 允许为空，渲染阶段会过滤。
+    - `content` 允许为空，渲染阶段会过滤；
+    - frontmatter 中的 **`name`** 字段若存在将被忽略（仍以目录名为准）。
     """
 
     model_config = ConfigDict(frozen=True)
 
-    id: str = Field(description="技能唯一标识。")
-    name: str = Field(description="技能展示名称。")
+    skill_name: str = Field(description="技能唯一名称（与 `skills/<skill_name>/` 目录名一致）。")
     description: str = Field(default="", description="技能简要说明。")
     enabled: bool = Field(default=True, description="技能是否启用。")
     content: str = Field(default="", description="技能正文（来自 `SKILL.md` 正文段）。")
@@ -151,12 +151,12 @@ def list_enabled_skills() -> list[SkillDefinition]:
     1. 扫描 `skills/*/SKILL.md`；
     2. 读取并解析文件头部元数据（frontmatter）；
     3. 读取同文件正文；
-    4. 过滤 `enabled=False` 与无 `id` 项；
-    5. 按 `id ASC` 排序。
+    4. 过滤 `enabled=False` 与目录名为空的项；
+    5. 按 `skill_name ASC` 排序。
 
     关键边界：
     - 目录不存在、文件损坏均按空列表处理；
-    - 未提供 `name/description` 时使用默认值。
+    - 未提供 `description` 时为空串。
     """
 
     skills_dir = _resolve_skills_dir()
@@ -165,18 +165,16 @@ def list_enabled_skills() -> list[SkillDefinition]:
     out: list[SkillDefinition] = []
     for skill_md_path in skills_dir.glob("*/SKILL.md"):
         meta, content = _read_skill_markdown_cached(skill_md_path)
-        skill_id = str(skill_md_path.parent.name).strip()
-        if not skill_id:
+        skill_name = str(skill_md_path.parent.name).strip()
+        if not skill_name:
             continue
-        name = str(meta.get("name") or skill_id).strip() or skill_id
         description = str(meta.get("description") or "").strip()
         enabled_raw = meta.get("enabled", True)
         enabled = bool(enabled_raw)
         if enabled:
             out.append(
                 SkillDefinition(
-                    id=skill_id,
-                    name=name,
+                    skill_name=skill_name,
                     description=description,
                     enabled=True,
                     content=content,
@@ -184,17 +182,17 @@ def list_enabled_skills() -> list[SkillDefinition]:
             )
         else:
             continue
-    out.sort(key=lambda item: item.id)
+    out.sort(key=lambda item: item.skill_name)
     return out
 
 
 def list_enabled_skill_metadata() -> list[dict[str, str]]:
-    """返回启用技能的元数据列表（`id/name/description`）。
+    """返回启用技能的元数据列表（`skill_name/description`）。
 
     逻辑：
     1. 调用 `list_enabled_skills` 获取技能定义；
-    2. 仅提取 `id/name/description` 三个稳定字段；
-    3. 保持原有排序顺序，供 system prompt 常驻展示。
+    2. 仅提取 `skill_name/description`；
+    3. 保持排序顺序，供 system prompt 常驻展示。
 
     关键边界：
     - 无启用技能时返回空列表；
@@ -203,32 +201,31 @@ def list_enabled_skill_metadata() -> list[dict[str, str]]:
 
     return [
         {
-            "id": skill.id,
-            "name": skill.name,
+            "skill_name": skill.skill_name,
             "description": skill.description,
         }
         for skill in list_enabled_skills()
     ]
 
 
-def select_skill_by_id(skill_id: str) -> SkillDefinition | None:
-    """按单个技能 ID 返回技能定义。
+def select_skill_by_name(skill_name: str) -> SkillDefinition | None:
+    """按单个技能名（目录名）返回技能定义。
 
     逻辑：
-    1. 读取启用技能并构建 `id -> SkillDefinition` 索引；
-    2. 用传入 `skill_id` 命中索引；
+    1. 读取启用技能并构建 `skill_name -> SkillDefinition` 索引；
+    2. 用传入 `skill_name` 命中索引；
     3. 命中返回单个技能，未命中返回 `None`。
 
     关键边界：
-    - `skill_id` 为空白时直接返回 `None`；
+    - `skill_name` 为空白时直接返回 `None`；
     - 仅返回启用技能，不会返回禁用技能。
     """
 
-    final_skill_id = str(skill_id or "").strip()
-    if not final_skill_id:
+    final_name = str(skill_name or "").strip()
+    if not final_name:
         return None
-    mapping = {skill.id: skill for skill in list_enabled_skills()}
-    skill = mapping.get(final_skill_id)
+    mapping = {skill.skill_name: skill for skill in list_enabled_skills()}
+    skill = mapping.get(final_name)
     if skill is not None:
         return skill
     return None
@@ -238,23 +235,22 @@ def render_skill_metadata_prompt(skill_meta_list: list[dict[str, str]]) -> str:
     """渲染 skills 元数据清单到 system prompt。
 
     逻辑：
-    1. 遍历元数据并提取 `id/name/description`；
+    1. 遍历元数据并提取 `skill_name/description`；
     2. 按固定格式输出列表，保证模型可稳定解析；
     3. 无可用条目时返回空串。
 
     关键边界：
-    - 缺失 `id` 的条目直接跳过；
+    - 缺失 `skill_name` 的条目直接跳过；
     - `description` 允许为空。
     """
 
     lines: list[str] = []
     for item in skill_meta_list:
-        skill_id = str(item.get("id", "") or "").strip()
-        if not skill_id:
+        skill_name = str(item.get("skill_name") or "").strip()
+        if not skill_name:
             continue
-        name = str(item.get("name", "") or "").strip() or skill_id
         description = str(item.get("description", "") or "").strip()
-        lines.append(f"- id={skill_id}; name={name}; description={description}")
+        lines.append(f"- skill_name={skill_name}; description={description}")
     if lines:
         return "## 以下是可用 skills 元数据清单（常驻）\n" + "\n".join(lines)
     else:
@@ -279,7 +275,7 @@ def render_skills_prompt(skills: list[SkillDefinition]) -> str:
         body = str(skill.content or "").strip()
         if not body:
             continue
-        blocks.append(f"### 技能：{skill.name}（{skill.id}）\n{body}")
+        blocks.append(f"### 技能：{skill.skill_name}\n{body}")
     if blocks:
         return "## 以下是可用技能（按本轮相关性筛选）\n\n" + "\n\n".join(blocks)
     else:

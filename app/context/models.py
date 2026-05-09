@@ -103,7 +103,7 @@ class ConversationContext(BaseModel):
     tool_loop_count: int = Field(default=0, description="跨回合累计工具循环计数。")
     loaded_skills: list[dict[str, str]] = Field(
         default_factory=list,
-        description="已加载技能列表（`id/name/description`），用于持久化当前会话技能态。",
+        description="已加载技能列表（`skill_name/description`），用于持久化当前会话技能态。",
     )
 
     def add_turn(self, *, role: str, content: str, meta: dict[str, Any] | None = None) -> None:
@@ -148,12 +148,11 @@ class ConversationContext(BaseModel):
         for item in self.loaded_skills:
             if not isinstance(item, dict):
                 continue
-            skill_id = str(item.get("id", "") or "").strip()
-            name = str(item.get("name", "") or "").strip()
-            description = str(item.get("description", "") or "").strip()
-            if not skill_id:
+            skill_name = str(item.get("skill_name") or "").strip()
+            description = str(item.get("description") or "").strip()
+            if not skill_name:
                 continue
-            loaded_skills.append({"id": skill_id, "name": name, "description": description})
+            loaded_skills.append({"skill_name": skill_name, "description": description})
         return (
             messages,
             pending_specs,
@@ -217,7 +216,7 @@ class OpenAIConversationContext(BaseModel):
     tool_loop_count: int = Field(default=0, description="跨 run_turn 累积的工具循环计数。")
     loaded_skills: list[dict[str, str]] = Field(
         default_factory=list,
-        description="当前会话已加载技能列表（`id/name/description`）。",
+        description="当前会话已加载技能列表（`skill_name/description`）。",
     )
     assistant_stream_buffer: str = Field(default="", repr=False, description="流式输出增量缓冲。")
 

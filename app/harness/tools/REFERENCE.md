@@ -64,5 +64,5 @@
 
 ## `skills.py`
 
-- **`load_skills`**：按 `skill_ids` 数组加载会话技能；返回 `loaded_skills` 与 `available_skills` 元数据 JSON
+- **`load_skills`**：按 `skill_names` 数组加载会话技能；返回 `loaded_skills` 与 `available_skills` 元数据 JSON（字段为 `skill_name/description`）
 
