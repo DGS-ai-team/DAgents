@@ -161,4 +161,4 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 ## License
 
-待补充
+本项目采用 [MIT License](LICENSE) 开源许可。
