@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
 from uuid import uuid4
 
+from pathlib import Path
+
+from app.config.env import resolve_runtime_root
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.core.main_agent.model import get_model_config
@@ -82,9 +84,12 @@ class AgentService:
         else:
             # 路径为空：纯内存会话，便于单测与无持久化部署。
             raw = (settings.agent_session_store_path or "").strip()
-            self._message_store = (
-                SqliteMessageStore(Path(raw).expanduser()) if raw else None
-            )
+            if raw:
+                rp = Path(raw).expanduser()
+                db_path = rp.resolve() if rp.is_absolute() else (resolve_runtime_root() / rp).resolve()
+                self._message_store = SqliteMessageStore(db_path)
+            else:
+                self._message_store = None
 
     async def start(self) -> None:
         """标记服务已启动（当前无额外预热逻辑）。

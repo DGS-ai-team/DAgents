@@ -6,7 +6,7 @@
     PYTHONPATH=. python scripts/query_session_sqlite.py list
     PYTHONPATH=. python scripts/query_session_sqlite.py show <session_id>
 
-数据库路径：优先 **`--db`**，否则 **`AGENT_SESSION_STORE_PATH`**（会先 **`load_env`** 读取 `.env`），再否则 **`.runtime/memory/session.sqlite3`**（相对仓库根）。
+数据库路径：优先 **`--db`**，否则 **`AGENT_SESSION_STORE_PATH`**（会先 **`load_env`** 读取 `.env`），再否则 **`.runtime/memory/session.sqlite3`**（相对仓库根，与 AgentService 默认一致）。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def _resolve_db_path(argv_db: str) -> Path:
     逻辑：
     1. **`argv_db` 非空** → **`expanduser`** 后为唯一候选；
     2. 否则静默加载 **`resolve_runtime_root()/.env`**（不 **`print`**，便于 **`list`** 管道）后读 **`AGENT_SESSION_STORE_PATH`**；
-    3. 再否则默认 **`<repo>/.runtime/memory/session.sqlite3`**。
+    3. 再否则默认 **`.runtime/memory/session.sqlite3`**（相对仓库根，与 AgentService 一致）。
 
     关键边界：
     - 候选路径仍可能不存在（**`list`** / **`show`** 内再报错）。
@@ -51,11 +51,15 @@ def _resolve_db_path(argv_db: str) -> Path:
 
     import os
 
+    def _under_repo(rel_or_abs: str) -> Path:
+        p = Path(rel_or_abs).expanduser()
+        return p.resolve() if p.is_absolute() else (resolve_runtime_root() / p).resolve()
+
     env_path = (os.getenv("AGENT_SESSION_STORE_PATH") or "").strip()
     if env_path:
-        return Path(env_path).expanduser().resolve()
+        return _under_repo(env_path)
 
-    return (_ROOT / ".runtime" / "memory" / "session.sqlite3").resolve()
+    return _under_repo(".runtime/memory/session.sqlite3")
 
 
 def _conversation_context_to_jsonable(store_path: Path, session_id: str) -> dict[str, object]:

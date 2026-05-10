@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Tuple
 
+from app.config.env import resolve_runtime_root
 from app.config.host_snapshot import HostSnapshot, get_host_snapshot
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
@@ -130,11 +131,9 @@ def _format_runtime_environment_section(snap: HostSnapshot) -> str:
 def _skills_base_dir_for_prompt() -> Path:
     """解析 skills 在提示词中展示的目标目录。"""
 
-    configured = (get_settings().agent_skills_dir or "").strip() or "skills"
-    candidate = Path(configured).expanduser()
-    if candidate.is_absolute():
-        return candidate
-    return (Path.cwd().resolve() / candidate).resolve()
+    configured = (get_settings().agent_skills_dir or "").strip() or ".runtime/skills"
+    sp = Path(configured).expanduser()
+    return sp.resolve() if sp.is_absolute() else (resolve_runtime_root() / sp).resolve()
 
 
 def get_system_prompt(
@@ -229,13 +228,13 @@ def get_system_prompt(
     parts.append(f"\n\n## 以下是当前运行环境：\n\n{runtime_body}\n")
     # 便于 Agent 用 read_file/search_file 操作审计落盘；与 raw_message_journal 写入约定对齐。
     if settings.agent_raw_message_history_enabled:
-        hist_rel = (settings.agent_raw_message_history_dir or "history").strip() or "history"
+        hist_rel = (settings.agent_raw_message_history_dir or ".runtime/history").strip() or ".runtime/history"
         parts.append(
-            "\n\n## 会话原始消息审计（JSONL）\n\n"
+            "\n\n## 会话原始消息记录（JSONL）\n\n"
             "运行时在**每次向对话上下文追加或插入**一条 OpenAI 风格消息时，会把该条消息的**插入瞬间快照**"
             "按会话、按自然日写入 JSONL（摘要压缩等**整段替换** `messages` 的操作**不会**写入本审计）。"
             "你可使用 `read_file`、`search_file` 等工具按会话与日期检索。\n\n"
-            f"- 目录：`{hist_rel}/`\n"
+            f"- 目录（：`{hist_rel}/`\n"
             f"- 文件命名：`{{session_id}}_{{YYYYMMDD}}.jsonl`；例如 `sess-123_20260510.jsonl`\n"
             "- 每行一条 JSON：`recorded_at`（写入时刻，ISO8601）、`message`（当时的完整消息字典）；"
             "若后续列表内同引用被就地改写，本文件仍保留插入时的内容\n"

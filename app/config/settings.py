@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import os
 import uuid
-from pathlib import Path
 from typing import Self
 
+from pathlib import Path
+
 from pydantic import BaseModel, ConfigDict
+
+from app.config.env import resolve_runtime_root
+
 
 def _env_str(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
@@ -126,7 +130,8 @@ def _resolve_agent_id(agent_id_file_path: str) -> str:
     """
 
     configured_id = _env_str("AGENT_ID")
-    file_path = Path(agent_id_file_path)
+    _p = Path(agent_id_file_path).expanduser()
+    file_path = _p.resolve() if _p.is_absolute() else (resolve_runtime_root() / _p).resolve()
     if configured_id:
         # 明确配置 AGENT_ID 时以配置为准，并同步写回文件防止重启漂移。
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,8 +180,8 @@ class Settings(BaseModel):
     agent_skills_enabled: bool = True
     # 是否允许 agent 自主创建/修改 skills
     agent_skills_allow_create: bool = False
-    # skills 根目录（默认仓库根目录下 `skills/`）
-    agent_skills_dir: str = "skills"
+    # skills 根目录（默认 `.runtime/skills`，相对仓库根）
+    agent_skills_dir: str = ".runtime/skills"
     # 单轮最多注入多少个匹配 skill
     agent_skills_max_in_prompt: int = 3
 
@@ -212,8 +217,8 @@ class Settings(BaseModel):
     agent_session_store_path: str = ".runtime/memory/session.sqlite3"
     # 是否在每次向 ctx.messages 追加/插入「业务原始消息」时写入 JSONL 审计（摘要压缩等整段替换不写）
     agent_raw_message_history_enabled: bool = True
-    # 审计目录（相对 resolve_runtime_root()，默认仓库根下 history/）
-    agent_raw_message_history_dir: str = "history"
+    # 审计目录（相对仓库根，默认 `.runtime/history`）
+    agent_raw_message_history_dir: str = ".runtime/history"
 
     # --- 兼容旧变量 ---
     openai_api_key: str = ""
@@ -243,7 +248,7 @@ class Settings(BaseModel):
             llm_stream_include_usage=_env_bool("LLM_STREAM_INCLUDE_USAGE", True),
             agent_skills_enabled=_env_bool("AGENT_SKILLS_ENABLED", True),
             agent_skills_allow_create=_env_bool("AGENT_SKILLS_ALLOW_CREATE", False),
-            agent_skills_dir=_env_str("AGENT_SKILLS_DIR", "skills") or "skills",
+            agent_skills_dir=_env_str("AGENT_SKILLS_DIR", ".runtime/skills") or ".runtime/skills",
             agent_skills_max_in_prompt=_env_int("AGENT_SKILLS_MAX_IN_PROMPT", 3),
             metrics_enabled=_env_bool("METRICS_ENABLED", True),
             max_queue_size=_env_int("MAX_QUEUE_SIZE", 0),
@@ -271,7 +276,8 @@ class Settings(BaseModel):
             bash_output_encoding=_env_str("BASH_OUTPUT_ENCODING", "utf-8") or "utf-8",
             agent_session_store_path=_agent_session_store_path(),
             agent_raw_message_history_enabled=_env_bool("AGENT_RAW_MESSAGE_HISTORY_ENABLED", True),
-            agent_raw_message_history_dir=_env_str("AGENT_RAW_MESSAGE_HISTORY_DIR", "history") or "history",
+            agent_raw_message_history_dir=_env_str("AGENT_RAW_MESSAGE_HISTORY_DIR", ".runtime/history")
+            or ".runtime/history",
             openai_api_key=_env_str("OPENAI_API_KEY"),
         )
 

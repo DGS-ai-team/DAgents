@@ -3,15 +3,20 @@
 | 文件 | 说明 |
 |------|------|
 | **`settings.py`** | **`Settings`** dataclass、**`get_settings()`**；环境变量键名与 **`.env.example`** 一致 |
-| **`env.py`** | **`load_env`**：将仓库根 **`.env`** 读入 `os.environ`（不覆盖已有变量） |
+| **`env.py`** | **`load_env`**；**`resolve_runtime_root`**（仓库根或打包后可执行目录） |
 | **`host_snapshot.py`** | **`HostSnapshot`**、**`capture_host_snapshot_at_startup`**（API 启动采集环境并打 INFO）、**`get_host_snapshot`**（进程内只读缓存） |
 | **`startup_checks.py`** | **`emit_linux_cross_user_shell_startup_hints`**：Linux 下跨用户 shell 提示（读 **`get_host_snapshot()`**；仅 **`logging`**，避免 stderr 双写重复） |
 
-## 会话与审计
+## 本地运行时路径（默认均在 `.runtime/`）
 
-- `AGENT_SESSION_STORE_PATH`：会话上下文 sqlite 路径（默认 `.runtime/memory/session.sqlite3`；显式空串可关闭）
-- `AGENT_RAW_MESSAGE_HISTORY_ENABLED`：是否在每次业务 **`ctx.messages` 追加/插入**时写原始消息 JSONL（默认 `true`；摘要压缩等整段替换不写）
-- `AGENT_RAW_MESSAGE_HISTORY_DIR`：审计目录名（相对 **`resolve_runtime_root()`**，默认 `history`）
+配置里的相对路径一律相对 **`resolve_runtime_root()`**（仓库根）。约定：
+
+- **`.runtime/memory/session.sqlite3`**：`AGENT_SESSION_STORE_PATH` 默认
+- **`.runtime/agent/agent_id`**：`AGENT_ID_FILE_PATH` 默认
+- **`.runtime/history/`**：`AGENT_RAW_MESSAGE_HISTORY_DIR` 默认（原始消息 JSONL）
+- **`.runtime/skills/`**：`AGENT_SKILLS_DIR` 默认
+
+仓库根旧 **`history/*.jsonl`**、**`skills/`** 可运行 **`scripts/migrate_runtime_layout.py`** 迁入 **`.runtime/`**。
 
 ## OpenAI 隐式 ReAct 配置
 
@@ -22,7 +27,7 @@
 ## Agent 标识配置
 
 - `AGENT_ID`：可显式指定当前 Agent ID（优先级最高）
-- `AGENT_ID_FILE_PATH`：Agent ID 持久化文件路径（默认 `.runtime/agent/agent_id`）
+- `AGENT_ID_FILE_PATH`：Agent ID 持久化文件路径（默认 **`.runtime/agent/agent_id`**）
 - 启动时若 `AGENT_ID` 与文件内容都不可用，会自动生成 UUID 并写入文件
 
 ## Agent 间协作配置

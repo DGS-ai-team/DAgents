@@ -41,7 +41,10 @@ class RawMessageJournalTestCase(unittest.TestCase):
         day = datetime.now().strftime("%Y%m%d")
         with TemporaryDirectory() as raw:
             root = Path(raw)
-            with patch("app.harness.history.raw_message_journal.resolve_runtime_root", return_value=root):
+            with patch(
+                "app.harness.history.raw_message_journal.resolve_runtime_root",
+                return_value=root,
+            ):
                 ctx = OpenAIConversationContext(session_id="sess-a", messages=[])
                 msg = {"role": "user", "content": "hello"}
                 append_openai_message_with_journal(ctx, msg)
@@ -60,7 +63,10 @@ class RawMessageJournalTestCase(unittest.TestCase):
         get_settings(reload=True)
         with TemporaryDirectory() as raw:
             root = Path(raw)
-            with patch("app.harness.history.raw_message_journal.resolve_runtime_root", return_value=root):
+            with patch(
+                "app.harness.history.raw_message_journal.resolve_runtime_root",
+                return_value=root,
+            ):
                 record_raw_openai_message_append(f"sid-{uuid.uuid4().hex}", {"role": "user", "content": "x"})
             self.assertEqual(list(root.rglob("*.jsonl")), [])
 
@@ -70,7 +76,10 @@ class RawMessageJournalTestCase(unittest.TestCase):
         get_settings(reload=True)
         with TemporaryDirectory() as raw:
             root = Path(raw)
-            with patch("app.harness.history.raw_message_journal.resolve_runtime_root", return_value=root):
+            with patch(
+                "app.harness.history.raw_message_journal.resolve_runtime_root",
+                return_value=root,
+            ):
                 record_raw_openai_message_append("", {"role": "user", "content": "x"})
             self.assertEqual(list(root.rglob("*.jsonl")), [])
 

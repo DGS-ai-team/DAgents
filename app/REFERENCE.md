@@ -7,7 +7,7 @@
 - 队列相关字段：**`max_queue_size`**
 - CLI 相关字段：**`agent_cli_mode`**
 - API 相关字段：**`agent_api_base`**
-- 会话 sqlite：**`agent_session_store_path`**（`AGENT_SESSION_STORE_PATH`：未设置用默认；显式空串关闭）
+- 会话 sqlite：**`agent_session_store_path`**（默认 **`.runtime/memory/session.sqlite3`**（相对仓库根）；`AGENT_SESSION_STORE_PATH` 未设置时使用；显式空串关闭）
 
 ## `config/env.py`
 
