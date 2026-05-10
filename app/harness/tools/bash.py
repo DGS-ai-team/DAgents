@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -13,11 +14,32 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict
 
 from app.config.settings import get_settings
+from app.config.host_snapshot import get_host_snapshot
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.host_platform import HostOsKind, detect_host_os
 from app.harness.tools.tool import tool
 
 ShellType = Literal["bash", "cmd", "powershell"]
+
+# 非 root 拦截：`su - <user> -c ...`（含 `-l` / `--login`）；按 bash 语句片段逐个匹配行首。
+_SU_LOGIN_WITH_C_RE = re.compile(
+    r"^\s*(?:/[\w./-]+/)?su\b\s+"
+    r"(?:-|(?:-l\b)|(?:--login\b))\s+"
+    r"(?:[^\s/-][^\s]*)"
+    r"\s+(?:-c|--command)\b",
+    re.IGNORECASE,
+)
+
+# 行首 `sudo` / `sudoedit`；若未带 `-n` / `--non-interactive`，可能在无 TTY 时阻塞读密码。
+_SUDO_FAMILY_INVOCATION_RE = re.compile(
+    r"^\s*(?:/[\w./-]+/)?(?:sudo|sudoedit)\b",
+    re.IGNORECASE,
+)
+_SUDO_NONINTERACTIVE_FLAG_RE = re.compile(
+    r"(?:^|\s)-n(?:\s|$)"
+    r"|(?:^|\s)--non-interactive(?:\s|$)",
+    re.IGNORECASE,
+)
 
 DEFAULT_BASH_TIMEOUT_SECONDS = 30
 MAX_BASH_TIMEOUT_SECONDS = 600
@@ -363,6 +385,55 @@ def _run_powershell_command(
     raise RuntimeError("未找到 powershell/pwsh 可执行文件。")
 
 
+def _blocked_non_root_password_prompting_shell(command: str, shell_type: ShellType) -> str | None:
+    """判定非 root 下是否应拦截「可能读 TTY 密码」的 bash 片段。
+
+    逻辑：
+    1. 仅 **`shell_type == bash`** 参与判定；
+    2. 使用 **`get_host_snapshot()`** 的 **os_kind / effective_uid**，避免重复 **`os.geteuid`**；
+    3. **Windows**（含 cygwin/msys 归类）、**effective_uid 不可用** 或 **root** 时放行；
+    4. **`su - <user> -c`**（含 `-l` / `--login`）任一片段行首命中 → 返回 **`ERROR`**（跨用户 su）；
+    5. 行首 **`sudo` / `sudoedit`** 且片段内 **无** **`-n`** / **`--non-interactive`** → 返回 **`ERROR`**（避免无 TTY 阻塞；免密场景请显式 **`sudo -n`**）。
+
+    关键分支或边界：
+    - **NOPASSWD** 但未写 **`-n`** 仍会被拦，迫使用户使用非交互语义（失败快于挂死）；
+    - 不做完整 bash 赋值/`env` 前缀建模，复杂绕过不在此覆盖。
+
+    Args:
+        command: 原始命令串。
+        shell_type: 已解析的执行 shell。
+
+    Returns:
+        需要拦截时返回错误字符串；否则返回 `None`。
+    """
+
+    if shell_type != "bash":
+        return None
+    snap = get_host_snapshot()
+    if snap.os_kind == "windows":
+        return None
+    euid = snap.effective_uid
+    if euid is None:
+        return None
+    if euid == 0:
+        return None
+    for segment in _split_bash_statements(command):
+        s = segment.strip()
+        if not s:
+            continue
+        if _SU_LOGIN_WITH_C_RE.match(s):
+            return (
+                "ERROR: 当前进程非 root，不允许执行 `su - <user> -c ...` 形式的跨用户登录 shell。"
+            )
+        if _SUDO_FAMILY_INVOCATION_RE.match(s):
+            if _SUDO_NONINTERACTIVE_FLAG_RE.search(s):
+                continue
+            return (
+                "ERROR: 当前进程非 root，不允许执行可能提示输入密码的 `sudo`/`sudoedit`（片段中缺少 `-n` 或 `--non-interactive`）。"
+            )
+    return None
+
+
 def _run_by_shell_type(
     shell_type: ShellType,
     command: str,
@@ -429,6 +500,7 @@ def bash_run(
     返回说明：
     - 成功或非零退出：返回结构化文本，含 `status`、`exit_code`、`stdout`、`stderr`。
     - 失败：返回 `ERROR: ...`；超时返回 `status=TIMEOUT`。
+    - Linux/macOS 等非 Windows：**非 root** 若以 **bash** 执行：语句片段行首匹配 **`su - <user> -c ...`**（含 `-l` / `--login`），或行首 **`sudo`/`sudoedit`** 且未含 **`-n`/`--non-interactive`**，直接返回错误（不创建子进程）。
     - 是否审批：由 `tool.should_require_tool_approval` 统一判断，本工具只负责命令执行。
 
     调用范例：
@@ -453,6 +525,11 @@ def bash_run(
         if resolved_shell_type not in ("bash", "cmd", "powershell"):
             return f"ERROR: 不支持的 shell_type：{shell_type!r}"
         output_encoding = _resolve_shell_output_encoding()
+
+        # 非 root 下禁止可能读 TTY 密码的 su/sudo（无 sudo -n）；避免 subprocess 挂死。
+        blocked = _blocked_non_root_password_prompting_shell(cmd, resolved_shell_type)
+        if blocked is not None:
+            return blocked
 
         try:
             completed = _run_by_shell_type(

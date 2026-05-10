@@ -9,6 +9,7 @@ from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext, PendingToolCall, RunTurnPhase
 from app.core.main_agent.model import get_model_config, get_openai_client
 from app.core.main_agent.prompt import get_system_prompt
+from app.harness.history.raw_message_journal import append_openai_message_with_journal
 from app.harness.service.interface import AgentEventEnvelope
 from app.harness.tools.tool import build_openai_toolkit, parse_tool_arguments
 from app.observability.metrics import record_llm_token_usage, usage_fields_from_openai_usage
@@ -49,7 +50,7 @@ class OpenAIImplicitReActRuntime:
         """
         # 模型流取消：补一条无 tool_calls 的 assistant，避免半截正文丢失；不触发「必须有 tool」规则。
         if (ctx.assistant_stream_buffer or "").strip():
-            ctx.messages.append({"role": "assistant", "content": ctx.assistant_stream_buffer})
+            append_openai_message_with_journal(ctx, {"role": "assistant", "content": ctx.assistant_stream_buffer})
         ctx.assistant_stream_buffer = ""
         ctx.run_turn_phase = RunTurnPhase.IDLE
 
@@ -102,7 +103,7 @@ class OpenAIImplicitReActRuntime:
         # 分支 A：message —— 仅追加用户消息。                                         #
         # ------------------------------------------------------------------ #
         if request_type == "human_message":
-            ctx.messages.append({"role": "user", "content": content})
+            append_openai_message_with_journal(ctx, {"role": "user", "content": content})
         elif request_type == "tool_message":
             # 外层已更新完 messages（如写入 tool/tool_result）时，tool_message 只负责继续做一轮模型推理。
             pass
@@ -195,12 +196,13 @@ class OpenAIImplicitReActRuntime:
         # ----- 子分支：模型要求调用工具（此处仍不 invoke，只登记 + 等人批）----- #
         if tool_calls:
             # 必须把 assistant + tool_calls 写入历史，否则下次请求模型时上下文不完整。
-            ctx.messages.append(
+            append_openai_message_with_journal(
+                ctx,
                 {
                     "role": "assistant",
                     "content": assistant_content or "",
                     "tool_calls": tool_calls,
-                }
+                },
             )
             pending: list[PendingToolCall] = []
             payload_calls: list[dict[str, Any]] = []
@@ -220,7 +222,7 @@ class OpenAIImplicitReActRuntime:
             return
 
         # ----- 子分支：本轮无工具调用，视为最终回复 ----- #
-        ctx.messages.append({"role": "assistant", "content": assistant_content})
+        append_openai_message_with_journal(ctx, {"role": "assistant", "content": assistant_content})
         # 仅在“无 tool_calls 的 assistant 正常收口”时重置累计循环计数。
         ctx.tool_loop_count = 0
         ctx.run_turn_phase = RunTurnPhase.IDLE
@@ -242,7 +244,7 @@ class OpenAIImplicitReActRuntime:
 
         关键边界：
         - tool 调用参数可能分片返回，需按 `index` 逐段拼接；
-        - 空 choices 的 chunk 仍可能携带 **`usage`**：先 **`record_llm_token_usage`**、**`yield usage`**，再 `continue`；
+        - 空 choices 的 chunk 仍可能携带 **`usage`**：先 **`record_llm_token_usage`**（Gauge **`set`**，映射提供商计数快照）、**`yield usage`**，再 `continue`；
         - 未开启 `include_usage` 或网关不支持时无 **`usage`** 分片。
 
         与外部交互：

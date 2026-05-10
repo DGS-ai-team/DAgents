@@ -46,6 +46,7 @@
 - **`_split_powershell_statements`**：按 powershell 规则切分命令片段。
 - **`_extract_root_for_shell`**：按 shell 类型提取命令首词。
 - **`_parse_command_ast`**：将命令解析为轻量 AST 节点列表。
+- **`_blocked_non_root_password_prompting_shell`**：基于 **`get_host_snapshot()`** 判定 OS/euid；非 root + bash 时拦截 **`su - … -c`** 及未带 **`-n`/`--non-interactive`** 的 **`sudo`/`sudoedit`**（否则 `None`）
 - **`_run_bash_command`**、**`_run_cmd_command`**、**`_run_powershell_command`**：三种 shell 的独立执行方法。
 - **`_run_by_shell_type`**：按 shell 类型分发执行方法。
 - **`bash_run`**：统一入口，支持 `shell_type` 选择执行器并返回结构化结果。

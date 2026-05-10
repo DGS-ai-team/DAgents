@@ -66,6 +66,8 @@ python run_agent_api.py
 
 常用配置见 **`app/config/settings.py`**；监听地址可通过 **`API_HOST`** / **`API_PORT`**（默认 **`127.0.0.1:8000`**）等在 `.env` 中设置。
 
+启动 **`run_agent_api.py`** 时会先采集 **`HostSnapshot`**（系统类型、登录名、有效 UID/GID 等）并写一条 **`logging` INFO**，后续 **`bash_run`**、启动提示、**`get_system_prompt`** 等均 **`get_host_snapshot()`** 读取缓存，避免重复探针。
+
 ### B）源码 + 离线依赖
 
 在可联网且与目标机 Python 次版本 / OS / 架构一致的环境执行 `pip download -r requirements.txt`，将源码与 `wheels/` 拷至离线机后 `pip install --no-index --find-links=wheels -r requirements.txt`。步骤细节见 **`packaging/OFFLINE_INSTALL.md`**。
@@ -87,6 +89,51 @@ python run_agent_api.py
 | CLI | `python run_agent.py` |
 | Register Center | `python run_register_center.py`（默认约 **`0.0.0.0:8010`**，见 `.env` / `REGISTER_CENTER_*`） |
 | 本地联调（API + Register Center） | `python run_dev_stack.py` |
+
+### Linux：跨用户 shell 与 sudoers（可选）
+
+Agent API 会通过 **`bash_run`** 等工具用 **`subprocess`** 执行 shell。若要在自动化场景下 **切换到其他 Unix 用户**（例如 **`su - <user> -c '...'`**），在 Linux 上常见痛点是：
+
+- **`su`** 往往依赖 **密码** 或前置特权（如 pam_wheel），服务进程 **无交互终端**，密码难以注入；
+- 因此 **非 root** 启动时，`su -` 一类命令容易阻塞或失败。
+
+**运行时拦截**：**`bash_run`** 在 **非 Windows** 且进程 **非 root**、且实际 shell 为 **bash** 时：若命令切段后任一片段行首为 **`su - <user> -c ...`**（含 **`-l` / `--login`**），或行首为 **`sudo`/`sudoedit`** 且片段内 **没有** **`-n` / `--non-interactive`**，将 **直接返回 `ERROR:`**，不启动子进程。已配置 **sudoers NOPASSWD** 时，请使用 **`sudo -n`** / **`sudo --non-interactive`**，以便在无 TTY 时快速失败而非阻塞读密码。
+
+**`python run_agent_api.py`** 在 **Linux** 下会根据当前有效 UID 打印启动提示（**stderr**，并写入 **`logging`**，级别为非 root 时 WARNING、为 root 时 INFO）：非 root 时提醒评估 **sudoers**；为 root 时提醒特权较高、建议仍优先使用低权限账户运行。
+
+实践中更推荐 **不用交互式 `su`**，改用 **`sudo -u <user> -- <command>`**，并为「运行 API 的 Unix 用户」（下称 **`dagentsrunner`**，请换成你的真实用户名）配置 **最小权限** 免密规则。
+
+#### sudoers 配置教程（概要）
+
+1. **编辑 sudoers（必须使用安全编辑器）**  
+   - `sudo visudo`  
+   - 或单独文件：`sudo visudo -f /etc/sudoers.d/dagents`（便于撤销）。
+
+2. **示例：允许 `dagentsrunner` 仅以用户 `deploy` 身份免密执行命令**
+
+   ```text
+   dagentsrunner ALL=(deploy) NOPASSWD: ALL
+   ```
+
+   生产环境应收紧为 **命令白名单**（路径一律用绝对路径），例如：
+
+   ```text
+   dagentsrunner ALL=(deploy) NOPASSWD: /usr/bin/git, /opt/app/bin/job.sh
+   ```
+
+3. **`visudo` 保存时会校验语法**，错误则拒绝写入，避免锁死 `sudo`。
+
+4. **验证（非交互必须成功）**
+
+   ```bash
+   sudo -u deploy -n true && echo ok
+   ```
+
+5. **工具内调用形态**  
+   - 使用：`sudo -n -u deploy -- /bin/bash -lc '你的命令'`（**`-n` 必填**，除非进程能以其它方式保证绝不读密码）  
+   - **`su -`** 在无 TTY/密码通道时通常不可靠；若必须用 `su`，往往意味着要以 **root** 或额外组件（如 expect）承接更大风险。
+
+**安全**：`NOPASSWD` 会扩大被攻破时的影响面，务必 **按调用用户、目标用户、命令** 最小授权；避免对高权限账户滥用 `NOPASSWD: ALL`。
 
 ## 与前端（DAgentsUI）对接
 

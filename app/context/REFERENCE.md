@@ -9,7 +9,7 @@
   - `MessageRecord`：单条消息记录（`role/content/meta`）
   - `ConversationContext`：可持久化会话上下文（`history/openai_messages/pending_tool_calls/run_turn_phase/messages_total_tokens/tool_loop_count/loaded_skills`；每项为 `skill_name/description`）
   - `PendingToolCall`：待执行/待审批工具规格
-  - `OpenAIConversationContext`：runtime 可变推理上下文（`messages/pending_tool_calls/run_turn_phase/messages_total_tokens/tool_loop_count/loaded_skills`，每项为 `skill_name/description`）
+  - `OpenAIConversationContext`：runtime 可变推理上下文（`messages/pending_tool_calls/run_turn_phase/messages_total_tokens/tool_loop_count/loaded_skills`，每项为 `skill_name/description`）；**`messages`** 条数由 **`metrics.refresh_session_context_metrics`** 暴露到 Prometheus（**`dagents_session_context_messages_count`**）
 - 辅助函数：
   - `_json_safe_deep()`：JSON 安全深拷贝
   - `_openai_messages_to_message_records()`：OpenAI 消息派生 `MessageRecord` 列表

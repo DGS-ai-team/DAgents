@@ -1,7 +1,10 @@
-"""Prometheus 指标定义与 LLM token 累计（供 `/metrics` 抓取）。
+"""Prometheus 指标定义与 LLM token 观测（供 `/metrics` 抓取）。
 
 与 OpenAI Chat Completions 流式对齐：需在请求中开启 `include_usage`，
 在流末尾 chunk 的 `usage` 上读取 `prompt_tokens` / `completion_tokens`。
+
+说明：`usage` 中的 prompt/completion 计数在部分网关侧已为**进程或账号维度累计值**，
+此处用 **Gauge + `set`** 直接反映上报快照，而不用 Counter 再次累加。
 """
 
 from __future__ import annotations
@@ -9,19 +12,28 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
-# --- LLM token（按模型名分桶，单部署通常 1 个取值，cardinality 可控）---
-LLM_PROMPT_TOKENS = Counter(
-    "dagents_llm_prompt_tokens_total",
-    "LLM 累计输入 token 数（提供商 usage.prompt_tokens）",
+# --- LLM token（按模型名分桶；值为提供商 usage 上报快照，多为网关侧已累计计数）---
+LLM_PROMPT_TOKENS = Gauge(
+    "dagents_llm_prompt_tokens",
+    "LLM 输入 token 数快照（提供商 usage.prompt_tokens；通常为已累计值，非本进程二次累加）",
     ("model",),
 )
-LLM_COMPLETION_TOKENS = Counter(
-    "dagents_llm_completion_tokens_total",
-    "LLM 累计输出 token 数（提供商 usage.completion_tokens）",
+LLM_COMPLETION_TOKENS = Gauge(
+    "dagents_llm_completion_tokens",
+    "LLM 输出 token 数快照（提供商 usage.completion_tokens；通常为已累计值，非本进程二次累加）",
     ("model",),
 )
+
+# --- Session 对话上下文（`OpenAIConversationContext.messages`，由 AgentService 在上下文变更时刷新）---
+SESSION_CONTEXT_MESSAGES_COUNT = Gauge(
+    "dagents_session_context_messages_count",
+    "各 session 内 `OpenAIConversationContext.messages` 条数（OpenAI 对话列表）",
+    labelnames=("session_id",),
+)
+
+_session_context_sessions_raw: set[str] = set()
 
 
 def sanitize_model_label(model: str) -> str:
@@ -40,6 +52,53 @@ def sanitize_model_label(model: str) -> str:
         return "unknown"
     safe = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", s).strip("_") or "unknown"
     return safe[:128]
+
+
+def sanitize_prometheus_label_value(value: str | None, *, max_len: int = 160) -> str:
+    """将任意字符串规范为安全的 Prometheus label 值（session_id / source / client_id 等）。
+
+    逻辑：与 **`sanitize_model_label`** 同类替换；空串返回 **`_empty`**，避免裸空 label。
+    """
+    s = (value or "").strip()
+    if not s:
+        return "_empty"
+    safe = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", s).strip("_") or "_"
+    return safe[:max_len]
+
+
+def refresh_session_context_metrics(session_contexts: dict[str, Any]) -> None:
+    """按当前 AgentService 的 **`_session_contexts`** 快照刷新 Prometheus Gauge。
+
+    逻辑：
+    1. 对比上一轮出现的 **`session_id`**，对已消失的 session **`SESSION_CONTEXT_MESSAGES_COUNT.remove`**；
+    2. 对每个 **`OpenAIConversationContext`** 读取 **`messages`**，写入 **`SESSION_CONTEXT_MESSAGES_COUNT`**。
+
+    关键边界：
+    - **`session_contexts={}`**（如服务 **`stop`**）清空本模块跟踪的全部上下文指标；
+    - **不在 metrics 中展开单条消息的 content 长度**。
+
+    副作用：
+    - 修改 Prometheus Registry 中对应 Gauge。
+    """
+    global _session_context_sessions_raw
+
+    curr_sessions_raw = set(session_contexts.keys())
+    for sid_raw in _session_context_sessions_raw - curr_sessions_raw:
+        sid_label = sanitize_prometheus_label_value(sid_raw)
+        try:
+            SESSION_CONTEXT_MESSAGES_COUNT.remove(sid_label)
+        except KeyError:
+            pass
+
+    for sid_raw, ctx in session_contexts.items():
+        sid_label = sanitize_prometheus_label_value(sid_raw)
+        messages = getattr(ctx, "messages", None)
+        if not isinstance(messages, list):
+            messages = []
+
+        SESSION_CONTEXT_MESSAGES_COUNT.labels(sid_label).set(len(messages))
+
+    _session_context_sessions_raw = set(curr_sessions_raw)
 
 
 def parse_usage_tokens(usage: Any) -> tuple[int, int]:
@@ -101,25 +160,24 @@ def usage_fields_from_openai_usage(usage: Any) -> dict[str, int | None]:
 
 
 def record_llm_token_usage(*, prompt_tokens: int, completion_tokens: int, model: str) -> None:
-    """将单次 completions 调用的 usage 累加到 Counter。
+    """将单次 completions 调用的 usage 写入 Gauge（`set`，不再二次累加）。
 
     逻辑：
     1. 规范化 `model` label；
-    2. prompt / completion 分别 `inc`（仅在大于 0 时），避免无意义时间序列。
+    2. prompt / completion 分别 **`set(max(0, value))`**（同一 `usage` 回调内两项一并更新）。
 
     副作用：
-    - 修改进程内 Prometheus 注册表中的 Counter 样本。
+    - 修改进程内 Prometheus 注册表中的 Gauge 样本。
 
     关键边界：
-    - 全零则不做任何事（兼容未返回 usage 的流式响应）。
+    - 全零则不做任何事（兼容未返回 usage 的流式响应）；
+    - 与 Counter 不同：多次上报时以后一次 **`set`** 为准，适用于上游已为累计计数的情形。
     """
     if prompt_tokens <= 0 and completion_tokens <= 0:
         return
     m = sanitize_model_label(model)
-    if prompt_tokens > 0:
-        LLM_PROMPT_TOKENS.labels(model=m).inc(prompt_tokens)
-    if completion_tokens > 0:
-        LLM_COMPLETION_TOKENS.labels(model=m).inc(completion_tokens)
+    LLM_PROMPT_TOKENS.labels(model=m).set(max(0, int(prompt_tokens)))
+    LLM_COMPLETION_TOKENS.labels(model=m).set(max(0, int(completion_tokens)))
 
 
 def metrics_text() -> tuple[bytes, str]:

@@ -19,8 +19,8 @@
 - **`PROMPT_CONTEXT_DIR`**：仓库根下与 **`app/`** 同级的 **`prompt_context/`**（**`SOUL_MD`** / **`USER_MD`** / **`CUSTOM_MD`**）
 - **`_read_prompt_context_markdown`**：读该目录下 **`.md`**（mtime 缓存）
 - **`get_static_system_prompt`**
-- **`_current_os_kind`**
-- **`get_system_prompt(context)`**：静态 + **`soul.md`** + **`user.md`** +（从 `context.loaded_skills` 读取）skills 元数据/正文 + 运行环境 + **`custom.md`**（**`## 自定义补充`**，最末）
+- **`_format_runtime_environment_section`**：将 **`HostSnapshot`** 格式化为「当前运行环境」正文（OS 类别、平台摘要、登录名、UID/GID）
+- **`get_system_prompt(context)`**：静态 + **`soul.md`** + **`user.md`** +（从 `context.loaded_skills` 读取）skills 元数据/正文 + **`get_host_snapshot()`** 运行环境 +（配置启用时）**会话原始消息审计 JSONL** 说明 + **`custom.md`**（**`## 自定义补充`**，最末）
 - **`read_memory_file_cached`**
 
 侧车目录 **`prompt_context/`** 不在本包内，见仓库根目录 **`prompt_context/README.md`**。

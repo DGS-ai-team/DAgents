@@ -1,4 +1,4 @@
-"""观测指标：`parse_usage_tokens` 与 token Counter 累加。"""
+"""观测指标：`parse_usage_tokens` 与 token Gauge 快照写入。"""
 
 from __future__ import annotations
 
@@ -48,13 +48,23 @@ class MetricsTokensTestCase(unittest.TestCase):
         self.assertTrue(sanitize_model_label("a/b:c").startswith("a"))
 
     def test_record_llm_token_usage_unique_model(self) -> None:
-        """用唯一 model label，避免与其它用例在同一 Registry 上累加混淆。"""
+        """用唯一 model label，避免与其它用例在同一 Registry 上混淆。"""
         label = f"ut_{uuid.uuid4().hex}"
         safe = sanitize_model_label(label)
         record_llm_token_usage(prompt_tokens=13, completion_tokens=17, model=label)
         body = generate_latest().decode("utf-8")
-        self.assertIn(f'dagents_llm_prompt_tokens_total{{model="{safe}"}} 13.0', body)
-        self.assertIn(f'dagents_llm_completion_tokens_total{{model="{safe}"}} 17.0', body)
+        self.assertIn(f'dagents_llm_prompt_tokens{{model="{safe}"}} 13.0', body)
+        self.assertIn(f'dagents_llm_completion_tokens{{model="{safe}"}} 17.0', body)
+
+    def test_record_llm_token_usage_overwrites_gauge(self) -> None:
+        """Gauge 以后一次 set 为准（上游累计值不应在本进程再 inc）。"""
+        label = f"ut_{uuid.uuid4().hex}"
+        safe = sanitize_model_label(label)
+        record_llm_token_usage(prompt_tokens=10, completion_tokens=5, model=label)
+        record_llm_token_usage(prompt_tokens=100, completion_tokens=50, model=label)
+        body = generate_latest().decode("utf-8")
+        self.assertIn(f'dagents_llm_prompt_tokens{{model="{safe}"}} 100.0', body)
+        self.assertIn(f'dagents_llm_completion_tokens{{model="{safe}"}} 50.0', body)
 
 
 if __name__ == "__main__":

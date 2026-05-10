@@ -17,6 +17,7 @@ from app.harness.queue.message_queue import MessageEnvelope, MessagePriority, Me
 from app.harness.service.interface import AgentEventEnvelope
 from app.harness.tools.tool import build_openai_toolkit
 from app.harness.tools.async_store import get_async_tool_result_store
+from app.observability.metrics import refresh_session_context_metrics
 
 
 def _queue_maxsize(max_queue_size: int) -> int | None:
@@ -139,6 +140,7 @@ class AgentService:
         self._session_queues.clear()
         self._session_contexts.clear()
         self._session_last_activity.clear()
+        refresh_session_context_metrics({})
         self._stop_event.set()
         print("[agent-service] stopped", flush=True)
 
@@ -188,6 +190,7 @@ class AgentService:
         await self._get_or_create_session_queue_async(sid)
         if sid not in self._session_contexts:
             self._session_contexts[sid] = self._load_context_from_store_sync(sid)
+        refresh_session_context_metrics(self._session_contexts)
         return sid
 
     async def release_session(self, session_id: str, *, clear_persisted: bool = True) -> bool:
@@ -218,6 +221,7 @@ class AgentService:
             self._session_active_handles.pop(sid, None)
             self._session_contexts.pop(sid, None)
             self._session_last_activity.pop(sid, None)
+            refresh_session_context_metrics(self._session_contexts)
         if clear_persisted and self._message_store is not None:
             await asyncio.to_thread(self._message_store.clear_session, sid)
             return True
@@ -336,6 +340,8 @@ class AgentService:
         ctx = await asyncio.to_thread(self._load_context_from_store_sync, session_id)
         ctx.session_id = session_id
         self._session_contexts[session_id] = ctx
+        # 刚从库装入缓存：刷新 `/metrics` 中的 messages 快照（无 sqlite 时也会在首轮 persist 前可见）。
+        refresh_session_context_metrics(self._session_contexts)
         return ctx
 
     async def _persist_context(self, session_id: str, ctx: OpenAIConversationContext) -> None:
@@ -407,6 +413,8 @@ class AgentService:
                 await self._persist_context(env.session_id, ctx)
             except Exception as exc:  # noqa: BLE001
                 self._log("error", env.session_id, f"persist failed: {exc}")
+            # 无论是否启用 sqlite，均以内存中的 ctx.messages 为准刷新 Prometheus（含 cancel/error 路径）。
+            refresh_session_context_metrics(self._session_contexts)
 
     async def _emit_envelope(
         self,
@@ -522,6 +530,8 @@ class AgentService:
         q = self._session_queues.pop(session_id, None)
         if q is not None:
             await q.stop()
+
+        refresh_session_context_metrics(self._session_contexts)
 
         print(
             f"[agent-service][evict] session={session_id}: evicted for capacity (idle session slot)",

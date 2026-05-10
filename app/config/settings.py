@@ -210,6 +210,10 @@ class Settings(BaseModel):
 
     # --- 会话消息落盘 ---
     agent_session_store_path: str = ".runtime/memory/session.sqlite3"
+    # 是否在每次向 ctx.messages 追加/插入「业务原始消息」时写入 JSONL 审计（摘要压缩等整段替换不写）
+    agent_raw_message_history_enabled: bool = True
+    # 审计目录（相对 resolve_runtime_root()，默认仓库根下 history/）
+    agent_raw_message_history_dir: str = "history"
 
     # --- 兼容旧变量 ---
     openai_api_key: str = ""
@@ -266,6 +270,8 @@ class Settings(BaseModel):
             agent_tool_approval_mode=_env_str("AGENT_TOOL_APPROVAL_MODE", "rule") or "rule",
             bash_output_encoding=_env_str("BASH_OUTPUT_ENCODING", "utf-8") or "utf-8",
             agent_session_store_path=_agent_session_store_path(),
+            agent_raw_message_history_enabled=_env_bool("AGENT_RAW_MESSAGE_HISTORY_ENABLED", True),
+            agent_raw_message_history_dir=_env_str("AGENT_RAW_MESSAGE_HISTORY_DIR", "history") or "history",
             openai_api_key=_env_str("OPENAI_API_KEY"),
         )
 

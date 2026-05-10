@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable, Literal
 
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext, PendingToolCall, RunTurnPhase
+from app.harness.history.raw_message_journal import append_openai_message_with_journal, insert_openai_message_with_journal
 from app.harness.queue.message_queue import MessageEnvelope
 from app.harness.service.interface import AgentEventEnvelope
 from app.harness.tools.tool import should_require_tool_approval
@@ -322,12 +323,13 @@ class MainAgentTurnOrchestrator:
                     }
                 )
             elif call_id in rejected_ids:
-                ctx.messages.append(
+                append_openai_message_with_journal(
+                    ctx,
                     {
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": f"工具 {item.name!r} 已被用户拒绝执行。",
-                    }
+                    },
                 )
             else:
                 remaining_pending.append(item)
@@ -369,19 +371,19 @@ class MainAgentTurnOrchestrator:
         ) = self._build_tool_result_messages(payload)
         tail_kind = self._classify_tool_result_tail(ctx)
         if tail_kind == "tail_tool":
-            ctx.messages.append(assistant_message)
-            ctx.messages.append(tool_message)
+            append_openai_message_with_journal(ctx, assistant_message)
+            append_openai_message_with_journal(ctx, tool_message)
         elif tail_kind == "tail_assistant_with_tool_calls":
             insert_at = len(ctx.messages) - 1
-            ctx.messages.insert(insert_at, assistant_message)
-            ctx.messages.insert(insert_at + 1, tool_message)
+            insert_openai_message_with_journal(ctx, insert_at, assistant_message)
+            insert_openai_message_with_journal(ctx, insert_at + 1, tool_message)
         elif tail_kind == "tail_assistant_without_tool_calls":
-            ctx.messages.append(user_message)
-            ctx.messages.append(assistant_message)
-            ctx.messages.append(tool_message)
+            append_openai_message_with_journal(ctx, user_message)
+            append_openai_message_with_journal(ctx, assistant_message)
+            append_openai_message_with_journal(ctx, tool_message)
         else:
-            ctx.messages.append(assistant_message)
-            ctx.messages.append(tool_message)
+            append_openai_message_with_journal(ctx, assistant_message)
+            append_openai_message_with_journal(ctx, tool_message)
         await self._emit_envelope(
             env=env,
             envelope=AgentEventEnvelope(
@@ -408,10 +410,13 @@ class MainAgentTurnOrchestrator:
                 payload={
                     "tool_name": tool_name,
                     "tool_call_id": tool_call_id,
-                    "content": tool_text,
+                    "content": str(tool_message.get("content", "") or ""),
                     "partial": False,
                     "async_status": status,
-                    "display_type": self._infer_tool_result_display_type(tool_name, tool_text),
+                    "display_type": self._infer_tool_result_display_type(
+                        tool_name,
+                        str(tool_message.get("content", "") or ""),
+                    ),
                 },
                 meta={},
             ),
@@ -507,12 +512,13 @@ class MainAgentTurnOrchestrator:
         closed_any = False
         for call_id, tool_name in self._stalled_tool_call_specs(ctx):
             closed_any = True
-            ctx.messages.append(
+            append_openai_message_with_journal(
+                ctx,
                 {
                     "role": "tool",
                     "tool_call_id": call_id,
                     "content": self._TOOL_USER_INTERRUPTED_MESSAGE,
-                }
+                },
             )
             await self._emit_envelope(
                 env=env,
@@ -699,13 +705,22 @@ class MainAgentTurnOrchestrator:
         tool_call_id: str,
         content: str,
     ) -> None:
-        """将工具执行结果回填到会话消息列表。"""
-        ctx.messages.append(
+        """将工具执行结果回填到会话消息列表，并写入原始消息审计。
+
+        逻辑：
+        1. 组装 **`role=tool`** 消息字典；
+        2. **`append_openai_message_with_journal`** 追加并落 JSONL。
+
+        副作用说明：
+        - 修改 **`ctx.messages`**；可能写 **`history/`**（或配置目录）审计文件。
+        """
+        append_openai_message_with_journal(
+            ctx,
             {
                 "role": "tool",
                 "tool_call_id": str(tool_call_id or "").strip(),
                 "content": str(content or ""),
-            }
+            },
         )
 
     async def _invoke_tool(self, ctx: OpenAIConversationContext, tool_call: PendingToolCall) -> str:

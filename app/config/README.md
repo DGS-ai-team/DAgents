@@ -4,6 +4,14 @@
 |------|------|
 | **`settings.py`** | **`Settings`** dataclass、**`get_settings()`**；环境变量键名与 **`.env.example`** 一致 |
 | **`env.py`** | **`load_env`**：将仓库根 **`.env`** 读入 `os.environ`（不覆盖已有变量） |
+| **`host_snapshot.py`** | **`HostSnapshot`**、**`capture_host_snapshot_at_startup`**（API 启动采集环境并打 INFO）、**`get_host_snapshot`**（进程内只读缓存） |
+| **`startup_checks.py`** | **`emit_linux_cross_user_shell_startup_hints`**：Linux 下跨用户 shell 提示（读 **`get_host_snapshot()`**；仅 **`logging`**，避免 stderr 双写重复） |
+
+## 会话与审计
+
+- `AGENT_SESSION_STORE_PATH`：会话上下文 sqlite 路径（默认 `.runtime/memory/session.sqlite3`；显式空串可关闭）
+- `AGENT_RAW_MESSAGE_HISTORY_ENABLED`：是否在每次业务 **`ctx.messages` 追加/插入**时写原始消息 JSONL（默认 `true`；摘要压缩等整段替换不写）
+- `AGENT_RAW_MESSAGE_HISTORY_DIR`：审计目录名（相对 **`resolve_runtime_root()`**，默认 `history`）
 
 ## OpenAI 隐式 ReAct 配置
 
