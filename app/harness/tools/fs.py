@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -269,20 +270,26 @@ def edit_file(path: str, edits_json: str, context: OpenAIConversationContext | N
 @tool("search_file")
 def search_file(
     path: str,
-    keyword: str,
+    pattern: str,
     index_offset: Optional[int] = 0,
     count_limit: Optional[int] = 5,
     context: OpenAIConversationContext | None = None,
 ) -> str:
-    """查找关键字，按**命中顺序**分页展示（**`index_offset`/`count_limit`**）。
-    可以通过调整index_offset和count_limit来调整展示的命中条数和偏移量以展示未被展示的内容。
+    """使用场景：在 **`FS_ROOT`** 内按**正则表达式**逐行检索，并按命中顺序分页展示。
+
     字段说明：
     - `path`：工作区内路径。
-    - `keyword`：非空关键字子串。
-    - `index_offset`：跳过前多少个命中（默认 0）；过大时**自动收紧**到仍可展示至少一条命中。
-    - `count_limit`：本页最多展示多少处命中（默认 5，至少 1，**不超过全文件命中总数**）。
+    - `pattern`：Python **`re`** 兼容的正则字符串（非空）；字面量特殊字符需自行转义（如 `\\.py`）。
+    - `index_offset`：跳过前多少个命中（默认 0）；过大时收紧至仍可展示至少一条。
+    - `count_limit`：本页最多展示多少处命中（默认 5；至多 **全文件命中总数**）。
 
-    逻辑：在全文件行内搜索；头部给出命中统计与前后是否仍有命中；每处命中带上下文行。
+    返回说明：
+    - 成功：头部元数据 + **`---`** 后为命中块（行上下文）；无命中时仅头部，`本页命中` 为 **`无`**。
+    - 失败：`ERROR: ...`（路径无效、正则无编译、`pattern` 为空等）
+
+    调用范例：
+    - `search_file({"path":"a.py","pattern":"TODO"})`
+    - `search_file({"path":"b.py","pattern":"def\\\\s+\\\\w+","index_offset":0,"count_limit":3})`（JSON 内 `\\` 为转义，引擎收到 `def\\s+\\w+`）
     """
     try:
         del context
@@ -291,19 +298,23 @@ def search_file(
             return f"ERROR: 文件不存在：{path!r}"
         if target.is_dir():
             return f"ERROR: 目标是目录，无法搜索：{path!r}"
-        needle = str(keyword or "")
-        if not needle:
-            return "ERROR: keyword 不能为空。"
+        raw_pat = str(pattern or "").strip()
+        if not raw_pat:
+            return "ERROR: pattern 不能为空。"
+        try:
+            regex = re.compile(raw_pat)
+        except re.error as exc:
+            return f"ERROR: 正则无效: {exc}"
         all_lines = _read_text_lines(target)
         total = len(all_lines)
-        hit_indexes = [idx for idx, line in enumerate(all_lines) if needle in line]
+        hit_indexes = [idx for idx, line in enumerate(all_lines) if regex.search(line)]
         total_hits = len(hit_indexes)
         io_raw = DEFAULT_SEARCH_INDEX_OFFSET if index_offset is None else max(0, int(index_offset))
         cl_raw = DEFAULT_SEARCH_COUNT_LIMIT if count_limit is None else max(1, int(count_limit))
 
         base_header = [
             f"文件: {target}",
-            f"关键字: {needle!r}",
+            f"正则: {raw_pat!r}",
             f"文件总行数: {total}",
             f"全文件命中数: {total_hits}",
         ]

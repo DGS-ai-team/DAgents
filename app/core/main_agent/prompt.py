@@ -47,7 +47,7 @@ def get_static_system_prompt() -> str:
 - 涉及文件操作时，优先使用以下工具，不要自行臆造文件读写能力：
   - 读取文件使用 `read_file`
   - 行级修改使用 `edit_file`
-  - 关键字定位使用 `search_file`
+  - 正则检索定位使用 `search_file`（参数 **`pattern`**）
   - 整体覆盖写入使用 `write_file`
   - 优先使用edit_file进行文件修改，除非你需要大规模重写文件才能使用write_file，另外，修改文件前务必确保使用read_file读取过文件内容。
 - 执行linux-shell命令时，除非你是root用户，否则尽可能不要使用su、sudo等需要输入密码的命令，这样会导致工具调用阻塞。

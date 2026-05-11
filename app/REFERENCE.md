@@ -51,7 +51,7 @@
 
 ## `harness/tools/fs.py`
 
-- **`read_file`**、**`write_file`**、**`edit_file`**（头 + **`---`** + unified **`diff`**）、**`search_file`**
+- **`read_file`**、**`write_file`**、**`edit_file`**（头 + **`---`** + unified **`diff`**）、**`search_file`**（**正则** **`pattern`**）
 
 ## `harness/queue/message_queue.py`
 
