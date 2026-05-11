@@ -51,7 +51,7 @@
 
 ## `harness/tools/fs.py`
 
-- **`fs_read`**、**`fs_write`**、**`fs_edit`**
+- **`read_file`**、**`write_file`**、**`edit_file`**、**`search_file`**
 
 ## `harness/queue/message_queue.py`
 

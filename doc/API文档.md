@@ -162,20 +162,27 @@ data: {"client_id":"...","session_id":"...","type":"...","seq":0,"ts":"...","dat
 
 - `assistant`
   - `data.content: string`
+  - `data.display_type: "terminal" | "code" | "normal_text" | "image" | "markdown"`（AI 正文默认 **`markdown`**）
 - `reasoning`
   - `data.content: string`
+  - `data.display_type: "reasoning"`（及其它合法字面量时与 `assistant` 同源推断规则兼容）
 - `usage`
   - `data.prompt_tokens: number`
   - `data.completion_tokens: number`
   - `data.total_tokens: number | null`
+  - `data.prompt_audio_tokens: number`（`usage.prompt_tokens_details.audio_tokens`）
+  - `data.prompt_cached_tokens: number`（`usage.prompt_tokens_details.cached_tokens`）
+  - `data.prompt_cache_hit_tokens: number`
+  - `data.prompt_cache_miss_tokens: number`
 - `tool_call`
   - `data.assistant_content: string`
   - `data.tool_calls: array`
+  - `data.display_type: "terminal" | "code" | "normal_text" | "image"`（由工具名与旁白推断）
 - `tool_result`
   - `data.content: string`（工具执行结果正文；失败时为错误信息或拒绝/打断提示）
   - `data.tool_call_id: string | null`
   - `data.tool_name: string | null`
-  - `data.display_type: "terminal" | "code" | "normal_text" | "image"`
+  - `data.display_type: "terminal" | "code" | "normal_text" | "image" | "reasoning" | "markdown"`（`reasoning` / `markdown` 可为显式覆盖；默认由服务端推断）
   - `data.rejected: bool`
   - `data.interrupted_by_user_message: bool`
   - `data.partial: bool`
@@ -185,6 +192,7 @@ data: {"client_id":"...","session_id":"...","type":"...","seq":0,"ts":"...","dat
   - `data.approval_args: object`（含 `tool_calls`）
   - `data.description: string`
   - `data.approval_id: string | null`
+  - `data.display_type: "terminal" | "code" | "normal_text" | "image"`（与 `tool_call` 推断规则一致）
 - `error`
   - `data.message: string`
 - `done`

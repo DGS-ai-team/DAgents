@@ -93,6 +93,7 @@
 ```json
 {
   "content": "你好，",
+  "display_type": "markdown",
   "meta": {
     "session_id": "…",
     "model": "…"
@@ -100,13 +101,14 @@
 }
 ```
 
-`meta` 由 **`AgentService`** 注入公共字段（`session_id` / `model`），并与 runtime 信封上的 **`envelope.meta`** 合并（后者当前多为空）。
+`display_type`：`terminal` | `code` | `normal_text` | `image` | **`markdown`**（模型正文默认 **`markdown`**；片段中含 Markdown 代码围栏时为 **`code`**，图片线索时为 **`image`**）。
 
-### 4.2 `reasoning`
+### 4.1.1 `reasoning`
 
 ```json
 {
   "content": "我需要先确认工具能力。",
+  "display_type": "reasoning",
   "meta": {
     "session_id": "…",
     "model": "…"
@@ -114,13 +116,21 @@
 }
 ```
 
-### 4.2.1 `usage`
+`display_type` 一般为 **`reasoning`**（推理模型思考流）。
+
+`meta` 由 **`AgentService`** 注入公共字段（`session_id` / `model`），并与 runtime 信封上的 **`envelope.meta`** 合并（后者当前多为空）。
+
+### 4.2 `usage`
 
 ```json
 {
   "prompt_tokens": 1162,
   "completion_tokens": 48,
   "total_tokens": 1210,
+  "prompt_audio_tokens": 0,
+  "prompt_cached_tokens": 0,
+  "prompt_cache_hit_tokens": 0,
+  "prompt_cache_miss_tokens": 5591,
   "meta": {
     "session_id": "…",
     "model": "…"
@@ -128,7 +138,7 @@
 }
 ```
 
-`total_tokens` 在提供商未返回时可能为 JSON `null`。
+`total_tokens` 在提供商未返回时可能为 JSON `null`。**`prompt_*`** 明细来自 **`CompletionUsage`**（部分网关可能不提供，缺失时为 `0`）。
 
 ### 4.3 `tool_call`
 
@@ -145,12 +155,15 @@
       "raw_arguments": "{\"command\":\"uname -a\"}"
     }
   ],
+  "display_type": "terminal",
   "meta": {
     "session_id": "…",
     "model": "…"
   }
 }
 ```
+
+`display_type`：由本轮 **`tool_calls` 工具名**与 **`assistant_content`** 汇总推断（`terminal` / `code` / `normal_text` / `image`）。
 
 ### 4.4 `tool_result`
 
@@ -159,12 +172,15 @@
   "tool_name": "bash_run",
   "tool_call_id": "019d76a23b1b2bf067f27d511a584766",
   "content": "Linux ...",
+  "display_type": "terminal",
   "meta": {
     "session_id": "…",
     "model": "…"
   }
 }
 ```
+
+`display_type`：同 API 文档（**`tool_result`** 与 **`display_inference.infer_tool_result_display_type`** 一致）。
 
 ### 4.5 `approval_required`
 
@@ -185,12 +201,15 @@
   },
   "description": "OpenAI tool calling 审批",
   "approval_id": null,
+  "display_type": "terminal",
   "meta": {
     "session_id": "…",
     "model": "…"
   }
 }
 ```
+
+`display_type`：与 **`tool_call`** 一致，由本轮 **`assistant_content`**（若有）与 **`approval_args.tool_calls`** 汇总推断（`terminal` / `code` / `normal_text` / `image`）。
 
 ### 4.6 `done`
 

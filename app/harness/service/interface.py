@@ -99,7 +99,7 @@ class AgentEventEnvelope(BaseModel):
 
     字段说明：
     - `event_type`：事件类型（如 `assistant`/`reasoning`/`usage`/`tool_call`/`tool_result`/`approval_required`/`error`/`done`）。
-    - `payload`：事件业务数据；`approval_required` 时建议符合 **`ApprovalRequiredEnvelopePayload`**（见 `app.schemas.approval`）。
+    - `payload`：事件业务数据；`approval_required` 时建议符合 **`ApprovalRequiredEnvelopePayload`**（含 **`display_type`**，见 `app.schemas.approval`）。
     - `meta`：附加元信息（会话、模型、耗时等）。
     """
 

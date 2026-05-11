@@ -20,7 +20,7 @@
 
 ## `agent_peer.py`
 
-- **`PeerApprovalEntry`**：**Pydantic `BaseModel`**；对端 `approval_required` 事件结构化条目（含 `target_session_id/approval_id/approval_args` 等）。
+- **`PeerApprovalEntry`**：**Pydantic `BaseModel`**；对端 `approval_required` 事件结构化条目（含 `target_session_id/approval_id/display_type/approval_args` 等）。
 - **`PeerStreamSummary`**：**Pydantic `BaseModel`**；单次远端 SSE 拉取汇总（`text/approvals/errors/final_state/truncated`）。
 - **`agent_discover`**：按分组发现可协作 Agent（内联固定结构 `agent_card`）
 - **`agent_send_message`**：点对点向目标 Agent 提交消息；返回信封含 `target_session_id/approvals/final_state` 与真实 `task.state`
@@ -61,7 +61,7 @@
 
 ## `fs.py`
 
-- **`fs_read`**、**`fs_write`**、**`fs_edit`**
+- **`read_file`**、**`write_file`**、**`edit_file`**、**`search_file`**
 
 ## `skills.py`
 

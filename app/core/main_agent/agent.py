@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from typing import Any, Awaitable, Callable, Literal
 
 from app.config.settings import get_settings
@@ -23,6 +22,11 @@ from app.schemas.approval import (
     parse_resume_tool_decision,
 )
 
+from app.core.main_agent.display_inference import (
+    VALID_DISPLAY_TYPES,
+    infer_tool_call_display_type,
+    infer_tool_result_display_type,
+)
 from app.core.main_agent.runtime_openai import OpenAIImplicitReActRuntime
 from app.core.summary_agent.agent import init_agent as init_summary_agent
 
@@ -319,7 +323,7 @@ class MainAgentTurnOrchestrator:
                         "tool_name": item.name,
                         "tool_call_id": item.call_id,
                         "content": result_text,
-                        "display_type": self._infer_tool_result_display_type(item.name, result_text),
+                        "display_type": infer_tool_result_display_type(item.name, result_text),
                     }
                 )
             elif call_id in rejected_ids:
@@ -384,20 +388,22 @@ class MainAgentTurnOrchestrator:
         else:
             append_openai_message_with_journal(ctx, assistant_message)
             append_openai_message_with_journal(ctx, tool_message)
+        async_tool_calls_payload = [
+            {
+                "id": tool_call_id,
+                "name": "tool_callback",
+                "arguments": {"job_id": str(payload.get("job_id", "") or "unknown-job")},
+                "raw_arguments": assistant_message["tool_calls"][0]["function"]["arguments"],
+            }
+        ]
         await self._emit_envelope(
             env=env,
             envelope=AgentEventEnvelope(
                 event_type="tool_call",
                 payload={
                     "assistant_content": "",
-                    "tool_calls": [
-                        {
-                            "id": tool_call_id,
-                            "name": "tool_callback",
-                            "arguments": {"job_id": str(payload.get("job_id", "") or "unknown-job")},
-                            "raw_arguments": assistant_message["tool_calls"][0]["function"]["arguments"],
-                        }
-                    ],
+                    "tool_calls": async_tool_calls_payload,
+                    "display_type": infer_tool_call_display_type("", async_tool_calls_payload),
                 },
                 meta={},
             ),
@@ -413,7 +419,7 @@ class MainAgentTurnOrchestrator:
                     "content": str(tool_message.get("content", "") or ""),
                     "partial": False,
                     "async_status": status,
-                    "display_type": self._infer_tool_result_display_type(
+                    "display_type": infer_tool_result_display_type(
                         tool_name,
                         str(tool_message.get("content", "") or ""),
                     ),
@@ -449,10 +455,10 @@ class MainAgentTurnOrchestrator:
                 result_content = str(item.get("content", "") or "")
                 tool_name = str(item.get("tool_name", "") or "")
                 display_type_raw = str(item.get("display_type", "") or "")
-                if display_type_raw in {"terminal", "code", "normal_text", "image"}:
+                if display_type_raw in VALID_DISPLAY_TYPES:
                     display_type = display_type_raw
                 else:
-                    display_type = self._infer_tool_result_display_type(tool_name, result_content)
+                    display_type = infer_tool_result_display_type(tool_name, result_content)
                 await self._emit_envelope(
                     env=env,
                     envelope=AgentEventEnvelope(
@@ -472,10 +478,10 @@ class MainAgentTurnOrchestrator:
             result_content = str(payload.get("content", "") or "")
             tool_name = str(payload.get("tool_name", "") or "")
             display_type_raw = str(payload.get("display_type", "") or "")
-            if display_type_raw in {"terminal", "code", "normal_text", "image"}:
+            if display_type_raw in VALID_DISPLAY_TYPES:
                 display_type = display_type_raw
             else:
-                display_type = self._infer_tool_result_display_type(tool_name, result_content)
+                display_type = infer_tool_result_display_type(tool_name, result_content)
             await self._emit_envelope(
                 env=env,
                 envelope=AgentEventEnvelope(
@@ -549,12 +555,26 @@ class MainAgentTurnOrchestrator:
         )
 
     @staticmethod
-    def _build_approval_required_payload(tool_calls: list[dict[str, Any]]) -> dict[str, Any]:
-        """把 `tool_call` 列表转换为统一 `approval_required` 载荷。"""
+    def _build_approval_required_payload(
+        tool_calls: list[dict[str, Any]],
+        *,
+        assistant_content: str = "",
+    ) -> dict[str, Any]:
+        """把 `tool_call` 列表转换为统一 `approval_required` 载荷。
+
+        逻辑：
+        1. 用 `infer_tool_call_display_type` 汇总展示类型（与前置 `tool_call` 事件对齐）；
+        2. 组装 `ApprovalRequiredEnvelopePayload` 并 `model_dump` 为 dict。
+
+        关键边界：
+        - `assistant_content` 缺省时传空串，推断主要依赖待审批工具名与旁白。
+        """
+        display_type = infer_tool_call_display_type(str(assistant_content or ""), tool_calls)
         payload = ApprovalRequiredEnvelopePayload(
             message="检测到工具调用，等待用户确认后继续执行。",
             args=ApprovalToolCallsArgs(tool_calls=[ToolCallApprovalItem.model_validate(c) for c in tool_calls]),
             description="OpenAI tool calling 审批",
+            display_type=display_type,
         )
         return payload.model_dump()
 
@@ -598,6 +618,7 @@ class MainAgentTurnOrchestrator:
     ) -> None:
         """统一的一轮 run_turn + 工具执行编排。"""
         captured_tool_calls: list[dict[str, Any]] = []
+        captured_assistant_content: str = ""
         runtime_done_envelope: AgentEventEnvelope | None = None
         async for envelope in runtime.run_turn(
             ctx,
@@ -606,6 +627,8 @@ class MainAgentTurnOrchestrator:
         ):
             if envelope.event_type == "tool_call":
                 captured_tool_calls = list(envelope.payload.get("tool_calls", []) or [])
+                # 与 `tool_call` 事件的 `assistant_content` 同源，供审批卡片的 `display_type` 推断。
+                captured_assistant_content = str(envelope.payload.get("assistant_content", "") or "")
             elif envelope.event_type == "done":
                 runtime_done_envelope = envelope
                 continue
@@ -642,7 +665,8 @@ class MainAgentTurnOrchestrator:
                                 "raw_arguments": json.dumps(p.arguments, ensure_ascii=False),
                             }
                             for p in need_approval_calls
-                        ]
+                        ],
+                        assistant_content=captured_assistant_content,
                     ),
                     meta={},
                 ),
@@ -657,7 +681,7 @@ class MainAgentTurnOrchestrator:
                         "tool_name": item.name,
                         "tool_call_id": item.call_id,
                         "content": result_text,
-                        "display_type": self._infer_tool_result_display_type(item.name, result_text),
+                        "display_type": infer_tool_result_display_type(item.name, result_text),
                     }
                     for item, result_text in zip(auto_exec_calls, auto_exec_results)
                 ]
@@ -675,7 +699,7 @@ class MainAgentTurnOrchestrator:
                 "tool_name": item.name,
                 "tool_call_id": item.call_id,
                 "content": result_text,
-                "display_type": self._infer_tool_result_display_type(item.name, result_text),
+                "display_type": infer_tool_result_display_type(item.name, result_text),
             }
             for item, result_text in zip(auto_exec_calls, auto_exec_results)
         ]
@@ -793,46 +817,6 @@ class MainAgentTurnOrchestrator:
         }
         user_message = {"role": "user", "content": user_text}
         return user_message, assistant_message, tool_message, tool_name, tool_call_id, status
-
-    @staticmethod
-    def _infer_tool_result_display_type(
-        tool_name: str,
-        content: str,
-    ) -> Literal["terminal", "code", "normal_text", "image"]:
-        """根据工具名与结果文本推断前端展示类型。
-
-        逻辑：
-        1. 命中图片 URL/data URI/markdown image 时返回 `image`；
-        2. 命中 shell/terminal 相关工具名时返回 `terminal`；
-        3. 命中代码围栏或代码类工具名时返回 `code`；
-        4. 其余返回 `normal_text`。
-        """
-        final_tool_name = str(tool_name or "").strip().lower()
-        final_content = str(content or "").strip()
-        if not final_content:
-            return "normal_text"
-        image_ext_pattern = r"https?://\S+\.(png|jpg|jpeg|gif|webp|bmp|svg)(\?\S*)?$"
-        if (
-            final_content.startswith("data:image/")
-            or "![](" in final_content
-            or re.search(image_ext_pattern, final_content, flags=re.IGNORECASE) is not None
-        ):
-            return "image"
-        terminal_tool_names = {"bash_run", "shell_run", "terminal_run", "cmd_run", "powershell_run"}
-        if final_tool_name in terminal_tool_names:
-            return "terminal"
-        code_tool_names = {
-            "fs_read",
-            "fs_edit",
-            "fs_write",
-            "python_run",
-            "javascript_run",
-            "typescript_run",
-            "code_run",
-        }
-        if "```" in final_content or final_tool_name in code_tool_names:
-            return "code"
-        return "normal_text"
 
     @staticmethod
     def _stalled_tool_call_specs(ctx: OpenAIConversationContext) -> list[tuple[str, str]]:

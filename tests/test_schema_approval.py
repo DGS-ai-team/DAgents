@@ -39,6 +39,7 @@ class SchemaApprovalTestCase(unittest.TestCase):
         )
         d = p.model_dump()
         self.assertEqual(d["args"]["tool_calls"][0]["id"], "1")
+        self.assertEqual(d["display_type"], "normal_text")
 
 
 if __name__ == "__main__":

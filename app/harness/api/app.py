@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
@@ -17,6 +18,8 @@ from app.harness.queue.message_queue import MessagePriority
 from app.harness.service.agent_service import AgentService
 from app.harness.streaming.events import InMemoryEventBus, StreamEvent
 from app.observability.metrics import metrics_text
+
+_logger = logging.getLogger(__name__)
 
 
 class MessageIn(BaseModel):
@@ -168,7 +171,7 @@ async def lifespan(app: FastAPI):
     app.state.registry_registered = registered
     app.state.registry_url = registry_url
     if not registered and registry_url:
-        print(f"[WARN] agent registry skipped: {register_reason}")
+        _logger.warning("agent registry skipped: %s", register_reason)
     try:
         yield
     finally:
@@ -177,7 +180,7 @@ async def lifespan(app: FastAPI):
                 str(getattr(app.state, "registry_url", ""))
             )
             if not unregistered:
-                print(f"[WARN] agent unregister failed: {unregister_reason}")
+                _logger.warning("agent unregister failed: %s", unregister_reason)
         await service.stop()
 
 

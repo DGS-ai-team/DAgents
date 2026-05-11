@@ -178,6 +178,7 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("model", events[0][3]["meta"])
         self.assertEqual(events[1][2], "approval_required")
         self.assertEqual(events[1][3]["approval_type"], "execute_tool")
+        self.assertEqual(events[1][3]["display_type"], "normal_text")
         self.assertEqual(events[1][3]["meta"]["session_id"], "s-event")
         self.assertEqual(events[-1][2], "done")
 
@@ -326,6 +327,7 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(event_type, "approval_required")
         self.assertEqual(data["approval_type"], "execute_tool")
+        self.assertEqual(data["display_type"], "normal_text")
         self.assertEqual(data["meta"]["session_id"], "s")
 
     def test_map_event_envelope_tool_result_shape(self) -> None:
@@ -368,6 +370,10 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["prompt_tokens"], 10)
         self.assertEqual(data["completion_tokens"], 20)
         self.assertEqual(data["total_tokens"], 30)
+        self.assertEqual(data["prompt_audio_tokens"], 0)
+        self.assertEqual(data["prompt_cached_tokens"], 0)
+        self.assertEqual(data["prompt_cache_hit_tokens"], 0)
+        self.assertEqual(data["prompt_cache_miss_tokens"], 0)
         self.assertEqual(data["meta"]["session_id"], "s")
         self.assertEqual(data["meta"]["extra"], 1)
 

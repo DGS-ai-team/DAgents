@@ -4,7 +4,7 @@
 
 - **`ToolCallApprovalItem`**：审批条目中单条工具（`id` / `name` / `arguments` / `raw_arguments`）
 - **`ApprovalToolCallsArgs`**：`payload.args`，含 **`tool_calls`**
-- **`ApprovalRequiredEnvelopePayload`**：与 `AgentEventEnvelope(event_type=approval_required)` 的 `payload` 一致（`approval_type` / `message` / `args` / `description`）
+- **`ApprovalRequiredEnvelopePayload`**：与 `AgentEventEnvelope(event_type=approval_required)` 的 `payload` 一致（`approval_type` / `message` / `args` / `description` / `display_type`）
 - **`ApprovalRequiredSseData`**：经 `AgentService._map_event_envelope_to_stream` 映射后的 SSE `data` 内嵌结构
 - **`ResumeToolApprove`**、**`ResumeToolReject`**、**`ResumeToolUnion`**：`resume_value` 判别式联合类型
 - **`parse_resume_tool_decision`**、**`is_tool_execution_approved`**：将任意 `resume_value` 规范为 approve/reject（失败视为 reject）

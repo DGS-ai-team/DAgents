@@ -35,11 +35,49 @@ class MetricsTokensTestCase(unittest.TestCase):
         u = SimpleNamespace(prompt_tokens=1, completion_tokens=2, total_tokens=3)
         self.assertEqual(
             usage_fields_from_openai_usage(u),
-            {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "total_tokens": 3,
+                "prompt_audio_tokens": 0,
+                "prompt_cached_tokens": 0,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 0,
+            },
         )
         self.assertEqual(
             usage_fields_from_openai_usage({"prompt_tokens": 4, "completion_tokens": 5}),
-            {"prompt_tokens": 4, "completion_tokens": 5, "total_tokens": None},
+            {
+                "prompt_tokens": 4,
+                "completion_tokens": 5,
+                "total_tokens": None,
+                "prompt_audio_tokens": 0,
+                "prompt_cached_tokens": 0,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 0,
+            },
+        )
+
+    def test_usage_fields_includes_prompt_details_and_cache(self) -> None:
+        u = SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=20,
+            total_tokens=30,
+            prompt_cache_hit_tokens=3,
+            prompt_cache_miss_tokens=7,
+            prompt_tokens_details=SimpleNamespace(audio_tokens=1, cached_tokens=5),
+        )
+        self.assertEqual(
+            usage_fields_from_openai_usage(u),
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+                "prompt_audio_tokens": 1,
+                "prompt_cached_tokens": 5,
+                "prompt_cache_hit_tokens": 3,
+                "prompt_cache_miss_tokens": 7,
+            },
         )
 
     def test_sanitize_model_label(self) -> None:
@@ -65,6 +103,23 @@ class MetricsTokensTestCase(unittest.TestCase):
         body = generate_latest().decode("utf-8")
         self.assertIn(f'dagents_llm_prompt_tokens{{model="{safe}"}} 100.0', body)
         self.assertIn(f'dagents_llm_completion_tokens{{model="{safe}"}} 50.0', body)
+
+    def test_record_llm_token_usage_writes_cache_gauges_when_usage_given(self) -> None:
+        label = f"ut_{uuid.uuid4().hex}"
+        safe = sanitize_model_label(label)
+        u = SimpleNamespace(
+            prompt_tokens=100,
+            completion_tokens=50,
+            prompt_cache_hit_tokens=10,
+            prompt_cache_miss_tokens=90,
+            prompt_tokens_details=SimpleNamespace(audio_tokens=2, cached_tokens=20),
+        )
+        record_llm_token_usage(prompt_tokens=100, completion_tokens=50, model=label, usage=u)
+        body = generate_latest().decode("utf-8")
+        self.assertIn(f'dagents_llm_prompt_audio_tokens{{model="{safe}"}} 2.0', body)
+        self.assertIn(f'dagents_llm_prompt_cached_tokens{{model="{safe}"}} 20.0', body)
+        self.assertIn(f'dagents_llm_prompt_cache_hit_tokens{{model="{safe}"}} 10.0', body)
+        self.assertIn(f'dagents_llm_prompt_cache_miss_tokens{{model="{safe}"}} 90.0', body)
 
 
 if __name__ == "__main__":

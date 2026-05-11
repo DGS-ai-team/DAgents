@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, AsyncIterator
 
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext, PendingToolCall, RunTurnPhase
+from app.core.main_agent.display_inference import (
+    infer_assistant_delta_display_type,
+    infer_reasoning_delta_display_type,
+    infer_tool_call_display_type,
+)
 from app.core.main_agent.model import get_model_config, get_openai_client
 from app.core.main_agent.prompt import get_system_prompt
 from app.harness.history.raw_message_journal import append_openai_message_with_journal
 from app.harness.service.interface import AgentEventEnvelope
 from app.harness.tools.tool import build_openai_toolkit, parse_tool_arguments
 from app.observability.metrics import record_llm_token_usage, usage_fields_from_openai_usage
+
+_logger = logging.getLogger(__name__)
 
 
 class OpenAIImplicitReActRuntime:
@@ -145,18 +153,32 @@ class OpenAIImplicitReActRuntime:
                     delta_text = str(model_event.get("text", ""))
                     if delta_text:
                         ctx.assistant_stream_buffer += delta_text
-                        yield self._ev("assistant", {"content": delta_text})
+                        yield self._ev(
+                            "assistant",
+                            {
+                                "content": delta_text,
+                                "display_type": infer_assistant_delta_display_type(delta_text),
+                            },
+                        )
                     continue
                 elif event_kind == "reasoning_delta":
                     reasoning_text = str(model_event.get("text", ""))
                     if reasoning_text:
                         ctx.assistant_stream_buffer += reasoning_text
-                        yield self._ev("reasoning", {"content": reasoning_text})
+                        yield self._ev(
+                            "reasoning",
+                            {
+                                "content": reasoning_text,
+                                "display_type": infer_reasoning_delta_display_type(),
+                            },
+                        )
                     continue
                 elif event_kind == "usage":
-                    prompt_tokens = int(model_event.get("prompt_tokens", 0))
-                    completion_tokens = int(model_event.get("completion_tokens", 0))
-                    total_tokens = int(model_event.get("total_tokens") or 0)
+                    # 透传 `usage_fields_from_openai_usage` 全量字段（含 cache/audio 明细）。
+                    usage_payload = {k: v for k, v in model_event.items() if k != "kind"}
+                    prompt_tokens = int(usage_payload.get("prompt_tokens", 0))
+                    completion_tokens = int(usage_payload.get("completion_tokens", 0))
+                    total_tokens = int(usage_payload.get("total_tokens") or 0)
                     # 优先使用 total_tokens；缺失时退化为 input+output（prompt+completion）。
                     if total_tokens > 0:
                         latest_total_tokens = total_tokens
@@ -164,14 +186,7 @@ class OpenAIImplicitReActRuntime:
                         merged_tokens = prompt_tokens + completion_tokens
                         if merged_tokens > 0:
                             latest_total_tokens = merged_tokens
-                    yield self._ev(
-                        "usage",
-                        {
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "total_tokens": model_event.get("total_tokens"),
-                        },
-                    )
+                    yield self._ev("usage", usage_payload)
                     continue
                 elif event_kind == "final":
                     model_msg = model_event.get("message")
@@ -216,7 +231,14 @@ class OpenAIImplicitReActRuntime:
                     {"id": call_id, "name": name, "arguments": args, "raw_arguments": fn.get("arguments")}
                 )
             ctx.pending_tool_calls = pending
-            yield self._ev("tool_call", {"tool_calls": payload_calls, "assistant_content": assistant_content})
+            yield self._ev(
+                "tool_call",
+                {
+                    "tool_calls": payload_calls,
+                    "assistant_content": assistant_content,
+                    "display_type": infer_tool_call_display_type(assistant_content, payload_calls),
+                },
+            )
             ctx.run_turn_phase = RunTurnPhase.AWAITING_TOOL_EXECUTION
             yield self._ev("done", {})
             return
@@ -248,7 +270,8 @@ class OpenAIImplicitReActRuntime:
         - 未开启 `include_usage` 或网关不支持时无 **`usage`** 分片。
 
         与外部交互：
-        - 若 **`self._stream_include_usage`** 为真，向 OpenAI 传入 **`stream_options={"include_usage": True}`**。
+        - 若 **`self._stream_include_usage`** 为真，向 OpenAI 传入 **`stream_options={"include_usage": True}`**；
+        - DEBUG 日志下对每个 SDK **`chunk`** 输出 **`%r`**（不做 JSON 再封装）。
         """
         kwargs: dict[str, Any] = {
             "model": self._model_cfg["model"],
@@ -268,11 +291,15 @@ class OpenAIImplicitReActRuntime:
         tool_calls_acc: dict[int, dict[str, Any]] = {}
         model_name = str(self._model_cfg.get("model") or "")
         async for chunk in stream:
+            # DEBUG：直接输出 SDK 流式分片对象（由 `%r` 展示原始 repr）。
+            _logger.debug("openai chat.completions stream chunk: %r", chunk)
             usage = getattr(chunk, "usage", None)
             if usage is not None:
                 fields = usage_fields_from_openai_usage(usage)
                 pt, ct = int(fields["prompt_tokens"]), int(fields["completion_tokens"])
-                record_llm_token_usage(prompt_tokens=pt, completion_tokens=ct, model=model_name)
+                record_llm_token_usage(
+                    prompt_tokens=pt, completion_tokens=ct, model=model_name, usage=usage
+                )
                 yield {"kind": "usage", **fields}
             choices = getattr(chunk, "choices", None) or []
             if not choices:

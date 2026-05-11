@@ -62,9 +62,10 @@ Prometheus 是一套 **主动拉取（pull）** 的时序监控系统：
 当前内置两类能力：
 
 1. **LLM token 快照（Gauge）**  
-   - **`dagents_llm_prompt_tokens{model=...}`**  
-   - **`dagents_llm_completion_tokens{model=...}`**  
-   - 在收到流式响应 **`usage`** chunk 时由 **`record_llm_token_usage(...)`** 执行 **`set`**（与 **`include_usage`** 配置配合）。若网关上报的 prompt/completion 已为累计值，此处**不再**用 Counter 二次累加。
+   - **`dagents_llm_prompt_tokens{model=...}`**、**`dagents_llm_completion_tokens{model=...}`**  
+   - **`dagents_llm_prompt_audio_tokens`**、**`dagents_llm_prompt_cached_tokens`**（来自 **`usage.prompt_tokens_details`**）  
+   - **`dagents_llm_prompt_cache_hit_tokens`**、**`dagents_llm_prompt_cache_miss_tokens`**  
+   - 在收到流式响应 **`usage`** chunk 时由 **`record_llm_token_usage(..., usage=原始 usage)`** 执行 **`set`**（与 **`include_usage`** 配置配合）。若网关上报的 prompt/completion 已为累计值，此处**不再**用 Counter 二次累加。
 
 2. **会话上下文快照（Gauge）**  
    - **`dagents_session_context_messages_count{session_id=...}`**：**`OpenAIConversationContext.messages`** 条数。  

@@ -4,7 +4,7 @@
 
 - 持续读取消息队列
 - 调用 OpenAI 隐式 ReAct runtime 处理消息
-- 输出处理结果（当前先 stdout）
+- 输出处理结果（经 **`logging`**：`AgentService._log`、SSE 映射等；默认 **`INFO`**，流式逐条映射为 **`DEBUG`**）
 
 | 文件 | 说明 |
 |------|------|

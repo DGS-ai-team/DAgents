@@ -42,6 +42,10 @@ class PeerApprovalEntry(BaseModel):
     approval_type: str = Field(default="execute_tool", description="审批类型。")
     content: str = Field(default="", description="对端审批提示文本。")
     description: str = Field(default="", description="审批描述。")
+    display_type: str = Field(
+        default="normal_text",
+        description="与对端 `tool_call` 推断规则一致的展示类型（SSE `approval_required.data.display_type`）。",
+    )
     approval_args: dict[str, Any] = Field(
         default_factory=dict,
         description="审批参数（含 `tool_calls` 列表，每项 `id/name/arguments/raw_arguments`）。",
@@ -280,6 +284,7 @@ def _approval_entry_from_event(*, target_session_id: str, data: dict[str, Any]) 
         approval_type=str(data.get("approval_type") or "execute_tool"),
         content=str(data.get("content") or ""),
         description=str(data.get("description") or ""),
+        display_type=str(data.get("display_type") or "normal_text"),
         approval_args=dict(safe_args),
     )
 
@@ -597,7 +602,7 @@ async def agent_send_message(
 
     返回说明：
     - 成功（对端正常 done）：返回 JSON 文本，`task.state="succeeded"`，`payload.content` 含 `target_session_id/stream_output`。
-    - 等待审批（对端 `approval_required`）：返回 JSON 文本，`task.state="requires_input"`；`payload.content.approvals[]` 列出每个待审批批次（含 `target_session_id/approval_id/approval_args.tool_calls`）。后续应调用 **`agent_peer_approve_tools`** 逐批做出决策。
+    - 等待审批（对端 `approval_required`）：返回 JSON 文本，`task.state="requires_input"`；`payload.content.approvals[]` 列出每个待审批批次（含 `target_session_id/approval_id/display_type/approval_args.tool_calls`）。后续应调用 **`agent_peer_approve_tools`** 逐批做出决策。
     - 失败：`task.state="failed"`，`error.code` 标注失败类别。
 
     调用范例：

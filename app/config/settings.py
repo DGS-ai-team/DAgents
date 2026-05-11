@@ -187,6 +187,8 @@ class Settings(BaseModel):
 
     # --- 可观测性 ---
     metrics_enabled: bool = True
+    # 应用与 uvicorn 日志级别（DEBUG/INFO/WARNING/ERROR/CRITICAL）
+    app_log_level: str = "INFO"
 
     # --- 队列（MVP）---
     max_queue_size: int = 0
@@ -251,6 +253,7 @@ class Settings(BaseModel):
             agent_skills_dir=_env_str("AGENT_SKILLS_DIR", ".runtime/skills") or ".runtime/skills",
             agent_skills_max_in_prompt=_env_int("AGENT_SKILLS_MAX_IN_PROMPT", 3),
             metrics_enabled=_env_bool("METRICS_ENABLED", True),
+            app_log_level=_env_str("APP_LOG_LEVEL", "INFO") or "INFO",
             max_queue_size=_env_int("MAX_QUEUE_SIZE", 0),
             agent_max_active_session_queues=_env_int("AGENT_MAX_ACTIVE_SESSION_QUEUES", 3),
             agent_session_idle_evict_seconds=_env_int("AGENT_SESSION_IDLE_EVICT_SECONDS", 300),

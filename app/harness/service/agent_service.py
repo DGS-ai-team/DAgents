@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any, Awaitable, Callable, Literal
 from uuid import uuid4
@@ -20,6 +21,8 @@ from app.harness.service.interface import AgentEventEnvelope
 from app.harness.tools.tool import build_openai_toolkit
 from app.harness.tools.async_store import get_async_tool_result_store
 from app.observability.metrics import refresh_session_context_metrics
+
+_logger = logging.getLogger(__name__)
 
 
 def _queue_maxsize(max_queue_size: int) -> int | None:
@@ -94,10 +97,10 @@ class AgentService:
     async def start(self) -> None:
         """标记服务已启动（当前无额外预热逻辑）。
 
-        逻辑：仅打印启动日志；session 队列仍按 `submit_message` 首次命中时创建。
+        逻辑：写 INFO 启动日志；session 队列仍按 `submit_message` 首次命中时创建。
         """
         self._async_store.register_message_queue_sender(self._enqueue_async_tool_result_message)
-        print("[agent-service] started", flush=True)
+        _logger.info("agent-service started")
 
     async def stop(self) -> None:
         """停止服务：取消在途 turn、停止消费者与队列，并唤醒 `run_forever()`。
@@ -107,7 +110,7 @@ class AgentService:
            runtime 的 `flush_cancelled_turn` 与 `finally` 落盘）；
         2. 对 `_session_consumer_tasks` 中每个 session 消费循环 `cancel` 并 `await`；
         3. 清空上述映射后，对每个 `MessageQueue` 调用 `stop()`，再清空 `_session_queues` 与 `_session_contexts`；
-        4. `set` `_stop_event` 并打印停止日志。
+        4. `set` `_stop_event` 并写 INFO 停止日志。
 
         关键边界：
         - 若某 session 正阻塞在 `receive()`，先取消 consumer 可通过 `CancelledError` 退出循环，再 `queue.stop()` 兜底唤醒。
@@ -147,7 +150,7 @@ class AgentService:
         self._session_last_activity.clear()
         refresh_session_context_metrics({})
         self._stop_event.set()
-        print("[agent-service] stopped", flush=True)
+        _logger.info("agent-service stopped")
 
     async def _enqueue_async_tool_result_message(self, session_id: str, payload: dict[str, Any]) -> None:
         """将异步工具完成结果投递到会话消息队列。
@@ -538,9 +541,9 @@ class AgentService:
 
         refresh_session_context_metrics(self._session_contexts)
 
-        print(
-            f"[agent-service][evict] session={session_id}: evicted for capacity (idle session slot)",
-            flush=True,
+        _logger.info(
+            "session evicted for capacity (idle session slot)",
+            extra={"session_id": session_id},
         )
 
     async def _get_or_create_session_queue_async(self, session_id: str) -> MessageQueue[MessageEnvelope]:
@@ -644,11 +647,24 @@ class AgentService:
 
     @staticmethod
     def _log(kind: str, session_id: str, body: str) -> None:
-        """统一一行日志格式：`[agent-service][kind] session=...: ...`。
+        """统一业务日志出口：`kind` 映射到 logging 级别。
 
-        逻辑：仅 `print`，无侧效应；`kind` 一般为 `result` 或 `error`。
+        逻辑：
+        - **`error`** → **`ERROR`**；
+        - **`stream`** → **`DEBUG`**（每条 SSE 映射一条，默认级别下不刷屏）；
+        - 其余（如 **`summary`**）→ **`INFO`**，若正文含 **`failed`** 则升为 **`WARNING`**。
         """
-        print(f"[agent-service][{kind}] session={session_id}: {body}", flush=True)
+
+        msg = "session=%s: %s"
+        args = (session_id, body)
+        if kind == "error":
+            _logger.error("[%s] " + msg, kind, *args)
+        elif kind == "stream":
+            _logger.debug("[%s] " + msg, kind, *args)
+        elif "failed" in body.lower():
+            _logger.warning("[%s] " + msg, kind, *args)
+        else:
+            _logger.info("[%s] " + msg, kind, *args)
 
     def _stream_base_meta(self, env: MessageEnvelope) -> dict[str, Any]:
         """构造每条 SSE `data.meta` 的公共字段（会话、当前模型）。
@@ -703,15 +719,30 @@ class AgentService:
         payload = envelope.payload
         # 以下为 HTTP 层 SSE 扁平字段约定，与 runtime 的 AgentEventEnvelope 解耦。
         if et == "assistant":
-            return "assistant", with_meta({"content": payload.get("content", "")})
+            return "assistant", with_meta(
+                {
+                    "content": payload.get("content", ""),
+                    # AI 正文默认 Markdown；缺省与 runtime `infer_assistant_delta_display_type` 兜底一致。
+                    "display_type": payload.get("display_type", "markdown"),
+                }
+            )
         if et == "reasoning":
-            return "reasoning", with_meta({"content": payload.get("content", "")})
+            return "reasoning", with_meta(
+                {
+                    "content": payload.get("content", ""),
+                    "display_type": payload.get("display_type", "reasoning"),
+                }
+            )
         if et == "usage":
             return "usage", with_meta(
                 {
                     "prompt_tokens": int(payload.get("prompt_tokens", 0)),
                     "completion_tokens": int(payload.get("completion_tokens", 0)),
                     "total_tokens": payload.get("total_tokens"),
+                    "prompt_audio_tokens": int(payload.get("prompt_audio_tokens", 0)),
+                    "prompt_cached_tokens": int(payload.get("prompt_cached_tokens", 0)),
+                    "prompt_cache_hit_tokens": int(payload.get("prompt_cache_hit_tokens", 0)),
+                    "prompt_cache_miss_tokens": int(payload.get("prompt_cache_miss_tokens", 0)),
                 }
             )
         if et == "tool_call":
@@ -719,6 +750,7 @@ class AgentService:
                 {
                     "assistant_content": payload.get("assistant_content", ""),
                     "tool_calls": payload.get("tool_calls", []),
+                    "display_type": payload.get("display_type", "normal_text"),
                 }
             )
         if et == "tool_result":
@@ -736,11 +768,13 @@ class AgentService:
         if et == "approval_required":
             return "approval_required", with_meta(
                 {
-                    "approval_type": payload.get("approval_type", "approval_required"),
+                    "approval_type": payload.get("approval_type", "execute_tool"),
                     "content": payload.get("message", ""),
                     "approval_args": payload.get("args", {}),
                     "description": payload.get("description", ""),
                     "approval_id": payload.get("approval_id"),
+                    # 与 `tool_call` 一致：缺省时按 `normal_text` 渲染（载荷通常已由编排层写入推断结果）。
+                    "display_type": payload.get("display_type", "normal_text"),
                 }
             )
         if et == "error":
