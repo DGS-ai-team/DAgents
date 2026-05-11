@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -101,6 +103,19 @@ def _window_lines(lines: list[str], line_offset: int, line_limit: int) -> tuple[
     return start, end
 
 
+def _format_fs_mtime(mtime: float) -> str:
+    """将 `Path.stat().st_mtime` 格式化为易读字符串。
+
+    逻辑：
+    1. **`datetime.fromtimestamp(...).astimezone()`** 得到带偏移的本地时间；
+    2. 使用 **`isoformat(timespec="seconds")`** 输出 **ISO 8601**（含 `+08:00` 等）；
+    3. 附加原始 **Unix 浮点秒**，便于与日志/系统工具对照。
+    """
+
+    dt = datetime.fromtimestamp(mtime).astimezone()
+    return f"{dt.isoformat(timespec='seconds')}"
+
+
 @tool("read_file")
 def read_file(
     path: str,
@@ -113,7 +128,7 @@ def read_file(
 
     输出头部包含：
     - 行号说明；
-    - 文件最后修改时间；
+    - 文件最后修改时间（**ISO 8601 带时区偏移** + **unix 浮点秒**）；
     - 当前展示行区间；
     - 后方是否仍有未读取行。
     """
@@ -135,7 +150,7 @@ def read_file(
         has_more_after = end < total
         header = [
             "行号说明: 每行使用 `行号>内容` 格式",
-            f"文件修改时间: {target.stat().st_mtime}",
+            f"文件修改时间: {_format_fs_mtime(target.stat().st_mtime)}",
             f"展示行区间: {start + 1}-{end} / {total}",
             f"后方是否还有未读取行: {'是' if has_more_after else '否'}",
             "---",
@@ -198,44 +213,75 @@ def _apply_line_edits(lines: list[str], edits: list[dict[str, Any]]) -> list[str
     return updated
 
 
+def _unified_diff_text(label: str, before: list[str], after: list[str]) -> str:
+    """生成 unified diff（`diff -u` 风格，`@@` 行含旧/新文件起始行号）。
+
+    逻辑：
+    1. **`difflib.unified_diff`** 产出与 Linux **`diff -u`** 同类的 `-`/`+`/上下文行；
+    2. 完全无差异时返回固定提示，避免工具输出空串。
+    """
+
+    joined = "\n".join(
+        difflib.unified_diff(
+            before,
+            after,
+            fromfile=f"a/{label}",
+            tofile=f"b/{label}",
+            lineterm="",
+        )
+    )
+    return joined if joined.strip() else "(无可见差异：编辑前后行序列一致。)"
+
+
 @tool("edit_file")
-def edit_file(path: str, edits_json: str, context: OpenAIConversationContext | None = None) -> str:
-    """按行编辑文件。
+def edit_file(path: str, edits_json: str, context: OpenAIConversationContext | None = None) -> dict[str, Any]:
+    """使用场景：在 **`FS_ROOT`** 内对已有文本文件做按行删/改/插。
 
-    `edits_json` 支持两种格式：
-    1) `[{...}, {...}]`
-    2) `{"edits":[{...}, {...}]}`
+    字段说明：
+    - `path`：工作区内路径。
+    - `edits_json`：JSON 对象，**仅** `{"edits":[...]}`；行号从 1 起；`delete`/`replace` 用 **`start_line`～`end_line` 闭区间**；`insert` 在 **`start_line` 行前**插入；多条按 **`edits`** 数组顺序依次执行。
 
-    动作支持：
-    - `delete`：删除 `start_line-end_line`
-    - `replace`：替换 `start_line-end_line` 为 `content`
-    - `insert`：在 `start_line` 前插入 `content`
+    返回说明：
+    - 成功：`ok=true`，含 **`path`**、**`diff`**（类 **`diff -u`**，**`@@` 内为行号范围**）。
+    - 失败：`ok=false`，**`error`** 说明原因。
+
+    调用范例（`edits_json`）：
+    - `{"edits":[{"action":"delete","start_line":3,"end_line":5}]}`
+    - `{"edits":[{"action":"replace","start_line":10,"end_line":12,"content":"# A\\nB"}]}`
+    - `{"edits":[{"action":"insert","start_line":1,"content":"#!/usr/bin/env python3\\n"}]}`
+    - `{"edits":[{"action":"delete","start_line":2,"end_line":2},{"action":"insert","start_line":2,"content":"# x"}]}`
     """
     try:
         del context
         target = _resolve_under_root(path)
         if not target.exists():
-            return f"ERROR: 文件不存在：{path!r}"
+            return {"ok": False, "error": f"文件不存在：{path!r}"}
         if target.is_dir():
-            return f"ERROR: 目标是目录，无法编辑：{path!r}"
+            return {"ok": False, "error": f"目标是目录，无法编辑：{path!r}"}
         payload = json.loads(edits_json)
-        if isinstance(payload, dict):
-            edits = payload.get("edits", [])
-        elif isinstance(payload, list):
-            edits = payload
-        else:
-            return "ERROR: edits_json 必须是数组或包含 edits 的对象。"
+        # 仅接受 {"edits":[...]}，避免与顶层数组两种写法长期分叉。
+        if not isinstance(payload, dict):
+            return {"ok": False, "error": 'edits_json 必须是 JSON 对象，形如 {"edits":[...]}。'}
+        if "edits" not in payload:
+            return {"ok": False, "error": 'edits_json 缺少 "edits" 字段。'}
+        edits = payload["edits"]
         if not isinstance(edits, list):
-            return "ERROR: edits_json.edits 必须是数组。"
-        old_lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+            return {"ok": False, "error": '"edits" 必须是数组。'}
+        raw_text = target.read_text(encoding="utf-8", errors="replace")
+        old_lines = raw_text.splitlines()
         new_lines = _apply_line_edits(old_lines, [dict(item) for item in edits if isinstance(item, dict)])
         new_text = "\n".join(new_lines)
-        if target.read_text(encoding="utf-8", errors="replace").endswith("\n"):
+        if raw_text.endswith("\n"):
             new_text += "\n"
+        diff_text = _unified_diff_text(path, old_lines, new_lines)
         target.write_text(new_text, encoding="utf-8")
-        return f"OK: 已编辑 {path!r}（行数 {len(old_lines)} -> {len(new_lines)}）"
+        return {
+            "ok": True,
+            "path": path,
+            "diff": diff_text,
+        }
     except Exception as exc:
-        return f"ERROR: edit_file 失败: {exc}"
+        return {"ok": False, "error": f"edit_file 失败: {exc}"}
 
 
 @tool("search_file")

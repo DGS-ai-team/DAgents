@@ -748,7 +748,16 @@ class MainAgentTurnOrchestrator:
         )
 
     async def _invoke_tool(self, ctx: OpenAIConversationContext, tool_call: PendingToolCall) -> str:
-        """执行单个工具调用并返回文本结果。"""
+        """执行单个工具调用并返回文本结果。
+
+        逻辑：
+        1. 查找 **`OpenAIToolSpec`** 并 **`invoke`**；
+        2. 若为协程则 **`await`**；
+        3. 返回值为 **`dict`/`list`** 时 **`json.dumps(ensure_ascii=False)`**，其余 **`str(...)`**，便于写入 **`role=tool`** 且保留结构化工具的 JSON 契约。
+
+        关键边界：
+        - 与 OpenAI tool 消息 **`content` 为字符串** 的协议一致；结构化结果由工具侧约定字段。
+        """
         spec = self._tool_map.get(tool_call.name)
         if spec is None:
             return f"ERROR: 未注册的工具：{tool_call.name!r}"
@@ -756,6 +765,8 @@ class MainAgentTurnOrchestrator:
             result = spec.invoke(tool_call.arguments, ctx)
             if asyncio.iscoroutine(result):
                 result = await result
+            if isinstance(result, (dict, list)):
+                return json.dumps(result, ensure_ascii=False)
             return str(result)
         except Exception as exc:  # noqa: BLE001
             return f"ERROR: 工具 {tool_call.name!r} 执行失败: {exc}"

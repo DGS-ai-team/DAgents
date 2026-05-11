@@ -63,7 +63,8 @@
 
 ## `fs.py`
 
-- **`read_file`**、**`write_file`**、**`edit_file`**、**`search_file`**
+- **`read_file`**、**`write_file`**、**`edit_file`**（返回 **`dict`**：`ok` / **`diff`**（`diff -u` 风格）等）、**`search_file`**
+- **`_format_fs_mtime`**：将 **`st_mtime`** 格式化为 **ISO 8601（含时区偏移）** 与 **unix 浮点秒**（供 **`read_file`** 头部）
 
 ## `skills.py`
 
