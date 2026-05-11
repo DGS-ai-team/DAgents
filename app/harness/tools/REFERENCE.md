@@ -63,8 +63,8 @@
 
 ## `fs.py`
 
-- **`read_file`**、**`write_file`**、**`edit_file`**（返回 **`dict`**：`ok` / **`diff`**（`diff -u` 风格）等）、**`search_file`**
-- **`_format_fs_mtime`**：将 **`st_mtime`** 格式化为 **ISO 8601（含时区偏移）** 与 **unix 浮点秒**（供 **`read_file`** 头部）
+- **`read_file`**、**`write_file`**、**`edit_file`**（头 + **`---`** + **`diff -u` 正文）、**`search_file`**（全文件检索；**`index_offset`/`count_limit`** 命中分页）
+- **`_workspace_root`**、**`_resolve_under_root`**、**`_read_text_lines`**、**`_window_lines`**、**`_line_numbered_text`**、**`_apply_line_edits`**：路径校验、读入、分页、行号展示与行级编辑
 
 ## `skills.py`
 

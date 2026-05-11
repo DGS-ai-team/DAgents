@@ -16,7 +16,8 @@ DEFAULT_MAX_READ_BYTES = 3000
 DEFAULT_LINE_OFFSET = 1
 DEFAULT_LINE_LIMIT = 100
 DEFAULT_SEARCH_CONTEXT_LINES = 10
-DEFAULT_SEARCH_MAX_HITS = 5
+DEFAULT_SEARCH_INDEX_OFFSET = 0
+DEFAULT_SEARCH_COUNT_LIMIT = 5
 _TEXT_SUFFIXES = {
     ".txt",
     ".md",
@@ -103,19 +104,6 @@ def _window_lines(lines: list[str], line_offset: int, line_limit: int) -> tuple[
     return start, end
 
 
-def _format_fs_mtime(mtime: float) -> str:
-    """将 `Path.stat().st_mtime` 格式化为易读字符串。
-
-    逻辑：
-    1. **`datetime.fromtimestamp(...).astimezone()`** 得到带偏移的本地时间；
-    2. 使用 **`isoformat(timespec="seconds")`** 输出 **ISO 8601**（含 `+08:00` 等）；
-    3. 附加原始 **Unix 浮点秒**，便于与日志/系统工具对照。
-    """
-
-    dt = datetime.fromtimestamp(mtime).astimezone()
-    return f"{dt.isoformat(timespec='seconds')}"
-
-
 @tool("read_file")
 def read_file(
     path: str,
@@ -124,13 +112,17 @@ def read_file(
     line_limit: Optional[int] = 100,
     context: OpenAIConversationContext | None = None,
 ) -> str:
-    """读取文件（按后缀选择读取策略），并返回带行号文本。
-
-    输出头部包含：
-    - 行号说明；
-    - 文件最后修改时间（**ISO 8601 带时区偏移** + **unix 浮点秒**）；
-    - 当前展示行区间；
-    - 后方是否仍有未读取行。
+    """
+    读取文件，并返回带行号文本。如果一次读取的文件内容超过max_bytes，则返回截断提示。
+    如果读取的文件内容超过line_limit，则返回截断提示。
+    通过调整line_offset和line_limit可以调整读取的行数和偏移量以读取未被展示的内容。
+    行号说明: 
+        每行使用 `行号>内容` 格式。
+    字段说明：
+    - `path`：文件路径。
+    - `max_bytes`：最大读取字节数，默认3000。
+    - `line_offset`：行偏移量，默认1。
+    - `line_limit`：行限制，默认100。
     """
     try:
         del context
@@ -148,9 +140,11 @@ def read_file(
         window_lines = all_lines[start:end]
         total = len(all_lines)
         has_more_after = end < total
+        st = target.stat()
+        dt = datetime.fromtimestamp(st.st_mtime).astimezone()
+        mtime_txt = f"{dt.isoformat(timespec='seconds')}（unix {st.st_mtime:.6f}）"
         header = [
-            "行号说明: 每行使用 `行号>内容` 格式",
-            f"文件修改时间: {_format_fs_mtime(target.stat().st_mtime)}",
+            f"文件修改时间: {mtime_txt}",
             f"展示行区间: {start + 1}-{end} / {total}",
             f"后方是否还有未读取行: {'是' if has_more_after else '否'}",
             "---",
@@ -213,28 +207,8 @@ def _apply_line_edits(lines: list[str], edits: list[dict[str, Any]]) -> list[str
     return updated
 
 
-def _unified_diff_text(label: str, before: list[str], after: list[str]) -> str:
-    """生成 unified diff（`diff -u` 风格，`@@` 行含旧/新文件起始行号）。
-
-    逻辑：
-    1. **`difflib.unified_diff`** 产出与 Linux **`diff -u`** 同类的 `-`/`+`/上下文行；
-    2. 完全无差异时返回固定提示，避免工具输出空串。
-    """
-
-    joined = "\n".join(
-        difflib.unified_diff(
-            before,
-            after,
-            fromfile=f"a/{label}",
-            tofile=f"b/{label}",
-            lineterm="",
-        )
-    )
-    return joined if joined.strip() else "(无可见差异：编辑前后行序列一致。)"
-
-
 @tool("edit_file")
-def edit_file(path: str, edits_json: str, context: OpenAIConversationContext | None = None) -> dict[str, Any]:
+def edit_file(path: str, edits_json: str, context: OpenAIConversationContext | None = None) -> str:
     """使用场景：在 **`FS_ROOT`** 内对已有文本文件做按行删/改/插。
 
     字段说明：
@@ -242,8 +216,7 @@ def edit_file(path: str, edits_json: str, context: OpenAIConversationContext | N
     - `edits_json`：JSON 对象，**仅** `{"edits":[...]}`；行号从 1 起；`delete`/`replace` 用 **`start_line`～`end_line` 闭区间**；`insert` 在 **`start_line` 行前**插入；多条按 **`edits`** 数组顺序依次执行。
 
     返回说明：
-    - 成功：`ok=true`，含 **`path`**、**`diff`**（类 **`diff -u`**，**`@@` 内为行号范围**）。
-    - 失败：`ok=false`，**`error`** 说明原因。
+    - 字符串：**头部**为 **`成功: 是|否`**、**`路径: ...`**，失败时另有 **`错误: ...`**；一行 **`---`** 后为 **正文**（类 **`diff -u`**）；失败时正文为空。
 
     调用范例（`edits_json`）：
     - `{"edits":[{"action":"delete","start_line":3,"end_line":5}]}`
@@ -255,39 +228,62 @@ def edit_file(path: str, edits_json: str, context: OpenAIConversationContext | N
         del context
         target = _resolve_under_root(path)
         if not target.exists():
-            return {"ok": False, "error": f"文件不存在：{path!r}"}
+            return f"成功: 否\n路径: {path}\n错误: 文件不存在：{path!r}\n---\n"
         if target.is_dir():
-            return {"ok": False, "error": f"目标是目录，无法编辑：{path!r}"}
+            return f"成功: 否\n路径: {path}\n错误: 目标是目录，无法编辑：{path!r}\n---\n"
         payload = json.loads(edits_json)
         # 仅接受 {"edits":[...]}，避免与顶层数组两种写法长期分叉。
         if not isinstance(payload, dict):
-            return {"ok": False, "error": 'edits_json 必须是 JSON 对象，形如 {"edits":[...]}。'}
+            return (
+                f"成功: 否\n路径: {path}\n"
+                f'错误: edits_json 必须是 JSON 对象，形如 {{"edits":[...]}}。\n---\n'
+            )
         if "edits" not in payload:
-            return {"ok": False, "error": 'edits_json 缺少 "edits" 字段。'}
+            return f'成功: 否\n路径: {path}\n错误: edits_json 缺少 "edits" 字段。\n---\n'
         edits = payload["edits"]
         if not isinstance(edits, list):
-            return {"ok": False, "error": '"edits" 必须是数组。'}
+            return f'成功: 否\n路径: {path}\n错误: "edits" 必须是数组。\n---\n'
         raw_text = target.read_text(encoding="utf-8", errors="replace")
         old_lines = raw_text.splitlines()
         new_lines = _apply_line_edits(old_lines, [dict(item) for item in edits if isinstance(item, dict)])
         new_text = "\n".join(new_lines)
         if raw_text.endswith("\n"):
             new_text += "\n"
-        diff_text = _unified_diff_text(path, old_lines, new_lines)
+        joined = "\n".join(
+            difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+                lineterm="",
+            )
+        )
+        # 与 `diff -u` 同类；无差异时仍给提示，避免正文空串。
+        diff_text = joined if joined.strip() else "(无可见差异：编辑前后行序列一致。)"
         target.write_text(new_text, encoding="utf-8")
-        return {
-            "ok": True,
-            "path": path,
-            "diff": diff_text,
-        }
+        return f"成功: 是\n路径: {path}\n---\n{diff_text}"
     except Exception as exc:
-        return {"ok": False, "error": f"edit_file 失败: {exc}"}
+        return f"成功: 否\n路径: {path}\n错误: edit_file 失败: {exc}\n---\n"
 
 
 @tool("search_file")
-def search_file(path: str, keyword: str, context: OpenAIConversationContext | None = None) -> str:
-    """查找关键字，返回命中点前后各 10 行（最多展示 5 处命中）。"""
+def search_file(
+    path: str,
+    keyword: str,
+    index_offset: Optional[int] = 0,
+    count_limit: Optional[int] = 5,
+    context: OpenAIConversationContext | None = None,
+) -> str:
+    """查找关键字，按**命中顺序**分页展示（**`index_offset`/`count_limit`**）。
+    可以通过调整index_offset和count_limit来调整展示的命中条数和偏移量以展示未被展示的内容。
+    字段说明：
+    - `path`：工作区内路径。
+    - `keyword`：非空关键字子串。
+    - `index_offset`：跳过前多少个命中（默认 0）；过大时**自动收紧**到仍可展示至少一条命中。
+    - `count_limit`：本页最多展示多少处命中（默认 5，至少 1，**不超过全文件命中总数**）。
 
+    逻辑：在全文件行内搜索；头部给出命中统计与前后是否仍有命中；每处命中带上下文行。
+    """
     try:
         del context
         target = _resolve_under_root(path)
@@ -298,28 +294,53 @@ def search_file(path: str, keyword: str, context: OpenAIConversationContext | No
         needle = str(keyword or "")
         if not needle:
             return "ERROR: keyword 不能为空。"
-        lines = _read_text_lines(target)
-        hit_indexes = [idx for idx, line in enumerate(lines) if needle in line]
-        shown_hits = hit_indexes[:DEFAULT_SEARCH_MAX_HITS]
-        blocks: list[str] = []
-        for seq, hit_idx in enumerate(shown_hits, start=1):
-            start = max(hit_idx - DEFAULT_SEARCH_CONTEXT_LINES, 0)
-            end = min(hit_idx + DEFAULT_SEARCH_CONTEXT_LINES + 1, len(lines))
-            blocks.append(
-                f"命中#{seq}: 行 {hit_idx + 1}（展示区间 {start + 1}-{end}）\n"
-                + _line_numbered_text(lines[start:end], start + 1)
-            )
-        header = [
+        all_lines = _read_text_lines(target)
+        total = len(all_lines)
+        hit_indexes = [idx for idx, line in enumerate(all_lines) if needle in line]
+        total_hits = len(hit_indexes)
+        io_raw = DEFAULT_SEARCH_INDEX_OFFSET if index_offset is None else max(0, int(index_offset))
+        cl_raw = DEFAULT_SEARCH_COUNT_LIMIT if count_limit is None else max(1, int(count_limit))
+
+        base_header = [
             f"文件: {target}",
             f"关键字: {needle!r}",
-            f"总命中数: {len(hit_indexes)}",
-            f"展示命中数: {len(shown_hits)}（最多 {DEFAULT_SEARCH_MAX_HITS}）",
-            f"上下文行数: 前后各 {DEFAULT_SEARCH_CONTEXT_LINES} 行",
+            f"文件总行数: {total}",
+            f"全文件命中数: {total_hits}",
+        ]
+        if total_hits > 0:
+            # 本页条数至多 total_hits；起始偏移至多 total_hits-1，保证至少展示 1 条命中。
+            cl = min(cl_raw, total_hits)
+            io = min(io_raw, total_hits - 1)
+            shown_hits = hit_indexes[io : io + cl]
+            has_earlier = io > 0
+            has_later = io + len(shown_hits) < total_hits
+            page_desc = f"第 {io + 1}-{io + len(shown_hits)} 处"
+        else:
+            io = 0
+            shown_hits = []
+            has_earlier = False
+            has_later = False
+            page_desc = "无"
+
+        blocks: list[str] = []
+        for seq, hit_idx in enumerate(shown_hits, start=1):
+            global_rank = io + seq
+            start = max(hit_idx - DEFAULT_SEARCH_CONTEXT_LINES, 0)
+            end = min(hit_idx + DEFAULT_SEARCH_CONTEXT_LINES + 1, total)
+            blocks.append(
+                f"命中#{global_rank}/{total_hits}: 行 {hit_idx + 1}（展示区间 {start + 1}-{end}）\n"
+                + _line_numbered_text(all_lines[start:end], start + 1)
+            )
+        header = base_header + [
+            f"本页命中: {page_desc} / 共 {total_hits}",
+            f"前方是否还有命中: {'是' if has_earlier else '否'}",
+            f"后方是否还有命中: {'是' if has_later else '否'}",
             "---",
         ]
+        header_text = "\n".join(header)
         if not blocks:
-            return "\n".join(header + ["未命中。"])
-        return "\n\n".join(["\n".join(header)] + blocks)
+            return header_text
+        return "\n\n".join([header_text] + blocks)
     except Exception as exc:
         return f"ERROR: search_file 失败: {exc}"
 
