@@ -10,8 +10,7 @@ __pycache__/
 history/
 *.sqlite3
 
-# local agent/ide files
-.agent/
+# editor / IDE
 .vscode/
 
 # frontend/tooling artifacts (for split-repo collaboration)

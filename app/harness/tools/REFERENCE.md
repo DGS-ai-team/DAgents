@@ -7,6 +7,8 @@
 - **`_decorate_sync_tool`**：同步工具装饰路径，仅注入元数据。
 - **`_decorate_async_tool`**：异步工具装饰路径，提交后台任务并返回 ACK。
 - **`should_require_tool_approval`**：统一审批入口；按全局模式、工具策略与 shell 策略决定是否审批。
+- **`DEFAULT_TOOL_APPROVAL_POLICY_FILE`** / **`DEFAULT_SHELL_POLICY_DIR`**：默认 **`.runtime/policy/…`**（相对仓库根，经 **`_resolve_repo_relative_path`** 解析）。
+- **`_resolve_repo_relative_path`**：策略路径相对 **`resolve_runtime_root()`** 锚定，避免依赖 cwd。
 - **`OpenAIToolSpec`**：**Pydantic `BaseModel`（frozen，`arbitrary_types_allowed`）**；工具规格与 `invoke` 绑定。
 - **`build_openai_toolkit`**：构建 OpenAI tools payload 与执行映射。
 - **`parse_tool_arguments`**：解析 tool arguments（JSON 字符串/对象）。

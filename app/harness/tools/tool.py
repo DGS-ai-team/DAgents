@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
+from app.config.env import resolve_runtime_root
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.async_store import get_async_tool_result_store
@@ -16,8 +17,26 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ApprovalMode = str
 _VALID_APPROVAL_MODES: set[str] = {"always", "never", "rule"}
-DEFAULT_TOOL_APPROVAL_POLICY_FILE = ".agent/policy/tool.approval.txt"
-DEFAULT_SHELL_POLICY_DIR = ".agent/policy/shell"
+DEFAULT_TOOL_APPROVAL_POLICY_FILE = ".runtime/policy/tool.approval.txt"
+DEFAULT_SHELL_POLICY_DIR = ".runtime/policy/shell"
+
+
+def _resolve_repo_relative_path(rel_or_abs: str) -> Path:
+    """将策略相关路径解析为绝对路径。
+
+    逻辑：
+    1. `expanduser` 展开用户主目录；
+    2. 已为绝对路径则 `resolve`；
+    3. 否则锚定 **`resolve_runtime_root()`**（源码仓库根或 frozen 可执行目录），与 **`AGENT_SESSION_STORE_PATH`** 一致。
+
+    关键边界：
+    - 相对路径不以进程 cwd 为锚点，避免在不同启动目录下误读策略文件。
+    """
+
+    p = Path(rel_or_abs).expanduser()
+    if p.is_absolute():
+        return p.resolve()
+    return (resolve_runtime_root() / p).resolve()
 
 
 def _normalize_approval_mode(raw: str | None, *, default: str = "rule") -> str:
@@ -61,17 +80,27 @@ def _policy_entry_map_from_file(path: Path) -> dict[str, str]:
 
 
 def _tool_policy_file_path() -> Path:
-    """返回工具审批策略文件路径（支持环境变量覆盖）。"""
+    """返回工具审批策略文件路径（支持环境变量覆盖）。
+
+    与外部交互：
+    - `TOOL_APPROVAL_POLICY_FILE` 未设置时使用默认 **`.runtime/policy/tool.approval.txt`**（相对仓库根）。
+    """
+
     raw = os.environ.get("TOOL_APPROVAL_POLICY_FILE", "").strip()
     chosen = raw or DEFAULT_TOOL_APPROVAL_POLICY_FILE
-    return Path(chosen).expanduser().resolve()
+    return _resolve_repo_relative_path(chosen)
 
 
 def _shell_policy_dir() -> Path:
-    """返回 shell 审批策略目录（与 bash 工具共享 `SHELL_POLICY_DIR`）。"""
+    """返回 shell 审批策略目录（与 bash 工具共享 `SHELL_POLICY_DIR`）。
+
+    与外部交互：
+    - `SHELL_POLICY_DIR` 未设置时使用默认 **`.runtime/policy/shell`**（相对仓库根）。
+    """
+
     raw = os.environ.get("SHELL_POLICY_DIR", "").strip()
     chosen = raw or DEFAULT_SHELL_POLICY_DIR
-    return Path(chosen).expanduser().resolve()
+    return _resolve_repo_relative_path(chosen)
 
 
 def _ensure_approval_policy_files() -> None:
@@ -302,7 +331,7 @@ def should_require_tool_approval(
     1. 接收工具名、工具参数与可选会话上下文，作为审批策略判断输入；
     2. 读取全局配置 `AGENT_TOOL_APPROVAL_MODE`，支持 `always/never/rule` 三种模式；
     3. `always` 强制审批，`never` 直接放行，`rule` 进入规则分支；
-    4. 规则分支先读工具级策略文件 `tool_name=mode`，并对 `bash_run` 额外读取 shell 级 `root=mode` 策略。
+    4. 规则分支先读工具级策略文件（默认 **`.runtime/policy/tool.approval.txt`**，行格式 `tool_name=mode`），并对 `bash_run` 额外读取 shell 级目录（默认 **`.runtime/policy/shell/`** 下各 `<shell>.approval.txt`）的 `root=mode` 策略。
 
     关键边界：
     - 本方法应保持纯函数语义，不直接修改 `context` 或触发外部副作用；
