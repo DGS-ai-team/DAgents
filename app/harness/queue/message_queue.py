@@ -28,6 +28,10 @@ from typing import Any, Generic, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 
 class MessageEnvelope(BaseModel):
     """单条入队载荷（与会话请求模型对齐）。
@@ -96,6 +100,7 @@ class MessageQueue(Generic[EnvelopeT]):
             RuntimeError: 队列已 `stop`（`_closed`）后禁止再入队。
             asyncio.QueueFull: 有界队列已满时（仅当构造时限制了 `max_queue_size`）。
         """
+        _logger.info("[enqueue] %s: request_type=%s", envelope.session_id, envelope.request_type)
         if self._closed:
             raise RuntimeError("MessageQueue 已关闭，无法 enqueue")
         self._put_nowait(priority=self._priority_value(priority), env=envelope)

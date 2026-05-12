@@ -79,8 +79,7 @@ class AgentService:
         self._turn_orchestrator = MainAgentTurnOrchestrator(
             submit_message=self.submit_message,
             emit_envelope=self._emit_envelope,
-            tool_map=self._tool_map,
-            log=self._log,
+            tool_map=self._tool_map
         )
         if message_store is not None:
             self._message_store = message_store
@@ -404,7 +403,7 @@ class AgentService:
                 flush(ctx)
             raise
         except Exception as exc:
-            self._log("error", env.session_id, str(exc))
+            _logger.error("%s: %s", env.session_id, exc)
             base_meta = self._stream_base_meta(env)
             err_t, err_d = self._map_event_envelope_to_stream(
                 AgentEventEnvelope(event_type="error", payload={"message": str(exc)}, meta={}),
@@ -420,7 +419,7 @@ class AgentService:
             try:
                 await self._persist_context(env.session_id, ctx)
             except Exception as exc:  # noqa: BLE001
-                self._log("error", env.session_id, f"persist failed: {exc}")
+                _logger.error("%s: persist failed: %s", env.session_id, exc)
             # 无论是否启用 sqlite，均以内存中的 ctx.messages 为准刷新 Prometheus（含 cancel/error 路径）。
             refresh_session_context_metrics(self._session_contexts)
 
@@ -442,7 +441,7 @@ class AgentService:
             envelope,
             base_meta=base_meta,
         )
-        self._log("stream", env.session_id, f"type={stream_type} data={stream_data}")
+        _logger.info("[emit_envelope] %s: type=%s data=%s", env.session_id, stream_type, stream_data)
         await self._emit_stream_event(
             env=env,
             event_type=stream_type,
@@ -644,27 +643,6 @@ class AgentService:
             finally:
                 if self._session_active_handles.get(session_id) is ht:
                     self._session_active_handles[session_id] = None
-
-    @staticmethod
-    def _log(kind: str, session_id: str, body: str) -> None:
-        """统一业务日志出口：`kind` 映射到 logging 级别。
-
-        逻辑：
-        - **`error`** → **`ERROR`**；
-        - **`stream`** → **`DEBUG`**（每条 SSE 映射一条，默认级别下不刷屏）；
-        - 其余（如 **`summary`**）→ **`INFO`**，若正文含 **`failed`** 则升为 **`WARNING`**。
-        """
-
-        msg = "session=%s: %s"
-        args = (session_id, body)
-        if kind == "error":
-            _logger.error("[%s] " + msg, kind, *args)
-        elif kind == "stream":
-            _logger.debug("[%s] " + msg, kind, *args)
-        elif "failed" in body.lower():
-            _logger.warning("[%s] " + msg, kind, *args)
-        else:
-            _logger.info("[%s] " + msg, kind, *args)
 
     def _stream_base_meta(self, env: MessageEnvelope) -> dict[str, Any]:
         """构造每条 SSE `data.meta` 的公共字段（会话、当前模型）。

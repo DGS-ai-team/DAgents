@@ -60,6 +60,7 @@ def _resolve_api_host_port() -> tuple[str, int]:
 
 
 def main() -> None:
+    env = resolve_runtime_root()
     load_env(resolve_runtime_root())
     # `.env` 写入 os.environ 后再加载 Settings，并与 uvicorn 对齐日志级别。
     get_settings(reload=True)

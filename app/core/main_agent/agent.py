@@ -30,7 +30,9 @@ from app.core.main_agent.display_inference import (
 from app.core.main_agent.runtime_openai import OpenAIImplicitReActRuntime
 from app.core.summary_agent.agent import init_agent as init_summary_agent
 
+import logging
 
+_logger = logging.getLogger(__name__)
 class MainAgentTurnOrchestrator:
     """消息回合业务编排器（service 无状态基础设施之上的业务层）。"""
 
@@ -43,7 +45,6 @@ class MainAgentTurnOrchestrator:
         submit_message: Callable[..., Awaitable[None]],
         emit_envelope: Callable[..., Awaitable[None]],
         tool_map: dict[str, Any],
-        log: Callable[[str, str, str], None],
     ) -> None:
         """注入编排依赖。
 
@@ -57,7 +58,6 @@ class MainAgentTurnOrchestrator:
         self._submit_message = submit_message
         self._emit_envelope = emit_envelope
         self._tool_map = tool_map
-        self._log = log
         self._summary_runtime: Any | None = None
         self._summary_silent_trigger_tokens = max(0, int(settings.summary_compression_silent_trigger_tokens))
         self._summary_blocking_trigger_tokens = max(0, int(settings.summary_compression_blocking_trigger_tokens))
@@ -95,7 +95,7 @@ class MainAgentTurnOrchestrator:
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # noqa: BLE001
-                self._log("summary", session_id, f"silent compression failed: {exc}")
+                _logger.error("%s: silent compression failed: %s", session_id, exc)
             running_task = None
         if running_task is not None and not running_task.done():
             has_running_task = True
@@ -113,7 +113,7 @@ class MainAgentTurnOrchestrator:
                 except asyncio.CancelledError:
                     pass
                 except Exception as exc:  # noqa: BLE001
-                    self._log("summary", session_id, f"blocking wait silent task failed: {exc}")
+                    _logger.error("%s: blocking wait silent task failed: %s", session_id, exc)
             # 阻塞压缩失败后的错误处理策略待补充（当前先留空）。
             blocking_ok = await self._run_compression_flow(session_id=session_id, ctx=ctx)
             if not blocking_ok:
@@ -178,7 +178,7 @@ class MainAgentTurnOrchestrator:
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # noqa: BLE001
-                self._log("summary", session_id, f"silent compression failed: {exc}")
+                _logger.error("%s: silent compression failed: %s", session_id, exc)
         pending = self._session_pending_compression_results.get(session_id)
         if not isinstance(pending, dict):
             return
@@ -190,7 +190,7 @@ class MainAgentTurnOrchestrator:
             return
         replacement = {"role": "user", "content": content}
         ctx.messages = [*ctx.messages[:start], replacement, *ctx.messages[end + 1 :]]
-        self._log("summary", session_id, "applied compressed message block")
+        _logger.info("%s: applied compressed message block", session_id)
 
     async def _run_compression_flow(self, *, session_id: str, ctx: OpenAIConversationContext) -> bool:
         """执行一次完整压缩流程（解析区间 -> 生成摘要 -> 暂存替换结果）。"""
@@ -217,7 +217,7 @@ class MainAgentTurnOrchestrator:
                 flush(ctx)
             raise
         except Exception as exc:  # noqa: BLE001
-            self._log("summary", session_id, f"compression failed: {exc}")
+            _logger.error("%s: compression failed: %s", session_id, exc)
             return False
         if not summary_text or not str(summary_text).strip():
             return False
@@ -238,6 +238,7 @@ class MainAgentTurnOrchestrator:
     ) -> None:
         """处理单条消息业务分支：resume/async_tool_result/tool_result/human_message。"""
         # 统一在业务分支前执行压缩决策与应用。
+        _logger.info("[begin_handle_message] %s: request_type=%s", env.session_id, env.request_type)
         await self.maybe_handle_summary_compression(session_id=env.session_id, ctx=ctx)
         if env.request_type == "resume":
             await self._handle_resume(ctx=ctx, env=env, base_meta=base_meta)
@@ -250,7 +251,7 @@ class MainAgentTurnOrchestrator:
             return
         else:
             await self._handle_human_message(ctx=ctx, runtime=runtime, env=env, base_meta=base_meta)
-
+        _logger.info("[end_handle_message] %s: request_type=%s", env.session_id, env.request_type)
     async def _handle_resume(
         self,
         *,
@@ -259,6 +260,8 @@ class MainAgentTurnOrchestrator:
         base_meta: dict[str, Any],
     ) -> None:
         """处理审批后的 resume：执行批准工具、处理拒绝并回灌 tool_result。"""
+        _logger.info("[begin_handle_resume] %s", env.session_id)
+        # 如果没有可恢复的工具调用，即pending_tool_calls为空，则直接返回错误
         if not ctx.pending_tool_calls:
             await self._emit_envelope(
                 env=env,
@@ -276,8 +279,10 @@ class MainAgentTurnOrchestrator:
             )
             return
 
+        # 判断是否允许执行
         decision = parse_resume_tool_decision(env.resume_value)
         if isinstance(decision, ResumeToolReject):
+            # 如果拒绝执行，则直接返回错误
             await self._emit_envelope(
                 env=env,
                 envelope=AgentEventEnvelope(
@@ -287,37 +292,45 @@ class MainAgentTurnOrchestrator:
                 ),
                 base_meta=base_meta,
             )
+            # 返回完成事件
             await self._emit_envelope(
                 env=env,
                 envelope=AgentEventEnvelope(event_type="done", payload={}, meta={}),
                 base_meta=base_meta,
             )
             return
-
+        # 如果允许执行，则按审批要求拆分本轮工具调用列表
         pending_by_id = {p.call_id: p for p in ctx.pending_tool_calls}
         approved_ids: set[str]
         rejected_ids: set[str]
         if isinstance(decision, ResumeToolApprove):
+            # 如果允许执行，则全部批准
             approved_ids = set(pending_by_id.keys())
             rejected_ids = set()
         elif isinstance(decision, ResumeToolSelection):
+            # 如果部分允许执行，则按批准和拒绝的call_id列表拆分
             approved_ids = {str(c).strip() for c in decision.approved}
             rejected_ids = {str(c).strip() for c in decision.rejected}
         else:
+            # 如果无法识别，则全部拒绝
             approved_ids = set()
             rejected_ids = set()
-
-        executed_results: list[dict[str, Any]] = []
-        remaining_pending: list[type(ctx.pending_tool_calls[0])] = []
+        # 执行批准的工具调用
+        executed_results: list[dict[str, Any]] = [] # 执行结果
+        remaining_pending: list[type(ctx.pending_tool_calls[0])] = [] # 剩余的pending工具调用
+        # 遍历pending工具调用列表
         for item in list(ctx.pending_tool_calls):
             call_id = item.call_id
             if call_id in approved_ids:
+                # 执行批准的工具调用
                 result_text = await self._invoke_tool(ctx, item)
+                # 将执行结果回填到会话消息列表
                 self._append_tool_message(
                     ctx=ctx,
                     tool_call_id=item.call_id,
                     content=result_text,
                 )
+                # 将执行结果回填到执行结果列表
                 executed_results.append(
                     {
                         "tool_name": item.name,
@@ -337,11 +350,11 @@ class MainAgentTurnOrchestrator:
                 )
             else:
                 remaining_pending.append(item)
-
+        # 如果remaining_pending不为空，即还有未执行的工具调用，则将剩余的pending工具调用回填到pending_tool_calls
         if remaining_pending:
             ctx.pending_tool_calls = remaining_pending
             return
-
+        # 如果remaining_pending为空，即所有工具调用都执行了，则提交工具结果
         await self._submit_message(
             session_id=env.session_id,
             client_id=env.client_id,
@@ -353,6 +366,7 @@ class MainAgentTurnOrchestrator:
             source="service",
             priority="tool_result",
         )
+        # 清空pending_tool_calls
         ctx.pending_tool_calls.clear()
 
     async def _handle_async_tool_result(
@@ -364,6 +378,7 @@ class MainAgentTurnOrchestrator:
         base_meta: dict[str, Any],
     ) -> None:
         """处理异步工具完成回灌，并继续一轮 tool_message 推理。"""
+        _logger.info("[begin_handle_async_tool_result] %s", env.session_id)
         payload = dict(env.async_tool_result or {})
         (
             user_message,
@@ -448,6 +463,7 @@ class MainAgentTurnOrchestrator:
         base_meta: dict[str, Any],
     ) -> None:
         """处理同步工具结果回灌，并继续一轮 tool_message 推理。"""
+        _logger.info("[begin_handle_tool_result] %s", env.session_id)
         payload = dict(env.tool_result or {})
         raw_results = payload.get("results")
         if isinstance(raw_results, list):
@@ -515,6 +531,7 @@ class MainAgentTurnOrchestrator:
         base_meta: dict[str, Any],
     ) -> None:
         """处理默认用户消息路径。"""
+        _logger.info("[begin_handle_human_message] %s", env.session_id)
         closed_any = False
         for call_id, tool_name in self._stalled_tool_call_specs(ctx):
             closed_any = True
@@ -617,9 +634,9 @@ class MainAgentTurnOrchestrator:
         content: str,
     ) -> None:
         """统一的一轮 run_turn + 工具执行编排。"""
-        captured_tool_calls: list[dict[str, Any]] = []
-        captured_assistant_content: str = ""
-        runtime_done_envelope: AgentEventEnvelope | None = None
+        captured_tool_calls: list[dict[str, Any]] = [] # 本轮捕获的 tool_call 列表
+        captured_assistant_content: str = "" # 本轮捕获的 assistant_content
+        runtime_done_envelope: AgentEventEnvelope | None = None # 本轮捕获的 done 事件
         async for envelope in runtime.run_turn(
             ctx,
             request_type=request_type,
@@ -643,7 +660,7 @@ class MainAgentTurnOrchestrator:
         if not captured_tool_calls:
             await self._emit_envelope(env=env, envelope=final_done_envelope, base_meta=base_meta)
             return
-
+        # 按审批要求拆分本轮工具调用列表
         auto_exec_calls, need_approval_calls = self._split_calls_by_approval(
             ctx=ctx,
             captured_tool_calls=captured_tool_calls,
@@ -651,7 +668,9 @@ class MainAgentTurnOrchestrator:
         auto_exec_tasks = [asyncio.create_task(self._invoke_tool(ctx, item)) for item in auto_exec_calls]
 
         if need_approval_calls:
+            # 需要审批的工具调用列表入队
             ctx.pending_tool_calls = list(need_approval_calls)
+            # 发出审批事件
             await self._emit_envelope(
                 env=env,
                 envelope=AgentEventEnvelope(
@@ -673,7 +692,9 @@ class MainAgentTurnOrchestrator:
                 base_meta=base_meta,
             )
             ctx.run_turn_phase = RunTurnPhase.AWAITING_TOOL_EXECUTION
+            # 发出 done 事件
             await self._emit_envelope(env=env, envelope=final_done_envelope, base_meta=base_meta)
+            # 执行自动执行的工具调用
             if auto_exec_tasks:
                 auto_exec_results = await asyncio.gather(*auto_exec_tasks)
                 executed_results = [
