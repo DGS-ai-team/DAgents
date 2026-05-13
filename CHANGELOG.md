@@ -34,6 +34,7 @@
 ### 仓库维护
 
 - **`.gitignore`**：增加 **`dist/`**、**`build/`**、**`bundle/`**，避免将 PyInstaller 与本地打包中间产物误提交。
+- **`tests/test_agent_service.py`**：懒加载 **`OpenAIImplicitReActRuntime`** 时 patch **`app.core.main_agent.runtime_openai.get_openai_client`**，避免新版 **OpenAI** SDK 在 **`LLM_API_KEY` 为空** 的 CI 环境于 **`AsyncOpenAI(...)`** 构造期抛错，导致 **`_session_consume_loop`** 崩掉、生命周期断言失败。
 
 ### 已知限制（0.1.0）
 

@@ -23,7 +23,7 @@
 ## `test_agent_service.py`
 
 - **`AgentServiceStreamMapTests`**：`_map_event_envelope_to_stream` 扁平字段（需完整依赖，否则 skip）。
-- **`AgentServiceLifecycleTests`**：`start`/`stop`、`submit_message`→`handle_message`、`cancel_current_turn`、`handle_stream_event` 错误路径（需完整依赖，否则 skip）。
+- **`AgentServiceLifecycleTests`**：`start`/`stop`、`submit_message`→`handle_message`、`cancel_current_turn`、`handle_stream_event` 错误路径；**`_make_service`** 内 patch **`runtime_openai.get_openai_client`**，避免懒加载 **runtime** 时无 **`LLM_API_KEY`** 触发 **OpenAI** 构造异常（需完整依赖，否则 skip）。
 
 ## `test_context_models.py`
 

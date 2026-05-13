@@ -102,6 +102,10 @@ class AgentServiceLifecycleTests(unittest.IsolatedAsyncioTestCase):
             patch("app.harness.service.agent_service.get_model_config", return_value={"model": "unit"}),
             patch("app.harness.service.agent_service.MainAgentTurnOrchestrator", side_effect=_factory),
             patch("app.harness.service.agent_service.refresh_session_context_metrics"),
+            # `OpenAIImplicitReActRuntime` 在 `agent_service._get_runtime` 中懒加载；其 `__init__` 会调用
+            # `runtime_openai` 模块内的 `get_openai_client`（与 `agent_service.get_settings` 的 patch 无关）。
+            # 新版 OpenAI SDK 在 api_key 为空时于构造期抛错，CI 无密钥时必须替身，避免消费者 task 直接崩掉。
+            patch("app.core.main_agent.runtime_openai.get_openai_client", return_value=MagicMock()),
             patch(
                 "app.harness.service.agent_service.get_async_tool_result_store",
                 return_value=self._async_store_mock,
