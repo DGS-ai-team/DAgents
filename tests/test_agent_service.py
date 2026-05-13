@@ -152,10 +152,10 @@ class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
         fake_runtime = FakeRuntime()
         events: list[tuple[str, str, dict]] = []
 
-        async def on_stream_event(client_id: str, session_id: str, event_type: str, data: dict):
-            events.append((client_id, session_id, event_type, data))
+        async def handle_stream_event(env, event_type: str, data: dict):
+            events.append((env.client_id, env.session_id, event_type, data))
 
-        service = AgentService(max_queue_size=0, on_stream_event=on_stream_event)
+        service = AgentService(max_queue_size=0, handle_stream_event=handle_stream_event)
         service._message_store = None
         service._get_runtime = lambda: fake_runtime  # type: ignore[method-assign]
 

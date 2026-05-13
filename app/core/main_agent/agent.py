@@ -23,7 +23,6 @@ from app.schemas.approval import (
 )
 
 from app.core.main_agent.display_inference import (
-    VALID_DISPLAY_TYPES,
     infer_tool_call_display_type,
     infer_tool_result_display_type,
 )
@@ -252,6 +251,7 @@ class MainAgentTurnOrchestrator:
         else:
             await self._handle_human_message(ctx=ctx, runtime=runtime, env=env, base_meta=base_meta)
         _logger.info("[end_handle_message] %s: request_type=%s", env.session_id, env.request_type)
+
     async def _handle_resume(
         self,
         *,
@@ -323,7 +323,12 @@ class MainAgentTurnOrchestrator:
             call_id = item.call_id
             if call_id in approved_ids:
                 # 执行批准的工具调用
-                result_text = await self._invoke_tool(ctx, item)
+                result_text = await self._invoke_tool(
+                    ctx,
+                    item,
+                    env=env,
+                    base_meta=base_meta,
+                )
                 # 将执行结果回填到会话消息列表
                 self._append_tool_message(
                     ctx=ctx,
@@ -354,7 +359,7 @@ class MainAgentTurnOrchestrator:
         if remaining_pending:
             ctx.pending_tool_calls = remaining_pending
             return
-        # 如果remaining_pending为空，即所有工具调用都执行了，则提交工具结果
+        # 如果remaining_pending为空，即所有工具调用都执行了，则将tool_result回填到agent处理队列，以在下一轮触发llm调用
         await self._submit_message(
             session_id=env.session_id,
             client_id=env.client_id,
@@ -462,57 +467,17 @@ class MainAgentTurnOrchestrator:
         env: MessageEnvelope,
         base_meta: dict[str, Any],
     ) -> None:
-        """处理同步工具结果回灌，并继续一轮 tool_message 推理。"""
+        """处理同步工具结果回灌，并继续一轮 tool_message 推理。
+
+        逻辑：
+        1. 打日志；
+        2. **`tool_result` 的 SSE `tool_result` 信封**已在各次 **`_invoke_tool`** 内发出，此处不再重复映射；
+        3. 调用 **`_run_turn_and_maybe_execute_tools`** 进入 **`tool_message`** 下一轮。
+
+        关键边界：
+        - 与 **`_submit_message(..., request_type="tool_result")`** 配对：入队前 **`messages`** 已含对应 **`role=tool`**。
+        """
         _logger.info("[begin_handle_tool_result] %s", env.session_id)
-        payload = dict(env.tool_result or {})
-        raw_results = payload.get("results")
-        if isinstance(raw_results, list):
-            for item in raw_results:
-                result_content = str(item.get("content", "") or "")
-                tool_name = str(item.get("tool_name", "") or "")
-                display_type_raw = str(item.get("display_type", "") or "")
-                if display_type_raw in VALID_DISPLAY_TYPES:
-                    display_type = display_type_raw
-                else:
-                    display_type = infer_tool_result_display_type(tool_name, result_content)
-                await self._emit_envelope(
-                    env=env,
-                    envelope=AgentEventEnvelope(
-                        event_type="tool_result",
-                        payload={
-                            "tool_name": tool_name,
-                            "tool_call_id": str(item.get("tool_call_id", "") or "").strip(),
-                            "content": result_content,
-                            "partial": False,
-                            "display_type": display_type,
-                        },
-                        meta={},
-                    ),
-                    base_meta=base_meta,
-                )
-        else:
-            result_content = str(payload.get("content", "") or "")
-            tool_name = str(payload.get("tool_name", "") or "")
-            display_type_raw = str(payload.get("display_type", "") or "")
-            if display_type_raw in VALID_DISPLAY_TYPES:
-                display_type = display_type_raw
-            else:
-                display_type = infer_tool_result_display_type(tool_name, result_content)
-            await self._emit_envelope(
-                env=env,
-                envelope=AgentEventEnvelope(
-                    event_type="tool_result",
-                    payload={
-                        "tool_name": tool_name,
-                        "tool_call_id": str(payload.get("tool_call_id", "") or "").strip(),
-                        "content": result_content,
-                        "partial": False,
-                        "display_type": display_type,
-                    },
-                    meta={},
-                ),
-                base_meta=base_meta,
-            )
         await self._run_turn_and_maybe_execute_tools(
             ctx=ctx,
             runtime=runtime,
@@ -530,11 +495,24 @@ class MainAgentTurnOrchestrator:
         env: MessageEnvelope,
         base_meta: dict[str, Any],
     ) -> None:
-        """处理默认用户消息路径。"""
+        """处理默认用户消息路径。
+
+        逻辑：
+        1. 若 **`ctx.pending_tool_calls` 非空**：视为用户在「待工具/待审批」阶段插入新 human，对当前 **`PendingToolCall`** 逐条补写打断 **`role=tool`** 并 **`emit` `tool_result`**，然后 **`clear()`** **`pending`** 且 **`run_turn_phase=IDLE`**；
+        2. **`_run_turn_and_maybe_execute_tools`** 以 **`human_message`** 进入下一轮模型。
+
+        关键边界：
+        - **`pending` 为空**时不写占位 tool，直接走 2；
+        - 先 **`list(pending)` 快照再遍历**，避免遍历中改列表。
+
+        副作用说明：
+        - 可能修改 **`ctx.messages`**、**`ctx.pending_tool_calls`**、**`ctx.run_turn_phase`**；并可能 **`emit_envelope`**。
+        """
         _logger.info("[begin_handle_human_message] %s", env.session_id)
-        closed_any = False
-        for call_id, tool_name in self._stalled_tool_call_specs(ctx):
-            closed_any = True
+        pending_snapshot = list(ctx.pending_tool_calls)
+        for item in pending_snapshot:
+            call_id = item.call_id
+            tool_name = item.name
             append_openai_message_with_journal(
                 ctx,
                 {
@@ -559,8 +537,10 @@ class MainAgentTurnOrchestrator:
                 ),
                 base_meta=base_meta,
             )
-        if closed_any and ctx.pending_tool_calls:
+        # 打断补位与 pending 一一对应：清空并退出「待工具」阶段，避免与 messages 语义脱节。
+        if pending_snapshot:
             ctx.pending_tool_calls.clear()
+            ctx.run_turn_phase = RunTurnPhase.IDLE
 
         await self._run_turn_and_maybe_execute_tools(
             ctx=ctx,
@@ -665,7 +645,12 @@ class MainAgentTurnOrchestrator:
             ctx=ctx,
             captured_tool_calls=captured_tool_calls,
         )
-        auto_exec_tasks = [asyncio.create_task(self._invoke_tool(ctx, item)) for item in auto_exec_calls]
+        auto_exec_tasks = [
+            asyncio.create_task(
+                self._invoke_tool(ctx, item, env=env, base_meta=base_meta),
+            )
+            for item in auto_exec_calls
+        ]
 
         if need_approval_calls:
             # 需要审批的工具调用列表入队
@@ -768,29 +753,65 @@ class MainAgentTurnOrchestrator:
             },
         )
 
-    async def _invoke_tool(self, ctx: OpenAIConversationContext, tool_call: PendingToolCall) -> str:
-        """执行单个工具调用并返回文本结果。
+    async def _invoke_tool(
+        self,
+        ctx: OpenAIConversationContext,
+        tool_call: PendingToolCall,
+        *,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+    ) -> str:
+        """执行单个工具调用并返回文本结果，并向流层发出一条 **`tool_result`** 信封。
 
         逻辑：
-        1. 查找 **`OpenAIToolSpec`** 并 **`invoke`**；
-        2. 若为协程则 **`await`**；
-        3. 返回值为 **`dict`/`list`** 时 **`json.dumps(ensure_ascii=False)`**，其余 **`str(...)`**，便于写入 **`role=tool`** 且保留结构化工具的 JSON 契约。
+        1. 解析 **`OpenAIToolSpec`**；未注册则得到错误文案；
+        2. **`invoke`**；协程则 **`await`**；
+        3. 将返回值规范为 **`result_text`**（**`dict`/`list`** → **`json.dumps`**，其余 **`str`**）；
+        4. 用 **`infer_tool_result_display_type`** 组装与 **`_handle_tool_result` 历史形态一致**的 **`AgentEventEnvelope`**，**`await _emit_envelope`**；
+        5. 返回 **`result_text`** 供 **`_append_tool_message`** 与 **`tool_result` 入队** 使用。
 
         关键边界：
-        - 与 OpenAI tool 消息 **`content` 为字符串** 的协议一致；结构化结果由工具侧约定字段。
+        - 错误路径（未注册、异常）同样发 **`tool_result`**，便于前端展示失败原因；
+        - **`env`/`base_meta`** 须与当前 turn 的 **`MessageEnvelope`** / **`_stream_base_meta`** 一致，否则 SSE 元数据会错位。
+
+        副作用说明：
+        - 调用注入的 **`emit_envelope`**（可能写订阅方）；不修改 **`ctx.messages`**（由调用方追加 tool 消息）。
         """
+        async def _emit_tool_result_envelope(result_text: str) -> None:
+            """将单条同步工具执行结果映射为 SSE **`tool_result`** 并交给 **`emit_envelope`**。"""
+            await self._emit_envelope(
+                env=env,
+                envelope=AgentEventEnvelope(
+                    event_type="tool_result",
+                    payload={
+                        "tool_name": tool_call.name,
+                        "tool_call_id": tool_call.call_id,
+                        "content": result_text,
+                        "partial": False,
+                        "display_type": infer_tool_result_display_type(tool_call.name, result_text),
+                    },
+                    meta={},
+                ),
+                base_meta=base_meta,
+            )
+
         spec = self._tool_map.get(tool_call.name)
         if spec is None:
-            return f"ERROR: 未注册的工具：{tool_call.name!r}"
+            result_text = f"ERROR: 未注册的工具：{tool_call.name!r}"
+            await _emit_tool_result_envelope(result_text)
+            return result_text
         try:
             result = spec.invoke(tool_call.arguments, ctx)
             if asyncio.iscoroutine(result):
                 result = await result
             if isinstance(result, (dict, list)):
-                return json.dumps(result, ensure_ascii=False)
-            return str(result)
+                result_text = json.dumps(result, ensure_ascii=False)
+            else:
+                result_text = str(result)
         except Exception as exc:  # noqa: BLE001
-            return f"ERROR: 工具 {tool_call.name!r} 执行失败: {exc}"
+            result_text = f"ERROR: 工具 {tool_call.name!r} 执行失败: {exc}"
+        await _emit_tool_result_envelope(result_text)
+        return result_text
 
     @staticmethod
     def _classify_tool_result_tail(
@@ -849,28 +870,6 @@ class MainAgentTurnOrchestrator:
         }
         user_message = {"role": "user", "content": user_text}
         return user_message, assistant_message, tool_message, tool_name, tool_call_id, status
-
-    @staticmethod
-    def _stalled_tool_call_specs(ctx: OpenAIConversationContext) -> list[tuple[str, str]]:
-        """当末尾仍是 `assistant(tool_calls)` 时，返回需要补写占位 tool 的 `(call_id, tool_name)` 列表。"""
-        if not ctx.messages:
-            return []
-        last = ctx.messages[-1]
-        if not isinstance(last, dict) or last.get("role") != "assistant":
-            return []
-        raw_calls = last.get("tool_calls") or []
-        if not raw_calls:
-            return []
-        pending_names = {p.call_id: p.name for p in ctx.pending_tool_calls}
-        out: list[tuple[str, str]] = []
-        for idx, c in enumerate(raw_calls):
-            if not isinstance(c, dict):
-                continue
-            call_id = str(c.get("id") or f"tool-call-{idx}")
-            fn = c.get("function", {}) if isinstance(c.get("function"), dict) else {}
-            name = str(fn.get("name") or "") or pending_names.get(call_id, "")
-            out.append((call_id, name))
-        return out
 
 
 def init_agent() -> OpenAIImplicitReActRuntime:
