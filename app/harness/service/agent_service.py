@@ -24,6 +24,9 @@ from app.observability.metrics import refresh_session_context_metrics
 
 _logger = logging.getLogger(__name__)
 
+# 与 `_emit_stream_event` 入参一致：`handle_stream_event` 自行从 `env` 取 `client_id`/`session_id` 并决定是否推送。
+StreamEventHandler = Callable[[MessageEnvelope, str, dict[str, Any]], Awaitable[None]]
+
 
 def _queue_maxsize(max_queue_size: int) -> int | None:
     """将配置中的 max_queue_size 规范化为 MessageQueue 可接受的参数。
@@ -42,24 +45,26 @@ class AgentService:
         self,
         *,
         max_queue_size: int = 0,
-        on_stream_event: Callable[[str, str, str, dict[str, Any]], Awaitable[None]] | None = None,
+        handle_stream_event: StreamEventHandler | None = None,
         message_store: SqliteMessageStore | None = None,
     ) -> None:
         """初始化服务状态；不启动任何消费者、不预建 session 队列。
 
         逻辑：
-        - `_runtime`：懒加载，首次处理消息时再 `init_agent()`；
-        - `_turn_orchestrator`：业务编排器，承载消息分支与工具审批/执行策略；
-        - `_stop_event`：供 `run_forever()` 阻塞，直到 `stop()` 置位；
-        - `_max_queue_size`：传给每个 session 的 `MessageQueue`；
-        - `_session_queues`：`session_id -> MessageQueue` 缓存，按需创建；
-        - `_message_store`：会话 sqlite；``None`` 时按 `Settings.agent_session_store_path` 构造，路径空则关闭；
-        - `_session_contexts`：`session_id -> OpenAIConversationContext` 进程内缓存，与队列串行写入一致；
-        - `_session_last_activity`：`session_id -> Unix 时间戳`，用于达上限时按闲置时长淘汰最久未活动会话；
-        - `_session_idle_evict_seconds`：闲置超过该秒数才允许成为淘汰候选（来自 `Settings.agent_session_idle_evict_seconds`，<=0 关闭）。
+        1. 保存队列上限、闲置淘汰配置与可选 **`handle_stream_event`**；
+        2. 初始化 session 队列/context/消费者 task 等空映射与 **`AsyncToolResultStore`** 发件人占位；
+        3. 组装 **`MainAgentTurnOrchestrator`**（入队提交 + **`_emit_envelope`**）；
+        4. 按入参或 **`Settings.agent_session_store_path`** 决定 **`_message_store`**（显式注入 / sqlite / 纯内存）。
+
+        关键边界：
+        - **`handle_stream_event` 为 ``None``** 时 **`_emit_stream_event`** 直接返回，不向任何订阅方推送；
+        - 注入回调后，**是否因缺少 `client_id` 而忽略事件**由回调自行判断，服务层不再代劳。
 
         Args:
             max_queue_size: 单个 session 队列容量；<=0 表示不限制。
+            handle_stream_event: 可选；签名与 **`_emit_stream_event`** 一致：`async (env, event_type, data)`，
+                其中 **`env`** 为当前 **`MessageEnvelope`**（含 **`client_id`** / **`session_id`**），
+                **`event_type`** / **`data`** 为 **`_map_event_envelope_to_stream`** 映射后的 SSE 语义字段。
             message_store: 可选注入存储（单测可传入或关闭）。
         """
         self._runtime: Any | None = None
@@ -74,7 +79,7 @@ class AgentService:
         self._session_consumer_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_active_handles: dict[str, asyncio.Task[None] | None] = {}
         self._async_store = get_async_tool_result_store()
-        self._on_stream_event = on_stream_event
+        self._handle_stream_event = handle_stream_event
         _, self._tool_map = build_openai_toolkit()
         self._turn_orchestrator = MainAgentTurnOrchestrator(
             submit_message=self.submit_message,
@@ -246,7 +251,7 @@ class AgentService:
         priority: MessagePriority = "other",
         client_id: str | None = None,
     ) -> None:
-        """对外投递入口：按 session 入队一条消息。
+        """按 session 入队一条消息至agent处理队列，以在下一轮触发llm调用。
 
         逻辑：
         1. `await _get_or_create_session_queue_async(session_id)` 取队列（可能新建并 `create_task` 启动 `_session_consume_loop`，达上限时可淘汰闲置会话）；
@@ -433,9 +438,12 @@ class AgentService:
         """映射并发送单条 envelope 到流输出。
 
         逻辑：
-        1. 用 `_map_event_envelope_to_stream` 转为 SSE 事件形态；
-        2. 记录统一日志；
-        3. 若存在 `client_id` 则通过 `_emit_stream_event` 推送给订阅方。
+        1. 用 **`_map_event_envelope_to_stream`** 转为 **`(event_type, data)`**；
+        2. 写 **`[emit_envelope]`** 日志；
+        3. 调用 **`_emit_stream_event`**，由注入的 **`handle_stream_event`**（若有）基于 **`env`** 自行路由。
+
+        关键边界：
+        - 无订阅回调时 **`_emit_stream_event`** 立即返回；不抛异常。
         """
         stream_type, stream_data = self._map_event_envelope_to_stream(
             envelope,
@@ -664,12 +672,24 @@ class AgentService:
         event_type: str,
         data: dict[str, Any],
     ) -> None:
-        if self._on_stream_event is None:
+        """将已映射的一条流事件交给 **`handle_stream_event`**（若已注入）。
+
+        逻辑：
+        1. 若 **`_handle_stream_event` 为 ``None``** 则返回；
+        2. 否则 **`await _handle_stream_event(env, event_type, data)`**。
+
+        关键边界：
+        - **不在此判断 `env.client_id`**：无订阅方、无 **`client_id`** 等策略由回调实现（如 API 层在写入总线前 return）。
+
+        异常说明：
+        - 回调内异常向上抛出，由 **`_handle_message`** 等调用方捕获或中断。
+
+        副作用说明：
+        - 仅转发调用；不修改 **`env`**。
+        """
+        if self._handle_stream_event is None:
             return
-        # 无 client_id 时无法关联 HTTP/SSE 订阅方，仅打日志（见 _handle_message 内 _log）。
-        if not env.client_id:
-            return
-        await self._on_stream_event(env.client_id, env.session_id, event_type, data)
+        await self._handle_stream_event(env, event_type, data)
 
     @staticmethod
     def _map_event_envelope_to_stream(

@@ -14,7 +14,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
 from app.config.settings import get_settings
-from app.harness.queue.message_queue import MessagePriority
+from app.harness.queue.message_queue import MessageEnvelope, MessagePriority
 from app.harness.service.agent_service import AgentService
 from app.harness.streaming.events import InMemoryEventBus, StreamEvent
 from app.observability.metrics import metrics_text
@@ -159,10 +159,14 @@ async def lifespan(app: FastAPI):
     s = get_settings(reload=True)
     bus = InMemoryEventBus()
 
-    async def on_stream_event(client_id: str, session_id: str, event_type: str, data: dict):
-        bus.publish(client_id=client_id, session_id=session_id, event_type=event_type, data=data)
+    async def handle_stream_event(env: MessageEnvelope, event_type: str, data: dict):
+        # 无 client_id 时无法关联 SSE 订阅方；与旧版在 AgentService 内短路的行为一致。
+        cid = (env.client_id or "").strip()
+        if not cid:
+            return
+        bus.publish(client_id=cid, session_id=env.session_id, event_type=event_type, data=data)
 
-    service = AgentService(max_queue_size=s.max_queue_size, on_stream_event=on_stream_event)
+    service = AgentService(max_queue_size=s.max_queue_size, handle_stream_event=handle_stream_event)
     await service.start()
     # message_queue 已随 service.start 初始化完成，此后再进行自登记，避免目录可见但服务未就绪。
     registered, register_reason, registry_url = await _register_self_to_registry()

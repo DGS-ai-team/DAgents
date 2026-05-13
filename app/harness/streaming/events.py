@@ -41,7 +41,10 @@ class EventBus(Protocol):
         ...
 
 class InMemoryEventBus:
-    """内存事件总线（单进程）。"""
+    """
+        内存事件总线（单进程）。
+        用于将agent处理队列中的消息发布到sse通道
+    """
 
     def __init__(self) -> None:
         """初始化内存流容器。"""

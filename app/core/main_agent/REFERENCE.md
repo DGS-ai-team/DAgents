@@ -11,7 +11,7 @@
 ## `agent.py`
 
 - **`init_agent`**：创建并返回 OpenAI 隐式 ReAct runtime
-- **`MainAgentTurnOrchestrator`**：消息回合业务编排器；`resume` / `async_tool_result` / `tool_result` / `human_message` 分支；`run_turn` 与工具审批/执行、tool_result 回灌；并内聚 summary 压缩入口流程（已完成结果替换、阻塞压缩、静默压缩任务管理）；**`display_inference`** 生成 **`tool_result` / `tool_call` / `approval_required`** 等 **`display_type`**
+- **`MainAgentTurnOrchestrator`**：消息回合业务编排器；`resume` / `async_tool_result` / `tool_result` / `human_message` 分支；`run_turn` 与工具审批/执行、tool_result 回灌；**`_invoke_tool`** 内在得到最终 **`result_text`** 后 **`emit` `tool_result`** 信封；**`_handle_tool_result`** 仅驱动 **`tool_message`** 下一轮（不再重复发 **`tool_result`** SSE）；**`_handle_human_message`**：若 **`ctx.pending_tool_calls`** 非空则按 pending 逐条补打断 **`tool`/`tool_result` SSE** 后 **`clear()`** pending 并 **`run_turn_phase=IDLE`**；并内聚 summary 压缩入口流程（已完成结果替换、阻塞压缩、静默压缩任务管理）；**`display_inference`** 生成 **`tool_result` / `tool_call` / `approval_required`** 等 **`display_type`**
 
 ## `runtime_openai.py`
 
