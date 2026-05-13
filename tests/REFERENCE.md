@@ -16,6 +16,10 @@
 
 - **`MessageQueueAsyncTests`**：四级优先级、同优先 FIFO、`pause`+`stop` 与 `receive` 的 `RuntimeError`、自定义 envelope、`pending_metrics_rows`。
 
+## `test_async_tool_store.py`
+
+- **`AsyncToolSubmitClientIdTests`**：**`AsyncToolResultStore.submit_coroutine`** 对 **`client_id`** 非空约束及任务跑通终态。
+
 ## `test_agent_service.py`
 
 - **`AgentServiceStreamMapTests`**：`_map_event_envelope_to_stream` 扁平字段（需完整依赖，否则 skip）。

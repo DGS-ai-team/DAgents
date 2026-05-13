@@ -130,7 +130,7 @@ def record_my_feature_hit(*, outcome: str) -> None:
 
 1. 本地启动 API，确认 **`METRICS_ENABLED=true`**，访问 **`GET /metrics`**，检查 **`HELP`/`TYPE`/样本行** 是否符合预期。  
 2. 为解析与注册逻辑补充 **`tests/test_*.py`**（规划见 **`tests/UNIT_TEST_CHECKLIST.md`** 中 observability 小节）。  
-3. 更新 **`app/observability/REFERENCE.md`**（及必要时 **`doc/项目实现总览.md`** 可观测性小节），便于后续维护者发现新指标。
+3. 更新 **`app/observability/REFERENCE.md`**，便于后续维护者发现新指标。
 
 ### 3.5 多进程 / 多 Worker 说明（前瞻）
 

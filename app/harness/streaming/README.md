@@ -2,6 +2,8 @@
 
 流式事件层（SSE/未来 Redis 共用的抽象层）。
 
+**对外完整叙述**（入站队列与 SSE 出站串联、联调要点）：见仓库 **`doc/agent-input-output.md`**；下文为子目录实现笔记。
+
 | 文件 | 说明 |
 |------|------|
 | **`events.py`** | `EventBus` 协议与 `InMemoryEventBus` 实现（当前 SSE 使用） |
@@ -55,7 +57,7 @@
 ```mermaid
 sequenceDiagram
     autonumber
-    participant C as Client(Frontend/CLI)
+    participant C as Client(Frontend/HTTP)
     participant API as FastAPI(/v1/messages,/v1/streams)
     participant BUS as InMemoryEventBus
     participant S as AgentService

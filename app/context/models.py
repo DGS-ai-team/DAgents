@@ -203,6 +203,14 @@ class OpenAIConversationContext(BaseModel):
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
     session_id: str = Field(default="", description="会话 ID。")
+    sse_client_id: str = Field(
+        default="",
+        description=(
+            "本进程内最近一条入站 MessageEnvelope 携带的 client_id（非空时刷新）；"
+            "供异步工具提交时写入 AsyncToolJob，使回灌入队仍带 SSE 通道。"
+            "不入库，重启后为空直至再次收到带 client_id 的请求。"
+        ),
+    )
     messages: list[dict[str, Any]] = Field(default_factory=list, description="OpenAI 对话消息列表。")
     pending_tool_calls: list[PendingToolCall] = Field(
         default_factory=list,

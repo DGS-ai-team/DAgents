@@ -164,7 +164,8 @@ jobs:
           cp .env.example bundle/
           cp README.md bundle/
           cp -r skills bundle/skills
-          cp -r prompt_context bundle/prompt_context
+          mkdir -p bundle/.runtime
+          cp -r packaging/prompt_context bundle/.runtime/prompt_context
           cd bundle
           zip -r "../${{ matrix.archive_name }}" .
 
@@ -180,7 +181,8 @@ jobs:
           Copy-Item ".env.example" "bundle/"
           Copy-Item "README.md" "bundle/"
           Copy-Item "skills" "bundle/skills" -Recurse
-          Copy-Item "prompt_context" "bundle/prompt_context" -Recurse
+          New-Item -ItemType Directory -Force -Path "bundle/.runtime" | Out-Null
+          Copy-Item "packaging/prompt_context" "bundle/.runtime/prompt_context" -Recurse
           Compress-Archive -Path bundle/* -DestinationPath "${{ matrix.archive_name }}" -Force
 
       - name: Upload bundle artifact

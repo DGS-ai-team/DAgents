@@ -11,8 +11,8 @@ Python **命名空间包**（无 `__init__.py`，PEP 420），从仓库根将根
 
 ## 入口
 
-- 推荐：**仓库根 `run_agent.py`** → 调用 **`app.harness.cli.main.main(project_root)`**。
-- 模块方式：`PYTHONPATH=<仓库根> python -m app.harness.cli.main`（等价，需保证 `PYTHONPATH`）。
+- 对外 HTTP 服务：在仓库根执行 **`python run_agent_api.py`**（详见仓库根 **README.md**）。
+- Register Center、本地联调等其它 **`run_*.py`**：见仓库根说明；**`app/harness/cli/`** 为演进中的调试入口，对外文档不展开其交互能力。
 
 ## 模块索引
 

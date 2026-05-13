@@ -1,13 +1,32 @@
 # DAgents
 
-**本仓库为 DAgents 后端**：多 Agent / 工具调用场景下的 Python 运行时，提供 FastAPI 服务、CLI、注册中心（Register Center）与相关设计文档。  
+**本仓库为 DAgents 后端**：多 Agent / 工具调用场景下的 Python 运行时，提供 FastAPI 服务、注册中心（Register Center）与相关设计文档。  
 **协议**：[MIT License](LICENSE)。**Web 前端**已独立，见 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI)。
 
+**当前版本：`v0.1.0`（2026-05-12）** · [变更记录](CHANGELOG.md)
+
 - 会话化 Agent 运行时（工具调用、审批、流式输出）
-- API 与 CLI、SQLite 可选持久化、Prometheus 指标（`/metrics`）
+- HTTP API、SQLite 可选持久化、Prometheus 指标（`/metrics`）
 - 可独立部署的注册中心 **`register_center/`**（Agent 登记、发现、分组广播与中继）
 
-> 项目持续迭代中，接口与实现可能变化。
+> **0.x 预览**：在向 **1.0** 演进前，仍可能出现不兼容的 HTTP/OpenAPI 或配置项调整；**会写入 [CHANGELOG.md](CHANGELOG.md)**，并在 **GitHub Releases**（与本仓库 tag 对齐）中便于查阅。小版本内尽量保持行为可预期。
+
+## 版本与兼容性
+
+- **标记版本**：`v0.1.0`（与 Git tag **`v0.1.0`** 一致；预编译包请以 **Releases** 资产为准）。
+- **Python**：**3.11+** 可尝试运行；**CI 与发布流水线在 Python 3.13 上验证**，生产环境建议与 CI 主版本对齐。
+- **发布物**：源码即本仓库；二进制见 **`packaging/`**、**`startup_scripts/`** 与 **`.github/workflows/build-and-release.yml`**；发版时请同步更新 **Releases** 说明与 **CHANGELOG**。
+
+## v0.1.0 范围与说明
+
+- **已交付能力**：见下文「功能概览」及 [CHANGELOG.md](CHANGELOG.md) 中 **0.1.0** 条目（API/持久化/流式/指标/Register Center 等）。
+- **单测**：默认 `python -m unittest discover -s tests -p "test_*.py" -v` **不**拉取实时 LLM；**`test_agent_service.py`** 在缺少完整依赖（如未 `pip install -r requirements.txt`）时部分用例会 **skip**。规划与覆盖矩阵见 **`tests/UNIT_TEST_CHECKLIST.md`**，运行说明见 **`tests/README.md`**。可选真机 LLM 冒烟见 **`tests/integration/README.md`**（`RUN_LIVE_LLM_TESTS` + `LLM_API_KEY`）。
+- **前端联调**：OpenAPI 与 **DAgentsUI** 的最低兼容组合以前端仓库说明为准；后端导出命令见「与前端（DAgentsUI）对接」。
+
+## 问题反馈与安全
+
+- **问题与功能请求**：请通过本仓库 **GitHub Issues** 反馈（建议注明 **`v0.1.0`**、Python 版本、操作系统与最小复现步骤）。
+- **安全漏洞**：请勿在公开 Issue 中张贴可利用细节；请按根目录 **[SECURITY.md](SECURITY.md)** 通过 **GitHub Security Advisories**（或其中约定的私密渠道）报告。
 
 ## 功能概览
 
@@ -23,9 +42,10 @@
 ```text
 DAgents/
 ├── LICENSE                      # MIT
+├── CHANGELOG.md                 # 版本变更记录（与 tag / Releases 对齐）
 ├── requirements.txt
 ├── .env.example                 # 环境变量模板（复制为 .env）
-├── run_agent.py                 # CLI
+├── run_agent.py                 # 仓库内脚本入口（能力未定，本文档不展开）
 ├── run_agent_api.py             # FastAPI（Agent API）
 ├── run_register_center.py       # Register Center
 ├── run_dev_stack.py             # 本地同时拉起 API + Register Center
@@ -35,10 +55,9 @@ DAgents/
 ├── tests/                       # 单元测试（`unittest`）
 ├── startup_scripts/             # 预编译包用：`start.sh`、`start_register_center.*`
 ├── scripts/                     # 辅助脚本（含 CI 构建）
-├── packaging/                   # 离线安装说明等
-├── prompt_context/              # 系统提示侧车文件
+├── packaging/                   # 离线安装说明、`prompt_context/` 侧车种子等
 ├── skills/                      # Agent / Cursor 技能等资源（按需）
-├── doc/                         # 设计与实现文档
+├── doc/                         # 对外技术文档（含 **`roadmap.md`**、`cases/` 等；索引见 **`doc/README.md`**）
 └── .github/workflows/           # CI（单测、PyInstaller 打包）
 ```
 
@@ -46,7 +65,7 @@ DAgents/
 
 | 安装方式 | Python | 其它 | 典型场景 |
 |----------|--------|------|----------|
-| **源码 + 在线 pip** | **3.11+**（CI 常用 **3.13**） | pip、可访问 PyPI | 开发 / 有外网服务器 |
+| **源码 + 在线 pip** | **3.11+**（**CI / 发布验证：3.13**） | pip、可访问 PyPI | 开发 / 有外网服务器 |
 | **源码 + 离线 wheels** | 与下载 wheel 时 **次版本一致** | wheel 与 OS/架构绑定 | 内网、隔离环境 |
 | **PyInstaller 发布包** | **无需** Python | Linux 需兼容构建环境的 **glibc** | 解压即用 |
 
@@ -59,7 +78,7 @@ DAgents/
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # 与 CI 一致；缺依赖时部分单测会 skip，见「开发说明」
 cp .env.example .env
 python run_agent_api.py
 ```
@@ -74,7 +93,7 @@ python run_agent_api.py
 
 ### C）预编译二进制（PyInstaller）
 
-无需 Python；Linux 注意 glibc 兼容性。解压后配置 `.env`，运行：
+无需 Python；Linux 注意 glibc 兼容性。发版二进制建议从 **GitHub Releases** 获取 **`v0.1.0`** 对应资产（或与 tag 对齐的自建产物）。解压后配置 `.env`，运行：
 
 - **`dagents-api`** / **`dagents-api.exe`**：Agent API  
 - **`dagents_register_center`** / **`dagents_register_center.exe`**：Register Center  
@@ -86,7 +105,6 @@ python run_agent_api.py
 | 用途 | 命令 |
 |------|------|
 | Agent API | `python run_agent_api.py` |
-| CLI | `python run_agent.py` |
 | Register Center | `python run_register_center.py`（默认约 **`0.0.0.0:8010`**，见 `.env` / `REGISTER_CENTER_*`） |
 | 本地联调（API + Register Center） | `python run_dev_stack.py` |
 
@@ -144,11 +162,11 @@ Agent API 会通过 **`bash_run`** 等工具用 **`subprocess`** 执行 shell。
 1. 在本仓库根目录导出 OpenAPI：  
    `python export_openapi_schema.py --output <前端仓库路径>/openapi.json`
 2. 在前端仓库生成类型（若前端已配置）：`pnpm gen:types`
-3. 典型 HTTP：`POST /v1/messages`、SSE 相关路由（见下文与 **`app/harness/api/README.md`**）
+3. 典型 HTTP：`POST /v1/messages`、SSE 相关路由（见 **`doc/api-reference.md`**、**`app/harness/api/README.md`**）
 
 ## API 说明（简版）
 
-更完整的契约与路由说明见 **`app/harness/api/README.md`** 与 OpenAPI 导出。
+更完整的契约与路由说明见 **`doc/api-reference.md`**（与实现对齐）、**`app/harness/api/README.md`** 与 OpenAPI 导出。
 
 | 能力 | 路径（示例） |
 |------|----------------|
@@ -160,19 +178,20 @@ Agent API 会通过 **`bash_run`** 等工具用 **`subprocess`** 执行 shell。
 | 释放会话 | `DELETE /v1/sessions/{session_id}` |
 | 指标 | `GET /metrics`（若启用） |
 
-Register Center 的 REST 约定见 **`register_center/README.md`** 与 **`doc/register_center-设计.md`**。
+Register Center 的 REST 约定见 **`register_center/README.md`**。
 
 ## 开发说明
 
-- **`app/`** 与各子目录维护 **`README.md`** / **`REFERENCE.md`**（约定见 `.cursor/rules/`）。
+- **`app/`** 与各子目录维护 **`README.md`** / **`REFERENCE.md`**（目录说明与符号索引；随代码变更更新）。
 - **`register_center/`** 由根目录 **`run_register_center.py`** 通过 `importlib` 加载 **`rc_app.py`**，便于不经安装直接运行。
-- 运行测试：
+- **运行测试**（与 **`.github/workflows/pr-tests.yml`** 一致）：
 
 ```bash
+pip install -r requirements.txt
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-部分用例依赖 **`OPENAI_API_KEY`** 或实时 LLM（见测试文件中的 skip 条件）；CI 安装依赖后应与发布流程一致。
+默认 discover **仅**包含 `tests/` 下 `test_*.py`：以本地单测为主，**不**依赖 `OPENAI_API_KEY`。**`test_agent_service.py`** 依赖 `AgentService` 完整导入链（含 `openai` 等），环境不完整时相关用例会 **skip**；安装 **`requirements.txt`** 后应与 CI 行为一致。可选联网 LLM 冒烟：`tests/integration/live_llm_smoke.py`（见 **`tests/integration/README.md`**）。覆盖规划见 **`tests/UNIT_TEST_CHECKLIST.md`**。
 
 - 指标实现见 **`app/observability/metrics.py`**。
 
@@ -183,9 +202,22 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 ## 文档入口
 
-- [doc/README.md](doc/README.md)
+- [CHANGELOG.md](CHANGELOG.md)（**`v0.1.0`** 起）
+- [SECURITY.md](SECURITY.md)（漏洞报告与支持版本）
+- [doc/README.md](doc/README.md)（`doc/` 技术文档索引；该目录下 Markdown 文件名为 **ASCII**）
+- [doc/cases/README.md](doc/cases/README.md)（**落地案例**目录说明与索引；具体案例 Markdown 放在 **`doc/cases/`**）
+- [doc/built-in-tools.md](doc/built-in-tools.md)（**内置工具**：`get_tools` 列表、异步与审批前提）
+- [doc/roadmap.md](doc/roadmap.md)（**路线图**：已实现 / 待办 / 已知限制）
+- [doc/architecture-and-flows.md](doc/architecture-and-flows.md)（架构分层与业务流程）
+- [doc/agent-input-output.md](doc/agent-input-output.md)（HTTP 入队与 SSE 出站专题）
+- [doc/context-compression-and-state.md](doc/context-compression-and-state.md)（上下文与压缩状态）
+- [doc/agent-turn-loop.md](doc/agent-turn-loop.md)（Agent 编排循环：`run_turn`、工具入队与审批）
+- [doc/a2a-and-register-center.md](doc/a2a-and-register-center.md)（A2A 与 Register Center：`agent_peer`、广播与中继）
+- [doc/api-reference.md](doc/api-reference.md)（HTTP / SSE 契约）
+- [doc/prometheus-metrics.md](doc/prometheus-metrics.md)（**`/metrics`** 与 Prometheus）
 - [app/README.md](app/README.md)
 - [app/REFERENCE.md](app/REFERENCE.md)
+- [tests/README.md](tests/README.md)
 
 ## License
 

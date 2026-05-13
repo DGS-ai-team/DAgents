@@ -2,7 +2,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| **`tool.py`** | 工具统一入口：`tool` 装饰器 + `get_tools()` + OpenAI tool 适配（`build_openai_toolkit`/`parse_tool_arguments`） |
+| **`tool.py`** | 工具统一入口：`tool` 装饰器 + `get_tools()` + OpenAI tool 适配（`build_openai_toolkit`/`parse_tool_arguments`）；**当前模型可见工具清单**见 [built-in-tools.md](../../../doc/built-in-tools.md) |
 | **`bash.py`** | 统一 shell 工具 **`bash_run`**（支持 `bash/cmd/powershell`，含分 shell 解析与策略校验） |
 | **`host_platform.py`** | **`host_platform`**：查询宿主机 OS（`os_kind` + `platform` 摘要，供与 bash 路径对齐） |
 | **`fs.py`** | 文件四件套：**`read_file`** / **`write_file`** / **`edit_file`** / **`search_file`**（`FS_ROOT` 路径约束、按后缀读取策略、行级编辑与**正则**检索） |

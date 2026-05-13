@@ -6,4 +6,6 @@
 | **`REFERENCE.md`** | 本目录 Python 符号索引 |
 
 说明：
+
 - 本目录统一承载会话上下文相关模型与转换逻辑。
+- 上下文持久化、压缩与 **`ctx`** 字段演变的专题叙述见仓库 **`doc/context-compression-and-state.md`**。

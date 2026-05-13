@@ -15,9 +15,10 @@
 
 ## `async_store.py`
 
-- **`AsyncToolJob`**：异步工具任务快照（含 `session_id`、状态、时间戳、结果/错误）。
+- **`AsyncToolJob`**：异步工具任务快照（含 **`session_id` / `client_id`**、状态、时间戳、结果/错误）。
 - **`AsyncToolResultStore`**：后台托管协程并维护任务状态与完成回调。
-- **`AsyncToolResultStore.register_message_queue_sender`**：注册消息队列发送器，任务终态时投递 `async_tool_result` 载荷。
+- **`AsyncToolResultStore.submit_coroutine`**：要求非空 **`client_id`**，与 **`OpenAIConversationContext.sse_client_id`** 对齐，供终态回灌 **`MessageEnvelope.client_id`**。
+- **`AsyncToolResultStore.register_message_queue_sender`**：注册消息队列发送器；终态 **`payload`** 含 **`client_id`**，与 **`AsyncToolJob`** 一致。
 - **`get_async_tool_result_store`**：返回进程级异步工具结果仓库单例。
 
 ## `agent_peer.py`

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Tuple
 
@@ -20,14 +21,68 @@ from app.harness.tools.agent_peer import _session_id_from_context
 # 记忆文件缓存：key -> (content, mtime)，文件未修改时直接返回缓存，避免重复读盘
 _memory_file_cache: dict[Tuple[str, ...], Tuple[str, float]] = {}
 
-# `prompt_context/` 侧车 Markdown：绝对路径 str -> (正文 strip 后, st_mtime)
+# `.runtime/prompt_context/` 侧车 Markdown：绝对路径 str -> (正文 strip 后, st_mtime)
 _prompt_context_file_cache: dict[str, tuple[str, float]] = {}
 
-# 与 `app/` 同级的仓库根目录下的 `prompt_context/`（`__file__` 在 `app/core/main_agent/`）
-PROMPT_CONTEXT_DIR = Path(__file__).resolve().parents[2].parent / "prompt_context"
 SOUL_MD = "soul.md"
 USER_MD = "user.md"
 CUSTOM_MD = "custom.md"
+
+
+def _repo_packaging_prompt_seed_dir() -> Path:
+    """解析仓库内 `packaging/prompt_context` 目录（源码树）。
+
+    逻辑：
+    1. 以 **`app/core/main_agent/prompt.py`** 为锚上溯仓库根；
+    2. 拼接 **`packaging/prompt_context`**。
+
+    关键边界：
+    - PyInstaller 等打包目录未必含 **`packaging/`** 目录，调用方需 **`is_dir()`** 再决定是否种子拷贝。
+    """
+    return Path(__file__).resolve().parents[2].parent / "packaging" / "prompt_context"
+
+
+def _prompt_context_dir() -> Path:
+    """解析运行根下 **`.runtime/prompt_context`** 并确保目录存在。
+
+    逻辑：
+    1. **`resolve_runtime_root()`** 与 **`.runtime/prompt_context`** 拼接；
+    2. **`mkdir(parents=True, exist_ok=True)`**。
+
+    副作用说明：
+    - 首次调用可能创建 **`.runtime`** 子目录。
+    """
+    d = (resolve_runtime_root() / ".runtime" / "prompt_context").resolve()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _ensure_prompt_context_seeded() -> None:
+    """若运行时侧车缺失，则从 **`packaging/prompt_context`** 拷贝缺省模板（不覆盖已有文件）。
+
+    逻辑：
+    1. 取得目标目录（含 **`mkdir`**）与种子目录；
+    2. 种子非目录则返回；
+    3. 对 **`soul.md` / `user.md` / `custom.md`**：目标不存在且种子为文件时 **`shutil.copy2`**。
+
+    关键边界：
+    - 已有 **`custom.md`** 等不会被覆盖，避免冲掉部署侧定制；
+    - 无种子目录时静默返回（例如裁剪后的发布包）。
+
+    副作用说明：
+    - 可能写入 **`.runtime/prompt_context/*.md`**。
+    """
+    dest = _prompt_context_dir()
+    seed = _repo_packaging_prompt_seed_dir()
+    if not seed.is_dir():
+        return
+    for name in (SOUL_MD, USER_MD, CUSTOM_MD):
+        src = seed / name
+        dst = dest / name
+        if dst.exists():
+            continue
+        if src.is_file():
+            shutil.copy2(src, dst)
 
 
 def get_static_system_prompt() -> str:
@@ -62,10 +117,10 @@ def read_memory_file_cached(path, cache_key: Tuple[str, ...]) -> str:
 
 
 def _read_prompt_context_markdown(filename: str) -> str:
-    """读取仓库根目录下 **`prompt_context/`** 内单个 Markdown 文件正文（UTF-8），带 mtime 进程内缓存。
+    """读取 **`.runtime/prompt_context/`** 内单个 Markdown 文件正文（UTF-8），带 mtime 进程内缓存。
 
     逻辑：
-    1. 解析 **`PROMPT_CONTEXT_DIR / filename`**（**`PROMPT_CONTEXT_DIR`** 与 **`app/`** 同级）；
+    1. **`_ensure_prompt_context_seeded`** 后解析 **`_prompt_context_dir() / filename`**；
     2. 非文件或 **`stat` 失败** → 返回 **`""`**；
     3. 若缓存键（绝对路径）存在且 **mtime 未变** → 返回缓存正文；
     4. 否则 **`read_text(encoding=\"utf-8\")`**，**`strip()`** 后写入缓存并返回。
@@ -75,12 +130,14 @@ def _read_prompt_context_markdown(filename: str) -> str:
     - 不解析 YAML front matter；全文作为一节内容拼入系统提示词。
 
     Args:
-        filename: 相对 **`prompt_context`** 的文件名（如 **`soul.md`**）。
+        filename: 相对 **`.runtime/prompt_context`** 的文件名（如 **`soul.md`**）。
 
     副作用：
+    - 可能创建 **`.runtime/prompt_context`** 并从 **`packaging/prompt_context`** 拷贝缺省模板；
     - 更新 **`_prompt_context_file_cache`**。
     """
-    path = PROMPT_CONTEXT_DIR / filename
+    _ensure_prompt_context_seeded()
+    path = _prompt_context_dir() / filename
     if not path.is_file():
         return ""
     try:
@@ -105,7 +162,7 @@ def _format_runtime_workspace_section() -> str:
 
     逻辑：
     1. 用 **`resolve_runtime_root()`** 拼出 **`.runtime`** 绝对路径作为对照；
-    2. 列出内置约定目录（memory/agent/history/skills）及用途；
+    2. 列出内置约定目录（memory、prompt_context、agent、history、skills）及用途；
     3. 写入 **`data/`**、**`scripts/`** 及 **`scripts_menu.md`** 索引约定。
 
     关键边界：
@@ -114,11 +171,11 @@ def _format_runtime_workspace_section() -> str:
     """
 
     rt = resolve_runtime_root() / ".runtime"
-    menu_file = rt / "scripts_menu.md"
     lines = [
         "## 重要目录说明：",
         "",
         "- **`.runtime/memory/`**：会话持久化。",
+        "- **`.runtime/prompt_context/`**：系统提示侧车 **`soul.md` / `user.md` / `custom.md`**（UTF-8；由 **`get_system_prompt`** 读取）。",
         "- **`.runtime/agent/`**：实例标识等。其中agent_id标记了你的唯一标识",
         "- **`.runtime/skills/`**：与 Agent **skills** 机制绑定的可复用能力（元数据与正文由 skills 加载逻辑管理）。",
         "- **`.runtime/data/`**：**临时数据区**——脚本输出结果、上传文件、中间产物等；可清理，**不要**当作唯一权威存档。",
@@ -177,14 +234,14 @@ def get_system_prompt(
 
     逻辑：
     1. 获取静态系统提示词并去掉尾部空白；
-    2. 读取仓库根下 **`prompt_context/soul.md`**，非空则追加 **`## 智能体设定`** 与正文；
-    3. 读取仓库根下 **`prompt_context/user.md`**，非空则追加 **`## 用户偏好`** 与正文；
+    2. 读取 **`.runtime/prompt_context/soul.md`**，非空则追加 **「以下是你的设定」** 与正文；
+    3. 读取 **`.runtime/prompt_context/user.md`**，非空则追加 **「以下是用户信息与偏好」** 与正文；
     4. 当启用 skills 功能时，先常驻追加 skills 元数据清单；
     5. 再按 `context.loaded_skills` 追加技能正文片段；
     6. 读取 **`get_host_snapshot()`**（与 API 启动采集同源缓存），追加 **`## 以下是当前运行环境`**（含 OS 类别与当前用户信息）；
     7. 追加 **`## `.runtime` 工作目录约定`**（含 **`data/`**、**`scripts/`**、**`scripts_menu.md`** 等说明）；
     8. 若启用 **`AGENT_RAW_MESSAGE_HISTORY_ENABLED`**，追加会话原始消息 JSONL 记录说明；
-    9. 读取 **`prompt_context/custom.md`**，非空则追加 **`## 以下是用户侧追加的临时/专项指令`**；
+    9. 读取 **`.runtime/prompt_context/custom.md`**，非空则追加 **`## 以下是用户侧追加的临时/专项指令`**；
     10. 追加 **`## 会话环境信息`**（含 **`session_id`**；位于整条 system prompt **最末**）。
 
     关键边界：

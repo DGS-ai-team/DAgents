@@ -160,21 +160,37 @@ class AgentService:
         """将异步工具完成结果投递到会话消息队列。
 
         逻辑：
-        1. 复用 `submit_message` 统一入队入口；
-        2. 指定 `request_type="async_tool_result"` 并透传 payload；
-        3. 以 `tool_result` 优先级入队，交给消费循环串行处理。
+        1. 从 **`payload`** 取出 **`client_id`**（与 **`AsyncToolJob`** 一致），缺省时抛错，避免 SSE 总线无法分桶；
+        2. 复制 **`payload`** 为入队用字典，**剔除 `client_id`**，避免与 **`MessageEnvelope.client_id`** 重复语义污染 **`async_tool_result`** 业务载荷；
+        3. 复用 **`submit_message`** 统一入队；
+        4. 指定 **`request_type="async_tool_result"`** 并以 **`tool_result`** 优先级入队。
 
         关键边界：
-        - 本方法为协程，供 `AsyncToolResultStore` 在终态通知路径中 `await`。
+        - 本方法为协程，供 **`AsyncToolResultStore`** 在终态通知路径中 **`await`**；
+        - **`client_id`** 空白时抛 **`ValueError`**，与 **`submit_coroutine`** 前置约束一致。
+
+        异常说明：
+        - **`client_id`** 缺失时向上抛出，便于观测与单测断言。
+
+        副作用说明：
+        - 仅触发入队；不修改 **`AsyncToolResultStore`** 内任务表。
         """
+        cid = str(payload.get("client_id") or "").strip()
+        if not cid:
+            raise ValueError(
+                "async_tool_result 缺少 client_id：无法将异步工具终态路由到 SSE 客户端，"
+                "请检查 AsyncToolJob 是否在 submit_coroutine 阶段写入了非空 client_id。"
+            )
+        body = dict(payload)
+        body.pop("client_id", None)
         await self.submit_message(
             session_id=session_id,
             content="",
             request_type="async_tool_result",
-            async_tool_result=dict(payload),
+            async_tool_result=body,
             source="async-store",
             priority="tool_result",
-            client_id=None,
+            client_id=cid,
         )
 
     async def run_forever(self) -> None:
@@ -390,6 +406,10 @@ class AgentService:
         - `CancelledError` 不吞掉：flush 后必须 `raise`，以便 consumer 区分「子 task 取消」与「自身取消」。
         """
         ctx = await self._resolve_context(env.session_id)
+        # 仅当入站 envelope 显式携带 client_id 时刷新，避免 async_tool_result 等内部入队用 None 覆盖已建立的通道。
+        _cid = (env.client_id or "").strip()
+        if _cid:
+            ctx.sse_client_id = _cid
         self._touch_session_activity(env.session_id)
         runtime = self._get_runtime()
         try:
