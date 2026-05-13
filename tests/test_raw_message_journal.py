@@ -1,87 +1,80 @@
-"""原始消息 JSONL 落盘记录单元测试。"""
+"""`app.harness.history.raw_message_journal` 单测：开关、空 session、追加与 JSONL 行结构。"""
 
 from __future__ import annotations
 
 import json
-import os
-import sys
+import tempfile
 import unittest
-import uuid
-from datetime import datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_ROOT))
-
-from app.config.settings import get_settings  # noqa: E402
-from app.context.models import OpenAIConversationContext  # noqa: E402
-from app.harness.history.raw_message_journal import (  # noqa: E402
-    append_openai_message_with_journal,
-    record_raw_openai_message_append,
-)
+from app.context.models import OpenAIConversationContext
+from app.harness.history import raw_message_journal as journal
 
 
-class RawMessageJournalTestCase(unittest.TestCase):
-    """验证 JSONL 记录写入路径与开关。"""
+class RecordRawOpenaiMessageAppendTests(unittest.TestCase):
+    """`record_raw_openai_message_append`：配置与 session 边界。"""
 
-    _ENV_KEYS = ("AGENT_RAW_MESSAGE_HISTORY_ENABLED", "AGENT_RAW_MESSAGE_HISTORY_DIR")
+    def test_disabled_or_empty_session_skips_write(self) -> None:
+        """关闭开关或 `session_id` 为空时不写文件。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(journal, "get_settings") as gs:
+                gs.return_value.agent_raw_message_history_enabled = False
+                gs.return_value.agent_raw_message_history_dir = str(root / "h")
+                journal.record_raw_openai_message_append("s1", {"role": "user", "content": "x"})
+            self.assertEqual(list(root.rglob("*.jsonl")), [])
 
-    def tearDown(self) -> None:
-        for key in self._ENV_KEYS:
-            os.environ.pop(key, None)
-        get_settings(reload=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(journal, "get_settings") as gs:
+                gs.return_value.agent_raw_message_history_enabled = True
+                gs.return_value.agent_raw_message_history_dir = str(root / "h")
+                journal.record_raw_openai_message_append("", {"role": "user", "content": "x"})
+            self.assertEqual(list(root.rglob("*.jsonl")), [])
 
-    def test_append_writes_jsonl_line(self) -> None:
-        """启用开关时追加一行 JSONL，且内容为插入快照。"""
-        os.environ["AGENT_RAW_MESSAGE_HISTORY_ENABLED"] = "true"
-        os.environ["AGENT_RAW_MESSAGE_HISTORY_DIR"] = "hist"
-        get_settings(reload=True)
-        day = datetime.now().strftime("%Y%m%d")
-        with TemporaryDirectory() as raw:
-            root = Path(raw)
-            with patch(
-                "app.harness.history.raw_message_journal.resolve_runtime_root",
-                return_value=root,
-            ):
+
+class AppendOpenaiMessageWithJournalTests(unittest.TestCase):
+    """`append_openai_message_with_journal`：列表追加与 JSONL 字段。"""
+
+    def test_append_writes_jsonl_line_with_message_snapshot(self) -> None:
+        """应在配置目录下生成 JSONL，行内含 `recorded_at` 与 `message` 快照。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hist = root / "hist"
+            with patch.object(journal, "get_settings") as gs, patch.object(journal, "resolve_runtime_root", return_value=root):
+                gs.return_value.agent_raw_message_history_enabled = True
+                gs.return_value.agent_raw_message_history_dir = str(hist)
                 ctx = OpenAIConversationContext(session_id="sess-a", messages=[])
-                msg = {"role": "user", "content": "hello"}
-                append_openai_message_with_journal(ctx, msg)
-                msg["content"] = "mutated"
-            path = root / "hist" / f"sess-a_{day}.jsonl"
-            self.assertTrue(path.is_file())
-            line = path.read_text(encoding="utf-8").strip().splitlines()[0]
-            row = json.loads(line)
-            self.assertEqual(row["message"]["content"], "hello")
-            self.assertIn("recorded_at", row)
-            self.assertEqual(ctx.messages[0]["content"], "mutated")
+                journal.append_openai_message_with_journal(ctx, {"role": "user", "content": "hello"})
+            self.assertEqual(len(ctx.messages), 1)
+            files = list(hist.glob("*.jsonl"))
+            self.assertEqual(len(files), 1)
+            line = files[0].read_text(encoding="utf-8").strip()
+            obj = json.loads(line)
+            self.assertIn("recorded_at", obj)
+            self.assertEqual(obj["message"]["content"], "hello")
 
-    def test_disabled_skips_file(self) -> None:
-        """关闭开关时不创建文件。"""
-        os.environ["AGENT_RAW_MESSAGE_HISTORY_ENABLED"] = "false"
-        get_settings(reload=True)
-        with TemporaryDirectory() as raw:
-            root = Path(raw)
-            with patch(
-                "app.harness.history.raw_message_journal.resolve_runtime_root",
-                return_value=root,
-            ):
-                record_raw_openai_message_append(f"sid-{uuid.uuid4().hex}", {"role": "user", "content": "x"})
-            self.assertEqual(list(root.rglob("*.jsonl")), [])
 
-    def test_empty_session_skips(self) -> None:
-        """session_id 为空时不写。"""
-        os.environ["AGENT_RAW_MESSAGE_HISTORY_ENABLED"] = "true"
-        get_settings(reload=True)
-        with TemporaryDirectory() as raw:
-            root = Path(raw)
-            with patch(
-                "app.harness.history.raw_message_journal.resolve_runtime_root",
-                return_value=root,
-            ):
-                record_raw_openai_message_append("", {"role": "user", "content": "x"})
-            self.assertEqual(list(root.rglob("*.jsonl")), [])
+class InsertOpenaiMessageWithJournalTests(unittest.TestCase):
+    """`insert_openai_message_with_journal`：插入顺序与 JSONL 追加顺序解耦。"""
+
+    def test_insert_prepends_message_and_still_appends_journal(self) -> None:
+        """`insert(0, ...)` 后列表首条为新消息；JSONL 仍按调用顺序追加一行。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hist = root / "hist"
+            with patch.object(journal, "get_settings") as gs, patch.object(journal, "resolve_runtime_root", return_value=root):
+                gs.return_value.agent_raw_message_history_enabled = True
+                gs.return_value.agent_raw_message_history_dir = str(hist)
+                ctx = OpenAIConversationContext(session_id="sess-b", messages=[{"role": "user", "content": "old"}])
+                journal.insert_openai_message_with_journal(ctx, 0, {"role": "system", "content": "sys"})
+            self.assertEqual(ctx.messages[0]["role"], "system")
+            self.assertEqual(ctx.messages[1]["content"], "old")
+            files = list(hist.glob("*.jsonl"))
+            self.assertEqual(len(files), 1)
+            nlines = len([ln for ln in files[0].read_text(encoding="utf-8").splitlines() if ln.strip()])
+            self.assertEqual(nlines, 1)
 
 
 if __name__ == "__main__":

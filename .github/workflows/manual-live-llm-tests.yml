@@ -57,4 +57,4 @@ jobs:
           MODEL="${{ inputs.llm_model }}"
           [ -n "$BASE" ] && export LLM_API_BASE="$BASE"
           [ -n "$MODEL" ] && export LLM_MODEL="$MODEL"
-          python -m unittest tests.integration.test_llm_live -v
+          python -m unittest tests.integration.live_llm_smoke -v

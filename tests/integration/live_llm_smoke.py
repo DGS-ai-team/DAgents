@@ -3,6 +3,9 @@
 默认跳过：仅当同时设置 ``RUN_LIVE_LLM_TESTS=1`` 且 ``LLM_API_KEY`` 非空时运行。
 本地或手动 workflow 执行前请通过环境变量注入密钥与可选的 ``LLM_API_BASE`` / ``LLM_MODEL``，
 与 ``app.config.settings.Settings`` 的命名一致。
+
+说明：
+- 文件名不使用 ``test_*.py``，避免 ``unittest discover -s tests -p "test_*.py"`` 误收联网用例。
 """
 
 from __future__ import annotations
