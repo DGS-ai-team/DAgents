@@ -7,8 +7,22 @@ __pycache__/
 
 # local runtime/state files
 .runtime/
+# 仅忽略仓库根下名为 history 的目录，避免误伤 `app/harness/history/` 源码包。
+/history/
 *.sqlite3
 
-# local agent/ide files
-.agent/
+# editor / IDE
 .vscode/
+
+# frontend/tooling artifacts (for split-repo collaboration)
+.pnpm-store/
+pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+openapi.json
+
+# PyInstaller / 本地打包中间产物（与 CI `dist/`、`bundle/` 布局一致，避免误提交二进制）
+dist/
+build/
+bundle/

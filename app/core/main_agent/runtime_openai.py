@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, AsyncIterator
 
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext, PendingToolCall, RunTurnPhase
+from app.core.main_agent.display_inference import (
+    infer_assistant_delta_display_type,
+    infer_reasoning_delta_display_type,
+    infer_tool_call_display_type,
+)
 from app.core.main_agent.model import get_model_config, get_openai_client
 from app.core.main_agent.prompt import get_system_prompt
+from app.harness.history.raw_message_journal import append_openai_message_with_journal
 from app.harness.service.interface import AgentEventEnvelope
-from app.harness.tools.openai_tools import build_openai_toolkit, parse_tool_arguments
+from app.harness.tools.tool import build_openai_toolkit, parse_tool_arguments
 from app.observability.metrics import record_llm_token_usage, usage_fields_from_openai_usage
+
+_logger = logging.getLogger(__name__)
 
 
 class OpenAIImplicitReActRuntime:
@@ -31,7 +40,6 @@ class OpenAIImplicitReActRuntime:
         settings = get_settings()
         self._client = get_openai_client()
         self._model_cfg = get_model_config()
-        self._system_prompt = get_system_prompt()
         self._tools_payload, _ = build_openai_toolkit()
         self._max_tool_loops = max(1, int(settings.llm_max_tool_loops))
         self._stream_include_usage = bool(settings.llm_stream_include_usage)
@@ -50,7 +58,7 @@ class OpenAIImplicitReActRuntime:
         """
         # 模型流取消：补一条无 tool_calls 的 assistant，避免半截正文丢失；不触发「必须有 tool」规则。
         if (ctx.assistant_stream_buffer or "").strip():
-            ctx.messages.append({"role": "assistant", "content": ctx.assistant_stream_buffer})
+            append_openai_message_with_journal(ctx, {"role": "assistant", "content": ctx.assistant_stream_buffer})
         ctx.assistant_stream_buffer = ""
         ctx.run_turn_phase = RunTurnPhase.IDLE
 
@@ -103,7 +111,7 @@ class OpenAIImplicitReActRuntime:
         # 分支 A：message —— 仅追加用户消息。                                         #
         # ------------------------------------------------------------------ #
         if request_type == "human_message":
-            ctx.messages.append({"role": "user", "content": content})
+            append_openai_message_with_journal(ctx, {"role": "user", "content": content})
         elif request_type == "tool_message":
             # 外层已更新完 messages（如写入 tool/tool_result）时，tool_message 只负责继续做一轮模型推理。
             pass
@@ -128,34 +136,57 @@ class OpenAIImplicitReActRuntime:
         # 每次 run_turn 最多消耗一次“模型轮次预算”；若中途因审批中断，该计数留给后续回合继续累计。
         ctx.tool_loop_count += 1
         ctx.run_turn_phase = RunTurnPhase.MODEL_STREAMING
+        if request_type == "human_message":
+            # human_message 阶段不再按查询自动选技能；仅消费上下文中已加载 skills。
+            dynamic_system_prompt = get_system_prompt(context=ctx)
+        else:
+            dynamic_system_prompt = get_system_prompt(context=ctx)
         model_msg = None
+        latest_total_tokens: int | None = None
         ctx.assistant_stream_buffer = ""
         # 流式阶段：同步写入 ctx.assistant_stream_buffer，供上层 Cancelled 后 flush 为合法 assistant 行。
         try:
             # tool_call_delta 由 _request_model_stream 产出但此处不消费；权威 tool_calls 仅来自 final 整包。
-            async for model_event in self._request_model_stream(ctx.messages):
+            async for model_event in self._request_model_stream(ctx.messages, dynamic_system_prompt):
                 event_kind = str(model_event.get("kind") or "")
                 if event_kind == "assistant_delta":
                     delta_text = str(model_event.get("text", ""))
                     if delta_text:
                         ctx.assistant_stream_buffer += delta_text
-                        yield self._ev("assistant", {"content": delta_text})
+                        yield self._ev(
+                            "assistant",
+                            {
+                                "content": delta_text,
+                                "display_type": infer_assistant_delta_display_type(delta_text),
+                            },
+                        )
                     continue
                 elif event_kind == "reasoning_delta":
                     reasoning_text = str(model_event.get("text", ""))
                     if reasoning_text:
                         ctx.assistant_stream_buffer += reasoning_text
-                        yield self._ev("reasoning", {"content": reasoning_text})
+                        yield self._ev(
+                            "reasoning",
+                            {
+                                "content": reasoning_text,
+                                "display_type": infer_reasoning_delta_display_type(),
+                            },
+                        )
                     continue
                 elif event_kind == "usage":
-                    yield self._ev(
-                        "usage",
-                        {
-                            "prompt_tokens": int(model_event.get("prompt_tokens", 0)),
-                            "completion_tokens": int(model_event.get("completion_tokens", 0)),
-                            "total_tokens": model_event.get("total_tokens"),
-                        },
-                    )
+                    # 透传 `usage_fields_from_openai_usage` 全量字段（含 cache/audio 明细）。
+                    usage_payload = {k: v for k, v in model_event.items() if k != "kind"}
+                    prompt_tokens = int(usage_payload.get("prompt_tokens", 0))
+                    completion_tokens = int(usage_payload.get("completion_tokens", 0))
+                    total_tokens = int(usage_payload.get("total_tokens") or 0)
+                    # 优先使用 total_tokens；缺失时退化为 input+output（prompt+completion）。
+                    if total_tokens > 0:
+                        latest_total_tokens = total_tokens
+                    else:
+                        merged_tokens = prompt_tokens + completion_tokens
+                        if merged_tokens > 0:
+                            latest_total_tokens = merged_tokens
+                    yield self._ev("usage", usage_payload)
                     continue
                 elif event_kind == "final":
                     model_msg = model_event.get("message")
@@ -172,17 +203,21 @@ class OpenAIImplicitReActRuntime:
             yield self._ev("error", {"message": "模型流式响应解析失败。"})
             yield self._ev("done", {})
             return
+        # 本轮 AI 响应返回后，使用 usage 总量刷新消息总 token（仅在元数据可用时更新）。
+        if latest_total_tokens is not None and latest_total_tokens >= 0:
+            ctx.messages_total_tokens = latest_total_tokens
         assistant_content = model_msg.get("content", "") or ""
         tool_calls = model_msg.get("tool_calls", [])
         # ----- 子分支：模型要求调用工具（此处仍不 invoke，只登记 + 等人批）----- #
         if tool_calls:
             # 必须把 assistant + tool_calls 写入历史，否则下次请求模型时上下文不完整。
-            ctx.messages.append(
+            append_openai_message_with_journal(
+                ctx,
                 {
                     "role": "assistant",
                     "content": assistant_content or "",
                     "tool_calls": tool_calls,
-                }
+                },
             )
             pending: list[PendingToolCall] = []
             payload_calls: list[dict[str, Any]] = []
@@ -196,19 +231,30 @@ class OpenAIImplicitReActRuntime:
                     {"id": call_id, "name": name, "arguments": args, "raw_arguments": fn.get("arguments")}
                 )
             ctx.pending_tool_calls = pending
-            yield self._ev("tool_call", {"tool_calls": payload_calls, "assistant_content": assistant_content})
+            yield self._ev(
+                "tool_call",
+                {
+                    "tool_calls": payload_calls,
+                    "assistant_content": assistant_content,
+                    "display_type": infer_tool_call_display_type(assistant_content, payload_calls),
+                },
+            )
             ctx.run_turn_phase = RunTurnPhase.AWAITING_TOOL_EXECUTION
             yield self._ev("done", {})
             return
 
         # ----- 子分支：本轮无工具调用，视为最终回复 ----- #
-        ctx.messages.append({"role": "assistant", "content": assistant_content})
+        append_openai_message_with_journal(ctx, {"role": "assistant", "content": assistant_content})
         # 仅在“无 tool_calls 的 assistant 正常收口”时重置累计循环计数。
         ctx.tool_loop_count = 0
         ctx.run_turn_phase = RunTurnPhase.IDLE
         yield self._ev("done", {})
 
-    async def _request_model_stream(self, messages: list[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
+    async def _request_model_stream(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+    ) -> AsyncIterator[dict[str, Any]]:
         """发起一次流式模型请求，逐步产出 delta 并在末尾给出最终消息对象。
 
         逻辑：
@@ -220,15 +266,16 @@ class OpenAIImplicitReActRuntime:
 
         关键边界：
         - tool 调用参数可能分片返回，需按 `index` 逐段拼接；
-        - 空 choices 的 chunk 仍可能携带 **`usage`**：先 **`record_llm_token_usage`**、**`yield usage`**，再 `continue`；
+        - 空 choices 的 chunk 仍可能携带 **`usage`**：先 **`record_llm_token_usage`**（Gauge **`set`**，映射提供商计数快照）、**`yield usage`**，再 `continue`；
         - 未开启 `include_usage` 或网关不支持时无 **`usage`** 分片。
 
         与外部交互：
-        - 若 **`self._stream_include_usage`** 为真，向 OpenAI 传入 **`stream_options={"include_usage": True}`**。
+        - 若 **`self._stream_include_usage`** 为真，向 OpenAI 传入 **`stream_options={"include_usage": True}`**；
+        - DEBUG 日志下对每个 SDK **`chunk`** 输出 **`%r`**（不做 JSON 再封装）。
         """
         kwargs: dict[str, Any] = {
             "model": self._model_cfg["model"],
-            "messages": [{"role": "system", "content": self._system_prompt}, *messages],
+            "messages": [{"role": "system", "content": system_prompt}, *messages],
             "tools": self._tools_payload,
             "temperature": self._model_cfg["temperature"],
             "stream": True,
@@ -244,11 +291,15 @@ class OpenAIImplicitReActRuntime:
         tool_calls_acc: dict[int, dict[str, Any]] = {}
         model_name = str(self._model_cfg.get("model") or "")
         async for chunk in stream:
+            # DEBUG：直接输出 SDK 流式分片对象（由 `%r` 展示原始 repr）。
+            _logger.debug("openai chat.completions stream chunk: %r", chunk)
             usage = getattr(chunk, "usage", None)
             if usage is not None:
                 fields = usage_fields_from_openai_usage(usage)
                 pt, ct = int(fields["prompt_tokens"]), int(fields["completion_tokens"])
-                record_llm_token_usage(prompt_tokens=pt, completion_tokens=ct, model=model_name)
+                record_llm_token_usage(
+                    prompt_tokens=pt, completion_tokens=ct, model=model_name, usage=usage
+                )
                 yield {"kind": "usage", **fields}
             choices = getattr(chunk, "choices", None) or []
             if not choices:

@@ -1,0 +1,161 @@
+name: Manual Package Binary
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build-bundle:
+    name: Build Bundle (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            os: ubuntu-22.04
+            build_kind: docker-focal-amd64
+            python_arch: x64
+            archive_name: dagents-api-linux-x64.zip
+            api_bin_name: dagents-api
+            rc_bin_name: dagents_register_center
+            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
+            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
+          - target: linux-x86
+            os: ubuntu-22.04
+            build_kind: docker-i386
+            python_arch: x86
+            archive_name: dagents-api-linux-x86.zip
+            api_bin_name: dagents-api
+            rc_bin_name: dagents_register_center
+            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
+            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
+          - target: windows-x64
+            os: windows-2022
+            build_kind: native
+            python_arch: x64
+            archive_name: dagents-api-windows-x64.zip
+            api_bin_name: dagents-api.exe
+            rc_bin_name: dagents_register_center.exe
+            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
+            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
+          - target: windows-x86
+            os: windows-2022
+            build_kind: native
+            python_arch: x86
+            archive_name: dagents-api-windows-x86.zip
+            api_bin_name: dagents-api.exe
+            rc_bin_name: dagents_register_center.exe
+            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
+            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Echo matrix (OS / 位数 / 构建方式)
+        shell: bash
+        run: |
+          echo "target=${{ matrix.target }} build_kind=${{ matrix.build_kind }} python_arch=${{ matrix.python_arch }}"
+
+      - name: Set up QEMU (Docker linux/386)
+        if: matrix.build_kind == 'docker-i386'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Python (目标架构：x64 / x86)
+        if: matrix.build_kind == 'native'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.python_arch }}
+          cache: pip
+
+      - name: Install dependencies (Python packages, native build only)
+        if: matrix.build_kind == 'native'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build single-file binaries (native PyInstaller)
+        if: matrix.build_kind == 'native'
+        shell: bash
+        run: |
+          pyinstaller ${{ matrix.api_pyinstaller_args }}
+          pyinstaller ${{ matrix.rc_pyinstaller_args }}
+
+      - name: Build single-file binaries (Linux x64 via Ubuntu 20.04 Docker + deadsnakes)
+        if: matrix.build_kind == 'docker-focal-amd64'
+        timeout-minutes: 90
+        shell: bash
+        env:
+          API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
+          RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
+        run: |
+          set -euxo pipefail
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/src" -w /src \
+            -e API_PI_ARGS -e RC_PI_ARGS \
+            ubuntu:20.04 \
+            bash /src/scripts/ci/build_linux_amd64_focal_deadsnakes.sh
+
+      - name: Build single-file binaries (Linux i386 / x86 via Docker + pyenv)
+        if: matrix.build_kind == 'docker-i386'
+        timeout-minutes: 120
+        shell: bash
+        env:
+          API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
+          RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
+          PYENV_PYTHON_VERSION: "3.13.2"
+        run: |
+          set -euxo pipefail
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/src" -w /src \
+            -e API_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
+            i386/ubuntu:focal \
+            bash /src/scripts/ci/build_linux_i386_pyenv.sh
+
+      - name: Prepare runtime bundle (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p bundle
+          cp "dist/${{ matrix.api_bin_name }}" bundle/
+          cp "dist/${{ matrix.rc_bin_name }}" bundle/
+          cp startup_scripts/linux/start.sh bundle/
+          cp startup_scripts/linux/start_register_center.sh bundle/
+          chmod +x bundle/start.sh
+          chmod +x bundle/start_register_center.sh
+          cp .env.example bundle/
+          cp README.md bundle/
+          cp -r skills bundle/skills
+          mkdir -p bundle/.runtime
+          cp -r packaging/prompt_context bundle/.runtime/prompt_context
+          cd bundle
+          zip -r "../${{ matrix.archive_name }}" .
+
+      - name: Prepare runtime bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bundle | Out-Null
+          Copy-Item "dist/${{ matrix.api_bin_name }}" "bundle/"
+          Copy-Item "dist/${{ matrix.rc_bin_name }}" "bundle/"
+          Copy-Item "startup_scripts/windows/start.bat" "bundle/"
+          Copy-Item "startup_scripts/windows/start_register_center.bat" "bundle/"
+          Copy-Item ".env.example" "bundle/"
+          Copy-Item "README.md" "bundle/"
+          Copy-Item "skills" "bundle/skills" -Recurse
+          New-Item -ItemType Directory -Force -Path "bundle/.runtime" | Out-Null
+          Copy-Item "packaging/prompt_context" "bundle/.runtime/prompt_context" -Recurse
+          Compress-Archive -Path bundle/* -DestinationPath "${{ matrix.archive_name }}" -Force
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: ${{ matrix.archive_name }}
+          if-no-files-found: error

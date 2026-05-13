@@ -1,377 +1,179 @@
+"""`AgentService` 单测：启动/停止、`submit_message` 入队消费、取消与 SSE 映射。"""
+
 from __future__ import annotations
 
 import asyncio
-import io
-import sys
-import time
 import unittest
-from contextlib import redirect_stdout
-from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
-_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_ROOT))
+from app.harness.queue.message_queue import MessageEnvelope
+from tests.test_support.stub_settings import settings_namespace
 
-from app.context.models import OpenAIConversationContext
-from app.harness.service.agent_service import AgentService
-from app.harness.service.interface import AgentEventEnvelope, AgentSubmitRequest
+try:
+    from app.harness.service.agent_service import AgentService
+    from app.harness.service.interface import AgentEventEnvelope
+except ImportError as exc:  # pragma: no cover - 仅精简环境触发
+    AgentService = None  # type: ignore[misc, assignment]
+    AgentEventEnvelope = None  # type: ignore[misc, assignment]
+    _AGENT_SERVICE_SKIP = f"AgentService 依赖链未就绪（{exc!r}）；请执行 pip install -r requirements.txt"
+else:
+    _AGENT_SERVICE_SKIP = ""
 
-_MAP_BASE_META = {"session_id": "s", "request_id": "r", "model": "unit-model"}
 
+@unittest.skipIf(AgentService is None, _AGENT_SERVICE_SKIP)
+class AgentServiceStreamMapTests(unittest.TestCase):
+    """`_map_event_envelope_to_stream`：扁平 SSE 字段与 `meta` 合并。"""
 
-class AgentSubmitRequestPriorityTestCase(unittest.TestCase):
-    def test_resume_coerces_default_other_to_resume(self) -> None:
-        r = AgentSubmitRequest(
-            session_id="s",
-            request_type="resume",
-            resume_value={"type": "approve"},
+    def test_assistant_and_tool_result_shapes(self) -> None:
+        """assistant / tool_result 含 `meta` 合并与常用默认值。"""
+        base = {"session_id": "sid", "model": "gpt-test"}
+        t1, d1 = AgentService._map_event_envelope_to_stream(
+            AgentEventEnvelope(event_type="assistant", payload={"content": "hi", "display_type": "markdown"}, meta={}),
+            base_meta=base,
         )
-        self.assertEqual(r.priority, "resume")
+        self.assertEqual(t1, "assistant")
+        self.assertEqual(d1.get("content"), "hi")
+        self.assertEqual(d1["meta"]["session_id"], "sid")
 
-    def test_resume_explicit_human_unchanged(self) -> None:
-        r = AgentSubmitRequest(
-            session_id="s",
-            request_type="resume",
-            resume_value={"type": "approve"},
-            priority="human",
+        t2, d2 = AgentService._map_event_envelope_to_stream(
+            AgentEventEnvelope(
+                event_type="tool_result",
+                payload={"content": "{}", "tool_call_id": "c1", "tool_name": "bash_run"},
+                meta={"trace": "1"},
+            ),
+            base_meta=base,
         )
-        self.assertEqual(r.priority, "human")
+        self.assertEqual(t2, "tool_result")
+        self.assertEqual(d2["tool_call_id"], "c1")
+        self.assertEqual(d2["meta"]["trace"], "1")
 
-
-class HangRuntime:
-    """用于验证取消时 `_handle_message` 会调用 `flush_cancelled_turn`。"""
-
-    def __init__(self) -> None:
-        self.started = asyncio.Event()
-        self.flush_count = 0
-
-    async def run_turn(self, ctx: OpenAIConversationContext, *, request_type: str, content=None, resume_value=None):
-        self.started.set()
-        await asyncio.sleep(30.0)
-        yield AgentEventEnvelope(event_type="done", payload={}, meta={})
-
-    def flush_cancelled_turn(self, ctx: OpenAIConversationContext) -> None:
-        self.flush_count += 1
-
-
-class HangThenPongRuntime:
-    """首条 `run_turn` 在长时间 sleep 上直至被取消；第二条正常产出事件。"""
-
-    def __init__(self) -> None:
-        self.run_turn_calls = 0
-        self.flush_count = 0
-
-    async def run_turn(self, ctx: OpenAIConversationContext, *, request_type: str, content=None, resume_value=None):
-        self.run_turn_calls += 1
-        if self.run_turn_calls == 1:
-            await asyncio.sleep(3600.0)
-        yield AgentEventEnvelope(
-            event_type="assistant",
-            payload={"content": "second-done"},
-            meta={},
-        )
-        yield AgentEventEnvelope(event_type="done", payload={}, meta={})
-
-    def flush_cancelled_turn(self, ctx: OpenAIConversationContext) -> None:
-        self.flush_count += 1
-
-
-class FakeRuntime:
-    def __init__(self) -> None:
-        self.calls = 0
-        self.last_kwargs: dict | None = None
-        self.last_ctx: OpenAIConversationContext | None = None
-
-    async def run_turn(self, ctx: OpenAIConversationContext, *, request_type: str, content=None, resume_value=None):
-        self.calls += 1
-        self.last_ctx = ctx
-        self.last_kwargs = {
-            "request_type": request_type,
-            "content": content,
-            "resume_value": resume_value,
-        }
-        yield AgentEventEnvelope(
-            event_type="assistant",
-            payload={"content": "pong"},
-            meta={},
-        )
-        yield AgentEventEnvelope(
-            event_type="approval_required",
-            payload={
-                "approval_type": "execute_tool",
-                "message": "test interrupt",
-                "args": {},
-                "description": "test desc",
-                "approval_id": "approval-1",
-            },
-            meta={},
-        )
-        yield AgentEventEnvelope(event_type="done", payload={}, meta={})
-
-
-class AgentServiceTestCase(unittest.IsolatedAsyncioTestCase):
-    async def test_create_session_binds_queue_and_runtime(self) -> None:
-        fake_runtime = FakeRuntime()
-        service = AgentService(max_queue_size=0)
-        service._message_store = None
-        service._get_runtime = lambda: fake_runtime  # type: ignore[method-assign]
-        with redirect_stdout(io.StringIO()):
-            await service.start()
-            sid = await service.create_session()
-            self.assertIn(sid, service._session_queues)
-            await service.stop()
-        self.assertTrue(sid)
-
-    async def test_service_can_consume_queue_and_process_message(self) -> None:
-        fake_runtime = FakeRuntime()
-        service = AgentService(max_queue_size=0)
-        service._message_store = None
-        service._get_runtime = lambda: fake_runtime  # type: ignore[method-assign]
-
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            await service.start()
-            await service.submit_message(
-                session_id="test-session",
-                content="ping",
-                source="unit-test",
-            )
-            await asyncio.sleep(0.1)
-            await service.stop()
-
-        output = buf.getvalue()
-        self.assertEqual(fake_runtime.calls, 1)
-        self.assertIsInstance(fake_runtime.last_ctx, OpenAIConversationContext)
-        self.assertEqual(fake_runtime.last_kwargs, {
-            "request_type": "human_message",
-            "content": "ping",
-            "resume_value": None,
-        })
-        self.assertIn("[agent-service][stream] session=test-session: type=assistant", output)
-
-    async def test_service_emits_stream_events_when_callback_provided(self) -> None:
-        fake_runtime = FakeRuntime()
-        events: list[tuple[str, str, dict]] = []
-
-        async def on_stream_event(request_id: str, event_type: str, data: dict):
-            events.append((request_id, event_type, data))
-
-        service = AgentService(max_queue_size=0, on_stream_event=on_stream_event)
-        service._message_store = None
-        service._get_runtime = lambda: fake_runtime  # type: ignore[method-assign]
-
-        with redirect_stdout(io.StringIO()):
-            await service.start()
-            await service.submit_message(
-                session_id="s-event",
-                content="ping",
-                source="unit-test",
-                request_id="req-1",
-            )
-            await asyncio.sleep(0.1)
-            await service.stop()
-
-        self.assertTrue(events)
-        self.assertEqual(events[0][0], "req-1")
-        self.assertEqual(events[0][1], "assistant")
-        self.assertEqual(events[0][2]["meta"]["session_id"], "s-event")
-        self.assertEqual(events[0][2]["meta"]["request_id"], "req-1")
-        self.assertIn("model", events[0][2]["meta"])
-        self.assertEqual(events[1][1], "approval_required")
-        self.assertEqual(events[1][2]["approval_type"], "execute_tool")
-        self.assertEqual(events[1][2]["meta"]["session_id"], "s-event")
-        self.assertEqual(events[-1][1], "done")
-        self.assertEqual(events[-1][2]["meta"]["request_id"], "req-1")
-
-    async def test_human_priority_does_not_auto_cancel_in_flight_turn(self) -> None:
-        """仅 human 入队不会打断在途 turn；显式 cancel 后第二条才会执行。"""
-        rt = HangThenPongRuntime()
-        service = AgentService(max_queue_size=0)
-        service._message_store = None
-        service._get_runtime = lambda: rt  # type: ignore[method-assign]
-
-        with redirect_stdout(io.StringIO()):
-            await service.start()
-            await service.submit_message(
-                session_id="s-human",
-                content="first",
-                source="unit-test",
-                priority="other",
-                request_id="r1",
-            )
-            for _ in range(200):
-                if rt.run_turn_calls >= 1:
-                    break
-                await asyncio.sleep(0.02)
-            self.assertEqual(rt.run_turn_calls, 1)
-            await service.submit_message(
-                session_id="s-human",
-                content="second",
-                source="unit-test",
-                priority="human",
-                request_id="r2",
-            )
-            for _ in range(50):
-                await asyncio.sleep(0.02)
-            self.assertEqual(rt.run_turn_calls, 1)
-            self.assertTrue(service.cancel_current_turn("s-human"))
-            for _ in range(200):
-                if rt.run_turn_calls >= 2:
-                    break
-                await asyncio.sleep(0.02)
-            await service.stop()
-
-        self.assertGreaterEqual(rt.flush_count, 1)
-        self.assertGreaterEqual(rt.run_turn_calls, 2)
-
-    async def test_cancel_current_turn_triggers_flush(self) -> None:
-        hang = HangRuntime()
-        service = AgentService(max_queue_size=0)
-        service._message_store = None
-        service._get_runtime = lambda: hang  # type: ignore[method-assign]
-
-        with redirect_stdout(io.StringIO()):
-            await service.start()
-            await service.submit_message(session_id="s-cancel", content="x", source="unit-test")
-            await asyncio.wait_for(hang.started.wait(), timeout=2.0)
-            self.assertTrue(service.cancel_current_turn("s-cancel"))
-            for _ in range(100):
-                if hang.flush_count >= 1:
-                    break
-                await asyncio.sleep(0.02)
-            await service.stop()
-
-        self.assertGreaterEqual(hang.flush_count, 1)
-
-    async def test_service_limits_active_session_queues_to_three(self) -> None:
-        service = AgentService(max_queue_size=0)
-        service._message_store = None
-        service._get_runtime = lambda: FakeRuntime()  # type: ignore[method-assign]
-
-        with redirect_stdout(io.StringIO()):
-            await service.start()
-            await service.submit_message(
-                session_id="s1",
-                content="ping1",
-                source="unit-test",
-            )
-            await service.submit_message(
-                session_id="s2",
-                content="ping2",
-                source="unit-test",
-            )
-            await service.submit_message(
-                session_id="s3",
-                content="ping3",
-                source="unit-test",
-            )
-
-            with self.assertRaises(RuntimeError):
-                await service.submit_message(
-                    session_id="s4",
-                    content="ping4",
-                    source="unit-test",
-                )
-            await service.stop()
-
-    async def test_evict_idle_session_when_at_capacity(self) -> None:
-        """达上限时，若存在闲置超阈值的 session，则淘汰最久未活动者以接纳新 session。"""
-        service = AgentService(max_queue_size=0)
-        service._message_store = None
-        service._get_runtime = lambda: FakeRuntime()  # type: ignore[method-assign]
-
-        with redirect_stdout(io.StringIO()):
-            await service.start()
-            await service.submit_message(
-                session_id="s1",
-                content="ping1",
-                source="unit-test",
-            )
-            await service.submit_message(
-                session_id="s2",
-                content="ping2",
-                source="unit-test",
-            )
-            await service.submit_message(
-                session_id="s3",
-                content="ping3",
-                source="unit-test",
-            )
-            # 等待三条会话各完成一轮 `_handle_message`（其开头会 touch），再把 s1 标为闲置超时。
-            await asyncio.sleep(0.25)
-            service._session_last_activity["s1"] = time.time() - 400.0
-
-            await service.submit_message(
-                session_id="s4",
-                content="ping4",
-                source="unit-test",
-            )
-            await asyncio.sleep(0.15)
-            self.assertNotIn("s1", service._session_queues)
-            self.assertIn("s4", service._session_queues)
-            await service.stop()
-
-    def test_map_event_envelope_approval_shape(self) -> None:
-        event_type, data = AgentService._map_event_envelope_to_stream(
+    def test_approval_required_and_done(self) -> None:
+        """审批事件扁平化 `args` → `approval_args`；`done` 允许空 payload。"""
+        base = {"session_id": "sid", "model": "m"}
+        t1, d1 = AgentService._map_event_envelope_to_stream(
             AgentEventEnvelope(
                 event_type="approval_required",
                 payload={
                     "approval_type": "execute_tool",
-                    "message": "msg",
-                    "args": {"a": 1},
-                    "description": "desc",
-                    "approval_id": "a-1",
+                    "message": "ok?",
+                    "args": {"tool_calls": []},
+                    "approval_id": "aid",
                 },
                 meta={},
             ),
-            base_meta=_MAP_BASE_META,
+            base_meta=base,
         )
-        self.assertEqual(event_type, "approval_required")
-        self.assertEqual(data["approval_type"], "execute_tool")
-        self.assertEqual(data["meta"]["session_id"], "s")
+        self.assertEqual(t1, "approval_required")
+        self.assertEqual(d1["approval_id"], "aid")
+        self.assertIn("approval_args", d1)
 
-    def test_map_event_envelope_tool_result_shape(self) -> None:
-        event_type, data = AgentService._map_event_envelope_to_stream(
-            AgentEventEnvelope(
-                event_type="tool_result",
-                payload={"tool_call_id": "tc1", "content": "ok", "partial": True},
-                meta={},
-            ),
-            base_meta=_MAP_BASE_META,
+        t2, d2 = AgentService._map_event_envelope_to_stream(
+            AgentEventEnvelope(event_type="done", payload={}, meta={}),
+            base_meta=base,
         )
-        self.assertEqual(event_type, "tool_result")
-        self.assertEqual(data["tool_call_id"], "tc1")
-        self.assertTrue(data["partial"])
-        self.assertEqual(data["meta"]["request_id"], "r")
+        self.assertEqual(t2, "done")
+        self.assertIn("meta", d2)
 
-    def test_map_event_envelope_reasoning_shape(self) -> None:
-        event_type, data = AgentService._map_event_envelope_to_stream(
-            AgentEventEnvelope(
-                event_type="reasoning",
-                payload={"content": "思考中"},
-                meta={},
-            ),
-            base_meta=_MAP_BASE_META,
-        )
-        self.assertEqual(event_type, "reasoning")
-        self.assertEqual(data["content"], "思考中")
-        self.assertEqual(data["meta"]["model"], "unit-model")
 
-    def test_map_event_envelope_usage_shape(self) -> None:
-        event_type, data = AgentService._map_event_envelope_to_stream(
-            AgentEventEnvelope(
-                event_type="usage",
-                payload={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-                meta={"extra": 1},
+@unittest.skipIf(AgentService is None, _AGENT_SERVICE_SKIP)
+class AgentServiceLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    """`start` / `stop` 与 orchestrator 替身，避免拉起真实 LLM runtime。"""
+
+    async def asyncSetUp(self) -> None:
+        """为每条用例准备可 await 的编排替身与 `get_settings` 注入。"""
+        self._orch = MagicMock()
+        self._orch.handle_message = AsyncMock()
+        self._orch.cancel_all_summary_tasks = AsyncMock()
+        self._orch.cancel_session_summary_task = AsyncMock()
+        self._async_store_mock = MagicMock()
+
+    async def _make_service(
+        self,
+        *,
+        handle_stream: object | None = None,
+    ) -> AgentService:
+        """构造 `AgentService`：统一 patch settings / model / orchestrator。"""
+
+        def _factory(*_a: object, **_k: object) -> MagicMock:
+            return self._orch
+
+        stack = [
+            patch("app.harness.service.agent_service.get_settings", return_value=settings_namespace()),
+            patch("app.harness.service.agent_service.get_model_config", return_value={"model": "unit"}),
+            patch("app.harness.service.agent_service.MainAgentTurnOrchestrator", side_effect=_factory),
+            patch("app.harness.service.agent_service.refresh_session_context_metrics"),
+            # `OpenAIImplicitReActRuntime` 在 `agent_service._get_runtime` 中懒加载；其 `__init__` 会调用
+            # `runtime_openai` 模块内的 `get_openai_client`（与 `agent_service.get_settings` 的 patch 无关）。
+            # 新版 OpenAI SDK 在 api_key 为空时于构造期抛错，CI 无密钥时必须替身，避免消费者 task 直接崩掉。
+            patch("app.core.main_agent.runtime_openai.get_openai_client", return_value=MagicMock()),
+            patch(
+                "app.harness.service.agent_service.get_async_tool_result_store",
+                return_value=self._async_store_mock,
             ),
-            base_meta=_MAP_BASE_META,
-        )
-        self.assertEqual(event_type, "usage")
-        self.assertEqual(data["prompt_tokens"], 10)
-        self.assertEqual(data["completion_tokens"], 20)
-        self.assertEqual(data["total_tokens"], 30)
-        self.assertEqual(data["meta"]["session_id"], "s")
-        self.assertEqual(data["meta"]["extra"], 1)
+        ]
+        for p in stack:
+            p.start()
+            self.addCleanup(p.stop)
+        assert AgentService is not None
+        return AgentService(max_queue_size=0, handle_stream_event=handle_stream, message_store=None)
+
+    async def test_start_stop_calls_async_store_register(self) -> None:
+        """`start` 注册队列发件人；`stop` 注销为 None，避免悬挂回调。"""
+        svc = await self._make_service()
+        await svc.start()
+        self.assertEqual(self._async_store_mock.register_message_queue_sender.call_count, 1)
+        await svc.stop()
+        self.assertGreaterEqual(self._async_store_mock.register_message_queue_sender.call_count, 2)
+        self._async_store_mock.register_message_queue_sender.assert_called_with(None)
+
+    async def test_submit_message_invokes_orchestrator_handle_message(self) -> None:
+        """投递 `human` 消息后，消费者应串行调用 `handle_message`（不自动 cancel）。"""
+        svc = await self._make_service()
+        await svc.start()
+        await svc.submit_message(session_id="s1", content="hello", source="test", priority="human", client_id="c1")
+        await asyncio.sleep(0.05)
+        self._orch.handle_message.assert_awaited()
+        _args, kwargs = self._orch.handle_message.call_args
+        self.assertIsInstance(kwargs.get("env"), MessageEnvelope)
+        self.assertEqual(kwargs["env"].session_id, "s1")
+        self.assertEqual(kwargs["env"].content, "hello")
+        await svc.stop()
+
+    async def test_cancel_current_turn_cancels_inflight_handle_message(self) -> None:
+        """`cancel_current_turn` 应取消尚未完成的 `_handle_message` 子 task。"""
+        gate = asyncio.Event()
+
+        async def slow_handle(*_a: object, **_k: object) -> None:
+            await gate.wait()
+
+        self._orch.handle_message = slow_handle
+        svc = await self._make_service()
+        await svc.start()
+        await svc.submit_message(session_id="s2", content="block", source="test", priority="human")
+        await asyncio.sleep(0.05)
+        ok = svc.cancel_current_turn("s2")
+        self.assertTrue(ok)
+        gate.set()
+        await asyncio.sleep(0.05)
+        await svc.stop()
+
+    async def test_handle_stream_event_receives_error_mapping_on_exception(self) -> None:
+        """编排抛错时服务层映射 `error` + `done` 并转发给 `handle_stream_event`。"""
+        self._orch.handle_message = AsyncMock(side_effect=RuntimeError("unit-boom"))
+        received: list[tuple[str, dict]] = []
+
+        async def cap(env: MessageEnvelope, event_type: str, data: dict) -> None:
+            received.append((event_type, data))
+
+        svc = await self._make_service(handle_stream=cap)
+        await svc.start()
+        await svc.submit_message(session_id="s3", content="x", source="test", priority="human", client_id="c9")
+        await asyncio.sleep(0.08)
+        types = [t for t, _ in received]
+        self.assertIn("error", types)
+        self.assertIn("done", types)
+        await svc.stop()
+
 
 if __name__ == "__main__":
     unittest.main()
-

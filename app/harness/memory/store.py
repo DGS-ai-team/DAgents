@@ -11,7 +11,6 @@ from app.context.models import (
     ConversationContext,
     MessageRecord,
     RunTurnPhase,
-    SummaryCompressionPhase,
 )
 
 
@@ -20,7 +19,7 @@ class SqliteMessageStore:
 
     逻辑：
     1. 初始化时确保数据库与 `session_history` 表存在（不做旧版列/格式迁移）；
-    2. `content` 为 UTF-8 JSON 对象：`{"history","openai_messages","pending_tool_calls","run_turn_phase","summary_compression_phase","summary_compression_range_start","summary_compression_range_end","summary_compressed_message","tool_loop_count"}`；
+    2. `content` 为 UTF-8 JSON 对象：`{"history","openai_messages","pending_tool_calls","run_turn_phase","messages_total_tokens","tool_loop_count"}`；
     3. `append_message` 事务内读改写：仅追加 `history`，其余上下文字段保持原值；
     4. `save_conversation_content` 整包覆盖写入（含主流程与 summary 压缩常驻字段）；
     5. `list_messages` / `load_conversation_content` 单次读取并解析；
@@ -98,10 +97,7 @@ class SqliteMessageStore:
                 openai_messages=list(decoded["openai_messages"]),
                 pending_tool_calls=list(decoded["pending_tool_calls"]),
                 run_turn_phase=str(decoded["run_turn_phase"]),
-                summary_compression_phase=str(decoded["summary_compression_phase"]),
-                summary_compression_range_start=int(decoded["summary_compression_range_start"]),
-                summary_compression_range_end=int(decoded["summary_compression_range_end"]),
-                summary_compressed_message=dict(decoded["summary_compressed_message"]),
+                messages_total_tokens=int(decoded["messages_total_tokens"]),
                 tool_loop_count=int(decoded["tool_loop_count"]),
             )
             conn.execute(
@@ -125,7 +121,7 @@ class SqliteMessageStore:
         3. 序列化主流程与 summary 压缩常驻字段后 UPSERT。
 
         关键边界：
-        - 每条 `meta` 与 `summary_compressed_message` 均须可被 `json` 序列化；
+        - 每条 `meta` 须可被 `json` 序列化；
         - 空 `session_id` 抛 `ValueError`。
 
         副作用说明：
@@ -142,10 +138,7 @@ class SqliteMessageStore:
             openai_messages=list(payload.openai_messages),
             pending_tool_calls=list(payload.pending_tool_calls),
             run_turn_phase=payload.run_turn_phase.value,
-            summary_compression_phase=payload.summary_compression_phase.value,
-            summary_compression_range_start=int(payload.summary_compression_range_start),
-            summary_compression_range_end=int(payload.summary_compression_range_end),
-            summary_compressed_message=dict(payload.summary_compressed_message),
+            messages_total_tokens=max(0, int(payload.messages_total_tokens)),
             tool_loop_count=max(0, int(payload.tool_loop_count)),
         )
 
@@ -214,10 +207,7 @@ class SqliteMessageStore:
             openai_messages=list(decoded["openai_messages"]),
             pending_tool_calls=list(decoded["pending_tool_calls"]),
             run_turn_phase=RunTurnPhase(str(decoded["run_turn_phase"])),
-            summary_compression_phase=SummaryCompressionPhase(str(decoded["summary_compression_phase"])),
-            summary_compression_range_start=int(decoded["summary_compression_range_start"]),
-            summary_compression_range_end=int(decoded["summary_compression_range_end"]),
-            summary_compressed_message=dict(decoded["summary_compressed_message"]),
+            messages_total_tokens=max(0, int(decoded["messages_total_tokens"])),
             tool_loop_count=max(0, int(decoded["tool_loop_count"])),
         )
 
@@ -285,10 +275,7 @@ class SqliteMessageStore:
             "openai_messages": [],
             "pending_tool_calls": [],
             "run_turn_phase": RunTurnPhase.IDLE.value,
-            "summary_compression_phase": SummaryCompressionPhase.NOT_STARTED.value,
-            "summary_compression_range_start": -1,
-            "summary_compression_range_end": -1,
-            "summary_compressed_message": {},
+            "messages_total_tokens": 0,
             "tool_loop_count": 0,
         }
         if not blob:
@@ -305,10 +292,7 @@ class SqliteMessageStore:
         raw_openai_messages = data.get("openai_messages", [])
         raw_pending_tool_calls = data.get("pending_tool_calls", [])
         raw_phase = data.get("run_turn_phase", RunTurnPhase.IDLE.value)
-        raw_summary_phase = data.get("summary_compression_phase", SummaryCompressionPhase.NOT_STARTED.value)
-        raw_summary_start = data.get("summary_compression_range_start", -1)
-        raw_summary_end = data.get("summary_compression_range_end", -1)
-        raw_summary_msg = data.get("summary_compressed_message", {})
+        raw_messages_total_tokens = data.get("messages_total_tokens", 0)
         raw_tool_loop_count = data.get("tool_loop_count", 0)
 
         openai_messages: list[dict[str, Any]] = []
@@ -341,18 +325,9 @@ class SqliteMessageStore:
         except Exception:
             run_turn_phase = RunTurnPhase.IDLE.value
         try:
-            summary_compression_phase = SummaryCompressionPhase(str(raw_summary_phase)).value
+            messages_total_tokens = max(0, int(raw_messages_total_tokens))
         except Exception:
-            summary_compression_phase = SummaryCompressionPhase.NOT_STARTED.value
-        try:
-            summary_compression_range_start = max(-1, int(raw_summary_start))
-        except Exception:
-            summary_compression_range_start = -1
-        try:
-            summary_compression_range_end = max(-1, int(raw_summary_end))
-        except Exception:
-            summary_compression_range_end = -1
-        summary_compressed_message = dict(raw_summary_msg) if isinstance(raw_summary_msg, dict) else {}
+            messages_total_tokens = 0
         try:
             tool_loop_count = max(0, int(raw_tool_loop_count))
         except Exception:
@@ -363,10 +338,7 @@ class SqliteMessageStore:
             "openai_messages": openai_messages,
             "pending_tool_calls": pending_tool_calls,
             "run_turn_phase": run_turn_phase,
-            "summary_compression_phase": summary_compression_phase,
-            "summary_compression_range_start": summary_compression_range_start,
-            "summary_compression_range_end": summary_compression_range_end,
-            "summary_compressed_message": summary_compressed_message,
+            "messages_total_tokens": messages_total_tokens,
             "tool_loop_count": tool_loop_count,
         }
 
@@ -392,16 +364,13 @@ class SqliteMessageStore:
         openai_messages: list[dict[str, Any]],
         pending_tool_calls: list[dict[str, Any]],
         run_turn_phase: str,
-        summary_compression_phase: str,
-        summary_compression_range_start: int,
-        summary_compression_range_end: int,
-        summary_compressed_message: dict[str, Any],
+        messages_total_tokens: int,
         tool_loop_count: int,
     ) -> bytes:
         """将会话上下文序列化为 UTF-8 JSON 字节。
 
         逻辑：
-        1. 组装 `{"history","openai_messages","pending_tool_calls","run_turn_phase","summary_compression_phase","summary_compression_range_start","summary_compression_range_end","summary_compressed_message","tool_loop_count"}`；
+        1. 组装 `{"history","openai_messages","pending_tool_calls","run_turn_phase","messages_total_tokens","tool_loop_count"}`；
         2. `json.dumps` 后编码为 UTF-8。
 
         异常说明：
@@ -412,10 +381,7 @@ class SqliteMessageStore:
             "openai_messages": openai_messages,
             "pending_tool_calls": pending_tool_calls,
             "run_turn_phase": run_turn_phase,
-            "summary_compression_phase": summary_compression_phase,
-            "summary_compression_range_start": max(-1, int(summary_compression_range_start)),
-            "summary_compression_range_end": max(-1, int(summary_compression_range_end)),
-            "summary_compressed_message": summary_compressed_message,
+            "messages_total_tokens": max(0, int(messages_total_tokens)),
             "tool_loop_count": max(0, int(tool_loop_count)),
         }
         return json.dumps(payload, ensure_ascii=False).encode("utf-8")

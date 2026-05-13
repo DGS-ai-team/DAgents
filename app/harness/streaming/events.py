@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Protocol
-from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StreamEvent(BaseModel):
@@ -18,12 +17,12 @@ class StreamEvent(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    request_id: str
-    session_id: str
-    type: str
-    seq: int
-    ts: str
-    data: dict[str, Any]
+    client_id: str = Field(description="事件归属的客户端通道 ID。")
+    session_id: str = Field(description="事件所属会话 ID。")
+    type: str = Field(description="事件类型（如 assistant/reasoning/tool_call/done）。")
+    seq: int = Field(description="同一 client_id 维度递增的事件序号。")
+    ts: str = Field(description="事件生成时间（ISO 8601 UTC 字符串）。")
+    data: dict[str, Any] = Field(description="事件业务载荷。")
 
     def to_dict(self) -> dict[str, Any]:
         """转为可序列化字典（供 SSE JSON 编码）。"""
@@ -33,98 +32,98 @@ class StreamEvent(BaseModel):
 class EventBus(Protocol):
     """事件总线协议：后续可替换为 Redis 实现。"""
 
-    def create_request(self, *, session_id: str) -> str:
-        """创建 request 事件流并返回 `request_id`。"""
+    def publish(self, *, client_id: str, session_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
+        """发布一条事件并返回标准化事件对象。"""
         ...
 
-    def has_request(self, request_id: str) -> bool:
-        """判断 `request_id` 是否存在。"""
+    async def subscribe_all(self, *, client_id: str | None = None) -> AsyncIterator[StreamEvent]:
+        """订阅全局事件流，按发布顺序异步产出事件。"""
         ...
-
-    def publish(self, *, request_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
-        """发布一条事件到指定 request 流并返回标准化事件对象。"""
-        ...
-
-    async def subscribe(self, *, request_id: str) -> AsyncIterator[StreamEvent]:
-        """订阅指定 request 流，按顺序异步产出事件。"""
-        ...
-
-
-class _RequestStream:
-    """单条 request 的内存缓冲（非 Pydantic：内含 `asyncio.Queue` 与可变 seq）。"""
-
-    __slots__ = ("session_id", "seq", "closed", "history", "queue")
-
-    def __init__(self, *, session_id: str) -> None:
-        self.session_id = session_id
-        self.seq = 0
-        self.closed = False
-        self.history: list[StreamEvent] = []
-        self.queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
-
 
 class InMemoryEventBus:
-    """内存事件总线（单进程）。"""
+    """
+        内存事件总线（单进程）。
+        用于将agent处理队列中的消息发布到sse通道
+    """
 
     def __init__(self) -> None:
         """初始化内存流容器。"""
-        self._streams: dict[str, _RequestStream] = {}
+        # P0 优化：按 client_id 分桶订阅者，publish 时只投递目标桶，避免全量轮询。
+        self._subscribers_by_client: dict[str, set[asyncio.Queue[StreamEvent]]] = {}
+        # 兼容未指定 client_id 的全量订阅（调试/观测场景）。
+        self._all_subscribers: set[asyncio.Queue[StreamEvent]] = set()
+        self._client_seq: dict[str, int] = {}
 
-    def create_request(self, *, session_id: str) -> str:
-        """创建新的 request 事件流。
-
-        逻辑：
-        1. 生成 `request_id`；
-        2. 初始化该 request 的序号、历史列表与实时队列；
-        3. 写入 `_streams` 并返回 `request_id`。
-        """
-        request_id = str(uuid4())
-        self._streams[request_id] = _RequestStream(session_id=session_id)
-        return request_id
-
-    def has_request(self, request_id: str) -> bool:
-        """检查 request 流是否存在。"""
-        return request_id in self._streams
-
-    def publish(self, *, request_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
-        """发布事件到指定 request 流。
+    def publish(self, *, client_id: str, session_id: str, event_type: str, data: dict[str, Any]) -> StreamEvent:
+        """发布事件到指定 `client_id/session_id`。
 
         逻辑：
-        1. 读取 request 流状态并构造 `StreamEvent`（含当前 `seq` 与 UTC 时间戳）；
-        2. `seq` 自增；
-        3. 写入 `history`（供后续订阅者补发）与 `queue`（供实时消费）；
-        4. 若事件为 `done`，标记流已关闭；
-        5. 返回事件对象。
+        1. 基于 `client_id/session_id` 构造 `StreamEvent`（含当前 `seq` 与 UTC 时间戳）；
+        2. 更新 `client_id` 维度序号；
+        3. 广播到目标 `client_id` 订阅桶（及全量订阅桶）；
+        4. 返回事件对象。
         """
-        stream = self._streams[request_id]
+        final_client_id = str(client_id or "").strip()
+        final_session_id = str(session_id or "").strip()
+        current_seq = self._client_seq.get(final_client_id, 0)
         event = StreamEvent(
-            request_id=request_id,
-            session_id=stream.session_id,
+            client_id=final_client_id,
+            session_id=final_session_id,
             type=event_type,
-            seq=stream.seq,
+            seq=current_seq,
             ts=datetime.now(timezone.utc).isoformat(),
             data=data,
         )
-        stream.seq += 1
-        stream.history.append(event)
-        stream.queue.put_nowait(event)
-        if event_type == "done":
-            stream.closed = True
+        self._client_seq[final_client_id] = current_seq + 1
+        client_subscribers = self._subscribers_by_client.get(final_client_id, set())
+        for subscriber_queue in list(client_subscribers):
+            subscriber_queue.put_nowait(event)
+        for subscriber_queue in list(self._all_subscribers):
+            subscriber_queue.put_nowait(event)
         return event
 
-    async def subscribe(self, *, request_id: str) -> AsyncIterator[StreamEvent]:
-        """订阅 request 流（先补历史，再读实时队列）。
+    async def subscribe_all(self, *, client_id: str | None = None) -> AsyncIterator[StreamEvent]:
+        """订阅全局事件流（仅实时，不补历史）。
 
         逻辑：
-        1. 先顺序输出 `history`，保证后来订阅者能补到已产生事件；
-        2. 再阻塞读取实时 `queue`；
-        3. 读到 `done` 事件后结束迭代。
+        1. 为当前订阅者创建独立 queue；
+        2. 若指定 `client_id`，注册到对应分桶；否则注册到全量分桶；
+        3. 持续读取 queue 并按到达顺序输出事件；
+        4. 订阅结束时注销 queue，避免内存泄漏。
+
+        关键分支/边界：
+        - 本方法不回放历史，仅推送订阅建立后的实时事件；
+        - 即使某条流已 done，其他流仍会继续推送，因此不在这里按 done 结束。
+
+        与外部交互：
+        - 无网络/磁盘交互，仅使用进程内 asyncio 队列。
+
+        异常说明：
+        - 调用方取消订阅时（CancelledError）会进入 finally 并清理订阅者。
+
+        副作用说明：
+        - 会临时向 `client_id` 对应订阅桶（或 `_all_subscribers`）注册当前队列。
         """
-        stream = self._streams[request_id]
-        for item in stream.history:
-            yield item
-        while True:
-            item = await stream.queue.get()
-            yield item
-            if item.type == "done":
-                break
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+        final_client_id = (client_id or "").strip()
+        if final_client_id:
+            bucket = self._subscribers_by_client.get(final_client_id)
+            if bucket is None:
+                bucket = set()
+                self._subscribers_by_client[final_client_id] = bucket
+            bucket.add(queue)
+        else:
+            self._all_subscribers.add(queue)
+        try:
+            while True:
+                item = await queue.get()
+                yield item
+        finally:
+            if final_client_id:
+                bucket = self._subscribers_by_client.get(final_client_id)
+                if bucket is not None and queue in bucket:
+                    bucket.remove(queue)
+                if bucket is not None and not bucket:
+                    self._subscribers_by_client.pop(final_client_id, None)
+            elif queue in self._all_subscribers:
+                self._all_subscribers.remove(queue)

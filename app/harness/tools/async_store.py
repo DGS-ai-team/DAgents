@@ -22,11 +22,13 @@ class AsyncToolJob:
     逻辑：
     1. `accepted/running/succeeded/failed/cancelled` 描述任务生命周期；
     2. `result_text/error_text` 仅在终态有意义；
-    3. `submitted/started/finished` 用于后续观测与排障。
+    3. `client_id` 与入站 **`MessageEnvelope.client_id`** 对齐，用于终态回灌时 **`publish` 至正确 SSE 桶**；
+    4. `submitted/started/finished` 用于后续观测与排障。
     """
 
     job_id: str
     session_id: str
+    client_id: str
     tool_name: str
     status: str
     submitted_at_unix_ms: int
@@ -79,35 +81,59 @@ class AsyncToolResultStore:
         """注册 message_queue 发送器（用于投递 `async_tool_result`）。
 
         逻辑：
-        1. 接收一个 `sender(session_id, payload)` 回调（可为同步，或返回 `Awaitable`）；
-        2. 任务终态时由 `_notify_completed` 调用该回调，若为 awaitable 则 `await`；
-        3. 传入 `None` 可清空发送器，避免服务停止后继续投递。
+        1. 接收一个 **`sender(session_id, payload)`** 回调（可为同步，或返回 **`Awaitable`**）；
+        2. **`payload`** 含业务字段及 **`client_id`**（与 **`AsyncToolJob.client_id`** 一致），供 **`MessageEnvelope.client_id`** 路由 SSE；
+        3. 任务终态时由 **`_notify_completed`** 调用该回调，若为 awaitable 则 **`await`**；
+        4. 传入 **`None`** 可清空发送器，避免服务停止后继续投递。
+
+        关键边界：
+        - **`client_id`** 在 **`submit_coroutine`** 阶段已校验非空；若发送器侧仍丢失，由 **`AgentService`** 入队前二次校验。
         """
         self._message_queue_sender = sender
 
-    def submit_coroutine(self, *, session_id: str, tool_name: str, coroutine_obj: Any) -> AsyncToolJob:
+    def submit_coroutine(
+        self,
+        *,
+        session_id: str,
+        client_id: str,
+        tool_name: str,
+        coroutine_obj: Any,
+    ) -> AsyncToolJob:
         """提交异步工具协程并立即返回 `accepted` 快照。
 
         逻辑：
         1. 校验参数是协程对象；
-        2. 校验 `session_id` 非空并创建 `accepted` 状态任务；
-        3. 在当前事件循环创建后台 task 执行 `_run_job`。
+        2. 校验 `session_id` 与 **`client_id`** 非空（后者用于任务终态回灌时路由 SSE）；
+        3. 创建 `accepted` 状态任务并在当前事件循环 **`create_task(_run_job)`**。
 
         关键边界：
-        - 非协程对象立即抛 `TypeError`；
-        - 无运行中事件循环时关闭协程并抛 `RuntimeError`。
+        - 非协程对象立即抛 **`TypeError`**；
+        - **`client_id`** 仅空白时抛 **`ValueError`**（与「回灌必须可达订阅端」约束一致）；
+        - 无运行中事件循环时关闭协程并抛 **`RuntimeError`**。
+
+        与外部交互：
+        - 仅内存登记任务；终态时经 **`_message_queue_sender`** 投递（见 **`AgentService`**）。
         """
         if not asyncio.iscoroutine(coroutine_obj):
             raise TypeError("submit_coroutine 仅接受协程对象。")
         final_session_id = str(session_id or "").strip()
         if not final_session_id:
+            coroutine_obj.close()
             raise ValueError("session_id 不能为空。")
+        final_client_id = str(client_id or "").strip()
+        if not final_client_id:
+            coroutine_obj.close()
+            raise ValueError(
+                "client_id 不能为空：异步工具完成后需将 async_tool_result 入队到同一 SSE 通道，"
+                "请先通过带 client_id 的入站请求处理本会话（见 OpenAIConversationContext.sse_client_id）。"
+            )
 
         tool_label = str(tool_name or "").strip() or "unknown_tool"
         job_id = str(uuid4())
         job = AsyncToolJob(
             job_id=job_id,
             session_id=final_session_id,
+            client_id=final_client_id,
             tool_name=tool_label,
             status="accepted",
             submitted_at_unix_ms=_now_ms(),
@@ -209,6 +235,7 @@ class AsyncToolResultStore:
             "event_type": "async_tool_result",
             "job_id": job.job_id,
             "session_id": job.session_id,
+            "client_id": job.client_id,
             "tool_name": job.tool_name,
             "status": job.status,
             "result_text": job.result_text,

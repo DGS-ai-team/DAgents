@@ -15,15 +15,15 @@ from pathlib import Path
 import uvicorn
 
 _ROOT = Path(__file__).resolve().parent
-_REGISTER_CENTER_DIR = _ROOT / "register-center"
+_REGISTER_CENTER_DIR = _ROOT / "register_center"
 sys.path.insert(0, str(_REGISTER_CENTER_DIR))
 
 
 def _load_app():
-    """按文件路径加载 register-center 的 FastAPI app。
+    """按文件路径加载 register_center 目录内的 FastAPI app。
 
     逻辑：
-    1. 构造 `register-center/rc_app.py` 的绝对路径；
+    1. 构造 `register_center/rc_app.py` 的绝对路径；
     2. 基于 `importlib` 创建模块规格并执行模块代码；
     3. 从模块对象中读取 `app` 并返回。
 

@@ -23,6 +23,7 @@ class AgentSubmitRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     session_id: str = Field(min_length=1)
+    client_id: str = Field(min_length=1, default="cli-default")
     request_type: RequestType = "message"
     content: str | None = None
     resume_value: Any = None
@@ -58,7 +59,6 @@ class AgentSubmitResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     accepted: bool
-    request_id: str
     session_id: str
     priority: MessagePriority
 
@@ -86,7 +86,7 @@ class AgentStreamEventData(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    request_id: str
+    client_id: str
     session_id: str
     type: str
     seq: int
@@ -99,7 +99,7 @@ class AgentEventEnvelope(BaseModel):
 
     字段说明：
     - `event_type`：事件类型（如 `assistant`/`reasoning`/`usage`/`tool_call`/`tool_result`/`approval_required`/`error`/`done`）。
-    - `payload`：事件业务数据；`approval_required` 时建议符合 **`ApprovalRequiredEnvelopePayload`**（见 `app.schemas.approval`）。
+    - `payload`：事件业务数据；`approval_required` 时建议符合 **`ApprovalRequiredEnvelopePayload`**（含 **`display_type`**，见 `app.schemas.approval`）。
     - `meta`：附加元信息（会话、模型、耗时等）。
     """
 
@@ -118,7 +118,7 @@ class AgentServiceClient(Protocol):
     字段说明：
     - `submit(...)`：提交一条消息或 resume 请求，返回 `AgentSubmitResult`。
     - `cancel_current_turn(...)`：请求取消指定 session 正在执行的 `_handle_message`（无在途任务则 `cancelled=False`）。
-    - `stream(...)`：按 `request_id` 订阅事件流，逐条产出 `AgentStreamEventData`。
+    - `stream(...)`：按 `session_id` 读取事件流，逐条产出 `AgentStreamEventData`。
 
     返回说明：
     - 成功：返回模型对象或异步事件迭代器。
@@ -127,7 +127,7 @@ class AgentServiceClient(Protocol):
     调用范例：
     - `session = await client.create_session()`
     - `await client.submit(AgentSubmitRequest(session_id=session.session_id, content="你好"))`
-    - `async for ev in client.stream("req-id"): ...`
+    - `async for ev in client.stream(session.session_id): ...`
     """
 
     async def create_session(self, session_id: str | None = None) -> AgentSessionCreateResult:
@@ -139,5 +139,5 @@ class AgentServiceClient(Protocol):
     async def cancel_current_turn(self, session_id: str) -> AgentCancelTurnResult:
         ...
 
-    async def stream(self, request_id: str) -> AsyncIterator[AgentStreamEventData]:
+    async def stream(self, session_id: str) -> AsyncIterator[AgentStreamEventData]:
         ...

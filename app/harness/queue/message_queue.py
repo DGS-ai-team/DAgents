@@ -28,6 +28,10 @@ from typing import Any, Generic, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 
 class MessageEnvelope(BaseModel):
     """单条入队载荷（与会话请求模型对齐）。
@@ -51,7 +55,7 @@ class MessageEnvelope(BaseModel):
     async_tool_result: dict[str, Any] | None = None
     tool_result: dict[str, Any] | None = None
     source: str = "cli"
-    request_id: str | None = None
+    client_id: str | None = None
 
 
 EnvelopeT = TypeVar("EnvelopeT")
@@ -96,6 +100,10 @@ class MessageQueue(Generic[EnvelopeT]):
             RuntimeError: 队列已 `stop`（`_closed`）后禁止再入队。
             asyncio.QueueFull: 有界队列已满时（仅当构造时限制了 `max_queue_size`）。
         """
+        # 泛型 EnvelopeT 未必为 MessageEnvelope；日志用 getattr 避免自定义 envelope 入队即崩。
+        sid = getattr(envelope, "session_id", None)
+        req = getattr(envelope, "request_type", None)
+        _logger.info("[enqueue] %s: request_type=%s", sid, req)
         if self._closed:
             raise RuntimeError("MessageQueue 已关闭，无法 enqueue")
         self._put_nowait(priority=self._priority_value(priority), env=envelope)
@@ -157,3 +165,27 @@ class MessageQueue(Generic[EnvelopeT]):
         if priority == "resume":
             return self.PRIORITY_RESUME
         return self.PRIORITY_OTHER
+
+    def pending_metrics_rows(self) -> list[tuple[int, int, EnvelopeT]]:
+        """观测用：列出堆内「尚未 `receive` 取出」的条目，按真实出队顺序排序，不 dequeue。
+
+        逻辑：
+        1. 读取底层 **`asyncio.PriorityQueue`** 的内部堆列表（CPython：`Queue._queue`，元素为 **`(priority_int, seq, envelope)`**）；
+        2. 按 **`(priority_int, seq)`** 排序，与同优先级 FIFO 语义一致；
+        3. 返回三元组列表。
+
+        关键边界：
+        - 依赖 CPython 实现细节；若运行时结构变化，应改为上层自行维护镜像队列；
+        - `pause` 仅阻塞消费者，堆内仍有条目时本方法照常反映积压。
+        """
+        raw = getattr(self._queue, "_queue", None)
+        if not isinstance(raw, list) or len(raw) == 0:
+            return []
+        ordered = sorted(raw, key=lambda t: (int(t[0]), int(t[1])))
+        out: list[tuple[int, int, EnvelopeT]] = []
+        for item in ordered:
+            pri_i = int(item[0])
+            seq_i = int(item[1])
+            env = item[2]
+            out.append((pri_i, seq_i, env))
+        return out

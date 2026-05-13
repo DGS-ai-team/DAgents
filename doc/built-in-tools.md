@@ -1,0 +1,154 @@
+# 内置工具一览
+
+本文说明 **当前注册进 OpenAI 运行时** 的内置工具：来源为 **`app/harness/tools/tool.py`** 中的 **`get_tools()`**，经 **`build_openai_toolkit()`** 生成 **tools JSON** 与 **`tool_map`**（**`app/core/main_agent/runtime_openai.py`** 请求模型时使用）。**`function.description`** 取自工具函数的 **docstring**；**`function.parameters`** 优先来自 **`args_schema.model_json_schema()`**，否则由 **`_signature_to_json_schema`** 从签名推导（见下文 **「附」**）。执行时由编排层 **`_invoke_tool`** 调用 **`OpenAIToolSpec.invoke`**。
+
+**审批**：是否进入 **`approval_required`** 由 **`should_require_tool_approval`**（**`tool.py`**）结合 **`AGENT_TOOL_APPROVAL_MODE`**（**`always` / `never` / `rule`**）及 **`.runtime/policy/`** 下策略文件决定；细则见 **`tool.py`** 内注释。
+
+---
+
+## 附：`@tool` / `tool()` 装饰逻辑、`docstring`、传给 LLM 的声明与参数执行管道
+
+以下描述 **`app/harness/tools/tool.py`** 与 **`app/core/main_agent/runtime_openai.py`**、**`app/core/main_agent/agent.py`** 之间的数据流。暴露给模型的 **`@tool`** 函数，其 docstring 建议采用 **「使用场景 → 字段说明 → 返回说明 → 调用范例」** 四段结构（面向调用契约，不写实现细节）。
+
+### 附.1 `tool(...)` 装饰器本身的逻辑
+
+实现入口为 **`tool(name: str | None = None)`**（**`tool.py`**）。装饰阶段 **不** 与 OpenAI 通信，只准备 **注册名**、**`description`** 元数据，并决定 **同步 / 异步** 两条装配路径。
+
+**1）调用形态分流（最外层）**
+
+| 写法 | 解析方式 |
+|------|----------|
+| **`@tool("my_tool")`** | 第一个参数为 **字符串**，返回 **`decorator`**，待 Python 再传入被装饰函数。 |
+| **`@tool()`** | 第一个参数非可调用，**`name` 为 `None`**，同样返回 **`decorator`**；最终工具名回退为 **`func.__name__`**。 |
+| **`@tool`**（无括号） | 第一个参数 **即为被装饰函数**（**`callable(name)`** 为真）；代码将 **`func = name`**、**`name = None`**，并 **立即** **`return decorator(func)`**，等价于用 **函数名** 作为工具名。 |
+
+**2）`decorator(func)` 内部（统一入口）**
+
+1. **`final_name`**：`(name or "").strip() or func.__name__.strip()`；若仍为空则 **`ValueError("tool name 不能为空，且函数名不能为空")`**。  
+2. **`description`**：**`inspect.getdoc(func) or ""`**（无 docstring 则为空串；**`_tool_to_spec`** 会用 **`f"调用工具 {name}"`** 作兜底描述）。  
+3. **同步 / 异步**：**`inspect.iscoroutinefunction(func)`** 为真 → **`_decorate_async_tool`**；否则 → **`_decorate_sync_tool`**。
+
+**3）`_decorate_sync_tool`（同步）**
+
+- **不**用包装器替换原函数：仅 **`func.name = final_name`**、**`func.description = description`**，然后 **原样返回 `func`**。  
+- **目的**：保持 **真实 Python 签名** 不变，便于 **`_signature_to_json_schema(inspect.signature(...))`** 与运行时 **`invoke_fn(**kwargs)`** 一致；装饰器注释写明 **「不包裹原函数」**。
+
+**4）`_decorate_async_tool`（异步）**
+
+- 使用 **`@functools.wraps(func)`** 定义 **`_wrapped_async_tool(*args, **kwargs)`**，对外暴露的 **可调用对象** 才是注册进 **`get_tools()`** 的引用。  
+- 包装函数体内：**若被装饰函数签名不包含 `context`**，则从 **`kwargs` 中移除 `context`** 再调用原协程函数，避免 **`TypeError`**。  
+- 调用原 **`async def`** 得到 **协程对象**（**不在此处 `await`**），从 **`kwargs["context"]`** 取出 **`OpenAIConversationContext`**，读取 **`session_id` / `sse_client_id`**，向 **`AsyncToolResultStore.submit_coroutine`** 提交后台任务；**`client_id` 为空则 `ValueError`**。  
+- 立即返回 **固定格式的受理字符串**（含 **`job_id`**）。  
+- 同样把 **`final_name` / `description`** 挂在包装函数上供 **`_tool_to_spec`** 读取。  
+- **`functools.wraps`** 有利于保留 **docstring** 与签名元数据，供 **`inspect.getdoc` / `inspect.signature`** 在注册阶段与 **`_tool_to_spec`** 衔接（具体以 **`_tool_to_spec`** 选用的 **`invoke_fn`** 为准）。
+
+### 附.2 工具函数的 docstring 做什么
+
+1. **`@tool("name")` 或 `@tool` / `@tool()`** 在 **`decorator(func)`** 内执行 **`inspect.getdoc(func)`**，得到整段 docstring 字符串（见附.1）。  
+2. 该字符串被写入 **对外工具对象** 上的 **`description`** 属性（同步：**原函数**；异步：**包装函数**，通常仍能通过 **`wraps` 暴露原 docstring**）。  
+3. **`_tool_to_spec`** 读取 **`tool_obj.description`**，作为 OpenAI **`tools[]` → `function.description`** 的原文发给模型。  
+
+因此：**docstring 是模型在「工具列表」里看到的唯一长说明**；宜按上述四段组织，避免把实现细节写进 docstring（模型用不上，且易与真实代码漂移）。
+
+**注意**：docstring **不参与** JSON Schema 字段生成；**参数名 / 类型 / 必填** 来自 **Python 函数签名**（见附.4）。
+
+### 附.3 如何传给 LLM（`tools` 载荷）
+
+1. **`build_openai_toolkit()`** 对 **`get_tools()`** 中每个工具调用 **`_tool_to_spec`**，得到 **`OpenAIToolSpec`**（**`name` / `description` / `parameters` / `invoke`**）。  
+2. 组装为 OpenAI Chat Completions 所接受的 **`tools`** 数组元素：  
+
+```text
+{ "type": "function", "function": { "name": <工具名>, "description": <docstring>, "parameters": <JSON Schema> } }
+```
+
+3. **`OpenAIImplicitReActRuntime`** 在 **`_request_model_stream`** 里把该 **`tools_payload`** 与 **`messages`**、**`system`** 一并传给 **`chat.completions.create(..., stream=True)`**（见 **`runtime_openai.py`**）。  
+
+运行时 **不在每轮请求里改动** **`tools` 列表**（构造 **`OpenAIImplicitReActRuntime`** 时从 **`build_openai_toolkit()`** 取一份固定 payload）；模型每轮看到的工具表一致，**已加载 skills** 等会话差异体现在 **`get_system_prompt(context)`** 的系统提示里，而非动态增删 **`tools`** 条目。
+
+### 附.4 `parameters`（JSON Schema）如何生成
+
+| 优先级 | 行为 |
+|--------|------|
+| **1** | 若工具对象带 **`args_schema`** 且实现 **`model_json_schema()`**（Pydantic v2），则 **`parameters`** 取该 **JSON Schema**（可表达复杂嵌套类型）。 |
+| **2** | 否则调用 **`_signature_to_json_schema(invoke_fn)`**：按 **`inspect.signature`** 遍历参数，**跳过名为 `context` 的参数**（该参数由运行时注入，**禁止出现在模型可见 schema**，避免模型伪造会话）。 |
+| **类型映射** | 注解为 **`int` / `float` / `bool`** 时分别映射为 **`integer` / `number` / `boolean`**；**其余注解（含 `list[str]` 等）当前一律映射为 `string`**。 |
+| **`required`** | 无默认值（**`inspect.Parameter.empty`**）的参数名加入 **`required`**。 |
+| **`additionalProperties`** | 当前固定为 **`true`**（schema 层允许额外属性），但 **Python 调用**仍按「关键字展开」执行（见 **附.5**）。 |
+
+### 附.5 模型返回后，参数如何变成 `invoke(...)` 调用
+
+1. **`run_turn`** 在流式 **`final`** 中读取 **`tool_calls`**；对每条调用 **`parse_tool_arguments(fn.get("arguments"))`**（**`tool.py`**）。  
+2. **`parse_tool_arguments`**：**`None` → `{}`**；已是 **`dict` → 原样**；字符串则 **`json.loads`**，**仅当解析结果为 `dict` 时返回**，否则 **`{}`**（非法 JSON、数组/标量根、空串均不抛异常）。  
+3. 结果存入 **`PendingToolCall.arguments`**（**`dict`**）。  
+4. 编排器 **`_invoke_tool`** 执行 **`spec.invoke(tool_call.arguments, ctx)`**（**`agent.py`**）。  
+5. **`OpenAIToolSpec._invoke`**（**`_tool_to_spec` 内闭包**）：  
+   - 若工具对象自带 **`invoke` 方法**：**`tool_obj.invoke(args)`**（**不**自动注入 **`context`**，由该类自行处理）；  
+   - 否则将 **`args` 按键展开为关键字参数**：**`invoke_fn(**final_kwargs)`**；若签名包含 **`context`**，则 **`final_kwargs["context"] = ctx`**。  
+
+**边界与建议**：
+
+- **多余键**：若模型在 JSON 里加入了 **函数签名未声明** 的键，**`**kwargs` 展开** 在 Python 中会 **`TypeError: got an unexpected keyword argument`**；工具实现可对入参做 **`.pop` 容忍** 或增加 **`**kwargs`** 吞掉未知键。  
+- **类型校验**：**`parse_tool_arguments` 不做字段级校验**；类型纠错依赖 **工具函数内部**（或未来在 **`invoke` 前** 增加校验层）。  
+- **返回值**：**`_invoke_tool`** 将 **`dict`/`list`** 结果 **`json.dumps`**，其余 **`str(...)`**；异常捕获为 **`ERROR: ...`** 字符串并同样走 **`tool_result`** SSE。
+
+---
+
+## 1. 已注册工具（固定顺序）
+
+下列 **10** 个工具与 **`get_tools()`** 返回顺序一致（便于单测与日志对齐）。
+
+| 工具名 | 执行形态 | 定义位置 | 作用概要 |
+|--------|----------|----------|----------|
+| **`load_skills`** | 同步 | **`app/harness/tools/skills.py`** | 按名称加载会话 **`loaded_skills`**，并返回可用技能元数据（受 **`agent_skills_max_in_prompt`** 等配置影响）。 |
+| **`read_file`** | 同步 | **`app/harness/tools/fs.py`** | 在 **`FS_ROOT`** 约束下读取文本/二进制（按后缀策略）。 |
+| **`search_file`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内按 **正则** 逐行检索并分页返回。 |
+| **`edit_file`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内对文本文件做行级删改插。 |
+| **`write_file`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内整体覆盖写入。 |
+| **`bash_run`** | 同步 | **`app/harness/tools/bash.py`** | 统一 shell 执行（**`bash` / `cmd` / `powershell`**），含命令切段与安全策略（如非 root 下对 **`su`/`sudo`** 的拦截）。 |
+| **`agent_discover`** | 同步 | **`app/harness/tools/agent_peer.py`** | 查询 **Register Center** 可见分组下的 Agent 列表，并尝试拉取 **`.well-known/agent-card.json`** 摘要。 |
+| **`agent_send_message`** | **异步** | **`agent_peer.py`** | 向指定 **`target_agent_id`** 投递 **`AgentPeerEnvelope`**（**`direct`/`relay`**），并汇总对端 SSE；依赖 **`REGISTRY_URL`**、**`DISCOVERY_GROUPS`** 等。 |
+| **`agent_broadcast`** | **异步** | **`agent_peer.py`** | 调用 **`POST /v1/broadcast`** 后并发拉取各目标 SSE。 |
+| **`agent_peer_approve_tools`** | **异步** | **`agent_peer.py`** | 对对端 **`approval_required`** 提交 **`resume`**（**直连对端 `base_url`**）。 |
+
+### 1.1 异步工具与 `client_id`
+
+**`async def` + `@tool`** 的函数会走 **`_decorate_async_tool`**：**立即返回** 含 **`job_id`** 的受理文案，真实逻辑在 **`AsyncToolResultStore`** 后台协程执行；完成后以 **`async_tool_result`** 入队并走 SSE。
+
+**硬前提**：会话 **`OpenAIConversationContext`** 上须已有非空 **`sse_client_id`**（由带 **`client_id`** 的入站 **`MessageEnvelope`** 刷新）。否则提交后台任务会 **`ValueError`**。详见 [agent-input-output.md](./agent-input-output.md) 与 **CHANGELOG** 中异步工具相关说明。
+
+---
+
+## 2. 配置与环境依赖（摘要）
+
+| 领域 | 关键项 |
+|------|--------|
+| **文件工具** | 环境变量 **`FS_ROOT`**：所有路径须落在该根目录下，否则拒绝访问。 |
+| **Shell** | 宿主 OS、策略文件（**`bash.py`** / **`tool.py`** 审批分支）；Windows/Linux 行为差异见 **`bash.py`**。 |
+| **Skills** | **`AGENT_SKILLS_*`**、技能目录（默认相对运行根的 **`.runtime/skills`**）；**`get_system_prompt`** 是否注入技能段由 **`agent_skills_enabled`** 等控制，与 **`load_skills`** 写入 **`ctx.loaded_skills`** 配合。 |
+| **A2A** | **`REGISTRY_URL`**、**`DISCOVERY_GROUPS`**、**`AGENT_ID`**、**`AGENT_PUBLIC_BASE_URL`**（自登记）、**`AGENT_PEER_DELIVERY_MODE`**、各类超时；详见 [a2a-and-register-center.md](./a2a-and-register-center.md)。 |
+
+---
+
+## 3. 仓库内存在但未纳入 `get_tools()` 的实现
+
+| 名称 | 位置 | 说明 |
+|------|------|------|
+| **`host_platform`** | **`app/harness/tools/host_platform.py`** | 已用 **`@tool("host_platform")`** 声明，**未**出现在 **`get_tools()`** 列表中，故 **当前模型不可见**。可用于后续与 **`bash_run`** 联动或 CLI。 |
+
+新增内置工具时，除实现函数外，须在 **`get_tools()`** 中 **显式加入** 才会进入 **`build_openai_toolkit()`**（注释写明「按稳定性逐步放开」）。
+
+---
+
+## 4. 相关文档与源码索引
+
+| 文档 / 路径 | 内容 |
+|-------------|------|
+| **`app/harness/tools/README.md`** | 各工具文件职责表 |
+| **`app/harness/tools/REFERENCE.md`** | 符号级索引 |
+| [a2a-and-register-center.md](./a2a-and-register-center.md) | **`agent_*`** 与 Register Center |
+| [architecture-and-flows.md](./architecture-and-flows.md) | 工具在主编排中的位置 |
+| [agent-turn-loop.md](./agent-turn-loop.md) | **`tool_result`** 回灌与 **`_invoke_tool`** |
+
+---
+
+**说明**：工具集合以 **`tool.py` → `get_tools()`** 为准；**docstring / Schema / 参数管道** 见上文 **「附」**；若与 OpenAPI/前端展示不一致，以运行时代码为准。

@@ -5,9 +5,9 @@
 - **`Settings`**、**`get_settings`**
 - 可观测性：**`metrics_enabled`**（**`METRICS_ENABLED`**）、LLM 流式 usage：**`llm_stream_include_usage`**（**`LLM_STREAM_INCLUDE_USAGE`**）
 - 队列相关字段：**`max_queue_size`**
-- CLI 相关字段：**`agent_cli_mode`**
+- 本地调试入口相关字段（命名保留）：**`agent_cli_mode`**
 - API 相关字段：**`agent_api_base`**
-- 会话 sqlite：**`agent_session_store_path`**（`AGENT_SESSION_STORE_PATH`：未设置用默认；显式空串关闭）
+- 会话 sqlite：**`agent_session_store_path`**（默认 **`.runtime/memory/session.sqlite3`**（相对仓库根）；`AGENT_SESSION_STORE_PATH` 未设置时使用；显式空串关闭）
 
 ## `config/env.py`
 
@@ -51,11 +51,7 @@
 
 ## `harness/tools/fs.py`
 
-- **`fs_read`**、**`fs_write`**、**`fs_edit`**
-
-## `harness/tools/common.py`
-
-- **`placeholder_common_tool`**
+- **`read_file`**、**`write_file`**、**`edit_file`**（头 + **`---`** + unified **`diff`**）、**`search_file`**（**正则** **`pattern`**）
 
 ## `harness/queue/message_queue.py`
 

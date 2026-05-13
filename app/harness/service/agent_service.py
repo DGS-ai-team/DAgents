@@ -3,21 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
-from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
 from uuid import uuid4
 
+from pathlib import Path
+
+from app.config.env import resolve_runtime_root
 from app.config.settings import get_settings
-from app.context.models import OpenAIConversationContext, SummaryCompressionPhase
+from app.context.models import OpenAIConversationContext
 from app.core.main_agent.model import get_model_config
 from app.core.main_agent.agent import MainAgentTurnOrchestrator
-from app.core.summary_agent.agent import init_agent as init_summary_agent
 from app.harness.memory.store import SqliteMessageStore
 from app.harness.queue.message_queue import MessageEnvelope, MessagePriority, MessageQueue
 from app.harness.service.interface import AgentEventEnvelope
-from app.harness.tools.openai_tools import build_openai_toolkit
+from app.harness.tools.tool import build_openai_toolkit
 from app.harness.tools.async_store import get_async_tool_result_store
+from app.observability.metrics import refresh_session_context_metrics
+
+_logger = logging.getLogger(__name__)
+
+# 与 `_emit_stream_event` 入参一致：`handle_stream_event` 自行从 `env` 取 `client_id`/`session_id` 并决定是否推送。
+StreamEventHandler = Callable[[MessageEnvelope, str, dict[str, Any]], Awaitable[None]]
 
 
 def _queue_maxsize(max_queue_size: int) -> int | None:
@@ -37,71 +45,66 @@ class AgentService:
         self,
         *,
         max_queue_size: int = 0,
-        on_stream_event: Callable[[str, str, dict[str, Any]], Awaitable[None]] | None = None,
+        handle_stream_event: StreamEventHandler | None = None,
         message_store: SqliteMessageStore | None = None,
     ) -> None:
         """初始化服务状态；不启动任何消费者、不预建 session 队列。
 
         逻辑：
-        - `_runtime`：懒加载，首次处理消息时再 `init_agent()`；
-        - `_turn_orchestrator`：业务编排器，承载消息分支与工具审批/执行策略；
-        - `_stop_event`：供 `run_forever()` 阻塞，直到 `stop()` 置位；
-        - `_max_queue_size`：传给每个 session 的 `MessageQueue`；
-        - `_session_queues`：`session_id -> MessageQueue` 缓存，按需创建；
-        - `_message_store`：会话 sqlite；``None`` 时按 `Settings.agent_session_store_path` 构造，路径空则关闭；
-        - `_session_contexts`：`session_id -> OpenAIConversationContext` 进程内缓存，与队列串行写入一致；
-        - `_session_last_activity`：`session_id -> Unix 时间戳`，用于达上限时按闲置时长淘汰最久未活动会话；
-        - `_session_idle_evict_seconds`：闲置超过该秒数才允许成为淘汰候选（来自 `Settings.agent_session_idle_evict_seconds`，<=0 关闭）。
+        1. 保存队列上限、闲置淘汰配置与可选 **`handle_stream_event`**；
+        2. 初始化 session 队列/context/消费者 task 等空映射与 **`AsyncToolResultStore`** 发件人占位；
+        3. 组装 **`MainAgentTurnOrchestrator`**（入队提交 + **`_emit_envelope`**）；
+        4. 按入参或 **`Settings.agent_session_store_path`** 决定 **`_message_store`**（显式注入 / sqlite / 纯内存）。
+
+        关键边界：
+        - **`handle_stream_event` 为 ``None``** 时 **`_emit_stream_event`** 直接返回，不向任何订阅方推送；
+        - 注入回调后，**是否因缺少 `client_id` 而忽略事件**由回调自行判断，服务层不再代劳。
 
         Args:
             max_queue_size: 单个 session 队列容量；<=0 表示不限制。
+            handle_stream_event: 可选；签名与 **`_emit_stream_event`** 一致：`async (env, event_type, data)`，
+                其中 **`env`** 为当前 **`MessageEnvelope`**（含 **`client_id`** / **`session_id`**），
+                **`event_type`** / **`data`** 为 **`_map_event_envelope_to_stream`** 映射后的 SSE 语义字段。
             message_store: 可选注入存储（单测可传入或关闭）。
         """
         self._runtime: Any | None = None
-        self._summary_runtime: Any | None = None
         self._stop_event = asyncio.Event()
         settings = get_settings()
         self._max_queue_size = max_queue_size
         self._max_active_session_queues = max(1, int(settings.agent_max_active_session_queues))
         self._session_idle_evict_seconds = max(0, int(settings.agent_session_idle_evict_seconds))
-        self._summary_silent_trigger_tokens = max(
-            0,
-            int(settings.summary_compression_silent_trigger_tokens),
-        )
-        self._summary_blocking_trigger_tokens = max(
-            0,
-            int(settings.summary_compression_blocking_trigger_tokens),
-        )
         self._session_queues: dict[str, MessageQueue[MessageEnvelope]] = {}
         self._session_contexts: dict[str, OpenAIConversationContext] = {}
-        self._session_summary_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_last_activity: dict[str, float] = {}
         self._session_consumer_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_active_handles: dict[str, asyncio.Task[None] | None] = {}
         self._async_store = get_async_tool_result_store()
-        self._on_stream_event = on_stream_event
+        self._handle_stream_event = handle_stream_event
         _, self._tool_map = build_openai_toolkit()
         self._turn_orchestrator = MainAgentTurnOrchestrator(
             submit_message=self.submit_message,
             emit_envelope=self._emit_envelope,
-            tool_map=self._tool_map,
+            tool_map=self._tool_map
         )
         if message_store is not None:
             self._message_store = message_store
         else:
             # 路径为空：纯内存会话，便于单测与无持久化部署。
             raw = (settings.agent_session_store_path or "").strip()
-            self._message_store = (
-                SqliteMessageStore(Path(raw).expanduser()) if raw else None
-            )
+            if raw:
+                rp = Path(raw).expanduser()
+                db_path = rp.resolve() if rp.is_absolute() else (resolve_runtime_root() / rp).resolve()
+                self._message_store = SqliteMessageStore(db_path)
+            else:
+                self._message_store = None
 
     async def start(self) -> None:
         """标记服务已启动（当前无额外预热逻辑）。
 
-        逻辑：仅打印启动日志；session 队列仍按 `submit_message` 首次命中时创建。
+        逻辑：写 INFO 启动日志；session 队列仍按 `submit_message` 首次命中时创建。
         """
         self._async_store.register_message_queue_sender(self._enqueue_async_tool_result_message)
-        print("[agent-service] started", flush=True)
+        _logger.info("agent-service started")
 
     async def stop(self) -> None:
         """停止服务：取消在途 turn、停止消费者与队列，并唤醒 `run_forever()`。
@@ -111,7 +114,7 @@ class AgentService:
            runtime 的 `flush_cancelled_turn` 与 `finally` 落盘）；
         2. 对 `_session_consumer_tasks` 中每个 session 消费循环 `cancel` 并 `await`；
         3. 清空上述映射后，对每个 `MessageQueue` 调用 `stop()`，再清空 `_session_queues` 与 `_session_contexts`；
-        4. `set` `_stop_event` 并打印停止日志。
+        4. `set` `_stop_event` 并写 INFO 停止日志。
 
         关键边界：
         - 若某 session 正阻塞在 `receive()`，先取消 consumer 可通过 `CancelledError` 退出循环，再 `queue.stop()` 兜底唤醒。
@@ -128,16 +131,7 @@ class AgentService:
                     pass
 
         # 结束静默压缩后台任务，防止 stop 后仍持有旧 context 写入压缩状态。
-        for st in list(self._session_summary_tasks.values()):
-            if st is not None and not st.done():
-                st.cancel()
-        for st in list(self._session_summary_tasks.values()):
-            if st is None:
-                continue
-            try:
-                await st
-            except asyncio.CancelledError:
-                pass
+        await self._turn_orchestrator.cancel_all_summary_tasks()
 
         # 再停「每 session 的 receive 循环」，避免 stop 后仍从已关闭队列取消息。
         for t in list(self._session_consumer_tasks.values()):
@@ -152,35 +146,51 @@ class AgentService:
 
         self._session_consumer_tasks.clear()
         self._session_active_handles.clear()
-        self._session_summary_tasks.clear()
         self._async_store.register_message_queue_sender(None)
         for q in self._session_queues.values():
             await q.stop()
         self._session_queues.clear()
         self._session_contexts.clear()
         self._session_last_activity.clear()
+        refresh_session_context_metrics({})
         self._stop_event.set()
-        print("[agent-service] stopped", flush=True)
+        _logger.info("agent-service stopped")
 
     async def _enqueue_async_tool_result_message(self, session_id: str, payload: dict[str, Any]) -> None:
         """将异步工具完成结果投递到会话消息队列。
 
         逻辑：
-        1. 复用 `submit_message` 统一入队入口；
-        2. 指定 `request_type="async_tool_result"` 并透传 payload；
-        3. 以 `tool_result` 优先级入队，交给消费循环串行处理。
+        1. 从 **`payload`** 取出 **`client_id`**（与 **`AsyncToolJob`** 一致），缺省时抛错，避免 SSE 总线无法分桶；
+        2. 复制 **`payload`** 为入队用字典，**剔除 `client_id`**，避免与 **`MessageEnvelope.client_id`** 重复语义污染 **`async_tool_result`** 业务载荷；
+        3. 复用 **`submit_message`** 统一入队；
+        4. 指定 **`request_type="async_tool_result"`** 并以 **`tool_result`** 优先级入队。
 
         关键边界：
-        - 本方法为协程，供 `AsyncToolResultStore` 在终态通知路径中 `await`。
+        - 本方法为协程，供 **`AsyncToolResultStore`** 在终态通知路径中 **`await`**；
+        - **`client_id`** 空白时抛 **`ValueError`**，与 **`submit_coroutine`** 前置约束一致。
+
+        异常说明：
+        - **`client_id`** 缺失时向上抛出，便于观测与单测断言。
+
+        副作用说明：
+        - 仅触发入队；不修改 **`AsyncToolResultStore`** 内任务表。
         """
+        cid = str(payload.get("client_id") or "").strip()
+        if not cid:
+            raise ValueError(
+                "async_tool_result 缺少 client_id：无法将异步工具终态路由到 SSE 客户端，"
+                "请检查 AsyncToolJob 是否在 submit_coroutine 阶段写入了非空 client_id。"
+            )
+        body = dict(payload)
+        body.pop("client_id", None)
         await self.submit_message(
             session_id=session_id,
             content="",
             request_type="async_tool_result",
-            async_tool_result=dict(payload),
+            async_tool_result=body,
             source="async-store",
             priority="tool_result",
-            request_id=None,
+            client_id=cid,
         )
 
     async def run_forever(self) -> None:
@@ -208,7 +218,42 @@ class AgentService:
         await self._get_or_create_session_queue_async(sid)
         if sid not in self._session_contexts:
             self._session_contexts[sid] = self._load_context_from_store_sync(sid)
+        refresh_session_context_metrics(self._session_contexts)
         return sid
+
+    async def release_session(self, session_id: str, *, clear_persisted: bool = True) -> bool:
+        """释放指定会话占用的服务端资源（内存 + 可选持久化）。
+
+        逻辑：
+        1. 规范化并校验 `session_id`，空值直接抛 `ValueError`；
+        2. 若该会话当前存在队列/消费者/在途 turn，则复用 `_evict_session_for_capacity` 做统一拆除；
+        3. 否则兜底清理内存映射（避免异常路径残留键）；
+        4. `clear_persisted=True` 且启用 sqlite 时，在线程池调用 `clear_session` 删除持久化行。
+
+        关键分支/边界：
+        - 本方法幂等：会话不存在时也可安全调用；
+        - 正在执行中的 turn 会被取消，取消后的上下文由 `_handle_message` 的取消收口逻辑处理；
+        - 持久化清理失败将向上抛出异常，由 API 层统一转为 400。
+
+        副作用说明：
+        - 可能取消任务、停止队列、删除会话缓存及 sqlite 中的会话记录。
+        """
+        sid = (session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id 不能为空。")
+        existed_in_memory = sid in self._session_queues or sid in self._session_contexts
+        if sid in self._session_queues:
+            await self._evict_session_for_capacity(sid)
+        else:
+            self._session_consumer_tasks.pop(sid, None)
+            self._session_active_handles.pop(sid, None)
+            self._session_contexts.pop(sid, None)
+            self._session_last_activity.pop(sid, None)
+            refresh_session_context_metrics(self._session_contexts)
+        if clear_persisted and self._message_store is not None:
+            await asyncio.to_thread(self._message_store.clear_session, sid)
+            return True
+        return existed_in_memory
 
     async def submit_message(
         self,
@@ -220,9 +265,9 @@ class AgentService:
         tool_result: dict[str, Any] | None = None,
         source: str = "service",
         priority: MessagePriority = "other",
-        request_id: str | None = None,
+        client_id: str | None = None,
     ) -> None:
-        """对外投递入口：按 session 入队一条消息。
+        """按 session 入队一条消息至agent处理队列，以在下一轮触发llm调用。
 
         逻辑：
         1. `await _get_or_create_session_queue_async(session_id)` 取队列（可能新建并 `create_task` 启动 `_session_consume_loop`，达上限时可淘汰闲置会话）；
@@ -258,7 +303,7 @@ class AgentService:
                 async_tool_result=async_tool_result,
                 tool_result=tool_result,
                 source=source,
-                request_id=request_id,
+                client_id=client_id,
             ),
             priority=effective_priority,
         )
@@ -270,7 +315,7 @@ class AgentService:
         resume_value: Any,
         source: str = "service",
         priority: MessagePriority = "resume",
-        request_id: str | None = None,
+        client_id: str | None = None,
     ) -> None:
         """投递 resume 请求：将 `resume_value` 入队并交由消费者触发 `Command(resume=...)`。
 
@@ -286,7 +331,7 @@ class AgentService:
                 request_type="resume",
                 resume_value=resume_value,
                 source=source,
-                request_id=request_id,
+                client_id=client_id,
             ),
             priority=priority,
         )
@@ -323,6 +368,8 @@ class AgentService:
         ctx = await asyncio.to_thread(self._load_context_from_store_sync, session_id)
         ctx.session_id = session_id
         self._session_contexts[session_id] = ctx
+        # 刚从库装入缓存：刷新 `/metrics` 中的 messages 快照（无 sqlite 时也会在首轮 persist 前可见）。
+        refresh_session_context_metrics(self._session_contexts)
         return ctx
 
     async def _persist_context(self, session_id: str, ctx: OpenAIConversationContext) -> None:
@@ -359,13 +406,13 @@ class AgentService:
         - `CancelledError` 不吞掉：flush 后必须 `raise`，以便 consumer 区分「子 task 取消」与「自身取消」。
         """
         ctx = await self._resolve_context(env.session_id)
+        # 仅当入站 envelope 显式携带 client_id 时刷新，避免 async_tool_result 等内部入队用 None 覆盖已建立的通道。
+        _cid = (env.client_id or "").strip()
+        if _cid:
+            ctx.sse_client_id = _cid
         self._touch_session_activity(env.session_id)
         runtime = self._get_runtime()
         try:
-            # 每轮入口先尝试应用已完成压缩，再做阻塞阈值判定，最后再考虑启动新一轮静默压缩。
-            await self._try_apply_ready_compression_result(env.session_id, ctx)
-            await self._maybe_run_blocking_compression(env.session_id, ctx)
-            await self._maybe_start_silent_compression(env.session_id, ctx)
             base_meta = self._stream_base_meta(env)
             await self._turn_orchestrator.handle_message(
                 ctx=ctx,
@@ -381,7 +428,7 @@ class AgentService:
                 flush(ctx)
             raise
         except Exception as exc:
-            self._log("error", env.session_id, str(exc))
+            _logger.error("%s: %s", env.session_id, exc)
             base_meta = self._stream_base_meta(env)
             err_t, err_d = self._map_event_envelope_to_stream(
                 AgentEventEnvelope(event_type="error", payload={"message": str(exc)}, meta={}),
@@ -397,7 +444,9 @@ class AgentService:
             try:
                 await self._persist_context(env.session_id, ctx)
             except Exception as exc:  # noqa: BLE001
-                self._log("error", env.session_id, f"persist failed: {exc}")
+                _logger.error("%s: persist failed: %s", env.session_id, exc)
+            # 无论是否启用 sqlite，均以内存中的 ctx.messages 为准刷新 Prometheus（含 cancel/error 路径）。
+            refresh_session_context_metrics(self._session_contexts)
 
     async def _emit_envelope(
         self,
@@ -409,15 +458,18 @@ class AgentService:
         """映射并发送单条 envelope 到流输出。
 
         逻辑：
-        1. 用 `_map_event_envelope_to_stream` 转为 SSE 事件形态；
-        2. 记录统一日志；
-        3. 若存在 `request_id` 则通过 `_emit_stream_event` 推送给订阅方。
+        1. 用 **`_map_event_envelope_to_stream`** 转为 **`(event_type, data)`**；
+        2. 写 **`[emit_envelope]`** 日志；
+        3. 调用 **`_emit_stream_event`**，由注入的 **`handle_stream_event`**（若有）基于 **`env`** 自行路由。
+
+        关键边界：
+        - 无订阅回调时 **`_emit_stream_event`** 立即返回；不抛异常。
         """
         stream_type, stream_data = self._map_event_envelope_to_stream(
             envelope,
             base_meta=base_meta,
         )
-        self._log("stream", env.session_id, f"type={stream_type} data={stream_data}")
+        _logger.info("[emit_envelope] %s: type=%s data=%s", env.session_id, stream_type, stream_data)
         await self._emit_stream_event(
             env=env,
             event_type=stream_type,
@@ -431,182 +483,6 @@ class AgentService:
 
             self._runtime = init_agent()
         return self._runtime
-
-    def _get_summary_runtime(self) -> Any:
-        """懒加载并复用 summary 压缩 runtime。"""
-        if self._summary_runtime is None:
-            self._summary_runtime = init_summary_agent()
-        return self._summary_runtime
-
-    async def _try_apply_ready_compression_result(
-        self,
-        session_id: str,
-        ctx: OpenAIConversationContext,
-    ) -> None:
-        """在每轮入口尝试应用已完成的压缩结果。
-
-        逻辑：
-        1. 若该 session 存在静默压缩 task 且已结束，先 `await` 回收 task 并移除映射；
-        2. 当 `summary_compression_phase` 已回到 `IDLE` 且存在 `summary_compressed_message` 时，执行区间替换；
-        3. 替换成功后压缩计划会由 runtime 清空并回到 `NOT_STARTED`，避免重复替换。
-
-        关键边界：
-        - 任务失败不向外抛错，仅记录日志并允许主流程继续；
-        - 若压缩结果无效（区间不合法/内容为空）则本轮跳过替换。
-        """
-        task = self._session_summary_tasks.get(session_id)
-        if task is not None and task.done():
-            self._session_summary_tasks.pop(session_id, None)
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception as exc:  # noqa: BLE001
-                self._log("summary", session_id, f"silent compression failed: {exc}")
-
-        if ctx.summary_compression_phase != SummaryCompressionPhase.IDLE:
-            return
-        if not ctx.summary_compressed_message:
-            # `IDLE` 表示“已压缩完成待替换”；若消息为空，重置为 `NOT_STARTED` 以允许后续重新压缩。
-            ctx.summary_compression_phase = SummaryCompressionPhase.NOT_STARTED
-            return
-        summary_runtime = self._get_summary_runtime()
-        if summary_runtime.replace_messages_with_compressed_message(ctx):
-            self._log("summary", session_id, "applied compressed message block")
-        else:
-            ctx.summary_compression_phase = SummaryCompressionPhase.NOT_STARTED
-            ctx.summary_compression_range_start = -1
-            ctx.summary_compression_range_end = -1
-            ctx.summary_compressed_message = {}
-
-    async def _maybe_run_blocking_compression(self, session_id: str, ctx: OpenAIConversationContext) -> None:
-        """按阻塞阈值在每轮入口执行串行压缩。
-
-        逻辑：
-        1. 阈值关闭时直接返回；
-        2. 若 token 估算未达阻塞阈值，返回；
-        3. 若已有静默压缩任务在跑，则等待其结束并尝试替换结果；
-        4. 否则在当前协程串行执行“选区间→准备文本块→run_turn→替换”。
-
-        关键边界：
-        - 压缩异常仅记录日志，不中断主消息处理；
-        - 若当前 `summary_compression_phase` 非 `NOT_STARTED` 且无任务可等待，跳过本轮阻塞压缩，避免并发竞态。
-        """
-        threshold = self._summary_blocking_trigger_tokens
-        if threshold <= 0:
-            return
-        summary_runtime = self._get_summary_runtime()
-        total_tokens = int(summary_runtime.estimate_message_tokens(ctx.messages))
-        if total_tokens < threshold:
-            return
-
-        running_task = self._session_summary_tasks.get(session_id)
-        if running_task is not None and not running_task.done():
-            try:
-                await running_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as exc:  # noqa: BLE001
-                self._log("summary", session_id, f"blocking wait silent task failed: {exc}")
-            await self._try_apply_ready_compression_result(session_id, ctx)
-            return
-
-        if ctx.summary_compression_phase != SummaryCompressionPhase.NOT_STARTED:
-            return
-        if not summary_runtime.should_compress(ctx, trigger_tokens=threshold):
-            return
-
-        prepared = summary_runtime.prepare_compression_block(ctx)
-        if not bool(prepared.get("ok")):
-            return
-        block = str(prepared.get("block") or "").strip()
-        if not block:
-            return
-
-        try:
-            await summary_runtime.run_turn(
-                ctx,
-                request_type="human_message",
-                content=block,
-            )
-            if summary_runtime.replace_messages_with_compressed_message(ctx):
-                self._log("summary", session_id, "blocking compression completed and applied")
-        except asyncio.CancelledError:
-            flush = getattr(summary_runtime, "flush_cancelled_turn", None)
-            if callable(flush):
-                flush(ctx)
-            raise
-        except Exception as exc:  # noqa: BLE001
-            self._log("summary", session_id, f"blocking compression failed: {exc}")
-
-    async def _maybe_start_silent_compression(self, session_id: str, ctx: OpenAIConversationContext) -> None:
-        """按静默阈值在每轮入口触发并行压缩任务。
-
-        逻辑：
-        1. 阈值关闭、已有任务运行、或当前 phase 非 `NOT_STARTED` 时不启动；
-        2. 达阈值后先在主协程内完成区间判定与文本块准备，固定本次压缩输入；
-        3. 创建后台 task 仅执行 `run_turn`，结果在后续 `handle_message` 入口统一替换。
-
-        关键边界：
-        - 静默任务不直接替换 `ctx.messages`，避免与主流程竞争写同一列表；
-        - 若准备阶段失败（无合法区间/文本空），本轮静默压缩放弃。
-        """
-        threshold = self._summary_silent_trigger_tokens
-        if threshold <= 0:
-            return
-        running_task = self._session_summary_tasks.get(session_id)
-        if running_task is not None and not running_task.done():
-            return
-        if ctx.summary_compression_phase != SummaryCompressionPhase.NOT_STARTED:
-            return
-
-        summary_runtime = self._get_summary_runtime()
-        if not summary_runtime.should_compress(ctx, trigger_tokens=threshold):
-            return
-        prepared = summary_runtime.prepare_compression_block(ctx)
-        if not bool(prepared.get("ok")):
-            return
-        block = str(prepared.get("block") or "").strip()
-        if not block:
-            return
-
-        self._session_summary_tasks[session_id] = asyncio.create_task(
-            self._run_silent_compression_task(
-                session_id=session_id,
-                ctx=ctx,
-                block=block,
-            )
-        )
-
-    async def _run_silent_compression_task(
-        self,
-        *,
-        session_id: str,
-        ctx: OpenAIConversationContext,
-        block: str,
-    ) -> None:
-        """后台执行单次静默压缩（不替换消息，仅产出压缩结果）。
-
-        逻辑：
-        1. 调用 summary runtime 的 `run_turn` 生成 `summary_compressed_message`；
-        2. 不在该任务中替换 `ctx.messages`，替换动作由下一次 `handle_message` 入口触发；
-        3. 任务失败仅记录日志，不向外传播到主消费循环。
-        """
-        summary_runtime = self._get_summary_runtime()
-        try:
-            await summary_runtime.run_turn(
-                ctx,
-                request_type="human_message",
-                content=block,
-            )
-            self._log("summary", session_id, "silent compression completed")
-        except asyncio.CancelledError:
-            flush = getattr(summary_runtime, "flush_cancelled_turn", None)
-            if callable(flush):
-                flush(ctx)
-            raise
-        except Exception as exc:  # noqa: BLE001
-            self._log("summary", session_id, f"silent compression failed: {exc}")
 
     def _touch_session_activity(self, session_id: str) -> None:
         """更新指定 session 的最后活动时间（Unix 秒）。
@@ -670,14 +546,7 @@ class AgentService:
             except asyncio.CancelledError:
                 pass
 
-        st = self._session_summary_tasks.get(session_id)
-        if st is not None and not st.done():
-            st.cancel()
-        if st is not None:
-            try:
-                await st
-            except asyncio.CancelledError:
-                pass
+        await self._turn_orchestrator.cancel_session_summary_task(session_id=session_id)
 
         t = self._session_consumer_tasks.get(session_id)
         if t is not None and not t.done():
@@ -690,7 +559,6 @@ class AgentService:
 
         self._session_consumer_tasks.pop(session_id, None)
         self._session_active_handles.pop(session_id, None)
-        self._session_summary_tasks.pop(session_id, None)
         self._session_contexts.pop(session_id, None)
         self._session_last_activity.pop(session_id, None)
 
@@ -698,9 +566,11 @@ class AgentService:
         if q is not None:
             await q.stop()
 
-        print(
-            f"[agent-service][evict] session={session_id}: evicted for capacity (idle session slot)",
-            flush=True,
+        refresh_session_context_metrics(self._session_contexts)
+
+        _logger.info(
+            "session evicted for capacity (idle session slot)",
+            extra={"session_id": session_id},
         )
 
     async def _get_or_create_session_queue_async(self, session_id: str) -> MessageQueue[MessageEnvelope]:
@@ -802,28 +672,16 @@ class AgentService:
                 if self._session_active_handles.get(session_id) is ht:
                     self._session_active_handles[session_id] = None
 
-    @staticmethod
-    def _log(kind: str, session_id: str, body: str) -> None:
-        """统一一行日志格式：`[agent-service][kind] session=...: ...`。
-
-        逻辑：仅 `print`，无侧效应；`kind` 一般为 `result` 或 `error`。
-        """
-        print(f"[agent-service][{kind}] session={session_id}: {body}", flush=True)
-
     def _stream_base_meta(self, env: MessageEnvelope) -> dict[str, Any]:
-        """构造每条 SSE `data.meta` 的公共字段（会话、请求、当前模型）。
+        """构造每条 SSE `data.meta` 的公共字段（会话、当前模型）。
 
         逻辑：
         1. 从 **`get_model_config()`** 取 **`model`** 字符串；
-        2. 与 **`env.session_id`**、**`env.request_id`** 组成 dict。
-
-        关键边界：
-        - **`request_id`** 可能为空（无订阅方），仍写入 meta 便于日志对齐。
+        2. 与 **`env.session_id`** 组成 dict。
         """
         cfg = get_model_config()
         return {
             "session_id": env.session_id,
-            "request_id": env.request_id or "",
             "model": str(cfg.get("model") or ""),
         }
 
@@ -834,12 +692,24 @@ class AgentService:
         event_type: str,
         data: dict[str, Any],
     ) -> None:
-        if self._on_stream_event is None:
+        """将已映射的一条流事件交给 **`handle_stream_event`**（若已注入）。
+
+        逻辑：
+        1. 若 **`_handle_stream_event` 为 ``None``** 则返回；
+        2. 否则 **`await _handle_stream_event(env, event_type, data)`**。
+
+        关键边界：
+        - **不在此判断 `env.client_id`**：无订阅方、无 **`client_id`** 等策略由回调实现（如 API 层在写入总线前 return）。
+
+        异常说明：
+        - 回调内异常向上抛出，由 **`_handle_message`** 等调用方捕获或中断。
+
+        副作用说明：
+        - 仅转发调用；不修改 **`env`**。
+        """
+        if self._handle_stream_event is None:
             return
-        # 无 request_id 时无法关联 HTTP/SSE 订阅方，仅打日志（见 _handle_message 内 _log）。
-        if not env.request_id:
-            return
-        await self._on_stream_event(env.request_id, event_type, data)
+        await self._handle_stream_event(env, event_type, data)
 
     @staticmethod
     def _map_event_envelope_to_stream(
@@ -867,15 +737,30 @@ class AgentService:
         payload = envelope.payload
         # 以下为 HTTP 层 SSE 扁平字段约定，与 runtime 的 AgentEventEnvelope 解耦。
         if et == "assistant":
-            return "assistant", with_meta({"content": payload.get("content", "")})
+            return "assistant", with_meta(
+                {
+                    "content": payload.get("content", ""),
+                    # AI 正文默认 Markdown；缺省与 runtime `infer_assistant_delta_display_type` 兜底一致。
+                    "display_type": payload.get("display_type", "markdown"),
+                }
+            )
         if et == "reasoning":
-            return "reasoning", with_meta({"content": payload.get("content", "")})
+            return "reasoning", with_meta(
+                {
+                    "content": payload.get("content", ""),
+                    "display_type": payload.get("display_type", "reasoning"),
+                }
+            )
         if et == "usage":
             return "usage", with_meta(
                 {
                     "prompt_tokens": int(payload.get("prompt_tokens", 0)),
                     "completion_tokens": int(payload.get("completion_tokens", 0)),
                     "total_tokens": payload.get("total_tokens"),
+                    "prompt_audio_tokens": int(payload.get("prompt_audio_tokens", 0)),
+                    "prompt_cached_tokens": int(payload.get("prompt_cached_tokens", 0)),
+                    "prompt_cache_hit_tokens": int(payload.get("prompt_cache_hit_tokens", 0)),
+                    "prompt_cache_miss_tokens": int(payload.get("prompt_cache_miss_tokens", 0)),
                 }
             )
         if et == "tool_call":
@@ -883,6 +768,7 @@ class AgentService:
                 {
                     "assistant_content": payload.get("assistant_content", ""),
                     "tool_calls": payload.get("tool_calls", []),
+                    "display_type": payload.get("display_type", "normal_text"),
                 }
             )
         if et == "tool_result":
@@ -891,6 +777,7 @@ class AgentService:
                     "content": payload.get("content", ""),
                     "tool_call_id": payload.get("tool_call_id"),
                     "tool_name": payload.get("tool_name"),
+                    "display_type": payload.get("display_type", "normal_text"),
                     "rejected": bool(payload.get("rejected", False)),
                     "interrupted_by_user_message": bool(payload.get("interrupted_by_user_message", False)),
                     "partial": bool(payload.get("partial", False)),
@@ -899,11 +786,13 @@ class AgentService:
         if et == "approval_required":
             return "approval_required", with_meta(
                 {
-                    "approval_type": payload.get("approval_type", "approval_required"),
+                    "approval_type": payload.get("approval_type", "execute_tool"),
                     "content": payload.get("message", ""),
                     "approval_args": payload.get("args", {}),
                     "description": payload.get("description", ""),
                     "approval_id": payload.get("approval_id"),
+                    # 与 `tool_call` 一致：缺省时按 `normal_text` 渲染（载荷通常已由编排层写入推断结果）。
+                    "display_type": payload.get("display_type", "normal_text"),
                 }
             )
         if et == "error":

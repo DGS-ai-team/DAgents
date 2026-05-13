@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import os
 import uuid
-from pathlib import Path
 from typing import Self
 
+from pathlib import Path
+
 from pydantic import BaseModel, ConfigDict
+
+from app.config.env import resolve_runtime_root
+
 
 def _env_str(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
@@ -126,7 +130,8 @@ def _resolve_agent_id(agent_id_file_path: str) -> str:
     """
 
     configured_id = _env_str("AGENT_ID")
-    file_path = Path(agent_id_file_path)
+    _p = Path(agent_id_file_path).expanduser()
+    file_path = _p.resolve() if _p.is_absolute() else (resolve_runtime_root() / _p).resolve()
     if configured_id:
         # 明确配置 AGENT_ID 时以配置为准，并同步写回文件防止重启漂移。
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,9 +176,19 @@ class Settings(BaseModel):
     summary_compression_blocking_trigger_tokens: int = 8000
     # 流式 completions 是否请求末尾 chunk 携带 usage（部分兼容网关不支持 `stream_options`）
     llm_stream_include_usage: bool = True
+    # 是否启用 skills 动态注入 system prompt
+    agent_skills_enabled: bool = True
+    # 是否允许 agent 自主创建/修改 skills
+    agent_skills_allow_create: bool = False
+    # skills 根目录（默认 `.runtime/skills`，相对仓库根）
+    agent_skills_dir: str = ".runtime/skills"
+    # 单轮最多注入多少个匹配 skill
+    agent_skills_max_in_prompt: int = 3
 
     # --- 可观测性 ---
     metrics_enabled: bool = True
+    # 应用与 uvicorn 日志级别（DEBUG/INFO/WARNING/ERROR/CRITICAL）
+    app_log_level: str = "INFO"
 
     # --- 队列（MVP）---
     max_queue_size: int = 0
@@ -184,6 +199,8 @@ class Settings(BaseModel):
     # --- CLI（方案二：HTTP 客户端）---
     agent_cli_mode: str = "api"
     agent_api_base: str = "http://127.0.0.1:8000"
+    # API CORS 允许来源（逗号分隔）；用于浏览器开发调试
+    api_cors_allow_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     agent_id: str = ""
     agent_id_file_path: str = ".runtime/agent/agent_id"
     registry_url: str = ""
@@ -193,13 +210,20 @@ class Settings(BaseModel):
     agent_peer_delivery_mode: str = "direct"
     agent_peer_stream_timeout_seconds: int = 60
     agent_peer_broadcast_stream_timeout_seconds: int = 20
+    # 全局工具审批模式：always（总是审批）/ never（永不审批）/ rule（按规则函数判断）
+    agent_tool_approval_mode: str = "rule"
+    # bash_run/cmd/powershell 输出解码编码（Windows 中文环境可用 gbk/cp936）
+    bash_output_encoding: str = "utf-8"
 
     # --- 会话消息落盘 ---
     agent_session_store_path: str = ".runtime/memory/session.sqlite3"
+    # 是否在每次向 ctx.messages 追加/插入「业务原始消息」时追加写入 JSONL 记录（摘要压缩等整段替换不写）
+    agent_raw_message_history_enabled: bool = True
+    # JSONL 记录目录（相对仓库根，默认 `.runtime/history`）
+    agent_raw_message_history_dir: str = ".runtime/history"
 
     # --- 兼容旧变量 ---
     openai_api_key: str = ""
-    langchain_openai_model: str = "gpt-4o-mini"
 
     @classmethod
     def load(cls) -> Self:
@@ -224,12 +248,21 @@ class Settings(BaseModel):
                 8000,
             ),
             llm_stream_include_usage=_env_bool("LLM_STREAM_INCLUDE_USAGE", True),
+            agent_skills_enabled=_env_bool("AGENT_SKILLS_ENABLED", True),
+            agent_skills_allow_create=_env_bool("AGENT_SKILLS_ALLOW_CREATE", False),
+            agent_skills_dir=_env_str("AGENT_SKILLS_DIR", ".runtime/skills") or ".runtime/skills",
+            agent_skills_max_in_prompt=_env_int("AGENT_SKILLS_MAX_IN_PROMPT", 3),
             metrics_enabled=_env_bool("METRICS_ENABLED", True),
+            app_log_level=_env_str("APP_LOG_LEVEL", "INFO") or "INFO",
             max_queue_size=_env_int("MAX_QUEUE_SIZE", 0),
             agent_max_active_session_queues=_env_int("AGENT_MAX_ACTIVE_SESSION_QUEUES", 3),
             agent_session_idle_evict_seconds=_env_int("AGENT_SESSION_IDLE_EVICT_SECONDS", 300),
             agent_cli_mode=_env_str("AGENT_CLI_MODE") or "api",
             agent_api_base=_env_str("AGENT_API_BASE") or "http://127.0.0.1:8000",
+            api_cors_allow_origins=(
+                _env_csv("API_CORS_ALLOW_ORIGINS")
+                or ["http://localhost:5173", "http://127.0.0.1:5173"]
+            ),
             agent_id=agent_id,
             agent_id_file_path=agent_id_file_path,
             registry_url=_env_str("REGISTRY_URL"),
@@ -242,9 +275,13 @@ class Settings(BaseModel):
                 "AGENT_PEER_BROADCAST_STREAM_TIMEOUT_SECONDS",
                 20,
             ),
+            agent_tool_approval_mode=_env_str("AGENT_TOOL_APPROVAL_MODE", "rule") or "rule",
+            bash_output_encoding=_env_str("BASH_OUTPUT_ENCODING", "utf-8") or "utf-8",
             agent_session_store_path=_agent_session_store_path(),
+            agent_raw_message_history_enabled=_env_bool("AGENT_RAW_MESSAGE_HISTORY_ENABLED", True),
+            agent_raw_message_history_dir=_env_str("AGENT_RAW_MESSAGE_HISTORY_DIR", ".runtime/history")
+            or ".runtime/history",
             openai_api_key=_env_str("OPENAI_API_KEY"),
-            langchain_openai_model=_env_str("LANGCHAIN_OPENAI_MODEL") or "gpt-4o-mini",
         )
 
 

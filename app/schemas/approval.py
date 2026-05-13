@@ -39,6 +39,7 @@ class ApprovalRequiredEnvelopePayload(BaseModel):
 
     逻辑：
     - `args.tool_calls` 与前置 `tool_call` 事件中的 `tool_calls` 列表同源；
+    - `display_type` 与前置 `tool_call` 的展示推断规则一致（`infer_tool_call_display_type`）；
     - 经 `AgentService._map_event_envelope_to_stream` 映射为 SSE 扁平字段（见 **`ApprovalRequiredSseData`**）。
     """
 
@@ -48,6 +49,7 @@ class ApprovalRequiredEnvelopePayload(BaseModel):
     message: str
     args: ApprovalToolCallsArgs
     description: str = ""
+    display_type: str = "normal_text"
 
 
 # --------------------------------------------------------------------------- #
@@ -65,6 +67,7 @@ class ApprovalRequiredSseData(BaseModel):
     approval_args: dict[str, Any] = Field(default_factory=dict)
     description: str = ""
     approval_id: str | None = None
+    display_type: str = "normal_text"
 
 
 # --------------------------------------------------------------------------- #
