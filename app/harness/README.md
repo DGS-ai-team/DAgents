@@ -10,6 +10,6 @@
 | **`memory/`** | 记忆层（已落地 `store.py`，提供 `SqliteMessageStore`） |
 | **`cli/`** | 命令行入口（`main.py`） |
 | **`skills/`** | skills 能力模块：扫描标准 `skills/*/SKILL.md`（frontmatter + 正文），并渲染 prompt 片段 |
-| **`history/`** | 原始 OpenAI 消息追加审计（JSONL，按会话按日）；详见子目录 README |
+| **`history/`** | 原始 OpenAI 消息 JSONL 按条记录（按会话、按日滚动）；详见子目录 README |
 
 Agent 组装在 **`app/core/main_agent/agent.py`**（**`init_agent`**）。

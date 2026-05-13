@@ -100,7 +100,10 @@ class MessageQueue(Generic[EnvelopeT]):
             RuntimeError: 队列已 `stop`（`_closed`）后禁止再入队。
             asyncio.QueueFull: 有界队列已满时（仅当构造时限制了 `max_queue_size`）。
         """
-        _logger.info("[enqueue] %s: request_type=%s", envelope.session_id, envelope.request_type)
+        # 泛型 EnvelopeT 未必为 MessageEnvelope；日志用 getattr 避免自定义 envelope 入队即崩。
+        sid = getattr(envelope, "session_id", None)
+        req = getattr(envelope, "request_type", None)
+        _logger.info("[enqueue] %s: request_type=%s", sid, req)
         if self._closed:
             raise RuntimeError("MessageQueue 已关闭，无法 enqueue")
         self._put_nowait(priority=self._priority_value(priority), env=envelope)

@@ -183,7 +183,7 @@ def get_system_prompt(
     5. 再按 `context.loaded_skills` 追加技能正文片段；
     6. 读取 **`get_host_snapshot()`**（与 API 启动采集同源缓存），追加 **`## 以下是当前运行环境`**（含 OS 类别与当前用户信息）；
     7. 追加 **`## `.runtime` 工作目录约定`**（含 **`data/`**、**`scripts/`**、**`scripts_menu.md`** 等说明）；
-    8. 若启用 **`AGENT_RAW_MESSAGE_HISTORY_ENABLED`**，追加会话原始消息 JSONL 审计说明；
+    8. 若启用 **`AGENT_RAW_MESSAGE_HISTORY_ENABLED`**，追加会话原始消息 JSONL 记录说明；
     9. 读取 **`prompt_context/custom.md`**，非空则追加 **`## 以下是用户侧追加的临时/专项指令`**；
     10. 追加 **`## 会话环境信息`**（含 **`session_id`**；位于整条 system prompt **最末**）。
 
@@ -193,8 +193,8 @@ def get_system_prompt(
     - 运行环境段落基于 **`HostSnapshot`**（启动时已 **`capture`** 则全程复用同一快照）；
     - skills 注入受配置项控制，未加载时不追加正文片段；
     - skills 元数据清单在启用时常驻注入；
-    - 原始消息审计说明仅在配置开启时注入；
-    - **`custom.md`** 与 **`session_id`** 段落在 **`.runtime` 约定** 与 JSONL 说明之后。
+    - 原始消息 JSONL 记录说明仅在配置开启时注入；
+    - **`custom.md`** 与 **`session_id`** 段落在 **`.runtime` 约定** 与 JSONL 记录说明之后。
 
     Args:
         context: 会话上下文（必填）；用于读取已加载技能（`loaded_skills`）。
@@ -264,13 +264,13 @@ def get_system_prompt(
     runtime_body = _format_runtime_environment_section(get_host_snapshot())
     parts.append(f"\n\n## 以下是当前运行环境：\n\n{runtime_body}\n")
     parts.append(f"\n\n## `.runtime` 工作目录约定\n\n{_format_runtime_workspace_section()}\n")
-    # 便于 Agent 用 read_file/search_file 操作审计落盘；与 raw_message_journal 写入约定对齐。
+    # 便于 Agent 用 read_file/search_file 查看 JSONL 落盘；与 raw_message_journal 写入约定对齐。
     if settings.agent_raw_message_history_enabled:
         hist_rel = (settings.agent_raw_message_history_dir or ".runtime/history").strip() or ".runtime/history"
         parts.append(
             "\n\n## 会话原始消息记录（JSONL）\n\n"
             "运行时在**每次向对话上下文追加或插入**一条 OpenAI 风格消息时，会把该条消息的**插入瞬间快照**"
-            "按会话、按自然日写入 JSONL（摘要压缩等**整段替换** `messages` 的操作**不会**写入本审计）。"
+            "按会话、按自然日写入 JSONL（摘要压缩等**整段替换** `messages` 的操作**不会**写入本条 JSONL 记录）。"
             "你可使用 `read_file`、`search_file` 等工具按会话与日期检索。\n\n"
             f"- 目录：`{hist_rel}/`\n"
             f"- 文件命名：`{{session_id}}_{{YYYYMMDD}}.jsonl`；例如 `sess-123_20260510.jsonl`\n"

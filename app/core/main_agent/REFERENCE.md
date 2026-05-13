@@ -30,7 +30,7 @@
 - **`_format_runtime_environment_section`**：将 **`HostSnapshot`** 格式化为「当前运行环境」正文（OS 类别、平台摘要、登录名、UID/GID）
 - **`_format_runtime_workspace_section`**：**`.runtime`** 子目录约定（含 **`data/`**、**`scripts/`**、**`scripts_menu.md`**）
 - **`_skills_base_dir_for_prompt`**：skills 根目录绝对路径（配置相对 **`resolve_runtime_root()`**）
-- **`get_system_prompt(context)`**：静态 + **`soul.md`** + **`user.md`** + skills + **`get_host_snapshot()`** 运行环境 + **`.runtime` 工作目录约定** +（配置启用时）JSONL 审计说明 + **`custom.md`**（最末）
+- **`get_system_prompt(context)`**：静态 + **`soul.md`** + **`user.md`** + skills + **`get_host_snapshot()`** 运行环境 + **`.runtime` 工作目录约定** +（配置启用时）JSONL 原始消息记录说明 + **`custom.md`**（最末）
 - **`read_memory_file_cached`**
 
 侧车目录 **`prompt_context/`** 不在本包内，见仓库根目录 **`prompt_context/README.md`**。

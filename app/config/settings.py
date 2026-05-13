@@ -217,9 +217,9 @@ class Settings(BaseModel):
 
     # --- 会话消息落盘 ---
     agent_session_store_path: str = ".runtime/memory/session.sqlite3"
-    # 是否在每次向 ctx.messages 追加/插入「业务原始消息」时写入 JSONL 审计（摘要压缩等整段替换不写）
+    # 是否在每次向 ctx.messages 追加/插入「业务原始消息」时追加写入 JSONL 记录（摘要压缩等整段替换不写）
     agent_raw_message_history_enabled: bool = True
-    # 审计目录（相对仓库根，默认 `.runtime/history`）
+    # JSONL 记录目录（相对仓库根，默认 `.runtime/history`）
     agent_raw_message_history_dir: str = ".runtime/history"
 
     # --- 兼容旧变量 ---

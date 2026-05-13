@@ -37,7 +37,7 @@ class PromptRuntimeEnvTestCase(unittest.TestCase):
         self.assertIn("操作系统类别：`linux`", text)
         self.assertIn("`alice`", text)
         self.assertIn("`1000` / `1000`", text)
-        self.assertIn("## 会话原始消息审计（JSONL）", text)
+        self.assertIn("## 会话原始消息记录（JSONL）", text)
         self.assertIn("recorded_at", text)
 
     def test_system_prompt_non_posix_uid_line(self) -> None:
@@ -60,7 +60,7 @@ class PromptRuntimeEnvTestCase(unittest.TestCase):
         self.assertIn("不适用（当前运行时非 POSIX 或未提供）", text)
 
     def test_system_prompt_omits_raw_journal_when_disabled(self) -> None:
-        """关闭原始消息审计配置时不注入 JSONL 说明段。"""
+        """关闭原始消息 JSONL 记录配置时不注入对应说明段。"""
         snap = HostSnapshot(
             captured_at_unix=0.0,
             os_kind="linux",
@@ -76,7 +76,7 @@ class PromptRuntimeEnvTestCase(unittest.TestCase):
         with patch.object(prompt_mod, "get_host_snapshot", return_value=snap):
             with patch.object(prompt_mod, "get_settings", return_value=disabled):
                 text = prompt_mod.get_system_prompt(OpenAIConversationContext())
-        self.assertNotIn("## 会话原始消息审计（JSONL）", text)
+        self.assertNotIn("## 会话原始消息记录（JSONL）", text)
 
 
 if __name__ == "__main__":

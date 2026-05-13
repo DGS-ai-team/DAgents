@@ -1,4 +1,4 @@
-"""原始消息 JSONL 审计单元测试。"""
+"""原始消息 JSONL 落盘记录单元测试。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from app.harness.history.raw_message_journal import (  # noqa: E402
 
 
 class RawMessageJournalTestCase(unittest.TestCase):
-    """验证审计写入路径与开关。"""
+    """验证 JSONL 记录写入路径与开关。"""
 
     _ENV_KEYS = ("AGENT_RAW_MESSAGE_HISTORY_ENABLED", "AGENT_RAW_MESSAGE_HISTORY_DIR")
 

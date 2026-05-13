@@ -750,14 +750,14 @@ class MainAgentTurnOrchestrator:
         tool_call_id: str,
         content: str,
     ) -> None:
-        """将工具执行结果回填到会话消息列表，并写入原始消息审计。
+        """将工具执行结果回填到会话消息列表，并写入原始消息 JSONL 记录。
 
         逻辑：
         1. 组装 **`role=tool`** 消息字典；
         2. **`append_openai_message_with_journal`** 追加并落 JSONL。
 
         副作用说明：
-        - 修改 **`ctx.messages`**；可能写 **`history/`**（或配置目录）审计文件。
+        - 修改 **`ctx.messages`**；可能写 **`history/`**（或配置目录）下 JSONL 记录文件。
         """
         append_openai_message_with_journal(
             ctx,
