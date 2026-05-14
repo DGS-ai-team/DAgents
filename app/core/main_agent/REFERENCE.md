@@ -24,9 +24,8 @@
 
 ## `prompt.py`
 
-- **`PROMPT_CONTEXT` 侧车目录**：**`<resolve_runtime_root()>/.runtime/prompt_context`**；缺省时从 **`packaging/prompt_context`** 种子拷贝（**`SOUL_MD`** / **`USER_MD`** / **`CUSTOM_MD`**）
-- **`_repo_packaging_prompt_seed_dir`** / **`_prompt_context_dir`** / **`_ensure_prompt_context_seeded`**：运行时目录与种子同步
-- **`_read_prompt_context_markdown`**：读该目录下 **`.md`**（mtime 缓存）
+- **`PROMPT_CONTEXT` 侧车目录**：**`<resolve_runtime_root()>/.runtime/prompt_context`**；缺失 **`soul.md` / `user.md` / `custom.md`** 时由 **`_ensure_prompt_context_files_exist`** 创建 **空 UTF-8 文件**（不覆盖已有文件）。发布包内可由 **`packaging/runtime/prompt_context/`** 空文件占位随 zip 解压即存在。
+- **`_prompt_context_dir`** / **`_ensure_prompt_context_files_exist`** / **`_read_prompt_context_markdown`**：目录与侧车文件、读盘与 mtime 缓存
 - **`get_static_system_prompt`**
 - **`_format_runtime_environment_section`**：将 **`HostSnapshot`** 格式化为「当前运行环境」正文（OS 类别、平台摘要、登录名、UID/GID）
 - **`_format_runtime_workspace_section`**：**`.runtime`** 子目录约定（含 **`data/`**、**`scripts/`**、**`scripts_menu.md`**）
@@ -34,5 +33,4 @@
 - **`get_system_prompt(context)`**：静态 + **`.runtime` 侧车 `soul.md` / `user.md`** + skills + **`get_host_snapshot()`** 运行环境 + **`.runtime` 工作目录约定** +（配置启用时）JSONL 原始消息记录说明 + **`custom.md`** + **`session_id`**（最末）
 - **`read_memory_file_cached`**
 
-侧车 Markdown 位于 **`<运行根>/.runtime/prompt_context/`**；仓库内种子见 **`packaging/prompt_context/README.md`**。
-
+侧车 Markdown 仅位于 **`<运行根>/.runtime/prompt_context/`**；内容由部署方在本地编辑（初始为空文件）。

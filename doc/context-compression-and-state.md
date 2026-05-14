@@ -129,11 +129,11 @@
 
 ## 8. 系统提示词组装与侧车 Markdown
 
-### 8.1 侧车路径与种子
+### 8.1 侧车路径与初始化
 
 - **运行时目录**：**`<resolve_runtime_root()>/.runtime/prompt_context/`**（与 **`.gitignore`** 下的 **`.runtime/`** 一致，**不提交 git**）。  
-- **仓库内种子**：**`packaging/prompt_context/`**（含 **`soul.md` / `user.md` / `custom.md`** 与 **`README.md`**）。  
-- **首次读取**：**`_read_prompt_context_markdown`** 会调用 **`_ensure_prompt_context_seeded`**：若运行时目录中 **缺少** 某文件名且种子中存在，则 **`shutil.copy2`** 拷贝一份；**已存在的文件不会被覆盖**，便于部署侧长期定制。
+- **仓库内占位**：**`packaging/runtime/prompt_context/`** 含 **空** **`soul.md` / `user.md` / `custom.md`**（无预设文案），随发布包并入 **`bundle/.runtime/`**；运行期权威路径仍为 **`<resolve_runtime_root()>/.runtime/prompt_context/`**（默认 **不提交 git**）。  
+- **首次读取**：**`_read_prompt_context_markdown`** 会调用 **`_ensure_prompt_context_files_exist`**：若 **`soul.md` / `user.md` / `custom.md`** 缺失则创建 **空文件**；**已存在的文件不会被覆盖**。
 
 ### 8.2 `custom.md` 与其它侧车
 
@@ -170,7 +170,7 @@
 | [architecture-and-flows.md](./architecture-and-flows.md) | 主流程、工具与 SSE |
 | [agent-input-output.md](./agent-input-output.md) | 入队与 SSE、`sse_client_id` |
 | [api-reference.md](./api-reference.md) | HTTP 契约 |
-| **`packaging/prompt_context/README.md`** | 侧车种子说明（仓库内路径） |
+| **`app/core/main_agent/prompt.py`** | **`_ensure_prompt_context_files_exist`** / **`_read_prompt_context_markdown`**：侧车仅 **`.runtime/prompt_context`**，缺失时建空文件 |
 
 ---
 

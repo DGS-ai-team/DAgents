@@ -18,7 +18,7 @@
 
 ### 变更
 
-- **系统提示侧车**：运行时从 **`<运行根>/.runtime/prompt_context/`** 读取 **`soul.md` / `user.md` / `custom.md`**；仓库内种子位于 **`packaging/prompt_context/`**，首次缺失时由 **`prompt.py`** 拷贝（不覆盖已有文件）。发布包/CI 将侧车目录打入 **`bundle/.runtime/prompt_context`**。
+- **系统提示侧车**：运行时从 **`<运行根>/.runtime/prompt_context/`** 读取 **`soul.md` / `user.md` / `custom.md`**；若缺失则由 **`prompt.py`** 创建 **空 UTF-8 文件**（不覆盖已有文件），**不从其它路径拷贝文案**。**`packaging/runtime/prompt_context/`** 提供 **空文件占位**；**`packaging/runtime/`** 另含 **`scripts/`**、**`data/`** 等目录占位，随发布 zip 并入 **`bundle/.runtime/`**。
 - **异步工具**：`AsyncToolResultStore.submit_coroutine` 要求非空 **`client_id`**；`OpenAIConversationContext` 新增进程内 **`sse_client_id`**（由带 **`client_id`** 的入站 `MessageEnvelope` 刷新），异步工具终态回灌的 **`MessageEnvelope.client_id`** 与该通道对齐，保证 SSE 可投递至原客户端。
 
 ### 文档

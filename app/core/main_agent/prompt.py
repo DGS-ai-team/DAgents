@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Tuple
 
@@ -29,19 +28,6 @@ USER_MD = "user.md"
 CUSTOM_MD = "custom.md"
 
 
-def _repo_packaging_prompt_seed_dir() -> Path:
-    """解析仓库内 `packaging/prompt_context` 目录（源码树）。
-
-    逻辑：
-    1. 以 **`app/core/main_agent/prompt.py`** 为锚上溯仓库根；
-    2. 拼接 **`packaging/prompt_context`**。
-
-    关键边界：
-    - PyInstaller 等打包目录未必含 **`packaging/`** 目录，调用方需 **`is_dir()`** 再决定是否种子拷贝。
-    """
-    return Path(__file__).resolve().parents[2].parent / "packaging" / "prompt_context"
-
-
 def _prompt_context_dir() -> Path:
     """解析运行根下 **`.runtime/prompt_context`** 并确保目录存在。
 
@@ -57,32 +43,33 @@ def _prompt_context_dir() -> Path:
     return d
 
 
-def _ensure_prompt_context_seeded() -> None:
-    """若运行时侧车缺失，则从 **`packaging/prompt_context`** 拷贝缺省模板（不覆盖已有文件）。
+def _ensure_prompt_context_files_exist() -> None:
+    """确保 **`.runtime/prompt_context/`** 下三份侧车 Markdown 存在；缺失则创建 **空 UTF-8 文件**。
 
     逻辑：
-    1. 取得目标目录（含 **`mkdir`**）与种子目录；
-    2. 种子非目录则返回；
-    3. 对 **`soul.md` / `user.md` / `custom.md`**：目标不存在且种子为文件时 **`shutil.copy2`**。
+    1. **`_prompt_context_dir()`** 创建目录；
+    2. 对 **`soul.md` / `user.md` / `custom.md`**：若路径 **已存在且为普通文件** → 不写入（保留部署方内容）；
+    3. 若 **不存在** → **`write_text(\"\", encoding=\"utf-8\")`** 创建空文件；
+    4. 若存在但 **非普通文件**（如目录）→ 跳过该项，避免破坏或抛错。
 
     关键边界：
-    - 已有 **`custom.md`** 等不会被覆盖，避免冲掉部署侧定制；
-    - 无种子目录时静默返回（例如裁剪后的发布包）。
+    - **从不**从 **`packaging/`** 或其它路径拷贝模板；侧车内容仅由 **`.runtime/prompt_context`** 管理。
 
     副作用说明：
-    - 可能写入 **`.runtime/prompt_context/*.md`**。
+    - 可能新建目录与至多三个空文件。
+
+    与外部交互：
+    - 仅本地区域文件系统。
     """
     dest = _prompt_context_dir()
-    seed = _repo_packaging_prompt_seed_dir()
-    if not seed.is_dir():
-        return
     for name in (SOUL_MD, USER_MD, CUSTOM_MD):
-        src = seed / name
-        dst = dest / name
-        if dst.exists():
+        path = dest / name
+        if path.is_file():
             continue
-        if src.is_file():
-            shutil.copy2(src, dst)
+        if path.exists():
+            # 非普通文件节点：不强行写，避免误覆盖异常类型路径。
+            continue
+        path.write_text("", encoding="utf-8")
 
 
 def get_static_system_prompt() -> str:
@@ -120,10 +107,11 @@ def _read_prompt_context_markdown(filename: str) -> str:
     """读取 **`.runtime/prompt_context/`** 内单个 Markdown 文件正文（UTF-8），带 mtime 进程内缓存。
 
     逻辑：
-    1. **`_ensure_prompt_context_seeded`** 后解析 **`_prompt_context_dir() / filename`**；
-    2. 非文件或 **`stat` 失败** → 返回 **`""`**；
-    3. 若缓存键（绝对路径）存在且 **mtime 未变** → 返回缓存正文；
-    4. 否则 **`read_text(encoding=\"utf-8\")`**，**`strip()`** 后写入缓存并返回。
+    1. **`_ensure_prompt_context_files_exist`** 确保目录与三份侧车文件存在（缺失则建空文件）；
+    2. 解析 **`_prompt_context_dir() / filename`**；
+    3. 非文件或 **`stat` 失败** → 返回 **`""`**；
+    4. 若缓存键（绝对路径）存在且 **mtime 未变** → 返回缓存正文；
+    5. 否则 **`read_text(encoding=\"utf-8\")`**，**`strip()`** 后写入缓存并返回。
 
     关键边界：
     - 空文件、仅空白 → 返回 **`""`**，**`get_system_prompt`** 将跳过对应段落；
@@ -133,10 +121,10 @@ def _read_prompt_context_markdown(filename: str) -> str:
         filename: 相对 **`.runtime/prompt_context`** 的文件名（如 **`soul.md`**）。
 
     副作用：
-    - 可能创建 **`.runtime/prompt_context`** 并从 **`packaging/prompt_context`** 拷贝缺省模板；
+    - 可能创建 **`.runtime/prompt_context`** 与空 **`*.md`**；
     - 更新 **`_prompt_context_file_cache`**。
     """
-    _ensure_prompt_context_seeded()
+    _ensure_prompt_context_files_exist()
     path = _prompt_context_dir() / filename
     if not path.is_file():
         return ""

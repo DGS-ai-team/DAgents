@@ -132,9 +132,8 @@ jobs:
           chmod +x bundle/start_register_center.sh
           cp .env.example bundle/
           cp README.md bundle/
-          cp -r skills bundle/skills
           mkdir -p bundle/.runtime
-          cp -r packaging/prompt_context bundle/.runtime/prompt_context
+          cp -a packaging/runtime/. bundle/.runtime/
           cd bundle
           zip -r "../${{ matrix.archive_name }}" .
 
@@ -149,10 +148,11 @@ jobs:
           Copy-Item "startup_scripts/windows/start_register_center.bat" "bundle/"
           Copy-Item ".env.example" "bundle/"
           Copy-Item "README.md" "bundle/"
-          Copy-Item "skills" "bundle/skills" -Recurse
           New-Item -ItemType Directory -Force -Path "bundle/.runtime" | Out-Null
-          Copy-Item "packaging/prompt_context" "bundle/.runtime/prompt_context" -Recurse
-          Compress-Archive -Path bundle/* -DestinationPath "${{ matrix.archive_name }}" -Force
+          Copy-Item "packaging/runtime/*" "bundle/.runtime" -Recurse -Force
+          Set-Location bundle
+          tar.exe -a -c -f "../${{ matrix.archive_name }}" .
+          Set-Location ..
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4

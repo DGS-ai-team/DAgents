@@ -28,7 +28,7 @@ class SkillDefinition(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    skill_name: str = Field(description="技能唯一名称（与 `skills/<skill_name>/` 目录名一致）。")
+    skill_name: str = Field(description="技能唯一名称（与技能根目录下 `<skill_name>/` 子目录名一致；默认根为 `<运行根>/.runtime/skills`）。")
     description: str = Field(default="", description="技能简要说明。")
     enabled: bool = Field(default=True, description="技能是否启用。")
     content: str = Field(default="", description="技能正文（来自 `SKILL.md` 正文段）。")
@@ -137,7 +137,7 @@ def list_enabled_skills() -> list[SkillDefinition]:
     """枚举并返回启用的 skills。
 
     逻辑：
-    1. 扫描 `skills/*/SKILL.md`；
+    1. 扫描 **`<技能根>/*/SKILL.md`**（技能根见 **`_resolve_skills_dir()`**，默认 **`<运行根>/.runtime/skills`**）；
     2. 读取并解析文件头部元数据（frontmatter）；
     3. 读取同文件正文；
     4. 过滤 `enabled=False` 与目录名为空的项；
