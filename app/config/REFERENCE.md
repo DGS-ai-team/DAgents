@@ -2,11 +2,14 @@
 
 ## `settings.py`
 
-- **`Settings`**：**Pydantic `BaseModel`（frozen）**；全局配置（含 LLM、**`summary_compression_silent_trigger_tokens`**、**`summary_compression_blocking_trigger_tokens`**、**`llm_stream_include_usage`**、**`metrics_enabled`**、**`app_log_level`**、队列（**`max_queue_size`** / **`agent_max_active_session_queues`** / **`agent_session_idle_evict_seconds`**）、本地调试相关配置、**`agent_id`**、**`agent_id_file_path`**、**`registry_url`**、**`discovery_groups`**、**`agent_public_base_url`**、**`agent_peer_cache_ttl_seconds`**、**`agent_peer_delivery_mode`**、**`agent_peer_stream_timeout_seconds`**、**`agent_peer_broadcast_stream_timeout_seconds`**、**`agent_session_store_path`**、**`agent_skills_dir`**、**`agent_raw_message_history_enabled`**、**`agent_raw_message_history_dir`**）
+- **`Settings`**：**Pydantic `BaseModel`（frozen）**；全局配置（含 LLM、**`summary_compression_silent_trigger_tokens`**、**`summary_compression_blocking_trigger_tokens`**、**`llm_stream_include_usage`**、**`metrics_enabled`**、**`app_log_level`**、队列（**`max_queue_size`** / **`agent_max_active_session_queues`** / **`agent_session_idle_evict_seconds`**）、本地调试相关配置、**`agent_id`**、**`registry_url`**、**`discovery_groups`**、**`agent_public_base_url`**、**`agent_peer_cache_ttl_seconds`**、**`agent_peer_delivery_mode`**、**`agent_peer_stream_timeout_seconds`**、**`agent_peer_broadcast_stream_timeout_seconds`**、**`agent_session_store_enabled`**、**`agent_raw_message_history_enabled`** 等）
 - **`get_settings`**：配置单例读取（支持 `reload=True`）
-- **`_agent_id_file_path`**：解析 Agent ID 文件路径（含默认值回退）
-- **`_resolve_agent_id`**：按“环境变量 > 文件 > 生成 UUID”顺序解析并持久化 Agent ID（**`agent_id_file_path`** 相对 **`resolve_runtime_root()`**，绝对路径则 **`resolve`**）
+- **`_resolve_agent_id`**：按“**`AGENT_ID` 环境变量** > **文件** > **生成 UUID**”顺序解析并持久化 Agent ID；文件路径固定为 **`runtime_layout.agent_id_file_path()`**（**`<运行根>/.runtime/agent/agent_id`**）
 - **`_env_csv`**：解析逗号分隔环境变量并做去重规范化
+
+## `runtime_layout.py`
+
+- **`skills_dir`** / **`raw_message_history_dir`** / **`session_sqlite_path`** / **`agent_id_file_path`** / **`shell_policy_dir`** / **`tool_policy_file_path`**：相对 **`resolve_runtime_root()`** 的固定 **`.runtime/...`** 路径（**不由环境变量覆盖**）
 
 ## `logging_setup.py`
 

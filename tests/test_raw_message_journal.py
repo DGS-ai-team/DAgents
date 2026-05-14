@@ -21,17 +21,17 @@ class RecordRawOpenaiMessageAppendTests(unittest.TestCase):
             root = Path(tmp)
             with patch.object(journal, "get_settings") as gs:
                 gs.return_value.agent_raw_message_history_enabled = False
-                gs.return_value.agent_raw_message_history_dir = str(root / "h")
                 journal.record_raw_openai_message_append("s1", {"role": "user", "content": "x"})
             self.assertEqual(list(root.rglob("*.jsonl")), [])
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            with patch.object(journal, "get_settings") as gs:
+            with patch.object(journal, "get_settings") as gs, patch(
+                "app.config.runtime_layout.resolve_runtime_root", return_value=root
+            ):
                 gs.return_value.agent_raw_message_history_enabled = True
-                gs.return_value.agent_raw_message_history_dir = str(root / "h")
                 journal.record_raw_openai_message_append("", {"role": "user", "content": "x"})
-            self.assertEqual(list(root.rglob("*.jsonl")), [])
+            self.assertEqual(list((root / ".runtime" / "history").rglob("*.jsonl")), [])
 
 
 class AppendOpenaiMessageWithJournalTests(unittest.TestCase):
@@ -41,10 +41,11 @@ class AppendOpenaiMessageWithJournalTests(unittest.TestCase):
         """应在配置目录下生成 JSONL，行内含 `recorded_at` 与 `message` 快照。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            hist = root / "hist"
-            with patch.object(journal, "get_settings") as gs, patch.object(journal, "resolve_runtime_root", return_value=root):
+            hist = root / ".runtime" / "history"
+            with patch.object(journal, "get_settings") as gs, patch(
+                "app.config.runtime_layout.resolve_runtime_root", return_value=root
+            ):
                 gs.return_value.agent_raw_message_history_enabled = True
-                gs.return_value.agent_raw_message_history_dir = str(hist)
                 ctx = OpenAIConversationContext(session_id="sess-a", messages=[])
                 journal.append_openai_message_with_journal(ctx, {"role": "user", "content": "hello"})
             self.assertEqual(len(ctx.messages), 1)
@@ -63,10 +64,11 @@ class InsertOpenaiMessageWithJournalTests(unittest.TestCase):
         """`insert(0, ...)` 后列表首条为新消息；JSONL 仍按调用顺序追加一行。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            hist = root / "hist"
-            with patch.object(journal, "get_settings") as gs, patch.object(journal, "resolve_runtime_root", return_value=root):
+            hist = root / ".runtime" / "history"
+            with patch.object(journal, "get_settings") as gs, patch(
+                "app.config.runtime_layout.resolve_runtime_root", return_value=root
+            ):
                 gs.return_value.agent_raw_message_history_enabled = True
-                gs.return_value.agent_raw_message_history_dir = str(hist)
                 ctx = OpenAIConversationContext(session_id="sess-b", messages=[{"role": "user", "content": "old"}])
                 journal.insert_openai_message_with_journal(ctx, 0, {"role": "system", "content": "sys"})
             self.assertEqual(ctx.messages[0]["role"], "system")

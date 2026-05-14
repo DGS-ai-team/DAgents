@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.config.env import resolve_runtime_root
+from app.config.runtime_layout import raw_message_history_dir
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 
@@ -47,19 +47,15 @@ def _journal_file_path(session_id: str) -> Path:
     """解析当日 JSONL 记录文件路径（`{safe_sid}_{YYYYMMDD}.jsonl`）。
 
     逻辑：
-    1. 读配置中的目录路径片段；
-    2. 相对路径与 **`resolve_runtime_root()`** 拼接（配置中宜写 **`.runtime/...`**）；
-    3. 文件名使用本地日期的 **`%Y%m%d`**（与「按日滚动」语义一致）。
+    1. 基础目录固定为 **`<运行根>/.runtime/history`**（**`raw_message_history_dir()`**）；
+    2. 文件名使用本地日期的 **`%Y%m%d`**（与「按日滚动」语义一致）。
 
-    关键分支：
-    - 目录名为空时回退 **`.runtime/history`**。
+    关键分支/边界：
+    - 与 **`runtime_layout`** 常量一致；单测可 **`patch`** **`resolve_runtime_root`** 将目录隔离到临时根。
     """
-    settings = get_settings()
     day = datetime.now().strftime("%Y%m%d")
     safe_sid = _sanitize_session_id_for_filename(session_id)
-    subdir = (settings.agent_raw_message_history_dir or ".runtime/history").strip() or ".runtime/history"
-    bp = Path(subdir).expanduser()
-    base = bp.resolve() if bp.is_absolute() else (resolve_runtime_root() / bp).resolve()
+    base = raw_message_history_dir()
     return base / f"{safe_sid}_{day}.jsonl"
 
 
@@ -115,7 +111,7 @@ def append_openai_message_with_journal(ctx: OpenAIConversationContext, message: 
     - JSONL 落盘失败在 **`record_*`** 内吞掉；列表已成功追加时不回滚。
 
     副作用说明：
-    - 修改 **`ctx.messages`**；可能写本地 **`history/`**（或配置目录）下 JSONL。
+    - 修改 **`ctx.messages`**；可能写本地 **`<运行根>/.runtime/history/`** 下 JSONL。
     """
     snapshot = copy.deepcopy(message)
     ctx.messages.append(message)

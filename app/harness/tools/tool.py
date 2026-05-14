@@ -10,15 +10,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.config.env import resolve_runtime_root
-from app.config.settings import get_settings
+from app.config.runtime_layout import shell_policy_dir, tool_policy_file_path
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.async_store import get_async_tool_result_store
 from pydantic import BaseModel, ConfigDict, Field
 
 ApprovalMode = str
 _VALID_APPROVAL_MODES: set[str] = {"always", "never", "rule"}
-DEFAULT_TOOL_APPROVAL_POLICY_FILE = ".runtime/policy/tool.approval.txt"
-DEFAULT_SHELL_POLICY_DIR = ".runtime/policy/shell"
 
 
 def _resolve_repo_relative_path(rel_or_abs: str) -> Path:
@@ -27,7 +25,7 @@ def _resolve_repo_relative_path(rel_or_abs: str) -> Path:
     逻辑：
     1. `expanduser` 展开用户主目录；
     2. 已为绝对路径则 `resolve`；
-    3. 否则锚定 **`resolve_runtime_root()`**（源码仓库根或 frozen 可执行目录），与 **`AGENT_SESSION_STORE_PATH`** 一致。
+    3. 否则锚定 **`resolve_runtime_root()`**（源码仓库根或 frozen 可执行目录），与 **`runtime_layout`** 会话/sqlite 等路径锚定规则一致。
 
     关键边界：
     - 相对路径不以进程 cwd 为锚点，避免在不同启动目录下误读策略文件。
@@ -79,30 +77,6 @@ def _policy_entry_map_from_file(path: Path) -> dict[str, str]:
     return mapping
 
 
-def _tool_policy_file_path() -> Path:
-    """返回工具审批策略文件路径（支持环境变量覆盖）。
-
-    与外部交互：
-    - `TOOL_APPROVAL_POLICY_FILE` 未设置时使用默认 **`.runtime/policy/tool.approval.txt`**（相对仓库根）。
-    """
-
-    raw = os.environ.get("TOOL_APPROVAL_POLICY_FILE", "").strip()
-    chosen = raw or DEFAULT_TOOL_APPROVAL_POLICY_FILE
-    return _resolve_repo_relative_path(chosen)
-
-
-def _shell_policy_dir() -> Path:
-    """返回 shell 审批策略目录（与 bash 工具共享 `SHELL_POLICY_DIR`）。
-
-    与外部交互：
-    - `SHELL_POLICY_DIR` 未设置时使用默认 **`.runtime/policy/shell`**（相对仓库根）。
-    """
-
-    raw = os.environ.get("SHELL_POLICY_DIR", "").strip()
-    chosen = raw or DEFAULT_SHELL_POLICY_DIR
-    return _resolve_repo_relative_path(chosen)
-
-
 def _ensure_approval_policy_files() -> None:
     """确保工具级与 shell 级审批策略文件存在。
 
@@ -111,11 +85,11 @@ def _ensure_approval_policy_files() -> None:
     2. 创建 shell 策略目录；
     3. 为 `bash/cmd/powershell` 各自创建 `<shell>.approval.txt`。
     """
-    tool_policy = _tool_policy_file_path()
+    tool_policy = tool_policy_file_path()
     tool_policy.parent.mkdir(parents=True, exist_ok=True)
     if not tool_policy.exists():
         tool_policy.write_text("", encoding="utf-8")
-    shell_dir = _shell_policy_dir()
+    shell_dir = shell_policy_dir()
     shell_dir.mkdir(parents=True, exist_ok=True)
     for shell_name in ("bash", "cmd", "powershell"):
         shell_file = shell_dir / f"{shell_name}.approval.txt"
@@ -126,14 +100,14 @@ def _ensure_approval_policy_files() -> None:
 def _tool_approval_mode(tool_name: str) -> str:
     """读取指定工具的审批模式（`tool_name=mode`）。"""
     _ensure_approval_policy_files()
-    mapping = _policy_entry_map_from_file(_tool_policy_file_path())
+    mapping = _policy_entry_map_from_file(tool_policy_file_path())
     return mapping.get(tool_name.strip().lower(), "rule")
 
 
 def _shell_command_approval_mode(shell_type: str, root_command: str) -> str:
     """读取指定 shell 命令首词的审批模式（`root=mode`）。"""
     _ensure_approval_policy_files()
-    policy_file = _shell_policy_dir() / f"{shell_type}.approval.txt"
+    policy_file = shell_policy_dir() / f"{shell_type}.approval.txt"
     mapping = _policy_entry_map_from_file(policy_file)
     return mapping.get(root_command.strip().lower(), "rule")
 

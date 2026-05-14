@@ -107,14 +107,14 @@
 
 ## 6. 与持久化、观测的衔接
 
-- **落盘**：**`AgentService._persist_context`** → **`ctx.to_conversation_context()`** → **`SqliteMessageStore`**（当 **`AGENT_SESSION_STORE_PATH`** 已配置时）；详见 §7。  
+- **落盘**：**`AgentService._persist_context`** → **`ctx.to_conversation_context()`** → **`SqliteMessageStore`**（当 **`agent_session_store_enabled`** 为真时）；详见 §7。  
 - **Prometheus**：**`refresh_session_context_metrics`** 在 **`_handle_message`** 的 **`finally`** 中调用，与队列积压等见 [prometheus-metrics.md](./prometheus-metrics.md)。
 
 ---
 
 ## 7. 会话记忆与持久化（`SqliteMessageStore`）
 
-当 **`AGENT_SESSION_STORE_PATH`** 解析结果 **非空**（默认未在环境中设置该键时为 **`.runtime/memory/session.sqlite3`**；若在环境中 **显式设为空串** 则关闭 SQLite）时，**`AgentService`** 使用 **`app/harness/memory/store.py`** 中的 **`SqliteMessageStore`**，在 **`_handle_message`** 的 **`finally`** 中把 **`OpenAIConversationContext.to_conversation_context()`** 整包写入 SQLite。
+当 **`Settings.agent_session_store_enabled`** 为真（环境 **`AGENT_SESSION_STORE_ENABLED`**，默认开启）时，**`AgentService`** 使用 **`app/harness/memory/store.py`** 中的 **`SqliteMessageStore`**，数据库路径固定为 **`<运行根>/.runtime/memory/session.sqlite3`**（**`runtime_layout.session_sqlite_path()`**），在 **`_handle_message`** 的 **`finally`** 中把 **`OpenAIConversationContext.to_conversation_context()`** 整包写入 SQLite。
 
 | 概念 | 说明 |
 |------|------|
@@ -129,11 +129,11 @@
 
 ## 8. 系统提示词组装与侧车 Markdown
 
-### 8.1 侧车路径与种子
+### 8.1 侧车路径与初始化
 
 - **运行时目录**：**`<resolve_runtime_root()>/.runtime/prompt_context/`**（与 **`.gitignore`** 下的 **`.runtime/`** 一致，**不提交 git**）。  
-- **仓库内种子**：**`packaging/prompt_context/`**（含 **`soul.md` / `user.md` / `custom.md`** 与 **`README.md`**）。  
-- **首次读取**：**`_read_prompt_context_markdown`** 会调用 **`_ensure_prompt_context_seeded`**：若运行时目录中 **缺少** 某文件名且种子中存在，则 **`shutil.copy2`** 拷贝一份；**已存在的文件不会被覆盖**，便于部署侧长期定制。
+- **仓库内占位**：**`packaging/runtime/prompt_context/`** 含 **空** **`soul.md` / `user.md` / `custom.md`**（无预设文案），随发布包并入 **`bundle/.runtime/`**；运行期权威路径仍为 **`<resolve_runtime_root()>/.runtime/prompt_context/`**（默认 **不提交 git**）。  
+- **首次读取**：**`_read_prompt_context_markdown`** 会调用 **`_ensure_prompt_context_files_exist`**：若 **`soul.md` / `user.md` / `custom.md`** 缺失则创建 **空文件**；**已存在的文件不会被覆盖**。
 
 ### 8.2 `custom.md` 与其它侧车
 
@@ -155,7 +155,7 @@
 5. 若 **`agent_skills_allow_create`**：追加 **自主创建 skills** 说明（含 skills 根路径）。  
 6. **`get_host_snapshot()`** → **「以下是当前运行环境」**。  
 7. **「`.runtime` 工作目录约定」**（含 **`memory/`**、**`prompt_context/`**、**`agent/`**、**`skills/`**、**`data/`**、**`scripts/`**、**`scripts_menu.md`** 等说明文本）。  
-8. 若启用 **`agent_raw_message_history_enabled`**：追加 **JSONL 原始消息记录** 说明（路径来自 **`agent_raw_message_history_dir`**，默认 **`.runtime/history/`**）。  
+8. 若启用 **`agent_raw_message_history_enabled`**：追加 **JSONL 原始消息记录** 说明（目录固定 **`<运行根>/.runtime/history/`**，见 **`raw_message_history_dir()`**）。  
 9. **`custom.md`**（可选）。  
 10. **「会话环境信息」**（含 **`session_id`**）。
 
@@ -170,7 +170,7 @@
 | [architecture-and-flows.md](./architecture-and-flows.md) | 主流程、工具与 SSE |
 | [agent-input-output.md](./agent-input-output.md) | 入队与 SSE、`sse_client_id` |
 | [api-reference.md](./api-reference.md) | HTTP 契约 |
-| **`packaging/prompt_context/README.md`** | 侧车种子说明（仓库内路径） |
+| **`app/core/main_agent/prompt.py`** | **`_ensure_prompt_context_files_exist`** / **`_read_prompt_context_markdown`**：侧车仅 **`.runtime/prompt_context`**，缺失时建空文件 |
 
 ---
 

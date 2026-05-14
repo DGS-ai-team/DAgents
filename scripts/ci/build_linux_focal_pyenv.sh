@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# 在 i386 Linux 容器（如 i386/ubuntu:focal）内：用 pyenv 从源码编译 32 位 CPython，再执行 PyInstaller。
+# 在 **Ubuntu 20.04 (focal)** 容器内（**amd64** 用 `ubuntu:20.04`，**i386** 用 `i386/ubuntu:focal`）：用 pyenv 从源码编译 CPython，再执行 PyInstaller。
 #
-# 背景：deadsnakes PPA 基本不提供 i386 deb；library/ubuntu 亦无可靠 linux/386 根镜像与新版 Python 的组合，
-# 因此在 CI 中用 pyenv + 官方源码在目标架构上编译最稳妥。
+# 背景：
+# 1. **amd64**：deadsnakes PPA 已不再为 focal 提供 `python3.13` 等套件（`Unable to locate package python3.13`），
+#    因此在 **glibc 2.31** 工具链下仍需 3.13 时，只能与 i386 一样走 **pyenv + 官方源码**。
+# 2. **i386**：deadsnakes 基本不提供 i386 deb；pyenv 在目标架构上编译最稳妥。
 #
 # 约定：
-# - 工作区挂载为 /src（与 GitHub Actions docker -v 一致）；
-# - API_PI_ARGS / RC_PI_ARGS：传给 `python -m PyInstaller` 的完整参数串（与 workflow matrix 一致）；
-# - PYENV_PYTHON_VERSION：可选，默认 3.13.2。
+# - 工作区挂载为 /src（与 GitHub Actions `docker -v` 一致）；
+# - **API_PI_ARGS** / **RC_PI_ARGS**：传给 `python -m PyInstaller` 的完整参数串（与 workflow matrix 一致）；
+# - **PYENV_PYTHON_VERSION**：可选，默认 **3.13.2**。
 #
-# 副作用：首次编译 CPython 耗时较长，建议在 workflow 上为该 step 设置足够 timeout。
+# 副作用：首次编译 CPython 耗时较长，建议在 workflow 上为该 step 设置足够 **timeout**。
 
 set -euxo pipefail
 

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Tuple
 
 from app.config.env import resolve_runtime_root
 from app.config.host_snapshot import HostSnapshot, get_host_snapshot
+from app.config.runtime_layout import skills_dir
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.harness.skills.skills import (
@@ -29,19 +29,6 @@ USER_MD = "user.md"
 CUSTOM_MD = "custom.md"
 
 
-def _repo_packaging_prompt_seed_dir() -> Path:
-    """解析仓库内 `packaging/prompt_context` 目录（源码树）。
-
-    逻辑：
-    1. 以 **`app/core/main_agent/prompt.py`** 为锚上溯仓库根；
-    2. 拼接 **`packaging/prompt_context`**。
-
-    关键边界：
-    - PyInstaller 等打包目录未必含 **`packaging/`** 目录，调用方需 **`is_dir()`** 再决定是否种子拷贝。
-    """
-    return Path(__file__).resolve().parents[2].parent / "packaging" / "prompt_context"
-
-
 def _prompt_context_dir() -> Path:
     """解析运行根下 **`.runtime/prompt_context`** 并确保目录存在。
 
@@ -57,32 +44,33 @@ def _prompt_context_dir() -> Path:
     return d
 
 
-def _ensure_prompt_context_seeded() -> None:
-    """若运行时侧车缺失，则从 **`packaging/prompt_context`** 拷贝缺省模板（不覆盖已有文件）。
+def _ensure_prompt_context_files_exist() -> None:
+    """确保 **`.runtime/prompt_context/`** 下三份侧车 Markdown 存在；缺失则创建 **空 UTF-8 文件**。
 
     逻辑：
-    1. 取得目标目录（含 **`mkdir`**）与种子目录；
-    2. 种子非目录则返回；
-    3. 对 **`soul.md` / `user.md` / `custom.md`**：目标不存在且种子为文件时 **`shutil.copy2`**。
+    1. **`_prompt_context_dir()`** 创建目录；
+    2. 对 **`soul.md` / `user.md` / `custom.md`**：若路径 **已存在且为普通文件** → 不写入（保留部署方内容）；
+    3. 若 **不存在** → **`write_text(\"\", encoding=\"utf-8\")`** 创建空文件；
+    4. 若存在但 **非普通文件**（如目录）→ 跳过该项，避免破坏或抛错。
 
     关键边界：
-    - 已有 **`custom.md`** 等不会被覆盖，避免冲掉部署侧定制；
-    - 无种子目录时静默返回（例如裁剪后的发布包）。
+    - **从不**从 **`packaging/`** 或其它路径拷贝模板；侧车内容仅由 **`.runtime/prompt_context`** 管理。
 
     副作用说明：
-    - 可能写入 **`.runtime/prompt_context/*.md`**。
+    - 可能新建目录与至多三个空文件。
+
+    与外部交互：
+    - 仅本地区域文件系统。
     """
     dest = _prompt_context_dir()
-    seed = _repo_packaging_prompt_seed_dir()
-    if not seed.is_dir():
-        return
     for name in (SOUL_MD, USER_MD, CUSTOM_MD):
-        src = seed / name
-        dst = dest / name
-        if dst.exists():
+        path = dest / name
+        if path.is_file():
             continue
-        if src.is_file():
-            shutil.copy2(src, dst)
+        if path.exists():
+            # 非普通文件节点：不强行写，避免误覆盖异常类型路径。
+            continue
+        path.write_text("", encoding="utf-8")
 
 
 def get_static_system_prompt() -> str:
@@ -120,10 +108,11 @@ def _read_prompt_context_markdown(filename: str) -> str:
     """读取 **`.runtime/prompt_context/`** 内单个 Markdown 文件正文（UTF-8），带 mtime 进程内缓存。
 
     逻辑：
-    1. **`_ensure_prompt_context_seeded`** 后解析 **`_prompt_context_dir() / filename`**；
-    2. 非文件或 **`stat` 失败** → 返回 **`""`**；
-    3. 若缓存键（绝对路径）存在且 **mtime 未变** → 返回缓存正文；
-    4. 否则 **`read_text(encoding=\"utf-8\")`**，**`strip()`** 后写入缓存并返回。
+    1. **`_ensure_prompt_context_files_exist`** 确保目录与三份侧车文件存在（缺失则建空文件）；
+    2. 解析 **`_prompt_context_dir() / filename`**；
+    3. 非文件或 **`stat` 失败** → 返回 **`""`**；
+    4. 若缓存键（绝对路径）存在且 **mtime 未变** → 返回缓存正文；
+    5. 否则 **`read_text(encoding=\"utf-8\")`**，**`strip()`** 后写入缓存并返回。
 
     关键边界：
     - 空文件、仅空白 → 返回 **`""`**，**`get_system_prompt`** 将跳过对应段落；
@@ -133,10 +122,10 @@ def _read_prompt_context_markdown(filename: str) -> str:
         filename: 相对 **`.runtime/prompt_context`** 的文件名（如 **`soul.md`**）。
 
     副作用：
-    - 可能创建 **`.runtime/prompt_context`** 并从 **`packaging/prompt_context`** 拷贝缺省模板；
+    - 可能创建 **`.runtime/prompt_context`** 与空 **`*.md`**；
     - 更新 **`_prompt_context_file_cache`**。
     """
-    _ensure_prompt_context_seeded()
+    _ensure_prompt_context_files_exist()
     path = _prompt_context_dir() / filename
     if not path.is_file():
         return ""
@@ -219,14 +208,6 @@ def _format_runtime_environment_section(snap: HostSnapshot) -> str:
     return "\n".join(lines)
 
 
-def _skills_base_dir_for_prompt() -> Path:
-    """解析 skills 在提示词中展示的目标目录。"""
-
-    configured = (get_settings().agent_skills_dir or "").strip() or ".runtime/skills"
-    sp = Path(configured).expanduser()
-    return sp.resolve() if sp.is_absolute() else (resolve_runtime_root() / sp).resolve()
-
-
 def get_system_prompt(
     context: OpenAIConversationContext,
 ) -> str:
@@ -303,11 +284,11 @@ def get_system_prompt(
                 f"\n\n## 以下是当前会话已加载技能的具体执行规则：\n\n{skills_prompt}\n"
             )
     if settings.agent_skills_allow_create:
-        skills_dir = _skills_base_dir_for_prompt()
+        skills_root = skills_dir()
         parts.append(
             "\n\n## 你可以自主创建 skills（已启用）\n\n"
             "当任务需要沉淀可复用能力时，你可以创建或更新 skills。\n\n"
-            f"- skills 根目录：`{skills_dir}`\n"
+            f"- skills 根目录：`{skills_root}`\n"
             "- 目录结构：`<skills_root>/<skill_name>/SKILL.md`（目录名即唯一技能名）\n"
             "- 文件格式：`SKILL.md` 必须由 frontmatter 元数据头 + 正文组成，示例：\n"
             "  ---\n"
@@ -323,7 +304,7 @@ def get_system_prompt(
     parts.append(f"\n\n## `.runtime` 工作目录约定\n\n{_format_runtime_workspace_section()}\n")
     # 便于 Agent 用 read_file/search_file 查看 JSONL 落盘；与 raw_message_journal 写入约定对齐。
     if settings.agent_raw_message_history_enabled:
-        hist_rel = (settings.agent_raw_message_history_dir or ".runtime/history").strip() or ".runtime/history"
+        hist_rel = str(Path(".runtime/history"))
         parts.append(
             "\n\n## 会话原始消息记录（JSONL）\n\n"
             "运行时在**每次向对话上下文追加或插入**一条 OpenAI 风格消息时，会把该条消息的**插入瞬间快照**"

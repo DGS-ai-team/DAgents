@@ -124,7 +124,7 @@
 |------|--------|
 | **文件工具** | 环境变量 **`FS_ROOT`**：所有路径须落在该根目录下，否则拒绝访问。 |
 | **Shell** | 宿主 OS、策略文件（**`bash.py`** / **`tool.py`** 审批分支）；Windows/Linux 行为差异见 **`bash.py`**。 |
-| **Skills** | **`AGENT_SKILLS_*`**、技能目录（默认相对运行根的 **`.runtime/skills`**）；**`get_system_prompt`** 是否注入技能段由 **`agent_skills_enabled`** 等控制，与 **`load_skills`** 写入 **`ctx.loaded_skills`** 配合。 |
+| **Skills** | **`AGENT_SKILLS_*`**（开关与注入上限等）；技能根目录固定 **`<运行根>/.runtime/skills`**；**`get_system_prompt`** 是否注入技能段由 **`agent_skills_enabled`** 等控制，与 **`load_skills`** 写入 **`ctx.loaded_skills`** 配合。 |
 | **A2A** | **`REGISTRY_URL`**、**`DISCOVERY_GROUPS`**、**`AGENT_ID`**、**`AGENT_PUBLIC_BASE_URL`**（自登记）、**`AGENT_PEER_DELIVERY_MODE`**、各类超时；详见 [a2a-and-register-center.md](./a2a-and-register-center.md)。 |
 
 ---

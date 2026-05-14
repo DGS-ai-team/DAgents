@@ -3,18 +3,21 @@
 | 文件 | 说明 |
 |------|------|
 | **`settings.py`** | **`Settings`** dataclass、**`get_settings()`**；环境变量键名与 **`.env.example`** 一致 |
+| **`runtime_layout.py`** | **`.runtime/...`** 下固定相对路径（skills / JSONL / sqlite / agent_id / 策略文件等），统一锚定 **`resolve_runtime_root()`** |
 | **`env.py`** | **`load_env`**；**`resolve_runtime_root`**（仓库根或打包后可执行目录） |
 | **`host_snapshot.py`** | **`HostSnapshot`**、**`capture_host_snapshot_at_startup`**（API 启动采集环境并打 INFO）、**`get_host_snapshot`**（进程内只读缓存） |
 | **`logging_setup.py`** | **`configure_app_logging`** / **`resolve_log_level`**：与 **`APP_LOG_LEVEL`**、`uvicorn` 对齐的根日志配置 |
 | **`startup_checks.py`** | **`emit_linux_cross_user_shell_startup_hints`**：Linux 下跨用户 shell 提示（读 **`get_host_snapshot()`**；仅 **`logging`**，避免 stderr 双写重复） |
 ## 本地运行时路径（默认均在 `.runtime/`）
 
-配置里的相对路径一律相对 **`resolve_runtime_root()`**（仓库根）。约定：
+下列路径由 **`app/config/runtime_layout.py`** 写死为相对 **`resolve_runtime_root()`** 的片段（**无**对应环境变量覆盖）：
 
-- **`.runtime/memory/session.sqlite3`**：`AGENT_SESSION_STORE_PATH` 默认
-- **`.runtime/agent/agent_id`**：`AGENT_ID_FILE_PATH` 默认
-- **`.runtime/history/`**：`AGENT_RAW_MESSAGE_HISTORY_DIR` 默认（原始消息 JSONL）
-- **`.runtime/skills/`**：`AGENT_SKILLS_DIR` 默认
+- **`.runtime/memory/session.sqlite3`**：会话 SQLite；是否启用由 **`AGENT_SESSION_STORE_ENABLED`**（**`Settings.agent_session_store_enabled`**）控制
+- **`.runtime/agent/agent_id`**：Agent ID 持久化文件
+- **`.runtime/history/`**：原始消息 JSONL（开关 **`AGENT_RAW_MESSAGE_HISTORY_ENABLED`**）
+- **`.runtime/skills/`**：技能根目录
+
+其它约定路径仍相对运行根：
 - **`.runtime/data/`**：临时数据（脚本输出、上传文件、中间产物等；非唯一权威存档）
 - **`.runtime/scripts/`**：与 skills 无绑定的独立脚本优先存放处
 - **`.runtime/scripts_menu.md`**：脚本索引与说明（路径、用途、运行方式等），便于检索；增删脚本时请同步更新
@@ -34,7 +37,7 @@
 ## Agent 标识配置
 
 - `AGENT_ID`：可显式指定当前 Agent ID（优先级最高）
-- `AGENT_ID_FILE_PATH`：Agent ID 持久化文件路径（默认 **`.runtime/agent/agent_id`**）
+- Agent ID 文件路径固定为 **`<运行根>/.runtime/agent/agent_id`**（见 **`runtime_layout`**）
 - 启动时若 `AGENT_ID` 与文件内容都不可用，会自动生成 UUID 并写入文件
 
 ## Agent 间协作配置

@@ -6,7 +6,7 @@
     PYTHONPATH=. python scripts/query_session_sqlite.py list
     PYTHONPATH=. python scripts/query_session_sqlite.py show <session_id>
 
-数据库路径：优先 **`--db`**，否则 **`AGENT_SESSION_STORE_PATH`**（会先 **`load_env`** 读取 `.env`），再否则 **`.runtime/memory/session.sqlite3`**（相对仓库根，与 AgentService 默认一致）。
+数据库路径：优先 **`--db`**；省略则静默加载 **`resolve_runtime_root()/.env`** 后读取 **`AGENT_SESSION_STORE_ENABLED`**（若为 false 则打印提示并以退出码 4 退出）；否则使用固定路径 **`<运行根>/.runtime/memory/session.sqlite3`**（与 **`runtime_layout.session_sqlite_path()`** / **`AgentService`** 一致）。
 """
 
 from __future__ import annotations
@@ -22,22 +22,25 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 
-def _resolve_db_path(argv_db: str) -> Path:
-    """解析 sqlite 文件路径。
+def _resolve_db_path(argv_db: str) -> tuple[Path, bool]:
+    """解析 sqlite 文件路径，并返回「会话存储开关是否关闭」。
 
     逻辑：
-    1. **`argv_db` 非空** → **`expanduser`** 后为唯一候选；
-    2. 否则静默加载 **`resolve_runtime_root()/.env`**（不 **`print`**，便于 **`list`** 管道）后读 **`AGENT_SESSION_STORE_PATH`**；
-    3. 再否则默认 **`.runtime/memory/session.sqlite3`**（相对仓库根，与 AgentService 一致）。
+    1. **`argv_db` 非空** → **`expanduser`** 后 **`resolve`**，第二项恒为 **`False`**（调用方显式指定 DB，不因开关短路）；
+    2. 否则静默加载 **`resolve_runtime_root()/.env`**（不 **`print`**，便于 **`list`** 管道）；
+    3. 读 **`AGENT_SESSION_STORE_ENABLED`**：若为假值则第二项为 **`True`**（主流程可提示并退出），路径仍指向默认 sqlite 以便运维核对；
+    4. 否则第二项为 **`False`**，路径为 **`session_sqlite_path()`**。
 
     关键边界：
-    - 候选路径仍可能不存在（**`list`** / **`show`** 内再报错）。
+    - 候选路径仍可能不存在（**`list`** / **`show`** 内再报错）；
+    - 开关关闭时不改路径语义，仅通过第二返回值让 CLI 决定是否提前退出。
     """
     raw = (argv_db or "").strip()
     if raw:
-        return Path(raw).expanduser().resolve()
+        return Path(raw).expanduser().resolve(), False
 
     from app.config.env import resolve_runtime_root
+    from app.config.runtime_layout import session_sqlite_path
 
     try:
         from dotenv import load_dotenv
@@ -51,15 +54,14 @@ def _resolve_db_path(argv_db: str) -> Path:
 
     import os
 
-    def _under_repo(rel_or_abs: str) -> Path:
-        p = Path(rel_or_abs).expanduser()
-        return p.resolve() if p.is_absolute() else (resolve_runtime_root() / p).resolve()
+    def _env_enabled(key: str, default: bool = True) -> bool:
+        v = (os.getenv(key) or "").strip()
+        if not v:
+            return default
+        return v.lower() in ("1", "true", "yes", "on")
 
-    env_path = (os.getenv("AGENT_SESSION_STORE_PATH") or "").strip()
-    if env_path:
-        return _under_repo(env_path)
-
-    return _under_repo(".runtime/memory/session.sqlite3")
+    disabled = not _env_enabled("AGENT_SESSION_STORE_ENABLED", True)
+    return session_sqlite_path(), disabled
 
 
 def _conversation_context_to_jsonable(store_path: Path, session_id: str) -> dict[str, object]:
@@ -140,7 +142,7 @@ def main() -> None:
     parser.add_argument(
         "--db",
         default="",
-        help="sqlite 路径；省略则从 AGENT_SESSION_STORE_PATH / 默认 .runtime/memory/session.sqlite3 推断",
+        help="sqlite 路径；省略则使用 <运行根>/.runtime/memory/session.sqlite3（与 runtime_layout 一致）",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -150,7 +152,15 @@ def main() -> None:
     p_show.add_argument("session_id", help="会话 ID")
 
     args = parser.parse_args()
-    db_path = _resolve_db_path(args.db)
+    db_path, store_disabled = _resolve_db_path(args.db)
+
+    if store_disabled and not (args.db or "").strip():
+        print(
+            "NOTE: AGENT_SESSION_STORE_ENABLED 为 false，服务默认不写入该 sqlite；"
+            f"仍尝试读取: {db_path}",
+            file=sys.stderr,
+        )
+        raise SystemExit(4)
 
     if args.command == "list":
         cmd_list(db_path)

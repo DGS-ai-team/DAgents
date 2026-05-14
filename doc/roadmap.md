@@ -35,7 +35,7 @@
 ### 2.3 上下文、压缩与提示词
 
 - **双层上下文模型**与 **summary 压缩**（静默 / 阻塞阈值、**`ctx.messages`** 区间替换）（[context-compression-and-state.md](./context-compression-and-state.md)）。
-- **可选 SQLite 会话持久化**（**`AGENT_SESSION_STORE_PATH`**）。
+- **可选 SQLite 会话持久化**（**`AGENT_SESSION_STORE_ENABLED`**；路径固定 **`.runtime/memory/session.sqlite3`**）。
 - **系统提示词**：静态段 + **`.runtime/prompt_context/`** 侧车（**`soul.md` / `user.md` / `custom.md`**）+ skills + 主机快照 + **JSONL 历史说明**等（**CHANGELOG [Unreleased]**、**`prompt.py`**）。
 
 ### 2.4 可观测与分发侧车
@@ -83,6 +83,7 @@
 | 方向 | 预期价值与边界（概要） |
 |------|------------------------|
 | **CLI** | 在 **HTTP API** 之外提供终端侧会话、调试与自动化入口（与配置项 **`AGENT_CLI_MODE`** 等长期对齐）；降低本地联调与脚本化运维成本。 |
+| **触发器（条件唤起）** | 在「显式 **`POST` 消息 / SSE 拉流**」之外，提供 **可声明的触发面**：按 **时间或日历**、**Webhook / 队列消息到达**、**文件或配置变更**、**Prometheus 指标阈值**、**Register Center 广播或 relay 的过滤匹配** 等条件 **唤起** Agent 执行（可映射为向既有 **`session_id`** 投递系统/用户消息，或 **模板化创建会话 + 首轮任务**）。需单独设计：**条件 DSL 或插件边界**、**幂等与去抖**、**并发与 `MessageQueue` 串行语义**、**鉴权/租户隔离/审计**、失败 **重试与死信**、与 **审批流** 的交互，避免与现有 **A2A** 语义重复或竞态。 |
 | **子 Agent 创建** | 由主 Agent 或编排层 **动态创建/挂载** 子会话或子运行时实例（与当前「单服务多 `session`」模型如何衔接需单独设计）；可能涉及资源配额、生命周期与观测。 |
 | **本地与远端 A2A 优化** | 在现有 **`agent_peer` + `direct`/`relay`**（见 [a2a-and-register-center.md](./a2a-and-register-center.md)）之上：超时与重试策略、连接池、大 payload、**`resume` 经 relay 的可行性**、广播扇出与 SSE 聚合性能、跨 NAT 拓扑下的可达性检测等。 |
 | **Register Center 全局总览** | 在 **不按 `discovery_group` 过滤** 的前提下，为 **可信管理员或控制面** 提供全局视图（当前 API **有意** 不提供全量列举以防未授权探测）；需配套 **鉴权、审计、分页与多租户** 设计。 |
@@ -99,4 +100,4 @@
 
 ---
 
-**最后更新**：已含 **§3.4 规划能力**（CLI、子 Agent、A2A 与 Register Center 增强、压缩与记忆书等方向）；与 **0.1.0 + [Unreleased]** 已交付事实并列维护，若与代码冲突以 **Git / CHANGELOG** 为准。
+**最后更新**：已含 **§3.4 规划能力**（CLI、**触发器（条件唤起）**、子 Agent、A2A 与 Register Center 增强、压缩与记忆书等方向）；与 **0.1.0 + [Unreleased]** 已交付事实并列维护，若与代码冲突以 **Git / CHANGELOG** 为准。

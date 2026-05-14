@@ -55,8 +55,7 @@ DAgents/
 ├── tests/                       # 单元测试（`unittest`）
 ├── startup_scripts/             # 预编译包用：`start.sh`、`start_register_center.*`
 ├── scripts/                     # 辅助脚本（含 CI 构建）
-├── packaging/                   # 离线安装说明、`prompt_context/` 侧车种子等
-├── skills/                      # Agent / Cursor 技能等资源（按需）
+├── packaging/                   # 离线安装说明、**`runtime/`**（预编译包 **`.runtime`** 占位：空侧车 **prompt_context**、**scripts**、**data** 等）
 ├── doc/                         # 对外技术文档（含 **`roadmap.md`**、`cases/` 等；索引见 **`doc/README.md`**）
 └── .github/workflows/           # CI（单测、PyInstaller 打包）
 ```
