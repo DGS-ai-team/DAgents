@@ -5,8 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.config.env import resolve_runtime_root
-from app.config.settings import get_settings
+from app.config.runtime_layout import skills_dir
 from pydantic import BaseModel, ConfigDict, Field
 
 _skill_meta_cache: dict[str, tuple[dict[str, Any], float]] = {}
@@ -32,22 +31,6 @@ class SkillDefinition(BaseModel):
     description: str = Field(default="", description="技能简要说明。")
     enabled: bool = Field(default=True, description="技能是否启用。")
     content: str = Field(default="", description="技能正文（来自 `SKILL.md` 正文段）。")
-
-
-def _resolve_skills_dir() -> Path:
-    """解析 skills 根目录。
-
-    逻辑：
-    1. 读取配置 **`AGENT_SKILLS_DIR`**（默认 **`.runtime/skills`**，相对仓库根）；
-    2. 绝对路径则 **`resolve`**；
-    3. 否则 **`resolve_runtime_root() / 配置`** 再 **`resolve`**。
-    """
-
-    configured = (get_settings().agent_skills_dir or "").strip() or ".runtime/skills"
-    candidate = Path(configured).expanduser()
-    if candidate.is_absolute():
-        return candidate
-    return (resolve_runtime_root() / candidate).resolve()
 
 
 def _parse_skill_frontmatter(meta_text: str) -> dict[str, Any]:
@@ -137,7 +120,7 @@ def list_enabled_skills() -> list[SkillDefinition]:
     """枚举并返回启用的 skills。
 
     逻辑：
-    1. 扫描 **`<技能根>/*/SKILL.md`**（技能根见 **`_resolve_skills_dir()`**，默认 **`<运行根>/.runtime/skills`**）；
+    1. 扫描 **`<技能根>/*/SKILL.md`**（技能根为 **`skills_dir()`** → **`<运行根>/.runtime/skills`**）；
     2. 读取并解析文件头部元数据（frontmatter）；
     3. 读取同文件正文；
     4. 过滤 `enabled=False` 与目录名为空的项；
@@ -148,11 +131,11 @@ def list_enabled_skills() -> list[SkillDefinition]:
     - 未提供 `description` 时为空串。
     """
 
-    skills_dir = _resolve_skills_dir()
-    if not skills_dir.is_dir():
+    skills_root = skills_dir()
+    if not skills_root.is_dir():
         return []
     out: list[SkillDefinition] = []
-    for skill_md_path in skills_dir.glob("*/SKILL.md"):
+    for skill_md_path in skills_root.glob("*/SKILL.md"):
         meta, content = _read_skill_markdown_cached(skill_md_path)
         skill_name = str(skill_md_path.parent.name).strip()
         if not skill_name:

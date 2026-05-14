@@ -7,6 +7,7 @@ from typing import Tuple
 
 from app.config.env import resolve_runtime_root
 from app.config.host_snapshot import HostSnapshot, get_host_snapshot
+from app.config.runtime_layout import skills_dir
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.harness.skills.skills import (
@@ -207,14 +208,6 @@ def _format_runtime_environment_section(snap: HostSnapshot) -> str:
     return "\n".join(lines)
 
 
-def _skills_base_dir_for_prompt() -> Path:
-    """解析 skills 在提示词中展示的目标目录。"""
-
-    configured = (get_settings().agent_skills_dir or "").strip() or ".runtime/skills"
-    sp = Path(configured).expanduser()
-    return sp.resolve() if sp.is_absolute() else (resolve_runtime_root() / sp).resolve()
-
-
 def get_system_prompt(
     context: OpenAIConversationContext,
 ) -> str:
@@ -291,11 +284,11 @@ def get_system_prompt(
                 f"\n\n## 以下是当前会话已加载技能的具体执行规则：\n\n{skills_prompt}\n"
             )
     if settings.agent_skills_allow_create:
-        skills_dir = _skills_base_dir_for_prompt()
+        skills_root = skills_dir()
         parts.append(
             "\n\n## 你可以自主创建 skills（已启用）\n\n"
             "当任务需要沉淀可复用能力时，你可以创建或更新 skills。\n\n"
-            f"- skills 根目录：`{skills_dir}`\n"
+            f"- skills 根目录：`{skills_root}`\n"
             "- 目录结构：`<skills_root>/<skill_name>/SKILL.md`（目录名即唯一技能名）\n"
             "- 文件格式：`SKILL.md` 必须由 frontmatter 元数据头 + 正文组成，示例：\n"
             "  ---\n"
@@ -311,7 +304,7 @@ def get_system_prompt(
     parts.append(f"\n\n## `.runtime` 工作目录约定\n\n{_format_runtime_workspace_section()}\n")
     # 便于 Agent 用 read_file/search_file 查看 JSONL 落盘；与 raw_message_journal 写入约定对齐。
     if settings.agent_raw_message_history_enabled:
-        hist_rel = (settings.agent_raw_message_history_dir or ".runtime/history").strip() or ".runtime/history"
+        hist_rel = str(Path(".runtime/history"))
         parts.append(
             "\n\n## 会话原始消息记录（JSONL）\n\n"
             "运行时在**每次向对话上下文追加或插入**一条 OpenAI 风格消息时，会把该条消息的**插入瞬间快照**"

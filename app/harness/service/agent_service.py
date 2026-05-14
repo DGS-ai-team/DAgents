@@ -11,6 +11,7 @@ from uuid import uuid4
 from pathlib import Path
 
 from app.config.env import resolve_runtime_root
+from app.config.runtime_layout import session_sqlite_path
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.core.main_agent.model import get_model_config
@@ -54,7 +55,7 @@ class AgentService:
         1. 保存队列上限、闲置淘汰配置与可选 **`handle_stream_event`**；
         2. 初始化 session 队列/context/消费者 task 等空映射与 **`AsyncToolResultStore`** 发件人占位；
         3. 组装 **`MainAgentTurnOrchestrator`**（入队提交 + **`_emit_envelope`**）；
-        4. 按入参或 **`Settings.agent_session_store_path`** 决定 **`_message_store`**（显式注入 / sqlite / 纯内存）。
+        4. 按入参或 **`Settings.agent_session_store_enabled`** + 固定 **`session_sqlite_path()`** 决定 **`_message_store`**（显式注入 / sqlite / 纯内存）。
 
         关键边界：
         - **`handle_stream_event` 为 ``None``** 时 **`_emit_stream_event`** 直接返回，不向任何订阅方推送；
@@ -89,12 +90,9 @@ class AgentService:
         if message_store is not None:
             self._message_store = message_store
         else:
-            # 路径为空：纯内存会话，便于单测与无持久化部署。
-            raw = (settings.agent_session_store_path or "").strip()
-            if raw:
-                rp = Path(raw).expanduser()
-                db_path = rp.resolve() if rp.is_absolute() else (resolve_runtime_root() / rp).resolve()
-                self._message_store = SqliteMessageStore(db_path)
+            # 开关关闭：纯内存会话，便于单测与无持久化部署；开启时使用固定 sqlite 路径（见 `runtime_layout`）。
+            if settings.agent_session_store_enabled:
+                self._message_store = SqliteMessageStore(session_sqlite_path())
             else:
                 self._message_store = None
 

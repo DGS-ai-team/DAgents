@@ -7,7 +7,7 @@
 - 队列相关字段：**`max_queue_size`**
 - 本地调试入口相关字段（命名保留）：**`agent_cli_mode`**
 - API 相关字段：**`agent_api_base`**
-- 会话 sqlite：**`agent_session_store_path`**（默认 **`.runtime/memory/session.sqlite3`**（相对仓库根）；`AGENT_SESSION_STORE_PATH` 未设置时使用；显式空串关闭）
+- 会话 sqlite：路径固定为 **`<运行根>/.runtime/memory/session.sqlite3`**（**`runtime_layout.session_sqlite_path()`**）；是否使用 **`SqliteMessageStore`** 由 **`agent_session_store_enabled`**（**`AGENT_SESSION_STORE_ENABLED`**，默认开启）控制
 
 ## `config/env.py`
 

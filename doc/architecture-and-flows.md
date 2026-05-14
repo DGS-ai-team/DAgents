@@ -153,7 +153,7 @@ sequenceDiagram
 
 ## 6. 持久化与运行时目录
 
-- **`agent_session_store_path`** 非空时，`AgentService` 使用 **`SqliteMessageStore`** 在会话创建/处理中加载或保存消息历史（路径相对运行时根解析，见 `resolve_runtime_root()`）。
+- **`agent_session_store_enabled`** 为真时，`AgentService` 使用 **`SqliteMessageStore`** 在会话创建/处理中加载或保存消息历史（路径固定为 **`<运行根>/.runtime/memory/session.sqlite3`**，见 **`runtime_layout`**）。
 - 释放会话 **`DELETE /v1/sessions/{session_id}`** 可清理服务端资源并删除持久化记录（以当前实现为准）。
 - `.runtime/`、`history/` 等本地目录用途见根 `README.md` 与 `.gitignore`。
 

@@ -29,8 +29,7 @@
 - **`get_static_system_prompt`**
 - **`_format_runtime_environment_section`**：将 **`HostSnapshot`** 格式化为「当前运行环境」正文（OS 类别、平台摘要、登录名、UID/GID）
 - **`_format_runtime_workspace_section`**：**`.runtime`** 子目录约定（含 **`data/`**、**`scripts/`**、**`scripts_menu.md`**）
-- **`_skills_base_dir_for_prompt`**：skills 根目录绝对路径（配置相对 **`resolve_runtime_root()`**）
-- **`get_system_prompt(context)`**：静态 + **`.runtime` 侧车 `soul.md` / `user.md`** + skills + **`get_host_snapshot()`** 运行环境 + **`.runtime` 工作目录约定** +（配置启用时）JSONL 原始消息记录说明 + **`custom.md`** + **`session_id`**（最末）
+- **`get_system_prompt(context)`**：静态 + **`.runtime` 侧车 `soul.md` / `user.md`** + skills + **`get_host_snapshot()`** 运行环境 + **`.runtime` 工作目录约定** +（配置启用时）JSONL 原始消息记录说明 + **`custom.md`** + **`session_id`**（最末）；自主创建 skills 段落中的根路径同 **`runtime_layout.skills_dir()`**
 - **`read_memory_file_cached`**
 
 侧车 Markdown 仅位于 **`<运行根>/.runtime/prompt_context/`**；内容由部署方在本地编辑（初始为空文件）。

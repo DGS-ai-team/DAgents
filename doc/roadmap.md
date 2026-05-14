@@ -35,7 +35,7 @@
 ### 2.3 上下文、压缩与提示词
 
 - **双层上下文模型**与 **summary 压缩**（静默 / 阻塞阈值、**`ctx.messages`** 区间替换）（[context-compression-and-state.md](./context-compression-and-state.md)）。
-- **可选 SQLite 会话持久化**（**`AGENT_SESSION_STORE_PATH`**）。
+- **可选 SQLite 会话持久化**（**`AGENT_SESSION_STORE_ENABLED`**；路径固定 **`.runtime/memory/session.sqlite3`**）。
 - **系统提示词**：静态段 + **`.runtime/prompt_context/`** 侧车（**`soul.md` / `user.md` / `custom.md`**）+ skills + 主机快照 + **JSONL 历史说明**等（**CHANGELOG [Unreleased]**、**`prompt.py`**）。
 
 ### 2.4 可观测与分发侧车

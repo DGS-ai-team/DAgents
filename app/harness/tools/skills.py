@@ -18,7 +18,7 @@ def load_skills(skill_names: list[str], context: OpenAIConversationContext) -> s
     """使用场景：希望加载技能时调用。
 
     字段说明：
-    - skill_names: 技能名称数组；每项须与 **技能根**（默认 **`<运行根>/.runtime/skills`**，见 **`AGENT_SKILLS_DIR`**）下 **`<skill_name>/`** 目录名一致。
+    - skill_names: 技能名称数组；每项须与 **技能根** **`<运行根>/.runtime/skills`**（**`runtime_layout.skills_dir()`**，不由环境变量覆盖）下 **`<skill_name>/`** 目录名一致。
 
     返回说明：
     - 成功：返回 JSON 字符串，包含 `loaded_skills`（本次加载结果）与 `available_skills`（全部启用技能元数据）。

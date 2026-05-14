@@ -1,6 +1,6 @@
 # `packaging/runtime/` — 预编译包内 **`.runtime/`** 占位
 
-本目录在 **PyInstaller 发布包** 打 zip 时 **整体合并进 `bundle/.runtime/`**（`cp -a packaging/runtime/. bundle/.runtime/`），与 **`app/config/settings.py`** 中 **`AGENT_SKILLS_DIR`**、侧车路径等默认相对 **`.runtime/`** 的布局对齐。
+本目录在 **PyInstaller 发布包** 打 zip 时 **整体合并进 `bundle/.runtime/`**（`cp -a packaging/runtime/. bundle/.runtime/`），与 **`app/config/runtime_layout.py`** 中 **`.runtime/skills`** 等固定相对路径布局对齐。
 
 | 子路径 | 说明 |
 |--------|------|

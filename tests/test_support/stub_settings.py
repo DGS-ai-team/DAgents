@@ -19,7 +19,7 @@ def settings_namespace(**overrides: object) -> SimpleNamespace:
         "max_queue_size": 0,
         "agent_max_active_session_queues": 8,
         "agent_session_idle_evict_seconds": 0,
-        "agent_session_store_path": "",
+        "agent_session_store_enabled": False,
         "metrics_enabled": False,
         "registry_url": "",
         "discovery_groups": [],

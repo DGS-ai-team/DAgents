@@ -74,42 +74,44 @@ class SettingsLoadTests(unittest.TestCase):
         """固定 `AGENT_ID`，避免 `_resolve_agent_id` 走随机 UUID 分支。"""
         return {
             "AGENT_ID": "unit-test-agent-id",
-            "AGENT_ID_FILE_PATH": str(tmp / "agent_id_file"),
         }
 
     def test_llm_timeout_default_when_unset_or_blank(self) -> None:
         """`LLM_TIMEOUT` 未设置或空串时回落到 120。"""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)
-            with patch.dict(os.environ, {**self._base_agent_env(p), "LLM_TIMEOUT": ""}, clear=False):
-                _reset_settings_singleton()
-                s = Settings.load()
+            with patch("app.config.runtime_layout.resolve_runtime_root", return_value=p):
+                with patch.dict(os.environ, {**self._base_agent_env(p), "LLM_TIMEOUT": ""}, clear=False):
+                    _reset_settings_singleton()
+                    s = Settings.load()
             self.assertEqual(s.llm_timeout, 120)
 
     def test_llm_timeout_override_from_env(self) -> None:
         """显式 `LLM_TIMEOUT` 应覆盖默认整数。"""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)
-            with patch.dict(
-                os.environ,
-                {**self._base_agent_env(p), "LLM_TIMEOUT": "77"},
-                clear=False,
-            ):
-                _reset_settings_singleton()
-                s = Settings.load()
+            with patch("app.config.runtime_layout.resolve_runtime_root", return_value=p):
+                with patch.dict(
+                    os.environ,
+                    {**self._base_agent_env(p), "LLM_TIMEOUT": "77"},
+                    clear=False,
+                ):
+                    _reset_settings_singleton()
+                    s = Settings.load()
             self.assertEqual(s.llm_timeout, 77)
 
     def test_metrics_enabled_false_when_env_says_false(self) -> None:
         """布尔环境变量支持常见假值（与 `_env_bool` 一致）。"""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)
-            with patch.dict(
-                os.environ,
-                {**self._base_agent_env(p), "METRICS_ENABLED": "false"},
-                clear=False,
-            ):
-                _reset_settings_singleton()
-                s = Settings.load()
+            with patch("app.config.runtime_layout.resolve_runtime_root", return_value=p):
+                with patch.dict(
+                    os.environ,
+                    {**self._base_agent_env(p), "METRICS_ENABLED": "false"},
+                    clear=False,
+                ):
+                    _reset_settings_singleton()
+                    s = Settings.load()
             self.assertFalse(s.metrics_enabled)
 
     def test_api_cors_csv_parses_dedup_and_order(self) -> None:
@@ -117,60 +119,64 @@ class SettingsLoadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)
             raw = "http://a.example, http://b.example ,http://a.example"
-            with patch.dict(
-                os.environ,
-                {**self._base_agent_env(p), "API_CORS_ALLOW_ORIGINS": raw},
-                clear=False,
-            ):
-                _reset_settings_singleton()
-                s = Settings.load()
+            with patch("app.config.runtime_layout.resolve_runtime_root", return_value=p):
+                with patch.dict(
+                    os.environ,
+                    {**self._base_agent_env(p), "API_CORS_ALLOW_ORIGINS": raw},
+                    clear=False,
+                ):
+                    _reset_settings_singleton()
+                    s = Settings.load()
             self.assertEqual(
                 s.api_cors_allow_origins,
                 ["http://a.example", "http://b.example"],
             )
 
-    def test_agent_session_store_path_default_when_key_absent(self) -> None:
-        """未定义 `AGENT_SESSION_STORE_PATH` 时使用默认 sqlite 相对路径。"""
+    def test_agent_session_store_enabled_default_true(self) -> None:
+        """未定义 `AGENT_SESSION_STORE_ENABLED` 时默认开启 SQLite 会话持久化（路径由 `runtime_layout` 固定）。"""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)
-            with patch.dict(os.environ, self._base_agent_env(p), clear=False):
-                os.environ.pop("AGENT_SESSION_STORE_PATH", None)
-                _reset_settings_singleton()
-                s = Settings.load()
-            self.assertEqual(s.agent_session_store_path, ".runtime/memory/session.sqlite3")
+            with patch("app.config.runtime_layout.resolve_runtime_root", return_value=p):
+                with patch.dict(os.environ, self._base_agent_env(p), clear=False):
+                    os.environ.pop("AGENT_SESSION_STORE_ENABLED", None)
+                    _reset_settings_singleton()
+                    s = Settings.load()
+            self.assertTrue(s.agent_session_store_enabled)
 
-    def test_agent_session_store_path_empty_string_disables_sqlite_path(self) -> None:
-        """显式设置空串表示关闭默认 sqlite 路径（由上层解释为空即关闭）。"""
+    def test_agent_session_store_enabled_false_from_env(self) -> None:
+        """显式 `AGENT_SESSION_STORE_ENABLED=false` 时关闭持久化（`AgentService` 使用纯内存）。"""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)
-            with patch.dict(
-                os.environ,
-                {**self._base_agent_env(p), "AGENT_SESSION_STORE_PATH": ""},
-                clear=False,
-            ):
-                _reset_settings_singleton()
-                s = Settings.load()
-            self.assertEqual(s.agent_session_store_path, "")
+            with patch("app.config.runtime_layout.resolve_runtime_root", return_value=p):
+                with patch.dict(
+                    os.environ,
+                    {**self._base_agent_env(p), "AGENT_SESSION_STORE_ENABLED": "false"},
+                    clear=False,
+                ):
+                    _reset_settings_singleton()
+                    s = Settings.load()
+            self.assertFalse(s.agent_session_store_enabled)
 
     def test_get_settings_singleton_and_reload(self) -> None:
         """`get_settings` 默认缓存；`reload=True` 时随环境变化重建。"""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)
-            with patch.dict(
-                os.environ,
-                {**self._base_agent_env(p), "LLM_MODEL": "first-model"},
-                clear=False,
-            ):
-                _reset_settings_singleton()
-                a = get_settings()
-                self.assertEqual(a.llm_model, "first-model")
-            with patch.dict(
-                os.environ,
-                {**self._base_agent_env(p), "LLM_MODEL": "second-model"},
-                clear=False,
-            ):
-                b = get_settings(reload=True)
-                self.assertEqual(b.llm_model, "second-model")
+            with patch("app.config.runtime_layout.resolve_runtime_root", return_value=p):
+                with patch.dict(
+                    os.environ,
+                    {**self._base_agent_env(p), "LLM_MODEL": "first-model"},
+                    clear=False,
+                ):
+                    _reset_settings_singleton()
+                    a = get_settings()
+                    self.assertEqual(a.llm_model, "first-model")
+                with patch.dict(
+                    os.environ,
+                    {**self._base_agent_env(p), "LLM_MODEL": "second-model"},
+                    clear=False,
+                ):
+                    b = get_settings(reload=True)
+                    self.assertEqual(b.llm_model, "second-model")
 
 
 if __name__ == "__main__":

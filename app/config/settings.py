@@ -6,11 +6,9 @@ import os
 import uuid
 from typing import Self
 
-from pathlib import Path
-
 from pydantic import BaseModel, ConfigDict
 
-from app.config.env import resolve_runtime_root
+from app.config.runtime_layout import agent_id_file_path
 
 
 def _env_str(key: str, default: str = "") -> str:
@@ -67,55 +65,20 @@ def _env_csv(key: str) -> list[str]:
     return result
 
 
-def _agent_session_store_path() -> str:
-    """解析 `AGENT_SESSION_STORE_PATH`：未出现在环境中时用默认路径；显式空串表示关闭 sqlite。"""
-    if "AGENT_SESSION_STORE_PATH" not in os.environ:
-        return ".runtime/memory/session.sqlite3"
-    return os.environ.get("AGENT_SESSION_STORE_PATH", "").strip()
-
-
-def _agent_id_file_path() -> str:
-    """解析 `AGENT_ID_FILE_PATH`。
-
-    逻辑：
-    1. 若环境变量中未出现该键，使用默认路径；
-    2. 若出现该键，读取其值并去除首尾空白；
-    3. 对空值回退默认路径，避免出现无效路径。
-
-    关键分支/边界：
-    - 显式空串会回退到默认值，而不是关闭功能；
-    - 路径可以是相对路径或绝对路径，后续由文件写入逻辑统一处理。
-
-    与外部交互：
-    - 仅读取进程环境变量。
-
-    异常说明：
-    - 无显式异常抛出。
-
-    副作用说明：
-    - 无。
-    """
-
-    default_path = ".runtime/agent/agent_id"
-    if "AGENT_ID_FILE_PATH" not in os.environ:
-        return default_path
-    candidate = os.environ.get("AGENT_ID_FILE_PATH", "").strip()
-    return candidate or default_path
-
-
-def _resolve_agent_id(agent_id_file_path: str) -> str:
+def _resolve_agent_id() -> str:
     """解析并确保 agent_id 持久化文件存在。
 
     逻辑：
-    1. 优先读取环境变量 `AGENT_ID`，若有值则作为当前实例 ID；
-    2. 当未配置 `AGENT_ID` 时，尝试从 `agent_id_file_path` 读取已有 ID；
-    3. 若环境变量和文件都不可用，则生成新 UUID 并写入文件；
-    4. 将最终 ID 回写到 `os.environ["AGENT_ID"]`，保证进程内后续读取一致。
+    1. 路径固定为 **`runtime_layout.agent_id_file_path()`**（`<运行根>/.runtime/agent/agent_id`）；
+    2. 优先读取环境变量 **`AGENT_ID`**，若有值则作为当前实例 ID 并写回文件；
+    3. 当未配置 **`AGENT_ID`** 时，尝试从该文件读取已有 ID；
+    4. 若环境变量和文件都不可用，则生成新 UUID 并写入文件；
+    5. 将最终 ID 回写到 **`os.environ["AGENT_ID"]`**，保证进程内后续读取一致。
 
     关键分支/边界：
     - 文件不存在、为空或仅空白时，会自动生成并写入新 ID；
-    - 环境变量存在时会覆盖文件内容，确保“配置优先”；
-    - 写文件前会自动创建父目录（如 `.runtime/agent/`）。
+    - 环境变量存在时会覆盖文件内容，确保「配置优先」；
+    - 写文件前会自动创建父目录（如 **`.runtime/agent/`**）。
 
     与外部交互：
     - 读取/写入本地文件系统中的 agent_id 文件；
@@ -126,12 +89,11 @@ def _resolve_agent_id(agent_id_file_path: str) -> str:
 
     副作用说明：
     - 可能创建目录、创建/覆盖 ID 文件；
-    - 会修改当前进程环境变量 `AGENT_ID`。
+    - 会修改当前进程环境变量 **`AGENT_ID`**。
     """
 
     configured_id = _env_str("AGENT_ID")
-    _p = Path(agent_id_file_path).expanduser()
-    file_path = _p.resolve() if _p.is_absolute() else (resolve_runtime_root() / _p).resolve()
+    file_path = agent_id_file_path()
     if configured_id:
         # 明确配置 AGENT_ID 时以配置为准，并同步写回文件防止重启漂移。
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,8 +142,6 @@ class Settings(BaseModel):
     agent_skills_enabled: bool = True
     # 是否允许 agent 自主创建/修改 skills
     agent_skills_allow_create: bool = False
-    # skills 根目录（默认 `.runtime/skills`，相对仓库根）
-    agent_skills_dir: str = ".runtime/skills"
     # 单轮最多注入多少个匹配 skill
     agent_skills_max_in_prompt: int = 3
 
@@ -202,7 +162,6 @@ class Settings(BaseModel):
     # API CORS 允许来源（逗号分隔）；用于浏览器开发调试
     api_cors_allow_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     agent_id: str = ""
-    agent_id_file_path: str = ".runtime/agent/agent_id"
     registry_url: str = ""
     discovery_groups: list[str] = []
     agent_public_base_url: str = ""
@@ -216,11 +175,10 @@ class Settings(BaseModel):
     bash_output_encoding: str = "utf-8"
 
     # --- 会话消息落盘 ---
-    agent_session_store_path: str = ".runtime/memory/session.sqlite3"
+    # 是否启用 SQLite 会话持久化（路径固定为 `<运行根>/.runtime/memory/session.sqlite3`，见 `runtime_layout`）
+    agent_session_store_enabled: bool = True
     # 是否在每次向 ctx.messages 追加/插入「业务原始消息」时追加写入 JSONL 记录（摘要压缩等整段替换不写）
     agent_raw_message_history_enabled: bool = True
-    # JSONL 记录目录（相对仓库根，默认 `.runtime/history`）
-    agent_raw_message_history_dir: str = ".runtime/history"
 
     # --- 兼容旧变量 ---
     openai_api_key: str = ""
@@ -228,8 +186,7 @@ class Settings(BaseModel):
     @classmethod
     def load(cls) -> Self:
         """从当前进程环境读取（请先 `load_env()` 以加载 `.env`）。"""
-        agent_id_file_path = _agent_id_file_path()
-        agent_id = _resolve_agent_id(agent_id_file_path)
+        agent_id = _resolve_agent_id()
         return cls(
             llm_provider=_env_str("LLM_PROVIDER") or "openai",
             llm_api_key=_env_str("LLM_API_KEY"),
@@ -250,7 +207,6 @@ class Settings(BaseModel):
             llm_stream_include_usage=_env_bool("LLM_STREAM_INCLUDE_USAGE", True),
             agent_skills_enabled=_env_bool("AGENT_SKILLS_ENABLED", True),
             agent_skills_allow_create=_env_bool("AGENT_SKILLS_ALLOW_CREATE", False),
-            agent_skills_dir=_env_str("AGENT_SKILLS_DIR", ".runtime/skills") or ".runtime/skills",
             agent_skills_max_in_prompt=_env_int("AGENT_SKILLS_MAX_IN_PROMPT", 3),
             metrics_enabled=_env_bool("METRICS_ENABLED", True),
             app_log_level=_env_str("APP_LOG_LEVEL", "INFO") or "INFO",
@@ -264,7 +220,6 @@ class Settings(BaseModel):
                 or ["http://localhost:5173", "http://127.0.0.1:5173"]
             ),
             agent_id=agent_id,
-            agent_id_file_path=agent_id_file_path,
             registry_url=_env_str("REGISTRY_URL"),
             discovery_groups=_env_csv("DISCOVERY_GROUPS"),
             agent_public_base_url=_env_str("AGENT_PUBLIC_BASE_URL"),
@@ -277,10 +232,8 @@ class Settings(BaseModel):
             ),
             agent_tool_approval_mode=_env_str("AGENT_TOOL_APPROVAL_MODE", "rule") or "rule",
             bash_output_encoding=_env_str("BASH_OUTPUT_ENCODING", "utf-8") or "utf-8",
-            agent_session_store_path=_agent_session_store_path(),
+            agent_session_store_enabled=_env_bool("AGENT_SESSION_STORE_ENABLED", True),
             agent_raw_message_history_enabled=_env_bool("AGENT_RAW_MESSAGE_HISTORY_ENABLED", True),
-            agent_raw_message_history_dir=_env_str("AGENT_RAW_MESSAGE_HISTORY_DIR", ".runtime/history")
-            or ".runtime/history",
             openai_api_key=_env_str("OPENAI_API_KEY"),
         )
 
