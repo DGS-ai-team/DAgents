@@ -4,4 +4,4 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 
 | 文件 | 说明 |
 |------|------|
-| **`build_linux_i386_pyenv.sh`** | 在 **i386** Ubuntu 容器内通过 **pyenv** 编译安装指定版本 CPython，再运行 PyInstaller（供 `linux-x86` 矩阵使用） |
+| **`build_linux_focal_pyenv.sh`** | 在 **Ubuntu 20.04 (focal)** 容器内（**amd64**：`ubuntu:20.04`；**i386**：`i386/ubuntu:focal`）通过 **pyenv** 从源码安装 **`PYENV_PYTHON_VERSION`**（默认 **3.13.2**），再运行 PyInstaller。deadsnakes 已不再为 focal 提供 **3.13** deb，故 linux-x64 与 linux-x86 共用本脚本。 |

@@ -17,6 +17,7 @@
 | [api-reference.md](./api-reference.md) | HTTP / SSE：路径、请求与响应体、`client_id`、错误约定；与 `app/harness/api/app.py` 对齐维护。 |
 | [prometheus-metrics.md](./prometheus-metrics.md) | Prometheus **`/metrics`** 行为、内置指标与安全扩展方式。 |
 | [roadmap.md](./roadmap.md) | **路线图**：已实现能力汇总、待办与已知限制（与 **CHANGELOG** 互补）。 |
+| [triggers-design.md](./triggers-design.md) | **触发器设计**：条件唤起 Agent、与 **`MessageQueue` / `submit_message`** 对齐、分阶段（定时 / Webhook / A2A 衔接）与配置约定。 |
 
 ## 落地案例目录
 
