@@ -1,0 +1,114 @@
+# 手动下载各平台 Python 3.13 可用的依赖包并打 zip，供离线或受限网络环境使用。
+name: Manual vendor Python deps (3.13)
+
+on:
+  workflow_dispatch:
+    inputs:
+      requirements_file:
+        description: "依赖清单路径（相对仓库根目录）"
+        required: false
+        default: "requirements.txt"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  download-and-pack:
+    name: "Vendor deps (${{ matrix.label }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            label: Linux x64
+            artifact_suffix: linux-x64
+          - os: windows-2022
+            label: Windows x64
+            artifact_suffix: windows-x64
+          - os: macos-14
+            label: macOS ARM64
+            artifact_suffix: macos-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: ${{ inputs.requirements_file }}
+
+      - name: Verify requirements file
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQ="${{ inputs.requirements_file }}"
+          if [[ ! -f "$REQ" ]]; then
+            echo "ERROR: missing file: $REQ" >&2
+            exit 1
+          fi
+
+      - name: pip download + pack zip
+        shell: bash
+        env:
+          REQUIREMENTS_FILE: ${{ inputs.requirements_file }}
+          ARTIFACT_SUFFIX: ${{ matrix.artifact_suffix }}
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          mkdir -p pack/vendor_downloads
+          # 各 runner 为本机平台解析 wheel；无 wheel 时回落 sdist。
+          pip download -r "${REQUIREMENTS_FILE}" -d pack/vendor_downloads --prefer-binary
+          cp "${REQUIREMENTS_FILE}" pack/requirements.txt
+          python - <<'PY'
+          from pathlib import Path
+
+          Path("pack/README-offline.txt").write_text(
+              "\n".join(
+                  [
+                      "用途：本压缩包由 GitHub Actions 在「当前操作系统 + CPython 3.13」下执行",
+                      "`pip download -r <清单> -d vendor_downloads` 生成，用于离线或受限网络安装",
+                      "与本包相同平台、相同 Python 大版本的环境。",
+                      "",
+                      "安装示例（先解压，在解压根目录执行）：",
+                      "  python -m pip install --upgrade pip",
+                      "  python -m pip install --no-index --find-links=vendor_downloads -r requirements.txt",
+                      "",
+                      "注意：",
+                      "- 含二进制扩展的 wheel 通常不可跨平台混用；请在对应平台（Linux / Windows / macOS）使用各自 zip。",
+                      "- macOS 制品当前在 macos-14（ARM64）上构建；若需 x86_64 可另加矩阵项。",
+                      "",
+                  ]
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          python - <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          suffix = os.environ["ARTIFACT_SUFFIX"]
+          out = Path(f"python-deps-{suffix}.zip")
+          base = Path("pack")
+          with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for path in base.rglob("*"):
+                  if path.is_file():
+                      zf.write(path, path.relative_to(base))
+          print("created", out.resolve(), "bytes", out.stat().st_size)
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-deps-${{ matrix.artifact_suffix }}
+          path: python-deps-${{ matrix.artifact_suffix }}.zip
+          if-no-files-found: error
