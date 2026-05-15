@@ -266,7 +266,7 @@ class OpenAIImplicitReActRuntime:
 
         关键边界：
         - tool 调用参数可能分片返回，需按 `index` 逐段拼接；
-        - 空 choices 的 chunk 仍可能携带 **`usage`**：先 **`record_llm_token_usage`**（Gauge **`set`**，映射提供商计数快照）、**`yield usage`**，再 `continue`；
+        - 空 choices 的 chunk 仍可能携带 **`usage`**：先 **`record_llm_token_usage`**（Counter **`inc`**，按本轮 usage 累加进程内总量）、**`yield usage`**，再 `continue`；
         - 未开启 `include_usage` 或网关不支持时无 **`usage`** 分片。
 
         与外部交互：

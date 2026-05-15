@@ -1,11 +1,12 @@
 """Prometheus 指标定义与 LLM token 观测（供 `/metrics` 抓取）。
 
 与 OpenAI Chat Completions 流式对齐：需在请求中开启 `include_usage`，
-在流末尾 chunk 的 `usage` 上读取 `prompt_tokens` / `completion_tokens`，
+在流式 **`usage`** chunk 上读取 `prompt_tokens` / `completion_tokens`，
 以及（若提供商返回）`prompt_tokens_details` 与 `prompt_cache_*` 相关计数。
 
-说明：`usage` 中的 prompt/completion 计数在部分网关侧已为**进程或账号维度累计值**，
-此处用 **Gauge + `set`** 直接反映上报快照，而不用 Counter 再次累加。
+说明：以下指标为 **Counter（`inc`）**，在进程内 **按每次 `usage` 分片上报的数值累加**。
+约定 **`usage` 表示「当前 completion 请求」的消耗**（OpenAI 及多数兼容网关的语义）。
+若某网关在 `usage` 中返回 **账号级终身累计**，则会导致 **重复累加**，需由网关或接入层改为按请求口径再接入本指标。
 """
 
 from __future__ import annotations
@@ -13,37 +14,37 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
 
-# --- LLM token（按模型名分桶；值为提供商 usage 上报快照，多为网关侧已累计计数）---
-LLM_PROMPT_TOKENS = Gauge(
-    "dagents_llm_prompt_tokens",
-    "LLM 输入 token 数快照（提供商 usage.prompt_tokens；通常为已累计值，非本进程二次累加）",
+# --- LLM token（按模型名分桶；进程内 Counter 累计，每次 record 对本轮 usage 做 inc）---
+LLM_PROMPT_TOKENS = Counter(
+    "dagents_llm_prompt_tokens_total",
+    "LLM 输入 token 累计（按 model；每次 completions usage 的 prompt_tokens 增量 inc）",
     ("model",),
 )
-LLM_COMPLETION_TOKENS = Gauge(
-    "dagents_llm_completion_tokens",
-    "LLM 输出 token 数快照（提供商 usage.completion_tokens；通常为已累计值，非本进程二次累加）",
+LLM_COMPLETION_TOKENS = Counter(
+    "dagents_llm_completion_tokens_total",
+    "LLM 输出 token 累计（按 model；每次 usage 的 completion_tokens 增量 inc）",
     ("model",),
 )
-LLM_PROMPT_AUDIO_TOKENS = Gauge(
-    "dagents_llm_prompt_audio_tokens",
-    "usage.prompt_tokens_details.audio_tokens 快照（按 model）",
+LLM_PROMPT_AUDIO_TOKENS = Counter(
+    "dagents_llm_prompt_audio_tokens_total",
+    "usage.prompt_tokens_details.audio_tokens 累计（按 model）",
     ("model",),
 )
-LLM_PROMPT_CACHED_TOKENS = Gauge(
-    "dagents_llm_prompt_cached_tokens",
-    "usage.prompt_tokens_details.cached_tokens 快照（按 model）",
+LLM_PROMPT_CACHED_TOKENS = Counter(
+    "dagents_llm_prompt_cached_tokens_total",
+    "usage.prompt_tokens_details.cached_tokens 累计（按 model）",
     ("model",),
 )
-LLM_PROMPT_CACHE_HIT_TOKENS = Gauge(
-    "dagents_llm_prompt_cache_hit_tokens",
-    "usage.prompt_cache_hit_tokens 快照（按 model）",
+LLM_PROMPT_CACHE_HIT_TOKENS = Counter(
+    "dagents_llm_prompt_cache_hit_tokens_total",
+    "usage.prompt_cache_hit_tokens 累计（按 model）",
     ("model",),
 )
-LLM_PROMPT_CACHE_MISS_TOKENS = Gauge(
-    "dagents_llm_prompt_cache_miss_tokens",
-    "usage.prompt_cache_miss_tokens 快照（按 model）",
+LLM_PROMPT_CACHE_MISS_TOKENS = Counter(
+    "dagents_llm_prompt_cache_miss_tokens_total",
+    "usage.prompt_cache_miss_tokens 累计（按 model）",
     ("model",),
 )
 
@@ -244,35 +245,45 @@ def record_llm_token_usage(
     model: str,
     usage: Any | None = None,
 ) -> None:
-    """将单次 completions 调用的 usage 写入 Gauge（`set`，不再二次累加）。
+    """将单次 completions **`usage`** 上报的 token 数 **累加** 到 Prometheus Counter（`inc`）。
 
     逻辑：
-    1. 规范化 `model` label；
-    2. prompt / completion 分别 **`set`**（若对应值 >0）；
-    3. 若传入原始 **`usage`**：写入 audio/cached/cache hit/miss 四类 Gauge。
+    1. 规范化 **`model`** label；
+    2. **`prompt_tokens` / `completion_tokens`** 大于 0 时对对应 Counter **`inc`**；
+    3. 若传入原始 **`usage`**：对 audio/cached/cache hit/miss 四类解析结果分别 **`inc`**（仅 **>0** 时调用，避免无意义 `inc(0)`）。
 
     副作用：
-    - 修改进程内 Prometheus 注册表中的 Gauge 样本。
+    - 修改进程内 Prometheus 注册表中的 Counter 样本（单调增）。
 
     关键边界：
-    - prompt/completion 全零且 **`usage` 为 None** 时不写入（兼容无 usage 分片）；
-    - 若 **`usage` 存在**：即使 prompt/completion 为 0 仍会刷新 cache 相关四类 Gauge；
-    - 与 Counter 不同：多次上报时以后一次 **`set`** 为准。
+    - **`prompt_tokens`/`completion_tokens` 全为 0 且 `usage` 为 None** 时直接返回；
+    - 若 **`usage` 存在**：即使 prompt/completion 为 0，仍会对四类 cache 明细中 **>0** 的项 **`inc`**；
+    - 依赖上游 **`usage` 为「当前请求消耗」**；若为账号级累计值会导致重复计量（见模块 docstring）。
     """
     if prompt_tokens <= 0 and completion_tokens <= 0 and usage is None:
         return
     m = sanitize_model_label(model)
-    if prompt_tokens > 0:
-        LLM_PROMPT_TOKENS.labels(model=m).set(max(0, int(prompt_tokens)))
-    if completion_tokens > 0:
-        LLM_COMPLETION_TOKENS.labels(model=m).set(max(0, int(completion_tokens)))
+    pt = max(0, int(prompt_tokens))
+    ct = max(0, int(completion_tokens))
+    if pt > 0:
+        LLM_PROMPT_TOKENS.labels(model=m).inc(pt)
+    if ct > 0:
+        LLM_COMPLETION_TOKENS.labels(model=m).inc(ct)
     if usage is not None:
         ex = parse_usage_prompt_cache_details(usage)
-        # 与上游 usage 分片对齐：缺失字段已在 parse 中归零。
-        LLM_PROMPT_AUDIO_TOKENS.labels(model=m).set(ex["prompt_audio_tokens"])
-        LLM_PROMPT_CACHED_TOKENS.labels(model=m).set(ex["prompt_cached_tokens"])
-        LLM_PROMPT_CACHE_HIT_TOKENS.labels(model=m).set(ex["prompt_cache_hit_tokens"])
-        LLM_PROMPT_CACHE_MISS_TOKENS.labels(model=m).set(ex["prompt_cache_miss_tokens"])
+        # 与上游 usage 分片对齐：缺失字段已在 parse 中归零；仅正数参与累计。
+        audio = ex["prompt_audio_tokens"]
+        cached = ex["prompt_cached_tokens"]
+        hit = ex["prompt_cache_hit_tokens"]
+        miss = ex["prompt_cache_miss_tokens"]
+        if audio > 0:
+            LLM_PROMPT_AUDIO_TOKENS.labels(model=m).inc(audio)
+        if cached > 0:
+            LLM_PROMPT_CACHED_TOKENS.labels(model=m).inc(cached)
+        if hit > 0:
+            LLM_PROMPT_CACHE_HIT_TOKENS.labels(model=m).inc(hit)
+        if miss > 0:
+            LLM_PROMPT_CACHE_MISS_TOKENS.labels(model=m).inc(miss)
 
 
 def metrics_text() -> tuple[bytes, str]:

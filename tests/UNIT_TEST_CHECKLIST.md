@@ -144,7 +144,7 @@
 | 优先级 | 主题 | 建议用例 | 断言方向 | 状态 |
 |--------|------|----------|----------|------|
 | P2 | `parse_usage_tokens` / `sanitize_model_label` | `test_metrics_tokens.py` | 边界、负值钳制 | ⬜ |
-| P2 | `record_llm_token_usage` | 同上 | Gauge `set`、独立 registry 防串测 | ⬜ |
+| P2 | `record_llm_token_usage` | 同上 | Counter `inc`、独立 registry 防串测 | ⬜ |
 | P2 | `refresh_session_context_metrics` | `test_session_context_metrics.py` | session 移除后 series 清理 | ⬜ |
 
 ---
