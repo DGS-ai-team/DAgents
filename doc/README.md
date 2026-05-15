@@ -8,6 +8,7 @@
 
 | 文件 | 说明 |
 |------|------|
+| [os-compatibility.md](./os-compatibility.md) | **操作系统 / glibc 兼容清单**：CPython **3.11** 官方对 Windows 的下界、Linux 为何不写「最低 RHEL」、PyInstaller 与 glibc 的关系；**不必固定 3.13** 时的落地建议。 |
 | [architecture-and-flows.md](./architecture-and-flows.md) | 架构分层、`session` / 队列 / 运行时概念，主流程与分支（工具、审批、异步工具、SSE、Register Center）。 |
 | [agent-input-output.md](./agent-input-output.md) | **输入/输出专题**：HTTP 入队与进程内 **`MessageQueue`**（优先级、消费循环、背压）+ **SSE 出站**（总线、`client_id`、事件映射与联调要点）。 |
 | [context-compression-and-state.md](./context-compression-and-state.md) | **`ConversationContext` / `OpenAIConversationContext`**、SQLite **会话记忆**、持久化边界、**summary 压缩**（静默/阻塞、`ctx.messages` 替换）、**`RunTurnPhase`**、**`.runtime/prompt_context` 侧车**（**`soul.md` / `user.md` / `custom.md`**）与 **`get_system_prompt`** 拼接顺序。 |
@@ -17,7 +18,7 @@
 | [api-reference.md](./api-reference.md) | HTTP / SSE：路径、请求与响应体、`client_id`、错误约定；与 `app/harness/api/app.py` 对齐维护。 |
 | [prometheus-metrics.md](./prometheus-metrics.md) | Prometheus **`/metrics`** 行为、内置指标与安全扩展方式。 |
 | [roadmap.md](./roadmap.md) | **路线图**：已实现能力汇总、待办与已知限制（与 **CHANGELOG** 互补）。 |
-| [triggers-design.md](./triggers-design.md) | **触发器设计**：条件唤起 Agent、与 **`MessageQueue` / `submit_message`** 对齐、分阶段（定时 / Webhook / A2A 衔接）与配置约定。 |
+| [triggers-design.md](./triggers-design.md) | **触发器设计**：**调度器轮询**、`Trigger` **基类协议**、**注册表**、**投递层**；**动态注册**（HTTP / `@tool`）；**`session_id` / `client_id` / SSE 回流`** 约定与分阶段（Webhook / A2A）。 |
 
 ## 落地案例目录
 
