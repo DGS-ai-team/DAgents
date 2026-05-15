@@ -14,7 +14,7 @@
 ## 版本与兼容性
 
 - **标记版本**：`v0.1.0`（与 Git tag **`v0.1.0`** 一致；预编译包请以 **Releases** 资产为准）。
-- **Python**：**3.11+** 可尝试运行；**CI 与发布流水线在 Python 3.13 上验证**，生产环境建议与 CI 主版本对齐。
+- **Python**：**3.11+** 可尝试运行；**CI 与发布流水线在 Python 3.13 上验证**，生产环境建议与 CI 主版本对齐。若部署在 **较旧 glibc 的 Linux** 或需对照官方「最低 Windows」表述，见 **[doc/os-compatibility.md](doc/os-compatibility.md)**。
 - **发布物**：源码即本仓库；二进制见 **`packaging/`**、**`startup_scripts/`** 与 **`.github/workflows/build-and-release.yml`**；发版时请同步更新 **Releases** 说明与 **CHANGELOG**。
 
 ## v0.1.0 范围与说明
@@ -66,7 +66,7 @@ DAgents/
 |----------|--------|------|----------|
 | **源码 + 在线 pip** | **3.11+**（**CI / 发布验证：3.13**） | pip、可访问 PyPI | 开发 / 有外网服务器 |
 | **源码 + 离线 wheels** | 与下载 wheel 时 **次版本一致** | wheel 与 OS/架构绑定 | 内网、隔离环境 |
-| **PyInstaller 发布包** | **无需** Python | Linux 需兼容构建环境的 **glibc** | 解压即用 |
+| **PyInstaller 发布包** | **无需** Python | Linux 上**实际**受 **构建环境 glibc** 约束（非「Python 3.11 官方一句话」）；见 **[doc/os-compatibility.md](doc/os-compatibility.md)** | 解压即用 |
 
 离线 wheel 说明见 **`packaging/OFFLINE_INSTALL.md`**。
 
