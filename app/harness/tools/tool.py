@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from app.config.env import resolve_runtime_root
 from app.config.runtime_layout import shell_policy_dir, tool_policy_file_path
+from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.async_store import get_async_tool_result_store
 from pydantic import BaseModel, ConfigDict, Field
