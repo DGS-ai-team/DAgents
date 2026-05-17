@@ -434,7 +434,7 @@ class AgentService:
             )
             await self._emit_stream_event(env=env, event_type=err_t, data=err_d)
             done_t, done_d = self._map_event_envelope_to_stream(
-                AgentEventEnvelope(event_type="done", payload={}, meta={}),
+                AgentEventEnvelope(event_type="done", payload={"finish_reason": "orchestrator_error"}, meta={}),
                 base_meta=base_meta,
             )
             await self._emit_stream_event(env=env, event_type=done_t, data=done_d)
@@ -719,7 +719,7 @@ class AgentService:
 
         逻辑：
         1. 将 **`base_meta`** 与 **`envelope.meta`** 合并为每条 **`data.meta`**；
-        2. 按 **`event_type`** 展开扁平 **`data`**（含 `usage` 的 token 字段）；
+        2. 按 **`event_type`** 展开扁平 **`data`**（含 `usage` 的 token 字段；**`done`** 必带 **`finish_reason`**（缺省映射为 **`unspecified`**）；**`tool_call_delta`** 含 **`tool_calls`** 列表）；
         3. `done` 的 payload 为 dict 时与其余事件一致带 **`meta`**。
 
         关键边界：
@@ -761,6 +761,8 @@ class AgentService:
                     "prompt_cache_miss_tokens": int(payload.get("prompt_cache_miss_tokens", 0)),
                 }
             )
+        if et == "tool_call_delta":
+            return "tool_call_delta", with_meta({"tool_calls": list(payload.get("tool_calls") or [])})
         if et == "tool_call":
             return "tool_call", with_meta(
                 {
@@ -796,7 +798,10 @@ class AgentService:
         if et == "error":
             return "error", with_meta({"message": payload.get("message", "")})
         if et == "done":
-            body = payload if isinstance(payload, dict) else {}
-            return "done", with_meta(dict(body))
+            body = dict(payload if isinstance(payload, dict) else {})
+            # 约定：每条 `done` 的 SSE `data` 均带 `finish_reason`（缺省由映射层补齐，避免前端分支漏判）。
+            if not str(body.get("finish_reason") or "").strip():
+                body["finish_reason"] = "unspecified"
+            return "done", with_meta(body)
         return "chunk", with_meta({"raw": payload})
 

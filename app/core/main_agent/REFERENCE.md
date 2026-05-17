@@ -15,7 +15,7 @@
 
 ## `runtime_openai.py`
 
-- **`OpenAIImplicitReActRuntime`**：OpenAI 原生 tool calling 运行时（仅推理：**`run_turn(ctx: OpenAIConversationContext, ...)`**，无 session/sqlite）；`run_turn` 单次调用只做一轮模型请求，仅处理 `human_message/tool_message` 两种输入；当模型产出 `tool_calls` 时只写 `pending_tool_calls` 并发 **`tool_call`（含 **`display_type`**）**，不处理审批、不执行工具、不处理 `tool_result` 回灌；**`assistant` / `reasoning`** 事件携带 **`display_type`**；维护 **`ctx.run_turn_phase`** 与跨回合 **`ctx.tool_loop_count`**；**`_request_model_stream`** 在 **`LLM_STREAM_INCLUDE_USAGE`** 开启时转发 `usage`，并在 **`DEBUG`** 下对每条流式 chunk 打 **`%r`** 原文；**`flush_cancelled_turn`**
+- **`OpenAIImplicitReActRuntime`**：OpenAI 原生 tool calling 运行时（仅推理：**`run_turn(ctx: OpenAIConversationContext, ...)`**，无 session/sqlite）；`run_turn` 单次调用只做一轮模型请求，仅处理 `human_message/tool_message` 两种输入；**`human_message`** 时 **`ctx.tool_loop_count = 0`** 再进入模型；**`tool_message`** 沿用累计直至无 **`tool_calls`** 的 assistant 收口时清零；流式阶段 **`run_turn`** 转发 **`assistant` / `reasoning` / `tool_call_delta`**（**`tool_call`** 仍为 **`final`** 后的整包）；**所有 `done` 信封均带 `finish_reason`**（模型侧或 **`empty_content` / `tool_loop_limit` / `model_stream_failed` 等** 语义）；当模型产出 `tool_calls` 时只写 `pending_tool_calls` 并发 **`tool_call`（含 **`display_type`**）**，不处理审批、不执行工具、不处理 `tool_result` 回灌；**`assistant` / `reasoning`** 事件携带 **`display_type`**；维护 **`ctx.run_turn_phase`**；**`_request_model_stream`**：delta 累加 **`final`**（含 **`finish_reason`** 字段）；**`finish_reason`** 流式分片另经 **`done`** 透出；**`LLM_STREAM_INCLUDE_USAGE`** 时转发 **`usage`**，**`DEBUG`** 下对每条流式 chunk 打 **`%r`**；**`flush_cancelled_turn`**
 
 ## `model.py`
 

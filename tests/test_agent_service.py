@@ -48,7 +48,7 @@ class AgentServiceStreamMapTests(unittest.TestCase):
         self.assertEqual(d2["meta"]["trace"], "1")
 
     def test_approval_required_and_done(self) -> None:
-        """审批事件扁平化 `args` → `approval_args`；`done` 允许空 payload。"""
+        """审批事件扁平化 `args` → `approval_args`；`done` 经映射层保证含 `finish_reason`。"""
         base = {"session_id": "sid", "model": "m"}
         t1, d1 = AgentService._map_event_envelope_to_stream(
             AgentEventEnvelope(
@@ -72,6 +72,7 @@ class AgentServiceStreamMapTests(unittest.TestCase):
             base_meta=base,
         )
         self.assertEqual(t2, "done")
+        self.assertEqual(d2.get("finish_reason"), "unspecified")
         self.assertIn("meta", d2)
 
 

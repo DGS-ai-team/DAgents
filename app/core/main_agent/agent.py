@@ -274,7 +274,9 @@ class MainAgentTurnOrchestrator:
             )
             await self._emit_envelope(
                 env=env,
-                envelope=AgentEventEnvelope(event_type="done", payload={}, meta={}),
+                envelope=AgentEventEnvelope(
+                    event_type="done", payload={"finish_reason": "resume_no_pending_tools"}, meta={}
+                ),
                 base_meta=base_meta,
             )
             return
@@ -295,7 +297,9 @@ class MainAgentTurnOrchestrator:
             # 返回完成事件
             await self._emit_envelope(
                 env=env,
-                envelope=AgentEventEnvelope(event_type="done", payload={}, meta={}),
+                envelope=AgentEventEnvelope(
+                    event_type="done", payload={"finish_reason": "resume_rejected"}, meta={}
+                ),
                 base_meta=base_meta,
             )
             return
@@ -613,10 +617,25 @@ class MainAgentTurnOrchestrator:
         request_type: str,
         content: str,
     ) -> None:
-        """统一的一轮 run_turn + 工具执行编排。"""
-        captured_tool_calls: list[dict[str, Any]] = [] # 本轮捕获的 tool_call 列表
-        captured_assistant_content: str = "" # 本轮捕获的 assistant_content
-        runtime_done_envelope: AgentEventEnvelope | None = None # 本轮捕获的 done 事件
+        """统一的一轮 run_turn + 工具执行编排。
+
+        逻辑：
+        1. 迭代 **`runtime.run_turn`**，将非 **`done`** 信封立即 **`_emit_envelope`**；
+        2. 遇 **`done`**：记录 **`payload.finish_reason`**（若有），并暂存该 **`done`**（通常后续还有一次收口 **`done`**）；
+        3. 流结束后将最后一次 **`done`** 的 **`payload`** 与已捕获的 **`finish_reason`** 做 **`setdefault`** 合并；若仍无有效字符串，则按是否捕获 **`tool_calls`** 回退为 **`tool_calls`** 或 **`stop`**，再进入 tool 分支或单次下发。
+
+        关键边界：
+        - 无 **`tool_calls`**：仅下发合并后的 **`done`**；
+        - 有 **`tool_calls`**：走审批/自动执行分支，**`done`** 在分支内择点下发（载荷仍带合并后的 **`finish_reason`**）。
+
+        副作用说明：
+        - 可能 **`_emit_envelope`**、**`_invoke_tool`**、**`_submit_message`**；修改 **`ctx`**（见各分支）。
+        """
+        captured_tool_calls: list[dict[str, Any]] = []  # 本轮捕获的 tool_call 列表
+        captured_assistant_content: str = ""  # 本轮捕获的 assistant_content
+        runtime_done_envelope: AgentEventEnvelope | None = None  # 本轮最后一次 `done`（常为收口空载荷）
+        # runtime 在流式 `finish_reason` 分片发出 `done` 并暂存；回合结束合并为一条再下发 SSE（网关无末包时编排层兜底 `stop`/`tool_calls`）。
+        captured_finish_reason: str = ""
         async for envelope in runtime.run_turn(
             ctx,
             request_type=request_type,
@@ -627,14 +646,25 @@ class MainAgentTurnOrchestrator:
                 # 与 `tool_call` 事件的 `assistant_content` 同源，供审批卡片的 `display_type` 推断。
                 captured_assistant_content = str(envelope.payload.get("assistant_content", "") or "")
             elif envelope.event_type == "done":
+                pl = envelope.payload or {}
+                fr = str(pl.get("finish_reason") or "").strip()
+                if fr:
+                    captured_finish_reason = fr
                 runtime_done_envelope = envelope
                 continue
             await self._emit_envelope(env=env, envelope=envelope, base_meta=base_meta)
 
-        final_done_envelope = runtime_done_envelope or AgentEventEnvelope(
+        merged_done_payload: dict[str, Any] = dict(
+            (runtime_done_envelope.payload if runtime_done_envelope else {}) or {}
+        )
+        if captured_finish_reason:
+            merged_done_payload.setdefault("finish_reason", captured_finish_reason)
+        if not str(merged_done_payload.get("finish_reason") or "").strip():
+            merged_done_payload["finish_reason"] = "tool_calls" if captured_tool_calls else "stop"
+        final_done_envelope = AgentEventEnvelope(
             event_type="done",
-            payload={},
-            meta={},
+            payload=merged_done_payload,
+            meta=dict((runtime_done_envelope.meta if runtime_done_envelope else {}) or {}),
         )
 
         if not captured_tool_calls:
