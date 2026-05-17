@@ -100,9 +100,9 @@
 | 工具名 | 执行形态 | 定义位置 | 作用概要 |
 |--------|----------|----------|----------|
 | **`load_skills`** | 同步 | **`app/harness/tools/skills.py`** | 按名称加载会话 **`loaded_skills`**，并返回可用技能元数据（受 **`agent_skills_max_in_prompt`** 等配置影响）。 |
-| **`read_file`** | 同步 | **`app/harness/tools/fs.py`** | 在 **`FS_ROOT`** 约束下读取文本/二进制（按后缀策略）。 |
-| **`search_file`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内按 **正则** 逐行检索并分页返回。 |
-| **`edit_file`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内对文本文件做行级删改插。 |
+| **`read_file`** | 同步 | **`app/harness/tools/fs.py`** | 流式按 **`line_offset`/`line_limit`** 分页；头含 **`next_line_offset`**（无行号前缀）。 |
+| **`search_file`** | 同步 | **`fs.py`** | 流式正则检索；**`next_index_offset`** 翻页；命中块建议 **`read_file`** 参数；相邻命中合并上下文。 |
+| **`search_replace`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内按 **`old_string`/`new_string`** 精确子串替换（可选 **`replace_all`**）。 |
 | **`write_file`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内整体覆盖写入。 |
 | **`bash_run`** | 同步 | **`app/harness/tools/bash.py`** | 统一 shell 执行（**`bash` / `cmd` / `powershell`**），含命令切段与安全策略（如非 root 下对 **`su`/`sudo`** 的拦截）。 |
 | **`agent_discover`** | 同步 | **`app/harness/tools/agent_peer.py`** | 查询 **Register Center** 可见分组下的 Agent 列表，并尝试拉取 **`.well-known/agent-card.json`** 摘要。 |

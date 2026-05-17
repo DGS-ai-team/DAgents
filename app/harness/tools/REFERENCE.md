@@ -63,8 +63,8 @@
 
 ## `fs.py`
 
-- **`read_file`**、**`write_file`**、**`edit_file`**（头 + **`---`** + **`diff -u` 正文）、**`search_file`**（**正则**按行匹配；**`index_offset`/`count_limit`** 命中分页）
-- **`_workspace_root`**、**`_resolve_under_root`**、**`_read_text_lines`**、**`_window_lines`**、**`_line_numbered_text`**、**`_apply_line_edits`**：路径校验、读入、分页、行号展示与行级编辑
+- **`read_file`**（流式行窗口；头含 **`next_line_offset`**；体积上限 **`Settings.fs_tool_read_max_bytes`**）、**`write_file`**、**`search_replace`**、**`search_file`**（流式扫描；**`next_index_offset`**；上限 **`fs_tool_search_max_bytes`**）
+- **`_iter_file_lines`**、**`_read_line_window`**、**`_scan_regex_hits`**、**`_merge_line_ranges`**、**`_load_lines_for_ranges`**、**`_read_file_text`**、**`_unified_diff_body`**：流式读、命中扫描与 diff
 
 ## `skills.py`
 

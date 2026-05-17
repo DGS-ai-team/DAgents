@@ -51,7 +51,7 @@
 
 ## `harness/tools/fs.py`
 
-- **`read_file`**、**`write_file`**、**`edit_file`**（头 + **`---`** + unified **`diff`**）、**`search_file`**（**正则** **`pattern`**）
+- **`read_file`**（流式 **`line_offset`/`line_limit`**，**`next_line_offset`**）、**`write_file`**、**`search_replace`**、**`search_file`**（**`next_index_offset`**，建议 **`read_file`**）
 
 ## `harness/queue/message_queue.py`
 

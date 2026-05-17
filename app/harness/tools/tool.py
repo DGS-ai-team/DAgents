@@ -363,7 +363,7 @@ def get_tools() -> list[Any]:
         agent_send_message,
     )
     from app.harness.tools.bash import bash_run
-    from app.harness.tools.fs import edit_file, read_file, search_file, write_file
+    from app.harness.tools.fs import read_file, search_file, search_replace, write_file
     from app.harness.tools.skills import load_skills
 
     # 先最小集启用，后续可按稳定性逐步放开更多工具。
@@ -371,7 +371,7 @@ def get_tools() -> list[Any]:
         load_skills,
         read_file,
         search_file,
-        edit_file,
+        search_replace,
         write_file,
         bash_run,
         agent_discover,
