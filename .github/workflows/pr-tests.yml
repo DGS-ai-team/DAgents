@@ -31,3 +31,6 @@ jobs:
 
       - name: Run unittest discovery
         run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Validate OpenAPI export
+        run: python export_openapi_schema.py --output /tmp/dagents-openapi.json
