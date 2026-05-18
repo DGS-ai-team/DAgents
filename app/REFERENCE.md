@@ -5,8 +5,7 @@
 - **`Settings`**、**`get_settings`**
 - 可观测性：**`metrics_enabled`**（**`METRICS_ENABLED`**）、LLM 流式 usage：**`llm_stream_include_usage`**（**`LLM_STREAM_INCLUDE_USAGE`**）
 - 队列相关字段：**`max_queue_size`**
-- 本地调试入口相关字段（命名保留）：**`agent_cli_mode`**
-- API 相关字段：**`agent_api_base`**
+- API 监听：**`api_host`** / **`api_port`**（**`API_HOST`** / **`API_PORT`**）；CLI 客户端 URL 为推导字段 **`agent_api_base`**
 - 会话 sqlite：路径固定为 **`<运行根>/.runtime/memory/session.sqlite3`**（**`runtime_layout.session_sqlite_path()`**）；是否使用 **`SqliteMessageStore`** 由 **`agent_session_store_enabled`**（**`AGENT_SESSION_STORE_ENABLED`**，默认开启）控制
 
 ## `config/env.py`

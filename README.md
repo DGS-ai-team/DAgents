@@ -190,7 +190,7 @@ pip install -r requirements.txt
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-默认 discover **仅**包含 `tests/` 下 `test_*.py`：以本地单测为主，**不**依赖 `OPENAI_API_KEY`。**`test_agent_service.py`** 依赖 `AgentService` 完整导入链（含 `openai` 等），环境不完整时相关用例会 **skip**；安装 **`requirements.txt`** 后应与 CI 行为一致。可选联网 LLM 冒烟：`tests/integration/live_llm_smoke.py`（见 **`tests/integration/README.md`**）。覆盖规划见 **`tests/UNIT_TEST_CHECKLIST.md`**。
+默认 discover **仅**包含 `tests/` 下 `test_*.py`：以本地单测为主，**不**依赖 `LLM_API_KEY`。**`test_agent_service.py`** 依赖 `AgentService` 完整导入链（含 `openai` 等），环境不完整时相关用例会 **skip**；安装 **`requirements.txt`** 后应与 CI 行为一致。可选联网 LLM 冒烟：`tests/integration/live_llm_smoke.py`（见 **`tests/integration/README.md`**）。覆盖规划见 **`tests/UNIT_TEST_CHECKLIST.md`**。
 
 - 指标实现见 **`app/observability/metrics.py`**。
 
