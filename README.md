@@ -21,7 +21,7 @@
 
 - **已交付能力**：见下文「功能概览」及 [CHANGELOG.md](CHANGELOG.md) 中 **0.1.0** 条目（API/持久化/流式/指标/Register Center 等）。
 - **单测**：默认 `python -m unittest discover -s tests -p "test_*.py" -v` **不**拉取实时 LLM；**`test_agent_service.py`** 在缺少完整依赖（如未 `pip install -r requirements.txt`）时部分用例会 **skip**。规划与覆盖矩阵见 **`tests/UNIT_TEST_CHECKLIST.md`**，运行说明见 **`tests/README.md`**。可选真机 LLM 冒烟见 **`tests/integration/README.md`**（`RUN_LIVE_LLM_TESTS` + `LLM_API_KEY`）。
-- **前端联调**：OpenAPI 与 **DAgentsUI** 的最低兼容组合以前端仓库说明为准；后端导出命令见「与前端（DAgentsUI）对接」。
+- **前端联调**：OpenAPI 与 **DAgentsUI** 的最低兼容组合以前端仓库说明为准；后端导出命令见「OpenAPI 契约同步」。
 
 ## 问题反馈与安全
 
@@ -154,12 +154,13 @@ Agent API 会通过 **`bash_run`** 等工具用 **`subprocess`** 执行 shell。
 
 ## OpenAPI 契约同步
 
-后端 FastAPI 应用是 API 契约源头。修改 `app/harness/api/app.py` 或相关 Pydantic schema 后，先导出 OpenAPI，再让前端重新生成类型：
+后端 FastAPI 应用是 API 契约源头。修改 `app/harness/api/app.py` 或相关 Pydantic schema 后，推荐使用辅助脚本一步完成同步：
 
 ```bash
-python export_openapi_schema.py --output openapi.json
 python scripts/ci/export_openapi_for_frontend.py --frontend ../DAgentsUI
 ```
+
+该脚本会自动将最新的 OpenAPI schema (`openapi.json`) 复制到前端仓库，并执行 `pnpm gen:types` 更新类型定义。如果只想在本地查看导出的 OpenAPI 内容，可以单独执行 `python export_openapi_schema.py --output openapi.json`。
 
 前端仓库会更新：
 

@@ -40,10 +40,21 @@ def main() -> int:
         "--output",
         str(openapi_target),
     ]
-    subprocess.run(export_cmd, cwd=backend_root, check=True)
+    try:
+        subprocess.run(export_cmd, cwd=backend_root, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"[openapi-sync] failed to export OpenAPI: exit code {e.returncode}", file=sys.stderr)
+        return e.returncode or 1
 
     if not args.skip_types:
-        subprocess.run(["pnpm", "gen:types"], cwd=frontend_root, check=True)
+        try:
+            subprocess.run(["pnpm", "gen:types"], cwd=frontend_root, check=True)
+        except FileNotFoundError:
+            print("[openapi-sync] failed to run pnpm gen:types: pnpm not found", file=sys.stderr)
+            return 1
+        except subprocess.CalledProcessError as e:
+            print(f"[openapi-sync] failed to run pnpm gen:types: exit code {e.returncode}", file=sys.stderr)
+            return e.returncode or 1
 
     print(f"[openapi-sync] updated {openapi_target}")
     return 0
