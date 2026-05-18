@@ -152,16 +152,21 @@ Agent API 会通过 **`bash_run`** 等工具用 **`subprocess`** 执行 shell。
 
 **安全**：`NOPASSWD` 会扩大被攻破时的影响面，务必 **按调用用户、目标用户、命令** 最小授权；避免对高权限账户滥用 `NOPASSWD: ALL`。
 
-## 与前端（DAgentsUI）对接
+## OpenAPI 契约同步
 
-前端仓库：**[github.com/DGS-ai-team/DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI)**。
+后端 FastAPI 应用是 API 契约源头。修改 `app/harness/api/app.py` 或相关 Pydantic schema 后，先导出 OpenAPI，再让前端重新生成类型：
 
-建议流程：
+```bash
+python export_openapi_schema.py --output openapi.json
+python scripts/ci/export_openapi_for_frontend.py --frontend ../DAgentsUI
+```
 
-1. 在本仓库根目录导出 OpenAPI：  
-   `python export_openapi_schema.py --output <前端仓库路径>/openapi.json`
-2. 在前端仓库生成类型（若前端已配置）：`pnpm gen:types`
-3. 典型 HTTP：`POST /v1/messages`、SSE 相关路由（见 **`doc/api-reference.md`**、**`app/harness/api/README.md`**）
+前端仓库会更新：
+
+- `openapi.json`
+- `src/api/types.ts`
+
+提交后端 API 变更时，请同时提交对应的前端契约文件变更，确保 `DAgentsUI` 的 `pnpm run ci` 能通过。
 
 ## API 说明（简版）
 
