@@ -1,4 +1,4 @@
-"""文件工具（read/search_replace/search/write）。"""
+"""文件工具四件套（read/edit/search/write）。"""
 
 from __future__ import annotations
 
@@ -6,57 +6,19 @@ import difflib
 import json
 import os
 import re
-from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.tool import tool
 
+DEFAULT_MAX_READ_BYTES = 3000
 DEFAULT_LINE_OFFSET = 1
 DEFAULT_LINE_LIMIT = 100
 DEFAULT_SEARCH_CONTEXT_LINES = 10
 DEFAULT_SEARCH_INDEX_OFFSET = 0
 DEFAULT_SEARCH_COUNT_LIMIT = 5
-# 命中索引列表上限（超出仍统计总数，分页仅针对已记录索引）
-MAX_SEARCH_HIT_INDEXES = 10_000
-class ReadFileArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    path: str = Field(min_length=1)
-    line_offset: Optional[int] = 1
-    line_limit: Optional[int] = Field(default=100, ge=1)
-
-
-class WriteFileArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    path: str = Field(min_length=1)
-    content: str
-
-
-class SearchReplaceArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    path: str = Field(min_length=1)
-    old_string: str = Field(min_length=1)
-    new_string: str
-    replace_all: bool = False
-
-
-class SearchFileArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    path: str = Field(min_length=1)
-    pattern: str = Field(min_length=1)
-    index_offset: Optional[int] = Field(default=0, ge=0)
-    count_limit: Optional[int] = Field(default=5, ge=1)
-
-
 _TEXT_SUFFIXES = {
     ".txt",
     ".md",
@@ -112,52 +74,29 @@ def _resolve_under_root(path: str) -> Path:
     return resolved
 
 
-def _read_file_text(path: Path) -> str:
-    """读取工作区内文本文件全文（与 `search_replace` 匹配口径一致）。
+def _line_numbered_text(lines: list[str], start_line: int) -> str:
+    """将文本行转换为带行号格式 `行号>内容`。"""
 
-    逻辑：
-    1. `.json` 先解析再 pretty-print，便于模型阅读与编辑；
-    2. 其它允许后缀按 UTF-8 读入，非法字节替换；
-    3. 不支持的后缀向上抛 `ValueError`。
+    return "\n".join(f"{start_line + idx}>{line}" for idx, line in enumerate(lines))
 
-    关键边界：
-    - 返回字符串保留文件原有换行，不在此层强制追加末尾 `\\n`。
-    """
+
+def _read_text_lines(path: Path) -> list[str]:
+    """读取文本文件并返回行数组（保留空行，不保留行尾换行符）。"""
+
     suffix = path.suffix.lower()
     if suffix == ".json":
         obj = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-        return json.dumps(obj, ensure_ascii=False, indent=2)
+        pretty = json.dumps(obj, ensure_ascii=False, indent=2)
+        return pretty.splitlines()
     if suffix in _TEXT_SUFFIXES:
-        return path.read_text(encoding="utf-8", errors="replace")
+        return path.read_text(encoding="utf-8", errors="replace").splitlines()
     raise ValueError(f"不支持读取该后缀文件：{suffix or '<no-suffix>'}")
 
 
-def _iter_file_lines(path: Path) -> Iterator[str]:
-    """按行流式产出文件内容（不含行尾 `\\n`/`\\r`）。
+def _window_lines(lines: list[str], line_offset: int, line_limit: int) -> tuple[int, int]:
+    """计算读取窗口（1-based 输入，返回 0-based [start, end)）。"""
 
-    逻辑：
-    1. 非 `.json`：逐行读盘，内存仅保留当前行；
-    2. `.json`：为 pretty-print 仍一次性读入后再 `splitlines`（大 JSON 例外，见工具说明）。
-
-    异常说明：
-    - 不支持的后缀向上抛 `ValueError`。
-    """
-    suffix = path.suffix.lower()
-    if suffix == ".json":
-        for line in _read_file_text(path).splitlines():
-            yield line
-        return
-    if suffix not in _TEXT_SUFFIXES:
-        raise ValueError(f"不支持读取该后缀文件：{suffix or '<no-suffix>'}")
-    with path.open(encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
-            yield raw.rstrip("\r\n")
-
-
-def _window_from_total(total: int, line_offset: int, line_limit: int) -> tuple[int, int]:
-    """由总行数计算 0-based 行窗口 `[start, end)`（与 `_window_lines` 语义一致）。"""
-    if total <= 0:
-        return 0, 0
+    total = len(lines)
     if line_offset > 0:
         start = max(line_offset - 1, 0)
     else:
@@ -166,205 +105,25 @@ def _window_from_total(total: int, line_offset: int, line_limit: int) -> tuple[i
     return start, end
 
 
-def _read_line_window(path: Path, line_offset: int, line_limit: int) -> tuple[list[str], int, int, int]:
-    """流式读取指定行窗口（避免为取 100 行而载入全文）。
-
-    逻辑：
-    1. 第一遍 `_iter_file_lines` 仅计数得 `total`；
-    2. `_window_from_total` 得 `[start, end)`；
-    3. 第二遍迭代，仅收集 `start <= idx < end` 的行，读到 `end` 即停止。
-
-    返回：
-    - `(window_lines, total, start, end)`，均为 0-based 窗口下标。
-    """
-    total = 0
-    for _ in _iter_file_lines(path):
-        total += 1
-    start, end = _window_from_total(total, line_offset, line_limit)
-    if start >= end:
-        return [], total, start, end
-    window: list[str] = []
-    idx = 0
-    for line in _iter_file_lines(path):
-        if idx >= end:
-            break
-        if idx >= start:
-            window.append(line)
-        idx += 1
-    return window, total, start, end
-
-
-def _apply_max_bytes_to_body(
-    body: str,
-    byte_limit: int,
-    *,
-    truncate_hint: str,
-) -> tuple[str, bool]:
-    """按 UTF-8 字节上限截断正文；超限时追加说明行。
-
-    返回 `(body, byte_truncated)`。
-    """
-    encoded = body.encode("utf-8")
-    if len(encoded) <= byte_limit:
-        return body, False
-    clipped = encoded[:byte_limit].decode("utf-8", errors="replace")
-    return clipped + f"\n\n[TRUNCATED] {truncate_hint}", True
-
-
-def _fs_tool_read_max_bytes() -> int:
-    """`read_file` 输出字节上限（来自 `Settings.fs_tool_read_max_bytes`）。"""
-    return max(1, int(get_settings().fs_tool_read_max_bytes))
-
-
-def _fs_tool_search_max_bytes() -> int:
-    """`search_file` 输出字节上限（来自 `Settings.fs_tool_search_max_bytes`）。"""
-    return max(1, int(get_settings().fs_tool_search_max_bytes))
-
-
-def _apply_max_bytes_to_output(full_text: str, byte_limit: int) -> tuple[str, bool]:
-    """截断整段工具输出（含头与正文），用于 `search_file`。"""
-    encoded = full_text.encode("utf-8")
-    if len(encoded) <= byte_limit:
-        return full_text, False
-    clipped = encoded[:byte_limit].decode("utf-8", errors="replace")
-    return (
-        clipped
-        + f"\n\n[TRUNCATED] 输出超过 {byte_limit} bytes；请减小 count_limit 或缩小检索范围，"
-        "并使用 next_index_offset 翻页。",
-        True,
-    )
-
-
-def _unified_diff_body(old_text: str, new_text: str, *, path: str) -> str:
-    """生成类 `diff -u` 的正文，供 `search_replace` 返回块使用。"""
-    joined = "\n".join(
-        difflib.unified_diff(
-            old_text.splitlines(),
-            new_text.splitlines(),
-            fromfile=f"a/{path}",
-            tofile=f"b/{path}",
-            lineterm="",
-        )
-    )
-    if joined.strip():
-        return joined
-    return "(无可见差异：编辑前后内容一致。)"
-
-
-def _scan_regex_hits(path: Path, regex: re.Pattern[str]) -> tuple[list[int], int, int, bool]:
-    """流式扫描命中行下标（0-based）。
-
-    返回 `(stored_hit_indexes, total_hit_count, total_line_count, index_list_capped)`。
-    - `stored_hit_indexes` 长度至多 `MAX_SEARCH_HIT_INDEXES`，供分页；
-    - `total_hit_count` 为全文件真实命中次数；
-    - `total_line_count` 为文件总行数（同次扫描得出，避免再读一遍）；
-    - `index_list_capped` 为真表示命中过多，仅前若干下标可分页。
-    """
-    stored: list[int] = []
-    total_hits = 0
-    line_idx = 0
-    for line in _iter_file_lines(path):
-        if regex.search(line):
-            total_hits += 1
-            if len(stored) < MAX_SEARCH_HIT_INDEXES:
-                stored.append(line_idx)
-        line_idx += 1
-    return stored, total_hits, line_idx, total_hits > len(stored)
-
-
-def _merge_line_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """合并重叠或相邻的半开区间 `[start, end)`。"""
-    if not ranges:
-        return []
-    ordered = sorted(ranges, key=lambda item: item[0])
-    merged: list[tuple[int, int]] = [ordered[0]]
-    for start, end in ordered[1:]:
-        prev_start, prev_end = merged[-1]
-        if start <= prev_end:
-            merged[-1] = (prev_start, max(prev_end, end))
-        else:
-            merged.append((start, end))
-    return merged
-
-
-def _load_lines_for_ranges(path: Path, ranges: list[tuple[int, int]]) -> dict[int, str]:
-    """第二遍流式读盘，仅 materialize 落在合并区间内行。"""
-    if not ranges:
-        return {}
-    max_end = max(end for _, end in ranges)
-    lines: dict[int, str] = {}
-    idx = 0
-    for line in _iter_file_lines(path):
-        if idx >= max_end:
-            break
-        for start, end in ranges:
-            if start <= idx < end:
-                lines[idx] = line
-                break
-        idx += 1
-    return lines
-
-
-def _format_search_blocks(
-    *,
-    shown_hits: list[int],
-    hit_indexes: list[int],
-    total_hits: int,
-    line_map: dict[int, str],
-    context_lines: int,
-    total_file_lines: int,
-) -> list[str]:
-    """将本页命中格式化为合并上下文块（P1：相邻命中共享一段正文）。"""
-    if not shown_hits:
-        return []
-    raw_ranges: list[tuple[int, int]] = []
-    for hit_idx in shown_hits:
-        start = max(hit_idx - context_lines, 0)
-        end = min(hit_idx + context_lines + 1, total_file_lines)
-        raw_ranges.append((start, end))
-    merged = _merge_line_ranges(raw_ranges)
-    blocks: list[str] = []
-    for range_start, range_end in merged:
-        hits_in_range = [h for h in shown_hits if range_start <= h < range_end]
-        rank_parts: list[str] = []
-        line_parts: list[str] = []
-        for h in hits_in_range:
-            global_rank = hit_indexes.index(h) + 1
-            rank_parts.append(f"#{global_rank}")
-            line_parts.append(str(h + 1))
-        context_text = "\n".join(line_map.get(i, "") for i in range(range_start, range_end))
-        read_offset = range_start + 1
-        read_limit = max(1, range_end - range_start)
-        blocks.append(
-            f"命中 {'、'.join(rank_parts)}/{total_hits}（原文行 {', '.join(line_parts)}）\n"
-            f"建议 read_file: line_offset={read_offset}, line_limit={read_limit}\n"
-            f"上下文:\n{context_text}"
-        )
-    return blocks
-
-
 @tool("read_file")
 def read_file(
     path: str,
+    max_bytes: Optional[int] = 3000,
     line_offset: Optional[int] = 1,
     line_limit: Optional[int] = 100,
     context: OpenAIConversationContext | None = None,
 ) -> str:
-    """使用场景：在 **`FS_ROOT`** 内按行窗口读取文本，供 **`search_replace`** 复制锚定文本；大文件用 **`line_offset`/`line_limit`** 分段读。
-
+    """
+    读取文件，并返回带行号文本。如果一次读取的文件内容超过max_bytes，则返回截断提示。
+    如果读取的文件内容超过line_limit，则返回截断提示。
+    通过调整line_offset和line_limit可以调整读取的行数和偏移量以读取未被展示的内容。
+    行号说明: 
+        每行使用 `行号>内容` 格式。
     字段说明：
-    - `path`：工作区内路径（必填）。
-    - `line_offset`：起始行（1-based，默认 1）；非正整数时从文件末尾倒数起算。
-    - `line_limit`：最多读取行数（默认 100），**分页主参数**。
-
-    返回说明：
-    - 成功：元数据头（含 **`next_line_offset`**、行区间）+ `---` + **纯文本正文**（无行号前缀）。
-    - 单页体积由部署配置 **`FS_TOOL_READ_MAX_BYTES`** 限制，触顶时请减小 `line_limit` 并用 **`next_line_offset`** 翻页。
-    - 失败：`ERROR: ...`
-
-    调用范例：
-    - `read_file({"path":"app/foo.py"})`
-    - `read_file({"path":"big.log","line_offset":101,"line_limit":80})`
+    - `path`：文件路径。
+    - `max_bytes`：最大读取字节数，默认3000。
+    - `line_offset`：行偏移量，默认1。
+    - `line_limit`：行限制，默认100。
     """
     try:
         del context
@@ -374,39 +133,31 @@ def read_file(
         if target.is_dir():
             return f"ERROR: 目标是目录，无法读取：{path!r}"
 
-        byte_limit = _fs_tool_read_max_bytes()
+        limit = DEFAULT_MAX_READ_BYTES if max_bytes is None else max(1, int(max_bytes))
+        all_lines = _read_text_lines(target)
         offset = DEFAULT_LINE_OFFSET if line_offset is None else int(line_offset)
         count = DEFAULT_LINE_LIMIT if line_limit is None else max(1, int(line_limit))
-        window_lines, total, start, end = _read_line_window(target, offset, count)
+        start, end = _window_lines(all_lines, offset, count)
+        window_lines = all_lines[start:end]
+        total = len(all_lines)
         has_more_after = end < total
-        body = "\n".join(window_lines)
-        body, byte_truncated = _apply_max_bytes_to_body(
-            body,
-            byte_limit,
-            truncate_hint=(
-                f"当前窗口超过配置上限 {byte_limit} bytes；请减小 line_limit，"
-                f"下一页建议 line_offset={end + 1}（若后方仍有行）。"
-            ),
-        )
         st = target.stat()
         dt = datetime.fromtimestamp(st.st_mtime).astimezone()
         mtime_txt = f"{dt.isoformat(timespec='seconds')}（unix {st.st_mtime:.6f}）"
-        next_line = str(end + 1) if has_more_after else "无"
         header = [
             f"文件修改时间: {mtime_txt}",
-            f"文件总行数: {total}",
-            f"本页行区间: {start + 1}-{end} / {total}",
-            f"next_line_offset: {next_line}",
+            f"展示行区间: {start + 1}-{end} / {total}",
             f"后方是否还有未读取行: {'是' if has_more_after else '否'}",
-            f"本页内容是否因体积上限截断: {'是' if byte_truncated else '否'}",
             "---",
         ]
-        return "\n".join(header) + "\n" + body
+        text = "\n".join(header) + "\n" + _line_numbered_text(window_lines, start + 1)
+        data = text.encode("utf-8")
+        if len(data) > limit:
+            text = data[:limit].decode("utf-8", errors="replace")
+            text += f"\n\n[TRUNCATED] 输出超过 {limit} bytes，已截断。"
+        return text
     except Exception as exc:
         return f"ERROR: read_file 失败: {exc}"
-
-
-read_file.args_schema = ReadFileArgs  # type: ignore[attr-defined]
 
 
 @tool("write_file")
@@ -415,19 +166,7 @@ def write_file(
     content: str,
     context: OpenAIConversationContext | None = None,
 ) -> str:
-    """使用场景：在 **`FS_ROOT`** 内整文件覆盖写入（新文件或大段重写）。
-
-    字段说明：
-    - `path`：工作区内路径（必填）。
-    - `content`：写入全文（必填）。
-
-    返回说明：
-    - 成功：`OK: 已写入 ...`
-    - 失败：`ERROR: ...`
-
-    调用范例：
-    - `write_file({"path":"notes.txt","content":"hello"})`
-    """
+    """覆盖写入文件。"""
     try:
         del context
         target = _resolve_under_root(path)
@@ -442,32 +181,49 @@ def write_file(
         return f"ERROR: write_file 失败: {exc}"
 
 
-write_file.args_schema = WriteFileArgs  # type: ignore[attr-defined]
+def _apply_line_edits(lines: list[str], edits: list[dict[str, Any]]) -> list[str]:
+    """按编辑动作数组执行行级修改。"""
+
+    updated = list(lines)
+    for item in edits:
+        action = str(item.get("action") or "").strip().lower()
+        start_line = int(item.get("start_line") or 0)
+        end_line = int(item.get("end_line") or start_line)
+        if start_line <= 0 or end_line <= 0 or end_line < start_line:
+            raise ValueError(f"非法行区间: {start_line}-{end_line}")
+        start_idx = start_line - 1
+        end_idx = end_line
+        if action == "delete":
+            del updated[start_idx:end_idx]
+        elif action == "replace":
+            content = str(item.get("content") or "")
+            replacement = content.splitlines()
+            updated[start_idx:end_idx] = replacement
+        elif action == "insert":
+            content = str(item.get("content") or "")
+            replacement = content.splitlines()
+            updated[start_idx:start_idx] = replacement
+        else:
+            raise ValueError(f"不支持的编辑动作: {action!r}")
+    return updated
 
 
-@tool("search_replace")
-def search_replace(
-    path: str,
-    old_string: str,
-    new_string: str,
-    replace_all: bool = False,
-    context: OpenAIConversationContext | None = None,
-) -> str:
-    """使用场景：在 **`FS_ROOT`** 内用精确子串替换修改已有文本（改前请先 **`read_file`**）。
+@tool("edit_file")
+def edit_file(path: str, edits_json: str, context: OpenAIConversationContext | None = None) -> str:
+    """使用场景：在 **`FS_ROOT`** 内对已有文本文件做按行删/改/插。
 
     字段说明：
-    - `path`：工作区内路径（必填）。
-    - `old_string`：须在磁盘文件中**精确出现**的片段（含空格与换行；勿带行号前缀）。
-    - `new_string`：替换结果（可为空字符串表示删除该片段）。
-    - `replace_all`：是否替换全部匹配（可选，默认 false）；为 false 时须**恰好 1 处**匹配。
+    - `path`：工作区内路径。
+    - `edits_json`：JSON 对象，**仅** `{"edits":[...]}`；行号从 1 起；`delete`/`replace` 用 **`start_line`～`end_line` 闭区间**；`insert` 在 **`start_line` 行前**插入；多条按 **`edits`** 数组顺序依次执行。
 
     返回说明：
-    - 成功：**`成功: 是`**、**`路径`**、**`---`** 后为 unified diff 正文。
-    - 失败：**`成功: 否`** 与 **`错误:`**；正文为空。
+    - 字符串：**头部**为 **`成功: 是|否`**、**`路径: ...`**，失败时另有 **`错误: ...`**；一行 **`---`** 后为 **正文**（类 **`diff -u`**）；失败时正文为空。
 
-    调用范例：
-    - `search_replace({"path":"a.py","old_string":"foo","new_string":"bar"})`
-    - `search_replace({"path":"a.py","old_string":"// TODO\\n","new_string":"","replace_all":true})`
+    调用范例（`edits_json`）：
+    - `{"edits":[{"action":"delete","start_line":3,"end_line":5}]}`
+    - `{"edits":[{"action":"replace","start_line":10,"end_line":12,"content":"# A\\nB"}]}`
+    - `{"edits":[{"action":"insert","start_line":1,"content":"#!/usr/bin/env python3\\n"}]}`
+    - `{"edits":[{"action":"delete","start_line":2,"end_line":2},{"action":"insert","start_line":2,"content":"# x"}]}`
     """
     try:
         del context
@@ -476,38 +232,39 @@ def search_replace(
             return f"成功: 否\n路径: {path}\n错误: 文件不存在：{path!r}\n---\n"
         if target.is_dir():
             return f"成功: 否\n路径: {path}\n错误: 目标是目录，无法编辑：{path!r}\n---\n"
-        if not old_string:
-            return f"成功: 否\n路径: {path}\n错误: old_string 不能为空。\n---\n"
-
-        raw_text = _read_file_text(target)
-        hit_count = raw_text.count(old_string)
-        if hit_count == 0:
+        payload = json.loads(edits_json)
+        # 仅接受 {"edits":[...]}，避免与顶层数组两种写法长期分叉。
+        if not isinstance(payload, dict):
             return (
                 f"成功: 否\n路径: {path}\n"
-                f"错误: 未找到 old_string（0 处匹配）；请 read_file 核对空白与换行。\n---\n"
+                f'错误: edits_json 必须是 JSON 对象，形如 {{"edits":[...]}}。\n---\n'
             )
-        if not replace_all and hit_count != 1:
-            return (
-                f"成功: 否\n路径: {path}\n"
-                f"错误: old_string 匹配 {hit_count} 处；请扩大上下文或设 replace_all=true。\n---\n"
+        if "edits" not in payload:
+            return f'成功: 否\n路径: {path}\n错误: edits_json 缺少 "edits" 字段。\n---\n'
+        edits = payload["edits"]
+        if not isinstance(edits, list):
+            return f'成功: 否\n路径: {path}\n错误: "edits" 必须是数组。\n---\n'
+        raw_text = target.read_text(encoding="utf-8", errors="replace")
+        old_lines = raw_text.splitlines()
+        new_lines = _apply_line_edits(old_lines, [dict(item) for item in edits if isinstance(item, dict)])
+        new_text = "\n".join(new_lines)
+        if raw_text.endswith("\n"):
+            new_text += "\n"
+        joined = "\n".join(
+            difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+                lineterm="",
             )
-
-        if replace_all:
-            new_text = raw_text.replace(old_string, new_string)
-            replaced = hit_count
-        else:
-            new_text = raw_text.replace(old_string, new_string, 1)
-            replaced = 1
-
+        )
+        # 与 `diff -u` 同类；无差异时仍给提示，避免正文空串。
+        diff_text = joined if joined.strip() else "(无可见差异：编辑前后行序列一致。)"
         target.write_text(new_text, encoding="utf-8")
-        diff_text = _unified_diff_body(raw_text, new_text, path=path)
-        head = f"成功: 是\n路径: {path}\n替换次数: {replaced}\n---\n{diff_text}"
-        return head
+        return f"成功: 是\n路径: {path}\n---\n{diff_text}"
     except Exception as exc:
-        return f"成功: 否\n路径: {path}\n错误: search_replace 失败: {exc}\n---\n"
-
-
-search_replace.args_schema = SearchReplaceArgs  # type: ignore[attr-defined]
+        return f"成功: 否\n路径: {path}\n错误: edit_file 失败: {exc}\n---\n"
 
 
 @tool("search_file")
@@ -518,22 +275,21 @@ def search_file(
     count_limit: Optional[int] = 5,
     context: OpenAIConversationContext | None = None,
 ) -> str:
-    """使用场景：在 **`FS_ROOT`** 内按**正则**逐行检索；分页返回命中及合并后的上下文（无行号前缀）。
+    """使用场景：在 **`FS_ROOT`** 内按**正则表达式**逐行检索，并按命中顺序分页展示。
 
     字段说明：
-    - `path`：工作区内路径（必填）。
-    - `pattern`：Python **`re`** 正则（必填，非空）。
-    - `index_offset`：跳过前 N 个命中（可选，默认 0）。
-    - `count_limit`：本页最多展示命中数（可选，默认 5）。
+    - `path`：工作区内路径。
+    - `pattern`：Python **`re`** 兼容的正则字符串（非空）；字面量特殊字符需自行转义（如 `\\.py`）。
+    - `index_offset`：跳过前多少个命中（默认 0）；过大时收紧至仍可展示至少一条。
+    - `count_limit`：本页最多展示多少处命中（默认 5；至多 **全文件命中总数**）。
 
     返回说明：
-    - 成功：元数据（含 **`next_index_offset`**）+ `---` + 命中块（含建议 **`read_file`** 参数）。
-    - 整段体积由 **`FS_TOOL_SEARCH_MAX_BYTES`** 限制；触顶时请减小 `count_limit` 并用 **`next_index_offset`** 翻页。
-    - 失败：`ERROR: ...`
+    - 成功：头部元数据 + **`---`** 后为命中块（行上下文）；无命中时仅头部，`本页命中` 为 **`无`**。
+    - 失败：`ERROR: ...`（路径无效、正则无编译、`pattern` 为空等）
 
     调用范例：
     - `search_file({"path":"a.py","pattern":"TODO"})`
-    - `search_file({"path":"b.py","pattern":"TODO","index_offset":5,"count_limit":3})`
+    - `search_file({"path":"b.py","pattern":"def\\\\s+\\\\w+","index_offset":0,"count_limit":3})`（JSON 内 `\\` 为转义，引擎收到 `def\\s+\\w+`）
     """
     try:
         del context
@@ -549,75 +305,53 @@ def search_file(
             regex = re.compile(raw_pat)
         except re.error as exc:
             return f"ERROR: 正则无效: {exc}"
-
-        hit_indexes, total_hits, total_file_lines, index_list_capped = _scan_regex_hits(target, regex)
+        all_lines = _read_text_lines(target)
+        total = len(all_lines)
+        hit_indexes = [idx for idx, line in enumerate(all_lines) if regex.search(line)]
+        total_hits = len(hit_indexes)
         io_raw = DEFAULT_SEARCH_INDEX_OFFSET if index_offset is None else max(0, int(index_offset))
         cl_raw = DEFAULT_SEARCH_COUNT_LIMIT if count_limit is None else max(1, int(count_limit))
-        byte_limit = _fs_tool_search_max_bytes()
 
-        # 分页仅针对已存入 `hit_indexes` 的前若干下标（极端海量命中时见头字段说明）。
-        pageable_total = len(hit_indexes)
         base_header = [
             f"文件: {target}",
             f"正则: {raw_pat!r}",
+            f"文件总行数: {total}",
             f"全文件命中数: {total_hits}",
         ]
-        if index_list_capped:
-            base_header.append(
-                f"命中索引列表: 仅保留前 {MAX_SEARCH_HIT_INDEXES} 处供 index_offset 分页；"
-                "全文件命中数仍为上值。"
-            )
-        if pageable_total > 0:
-            cl = min(cl_raw, pageable_total)
-            io = min(io_raw, pageable_total - 1)
+        if total_hits > 0:
+            # 本页条数至多 total_hits；起始偏移至多 total_hits-1，保证至少展示 1 条命中。
+            cl = min(cl_raw, total_hits)
+            io = min(io_raw, total_hits - 1)
             shown_hits = hit_indexes[io : io + cl]
             has_earlier = io > 0
-            has_later = io + len(shown_hits) < pageable_total
+            has_later = io + len(shown_hits) < total_hits
             page_desc = f"第 {io + 1}-{io + len(shown_hits)} 处"
-            next_index = str(io + len(shown_hits)) if has_later else "无"
         else:
             io = 0
             shown_hits = []
             has_earlier = False
             has_later = False
             page_desc = "无"
-            next_index = "无"
 
         blocks: list[str] = []
-        if shown_hits:
-            ctx = DEFAULT_SEARCH_CONTEXT_LINES
-            raw_ranges = [
-                (max(h - ctx, 0), min(h + ctx + 1, total_file_lines)) for h in shown_hits
-            ]
-            merged_ranges = _merge_line_ranges(raw_ranges)
-            line_map = _load_lines_for_ranges(target, merged_ranges)
-            blocks = _format_search_blocks(
-                shown_hits=shown_hits,
-                hit_indexes=hit_indexes,
-                total_hits=total_hits,
-                line_map=line_map,
-                context_lines=ctx,
-                total_file_lines=total_file_lines,
+        for seq, hit_idx in enumerate(shown_hits, start=1):
+            global_rank = io + seq
+            start = max(hit_idx - DEFAULT_SEARCH_CONTEXT_LINES, 0)
+            end = min(hit_idx + DEFAULT_SEARCH_CONTEXT_LINES + 1, total)
+            blocks.append(
+                f"命中#{global_rank}/{total_hits}: 行 {hit_idx + 1}（展示区间 {start + 1}-{end}）\n"
+                + _line_numbered_text(all_lines[start:end], start + 1)
             )
-
         header = base_header + [
-            f"本页命中: {page_desc} / 可分页 {pageable_total} 处",
-            f"next_index_offset: {next_index}",
+            f"本页命中: {page_desc} / 共 {total_hits}",
             f"前方是否还有命中: {'是' if has_earlier else '否'}",
             f"后方是否还有命中: {'是' if has_later else '否'}",
             "---",
         ]
         header_text = "\n".join(header)
         if not blocks:
-            full_out = header_text
-        else:
-            full_out = "\n\n".join([header_text] + blocks)
-        full_out, out_truncated = _apply_max_bytes_to_output(full_out, byte_limit)
-        if out_truncated:
-            full_out += f"\nnext_index_offset: {next_index}"
-        return full_out
+            return header_text
+        return "\n\n".join([header_text] + blocks)
     except Exception as exc:
         return f"ERROR: search_file 失败: {exc}"
 
-
-search_file.args_schema = SearchFileArgs  # type: ignore[attr-defined]

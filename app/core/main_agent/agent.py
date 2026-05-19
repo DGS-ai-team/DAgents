@@ -11,30 +11,27 @@ from app.context.models import OpenAIConversationContext, PendingToolCall, RunTu
 from app.harness.history.raw_message_journal import append_openai_message_with_journal, insert_openai_message_with_journal
 from app.harness.queue.message_queue import MessageEnvelope
 from app.harness.service.interface import AgentEventEnvelope
-from app.harness.tools.result_policy import package_tool_result
-from app.observability.metrics import record_tool_execution_result
+from app.harness.tools.tool import should_require_tool_approval
+from app.schemas.approval import (
+    ApprovalRequiredEnvelopePayload,
+    ApprovalToolCallsArgs,
+    ResumeToolApprove,
+    ResumeToolReject,
+    ResumeToolSelection,
+    ToolCallApprovalItem,
+    parse_resume_tool_decision,
+)
 
 from app.core.main_agent.display_inference import (
     infer_tool_call_display_type,
     infer_tool_result_display_type,
 )
 from app.core.main_agent.runtime_openai import OpenAIImplicitReActRuntime
-from app.core.main_agent.summary_compression import SummaryCompressionCoordinator, messages_fingerprint
-from app.core.main_agent.tool_execution import (
-    ToolExecutionCoordinator,
-    ToolExecutionPlan,
-    build_approval_required_payload,
-    build_tool_execution_plan,
-    pending_tool_call_to_approval_item,
-)
-from app.core.main_agent.tool_resume import ResumeDecisionPlan, ToolResumeCoordinator, build_resume_decision_plan
 from app.core.summary_agent.agent import init_agent as init_summary_agent
 
 import logging
 
 _logger = logging.getLogger(__name__)
-
-
 class MainAgentTurnOrchestrator:
     """消息回合业务编排器（service 无状态基础设施之上的业务层）。"""
 
@@ -60,49 +57,104 @@ class MainAgentTurnOrchestrator:
         self._submit_message = submit_message
         self._emit_envelope = emit_envelope
         self._tool_map = tool_map
-        self._summary_compression = SummaryCompressionCoordinator(
-            emit_envelope=emit_envelope,
-            silent_trigger_tokens=int(settings.summary_compression_silent_trigger_tokens),
-            blocking_trigger_tokens=int(settings.summary_compression_blocking_trigger_tokens),
-            summary_runtime_factory=init_summary_agent,
-        )
-        self._tool_resume = ToolResumeCoordinator(
-            invoke_tool=self._invoke_tool,
-            append_tool_message=self._append_tool_message,
-            emit_envelope=emit_envelope,
-        )
-        self._tool_execution = ToolExecutionCoordinator(
-            invoke_tool=self._invoke_tool,
-            append_tool_message=self._append_tool_message,
-            emit_envelope=emit_envelope,
-            submit_message=submit_message,
-        )
-        self._session_summary_tasks = self._summary_compression.session_tasks
-        self._session_pending_compression_results = self._summary_compression.pending_results
+        self._summary_runtime: Any | None = None
+        self._summary_silent_trigger_tokens = max(0, int(settings.summary_compression_silent_trigger_tokens))
+        self._summary_blocking_trigger_tokens = max(0, int(settings.summary_compression_blocking_trigger_tokens))
+        self._session_summary_tasks: dict[str, asyncio.Task[None]] = {}
+        self._session_pending_compression_results: dict[str, dict[str, Any]] = {}
 
     async def maybe_handle_summary_compression(
         self,
         *,
         session_id: str,
         ctx: OpenAIConversationContext,
-        env: MessageEnvelope | None = None,
-        base_meta: dict[str, Any] | None = None,
     ) -> None:
-        await self._summary_compression.maybe_handle(
-            session_id=session_id,
-            ctx=ctx,
-            env=env,
-            base_meta=base_meta,
+        """在每轮消息处理入口执行 summary 压缩编排。
+
+        逻辑：
+        1. 先按阈值判断本轮压缩级别（`silent` / `blocking` / `none`）；
+        2. 命中 `silent`：仅当无在途静默任务时启动并记录后台压缩；
+        3. 命中 `blocking`：若有在途压缩先阻塞等待；否则（或等待后仍未产出结果）执行阻塞压缩；
+        4. 最后统一尝试应用已完成压缩结果（若有）。
+        """
+        summary_runtime = self._get_summary_runtime()
+        decision = summary_runtime.should_compress(
+            ctx.messages,
+            silent_trigger_tokens=self._summary_silent_trigger_tokens,
+            blocking_trigger_tokens=self._summary_blocking_trigger_tokens,
+            messages_total_tokens=int(ctx.messages_total_tokens),
         )
+        should_compress = bool(decision.get("should_compress"))
+        trigger_level = str(decision.get("trigger_level") or "none")
+        running_task = self._session_summary_tasks.get(session_id)
+        if running_task is not None and running_task.done():
+            self._session_summary_tasks.pop(session_id, None)
+            try:
+                await running_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                _logger.error("%s: silent compression failed: %s", session_id, exc)
+            running_task = None
+        if running_task is not None and not running_task.done():
+            has_running_task = True
+        else:
+            has_running_task = False
+        if should_compress and trigger_level == "silent":
+            if not has_running_task:
+                self._session_summary_tasks[session_id] = asyncio.create_task(
+                    self._run_compression_flow(session_id=session_id, ctx=ctx)
+                )
+        elif should_compress and trigger_level == "blocking":
+            if has_running_task:
+                try:
+                    await running_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:  # noqa: BLE001
+                    _logger.error("%s: blocking wait silent task failed: %s", session_id, exc)
+            # 阻塞压缩失败后的错误处理策略待补充（当前先留空）。
+            blocking_ok = await self._run_compression_flow(session_id=session_id, ctx=ctx)
+            if not blocking_ok:
+                # TODO: 阻塞压缩失败时返回特定错误消息（当前先留空）。
+                pass
+        else:
+            pass
+        await self._try_apply_ready_compression_result(session_id=session_id, ctx=ctx)
 
     async def cancel_all_summary_tasks(self) -> None:
-        await self._summary_compression.cancel_all_tasks()
+        """取消并回收所有 session 的静默压缩任务。"""
+        for task in list(self._session_summary_tasks.values()):
+            if task is not None and not task.done():
+                task.cancel()
+        for task in list(self._session_summary_tasks.values()):
+            if task is None:
+                continue
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._session_summary_tasks.clear()
+        self._session_pending_compression_results.clear()
 
     async def cancel_session_summary_task(self, *, session_id: str) -> None:
-        await self._summary_compression.cancel_session_task(session_id=session_id)
+        """取消并回收指定 session 的静默压缩任务。"""
+        task = self._session_summary_tasks.get(session_id)
+        if task is not None and not task.done():
+            task.cancel()
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._session_summary_tasks.pop(session_id, None)
+        self._session_pending_compression_results.pop(session_id, None)
 
     def _get_summary_runtime(self) -> Any:
-        return self._summary_compression.get_runtime()
+        """懒加载并复用 summary 压缩 runtime。"""
+        if self._summary_runtime is None:
+            self._summary_runtime = init_summary_agent()
+        return self._summary_runtime
 
     async def _try_apply_ready_compression_result(
         self,
@@ -110,24 +162,70 @@ class MainAgentTurnOrchestrator:
         session_id: str,
         ctx: OpenAIConversationContext,
     ) -> None:
-        await self._summary_compression.try_apply_ready_result(session_id=session_id, ctx=ctx)
+        """在每轮入口尝试应用已完成的压缩结果。
 
-    async def _run_compression_flow(
-        self,
-        *,
-        session_id: str,
-        ctx: OpenAIConversationContext,
-        trigger_level: str = "unknown",
-    ) -> bool:
-        return await self._summary_compression.run_compression_flow(
-            session_id=session_id,
-            ctx=ctx,
-            trigger_level=trigger_level,
-        )
+        逻辑：
+        1. 若该 session 存在已结束静默压缩 task，先回收 task 并记录失败日志；
+        2. 若存在待应用压缩结果，按 `start/end` 替换消息切片；
+        3. 替换失败（区间越界/内容空）时直接丢弃待应用结果，不改写消息。
+        """
+        task = self._session_summary_tasks.get(session_id)
+        if task is not None and task.done():
+            self._session_summary_tasks.pop(session_id, None)
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                _logger.error("%s: silent compression failed: %s", session_id, exc)
+        pending = self._session_pending_compression_results.get(session_id)
+        if not isinstance(pending, dict):
+            return
+        self._session_pending_compression_results.pop(session_id, None)
+        start = int(pending.get("start", -1))
+        end = int(pending.get("end", -1))
+        content = str(pending.get("content", "") or "").strip()
+        if start < 0 or end < start or end >= len(ctx.messages) or not content:
+            return
+        replacement = {"role": "user", "content": content}
+        ctx.messages = [*ctx.messages[:start], replacement, *ctx.messages[end + 1 :]]
+        _logger.info("%s: applied compressed message block", session_id)
 
-    @staticmethod
-    def _messages_fingerprint(messages: list[dict[str, Any]]) -> str:
-        return messages_fingerprint(messages)
+    async def _run_compression_flow(self, *, session_id: str, ctx: OpenAIConversationContext) -> bool:
+        """执行一次完整压缩流程（解析区间 -> 生成摘要 -> 暂存替换结果）。"""
+        summary_runtime = self._get_summary_runtime()
+        prepared = summary_runtime.build_compression_plan(ctx.messages)
+        if not bool(prepared.get("ok")):
+            return False
+        start = int(prepared.get("start", -1))
+        end = int(prepared.get("end", -1))
+        block = str(prepared.get("block") or "").strip()
+        if start < 0 or end < start or end >= len(ctx.messages) or not block:
+            return False
+        try:
+            follow_content = summary_runtime.build_follow_content(ctx.messages, end=end)
+            summary_text = await summary_runtime.run_turn(
+                ctx,
+                request_type="human_message",
+                content=block,
+                follow_content=follow_content,
+            )
+        except asyncio.CancelledError:
+            flush = getattr(summary_runtime, "flush_cancelled_turn", None)
+            if callable(flush):
+                flush(ctx)
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _logger.error("%s: compression failed: %s", session_id, exc)
+            return False
+        if not summary_text or not str(summary_text).strip():
+            return False
+        self._session_pending_compression_results[session_id] = {
+            "start": start,
+            "end": end,
+            "content": str(summary_text).strip(),
+        }
+        return True
 
     async def handle_message(
         self,
@@ -140,12 +238,7 @@ class MainAgentTurnOrchestrator:
         """处理单条消息业务分支：resume/async_tool_result/tool_result/human_message。"""
         # 统一在业务分支前执行压缩决策与应用。
         _logger.info("[begin_handle_message] %s: request_type=%s", env.session_id, env.request_type)
-        await self.maybe_handle_summary_compression(
-            session_id=env.session_id,
-            ctx=ctx,
-            env=env,
-            base_meta=base_meta,
-        )
+        await self.maybe_handle_summary_compression(session_id=env.session_id, ctx=ctx)
         if env.request_type == "resume":
             await self._handle_resume(ctx=ctx, env=env, base_meta=base_meta)
             return
@@ -181,105 +274,105 @@ class MainAgentTurnOrchestrator:
             )
             await self._emit_envelope(
                 env=env,
+                envelope=AgentEventEnvelope(event_type="done", payload={}, meta={}),
+                base_meta=base_meta,
+            )
+            return
+
+        # 判断是否允许执行
+        decision = parse_resume_tool_decision(env.resume_value)
+        if isinstance(decision, ResumeToolReject):
+            # 如果拒绝执行，则直接返回错误
+            await self._emit_envelope(
+                env=env,
                 envelope=AgentEventEnvelope(
-                    event_type="done", payload={"finish_reason": "resume_no_pending_tools"}, meta={}
+                    event_type="error",
+                    payload={"message": "工具执行已被拒绝。"},
+                    meta={},
                 ),
                 base_meta=base_meta,
             )
-            return
-
-        pending_snapshot = list(ctx.pending_tool_calls)
-        decision_plan = self._build_resume_decision_plan(env.resume_value, pending_snapshot)
-        if not decision_plan.is_valid:
-            await self._emit_resume_error_done(
+            # 返回完成事件
+            await self._emit_envelope(
                 env=env,
+                envelope=AgentEventEnvelope(event_type="done", payload={}, meta={}),
                 base_meta=base_meta,
-                message=str(decision_plan.error_message or "resume 决策无效。"),
-                finish_reason=str(decision_plan.finish_reason or "resume_invalid"),
             )
             return
-
-        executed_results = await self._apply_resume_decision(
-            ctx=ctx,
-            env=env,
-            base_meta=base_meta,
-            pending_snapshot=pending_snapshot,
-            decision_plan=decision_plan,
-        )
-        ctx.pending_tool_calls.clear()
-        ctx.run_turn_phase = RunTurnPhase.IDLE
+        # 如果允许执行，则按审批要求拆分本轮工具调用列表
+        pending_by_id = {p.call_id: p for p in ctx.pending_tool_calls}
+        approved_ids: set[str]
+        rejected_ids: set[str]
+        if isinstance(decision, ResumeToolApprove):
+            # 如果允许执行，则全部批准
+            approved_ids = set(pending_by_id.keys())
+            rejected_ids = set()
+        elif isinstance(decision, ResumeToolSelection):
+            # 如果部分允许执行，则按批准和拒绝的call_id列表拆分
+            approved_ids = {str(c).strip() for c in decision.approved}
+            rejected_ids = {str(c).strip() for c in decision.rejected}
+        else:
+            # 如果无法识别，则全部拒绝
+            approved_ids = set()
+            rejected_ids = set()
+        # 执行批准的工具调用
+        executed_results: list[dict[str, Any]] = [] # 执行结果
+        remaining_pending: list[type(ctx.pending_tool_calls[0])] = [] # 剩余的pending工具调用
+        # 遍历pending工具调用列表
+        for item in list(ctx.pending_tool_calls):
+            call_id = item.call_id
+            if call_id in approved_ids:
+                # 执行批准的工具调用
+                result_text = await self._invoke_tool(
+                    ctx,
+                    item,
+                    env=env,
+                    base_meta=base_meta,
+                )
+                # 将执行结果回填到会话消息列表
+                self._append_tool_message(
+                    ctx=ctx,
+                    tool_call_id=item.call_id,
+                    content=result_text,
+                )
+                # 将执行结果回填到执行结果列表
+                executed_results.append(
+                    {
+                        "tool_name": item.name,
+                        "tool_call_id": item.call_id,
+                        "content": result_text,
+                        "display_type": infer_tool_result_display_type(item.name, result_text),
+                    }
+                )
+            elif call_id in rejected_ids:
+                append_openai_message_with_journal(
+                    ctx,
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": f"工具 {item.name!r} 已被用户拒绝执行。",
+                    },
+                )
+            else:
+                remaining_pending.append(item)
+        # 如果remaining_pending不为空，即还有未执行的工具调用，则将剩余的pending工具调用回填到pending_tool_calls
+        if remaining_pending:
+            ctx.pending_tool_calls = remaining_pending
+            return
+        # 如果remaining_pending为空，即所有工具调用都执行了，则将tool_result回填到agent处理队列，以在下一轮触发llm调用
         await self._submit_message(
             session_id=env.session_id,
             client_id=env.client_id,
             content="",
             request_type="tool_result",
-            tool_result={"results": executed_results},
+            tool_result={
+                "results": executed_results,
+            },
             source="service",
             priority="tool_result",
         )
-
-    async def _emit_resume_error_done(
-        self,
-        *,
-        env: MessageEnvelope,
-        base_meta: dict[str, Any],
-        message: str,
-        finish_reason: str,
-    ) -> None:
-        await self._emit_envelope(
-            env=env,
-            envelope=AgentEventEnvelope(event_type="error", payload={"message": message}, meta={}),
-            base_meta=base_meta,
-        )
-        await self._emit_envelope(
-            env=env,
-            envelope=AgentEventEnvelope(event_type="done", payload={"finish_reason": finish_reason}, meta={}),
-            base_meta=base_meta,
-        )
-
-    def _build_resume_decision_plan(
-        self,
-        resume_value: Any,
-        pending_snapshot: list[PendingToolCall],
-    ) -> ResumeDecisionPlan:
-        return build_resume_decision_plan(resume_value, pending_snapshot)
-
-    async def _apply_resume_decision(
-        self,
-        *,
-        ctx: OpenAIConversationContext,
-        env: MessageEnvelope,
-        base_meta: dict[str, Any],
-        pending_snapshot: list[PendingToolCall],
-        decision_plan: ResumeDecisionPlan,
-    ) -> list[dict[str, Any]]:
-        return await self._tool_resume.apply_decision(
-            ctx=ctx,
-            env=env,
-            base_meta=base_meta,
-            pending_snapshot=pending_snapshot,
-            decision_plan=decision_plan,
-        )
-
-    async def _execute_approved_resume_tool(
-        self,
-        *,
-        ctx: OpenAIConversationContext,
-        env: MessageEnvelope,
-        base_meta: dict[str, Any],
-        item: PendingToolCall,
-    ) -> dict[str, Any]:
-        return await self._tool_resume.execute_approved_tool(ctx=ctx, env=env, base_meta=base_meta, item=item)
-
-    async def _record_rejected_resume_tool(
-        self,
-        *,
-        ctx: OpenAIConversationContext,
-        env: MessageEnvelope,
-        base_meta: dict[str, Any],
-        item: PendingToolCall,
-    ) -> dict[str, Any]:
-        return await self._tool_resume.record_rejected_tool(ctx=ctx, env=env, base_meta=base_meta, item=item)
+        # 清空pending_tool_calls
+        ctx.pending_tool_calls.clear()
 
     async def _handle_async_tool_result(
         self,
@@ -464,15 +557,51 @@ class MainAgentTurnOrchestrator:
         *,
         assistant_content: str = "",
     ) -> dict[str, Any]:
-        return build_approval_required_payload(tool_calls, assistant_content=assistant_content)
+        """把 `tool_call` 列表转换为统一 `approval_required` 载荷。
 
-    def _build_tool_execution_plan(
+        逻辑：
+        1. 用 `infer_tool_call_display_type` 汇总展示类型（与前置 `tool_call` 事件对齐）；
+        2. 组装 `ApprovalRequiredEnvelopePayload` 并 `model_dump` 为 dict。
+
+        关键边界：
+        - `assistant_content` 缺省时传空串，推断主要依赖待审批工具名与旁白。
+        """
+        display_type = infer_tool_call_display_type(str(assistant_content or ""), tool_calls)
+        payload = ApprovalRequiredEnvelopePayload(
+            message="检测到工具调用，等待用户确认后继续执行。",
+            args=ApprovalToolCallsArgs(tool_calls=[ToolCallApprovalItem.model_validate(c) for c in tool_calls]),
+            description="OpenAI tool calling 审批",
+            display_type=display_type,
+        )
+        return payload.model_dump()
+
+    def _split_calls_by_approval(
         self,
         *,
         ctx: OpenAIConversationContext,
         captured_tool_calls: list[dict[str, Any]],
-    ) -> ToolExecutionPlan:
-        return build_tool_execution_plan(ctx=ctx, captured_tool_calls=captured_tool_calls)
+    ) -> tuple[list[PendingToolCall], list[PendingToolCall]]:
+        """按审批要求拆分本轮工具调用列表。"""
+        pending_by_id = {p.call_id: p for p in ctx.pending_tool_calls}
+        auto_exec_calls: list[PendingToolCall] = []
+        need_approval_calls: list[PendingToolCall] = []
+        for call in captured_tool_calls:
+            call_id = str(call.get("id") or "")
+            item = pending_by_id.get(call_id)
+            if item is None:
+                continue
+            call_args = item.arguments if isinstance(item.arguments, dict) else {}
+            # 审批策略统一收敛到工具层入口，便于后续按工具/参数逐步细化规则。
+            requires_approval = should_require_tool_approval(
+                tool_name=item.name,
+                tool_args=call_args,
+                context=ctx,
+            )
+            if requires_approval:
+                need_approval_calls.append(item)
+            else:
+                auto_exec_calls.append(item)
+        return auto_exec_calls, need_approval_calls
 
     async def _run_turn_and_maybe_execute_tools(
         self,
@@ -484,25 +613,10 @@ class MainAgentTurnOrchestrator:
         request_type: str,
         content: str,
     ) -> None:
-        """统一的一轮 run_turn + 工具执行编排。
-
-        逻辑：
-        1. 迭代 **`runtime.run_turn`**，将非 **`done`** 信封立即 **`_emit_envelope`**；
-        2. 遇 **`done`**：记录 **`payload.finish_reason`**（若有），并暂存该 **`done`**（通常后续还有一次收口 **`done`**）；
-        3. 流结束后将最后一次 **`done`** 的 **`payload`** 与已捕获的 **`finish_reason`** 做 **`setdefault`** 合并；若仍无有效字符串，则按是否捕获 **`tool_calls`** 回退为 **`tool_calls`** 或 **`stop`**，再进入 tool 分支或单次下发。
-
-        关键边界：
-        - 无 **`tool_calls`**：仅下发合并后的 **`done`**；
-        - 有 **`tool_calls`**：走审批/自动执行分支，**`done`** 在分支内择点下发（载荷仍带合并后的 **`finish_reason`**）。
-
-        副作用说明：
-        - 可能 **`_emit_envelope`**、**`_invoke_tool`**、**`_submit_message`**；修改 **`ctx`**（见各分支）。
-        """
-        captured_tool_calls: list[dict[str, Any]] = []  # 本轮捕获的 tool_call 列表
-        captured_assistant_content: str = ""  # 本轮捕获的 assistant_content
-        runtime_done_envelope: AgentEventEnvelope | None = None  # 本轮最后一次 `done`（常为收口空载荷）
-        # runtime 在流式 `finish_reason` 分片发出 `done` 并暂存；回合结束合并为一条再下发 SSE（网关无末包时编排层兜底 `stop`/`tool_calls`）。
-        captured_finish_reason: str = ""
+        """统一的一轮 run_turn + 工具执行编排。"""
+        captured_tool_calls: list[dict[str, Any]] = [] # 本轮捕获的 tool_call 列表
+        captured_assistant_content: str = "" # 本轮捕获的 assistant_content
+        runtime_done_envelope: AgentEventEnvelope | None = None # 本轮捕获的 done 事件
         async for envelope in runtime.run_turn(
             ctx,
             request_type=request_type,
@@ -513,92 +627,105 @@ class MainAgentTurnOrchestrator:
                 # 与 `tool_call` 事件的 `assistant_content` 同源，供审批卡片的 `display_type` 推断。
                 captured_assistant_content = str(envelope.payload.get("assistant_content", "") or "")
             elif envelope.event_type == "done":
-                pl = envelope.payload or {}
-                fr = str(pl.get("finish_reason") or "").strip()
-                if fr:
-                    captured_finish_reason = fr
                 runtime_done_envelope = envelope
                 continue
             await self._emit_envelope(env=env, envelope=envelope, base_meta=base_meta)
 
-        merged_done_payload: dict[str, Any] = dict(
-            (runtime_done_envelope.payload if runtime_done_envelope else {}) or {}
-        )
-        if captured_finish_reason:
-            merged_done_payload.setdefault("finish_reason", captured_finish_reason)
-        if not str(merged_done_payload.get("finish_reason") or "").strip():
-            merged_done_payload["finish_reason"] = "tool_calls" if captured_tool_calls else "stop"
-        final_done_envelope = AgentEventEnvelope(
+        final_done_envelope = runtime_done_envelope or AgentEventEnvelope(
             event_type="done",
-            payload=merged_done_payload,
-            meta=dict((runtime_done_envelope.meta if runtime_done_envelope else {}) or {}),
+            payload={},
+            meta={},
         )
 
         if not captured_tool_calls:
             await self._emit_envelope(env=env, envelope=final_done_envelope, base_meta=base_meta)
             return
-        # 按审批要求生成执行计划；后续所有状态迁移都从 plan 读取，避免隐式 tuple 分支。
-        execution_plan = self._build_tool_execution_plan(
+        # 按审批要求拆分本轮工具调用列表
+        auto_exec_calls, need_approval_calls = self._split_calls_by_approval(
             ctx=ctx,
             captured_tool_calls=captured_tool_calls,
         )
-        if execution_plan.has_pending_approval:
-            await self._wait_for_tool_approval_batch(
-                ctx=ctx,
-                env=env,
-                base_meta=base_meta,
-                captured_tool_calls=captured_tool_calls,
-                captured_assistant_content=captured_assistant_content,
-                final_done_envelope=final_done_envelope,
-                execution_plan=execution_plan,
+        auto_exec_tasks = [
+            asyncio.create_task(
+                self._invoke_tool(ctx, item, env=env, base_meta=base_meta),
             )
+            for item in auto_exec_calls
+        ]
+
+        if need_approval_calls:
+            # 需要审批的工具调用列表入队
+            ctx.pending_tool_calls = list(need_approval_calls)
+            # 发出审批事件
+            await self._emit_envelope(
+                env=env,
+                envelope=AgentEventEnvelope(
+                    event_type="approval_required",
+                    payload=self._build_approval_required_payload(
+                        [
+                            {
+                                "id": p.call_id,
+                                "name": p.name,
+                                "arguments": dict(p.arguments),
+                                "raw_arguments": json.dumps(p.arguments, ensure_ascii=False),
+                            }
+                            for p in need_approval_calls
+                        ],
+                        assistant_content=captured_assistant_content,
+                    ),
+                    meta={},
+                ),
+                base_meta=base_meta,
+            )
+            ctx.run_turn_phase = RunTurnPhase.AWAITING_TOOL_EXECUTION
+            # 发出 done 事件
+            await self._emit_envelope(env=env, envelope=final_done_envelope, base_meta=base_meta)
+            # 执行自动执行的工具调用
+            if auto_exec_tasks:
+                auto_exec_results = await asyncio.gather(*auto_exec_tasks)
+                executed_results = [
+                    {
+                        "tool_name": item.name,
+                        "tool_call_id": item.call_id,
+                        "content": result_text,
+                        "display_type": infer_tool_result_display_type(item.name, result_text),
+                    }
+                    for item, result_text in zip(auto_exec_calls, auto_exec_results)
+                ]
+                for item, result_text in zip(auto_exec_calls, auto_exec_results):
+                    self._append_tool_message(
+                        ctx=ctx,
+                        tool_call_id=item.call_id,
+                        content=result_text,
+                    )
             return
 
-        await self._execute_auto_tool_batch(
-            ctx=ctx,
-            env=env,
-            base_meta=base_meta,
-            auto_exec_calls=execution_plan.auto_exec_calls,
-        )
-
-    async def _wait_for_tool_approval_batch(
-        self,
-        *,
-        ctx: OpenAIConversationContext,
-        env: MessageEnvelope,
-        base_meta: dict[str, Any],
-        captured_tool_calls: list[dict[str, Any]],
-        captured_assistant_content: str,
-        final_done_envelope: AgentEventEnvelope,
-        execution_plan: ToolExecutionPlan,
-    ) -> None:
-        await self._tool_execution.wait_for_approval_batch(
-            ctx=ctx,
-            env=env,
-            base_meta=base_meta,
-            captured_tool_calls=captured_tool_calls,
-            captured_assistant_content=captured_assistant_content,
-            final_done_envelope=final_done_envelope,
-            execution_plan=execution_plan,
-        )
-
-    @staticmethod
-    def _pending_tool_call_to_approval_item(item: PendingToolCall) -> dict[str, Any]:
-        return pending_tool_call_to_approval_item(item)
-
-    async def _execute_auto_tool_batch(
-        self,
-        *,
-        ctx: OpenAIConversationContext,
-        env: MessageEnvelope,
-        base_meta: dict[str, Any],
-        auto_exec_calls: list[PendingToolCall],
-    ) -> None:
-        await self._tool_execution.execute_auto_batch(
-            ctx=ctx,
-            env=env,
-            base_meta=base_meta,
-            auto_exec_calls=auto_exec_calls,
+        auto_exec_results = await asyncio.gather(*auto_exec_tasks)
+        executed_results = [
+            {
+                "tool_name": item.name,
+                "tool_call_id": item.call_id,
+                "content": result_text,
+                "display_type": infer_tool_result_display_type(item.name, result_text),
+            }
+            for item, result_text in zip(auto_exec_calls, auto_exec_results)
+        ]
+        for item, result_text in zip(auto_exec_calls, auto_exec_results):
+            self._append_tool_message(
+                ctx=ctx,
+                tool_call_id=item.call_id,
+                content=result_text,
+            )
+        ctx.pending_tool_calls.clear()
+        await self._submit_message(
+            session_id=env.session_id,
+            client_id=env.client_id,
+            content="",
+            request_type="tool_result",
+            tool_result={
+                "results": executed_results,
+            },
+            source="service",
+            priority="tool_result",
         )
 
     @staticmethod
@@ -650,14 +777,7 @@ class MainAgentTurnOrchestrator:
         副作用说明：
         - 调用注入的 **`emit_envelope`**（可能写订阅方）；不修改 **`ctx.messages`**（由调用方追加 tool 消息）。
         """
-        async def _emit_tool_result_envelope(
-            *,
-            model_text: str,
-            display_text: str,
-            raw_ref: str,
-            truncated: bool,
-            sensitive_filtered: bool,
-        ) -> None:
+        async def _emit_tool_result_envelope(result_text: str) -> None:
             """将单条同步工具执行结果映射为 SSE **`tool_result`** 并交给 **`emit_envelope`**。"""
             await self._emit_envelope(
                 env=env,
@@ -666,13 +786,9 @@ class MainAgentTurnOrchestrator:
                     payload={
                         "tool_name": tool_call.name,
                         "tool_call_id": tool_call.call_id,
-                        "content": display_text,
-                        "model_content": model_text,
-                        "raw_ref": raw_ref,
-                        "truncated": truncated,
-                        "sensitive_filtered": sensitive_filtered,
+                        "content": result_text,
                         "partial": False,
-                        "display_type": infer_tool_result_display_type(tool_call.name, display_text),
+                        "display_type": infer_tool_result_display_type(tool_call.name, result_text),
                     },
                     meta={},
                 ),
@@ -682,16 +798,8 @@ class MainAgentTurnOrchestrator:
         spec = self._tool_map.get(tool_call.name)
         if spec is None:
             result_text = f"ERROR: 未注册的工具：{tool_call.name!r}"
-            record_tool_execution_result(tool_name=tool_call.name, ok=False)
-            envelope = package_tool_result(tool_name=tool_call.name, content=result_text)
-            await _emit_tool_result_envelope(
-                model_text=envelope.model_content,
-                display_text=envelope.display_content,
-                raw_ref=envelope.raw_ref,
-                truncated=envelope.truncated,
-                sensitive_filtered=envelope.sensitive_filtered,
-            )
-            return envelope.model_content
+            await _emit_tool_result_envelope(result_text)
+            return result_text
         try:
             result = spec.invoke(tool_call.arguments, ctx)
             if asyncio.iscoroutine(result):
@@ -702,16 +810,8 @@ class MainAgentTurnOrchestrator:
                 result_text = str(result)
         except Exception as exc:  # noqa: BLE001
             result_text = f"ERROR: 工具 {tool_call.name!r} 执行失败: {exc}"
-        record_tool_execution_result(tool_name=tool_call.name, ok=not result_text.startswith("ERROR:"))
-        envelope = package_tool_result(tool_name=tool_call.name, content=result_text)
-        await _emit_tool_result_envelope(
-            model_text=envelope.model_content,
-            display_text=envelope.display_content,
-            raw_ref=envelope.raw_ref,
-            truncated=envelope.truncated,
-            sensitive_filtered=envelope.sensitive_filtered,
-        )
-        return envelope.model_content
+        await _emit_tool_result_envelope(result_text)
+        return result_text
 
     @staticmethod
     def _classify_tool_result_tail(
@@ -744,12 +844,7 @@ class MainAgentTurnOrchestrator:
         error_text = str(payload.get("error_text", "") or "")
         tool_call_id = str(payload.get("tool_call_id", "") or f"async-job-{job_id}")
         result_body = result_text if status == "succeeded" else (error_text or "工具执行失败")
-        envelope = package_tool_result(tool_name=tool_name, content=result_body)
-        raw_suffix = f" raw_ref={envelope.raw_ref}" if envelope.raw_ref else ""
-        tool_text = (
-            f"工具{tool_name}执行已完成，job_id：{job_id}，执行结果如下："
-            f"{envelope.model_content}{raw_suffix}"
-        )
+        tool_text = f"工具{tool_name}执行已完成，job_id：{job_id}，执行结果如下：{result_body}"
         user_text = f"工具{tool_name}，job_id已完成，请获取执行结果并继续任务。"
         assistant_message = {
             "role": "assistant",

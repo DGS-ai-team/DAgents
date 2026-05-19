@@ -14,9 +14,6 @@ __pycache__/
 # editor / IDE
 .vscode/
 
-# local worktrees
-.worktrees/
-
 # frontend/tooling artifacts (for split-repo collaboration)
 .pnpm-store/
 pnpm-debug.log*

@@ -18,7 +18,6 @@
 
 ### 变更
 
-- **Prometheus（LLM token）**：`dagents_llm_*` token 指标由 **Gauge `set`（末次快照）** 改为 **Counter `inc`（进程内累计）**，指标名增加 **`_total`** 后缀（例如 **`dagents_llm_prompt_tokens_total`**）；监控面板的 PromQL 与告警需改用新指标名。语义约定：每次流式 **`usage`** 分片表示 **当前 completion 请求** 的消耗；若网关上报账号级终身累计会导致重复累加。
 - **系统提示侧车**：运行时从 **`<运行根>/.runtime/prompt_context/`** 读取 **`soul.md` / `user.md` / `custom.md`**；若缺失则由 **`prompt.py`** 创建 **空 UTF-8 文件**（不覆盖已有文件），**不从其它路径拷贝文案**。**`packaging/runtime/prompt_context/`** 提供 **空文件占位**；**`packaging/runtime/`** 另含 **`scripts/`**、**`data/`** 等目录占位，随发布 zip 并入 **`bundle/.runtime/`**。
 - **异步工具**：`AsyncToolResultStore.submit_coroutine` 要求非空 **`client_id`**；`OpenAIConversationContext` 新增进程内 **`sse_client_id`**（由带 **`client_id`** 的入站 `MessageEnvelope` 刷新），异步工具终态回灌的 **`MessageEnvelope.client_id`** 与该通道对齐，保证 SSE 可投递至原客户端。
 

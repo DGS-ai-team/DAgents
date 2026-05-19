@@ -92,11 +92,11 @@ class ResumeToolReject(BaseModel):
 
 
 class ResumeToolSelection(BaseModel):
-    """对当前 pending 中的全部工具做逐条决策。
+    """对当前 pending 中部分工具做逐条决策。
 
     - `approved`: 被允许执行的 call_id 列表；
     - `rejected`: 被显式拒绝的 call_id 列表；
-    - 编排层要求两组 call_id 一次性覆盖全部 pending，避免留下半闭合 tool_calls。
+    - 未出现在任一列表中的 pending 工具保持为 pending，等待后续 resume。
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True)

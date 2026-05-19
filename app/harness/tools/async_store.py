@@ -160,31 +160,6 @@ class AsyncToolResultStore:
             return None
         return replace(job)
 
-    def cancel_job(self, job_id: str) -> AsyncToolJob | None:
-        """取消指定异步工具任务并返回取消后的快照。
-
-        逻辑：
-        1. 查询任务与底层 `asyncio.Task`；
-        2. 若任务已进入终态，直接返回快照；
-        3. 否则调用 `task.cancel()`，并先将状态标记为 `cancelled`，最终 `_run_job` 会补齐 finished 时间与回灌。
-
-        关键边界：
-        - 不等待取消完成，避免工具调用阻塞；
-        - 未找到任务返回 `None`。
-        """
-        final_job_id = str(job_id or "").strip()
-        job = self._jobs.get(final_job_id)
-        if job is None:
-            return None
-        if job.status in self.TERMINAL_STATUSES:
-            return replace(job)
-        task = self._tasks.get(final_job_id)
-        if task is not None and not task.done():
-            task.cancel()
-        job.status = "cancelled"
-        job.error_text = "任务已请求取消。"
-        return replace(job)
-
     async def _run_job(self, *, job_id: str, coroutine_obj: Any) -> None:
         """执行后台协程并写入终态。
 

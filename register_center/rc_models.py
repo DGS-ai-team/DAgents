@@ -45,12 +45,6 @@ class AgentUpsertRequest(BaseModel):
         default_factory=list,
         description="能力标签提示（可选），用于 discovery 阶段的轻量过滤。",
     )
-    ttl_seconds: int = Field(
-        default=60,
-        ge=5,
-        le=3600,
-        description="登记有效期秒数；客户端需按心跳周期刷新。",
-    )
 
     @field_validator("agent_id")
     @classmethod
@@ -216,7 +210,6 @@ class AgentRecord(BaseModel):
     discovery_group: list[str]
     capabilities_hint: list[str] = Field(default_factory=list)
     registered_at_unix: int
-    expires_at_unix: int
 
 
 class AgentListResponse(BaseModel):
