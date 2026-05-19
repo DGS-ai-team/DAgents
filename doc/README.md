@@ -17,7 +17,6 @@
 | [built-in-tools.md](./built-in-tools.md) | **内置工具**：**`get_tools()`** 列表、**`@tool` docstring → LLM `description`**、**Schema/参数管道**、异步与 **`FS_ROOT`** / A2A 依赖、未注册的 **`host_platform`**。 |
 | [api-reference.md](./api-reference.md) | HTTP / SSE：路径、请求与响应体、`client_id`、错误约定；与 `app/harness/api/app.py` 对齐维护。 |
 | [prometheus-metrics.md](./prometheus-metrics.md) | Prometheus **`/metrics`** 行为、内置指标与安全扩展方式。 |
-| [security-rollout.md](./security-rollout.md) | 安全治理、审计指标、长任务/A2A/tools/prompt 变更的分阶段验收与回滚方式。 |
 | [roadmap.md](./roadmap.md) | **路线图**：已实现能力汇总、待办与已知限制（与 **CHANGELOG** 互补）。 |
 | [triggers-design.md](./triggers-design.md) | **触发器设计**：**调度器轮询**、`Trigger` **基类协议**、**注册表**、**投递层**；**动态注册**（HTTP / `@tool`）；**`session_id` / `client_id` / SSE 回流`** 约定与分阶段（Webhook / A2A）。 |
 

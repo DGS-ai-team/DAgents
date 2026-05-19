@@ -13,7 +13,7 @@ from pathlib import Path
 from app.config.env import resolve_runtime_root
 from app.config.runtime_layout import session_sqlite_path
 from app.config.settings import get_settings
-from app.context.models import OpenAIConversationContext, RunTurnPhase
+from app.context.models import OpenAIConversationContext
 from app.core.main_agent.model import get_model_config
 from app.core.main_agent.agent import MainAgentTurnOrchestrator
 from app.harness.memory.store import SqliteMessageStore
@@ -21,7 +21,7 @@ from app.harness.queue.message_queue import MessageEnvelope, MessagePriority, Me
 from app.harness.service.interface import AgentEventEnvelope
 from app.harness.tools.tool import build_openai_toolkit
 from app.harness.tools.async_store import get_async_tool_result_store
-from app.observability.metrics import refresh_session_context_metrics, refresh_session_queue_metrics
+from app.observability.metrics import refresh_session_context_metrics
 
 _logger = logging.getLogger(__name__)
 
@@ -151,7 +151,6 @@ class AgentService:
         self._session_contexts.clear()
         self._session_last_activity.clear()
         refresh_session_context_metrics({})
-        refresh_session_queue_metrics({})
         self._stop_event.set()
         _logger.info("agent-service stopped")
 
@@ -306,7 +305,6 @@ class AgentService:
             ),
             priority=effective_priority,
         )
-        refresh_session_queue_metrics(self._session_queues)
 
     async def submit_resume(
         self,
@@ -335,7 +333,6 @@ class AgentService:
             ),
             priority=priority,
         )
-        refresh_session_queue_metrics(self._session_queues)
 
     def _load_context_from_store_sync(self, session_id: str) -> OpenAIConversationContext:
         """同步从 sqlite 加载或构造空 `OpenAIConversationContext`（不写回）。
@@ -409,7 +406,6 @@ class AgentService:
         ctx = await self._resolve_context(env.session_id)
         # 仅当入站 envelope 显式携带 client_id 时刷新，避免 async_tool_result 等内部入队用 None 覆盖已建立的通道。
         _cid = (env.client_id or "").strip()
-        ctx.active_client_id = _cid
         if _cid:
             ctx.sse_client_id = _cid
         self._touch_session_activity(env.session_id)
@@ -438,12 +434,11 @@ class AgentService:
             )
             await self._emit_stream_event(env=env, event_type=err_t, data=err_d)
             done_t, done_d = self._map_event_envelope_to_stream(
-                AgentEventEnvelope(event_type="done", payload={"finish_reason": "orchestrator_error"}, meta={}),
+                AgentEventEnvelope(event_type="done", payload={}, meta={}),
                 base_meta=base_meta,
             )
             await self._emit_stream_event(env=env, event_type=done_t, data=done_d)
         finally:
-            ctx.active_client_id = ""
             try:
                 await self._persist_context(env.session_id, ctx)
             except Exception as exc:  # noqa: BLE001
@@ -516,13 +511,6 @@ class AgentService:
         for sid in self._session_queues:
             if sid == exclude_session_id:
                 continue
-            active_handle = self._session_active_handles.get(sid)
-            if active_handle is not None and not active_handle.done():
-                continue
-            ctx = self._session_contexts.get(sid)
-            if ctx is not None:
-                if ctx.pending_tool_calls or ctx.run_turn_phase != RunTurnPhase.IDLE:
-                    continue
             last = float(self._session_last_activity.get(sid, 0.0))
             if now - last < float(threshold):
                 continue
@@ -577,7 +565,6 @@ class AgentService:
             await q.stop()
 
         refresh_session_context_metrics(self._session_contexts)
-        refresh_session_queue_metrics(self._session_queues)
 
         _logger.info(
             "session evicted for capacity (idle session slot)",
@@ -659,7 +646,6 @@ class AgentService:
             try:
                 # 与 pause/stop 协作：pause 时阻塞在 gate；stop 后 receive 抛 RuntimeError 退出本循环。
                 env = await q.receive()
-                refresh_session_queue_metrics(self._session_queues)
             except RuntimeError:
                 break
             except asyncio.CancelledError:
@@ -733,7 +719,7 @@ class AgentService:
 
         逻辑：
         1. 将 **`base_meta`** 与 **`envelope.meta`** 合并为每条 **`data.meta`**；
-        2. 按 **`event_type`** 展开扁平 **`data`**（含 `usage` 的 token 字段；**`done`** 必带 **`finish_reason`**（缺省映射为 **`unspecified`**）；**`tool_call_delta`** 含 **`tool_calls`** 列表）；
+        2. 按 **`event_type`** 展开扁平 **`data`**（含 `usage` 的 token 字段）；
         3. `done` 的 payload 为 dict 时与其余事件一致带 **`meta`**。
 
         关键边界：
@@ -775,8 +761,6 @@ class AgentService:
                     "prompt_cache_miss_tokens": int(payload.get("prompt_cache_miss_tokens", 0)),
                 }
             )
-        if et == "tool_call_delta":
-            return "tool_call_delta", with_meta({"tool_calls": list(payload.get("tool_calls") or [])})
         if et == "tool_call":
             return "tool_call", with_meta(
                 {
@@ -812,10 +796,7 @@ class AgentService:
         if et == "error":
             return "error", with_meta({"message": payload.get("message", "")})
         if et == "done":
-            body = dict(payload if isinstance(payload, dict) else {})
-            # 约定：每条 `done` 的 SSE `data` 均带 `finish_reason`（缺省由映射层补齐，避免前端分支漏判）。
-            if not str(body.get("finish_reason") or "").strip():
-                body["finish_reason"] = "unspecified"
-            return "done", with_meta(body)
+            body = payload if isinstance(payload, dict) else {}
+            return "done", with_meta(dict(body))
         return "chunk", with_meta({"raw": payload})
 

@@ -82,7 +82,6 @@ class AgentRegistryStore:
             discovery_group=payload.discovery_group,
             capabilities_hint=payload.capabilities_hint,
             registered_at_unix=now_unix,
-            expires_at_unix=now_unix + int(payload.ttl_seconds),
         )
         with self._lock:
             self._records[payload.agent_id] = record
@@ -109,7 +108,6 @@ class AgentRegistryStore:
         """
 
         with self._lock:
-            self._prune_expired_locked()
             return self._records.get(agent_id)
 
     def list(self, discovery_group: str | None = None) -> list[AgentRecord]:
@@ -135,28 +133,11 @@ class AgentRegistryStore:
         """
 
         with self._lock:
-            self._prune_expired_locked()
             records = list(self._records.values())
             if discovery_group is not None:
                 # 多分组场景下，命中任一登记分组即视为可见。
                 records = [item for item in records if discovery_group in item.discovery_group]
             return sorted(records, key=lambda item: item.agent_id)
-
-    def _prune_expired_locked(self) -> None:
-        """清理已超过 TTL 的登记记录。
-
-        逻辑：
-        1. 读取当前 Unix 秒；
-        2. 找出 `expires_at_unix <= now` 的记录；
-        3. 在调用方已持锁的前提下删除。
-
-        关键边界：
-        - 本方法要求调用方持有 `_lock`，避免重复加锁造成语义混乱。
-        """
-        now_unix = int(time.time())
-        expired = [agent_id for agent_id, item in self._records.items() if item.expires_at_unix <= now_unix]
-        for agent_id in expired:
-            self._records.pop(agent_id, None)
 
     def delete(self, agent_id: str) -> bool:
         """删除指定 Agent 记录。

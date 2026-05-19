@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
@@ -18,7 +18,6 @@ from app.harness.queue.message_queue import MessageEnvelope, MessagePriority
 from app.harness.service.agent_service import AgentService
 from app.harness.streaming.events import InMemoryEventBus, StreamEvent
 from app.observability.metrics import metrics_text
-from app.schemas.agent_peer import parse_agent_peer_envelope_from_text
 
 _logger = logging.getLogger(__name__)
 
@@ -67,30 +66,6 @@ class CancelTurnResult(BaseModel):
 
     session_id: str
     cancelled: bool
-
-
-def _normalize_inbound_peer_message(content: str, source: str) -> tuple[str, str]:
-    """识别入站 AgentPeerEnvelope 并转为普通消息正文。
-
-    逻辑：
-    1. 尝试将 `content` 解析为 `AgentPeerEnvelope`；
-    2. 非信封时原样返回；
-    3. 信封命中时提取 payload content，并把 source 标记为 `a2a:<caller_agent_id>`。
-
-    关键边界：
-    - 仅处理文本入站，不改变 resume；
-    - payload 为 JSON 对象时稳定序列化后交给 Agent。
-    """
-    envelope = parse_agent_peer_envelope_from_text(content)
-    if envelope is None:
-        return content, source
-    payload_content = envelope.payload.content
-    if isinstance(payload_content, dict):
-        final_content = json.dumps(payload_content, ensure_ascii=False)
-    else:
-        final_content = str(payload_content)
-    caller_id = envelope.caller.agent_id.strip() or "unknown"
-    return final_content, f"a2a:{caller_id}"
 
 
 async def _register_self_to_registry() -> tuple[bool, str, str]:
@@ -307,12 +282,11 @@ def create_app() -> FastAPI:
             else:
                 if not body.content or not body.content.strip():
                     raise HTTPException(status_code=422, detail="content is required for request_type=message")
-                final_content, final_source = _normalize_inbound_peer_message(body.content, body.source)
                 await service.submit_message(
                     session_id=body.session_id,
                     client_id=body.client_id,
-                    content=final_content,
-                    source=final_source,
+                    content=body.content,
+                    source=body.source,
                     priority=body.priority,
                 )
         except HTTPException:
@@ -326,7 +300,7 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/v1/streams")
-    async def stream_all(client_id: str, request: Request):
+    async def stream_all(client_id: str):
         """订阅全局 SSE 流（跨 session/request 的实时事件）。
 
         逻辑：
@@ -339,10 +313,9 @@ def create_app() -> FastAPI:
         - 同一前端可复用一个连接并按 `session_id` 在本地分流展示。
         """
         bus: InMemoryEventBus = app.state.bus
-        last_seq = _parse_last_event_id(request.headers.get("last-event-id"))
 
         async def event_iter():
-            async for event in bus.subscribe_all(client_id=client_id, last_seq=last_seq):
+            async for event in bus.subscribe_all(client_id=client_id):
                 yield _to_sse(event)
 
         return StreamingResponse(event_iter(), media_type="text/event-stream")
@@ -353,16 +326,7 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-def _parse_last_event_id(value: str | None) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value.strip())
-    except ValueError:
-        return None
-
-
 def _to_sse(event: StreamEvent) -> str:
     payload = json.dumps(event.to_dict(), ensure_ascii=False)
-    return f"id: {event.seq}\nevent: {event.type}\ndata: {payload}\n\n"
+    return f"event: {event.type}\ndata: {payload}\n\n"
 

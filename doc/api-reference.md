@@ -224,8 +224,6 @@ data: {"client_id":"...","session_id":"...","type":"<event_type>","seq":0,"ts":"
   - **`prompt_tokens`** / **`completion_tokens`**：number  
   - **`total_tokens`**：`number | null`  
   - **`prompt_audio_tokens`**、**`prompt_cached_tokens`**、**`prompt_cache_hit_tokens`**、**`prompt_cache_miss_tokens`**：number（缺省 **0**）
-- **`tool_call_delta`**
-  - **`tool_calls`**：`array`（OpenAI 流式分片，含 **`index`**；**执行与审批以回合末 `tool_call` 为准**）
 - **`tool_call`**
   - **`assistant_content`**：`string`
   - **`tool_calls`**：`array`
@@ -245,8 +243,7 @@ data: {"client_id":"...","session_id":"...","type":"<event_type>","seq":0,"ts":"
 - **`error`**
   - **`message`**：`string`
 - **`done`**
-  - **`finish_reason`**：`string`（映射层保证存在；如 **`stop`**、**`tool_calls`**、**`error`**、**`resume_rejected`** 等）
-  - 其余字段与 **`meta`** 合并展示
+  - 其余字段与 **`meta`** 合并展示；payload 通常为 **空对象**。
 - **`chunk`**（兜底）
   - **`raw`**：未专门映射的 payload
 

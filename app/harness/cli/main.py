@@ -109,6 +109,11 @@ def main(project_root: Path | None = None) -> None:
     root = project_root or Path(__file__).resolve().parent.parent.parent.parent
 
     load_env(root)
+
+    s = get_settings()
+    mode = (s.agent_cli_mode or "api").strip().lower()
+    if mode not in ("api", "http"):
+        raise SystemExit(f"当前仅支持方案二 HTTP CLI，AGENT_CLI_MODE={s.agent_cli_mode!r}")
     asyncio.run(_run_http_cli(root))
 
 
