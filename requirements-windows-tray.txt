@@ -1,0 +1,5 @@
+# Windows 托盘启动器额外依赖（在仓库根执行）:
+#   pip install -r requirements.txt -r requirements-windows-tray.txt
+-r requirements.txt
+pystray>=0.19.5
+Pillow>=10.0.0

@@ -70,7 +70,7 @@ class MessageQueueAsyncTests(unittest.IsolatedAsyncioTestCase):
         q.enqueue(envelope=_CustomEnvelope("a"), priority="other")
         self.assertEqual(q.pending_metrics_rows()[0][2].label, "a")
 
-    def test_pending_metrics_rows_sorted_like_dequeue(self) -> None:
+    async def test_pending_metrics_rows_sorted_like_dequeue(self) -> None:
         """`pending_metrics_rows` 按 (priority, seq) 排序，与真实出队顺序一致。"""
         q: MessageQueue[MessageEnvelope] = MessageQueue()
         q.enqueue(envelope=MessageEnvelope(session_id="s", content="a", source="t"), priority="human")
@@ -80,6 +80,11 @@ class MessageQueueAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[0][0], -1)
         self.assertEqual(rows[0][2].content, "c")
+
+        received = await q.receive()
+        self.assertEqual(received.content, "c")
+        rows_after_receive = q.pending_metrics_rows()
+        self.assertEqual([row[2].content for row in rows_after_receive], ["a", "b"])
 
 
 if __name__ == "__main__":

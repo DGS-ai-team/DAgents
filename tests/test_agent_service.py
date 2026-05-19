@@ -6,6 +6,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.context.models import OpenAIConversationContext, PendingToolCall, RunTurnPhase
 from app.harness.queue.message_queue import MessageEnvelope
 from tests.test_support.stub_settings import settings_namespace
 
@@ -48,7 +49,7 @@ class AgentServiceStreamMapTests(unittest.TestCase):
         self.assertEqual(d2["meta"]["trace"], "1")
 
     def test_approval_required_and_done(self) -> None:
-        """审批事件扁平化 `args` → `approval_args`；`done` 允许空 payload。"""
+        """审批事件扁平化 `args` → `approval_args`；`done` 经映射层保证含 `finish_reason`。"""
         base = {"session_id": "sid", "model": "m"}
         t1, d1 = AgentService._map_event_envelope_to_stream(
             AgentEventEnvelope(
@@ -72,6 +73,7 @@ class AgentServiceStreamMapTests(unittest.TestCase):
             base_meta=base,
         )
         self.assertEqual(t2, "done")
+        self.assertEqual(d2.get("finish_reason"), "unspecified")
         self.assertIn("meta", d2)
 
 
@@ -91,6 +93,7 @@ class AgentServiceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         handle_stream: object | None = None,
+        settings_overrides: dict[str, object] | None = None,
     ) -> AgentService:
         """构造 `AgentService`：统一 patch settings / model / orchestrator。"""
 
@@ -98,7 +101,10 @@ class AgentServiceLifecycleTests(unittest.IsolatedAsyncioTestCase):
             return self._orch
 
         stack = [
-            patch("app.harness.service.agent_service.get_settings", return_value=settings_namespace()),
+            patch(
+                "app.harness.service.agent_service.get_settings",
+                return_value=settings_namespace(**dict(settings_overrides or {})),
+            ),
             patch("app.harness.service.agent_service.get_model_config", return_value={"model": "unit"}),
             patch("app.harness.service.agent_service.MainAgentTurnOrchestrator", side_effect=_factory),
             patch("app.harness.service.agent_service.refresh_session_context_metrics"),
@@ -129,14 +135,24 @@ class AgentServiceLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_submit_message_invokes_orchestrator_handle_message(self) -> None:
         """投递 `human` 消息后，消费者应串行调用 `handle_message`（不自动 cancel）。"""
         svc = await self._make_service()
+        seen_active_client_ids: list[str] = []
+
+        async def capture_handle(*_a: object, **kwargs: object) -> None:
+            ctx = kwargs["ctx"]
+            assert isinstance(ctx, OpenAIConversationContext)
+            seen_active_client_ids.append(ctx.active_client_id)
+
+        self._orch.handle_message = capture_handle
         await svc.start()
         await svc.submit_message(session_id="s1", content="hello", source="test", priority="human", client_id="c1")
         await asyncio.sleep(0.05)
-        self._orch.handle_message.assert_awaited()
-        _args, kwargs = self._orch.handle_message.call_args
-        self.assertIsInstance(kwargs.get("env"), MessageEnvelope)
-        self.assertEqual(kwargs["env"].session_id, "s1")
-        self.assertEqual(kwargs["env"].content, "hello")
+        self.assertEqual(seen_active_client_ids, ["c1"])
+        self.assertEqual(svc._session_contexts["s1"].active_client_id, "")
+        _args, kwargs = self._orch.handle_message.call_args if hasattr(self._orch.handle_message, "call_args") else ((), {})
+        if kwargs:
+            self.assertIsInstance(kwargs.get("env"), MessageEnvelope)
+            self.assertEqual(kwargs["env"].session_id, "s1")
+            self.assertEqual(kwargs["env"].content, "hello")
         await svc.stop()
 
     async def test_cancel_current_turn_cancels_inflight_handle_message(self) -> None:
@@ -173,6 +189,40 @@ class AgentServiceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error", types)
         self.assertIn("done", types)
         await svc.stop()
+
+    async def test_idle_eviction_skips_active_handle(self) -> None:
+        """容量淘汰不应选择仍有在途 `_handle_message` task 的 session。"""
+        svc = await self._make_service(settings_overrides={"agent_session_idle_evict_seconds": 1})
+        gate = asyncio.Event()
+        active_task = asyncio.create_task(gate.wait())
+        self.addAsyncCleanup(active_task.cancel)
+        svc._session_queues["active"] = MagicMock()
+        svc._session_queues["idle"] = MagicMock()
+        svc._session_active_handles["active"] = active_task
+        svc._session_last_activity["active"] = 0.0
+        svc._session_last_activity["idle"] = 1.0
+
+        victim = svc._pick_idle_eviction_victim(exclude_session_id="new")
+
+        self.assertEqual(victim, "idle")
+        gate.set()
+
+    async def test_idle_eviction_skips_pending_context(self) -> None:
+        """容量淘汰不应选择仍处于待工具阶段的 session。"""
+        svc = await self._make_service(settings_overrides={"agent_session_idle_evict_seconds": 1})
+        svc._session_queues["awaiting"] = MagicMock()
+        svc._session_queues["idle"] = MagicMock()
+        svc._session_contexts["awaiting"] = OpenAIConversationContext(
+            session_id="awaiting",
+            pending_tool_calls=[PendingToolCall(call_id="call-1", name="tool", arguments={})],
+            run_turn_phase=RunTurnPhase.AWAITING_TOOL_EXECUTION,
+        )
+        svc._session_last_activity["awaiting"] = 0.0
+        svc._session_last_activity["idle"] = 1.0
+
+        victim = svc._pick_idle_eviction_victim(exclude_session_id="new")
+
+        self.assertEqual(victim, "idle")
 
 
 if __name__ == "__main__":

@@ -227,6 +227,7 @@ class OpenAIConversationContext(BaseModel):
         description="当前会话已加载技能列表（`skill_name/description`）。",
     )
     assistant_stream_buffer: str = Field(default="", repr=False, description="流式输出增量缓冲。")
+    active_client_id: str = Field(default="", repr=False, description="当前入站消息的 SSE client_id，仅用于本轮工具路由。")
 
     def normalized_run_turn_phase_for_persist(self) -> RunTurnPhase:
         """将 `run_turn_phase` 规范为可写入 sqlite 的值。"""

@@ -6,18 +6,29 @@ import functools
 import inspect
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from types import UnionType
+from typing import Any, Callable, Literal, get_args, get_origin, get_type_hints
 
 from app.config.env import resolve_runtime_root
 from app.config.runtime_layout import shell_policy_dir, tool_policy_file_path
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.async_store import get_async_tool_result_store
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 ApprovalMode = str
 _VALID_APPROVAL_MODES: set[str] = {"always", "never", "rule"}
+
+
+@dataclass(frozen=True, slots=True)
+class ToolApprovalDecision:
+    require_approval: bool
+    reason: str
+    risk_level: Literal["low", "medium", "high"] = "medium"
+    mode: str = "rule"
+
 
 
 def _resolve_repo_relative_path(rel_or_abs: str) -> Path:
@@ -193,11 +204,11 @@ def _decorate_async_tool(
     逻辑：
     1. 检测函数签名是否声明 `context` 参数；
     2. 包装后调用原始 async 函数拿协程对象（不在此 await）；
-    3. 从 `context.session_id` / **`context.sse_client_id`** 解析会话与 SSE 通道并提交到 **`AsyncToolResultStore`**；
-    4. 返回包含 `job_id` 的受理文案。
+    3. 优先从 `context.active_client_id` 取本轮 SSE 通道，缺省时退回最近的 `context.sse_client_id`；
+    4. 提交到 **`AsyncToolResultStore`** 并返回包含 `job_id` 的受理文案。
 
     关键边界：
-    - 无运行中事件循环、缺少 **`session_id`** 或 **`sse_client_id`** 时，提交会抛异常；
+    - 无运行中事件循环、缺少 **`session_id`** 或可用 client_id 时，提交会抛异常；
     - 若原函数不接收 `context`，会在调用前移除该参数以保持兼容。
 
     与外部交互：
@@ -222,11 +233,11 @@ def _decorate_async_tool(
         client_id = ""
         if isinstance(ctx, OpenAIConversationContext):
             session_id = ctx.session_id
-            client_id = (ctx.sse_client_id or "").strip()
+            client_id = (ctx.active_client_id or "").strip() or (ctx.sse_client_id or "").strip()
         if not client_id:
             raise ValueError(
-                "异步工具缺少 client_id：请确保本会话已处理过带 client_id 的入站消息（已写入 "
-                "OpenAIConversationContext.sse_client_id），否则异步结果无法投递到 SSE。"
+                "异步工具缺少 client_id：请确保当前入站消息带 client_id，或本会话已有可用 SSE 通道，"
+                "否则异步结果无法投递到 SSE。"
             )
         store = get_async_tool_result_store()
         job = store.submit_coroutine(
@@ -302,51 +313,75 @@ def tool(
         return decorator
 
 
+def decide_tool_approval(
+    *,
+    tool_name: str,
+    tool_args: dict[str, Any],
+    context: OpenAIConversationContext | None = None,
+) -> ToolApprovalDecision:
+    """返回结构化工具审批决策，包含是否审批、原因与风险等级。"""
+    del context
+    normalized_tool = tool_name.strip().lower()
+    mode_raw = (get_settings().agent_tool_approval_mode or "rule").strip().lower()
+    mode = mode_raw if mode_raw in {"always", "never", "rule"} else "rule"
+    if mode == "always":
+        return ToolApprovalDecision(
+            require_approval=True,
+            reason="全局工具审批模式为 always。",
+            risk_level="high",
+            mode="global:always",
+        )
+    if mode == "never":
+        return ToolApprovalDecision(
+            require_approval=False,
+            reason="全局工具审批模式为 never。",
+            risk_level="low",
+            mode="global:never",
+        )
+
+    tool_mode = _tool_approval_mode(tool_name)
+    if tool_mode == "always":
+        return ToolApprovalDecision(
+            require_approval=True,
+            reason=f"工具策略要求 {tool_name} 始终审批。",
+            risk_level="high",
+            mode="tool:always",
+        )
+    if tool_mode == "never":
+        return ToolApprovalDecision(
+            require_approval=False,
+            reason=f"工具策略允许 {tool_name} 自动执行。",
+            risk_level="low",
+            mode="tool:never",
+        )
+    if normalized_tool == "bash_run":
+        require_approval = _should_require_approval_for_bash_tool(tool_args)
+        return ToolApprovalDecision(
+            require_approval=require_approval,
+            reason=(
+                "bash_run 命令命中 shell 策略或无法安全解析，需人工确认。"
+                if require_approval
+                else "bash_run 命令首词均被 shell 策略允许自动执行。"
+            ),
+            risk_level="high" if require_approval else "low",
+            mode="shell:rule",
+        )
+    return ToolApprovalDecision(
+        require_approval=True,
+        reason="未命中自动放行策略，默认保守要求审批。",
+        risk_level="medium",
+        mode="tool:rule",
+    )
+
+
 def should_require_tool_approval(
     *,
     tool_name: str,
     tool_args: dict[str, Any],
     context: OpenAIConversationContext | None = None,
 ) -> bool:
-    """判断某次工具调用是否需要进入审批流程（占位实现）。
-
-    逻辑：
-    1. 接收工具名、工具参数与可选会话上下文，作为审批策略判断输入；
-    2. 读取全局配置 `AGENT_TOOL_APPROVAL_MODE`，支持 `always/never/rule` 三种模式；
-    3. `always` 强制审批，`never` 直接放行，`rule` 进入规则分支；
-    4. 规则分支先读工具级策略文件（默认 **`.runtime/policy/tool.approval.txt`**，行格式 `tool_name=mode`），并对 `bash_run` 额外读取 shell 级目录（默认 **`.runtime/policy/shell/`** 下各 `<shell>.approval.txt`）的 `root=mode` 策略。
-
-    关键边界：
-    - 本方法应保持纯函数语义，不直接修改 `context` 或触发外部副作用；
-    - 当 `AGENT_TOOL_APPROVAL_MODE` 取值非法时，回退为 `rule`；
-    - 当策略未命中任何规则时，维持“默认需要审批”的保守行为；
-    - `bash_run` 的 `rule` 由 shell 策略文件细分，当前 `rule` 仍回退为需要审批。
-
-    Args:
-        tool_name: 工具名（如 `bash_run`、`agent_send_message`）。
-        tool_args: 本次工具调用参数（已解析为字典）。
-        context: 当前会话上下文（可选，供后续策略扩展使用）。
-
-    Returns:
-        bool: `True` 表示进入审批；`False` 表示可自动执行。
-    """
-    mode_raw = (get_settings().agent_tool_approval_mode or "rule").strip().lower()
-    mode = mode_raw if mode_raw in {"always", "never", "rule"} else "rule"
-    if mode == "always":
-        return True
-    elif mode == "never":
-        return False
-    else:
-        del context
-        tool_mode = _tool_approval_mode(tool_name)
-        if tool_mode == "always":
-            return True
-        elif tool_mode == "never":
-            return False
-        else:
-            if tool_name.strip().lower() == "bash_run":
-                return _should_require_approval_for_bash_tool(tool_args)
-            return True
+    """判断某次工具调用是否需要进入审批流程。"""
+    return decide_tool_approval(tool_name=tool_name, tool_args=tool_args, context=context).require_approval
 
 
 def get_tools() -> list[Any]:
@@ -362,23 +397,32 @@ def get_tools() -> list[Any]:
         agent_peer_approve_tools,
         agent_send_message,
     )
-    from app.harness.tools.bash import bash_run
-    from app.harness.tools.fs import edit_file, read_file, search_file, write_file
-    from app.harness.tools.skills import load_skills
+    from app.harness.tools.async_tasks import async_tool_cancel, async_tool_status
+    from app.harness.tools.bash import bash_job_cancel, bash_job_status, bash_job_tail, bash_run
+    from app.harness.tools.fs import read_file, search_file, search_replace, write_file
+    from app.harness.tools.skills import clear_skills, load_skills, unload_skills
 
     # 先最小集启用，后续可按稳定性逐步放开更多工具。
-    return [
-        load_skills,
+    tools: list[Any] = []
+    if bool(get_settings().agent_skills_enabled):
+        tools.extend([load_skills, unload_skills, clear_skills])
+    tools.extend([
         read_file,
         search_file,
-        edit_file,
+        search_replace,
         write_file,
         bash_run,
+        bash_job_status,
+        bash_job_tail,
+        bash_job_cancel,
+        async_tool_status,
+        async_tool_cancel,
         agent_discover,
         agent_send_message,
         agent_broadcast,
         agent_peer_approve_tools,
-    ]
+    ])
+    return tools
 
 
 class OpenAIToolSpec(BaseModel):
@@ -402,15 +446,73 @@ class OpenAIToolSpec(BaseModel):
     invoke: Callable[[dict[str, Any], OpenAIConversationContext | None], Any]
 
 
+def _annotation_to_json_schema(annotation: Any) -> dict[str, Any]:
+    """将 Python 类型注解映射为 JSON Schema 片段。
+
+    逻辑：
+    1. 识别基础标量类型；
+    2. 识别 `list[T]` / `dict[str, T]` / `Literal[...]`；
+    3. 识别 `Optional[T]` / `Union[...]` 并生成 `anyOf`；
+    4. 未知类型保守回退为 `string`，避免 schema 构造失败。
+
+    关键边界：
+    - 该函数只生成模型可见参数 schema，不做运行时强制类型转换；
+    - `Any` 与未标注参数允许常见 JSON 标量/对象/数组。
+    """
+    if annotation is inspect._empty or annotation is Any:
+        return {"type": ["string", "number", "integer", "boolean", "object", "array", "null"]}
+    if annotation is str:
+        return {"type": "string"}
+    if annotation is int:
+        return {"type": "integer"}
+    if annotation is float:
+        return {"type": "number"}
+    if annotation is bool:
+        return {"type": "boolean"}
+    if annotation is dict:
+        return {"type": "object", "additionalProperties": True}
+    if annotation is list:
+        return {"type": "array", "items": {}}
+
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is list:
+        item_schema = _annotation_to_json_schema(args[0]) if args else {}
+        return {"type": "array", "items": item_schema}
+    if origin is dict:
+        value_schema = _annotation_to_json_schema(args[1]) if len(args) >= 2 else True
+        return {"type": "object", "additionalProperties": value_schema}
+    if origin is Literal:
+        values = list(args)
+        schema: dict[str, Any] = {"enum": values}
+        if values:
+            value_types = {type(item) for item in values}
+            if value_types <= {str}:
+                schema["type"] = "string"
+            elif value_types <= {int}:
+                schema["type"] = "integer"
+            elif value_types <= {bool}:
+                schema["type"] = "boolean"
+        return schema
+    if origin is UnionType or str(origin) == "typing.Union":
+        variants = [_annotation_to_json_schema(item) for item in args]
+        return {"anyOf": variants}
+    return {"type": "string"}
+
+
 def _signature_to_json_schema(func: Callable[..., Any]) -> dict[str, Any]:
     """将 Python 签名转换为最小 JSON Schema。
 
     逻辑：
     1. 遍历函数参数，生成 `properties`；
-    2. 推断基础类型（str/int/float/bool/其他）；
+    2. 推断基础类型、数组、对象、Literal 与 Optional/Union；
     3. 无默认值参数放入 `required`。
     """
     sig = inspect.signature(func)
+    try:
+        type_hints = get_type_hints(func)
+    except Exception:  # noqa: BLE001
+        type_hints = {}
     properties: dict[str, Any] = {}
     required: list[str] = []
     for param_name, p in sig.parameters.items():
@@ -419,24 +521,32 @@ def _signature_to_json_schema(func: Callable[..., Any]) -> dict[str, Any]:
             continue
         if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
-        anno = p.annotation
-        if anno in (int,):
-            t = "integer"
-        elif anno in (float,):
-            t = "number"
-        elif anno in (bool,):
-            t = "boolean"
-        else:
-            t = "string"
-        properties[param_name] = {"type": t}
+        properties[param_name] = _annotation_to_json_schema(type_hints.get(param_name, p.annotation))
         if p.default is inspect._empty:
             required.append(param_name)
     return {
         "type": "object",
         "properties": properties,
         "required": required,
-        "additionalProperties": True,
+        "additionalProperties": False,
     }
+
+
+def _validate_tool_arguments(args_schema: Any, args: dict[str, Any]) -> dict[str, Any]:
+    """用工具声明的 Pydantic args_schema 做运行时参数校验。"""
+    if args_schema is None or not hasattr(args_schema, "model_validate"):
+        return dict(args)
+    try:
+        validated = args_schema.model_validate(dict(args))
+    except ValidationError as exc:
+        details = "; ".join(
+            f"{'.'.join(str(part) for part in item.get('loc', ()))}: {item.get('msg')}"
+            for item in exc.errors()
+        )
+        raise ValueError(f"工具参数校验失败：{details or exc}") from exc
+    if hasattr(validated, "model_dump"):
+        return dict(validated.model_dump())
+    return dict(args)
 
 
 def _tool_to_spec(tool_obj: Any) -> OpenAIToolSpec:
@@ -476,13 +586,24 @@ def _tool_to_spec(tool_obj: Any) -> OpenAIToolSpec:
 
     fn_sig = inspect.signature(invoke_fn)
     accepts_context = "context" in fn_sig.parameters
+    accepts_var_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in fn_sig.parameters.values())
+    accepted_param_names = {
+        name
+        for name, p in fn_sig.parameters.items()
+        if name != "context" and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
 
     def _invoke(args: dict[str, Any], context: OpenAIConversationContext | None = None) -> Any:
         # 带 `invoke` 的工具对象走统一入口；否则按 Python 关键字展开（可注入 `context`）。
+        validated_args = _validate_tool_arguments(args_schema, args)
         if getattr(tool_obj, "invoke", None):
-            return tool_obj.invoke(args)
+            return tool_obj.invoke(validated_args)
         else:
-            final_kwargs = dict(args)
+            # schema 已禁止未知字段；执行层仍做一次过滤，避免模型/网关绕过 schema 后触发 TypeError。
+            if accepts_var_kwargs:
+                final_kwargs = dict(validated_args)
+            else:
+                final_kwargs = {k: v for k, v in dict(validated_args).items() if k in accepted_param_names}
             if accepts_context:
                 final_kwargs["context"] = context
             return invoke_fn(**final_kwargs)

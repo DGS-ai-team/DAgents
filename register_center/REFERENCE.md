@@ -9,12 +9,12 @@
 ### 类
 
 - `AgentUpsertRequest`
-  - 说明：登记/更新请求模型，负责 `agent_id`、`base_url`、`discovery_group`（字符串或字符串列表）与 `capabilities_hint` 的校验与规范化。
+  - 说明：登记/更新请求模型，负责 `agent_id`、`base_url`、`discovery_group`（字符串或字符串列表）、`capabilities_hint` 与 `ttl_seconds` 的校验与规范化。
   - 方法：
     - `validate_agent_id(value: str) -> str`
     - `validate_base_url(value: str) -> str`
 - `AgentRecord`
-  - 说明：对外返回的单条登记记录结构（`discovery_group` 为非空分组列表，可含 `capabilities_hint`）。
+  - 说明：对外返回的单条登记记录结构（`discovery_group` 为非空分组列表，可含 `capabilities_hint`，含 `registered_at_unix/expires_at_unix`）。
 - `AgentListResponse`
   - 说明：列表查询响应壳，字段为 `agents`。
 - `HealthResponse`
@@ -48,6 +48,7 @@
     - `upsert(payload: AgentUpsertRequest) -> AgentRecord`
     - `get(agent_id: str) -> AgentRecord | None`
     - `list(discovery_group: str | None = None) -> list[AgentRecord]`
+    - `_prune_expired_locked() -> None`
     - `delete(agent_id: str) -> bool`
     - `count() -> int`
 

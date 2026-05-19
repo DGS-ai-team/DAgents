@@ -29,6 +29,58 @@ def _env_int(key: str, default: int) -> int:
     return int(raw)
 
 
+def _resolve_api_host() -> str:
+    """解析 API 监听 host（`API_HOST`，默认 `127.0.0.1`）。"""
+
+    return _env_str("API_HOST", "127.0.0.1") or "127.0.0.1"
+
+
+def _resolve_api_port() -> int:
+    """解析 API 监听 port（`API_PORT`，非法时回落 8000）。"""
+
+    raw = _env_str("API_PORT", "8000") or "8000"
+    try:
+        port = int(raw)
+        if 1 <= port <= 65535:
+            return port
+    except ValueError:
+        pass
+    return 8000
+
+
+def _client_host_for_agent_api_base(bind_host: str) -> str:
+    """将 uvicorn 绑定 host 映射为 HTTP 客户端可连的 host。
+
+    逻辑：
+    1. 全接口绑定（`0.0.0.0`、`::` 等）回落 `127.0.0.1`；
+    2. 其余返回去空白后的原 host。
+
+    关键分支/边界：
+    - 空串视为未配置，回落 `127.0.0.1`。
+
+    与外部交互：
+    - 无。
+
+    异常说明：
+    - 无。
+
+    副作用说明：
+    - 无。
+    """
+
+    normalized = bind_host.strip().lower()
+    if normalized in ("0.0.0.0", "::", "[::]", ""):
+        return "127.0.0.1"
+    return bind_host.strip() or "127.0.0.1"
+
+
+def _resolve_agent_api_base(api_host: str, api_port: int) -> str:
+    """由 `API_HOST`/`API_PORT` 推导 CLI 与本地 HTTP 客户端 base URL。"""
+
+    client_host = _client_host_for_agent_api_base(api_host)
+    return f"http://{client_host}:{api_port}"
+
+
 def _env_csv(key: str) -> list[str]:
     """解析逗号分隔环境变量为字符串列表。
 
@@ -124,7 +176,6 @@ class Settings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     # --- LLM（OpenAI 兼容）---
-    llm_provider: str = "openai"
     llm_api_key: str = ""
     llm_api_base: str = ""
     llm_model: str = ""
@@ -156,8 +207,10 @@ class Settings(BaseModel):
     # 活跃 session 达上限时：仅当某 session 最后活动时间早于该秒数，才允许按 LRU 闲置顺序淘汰以接纳新 session；<=0 关闭该机制
     agent_session_idle_evict_seconds: int = 300
 
-    # --- CLI（方案二：HTTP 客户端）---
-    agent_cli_mode: str = "api"
+    # --- API 服务监听与 CLI 客户端 ---
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
+    # CLI / 本地 HTTP 客户端 base URL（由 api_host/api_port 推导，见 `_resolve_agent_api_base`）
     agent_api_base: str = "http://127.0.0.1:8000"
     # API CORS 允许来源（逗号分隔）；用于浏览器开发调试
     api_cors_allow_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -173,6 +226,10 @@ class Settings(BaseModel):
     agent_tool_approval_mode: str = "rule"
     # bash_run/cmd/powershell 输出解码编码（Windows 中文环境可用 gbk/cp936）
     bash_output_encoding: str = "utf-8"
+    # 文件工具 `read_file` 单页输出 UTF-8 字节上限（不由模型传参，防上下文暴增）
+    fs_tool_read_max_bytes: int = 3000
+    # 文件工具 `search_file` 整段输出 UTF-8 字节上限
+    fs_tool_search_max_bytes: int = 8000
 
     # --- 会话消息落盘 ---
     # 是否启用 SQLite 会话持久化（路径固定为 `<运行根>/.runtime/memory/session.sqlite3`，见 `runtime_layout`）
@@ -180,15 +237,13 @@ class Settings(BaseModel):
     # 是否在每次向 ctx.messages 追加/插入「业务原始消息」时追加写入 JSONL 记录（摘要压缩等整段替换不写）
     agent_raw_message_history_enabled: bool = True
 
-    # --- 兼容旧变量 ---
-    openai_api_key: str = ""
-
     @classmethod
     def load(cls) -> Self:
         """从当前进程环境读取（请先 `load_env()` 以加载 `.env`）。"""
         agent_id = _resolve_agent_id()
+        api_host = _resolve_api_host()
+        api_port = _resolve_api_port()
         return cls(
-            llm_provider=_env_str("LLM_PROVIDER") or "openai",
             llm_api_key=_env_str("LLM_API_KEY"),
             llm_api_base=_env_str("LLM_API_BASE"),
             llm_model=_env_str("LLM_MODEL"),
@@ -213,8 +268,9 @@ class Settings(BaseModel):
             max_queue_size=_env_int("MAX_QUEUE_SIZE", 0),
             agent_max_active_session_queues=_env_int("AGENT_MAX_ACTIVE_SESSION_QUEUES", 3),
             agent_session_idle_evict_seconds=_env_int("AGENT_SESSION_IDLE_EVICT_SECONDS", 300),
-            agent_cli_mode=_env_str("AGENT_CLI_MODE") or "api",
-            agent_api_base=_env_str("AGENT_API_BASE") or "http://127.0.0.1:8000",
+            api_host=api_host,
+            api_port=api_port,
+            agent_api_base=_resolve_agent_api_base(api_host, api_port),
             api_cors_allow_origins=(
                 _env_csv("API_CORS_ALLOW_ORIGINS")
                 or ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -232,9 +288,10 @@ class Settings(BaseModel):
             ),
             agent_tool_approval_mode=_env_str("AGENT_TOOL_APPROVAL_MODE", "rule") or "rule",
             bash_output_encoding=_env_str("BASH_OUTPUT_ENCODING", "utf-8") or "utf-8",
+            fs_tool_read_max_bytes=max(1, _env_int("FS_TOOL_READ_MAX_BYTES", 3000)),
+            fs_tool_search_max_bytes=max(1, _env_int("FS_TOOL_SEARCH_MAX_BYTES", 8000)),
             agent_session_store_enabled=_env_bool("AGENT_SESSION_STORE_ENABLED", True),
             agent_raw_message_history_enabled=_env_bool("AGENT_RAW_MESSAGE_HISTORY_ENABLED", True),
-            openai_api_key=_env_str("OPENAI_API_KEY"),
         )
 
 

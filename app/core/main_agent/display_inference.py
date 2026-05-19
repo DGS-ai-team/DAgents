@@ -17,7 +17,7 @@ _CODE_TOOL_NAMES = frozenset(
     {
         "read_file",
         "write_file",
-        "edit_file",
+        "search_replace",
         "search_file",
         "python_run",
         "javascript_run",

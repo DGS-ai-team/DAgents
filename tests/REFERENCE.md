@@ -20,10 +20,19 @@
 
 - **`AsyncToolSubmitClientIdTests`**：**`AsyncToolResultStore.submit_coroutine`** 对 **`client_id`** 非空约束及任务跑通终态。
 
+## `test_api_app.py`
+
+- **`FastApiRouteTests`**：使用 `AgentService` 替身验证 `/v1/sessions`、`/v1/messages`、`resume`、`cancel`、`release` 路由接线与默认 priority。
+- **`SseEncodingTests`**：验证 `_to_sse` 输出 `event:` / `data:` 与空行结尾格式。
+
 ## `test_agent_service.py`
 
 - **`AgentServiceStreamMapTests`**：`_map_event_envelope_to_stream` 扁平字段（需完整依赖，否则 skip）。
 - **`AgentServiceLifecycleTests`**：`start`/`stop`、`submit_message`→`handle_message`、`cancel_current_turn`、`handle_stream_event` 错误路径；**`_make_service`** 内 patch **`runtime_openai.get_openai_client`**，避免懒加载 **runtime** 时无 **`LLM_API_KEY`** 触发 **OpenAI** 构造异常（需完整依赖，否则 skip）。
+
+## `test_main_agent_orchestrator.py`
+
+- **`MainAgentTurnOrchestratorTests`**：使用脚本化 runtime 替身覆盖 human 无工具收口、自动工具执行、审批挂起、pending 被新 human 打断、resume approve 工具闭环。
 
 ## `test_context_models.py`
 

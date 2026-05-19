@@ -157,6 +157,37 @@ class SettingsLoadTests(unittest.TestCase):
                     s = Settings.load()
             self.assertFalse(s.agent_session_store_enabled)
 
+    def test_agent_api_base_derived_from_api_host_port(self) -> None:
+        """`agent_api_base` 由 `API_HOST`/`API_PORT` 推导，不再读取 `AGENT_API_BASE`。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            with patch("app.config.runtime_layout.resolve_runtime_root", return_value=p):
+                with patch.dict(
+                    os.environ,
+                    {**self._base_agent_env(p), "API_HOST": "127.0.0.1", "API_PORT": "9001"},
+                    clear=False,
+                ):
+                    _reset_settings_singleton()
+                    s = Settings.load()
+            self.assertEqual(s.api_host, "127.0.0.1")
+            self.assertEqual(s.api_port, 9001)
+            self.assertEqual(s.agent_api_base, "http://127.0.0.1:9001")
+
+    def test_agent_api_base_maps_bind_all_interfaces_to_loopback(self) -> None:
+        """监听 `0.0.0.0` 时 CLI base URL 使用 `127.0.0.1`。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            with patch("app.config.runtime_layout.resolve_runtime_root", return_value=p):
+                with patch.dict(
+                    os.environ,
+                    {**self._base_agent_env(p), "API_HOST": "0.0.0.0", "API_PORT": "8000"},
+                    clear=False,
+                ):
+                    _reset_settings_singleton()
+                    s = Settings.load()
+            self.assertEqual(s.api_host, "0.0.0.0")
+            self.assertEqual(s.agent_api_base, "http://127.0.0.1:8000")
+
     def test_get_settings_singleton_and_reload(self) -> None:
         """`get_settings` 默认缓存；`reload=True` 时随环境变化重建。"""
         with tempfile.TemporaryDirectory() as tmp:
