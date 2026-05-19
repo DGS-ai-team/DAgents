@@ -5,17 +5,24 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 import shlex
+import signal
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+from time import time
 from typing import Literal, Optional
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
 from app.config.settings import get_settings
 from app.config.host_snapshot import get_host_snapshot
 from app.context.models import OpenAIConversationContext
+from app.harness.tools.async_store import get_async_tool_result_store
 from app.harness.tools.host_platform import HostOsKind, detect_host_os
 from app.harness.tools.tool import tool
 
@@ -44,6 +51,45 @@ _SUDO_NONINTERACTIVE_FLAG_RE = re.compile(
 DEFAULT_BASH_TIMEOUT_SECONDS = 30
 MAX_BASH_TIMEOUT_SECONDS = 600
 MAX_BASH_OUTPUT_CHARS = 12000
+SHELL_JOB_TAIL_CHARS = 8000
+
+
+@dataclass(slots=True)
+class ShellJob:
+    """后台 shell job 快照。
+
+    逻辑：
+    1. 保存同一个已经启动的 `Popen` 进程，超时后不重启、不杀进程；
+    2. 后台等待完成后写入 stdout/stderr、退出码与状态；
+    3. status/tail/cancel 工具从本结构读取状态。
+
+    关键边界：
+    - 当前为进程内存储，服务重启后不可恢复；
+    - stdout/stderr 暂存于内存，后续可替换为落盘 raw_ref。
+    """
+
+    job_id: str
+    command: str
+    cwd: str
+    shell_type: ShellType
+    timeout_seconds: int
+    output_encoding: str
+    process: subprocess.Popen[str]
+    status: str = "running"
+    async_job_id: str = ""
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int | None = None
+    started_at_unix_ms: int = 0
+    finished_at_unix_ms: int = 0
+
+
+_SHELL_JOBS: dict[str, ShellJob] = {}
+
+
+def _now_ms() -> int:
+    """返回当前 Unix 毫秒时间戳。"""
+    return int(time() * 1000)
 
 
 def _resolve_shell_output_encoding() -> str:
@@ -385,6 +431,109 @@ def _run_powershell_command(
     raise RuntimeError("未找到 powershell/pwsh 可执行文件。")
 
 
+def _popen_by_shell_type(
+    shell_type: ShellType,
+    command: str,
+    cwd: str,
+    output_encoding: str,
+) -> subprocess.Popen[str]:
+    """按 shell 类型启动可托管进程。
+
+    逻辑：
+    1. 根据 `shell_type` 组装与同步执行一致的命令参数；
+    2. 使用 stdout/stderr pipe 捕获输出；
+    3. POSIX 下启动独立进程组，便于后续 cancel 工具终止整组。
+
+    关键边界：
+    - powershell 仍按 `pwsh` → `powershell` 顺序探测；
+    - 本函数只启动进程，不等待完成。
+    """
+    popen_kwargs: dict[str, object] = {
+        "cwd": cwd,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": output_encoding,
+        "errors": "replace",
+    }
+    if os.name != "nt":
+        popen_kwargs["start_new_session"] = True
+    if shell_type == "bash":
+        return subprocess.Popen(["bash", "-lc", command], **popen_kwargs)
+    if shell_type == "cmd":
+        return subprocess.Popen(["cmd", "/C", command], **popen_kwargs)
+    for exe in ("pwsh", "powershell"):
+        try:
+            return subprocess.Popen([exe, "-NoProfile", "-Command", command], **popen_kwargs)
+        except FileNotFoundError:
+            continue
+    raise RuntimeError("未找到 powershell/pwsh 可执行文件。")
+
+
+async def _wait_shell_job(job_id: str) -> str:
+    """后台等待 shell job 完成并返回压缩摘要。
+
+    逻辑：
+    1. 在线程中等待原 `Popen.communicate()` 完成；
+    2. 写入 job 终态、stdout/stderr 与退出码；
+    3. 返回模型友好的完成摘要，供异步工具回灌。
+
+    关键边界：
+    - 取消等待时会尝试取消 shell job，避免孤儿进程继续跑；
+    - 输出进入上下文前按 `MAX_BASH_OUTPUT_CHARS` 裁剪。
+    """
+    job = _SHELL_JOBS[job_id]
+    try:
+        stdout, stderr = await asyncio.to_thread(job.process.communicate)
+        job.exit_code = job.process.returncode
+        job.stdout = stdout or ""
+        job.stderr = stderr or ""
+        job.status = "succeeded" if job.exit_code == 0 else "failed"
+    except asyncio.CancelledError:
+        _terminate_shell_job_process(job)
+        job.status = "cancelled"
+        job.stderr = (job.stderr + "\nShellJob 等待任务被取消。").strip()
+        raise
+    finally:
+        job.finished_at_unix_ms = _now_ms()
+
+    stdout_text, out_truncated = _clip_text(job.stdout, MAX_BASH_OUTPUT_CHARS)
+    stderr_text, err_truncated = _clip_text(job.stderr, MAX_BASH_OUTPUT_CHARS)
+    parts = [
+        f"[BASH_JOB_DONE] job_id={job.job_id} shell_type={job.shell_type} status={job.status} exit_code={job.exit_code}",
+        f"cwd={job.cwd!r}",
+        f"async_job_id={job.async_job_id}",
+        "--- STDOUT ---",
+        stdout_text,
+        "--- STDERR ---",
+        stderr_text,
+    ]
+    if out_truncated or err_truncated:
+        parts.append(
+            f"[TRUNCATED] 输出超过 {MAX_BASH_OUTPUT_CHARS} 字符，已对 stdout/stderr 分别截断；可用 bash_job_tail 查询尾部。"
+        )
+    return "\n".join(parts)
+
+
+def _terminate_shell_job_process(job: ShellJob) -> None:
+    """终止 shell job 对应进程。
+
+    逻辑：
+    1. 若进程已结束则直接返回；
+    2. POSIX 下优先终止整个进程组；
+    3. 失败时回退到单进程 `terminate()`。
+    """
+    if job.process.poll() is not None:
+        return
+    try:
+        if os.name != "nt":
+            os.killpg(job.process.pid, signal.SIGTERM)
+        else:
+            job.process.terminate()
+    except Exception:
+        job.process.terminate()
+
+
 def _blocked_non_root_password_prompting_shell(command: str, shell_type: ShellType) -> str | None:
     """判定非 root 下是否应拦截「可能读 TTY 密码」的 bash 片段。
 
@@ -531,24 +680,59 @@ def bash_run(
         if blocked is not None:
             return blocked
 
+        process = _popen_by_shell_type(
+            resolved_shell_type,
+            cmd,
+            str(run_cwd),
+            output_encoding,
+        )
         try:
-            completed = _run_by_shell_type(
-                resolved_shell_type,
-                cmd,
-                str(run_cwd),
-                timeout,
-                output_encoding,
+            stdout, stderr = process.communicate(timeout=timeout)
+            stdout = stdout or ""
+            stderr = stderr or ""
+            status = "OK" if process.returncode == 0 else "NON_ZERO_EXIT"
+            exit_code = process.returncode
+        except subprocess.TimeoutExpired:
+            # 超时不再杀进程：登记同一个正在运行的 Popen，交给后台协程等待终态并异步回灌摘要。
+            job_id = str(uuid4())
+            job = ShellJob(
+                job_id=job_id,
+                command=cmd,
+                cwd=str(run_cwd),
+                shell_type=resolved_shell_type,
+                timeout_seconds=timeout,
+                output_encoding=output_encoding,
+                process=process,
+                started_at_unix_ms=_now_ms(),
             )
-            stdout = completed.stdout or ""
-            stderr = completed.stderr or ""
-            status = "OK" if completed.returncode == 0 else "NON_ZERO_EXIT"
-            exit_code = completed.returncode
-        except subprocess.TimeoutExpired as exc:
-            stdout = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
-            stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
-            status = "TIMEOUT"
-            exit_code = -1
-            stderr = (stderr + f"\n命令执行超时：{timeout}s").strip()
+            _SHELL_JOBS[job_id] = job
+            async_job_id = ""
+            async_error = ""
+            if isinstance(context, OpenAIConversationContext):
+                try:
+                    async_store = get_async_tool_result_store()
+                    async_job = async_store.submit_coroutine(
+                        session_id=context.session_id,
+                        client_id=(context.sse_client_id or "").strip(),
+                        tool_name="bash_run",
+                        coroutine_obj=_wait_shell_job(job_id),
+                    )
+                    async_job_id = async_job.job_id
+                    job.async_job_id = async_job_id
+                except Exception as exc:  # noqa: BLE001
+                    async_error = str(exc)
+            parts = [
+                f"[BASH_RESULT] shell_type={resolved_shell_type} status=RUNNING job_id={job_id}",
+                f"cwd={str(run_cwd)!r}",
+                f"timeout_seconds={timeout}",
+                f"output_encoding={output_encoding}",
+                f"async_job_id={async_job_id}",
+                "命令超过同步等待时间，已降级为后台 ShellJob；原进程仍在继续运行，未重启、未杀死。",
+                "可用 bash_job_status / bash_job_tail / bash_job_cancel 查询或取消。",
+            ]
+            if async_error:
+                parts.append(f"[ASYNC_CALLBACK_WARNING] 异步回灌未注册成功：{async_error}")
+            return "\n".join(parts)
 
         stdout, out_truncated = _clip_text(stdout, MAX_BASH_OUTPUT_CHARS)
         stderr, err_truncated = _clip_text(stderr, MAX_BASH_OUTPUT_CHARS)
@@ -570,3 +754,104 @@ def bash_run(
         return "\n".join(parts)
     except Exception as exc:
         return f"ERROR: bash_run 失败: {exc}"
+
+
+@tool("bash_job_status")
+def bash_job_status(job_id: str) -> str:
+    """使用场景：查询 `bash_run` 超时后台化后返回的 ShellJob 状态。
+
+    字段说明：
+    - job_id: `bash_run` 返回的 ShellJob ID。
+
+    返回说明：
+    - 成功：返回结构化文本，含 status、exit_code、cwd、时间戳与 async_job_id。
+    - 失败：返回 `ERROR: ...`。
+
+    调用范例：
+    - `bash_job_status({"job_id":"..."})`
+    """
+    job = _SHELL_JOBS.get(str(job_id or "").strip())
+    if job is None:
+        return f"ERROR: 未找到 ShellJob：{job_id!r}"
+    if job.process.poll() is not None and job.status == "running":
+        job.exit_code = job.process.returncode
+        job.status = "succeeded" if job.exit_code == 0 else "failed"
+        job.finished_at_unix_ms = _now_ms()
+    return "\n".join(
+        [
+            f"[BASH_JOB_STATUS] job_id={job.job_id} status={job.status} exit_code={job.exit_code}",
+            f"shell_type={job.shell_type}",
+            f"cwd={job.cwd!r}",
+            f"timeout_seconds={job.timeout_seconds}",
+            f"async_job_id={job.async_job_id}",
+            f"started_at_unix_ms={job.started_at_unix_ms}",
+            f"finished_at_unix_ms={job.finished_at_unix_ms}",
+        ]
+    )
+
+
+@tool("bash_job_tail")
+def bash_job_tail(job_id: str, max_chars: Optional[int] = None) -> str:
+    """使用场景：读取 ShellJob 已完成输出的尾部；运行中 job 仅返回当前可用状态。
+
+    字段说明：
+    - job_id: `bash_run` 返回的 ShellJob ID。
+    - max_chars: stdout/stderr 各自最多返回字符数（可选，默认 8000）。
+
+    返回说明：
+    - 成功：返回 stdout/stderr 尾部文本。
+    - 失败：返回 `ERROR: ...`。
+
+    调用范例：
+    - `bash_job_tail({"job_id":"..."})`
+    - `bash_job_tail({"job_id":"...","max_chars":2000})`
+    """
+    job = _SHELL_JOBS.get(str(job_id or "").strip())
+    if job is None:
+        return f"ERROR: 未找到 ShellJob：{job_id!r}"
+    limit = SHELL_JOB_TAIL_CHARS if max_chars is None else max(1, min(int(max_chars), MAX_BASH_OUTPUT_CHARS))
+    if job.status == "running":
+        return (
+            f"[BASH_JOB_TAIL] job_id={job.job_id} status=running\n"
+            "进程仍在运行；stdout/stderr 将在完成后由后台等待协程写入。"
+        )
+    stdout = (job.stdout or "")[-limit:]
+    stderr = (job.stderr or "")[-limit:]
+    return "\n".join(
+        [
+            f"[BASH_JOB_TAIL] job_id={job.job_id} status={job.status} exit_code={job.exit_code}",
+            "--- STDOUT_TAIL ---",
+            stdout,
+            "--- STDERR_TAIL ---",
+            stderr,
+        ]
+    )
+
+
+@tool("bash_job_cancel")
+def bash_job_cancel(job_id: str) -> str:
+    """使用场景：取消仍在运行的 ShellJob。
+
+    字段说明：
+    - job_id: `bash_run` 返回的 ShellJob ID。
+
+    返回说明：
+    - 成功：返回取消后的状态；已结束 job 返回当前终态。
+    - 失败：返回 `ERROR: ...`。
+
+    调用范例：
+    - `bash_job_cancel({"job_id":"..."})`
+    """
+    job = _SHELL_JOBS.get(str(job_id or "").strip())
+    if job is None:
+        return f"ERROR: 未找到 ShellJob：{job_id!r}"
+    if job.process.poll() is None:
+        _terminate_shell_job_process(job)
+        job.status = "cancelled"
+        job.finished_at_unix_ms = _now_ms()
+        return f"[BASH_JOB_CANCELLED] job_id={job.job_id} status=cancelled"
+    if job.status == "running":
+        job.exit_code = job.process.returncode
+        job.status = "succeeded" if job.exit_code == 0 else "failed"
+        job.finished_at_unix_ms = _now_ms()
+    return f"[BASH_JOB_CANCELLED] job_id={job.job_id} status={job.status} exit_code={job.exit_code}"

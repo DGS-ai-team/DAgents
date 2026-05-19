@@ -54,8 +54,35 @@ SESSION_CONTEXT_MESSAGES_COUNT = Gauge(
     "各 session 内 `OpenAIConversationContext.messages` 条数（OpenAI 对话列表）",
     labelnames=("session_id",),
 )
+SESSION_QUEUE_DEPTH = Gauge(
+    "dagents_session_queue_depth",
+    "各 session 队列积压消息数（按 MessageQueue pending 快照统计）",
+    labelnames=("session_id",),
+)
+SESSION_QUEUE_PRIORITY_DEPTH = Gauge(
+    "dagents_session_queue_priority_depth",
+    "各 session 队列按请求类型聚合的积压消息数",
+    labelnames=("session_id", "request_type"),
+)
+TOOL_EXECUTIONS_TOTAL = Counter(
+    "dagents_tool_executions_total",
+    "工具执行次数（按工具名与结果状态聚合）",
+    labelnames=("tool_name", "status"),
+)
+TOOL_APPROVAL_REQUIRED_TOTAL = Counter(
+    "dagents_tool_approval_required_total",
+    "需要人工审批的工具调用次数",
+    labelnames=("tool_name",),
+)
+SUMMARY_COMPRESSION_TOTAL = Counter(
+    "dagents_summary_compression_total",
+    "上下文压缩结果次数（按触发阶段与结果状态聚合）",
+    labelnames=("trigger_level", "status"),
+)
 
 _session_context_sessions_raw: set[str] = set()
+_session_queue_sessions_raw: set[str] = set()
+_session_queue_priority_label_pairs: set[tuple[str, str]] = set()
 
 
 def sanitize_model_label(model: str) -> str:
@@ -121,6 +148,86 @@ def refresh_session_context_metrics(session_contexts: dict[str, Any]) -> None:
         SESSION_CONTEXT_MESSAGES_COUNT.labels(sid_label).set(len(messages))
 
     _session_context_sessions_raw = set(curr_sessions_raw)
+
+
+def refresh_session_queue_metrics(session_queues: dict[str, Any]) -> None:
+    """按当前 session 队列快照刷新队列积压 Gauge。
+
+    逻辑：
+    1. 清理已消失 session 的队列指标；
+    2. 调用队列的 `pending_metrics_rows()` 获取未出队条目；
+    3. 同时写入总积压与按 `request_type` 聚合的积压。
+
+    关键边界：
+    - 队列替身若未实现 `pending_metrics_rows`，按空队列处理；
+    - 不展开消息正文，避免指标泄露用户输入。
+    """
+    global _session_queue_sessions_raw, _session_queue_priority_label_pairs
+
+    curr_sessions_raw = set(session_queues.keys())
+    for sid_raw in _session_queue_sessions_raw - curr_sessions_raw:
+        sid_label = sanitize_prometheus_label_value(sid_raw)
+        try:
+            SESSION_QUEUE_DEPTH.remove(sid_label)
+        except KeyError:
+            pass
+
+    # 先清掉上一轮 request_type 维度，随后按当前快照重建，避免旧类型残留。
+    for sid_label, request_type in list(_session_queue_priority_label_pairs):
+        try:
+            SESSION_QUEUE_PRIORITY_DEPTH.remove(sid_label, request_type)
+        except KeyError:
+            pass
+    _session_queue_priority_label_pairs = set()
+
+    for sid_raw, queue in session_queues.items():
+        sid_label = sanitize_prometheus_label_value(sid_raw)
+        rows_fn = getattr(queue, "pending_metrics_rows", None)
+        rows = rows_fn() if callable(rows_fn) else []
+        SESSION_QUEUE_DEPTH.labels(sid_label).set(len(rows))
+
+        by_request_type: dict[str, int] = {}
+        for _priority, _seq, env in rows:
+            request_type = sanitize_prometheus_label_value(str(getattr(env, "request_type", "unknown") or "unknown"))
+            by_request_type[request_type] = by_request_type.get(request_type, 0) + 1
+        for request_type, count in by_request_type.items():
+            SESSION_QUEUE_PRIORITY_DEPTH.labels(sid_label, request_type).set(count)
+            _session_queue_priority_label_pairs.add((sid_label, request_type))
+
+    _session_queue_sessions_raw = set(curr_sessions_raw)
+
+
+def record_tool_execution_result(*, tool_name: str, ok: bool) -> None:
+    """记录单次工具执行结果。
+
+    逻辑：
+    1. 规范化工具名 label；
+    2. 按 `ok/error` 状态递增 Counter。
+    """
+    tool_label = sanitize_prometheus_label_value(tool_name, max_len=120)
+    status = "ok" if ok else "error"
+    TOOL_EXECUTIONS_TOTAL.labels(tool_label, status).inc()
+
+
+def record_tool_approval_required(*, tool_name: str) -> None:
+    """记录一次工具审批等待。
+
+    逻辑：按工具名递增人工审批 Counter，供观测高风险工具等待量。
+    """
+    tool_label = sanitize_prometheus_label_value(tool_name, max_len=120)
+    TOOL_APPROVAL_REQUIRED_TOTAL.labels(tool_label).inc()
+
+
+def record_summary_compression_result(*, trigger_level: str, ok: bool) -> None:
+    """记录一次 summary 压缩结果。
+
+    逻辑：
+    1. 规范化触发阶段（silent/blocking/unknown）；
+    2. 按 `ok/error` 状态递增 Counter。
+    """
+    trigger_label = sanitize_prometheus_label_value(trigger_level or "unknown", max_len=80)
+    status = "ok" if ok else "error"
+    SUMMARY_COMPRESSION_TOTAL.labels(trigger_label, status).inc()
 
 
 def parse_usage_tokens(usage: Any) -> tuple[int, int]:

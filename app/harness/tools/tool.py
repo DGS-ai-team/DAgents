@@ -7,7 +7,8 @@ import inspect
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable
+from types import UnionType
+from typing import Any, Callable, Literal, get_args, get_origin, get_type_hints
 
 from app.config.env import resolve_runtime_root
 from app.config.runtime_layout import shell_policy_dir, tool_policy_file_path
@@ -362,23 +363,32 @@ def get_tools() -> list[Any]:
         agent_peer_approve_tools,
         agent_send_message,
     )
-    from app.harness.tools.bash import bash_run
+    from app.harness.tools.async_tasks import async_tool_cancel, async_tool_status
+    from app.harness.tools.bash import bash_job_cancel, bash_job_status, bash_job_tail, bash_run
     from app.harness.tools.fs import read_file, search_file, search_replace, write_file
-    from app.harness.tools.skills import load_skills
+    from app.harness.tools.skills import clear_skills, load_skills, unload_skills
 
     # 先最小集启用，后续可按稳定性逐步放开更多工具。
-    return [
-        load_skills,
+    tools: list[Any] = []
+    if bool(get_settings().agent_skills_enabled):
+        tools.extend([load_skills, unload_skills, clear_skills])
+    tools.extend([
         read_file,
         search_file,
         search_replace,
         write_file,
         bash_run,
+        bash_job_status,
+        bash_job_tail,
+        bash_job_cancel,
+        async_tool_status,
+        async_tool_cancel,
         agent_discover,
         agent_send_message,
         agent_broadcast,
         agent_peer_approve_tools,
-    ]
+    ])
+    return tools
 
 
 class OpenAIToolSpec(BaseModel):
@@ -402,15 +412,73 @@ class OpenAIToolSpec(BaseModel):
     invoke: Callable[[dict[str, Any], OpenAIConversationContext | None], Any]
 
 
+def _annotation_to_json_schema(annotation: Any) -> dict[str, Any]:
+    """将 Python 类型注解映射为 JSON Schema 片段。
+
+    逻辑：
+    1. 识别基础标量类型；
+    2. 识别 `list[T]` / `dict[str, T]` / `Literal[...]`；
+    3. 识别 `Optional[T]` / `Union[...]` 并生成 `anyOf`；
+    4. 未知类型保守回退为 `string`，避免 schema 构造失败。
+
+    关键边界：
+    - 该函数只生成模型可见参数 schema，不做运行时强制类型转换；
+    - `Any` 与未标注参数允许常见 JSON 标量/对象/数组。
+    """
+    if annotation is inspect._empty or annotation is Any:
+        return {"type": ["string", "number", "integer", "boolean", "object", "array", "null"]}
+    if annotation is str:
+        return {"type": "string"}
+    if annotation is int:
+        return {"type": "integer"}
+    if annotation is float:
+        return {"type": "number"}
+    if annotation is bool:
+        return {"type": "boolean"}
+    if annotation is dict:
+        return {"type": "object", "additionalProperties": True}
+    if annotation is list:
+        return {"type": "array", "items": {}}
+
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is list:
+        item_schema = _annotation_to_json_schema(args[0]) if args else {}
+        return {"type": "array", "items": item_schema}
+    if origin is dict:
+        value_schema = _annotation_to_json_schema(args[1]) if len(args) >= 2 else True
+        return {"type": "object", "additionalProperties": value_schema}
+    if origin is Literal:
+        values = list(args)
+        schema: dict[str, Any] = {"enum": values}
+        if values:
+            value_types = {type(item) for item in values}
+            if value_types <= {str}:
+                schema["type"] = "string"
+            elif value_types <= {int}:
+                schema["type"] = "integer"
+            elif value_types <= {bool}:
+                schema["type"] = "boolean"
+        return schema
+    if origin is UnionType or str(origin) == "typing.Union":
+        variants = [_annotation_to_json_schema(item) for item in args]
+        return {"anyOf": variants}
+    return {"type": "string"}
+
+
 def _signature_to_json_schema(func: Callable[..., Any]) -> dict[str, Any]:
     """将 Python 签名转换为最小 JSON Schema。
 
     逻辑：
     1. 遍历函数参数，生成 `properties`；
-    2. 推断基础类型（str/int/float/bool/其他）；
+    2. 推断基础类型、数组、对象、Literal 与 Optional/Union；
     3. 无默认值参数放入 `required`。
     """
     sig = inspect.signature(func)
+    try:
+        type_hints = get_type_hints(func)
+    except Exception:  # noqa: BLE001
+        type_hints = {}
     properties: dict[str, Any] = {}
     required: list[str] = []
     for param_name, p in sig.parameters.items():
@@ -419,23 +487,14 @@ def _signature_to_json_schema(func: Callable[..., Any]) -> dict[str, Any]:
             continue
         if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
-        anno = p.annotation
-        if anno in (int,):
-            t = "integer"
-        elif anno in (float,):
-            t = "number"
-        elif anno in (bool,):
-            t = "boolean"
-        else:
-            t = "string"
-        properties[param_name] = {"type": t}
+        properties[param_name] = _annotation_to_json_schema(type_hints.get(param_name, p.annotation))
         if p.default is inspect._empty:
             required.append(param_name)
     return {
         "type": "object",
         "properties": properties,
         "required": required,
-        "additionalProperties": True,
+        "additionalProperties": False,
     }
 
 
@@ -476,13 +535,23 @@ def _tool_to_spec(tool_obj: Any) -> OpenAIToolSpec:
 
     fn_sig = inspect.signature(invoke_fn)
     accepts_context = "context" in fn_sig.parameters
+    accepts_var_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in fn_sig.parameters.values())
+    accepted_param_names = {
+        name
+        for name, p in fn_sig.parameters.items()
+        if name != "context" and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
 
     def _invoke(args: dict[str, Any], context: OpenAIConversationContext | None = None) -> Any:
         # 带 `invoke` 的工具对象走统一入口；否则按 Python 关键字展开（可注入 `context`）。
         if getattr(tool_obj, "invoke", None):
             return tool_obj.invoke(args)
         else:
-            final_kwargs = dict(args)
+            # schema 已禁止未知字段；执行层仍做一次过滤，避免模型/网关绕过 schema 后触发 TypeError。
+            if accepts_var_kwargs:
+                final_kwargs = dict(args)
+            else:
+                final_kwargs = {k: v for k, v in dict(args).items() if k in accepted_param_names}
             if accepts_context:
                 final_kwargs["context"] = context
             return invoke_fn(**final_kwargs)

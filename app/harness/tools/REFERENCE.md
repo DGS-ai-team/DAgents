@@ -9,6 +9,8 @@
 - **`should_require_tool_approval`**：统一审批入口；按全局模式、工具策略与 shell 策略决定是否审批。
 - **`_resolve_repo_relative_path`**：通用「相对运行根 / 绝对路径」解析；工具与 shell 审批路径直接使用 **`runtime_layout.tool_policy_file_path()`** / **`shell_policy_dir()`**。
 - **`OpenAIToolSpec`**：**Pydantic `BaseModel`（frozen，`arbitrary_types_allowed`）**；工具规格与 `invoke` 绑定。
+- **`_annotation_to_json_schema`**：将 Python 类型注解映射为 JSON Schema，覆盖基础类型、`list[T]`、`dict`、`Literal`、`Optional/Union`。
+- **`_signature_to_json_schema`**：函数签名到 OpenAI tool 参数 JSON Schema（默认 `additionalProperties=false`）。
 - **`build_openai_toolkit`**：构建 OpenAI tools payload 与执行映射。
 - **`parse_tool_arguments`**：解析 tool arguments（JSON 字符串/对象）。
 
@@ -18,7 +20,13 @@
 - **`AsyncToolResultStore`**：后台托管协程并维护任务状态与完成回调。
 - **`AsyncToolResultStore.submit_coroutine`**：要求非空 **`client_id`**，与 **`OpenAIConversationContext.sse_client_id`** 对齐，供终态回灌 **`MessageEnvelope.client_id`**。
 - **`AsyncToolResultStore.register_message_queue_sender`**：注册消息队列发送器；终态 **`payload`** 含 **`client_id`**，与 **`AsyncToolJob`** 一致。
+- **`AsyncToolResultStore.cancel_job`**：请求取消未终态任务并返回快照。
 - **`get_async_tool_result_store`**：返回进程级异步工具结果仓库单例。
+
+## `async_tasks.py`
+
+- **`async_tool_status`**：按 job_id 查询异步工具任务快照。
+- **`async_tool_cancel`**：按 job_id 请求取消异步工具任务。
 
 ## `agent_peer.py`
 
@@ -42,6 +50,7 @@
 ## `bash.py`
 
 - **`_clip_text`**：按字符上限裁剪输出文本。
+- **`ShellJob`**：后台 shell job 快照；保存同一运行中 `Popen` 进程、状态、输出与异步回灌 job_id。
 - **`CommandAstNode`**：**Pydantic `BaseModel`（frozen）**；轻量 AST 节点（解析器、片段原文、命令首词）
 - **`_split_bash_statements`**：按 bash 规则切分命令片段。
 - **`_split_cmd_statements`**：按 cmd 规则切分命令片段。
@@ -51,7 +60,9 @@
 - **`_blocked_non_root_password_prompting_shell`**：基于 **`get_host_snapshot()`** 判定 OS/euid；非 root + bash 时拦截 **`su - … -c`** 及未带 **`-n`/`--non-interactive`** 的 **`sudo`/`sudoedit`**（否则 `None`）
 - **`_run_bash_command`**、**`_run_cmd_command`**、**`_run_powershell_command`**：三种 shell 的独立执行方法。
 - **`_run_by_shell_type`**：按 shell 类型分发执行方法。
-- **`bash_run`**：统一入口，支持 `shell_type` 选择执行器并返回结构化结果。
+- **`_popen_by_shell_type`** / **`_wait_shell_job`** / **`_terminate_shell_job_process`**：启动可托管进程、后台等待同一进程完成并生成异步回灌摘要、取消后台进程。
+- **`bash_run`**：统一入口，支持 `shell_type` 选择执行器并返回结构化结果；同步超时时不杀进程，登记为 ShellJob 并返回 `job_id`/`async_job_id`。
+- **`bash_job_status`** / **`bash_job_tail`** / **`bash_job_cancel`**：查询、读取尾部输出、取消后台 ShellJob。
 
 ## `host_platform.py`
 
@@ -68,5 +79,13 @@
 
 ## `skills.py`
 
-- **`load_skills`**：按 `skill_names` 数组加载会话技能；返回 `loaded_skills` 与 `available_skills` 元数据 JSON（字段为 `skill_name/description`）
+- **`load_skills`**：按 `skill_names` 数组整组设置会话技能；空数组表示清空；返回 `action=set_loaded_skills`、`loaded_skills` 与 `available_skills`。
+- **`unload_skills`**：从当前会话已加载技能中移除指定名称，不影响磁盘 skill 文件。
+- **`clear_skills`**：清空当前会话已加载技能，不影响磁盘 skill 文件。
+
+## `result_policy.py`
+
+- **`ToolResultEnvelope`**：工具结果三路产物，区分 `model_content`、`display_content`、`raw_ref`、截断与脱敏标记。
+- **`package_tool_result`**：对工具原始输出做敏感信息脱敏、首尾裁剪与 `.runtime/tool_outputs/<id>.txt` 原文落盘引用。
+- **`_filter_sensitive_text`** / **`_clip_middle`**：内置敏感字段过滤与长文本首尾保留裁剪。
 

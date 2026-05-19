@@ -11,7 +11,8 @@
 ## `agent.py`
 
 - **`init_agent`**：创建并返回 OpenAI 隐式 ReAct runtime
-- **`MainAgentTurnOrchestrator`**：消息回合业务编排器；`resume` / `async_tool_result` / `tool_result` / `human_message` 分支；`run_turn` 与工具审批/执行、tool_result 回灌；**`_invoke_tool`** 内在得到最终 **`result_text`** 后 **`emit` `tool_result`** 信封；**`_handle_tool_result`** 仅驱动 **`tool_message`** 下一轮（不再重复发 **`tool_result`** SSE）；**`_handle_human_message`**：若 **`ctx.pending_tool_calls`** 非空则按 pending 逐条补打断 **`tool`/`tool_result` SSE** 后 **`clear()`** pending 并 **`run_turn_phase=IDLE`**；并内聚 summary 压缩入口流程（已完成结果替换、阻塞压缩、静默压缩任务管理）；**`display_inference`** 生成 **`tool_result` / `tool_call` / `approval_required`** 等 **`display_type`**
+- **`ToolExecutionPlan`**：单轮 `tool_calls` 的内部执行计划，显式承载自动执行工具与待审批工具两组。
+- **`MainAgentTurnOrchestrator`**：消息回合业务编排器；`resume` / `async_tool_result` / `tool_result` / `human_message` 分支；`run_turn` 与工具审批/执行、tool_result 回灌；**`_build_tool_execution_plan`** 按审批策略生成 **`ToolExecutionPlan`**；**`_invoke_tool`** 内在得到最终 **`result_text`** 后 **`emit` `tool_result`** 信封；**`_handle_tool_result`** 仅驱动 **`tool_message`** 下一轮（不再重复发 **`tool_result`** SSE）；**`_handle_human_message`**：若 **`ctx.pending_tool_calls`** 非空则按 pending 逐条补打断 **`tool`/`tool_result` SSE** 后 **`clear()`** pending 并 **`run_turn_phase=IDLE`**；并内聚 summary 压缩入口流程（已完成结果替换、阻塞压缩失败可恢复错误、静默压缩 source_fingerprint 版本校验、静默压缩任务管理）；**`display_inference`** 生成 **`tool_result` / `tool_call` / `approval_required`** 等 **`display_type`**
 
 ## `runtime_openai.py`
 
@@ -29,7 +30,7 @@
 - **`get_static_system_prompt`**
 - **`_format_runtime_environment_section`**：将 **`HostSnapshot`** 格式化为「当前运行环境」正文（OS 类别、平台摘要、登录名、UID/GID）
 - **`_format_runtime_workspace_section`**：**`.runtime`** 子目录约定（含 **`data/`**、**`scripts/`**、**`scripts_menu.md`**）
-- **`get_system_prompt(context)`**：静态 + **`.runtime` 侧车 `soul.md` / `user.md`** + skills + **`get_host_snapshot()`** 运行环境 + **`.runtime` 工作目录约定** +（配置启用时）JSONL 原始消息记录说明 + **`custom.md`** + **`session_id`**（最末）；自主创建 skills 段落中的根路径同 **`runtime_layout.skills_dir()`**
-- **`read_memory_file_cached`**
+- **`get_system_prompt(context)`**：静态 + **`.runtime` 侧车 `soul.md` / `user.md`** + 可选长期记忆 **`.runtime/memory/long_term.md`** + skills + **`get_host_snapshot()`** 运行环境 + **`.runtime` 工作目录约定** +（配置启用时）JSONL 原始消息记录说明 + **`custom.md`** + **`session_id`**（最末）；自主创建 skills 段落中的根路径同 **`runtime_layout.skills_dir()`**
+- **`read_memory_file_cached`** / **`_read_long_term_memory`**：只读长期记忆 Markdown，按 mtime 缓存；不存在或空白时不注入 prompt
 
 侧车 Markdown 仅位于 **`<运行根>/.runtime/prompt_context/`**；内容由部署方在本地编辑（初始为空文件）。

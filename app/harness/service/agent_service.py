@@ -21,7 +21,7 @@ from app.harness.queue.message_queue import MessageEnvelope, MessagePriority, Me
 from app.harness.service.interface import AgentEventEnvelope
 from app.harness.tools.tool import build_openai_toolkit
 from app.harness.tools.async_store import get_async_tool_result_store
-from app.observability.metrics import refresh_session_context_metrics
+from app.observability.metrics import refresh_session_context_metrics, refresh_session_queue_metrics
 
 _logger = logging.getLogger(__name__)
 
@@ -151,6 +151,7 @@ class AgentService:
         self._session_contexts.clear()
         self._session_last_activity.clear()
         refresh_session_context_metrics({})
+        refresh_session_queue_metrics({})
         self._stop_event.set()
         _logger.info("agent-service stopped")
 
@@ -305,6 +306,7 @@ class AgentService:
             ),
             priority=effective_priority,
         )
+        refresh_session_queue_metrics(self._session_queues)
 
     async def submit_resume(
         self,
@@ -333,6 +335,7 @@ class AgentService:
             ),
             priority=priority,
         )
+        refresh_session_queue_metrics(self._session_queues)
 
     def _load_context_from_store_sync(self, session_id: str) -> OpenAIConversationContext:
         """同步从 sqlite 加载或构造空 `OpenAIConversationContext`（不写回）。
@@ -565,6 +568,7 @@ class AgentService:
             await q.stop()
 
         refresh_session_context_metrics(self._session_contexts)
+        refresh_session_queue_metrics(self._session_queues)
 
         _logger.info(
             "session evicted for capacity (idle session slot)",
@@ -646,6 +650,7 @@ class AgentService:
             try:
                 # 与 pause/stop 协作：pause 时阻塞在 gate；stop 后 receive 抛 RuntimeError 退出本循环。
                 env = await q.receive()
+                refresh_session_queue_metrics(self._session_queues)
             except RuntimeError:
                 break
             except asyncio.CancelledError:
