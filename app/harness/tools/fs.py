@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.tool import tool
@@ -22,6 +24,39 @@ DEFAULT_SEARCH_INDEX_OFFSET = 0
 DEFAULT_SEARCH_COUNT_LIMIT = 5
 # 命中索引列表上限（超出仍统计总数，分页仅针对已记录索引）
 MAX_SEARCH_HIT_INDEXES = 10_000
+class ReadFileArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    line_offset: Optional[int] = 1
+    line_limit: Optional[int] = Field(default=100, ge=1)
+
+
+class WriteFileArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    content: str
+
+
+class SearchReplaceArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    old_string: str = Field(min_length=1)
+    new_string: str
+    replace_all: bool = False
+
+
+class SearchFileArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    pattern: str = Field(min_length=1)
+    index_offset: Optional[int] = Field(default=0, ge=0)
+    count_limit: Optional[int] = Field(default=5, ge=1)
+
+
 _TEXT_SUFFIXES = {
     ".txt",
     ".md",
@@ -371,6 +406,9 @@ def read_file(
         return f"ERROR: read_file 失败: {exc}"
 
 
+read_file.args_schema = ReadFileArgs  # type: ignore[attr-defined]
+
+
 @tool("write_file")
 def write_file(
     path: str,
@@ -402,6 +440,9 @@ def write_file(
         return f"OK: 已写入 {path!r} ({len(content.encode('utf-8'))} bytes)"
     except Exception as exc:
         return f"ERROR: write_file 失败: {exc}"
+
+
+write_file.args_schema = WriteFileArgs  # type: ignore[attr-defined]
 
 
 @tool("search_replace")
@@ -464,6 +505,9 @@ def search_replace(
         return head
     except Exception as exc:
         return f"成功: 否\n路径: {path}\n错误: search_replace 失败: {exc}\n---\n"
+
+
+search_replace.args_schema = SearchReplaceArgs  # type: ignore[attr-defined]
 
 
 @tool("search_file")
@@ -574,3 +618,6 @@ def search_file(
         return full_out
     except Exception as exc:
         return f"ERROR: search_file 失败: {exc}"
+
+
+search_file.args_schema = SearchFileArgs  # type: ignore[attr-defined]

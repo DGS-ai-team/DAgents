@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any, AsyncIterator
 
@@ -18,9 +19,36 @@ from app.core.main_agent.prompt import get_system_prompt
 from app.harness.history.raw_message_journal import append_openai_message_with_journal
 from app.harness.service.interface import AgentEventEnvelope
 from app.harness.tools.tool import build_openai_toolkit, parse_tool_arguments
-from app.observability.metrics import record_llm_token_usage, usage_fields_from_openai_usage
+from app.observability.metrics import (
+    record_llm_token_usage,
+    record_system_prompt_observation,
+    usage_fields_from_openai_usage,
+)
 
 _logger = logging.getLogger(__name__)
+
+
+def estimate_messages_total_tokens(messages: list[dict[str, Any]], *, system_prompt: str = "") -> int:
+    """在 provider 未返回 usage 时粗估当前上下文 token 数。"""
+    try:
+        messages_text = json.dumps(messages, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:  # noqa: BLE001
+        messages_text = repr(messages)
+    total_chars = len(str(system_prompt or "")) + len(messages_text)
+    message_overhead = max(0, len(messages)) * 4
+    return max(1, (total_chars + 3) // 4 + message_overhead)
+
+
+def resolve_messages_total_tokens(
+    messages: list[dict[str, Any]],
+    *,
+    system_prompt: str = "",
+    usage_total_tokens: int | None = None,
+) -> int:
+    """优先使用 provider usage；缺失时退化为本地估算。"""
+    if usage_total_tokens is not None and usage_total_tokens >= 0:
+        return int(usage_total_tokens)
+    return estimate_messages_total_tokens(messages, system_prompt=system_prompt)
 
 
 class OpenAIImplicitReActRuntime:
@@ -145,6 +173,12 @@ class OpenAIImplicitReActRuntime:
             dynamic_system_prompt = get_system_prompt(context=ctx)
         else:
             dynamic_system_prompt = get_system_prompt(context=ctx)
+        model_name = str(getattr(self, "_model_cfg", {}).get("model") or "")
+        system_prompt_fp = record_system_prompt_observation(
+            model=model_name,
+            system_prompt=dynamic_system_prompt,
+            message_count=len(ctx.messages),
+        )
         model_msg = None
         latest_total_tokens: int | None = None
         ctx.assistant_stream_buffer = ""
@@ -187,6 +221,8 @@ class OpenAIImplicitReActRuntime:
                 elif event_kind == "usage":
                     # 透传 `usage_fields_from_openai_usage` 全量字段（含 cache/audio 明细）。
                     usage_payload = {k: v for k, v in model_event.items() if k != "kind"}
+                    usage_payload.setdefault("system_prompt_chars", len(dynamic_system_prompt))
+                    usage_payload.setdefault("system_prompt_fingerprint", system_prompt_fp)
                     prompt_tokens = int(usage_payload.get("prompt_tokens", 0))
                     completion_tokens = int(usage_payload.get("completion_tokens", 0))
                     total_tokens = int(usage_payload.get("total_tokens") or 0)
@@ -220,9 +256,6 @@ class OpenAIImplicitReActRuntime:
             yield self._ev("error", {"message": "模型流式响应解析失败。"})
             yield self._ev("done", {"finish_reason": "error"})
             return
-        # 本轮 AI 响应返回后，使用 usage 总量刷新消息总 token（仅在元数据可用时更新）。
-        if latest_total_tokens is not None and latest_total_tokens >= 0:
-            ctx.messages_total_tokens = latest_total_tokens
         assistant_content = model_msg.get("content", "") or ""
         tool_calls = model_msg.get("tool_calls", [])
         # ----- 子分支：模型要求调用工具（此处仍不 invoke，只登记 + 等人批）----- #
@@ -250,6 +283,11 @@ class OpenAIImplicitReActRuntime:
                     {"id": call_id, "name": name, "arguments": args, "raw_arguments": fn.get("arguments")}
                 )
             ctx.pending_tool_calls = pending
+            ctx.messages_total_tokens = resolve_messages_total_tokens(
+                ctx.messages,
+                system_prompt=dynamic_system_prompt,
+                usage_total_tokens=latest_total_tokens,
+            )
             yield self._ev(
                 "tool_call",
                 {
@@ -263,6 +301,11 @@ class OpenAIImplicitReActRuntime:
 
         # ----- 子分支：本轮无工具调用，视为最终回复 ----- #
         append_openai_message_with_journal(ctx, {"role": "assistant", "content": assistant_content})
+        ctx.messages_total_tokens = resolve_messages_total_tokens(
+            ctx.messages,
+            system_prompt=dynamic_system_prompt,
+            usage_total_tokens=latest_total_tokens,
+        )
         # 仅在“无 tool_calls 的 assistant 正常收口”时重置累计循环计数。
         ctx.tool_loop_count = 0
         ctx.run_turn_phase = RunTurnPhase.IDLE

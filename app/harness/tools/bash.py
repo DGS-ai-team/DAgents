@@ -17,7 +17,7 @@ from time import time
 from typing import Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.config.settings import get_settings
 from app.config.host_snapshot import get_host_snapshot
@@ -27,6 +27,26 @@ from app.harness.tools.host_platform import HostOsKind, detect_host_os
 from app.harness.tools.tool import tool
 
 ShellType = Literal["bash", "cmd", "powershell"]
+
+
+class BashRunArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: str = Field(min_length=1)
+    timeout_seconds: Optional[int] = Field(default=None, ge=1, le=600)
+    cwd: Optional[str] = None
+    shell_type: Optional[ShellType] = None
+
+
+class ShellJobIdArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(min_length=1)
+
+
+class BashJobTailArgs(ShellJobIdArgs):
+    max_chars: Optional[int] = Field(default=None, ge=1, le=12000)
+
 
 # 非 root 拦截：`su - <user> -c ...`（含 `-l` / `--login`）；按 bash 语句片段逐个匹配行首。
 _SU_LOGIN_WITH_C_RE = re.compile(
@@ -756,6 +776,9 @@ def bash_run(
         return f"ERROR: bash_run 失败: {exc}"
 
 
+bash_run.args_schema = BashRunArgs  # type: ignore[attr-defined]
+
+
 @tool("bash_job_status")
 def bash_job_status(job_id: str) -> str:
     """使用场景：查询 `bash_run` 超时后台化后返回的 ShellJob 状态。
@@ -788,6 +811,9 @@ def bash_job_status(job_id: str) -> str:
             f"finished_at_unix_ms={job.finished_at_unix_ms}",
         ]
     )
+
+
+bash_job_status.args_schema = ShellJobIdArgs  # type: ignore[attr-defined]
 
 
 @tool("bash_job_tail")
@@ -828,6 +854,9 @@ def bash_job_tail(job_id: str, max_chars: Optional[int] = None) -> str:
     )
 
 
+bash_job_tail.args_schema = BashJobTailArgs  # type: ignore[attr-defined]
+
+
 @tool("bash_job_cancel")
 def bash_job_cancel(job_id: str) -> str:
     """使用场景：取消仍在运行的 ShellJob。
@@ -855,3 +884,6 @@ def bash_job_cancel(job_id: str) -> str:
         job.status = "succeeded" if job.exit_code == 0 else "failed"
         job.finished_at_unix_ms = _now_ms()
     return f"[BASH_JOB_CANCELLED] job_id={job.job_id} status={job.status} exit_code={job.exit_code}"
+
+
+bash_job_cancel.args_schema = ShellJobIdArgs  # type: ignore[attr-defined]

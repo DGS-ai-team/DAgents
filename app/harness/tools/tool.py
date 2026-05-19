@@ -6,6 +6,7 @@ import functools
 import inspect
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from types import UnionType
 from typing import Any, Callable, Literal, get_args, get_origin, get_type_hints
@@ -15,10 +16,19 @@ from app.config.runtime_layout import shell_policy_dir, tool_policy_file_path
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.async_store import get_async_tool_result_store
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 ApprovalMode = str
 _VALID_APPROVAL_MODES: set[str] = {"always", "never", "rule"}
+
+
+@dataclass(frozen=True, slots=True)
+class ToolApprovalDecision:
+    require_approval: bool
+    reason: str
+    risk_level: Literal["low", "medium", "high"] = "medium"
+    mode: str = "rule"
+
 
 
 def _resolve_repo_relative_path(rel_or_abs: str) -> Path:
@@ -303,51 +313,75 @@ def tool(
         return decorator
 
 
+def decide_tool_approval(
+    *,
+    tool_name: str,
+    tool_args: dict[str, Any],
+    context: OpenAIConversationContext | None = None,
+) -> ToolApprovalDecision:
+    """返回结构化工具审批决策，包含是否审批、原因与风险等级。"""
+    del context
+    normalized_tool = tool_name.strip().lower()
+    mode_raw = (get_settings().agent_tool_approval_mode or "rule").strip().lower()
+    mode = mode_raw if mode_raw in {"always", "never", "rule"} else "rule"
+    if mode == "always":
+        return ToolApprovalDecision(
+            require_approval=True,
+            reason="全局工具审批模式为 always。",
+            risk_level="high",
+            mode="global:always",
+        )
+    if mode == "never":
+        return ToolApprovalDecision(
+            require_approval=False,
+            reason="全局工具审批模式为 never。",
+            risk_level="low",
+            mode="global:never",
+        )
+
+    tool_mode = _tool_approval_mode(tool_name)
+    if tool_mode == "always":
+        return ToolApprovalDecision(
+            require_approval=True,
+            reason=f"工具策略要求 {tool_name} 始终审批。",
+            risk_level="high",
+            mode="tool:always",
+        )
+    if tool_mode == "never":
+        return ToolApprovalDecision(
+            require_approval=False,
+            reason=f"工具策略允许 {tool_name} 自动执行。",
+            risk_level="low",
+            mode="tool:never",
+        )
+    if normalized_tool == "bash_run":
+        require_approval = _should_require_approval_for_bash_tool(tool_args)
+        return ToolApprovalDecision(
+            require_approval=require_approval,
+            reason=(
+                "bash_run 命令命中 shell 策略或无法安全解析，需人工确认。"
+                if require_approval
+                else "bash_run 命令首词均被 shell 策略允许自动执行。"
+            ),
+            risk_level="high" if require_approval else "low",
+            mode="shell:rule",
+        )
+    return ToolApprovalDecision(
+        require_approval=True,
+        reason="未命中自动放行策略，默认保守要求审批。",
+        risk_level="medium",
+        mode="tool:rule",
+    )
+
+
 def should_require_tool_approval(
     *,
     tool_name: str,
     tool_args: dict[str, Any],
     context: OpenAIConversationContext | None = None,
 ) -> bool:
-    """判断某次工具调用是否需要进入审批流程（占位实现）。
-
-    逻辑：
-    1. 接收工具名、工具参数与可选会话上下文，作为审批策略判断输入；
-    2. 读取全局配置 `AGENT_TOOL_APPROVAL_MODE`，支持 `always/never/rule` 三种模式；
-    3. `always` 强制审批，`never` 直接放行，`rule` 进入规则分支；
-    4. 规则分支先读工具级策略文件（默认 **`.runtime/policy/tool.approval.txt`**，行格式 `tool_name=mode`），并对 `bash_run` 额外读取 shell 级目录（默认 **`.runtime/policy/shell/`** 下各 `<shell>.approval.txt`）的 `root=mode` 策略。
-
-    关键边界：
-    - 本方法应保持纯函数语义，不直接修改 `context` 或触发外部副作用；
-    - 当 `AGENT_TOOL_APPROVAL_MODE` 取值非法时，回退为 `rule`；
-    - 当策略未命中任何规则时，维持“默认需要审批”的保守行为；
-    - `bash_run` 的 `rule` 由 shell 策略文件细分，当前 `rule` 仍回退为需要审批。
-
-    Args:
-        tool_name: 工具名（如 `bash_run`、`agent_send_message`）。
-        tool_args: 本次工具调用参数（已解析为字典）。
-        context: 当前会话上下文（可选，供后续策略扩展使用）。
-
-    Returns:
-        bool: `True` 表示进入审批；`False` 表示可自动执行。
-    """
-    mode_raw = (get_settings().agent_tool_approval_mode or "rule").strip().lower()
-    mode = mode_raw if mode_raw in {"always", "never", "rule"} else "rule"
-    if mode == "always":
-        return True
-    elif mode == "never":
-        return False
-    else:
-        del context
-        tool_mode = _tool_approval_mode(tool_name)
-        if tool_mode == "always":
-            return True
-        elif tool_mode == "never":
-            return False
-        else:
-            if tool_name.strip().lower() == "bash_run":
-                return _should_require_approval_for_bash_tool(tool_args)
-            return True
+    """判断某次工具调用是否需要进入审批流程。"""
+    return decide_tool_approval(tool_name=tool_name, tool_args=tool_args, context=context).require_approval
 
 
 def get_tools() -> list[Any]:
@@ -498,6 +532,23 @@ def _signature_to_json_schema(func: Callable[..., Any]) -> dict[str, Any]:
     }
 
 
+def _validate_tool_arguments(args_schema: Any, args: dict[str, Any]) -> dict[str, Any]:
+    """用工具声明的 Pydantic args_schema 做运行时参数校验。"""
+    if args_schema is None or not hasattr(args_schema, "model_validate"):
+        return dict(args)
+    try:
+        validated = args_schema.model_validate(dict(args))
+    except ValidationError as exc:
+        details = "; ".join(
+            f"{'.'.join(str(part) for part in item.get('loc', ()))}: {item.get('msg')}"
+            for item in exc.errors()
+        )
+        raise ValueError(f"工具参数校验失败：{details or exc}") from exc
+    if hasattr(validated, "model_dump"):
+        return dict(validated.model_dump())
+    return dict(args)
+
+
 def _tool_to_spec(tool_obj: Any) -> OpenAIToolSpec:
     """将单个工具对象转换为 OpenAI 可注册规格。
 
@@ -544,14 +595,15 @@ def _tool_to_spec(tool_obj: Any) -> OpenAIToolSpec:
 
     def _invoke(args: dict[str, Any], context: OpenAIConversationContext | None = None) -> Any:
         # 带 `invoke` 的工具对象走统一入口；否则按 Python 关键字展开（可注入 `context`）。
+        validated_args = _validate_tool_arguments(args_schema, args)
         if getattr(tool_obj, "invoke", None):
-            return tool_obj.invoke(args)
+            return tool_obj.invoke(validated_args)
         else:
             # schema 已禁止未知字段；执行层仍做一次过滤，避免模型/网关绕过 schema 后触发 TypeError。
             if accepts_var_kwargs:
-                final_kwargs = dict(args)
+                final_kwargs = dict(validated_args)
             else:
-                final_kwargs = {k: v for k, v in dict(args).items() if k in accepted_param_names}
+                final_kwargs = {k: v for k, v in dict(validated_args).items() if k in accepted_param_names}
             if accepts_context:
                 final_kwargs["context"] = context
             return invoke_fn(**final_kwargs)

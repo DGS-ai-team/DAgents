@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -81,7 +83,7 @@ class SqliteMessageStore:
         new_item = {"role": role_text, "content": content, "meta": meta or {}}
         json.dumps(new_item, ensure_ascii=False)
 
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT content FROM session_history WHERE session_id = ?",
@@ -99,6 +101,7 @@ class SqliteMessageStore:
                 run_turn_phase=str(decoded["run_turn_phase"]),
                 messages_total_tokens=int(decoded["messages_total_tokens"]),
                 tool_loop_count=int(decoded["tool_loop_count"]),
+                loaded_skills=list(decoded["loaded_skills"]),
             )
             conn.execute(
                 """
@@ -140,9 +143,10 @@ class SqliteMessageStore:
             run_turn_phase=payload.run_turn_phase.value,
             messages_total_tokens=max(0, int(payload.messages_total_tokens)),
             tool_loop_count=max(0, int(payload.tool_loop_count)),
+            loaded_skills=list(payload.loaded_skills),
         )
 
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO session_history(session_id, content)
@@ -171,7 +175,7 @@ class SqliteMessageStore:
         sid = (session_id or "").strip()
         if not sid:
             return []
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT content FROM session_history WHERE session_id = ?",
                 (sid,),
@@ -196,7 +200,7 @@ class SqliteMessageStore:
         sid = (session_id or "").strip()
         if not sid:
             return ConversationContext()
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT content FROM session_history WHERE session_id = ?",
                 (sid,),
@@ -209,6 +213,7 @@ class SqliteMessageStore:
             run_turn_phase=RunTurnPhase(str(decoded["run_turn_phase"])),
             messages_total_tokens=max(0, int(decoded["messages_total_tokens"])),
             tool_loop_count=max(0, int(decoded["tool_loop_count"])),
+            loaded_skills=list(decoded["loaded_skills"]),
         )
 
     def clear_session(self, session_id: str) -> None:
@@ -227,7 +232,7 @@ class SqliteMessageStore:
         sid = (session_id or "").strip()
         if not sid:
             return
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("DELETE FROM session_history WHERE session_id = ?", (sid,))
             conn.commit()
 
@@ -245,7 +250,7 @@ class SqliteMessageStore:
         与外部交互：
         - 数据库：执行 DDL。
         """
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS session_history (
@@ -277,6 +282,7 @@ class SqliteMessageStore:
             "run_turn_phase": RunTurnPhase.IDLE.value,
             "messages_total_tokens": 0,
             "tool_loop_count": 0,
+            "loaded_skills": [],
         }
         if not blob:
             return empty_payload
@@ -294,6 +300,7 @@ class SqliteMessageStore:
         raw_phase = data.get("run_turn_phase", RunTurnPhase.IDLE.value)
         raw_messages_total_tokens = data.get("messages_total_tokens", 0)
         raw_tool_loop_count = data.get("tool_loop_count", 0)
+        raw_loaded_skills = data.get("loaded_skills", [])
 
         openai_messages: list[dict[str, Any]] = []
         if isinstance(raw_openai_messages, list):
@@ -333,6 +340,21 @@ class SqliteMessageStore:
         except Exception:
             tool_loop_count = 0
 
+        loaded_skills: list[dict[str, str]] = []
+        if isinstance(raw_loaded_skills, list):
+            for item in raw_loaded_skills:
+                if not isinstance(item, dict):
+                    continue
+                skill_name = str(item.get("skill_name") or "").strip()
+                if not skill_name:
+                    continue
+                loaded_skills.append(
+                    {
+                        "skill_name": skill_name,
+                        "description": str(item.get("description") or "").strip(),
+                    }
+                )
+
         return {
             "history": SqliteMessageStore._normalize_message_dicts(raw_hist),
             "openai_messages": openai_messages,
@@ -340,6 +362,7 @@ class SqliteMessageStore:
             "run_turn_phase": run_turn_phase,
             "messages_total_tokens": messages_total_tokens,
             "tool_loop_count": tool_loop_count,
+            "loaded_skills": loaded_skills,
         }
 
     @staticmethod
@@ -366,6 +389,7 @@ class SqliteMessageStore:
         run_turn_phase: str,
         messages_total_tokens: int,
         tool_loop_count: int,
+        loaded_skills: list[dict[str, str]],
     ) -> bytes:
         """将会话上下文序列化为 UTF-8 JSON 字节。
 
@@ -383,6 +407,7 @@ class SqliteMessageStore:
             "run_turn_phase": run_turn_phase,
             "messages_total_tokens": max(0, int(messages_total_tokens)),
             "tool_loop_count": max(0, int(tool_loop_count)),
+            "loaded_skills": loaded_skills,
         }
         return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
@@ -403,6 +428,15 @@ class SqliteMessageStore:
         - 假定键已存在（由 `_normalize_message_dicts` 保证）；否则可能 `KeyError`。
         """
         return [MessageRecord.model_validate(it) for it in items]
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """创建并在使用后关闭 sqlite 连接。"""
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _connect(self) -> sqlite3.Connection:
         """创建 sqlite 连接。

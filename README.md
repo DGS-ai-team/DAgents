@@ -167,7 +167,7 @@ python scripts/ci/export_openapi_for_frontend.py --frontend ../DAgentsUI
 - `openapi.json`
 - `src/api/types.ts`
 
-提交后端 API 变更时，请同时提交对应的前端契约文件变更，确保 `DAgentsUI` 的 `pnpm run ci` 能通过。
+提交后端 API 变更时，请同时提交对应的前端契约文件变更，确保 `DAgentsUI` 的 `pnpm check` 能通过。
 
 ## API 说明（简版）
 
@@ -194,6 +194,12 @@ Register Center 的 REST 约定见 **`register_center/README.md`**。
 ```bash
 pip install -r requirements.txt
 python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+本地收口建议使用更严格的资源泄漏检查：
+
+```bash
+python -W error::ResourceWarning -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 默认 discover **仅**包含 `tests/` 下 `test_*.py`：以本地单测为主，**不**依赖 `LLM_API_KEY`。**`test_agent_service.py`** 依赖 `AgentService` 完整导入链（含 `openai` 等），环境不完整时相关用例会 **skip**；安装 **`requirements.txt`** 后应与 CI 行为一致。可选联网 LLM 冒烟：`tests/integration/live_llm_smoke.py`（见 **`tests/integration/README.md`**）。覆盖规划见 **`tests/UNIT_TEST_CHECKLIST.md`**。

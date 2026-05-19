@@ -6,9 +6,12 @@
 - **`tool`**：项目内工具装饰器，为函数挂载 `name/description` 供注册层读取。
 - **`_decorate_sync_tool`**：同步工具装饰路径，仅注入元数据。
 - **`_decorate_async_tool`**：异步工具装饰路径，提交后台任务并返回 ACK。
-- **`should_require_tool_approval`**：统一审批入口；按全局模式、工具策略与 shell 策略决定是否审批。
+- **`ToolApprovalDecision`**：结构化审批决策，包含 `require_approval`、`reason`、`risk_level`、`mode`。
+- **`decide_tool_approval`**：统一审批入口；按全局模式、工具策略与 shell 策略决定是否审批，并返回原因、风险等级与策略来源。
+- **`should_require_tool_approval`**：兼容旧调用的布尔审批入口，内部读取 **`decide_tool_approval(...).require_approval`**。
 - **`_resolve_repo_relative_path`**：通用「相对运行根 / 绝对路径」解析；工具与 shell 审批路径直接使用 **`runtime_layout.tool_policy_file_path()`** / **`shell_policy_dir()`**。
 - **`OpenAIToolSpec`**：**Pydantic `BaseModel`（frozen，`arbitrary_types_allowed`）**；工具规格与 `invoke` 绑定。
+- **`_validate_tool_arguments`**：调用工具声明的 Pydantic `args_schema` 做运行时字段校验，并保留 schema 默认值。
 - **`_annotation_to_json_schema`**：将 Python 类型注解映射为 JSON Schema，覆盖基础类型、`list[T]`、`dict`、`Literal`、`Optional/Union`。
 - **`_signature_to_json_schema`**：函数签名到 OpenAI tool 参数 JSON Schema（默认 `additionalProperties=false`）。
 - **`build_openai_toolkit`**：构建 OpenAI tools payload 与执行映射。
@@ -86,6 +89,6 @@
 ## `result_policy.py`
 
 - **`ToolResultEnvelope`**：工具结果三路产物，区分 `model_content`、`display_content`、`raw_ref`、截断与脱敏标记。
-- **`package_tool_result`**：对工具原始输出做敏感信息脱敏、首尾裁剪与 `.runtime/tool_outputs/<id>.txt` 原文落盘引用。
+- **`package_tool_result`**：对工具输出做敏感信息脱敏、首尾裁剪与 `.runtime/tool_outputs/<id>.txt` 引用；敏感命中时 raw_ref 也只保存脱敏副本，非敏感长输出保留完整内容便于排障。
 - **`_filter_sensitive_text`** / **`_clip_middle`**：内置敏感字段过滤与长文本首尾保留裁剪。
 

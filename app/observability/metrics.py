@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
@@ -78,6 +79,26 @@ SUMMARY_COMPRESSION_TOTAL = Counter(
     "dagents_summary_compression_total",
     "上下文压缩结果次数（按触发阶段与结果状态聚合）",
     labelnames=("trigger_level", "status"),
+)
+SUMMARY_COMPRESSION_APPLY_TOTAL = Counter(
+    "dagents_summary_compression_apply_total",
+    "上下文压缩应用结果次数（applied/stale/invalid）",
+    labelnames=("trigger_level", "status"),
+)
+SUMMARY_COMPRESSION_MESSAGES_TOTAL = Counter(
+    "dagents_summary_compression_messages_total",
+    "成功应用压缩时被压缩的原始消息条数累计",
+    labelnames=("trigger_level",),
+)
+SYSTEM_PROMPT_CHARS = Gauge(
+    "dagents_system_prompt_chars",
+    "当前模型请求 system prompt 字符数（按 model 与内容指纹聚合，不暴露 prompt 原文）",
+    labelnames=("model", "fingerprint"),
+)
+SYSTEM_PROMPT_CONTEXT_MESSAGES_COUNT = Gauge(
+    "dagents_system_prompt_context_messages_count",
+    "记录 system prompt 时对应的会话 messages 条数（按 model 与 prompt 指纹聚合）",
+    labelnames=("model", "fingerprint"),
 )
 
 _session_context_sessions_raw: set[str] = set()
@@ -230,6 +251,20 @@ def record_summary_compression_result(*, trigger_level: str, ok: bool) -> None:
     SUMMARY_COMPRESSION_TOTAL.labels(trigger_label, status).inc()
 
 
+def record_summary_compression_apply(
+    *,
+    trigger_level: str,
+    status: str,
+    compressed_message_count: int = 0,
+) -> None:
+    """记录压缩结果应用阶段的成功、过期或非法丢弃。"""
+    trigger_label = sanitize_prometheus_label_value(trigger_level or "unknown", max_len=80)
+    status_label = sanitize_prometheus_label_value(status or "unknown", max_len=80)
+    SUMMARY_COMPRESSION_APPLY_TOTAL.labels(trigger_label, status_label).inc()
+    if status_label == "applied" and compressed_message_count > 0:
+        SUMMARY_COMPRESSION_MESSAGES_TOTAL.labels(trigger_label).inc(max(0, int(compressed_message_count)))
+
+
 def parse_usage_tokens(usage: Any) -> tuple[int, int]:
     """从 OpenAI SDK `CompletionUsage` 或等价 dict 解析 prompt/completion token 数。
 
@@ -316,6 +351,26 @@ def parse_usage_prompt_cache_details(usage: Any) -> dict[str, int]:
         "prompt_cache_hit_tokens": hit,
         "prompt_cache_miss_tokens": miss,
     }
+
+
+def system_prompt_fingerprint(system_prompt: str) -> str:
+    """生成 system prompt 内容指纹，用于观测缓存友好性而不暴露原文。"""
+    raw = str(system_prompt or "").encode("utf-8", errors="replace")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def record_system_prompt_observation(
+    *,
+    model: str,
+    system_prompt: str,
+    message_count: int,
+) -> str:
+    """记录一次模型请求使用的 system prompt 长度与内容指纹。"""
+    m = sanitize_model_label(model)
+    fp = system_prompt_fingerprint(system_prompt)
+    SYSTEM_PROMPT_CHARS.labels(m, fp).set(len(str(system_prompt or "")))
+    SYSTEM_PROMPT_CONTEXT_MESSAGES_COUNT.labels(m, fp).set(max(0, int(message_count)))
+    return fp
 
 
 def usage_fields_from_openai_usage(usage: Any) -> dict[str, Any]:

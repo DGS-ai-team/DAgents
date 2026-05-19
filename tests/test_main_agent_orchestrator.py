@@ -8,8 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.context.models import OpenAIConversationContext, PendingToolCall, RunTurnPhase
+from app.core.main_agent.summary_compression import SummaryCompressionCoordinator
 from app.harness.queue.message_queue import MessageEnvelope
 from app.harness.service.interface import AgentEventEnvelope
+from app.observability.metrics import system_prompt_fingerprint
 from tests.test_support.stub_settings import settings_namespace
 
 try:
@@ -154,7 +156,8 @@ class MainAgentTurnOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         ctx = OpenAIConversationContext(session_id="s2")
         env = MessageEnvelope(session_id="s2", request_type="message", content="run", client_id="c2")
 
-        with patch("app.core.main_agent.agent.should_require_tool_approval", return_value=False):
+        decision = SimpleNamespace(require_approval=False, reason="auto", risk_level="low", mode="test")
+        with patch("app.core.main_agent.tool_execution.decide_tool_approval", return_value=decision):
             await orchestrator.handle_message(ctx=ctx, runtime=runtime, env=env, base_meta={})
 
         self.assertIn("tool_call", [item.event_type for item in emitted])
@@ -186,7 +189,8 @@ class MainAgentTurnOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         ctx = OpenAIConversationContext(session_id="s3")
         env = MessageEnvelope(session_id="s3", request_type="message", content="deploy", client_id="c3")
 
-        with patch("app.core.main_agent.agent.should_require_tool_approval", return_value=True):
+        decision = SimpleNamespace(require_approval=True, reason="needs approval", risk_level="high", mode="test")
+        with patch("app.core.main_agent.tool_execution.decide_tool_approval", return_value=decision):
             await orchestrator.handle_message(ctx=ctx, runtime=runtime, env=env, base_meta={})
 
         self.assertEqual([item.event_type for item in emitted], ["tool_call", "approval_required", "done"])
@@ -226,11 +230,17 @@ class MainAgentTurnOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         ctx = OpenAIConversationContext(session_id="s3-mixed")
         env = MessageEnvelope(session_id="s3-mixed", request_type="message", content="run", client_id="c3")
 
-        def _approval_policy(*, tool_name: str, tool_args: dict, context: OpenAIConversationContext) -> bool:
+        def _approval_policy(*, tool_name: str, tool_args: dict, context: OpenAIConversationContext):
             del tool_args, context
-            return tool_name == "danger_tool"
+            needs_approval = tool_name == "danger_tool"
+            return SimpleNamespace(
+                require_approval=needs_approval,
+                reason="danger" if needs_approval else "safe",
+                risk_level="high" if needs_approval else "low",
+                mode="test",
+            )
 
-        with patch("app.core.main_agent.agent.should_require_tool_approval", side_effect=_approval_policy):
+        with patch("app.core.main_agent.tool_execution.decide_tool_approval", side_effect=_approval_policy):
             await orchestrator.handle_message(ctx=ctx, runtime=runtime, env=env, base_meta={})
 
         self.assertEqual([item.event_type for item in emitted], ["tool_call", "approval_required", "done"])
@@ -447,6 +457,61 @@ class MainAgentTurnOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.run_turn_phase, RunTurnPhase.IDLE)
         self.assertEqual(ctx.messages[-1], {"role": "assistant", "content": "ok"})
 
+    async def test_missing_usage_estimates_messages_total_tokens(self) -> None:
+        """provider 不返回 usage 时也应刷新粗略 token 数，保证压缩阈值仍可触发。"""
+        assert OpenAIImplicitReActRuntime is not None
+        runtime = object.__new__(OpenAIImplicitReActRuntime)
+        runtime._max_tool_loops = 10
+
+        async def _fake_stream(_messages, _system_prompt):
+            yield {"kind": "finish_reason", "finish_reason": "stop"}
+            yield {"kind": "final", "message": {"content": "ok", "tool_calls": []}}
+
+        runtime._request_model_stream = _fake_stream
+        ctx = OpenAIConversationContext(session_id="s-token-fallback")
+
+        with patch("app.core.main_agent.runtime_openai.get_system_prompt", return_value="stable system prompt"):
+            async for _event in runtime.run_turn(ctx, request_type="human_message", content="hello"):
+                pass
+
+        self.assertGreater(ctx.messages_total_tokens, 0)
+
+    async def test_usage_event_includes_system_prompt_observation_fields(self) -> None:
+        """usage 事件应携带 system prompt 指纹与长度，便于关联缓存命中表现。"""
+        assert OpenAIImplicitReActRuntime is not None
+        runtime = object.__new__(OpenAIImplicitReActRuntime)
+        runtime._max_tool_loops = 10
+        system_prompt = "stable system prompt"
+
+        async def _fake_stream(_messages, _system_prompt):
+            yield {
+                "kind": "usage",
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "total_tokens": 12,
+                "prompt_cache_hit_tokens": 6,
+                "prompt_cache_miss_tokens": 4,
+            }
+            yield {"kind": "finish_reason", "finish_reason": "stop"}
+            yield {"kind": "final", "message": {"content": "ok", "tool_calls": []}}
+
+        runtime._request_model_stream = _fake_stream
+        ctx = OpenAIConversationContext(session_id="s-prompt-observe")
+
+        events: list[AgentEventEnvelope] = []
+        with patch("app.core.main_agent.runtime_openai.get_system_prompt", return_value=system_prompt):
+            async for event in runtime.run_turn(ctx, request_type="human_message", content="hello"):
+                events.append(event)
+
+        usage_event = next(item for item in events if item.event_type == "usage")
+        self.assertEqual(usage_event.payload["system_prompt_chars"], len(system_prompt))
+        self.assertEqual(
+            usage_event.payload["system_prompt_fingerprint"],
+            system_prompt_fingerprint(system_prompt),
+        )
+        self.assertEqual(usage_event.payload["prompt_cache_hit_tokens"], 6)
+        self.assertEqual(usage_event.payload["prompt_cache_miss_tokens"], 4)
+
     async def test_ready_summary_compression_result_replaces_source_block(self) -> None:
         """已完成的压缩结果应在消息版本匹配时替换原消息区间。"""
         orchestrator, _submit, _emitted = self._make_orchestrator()
@@ -497,6 +562,57 @@ class MainAgentTurnOrchestratorTests(unittest.IsolatedAsyncioTestCase):
             [{"role": "user", "content": "summary ab"}, {"role": "user", "content": "new"}],
         )
         self.assertNotIn(ctx.session_id, orchestrator._session_pending_compression_results)
+
+    async def test_silent_summary_compression_uses_start_snapshot(self) -> None:
+        """静默压缩 task 应基于启动瞬间快照生成，区间随后变化时应用阶段丢弃旧摘要。"""
+        emitted: list[AgentEventEnvelope] = []
+
+        async def _emit_envelope(*, env, envelope, base_meta):
+            del env, base_meta
+            emitted.append(envelope)
+
+        class _SummaryRuntime:
+            def build_compression_plan(self, messages):
+                return {
+                    "ok": True,
+                    "start": 0,
+                    "end": 2,
+                    "block": ";".join(str(item.get("content") or "") for item in messages[0:3]),
+                    "compressed_message_count": 3,
+                }
+
+            def build_follow_content(self, messages, *, end):
+                return ";".join(str(item.get("content") or "") for item in messages[end + 1 :])
+
+            async def run_turn(self, ctx, *, request_type, content=None, follow_content=None):
+                del ctx, request_type, follow_content
+                await asyncio.sleep(0)
+                return f"summary:{content}"
+
+        coordinator = SummaryCompressionCoordinator(
+            emit_envelope=_emit_envelope,
+            silent_trigger_tokens=1,
+            blocking_trigger_tokens=2,
+            summary_runtime_factory=_SummaryRuntime,
+        )
+        ctx = OpenAIConversationContext(
+            session_id="summary-snapshot",
+            messages=[
+                {"role": "user", "content": "a"},
+                {"role": "assistant", "content": "b"},
+                {"role": "user", "content": "c"},
+                {"role": "assistant", "content": "d"},
+            ],
+        )
+
+        coordinator._start_task(session_id=ctx.session_id, ctx=ctx, trigger_level="silent")
+        ctx.messages[1] = {"role": "assistant", "content": "changed"}
+        await coordinator.session_tasks[ctx.session_id]
+        await coordinator.try_apply_ready_result(session_id=ctx.session_id, ctx=ctx)
+
+        self.assertEqual(ctx.messages[0]["content"], "a")
+        self.assertEqual(ctx.messages[1]["content"], "changed")
+        self.assertNotIn(ctx.session_id, coordinator.pending_results)
 
     async def test_mutated_summary_compression_slice_is_discarded(self) -> None:
         """若被压缩区间自身变化，应丢弃结果，避免旧摘要覆盖新上下文。"""

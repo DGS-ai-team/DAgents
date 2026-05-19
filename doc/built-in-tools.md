@@ -2,7 +2,7 @@
 
 本文说明 **当前注册进 OpenAI 运行时** 的内置工具：来源为 **`app/harness/tools/tool.py`** 中的 **`get_tools()`**，经 **`build_openai_toolkit()`** 生成 **tools JSON** 与 **`tool_map`**（**`app/core/main_agent/runtime_openai.py`** 请求模型时使用）。**`function.description`** 取自工具函数的 **docstring**；**`function.parameters`** 优先来自 **`args_schema.model_json_schema()`**，否则由 **`_signature_to_json_schema`** 从签名推导（见下文 **「附」**）。执行时由编排层 **`_invoke_tool`** 调用 **`OpenAIToolSpec.invoke`**。
 
-**审批**：是否进入 **`approval_required`** 由 **`should_require_tool_approval`**（**`tool.py`**）结合 **`AGENT_TOOL_APPROVAL_MODE`**（**`always` / `never` / `rule`**）及 **`.runtime/policy/`** 下策略文件决定；细则见 **`tool.py`** 内注释。
+**审批**：是否进入 **`approval_required`** 由 **`decide_tool_approval`**（**`tool.py`**）结合 **`AGENT_TOOL_APPROVAL_MODE`**（**`always` / `never` / `rule`**）及 **`.runtime/policy/`** 下策略文件决定；返回值包含 **是否审批、原因、风险等级、策略来源**，并由审批卡片透出；兼容布尔入口 **`should_require_tool_approval`**。
 
 ---
 
@@ -73,7 +73,7 @@
 | **2** | 否则调用 **`_signature_to_json_schema(invoke_fn)`**：按 **`inspect.signature`** 遍历参数，**跳过名为 `context` 的参数**（该参数由运行时注入，**禁止出现在模型可见 schema**，避免模型伪造会话）。 |
 | **类型映射** | 注解为 **`int` / `float` / `bool`** 时分别映射为 **`integer` / `number` / `boolean`**；**其余注解（含 `list[str]` 等）当前一律映射为 `string`**。 |
 | **`required`** | 无默认值（**`inspect.Parameter.empty`**）的参数名加入 **`required`**。 |
-| **`additionalProperties`** | 当前固定为 **`true`**（schema 层允许额外属性），但 **Python 调用**仍按「关键字展开」执行（见 **附.5**）。 |
+| **`additionalProperties`** | Pydantic `args_schema` 由模型配置决定；高风险 shell/fs 工具使用 **`extra="forbid"`** 拒绝未知字段。签名推导路径默认 **`false`**。 |
 
 ### 附.5 模型返回后，参数如何变成 `invoke(...)` 调用
 
@@ -81,15 +81,15 @@
 2. **`parse_tool_arguments`**：**`None` → `{}`**；已是 **`dict` → 原样**；字符串则 **`json.loads`**，**仅当解析结果为 `dict` 时返回**，否则 **`{}`**（非法 JSON、数组/标量根、空串均不抛异常）。  
 3. 结果存入 **`PendingToolCall.arguments`**（**`dict`**）。  
 4. 编排器 **`_invoke_tool`** 执行 **`spec.invoke(tool_call.arguments, ctx)`**（**`agent.py`**）。  
-5. **`OpenAIToolSpec._invoke`**（**`_tool_to_spec` 内闭包**）：  
-   - 若工具对象自带 **`invoke` 方法**：**`tool_obj.invoke(args)`**（**不**自动注入 **`context`**，由该类自行处理）；  
-   - 否则将 **`args` 按键展开为关键字参数**：**`invoke_fn(**final_kwargs)`**；若签名包含 **`context`**，则 **`final_kwargs["context"] = ctx`**。  
+5. **`OpenAIToolSpec._invoke`**（**`_tool_to_spec` 内闭包**）：先用工具对象的 **`args_schema.model_validate(...)`** 做运行时参数校验（若存在），再进入实际调用。  
+   - 若工具对象自带 **`invoke` 方法**：**`tool_obj.invoke(validated_args)`**（**不**自动注入 **`context`**，由该类自行处理）；  
+   - 否则将 **`validated_args` 按键展开为关键字参数**：**`invoke_fn(**final_kwargs)`**；若签名包含 **`context`**，则 **`final_kwargs["context"] = ctx`**。  
 
 **边界与建议**：
 
-- **多余键**：若模型在 JSON 里加入了 **函数签名未声明** 的键，**`**kwargs` 展开** 在 Python 中会 **`TypeError: got an unexpected keyword argument`**；工具实现可对入参做 **`.pop` 容忍** 或增加 **`**kwargs`** 吞掉未知键。  
-- **类型校验**：**`parse_tool_arguments` 不做字段级校验**；类型纠错依赖 **工具函数内部**（或未来在 **`invoke` 前** 增加校验层）。  
-- **返回值**：**`_invoke_tool`** 将 **`dict`/`list`** 结果 **`json.dumps`**，其余 **`str(...)`**；异常捕获为 **`ERROR: ...`** 字符串并同样走 **`tool_result`** SSE。
+- **多余键**：带 Pydantic `args_schema` 且配置 **`extra="forbid"`** 的工具会在执行函数前返回参数校验错误；无 `args_schema` 的工具按签名过滤/展开。  
+- **类型校验**：**`parse_tool_arguments` 只解析 JSON 根对象**；字段级校验由 **`_validate_tool_arguments`** 根据工具声明的 Pydantic schema 完成。  
+- **返回值**：**`_invoke_tool`** 将 **`dict`/`list`** 结果 **`json.dumps`**，其余 **`str(...)`**；异常捕获为 **`ERROR: ...`** 字符串并同样走 **`tool_result`** SSE，再经 **`package_tool_result`** 生成模型上下文、展示内容和 `raw_ref` 元数据。
 
 ---
 

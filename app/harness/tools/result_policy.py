@@ -28,8 +28,8 @@ class ToolResultEnvelope:
     3. `raw_ref` 指向落盘原文，供排障或后续分页读取。
 
     关键边界：
-    - 敏感信息会在 model/display 两路脱敏；
-    - raw 原文仅在内容较长或脱敏发生时落盘，当前不做加密。
+    - 敏感信息会在 model/display/raw_ref 三路脱敏；
+    - raw_ref 仅在内容较长或脱敏发生时落盘，命中敏感信息时保存安全副本。
     """
 
     model_content: str
@@ -97,7 +97,7 @@ def package_tool_result(*, tool_name: str, content: str) -> ToolResultEnvelope:
     逻辑：
     1. 对原文做敏感信息脱敏，得到上下文安全版本；
     2. 分别按模型上下文与 SSE 展示上限裁剪；
-    3. 当原文超长或发生脱敏时，将完整原文写入 `.runtime/tool_outputs/<id>.txt` 并返回引用。
+    3. 当原文超长或发生脱敏时写入 `.runtime/tool_outputs/<id>.txt` 并返回引用；敏感命中时写入脱敏副本。
 
     Args:
         tool_name: 工具名，用于 raw 文件命名与摘要说明。
@@ -112,7 +112,8 @@ def package_tool_result(*, tool_name: str, content: str) -> ToolResultEnvelope:
     if should_write_raw:
         safe_tool = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", str(tool_name or "tool")).strip("_") or "tool"
         path = _tool_outputs_dir() / f"{safe_tool}-{uuid4().hex}.txt"
-        path.write_text(raw_text, encoding="utf-8", errors="replace")
+        persisted_text = filtered_text if sensitive_filtered else raw_text
+        path.write_text(persisted_text, encoding="utf-8", errors="replace")
         raw_ref = str(path)
         suffix = f"\n[RAW_REF] {raw_ref}"
         if sensitive_filtered:
