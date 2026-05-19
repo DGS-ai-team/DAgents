@@ -42,6 +42,18 @@ _logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
+class ResumeDecisionPlan:
+    approved_ids: set[str]
+    rejected_ids: set[str]
+    error_message: str | None = None
+    finish_reason: str | None = None
+
+    @property
+    def is_valid(self) -> bool:
+        return self.error_message is None
+
+
+@dataclass(frozen=True, slots=True)
 class ToolExecutionPlan:
     """单轮模型 `tool_calls` 的执行计划。
 
@@ -125,65 +137,93 @@ class MainAgentTurnOrchestrator:
         )
         should_compress = bool(decision.get("should_compress"))
         trigger_level = str(decision.get("trigger_level") or "none")
-        running_task = self._session_summary_tasks.get(session_id)
-        if running_task is not None and running_task.done():
-            self._session_summary_tasks.pop(session_id, None)
-            try:
-                await running_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as exc:  # noqa: BLE001
-                _logger.error("%s: silent compression failed: %s", session_id, exc)
-            running_task = None
-        if running_task is not None and not running_task.done():
-            has_running_task = True
-        else:
-            has_running_task = False
+        running_task = await self._reap_finished_summary_task(session_id=session_id)
+        has_running_task = running_task is not None and not running_task.done()
         if should_compress and trigger_level == "silent":
             if not has_running_task:
-                self._session_summary_tasks[session_id] = asyncio.create_task(
-                    self._run_compression_flow(session_id=session_id, ctx=ctx, trigger_level=trigger_level)
-                )
+                self._start_summary_compression_task(session_id=session_id, ctx=ctx, trigger_level=trigger_level)
         elif should_compress and trigger_level == "blocking":
-            if has_running_task:
-                try:
-                    await running_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception as exc:  # noqa: BLE001
-                    _logger.error("%s: blocking wait silent task failed: %s", session_id, exc)
+            if has_running_task and running_task is not None:
+                await self._wait_summary_task(
+                    session_id=session_id,
+                    task=running_task,
+                    error_label="blocking wait silent task failed",
+                )
             blocking_ok = await self._run_compression_flow(
                 session_id=session_id,
                 ctx=ctx,
                 trigger_level=trigger_level,
             )
             if not blocking_ok:
-                _logger.warning(
-                    "%s: blocking compression failed; continue with original context",
-                    session_id,
-                    extra={
-                        "session_id": session_id,
-                        "compression_trigger": trigger_level,
-                        "messages_total_tokens": int(ctx.messages_total_tokens),
-                    },
+                await self._emit_blocking_compression_failure(
+                    session_id=session_id,
+                    ctx=ctx,
+                    env=env,
+                    base_meta=base_meta,
+                    trigger_level=trigger_level,
                 )
-                if env is not None:
-                    await self._emit_envelope(
-                        env=env,
-                        envelope=AgentEventEnvelope(
-                            event_type="error",
-                            payload={
-                                "message": "上下文阻塞压缩失败，已继续使用原始上下文。",
-                                "recoverable": True,
-                                "stage": "summary_compression",
-                            },
-                            meta={},
-                        ),
-                        base_meta=dict(base_meta or {}),
-                    )
-        else:
-            pass
         await self._try_apply_ready_compression_result(session_id=session_id, ctx=ctx)
+
+    async def _reap_finished_summary_task(self, *, session_id: str) -> asyncio.Task[None] | None:
+        task = self._session_summary_tasks.get(session_id)
+        if task is None or not task.done():
+            return task
+        self._session_summary_tasks.pop(session_id, None)
+        await self._wait_summary_task(session_id=session_id, task=task, error_label="silent compression failed")
+        return None
+
+    async def _wait_summary_task(self, *, session_id: str, task: asyncio.Task[None], error_label: str) -> None:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            _logger.error("%s: %s: %s", session_id, error_label, exc)
+
+    def _start_summary_compression_task(
+        self,
+        *,
+        session_id: str,
+        ctx: OpenAIConversationContext,
+        trigger_level: str,
+    ) -> None:
+        self._session_summary_tasks[session_id] = asyncio.create_task(
+            self._run_compression_flow(session_id=session_id, ctx=ctx, trigger_level=trigger_level)
+        )
+
+    async def _emit_blocking_compression_failure(
+        self,
+        *,
+        session_id: str,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope | None,
+        base_meta: dict[str, Any] | None,
+        trigger_level: str,
+    ) -> None:
+        _logger.warning(
+            "%s: blocking compression failed; continue with original context",
+            session_id,
+            extra={
+                "session_id": session_id,
+                "compression_trigger": trigger_level,
+                "messages_total_tokens": int(ctx.messages_total_tokens),
+            },
+        )
+        if env is None:
+            return
+        await self._emit_envelope(
+            env=env,
+            envelope=AgentEventEnvelope(
+                event_type="error",
+                payload={
+                    "message": "上下文阻塞压缩失败，已继续使用原始上下文。",
+                    "recoverable": True,
+                    "stage": "summary_compression",
+                },
+                meta={},
+            ),
+            base_meta=dict(base_meta or {}),
+        )
 
     async def cancel_all_summary_tasks(self) -> None:
         """取消并回收所有 session 的静默压缩任务。"""
@@ -233,15 +273,7 @@ class MainAgentTurnOrchestrator:
         3. 替换前校验 source_len/source_fingerprint，确认压缩基于当前消息版本；
         4. 替换失败（区间越界/内容空/版本不一致）时直接丢弃待应用结果，不改写消息。
         """
-        task = self._session_summary_tasks.get(session_id)
-        if task is not None and task.done():
-            self._session_summary_tasks.pop(session_id, None)
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception as exc:  # noqa: BLE001
-                _logger.error("%s: silent compression failed: %s", session_id, exc)
+        await self._reap_finished_summary_task(session_id=session_id)
         pending = self._session_pending_compression_results.get(session_id)
         if not isinstance(pending, dict):
             return
@@ -256,16 +288,22 @@ class MainAgentTurnOrchestrator:
                 extra={"session_id": session_id, "compression_start": start, "compression_end": end},
             )
             return
-        source_len = int(pending.get("source_len", -1))
-        source_fingerprint = str(pending.get("source_fingerprint") or "")
-        if source_len != len(ctx.messages) or source_fingerprint != self._messages_fingerprint(ctx.messages):
-            # 静默压缩可能晚于新消息完成；版本不一致时宁可丢弃，也不能覆盖新上下文。
+        current_slice = ctx.messages[start : end + 1]
+        source_slice_fingerprint = str(pending.get("source_slice_fingerprint") or "")
+        if source_slice_fingerprint:
+            is_stale = source_slice_fingerprint != self._messages_fingerprint(current_slice)
+        else:
+            source_len = int(pending.get("source_len", -1))
+            source_fingerprint = str(pending.get("source_fingerprint") or "")
+            is_stale = source_len != len(ctx.messages) or source_fingerprint != self._messages_fingerprint(ctx.messages)
+        if is_stale:
             _logger.warning(
                 "%s: discard stale compression result",
                 session_id,
                 extra={
                     "session_id": session_id,
-                    "compression_source_len": source_len,
+                    "compression_start": start,
+                    "compression_end": end,
                     "current_message_len": len(ctx.messages),
                 },
             )
@@ -279,7 +317,7 @@ class MainAgentTurnOrchestrator:
                 "session_id": session_id,
                 "compression_start": start,
                 "compression_end": end,
-                "compression_source_len": source_len,
+                "compressed_message_count": len(current_slice),
             },
         )
 
@@ -341,8 +379,7 @@ class MainAgentTurnOrchestrator:
             "start": start,
             "end": end,
             "content": str(summary_text).strip(),
-            "source_len": len(ctx.messages),
-            "source_fingerprint": self._messages_fingerprint(ctx.messages),
+            "source_slice_fingerprint": self._messages_fingerprint(ctx.messages[start : end + 1]),
             "compressed_message_count": int(prepared.get("compressed_message_count", 0)),
         }
         record_summary_compression_result(trigger_level=trigger_level, ok=True)
@@ -424,102 +461,24 @@ class MainAgentTurnOrchestrator:
             )
             return
 
-        decision = parse_resume_tool_decision(env.resume_value)
         pending_snapshot = list(ctx.pending_tool_calls)
-        pending_by_id = {p.call_id: p for p in pending_snapshot}
-        pending_ids = set(pending_by_id.keys())
-        approved_ids: set[str]
-        rejected_ids: set[str]
-        if isinstance(decision, ResumeToolApprove):
-            approved_ids = set(pending_ids)
-            rejected_ids = set()
-        elif isinstance(decision, ResumeToolReject):
-            approved_ids = set()
-            rejected_ids = set(pending_ids)
-        elif isinstance(decision, ResumeToolSelection):
-            approved_ids = {str(c).strip() for c in decision.approved if str(c).strip()}
-            rejected_ids = {str(c).strip() for c in decision.rejected if str(c).strip()}
-            decided_ids = approved_ids | rejected_ids
-            invalid_ids = decided_ids - pending_ids
-            duplicate_ids = approved_ids & rejected_ids
-            if invalid_ids or duplicate_ids or decided_ids != pending_ids:
-                await self._emit_envelope(
-                    env=env,
-                    envelope=AgentEventEnvelope(
-                        event_type="error",
-                        payload={"message": "selection resume 必须一次性覆盖全部 pending tool 调用，且不能包含未知或重复 call_id。"},
-                        meta={},
-                    ),
-                    base_meta=base_meta,
-                )
-                await self._emit_envelope(
-                    env=env,
-                    envelope=AgentEventEnvelope(
-                        event_type="done", payload={"finish_reason": "resume_selection_invalid"}, meta={}
-                    ),
-                    base_meta=base_meta,
-                )
-                return
-        else:
-            approved_ids = set()
-            rejected_ids = set(pending_ids)
+        decision_plan = self._build_resume_decision_plan(env.resume_value, pending_snapshot)
+        if not decision_plan.is_valid:
+            await self._emit_resume_error_done(
+                env=env,
+                base_meta=base_meta,
+                message=str(decision_plan.error_message or "resume 决策无效。"),
+                finish_reason=str(decision_plan.finish_reason or "resume_invalid"),
+            )
+            return
 
-        executed_results: list[dict[str, Any]] = []
-        for item in pending_snapshot:
-            call_id = item.call_id
-            if call_id in approved_ids:
-                result_text = await self._invoke_tool(
-                    ctx,
-                    item,
-                    env=env,
-                    base_meta=base_meta,
-                )
-                self._append_tool_message(
-                    ctx=ctx,
-                    tool_call_id=item.call_id,
-                    content=result_text,
-                )
-                executed_results.append(
-                    {
-                        "tool_name": item.name,
-                        "tool_call_id": item.call_id,
-                        "content": result_text,
-                        "display_type": infer_tool_result_display_type(item.name, result_text),
-                    }
-                )
-            elif call_id in rejected_ids:
-                result_text = f"工具 {item.name!r} 已被用户拒绝执行。"
-                self._append_tool_message(
-                    ctx=ctx,
-                    tool_call_id=item.call_id,
-                    content=result_text,
-                )
-                await self._emit_envelope(
-                    env=env,
-                    envelope=AgentEventEnvelope(
-                        event_type="tool_result",
-                        payload={
-                            "tool_name": item.name,
-                            "tool_call_id": item.call_id,
-                            "content": result_text,
-                            "rejected": True,
-                            "partial": False,
-                            "display_type": infer_tool_result_display_type(item.name, result_text),
-                        },
-                        meta={},
-                    ),
-                    base_meta=base_meta,
-                )
-                executed_results.append(
-                    {
-                        "tool_name": item.name,
-                        "tool_call_id": item.call_id,
-                        "content": result_text,
-                        "rejected": True,
-                        "display_type": infer_tool_result_display_type(item.name, result_text),
-                    }
-                )
-
+        executed_results = await self._apply_resume_decision(
+            ctx=ctx,
+            env=env,
+            base_meta=base_meta,
+            pending_snapshot=pending_snapshot,
+            decision_plan=decision_plan,
+        )
         ctx.pending_tool_calls.clear()
         ctx.run_turn_phase = RunTurnPhase.IDLE
         await self._submit_message(
@@ -527,12 +486,129 @@ class MainAgentTurnOrchestrator:
             client_id=env.client_id,
             content="",
             request_type="tool_result",
-            tool_result={
-                "results": executed_results,
-            },
+            tool_result={"results": executed_results},
             source="service",
             priority="tool_result",
         )
+
+    async def _emit_resume_error_done(
+        self,
+        *,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+        message: str,
+        finish_reason: str,
+    ) -> None:
+        await self._emit_envelope(
+            env=env,
+            envelope=AgentEventEnvelope(event_type="error", payload={"message": message}, meta={}),
+            base_meta=base_meta,
+        )
+        await self._emit_envelope(
+            env=env,
+            envelope=AgentEventEnvelope(event_type="done", payload={"finish_reason": finish_reason}, meta={}),
+            base_meta=base_meta,
+        )
+
+    def _build_resume_decision_plan(
+        self,
+        resume_value: Any,
+        pending_snapshot: list[PendingToolCall],
+    ) -> ResumeDecisionPlan:
+        decision = parse_resume_tool_decision(resume_value)
+        pending_ids = {p.call_id for p in pending_snapshot}
+        if isinstance(decision, ResumeToolApprove):
+            return ResumeDecisionPlan(approved_ids=set(pending_ids), rejected_ids=set())
+        if isinstance(decision, ResumeToolReject):
+            return ResumeDecisionPlan(approved_ids=set(), rejected_ids=set(pending_ids))
+        if isinstance(decision, ResumeToolSelection):
+            approved_ids = {str(c).strip() for c in decision.approved if str(c).strip()}
+            rejected_ids = {str(c).strip() for c in decision.rejected if str(c).strip()}
+            decided_ids = approved_ids | rejected_ids
+            invalid_ids = decided_ids - pending_ids
+            duplicate_ids = approved_ids & rejected_ids
+            if invalid_ids or duplicate_ids or decided_ids != pending_ids:
+                return ResumeDecisionPlan(
+                    approved_ids=set(),
+                    rejected_ids=set(),
+                    error_message="selection resume 必须一次性覆盖全部 pending tool 调用，且不能包含未知或重复 call_id。",
+                    finish_reason="resume_selection_invalid",
+                )
+            return ResumeDecisionPlan(approved_ids=approved_ids, rejected_ids=rejected_ids)
+        return ResumeDecisionPlan(approved_ids=set(), rejected_ids=set(pending_ids))
+
+    async def _apply_resume_decision(
+        self,
+        *,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+        pending_snapshot: list[PendingToolCall],
+        decision_plan: ResumeDecisionPlan,
+    ) -> list[dict[str, Any]]:
+        executed_results: list[dict[str, Any]] = []
+        for item in pending_snapshot:
+            if item.call_id in decision_plan.approved_ids:
+                executed_results.append(
+                    await self._execute_approved_resume_tool(ctx=ctx, env=env, base_meta=base_meta, item=item)
+                )
+            elif item.call_id in decision_plan.rejected_ids:
+                executed_results.append(
+                    await self._record_rejected_resume_tool(ctx=ctx, env=env, base_meta=base_meta, item=item)
+                )
+        return executed_results
+
+    async def _execute_approved_resume_tool(
+        self,
+        *,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+        item: PendingToolCall,
+    ) -> dict[str, Any]:
+        result_text = await self._invoke_tool(ctx, item, env=env, base_meta=base_meta)
+        self._append_tool_message(ctx=ctx, tool_call_id=item.call_id, content=result_text)
+        return {
+            "tool_name": item.name,
+            "tool_call_id": item.call_id,
+            "content": result_text,
+            "display_type": infer_tool_result_display_type(item.name, result_text),
+        }
+
+    async def _record_rejected_resume_tool(
+        self,
+        *,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+        item: PendingToolCall,
+    ) -> dict[str, Any]:
+        result_text = f"工具 {item.name!r} 已被用户拒绝执行。"
+        display_type = infer_tool_result_display_type(item.name, result_text)
+        self._append_tool_message(ctx=ctx, tool_call_id=item.call_id, content=result_text)
+        await self._emit_envelope(
+            env=env,
+            envelope=AgentEventEnvelope(
+                event_type="tool_result",
+                payload={
+                    "tool_name": item.name,
+                    "tool_call_id": item.call_id,
+                    "content": result_text,
+                    "rejected": True,
+                    "partial": False,
+                    "display_type": display_type,
+                },
+                meta={},
+            ),
+            base_meta=base_meta,
+        )
+        return {
+            "tool_name": item.name,
+            "tool_call_id": item.call_id,
+            "content": result_text,
+            "rejected": True,
+            "display_type": display_type,
+        }
 
     async def _handle_async_tool_result(
         self,
@@ -844,43 +920,79 @@ class MainAgentTurnOrchestrator:
             ctx=ctx,
             captured_tool_calls=captured_tool_calls,
         )
-        auto_exec_calls = execution_plan.auto_exec_calls
-        need_approval_calls = execution_plan.need_approval_calls
-
         if execution_plan.has_pending_approval:
-            for item in need_approval_calls:
-                record_tool_approval_required(tool_name=item.name)
-            pending_by_id = {p.call_id: p for p in ctx.pending_tool_calls}
-            pending_batch = [pending_by_id[str(call.get("id") or "")] for call in captured_tool_calls if str(call.get("id") or "") in pending_by_id]
-            ctx.pending_tool_calls = pending_batch
-            await self._emit_envelope(
+            await self._wait_for_tool_approval_batch(
+                ctx=ctx,
                 env=env,
-                envelope=AgentEventEnvelope(
-                    event_type="approval_required",
-                    payload=self._build_approval_required_payload(
-                        [
-                            {
-                                "id": p.call_id,
-                                "name": p.name,
-                                "arguments": dict(p.arguments),
-                                "raw_arguments": json.dumps(p.arguments, ensure_ascii=False),
-                            }
-                            for p in pending_batch
-                        ],
-                        assistant_content=captured_assistant_content,
-                    ),
-                    meta={},
-                ),
                 base_meta=base_meta,
+                captured_tool_calls=captured_tool_calls,
+                captured_assistant_content=captured_assistant_content,
+                final_done_envelope=final_done_envelope,
+                execution_plan=execution_plan,
             )
-            ctx.run_turn_phase = RunTurnPhase.AWAITING_TOOL_EXECUTION
-            await self._emit_envelope(env=env, envelope=final_done_envelope, base_meta=base_meta)
             return
 
+        await self._execute_auto_tool_batch(
+            ctx=ctx,
+            env=env,
+            base_meta=base_meta,
+            auto_exec_calls=execution_plan.auto_exec_calls,
+        )
+
+    async def _wait_for_tool_approval_batch(
+        self,
+        *,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+        captured_tool_calls: list[dict[str, Any]],
+        captured_assistant_content: str,
+        final_done_envelope: AgentEventEnvelope,
+        execution_plan: ToolExecutionPlan,
+    ) -> None:
+        for item in execution_plan.need_approval_calls:
+            record_tool_approval_required(tool_name=item.name)
+        pending_by_id = {p.call_id: p for p in ctx.pending_tool_calls}
+        pending_batch = [
+            pending_by_id[str(call.get("id") or "")]
+            for call in captured_tool_calls
+            if str(call.get("id") or "") in pending_by_id
+        ]
+        ctx.pending_tool_calls = pending_batch
+        await self._emit_envelope(
+            env=env,
+            envelope=AgentEventEnvelope(
+                event_type="approval_required",
+                payload=self._build_approval_required_payload(
+                    [self._pending_tool_call_to_approval_item(p) for p in pending_batch],
+                    assistant_content=captured_assistant_content,
+                ),
+                meta={},
+            ),
+            base_meta=base_meta,
+        )
+        ctx.run_turn_phase = RunTurnPhase.AWAITING_TOOL_EXECUTION
+        await self._emit_envelope(env=env, envelope=final_done_envelope, base_meta=base_meta)
+
+    @staticmethod
+    def _pending_tool_call_to_approval_item(item: PendingToolCall) -> dict[str, Any]:
+        return {
+            "id": item.call_id,
+            "name": item.name,
+            "arguments": dict(item.arguments),
+            "raw_arguments": json.dumps(item.arguments, ensure_ascii=False),
+        }
+
+    async def _execute_auto_tool_batch(
+        self,
+        *,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+        auto_exec_calls: list[PendingToolCall],
+    ) -> None:
         auto_exec_tasks = [
-            asyncio.create_task(
-                self._invoke_tool(ctx, item, env=env, base_meta=base_meta),
-            )
+            asyncio.create_task(self._invoke_tool(ctx, item, env=env, base_meta=base_meta))
             for item in auto_exec_calls
         ]
         auto_exec_results = await asyncio.gather(*auto_exec_tasks)
@@ -894,20 +1006,14 @@ class MainAgentTurnOrchestrator:
             for item, result_text in zip(auto_exec_calls, auto_exec_results)
         ]
         for item, result_text in zip(auto_exec_calls, auto_exec_results):
-            self._append_tool_message(
-                ctx=ctx,
-                tool_call_id=item.call_id,
-                content=result_text,
-            )
+            self._append_tool_message(ctx=ctx, tool_call_id=item.call_id, content=result_text)
         ctx.pending_tool_calls.clear()
         await self._submit_message(
             session_id=env.session_id,
             client_id=env.client_id,
             content="",
             request_type="tool_result",
-            tool_result={
-                "results": executed_results,
-            },
+            tool_result={"results": executed_results},
             source="service",
             priority="tool_result",
         )

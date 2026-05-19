@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
@@ -326,7 +326,7 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/v1/streams")
-    async def stream_all(client_id: str):
+    async def stream_all(client_id: str, request: Request):
         """订阅全局 SSE 流（跨 session/request 的实时事件）。
 
         逻辑：
@@ -339,9 +339,10 @@ def create_app() -> FastAPI:
         - 同一前端可复用一个连接并按 `session_id` 在本地分流展示。
         """
         bus: InMemoryEventBus = app.state.bus
+        last_seq = _parse_last_event_id(request.headers.get("last-event-id"))
 
         async def event_iter():
-            async for event in bus.subscribe_all(client_id=client_id):
+            async for event in bus.subscribe_all(client_id=client_id, last_seq=last_seq):
                 yield _to_sse(event)
 
         return StreamingResponse(event_iter(), media_type="text/event-stream")
@@ -352,7 +353,16 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
+def _parse_last_event_id(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value.strip())
+    except ValueError:
+        return None
+
+
 def _to_sse(event: StreamEvent) -> str:
     payload = json.dumps(event.to_dict(), ensure_ascii=False)
-    return f"event: {event.type}\ndata: {payload}\n\n"
+    return f"id: {event.seq}\nevent: {event.type}\ndata: {payload}\n\n"
 

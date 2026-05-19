@@ -58,6 +58,35 @@ class InMemoryEventBusTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([second.type, third.type], ["three", "four"])
         await stream.aclose()
 
+    async def test_subscribe_replays_events_after_last_seq_for_same_client(self) -> None:
+        """带 `last_seq` 重连时，只回放同一 client 中 seq 更大的近期历史事件。"""
+        bus = InMemoryEventBus(history_size=4)
+        bus.publish(client_id="c4", session_id="s", event_type="old", data={})
+        bus.publish(client_id="other", session_id="s", event_type="other", data={})
+        bus.publish(client_id="c4", session_id="s", event_type="missed-a", data={})
+        bus.publish(client_id="c4", session_id="s", event_type="missed-b", data={})
+
+        stream = bus.subscribe_all(client_id="c4", last_seq=0)
+        first = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+        second = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+
+        self.assertEqual([first.type, second.type], ["missed-a", "missed-b"])
+        self.assertEqual([first.seq, second.seq], [1, 2])
+        await stream.aclose()
+
+    async def test_history_is_bounded_to_recent_events(self) -> None:
+        """历史缓冲仅保留最近 `history_size` 条事件，避免重连回放自身无界增长。"""
+        bus = InMemoryEventBus(history_size=2)
+        for event_type in ["one", "two", "three"]:
+            bus.publish(client_id="c5", session_id="s", event_type=event_type, data={})
+
+        stream = bus.subscribe_all(client_id="c5", last_seq=-1)
+        first = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+        second = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+
+        self.assertEqual([first.type, second.type], ["two", "three"])
+        await stream.aclose()
+
 
 if __name__ == "__main__":
     unittest.main()

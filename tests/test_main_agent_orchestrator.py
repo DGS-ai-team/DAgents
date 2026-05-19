@@ -447,6 +447,81 @@ class MainAgentTurnOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.run_turn_phase, RunTurnPhase.IDLE)
         self.assertEqual(ctx.messages[-1], {"role": "assistant", "content": "ok"})
 
+    async def test_ready_summary_compression_result_replaces_source_block(self) -> None:
+        """已完成的压缩结果应在消息版本匹配时替换原消息区间。"""
+        orchestrator, _submit, _emitted = self._make_orchestrator()
+        ctx = OpenAIConversationContext(
+            session_id="summary-apply",
+            messages=[
+                {"role": "user", "content": "a"},
+                {"role": "assistant", "content": "b"},
+                {"role": "user", "content": "c"},
+            ],
+        )
+        orchestrator._session_pending_compression_results[ctx.session_id] = {
+            "start": 0,
+            "end": 1,
+            "content": "summary ab",
+            "source_len": len(ctx.messages),
+            "source_fingerprint": orchestrator._messages_fingerprint(ctx.messages),
+        }
+
+        await orchestrator._try_apply_ready_compression_result(session_id=ctx.session_id, ctx=ctx)
+
+        self.assertEqual(
+            ctx.messages,
+            [{"role": "user", "content": "summary ab"}, {"role": "user", "content": "c"}],
+        )
+        self.assertNotIn(ctx.session_id, orchestrator._session_pending_compression_results)
+
+    async def test_summary_compression_result_survives_appended_messages(self) -> None:
+        """静默压缩期间若只追加新消息，压缩区间未变时仍应无感应用摘要。"""
+        orchestrator, _submit, _emitted = self._make_orchestrator()
+        ctx = OpenAIConversationContext(
+            session_id="summary-append",
+            messages=[{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}],
+        )
+        slice_fingerprint = orchestrator._messages_fingerprint(ctx.messages[0:2])
+        ctx.messages.append({"role": "user", "content": "new"})
+        orchestrator._session_pending_compression_results[ctx.session_id] = {
+            "start": 0,
+            "end": 1,
+            "content": "summary ab",
+            "source_slice_fingerprint": slice_fingerprint,
+        }
+
+        await orchestrator._try_apply_ready_compression_result(session_id=ctx.session_id, ctx=ctx)
+
+        self.assertEqual(
+            ctx.messages,
+            [{"role": "user", "content": "summary ab"}, {"role": "user", "content": "new"}],
+        )
+        self.assertNotIn(ctx.session_id, orchestrator._session_pending_compression_results)
+
+    async def test_mutated_summary_compression_slice_is_discarded(self) -> None:
+        """若被压缩区间自身变化，应丢弃结果，避免旧摘要覆盖新上下文。"""
+        orchestrator, _submit, _emitted = self._make_orchestrator()
+        ctx = OpenAIConversationContext(
+            session_id="summary-stale",
+            messages=[{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}],
+        )
+        slice_fingerprint = orchestrator._messages_fingerprint(ctx.messages[0:2])
+        ctx.messages[1] = {"role": "assistant", "content": "changed"}
+        orchestrator._session_pending_compression_results[ctx.session_id] = {
+            "start": 0,
+            "end": 1,
+            "content": "summary ab",
+            "source_slice_fingerprint": slice_fingerprint,
+        }
+
+        await orchestrator._try_apply_ready_compression_result(session_id=ctx.session_id, ctx=ctx)
+
+        self.assertEqual(
+            ctx.messages,
+            [{"role": "user", "content": "a"}, {"role": "assistant", "content": "changed"}],
+        )
+        self.assertNotIn(ctx.session_id, orchestrator._session_pending_compression_results)
+
 
 if __name__ == "__main__":
     unittest.main()

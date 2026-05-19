@@ -190,9 +190,16 @@ class SseEncodingTests(unittest.TestCase):
 
         text = api_app._to_sse(event)
 
-        self.assertTrue(text.startswith("event: assistant\n"))
+        self.assertTrue(text.startswith("id: 0\nevent: assistant\n"))
         self.assertIn('"content": "你好"', text)
         self.assertTrue(text.endswith("\n\n"))
+
+    def test_parse_last_event_id_ignores_invalid_values(self) -> None:
+        """`Last-Event-ID` 非整数时应忽略，避免重连请求因脏 header 失败。"""
+        assert api_app is not None
+        self.assertEqual(api_app._parse_last_event_id("42"), 42)
+        self.assertIsNone(api_app._parse_last_event_id("not-an-int"))
+        self.assertIsNone(api_app._parse_last_event_id(None))
 
 
 if __name__ == "__main__":
