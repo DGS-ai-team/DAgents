@@ -148,7 +148,7 @@ class OpenAIImplicitReActRuntime:
         model_msg = None
         latest_total_tokens: int | None = None
         ctx.assistant_stream_buffer = ""
-        # 流式阶段：同步写入 ctx.assistant_stream_buffer，供上层 Cancelled 后 flush 为合法 assistant 行。
+        # 流式阶段仅缓存 assistant 正文，供上层 Cancelled 后 flush 为合法 assistant 行。
         try:
             async for model_event in self._request_model_stream(ctx.messages, dynamic_system_prompt):
                 event_kind = str(model_event.get("kind") or "")
@@ -170,8 +170,6 @@ class OpenAIImplicitReActRuntime:
                 elif event_kind == "reasoning_delta":
                     reasoning_text = str(model_event.get("text", ""))
                     if reasoning_text:
-                        ctx.assistant_stream_buffer += reasoning_text
-                        # 构建流式事件envelope，供前端进行流式输出。
                         yield self._ev(
                             "reasoning",
                             {
@@ -396,7 +394,6 @@ class OpenAIImplicitReActRuntime:
                             full_content += str(content_delta)
                             yield {"kind": "assistant_delta", "text": str(content_delta)}
                         elif reasoning_delta:
-                            # 推理模型：reasoning 与 content 在协议上可能分列，run_turn 里与正文一并记入 assistant_stream_buffer。
                             yield {"kind": "reasoning_delta", "text": str(reasoning_delta)}
             # 末包常带 finish_reason：只把结束原因交给上层，不累加 choice.message（与 delta 权威一致）。
             if fr is not None:

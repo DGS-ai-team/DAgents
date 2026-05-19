@@ -46,8 +46,9 @@ class InMemoryEventBus:
         用于将agent处理队列中的消息发布到sse通道
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, subscriber_queue_size: int = 256) -> None:
         """初始化内存流容器。"""
+        self._subscriber_queue_size = max(1, int(subscriber_queue_size))
         # P0 优化：按 client_id 分桶订阅者，publish 时只投递目标桶，避免全量轮询。
         self._subscribers_by_client: dict[str, set[asyncio.Queue[StreamEvent]]] = {}
         # 兼容未指定 client_id 的全量订阅（调试/观测场景）。
@@ -77,10 +78,26 @@ class InMemoryEventBus:
         self._client_seq[final_client_id] = current_seq + 1
         client_subscribers = self._subscribers_by_client.get(final_client_id, set())
         for subscriber_queue in list(client_subscribers):
-            subscriber_queue.put_nowait(event)
+            self._offer_event(subscriber_queue, event)
         for subscriber_queue in list(self._all_subscribers):
-            subscriber_queue.put_nowait(event)
+            self._offer_event(subscriber_queue, event)
         return event
+
+    @staticmethod
+    def _offer_event(queue: asyncio.Queue[StreamEvent], event: StreamEvent) -> None:
+        try:
+            queue.put_nowait(event)
+            return
+        except asyncio.QueueFull:
+            pass
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
 
     async def subscribe_all(self, *, client_id: str | None = None) -> AsyncIterator[StreamEvent]:
         """订阅全局事件流（仅实时，不补历史）。
@@ -104,7 +121,7 @@ class InMemoryEventBus:
         副作用说明：
         - 会临时向 `client_id` 对应订阅桶（或 `_all_subscribers`）注册当前队列。
         """
-        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue(maxsize=self._subscriber_queue_size)
         final_client_id = (client_id or "").strip()
         if final_client_id:
             bucket = self._subscribers_by_client.get(final_client_id)

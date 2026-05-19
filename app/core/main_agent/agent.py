@@ -424,65 +424,61 @@ class MainAgentTurnOrchestrator:
             )
             return
 
-        # 判断是否允许执行
         decision = parse_resume_tool_decision(env.resume_value)
-        if isinstance(decision, ResumeToolReject):
-            # 如果拒绝执行，则直接返回错误
-            await self._emit_envelope(
-                env=env,
-                envelope=AgentEventEnvelope(
-                    event_type="error",
-                    payload={"message": "工具执行已被拒绝。"},
-                    meta={},
-                ),
-                base_meta=base_meta,
-            )
-            # 返回完成事件
-            await self._emit_envelope(
-                env=env,
-                envelope=AgentEventEnvelope(
-                    event_type="done", payload={"finish_reason": "resume_rejected"}, meta={}
-                ),
-                base_meta=base_meta,
-            )
-            return
-        # 如果允许执行，则按审批要求拆分本轮工具调用列表
-        pending_by_id = {p.call_id: p for p in ctx.pending_tool_calls}
+        pending_snapshot = list(ctx.pending_tool_calls)
+        pending_by_id = {p.call_id: p for p in pending_snapshot}
+        pending_ids = set(pending_by_id.keys())
         approved_ids: set[str]
         rejected_ids: set[str]
         if isinstance(decision, ResumeToolApprove):
-            # 如果允许执行，则全部批准
-            approved_ids = set(pending_by_id.keys())
+            approved_ids = set(pending_ids)
             rejected_ids = set()
-        elif isinstance(decision, ResumeToolSelection):
-            # 如果部分允许执行，则按批准和拒绝的call_id列表拆分
-            approved_ids = {str(c).strip() for c in decision.approved}
-            rejected_ids = {str(c).strip() for c in decision.rejected}
-        else:
-            # 如果无法识别，则全部拒绝
+        elif isinstance(decision, ResumeToolReject):
             approved_ids = set()
-            rejected_ids = set()
-        # 执行批准的工具调用
-        executed_results: list[dict[str, Any]] = [] # 执行结果
-        remaining_pending: list[type(ctx.pending_tool_calls[0])] = [] # 剩余的pending工具调用
-        # 遍历pending工具调用列表
-        for item in list(ctx.pending_tool_calls):
+            rejected_ids = set(pending_ids)
+        elif isinstance(decision, ResumeToolSelection):
+            approved_ids = {str(c).strip() for c in decision.approved if str(c).strip()}
+            rejected_ids = {str(c).strip() for c in decision.rejected if str(c).strip()}
+            decided_ids = approved_ids | rejected_ids
+            invalid_ids = decided_ids - pending_ids
+            duplicate_ids = approved_ids & rejected_ids
+            if invalid_ids or duplicate_ids or decided_ids != pending_ids:
+                await self._emit_envelope(
+                    env=env,
+                    envelope=AgentEventEnvelope(
+                        event_type="error",
+                        payload={"message": "selection resume 必须一次性覆盖全部 pending tool 调用，且不能包含未知或重复 call_id。"},
+                        meta={},
+                    ),
+                    base_meta=base_meta,
+                )
+                await self._emit_envelope(
+                    env=env,
+                    envelope=AgentEventEnvelope(
+                        event_type="done", payload={"finish_reason": "resume_selection_invalid"}, meta={}
+                    ),
+                    base_meta=base_meta,
+                )
+                return
+        else:
+            approved_ids = set()
+            rejected_ids = set(pending_ids)
+
+        executed_results: list[dict[str, Any]] = []
+        for item in pending_snapshot:
             call_id = item.call_id
             if call_id in approved_ids:
-                # 执行批准的工具调用
                 result_text = await self._invoke_tool(
                     ctx,
                     item,
                     env=env,
                     base_meta=base_meta,
                 )
-                # 将执行结果回填到会话消息列表
                 self._append_tool_message(
                     ctx=ctx,
                     tool_call_id=item.call_id,
                     content=result_text,
                 )
-                # 将执行结果回填到执行结果列表
                 executed_results.append(
                     {
                         "tool_name": item.name,
@@ -492,21 +488,40 @@ class MainAgentTurnOrchestrator:
                     }
                 )
             elif call_id in rejected_ids:
-                append_openai_message_with_journal(
-                    ctx,
-                    {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": f"工具 {item.name!r} 已被用户拒绝执行。",
-                    },
+                result_text = f"工具 {item.name!r} 已被用户拒绝执行。"
+                self._append_tool_message(
+                    ctx=ctx,
+                    tool_call_id=item.call_id,
+                    content=result_text,
                 )
-            else:
-                remaining_pending.append(item)
-        # 如果remaining_pending不为空，即还有未执行的工具调用，则将剩余的pending工具调用回填到pending_tool_calls
-        if remaining_pending:
-            ctx.pending_tool_calls = remaining_pending
-            return
-        # 如果remaining_pending为空，即所有工具调用都执行了，则将tool_result回填到agent处理队列，以在下一轮触发llm调用
+                await self._emit_envelope(
+                    env=env,
+                    envelope=AgentEventEnvelope(
+                        event_type="tool_result",
+                        payload={
+                            "tool_name": item.name,
+                            "tool_call_id": item.call_id,
+                            "content": result_text,
+                            "rejected": True,
+                            "partial": False,
+                            "display_type": infer_tool_result_display_type(item.name, result_text),
+                        },
+                        meta={},
+                    ),
+                    base_meta=base_meta,
+                )
+                executed_results.append(
+                    {
+                        "tool_name": item.name,
+                        "tool_call_id": item.call_id,
+                        "content": result_text,
+                        "rejected": True,
+                        "display_type": infer_tool_result_display_type(item.name, result_text),
+                    }
+                )
+
+        ctx.pending_tool_calls.clear()
+        ctx.run_turn_phase = RunTurnPhase.IDLE
         await self._submit_message(
             session_id=env.session_id,
             client_id=env.client_id,
@@ -518,8 +533,6 @@ class MainAgentTurnOrchestrator:
             source="service",
             priority="tool_result",
         )
-        # 清空pending_tool_calls
-        ctx.pending_tool_calls.clear()
 
     async def _handle_async_tool_result(
         self,
@@ -833,19 +846,13 @@ class MainAgentTurnOrchestrator:
         )
         auto_exec_calls = execution_plan.auto_exec_calls
         need_approval_calls = execution_plan.need_approval_calls
-        auto_exec_tasks = [
-            asyncio.create_task(
-                self._invoke_tool(ctx, item, env=env, base_meta=base_meta),
-            )
-            for item in auto_exec_calls
-        ]
 
         if execution_plan.has_pending_approval:
             for item in need_approval_calls:
                 record_tool_approval_required(tool_name=item.name)
-            # 需要审批的工具调用列表入队
-            ctx.pending_tool_calls = list(need_approval_calls)
-            # 发出审批事件
+            pending_by_id = {p.call_id: p for p in ctx.pending_tool_calls}
+            pending_batch = [pending_by_id[str(call.get("id") or "")] for call in captured_tool_calls if str(call.get("id") or "") in pending_by_id]
+            ctx.pending_tool_calls = pending_batch
             await self._emit_envelope(
                 env=env,
                 envelope=AgentEventEnvelope(
@@ -858,7 +865,7 @@ class MainAgentTurnOrchestrator:
                                 "arguments": dict(p.arguments),
                                 "raw_arguments": json.dumps(p.arguments, ensure_ascii=False),
                             }
-                            for p in need_approval_calls
+                            for p in pending_batch
                         ],
                         assistant_content=captured_assistant_content,
                     ),
@@ -867,28 +874,15 @@ class MainAgentTurnOrchestrator:
                 base_meta=base_meta,
             )
             ctx.run_turn_phase = RunTurnPhase.AWAITING_TOOL_EXECUTION
-            # 发出 done 事件
             await self._emit_envelope(env=env, envelope=final_done_envelope, base_meta=base_meta)
-            # 执行自动执行的工具调用
-            if auto_exec_tasks:
-                auto_exec_results = await asyncio.gather(*auto_exec_tasks)
-                executed_results = [
-                    {
-                        "tool_name": item.name,
-                        "tool_call_id": item.call_id,
-                        "content": result_text,
-                        "display_type": infer_tool_result_display_type(item.name, result_text),
-                    }
-                    for item, result_text in zip(auto_exec_calls, auto_exec_results)
-                ]
-                for item, result_text in zip(auto_exec_calls, auto_exec_results):
-                    self._append_tool_message(
-                        ctx=ctx,
-                        tool_call_id=item.call_id,
-                        content=result_text,
-                    )
             return
 
+        auto_exec_tasks = [
+            asyncio.create_task(
+                self._invoke_tool(ctx, item, env=env, base_meta=base_meta),
+            )
+            for item in auto_exec_calls
+        ]
         auto_exec_results = await asyncio.gather(*auto_exec_tasks)
         executed_results = [
             {

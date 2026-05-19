@@ -13,7 +13,7 @@ from pathlib import Path
 from app.config.env import resolve_runtime_root
 from app.config.runtime_layout import session_sqlite_path
 from app.config.settings import get_settings
-from app.context.models import OpenAIConversationContext
+from app.context.models import OpenAIConversationContext, RunTurnPhase
 from app.core.main_agent.model import get_model_config
 from app.core.main_agent.agent import MainAgentTurnOrchestrator
 from app.harness.memory.store import SqliteMessageStore
@@ -409,6 +409,7 @@ class AgentService:
         ctx = await self._resolve_context(env.session_id)
         # 仅当入站 envelope 显式携带 client_id 时刷新，避免 async_tool_result 等内部入队用 None 覆盖已建立的通道。
         _cid = (env.client_id or "").strip()
+        ctx.active_client_id = _cid
         if _cid:
             ctx.sse_client_id = _cid
         self._touch_session_activity(env.session_id)
@@ -442,6 +443,7 @@ class AgentService:
             )
             await self._emit_stream_event(env=env, event_type=done_t, data=done_d)
         finally:
+            ctx.active_client_id = ""
             try:
                 await self._persist_context(env.session_id, ctx)
             except Exception as exc:  # noqa: BLE001
@@ -514,6 +516,13 @@ class AgentService:
         for sid in self._session_queues:
             if sid == exclude_session_id:
                 continue
+            active_handle = self._session_active_handles.get(sid)
+            if active_handle is not None and not active_handle.done():
+                continue
+            ctx = self._session_contexts.get(sid)
+            if ctx is not None:
+                if ctx.pending_tool_calls or ctx.run_turn_phase != RunTurnPhase.IDLE:
+                    continue
             last = float(self._session_last_activity.get(sid, 0.0))
             if now - last < float(threshold):
                 continue

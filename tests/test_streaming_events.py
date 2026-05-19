@@ -38,6 +38,26 @@ class InMemoryEventBusTests(unittest.IsolatedAsyncioTestCase):
         e2 = bus.publish(client_id="c2", session_id="s", event_type="t", data={})
         self.assertEqual(e1.seq + 1, e2.seq)
 
+    async def test_slow_subscriber_drops_oldest_when_queue_full(self) -> None:
+        """慢订阅者队列满时应丢弃最旧事件，避免无界积压并保留最新事件。"""
+        bus = InMemoryEventBus(subscriber_queue_size=2)
+        stream = bus.subscribe_all(client_id="c3")
+        first_task = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0.02)
+
+        bus.publish(client_id="c3", session_id="s", event_type="one", data={})
+        first = await asyncio.wait_for(first_task, timeout=2.0)
+        self.assertEqual(first.type, "one")
+
+        bus.publish(client_id="c3", session_id="s", event_type="two", data={})
+        bus.publish(client_id="c3", session_id="s", event_type="three", data={})
+        bus.publish(client_id="c3", session_id="s", event_type="four", data={})
+
+        second = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+        third = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+        self.assertEqual([second.type, third.type], ["three", "four"])
+        await stream.aclose()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -194,11 +194,11 @@ def _decorate_async_tool(
     逻辑：
     1. 检测函数签名是否声明 `context` 参数；
     2. 包装后调用原始 async 函数拿协程对象（不在此 await）；
-    3. 从 `context.session_id` / **`context.sse_client_id`** 解析会话与 SSE 通道并提交到 **`AsyncToolResultStore`**；
-    4. 返回包含 `job_id` 的受理文案。
+    3. 优先从 `context.active_client_id` 取本轮 SSE 通道，缺省时退回最近的 `context.sse_client_id`；
+    4. 提交到 **`AsyncToolResultStore`** 并返回包含 `job_id` 的受理文案。
 
     关键边界：
-    - 无运行中事件循环、缺少 **`session_id`** 或 **`sse_client_id`** 时，提交会抛异常；
+    - 无运行中事件循环、缺少 **`session_id`** 或可用 client_id 时，提交会抛异常；
     - 若原函数不接收 `context`，会在调用前移除该参数以保持兼容。
 
     与外部交互：
@@ -223,11 +223,11 @@ def _decorate_async_tool(
         client_id = ""
         if isinstance(ctx, OpenAIConversationContext):
             session_id = ctx.session_id
-            client_id = (ctx.sse_client_id or "").strip()
+            client_id = (ctx.active_client_id or "").strip() or (ctx.sse_client_id or "").strip()
         if not client_id:
             raise ValueError(
-                "异步工具缺少 client_id：请确保本会话已处理过带 client_id 的入站消息（已写入 "
-                "OpenAIConversationContext.sse_client_id），否则异步结果无法投递到 SSE。"
+                "异步工具缺少 client_id：请确保当前入站消息带 client_id，或本会话已有可用 SSE 通道，"
+                "否则异步结果无法投递到 SSE。"
             )
         store = get_async_tool_result_store()
         job = store.submit_coroutine(

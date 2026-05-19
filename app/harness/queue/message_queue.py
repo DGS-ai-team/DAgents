@@ -84,6 +84,7 @@ class MessageQueue(Generic[EnvelopeT]):
         )
         # 同优先级时 _seq 递增，保证 PriorityQueue 出队顺序与入队先后一致（tuple 第二元比较）。
         self._seq = 0
+        self._pending_items: dict[int, tuple[int, int, EnvelopeT]] = {}
         self._consume_gate = asyncio.Event()
         self._consume_gate.set()
         self._closed = False
@@ -123,7 +124,8 @@ class MessageQueue(Generic[EnvelopeT]):
         # 须在 gate 通过后再判 closed：stop 时会 set gate，使阻塞中的 receive 能醒来并退出。
         if self._closed:
             raise RuntimeError("MessageQueue 已关闭，无法 receive")
-        _, _, env = await self._queue.get()
+        _, seq, env = await self._queue.get()
+        self._pending_items.pop(seq, None)
         return env
 
     async def stop(self) -> None:
@@ -154,7 +156,9 @@ class MessageQueue(Generic[EnvelopeT]):
 
     def _put_nowait(self, *, priority: int, env: EnvelopeT) -> None:
         """向优先级队列执行非阻塞入队，并维护稳定顺序序号。"""
-        self._queue.put_nowait((priority, self._seq, env))
+        item = (priority, self._seq, env)
+        self._queue.put_nowait(item)
+        self._pending_items[self._seq] = item
         self._seq += 1
 
     def _priority_value(self, priority: MessagePriority) -> int:
@@ -167,25 +171,15 @@ class MessageQueue(Generic[EnvelopeT]):
         return self.PRIORITY_OTHER
 
     def pending_metrics_rows(self) -> list[tuple[int, int, EnvelopeT]]:
-        """观测用：列出堆内「尚未 `receive` 取出」的条目，按真实出队顺序排序，不 dequeue。
+        """观测用：列出尚未 `receive` 取出的条目，按真实出队顺序排序，不 dequeue。
 
         逻辑：
-        1. 读取底层 **`asyncio.PriorityQueue`** 的内部堆列表（CPython：`Queue._queue`，元素为 **`(priority_int, seq, envelope)`**）；
+        1. 读取入队/出队同步维护的 `_pending_items` 镜像；
         2. 按 **`(priority_int, seq)`** 排序，与同优先级 FIFO 语义一致；
         3. 返回三元组列表。
 
         关键边界：
-        - 依赖 CPython 实现细节；若运行时结构变化，应改为上层自行维护镜像队列；
-        - `pause` 仅阻塞消费者，堆内仍有条目时本方法照常反映积压。
+        - 不读取 `asyncio.PriorityQueue` 私有字段，避免依赖 CPython 内部堆结构；
+        - `pause` 仅阻塞消费者，仍有条目时本方法照常反映积压。
         """
-        raw = getattr(self._queue, "_queue", None)
-        if not isinstance(raw, list) or len(raw) == 0:
-            return []
-        ordered = sorted(raw, key=lambda t: (int(t[0]), int(t[1])))
-        out: list[tuple[int, int, EnvelopeT]] = []
-        for item in ordered:
-            pri_i = int(item[0])
-            seq_i = int(item[1])
-            env = item[2]
-            out.append((pri_i, seq_i, env))
-        return out
+        return sorted(self._pending_items.values(), key=lambda t: (int(t[0]), int(t[1])))
