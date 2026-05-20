@@ -221,6 +221,7 @@ class Settings(BaseModel):
     agent_registry_ttl_seconds: int = 60
     agent_peer_cache_ttl_seconds: int = 60
     agent_peer_delivery_mode: str = "direct"
+    agent_peer_http_retry_attempts: int = 2
     agent_peer_stream_timeout_seconds: int = 60
     agent_peer_broadcast_stream_timeout_seconds: int = 20
     agent_peer_shared_token: str = ""
@@ -284,6 +285,7 @@ class Settings(BaseModel):
             agent_registry_ttl_seconds=max(5, min(3600, _env_int("AGENT_REGISTRY_TTL_SECONDS", 60))),
             agent_peer_cache_ttl_seconds=_env_int("AGENT_PEER_CACHE_TTL_SECONDS", 60),
             agent_peer_delivery_mode=_env_str("AGENT_PEER_DELIVERY_MODE", "direct") or "direct",
+            agent_peer_http_retry_attempts=max(1, min(5, _env_int("AGENT_PEER_HTTP_RETRY_ATTEMPTS", 2))),
             agent_peer_stream_timeout_seconds=_env_int("AGENT_PEER_STREAM_TIMEOUT_SECONDS", 60),
             agent_peer_broadcast_stream_timeout_seconds=_env_int(
                 "AGENT_PEER_BROADCAST_STREAM_TIMEOUT_SECONDS",

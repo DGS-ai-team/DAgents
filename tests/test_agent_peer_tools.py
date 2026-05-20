@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from app.harness.tools import agent_peer, agent_peer_common
+from app.harness.tools import agent_peer, agent_peer_common, agent_peer_registry
 from tests.test_support.stub_settings import settings_namespace
 
 
@@ -161,8 +161,61 @@ class AgentPeerApproveRelayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_FakeRelayAsyncClient.posted_payload["request_type"], "resume")
         self.assertEqual(_FakeRelayAsyncClient.posted_payload["resume_value"], {"type": "approve"})
         self.assertNotIn("content", _FakeRelayAsyncClient.posted_payload)
-        self.assertEqual(payload["payload"]["content"]["target_base_url"], "http://agent-b.local")
+        content = payload["payload"]["content"]
+        self.assertEqual(content["target_base_url"], "http://agent-b.local")
+        self.assertEqual(content["delivery_mode"], "relay")
+        self.assertEqual(content["http_read_retry_attempts"], 2)
+        self.assertTrue(content["stream_replay_from_start"])
         self.assertEqual(payload["task"]["state"], "succeeded")
+
+
+class _FakeRegistryReadResponse:
+    def __init__(self, status_code: int, body: dict[str, object]) -> None:
+        self.status_code = status_code
+        self._body = body
+        self.request = object()
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"status={self.status_code}")
+
+    def json(self) -> dict[str, object]:
+        return self._body
+
+
+class _FakeRetryRegistryClient:
+    calls = 0
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def get(self, *_args: object, **_kwargs: object) -> _FakeRegistryReadResponse:
+        type(self).calls += 1
+        if type(self).calls == 1:
+            return _FakeRegistryReadResponse(503, {})
+        return _FakeRegistryReadResponse(
+            200,
+            {"agents": [{"agent_id": "agent-b", "base_url": "http://agent-b.local", "discovery_group": ["g1"]}]},
+        )
+
+
+class AgentPeerRegistryRetryTests(unittest.TestCase):
+    def test_discover_agents_retries_transient_read_status(self) -> None:
+        _FakeRetryRegistryClient.calls = 0
+        with patch("app.harness.tools.agent_peer_registry.httpx.Client", _FakeRetryRegistryClient), patch(
+            "app.harness.tools.agent_peer_registry.get_settings",
+            return_value=settings_namespace(registry_url="http://rc.local", agent_peer_http_retry_attempts=2),
+        ):
+            agents = agent_peer_registry.discover_agents_by_groups(["g1"])
+
+        self.assertEqual(_FakeRetryRegistryClient.calls, 2)
+        self.assertEqual(agents[0]["agent_id"], "agent-b")
 
 
 class AgentPeerCommonHelperTests(unittest.TestCase):

@@ -85,7 +85,7 @@
 | **CLI** | 在 **HTTP API** 之外提供终端侧会话、调试与自动化入口（与配置项 **`AGENT_CLI_MODE`** 等长期对齐）；降低本地联调与脚本化运维成本。 |
 | **触发器（条件唤起）** | 在「显式 **`POST` 消息 / SSE 拉流**」之外，提供 **可声明的触发面**：按 **时间或日历**、**Webhook / 队列消息到达**、**文件或配置变更**、**Prometheus 指标阈值**、**Register Center 广播或 relay 的过滤匹配** 等条件 **唤起** Agent 执行（可映射为向既有 **`session_id`** 投递系统/用户消息，或 **模板化创建会话 + 首轮任务**）。需单独设计：**条件 DSL 或插件边界**、**幂等与去抖**、**并发与 `MessageQueue` 串行语义**、**鉴权/租户隔离/审计**、失败 **重试与死信**、与 **审批流** 的交互，避免与现有 **A2A** 语义重复或竞态。 |
 | **子 Agent 创建** | 由主 Agent 或编排层 **动态创建/挂载** 子会话或子运行时实例（与当前「单服务多 `session`」模型如何衔接需单独设计）；可能涉及资源配额、生命周期与观测。 |
-| **本地与远端 A2A 优化** | 在现有 **`agent_peer` + `direct`/`relay`**（见 [a2a-and-register-center.md](./a2a-and-register-center.md)）之上：超时与重试策略、连接池、大 payload、**`resume` 经 relay 的可行性**、广播扇出与 SSE 聚合性能、跨 NAT 拓扑下的可达性检测等。 |
+| **本地与远端 A2A 优化** | 已补：`resume` 经 relay、SSE 历史回放、只读发现/Card 请求有界重试、返回 payload 排障字段。后续仍可继续：连接池、大 payload、广播扇出与 SSE 聚合性能、跨 NAT 拓扑下的可达性检测等。 |
 | **Register Center 全局总览** | 在 **不按 `discovery_group` 过滤** 的前提下，为 **可信管理员或控制面** 提供全局视图（当前 API **有意** 不提供全量列举以防未授权探测）；需配套 **鉴权、审计、分页与多租户** 设计。 |
 | **Context 压缩优化** | 在现有 **静默 / 阻塞 + summary 替换**（见 [context-compression-and-state.md](./context-compression-and-state.md)）之上：压缩质量（保留工具边界/结构化信息）、触发策略（多信号而不仅是 token 计数）、失败降级与 **§3.1** 用户可见错误等。 |
 | **Agent 内置记忆书** | 结构化、可检索的 **长期会话外记忆**（「记忆书」）：与 **SQLite 会话态**、**JSONL 原始消息**、**`custom.md` 侧车** 分工明确；可能包含章节、标签、显式写入 API 及与 **`get_system_prompt`** / 工具联动的读取策略。 |

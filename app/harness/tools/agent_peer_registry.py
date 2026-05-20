@@ -11,6 +11,30 @@ from app.harness.tools.agent_peer_common import DEFAULT_HTTP_TIMEOUT_SECONDS, a2
 
 _AGENT_LIST_CACHE: list[dict[str, Any]] = []
 _AGENT_LIST_CACHE_UPDATED_AT_UNIX_MS = 0
+_TRANSIENT_READ_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+
+
+def http_read_retry_attempts() -> int:
+    raw = getattr(get_settings(), "agent_peer_http_retry_attempts", 2)
+    return max(1, min(5, int(raw)))
+
+
+def get_with_retries(client: httpx.Client, url: str, **kwargs: Any) -> httpx.Response:
+    attempts = http_read_retry_attempts()
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            resp = client.get(url, **kwargs)
+            if resp.status_code not in _TRANSIENT_READ_STATUS_CODES or attempt == attempts - 1:
+                return resp
+            last_exc = httpx.HTTPStatusError("transient read status", request=resp.request, response=resp)
+        except httpx.RequestError as exc:
+            last_exc = exc
+            if attempt == attempts - 1:
+                raise
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("A2A read retry failed without response")
 
 
 def cache_agent_list(agents: list[dict[str, Any]]) -> None:
@@ -84,7 +108,7 @@ def discover_agents_by_groups(groups: list[str]) -> list[dict[str, Any]]:
     by_id: dict[str, dict[str, Any]] = {}
     with httpx.Client(timeout=DEFAULT_HTTP_TIMEOUT_SECONDS) as client:
         for group_id in final_groups:
-            resp = client.get(f"{registry_url}/v1/agents", params={"discovery_group": group_id}, headers=a2a_auth_headers())
+            resp = get_with_retries(client, f"{registry_url}/v1/agents", params={"discovery_group": group_id}, headers=a2a_auth_headers())
             resp.raise_for_status()
             body = resp.json()
             for item in body.get("agents", []):
@@ -127,7 +151,7 @@ def attach_agent_card_summary(agent: dict[str, Any]) -> dict[str, Any]:
         return enriched
     try:
         with httpx.Client(timeout=DEFAULT_HTTP_TIMEOUT_SECONDS) as client:
-            resp = client.get(card_url)
+            resp = get_with_retries(client, card_url)
             resp.raise_for_status()
             card = resp.json()
         card_info["card_payload"] = card

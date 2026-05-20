@@ -27,6 +27,7 @@ def settings_namespace(**overrides: object) -> SimpleNamespace:
         "agent_public_base_url": "",
         "agent_registry_ttl_seconds": 60,
         "agent_peer_shared_token": "",
+        "agent_peer_http_retry_attempts": 2,
         "api_cors_allow_origins": ["http://localhost:5173"],
     }
     base.update(overrides)

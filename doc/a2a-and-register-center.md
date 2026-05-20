@@ -77,6 +77,7 @@
 | **`AGENT_PEER_DELIVERY_MODE`** | **`direct`**（默认）：调用方进程根据目录缓存解析 **`base_url`** 后直接 **`POST /v1/messages`**；**`relay`**：**`agent_send_message`** 与 **`agent_peer_approve_tools`** 改为 **`POST {REGISTRY_URL}/v1/relay`**，由中心转发（适合调用方 **无法直连** 对端 **`base_url`** 的网络拓扑）。 |
 | **`AGENT_PEER_SHARED_TOKEN`** | 可选共享令牌；配置后 Register Center A2A 路由、Agent 入站 A2A 消息与 A2A SSE 通道需携带 **`x-dagents-a2a-token`**。 |
 | **`AGENT_PEER_CACHE_TTL_SECONDS`** | **`agent_id → 记录`** 的进程内列表缓存 TTL；过期后再次 **`GET /v1/agents`** 回源。 |
+| **`AGENT_PEER_HTTP_RETRY_ATTEMPTS`** | 只读 A2A HTTP 请求（发现列表、Agent Card）遇到连接错误或 408/429/5xx 时的最大尝试次数，默认 2，范围 1–5；不会自动重试 `/v1/messages` 这类非幂等 POST，避免重复入队。 |
 | **`AGENT_PEER_STREAM_TIMEOUT_SECONDS`** | **`agent_send_message` / `agent_peer_approve_tools`** 拉对端 SSE 的超时。 |
 | **`AGENT_PEER_BROADCAST_STREAM_TIMEOUT_SECONDS`** | **`agent_broadcast`** 并发拉各目标 SSE 的单目标超时。 |
 
@@ -84,11 +85,11 @@
 
 ## 4. A2A 工具一览
 
-所有工具均在 **`app/harness/tools/agent_peer.py`** 注册；返回值为 **JSON 字符串**（封装 **`AgentPeerEnvelope`** 或错误语义），便于模型解析。
+所有工具均在 **`app/harness/tools/agent_peer.py`** 注册；返回值为 **JSON 字符串**（封装 **`AgentPeerEnvelope`** 或错误语义），便于模型解析。成功 payload 会包含排障字段（如 **`delivery_mode`**、**`http_read_retry_attempts`**、**`stream_replay_from_start`**）。
 
 | 工具名 | 作用 |
 |--------|------|
-| **`agent_discover`** | 对 **`DISCOVERY_GROUPS`** 中每个分组请求 **`GET /v1/agents`**，合并去重；可选拉取各 Agent **`.well-known/agent-card.json`** 摘要写入 **`agent_card`**。 |
+| **`agent_discover`** | 对 **`DISCOVERY_GROUPS`** 中每个分组请求 **`GET /v1/agents`**，合并去重；可选拉取各 Agent **`.well-known/agent-card.json`** 摘要写入 **`agent_card`**；这些只读请求按 **`AGENT_PEER_HTTP_RETRY_ATTEMPTS`** 做有界重试。 |
 | **`agent_send_message`** | 构造 **`AgentPeerEnvelope`**（**`intent=delegate`** 等），**`session_id`** 使用 **`peer-{caller}-{target}-{随机}`**，避免与对端用户会话混用；**`direct`** 或对 **`relay`** 投递后，以 **`Last-Event-ID: -1`** 连接对端 **`/v1/streams?client_id=...`** 回放并汇总 **`assistant` / `reasoning` / `tool_result` / `approval_required` / `error` / `done`**。若出现 **`approval_required`**，返回 **`task.state=requires_input`** 与 **`approvals[]`**。 |
 | **`agent_broadcast`** | **`POST /v1/broadcast`**；再根据返回的每个目标的 **`base_url` / `session_id` / `client_id`** **并发** 拉 SSE，聚合 **`stream_outputs`** 与审批信息。 |
 | **`agent_peer_approve_tools`** | 向对端提交 **`request_type=resume`**，**`resume_value`** 与 **`app/schemas/approval.py`** 一致（**`approve` / `reject` / `selection`**）；按 **`AGENT_PEER_DELIVERY_MODE`** 选择直连对端 **`/v1/messages`** 或经 Register Center **`/v1/relay`** 中继，然后继续回放/收集对端 SSE。 |

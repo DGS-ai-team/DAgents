@@ -35,7 +35,7 @@
 
 - **`agent_peer.py`**：公开工具入口，保留 **`agent_discover` / `agent_send_message` / `agent_broadcast` / `agent_peer_approve_tools`** 注册面。
 - **`agent_peer_common.py`**：公共模型与无状态 helper：**`PeerApprovalEntry`**、**`PeerStreamSummary`**、SSE 回放汇总（带 **`Last-Event-ID: -1`**）、A2A token header、错误信封、resume 决策构造、任务状态映射。
-- **`agent_peer_registry.py`**：Register Center 解析与目录缓存：按分组发现、TTL 缓存、目标 Agent 解析、Agent Card 摘要补充。
+- **`agent_peer_registry.py`**：Register Center 解析与目录缓存：按分组发现、TTL 缓存、目标 Agent 解析、Agent Card 摘要补充；只读 HTTP 请求支持有界 transient retry。
 - **`agent_discover`**：按分组发现可协作 Agent（内联固定结构 `agent_card`）。
 - **`agent_send_message`**：点对点向目标 Agent 提交消息；支持 **`direct` / `relay`**；返回信封含 `target_session_id/approvals/final_state` 与真实 `task.state`。
 - **`agent_broadcast`**：调用 Register Center 广播并并发收集每个目标 SSE，聚合 `approvals` 与广播级 `task.state`。
