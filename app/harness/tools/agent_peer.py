@@ -23,6 +23,7 @@ from app.schemas.agent_peer import (
 from app.harness.tools.tool import tool
 
 _DEFAULT_HTTP_TIMEOUT_SECONDS = 15.0
+_A2A_TOKEN_HEADER = "x-dagents-a2a-token"
 _AGENT_LIST_CACHE: list[dict[str, Any]] = []
 _AGENT_LIST_CACHE_UPDATED_AT_UNIX_MS = 0
 
@@ -244,6 +245,13 @@ def _resolve_registry_url() -> str:
     return (s.registry_url or "").strip().rstrip("/")
 
 
+def _a2a_auth_headers() -> dict[str, str]:
+    token = (get_settings().agent_peer_shared_token or "").strip()
+    if not token:
+        return {}
+    return {_A2A_TOKEN_HEADER: token}
+
+
 def _require_registry_url() -> str:
     """获取必需的 Register Center 地址；未配置时抛 `ValueError`。"""
 
@@ -263,7 +271,7 @@ def _discover_agents_by_groups(groups: list[str]) -> list[dict[str, Any]]:
     by_id: dict[str, dict[str, Any]] = {}
     with httpx.Client(timeout=_DEFAULT_HTTP_TIMEOUT_SECONDS) as client:
         for group_id in final_groups:
-            resp = client.get(f"{registry_url}/v1/agents", params={"discovery_group": group_id})
+            resp = client.get(f"{registry_url}/v1/agents", params={"discovery_group": group_id}, headers=_a2a_auth_headers())
             resp.raise_for_status()
             body = resp.json()
             for item in body.get("agents", []):
@@ -325,7 +333,8 @@ async def _collect_peer_stream_summary(
         async with asyncio.timeout(max(1.0, timeout_seconds)):
             async with httpx.AsyncClient(timeout=None) as client:
                 stream_url = f"{final_base_url}/v1/streams?client_id={final_client_id}"
-                async with client.stream("GET", stream_url) as resp:
+                headers = {"Last-Event-ID": "-1", **_a2a_auth_headers()}
+                async with client.stream("GET", stream_url, headers=headers) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
                         if line.startswith("event:"):
@@ -679,7 +688,7 @@ async def agent_send_message(
             if final_delivery_mode == "direct":
                 target = _resolve_target_agent(target_id)
                 target_base_url = str(target.get("base_url") or "").strip().rstrip("/")
-                resp = await client.post(f"{target_base_url}/v1/messages", json=body)
+                resp = await client.post(f"{target_base_url}/v1/messages", json=body, headers=_a2a_auth_headers())
             else:
                 registry_url = _require_registry_url()
                 relay_payload = {
@@ -692,7 +701,7 @@ async def agent_send_message(
                     "source": "agent-peer-relay",
                     "priority": "human",
                 }
-                resp = await client.post(f"{registry_url}/v1/relay", json=relay_payload)
+                resp = await client.post(f"{registry_url}/v1/relay", json=relay_payload, headers=_a2a_auth_headers())
             resp.raise_for_status()
             submit = resp.json()
             if final_delivery_mode == "relay":
@@ -821,6 +830,7 @@ async def agent_broadcast(
                     "discovery_group_ids": groups,
                     "source": "agent-peer",
                 },
+                headers=_a2a_auth_headers(),
             )
             resp.raise_for_status()
             result = resp.json()
@@ -1014,7 +1024,7 @@ async def agent_peer_approve_tools(
             "priority": "resume",
         }
         async with httpx.AsyncClient(timeout=_DEFAULT_HTTP_TIMEOUT_SECONDS) as client:
-            resp = await client.post(f"{target_base_url}/v1/messages", json=body)
+            resp = await client.post(f"{target_base_url}/v1/messages", json=body, headers=_a2a_auth_headers())
             resp.raise_for_status()
             submit = resp.json()
         accepted = bool(submit.get("accepted", False))

@@ -36,6 +36,30 @@ else:
     _API_SKIP = ""
 
 
+class FakeRegistryResponse:
+    def raise_for_status(self) -> None:
+        return None
+
+
+class FakeRegistryAsyncClient:
+    posted_payload: dict[str, object] = {}
+    posted_url = ""
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def post(self, url: str, *, json: dict[str, object], **_kwargs: object) -> FakeRegistryResponse:
+        type(self).posted_url = url
+        type(self).posted_payload = dict(json)
+        return FakeRegistryResponse()
+
+
 class FakeAgentService:
     """API 测试用服务替身。
 
@@ -98,7 +122,7 @@ class FastApiRouteTests(unittest.TestCase):
         """清理服务实例列表，避免用例间串状态。"""
         FakeAgentService.instances.clear()
 
-    def _client(self):
+    def _client(self, **settings_overrides: object):
         """构造带替身服务的 TestClient。
 
         逻辑：
@@ -107,7 +131,7 @@ class FastApiRouteTests(unittest.TestCase):
         3. 返回 `TestClient` 上下文管理器。
         """
         assert api_app is not None
-        settings = settings_namespace(metrics_enabled=False)
+        settings = settings_namespace(metrics_enabled=False, **settings_overrides)
         return patch.multiple(
             api_app,
             AgentService=FakeAgentService,
@@ -158,6 +182,81 @@ class FastApiRouteTests(unittest.TestCase):
         self.assertEqual(service.submitted_resumes[0]["priority"], "resume")
         self.assertEqual(service.released_sessions, [("s-api", True)])
 
+    def test_peer_stream_token_scope_matches_a2a_client_ids(self) -> None:
+        assert api_app is not None
+        self.assertTrue(api_app._requires_a2a_stream_token("peer-c"))
+        self.assertTrue(api_app._requires_a2a_stream_token("approve-c"))
+        self.assertTrue(api_app._requires_a2a_stream_token("broadcast-c"))
+        self.assertFalse(api_app._requires_a2a_stream_token("web-c"))
+
+    def test_message_route_requires_token_for_agent_peer_source_when_configured(self) -> None:
+        assert api_app is not None and TestClient is not None
+        with self._client(agent_peer_shared_token="secret"):
+            app = api_app.create_app()
+            with TestClient(app) as client:
+                rejected = client.post(
+                    "/v1/messages",
+                    json={
+                        "session_id": "s-api",
+                        "client_id": "c-api",
+                        "content": "hello",
+                        "source": "agent-peer",
+                    },
+                )
+                accepted = client.post(
+                    "/v1/messages",
+                    headers={"x-dagents-a2a-token": "secret"},
+                    json={
+                        "session_id": "s-api",
+                        "client_id": "c-api",
+                        "content": "hello",
+                        "source": "agent-peer",
+                    },
+                )
+
+        self.assertEqual(rejected.status_code, 401)
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(len(FakeAgentService.instances[-1].submitted_messages), 1)
+
+    def test_message_route_preserves_agent_peer_envelope_metadata(self) -> None:
+        assert api_app is not None and TestClient is not None
+        from app.schemas.agent_peer import build_agent_peer_envelope
+
+        envelope = build_agent_peer_envelope(
+            caller_agent_id="agent-a",
+            caller_session_id="caller-s",
+            caller_groups=["g1"],
+            target_agent_id="agent-b",
+            target_groups=None,
+            intent="delegate",
+            payload_content={"question": "hi"},
+            payload_content_type="application/json",
+            trace_id="trace-unit",
+        )
+        with self._client():
+            app = api_app.create_app()
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/v1/messages",
+                    json={
+                        "session_id": "peer-s",
+                        "client_id": "peer-c",
+                        "content": envelope.model_dump_json(),
+                        "source": "agent-peer",
+                    },
+                )
+                self.assertEqual(resp.status_code, 200)
+
+        message = FakeAgentService.instances[-1].submitted_messages[0]
+        self.assertEqual(message["source"], "a2a:agent-a")
+        self.assertEqual(message["content"], '{"question": "hi"}')
+        self.assertIsInstance(message["peer_envelope"], dict)
+        peer_envelope = message["peer_envelope"]
+        assert isinstance(peer_envelope, dict)
+        self.assertEqual(peer_envelope["trace_id"], "trace-unit")
+        self.assertEqual(peer_envelope["caller"]["session_id"], "caller-s")
+        self.assertEqual(peer_envelope["target"]["agent_id"], "agent-b")
+
     def test_message_route_rejects_blank_content(self) -> None:
         """普通 message 缺正文时应返回 422，且不调用服务入队。"""
         assert api_app is not None and TestClient is not None
@@ -170,6 +269,34 @@ class FastApiRouteTests(unittest.TestCase):
                 )
                 self.assertEqual(resp.status_code, 422)
         self.assertEqual(FakeAgentService.instances[-1].submitted_messages, [])
+
+
+@unittest.skipIf(api_app is None, _API_SKIP)
+class RegistryRegistrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_register_self_sends_configured_ttl(self) -> None:
+        assert api_app is not None
+        settings = settings_namespace(
+            registry_url="http://rc.local",
+            agent_public_base_url="http://agent.local",
+            discovery_groups=["g1"],
+            agent_id="agent-a",
+            agent_registry_ttl_seconds=17,
+        )
+        with patch.multiple(api_app, get_settings=lambda *args, **kwargs: settings), patch.object(
+            api_app.httpx, "AsyncClient", FakeRegistryAsyncClient
+        ):
+            registered, reason, registry_url = await api_app._register_self_to_registry()
+
+        self.assertTrue(registered, reason)
+        self.assertEqual(registry_url, "http://rc.local")
+        self.assertEqual(FakeRegistryAsyncClient.posted_url, "http://rc.local/v1/agents")
+        self.assertEqual(FakeRegistryAsyncClient.posted_payload["ttl_seconds"], 17)
+
+    def test_heartbeat_interval_is_half_of_bounded_ttl(self) -> None:
+        assert api_app is not None
+        self.assertEqual(api_app._registry_heartbeat_interval_seconds(60), 30.0)
+        self.assertEqual(api_app._registry_heartbeat_interval_seconds(4), 2.5)
+        self.assertEqual(api_app._registry_heartbeat_interval_seconds(7200), 1800.0)
 
 
 @unittest.skipIf(StreamEvent is None or api_app is None, _API_SKIP)

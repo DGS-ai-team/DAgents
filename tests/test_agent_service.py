@@ -48,6 +48,24 @@ class AgentServiceStreamMapTests(unittest.TestCase):
         self.assertEqual(d2["tool_call_id"], "c1")
         self.assertEqual(d2["meta"]["trace"], "1")
 
+    def test_stream_base_meta_includes_peer_envelope(self) -> None:
+        """入站 A2A 元数据应进入后续 SSE meta，便于调用方追踪来源与 trace。"""
+        assert AgentService is not None
+        with patch("app.harness.service.agent_service.get_settings", return_value=settings_namespace()), patch(
+            "app.harness.service.agent_service.get_model_config", return_value={"model": "unit"}
+        ), patch("app.harness.service.agent_service.build_openai_toolkit", return_value=([], {})):
+            svc = AgentService(max_queue_size=0, message_store=None)
+        meta = svc._stream_base_meta(
+            MessageEnvelope(
+                session_id="s-peer",
+                content="hello",
+                peer_envelope={"trace_id": "trace-unit", "caller": {"agent_id": "agent-a"}},
+            )
+        )
+
+        self.assertEqual(meta["session_id"], "s-peer")
+        self.assertEqual(meta["peer_envelope"]["trace_id"], "trace-unit")
+
     def test_approval_required_and_done(self) -> None:
         """审批事件扁平化 `args` → `approval_args`；`done` 经映射层保证含 `finish_reason`。"""
         base = {"session_id": "sid", "model": "m"}

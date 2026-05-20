@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import os
 import uuid
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 
 from rc_models import (
     AgentListResponse,
@@ -20,6 +22,28 @@ from rc_models import (
     RelayResponse,
 )
 from rc_store import AgentRegistryStore
+
+_A2A_TOKEN_HEADER = "x-dagents-a2a-token"
+
+
+def _shared_token() -> str:
+    return os.environ.get("AGENT_PEER_SHARED_TOKEN", "").strip()
+
+
+def _a2a_auth_headers() -> dict[str, str]:
+    token = _shared_token()
+    if not token:
+        return {}
+    return {_A2A_TOKEN_HEADER: token}
+
+
+def _verify_shared_token(request: Request) -> None:
+    expected = _shared_token()
+    if not expected:
+        return
+    actual = (request.headers.get(_A2A_TOKEN_HEADER) or "").strip()
+    if not actual or not hmac.compare_digest(actual, expected):
+        raise HTTPException(status_code=401, detail="invalid A2A token")
 
 
 async def _broadcast_to_agent(
@@ -64,7 +88,7 @@ async def _broadcast_to_agent(
         "priority": "human",
     }
     try:
-        resp = await client.post(target_url, json=payload)
+        resp = await client.post(target_url, json=payload, headers=_a2a_auth_headers())
         detail = None
         try:
             body = resp.json()
@@ -161,7 +185,7 @@ def create_app() -> FastAPI:
         return HealthResponse(status="ok", agents=store.count())
 
     @app.post("/v1/agents", response_model=AgentRecord, tags=["agents"])
-    def upsert_agent(payload: AgentUpsertRequest) -> AgentRecord:
+    def upsert_agent(payload: AgentUpsertRequest, request: Request) -> AgentRecord:
         """登记或覆盖更新一条 Agent 记录。
 
         逻辑：
@@ -183,11 +207,13 @@ def create_app() -> FastAPI:
         - 修改仓库内对应 `agent_id` 的记录。
         """
 
+        _verify_shared_token(request)
         return store.upsert(payload)
 
     @app.get("/v1/agents", response_model=AgentListResponse, tags=["agents"])
     def list_agents(
-        discovery_group: str = Query(..., description="按发现分组精确筛选（必填）。")
+        request: Request,
+        discovery_group: str = Query(..., description="按发现分组精确筛选（必填）。"),
     ) -> AgentListResponse:
         """查询指定分组下的 Agent 列表。
 
@@ -210,12 +236,14 @@ def create_app() -> FastAPI:
         - 无。
         """
 
+        _verify_shared_token(request)
         records = store.list(discovery_group=discovery_group)
         return AgentListResponse(agents=records)
 
     @app.get("/v1/agents/{agent_id}", response_model=AgentRecord, tags=["agents"])
     def get_agent(
         agent_id: str,
+        request: Request,
         discovery_group: str = Query(..., description="调用方所属分组（必填）。"),
     ) -> AgentRecord:
         """按 agent_id 查询单条 Agent 记录（分组隔离）。
@@ -238,13 +266,14 @@ def create_app() -> FastAPI:
         - 无。
         """
 
+        _verify_shared_token(request)
         record = store.get(agent_id)
         if record is None or discovery_group not in record.discovery_group:
             raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
         return record
 
     @app.delete("/v1/agents/{agent_id}", tags=["agents"])
-    def delete_agent(agent_id: str) -> dict[str, bool]:
+    def delete_agent(agent_id: str, request: Request) -> dict[str, bool]:
         """按 `agent_id` 删除登记记录。
 
         逻辑：
@@ -266,13 +295,14 @@ def create_app() -> FastAPI:
         - 可能删除 `_records` 中一条登记。
         """
 
+        _verify_shared_token(request)
         ok = store.delete(agent_id)
         if not ok:
             raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
         return {"deleted": True}
 
     @app.post("/v1/broadcast", response_model=BroadcastResponse, tags=["broadcast"])
-    async def broadcast_message(payload: BroadcastRequest) -> BroadcastResponse:
+    async def broadcast_message(payload: BroadcastRequest, request: Request) -> BroadcastResponse:
         """按分组列表向已注册 Agent 广播消息。
 
         逻辑：
@@ -297,6 +327,7 @@ def create_app() -> FastAPI:
         - 会触发多个下游 Agent 接收并处理同一条消息。
         """
 
+        _verify_shared_token(request)
         targets_by_id: dict[str, AgentRecord] = {}
         for group_id in payload.discovery_group_ids:
             group_targets = store.list(discovery_group=group_id)
@@ -337,7 +368,7 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/v1/relay", response_model=RelayResponse, tags=["relay"])
-    async def relay_message(payload: RelayRequest) -> RelayResponse:
+    async def relay_message(payload: RelayRequest, request: Request) -> RelayResponse:
         """按目标 Agent ID 中继单条消息到下游 Agent。
 
         逻辑：
@@ -363,6 +394,7 @@ def create_app() -> FastAPI:
         - 会触发目标 Agent 接收并处理一条新消息。
         """
 
+        _verify_shared_token(request)
         target = store.get(payload.target_agent_id)
         if target is None:
             raise HTTPException(status_code=404, detail=f"agent_id={payload.target_agent_id!r} 不存在")
@@ -380,7 +412,7 @@ def create_app() -> FastAPI:
         }
         async with httpx.AsyncClient(timeout=20.0) as client:
             try:
-                resp = await client.post(target_url, json=forward_payload)
+                resp = await client.post(target_url, json=forward_payload, headers=_a2a_auth_headers())
             except Exception as exc:
                 raise HTTPException(status_code=502, detail=f"relay 下游调用失败: {exc}") from exc
         if resp.status_code >= 400:

@@ -44,6 +44,7 @@ class MessageEnvelope(BaseModel):
         async_tool_result: 异步工具完成载荷（`request_type=async_tool_result` 时使用）。
         tool_result: 同步工具结果载荷（`request_type=tool_result` 时使用）。
         source: 投递来源标签（如 cli / service / http），仅用于观测与调试。
+        peer_envelope: 原始入站 AgentPeerEnvelope 元数据；仅 A2A 消息使用。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -56,6 +57,7 @@ class MessageEnvelope(BaseModel):
     tool_result: dict[str, Any] | None = None
     source: str = "cli"
     client_id: str | None = None
+    peer_envelope: dict[str, Any] | None = None
 
 
 EnvelopeT = TypeVar("EnvelopeT")

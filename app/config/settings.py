@@ -218,10 +218,12 @@ class Settings(BaseModel):
     registry_url: str = ""
     discovery_groups: list[str] = []
     agent_public_base_url: str = ""
+    agent_registry_ttl_seconds: int = 60
     agent_peer_cache_ttl_seconds: int = 60
     agent_peer_delivery_mode: str = "direct"
     agent_peer_stream_timeout_seconds: int = 60
     agent_peer_broadcast_stream_timeout_seconds: int = 20
+    agent_peer_shared_token: str = ""
     # 全局工具审批模式：always（总是审批）/ never（永不审批）/ rule（按规则函数判断）
     agent_tool_approval_mode: str = "rule"
     # bash_run/cmd/powershell 输出解码编码（Windows 中文环境可用 gbk/cp936）
@@ -279,6 +281,7 @@ class Settings(BaseModel):
             registry_url=_env_str("REGISTRY_URL"),
             discovery_groups=_env_csv("DISCOVERY_GROUPS"),
             agent_public_base_url=_env_str("AGENT_PUBLIC_BASE_URL"),
+            agent_registry_ttl_seconds=max(5, min(3600, _env_int("AGENT_REGISTRY_TTL_SECONDS", 60))),
             agent_peer_cache_ttl_seconds=_env_int("AGENT_PEER_CACHE_TTL_SECONDS", 60),
             agent_peer_delivery_mode=_env_str("AGENT_PEER_DELIVERY_MODE", "direct") or "direct",
             agent_peer_stream_timeout_seconds=_env_int("AGENT_PEER_STREAM_TIMEOUT_SECONDS", 60),
@@ -286,6 +289,7 @@ class Settings(BaseModel):
                 "AGENT_PEER_BROADCAST_STREAM_TIMEOUT_SECONDS",
                 20,
             ),
+            agent_peer_shared_token=_env_str("AGENT_PEER_SHARED_TOKEN"),
             agent_tool_approval_mode=_env_str("AGENT_TOOL_APPROVAL_MODE", "rule") or "rule",
             bash_output_encoding=_env_str("BASH_OUTPUT_ENCODING", "utf-8") or "utf-8",
             fs_tool_read_max_bytes=max(1, _env_int("FS_TOOL_READ_MAX_BYTES", 3000)),

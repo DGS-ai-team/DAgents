@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import hmac
 import json
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, Literal
 
 import httpx
@@ -20,6 +22,7 @@ from app.harness.streaming.events import InMemoryEventBus, StreamEvent
 from app.observability.metrics import metrics_text
 from app.schemas.agent_peer import parse_agent_peer_envelope_from_text
 
+_A2A_TOKEN_HEADER = "x-dagents-a2a-token"
 _logger = logging.getLogger(__name__)
 
 
@@ -69,7 +72,39 @@ class CancelTurnResult(BaseModel):
     cancelled: bool
 
 
-def _normalize_inbound_peer_message(content: str, source: str) -> tuple[str, str]:
+def _a2a_auth_headers() -> dict[str, str]:
+    token = (get_settings().agent_peer_shared_token or "").strip()
+    if not token:
+        return {}
+    return {_A2A_TOKEN_HEADER: token}
+
+
+def _requires_a2a_token(source: str) -> bool:
+    normalized = (source or "").strip().lower()
+    return normalized.startswith("agent-peer") or normalized.startswith("register_center") or normalized.startswith("a2a:")
+
+
+def _verify_a2a_token_value(request: Request) -> None:
+    expected = (get_settings().agent_peer_shared_token or "").strip()
+    if not expected:
+        return
+    actual = (request.headers.get(_A2A_TOKEN_HEADER) or "").strip()
+    if not actual or not hmac.compare_digest(actual, expected):
+        raise HTTPException(status_code=401, detail="invalid A2A token")
+
+
+def _verify_a2a_token(request: Request, source: str) -> None:
+    if not _requires_a2a_token(source):
+        return
+    _verify_a2a_token_value(request)
+
+
+def _requires_a2a_stream_token(client_id: str) -> bool:
+    normalized = (client_id or "").strip().lower()
+    return normalized.startswith("peer-") or normalized.startswith("approve-") or normalized.startswith("broadcast-")
+
+
+def _normalize_inbound_peer_message(content: str, source: str) -> tuple[str, str, dict[str, Any] | None]:
     """识别入站 AgentPeerEnvelope 并转为普通消息正文。
 
     逻辑：
@@ -83,14 +118,14 @@ def _normalize_inbound_peer_message(content: str, source: str) -> tuple[str, str
     """
     envelope = parse_agent_peer_envelope_from_text(content)
     if envelope is None:
-        return content, source
+        return content, source, None
     payload_content = envelope.payload.content
     if isinstance(payload_content, dict):
         final_content = json.dumps(payload_content, ensure_ascii=False)
     else:
         final_content = str(payload_content)
     caller_id = envelope.caller.agent_id.strip() or "unknown"
-    return final_content, f"a2a:{caller_id}"
+    return final_content, f"a2a:{caller_id}", envelope.model_dump()
 
 
 async def _register_self_to_registry() -> tuple[bool, str, str]:
@@ -132,14 +167,20 @@ async def _register_self_to_registry() -> tuple[bool, str, str]:
         "agent_id": agent_id,
         "base_url": agent_base_url,
         "discovery_group": groups,
+        "ttl_seconds": max(5, min(3600, int(s.agent_registry_ttl_seconds))),
     }
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(f"{registry_url}/v1/agents", json=payload)
+            resp = await client.post(f"{registry_url}/v1/agents", json=payload, headers=_a2a_auth_headers())
             resp.raise_for_status()
         return True, "ok", registry_url
     except Exception as exc:
         return False, f"register failed: {exc}", registry_url
+
+
+def _registry_heartbeat_interval_seconds(ttl_seconds: int) -> float:
+    ttl = max(5, min(3600, int(ttl_seconds)))
+    return max(1.0, float(ttl) / 2.0)
 
 
 async def _unregister_self_from_registry(registry_url: str) -> tuple[bool, str]:
@@ -171,12 +212,24 @@ async def _unregister_self_from_registry(registry_url: str) -> tuple[bool, str]:
         return False, "missing registry_url/agent_id"
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.delete(f"{final_registry_url}/v1/agents/{agent_id}")
+            resp = await client.delete(f"{final_registry_url}/v1/agents/{agent_id}", headers=_a2a_auth_headers())
         if resp.status_code in (200, 204, 404):
             return True, "ok"
         return False, f"unregister status={resp.status_code}"
     except Exception as exc:
         return False, f"unregister failed: {exc}"
+
+
+async def _registry_heartbeat_loop(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        interval = _registry_heartbeat_interval_seconds(get_settings().agent_registry_ttl_seconds)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            return
+        except TimeoutError:
+            registered, reason, registry_url = await _register_self_to_registry()
+            if not registered and registry_url:
+                _logger.warning("agent registry heartbeat failed: %s", reason)
 
 
 @asynccontextmanager
@@ -195,15 +248,27 @@ async def lifespan(app: FastAPI):
     await service.start()
     # message_queue 已随 service.start 初始化完成，此后再进行自登记，避免目录可见但服务未就绪。
     registered, register_reason, registry_url = await _register_self_to_registry()
+    heartbeat_stop_event: asyncio.Event | None = None
+    heartbeat_task: asyncio.Task[None] | None = None
+    if registered:
+        heartbeat_stop_event = asyncio.Event()
+        heartbeat_task = asyncio.create_task(_registry_heartbeat_loop(heartbeat_stop_event))
     app.state.service = service
     app.state.bus = bus
     app.state.registry_registered = registered
     app.state.registry_url = registry_url
+    app.state.registry_heartbeat_task = heartbeat_task
     if not registered and registry_url:
         _logger.warning("agent registry skipped: %s", register_reason)
     try:
         yield
     finally:
+        if heartbeat_stop_event is not None:
+            heartbeat_stop_event.set()
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat_task
         if bool(getattr(app.state, "registry_registered", False)):
             unregistered, unregister_reason = await _unregister_self_from_registry(
                 str(getattr(app.state, "registry_url", ""))
@@ -293,9 +358,10 @@ def create_app() -> FastAPI:
         return SessionReleaseResult(session_id=sid, released=released)
 
     @app.post("/v1/messages", response_model=SubmitResult)
-    async def submit_message(body: MessageIn) -> SubmitResult:
+    async def submit_message(body: MessageIn, request: Request) -> SubmitResult:
         service: AgentService = app.state.service
         try:
+            _verify_a2a_token(request, body.source)
             if body.request_type == "resume":
                 await service.submit_resume(
                     session_id=body.session_id,
@@ -307,13 +373,14 @@ def create_app() -> FastAPI:
             else:
                 if not body.content or not body.content.strip():
                     raise HTTPException(status_code=422, detail="content is required for request_type=message")
-                final_content, final_source = _normalize_inbound_peer_message(body.content, body.source)
+                final_content, final_source, peer_envelope = _normalize_inbound_peer_message(body.content, body.source)
                 await service.submit_message(
                     session_id=body.session_id,
                     client_id=body.client_id,
                     content=final_content,
                     source=final_source,
                     priority=body.priority,
+                    peer_envelope=peer_envelope,
                 )
         except HTTPException:
             raise
@@ -338,6 +405,8 @@ def create_app() -> FastAPI:
         - 该接口仅推送连接建立后的实时事件，不回放历史；
         - 同一前端可复用一个连接并按 `session_id` 在本地分流展示。
         """
+        if _requires_a2a_stream_token(client_id):
+            _verify_a2a_token_value(request)
         bus: InMemoryEventBus = app.state.bus
         last_seq = _parse_last_event_id(request.headers.get("last-event-id"))
 

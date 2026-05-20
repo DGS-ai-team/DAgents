@@ -265,6 +265,7 @@ class AgentService:
         source: str = "service",
         priority: MessagePriority = "other",
         client_id: str | None = None,
+        peer_envelope: dict[str, Any] | None = None,
     ) -> None:
         """按 session 入队一条消息至agent处理队列，以在下一轮触发llm调用。
 
@@ -303,6 +304,7 @@ class AgentService:
                 tool_result=tool_result,
                 source=source,
                 client_id=client_id,
+                peer_envelope=peer_envelope,
             ),
             priority=effective_priority,
         )
@@ -692,10 +694,13 @@ class AgentService:
         2. 与 **`env.session_id`** 组成 dict。
         """
         cfg = get_model_config()
-        return {
+        meta: dict[str, Any] = {
             "session_id": env.session_id,
             "model": str(cfg.get("model") or ""),
         }
+        if env.peer_envelope:
+            meta["peer_envelope"] = env.peer_envelope
+        return meta
 
     async def _emit_stream_event(
         self,
