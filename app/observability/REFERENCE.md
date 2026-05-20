@@ -9,10 +9,12 @@
 - **`SESSION_CONTEXT_MESSAGES_COUNT`**：各 session 的 **`OpenAIConversationContext.messages`** 条数（label **`session_id`**）
 - **`SESSION_QUEUE_DEPTH`**、**`SESSION_QUEUE_PRIORITY_DEPTH`**：各 session 队列积压总量与按 `request_type` 聚合的积压量
 - **`TOOL_EXECUTIONS_TOTAL`**、**`TOOL_APPROVAL_REQUIRED_TOTAL`**：工具执行结果与审批等待次数
+- **`A2A_OPERATIONS_TOTAL`**、**`A2A_OPERATION_LATENCY_SECONDS`**、**`A2A_TERMINAL_STATES_TOTAL`**：A2A / Register Center 操作次数、耗时与终态聚合
 - **`SUMMARY_COMPRESSION_TOTAL`**：summary 压缩按触发阶段与结果状态聚合的次数
 - **`sanitize_prometheus_label_value`**：通用 label 净化（**`session_id`** 等）
 - **`refresh_session_context_metrics`**：由 **`AgentService`** 在 **`_handle_message` finally**、**`create_session`**、**`_resolve_context` 首次装入缓存**、**`release_session`**、**`_evict_session_for_capacity`**、**`stop`** 后调用
 - **`refresh_session_queue_metrics`**：由 **`AgentService`** 在消息入队、出队、淘汰与 stop 后刷新队列积压指标
+- **`record_a2a_operation`**、**`record_a2a_terminal_state`**：A2A discovery/card/stream、调用方工具提交与 Register Center relay/broadcast 打点入口
 - **`record_tool_execution_result`**、**`record_tool_approval_required`**、**`record_summary_compression_result`**：编排器在工具执行、审批等待与压缩完成/失败时打点
 - **`parse_usage_tokens`**：从 SDK `usage` 或 dict 解析 `(prompt_tokens, completion_tokens)`
 - **`parse_usage_prompt_cache_details`**：从 **`usage`** 解析 **`prompt_tokens_details`** 与 **`prompt_cache_*`**

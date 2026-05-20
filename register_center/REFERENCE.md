@@ -42,13 +42,15 @@
 ### 类
 
 - `AgentRegistryStore`
-  - 说明：基于内存字典的登记仓库，提供线程安全的增删改查与计数。
+  - 说明：基于内存字典的登记仓库，提供线程安全的增删改查与计数；可选 `persist_path` 启用 JSON 文件持久化。
   - 方法：
-    - `__init__() -> None`
+    - `__init__(persist_path: str | os.PathLike[str] | None = None) -> None`
     - `upsert(payload: AgentUpsertRequest) -> AgentRecord`
     - `get(agent_id: str) -> AgentRecord | None`
     - `list(discovery_group: str | None = None) -> list[AgentRecord]`
-    - `_prune_expired_locked() -> None`
+    - `_prune_expired_locked() -> bool`
+    - `_load_from_disk() -> None`
+    - `_persist_locked() -> None`
     - `delete(agent_id: str) -> bool`
     - `count() -> int`
 
@@ -57,7 +59,7 @@
 ### 函数
 
 - `create_app() -> FastAPI`
-  - 说明：构建 FastAPI 应用并注册 `/health`、`/v1/agents`（含 delete）、`/v1/broadcast`、`/v1/relay` 路由（查询接口按分组强隔离）。
+  - 说明：构建 FastAPI 应用并注册 `/health`、`/metrics`、`/v1/agents`（含 delete）、`/v1/broadcast`、`/v1/relay` 路由（查询接口按分组强隔离）；读取 `REGISTER_CENTER_STORE_PATH` 决定是否启用 JSON 持久化。
 - `_broadcast_to_agent(client, *, agent, message, source) -> BroadcastResultItem`
   - 说明：向单个 Agent 的 `/v1/messages` 转发广播消息并收集结果。
 

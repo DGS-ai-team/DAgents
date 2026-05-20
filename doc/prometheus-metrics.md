@@ -29,7 +29,7 @@ Prometheus 是一套 **主动拉取（pull）** 的时序监控系统：
 |------|------|----------|
 | **Counter** | 只增不减的累计量 | 请求总数、累计 token 数 |
 | **Gauge** | 可升可降的快照值 | 当前队列长度、当前连接数 |
-| **Histogram / Summary** | 分布与分位数 | 延迟分布（本项目暂未使用） |
+| **Histogram / Summary** | 分布与分位数 | 延迟分布（A2A 操作耗时使用 Histogram） |
 
 命名习惯：Counter 常以 **`_total`** 结尾；Gauge 一般不使用该后缀。
 
@@ -50,8 +50,9 @@ Prometheus 是一套 **主动拉取（pull）** 的时序监控系统：
 
 ### 2.1 路由与开关
 
-- FastAPI 应用在 **`app/harness/api/app.py`** 中注册 **`GET /metrics`**。
-- 是否挂载该路由由配置 **`METRICS_ENABLED`**（**`Settings.metrics_enabled`**）控制；为假时不注册路由（抓取端需保证配置一致）。
+- Agent API 在 **`app/harness/api/app.py`** 中注册 **`GET /metrics`**。
+- Register Center 在 **`register_center/rc_app.py`** 中注册 **`GET /metrics`**，用于暴露 relay/broadcast 侧 A2A 指标。
+- Agent API 的 metrics 路由由配置 **`METRICS_ENABLED`**（**`Settings.metrics_enabled`**）控制；为假时不注册路由（抓取端需保证配置一致）。
 
 响应体由 **`app/observability/metrics.py`** 中的 **`metrics_text()`** 生成：内部调用 **`prometheus_client.generate_latest()`**，返回 **`bytes`** 与 **`Content-Type`**（一般为 `CONTENT_TYPE_LATEST`）。
 
@@ -70,6 +71,12 @@ Prometheus 是一套 **主动拉取（pull）** 的时序监控系统：
 2. **会话上下文快照（Gauge）**  
    - **`dagents_session_context_messages_count{session_id=...}`**：**`OpenAIConversationContext.messages`** 条数。  
    - 由 **`refresh_session_context_metrics(session_contexts)`** 根据 **`AgentService._session_contexts`** 更新；对已消失的 **`session_id`** 执行 **`SESSION_CONTEXT_MESSAGES_COUNT.remove`**。
+
+3. **A2A / Register Center 操作观测**
+   - **`dagents_a2a_operations_total{component,operation,status}`**：发现、Agent Card、peer stream、调用方工具提交（send/broadcast/approve）与 Register Center relay/broadcast 的累计次数。
+   - **`dagents_a2a_operation_latency_seconds{component,operation,status}`**：同一组操作的耗时分布。
+   - **`dagents_a2a_terminal_states_total{component,operation,final_state}`**：调用方工具、peer stream 与 Register Center relay/broadcast 的终态聚合。
+   - label 只使用固定组件/操作/状态，不包含消息正文、trace、session 或 client ID。
 
 ### 2.3 何时刷新上下文指标
 

@@ -1,9 +1,12 @@
-"""Register Center 的内存存储实现。"""
+"""Register Center 的存储实现。"""
 
 from __future__ import annotations
 
+import json
+import os
 import threading
 import time
+from pathlib import Path
 
 from rc_models import AgentRecord, AgentUpsertRequest
 
@@ -22,7 +25,7 @@ class AgentRegistryStore:
     - 列表查询支持按分组“成员关系”过滤（记录分组列表包含该分组即命中）。
 
     与外部交互：
-    - 无网络/文件/数据库交互，仅依赖进程内内存和系统时间。
+    - 默认仅依赖进程内内存和系统时间；配置 `persist_path` 后会读写本地 JSON 文件。
 
     异常说明：
     - 本类不主动吞异常，原则上仅抛出编程期异常。
@@ -31,28 +34,16 @@ class AgentRegistryStore:
     - 会修改内部 `_records` 状态。
     """
 
-    def __init__(self) -> None:
-        """初始化内存仓库。
-
-        逻辑：
-        1. 创建可重入锁；
-        2. 初始化空记录字典。
-
-        关键分支/边界：
-        - 无。
-
-        与外部交互：
-        - 无。
-
-        异常说明：
-        - 无显式异常处理。
-
-        副作用说明：
-        - 创建实例级内存状态。
-        """
+    def __init__(self, persist_path: str | os.PathLike[str] | None = None) -> None:
+        """初始化仓库。"""
 
         self._lock = threading.RLock()
         self._records: dict[str, AgentRecord] = {}
+        self._persist_path = Path(persist_path) if persist_path else None
+        self._load_from_disk()
+        with self._lock:
+            if self._prune_expired_locked():
+                self._persist_locked()
 
     def upsert(self, payload: AgentUpsertRequest) -> AgentRecord:
         """写入或覆盖一条 Agent 记录。
@@ -86,6 +77,7 @@ class AgentRegistryStore:
         )
         with self._lock:
             self._records[payload.agent_id] = record
+            self._persist_locked()
             return self._records[payload.agent_id]
 
     def get(self, agent_id: str) -> AgentRecord | None:
@@ -109,7 +101,8 @@ class AgentRegistryStore:
         """
 
         with self._lock:
-            self._prune_expired_locked()
+            if self._prune_expired_locked():
+                self._persist_locked()
             return self._records.get(agent_id)
 
     def list(self, discovery_group: str | None = None) -> list[AgentRecord]:
@@ -135,28 +128,46 @@ class AgentRegistryStore:
         """
 
         with self._lock:
-            self._prune_expired_locked()
+            if self._prune_expired_locked():
+                self._persist_locked()
             records = list(self._records.values())
             if discovery_group is not None:
                 # 多分组场景下，命中任一登记分组即视为可见。
                 records = [item for item in records if discovery_group in item.discovery_group]
             return sorted(records, key=lambda item: item.agent_id)
 
-    def _prune_expired_locked(self) -> None:
-        """清理已超过 TTL 的登记记录。
-
-        逻辑：
-        1. 读取当前 Unix 秒；
-        2. 找出 `expires_at_unix <= now` 的记录；
-        3. 在调用方已持锁的前提下删除。
-
-        关键边界：
-        - 本方法要求调用方持有 `_lock`，避免重复加锁造成语义混乱。
-        """
+    def _prune_expired_locked(self) -> bool:
+        """清理已超过 TTL 的登记记录。"""
         now_unix = int(time.time())
         expired = [agent_id for agent_id, item in self._records.items() if item.expires_at_unix <= now_unix]
         for agent_id in expired:
             self._records.pop(agent_id, None)
+        return bool(expired)
+
+    def _load_from_disk(self) -> None:
+        if self._persist_path is None or not self._persist_path.exists():
+            return
+        raw = json.loads(self._persist_path.read_text(encoding="utf-8"))
+        records = raw.get("agents", []) if isinstance(raw, dict) else []
+        loaded: dict[str, AgentRecord] = {}
+        for item in records:
+            record = AgentRecord.model_validate(item)
+            loaded[record.agent_id] = record
+        with self._lock:
+            self._records = loaded
+
+    def _persist_locked(self) -> None:
+        if self._persist_path is None:
+            return
+        self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "agents": [
+                item.model_dump(mode="json") for item in sorted(self._records.values(), key=lambda v: v.agent_id)
+            ]
+        }
+        tmp_path = self._persist_path.with_name(f".{self._persist_path.name}.{os.getpid()}.tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        tmp_path.replace(self._persist_path)
 
     def delete(self, agent_id: str) -> bool:
         """删除指定 Agent 记录。
@@ -183,6 +194,7 @@ class AgentRegistryStore:
             if agent_id not in self._records:
                 return False
             del self._records[agent_id]
+            self._persist_locked()
             return True
 
     def count(self) -> int:
@@ -206,4 +218,6 @@ class AgentRegistryStore:
         """
 
         with self._lock:
+            if self._prune_expired_locked():
+                self._persist_locked()
             return len(self._records)

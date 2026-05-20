@@ -15,7 +15,7 @@ import hashlib
 import re
 from typing import Any
 
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 # --- LLM token（按模型名分桶；进程内 Counter 累计，每次 record 对本轮 usage 做 inc）---
 LLM_PROMPT_TOKENS = Counter(
@@ -99,6 +99,21 @@ SYSTEM_PROMPT_CONTEXT_MESSAGES_COUNT = Gauge(
     "dagents_system_prompt_context_messages_count",
     "记录 system prompt 时对应的会话 messages 条数（按 model 与 prompt 指纹聚合）",
     labelnames=("model", "fingerprint"),
+)
+A2A_OPERATIONS_TOTAL = Counter(
+    "dagents_a2a_operations_total",
+    "A2A 操作次数（按组件、操作与结果状态聚合）",
+    labelnames=("component", "operation", "status"),
+)
+A2A_OPERATION_LATENCY_SECONDS = Histogram(
+    "dagents_a2a_operation_latency_seconds",
+    "A2A 操作耗时秒数（按组件、操作与结果状态聚合）",
+    labelnames=("component", "operation", "status"),
+)
+A2A_TERMINAL_STATES_TOTAL = Counter(
+    "dagents_a2a_terminal_states_total",
+    "A2A 流式任务终态次数（按组件、操作与终态聚合）",
+    labelnames=("component", "operation", "final_state"),
 )
 
 _session_context_sessions_raw: set[str] = set()
@@ -216,6 +231,30 @@ def refresh_session_queue_metrics(session_queues: dict[str, Any]) -> None:
             _session_queue_priority_label_pairs.add((sid_label, request_type))
 
     _session_queue_sessions_raw = set(curr_sessions_raw)
+
+
+def record_a2a_operation(
+    *,
+    component: str,
+    operation: str,
+    status: str,
+    elapsed_seconds: float | None = None,
+) -> None:
+    component_label = sanitize_prometheus_label_value(component or "unknown", max_len=80)
+    operation_label = sanitize_prometheus_label_value(operation or "unknown", max_len=80)
+    status_label = sanitize_prometheus_label_value(status or "unknown", max_len=80)
+    A2A_OPERATIONS_TOTAL.labels(component_label, operation_label, status_label).inc()
+    if elapsed_seconds is not None:
+        A2A_OPERATION_LATENCY_SECONDS.labels(component_label, operation_label, status_label).observe(
+            max(0.0, float(elapsed_seconds))
+        )
+
+
+def record_a2a_terminal_state(*, component: str, operation: str, final_state: str) -> None:
+    component_label = sanitize_prometheus_label_value(component or "unknown", max_len=80)
+    operation_label = sanitize_prometheus_label_value(operation or "unknown", max_len=80)
+    final_state_label = sanitize_prometheus_label_value(final_state or "unknown", max_len=80)
+    A2A_TERMINAL_STATES_TOTAL.labels(component_label, operation_label, final_state_label).inc()
 
 
 def record_tool_execution_result(*, tool_name: str, ok: bool) -> None:

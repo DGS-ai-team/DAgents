@@ -52,3 +52,4 @@
 - `AGENT_PEER_HTTP_RETRY_ATTEMPTS`：A2A 只读 HTTP 请求最大尝试次数（默认 `2`，范围 `1..5`；不重试非幂等消息 POST）
 - `AGENT_PEER_STREAM_TIMEOUT_SECONDS`：`agent_send_message` 拉取对端 SSE 输出的超时秒数（默认 `60`）
 - `AGENT_PEER_BROADCAST_STREAM_TIMEOUT_SECONDS`：`agent_broadcast` 汇总多目标 SSE 输出的总超时秒数（默认 `20`，超时截断已收集内容）
+- `REGISTER_CENTER_STORE_PATH`：Register Center 服务自身可选 JSON 持久化路径；未配置时仍为进程内内存表

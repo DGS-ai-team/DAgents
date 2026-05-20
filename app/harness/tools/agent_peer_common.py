@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from typing import Any, Literal
 
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext
+from app.observability.metrics import record_a2a_operation, record_a2a_terminal_state
 from app.schemas.agent_peer import AgentPeerError, AgentPeerTaskState, build_agent_peer_envelope
 
 DEFAULT_HTTP_TIMEOUT_SECONDS = 15.0
@@ -124,11 +126,18 @@ async def collect_peer_stream_summary(
     session_id: str,
     timeout_seconds: float,
 ) -> PeerStreamSummary:
+    started = time.monotonic()
     final_base_url = base_url.strip().rstrip("/")
     final_client_id = client_id.strip()
     final_session_id = session_id.strip()
     summary = PeerStreamSummary()
     if not final_base_url or not final_client_id or not final_session_id:
+        record_a2a_operation(
+            component="agent_peer",
+            operation="peer_stream",
+            status="invalid_input",
+            elapsed_seconds=time.monotonic() - started,
+        )
         return summary
     text_lines: list[str] = []
     event_name = ""
@@ -204,6 +213,13 @@ async def collect_peer_stream_summary(
         summary.final_state = "succeeded"
     else:
         summary.final_state = "failed"
+    record_a2a_operation(
+        component="agent_peer",
+        operation="peer_stream",
+        status=summary.final_state,
+        elapsed_seconds=time.monotonic() - started,
+    )
+    record_a2a_terminal_state(component="agent_peer", operation="peer_stream", final_state=summary.final_state)
     return summary
 
 

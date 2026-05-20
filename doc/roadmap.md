@@ -40,8 +40,8 @@
 
 ### 2.4 可观测与分发侧车
 
-- **Prometheus**：可选 **`/metrics`**（**`app/observability/`**）。
-- **Register Center（MVP）**：内存登记表、按 **`discovery_group`** 查询、**`/v1/broadcast`**、**`/v1/relay`**（**`register_center/`**）。
+- **Prometheus**：可选 **`/metrics`**（**`app/observability/`**）；已覆盖 LLM/session/queue/tool/summary 与 A2A/Register Center 操作指标。
+- **Register Center（MVP）**：默认内存登记表，可选 **`REGISTER_CENTER_STORE_PATH`** 单文件 JSON 持久化；按 **`discovery_group`** 查询、**`/v1/broadcast`**、**`/v1/relay`**（**`register_center/`**）。
 - **A2A**：**`agent_discover` / `agent_send_message` / `agent_broadcast` / `agent_peer_approve_tools`**，**`direct` / `relay`** 投递模式（[a2a-and-register-center.md](./a2a-and-register-center.md)）。
 
 ### 2.5 工程与文档
@@ -65,7 +65,7 @@
 
 | 项 | 说明 |
 |----|------|
-| **Register Center 持久化与高可用** | 当前为 **单进程内存表**；重启丢失；多副本无共享状态。演进方向可包括持久存储、鉴权、健康剔除等（需单独设计）。 |
+| **Register Center 高可用与共享存储** | 已有默认内存表 + 可选单文件 JSON 持久化，能覆盖单实例重启恢复；多副本仍无共享状态。演进方向可包括数据库/一致性存储、鉴权、健康剔除等（需单独设计）。 |
 | **HTTP API 单测覆盖** | **0.1.0 已知限制**：未在仓库内对全部路由做自动化覆盖；CI 以默认 **`test_*.py`** 为主。 |
 | **多运行时抽象** | 主路径深度绑定 **OpenAI SDK 形态**；若需统一抽象多厂商协议，需在 **`model` / `runtime`** 层演进。 |
 

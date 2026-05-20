@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
@@ -30,11 +31,22 @@ from app.harness.tools.agent_peer_registry import (
     discover_agents_by_groups as _discover_agents_by_groups,
     require_registry_url as _require_registry_url,
     http_read_retry_attempts as _http_read_retry_attempts,
+    refresh_agent_list_for_visible_groups as _refresh_agent_list_for_visible_groups,
     resolve_registry_url as _resolve_registry_url,
     resolve_target_agent as _resolve_target_agent,
 )
 from app.harness.tools.tool import tool
+from app.observability.metrics import record_a2a_operation, record_a2a_terminal_state
 from app.schemas.agent_peer import AgentPeerError, AgentPeerTask, build_agent_peer_envelope
+
+
+def _record_tool_operation(operation: str, status: str, started: float) -> None:
+    record_a2a_operation(
+        component="agent_peer_tool",
+        operation=operation,
+        status=status,
+        elapsed_seconds=time.monotonic() - started,
+    )
 
 
 @tool("agent_discover")
@@ -124,6 +136,8 @@ async def agent_send_message(
     - `agent_send_message({"target_agent_id":"agent-b","message":"请总结日报"})`
     """
 
+    started = time.monotonic()
+    operation = "send_message"
     s = get_settings()
     msg = message.strip()
     target_id = target_agent_id.strip()
@@ -136,6 +150,8 @@ async def agent_send_message(
     )
     trace_id = f"trace-{uuid.uuid4().hex}"
     if not target_id:
+        _record_tool_operation(operation, "invalid_target", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="delegate",
             session_id=caller_session_id,
@@ -147,6 +163,8 @@ async def agent_send_message(
             trace_id=trace_id,
         )
     if not msg:
+        _record_tool_operation(operation, "invalid_message", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="delegate",
             session_id=caller_session_id,
@@ -158,6 +176,8 @@ async def agent_send_message(
             trace_id=trace_id,
         )
     if final_delivery_mode not in {"direct", "relay"}:
+        _record_tool_operation(operation, "invalid_delivery_mode", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="delegate",
             session_id=caller_session_id,
@@ -212,6 +232,7 @@ async def agent_send_message(
             submit = resp.json()
             if final_delivery_mode == "relay":
                 target_base_url = str(submit.get("target_base_url") or "").strip().rstrip("/")
+        _record_tool_operation(operation, "submit_ok", started)
         accepted = bool(submit.get("accepted", False))
         if not accepted:
             raise ValueError("目标 Agent 未确认入队（accepted=false）")
@@ -221,6 +242,7 @@ async def agent_send_message(
             session_id=peer_session_id,
             timeout_seconds=float(max(1, int(s.agent_peer_stream_timeout_seconds))),
         )
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state=summary.final_state)
         ack_env = build_agent_peer_envelope(
             caller_agent_id=s.agent_id,
             caller_session_id=caller_session_id,
@@ -263,6 +285,8 @@ async def agent_send_message(
         )
         return _json_text(ack_env.model_dump())
     except Exception as exc:
+        _record_tool_operation(operation, "error", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         # 与目标 Agent 通信失败时刷新目录缓存，便于下次改用最新地址重试。
         try:
             _refresh_agent_list_for_visible_groups(_stable_groups(s.discovery_groups))
@@ -302,12 +326,16 @@ async def agent_broadcast(
     - `agent_broadcast({"message":"触发巡检","discovery_group_ids":["team-a","team-b"]})`
     """
 
+    started = time.monotonic()
+    operation = "broadcast"
     s = get_settings()
     caller_session_id = _session_id_from_context(context, "broadcast")
     trace_id = f"trace-{uuid.uuid4().hex}"
     msg = message.strip()
     groups = _stable_groups(discovery_group_ids)
     if not msg:
+        _record_tool_operation(operation, "invalid_message", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="broadcast",
             session_id=caller_session_id,
@@ -319,6 +347,8 @@ async def agent_broadcast(
             trace_id=trace_id,
         )
     if not groups:
+        _record_tool_operation(operation, "invalid_groups", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="broadcast",
             session_id=caller_session_id,
@@ -343,6 +373,7 @@ async def agent_broadcast(
             )
             resp.raise_for_status()
             result = resp.json()
+        _record_tool_operation(operation, "submit_ok", started)
         stream_timeout_seconds = float(max(1, int(s.agent_peer_broadcast_stream_timeout_seconds)))
         # 并发收集每个目标的 SSE：避免串行让快目标被慢目标饿死，整体 SLA 由 stream_timeout_seconds 兜底。
         targets: list[dict[str, Any]] = []
@@ -408,6 +439,7 @@ async def agent_broadcast(
             aggregated = "failed" if all(state == "failed" for state in per_target_states) else "running"
         else:
             aggregated = "running"
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state=aggregated)
         env = build_agent_peer_envelope(
             caller_agent_id=s.agent_id,
             caller_session_id=caller_session_id,
@@ -435,6 +467,8 @@ async def agent_broadcast(
         )
         return _json_text(env.model_dump())
     except Exception as exc:
+        _record_tool_operation(operation, "error", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="broadcast",
             session_id=caller_session_id,
@@ -475,12 +509,16 @@ async def agent_peer_approve_tools(
     - `agent_peer_approve_tools({"target_agent_id":"agent-b","target_session_id":"peer-...","decision":"selection","approved_call_ids":["call_1"],"rejected_call_ids":["call_2"]})`
     """
 
+    started = time.monotonic()
+    operation = "approve_tools"
     s = get_settings()
     caller_session_id = _session_id_from_context(context, f"peer-{s.agent_id}")
     trace_id = f"trace-{uuid.uuid4().hex}"
     target_id = (target_agent_id or "").strip()
     peer_session_id = (target_session_id or "").strip()
     if not target_id:
+        _record_tool_operation(operation, "invalid_target", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="delegate",
             session_id=caller_session_id,
@@ -492,6 +530,8 @@ async def agent_peer_approve_tools(
             trace_id=trace_id,
         )
     if not peer_session_id:
+        _record_tool_operation(operation, "invalid_target_session", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="delegate",
             session_id=caller_session_id,
@@ -509,6 +549,8 @@ async def agent_peer_approve_tools(
             rejected_call_ids=rejected_call_ids,
         )
     except ValueError as exc:
+        _record_tool_operation(operation, "invalid_decision", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="delegate",
             session_id=caller_session_id,
@@ -521,6 +563,8 @@ async def agent_peer_approve_tools(
         )
     final_delivery_mode = (s.agent_peer_delivery_mode or "direct").strip().lower()
     if final_delivery_mode not in {"direct", "relay"}:
+        _record_tool_operation(operation, "invalid_delivery_mode", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="delegate",
             session_id=caller_session_id,
@@ -567,6 +611,7 @@ async def agent_peer_approve_tools(
             target_base_url = target_base_url or str(submit.get("target_base_url") or "").strip().rstrip("/")
             if not target_base_url:
                 raise ValueError("目标 Agent 未提供 base_url")
+        _record_tool_operation(operation, "submit_ok", started)
         accepted = bool(submit.get("accepted", False))
         if not accepted:
             raise ValueError("目标 Agent 未确认 resume 入队（accepted=false）")
@@ -576,6 +621,7 @@ async def agent_peer_approve_tools(
             session_id=peer_session_id,
             timeout_seconds=float(max(1, int(s.agent_peer_stream_timeout_seconds))),
         )
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state=summary.final_state)
         env = build_agent_peer_envelope(
             caller_agent_id=s.agent_id,
             caller_session_id=caller_session_id,
@@ -619,6 +665,8 @@ async def agent_peer_approve_tools(
         )
         return _json_text(env.model_dump())
     except Exception as exc:
+        _record_tool_operation(operation, "error", started)
+        record_a2a_terminal_state(component="agent_peer_tool", operation=operation, final_state="failed")
         return _build_error_envelope_text(
             intent="delegate",
             session_id=caller_session_id,

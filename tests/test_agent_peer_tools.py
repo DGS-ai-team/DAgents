@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from app.harness.tools import agent_peer, agent_peer_common, agent_peer_registry
+from app.observability.metrics import metrics_text
 from tests.test_support.stub_settings import settings_namespace
 
 
@@ -167,6 +168,15 @@ class AgentPeerApproveRelayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content["http_read_retry_attempts"], 2)
         self.assertTrue(content["stream_replay_from_start"])
         self.assertEqual(payload["task"]["state"], "succeeded")
+        metrics = metrics_text()[0].decode("utf-8")
+        self.assertIn(
+            'dagents_a2a_operations_total{component="agent_peer_tool",operation="approve_tools",status="submit_ok"}',
+            metrics,
+        )
+        self.assertIn(
+            'dagents_a2a_terminal_states_total{component="agent_peer_tool",final_state="succeeded",operation="approve_tools"}',
+            metrics,
+        )
 
 
 class _FakeRegistryReadResponse:

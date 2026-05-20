@@ -52,7 +52,7 @@
 - **上下文模型**：`app/context/models.py`（`OpenAIConversationContext`、`PendingToolCall` 等）
 - **历史与落盘**：`app/harness/history/raw_message_journal.py`、`app/harness/memory/store.py`
 - **工具集**：`app/harness/tools/*`（bash、fs、agent_peer、async_store 等），由 `build_openai_toolkit()` 组装
-- **可观测性**：`app/observability/metrics.py`（可选 `/metrics`）
+- **可观测性**：`app/observability/metrics.py`（Agent API 可选 `/metrics`；Register Center 提供 `/metrics`）
 - **压缩子 Agent**：`app/core/summary_agent/agent.py`（由编排器按 token 阈值触发）
 
 ## 3. 核心概念

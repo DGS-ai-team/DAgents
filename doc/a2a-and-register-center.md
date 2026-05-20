@@ -30,7 +30,7 @@
 
 | 组件 | 职责 |
 |------|------|
-| **Register Center** | 内存表维护 **`agent_id` + `base_url` + `discovery_group`（可多组）**；**不提供**全量 Agent 列表（查询必须带 **`discovery_group`**）；提供 **`/v1/broadcast`**（按分组聚合目标并 **HTTP POST** 各 Agent 的 **`/v1/messages`**）、**`/v1/relay`**（按 **`target_agent_id`** 单跳转发到对端 **`/v1/messages`**，并校验 **`caller_groups`** 与目标分组是否有交集）。 |
+| **Register Center** | 默认以内存表维护 **`agent_id` + `base_url` + `discovery_group`（可多组）**，可通过 **`REGISTER_CENTER_STORE_PATH`** 启用 JSON 文件持久化；**不提供**全量 Agent 列表（查询必须带 **`discovery_group`**）；提供 **`/v1/broadcast`**（按分组聚合目标并 **HTTP POST** 各 Agent 的 **`/v1/messages`**）、**`/v1/relay`**（按 **`target_agent_id`** 单跳转发到对端 **`/v1/messages`**，并校验 **`caller_groups`** 与目标分组是否有交集）。 |
 | **主 Agent（调用方）** | 通过 **`agent_*`** 工具发 HTTP；点对点投递时把 **`AgentPeerEnvelope`** JSON 放进 **`POST /v1/messages` 的 `content`**；用 **`client_id` + `session_id`** 连接对端 **`GET /v1/streams`** 汇总 SSE。 |
 | **对端 Agent** | 与普通会话相同：入队 **`message`** → 编排器解析 **`content`**（若为 A2A 信封则由业务/模型理解）；若触发工具审批，调用方可用 **`agent_peer_approve_tools`** 向对端 **`POST resume`**。 |
 
@@ -48,6 +48,7 @@
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | **GET** | **`/health`** | 健康检查与当前登记数量。 |
+| **GET** | **`/metrics`** | Prometheus 文本指标；包含 Register Center relay/broadcast A2A 指标。 |
 | **POST** | **`/v1/agents`** | 登记或 **覆盖** 同一 **`agent_id`**；请求体含 **`base_url`**、**`discovery_group`**（字符串或字符串列表）与可选 **`ttl_seconds`**。 |
 | **GET** | **`/v1/agents?discovery_group=...`** | **必填** 分组参数；返回该组内 Agent 列表（精确匹配分组）。 |
 | **GET** | **`/v1/agents/{agent_id}?discovery_group=...`** | 调用方分组必须在目标记录的 **`discovery_group`** 中，否则 **404**（防跨组探测）。 |
@@ -55,7 +56,7 @@
 | **POST** | **`/v1/broadcast`** | 体字段含 **`message`**、**`discovery_group_ids`**、**`source`**；中心按组 **`store.list`** 合并去重后，对每个目标 **`POST {base_url}/v1/messages`**，且 **`content` 为广播正文本身**（**非** `AgentPeerEnvelope`）。每个目标使用中心生成的独立 **`session_id` / `client_id`**。 |
 | **POST** | **`/v1/relay`** | 体字段含 **`target_agent_id`**、**`caller_groups`**（可空）、与下游一致的 **`session_id` / `client_id` / `request_type` / `source` / `priority`**；**`message`** 中继带 **`content`**，**`resume`** 中继带 **`resume_value`**；校验目标存在且 **`caller_groups` 与目标分组有交集**（若 **`caller_groups` 非空**）后转发到 **`{base_url}/v1/messages`**。 |
 
-**局限（MVP）**：登记表为 **进程内内存**；多实例 Register Center **不**共享状态；生产需替换存储或前置负载策略。
+**存储（MVP）**：默认登记表为 **进程内内存**；设置 **`REGISTER_CENTER_STORE_PATH`** 后启用单文件 JSON 持久化，写入、删除和 TTL 清理会原子写回文件。多实例 Register Center 仍 **不**共享状态；生产多副本需替换共享存储或前置负载策略。
 
 ### 2.3 主 Agent API 自登记
 
@@ -69,6 +70,7 @@
 
 | 环境变量 / 配置字段 | 含义 |
 |---------------------|------|
+| **`REGISTER_CENTER_STORE_PATH`** | Register Center 服务自身配置；可选 JSON 存储文件路径，未配置时使用进程内内存表。 |
 | **`REGISTRY_URL`** | Register Center 根 URL；**`agent_discover` / `agent_broadcast` / `relay` 投递** 依赖（**`direct` 模式下的 `agent_send_message` 发现列表** 也依赖它刷新缓存）。 |
 | **`AGENT_ID`** | 本实例在目录中的唯一 ID（常与 **`.runtime/agent/agent_id`** 解析逻辑配合，见 **`Settings`**）。 |
 | **`DISCOVERY_GROUPS`** | 本 Agent 所属发现分组（CSV）；**为空** 时跳过自登记，且 **`agent_discover`** 等工具会失败。 |

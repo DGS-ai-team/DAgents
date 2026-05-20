@@ -8,6 +8,7 @@ import httpx
 
 from app.config.settings import get_settings
 from app.harness.tools.agent_peer_common import DEFAULT_HTTP_TIMEOUT_SECONDS, a2a_auth_headers, stable_groups
+from app.observability.metrics import record_a2a_operation
 
 _AGENT_LIST_CACHE: list[dict[str, Any]] = []
 _AGENT_LIST_CACHE_UPDATED_AT_UNIX_MS = 0
@@ -101,25 +102,54 @@ def require_registry_url() -> str:
 
 
 def discover_agents_by_groups(groups: list[str]) -> list[dict[str, Any]]:
+    started = time.monotonic()
     final_groups = stable_groups(groups)
     if not final_groups:
+        record_a2a_operation(
+            component="agent_peer",
+            operation="discover_agents",
+            status="empty_groups",
+            elapsed_seconds=time.monotonic() - started,
+        )
         return []
-    registry_url = require_registry_url()
-    by_id: dict[str, dict[str, Any]] = {}
-    with httpx.Client(timeout=DEFAULT_HTTP_TIMEOUT_SECONDS) as client:
-        for group_id in final_groups:
-            resp = get_with_retries(client, f"{registry_url}/v1/agents", params={"discovery_group": group_id}, headers=a2a_auth_headers())
-            resp.raise_for_status()
-            body = resp.json()
-            for item in body.get("agents", []):
-                agent_id = str(item.get("agent_id") or "").strip()
-                if not agent_id:
-                    continue
-                by_id[agent_id] = item
-    return sorted(by_id.values(), key=lambda item: str(item.get("agent_id") or ""))
+    try:
+        registry_url = require_registry_url()
+        by_id: dict[str, dict[str, Any]] = {}
+        with httpx.Client(timeout=DEFAULT_HTTP_TIMEOUT_SECONDS) as client:
+            for group_id in final_groups:
+                resp = get_with_retries(
+                    client,
+                    f"{registry_url}/v1/agents",
+                    params={"discovery_group": group_id},
+                    headers=a2a_auth_headers(),
+                )
+                resp.raise_for_status()
+                body = resp.json()
+                for item in body.get("agents", []):
+                    agent_id = str(item.get("agent_id") or "").strip()
+                    if not agent_id:
+                        continue
+                    by_id[agent_id] = item
+        agents = sorted(by_id.values(), key=lambda item: str(item.get("agent_id") or ""))
+        record_a2a_operation(
+            component="agent_peer",
+            operation="discover_agents",
+            status="ok",
+            elapsed_seconds=time.monotonic() - started,
+        )
+        return agents
+    except Exception:
+        record_a2a_operation(
+            component="agent_peer",
+            operation="discover_agents",
+            status="error",
+            elapsed_seconds=time.monotonic() - started,
+        )
+        raise
 
 
 def attach_agent_card_summary(agent: dict[str, Any]) -> dict[str, Any]:
+    started = time.monotonic()
     enriched = dict(agent)
     base = str(enriched.get("base_url") or "").strip().rstrip("/")
     parsed = urlparse(base if "://" in base else f"http://{base}") if base else None
@@ -148,6 +178,12 @@ def attach_agent_card_summary(agent: dict[str, Any]) -> dict[str, Any]:
     if not base:
         card_info["error"] = "base_url 为空，无法读取 agent card"
         enriched["agent_card"] = card_info
+        record_a2a_operation(
+            component="agent_peer",
+            operation="agent_card",
+            status="missing_base_url",
+            elapsed_seconds=time.monotonic() - started,
+        )
         return enriched
     try:
         with httpx.Client(timeout=DEFAULT_HTTP_TIMEOUT_SECONDS) as client:
@@ -157,11 +193,23 @@ def attach_agent_card_summary(agent: dict[str, Any]) -> dict[str, Any]:
         card_info["card_payload"] = card
         card_info["error"] = None
         enriched["agent_card"] = card_info
+        record_a2a_operation(
+            component="agent_peer",
+            operation="agent_card",
+            status="ok",
+            elapsed_seconds=time.monotonic() - started,
+        )
         return enriched
     except Exception as exc:
         card_info["card_payload"] = None
         card_info["error"] = str(exc)
         enriched["agent_card"] = card_info
+        record_a2a_operation(
+            component="agent_peer",
+            operation="agent_card",
+            status="error",
+            elapsed_seconds=time.monotonic() - started,
+        )
         return enriched
 
 
