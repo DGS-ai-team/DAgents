@@ -86,7 +86,14 @@ class OpenAIImplicitReActRuntime:
         """
         # 模型流取消：补一条无 tool_calls 的 assistant，避免半截正文丢失；不触发「必须有 tool」规则。
         if (ctx.assistant_stream_buffer or "").strip():
-            append_openai_message_with_journal(ctx, {"role": "assistant", "content": ctx.assistant_stream_buffer})
+            append_openai_message_with_journal(
+                ctx,
+                {
+                    "role": "assistant",
+                    "content": ctx.assistant_stream_buffer,
+                    "reasoning_content": "",
+                },
+            )
         ctx.assistant_stream_buffer = ""
         ctx.run_turn_phase = RunTurnPhase.IDLE
 
@@ -258,14 +265,18 @@ class OpenAIImplicitReActRuntime:
             return
         assistant_content = model_msg.get("content", "") or ""
         tool_calls = model_msg.get("tool_calls", [])
+        reasoning_content = (
+            "" if model_msg.get("reasoning_content") is None else str(model_msg.get("reasoning_content"))
+        )
         # ----- 子分支：模型要求调用工具（此处仍不 invoke，只登记 + 等人批）----- #
         if tool_calls:
-            # 必须把 assistant + tool_calls 写入历史，否则下次请求模型时上下文不完整。
+            # 必须把 assistant + tool_calls + reasoning_content 写入历史，供思考模式后续 API 回传。
             append_openai_message_with_journal(
                 ctx,
                 {
                     "role": "assistant",
                     "content": assistant_content or "",
+                    "reasoning_content": reasoning_content,
                     "tool_calls": tool_calls,
                 },
             )
@@ -300,7 +311,14 @@ class OpenAIImplicitReActRuntime:
             return
 
         # ----- 子分支：本轮无工具调用，视为最终回复 ----- #
-        append_openai_message_with_journal(ctx, {"role": "assistant", "content": assistant_content})
+        append_openai_message_with_journal(
+            ctx,
+            {
+                "role": "assistant",
+                "content": assistant_content,
+                "reasoning_content": reasoning_content,
+            },
+        )
         ctx.messages_total_tokens = resolve_messages_total_tokens(
             ctx.messages,
             system_prompt=dynamic_system_prompt,
@@ -361,6 +379,7 @@ class OpenAIImplicitReActRuntime:
         stream = await self._client.chat.completions.create(**kwargs)
         # 流式阶段只累积；最终一条 final 与 OpenAI 非流式 message 结构对齐，供 run_turn 分支判断 tool_calls。
         full_content: str = ""
+        full_reasoning_content: str = ""
         tool_calls_acc: dict[int, dict[str, Any]] = {}
         model_name = str(self._model_cfg.get("model") or "")
         # 与流式 `finish_reason` 分片同源：挂到 `final` 上供 `run_turn` 收口 `done` 使用（网关偶发缺末包时可为空）。
@@ -386,6 +405,10 @@ class OpenAIImplicitReActRuntime:
             delta = getattr(choice, "delta", None)
             if delta is not None:
                 role = getattr(delta, "role", None)
+                reasoning_delta = getattr(delta, "reasoning_content", None)
+                if reasoning_delta:
+                    # 与 tool/content 分片可交错到达；先累加再按需向外发 reasoning 事件。
+                    full_reasoning_content += str(reasoning_delta)
                 if role in (None, "assistant"):
                     tc_list = getattr(delta, "tool_calls", None) or []
                     # 如果tool_calls不为空，则处理tool_calls
@@ -432,7 +455,6 @@ class OpenAIImplicitReActRuntime:
                     else:
                         # 与 tool 分片互斥：同一 chunk 通常不会同时带正文与 tool_calls。
                         content_delta = getattr(delta, "content", None)
-                        reasoning_delta = getattr(delta, "reasoning_content", None)
                         if content_delta:
                             full_content += str(content_delta)
                             yield {"kind": "assistant_delta", "text": str(content_delta)}
@@ -461,7 +483,11 @@ class OpenAIImplicitReActRuntime:
             )
         yield {
             "kind": "final",
-            "message": {"content": full_content, "tool_calls": tool_calls},
+            "message": {
+                "content": full_content,
+                "tool_calls": tool_calls,
+                "reasoning_content": full_reasoning_content,
+            },
             "finish_reason": stream_tail_finish_reason,
         }
 

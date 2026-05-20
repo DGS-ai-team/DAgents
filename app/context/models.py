@@ -63,11 +63,17 @@ def _openai_messages_to_message_records(messages: list[dict[str, Any]]) -> list[
                 )
             )
         elif role == "assistant" and m.get("tool_calls"):
+            meta: dict[str, Any] = {"tool_calls": _json_safe_deep(m.get("tool_calls"))}
+            rc = m.get("reasoning_content")
+            if rc is not None and str(rc).strip():
+                meta["reasoning_content"] = str(rc)
+            records.append(MessageRecord(role="assistant", content=ctext, meta=meta))
+        elif role == "assistant" and m.get("reasoning_content") is not None and str(m.get("reasoning_content") or "").strip():
             records.append(
                 MessageRecord(
                     role="assistant",
                     content=ctext,
-                    meta={"tool_calls": _json_safe_deep(m.get("tool_calls"))},
+                    meta={"reasoning_content": str(m.get("reasoning_content"))},
                 )
             )
         else:
