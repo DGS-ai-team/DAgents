@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.test_support.stub_settings import settings_namespace
+from app.harness.triggers.runtime import reset_trigger_runtime
 
 
 if "openai" not in sys.modules:
@@ -123,6 +124,8 @@ class FastApiRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         """清理服务实例列表，避免用例间串状态。"""
         FakeAgentService.instances.clear()
+        reset_trigger_runtime()
+        self.addCleanup(reset_trigger_runtime)
         self._tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmpdir.cleanup)
 

@@ -366,6 +366,21 @@ def decide_tool_approval(
             risk_level="high" if require_approval else "low",
             mode="shell:rule",
         )
+    if normalized_tool in {"trigger_list", "trigger_get"}:
+        return ToolApprovalDecision(
+            require_approval=False,
+            reason="触发器只读查询允许自动执行。",
+            risk_level="low",
+            mode="trigger:read",
+        )
+    if normalized_tool in {"trigger_create", "trigger_update", "trigger_delete", "trigger_fire"}:
+        risk_level = "high" if normalized_tool in {"trigger_delete", "trigger_fire"} else "medium"
+        return ToolApprovalDecision(
+            require_approval=True,
+            reason="触发器会改变自主行动入口或主动唤起 Agent，需人工确认。",
+            risk_level=risk_level,
+            mode="trigger:write",
+        )
     return ToolApprovalDecision(
         require_approval=True,
         reason="未命中自动放行策略，默认保守要求审批。",
@@ -401,6 +416,14 @@ def get_tools() -> list[Any]:
     from app.harness.tools.bash import bash_job_cancel, bash_job_status, bash_job_tail, bash_run
     from app.harness.tools.fs import read_file, search_file, search_replace, write_file
     from app.harness.tools.skills import clear_skills, load_skills, unload_skills
+    from app.harness.tools.triggers import (
+        trigger_create,
+        trigger_delete,
+        trigger_fire,
+        trigger_get,
+        trigger_list,
+        trigger_update,
+    )
 
     # 先最小集启用，后续可按稳定性逐步放开更多工具。
     tools: list[Any] = []
@@ -417,6 +440,12 @@ def get_tools() -> list[Any]:
         bash_job_cancel,
         async_tool_status,
         async_tool_cancel,
+        trigger_list,
+        trigger_get,
+        trigger_create,
+        trigger_update,
+        trigger_delete,
+        trigger_fire,
         agent_discover,
         agent_send_message,
         agent_broadcast,

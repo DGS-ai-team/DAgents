@@ -95,16 +95,22 @@
 
 ## 1. 已注册工具（固定顺序）
 
-下列 **10** 个工具与 **`get_tools()`** 返回顺序一致（便于单测与日志对齐）。
+下列工具与 **`get_tools()`** 返回顺序一致（便于单测与日志对齐）。
 
 | 工具名 | 执行形态 | 定义位置 | 作用概要 |
 |--------|----------|----------|----------|
 | **`load_skills`** | 同步 | **`app/harness/tools/skills.py`** | 按名称加载会话 **`loaded_skills`**，并返回可用技能元数据（受 **`agent_skills_max_in_prompt`** 等配置影响）。 |
-| **`read_file`** | 同步 | **`app/harness/tools/fs.py`** | 流式按 **`line_offset`/`line_limit`** 分页；头含 **`next_line_offset`**（无行号前缀）。 |
-| **`search_file`** | 同步 | **`fs.py`** | 流式正则检索；**`next_index_offset`** 翻页；命中块建议 **`read_file`** 参数；相邻命中合并上下文。 |
-| **`search_replace`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内按 **`old_string`/`new_string`** 精确子串替换（可选 **`replace_all`**）。 |
-| **`write_file`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内整体覆盖写入。 |
+| **`read_file`** | 同步 | **`app/harness/tools/fs.py`** | 流式按 **`line_offset`/`line_limit`** 分页；头含 **`next_line_offset`**；默认无行号，可用 **`include_line_numbers`** 输出 `行号<TAB>正文`。 |
+| **`search_file`** | 同步 | **`fs.py`** | 流式检索；支持 regex/literal、大小写敏感开关、上下文行数与 **`next_index_offset`** 翻页；命中块建议 **`read_file`** 参数；相邻命中合并上下文。 |
+| **`search_replace`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内按 **`old_string`/`new_string`** 精确子串替换（可选 **`replace_all`**）；保留原始文件文本并返回匹配行与 unified diff。 |
+| **`write_file`** | 同步 | **`fs.py`** | 在 **`FS_ROOT`** 内写入整文件；支持父目录自动创建与 **`if_exists=overwrite/error/skip_if_same`**。 |
 | **`bash_run`** | 同步 | **`app/harness/tools/bash.py`** | 统一 shell 执行（**`bash` / `cmd` / `powershell`**），含命令切段与安全策略（如非 root 下对 **`su`/`sudo`** 的拦截）。 |
+| **`trigger_list`** | 同步 | **`app/harness/tools/triggers.py`** | 列出触发器资源，支持包含或过滤禁用项；只读低风险。 |
+| **`trigger_get`** | 同步 | **`triggers.py`** | 查看单个触发器配置和状态；只读低风险。 |
+| **`trigger_create`** | 同步 | **`triggers.py`** | 创建触发器资源，用于沉淀定时、事件、指标等自主唤起规则；默认需要审批。 |
+| **`trigger_update`** | 同步 | **`triggers.py`** | 更新触发器条件、模板、风险等级或启用状态；默认需要审批。 |
+| **`trigger_delete`** | 同步 | **`triggers.py`** | 删除触发器资源；默认需要审批。 |
+| **`trigger_fire`** | 异步 | **`triggers.py`** | 手动触发触发器并投递到 **`AgentService`** 队列；不会绕过工具审批；默认需要审批。 |
 | **`agent_discover`** | 同步 | **`app/harness/tools/agent_peer.py`** | 查询 **Register Center** 可见分组下的 Agent 列表，并尝试拉取 **`.well-known/agent-card.json`** 摘要。 |
 | **`agent_send_message`** | **异步** | **`agent_peer.py`** | 向指定 **`target_agent_id`** 投递 **`AgentPeerEnvelope`**（**`direct`/`relay`**），并汇总对端 SSE；依赖 **`REGISTRY_URL`**、**`DISCOVERY_GROUPS`** 等。 |
 | **`agent_broadcast`** | **异步** | **`agent_peer.py`** | 调用 **`POST /v1/broadcast`** 后并发拉取各目标 SSE。 |
@@ -126,6 +132,7 @@
 | **Shell** | 宿主 OS、策略文件（**`bash.py`** / **`tool.py`** 审批分支）；Windows/Linux 行为差异见 **`bash.py`**。 |
 | **Skills** | **`AGENT_SKILLS_*`**（开关与注入上限等）；技能根目录固定 **`<运行根>/.runtime/skills`**；**`get_system_prompt`** 是否注入技能段由 **`agent_skills_enabled`** 等控制，与 **`load_skills`** 写入 **`ctx.loaded_skills`** 配合。 |
 | **A2A** | **`REGISTRY_URL`**、**`DISCOVERY_GROUPS`**、**`AGENT_ID`**、**`AGENT_PUBLIC_BASE_URL`**（自登记）、**`AGENT_PEER_DELIVERY_MODE`**、各类超时；详见 [a2a-and-register-center.md](./a2a-and-register-center.md)。 |
+| **Triggers** | **`TRIGGERS_ENABLED`**、**`TRIGGER_SCHEDULER_POLL_SECONDS`**；触发器资源固定存储在 **`<运行根>/.runtime/triggers/triggers.json`**。 |
 
 ---
 

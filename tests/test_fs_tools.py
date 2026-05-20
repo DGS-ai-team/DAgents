@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.harness.tools.fs import read_file, search_file, search_replace
+from app.harness.tools.fs import read_file, search_file, search_replace, write_file
 
 
 class FsToolsTests(unittest.TestCase):
@@ -61,6 +61,26 @@ class FsToolsTests(unittest.TestCase):
         self.assertIn("next_line_offset: 4", out)
         self.assertIn("后方是否还有未读取行: 是", out)
 
+    def test_read_file_can_include_line_numbers(self) -> None:
+        p = self._root / "numbered.txt"
+        p.write_text("a\nb\n", encoding="utf-8")
+        out = read_file(path="numbered.txt", include_line_numbers=True)
+        body = out.split("---", 1)[-1].strip()
+        self.assertEqual(body, "1\ta\n2\tb")
+        self.assertIn("正文是否包含行号: 是", out)
+
+    def test_write_file_if_exists_policies(self) -> None:
+        p = self._root / "nested" / "out.txt"
+        out = write_file(path="nested/out.txt", content="hello", create_parent_dirs=False)
+        self.assertIn("父目录不存在", out)
+        out = write_file(path="nested/out.txt", content="hello")
+        self.assertIn("新建写入", out)
+        out = write_file(path="nested/out.txt", content="hello", if_exists="skip_if_same")
+        self.assertIn("内容未变化", out)
+        out = write_file(path="nested/out.txt", content="changed", if_exists="error")
+        self.assertIn("文件已存在", out)
+        self.assertEqual(p.read_text(encoding="utf-8"), "hello")
+
     def test_search_file_navigation_and_merge(self) -> None:
         """search_file 应含 read_file 建议、next_index_offset，且相邻命中合并上下文。"""
         p = self._root / "hits.txt"
@@ -73,6 +93,24 @@ class FsToolsTests(unittest.TestCase):
         # 三处命中相邻，合并后上下文里的 TODO 不应重复出现三次独立块
         self.assertEqual(out.count("上下文:"), 1)
         self.assertNotRegex(out.split("---", 1)[-1], r"(?m)^\d+>")
+
+    def test_search_file_supports_literal_and_ignore_case(self) -> None:
+        p = self._root / "literal.txt"
+        p.write_text("Error: a.b\nerror: axb\n", encoding="utf-8")
+        regex_out = search_file(path="literal.txt", pattern="a.b", context_lines=0)
+        literal_out = search_file(path="literal.txt", pattern="a.b", literal=True, context_lines=0)
+        ignore_case_out = search_file(path="literal.txt", pattern="ERROR", case_sensitive=False, context_lines=0)
+        self.assertIn("全文件命中数: 2", regex_out)
+        self.assertIn("全文件命中数: 1", literal_out)
+        self.assertIn("全文件命中数: 2", ignore_case_out)
+
+    def test_search_replace_preserves_json_raw_text_and_reports_lines(self) -> None:
+        p = self._root / "data.json"
+        p.write_text('{"a":1,"b":2}\n', encoding="utf-8")
+        out = search_replace(path="data.json", old_string='"a":1', new_string='"a":3')
+        self.assertIn("成功: 是", out)
+        self.assertIn("匹配行: 1", out)
+        self.assertEqual(p.read_text(encoding="utf-8"), '{"a":3,"b":2}\n')
 
 
 if __name__ == "__main__":

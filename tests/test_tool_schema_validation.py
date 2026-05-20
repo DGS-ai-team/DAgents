@@ -14,8 +14,10 @@ from app.harness.tools.tool import (
     ToolApprovalDecision,
     _tool_to_spec,
     _validate_tool_arguments,
+    build_openai_toolkit,
     decide_tool_approval,
 )
+from app.harness.tools.triggers import trigger_create, trigger_fire, trigger_list
 
 
 class ToolSchemaValidationTests(unittest.TestCase):
@@ -54,6 +56,39 @@ class ToolSchemaValidationTests(unittest.TestCase):
                 args_schema,
                 {"path": "a.txt", "old_string": "", "new_string": "new"},
             )
+
+    def test_trigger_tools_are_registered_and_schema_validates(self) -> None:
+        """触发器工具应进入模型可见工具表，并通过 Pydantic schema 拒绝未知字段。"""
+        tools_payload, tool_map = build_openai_toolkit()
+        tool_names = {item["function"]["name"] for item in tools_payload}
+
+        self.assertIn("trigger_list", tool_names)
+        self.assertIn("trigger_create", tool_names)
+        self.assertIn("trigger_fire", tool_names)
+        self.assertIn("trigger_id", tool_map["trigger_fire"].parameters["properties"])
+
+        create_spec = _tool_to_spec(trigger_create)
+        self.assertIn("name", create_spec.parameters["required"])
+        self.assertIn("task_template", create_spec.parameters["required"])
+        with self.assertRaisesRegex(ValueError, "extra"):
+            create_spec.invoke({"name": "n", "task_template": "t", "extra": True}, None)
+
+    def test_trigger_tool_approval_policy(self) -> None:
+        """触发器只读工具自动放行，写入和 fire 默认要求审批。"""
+        settings = SimpleNamespace(agent_tool_approval_mode="rule")
+
+        with patch("app.harness.tools.tool.get_settings", return_value=settings):
+            read_decision = decide_tool_approval(tool_name="trigger_list", tool_args={})
+            write_decision = decide_tool_approval(tool_name="trigger_create", tool_args={})
+            fire_decision = decide_tool_approval(tool_name="trigger_fire", tool_args={})
+
+        self.assertFalse(read_decision.require_approval)
+        self.assertEqual(read_decision.mode, "trigger:read")
+        self.assertTrue(write_decision.require_approval)
+        self.assertEqual(write_decision.mode, "trigger:write")
+        self.assertEqual(write_decision.risk_level, "medium")
+        self.assertTrue(fire_decision.require_approval)
+        self.assertEqual(fire_decision.risk_level, "high")
 
     def test_decide_tool_approval_returns_reason_and_risk(self) -> None:
         """结构化审批决策应保留原 bool 语义并说明来源。"""

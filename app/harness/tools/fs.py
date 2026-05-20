@@ -9,7 +9,7 @@ import re
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,12 +24,16 @@ DEFAULT_SEARCH_INDEX_OFFSET = 0
 DEFAULT_SEARCH_COUNT_LIMIT = 5
 # 命中索引列表上限（超出仍统计总数，分页仅针对已记录索引）
 MAX_SEARCH_HIT_INDEXES = 10_000
+MAX_SEARCH_CONTEXT_LINES = 50
+
+
 class ReadFileArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str = Field(min_length=1)
     line_offset: Optional[int] = 1
     line_limit: Optional[int] = Field(default=100, ge=1)
+    include_line_numbers: bool = False
 
 
 class WriteFileArgs(BaseModel):
@@ -37,6 +41,8 @@ class WriteFileArgs(BaseModel):
 
     path: str = Field(min_length=1)
     content: str
+    create_parent_dirs: bool = True
+    if_exists: Literal["overwrite", "error", "skip_if_same"] = "overwrite"
 
 
 class SearchReplaceArgs(BaseModel):
@@ -55,6 +61,9 @@ class SearchFileArgs(BaseModel):
     pattern: str = Field(min_length=1)
     index_offset: Optional[int] = Field(default=0, ge=0)
     count_limit: Optional[int] = Field(default=5, ge=1)
+    context_lines: Optional[int] = Field(default=10, ge=0, le=MAX_SEARCH_CONTEXT_LINES)
+    case_sensitive: bool = True
+    literal: bool = False
 
 
 _TEXT_SUFFIXES = {
@@ -112,8 +121,15 @@ def _resolve_under_root(path: str) -> Path:
     return resolved
 
 
+def _read_file_raw_text(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in _TEXT_SUFFIXES:
+        return path.read_text(encoding="utf-8", errors="replace")
+    raise ValueError(f"不支持读取该后缀文件：{suffix or '<no-suffix>'}")
+
+
 def _read_file_text(path: Path) -> str:
-    """读取工作区内文本文件全文（与 `search_replace` 匹配口径一致）。
+    """读取工作区内文本文件全文（与 `read_file` 展示口径一致）。
 
     逻辑：
     1. `.json` 先解析再 pretty-print，便于模型阅读与编辑；
@@ -152,6 +168,26 @@ def _iter_file_lines(path: Path) -> Iterator[str]:
     with path.open(encoding="utf-8", errors="replace") as fh:
         for raw in fh:
             yield raw.rstrip("\r\n")
+
+
+def _format_numbered_lines(lines: list[str], *, start_line: int) -> list[str]:
+    return [f"{start_line + idx}\t{line}" for idx, line in enumerate(lines)]
+
+
+def _line_numbers_for_occurrences(text: str, needle: str, *, limit: int = 20) -> tuple[list[int], bool]:
+    lines: list[int] = []
+    start = 0
+    truncated = False
+    while True:
+        pos = text.find(needle, start)
+        if pos < 0:
+            break
+        if len(lines) < limit:
+            lines.append(text.count("\n", 0, pos) + 1)
+        else:
+            truncated = True
+        start = pos + max(1, len(needle))
+    return lines, truncated
 
 
 def _window_from_total(total: int, line_offset: int, line_limit: int) -> tuple[int, int]:
@@ -348,6 +384,7 @@ def read_file(
     path: str,
     line_offset: Optional[int] = 1,
     line_limit: Optional[int] = 100,
+    include_line_numbers: bool = False,
     context: OpenAIConversationContext | None = None,
 ) -> str:
     """使用场景：在 **`FS_ROOT`** 内按行窗口读取文本，供 **`search_replace`** 复制锚定文本；大文件用 **`line_offset`/`line_limit`** 分段读。
@@ -356,6 +393,7 @@ def read_file(
     - `path`：工作区内路径（必填）。
     - `line_offset`：起始行（1-based，默认 1）；非正整数时从文件末尾倒数起算。
     - `line_limit`：最多读取行数（默认 100），**分页主参数**。
+    - `include_line_numbers`：是否在正文前加 1-based 行号和 tab，默认 false。
 
     返回说明：
     - 成功：元数据头（含 **`next_line_offset`**、行区间）+ `---` + **纯文本正文**（无行号前缀）。
@@ -379,7 +417,8 @@ def read_file(
         count = DEFAULT_LINE_LIMIT if line_limit is None else max(1, int(line_limit))
         window_lines, total, start, end = _read_line_window(target, offset, count)
         has_more_after = end < total
-        body = "\n".join(window_lines)
+        body_lines = _format_numbered_lines(window_lines, start_line=start + 1) if include_line_numbers else window_lines
+        body = "\n".join(body_lines)
         body, byte_truncated = _apply_max_bytes_to_body(
             body,
             byte_limit,
@@ -398,6 +437,7 @@ def read_file(
             f"本页行区间: {start + 1}-{end} / {total}",
             f"next_line_offset: {next_line}",
             f"后方是否还有未读取行: {'是' if has_more_after else '否'}",
+            f"正文是否包含行号: {'是' if include_line_numbers else '否'}",
             f"本页内容是否因体积上限截断: {'是' if byte_truncated else '否'}",
             "---",
         ]
@@ -413,6 +453,8 @@ read_file.args_schema = ReadFileArgs  # type: ignore[attr-defined]
 def write_file(
     path: str,
     content: str,
+    create_parent_dirs: bool = True,
+    if_exists: Literal["overwrite", "error", "skip_if_same"] = "overwrite",
     context: OpenAIConversationContext | None = None,
 ) -> str:
     """使用场景：在 **`FS_ROOT`** 内整文件覆盖写入（新文件或大段重写）。
@@ -420,9 +462,11 @@ def write_file(
     字段说明：
     - `path`：工作区内路径（必填）。
     - `content`：写入全文（必填）。
+    - `create_parent_dirs`：父目录不存在时是否自动创建，默认 true。
+    - `if_exists`：目标存在时的策略：`overwrite` / `error` / `skip_if_same`。
 
     返回说明：
-    - 成功：`OK: 已写入 ...`
+    - 成功：`OK: 已写入 ...` 或 `OK: 内容未变化 ...`
     - 失败：`ERROR: ...`
 
     调用范例：
@@ -431,13 +475,25 @@ def write_file(
     try:
         del context
         target = _resolve_under_root(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-
+        exists_before = target.exists()
+        if if_exists not in {"overwrite", "error", "skip_if_same"}:
+            return "ERROR: if_exists 仅支持 overwrite / error / skip_if_same。"
         if target.exists() and target.is_dir():
             return f"ERROR: 目标是目录，无法写入：{path!r}"
+        if exists_before and if_exists == "error":
+            return f"ERROR: 文件已存在，if_exists=error 阻止覆盖：{path!r}"
+        if exists_before and if_exists == "skip_if_same":
+            current = _read_file_raw_text(target)
+            if current == content:
+                return f"OK: 内容未变化，跳过写入 {path!r} ({len(content.encode('utf-8'))} bytes)"
+        if not target.parent.exists():
+            if not create_parent_dirs:
+                return f"ERROR: 父目录不存在且 create_parent_dirs=false：{str(target.parent)!r}"
+            target.parent.mkdir(parents=True, exist_ok=True)
 
         target.write_text(content, encoding="utf-8")
-        return f"OK: 已写入 {path!r} ({len(content.encode('utf-8'))} bytes)"
+        action = "覆盖写入" if exists_before else "新建写入"
+        return f"OK: 已{action} {path!r} ({len(content.encode('utf-8'))} bytes)"
     except Exception as exc:
         return f"ERROR: write_file 失败: {exc}"
 
@@ -479,8 +535,12 @@ def search_replace(
         if not old_string:
             return f"成功: 否\n路径: {path}\n错误: old_string 不能为空。\n---\n"
 
-        raw_text = _read_file_text(target)
+        raw_text = _read_file_raw_text(target)
         hit_count = raw_text.count(old_string)
+        hit_lines, hit_lines_truncated = _line_numbers_for_occurrences(raw_text, old_string)
+        line_hint = "、".join(str(item) for item in hit_lines)
+        if hit_lines_truncated:
+            line_hint += "、..."
         if hit_count == 0:
             return (
                 f"成功: 否\n路径: {path}\n"
@@ -489,7 +549,8 @@ def search_replace(
         if not replace_all and hit_count != 1:
             return (
                 f"成功: 否\n路径: {path}\n"
-                f"错误: old_string 匹配 {hit_count} 处；请扩大上下文或设 replace_all=true。\n---\n"
+                f"错误: old_string 匹配 {hit_count} 处；请扩大上下文或设 replace_all=true。\n"
+                f"匹配行: {line_hint or '未知'}\n---\n"
             )
 
         if replace_all:
@@ -499,9 +560,11 @@ def search_replace(
             new_text = raw_text.replace(old_string, new_string, 1)
             replaced = 1
 
+        if new_text == raw_text:
+            return f"成功: 是\n路径: {path}\n替换次数: 0\n匹配行: {line_hint or '未知'}\n---\n(内容未变化。)"
         target.write_text(new_text, encoding="utf-8")
         diff_text = _unified_diff_body(raw_text, new_text, path=path)
-        head = f"成功: 是\n路径: {path}\n替换次数: {replaced}\n---\n{diff_text}"
+        head = f"成功: 是\n路径: {path}\n替换次数: {replaced}\n匹配行: {line_hint or '未知'}\n---\n{diff_text}"
         return head
     except Exception as exc:
         return f"成功: 否\n路径: {path}\n错误: search_replace 失败: {exc}\n---\n"
@@ -516,6 +579,9 @@ def search_file(
     pattern: str,
     index_offset: Optional[int] = 0,
     count_limit: Optional[int] = 5,
+    context_lines: Optional[int] = 10,
+    case_sensitive: bool = True,
+    literal: bool = False,
     context: OpenAIConversationContext | None = None,
 ) -> str:
     """使用场景：在 **`FS_ROOT`** 内按**正则**逐行检索；分页返回命中及合并后的上下文（无行号前缀）。
@@ -525,6 +591,9 @@ def search_file(
     - `pattern`：Python **`re`** 正则（必填，非空）。
     - `index_offset`：跳过前 N 个命中（可选，默认 0）。
     - `count_limit`：本页最多展示命中数（可选，默认 5）。
+    - `context_lines`：每处命中前后展示的上下文行数，默认 10。
+    - `case_sensitive`：是否大小写敏感，默认 true。
+    - `literal`：是否把 pattern 当普通字符串而非正则，默认 false。
 
     返回说明：
     - 成功：元数据（含 **`next_index_offset`**）+ `---` + 命中块（含建议 **`read_file`** 参数）。
@@ -545,21 +614,25 @@ def search_file(
         raw_pat = str(pattern or "").strip()
         if not raw_pat:
             return "ERROR: pattern 不能为空。"
+        regex_pattern = re.escape(raw_pat) if literal else raw_pat
+        flags = 0 if case_sensitive else re.IGNORECASE
         try:
-            regex = re.compile(raw_pat)
+            regex = re.compile(regex_pattern, flags=flags)
         except re.error as exc:
             return f"ERROR: 正则无效: {exc}"
 
         hit_indexes, total_hits, total_file_lines, index_list_capped = _scan_regex_hits(target, regex)
         io_raw = DEFAULT_SEARCH_INDEX_OFFSET if index_offset is None else max(0, int(index_offset))
         cl_raw = DEFAULT_SEARCH_COUNT_LIMIT if count_limit is None else max(1, int(count_limit))
+        ctx_lines = DEFAULT_SEARCH_CONTEXT_LINES if context_lines is None else max(0, min(MAX_SEARCH_CONTEXT_LINES, int(context_lines)))
         byte_limit = _fs_tool_search_max_bytes()
 
         # 分页仅针对已存入 `hit_indexes` 的前若干下标（极端海量命中时见头字段说明）。
         pageable_total = len(hit_indexes)
         base_header = [
             f"文件: {target}",
-            f"正则: {raw_pat!r}",
+            f"pattern: {raw_pat!r}",
+            f"匹配模式: {'literal' if literal else 'regex'} / {'case-sensitive' if case_sensitive else 'ignore-case'}",
             f"全文件命中数: {total_hits}",
         ]
         if index_list_capped:
@@ -585,9 +658,8 @@ def search_file(
 
         blocks: list[str] = []
         if shown_hits:
-            ctx = DEFAULT_SEARCH_CONTEXT_LINES
             raw_ranges = [
-                (max(h - ctx, 0), min(h + ctx + 1, total_file_lines)) for h in shown_hits
+                (max(h - ctx_lines, 0), min(h + ctx_lines + 1, total_file_lines)) for h in shown_hits
             ]
             merged_ranges = _merge_line_ranges(raw_ranges)
             line_map = _load_lines_for_ranges(target, merged_ranges)
@@ -596,7 +668,7 @@ def search_file(
                 hit_indexes=hit_indexes,
                 total_hits=total_hits,
                 line_map=line_map,
-                context_lines=ctx,
+                context_lines=ctx_lines,
                 total_file_lines=total_file_lines,
             )
 

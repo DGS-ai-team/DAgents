@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
+from app.harness.tools.triggers import trigger_create, trigger_get, trigger_list
 from app.harness.triggers.models import TriggerCreateIn, TriggerUpdateIn
+from app.harness.triggers.runtime import reset_trigger_runtime, set_trigger_runtime
 from app.harness.triggers.scheduler import TriggerScheduler
 from app.harness.triggers.store import JsonTriggerStore
 
@@ -50,7 +53,35 @@ class TriggerStoreTests(unittest.TestCase):
             self.assertEqual(reloaded.get_trigger(created.trigger_id).name, "heartbeat")  # type: ignore[union-attr]
 
 
+class TriggerToolTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        reset_trigger_runtime()
+
+    def test_trigger_tools_use_shared_runtime_store(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JsonTriggerStore(Path(tmp) / "triggers.json")
+            set_trigger_runtime(store=store, scheduler=None)
+
+            created = json.loads(
+                trigger_create(
+                    name="daily-check",
+                    source_type="manual",
+                    task_template="check service",
+                )
+            )
+            trigger_id = created["trigger"]["trigger_id"]
+            listed = json.loads(trigger_list())
+            fetched = json.loads(trigger_get(trigger_id))
+
+            self.assertTrue(created["ok"])
+            self.assertEqual(listed["triggers"][0]["trigger_id"], trigger_id)
+            self.assertEqual(fetched["trigger"]["name"], "daily-check")
+
+
 class TriggerSchedulerTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self) -> None:
+        reset_trigger_runtime()
+
     async def test_fire_trigger_queues_message_into_agent_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = JsonTriggerStore(Path(tmp) / "triggers.json")

@@ -29,6 +29,7 @@ from app.harness.triggers.models import (
     TriggerListResult,
     TriggerUpdateIn,
 )
+from app.harness.triggers.runtime import get_trigger_store, set_trigger_runtime
 from app.harness.triggers.scheduler import TriggerScheduler
 from app.harness.triggers.store import JsonTriggerStore
 from app.observability.metrics import metrics_text
@@ -258,7 +259,7 @@ async def lifespan(app: FastAPI):
 
     service = AgentService(max_queue_size=s.max_queue_size, handle_stream_event=handle_stream_event)
     await service.start()
-    trigger_store = JsonTriggerStore(triggers_store_path())
+    trigger_store = get_trigger_store(triggers_store_path())
     trigger_scheduler: TriggerScheduler | None = None
     if bool(getattr(s, "triggers_enabled", True)):
         trigger_scheduler = TriggerScheduler(
@@ -267,6 +268,7 @@ async def lifespan(app: FastAPI):
             poll_seconds=int(getattr(s, "trigger_scheduler_poll_seconds", 5)),
         )
         trigger_scheduler.start()
+    set_trigger_runtime(store=trigger_store, scheduler=trigger_scheduler)
     # message_queue 已随 service.start 初始化完成，此后再进行自登记，避免目录可见但服务未就绪。
     registered, register_reason, registry_url = await _register_self_to_registry()
     heartbeat_stop_event: asyncio.Event | None = None
@@ -288,6 +290,7 @@ async def lifespan(app: FastAPI):
     finally:
         if trigger_scheduler is not None:
             await trigger_scheduler.stop()
+        set_trigger_runtime(store=trigger_store, scheduler=None)
         if heartbeat_stop_event is not None:
             heartbeat_stop_event.set()
         if heartbeat_task is not None:
