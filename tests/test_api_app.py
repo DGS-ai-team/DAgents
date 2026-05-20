@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from tests.test_support.stub_settings import settings_namespace
@@ -121,6 +123,8 @@ class FastApiRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         """清理服务实例列表，避免用例间串状态。"""
         FakeAgentService.instances.clear()
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
 
     def _client(self, **settings_overrides: object):
         """构造带替身服务的 TestClient。
@@ -136,6 +140,7 @@ class FastApiRouteTests(unittest.TestCase):
             api_app,
             AgentService=FakeAgentService,
             get_settings=lambda *args, **kwargs: settings,
+            triggers_store_path=lambda: Path(self._tmpdir.name) / "triggers.json",
         )
 
     def test_session_message_resume_cancel_and_release_routes(self) -> None:
@@ -181,6 +186,41 @@ class FastApiRouteTests(unittest.TestCase):
         self.assertEqual(service.submitted_messages[0]["priority"], "human")
         self.assertEqual(service.submitted_resumes[0]["priority"], "resume")
         self.assertEqual(service.released_sessions, [("s-api", True)])
+
+    def test_trigger_routes_create_list_fire_and_history(self) -> None:
+        """触发器 API 应创建资源、手动投递任务并记录历史。"""
+        assert api_app is not None and TestClient is not None
+        with self._client():
+            app = api_app.create_app()
+            with TestClient(app) as client:
+                create_resp = client.post(
+                    "/v1/triggers",
+                    json={
+                        "name": "diagnose-payment",
+                        "source_type": "manual",
+                        "task_template": "diagnose payment payload={payload_json}",
+                    },
+                )
+                self.assertEqual(create_resp.status_code, 200)
+                trigger_id = create_resp.json()["trigger_id"]
+
+                list_resp = client.get("/v1/triggers")
+                self.assertEqual(list_resp.status_code, 200)
+                self.assertEqual(list_resp.json()["triggers"][0]["trigger_id"], trigger_id)
+
+                fire_resp = client.post(
+                    f"/v1/triggers/{trigger_id}/fire",
+                    json={"reason": "manual", "payload": {"service": "payment"}, "force": True},
+                )
+                self.assertEqual(fire_resp.status_code, 200)
+                self.assertEqual(fire_resp.json()["status"], "queued")
+
+                history_resp = client.get(f"/v1/triggers/{trigger_id}/history")
+                self.assertEqual(history_resp.status_code, 200)
+                self.assertEqual(history_resp.json()["records"][0]["status"], "queued")
+
+        service = FakeAgentService.instances[-1]
+        self.assertEqual(service.submitted_messages[-1]["source"], f"trigger:{trigger_id}")
 
     def test_peer_stream_token_scope_matches_a2a_client_ids(self) -> None:
         assert api_app is not None

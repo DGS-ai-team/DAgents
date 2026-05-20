@@ -15,10 +15,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
+from app.config.runtime_layout import triggers_store_path
 from app.config.settings import get_settings
 from app.harness.queue.message_queue import MessageEnvelope, MessagePriority
 from app.harness.service.agent_service import AgentService
 from app.harness.streaming.events import InMemoryEventBus, StreamEvent
+from app.harness.triggers.models import (
+    TriggerCreateIn,
+    TriggerDefinition,
+    TriggerFireIn,
+    TriggerFireRecord,
+    TriggerHistoryResult,
+    TriggerListResult,
+    TriggerUpdateIn,
+)
+from app.harness.triggers.scheduler import TriggerScheduler
+from app.harness.triggers.store import JsonTriggerStore
 from app.observability.metrics import metrics_text
 from app.schemas.agent_peer import parse_agent_peer_envelope_from_text
 
@@ -246,6 +258,15 @@ async def lifespan(app: FastAPI):
 
     service = AgentService(max_queue_size=s.max_queue_size, handle_stream_event=handle_stream_event)
     await service.start()
+    trigger_store = JsonTriggerStore(triggers_store_path())
+    trigger_scheduler: TriggerScheduler | None = None
+    if bool(getattr(s, "triggers_enabled", True)):
+        trigger_scheduler = TriggerScheduler(
+            store=trigger_store,
+            service=service,
+            poll_seconds=int(getattr(s, "trigger_scheduler_poll_seconds", 5)),
+        )
+        trigger_scheduler.start()
     # message_queue 已随 service.start 初始化完成，此后再进行自登记，避免目录可见但服务未就绪。
     registered, register_reason, registry_url = await _register_self_to_registry()
     heartbeat_stop_event: asyncio.Event | None = None
@@ -255,6 +276,8 @@ async def lifespan(app: FastAPI):
         heartbeat_task = asyncio.create_task(_registry_heartbeat_loop(heartbeat_stop_event))
     app.state.service = service
     app.state.bus = bus
+    app.state.trigger_store = trigger_store
+    app.state.trigger_scheduler = trigger_scheduler
     app.state.registry_registered = registered
     app.state.registry_url = registry_url
     app.state.registry_heartbeat_task = heartbeat_task
@@ -263,6 +286,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if trigger_scheduler is not None:
+            await trigger_scheduler.stop()
         if heartbeat_stop_event is not None:
             heartbeat_stop_event.set()
         if heartbeat_task is not None:
@@ -391,6 +416,64 @@ def create_app() -> FastAPI:
             session_id=body.session_id,
             priority=body.priority,
         )
+
+    @app.post("/v1/triggers", response_model=TriggerDefinition)
+    async def create_trigger(body: TriggerCreateIn) -> TriggerDefinition:
+        store: JsonTriggerStore = app.state.trigger_store
+        try:
+            return store.create_trigger(body.to_definition())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/v1/triggers", response_model=TriggerListResult)
+    async def list_triggers() -> TriggerListResult:
+        store: JsonTriggerStore = app.state.trigger_store
+        return TriggerListResult(triggers=store.list_triggers())
+
+    @app.get("/v1/triggers/{trigger_id}", response_model=TriggerDefinition)
+    async def get_trigger(trigger_id: str) -> TriggerDefinition:
+        store: JsonTriggerStore = app.state.trigger_store
+        trigger = store.get_trigger(trigger_id)
+        if trigger is None:
+            raise HTTPException(status_code=404, detail="trigger not found")
+        return trigger
+
+    @app.patch("/v1/triggers/{trigger_id}", response_model=TriggerDefinition)
+    async def update_trigger(trigger_id: str, body: TriggerUpdateIn) -> TriggerDefinition:
+        store: JsonTriggerStore = app.state.trigger_store
+        try:
+            return store.update_trigger(trigger_id, body)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="trigger not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.delete("/v1/triggers/{trigger_id}")
+    async def delete_trigger(trigger_id: str) -> dict[str, object]:
+        store: JsonTriggerStore = app.state.trigger_store
+        return {"trigger_id": trigger_id, "deleted": store.delete_trigger(trigger_id)}
+
+    @app.post("/v1/triggers/{trigger_id}/fire", response_model=TriggerFireRecord)
+    async def fire_trigger(trigger_id: str, body: TriggerFireIn) -> TriggerFireRecord:
+        scheduler: TriggerScheduler | None = app.state.trigger_scheduler
+        if scheduler is None:
+            raise HTTPException(status_code=503, detail="trigger scheduler is disabled")
+        try:
+            return await scheduler.fire_trigger(
+                trigger_id,
+                reason=body.reason,
+                payload=body.payload,
+                force=body.force,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="trigger not found") from exc
+
+    @app.get("/v1/triggers/{trigger_id}/history", response_model=TriggerHistoryResult)
+    async def list_trigger_history(trigger_id: str) -> TriggerHistoryResult:
+        store: JsonTriggerStore = app.state.trigger_store
+        if store.get_trigger(trigger_id) is None:
+            raise HTTPException(status_code=404, detail="trigger not found")
+        return TriggerHistoryResult(records=store.list_history(trigger_id))
 
     @app.get("/v1/streams")
     async def stream_all(client_id: str, request: Request):

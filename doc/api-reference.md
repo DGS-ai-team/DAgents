@@ -56,6 +56,13 @@
 | `GET` | `/v1/streams` | 全局 SSE（**必填** `client_id`） |
 | `POST` | `/v1/sessions/{session_id}/cancel` | 取消当前 turn |
 | `DELETE` | `/v1/sessions/{session_id}` | 释放会话资源并可选清库 |
+| `POST` | `/v1/triggers` | 创建触发器资源 |
+| `GET` | `/v1/triggers` | 列出触发器资源 |
+| `GET` | `/v1/triggers/{trigger_id}` | 查看单个触发器 |
+| `PATCH` | `/v1/triggers/{trigger_id}` | 更新触发器 |
+| `DELETE` | `/v1/triggers/{trigger_id}` | 删除触发器 |
+| `POST` | `/v1/triggers/{trigger_id}/fire` | 手动触发并投递任务 |
+| `GET` | `/v1/triggers/{trigger_id}/history` | 查看触发历史 |
 
 ---
 
@@ -194,6 +201,52 @@
     - **未启用 sqlite** 时，表示此前该会话是否曾在**内存**中活跃过（**从未创建**则可能为 **`false`**）。调用方可将 **404/200** 均视为「已尽力释放」的幂等体验，具体以前端需求为准。
 
 **错误**：内部失败（如删库异常）**400**，`detail` 为字符串。
+
+---
+
+### 3.8 触发器控制面
+
+触发器用于在显式用户消息之外，按受控条件唤起 Agent 执行任务。第一版支持触发器资源管理、JSON 持久化、interval/once 调度、手动 fire 和触发历史；所有触发最终都会投递到现有 `AgentService.submit_message`，不会绕过工具审批与 session 队列。
+
+- **存储路径**：`<运行根>/.runtime/triggers/triggers.json`
+- **开关**：`TRIGGERS_ENABLED=true|false`；关闭后 API 仍可管理资源，但 `POST /fire` 返回 **503**。
+- **调度轮询**：`TRIGGER_SCHEDULER_POLL_SECONDS`，默认 **5** 秒。
+
+#### 创建触发器
+
+- **`POST /v1/triggers`**
+- 常用请求字段：
+  - **`name`**：名称，必填。
+  - **`source_type`**：`manual | interval | once | webhook | queue | file | metric | registry_event`。
+  - **`condition`**：触发条件；`interval` 需 `{"interval_seconds": 60}`，`once` 需 `{"fire_at": 1730000000}`。
+  - **`task_template`**：投递给 Agent 的任务模板，必填；支持 `{trigger_id}`、`{trigger_name}`、`{source_type}`、`{reason}`、`{payload_json}`。
+  - **`target_session_id`**：可选；为空时触发器执行时自动创建新 session。
+  - **`client_id`**：可选；为空时使用 `trigger-{trigger_id}`。
+  - **`risk_level`**：`low | medium | high | critical`，默认 `low`。
+  - **`enabled`**：是否进入调度器，默认 `false`。
+  - **`approval_policy`**：高风险自主触发需显式设置 `{"auto_fire_allowed": true}`，否则调度器只记录 skipped。
+
+#### 手动触发
+
+- **`POST /v1/triggers/{trigger_id}/fire`**
+- 请求体：
+
+```json
+{
+  "reason": "manual",
+  "payload": {"service": "payment"},
+  "force": true
+}
+```
+
+响应为 `TriggerFireRecord`：包含 `status`（`queued | skipped | error`）、`session_id`、`client_id`、最终投递 `content` 与可读 `message`。
+
+#### 安全边界
+
+- 触发器只负责唤起任务，不直接执行工具。
+- 工具调用仍走现有 `approval_required` / `resume` 流程。
+- 调度器对 `high` / `critical` 风险触发器默认跳过自主 fire，除非 `approval_policy.auto_fire_allowed=true`。
+- 触发历史会记录来源、payload、投递内容、结果和错误信息，作为后续 Audit Timeline 的数据基础。
 
 ---
 

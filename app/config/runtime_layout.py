@@ -28,6 +28,7 @@ SESSION_SQLITE_RELATIVE = Path(".runtime/memory/session.sqlite3")
 AGENT_ID_FILE_RELATIVE = Path(".runtime/agent/agent_id")
 SHELL_POLICY_RELATIVE = Path(".runtime/policy/shell")
 TOOL_POLICY_FILE_RELATIVE = Path(".runtime/policy/tool.approval.txt")
+TRIGGERS_STORE_RELATIVE = Path(".runtime/triggers/triggers.json")
 
 
 def skills_dir() -> Path:
@@ -58,3 +59,8 @@ def shell_policy_dir() -> Path:
 def tool_policy_file_path() -> Path:
     """工具审批策略文件：`<运行根>/.runtime/policy/tool.approval.txt`。"""
     return (resolve_runtime_root() / TOOL_POLICY_FILE_RELATIVE).resolve()
+
+
+def triggers_store_path() -> Path:
+    """触发器 JSON 存储文件：`<运行根>/.runtime/triggers/triggers.json`。"""
+    return (resolve_runtime_root() / TRIGGERS_STORE_RELATIVE).resolve()

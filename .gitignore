@@ -11,6 +11,9 @@ __pycache__/
 /history/
 *.sqlite3
 
+# private planning docs
+docs/private-enterprise-positioning.md
+
 # editor / IDE
 .vscode/
 

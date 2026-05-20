@@ -234,6 +234,10 @@ class Settings(BaseModel):
     # 文件工具 `search_file` 整段输出 UTF-8 字节上限
     fs_tool_search_max_bytes: int = 8000
 
+    # --- 触发器 ---
+    triggers_enabled: bool = True
+    trigger_scheduler_poll_seconds: int = 5
+
     # --- 会话消息落盘 ---
     # 是否启用 SQLite 会话持久化（路径固定为 `<运行根>/.runtime/memory/session.sqlite3`，见 `runtime_layout`）
     agent_session_store_enabled: bool = True
@@ -296,6 +300,8 @@ class Settings(BaseModel):
             bash_output_encoding=_env_str("BASH_OUTPUT_ENCODING", "utf-8") or "utf-8",
             fs_tool_read_max_bytes=max(1, _env_int("FS_TOOL_READ_MAX_BYTES", 3000)),
             fs_tool_search_max_bytes=max(1, _env_int("FS_TOOL_SEARCH_MAX_BYTES", 8000)),
+            triggers_enabled=_env_bool("TRIGGERS_ENABLED", True),
+            trigger_scheduler_poll_seconds=max(1, _env_int("TRIGGER_SCHEDULER_POLL_SECONDS", 5)),
             agent_session_store_enabled=_env_bool("AGENT_SESSION_STORE_ENABLED", True),
             agent_raw_message_history_enabled=_env_bool("AGENT_RAW_MESSAGE_HISTORY_ENABLED", True),
         )

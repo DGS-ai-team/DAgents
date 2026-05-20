@@ -28,6 +28,8 @@ def settings_namespace(**overrides: object) -> SimpleNamespace:
         "agent_registry_ttl_seconds": 60,
         "agent_peer_shared_token": "",
         "agent_peer_http_retry_attempts": 2,
+        "triggers_enabled": True,
+        "trigger_scheduler_poll_seconds": 5,
         "api_cors_allow_origins": ["http://localhost:5173"],
     }
     base.update(overrides)
