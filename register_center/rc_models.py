@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AgentUpsertRequest(BaseModel):
@@ -369,8 +369,9 @@ class RelayRequest(BaseModel):
     caller_groups: list[str] = Field(default_factory=list, description="调用方可见分组列表。")
     session_id: str = Field(description="透传到目标 Agent 的会话 ID。")
     client_id: str = Field(description="透传到目标 Agent 的 SSE 客户端通道 ID。")
-    request_type: str = Field(description="透传到目标 Agent 的请求类型。")
-    content: str = Field(description="透传到目标 Agent 的消息内容。")
+    request_type: Literal["message", "resume"] = Field(description="透传到目标 Agent 的请求类型。")
+    content: str | None = Field(default=None, description="透传到目标 Agent 的消息内容。")
+    resume_value: Any | None = Field(default=None, description="request_type=resume 时透传的审批恢复值。")
     source: str = Field(default="agent-peer-relay", description="透传消息来源标识。")
     priority: str = Field(default="human", description="透传消息优先级。")
 
@@ -382,13 +383,24 @@ class RelayRequest(BaseModel):
             raise ValueError("target_agent_id 不能为空")
         return cleaned
 
-    @field_validator("session_id", "client_id", "request_type", "content", "source", "priority")
+    @field_validator("session_id", "client_id", "source", "priority")
     @classmethod
     def validate_non_empty_text_fields(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("中继字段不能为空")
         return cleaned
+
+    @model_validator(mode="after")
+    def validate_request_body(self) -> "RelayRequest":
+        if self.request_type == "message":
+            content = (self.content or "").strip()
+            if not content:
+                raise ValueError("message 中继必须提供 content")
+            self.content = content
+        elif self.resume_value is None:
+            raise ValueError("resume 中继必须提供 resume_value")
+        return self
 
     @field_validator("caller_groups")
     @classmethod

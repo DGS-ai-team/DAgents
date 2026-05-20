@@ -31,24 +31,15 @@
 - **`async_tool_status`**：按 job_id 查询异步工具任务快照。
 - **`async_tool_cancel`**：按 job_id 请求取消异步工具任务。
 
-## `agent_peer.py`
+## `agent_peer.py` / `agent_peer_common.py` / `agent_peer_registry.py`
 
-- **`PeerApprovalEntry`**：**Pydantic `BaseModel`**；对端 `approval_required` 事件结构化条目（含 `target_session_id/approval_id/display_type/approval_args` 等）。
-- **`PeerStreamSummary`**：**Pydantic `BaseModel`**；单次远端 SSE 拉取汇总（`text/approvals/errors/final_state/truncated`）。
-- **`agent_discover`**：按分组发现可协作 Agent（内联固定结构 `agent_card`）
-- **`agent_send_message`**：点对点向目标 Agent 提交消息；返回信封含 `target_session_id/approvals/final_state` 与真实 `task.state`
-- **`agent_broadcast`**：调用 Register Center 广播并并发收集每个目标 SSE，聚合 `approvals` 与广播级 `task.state`
-- **`agent_peer_approve_tools`**：对端 `approval_required` 后向其提交 `approve/reject/selection` 决策的 `resume`，再收集后续 SSE
-- **`_collect_peer_stream_summary`**：读取目标 `/v1/streams?client_id=...` 并按 `session_id` 汇总文本/审批/错误，超时返回 `truncated`
-- **`_approval_entry_from_event`**：把 SSE `approval_required` 的 `data` 转为 `PeerApprovalEntry`
-- **`_peer_state_to_task_state`**：把 `PeerStreamSummary.final_state` 映射到 `AgentPeerTaskState`
-- **`_build_resume_value`**：按 `decision` 构造与 `app.schemas.approval` 对齐的 `resume_value`（`approve/reject/selection`）
-- **`_new_peer_session_id`**：为单次点对点请求生成隔离的对端会话 ID（`peer-<caller>-<target>-<short>`）
-- **`_session_id_from_context`**：从 `OpenAIConversationContext` 解析调用方会话 ID，缺失时回退生成
-- **`_cache_agent_list`** / **`_is_agent_list_cache_stale`** / **`_refresh_agent_list_for_visible_groups`** / **`_resolve_target_agent_from_cache`** / **`_clear_agent_list_cache`**：进程内 agent 目录缓存与 TTL 维护
-- **`_discover_agents_by_groups`**：按分组聚合目录查询结果并去重
-- **`_attach_agent_card_summary`**：为发现结果补充固定结构 `agent_card`（含访问 URL/端口、card 内容与错误字段）
-- **`_resolve_target_agent`**：在调用方可见分组内解析目标 Agent
+- **`agent_peer.py`**：公开工具入口，保留 **`agent_discover` / `agent_send_message` / `agent_broadcast` / `agent_peer_approve_tools`** 注册面。
+- **`agent_peer_common.py`**：公共模型与无状态 helper：**`PeerApprovalEntry`**、**`PeerStreamSummary`**、SSE 回放汇总（带 **`Last-Event-ID: -1`**）、A2A token header、错误信封、resume 决策构造、任务状态映射。
+- **`agent_peer_registry.py`**：Register Center 解析与目录缓存：按分组发现、TTL 缓存、目标 Agent 解析、Agent Card 摘要补充。
+- **`agent_discover`**：按分组发现可协作 Agent（内联固定结构 `agent_card`）。
+- **`agent_send_message`**：点对点向目标 Agent 提交消息；支持 **`direct` / `relay`**；返回信封含 `target_session_id/approvals/final_state` 与真实 `task.state`。
+- **`agent_broadcast`**：调用 Register Center 广播并并发收集每个目标 SSE，聚合 `approvals` 与广播级 `task.state`。
+- **`agent_peer_approve_tools`**：对端 `approval_required` 后提交 `approve/reject/selection` 的 `resume`；支持 **`direct` / `relay`**，再收集后续 SSE。
 
 ## `bash.py`
 

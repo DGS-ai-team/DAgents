@@ -406,10 +406,13 @@ def create_app() -> FastAPI:
             "session_id": payload.session_id,
             "client_id": payload.client_id,
             "request_type": payload.request_type,
-            "content": payload.content,
             "source": payload.source,
             "priority": payload.priority,
         }
+        if payload.request_type == "resume":
+            forward_payload["resume_value"] = payload.resume_value
+        else:
+            forward_payload["content"] = payload.content
         async with httpx.AsyncClient(timeout=20.0) as client:
             try:
                 resp = await client.post(target_url, json=forward_payload, headers=_a2a_auth_headers())

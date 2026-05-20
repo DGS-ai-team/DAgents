@@ -31,9 +31,9 @@ python run_register_center.py
 
 ## 核心接口
 
-- `POST /v1/agents`：登记/更新 Agent（`discovery_group` 支持字符串或字符串列表，支持可选 `capabilities_hint`）
+- `POST /v1/agents`：登记/更新 Agent（`discovery_group` 支持字符串或字符串列表，支持可选 `capabilities_hint` / `ttl_seconds`）
 - `GET /v1/agents`：列表查询（`discovery_group` 必填，不提供全量视图）
 - `GET /v1/agents/{agent_id}`：按 ID 查询（`discovery_group` 必填，分组隔离）
 - `DELETE /v1/agents/{agent_id}`：按 ID 注销登记记录
 - `POST /v1/broadcast`：按分组列表广播消息到已注册 Agent 的 `/v1/messages`
-- `POST /v1/relay`：按 `target_agent_id` 中继单条消息到目标 Agent 的 `/v1/messages`
+- `POST /v1/relay`：按 `target_agent_id` 中继单条消息或 `resume_value` 到目标 Agent 的 `/v1/messages`

@@ -149,7 +149,7 @@ sequenceDiagram
 
 - Agent API 启动时若配置 `REGISTRY_URL`、`AGENT_PUBLIC_BASE_URL`、`DISCOVERY_GROUPS`、`AGENT_ID` 等，会向 Register Center **`POST /v1/agents`** 自登记；关闭时 **`DELETE`**。
 - Register Center 提供按组 **`POST /v1/broadcast`** 与 **`POST /v1/relay`**，将负载转发到各 Agent 对外暴露的 **`POST /v1/messages`**（详见 **`register_center/README.md`** 与 [a2a-and-register-center.md](./a2a-and-register-center.md)）。
-- 跨 Agent 协作工具（**`agent_discover` / `agent_send_message` / `agent_broadcast` / `agent_peer_approve_tools`**，**`app/harness/tools/agent_peer.py`**）依赖上述发现与 HTTP 投递能力；**`AGENT_PEER_DELIVERY_MODE=direct|relay`**、对端 SSE 与 **`resume` 仅直连** 等边界见该专题文档。
+- 跨 Agent 协作工具（**`agent_discover` / `agent_send_message` / `agent_broadcast` / `agent_peer_approve_tools`**，**`app/harness/tools/agent_peer.py`**）依赖上述发现与 HTTP 投递能力；**`AGENT_PEER_DELIVERY_MODE=direct|relay`**、对端 SSE 回放与 **`resume` relay** 等边界见该专题文档。
 
 ## 6. 持久化与运行时目录
 

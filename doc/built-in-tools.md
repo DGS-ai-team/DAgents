@@ -108,7 +108,7 @@
 | **`agent_discover`** | 同步 | **`app/harness/tools/agent_peer.py`** | 查询 **Register Center** 可见分组下的 Agent 列表，并尝试拉取 **`.well-known/agent-card.json`** 摘要。 |
 | **`agent_send_message`** | **异步** | **`agent_peer.py`** | 向指定 **`target_agent_id`** 投递 **`AgentPeerEnvelope`**（**`direct`/`relay`**），并汇总对端 SSE；依赖 **`REGISTRY_URL`**、**`DISCOVERY_GROUPS`** 等。 |
 | **`agent_broadcast`** | **异步** | **`agent_peer.py`** | 调用 **`POST /v1/broadcast`** 后并发拉取各目标 SSE。 |
-| **`agent_peer_approve_tools`** | **异步** | **`agent_peer.py`** | 对对端 **`approval_required`** 提交 **`resume`**（**直连对端 `base_url`**）。 |
+| **`agent_peer_approve_tools`** | **异步** | **`agent_peer.py`** | 对对端 **`approval_required`** 提交 **`resume`**（按 **`AGENT_PEER_DELIVERY_MODE`** 直连或经 Register Center relay）。 |
 
 ### 1.1 异步工具与 `client_id`
 
