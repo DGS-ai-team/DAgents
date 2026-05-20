@@ -20,28 +20,40 @@ jobs:
             build_kind: docker-focal-amd64
             python_arch: x64
             archive_name: dagents-api-linux-x64.zip
+            deb_name: dagents-backend-linux-x64.deb
+            deb_arch: amd64
             api_bin_name: dagents-api
             rc_bin_name: dagents_register_center
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
+            cli_bin_name: dagents-cli
+            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=prompt_toolkit --hidden-import=aiohttp run_dagents_cli.py
           - target: linux-x86
             os: ubuntu-22.04
             build_kind: docker-i386
             python_arch: x86
             archive_name: dagents-api-linux-x86.zip
+            deb_name: dagents-backend-linux-x86.deb
+            deb_arch: i386
             api_bin_name: dagents-api
             rc_bin_name: dagents_register_center
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
+            cli_bin_name: dagents-cli
+            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=prompt_toolkit --hidden-import=aiohttp run_dagents_cli.py
           - target: windows-x64
             os: windows-2022
             build_kind: native
             python_arch: x64
             archive_name: dagents-api-windows-x64.zip
+            installer_name: dagents-backend-windows-x64-installer
+            inno_arch: x64
             api_bin_name: dagents-api.exe
             rc_bin_name: dagents_register_center.exe
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
+            cli_bin_name: dagents-cli.exe
+            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=prompt_toolkit --hidden-import=aiohttp run_dagents_cli.py
           - target: windows-x86
             os: windows-2022
             build_kind: native
@@ -51,6 +63,8 @@ jobs:
             rc_bin_name: dagents_register_center.exe
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
+            cli_bin_name: dagents-cli.exe
+            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=prompt_toolkit --hidden-import=aiohttp run_dagents_cli.py
 
     steps:
       - name: Checkout
@@ -87,6 +101,7 @@ jobs:
         run: |
           pyinstaller ${{ matrix.api_pyinstaller_args }}
           pyinstaller ${{ matrix.rc_pyinstaller_args }}
+          pyinstaller ${{ matrix.cli_pyinstaller_args }}
 
       - name: Build single-file binaries (Linux x64 via Ubuntu 20.04 Docker + pyenv)
         if: matrix.build_kind == 'docker-focal-amd64'
@@ -95,12 +110,13 @@ jobs:
         env:
           API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
           RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
+          CLI_PI_ARGS: ${{ matrix.cli_pyinstaller_args }}
           PYENV_PYTHON_VERSION: "3.13.2"
         run: |
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e API_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
+            -e API_PI_ARGS -e RC_PI_ARGS -e CLI_PI_ARGS -e PYENV_PYTHON_VERSION \
             ubuntu:20.04 \
             bash /src/scripts/ci/build_linux_focal_pyenv.sh
 
@@ -111,12 +127,13 @@ jobs:
         env:
           API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
           RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
+          CLI_PI_ARGS: ${{ matrix.cli_pyinstaller_args }}
           PYENV_PYTHON_VERSION: "3.13.2"
         run: |
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e API_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
+            -e API_PI_ARGS -e RC_PI_ARGS -e CLI_PI_ARGS -e PYENV_PYTHON_VERSION \
             i386/ubuntu:focal \
             bash /src/scripts/ci/build_linux_focal_pyenv.sh
 
@@ -126,6 +143,7 @@ jobs:
           mkdir -p bundle
           cp "dist/${{ matrix.api_bin_name }}" bundle/
           cp "dist/${{ matrix.rc_bin_name }}" bundle/
+          cp "dist/${{ matrix.cli_bin_name }}" bundle/
           cp startup_scripts/linux/start.sh bundle/
           cp startup_scripts/linux/start_register_center.sh bundle/
           chmod +x bundle/start.sh
@@ -137,6 +155,11 @@ jobs:
           cd bundle
           zip -r "../${{ matrix.archive_name }}" .
 
+      - name: Build Linux deb package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash packaging/linux/build-deb.sh "0.0.0" "${{ matrix.deb_arch }}" "${{ matrix.deb_name }}"
+
       - name: Prepare runtime bundle (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -144,6 +167,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path bundle | Out-Null
           Copy-Item "dist/${{ matrix.api_bin_name }}" "bundle/"
           Copy-Item "dist/${{ matrix.rc_bin_name }}" "bundle/"
+          Copy-Item "dist/${{ matrix.cli_bin_name }}" "bundle/"
           Copy-Item "startup_scripts/windows/start.bat" "bundle/"
           Copy-Item "startup_scripts/windows/start_register_center.bat" "bundle/"
           Copy-Item ".env.example" "bundle/"
@@ -154,9 +178,37 @@ jobs:
           tar.exe -a -c -f "../${{ matrix.archive_name }}" .
           Set-Location ..
 
+      - name: Install Inno Setup (Windows)
+        if: matrix.target == 'windows-x64'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        if: matrix.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc packaging/windows/dagents-installer.iss "/DMyAppVersion=0.0.0" "/DMyAppArch=${{ matrix.inno_arch }}" "/DMyOutputBaseFilename=${{ matrix.installer_name }}"
+
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.archive_name }}
           path: ${{ matrix.archive_name }}
+          if-no-files-found: error
+
+      - name: Upload deb artifact (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.deb_name }}
+          path: ${{ matrix.deb_name }}
+          if-no-files-found: error
+
+      - name: Upload installer artifact (Windows)
+        if: matrix.target == 'windows-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.installer_name }}.exe
+          path: dist-installer/${{ matrix.installer_name }}.exe
           if-no-files-found: error

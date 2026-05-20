@@ -1,6 +1,6 @@
 # `scripts/windows/`
 
-Windows 专用辅助脚本（托盘、快捷启动）。
+Windows 专用辅助脚本（托盘、快捷启动）。Windows 安装器资源位于 `packaging/windows/`。
 
 | 文件 | 说明 |
 |------|------|
@@ -28,6 +28,18 @@ scripts\windows\start_tray.bat --with-register-center
 
 ```bat
 python scripts\windows\tray_launcher.py
+```
+
+## 安装包命令
+
+Windows x64 安装器会安装后端文件并把安装目录加入当前用户 PATH。安装后新开终端可使用：
+
+```bat
+dagents chat
+dagents serve
+dagents register-center
+dagents doctor
+dagents version
 ```
 
 ## 日志

@@ -8,7 +8,7 @@
 #
 # 约定：
 # - 工作区挂载为 /src（与 GitHub Actions `docker -v` 一致）；
-# - **API_PI_ARGS** / **RC_PI_ARGS**：传给 `python -m PyInstaller` 的完整参数串（与 workflow matrix 一致）；
+# - **API_PI_ARGS** / **RC_PI_ARGS** / **CLI_PI_ARGS**：传给 `python -m PyInstaller` 的完整参数串（与 workflow matrix 一致）；
 # - **PYENV_PYTHON_VERSION**：可选，默认 **3.13.2**。
 #
 # 副作用：首次编译 CPython 耗时较长，建议在 workflow 上为该 step 设置足够 **timeout**。
@@ -51,3 +51,4 @@ python -m pip install -r requirements.txt pyinstaller
 
 eval python -m PyInstaller ${API_PI_ARGS}
 eval python -m PyInstaller ${RC_PI_ARGS}
+eval python -m PyInstaller ${CLI_PI_ARGS}

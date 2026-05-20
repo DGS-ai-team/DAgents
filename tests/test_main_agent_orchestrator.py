@@ -455,7 +455,7 @@ class MainAgentTurnOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.event_type for item in events], ["done"])
         self.assertEqual(ctx.tool_loop_count, 0)
         self.assertEqual(ctx.run_turn_phase, RunTurnPhase.IDLE)
-        self.assertEqual(ctx.messages[-1], {"role": "assistant", "content": "ok"})
+        self.assertEqual(ctx.messages[-1], {"role": "assistant", "content": "ok", "reasoning_content": ""})
 
     async def test_missing_usage_estimates_messages_total_tokens(self) -> None:
         """provider 不返回 usage 时也应刷新粗略 token 数，保证压缩阈值仍可触发。"""
