@@ -7,9 +7,19 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from app.config.env import load_env
 from app.cli.chat import run_chat
 
-DEFAULT_API_BASE = "http://127.0.0.1:8000"
+
+def _default_api_base() -> str:
+    """从 .env 读取 API_HOST / API_PORT 构造默认地址，兜底 127.0.0.1:8000。"""
+    home = _runtime_home()
+    env_path = home / ".env"
+    if env_path.is_file():
+        load_env(home)
+    host = os.getenv("API_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    port = os.getenv("API_PORT", "8000").strip() or "8000"
+    return f"http://{host}:{port}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -35,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     chat = subparsers.add_parser("chat", help="Start an interactive terminal chat")
-    chat.add_argument("--api", default=os.getenv("DAGENTS_API_BASE", DEFAULT_API_BASE), help="DAgents API base URL")
+    chat.add_argument("--api", default=os.getenv("DAGENTS_API_BASE") or _default_api_base(), help="DAgents API base URL")
     chat.add_argument("--session", default=None, help="Session ID to create or reuse")
     chat.add_argument("--client-id", default=None, help="SSE client ID")
     chat.add_argument("--show-reasoning", action="store_true", help="Print reasoning stream events")
