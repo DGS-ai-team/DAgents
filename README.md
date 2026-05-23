@@ -45,7 +45,6 @@ DAgents/
 ├── CHANGELOG.md                 # 版本变更记录（与 tag / Releases 对齐）
 ├── requirements.txt
 ├── .env.example                 # 环境变量模板（复制为 .env）
-├── run_agent.py                 # 仓库内脚本入口（能力未定，本文档不展开）
 ├── run_agent_api.py             # FastAPI（Agent API）
 ├── run_register_center.py       # Register Center
 ├── run_dev_stack.py             # 本地同时拉起 API + Register Center
