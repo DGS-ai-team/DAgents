@@ -1,81 +1,66 @@
-"""触发器工具：供 Agent 管理和唤起受治理的触发器。"""
+"""触发器 Agent 工具：经 `runtime.get_trigger_*` 读写 JSON 存储并可选投递调度器。"""
 
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.context.models import OpenAIConversationContext
 from app.harness.tools.tool import tool
-from app.harness.triggers.models import TriggerCreateIn, TriggerFireIn, TriggerUpdateIn
+from app.harness.triggers.models import TriggerCreateIn, TriggerUpdateIn
 from app.harness.triggers.runtime import get_trigger_scheduler, get_trigger_store
-
-TriggerSourceArg = Literal["manual", "interval", "once", "webhook", "queue", "file", "metric", "registry_event"]
-TriggerRiskArg = Literal["low", "medium", "high", "critical"]
 
 
 class TriggerListArgs(BaseModel):
+    """`trigger_list` 入参 schema。"""
+
     model_config = ConfigDict(extra="forbid")
 
     include_disabled: bool = True
 
 
 class TriggerGetArgs(BaseModel):
+    """`trigger_get` 入参 schema。"""
+
     model_config = ConfigDict(extra="forbid")
 
     trigger_id: str = Field(min_length=1)
 
 
 class TriggerCreateArgs(BaseModel):
+    """`trigger_create` 入参 schema（`context` 由运行时注入，不在 schema 中）。"""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
     task_template: str = Field(min_length=1)
-    description: str = ""
-    owner: str = ""
-    team: str = ""
-    source_type: TriggerSourceArg = "manual"
-    condition: dict[str, Any] = Field(default_factory=dict)
-    target_session_id: str | None = None
-    client_id: str | None = None
-    risk_level: TriggerRiskArg = "low"
-    enabled: bool = False
-    cooldown_seconds: int = Field(default=0, ge=0)
-    max_concurrency: int = Field(default=1, ge=1)
-    approval_policy: dict[str, Any] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    condition: dict[str, Any]
 
 
 class TriggerUpdateArgs(BaseModel):
+    """`trigger_update` 入参 schema；未传字段表示不修改。"""
+
     model_config = ConfigDict(extra="forbid")
 
     trigger_id: str = Field(min_length=1)
     name: str | None = None
     task_template: str | None = None
-    description: str | None = None
-    owner: str | None = None
-    team: str | None = None
-    source_type: TriggerSourceArg | None = None
     condition: dict[str, Any] | None = None
-    target_session_id: str | None = None
-    client_id: str | None = None
-    risk_level: TriggerRiskArg | None = None
-    enabled: bool | None = None
-    cooldown_seconds: int | None = Field(default=None, ge=0)
-    max_concurrency: int | None = Field(default=None, ge=1)
-    approval_policy: dict[str, Any] | None = None
-    metadata: dict[str, Any] | None = None
 
 
 class TriggerDeleteArgs(BaseModel):
+    """`trigger_delete` 入参 schema。"""
+
     model_config = ConfigDict(extra="forbid")
 
     trigger_id: str = Field(min_length=1)
 
 
 class TriggerFireArgs(BaseModel):
+    """`trigger_fire` 入参 schema。"""
+
     model_config = ConfigDict(extra="forbid")
 
     trigger_id: str = Field(min_length=1)
@@ -84,10 +69,24 @@ class TriggerFireArgs(BaseModel):
     force: bool = False
 
 
+def _session_client_from_context(
+    context: OpenAIConversationContext | None,
+) -> tuple[str | None, str | None]:
+    """从推理上下文解析投递目标 session / client（供 trigger_create 绑定当前会话）。"""
+    if not isinstance(context, OpenAIConversationContext):
+        return None, None
+    session_id = (context.session_id or "").strip() or None
+    client_id = (context.sse_client_id or context.active_client_id or "").strip() or None
+    return session_id, client_id
+
+
 @tool("trigger_list")
 def trigger_list(include_disabled: bool = True) -> str:
-    """列出当前触发器。用于查看已配置的自主行动入口，不会执行触发器。"""
+    """使用场景：查看已配置的触发器列表；只读，不会执行或投递任务。
 
+    字段说明：
+    - include_disabled: 是否包含 `enabled=false` 的项（默认 true）。
+    """
     triggers = get_trigger_store().list_triggers()
     if not include_disabled:
         triggers = [item for item in triggers if item.enabled]
@@ -96,8 +95,12 @@ def trigger_list(include_disabled: bool = True) -> str:
 
 @tool("trigger_get")
 def trigger_get(trigger_id: str) -> str:
-    """查看单个触发器的配置和状态。不会执行触发器。"""
+    """使用场景：查看单个触发器配置与 `next_fire_at`；不执行触发。
 
+    字段说明：
+    - trigger_id: 触发器 ID（必填）。
+
+    """
     trigger = get_trigger_store().get_trigger(trigger_id.strip())
     if trigger is None:
         return _json_text({"ok": False, "error": "trigger not found", "trigger_id": trigger_id})
@@ -108,38 +111,25 @@ def trigger_get(trigger_id: str) -> str:
 def trigger_create(
     name: str,
     task_template: str,
-    description: str = "",
-    owner: str = "",
-    team: str = "",
-    source_type: TriggerSourceArg = "manual",
-    condition: dict[str, Any] | None = None,
-    target_session_id: str | None = None,
-    client_id: str | None = None,
-    risk_level: TriggerRiskArg = "low",
-    enabled: bool = False,
-    cooldown_seconds: int = 0,
-    max_concurrency: int = 1,
-    approval_policy: dict[str, Any] | None = None,
-    metadata: dict[str, Any] | None = None,
+    condition: dict[str, Any],
+    context: OpenAIConversationContext | None = None,
 ) -> str:
-    """创建触发器。用于沉淀定时、事件、指标等自主唤起规则；启用后会被调度器消费。"""
+    """使用场景：新建触发器；须提供非空 `condition` 并由调度器按其中键执行。
 
+    字段说明：
+    - name、task_template、condition: 必填。
+    - condition: `{"interval_seconds": N}` 周期，或 `{"fire_at": unix秒}` 单次；不可为 `{}`。
+
+    注意：task_template必须带上必要的上下文，防止触发时需要再次向用户询问，或者造成执行偏差。
+
+    """
+    target_session_id, client_id = _session_client_from_context(context)
     body = TriggerCreateIn(
         name=name,
-        description=description,
-        owner=owner,
-        team=team,
-        source_type=source_type,
-        condition=condition or {},
+        task_template=task_template,
+        condition=condition,
         target_session_id=target_session_id,
         client_id=client_id,
-        task_template=task_template,
-        risk_level=risk_level,
-        enabled=enabled,
-        cooldown_seconds=cooldown_seconds,
-        max_concurrency=max_concurrency,
-        approval_policy=approval_policy or {},
-        metadata=metadata or {},
     )
     trigger = get_trigger_store().create_trigger(body.to_definition())
     return _json_text({"ok": True, "trigger": trigger.model_dump()})
@@ -150,41 +140,22 @@ def trigger_update(
     trigger_id: str,
     name: str | None = None,
     task_template: str | None = None,
-    description: str | None = None,
-    owner: str | None = None,
-    team: str | None = None,
-    source_type: TriggerSourceArg | None = None,
     condition: dict[str, Any] | None = None,
-    target_session_id: str | None = None,
-    client_id: str | None = None,
-    risk_level: TriggerRiskArg | None = None,
-    enabled: bool | None = None,
-    cooldown_seconds: int | None = None,
-    max_concurrency: int | None = None,
-    approval_policy: dict[str, Any] | None = None,
-    metadata: dict[str, Any] | None = None,
 ) -> str:
-    """更新触发器配置。用于调整触发条件、任务模板、风险等级或启用状态。"""
+    """使用场景：修改已有触发器的名称、模板或 condition；未传字段保持不变。
 
+    字段说明：
+    - trigger_id: 必填。
+    - name / task_template / condition: 可选局部更新。
+
+    """
     patch = TriggerUpdateIn(
         **{
             key: value
             for key, value in {
                 "name": name,
                 "task_template": task_template,
-                "description": description,
-                "owner": owner,
-                "team": team,
-                "source_type": source_type,
                 "condition": condition,
-                "target_session_id": target_session_id,
-                "client_id": client_id,
-                "risk_level": risk_level,
-                "enabled": enabled,
-                "cooldown_seconds": cooldown_seconds,
-                "max_concurrency": max_concurrency,
-                "approval_policy": approval_policy,
-                "metadata": metadata,
             }.items()
             if value is not None
         }
@@ -198,8 +169,12 @@ def trigger_update(
 
 @tool("trigger_delete")
 def trigger_delete(trigger_id: str) -> str:
-    """删除触发器。用于移除不再需要的自主行动规则。"""
+    """使用场景：删除不再需要的触发器规则。
 
+    字段说明：
+    - trigger_id: 必填。
+
+    """
     deleted = get_trigger_store().delete_trigger(trigger_id.strip())
     return _json_text({"ok": True, "trigger_id": trigger_id, "deleted": deleted})
 
@@ -211,8 +186,20 @@ async def trigger_fire(
     force: bool = False,
     context: OpenAIConversationContext | None = None,
 ) -> str:
-    """手动触发一个触发器，并将其任务投递到 AgentService 队列。不会绕过工具审批。"""
+    """使用场景：立即执行一次触发器，将渲染后的任务投递到 Agent 队列。
 
+    字段说明：
+    - trigger_id: 必填。
+    - reason、payload、force: 同 HTTP fire API。
+    - context: 运行时注入，本工具当前不使用（投递目标以资源内绑定为准）。
+
+    返回说明：
+    - 成功且投递：`ok=true`，`record.status=queued`。
+    - 调度器未启动：`error=trigger scheduler is not available`。
+
+    调用范例：
+    - `trigger_fire({"trigger_id":"<uuid>"})`
+    """
     del context
     scheduler = get_trigger_scheduler()
     if scheduler is None:
@@ -235,9 +222,10 @@ trigger_create.args_schema = TriggerCreateArgs  # type: ignore[attr-defined]
 trigger_update.args_schema = TriggerUpdateArgs  # type: ignore[attr-defined]
 trigger_delete.args_schema = TriggerDeleteArgs  # type: ignore[attr-defined]
 trigger_fire.name = "trigger_fire"  # type: ignore[attr-defined]
-trigger_fire.description = "手动触发一个触发器，并将其任务投递到 AgentService 队列。不会绕过工具审批。"  # type: ignore[attr-defined]
+trigger_fire.description = trigger_fire.__doc__ or ""  # type: ignore[attr-defined]
 trigger_fire.args_schema = TriggerFireArgs  # type: ignore[attr-defined]
 
 
 def _json_text(payload: dict[str, Any]) -> str:
+    """将工具结果序列化为排序后的 JSON 字符串。"""
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)

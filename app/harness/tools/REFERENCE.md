@@ -69,6 +69,7 @@
 ## `fs.py`
 
 - **`read_file`**（流式行窗口；头含 **`next_line_offset`**；体积上限 **`Settings.fs_tool_read_max_bytes`**）、**`write_file`**、**`search_replace`**、**`search_file`**（流式扫描；**`next_index_offset`**；上限 **`fs_tool_search_max_bytes`**）
+- **`_is_text_readable_path`**：判定是否按 UTF-8 文本读取（白名单后缀或无后缀）
 - **`_iter_file_lines`**、**`_read_line_window`**、**`_scan_regex_hits`**、**`_merge_line_ranges`**、**`_load_lines_for_ranges`**、**`_read_file_text`**、**`_unified_diff_body`**：流式读、命中扫描与 diff
 
 ## `skills.py`
@@ -76,6 +77,13 @@
 - **`load_skills`**：按 `skill_names` 数组整组设置会话技能；空数组表示清空；返回 `action=set_loaded_skills`、`loaded_skills` 与 `available_skills`。
 - **`unload_skills`**：从当前会话已加载技能中移除指定名称，不影响磁盘 skill 文件。
 - **`clear_skills`**：清空当前会话已加载技能，不影响磁盘 skill 文件。
+
+## `triggers.py`
+
+- **`TriggerListArgs`** / **`TriggerGetArgs`** / **`TriggerCreateArgs`**（`name`/`task_template`/`condition`）/ **`TriggerUpdateArgs`** / **`TriggerDeleteArgs`** / **`TriggerFireArgs`**
+- **`_session_client_from_context`**：从 `OpenAIConversationContext` 解析 session/client 供 create 绑定
+- **`trigger_list`** / **`trigger_get`** / **`trigger_create`** / **`trigger_update`** / **`trigger_delete`** / **`trigger_fire`**
+- **`_json_text`**
 
 ## `result_policy.py`
 

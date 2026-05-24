@@ -200,8 +200,8 @@ class FastApiRouteTests(unittest.TestCase):
                     "/v1/triggers",
                     json={
                         "name": "diagnose-payment",
-                        "source_type": "manual",
                         "task_template": "diagnose payment payload={payload_json}",
+                        "condition": {"interval_seconds": 3600},
                     },
                 )
                 self.assertEqual(create_resp.status_code, 200)

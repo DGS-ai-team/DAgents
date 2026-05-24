@@ -69,6 +69,16 @@ class FsToolsTests(unittest.TestCase):
         self.assertEqual(body, "1\ta\n2\tb")
         self.assertIn("正文是否包含行号: 是", out)
 
+    def test_read_file_supports_extensionless_text_file(self) -> None:
+        """无后缀文件（如 Makefile）应按 UTF-8 文本读取。"""
+        p = self._root / "Makefile"
+        p.write_text("all:\n\techo ok\n", encoding="utf-8")
+        out = read_file(path="Makefile")
+        body = out.split("---", 1)[-1].strip()
+        self.assertEqual(body, "all:\n\techo ok")
+        search_out = search_file(path="Makefile", pattern="echo", context_lines=0)
+        self.assertIn("全文件命中数: 1", search_out)
+
     def test_write_file_if_exists_policies(self) -> None:
         p = self._root / "nested" / "out.txt"
         out = write_file(path="nested/out.txt", content="hello", create_parent_dirs=False)

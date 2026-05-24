@@ -217,14 +217,10 @@
 - **`POST /v1/triggers`**
 - 常用请求字段：
   - **`name`**：名称，必填。
-  - **`source_type`**：`manual | interval | once | webhook | queue | file | metric | registry_event`。
-  - **`condition`**：触发条件；`interval` 需 `{"interval_seconds": 60}`，`once` 需 `{"fire_at": 1730000000}`。
-  - **`task_template`**：投递给 Agent 的任务模板，必填；支持 `{trigger_id}`、`{trigger_name}`、`{source_type}`、`{reason}`、`{payload_json}`。
-  - **`target_session_id`**：可选；为空时触发器执行时自动创建新 session。
-  - **`client_id`**：可选；为空时使用 `trigger-{trigger_id}`。
-  - **`risk_level`**：`low | medium | high | critical`，默认 `low`。
-  - **`enabled`**：是否进入调度器，默认 `false`。
-  - **`approval_policy`**：高风险自主触发需显式设置 `{"auto_fire_allowed": true}`，否则调度器只记录 skipped。
+  - **`condition`**（必填，不可为空）：`{"interval_seconds": 60}` 周期，或 `{"fire_at": 1730000000}` 单次；二者不可同时设置。
+  - **`task_template`**：投递给 Agent 的任务模板，必填；支持 `{trigger_id}`、`{trigger_name}`、`{reason}`、`{payload_json}`。
+  - **`target_session_id`** / **`client_id`**：可选；HTTP 创建时可指定；Agent 工具 `trigger_create` 会从当前会话 `context` 自动绑定。
+  - 新建触发器默认 **`enabled=true`**，并根据 `condition` 计算 `next_fire_at`。
 
 #### 手动触发
 
@@ -245,7 +241,7 @@
 
 - 触发器只负责唤起任务，不直接执行工具。
 - 工具调用仍走现有 `approval_required` / `resume` 流程。
-- 调度器对 `high` / `critical` 风险触发器默认跳过自主 fire，除非 `approval_policy.auto_fire_allowed=true`。
+- 调度器对 `enabled=true` 且 `next_fire_at` 到期的触发器自动 fire；工具/API 写入类操作仍受工具审批策略约束。
 - 触发历史会记录来源、payload、投递内容、结果和错误信息，作为后续 Audit Timeline 的数据基础。
 
 ---

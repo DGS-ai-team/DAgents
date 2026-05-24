@@ -203,8 +203,8 @@ def _format_runtime_workspace_section() -> str:
         "## 重要目录说明：",
         "",
         "- **`.runtime/memory/`**：会话持久化。",
-        "- **`.runtime/prompt_context/`**：系统提示侧车 **`soul.md` / `user.md` / `custom.md`**（UTF-8；由 **`get_system_prompt`** 读取）。",
-        "- **`.runtime/agent/`**：实例标识等。其中agent_id标记了你的唯一标识",
+        "- **`.runtime/prompt_context/`**： **`soul.md`（你的设定） / `user.md`（用户信息与偏好） / `custom.md`（用户侧追加的临时/专项指令）**（UTF-8；已加载到prompt中，无需主动读取）。",
+        "- **`.runtime/agent/`**：实例标识等。其中agent_id标记了你的唯一标识，无需主动读取",
         "- **`.runtime/skills/`**：与 Agent **skills** 机制绑定的可复用能力（元数据与正文由 skills 加载逻辑管理）。",
         "- **`.runtime/data/`**：**临时数据区**——脚本输出结果、上传文件、中间产物等；可清理，**不要**当作唯一权威存档。",
         "- **`.runtime/scripts/`**：**独立脚本区**——与 skills **无关联**、单独编写的小脚本/工具脚本应**优先**放在此处，避免与 **`skills/`** 混淆。",
@@ -213,7 +213,6 @@ def _format_runtime_workspace_section() -> str:
         f"- **`.runtime/scripts_menu.md`**：用 Markdown 等为 **`scripts/`** 内脚本建立索引（路径、用途、如何运行、依赖说明），便于快速检索；新增或删除脚本时同步更新，**不要**在对话中编造未列入或未存在的脚本路径。",
         "执行任务时优先判断是否有脚本能够完成任务。新增脚本前也要先判断是否已有可用的脚本。",
         "",
-        "若首次使用时目录或索引文件不存在，可用文件工具创建后再写入。",
     ]
     return "\n".join(lines)
 

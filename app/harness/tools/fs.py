@@ -88,6 +88,22 @@ _TEXT_SUFFIXES = {
 }
 
 
+def _is_text_readable_path(path: Path) -> bool:
+    """判定路径是否按 UTF-8 文本读取（含无后缀的纯文本文件）。
+
+    逻辑：
+    1. 已知文本后缀（`_TEXT_SUFFIXES`）允许；
+    2. 无后缀（如 `Makefile`、`LICENSE`）也允许，按 UTF-8 读入。
+
+    关键分支：
+    - 有后缀但不在白名单内仍拒绝，避免误读二进制。
+    """
+    suffix = path.suffix.lower()
+    if suffix in _TEXT_SUFFIXES:
+        return True
+    return suffix == ""
+
+
 def _workspace_root() -> Path:
     """返回文件工具允许访问的根目录。
 
@@ -122,9 +138,9 @@ def _resolve_under_root(path: str) -> Path:
 
 
 def _read_file_raw_text(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix in _TEXT_SUFFIXES:
+    if _is_text_readable_path(path):
         return path.read_text(encoding="utf-8", errors="replace")
+    suffix = path.suffix.lower()
     raise ValueError(f"不支持读取该后缀文件：{suffix or '<no-suffix>'}")
 
 
@@ -143,7 +159,7 @@ def _read_file_text(path: Path) -> str:
     if suffix == ".json":
         obj = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         return json.dumps(obj, ensure_ascii=False, indent=2)
-    if suffix in _TEXT_SUFFIXES:
+    if _is_text_readable_path(path):
         return path.read_text(encoding="utf-8", errors="replace")
     raise ValueError(f"不支持读取该后缀文件：{suffix or '<no-suffix>'}")
 
@@ -163,7 +179,7 @@ def _iter_file_lines(path: Path) -> Iterator[str]:
         for line in _read_file_text(path).splitlines():
             yield line
         return
-    if suffix not in _TEXT_SUFFIXES:
+    if not _is_text_readable_path(path):
         raise ValueError(f"不支持读取该后缀文件：{suffix or '<no-suffix>'}")
     with path.open(encoding="utf-8", errors="replace") as fh:
         for raw in fh:
@@ -390,7 +406,7 @@ def read_file(
     """使用场景：在 **`FS_ROOT`** 内按行窗口读取文本，供 **`search_replace`** 复制锚定文本；大文件用 **`line_offset`/`line_limit`** 分段读。
 
     字段说明：
-    - `path`：工作区内路径（必填）。
+    - `path`：工作区内路径（必填）；支持无后缀文本文件（如 `Makefile`）。
     - `line_offset`：起始行（1-based，默认 1）；非正整数时从文件末尾倒数起算。
     - `line_limit`：最多读取行数（默认 100），**分页主参数**。
     - `include_line_numbers`：是否在正文前加 1-based 行号和 tab，默认 false。
