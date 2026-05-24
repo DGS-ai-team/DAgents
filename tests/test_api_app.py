@@ -84,6 +84,8 @@ class FakeAgentService:
         self.submitted_messages: list[dict[str, object]] = []
         self.submitted_resumes: list[dict[str, object]] = []
         self.released_sessions: list[tuple[str, bool]] = []
+        self.list_sessions_result: dict[str, object] = {"active": [], "persisted": []}
+        self.deleted_persisted_sessions: list[str] = []
         FakeAgentService.instances.append(self)
 
     async def start(self) -> None:
@@ -115,6 +117,17 @@ class FakeAgentService:
         """记录会话释放参数。"""
         self.released_sessions.append((session_id, clear_persisted))
         return True
+
+    async def list_sessions(self) -> dict[str, object]:
+        """返回预设 session 列表。"""
+        return dict(self.list_sessions_result)
+
+    async def delete_persisted_session(self, session_id: str) -> bool:
+        """记录 sqlite 删除请求。"""
+        self.deleted_persisted_sessions.append(session_id)
+        if session_id == "active-s":
+            raise RuntimeError("session 'active-s' is still active in queue")
+        return session_id == "persisted-s"
 
 
 @unittest.skipIf(TestClient is None or api_app is None, _API_SKIP)
@@ -189,6 +202,27 @@ class FastApiRouteTests(unittest.TestCase):
         self.assertEqual(service.submitted_messages[0]["priority"], "human")
         self.assertEqual(service.submitted_resumes[0]["priority"], "resume")
         self.assertEqual(service.released_sessions, [("s-api", True)])
+
+    def test_list_and_delete_persisted_session_routes(self) -> None:
+        """GET /v1/sessions 与 DELETE /v1/sessions/{id}/persisted 应接线到 AgentService。"""
+        assert api_app is not None and TestClient is not None
+        with self._client():
+            app = api_app.create_app()
+            with TestClient(app) as client:
+                list_resp = client.get("/v1/sessions")
+                self.assertEqual(list_resp.status_code, 200)
+                self.assertIn("active", list_resp.json())
+                self.assertIn("persisted", list_resp.json())
+
+                ok_delete = client.delete("/v1/sessions/persisted-s/persisted")
+                self.assertEqual(ok_delete.status_code, 200)
+                self.assertTrue(ok_delete.json()["deleted"])
+
+                blocked = client.delete("/v1/sessions/active-s/persisted")
+                self.assertEqual(blocked.status_code, 409)
+
+        service = FakeAgentService.instances[-1]
+        self.assertEqual(service.deleted_persisted_sessions, ["persisted-s", "active-s"])
 
     def test_trigger_routes_create_list_fire_and_history(self) -> None:
         """触发器 API 应创建资源、手动投递任务并记录历史。"""

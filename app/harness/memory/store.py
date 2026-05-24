@@ -115,17 +115,25 @@ class SqliteMessageStore:
             )
             conn.commit()
 
-    def save_conversation_content(self, session_id: str, payload: ConversationContext) -> None:
+    def save_conversation_content(
+        self,
+        session_id: str,
+        payload: ConversationContext,
+        *,
+        first_request_message: str | None = None,
+    ) -> None:
         """用内存中的 `ConversationContext` 覆盖写入该会话的 `content` 行。
 
         逻辑：
         1. 校验 `session_id`；
         2. 将 `history` 转为与持久化一致的字典列表，并按上限截断；
-        3. 序列化主流程与 summary 压缩常驻字段后 UPSERT。
+        3. 若库中尚无 `first_request_message`，写入入参或从 `history` 推导的首条用户消息；
+        4. 序列化主流程与 summary 压缩常驻字段后 UPSERT。
 
         关键边界：
         - 每条 `meta` 须可被 `json` 序列化；
-        - 空 `session_id` 抛 `ValueError`。
+        - 空 `session_id` 抛 `ValueError`；
+        - 已有非空 `first_request_message` 时不覆盖。
 
         副作用说明：
         - 覆盖该行 `content`；若不存在则插入新行。
@@ -145,17 +153,30 @@ class SqliteMessageStore:
             tool_loop_count=max(0, int(payload.tool_loop_count)),
             loaded_skills=list(payload.loaded_skills),
         )
+        first_text = self._normalize_first_request_text(first_request_message)
+        if not first_text:
+            first_text = self._derive_first_request_message(payload)
 
         with self._connection() as conn:
+            row = conn.execute(
+                "SELECT first_request_message FROM session_history WHERE session_id = ?",
+                (sid,),
+            ).fetchone()
+            existing_first = str(row[0] if row else "").strip()
+            stored_first = existing_first if existing_first else first_text
             conn.execute(
                 """
-                INSERT INTO session_history(session_id, content)
-                VALUES(?, ?)
+                INSERT INTO session_history(session_id, content, first_request_message)
+                VALUES(?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     content = excluded.content,
+                    first_request_message = CASE
+                        WHEN trim(session_history.first_request_message) = '' THEN excluded.first_request_message
+                        ELSE session_history.first_request_message
+                    END,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (sid, blob),
+                (sid, blob, stored_first),
             )
             conn.commit()
 
@@ -229,12 +250,53 @@ class SqliteMessageStore:
         副作用说明：
         - 删除 `session_history` 中该会话行。
         """
+        self.delete_session_if_exists(session_id)
+
+    def delete_session_if_exists(self, session_id: str) -> bool:
+        """删除 sqlite 中的会话行；存在则返回 True。
+
+        逻辑：
+        1. 规范化 `session_id`；
+        2. 执行 DELETE 并检查 `rowcount`。
+
+        关键边界：
+        - 空 `session_id` 返回 False。
+        """
         sid = (session_id or "").strip()
         if not sid:
-            return
+            return False
         with self._connection() as conn:
-            conn.execute("DELETE FROM session_history WHERE session_id = ?", (sid,))
+            cur = conn.execute("DELETE FROM session_history WHERE session_id = ?", (sid,))
             conn.commit()
+            return int(cur.rowcount or 0) > 0
+
+    def list_session_summaries(self) -> list[dict[str, str]]:
+        """列出所有已持久化会话摘要（不含 BLOB 正文）。
+
+        逻辑：
+        1. 查询 `session_id` / `first_request_message` / `updated_at`；
+        2. 按 `updated_at` 降序返回字典列表。
+
+        Returns:
+            每项含 `session_id`、`first_request_message`、`updated_at`。
+        """
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT session_id, COALESCE(first_request_message, ''), updated_at
+                FROM session_history
+                ORDER BY updated_at DESC
+                """
+            ).fetchall()
+        return [
+            {
+                "session_id": str(row[0] or ""),
+                "first_request_message": str(row[1] or ""),
+                "updated_at": str(row[2] or ""),
+            }
+            for row in rows
+            if str(row[0] or "").strip()
+        ]
 
     def _init_schema(self) -> None:
         """初始化 SQLite 表结构。
@@ -260,7 +322,55 @@ class SqliteMessageStore:
                 )
                 """
             )
+            columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(session_history)").fetchall()
+            }
+            if "first_request_message" not in columns:
+                conn.execute(
+                    "ALTER TABLE session_history ADD COLUMN first_request_message TEXT NOT NULL DEFAULT ''"
+                )
             conn.commit()
+
+    @staticmethod
+    def _normalize_first_request_text(value: str | None) -> str:
+        """截断并规范化首条请求消息预览。"""
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if len(text) <= 500:
+            return text
+        return f"{text[:500]}..."
+
+    @staticmethod
+    def _derive_first_request_message(payload: ConversationContext) -> str:
+        """从会话 history / openai_messages 推导首条用户请求文本。"""
+        for rec in payload.history:
+            role = str(rec.role or "").strip().lower()
+            if role not in {"user", "human"}:
+                continue
+            text = str(rec.content or "").strip()
+            if text:
+                return SqliteMessageStore._normalize_first_request_text(text)
+        for msg in payload.openai_messages:
+            if not isinstance(msg, dict):
+                continue
+            if str(msg.get("role") or "").strip().lower() != "user":
+                continue
+            content = msg.get("content")
+            if isinstance(content, str):
+                text = content.strip()
+            elif isinstance(content, list):
+                parts: list[str] = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        parts.append(str(part.get("text") or ""))
+                text = "".join(parts).strip()
+            else:
+                text = str(content or "").strip()
+            if text:
+                return SqliteMessageStore._normalize_first_request_text(text)
+        return ""
 
     @staticmethod
     def _decode_content_blob(blob: bytes | None) -> dict[str, Any]:

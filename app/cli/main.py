@@ -9,6 +9,7 @@ from typing import Sequence
 
 from app.config.env import load_env
 from app.cli.chat import run_chat
+from app.cli.session_commands import run_delete_session, run_show_session
 
 
 def _default_api_base() -> str:
@@ -27,6 +28,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "chat":
         return run_chat(args)
+    if args.command == "show":
+        if args.show_command == "session":
+            return run_show_session(args)
+        parser.parse_args(["show", "--help"])
+        return 1
+    if args.command == "delete":
+        if args.delete_command == "session":
+            return run_delete_session(args)
+        parser.parse_args(["delete", "--help"])
+        return 1
     if args.command in {"serve", "api"}:
         return _run_installed_or_python("dagents-api", "run_agent_api.py", args.extra)
     if args.command == "register-center":
@@ -44,11 +55,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dagents", description="DAgents command line interface")
     subparsers = parser.add_subparsers(dest="command")
 
-    chat = subparsers.add_parser("chat", help="Start an interactive terminal chat")
+    chat = subparsers.add_parser("chat", help="Start an interactive Textual TUI chat")
     chat.add_argument("--api", default=os.getenv("DAGENTS_API_BASE") or _default_api_base(), help="DAgents API base URL")
     chat.add_argument("--session", default=None, help="Session ID to create or reuse")
     chat.add_argument("--client-id", default=None, help="SSE client ID")
     chat.add_argument("--show-reasoning", action="store_true", help="Print reasoning stream events")
+
+    show = subparsers.add_parser("show", help="Show runtime resources")
+    show_sub = show.add_subparsers(dest="show_command")
+    show_session = show_sub.add_parser("session", help="List active queue sessions and persisted sqlite sessions")
+    show_session.add_argument(
+        "--api",
+        default=os.getenv("DAGENTS_API_BASE") or _default_api_base(),
+        help="DAgents API base URL",
+    )
+
+    delete = subparsers.add_parser("delete", help="Delete runtime resources")
+    delete_sub = delete.add_subparsers(dest="delete_command")
+    delete_session = delete_sub.add_parser(
+        "session",
+        help="Delete a persisted sqlite session (only when not in queue)",
+    )
+    delete_session.add_argument("session_id", help="Session ID to delete from sqlite")
+    delete_session.add_argument(
+        "--api",
+        default=os.getenv("DAGENTS_API_BASE") or _default_api_base(),
+        help="DAgents API base URL",
+    )
 
     serve = subparsers.add_parser("serve", help="Start the Agent API backend")
     serve.add_argument("extra", nargs=argparse.REMAINDER)

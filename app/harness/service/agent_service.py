@@ -79,6 +79,7 @@ class AgentService:
         self._session_last_activity: dict[str, float] = {}
         self._session_consumer_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_active_handles: dict[str, asyncio.Task[None] | None] = {}
+        self._session_first_request: dict[str, str] = {}
         self._async_store = get_async_tool_result_store()
         self._handle_stream_event = handle_stream_event
         _, self._tool_map = build_openai_toolkit()
@@ -254,6 +255,84 @@ class AgentService:
             return True
         return existed_in_memory
 
+    async def list_sessions(self) -> dict[str, list[dict[str, Any]]]:
+        """列出活跃队列中的 session 与 sqlite 中已持久化的 session 摘要。
+
+        逻辑：
+        1. 遍历 `_session_queues` 组装活跃 session（含 queue 深度、client_id、phase）；
+        2. 若启用 sqlite，读取 `list_session_summaries` 并标记是否仍在队列中；
+        3. 返回 `{"active": [...], "persisted": [...]}`。
+
+        关键边界：
+        - 无 sqlite 时 `persisted` 为空列表；
+        - 活跃 session 可能同时出现在 persisted（`in_queue=True`）。
+        """
+        active: list[dict[str, Any]] = []
+        for sid, queue in self._session_queues.items():
+            ctx = self._session_contexts.get(sid)
+            active_handle = self._session_active_handles.get(sid)
+            has_active_turn = active_handle is not None and not active_handle.done()
+            pending_count = len(queue.pending_metrics_rows())
+            client_id = ""
+            run_turn_phase = RunTurnPhase.IDLE.value
+            if ctx is not None:
+                client_id = (ctx.sse_client_id or ctx.active_client_id or "").strip()
+                run_turn_phase = ctx.run_turn_phase.value
+            last_activity = self._session_last_activity.get(sid)
+            active.append(
+                {
+                    "session_id": sid,
+                    "client_id": client_id or None,
+                    "queue_pending": pending_count,
+                    "has_active_turn": has_active_turn,
+                    "run_turn_phase": run_turn_phase,
+                    "last_activity_at": float(last_activity) if last_activity is not None else None,
+                }
+            )
+        active.sort(key=lambda row: str(row.get("session_id") or ""))
+
+        persisted: list[dict[str, Any]] = []
+        if self._message_store is not None:
+            queue_ids = set(self._session_queues.keys())
+            rows = await asyncio.to_thread(self._message_store.list_session_summaries)
+            for row in rows:
+                sid = str(row.get("session_id") or "").strip()
+                if not sid:
+                    continue
+                persisted.append(
+                    {
+                        "session_id": sid,
+                        "first_request_message": str(row.get("first_request_message") or ""),
+                        "updated_at": str(row.get("updated_at") or ""),
+                        "in_queue": sid in queue_ids,
+                    }
+                )
+        return {"active": active, "persisted": persisted}
+
+    async def delete_persisted_session(self, session_id: str) -> bool:
+        """仅删除 sqlite 中的 session；会话仍在队列中时拒绝。
+
+        逻辑：
+        1. 校验 `session_id`；
+        2. 若 `_session_queues` 仍含该 session，抛 `RuntimeError`；
+        3. 调用 `delete_session_if_exists` 删除持久化行。
+
+        关键分支：
+        - 未启用 sqlite 时返回 False；
+        - 行不存在时返回 False。
+
+        异常说明：
+        - session 仍在队列中时向上抛 `RuntimeError`，由 API 层转为 409。
+        """
+        sid = (session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id 不能为空。")
+        if sid in self._session_queues:
+            raise RuntimeError(f"session {sid!r} is still active in queue")
+        if self._message_store is None:
+            return False
+        return await asyncio.to_thread(self._message_store.delete_session_if_exists, sid)
+
     async def submit_message(
         self,
         *,
@@ -295,6 +374,11 @@ class AgentService:
         if request_type in {"async_tool_result", "tool_result"} and priority == "other":
             effective_priority = "tool_result"
         q = await self._get_or_create_session_queue_async(session_id)
+        sid = (session_id or "").strip()
+        content_text = str(content or "").strip()
+        if request_type == "message" and content_text and sid and sid not in self._session_first_request:
+            preview = content_text if len(content_text) <= 500 else f"{content_text[:500]}..."
+            self._session_first_request[sid] = preview
         q.enqueue(
             envelope=MessageEnvelope(
                 session_id=session_id,
@@ -388,9 +472,14 @@ class AgentService:
         if self._message_store is None:
             return
         payload = ctx.to_conversation_context()
+        first_request = self._session_first_request.get(session_id)
 
         def _save() -> None:
-            self._message_store.save_conversation_content(session_id, payload)
+            self._message_store.save_conversation_content(
+                session_id,
+                payload,
+                first_request_message=first_request,
+            )
 
         await asyncio.to_thread(_save)
 

@@ -60,6 +60,19 @@
 
 - 全仓库单测路线图；**§5 API** 等待在「完整 `requirements` + 预 patch 编排层」下补 `TestClient` 用例。
 
+## `test_cli_approval.py`
+
+- **`CliApprovalTests`** / **`CliSseParserTests`**：审批载荷解析、resume 决策、SSE block 解析。
+
+## `test_cli_session_controller.py`
+
+- **`SessionControllerRenderTests`**：后台 render、turn 栅栏、approval skip done。
+- **`SessionControllerBindTriggersTests`**：`bind_triggers_to_client` PATCH 逻辑。
+
+## `test_agent_service_sessions.py`
+
+- **`AgentServiceSessionAdminTests`**：`list_sessions`、`delete_persisted_session` 行为。
+
 ## `integration/`
 
 - 详见 **`integration/REFERENCE.md`**（`live_llm_smoke`：可选真实 LLM 冒烟）。

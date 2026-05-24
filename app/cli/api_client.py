@@ -71,6 +71,25 @@ class DAgentsApiClient:
             },
         )
 
+    async def list_triggers(self) -> dict[str, Any]:
+        """GET /v1/triggers，返回含 triggers 列表的字典。"""
+        return await self._get_json("/v1/triggers")
+
+    async def list_sessions(self) -> dict[str, Any]:
+        """GET /v1/sessions，返回活跃与持久化 session 列表。"""
+        return await self._get_json("/v1/sessions")
+
+    async def delete_persisted_session(self, session_id: str) -> dict[str, Any]:
+        """DELETE /v1/sessions/{session_id}/persisted，仅删除 sqlite 行。"""
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        return await self._delete_json(f"/v1/sessions/{sid}/persisted")
+
+    async def patch_trigger(self, trigger_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """PATCH /v1/triggers/{trigger_id} 部分更新。"""
+        return await self._patch_json(f"/v1/triggers/{trigger_id}", payload)
+
     async def stream_events(self, *, client_id: str) -> AsyncIterator[StreamEvent]:
         query = urlencode({"client_id": client_id})
         async with self._session.get(f"{self.api_base}/v1/streams?{query}") as resp:
@@ -87,8 +106,47 @@ class DAgentsApiClient:
                     if event is not None:
                         yield event
 
+    async def _get_json(self, path: str) -> dict[str, Any]:
+        async with self._session.get(f"{self.api_base}{path}") as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise RuntimeError(f"HTTP {resp.status}: {text}")
+            if not text.strip():
+                return {}
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"invalid JSON response from {path}: {text}") from exc
+            return data if isinstance(data, dict) else {}
+
     async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         async with self._session.post(f"{self.api_base}{path}", json=payload) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise RuntimeError(f"HTTP {resp.status}: {text}")
+            if not text.strip():
+                return {}
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"invalid JSON response from {path}: {text}") from exc
+            return data if isinstance(data, dict) else {}
+
+    async def _patch_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        async with self._session.patch(f"{self.api_base}{path}", json=payload) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise RuntimeError(f"HTTP {resp.status}: {text}")
+            if not text.strip():
+                return {}
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"invalid JSON response from {path}: {text}") from exc
+            return data if isinstance(data, dict) else {}
+
+    async def _delete_json(self, path: str) -> dict[str, Any]:
+        async with self._session.delete(f"{self.api_base}{path}") as resp:
             text = await resp.text()
             if resp.status >= 400:
                 raise RuntimeError(f"HTTP {resp.status}: {text}")

@@ -6,7 +6,9 @@ DAGENTS_HOME="${DAGENTS_HOME:-/opt/dagents/backend}"
 show_help() {
   cat <<EOF
 Usage:
-  dagents chat               Start interactive terminal chat
+  dagents chat               Start interactive Textual TUI chat
+  dagents show session       List active queue and persisted sqlite sessions
+  dagents delete session ID  Delete persisted sqlite session (not in queue)
   dagents serve              Start the Agent API backend
   dagents register-center    Start the Register Center
   dagents doctor             Check installed files

@@ -27,7 +27,7 @@ jobs:
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
             cli_bin_name: dagents-cli
-            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=prompt_toolkit --hidden-import=aiohttp run_dagents_cli.py
+            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=textual --hidden-import=aiohttp run_dagents_cli.py
           - target: linux-x86
             os: ubuntu-22.04
             build_kind: docker-i386
@@ -40,7 +40,7 @@ jobs:
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
             cli_bin_name: dagents-cli
-            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=prompt_toolkit --hidden-import=aiohttp run_dagents_cli.py
+            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=textual --hidden-import=aiohttp run_dagents_cli.py
           - target: windows-x64
             os: windows-2022
             build_kind: native
@@ -53,7 +53,7 @@ jobs:
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
             cli_bin_name: dagents-cli.exe
-            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=prompt_toolkit --hidden-import=aiohttp run_dagents_cli.py
+            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=textual --hidden-import=aiohttp run_dagents_cli.py
           - target: windows-x86
             os: windows-2022
             build_kind: native
@@ -64,7 +64,7 @@ jobs:
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
             rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
             cli_bin_name: dagents-cli.exe
-            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=prompt_toolkit --hidden-import=aiohttp run_dagents_cli.py
+            cli_pyinstaller_args: --onefile --name dagents-cli --hidden-import=textual --hidden-import=aiohttp run_dagents_cli.py
 
     steps:
       - name: Checkout

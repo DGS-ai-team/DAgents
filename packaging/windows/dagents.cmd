@@ -99,7 +99,9 @@ exit /b 0
 
 :help
 echo Usage:
-echo   dagents chat              Start interactive terminal chat
+echo   dagents chat              Start interactive Textual TUI chat
+echo   dagents show session      List active and persisted sessions
+echo   dagents delete session ID Delete persisted session not in queue
 echo   dagents serve             Start the Agent API backend
 echo   dagents register-center   Start the Register Center
 echo   dagents doctor            Check installed files

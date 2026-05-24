@@ -78,6 +78,32 @@ class SessionReleaseResult(BaseModel):
     released: bool
 
 
+class SessionActiveInfo(BaseModel):
+    session_id: str
+    client_id: str | None = None
+    queue_pending: int = 0
+    has_active_turn: bool = False
+    run_turn_phase: str = "idle"
+    last_activity_at: float | None = None
+
+
+class SessionPersistedInfo(BaseModel):
+    session_id: str
+    first_request_message: str = ""
+    updated_at: str = ""
+    in_queue: bool = False
+
+
+class SessionListResult(BaseModel):
+    active: list[SessionActiveInfo]
+    persisted: list[SessionPersistedInfo]
+
+
+class SessionPersistedDeleteResult(BaseModel):
+    session_id: str
+    deleted: bool
+
+
 class CancelTurnResult(BaseModel):
     """取消当前推理 turn 的响应（无在途任务时 `cancelled=false`）。"""
 
@@ -362,6 +388,16 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return SessionCreateResult(session_id=final_session_id, created=True)
 
+    @app.get("/v1/sessions", response_model=SessionListResult)
+    async def list_sessions() -> SessionListResult:
+        """列出活跃队列 session 与 sqlite 已持久化 session。"""
+        service: AgentService = app.state.service
+        data = await service.list_sessions()
+        return SessionListResult(
+            active=[SessionActiveInfo.model_validate(item) for item in data.get("active", [])],
+            persisted=[SessionPersistedInfo.model_validate(item) for item in data.get("persisted", [])],
+        )
+
     @app.post("/v1/sessions/{session_id}/cancel", response_model=CancelTurnResult)
     async def cancel_current_turn(session_id: str) -> CancelTurnResult:
         """取消指定 session 当前正在执行的 `_handle_message`（流式输出会中断，上下文由 runtime `flush_cancelled_turn` 修补）。"""
@@ -384,6 +420,21 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return SessionReleaseResult(session_id=sid, released=released)
+
+    @app.delete("/v1/sessions/{session_id}/persisted", response_model=SessionPersistedDeleteResult)
+    async def delete_persisted_session(session_id: str) -> SessionPersistedDeleteResult:
+        """仅删除 sqlite 中的 session；会话仍在队列时返回 409。"""
+        service: AgentService = app.state.service
+        sid = session_id.strip()
+        if not sid:
+            raise HTTPException(status_code=422, detail="session_id is empty")
+        try:
+            deleted = await service.delete_persisted_session(sid)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return SessionPersistedDeleteResult(session_id=sid, deleted=deleted)
 
     @app.post("/v1/messages", response_model=SubmitResult)
     async def submit_message(body: MessageIn, request: Request) -> SubmitResult:
