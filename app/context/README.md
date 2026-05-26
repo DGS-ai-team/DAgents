@@ -3,6 +3,7 @@
 | 文件 | 说明 |
 |------|------|
 | **`models.py`** | 会话上下文核心模型：`MessageRecord`、`ConversationContext`、`PendingToolCall`、`OpenAIConversationContext`，以及 runtime 对齐常量与阶段枚举（含 `RunTurnPhase` 与 `SummaryCompressionPhase`） |
+| **`openai_messages.py`** | OpenAI messages 写入上下文前的协议规范化工具，统一处理 DeepSeek `reasoning_content` 字段 |
 | **`REFERENCE.md`** | 本目录 Python 符号索引 |
 
 说明：

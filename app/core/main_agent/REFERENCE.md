@@ -11,7 +11,7 @@
 ## `agent.py`
 
 - **`init_agent`**：创建并返回 OpenAI 隐式 ReAct runtime
-- **`MainAgentTurnOrchestrator`**：消息回合业务编排器；`resume` / `async_tool_result` / `tool_result` / `human_message` 分支；装配 **`SummaryCompressionCoordinator`**、**`ToolExecutionCoordinator`**、**`ToolResumeCoordinator`**；**`_invoke_tool`** 内在得到最终 **`result_text`** 后经 **`package_tool_result`** 裁剪/脱敏并 **`emit` `tool_result`** 信封；**`_handle_tool_result`** 仅驱动 **`tool_message`** 下一轮（不再重复发 **`tool_result`** SSE）；**`_handle_human_message`**：若 **`ctx.pending_tool_calls`** 非空则按 pending 逐条补打断 **`tool`/`tool_result` SSE** 后 **`clear()`** pending 并 **`run_turn_phase=IDLE`**；**`display_inference`** 生成 **`tool_result` / `tool_call` / `approval_required`** 等 **`display_type`**
+- **`MainAgentTurnOrchestrator`**：消息回合业务编排器；`resume` / `async_tool_result` / `tool_result` / `human_message` 分支；装配 **`SummaryCompressionCoordinator`**、**`ToolExecutionCoordinator`**、**`ToolResumeCoordinator`**；**`_invoke_tool`** 内在得到最终 **`result_text`** 后经 **`package_tool_result`** 裁剪/脱敏并 **`emit` `tool_result`** 信封；**`_handle_async_tool_result`** 合成 `tool_callback` assistant，`reasoning_content` 由统一 message 写入口补齐；**`_handle_tool_result`** 仅驱动 **`tool_message`** 下一轮（不再重复发 **`tool_result`** SSE）；**`_handle_human_message`**：若 **`ctx.pending_tool_calls`** 非空则按 pending 逐条补打断 **`tool`/`tool_result` SSE** 后 **`clear()`** pending 并 **`run_turn_phase=IDLE`**；**`display_inference`** 生成 **`tool_result` / `tool_call` / `approval_required`** 等 **`display_type`**
 
 ## `summary_compression.py`
 

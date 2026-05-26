@@ -736,7 +736,20 @@ class MainAgentTurnOrchestrator:
     def _build_tool_result_messages(
         payload: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, str, str]:
-        """构造 `async_tool_result` 写回会话历史所需的 user/assistant/tool 三段消息。"""
+        """构造 `async_tool_result` 写回会话历史所需的三段消息。
+
+        逻辑：
+        1. 从异步任务 payload 提取工具名、job、状态与结果；
+        2. 将结果交给 `package_tool_result` 做模型侧内容裁剪/脱敏；
+        3. 合成 `user` 提醒、`assistant.tool_calls=tool_callback` 与对应 `tool` 消息。
+
+        关键边界：
+        - 失败/取消任务优先使用 `error_text`，成功任务使用 `result_text`；
+        - 合成 assistant 的 `reasoning_content` 由统一 message 写入口补齐，避免协议逻辑散落。
+
+        与外部交互：
+        - 调用 `package_tool_result` 生成模型可消费的工具结果正文。
+        """
         tool_name = str(payload.get("tool_name", "") or "unknown_tool")
         job_id = str(payload.get("job_id", "") or "unknown-job")
         status = str(payload.get("status", "") or "succeeded")

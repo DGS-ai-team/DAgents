@@ -16,6 +16,7 @@ from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext, RunTurnPhase
 from app.core.main_agent.model import get_model_config
 from app.core.main_agent.agent import MainAgentTurnOrchestrator
+from app.harness.skills.skills import list_enabled_skill_metadata, select_skill_by_name
 from app.harness.memory.store import SqliteMessageStore
 from app.harness.queue.message_queue import MessageEnvelope, MessagePriority, MessageQueue
 from app.harness.service.interface import AgentEventEnvelope
@@ -332,6 +333,221 @@ class AgentService:
         if self._message_store is None:
             return False
         return await asyncio.to_thread(self._message_store.delete_session_if_exists, sid)
+
+    async def get_session_context_summary(self, session_id: str) -> dict[str, Any]:
+        """读取当前 session 的 context 摘要。
+
+        逻辑：
+        1. 校验并预热 session 队列；
+        2. 解析内存/持久化 context；
+        3. 返回上下文字段摘要与最近若干条 OpenAI messages 预览。
+
+        关键边界：
+        - 只读，不修改 context；
+        - messages 只返回尾部预览，避免 HTTP/TUI 输出过大。
+        """
+        sid = (session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id 不能为空。")
+        await self._get_or_create_session_queue_async(sid)
+        ctx = await self._resolve_context(sid)
+        active_handle = self._session_active_handles.get(sid)
+        queue = self._session_queues.get(sid)
+        return {
+            "session_id": sid,
+            "sse_client_id": ctx.sse_client_id,
+            "active_client_id": ctx.active_client_id,
+            "run_turn_phase": ctx.run_turn_phase.value,
+            "messages_count": len(ctx.messages),
+            "pending_tool_calls_count": len(ctx.pending_tool_calls),
+            "messages_total_tokens": max(0, int(ctx.messages_total_tokens)),
+            "tool_loop_count": max(0, int(ctx.tool_loop_count)),
+            "loaded_skills": self._normalized_loaded_skills(ctx),
+            "queue_pending": len(queue.pending_metrics_rows()) if queue is not None else 0,
+            "has_active_turn": active_handle is not None and not active_handle.done(),
+            "recent_messages": [self._message_preview(item) for item in ctx.messages[-12:]],
+        }
+
+    async def clear_session_context(self, session_id: str) -> dict[str, Any]:
+        """清空会话对话上下文并重置持久化态（保留 session 路由与 loaded_skills）。
+
+        逻辑：
+        1. 校验 `session_id`，确保 session 队列/context 已预热；
+        2. 若在途 `_handle_message` 存在则 cancel 并 await 结束；
+        3. 取消该 session 的 summary 压缩 task；
+        4. 对内存 context 调用 `reset_conversation_state` 并落盘；
+        5. 刷新 metrics。
+
+        关键分支：
+        - 队列中未消费消息不清除，后续将在空 context 上继续处理；
+        - sqlite `first_request_message` 由 `save_conversation_content` 保留既有值。
+
+        异常说明：
+        - 空 `session_id` 抛 `ValueError`。
+        """
+        sid = (session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id 不能为空。")
+        await self._get_or_create_session_queue_async(sid)
+        cancelled_turn = await self._cancel_and_await_active_turn(sid)
+        await self._turn_orchestrator.cancel_session_summary_task(session_id=sid)
+        ctx = await self._resolve_context(sid)
+        ctx.reset_conversation_state()
+        await self._persist_context(sid, ctx)
+        refresh_session_context_metrics(self._session_contexts)
+        return {"session_id": sid, "cleared": True, "cancelled_turn": cancelled_turn}
+
+    async def list_session_skills(self, session_id: str) -> dict[str, Any]:
+        """查询当前会话已加载技能与可用技能。
+
+        逻辑：
+        1. 校验并预热 session 队列；
+        2. 解析上下文中的 `loaded_skills`；
+        3. 返回 `loaded_skills` 与全量 `available_skills`。
+
+        关键边界：
+        - 不修改上下文；
+        - 可用技能来自磁盘 enabled skills 元数据。
+        """
+        sid = (session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id 不能为空。")
+        await self._get_or_create_session_queue_async(sid)
+        ctx = await self._resolve_context(sid)
+        return self._session_skills_payload(sid, ctx)
+
+    async def load_session_skill(self, session_id: str, skill_name: str) -> dict[str, Any]:
+        """向当前会话追加加载一个 skill 并持久化。
+
+        逻辑：
+        1. 校验 session 与 skill_name；
+        2. 确认 skill 存在且 enabled；
+        3. 若未加载则追加到 `ctx.loaded_skills`；
+        4. 持久化上下文并返回最新技能状态。
+
+        关键边界：
+        - 已加载时幂等返回；
+        - 超过 `agent_skills_max_in_prompt` 时拒绝新增，避免 prompt 侧静默截断。
+        """
+        sid = (session_id or "").strip()
+        final_skill_name = str(skill_name or "").strip()
+        if not sid:
+            raise ValueError("session_id 不能为空。")
+        if not final_skill_name:
+            raise ValueError("skill_name 不能为空。")
+        skill = select_skill_by_name(final_skill_name)
+        if skill is None:
+            raise ValueError(f"skill 不存在或未启用：{final_skill_name}")
+        await self._get_or_create_session_queue_async(sid)
+        ctx = await self._resolve_context(sid)
+        current = self._normalized_loaded_skills(ctx)
+        if not any(item["skill_name"] == skill.skill_name for item in current):
+            max_skills = max(0, int(get_settings().agent_skills_max_in_prompt))
+            if len(current) >= max_skills:
+                raise ValueError(f"已加载技能数量达到上限：{max_skills}")
+            current.append({"skill_name": skill.skill_name, "description": skill.description})
+            ctx.loaded_skills = current
+            await self._persist_context(sid, ctx)
+        return self._session_skills_payload(sid, ctx)
+
+    async def unload_session_skill(self, session_id: str, skill_name: str) -> dict[str, Any]:
+        """从当前会话移除一个已加载 skill 并持久化。
+
+        逻辑：
+        1. 校验 session 与 skill_name；
+        2. 从 `ctx.loaded_skills` 过滤目标名称；
+        3. 持久化上下文并返回最新技能状态。
+
+        关键边界：
+        - 未加载的名称会被忽略，保持幂等。
+        """
+        sid = (session_id or "").strip()
+        final_skill_name = str(skill_name or "").strip()
+        if not sid:
+            raise ValueError("session_id 不能为空。")
+        if not final_skill_name:
+            raise ValueError("skill_name 不能为空。")
+        await self._get_or_create_session_queue_async(sid)
+        ctx = await self._resolve_context(sid)
+        current = [
+            item for item in self._normalized_loaded_skills(ctx)
+            if item["skill_name"] != final_skill_name
+        ]
+        ctx.loaded_skills = current
+        await self._persist_context(sid, ctx)
+        return self._session_skills_payload(sid, ctx)
+
+    @staticmethod
+    def _normalized_loaded_skills(ctx: OpenAIConversationContext) -> list[dict[str, str]]:
+        """规范化 `ctx.loaded_skills` 为 `skill_name/description` 列表。"""
+        loaded: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in ctx.loaded_skills:
+            if not isinstance(item, dict):
+                continue
+            skill_name = str(item.get("skill_name") or "").strip()
+            if not skill_name or skill_name in seen:
+                continue
+            seen.add(skill_name)
+            loaded.append({"skill_name": skill_name, "description": str(item.get("description") or "").strip()})
+        return loaded
+
+    def _session_skills_payload(self, session_id: str, ctx: OpenAIConversationContext) -> dict[str, Any]:
+        """组装 session skill API 的统一响应。"""
+        loaded = self._normalized_loaded_skills(ctx)
+        ctx.loaded_skills = list(loaded)
+        return {
+            "session_id": session_id,
+            "loaded_skills": loaded,
+            "available_skills": list_enabled_skill_metadata(),
+        }
+
+    @staticmethod
+    def _message_preview(message: dict[str, Any]) -> dict[str, Any]:
+        """将 OpenAI message 压缩为 context 视图预览行。
+
+        逻辑：
+        1. 提取 role、content、tool_call_id、tool_calls 与 reasoning 标记；
+        2. 将换行转义为 `\\n`，避免 TUI 一条 message 预览撑成多行；
+        3. 将正文截断到 160 字符以内。
+
+        关键边界：
+        - message 内容可能为 `None` 或非字符串，统一转为字符串预览。
+        """
+        role = str(message.get("role") or "unknown")
+        raw_content = message.get("content")
+        content = "" if raw_content is None else str(raw_content)
+        preview = content.replace("\n", "\\n")
+        if len(preview) > 160:
+            preview = f"{preview[:157]}..."
+        return {
+            "role": role,
+            "content": preview,
+            "tool_call_id": str(message.get("tool_call_id") or ""),
+            "tool_calls_count": len(message.get("tool_calls") or []) if isinstance(message.get("tool_calls"), list) else 0,
+            "has_reasoning_content": bool(str(message.get("reasoning_content") or "")),
+        }
+
+    async def _cancel_and_await_active_turn(self, session_id: str) -> bool:
+        """取消并等待指定 session 在途 turn 结束。
+
+        逻辑：
+        1. 取 `_session_active_handles[session_id]`；
+        2. 无 task 或已结束则返回 False；
+        3. 否则 cancel 并 await（吞掉 CancelledError）。
+
+        关键分支：
+        - 必须 await 后再 reset context，避免 `finally` 落盘覆盖清空结果。
+        """
+        ht = self._session_active_handles.get(session_id)
+        if ht is None or ht.done():
+            return False
+        ht.cancel()
+        try:
+            await ht
+        except asyncio.CancelledError:
+            pass
+        return True
 
     async def submit_message(
         self,

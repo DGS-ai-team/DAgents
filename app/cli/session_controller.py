@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app.cli.api_client import DAgentsApiClient, StreamEvent
 from app.cli.approval import (
+    ApprovalCancelled,
     ApprovalDecision,
     ToolApprovalRequest,
     build_all_rejected_decision,
@@ -19,7 +20,6 @@ from app.cli.render import (
     format_assistant_end,
     format_error,
     format_reasoning,
-    format_system_line,
     format_tool_call,
     format_tool_result,
 )
@@ -96,9 +96,6 @@ class SessionController:
         self._stream_task = asyncio.create_task(self._pump_stream())
         self._render_task = asyncio.create_task(self._render_loop())
         self._emit_status()
-        self._emit_transcript(format_system_line(f"Connected to {self.api_base}"))
-        self._emit_transcript(format_system_line(f"Session: {self.session_id}"))
-        self._emit_transcript(format_system_line("Type /help for commands, /exit to quit."))
 
     async def stop(self) -> None:
         """停止后台任务并关闭 API 客户端。"""
@@ -157,6 +154,80 @@ class SessionController:
             )
             bound += 1
         return bound
+
+    async def clear_context(self) -> dict[str, Any]:
+        """清空当前 session 的服务端对话上下文。
+
+        逻辑：
+        1. 调用 `POST /v1/sessions/{session_id}/clear-context`；
+        2. 返回 API 响应 dict。
+
+        关键边界：
+        - 需已 `start()` 且 `session_id` 非空。
+        """
+        assert self._client is not None
+        return await self._client.clear_session_context(self.session_id)
+
+    async def list_sessions(self) -> dict[str, Any]:
+        """查询后端当前 session 列表。
+
+        逻辑：
+        1. 调用 `GET /v1/sessions`；
+        2. 原样返回 API 响应，UI 层负责选择展示 active/persisted。
+
+        关键边界：
+        - 需已 `start()`，否则 `_client` 不存在。
+        """
+        assert self._client is not None
+        return await self._client.list_sessions()
+
+    async def get_context(self) -> dict[str, Any]:
+        """查询当前 session 的 context 摘要。
+
+        逻辑：
+        1. 确认 controller 已 `start()` 并持有 API client；
+        2. 使用当前 `session_id` 调用 context API；
+        3. 原样返回后端摘要，由 TUI 负责格式化。
+
+        关键边界：
+        - 不修改本地 turn 栅栏与 SSE 状态，仅用于 `/context` 只读视图。
+        """
+        assert self._client is not None
+        return await self._client.get_session_context(self.session_id)
+
+    async def cancel_current_turn(self) -> dict[str, Any]:
+        """取消当前 session 的在途 turn，并解除本地用户轮次等待。
+
+        逻辑：
+        1. 调用服务端 cancel 接口；
+        2. 无论服务端是否存在 active turn，都结束本地 wait_user_turn；
+        3. 返回 API 响应，供 UI 按需展示。
+
+        关键边界：
+        - 审批等待发生在 CLI render loop 内，服务端可能已无 active turn；本地仍需解除等待。
+        """
+        assert self._client is not None
+        result = await self._client.cancel_current_turn(self.session_id)
+        self._awaiting_user_turn = False
+        self._submit_pending_marker = False
+        self._user_turn_started = False
+        self._user_turn_done.set()
+        return result
+
+    async def list_skills(self) -> dict[str, Any]:
+        """查询当前会话 loaded skills 与后端可用 skills。"""
+        assert self._client is not None
+        return await self._client.list_session_skills(self.session_id)
+
+    async def load_skill(self, skill_name: str) -> dict[str, Any]:
+        """向当前会话加载一个 skill。"""
+        assert self._client is not None
+        return await self._client.load_session_skill(self.session_id, skill_name)
+
+    async def unload_skill(self, skill_name: str) -> dict[str, Any]:
+        """从当前会话卸载一个 skill。"""
+        assert self._client is not None
+        return await self._client.unload_session_skill(self.session_id, skill_name)
 
     def _reset_user_turn_wait(self) -> None:
         """在用户 submit 后重置 turn 栅栏状态。"""
@@ -240,7 +311,7 @@ class SessionController:
             if content:
                 self._emit_transcript(format_assistant_delta(content))
                 self._assistant_line_open = True
-        elif event_type == "reasoning" and self.show_reasoning:
+        elif event_type == "reasoning":
             content = str(data.get("content") or "")
             if content:
                 self._ensure_assistant_end()
@@ -274,7 +345,10 @@ class SessionController:
         async with self._approval_lock:
             requests = extract_tool_approval_requests(data)
             if self._approval_cb is not None:
-                decision = await self._approval_cb(requests)
+                try:
+                    decision = await self._approval_cb(requests)
+                except ApprovalCancelled:
+                    return False
             else:
                 decision = build_all_rejected_decision(requests)
             assert self._client is not None

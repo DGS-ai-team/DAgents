@@ -22,7 +22,7 @@
 
 ## `test_api_app.py`
 
-- **`FastApiRouteTests`**：使用 `AgentService` 替身验证 `/v1/sessions`、`/v1/messages`、`resume`、`cancel`、`release` 路由接线与默认 priority。
+- **`FastApiRouteTests`**：使用 `AgentService` 替身验证 `/v1/sessions`、`/v1/messages`、`resume`、`cancel`、`release`、session context/skills 路由接线与默认 priority。
 - **`SseEncodingTests`**：验证 `_to_sse` 输出 `event:` / `data:` 与空行结尾格式。
 
 ## `test_agent_service.py`
@@ -42,7 +42,7 @@
 ## `test_raw_message_journal.py`
 
 - **`RecordRawOpenaiMessageAppendTests`**：开关关闭与空 `session_id` 不写盘。
-- **`AppendOpenaiMessageWithJournalTests`** / **`InsertOpenaiMessageWithJournalTests`**：列表变更与 JSONL 行结构（`get_settings` / `resolve_runtime_root` patch）。
+- **`AppendOpenaiMessageWithJournalTests`** / **`InsertOpenaiMessageWithJournalTests`**：列表变更、JSONL 行结构，以及 `assistant + tool_calls` 写入时统一补齐/继承 `reasoning_content`（`get_settings` / `resolve_runtime_root` patch）。
 
 ## `test_schema_approval.py`
 
@@ -69,9 +69,13 @@
 - **`SessionControllerRenderTests`**：后台 render、turn 栅栏、approval skip done。
 - **`SessionControllerBindTriggersTests`**：`bind_triggers_to_client` PATCH 逻辑。
 
+## `test_context_clear.py`
+
+- **`OpenAIConversationContextResetTests`**：`reset_conversation_state` 保留/清空字段。
+
 ## `test_agent_service_sessions.py`
 
-- **`AgentServiceSessionAdminTests`**：`list_sessions`、`delete_persisted_session` 行为。
+- **`AgentServiceSessionAdminTests`**：`list_sessions`、`delete_persisted_session`、`get_session_context_summary`、`clear_session_context`、session skill 加载/卸载行为。
 
 ## `integration/`
 

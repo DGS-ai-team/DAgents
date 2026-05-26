@@ -279,3 +279,49 @@ class OpenAIConversationContext(BaseModel):
             tool_loop_count=max(0, int(self.tool_loop_count)),
             loaded_skills=list(self.loaded_skills),
         )
+
+    def reset_conversation_state(self) -> None:
+        """重置对话态字段，保留 session 路由与已加载技能。
+
+        逻辑：
+        1. 清空 messages / pending_tool_calls / 流式缓冲与 token 计数；
+        2. 将 run_turn_phase 置为 IDLE、tool_loop_count 置 0；
+        3. 保留 session_id、sse_client_id、loaded_skills；清空 active_client_id。
+
+        关键分支：
+        - 不修改 loaded_skills（会话能力配置，由 clear_skills 单独处理）；
+        - 不触碰 sse_client_id（异步工具与 SSE 路由通道）。
+
+        副作用说明：
+        - 原地修改当前实例；调用方负责 persist 与取消在途 turn。
+        """
+        self.messages = []
+        self.pending_tool_calls = []
+        self.run_turn_phase = RunTurnPhase.IDLE
+        self.messages_total_tokens = 0
+        self.tool_loop_count = 0
+        self.assistant_stream_buffer = ""
+        self.active_client_id = ""
+
+    def reset_conversation_state(self) -> None:
+        """重置对话态字段，保留 session 路由与已加载技能。
+
+        逻辑：
+        1. 清空 messages / pending_tool_calls / 流式缓冲与 token 计数；
+        2. 将 run_turn_phase 置为 IDLE、tool_loop_count 置 0；
+        3. 保留 session_id、sse_client_id、loaded_skills；清空 active_client_id。
+
+        关键分支：
+        - 不修改 loaded_skills（会话能力配置，由 clear_skills 单独处理）；
+        - 不触碰 sse_client_id（异步工具与 SSE 路由通道）。
+
+        副作用说明：
+        - 原地修改当前实例；调用方负责 persist 与取消在途 turn。
+        """
+        self.messages = []
+        self.pending_tool_calls = []
+        self.run_turn_phase = RunTurnPhase.IDLE
+        self.messages_total_tokens = 0
+        self.tool_loop_count = 0
+        self.assistant_stream_buffer = ""
+        self.active_client_id = ""

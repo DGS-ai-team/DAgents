@@ -6,6 +6,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.test_support.stub_settings import settings_namespace
@@ -115,6 +116,92 @@ class AgentServiceSessionAdminTests(unittest.IsolatedAsyncioTestCase):
         deleted = await svc.delete_persisted_session("gone-s")
         self.assertTrue(deleted)
         self.assertEqual(self._store.list_session_summaries(), [])
+
+    async def test_clear_session_context_resets_messages_and_preserves_skills(self) -> None:
+        from app.context.models import OpenAIConversationContext, PendingToolCall, RunTurnPhase
+
+        svc = await self._make_service()
+        await svc.start()
+        await svc.create_session("clear-s")
+        ctx = OpenAIConversationContext(
+            session_id="clear-s",
+            sse_client_id="cli-x",
+            messages=[{"role": "user", "content": "hello"}],
+            pending_tool_calls=[PendingToolCall(call_id="c1", name="bash", arguments={})],
+            run_turn_phase=RunTurnPhase.AWAITING_TOOL_EXECUTION,
+            messages_total_tokens=10,
+            tool_loop_count=2,
+            loaded_skills=[{"skill_name": "planning", "description": "plan"}],
+        )
+        svc._session_contexts["clear-s"] = ctx
+        svc._session_first_request["clear-s"] = "hello"
+        await svc._persist_context("clear-s", ctx)
+
+        result = await svc.clear_session_context("clear-s")
+
+        self.assertTrue(result["cleared"])
+        cleared = svc._session_contexts["clear-s"]
+        self.assertEqual(cleared.messages, [])
+        self.assertEqual(cleared.pending_tool_calls, [])
+        self.assertEqual(cleared.run_turn_phase, RunTurnPhase.IDLE)
+        self.assertEqual(cleared.loaded_skills, [{"skill_name": "planning", "description": "plan"}])
+        self.assertEqual(cleared.sse_client_id, "cli-x")
+        restored = self._store.load_conversation_content("clear-s")
+        self.assertEqual(restored.openai_messages, [])
+        self.assertEqual(restored.loaded_skills, [{"skill_name": "planning", "description": "plan"}])
+        summaries = self._store.list_session_summaries()
+        self.assertEqual(summaries[0]["first_request_message"], "hello")
+        self._orch.cancel_session_summary_task.assert_awaited()
+        await svc.stop()
+
+    async def test_get_session_context_summary_returns_preview(self) -> None:
+        """context 摘要应返回计数、技能与最近消息预览。"""
+        from app.context.models import OpenAIConversationContext
+
+        svc = await self._make_service()
+        await svc.start()
+        await svc.create_session("context-s")
+        ctx = OpenAIConversationContext(
+            session_id="context-s",
+            sse_client_id="cli-x",
+            messages=[{"role": "user", "content": "hello\nworld"}],
+            messages_total_tokens=5,
+            loaded_skills=[{"skill_name": "planning", "description": "plan"}],
+        )
+        svc._session_contexts["context-s"] = ctx
+
+        data = await svc.get_session_context_summary("context-s")
+
+        self.assertEqual(data["session_id"], "context-s")
+        self.assertEqual(data["messages_count"], 1)
+        self.assertEqual(data["messages_total_tokens"], 5)
+        self.assertEqual(data["loaded_skills"], [{"skill_name": "planning", "description": "plan"}])
+        self.assertEqual(data["recent_messages"][0]["content"], "hello\\nworld")
+        await svc.stop()
+
+    async def test_session_skill_load_unload_persists_context(self) -> None:
+        """service skill API 应追加/移除 loaded_skills 并持久化。"""
+        svc = await self._make_service()
+        await svc.start()
+        await svc.create_session("skill-s")
+        skill = SimpleNamespace(skill_name="alpha", description="Alpha skill")
+
+        with patch("app.harness.service.agent_service.select_skill_by_name", return_value=skill), patch(
+            "app.harness.service.agent_service.list_enabled_skill_metadata",
+            return_value=[{"skill_name": "alpha", "description": "Alpha skill"}],
+        ):
+            loaded = await svc.load_session_skill("skill-s", "alpha")
+            self.assertEqual(loaded["loaded_skills"], [{"skill_name": "alpha", "description": "Alpha skill"}])
+
+            listed = await svc.list_session_skills("skill-s")
+            self.assertEqual(listed["available_skills"], [{"skill_name": "alpha", "description": "Alpha skill"}])
+
+            unloaded = await svc.unload_session_skill("skill-s", "alpha")
+            self.assertEqual(unloaded["loaded_skills"], [])
+
+        restored = self._store.load_conversation_content("skill-s")
+        self.assertEqual(restored.loaded_skills, [])
+        await svc.stop()
 
 
 if __name__ == "__main__":

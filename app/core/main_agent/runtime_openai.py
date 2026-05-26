@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator
 
 from app.config.settings import get_settings
 from app.context.models import OpenAIConversationContext, PendingToolCall, RunTurnPhase
+from app.context.openai_messages import normalize_reasoning_content
 from app.core.main_agent.display_inference import (
     infer_assistant_delta_display_type,
     infer_reasoning_delta_display_type,
@@ -265,9 +266,7 @@ class OpenAIImplicitReActRuntime:
             return
         assistant_content = model_msg.get("content", "") or ""
         tool_calls = model_msg.get("tool_calls", [])
-        reasoning_content = (
-            "" if model_msg.get("reasoning_content") is None else str(model_msg.get("reasoning_content"))
-        )
+        reasoning_content = normalize_reasoning_content(model_msg.get("reasoning_content"))
         # ----- 子分支：模型要求调用工具（此处仍不 invoke，只登记 + 等人批）----- #
         if tool_calls:
             # 必须把 assistant + tool_calls + reasoning_content 写入历史，供思考模式后续 API 回传。

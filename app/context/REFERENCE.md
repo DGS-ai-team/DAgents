@@ -19,4 +19,11 @@
   - `ConversationContext.from_openai_runtime()`
   - `OpenAIConversationContext.from_conversation_context()`
   - `OpenAIConversationContext.to_conversation_context()`
+  - `OpenAIConversationContext.reset_conversation_state()`：清空对话态，保留 `session_id` / `sse_client_id` / `loaded_skills`
   - `OpenAIConversationContext.normalized_run_turn_phase_for_persist()`
+
+## `openai_messages.py`
+
+- **`normalize_reasoning_content()`**：将模型/历史中的 `reasoning_content` 规范为字符串，`None` 转为空串。
+- **`latest_assistant_reasoning_content()`**：从 OpenAI messages 尾部读取最近 assistant 的 `reasoning_content`。
+- **`normalize_openai_message_for_context()`**：`ctx.messages` 写入前的统一规范化入口；对 `assistant + tool_calls` 保证 `reasoning_content` 字段存在，异步 `tool_callback` 可继承最近 assistant reasoning。

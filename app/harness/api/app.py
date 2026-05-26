@@ -104,11 +104,50 @@ class SessionPersistedDeleteResult(BaseModel):
     deleted: bool
 
 
+class SessionClearContextResult(BaseModel):
+    session_id: str
+    cleared: bool
+    cancelled_turn: bool
+
+
 class CancelTurnResult(BaseModel):
     """取消当前推理 turn 的响应（无在途任务时 `cancelled=false`）。"""
 
     session_id: str
     cancelled: bool
+
+
+class SkillMutationIn(BaseModel):
+    skill_name: str = Field(min_length=1)
+
+
+class SessionSkillsResult(BaseModel):
+    session_id: str
+    loaded_skills: list[dict[str, str]]
+    available_skills: list[dict[str, str]]
+
+
+class ContextMessagePreview(BaseModel):
+    role: str
+    content: str = ""
+    tool_call_id: str = ""
+    tool_calls_count: int = 0
+    has_reasoning_content: bool = False
+
+
+class SessionContextResult(BaseModel):
+    session_id: str
+    sse_client_id: str = ""
+    active_client_id: str = ""
+    run_turn_phase: str
+    messages_count: int
+    pending_tool_calls_count: int
+    messages_total_tokens: int
+    tool_loop_count: int
+    loaded_skills: list[dict[str, str]]
+    queue_pending: int
+    has_active_turn: bool
+    recent_messages: list[ContextMessagePreview]
 
 
 def _a2a_auth_headers() -> dict[str, str]:
@@ -407,6 +446,94 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=422, detail="session_id is empty")
         ok = service.cancel_current_turn(sid)
         return CancelTurnResult(session_id=sid, cancelled=ok)
+
+    @app.post("/v1/sessions/{session_id}/clear-context", response_model=SessionClearContextResult)
+    async def clear_session_context(session_id: str) -> SessionClearContextResult:
+        """清空 session 对话上下文（保留 loaded_skills 与 first_request_message）。"""
+        service: AgentService = app.state.service
+        sid = session_id.strip()
+        if not sid:
+            raise HTTPException(status_code=422, detail="session_id is empty")
+        try:
+            result = await service.clear_session_context(sid)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return SessionClearContextResult(
+            session_id=str(result.get("session_id") or sid),
+            cleared=bool(result.get("cleared")),
+            cancelled_turn=bool(result.get("cancelled_turn")),
+        )
+
+    @app.get("/v1/sessions/{session_id}/context", response_model=SessionContextResult)
+    async def get_session_context(session_id: str) -> SessionContextResult:
+        """查询 session 当前 context 摘要。
+
+        逻辑：
+        1. 校验路径中的 `session_id`；
+        2. 委托 `AgentService.get_session_context_summary` 读取只读快照；
+        3. 使用 `SessionContextResult` 校验并返回。
+
+        关键边界：
+        - `ValueError` 映射为 422，其余异常映射为 400。
+        """
+        service: AgentService = app.state.service
+        sid = session_id.strip()
+        if not sid:
+            raise HTTPException(status_code=422, detail="session_id is empty")
+        try:
+            result = await service.get_session_context_summary(sid)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return SessionContextResult.model_validate(result)
+
+    @app.get("/v1/sessions/{session_id}/skills", response_model=SessionSkillsResult)
+    async def list_session_skills(session_id: str) -> SessionSkillsResult:
+        """查询 session 当前已加载 skills 与可用 skills。"""
+        service: AgentService = app.state.service
+        sid = session_id.strip()
+        if not sid:
+            raise HTTPException(status_code=422, detail="session_id is empty")
+        try:
+            result = await service.list_session_skills(sid)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return SessionSkillsResult.model_validate(result)
+
+    @app.post("/v1/sessions/{session_id}/skills/load", response_model=SessionSkillsResult)
+    async def load_session_skill(session_id: str, body: SkillMutationIn) -> SessionSkillsResult:
+        """向 session 追加加载一个 skill。"""
+        service: AgentService = app.state.service
+        sid = session_id.strip()
+        if not sid:
+            raise HTTPException(status_code=422, detail="session_id is empty")
+        try:
+            result = await service.load_session_skill(sid, body.skill_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return SessionSkillsResult.model_validate(result)
+
+    @app.post("/v1/sessions/{session_id}/skills/unload", response_model=SessionSkillsResult)
+    async def unload_session_skill(session_id: str, body: SkillMutationIn) -> SessionSkillsResult:
+        """从 session 卸载一个 skill。"""
+        service: AgentService = app.state.service
+        sid = session_id.strip()
+        if not sid:
+            raise HTTPException(status_code=422, detail="session_id is empty")
+        try:
+            result = await service.unload_session_skill(sid, body.skill_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return SessionSkillsResult.model_validate(result)
 
     @app.delete("/v1/sessions/{session_id}", response_model=SessionReleaseResult)
     async def release_session(session_id: str) -> SessionReleaseResult:

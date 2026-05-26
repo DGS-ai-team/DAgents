@@ -56,6 +56,30 @@ class AppendOpenaiMessageWithJournalTests(unittest.TestCase):
             self.assertIn("recorded_at", obj)
             self.assertEqual(obj["message"]["content"], "hello")
 
+    def test_append_normalizes_assistant_tool_calls_reasoning_content(self) -> None:
+        """assistant tool_calls 写入入口应统一保留 `reasoning_content` 字段。"""
+        ctx = OpenAIConversationContext(session_id="sess-reasoning", messages=[])
+
+        with patch.object(journal, "get_settings") as gs:
+            gs.return_value.agent_raw_message_history_enabled = False
+            journal.append_openai_message_with_journal(
+                ctx,
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "bash_run", "arguments": "{}"},
+                        }
+                    ],
+                },
+            )
+
+        self.assertIn("reasoning_content", ctx.messages[0])
+        self.assertEqual(ctx.messages[0]["reasoning_content"], "")
+
 
 class InsertOpenaiMessageWithJournalTests(unittest.TestCase):
     """`insert_openai_message_with_journal`：插入顺序与 JSONL 追加顺序解耦。"""
@@ -77,6 +101,46 @@ class InsertOpenaiMessageWithJournalTests(unittest.TestCase):
             self.assertEqual(len(files), 1)
             nlines = len([ln for ln in files[0].read_text(encoding="utf-8").splitlines() if ln.strip()])
             self.assertEqual(nlines, 1)
+
+    def test_insert_tool_callback_inherits_latest_reasoning_content(self) -> None:
+        """异步工具回灌插入的 tool_callback assistant 应在统一入口继承 reasoning。"""
+        ctx = OpenAIConversationContext(
+            session_id="sess-callback",
+            messages=[
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "cached thinking",
+                    "tool_calls": [
+                        {
+                            "id": "call-original",
+                            "type": "function",
+                            "function": {"name": "bash_run", "arguments": "{}"},
+                        }
+                    ],
+                }
+            ],
+        )
+
+        with patch.object(journal, "get_settings") as gs:
+            gs.return_value.agent_raw_message_history_enabled = False
+            journal.insert_openai_message_with_journal(
+                ctx,
+                0,
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call-callback",
+                            "type": "function",
+                            "function": {"name": "tool_callback", "arguments": "{}"},
+                        }
+                    ],
+                },
+            )
+
+        self.assertEqual(ctx.messages[0]["reasoning_content"], "cached thinking")
 
 
 if __name__ == "__main__":

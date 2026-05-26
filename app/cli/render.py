@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -15,6 +15,8 @@ class TranscriptKind(str, Enum):
     LINE = "line"
     ERROR = "error"
     ASSISTANT_END = "assistant_end"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +25,7 @@ class TranscriptUpdate:
 
     kind: TranscriptKind
     text: str = ""
+    data: dict[str, Any] = field(default_factory=dict)
 
 
 def compact_json(value: Any, *, max_length: int = 500) -> str:
@@ -53,7 +56,7 @@ def format_tool_result(data: dict[str, Any]) -> TranscriptUpdate:
     lines = [f"[tool:{status}] {name} {call_id}".rstrip()]
     if content:
         lines.append(content)
-    return TranscriptUpdate(kind=TranscriptKind.LINE, text="\n".join(lines))
+    return TranscriptUpdate(kind=TranscriptKind.TOOL_RESULT, text="\n".join(lines), data=data)
 
 
 def format_tool_call(data: dict[str, Any]) -> TranscriptUpdate | None:
@@ -71,7 +74,7 @@ def format_tool_call(data: dict[str, Any]) -> TranscriptUpdate | None:
         lines.append(f"  {index}. {name} ({call_id})")
         if args:
             lines.append(f"    args: {compact_json(args, max_length=500)}")
-    return TranscriptUpdate(kind=TranscriptKind.LINE, text="\n".join(lines))
+    return TranscriptUpdate(kind=TranscriptKind.TOOL_CALL, text="\n".join(lines), data=data)
 
 
 def format_reasoning(content: str) -> TranscriptUpdate:

@@ -86,6 +86,7 @@ class FakeAgentService:
         self.released_sessions: list[tuple[str, bool]] = []
         self.list_sessions_result: dict[str, object] = {"active": [], "persisted": []}
         self.deleted_persisted_sessions: list[str] = []
+        self.skill_actions: list[tuple[str, str, str]] = []
         FakeAgentService.instances.append(self)
 
     async def start(self) -> None:
@@ -128,6 +129,58 @@ class FakeAgentService:
         if session_id == "active-s":
             raise RuntimeError("session 'active-s' is still active in queue")
         return session_id == "persisted-s"
+
+    async def clear_session_context(self, session_id: str) -> dict[str, object]:
+        """记录清空上下文请求。"""
+        return {
+            "session_id": session_id,
+            "cleared": True,
+            "cancelled_turn": session_id == "s-cancel",
+        }
+
+    async def get_session_context_summary(self, session_id: str) -> dict[str, object]:
+        """返回 session context 摘要。"""
+        return {
+            "session_id": session_id,
+            "sse_client_id": "cli-1",
+            "active_client_id": "",
+            "run_turn_phase": "idle",
+            "messages_count": 1,
+            "pending_tool_calls_count": 0,
+            "messages_total_tokens": 12,
+            "tool_loop_count": 0,
+            "loaded_skills": [],
+            "queue_pending": 0,
+            "has_active_turn": False,
+            "recent_messages": [{"role": "user", "content": "hello"}],
+        }
+
+    async def list_session_skills(self, session_id: str) -> dict[str, object]:
+        """返回当前会话技能状态。"""
+        self.skill_actions.append(("list", session_id, ""))
+        return {
+            "session_id": session_id,
+            "loaded_skills": [{"skill_name": "s1", "description": "demo"}],
+            "available_skills": [{"skill_name": "s1", "description": "demo"}],
+        }
+
+    async def load_session_skill(self, session_id: str, skill_name: str) -> dict[str, object]:
+        """记录加载技能请求。"""
+        self.skill_actions.append(("load", session_id, skill_name))
+        return {
+            "session_id": session_id,
+            "loaded_skills": [{"skill_name": skill_name, "description": "loaded"}],
+            "available_skills": [{"skill_name": skill_name, "description": "loaded"}],
+        }
+
+    async def unload_session_skill(self, session_id: str, skill_name: str) -> dict[str, object]:
+        """记录卸载技能请求。"""
+        self.skill_actions.append(("unload", session_id, skill_name))
+        return {
+            "session_id": session_id,
+            "loaded_skills": [],
+            "available_skills": [{"skill_name": skill_name, "description": "loaded"}],
+        }
 
 
 @unittest.skipIf(TestClient is None or api_app is None, _API_SKIP)
@@ -223,6 +276,56 @@ class FastApiRouteTests(unittest.TestCase):
 
         service = FakeAgentService.instances[-1]
         self.assertEqual(service.deleted_persisted_sessions, ["persisted-s", "active-s"])
+
+    def test_clear_session_context_route(self) -> None:
+        """POST /v1/sessions/{id}/clear-context 应接线到 AgentService。"""
+        assert api_app is not None and TestClient is not None
+        with self._client():
+            app = api_app.create_app()
+            with TestClient(app) as client:
+                resp = client.post("/v1/sessions/s-cancel/clear-context")
+                self.assertEqual(resp.status_code, 200)
+                body = resp.json()
+                self.assertEqual(body["session_id"], "s-cancel")
+                self.assertTrue(body["cleared"])
+                self.assertTrue(body["cancelled_turn"])
+
+    def test_session_context_route(self) -> None:
+        """GET /v1/sessions/{id}/context 应返回 context 摘要。"""
+        assert api_app is not None and TestClient is not None
+        with self._client():
+            app = api_app.create_app()
+            with TestClient(app) as client:
+                resp = client.get("/v1/sessions/s-context/context")
+                self.assertEqual(resp.status_code, 200)
+                body = resp.json()
+                self.assertEqual(body["session_id"], "s-context")
+                self.assertEqual(body["messages_count"], 1)
+                self.assertEqual(body["recent_messages"][0]["role"], "user")
+
+    def test_session_skill_routes(self) -> None:
+        """session skill 查询/加载/卸载路由应接线到 AgentService。"""
+        assert api_app is not None and TestClient is not None
+        with self._client():
+            app = api_app.create_app()
+            with TestClient(app) as client:
+                list_resp = client.get("/v1/sessions/s1/skills")
+                self.assertEqual(list_resp.status_code, 200)
+                self.assertEqual(list_resp.json()["loaded_skills"][0]["skill_name"], "s1")
+
+                load_resp = client.post("/v1/sessions/s1/skills/load", json={"skill_name": "alpha"})
+                self.assertEqual(load_resp.status_code, 200)
+                self.assertEqual(load_resp.json()["loaded_skills"][0]["skill_name"], "alpha")
+
+                unload_resp = client.post("/v1/sessions/s1/skills/unload", json={"skill_name": "alpha"})
+                self.assertEqual(unload_resp.status_code, 200)
+                self.assertEqual(unload_resp.json()["loaded_skills"], [])
+
+        service = FakeAgentService.instances[-1]
+        self.assertEqual(
+            service.skill_actions,
+            [("list", "s1", ""), ("load", "s1", "alpha"), ("unload", "s1", "alpha")],
+        )
 
     def test_trigger_routes_create_list_fire_and_history(self) -> None:
         """触发器 API 应创建资源、手动投递任务并记录历史。"""

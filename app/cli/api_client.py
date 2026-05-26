@@ -86,6 +86,63 @@ class DAgentsApiClient:
             raise ValueError("session_id is required")
         return await self._delete_json(f"/v1/sessions/{sid}/persisted")
 
+    async def clear_session_context(self, session_id: str) -> dict[str, Any]:
+        """POST /v1/sessions/{session_id}/clear-context，清空对话上下文。"""
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        return await self._post_json(f"/v1/sessions/{sid}/clear-context", {})
+
+    async def get_session_context(self, session_id: str) -> dict[str, Any]:
+        """查询指定 session 的 context 摘要。
+
+        逻辑：
+        1. 规范化并校验 `session_id`；
+        2. 调用 `GET /v1/sessions/{session_id}/context`；
+        3. 返回后端 JSON dict。
+
+        关键边界：
+        - 空 session_id 直接抛 `ValueError`，避免拼出无效路径。
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        return await self._get_json(f"/v1/sessions/{sid}/context")
+
+    async def cancel_current_turn(self, session_id: str) -> dict[str, Any]:
+        """POST /v1/sessions/{session_id}/cancel，取消当前在途 turn。"""
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        return await self._post_json(f"/v1/sessions/{sid}/cancel", {})
+
+    async def list_session_skills(self, session_id: str) -> dict[str, Any]:
+        """GET /v1/sessions/{session_id}/skills，查询当前会话 skills。"""
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        return await self._get_json(f"/v1/sessions/{sid}/skills")
+
+    async def load_session_skill(self, session_id: str, skill_name: str) -> dict[str, Any]:
+        """POST /v1/sessions/{session_id}/skills/load，加载一个 skill。"""
+        sid = str(session_id or "").strip()
+        name = str(skill_name or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        if not name:
+            raise ValueError("skill_name is required")
+        return await self._post_json(f"/v1/sessions/{sid}/skills/load", {"skill_name": name})
+
+    async def unload_session_skill(self, session_id: str, skill_name: str) -> dict[str, Any]:
+        """POST /v1/sessions/{session_id}/skills/unload，卸载一个 skill。"""
+        sid = str(session_id or "").strip()
+        name = str(skill_name or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        if not name:
+            raise ValueError("skill_name is required")
+        return await self._post_json(f"/v1/sessions/{sid}/skills/unload", {"skill_name": name})
+
     async def patch_trigger(self, trigger_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """PATCH /v1/triggers/{trigger_id} 部分更新。"""
         return await self._patch_json(f"/v1/triggers/{trigger_id}", payload)

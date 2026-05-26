@@ -25,6 +25,10 @@ class ApprovalDecision:
         return {"type": "selection", "approved": self.approved, "rejected": self.rejected}
 
 
+class ApprovalCancelled(Exception):
+    """用户取消当前审批流程；调用方不应继续 submit resume。"""
+
+
 def extract_tool_approval_requests(data: dict[str, Any]) -> list[ToolApprovalRequest]:
     args = data.get("approval_args")
     if not isinstance(args, dict):

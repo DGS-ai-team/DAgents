@@ -55,6 +55,11 @@
 | `POST` | `/v1/messages` | 提交用户消息或 resume |
 | `GET` | `/v1/streams` | 全局 SSE（**必填** `client_id`） |
 | `POST` | `/v1/sessions/{session_id}/cancel` | 取消当前 turn |
+| `POST` | `/v1/sessions/{session_id}/clear-context` | 清空对话上下文（保留技能与首条请求标识） |
+| `GET` | `/v1/sessions/{session_id}/context` | 查询当前会话 context 摘要 |
+| `GET` | `/v1/sessions/{session_id}/skills` | 查询当前会话 skills |
+| `POST` | `/v1/sessions/{session_id}/skills/load` | 加载一个 skill |
+| `POST` | `/v1/sessions/{session_id}/skills/unload` | 卸载一个 skill |
 | `DELETE` | `/v1/sessions/{session_id}` | 释放会话资源并可选清库 |
 | `POST` | `/v1/triggers` | 创建触发器资源 |
 | `GET` | `/v1/triggers` | 列出触发器资源 |
@@ -184,6 +189,63 @@
 - **响应体**（`CancelTurnResult`）：
   - **`session_id`**：规范化后的 id
   - **`cancelled`**：`bool` — **无在途 `_handle_message` 时为 `false`**（幂等语义）
+
+---
+
+### 3.6.1 清空对话上下文
+
+- **`POST /v1/sessions/{session_id}/clear-context`**
+- **路径参数**：**`session_id`**（纯空白时 **422**）
+- **用途**：在同一 session 下清空 `messages` / `pending_tool_calls` 等对话态并重置 `run_turn_phase`；**保留** `loaded_skills`、`sse_client_id` 与 sqlite **`first_request_message`**（便于 `show session` 识别）。
+- **行为**：
+  - 若有在途 turn，会先 **cancel 并等待结束** 再清空（避免 `finally` 落盘覆盖清空结果）；
+  - 取消该 session 的 summary 压缩后台 task；
+  - **不**清空消息队列中已入队但未消费的消息（后续将在空 context 上继续处理）。
+- **响应体**（`SessionClearContextResult`）：
+  - **`session_id`**：string
+  - **`cleared`**：`bool` — 成功时为 `true`
+  - **`cancelled_turn`**：`bool` — 是否取消了在途 turn
+
+**错误**：参数非法 **422**；内部失败 **400**。
+
+---
+
+### 3.6.2 会话 context 摘要
+
+- **`GET /v1/sessions/{session_id}/context`**
+- **路径参数**：**`session_id`**（纯空白时 **422**）
+- **用途**：只读查询当前会话内存/持久化 context 摘要，供 TUI `/context` 视图展示。
+- **响应体**（`SessionContextResult`）：
+  - **`session_id`**：string
+  - **`sse_client_id`** / **`active_client_id`**：当前 SSE/活跃 client 标识
+  - **`run_turn_phase`**：当前 turn 阶段
+  - **`messages_count`** / **`pending_tool_calls_count`** / **`messages_total_tokens`** / **`tool_loop_count`**：context 计数
+  - **`loaded_skills`**：`[{ skill_name, description }]`
+  - **`queue_pending`** / **`has_active_turn`**：队列与在途 turn 状态
+  - **`recent_messages`**：最近若干条 OpenAI message 预览（角色、截断内容、tool call/reasoning 标记）
+
+**错误**：参数非法 **422**；内部失败 **400**。
+
+---
+
+### 3.6.3 会话 skills
+
+- **`GET /v1/sessions/{session_id}/skills`**
+- **`POST /v1/sessions/{session_id}/skills/load`**
+- **`POST /v1/sessions/{session_id}/skills/unload`**
+- **路径参数**：**`session_id`**（纯空白时 **422**）
+- **load/unload 请求体**：
+  - **`skill_name`**：`string`（必填）
+- **用途**：
+  - 查询当前会话已加载的 `loaded_skills` 与磁盘启用的 `available_skills`；
+  - `load` 向当前会话追加一个 enabled skill；
+  - `unload` 从当前会话移除一个 skill。
+- **响应体**（`SessionSkillsResult`）：
+  - **`session_id`**：string
+  - **`loaded_skills`**：`[{ skill_name, description }]`
+  - **`available_skills`**：`[{ skill_name, description }]`
+
+**错误**：参数非法、skill 不存在或超过加载上限时 **422**；内部失败 **400**。
 
 ---
 
