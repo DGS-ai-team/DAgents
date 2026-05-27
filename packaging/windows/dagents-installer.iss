@@ -17,7 +17,8 @@ AppPublisher=DAgents
 DefaultDirName={autopf}\DAgents\Backend
 DefaultGroupName=DAgents
 DisableProgramGroupPage=yes
-OutputDir=dist-installer
+; 相对本 .iss 所在目录；与 CI upload-artifact 的「仓库根/dist-installer/」一致。
+OutputDir=..\..\dist-installer
 OutputBaseFilename={#MyOutputBaseFilename}
 Compression=lzma2
 SolidCompression=yes
