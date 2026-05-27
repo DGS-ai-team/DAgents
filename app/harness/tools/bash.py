@@ -670,7 +670,6 @@ def bash_run(
     - 成功或非零退出：返回结构化文本，含 `status`、`exit_code`、`stdout`、`stderr`。
     - 失败：返回 `ERROR: ...`；超时返回 `status=TIMEOUT`。
     - Linux/macOS 等非 Windows：**非 root** 若以 **bash** 执行：语句片段行首匹配 **`su - <user> -c ...`**（含 `-l` / `--login`），或行首 **`sudo`/`sudoedit`** 且未含 **`-n`/`--non-interactive`**，直接返回错误（不创建子进程）。
-    - 是否审批：由 `tool.should_require_tool_approval` 统一判断，本工具只负责命令执行。
 
     调用范例：
     - `bash_run({"command":"git status"})`
@@ -747,7 +746,7 @@ def bash_run(
                 f"timeout_seconds={timeout}",
                 f"output_encoding={output_encoding}",
                 f"async_job_id={async_job_id}",
-                "命令超过同步等待时间，已降级为后台 ShellJob；原进程仍在继续运行，未重启、未杀死。",
+                "命令超过同步等待时间，已降级为后台 ShellJob；完成后会自动返回结果",
                 "可用 bash_job_status / bash_job_tail / bash_job_cancel 查询或取消。",
             ]
             if async_error:

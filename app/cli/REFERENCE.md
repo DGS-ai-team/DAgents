@@ -4,6 +4,14 @@
 
 - **`main`** / **`build_parser`**：CLI 子命令入口
 - **`_default_api_base`**：从 `.env` 读取 API 地址
+- **`_normalize_serve_extra`**：剥离 `serve` 的 `REMAINDER` 中 `--` 前缀
+
+## `daemon.py`
+
+- **`add_serve_arguments`**：`serve` / `api` 的 `--foreground` / `--stop` / `--status` / `--no-hooks` / `--no-wait`
+- **`run_serve_command`**：后台启动、停止、状态、前台运行；默认写 `dagents-api.pid` 与 `logs/dagents-api.log`
+- **`_run_hook_dir`** / **`_run_hook_script`**：`.runtime/scripts/serve/startup.d` 与 `shutdown.d` 钩子
+- **`_start_serve_daemon`** / **`_run_api_foreground`**：后台 `Popen` 或前台 `subprocess.call`
 
 ## `chat.py`
 

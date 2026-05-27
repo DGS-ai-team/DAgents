@@ -36,6 +36,18 @@ dagents delete session SESSION_ID [--api URL]
 | `/clear` | 清空服务端 context 并清 transcript |
 | `/exit` | 退出，并在终端打印恢复当前会话的 `dagents chat --session ...` 命令 |
 
+`dagents serve`（非 TUI 内命令，在 shell 中执行）：
+
+| 命令 | 说明 |
+|------|------|
+| `dagents serve` | 后台启动 Agent API（默认），日志写入 `logs/dagents-api.log`，PID 写入 `dagents-api.pid` |
+| `dagents serve --stop` | 停止后台 API，并执行 `.runtime/scripts/serve/shutdown.d/` 钩子 |
+| `dagents serve --status` | 查看后台 API 是否在运行 |
+| `dagents serve --foreground` | 前台运行（调试，不写 PID） |
+| `dagents serve --no-hooks` | 跳过 startup/shutdown 钩子 |
+
+钩子目录见 `packaging/runtime/scripts/serve/`（安装后位于 `.runtime/scripts/serve/`）。
+
 快捷键：context 视图中按 `Esc` 返回聊天记录；输出中或工具审批中按 `Esc` 可调用取消接口中断当前 turn。
 
 ## 架构要点
@@ -46,5 +58,6 @@ dagents delete session SESSION_ID [--api URL]
 - **等待状态**：用户消息提交成功后显示 `prefilling... Ns`，首条内容到达后冻结为 `done`；reasoning 到达时显示 `thinking... Ns`。
 - **工具审批**：不弹窗，隐藏输入框并在 RichLog 对应工具下方逐条展示审批选项；每个工具单独批准/拒绝，上下键选择、Enter 确认，`Esc` 取消当前 turn 后恢复输入框。
 - **工具耗时**：工具执行中黄点占位行显示动态耗时（如 `bash(...)... 1.2s`），完成后绿点结果标题展示总耗时（含审批等待时间）。
+- **工具展示**：`write_file` 与过长 `bash` 命令在标题下方以代码框展示全文；短 bash 命令仍显示在 `bash(...)` 括号内。
 - **长连 SSE**：`_pump_stream` 后台入队，`_render_loop` 持续渲染到 RichLog（触发器/后台 turn 可实时可见）。
 - **用户 turn 栅栏**：`submit_message` + `wait_user_turn`；在 submit 后见到内容事件之前的 `done` 被忽略（如在途 trigger 收尾）。

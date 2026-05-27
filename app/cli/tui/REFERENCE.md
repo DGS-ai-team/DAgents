@@ -6,7 +6,7 @@
 - **`_write_welcome_panel`**：连接成功后向 RichLog 写入欢迎 Panel
 - **`_transcript_base_lines`**：欢迎 Panel 占用的行数下限（流式回退）
 - **`_exit_with_resume_hint`**：`/exit` 退出后打印 `dagents chat --session ...` 会话恢复命令
-- **`_tool_display_name`** / **`_tool_call_text_from_call`**：工具调用短标题与完整展示块；`write_file` 仅在括号中展示 path，并在下方文本框展示 content
+- **`_tool_display_name`** / **`_tool_call_text_from_call`**：工具调用短标题与完整展示块；`write_file` 括号内仅 path、下方代码框展示 content；`bash_run` 的 command 过长时括号内截断预览、下方 ```bash``` 代码框展示全文
 - **`_write_tool_call`** / **`_write_tool_result`**：多工具逐条占位与结果重写；执行中黄点行动态显示耗时，完成后绿点标题展示总耗时
 - **`_format_tool_elapsed`** / **`_animate_tool_pending`** / **`_cancel_tool_pending_tasks`**：工具执行耗时格式化与占位行动画
 - **`_start_status_line`** / **`_finish_status_line`**：`prefilling/thinking` 等待状态行

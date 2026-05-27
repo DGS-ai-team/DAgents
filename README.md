@@ -98,10 +98,10 @@ python run_agent_api.py
 
 解压便携包或安装后配置 `.env`，运行：
 
-- **`dagents-api`** / **`dagents-api.exe`**：Agent API  
+- **`dagents serve`**（或 **`dagents-api`** 直接调用）：默认 **后台** 启动 Agent API，日志 **`logs/dagents-api.log`**，PID **`dagents-api.pid`**；**`dagents serve --stop`** / **`--status`** / **`--foreground`**；启动/停止前后可执行 **`.runtime/scripts/serve/startup.d`**、**`shutdown.d`** 钩子（见 **`packaging/runtime/scripts/serve/README.md`**）。
 - **`dagents_register_center`** / **`dagents_register_center.exe`**：Register Center  
 
-可选用 **`startup_scripts/linux/`**、**`startup_scripts/windows/`** 下的启动脚本。
+可选用 **`startup_scripts/linux/`**、**`startup_scripts/windows/`** 下的启动脚本（与 **`dagents serve`** 钩子目录不同，二者可并存）。
 
 ### 常用启动命令（源码）
 

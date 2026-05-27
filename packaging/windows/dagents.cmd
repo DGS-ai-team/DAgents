@@ -40,7 +40,10 @@ echo Usage:
 echo   dagents chat              Start interactive Textual TUI chat
 echo   dagents show session      List active and persisted sessions
 echo   dagents delete session ID Delete persisted session not in queue
-echo   dagents serve             Start the Agent API backend
+echo   dagents serve             Start Agent API in background (logs/dagents-api.log)
+echo   dagents serve --stop      Stop background Agent API (+ shutdown.d hooks)
+echo   dagents serve --status    Show background Agent API status
+echo   dagents serve --foreground  Run Agent API in foreground (debug)
 echo   dagents register-center   Start the Register Center
 echo   dagents doctor            Check installed files
 echo   dagents version           Print version information

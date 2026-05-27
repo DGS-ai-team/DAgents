@@ -28,6 +28,8 @@ from app.cli.tui.prompt_text_area import PromptTextArea
 from app.cli.tui.welcome_panel import build_welcome_panel
 
 _HELP_HINT = "Type /help for commands, /exit to quit.  Enter 发送，Shift+Enter 换行"
+# bash command 在括号内可展示的 cell 上限；超出则在标题下方用代码框展示全文。
+_BASH_INLINE_COMMAND_MAX_CELLS = 56
 
 
 class DAgentsTuiApp(App[None]):
@@ -520,11 +522,38 @@ class DAgentsTuiApp(App[None]):
                 task.cancel()
         self._status_lines.clear()
 
+    def _bash_command_box(self, command: str) -> str:
+        """将 bash 的完整 command 渲染为标题下方的代码框。"""
+        lines = command.splitlines() or ["<empty>"]
+        box = ["```bash"]
+        box.extend(lines)
+        box.append("```")
+        return "\n".join(box)
+
+    def _bash_command_parts(self, command: str) -> tuple[str, str | None]:
+        """生成 bash 工具标题行与可选的 command 代码框。
+
+        逻辑：
+        1. 按 cell 宽度判断 command 是否可放在 `bash(...)` 括号内；
+        2. 过长时标题只保留截断预览，全文放入代码框（与 write_file 一致）；
+        3. 返回 `(title, None)` 或 `(title, code_box_text)`。
+
+        关键边界：
+        - 空 command 显示 `bash(—)`，不附加代码框。
+        """
+        cmd = str(command or "").strip()
+        if not cmd:
+            return "bash(—)", None
+        if cell_len(cmd) <= _BASH_INLINE_COMMAND_MAX_CELLS:
+            return f"bash({cmd})", None
+        preview = self._truncate_cells(cmd, max(12, _BASH_INLINE_COMMAND_MAX_CELLS - 1))
+        return f"bash({preview})", self._bash_command_box(cmd)
+
     def _tool_display_name(self, name: str, arguments: dict[str, Any]) -> str:
         """生成工具调用在 transcript 中的短标题。
 
         逻辑：
-        1. `bash_run` 只展示命令，压缩长参数结构；
+        1. `bash_run` 短 command 放在括号内，过长则括号内仅截断预览（全文见调用块代码框）；
         2. `trigger_create` 只展示触发器名称，避免 cron/描述等参数挤占消息行；
         3. `write_file` 只展示 path，content 交给下方文本框；
         4. 其它工具按 `key=value` 摘要展示参数。
@@ -534,8 +563,8 @@ class DAgentsTuiApp(App[None]):
         - 不修改传入 arguments，仅用于 UI 文案。
         """
         if name == "bash_run":
-            command = str(arguments.get("command") or "").strip()
-            return f"bash({command or '—'})"
+            title, _ = self._bash_command_parts(str(arguments.get("command") or ""))
+            return title
         if name == "trigger_create":
             # trigger 创建参数较多，列表中只暴露 name 便于快速识别本次审批对象。
             trigger_name = str(arguments.get("name") or "").strip()
@@ -585,15 +614,20 @@ class DAgentsTuiApp(App[None]):
 
         逻辑：
         1. 先生成工具短标题；
-        2. `write_file` 追加 content 文本框；
+        2. `write_file` / 过长 `bash_run` 在标题下方追加代码框；
         3. 其它工具只展示短标题。
 
         关键边界：
         - `arguments` 非 dict 时退化为空参数；
-        - pending summary 仍使用短标题，避免工具结果重写时携带大段 content。
+        - pending summary 仍使用短标题，避免工具结果重写时携带大段 command/content。
         """
         name = str(item.get("name") or "unknown")
         arguments = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
+        if name == "bash_run":
+            title, box = self._bash_command_parts(str(arguments.get("command") or ""))
+            if box is not None:
+                return f"{title}\n{box}"
+            return title
         summary = self._tool_display_name(name, arguments)
         if name != "write_file":
             return summary
