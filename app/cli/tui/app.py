@@ -336,6 +336,7 @@ class DAgentsTuiApp(App[None]):
             return
         if self._approval_future is not None and not self._approval_future.done():
             self._approval_future.set_exception(ApprovalCancelled())
+        self._cancel_tool_pending_tasks()
         self._cancel_status_lines()
         self._finish_assistant_stream(self._transcript_log())
         self._cancel_task = asyncio.create_task(self._cancel_current_turn_request())
@@ -599,8 +600,82 @@ class DAgentsTuiApp(App[None]):
         content = str(arguments.get("content") or "")
         return f"{summary}\n{self._write_file_content_box(content)}"
 
+    @staticmethod
+    def _format_tool_elapsed(elapsed_s: float) -> str:
+        """将工具执行秒数格式化为可读耗时（毫秒 / 秒 / 分秒）。"""
+        safe = max(0.0, float(elapsed_s))
+        if safe < 1.0:
+            return f"{safe * 1000:.0f}ms"
+        if safe < 60.0:
+            return f"{safe:.1f}s"
+        minutes = int(safe // 60)
+        seconds = safe % 60.0
+        return f"{minutes}m{seconds:.0f}s"
+
+    def _tool_pending_block(self, summary: str, body: str, elapsed_s: float) -> str:
+        """生成执行中工具占位块（黄点 + 动态省略号 + 已耗时）。"""
+        frame = int(max(0.0, elapsed_s) * 2) % 3
+        dots = ("." * (frame + 1)).ljust(3)
+        head = f"{summary}{dots} {self._format_tool_elapsed(elapsed_s)}"
+        lines = body.splitlines() or [summary]
+        lines[0] = head
+        return "\n".join(lines)
+
+    def _tool_result_title_markup(
+        self,
+        summary: str,
+        *,
+        elapsed_s: float | None,
+        rejected: bool,
+    ) -> str:
+        """组装工具结果标题行 Rich markup（含拒绝态与耗时）。"""
+        parts = [escape(summary)]
+        if rejected:
+            parts.append("[red]已拒绝[/red]")
+        if elapsed_s is not None:
+            parts.append(f"[dim]· {escape(self._format_tool_elapsed(elapsed_s))}[/dim]")
+        return " ".join(parts)
+
+    def _cancel_tool_pending_tasks(self) -> None:
+        """取消所有工具执行中的耗时刷新任务（Esc 取消 turn 时调用）。"""
+        for item in self._pending_tools.values():
+            task = item.get("status_task")
+            if isinstance(task, asyncio.Task):
+                task.cancel()
+
+    async def _animate_tool_pending(self, call_id: str) -> None:
+        """定时重写工具占位行，展示执行中耗时（与 prefilling/thinking 一致）。"""
+        try:
+            while call_id in self._pending_tools:
+                pending = self._pending_tools.get(call_id)
+                if pending is None:
+                    return
+                started_at = float(pending.get("started_at", time.monotonic()))
+                elapsed_s = max(0.0, time.monotonic() - started_at)
+                block = self._tool_pending_block(
+                    str(pending.get("summary") or "tool"),
+                    str(pending.get("call_block") or ""),
+                    elapsed_s,
+                )
+                start, end = self._replace_log_block(
+                    int(pending["start"]),
+                    int(pending["end"]),
+                    self._message_block("[yellow blink]●[/yellow blink]", block),
+                )
+                pending["start"] = start
+                pending["end"] = end
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            raise
+
     def _write_tool_call(self, data: dict[str, Any]) -> None:
-        """写入工具调用占位行，并记录行范围以便 tool_result 到达后重写。"""
+        """写入工具调用占位行，并记录行范围以便 tool_result 到达后重写。
+
+        逻辑：
+        1. 写入黄点占位并记录行号；
+        2. 记录 started_at 并启动耗时动画任务；
+        3. tool_result 到达后取消动画并展示最终耗时。
+        """
         tool_calls = data.get("tool_calls")
         if not isinstance(tool_calls, list) or not tool_calls:
             return
@@ -611,11 +686,24 @@ class DAgentsTuiApp(App[None]):
             call_id = str(item.get("id") or "").strip()
             summary = self._tool_summary_from_call(item)
             block = self._tool_call_text_from_call(item)
+            started_at = time.monotonic()
             start = len(log.lines)
-            log.write(self._message_block("[yellow blink]●[/yellow blink]", block))
+            log.write(
+                self._message_block(
+                    "[yellow blink]●[/yellow blink]",
+                    self._tool_pending_block(summary, block, 0.0),
+                )
+            )
             end = len(log.lines)
             if call_id:
-                self._pending_tools[call_id] = {"start": start, "end": end, "summary": summary}
+                self._pending_tools[call_id] = {
+                    "start": start,
+                    "end": end,
+                    "summary": summary,
+                    "call_block": block,
+                    "started_at": started_at,
+                    "status_task": asyncio.create_task(self._animate_tool_pending(call_id)),
+                }
 
     def _extract_bash_sections(self, content: str) -> tuple[str, str]:
         stdout_match = re.search(
@@ -665,7 +753,11 @@ class DAgentsTuiApp(App[None]):
     def _render_bash_result_block(self, result_id: str) -> str:
         """渲染 bash 工具结果：折叠单行，展开为代码框。"""
         result = self._tool_results[result_id]
-        title = escape(str(result["title"]))
+        title = self._tool_result_title_markup(
+            str(result["title"]),
+            elapsed_s=result.get("elapsed_s"),
+            rejected=bool(result.get("rejected")),
+        )
         detail = str(result["detail"])
         expanded = bool(result["expanded"])
         has_detail = bool(detail.strip())
@@ -701,7 +793,13 @@ class DAgentsTuiApp(App[None]):
             toggle = f" [@click=app.toggle_tool_result('{result_id}')][dim underline]收起[/dim underline][/]"
         else:
             toggle = ""
-        lines = [escape(str(result["title"]))]
+        lines = [
+            self._tool_result_title_markup(
+                str(result["title"]),
+                elapsed_s=result.get("elapsed_s"),
+                rejected=bool(result.get("rejected")),
+            )
+        ]
         for index, line in enumerate(body_lines):
             suffix = toggle if index == 0 else ""
             lines.append(f"[dim]└─ {line}[/dim]{suffix}" if index == 0 else f"[dim]   {line}[/dim]")
@@ -864,12 +962,31 @@ class DAgentsTuiApp(App[None]):
         self._render_approval_block()
 
     def _write_tool_result(self, data: dict[str, Any]) -> None:
-        """tool_result 到达时，将原 tool_call 黄点块重写为绿点结果块。"""
+        """tool_result 到达时，将原 tool_call 黄点块重写为绿点结果块。
+
+        逻辑：
+        1. 停止该 call_id 的执行中耗时动画；
+        2. 用 started_at 计算耗时（优先 SSE 下发的 duration_seconds）；
+        3. 在结果标题行展示耗时。
+        """
         call_id = str(data.get("tool_call_id") or "").strip()
         pending = self._pending_tools.pop(call_id, None)
+        if pending is not None:
+            task = pending.get("status_task")
+            if isinstance(task, asyncio.Task):
+                task.cancel()
         tool_name = str(data.get("tool_name") or "tool")
         title = pending["summary"] if pending is not None else self._tool_display_name(tool_name, {})
         summary, detail = self._tool_result_text(data)
+        elapsed_s: float | None = None
+        raw_duration = data.get("duration_seconds")
+        if raw_duration is not None:
+            try:
+                elapsed_s = max(0.0, float(raw_duration))
+            except (TypeError, ValueError):
+                elapsed_s = None
+        if elapsed_s is None and pending is not None:
+            elapsed_s = max(0.0, time.monotonic() - float(pending.get("started_at", time.monotonic())))
         self._tool_result_counter += 1
         result_id = f"tool-{self._tool_result_counter}"
         self._tool_results[result_id] = {
@@ -878,6 +995,8 @@ class DAgentsTuiApp(App[None]):
             "summary": summary,
             "detail": detail,
             "expanded": False,
+            "elapsed_s": elapsed_s,
+            "rejected": bool(data.get("rejected")),
             "start": 0,
             "end": 0,
         }
@@ -977,6 +1096,8 @@ class DAgentsTuiApp(App[None]):
 
     def _reset_transcript_after_clear(self, log: RichLog) -> None:
         """清屏后重置流式状态与欢迎区行边界。"""
+        self._cancel_tool_pending_tasks()
+        self._pending_tools.clear()
         self._cancel_status_lines()
         self._finish_assistant_stream(log)
         self._transcript_base_lines = 0

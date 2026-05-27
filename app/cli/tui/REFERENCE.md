@@ -7,7 +7,8 @@
 - **`_transcript_base_lines`**：欢迎 Panel 占用的行数下限（流式回退）
 - **`_exit_with_resume_hint`**：`/exit` 退出后打印 `dagents chat --session ...` 会话恢复命令
 - **`_tool_display_name`** / **`_tool_call_text_from_call`**：工具调用短标题与完整展示块；`write_file` 仅在括号中展示 path，并在下方文本框展示 content
-- **`_write_tool_call`** / **`_write_tool_result`**：多工具逐条占位与结果重写
+- **`_write_tool_call`** / **`_write_tool_result`**：多工具逐条占位与结果重写；执行中黄点行动态显示耗时，完成后绿点标题展示总耗时
+- **`_format_tool_elapsed`** / **`_animate_tool_pending`** / **`_cancel_tool_pending_tasks`**：工具执行耗时格式化与占位行动画
 - **`_start_status_line`** / **`_finish_status_line`**：`prefilling/thinking` 等待状态行
 - **`_cancel_current_turn`** / **`_cancel_current_turn_request`**：Esc 触发当前 turn 取消；审批中会中断 approval future，避免继续 submit resume
 - **`_show_context_view` / `_enter_context_view` / `_exit_context_view` / `_format_context_state`**：`/context` 命令展示当前 context 摘要；进入时隐藏聊天 RichLog，Esc 返回

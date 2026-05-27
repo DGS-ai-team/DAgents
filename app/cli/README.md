@@ -45,5 +45,6 @@ dagents delete session SESSION_ID [--api URL]
 - **消息样式**：用户、assistant、tool 消息使用固定圆点列；流式/执行中为黄点，完成为绿点；`/context` 会临时隐藏聊天 RichLog 并展示只读 context 摘要。
 - **等待状态**：用户消息提交成功后显示 `prefilling... Ns`，首条内容到达后冻结为 `done`；reasoning 到达时显示 `thinking... Ns`。
 - **工具审批**：不弹窗，隐藏输入框并在 RichLog 对应工具下方逐条展示审批选项；每个工具单独批准/拒绝，上下键选择、Enter 确认，`Esc` 取消当前 turn 后恢复输入框。
+- **工具耗时**：工具执行中黄点占位行显示动态耗时（如 `bash(...)... 1.2s`），完成后绿点结果标题展示总耗时（含审批等待时间）。
 - **长连 SSE**：`_pump_stream` 后台入队，`_render_loop` 持续渲染到 RichLog（触发器/后台 turn 可实时可见）。
 - **用户 turn 栅栏**：`submit_message` + `wait_user_turn`；在 submit 后见到内容事件之前的 `done` 被忽略（如在途 trigger 收尾）。
