@@ -29,8 +29,10 @@ UninstallDisplayIcon={app}\dagents-cli.exe
 ChangesEnvironment=yes
 
 [Files]
-Source: "bundle\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "packaging\windows\dagents.cmd"; DestDir: "{app}"; Flags: ignoreversion
+; CI 与本地均在「仓库根」生成 bundle\；脚本在 packaging\windows\，故用 ..\..\ 回到根目录再取 bundle。
+Source: "..\..\bundle\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 启动包装脚本与本 .iss 同目录，勿写 packaging\windows\ 前缀（否则会变成 packaging\windows\packaging\windows\...）。
+Source: "dagents.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\DAgents Backend Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"
