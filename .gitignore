@@ -33,3 +33,5 @@ openapi.json
 dist/
 build/
 bundle/
+deb-root/
+rpm-build/

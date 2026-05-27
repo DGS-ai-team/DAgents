@@ -55,6 +55,7 @@ jobs:
             python_arch: x64
             archive_name: dagents-backend-linux-x64.zip
             deb_name: dagents-backend-linux-x64.deb
+            rpm_name: dagents-backend-linux-x64.rpm
             deb_arch: amd64
             api_bin_name: dagents-api
             rc_bin_name: dagents_register_center
@@ -69,6 +70,7 @@ jobs:
             python_arch: x86
             archive_name: dagents-backend-linux-x86.zip
             deb_name: dagents-backend-linux-x86.deb
+            rpm_name: dagents-backend-linux-x86.rpm
             deb_arch: i386
             api_bin_name: dagents-api
             rc_bin_name: dagents_register_center
@@ -192,6 +194,10 @@ jobs:
           cd bundle
           zip -r "../${{ matrix.archive_name }}" .
 
+      - name: Install RPM build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Build Linux deb package
         if: runner.os == 'Linux'
         shell: bash
@@ -199,6 +205,14 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           if [ -z "$version" ] || [ "$version" = "main" ]; then version="0.0.0"; fi
           bash packaging/linux/build-deb.sh "$version" "${{ matrix.deb_arch }}" "${{ matrix.deb_name }}"
+
+      - name: Build Linux rpm package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ -z "$version" ] || [ "$version" = "main" ]; then version="0.0.0"; fi
+          bash packaging/linux/build-rpm.sh "$version" "${{ matrix.deb_arch }}" "${{ matrix.rpm_name }}"
 
       - name: Prepare runtime bundle (Windows)
         if: runner.os == 'Windows'
@@ -248,6 +262,14 @@ jobs:
           path: ${{ matrix.deb_name }}
           if-no-files-found: error
 
+      - name: Upload rpm artifact (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rpm_name }}
+          path: ${{ matrix.rpm_name }}
+          if-no-files-found: error
+
       - name: Upload installer artifact (Windows)
         if: matrix.target == 'windows-x64'
         uses: actions/upload-artifact@v4
@@ -279,5 +301,6 @@ jobs:
           files: |
             dist/dagents-backend-*.zip
             dist/dagents-backend-linux-*.deb
+            dist/dagents-backend-linux-*.rpm
             dist/dagents-backend-windows-*-installer.exe
           generate_release_notes: true

@@ -93,7 +93,7 @@ python run_agent_api.py
 
 无需 Python；Linux 注意 glibc 兼容性。发版资产建议从 **GitHub Releases** 获取（或与 tag 对齐的自建产物）：
 
-- **`dagents-backend-*.zip` / `.deb` / `*-installer.exe`**：完整后端运行时（api + register_center + cli + `.runtime`），解压或安装后使用；
+- **`dagents-backend-*.zip` / `.deb` / `.rpm` / `*-installer.exe`**：完整后端运行时（api + register_center + cli + `.runtime`），解压或安装后使用；
 - 包内可执行文件 **`dagents-api`** / **`dagents-api.exe`**：仅 Agent API 进程。
 
 解压便携包或安装后配置 `.env`，运行：
