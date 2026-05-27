@@ -1,15 +1,11 @@
 @echo off
 setlocal EnableExtensions
 
-rem 安装目录来自本脚本位置；%~dp0 末尾带 \，若写成 pushd "%DAGENTS_HOME%" 会变成 \" 转义引号，CMD 报「此时不应有 \Backend\。」
-set "DAGENTS_HOME=%~dp0"
-if "%DAGENTS_HOME:~-1%"=="\" set "DAGENTS_HOME=%DAGENTS_HOME:~0,-1%"
-
-pushd "%DAGENTS_HOME%" >nul 2>&1
-if errorlevel 1 (
-  echo [dagents] Cannot access install directory: %DAGENTS_HOME%
-  exit /b 1
-)
+rem 安装目录：%~dp0 末尾自带 \，必须写成 "%~dp0." 再 pushd，否则 \" 会转义引号（报「此时不应有 \Backend\。」）。
+rem 勿在 if (...) 块内 echo 未加引号的 %DAGENTS_HOME%：括号块解析时路径末尾 \ 仍会触发同样错误。
+pushd "%~dp0." >nul 2>&1
+if errorlevel 1 goto dagents_pushd_failed
+set "DAGENTS_HOME=%CD%"
 
 if "%~1"=="" goto chat
 if /I "%~1"=="chat" goto chat_shift
@@ -128,4 +124,8 @@ echo   dagents register-center
 echo   dagents doctor
 echo   dagents version
 popd >nul
+exit /b 1
+
+:dagents_pushd_failed
+echo [dagents] Cannot access install directory: "%~dp0."
 exit /b 1
