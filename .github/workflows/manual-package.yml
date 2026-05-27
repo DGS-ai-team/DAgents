@@ -19,7 +19,7 @@ jobs:
             os: ubuntu-22.04
             build_kind: docker-focal-amd64
             python_arch: x64
-            archive_name: dagents-api-linux-x64.zip
+            archive_name: dagents-backend-linux-x64.zip
             deb_name: dagents-backend-linux-x64.deb
             deb_arch: amd64
             api_bin_name: dagents-api
@@ -32,7 +32,7 @@ jobs:
             os: ubuntu-22.04
             build_kind: docker-i386
             python_arch: x86
-            archive_name: dagents-api-linux-x86.zip
+            archive_name: dagents-backend-linux-x86.zip
             deb_name: dagents-backend-linux-x86.deb
             deb_arch: i386
             api_bin_name: dagents-api
@@ -45,7 +45,7 @@ jobs:
             os: windows-2022
             build_kind: native
             python_arch: x64
-            archive_name: dagents-api-windows-x64.zip
+            archive_name: dagents-backend-windows-x64.zip
             installer_name: dagents-backend-windows-x64-installer
             inno_arch: x64
             api_bin_name: dagents-api.exe
@@ -58,7 +58,7 @@ jobs:
             os: windows-2022
             build_kind: native
             python_arch: x86
-            archive_name: dagents-api-windows-x86.zip
+            archive_name: dagents-backend-windows-x86.zip
             api_bin_name: dagents-api.exe
             rc_bin_name: dagents_register_center.exe
             api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py

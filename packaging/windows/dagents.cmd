@@ -1,8 +1,15 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 
+rem 安装目录来自本脚本位置；%~dp0 末尾带 \，若写成 pushd "%DAGENTS_HOME%" 会变成 \" 转义引号，CMD 报「此时不应有 \Backend\。」
 set "DAGENTS_HOME=%~dp0"
-pushd "%DAGENTS_HOME%" >nul
+if "%DAGENTS_HOME:~-1%"=="\" set "DAGENTS_HOME=%DAGENTS_HOME:~0,-1%"
+
+pushd "%DAGENTS_HOME%" >nul 2>&1
+if errorlevel 1 (
+  echo [dagents] Cannot access install directory: %DAGENTS_HOME%
+  exit /b 1
+)
 
 if "%~1"=="" goto chat
 if /I "%~1"=="chat" goto chat_shift
@@ -23,7 +30,7 @@ goto help_error
 shift /1
 :chat
 if not exist "dagents-cli.exe" (
-  echo [dagents] dagents-cli.exe was not found in %DAGENTS_HOME%
+  echo [dagents] dagents-cli.exe was not found in "%DAGENTS_HOME%"
   popd >nul
   exit /b 1
 )
@@ -35,7 +42,7 @@ exit /b %EXIT_CODE%
 :serve_shift
 shift /1
 if not exist "dagents-api.exe" (
-  echo [dagents] dagents-api.exe was not found in %DAGENTS_HOME%
+  echo [dagents] dagents-api.exe was not found in "%DAGENTS_HOME%"
   popd >nul
   exit /b 1
 )
@@ -47,7 +54,7 @@ exit /b %EXIT_CODE%
 :register_center_shift
 shift /1
 if not exist "dagents_register_center.exe" (
-  echo [dagents] dagents_register_center.exe was not found in %DAGENTS_HOME%
+  echo [dagents] dagents_register_center.exe was not found in "%DAGENTS_HOME%"
   popd >nul
   exit /b 1
 )
@@ -109,7 +116,7 @@ echo   dagents version           Print version information
 echo.
 echo Environment:
 echo   Set DAGENTS_API_BASE to choose the chat backend URL.
-echo   Copy .env.example to .env in %DAGENTS_HOME% to customize host, port, model, and provider settings.
+echo   Copy .env.example to .env in "%DAGENTS_HOME%" to customize host, port, model, and provider settings.
 popd >nul
 exit /b 0
 
