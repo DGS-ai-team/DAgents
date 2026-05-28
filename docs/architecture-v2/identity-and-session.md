@@ -1,11 +1,12 @@
 # 身份与会话模型
 
-v2 的身份模型要解决四个问题：调用方不能伪造推送通道，session 必须有明确归属，A2A 会话必须可追踪，Proxy 连接必须能在多 Backend 中定位。
+v2 的身份模型要解决五个问题：调用方不能伪造推送通道，session 必须有明确归属，A2A 会话必须可追踪，Body Binding 必须稳定，Proxy 连接必须能在多 Backend 中定位。
 
 ## 1. 身份层级
 
 ```text
-agent_id              Agent 的长期身份，向 RC 注册
+agent_id              Agent Instance 的长期身份，向 RC 注册
+body_id               Agent 绑定的执行环境身份
 backend_instance_id   Backend 实例身份，用于多副本协调
 connection_id         用户、A2A 或系统连接身份，由 Backend 生成
 session_id            对话上下文身份，由 Backend 生成
@@ -14,29 +15,47 @@ proxy_connection_id   Go Proxy 控制通道身份，由 Backend 生成
 execution_id          单次工具执行身份，由 Backend 生成
 ```
 
-除 `agent_id` 可由配置声明并在注册时校验外，其余运行期 ID 都由服务端生成。外部调用方不能自造或占用这些 ID。
+除 `agent_id` 和配置声明的 `body_id` 需要在注册时校验外，其余运行期 ID 都由服务端生成。外部调用方不能自造或占用这些 ID。
 
-## 2. Agent 身份
+## 2. Agent Instance 身份
 
-`agent_id` 是 Agent 的稳定身份，用于 RC 发现、A2A 寻址、session 归属和 Proxy 绑定。
+`agent_id` 是统一 Agent Instance 的稳定身份，用于 RC 发现、A2A 寻址和 session 归属。Agent Instance 绑定 exactly one active Body；如果 Body 基础设施不同，应注册为不同 Agent Instance。
 
 ```python
 class AgentRecord(BaseModel):
     agent_id: str
-    agent_type: Literal["server", "terminal"] = "server"
     schedulable: bool = True
     base_url: str
     discovery_group: list[str]
     capabilities_hint: list[str]
-    host_info: dict[str, str] | None = None
+    brain_profile: BrainProfileRef
+    body: AgentBodyRef
     registered_at_unix: int
     expires_at_unix: int
+
+
+class BrainProfileRef(BaseModel):
+    profile_id: str
+    model_policy: str
+    prompt_profile: str
+    context_policy: str
+
+
+class AgentBodyRef(BaseModel):
+    body_id: str
+    kind: Literal["backend_local", "proxy_hosted"]
+    capabilities: list[str]
+    resources: list[str]
+    environment: dict[str, str]
+    host_info: dict[str, str] | None = None
+    policy_profile: str
 ```
 
 约束：
 
 - `agent_id` 必须全局唯一。
-- terminal agent 必须绑定一个在线 Proxy 才能执行远程工具。
+- 一个 Agent 同一时间只能绑定一个 active Body。
+- `body.kind == "proxy_hosted"` 的 Agent 必须有 active ProxyConnection 才能执行该 Body 上的工具。
 - `schedulable: false` 的 Agent 不应出现在普通 A2A discover 结果中，除非调用方有显式权限。
 
 ## 3. Backend 实例身份
@@ -84,12 +103,13 @@ class ConnectionRecord(BaseModel):
 
 ## 5. Session 身份
 
-Session 表示一个对话上下文和消息队列。
+Session 表示用户或 A2A 与某个 Agent Instance 的一次对话上下文。
 
 ```python
 class SessionRecord(BaseModel):
     session_id: str
     agent_id: str
+    body_id: str
     owning_backend_instance_id: str | None
     connection_ids: set[str]
     created_at: float
@@ -135,6 +155,7 @@ Proxy 注册后获得 `proxy_connection_id`。
 class ProxyConnectionRecord(BaseModel):
     proxy_connection_id: str
     agent_id: str
+    body_id: str
     backend_instance_id: str
     status: Literal["online", "offline", "draining"]
     capabilities: list[str]
@@ -146,9 +167,10 @@ class ProxyConnectionRecord(BaseModel):
 约束：
 
 - Proxy 心跳使用 `proxy_connection_id`，不是裸 `agent_id`。
-- 一个 terminal agent 同一时间只能有一个 active Proxy，除非显式支持多 body 模式。
+- 一个 `proxy_hosted` Body 同一时间只能有一个 active ProxyConnection。
+- 一个 Agent 同一时间只能绑定一个 active Body；v2 不支持多 Body 模式。
 - Proxy 重连会生成新的 `proxy_connection_id`，旧连接进入 offline 或 expired。
-- 执行任务必须绑定当前 active `proxy_connection_id`，防止发给旧连接。
+- 执行任务必须绑定当前 active `body_id` 与 `proxy_connection_id`，防止发给旧连接。
 
 ## 8. 用户连接流程
 
@@ -175,7 +197,7 @@ Backend 必须校验 `connection_id`、`session_id` 和 `client_id` 的归属关
 
 ## 9. A2A 会话流程
 
-A2A 调用不能由调用方自造目标 session 或 client。
+A2A 调用不能由调用方自造目标 session 或 client。A2A 调用的目标是 Agent Instance；调用方不关心目标 Agent 的 Body kind，也不能绕过目标 Agent 的 Brain、session、policy 或 Body Binding。
 
 ```text
 Agent A 需要调用 Agent B
@@ -183,6 +205,7 @@ Agent A 需要调用 Agent B
   → Agent A Backend 请求 Agent B Backend 创建 A2A session
   → Agent B Backend 生成 connection_id、session_id、client_id
   → Agent A Backend 使用返回的授权信息发送消息和订阅结果
+  → Agent B 的 Brain Runtime 根据自己的 Brain Profile 与 Body Binding 处理请求
   → 调用结束后 Agent B Backend 清理短命 A2A session
 ```
 
@@ -202,8 +225,9 @@ class ExecutionRecord(BaseModel):
     execution_id: str
     session_id: str
     agent_id: str
+    body_id: str
     tool_name: str
-    target: Literal["local", "proxy"]
+    target: Literal["backend_local", "proxy_hosted"]
     proxy_connection_id: str | None
     policy_decision_id: str
     status: Literal["pending", "waiting_approval", "running", "completed", "failed", "denied", "timeout", "cancelled"]
@@ -218,6 +242,7 @@ ExecutionRecord 进入共享状态层，便于多 Backend 下追踪、审批、�
 | 资源 | 默认 TTL | 清理规则 |
 |------|----------|----------|
 | Agent RC 注册 | 60s | 心跳续租，过期移除 |
+| Body presence | 90s | proxy-hosted Body 无心跳则 offline |
 | Backend instance | 30s | 心跳续租，失联标记 offline |
 | Connection | 60s 宽限期 | 断开后无重连则清理 |
 | User session | 24h 无活动 | 可配置，持久化上下文可保留更久 |
@@ -231,5 +256,5 @@ ExecutionRecord 进入共享状态层，便于多 Backend 下追踪、审批、�
 - 外部调用方不能指定 `client_id`、`connection_id`、`session_id` 或 `execution_id`。
 - 每个请求都必须校验 connection 与 session 的归属。
 - SSE 订阅只能接收授权 session 的事件。
-- Proxy 执行必须绑定当前 active `proxy_connection_id`。
+- Proxy 执行必须绑定当前 active `body_id` 与 `proxy_connection_id`。
 - A2A 请求必须携带有效 A2A token，并由目标 Backend 创建受控会话。

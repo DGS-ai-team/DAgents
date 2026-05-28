@@ -1,6 +1,6 @@
 # 安全与策略模型
 
-Terminal Agent 允许 LLM 驱动远程宿主机执行命令和文件操作，必须默认按高风险能力设计。v2 的安全目标是：**所有远程执行都可授权、可审批、可审计、可限制、可撤销**。
+绑定 `proxy_hosted` Body 的 Agent 允许 LLM 驱动远程宿主机执行命令和文件操作，必须默认按高风险能力设计。v2 的安全目标是：**所有远程执行都可授权、可审批、可审计、可限制、可撤销**。
 
 ## 1. 安全边界
 
@@ -11,7 +11,7 @@ User / A2A caller
   → Brain Layer tool decision
   → Control Plane policy decision
   → approval if required
-  → Proxy local hard constraints
+  → Body local hard constraints
   → execution
   → audit record
 ```
@@ -22,11 +22,11 @@ User / A2A caller
 
 策略层输入：
 
-- `agent_id` 与 `agent_type`。
+- `agent_id`、`body_id` 与 `body.kind`。
 - `session_id`、`connection_id`、调用来源。
-- 工具名与参数。
+- Brain Profile、Body policy profile、工具名与参数。
 - 是否来自用户会话、A2A 调用或自动任务。
-- Proxy host_info 与能力标签。
+- Body host_info、resources、environment 与能力标签。
 - 历史风险信号，例如失败率、频繁审批拒绝、异常时间段。
 
 策略层输出：
@@ -45,7 +45,7 @@ User / A2A caller
 |------------|----------|------|
 | 只读文件读取，限于 `fs_root` | `auto` 或 `require_approval` | 取决于目录敏感级别 |
 | 文件写入 | `require_approval` | 需要展示目标路径和内容摘要 |
-| shell 只读命令 | `auto` 或 `require_approval` | 例如 `ls`、`kubectl get` 可按 agent 配置自动执行 |
+| shell 只读命令 | `auto` 或 `require_approval` | 例如 `ls`、`kubectl get` 可按 Agent/Body 配置自动执行 |
 | shell 变更命令 | `require_approval` | 例如 `kubectl apply`、`systemctl restart` |
 | 删除、格式化、权限修改 | `require_approval` 或 `deny` | 默认不自动执行 |
 | 网络扫描、压力测试 | `deny` | 除非明确授权的安全测试环境 |
@@ -57,7 +57,7 @@ User / A2A caller
 审批请求应包含：
 
 - 调用来源：用户、A2A caller、session。
-- 目标 Agent 和 Proxy 宿主机。
+- 目标 Agent、Body 和 Proxy 宿主机。
 - 工具名、参数、工作目录、超时。
 - 策略命中的规则。
 - 风险摘要。
@@ -84,18 +84,18 @@ User / A2A caller
 
 | 场景 | 审批主体 |
 |------|----------|
-| 用户自己的 terminal agent | 当前用户或该 Agent owner |
-| A2A 调用 terminal agent | 目标 Agent owner 或目标 session 用户 |
-| 生产组 schedulable agent | 生产组授权人 |
+| 用户自己的 proxy-hosted Body Agent | 当前用户或该 Agent owner |
+| A2A 调用 proxy-hosted Body Agent | 目标 Agent owner 或目标 session 用户 |
+| 生产组 schedulable Agent | 生产组授权人 |
 | 高风险命令 | 更高权限审批人或 deny |
 
-Backend 必须能判断审批人是否有权批准目标 Agent 的执行请求。
+Backend 必须能判断审批人是否有权批准目标 Agent + Body 的执行请求。
 
-## 6. Proxy 本地硬约束
+## 6. Body 本地硬约束
 
-策略层在 Backend，但 Proxy 仍必须执行本地硬约束，防止 Backend 配置错误或 token 泄露导致无限制执行。
+策略层在 Backend，但 Body 仍必须执行本地硬约束，防止 Backend 配置错误或 token 泄露导致无限制执行。
 
-Proxy 必须支持：
+`proxy_hosted` Body 必须支持：
 
 - `fs_root` 文件边界。
 - 禁止 `..`、symlink escape、Windows drive escape、UNC path escape。
@@ -107,7 +107,7 @@ Proxy 必须支持：
 - 可选网络访问限制。
 - 进程树取消和清理。
 
-Backend 策略允许不代表 Proxy 必须执行；Proxy 可以因为本地硬约束拒绝任务。
+Backend 策略允许不代表 Body 必须执行；Body 可以因为本地硬约束拒绝任务。
 
 ## 7. Shell 执行约束
 
@@ -141,6 +141,7 @@ class AuditRecord(BaseModel):
     audit_id: str
     event_type: Literal["policy_decision", "approval", "execution_started", "execution_finished"]
     agent_id: str
+    body_id: str | None
     session_id: str | None
     connection_id: str | None
     execution_id: str | None
@@ -158,7 +159,7 @@ class AuditRecord(BaseModel):
 
 ## 10. Token 与认证
 
-- Proxy 注册使用 agent 级 token。
+- Proxy 注册使用 Agent/Body 级 token。
 - A2A 请求使用现有 `x-dagents-a2a-token`，并绑定 discovery group 或 trust domain。
 - 用户入口使用 Gateway 或 Backend 认证。
 - Proxy token 应支持轮换和吊销。
@@ -171,7 +172,7 @@ class AuditRecord(BaseModel):
 - 用户取消当前 execution。
 - 审批超时后自动拒绝。
 - Proxy token 吊销后拒绝新任务并断开旧 control channel。
-- Agent owner 将 terminal agent 设置为 `schedulable: false` 后停止被 A2A discover。
+- Agent owner 将 Agent 设置为 `schedulable: false` 后停止被 A2A discover。
 - Backend draining 时不再接收新 Proxy control channel。
 
 ## 12. 安全不变量
@@ -180,5 +181,5 @@ class AuditRecord(BaseModel):
 - `require_approval` 未批准前不能下发到 Proxy。
 - `deny` 结果不能被普通用户覆盖。
 - A2A 调用不能绕过目标 Agent owner 的策略。
-- Proxy 本地硬约束优先于 Backend 允许结果。
+- Body 本地硬约束优先于 Backend 允许结果。
 - 所有远程执行都有审计记录。

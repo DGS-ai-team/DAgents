@@ -34,8 +34,8 @@
                          │ discovery / metadata│
                          └─────────────────────┘
 
- Go Proxy C ──outbound control channel──> Backend A or B
- Go Proxy D ──outbound control channel──> Backend A or B
+ Agent A ── body.kind=backend_local ── Backend local executor
+ Agent B ── body.kind=proxy_hosted  ── Go Proxy outbound channel
 ```
 
 Go Proxy 只需要访问 Gateway 或 Backend 入口，不需要被 Backend 直连。
@@ -46,9 +46,9 @@ Go Proxy 只需要访问 Gateway 或 Backend 入口，不需要被 Backend 直�
 |------|------|------|
 | L7 Gateway / Nginx | TLS、认证入口、HTTP/SSE 转发 | 推荐生产部署 |
 | Python Backend | Brain Layer + Control Plane | 可多副本 |
-| Shared State | session、connection、proxy presence、execution 状态 | v2 多副本必需 |
-| Register Center | Agent 发现与元数据注册 | 可独立部署 |
-| Go Proxy | 宿主机执行代理 | 每个 terminal agent 至少一个 |
+| Shared State | session、connection、body presence、proxy presence、execution 状态 | v2 多副本必需 |
+| Register Center | Agent Instance 发现与元数据注册 | 可独立部署 |
+| Go Proxy | `proxy_hosted` Body 的宿主机执行代理 | 每个 proxy-hosted Body 最多一个 active ProxyConnection |
 | Go TUI | 跨平台用户终端 | 可选 |
 
 ## 3. 共享状态范围
@@ -61,7 +61,8 @@ Go Proxy 只需要访问 Gateway 或 Backend 入口，不需要被 Backend 直�
 | Connection records | 校验用户、A2A、proxy 连接归属 |
 | Client records | SSE 授权与路由 |
 | Session metadata | session 归属、TTL、connection 关联 |
-| Proxy presence | 判断 terminal agent 是否可执行 |
+| Body presence | 判断 Agent 绑定的 Body 是否可执行 |
+| Proxy presence | 判断 proxy-hosted Body 的控制通道是否可用 |
 | Execution records | 工具执行状态、审批、取消、超时 |
 | Policy decisions | 审批决策与审计关联 |
 | Event routing metadata | SSE 事件应该发给哪些 client |
@@ -79,7 +80,7 @@ Gateway 不应长期依赖 `$arg_session_id` sticky routing，因为很多 API �
 3. 如果当前实例不是资源 owner：
    - 对短请求：内部转发给 owner 或通过共享状态完成操作。
    - 对 SSE：订阅共享事件总线或返回可重连信息。
-   - 对 Proxy execution：将任务投递给持有 control channel 的 Backend。
+   - 对 proxy-hosted Body execution：将任务投递给持有 control channel 的 Backend。
 4. owner 不可用时，根据资源类型失败、重连或接管。
 
 Phase 1 可以只部署单 Backend，避免过早实现跨实例转发。
@@ -99,8 +100,8 @@ Go Proxy
 多 Backend 下：
 
 - control channel 落在哪个 Backend，就由哪个 Backend 持有该连接。
-- 共享状态记录 `proxy_connection_id → backend_instance_id`。
-- 其他 Backend 需要执行该 terminal agent 的工具时，通过共享状态或内部 RPC 将任务交给持有连接的 Backend。
+- 共享状态记录 `body_id → proxy_connection_id → backend_instance_id`。
+- 其他 Backend 需要执行该 Agent 的 proxy-hosted Body 工具时，通过共享状态或内部 RPC 将任务交给持有连接的 Backend。
 - 持有连接的 Backend 下线时，Proxy 断线并重连到任意健康 Backend，获得新的 `proxy_connection_id`。
 
 ## 6. 启动顺序
@@ -125,7 +126,7 @@ Phase 3 客户端
 | Shared State 故障 | 多 Backend 协调不可用，应进入降级或只读保护 |
 | Register Center 故障 | 新 Agent 发现和注册受影响，已有 session 可继续 |
 | Backend 实例故障 | 该实例持有的 SSE/Proxy control channel 断开，客户端和 Proxy 重连 |
-| Go Proxy 故障 | 对应 terminal agent 不能执行远程工具 |
+| Go Proxy 故障 | 对应 proxy-hosted Body 不能执行远程工具 |
 | Gateway 故障 | 外部访问不可用，内部 Backend 状态不一定受影响 |
 
 ## 7. 健康检查
@@ -148,14 +149,15 @@ Phase 3 客户端
 ```text
 dagents_backend_instances_online
 dagents_connections_total{type}
-dagents_sessions_total{agent_type}
+dagents_sessions_total{body_kind}
+dagents_body_online_total{body_kind}
 dagents_proxy_online_total
-dagents_proxy_heartbeat_age_seconds{agent_id}
+dagents_proxy_heartbeat_age_seconds{agent_id,body_id}
 dagents_proxy_control_channels{backend_instance_id}
-dagents_execution_total{tool,target,status}
-dagents_execution_latency_seconds{tool,target}
-dagents_execution_queue_depth{agent_id}
-dagents_policy_decisions_total{decision,tool}
+dagents_execution_total{tool,target,status,body_kind}
+dagents_execution_latency_seconds{tool,target,body_kind}
+dagents_execution_queue_depth{agent_id,body_id}
+dagents_policy_decisions_total{decision,tool,body_kind}
 dagents_approval_pending_total
 dagents_sse_clients_total
 dagents_sse_push_latency_seconds
@@ -178,9 +180,9 @@ agent-config/
 ├── backend/
 │   ├── base.yaml              # LLM、shared state、RC、策略默认值
 │   ├── instances/             # backend_instance_id、host、port
-│   └── agents/                # agent_id、agent_type、capabilities、schedulable
+│   └── agents/                # agent_id、brain_profile、body.kind、body_id、capabilities、schedulable
 ├── proxy/
-│   └── proxy.yaml             # agent_id、backend_url、fs_root、本地硬约束
+│   └── proxy.yaml             # agent_id、body_id、backend_url、fs_root、本地硬约束
 ├── policy/
 │   └── execution-policy.yaml  # 工具审批和拒绝规则
 └── tui/
@@ -194,7 +196,7 @@ agent-config/
 | 阶段 | 形态 | 说明 |
 |------|------|------|
 | Phase 1 | 单 Backend + 单 Shared State 可选 | 验证 outbound Proxy 和策略执行 |
-| Phase 2 | 多 Backend + Redis/shared state | 支持跨实例 session、Proxy presence 和 execution tracking |
+| Phase 2 | 多 Backend + Redis/shared state | 支持跨实例 session、Body presence、Proxy presence 和 execution tracking |
 | Phase 3 | 多 Backend + 集中审计 + 高可用 RC | 面向生产运维和多团队使用 |
 | Phase 4 | 多租户 + 分区调度 + 消息总线 | 面向大规模 Agent 网络 |
 
@@ -209,10 +211,11 @@ agent-config/
 - Gateway 是否允许 WebSocket 或长连接升级。
 - Backend 是否记录注册失败原因。
 
-### terminal agent 在线但执行失败
+### proxy-hosted Body 在线但执行失败
 
 检查：
 
+- `body_id` 是否绑定到目标 Agent。
 - `proxy_connection_id` 是否仍是 active。
 - policy 是否返回 `deny` 或等待审批。
 - Proxy 本地 `fs_root`、工作目录和命令白名单。
@@ -230,8 +233,8 @@ agent-config/
 ## 12. 安全运维要求
 
 - Gateway 负责 TLS 终结和外部认证。
-- Backend 校验所有 connection、session、client、proxy 身份。
-- Proxy 使用 agent 级 token 注册，并支持轮换。
+- Backend 校验所有 connection、session、client、body、proxy 身份。
+- Proxy 使用 Agent/Body 级 token 注册，并支持轮换。
 - 远程执行必须经过策略层并写审计。
-- Proxy 本地执行必须限制 `fs_root`、超时、输出大小和环境变量。
+- Body 本地执行必须限制 `fs_root`、超时、输出大小和环境变量。
 - 生产环境应启用集中日志和审计保留策略。
