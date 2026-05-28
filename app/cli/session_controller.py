@@ -14,7 +14,14 @@ from app.cli.approval import (
     build_all_rejected_decision,
     extract_tool_approval_requests,
 )
+from app.cli.user_information import (
+    UserInformationAnswer,
+    UserInformationCancelled,
+    UserInformationRequest,
+    extract_user_information_request,
+)
 from app.cli.render import (
+    TranscriptKind,
     TranscriptUpdate,
     format_assistant_delta,
     format_assistant_end,
@@ -22,10 +29,12 @@ from app.cli.render import (
     format_reasoning,
     format_tool_call,
     format_tool_result,
+    format_user_information_required,
 )
 
 TranscriptCallback = Callable[[TranscriptUpdate], None]
 ApprovalCallback = Callable[[list[ToolApprovalRequest]], Awaitable[ApprovalDecision]]
+UserInformationCallback = Callable[[UserInformationRequest], Awaitable[UserInformationAnswer]]
 StatusCallback = Callable[[str], None]
 
 
@@ -61,6 +70,7 @@ class SessionController:
         self._render_task: asyncio.Task[None] | None = None
         self._transcript_cb: TranscriptCallback | None = None
         self._approval_cb: ApprovalCallback | None = None
+        self._user_information_cb: UserInformationCallback | None = None
         self._status_cb: StatusCallback | None = None
         self._done_counter = 0
         self._user_turn_done = asyncio.Event()
@@ -70,6 +80,7 @@ class SessionController:
         self._assistant_line_open = False
         self._sse_connected = False
         self._approval_lock = asyncio.Lock()
+        self._user_information_lock = asyncio.Lock()
 
     def on_transcript(self, callback: TranscriptCallback) -> None:
         """注册 transcript 更新回调。"""
@@ -78,6 +89,10 @@ class SessionController:
     def on_approval(self, callback: ApprovalCallback) -> None:
         """注册工具审批回调（由 UI 层实现交互）。"""
         self._approval_cb = callback
+
+    def on_user_information(self, callback: UserInformationCallback) -> None:
+        """注册用户询问回调（由 UI 层收集回答）。"""
+        self._user_information_cb = callback
 
     def on_status(self, callback: StatusCallback) -> None:
         """注册状态栏文本回调。"""
@@ -324,6 +339,9 @@ class SessionController:
         elif event_type == "approval_required":
             self._ensure_assistant_end()
             skip_holder["v"] = await self._handle_approval(data)
+        elif event_type == "user_information_required":
+            self._ensure_assistant_end()
+            skip_holder["v"] = await self._handle_user_information(data)
         elif event_type == "tool_result":
             self._ensure_assistant_end()
             self._emit_transcript(format_tool_result(data))
@@ -356,6 +374,32 @@ class SessionController:
                 session_id=self.session_id,
                 client_id=self.client_id,
                 resume_value=decision.to_resume_value(),
+            )
+            return True
+
+    async def _handle_user_information(self, data: dict[str, Any]) -> bool:
+        """处理 user_information_required：回调 UI 收集回答并 submit resume。"""
+        async with self._user_information_lock:
+            request = extract_user_information_request(data)
+            if request is None:
+                return False
+            if self._user_information_cb is not None:
+                try:
+                    answer = await self._user_information_cb(request)
+                except UserInformationCancelled:
+                    return False
+            else:
+                answer = UserInformationAnswer(
+                    tool_call_id=request.tool_call_id,
+                    answer="",
+                    selected_options=[],
+                    cancelled=True,
+                )
+            assert self._client is not None
+            await self._client.submit_resume(
+                session_id=self.session_id,
+                client_id=self.client_id,
+                resume_value=answer.to_resume_value(),
             )
             return True
 

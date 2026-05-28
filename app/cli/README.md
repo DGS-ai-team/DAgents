@@ -7,6 +7,7 @@
 | [`session_controller.py`](session_controller.py) | SSE pump、后台 render 循环、用户 turn 栅栏、trigger 绑定 |
 | [`api_client.py`](api_client.py) | HTTP/SSE 客户端（session、message、stream、trigger CRUD） |
 | [`approval.py`](approval.py) | 工具审批载荷解析与 resume 决策构造 |
+| [`user_information.py`](user_information.py) | `ask_user_information` SSE 解析与用户回答 resume 构造 |
 | [`session_commands.py`](session_commands.py) | `dagents show session` / `dagents delete session` |
 | [`tui/`](tui/) | Textual UI：主 App、进入欢迎区、审批 Modal |
 | [`version_info.py`](version_info.py) | CLI 版本号与用户名解析 |
@@ -48,7 +49,9 @@ dagents delete session SESSION_ID [--api URL]
 
 钩子目录见 `packaging/runtime/scripts/serve/`（安装后位于 `.runtime/scripts/serve/`）。
 
-快捷键：context 视图中按 `Esc` 返回聊天记录；输出中或工具审批中按 `Esc` 可调用取消接口中断当前 turn。
+快捷键：context 视图中按 `Esc` 返回聊天记录；输出中、工具审批或 Agent 询问中按 `Esc` 可调用取消接口中断当前 turn。
+
+**Agent 询问（`ask_user_information`）**：Agent 调用该工具时，TUI 会展示问题；无选项时在底部输入框输入后 Enter 提交；有选项时用 ↑/↓ 选择、Space 多选切换、Enter 确认。
 
 ## 架构要点
 

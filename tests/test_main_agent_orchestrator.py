@@ -638,6 +638,75 @@ class MainAgentTurnOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(ctx.session_id, orchestrator._session_pending_compression_results)
 
+    async def test_ask_user_information_emits_user_information_required(self) -> None:
+        """`ask_user_information` 应发出 user_information_required 并保留 pending。"""
+        tool_call = {
+            "id": "call-ask",
+            "name": "ask_user_information",
+            "arguments": {"question": "请选择环境"},
+            "raw_arguments": "{\"question\":\"请选择环境\"}",
+        }
+        runtime = FakeRuntime(
+            [
+                AgentEventEnvelope(
+                    event_type="tool_call",
+                    payload={"tool_calls": [tool_call], "assistant_content": ""},
+                    meta={},
+                ),
+                AgentEventEnvelope(event_type="done", payload={"finish_reason": "tool_calls"}, meta={}),
+            ]
+        )
+        orchestrator, submit, emitted = self._make_orchestrator()
+        ctx = OpenAIConversationContext(session_id="s-ask")
+        env = MessageEnvelope(session_id="s-ask", request_type="message", content="go", client_id="c-ask")
+
+        await orchestrator.handle_message(ctx=ctx, runtime=runtime, env=env, base_meta={})
+
+        self.assertEqual(
+            [item.event_type for item in emitted],
+            ["tool_call", "user_information_required", "done"],
+        )
+        self.assertEqual(emitted[-1].payload.get("finish_reason"), "awaiting_user_information")
+        self.assertEqual(len(ctx.pending_tool_calls), 1)
+        self.assertEqual(ctx.pending_tool_calls[0].name, "ask_user_information")
+        submit.assert_not_awaited()
+
+    async def test_user_information_resume_submits_tool_result(self) -> None:
+        """用户回答 resume 后应写入 tool message 并回灌 tool_result。"""
+        orchestrator, submit, emitted = self._make_orchestrator()
+        ctx = OpenAIConversationContext(session_id="s-resume")
+        ctx.pending_tool_calls = [
+            PendingToolCall(
+                call_id="call-ask",
+                name="ask_user_information",
+                arguments={"question": "补充信息"},
+            )
+        ]
+        env = MessageEnvelope(
+            session_id="s-resume",
+            request_type="resume",
+            resume_value={
+                "type": "user_information",
+                "tool_call_id": "call-ask",
+                "answer": "生产环境",
+                "selected_options": [],
+            },
+            client_id="c-resume",
+        )
+
+        await orchestrator.handle_message(
+            ctx=ctx,
+            runtime=FakeRuntime([]),
+            env=env,
+            base_meta={},
+        )
+
+        self.assertEqual(ctx.messages[-1]["role"], "tool")
+        self.assertIn("生产环境", str(ctx.messages[-1]["content"]))
+        submit.assert_awaited_once()
+        self.assertEqual(submit.await_args.kwargs["request_type"], "tool_result")
+        self.assertIn("tool_result", [item.event_type for item in emitted])
+
 
 if __name__ == "__main__":
     unittest.main()

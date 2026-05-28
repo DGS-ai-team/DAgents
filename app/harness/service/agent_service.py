@@ -1119,6 +1119,15 @@ class AgentService:
                     "display_type": payload.get("display_type", "normal_text"),
                 }
             )
+        if et == "user_information_required":
+            return "user_information_required", with_meta(
+                {
+                    "content": payload.get("message", ""),
+                    "user_information_args": payload.get("args", {}),
+                    "description": payload.get("description", ""),
+                    "display_type": payload.get("display_type", "normal_text"),
+                }
+            )
         if et == "error":
             return "error", with_meta({"message": payload.get("message", "")})
         if et == "done":

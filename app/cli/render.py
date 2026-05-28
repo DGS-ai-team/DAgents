@@ -47,6 +47,25 @@ def tool_summary(item: ToolApprovalRequest, index: int) -> str:
     return f"  {index}. {item.name} ({item.call_id}){risk}\n    args: {args}{reason}"
 
 
+def format_user_information_required(data: dict[str, Any]) -> TranscriptUpdate:
+    """将 user_information_required SSE 载荷格式化为 transcript 行。"""
+    args = data.get("user_information_args")
+    question = str(data.get("content") or "").strip()
+    if isinstance(args, dict):
+        question = str(args.get("question") or question).strip()
+    lines = ["[user question]", question or "(empty question)"]
+    if isinstance(args, dict):
+        options = args.get("options")
+        if isinstance(options, list) and options:
+            lines.append("options:")
+            for index, raw in enumerate(options, start=1):
+                if not isinstance(raw, dict):
+                    continue
+                label = str(raw.get("label") or raw.get("id") or f"option-{index}")
+                lines.append(f"  {index}. {label}")
+    return TranscriptUpdate(kind=TranscriptKind.LINE, text="\n".join(lines), data=data)
+
+
 def format_tool_result(data: dict[str, Any]) -> TranscriptUpdate:
     """将 tool_result SSE 载荷格式化为 transcript 行。"""
     name = data.get("tool_name") or "tool"

@@ -3,6 +3,7 @@
 | 文件 | 说明 |
 |------|------|
 | **`tool.py`** | 工具统一入口：`tool` 装饰器 + `get_tools()` + OpenAI tool 适配（`build_openai_toolkit`/`parse_tool_arguments`/运行时 args_schema 校验/结构化审批决策）；**当前模型可见工具清单**见 [built-in-tools.md](../../../doc/built-in-tools.md) |
+| **`user_information.py`** | **`ask_user_information`**：向用户询问自由文本或选项式信息（编排器特殊处理，不经同步执行） |
 | **`bash.py`** | 统一 shell 工具 **`bash_run`**（支持 `bash/cmd/powershell`，超时自动降级为后台 ShellJob），以及 **`bash_job_status`** / **`bash_job_tail`** / **`bash_job_cancel`** |
 | **`host_platform.py`** | **`host_platform`**：查询宿主机 OS（`os_kind` + `platform` 摘要，供与 bash 路径对齐） |
 | **`fs.py`** | 文件工具：**`read_file`**（流式分页 + `next_line_offset`，可选行号）/ **`search_replace`**（保留原始文本 + diff + 匹配行）/ **`search_file`**（regex/literal、大小写、上下文、`next_index_offset`）/ **`write_file`**（父目录与存在策略） |

@@ -25,9 +25,15 @@ from app.core.main_agent.tool_execution import (
     ToolExecutionPlan,
     build_approval_required_payload,
     build_tool_execution_plan,
+    pending_calls_to_dicts,
     pending_tool_call_to_approval_item,
 )
 from app.core.main_agent.tool_resume import ResumeDecisionPlan, ToolResumeCoordinator, build_resume_decision_plan
+from app.harness.tools.user_information import (
+    ASK_USER_INFORMATION_TOOL,
+    format_user_information_tool_result,
+)
+from app.schemas.user_information import is_user_information_resume, parse_user_information_resume
 from app.core.summary_agent.agent import init_agent as init_summary_agent
 
 import logging
@@ -166,8 +172,16 @@ class MainAgentTurnOrchestrator:
         env: MessageEnvelope,
         base_meta: dict[str, Any],
     ) -> None:
-        """处理审批后的 resume：执行批准工具、处理拒绝并回灌 tool_result。"""
+        """处理审批后的 resume，或用户回答 `ask_user_information` 的 resume。"""
         _logger.info("[begin_handle_resume] %s", env.session_id)
+        if is_user_information_resume(env.resume_value):
+            await self._handle_user_information_resume(
+                ctx=ctx,
+                env=env,
+                base_meta=base_meta,
+            )
+            return
+
         # 如果没有可恢复的工具调用，即pending_tool_calls为空，则直接返回错误
         if not ctx.pending_tool_calls:
             await self._emit_envelope(
@@ -217,6 +231,167 @@ class MainAgentTurnOrchestrator:
             source="service",
             priority="tool_result",
         )
+
+    async def _handle_user_information_resume(
+        self,
+        *,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+    ) -> None:
+        """处理用户对 `ask_user_information` 的回答并继续工具链。
+
+        逻辑：
+        1. 校验 resume 载荷与 pending 中对应 call_id；
+        2. 写入 tool message 并 emit SSE `tool_result`；
+        3. 从 pending 移除已回答项，并尝试自动执行剩余免审批工具；
+        4. 以 `tool_result` 入队触发下一轮 `tool_message` 推理。
+        """
+        parsed = parse_user_information_resume(env.resume_value)
+        if parsed is None:
+            await self._emit_resume_error_done(
+                env=env,
+                base_meta=base_meta,
+                message="user_information resume 载荷无效。",
+                finish_reason="resume_user_information_invalid",
+            )
+            return
+        if not ctx.pending_tool_calls:
+            await self._emit_resume_error_done(
+                env=env,
+                base_meta=base_meta,
+                message="没有可恢复的 pending tool 调用。",
+                finish_reason="resume_no_pending_tools",
+            )
+            return
+
+        pending_item = next(
+            (item for item in ctx.pending_tool_calls if item.call_id == parsed.tool_call_id),
+            None,
+        )
+        if pending_item is None or pending_item.name != ASK_USER_INFORMATION_TOOL:
+            await self._emit_resume_error_done(
+                env=env,
+                base_meta=base_meta,
+                message="resume 中的 tool_call_id 与 pending ask_user_information 不匹配。",
+                finish_reason="resume_user_information_mismatch",
+            )
+            return
+
+        if parsed.cancelled:
+            result_text = format_user_information_tool_result(
+                answer="",
+                selected_options=[],
+                cancelled=True,
+            )
+        else:
+            args = pending_item.arguments if isinstance(pending_item.arguments, dict) else {}
+            required = bool(args.get("required", True))
+            answer = str(parsed.answer or "").strip()
+            selected = [str(item).strip() for item in parsed.selected_options if str(item).strip()]
+            if required and not answer and not selected:
+                await self._emit_resume_error_done(
+                    env=env,
+                    base_meta=base_meta,
+                    message="必填问题未提供回答。",
+                    finish_reason="resume_user_information_empty",
+                )
+                return
+            result_text = format_user_information_tool_result(
+                answer=answer,
+                selected_options=selected,
+                cancelled=False,
+            )
+
+        self._append_tool_message(ctx=ctx, tool_call_id=pending_item.call_id, content=result_text)
+        executed_results: list[dict[str, Any]] = [
+            {
+                "tool_name": pending_item.name,
+                "tool_call_id": pending_item.call_id,
+                "content": result_text,
+                "display_type": infer_tool_result_display_type(pending_item.name, result_text),
+            }
+        ]
+        await self._emit_envelope(
+            env=env,
+            envelope=AgentEventEnvelope(
+                event_type="tool_result",
+                payload={
+                    "tool_name": pending_item.name,
+                    "tool_call_id": pending_item.call_id,
+                    "content": result_text,
+                    "partial": False,
+                    "display_type": infer_tool_result_display_type(pending_item.name, result_text),
+                },
+                meta={},
+            ),
+            base_meta=base_meta,
+        )
+
+        ctx.pending_tool_calls = [
+            item for item in ctx.pending_tool_calls if item.call_id != pending_item.call_id
+        ]
+
+        # 同批剩余 pending 若均为免审批工具，则在此一并执行，避免 partial tool 链悬空。
+        while ctx.pending_tool_calls:
+            plan = build_tool_execution_plan(
+                ctx=ctx,
+                captured_tool_calls=pending_calls_to_dicts(ctx.pending_tool_calls),
+            )
+            if plan.has_pending_user_information or plan.has_pending_approval:
+                break
+            if not plan.auto_exec_calls:
+                break
+            batch_results = await self._execute_auto_tool_batch_collect(
+                ctx=ctx,
+                env=env,
+                base_meta=base_meta,
+                auto_exec_calls=plan.auto_exec_calls,
+            )
+            executed_results.extend(batch_results)
+            executed_ids = {item.call_id for item in plan.auto_exec_calls}
+            ctx.pending_tool_calls = [
+                item for item in ctx.pending_tool_calls if item.call_id not in executed_ids
+            ]
+
+        if not ctx.pending_tool_calls:
+            ctx.run_turn_phase = RunTurnPhase.IDLE
+        await self._submit_message(
+            session_id=env.session_id,
+            client_id=env.client_id,
+            content="",
+            request_type="tool_result",
+            tool_result={"results": executed_results},
+            source="service",
+            priority="tool_result",
+        )
+
+    async def _execute_auto_tool_batch_collect(
+        self,
+        *,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+        auto_exec_calls: list[PendingToolCall],
+    ) -> list[dict[str, Any]]:
+        """执行一批免审批工具并返回结果列表（不清空 pending，不单独入队）。"""
+        auto_exec_tasks = [
+            asyncio.create_task(self._invoke_tool(ctx, item, env=env, base_meta=base_meta))
+            for item in auto_exec_calls
+        ]
+        auto_exec_results = await asyncio.gather(*auto_exec_tasks)
+        executed_results: list[dict[str, Any]] = []
+        for item, result_text in zip(auto_exec_calls, auto_exec_results):
+            self._append_tool_message(ctx=ctx, tool_call_id=item.call_id, content=result_text)
+            executed_results.append(
+                {
+                    "tool_name": item.name,
+                    "tool_call_id": item.call_id,
+                    "content": result_text,
+                    "display_type": infer_tool_result_display_type(item.name, result_text),
+                }
+            )
+        return executed_results
 
     async def _emit_resume_error_done(
         self,
@@ -542,6 +717,16 @@ class MainAgentTurnOrchestrator:
             ctx=ctx,
             captured_tool_calls=captured_tool_calls,
         )
+        if execution_plan.has_pending_user_information:
+            await self._wait_for_user_information(
+                ctx=ctx,
+                env=env,
+                base_meta=base_meta,
+                captured_tool_calls=captured_tool_calls,
+                final_done_envelope=final_done_envelope,
+                execution_plan=execution_plan,
+            )
+            return
         if execution_plan.has_pending_approval:
             await self._wait_for_tool_approval_batch(
                 ctx=ctx,
@@ -578,6 +763,25 @@ class MainAgentTurnOrchestrator:
             base_meta=base_meta,
             captured_tool_calls=captured_tool_calls,
             captured_assistant_content=captured_assistant_content,
+            final_done_envelope=final_done_envelope,
+            execution_plan=execution_plan,
+        )
+
+    async def _wait_for_user_information(
+        self,
+        *,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+        captured_tool_calls: list[dict[str, Any]],
+        final_done_envelope: AgentEventEnvelope,
+        execution_plan: ToolExecutionPlan,
+    ) -> None:
+        await self._tool_execution.wait_for_user_information(
+            ctx=ctx,
+            env=env,
+            base_meta=base_meta,
+            captured_tool_calls=captured_tool_calls,
             final_done_envelope=final_done_envelope,
             execution_plan=execution_plan,
         )

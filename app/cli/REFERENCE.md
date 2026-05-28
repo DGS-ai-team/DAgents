@@ -27,7 +27,14 @@
   - **`list_skills` / `load_skill` / `unload_skill`**：调用 session skills API
   - **`clear_context`**：调用 `POST .../clear-context`
   - **`bind_triggers_to_client`**：PATCH 同 session trigger 的 `client_id`
-  - **`on_transcript` / `on_approval` / `on_status`**：UI 回调注册
+  - **`on_transcript` / `on_approval` / `on_user_information` / `on_status`**：UI 回调注册
+
+## `user_information.py`
+
+- **`UserInformationRequest`** / **`UserInformationAnswer`**：SSE 询问与用户回答模型
+- **`extract_user_information_request`**：解析 `user_information_required` 载荷
+- **`build_answer_from_text`** / **`build_answer_from_options`**：构造 resume 回答
+- **`UserInformationCancelled`**：用户 Esc 取消信号
 
 ## `api_client.py`
 

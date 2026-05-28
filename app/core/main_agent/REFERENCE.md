@@ -22,7 +22,8 @@
 ## `tool_execution.py`
 
 - **`ToolExecutionPlan`**：单轮 `tool_calls` 的内部执行计划，承载自动执行工具、待审批工具与每个 call 的 **`ToolApprovalDecision`**。
-- **`build_tool_execution_plan`**：根据 pending tool call 与 **`decide_tool_approval`** 生成计划；同批只要有一项需审批，则整批等待用户 resume。
+- **`build_tool_execution_plan`**：根据 pending tool call 与 **`decide_tool_approval`** 生成计划；识别 **`ask_user_information`** 优先等待用户输入；同批只要有一项需审批，则整批等待用户 resume。
+- **`build_user_information_required_payload`** / **`wait_for_user_information`**：发出 `user_information_required` SSE 并暂停回合。
 - **`pending_tool_call_to_approval_item`** / **`build_approval_required_payload`**：构造审批卡片数据，透出 **`approval_reason`**、**`risk_level`**、**`approval_mode`** 等元数据。
 - **`ToolExecutionCoordinator`**：统一处理审批等待批与自动执行批，自动执行结果会写回 tool message 并以 `tool_result` 请求重新入队。
 

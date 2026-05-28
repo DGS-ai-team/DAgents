@@ -12,8 +12,10 @@ from app.core.main_agent.display_inference import infer_tool_call_display_type, 
 from app.harness.queue.message_queue import MessageEnvelope
 from app.harness.service.interface import AgentEventEnvelope
 from app.harness.tools.tool import ToolApprovalDecision, decide_tool_approval
+from app.harness.tools.user_information import ASK_USER_INFORMATION_TOOL
 from app.observability.metrics import record_tool_approval_required
 from app.schemas.approval import ApprovalRequiredEnvelopePayload, ApprovalToolCallsArgs, ToolCallApprovalItem
+from app.schemas.user_information import UserInformationRequiredEnvelopePayload
 
 
 EmitEnvelope = Callable[..., Awaitable[None]]
@@ -27,10 +29,15 @@ class ToolExecutionPlan:
     auto_exec_calls: list[PendingToolCall]
     need_approval_calls: list[PendingToolCall]
     approval_decisions: dict[str, ToolApprovalDecision]
+    user_information_call: PendingToolCall | None = None
 
     @property
     def has_pending_approval(self) -> bool:
         return bool(self.need_approval_calls)
+
+    @property
+    def has_pending_user_information(self) -> bool:
+        return self.user_information_call is not None
 
 
 def build_tool_execution_plan(
@@ -42,10 +49,15 @@ def build_tool_execution_plan(
     auto_exec_calls: list[PendingToolCall] = []
     need_approval_calls: list[PendingToolCall] = []
     approval_decisions: dict[str, ToolApprovalDecision] = {}
+    user_information_call: PendingToolCall | None = None
     for call in captured_tool_calls:
         call_id = str(call.get("id") or "")
         item = pending_by_id.get(call_id)
         if item is None:
+            continue
+        if item.name == ASK_USER_INFORMATION_TOOL:
+            if user_information_call is None:
+                user_information_call = item
             continue
         call_args = item.arguments if isinstance(item.arguments, dict) else {}
         decision = decide_tool_approval(
@@ -62,6 +74,7 @@ def build_tool_execution_plan(
         auto_exec_calls=auto_exec_calls,
         need_approval_calls=need_approval_calls,
         approval_decisions=approval_decisions,
+        user_information_call=user_information_call,
     )
 
 
@@ -78,6 +91,49 @@ def build_approval_required_payload(
         display_type=display_type,
     )
     return payload.model_dump()
+
+
+def build_user_information_required_payload(item: PendingToolCall) -> dict[str, Any]:
+    """构造 `user_information_required` SSE 载荷。"""
+    args = dict(item.arguments) if isinstance(item.arguments, dict) else {}
+    question = str(args.get("question") or "").strip() or "请补充信息"
+    display_type = infer_tool_call_display_type(
+        "",
+        [
+            {
+                "id": item.call_id,
+                "name": item.name,
+                "arguments": args,
+            }
+        ],
+    )
+    payload = UserInformationRequiredEnvelopePayload(
+        message=question,
+        args={
+            "tool_call_id": item.call_id,
+            "tool_name": item.name,
+            "question": question,
+            "options": list(args.get("options") or []),
+            "allow_multiple": bool(args.get("allow_multiple", False)),
+            "placeholder": str(args.get("placeholder") or ""),
+            "required": bool(args.get("required", True)),
+        },
+        description="等待用户补充信息",
+        display_type=display_type,
+    )
+    return payload.model_dump()
+
+
+def pending_calls_to_dicts(items: list[PendingToolCall]) -> list[dict[str, Any]]:
+    """将 pending 快照转为 tool_call 列表形态。"""
+    return [
+        {
+            "id": item.call_id,
+            "name": item.name,
+            "arguments": dict(item.arguments),
+        }
+        for item in items
+    ]
 
 
 def pending_tool_call_to_approval_item(
@@ -156,6 +212,55 @@ class ToolExecutionCoordinator:
         )
         ctx.run_turn_phase = RunTurnPhase.AWAITING_TOOL_EXECUTION
         await self._emit_envelope(env=env, envelope=final_done_envelope, base_meta=base_meta)
+
+    async def wait_for_user_information(
+        self,
+        *,
+        ctx: OpenAIConversationContext,
+        env: MessageEnvelope,
+        base_meta: dict[str, Any],
+        captured_tool_calls: list[dict[str, Any]],
+        final_done_envelope: AgentEventEnvelope,
+        execution_plan: ToolExecutionPlan,
+    ) -> None:
+        """等待用户回答 `ask_user_information` 并暂停本轮。
+
+        逻辑：
+        1. 保留整批 captured pending（含同批其它 tool call）；
+        2. 仅对第一条 `ask_user_information` 发 `user_information_required`；
+        3. 下发 `done(awaiting_user_information)` 供 TUI 进入询问模式。
+        """
+        item = execution_plan.user_information_call
+        if item is None:
+            return
+        pending_by_id = {p.call_id: p for p in ctx.pending_tool_calls}
+        pending_batch = [
+            pending_by_id[str(call.get("id") or "")]
+            for call in captured_tool_calls
+            if str(call.get("id") or "") in pending_by_id
+        ]
+        ctx.pending_tool_calls = pending_batch
+        await self._emit_envelope(
+            env=env,
+            envelope=AgentEventEnvelope(
+                event_type="user_information_required",
+                payload=build_user_information_required_payload(item),
+                meta={},
+            ),
+            base_meta=base_meta,
+        )
+        ctx.run_turn_phase = RunTurnPhase.AWAITING_TOOL_EXECUTION
+        done_payload = dict(final_done_envelope.payload or {})
+        done_payload["finish_reason"] = "awaiting_user_information"
+        await self._emit_envelope(
+            env=env,
+            envelope=AgentEventEnvelope(
+                event_type="done",
+                payload=done_payload,
+                meta=dict(final_done_envelope.meta or {}),
+            ),
+            base_meta=base_meta,
+        )
 
     async def execute_auto_batch(
         self,

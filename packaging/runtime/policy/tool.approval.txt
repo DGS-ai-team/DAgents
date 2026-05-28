@@ -6,6 +6,7 @@
 read_file=never
 search_file=never
 host_platform=never
+ask_user_information=never
 agent_discover=never
 load_skills=never
 

@@ -99,6 +99,7 @@
 
 | 工具名 | 执行形态 | 定义位置 | 作用概要 |
 |--------|----------|----------|----------|
+| **`ask_user_information`** | 编排器特殊处理 | **`app/harness/tools/user_information.py`** | 向用户询问自由文本或选项式信息；发 SSE `user_information_required`，TUI 收集回答后经 `resume(type=user_information)` 回灌为 tool 结果。 |
 | **`load_skills`** | 同步 | **`app/harness/tools/skills.py`** | 按名称加载会话 **`loaded_skills`**，并返回可用技能元数据（受 **`agent_skills_max_in_prompt`** 等配置影响）。 |
 | **`read_file`** | 同步 | **`app/harness/tools/fs.py`** | 流式按 **`line_offset`/`line_limit`** 分页；头含 **`next_line_offset`**；默认无行号，可用 **`include_line_numbers`** 输出 `行号<TAB>正文`。 |
 | **`search_file`** | 同步 | **`fs.py`** | 流式检索；支持 regex/literal、大小写敏感开关、上下文行数与 **`next_index_offset`** 翻页；命中块建议 **`read_file`** 参数；相邻命中合并上下文。 |

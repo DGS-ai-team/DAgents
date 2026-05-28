@@ -94,6 +94,30 @@ class AgentServiceStreamMapTests(unittest.TestCase):
         self.assertEqual(d2.get("finish_reason"), "unspecified")
         self.assertIn("meta", d2)
 
+    def test_user_information_required_mapping(self) -> None:
+        """user_information_required 应扁平化 args → user_information_args。"""
+        base = {"session_id": "sid", "model": "m"}
+        event_type, data = AgentService._map_event_envelope_to_stream(
+            AgentEventEnvelope(
+                event_type="user_information_required",
+                payload={
+                    "message": "请选择",
+                    "args": {
+                        "tool_call_id": "call-1",
+                        "question": "请选择",
+                        "options": [],
+                    },
+                    "description": "等待用户补充信息",
+                },
+                meta={},
+            ),
+            base_meta=base,
+        )
+        self.assertEqual(event_type, "user_information_required")
+        self.assertEqual(data["content"], "请选择")
+        self.assertIn("user_information_args", data)
+        self.assertEqual(data["user_information_args"]["tool_call_id"], "call-1")
+
 
 @unittest.skipIf(AgentService is None, _AGENT_SERVICE_SKIP)
 class AgentServiceLifecycleTests(unittest.IsolatedAsyncioTestCase):

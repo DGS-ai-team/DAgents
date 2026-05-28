@@ -24,6 +24,13 @@ from app.cli.approval import (
 )
 from app.cli.render import TranscriptKind, TranscriptUpdate
 from app.cli.session_controller import SessionController
+from app.cli.user_information import (
+    UserInformationAnswer,
+    UserInformationCancelled,
+    UserInformationRequest,
+    build_answer_from_options,
+    build_answer_from_text,
+)
 from app.cli.tui.prompt_text_area import PromptTextArea
 from app.cli.tui.welcome_panel import build_welcome_panel
 
@@ -119,6 +126,11 @@ class DAgentsTuiApp(App[None]):
         self._approval_selected_index = 0
         self._approval_decisions: dict[str, bool] = {}
         self._approval_block: dict[str, int] | None = None
+        self._user_info_future: asyncio.Future[UserInformationAnswer] | None = None
+        self._user_info_request: UserInformationRequest | None = None
+        self._user_info_selected_index = 0
+        self._user_info_selected_ids: set[str] = set()
+        self._user_info_block: dict[str, int] | None = None
         self._pending_tools: dict[str, dict[str, Any]] = {}
         self._tool_results: dict[str, dict[str, Any]] = {}
         self._tool_result_counter = 0
@@ -145,6 +157,7 @@ class DAgentsTuiApp(App[None]):
         self._controller.on_transcript(self._on_transcript)
         self._controller.on_status(self._on_status)
         self._controller.on_approval(self._on_approval)
+        self._controller.on_user_information(self._on_user_information)
         self._apply_top_status(connected=False)
         try:
             await self._controller.start()
@@ -247,6 +260,47 @@ class DAgentsTuiApp(App[None]):
             self.call_later(_cleanup)
             await cleanup_done
 
+    async def _on_user_information(self, request: UserInformationRequest) -> UserInformationAnswer:
+        """展示用户询问 UI，并等待回答或取消。
+
+        逻辑：
+        1. 通过 UI 队列初始化询问块与输入状态；
+        2. 等待 `_user_info_future` 完成；
+        3. cleanup 恢复输入框与 RichLog。
+        """
+        loop = asyncio.get_running_loop()
+        ready: asyncio.Future[asyncio.Future[UserInformationAnswer]] = loop.create_future()
+
+        def _begin() -> None:
+            try:
+                future = self._begin_user_info_ui(request)
+            except Exception as exc:  # noqa: BLE001
+                if not ready.done():
+                    ready.set_exception(exc)
+            else:
+                if not ready.done():
+                    ready.set_result(future)
+
+        self.call_later(_begin)
+        answer_future = await ready
+        try:
+            return await answer_future
+        finally:
+            cleanup_done: asyncio.Future[None] = loop.create_future()
+
+            def _cleanup() -> None:
+                try:
+                    self._end_user_info_ui()
+                except Exception as exc:  # noqa: BLE001
+                    if not cleanup_done.done():
+                        cleanup_done.set_exception(exc)
+                else:
+                    if not cleanup_done.done():
+                        cleanup_done.set_result(None)
+
+            self.call_later(_cleanup)
+            await cleanup_done
+
     def _begin_approval_ui(self, requests: list[ToolApprovalRequest]) -> asyncio.Future[ApprovalDecision]:
         """在 UI 队列中初始化审批状态并立即刷新 RichLog。
 
@@ -283,6 +337,53 @@ class DAgentsTuiApp(App[None]):
         self._refresh_approval_layout()
         prompt.focus()
 
+    def _begin_user_info_ui(self, request: UserInformationRequest) -> asyncio.Future[UserInformationAnswer]:
+        """初始化用户询问 UI 并返回等待 future。"""
+        prompt = self._prompt_area()
+        self._user_info_request = request
+        self._user_info_selected_index = 0
+        self._user_info_selected_ids = set()
+        self._user_info_future = asyncio.get_running_loop().create_future()
+        log = self._transcript_log()
+        log.write(f"[bold cyan]Agent 询问[/bold cyan]\n{escape(request.question)}")
+        if request.options:
+            prompt.display = False
+            self._write_user_info_block()
+            self._transcript_log().focus()
+        else:
+            prompt.display = True
+            if request.placeholder:
+                prompt.placeholder = request.placeholder
+            prompt.focus()
+        self._refresh_user_info_layout()
+        return self._user_info_future
+
+    def _end_user_info_ui(self) -> None:
+        """清理用户询问 UI 状态。"""
+        prompt = self._prompt_area()
+        self._user_info_future = None
+        self._user_info_request = None
+        self._user_info_selected_index = 0
+        self._user_info_selected_ids = set()
+        self._delete_user_info_block()
+        prompt.placeholder = ""
+        prompt.display = True
+        self._refresh_user_info_layout()
+        prompt.focus()
+
+    def _refresh_user_info_layout(self) -> None:
+        """用户询问块变更后刷新布局。"""
+        log = self._transcript_log()
+        log.refresh(layout=True)
+        self._prompt_area().refresh(layout=True)
+        self.refresh(layout=True)
+        scroll_end = getattr(log, "scroll_end", None)
+        if callable(scroll_end):
+            try:
+                scroll_end(animate=False)
+            except TypeError:
+                scroll_end()
+
     def _refresh_approval_layout(self) -> None:
         """审批块增删后强制刷新布局并滚动到底部。"""
         log = self._transcript_log()
@@ -312,6 +413,26 @@ class DAgentsTuiApp(App[None]):
                 return
             self._cancel_current_turn()
             return
+        if self._user_info_future is not None and not self._user_info_future.done():
+            request = self._user_info_request
+            if request is not None and request.options:
+                if event.key == "up":
+                    event.stop()
+                    event.prevent_default()
+                    self._move_user_info_selection(-1)
+                elif event.key == "down":
+                    event.stop()
+                    event.prevent_default()
+                    self._move_user_info_selection(1)
+                elif event.key == "space" and request.allow_multiple:
+                    event.stop()
+                    event.prevent_default()
+                    self._toggle_user_info_selection()
+                elif event.key == "enter":
+                    event.stop()
+                    event.prevent_default()
+                    self.confirm_user_info_choice()
+            return
         if self._approval_future is None or self._approval_future.done():
             return
         if event.key == "up":
@@ -338,6 +459,8 @@ class DAgentsTuiApp(App[None]):
             return
         if self._approval_future is not None and not self._approval_future.done():
             self._approval_future.set_exception(ApprovalCancelled())
+        if self._user_info_future is not None and not self._user_info_future.done():
+            self._user_info_future.set_exception(UserInformationCancelled())
         self._cancel_tool_pending_tasks()
         self._cancel_status_lines()
         self._finish_assistant_stream(self._transcript_log())
@@ -384,6 +507,109 @@ class DAgentsTuiApp(App[None]):
         rejected = [item.call_id for item in self._approval_requests if not self._approval_decisions.get(item.call_id)]
         if self._approval_future is not None and not self._approval_future.done():
             self._approval_future.set_result(ApprovalDecision(approved=approved, rejected=rejected))
+
+    def _user_info_block_text(self) -> str:
+        request = self._user_info_request
+        if request is None or not request.options:
+            return ""
+        lines: list[str] = []
+        for index, option in enumerate(request.options):
+            selected = option.id in self._user_info_selected_ids
+            cursor = "[cyan]●[/cyan]" if index == self._user_info_selected_index else " "
+            marker = "[x]" if selected else "[ ]"
+            style = "bold" if index == self._user_info_selected_index else "dim"
+            lines.append(f"   {cursor} [{style}]{marker} {escape(option.label)}[/{style}]")
+        if request.allow_multiple:
+            lines.append("   [dim]↑/↓ 选择，Space 切换，Enter 提交[/dim]")
+        else:
+            lines.append("   [dim]↑/↓ 选择，Enter 确认[/dim]")
+        return "\n".join(lines)
+
+    def _write_user_info_block(self) -> None:
+        start = len(self._transcript_log().lines)
+        start, end = self._replace_log_block(start, start, self._user_info_block_text())
+        self._user_info_block = {"start": start, "end": end}
+
+    def _render_user_info_block(self) -> None:
+        if self._user_info_block is None:
+            return
+        start, end = self._replace_log_block(
+            self._user_info_block["start"],
+            self._user_info_block["end"],
+            self._user_info_block_text(),
+        )
+        self._user_info_block = {"start": start, "end": end}
+
+    def _delete_user_info_block(self) -> None:
+        if self._user_info_block is None:
+            return
+        self._delete_log_block(self._user_info_block["start"], self._user_info_block["end"])
+        self._user_info_block = None
+
+    def _move_user_info_selection(self, delta: int) -> None:
+        request = self._user_info_request
+        if request is None or not request.options:
+            return
+        count = len(request.options)
+        if count <= 0:
+            return
+        self._user_info_selected_index = (self._user_info_selected_index + delta) % count
+        self._render_user_info_block()
+
+    def _toggle_user_info_selection(self) -> None:
+        request = self._user_info_request
+        if request is None or not request.options:
+            return
+        option = request.options[self._user_info_selected_index]
+        if option.id in self._user_info_selected_ids:
+            self._user_info_selected_ids.remove(option.id)
+        else:
+            self._user_info_selected_ids.add(option.id)
+        self._render_user_info_block()
+
+    def confirm_user_info_choice(self) -> None:
+        """提交选项式用户回答。"""
+        if self._user_info_future is None or self._user_info_future.done():
+            return
+        request = self._user_info_request
+        if request is None:
+            self._finish_user_info(
+                UserInformationAnswer(
+                    tool_call_id="",
+                    answer="",
+                    selected_options=[],
+                    cancelled=True,
+                )
+            )
+            return
+        if not request.options:
+            return
+        if request.allow_multiple:
+            selected_ids = sorted(self._user_info_selected_ids)
+        else:
+            option = request.options[self._user_info_selected_index]
+            selected_ids = [option.id]
+        if request.required and not selected_ids:
+            return
+        answer = build_answer_from_options(request, selected_ids)
+        self._finish_user_info(answer)
+
+    def _submit_user_info_text_answer(self, text: str) -> None:
+        """提交自由文本用户回答。"""
+        if self._user_info_future is None or self._user_info_future.done():
+            return
+        request = self._user_info_request
+        if request is None or request.options:
+            return
+        value = str(text or "").strip()
+        if request.required and not value:
+            return
+        self._finish_user_info(build_answer_from_text(request, value))
+
+    def _finish_user_info(self, answer: UserInformationAnswer) -> None:
+        """唤醒用户询问 future。"""
+        if self._user_info_future is not None and not self._user_info_future.done():
+            self._user_info_future.set_result(answer)
 
     def _finish_assistant_stream(self, log: RichLog) -> None:
         """结束当前 assistant 流式段并重置缓冲。"""
@@ -889,6 +1115,9 @@ class DAgentsTuiApp(App[None]):
         if self._approval_block is not None and self._approval_block["start"] >= anchor:
             self._approval_block["start"] += delta
             self._approval_block["end"] += delta
+        if self._user_info_block is not None and self._user_info_block["start"] >= anchor:
+            self._user_info_block["start"] += delta
+            self._user_info_block["end"] += delta
 
     def _approval_option_count(self) -> int:
         # 当前只展示一个工具的“同意/不同意”，确认后再切到下一个工具。
@@ -1169,6 +1398,11 @@ class DAgentsTuiApp(App[None]):
         value = prompt.text.strip()
         prompt.text = ""
         if not value:
+            return
+        if self._user_info_future is not None and not self._user_info_future.done():
+            request = self._user_info_request
+            if request is not None and not request.options:
+                self._submit_user_info_text_answer(value)
             return
         if value in {"/exit", "/quit", "exit", "quit"}:
             self._exit_with_resume_hint()

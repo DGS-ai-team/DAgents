@@ -41,6 +41,13 @@
 - **`agent_broadcast`**：调用 Register Center 广播并并发收集每个目标 SSE，聚合 `approvals` 与广播级 `task.state`。
 - **`agent_peer_approve_tools`**：对端 `approval_required` 后提交 `approve/reject/selection` 的 `resume`；支持 **`direct` / `relay`**，再收集后续 SSE。
 
+## `user_information.py`
+
+- **`ASK_USER_INFORMATION_TOOL`**：工具名常量 `ask_user_information`。
+- **`AskUserInformationArgs`** / **`UserInformationOptionArgs`**：Pydantic 参数 schema。
+- **`ask_user_information`**：模型可见工具声明；同步路径返回 ERROR，实际由编排器发 `user_information_required`。
+- **`format_user_information_tool_result`**：将用户回答格式化为 `role=tool` 正文。
+
 ## `bash.py`
 
 - **`_clip_text`**：按字符上限裁剪输出文本。

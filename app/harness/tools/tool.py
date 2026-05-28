@@ -373,6 +373,13 @@ def decide_tool_approval(
             risk_level="low",
             mode="trigger:read",
         )
+    if normalized_tool == "ask_user_information":
+        return ToolApprovalDecision(
+            require_approval=False,
+            reason="ask_user_information 由编排器等待用户输入，不再二次审批。",
+            risk_level="low",
+            mode="tool:user_information",
+        )
     if normalized_tool in {"trigger_create", "trigger_update", "trigger_delete", "trigger_fire"}:
         risk_level = "high" if normalized_tool in {"trigger_delete", "trigger_fire"} else "medium"
         return ToolApprovalDecision(
@@ -424,12 +431,14 @@ def get_tools() -> list[Any]:
         trigger_list,
         trigger_update,
     )
+    from app.harness.tools.user_information import ask_user_information
 
     # 先最小集启用，后续可按稳定性逐步放开更多工具。
     tools: list[Any] = []
     if bool(get_settings().agent_skills_enabled):
         tools.extend([load_skills, unload_skills, clear_skills])
     tools.extend([
+        ask_user_information,
         read_file,
         search_file,
         search_replace,
