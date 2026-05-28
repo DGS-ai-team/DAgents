@@ -1,222 +1,235 @@
 # 身份与会话模型
 
-## 1. 当前模型
+v2 的身份模型要解决四个问题：调用方不能伪造推送通道，session 必须有明确归属，A2A 会话必须可追踪，Proxy 连接必须能在多 Backend 中定位。
 
-DAgents 当前使用两层标识：
+## 1. 身份层级
 
-```
-session_id  — 标识一个对话会话（上下文 + 消息队列）
-client_id   — 标识一个 SSE 推送通道（InMemoryEventBus 订阅键）
-```
-
-**问题**：
-- `client_id` 由调用方任意指定，后端不校验，存在碰撞和伪造风险
-- 缺少"谁属于哪个 Agent"的正式模型
-- A2A 场景下 peer session 与主 session 没有显式关联
-- Go Proxy 没有身份体系
-
-## 2. 新模型：四层身份
-
-```
-┌─────────────────────────────────────────────┐
-│                  agent_id                    │  ← Agent 身份
-│         "k8s-ops-01" / "code-review-02"     │     向 RC 注册
-├─────────────────────────────────────────────┤
-│               connection_id                  │  ← 连接通道
-│   "conn-abc123" / "conn-def456"             │     后端生成，关联 agent
-├─────────────────────────────────────────────┤
-│               session_id                     │  ← 对话上下文
-│   "sess-xyz789" / "sess-uvw012"             │     消息队列 + 持久化
-├─────────────────────────────────────────────┤
-│               client_id                      │  ← SSE 推送端点
-│   "client-111" / "client-222"               │     订阅通道，关联 session
-└─────────────────────────────────────────────┘
+```text
+agent_id              Agent 的长期身份，向 RC 注册
+backend_instance_id   Backend 实例身份，用于多副本协调
+connection_id         用户、A2A 或系统连接身份，由 Backend 生成
+session_id            对话上下文身份，由 Backend 生成
+client_id             SSE 推送订阅身份，由 Backend 生成
+proxy_connection_id   Go Proxy 控制通道身份，由 Backend 生成
+execution_id          单次工具执行身份，由 Backend 生成
 ```
 
-### 2.1 agent_id
+除 `agent_id` 可由配置声明并在注册时校验外，其余运行期 ID 都由服务端生成。外部调用方不能自造或占用这些 ID。
 
-Agent 的全局唯一标识。在 Register Center 注册时声明，贯穿整个生命周期。
+## 2. Agent 身份
+
+`agent_id` 是 Agent 的稳定身份，用于 RC 发现、A2A 寻址、session 归属和 Proxy 绑定。
 
 ```python
 class AgentRecord(BaseModel):
-    agent_id: str                                    # 全局唯一
+    agent_id: str
     agent_type: Literal["server", "terminal"] = "server"
     schedulable: bool = True
-    base_url: str                                    # A2A 消息接收端点
-    discovery_group: list[str]                       # RC 发现分组
-    capabilities_hint: list[str]                     # 能力标签
-    host_info: dict[str, str] | None = None          # terminal agent 宿主机信息
+    base_url: str
+    discovery_group: list[str]
+    capabilities_hint: list[str]
+    host_info: dict[str, str] | None = None
     registered_at_unix: int
     expires_at_unix: int
 ```
 
-### 2.2 connection_id
+约束：
 
-连接通道标识。每个物理连接（Go TUI、A2A SSE、Go Proxy）一个 connection_id。**后端生成，调用方不可指定。**
+- `agent_id` 必须全局唯一。
+- terminal agent 必须绑定一个在线 Proxy 才能执行远程工具。
+- `schedulable: false` 的 Agent 不应出现在普通 A2A discover 结果中，除非调用方有显式权限。
+
+## 3. Backend 实例身份
+
+多 Backend 部署下，每个实例有 `backend_instance_id`。它用于标识：
+
+- 哪个 Backend 持有某条 SSE 连接。
+- 哪个 Backend 持有某个 Proxy control channel。
+- 某个 execution 当前由哪个实例负责推进。
+
+```python
+class BackendInstanceRecord(BaseModel):
+    backend_instance_id: str
+    base_url: str
+    status: Literal["online", "draining", "offline"]
+    started_at: float
+    last_heartbeat_at: float
+```
+
+共享状态层保存 Backend presence。实例退出或失联后，其他实例可以根据状态判断哪些 connection、stream 或 execution 需要失败、重连或接管。
+
+## 4. Connection 身份
+
+Connection 表示一个逻辑连接，不等同于 TCP 连接。
 
 ```python
 class ConnectionRecord(BaseModel):
-    connection_id: str                               # 后端 uuid
-    agent_id: str                                    # 归属
-    conn_type: Literal["user_tui", "a2a_caller", "a2a_callee", "proxy"]
-    client_id: str                                   # 关联的 SSE 通道标识
-    sessions: set[str]                               # 此连接关联的 session_id 列表
+    connection_id: str
+    agent_id: str
+    backend_instance_id: str
+    conn_type: Literal["user_tui", "web_ui", "api_client", "a2a_caller", "a2a_callee", "proxy"]
+    client_ids: set[str]
+    session_ids: set[str]
     created_at: float
     last_event_at: float
+    expires_at: float
 ```
 
-**conn_type 说明**：
+约束：
 
-| 类型 | 含义 | 典型场景 |
-|------|------|----------|
-| `user_tui` | 用户终端连接 | Go TUI 或浏览器 UI 连接后端 |
-| `a2a_caller` | A2A 主调方 SSE | Agent A 调用 Agent B 时拉取 B 的 SSE |
-| `a2a_callee` | A2A 被调方 SSE | Agent B 被调用后，A 连 B 的流 |
-| `proxy` | Go Proxy 连接 | 终端 Agent 的工具执行通道 |
+- `connection_id` 由 Backend 生成。
+- 请求中的 `connection_id` 必须属于请求声明的 `agent_id`。
+- connection 只能访问它关联的 session。
+- connection 断开后进入宽限期，超时清理相关 client。
 
-### 2.3 session_id
+## 5. Session 身份
 
-对话会话标识。包含完整的 `OpenAIConversationContext`、消息队列、SQLite 持久化。
+Session 表示一个对话上下文和消息队列。
 
 ```python
 class SessionRecord(BaseModel):
     session_id: str
-    agent_id: str                                    # 归属的 Agent
-    connection_ids: set[str]                         # 哪些连接可以订阅此 session
+    agent_id: str
+    owning_backend_instance_id: str | None
+    connection_ids: set[str]
     created_at: float
     last_activity_at: float
-    peer_agent_id: str | None = None                 # A2A 场景的对端 Agent
-    peer_session_id: str | None = None               # A2A 场景的对端 session
-    ttl_seconds: int = 86400                         # 默认 24h
+    ttl_seconds: int
+    peer_agent_id: str | None = None
+    peer_session_id: str | None = None
+    persisted: bool = True
 ```
 
-### 2.4 client_id
+在共享状态多 Backend 目标形态下，session 元数据必须进入共享状态。上下文正文可以按阶段选择：
 
-SSE 推送端点标识。一个 connection 至少有一个 client_id。A2A 场景下，调用方生成新的 client_id 用于拉取对端 SSE。
+- Phase 1：单 Backend 本地 SQLite。
+- Phase 2：共享 session store 或可被 owning Backend 恢复的持久化存储。
+- Phase 3：支持跨实例接管和集中历史查询。
+
+## 6. Client 身份与 SSE 授权
+
+`client_id` 是 SSE 推送订阅身份，只能由 Backend 生成。
 
 ```python
-# client_id 由后端在连接建立时生成
-# GET /v1/streams?client_id=xxx → InMemoryEventBus 查表推送
-#
-# 一个 session 可以推送到多个 client_id
-# （多个终端同时观看同一个 Agent 的输出）
+class ClientRecord(BaseModel):
+    client_id: str
+    connection_id: str
+    backend_instance_id: str
+    allowed_session_ids: set[str]
+    created_at: float
+    expires_at: float
 ```
 
-## 3. 身份流程
+SSE 连接规则：
 
-### 3.1 用户终端连接
+- `GET /v1/streams?client_id=...` 必须校验 client 是否存在且未过期。
+- client 必须属于有效 connection。
+- SSE 只能推送 `allowed_session_ids` 中的事件。
+- 多 Backend 下，如果请求落到非持有 SSE 的实例，该实例应基于共享状态转发、重定向或通过消息总线订阅事件。
 
+## 7. Proxy 身份
+
+Proxy 注册后获得 `proxy_connection_id`。
+
+```python
+class ProxyConnectionRecord(BaseModel):
+    proxy_connection_id: str
+    agent_id: str
+    backend_instance_id: str
+    status: Literal["online", "offline", "draining"]
+    capabilities: list[str]
+    host_info: dict[str, str]
+    last_heartbeat_at: float
+    expires_at: float
 ```
-Go TUI 启动
-  → POST /v1/connections/register
-     { "agent_id": "k8s-ops-01", "conn_type": "user_tui" }
-  ← 返回 { "connection_id": "conn-abc", "client_id": "client-111" }
 
-Go TUI 创建会话
+约束：
+
+- Proxy 心跳使用 `proxy_connection_id`，不是裸 `agent_id`。
+- 一个 terminal agent 同一时间只能有一个 active Proxy，除非显式支持多 body 模式。
+- Proxy 重连会生成新的 `proxy_connection_id`，旧连接进入 offline 或 expired。
+- 执行任务必须绑定当前 active `proxy_connection_id`，防止发给旧连接。
+
+## 8. 用户连接流程
+
+```text
+Client 启动
+  → POST /v1/connections
+     { agent_id, conn_type: "user_tui" }
+  ← { connection_id, client_id }
+
+Client 创建 session
   → POST /v1/sessions
-     { "agent_id": "k8s-ops-01", "connection_id": "conn-abc" }
-  ← 返回 { "session_id": "sess-xyz" }
+     { agent_id, connection_id }
+  ← { session_id }
 
-Go TUI 连接 SSE
-  → GET /v1/streams?client_id=client-111
-  ← SSE 事件流开始推送
+Client 订阅 SSE
+  → GET /v1/streams?client_id=...
 
-Go TUI 发送消息
+Client 发送消息
   → POST /v1/messages
-     { "session_id": "sess-xyz", "content": "帮我查一下集群状态" }
-  → SSE 推送 assistant 回复
+     { connection_id, session_id, content }
 ```
 
-### 3.2 A2A 调用
+Backend 必须校验 `connection_id`、`session_id` 和 `client_id` 的归属关系。
 
-```
-Agent A 调用 Agent B
-  → agent_send_message(target_agent_id="agent-b", message="...")
+## 9. A2A 会话流程
 
-  后端内部：
-  1. 生成 peer_session_id: "sess-peer-001"
-  2. 生成 peer_client_id: "client-a2a-001"
-  3. 向 Agent B 的 /v1/messages 发送：
-     { "session_id": "sess-peer-001",
-       "client_id": "client-a2a-001",
-       "content": "..." }
-  4. 后端创建 A2A connection 记录：
-     ConnectionRecord(conn_type="a2a_caller", session="sess-peer-001", ...)
-  5. 以 peer_client_id 连接 Agent B 的 SSE，收集回复
-  6. 收集完成后返回给 Agent A
+A2A 调用不能由调用方自造目标 session 或 client。
+
+```text
+Agent A 需要调用 Agent B
+  → Agent A Backend 通过 RC 找到 Agent B base_url
+  → Agent A Backend 请求 Agent B Backend 创建 A2A session
+  → Agent B Backend 生成 connection_id、session_id、client_id
+  → Agent A Backend 使用返回的授权信息发送消息和订阅结果
+  → 调用结束后 Agent B Backend 清理短命 A2A session
 ```
 
-### 3.3 Go Proxy 连接
+目标 Backend 创建的 A2A 资源应具备：
 
+- 短 TTL，默认 5 分钟。
+- 不持久化完整长期上下文，除非策略要求审计保留。
+- 明确记录 caller agent、target agent、source session 和 peer session。
+- 与普通用户 session 分开计数和限流。
+
+## 10. Execution 身份
+
+每次工具执行都有 `execution_id`。
+
+```python
+class ExecutionRecord(BaseModel):
+    execution_id: str
+    session_id: str
+    agent_id: str
+    tool_name: str
+    target: Literal["local", "proxy"]
+    proxy_connection_id: str | None
+    policy_decision_id: str
+    status: Literal["pending", "waiting_approval", "running", "completed", "failed", "denied", "timeout", "cancelled"]
+    created_at: float
+    updated_at: float
 ```
-Go Proxy 启动
-  → POST /v1/proxy/register
-     { "agent_id": "k8s-ops-01", "capabilities": [...], "schedulable": true }
-  ← 返回 { "connection_id": "conn-proxy-001" }
 
-Go Proxy 心跳
-  → POST /v1/proxy/heartbeat  (每 30s)
-     { "connection_id": "conn-proxy-001" }
+ExecutionRecord 进入共享状态层，便于多 Backend 下追踪、审批、取消和审计。
 
-Python 后端需要执行工具
-  → POST http://proxy-addr:9090/execute
-     { "tool": "shell", "command": "kubectl get pods", "timeout": 30 }
-  ← 返回 { "exit_code": 0, "stdout": "...", "stderr": "" }
-```
+## 11. 生命周期默认值
 
-## 4. 生命周期管理
-
-| 资源 | 创建 | 销毁 |
-|------|------|------|
-| `agent_id` | RC 注册 + Backend 内部创建 | RC 注销（主动或 TTL 过期） |
-| `connection_id` | 连接建立时 Backend 分配 | 连接断开 + 60s 宽限期后清理 |
-| `session_id` | 用户/A2A 显式创建 | DELETE /v1/sessions 或 TTL 过期 |
-| `client_id` | 连接注册时 Backend 分配 | connection 销毁时同步清理 |
-
-**TTL 默认值**：
-
-| 资源 | TTL | 可配置 |
-|------|-----|--------|
-| Agent RC 注册 | 60s（心跳续租） | `AGENT_REGISTRY_TTL_SECONDS` |
-| Connection | SSE 断开后 60s 清理 | `CONNECTION_GRACE_PERIOD_SECONDS` |
-| Session | 24h 无活动后清理 | `SESSION_TTL_SECONDS` |
-| Client | 随 Connection 生命周期 | — |
-
-## 5. A2A session 的特殊处理
-
-A2A 会话与用户会话的关键区别：
-
-| 维度 | 用户会话 | A2A 会话 |
+| 资源 | 默认 TTL | 清理规则 |
 |------|----------|----------|
-| 创建者 | 用户终端 | Agent 工具层 |
-| session_id 格式 | `sess-{uuid}` | `peer-{caller}-{target}-{random}` |
-| TTL | 24h | 5min（短命，收集完即销毁） |
-| 持久化 | SQLite（可选） | 不持久化（内存中） |
-| 审批回溯 | 通过 resume + resume_value | 通过 agent_peer_approve_tools |
+| Agent RC 注册 | 60s | 心跳续租，过期移除 |
+| Backend instance | 30s | 心跳续租，失联标记 offline |
+| Connection | 60s 宽限期 | 断开后无重连则清理 |
+| User session | 24h 无活动 | 可配置，持久化上下文可保留更久 |
+| A2A session | 5min | 调用结束即清理 |
+| Client | 随 connection | connection 清理时同步删除 |
+| Proxy connection | 90s 无心跳 | 标记 offline，拒绝新执行 |
+| Execution | 由工具超时决定 | 结束后保留审计摘要 |
 
-## 6. 多终端看同一 Agent
+## 12. 安全不变量
 
-```
-Agent A
-  │
-  ├── connection_1 (Go TUI, 桌面终端)
-  │     └── session_A
-  │
-  └── connection_2 (Go TUI, 手机终端)
-        └── session_A (共享同一会话)
-
-两个终端连接同一个 session_id，
-后端向 session 关联的所有 client_id 推送 SSE。
-```
-
-此场景需要 Agent 支持多终端协商。当前 MVP 阶段，建议每个 session 只关联一个活跃的 `user_tui` 连接。
-
-## 7. 安全约束
-
-| 约束 | 说明 |
-|------|------|
-| `client_id` 由后端生成 | 调用方不可指定，防止碰撞和占位攻击 |
-| 连接归属校验 | 请求中的 `connection_id` 必须属于该 `agent_id` |
-| Session 归属校验 | 请求中的 `session_id` 必须在 `connection.sessions` 中 |
-| A2A token | 跨 Agent 请求需携带 `x-dagents-a2a-token`（与现有一致） |
-| Proxy 认证 | Proxy 注册时使用 agent 级别 token |
+- 外部调用方不能指定 `client_id`、`connection_id`、`session_id` 或 `execution_id`。
+- 每个请求都必须校验 connection 与 session 的归属。
+- SSE 订阅只能接收授权 session 的事件。
+- Proxy 执行必须绑定当前 active `proxy_connection_id`。
+- A2A 请求必须携带有效 A2A token，并由目标 Backend 创建受控会话。

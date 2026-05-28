@@ -1,85 +1,98 @@
 # 重构背景与动机
 
-## 1. 问题：Agent 的能力受限于 Python 运行时的可达范围
+## 1. 问题：Agent 能力受限于 Python 运行时可达范围
 
-DAgents 当前是一个纯 Python 项目。Agent 的所有能力——LLM 推理、工具执行、文件系统访问——都在同一个 Python 进程内完成。这带来一个根本性限制：**Agent 只能部署在能运行 Python 3.11+ 的机器上。**
+DAgents 当前主要由 Python 实现。Agent 的 LLM 推理、工具执行、文件访问、TUI 交互和 A2A 协作都运行在同一个 Python 运行时附近。这让系统简单，但也带来一个根本限制：**Agent 只能完整部署在能稳定运行 Python 3.11+ 及其依赖的机器上**。
 
-现实世界中，大量宿主机无法满足这个条件：
+现实环境中，大量机器无法满足这个条件：
 
-| 环境 | glibc / 终端 | Python 3.11+ | 结论 |
-|------|-------------|:---:|------|
-| Windows Server 2012 | conhost 无 ANSI | ⚠️ 官方不支持 | **Python 能装但 textual TUI 跑不了** |
-| Windows Server 2012 R2 | conhost 无 ANSI | ✅ Python 3.12 最后支持 | **TUI 不可用** |
-| RHEL 6 / CentOS 6 | glibc 2.12 | ❌ 无法安装 | **连 Python 都装不上** |
-| RHEL 7 / CentOS 7 | glibc 2.17 | ⚠️ 需要 manylinux2014 | **勉强可用，部分包需源码编译** |
-| 麒麟 V10 | glibc 2.28 | ✅ | **完美支持** |
-| Ubuntu 20.04+ | glibc 2.31 | ✅ | **完美支持** |
-| macOS | — | ✅ | **完美支持** |
+| 环境 | 主要限制 | 结论 |
+|------|----------|------|
+| Windows Server 2012 | 老 conhost 对 ANSI、鼠标上报、OSC 52 支持差 | Python 可安装但 textual TUI 不可靠 |
+| Windows Server 2012 R2 | Python 3.12 是最后支持版本，终端能力仍弱 | Agent 后端可勉强运行，TUI 不适合 |
+| RHEL 6 / CentOS 6 | glibc 2.12，现代 Python wheel 不兼容 | 很难部署 Python 3.11+ |
+| RHEL 7 / CentOS 7 | glibc 2.17，依赖包兼容性受限 | 可用但维护成本高 |
+| 麒麟 V10 / Ubuntu 20.04+ / macOS | 现代运行时支持较好 | 适合运行 Python Backend |
 
-但这些"不支持"的机器上，往往有独特且不可替代的环境能力：
+这些“不适合跑 Python Agent”的机器，往往又拥有不可替代的本地能力：
 
-- **Server 2012**：AD 域控、Windows 专属运维工具、遗留业务系统
-- **RHEL 6**：老数据库实例、cron 定时任务、生产环境历史遗留
-- **任意老机器**：特定的 `custom.md` 规则、`skills/` 目录、kubeconfig、本地密钥
+- 老 Windows 上的 AD 域控、PowerShell 运维脚本、Windows 专属工具。
+- RHEL 6 上的历史数据库、cron 任务、本地配置和遗留业务系统。
+- 只能在宿主机访问的 kubeconfig、内网 DNS、数据库 socket、本地密钥和 `custom.md`。
 
-**这些机器的环境能力不应该因为"装不上 Python"就被排除在 Agent 网络之外。**
+这些能力不应该因为 Python 运行时不可达而被排除在 Agent 网络之外。
 
-## 2. 当前架构的瓶颈
+## 2. 当前架构瓶颈
 
-### 2.1 TUI 绑定在 Python 进程
+### 2.1 TUI 与 Python 进程绑定
 
-```
-app/cli/tui/app.py           ← textual.app.App，DAgentsTuiApp
-app/cli/tui/approval_screen.py ← textual.screen.ModalScreen
-app/cli/tui/prompt_text_area.py
-```
+当前 Python TUI 依赖 textual。textual 适合现代终端，但对老 Windows conhost、旧 SSH 客户端和受限终端支持不足。即使 Agent 后端可以运行，交互体验也可能不可用。
 
-textual 依赖现代终端的 ANSI escape + 鼠标上报 + OSC 52 剪贴板。老 Windows conhost 全不支持。维护者明确不修 conhost 兼容问题。
+### 2.2 工具执行与 Backend 本机绑定
 
-### 2.2 工具执行绑定在本地进程
+现有工具执行通常通过 Backend 本地进程、文件系统和 shell 完成。这意味着 Agent 只能使用 Backend 所在机器上的工具链，无法自然使用另一台机器上的 `kubectl`、`mysql`、PowerShell、专用 CLI 或本地文件。
 
-```python
-# app/harness/tools/bash.py 等
-# 工具通过 subprocess.run() 或本地文件操作执行
-# Agent 无法使用另一台机器上的 kubectl / mysql / PowerShell 工具
-```
+### 2.3 分发形态受 Python 依赖约束
 
-即使 Python 能跑在某台机器上，这台机器也不一定有业务需要的工具链。
+源码安装和 PyInstaller 都不能完全绕过目标 OS 的 libc、终端、系统库和安全策略限制。对于旧 glibc 或老 Windows，继续把完整 Agent 运行时搬过去会持续遇到兼容性问题。
 
-### 2.3 分发形态单一
+## 3. 关键洞察：思考与行动可以分离
 
-DAgents 目前只有两种交付方式：源码 `pip install` 或 PyInstaller 单文件包。两者都依赖目标 OS 能运行编译好的 Python 运行时。对于 glibc 2.12 的 RHEL 6，连 `pip` 都找不到兼容的 wheel。
+一次 Agent turn 可以拆成两类行为：
 
-## 3. 核心洞察：Agent 的能力可以被拆分
-
-回顾 Agent 的运行时行为：
-
-```
-一次 Agent turn 的完整流程：
-  1. 接收消息 → 入队
-  2. LLM 推理 → 决策
-  3. 工具调用 → 执行
-  4. 结果回写 → 再推理
-  5. SSE 推送 → 返回用户
+```text
+思考：接收消息、LLM 推理、规划、上下文管理、A2A 协作、SSE 推送
+行动：执行 shell、读写文件、调用宿主机工具、访问本地环境能力
 ```
 
-其中步骤 1、2、4、5 是纯"思考"——I/O bound，等 LLM 返回，不需要特殊环境。步骤 3 是"行动"——真正需要宿主机环境的部分。
+“思考”依赖 LLM SDK、上下文模型、消息队列和 Python 生态，适合集中在现代 Backend 上运行。
+“行动”依赖宿主机环境、系统命令、本地权限和跨平台分发，适合由轻量 Go Proxy 在目标机器执行。
 
-**大脑（思考）和身体（行动）不需要在同一个进程，甚至不需要在同一台机器上。**
+因此 v2 的核心方向是：**Agent 的大脑集中运行，Agent 的身体可分布部署**。
 
-## 4. 设计目标
+## 4. 为什么 Proxy 必须只出站连接 Backend
+
+一种直观设计是 Backend 直接调用宿主机上的 Proxy：
+
+```text
+Backend ──HTTP──> Go Proxy /execute
+```
+
+这个模型实现简单，但在真实企业网络里问题很大：
+
+- 老机器通常在 NAT、防火墙或专用内网后面，Backend 无法直接访问。
+- 让每台宿主机暴露端口会增加运维和安全成本。
+- 动态 IP、VPN、堡垒机和多网段会让服务发现变复杂。
+- Proxy 作为执行端暴露入站接口，会扩大攻击面。
+
+v2 因此采用出站控制通道：
+
+```text
+Go Proxy ──outbound control channel──> Backend
+Backend 通过已建立通道下发任务
+```
+
+这个模型的优点是：
+
+- Proxy 只需要能访问 Backend，不需要公网入站端口。
+- 更容易穿过 NAT、防火墙和老旧网络环境。
+- Backend 可以统一认证、限流、审计和策略判定。
+- Proxy 失联可以通过心跳和连接状态直接发现。
+
+## 5. 设计目标
 
 | 目标 | 说明 |
 |------|------|
-| **OS 全覆盖** | 任何能跑 Go 静态二进制的 OS 都能作为 Agent 的执行环境加入网络 |
-| **Python 代码最小改动** | Agent 引擎、A2A 协议、Register Center 不动核心逻辑 |
-| **向后兼容** | 现有 Agent（server 类型）行为完全不变 |
-| **安全隔离** | 工具执行在宿主机侧隔离 |，Agent 之间通过 RC 做分组和 A2A token 鉴权 |
-| **运维简单** | Go 端单二进制，无依赖；Python 端加一个模块 |
-| **A2A 透明** | 终端 Agent 和非终端 Agent 对 Register Center 没有区别 |
+| 跨 OS 执行能力 | 任何能运行 Go 静态二进制的宿主机都可以成为执行环境 |
+| Python 核心最小扰动 | Agent loop、LLM runtime、A2A 语义尽量保持稳定 |
+| 出站连接优先 | Proxy 不暴露公网端口，执行任务通过控制通道下发 |
+| 多 Backend 可扩展 | v2 目标支持共享状态多副本，而不是长期依赖单机内存 |
+| 策略化安全执行 | 远程工具执行经过策略判定、审批和审计 |
+| 向后兼容 | `server` Agent 保持现有本地执行行为 |
 
-## 5. 参考背景
+## 6. 非目标
 
-- [os-compatibility.md](../os-compatibility.md)：各 OS 上 Python 的兼容性详细分析
-- [a2a-and-register-center.md](../a2a-and-register-center.md)：现有 A2A 协议与 Register Center 设计
-- [architecture-and-flows.md](../architecture-and-flows.md)：当前架构与业务流程
+- 不把 LLM 推理迁移到 Go。
+- 不让 Go Proxy 参与 Agent 决策或上下文管理。
+- 不要求 Phase 1 一次实现完整多租户、高可用和集中审计。
+- 不让 Register Center 参与具体工具执行路由。

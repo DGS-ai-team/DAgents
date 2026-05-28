@@ -1,308 +1,254 @@
-# Agent 双运行时架构设计
+# Agent 双运行时目标架构
 
-本文提出 **DAgents 的多运行时架构**：Agent 的大脑（LLM 决策引擎）统一运行在 Python 后端，身体（工具执行环境）可以部署在本地或任意远程宿主机上由 Go Proxy 代理。该架构解决的核心问题见 [os-compatibility.md](./os-compatibility.md)——低版本 Windows（Server 2012）、旧 glibc Linux（RHEL 6）等无法直接运行 Python 3.11+ 的宿主机，其本地环境能力仍可作为 Agent 加入协作网络。
+DAgents v2 将 Agent 拆成大脑和身体：**大脑统一在 Python Backend，身体可以在 Backend 本机，也可以在远程宿主机的 Go Proxy**。
 
----
+```text
+Agent = Brain + Body
 
-## 1. 核心概念：Agent = 大脑 + 身体
-
-```
-┌────────────────────────────────────────────────────┐
-│                    Agent                           │
-│                                                    │
-│  ┌──────────────────┐    ┌──────────────────────┐ │
-│  │  大脑 (Brain)     │    │  身体 (Body)          │ │
-│  │                  │    │                      │ │
-│  │  LLM 推理        │    │  工具执行环境         │ │
-│  │  规划与决策       │    │  Shell / 文件系统     │ │
-│  │  上下文管理       │    │  custom.md / skills  │ │
-│  │  多步编排         │    │  数据库 / kubectl    │ │
-│  │                  │    │  第三方工具链         │ │
-│  │  运行位置:        │    │                      │ │
-│  │  Python 后端      │    │  运行位置: 可变       │ │
-│  └──────────────────┘    └──────────────────────┘ │
-│                                                    │
-│  大脑与身体的三种关系：                               │
-│    A. 同在 Python 后端（非终端 Agent）                │
-│    B. 大脑在后端，身体在远程 Go Proxy（终端 Agent）     │
-│    C. 大脑在后端，身体同机但经本地 Go Proxy 隔离执行    │
-└────────────────────────────────────────────────────┘
+Brain: LLM 推理、上下文、Agent loop、A2A 协作
+Body: shell、文件系统、本地工具链、宿主机权限域
 ```
 
-- **大脑**：永远在 Python 后端运行。负责 LLM 调用、Agent 循环、工具决策、A2A 协议。
-- **身体**：提供工具实际执行所需的**文件系统、Shell 环境、工具链、权限域**。
+## 1. Agent 类型
 
----
+### 1.1 Server Agent
 
-## 2. Agent 分类
+`agent_type: "server"` 表示大脑和身体都在 Python Backend。
 
-### 2.1 非终端 Agent（`agent_type: "server"`）
-
-大脑与身体都在 Python 后端服务器上。与当前 DAgents 行为完全一致。
-
-| 属性 | 值 |
-|------|-----|
-| 大脑位置 | Python 后端 |
-| 身体位置 | Python 后端（本地磁盘、进程、工具） |
-| schedulable | **始终 `true`**（天然可被其他 Agent 发现和调度） |
-| 典型场景 | 代码审查、文档生成、通用对话 |
-
-### 2.2 终端 Agent（`agent_type: "terminal"`）
-
-大脑在 Python 后端，身体在远程宿主机的 Go Proxy 上。
-
-| 属性 | 值 |
-|------|-----|
-| 大脑位置 | Python 后端（与其他 Agent 共享 Agent Engine） |
-| 身体位置 | 远程宿主机上的 Go Proxy（Server 2012 / RHEL 6 / 麒麟 V10 / ...） |
-| schedulable | **可配置**（注册时由宿主机 owner 决定是否开放给其他 Agent 发现） |
-| 典型场景 | k8s 集群运维、数据库查询、CI/CD 触发、Windows 桌面自动化 |
-
-终端 Agent 的 `schedulable` 字段允许宿主机的管理员决定：
-- `schedulable: true` — Agent 加入 A2A 网络，能力被其他 Agent 通过 Register Center 发现
-- `schedulable: false` — Agent 仅对绑定的终端可见，不参与 A2A 调度（纯个人助手模式）
-
----
-
-## 3. 网络拓扑
-
-```
-                        ┌──────────────────────────┐
-                        │     Register Center       │
-                        │     (A2A 发现 + 路由)      │
-                        └────────────┬─────────────┘
-                                     │
-        ┌────────────────────────────┼────────────────────────────┐
-        │                            │                            │
-        ▼                            ▼                            ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                      Python Backend Server                        │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │                    Agent Engine                              │ │
-│  │                                                             │ │
-│  │  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌──────────┐ │ │
-│  │  │ Agent A   │  │ Agent B   │  │ Agent C   │  │ Agent D  │ │ │
-│  │  │ server    │  │ server    │  │ terminal  │  │ terminal │ │ │
-│  │  │ sche:true │  │ sche:true │  │ sche:true │  │ sche:false│ │ │
-│  │  │ 代码审查  │  │ 数据分析  │  │ k8s 运维  │  │ 个人助手 │ │ │
-│  │  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘  └────┬─────┘ │ │
-│  │        │              │              │              │       │ │
-│  └────────┼──────────────┼──────────────┼──────────────┼───────┘ │
-│           │              │              │              │         │
-│     工具本地执行    工具本地执行   ProxyManager   ProxyManager   │
-│                                    │              │             │
-└────────────────────────────────────┼──────────────┼─────────────┘
-                                     │              │
-                              HTTP/WebSocket     HTTP/WebSocket
-                                     │              │
-                          ┌──────────┴──┐    ┌──────┴──────────┐
-                          │ Go Proxy C  │    │   Go Proxy D    │
-                          │ Server 2012 │    │   RHEL 6        │
-                          │             │    │                 │
-                          │ kubectl     │    │ SQL DB          │
-                          │ helm        │    │ cron jobs       │
-                          │ kubeconfig  │    │ custom.md       │
-                          │ custom.md   │    │ skills/         │
-                          └─────────────┘    └─────────────────┘
-```
-
-**关键约束**：
-- Register Center 不感知 Agent 的 `agent_type` 或身体位置。它只维护 `agent_id → message_endpoint` 映射。
-- A2A 消息永远发到 Agent 的 `/v1/messages` 端点——该端点由 Python 后端对外暴露。
-- Go Proxy 的内部地址（`execution_endpoint`）仅在 Python 后端内部使用，不暴露给 RC。
-
----
-
-## 4. 一次跨终端 Agent 协作的完整流程
-
-以终端 Agent C（k8s 运维, Server 2012）请终端 Agent D（数据分析, RHEL 6）查询数据库为例：
-
-```
-Step 1: Agent C 的大脑（Python 后端）收到用户消息
-        → LLM 决策：需要查询数据库慢查询日志
-        → capabilities 自检：本地无 SQL 工具
-        → 调用 agent_discover: capabilities_hint=["sql","data-analysis"]
-
-Step 2: Register Center 返回 Agent D 的记录
-        → Agent D.agent_type="terminal", schedulable=true
-
-Step 3: Python 后端 A2A 调用
-        → agent_send_message → RC relay → Agent D 的 /v1/messages
-        → 消息进入 Agent D 的消息队列
-
-Step 4: Agent D 的大脑（Python 后端）推理
-        → 需要执行 SQL: mysql -e "SELECT ..."
-        → Agent D 的 body 在 RHEL 6 上
-        → ProxyManager 路由: D → Go Proxy D
-
-Step 5: Python 后端 ──HTTP──▶ Go Proxy D 的 /execute
-        { "tool": "shell", "command": "mysql -e 'SELECT ...'" }
-
-Step 6: Go Proxy D 在 RHEL 6 上执行
-        → mysql 客户端查询本地数据库
-        → 返回结果给 Python 后端
-
-Step 7: Agent D 的大脑分析结果
-        → LLM 生成回复
-        → SSE 推送回 Agent C
-```
-
-**全程只有 Step 5-6 涉及远程宿主机调用。** Agent 的 LLM 推理、A2A 协议、上下文管理全部在 Python 后端完成。
-
----
-
-## 5. Go Proxy 设计
-
-Go Proxy 是部署在宿主机上的轻量执行代理。它**不思考、不决策、不调用 LLM**。
-
-### 5.1 生命周期
-
-```
-启动 → 扫描环境 → 注册到 Backend → 心跳维持 → 接收/执行指令 → 退出时注销
-```
-
-### 5.2 功能清单（~400 行 Go）
-
-| 功能 | 说明 |
+| 属性 | 说明 |
 |------|------|
-| **环境扫描** | 启动时读取 `custom.md`、`skills/` 目录、检测可用工具链（kubectl / helm / mysql 等） |
-| **向 Backend 注册** | `POST /v1/proxy/register`，上报 agent_id、capabilities、schedulable |
-| **指令执行** | `POST /execute` 接收 shell 命令/文件操作，在本机执行并返回结果 |
-| **心跳** | 定期向 Backend 报告存活，超时未心跳则 ProxyManager 标记其为离线 |
-| **安全沙箱** | 可配置执行根目录（`FS_ROOT`）、命令白名单/黑名单、网络访问策略 |
-| **状态上报** | 宿主机信息（OS、CPU、内存）、运行中的长时间任务 |
+| Brain | Python Backend |
+| Body | Python Backend 本机 |
+| 工具执行 | 本地工具执行器 |
+| schedulable | 默认 true |
+| 典型场景 | 代码审查、文档生成、通用问答、Backend 本机自动化 |
 
-### 5.3 与 Backend 的通信协议
+Server Agent 是当前 DAgents 行为的延续。
 
-```
-Go Proxy ──HTTP──▶ Python Backend
+### 1.2 Terminal Agent
 
-POST /v1/proxy/register     # 注册
-  { "agent_id", "capabilities", "schedulable", "environment": {...} }
+`agent_type: "terminal"` 表示大脑在 Python Backend，身体在 Go Proxy 所在宿主机。
 
-POST /v1/proxy/heartbeat     # 心跳（每 30s）
-  { "agent_id" }
+| 属性 | 说明 |
+|------|------|
+| Brain | Python Backend |
+| Body | Go Proxy 宿主机 |
+| 工具执行 | Proxy control channel 下发 |
+| schedulable | 由 owner 配置 |
+| 典型场景 | 老 Windows 运维、RHEL 6 数据库、k8s 集群、本地专用工具链 |
 
-Python Backend ──HTTP──▶ Go Proxy
+Terminal Agent 可以选择是否加入 A2A 调度：
 
-POST /execute                # 工具执行
-  { "tool": "shell", "command": "...", "timeout": 30 }
-  → { "exit_code": 0, "stdout": "...", "stderr": "" }
+- `schedulable: true`：可被其他 Agent 发现和调用。
+- `schedulable: false`：仅绑定用户或特定入口使用，不参与普通 A2A 发现。
 
-POST /execute                # 文件读取
-  { "tool": "file_read", "path": "/etc/custom.md" }
-  → { "content": "...", "encoding": "utf-8" }
-```
+## 2. 目标拓扑
 
----
+```text
+                    ┌────────────────────┐
+                    │  Register Center   │
+                    │  Agent discovery   │
+                    └─────────┬──────────┘
+                              │
+              ┌───────────────┴────────────────┐
+              │                                │
+              ▼                                ▼
+    ┌──────────────────┐              ┌──────────────────┐
+    │ Python Backend A │              │ Python Backend B │
+    │ Brain + Control  │              │ Brain + Control  │
+    └────────┬─────────┘              └────────┬─────────┘
+             │                                 │
+             └──────────┬──────────────────────┘
+                        ▼
+              ┌──────────────────┐
+              │  Shared State    │
+              │ sessions/proxies │
+              └──────────────────┘
 
-## 6. ProxyManager（Python 后端新增模块）
-
-`app/proxy/` 负责管理所有 Go Proxy 连接：
-
-```python
-class ProxyManager:
-    """管理所有 Go Proxy 的连接池和路由。"""
-
-    proxies: dict[str, ProxyConnection]  # agent_id → 连接
-
-    async def register(self, info: ProxyRegisterRequest) -> AgentRecord
-    async def heartbeat(self, agent_id: str) -> None
-    async def execute(self, agent_id: str, tool: ToolCall) -> ToolResult
-    async def check_offline(self) -> list[str]  # 心跳超时检测
-```
-
-当 Agent 的大脑决策需要执行工具时，ProxyManager 根据 `agent_id` 决定路由：
-
-```python
-def route_tool_execution(agent: AgentRecord, tool_call: ToolCall) -> ToolResult:
-    if agent.agent_type == "server":
-        # 非终端 Agent：直接在后端本地执行
-        return local_tool_map[tool_call.name](tool_call.params)
-    else:
-        # 终端 Agent：转发到 Go Proxy
-        return proxy_manager.execute(agent.agent_id, tool_call)
+    Go Proxy C ──outbound control channel──> one Backend instance
+    Go Proxy D ──outbound control channel──> one Backend instance
 ```
 
----
+Backend 多副本共享状态。某个 Proxy 的长连接会落在一个 Backend 实例上，但其他 Backend 可以通过共享状态发现它的 presence，并通过拥有该连接的 Backend 转发执行任务。
 
-## 7. Register Center 的变化
+## 3. Register Center 与 Backend 边界
 
-RC 的 A2A 协议**完全不变**。仅 Agent 注册信息增加字段：
+Register Center 负责：
+
+- Agent 注册、续租、注销。
+- 按 `discovery_group`、`capabilities`、`schedulable` 返回候选 Agent。
+- 存储 Agent 元数据，例如 `agent_type`、`host_info`。
+
+Register Center 不负责：
+
+- 判断工具是否允许执行。
+- 路由工具执行请求。
+- 管理 Proxy control channel。
+- 存储 session、connection 或 SSE 状态。
+
+Backend Control Plane 负责执行路由。RC 可以知道 Agent 是 server 还是 terminal，但不参与执行路径决策。
+
+## 4. Go Proxy 生命周期
+
+```text
+启动
+  → 读取配置和本地策略硬约束
+  → 扫描环境能力
+  → 向 Backend 注册
+  → 建立 outbound control channel
+  → 周期性心跳和状态上报
+  → 接收执行任务
+  → 返回执行结果
+  → 退出时注销或等待 Backend 超时清理
+```
+
+### 4.1 注册
+
+Proxy 启动后向 Backend 注册：
 
 ```json
-// 非终端 Agent（与现有行为一致）
-{
-  "agent_id": "code-review-01",
-  "base_url": "http://backend:8000",
-  "discovery_group": ["engineering"],
-  "capabilities_hint": ["code-review", "git"],
-  "agent_type": "server",
-  "schedulable": true
-}
-
-// 终端 Agent（新增字段）
 {
   "agent_id": "k8s-ops-01",
-  "base_url": "http://backend:8000",
-  "discovery_group": ["production"],
-  "capabilities_hint": ["kubernetes", "helm", "docker"],
   "agent_type": "terminal",
   "schedulable": true,
+  "capabilities": ["kubernetes", "helm", "shell"],
   "host_info": {
-    "os": "Windows Server 2012",
-    "tools": ["kubectl", "helm"]
+    "os": "Windows Server 2012 R2",
+    "arch": "amd64",
+    "hostname": "ops-win-01"
   }
 }
 ```
 
-`agent_type` 和 `schedulable` 为可选字段（默认 `server` / `true`），向后兼容现有注册。
+Backend 返回服务端生成的身份：
 
----
-
-## 8. 交付形态对比
-
-```
-                        非终端 Agent              终端 Agent (Server 2012)
-                        
-Backend Server          Python DAgents 完整版      Python DAgents 完整版（不变）
-                        工具本地执行 ✓              工具→ProxyManager 路由
-
-宿主机                  无要求                      Go Proxy 单二进制（10-15MB）
-                                                     拖过去就跑，零依赖
+```json
+{
+  "proxy_connection_id": "pconn-...",
+  "agent_id": "k8s-ops-01",
+  "control_channel_url": "/v1/proxy/control/pconn-..."
+}
 ```
 
-| 交付物 | 位置 | 语言 | 大小 | 依赖 |
-|--------|------|------|------|------|
-| DAgents Backend | 现代服务器（麒麟 V10 / RHEL 8+ / Ubuntu） | Python | ~200MB (含依赖) | Python 3.11+, pip |
-| Go Proxy | 任意宿主机（Server 2012 / RHEL 6） | Go | ~10-15MB | 无（静态编译） |
-| Register Center | 与 Backend 同机或独立 | Python | 已含在 Backend 中 | 同 Backend |
+### 4.2 控制通道
 
----
+Proxy 使用服务端返回的 `proxy_connection_id` 建立长连接控制通道。控制通道语义：
 
-## 9. 迁移路径
+- 连接由 Proxy 主动发起。
+- Backend 在该连接上下发任务。
+- Proxy 通过同一连接或配套结果接口返回结果。
+- 心跳、任务进度、取消信号都绑定到该连接。
 
-当前架构中，所有 Agent 都是非终端 Agent（`server` 类型）。引入终端 Agent 的迁移步骤：
+Phase 1 可以选择 WebSocket；后续可替换为 HTTP/2 stream 或 gRPC stream，但协议语义不变。
 
-1. **Backend 新增 `app/proxy/`**：ProxyManager + 路由逻辑。不修改现有 Agent 代码。
-2. **Go Proxy 开发**：独立仓库 `dagents-proxy`，约 400 行 Go。
-3. **Register Center 字段扩展**：`agent_type`、`schedulable`、`host_info`（可选，向后兼容）。
-4. **宿主机部署**：在需要暴露能力的旧 OS 上启动 Go Proxy，注册到 Backend。
+## 5. 工具执行流程
 
-现有 Agent 不受影响。非终端 Agent 的工具执行路径完全不变。
+```text
+1. 用户或 A2A 消息进入 session
+2. Brain Layer 推理并产生 ToolCall
+3. Control Plane 查询 session、agent、proxy presence 和 policy
+4. policy 返回 auto / require_approval / deny
+5. 若允许执行：
+   - server agent → 本地工具执行器
+   - terminal agent → ProxyManager 下发 ExecutionRequest
+6. 执行结果归一化为 ToolResult
+7. Brain Layer 继续推理
+8. SSE 将过程和结果推给订阅 client
+```
 
----
+ExecutionRequest 示例：
 
-## 10. 与其它文档的关系
+```json
+{
+  "execution_id": "exec-...",
+  "agent_id": "k8s-ops-01",
+  "session_id": "sess-...",
+  "tool": "shell_exec",
+  "params": {
+    "command": "kubectl get pods -A",
+    "cwd": "/workspace",
+    "timeout_seconds": 30
+  },
+  "policy_decision_id": "pol-..."
+}
+```
 
-| 文档 | 内容 |
-|------|------|
-| [architecture-and-flows.md](./architecture-and-flows.md) | 整体架构与主/分支业务流程 |
-| [a2a-and-register-center.md](./a2a-and-register-center.md) | A2A 协议、Register Center API 与配置 |
-| [os-compatibility.md](./os-compatibility.md) | 操作系统兼容性清单与 glibc 说明 |
-| [built-in-tools.md](./built-in-tools.md) | 内置工具清单与注册方式 |
+ExecutionResult 示例：
 
----
+```json
+{
+  "execution_id": "exec-...",
+  "status": "completed",
+  "exit_code": 0,
+  "stdout": "...",
+  "stderr": "",
+  "duration_ms": 842
+}
+```
 
-**说明**：本文为架构设计文档，实现细节以实际代码和 CHANGELOG 为准。
+## 6. 离线、超时和背压
+
+### 6.1 Proxy 离线
+
+Backend 在共享状态中维护 Proxy presence。若超过配置时间未收到心跳或控制通道断开：
+
+- 标记 Proxy offline。
+- terminal agent 不再接受新的远程执行任务。
+- 正在等待的 execution 标记为 interrupted 或 timeout。
+- 若该 Agent `schedulable: true`，RC 中的记录应尽快续租失败或被注销。
+
+### 6.2 执行超时
+
+每个 ExecutionRequest 必须有超时。超时后：
+
+- Backend 向 Proxy 发送 cancel。
+- Proxy 尝试终止本地进程树。
+- 结果标记为 `timeout`，并记录审计事件。
+
+### 6.3 背压
+
+每个 Proxy 应有最大并发和队列限制：
+
+- 超过并发限制时返回 `busy` 或排队。
+- 超过队列限制时拒绝新任务。
+- Backend 将队列深度、执行延迟和拒绝次数暴露为指标。
+
+## 7. 数据模型扩展
+
+AgentRecord 建议字段：
+
+```python
+class AgentRecord(BaseModel):
+    agent_id: str
+    base_url: str
+    discovery_group: list[str]
+    capabilities_hint: list[str]
+    agent_type: Literal["server", "terminal"] = "server"
+    schedulable: bool = True
+    host_info: dict[str, str] | None = None
+    registered_at_unix: int
+    expires_at_unix: int
+```
+
+ProxyConnection 建议字段：
+
+```python
+class ProxyConnection(BaseModel):
+    proxy_connection_id: str
+    agent_id: str
+    backend_instance_id: str
+    status: Literal["online", "offline", "draining"]
+    capabilities: list[str]
+    host_info: dict[str, str]
+    last_heartbeat_at: float
+    max_concurrency: int
+    active_executions: int
+```
+
+## 8. 迁移路径
+
+1. 扩展 Agent 元数据字段，默认保持 `server`。
+2. 新增 Proxy 注册和 control channel，不改变 server agent 执行路径。
+3. 在工具执行入口增加统一路由层。
+4. terminal agent 先支持少量工具和静态策略。
+5. 引入共享状态后支持多 Backend、跨实例 Proxy 路由和集中 presence。

@@ -1,267 +1,237 @@
 # 部署与运维指南
 
-## 1. 部署拓扑
+本文描述 architecture-v2 的目标部署形态。Phase 1 可以从单 Backend 起步，但文档中的最终目标是共享状态多 Backend。
 
+## 1. 目标拓扑
+
+```text
+                         ┌─────────────────────┐
+                         │      Client Plane    │
+                         │ Go TUI / Web / API   │
+                         └──────────┬──────────┘
+                                    │ HTTP/SSE
+                                    ▼
+                         ┌─────────────────────┐
+                         │  L7 Gateway / Nginx │
+                         │ TLS / auth / routing│
+                         └──────┬────────┬─────┘
+                                │        │
+                    ┌───────────▼──┐  ┌──▼───────────┐
+                    │ Backend A    │  │ Backend B    │
+                    │ Brain+Control│  │ Brain+Control│
+                    └──────┬───────┘  └──────┬───────┘
+                           │                 │
+                           └──────┬──────────┘
+                                  ▼
+                         ┌─────────────────────┐
+                         │    Shared State     │
+                         │ Redis/session store │
+                         └─────────────────────┘
+                                  │
+                                  ▼
+                         ┌─────────────────────┐
+                         │   Register Center   │
+                         │ discovery / metadata│
+                         └─────────────────────┘
+
+ Go Proxy C ──outbound control channel──> Backend A or B
+ Go Proxy D ──outbound control channel──> Backend A or B
 ```
-                            ┌──────────────┐
-                            │   用户终端    │
-                            └──────┬───────┘
-                                   │
-                            ┌──────┴───────┐
-                            │    Nginx      │  ← 反向代理 + SSL 终结 + session hash 路由
-                            │  :443/:80     │
-                            └──┬───┬───┬───┘
-                               │   │   │
-                  ┌────────────┼───┘   └──────────────┐
-                  ▼            ▼                      ▼
-           ┌──────────┐ ┌──────────┐          ┌──────────────┐
-           │Python    │ │Python    │          │Register      │
-           │Backend 1 │ │Backend 2 │          │Center        │
-           │:8000     │ │:8001     │          │:8010         │
-           │          │ │          │          │              │
-           │Agent A   │ │Agent C   │          │ 独立部署      │
-           │Agent B   │ │Agent D   │          │ 可多副本      │
-           └────┬─────┘ └────┬─────┘          └──────────────┘
-                │            │
-     ┌──────────┴───┐    ┌───┴──────────┐
-     │Go Proxy C    │    │Go Proxy D    │
-     │:9090         │    │:9090         │
-     │Server 2012   │    │RHEL 6        │
-     │kubectl/helm  │    │mysql/cron    │
-     └──────────────┘    └──────────────┘
-```
+
+Go Proxy 只需要访问 Gateway 或 Backend 入口，不需要被 Backend 直连。
 
 ## 2. 组件清单
 
-| 组件 | 进程 | 端口 | 交付方式 | 依赖 |
-|------|------|------|----------|------|
-| Nginx | nginx | 80/443 | 系统包 | 无 |
-| Python Backend | `python run_agent_api.py` | 8000 | 源码或 PyInstaller | Python 3.11+ |
-| Register Center | `python run_register_center.py` | 8010 | 源码（与 Backend 同仓库） | Python 3.11+ |
-| Go Proxy | `./dagents-proxy` | 9090 | Go 单二进制 | 无（静态编译） |
-| Go TUI | `./dagents-tui` | — | Go 单二进制 | 无 |
+| 组件 | 职责 | 状态 |
+|------|------|------|
+| L7 Gateway / Nginx | TLS、认证入口、HTTP/SSE 转发 | 推荐生产部署 |
+| Python Backend | Brain Layer + Control Plane | 可多副本 |
+| Shared State | session、connection、proxy presence、execution 状态 | v2 多副本必需 |
+| Register Center | Agent 发现与元数据注册 | 可独立部署 |
+| Go Proxy | 宿主机执行代理 | 每个 terminal agent 至少一个 |
+| Go TUI | 跨平台用户终端 | 可选 |
 
-## 3. 配置文件分层
+## 3. 共享状态范围
 
+多 Backend 目标形态下，以下状态不能只保存在单机内存：
+
+| 状态 | 用途 |
+|------|------|
+| Backend presence | 判断实例是否在线、是否可接收新连接 |
+| Connection records | 校验用户、A2A、proxy 连接归属 |
+| Client records | SSE 授权与路由 |
+| Session metadata | session 归属、TTL、connection 关联 |
+| Proxy presence | 判断 terminal agent 是否可执行 |
+| Execution records | 工具执行状态、审批、取消、超时 |
+| Policy decisions | 审批决策与审计关联 |
+| Event routing metadata | SSE 事件应该发给哪些 client |
+
+上下文正文和历史记录可以按阶段从 SQLite 迁移到共享 session store。若仍使用 SQLite，必须明确 session owning Backend，并限制跨实例接管能力。
+
+## 4. Backend 路由策略
+
+Gateway 不应长期依赖 `$arg_session_id` sticky routing，因为很多 API 的 session 信息在 JSON body 中，SSE 和 A2A 也有不同路由需求。
+
+推荐策略：
+
+1. 任意 Backend 可以接收普通 API 请求。
+2. Backend 根据共享状态判断请求资源归属。
+3. 如果当前实例不是资源 owner：
+   - 对短请求：内部转发给 owner 或通过共享状态完成操作。
+   - 对 SSE：订阅共享事件总线或返回可重连信息。
+   - 对 Proxy execution：将任务投递给持有 control channel 的 Backend。
+4. owner 不可用时，根据资源类型失败、重连或接管。
+
+Phase 1 可以只部署单 Backend，避免过早实现跨实例转发。
+
+## 5. Proxy 连接与路由
+
+Proxy 连接流程：
+
+```text
+Go Proxy
+  → POST /v1/proxy/register
+  ← proxy_connection_id
+  → 建立 outbound control channel
+  → 心跳 / 状态上报 / 接收任务 / 返回结果
 ```
+
+多 Backend 下：
+
+- control channel 落在哪个 Backend，就由哪个 Backend 持有该连接。
+- 共享状态记录 `proxy_connection_id → backend_instance_id`。
+- 其他 Backend 需要执行该 terminal agent 的工具时，通过共享状态或内部 RPC 将任务交给持有连接的 Backend。
+- 持有连接的 Backend 下线时，Proxy 断线并重连到任意健康 Backend，获得新的 `proxy_connection_id`。
+
+## 6. 启动顺序
+
+```text
+Phase 1 基础设施
+  1. Shared State
+  2. Register Center
+  3. Python Backend 实例
+
+Phase 2 执行层
+  4. Go Proxy 启动并出站连接 Backend
+
+Phase 3 客户端
+  5. Go TUI / Python TUI / Web UI 连接 Backend
+```
+
+依赖影响：
+
+| 故障 | 影响 |
+|------|------|
+| Shared State 故障 | 多 Backend 协调不可用，应进入降级或只读保护 |
+| Register Center 故障 | 新 Agent 发现和注册受影响，已有 session 可继续 |
+| Backend 实例故障 | 该实例持有的 SSE/Proxy control channel 断开，客户端和 Proxy 重连 |
+| Go Proxy 故障 | 对应 terminal agent 不能执行远程工具 |
+| Gateway 故障 | 外部访问不可用，内部 Backend 状态不一定受影响 |
+
+## 7. 健康检查
+
+| 组件 | 检查方式 | 告警条件 |
+|------|----------|----------|
+| Gateway | HTTP health | 连续失败 |
+| Backend | `GET /health` + shared state heartbeat | 实例心跳过期 |
+| Shared State | ping/read/write smoke test | 延迟过高或不可写 |
+| Register Center | `GET /health` | 连续失败 |
+| Go Proxy | control channel heartbeat | 超过 90s 无心跳 |
+| Execution | execution timeout / failure rate | 超时率或失败率超过阈值 |
+| LLM API | Backend 内部指标 | 错误率或 P99 超阈值 |
+| SSE | client reconnect / push latency | 重连率或延迟异常 |
+
+## 8. 监控指标
+
+建议新增指标：
+
+```text
+dagents_backend_instances_online
+dagents_connections_total{type}
+dagents_sessions_total{agent_type}
+dagents_proxy_online_total
+dagents_proxy_heartbeat_age_seconds{agent_id}
+dagents_proxy_control_channels{backend_instance_id}
+dagents_execution_total{tool,target,status}
+dagents_execution_latency_seconds{tool,target}
+dagents_execution_queue_depth{agent_id}
+dagents_policy_decisions_total{decision,tool}
+dagents_approval_pending_total
+dagents_sse_clients_total
+dagents_sse_push_latency_seconds
+dagents_a2a_sessions_total{caller_agent,target_agent,status}
+```
+
+关键告警：
+
+- Proxy heartbeat age > 90s。
+- execution timeout rate 持续升高。
+- pending approval 长时间无人处理。
+- Shared State 写入失败或延迟过高。
+- Backend 实例数低于期望副本数。
+- SSE 重连率异常。
+
+## 9. 配置分层
+
+```text
 agent-config/
 ├── backend/
-│   ├── base.yaml              # 所有后端实例共享
-│   │   ├── llm_endpoint
-│   │   ├── llm_api_key
-│   │   └── shared_prompt     # 所有 Agent 共享的 system_prompt 基础
-│   │
-│   ├── instances/
-│   │   ├── instance-1.yaml    # 实例 1 特有
-│   │   │   ├── host: 0.0.0.0
-│   │   │   ├── port: 8000
-│   │   │   └── agents: [agent-a, agent-b]
-│   │   │
-│   │   └── instance-2.yaml
-│   │       ├── host: 0.0.0.0
-│   │       ├── port: 8001
-│   │       └── agents: [agent-c, agent-d]
-│   │
-│   └── agents/
-│       ├── agent-a.yaml       # Agent A 配置
-│       │   ├── agent_id: "code-review-01"
-│       │   ├── agent_type: "server"
-│       │   ├── discovery_group: ["engineering"]
-│       │   ├── capabilities: ["code-review", "git"]
-│       │   └── custom_md_path: "/etc/dagents/agent-a/custom.md"
-│       │
-│       └── agent-d.yaml       # Agent D（终端类）
-│           ├── agent_id: "k8s-ops-01"
-│           ├── agent_type: "terminal"
-│           ├── discovery_group: ["production"]
-│           ├── capabilities: ["kubernetes", "helm"]
-│           └── schedulable: true
-│
+│   ├── base.yaml              # LLM、shared state、RC、策略默认值
+│   ├── instances/             # backend_instance_id、host、port
+│   └── agents/                # agent_id、agent_type、capabilities、schedulable
 ├── proxy/
-│   ├── proxy-c.yaml           # Go Proxy C 配置
-│   │   ├── agent_id: "k8s-ops-01"
-│   │   ├── backend_url: "http://10.0.0.1:8000"
-│   │   ├── fs_root: "/opt/dagents/workspace"
-│   │   ├── allowed_commands: ["kubectl", "helm", "docker"]
-│   │   └── schedulable: true
-│   │
-│   └── proxy-d.yaml
-│       ├── agent_id: "sql-query-01"
-│       ├── backend_url: "http://10.0.0.1:8001"
-│       └── schedulable: false     # 个人助手，不参与 A2A
-│
+│   └── proxy.yaml             # agent_id、backend_url、fs_root、本地硬约束
+├── policy/
+│   └── execution-policy.yaml  # 工具审批和拒绝规则
 └── tui/
-    └── tui-alice.yaml
-        ├── backend_url: "http://10.0.0.1:8000"
-        ├── agent_id: "k8s-ops-01"
-        └── theme: "dark"
+    └── tui.yaml               # backend_url、agent_id、主题
 ```
 
-## 4. 启动顺序
+敏感配置如 LLM API key、Proxy token、A2A token 应通过 secret 管理或环境变量注入，不应写入普通配置文件。
 
-```
-Phase 1 — 基础设施（依赖最少，先启动）：
-  Register Center:
-    python run_register_center.py
+## 10. 扩容阶段
 
-Phase 2 — 计算层（依赖 RC，可并行启动）：
-  Python Backend 实例:
-    python run_agent_api.py  # instance-1
-    python run_agent_api.py  # instance-2
-    ...
-  各实例启动后自动向 RC 登记
+| 阶段 | 形态 | 说明 |
+|------|------|------|
+| Phase 1 | 单 Backend + 单 Shared State 可选 | 验证 outbound Proxy 和策略执行 |
+| Phase 2 | 多 Backend + Redis/shared state | 支持跨实例 session、Proxy presence 和 execution tracking |
+| Phase 3 | 多 Backend + 集中审计 + 高可用 RC | 面向生产运维和多团队使用 |
+| Phase 4 | 多租户 + 分区调度 + 消息总线 | 面向大规模 Agent 网络 |
 
-Phase 3 — 执行层（依赖 Backend，按需启动）：
-  Go Proxy（各宿主机独立）:
-    ./dagents-proxy --config proxy-c.yaml
-    ./dagents-proxy --config proxy-d.yaml
+## 11. 排障指引
 
-Phase 4 — 展示层（依赖 Backend，用户侧启动）：
-  Go TUI:
-    ./dagents-tui --config tui-alice.yaml
+### Proxy 连接不上 Backend
 
-依赖关系：
-  RC 挂了 → 已有 session 不受影响，新 Agent 发现暂停
-  Backend 挂了 → 该实例上的 session 丢失（SQLite 可恢复）
-  Proxy 挂了 → 该终端 Agent 不可调度，Backend 发告警
-  TUI 挂了 → 用户重连即可
-```
+检查：
 
-## 5. 健康检查
+- Proxy 所在机器能否访问 `backend_url`。
+- token 是否有效。
+- Gateway 是否允许 WebSocket 或长连接升级。
+- Backend 是否记录注册失败原因。
 
-| 组件 | 检查端点 | 频率 | 告警条件 |
-|------|----------|------|----------|
-| Register Center | `GET /health` | 15s | 连续 3 次失败 |
-| Python Backend | `GET /health` | 15s | 连续 3 次失败 |
-| Go Proxy | `POST /v1/proxy/heartbeat` | 30s（主动推送） | 90s 无心跳 → 标记 offline |
-| Go Proxy 工具可用 | `POST /execute` 健康检查命令 | 随心跳附带 | 工具执行失败率 > 10% |
-| Go TUI | SSE 连接状态 | 实时 | 断开 → 通知用户 |
-| LLM API | Backend 内部记录 | 每次调用 | 错误率 > 5% 或 P99 > 30s |
-| A2A 消息投递 | RC relay 指标 | 每次 relay | 失败率 > 10% |
+### terminal agent 在线但执行失败
 
-## 6. Nginx 配置示例
+检查：
 
-```nginx
-upstream dagents_backend {
-    # session 亲和性：同一 session 始终路由到同一后端实例
-    hash $arg_session_id consistent;
-    server 10.0.0.1:8000 max_fails=3 fail_timeout=30s;
-    server 10.0.0.2:8001 max_fails=3 fail_timeout=30s;
-}
+- `proxy_connection_id` 是否仍是 active。
+- policy 是否返回 `deny` 或等待审批。
+- Proxy 本地 `fs_root`、工作目录和命令白名单。
+- execution timeout 和输出大小限制。
 
-upstream register_center {
-    server 10.0.0.1:8010;
-    server 10.0.0.2:8010 backup;  # 备机
-}
+### SSE 没有事件
 
-server {
-    listen 443 ssl;
-    server_name agents.example.com;
+检查：
 
-    # SSE 专用：长连接，禁用缓冲
-    location /v1/streams {
-        proxy_pass http://dagents_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_buffering off;           # 关闭缓冲，实时推送
-        proxy_read_timeout 3600s;      # 最长 1 小时 SSE 连接
-        chunked_transfer_encoding on;
-    }
+- `client_id` 是否有效且未过期。
+- client 是否有 session 订阅权限。
+- 当前 Backend 是否能订阅共享事件或转发到 SSE owner。
+- Gateway 是否关闭 buffering，并允许长连接。
 
-    # 常规 API
-    location /v1/ {
-        proxy_pass http://dagents_backend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 120s;
-    }
+## 12. 安全运维要求
 
-    # Go Proxy 注册和心跳
-    location /v1/proxy/ {
-        proxy_pass http://dagents_backend;
-        proxy_read_timeout 30s;
-    }
-
-    # Register Center
-    location /rc/ {
-        rewrite ^/rc/(.*) /$1 break;
-        proxy_pass http://register_center;
-    }
-}
-```
-
-## 7. 扩容策略
-
-| 阶段 | 并发 session | 并发 SSE | 后端实例 | 是否需要外部存储 |
-|------|:-----------:|:--------:|:--------:|:----------------:|
-| P1 起步 | < 100 | < 200 | 1 | ❌ SQLite 足够 |
-| P2 成长 | 100-500 | 200-1000 | 2-3（Nginx hash） | ❌ SQLite + 健康检查即可 |
-| P3 规模化 | 500-2000 | 1000-5000 | 5+ | ✅ Redis session store + RC etcd |
-| P4 大规模 | 2000+ | 5000+ | 10+ | ✅ Redis + etcd + Kafka 解耦 |
-
-**当前阶段的扩容只需要：**
-1. 新增 Python Backend 实例（启动即用，向 RC 注册）
-2. 在 Nginx upstream 列表中添加新实例
-3. 无需外部存储、无状态迁移、无代码改动
-
-## 8. 监控指标（Prometheus）
-
-DAgents 已有 `/metrics` 端点，v2 扩展以下指标：
-
-```python
-# 新增指标
-agent_connections_total{type="user_tui|a2a_caller|a2a_callee|proxy"}  # 连接数
-agent_proxy_online_total                                                # 在线 Proxy 数
-agent_proxy_last_heartbeat_seconds{agent_id}                           # 最后心跳时间
-agent_tool_exec_latency_seconds{agent_type="server|terminal"}           # 工具执行延迟
-agent_session_queue_depth{session_id}                                   # 各 session 队列深度
-agent_a2a_peer_session_total{caller_agent, target_agent}               # A2A 会话数
-agent_sse_push_latency_seconds                                          # SSE 推送延迟
-
-# 告警规则
-alert ProxyOffline:
-  agent_proxy_last_heartbeat_seconds > 90
-
-alert SessionQueueBackpressure:
-  agent_session_queue_depth > 10
-
-alert HighLLMErrorRate:
-  rate(agent_llm_errors_total[5m]) / rate(agent_llm_requests_total[5m]) > 0.05
-
-alert BackendDown:
-  up{job="dagents-backend"} == 0
-```
-
-## 9. 日志与排障
-
-```bash
-# 各组件日志位置
-Python Backend:  stdout/stderr  → 可选 systemd journal
-Register Center: stdout/stderr  →  可选 systemd journal
-Go Proxy:        stdout/stderr  →  可选写入文件 ./dagents-proxy.log
-Go TUI:          本地日志  ~/.dagents/tui.log
-
-# 常见问题排查
-## Proxy 连不上 Backend
-  curl http://backend-addr:8000/health
-  → 检查网络/防火墙/backend_url 配置
-
-## Agent 未在 RC 中显示
-  curl http://rc-addr:8010/v1/agents?discovery_group=production
-  → 检查 DISCOVERY_GROUPS 配置、AGENT_PUBLIC_BASE_URL 是否可路由
-
-## TUI SSE 断连
-  → 检查 Nginx proxy_read_timeout 设置
-  → 检查后端日志中 SSE 连接异常
-```
-
-## 10. 安全清单
-
-| 措施 | 说明 |
-|------|------|
-| TLS 终结 | Nginx 侧配置 SSL 证书，内网可选 |
-| A2A token | `x-dagents-a2a-token` 头校验（已有） |
-| Proxy 认证 | Proxy 注册时携带 agent 级别 token |
-| FS_ROOT 沙箱 | Go Proxy 所有文件操作限于配置的根目录 |
-| 命令白名单 | Go Proxy 可配置允许执行的命令列表 |
-| 网络隔离 | Go Proxy 仅需访问 Backend，无需暴露公网端口 |
+- Gateway 负责 TLS 终结和外部认证。
+- Backend 校验所有 connection、session、client、proxy 身份。
+- Proxy 使用 agent 级 token 注册，并支持轮换。
+- 远程执行必须经过策略层并写审计。
+- Proxy 本地执行必须限制 `fs_root`、超时、输出大小和环境变量。
+- 生产环境应启用集中日志和审计保留策略。
