@@ -20,4 +20,4 @@
 
 ## 设计文档
 
-详见仓库 [`doc/triggers-design.md`](../../../doc/triggers-design.md)（长期架构）；当前实现为 MVP JSON 存储 + 轮询调度。
+详见仓库 [`docs/triggers-design.md`](../../../docs/triggers-design.md)（长期架构）；当前实现为 MVP JSON 存储 + 轮询调度。

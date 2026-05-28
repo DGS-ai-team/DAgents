@@ -14,7 +14,7 @@
 ## 版本与兼容性
 
 - **标记版本**：`v0.1.0`（与 Git tag **`v0.1.0`** 一致；预编译包请以 **Releases** 资产为准）。
-- **Python**：**3.11+** 可尝试运行；**CI 与发布流水线在 Python 3.13 上验证**，生产环境建议与 CI 主版本对齐。若部署在 **较旧 glibc 的 Linux** 或需对照官方「最低 Windows」表述，见 **[doc/os-compatibility.md](doc/os-compatibility.md)**。
+- **Python**：**3.11+** 可尝试运行；**CI 与发布流水线在 Python 3.13 上验证**，生产环境建议与 CI 主版本对齐。若部署在 **较旧 glibc 的 Linux** 或需对照官方「最低 Windows」表述，见 **[docs/os-compatibility.md](docs/os-compatibility.md)**。
 - **发布物**：源码即本仓库；二进制见 **`packaging/`**、**`startup_scripts/`** 与 **`.github/workflows/build-and-release.yml`**；发版时请同步更新 **Releases** 说明与 **CHANGELOG**。
 
 ## v0.1.0 范围与说明
@@ -55,7 +55,7 @@ DAgents/
 ├── startup_scripts/             # 预编译包用：`start.sh`、`start_register_center.*`
 ├── scripts/                     # 辅助脚本（含 CI 构建）
 ├── packaging/                   # 离线安装说明、**`runtime/`**（预编译包 **`.runtime`** 占位：空侧车 **prompt_context**、**scripts**、**data** 等）
-├── doc/                         # 对外技术文档（含 **`roadmap.md`**、`cases/` 等；索引见 **`doc/README.md`**）
+├── docs/                         # 对外技术文档（含 **`roadmap.md`**、`cases/` 等；索引见 **`docs/README.md`**）
 └── .github/workflows/           # CI（单测、PyInstaller 打包）
 ```
 
@@ -65,7 +65,7 @@ DAgents/
 |----------|--------|------|----------|
 | **源码 + 在线 pip** | **3.11+**（**CI / 发布验证：3.13**） | pip、可访问 PyPI | 开发 / 有外网服务器 |
 | **源码 + 离线 wheels** | 与下载 wheel 时 **次版本一致** | wheel 与 OS/架构绑定 | 内网、隔离环境 |
-| **PyInstaller 发布包** | **无需** Python | Linux 上**实际**受 **构建环境 glibc** 约束（非「Python 3.11 官方一句话」）；见 **[doc/os-compatibility.md](doc/os-compatibility.md)** | 解压即用 |
+| **PyInstaller 发布包** | **无需** Python | Linux 上**实际**受 **构建环境 glibc** 约束（非「Python 3.11 官方一句话」）；见 **[docs/os-compatibility.md](docs/os-compatibility.md)** | 解压即用 |
 
 离线 wheel 说明见 **`packaging/OFFLINE_INSTALL.md`**。
 
@@ -175,7 +175,7 @@ python scripts/ci/export_openapi_for_frontend.py --frontend ../DAgentsUI
 
 ## API 说明（简版）
 
-更完整的契约与路由说明见 **`doc/api-reference.md`**（与实现对齐）、**`app/harness/api/README.md`** 与 OpenAPI 导出。
+更完整的契约与路由说明见 **`docs/api-reference.md`**（与实现对齐）、**`app/harness/api/README.md`** 与 OpenAPI 导出。
 
 | 能力 | 路径（示例） |
 |------|----------------|
@@ -219,17 +219,17 @@ python -W error::ResourceWarning -m unittest discover -s tests -p "test_*.py" -v
 
 - [CHANGELOG.md](CHANGELOG.md)（**`v0.1.0`** 起）
 - [SECURITY.md](SECURITY.md)（漏洞报告与支持版本）
-- [doc/README.md](doc/README.md)（`doc/` 技术文档索引；该目录下 Markdown 文件名为 **ASCII**）
-- [doc/cases/README.md](doc/cases/README.md)（**落地案例**目录说明与索引；具体案例 Markdown 放在 **`doc/cases/`**）
-- [doc/built-in-tools.md](doc/built-in-tools.md)（**内置工具**：`get_tools` 列表、异步与审批前提）
-- [doc/roadmap.md](doc/roadmap.md)（**路线图**：已实现 / 待办 / 已知限制）
-- [doc/architecture-and-flows.md](doc/architecture-and-flows.md)（架构分层与业务流程）
-- [doc/agent-input-output.md](doc/agent-input-output.md)（HTTP 入队与 SSE 出站专题）
-- [doc/context-compression-and-state.md](doc/context-compression-and-state.md)（上下文与压缩状态）
-- [doc/agent-turn-loop.md](doc/agent-turn-loop.md)（Agent 编排循环：`run_turn`、工具入队与审批）
-- [doc/a2a-and-register-center.md](doc/a2a-and-register-center.md)（A2A 与 Register Center：`agent_peer`、广播与中继）
-- [doc/api-reference.md](doc/api-reference.md)（HTTP / SSE 契约）
-- [doc/prometheus-metrics.md](doc/prometheus-metrics.md)（**`/metrics`** 与 Prometheus）
+- [docs/README.md](docs/README.md)（`docs/` 技术文档索引；该目录下 Markdown 文件名为 **ASCII**）
+- [docs/cases/README.md](docs/cases/README.md)（**落地案例**目录说明与索引；具体案例 Markdown 放在 **`docs/cases/`**）
+- [docs/built-in-tools.md](docs/built-in-tools.md)（**内置工具**：`get_tools` 列表、异步与审批前提）
+- [docs/roadmap.md](docs/roadmap.md)（**路线图**：已实现 / 待办 / 已知限制）
+- [docs/architecture-and-flows.md](docs/architecture-and-flows.md)（架构分层与业务流程）
+- [docs/agent-input-output.md](docs/agent-input-output.md)（HTTP 入队与 SSE 出站专题）
+- [docs/context-compression-and-state.md](docs/context-compression-and-state.md)（上下文与压缩状态）
+- [docs/agent-turn-loop.md](docs/agent-turn-loop.md)（Agent 编排循环：`run_turn`、工具入队与审批）
+- [docs/a2a-and-register-center.md](docs/a2a-and-register-center.md)（A2A 与 Register Center：`agent_peer`、广播与中继）
+- [docs/api-reference.md](docs/api-reference.md)（HTTP / SSE 契约）
+- [docs/prometheus-metrics.md](docs/prometheus-metrics.md)（**`/metrics`** 与 Prometheus）
 - [app/README.md](app/README.md)
 - [app/REFERENCE.md](app/REFERENCE.md)
 - [tests/README.md](tests/README.md)

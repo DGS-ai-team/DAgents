@@ -12,7 +12,7 @@
 
 - 客户端通过 **HTTP** 创建会话并 **`POST` 提交消息**，经校验后调用 **`AgentService.submit_message`**（见 **`app/harness/api/app.py`**）。
 - 每条会话对应进程内 **`MessageQueue`**，**串行消费**；**`MessageEnvelope`** 含 **`request_type` / `content` / `client_id` / `source`** 等（见 **`app/harness/queue/message_queue.py`**）。
-- **SSE** 按 **`session_id` + `client_id`** 分桶；无订阅方时事件仍可产生，但无人接收（见 **`doc/agent-input-output.md`**）。
+- **SSE** 按 **`session_id` + `client_id`** 分桶；无订阅方时事件仍可产生，但无人接收（见 **`docs/agent-input-output.md`**）。
 
 ### 1.2 目标
 
@@ -34,7 +34,7 @@
 3. **调度器单一入口**：所有「是否该触发」的副作用经 **调度器 tick** 串行或受控并发进入 **注册表快照**，避免触发器自启线程绕过策略。
 4. **会话边界清晰**：默认 **只向已存在会话投递**；**自动建会话** 须单独开关并文档化副作用。
 5. **安全默认关闭**：未显式启用时 **零触发**；Webhook / 管理注册接口须 **鉴权 + 限流**。
-6. **可观测**：求值跳过 / 触发成功 / 投递失败 / 去抖丢弃等进入 **logging**；可选 **`/metrics`** 计数器（与 **`doc/prometheus-metrics.md`** 一致）。
+6. **可观测**：求值跳过 / 触发成功 / 投递失败 / 去抖丢弃等进入 **logging**；可选 **`/metrics`** 计数器（与 **`docs/prometheus-metrics.md`** 一致）。
 
 ---
 
@@ -137,7 +137,7 @@
 
 ### 3.8 `triggers.metrics`（可选）
 
-**职责**：封装 **`triggers_eval_total{trigger_id,result}`**、**`triggers_dispatch_total{status}`** 等；实现方式与 **`doc/prometheus-metrics.md`** 对齐。
+**职责**：封装 **`triggers_eval_total{trigger_id,result}`**、**`triggers_dispatch_total{status}`** 等；实现方式与 **`docs/prometheus-metrics.md`** 对齐。
 
 ---
 
@@ -271,7 +271,7 @@ triggers:
 
 ## 11. 文档维护
 
-- 实现后：**`doc/api-reference.md`** 增加内部注册 / Webhook 路由；**`doc/agent-input-output.md`** 增加「触发器 **`client_id` 桶**」脚注。
-- **`doc/roadmap.md`** §3.4 与实现状态对齐。
+- 实现后：**`docs/api-reference.md`** 增加内部注册 / Webhook 路由；**`docs/agent-input-output.md`** 增加「触发器 **`client_id` 桶**」脚注。
+- **`docs/roadmap.md`** §3.4 与实现状态对齐。
 
 **最后更新**：按「调度器轮询 + 触发器基类 + 动态注册 + session/client/回流」蓝图重写模块划分与推荐方案。

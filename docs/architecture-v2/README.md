@@ -63,6 +63,6 @@ v2 的目标不是把现有 Python Agent 重写成 Go，而是把 Agent 能力�
 
 ## 与现有文档的关系
 
-`docs/architecture-v2` 描述计划中的 v2 目标形态。当前已实现系统仍以 `doc/architecture-and-flows.md`、`doc/a2a-and-register-center.md`、`doc/built-in-tools.md`、`doc/os-compatibility.md` 等现有文档和实际代码为准。
+`docs/architecture-v2` 描述计划中的 v2 目标形态。当前已实现系统仍以 `docs/architecture-and-flows.md`、`docs/a2a-and-register-center.md`、`docs/built-in-tools.md`、`docs/os-compatibility.md` 等现有文档和实际代码为准。
 
 实现时应以本目录作为目标架构参考，并在每个 Phase 完成后同步更新 CHANGELOG 和当前实现文档。

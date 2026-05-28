@@ -2,7 +2,7 @@
 
 FastAPI 接入层：统一对外入口（浏览器或其它 HTTP 客户端）。
 
-**对外 HTTP/SSE 契约**（路径、字段、错误码、SSE 形状）以仓库 **`doc/api-reference.md`** 为准，与 **`app.py`** 同步维护。
+**对外 HTTP/SSE 契约**（路径、字段、错误码、SSE 形状）以仓库 **`docs/api-reference.md`** 为准，与 **`app.py`** 同步维护。
 
 | 文件 | 说明 |
 |------|------|

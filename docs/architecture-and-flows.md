@@ -170,7 +170,7 @@ sequenceDiagram
 | [prometheus-metrics.md](./prometheus-metrics.md) | `/metrics` 指标说明 |
 | [built-in-tools.md](./built-in-tools.md) | **内置工具清单**：**`get_tools()`**、**docstring → LLM**、**Schema/参数**、审批与异步工具前提 |
 | [roadmap.md](./roadmap.md) | **路线图**：已实现能力、待实现项、已知限制（与 **CHANGELOG** 互补） |
-| [cases/README.md](./cases/README.md) | **落地案例**索引：场景实践、效果与限制（与契约类 **`doc/*.md`** 分工） |
+| [cases/README.md](./cases/README.md) | **落地案例**索引：场景实践、效果与限制（与契约类 **`docs/*.md`** 分工） |
 | `register_center/README.md` | 注册中心 API |
 | 根目录 `README.md` | 安装、环境变量、安全与版本 |
 

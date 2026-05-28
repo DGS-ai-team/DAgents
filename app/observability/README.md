@@ -1,6 +1,6 @@
 # `app/observability/`
 
-Prometheus 指标与相关辅助（由 Agent API 与 Register Center 的 FastAPI **`GET /metrics`** 暴露）。机制与新增指标步骤见 **`../../doc/prometheus-metrics.md`**。
+Prometheus 指标与相关辅助（由 Agent API 与 Register Center 的 FastAPI **`GET /metrics`** 暴露）。机制与新增指标步骤见 **`../../docs/prometheus-metrics.md`**。
 
 | 文件 | 说明 |
 |------|------|

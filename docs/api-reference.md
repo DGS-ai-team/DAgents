@@ -86,7 +86,7 @@
 
 - **`GET /metrics`**
 - **条件**：仅当 **`METRICS_ENABLED`** 为真（默认）时注册；否则无此路由。
-- 响应：`text/plain`（Prometheus exposition 格式）。细节见 **`doc/prometheus-metrics.md`**。
+- 响应：`text/plain`（Prometheus exposition 格式）。细节见 **`docs/prometheus-metrics.md`**。
 
 ---
 

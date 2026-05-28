@@ -2,7 +2,7 @@
 
 进程内优先级队列（MVP）：**仅入队 / 阻塞出队**（`enqueue` / `await receive`）及 pause/resume/stop；**消费者由上层**（如 `AgentService`）自行循环 `receive` 并处理。
 
-**对外专题**（入队与 SSE 出站串联）：见仓库根 **`doc/agent-input-output.md`**。
+**对外专题**（入队与 SSE 出站串联）：见仓库根 **`docs/agent-input-output.md`**。
 
 | 文件 | 说明 |
 |------|------|

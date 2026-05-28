@@ -12,4 +12,4 @@
 | **`model.py`** | **`get_openai_client()`**、**`get_model_config()`** |
 | **`prompt.py`** | **`get_system_prompt`**（稳定前缀 + prompt context 侧车 + loaded skills + custom + session 后缀）、**`build_stable_system_prompt`** 等 |
 
-高层行为与编排细节见本目录 **`README.md`**、**`REFERENCE.md`** 及源码；对外 HTTP/SSE 契约见 **`../../../doc/api-reference.md`**。
+高层行为与编排细节见本目录 **`README.md`**、**`REFERENCE.md`** 及源码；对外 HTTP/SSE 契约见 **`../../../docs/api-reference.md`**。
