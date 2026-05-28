@@ -29,16 +29,16 @@ v2 不再把 Agent 定义为两类。所有 Agent 都是 `agent_id` 标识的 Ag
 - A2A 调用目标是 Agent Instance，不是 Body，也不是某种 Agent 类型。
 - 调用方不关心目标 Agent 的 Body 部署形态；目标 Agent 自己通过 Control Plane 路由执行。
 
-## 2. Body kind
+## 2. Tool kind
 
-Body 的部署形态由 `body.kind` 描述：
+Agent Instance 只绑定一个 Body，但它可以拥有多种工具。执行位置由工具声明决定，而不是由 Body 把整个 Agent 固定成某类执行体。
 
-| body.kind | 说明 | 执行位置 |
+| tool.kind | 说明 | 执行位置 |
 |-----------|------|----------|
-| `backend_local` | Body 位于 Python Backend 本机 | Backend 本地工具执行器 |
-| `proxy_hosted` | Body 位于 Go Proxy 宿主机 | Proxy control channel 下发执行 |
+| `backend` | 依赖 Backend、共享状态或控制平面的工具 | Backend executor |
+| `body` | 依赖绑定 Body 的 shell、文件系统、本地脚本或宿主机资源 | Body control channel |
 
-`body.kind` 是执行环境属性，不是 Agent 类型。它只影响工具执行路径、可用资源、风险策略和运维状态。
+`tool.kind` 是执行路由属性。Body Binding 定义“这个 Agent 的终端/宿主执行环境是谁”，Tool Manifest 定义“每个工具在哪里执行”。
 
 ## 3. 目标拓扑
 
@@ -63,11 +63,11 @@ Body 的部署形态由 `body.kind` 描述：
               │ sessions/bodies  │
               └──────────────────┘
 
-Agent code-review-01 ── body.kind=backend_local ── Backend local executor
-Agent k8s-ops-01    ── body.kind=proxy_hosted  ── Go Proxy outbound channel
+Agent code-review-01 ── tools: backend + body ── Backend executor / Body control channel
+Agent k8s-ops-01    ── tools: backend + body ── Backend executor / Go Proxy outbound channel
 ```
 
-Backend 多副本共享状态。某个 `proxy_hosted` Body 的长连接会落在一个 Backend 实例上，其他 Backend 通过共享状态发现该 Body 的 presence，并通过持有连接的 Backend 转发执行任务。
+Backend 多副本共享状态。某个 Body 的 Proxy 长连接会落在一个 Backend 实例上；其他 Backend 通过共享状态发现该 Body 的 presence，并在执行 `tool.kind == "body"` 的工具时通过持有连接的 Backend 转发任务。
 
 ## 4. Register Center 与 Backend 边界
 
@@ -75,7 +75,7 @@ Register Center 负责：
 
 - Agent Instance 注册、续租、注销。
 - 按 `discovery_group`、`capabilities`、`schedulable` 返回候选 Agent。
-- 存储 Agent 元数据，例如 `body.kind`、`body.host_info`、`body.capabilities`。
+- 存储 Agent 元数据，例如 `body.host_info`、`body.capabilities`、`tools`。
 
 Register Center 不负责：
 
@@ -88,7 +88,7 @@ Backend Control Plane 负责执行路由。RC 可以知道 Agent 绑定了什么
 
 ## 5. Go Proxy 生命周期
 
-Go Proxy 是 `proxy_hosted` Body 的宿主机执行代理。
+Go Proxy 是 Body 的宿主机执行代理，负责让 `tool.kind == "body"` 的工具可以在该 Body 上执行。
 
 ```text
 启动
@@ -111,7 +111,6 @@ Proxy 启动后向 Backend 注册它承载的 Agent Instance 与 Body：
   "agent_id": "k8s-ops-01",
   "body": {
     "body_id": "body-k8s-ops-01",
-    "kind": "proxy_hosted",
     "capabilities": ["kubernetes", "helm", "shell"],
     "resources": ["prod-kubeconfig", "ops-workspace"],
     "environment": {
@@ -124,6 +123,12 @@ Proxy 启动后向 Backend 注册它承载的 Agent Instance 与 Body：
     },
     "policy_profile": "production-ops"
   },
+  "tools": [
+    {"name": "agent_discover", "kind": "backend"},
+    {"name": "shell_exec", "kind": "body"},
+    {"name": "file_read", "kind": "body"},
+    {"name": "file_write", "kind": "body"}
+  ],
   "schedulable": true
 }
 ```
@@ -156,14 +161,14 @@ Phase 1 可以选择 WebSocket；后续可替换为 HTTP/2 stream 或 gRPC strea
 ```text
 1. 用户或 A2A 消息进入 Agent session
 2. Brain Runtime 按该 Agent 的 Brain Profile 推理并产生 ToolCall
-3. Control Plane 查询 session、Agent、Body Binding、Body presence 和 policy
+3. Control Plane 查询 session、Agent、Tool Manifest、Body Binding、Body presence 和 policy
 4. policy 返回 auto / require_approval / deny
 5. 若允许执行：
-   - body.kind == backend_local → Backend 本地工具执行器
-   - body.kind == proxy_hosted  → ProxyManager 下发 ExecutionRequest
+   - tool.kind == backend → Backend executor
+   - tool.kind == body    → ProxyManager 下发 ExecutionRequest 到绑定 Body
 6. 执行结果归一化为 ToolResult
 7. Brain Runtime 继续推理
-8. SSE 将过程和结果推给订阅 client
+8. SSE 将过程和结果推给授权 connection
 ```
 
 ExecutionRequest 示例：
@@ -201,7 +206,7 @@ ExecutionResult 示例：
 
 ### 7.1 Body 离线
 
-Backend 在共享状态中维护 Body presence。若 `proxy_hosted` Body 超过配置时间未收到心跳或控制通道断开：
+Backend 在共享状态中维护 Body presence。若 Body 超过配置时间未收到心跳或控制通道断开：
 
 - 标记 Body offline。
 - 绑定该 Body 的 Agent 不再接受依赖该 Body 的新执行任务。
@@ -237,6 +242,7 @@ class AgentRecord(BaseModel):
     schedulable: bool = True
     brain_profile: BrainProfileRef
     body: AgentBodyRef
+    tools: list[ToolRef]
     registered_at_unix: int
     expires_at_unix: int
 
@@ -250,12 +256,18 @@ class BrainProfileRef(BaseModel):
 
 class AgentBodyRef(BaseModel):
     body_id: str
-    kind: Literal["backend_local", "proxy_hosted"]
     capabilities: list[str]
     resources: list[str]
     environment: dict[str, str]
     host_info: dict[str, str] | None = None
     policy_profile: str
+
+
+class ToolRef(BaseModel):
+    name: str
+    kind: Literal["backend", "body"]
+    capabilities: list[str] = []
+    policy_profile: str | None = None
 ```
 
 ProxyConnection 建议字段：
@@ -276,8 +288,8 @@ class ProxyConnection(BaseModel):
 
 ## 9. 迁移路径
 
-1. 将现有 Backend 本机执行建模为 `backend_local` Body。
-2. 新增 Agent Body Binding 元数据，不再引入 Agent 类型二分。
-3. 新增 Proxy 注册和 control channel，用于注册 `proxy_hosted` Body。
-4. 在工具执行入口增加统一路由层：按 Body Binding 路由。
+1. 新增 Agent Body Binding 元数据，不再引入 Agent 类型二分。
+2. 新增 Tool Manifest，用 `tool.kind` 区分 Backend tool 和 Body tool。
+3. 新增 Proxy 注册和 control channel，用于注册 Agent 绑定的 Body。
+4. 在工具执行入口增加统一路由层：按 `tool.kind` 路由，再按 Body Binding 定位 Body tool 的执行目标。
 5. 引入共享状态后支持多 Backend、跨实例 Proxy 路由和集中 Body presence。

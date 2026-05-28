@@ -14,7 +14,7 @@ Control Plane     Backend API、session/connection、Body Binding、ProxyManager
 Brain Layer       LLM 推理、Agent turn loop、上下文、A2A reasoning
       │
       ▼
-Execution Plane   backend-local body / proxy-hosted body / shell / 文件系统 / 宿主机能力
+Execution Plane   backend tools / body tools / shell / 文件系统 / 宿主机能力
 ```
 
 Brain Layer 和 Control Plane 都运行在 Python Backend 中，但职责不同：Brain 决定“要做什么”，Control Plane 决定“能不能做、交给哪个 Body 做、如何追踪结果”。Execution Plane 不思考，只执行经过授权的任务。
@@ -51,9 +51,9 @@ app/schemas/
 **职责**：
 
 - 对外 API：sessions、messages、streams、connections、proxy registration。
-- 生成并校验 `session_id`、`connection_id`、`client_id`、`proxy_connection_id`。
+- 生成并校验 `session_id`、`connection_id`、`proxy_connection_id`。
 - 维护 session、connection、Body presence、Proxy presence 和执行任务状态。
-- 根据 Agent 的 Body Binding、Proxy 状态和策略结果路由工具执行。
+- 根据 `tool.kind`、Agent 的 Body Binding、Proxy 状态和策略结果路由工具执行。
 - 调用策略层判断工具执行结果：`auto`、`require_approval`、`deny`。
 - 将执行结果返回 Brain Layer，并通过 SSE 推送用户可见事件。
 - 在多 Backend 部署下协调共享状态。
@@ -70,15 +70,22 @@ app/observability/
 
 ## 4. Execution Plane：执行平面
 
-Execution Plane 由 Agent 绑定的 Body 提供。每个 Agent Instance 同一时间只绑定一个 active Body。
+Execution Plane 由 Backend executor 与 Agent 绑定的 Body 共同构成。每个 Agent Instance 同一时间只绑定一个 active Body，但该 Agent 的工具不一定都在 Body 上执行。
 
-### 4.1 backend-local Body 执行
+工具执行位置由 `tool.kind` 决定：
 
-`body.kind: "backend_local"` 表示 Body 位于 Python Backend 本机。工具通过 Backend 本地执行器运行，适合代码审查、文档生成、Backend 本机自动化等场景。
+| tool.kind | 执行位置 | 示例 |
+|-----------|----------|------|
+| `backend` | Python Backend / Control Plane | A2A discover、上下文查询、Register Center 查询、纯 Backend 服务调用 |
+| `body` | Agent 绑定的 Body，通过 Go Proxy 或等价控制通道 | shell、文件读写、本地脚本、宿主机资源访问 |
 
-### 4.2 proxy-hosted Body 执行
+### 4.1 Backend tool 执行
 
-`body.kind: "proxy_hosted"` 表示 Body 位于 Go Proxy 宿主机。Go Proxy 主动出站连接 Backend，并接收 Backend 通过控制通道下发的执行任务。
+`tool.kind: "backend"` 表示该工具只依赖 Backend 或共享服务，不访问 Body 文件系统、shell 或宿主机资源。它可以在处理 session 的 Backend 上执行，也可以在多 Backend 下通过共享状态或内部 RPC 交给资源 owner。
+
+### 4.2 Body tool 执行
+
+`tool.kind: "body"` 表示该工具必须在 Agent 绑定的 Body 上执行。Go Proxy 主动出站连接 Backend，并接收 Backend 通过控制通道下发的执行任务。
 
 Go Proxy 负责：
 
@@ -116,8 +123,8 @@ Client Plane 不直接访问 Go Proxy。所有用户输入先进入 Backend，�
 | A2A 协议 | 是 | 否 |
 | session/connection 管理 | 是 | 否 |
 | 策略判定 | 是 | 执行本地硬约束 |
-| shell 执行 | backend-local Body 本地执行 | proxy-hosted Body 远程执行 |
-| 文件读写 | backend-local Body 本地执行 | proxy-hosted Body 限于 `fs_root` 执行 |
+| shell 执行 | 否，除非是受控 Backend 运维工具 | Body tool 限于 `fs_root` 和本地策略执行 |
+| 文件读写 | Backend 管理文件或上下文存储 | Body tool 限于 `fs_root` 执行 |
 | TUI 渲染 | Python TUI 可选 | Go TUI 可选 |
 | 跨旧 OS 分发 | 弱 | 强 |
 
@@ -138,10 +145,10 @@ Backend      ──Redis protocol──> Shared State
 Brain Layer 产生 ToolCall
   │
   ▼
-Control Plane 查询 Agent Body Binding、session、policy、Body presence
+Control Plane 查询 Tool Manifest、Agent Body Binding、session、policy、Body presence
   │
-  ├── body.kind == backend_local → Backend 本地工具执行器
-  └── body.kind == proxy_hosted  → ProxyManager 通过 control channel 下发任务
+  ├── tool.kind == backend → Backend executor
+  └── tool.kind == body    → ProxyManager 通过 control channel 下发到绑定 Body
 ```
 
-Brain Layer 不需要知道工具是在本地还是远程执行，只接收统一的 `ToolResult`。执行位置、审批、超时、重试和审计都由 Control Plane 处理。
+Brain Layer 不需要知道工具是在 Backend 还是 Body 执行，只接收统一的 `ToolResult`。执行位置、审批、超时、重试和审计都由 Control Plane 处理。

@@ -1,6 +1,6 @@
 # 安全与策略模型
 
-绑定 `proxy_hosted` Body 的 Agent 允许 LLM 驱动远程宿主机执行命令和文件操作，必须默认按高风险能力设计。v2 的安全目标是：**所有远程执行都可授权、可审批、可审计、可限制、可撤销**。
+`tool.kind == "body"` 的工具允许 LLM 驱动绑定 Body 执行命令和文件操作，必须默认按高风险能力设计。v2 的安全目标是：**所有 Body 执行都可授权、可审批、可审计、可限制、可撤销**。
 
 ## 1. 安全边界
 
@@ -22,9 +22,9 @@ User / A2A caller
 
 策略层输入：
 
-- `agent_id`、`body_id` 与 `body.kind`。
+- `agent_id`、`body_id` 与 `tool.kind`。
 - `session_id`、`connection_id`、调用来源。
-- Brain Profile、Body policy profile、工具名与参数。
+- Brain Profile、Body policy profile、Tool policy profile、工具名与参数。
 - 是否来自用户会话、A2A 调用或自动任务。
 - Body host_info、resources、environment 与能力标签。
 - 历史风险信号，例如失败率、频繁审批拒绝、异常时间段。
@@ -84,8 +84,8 @@ User / A2A caller
 
 | 场景 | 审批主体 |
 |------|----------|
-| 用户自己的 proxy-hosted Body Agent | 当前用户或该 Agent owner |
-| A2A 调用 proxy-hosted Body Agent | 目标 Agent owner 或目标 session 用户 |
+| 用户自己的 Body tool execution | 当前用户或该 Agent owner |
+| A2A 调用 Body tool execution | 目标 Agent owner 或目标 session 用户 |
 | 生产组 schedulable Agent | 生产组授权人 |
 | 高风险命令 | 更高权限审批人或 deny |
 
@@ -95,7 +95,7 @@ Backend 必须能判断审批人是否有权批准目标 Agent + Body 的执行�
 
 策略层在 Backend，但 Body 仍必须执行本地硬约束，防止 Backend 配置错误或 token 泄露导致无限制执行。
 
-`proxy_hosted` Body 必须支持：
+承载 Body tool execution 的 Body 必须支持：
 
 - `fs_root` 文件边界。
 - 禁止 `..`、symlink escape、Windows drive escape、UNC path escape。

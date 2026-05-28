@@ -24,8 +24,8 @@ Control Plane 负责身份、路由、策略、审批和状态协调。
 |------|------|------|
 | LLM API key / model provider | Brain / Backend config | 不属于 Body，Body 不调用 LLM |
 | 模型选择、temperature、tool choice 策略 | Brain Profile | 影响推理行为 |
-| Agent persona / `soul.md` | Brain Profile | 定义 Agent 的长期角色与行为风格 |
-| 用户偏好 / `user.md` | Brain Profile 或 User Profile | 跨 Body 生效的偏好归 Brain；只在某宿主机有效的偏好归 Body Context |
+| Agent persona / `soul.md` | Brain Profile，按 `profile_id` 或 `agent_id` 区分 | 定义某个 Agent Instance 的长期角色、能力边界与行为风格 |
+| 用户偏好 / `user.md` | User Profile / Organization Profile，可被 Brain Profile 引用 | 同一用户、团队或组织内跨 Agent/Body 复用的偏好；只在某宿主机有效的偏好归 Body Context |
 | 临时专项指令 / `custom.md` | 视来源而定 | Backend 侧 custom 属 Brain Profile；宿主机侧 custom 属 Body Context |
 | system prompt 拼接 | Brain | Brain 负责将 Brain Profile、Session Context、Body Manifest 组装为最终 prompt |
 | conversation history | Session Context / Brain | 对话历史由 Brain 使用并由 Backend 持久化 |
@@ -33,8 +33,8 @@ Control Plane 负责身份、路由、策略、审批和状态协调。
 | context compression | Brain | 压缩策略和摘要生成在 Backend 执行 |
 | skills 元数据 | Brain 或 Body Manifest | 纯提示词 skills 属 Brain；依赖宿主机工具/文件/权限的 skills 属 Body |
 | skills 执行依赖 | Body | 例如 kubectl、mysql、PowerShell、脚本路径 |
-| tools schema | Brain / Control Plane | 模型可见的工具定义和参数 schema 在 Backend 管理 |
-| tool implementation | Body 或 Backend local executor | 实际执行在 Agent 绑定的 Body 上 |
+| tools schema / Tool Manifest | Brain / Control Plane | 模型可见的工具定义、参数 schema 和 `tool.kind` 在 Backend 管理 |
+| tool implementation | Backend executor 或 Body | `tool.kind == "backend"` 在 Backend 执行；`tool.kind == "body"` 在 Agent 绑定的 Body 上执行 |
 | shell / file system | Body | Body 提供执行环境和文件边界 |
 | `fs_root` | Body | Body 本地硬约束 |
 | allowed commands / deny rules | Body hard constraints + Policy | Body 必须能本地拒绝危险操作；Backend 负责全局策略 |
@@ -46,22 +46,47 @@ Control Plane 负责身份、路由、策略、审批和状态协调。
 | audit log | Control Plane | 策略判定、审批、执行结果统一审计 |
 | A2A routing | Brain + Control Plane | Brain 决定是否调用 peer；Control Plane 负责会话和消息投递 |
 | Register Center metadata | Control Plane / RC | RC 保存 Agent discovery 元数据，不执行工具 |
-| SSE client state | Control Plane | client_id、连接、推送路由不属于 Brain 或 Body |
+| SSE subscription state | Control Plane | connection、session 订阅和推送路由不属于 Brain 或 Body |
 
 ## 3. Prompt 类文件归属
 
 ### 3.1 Brain-owned prompt
 
-以下内容归 Brain Profile 或 User Profile：
+以下内容归 Brain Profile 或 User / Organization Profile：
 
-- Agent persona，例如 `soul.md`。
-- 跨所有 Body 生效的用户偏好，例如 `user.md`。
+- Agent persona，例如 `soul.md`。它应按 `profile_id` 或 `agent_id` 区分，不应是 Backend 全局唯一文件。
+- 跨所有 Body 生效的用户、团队或组织偏好，例如 `user.md`。
 - 模型行为规则、回复风格、工具选择原则。
 - 与宿主机无关的长期业务知识。
 
-这些内容由 Backend 读取、缓存，并参与最终 system prompt 组装。
+这些内容由 Backend 读取、缓存，并参与最终 system prompt 组装。Backend 是管理和组装位置，不代表这些文件在语义上是全局共享。
 
-### 3.2 Body-owned prompt/context
+### 3.2 Prompt Profile 的作用域
+
+`Brain Profile` 不等于 Backend 全局配置。Backend 可以集中保存和加载这些文件，但作用域必须显式声明：
+
+| 文件 / 配置 | 推荐作用域 | 说明 |
+|-------------|------------|------|
+| `soul.md` | `brain_profile.profile_id`，通常与 `agent_id` 一一对应 | 定义该 Agent Instance 的 persona、任务边界、长期行为风格 |
+| `user.md` | `user_profile_id` 或 `organization_profile_id` | 定义用户、团队或组织内可复用的偏好、表达习惯和协作方式 |
+| `custom.md` | Brain Profile、Body Context 或 Session Context，取决于来源 | Backend 侧长期 custom 属 Brain；宿主机侧 custom 属 Body；本轮临时约束属 Session |
+| skill 配置 | Brain Profile 或 Body Manifest | 纯提示词 skill 可随 Brain Profile；依赖宿主机能力的 skill 随 Body |
+
+真实场景中，一个 Body 通常对应一个用户、服务账号或组织内执行身份，也经常与一个 Agent Instance 一一对应。因此 Phase 1 可以采用简单映射：
+
+```text
+agent_id → brain_profile.profile_id → soul.md
+agent_id → body_id → default user_profile_id / organization_profile_id → user.md
+```
+
+但这仍应保留为显式引用关系，而不是把 `soul.md` 或 `user.md` 设计成 Backend 进程级全局文件。这样后续可以支持：
+
+- 多个 Agent Instance 复用同一个用户或组织偏好。
+- 同一个用户拥有多个不同 persona 的 Agent。
+- 同一个 Body 更换 Brain Profile 后形成新的 Agent Instance。
+- A2A 调用时清楚区分目标 Agent persona 与目标 owner 偏好。
+
+### 3.3 Body-owned prompt/context
 
 以下内容归 Body Context：
 
@@ -72,7 +97,7 @@ Control Plane 负责身份、路由、策略、审批和状态协调。
 
 Body-owned 内容不应直接覆盖 Brain 的最高优先级规则。它应作为“环境上下文”进入 prompt，由 Brain 解释并受策略约束。
 
-### 3.3 Session-owned prompt/context
+### 3.4 Session-owned prompt/context
 
 以下内容归 Session Context：
 
@@ -147,7 +172,8 @@ Environment 是 Body 的一部分，但可以有摘要进入 Brain：
 | LLM endpoint、model、API key | Backend / Brain Runtime |
 | prompt_profile、context_policy | Brain Profile |
 | discovery_group、schedulable | Agent Instance / Control Plane |
-| body.kind、body_id | Body Binding |
+| body_id | Body Binding |
+| tool.kind、tool policy profile | Tool Manifest / Control Plane |
 | fs_root、allowed_commands、env allowlist | Body |
 | approval rules、deny rules、risk profile | Control Plane Policy |
 | Redis/shared state、RC URL | Control Plane |
@@ -158,13 +184,14 @@ Environment 是 Body 的一部分，但可以有摘要进入 Brain：
 最终 system prompt 由 Brain 组装。建议顺序：
 
 1. Backend 静态最高优先级规则。
-2. Brain Profile：persona / `soul.md`。
-3. User Profile：跨 Body 用户偏好 / `user.md`。
+2. Brain Profile：按 `profile_id` 或 `agent_id` 选择 persona / `soul.md`。
+3. User / Organization Profile：按 `user_profile_id` 或 `organization_profile_id` 选择跨 Body 偏好 / `user.md`。
 4. Agent capability summary。
-5. Body Manifest：body.kind、host_info、resources、tools、environment 摘要和限制。
-6. 已加载 skills 的说明。
-7. Session Context：当前 session_id、用户目标、A2A peer 信息。
-8. Body-owned `custom.md` 或本 session 临时约束。
+5. Body Manifest：body_id、host_info、resources、environment 摘要和限制。
+6. Tool Manifest：可用工具、`tool.kind`、参数 schema、策略摘要。
+7. 已加载 skills 的说明。
+8. Session Context：当前 session_id、用户目标、A2A peer 信息。
+9. Body-owned `custom.md` 或本 session 临时约束。
 
 Body Manifest 和 Body-owned `custom.md` 不能覆盖 Backend 静态最高优先级规则、安全策略或审批要求。
 
@@ -183,8 +210,8 @@ Body Manifest 和 Body-owned `custom.md` 不能覆盖 Backend 静态最高优先
 Phase 1 不需要一次实现完整配置系统，但文档和数据模型应按以下最小集对齐：
 
 - `AgentRecord` 包含 `brain_profile` 与 `body`。
-- `body.kind` 支持 `backend_local` 和 `proxy_hosted`。
+- Tool Manifest 支持 `tool.kind == "backend"` 和 `tool.kind == "body"`。
 - `body_id` 出现在 ProxyConnection、Session、Execution 记录中。
-- Prompt 组装能接收 Body Manifest 摘要。
-- 策略输入包含 `agent_id`、`body_id`、`body.kind`、tool 和 params。
+- Prompt 组装能接收 Body Manifest 和 Tool Manifest 摘要。
+- 策略输入包含 `agent_id`、`body_id`、`tool.kind`、tool 和 params。
 - 审计记录包含 `agent_id`、`body_id`、execution 与 policy decision。
