@@ -9,7 +9,7 @@
 | 文件 | 说明 |
 |------|------|
 | [os-compatibility.md](./os-compatibility.md) | **操作系统 / glibc 兼容清单**：CPython **3.11** 官方对 Windows 的下界、Linux 为何不写「最低 RHEL」、PyInstaller 与 glibc 的关系；**不必固定 3.13** 时的落地建议。 |
-| [agent-dual-runtime.md](./agent-dual-runtime.md) | **Agent 双运行时架构**：Agent = 大脑(Python) + 身体(本地或Go Proxy)；终端/非终端 Agent 分类、Go Proxy 设计、跨 OS 协作流程。 |
+| [architecture-v2/](./architecture-v2/) | **双运行时架构重构设计**：Agent = 大脑(Python) + 身体(Go Proxy)；终端/非终端 Agent 分类、Python-Go 功能划分、身份与会话模型、部署运维指南。 |
 | [architecture-and-flows.md](./architecture-and-flows.md) | 架构分层、`session` / 队列 / 运行时概念，主流程与分支（工具、审批、异步工具、SSE、Register Center）。 |
 | [agent-input-output.md](./agent-input-output.md) | **输入/输出专题**：HTTP 入队与进程内 **`MessageQueue`**（优先级、消费循环、背压）+ **SSE 出站**（总线、`client_id`、事件映射与联调要点）。 |
 | [context-compression-and-state.md](./context-compression-and-state.md) | **`ConversationContext` / `OpenAIConversationContext`**、SQLite **会话记忆**、持久化边界、**summary 压缩**（静默/阻塞、`ctx.messages` 替换）、**`RunTurnPhase`**、**`.runtime/prompt_context` 侧车**（**`soul.md` / `user.md` / `custom.md`**）与 **`get_system_prompt`** 拼接顺序。 |
