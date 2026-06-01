@@ -2,6 +2,33 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-05-30
+
+**0.x 预览**：Go **Agent Node + Client** 成为本地助手主线；Python FastAPI Agent 运行时标记 **已弃用**（仍维护 DAgentsUI / A2A / Register Center）。
+
+### 新增
+
+- **`node/`**、**`client/`**、**`shared/config/`**：Go Agent Node（LLM turn、工具、SQLite、policy、skills、compression、triggers）、Go REPL Client、共用 YAML 配置。
+- **Python Textual TUI**（`app/cli/`）：连 Go Node 的 `dagents chat`；与 Go REPL 双 Client 并存。
+- **Go Client bubbletea 全屏 TUI**（`client/internal/tui/full/`）：输入/输出分区；`tui --plain` REPL 兜底；与 Python Textual 目录隔离。
+- **N7 部分**：`go-node-compatibility.md`、静态构建、RHEL6 SysV init、Release CI Go tarball。
+- **Go full HITL**：逐工具审批（↑/↓ Space Enter）、选项式 `ask_user_information`。
+- **消息协议（Go）**：`tool_result` / `async_tool_result` 入队分流；多工具并行执行；上下文压缩 SSE 事件。
+
+### 变更
+
+- **文档**：`docs/architecture-v2/` 迁入 `docs/architecture/`、`docs/design/`、`docs/future/`、`docs/archive/`；根 README 与索引按双栈重写。
+- **Python Agent 后端**：`app/deprecated_backend.py`；API 响应 `Deprecation` 头；`/health` 含弃用元数据。
+- 移除 Windows 托盘启动器（`scripts/windows/tray_launcher.py` 等）。
+
+### 已知限制（0.2.0）
+
+- Go Node **N7** RHEL6/Win2012 **真机验收**待完成（见 `docs/architecture/rhel6-acceptance-checklist.md`）。
+- Go full TUI：`--show-reasoning`、逐工具审批、选项式询问；Release 含 **linux tar + windows zip**。
+- Python FastAPI 仍为 Web/A2A 路径；与 Go Node API 契约分离维护。
+
+（Git **tag**：`v0.2.0`。）
+
 ## [0.1.0] - 2026-05-12
 
 首个对外标记版本（**0.x 预览**）：核心 Agent API、可选 SQLite 会话持久化、SSE 流式事件、Prometheus 指标、Register Center 与配套文档/单测基线。以下 **变更 / 文档 / 仓库维护** 与首版同批交付（尚未单独发补丁版号时，仍以 **`v0.1.0`** 与 Git tag 对齐）。

@@ -20,6 +20,7 @@ def build_welcome_panel(
     session_id: str,
     username: str | None = None,
     version: str | None = None,
+    width: int | None = None,
 ) -> Panel:
     """构造进入聊天时写入 RichLog 的欢迎 Panel（连接成功后一次性写入，不再更新）。
 
@@ -33,9 +34,10 @@ def build_welcome_panel(
         session_id: 当前 session id（空则展示 —）。
         username: 系统用户名，默认 `get_cli_username()`。
         version: CLI 版本，默认 `get_cli_version()`。
+        width: RichLog 可用宽度；传入时 Panel 边框与 transcript 同宽。
 
     Returns:
-        可直接 `RichLog.write(panel)` 的 Rich Panel。
+        可直接 ``RichLog.write(panel, expand=True)`` 的 Rich Panel（须 expand 才能铺满 transcript 宽度）。
     """
     user = username if username is not None else get_cli_username()
     ver = version if version is not None else get_cli_version()
@@ -57,9 +59,11 @@ def build_welcome_panel(
     grid.add_column(ratio=1)
     grid.add_row(left, right)
 
-    return Panel(
-        grid,
-        title=f"[bold]DAgents v{ver}[/bold]",
-        border_style="red",
-        padding=(1, 2),
-    )
+    panel_kwargs: dict[str, object] = {
+        "title": f"[bold]DAgents v{ver}[/bold]",
+        "border_style": "red",
+        "padding": (1, 2),
+    }
+    if width is not None and width > 0:
+        panel_kwargs["width"] = width
+    return Panel(grid, **panel_kwargs)

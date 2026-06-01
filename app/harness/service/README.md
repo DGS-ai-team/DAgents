@@ -1,5 +1,7 @@
 # `app/harness/service/`
 
+> **【已弃用】** Python `AgentService` 编排层。Go 等价实现：**`node/internal/session/`** + **`node/internal/turn/`**。
+
 独立 Agent 服务（常驻进程，通常由 FastAPI 层托管）：
 
 - 持续读取消息队列

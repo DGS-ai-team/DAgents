@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any
 from urllib.parse import urlencode
 
 import aiohttp
@@ -15,6 +16,10 @@ class StreamEvent:
     payload: dict[str, Any]
 
     @property
+    def is_stream_ready(self) -> bool:
+        return self.event_type == "__stream_ready__"
+
+    @property
     def session_id(self) -> str:
         return str(self.payload.get("session_id") or "")
 
@@ -25,6 +30,8 @@ class StreamEvent:
 
 
 class DAgentsApiClient:
+    """Go Agent Node HTTP/SSE 客户端；请求/响应字段与 Node API 一一对应。"""
+
     def __init__(self, api_base: str, *, timeout_seconds: float = 30.0) -> None:
         self.api_base = api_base.rstrip("/")
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=timeout_seconds)
@@ -37,6 +44,9 @@ class DAgentsApiClient:
         async with self._session.get(f"{self.api_base}/health") as resp:
             return resp.status == 200
 
+    async def get_agent_info(self) -> dict[str, Any]:
+        return await self._get_json("/v1/agent/info")
+
     async def create_session(self, session_id: str | None = None) -> str:
         payload: dict[str, Any] = {}
         if session_id:
@@ -44,50 +54,41 @@ class DAgentsApiClient:
         result = await self._post_json("/v1/sessions", payload)
         sid = str(result.get("session_id") or "").strip()
         if not sid:
-            raise RuntimeError("backend did not return a session_id")
+            raise RuntimeError("node did not return a session_id")
         return sid
 
-    async def submit_message(self, *, session_id: str, client_id: str, content: str) -> None:
+    async def submit_message(self, *, session_id: str, content: str) -> None:
         await self._post_json(
             "/v1/messages",
             {
                 "session_id": session_id,
-                "client_id": client_id,
                 "request_type": "message",
                 "content": content,
-                "source": "cli",
             },
         )
 
-    async def submit_resume(self, *, session_id: str, client_id: str, resume_value: dict[str, Any]) -> None:
+    async def submit_resume(self, *, session_id: str, resume_value: dict[str, Any]) -> None:
         await self._post_json(
             "/v1/messages",
             {
                 "session_id": session_id,
-                "client_id": client_id,
                 "request_type": "resume",
                 "resume_value": resume_value,
-                "source": "cli",
             },
         )
 
-    async def list_triggers(self) -> dict[str, Any]:
-        """GET /v1/triggers，返回含 triggers 列表的字典。"""
-        return await self._get_json("/v1/triggers")
-
     async def list_sessions(self) -> dict[str, Any]:
-        """GET /v1/sessions，返回活跃与持久化 session 列表。"""
+        """GET /v1/sessions → `{ "sessions": [...] }`。"""
         return await self._get_json("/v1/sessions")
 
-    async def delete_persisted_session(self, session_id: str) -> dict[str, Any]:
-        """DELETE /v1/sessions/{session_id}/persisted，仅删除 sqlite 行。"""
+    async def delete_session(self, session_id: str) -> dict[str, Any]:
+        """DELETE /v1/sessions/{id} → `{ session_id, released }`。"""
         sid = str(session_id or "").strip()
         if not sid:
             raise ValueError("session_id is required")
-        return await self._delete_json(f"/v1/sessions/{sid}/persisted")
+        return await self._delete_json(f"/v1/sessions/{sid}")
 
     async def clear_session_context(self, session_id: str) -> dict[str, Any]:
-        """POST /v1/sessions/{session_id}/clear-context，清空对话上下文。"""
         sid = str(session_id or "").strip()
         if not sid:
             raise ValueError("session_id is required")
@@ -99,10 +100,7 @@ class DAgentsApiClient:
         逻辑：
         1. 规范化并校验 `session_id`；
         2. 调用 `GET /v1/sessions/{session_id}/context`；
-        3. 返回后端 JSON dict。
-
-        关键边界：
-        - 空 session_id 直接抛 `ValueError`，避免拼出无效路径。
+        3. 返回 Node JSON dict。
         """
         sid = str(session_id or "").strip()
         if not sid:
@@ -110,49 +108,49 @@ class DAgentsApiClient:
         return await self._get_json(f"/v1/sessions/{sid}/context")
 
     async def cancel_current_turn(self, session_id: str) -> dict[str, Any]:
-        """POST /v1/sessions/{session_id}/cancel，取消当前在途 turn。"""
         sid = str(session_id or "").strip()
         if not sid:
             raise ValueError("session_id is required")
         return await self._post_json(f"/v1/sessions/{sid}/cancel", {})
 
     async def list_session_skills(self, session_id: str) -> dict[str, Any]:
-        """GET /v1/sessions/{session_id}/skills，查询当前会话 skills。"""
         sid = str(session_id or "").strip()
         if not sid:
             raise ValueError("session_id is required")
         return await self._get_json(f"/v1/sessions/{sid}/skills")
 
     async def load_session_skill(self, session_id: str, skill_name: str) -> dict[str, Any]:
-        """POST /v1/sessions/{session_id}/skills/load，加载一个 skill。"""
         sid = str(session_id or "").strip()
         name = str(skill_name or "").strip()
-        if not sid:
-            raise ValueError("session_id is required")
-        if not name:
-            raise ValueError("skill_name is required")
+        if not sid or not name:
+            raise ValueError("session_id and skill_name are required")
         return await self._post_json(f"/v1/sessions/{sid}/skills/load", {"skill_name": name})
 
     async def unload_session_skill(self, session_id: str, skill_name: str) -> dict[str, Any]:
-        """POST /v1/sessions/{session_id}/skills/unload，卸载一个 skill。"""
         sid = str(session_id or "").strip()
         name = str(skill_name or "").strip()
-        if not sid:
-            raise ValueError("session_id is required")
-        if not name:
-            raise ValueError("skill_name is required")
+        if not sid or not name:
+            raise ValueError("session_id and skill_name are required")
         return await self._post_json(f"/v1/sessions/{sid}/skills/unload", {"skill_name": name})
 
-    async def patch_trigger(self, trigger_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """PATCH /v1/triggers/{trigger_id} 部分更新。"""
-        return await self._patch_json(f"/v1/triggers/{trigger_id}", payload)
-
-    async def stream_events(self, *, client_id: str) -> AsyncIterator[StreamEvent]:
-        query = urlencode({"client_id": client_id})
+    async def stream_events(self, *, session_id: str, live_only: bool = True) -> AsyncIterator[StreamEvent]:
+        """订阅 SSE；默认 live_only 跳过重放（对齐 Node `live=1`）。"""
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required for SSE")
+        params: dict[str, str] = {"session_id": sid}
+        if live_only:
+            params["live"] = "1"
+        query = urlencode(params)
         async with self._session.get(f"{self.api_base}/v1/streams?{query}") as resp:
             if resp.status != 200:
                 body = await resp.text()
-                raise RuntimeError(f"stream failed: HTTP {resp.status}: {body}")
+                raise RuntimeError(_format_http_error(resp.status, body))
+            yield StreamEvent(
+                event_type="__stream_ready__",
+                event_id=None,
+                payload={"session_id": sid},
+            )
             buffer = ""
             async for chunk in resp.content.iter_chunked(1024):
                 buffer += chunk.decode("utf-8", errors="replace")
@@ -167,7 +165,7 @@ class DAgentsApiClient:
         async with self._session.get(f"{self.api_base}{path}") as resp:
             text = await resp.text()
             if resp.status >= 400:
-                raise RuntimeError(f"HTTP {resp.status}: {text}")
+                raise RuntimeError(_format_http_error(resp.status, text))
             if not text.strip():
                 return {}
             try:
@@ -180,20 +178,7 @@ class DAgentsApiClient:
         async with self._session.post(f"{self.api_base}{path}", json=payload) as resp:
             text = await resp.text()
             if resp.status >= 400:
-                raise RuntimeError(f"HTTP {resp.status}: {text}")
-            if not text.strip():
-                return {}
-            try:
-                data = json.loads(text)
-            except json.JSONDecodeError as exc:
-                raise RuntimeError(f"invalid JSON response from {path}: {text}") from exc
-            return data if isinstance(data, dict) else {}
-
-    async def _patch_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        async with self._session.patch(f"{self.api_base}{path}", json=payload) as resp:
-            text = await resp.text()
-            if resp.status >= 400:
-                raise RuntimeError(f"HTTP {resp.status}: {text}")
+                raise RuntimeError(_format_http_error(resp.status, text))
             if not text.strip():
                 return {}
             try:
@@ -206,7 +191,7 @@ class DAgentsApiClient:
         async with self._session.delete(f"{self.api_base}{path}") as resp:
             text = await resp.text()
             if resp.status >= 400:
-                raise RuntimeError(f"HTTP {resp.status}: {text}")
+                raise RuntimeError(_format_http_error(resp.status, text))
             if not text.strip():
                 return {}
             try:
@@ -214,6 +199,23 @@ class DAgentsApiClient:
             except json.JSONDecodeError as exc:
                 raise RuntimeError(f"invalid JSON response from {path}: {text}") from exc
             return data if isinstance(data, dict) else {}
+
+
+def _format_http_error(status: int, text: str) -> str:
+    """解析 Go Node `{error:{code,message}}` 错误体。"""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return f"HTTP {status}: {text}"
+    err = data.get("error")
+    if isinstance(err, dict):
+        message = str(err.get("message") or "").strip()
+        code = str(err.get("code") or "").strip()
+        if message and code:
+            return f"HTTP {status} ({code}): {message}"
+        if message:
+            return f"HTTP {status}: {message}"
+    return f"HTTP {status}: {text}"
 
 
 def _parse_sse_block(block: str) -> StreamEvent | None:

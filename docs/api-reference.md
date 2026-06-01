@@ -1,10 +1,14 @@
 # DAgents API 文档（与实现同步）
 
-本文档与 **`v0.1.0`** 前后端行为对齐，面向前端接入与联调；实现以代码为准。
+> **【已弃用 — Agent 运行时】** 本文档描述 **Python FastAPI** 契约（`app/harness/api`）。  
+> 本地助手 Agent API 见 [architecture/agent-node-api.md](./architecture/agent-node-api.md)。  
+> 弃用说明：`app/deprecated_backend.py`；`GET /health` 与响应头 `Deprecation: true`。
+
+本文档与 **`v0.2.0`** 前后端行为对齐，面向前端接入与联调；实现以代码为准。
 
 | 项目 | 说明 |
 |------|------|
-| 实现入口 | `app/harness/api/app.py`（`create_app()`，`FastAPI(..., version="0.1.0")`） |
+| 实现入口 | `app/harness/api/app.py`（`create_app()`，`FastAPI(..., version="0.2.0")`） |
 | 进程入口 | 仓库根目录 `run_agent_api.py`（监听 **`API_HOST`** / **`API_PORT`**，默认 **`127.0.0.1:8000`**） |
 | 编排 / SSE 映射 | `app/harness/service/agent_service.py`（**`_map_event_envelope_to_stream`**） |
 | SSE 总线 | `app/harness/streaming/events.py`（**`InMemoryEventBus`**） |
@@ -13,6 +17,8 @@
 **入站/出站专题**（消息队列 + SSE 串联、联调要点）：[agent-input-output.md](./agent-input-output.md)。
 
 **OpenAPI 单一来源**：运行时可访问 **`GET /openapi.json`**、**`GET /docs`**（Swagger UI）、**`GET /redoc`**；分仓导出见仓库根 **`export_openapi_schema.py`**。
+
+**Go Agent Node**：本地助手运行时，见 [design/agent-client-refactor-plan.md](./design/agent-client-refactor-plan.md) 与 [architecture/agent-node-api.md](./architecture/agent-node-api.md)。下文 **§3.8 触发器** 等 Python 路径以 FastAPI 为准；Go triggers 见 [`node/internal/triggers/README.md`](../node/internal/triggers/README.md)。
 
 **启动副作用（非 HTTP）**：若配置 **`REGISTRY_URL`**、**`AGENT_PUBLIC_BASE_URL`**、**`DISCOVERY_GROUPS`**、**`AGENT_ID`** 等完整，进程 **lifespan** 会向 Register Center **`POST /v1/agents`** 自登记，关闭时 **`DELETE /v1/agents/{agent_id}`**；缺省或网络失败仅打日志，**不**阻塞 API 监听。
 
@@ -32,14 +38,14 @@
 - 普通 JSON 接口返回 **`application/json`**（FastAPI 默认）。
 - **`GET /v1/streams`** 为 **SSE**（**`Content-Type: text/event-stream`**）。
 - 提交消息接口 **不** 返回 `request_id`；前端按 **`session_id`** 与会话状态组织 UI。
-- **SSE 与 `client_id`**：
-  - 流式连接 **必须** 带查询参数 **`client_id`**；缺失或非法时由框架返回 **422**。
-  - **`POST /v1/messages`** 请求体中的 **`client_id`** 默认值为 **`"default"`**（`min_length=1`）；**若 `MessageEnvelope.client_id` 为空/空白，服务层不会向总线推送 SSE**（与 `app.py` 中 `handle_stream_event` 一致）。**生产联调请显式传与 SSE 相同的 `client_id`**。
+- **SSE 与 `connection_id`**：
+  - 流式连接 **必须** 带查询参数 **`connection_id`**（由 **`POST /v1/connections`** 创建）；缺失或非法时由框架返回 **422**。
+  - **`POST /v1/messages`** 请求体 **必填** **`connection_id`**（`min_length=1`）；**若 `MessageEnvelope.connection_id` 为空/空白，服务层不会向总线推送 SSE**（与 `app.py` 中 `handle_stream_event` 一致）。
 - **SSE 帧内 envelope**（`StreamEvent` 序列化）字段：
-  - **`client_id`**：string  
+  - **`connection_id`**：string  
   - **`session_id`**：string  
   - **`type`**：string（与 SSE 的 `event:` 行一致）  
-  - **`seq`**：number（按 `client_id` 维度递增）  
+  - **`seq`**：number（按 `connection_id` 维度递增）  
   - **`ts`**：string（UTC ISO8601）  
   - **`data`**：object（扁平业务字段 + 内嵌 **`meta`**，见下文 §4）
 
@@ -51,9 +57,10 @@
 |------|------|------|
 | `GET` | `/health` | 存活探测 |
 | `GET` | `/metrics` | Prometheus 文本（**可选**，见 §3.2） |
+| `POST` | `/v1/connections` | **v2**：创建 Client connection（见 §3.10） |
 | `POST` | `/v1/sessions` | 创建会话 |
 | `POST` | `/v1/messages` | 提交用户消息或 resume |
-| `GET` | `/v1/streams` | 全局 SSE（**必填** `client_id`） |
+| `GET` | `/v1/streams` | 全局 SSE（**必填** `connection_id`） |
 | `POST` | `/v1/sessions/{session_id}/cancel` | 取消当前 turn |
 | `POST` | `/v1/sessions/{session_id}/clear-context` | 清空对话上下文（保留技能与首条请求标识） |
 | `GET` | `/v1/sessions/{session_id}/context` | 查询当前会话 context 摘要 |
@@ -68,17 +75,28 @@
 | `DELETE` | `/v1/triggers/{trigger_id}` | 删除触发器 |
 | `POST` | `/v1/triggers/{trigger_id}/fire` | 手动触发并投递任务 |
 | `GET` | `/v1/triggers/{trigger_id}/history` | 查看触发历史 |
+| `POST` | `/v1/bodies/register` | **v2**：Proxy 注册 Body（Bearer bootstrap；见 §3.9） |
+| `GET` | `/v1/bodies/status` | **v2**：Body/Proxy 只读摘要（TUI 联调；见 §3.9） |
+| `WS` | `/v1/bodies/control/{proxy_connection_id}` | **v2**：Proxy 出站控制通道（见 §3.9） |
 
 ---
 
 ### 3.1 健康检查
 
 - **`GET /health`**
-- 响应示例：
+- 响应示例（含弃用元数据）：
 
 ```json
-{"status": "ok"}
+{
+  "status": "ok",
+  "deprecated": true,
+  "replacement": "go-agent-node",
+  "deprecation_notice": "【已弃用】Python FastAPI Agent 运行时…",
+  "successor_doc": "docs/architecture/overview.md"
+}
 ```
+
+- 所有 API 响应另含 HTTP 头：**`Deprecation: true`**、**`X-DAgents-Backend: python-deprecated`**、**`X-DAgents-Successor: go-agent-node`**
 
 ---
 
@@ -95,16 +113,24 @@
 - **`POST /v1/sessions`**
 - **请求体**（`SessionCreateIn`）：
   - **`session_id`**：`string | null`（可选；不传或空串时服务端生成 UUID）
+  - **`connection_id`**：`string | null`（可选，Phase 2；创建时绑定 session 到 connection）
+  - **`agent_id`**：`string | null`（可选；缺省 Backend **`AGENT_ID`**；与 `connection_id` 同时提供时必须一致）
 - **响应体**（`SessionCreateResult`）：
   - **`session_id`**：`string`
+  - **`agent_id`**：`string`
+  - **`body_id`**：`string | null`（Proxy 在线时为 `body-{agent_id}`，否则 `null` 表示 backend-only 会话）
   - **`created`**：`bool`（当前实现固定为 **`true`**）
-- **错误**：容量或内部错误时 **400**，`detail` 为可读字符串。
+- **错误**：容量或内部错误 **400**；connection 无效 **404/410**；agent_id 与 connection 冲突 **409**。
+
+**v1 兼容**：仅传 `session_id` 时行为不变；响应新增 `agent_id` / `body_id` 字段（旧 Client 可忽略）。
 
 **示例**：
 
 ```json
 {
   "session_id": "s-web",
+  "agent_id": "ops-01",
+  "body_id": "body-ops-01",
   "created": true
 }
 ```
@@ -116,7 +142,7 @@
 - **`POST /v1/messages`**
 - **请求体**（`MessageIn`）：
   - **`session_id`**：`string`，**必填**，`min_length=1`
-  - **`client_id`**：`string`，默认 **`"default"`**，`min_length=1`（**建议与 SSE 使用同一值**）
+  - **`connection_id`**：`string`，**必填**，`min_length=1`（须与 SSE 订阅使用同一值）
   - **`request_type`**：`"message" | "resume"`，默认 **`"message"`**
   - **`content`**：`string | null`；当 **`request_type === "message"`** 时 **必填且非空白**，否则 **422**
   - **`resume_value`**：`any | null`；**`resume`** 时由编排消费（审批结构见 **`app/schemas/approval.py`**）
@@ -137,7 +163,7 @@
 ```json
 {
   "session_id": "s-web",
-  "client_id": "client-001",
+  "connection_id": "client-001",
   "request_type": "message",
   "content": "你好",
   "source": "client"
@@ -149,7 +175,7 @@
 ```json
 {
   "session_id": "s-web",
-  "client_id": "client-001",
+  "connection_id": "client-001",
   "request_type": "resume",
   "resume_value": {
     "type": "selection",
@@ -167,16 +193,16 @@
 - `{"type":"selection","approved":[...],"rejected":[...]}`
 - 非法或缺省类型时运行时按 **reject** 语义处理（不向外抛校验错误）
 
-> **说明**：HTTP 层 **`request_type`** 仅 **`message` / `resume`**。内部队列另有 **`async_tool_result` / `tool_result`** 等，由服务与异步工具仓写入，**不经** `POST /v1/messages`。其中 **`async_tool_result`** 入队的 **`MessageEnvelope.client_id`** 与异步任务快照中的 **`client_id`** 一致，用于 **SSE 分桶**（见 [agent-input-output.md](./agent-input-output.md)）。
+> **说明**：HTTP 层 **`request_type`** 仅 **`message` / `resume`**。内部队列另有 **`async_tool_result` / `tool_result`** 等，由服务与异步工具仓写入，**不经** `POST /v1/messages`。其中 **`async_tool_result`** 入队的 **`MessageEnvelope.connection_id`** 与异步任务快照中的 **`connection_id`** 一致，用于 **SSE 分桶**（见 [agent-input-output.md](./agent-input-output.md)）。
 
 ---
 
 ### 3.5 全局 SSE（推荐前端单连接）
 
-- **`GET /v1/streams?client_id=<your_client_id>`**
-- **用途**：同一 **`client_id`** 下跨 **`session_id`** 的实时事件流。
+- **`GET /v1/streams?connection_id=<your_connection_id>`**
+- **用途**：同一 **`connection_id`** 下跨 **`session_id`** 的实时事件流。
 - **行为**：仅推送 **订阅建立之后** 的事件，**不**回放历史。
-- **错误**：缺少 **`client_id`** 时 **422**。
+- **错误**：缺少 **`connection_id`** 时 **422**。
 
 **帧格式**见 §4。
 
@@ -196,7 +222,7 @@
 
 - **`POST /v1/sessions/{session_id}/clear-context`**
 - **路径参数**：**`session_id`**（纯空白时 **422**）
-- **用途**：在同一 session 下清空 `messages` / `pending_tool_calls` 等对话态并重置 `run_turn_phase`；**保留** `loaded_skills`、`sse_client_id` 与 sqlite **`first_request_message`**（便于 `show session` 识别）。
+- **用途**：在同一 session 下清空 `messages` / `pending_tool_calls` 等对话态并重置 `run_turn_phase`；**保留** `loaded_skills`、`sse_connection_id` 与 sqlite **`first_request_message`**（便于 `show session` 识别）。
 - **行为**：
   - 若有在途 turn，会先 **cancel 并等待结束** 再清空（避免 `finally` 落盘覆盖清空结果）；
   - 取消该 session 的 summary 压缩后台 task；
@@ -217,7 +243,7 @@
 - **用途**：只读查询当前会话内存/持久化 context 摘要，供 TUI `/context` 视图展示。
 - **响应体**（`SessionContextResult`）：
   - **`session_id`**：string
-  - **`sse_client_id`** / **`active_client_id`**：当前 SSE/活跃 client 标识
+  - **`sse_connection_id`** / **`active_connection_id`**：当前 SSE/活跃 client 标识
   - **`run_turn_phase`**：当前 turn 阶段
   - **`messages_count`** / **`pending_tool_calls_count`** / **`messages_total_tokens`** / **`tool_loop_count`**：context 计数
   - **`loaded_skills`**：`[{ skill_name, description }]`
@@ -281,7 +307,7 @@
   - **`name`**：名称，必填。
   - **`condition`**（必填，不可为空）：`{"interval_seconds": 60}` 周期，或 `{"fire_at": 1730000000}` 单次；二者不可同时设置。
   - **`task_template`**：投递给 Agent 的任务模板，必填；支持 `{trigger_id}`、`{trigger_name}`、`{reason}`、`{payload_json}`。
-  - **`target_session_id`** / **`client_id`**：可选；HTTP 创建时可指定；Agent 工具 `trigger_create` 会从当前会话 `context` 自动绑定。
+  - **`target_session_id`** / **`connection_id`**：可选；HTTP 创建时可指定；未指定时调度器 fire 时自动创建 **`API_CLIENT`** connection；Agent 工具 `trigger_create` 会从当前会话 `context` 自动绑定。
   - 新建触发器默认 **`enabled=true`**，并根据 `condition` 计算 `next_fire_at`。
 
 #### 手动触发
@@ -297,7 +323,7 @@
 }
 ```
 
-响应为 `TriggerFireRecord`：包含 `status`（`queued | skipped | error`）、`session_id`、`client_id`、最终投递 `content` 与可读 `message`。
+响应为 `TriggerFireRecord`：包含 `status`（`queued | skipped | error`）、`session_id`、`connection_id`、最终投递 `content` 与可读 `message`。
 
 #### 安全边界
 
@@ -308,13 +334,168 @@
 
 ---
 
+### 3.9 v2 Body 注册与控制通道（已废弃）
+
+> **状态（2026-05）**：本节描述已回退的 Brain/Body + Proxy 方案，**现网无对应实现**。当前架构见 [architecture/overview.md](./architecture/overview.md)。
+
+**前置配置**（`.env` / 环境变量）：
+
+| 变量 | 说明 |
+|------|------|
+| `V2_PROXY_BOOTSTRAP_TOKEN` | Proxy 注册时 Bearer token；**未配置时** `POST /v1/bodies/register` 返回 **503** |
+| `V2_BACKEND_INSTANCE_ID` | Backend 实例标识（默认 `backend-local`） |
+| `V2_PROXY_HEARTBEAT_TIMEOUT_SECONDS` | 心跳超时 sweep（默认 **90**） |
+| `V2_BODY_ASYNC_ENABLED` | body 长时 bash 走 async detached（默认 **true**） |
+| `V2_BODY_ASYNC_TIMEOUT_THRESHOLD_SECONDS` | 超过该秒数的 `bash_run` 使用 async（默认 **30**） |
+| `V2_ALLOW_LOCAL_BODY_FALLBACK` | Proxy 不可达时 body 工具降级本地执行（默认 **true**） |
+
+#### Body 注册
+
+- **`POST /v1/bodies/register`**
+- **认证**：**`Authorization: Bearer <V2_PROXY_BOOTSTRAP_TOKEN>`**（缺失 **401**；不匹配 **403**）
+- **请求体**（`RegisterBodyRequest`）：
+  - **`desired_agent_id`**：`string | null`（可选；缺省 Backend **`AGENT_ID`** / `settings.agent_id`）
+  - **`requested_template_id`**：`string | null`（可选；内建 AgentTemplate ID，见下表；未知 ID **400**）
+  - **`body_manifest`**：`object`
+    - **`capabilities`**：`string[]`（默认 `[]`）
+    - **`host_info`**：`object`（默认 `{}`）
+    - **`local_constraints`**：`object`（默认 `{}`）
+- **响应体**（`RegisterBodyResponse`）：
+  - **`agent_id`**：`string`
+  - **`body_id`**：`string`（Phase 1 形如 `body-{agent_id}`）
+  - **`proxy_connection_id`**：`string`（形如 `pconn-...`）
+  - **`control_channel_url`**：`string`（相对路径，如 `/v1/bodies/control/pconn-...`）
+  - **`accepted_manifest_version`**：`number`
+  - **`agent_status`**：`string`（如 **`active`**、`pending_approval`（`ops-terminal-agent` 模板））
+- **内建 AgentTemplate**（`requested_template_id`）：
+
+| template_id | 用途 | 默认 `agent_status` | 要求 capabilities |
+|-------------|------|---------------------|-------------------|
+| `personal-terminal-agent` | 用户终端/工作站 Body | `active` | `shell`, `filesystem` |
+| `ops-terminal-agent` | 运维宿主机 Body | `pending_approval` | `shell` |
+| `backend-helper-agent` | 偏 Backend 工具的辅助 Agent | `active` | （无） |
+
+- **行为**：
+  - 提供 **`requested_template_id`** 时按模板 upsert 内存 **`AgentRecord`**（`app/harness/agents/v2/`），并校验 manifest capabilities；
+  - 同一 body 重复注册会 **替换** active 连接（旧连接标记 offline）；
+  - Phase 2 **不**同步 Register Center（RC 同步留 Phase 3）。
+
+请求示例：
+
+```json
+{
+  "desired_agent_id": "k8s-ops-01",
+  "body_manifest": {
+    "capabilities": ["shell", "filesystem"],
+    "host_info": { "os": "linux", "arch": "amd64" },
+    "local_constraints": { "fs_root": "/opt/dagents/workspace" }
+  }
+}
+```
+
+#### 控制通道 WebSocket
+
+- **`WS /v1/bodies/control/{proxy_connection_id}`**
+- **调用方**：Go Proxy（**出站**连接 Backend；Backend 无需直连宿主机）
+- **协议**：JSON envelope（`execute` / `result` / `heartbeat` 等）；原设计文档已移除，见 [agent-client-refactor-plan.md](./agent-client-refactor-plan.md)
+- **边界**：
+  - 未知或已 offline 的 `proxy_connection_id` 会被拒绝（关闭码 **4404** / **4403**）；
+  - Backend 经 hub 下发 body 工具执行；Proxy 返回 `result` 后 Execution Dispatcher 完成记录。
+
+**Go Proxy 联机**（同机示例）：
+
+```bash
+# Backend 已启动且 V2_PROXY_BOOTSTRAP_TOKEN 已配置
+dagents-proxy -connect -backend http://127.0.0.1:8000 -bootstrap-token "$V2_PROXY_BOOTSTRAP_TOKEN"
+```
+
+实现入口：`app/harness/api/v2/bodies.py`、`app/proxy/v2/control_channel.py`；Go 客户端见 `proxy/v2/internal/client/`。
+
+#### v1 工具名 → Proxy canonical（Phase 2 S7）
+
+LLM / Tool Manifest 仍使用 **v1 名**；Execution Dispatcher 经 `body_executor` 映射后下发：
+
+| v1（LLM 可见） | Proxy `execute.tool` | 本地降级（`V2_ALLOW_LOCAL_BODY_FALLBACK`） |
+|----------------|------------------------|--------------------------------------------|
+| `bash_run` | `shell_exec` | 是 |
+| `read_file` | `file_read` | 是 |
+| `write_file` | `file_write` | 是 |
+| `search_file` | `file_search` | 否（需在线 Proxy） |
+| `bash_job_status` | `shell_job_status` | 否 |
+| `bash_job_tail` | `shell_job_tail` | 否 |
+| `bash_job_cancel` | `shell_job_cancel` | 否 |
+
+**Body offline 可见性**：无 active control channel 时，`build_openai_toolkit()` 的 **tools payload** 会隐藏上表中不可降级的 body 工具；执行层 `tool_map` 仍保留全量名称以便一致报错。实现：`app/harness/tools/v2/visibility.py`。
+
+#### 临时子 Agent（Phase 2 S8）
+
+- **工具名**：`create_temporary_agent`（`tool.kind=backend`）
+- **body_binding**：`backend_only`（无 Body）或 `inherit_parent_body`（共享父 session 的 `body_id`）
+- **模板**：`code-review-helper`、`research-helper`、`ops-check-helper`（见 `app/config/v2/temporary_agent_template.py`）
+- **配置**：`V2_DEFAULT_CHILD_AGENT_TTL_SECONDS`（默认 **1800**）、`V2_MAX_CHILD_AGENT_TTL_SECONDS`（**7200**）、`V2_DEFAULT_CHILD_AGENT_MAX_TURNS` / `V2_MAX_CHILD_AGENT_TURNS`
+- **生命周期**：TTL 到期自动清理；`DELETE /v1/sessions/{id}` 取消仍 active 的子 Agent；默认 **不** 进入 RC discover
+
+#### Body / Proxy 只读状态（TUI 联调）
+
+- **`GET /v1/bodies/status`**
+- **认证**：无（与 v1 API 一致）
+- **响应体**（`BodiesStatusResponse`）：
+  - **`v2_allow_local_body_fallback`**：Proxy 离线时 body 工具是否本地降级
+  - **`proxy_bootstrap_configured`**：是否配置了 `V2_PROXY_BOOTSTRAP_TOKEN`
+  - **`backend_instance_id`** / **`agent_id`**
+  - **`bodies`**：数组，每项含 **`body_id`**、**`status`**、**`control_channel_ws_connected`** 等
+- **用途**：Textual TUI 欢迎页与 `/status` 命令；`run_phase1_stack.py` 等待 Proxy WS 就绪
+
+**一键 Phase 1 联调**：
+
+```bash
+python run_phase1_stack.py --chat
+python run_v2_stack.py --chat
+```
+
+**Phase 2 联调（TUI 默认 v2 connection）**：
+
+```bash
+python run_v2_stack.py --chat
+```
+
+---
+
+### 3.10 v2 Connection（Client Plane）
+
+- **`POST /v1/connections`**
+- **请求体**：
+  - **`agent_id`**：`string | null`（可选；缺省 Backend **`AGENT_ID`**）
+  - **`conn_type`**：`user_tui` | `web_ui` | `api_client` | `a2a_caller` | `a2a_callee` | `proxy`（默认 **`user_tui`**）
+- **响应体**：
+  - **`connection_id`**：`string`（形如 `conn-...`，同时作为 SSE 分桶 ID）
+  - **`agent_id`** / **`conn_type`**
+  - **`expires_at`**：Unix 时间戳（默认 TTL **`V2_CONNECTION_TTL_SECONDS`**，86400）
+
+**v2 Client 典型流程**：
+
+```text
+POST /v1/connections  →  connection_id
+POST /v1/sessions     →  session_id（S3 起可带 connection_id）
+GET  /v1/streams?connection_id=...
+POST /v1/messages     { connection_id, session_id, ... }
+```
+
+**`GET /v1/streams`**：**必填** `connection_id`（须为有效、未过期的 connection）。
+
+**`POST /v1/messages`**：**必填** **`connection_id`**；自动将 `session_id` 绑定到该 connection。
+
+SSE JSON 帧携带顶层 **`connection_id`**、**`agent_id`**、**`body_id`**、**`execution_id`**（后三者来自 Session 绑定与 Execution 记录）。
+
+---
+
 ## 4. SSE 事件格式
 
 单条帧：
 
 ```text
 event: <event_type>
-data: {"client_id":"...","session_id":"...","type":"<event_type>","seq":0,"ts":"...","data":{...}}
+data: {"connection_id":"...","session_id":"...","connection_id":"...","agent_id":"...","body_id":"...","execution_id":"...","type":"<event_type>","seq":0,"ts":"...","data":{...}}
 
 ```
 
@@ -346,6 +527,7 @@ data: {"client_id":"...","session_id":"...","type":"<event_type>","seq":0,"ts":"
   - **`tool_call_id`** / **`tool_name`**：`string | null`
   - **`display_type`**：默认 **`normal_text`**
   - **`rejected`** / **`interrupted_by_user_message`** / **`partial`**：`bool`
+  - **`execution_id`**：`string | null`（v2；HITL 关联，亦见顶层 **`StreamEvent.execution_id`**）
 - **`approval_required`**
   - **`approval_type`**：默认 **`execute_tool`**
   - **`content`**：string（来自 payload 的 **`message`** 字段）
@@ -363,7 +545,7 @@ data: {"client_id":"...","session_id":"...","type":"<event_type>","seq":0,"ts":"
 
 ### 4.2 `meta` 字段
 
-各事件的 **`data.meta`** 由 **`base_meta`**（如 **`session_id`**、**`model`**）与事件 **`envelope.meta`** 合并得到。
+各事件的 **`data.meta`** 由 **`base_meta`**（如 **`session_id`**、**`model`**）与事件 **`envelope.meta`** 合并得到。v2 路径下 API 层还会写入 **`agent_id`**、**`body_id`**、**`connection_id`**、**`execution_id`**（与 `StreamEvent` 顶层字段一致，便于嵌套 `data.data` 消费者读取）。
 
 ---
 
@@ -371,7 +553,7 @@ data: {"client_id":"...","session_id":"...","type":"<event_type>","seq":0,"ts":"
 
 | 场景 | 常见状态码 |
 |------|------------|
-| Pydantic / 参数校验失败（如 **`message` 缺 `content`**、**`/streams` 缺 `client_id`**） | **422** |
+| Pydantic / 参数校验失败（如 **`message` 缺 `content`**、**`/streams` 缺 `connection_id`**） | **422** |
 | 业务/容量/队列等失败（`HTTPException` 或编排外异常经服务转换） | **400**，`detail` 为字符串 |
 | **`GET /metrics`** 未注册（指标关闭） | **404** |
 
@@ -394,8 +576,8 @@ data: {"client_id":"...","session_id":"...","type":"<event_type>","seq":0,"ts":"
 
 ## 7. 联调建议
 
-1. 启动后生成并长期持有 **`client_id`**，建立 **`GET /v1/streams?client_id=...`** 单连接。  
-2. **`POST /v1/messages`** 使用 **同一 `client_id`**，否则可能 **收不到 SSE**。  
+1. **`POST /v1/connections`** 获取并长期持有 **`connection_id`**，建立 **`GET /v1/streams?connection_id=...`** 单连接。  
+2. **`POST /v1/messages`** 使用 **同一 `connection_id`**，否则可能 **收不到 SSE**。  
 3. 按 SSE 包内 **`session_id`** 在前端分流会话 UI。  
 4. 排障顺序：**`/health`** → **`/streams`** 是否建立 → **`/v1/messages`** 与事件是否闭环到 **`done`**。
 

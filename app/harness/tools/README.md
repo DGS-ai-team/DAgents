@@ -10,7 +10,7 @@
 | **`skills.py`** | 技能生命周期工具：**`load_skills`**（整组替换/空数组清空）、**`unload_skills`**（移除指定已加载技能）、**`clear_skills`**（清空会话技能） |
 | **`result_policy.py`** | 工具结果过滤/压缩：模型上下文、SSE 展示与原始落盘引用三路分离 |
 | **`async_tasks.py`** | 异步工具任务查询与取消：**`async_tool_status`** / **`async_tool_cancel`** |
-| **`triggers.py`** | 触发器控制面工具：**`trigger_list`** / **`trigger_get`** / **`trigger_create`** / **`trigger_update`** / **`trigger_delete`** / **`trigger_fire`**，供 Agent 管理和唤起受治理的自主行动入口 |
+| **`triggers.py`** | 触发器控制面工具：**`trigger_list`** / **`trigger_get`** / **`trigger_create`** / **`trigger_update`** / **`trigger_delete`** / **`trigger_fire`**，供 Agent 管理和唤起受治理的自主行动入口；`condition` 在 Python 运行时支持 `interval_seconds` / `fire_at`，Go Node 另支持 `schedule` + 可选 `cmd`（见 [`node/internal/triggers/README.md`](../../../node/internal/triggers/README.md)） |
 | **`agent_peer.py`** | Agent 间协作工具：**`agent_discover`**（内含固定结构 `agent_card`，含访问 URL/端口） / **`agent_send_message`**（异步后台提交，结构化汇总对端 SSE，含 `approvals` 摘要与真实 `task.state`） / **`agent_broadcast`**（并发收集分组目标输出，按目标聚合 `approvals` 与 `final_state`） / **`agent_peer_approve_tools`**（对端 `approval_required` 后提交 `approve/reject/selection` 决策，并继续收集对端 SSE） |
 | **`async_store.py`** | 异步工具结果仓库：托管后台协程任务，记录 `job_id/status/result/error` |
 | **`REFERENCE.md`** | 本目录 Python 符号索引 |

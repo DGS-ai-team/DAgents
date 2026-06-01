@@ -1,4 +1,4 @@
-"""FastAPI 网关：所有客户端通过 HTTP 调用 AgentService。"""
+"""FastAPI 网关：HTTP 调用 AgentService（**已弃用**，见 ``app/deprecated_backend``）。"""
 
 from __future__ import annotations
 
@@ -14,9 +14,18 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteResponse
 
 from app.config.runtime_layout import triggers_store_path
 from app.config.settings import get_settings
+from app.deprecated_backend import (
+    DEPRECATED_BACKEND_NOTICE_EN,
+    DEPRECATED_BACKEND_NOTICE_ZH,
+    health_deprecation_fields,
+    log_deprecation_warning,
+)
 from app.harness.queue.message_queue import MessageEnvelope, MessagePriority
 from app.harness.service.agent_service import AgentService
 from app.harness.streaming.events import InMemoryEventBus, StreamEvent
@@ -37,6 +46,17 @@ from app.schemas.agent_peer import parse_agent_peer_envelope_from_text
 
 _A2A_TOKEN_HEADER = "x-dagents-a2a-token"
 _logger = logging.getLogger(__name__)
+
+
+class _DeprecationHeaderMiddleware(BaseHTTPMiddleware):
+    """为所有 HTTP 响应附加弃用标记头（不修改响应体）。"""
+
+    async def dispatch(self, request: StarletteRequest, call_next) -> StarletteResponse:
+        response = await call_next(request)
+        response.headers["Deprecation"] = "true"
+        response.headers["X-DAgents-Backend"] = "python-deprecated"
+        response.headers["X-DAgents-Successor"] = "go-agent-node"
+        return response
 
 
 class MessageIn(BaseModel):
@@ -312,6 +332,7 @@ async def _registry_heartbeat_loop(stop_event: asyncio.Event) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_deprecation_warning(_logger)
     s = get_settings(reload=True)
     bus = InMemoryEventBus()
 
@@ -395,7 +416,13 @@ def create_app() -> FastAPI:
     - 启动时会向应用实例挂载路由与中间件。
     """
     s = get_settings()
-    app = FastAPI(title="DAgents API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="DAgents API (deprecated)",
+        version="0.2.0",
+        description=f"{DEPRECATED_BACKEND_NOTICE_ZH}\n\n{DEPRECATED_BACKEND_NOTICE_EN}",
+        lifespan=lifespan,
+    )
+    app.add_middleware(_DeprecationHeaderMiddleware)
     cors_origins = s.api_cors_allow_origins or ["http://localhost:5173", "http://127.0.0.1:5173"]
     allow_all_origins = "*" in cors_origins
     # 允许前端 dev server 进行跨域预检与正式请求；当前不依赖 cookie 凭证。
@@ -408,8 +435,8 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> dict[str, Any]:
+        return {"status": "ok", **health_deprecation_fields()}
 
     if s.metrics_enabled:
 

@@ -4,7 +4,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import Any
-from uuid import uuid4
 
 from app.cli.api_client import DAgentsApiClient, StreamEvent
 from app.cli.approval import (
@@ -25,6 +24,7 @@ from app.cli.render import (
     TranscriptUpdate,
     format_assistant_delta,
     format_assistant_end,
+    format_context_compression,
     format_error,
     format_reasoning,
     format_tool_call,
@@ -56,12 +56,12 @@ class SessionController:
         *,
         api_base: str,
         session_id: str | None,
-        client_id: str | None,
         show_reasoning: bool,
+        config_path: str | None = None,
     ) -> None:
         self.api_base = api_base
+        self.config_path = config_path
         self.initial_session_id = session_id
-        self.client_id = client_id or f"cli-{uuid4().hex[:12]}"
         self.show_reasoning = show_reasoning
         self.session_id = ""
         self._client: DAgentsApiClient | None = None
@@ -81,6 +81,31 @@ class SessionController:
         self._sse_connected = False
         self._approval_lock = asyncio.Lock()
         self._user_information_lock = asyncio.Lock()
+        self._last_event_seq = 0
+        self._turn_seq_fence = 0
+        self._sse_ready = asyncio.Event()
+
+    def _event_seq(self, event: StreamEvent) -> int:
+        """从 SSE id 或 envelope.seq 解析事件序号。"""
+        if event.event_id:
+            try:
+                return int(event.event_id)
+            except ValueError:
+                pass
+        raw = event.payload.get("seq")
+        if isinstance(raw, int):
+            return raw
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 0
+
+    def _is_stale_stream_event(self, event: StreamEvent) -> bool:
+        """submit 之后仍可能收到 replay 的历史事件，须忽略 turn 栅栏与 transcript。"""
+        seq = self._event_seq(event)
+        if seq > 0:
+            self._last_event_seq = max(self._last_event_seq, seq)
+        return seq > 0 and seq <= self._turn_seq_fence
 
     def on_transcript(self, callback: TranscriptCallback) -> None:
         """注册 transcript 更新回调。"""
@@ -103,13 +128,18 @@ class SessionController:
         return self._sse_connected
 
     async def start(self) -> None:
-        """连接后端并启动 SSE pump 与 render 循环。"""
+        """连接 Agent Node 并启动 SSE pump 与 render 循环。"""
         self._client = DAgentsApiClient(self.api_base)
         if not await self._client.health():
-            raise RuntimeError(f"backend health check failed: {self.api_base}/health")
+            raise RuntimeError(f"node health check failed: {self.api_base}/health")
+        self._sse_ready.clear()
         self.session_id = await self._client.create_session(self.initial_session_id)
         self._stream_task = asyncio.create_task(self._pump_stream())
         self._render_task = asyncio.create_task(self._render_loop())
+        try:
+            await asyncio.wait_for(self._sse_ready.wait(), timeout=15.0)
+        except TimeoutError as exc:
+            raise RuntimeError("SSE subscription timed out") from exc
         self._emit_status()
 
     async def stop(self) -> None:
@@ -126,49 +156,26 @@ class SessionController:
     async def submit_message(self, content: str) -> None:
         """投递用户消息并标记等待本轮 turn 完成。"""
         assert self._client is not None
+        if not self._sse_ready.is_set():
+            raise RuntimeError("SSE not ready")
         self._reset_user_turn_wait()
         await self._client.submit_message(
             session_id=self.session_id,
-            client_id=self.client_id,
             content=content,
         )
 
-    async def wait_user_turn(self) -> None:
+    async def wait_user_turn(self, *, timeout_seconds: float = 300.0) -> None:
         """阻塞直到本轮用户消息对应的 turn 收到 done（含 approval skip 语义）。"""
         if not self._awaiting_user_turn:
             return
-        await self._user_turn_done.wait()
-
-    async def bind_triggers_to_client(self) -> int:
-        """将当前 session 下 client_id 缺失或不匹配的 trigger 绑定到本 CLI client_id。
-
-        Returns:
-            成功 PATCH 的 trigger 数量。
-        """
-        assert self._client is not None
-        result = await self._client.list_triggers()
-        triggers = result.get("triggers")
-        if not isinstance(triggers, list):
-            return 0
-        bound = 0
-        for raw in triggers:
-            if not isinstance(raw, dict):
-                continue
-            trigger_id = str(raw.get("trigger_id") or "").strip()
-            target_session = str(raw.get("target_session_id") or "").strip()
-            existing_client = str(raw.get("client_id") or "").strip()
-            if not trigger_id:
-                continue
-            if target_session and target_session != self.session_id:
-                continue
-            if existing_client == self.client_id:
-                continue
-            await self._client.patch_trigger(
-                trigger_id,
-                {"target_session_id": self.session_id, "client_id": self.client_id},
-            )
-            bound += 1
-        return bound
+        try:
+            await asyncio.wait_for(self._user_turn_done.wait(), timeout=timeout_seconds)
+        except TimeoutError as exc:
+            self._awaiting_user_turn = False
+            self._user_turn_done.set()
+            raise RuntimeError(
+                f"turn timed out after {int(timeout_seconds)}s (no done event; check SSE / node logs)"
+            ) from exc
 
     async def clear_context(self) -> dict[str, Any]:
         """清空当前 session 的服务端对话上下文。
@@ -184,15 +191,7 @@ class SessionController:
         return await self._client.clear_session_context(self.session_id)
 
     async def list_sessions(self) -> dict[str, Any]:
-        """查询后端当前 session 列表。
-
-        逻辑：
-        1. 调用 `GET /v1/sessions`；
-        2. 原样返回 API 响应，UI 层负责选择展示 active/persisted。
-
-        关键边界：
-        - 需已 `start()`，否则 `_client` 不存在。
-        """
+        """查询后端 session 列表（GET /v1/sessions）。"""
         assert self._client is not None
         return await self._client.list_sessions()
 
@@ -249,6 +248,7 @@ class SessionController:
         self._awaiting_user_turn = True
         self._user_turn_started = False
         self._submit_pending_marker = True
+        self._turn_seq_fence = self._last_event_seq
         self._user_turn_done.clear()
 
     def _emit_transcript(self, update: TranscriptUpdate) -> None:
@@ -259,9 +259,16 @@ class SessionController:
         if self._status_cb is None:
             return
         sse = "connected" if self._sse_connected else "disconnected"
-        self._status_cb(
-            f"api={self.api_base} session={self.session_id} client={self.client_id} sse={sse}"
+        parts = [f"api={self.api_base}"]
+        if self.config_path:
+            parts.append(f"config={self.config_path}")
+        parts.extend(
+            [
+                f"session={self.session_id}",
+                f"sse={sse}",
+            ]
         )
+        self._status_cb(" ".join(parts))
 
     def _mark_user_turn_content_seen(self) -> None:
         """submit 之后首次见到 assistant/tool 等内容事件，标记用户 turn 已开始。"""
@@ -272,10 +279,14 @@ class SessionController:
     async def _pump_stream(self) -> None:
         """后台 SSE 读取，过滤 session 后入队。"""
         assert self._client is not None
-        self._sse_connected = True
-        self._emit_status()
         try:
-            async for event in self._client.stream_events(client_id=self.client_id):
+            stream = self._client.stream_events(session_id=self.session_id)
+            async for event in stream:
+                if event.is_stream_ready:
+                    self._sse_connected = True
+                    self._sse_ready.set()
+                    self._emit_status()
+                    continue
                 if event.session_id and event.session_id != self.session_id:
                     continue
                 await self._events.put(event)
@@ -301,6 +312,8 @@ class SessionController:
                     payload={"session_id": self.session_id, "data": {}},
                 )
             )
+            if not self._sse_ready.is_set():
+                self._sse_ready.set()
         finally:
             self._sse_connected = False
             self._emit_status()
@@ -315,6 +328,10 @@ class SessionController:
 
     async def _handle_stream_event(self, event: StreamEvent, skip_holder: dict[str, bool]) -> None:
         """处理单条 SSE 事件并更新 UI / turn 状态。"""
+        if event.is_stream_ready:
+            return
+        if self._is_stale_stream_event(event):
+            return
         data = event.data
         event_type = event.event_type
 
@@ -345,18 +362,27 @@ class SessionController:
         elif event_type == "tool_result":
             self._ensure_assistant_end()
             self._emit_transcript(format_tool_result(data))
+        elif event_type in {"context_compression_blocking", "context_compression_silent"}:
+            self._ensure_assistant_end()
+            self._emit_transcript(format_context_compression(event_type, data))
         elif event_type == "error":
             self._ensure_assistant_end()
             message = str(data.get("message") or "unknown error")
             self._emit_transcript(format_error(message))
+            if self._awaiting_user_turn:
+                self._awaiting_user_turn = False
+                self._user_turn_done.set()
         elif event_type == "done":
             self._ensure_assistant_end()
             self._done_counter += 1
             if skip_holder["v"]:
                 skip_holder["v"] = False
-            elif self._awaiting_user_turn and self._user_turn_started:
-                self._awaiting_user_turn = False
-                self._user_turn_done.set()
+            elif self._awaiting_user_turn:
+                seq = self._event_seq(event)
+                # seq > fence 表示 submit 之后的新 turn 已结束（即使 assistant 增量被漏收）。
+                if self._user_turn_started or seq > self._turn_seq_fence:
+                    self._awaiting_user_turn = False
+                    self._user_turn_done.set()
 
     async def _handle_approval(self, data: dict[str, Any]) -> bool:
         """处理 approval_required：回调 UI 审批并 submit resume；返回是否 skip 下一条 done。"""
@@ -372,7 +398,6 @@ class SessionController:
             assert self._client is not None
             await self._client.submit_resume(
                 session_id=self.session_id,
-                client_id=self.client_id,
                 resume_value=decision.to_resume_value(),
             )
             return True
@@ -398,7 +423,6 @@ class SessionController:
             assert self._client is not None
             await self._client.submit_resume(
                 session_id=self.session_id,
-                client_id=self.client_id,
                 resume_value=answer.to_resume_value(),
             )
             return True

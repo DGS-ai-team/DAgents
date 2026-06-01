@@ -1,4 +1,4 @@
-"""独立 Agent 服务（常驻进程）。"""
+"""独立 Agent 服务（常驻进程，**已弃用** — 替代方案见 ``app/deprecated_backend``）。"""
 
 from __future__ import annotations
 

@@ -10,6 +10,14 @@ ask_user_information=never
 agent_discover=never
 load_skills=never
 
+# --- 触发器 ---
+trigger_list=never
+trigger_get=never
+trigger_create=always
+trigger_update=always
+trigger_delete=always
+trigger_fire=always
+
 # --- 必须审批：写盘、改会话、跨 Agent、执行 shell ---
 write_file=always
 search_replace=always

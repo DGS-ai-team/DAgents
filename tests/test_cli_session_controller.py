@@ -28,7 +28,6 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         self.controller = SessionController(
             api_base="http://test",
             session_id="s1",
-            client_id="c1",
             show_reasoning=False,
         )
         self.controller.session_id = "s1"
@@ -94,38 +93,6 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.wait_for(wait_task, timeout=1.0)
         mock_client.submit_resume.assert_awaited_once()
-
-
-class SessionControllerBindTriggersTests(unittest.IsolatedAsyncioTestCase):
-    async def test_bind_triggers_patches_matching_session(self) -> None:
-        """bind_triggers_to_client 应 PATCH 同 session 且 client_id 不匹配的 trigger。"""
-        controller = SessionController(
-            api_base="http://test",
-            session_id="s1",
-            client_id="cli-1",
-            show_reasoning=False,
-        )
-        controller.session_id = "s1"
-        mock_client = MagicMock()
-        mock_client.list_triggers = AsyncMock(
-            return_value={
-                "triggers": [
-                    {"trigger_id": "t1", "target_session_id": "s1", "client_id": "trigger-t1"},
-                    {"trigger_id": "t2", "target_session_id": "other", "client_id": ""},
-                    {"trigger_id": "t3", "target_session_id": "s1", "client_id": "cli-1"},
-                ]
-            }
-        )
-        mock_client.patch_trigger = AsyncMock(return_value={})
-        controller._client = mock_client
-
-        bound = await controller.bind_triggers_to_client()
-
-        self.assertEqual(bound, 1)
-        mock_client.patch_trigger.assert_awaited_once_with(
-            "t1",
-            {"target_session_id": "s1", "client_id": "cli-1"},
-        )
 
 
 if __name__ == "__main__":

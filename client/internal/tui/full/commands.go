@@ -1,0 +1,273 @@
+package full
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
+	"github.com/DGS-ai-team/DAgents/client/internal/version"
+	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
+)
+
+func (m *model) execCommand(line string) (quit bool, err error) {
+	parts := strings.Fields(line)
+	if len(parts) == 0 {
+		return false, nil
+	}
+	cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
+	switch cmd {
+	case "help", "h", "?":
+		m.transcript.Add("[system] " + strings.TrimSpace(`命令: /status /context /sessions /switch /new /clear /cancel /skill /tools /reasoning /quit`))
+		m.syncViewport()
+	case "context":
+		err = m.enterContextView()
+	case "skill":
+		err = m.handleSkillCommand(parts[1:])
+	case "status":
+		err = m.appendStatus()
+	case "sessions", "ls":
+		err = m.appendSessions()
+	case "switch":
+		if len(parts) < 2 {
+			return false, fmt.Errorf("用法: /switch <session_id>")
+		}
+		err = m.switchSession(parts[1])
+	case "new":
+		err = m.switchSession("")
+	case "clear":
+		err = m.client.ClearSessionContext(m.ctx, m.currentSession())
+		if err == nil {
+			m.transcript.Add("[system] 已清空对话上下文")
+			m.syncViewport()
+		}
+	case "cancel":
+		err = m.cancelTurn()
+		if err == nil {
+			m.awaitingTurn = false
+			m.statusLine = "已取消在途 turn"
+		}
+	case "tools":
+		if len(parts) > 1 && strings.EqualFold(parts[1], "verbose") {
+			m.toolFold.SetVerbose(true)
+			m.statusLine = "tool 输出：详细"
+		} else if len(parts) > 1 && strings.EqualFold(parts[1], "brief") {
+			m.toolFold.SetVerbose(false)
+			m.statusLine = "tool 输出：折叠"
+		} else {
+			mode := "折叠"
+			if m.toolFold.Verbose() {
+				mode = "详细"
+			}
+			m.statusLine = "tool 输出: " + mode
+		}
+	case "reasoning":
+		if len(parts) > 1 {
+			switch strings.ToLower(parts[1]) {
+			case "on", "true", "1":
+				m.showReasoning = true
+			case "off", "false", "0":
+				m.showReasoning = false
+			default:
+				return false, fmt.Errorf("用法: /reasoning on|off")
+			}
+		}
+		mode := "关闭"
+		if m.showReasoning {
+			mode = "开启"
+		}
+		m.statusLine = "reasoning 显示: " + mode
+	case "quit", "exit", "q":
+		return true, nil
+	default:
+		return false, fmt.Errorf("未知命令 %q", cmd)
+	}
+	return false, err
+}
+
+func (m *model) enterContextView() error {
+	ctxBody, err := m.client.GetSessionContext(m.ctx, m.currentSession())
+	if err != nil {
+		return err
+	}
+	m.contextText = tuishared.FormatSessionContext(ctxBody)
+	m.contextMode = true
+	m.helpLine = "Esc 返回聊天记录"
+	m.viewport.SetContent(m.contextText)
+	m.statusLine = "context 视图"
+	return nil
+}
+
+func (m *model) exitContextView() {
+	m.contextMode = false
+	m.contextText = ""
+	m.helpLine = "Enter 发送 · Shift+Enter 换行 · Esc 取消 turn · /help 命令 · /quit 退出"
+	m.syncViewport()
+	m.statusLine = ""
+}
+
+func (m *model) handleSkillCommand(args []string) error {
+	sid := m.currentSession()
+	if len(args) == 0 {
+		sk, err := m.client.ListSessionSkills(m.ctx, sid)
+		if err != nil {
+			return err
+		}
+		m.transcript.Add("[system] " + tuishared.FormatSessionSkills(sk))
+		m.syncViewport()
+		return nil
+	}
+	switch strings.ToLower(args[0]) {
+	case "load":
+		if len(args) < 2 {
+			return fmt.Errorf("用法: /skill load NAME")
+		}
+		sk, err := m.client.LoadSessionSkill(m.ctx, sid, args[1])
+		if err != nil {
+			return err
+		}
+		m.transcript.Add("[system] 已加载 skill " + args[1])
+		m.transcript.Add("[system] " + tuishared.FormatSessionSkills(sk))
+		m.syncViewport()
+	case "unload":
+		if len(args) < 2 {
+			return fmt.Errorf("用法: /skill unload NAME")
+		}
+		sk, err := m.client.UnloadSessionSkill(m.ctx, sid, args[1])
+		if err != nil {
+			return err
+		}
+		m.transcript.Add("[system] 已卸载 skill " + args[1])
+		m.transcript.Add("[system] " + tuishared.FormatSessionSkills(sk))
+		m.syncViewport()
+	default:
+		return fmt.Errorf("未知 skill 子命令 %q（可用 load/unload）", args[0])
+	}
+	return nil
+}
+
+func (m *model) switchSession(requested string) error {
+	m.stopStream()
+	id, err := m.client.CreateSession(m.ctx, requested)
+	if err != nil {
+		return err
+	}
+	m.sessionMu.Lock()
+	m.sessionID = id
+	m.sessionMu.Unlock()
+	m.awaitingTurn = false
+	m.submitSeen = false
+	m.transcript.Add("[system] 已切换 session=" + id)
+	m.syncViewport()
+	m.restartStream()
+	m.statusLine = "session 已切换"
+	return nil
+}
+
+func (m *model) appendStatus() error {
+	ctxBody, err := m.client.GetSessionContext(m.ctx, m.currentSession())
+	if err != nil {
+		return err
+	}
+	line := fmt.Sprintf(
+		"status agent=%s node=%s client=%s msgs=%d queue=%d active_turn=%v",
+		m.probe.AgentID, m.probe.Version, version.Version,
+		ctxBody.MessagesCount, ctxBody.QueuePending, ctxBody.HasActiveTurn,
+	)
+	if ctxBody.TurnState != "" {
+		line += " state=" + ctxBody.TurnState
+	}
+	m.transcript.Add("[system] " + line)
+	m.syncViewport()
+	return nil
+}
+
+func (m *model) appendSessions() error {
+	items, err := m.client.ListSessions(m.ctx)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		m.transcript.Add("[system] (无 session)")
+		m.syncViewport()
+		return nil
+	}
+	cur := m.currentSession()
+	for _, s := range items {
+		mark := " "
+		if s.SessionID == cur {
+			mark = "*"
+		}
+		preview := s.FirstUserMessage
+		if len(preview) > 40 {
+			preview = preview[:40] + "..."
+		}
+		m.transcript.Add(fmt.Sprintf("[system] %s %s msgs=%d %s", mark, s.SessionID, s.MessageCount, preview))
+	}
+	m.syncViewport()
+	return nil
+}
+
+func (m *model) restartStream() {
+	m.stopStream()
+	streamCtx, cancel := context.WithCancel(m.ctx)
+	m.streamCancel = cancel
+	m.streamDone = make(chan struct{})
+	go func() {
+		defer close(m.streamDone)
+		runSSELoop(streamCtx, m)
+	}()
+}
+
+func (m *model) stopStream() {
+	if m.streamCancel == nil {
+		return
+	}
+	m.streamCancel()
+	<-m.streamDone
+	m.streamCancel = nil
+}
+
+func runSSELoop(ctx context.Context, m *model) {
+	const reconnectDelay = 5 * time.Second
+	lastSeq := 0
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		fromSeq := lastSeq
+		m.sseConnected = true
+		m.sseDetail = "订阅中"
+		if m.program != nil {
+			m.program.Send(refreshViewportMsg{})
+		}
+
+		err := m.client.StreamEvents(ctx, m.currentSession(), fromSeq, func(ev nodeapi.StreamEvent) bool {
+			if ev.Seq > lastSeq {
+				lastSeq = ev.Seq
+			}
+			m.onStreamEvent(ev)
+			return true
+		})
+		m.sseConnected = false
+		if ctx.Err() != nil {
+			return
+		}
+		detail := "已断开"
+		if err != nil {
+			detail = fmt.Sprintf("断开: %v", err)
+		}
+		m.sseDetail = detail + " · " + strconv.Itoa(int(reconnectDelay.Seconds())) + "s 后重连"
+		if m.program != nil {
+			m.program.Send(streamErrMsg{line: m.sseDetail})
+			m.program.Send(refreshViewportMsg{})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(reconnectDelay):
+		}
+	}
+}

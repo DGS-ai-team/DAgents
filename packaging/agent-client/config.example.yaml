@@ -1,0 +1,61 @@
+# config.example.yaml — Agent Node 与 Client 共用配置（可提交仓库）
+#
+# 本地使用：
+#   cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
+#   # 编辑 config.yaml（如 llm.mock: false、agent_id 等）；config.yaml 已在 .gitignore 中
+#
+# 开发联调也可直接引用本文件（默认 llm.mock=true，无需 API Key）：
+#   go run ./node/cmd/dagents-node -config packaging/agent-client/config.example.yaml
+
+agent_id: ops-linux-01  # 可选；缺省时自动生成并写入 .runtime/agent/agent_id
+
+listen:
+  host: 127.0.0.1
+  port: 18765
+
+local:
+  endpoint: http://127.0.0.1:18765
+
+expose_to_peers: false
+
+# 工具可访问的文件根；运行时目录见 .gitignore 中的 .runtime/
+fs_root: ./.runtime
+
+llm:
+  provider: openai
+  base_url: https://api.openai.com/v1
+  model: gpt-4.1
+  # 真实 LLM：设 mock: false，并 export OPENAI_API_KEY（或改 api_key_env）
+  api_key_env: OPENAI_API_KEY
+  mock: true
+  max_tool_loops: 16
+
+manage:
+  enabled: false
+
+# 工具审批策略位于 .runtime/policy/（首次启动从 packaging/runtime/policy 种子复制）
+# 编辑 tool.approval.txt 与 shell/*.approval.txt 即可调整审批规则。
+
+data_dir: ./.runtime/data
+
+skills:
+  enabled: true
+  max_in_prompt: 3
+  root: ./.runtime/skills
+
+compression:
+  silent_trigger_tokens: 4000
+  blocking_trigger_tokens: 8000
+
+triggers:
+  enabled: true
+  poll_seconds: 5
+  # store_path: ./.runtime/triggers/triggers.json
+
+# 原始消息 JSONL 审计（对齐 Python AGENT_RAW_MESSAGE_HISTORY_ENABLED，默认 true）
+# raw_message_history:
+#   enabled: true
+
+# Node stderr 日志级别：debug | info | warn | error
+log:
+  level: info

@@ -12,8 +12,8 @@ def run_chat(args: argparse.Namespace) -> int:
     controller = SessionController(
         api_base=args.api,
         session_id=args.session,
-        client_id=args.client_id,
         show_reasoning=args.show_reasoning,
+        config_path=getattr(args, "config_path", None),
     )
 
     async def _main() -> None:

@@ -1,6 +1,6 @@
 # 触发器（条件唤起 Agent）设计方案
 
-本文在 **DAgents 现有进程内队列 + `AgentService.submit_message`** 之上，描述 **触发器（Trigger）** 的 **目标边界、按模块的职责划分、调度与基类协议、动态注册（Agent 友好）以及 `session_id` / `client_id` / 消息回流** 的约定。实现以本文件为设计基线；与代码冲突时以 **Git / CHANGELOG** 为准。
+本文在 **DAgents 现有进程内队列 + `AgentService.submit_message`** 之上，描述 **触发器（Trigger）** 的 **目标边界、按模块的职责划分、调度与基类协议、动态注册（Agent 友好）以及 `session_id` / `connection_id` / 消息回流** 的约定。实现以本文件为设计基线；与代码冲突时以 **Git / CHANGELOG** 为准。
 
 **相关索引**：[agent-input-output.md](./agent-input-output.md)（入队与 SSE）、[architecture-and-flows.md](./architecture-and-flows.md)（分层）、[roadmap.md](./roadmap.md) §3.4「触发器」。
 
@@ -11,8 +11,8 @@
 ### 1.1 现状
 
 - 客户端通过 **HTTP** 创建会话并 **`POST` 提交消息**，经校验后调用 **`AgentService.submit_message`**（见 **`app/harness/api/app.py`**）。
-- 每条会话对应进程内 **`MessageQueue`**，**串行消费**；**`MessageEnvelope`** 含 **`request_type` / `content` / `client_id` / `source`** 等（见 **`app/harness/queue/message_queue.py`**）。
-- **SSE** 按 **`session_id` + `client_id`** 分桶；无订阅方时事件仍可产生，但无人接收（见 **`docs/agent-input-output.md`**）。
+- 每条会话对应进程内 **`MessageQueue`**，**串行消费**；**`MessageEnvelope`** 含 **`request_type` / `content` / `connection_id` / `source`** 等（见 **`app/harness/queue/message_queue.py`**）。
+- **SSE** 按 **`session_id` + `connection_id`** 分桶；无订阅方时事件仍可产生，但无人接收（见 **`docs/agent-input-output.md`**）。
 
 ### 1.2 目标
 
@@ -54,7 +54,7 @@
 | **`is_enabled() -> bool`** | 调度器每 tick | 软开关；`False` 时跳过求值与触发（便于动态禁用）。 |
 | **`next_wake_after_seconds(now) -> float | None`** | 调度器 | **可选优化**：返回「最早需要再评估」的秒数；`None` 表示参与 **下一轮全局 tick**（简单轮询）。Cron/interval 可实现休眠提示，避免空转。 |
 | **`evaluate(now) -> TriggerEvalResult`** | 调度器 | **只读求值**：是否满足触发条件；**不得**在此直接 `submit_message`（便于单测与幂等去抖在调度层统一处理）。 |
-| **`build_action() -> TriggerAction`** | 调度器在 `evaluate` 为「触发」且通过幂等/去抖后 | 产出 **纯数据**：目标 **`session_id`**、**`client_id`**、**`request_type`**（`message` / `resume`）、**`content` / `resume` 载荷**、**`priority`**、**幂等键材料** 等。 |
+| **`build_action() -> TriggerAction`** | 调度器在 `evaluate` 为「触发」且通过幂等/去抖后 | 产出 **纯数据**：目标 **`session_id`**、**`connection_id`**、**`request_type`**（`message` / `resume`）、**`content` / `resume` 载荷**、**`priority`**、**幂等键材料** 等。 |
 | **`on_dispatch_result(...)`（可选）** | 投递层 | 投递成功/失败/队列满回调；用于指标或 **有限重试** 策略，**不**阻塞主消费循环过久。 |
 
 **`TriggerEvalResult`（示意）**：`skip` | `fire` | `defer_until(timestamp)`，附 **人类可读原因** 字符串供 DEBUG。
@@ -121,7 +121,7 @@
 | 路径 | Agent 友好度 | 说明 |
 |------|----------------|------|
 | **A. HTTP 管理 API（内部路由）** | 中 | 例如 **`POST /internal/triggers`** body 为 **声明式 JSON**（与静态配置子集同 schema），鉴权 **Bearer / mTLS / HMAC**；服务端 **工厂函数** `build_trigger_from_dict` → `registry.register`。适合 **GitOps 外** 的运维脚本。 |
-| **B. `@tool("register_trigger")`（受限参数）** | 高 | 暴露 **结构化参数**：`trigger_id`, `session_id`, `client_id`, `mode: interval|cron`, `interval_seconds` / `cron_expr`, `content`, `enabled`。工具实现内 **校验 + registry.register**，返回 **`trigger_id` 与下次理论唤醒说明**。模型用自然语言描述需求，工具落 **安全子集**，避免任意代码。 |
+| **B. `@tool("register_trigger")`（受限参数）** | 高 | 暴露 **结构化参数**：`trigger_id`, `session_id`, `connection_id`, `mode: interval|cron`, `interval_seconds` / `cron_expr`, `content`, `enabled`。工具实现内 **校验 + registry.register**，返回 **`trigger_id` 与下次理论唤醒说明**。模型用自然语言描述需求，工具落 **安全子集**，避免任意代码。 |
 
 **安全**：动态注册必须 **显式总开关**（如 **`AGENT_TRIGGERS_DYNAMIC_ENABLED`**）；默认 **关**；与 **`AGENT_TRIGGERS_ENABLED`** 组合。
 
@@ -173,14 +173,14 @@ flowchart LR
 
 ---
 
-## 5. `session_id`、`client_id` 与 Agent 产出如何「返回」
+## 5. `session_id`、`connection_id` 与 Agent 产出如何「返回」
 
 ### 5.1 决策表（谁决定）
 
 | 字段 | 默认谁决定 | 可选扩展 |
 |------|------------|----------|
 | **`session_id`** | **`TriggerAction` 内显式字段**（静态配置或动态注册参数绑定）；**默认**指向 **已存在** 会话。 | **`auto_create_session`** 为真时，投递前 **`create_session`** 再 **`submit_message`**（须单独开关与审计日志）。 |
-| **`client_id`** | **每条触发器配置必填或回落全局** `AGENT_TRIGGER_DEFAULT_CLIENT_ID`（如 **`trigger`**）；推荐 **`trigger:{trigger_id}`** 与 HTTP 用户 **`default`** 分离，便于 SSE 只订一方。 | Webhook 可在 **受限模板** 中覆盖为 **`body.client_id`**（白名单字段集）。 |
+| **`connection_id`** | 触发器资源 **可选** 持久化；fire 时若未配置，**`TriggerScheduler._ensure_trigger_connection`** 自动创建 **`API_CLIENT`** connection。 | Webhook 可在 **受限模板** 中覆盖为 **`body.connection_id`**（白名单字段集）。 |
 | **`source`** | 框架层写 **`trigger:{trigger_id}`**（与 §2 一致）。 | 无 |
 
 ### 5.2 触发后 Agent 消息如何「返回」
@@ -189,9 +189,9 @@ flowchart LR
 
 | 场景 | 行为 |
 |------|------|
-| **已有客户端** 对 **`(session_id, client_id)`** 建立 **`GET /v1/streams`** | 触发投递的 **`human_message`/`assistant`/…** 与人工消息 **同桶可见**，无需额外改造。 |
+| **已有客户端** 对 **`(session_id, connection_id)`** 建立 **`GET /v1/streams`** | 触发投递的 **`human_message`/`assistant`/…** 与人工消息 **同桶可见**，无需额外改造。 |
 | **无任何 SSE 订阅** | 事件照常入队、**`run_turn` 仍执行**；仅 **无人实时收流**；会话状态仍可按现有 **SQLite / 内存** 策略落盘（若开启）。 |
-| **希望「运营后台」独占看触发器产出** | 使用 **独立 `client_id`** 订阅；人在 **`default`** 桶不受干扰。 |
+| **希望「运营后台」独占看触发器产出** | 使用 **独立 `connection_id`** 订阅；人在 **`default`** 桶不受干扰。 |
 
 **首版不做的「回流增强」**（可记入 roadmap）：内部 WebSocket 桥、**按 `trigger_id` 的 Webhook 回调 URL** 把最终 assistant 文本 POST 出去等——避免与 **审批 / SSE 状态机** 强耦合。
 
@@ -224,7 +224,7 @@ triggers:
   - id: nightly_digest
     enabled: true
     session_id: "cron-demo"
-    client_id: "trigger:nightly_digest"
+    connection_id: "trigger:nightly_digest"
     schedule:
       cron: "0 8 * * *"
     action:
@@ -249,12 +249,12 @@ triggers:
 | 动态注册 | **`app/harness/triggers/dynamic.py`** + **`app/harness/tools/triggers.py`**（`@tool`） |
 | HTTP Webhook | **`app/harness/api/app.py`** + **`triggers/webhook.py`** |
 | 生命周期 | **`create_app` lifespan**：`service.start` → **`scheduler.start(service)`** → 关闭逆序 |
-| 配置 | **`app/config/settings.py`**：`agent_triggers_enabled`、`agent_triggers_config_path`、`agent_trigger_default_client_id`、`agent_triggers_dynamic_enabled`、`agent_trigger_tick_seconds`、时区等 |
+| 配置 | **`app/config/settings.py`**：`triggers_enabled`、`trigger_scheduler_poll_seconds` 等 |
 
 | 里程碑 | 交付物 |
 |--------|--------|
 | **M1** | `Trigger` ABC + **`IntervalTrigger`** + **`Registry` + `Scheduler` + `Delivery`**；静态 YAML 加载；日志。 |
-| **M2** | **`CronTrigger`** + 幂等窗口；**`client_id` / `source`** 与 **`api-reference.md`** 脚注对齐。 |
+| **M2** | **`CronTrigger`** + 幂等窗口；**`connection_id` / `source`** 与 **`api-reference.md`** 脚注对齐。 |
 | **M3** | **动态 `register_trigger` 工具** + 可选 **HTTP 内部注册**；鉴权 + 限流。 |
 | **M4** | **Webhook** + HMAC；可选 **`auto_create_session`**、Prometheus 计数器。 |
 
@@ -271,7 +271,7 @@ triggers:
 
 ## 11. 文档维护
 
-- 实现后：**`docs/api-reference.md`** 增加内部注册 / Webhook 路由；**`docs/agent-input-output.md`** 增加「触发器 **`client_id` 桶**」脚注。
+- 实现后：**`docs/api-reference.md`** 增加内部注册 / Webhook 路由；**`docs/agent-input-output.md`** 增加「触发器 **`connection_id` 桶**」脚注。
 - **`docs/roadmap.md`** §3.4 与实现状态对齐。
 
-**最后更新**：按「调度器轮询 + 触发器基类 + 动态注册 + session/client/回流」蓝图重写模块划分与推荐方案。
+**最后更新**：按「调度器轮询 + 触发器基类 + 动态注册 + session/connection/回流」蓝图重写模块划分与推荐方案。

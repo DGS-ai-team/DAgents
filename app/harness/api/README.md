@@ -1,12 +1,17 @@
 # `app/harness/api/`
 
-FastAPI 接入层：统一对外入口（浏览器或其它 HTTP 客户端）。
+> **【已弃用】** Python FastAPI Agent API。DAgentsUI / A2A 联调仍可用；新功能请实现于 **`node/internal/api/`**。
+
+FastAPI 接入层：对外 HTTP/SSE（浏览器或其它 HTTP 客户端）。
 
 **对外 HTTP/SSE 契约**（路径、字段、错误码、SSE 形状）以仓库 **`docs/api-reference.md`** 为准，与 **`app.py`** 同步维护。
 
+- 所有响应含 HTTP 头 **`Deprecation: true`**、**`X-DAgents-Backend: python-deprecated`**
+- **`GET /health`** 返回 `deprecated`、`replacement`、`deprecation_notice` 字段
+
 | 文件 | 说明 |
 |------|------|
-| **`app.py`** | FastAPI 应用与路由：健康检查、**`GET /metrics`**、session/message/SSE、触发器 CRUD 与手动 fire；**`MessageIn.priority`** 缺省 **`message`→`human`**、**`resume`→`resume`**（**`human` 仅队列优先级，不自动 cancel**）；Register Center 自登记/注销使用 **`logging`** |
+| **`app.py`** | FastAPI 应用与路由：健康检查、**`GET /metrics`**、session/message/SSE、触发器 CRUD 与手动 fire |
 
 ## 契约导出
 

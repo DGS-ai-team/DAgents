@@ -9,7 +9,7 @@
 | 类型 | 位置 | 用途 |
 |------|------|------|
 | **`ConversationContext`** | **`app/context/models.py`** | **可落库**：`openai_messages`、`pending_tool_calls`（dict 列表）、`run_turn_phase`、`messages_total_tokens`、`tool_loop_count`、`loaded_skills`，以及派生 **`history`**（人类可读摘要）。 |
-| **`OpenAIConversationContext`** | 同上 | **进程内推理权威**：`messages`（OpenAI 消息 dict 列表）、`pending_tool_calls`（**`PendingToolCall`** 对象列表）、`run_turn_phase`、`messages_total_tokens`、`tool_loop_count`、`loaded_skills`、`assistant_stream_buffer`、**`sse_client_id`** 等。 |
+| **`OpenAIConversationContext`** | 同上 | **进程内推理权威**：`messages`（OpenAI 消息 dict 列表）、`pending_tool_calls`（**`PendingToolCall`** 对象列表）、`run_turn_phase`、`messages_total_tokens`、`tool_loop_count`、`loaded_skills`、`assistant_stream_buffer`、**`sse_connection_id`** 等。 |
 
 **转换**：
 
@@ -18,7 +18,7 @@
 
 **不入库（仅推理态 / 编排层内存）**：
 
-- **`OpenAIConversationContext.sse_client_id`**：见 [agent-input-output.md](./agent-input-output.md)。
+- **`OpenAIConversationContext.sse_connection_id`**：见 [agent-input-output.md](./agent-input-output.md)。
 - **`assistant_stream_buffer`**：流式增量缓冲；取消时用 **`flush_cancelled_turn`** 收敛进 **`messages`** 或清空。
 - **压缩编排的中间态**：见 §4（**`MainAgentTurnOrchestrator`** 内 **`_session_summary_tasks`**、**`_session_pending_compression_results`**）。
 
@@ -31,7 +31,7 @@
 | 字段 | 典型写入方 | 说明 |
 |------|------------|------|
 | **`session_id`** | **`AgentService`** 装入缓存时 | 与队列 **`session_id`** 对齐。 |
-| **`sse_client_id`** | **`AgentService._handle_message`** | 入站 **`env.client_id`** 非空时刷新；不入库。 |
+| **`sse_connection_id`** | **`AgentService._handle_message`** | 入站 **`env.connection_id`** 非空时刷新；不入库。 |
 | **`messages`** | **`runtime_openai`**、**`raw_message_journal`**、编排器（tool/user/assistant 插入）、**`_try_apply_ready_compression_result`**（区间替换） | OpenAI 请求权威列表；压缩成功时 **用单条 `role=user` 摘要替换 `[start,end]` 切片**。 |
 | **`pending_tool_calls`** | **`runtime_openai`**（模型产出 tool_calls）、编排器（审批拆分、清空、执行后回填） | 与 **`tool_result` / `resume` / `async_tool_result`** 分支强相关。 |
 | **`run_turn_phase`** | **`OpenAIImplicitReActRuntime.run_turn`** | **`IDLE` → `BRANCH_RESOLVING` / `MODEL_STREAMING` / `AWAITING_TOOL_EXECUTION`** 等；见 §3。 |
@@ -120,7 +120,7 @@
 |------|------|
 | **存储粒度** | 按 **`session_id`** 一行；**`content`** BLOB 为 UTF-8 JSON，含 **`history`**、**`openai_messages`**、**`pending_tool_calls`**、**`run_turn_phase`**（已规整）、**`messages_total_tokens`**、**`tool_loop_count`**、**`loaded_skills`** 等。 |
 | **`history`** | 由 **`openai_messages`** 派生的 **`MessageRecord`** 列表，便于人类可读摘要；**`append_message`** 路径可仅追加 **`history`**（读-改-写单行）。 |
-| **与推理态差异** | **`sse_client_id`**、**`assistant_stream_buffer`**、编排器内压缩 task 等 **不写入** 该 JSON；重启进程后 **`sse_client_id`** 需由下一次带 **`client_id`** 的入站消息重新建立（见 [agent-input-output.md](./agent-input-output.md)）。 |
+| **与推理态差异** | **`sse_connection_id`**、**`assistant_stream_buffer`**、编排器内压缩 task 等 **不写入** 该 JSON；重启进程后 **`sse_connection_id`** 需由下一次带 **`connection_id`** 的入站消息重新建立（见 [agent-input-output.md](./agent-input-output.md)）。 |
 | **默认路径** | 未显式配置时常见默认指向 **`.runtime/memory/`** 下 sqlite 文件（以 **`Settings`** 与 **`resolve_runtime_root()`** 解析为准）。 |
 
 **`read_memory_file_cached`**（**`prompt.py`**）：当前实现为 **占位**，恒返回空串；未来若接入「外部记忆文件」再拼入 **`get_system_prompt`**，需在此集中实现缓存与 mtime 策略。
@@ -168,7 +168,7 @@
 | 文档 | 内容 |
 |------|------|
 | [architecture-and-flows.md](./architecture-and-flows.md) | 主流程、工具与 SSE |
-| [agent-input-output.md](./agent-input-output.md) | 入队与 SSE、`sse_client_id` |
+| [agent-input-output.md](./agent-input-output.md) | 入队与 SSE、`sse_connection_id` |
 | [api-reference.md](./api-reference.md) | HTTP 契约 |
 | **`app/core/main_agent/prompt.py`** | **`_ensure_prompt_context_files_exist`** / **`_read_prompt_context_markdown`**：侧车仅 **`.runtime/prompt_context`**，缺失时建空文件 |
 

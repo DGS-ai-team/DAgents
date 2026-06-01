@@ -183,7 +183,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="DAgents Register Center",
-        version="0.1.0",
+        version="0.2.0",
         description="用于维护 agent_id -> base_url 映射的轻量目录服务。",
     )
     store = AgentRegistryStore(persist_path=_registry_store_path())

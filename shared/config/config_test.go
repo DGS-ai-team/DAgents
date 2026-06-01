@@ -1,0 +1,164 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string) {
+	t.Helper()
+	dir := t.TempDir()
+	runtimeDir = dir
+	path := filepath.Join(dir, "config.yaml")
+	dataDir := filepath.Join(dir, "data")
+	if !strings.Contains(content, "data_dir:") {
+		content = fmt.Sprintf("data_dir: %q\n", dataDir) + content
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path, runtimeDir
+}
+
+func TestLoadFile_appliesDefaults(t *testing.T) {
+	path, runtimeDir := testConfigPath(t, "agent_id: test-agent\n")
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if cfg.AgentID != "test-agent" {
+		t.Fatalf("agent_id = %q, want test-agent", cfg.AgentID)
+	}
+	idFile := filepath.Join(runtimeDir, "agent", "agent_id")
+	raw, err := os.ReadFile(idFile)
+	if err != nil {
+		t.Fatalf("read agent_id file: %v", err)
+	}
+	if strings.TrimSpace(string(raw)) != "test-agent" {
+		t.Fatalf("agent_id file = %q, want test-agent", raw)
+	}
+	if cfg.Listen.Host != DefaultListenHost {
+		t.Fatalf("listen.host = %q, want %q", cfg.Listen.Host, DefaultListenHost)
+	}
+	if cfg.Listen.Port != DefaultListenPort {
+		t.Fatalf("listen.port = %d, want %d", cfg.Listen.Port, DefaultListenPort)
+	}
+	wantEndpoint := "http://127.0.0.1:18765"
+	if cfg.Local.Endpoint != wantEndpoint {
+		t.Fatalf("local.endpoint = %q, want %q", cfg.Local.Endpoint, wantEndpoint)
+	}
+	if cfg.LLM.MaxToolLoops != 16 {
+		t.Fatalf("llm.max_tool_loops = %d, want 16", cfg.LLM.MaxToolLoops)
+	}
+}
+
+func TestLoadFile_autoGeneratesAgentID(t *testing.T) {
+	path, runtimeDir := testConfigPath(t, "listen:\n  port: 8080\n")
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if strings.TrimSpace(cfg.AgentID) == "" {
+		t.Fatal("expected generated agent_id")
+	}
+	idFile := filepath.Join(runtimeDir, "agent", "agent_id")
+	raw, err := os.ReadFile(idFile)
+	if err != nil {
+		t.Fatalf("read agent_id file: %v", err)
+	}
+	if strings.TrimSpace(string(raw)) != cfg.AgentID {
+		t.Fatalf("file agent_id = %q, cfg = %q", raw, cfg.AgentID)
+	}
+}
+
+func TestLoadFile_readsAgentIDFromFile(t *testing.T) {
+	path, runtimeDir := testConfigPath(t, "agent_id: yaml-should-not-win\n")
+	idFile := filepath.Join(runtimeDir, "agent", "agent_id")
+	if err := os.MkdirAll(filepath.Dir(idFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(idFile, []byte("from-file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if cfg.AgentID != "from-file" {
+		t.Fatalf("agent_id = %q, want from-file", cfg.AgentID)
+	}
+}
+
+func TestLoadFile_expandsEnv(t *testing.T) {
+	path, runtimeDir := testConfigPath(t, "agent_id: ${TEST_DAGENTS_AGENT_ID}\n")
+	t.Setenv("TEST_DAGENTS_AGENT_ID", "from-env")
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if cfg.AgentID != "from-env" {
+		t.Fatalf("agent_id = %q, want from-env", cfg.AgentID)
+	}
+	raw, err := os.ReadFile(filepath.Join(runtimeDir, "agent", "agent_id"))
+	if err != nil {
+		t.Fatalf("read agent_id file: %v", err)
+	}
+	if strings.TrimSpace(string(raw)) != "from-env" {
+		t.Fatalf("agent_id file = %q, want from-env", raw)
+	}
+}
+
+func TestRawMessageHistoryEnabled_envOverridesYAML(t *testing.T) {
+	path, _ := testConfigPath(t, "agent_id: test-agent\nraw_message_history:\n  enabled: true\n")
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	t.Setenv(EnvRawMessageHistoryEnabled, "false")
+	if cfg.RawMessageHistoryEnabled() {
+		t.Fatal("expected env false to disable journal")
+	}
+}
+
+func TestRawMessageHistoryDir(t *testing.T) {
+	path, runtimeDir := testConfigPath(t, "agent_id: test-agent\n")
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	want := filepath.Join(runtimeDir, "history")
+	if cfg.RawMessageHistoryDir() != want {
+		t.Fatalf("RawMessageHistoryDir = %q, want %q", cfg.RawMessageHistoryDir(), want)
+	}
+}
+
+func TestLoadFile_envAgentIDOverridesFile(t *testing.T) {
+	path, runtimeDir := testConfigPath(t, "")
+	idFile := filepath.Join(runtimeDir, "agent", "agent_id")
+	if err := os.MkdirAll(filepath.Dir(idFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(idFile, []byte("old-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvAgentID, "env-wins")
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if cfg.AgentID != "env-wins" {
+		t.Fatalf("agent_id = %q, want env-wins", cfg.AgentID)
+	}
+	raw, _ := os.ReadFile(idFile)
+	if strings.TrimSpace(string(raw)) != "env-wins" {
+		t.Fatalf("agent_id file = %q, want env-wins", raw)
+	}
+}

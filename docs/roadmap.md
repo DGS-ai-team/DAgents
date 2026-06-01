@@ -27,8 +27,9 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
-| **0.1.0** | **已发布** | 首个对外标记版本：核心 API、可选 SQLite、SSE、指标、Register Center（内存）、文档与单测基线（见 **CHANGELOG**）。 |
-| **0.x** | **进行中** | 以企业本地闭环为主线，在 **1.0** 前允许不兼容调整；重要变更写入 **CHANGELOG**。 |
+| **0.2.0** | **已发布** | Go Agent Node + Client 本地助手主线；Python Agent 运行时弃用标记；触发器日历调度；文档双栈重组（见 **CHANGELOG**）。 |
+| **0.1.0** | **已发布** | 首个对外标记版本：Python 核心 API、SQLite、SSE、Register Center、文档与单测基线。 |
+| **0.x** | **进行中** | 以 Go 本地助手 + 企业治理为主线；**1.0** 前允许不兼容调整。 |
 | **1.0** | **目标** | 企业本地闭环、Agent Directory、治理审计、触发器控制面、Skill Library 的核心 API 与配置形态相对稳定。 |
 
 ---
@@ -49,7 +50,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 - **隐式 ReAct 单轮运行时**：**`OpenAIImplicitReActRuntime.run_turn`**，工具执行与审批在编排层（见 [agent-turn-loop.md](./agent-turn-loop.md)）。
 - **工具集**：**`bash_run`**、受限 **FS** 四件套、**`load_skills`**、**`agent_peer`**、异步工具托管等（**`app/harness/tools/`**）；**当前模型可见工具名与顺序**见 [built-in-tools.md](./built-in-tools.md)。
 - **审批**：工具级策略 + **`resume_value`** 与 **`approval_required`** SSE。
-- **异步工具**：后台协程 + 结果回灌 **`async_tool_result`**；**`client_id`** 与 **`sse_client_id`** 对齐（见 **CHANGELOG [Unreleased]**）。
+- **异步工具**：后台协程 + 结果回灌 **`async_tool_result`**；**`connection_id`** 与 **`sse_connection_id`** 对齐（见 **CHANGELOG [Unreleased]**）。
 
 ### 3.3 上下文、压缩与提示词
 
@@ -190,7 +191,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 | 项 | 说明 |
 |----|------|
 | **Register Center 高可用与共享存储** | 已有默认内存表 + 可选单文件 JSON 持久化，能覆盖单实例重启恢复；多副本仍无共享状态。后续应在 Agent Directory 阶段合并设计数据库/一致性存储、鉴权、健康剔除。 |
-| **HTTP API 单测覆盖** | **0.1.0 已知限制**：未在仓库内对全部路由做自动化覆盖；后续应优先覆盖治理、审计、触发器和 Agent Directory。 |
+| **HTTP API 单测覆盖** | **0.x 已知限制**：Python API 与 Go Node 均未全路由自动化覆盖；后续应优先覆盖治理、审计、触发器与 Agent Directory。 |
 | **多运行时抽象** | 主路径深度绑定 **OpenAI SDK 形态**；短期不作为主线，除非企业私有模型接入需要统一抽象。 |
 | **触发器控制面尚未落地** | 目前仍以显式消息提交为主，尚无统一的触发器资源模型、调度器、幂等去抖、死信、触发审计和 UI。 |
 | **Skill 生命周期尚未产品化** | 当前 skills 更接近工具/提示词扩展，尚未形成可审批、可版本化、可回滚、可统计的企业 Skill Library。 |

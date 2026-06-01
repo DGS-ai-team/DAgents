@@ -1,0 +1,22 @@
+# policy.example.yaml — 工具执行策略示例（可提交仓库）
+#
+# 本地使用：
+#   cp packaging/agent-client/policy.example.yaml packaging/agent-client/policy.yaml
+#   # 在 config.yaml 中将 policy_file 指向 policy.yaml
+
+default: require_approval
+
+tools:
+  read_file: auto
+  ask_user_information: auto
+  write_file: require_approval
+  search_replace: require_approval
+  bash_run: require_approval
+  background_job_status: auto
+  background_job_cancel: require_approval
+  trigger_list: auto
+  trigger_get: auto
+  trigger_create: require_approval
+  trigger_update: require_approval
+  trigger_delete: require_approval
+  trigger_fire: require_approval

@@ -1,5 +1,5 @@
 """
-FastAPI 入口：
+FastAPI 入口（**已弃用** — Agent 运行时请优先使用 Go Node，见 ``app/deprecated_backend.py``）。
 
 用法（在 DAgents 根目录）:
   python run_agent_api.py
@@ -7,6 +7,7 @@ FastAPI 入口：
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -20,10 +21,12 @@ from app.config.host_snapshot import capture_host_snapshot_at_startup  # noqa: E
 from app.config.logging_setup import configure_app_logging, numeric_level_to_uvicorn  # noqa: E402
 from app.config.settings import get_settings  # noqa: E402
 from app.config.startup_checks import emit_linux_cross_user_shell_startup_hints  # noqa: E402
+from app.deprecated_backend import log_deprecation_warning  # noqa: E402
 from app.harness.api.app import app  # noqa: E402
 
 
 def main() -> None:
+    log_deprecation_warning(logging.getLogger("run_agent_api"))
     env = resolve_runtime_root()
     load_env(resolve_runtime_root())
     # `.env` 写入 os.environ 后再加载 Settings，并与 uvicorn 对齐日志级别。

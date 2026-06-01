@@ -37,7 +37,7 @@
 
 - 使用 **`@functools.wraps(func)`** 定义 **`_wrapped_async_tool(*args, **kwargs)`**，对外暴露的 **可调用对象** 才是注册进 **`get_tools()`** 的引用。  
 - 包装函数体内：**若被装饰函数签名不包含 `context`**，则从 **`kwargs` 中移除 `context`** 再调用原协程函数，避免 **`TypeError`**。  
-- 调用原 **`async def`** 得到 **协程对象**（**不在此处 `await`**），从 **`kwargs["context"]`** 取出 **`OpenAIConversationContext`**，读取 **`session_id` / `sse_client_id`**，向 **`AsyncToolResultStore.submit_coroutine`** 提交后台任务；**`client_id` 为空则 `ValueError`**。  
+- 调用原 **`async def`** 得到 **协程对象**（**不在此处 `await`**），从 **`kwargs["context"]`** 取出 **`OpenAIConversationContext`**，读取 **`session_id` / `sse_connection_id`**，向 **`AsyncToolResultStore.submit_coroutine`** 提交后台任务；**`connection_id` 为空则 `ValueError`**。  
 - 立即返回 **固定格式的受理字符串**（含 **`job_id`**）。  
 - 同样把 **`final_name` / `description`** 挂在包装函数上供 **`_tool_to_spec`** 读取。  
 - **`functools.wraps`** 有利于保留 **docstring** 与签名元数据，供 **`inspect.getdoc` / `inspect.signature`** 在注册阶段与 **`_tool_to_spec`** 衔接（具体以 **`_tool_to_spec`** 选用的 **`invoke_fn`** 为准）。
@@ -117,11 +117,11 @@
 | **`agent_broadcast`** | **异步** | **`agent_peer.py`** | 调用 **`POST /v1/broadcast`** 后并发拉取各目标 SSE。 |
 | **`agent_peer_approve_tools`** | **异步** | **`agent_peer.py`** | 对对端 **`approval_required`** 提交 **`resume`**（按 **`AGENT_PEER_DELIVERY_MODE`** 直连或经 Register Center relay）。 |
 
-### 1.1 异步工具与 `client_id`
+### 1.1 异步工具与 `connection_id`
 
 **`async def` + `@tool`** 的函数会走 **`_decorate_async_tool`**：**立即返回** 含 **`job_id`** 的受理文案，真实逻辑在 **`AsyncToolResultStore`** 后台协程执行；完成后以 **`async_tool_result`** 入队并走 SSE。
 
-**硬前提**：会话 **`OpenAIConversationContext`** 上须已有非空 **`sse_client_id`**（由带 **`client_id`** 的入站 **`MessageEnvelope`** 刷新）。否则提交后台任务会 **`ValueError`**。详见 [agent-input-output.md](./agent-input-output.md) 与 **CHANGELOG** 中异步工具相关说明。
+**硬前提**：会话 **`OpenAIConversationContext`** 上须已有非空 **`sse_connection_id`**（由带 **`connection_id`** 的入站 **`MessageEnvelope`** 刷新）。否则提交后台任务会 **`ValueError`**。详见 [agent-input-output.md](./agent-input-output.md) 与 **CHANGELOG** 中异步工具相关说明。
 
 ---
 

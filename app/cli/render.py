@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any
 
 from app.cli.approval import ToolApprovalRequest
+from app.cli.tool_calls import normalize_tool_call_item
 
 
 class TranscriptKind(str, Enum):
@@ -17,6 +18,7 @@ class TranscriptKind(str, Enum):
     ASSISTANT_END = "assistant_end"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
+    COMPRESSION = "compression"
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,9 +89,10 @@ def format_tool_call(data: dict[str, Any]) -> TranscriptUpdate | None:
     for index, item in enumerate(tool_calls, start=1):
         if not isinstance(item, dict):
             continue
-        name = item.get("name") or "unknown"
-        call_id = item.get("id") or ""
-        args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
+        normalized = normalize_tool_call_item(item)
+        name = normalized["name"]
+        call_id = normalized["id"]
+        args = normalized["arguments"]
         lines.append(f"  {index}. {name} ({call_id})")
         if args:
             lines.append(f"    args: {compact_json(args, max_length=500)}")
@@ -119,3 +122,20 @@ def format_assistant_end() -> TranscriptUpdate:
 def format_system_line(text: str) -> TranscriptUpdate:
     """系统提示行。"""
     return TranscriptUpdate(kind=TranscriptKind.LINE, text=text)
+
+
+def format_context_compression(event_type: str, data: dict[str, Any]) -> TranscriptUpdate:
+    """将 blocking/silent 上下文压缩 SSE 转为 TUI 可消费的 transcript 更新。"""
+    mode = "silent" if event_type == "context_compression_silent" else "blocking"
+    return TranscriptUpdate(
+        kind=TranscriptKind.COMPRESSION,
+        text="",
+        data={
+            "mode": mode,
+            "phase": str(data.get("phase") or ""),
+            "status": str(data.get("status") or ""),
+            "compressed_message_count": data.get("compressed_message_count"),
+            "compression_start": data.get("compression_start"),
+            "compression_end": data.get("compression_end"),
+        },
+    )

@@ -7,8 +7,11 @@ import time
 from typing import Any
 
 from rich.cells import cell_len, set_cell_size
+from rich.console import Group, RenderableType
 from rich.markup import escape
 from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from textual import events
@@ -24,6 +27,7 @@ from app.cli.approval import (
 )
 from app.cli.render import TranscriptKind, TranscriptUpdate
 from app.cli.session_controller import SessionController
+from app.cli.tool_calls import normalize_tool_call_item
 from app.cli.user_information import (
     UserInformationAnswer,
     UserInformationCancelled,
@@ -42,8 +46,8 @@ _BASH_INLINE_COMMAND_MAX_CELLS = 56
 class DAgentsTuiApp(App[None]):
     """DAgents Textual 聊天 TUI。"""
 
-    # 固定亮色主题（Screen 背景约 #E0E0E0）；不跟随终端、不做动态切换。
-    theme = "textual-light"
+    # 固定暗色主题；不跟随终端、不做动态切换。
+    theme = "textual-dark"
 
     CSS = """
     Screen {
@@ -197,11 +201,14 @@ class DAgentsTuiApp(App[None]):
         副作用：更新 ``_transcript_base_lines`` 供流式回退边界使用。
         """
         log = self._transcript_log()
+        panel_width = int(getattr(log.size, "width", 0) or 0)
         log.write(
             build_welcome_panel(
                 api_base=self._controller.api_base,
                 session_id=self._controller.session_id,
-            )
+                width=panel_width if panel_width > 0 else None,
+            ),
+            expand=True,
         )
         self._transcript_base_lines = len(log.lines)
 
@@ -651,14 +658,19 @@ class DAgentsTuiApp(App[None]):
         """格式化 assistant 消息。
 
         流式中使用普通文本，完成后用 Markdown 渲染正文；左侧圆点单独占一列以保持对齐。
+        完成态正文列使用 overflow=fold，避免 Rich Table 默认 ellipsis 截断长行。
         """
         if not complete:
             return self._message_block("[yellow blink]●[/yellow blink]", text)
         grid = Table.grid(expand=True, padding=(0, 1))
-        grid.add_column(width=1)
-        grid.add_column(ratio=1)
+        grid.add_column(width=1, no_wrap=True)
+        grid.add_column(ratio=1, overflow="fold")
         grid.add_row(Text("●", style="green"), Markdown(text))
         return grid
+
+    def _write_assistant_block(self, log: RichLog, text: str, *, complete: bool) -> None:
+        """写入 assistant 块；Renderables 需 expand 才能按 RichLog 宽度折行。"""
+        log.write(self._assistant_block(text, complete=complete), expand=True)
 
     def _event_block(self, text: str) -> str:
         """格式化非流式事件：工具消息使用圆点，普通系统行保持原样。"""
@@ -673,17 +685,33 @@ class DAgentsTuiApp(App[None]):
             log.write("")
 
     def _status_text(self, name: str, *, done: bool = False) -> str:
-        """生成 prefilling/thinking 状态行文本。"""
+        """生成 prefilling/thinking/compression_blocking 状态行文本。"""
         state = self._status_lines.get(name)
         started_at = float(state.get("started_at", time.monotonic())) if state else time.monotonic()
         raw_elapsed = max(0.0, time.monotonic() - started_at)
         elapsed = int(raw_elapsed)
+        label = name
+        if name == "compression_blocking":
+            label = "compressing context (blocking)"
         if done:
-            return self._message_block("[green]●[/green]", f"{name}... {elapsed}s done")
+            return self._message_block("[green]●[/green]", f"{label}... {elapsed}s done")
         frame = int(raw_elapsed * 2) % 3
         # 省略号槽位固定 3 个字符，避免动画刷新时秒数左右抖动。
         dots = ("." * (frame + 1)).ljust(3)
-        return self._message_block("[yellow blink]●[/yellow blink]", f"{name}{dots} {elapsed}s")
+        return self._message_block("[yellow blink]●[/yellow blink]", f"{label}{dots} {elapsed}s")
+
+    def _compression_detail_line(self, mode: str, status: str, count: Any) -> str:
+        """压缩结束时的摘要行（blocking/silent 文案区分）。"""
+        prefix = "blocking" if mode == "blocking" else "silent"
+        if status == "applied":
+            return f"[dim]Context compression ({prefix}) applied — replaced {count} messages[/dim]"
+        if status == "failed":
+            return f"[yellow]Context compression ({prefix}) failed — keeping original context[/yellow]"
+        if status == "stale":
+            return f"[yellow]Context compression ({prefix}) result stale — discarded[/yellow]"
+        if status == "invalid":
+            return f"[yellow]Context compression ({prefix}) result invalid — discarded[/yellow]"
+        return f"[dim]Context compression ({prefix}) finished (status={status})[/dim]"
 
     def _replace_status_line(self, name: str, content: str) -> None:
         state = self._status_lines.get(name)
@@ -748,21 +776,30 @@ class DAgentsTuiApp(App[None]):
                 task.cancel()
         self._status_lines.clear()
 
-    def _bash_command_box(self, command: str) -> str:
-        """将 bash 的完整 command 渲染为标题下方的代码框。"""
-        lines = command.splitlines() or ["<empty>"]
-        box = ["```bash"]
-        box.extend(lines)
-        box.append("```")
-        return "\n".join(box)
+    def _rich_code_box(self, content: str, *, lexer: str = "bash") -> Panel:
+        """将文本渲染为带边框的 Rich 代码框（Syntax + Panel）。"""
+        text = content if content.strip() else "<empty>"
+        return Panel(
+            Syntax(text, lexer, theme="monokai", word_wrap=True, background_color="default"),
+            border_style="dim",
+            padding=(0, 1),
+        )
+
+    def _tool_dot_block(self, *, dot_style: str, body: RenderableType) -> Table:
+        """圆点 + 正文（可为 Group / Panel 等 Rich 组件）的 transcript 行。"""
+        grid = Table.grid(expand=True, padding=(0, 1))
+        grid.add_column(width=1)
+        grid.add_column(ratio=1)
+        grid.add_row(Text("●", style=dot_style), body)
+        return grid
 
     def _bash_command_parts(self, command: str) -> tuple[str, str | None]:
         """生成 bash 工具标题行与可选的 command 代码框。
 
         逻辑：
         1. 按 cell 宽度判断 command 是否可放在 `bash(...)` 括号内；
-        2. 过长时标题只保留截断预览，全文放入代码框（与 write_file 一致）；
-        3. 返回 `(title, None)` 或 `(title, code_box_text)`。
+        2. 过长时标题只保留截断预览，全文放入下方代码框；
+        3. 返回 `(title, None)` 或 `(title, full_command)`。
 
         关键边界：
         - 空 command 显示 `bash(—)`，不附加代码框。
@@ -773,7 +810,7 @@ class DAgentsTuiApp(App[None]):
         if cell_len(cmd) <= _BASH_INLINE_COMMAND_MAX_CELLS:
             return f"bash({cmd})", None
         preview = self._truncate_cells(cmd, max(12, _BASH_INLINE_COMMAND_MAX_CELLS - 1))
-        return f"bash({preview})", self._bash_command_box(cmd)
+        return f"bash({preview})", cmd
 
     def _tool_display_name(self, name: str, arguments: dict[str, Any]) -> str:
         """生成工具调用在 transcript 中的短标题。
@@ -803,25 +840,28 @@ class DAgentsTuiApp(App[None]):
             return f"{name}({args})"
         return f"{name}()"
 
-    def _write_file_content_box(self, content: str) -> str:
-        """将 `write_file.content` 渲染为工具标题下方的代码框。
+    def _tool_call_parts_from_call(self, item: dict[str, Any]) -> tuple[str, str | None, str]:
+        """从 tool_call SSE payload 解析短标题与可选代码框内容。
 
         逻辑：
-        1. 将 content 按原始换行拆分；
-        2. 使用类似 Markdown fenced code block 的等宽区域标出内容；
-        3. 空内容以占位文案展示，避免只看到空框。
+        1. 规范化 OpenAI / Node 扁平格式；
+        2. `bash_run` / `write_file` 在需要时返回全文供代码框展示；
+        3. 返回 `(summary, code_content, code_lexer)`。
 
         关键边界：
-        - 不裁剪、不解析 content；Rich markup 由外层 `_message_block` 统一 escape；
-        - 只负责生成文本，不写入 RichLog。
+        - 短 bash command 不附加代码框（`code_content=None`）。
         """
-        content_lines = content.splitlines()
-        if not content_lines:
-            content_lines = ["<empty>"]
-        lines = ["```content"]
-        lines.extend(content_lines)
-        lines.append("```")
-        return "\n".join(lines)
+        normalized = normalize_tool_call_item(item)
+        name = normalized["name"]
+        arguments = normalized["arguments"]
+        if name == "bash_run":
+            title, command = self._bash_command_parts(str(arguments.get("command") or ""))
+            return title, command, "bash"
+        summary = self._tool_display_name(name, arguments)
+        if name == "write_file":
+            content = str(arguments.get("content") or "")
+            return summary, content if content else None, "text"
+        return summary, None, "bash"
 
     def _tool_summary_from_call(self, item: dict[str, Any]) -> str:
         """从 tool_call SSE payload 生成后续结果重写使用的短标题。
@@ -831,34 +871,28 @@ class DAgentsTuiApp(App[None]):
         2. 委托 `_tool_display_name` 做工具特化展示；
         3. 返回单行标题，供 pending tool 与 tool_result 共用。
         """
-        name = str(item.get("name") or "unknown")
-        arguments = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
-        return self._tool_display_name(name, arguments)
+        normalized = normalize_tool_call_item(item)
+        return self._tool_display_name(normalized["name"], normalized["arguments"])
 
-    def _tool_call_text_from_call(self, item: dict[str, Any]) -> str:
-        """从 tool_call SSE payload 生成 RichLog 中的完整工具调用块。
-
-        逻辑：
-        1. 先生成工具短标题；
-        2. `write_file` / 过长 `bash_run` 在标题下方追加代码框；
-        3. 其它工具只展示短标题。
-
-        关键边界：
-        - `arguments` 非 dict 时退化为空参数；
-        - pending summary 仍使用短标题，避免工具结果重写时携带大段 command/content。
-        """
-        name = str(item.get("name") or "unknown")
-        arguments = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
-        if name == "bash_run":
-            title, box = self._bash_command_parts(str(arguments.get("command") or ""))
-            if box is not None:
-                return f"{title}\n{box}"
-            return title
-        summary = self._tool_display_name(name, arguments)
-        if name != "write_file":
-            return summary
-        content = str(arguments.get("content") or "")
-        return f"{summary}\n{self._write_file_content_box(content)}"
+    def _tool_pending_renderable(
+        self,
+        summary: str,
+        *,
+        code_content: str | None = None,
+        code_lexer: str = "bash",
+        elapsed_s: float = 0.0,
+        dot_blink: bool = True,
+    ) -> Table:
+        """生成执行中工具占位块（黄点 + 可选代码框 + 动态耗时）。"""
+        frame = int(max(0.0, elapsed_s) * 2) % 3
+        dots = ("." * (frame + 1)).ljust(3)
+        head = f"{summary}{dots} {self._format_tool_elapsed(elapsed_s)}"
+        if code_content is not None:
+            body: RenderableType = Group(Text(head), self._rich_code_box(code_content, lexer=code_lexer))
+        else:
+            body = Text(head)
+        dot_style = "yellow blink" if dot_blink else "yellow"
+        return self._tool_dot_block(dot_style=dot_style, body=body)
 
     @staticmethod
     def _format_tool_elapsed(elapsed_s: float) -> str:
@@ -871,15 +905,6 @@ class DAgentsTuiApp(App[None]):
         minutes = int(safe // 60)
         seconds = safe % 60.0
         return f"{minutes}m{seconds:.0f}s"
-
-    def _tool_pending_block(self, summary: str, body: str, elapsed_s: float) -> str:
-        """生成执行中工具占位块（黄点 + 动态省略号 + 已耗时）。"""
-        frame = int(max(0.0, elapsed_s) * 2) % 3
-        dots = ("." * (frame + 1)).ljust(3)
-        head = f"{summary}{dots} {self._format_tool_elapsed(elapsed_s)}"
-        lines = body.splitlines() or [summary]
-        lines[0] = head
-        return "\n".join(lines)
 
     def _tool_result_title_markup(
         self,
@@ -912,15 +937,16 @@ class DAgentsTuiApp(App[None]):
                     return
                 started_at = float(pending.get("started_at", time.monotonic()))
                 elapsed_s = max(0.0, time.monotonic() - started_at)
-                block = self._tool_pending_block(
+                block = self._tool_pending_renderable(
                     str(pending.get("summary") or "tool"),
-                    str(pending.get("call_block") or ""),
-                    elapsed_s,
+                    code_content=pending.get("code_content"),
+                    code_lexer=str(pending.get("code_lexer") or "bash"),
+                    elapsed_s=elapsed_s,
                 )
                 start, end = self._replace_log_block(
                     int(pending["start"]),
                     int(pending["end"]),
-                    self._message_block("[yellow blink]●[/yellow blink]", block),
+                    block,
                 )
                 pending["start"] = start
                 pending["end"] = end
@@ -944,14 +970,15 @@ class DAgentsTuiApp(App[None]):
             if not isinstance(item, dict):
                 continue
             call_id = str(item.get("id") or "").strip()
-            summary = self._tool_summary_from_call(item)
-            block = self._tool_call_text_from_call(item)
+            summary, code_content, code_lexer = self._tool_call_parts_from_call(item)
             started_at = time.monotonic()
             start = len(log.lines)
             log.write(
-                self._message_block(
-                    "[yellow blink]●[/yellow blink]",
-                    self._tool_pending_block(summary, block, 0.0),
+                self._tool_pending_renderable(
+                    summary,
+                    code_content=code_content,
+                    code_lexer=code_lexer,
+                    elapsed_s=0.0,
                 )
             )
             end = len(log.lines)
@@ -960,7 +987,8 @@ class DAgentsTuiApp(App[None]):
                     "start": start,
                     "end": end,
                     "summary": summary,
-                    "call_block": block,
+                    "code_content": code_content,
+                    "code_lexer": code_lexer,
                     "started_at": started_at,
                     "status_task": asyncio.create_task(self._animate_tool_pending(call_id)),
                 }
@@ -990,6 +1018,12 @@ class DAgentsTuiApp(App[None]):
         summary = lines[0] if lines else "无输出"
         return summary, detail
 
+    def _transcript_content_width(self) -> int:
+        """返回 transcript（RichLog）可用列宽，供 Panel/折行布局使用。"""
+        log_width = int(getattr(self._transcript_log().size, "width", 0) or 0)
+        screen_width = int(getattr(self.size, "width", 0) or 0)
+        return max(20, log_width or screen_width or 80)
+
     def _tool_result_summary_width(self, *, has_toggle: bool) -> int:
         """估算工具结果折叠摘要可用宽度，避免 bash 单行超过屏幕。
 
@@ -998,11 +1032,8 @@ class DAgentsTuiApp(App[None]):
         2. 预留圆点、缩进、`└─` 与展开按钮空间；
         3. 返回至少 20 列，避免极窄窗口下摘要完全不可读。
         """
-        log_width = int(getattr(self._transcript_log().size, "width", 0) or 0)
-        screen_width = int(getattr(self.size, "width", 0) or 0)
-        width = log_width or screen_width or 80
         reserved = 11 + (5 if has_toggle else 0)
-        return max(20, width - reserved)
+        return max(20, self._transcript_content_width() - reserved)
 
     def _truncate_cells(self, text: str, max_width: int) -> str:
         """按终端 cell 宽度截断文本，并用省略号标记。"""
@@ -1010,8 +1041,8 @@ class DAgentsTuiApp(App[None]):
             return text
         return f"{set_cell_size(text, max(0, max_width - 1)).rstrip()}…"
 
-    def _render_bash_result_block(self, result_id: str) -> str:
-        """渲染 bash 工具结果：折叠单行，展开为代码框。"""
+    def _render_bash_result_block(self, result_id: str) -> Table:
+        """渲染 bash 工具结果：折叠单行，展开为 Syntax 代码框。"""
         result = self._tool_results[result_id]
         title = self._tool_result_title_markup(
             str(result["title"]),
@@ -1025,20 +1056,21 @@ class DAgentsTuiApp(App[None]):
         if has_detail:
             action = "收起" if expanded else "展开"
             toggle = f" [@click=app.toggle_tool_result('{result_id}')][dim underline]{action}[/dim underline][/]"
-        lines = [title]
         if not expanded:
             summary = str(result["summary"]).replace("\n", " ").strip() or "无输出"
             summary = self._truncate_cells(summary, self._tool_result_summary_width(has_toggle=has_detail))
-            lines.append(f"[dim]└─ {escape(summary)}[/dim]{toggle}")
-            return self._message_block("[green]●[/green]", "\n".join(lines), escape_text=False)
+            body: RenderableType = Group(
+                Text.from_markup(f"{title}{toggle}"),
+                Text.from_markup(f"[dim]└─ {escape(summary)}[/dim]"),
+            )
+        else:
+            body = Group(
+                Text.from_markup(f"{title}{toggle}"),
+                self._rich_code_box(detail, lexer="bash"),
+            )
+        return self._tool_dot_block(dot_style="green", body=body)
 
-        code_lines = detail.splitlines() or ["<empty>"]
-        lines.append(f"[dim]└─ ```bash[/dim]{toggle}")
-        lines.extend(f"[dim]   {escape(line)}[/dim]" for line in code_lines)
-        lines.append("[dim]   ```[/dim]")
-        return self._message_block("[green]●[/green]", "\n".join(lines), escape_text=False)
-
-    def _render_tool_result_block(self, result_id: str) -> str:
+    def _render_tool_result_block(self, result_id: str) -> str | Table:
         result = self._tool_results[result_id]
         if str(result.get("tool_name") or "") == "bash_run":
             return self._render_bash_result_block(result_id)
@@ -1065,7 +1097,7 @@ class DAgentsTuiApp(App[None]):
             lines.append(f"[dim]└─ {line}[/dim]{suffix}" if index == 0 else f"[dim]   {line}[/dim]")
         return self._message_block("[green]●[/green]", "\n".join(lines), escape_text=False)
 
-    def _replace_log_block(self, start: int, end: int, content: str) -> tuple[int, int]:
+    def _replace_log_block(self, start: int, end: int, content: str | RenderableType) -> tuple[int, int]:
         """替换 RichLog 指定行范围，用于 tool_result 点击展开/收起。"""
         log = self._transcript_log()
         suffix = log.lines[end:]
@@ -1305,11 +1337,11 @@ class DAgentsTuiApp(App[None]):
             self._assistant_buffer += update.text
             self._rewind_assistant_stream_lines(log)
             if self._assistant_buffer:
-                log.write(self._assistant_block(self._assistant_buffer, complete=False))
+                self._write_assistant_block(log, self._assistant_buffer, complete=False)
         elif update.kind == TranscriptKind.ASSISTANT_END:
             if self._assistant_buffer:
                 self._rewind_assistant_stream_lines(log)
-                log.write(self._assistant_block(self._assistant_buffer, complete=True))
+                self._write_assistant_block(log, self._assistant_buffer, complete=True)
                 self._append_message_gap()
             self._finish_assistant_stream(log)
         elif update.kind == TranscriptKind.TOOL_CALL:
@@ -1328,6 +1360,26 @@ class DAgentsTuiApp(App[None]):
             self._finish_assistant_stream(log)
             log.write(f"[red]{update.text}[/red]")
             self._append_message_gap()
+        elif update.kind == TranscriptKind.COMPRESSION:
+            mode = str(update.data.get("mode") or "blocking")
+            phase = str(update.data.get("phase") or "")
+            status = str(update.data.get("status") or "")
+            count = update.data.get("compressed_message_count")
+            if mode == "blocking":
+                if phase == "start":
+                    self._start_status_line("compression_blocking")
+                elif phase == "end":
+                    self._finish_status_line("compression_blocking", add_gap=False)
+                    detail = self._compression_detail_line(mode, status, count)
+                    log.write(detail)
+                    self._append_message_gap()
+            else:
+                if phase == "start":
+                    log.write(f"[dim]Silent context compression started (target {count} messages)[/dim]")
+                elif phase == "end":
+                    log.write(self._compression_detail_line(mode, status, count))
+                    if status in {"applied", "failed", "stale", "invalid"}:
+                        self._append_message_gap()
         elif update.kind == TranscriptKind.LINE and update.text.startswith("[reasoning]"):
             self._submit_content_seen = True
             self._finish_waiting_statuses(before_reasoning=True)
@@ -1342,20 +1394,18 @@ class DAgentsTuiApp(App[None]):
             self._append_message_gap()
 
     def _apply_top_status(self, *, connected: bool | None = None) -> None:
-        """更新顶栏右侧：SSE 状态文案 + 圆点 + 当前 session_id。
+        """更新顶栏右侧：SSE 状态文案 + 圆点。
 
         逻辑：
         1. 根据 connected（默认取 controller.sse_connected）生成「已连接/未连接」文案与圆点颜色；
-        2. session_id 为空时显示「—」；
-        3. 写入 #top-status-bar（Rich markup）。
+        2. 写入 #top-status-bar（Rich markup）。
         """
         if connected is None:
             connected = self._controller.sse_connected
         sse_text = "SSE 已连接" if connected else "SSE 未连接"
         dot = "[green]●[/green]" if connected else "[red]●[/red]"
-        session_id = self._controller.session_id.strip() or "—"
         bar = self.query_one("#top-status-bar", Static)
-        bar.update(f"{sse_text} {dot}  session {session_id}")
+        bar.update(f"{sse_text} {dot}")
 
     def _reset_transcript_after_clear(self, log: RichLog) -> None:
         """清屏后重置流式状态与欢迎区行边界。"""
@@ -1414,8 +1464,7 @@ class DAgentsTuiApp(App[None]):
             log = self._transcript_log()
             log.write(
                 f"api={self._controller.api_base} session={self._controller.session_id} "
-                f"client={self._controller.client_id} sse="
-                f"{'connected' if self._controller.sse_connected else 'disconnected'}"
+                f"sse={'connected' if self._controller.sse_connected else 'disconnected'}"
             )
             self._apply_top_status()
             return
@@ -1427,9 +1476,6 @@ class DAgentsTuiApp(App[None]):
             return
         if value == "/skill" or value.startswith("/skill "):
             await self._handle_skill_command(value)
-            return
-        if value == "/bind-triggers":
-            await self._bind_triggers()
             return
         if value == "/clear":
             await self._clear_context()
@@ -1453,45 +1499,38 @@ class DAgentsTuiApp(App[None]):
         finally:
             prompt.focus()
 
-    async def _bind_triggers(self) -> None:
-        log = self._transcript_log()
-        try:
-            bound = await self._controller.bind_triggers_to_client()
-            log.write(f"Bound {bound} trigger(s) to client {self._controller.client_id}")
-        except Exception as exc:
-            log.write(f"[red]bind-triggers failed: {exc}[/red]")
-
     async def _show_sessions(self) -> None:
-        """查询并展示当前队列中的 active sessions。
-
-        逻辑：
-        1. 调用 controller 查询 `/v1/sessions`；
-        2. 只读取 `active` 列表，符合 `/session` 查看当前队列的语义；
-        3. 以紧凑文本输出 session_id、client、pending、processing 与 phase。
-
-        关键边界：
-        - active 为空时显示 `(none)`；
-        - API 字段异常时按空列表处理，避免 TUI 命令崩溃。
-        """
+        """查询并展示 Node session 列表（GET /v1/sessions → sessions）。"""
         log = self._transcript_log()
         try:
             data = await self._controller.list_sessions()
-            active = data.get("active")
-            rows = active if isinstance(active, list) else []
-            lines = ["Active sessions (queue):"]
-            if not rows:
+            sessions = data.get("sessions")
+            rows = sessions if isinstance(sessions, list) else []
+            active_rows = [item for item in rows if isinstance(item, dict) and item.get("active")]
+            persisted_rows = [item for item in rows if isinstance(item, dict) and not item.get("active")]
+            lines = ["Active sessions (in memory):"]
+            if not active_rows:
                 lines.append("  (none)")
-            for item in rows:
-                if not isinstance(item, dict):
-                    continue
+            for item in active_rows:
                 sid = str(item.get("session_id") or "-")
-                client_id = str(item.get("client_id") or "-")
                 pending = str(item.get("queue_pending") or 0)
                 processing = "yes" if item.get("has_active_turn") else "no"
-                phase = str(item.get("run_turn_phase") or "-")
+                phase = str(item.get("run_turn_phase") or "idle")
+                msgs = str(item.get("message_count") or 0)
                 lines.append(
-                    f"  {sid}  client={client_id}  pending={pending}  processing={processing}  phase={phase}"
+                    f"  {sid}  msgs={msgs}  pending={pending}  processing={processing}  phase={phase}"
                 )
+            lines.append("")
+            lines.append("Persisted sessions (sqlite, not in memory):")
+            if not persisted_rows:
+                lines.append("  (none)")
+            for item in persisted_rows:
+                sid = str(item.get("session_id") or "-")
+                preview = str(item.get("first_user_message") or "")
+                if len(preview) > 40:
+                    preview = preview[:40] + "..."
+                updated = str(item.get("updated_at") or "-")
+                lines.append(f"  {sid}  updated={updated}  {preview}")
             log.write("\n".join(lines))
         except Exception as exc:
             log.write(f"[red]session failed: {exc}[/red]")
@@ -1567,8 +1606,7 @@ class DAgentsTuiApp(App[None]):
             "Context",
             "",
             f"session_id: {escape(str(data.get('session_id') or '-'))}",
-            f"sse_client_id: {escape(str(data.get('sse_client_id') or '-'))}",
-            f"active_client_id: {escape(str(data.get('active_client_id') or '-'))}",
+            f"turn_state: {escape(str(data.get('turn_state') or '-'))}",
             f"run_turn_phase: {escape(str(data.get('run_turn_phase') or '-'))}",
             f"messages_count: {data.get('messages_count') or 0}",
             f"pending_tool_calls_count: {data.get('pending_tool_calls_count') or 0}",
@@ -1691,7 +1729,7 @@ class DAgentsTuiApp(App[None]):
         if len(parts) == 1:
             try:
                 data = await self._controller.list_skills()
-                log.write(self._format_skill_state(data))
+                log.write(self._skill_state_block(data), expand=True)
             except Exception as exc:
                 log.write(f"[red]skill failed: {exc}[/red]")
             return
@@ -1705,12 +1743,12 @@ class DAgentsTuiApp(App[None]):
                 data = await self._controller.load_skill(skill_name)
             else:
                 data = await self._controller.unload_skill(skill_name)
-            log.write(self._format_skill_state(data))
+            log.write(self._skill_state_block(data), expand=True)
         except Exception as exc:
             log.write(f"[red]skill {action} failed: {exc}[/red]")
 
     def _format_skill_state(self, data: dict[str, Any]) -> str:
-        """将 skill API 响应格式化为 RichLog 文本。"""
+        """将 skill API 响应格式化为纯文本（供 `_skill_state_block` 折行渲染）。"""
         loaded = data.get("loaded_skills")
         available = data.get("available_skills")
         loaded_rows = loaded if isinstance(loaded, list) else []
@@ -1722,8 +1760,8 @@ class DAgentsTuiApp(App[None]):
         for item in loaded_rows:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("skill_name") or "-")
-            desc = str(item.get("description") or "")
+            name = escape(str(item.get("skill_name") or "-"))
+            desc = escape(str(item.get("description") or ""))
             lines.append(f"    - {name}{f' · {desc}' if desc else ''}")
         lines.append("  available:")
         if not available_rows:
@@ -1736,11 +1774,19 @@ class DAgentsTuiApp(App[None]):
         for item in available_rows:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("skill_name") or "-")
-            desc = str(item.get("description") or "")
-            marker = " [loaded]" if name in loaded_names else ""
+            name = escape(str(item.get("skill_name") or "-"))
+            desc = escape(str(item.get("description") or ""))
+            marker = " [loaded]" if str(item.get("skill_name") or "") in loaded_names else ""
             lines.append(f"    - {name}{marker}{f' · {desc}' if desc else ''}")
         return "\n".join(lines)
+
+    def _skill_state_block(self, data: dict[str, Any]) -> RenderableType:
+        """构造 skill 列表块；按 transcript 宽度折行，避免描述超出聊天区域。"""
+        width = self._transcript_content_width()
+        grid = Table.grid(expand=True, padding=(0, 0))
+        grid.add_column(ratio=1, overflow="fold", max_width=width if width > 0 else None)
+        grid.add_row(Text.from_markup(self._format_skill_state(data)))
+        return grid
 
     async def _clear_context(self) -> None:
         log = self._transcript_log()
@@ -1756,13 +1802,12 @@ class DAgentsTuiApp(App[None]):
         for line in (
             "Commands:",
             "  /help            Show this help",
-            "  /status          Show API/session/client IDs",
+            "  /status          Show API/session/SSE status",
             "  /context         Show current context view (Esc to return)",
-            "  /session         Show active queued sessions",
+            "  /session         Show Agent Node sessions",
             "  /skill           Show loaded and available skills",
             "  /skill load NAME Load one skill into current session",
             "  /skill unload NAME Unload one skill from current session",
-            "  /bind-triggers   Bind session triggers to this client_id",
             "  /clear           Clear server context and transcript",
             "  /exit            Quit chat",
         ):

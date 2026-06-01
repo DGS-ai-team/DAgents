@@ -3,8 +3,14 @@
 ## `main.py`
 
 - **`main`** / **`build_parser`**：CLI 子命令入口
-- **`_default_api_base`**：从 `.env` 读取 API 地址
+- **`_default_api_base`**：无 YAML 时从 env/.env 解析 API 地址
+- **`_add_client_config_arguments`** / **`apply_client_settings`**：`--config` / `--api` 合并
 - **`_normalize_serve_extra`**：剥离 `serve` 的 `REMAINDER` 中 `--` 前缀
+
+## `config_file.py`
+
+- **`AgentClientConfig`**：Python 侧共用配置子集（`api_base`）
+- **`resolve_config_path`** / **`resolve_agent_id`** / **`load_agent_client_config`** / **`resolve_client_settings`**：与 Go `ResolveConfigPath` / `ResolveAgentID` 对齐
 
 ## `daemon.py`
 
@@ -19,14 +25,13 @@
 
 ## `session_controller.py`
 
-- **`SessionController`**：会话生命周期、SSE pump/render、turn 栅栏、trigger 绑定
-  - **`start` / `stop`**：连接后端、启停后台任务
+- **`SessionController`**：会话生命周期、SSE pump/render、turn 栅栏
+  - **`start` / `stop`**：连接 Node、启停后台任务
   - **`submit_message` / `wait_user_turn` / `cancel_current_turn`**：用户消息、轮次等待与在途 turn 取消
   - **`list_sessions`**：调用 `GET /v1/sessions`
   - **`get_context`**：调用 `GET /v1/sessions/{session_id}/context`
   - **`list_skills` / `load_skill` / `unload_skill`**：调用 session skills API
   - **`clear_context`**：调用 `POST .../clear-context`
-  - **`bind_triggers_to_client`**：PATCH 同 session trigger 的 `client_id`
   - **`on_transcript` / `on_approval` / `on_user_information` / `on_status`**：UI 回调注册
 
 ## `user_information.py`
@@ -39,7 +44,7 @@
 ## `api_client.py`
 
 - **`StreamEvent`**：SSE 解析结果（`event_type`、`session_id`、`data`）
-- **`DAgentsApiClient`**：health、session、message、resume、cancel、stream、session list/delete/clear-context/context、session skills、trigger list/patch
+- **`DAgentsApiClient`**：Agent Node HTTP/SSE（health、session、message、resume、cancel、stream、skills、context）
 - **`_parse_sse_block`**：SSE block → `StreamEvent`
 
 ## `approval.py`
@@ -53,6 +58,11 @@
 - **`run_show_session`** / **`run_delete_session`**：`dagents show session` 与 `dagents delete session`
 - **`_render_session_list`**：终端表格输出
 
+## `tool_calls.py`
+
+- **`parse_tool_arguments`**：将 JSON 字符串或 dict 解析为 tool arguments dict
+- **`normalize_tool_call_item`**：OpenAI `function.name` / 扁平 Node 格式统一为 `{id, name, arguments}`
+
 ## `render.py`
 
 - **`TranscriptKind`** / **`TranscriptUpdate`**：transcript 更新类型
@@ -60,12 +70,12 @@
 
 ## `version_info.py`
 
-- **`CLI_VERSION`**：CLI 展示版本（与 API `0.1.0` 对齐）
+- **`CLI_VERSION`**：CLI 展示版本（与仓库标记版本 `0.2.0` 对齐）
 - **`get_cli_username`** / **`get_cli_version`**：欢迎区用户名与版本
 
 ## `tui/app.py`
 
-- **`DAgentsTuiApp`**：Textual 主界面（`theme=textual-light` + 顶栏 SSE/session + RichLog/context 视图 + 底栏 help 提示）
+- **`DAgentsTuiApp`**：Textual 主界面（`theme=textual-dark` + 顶栏 SSE 状态 + RichLog/context 视图 + 底栏 help 提示）
 - **`_write_welcome_panel`** / **`_transcript_base_lines`**：连接后 Rich Panel 欢迎区与流式回退边界
 - **`_message_block`** / **`_assistant_block`** / **`_event_block`**：统一消息圆点与正文对齐；assistant 完成态用 Markdown 渲染
 - **`_start_status_line`** / **`_finish_status_line`** / **`_animate_status_line`**：`prefilling/thinking` 等待状态行

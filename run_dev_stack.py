@@ -1,6 +1,8 @@
 """
 本地一键启动开发栈（API + Register Center）。
 
+**已弃用**：Agent 运行时请优先 Go Agent Node；本脚本仅用于 DAgentsUI / A2A 联调。
+
 用法（在 DAgents 根目录）:
   python run_dev_stack.py
   python run_dev_stack.py --no-register
@@ -9,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import shlex
 import subprocess
 import sys
@@ -17,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config.env import load_env
+from app.deprecated_backend import log_deprecation_warning
 
 
 @dataclass
@@ -258,6 +262,7 @@ def main() -> int:
 
     root = Path(__file__).resolve().parent
     load_env(root)
+    log_deprecation_warning(logging.getLogger("run_dev_stack"))
     args = parse_args()
     commands = build_commands(root=root, args=args)
     if not commands:

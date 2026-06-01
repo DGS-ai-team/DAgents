@@ -1,5 +1,12 @@
 # `app/` 模块索引
 
+## `deprecated_backend.py`
+
+- **`DEPRECATED_BACKEND`** / **`DEPRECATED_BACKEND_REPLACEMENT`**：弃用标记与替代栈名
+- **`DEPRECATED_BACKEND_NOTICE_ZH`** / **`_EN`**：中英文说明
+- **`log_deprecation_warning(logger)`**：启动时 WARNING
+- **`health_deprecation_fields()`**：`/health` JSON 扩展字段
+
 ## `config/settings.py`
 
 - **`Settings`**、**`get_settings`**

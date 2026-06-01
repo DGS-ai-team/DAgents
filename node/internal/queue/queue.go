@@ -1,0 +1,158 @@
+// Package queue 提供 per-session 优先级消息队列（对齐 Python MessageQueue 语义子集）。
+package queue
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+)
+
+// Priority 为入队优先级标签。
+type Priority string
+
+const (
+	PriorityToolResult      Priority = "tool_result"
+	PriorityHuman           Priority = "human"
+	PriorityResume          Priority = "resume"
+	PriorityAsyncCompletion Priority = "async_completion"
+	PriorityOther           Priority = "other"
+)
+
+// Envelope 为单条入队载荷。
+type Envelope struct {
+	RequestType     string
+	Content         string
+	ResumeValue     map[string]any
+	TriggerID       string // 非空表示 trigger fire 投递；dequeue 后用于清除 pending 标记
+	AsyncToolResult *AsyncToolResultPayload
+}
+
+type queuedItem struct {
+	priority int
+	seq      uint64
+	env      Envelope
+}
+
+// MessageQueue 进程内优先级队列；仅入队与阻塞出队，无内嵌 consumer。
+type MessageQueue struct {
+	mu     sync.Mutex
+	seq    uint64
+	items  []queuedItem
+	notify chan struct{}
+	closed bool
+}
+
+// NewMessageQueue 创建空队列。
+func NewMessageQueue() *MessageQueue {
+	return &MessageQueue{notify: make(chan struct{}, 1)}
+}
+
+// Enqueue 非阻塞入队；队列关闭后返回 error。
+func (q *MessageQueue) Enqueue(env Envelope, priority Priority) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return errors.New("queue closed")
+	}
+	q.seq++
+	item := queuedItem{
+		priority: priorityValue(priority),
+		seq:      q.seq,
+		env:      env,
+	}
+	q.items = append(q.items, item)
+	sort.SliceStable(q.items, func(i, j int) bool {
+		if q.items[i].priority != q.items[j].priority {
+			return q.items[i].priority < q.items[j].priority
+		}
+		return q.items[i].seq < q.items[j].seq
+	})
+	select {
+	case q.notify <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// Dequeue 阻塞直到有消息或 ctx 取消/队列关闭。
+func (q *MessageQueue) Dequeue(ctx context.Context) (Envelope, error) {
+	for {
+		q.mu.Lock()
+		if len(q.items) > 0 {
+			env := q.items[0].env
+			q.items = q.items[1:]
+			q.mu.Unlock()
+			return env, nil
+		}
+		if q.closed {
+			q.mu.Unlock()
+			return Envelope{}, errors.New("queue closed")
+		}
+		q.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return Envelope{}, ctx.Err()
+		case <-q.notify:
+		}
+	}
+}
+
+// Close 关闭队列；唤醒等待中的 Dequeue。
+func (q *MessageQueue) Close() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.closed = true
+	select {
+	case q.notify <- struct{}{}:
+	default:
+	}
+}
+
+// Len 返回当前队列深度（测试/观测用）。
+func (q *MessageQueue) Len() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.items)
+}
+
+func priorityValue(p Priority) int {
+	switch p {
+	case PriorityToolResult:
+		return -1
+	case PriorityHuman:
+		return 0
+	case PriorityResume:
+		return 1
+	case PriorityAsyncCompletion:
+		return 2
+	default:
+		return 10
+	}
+}
+
+// ParsePriority 解析显式 priority 字段；空串或未知值返回 false。
+func ParsePriority(raw string) (Priority, bool) {
+	p := Priority(strings.TrimSpace(raw))
+	switch p {
+	case PriorityToolResult, PriorityHuman, PriorityResume, PriorityAsyncCompletion, PriorityOther:
+		return p, true
+	default:
+		return "", false
+	}
+}
+
+// PriorityForRequestType 将 HTTP request_type 映射为队列优先级。
+func PriorityForRequestType(requestType string) (Priority, error) {
+	switch requestType {
+	case "message":
+		return PriorityHuman, nil
+	case "resume":
+		return PriorityResume, nil
+	default:
+		return "", fmt.Errorf("invalid_request_type")
+	}
+}

@@ -1,5 +1,7 @@
 # `app/core/main_agent/`
 
+> **【已弃用】** Python 主 Agent 编排。新实现见 **`node/internal/turn/`**。
+
 主 Agent 运行时：OpenAI 隐式 ReAct 编排、模型客户端与系统提示词。
 
 | 文件 | 说明 |

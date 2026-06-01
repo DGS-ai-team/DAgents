@@ -123,7 +123,7 @@ flowchart TD
 | 文档 | 内容 |
 |------|------|
 | [architecture-and-flows.md](./architecture-and-flows.md) | 组件分层、主序列图、分支概览 |
-| [agent-input-output.md](./agent-input-output.md) | 入队、SSE、`client_id` |
+| [agent-input-output.md](./agent-input-output.md) | 入队、SSE、`connection_id` |
 | [context-compression-and-state.md](./context-compression-and-state.md) | 压缩与 `ctx` 字段 |
 | [api-reference.md](./api-reference.md) | HTTP 契约 |
 

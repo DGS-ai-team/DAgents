@@ -1,6 +1,8 @@
 # DAgents 架构与业务流程
 
-本文说明 **DAgents 后端** 的整体分层、运行时组件与一条用户消息从进入到模型/工具/SSE 输出的主路径。实现细节以源码为准；HTTP 字段级说明见 [api-reference.md](./api-reference.md)。
+> **已迁移**：正文见 [architecture/python-runtime.md](./architecture/python-runtime.md)。本文件保留为兼容链接。
+
+请阅读 [architecture/overview.md](./architecture/overview.md) 了解双栈选型。
 
 ## 1. 系统边界与部署形态
 
@@ -140,10 +142,10 @@ sequenceDiagram
 - 长时间任务可将完成回调注册到 `AsyncToolResultStore`；完成时调用服务注册的 **`_enqueue_async_tool_result_message`**，以 `async_tool_result` 入队。
 - 消费逻辑与同步 `tool_result` 类似，均回到「模型继续推理」闭环。
 
-### 5.4 SSE 与 `client_id`
+### 5.4 SSE 与 `connection_id`
 
-- API lifespan 创建 **`InMemoryEventBus`**；仅当 envelope 上带有 **`client_id`** 时，才把事件发布到总线（与旧行为一致：无 `client_id` 则无法关联订阅端）。
-- `GET /v1/streams?client_id=...`：**不回放历史**，仅推送连接建立后的实时事件；前端可按 `session_id` 分流展示。
+- API lifespan 创建 **`InMemoryEventBus`**；仅当 envelope 上带有非空 **`connection_id`** 时，才把事件发布到总线（无 **`connection_id`** 则无法关联订阅端）。
+- `GET /v1/streams?connection_id=...`：**不回放历史**，仅推送连接建立后的实时事件；前端可按 `session_id` 分流展示。
 
 ### 5.5 Register Center 与多 Agent
 

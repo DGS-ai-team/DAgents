@@ -1,0 +1,17 @@
+[Unit]
+Description=DAgents Agent Node (Go)
+Documentation=https://github.com/DGS-ai-team/DAgents/blob/main/node/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKING_DIR@
+ExecStart=@BINARY@ -config @CONFIG@
+Restart=on-failure
+RestartSec=5
+Environment=DAGENTS_CONFIG=@CONFIG@
+@ENV_FILE_LINE@
+
+[Install]
+WantedBy=multi-user.target

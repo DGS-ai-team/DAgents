@@ -56,7 +56,7 @@ def extract_user_information_request(data: dict[str, Any]) -> UserInformationReq
 
     逻辑：
     1. 读取 `user_information_args` 字典；
-    2. 解析 `tool_call_id` 与 `question`；
+    2. 解析 `tool_call_id` 与 `question`（`content` 为问题正文兜底）；
     3. 规范化 `options` 列表，过滤无效项。
     """
     args = data.get("user_information_args")

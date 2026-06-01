@@ -4,9 +4,11 @@
 
 - **`DAgentsTuiApp`**：Textual 聊天主应用
 - **`_write_welcome_panel`**：连接成功后向 RichLog 写入欢迎 Panel
+- **`_assistant_block`** / **`_write_assistant_block`**：assistant 流式/完成态渲染；完成态 Table 正文列 `overflow=fold` 避免 ellipsis 截断
 - **`_transcript_base_lines`**：欢迎 Panel 占用的行数下限（流式回退）
 - **`_exit_with_resume_hint`**：`/exit` 退出后打印 `dagents chat --session ...` 会话恢复命令
-- **`_tool_display_name`** / **`_tool_call_text_from_call`**：工具调用短标题与完整展示块；`write_file` 括号内仅 path、下方代码框展示 content；`bash_run` 的 command 过长时括号内截断预览、下方 ```bash``` 代码框展示全文
+- **`_rich_code_box`** / **`_tool_dot_block`**：Rich Panel + Syntax 代码框与圆点对齐布局
+- **`_tool_display_name`** / **`_tool_call_parts_from_call`**：工具调用短标题与可选代码框正文；`write_file` / 过长 `bash_run` 用代码框展示全文
 - **`_write_tool_call`** / **`_write_tool_result`**：多工具逐条占位与结果重写；执行中黄点行动态显示耗时，完成后绿点标题展示总耗时
 - **`_format_tool_elapsed`** / **`_animate_tool_pending`** / **`_cancel_tool_pending_tasks`**：工具执行耗时格式化与占位行动画
 - **`_start_status_line`** / **`_finish_status_line`**：`prefilling/thinking` 等待状态行
@@ -18,7 +20,8 @@
 - **`_refresh_approval_layout`**：审批块增删后刷新布局并滚动到底部
 - **`confirm_approval_choice`**：确认 RichLog 内审批选项当前选择
 - **`_show_sessions`**：`/session` 命令查询并展示当前队列中的 active sessions
-- **`_handle_skill_command`** / **`_format_skill_state`**：`/skill` 命令查询、加载、卸载当前会话 skills
+- **`_handle_skill_command`** / **`_format_skill_state`** / **`_skill_state_block`**：`/skill` 命令；列表按 transcript 宽度折行（`expand=True` + `overflow=fold`）
+- **`_transcript_content_width`**：RichLog 可用列宽（欢迎 Panel、skill 块等共用）
 
 ## `welcome_panel.py`
 

@@ -1,6 +1,6 @@
 # `tests/`
 
-单元测试目录（**已清空历史用例**，按 **`UNIT_TEST_CHECKLIST.md`** 分阶段补回）。
+Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 各包内。
 
 | 文件 / 目录 | 说明 |
 |-------------|------|
@@ -23,6 +23,7 @@
 ```bash
 pip install -r requirements.txt
 python -m unittest discover -s tests -p "test_*.py" -v
+go test ./node/... ./client/... ./shared/config/...
 ```
 
 单文件示例：
@@ -35,7 +36,12 @@ python -m unittest tests.integration.live_llm_smoke -v
 
 ## CI
 
-`.github/workflows/pr-tests.yml` 与上式一致；**不**自动执行 `tests/integration/` 内用例。
+| Workflow | 说明 |
+|----------|------|
+| **`pr-tests.yml`** | Python `unittest discover` |
+| **`go-ac.yml`** | `go test` + build（`node/`、`client/`、`shared/config/` 变更时） |
+
+本地 Go 测试：`go test ./node/... ./client/... ./shared/config/...`
 
 ## 规划入口
 

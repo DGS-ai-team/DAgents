@@ -35,14 +35,14 @@ session_id=A  →  MessageQueue_A  →  asyncio.Task(_session_consume_loop("A"))
 | **`session_id`** | 路由到哪一个 **`MessageQueue`**。 |
 | **`request_type`** | **`message`**、**`resume`**、**`tool_result`**、**`async_tool_result`**。 |
 | **`content` / `resume_value` / `tool_result` / `async_tool_result`** | 各类型业务载荷。 |
-| **`client_id`** | **不参与** 队列排序；出队后用于 **SSE 路由**。**`async_tool_result`** 入队路径下 **须非空**（与 **`AsyncToolJob.client_id`** 一致，源自会话上最近一次非空入站 **`client_id`**）；其它 **`request_type`** 在纯内部场景下仍可为 **`None`**（总线不投递）。 |
+| **`connection_id`** | **不参与** 队列排序；出队后用于 **SSE 路由**。**`async_tool_result`** 入队路径下 **须非空**（与 **`AsyncToolJob.connection_id`** 一致，源自会话上最近一次非空入站 **`connection_id`**）；其它 **`request_type`** 在纯内部场景下仍可为 **`None`**（总线不投递）。 |
 | **`source`** | 观测标签，不影响优先级。 |
 
-### 1.3.1 会话上的 `sse_client_id`（进程内）
+### 1.3.1 会话上的 `sse_connection_id`（进程内）
 
-- **`OpenAIConversationContext.sse_client_id`**：在 **`AgentService._handle_message`** 中，当 **`env.client_id`** 非空白时写入，表示「本会话当前绑定的 SSE 通道」；**不入库**，重启后为空直至再次收到带 **`client_id`** 的入站消息。  
-- **异步工具**：**`_decorate_async_tool`** 在 **`submit_coroutine`** 时读取 **`ctx.sse_client_id`**；若从未建立（空白），**`submit_coroutine`** / 装饰层会 **`ValueError`**，避免终态无法 **`publish`** 到客户端。  
-- **内部回灌**：**`async_tool_result`** 的 **`MessageEnvelope`** 带 **`client_id`**，处理该 envelope 时若再次写入 **`ctx.sse_client_id`**，可刷新通道（与入站人类消息一致）。
+- **`OpenAIConversationContext.sse_connection_id`**：在 **`AgentService._handle_message`** 中，当 **`env.connection_id`** 非空白时写入，表示「本会话当前绑定的 SSE 通道」；**不入库**，重启后为空直至再次收到带 **`connection_id`** 的入站消息。  
+- **异步工具**：**`_decorate_async_tool`** 在 **`submit_coroutine`** 时读取 **`ctx.sse_connection_id`**；若从未建立（空白），**`submit_coroutine`** / 装饰层会 **`ValueError`**，避免终态无法 **`publish`** 到客户端。  
+- **内部回灌**：**`async_tool_result`** 的 **`MessageEnvelope`** 带 **`connection_id`**，处理该 envelope 时若再次写入 **`ctx.sse_connection_id`**，可刷新通道（与入站人类消息一致）。
 
 ### 1.4 优先级：`MessagePriority`
 
@@ -72,7 +72,7 @@ session_id=A  →  MessageQueue_A  →  asyncio.Task(_session_consume_loop("A"))
 |------|------|
 | **`submit_message`** | 构造 **`MessageEnvelope`** 并 **`enqueue`**（**`effective_priority`** 含工具升格逻辑）。 |
 | **`submit_resume`** | **`request_type=resume`**，默认 **`priority="resume"`**。 |
-| **`_enqueue_async_tool_result_message`** | 从 **`AsyncToolResultStore`** 的 **`payload.client_id`** 取通道，**`MessageEnvelope.client_id`** 与之相同后 **`enqueue`**（缺 **`client_id`** 时抛错）。 |
+| **`_enqueue_async_tool_result_message`** | 从 **`AsyncToolResultStore`** 的 **`payload.connection_id`** 取通道，**`MessageEnvelope.connection_id`** 与之相同后 **`enqueue`**（缺 **`connection_id`** 时抛错）。 |
 
 HTTP：**`POST /v1/messages`** → **`submit_message` / `submit_resume`**（**`app/harness/api/app.py`**）。
 
@@ -92,7 +92,7 @@ HTTP：**`POST /v1/messages`** → **`submit_message` / `submit_resume`**（**`a
 | 隔离 | **`session_id` → 独立队列 + 独立 consumer** |
 | 顺序 | **串行 `receive` → `_handle_message`** |
 | 优先级 | **`tool_result` < `human` < `resume` < `other`**（数值）；同优先级 FIFO |
-| 与出站 | 出队后的 **`env.client_id`** 随 **`_emit_stream_event`** 传入 API 回调，决定能否写入 SSE 总线（见第二部分）。 |
+| 与出站 | 出队后的 **`env.connection_id`** 随 **`_emit_stream_event`** 传入 API 回调，决定能否写入 SSE 总线（见第二部分）。 |
 
 ---
 
@@ -102,10 +102,10 @@ HTTP：**`POST /v1/messages`** → **`submit_message` / `submit_resume`**（**`a
 
 | 项目 | 说明 |
 |------|------|
-| **模式** | **单进程内存总线** **`InMemoryEventBus`**（**`app/harness/streaming/events.py`**）；**`GET /v1/streams`** 长连接订阅，**按 `client_id` 分桶** **`publish`**。 |
+| **模式** | **单进程内存总线** **`InMemoryEventBus`**（**`app/harness/streaming/events.py`**）；**`GET /v1/streams`** 长连接订阅，**按 `connection_id` 分桶** **`publish`**。 |
 | **不回放** | **`subscribe_all`** 仅推送 **订阅建立之后** 的事件。 |
 | **`done` 不断连** | **`done`** 只表示一轮处理语义结束；**SSE 连接保持**，由客户端关闭或网络中断结束。 |
-| **与入队的关系** | 事件携带的 **`client_id` / `session_id`** 来自当前处理的 **`MessageEnvelope`**；若 **`env.client_id` 为空/空白**，API 层 **`handle_stream_event` 直接 return**，**不向总线发布**（无通道可归因）。 |
+| **与入队的关系** | 事件携带的 **`connection_id` / `session_id`** 来自当前处理的 **`MessageEnvelope`**；若 **`env.connection_id` 为空/空白**，API 层 **`handle_stream_event` 直接 return**，**不向总线发布**（无通道可归因）。 |
 
 ### 2.2 端到端链路（出站）
 
@@ -114,15 +114,15 @@ HTTP：**`POST /v1/messages`** → **`submit_message` / `submit_resume`**（**`a
 1. **`MainAgentTurnOrchestrator`**（等）调用注入的 **`emit_envelope`** → 实为 **`AgentService._emit_envelope`**  
 2. **`_map_event_envelope_to_stream`** → **`(event_type, data)`**（**`data` 内含 `meta`**，见 [api-reference.md](./api-reference.md) §4）  
 3. **`_emit_stream_event`** → **`await handle_stream_event(env, event_type, data)`**（FastAPI **`lifespan`** 内闭包）  
-4. **`handle_stream_event`**：校验 **`env.client_id`** 后 **`bus.publish(client_id=..., session_id=..., event_type=..., data=...)`**  
-5. **`InMemoryEventBus.publish`**：构造 **`StreamEvent`**（含 **`seq`**、**`ts`**），**`put_nowait`** 到该 **`client_id`** 桶内各订阅队列，并复制一份到 **`_all_subscribers`**（无 **`client_id`** 的调试订阅）  
+4. **`handle_stream_event`**：校验 **`env.connection_id`** 后 **`bus.publish(connection_id=..., session_id=..., event_type=..., data=...)`**  
+5. **`InMemoryEventBus.publish`**：构造 **`StreamEvent`**（含 **`seq`**、**`ts`**），**`put_nowait`** 到该 **`connection_id`** 桶内各订阅队列，并复制一份到 **`_all_subscribers`**（无 **`connection_id`** 的调试订阅）  
 6. **`GET /v1/streams`** 的生成器从连接级 **`asyncio.Queue`** 取事件，格式化为 SSE 帧写出  
 
 **源码锚点**：**`app/harness/service/agent_service.py`**（**`_emit_envelope` / `_emit_stream_event` / `_map_event_envelope_to_stream`**）；**`app/harness/api/app.py`**（**`lifespan` → `handle_stream_event`**、**`_to_sse`**）；**`app/harness/streaming/events.py`**（**`InMemoryEventBus` / `StreamEvent`**）。
 
 ### 2.3 `StreamEvent` 与 SSE 帧形状
 
-- **顶层**：**`client_id`**、**`session_id`**、**`type`**（与 SSE **`event:`** 行一致）、**`seq`**（按 **`client_id` 单调递增**）、**`ts`**（UTC ISO）、**`data`**（业务载荷 + **`meta`**）。  
+- **顶层**：**`connection_id`**、**`session_id`**、**`type`**（与 SSE **`event:`** 行一致）、**`seq`**（按 **`connection_id` 单调递增**）、**`ts`**（UTC ISO）、**`data`**（业务载荷 + **`meta`**）。  
 - **帧格式**与 **`data` 内各 `type` 扁平字段** 见 [api-reference.md](./api-reference.md) **§3.5、§4**。
 
 ### 2.4 `type` 与编排层 `event_type` 的映射关系
@@ -131,9 +131,9 @@ HTTP：**`POST /v1/messages`** → **`submit_message` / `submit_resume`**（**`a
 
 ### 2.5 客户端联调要点
 
-1. 启动后生成并稳定复用 **`client_id`**。  
-2. 建立 **`GET /v1/streams?client_id=...`**（缺参 **422**）。  
-3. **`POST /v1/messages`** 使用 **同一 `client_id`** 与目标 **`session_id`**，否则可能 **收不到 SSE**（服务层仍处理消息，但总线不投递）。  
+1. **`POST /v1/connections`** 获取并稳定复用 **`connection_id`**。  
+2. 建立 **`GET /v1/streams?connection_id=...`**（缺参 **422**）。  
+3. **`POST /v1/messages`** 使用 **同一 `connection_id`** 与目标 **`session_id`**，否则可能 **收不到 SSE**（服务层仍处理消息，但总线不投递）。  
 4. 多 **`session_id`** 可共用 **一条** SSE，在客户端用 **`session_id`** 分流展示。
 
 ### 2.6 SSE 事件类型速查（前端分流）
@@ -359,7 +359,7 @@ sequenceDiagram
 | **工具 UI** | **`tool_call`** 建卡 → **`tool_result`** 按 **`tool_call_id`** 填结果 → 可选在 **`done` 后**显示 loading（执行中） |
 | **审批** | 仅 **`approval_required`** 打开审批；提交 **`resume`** 后再监听 **`tool_result`** 与下一轮 **`assistant`** |
 | **增量 tool 参数** | **`tool_call_delta`** 可选展示；**执行与审批以 `tool_call` 为准** |
-| **多会话** | 同一 **`client_id`** 一条 SSE，用顶层 **`session_id`** 路由到对应会话面板 |
+| **多会话** | 同一 **`connection_id`** 一条 SSE，用顶层 **`session_id`** 路由到对应会话面板 |
 | **字段表** | 各 `type` 的扁平字段以 [api-reference.md](./api-reference.md) **§4.1** 为准 |
 
 ### 2.9 端到端时序图（入站 + 出站）
@@ -373,17 +373,17 @@ sequenceDiagram
     participant S as AgentService
     participant BUS as InMemoryEventBus
 
-    C->>API: GET /v1/streams?client_id=cid
-    API->>BUS: subscribe_all(client_id=cid)
+    C->>API: GET /v1/streams?connection_id=cid
+    API->>BUS: subscribe_all(connection_id=cid)
 
-    C->>API: POST /v1/messages (session_id, client_id=cid, ...)
+    C->>API: POST /v1/messages (session_id, connection_id=cid, ...)
     API->>S: submit_message / submit_resume → enqueue
 
     S->>Q: receive() 出队
     S->>S: _handle_message → 编排 / runtime
     S->>API: handle_stream_event(env, type, data)
-    Note over S,API: env.client_id 非空才继续
-    API->>BUS: publish(client_id, session_id, type, data)
+    Note over S,API: env.connection_id 非空才继续
+    API->>BUS: publish(connection_id, session_id, type, data)
     BUS-->>API: StreamEvent → SSE 帧
     API-->>C: event: assistant / done / ...
 ```

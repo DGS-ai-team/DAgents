@@ -7,7 +7,7 @@
 - `bash_run` 与后台 `ShellJob`：启动前仍走工具审批策略；超时只改变等待方式，不改变安全边界。后台任务应优先通过 `bash_job_status`、`bash_job_tail`、`bash_job_cancel` 查询和控制。
 - 文件写入工具：继续依赖工具审批与精确参数 schema；模型上下文不应包含未知参数。
 - A2A 入站与 relay：入站 `AgentPeerEnvelope` 由 API 层识别并标记 `source=a2a:<caller_agent_id>`；未知或非法信封按普通文本处理，不提升权限。
-- skills：`AGENT_SKILLS_ENABLED=false` 时不暴露 skills 工具、不注入 skills prompt；`clear_skills` 与 `unload_skills` 只影响会话态，不删除磁盘文件。
+- skills：`AGENT_SKILLS_ENABLED=false` 时不暴露 skills 工具、不注入 skills prompt；`unload_skills`（含空数组清空）与 `load_skills` 只影响会话态，不删除磁盘文件。
 - 工具原始输出落盘：长输出或脱敏命中时写入 `.runtime/tool_outputs/`；模型与 SSE 展示使用脱敏/截断版本，避免敏感信息直接进入上下文。
 - prompt 侧车与长期记忆：`.runtime/prompt_context/*.md` 与 `.runtime/memory/long_term.md` 只作为低优先级上下文，不应覆盖系统级安全规则。
 
