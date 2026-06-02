@@ -133,6 +133,15 @@ class DAgentsApiClient:
             raise ValueError("session_id and skill_name are required")
         return await self._post_json(f"/v1/sessions/{sid}/skills/unload", {"skill_name": name})
 
+    async def list_child_agents(self, parent_session_id: str) -> list[dict[str, Any]]:
+        """GET /v1/sessions/{parent}/child-agents → items 列表。"""
+        sid = str(parent_session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        result = await self._get_json(f"/v1/sessions/{sid}/child-agents")
+        items = result.get("items")
+        return items if isinstance(items, list) else []
+
     async def stream_events(self, *, session_id: str, live_only: bool = True) -> AsyncIterator[StreamEvent]:
         """订阅 SSE；默认 live_only 跳过重放（对齐 Node `live=1`）。"""
         sid = str(session_id or "").strip()

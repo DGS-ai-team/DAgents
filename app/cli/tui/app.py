@@ -24,9 +24,11 @@ from app.cli.approval import (
     ApprovalDecision,
     ToolApprovalRequest,
     build_all_rejected_decision,
+    extract_tool_approval_requests,
 )
+from app.cli.child_agent import approval_header, format_child_agents_list
 from app.cli.render import TranscriptKind, TranscriptUpdate
-from app.cli.session_controller import SessionController
+from app.cli.session_controller import PendingHITL, SessionController
 from app.cli.tool_calls import normalize_tool_call_item
 from app.cli.user_information import (
     UserInformationAnswer,
@@ -34,6 +36,7 @@ from app.cli.user_information import (
     UserInformationRequest,
     build_answer_from_options,
     build_answer_from_text,
+    extract_user_information_request,
 )
 from app.cli.tui.prompt_text_area import PromptTextArea
 from app.cli.tui.welcome_panel import build_welcome_panel
@@ -76,6 +79,15 @@ class DAgentsTuiApp(App[None]):
         border: none;
     }
     RichLog {
+        background: transparent;
+        border: none;
+    }
+    #input-strip {
+        height: 1;
+        margin: 0 1 0 1;
+        padding: 0 1;
+        color: $text-muted;
+        content-align: left middle;
         background: transparent;
         border: none;
     }
@@ -130,6 +142,9 @@ class DAgentsTuiApp(App[None]):
         self._approval_selected_index = 0
         self._approval_decisions: dict[str, bool] = {}
         self._approval_block: dict[str, int] | None = None
+        self._approval_raw_data: dict[str, Any] | None = None
+        self._hitl_busy = False
+        self._hitl_task: asyncio.Task[None] | None = None
         self._user_info_future: asyncio.Future[UserInformationAnswer] | None = None
         self._user_info_request: UserInformationRequest | None = None
         self._user_info_selected_index = 0
@@ -148,6 +163,7 @@ class DAgentsTuiApp(App[None]):
         yield Static(id="top-status-bar", markup=True)
         yield RichLog(id="transcript", highlight=True, markup=True, wrap=True)
         yield RichLog(id="context-view", highlight=True, markup=True, wrap=True)
+        yield Static("", id="input-strip", markup=True)
         yield PromptTextArea(
             id="prompt",
             placeholder="",
@@ -160,8 +176,9 @@ class DAgentsTuiApp(App[None]):
         """挂载后注册 controller 回调并聚焦输入框。"""
         self._controller.on_transcript(self._on_transcript)
         self._controller.on_status(self._on_status)
-        self._controller.on_approval(self._on_approval)
-        self._controller.on_user_information(self._on_user_information)
+        self._controller.on_hitl_pending(self._on_hitl_pending)
+        self._controller.on_child_strip(self._on_child_strip)
+        self._refresh_input_strip()
         self._apply_top_status(connected=False)
         try:
             await self._controller.start()
@@ -217,25 +234,56 @@ class DAgentsTuiApp(App[None]):
         self.call_later(self._apply_transcript, update)
 
     def _on_status(self, _text: str) -> None:
-        """SSE/连接变化时仅刷新顶栏（不再使用输入框上方状态行）。"""
+        """SSE/连接变化时刷新顶栏。"""
         self.call_later(self._apply_top_status)
 
-    async def _on_approval(self, requests: list[ToolApprovalRequest]) -> ApprovalDecision:
-        """隐藏输入框，并在 RichLog 中当前工具下方展示审批选项。
+    def _on_hitl_pending(self) -> None:
+        """HITL 入队后触发非阻塞处理。"""
+        self.call_later(self._process_hitl_queue)
 
-        逻辑：
-        1. controller 的 SSE render task 只负责等待结果；
-        2. widget 状态变更通过 `call_later` 回到 Textual UI 队列执行；
-        3. 用户逐项确认后，由 `_approval_future` 将决策交还 controller。
+    def _on_child_strip(self) -> None:
+        """子 Agent 状态变更时刷新输入框上方状态条。"""
+        self.call_later(self._refresh_input_strip)
 
-        关键边界：
-        - 不能在 controller 后台 task 里直接改 RichLog/TextArea，否则需要键盘等下一次 UI 事件才会重绘；
-        - cleanup 同样回到 UI 队列执行，确保输入框恢复与审批块删除同步刷新。
-        """
+    def _refresh_input_strip(self) -> None:
+        """刷新 #input-strip 文案（活跃子 Agent / 待审批 / HITL 队列）。"""
+        strip = self.query_one("#input-strip", Static)
+        text = self._controller.child_tracker.input_strip_text(self._controller.hitl_queue_len())
+        strip.update(f"[dim]{escape(text)}[/dim]")
+
+    def _process_hitl_queue(self) -> None:
+        """空闲时展示并处理队首 HITL（不阻塞 SSE render loop）。"""
+        if self._hitl_busy:
+            return
+        if self._approval_future is not None and not self._approval_future.done():
+            return
+        if self._user_info_future is not None and not self._user_info_future.done():
+            return
+        item = self._controller.peek_hitl()
+        if item is None:
+            return
+        self._hitl_busy = True
+        if item.kind == "approval":
+            self._hitl_task = asyncio.create_task(self._run_approval_hitl(item))
+        else:
+            self._hitl_task = asyncio.create_task(self._run_user_info_hitl(item))
+
+    async def _run_approval_hitl(self, item: PendingHITL) -> None:
+        """展示审批 UI，完成后异步 submit resume。"""
+        requests = extract_tool_approval_requests(item.data)
         if not requests:
-            return build_all_rejected_decision([])
+            try:
+                await self._controller.complete_hitl_approval(build_all_rejected_decision([]))
+            except Exception as exc:  # noqa: BLE001
+                self._transcript_log().write(f"[red]approval submit failed: {exc}[/red]")
+            finally:
+                self._hitl_busy = False
+                self._refresh_input_strip()
+                self.call_later(self._process_hitl_queue)
+            return
         loop = asyncio.get_running_loop()
         ready: asyncio.Future[asyncio.Future[ApprovalDecision]] = loop.create_future()
+        self._approval_raw_data = item.data
 
         def _begin() -> None:
             try:
@@ -248,33 +296,57 @@ class DAgentsTuiApp(App[None]):
                     ready.set_result(future)
 
         self.call_later(_begin)
-        approval_future = await ready
         try:
-            return await approval_future
+            approval_future = await ready
+            decision = await approval_future
+        except ApprovalCancelled:
+            self._controller.discard_hitl_head()
+            self.call_later(self._end_approval_ui)
+            self._hitl_busy = False
+            self._refresh_input_strip()
+            self.call_later(self._process_hitl_queue)
+            return
+        except Exception as exc:  # noqa: BLE001
+            self._controller.discard_hitl_head()
+            self.call_later(self._end_approval_ui)
+            self._transcript_log().write(f"[red]approval ui failed: {exc}[/red]")
+            self._hitl_busy = False
+            self._refresh_input_strip()
+            self.call_later(self._process_hitl_queue)
+            return
         finally:
-            cleanup_done: asyncio.Future[None] = loop.create_future()
+            self._approval_raw_data = None
+        cleanup_done: asyncio.Future[None] = loop.create_future()
 
-            def _cleanup() -> None:
-                try:
-                    self._end_approval_ui()
-                except Exception as exc:  # noqa: BLE001
-                    if not cleanup_done.done():
-                        cleanup_done.set_exception(exc)
-                else:
-                    if not cleanup_done.done():
-                        cleanup_done.set_result(None)
+        def _cleanup() -> None:
+            try:
+                self._end_approval_ui()
+            except Exception as exc:  # noqa: BLE001
+                if not cleanup_done.done():
+                    cleanup_done.set_exception(exc)
+            else:
+                if not cleanup_done.done():
+                    cleanup_done.set_result(None)
 
-            self.call_later(_cleanup)
-            await cleanup_done
+        self.call_later(_cleanup)
+        await cleanup_done
+        try:
+            await self._controller.complete_hitl_approval(decision)
+        except Exception as exc:  # noqa: BLE001
+            self._transcript_log().write(f"[red]approval submit failed: {exc}[/red]")
+        finally:
+            self._hitl_busy = False
+            self._refresh_input_strip()
+            self.call_later(self._process_hitl_queue)
 
-    async def _on_user_information(self, request: UserInformationRequest) -> UserInformationAnswer:
-        """展示用户询问 UI，并等待回答或取消。
-
-        逻辑：
-        1. 通过 UI 队列初始化询问块与输入状态；
-        2. 等待 `_user_info_future` 完成；
-        3. cleanup 恢复输入框与 RichLog。
-        """
+    async def _run_user_info_hitl(self, item: PendingHITL) -> None:
+        """展示用户询问 UI，完成后异步 submit resume。"""
+        request = extract_user_information_request(item.data)
+        if request is None:
+            self._controller.discard_hitl_head()
+            self._hitl_busy = False
+            self.call_later(self._process_hitl_queue)
+            return
         loop = asyncio.get_running_loop()
         ready: asyncio.Future[asyncio.Future[UserInformationAnswer]] = loop.create_future()
 
@@ -289,24 +361,36 @@ class DAgentsTuiApp(App[None]):
                     ready.set_result(future)
 
         self.call_later(_begin)
-        answer_future = await ready
         try:
-            return await answer_future
+            answer_future = await ready
+            answer = await answer_future
+        except UserInformationCancelled:
+            self._controller.discard_hitl_head()
+            self.call_later(self._end_user_info_ui)
+            self._hitl_busy = False
+            self.call_later(self._process_hitl_queue)
+            return
+        cleanup_done: asyncio.Future[None] = loop.create_future()
+
+        def _cleanup() -> None:
+            try:
+                self._end_user_info_ui()
+            except Exception as exc:  # noqa: BLE001
+                if not cleanup_done.done():
+                    cleanup_done.set_exception(exc)
+            else:
+                if not cleanup_done.done():
+                    cleanup_done.set_result(None)
+
+        self.call_later(_cleanup)
+        await cleanup_done
+        try:
+            await self._controller.complete_hitl_user_info(answer)
+        except Exception as exc:  # noqa: BLE001
+            self._transcript_log().write(f"[red]user info submit failed: {exc}[/red]")
         finally:
-            cleanup_done: asyncio.Future[None] = loop.create_future()
-
-            def _cleanup() -> None:
-                try:
-                    self._end_user_info_ui()
-                except Exception as exc:  # noqa: BLE001
-                    if not cleanup_done.done():
-                        cleanup_done.set_exception(exc)
-                else:
-                    if not cleanup_done.done():
-                        cleanup_done.set_result(None)
-
-            self.call_later(_cleanup)
-            await cleanup_done
+            self._hitl_busy = False
+            self.call_later(self._process_hitl_queue)
 
     def _begin_approval_ui(self, requests: list[ToolApprovalRequest]) -> asyncio.Future[ApprovalDecision]:
         """在 UI 队列中初始化审批状态并立即刷新 RichLog。
@@ -468,6 +552,8 @@ class DAgentsTuiApp(App[None]):
             self._approval_future.set_exception(ApprovalCancelled())
         if self._user_info_future is not None and not self._user_info_future.done():
             self._user_info_future.set_exception(UserInformationCancelled())
+        self._controller.clear_hitl_queue()
+        self._hitl_busy = False
         self._cancel_tool_pending_tasks()
         self._cancel_status_lines()
         self._finish_assistant_stream(self._transcript_log())
@@ -1209,6 +1295,9 @@ class DAgentsTuiApp(App[None]):
 
     def _approval_block_text(self) -> str:
         lines: list[str] = []
+        if self._approval_raw_data:
+            header = approval_header(self._approval_raw_data)
+            lines.append(f"[bold cyan]{escape(header)}[/bold cyan]")
         for option_index, (_call_id, approved) in enumerate(self._approval_options()):
             action = "同意" if approved else "不同意"
             cursor = "[cyan]●[/cyan]" if option_index == self._approval_selected_index else " "
@@ -1479,6 +1568,9 @@ class DAgentsTuiApp(App[None]):
             return
         if value == "/clear":
             await self._clear_context()
+            return
+        if value == "/children":
+            await self._show_children()
             return
         if value.startswith("/"):
             log = self._transcript_log()
@@ -1788,10 +1880,23 @@ class DAgentsTuiApp(App[None]):
         grid.add_row(Text.from_markup(self._format_skill_state(data)))
         return grid
 
+    async def _show_children(self) -> None:
+        """查询并展示当前 session 下活跃子 Agent。"""
+        log = self._transcript_log()
+        try:
+            items = await self._controller.list_child_agents()
+            self._controller.child_tracker.replace_from_api(items)
+            self._refresh_input_strip()
+            text = format_child_agents_list(items, self._controller.child_tracker.awaiting_map())
+            log.write(text)
+        except Exception as exc:
+            log.write(f"[red]children failed: {exc}[/red]")
+
     async def _clear_context(self) -> None:
         log = self._transcript_log()
         try:
             await self._controller.clear_context()
+            self._controller.reset_child_state()
             log.clear()
             self._reset_transcript_after_clear(log)
         except Exception as exc:
@@ -1808,6 +1913,7 @@ class DAgentsTuiApp(App[None]):
             "  /skill           Show loaded and available skills",
             "  /skill load NAME Load one skill into current session",
             "  /skill unload NAME Unload one skill from current session",
+            "  /children        List active child agents",
             "  /clear           Clear server context and transcript",
             "  /exit            Quit chat",
         ):

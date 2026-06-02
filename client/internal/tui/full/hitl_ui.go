@@ -1,12 +1,13 @@
 package full
 
 import (
-	"fmt"
 	"strings"
 
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+const defaultInputPlaceholder = "输入消息… (/help 命令，Enter 发送，Shift+Enter 换行，Esc 取消 turn)"
 
 func (m *model) initApprovalState(data map[string]any) {
 	m.hitlData = data
@@ -26,15 +27,15 @@ func (m *model) initUserInfoState(data map[string]any) {
 func (m *model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
-		m.resolveHITL(hitlResult{resume: clihitl.BuildApprovalResume(m.hitlData, true)})
-		m.resetHITLState()
-		m.statusLine = "已批准全部工具"
-		return m, nil
+		return m.finishApprovalInteraction(
+			clihitl.BuildApprovalResume(m.hitlData, true),
+			"已批准全部工具",
+		)
 	case "n", "N", "esc":
-		m.resolveHITL(hitlResult{resume: clihitl.BuildApprovalResume(m.hitlData, false)})
-		m.resetHITLState()
-		m.statusLine = "已拒绝全部工具"
-		return m, nil
+		return m.finishApprovalInteraction(
+			clihitl.BuildApprovalResume(m.hitlData, false),
+			"已拒绝全部工具",
+		)
 	case "up", "k":
 		if m.approvalCursor > 0 {
 			m.approvalCursor--
@@ -53,10 +54,10 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.approvalSelected[id] = !m.approvalSelected[id]
 		return m, nil
 	case "enter":
-		m.resolveHITL(hitlResult{resume: clihitl.BuildApprovalSelectionResume(m.hitlData, m.approvalSelected)})
-		m.resetHITLState()
-		m.statusLine = "已提交审批选择"
-		return m, nil
+		return m.finishApprovalInteraction(
+			clihitl.BuildApprovalSelectionResume(m.hitlData, m.approvalSelected),
+			"已提交审批选择",
+		)
 	default:
 		return m, nil
 	}
@@ -68,10 +69,11 @@ func (m *model) handleUserInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
-		m.resolveHITL(hitlResult{err: fmt.Errorf("用户取消")})
+		m.popHITLQueueHead()
 		m.resetHITLState()
 		m.input.SetValue("")
 		m.statusLine = "已取消回答"
+		m.showNextHITLIfIdle()
 		return m, nil
 	case "enter":
 		answer := strings.TrimSpace(m.input.Value())
@@ -79,12 +81,10 @@ func (m *model) handleUserInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.errLine = "回答不能为空"
 			return m, nil
 		}
-		m.resolveHITL(hitlResult{resume: clihitl.BuildUserInformationResume(m.userInfoReq, answer, nil, false)})
-		m.resetHITLState()
-		m.input.SetValue("")
-		m.input.Placeholder = defaultInputPlaceholder
-		m.statusLine = "已提交回答"
-		return m, nil
+		return m.finishUserInfoInteraction(
+			clihitl.BuildUserInformationResume(m.userInfoReq, answer, nil, false),
+			"已提交回答",
+		)
 	default:
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
@@ -99,9 +99,10 @@ func (m *model) handleUserInfoOptionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
-		m.resolveHITL(hitlResult{err: fmt.Errorf("用户取消")})
+		m.popHITLQueueHead()
 		m.resetHITLState()
 		m.statusLine = "已取消回答"
+		m.showNextHITLIfIdle()
 		return m, nil
 	case "up", "k":
 		if m.userInfoCursor > 0 {
@@ -130,10 +131,7 @@ func (m *model) handleUserInfoOptionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.errLine = err.Error()
 			return m, nil
 		}
-		m.resolveHITL(hitlResult{resume: rv})
-		m.resetHITLState()
-		m.statusLine = "已提交回答"
-		return m, nil
+		return m.finishUserInfoInteraction(rv, "已提交回答")
 	default:
 		return m, nil
 	}
@@ -148,7 +146,6 @@ func (m *model) resetHITLState() {
 	m.userInfoSelected = nil
 	m.userInfoCursor = 0
 	m.userInfoUseOptions = false
+	m.hitlData = nil
 	m.errLine = ""
 }
-
-const defaultInputPlaceholder = "输入消息… (/help 命令，Enter 发送，Shift+Enter 换行，Esc 取消 turn)"

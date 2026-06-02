@@ -8,6 +8,7 @@
 | [`session_controller.py`](session_controller.py) | SSE pump、后台 render 循环、用户 turn 栅栏 |
 | [`api_client.py`](api_client.py) | Agent Node HTTP/SSE 客户端 |
 | [`approval.py`](approval.py) | 工具审批载荷解析与 resume 决策构造 |
+| [`child_agent.py`](child_agent.py) | 子 Agent SSE 过滤、生命周期文案、`ChildAgentTracker` |
 | [`user_information.py`](user_information.py) | `ask_user_information` SSE 解析与用户回答 resume 构造 |
 | [`session_commands.py`](session_commands.py) | `dagents show session` / `dagents delete session` |
 | [`tui/`](tui/) | Textual UI：主 App、进入欢迎区、审批 Modal |
@@ -46,6 +47,7 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 | `/skill` | 展示 loaded/available skills |
 | `/skill load NAME` | 加载 skill |
 | `/skill unload NAME` | 卸载 skill |
+| `/children` | 列出当前 session 下活跃子 Agent |
 | `/clear` | 清空服务端 context 并清 transcript |
 | `/exit` | 退出，并在终端打印恢复当前会话的 `dagents chat --session ...` 命令 |
 
@@ -70,5 +72,7 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 - **唯一运行时**：TUI 只连 Go Agent Node；SSE 按 `session_id` 订阅。
 - **TUI 主题**：固定 `textual-dark` 暗色（`DAgentsTuiApp.theme`），不跟随终端配色。
 - **进入欢迎区**：连接成功后 `build_welcome_panel()` 以 Rich `Panel` 写入 RichLog，随消息一起滚动；`/clear` 清屏时一并清除。
-- **长连 SSE**：`_pump_stream` 后台入队，`_render_loop` 持续渲染到 RichLog。
+- **长连 SSE**：`_pump_stream` 后台入队，`_render_loop` 持续渲染到 RichLog；子 Agent turn 的 assistant/tool 等事件被过滤，仅展示审批与生命周期系统行。
+- **HITL 非阻塞**：`approval_required` / `user_information_required` 入队后由 TUI 异步处理，避免阻塞 SSE 消费。
+- **子 Agent 状态条**：输入框上方 `#input-strip` 展示活跃子 Agent 数与待审批数。
 - **用户 turn 栅栏**：`submit_message` + `wait_user_turn`；在 submit 后见到内容事件之前的 `done` 被忽略。

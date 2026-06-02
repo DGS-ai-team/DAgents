@@ -8,6 +8,7 @@ import (
 	"time"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
+	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/client/internal/version"
 	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 )
@@ -20,7 +21,7 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 	cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
 	switch cmd {
 	case "help", "h", "?":
-		m.transcript.Add("[system] " + strings.TrimSpace(`命令: /status /context /sessions /switch /new /clear /cancel /skill /tools /reasoning /quit`))
+		m.transcript.Add("[system] " + strings.TrimSpace(`命令: /status /context /sessions /switch /new /clear /cancel /children /skill /tools /reasoning /quit`))
 		m.syncViewport()
 	case "context":
 		err = m.enterContextView()
@@ -48,6 +49,11 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 		if err == nil {
 			m.awaitingTurn = false
 			m.statusLine = "已取消在途 turn"
+		}
+	case "children", "child":
+		err = m.appendChildren()
+		if err == nil {
+			m.statusLine = "已刷新子 Agent 列表"
 		}
 	case "tools":
 		if len(parts) > 1 && strings.EqualFold(parts[1], "verbose") {
@@ -159,6 +165,9 @@ func (m *model) switchSession(requested string) error {
 	m.sessionMu.Unlock()
 	m.awaitingTurn = false
 	m.submitSeen = false
+	m.resetHITLQueue()
+	m.resetHITLState()
+	m.children.reset()
 	m.transcript.Add("[system] 已切换 session=" + id)
 	m.syncViewport()
 	m.restartStream()
@@ -210,6 +219,26 @@ func (m *model) appendSessions() error {
 	return nil
 }
 
+func (m *model) appendChildren() error {
+	items, err := m.client.ListChildAgents(m.ctx, m.currentSession())
+	if err != nil {
+		return err
+	}
+	m.children.replaceFromAPI(items)
+	for _, p := range m.hitlQueue {
+		if p.kind != hitlPendingApproval {
+			continue
+		}
+		if id := clihitl.ChildSessionIDFromData(p.data); id != "" {
+			m.children.setAwaitingApproval(id, true)
+		}
+	}
+	awaiting := m.children.awaitingApprovalMap()
+	m.transcript.Add("[system] " + tuishared.FormatChildAgentsList(items, awaiting))
+	m.syncViewport()
+	return nil
+}
+
 func (m *model) restartStream() {
 	m.stopStream()
 	streamCtx, cancel := context.WithCancel(m.ctx)
@@ -242,6 +271,7 @@ func runSSELoop(ctx context.Context, m *model) {
 		m.sseDetail = "订阅中"
 		if m.program != nil {
 			m.program.Send(refreshViewportMsg{})
+			m.program.Send(syncChildAgentsMsg{})
 		}
 
 		err := m.client.StreamEvents(ctx, m.currentSession(), fromSeq, func(ev nodeapi.StreamEvent) bool {

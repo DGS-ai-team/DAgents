@@ -15,7 +15,9 @@
 - **`_cancel_current_turn`** / **`_cancel_current_turn_request`**：Esc 触发当前 turn 取消；审批中会中断 approval future，避免继续 submit resume
 - **`_show_context_view` / `_enter_context_view` / `_exit_context_view` / `_format_context_state`**：`/context` 命令展示当前 context 摘要；进入时隐藏聊天 RichLog，Esc 返回
 - **`action_toggle_tool_result`**：点击工具结果摘要展开/收起
-- **`_begin_approval_ui`** / **`_end_approval_ui`**：通过 Textual UI 队列初始化/清理 RichLog 内审批交互，避免后台 task 直接改 widget
+- **`_process_hitl_queue`** / **`_run_approval_hitl`** / **`_run_user_info_hitl`**：非阻塞 HITL 队列处理
+- **`_refresh_input_strip`** / **`_show_children`**：子 Agent 状态条与 `/children` 命令
+- **`_begin_approval_ui`** / **`_end_approval_ui`**：通过 Textual UI 队列初始化/清理 RichLog 内审批交互；子任务审批显示青色标题
 - **`_write_approval_block`** / **`_render_approval_block`** / **`_delete_approval_block`**：RichLog 内逐工具审批选项块
 - **`_refresh_approval_layout`**：审批块增删后刷新布局并滚动到底部
 - **`confirm_approval_choice`**：确认 RichLog 内审批选项当前选择

@@ -98,9 +98,9 @@ func BuildApprovalResume(data map[string]any, approveAll bool) map[string]any {
 	items := ExtractToolApprovals(data)
 	if len(items) == 0 {
 		if approveAll {
-			return map[string]any{"type": "approve"}
+			return attachApprovalRouting(data, map[string]any{"type": "approve"})
 		}
-		return map[string]any{"type": "reject"}
+		return attachApprovalRouting(data, map[string]any{"type": "reject"})
 	}
 	if approveAll {
 		approved := make([]string, 0, len(items))
@@ -108,20 +108,20 @@ func BuildApprovalResume(data map[string]any, approveAll bool) map[string]any {
 			approved = append(approved, it.CallID)
 		}
 		rejected := []string{}
-		return map[string]any{"type": "selection", "approved": approved, "rejected": rejected}
+		return attachApprovalRouting(data, map[string]any{"type": "selection", "approved": approved, "rejected": rejected})
 	}
 	rejected := make([]string, 0, len(items))
 	for _, it := range items {
 		rejected = append(rejected, it.CallID)
 	}
-	return map[string]any{"type": "selection", "approved": []string{}, "rejected": rejected}
+	return attachApprovalRouting(data, map[string]any{"type": "selection", "approved": []string{}, "rejected": rejected})
 }
 
 // BuildApprovalSelectionResume 按逐条勾选构造 selection resume；未在 approved 中的视为 rejected。
 func BuildApprovalSelectionResume(data map[string]any, approved map[string]bool) map[string]any {
 	items := ExtractToolApprovals(data)
 	if len(items) == 0 {
-		return map[string]any{"type": "reject"}
+		return attachApprovalRouting(data, map[string]any{"type": "reject"})
 	}
 	approvedIDs := make([]string, 0)
 	rejectedIDs := make([]string, 0)
@@ -132,11 +132,11 @@ func BuildApprovalSelectionResume(data map[string]any, approved map[string]bool)
 			rejectedIDs = append(rejectedIDs, it.CallID)
 		}
 	}
-	return map[string]any{
+	return attachApprovalRouting(data, map[string]any{
 		"type":     "selection",
 		"approved": approvedIDs,
 		"rejected": rejectedIDs,
-	}
+	})
 }
 
 // FormatApprovalInteractive 生成交互式审批文本（含光标与勾选状态）。

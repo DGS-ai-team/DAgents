@@ -46,6 +46,8 @@ type runtime struct {
 	fsRoot        string
 
 	triggerDelivery triggers.DeliveryTracker
+
+	childMeta *childRuntimeMeta
 }
 
 func newRuntime(
@@ -63,13 +65,33 @@ func newRuntime(
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
+	return newRuntimeWithPublisher(id, agentID, hub, hub, llmClient, registry, policyEngine, st, logger,
+		initial, loaded, initialPending, initialLoopCount, turnOpts, triggerDelivery)
+}
+
+func newRuntimeWithPublisher(
+	id, agentID string,
+	pub stream.Publisher,
+	eventHub *stream.Hub,
+	llmClient llm.Client,
+	toolExec tools.Executor,
+	policyEngine *policy.Engine,
+	st *store.SQLiteStore,
+	logger *slog.Logger,
+	initial []llm.Message,
+	loaded []skills.LoadedSkill,
+	initialPending *turn.PendingHITL,
+	initialLoopCount int,
+	turnOpts TurnOptions,
+	triggerDelivery triggers.DeliveryTracker,
+) *runtime {
 	catalog := skills.NewCatalog(turnOpts.SkillsRoot, turnOpts.SkillsEnabled, turnOpts.SkillsMaxInPrompt)
 	journal := history.NewJournal(turnOpts.RawMessageHistoryEnabled, turnOpts.RawMessageHistoryDir, logger)
 	rt := &runtime{
 		session:       Session{ID: id, AgentID: agentID},
 		queue:         queue.NewMessageQueue(),
 		store:         st,
-		hub:           hub,
+		hub:           eventHub,
 		agentID:       agentID,
 		skillsCatalog: catalog,
 		compression:   compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking),
@@ -84,9 +106,9 @@ func newRuntime(
 	rt.orch = turn.NewOrchestrator(
 		agentID,
 		turnOpts.FSRoot,
-		hub,
+		pub,
 		llmClient,
-		registry,
+		toolExec,
 		policyEngine,
 		turn.SkillAccess{
 			Catalog: catalog,
@@ -177,7 +199,7 @@ func (r *runtime) handleHumanMessage(parent context.Context, content string) {
 		r.orch.InterruptPending(r.session.ID, &r.messages, pending)
 	}
 	r.toolLoopCount = 0
-	if r.compression != nil && r.compression.Enabled() {
+	if r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
 		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
 	}
 	turnCtx, cancel := context.WithCancel(parent)
@@ -186,11 +208,15 @@ func (r *runtime) handleHumanMessage(parent context.Context, content string) {
 	history := r.messages
 	r.mu.Unlock()
 
+	var scheduleToolResult bool
 	defer func() {
 		r.mu.Lock()
 		r.state = turn.StateIdle
 		r.turnCancel = nil
 		r.mu.Unlock()
+		if !scheduleToolResult {
+			r.tryCompleteChildIfIdle()
+		}
 	}()
 
 	setState := func(s turn.State) {
@@ -210,6 +236,14 @@ func (r *runtime) handleHumanMessage(parent context.Context, content string) {
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
+	scheduleToolResult = outcome.ScheduleToolResult
+	if outcome.ScheduleToolResult {
+		_ = r.scheduleToolResult()
+	}
+	r.persist(context.Background())
+}
+
+func (r *runtime) afterToolStep(outcome turn.StepOutcome) {
 	if outcome.ScheduleToolResult {
 		_ = r.scheduleToolResult()
 	}
@@ -218,7 +252,7 @@ func (r *runtime) handleHumanMessage(parent context.Context, content string) {
 
 func (r *runtime) handleToolResult(parent context.Context) {
 	r.mu.Lock()
-	if r.compression != nil && r.compression.Enabled() {
+	if r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
 		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
 	}
 	turnCtx, cancel := context.WithCancel(parent)
@@ -228,11 +262,15 @@ func (r *runtime) handleToolResult(parent context.Context) {
 	loopCount := r.toolLoopCount
 	r.mu.Unlock()
 
+	var scheduleToolResult bool
 	defer func() {
 		r.mu.Lock()
 		r.state = turn.StateIdle
 		r.turnCancel = nil
 		r.mu.Unlock()
+		if !scheduleToolResult {
+			r.tryCompleteChildIfIdle()
+		}
 	}()
 
 	setState := func(s turn.State) {
@@ -245,10 +283,8 @@ func (r *runtime) handleToolResult(parent context.Context) {
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	if outcome.ScheduleToolResult {
-		_ = r.scheduleToolResult()
-	}
-	r.persist(context.Background())
+	scheduleToolResult = outcome.ScheduleToolResult
+	r.afterToolStep(outcome)
 }
 
 func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.AsyncToolResultPayload) {
@@ -256,7 +292,7 @@ func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.A
 		return
 	}
 	r.mu.Lock()
-	if r.compression != nil && r.compression.Enabled() {
+	if r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
 		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
 	}
 	turnCtx, cancel := context.WithCancel(parent)
@@ -266,11 +302,15 @@ func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.A
 	loopCount := r.toolLoopCount
 	r.mu.Unlock()
 
+	var scheduleToolResult bool
 	defer func() {
 		r.mu.Lock()
 		r.state = turn.StateIdle
 		r.turnCancel = nil
 		r.mu.Unlock()
+		if !scheduleToolResult {
+			r.tryCompleteChildIfIdle()
+		}
 	}()
 
 	setState := func(s turn.State) {
@@ -290,10 +330,8 @@ func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.A
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	if outcome.ScheduleToolResult {
-		_ = r.scheduleToolResult()
-	}
-	r.persist(context.Background())
+	scheduleToolResult = outcome.ScheduleToolResult
+	r.afterToolStep(outcome)
 }
 
 func (r *runtime) handleMessage(parent context.Context, content string) {
@@ -315,11 +353,15 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 	loopCount := r.toolLoopCount
 	r.mu.Unlock()
 
+	var scheduleToolResult bool
 	defer func() {
 		r.mu.Lock()
 		r.state = turn.StateIdle
 		r.turnCancel = nil
 		r.mu.Unlock()
+		if !scheduleToolResult {
+			r.tryCompleteChildIfIdle()
+		}
 	}()
 
 	setState := func(s turn.State) {
@@ -333,14 +375,12 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	if outcome.ScheduleToolResult {
-		_ = r.scheduleToolResult()
-	}
-	r.persist(context.Background())
+	scheduleToolResult = outcome.ScheduleToolResult
+	r.afterToolStep(outcome)
 }
 
 func (r *runtime) persist(ctx context.Context) {
-	if r.store == nil {
+	if r.store == nil || r.isChildSession() {
 		return
 	}
 	r.mu.Lock()

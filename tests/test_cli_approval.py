@@ -52,6 +52,16 @@ class CliApprovalTests(unittest.TestCase):
         self.assertEqual(approved, {"type": "selection", "approved": ["call_1", "call_2"], "rejected": []})
         self.assertEqual(rejected, {"type": "selection", "approved": [], "rejected": ["call_1", "call_2"]})
 
+    def test_build_approval_resume_routes_child_session(self) -> None:
+        from app.cli.approval import build_approval_resume
+
+        requests = extract_tool_approval_requests(self._payload())
+        data = {"child_session_id": "child-s1", "approval_id": "ap-99"}
+        resume = build_approval_resume(data, build_all_approved_decision(requests))
+        self.assertEqual(resume["child_session_id"], "child-s1")
+        self.assertEqual(resume["approval_id"], "ap-99")
+        self.assertEqual(resume["approved"], ["call_1", "call_2"])
+
     def test_selection_resume_payload_rejects_unselected_calls(self) -> None:
         requests = extract_tool_approval_requests(self._payload())
 

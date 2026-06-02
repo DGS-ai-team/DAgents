@@ -5,21 +5,21 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 from app.cli.api_client import StreamEvent
-from app.cli.approval import build_all_approved_decision
+from app.cli.approval import build_all_approved_decision, extract_tool_approval_requests
 from app.cli.render import TranscriptKind
 from app.cli.session_controller import SessionController
 
 
-def _event(event_type: str, *, content: str = "", message: str = "") -> StreamEvent:
-    data: dict[str, object] = {}
+def _event(event_type: str, *, content: str = "", message: str = "", data: dict | None = None) -> StreamEvent:
+    payload_data: dict[str, object] = dict(data) if data is not None else {}
     if content:
-        data["content"] = content
+        payload_data["content"] = content
     if message:
-        data["message"] = message
+        payload_data["message"] = message
     return StreamEvent(
         event_type=event_type,
         event_id=None,
-        payload={"session_id": "s1", "data": data},
+        payload={"session_id": "s1", "data": payload_data},
     )
 
 
@@ -59,31 +59,36 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(wait_task, timeout=1.0)
         self.assertTrue(self.controller._user_turn_done.is_set())
 
-    async def test_approval_skips_first_done_before_user_turn_completes(self) -> None:
-        """approval 后第一条 done 被 skip，第二条 done 才结束用户 turn 等待。"""
+    async def test_approval_enqueued_and_skip_done_after_resume(self) -> None:
+        """approval 入队不阻塞；complete 后 skip 第一条 done。"""
         mock_client = MagicMock()
         mock_client.submit_resume = AsyncMock()
         self.controller._client = mock_client
-
-        async def approve(reqs: list) -> object:
-            return build_all_approved_decision(reqs)
-
-        self.controller.on_approval(approve)
 
         self.controller._reset_user_turn_wait()
         wait_task = asyncio.create_task(self.controller.wait_user_turn())
         skip_holder = {"v": False}
 
         await self.controller._handle_stream_event(_event("assistant", content="plan"), skip_holder)
-        skip_holder["v"] = await self.controller._handle_approval(
-            {
-                "approval_args": {
-                    "tool_calls": [
-                        {"id": "call_1", "name": "read_file", "arguments": {"path": "a.txt"}},
-                    ]
-                }
-            }
+        await self.controller._handle_stream_event(
+            _event(
+                "approval_required",
+                data={
+                    "approval_args": {
+                        "tool_calls": [
+                            {"id": "call_1", "name": "read_file", "arguments": {"path": "a.txt"}},
+                        ]
+                    }
+                },
+            ),
+            skip_holder,
         )
+        item = self.controller.peek_hitl()
+        self.assertIsNotNone(item)
+
+        requests = extract_tool_approval_requests(item.data)  # type: ignore[union-attr]
+        await self.controller.complete_hitl_approval(build_all_approved_decision(requests))
+
         await self.controller._handle_stream_event(_event("done"), skip_holder)
         await asyncio.sleep(0)
         self.assertFalse(self.controller._user_turn_done.is_set())

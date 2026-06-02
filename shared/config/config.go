@@ -32,6 +32,7 @@ type Config struct {
 	Compression   CompressionConfig  `yaml:"compression"`
 	Triggers          TriggersConfig          `yaml:"triggers"`
 	RawMessageHistory RawMessageHistoryConfig `yaml:"raw_message_history"`
+	ChildAgents       ChildAgentsConfig       `yaml:"child_agents"`
 	Log               LogConfig               `yaml:"log"`
 }
 
@@ -40,6 +41,17 @@ const EnvRawMessageHistoryEnabled = "AGENT_RAW_MESSAGE_HISTORY_ENABLED"
 // RawMessageHistoryConfig 控制原始消息 JSONL 审计侧车。
 type RawMessageHistoryConfig struct {
 	Enabled *bool `yaml:"enabled"`
+}
+
+// ChildAgentsConfig 控制临时子 Agent（见 docs/architecture/child-agent-tools.md）。
+type ChildAgentsConfig struct {
+	Enabled                   bool `yaml:"enabled"`
+	DefaultTTLSeconds         int  `yaml:"default_ttl_seconds"`
+	MaxTTLSeconds             int  `yaml:"max_ttl_seconds"`
+	DefaultMaxTurns           int  `yaml:"default_max_turns"`
+	MaxMaxTurns               int  `yaml:"max_max_turns"`
+	MaxActivePerParent        int  `yaml:"max_active_per_parent"`
+	DefaultWaitTimeoutSeconds int  `yaml:"default_wait_timeout_seconds"`
 }
 
 // LogConfig 控制 Node 进程 stderr 结构化日志级别。
@@ -157,6 +169,24 @@ func (c *Config) ApplyDefaults() {
 	}
 	if strings.TrimSpace(c.Log.Level) == "" {
 		c.Log.Level = "info"
+	}
+	if c.ChildAgents.DefaultTTLSeconds <= 0 {
+		c.ChildAgents.DefaultTTLSeconds = 1800
+	}
+	if c.ChildAgents.MaxTTLSeconds <= 0 {
+		c.ChildAgents.MaxTTLSeconds = 7200
+	}
+	if c.ChildAgents.DefaultMaxTurns <= 0 {
+		c.ChildAgents.DefaultMaxTurns = 20
+	}
+	if c.ChildAgents.MaxMaxTurns <= 0 {
+		c.ChildAgents.MaxMaxTurns = 50
+	}
+	if c.ChildAgents.MaxActivePerParent <= 0 {
+		c.ChildAgents.MaxActivePerParent = 8
+	}
+	if c.ChildAgents.DefaultWaitTimeoutSeconds <= 0 {
+		c.ChildAgents.DefaultWaitTimeoutSeconds = 300
 	}
 }
 

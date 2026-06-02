@@ -21,9 +21,10 @@ import (
 )
 
 const (
-	inputHeight   = 3
-	statusHeight  = 1
-	helpHeight    = 1
+	inputHeight      = 3
+	statusHeight     = 1
+	inputStripHeight = 1
+	helpHeight       = 1
 	minViewWidth  = 20
 	minViewHeight = 6
 )
@@ -36,12 +37,6 @@ const (
 	modeUserInfo
 )
 
-type hitlResult struct {
-	resume map[string]any
-	err    error
-}
-
-// refreshViewportMsg 通知 Update 刷新 viewport 内容并滚到底。
 type refreshViewportMsg struct{}
 
 // streamErrMsg SSE 后台非致命错误（已记录到 transcript）。
@@ -72,7 +67,7 @@ type model struct {
 	mode       uiMode
 	hitlPrompt string
 	hitlData   map[string]any
-	hitlCh     chan hitlResult
+	hitlQueue  []hitlPending
 
 	contextMode bool
 	contextText string
@@ -97,6 +92,8 @@ type model struct {
 
 	streamCancel context.CancelFunc
 	streamDone   chan struct{}
+
+	children *childAgentTracker
 }
 
 // Run 启动全屏 TUI；initialSession 非空时尝试恢复该 session。
@@ -126,9 +123,9 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		input:      ta,
 		transcript: tuishared.NewTranscript(0),
 		toolFold:   &tuishared.ToolFold{},
-		hitlCh:     make(chan hitlResult, 1),
 		showReasoning: showReasoning,
 		helpLine:   "Enter 发送 · Shift+Enter 换行 · Esc 取消 turn · /help 命令 · /quit 退出",
+		children:   newChildAgentTracker(),
 	}
 
 	if err := m.bootstrapSession(initialSession); err != nil {
@@ -188,6 +185,28 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.transcript.Add("[system] " + msg.line)
 		m.syncViewport()
 		return m, nil
+
+	case pendingHITLChangedMsg:
+		m.showNextHITLIfIdle()
+		m.syncViewport()
+		return m, nil
+
+	case hitlSubmitResultMsg:
+		if msg.err != nil {
+			m.errLine = msg.err.Error()
+		} else {
+			m.errLine = ""
+		}
+		return m, nil
+
+	case childAgentsSyncedMsg:
+		if msg.err == nil {
+			m.children.replaceFromAPI(msg.items)
+		}
+		return m, nil
+
+	case syncChildAgentsMsg:
+		return m, m.cmdSyncChildAgents()
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -284,16 +303,20 @@ func (m *model) View() string {
 		help = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(m.errLine)
 	}
 
-	parts := []string{status, viewBody, inputBox, help}
+	parts := []string{status, viewBody, m.renderInputStrip(), inputBox, help}
 	if m.mode == modeApproval {
 		body := clihitl.FormatApprovalInteractive(m.hitlData, m.approvalSelected, m.approvalCursor)
+		borderColor := lipgloss.Color("214")
+		if clihitl.IsChildAgentApproval(m.hitlData) {
+			borderColor = lipgloss.Color("39")
+		}
 		prompt := lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("214")).
+			BorderForeground(borderColor).
 			Padding(0, 1).
 			Width(m.viewport.Width).
-			Render("工具审批\n" + body)
-		parts = []string{status, viewBody, prompt, help}
+			Render(clihitl.ApprovalHeader(m.hitlData) + "\n" + body)
+		parts = []string{status, viewBody, m.renderInputStrip(), prompt, help}
 	} else if m.mode == modeUserInfo {
 		question := m.hitlPrompt
 		if m.userInfoReq != nil && m.userInfoReq.Question != "" {
@@ -302,17 +325,34 @@ func (m *model) View() string {
 		prompt := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("229")).
 			Render("Agent 询问: " + question)
-		parts = []string{status, viewBody, prompt}
+		parts = []string{status, viewBody, m.renderInputStrip(), prompt}
 		if m.userInfoUseOptions && m.userInfoReq != nil {
 			opts := lipgloss.NewStyle().Render(clihitl.FormatUserInformationOptions(m.userInfoReq, m.userInfoSelected, m.userInfoCursor))
-			parts = append(parts, opts)
-			parts = append(parts, help)
+			parts = append(parts, opts, help)
 		} else {
 			parts = append(parts, inputBox, help)
 		}
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+func (m *model) renderInputStrip() string {
+	_, pending := m.children.counts()
+	text := m.renderInputStripStyled()
+	width := m.viewport.Width
+	if width <= 0 {
+		width = 80
+	}
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	if pending > 0 {
+		style = style.Foreground(lipgloss.Color("214"))
+	}
+	rendered := style.Render(text)
+	if lipgloss.Width(rendered) < width {
+		rendered += strings.Repeat(" ", width-lipgloss.Width(rendered))
+	}
+	return rendered
 }
 
 func (m *model) renderStatusBar() string {
@@ -348,11 +388,11 @@ func (m *model) applySize(w, h int) {
 	if h < minViewHeight {
 		h = minViewHeight
 	}
-	viewH := h - statusHeight - inputHeight - helpHeight - 2
+	viewH := h - statusHeight - inputStripHeight - inputHeight - helpHeight - 2
 	if m.mode == modeApproval {
-		viewH = h - statusHeight - 5 - helpHeight
+		viewH = h - statusHeight - inputStripHeight - 5 - helpHeight
 	} else if m.mode == modeUserInfo {
-		viewH = h - statusHeight - inputHeight - helpHeight - 3
+		viewH = h - statusHeight - inputStripHeight - inputHeight - helpHeight - 3
 	}
 	if viewH < 3 {
 		viewH = 3
@@ -366,131 +406,6 @@ func (m *model) applySize(w, h int) {
 func (m *model) syncViewport() {
 	m.viewport.SetContent(strings.Join(m.transcript.Lines(), "\n"))
 	m.viewport.GotoBottom()
-}
-
-func (m *model) resolveHITL(res hitlResult) {
-	select {
-	case m.hitlCh <- res:
-	default:
-	}
-}
-
-func (m *model) promptApproval(ctx context.Context, data map[string]any) (map[string]any, error) {
-	m.initApprovalState(data)
-	m.hitlPrompt = clihitl.FormatApprovalPrompt(data)
-	if m.program != nil {
-		m.program.Send(refreshViewportMsg{})
-	}
-	m.mode = modeApproval
-	m.statusLine = "等待审批…"
-	select {
-	case <-ctx.Done():
-		m.resetHITLState()
-		return nil, ctx.Err()
-	case res := <-m.hitlCh:
-		if res.err != nil {
-			m.resetHITLState()
-			return nil, res.err
-		}
-		m.resetHITLState()
-		return res.resume, nil
-	}
-}
-
-func (m *model) promptUserInfo(ctx context.Context, data map[string]any) (map[string]any, error) {
-	m.initUserInfoState(data)
-	if m.userInfoReq != nil {
-		m.hitlPrompt = m.userInfoReq.Question
-	} else {
-		m.hitlPrompt = clihitl.FormatUserInformationQuestion(data)
-	}
-	if m.program != nil {
-		m.program.Send(refreshViewportMsg{})
-	}
-	m.mode = modeUserInfo
-	m.input.SetValue("")
-	if m.userInfoUseOptions {
-		m.input.Placeholder = "使用 ↑/↓ + Space 选择选项"
-	} else {
-		m.input.Placeholder = "输入回答后 Enter 提交 · Esc 取消"
-	}
-	m.statusLine = "等待用户回答…"
-	select {
-	case <-ctx.Done():
-		m.resetHITLState()
-		return nil, ctx.Err()
-	case res := <-m.hitlCh:
-		if res.err != nil {
-			m.resetHITLState()
-			return nil, res.err
-		}
-		m.resetHITLState()
-		return res.resume, nil
-	}
-}
-
-func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
-	sink := clihitl.Sink{
-		OnAssistant: func(text string) {
-			if m.awaitingTurn && !m.submitSeen {
-				m.submitSeen = true
-			}
-			m.transcript.AppendPartial("assistant", text)
-			if m.program != nil {
-				m.program.Send(refreshViewportMsg{})
-			}
-		},
-		OnReasoning: func(text string) {
-			if !m.showReasoning {
-				return
-			}
-			m.transcript.AppendPartial("reasoning", text)
-			if m.program != nil {
-				m.program.Send(refreshViewportMsg{})
-			}
-		},
-		OnTool: func(eventType string, data map[string]any) {
-			m.transcript.FinishPartial("assistant")
-			m.transcript.FinishPartial("reasoning")
-			line := m.toolFold.Format(eventType, data)
-			m.transcript.Add("[system] " + line)
-			if m.program != nil {
-				m.program.Send(refreshViewportMsg{})
-			}
-		},
-		OnCompression: func(eventType string, data map[string]any) {
-			m.transcript.Add("[system] " + clihitl.FormatContextCompression(eventType, data))
-			if m.program != nil {
-				m.program.Send(refreshViewportMsg{})
-			}
-		},
-		OnError: func(msg string) {
-			m.transcript.Add("[system] error: " + msg)
-			if m.program != nil {
-				m.program.Send(refreshViewportMsg{})
-			}
-		},
-	}
-	interact := &clihitl.Interact{
-		PromptApproval: m.promptApproval,
-		PromptUserInfo: m.promptUserInfo,
-	}
-	cont, err := clihitl.HandleStreamEvent(m.ctx, m.client, m.currentSession(), ev, sink, interact, false)
-	if err != nil && m.program != nil {
-		m.program.Send(streamErrMsg{line: fmt.Sprintf("事件处理失败: %v", err)})
-	}
-	if ev.Type == "done" {
-		m.transcript.FinishPartial("assistant")
-		m.transcript.FinishPartial("reasoning")
-		if m.awaitingTurn && m.submitSeen {
-			m.awaitingTurn = false
-			m.statusLine = "回合结束"
-		}
-		if m.program != nil {
-			m.program.Send(refreshViewportMsg{})
-		}
-	}
-	_ = cont
 }
 
 func (m *model) cancelTurn() error {

@@ -31,8 +31,17 @@
   - **`list_sessions`**：调用 `GET /v1/sessions`
   - **`get_context`**：调用 `GET /v1/sessions/{session_id}/context`
   - **`list_skills` / `load_skill` / `unload_skill`**：调用 session skills API
+  - **`list_child_agents`**：调用 `GET /v1/sessions/{id}/child-agents`
   - **`clear_context`**：调用 `POST .../clear-context`
-  - **`on_transcript` / `on_approval` / `on_user_information` / `on_status`**：UI 回调注册
+  - **`on_transcript` / `on_hitl_pending` / `on_child_strip` / `on_status`**：UI 回调注册
+  - **`peek_hitl` / `complete_hitl_approval` / `complete_hitl_user_info` / `discard_hitl_head`**：非阻塞 HITL 队列
+  - **`child_tracker`**：`ChildAgentTracker` 实例（活跃子 Agent / 待审批）
+
+## `child_agent.py`
+
+- **`should_skip_child_runtime_display`**：子 turn SSE 是否应对用户隐藏
+- **`format_child_lifecycle_line`** / **`approval_header`** / **`format_child_agents_list`**：TUI 文案
+- **`ChildAgentTracker`**：跟踪活跃子 Agent 与 `input_strip_text`
 
 ## `user_information.py`
 
@@ -44,14 +53,14 @@
 ## `api_client.py`
 
 - **`StreamEvent`**：SSE 解析结果（`event_type`、`session_id`、`data`）
-- **`DAgentsApiClient`**：Agent Node HTTP/SSE（health、session、message、resume、cancel、stream、skills、context）
+- **`DAgentsApiClient`**：Agent Node HTTP/SSE（health、session、message、resume、cancel、stream、skills、context、child-agents）
 - **`_parse_sse_block`**：SSE block → `StreamEvent`
 
 ## `approval.py`
 
 - **`ToolApprovalRequest`** / **`ApprovalDecision`** / **`ApprovalCancelled`**：审批模型与用户取消信号
 - **`extract_tool_approval_requests`**：从 SSE `approval_required.data` 提取工具列表
-- **`build_*_decision`** / **`parse_selection_tokens`**：resume 决策构造
+- **`build_*_decision`** / **`parse_selection_tokens`** / **`build_approval_resume`**：resume 决策构造（含子 Agent 路由字段）
 
 ## `session_commands.py`
 
@@ -75,7 +84,7 @@
 
 ## `tui/app.py`
 
-- **`DAgentsTuiApp`**：Textual 主界面（`theme=textual-dark` + 顶栏 SSE 状态 + RichLog/context 视图 + 底栏 help 提示）
+- **`DAgentsTuiApp`**：Textual 主界面（`theme=textual-dark` + 顶栏 SSE 状态 + 子 Agent 状态条 + RichLog/context 视图 + 底栏 help 提示）
 - **`_write_welcome_panel`** / **`_transcript_base_lines`**：连接后 Rich Panel 欢迎区与流式回退边界
 - **`_message_block`** / **`_assistant_block`** / **`_event_block`**：统一消息圆点与正文对齐；assistant 完成态用 Markdown 渲染
 - **`_start_status_line`** / **`_finish_status_line`** / **`_animate_status_line`**：`prefilling/thinking` 等待状态行

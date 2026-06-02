@@ -20,27 +20,40 @@
 
 ## 2. 构建命令
 
-```bash
-scripts/package_go_agent_client.sh
-# → dist/dagents-agent-client-linux-amd64-${VERSION}.tar.gz
-# → dist/dagents-agent-client-windows-amd64-${VERSION}.zip
-```
-
-单平台：
+**本地助手（Go Node + Textual TUI，Release 默认）：**
 
 ```bash
-OUT_DIR=dist/pkg GOOS=windows GOARCH=amd64 scripts/ci/build_go_static.sh
+scripts/package_local_assistant.sh
+# → dist/dagents-local-assistant-linux-amd64-${VERSION}.tar.gz   （在 Linux 上执行）
+# → dist/dagents-local-assistant-windows-amd64-${VERSION}.zip  （在 Windows 上执行）
 ```
 
-产物：
+CI 在 `v*` 标签推送时并行构建 linux-amd64 与 windows-amd64。
+
+仅 Go Node（无 TUI 二进制）：
+
+```bash
+BUILD_CLIENT=0 OUT_DIR=dist/pkg GOOS=linux GOARCH=amd64 scripts/ci/build_go_static.sh
+```
+
+含 Go Client 兜底 TUI（`BUILD_CLIENT=1`）：
+
+```bash
+BUILD_CLIENT=1 OUT_DIR=dist/pkg GOOS=linux GOARCH=amd64 scripts/ci/build_go_static.sh
+```
+
+**Release 包布局：**
 
 ```text
-dist/dagents-agent-client-linux-amd64/
+dist/dagents-local-assistant-linux-amd64/
   bin/dagents-node
-  bin/dagents-client
+  bin/dagents-cli          # PyInstaller Textual TUI
   config.example.yaml
+  .runtime/
   README.txt
 ```
+
+legacy Go-only 包（`dagents-agent-client-*`）已由上述产物取代。
 
 Windows（Server 2012+ / Windows Terminal）：
 

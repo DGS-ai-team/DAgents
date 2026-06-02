@@ -59,7 +59,7 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int) (*Registry, error) {
 
 // Definitions 返回传给 LLM 的 tools 列表。
 func (r *Registry) Definitions() []ToolDef {
-	return []ToolDef{
+	base := []ToolDef{
 		readFileToolDef(),
 		writeFileToolDef(),
 		searchFileToolDef(),
@@ -78,6 +78,7 @@ func (r *Registry) Definitions() []ToolDef {
 		triggerDeleteToolDef(),
 		triggerFireToolDef(),
 	}
+	return append(base, childAgentToolDefs()...)
 }
 
 // Execute 按名称 dispatch 工具；未知工具返回 error 文本。
@@ -112,6 +113,7 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["trigger_update"] = r.execTriggerUpdate
 	r.handlers["trigger_delete"] = r.execTriggerDelete
 	r.handlers["trigger_fire"] = r.execTriggerFire
+	r.RegisterChildAgentToolStubs()
 }
 
 func resolveFSRoot(fsRoot string) (string, error) {

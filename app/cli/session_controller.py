@@ -3,15 +3,19 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from app.cli.api_client import DAgentsApiClient, StreamEvent
 from app.cli.approval import (
-    ApprovalCancelled,
     ApprovalDecision,
-    ToolApprovalRequest,
-    build_all_rejected_decision,
-    extract_tool_approval_requests,
+    build_approval_resume,
+)
+from app.cli.child_agent import (
+    ChildAgentTracker,
+    child_session_id_from_data,
+    format_child_lifecycle_line,
+    should_skip_child_runtime_display,
 )
 from app.cli.user_information import (
     UserInformationAnswer,
@@ -27,15 +31,25 @@ from app.cli.render import (
     format_context_compression,
     format_error,
     format_reasoning,
+    format_system_line,
     format_tool_call,
     format_tool_result,
     format_user_information_required,
 )
 
 TranscriptCallback = Callable[[TranscriptUpdate], None]
-ApprovalCallback = Callable[[list[ToolApprovalRequest]], Awaitable[ApprovalDecision]]
 UserInformationCallback = Callable[[UserInformationRequest], Awaitable[UserInformationAnswer]]
 StatusCallback = Callable[[str], None]
+HitlPendingCallback = Callable[[], None]
+ChildStripCallback = Callable[[], None]
+
+
+@dataclass
+class PendingHITL:
+    """待 UI 处理的 HITL 项（审批或用户询问）。"""
+
+    kind: Literal["approval", "user_information"]
+    data: dict[str, Any]
 
 
 class SessionController:
@@ -69,9 +83,10 @@ class SessionController:
         self._stream_task: asyncio.Task[None] | None = None
         self._render_task: asyncio.Task[None] | None = None
         self._transcript_cb: TranscriptCallback | None = None
-        self._approval_cb: ApprovalCallback | None = None
         self._user_information_cb: UserInformationCallback | None = None
         self._status_cb: StatusCallback | None = None
+        self._hitl_pending_cb: HitlPendingCallback | None = None
+        self._child_strip_cb: ChildStripCallback | None = None
         self._done_counter = 0
         self._user_turn_done = asyncio.Event()
         self._awaiting_user_turn = False
@@ -79,8 +94,9 @@ class SessionController:
         self._submit_pending_marker = False
         self._assistant_line_open = False
         self._sse_connected = False
-        self._approval_lock = asyncio.Lock()
-        self._user_information_lock = asyncio.Lock()
+        self._hitl_queue: list[PendingHITL] = []
+        self._skip_next_done = False
+        self._child_tracker = ChildAgentTracker()
         self._last_event_seq = 0
         self._turn_seq_fence = 0
         self._sse_ready = asyncio.Event()
@@ -111,9 +127,13 @@ class SessionController:
         """注册 transcript 更新回调。"""
         self._transcript_cb = callback
 
-    def on_approval(self, callback: ApprovalCallback) -> None:
-        """注册工具审批回调（由 UI 层实现交互）。"""
-        self._approval_cb = callback
+    def on_hitl_pending(self, callback: HitlPendingCallback) -> None:
+        """HITL 入队后通知 UI 处理（非阻塞，避免丢 SSE）。"""
+        self._hitl_pending_cb = callback
+
+    def on_child_strip(self, callback: ChildStripCallback) -> None:
+        """子 Agent 状态条变更时通知 UI 刷新。"""
+        self._child_strip_cb = callback
 
     def on_user_information(self, callback: UserInformationCallback) -> None:
         """注册用户询问回调（由 UI 层收集回答）。"""
@@ -243,6 +263,79 @@ class SessionController:
         assert self._client is not None
         return await self._client.unload_session_skill(self.session_id, skill_name)
 
+    async def list_child_agents(self) -> list[dict[str, Any]]:
+        """查询当前父 session 下活跃子 Agent 列表。"""
+        assert self._client is not None
+        return await self._client.list_child_agents(self.session_id)
+
+    @property
+    def child_tracker(self) -> ChildAgentTracker:
+        return self._child_tracker
+
+    def hitl_queue_len(self) -> int:
+        return len(self._hitl_queue)
+
+    def peek_hitl(self) -> PendingHITL | None:
+        """返回队首待处理 HITL，不弹出。"""
+        return self._hitl_queue[0] if self._hitl_queue else None
+
+    def discard_hitl_head(self) -> None:
+        """取消审批/询问时丢弃队首，不 submit resume。"""
+        if not self._hitl_queue:
+            return
+        item = self._hitl_queue.pop(0)
+        if item.kind == "approval":
+            child_id = child_session_id_from_data(item.data)
+            if child_id:
+                self._child_tracker.set_awaiting_approval(child_id, False)
+                self._emit_child_strip()
+        self._notify_hitl_pending()
+
+    def clear_hitl_queue(self) -> None:
+        """Esc 取消 turn 时清空 HITL 队列并重置子 Agent 待审批标记。"""
+        for entry in self._child_tracker.entries.values():
+            entry.awaiting_approval = False
+        self._hitl_queue.clear()
+        self._emit_child_strip()
+        self._notify_hitl_pending()
+
+    async def complete_hitl_approval(self, decision: ApprovalDecision) -> None:
+        """提交审批 resume 并弹出队首；编排层随后会 emit 一条可 skip 的 done。"""
+        if not self._hitl_queue or self._hitl_queue[0].kind != "approval":
+            return
+        data = self._hitl_queue[0].data
+        child_id = child_session_id_from_data(data)
+        if child_id:
+            self._child_tracker.set_awaiting_approval(child_id, False)
+            self._emit_child_strip()
+        self._hitl_queue.pop(0)
+        assert self._client is not None
+        await self._client.submit_resume(
+            session_id=self.session_id,
+            resume_value=build_approval_resume(data, decision),
+        )
+        self._skip_next_done = True
+        self._notify_hitl_pending()
+
+    async def complete_hitl_user_info(self, answer: UserInformationAnswer) -> None:
+        """提交用户询问 resume 并弹出队首。"""
+        if not self._hitl_queue or self._hitl_queue[0].kind != "user_information":
+            return
+        self._hitl_queue.pop(0)
+        assert self._client is not None
+        await self._client.submit_resume(
+            session_id=self.session_id,
+            resume_value=answer.to_resume_value(),
+        )
+        self._skip_next_done = True
+        self._notify_hitl_pending()
+
+    def reset_child_state(self) -> None:
+        """切换 session 或清屏时重置子 Agent 跟踪与 HITL 队列。"""
+        self._child_tracker.reset()
+        self._hitl_queue.clear()
+        self._emit_child_strip()
+
     def _reset_user_turn_wait(self) -> None:
         """在用户 submit 后重置 turn 栅栏状态。"""
         self._awaiting_user_turn = True
@@ -270,6 +363,14 @@ class SessionController:
         )
         self._status_cb(" ".join(parts))
 
+    def _emit_child_strip(self) -> None:
+        if self._child_strip_cb is not None:
+            self._child_strip_cb()
+
+    def _notify_hitl_pending(self) -> None:
+        if self._hitl_pending_cb is not None:
+            self._hitl_pending_cb()
+
     def _mark_user_turn_content_seen(self) -> None:
         """submit 之后首次见到 assistant/tool 等内容事件，标记用户 turn 已开始。"""
         if self._submit_pending_marker:
@@ -286,6 +387,7 @@ class SessionController:
                     self._sse_connected = True
                     self._sse_ready.set()
                     self._emit_status()
+                    await self._sync_child_agents_from_api()
                     continue
                 if event.session_id and event.session_id != self.session_id:
                     continue
@@ -335,6 +437,13 @@ class SessionController:
         data = event.data
         event_type = event.event_type
 
+        if should_skip_child_runtime_display(event_type, data):
+            return
+
+        if event_type in {"child_agent_created", "child_agent_completed", "child_agent_cancelled"}:
+            self._handle_child_lifecycle(event_type, data)
+            return
+
         if event_type in {"assistant", "tool_call", "tool_result", "reasoning"}:
             self._mark_user_turn_content_seen()
 
@@ -355,10 +464,10 @@ class SessionController:
                 self._emit_transcript(formatted)
         elif event_type == "approval_required":
             self._ensure_assistant_end()
-            skip_holder["v"] = await self._handle_approval(data)
+            self._enqueue_hitl(PendingHITL(kind="approval", data=data))
         elif event_type == "user_information_required":
             self._ensure_assistant_end()
-            skip_holder["v"] = await self._handle_user_information(data)
+            self._enqueue_hitl(PendingHITL(kind="user_information", data=data))
         elif event_type == "tool_result":
             self._ensure_assistant_end()
             self._emit_transcript(format_tool_result(data))
@@ -375,8 +484,9 @@ class SessionController:
         elif event_type == "done":
             self._ensure_assistant_end()
             self._done_counter += 1
-            if skip_holder["v"]:
+            if skip_holder["v"] or self._skip_next_done:
                 skip_holder["v"] = False
+                self._skip_next_done = False
             elif self._awaiting_user_turn:
                 seq = self._event_seq(event)
                 # seq > fence 表示 submit 之后的新 turn 已结束（即使 assistant 增量被漏收）。
@@ -384,48 +494,36 @@ class SessionController:
                     self._awaiting_user_turn = False
                     self._user_turn_done.set()
 
-    async def _handle_approval(self, data: dict[str, Any]) -> bool:
-        """处理 approval_required：回调 UI 审批并 submit resume；返回是否 skip 下一条 done。"""
-        async with self._approval_lock:
-            requests = extract_tool_approval_requests(data)
-            if self._approval_cb is not None:
-                try:
-                    decision = await self._approval_cb(requests)
-                except ApprovalCancelled:
-                    return False
-            else:
-                decision = build_all_rejected_decision(requests)
-            assert self._client is not None
-            await self._client.submit_resume(
-                session_id=self.session_id,
-                resume_value=decision.to_resume_value(),
-            )
-            return True
+    def _enqueue_hitl(self, item: PendingHITL) -> None:
+        """HITL 入队并通知 UI；子审批时标记 awaiting_approval。"""
+        if item.kind == "approval":
+            child_id = child_session_id_from_data(item.data)
+            if child_id:
+                self._child_tracker.set_awaiting_approval(child_id, True)
+                self._emit_child_strip()
+        self._hitl_queue.append(item)
+        self._notify_hitl_pending()
 
-    async def _handle_user_information(self, data: dict[str, Any]) -> bool:
-        """处理 user_information_required：回调 UI 收集回答并 submit resume。"""
-        async with self._user_information_lock:
-            request = extract_user_information_request(data)
-            if request is None:
-                return False
-            if self._user_information_cb is not None:
-                try:
-                    answer = await self._user_information_cb(request)
-                except UserInformationCancelled:
-                    return False
-            else:
-                answer = UserInformationAnswer(
-                    tool_call_id=request.tool_call_id,
-                    answer="",
-                    selected_options=[],
-                    cancelled=True,
-                )
-            assert self._client is not None
-            await self._client.submit_resume(
-                session_id=self.session_id,
-                resume_value=answer.to_resume_value(),
-            )
-            return True
+    def _handle_child_lifecycle(self, event_type: str, data: dict[str, Any]) -> None:
+        """处理子 Agent 生命周期 SSE，写入系统行并更新 tracker。"""
+        if event_type == "child_agent_created":
+            self._child_tracker.on_created(data)
+        else:
+            self._child_tracker.on_finished(child_session_id_from_data(data))
+        self._emit_child_strip()
+        line = format_child_lifecycle_line(event_type, data)
+        if line:
+            self._emit_transcript(format_system_line(line))
+
+    async def _sync_child_agents_from_api(self) -> None:
+        """SSE 重连后 HTTP 对齐子 Agent 列表。"""
+        assert self._client is not None
+        try:
+            items = await self._client.list_child_agents(self.session_id)
+            self._child_tracker.replace_from_api(items)
+            self._emit_child_strip()
+        except Exception:
+            pass
 
     def _ensure_assistant_end(self) -> None:
         """assistant 流式段与块级事件之间补换行。"""

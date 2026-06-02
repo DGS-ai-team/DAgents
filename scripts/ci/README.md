@@ -4,14 +4,16 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 
 | 文件 | 说明 |
 |------|------|
-| **`build_linux_focal_pyenv.sh`** | 在 **Ubuntu 20.04 (focal)** 容器内（**amd64**：`ubuntu:20.04`；**i386**：`i386/ubuntu:focal`）通过 **pyenv** 从源码安装 **`PYENV_PYTHON_VERSION`**（默认 **3.13.2**），再运行 PyInstaller。deadsnakes 已不再为 focal 提供 **3.13** deb，故 linux-x64 与 linux-x86 共用本脚本。 |
-| **`build_linux_rocky8_pyenv.sh`** | 在 **Rocky Linux 8**（**glibc 2.28**）容器内用 **gcc-toolset-13** + **pyenv** 编 Python 再打 PyInstaller，用于在**更旧 glibc** 宿主上降低 `GLIBC_*` 版本需求（见 **`docs/os-compatibility.md`**）；是否接入 CI 以 workflow 为准。 |
-| **`build_go_static.sh`** | Go Node+Client 静态交叉编译（linux/windows） |
+| **`build_go_static.sh`** | Go `dagents-node` 静态交叉编译；`BUILD_CLIENT=1` 时额外编 `dagents-client` |
 | **`build_go_linux_static.sh`** | 兼容入口（等同 `GOOS=linux`） |
+| **`build_dagents_cli.sh`** | PyInstaller 单文件 **`dagents-cli`**（Textual TUI） |
+| **`build_linux_focal_pyenv.sh`** | focal 容器内 pyenv + PyInstaller（Linux 低 glibc；CI 仅编 CLI） |
+| **`assemble_local_assistant_bundle.sh`** | 组装 `dagents-local-assistant-*` 目录并 tar.gz/zip |
+| **`build_linux_rocky8_pyenv.sh`** | Rocky8 低 glibc PyInstaller（可选，未接入当前 Release） |
 | **`export_openapi_for_frontend.py`** | 导出 OpenAPI 并同步 DAgentsUI 类型 |
-| **`packaging/linux/build-deb.sh`** | 在已生成 `bundle/` 后构建 `dagents-backend` `.deb` 安装包；安装后提供 `dagents chat/serve/register-center/doctor/version` 命令。 |
-| **`packaging/linux/build-rpm.sh`** | 同上布局构建 `dagents-backend` `.rpm`（RHEL/Fedora/openSUSE 等）；需本机 `rpmbuild`（如 `apt install rpm`）。 |
 
-**Go**：`.github/workflows/go-ac.yml` 在仓库根执行 `go test ./node/... ./client/...`，非本目录脚本。
+**Release 打包**：仓库根 `scripts/package_local_assistant.sh`；CI 见 `.github/workflows/build-and-release.yml`（`dagents-local-assistant-linux-amd64` + `windows-amd64`）。
 
-各平台 **Python 3.13 依赖离线包**（`pip download` + zip）见 GitHub Actions 工作流 **`manual-vendor-python-deps.yml`**（手动运行）。
+**Go 测试**：`.github/workflows/go-ac.yml` 在仓库根执行 `go test ./node/... ./client/...`。
+
+legacy **`packaging/linux/build-deb.sh`** / **`build-rpm.sh`**（Python backend 安装包）当前 Release **未使用**。

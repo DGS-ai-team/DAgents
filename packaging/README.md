@@ -6,16 +6,27 @@
 
 | 名称 | 含义 |
 |------|------|
-| **`dagents-api`**（可执行文件） | 仅 Agent HTTP/SSE 服务进程（`run_agent_api.py`） |
-| **`dagents-backend-*.{zip,tar.zip,deb,rpm,exe}`** | 完整后端运行时（api + register_center + cli + `.runtime` + 启动脚本）的便携包或安装包 |
-| **`dagents_register_center` / `dagents-cli`** | 同 bundle 内的其它可执行文件，不单独出现在 zip/deb 文件名中 |
+| **`dagents-local-assistant-*.{tar.gz,zip}`** | **Go Node + Textual TUI**（`dagents-node` + PyInstaller `dagents-cli`）+ `config.example.yaml` + `.runtime/` |
+| **`dagents-backend-*`**（legacy） | 旧 Python 全栈后端（api + register_center + cli）；**Release CI 已不再构建** |
+| **`dagents-cli`** | Textual TUI 单文件二进制（PyInstaller 产物名） |
 
-便携 zip/tar 与 deb/Windows 安装包统一使用 **`dagents-backend-*`** 前缀，避免与单个 **`dagents-api`** 二进制混淆。
+本地/CI 打包：
+
+```bash
+# 当前操作系统（需 Go + Python 3.11+）
+scripts/package_local_assistant.sh
+
+# 产物示例
+# dist/dagents-local-assistant-linux-amd64-0.2.0.tar.gz
+# dist/dagents-local-assistant-windows-amd64-0.2.0.zip
+```
 
 | 路径 | 说明 |
 |------|------|
-| **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`）；见 [agent-client/README.md](./agent-client/README.md) |
-| **`OFFLINE_INSTALL.md`** | 离线安装步骤摘要；亦可复制到 README「离线依赖」章节 |
-| **`runtime/`** | 预编译包内 **`.runtime/`** 整树占位：**`prompt_context/`**（空 **`soul.md`/`user.md`/`custom.md`**）、**`scripts/`**、**`data/`**、**`skills/`**、**`history/`**、**`memory/`**、**`agent/`** 等；打 zip 时并入 **`bundle/.runtime/`**；侧车无预设文案，运行时仍可由 **`prompt.py`** 补建缺失文件 |
-| **`windows/`** | Windows 安装器资源：Inno Setup 脚本与 `dagents.cmd`（`pushd "%~dp0."`；子命令统一 `dagents-cli.exe %*`，勿 `shift` 后再拼固定子命令 + `%*`，否则会出现 `chat chat` 等重复参数） |
-| **`linux/`** | Linux 安装包资源：`.deb` / `.rpm` 构建脚本、`dagents-backend.spec` 与安装后暴露的 `dagents` 命令入口（含 `chat` 交互终端） |
+| **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`） |
+| **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等） |
+| **`linux/`** | legacy deb/rpm 脚本（**当前 Release 未使用**） |
+| **`windows/`** | legacy Inno Setup（**当前 Release 未使用**） |
+| **`OFFLINE_INSTALL.md`** | 源码离线安装（开发/调试） |
+
+架构与联调见 [local-assistant.md](../docs/architecture/local-assistant.md)。

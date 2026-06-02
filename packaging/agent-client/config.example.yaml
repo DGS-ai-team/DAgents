@@ -59,3 +59,13 @@ triggers:
 # Node stderr 日志级别：debug | info | warn | error
 log:
   level: info
+
+# 临时子 Agent（见 docs/architecture/child-agent-tools.md）
+child_agents:
+  enabled: true
+  default_ttl_seconds: 1800
+  max_ttl_seconds: 7200
+  default_max_turns: 20
+  max_max_turns: 50
+  max_active_per_parent: 8
+  default_wait_timeout_seconds: 300

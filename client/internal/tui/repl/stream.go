@@ -99,6 +99,16 @@ func (r *streamRunner) Run(ctx context.Context) error {
 }
 
 func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) (bool, error) {
+	if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
+		return true, nil
+	}
+	switch ev.Type {
+	case "child_agent_created", "child_agent_completed", "child_agent_cancelled":
+		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
+			r.logSystem(line)
+		}
+		return true, nil
+	}
 	sink := clihitl.Sink{
 		OnAssistant: func(text string) {
 			r.printAssistant(text)

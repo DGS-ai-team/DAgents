@@ -12,6 +12,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -55,6 +56,8 @@ type Manager struct {
 	logger   *slog.Logger
 
 	triggerDelivery triggers.DeliveryTracker
+
+	children *childagent.Manager
 }
 
 // NewManager 绑定 agent、SSE Hub、LLM、工具、策略与持久化 store。
@@ -126,6 +129,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 		created := len(msgs) == 0 && !m.sessionExistsInStore(id)
 		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, m.turn, m.triggerDelivery)
 		m.sessions[id] = rt
+		m.attachUserChildTools(rt)
 		rt.start(m.ctx)
 		if created {
 			rt.persist(context.Background())
@@ -146,6 +150,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	defer m.mu.Unlock()
 	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, 0, m.turn, m.triggerDelivery)
 	m.sessions[newID] = rt
+	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
 	rt.persist(context.Background())
 	m.logger.Info("session created", "session_id", newID, "restored", false)
@@ -314,6 +319,9 @@ func (m *Manager) ClearContext(sessionID string) (cancelled bool, err error) {
 // Delete 释放 session：停止 consumer、移出内存并删除 DB 行。
 func (m *Manager) Delete(sessionID string) (bool, error) {
 	sid := strings.TrimSpace(sessionID)
+	if m.children != nil {
+		m.children.CancelAllForParent(sid)
+	}
 	wasActive := false
 	m.mu.Lock()
 	if rt, ok := m.sessions[sid]; ok {
@@ -349,6 +357,15 @@ func (m *Manager) EnqueueMessage(
 		"request_type", requestType,
 	)
 	if requestType == "resume" {
+		if m.children != nil && m.children.Enabled() {
+			targetParent, routeErr := m.children.RouteResume(sessionID, resumeValue)
+			if routeErr != nil {
+				return "", routeErr
+			}
+			if !targetParent {
+				return string(queue.PriorityResume), nil
+			}
+		}
 		if !rt.hasPendingHITL() {
 			return "", fmt.Errorf("no_pending_hitl")
 		}
@@ -460,6 +477,13 @@ func (m *Manager) getRuntime(sessionID string) *runtime {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sessions[strings.TrimSpace(sessionID)]
+}
+
+func (m *Manager) attachUserChildTools(rt *runtime) {
+	if rt == nil || rt.isChildSession() || m.children == nil || !m.children.Enabled() {
+		return
+	}
+	rt.orch.SetChildAgentTools(m.children, false)
 }
 
 func generateSessionID() (string, error) {

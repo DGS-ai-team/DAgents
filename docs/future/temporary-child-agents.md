@@ -1,5 +1,7 @@
 # 临时子 Agent 设计
 
+> **Go Node 实现契约**（工具字段、HTTP cancel、SSE、生命周期）见 [architecture/child-agent-tools.md](../architecture/child-agent-tools.md)。下文为 v2 概念与 Control Plane 视角，部分字段（如 `context_seed`、`body_binding`）在 Go Phase 1 中已简化。
+
 本文定义 architecture-v2 下父 Agent 如何创建短生命周期子 Agent。核心原则是：**临时子 Agent 是受控的短生命周期 Agent Instance，不是父 Agent 内部的线程，也不能获得超过父 Agent 的权限**。
 
 ## 1. 定义

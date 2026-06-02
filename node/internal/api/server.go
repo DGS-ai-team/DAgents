@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
@@ -150,6 +151,16 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		RawMessageHistoryEnabled: cfg.RawMessageHistoryEnabled(),
 		RawMessageHistoryDir:     cfg.RawMessageHistoryDir(),
 	}, logger)
+	childMgr := childagent.NewManager(childagent.Config{
+		Enabled:                   cfg.ChildAgents.Enabled,
+		DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
+		MaxTTLSeconds:             cfg.ChildAgents.MaxTTLSeconds,
+		DefaultMaxTurns:           cfg.ChildAgents.DefaultMaxTurns,
+		MaxMaxTurns:               cfg.ChildAgents.MaxMaxTurns,
+		MaxActivePerParent:        cfg.ChildAgents.MaxActivePerParent,
+		DefaultWaitTimeoutSeconds: cfg.ChildAgents.DefaultWaitTimeoutSeconds,
+	}, hub, cfg.AgentID, logger)
+	mgr.SetChildAgentManager(childMgr)
 	var triggerStore *triggers.Store
 	var triggerSched *triggers.Scheduler
 	if opened, err := triggers.OpenStore(cfg.TriggersStorePath(), 200); err != nil {
@@ -204,6 +215,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/skills/unload", s.handleUnloadSessionSkill)
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()
+	s.registerChildAgentRoutes()
 	return s
 }
 
@@ -349,7 +361,7 @@ type listSessionsResponse struct {
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	// GET /v1/sessions：合并内存活跃 session 与 SQLite 持久化摘要（去重）。
-	active := s.sessions.ListActive()
+	active := s.sessions.ListActiveUser()
 	persisted, err := s.sessions.ListPersisted(r.Context())
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)

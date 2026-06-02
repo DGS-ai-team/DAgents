@@ -282,6 +282,31 @@ func (c *Client) SubmitResume(ctx context.Context, sessionID string, resumeValue
 	return nil
 }
 
+// ChildAgentListItem 为 GET child-agents 列表项。
+type ChildAgentListItem struct {
+	ChildSessionID string `json:"child_session_id"`
+	Status         string `json:"status"`
+	Purpose        string `json:"purpose"`
+	TemplateID     string `json:"template_id"`
+	CreatedAt      string `json:"created_at"`
+	ExpiresAt      string `json:"expires_at"`
+	TurnCount      int    `json:"turn_count"`
+	MaxTurns       int    `json:"max_turns"`
+}
+
+// ListChildAgents 返回父 session 下活跃子 Agent 列表。
+func (c *Client) ListChildAgents(ctx context.Context, parentSessionID string) ([]ChildAgentListItem, error) {
+	parentSessionID = strings.TrimSpace(parentSessionID)
+	var resp struct {
+		Items []ChildAgentListItem `json:"items"`
+	}
+	path := "/v1/sessions/" + url.PathEscape(parentSessionID) + "/child-agents"
+	if err := c.getJSON(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Items, nil
+}
+
 // StreamEvents 订阅 GET /v1/streams，按 session_id 过滤（可选），逐条回调 handler。
 
 // handler 返回 false 时提前结束；ctx 取消时退出。

@@ -82,6 +82,18 @@ def build_selection_decision(requests: list[ToolApprovalRequest], approved_ids: 
     return ApprovalDecision(approved=approved, rejected=rejected)
 
 
+def build_approval_resume(data: dict[str, Any], decision: ApprovalDecision) -> dict[str, Any]:
+    """构造审批 resume_value；子 Agent 审批时注入 child_session_id / approval_id。"""
+    resume = decision.to_resume_value()
+    child_id = str(data.get("child_session_id") or "").strip()
+    if child_id:
+        resume["child_session_id"] = child_id
+    approval_id = str(data.get("approval_id") or "").strip()
+    if approval_id:
+        resume["approval_id"] = approval_id
+    return resume
+
+
 def parse_selection_tokens(value: str, requests: list[ToolApprovalRequest]) -> set[str]:
     tokens = [part.strip() for part in value.replace(",", " ").split() if part.strip()]
     by_index = {str(index): item.call_id for index, item in enumerate(requests, start=1)}

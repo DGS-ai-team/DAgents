@@ -32,15 +32,20 @@ build_one() {
   )
 }
 
+BUILD_CLIENT="${BUILD_CLIENT:-0}"
+
 build_one "./node/cmd/dagents-node" "${OUT_DIR}/bin/dagents-node${EXE}"
-build_one "./client/cmd/dagents-client" "${OUT_DIR}/bin/dagents-client${EXE}"
+if [[ "${BUILD_CLIENT}" == "1" ]]; then
+  build_one "./client/cmd/dagents-client" "${OUT_DIR}/bin/dagents-client${EXE}"
+fi
 
 if [[ -f "${REPO_ROOT}/packaging/agent-client/config.example.yaml" ]]; then
   cp "${REPO_ROOT}/packaging/agent-client/config.example.yaml" "${OUT_DIR}/config.example.yaml"
 fi
 
-if [[ "${GOOS}" == "windows" ]]; then
-  cat > "${OUT_DIR}/README.txt" <<'EOF'
+if [[ "${BUILD_CLIENT}" == "1" ]]; then
+  if [[ "${GOOS}" == "windows" ]]; then
+    cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node + Client (Go static build, Windows)
 
 1. copy config.example.yaml to config.yaml and edit llm / agent_id
@@ -50,8 +55,8 @@ DAgents Agent Node + Client (Go static build, Windows)
 
 See docs/architecture/go-node-compatibility.md
 EOF
-else
-  cat > "${OUT_DIR}/README.txt" <<'EOF'
+  else
+    cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node + Client (Go static build)
 
 1. cp config.example.yaml config.yaml && 编辑 llm / agent_id
@@ -61,6 +66,21 @@ DAgents Agent Node + Client (Go static build)
 
 文档: docs/architecture/go-node-compatibility.md
 EOF
+  fi
+else
+  if [[ "${GOOS}" == "windows" ]]; then
+    cat > "${OUT_DIR}/README.txt" <<'EOF'
+DAgents Agent Node (Go static build, Windows)
+
+Use scripts/package_local_assistant.sh to bundle with Textual TUI (dagents-cli).
+EOF
+  else
+    cat > "${OUT_DIR}/README.txt" <<'EOF'
+DAgents Agent Node (Go static build)
+
+完整本地助手请使用 scripts/package_local_assistant.sh（含 Textual TUI）。
+EOF
+  fi
 fi
 
 echo "[done] ${OUT_DIR}"

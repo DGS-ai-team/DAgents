@@ -97,6 +97,9 @@ DELETE /v1/sessions/{session_id}
 POST /v1/sessions/{session_id}/cancel
 POST /v1/sessions/{session_id}/clear-context
 GET /v1/sessions/{session_id}/context
+GET /v1/sessions/{session_id}/child-agents
+GET /v1/sessions/{session_id}/child-agents/{child_session_id}
+POST /v1/sessions/{session_id}/child-agents/{child_session_id}/cancel
 ```
 
 ### 2.3 消息与 resume
@@ -159,6 +162,23 @@ POST /v1/sessions/{session_id}/skills/unload
 
 ---
 
+## 2.8 临时子 Agent（Client / 用户）
+
+契约详述见 **[child-agent-tools.md](./child-agent-tools.md)**。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/v1/sessions/{parent_session_id}/child-agents` | 列出该父 session 下**未交付**的活跃子 Agent |
+| GET | `/v1/sessions/{parent_session_id}/child-agents/{child_session_id}` | 查询单个子 Agent 状态 |
+| POST | `/v1/sessions/{parent_session_id}/child-agents/{child_session_id}/cancel` | 用户/Client 停止子 Agent（与工具 `cancel_child_agent` 等价） |
+
+- 子 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建，**无**独立 SSE；事件 **`child_agent_created` / `child_agent_completed` / `child_agent_cancelled`** 发往**父** session 的 `GET /v1/streams`。
+- 子 Agent **生命周期**在**向父 Agent 交付结果**后结束并回收；交付时发送结束类 SSE。
+
+父 Agent 工具（非 HTTP）：`create_temporary_agent`、`wait_child_agents`、`child_agent_status`、`cancel_child_agent`。
+
+---
+
 ## 3. A2A（经 Manage，无入站 API）
 
 非子 Agent 的 A2A **不**在本 Node 暴露 HTTP 路由；由工具层调用 **Manage**（见 [a2a-via-manage.md](./a2a-via-manage.md)、[manage-api-sketch.md](./manage-api-sketch.md) §4）。
@@ -183,22 +203,22 @@ POST {manage_url}/v1/a2a/messages/{message_id}/reply
 
 ---
 
-## 4. Internal API（子 Agent，进程内）
+## 4. 子 Agent 实现分层（Go Node）
 
-临时子 Agent **不监听端口**、**不注册 Manage 独立条目**（继承主 `agent_id` 的 Node 注册）。
+临时子 Agent **不监听端口**、**不注册 Manage 独立条目**（继承主 `agent_id`）。
 
-进程内接口（Go package，非 HTTP 或仅 localhost admin）：
+| 层 | 说明 |
+|----|------|
+| **HTTP** | §2.8 list / get / cancel（用户与 Client） |
+| **工具** | `create_temporary_agent` 等（父 Agent turn loop） |
+| **进程内** | `node/internal/childagent/`：`Create` / `Deliver` / `Cancel` / `Wait` |
 
-| 操作 | 说明 |
-|------|------|
-| `CreateChildAgent(purpose, template_id, ttl, allowed_tools)` | 创建子会话与权限沙箱 |
-| `SubmitChildMessage(child_session_id, content)` | 主 Agent 工具 `create_temporary_agent` 触发 |
-| `CancelChildAgent(child_session_id)` | TTL / 主会话释放时清理 |
+字段、SSE、生命周期见 **[child-agent-tools.md](./child-agent-tools.md)**。
 
 子 Agent turn 与工具执行共享：
 
-- 同一 FS 根 / shell 环境（可配置只读沙箱）
-- 同一 LLM 配额与审计通道（审计事件带 `parent_session_id` / `child_agent_kind=temporary`）
+- 同一 FS 根 / shell 环境
+- 同一 LLM 客户端（审计日志带 `parent_session_id`、`child_agent_kind=temporary`）
 
 ---
 
@@ -272,4 +292,4 @@ local:
 | P0 | `/health`、`POST /v1/sessions`、`POST /v1/messages`、`GET /v1/streams` |
 | P0 | Manage 注册/心跳/审计（出站） |
 | P1 | HITL resume、skills HTTP、A2A inbox 轮询 + Manage 工具 |
-| P2 | 子 Agent internal API、execution_progress 细粒度事件 |
+| P2 | **临时子 Agent**（[child-agent-tools.md](./child-agent-tools.md)）、execution_progress 细粒度事件 |

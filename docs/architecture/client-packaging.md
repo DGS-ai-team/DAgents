@@ -68,11 +68,9 @@ systemd：Node 为 `Type=simple` 服务；Client 为用户会话或 SSH 登录�
 
 ## 5. 构建产物
 
-Phase AC 目标：`linux-amd64` 与 `windows-amd64` tarball；glibc 目标见 [go-node-compatibility.md](./go-node-compatibility.md)。
-
-本地打包：
+Phase AC Release：`linux-amd64` 与 `windows-amd64` 压缩包（Go Node + PyInstaller Textual TUI）；glibc 目标见 [go-node-compatibility.md](./go-node-compatibility.md)。
 
 ```bash
-scripts/package_go_agent_client.sh
-# 产物: dist/dagents-agent-client-linux-amd64-0.2.0.tar.gz
+scripts/package_local_assistant.sh
+# 产物: dist/dagents-local-assistant-linux-amd64-0.2.0.tar.gz（或 windows zip）
 ```

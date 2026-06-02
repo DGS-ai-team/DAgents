@@ -112,15 +112,14 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 ---
 
-## 预编译包（Python）
+## 预编译包（本地助手）
 
-无需 Python 环境；Linux 注意 glibc。资产见 GitHub Releases：
+无需单独安装 Python/Go 运行时；Linux 注意 PyInstaller 二进制 glibc 要求。资产见 GitHub Releases：
 
-- **`dagents-backend-*`**：api + register_center + cli + `.runtime`
-- **`dagents serve`**：后台启动 Python Agent API（**非** Go Node）
-- **`dagents chat`**：Textual TUI，连 **Go Node**（需单独启动 `dagents-node`）
+- **`dagents-local-assistant-*`**：`dagents-node`（Go）+ `dagents-cli`（Textual TUI）+ `config.example.yaml` + `.runtime/`
+- 解压后：终端 1 运行 `./bin/dagents-node -config config.yaml`；终端 2 运行 `./bin/dagents-cli chat --config config.yaml`
 
-离线安装：[packaging/OFFLINE_INSTALL.md](packaging/OFFLINE_INSTALL.md)。
+源码联调见 [docs/architecture/local-assistant.md](docs/architecture/local-assistant.md)。
 
 ---
 

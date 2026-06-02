@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	historypkg "github.com/DGS-ai-team/DAgents/node/internal/history"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
@@ -45,10 +46,10 @@ type SkillAccess struct {
 // Orchestrator 驱动 LLM + 工具循环并通过 Hub 推送 SSE。
 type Orchestrator struct {
 	llm          llm.Client
-	hub          *stream.Hub
+	hub          stream.Publisher
 	agentID      string
 	fsRoot       string
-	tools        *tools.Registry
+	tools        tools.Executor
 	policy       *policy.Engine
 	skillAccess  SkillAccess
 	maxToolLoops int
@@ -56,7 +57,16 @@ type Orchestrator struct {
 	journal      *historypkg.Journal
 	logger       *slog.Logger
 
+	childMgr       *childagent.Manager
+	isChildSession bool
+
 	enqueueToolResult func(sessionID string) error
+}
+
+// SetChildAgentTools 注入子 Agent 工具处理器；isChild 为 true 时禁止调用管理工具。
+func (o *Orchestrator) SetChildAgentTools(m *childagent.Manager, isChild bool) {
+	o.childMgr = m
+	o.isChildSession = isChild
 }
 
 // SetToolResultEnqueuer 注入 tool_result 入队回调；生产 session 必须设置以对齐 Python 队列语义。
@@ -235,9 +245,9 @@ func (o *Orchestrator) ContinueAfterResume(
 
 func NewOrchestrator(
 	agentID, fsRoot string,
-	hub *stream.Hub,
+	hub stream.Publisher,
 	client llm.Client,
-	registry *tools.Registry,
+	toolExec tools.Executor,
 	policyEngine *policy.Engine,
 	skillAccess SkillAccess,
 	maxToolLoops int,
@@ -256,7 +266,7 @@ func NewOrchestrator(
 		fsRoot:       fsRoot,
 		hub:          hub,
 		llm:          client,
-		tools:        registry,
+		tools:        toolExec,
 		policy:       policyEngine,
 		skillAccess:  skillAccess,
 		maxToolLoops: maxToolLoops,
@@ -458,7 +468,32 @@ func (o *Orchestrator) processToolCalls(
 	for _, tc := range calls {
 		o.publishToolCall(sessionID, tc)
 
+		if childagent.IsChildAgentTool(tc.Function.Name) {
+			if o.isChildSession {
+				o.appendDeniedTool(sessionID, history, tc, "child_forbidden")
+				continue
+			}
+			if o.childMgr == nil || !o.childMgr.Enabled() {
+				output := "ERROR: child agents disabled"
+				o.publishToolResult(sessionID, tc, output, true, nil)
+				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+				continue
+			}
+			_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
+			output, err := o.childMgr.HandleParentTool(ctx, sessionID, tc.Function.Name, cleanedArgs)
+			if err != nil {
+				return nil, "", err
+			}
+			o.publishToolResult(sessionID, tc, output, strings.HasPrefix(output, "ERROR:"), nil)
+			o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+			continue
+		}
+
 		if tools.IsAskUserInformation(tc.Function.Name) {
+			if o.isChildSession {
+				o.appendDeniedTool(sessionID, history, tc, "ask_user_forbidden_for_child")
+				continue
+			}
 			if userInfo == nil {
 				cp := tc
 				userInfo = &cp
