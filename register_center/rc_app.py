@@ -11,7 +11,7 @@ import uuid
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 
-from app.observability.metrics import metrics_text, record_a2a_operation, record_a2a_terminal_state
+from metrics import metrics_text, record_a2a_operation, record_a2a_terminal_state
 
 from rc_models import (
     AgentListResponse,

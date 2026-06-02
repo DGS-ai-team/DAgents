@@ -1,9 +1,9 @@
 # Python 运行时架构与业务流程
 
-> **【已弃用 — Agent 运行时】** 本文描述遗留 Python FastAPI 栈。本地助手请用 [overview.md](./overview.md) 中的 Go Node。  
-> **仍适用**：DAgentsUI 联调、A2A、Register Center。
+> **【已移除】** 本文描述的 **Python FastAPI Agent 运行时**（`app/harness/`、`app/core/`）**已从仓库删除**。  
+> 本地助手请使用 [overview.md](./overview.md) 中的 **Go Agent Node**。Register Center 仍见 [../../register_center/README.md](../../register_center/README.md)。
 
-> **适用栈**：`python run_agent_api.py` 启动的 **FastAPI Agent API**。本地 Go Agent Node 见 [overview.md](./overview.md) 与 [agent-node-api.md](./agent-node-api.md)。
+> **适用栈（历史）**：`python run_agent_api.py` 启动的 FastAPI Agent API。
 
 本文说明 **Python DAgents 后端** 的分层、运行时组件与一条用户消息从进入到模型/工具/SSE 输出的主路径。HTTP 字段级说明见 [api-reference.md](../api-reference.md)。
 

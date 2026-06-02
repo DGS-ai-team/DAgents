@@ -51,18 +51,6 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 | `/clear` | 清空服务端 context 并清 transcript |
 | `/exit` | 退出，并在终端打印恢复当前会话的 `dagents chat --session ...` 命令 |
 
-`dagents serve`（非 TUI 内命令，在 shell 中执行）：
-
-| 命令 | 说明 |
-|------|------|
-| `dagents serve` | 后台启动 Agent API（默认），日志写入 `logs/dagents-api.log`，PID 写入 `dagents-api.pid` |
-| `dagents serve --stop` | 停止后台 API，并执行 `.runtime/scripts/serve/shutdown.d/` 钩子 |
-| `dagents serve --status` | 查看后台 API 是否在运行 |
-| `dagents serve --foreground` | 前台运行（调试，不写 PID） |
-| `dagents serve --no-hooks` | 跳过 startup/shutdown 钩子 |
-
-钩子目录见 `packaging/runtime/scripts/serve/`（安装后位于 `.runtime/scripts/serve/`）。
-
 快捷键：context 视图中按 `Esc` 返回聊天记录；输出中、工具审批或 Agent 询问中按 `Esc` 可调用 cancel 中断当前 turn。
 
 **Agent 询问（`ask_user_information`）**：Agent 调用该工具时，TUI 会展示问题；无选项时在底部输入框输入后 Enter 提交；有选项时用 ↑/↓ 选择、Space 多选切换、Enter 确认。

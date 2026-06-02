@@ -2,22 +2,15 @@
 
 ## `main.py`
 
-- **`main`** / **`build_parser`**：CLI 子命令入口
-- **`_default_api_base`**：无 YAML 时从 env/.env 解析 API 地址
+- **`main`** / **`build_parser`**：CLI 子命令入口（`chat` / `show` / `delete` / `register-center`）
+- **`_default_api_base`**：无 YAML 时从 env/.env 解析 Go Node 地址
 - **`_add_client_config_arguments`** / **`apply_client_settings`**：`--config` / `--api` 合并
-- **`_normalize_serve_extra`**：剥离 `serve` 的 `REMAINDER` 中 `--` 前缀
 
 ## `config_file.py`
 
 - **`AgentClientConfig`**：Python 侧共用配置子集（`api_base`）
 - **`resolve_config_path`** / **`resolve_agent_id`** / **`load_agent_client_config`** / **`resolve_client_settings`**：与 Go `ResolveConfigPath` / `ResolveAgentID` 对齐
 
-## `daemon.py`
-
-- **`add_serve_arguments`**：`serve` / `api` 的 `--foreground` / `--stop` / `--status` / `--no-hooks` / `--no-wait`
-- **`run_serve_command`**：后台启动、停止、状态、前台运行；默认写 `dagents-api.pid` 与 `logs/dagents-api.log`
-- **`_run_hook_dir`** / **`_run_hook_script`**：`.runtime/scripts/serve/startup.d` 与 `shutdown.d` 钩子
-- **`_start_serve_daemon`** / **`_run_api_foreground`**：后台 `Popen` 或前台 `subprocess.call`
 
 ## `chat.py`
 

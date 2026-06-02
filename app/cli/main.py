@@ -9,7 +9,6 @@ from typing import Sequence
 
 from app.cli.config_file import resolve_client_settings
 from app.cli.chat import run_chat
-from app.cli.daemon import add_serve_arguments, run_serve_command
 from app.cli.session_commands import run_delete_session, run_show_session
 
 
@@ -63,18 +62,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_delete_session(apply_client_settings(args))
         parser.parse_args(["delete", "--help"])
         return 1
-    if args.command in {"serve", "api"}:
-        return run_serve_command(
-            _runtime_home(),
-            binary_stem="dagents-api",
-            script_name="run_agent_api.py",
-            extra_args=_normalize_serve_extra(args.extra),
-            foreground=bool(args.foreground),
-            stop=bool(args.stop),
-            status=bool(args.status),
-            no_hooks=bool(args.no_hooks),
-            no_wait=bool(args.no_wait),
-        )
     if args.command == "register-center":
         return _run_installed_or_python("dagents_register_center", "run_register_center.py", args.extra)
     if args.command == "doctor":
@@ -109,29 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
     delete_session.add_argument("session_id", help="Session ID to release")
     _add_client_config_arguments(delete_session)
 
-    serve = subparsers.add_parser(
-        "serve",
-        help="Start the Agent API backend in background (use --foreground for blocking)",
-    )
-    add_serve_arguments(serve)
-
-    api = subparsers.add_parser("api", help="Alias for serve")
-    add_serve_arguments(api)
-
     register_center = subparsers.add_parser("register-center", help="Start the Register Center")
     register_center.add_argument("extra", nargs=argparse.REMAINDER)
 
     subparsers.add_parser("doctor", help="Check installed files")
     subparsers.add_parser("version", help="Print version information")
     return parser
-
-
-def _normalize_serve_extra(extra: list[str] | None) -> list[str]:
-    """剥离 REMAINDER 可能带的 `--` 前缀，保留传给 API 进程的参数。"""
-    rows = list(extra or [])
-    if rows and rows[0] == "--":
-        return rows[1:]
-    return rows
 
 
 def _run_installed_or_python(binary_stem: str, script_name: str, extra_args: list[str]) -> int:
@@ -165,8 +135,8 @@ def _doctor() -> int:
 
 def _expected_binary_names() -> list[str]:
     if os.name == "nt":
-        return ["dagents-api.exe", "dagents_register_center.exe"]
-    return ["dagents-api", "dagents_register_center"]
+        return ["dagents_register_center.exe"]
+    return ["dagents_register_center"]
 
 
 def _runtime_home() -> Path:

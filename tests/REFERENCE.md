@@ -4,7 +4,7 @@
 
 ## `test_smoke.py`
 
-- **`WorkspaceImportSmokeTest`**：轻量 `import app.harness.queue.message_queue`，验证工作区可解析。
+- **`WorkspaceImportSmokeTest`**：轻量 `import app.cli.main`，验证工作区可解析。
 
 ## `test_config_settings.py`
 

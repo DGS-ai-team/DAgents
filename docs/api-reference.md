@@ -1,8 +1,8 @@
 # DAgents API 文档（与实现同步）
 
-> **【已弃用 — Agent 运行时】** 本文档描述 **Python FastAPI** 契约（`app/harness/api`）。  
-> 本地助手 Agent API 见 [architecture/agent-node-api.md](./architecture/agent-node-api.md)。  
-> 弃用说明：`app/deprecated_backend.py`；`GET /health` 与响应头 `Deprecation: true`。
+> **【已移除】** 本文档描述的 **Python FastAPI Agent API**（`run_agent_api.py`、`app/harness/`）**已从仓库删除**。  
+> 当前 Agent HTTP/SSE 契约见 **[architecture/agent-node-api.md](./architecture/agent-node-api.md)**（Go Node）。  
+> 下文保留作历史参考。
 
 本文档与 **`v0.2.0`** 前后端行为对齐，面向前端接入与联调；实现以代码为准。
 

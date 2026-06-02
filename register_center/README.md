@@ -10,6 +10,7 @@ Register Center 的实现目录（MVP：FastAPI + 默认内存存储，可选 JS
 | `rc_models.py` | 请求/响应 Pydantic 模型与字段校验规则。 |
 | `rc_store.py` | 登记表存储（字典 + 线程锁；可选 JSON 文件持久化）。 |
 | `rc_app.py` | FastAPI 应用工厂与 REST 路由定义（含分组广播与单目标中继接口）。 |
+| `metrics.py` | Prometheus A2A 指标（relay/broadcast） |
 | `REFERENCE.md` | 本目录 Python 符号索引。 |
 
 ## 运行方式

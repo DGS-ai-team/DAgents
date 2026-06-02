@@ -1,18 +1,10 @@
 # DAgents
 
-多 Agent / 工具调用场景下的 **Agent 运行时**仓库：含 **Go 本地助手栈**（Agent Node + 终端 Client）与 **Python FastAPI 栈**（Web API、A2A、Register Center）。  
+多 Agent / 工具调用场景下的 **Agent 运行时**仓库：**Go Agent Node** 为本地助手主线；Python 保留 **Textual TUI Client** 与 **Register Center**。
+
 **协议**：[MIT License](LICENSE)。**Web 前端**独立仓库：[DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI)。
 
 **标记版本：`v0.2.0`（2026-05-30）** · [变更记录](CHANGELOG.md)
-
-## 两条运行时路径
-
-| 场景 | 栈 | 快速开始 |
-|------|-----|----------|
-| **本地终端助手**（推荐开发主线） | Go Node + Textual/Go Client | 见 [本地助手](#本地助手-go-node) |
-| **Web UI / OpenAPI / A2A**（遗留） | Python FastAPI + Register Center **（已弃用 Agent 运行时）** | 见 [Python API](#python-api已弃用--agent-运行时) |
-
-架构选型说明：[docs/architecture/overview.md](docs/architecture/overview.md)。
 
 ---
 
@@ -29,44 +21,32 @@ go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 
 # 终端 2 — Client（二选一）
 python -m app.cli.main chat --config packaging/agent-client/config.yaml   # Textual TUI（首选）
-go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml tui  # Go REPL（兜底）
+go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml tui  # Go TUI（full / --plain）
 ```
 
 | 目录 | 说明 |
 |------|------|
-| [`node/`](node/README.md) | Agent Node |
-| [`client/`](client/README.md) | Go REPL Client |
+| [`node/`](node/README.md) | Agent Node（Go） |
+| [`client/`](client/README.md) | Go TUI Client |
 | [`shared/config/`](shared/config/README.md) | 共用 YAML 配置 |
 | [`app/cli/`](app/cli/README.md) | Python Textual TUI（连 Go Node） |
 
-文档：[docs/architecture/local-assistant.md](docs/architecture/local-assistant.md)。
+文档：[docs/architecture/local-assistant.md](docs/architecture/local-assistant.md)、[docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md)。
 
 ---
 
-## Python API（**已弃用 — Agent 运行时**）
+## Register Center（Python）
 
-> 仍维护用于 **DAgentsUI**、**OpenAPI**、**A2A**、**Register Center** 与 v0.2.0 发布包。  
-> 本地助手与新功能请使用 [Go Node](#本地助手-go-node)。启动时会打 WARNING，API 响应含 `Deprecation` 头。
-
-FastAPI 服务、Prometheus、Register Center、**agent_peer** A2A。
+Agent 登记、广播与中继（A2A 控制面）；**非** Agent 运行时。
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-python run_agent_api.py          # 默认 127.0.0.1:8000
-python run_register_center.py    # 可选，默认 :8010
-python run_dev_stack.py          # API + Register Center
+python run_register_center.py    # 默认 :8010
+python run_dev_stack.py          # 同上（开发便捷入口）
 ```
 
-| 能力 | 说明 |
-|------|------|
-| HTTP / SSE | 会话、消息、流式、审批 |
-| SQLite | 可选会话持久化 |
-| Register Center | Agent 登记、广播、中继 |
-| 指标 | `GET /metrics`（可选） |
-
-文档：[docs/architecture/python-runtime.md](docs/architecture/python-runtime.md)、[docs/api-reference.md](docs/api-reference.md)。
+文档：[register_center/README.md](register_center/README.md)。
 
 ---
 
@@ -75,14 +55,13 @@ python run_dev_stack.py          # API + Register Center
 ```text
 DAgents/
 ├── node/                 # Go Agent Node
-├── client/               # Go REPL Client
+├── client/               # Go TUI Client
 ├── shared/config/        # Node + Client 共用 YAML
-├── app/                  # Python：API、harness、cli TUI
+├── app/cli/              # Python Textual TUI
 ├── register_center/      # Register Center（Python FastAPI）
-├── packaging/            # 配置示例、PyInstaller runtime、离线安装
+├── packaging/            # 配置示例、离线安装、Go 本地助手包
 ├── docs/                 # 技术文档（见 docs/README.md）
-├── tests/                # Python unittest
-├── run_agent_api.py
+├── tests/                # Python CLI / Register Center 单测
 ├── run_register_center.py
 └── requirements.txt
 ```
@@ -95,7 +74,7 @@ DAgents/
 # Go（node/client 变更时 CI 同样执行）
 go test ./node/... ./client/... ./shared/config/...
 
-# Python（与 .github/workflows/pr-tests.yml 一致）
+# Python CLI / Register Center
 pip install -r requirements.txt
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
@@ -108,38 +87,19 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 - **Python**：3.11+ 可运行；**CI 验证 3.13**。见 [docs/os-compatibility.md](docs/os-compatibility.md)。
 - **Go**：见 `go.work`（`node`、`client`、`shared/config`）。
-- **0.x 预览**：不兼容变更写入 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
 ## 预编译包（本地助手）
 
-无需单独安装 Python/Go 运行时；Linux 注意 PyInstaller 二进制 glibc 要求。资产见 GitHub Releases：
-
-- **`dagents-local-assistant-*`**：`dagents-node` + 两种 TUI 客户端 + `config.example.yaml` + `.runtime/`
-  - `dagents-cli chat` — Python Textual TUI
-  - `dagents-client tui` — **Go bubbletea 全屏 TUI**（默认，无额外依赖）
-  - `dagents-client tui --plain` — Go 行模式 REPL（老终端）
-- 解压后：终端 1 `./bin/dagents-node -config config.yaml`；终端 2 任选上述 TUI 命令
-
-源码联调见 [docs/architecture/local-assistant.md](docs/architecture/local-assistant.md)。
-
----
-
-## OpenAPI 与前端
-
-```bash
-python scripts/ci/export_openapi_for_frontend.py --frontend ../DAgentsUI
-```
-
-契约针对 **Python API**；Go Node API 见 [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md)。
+资产见 GitHub Releases **`dagents-local-assistant-*`**：`dagents-node` + Textual/Go Client + `config.example.yaml`。
 
 ---
 
 ## 问题反馈与安全
 
-- **Issues**：注明栈（Go Node / Python API）、版本、OS、复现步骤。
-- **安全漏洞**：[SECURITY.md](SECURITY.md)（勿在公开 Issue 贴 exploit）。
+- **Issues**：注明栈（Go Node / Python CLI）、版本、OS、复现步骤。
+- **安全漏洞**：[SECURITY.md](SECURITY.md)。
 
 ---
 
@@ -148,12 +108,10 @@ python scripts/ci/export_openapi_for_frontend.py --frontend ../DAgentsUI
 | 文档 | 说明 |
 |------|------|
 | [docs/README.md](docs/README.md) | 技术文档索引 |
-| [docs/architecture/overview.md](docs/architecture/overview.md) | 双栈架构 |
-| [docs/roadmap.md](docs/roadmap.md) | 路线图 |
+| [docs/architecture/overview.md](docs/architecture/overview.md) | 架构总览 |
+| [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md) | Go Node HTTP/SSE API |
 | [register_center/README.md](register_center/README.md) | Register Center API |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更 |
-
-各代码目录 **`README.md`** / **`REFERENCE.md`** 随源码维护。
 
 ---
 
