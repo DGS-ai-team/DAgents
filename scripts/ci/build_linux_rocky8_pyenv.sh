@@ -7,7 +7,7 @@
 #
 # 硬边界：
 # - **RHEL 6 / CentOS 6（glibc 2.12）无法运行 CPython 3.13**；若必须支持，只能换更低版本 Python 或容器化部署，勿期望本仓库 PyInstaller 产物兼容。
-# - 官方 `rockylinux:8` 极简镜像不含 **find**（findutils），pyenv python-build 会因此失败，须在 dnf 中显式安装。
+# - 官方 `rockylinux:8` 极简镜像不含 **find**（findutils），pyenv python-build 会因此失败；勿装完整 coreutils（与 coreutils-single 冲突）。
 #
 # 约定（与 **`build_linux_focal_pyenv.sh`** 一致）：
 # - 工作区挂载为 **/src**；
@@ -24,7 +24,7 @@ export PIP_DISABLE_PIP_VERSION_CHECK=1
 
 dnf -y install \
   ca-certificates curl git \
-  findutils coreutils tar gzip \
+  findutils tar gzip \
   make patch pkg-config which \
   gcc zlib-devel bzip2-devel readline-devel sqlite-devel openssl-devel xz xz-devel \
   libffi-devel gdbm-devel \
