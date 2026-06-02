@@ -1,6 +1,6 @@
 name: Build And Release Binary
 
-# main 上日常推送只跑单测；打 v* 标签才构建 Node + Textual TUI 压缩包并创建 Release。
+# main 推送仅跑单测；打 v* 标签时构建本地助手包（Go Node + 双 TUI + Register Center）并创建 GitHub Release。
 on:
   push:
     branches:
@@ -18,11 +18,26 @@ env:
 
 jobs:
   unit-tests:
-    name: Unit tests
+    name: Unit tests (Go + Python)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            node/go.sum
+            client/go.sum
+            shared/config/go.sum
+
+      - name: Go test
+        run: |
+          go test ./shared/config/...
+          go test ./node/...
+          go test ./client/...
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -30,12 +45,12 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run unittest discovery
+      - name: Python unittest
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
   build-local-assistant:
@@ -72,13 +87,7 @@ jobs:
             client/go.sum
             shared/config/go.sum
 
-      - name: Test Go modules
-        shell: bash
-        run: |
-          go test ./shared/config/...
-          go test ./node/...
-
-      - name: Build Go dagents-node
+      - name: Build Go binaries (dagents-node + dagents-client)
         shell: bash
         run: |
           set -euo pipefail
@@ -98,17 +107,14 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Build dagents-cli (native PyInstaller)
+      - name: Build Python bundles (Windows native PyInstaller)
         if: matrix.cli_build == 'native'
         shell: bash
-        run: bash scripts/ci/build_dagents_cli.sh
+        run: |
+          bash scripts/ci/build_dagents_cli.sh
+          bash scripts/ci/build_dagents_register_center.sh
 
-      - name: Build dagents_register_center (native PyInstaller)
-        if: matrix.cli_build == 'native'
-        shell: bash
-        run: bash scripts/ci/build_dagents_register_center.sh
-
-      - name: Build dagents-cli (Linux Rocky 8 Docker + pyenv, glibc 2.28)
+      - name: Build Python bundles (Linux Rocky 8 Docker + pyenv, glibc 2.28)
         if: matrix.cli_build == 'docker-rocky8'
         timeout-minutes: 120
         shell: bash
@@ -120,7 +126,7 @@ jobs:
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e CLI_PI_ARGS -e PYENV_PYTHON_VERSION \
+            -e CLI_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
             rockylinux:8 \
             bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
 
@@ -144,7 +150,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs:
       - build-local-assistant
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Download all release artifacts

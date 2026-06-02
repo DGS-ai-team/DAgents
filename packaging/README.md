@@ -21,7 +21,13 @@ scripts/package_local_assistant.sh
 # dist/dagents-local-assistant-windows-amd64-0.2.0.zip
 ```
 
-Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**（glibc 2.28）容器内 PyInstaller；Go 二进制 **CGO_ENABLED=0** 静态编译。
+Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` / `dagents_register_center` 在 **rockylinux:8**（glibc 2.28）容器内 PyInstaller；Go 二进制 **CGO_ENABLED=0** 静态编译。
+
+| 工作流 | 触发 | 产物 |
+|--------|------|------|
+| [build-and-release.yml](../.github/workflows/build-and-release.yml) | 推送 **`v*`** 标签 | GitHub Release + `dagents-local-assistant-*` |
+| [manual-package.yml](../.github/workflows/manual-package.yml) | 手动 **workflow_dispatch** | Actions Artifact（可填 `version`、可选跳过测试） |
+| [go-ac.yml](../.github/workflows/go-ac.yml) | PR / push（Go 路径） | 仅测试与编译冒烟，不打包 |
 
 | 路径 | 说明 |
 |------|------|

@@ -10,7 +10,7 @@
 #
 # 约定（与 **`build_linux_focal_pyenv.sh`** 一致）：
 # - 工作区挂载为 **/src**；
-# - **CLI_PI_ARGS** / **API_PI_ARGS** / **RC_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串（至少填一项）；
+# - **CLI_PI_ARGS** / **RC_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串（至少填一项）；
 # - **PYENV_PYTHON_VERSION**：可选，默认 **3.13.2**。
 #
 # 副作用：首次编译 CPython 耗时长；workflow step 需足够 **timeout**。
@@ -18,6 +18,8 @@
 set -euxo pipefail
 
 PYENV_PYTHON_VERSION="${PYENV_PYTHON_VERSION:-3.13.2}"
+export PIP_ROOT_USER_ACTION=ignore
+export PIP_DISABLE_PIP_VERSION_CHECK=1
 
 dnf -y install \
   ca-certificates curl git \
@@ -38,27 +40,41 @@ if [ ! -x "${PYENV_ROOT}/bin/pyenv" ]; then
   git clone --depth 1 https://github.com/pyenv/pyenv.git "${PYENV_ROOT}"
 fi
 
+# 非交互 shell 须 init --path，否则 shims 不在 PATH 上（ensurepip / pip 会装到 versions/X/bin 却找不到 python）。
+eval "$(pyenv init --path)"
 eval "$(pyenv init -)"
 
 export PYTHON_CONFIGURE_OPTS="${PYTHON_CONFIGURE_OPTS:---enable-shared}"
+# 构建阶段跳过 ensurepip，避免 pyenv install 末尾因 PATH 警告以非零退出；装完后再显式 bootstrap pip。
+export PYTHON_BUILD_SKIP_ENSUREPIP=1
 
-pyenv install -s "${PYENV_PYTHON_VERSION}"
+if ! pyenv versions --bare | grep -qx "${PYENV_PYTHON_VERSION}"; then
+  pyenv install -s "${PYENV_PYTHON_VERSION}"
+fi
 pyenv global "${PYENV_PYTHON_VERSION}"
+pyenv rehash
+
+PYENV_PYTHON="${PYENV_ROOT}/versions/${PYENV_PYTHON_VERSION}/bin/python"
+export PATH="${PYENV_ROOT}/shims:${PYENV_ROOT}/versions/${PYENV_PYTHON_VERSION}/bin:${PATH}"
+export LD_LIBRARY_PATH="${PYENV_ROOT}/versions/${PYENV_PYTHON_VERSION}/lib:${LD_LIBRARY_PATH:-}"
+
+if ! "${PYENV_PYTHON}" -c 'import pip' 2>/dev/null; then
+  "${PYENV_PYTHON}" -m ensurepip --upgrade
+fi
+"${PYENV_PYTHON}" -m pip install --upgrade pip wheel
 
 cd /src
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt pyinstaller
+"${PYENV_PYTHON}" -m pip install -r requirements.txt pyinstaller
 
-if [[ -z "${API_PI_ARGS:-}" && -z "${RC_PI_ARGS:-}" && -z "${CLI_PI_ARGS:-}" ]]; then
-  echo "[build_linux_rocky8_pyenv] at least one of API_PI_ARGS, RC_PI_ARGS, CLI_PI_ARGS is required" >&2
+if [[ -z "${CLI_PI_ARGS:-}" && -z "${RC_PI_ARGS:-}" ]]; then
+  echo "[build_linux_rocky8_pyenv] at least one of CLI_PI_ARGS, RC_PI_ARGS is required" >&2
   exit 1
 fi
-if [[ -n "${API_PI_ARGS:-}" ]]; then
-  eval python -m PyInstaller ${API_PI_ARGS}
-fi
 if [[ -n "${RC_PI_ARGS:-}" ]]; then
-  eval python -m PyInstaller ${RC_PI_ARGS}
+  eval "${PYENV_PYTHON}" -m PyInstaller ${RC_PI_ARGS}
 fi
 if [[ -n "${CLI_PI_ARGS:-}" ]]; then
-  eval python -m PyInstaller ${CLI_PI_ARGS}
+  eval "${PYENV_PYTHON}" -m PyInstaller ${CLI_PI_ARGS}
 fi
+
+echo "[build_linux_rocky8_pyenv] done: $(ls -la /src/dist/ 2>/dev/null || true)"

@@ -1,7 +1,17 @@
 name: Manual Package Binary
 
+# 手动打本地助手包（与 tag Release 同矩阵，不上传 GitHub Release）。
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "产物版本号后缀（写入 dagents-local-assistant-*-{version}.tar.gz/.zip）"
+        required: false
+        default: "0.0.0-manual"
+      skip_tests:
+        description: "跳过构建前 Go/Python 单测（仅调试打包脚本时用）"
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -9,8 +19,45 @@ env:
   RC_PI_ARGS: --onefile --name dagents_register_center --add-data register_center:register_center run_register_center.py
 
 jobs:
+  test:
+    name: Pre-build tests
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            node/go.sum
+            client/go.sum
+            shared/config/go.sum
+
+      - name: Go test
+        run: |
+          go test ./shared/config/...
+          go test ./node/...
+          go test ./client/...
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Python test
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m unittest discover -s tests -p "test_*.py" -v
+
   build-local-assistant:
     name: Build local assistant (${{ matrix.platform }})
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -41,7 +88,7 @@ jobs:
             client/go.sum
             shared/config/go.sum
 
-      - name: Build Go dagents-node
+      - name: Build Go binaries (dagents-node + dagents-client)
         shell: bash
         run: |
           set -euo pipefail
@@ -61,17 +108,14 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Build dagents-cli (native PyInstaller)
+      - name: Build Python bundles (Windows native PyInstaller)
         if: matrix.cli_build == 'native'
         shell: bash
-        run: bash scripts/ci/build_dagents_cli.sh
+        run: |
+          bash scripts/ci/build_dagents_cli.sh
+          bash scripts/ci/build_dagents_register_center.sh
 
-      - name: Build dagents_register_center (native PyInstaller)
-        if: matrix.cli_build == 'native'
-        shell: bash
-        run: bash scripts/ci/build_dagents_register_center.sh
-
-      - name: Build dagents-cli (Linux Rocky 8 Docker + pyenv, glibc 2.28)
+      - name: Build Python bundles (Linux Rocky 8 Docker + pyenv, glibc 2.28)
         if: matrix.cli_build == 'docker-rocky8'
         timeout-minutes: 120
         shell: bash
@@ -83,14 +127,14 @@ jobs:
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e CLI_PI_ARGS -e PYENV_PYTHON_VERSION \
+            -e CLI_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
             rockylinux:8 \
             bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
 
       - name: Assemble release archive
         shell: bash
         run: |
-          VERSION="0.0.0-manual"
+          VERSION="${{ inputs.version }}"
           PLATFORM="${{ matrix.platform }}" VERSION="${VERSION}" \
             bash scripts/ci/assemble_local_assistant_bundle.sh
           ls -la dist/dagents-local-assistant-*

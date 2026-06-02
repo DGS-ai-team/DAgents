@@ -8,4 +8,3 @@ prometheus-client>=0.21.0
 textual>=0.80.0
 aiohttp>=3.7.4,<4
 PyYAML
-qq-botpy
