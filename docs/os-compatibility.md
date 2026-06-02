@@ -55,11 +55,11 @@ PEP 11 中 **Tier 2** 含 **`x86_64-apple-darwin`**，**Tier 1** 含 **`aarch64-
 | 交付形态 | Windows | Linux | macOS |
 |----------|---------|-------|--------|
 | **源码 + pip**（`requirements.txt`） | 受限于你在该机上安装的 **Python 小版本**；若使用 **3.11**，可参考 §1.1 的 **Win 8.1+**（传统安装包） | 以 **发行版是否提供 / 能否编译 3.11+** 为准；DAgents 声明 **3.11+**，CI 验证 **3.13** | 以本机 Python 与依赖 wheel 为准 |
-| **PyInstaller 单文件包**（本仓库 CI，见 `.github/workflows/build-and-release.yml`） | 当前矩阵为 **Windows 2022** 上构建的 **x64/x86**；实际最低 **Windows** 版本还受 **VC 运行库** 等约束，需以 **在目标机实测** 为准 | **由 CI 选用的 Linux 镜像 glibc 决定**。当前 Linux x64 默认在 **Ubuntu 20.04（focal）** 容器内用 pyenv 编 **3.13** 再打 PyInstaller，产物往往依赖 **较新的 glibc 符号**（例如与 **GLIBC_2.30** 相关的问题），**无法在 glibc 更旧的主机（如部分 RHEL 7/8 或更老环境）上保证可运行** | 若 CI 未产出 darwin 单文件包，则本节不适用 |
+| **PyInstaller 单文件包**（本仓库 CI，见 `.github/workflows/build-and-release.yml`） | 当前矩阵为 **Windows 2022** 上构建的 **x64**；实际最低 **Windows** 版本还受 **VC 运行库** 等约束，需以 **在目标机实测** 为准 | **由 CI 选用的 Linux 镜像 glibc 决定**。Linux x64 在 **Rocky Linux 8** 容器（glibc **2.28**）内用 pyenv 编 **3.13** 再打 PyInstaller；Runner 为 **ubuntu-20.04**。Go 二进制为 **CGO_ENABLED=0** 静态编译，与宿主 glibc 无关。**RHEL 7 及以下（glibc < 2.28）仍不保证可运行 `dagents-cli`** | 若 CI 未产出 darwin 单文件包，则本节不适用 |
 
-**不要求必须用 Python 3.13**：若目标环境 glibc 偏旧，可采取：
+**不要求必须用 Python 3.13**：若目标环境 glibc 更旧（如 RHEL 7），可采取：
 
-- **在同一类旧 glibc 环境**（例如 **glibc 2.28** 的 **RHEL 8 / Rocky Linux 8**）用本仓库 `scripts/ci/build_linux_rocky8_pyenv.sh` 自行打 PyInstaller（或自建 Docker 镜像与 workflow）；或  
+- 在 **不高于目标 glibc** 的容器内用 `scripts/ci/build_linux_rocky8_pyenv.sh`（或更低版本链，若 CPython 3.13 能编过）重打 PyInstaller；或  
 - **固定使用 Python 3.11** 并在该环境 **源码安装 + venv**，使解释器与依赖均与宿主 glibc 一致（DAgents 代码需在 3.11 下回归验证）。
 
 ---
@@ -68,12 +68,12 @@ PEP 11 中 **Tier 2** 含 **`x86_64-apple-darwin`**，**Tier 1** 含 **`aarch64-
 
 以下为**典型**主版本自带的 glibc 主版本（实际以 `ldd --version` 为准；企业版可能有 backport）：
 
-| 环境（示例） | 典型 glibc（量级） | 与「现代 PyInstaller（focal/较新链）」 |
+| 环境（示例） | 典型 glibc（量级） | 与 Release CI `dagents-cli`（Rocky 8 构建） |
 |--------------|-------------------|----------------------------------------|
-| RHEL 6 / CentOS 6 | ~**2.12** | **极难**承载官方 **3.11+** 预编译解释器/onefile；不建议作为目标 |
-| RHEL 7 / CentOS 7 | ~**2.17** | 与 **manylinux2014** 量级接近；**是否**能跑 **3.11 官方二进制**仍取决于具体构建；**focal 打的 onefile** 通常 **不兼容** |
-| RHEL 8 / Rocky 8 / Alma 8 | ~**2.28** | 若 onefile 在 **glibc 2.28** 环境构建，通常 **可覆盖** 该类宿主；低于 2.28 仍可能失败 |
-| Ubuntu 20.04（focal） | ~**2.31** | 与本仓库默认 Linux x64 **构建环境**同量级 |
+| RHEL 6 / CentOS 6 | ~**2.12** | **不支持** CPython 3.13 onefile；Go Node/Client 另见兼容文档 |
+| RHEL 7 / CentOS 7 | ~**2.17** | **通常不兼容**（低于构建链 2.28） |
+| RHEL 8 / Rocky 8 / Alma 8 | ~**2.28** | **CI 默认构建环境**；该类宿主可运行 |
+| Ubuntu 20.04（focal） | ~**2.31** | 兼容（glibc 高于 2.28） |
 
 ---
 

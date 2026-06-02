@@ -21,6 +21,8 @@ scripts/package_local_assistant.sh
 # dist/dagents-local-assistant-windows-amd64-0.2.0.zip
 ```
 
+Linux Release CI：Runner **ubuntu-20.04**；`dagents-cli` 在 **rockylinux:8**（glibc 2.28）容器内 PyInstaller；Go 二进制 **CGO_ENABLED=0** 静态编译。
+
 | 路径 | 说明 |
 |------|------|
 | **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`） |

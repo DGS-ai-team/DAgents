@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 在 **Ubuntu 20.04 (focal)** 容器内（**amd64** 用 `ubuntu:20.04`，**i386** 用 `i386/ubuntu:focal`）：用 pyenv 从源码编译 CPython，再执行 PyInstaller。
 #
+# 说明：Release CI 已改用 **`build_linux_rocky8_pyenv.sh`**（glibc 2.28）。本脚本保留供 i386 或需 focal 链时手动构建。
+#
 # 背景：
 # 1. **amd64**：deadsnakes PPA 已不再为 focal 提供 `python3.13` 等套件（`Unable to locate package python3.13`），
 #    因此在 **glibc 2.31** 工具链下仍需 3.13 时，只能与 i386 一样走 **pyenv + 官方源码**。

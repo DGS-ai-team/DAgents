@@ -17,10 +17,10 @@ jobs:
       matrix:
         include:
           - platform: linux-amd64
-            os: ubuntu-22.04
+            os: ubuntu-20.04
             goos: linux
             goarch: amd64
-            cli_build: docker-focal
+            cli_build: docker-rocky8
           - platform: windows-amd64
             os: windows-2022
             goos: windows
@@ -65,8 +65,8 @@ jobs:
         shell: bash
         run: bash scripts/ci/build_dagents_cli.sh
 
-      - name: Build dagents-cli (Linux focal Docker + pyenv)
-        if: matrix.cli_build == 'docker-focal'
+      - name: Build dagents-cli (Linux Rocky 8 Docker + pyenv, glibc 2.28)
+        if: matrix.cli_build == 'docker-rocky8'
         timeout-minutes: 120
         shell: bash
         env:
@@ -77,8 +77,8 @@ jobs:
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
             -e CLI_PI_ARGS -e PYENV_PYTHON_VERSION \
-            ubuntu:20.04 \
-            bash /src/scripts/ci/build_linux_focal_pyenv.sh
+            rockylinux:8 \
+            bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
 
       - name: Assemble release archive
         shell: bash
