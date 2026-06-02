@@ -4,30 +4,88 @@
 
 ## [0.2.0] - 2026-05-30
 
-**0.x 预览**：Go **Agent Node + Client** 成为本地助手主线；Python FastAPI Agent 运行时标记 **已弃用**（仍维护 DAgentsUI / A2A / Register Center）。
+**0.x 预览**：**Go Agent Node + Client** 成为唯一 Agent 运行时；本地助手与终端交互以 Go 栈为主线。Python 保留 **Textual TUI Client**（`dagents chat`）与 **Register Center**，**Python FastAPI Agent API 已从仓库移除**（原 `app/harness/`、`run_agent_api.py`）。
 
 ### 新增
 
-- **`node/`**、**`client/`**、**`shared/config/`**：Go Agent Node（LLM turn、工具、SQLite、policy、skills、compression、triggers）、Go REPL Client、共用 YAML 配置。
-- **Python Textual TUI**（`app/cli/`）：连 Go Node 的 `dagents chat`；与 Go REPL 双 Client 并存。
-- **Go Client bubbletea 全屏 TUI**（`client/internal/tui/full/`）：输入/输出分区；`tui --plain` REPL 兜底；与 Python Textual 目录隔离。
-- **N7 部分**：`go-node-compatibility.md`、静态构建、RHEL6 SysV init、Release CI Go tarball。
-- **Go full HITL**：逐工具审批（↑/↓ Space Enter）、选项式 `ask_user_information`。
-- **消息协议（Go）**：`tool_result` / `async_tool_result` 入队分流；多工具并行执行；上下文压缩 SSE 事件。
+#### Go Agent Node（`node/`）
+
+- **HTTP/SSE API**：会话创建/恢复、消息提交、`/resume`、流式事件、`/cancel`、context/skills/child-agents 等（契约见 `docs/architecture/agent-node-api.md`）。
+- **Turn 编排**：OpenAI 兼容 LLM、工具循环、审批暂停、`user_information` 询问、上下文压缩（blocking/silent SSE）。
+- **工具**：`bash_run`、`read_file` / `write_file` / `search_replace`、`load_skills` / `unload_skills`、trigger 系列、子 Agent 工具（`spawn_child_agent` 等）。
+- **Triggers**：`interval`、`fire_at`、日历 **`schedule`**（含 `cmd` 门控）；SQLite/JSON 持久化。
+- **Session**：SQLite 消息持久化；多 session 队列与活跃 turn 管理。
+- **Policy / Skills**：本地 policy profile；按 session 加载 skill 元数据。
+- **Usage 事件**：SSE `usage` 含 prompt/completion、cache hit/miss、`prompt_tokens_details`（供 Client input strip）。
+
+#### Go Client（`client/`）
+
+- **bubbletea 全屏 TUI**（`tui`，默认）：上输出 / 下输入；SSE 断线按 `Last-Event-ID` 重连。
+- **行模式 REPL**（`tui --plain` / `TERM=dumb`）：老 SSH / RHEL6 兜底；turn 期间独占 stdin，完整走通 HITL。
+- **HITL（full）**：逐工具审批（↑/↓、Space、Enter）；选项式 `ask_user_information`；子 Agent 审批标题区分。
+- **展示友好化**：`[tool] ▶ 调用 bash(…)` / `✓ bash 完成`；审批展示参数/原因/风险；input strip `↑prompt ↓completion · hit N`。
+- **斜杠命令**：`/context`、`/skill`、`/children`、`/cancel`、`/tools verbose|brief`、`/reasoning on|off` 等。
+- **探测与一次性 chat**：`probe`、`chat "消息"`（非交互）。
+
+#### 共用配置（`shared/config/`、`packaging/agent-client/`）
+
+- **YAML 同包配置**：`agent_id`、`listen`、`local.endpoint`、`llm`、`data_dir` 等；Node 与双 Client 共用。
+- **本地助手打包**：`dagents-local-assistant-*` tarball/zip（Go Node + Go Client + Textual CLI + `config.example.yaml` + 启动脚本）。
+
+#### Python Textual TUI（`app/cli/`）
+
+- **`dagents chat`**：连 **Go Node**（非 Python API）；RichLog 流式输出、非阻塞 HITL、子 Agent 过滤与状态条。
+- **共用 YAML**：`--config` / `DAGENTS_CONFIG` 与 Go Client 对齐；`show session` / `delete session`。
+- **Usage strip**：消费 SSE `usage`，显示上下行 token 与 cache hit（与 Go Client 语义一致）。
+
+#### Register Center（`register_center/`）
+
+- **持久化**：可选 JSON 文件存储；TTL  prune。
+- **A2A 指标**：relay/broadcast Prometheus 计数（`register_center/metrics.py`）。
+- **安全**：共享 token 校验；relay resume 转发。
+
+#### 文档与工程
+
+- **文档重组**：原 `docs/architecture-v2/` 迁入 `docs/architecture/`、`docs/design/`、`docs/future/`、`docs/archive/`。
+- **N7 部分**：`go-node-compatibility.md`、Go 静态构建脚本、RHEL6 SysV init、Release CI Go tarball。
+- **子 Agent 设计**：`docs/architecture/child-agent-tools.md`。
 
 ### 变更
 
-- **文档**：`docs/architecture-v2/` 迁入 `docs/architecture/`、`docs/design/`、`docs/future/`、`docs/archive/`；根 README 与索引按双栈重写。
-- **Python Agent 后端**：`app/deprecated_backend.py`；API 响应 `Deprecation` 头；`/health` 含弃用元数据。
-- 移除 Windows 托盘启动器（`scripts/windows/tray_launcher.py` 等）。
+- **运行时主线**：本地助手默认 `go run ./node/cmd/dagents-node` + `dagents chat` 或 `dagents-client tui`；不再提供 Python Agent API 进程。
+- **`run_dev_stack.py`**：仅启动 Register Center（原 API + RC 联调入口简化）。
+- **`dagents` CLI**：移除 `serve` / `api` 子命令（原后台 `dagents-api`）；保留 `chat`、`show`、`delete`、`register-center`。
+- **CI**：PR 跑 Go `node/` / `client/` 单测 + Python CLI/RC 单测；移除 Python OpenAPI 导出步骤；`dagents-cli` 构建改用 Rocky Linux 8。
+- **`requirements.txt`**：移除 `openai`、`APScheduler` 等仅 Agent API 栈依赖。
+- **Prometheus（Register Center）**：A2A 指标从 `app/observability/` 迁至 `register_center/metrics.py`。
+
+### 移除
+
+- **Python FastAPI Agent 运行时**：`app/harness/`、`app/core/`、`app/context/`、`app/schemas/`、`app/observability/`、`run_agent_api.py`、`export_openapi_schema.py`。
+- **Legacy 打包**：`packaging/linux/dagents-backend.*`、旧全栈 `startup_scripts` 中的 `dagents-api` 启动脚本。
+- **辅助脚本**：`scripts/query_session_sqlite.py`、`scripts/migrate_runtime_layout.py`、`scripts/ci/export_openapi_for_frontend.py`。
+- **Python Node 单测**：`test_agent_service*.py`、`test_api_app.py`、`test_main_agent_*.py` 等约 20+ 文件。
+- **Windows 托盘启动器**（`scripts/windows/tray_launcher.py` 等）。
+
+### 修复
+
+- **HITL**：Python/Go Client 与 Node 间 `tool_call_id` 同步；新 `approval_required` 替换 stale 队列项。
+- **Go full TUI**：textarea 默认 Focus；placeholder UTF-8 首字节乱码（`> 输入消息...`）。
+- **Go plain REPL**：发消息后等待 `done` 再显示 `dagents>`，避免与 HITL 抢 stdin；`done` 正确收尾 assistant 行。
+- **Trigger 调度与日志**：fire 路径与 observability 对齐（Go Node）。
 
 ### 已知限制（0.2.0）
 
-- Go Node **N7** RHEL6/Win2012 **真机验收**待完成（见 `docs/architecture/rhel6-acceptance-checklist.md`）。
-- Go full TUI：`--show-reasoning`、逐工具审批、选项式询问；Release 含 **linux tar + windows zip**。
-- Python FastAPI 仍为 Web/A2A 路径；与 Go Node API 契约分离维护。
+- **N7 真机验收**：RHEL6 / Windows Server 2012 等待测清单见 `docs/architecture/rhel6-acceptance-checklist.md`。
+- **plain REPL**：工具审批仅 y/N 全批/全拒；无 full TUI 的逐项勾选；回合等待期间不可用 `/cancel`。
+- **A2A 工具**：随 Python Agent API 移除；Register Center relay/broadcast 仍可用，Agent 侧 A2A 需后续在 Go/Manage 落地。
+- **历史文档**：`docs/api-reference.md`、`docs/architecture/python-runtime.md` 描述已删除的 Python API，仅作参考；现行契约见 `docs/architecture/agent-node-api.md`。
+- **Web UI（DAgentsUI）**：独立前端仓库 **尚未适配 v0.2.0**，仍基于旧 Python Agent API / OpenAPI；浏览器 Client 暂不可用，请使用终端 TUI。
+- **0.x 预览**：破坏性变更在 **1.0** 前仍可能出现。
 
 （Git **tag**：`v0.2.0`。）
+
+---
 
 ## [0.1.0] - 2026-05-12
 
@@ -69,5 +127,7 @@
 - **HTTP API 单测**未在仓库内全覆盖；CI 以 `requirements.txt` 安装后跑默认 `test_*.py`。
 - **`test_agent_service.py`** 在缺少完整依赖（如未安装 `openai`）时相关用例会 **skip**，与 CI 全量安装行为不同。
 - 破坏性 API 变更在迈向 **1.0** 前仍可能出现；见 [README.md](README.md) 中「版本与兼容性」。
+
+> **注**：0.1.0 中的 Python FastAPI Agent 运行时已在 **0.2.0** 移除；上文保留作该版本历史记录。
 
 （Git **tag**：`v0.1.0`；请在对应托管平台上创建 **Releases** 并与该 tag 对齐。）
