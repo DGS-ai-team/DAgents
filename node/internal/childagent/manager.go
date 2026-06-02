@@ -61,6 +61,10 @@ type Manager struct {
 	mu       sync.Mutex
 	records  map[string]*Record
 	byParent map[string][]string
+	// parentOf 在 removeRecord 后仍保留，供 wait_child_agents / status 校验归属。
+	parentOf map[string]string
+	// delivered 保存终态快照，供异步 wait 在记录回收后读取。
+	delivered map[string]Result
 }
 
 // NewManager 创建子 Agent 管理器；未 BindHost 前 Create 不可用。
@@ -88,8 +92,10 @@ func NewManager(cfg Config, hub *stream.Hub, agentID string, logger *slog.Logger
 		hub:      hub,
 		agentID:  agentID,
 		logger:   logx.OrDefault(logger),
-		records:  make(map[string]*Record),
-		byParent: make(map[string][]string),
+		records:   make(map[string]*Record),
+		byParent:  make(map[string][]string),
+		parentOf:  make(map[string]string),
+		delivered: make(map[string]Result),
 	}
 }
 
@@ -145,6 +151,7 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 	m.mu.Lock()
 	m.records[childID] = rec
 	m.byParent[parentSessionID] = append(m.byParent[parentSessionID], childID)
+	m.parentOf[childID] = parentSessionID
 	m.mu.Unlock()
 
 	if err := m.host.SpawnChild(SpawnSpec{
@@ -252,14 +259,14 @@ func (m *Manager) Cancel(parentSessionID, childSessionID, reason string) (Result
 // GetResult 返回已交付或进行中的结果快照。
 func (m *Manager) GetResult(childSessionID string) (Result, error) {
 	m.mu.Lock()
-	rec, ok := m.records[childSessionID]
-	if !ok {
-		m.mu.Unlock()
-		return Result{}, fmt.Errorf("child_agent_not_found")
+	defer m.mu.Unlock()
+	if rec, ok := m.records[childSessionID]; ok {
+		return rec.snapshot(), nil
 	}
-	out := rec.snapshot()
-	m.mu.Unlock()
-	return out, nil
+	if res, ok := m.delivered[childSessionID]; ok {
+		return res, nil
+	}
+	return Result{}, fmt.Errorf("child_agent_not_found")
 }
 
 // ListActive 返回父 session 下未交付的子 Agent 记录。
@@ -347,6 +354,10 @@ func (m *Manager) finishWithEvent(childSessionID string, status Status, summary,
 	}
 	rec.mu.Unlock()
 	parentID := rec.ParentSessionID
+	m.mu.Unlock()
+
+	m.mu.Lock()
+	m.delivered[childSessionID] = out
 	m.mu.Unlock()
 
 	if cancelledEvent {

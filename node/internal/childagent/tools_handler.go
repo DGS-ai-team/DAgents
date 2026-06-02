@@ -113,13 +113,20 @@ func (m *Manager) cancelInternal(parentSessionID, childID, reason string) (previ
 
 func (m *Manager) validateOwnership(parentSessionID, childID string) error {
 	m.mu.Lock()
-	rec, ok := m.records[childID]
-	if !ok || rec.ParentSessionID != parentSessionID {
-		m.mu.Unlock()
-		return fmt.Errorf("child_session_id not found or not owned by parent")
+	defer m.mu.Unlock()
+	if rec, ok := m.records[childID]; ok {
+		if rec.ParentSessionID != parentSessionID {
+			return fmt.Errorf("child_session_id not found or not owned by parent")
+		}
+		return nil
 	}
-	m.mu.Unlock()
-	return nil
+	if owner, ok := m.parentOf[childID]; ok {
+		if owner != parentSessionID {
+			return fmt.Errorf("child_session_id not found or not owned by parent")
+		}
+		return nil
+	}
+	return fmt.Errorf("child_session_id not found or not owned by parent")
 }
 
 func (m *Manager) allTerminalOrFailFast(ids []string, failFast bool) (done bool, timedOut bool) {
@@ -148,7 +155,6 @@ func (m *Manager) formatWaitResults(ids []string, timedOut bool) (string, error)
 	for _, id := range ids {
 		res, err := m.GetResult(id)
 		if err != nil {
-			// 已交付并 remove 的记录：从 snapshot 不可得，标记 not found
 			results = append(results, Result{ChildSessionID: id, Status: StatusCompleted})
 			continue
 		}
