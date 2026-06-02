@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - platform: linux-amd64
-            os: ubuntu-20.04
+            os: ubuntu-latest
             goos: linux
             goarch: amd64
             cli_build: docker-rocky8

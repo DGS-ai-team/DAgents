@@ -55,7 +55,7 @@ PEP 11 中 **Tier 2** 含 **`x86_64-apple-darwin`**，**Tier 1** 含 **`aarch64-
 | 交付形态 | Windows | Linux | macOS |
 |----------|---------|-------|--------|
 | **源码 + pip**（`requirements.txt`） | 受限于你在该机上安装的 **Python 小版本**；若使用 **3.11**，可参考 §1.1 的 **Win 8.1+**（传统安装包） | 以 **发行版是否提供 / 能否编译 3.11+** 为准；DAgents 声明 **3.11+**，CI 验证 **3.13** | 以本机 Python 与依赖 wheel 为准 |
-| **PyInstaller 单文件包**（本仓库 CI，见 `.github/workflows/build-and-release.yml`） | 当前矩阵为 **Windows 2022** 上构建的 **x64**；实际最低 **Windows** 版本还受 **VC 运行库** 等约束，需以 **在目标机实测** 为准 | **由 CI 选用的 Linux 镜像 glibc 决定**。Linux x64 在 **Rocky Linux 8** 容器（glibc **2.28**）内用 pyenv 编 **3.13** 再打 PyInstaller；Runner 为 **ubuntu-20.04**。Go 二进制为 **CGO_ENABLED=0** 静态编译，与宿主 glibc 无关。**RHEL 7 及以下（glibc < 2.28）仍不保证可运行 `dagents-cli`** | 若 CI 未产出 darwin 单文件包，则本节不适用 |
+| **PyInstaller 单文件包**（本仓库 CI，见 `.github/workflows/build-and-release.yml`） | 当前矩阵为 **Windows 2022** 上构建的 **x64**；实际最低 **Windows** 版本还受 **VC 运行库** 等约束，需以 **在目标机实测** 为准 | **由 CI 选用的 Linux 镜像 glibc 决定**。Linux x64 在 **Rocky Linux 8** 容器（glibc **2.28**）内用 pyenv 编 **3.13** 再打 PyInstaller；Runner 为 **ubuntu-latest**（仅作宿主机，不参与 glibc 绑定）。Go 二进制为 **CGO_ENABLED=0** 静态编译，与宿主 glibc 无关。**RHEL 7 及以下（glibc < 2.28）仍不保证可运行 `dagents-cli`** | 若 CI 未产出 darwin 单文件包，则本节不适用 |
 
 **不要求必须用 Python 3.13**：若目标环境 glibc 更旧（如 RHEL 7），可采取：
 
