@@ -47,6 +47,7 @@ BUILD_CLIENT=1 OUT_DIR=dist/pkg GOOS=linux GOARCH=amd64 scripts/ci/build_go_stat
 ```text
 dist/dagents-local-assistant-linux-amd64/
   bin/dagents-node
+  bin/dagents-client       # Go TUI：默认 bubbletea 全屏（tui）；--plain 为行模式 REPL
   bin/dagents-cli          # PyInstaller Textual TUI
   config.example.yaml
   .runtime/

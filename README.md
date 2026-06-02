@@ -116,8 +116,11 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 无需单独安装 Python/Go 运行时；Linux 注意 PyInstaller 二进制 glibc 要求。资产见 GitHub Releases：
 
-- **`dagents-local-assistant-*`**：`dagents-node`（Go）+ `dagents-cli`（Textual TUI）+ `config.example.yaml` + `.runtime/`
-- 解压后：终端 1 运行 `./bin/dagents-node -config config.yaml`；终端 2 运行 `./bin/dagents-cli chat --config config.yaml`
+- **`dagents-local-assistant-*`**：`dagents-node` + 两种 TUI 客户端 + `config.example.yaml` + `.runtime/`
+  - `dagents-cli chat` — Python Textual TUI
+  - `dagents-client tui` — **Go bubbletea 全屏 TUI**（默认，无额外依赖）
+  - `dagents-client tui --plain` — Go 行模式 REPL（老终端）
+- 解压后：终端 1 `./bin/dagents-node -config config.yaml`；终端 2 任选上述 TUI 命令
 
 源码联调见 [docs/architecture/local-assistant.md](docs/architecture/local-assistant.md)。
 

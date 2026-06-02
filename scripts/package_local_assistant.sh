@@ -30,7 +30,7 @@ case "$(uname -s)" in
 esac
 
 OUT_DIR="${REPO_ROOT}/dist/go-build-${PLATFORM}"
-BUILD_CLIENT=0 OUT_DIR="${OUT_DIR}" GOOS="${GOOS}" GOARCH="${GOARCH}" \
+BUILD_CLIENT=1 OUT_DIR="${OUT_DIR}" GOOS="${GOOS}" GOARCH="${GOARCH}" \
   bash "${REPO_ROOT}/scripts/ci/build_go_static.sh"
 
 EXE=""
@@ -39,6 +39,7 @@ if [[ "${GOOS}" == "windows" ]]; then
 fi
 mkdir -p "${REPO_ROOT}/dist"
 cp "${OUT_DIR}/bin/dagents-node${EXE}" "${REPO_ROOT}/dist/dagents-node${EXE}"
+cp "${OUT_DIR}/bin/dagents-client${EXE}" "${REPO_ROOT}/dist/dagents-client${EXE}"
 
 bash "${REPO_ROOT}/scripts/ci/build_dagents_cli.sh"
 

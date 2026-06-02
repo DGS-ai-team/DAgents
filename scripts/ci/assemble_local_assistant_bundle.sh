@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 将已编译的 dagents-node + dagents-cli 与配置、.runtime 组装为发布目录并压缩。
+# 将已编译的 dagents-node + dagents-client + dagents-cli 与配置、.runtime 组装为发布目录并压缩。
 #
 # 用法：
 #   PLATFORM=linux-amd64 VERSION=0.2.0 scripts/ci/assemble_local_assistant_bundle.sh
@@ -20,10 +20,15 @@ if [[ "${PLATFORM}" == windows-* ]]; then
 fi
 
 NODE_BIN="${NODE_BIN:-${REPO_ROOT}/dist/dagents-node${EXE}}"
+CLIENT_BIN="${CLIENT_BIN:-${REPO_ROOT}/dist/dagents-client${EXE}}"
 CLI_BIN="${CLI_BIN:-${REPO_ROOT}/dist/dagents-cli${EXE}}"
 
 if [[ ! -f "${NODE_BIN}" ]]; then
   echo "[assemble] missing node binary: ${NODE_BIN}" >&2
+  exit 1
+fi
+if [[ ! -f "${CLIENT_BIN}" ]]; then
+  echo "[assemble] missing client binary: ${CLIENT_BIN}" >&2
   exit 1
 fi
 if [[ ! -f "${CLI_BIN}" ]]; then
@@ -39,6 +44,7 @@ rm -rf "${BUNDLE_DIR}"
 mkdir -p "${BUNDLE_DIR}/bin" "${BUNDLE_DIR}/.runtime"
 
 install -m 0755 "${NODE_BIN}" "${BUNDLE_DIR}/bin/dagents-node${EXE}"
+install -m 0755 "${CLIENT_BIN}" "${BUNDLE_DIR}/bin/dagents-client${EXE}"
 install -m 0755 "${CLI_BIN}" "${BUNDLE_DIR}/bin/dagents-cli${EXE}"
 
 if [[ -f "${REPO_ROOT}/packaging/agent-client/config.example.yaml" ]]; then
@@ -48,11 +54,18 @@ cp -a "${REPO_ROOT}/packaging/runtime/." "${BUNDLE_DIR}/.runtime/"
 
 if [[ "${PLATFORM}" == windows-* ]]; then
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
-DAgents Local Assistant (Go Node + Textual TUI)
+DAgents Local Assistant (Go Node + dual TUI)
 
 1. copy config.example.yaml to config.yaml and edit llm / agent_id
 2. bin\dagents-node.exe -config config.yaml
-3. bin\dagents-cli.exe chat --config config.yaml
+
+TUI (pick one):
+3a. bin\dagents-cli.exe chat --config config.yaml
+    Python Textual TUI (rich UI, recommended on modern terminals)
+3b. bin\dagents-client.exe -config config.yaml tui
+    Go bubbletea full-screen TUI (default; child agents, /children, etc.)
+3c. bin\dagents-client.exe -config config.yaml tui --plain
+    Go line-mode REPL (legacy SSH / dumb terminal)
 
 See docs/architecture/local-assistant.md
 EOF
@@ -66,11 +79,18 @@ EOF
   fi
 else
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
-DAgents Local Assistant（Go Node + Textual TUI）
+DAgents Local Assistant（Go Node + 双 TUI）
 
 1. cp config.example.yaml config.yaml && 编辑 llm / agent_id
 2. ./bin/dagents-node -config config.yaml
-3. ./bin/dagents-cli chat --config config.yaml
+
+TUI（三选一）：
+3a. ./bin/dagents-cli chat --config config.yaml
+    Python Textual TUI（现代终端，富 UI）
+3b. ./bin/dagents-client -config config.yaml tui
+    Go bubbletea 全屏 TUI（默认；含子 Agent、/children 等）
+3c. ./bin/dagents-client -config config.yaml tui --plain
+    Go 行模式 REPL（老 SSH / dumb 终端）
 
 文档: docs/architecture/local-assistant.md
 EOF

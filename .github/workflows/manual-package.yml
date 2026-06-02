@@ -45,12 +45,13 @@ jobs:
         run: |
           set -euo pipefail
           OUT_DIR="${{ github.workspace }}/dist/go-build-${{ matrix.platform }}"
-          BUILD_CLIENT=0 OUT_DIR="${OUT_DIR}" GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
+          BUILD_CLIENT=1 OUT_DIR="${OUT_DIR}" GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
             bash scripts/ci/build_go_static.sh
           EXE=""
           if [[ "${{ matrix.goos }}" == "windows" ]]; then EXE=".exe"; fi
           mkdir -p dist
           cp "${OUT_DIR}/bin/dagents-node${EXE}" "dist/dagents-node${EXE}"
+          cp "${OUT_DIR}/bin/dagents-client${EXE}" "dist/dagents-client${EXE}"
 
       - name: Setup Python (Windows)
         if: matrix.cli_build == 'native'

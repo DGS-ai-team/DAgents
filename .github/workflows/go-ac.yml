@@ -60,12 +60,12 @@ jobs:
 
       - name: Static build smoke
         run: |
-          bash scripts/ci/build_go_linux_static.sh
+          BUILD_CLIENT=1 bash scripts/ci/build_go_linux_static.sh
           test -x dist/go-linux-amd64/bin/dagents-node
           test -x dist/go-linux-amd64/bin/dagents-client
 
       - name: Windows cross-compile smoke
         run: |
-          OUT_DIR=dist/go-windows-amd64 GOOS=windows GOARCH=amd64 bash scripts/ci/build_go_static.sh
+          BUILD_CLIENT=1 OUT_DIR=dist/go-windows-amd64 GOOS=windows GOARCH=amd64 bash scripts/ci/build_go_static.sh
           test -f dist/go-windows-amd64/bin/dagents-node.exe
           test -f dist/go-windows-amd64/bin/dagents-client.exe
