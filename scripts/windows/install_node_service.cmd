@@ -82,12 +82,14 @@ if defined DAGENTS_CONFIG (
   echo [error] DAGENTS_CONFIG not found: %DAGENTS_CONFIG%
   exit /b 1
 )
-set "C1=%REPO_ROOT%\packaging\agent-client\config.yaml"
-set "C2=%REPO_ROOT%\packaging\agent-client\config.example.yaml"
-set "C3=%REPO_ROOT%\config.yaml"
+set "C1=%REPO_ROOT%\config.yaml"
+set "C2=%REPO_ROOT%\config.example.yaml"
+set "C3=%REPO_ROOT%\packaging\agent-client\config.yaml"
+set "C4=%REPO_ROOT%\packaging\agent-client\config.example.yaml"
 if exist "%C1%" (set "CONFIG=%C1%" & exit /b 0)
 if exist "%C2%" (set "CONFIG=%C2%" & exit /b 0)
 if exist "%C3%" (set "CONFIG=%C3%" & exit /b 0)
+if exist "%C4%" (set "CONFIG=%C4%" & exit /b 0)
 echo [error] config not found: pass config path or set DAGENTS_CONFIG
 exit /b 1
 

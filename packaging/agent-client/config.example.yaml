@@ -44,8 +44,8 @@ skills:
   root: ./.runtime/skills
 
 compression:
-  silent_trigger_tokens: 4000
-  blocking_trigger_tokens: 8000
+  silent_trigger_tokens: 80000
+  blocking_trigger_tokens: 100000
 
 triggers:
   enabled: true

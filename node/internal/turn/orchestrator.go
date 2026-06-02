@@ -360,11 +360,7 @@ func (o *Orchestrator) runOneStep(
 			})
 		},
 		OnUsage: func(u llm.Usage) {
-			o.hub.Publish(sessionID, o.agentID, "usage", map[string]any{
-				"prompt_tokens":     u.PromptTokens,
-				"completion_tokens": u.CompletionTokens,
-				"total_tokens":      u.TotalTokens,
-			})
+			o.hub.Publish(sessionID, o.agentID, "usage", u.SSEPayload())
 		},
 	})
 	if err != nil {
@@ -535,12 +531,7 @@ func (o *Orchestrator) processToolCalls(
 		executionID := newShortID("exec-")
 		toolItems := make([]map[string]any, 0, len(approvalCalls))
 		for _, tc := range approvalCalls {
-			toolItems = append(toolItems, map[string]any{
-				"id":            tc.ID,
-				"name":          tc.Function.Name,
-				"arguments":     parseJSONArgs(tc.Function.Arguments),
-				"raw_arguments": tc.Function.Arguments,
-			})
+			toolItems = append(toolItems, buildApprovalToolItem(tc))
 		}
 		o.hub.Publish(sessionID, o.agentID, "approval_required", map[string]any{
 			"approval_type": "execute_tool",

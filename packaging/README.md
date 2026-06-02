@@ -6,7 +6,7 @@
 
 | 名称 | 含义 |
 |------|------|
-| **`dagents-local-assistant-*.{tar.gz,zip}`** | **Go Node + 双 TUI**：`dagents-node` + `dagents-client`（Go bubbletea 全屏 / `--plain` REPL）+ `dagents-cli`（Python Textual）+ 配置与 `.runtime/` |
+| **`dagents-local-assistant-*.{tar.gz,zip}`** | **Go Node + 双 TUI + Register Center**：`dagents-node`、`dagents-client`、`dagents-cli`、`dagents_register_center` + 配置、`.runtime/`、**`scripts/`**（启动与 systemd/计划任务注册） |
 | **`dagents-backend-*`**（legacy） | 旧 Python 全栈后端（api + register_center + cli）；**Release CI 已不再构建** |
 | **`dagents-cli`** | Textual TUI 单文件二进制（PyInstaller 产物名） |
 

@@ -139,3 +139,81 @@ def format_context_compression(event_type: str, data: dict[str, Any]) -> Transcr
             "compression_end": data.get("compression_end"),
         },
     )
+
+
+def format_compact_token_count(count: int | None) -> str:
+    """将 context token 估算值格式化为 input strip 右侧短文案（无 usage 时的回退）。
+
+    逻辑：
+    1. 未拉取过 context 时返回空串（不占位）；
+    2. >= 10000 时用一位小数的 k 后缀；
+    3. 其余用千分位整数。
+
+    关键边界：
+    - 负数按 0 展示。
+    """
+    if count is None:
+        return ""
+    if count < 0:
+        count = 0
+    if count >= 10_000:
+        return f"ctx {count / 1000:.1f}k"
+    return f"ctx {count:,}"
+
+
+@dataclass(frozen=True, slots=True)
+class UsageStripSnapshot:
+    """input strip 右侧最近一次 SSE usage 快照（与 Go client 对齐）。"""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cache_hit_tokens: int = 0
+    has_data: bool = False
+
+
+def parse_usage_strip(data: dict[str, Any]) -> UsageStripSnapshot:
+    """从 SSE usage 事件 data 解析 strip 快照。"""
+    prompt = _int_from_event_data(data.get("prompt_tokens"))
+    completion = _int_from_event_data(data.get("completion_tokens"))
+    hit = _int_from_event_data(data.get("prompt_cache_hit_tokens"))
+    cached = _int_from_event_data(data.get("prompt_cached_tokens"))
+    if hit <= 0 and cached > 0:
+        hit = cached
+    if prompt <= 0 and completion <= 0:
+        return UsageStripSnapshot()
+    return UsageStripSnapshot(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        cache_hit_tokens=hit,
+        has_data=True,
+    )
+
+
+def format_input_strip_usage(snapshot: UsageStripSnapshot) -> str:
+    """格式化 ↑上行 ↓下行 与 cache hit（无数据时返回空串）。"""
+    if not snapshot.has_data:
+        return ""
+    text = f"↑{_format_compact_count(snapshot.prompt_tokens)} ↓{_format_compact_count(snapshot.completion_tokens)}"
+    if snapshot.cache_hit_tokens > 0:
+        text += f" · hit {_format_compact_count(snapshot.cache_hit_tokens)}"
+    return text
+
+
+def _int_from_event_data(value: Any) -> int:
+    if value is None:
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _format_compact_count(count: int) -> str:
+    if count < 0:
+        count = 0
+    if count >= 10_000:
+        rounded = round(count / 1000, 1)
+        if rounded == int(rounded):
+            return f"{int(rounded)}k"
+        return f"{rounded:.1f}k"
+    return f"{count:,}"

@@ -26,6 +26,7 @@ type streamRunner struct {
 	toolFold   *tuishared.ToolFold
 	printMu    *sync.Mutex
 	showReasoning *bool
+	assistantLineOpen bool
 	reasoningLineOpen bool
 
 	onTurnDone func()
@@ -121,8 +122,9 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 		OnTool: func(eventType string, data map[string]any) {
 			r.finishAssistantLine()
 			r.finishReasoningLine()
-			line := r.toolFold.Format(eventType, data)
-			r.logSystem(line)
+			for _, line := range tuishared.FormatToolEvent(eventType, data, r.toolFold.Verbose()) {
+				r.logSystem(line)
+			}
 		},
 		OnCompression: func(eventType string, data map[string]any) {
 			r.logSystem(clihitl.FormatContextCompression(eventType, data))
@@ -131,9 +133,9 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 			r.logSystem("error: " + msg)
 		},
 	}
-	// REPL 模式 HITL 走 stdin；Interact 为 nil。
+	// REPL 模式 HITL 走 stdin；Interact 为 nil。主循环在 turn 期间不读 stdin。
 	cont, err := clihitl.HandleStreamEvent(ctx, r.client, r.sessionID, ev, sink, nil, false)
-	if !cont && ev.Type == "done" {
+	if ev.Type == "done" {
 		r.finishAssistantLine()
 		r.finishReasoningLine()
 		if r.onTurnDone != nil {
@@ -147,6 +149,9 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 func (r *streamRunner) printAssistant(text string) {
 	r.printMu.Lock()
 	defer r.printMu.Unlock()
+	if text != "" {
+		r.assistantLineOpen = true
+	}
 	fmt.Print(text)
 	r.transcript.AppendPartial("assistant", text)
 }
@@ -154,7 +159,10 @@ func (r *streamRunner) printAssistant(text string) {
 func (r *streamRunner) finishAssistantLine() {
 	r.printMu.Lock()
 	defer r.printMu.Unlock()
-	fmt.Println()
+	if r.assistantLineOpen {
+		fmt.Println()
+		r.assistantLineOpen = false
+	}
 	r.transcript.FinishPartial("assistant")
 }
 

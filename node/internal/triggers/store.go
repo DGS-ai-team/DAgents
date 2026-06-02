@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 )
 
 var errTriggerNotFound = errors.New("trigger not found")
@@ -21,6 +24,7 @@ type Store struct {
 	triggers     map[string]Definition
 	history      []FireRecord
 	pending      *pendingDelivery
+	logger       *slog.Logger
 }
 
 // OpenStore 加载或初始化 triggers.json。
@@ -38,11 +42,20 @@ func OpenStore(path string, historyLimit int) (*Store, error) {
 		historyLimit: historyLimit,
 		triggers:     make(map[string]Definition),
 		pending:      newPendingDelivery(),
+		logger:       logx.Discard(),
 	}
 	if err := s.load(); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// SetLogger 注入结构化日志；nil 时丢弃输出（单测默认）。
+func (s *Store) SetLogger(logger *slog.Logger) {
+	if s == nil {
+		return
+	}
+	s.logger = discardLogger(logger)
 }
 
 func (s *Store) ListTriggers() []Definition {
@@ -82,6 +95,7 @@ func (s *Store) CreateTrigger(def Definition) (Definition, error) {
 	if err := s.saveLocked(); err != nil {
 		return Definition{}, err
 	}
+	s.logCreated(def)
 	return def, nil
 }
 
@@ -121,6 +135,7 @@ func (s *Store) UpdateTrigger(id string, patch UpdatePatch, now time.Time) (Defi
 	if err := s.saveLocked(); err != nil {
 		return Definition{}, err
 	}
+	s.logUpdated(updated)
 	return updated, nil
 }
 
@@ -132,6 +147,7 @@ func (s *Store) DeleteTrigger(id string) bool {
 	}
 	delete(s.triggers, id)
 	_ = s.saveLocked()
+	s.logDeleted(id)
 	return true
 }
 
@@ -263,7 +279,11 @@ func (s *Store) load() error {
 		return fmt.Errorf("parse triggers store: %w", err)
 	}
 	s.triggers = make(map[string]Definition, len(payload.Triggers))
+	now := time.Now()
 	for _, item := range payload.Triggers {
+		if item.Enabled && item.NextFireAt == nil {
+			item = item.WithNextFire(now)
+		}
 		s.triggers[item.TriggerID] = item
 	}
 	s.history = payload.History

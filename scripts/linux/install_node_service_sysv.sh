@@ -47,7 +47,9 @@ resolve_config() {
     abs_path "${CONFIG}"
     return
   fi
-  local c="${REPO_ROOT}/packaging/agent-client/config.yaml"
+  local c="${REPO_ROOT}/config.yaml"
+  [[ -f "${c}" ]] || c="${REPO_ROOT}/config.example.yaml"
+  [[ -f "${c}" ]] || c="${REPO_ROOT}/packaging/agent-client/config.yaml"
   [[ -f "${c}" ]] || c="${REPO_ROOT}/packaging/agent-client/config.example.yaml"
   [[ -f "${c}" ]] || die "config not found"
   abs_path "${c}"

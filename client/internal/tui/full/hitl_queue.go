@@ -33,14 +33,48 @@ func (m *model) resetHITLQueue() {
 }
 
 func (m *model) enqueueApproval(data map[string]any) {
-	m.hitlQueue = append(m.hitlQueue, hitlPending{kind: hitlPendingApproval, data: data})
+	// 仅保留最新一批 approval，避免 stale call_id resume 触发 unknown approved id。
+	filtered := m.hitlQueue[:0]
+	for _, item := range m.hitlQueue {
+		if item.kind != hitlPendingApproval {
+			filtered = append(filtered, item)
+		} else if id := clihitl.ChildSessionIDFromData(item.data); id != "" {
+			m.children.setAwaitingApproval(id, false)
+		}
+	}
+	m.hitlQueue = append(filtered, hitlPending{kind: hitlPendingApproval, data: data})
 	if id := clihitl.ChildSessionIDFromData(data); id != "" {
 		m.children.setAwaitingApproval(id, true)
 	}
 }
 
 func (m *model) enqueueUserInfo(data map[string]any) {
+	// user_information 切换 server pending 后，队列中旧 approval 无效。
+	filtered := m.hitlQueue[:0]
+	for _, item := range m.hitlQueue {
+		if item.kind != hitlPendingApproval {
+			filtered = append(filtered, item)
+		} else if id := clihitl.ChildSessionIDFromData(item.data); id != "" {
+			m.children.setAwaitingApproval(id, false)
+		}
+	}
+	m.hitlQueue = filtered
 	m.hitlQueue = append(m.hitlQueue, hitlPending{kind: hitlPendingUserInfo, data: data})
+}
+
+func (m *model) invalidateHITLForUserMessage() {
+	if len(m.hitlQueue) == 0 && m.mode != modeApproval && m.mode != modeUserInfo {
+		return
+	}
+	for _, item := range m.hitlQueue {
+		if item.kind == hitlPendingApproval {
+			if id := clihitl.ChildSessionIDFromData(item.data); id != "" {
+				m.children.setAwaitingApproval(id, false)
+			}
+		}
+	}
+	m.resetHITLQueue()
+	m.resetHITLState()
 }
 
 func (m *model) pendingHITLCount() int {
@@ -79,9 +113,9 @@ func (m *model) showNextHITLIfIdle() {
 		m.mode = modeUserInfo
 		m.input.SetValue("")
 		if m.userInfoUseOptions {
-			m.input.Placeholder = "使用 ↑/↓ + Space 选择选项"
+			m.input.Placeholder = "> 使用 ↑/↓ + Space 选择选项"
 		} else {
-			m.input.Placeholder = "输入回答后 Enter 提交 · Esc 取消"
+			m.input.Placeholder = "> 输入回答后 Enter 提交, Esc 取消"
 		}
 		m.statusLine = "等待用户回答…"
 	default:
@@ -141,7 +175,7 @@ func (m *model) finishApprovalInteraction(resume map[string]any, statusLine stri
 	m.resetHITLState()
 	m.statusLine = statusLine
 	m.showNextHITLIfIdle()
-	return m, m.cmdSubmitResume(resume)
+	return m, tea.Batch(m.cmdSubmitResume(resume), m.refocusInputIfNeeded())
 }
 
 func (m *model) finishUserInfoInteraction(resume map[string]any, statusLine string) (tea.Model, tea.Cmd) {
@@ -151,5 +185,5 @@ func (m *model) finishUserInfoInteraction(resume map[string]any, statusLine stri
 	m.input.Placeholder = defaultInputPlaceholder
 	m.statusLine = statusLine
 	m.showNextHITLIfIdle()
-	return m, m.cmdSubmitResume(resume)
+	return m, tea.Batch(m.cmdSubmitResume(resume), m.refocusInputIfNeeded())
 }

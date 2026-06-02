@@ -10,10 +10,11 @@
 | `ConditionCmd` | 读取 condition 内可选 cmd |
 | `CmdGate` / `ShellCmdGate` | schedule 触发前 bash 门控（exit 0 通过） |
 | `OpenStore(path, historyLimit)` | 打开 JSON 存储 |
+| `Store.SetLogger` | 注入 logger（create/update/delete 打 Info） |
 | `Store.ListTriggers` / `GetTrigger` / `CreateTrigger` / `UpdateTrigger` / `DeleteTrigger` | CRUD |
 | `Store.ListEnabledTriggers` / `ReplaceTrigger` | 调度 tick 内部更新 |
 | `Store.HasPendingDelivery` / `MarkPendingDelivery` / `ClearPendingDelivery` | trigger 消息待 dequeue 去重 |
 | `DeliveryTracker` | 待消费跟踪接口 |
 | `MessageSubmitter` | fire 时创建 session 并入队 |
-| `NewScheduler` / `Start` / `Stop` / `FireTrigger` / `SetCmdGate` | 调度器 |
+| `NewScheduler` / `Start` / `Stop` / `FireTrigger` / `SetCmdGate` / `SetLogger` | 调度器 |
 | `RenderTaskTemplate` | 渲染 task_template |

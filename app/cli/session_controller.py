@@ -26,15 +26,19 @@ from app.cli.user_information import (
 from app.cli.render import (
     TranscriptKind,
     TranscriptUpdate,
+    UsageStripSnapshot,
     format_assistant_delta,
     format_assistant_end,
+    format_compact_token_count,
     format_context_compression,
     format_error,
+    format_input_strip_usage,
     format_reasoning,
     format_system_line,
     format_tool_call,
     format_tool_result,
     format_user_information_required,
+    parse_usage_strip,
 )
 
 TranscriptCallback = Callable[[TranscriptUpdate], None]
@@ -100,6 +104,9 @@ class SessionController:
         self._last_event_seq = 0
         self._turn_seq_fence = 0
         self._sse_ready = asyncio.Event()
+        self._messages_total_tokens: int | None = None
+        self._usage_strip = UsageStripSnapshot()
+        self._token_refresh_task: asyncio.Task[None] | None = None
 
     def _event_seq(self, event: StreamEvent) -> int:
         """从 SSE id 或 envelope.seq 解析事件序号。"""
@@ -161,6 +168,7 @@ class SessionController:
         except TimeoutError as exc:
             raise RuntimeError("SSE subscription timed out") from exc
         self._emit_status()
+        self._schedule_context_token_refresh()
 
     async def stop(self) -> None:
         """停止后台任务并关闭 API 客户端。"""
@@ -174,10 +182,16 @@ class SessionController:
             self._client = None
 
     async def submit_message(self, content: str) -> None:
-        """投递用户消息并标记等待本轮 turn 完成。"""
+        """投递用户消息并标记等待本轮 turn 完成。
+
+        逻辑：
+        1. 丢弃本地 HITL 队列（服务端会用 InterruptPending 清 pending，旧 resume 会 unknown id）；
+        2. 重置 turn 栅栏并 POST /v1/messages。
+        """
         assert self._client is not None
         if not self._sse_ready.is_set():
             raise RuntimeError("SSE not ready")
+        self._drop_hitl_queue_for_user_interrupt()
         self._reset_user_turn_wait()
         await self._client.submit_message(
             session_id=self.session_id,
@@ -208,7 +222,11 @@ class SessionController:
         - 需已 `start()` 且 `session_id` 非空。
         """
         assert self._client is not None
-        return await self._client.clear_session_context(self.session_id)
+        result = await self._client.clear_session_context(self.session_id)
+        self._messages_total_tokens = 0
+        self._usage_strip = UsageStripSnapshot()
+        self._emit_child_strip()
+        return result
 
     async def list_sessions(self) -> dict[str, Any]:
         """查询后端 session 列表（GET /v1/sessions）。"""
@@ -274,6 +292,13 @@ class SessionController:
 
     def hitl_queue_len(self) -> int:
         return len(self._hitl_queue)
+
+    def input_strip_token_text(self) -> str:
+        """input strip 右侧 token 统计：优先 SSE usage，回退 context 估算。"""
+        usage_text = format_input_strip_usage(self._usage_strip)
+        if usage_text:
+            return usage_text
+        return format_compact_token_count(self._messages_total_tokens)
 
     def peek_hitl(self) -> PendingHITL | None:
         """返回队首待处理 HITL，不弹出。"""
@@ -366,6 +391,37 @@ class SessionController:
     def _emit_child_strip(self) -> None:
         if self._child_strip_cb is not None:
             self._child_strip_cb()
+
+    def _schedule_context_token_refresh(self) -> None:
+        """异步拉取 GET /context 并更新 input strip token 统计。
+
+        逻辑：
+        1. 取消尚未完成的上一轮刷新（done/compression 可能连续触发）；
+        2. 后台 GET context，读取 messages_total_tokens；
+        3. 数值变化时通知 UI 刷新 input strip。
+
+        关键边界：
+        - 拉取失败静默忽略，保留上次展示值；
+        - stop 后 client 可能已关闭，任务内须判空。
+        """
+        if self._token_refresh_task is not None and not self._token_refresh_task.done():
+            self._token_refresh_task.cancel()
+        self._token_refresh_task = asyncio.create_task(self._refresh_context_tokens())
+
+    async def _refresh_context_tokens(self) -> None:
+        """执行一次 context token 拉取并刷新 strip。"""
+        if self._client is None or not self.session_id:
+            return
+        try:
+            data = await self._client.get_session_context(self.session_id)
+            tokens = int(data.get("messages_total_tokens") or 0)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+        if self._messages_total_tokens != tokens:
+            self._messages_total_tokens = tokens
+            self._emit_child_strip()
 
     def _notify_hitl_pending(self) -> None:
         if self._hitl_pending_cb is not None:
@@ -471,9 +527,13 @@ class SessionController:
         elif event_type == "tool_result":
             self._ensure_assistant_end()
             self._emit_transcript(format_tool_result(data))
+        elif event_type == "usage":
+            self._usage_strip = parse_usage_strip(data)
+            self._emit_child_strip()
         elif event_type in {"context_compression_blocking", "context_compression_silent"}:
             self._ensure_assistant_end()
             self._emit_transcript(format_context_compression(event_type, data))
+            self._schedule_context_token_refresh()
         elif event_type == "error":
             self._ensure_assistant_end()
             message = str(data.get("message") or "unknown error")
@@ -493,16 +553,48 @@ class SessionController:
                 if self._user_turn_started or seq > self._turn_seq_fence:
                     self._awaiting_user_turn = False
                     self._user_turn_done.set()
+            self._schedule_context_token_refresh()
 
     def _enqueue_hitl(self, item: PendingHITL) -> None:
-        """HITL 入队并通知 UI；子审批时标记 awaiting_approval。"""
+        """HITL 入队并通知 UI；子审批时标记 awaiting_approval。
+
+        逻辑：
+        1. 新 approval 替换队列中已有 approval（仅最新一批与 server pending 一致）；
+        2. user_information 入队时丢弃过期 approval（server 已切到询问态）。
+        """
         if item.kind == "approval":
+            self._hitl_queue = [q for q in self._hitl_queue if q.kind != "approval"]
             child_id = child_session_id_from_data(item.data)
             if child_id:
                 self._child_tracker.set_awaiting_approval(child_id, True)
                 self._emit_child_strip()
+        elif item.kind == "user_information":
+            self._drop_stale_approval_hitl_entries()
         self._hitl_queue.append(item)
         self._notify_hitl_pending()
+
+    def _drop_hitl_queue_for_user_interrupt(self) -> None:
+        """新用户消息会打断 server pending HITL；本地队列必须同步清空。"""
+        if not self._hitl_queue:
+            return
+        for entry in self._child_tracker.entries.values():
+            entry.awaiting_approval = False
+        self._hitl_queue.clear()
+        self._emit_child_strip()
+        self._notify_hitl_pending()
+
+    def _drop_stale_approval_hitl_entries(self) -> None:
+        """移除 approval 队列项并重置子 Agent awaiting_approval 标记。"""
+        if not self._hitl_queue:
+            return
+        for entry in self._hitl_queue:
+            if entry.kind != "approval":
+                continue
+            child_id = child_session_id_from_data(entry.data)
+            if child_id:
+                self._child_tracker.set_awaiting_approval(child_id, False)
+        self._hitl_queue = [q for q in self._hitl_queue if q.kind != "approval"]
+        self._emit_child_strip()
 
     def _handle_child_lifecycle(self, event_type: str, data: dict[str, Any]) -> None:
         """处理子 Agent 生命周期 SSE，写入系统行并更新 tracker。"""

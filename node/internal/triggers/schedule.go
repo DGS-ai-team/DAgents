@@ -66,7 +66,11 @@ func ConditionCmd(condition map[string]any) string {
 	if condition == nil {
 		return ""
 	}
-	return strings.TrimSpace(fmt.Sprint(condition["cmd"]))
+	raw, ok := condition["cmd"]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
 }
 
 // NextCalendarFire 计算 strictly after `after` 的下一次日历触发时刻（主机本地时区）。
@@ -253,7 +257,9 @@ const (
 
 // EvaluateDue 判定是否应触发、是否仅推进 next_fire_at（漏触发超过 1 周期）。
 
-// 规则：now >= next_fire_at 且 (now-next) < 1 个周期 → 补发/准时 fire；否则仅算下一次。
+// 规则：
+// - interval / once：只要 now >= next_fire_at 即 fire（与 Python due_triggers 对齐）；
+// - calendar：now >= next_fire_at 且 (now-next) < 1 个周期 → 补发/准时 fire，否则仅推进。
 func EvaluateDue(def Definition, now time.Time) (DueDecision, Definition) {
 	if !def.Enabled || def.NextFireAt == nil {
 		return DueNotReady, def
@@ -261,6 +267,10 @@ func EvaluateDue(def Definition, now time.Time) (DueDecision, Definition) {
 	nextAt := unixFloatToTime(*def.NextFireAt)
 	if now.Before(nextAt) {
 		return DueNotReady, def
+	}
+	kind, _ := InferScheduleKind(def.Condition)
+	if kind == ScheduleInterval || kind == ScheduleOnce {
+		return DueFire, def
 	}
 	period := SchedulePeriod(def.Condition, nextAt)
 	if period <= 0 {

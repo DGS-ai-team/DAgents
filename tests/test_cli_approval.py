@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from app.cli.api_client import _parse_sse_block
+from app.cli.api_client import _decode_utf8_chunks, _parse_sse_block
 from app.cli.approval import (
     build_all_approved_decision,
     build_all_rejected_decision,
+    build_approval_decision_from_map,
     build_selection_decision,
+    clamp_menu_selection_index,
     extract_tool_approval_requests,
     parse_selection_tokens,
 )
@@ -82,8 +84,39 @@ class CliApprovalTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_selection_tokens("3", requests)
 
+    def test_clamp_menu_selection_index_up_from_first_stays(self) -> None:
+        """双项菜单在首项按 Up 不应环绕到末项（同意→不同意错位）。"""
+        self.assertEqual(clamp_menu_selection_index(0, -1, 2), 0)
+        self.assertEqual(clamp_menu_selection_index(0, 1, 2), 1)
+        self.assertEqual(clamp_menu_selection_index(1, 1, 2), 1)
+        self.assertEqual(clamp_menu_selection_index(1, -1, 2), 0)
+
+    def test_build_approval_decision_from_map(self) -> None:
+        requests = extract_tool_approval_requests(self._payload())
+        decision = build_approval_decision_from_map(
+            requests,
+            {"call_1": True, "call_2": False},
+        )
+        self.assertEqual(decision.approved, ["call_1"])
+        self.assertEqual(decision.rejected, ["call_2"])
+
 
 class CliSseParserTests(unittest.TestCase):
+    def test_decode_utf8_chunks_preserves_multibyte_at_chunk_boundary(self) -> None:
+        """SSE 分块不得在 UTF-8 码点中间 decode，否则中文会变成 �。"""
+        payload = 'data: {"data":{"content":"现在是 2026 年 6 月 2 日"}}\n\n'
+        raw = payload.encode("utf-8")
+        month = "月".encode("utf-8")
+        split_at = raw.index(month) + 1  # 在「月」的第 2 个字节处切开
+        chunks = [raw[:split_at], raw[split_at:]]
+
+        broken = chunks[0].decode("utf-8", errors="replace") + chunks[1].decode("utf-8", errors="replace")
+        self.assertIn("\ufffd", broken)
+
+        fixed = _decode_utf8_chunks(chunks)
+        self.assertNotIn("\ufffd", fixed)
+        self.assertIn("6 月 2", fixed)
+
     def test_parse_sse_block_reads_event_id_and_json_payload(self) -> None:
         event = _parse_sse_block(
             'id: 7\nevent: assistant\ndata: {"session_id":"s1","data":{"content":"hi"}}'

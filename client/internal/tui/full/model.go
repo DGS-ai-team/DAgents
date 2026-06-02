@@ -90,6 +90,9 @@ type model struct {
 	helpLine     string
 	errLine      string
 
+	messagesTotalTokens int
+	usageStrip          tuishared.UsageStripSnapshot
+
 	streamCancel context.CancelFunc
 	streamDone   chan struct{}
 
@@ -108,6 +111,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 	}
 
 	ta := textarea.New()
+	ta.Prompt = ""
 	ta.Placeholder = defaultInputPlaceholder
 	ta.ShowLineNumbers = false
 	ta.SetHeight(inputHeight - 1)
@@ -126,6 +130,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		showReasoning: showReasoning,
 		helpLine:   "Enter 发送 · Shift+Enter 换行 · Esc 取消 turn · /help 命令 · /quit 退出",
 		children:   newChildAgentTracker(),
+		messagesTotalTokens: -1,
 	}
 
 	if err := m.bootstrapSession(initialSession); err != nil {
@@ -168,7 +173,8 @@ func (m *model) currentSession() string {
 }
 
 func (m *model) Init() tea.Cmd {
-	return textarea.Blink
+	// textarea 默认未 focus；不调用 Focus() 时 Update 会直接丢弃按键。
+	return m.input.Focus()
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -189,7 +195,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pendingHITLChangedMsg:
 		m.showNextHITLIfIdle()
 		m.syncViewport()
-		return m, nil
+		return m, m.refocusInputIfNeeded()
 
 	case hitlSubmitResultMsg:
 		if msg.err != nil {
@@ -207,6 +213,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case syncChildAgentsMsg:
 		return m, m.cmdSyncChildAgents()
+
+	case refreshContextTokensMsg:
+		return m, m.cmdRefreshContextTokens()
+
+	case contextTokensSyncedMsg:
+		if msg.tokens >= 0 {
+			m.messagesTotalTokens = msg.tokens
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -266,6 +281,7 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.errLine = "上一回合尚未结束，请等待或 Esc 取消"
 			return m, nil
 		}
+		m.invalidateHITLForUserMessage()
 		m.transcript.Add("[user] " + text)
 		m.syncViewport()
 		m.awaitingTurn = true
@@ -339,7 +355,24 @@ func (m *model) View() string {
 
 func (m *model) renderInputStrip() string {
 	_, pending := m.children.counts()
-	text := m.renderInputStripStyled()
+	left := m.renderInputStripStyled()
+	right := tuishared.FormatInputStripUsage(m.usageStrip)
+	if right == "" {
+		right = tuishared.FormatInputStripTokens(m.messagesTotalTokens)
+	}
+	text := left
+	if right != "" {
+		width := m.viewport.Width
+		if width <= 0 {
+			width = 80
+		}
+		gap := width - len(left) - len(right)
+		if gap < 2 {
+			text = left + "  ·  " + right
+		} else {
+			text = left + strings.Repeat(" ", gap) + right
+		}
+	}
 	width := m.viewport.Width
 	if width <= 0 {
 		width = 80
@@ -416,6 +449,13 @@ func (m *model) cancelTurn() error {
 	if cancelled {
 		m.transcript.Add("[system] turn 已取消")
 		m.syncViewport()
+	}
+	return nil
+}
+
+func (m *model) refocusInputIfNeeded() tea.Cmd {
+	if m.mode == modeChat || (m.mode == modeUserInfo && !m.userInfoUseOptions) {
+		return m.input.Focus()
 	}
 	return nil
 }

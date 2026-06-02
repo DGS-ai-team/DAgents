@@ -14,7 +14,20 @@ from pathlib import Path
 
 import uvicorn
 
-_ROOT = Path(__file__).resolve().parent
+
+def _root_dir() -> Path:
+    """解析 Register Center 资源根目录（源码树或 PyInstaller 解压目录）。
+
+    逻辑：
+    1. frozen 且存在 `_MEIPASS` 时使用打包内嵌的 register_center 数据；
+    2. 否则使用 `run_register_center.py` 所在仓库根目录。
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(getattr(sys, "_MEIPASS"))
+    return Path(__file__).resolve().parent
+
+
+_ROOT = _root_dir()
 _REGISTER_CENTER_DIR = _ROOT / "register_center"
 sys.path.insert(0, str(_REGISTER_CENTER_DIR))
 

@@ -7,7 +7,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const defaultInputPlaceholder = "输入消息… (/help 命令，Enter 发送，Shift+Enter 换行，Esc 取消 turn)"
+// defaultInputPlaceholder 为 chat 模式输入框占位符。
+//
+// 须以 ASCII 字符开头：bubbles textarea 在渲染 placeholder 时对 plines[0][0]
+// 按字节取首字符作假光标，UTF-8 中文首字会被截断为乱码（如「输」→「è」）。
+const defaultInputPlaceholder = "> 输入消息... (/help 命令, Enter 发送, Shift+Enter 换行, Esc 取消 turn)"
 
 func (m *model) initApprovalState(data map[string]any) {
 	m.hitlData = data
@@ -54,8 +58,9 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.approvalSelected[id] = !m.approvalSelected[id]
 		return m, nil
 	case "enter":
+		resolved := clihitl.ResolveApprovalSelection(m.approvalItems, m.approvalSelected, m.approvalCursor)
 		return m.finishApprovalInteraction(
-			clihitl.BuildApprovalSelectionResume(m.hitlData, m.approvalSelected),
+			clihitl.BuildApprovalSelectionResume(m.hitlData, resolved),
 			"已提交审批选择",
 		)
 	default:
@@ -74,7 +79,7 @@ func (m *model) handleUserInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.SetValue("")
 		m.statusLine = "已取消回答"
 		m.showNextHITLIfIdle()
-		return m, nil
+		return m, m.refocusInputIfNeeded()
 	case "enter":
 		answer := strings.TrimSpace(m.input.Value())
 		if answer == "" {

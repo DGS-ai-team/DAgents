@@ -117,6 +117,10 @@ func resolveUserInformation(ctx context.Context, interact *Interact, data map[st
 	if interact != nil && interact.PromptUserInfo != nil {
 		return interact.PromptUserInfo(ctx, data)
 	}
+	req := ExtractUserInformationRequest(data)
+	if req != nil && len(req.Options) > 0 {
+		return resolveUserInformationOptionsPlain(req)
+	}
 	question := extractUserInformationQuestion(data)
 	toolCallID := extractUserInformationToolCallID(data)
 	fmt.Fprintf(os.Stderr, "\n--- 询问 ---\n%s\n> ", question)
@@ -129,6 +133,58 @@ func resolveUserInformation(ctx context.Context, interact *Interact, data map[st
 		"tool_call_id": toolCallID,
 		"answer":       answer,
 	}, nil
+}
+
+// resolveUserInformationOptionsPlain 在终端列出可选项，支持序号或自由文本作答。
+func resolveUserInformationOptionsPlain(req *UserInformationRequest) (map[string]any, error) {
+	fmt.Fprintf(os.Stderr, "\n--- 询问 ---\n%s\n", req.Question)
+	for i, opt := range req.Options {
+		fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, opt.Label)
+	}
+	prompt := "请输入选项序号"
+	if req.AllowMultiple {
+		prompt += "（多个用逗号分隔，如 1,3）"
+	}
+	if !req.Required {
+		prompt += "，或直接输入文字"
+	}
+	fmt.Fprintf(os.Stderr, "%s: ", prompt)
+	line, err := readLine(os.Stdin)
+	if err != nil {
+		return nil, err
+	}
+	line = strings.TrimSpace(line)
+	if line == "" && req.Required {
+		return nil, fmt.Errorf("需要回答")
+	}
+	if selected, ok := parseOptionSelection(line, req); ok {
+		return BuildUserInformationResumeFromOptions(req, selected)
+	}
+	return BuildUserInformationResume(req, line, nil, false), nil
+}
+
+// parseOptionSelection 解析「1」或「1,3」为 option 勾选；非序号格式返回 false。
+func parseOptionSelection(line string, req *UserInformationRequest) (map[string]bool, bool) {
+	if line == "" || len(req.Options) == 0 {
+		return nil, false
+	}
+	parts := strings.Split(line, ",")
+	selected := make(map[string]bool)
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		idx := 0
+		if _, err := fmt.Sscanf(part, "%d", &idx); err != nil || idx < 1 || idx > len(req.Options) {
+			return nil, false
+		}
+		selected[req.Options[idx-1].ID] = true
+	}
+	if len(selected) == 0 {
+		return nil, false
+	}
+	return selected, true
 }
 
 func extractUserInformationQuestion(data map[string]any) string {

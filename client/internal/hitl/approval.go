@@ -8,11 +8,12 @@ import (
 
 // ToolApprovalItem 为待审批的单条 tool call 摘要。
 type ToolApprovalItem struct {
-	CallID   string
-	Name     string
-	RawArgs  string
-	Reason   string
-	Risk     string
+	CallID    string
+	Name      string
+	RawArgs   string
+	Arguments map[string]any
+	Reason    string
+	Risk      string
 }
 
 // ExtractToolApprovals 从 approval_required SSE data 解析 tool_calls 列表。
@@ -44,19 +45,26 @@ func ExtractToolApprovals(data map[string]any) []ToolApprovalItem {
 		if name == "" {
 			name = "unknown"
 		}
-		rawArgs := strings.TrimSpace(fmt.Sprint(m["raw_arguments"]))
+		rawArgs := mapStringField(m, "raw_arguments")
+		var argMap map[string]any
+		if raw, ok := m["arguments"].(map[string]any); ok {
+			argMap = raw
+		}
 		if rawArgs == "" {
-			if argMap, ok := m["arguments"].(map[string]any); ok {
+			if s, ok := m["arguments"].(string); ok {
+				rawArgs = strings.TrimSpace(s)
+			} else if len(argMap) > 0 {
 				b, _ := json.Marshal(argMap)
 				rawArgs = string(b)
 			}
 		}
 		item := ToolApprovalItem{
-			CallID:  callID,
-			Name:    name,
-			RawArgs: rawArgs,
-			Reason:  strings.TrimSpace(fmt.Sprint(m["approval_reason"])),
-			Risk:    strings.TrimSpace(fmt.Sprint(m["risk_level"])),
+			CallID:    callID,
+			Name:      name,
+			RawArgs:   rawArgs,
+			Arguments: argMap,
+			Reason:    mapStringField(m, "approval_reason"),
+			Risk:      mapStringField(m, "risk_level"),
 		}
 		out = append(out, item)
 	}
@@ -76,19 +84,7 @@ func FormatApprovalPrompt(data map[string]any) string {
 	b.WriteString(fmt.Sprintf("待审批工具 (%d):\n", len(items)))
 	for i, it := range items {
 		b.WriteString(fmt.Sprintf("  %d. %s (%s)\n", i+1, it.Name, it.CallID))
-		if it.Reason != "" {
-			b.WriteString("     原因: " + it.Reason + "\n")
-		}
-		if it.Risk != "" {
-			b.WriteString("     风险: " + it.Risk + "\n")
-		}
-		if it.RawArgs != "" {
-			args := it.RawArgs
-			if len(args) > 120 {
-				args = args[:120] + "..."
-			}
-			b.WriteString("     参数: " + args + "\n")
-		}
+		writeApprovalItemDetails(&b, it, "     ")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -115,6 +111,32 @@ func BuildApprovalResume(data map[string]any, approveAll bool) map[string]any {
 		rejected = append(rejected, it.CallID)
 	}
 	return attachApprovalRouting(data, map[string]any{"type": "selection", "approved": []string{}, "rejected": rejected})
+}
+
+// ResolveApprovalSelection 解析 Enter 提交前的勾选状态。
+
+// 逻辑：
+// 1. 复制已有勾选；
+// 2. 若用户未 Space 勾选任何项，则默认批准当前光标所在工具（避免 Enter 误提交成全拒绝）；
+// 3. 返回供 BuildApprovalSelectionResume 使用的 map。
+
+// 关键边界：用户显式 Space 取消勾选后，即使光标在该行也不自动批准。
+func ResolveApprovalSelection(items []ToolApprovalItem, selected map[string]bool, cursor int) map[string]bool {
+	out := make(map[string]bool, len(selected)+1)
+	for id, on := range selected {
+		out[id] = on
+	}
+	hasApproved := false
+	for _, on := range out {
+		if on {
+			hasApproved = true
+			break
+		}
+	}
+	if !hasApproved && cursor >= 0 && cursor < len(items) {
+		out[items[cursor].CallID] = true
+	}
+	return out
 }
 
 // BuildApprovalSelectionResume 按逐条勾选构造 selection resume；未在 approved 中的视为 rejected。
@@ -160,10 +182,8 @@ func FormatApprovalInteractive(data map[string]any, approved map[string]bool, cu
 			prefix = "> "
 		}
 		fmt.Fprintf(&b, "%s%s %s (%s)\n", prefix, mark, it.Name, it.CallID)
-		if it.Reason != "" {
-			b.WriteString("     原因: " + it.Reason + "\n")
-		}
+		writeApprovalItemDetails(&b, it, "     ")
 	}
-	b.WriteString("\n↑/↓ 移动 · Space 切换 · Enter 确认 · Y 全批准 · N/Esc 全拒绝")
+	b.WriteString("\n↑/↓ 移动 · Space 切换 · Enter 确认（未勾选时默认批准光标项） · Y 全批准 · N/Esc 全拒绝")
 	return strings.TrimRight(b.String(), "\n")
 }

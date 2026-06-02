@@ -99,6 +99,72 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(wait_task, timeout=1.0)
         mock_client.submit_resume.assert_awaited_once()
 
+    async def test_submit_message_clears_hitl_queue(self) -> None:
+        """新用户消息应丢弃本地 HITL，避免 stale call_id 提交 resume。"""
+        mock_client = MagicMock()
+        mock_client.submit_message = AsyncMock()
+        self.controller._client = mock_client
+        self.controller._sse_ready.set()
+
+        await self.controller._handle_stream_event(
+            _event(
+                "approval_required",
+                data={
+                    "approval_args": {
+                        "tool_calls": [{"id": "call_old", "name": "bash_run", "arguments": {}}],
+                    }
+                },
+            ),
+            {"v": False},
+        )
+        self.assertEqual(self.controller.hitl_queue_len(), 1)
+
+        await self.controller.submit_message("改问深圳天气")
+
+        self.assertEqual(self.controller.hitl_queue_len(), 0)
+        mock_client.submit_message.assert_awaited_once()
+
+    async def test_new_approval_replaces_stale_approval_in_queue(self) -> None:
+        """新的 approval_required 应替换队列中旧 approval。"""
+        old_data = {
+            "approval_args": {
+                "tool_calls": [{"id": "call_old", "name": "bash_run", "arguments": {}}],
+            }
+        }
+        new_data = {
+            "approval_args": {
+                "tool_calls": [{"id": "call_new", "name": "bash_run", "arguments": {}}],
+            }
+        }
+        await self.controller._handle_stream_event(
+            _event("approval_required", data=old_data),
+            {"v": False},
+        )
+        await self.controller._handle_stream_event(
+            _event("approval_required", data=new_data),
+            {"v": False},
+        )
+        self.assertEqual(self.controller.hitl_queue_len(), 1)
+        item = self.controller.peek_hitl()
+        self.assertIsNotNone(item)
+        ids = [r.call_id for r in extract_tool_approval_requests(item.data)]  # type: ignore[union-attr]
+        self.assertEqual(ids, ["call_new"])
+
+    async def test_done_refreshes_context_tokens(self) -> None:
+        """done 后应拉取 context 并更新 input strip token 统计。"""
+        mock_client = MagicMock()
+        mock_client.get_session_context = AsyncMock(return_value={"messages_total_tokens": 4321})
+        self.controller._client = mock_client
+        notified = asyncio.Event()
+        self.controller.on_child_strip(lambda: notified.set())
+
+        await self.controller._handle_stream_event(_event("done"), {"v": False})
+        await asyncio.wait_for(notified.wait(), timeout=1.0)
+
+        mock_client.get_session_context.assert_awaited_once_with("s1")
+        self.assertEqual(self.controller._messages_total_tokens, 4321)
+        self.assertEqual(self.controller.input_strip_token_text(), "ctx 4,321")
+
 
 if __name__ == "__main__":
     unittest.main()

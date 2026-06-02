@@ -45,13 +45,6 @@ type ChatResult struct {
 	FinishReason     string
 }
 
-// Usage 表示一次 completion 的 token 用量。
-type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
 // StreamHandler 接收流式 delta 与最终 usage。
 type StreamHandler struct {
 	OnDelta           func(delta string)

@@ -38,3 +38,42 @@ func TestBuildApprovalResumeSelection(t *testing.T) {
 		t.Fatalf("approved = %v", approved)
 	}
 }
+
+func TestFormatApprovalInteractiveShowsArgs(t *testing.T) {
+	line := FormatApprovalInteractive(map[string]any{
+		"message": "检测到工具调用，等待用户确认后继续执行。",
+		"approval_args": map[string]any{
+			"tool_calls": []any{
+				map[string]any{
+					"id":              "call-1",
+					"name":            "trigger_create",
+					"raw_arguments":   `{"name":"喝水提醒","schedule":{"kind":"once"}}`,
+					"approval_reason": "将创建定时触发器: 喝水提醒",
+					"risk_level":      "medium",
+				},
+			},
+		},
+	}, map[string]bool{}, 0)
+	for _, part := range []string{"trigger_create", "喝水提醒", "参数:", "风险: medium", "原因:"} {
+		if !strings.Contains(line, part) {
+			t.Fatalf("interactive missing %q:\n%s", part, line)
+		}
+	}
+	if strings.Contains(line, "<nil>") {
+		t.Fatalf("should not show nil: %q", line)
+	}
+}
+
+func TestResolveApprovalSelection_defaults_cursor_when_none_checked(t *testing.T) {
+	items := []ToolApprovalItem{
+		{CallID: "a", Name: "t1"},
+		{CallID: "b", Name: "t2"},
+	}
+	resolved := ResolveApprovalSelection(items, map[string]bool{}, 1)
+	if !resolved["b"] {
+		t.Fatalf("expected cursor item approved: %+v", resolved)
+	}
+	if resolved["a"] {
+		t.Fatalf("expected non-cursor item rejected: %+v", resolved)
+	}
+}

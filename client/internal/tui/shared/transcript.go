@@ -120,31 +120,25 @@ func (f *ToolFold) Verbose() bool {
 	return f.verbose
 }
 
-// Format 将 tool_call/tool_result 格式化为单行或详细文本。
+// Format 将 tool_call/tool_result 格式化为用户可读文本（委托 FormatToolEvent）。
 func (f *ToolFold) Format(eventType string, data map[string]any) string {
 	f.mu.Lock()
 	verbose := f.verbose
 	f.mu.Unlock()
+	lines := FormatToolEvent(eventType, data, verbose)
+	if len(lines) == 0 {
+		return fmt.Sprintf("[%s] (无详情)", eventType)
+	}
+	return strings.Join(lines, "\n")
+}
 
-	if verbose {
-		return fmt.Sprintf("[%s] %v", eventType, data)
+func trimDisplayField(v any) string {
+	if v == nil {
+		return ""
 	}
-	name := strings.TrimSpace(fmt.Sprint(data["name"]))
-	if name == "" {
-		name = strings.TrimSpace(fmt.Sprint(data["tool_name"]))
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "" || s == "<nil>" {
+		return ""
 	}
-	preview := strings.TrimSpace(fmt.Sprint(data["content"]))
-	if preview == "" {
-		preview = strings.TrimSpace(fmt.Sprint(data["output"]))
-	}
-	if len(preview) > 80 {
-		preview = preview[:80] + "..."
-	}
-	if name != "" && preview != "" {
-		return fmt.Sprintf("[%s] %s → %s", eventType, name, preview)
-	}
-	if name != "" {
-		return fmt.Sprintf("[%s] %s", eventType, name)
-	}
-	return fmt.Sprintf("[%s] (折叠，/tools verbose 展开)", eventType)
+	return s
 }

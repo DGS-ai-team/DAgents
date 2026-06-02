@@ -11,6 +11,7 @@ Go Node 触发器：JSON 持久化、调度轮询、fire 投递 session 队列�
 | `scheduler.go` | 后台 poll、`EvaluateDue`、`FireTrigger`、cmd 门控 wiring |
 | `delivery.go` | 进程内 pending 投递去重（不写入 JSON） |
 | `template.go` | task_template 占位符渲染 |
+| `logging.go` | trigger 创建/更新/删除与 fire 结果的结构化日志 |
 | `schedule_test.go` | 日历调度、漏触发、cmd 门控单测 |
 
 ## condition 调度类型
@@ -62,5 +63,15 @@ Go Node 触发器：JSON 持久化、调度轮询、fire 投递 session 队列�
 - HTTP：`node/internal/api/` → `/v1/triggers*`
 - Agent 工具：`node/internal/tools/triggers.go`
 - 配置：`shared/config` 的 `triggers.enabled` / `poll_seconds` / `store_path`
+
+## 日志
+
+Node 启动时对 store/scheduler 注入 logger（见 `server.go`）。`log.level: info` 可见：
+
+- `trigger created` / `trigger updated` / `trigger deleted`
+- `trigger scheduler started`
+- `trigger fired`（queued）/ `trigger fire skipped` / `trigger fire failed`
+
+`debug` 额外输出 calendar 漏触发窗口外的 `trigger schedule advanced only`。
 
 符号索引见同目录 [`REFERENCE.md`](./REFERENCE.md)。

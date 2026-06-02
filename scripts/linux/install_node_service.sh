@@ -60,9 +60,10 @@ resolve_config() {
     return
   fi
   local candidates=(
+    "${REPO_ROOT}/config.yaml"
+    "${REPO_ROOT}/config.example.yaml"
     "${REPO_ROOT}/packaging/agent-client/config.yaml"
     "${REPO_ROOT}/packaging/agent-client/config.example.yaml"
-    "${REPO_ROOT}/config.yaml"
   )
   local c
   for c in "${candidates[@]}"; do

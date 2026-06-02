@@ -3,9 +3,11 @@ package triggers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +23,7 @@ type Scheduler struct {
 	submitter    MessageSubmitter
 	cmdGate      CmdGate
 	pollInterval time.Duration
+	logger       *slog.Logger
 
 	mu     sync.Mutex
 	stopCh chan struct{}
@@ -37,7 +40,16 @@ func NewScheduler(store *Store, submitter MessageSubmitter, pollSeconds int) *Sc
 		submitter:    submitter,
 		cmdGate:      NewShellCmdGate(),
 		pollInterval: time.Duration(pollSeconds) * time.Second,
+		logger:       logx.Discard(),
 	}
+}
+
+// SetLogger 注入结构化日志；nil 时丢弃输出（单测默认）。
+func (s *Scheduler) SetLogger(logger *slog.Logger) {
+	if s == nil {
+		return
+	}
+	s.logger = discardLogger(logger)
 }
 
 // SetCmdGate 注入 cmd 门控执行器（测试用）。
@@ -56,6 +68,7 @@ func (s *Scheduler) Start() {
 	}
 	s.stopCh = make(chan struct{})
 	s.doneCh = make(chan struct{})
+	s.logger.Info("trigger scheduler started", "poll_seconds", int(s.pollInterval.Seconds()))
 	go s.runLoop()
 }
 
@@ -106,6 +119,11 @@ func (s *Scheduler) tickDue(now time.Time) {
 		switch decision {
 		case DueAdvanceOnly:
 			_ = s.store.ReplaceTrigger(updated)
+			s.logger.Debug("trigger schedule advanced only",
+				"trigger_id", def.TriggerID,
+				"name", def.Name,
+				"next_fire_at", updated.NextFireAt,
+			)
 		case DueFire:
 			s.fire(def, "schedule", map[string]any{}, false)
 		default:
@@ -118,7 +136,9 @@ func (s *Scheduler) fire(def Definition, reason string, payload map[string]any, 
 		payload = map[string]any{}
 	}
 	if !def.Enabled && !force {
-		return s.record(def, FireStatusSkipped, reason, payload, "trigger is disabled", nil, nil, "")
+		record := s.record(def, FireStatusSkipped, reason, payload, "trigger is disabled", nil, nil, "")
+		s.logFireRecord(record)
+		return record
 	}
 	if s.store.HasPendingDelivery(def.TriggerID) {
 		record := FireRecord{
@@ -130,8 +150,9 @@ func (s *Scheduler) fire(def Definition, reason string, payload map[string]any, 
 			FiredAt:   timeToUnixFloat(time.Now()),
 		}
 		if reason != "schedule" {
-			return s.store.AddHistory(record)
+			record = s.store.AddHistory(record)
 		}
+		s.logFireRecord(record)
 		return record
 	}
 	if reason == "schedule" {
@@ -156,7 +177,9 @@ func (s *Scheduler) fire(def Definition, reason string, payload map[string]any, 
 	}
 	sessionID, err := s.submitter.EnsureSession(requestedSession)
 	if err != nil {
-		return s.record(def, FireStatusError, reason, payload, err.Error(), nil, nil, "")
+		record := s.record(def, FireStatusError, reason, payload, err.Error(), nil, nil, "")
+		s.logFireRecord(record)
+		return record
 	}
 	clientID := fmt.Sprintf("trigger-%s", def.TriggerID)
 	if def.ClientID != nil && *def.ClientID != "" {
@@ -164,13 +187,19 @@ func (s *Scheduler) fire(def Definition, reason string, payload map[string]any, 
 	}
 	content := RenderTaskTemplate(def.TaskTemplate, def, reason, payload)
 	if err := s.submitter.SubmitTriggerMessage(sessionID, def.TriggerID, content); err != nil {
-		return s.record(def, FireStatusError, reason, payload, err.Error(), &sessionID, &clientID, content)
+		record := s.record(def, FireStatusError, reason, payload, err.Error(), &sessionID, &clientID, content)
+		s.logFireRecord(record)
+		return record
 	}
 	s.store.MarkPendingDelivery(def.TriggerID)
 	if _, err := s.store.MarkFired(def.TriggerID, time.Now()); err != nil {
-		return s.record(def, FireStatusError, reason, payload, err.Error(), &sessionID, &clientID, content)
+		record := s.record(def, FireStatusError, reason, payload, err.Error(), &sessionID, &clientID, content)
+		s.logFireRecord(record)
+		return record
 	}
-	return s.record(def, FireStatusQueued, reason, payload, "queued", &sessionID, &clientID, content)
+	record := s.record(def, FireStatusQueued, reason, payload, "queued", &sessionID, &clientID, content)
+	s.logFireRecord(record)
+	return record
 }
 
 func (s *Scheduler) runCmdGate(cmd string) (bool, string, error) {
@@ -193,8 +222,9 @@ func (s *Scheduler) rescheduleAfterCmdSkip(def Definition, reason string, payloa
 		FiredAt:   timeToUnixFloat(time.Now()),
 	}
 	if reason != "schedule" {
-		return s.store.AddHistory(record)
+		record = s.store.AddHistory(record)
 	}
+	s.logFireRecord(record)
 	return record
 }
 

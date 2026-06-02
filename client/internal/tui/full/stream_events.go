@@ -6,6 +6,7 @@ import (
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
+	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -49,12 +50,20 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		}
 		m.transcript.FinishPartial("assistant")
 		m.transcript.FinishPartial("reasoning")
-		line := m.toolFold.Format(ev.Type, ev.Data)
-		m.transcript.Add("[system] " + line)
+		for _, line := range tuishared.FormatToolEvent(ev.Type, ev.Data, m.toolFold.Verbose()) {
+			m.transcript.Add(line)
+		}
 		m.notifyViewportRefresh()
+	case "usage":
+		if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
+			return
+		}
+		m.usageStrip = tuishared.ParseUsageStrip(ev.Data)
+		m.notifyStripRefresh()
 	case "context_compression_blocking", "context_compression_silent":
 		m.transcript.Add("[system] " + clihitl.FormatContextCompression(ev.Type, ev.Data))
 		m.notifyViewportRefresh()
+		m.scheduleContextTokenRefresh()
 	case "error":
 		msg := strings.TrimSpace(fmt.Sprint(ev.Data["message"]))
 		if msg == "" {
@@ -108,6 +117,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			m.statusLine = "回合结束"
 		}
 		m.notifyViewportRefresh()
+		m.scheduleContextTokenRefresh()
 	default:
 	}
 }

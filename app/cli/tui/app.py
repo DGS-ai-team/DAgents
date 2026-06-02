@@ -24,6 +24,8 @@ from app.cli.approval import (
     ApprovalDecision,
     ToolApprovalRequest,
     build_all_rejected_decision,
+    build_approval_decision_from_map,
+    clamp_menu_selection_index,
     extract_tool_approval_requests,
 )
 from app.cli.child_agent import approval_header, format_child_agents_list
@@ -246,10 +248,20 @@ class DAgentsTuiApp(App[None]):
         self.call_later(self._refresh_input_strip)
 
     def _refresh_input_strip(self) -> None:
-        """刷新 #input-strip 文案（活跃子 Agent / 待审批 / HITL 队列）。"""
+        """刷新 #input-strip 文案（子 Agent / HITL 队列 + 右侧 token 统计）。"""
         strip = self.query_one("#input-strip", Static)
-        text = self._controller.child_tracker.input_strip_text(self._controller.hitl_queue_len())
-        strip.update(f"[dim]{escape(text)}[/dim]")
+        left = self._controller.child_tracker.input_strip_text(self._controller.hitl_queue_len())
+        right = self._controller.input_strip_token_text()
+        if right:
+            width = int(getattr(strip.size, "width", 0) or 0)
+            if width > len(left) + len(right) + 1:
+                gap = width - len(left) - len(right)
+                line = f"{left}{' ' * gap}{right}"
+            else:
+                line = f"{left}  ·  {right}"
+        else:
+            line = left
+        strip.update(f"[dim]{escape(line)}[/dim]")
 
     def _process_hitl_queue(self) -> None:
         """空闲时展示并处理队首 HITL（不阻塞 SSE render loop）。"""
@@ -409,8 +421,9 @@ class DAgentsTuiApp(App[None]):
         self._approval_decisions = {}
         self._approval_future = asyncio.get_running_loop().create_future()
 
-        # 审批期间隐藏输入框，由 App 捕获上下键与 Enter；选项直接插在工具调用下方。
+        # 审批期间隐藏并只读输入框，避免 Enter 误触 submit_prompt；快捷键由 App 捕获。
         prompt.display = False
+        prompt.read_only = True
         self._write_approval_block()
         self._refresh_approval_layout()
         self._transcript_log().focus()
@@ -424,6 +437,7 @@ class DAgentsTuiApp(App[None]):
         self._approval_selected_index = 0
         self._approval_decisions = {}
         self._delete_approval_block()
+        prompt.read_only = False
         prompt.display = True
         self._refresh_approval_layout()
         prompt.focus()
@@ -439,6 +453,7 @@ class DAgentsTuiApp(App[None]):
         log.write(f"[bold cyan]Agent 询问[/bold cyan]\n{escape(request.question)}")
         if request.options:
             prompt.display = False
+            prompt.read_only = True
             self._write_user_info_block()
             self._transcript_log().focus()
         else:
@@ -458,6 +473,7 @@ class DAgentsTuiApp(App[None]):
         self._user_info_selected_ids = set()
         self._delete_user_info_block()
         prompt.placeholder = ""
+        prompt.read_only = False
         prompt.display = True
         self._refresh_user_info_layout()
         prompt.focus()
@@ -526,14 +542,19 @@ class DAgentsTuiApp(App[None]):
             return
         if self._approval_future is None or self._approval_future.done():
             return
-        if event.key == "up":
+        if event.key in {"up", "down"}:
             event.stop()
             event.prevent_default()
-            self._move_approval_selection(-1)
-        elif event.key == "down":
+            delta = -1 if event.key == "up" else 1
+            self._move_approval_selection(delta)
+        elif event.key in {"y", "Y"}:
             event.stop()
             event.prevent_default()
-            self._move_approval_selection(1)
+            self._set_approval_choice_for_current(approved=True)
+        elif event.key in {"n", "N"}:
+            event.stop()
+            event.prevent_default()
+            self._set_approval_choice_for_current(approved=False)
         elif event.key == "enter":
             event.stop()
             event.prevent_default()
@@ -548,16 +569,23 @@ class DAgentsTuiApp(App[None]):
         """
         if self._cancel_task is not None and not self._cancel_task.done():
             return
-        if self._approval_future is not None and not self._approval_future.done():
-            self._approval_future.set_exception(ApprovalCancelled())
-        if self._user_info_future is not None and not self._user_info_future.done():
-            self._user_info_future.set_exception(UserInformationCancelled())
+        self._abort_local_hitl_for_user_message()
         self._controller.clear_hitl_queue()
         self._hitl_busy = False
         self._cancel_tool_pending_tasks()
         self._cancel_status_lines()
         self._finish_assistant_stream(self._transcript_log())
         self._cancel_task = asyncio.create_task(self._cancel_current_turn_request())
+
+    def _abort_local_hitl_for_user_message(self) -> None:
+        """关闭本地 HITL UI；新用户消息或 Esc 会打断 server pending，勿再 submit 旧 call_id。"""
+        if self._approval_future is not None and not self._approval_future.done():
+            self._approval_future.set_exception(ApprovalCancelled())
+            self.call_later(self._end_approval_ui)
+        if self._user_info_future is not None and not self._user_info_future.done():
+            self._user_info_future.set_exception(UserInformationCancelled())
+            self.call_later(self._end_user_info_ui)
+        self._hitl_busy = False
 
     async def _cancel_current_turn_request(self) -> None:
         """调用服务端 cancel 接口；失败时在 transcript 中提示。"""
@@ -596,10 +624,24 @@ class DAgentsTuiApp(App[None]):
 
     def _finish_approval(self) -> None:
         """所有工具均完成单独审批后，构造最终决策。"""
-        approved = [item.call_id for item in self._approval_requests if self._approval_decisions.get(item.call_id)]
-        rejected = [item.call_id for item in self._approval_requests if not self._approval_decisions.get(item.call_id)]
+        decision = build_approval_decision_from_map(self._approval_requests, self._approval_decisions)
         if self._approval_future is not None and not self._approval_future.done():
-            self._approval_future.set_result(ApprovalDecision(approved=approved, rejected=rejected))
+            self._approval_future.set_result(decision)
+
+    def _set_approval_choice_for_current(self, *, approved: bool) -> None:
+        """为当前待审批工具写入决策并推进到下一项或结束。"""
+        item = self._current_approval_request()
+        if item is None:
+            self._finish_approval()
+            return
+        self._approval_decisions[item.call_id] = approved
+        if len(self._approval_decisions) >= len(self._approval_requests):
+            self._finish_approval()
+            return
+        self._approval_selected_index = 0
+        self._delete_approval_block()
+        self._write_approval_block()
+        self._refresh_approval_layout()
 
     def _user_info_block_text(self) -> str:
         request = self._user_info_request
@@ -646,7 +688,11 @@ class DAgentsTuiApp(App[None]):
         count = len(request.options)
         if count <= 0:
             return
-        self._user_info_selected_index = (self._user_info_selected_index + delta) % count
+        self._user_info_selected_index = clamp_menu_selection_index(
+            self._user_info_selected_index,
+            delta,
+            count,
+        )
         self._render_user_info_block()
 
     def _toggle_user_info_selection(self) -> None:
@@ -1304,7 +1350,7 @@ class DAgentsTuiApp(App[None]):
             style = "bold" if option_index == self._approval_selected_index else "dim"
             color = "green" if approved else "red"
             lines.append(f"   {cursor} [{style}][{color}]{action}[/{color}][/{style}]")
-        lines.append("   [dim]↑/↓ 选择，Enter 确认当前项[/dim]")
+        lines.append("   [dim]↑/↓ 选择，Enter 确认当前项，Y 同意 / N 拒绝[/dim]")
         return "\n".join(lines)
 
     def _write_approval_block(self) -> None:
@@ -1342,7 +1388,11 @@ class DAgentsTuiApp(App[None]):
         count = self._approval_option_count()
         if count <= 0:
             return
-        self._approval_selected_index = (self._approval_selected_index + delta) % count
+        self._approval_selected_index = clamp_menu_selection_index(
+            self._approval_selected_index,
+            delta,
+            count,
+        )
         self._render_approval_block()
 
     def _write_tool_result(self, data: dict[str, Any]) -> None:
@@ -1576,6 +1626,7 @@ class DAgentsTuiApp(App[None]):
             log = self._transcript_log()
             log.write(f"[yellow]Unknown command: {value}[/yellow]")
             return
+        self._abort_local_hitl_for_user_message()
         self._write_user_message(value)
         self._submit_content_seen = False
         try:

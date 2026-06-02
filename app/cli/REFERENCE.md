@@ -55,12 +55,14 @@
 - **`StreamEvent`**：SSE 解析结果（`event_type`、`session_id`、`data`）
 - **`DAgentsApiClient`**：Agent Node HTTP/SSE（health、session、message、resume、cancel、stream、skills、context、child-agents）
 - **`_parse_sse_block`**：SSE block → `StreamEvent`
+- **`_decode_utf8_chunks`**：增量 UTF-8 解码（避免 SSE 分块截断多字节字符）
 
 ## `approval.py`
 
 - **`ToolApprovalRequest`** / **`ApprovalDecision`** / **`ApprovalCancelled`**：审批模型与用户取消信号
 - **`extract_tool_approval_requests`**：从 SSE `approval_required.data` 提取工具列表
 - **`build_*_decision`** / **`parse_selection_tokens`** / **`build_approval_resume`**：resume 决策构造（含子 Agent 路由字段）
+- **`clamp_menu_selection_index`** / **`build_approval_decision_from_map`**：TUI 菜单光标与决策表
 
 ## `session_commands.py`
 

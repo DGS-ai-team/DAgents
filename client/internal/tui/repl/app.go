@@ -34,6 +34,8 @@ type App struct {
 
 	streamCancel context.CancelFunc
 	streamDone   chan struct{}
+
+	turn turnGate
 }
 
 // Run 启动行模式 REPL；initialSession 非空时尝试恢复该 session。
@@ -89,8 +91,15 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		}
 
 		app.transcript.Add("[user] " + line)
+		app.turn.begin()
 		if err := app.client.SubmitMessage(ctx, app.currentSession(), line); err != nil {
+			app.turn.finish()
 			fmt.Fprintf(os.Stderr, "发送失败: %v\n", err)
+			continue
+		}
+		fmt.Fprintln(os.Stderr, "（回合进行中；若有审批/询问，请在下方提示处输入）")
+		if err := app.turn.wait(ctx); err != nil {
+			return err
 		}
 	}
 }
@@ -121,9 +130,13 @@ func (a *App) restartStream(ctx context.Context) {
 	sid := a.currentSession()
 	go func() {
 		defer close(a.streamDone)
-		runner := newStreamRunner(a.client, sid, a.transcript, a.toolFold, &a.printMu, &a.showReasoning, nil)
+		runner := newStreamRunner(a.client, sid, a.transcript, a.toolFold, &a.printMu, &a.showReasoning, a.onStreamTurnDone)
 		_ = runner.Run(streamCtx)
 	}()
+}
+
+func (a *App) onStreamTurnDone() {
+	a.turn.finish()
 }
 
 func (a *App) stopStream() {
@@ -279,7 +292,7 @@ func printHelp() {
   /switch <id>         切换 session
   /new                 新建 session
   /clear               清空当前对话上下文
-  /cancel              取消在途 turn（不退出 TUI）
+  /cancel              取消在途 turn（回合等待期间不可用，请等审批结束）
   /history [n|all]     查看最近 n 行输出（默认 20）
   /tools [verbose|brief]  tool 输出折叠/展开
   /reasoning [on|off]  显示/隐藏模型推理流

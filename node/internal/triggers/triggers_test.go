@@ -1,6 +1,7 @@
 package triggers
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -159,5 +160,102 @@ func TestSchedulerSkipsWhenPendingDelivery(t *testing.T) {
 	}
 	if len(sub.messages) != 2 {
 		t.Fatalf("messages = %v", sub.messages)
+	}
+}
+
+func TestEvaluateDueIntervalFiresEvenWhenOverdue(t *testing.T) {
+	nextAt := time.Now().Add(-2 * time.Minute)
+	def := Definition{
+		Enabled:    true,
+		Condition:  map[string]any{"interval_seconds": 60},
+		NextFireAt: ptrFloat(timeToUnixFloat(nextAt)),
+	}
+	decision, _ := EvaluateDue(def, time.Now())
+	if decision != DueFire {
+		t.Fatalf("decision = %d want DueFire for overdue interval", decision)
+	}
+}
+
+func TestConditionCmdIgnoresMissingKey(t *testing.T) {
+	if got := ConditionCmd(map[string]any{"interval_seconds": 60}); got != "" {
+		t.Fatalf("ConditionCmd = %q, want empty", got)
+	}
+	if got := ConditionCmd(map[string]any{"cmd": nil}); got != "" {
+		t.Fatalf("ConditionCmd nil = %q, want empty", got)
+	}
+}
+
+func TestSchedulerTickIntervalWhenDue(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "t.json"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	def, err := NewDefinitionFromCreate(CreateInput{
+		Name:         "tick",
+		TaskTemplate: "hello",
+		Condition:    map[string]any{"interval_seconds": 1},
+	}, "agent-1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateTrigger(def); err != nil {
+		t.Fatal(err)
+	}
+	sub := &fakeSubmitter{}
+	sched := NewScheduler(store, sub, 1)
+	sched.RunOnceForTest(nil, now.Add(500*time.Millisecond))
+	if len(sub.messages) != 0 {
+		t.Fatalf("early tick should not fire: %v", sub.messages)
+	}
+	sched.RunOnceForTest(nil, now.Add(1100*time.Millisecond))
+	if len(sub.messages) != 1 {
+		t.Fatalf("expected 1 message, got %v", sub.messages)
+	}
+}
+
+func TestSchedulerTickIntervalOverdueStillFires(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "t.json"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	def, err := NewDefinitionFromCreate(CreateInput{
+		Name:         "overdue",
+		TaskTemplate: "catch-up",
+		Condition:    map[string]any{"interval_seconds": 30},
+	}, "agent-1", now.Add(-5*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	past := timeToUnixFloat(now.Add(-2 * time.Minute))
+	def.NextFireAt = &past
+	if _, err := store.CreateTrigger(def); err != nil {
+		t.Fatal(err)
+	}
+	sub := &fakeSubmitter{}
+	sched := NewScheduler(store, sub, 5)
+	sched.RunOnceForTest(nil, now)
+	if len(sub.messages) != 1 {
+		t.Fatalf("overdue interval should still fire once, got %v", sub.messages)
+	}
+}
+
+func TestStoreLoadReconcilesMissingNextFireAt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "triggers.json")
+	raw := `{"triggers":[{"trigger_id":"t1","name":"x","condition":{"interval_seconds":60},"target_agent_id":"local","task_template":"hi","enabled":true,"fire_count":0,"created_at":1,"updated_at":1}],"history":[]}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(path, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.GetTrigger("t1")
+	if !ok || got.NextFireAt == nil {
+		t.Fatalf("expected reconciled next_fire_at, got %+v ok=%v", got, ok)
 	}
 }

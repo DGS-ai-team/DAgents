@@ -41,6 +41,8 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 	case "clear":
 		err = m.client.ClearSessionContext(m.ctx, m.currentSession())
 		if err == nil {
+			m.messagesTotalTokens = 0
+			m.resetUsageStrip()
 			m.transcript.Add("[system] 已清空对话上下文")
 			m.syncViewport()
 		}
@@ -98,6 +100,7 @@ func (m *model) enterContextView() error {
 	if err != nil {
 		return err
 	}
+	m.applyContextTokensFromView(ctxBody)
 	m.contextText = tuishared.FormatSessionContext(ctxBody)
 	m.contextMode = true
 	m.helpLine = "Esc 返回聊天记录"
@@ -168,6 +171,8 @@ func (m *model) switchSession(requested string) error {
 	m.resetHITLQueue()
 	m.resetHITLState()
 	m.children.reset()
+	m.messagesTotalTokens = -1
+	m.resetUsageStrip()
 	m.transcript.Add("[system] 已切换 session=" + id)
 	m.syncViewport()
 	m.restartStream()
@@ -272,6 +277,7 @@ func runSSELoop(ctx context.Context, m *model) {
 		if m.program != nil {
 			m.program.Send(refreshViewportMsg{})
 			m.program.Send(syncChildAgentsMsg{})
+			m.program.Send(refreshContextTokensMsg{})
 		}
 
 		err := m.client.StreamEvents(ctx, m.currentSession(), fromSeq, func(ev nodeapi.StreamEvent) bool {

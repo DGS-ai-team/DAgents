@@ -167,7 +167,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		logger.Warn("trigger store init failed", "error", err, "path", cfg.TriggersStorePath())
 	} else {
 		triggerStore = opened
+		triggerStore.SetLogger(logger)
 		triggerSched = triggers.NewScheduler(triggerStore, &session.TriggerSubmitter{Mgr: mgr}, cfg.Triggers.PollSeconds)
+		triggerSched.SetLogger(logger)
 		mgr.SetTriggerDeliveryTracker(triggerStore)
 		if o.tools != nil {
 			o.tools.SetTriggerRuntime(triggerStore, triggerSched, cfg.AgentID)

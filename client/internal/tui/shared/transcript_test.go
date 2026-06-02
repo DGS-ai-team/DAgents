@@ -1,6 +1,9 @@
 package shared
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTranscriptTail(t *testing.T) {
 	tr := NewTranscript(5)
@@ -13,6 +16,27 @@ func TestTranscriptTail(t *testing.T) {
 	tail := tr.Tail(2)
 	if len(tail) != 2 || tail[0] != "6" || tail[1] != "7" {
 		t.Fatalf("tail = %v", tail)
+	}
+}
+
+func TestToolFoldFormatNestedToolCall(t *testing.T) {
+	f := &ToolFold{}
+	line := f.Format("tool_call", map[string]any{
+		"tool_calls": []any{
+			map[string]any{
+				"id": "call-1",
+				"function": map[string]any{
+					"name":      "trigger_create",
+					"arguments": `{"name":"喝水提醒"}`,
+				},
+			},
+		},
+	})
+	if !strings.Contains(line, "trigger_create") || !strings.Contains(line, "喝水提醒") {
+		t.Fatalf("line = %q", line)
+	}
+	if strings.Contains(line, "<nil>") {
+		t.Fatalf("line = %q", line)
 	}
 }
 

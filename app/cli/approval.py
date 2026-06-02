@@ -94,6 +94,30 @@ def build_approval_resume(data: dict[str, Any], decision: ApprovalDecision) -> d
     return resume
 
 
+def clamp_menu_selection_index(current: int, delta: int, count: int) -> int:
+    """菜单光标移动：在 [0, count-1] 内 clamp，避免 `%` 环绕导致 Up 从「同意」跳到「不同意」。
+
+    逻辑：
+    1. count<=0 时返回 0；
+    2. current+delta 小于 0 则停在 0，大于 count-1 则停在末项。
+
+    关键边界：双项菜单（同意/不同意）时 index 0 在上方，Up 不应落到 index 1。
+    """
+    if count <= 0:
+        return 0
+    return max(0, min(count - 1, current + delta))
+
+
+def build_approval_decision_from_map(
+    requests: list[ToolApprovalRequest],
+    decisions: dict[str, bool],
+) -> ApprovalDecision:
+    """由 call_id→bool 决策表构造 ApprovalDecision（True=批准）。"""
+    approved = [item.call_id for item in requests if decisions.get(item.call_id)]
+    rejected = [item.call_id for item in requests if not decisions.get(item.call_id)]
+    return ApprovalDecision(approved=approved, rejected=rejected)
+
+
 def parse_selection_tokens(value: str, requests: list[ToolApprovalRequest]) -> set[str]:
     tokens = [part.strip() for part in value.replace(",", " ").split() if part.strip()]
     by_index = {str(index): item.call_id for index, item in enumerate(requests, start=1)}

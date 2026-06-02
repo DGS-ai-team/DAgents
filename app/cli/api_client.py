@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import codecs
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
@@ -161,14 +162,24 @@ class DAgentsApiClient:
                 payload={"session_id": sid},
             )
             buffer = ""
+            decoder = codecs.getincrementaldecoder("utf-8")()
             async for chunk in resp.content.iter_chunked(1024):
-                buffer += chunk.decode("utf-8", errors="replace")
+                # 按块 decode 时必须用增量解码器；否则多字节字符（如中文）恰好在块边界会被
+                # errors="replace" 变成 U+FFFD（界面上的 �）。
+                buffer += decoder.decode(chunk)
                 buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
                 while "\n\n" in buffer:
                     block, buffer = buffer.split("\n\n", 1)
                     event = _parse_sse_block(block)
                     if event is not None:
                         yield event
+            buffer += decoder.decode(b"", final=True)
+            buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
+            while "\n\n" in buffer:
+                block, buffer = buffer.split("\n\n", 1)
+                event = _parse_sse_block(block)
+                if event is not None:
+                    yield event
 
     async def _get_json(self, path: str) -> dict[str, Any]:
         async with self._session.get(f"{self.api_base}{path}") as resp:
@@ -208,6 +219,25 @@ class DAgentsApiClient:
             except json.JSONDecodeError as exc:
                 raise RuntimeError(f"invalid JSON response from {path}: {text}") from exc
             return data if isinstance(data, dict) else {}
+
+
+def _decode_utf8_chunks(chunks: Iterable[bytes], *, final_empty: bool = True) -> str:
+    """将可能截断 UTF-8 的字节块序列解码为 str（供 SSE 流与单测使用）。
+
+    逻辑：
+    1. 用 incremental decoder 缓冲不完整码点，等待后续块；
+    2. 全部块喂完后 `final=True` 冲刷尾部；
+    3. 非法 UTF-8 向上抛 `UnicodeDecodeError`（HTTP 体应始终为 UTF-8）。
+
+    Args:
+        chunks: 顺序字节块（模拟 `iter_chunked`）。
+        final_empty: 是否在末尾调用 `decode(b"", final=True)`。
+    """
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    text = "".join(decoder.decode(chunk) for chunk in chunks)
+    if final_empty:
+        text += decoder.decode(b"", final=True)
+    return text
 
 
 def _format_http_error(status: int, text: str) -> str:
