@@ -91,21 +91,21 @@ func (m *Manager) HandleCancelTool(parentSessionID, argsJSON string) (string, er
 
 func (m *Manager) cancelInternal(parentSessionID, childID, reason string) (previous string, err error) {
 	m.mu.Lock()
-	rec, ok := m.records[childID]
+	agent, ok := m.activeByID[childID]
 	if !ok {
 		m.mu.Unlock()
 		return "", fmt.Errorf("child_session_id not found or not owned by parent")
 	}
-	if rec.ParentSessionID != parentSessionID {
+	if agent.ParentSessionID != parentSessionID {
 		m.mu.Unlock()
 		return "", fmt.Errorf("child_session_id not found or not owned by parent")
 	}
-	if rec.terminal() {
-		prev := string(rec.Status)
+	if agent.isTerminal() {
+		prev := string(agent.Status)
 		m.mu.Unlock()
 		return prev, nil
 	}
-	prev := string(rec.Status)
+	prev := string(agent.Status)
 	m.mu.Unlock()
 	_, err = m.Cancel(parentSessionID, childID, reason)
 	return prev, err
@@ -114,13 +114,13 @@ func (m *Manager) cancelInternal(parentSessionID, childID, reason string) (previ
 func (m *Manager) validateOwnership(parentSessionID, childID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if rec, ok := m.records[childID]; ok {
-		if rec.ParentSessionID != parentSessionID {
+	if agent, ok := m.activeByID[childID]; ok {
+		if agent.ParentSessionID != parentSessionID {
 			return fmt.Errorf("child_session_id not found or not owned by parent")
 		}
 		return nil
 	}
-	if owner, ok := m.parentOf[childID]; ok {
+	if owner, ok := m.childToParent[childID]; ok {
 		if owner != parentSessionID {
 			return fmt.Errorf("child_session_id not found or not owned by parent")
 		}
@@ -133,11 +133,11 @@ func (m *Manager) allTerminalOrFailFast(ids []string, failFast bool) (done bool,
 	allTerminal := true
 	for _, id := range ids {
 		m.mu.Lock()
-		rec := m.records[id]
-		terminal := rec == nil || rec.terminal()
+		agent := m.activeByID[id]
+		terminal := agent == nil || agent.isTerminal()
 		status := StatusActive
-		if rec != nil {
-			status = rec.Status
+		if agent != nil {
+			status = agent.Status
 		}
 		m.mu.Unlock()
 		if !terminal {

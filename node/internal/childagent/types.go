@@ -24,8 +24,8 @@ type CreateInput struct {
 	Purpose      string
 	AllowedTools []string
 	TTLSeconds   int
-	MaxTurns int
-	Wait     bool
+	MaxTurns     int
+	Wait         bool
 }
 
 // Result 为交付给父 Agent 的终态结果。
@@ -38,8 +38,8 @@ type Result struct {
 	Artifacts      []string `json:"artifacts"`
 }
 
-// Record 跟踪单个子 Agent 元数据与等待方。
-type Record struct {
+// ActiveAgent 跟踪单个活跃临时 Agent 的元数据与同步等待（Manager 内存账本，非 session runtime）。
+type ActiveAgent struct {
 	ChildSessionID  string
 	ParentSessionID string
 	Purpose         string
@@ -48,16 +48,16 @@ type Record struct {
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
 	MaxTurns        int
-	TurnCount int
-	WaitSync  bool
+	TurnCount       int
+	WaitSync        bool
 
-	mu     sync.Mutex
-	result *Result
-	done   chan struct{}
+	mu             sync.Mutex
+	terminalResult *Result
+	settledCh      chan struct{}
 }
 
-func newRecord(parentID string, input CreateInput, childID string, expiresAt time.Time) *Record {
-	return &Record{
+func newActiveAgent(parentID string, input CreateInput, childID string, expiresAt time.Time) *ActiveAgent {
+	return &ActiveAgent{
 		ChildSessionID:  childID,
 		ParentSessionID: parentID,
 		Purpose:         input.Purpose,
@@ -65,14 +65,14 @@ func newRecord(parentID string, input CreateInput, childID string, expiresAt tim
 		Status:          StatusCreating,
 		CreatedAt:       time.Now(),
 		ExpiresAt:       expiresAt,
-		MaxTurns: input.MaxTurns,
-		WaitSync: input.Wait,
-		done:            make(chan struct{}),
+		MaxTurns:        input.MaxTurns,
+		WaitSync:        input.Wait,
+		settledCh:       make(chan struct{}),
 	}
 }
 
-func (r *Record) terminal() bool {
-	switch r.Status {
+func (a *ActiveAgent) isTerminal() bool {
+	switch a.Status {
 	case StatusCompleted, StatusFailed, StatusCancelled, StatusExpired:
 		return true
 	default:
@@ -80,17 +80,17 @@ func (r *Record) terminal() bool {
 	}
 }
 
-func (r *Record) snapshot() Result {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.result != nil {
-		out := *r.result
+func (a *ActiveAgent) resultSnapshot() Result {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.terminalResult != nil {
+		out := *a.terminalResult
 		return out
 	}
 	return Result{
-		ChildSessionID: r.ChildSessionID,
-		Status:         r.Status,
-		TurnCount:      r.TurnCount,
+		ChildSessionID: a.ChildSessionID,
+		Status:         a.Status,
+		TurnCount:      a.TurnCount,
 		Artifacts:      []string{},
 	}
 }

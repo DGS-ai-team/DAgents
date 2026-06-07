@@ -9,8 +9,8 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
-// TestHandleWaitAfterRecordRemoved 异步临时 Agent 交付并 removeRecord 后 wait_temporary_agents 仍可读终态。
-func TestHandleWaitAfterRecordRemoved(t *testing.T) {
+// TestHandleWaitAfterActiveUnregistered 异步临时 Agent 交付并 unregisterActive 后 wait_temporary_agents 仍可读终态。
+func TestHandleWaitAfterActiveUnregistered(t *testing.T) {
 	hub := stream.NewHub(16, nil)
 	m := NewManager(Config{Enabled: true}, hub, "agent-1", nil)
 	host := &fakeHost{parentOK: true}
@@ -64,8 +64,8 @@ func TestHandleWaitRejectsWrongParent(t *testing.T) {
 	}
 }
 
-// TestGetResultFromDeliveredCache removeRecord 后 GetResult 仍返回快照。
-func TestGetResultFromDeliveredCache(t *testing.T) {
+// TestGetResultFromSettledCache unregisterActive 后 GetResult 仍从 settledResults 返回快照。
+func TestGetResultFromSettledCache(t *testing.T) {
 	hub := stream.NewHub(16, nil)
 	m := NewManager(Config{Enabled: true}, hub, "agent-1", nil)
 	host := &fakeHost{parentOK: true}

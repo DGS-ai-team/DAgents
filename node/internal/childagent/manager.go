@@ -45,7 +45,6 @@ type SpawnSpec struct {
 	AllowedTools    []string
 	MaxTurns        int
 	Purpose         string
-	Record          *Record
 }
 
 // Manager 跟踪子 Agent 记录、交付结果与 TTL。
@@ -57,13 +56,15 @@ type Manager struct {
 
 	host Host
 
-	mu       sync.Mutex
-	records  map[string]*Record
-	byParent map[string][]string
-	// parentOf 在 removeRecord 后仍保留，供 wait_temporary_agents / status 校验归属。
-	parentOf map[string]string
-	// delivered 保存终态快照，供异步 wait 在记录回收后读取。
-	delivered map[string]Result
+	mu sync.Mutex
+	// activeByID：活跃临时 Agent 账本（child_session_id → ActiveAgent）。
+	activeByID map[string]*ActiveAgent
+	// activeIDsByParent：父 session 下仍活跃的 child_session_id 列表。
+	activeIDsByParent map[string][]string
+	// childToParent：unregisterActive 后仍保留，供 wait/status 校验归属。
+	childToParent map[string]string
+	// settledResults：终态快照，unregisterActive 后仍可供 wait 读取。
+	settledResults map[string]Result
 }
 
 // NewManager 创建子 Agent 管理器；未 BindHost 前 Create 不可用。
@@ -87,14 +88,14 @@ func NewManager(cfg Config, hub *stream.Hub, agentID string, logger *slog.Logger
 		cfg.DefaultWaitTimeoutSeconds = 300
 	}
 	return &Manager{
-		cfg:      cfg,
-		hub:      hub,
-		agentID:  agentID,
-		logger:   logx.OrDefault(logger),
-		records:   make(map[string]*Record),
-		byParent:  make(map[string][]string),
-		parentOf:  make(map[string]string),
-		delivered: make(map[string]Result),
+		cfg:       cfg,
+		hub:       hub,
+		agentID:   agentID,
+		logger:    logx.OrDefault(logger),
+		activeByID:        make(map[string]*ActiveAgent),
+		activeIDsByParent: make(map[string][]string),
+		childToParent:     make(map[string]string),
+		settledResults:    make(map[string]Result),
 	}
 }
 
@@ -138,43 +139,46 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 		return "", err
 	}
 	expiresAt := time.Now().Add(time.Duration(input.TTLSeconds) * time.Second)
-	rec := newRecord(parentSessionID, input, childID, expiresAt)
-	rec.AllowedTools = allowed
-	rec.Status = StatusCreating
+	agent := newActiveAgent(parentSessionID, input, childID, expiresAt)
+	agent.AllowedTools = allowed
+	agent.Status = StatusCreating
 
 	m.mu.Lock()
-	m.records[childID] = rec
-	m.byParent[parentSessionID] = append(m.byParent[parentSessionID], childID)
-	m.parentOf[childID] = parentSessionID
+	m.activeByID[childID] = agent
+	m.activeIDsByParent[parentSessionID] = append(m.activeIDsByParent[parentSessionID], childID)
+	m.childToParent[childID] = parentSessionID
 	m.mu.Unlock()
 
+	// 创建子 runtime
 	if err := m.host.SpawnChild(SpawnSpec{
 		ChildSessionID:  childID,
 		ParentSessionID: parentSessionID,
 		AllowedTools:    allowed,
 		MaxTurns:        input.MaxTurns,
 		Purpose:         input.Purpose,
-		Record:          rec,
 	}); err != nil {
-		m.removeRecord(childID)
+		m.unregisterActive(childID)
 		return "ERROR: " + err.Error(), nil
 	}
 
+	// 投递首条 task
 	task := FormatChildTask(input.Task)
 	if err := m.host.EnqueueChildTask(childID, task); err != nil {
 		m.Cancel(parentSessionID, childID, "spawn enqueue failed")
 		return "ERROR: " + err.Error(), nil
 	}
 
-	rec.mu.Lock()
-	rec.Status = StatusActive
-	rec.mu.Unlock()
-
-	m.publishCreated(parentSessionID, rec, input.Wait)
+	agent.mu.Lock()
+	agent.Status = StatusActive
+	agent.mu.Unlock()
+	// 发布创建事件
+	m.publishCreated(parentSessionID, agent, input.Wait)
+	// 启动 TTL 定时器
 	go m.runTTLTimer(childID, time.Duration(input.TTLSeconds)*time.Second)
 
+	// 等待结果
 	if input.Wait {
-		res, waitErr := m.waitRecord(ctx, rec, time.Duration(input.TTLSeconds)*time.Second+30*time.Second)
+		res, waitErr := m.waitUntilSettled(ctx, agent, time.Duration(input.TTLSeconds)*time.Second+30*time.Second)
 		if waitErr != nil {
 			return "ERROR: " + waitErr.Error(), nil
 		}
@@ -190,6 +194,7 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 		return string(body), nil
 	}
 
+	// 返回结果
 	body, _ := json.Marshal(map[string]any{
 		"kind":             "handle",
 		"child_session_id": childID,
@@ -204,14 +209,14 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 // OnChildSettled 在子 runtime turn 空闲且无 pending HITL 时调用，尝试完成子 Agent。
 func (m *Manager) OnChildSettled(childSessionID, summary string, turnCount int) {
 	m.mu.Lock()
-	rec, ok := m.records[childSessionID]
-	if !ok || rec.terminal() {
+	agent, ok := m.activeByID[childSessionID]
+	if !ok || agent.isTerminal() {
 		m.mu.Unlock()
 		return
 	}
-	rec.mu.Lock()
-	rec.TurnCount = turnCount
-	rec.mu.Unlock()
+	agent.mu.Lock()
+	agent.TurnCount = turnCount
+	agent.mu.Unlock()
 	m.mu.Unlock()
 
 	if strings.TrimSpace(summary) == "" {
@@ -224,21 +229,21 @@ func (m *Manager) OnChildSettled(childSessionID, summary string, turnCount int) 
 func (m *Manager) Cancel(parentSessionID, childSessionID, reason string) (Result, error) {
 	childSessionID = strings.TrimSpace(childSessionID)
 	m.mu.Lock()
-	rec, ok := m.records[childSessionID]
+	agent, ok := m.activeByID[childSessionID]
 	if !ok {
 		m.mu.Unlock()
 		return Result{}, fmt.Errorf("child_agent_not_found")
 	}
-	if parentSessionID != "" && rec.ParentSessionID != parentSessionID {
+	if parentSessionID != "" && agent.ParentSessionID != parentSessionID {
 		m.mu.Unlock()
 		return Result{}, fmt.Errorf("child_agent_not_found")
 	}
-	if rec.terminal() {
-		out := rec.snapshot()
+	if agent.isTerminal() {
+		out := agent.resultSnapshot()
 		m.mu.Unlock()
 		return out, nil
 	}
-	prev := rec.Status
+	prev := agent.Status
 	m.mu.Unlock()
 
 	reason = strings.TrimSpace(reason)
@@ -252,27 +257,27 @@ func (m *Manager) Cancel(parentSessionID, childSessionID, reason string) (Result
 func (m *Manager) GetResult(childSessionID string) (Result, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if rec, ok := m.records[childSessionID]; ok {
-		return rec.snapshot(), nil
+	if agent, ok := m.activeByID[childSessionID]; ok {
+		return agent.resultSnapshot(), nil
 	}
-	if res, ok := m.delivered[childSessionID]; ok {
+	if res, ok := m.settledResults[childSessionID]; ok {
 		return res, nil
 	}
 	return Result{}, fmt.Errorf("child_agent_not_found")
 }
 
 // ListActive 返回父 session 下未交付的子 Agent 记录。
-func (m *Manager) ListActive(parentSessionID string) []*Record {
+func (m *Manager) ListActive(parentSessionID string) []*ActiveAgent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	ids := m.byParent[parentSessionID]
-	out := make([]*Record, 0, len(ids))
+	ids := m.activeIDsByParent[parentSessionID]
+	out := make([]*ActiveAgent, 0, len(ids))
 	for _, id := range ids {
-		rec := m.records[id]
-		if rec == nil || rec.terminal() {
+		agent := m.activeByID[id]
+		if agent == nil || agent.isTerminal() {
 			continue
 		}
-		out = append(out, rec)
+		out = append(out, agent)
 	}
 	return out
 }
@@ -288,8 +293,8 @@ func (m *Manager) RouteResume(parentSessionID string, resume map[string]any) (ta
 		return true, m.host.DeliverParentResume(parentSessionID, resume)
 	}
 	m.mu.Lock()
-	rec, ok := m.records[childID]
-	if !ok || rec.ParentSessionID != parentSessionID {
+	agent, ok := m.activeByID[childID]
+	if !ok || agent.ParentSessionID != parentSessionID {
 		m.mu.Unlock()
 		return false, fmt.Errorf("hitl_target_mismatch")
 	}
@@ -303,46 +308,47 @@ func (m *Manager) RouteResume(parentSessionID string, resume map[string]any) (ta
 // CancelAllForParent 父 session 删除时取消其下所有活跃子 Agent。
 func (m *Manager) CancelAllForParent(parentSessionID string) {
 	m.mu.Lock()
-	ids := append([]string(nil), m.byParent[parentSessionID]...)
+	ids := append([]string(nil), m.activeIDsByParent[parentSessionID]...)
 	m.mu.Unlock()
 	for _, id := range ids {
 		_, _ = m.Cancel(parentSessionID, id, "parent session released")
 	}
 }
 
+// finishWithEvent 完成子 Agent 并发布事件。
 func (m *Manager) finishWithEvent(childSessionID string, status Status, summary, errText string, cancelledEvent bool, previousStatus string) Result {
 	m.mu.Lock()
-	rec, ok := m.records[childSessionID]
-	if !ok || rec.terminal() {
+	agent, ok := m.activeByID[childSessionID]
+	if !ok || agent.isTerminal() {
 		out := Result{}
-		if rec != nil {
-			out = rec.snapshot()
+		if agent != nil {
+			out = agent.resultSnapshot()
 		}
 		m.mu.Unlock()
 		return out
 	}
-	rec.mu.Lock()
-	rec.Status = status
+	agent.mu.Lock()
+	agent.Status = status
 	out := Result{
 		ChildSessionID: childSessionID,
 		Status:         status,
 		Summary:        summary,
-		TurnCount:      rec.TurnCount,
+		TurnCount:      agent.TurnCount,
 		Error:          errText,
 		Artifacts:      []string{},
 	}
-	rec.result = &out
+	agent.terminalResult = &out
 	select {
-	case <-rec.done:
+	case <-agent.settledCh:
 	default:
-		close(rec.done)
+		close(agent.settledCh)
 	}
-	rec.mu.Unlock()
-	parentID := rec.ParentSessionID
+	agent.mu.Unlock()
+	parentID := agent.ParentSessionID
 	m.mu.Unlock()
 
 	m.mu.Lock()
-	m.delivered[childSessionID] = out
+	m.settledResults[childSessionID] = out
 	m.mu.Unlock()
 
 	if cancelledEvent {
@@ -353,19 +359,20 @@ func (m *Manager) finishWithEvent(childSessionID string, status Status, summary,
 	if m.host != nil {
 		m.host.StopChild(childSessionID)
 	}
-	m.removeRecord(childSessionID)
+	m.unregisterActive(childSessionID)
 	return out
 }
 
-func (m *Manager) removeRecord(childSessionID string) {
+// unregisterActive 从活跃账本移除临时 Agent（终态快照保留在 settledResults）。
+func (m *Manager) unregisterActive(childSessionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	rec := m.records[childSessionID]
-	if rec == nil {
+	agent := m.activeByID[childSessionID]
+	if agent == nil {
 		return
 	}
-	delete(m.records, childSessionID)
-	ids := m.byParent[rec.ParentSessionID]
+	delete(m.activeByID, childSessionID)
+	ids := m.activeIDsByParent[agent.ParentSessionID]
 	filtered := ids[:0]
 	for _, id := range ids {
 		if id != childSessionID {
@@ -373,22 +380,23 @@ func (m *Manager) removeRecord(childSessionID string) {
 		}
 	}
 	if len(filtered) == 0 {
-		delete(m.byParent, rec.ParentSessionID)
+		delete(m.activeIDsByParent, agent.ParentSessionID)
 	} else {
-		m.byParent[rec.ParentSessionID] = filtered
+		m.activeIDsByParent[agent.ParentSessionID] = filtered
 	}
 }
 
-func (m *Manager) waitRecord(ctx context.Context, rec *Record, timeout time.Duration) (Result, error) {
+// waitUntilSettled 阻塞直到 ActiveAgent 进入终态（wait=true 创建路径）。
+func (m *Manager) waitUntilSettled(ctx context.Context, agent *ActiveAgent, timeout time.Duration) (Result, error) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return Result{}, ctx.Err()
-	case <-rec.done:
-		return rec.snapshot(), nil
+	case <-agent.settledCh:
+		return agent.resultSnapshot(), nil
 	case <-timer.C:
-		_, _ = m.Cancel(rec.ParentSessionID, rec.ChildSessionID, "wait timeout")
+		_, _ = m.Cancel(agent.ParentSessionID, agent.ChildSessionID, "wait timeout")
 		return Result{}, fmt.Errorf("wait timeout")
 	}
 }
@@ -396,9 +404,9 @@ func (m *Manager) waitRecord(ctx context.Context, rec *Record, timeout time.Dura
 func (m *Manager) checkActiveLimit(parentID string) error {
 	active := 0
 	m.mu.Lock()
-	for _, id := range m.byParent[parentID] {
-		rec := m.records[id]
-		if rec != nil && !rec.terminal() {
+	for _, id := range m.activeIDsByParent[parentID] {
+		agent := m.activeByID[id]
+		if agent != nil && !agent.isTerminal() {
 			active++
 		}
 	}
@@ -414,29 +422,29 @@ func (m *Manager) runTTLTimer(childID string, ttl time.Duration) {
 	defer timer.Stop()
 	<-timer.C
 	m.mu.Lock()
-	rec := m.records[childID]
-	if rec == nil || rec.terminal() {
+	agent := m.activeByID[childID]
+	if agent == nil || agent.isTerminal() {
 		m.mu.Unlock()
 		return
 	}
-	parentID := rec.ParentSessionID
-	prev := string(rec.Status)
+	parentID := agent.ParentSessionID
+	prev := string(agent.Status)
 	m.mu.Unlock()
 	m.finishWithEvent(childID, StatusExpired, "", "ttl expired", false, prev)
 	m.logger.Info("child agent expired", "child_session_id", childID, "parent_session_id", parentID)
 }
 
-func (m *Manager) publishCreated(parentID string, rec *Record, wait bool) {
+func (m *Manager) publishCreated(parentID string, agent *ActiveAgent, wait bool) {
 	if m.hub == nil {
 		return
 	}
 	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCreated, map[string]any{
-		"child_session_id":  rec.ChildSessionID,
+		"child_session_id":  agent.ChildSessionID,
 		"parent_session_id": parentID,
-		"purpose":           rec.Purpose,
+		"purpose":           agent.Purpose,
 		"status":            StatusActive,
-		"expires_at":        rec.ExpiresAt.Format(time.RFC3339),
-		"max_turns":         rec.MaxTurns,
+		"expires_at":        agent.ExpiresAt.Format(time.RFC3339),
+		"max_turns":         agent.MaxTurns,
 		"wait":              wait,
 	})
 }

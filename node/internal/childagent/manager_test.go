@@ -57,6 +57,12 @@ func TestResolveAllowedToolsRejectsParentOnly(t *testing.T) {
 	}
 }
 
+func TestResolveAllowedToolsRejectsSkills(t *testing.T) {
+	if _, err := resolveAllowedTools([]string{ToolLoadSkills}); err == nil {
+		t.Fatal("expected error for skills tool")
+	}
+}
+
 func TestResolveAllowedToolsDefault(t *testing.T) {
 	got, err := resolveAllowedTools(nil)
 	if err != nil {

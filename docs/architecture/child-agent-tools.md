@@ -149,7 +149,7 @@
 | `allowed_tools`（未指定时） | `read_file`, `search_file`, `bash_run` |
 | `max_turns`（未指定时） | `child_agents.default_max_turns`（默认 20） |
 
-`allowed_tools` 须为 §8 可下放列表的子集，并与父 Agent 全局可用工具求交。子 Agent **可以**使用 `load_skills` / `unload_skills` / `clear_skills`，当且仅当父 Agent 可用且 `allowed_tools` 包含对应项。
+`allowed_tools` 须为 §8 可下放列表的子集，并与父 Agent 全局可用工具求交。临时 Agent **不得**使用 `load_skills` / `unload_skills` / `clear_skills`（仅父 Agent 会话可加载技能）。
 
 ---
 
@@ -157,11 +157,11 @@
 
 **可下放（父有则子可申请）：**
 
-`read_file`, `write_file`, `search_file`, `search_replace`, `bash_run`, `load_skills`, `unload_skills`, `clear_skills`, `background_job_status`, `background_job_cancel`
+`read_file`, `write_file`, `search_file`, `search_replace`, `bash_run`, `background_job_status`, `background_job_cancel`
 
 **永不下放：**
 
-`create_temporary_agent`, `wait_temporary_agents`, `temporary_agent_status`, `cancel_temporary_agent`, `ask_user_information`, `trigger_*`
+`create_temporary_agent`, `wait_temporary_agents`, `temporary_agent_status`, `cancel_temporary_agent`, `load_skills`, `unload_skills`, `clear_skills`, `ask_user_information`, `trigger_*`
 
 ---
 

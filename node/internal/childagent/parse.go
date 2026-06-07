@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// parseCreateInput 解析 create_temporary_agent 工具入参。
 func parseCreateInput(argsJSON string, cfg Config) (CreateInput, error) {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &raw); err != nil {
@@ -56,7 +57,7 @@ func parseCreateInput(argsJSON string, cfg Config) (CreateInput, error) {
 		AllowedTools: allowed,
 		TTLSeconds:   ttl,
 		MaxTurns:     maxTurns,
-		Wait: wait,
+		Wait:         wait,
 	}, nil
 }
 
