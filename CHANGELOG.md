@@ -2,6 +2,31 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.1** 代码基础上对齐 `/health` 与 Client 版本号为 **0.2.2**；**本版重点修复工具审批（HITL）相关缺陷**。
+
+### 修复
+
+- **工具审批（HITL）**：
+  - **Go full TUI**：父 Agent 与子临时 Agent 并发出现 `approval_required` 时，审批队列曾按单一槽位去重，导致后到的审批覆盖先到、或用户批准后 `resume` 无法匹配正确 `tool_call_id`。现以 **`ApprovalQueueKey`** 分桶（父：`approval_id`；子：`child_session_id`），同键仅保留最新一条，不同 Agent 的审批可并行排队。
+  - **resume 路由**：`SubmitResume` 载荷携带 `approval_id` / `child_session_id`，与 Node pending HITL 对齐，避免审批结果投递到错误会话或静默失败。
+  - **Node**：启用临时 Agent 时，父 session 的 `resume` 曾被重复入队，导致队列积压、审批无法继续；现保证单次入队（见 `TestEnqueueResumeParentDoesNotDoubleEnqueue`）。
+  - **Textual TUI（`dagents chat`）**：审批队列与用户追问（`ask_user_information`）展示与 Go Client 语义对齐，避免子 Agent 审批与父审批互相顶替。
+
+### 变更
+
+- **临时 Agent**：工具与 SSE 统一为 **temporary agent** 命名；子 runtime 禁止 `load_skills` / `unload_skills` / `clear_skills`；`ActiveAgent` 等内部命名整理。
+- **文档**：Python Agent 运行时迁入 `docs/archive/python-agent-runtime/`；新增 [`docs/architecture/go-node-internals.md`](docs/architecture/go-node-internals.md) 与 `node/internal/session`、`turn` 包 README。
+
+（Git **tag**：`v0.2.2`。）
+
+## [0.2.1] - 2026-06-07
+
+中间 tag，**未** bump 代码内 `Version` 常量；变更已包含在 **0.2.2**。主要内容：临时 Agent 重构与文档归档（见上）。
+
+（Git **tag**：`v0.2.1`。）
+
 ## [0.2.0] - 2026-05-30
 
 **0.x 预览**：**Go Agent Node + Client** 成为唯一 Agent 运行时；本地助手与终端交互以 Go 栈为主线。Python 保留 **Textual TUI Client**（`dagents chat`）与 **Register Center**，**Python FastAPI Agent API 已从仓库移除**（原 `app/harness/`、`run_agent_api.py`）。

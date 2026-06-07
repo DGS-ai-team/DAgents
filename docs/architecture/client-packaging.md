@@ -72,5 +72,5 @@ Phase AC Release：`linux-amd64` 与 `windows-amd64` 压缩包（Go Node + PyIns
 
 ```bash
 scripts/package_local_assistant.sh
-# 产物: dist/dagents-local-assistant-linux-amd64-0.2.0.tar.gz（或 windows zip）
+# 产物: dist/dagents-local-assistant-linux-amd64-0.2.2.tar.gz（或 windows zip）
 ```

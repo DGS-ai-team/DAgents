@@ -3,8 +3,8 @@
 # 与配置、.runtime、scripts/ 组装为发布目录并压缩。
 #
 # 用法：
-#   PLATFORM=linux-amd64 VERSION=0.2.0 scripts/ci/assemble_local_assistant_bundle.sh
-#   PLATFORM=windows-amd64 VERSION=0.2.0 scripts/ci/assemble_local_assistant_bundle.sh
+#   PLATFORM=linux-amd64 VERSION=0.2.2 scripts/ci/assemble_local_assistant_bundle.sh
+#   PLATFORM=windows-amd64 VERSION=0.2.2 scripts/ci/assemble_local_assistant_bundle.sh
 #
 # 前置：dist/dagents-node[.exe]、dist/dagents-cli[.exe] 已存在（或由 NODE_BIN/CLI_BIN 指定）。
 set -euo pipefail
@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 PLATFORM="${PLATFORM:-linux-amd64}"
-VERSION="${VERSION:-0.2.0}"
+VERSION="${VERSION:-0.2.2}"
 
 EXE=""
 if [[ "${PLATFORM}" == windows-* ]]; then

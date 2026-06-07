@@ -81,7 +81,7 @@
 
 ## `version_info.py`
 
-- **`CLI_VERSION`**：CLI 展示版本（与仓库标记版本 `0.2.0` 对齐）
+- **`CLI_VERSION`**：CLI 展示版本（与仓库标记版本 `0.2.2` 对齐）
 - **`get_cli_username`** / **`get_cli_version`**：欢迎区用户名与版本
 
 ## `tui/app.py`

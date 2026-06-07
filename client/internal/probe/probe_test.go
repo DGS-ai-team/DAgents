@@ -14,7 +14,7 @@ func TestNode_success(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status": "ok", "agent_id": "a1", "version": "0.2.0",
+			"status": "ok", "agent_id": "a1", "version": "0.2.2",
 		})
 	})
 	mux.HandleFunc("GET /v1/agent/info", func(w http.ResponseWriter, _ *http.Request) {

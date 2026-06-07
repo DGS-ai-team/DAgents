@@ -53,7 +53,7 @@ GET /health
 ```
 
 ```json
-{ "status": "ok", "agent_id": "ops-win-01", "version": "0.2.0" }
+{ "status": "ok", "agent_id": "ops-win-01", "version": "0.2.2" }
 ```
 
 ```http

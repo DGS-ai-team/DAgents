@@ -27,7 +27,8 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
-| **0.2.0** | **已发布** | Go Agent Node + Client 本地助手主线；Python Agent 运行时弃用标记；触发器日历调度；文档双栈重组（见 **CHANGELOG**）。 |
+| **0.2.2** | **已发布** | HITL 工具审批修复；临时 Agent 协议整理；文档归档与 go-node-internals（见 **CHANGELOG**）。 |
+| **0.2.0** | **已发布** | Go Agent Node + Client 本地助手主线；Python Agent 运行时移除；触发器日历调度（见 **CHANGELOG**）。 |
 | **0.1.0** | **已发布** | 首个对外标记版本：Python 核心 API、SQLite、SSE、Register Center、文档与单测基线。 |
 | **0.x** | **进行中** | 以 Go 本地助手 + 企业治理为主线；**1.0** 前允许不兼容调整。 |
 | **1.0** | **目标** | 企业本地闭环、Agent Directory、治理审计、触发器控制面、Skill Library 的核心 API 与配置形态相对稳定。 |
