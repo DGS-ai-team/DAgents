@@ -20,10 +20,6 @@ func parseCreateInput(argsJSON string, cfg Config) (CreateInput, error) {
 	if purpose == "" {
 		return CreateInput{}, fmt.Errorf("purpose is required")
 	}
-	templateID := strings.TrimSpace(fmt.Sprint(raw["template_id"]))
-	if templateID == "" || templateID == "<nil>" {
-		templateID = "general-helper"
-	}
 	ttl := cfg.DefaultTTLSeconds
 	if v, ok := raw["ttl_seconds"].(float64); ok && int(v) > 0 {
 		ttl = int(v)
@@ -45,7 +41,6 @@ func parseCreateInput(argsJSON string, cfg Config) (CreateInput, error) {
 		maxTurns = cfg.MaxMaxTurns
 	}
 	wait, _ := raw["wait"].(bool)
-	detached, _ := raw["detached"].(bool)
 	var allowed []string
 	if arr, ok := raw["allowed_tools"].([]any); ok {
 		for _, item := range arr {
@@ -58,27 +53,21 @@ func parseCreateInput(argsJSON string, cfg Config) (CreateInput, error) {
 	return CreateInput{
 		Task:         task,
 		Purpose:      purpose,
-		TemplateID:   templateID,
 		AllowedTools: allowed,
 		TTLSeconds:   ttl,
 		MaxTurns:     maxTurns,
-		Wait:         wait,
-		Detached:     detached,
+		Wait: wait,
 	}, nil
 }
 
-func resolveAllowedTools(tmpl Template, requested []string) ([]string, error) {
-	templateSet := make(map[string]struct{}, len(tmpl.DefaultTools))
-	for _, n := range tmpl.DefaultTools {
-		templateSet[n] = struct{}{}
-	}
+func resolveAllowedTools(requested []string) ([]string, error) {
 	parentSet := make(map[string]struct{}, len(ParentDelegatableTools()))
 	for _, n := range ParentDelegatableTools() {
 		parentSet[n] = struct{}{}
 	}
 	pick := requested
 	if len(pick) == 0 {
-		pick = tmpl.DefaultTools
+		pick = DefaultChildAllowedTools()
 	}
 	out := make([]string, 0, len(pick))
 	for _, name := range pick {
@@ -88,9 +77,6 @@ func resolveAllowedTools(tmpl Template, requested []string) ([]string, error) {
 		}
 		if IsParentOnlyTool(name) {
 			return nil, fmt.Errorf("tool %q cannot be delegated to child agent", name)
-		}
-		if _, ok := templateSet[name]; !ok {
-			return nil, fmt.Errorf("tool %q exceeds template allowed set", name)
 		}
 		if _, ok := parentSet[name]; !ok {
 			return nil, fmt.Errorf("tool %q is not delegatable", name)
@@ -103,7 +89,7 @@ func resolveAllowedTools(tmpl Template, requested []string) ([]string, error) {
 	return out, nil
 }
 
-// WaitTimeout 返回 wait_child_agents 默认超时。
+// WaitTimeout 返回 wait_temporary_agents 默认超时。
 func (m *Manager) WaitTimeout(requested int) time.Duration {
 	if requested <= 0 {
 		return time.Duration(m.cfg.DefaultWaitTimeoutSeconds) * time.Second

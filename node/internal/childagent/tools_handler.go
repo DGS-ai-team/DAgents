@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// HandleWait 实现 wait_child_agents 工具。
+// HandleWait 实现 wait_temporary_agents 工具。
 func (m *Manager) HandleWait(ctx context.Context, parentSessionID, argsJSON string) (string, error) {
 	ids, timeoutSec, failFast, err := parseWaitInput(argsJSON, m.cfg.DefaultWaitTimeoutSeconds)
 	if err != nil {
@@ -42,7 +42,7 @@ func (m *Manager) HandleWait(ctx context.Context, parentSessionID, argsJSON stri
 	}
 }
 
-// HandleStatus 实现 child_agent_status 工具。
+// HandleStatus 实现 temporary_agent_status 工具。
 func (m *Manager) HandleStatus(parentSessionID, argsJSON string) (string, error) {
 	ids, err := parseIDList(argsJSON)
 	if err != nil {
@@ -66,7 +66,7 @@ func (m *Manager) HandleStatus(parentSessionID, argsJSON string) (string, error)
 	return string(body), nil
 }
 
-// HandleCancelTool 实现 cancel_child_agent 工具。
+// HandleCancelTool 实现 cancel_temporary_agent 工具。
 func (m *Manager) HandleCancelTool(parentSessionID, argsJSON string) (string, error) {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &raw); err != nil {
@@ -207,18 +207,18 @@ func parseIDListFromMap(raw map[string]any) ([]string, error) {
 	return out, nil
 }
 
-// HandleParentTool 分发父 Agent 子 Agent 管理工具。
+// HandleParentTool 分发父 Agent 临时 Agent 管理工具（非 A2A）。
 func (m *Manager) HandleParentTool(ctx context.Context, parentSessionID, toolName, argsJSON string) (string, error) {
 	switch toolName {
-	case "create_temporary_agent":
+	case ToolCreateTemporaryAgent:
 		return m.HandleCreate(ctx, parentSessionID, argsJSON)
-	case "wait_child_agents":
+	case ToolWaitTemporaryAgents:
 		return m.HandleWait(ctx, parentSessionID, argsJSON)
-	case "child_agent_status":
+	case ToolTemporaryAgentStatus:
 		return m.HandleStatus(parentSessionID, argsJSON)
-	case "cancel_child_agent":
+	case ToolCancelTemporaryAgent:
 		return m.HandleCancelTool(parentSessionID, argsJSON)
 	default:
-		return "", fmt.Errorf("unknown child tool %q", toolName)
+		return "", fmt.Errorf("unknown temporary agent tool %q", toolName)
 	}
 }

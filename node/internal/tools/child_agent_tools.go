@@ -9,9 +9,9 @@ import (
 func childAgentToolDefs() []ToolDef {
 	return []ToolDef{
 		createTemporaryAgentToolDef(),
-		waitChildAgentsToolDef(),
-		childAgentStatusToolDef(),
-		cancelChildAgentToolDef(),
+		waitTemporaryAgentsToolDef(),
+		temporaryAgentStatusToolDef(),
+		cancelTemporaryAgentToolDef(),
 	}
 }
 
@@ -19,19 +19,25 @@ func createTemporaryAgentToolDef() ToolDef {
 	return ToolDef{
 		Type: "function",
 		Function: FunctionDef{
-			Name:        "create_temporary_agent",
-			Description: "创建临时子 Agent 执行自包含子任务；wait=true 阻塞至完成",
+			Name: "create_temporary_agent",
+			Description: "创建同进程临时 Agent（temporary agent）执行自包含子任务，非外部 A2A 对等调用。" +
+				"wait=true 时阻塞至完成。须在 task 中提供完整上下文，并通过 allowed_tools 指定其可用工具（仅限你当前拥有的工具子集）。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"task":           map[string]any{"type": "string", "description": "子 Agent 首条 user 任务（必填，须自包含）"},
-					"purpose":        map[string]any{"type": "string", "description": "短说明（必填）"},
-					"template_id":    map[string]any{"type": "string", "description": "模板 id，默认 general-helper"},
-					"allowed_tools":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"ttl_seconds":    map[string]any{"type": "integer"},
-					"max_turns":      map[string]any{"type": "integer"},
-					"wait":           map[string]any{"type": "boolean", "description": "true 时阻塞等待子 Agent 结果"},
-					"detached":       map[string]any{"type": "boolean"},
+					"task": map[string]any{
+						"type":        "string",
+						"description": "临时 Agent 首条 user 任务（必填，须自包含，含角色与约束）",
+					},
+					"purpose": map[string]any{"type": "string", "description": "短说明（必填，用于日志与 UI）"},
+					"allowed_tools": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "临时 Agent 可用工具子集，须在父可下放列表内；默认 read_file、search_file、bash_run",
+					},
+					"ttl_seconds": map[string]any{"type": "integer", "description": "临时 Agent 生命周期（秒）"},
+					"max_turns":   map[string]any{"type": "integer", "description": "临时 Agent 最大回合数"},
+					"wait":        map[string]any{"type": "boolean", "description": "true 时阻塞等待临时 Agent 结果"},
 				},
 				"required":             []string{"task", "purpose"},
 				"additionalProperties": false,
@@ -40,18 +46,22 @@ func createTemporaryAgentToolDef() ToolDef {
 	}
 }
 
-func waitChildAgentsToolDef() ToolDef {
+func waitTemporaryAgentsToolDef() ToolDef {
 	return ToolDef{
 		Type: "function",
 		Function: FunctionDef{
-			Name:        "wait_child_agents",
-			Description: "等待多个子 Agent 终态并汇总",
+			Name:        "wait_temporary_agents",
+			Description: "等待一个或多个临时 Agent（temporary agent）到达终态并汇总；非 A2A 消息轮询。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"child_session_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"timeout_seconds":   map[string]any{"type": "integer"},
-					"fail_fast":         map[string]any{"type": "boolean"},
+					"child_session_ids": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "临时 Agent 的 session id 列表（create_temporary_agent 返回）",
+					},
+					"timeout_seconds": map[string]any{"type": "integer", "description": "最长等待秒数，0 表示立即返回当前快照"},
+					"fail_fast":       map[string]any{"type": "boolean", "description": "任一进入失败终态时提前返回"},
 				},
 				"required":             []string{"child_session_ids"},
 				"additionalProperties": false,
@@ -60,16 +70,20 @@ func waitChildAgentsToolDef() ToolDef {
 	}
 }
 
-func childAgentStatusToolDef() ToolDef {
+func temporaryAgentStatusToolDef() ToolDef {
 	return ToolDef{
 		Type: "function",
 		Function: FunctionDef{
-			Name:        "child_agent_status",
-			Description: "非阻塞查询子 Agent 状态",
+			Name:        "temporary_agent_status",
+			Description: "非阻塞查询临时 Agent（temporary agent）状态；非 A2A。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"child_session_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"child_session_ids": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "临时 Agent 的 session id 列表",
+					},
 				},
 				"required":             []string{"child_session_ids"},
 				"additionalProperties": false,
@@ -78,17 +92,20 @@ func childAgentStatusToolDef() ToolDef {
 	}
 }
 
-func cancelChildAgentToolDef() ToolDef {
+func cancelTemporaryAgentToolDef() ToolDef {
 	return ToolDef{
 		Type: "function",
 		Function: FunctionDef{
-			Name:        "cancel_child_agent",
-			Description: "取消仍在运行的子 Agent",
+			Name:        "cancel_temporary_agent",
+			Description: "取消仍在运行的临时 Agent（temporary agent）；非 A2A。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"child_session_id": map[string]any{"type": "string"},
-					"reason":           map[string]any{"type": "string"},
+					"child_session_id": map[string]any{
+						"type":        "string",
+						"description": "临时 Agent 的 session id",
+					},
+					"reason": map[string]any{"type": "string", "description": "取消原因（可选）"},
 				},
 				"required":             []string{"child_session_id"},
 				"additionalProperties": false,
@@ -97,10 +114,10 @@ func cancelChildAgentToolDef() ToolDef {
 	}
 }
 
-// RegisterChildAgentToolStubs 注册子 Agent 工具占位（执行由 orchestrator 处理）。
+// RegisterChildAgentToolStubs 注册临时 Agent 工具占位（执行由 orchestrator 处理，非 A2A）。
 func (r *Registry) RegisterChildAgentToolStubs() {
 	for _, name := range []string{
-		"create_temporary_agent", "wait_child_agents", "child_agent_status", "cancel_child_agent",
+		"create_temporary_agent", "wait_temporary_agents", "temporary_agent_status", "cancel_temporary_agent",
 	} {
 		n := name
 		r.handlers[n] = func(context.Context, json.RawMessage) (string, error) {

@@ -9,5 +9,7 @@
 | `Record` / `Result` | 子 Agent 元数据与终态 |
 | `RelayHub` | 子 turn SSE → 父 session |
 | `RestrictedRegistry` | 工具白名单 |
-| `LookupTemplate` / `FormatTask` | 模板与首条 task |
-| `IsChildAgentTool` / `IsParentOnlyTool` | 工具分流 |
+| `FormatChildTask` / `DefaultChildAllowedTools` | 首条 task 与默认工具集 |
+| `ParentDelegatableTools` / `resolveAllowedTools` | 工具下放校验 |
+| `IsTemporaryAgentTool` / `IsParentOnlyTool` | 临时 Agent 工具分流（非 A2A） |
+| `HitlScopeTemporaryAgent` / `EventTemporaryAgent*` | SSE 与 HITL 协议常量 |

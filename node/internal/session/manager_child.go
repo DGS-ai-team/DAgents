@@ -48,7 +48,6 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 		childOpts,
 		spec.AllowedTools,
 		spec.Purpose,
-		spec.TemplateID,
 		m.children,
 	)
 	m.sessions[spec.ChildSessionID] = rt
@@ -163,7 +162,7 @@ func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, err
 			ChildSessionID: rec.ChildSessionID,
 			Status:         string(rec.Status),
 			Purpose:        rec.Purpose,
-			TemplateID:     rec.TemplateID,
+			AllowedTools:   append([]string(nil), rec.AllowedTools...),
 			CreatedAt:      rec.CreatedAt,
 			ExpiresAt:      rec.ExpiresAt,
 			TurnCount:      turnCount,
@@ -186,7 +185,7 @@ type ChildAgentView struct {
 	ChildSessionID string    `json:"child_session_id"`
 	Status         string    `json:"status"`
 	Purpose        string    `json:"purpose"`
-	TemplateID     string    `json:"template_id"`
+	AllowedTools   []string  `json:"allowed_tools"`
 	CreatedAt      time.Time `json:"created_at"`
 	ExpiresAt      time.Time `json:"expires_at"`
 	TurnCount      int       `json:"turn_count"`

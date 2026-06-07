@@ -19,7 +19,7 @@ func newChildRuntime(
 	logger *slog.Logger,
 	turnOpts TurnOptions,
 	allowedTools []string,
-	purpose, templateID string,
+	purpose string,
 	childMgr *childagent.Manager,
 ) *runtime {
 	restricted := childagent.NewRestrictedRegistry(baseRegistry, allowedTools)
@@ -29,7 +29,6 @@ func newChildRuntime(
 		AgentID:         agentID,
 		ChildSessionID:  id,
 		ChildPurpose:    purpose,
-		ChildTemplateID: templateID,
 	}
 	rt := newRuntimeWithPublisher(
 		id, agentID, relay, hub, llmClient, restricted, policyEngine, nil, logger,

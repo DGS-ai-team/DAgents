@@ -54,7 +54,7 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 
 快捷键：context 视图中按 `Esc` 返回聊天记录；输出中、工具审批或 Agent 询问中按 `Esc` 可调用 cancel 中断当前 turn。
 
-**Agent 询问（`ask_user_information`）**：Node 会发 `tool_call`（工具行）与 `user_information_required`（「Agent 询问」块）；**以询问块为准**操作。无选项时在底部输入框输入后 Enter；有选项时 ↑/↓、Space 多选、Enter 确认。`done` 表示轮到用户（见 [agent-node-api.md §2.4.1](../../docs/architecture/agent-node-api.md)）。
+**Agent 询问（`ask_user_information`）**：TUI 将 `tool_call` 与 `user_information_required` 合并为一条「Agent 询问」块（问题 + 选项）。无选项时在底部输入框输入后 Enter；有选项时 ↑/↓、Space 多选、Enter 确认。`done` 表示轮到用户（见 [agent-node-api.md §2.4.1](../../docs/architecture/agent-node-api.md)）。
 
 ## 架构要点
 

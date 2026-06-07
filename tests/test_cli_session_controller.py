@@ -131,8 +131,59 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.hitl_queue_len(), 0)
         mock_client.submit_message.assert_awaited_once()
 
+    async def test_two_child_approvals_both_queued(self) -> None:
+        """不同子 Agent 的 approval 应并存，不被后到的覆盖。"""
+        child_a = {
+            "child_session_id": "child-a",
+            "approval_args": {
+                "tool_calls": [{"id": "call_a", "name": "bash_run", "arguments": {}}],
+            },
+        }
+        child_b = {
+            "child_session_id": "child-b",
+            "approval_args": {
+                "tool_calls": [{"id": "call_b", "name": "bash_run", "arguments": {}}],
+            },
+        }
+        await self.controller._handle_stream_event(_event("approval_required", data=child_a))
+        await self.controller._handle_stream_event(_event("approval_required", data=child_b))
+        self.assertEqual(self.controller.hitl_queue_len(), 2)
+        head = self.controller.peek_hitl()
+        self.assertIsNotNone(head)
+        assert head is not None
+        ids = [r.call_id for r in extract_tool_approval_requests(head.data)]
+        self.assertEqual(ids, ["call_a"])
+
+    async def test_user_information_does_not_clear_approval_queue(self) -> None:
+        """user_information 入队时不应移除队列中已有 approval。"""
+        await self.controller._handle_stream_event(
+            _event(
+                "approval_required",
+                data={
+                    "child_session_id": "child-a",
+                    "approval_args": {
+                        "tool_calls": [{"id": "call_a", "name": "bash_run", "arguments": {}}],
+                    },
+                },
+            ),
+        )
+        await self.controller._handle_stream_event(
+            _event(
+                "user_information_required",
+                data={
+                    "user_information_args": {
+                        "tool_call_id": "call_ask",
+                        "question": "确认？",
+                    },
+                },
+            ),
+        )
+        self.assertEqual(self.controller.hitl_queue_len(), 2)
+        kinds = [item.kind for item in self.controller._hitl_queue]
+        self.assertEqual(kinds, ["approval", "user_information"])
+
     async def test_new_approval_replaces_stale_approval_in_queue(self) -> None:
-        """新的 approval_required 应替换队列中旧 approval。"""
+        """同一父级目标的 approval_required 应替换队列中旧 approval。"""
         old_data = {
             "approval_args": {
                 "tool_calls": [{"id": "call_old", "name": "bash_run", "arguments": {}}],

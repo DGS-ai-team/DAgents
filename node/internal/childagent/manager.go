@@ -45,7 +45,6 @@ type SpawnSpec struct {
 	AllowedTools    []string
 	MaxTurns        int
 	Purpose         string
-	TemplateID      string
 	Record          *Record
 }
 
@@ -61,7 +60,7 @@ type Manager struct {
 	mu       sync.Mutex
 	records  map[string]*Record
 	byParent map[string][]string
-	// parentOf 在 removeRecord 后仍保留，供 wait_child_agents / status 校验归属。
+	// parentOf 在 removeRecord 后仍保留，供 wait_temporary_agents / status 校验归属。
 	parentOf map[string]string
 	// delivered 保存终态快照，供异步 wait 在记录回收后读取。
 	delivered map[string]Result
@@ -129,11 +128,7 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 		return "ERROR: " + err.Error(), nil
 	}
 
-	tmpl, err := LookupTemplate(input.TemplateID)
-	if err != nil {
-		return "ERROR: " + err.Error(), nil
-	}
-	allowed, err := resolveAllowedTools(tmpl, input.AllowedTools)
+	allowed, err := resolveAllowedTools(input.AllowedTools)
 	if err != nil {
 		return "ERROR: " + err.Error(), nil
 	}
@@ -144,7 +139,6 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 	}
 	expiresAt := time.Now().Add(time.Duration(input.TTLSeconds) * time.Second)
 	rec := newRecord(parentSessionID, input, childID, expiresAt)
-	rec.TemplateID = tmpl.ID
 	rec.AllowedTools = allowed
 	rec.Status = StatusCreating
 
@@ -160,14 +154,13 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 		AllowedTools:    allowed,
 		MaxTurns:        input.MaxTurns,
 		Purpose:         input.Purpose,
-		TemplateID:      tmpl.ID,
 		Record:          rec,
 	}); err != nil {
 		m.removeRecord(childID)
 		return "ERROR: " + err.Error(), nil
 	}
 
-	task := FormatTask(tmpl, input.Task)
+	task := FormatChildTask(input.Task)
 	if err := m.host.EnqueueChildTask(childID, task); err != nil {
 		m.Cancel(parentSessionID, childID, "spawn enqueue failed")
 		return "ERROR: " + err.Error(), nil
@@ -202,7 +195,6 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 		"child_session_id": childID,
 		"status":           StatusActive,
 		"purpose":          input.Purpose,
-		"template_id":      tmpl.ID,
 		"expires_at":       expiresAt.Format(time.RFC3339),
 		"max_turns":        input.MaxTurns,
 	})
@@ -308,19 +300,12 @@ func (m *Manager) RouteResume(parentSessionID string, resume map[string]any) (ta
 	return false, m.host.DeliverChildResume(childID, resume)
 }
 
-// CancelAllForParent 父 session 删除时取消非 detached 子 Agent。
+// CancelAllForParent 父 session 删除时取消其下所有活跃子 Agent。
 func (m *Manager) CancelAllForParent(parentSessionID string) {
 	m.mu.Lock()
 	ids := append([]string(nil), m.byParent[parentSessionID]...)
 	m.mu.Unlock()
 	for _, id := range ids {
-		m.mu.Lock()
-		rec := m.records[id]
-		detached := rec != nil && rec.Detached
-		m.mu.Unlock()
-		if detached {
-			continue
-		}
 		_, _ = m.Cancel(parentSessionID, id, "parent session released")
 	}
 }
@@ -445,11 +430,10 @@ func (m *Manager) publishCreated(parentID string, rec *Record, wait bool) {
 	if m.hub == nil {
 		return
 	}
-	m.hub.Publish(parentID, m.agentID, "child_agent_created", map[string]any{
+	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCreated, map[string]any{
 		"child_session_id":  rec.ChildSessionID,
 		"parent_session_id": parentID,
 		"purpose":           rec.Purpose,
-		"template_id":       rec.TemplateID,
 		"status":            StatusActive,
 		"expires_at":        rec.ExpiresAt.Format(time.RFC3339),
 		"max_turns":         rec.MaxTurns,
@@ -461,7 +445,7 @@ func (m *Manager) publishCompleted(parentID string, res *Result) {
 	if m.hub == nil || res == nil {
 		return
 	}
-	m.hub.Publish(parentID, m.agentID, "child_agent_completed", map[string]any{
+	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCompleted, map[string]any{
 		"child_session_id":  res.ChildSessionID,
 		"parent_session_id": parentID,
 		"status":            res.Status,
@@ -476,7 +460,7 @@ func (m *Manager) publishCancelled(parentID, childID, reason, previous string) {
 	if m.hub == nil {
 		return
 	}
-	m.hub.Publish(parentID, m.agentID, "child_agent_cancelled", map[string]any{
+	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCancelled, map[string]any{
 		"child_session_id":  childID,
 		"parent_session_id": parentID,
 		"status":            StatusCancelled,

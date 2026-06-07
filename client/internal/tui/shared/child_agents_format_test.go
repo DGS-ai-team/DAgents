@@ -18,7 +18,7 @@ func TestFormatChildAgentsListItems(t *testing.T) {
 	got := FormatChildAgentsList([]nodeapi.ChildAgentListItem{{
 		ChildSessionID: "child-abc",
 		Purpose:        "review",
-		TemplateID:     "general-helper",
+		AllowedTools:   []string{"read_file", "search_file"},
 		Status:         "active",
 		TurnCount:      2,
 		MaxTurns:       20,

@@ -112,7 +112,7 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 		r.turn.MarkTurnContent()
 	}
 	switch ev.Type {
-	case "child_agent_created", "child_agent_completed", "child_agent_cancelled":
+	case "temporary_agent_created", "temporary_agent_completed", "temporary_agent_cancelled":
 		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
 			r.logSystem(line)
 		}

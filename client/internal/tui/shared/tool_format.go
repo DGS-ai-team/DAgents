@@ -7,8 +7,10 @@ import (
 )
 
 const (
-	toolPreviewMaxRunes = 240
-	toolDetailMaxLines  = 8
+	toolPreviewMaxRunes       = 240
+	toolDetailMaxLines        = 8
+	UserInformationToolName   = "ask_user_information"
+	userInformationDisplayName = "Agent 询问"
 )
 
 // NormalizedToolCall 为 UI 使用的 tool call 扁平结构。
@@ -40,6 +42,10 @@ func formatToolCallEvent(data map[string]any, verbose bool) []string {
 	}
 	lines := make([]string, 0, len(calls))
 	for _, call := range calls {
+		if call.Name == UserInformationToolName {
+			// 问题正文在 user_information_required 时与「Agent 询问」合并为单条展示。
+			continue
+		}
 		title := ToolDisplayName(call.Name, call.Arguments)
 		lines = append(lines, "[tool] ▶ 调用 "+title)
 		if verbose {
@@ -96,6 +102,13 @@ func resultHeadline(name string, rejected bool, content string) string {
 		return "✓ " + name + " 后台任务结束"
 	case strings.HasPrefix(content, "ERROR:"):
 		return "✗ " + name + " 错误"
+	case name == "search_replace" || strings.HasPrefix(content, "成功:"):
+		if hint := summarizeSearchReplaceMeta(content); hint != "" {
+			if strings.Contains(content, "成功: 否") {
+				return "✗ search_replace · " + hint
+			}
+			return "✓ search_replace · " + hint
+		}
 	case strings.HasPrefix(content, `{`) || strings.HasPrefix(content, `[`):
 		if hint := summarizeJSONResult(content); hint != "" {
 			return "✓ " + name + " · " + hint
@@ -115,6 +128,11 @@ func summarizeToolResultContent(name, content string) string {
 		return truncatePreview(content, toolPreviewMaxRunes)
 	case strings.HasPrefix(content, "ERROR:"):
 		return truncatePreview(content, toolPreviewMaxRunes)
+	case name == "search_replace" || strings.HasPrefix(content, "成功:"):
+		if diff := searchReplaceDiff(content); diff != "" {
+			return truncatePreviewLines(diff, toolDetailMaxLines, toolPreviewMaxRunes)
+		}
+		return summarizeSearchReplaceMeta(content)
 	default:
 		if hint := summarizeJSONResult(content); hint != "" && !strings.Contains(content, "\n") {
 			return hint
@@ -151,6 +169,55 @@ func parseBashExitCode(content string) int {
 		return code
 	}
 	return -1
+}
+
+func splitSearchReplaceResult(content string) (meta, diff string) {
+	parts := strings.SplitN(content, "\n---\n", 2)
+	meta = strings.TrimSpace(parts[0])
+	if len(parts) > 1 {
+		diff = strings.TrimSpace(parts[1])
+	}
+	return meta, diff
+}
+
+func parseSearchReplaceFields(meta string) map[string]string {
+	fields := make(map[string]string)
+	for _, line := range strings.Split(meta, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			continue
+		}
+		fields[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	return fields
+}
+
+func summarizeSearchReplaceMeta(content string) string {
+	meta, _ := splitSearchReplaceResult(content)
+	fields := parseSearchReplaceFields(meta)
+	if fields["成功"] == "否" {
+		if err := fields["错误"]; err != "" {
+			return err
+		}
+		return "失败"
+	}
+	path := fields["路径"]
+	count := fields["替换次数"]
+	if count != "" && path != "" {
+		return count + " 处替换 · " + path
+	}
+	if path != "" {
+		return path
+	}
+	if count != "" {
+		return count + " 处替换"
+	}
+	return ""
+}
+
+func searchReplaceDiff(content string) string {
+	_, diff := splitSearchReplaceResult(content)
+	return diff
 }
 
 func extractSection(content, startMark, endMark string) string {
@@ -304,6 +371,8 @@ func ToolDisplayName(name string, args map[string]any) string {
 			path = "—"
 		}
 		return name + "(" + path + ")"
+	case UserInformationToolName:
+		return userInformationDisplayName
 	default:
 		if len(args) == 0 {
 			return name + "()"

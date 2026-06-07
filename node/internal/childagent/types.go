@@ -22,12 +22,10 @@ const (
 type CreateInput struct {
 	Task         string
 	Purpose      string
-	TemplateID   string
 	AllowedTools []string
 	TTLSeconds   int
-	MaxTurns     int
-	Wait         bool
-	Detached     bool
+	MaxTurns int
+	Wait     bool
 }
 
 // Result 为交付给父 Agent 的终态结果。
@@ -44,16 +42,14 @@ type Result struct {
 type Record struct {
 	ChildSessionID  string
 	ParentSessionID string
-	TemplateID      string
 	Purpose         string
 	AllowedTools    []string
 	Status          Status
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
 	MaxTurns        int
-	TurnCount       int
-	Detached        bool
-	WaitSync        bool
+	TurnCount int
+	WaitSync  bool
 
 	mu     sync.Mutex
 	result *Result
@@ -64,15 +60,13 @@ func newRecord(parentID string, input CreateInput, childID string, expiresAt tim
 	return &Record{
 		ChildSessionID:  childID,
 		ParentSessionID: parentID,
-		TemplateID:      input.TemplateID,
 		Purpose:         input.Purpose,
 		AllowedTools:    append([]string(nil), input.AllowedTools...),
 		Status:          StatusCreating,
 		CreatedAt:       time.Now(),
 		ExpiresAt:       expiresAt,
-		MaxTurns:        input.MaxTurns,
-		Detached:        input.Detached,
-		WaitSync:        input.Wait,
+		MaxTurns: input.MaxTurns,
+		WaitSync: input.Wait,
 		done:            make(chan struct{}),
 	}
 }

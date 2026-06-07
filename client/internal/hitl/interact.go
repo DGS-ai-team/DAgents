@@ -123,7 +123,11 @@ func resolveUserInformation(ctx context.Context, interact *Interact, data map[st
 	}
 	question := extractUserInformationQuestion(data)
 	toolCallID := extractUserInformationToolCallID(data)
-	fmt.Fprintf(os.Stderr, "\n--- 询问 ---\n%s\n> ", question)
+	PrintUserInformationTranscript(os.Stderr, &UserInformationRequest{
+		ToolCallID: toolCallID,
+		Question:   question,
+	})
+	fmt.Fprint(os.Stderr, "> ")
 	answer, err := readLine(os.Stdin)
 	if err != nil {
 		return nil, err
@@ -137,7 +141,8 @@ func resolveUserInformation(ctx context.Context, interact *Interact, data map[st
 
 // resolveUserInformationOptionsPlain 在终端列出可选项，支持序号或自由文本作答。
 func resolveUserInformationOptionsPlain(req *UserInformationRequest) (map[string]any, error) {
-	fmt.Fprintf(os.Stderr, "\n--- 询问 ---\n%s\n", req.Question)
+	PrintUserInformationTranscript(os.Stderr, req)
+	fmt.Fprintln(os.Stderr)
 	for i, opt := range req.Options {
 		fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, opt.Label)
 	}

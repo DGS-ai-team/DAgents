@@ -62,7 +62,7 @@ func TestHandleEventChildLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := r.handleEvent(ctx, nodeapi.StreamEvent{
-		Type: "child_agent_created",
+		Type: "temporary_agent_created",
 		Data: map[string]any{
 			"child_session_id": "child-abc",
 			"purpose":          "scan logs",
@@ -72,7 +72,7 @@ func TestHandleEventChildLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := r.transcript.Lines()
-	if len(lines) != 1 || !strings.Contains(lines[0], "子任务已创建") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "临时 Agent 已创建") {
 		t.Fatalf("lifecycle line missing: %v", lines)
 	}
 }
@@ -107,7 +107,7 @@ func TestShouldSkipChildRuntimeDisplayRepl(t *testing.T) {
 	if clihitl.ShouldSkipChildRuntimeDisplay("approval_required", data) {
 		t.Fatal("approval should not skip")
 	}
-	if clihitl.ShouldSkipChildRuntimeDisplay("child_agent_created", data) {
+	if clihitl.ShouldSkipChildRuntimeDisplay("temporary_agent_created", data) {
 		t.Fatal("lifecycle should not skip")
 	}
 }

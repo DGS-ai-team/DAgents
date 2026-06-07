@@ -499,7 +499,7 @@ func (o *Orchestrator) processToolCalls(
 	for _, tc := range calls {
 		o.publishToolCall(sessionID, tc)
 
-		if childagent.IsChildAgentTool(tc.Function.Name) {
+		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
 			if o.isChildSession {
 				o.appendDeniedTool(sessionID, history, tc, "child_forbidden")
 				continue

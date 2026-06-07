@@ -38,6 +38,7 @@
 
 ## `child_agent.py`
 
+- **`approval_queue_key`**：HITL approval 去重键（子按 `child_session_id`，父按 `approval_id`）
 - **`should_skip_child_runtime_display`**：子 turn SSE 是否应对用户隐藏
 - **`format_child_lifecycle_line`** / **`approval_header`** / **`format_child_agents_list`**：TUI 文案
 - **`ChildAgentTracker`**：跟踪活跃子 Agent 与 `input_strip_text`

@@ -53,3 +53,46 @@ func TestToolDisplayNameTrigger(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestFormatToolCallSkipsUserInformation(t *testing.T) {
+	lines := FormatToolEvent("tool_call", map[string]any{
+		"tool_calls": []any{
+			map[string]any{
+				"id":   "call-ask",
+				"name": UserInformationToolName,
+				"arguments": map[string]any{
+					"question": "请选择语言",
+					"options":  []any{map[string]any{"id": "go", "label": "Go"}},
+				},
+			},
+		},
+	}, false)
+	if len(lines) != 0 {
+		t.Fatalf("expected skip, lines=%v", lines)
+	}
+}
+
+func TestFormatToolResultSearchReplaceFriendly(t *testing.T) {
+	content := "成功: 是\n路径: .runtime/scripts_menu.md\n替换次数: 1\n匹配行: 5\n---\n--- a/.runtime/scripts_menu.md\n+++ b/.runtime/scripts_menu.md\n+new line\n"
+	lines := FormatToolEvent("tool_result", map[string]any{
+		"tool_name": "search_replace",
+		"content":   content,
+	}, false)
+	if len(lines) < 2 {
+		t.Fatalf("lines=%v", lines)
+	}
+	if !strings.Contains(lines[0], "1 处替换") || !strings.Contains(lines[0], "scripts_menu") {
+		t.Fatalf("head=%q", lines[0])
+	}
+	preview := strings.Join(lines[1:], "\n")
+	if !strings.Contains(preview, "--- a/") && !strings.Contains(preview, "+new line") {
+		t.Fatalf("preview=%q", preview)
+	}
+}
+
+func TestToolDisplayNameUserInformation(t *testing.T) {
+	got := ToolDisplayName(UserInformationToolName, map[string]any{"question": "long question"})
+	if got != "Agent 询问" {
+		t.Fatalf("got %q", got)
+	}
+}

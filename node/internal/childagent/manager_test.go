@@ -52,8 +52,23 @@ func TestCreateTemporaryAgentAsync(t *testing.T) {
 }
 
 func TestResolveAllowedToolsRejectsParentOnly(t *testing.T) {
-	tmpl, _ := LookupTemplate("code-review-helper")
-	if _, err := resolveAllowedTools(tmpl, []string{"create_temporary_agent"}); err == nil {
+	if _, err := resolveAllowedTools([]string{"create_temporary_agent"}); err == nil {
 		t.Fatal("expected error for parent-only tool")
+	}
+}
+
+func TestResolveAllowedToolsDefault(t *testing.T) {
+	got, err := resolveAllowedTools(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := DefaultChildAllowedTools()
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v want %v", got, want)
+		}
 	}
 }

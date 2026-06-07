@@ -165,7 +165,7 @@ Last-Event-ID: 42
 - Phase 1 可简化为 **全局单流**（一个 Client 一个 Node 实例通常一个活跃 session）。
 - 帧格式见 [client-events-and-hitl.md](./client-events-and-hitl.md)（修订版：去掉 `connection_id` 必填，保留 `session_id` / `execution_id`）。
 
-核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`approval_required`、`user_information_required`、`child_agent_created` / `child_agent_completed` / `child_agent_cancelled`、`error`、`done`。
+核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`approval_required`、`user_information_required`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`done`。
 
 #### 2.4.1 `done` 事件（语义 B：轮到用户）
 
@@ -221,12 +221,12 @@ POST /v1/sessions/{session_id}/skills/unload
 |------|------|------|
 | GET | `/v1/sessions/{parent_session_id}/child-agents` | 列出该父 session 下**未交付**的活跃子 Agent |
 | GET | `/v1/sessions/{parent_session_id}/child-agents/{child_session_id}` | 查询单个子 Agent 状态 |
-| POST | `/v1/sessions/{parent_session_id}/child-agents/{child_session_id}/cancel` | 用户/Client 停止子 Agent（与工具 `cancel_child_agent` 等价） |
+| POST | `/v1/sessions/{parent_session_id}/child-agents/{child_session_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
 
-- 子 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建，**无**独立 SSE；事件 **`child_agent_created` / `child_agent_completed` / `child_agent_cancelled`** 发往**父** session 的 `GET /v1/streams`。
+- 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建（非 A2A），**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** session 的 `GET /v1/streams`。
 - 子 Agent **生命周期**在**向父 Agent 交付结果**后结束并回收；交付时发送结束类 SSE。
 
-父 Agent 工具（非 HTTP）：`create_temporary_agent`、`wait_child_agents`、`child_agent_status`、`cancel_child_agent`。
+父 Agent 工具（非 HTTP，非 A2A）：`create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent`。
 
 ---
 

@@ -322,7 +322,7 @@ func (m *model) View() string {
 	if m.mode == modeApproval {
 		body := clihitl.FormatApprovalInteractive(m.hitlData, m.approvalSelected, m.approvalCursor)
 		borderColor := lipgloss.Color("214")
-		if clihitl.IsChildAgentApproval(m.hitlData) {
+		if clihitl.IsTemporaryAgentApproval(m.hitlData) {
 			borderColor = lipgloss.Color("39")
 		}
 		prompt := lipgloss.NewStyle().
@@ -333,14 +333,8 @@ func (m *model) View() string {
 			Render(clihitl.ApprovalHeader(m.hitlData) + "\n" + body)
 		parts = []string{status, viewBody, m.renderInputStrip(), prompt, help}
 	} else if m.mode == modeUserInfo {
-		question := m.hitlPrompt
-		if m.userInfoReq != nil && m.userInfoReq.Question != "" {
-			question = m.userInfoReq.Question
-		}
-		prompt := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("229")).
-			Render("Agent 询问: " + question)
-		parts = []string{status, viewBody, m.renderInputStrip(), prompt}
+		// 问题已在 transcript「Agent 询问」块中展示；底部仅保留选项或输入框。
+		parts = []string{status, viewBody, m.renderInputStrip()}
 		if m.userInfoUseOptions && m.userInfoReq != nil {
 			opts := lipgloss.NewStyle().Render(clihitl.FormatUserInformationOptions(m.userInfoReq, m.userInfoSelected, m.userInfoCursor))
 			parts = append(parts, opts, help)

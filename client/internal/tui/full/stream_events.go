@@ -79,7 +79,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			m.turn.FinishTurn()
 			m.statusLine = "回合结束"
 		}
-	case "child_agent_created":
+	case "temporary_agent_created":
 		m.children.onCreated(ev.Data)
 		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
 			m.transcript.Add("[system] " + line)
@@ -87,7 +87,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		} else {
 			m.notifyStripRefresh()
 		}
-	case "child_agent_completed":
+	case "temporary_agent_completed":
 		id := clihitl.ChildSessionIDFromData(ev.Data)
 		m.children.onFinished(id)
 		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
@@ -96,7 +96,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		} else {
 			m.notifyStripRefresh()
 		}
-	case "child_agent_cancelled":
+	case "temporary_agent_cancelled":
 		id := clihitl.ChildSessionIDFromData(ev.Data)
 		m.children.onFinished(id)
 		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {

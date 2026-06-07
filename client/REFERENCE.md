@@ -41,7 +41,10 @@
 | `Interact` | HITL 回调（全屏 TUI）；nil 时 stdin |
 | `HandleStreamEvent` | 处理事件与 HITL；支持 `context_compression_*` |
 | `BuildApprovalSelectionResume` | 逐条勾选审批 resume |
+| `ApprovalQueueKey` | HITL approval 队列去重键 |
 | `ExtractUserInformationRequest` | 解析 ask_user_information |
+| `FormatUserInformationTranscriptLines` | 合并「Agent 询问」transcript 行 |
+| `PrintUserInformationTranscript` | REPL 输出合并询问块 |
 | `BuildUserInformationResumeFromOptions` | 选项式回答 resume |
 | `FormatContextCompression` | 压缩 SSE 格式化为终端提示行 |
 

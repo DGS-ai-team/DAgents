@@ -287,7 +287,7 @@ type ChildAgentListItem struct {
 	ChildSessionID string `json:"child_session_id"`
 	Status         string `json:"status"`
 	Purpose        string `json:"purpose"`
-	TemplateID     string `json:"template_id"`
+	AllowedTools   []string `json:"allowed_tools"`
 	CreatedAt      string `json:"created_at"`
 	ExpiresAt      string `json:"expires_at"`
 	TurnCount      int    `json:"turn_count"`

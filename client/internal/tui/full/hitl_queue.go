@@ -33,13 +33,16 @@ func (m *model) resetHITLQueue() {
 }
 
 func (m *model) enqueueApproval(data map[string]any) {
-	// 仅保留最新一批 approval，避免 stale call_id resume 触发 unknown approved id。
+	// 同 ApprovalQueueKey 仅保留最新一条，不同子 Agent / 父审批可并存。
+	key := clihitl.ApprovalQueueKey(data)
 	filtered := m.hitlQueue[:0]
 	for _, item := range m.hitlQueue {
 		if item.kind != hitlPendingApproval {
 			filtered = append(filtered, item)
-		} else if id := clihitl.ChildSessionIDFromData(item.data); id != "" {
-			m.children.setAwaitingApproval(id, false)
+			continue
+		}
+		if clihitl.ApprovalQueueKey(item.data) != key {
+			filtered = append(filtered, item)
 		}
 	}
 	m.hitlQueue = append(filtered, hitlPending{kind: hitlPendingApproval, data: data})
@@ -49,16 +52,6 @@ func (m *model) enqueueApproval(data map[string]any) {
 }
 
 func (m *model) enqueueUserInfo(data map[string]any) {
-	// user_information 切换 server pending 后，队列中旧 approval 无效。
-	filtered := m.hitlQueue[:0]
-	for _, item := range m.hitlQueue {
-		if item.kind != hitlPendingApproval {
-			filtered = append(filtered, item)
-		} else if id := clihitl.ChildSessionIDFromData(item.data); id != "" {
-			m.children.setAwaitingApproval(id, false)
-		}
-	}
-	m.hitlQueue = filtered
 	m.hitlQueue = append(m.hitlQueue, hitlPending{kind: hitlPendingUserInfo, data: data})
 }
 
@@ -98,7 +91,7 @@ func (m *model) showNextHITLIfIdle() {
 		m.initApprovalState(head.data)
 		m.hitlPrompt = clihitl.FormatApprovalPrompt(head.data)
 		m.mode = modeApproval
-		if clihitl.IsChildAgentApproval(head.data) {
+		if clihitl.IsTemporaryAgentApproval(head.data) {
 			m.statusLine = "子任务等待审批…"
 		} else {
 			m.statusLine = "等待审批…"
@@ -110,6 +103,7 @@ func (m *model) showNextHITLIfIdle() {
 		} else {
 			m.hitlPrompt = clihitl.FormatUserInformationQuestion(head.data)
 		}
+		m.appendUserInfoTranscript()
 		m.mode = modeUserInfo
 		m.input.SetValue("")
 		if m.userInfoUseOptions {
@@ -120,6 +114,13 @@ func (m *model) showNextHITLIfIdle() {
 		m.statusLine = "等待用户回答…"
 	default:
 	}
+}
+
+func (m *model) appendUserInfoTranscript() {
+	for _, line := range clihitl.FormatUserInformationTranscriptLines(m.userInfoReq) {
+		m.transcript.Add(line)
+	}
+	m.notifyViewportRefresh()
 }
 
 func (m *model) popHITLQueueHead() {
@@ -147,9 +148,9 @@ func (m *model) renderInputStripStyled() string {
 	active, pending := m.children.counts()
 	var left string
 	if active == 0 && pending == 0 {
-		left = "子 Agent: —"
+		left = "临时 Agent: —"
 	} else {
-		left = fmt.Sprintf("子 Agent: %d 活跃", active)
+		left = fmt.Sprintf("临时 Agent: %d 活跃", active)
 		if pending > 0 {
 			left += fmt.Sprintf(" · %d 待审批", pending)
 		}

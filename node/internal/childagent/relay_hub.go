@@ -10,8 +10,7 @@ type RelayHub struct {
 	ParentSessionID string
 	AgentID         string
 	ChildSessionID  string
-	ChildPurpose    string
-	ChildTemplateID string
+	ChildPurpose string
 }
 
 // Publish 实现 stream.Publisher；忽略 orchestrator 传入的 sessionID，统一发往父 session。
@@ -25,9 +24,8 @@ func (h *RelayHub) Publish(_sessionID, agentID, eventType string, data map[strin
 	}
 	data["child_session_id"] = h.ChildSessionID
 	if eventType == "approval_required" {
-		data["hitl_scope"] = "child_agent"
+		data["hitl_scope"] = HitlScopeTemporaryAgent
 		data["child_purpose"] = h.ChildPurpose
-		data["child_template_id"] = h.ChildTemplateID
 	}
 	aid := agentID
 	if aid == "" {

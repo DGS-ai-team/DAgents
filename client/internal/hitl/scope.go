@@ -5,6 +5,20 @@ import (
 	"strings"
 )
 
+// ApprovalQueueKey 为 HITL 队列中 approval 的去重键（子按 child_session_id，父按 approval_id）。
+func ApprovalQueueKey(data map[string]any) string {
+	if data == nil {
+		return "parent:"
+	}
+	if id := ChildSessionIDFromData(data); id != "" {
+		return "child:" + id
+	}
+	if id, _ := data["approval_id"].(string); strings.TrimSpace(id) != "" {
+		return "parent:" + strings.TrimSpace(id)
+	}
+	return "parent:"
+}
+
 // ChildSessionIDFromData 从 SSE data 提取子 session id。
 func ChildSessionIDFromData(data map[string]any) string {
 	if data == nil {
@@ -14,13 +28,13 @@ func ChildSessionIDFromData(data map[string]any) string {
 	return strings.TrimSpace(id)
 }
 
-// IsChildAgentApproval 判断 approval_required 是否属于子 Agent 工具审批。
-func IsChildAgentApproval(data map[string]any) bool {
+// IsTemporaryAgentApproval 判断 approval_required 是否属于临时 Agent 工具审批（非 A2A）。
+func IsTemporaryAgentApproval(data map[string]any) bool {
 	if data == nil {
 		return false
 	}
 	scope := strings.TrimSpace(fmt.Sprint(data["hitl_scope"]))
-	if scope == "child_agent" {
+	if scope == "temporary_agent" {
 		return true
 	}
 	return ChildSessionIDFromData(data) != ""
@@ -33,12 +47,12 @@ func IsChildRuntimeEvent(data map[string]any) bool {
 
 // ApprovalHeader 返回审批面板标题。
 func ApprovalHeader(data map[string]any) string {
-	if !IsChildAgentApproval(data) {
+	if !IsTemporaryAgentApproval(data) {
 		return "工具审批"
 	}
 	purpose := strings.TrimSpace(fmt.Sprint(data["child_purpose"]))
 	if purpose == "" {
-		purpose = "子任务"
+		purpose = "临时 Agent"
 	}
 	childID := ChildSessionIDFromData(data)
 	short := childID
@@ -46,9 +60,9 @@ func ApprovalHeader(data map[string]any) string {
 		short = short[:14] + "…"
 	}
 	if short != "" {
-		return fmt.Sprintf("子任务审批 · %s · %s", purpose, short)
+		return fmt.Sprintf("临时 Agent 审批 · %s · %s", purpose, short)
 	}
-	return "子任务审批 · " + purpose
+	return "临时 Agent 审批 · " + purpose
 }
 
 func attachApprovalRouting(data map[string]any, rv map[string]any) map[string]any {
@@ -70,7 +84,7 @@ func ShouldSkipChildRuntimeDisplay(eventType string, data map[string]any) bool {
 		return false
 	}
 	switch eventType {
-	case "approval_required", "child_agent_created", "child_agent_completed", "child_agent_cancelled":
+	case "approval_required", "temporary_agent_created", "temporary_agent_completed", "temporary_agent_cancelled":
 		return false
 	default:
 		return true
@@ -86,23 +100,23 @@ func FormatChildLifecycleLine(eventType string, data map[string]any) string {
 	}
 	purpose := strings.TrimSpace(fmt.Sprint(data["purpose"]))
 	switch eventType {
-	case "child_agent_created":
+	case "temporary_agent_created":
 		if purpose != "" {
-			return fmt.Sprintf("子任务已创建 · %s · %s", purpose, short)
+			return fmt.Sprintf("临时 Agent 已创建 · %s · %s", purpose, short)
 		}
-		return fmt.Sprintf("子任务已创建 · %s", short)
-	case "child_agent_completed":
+		return fmt.Sprintf("临时 Agent 已创建 · %s", short)
+	case "temporary_agent_completed":
 		status := strings.TrimSpace(fmt.Sprint(data["status"]))
 		if status == "" {
 			status = "completed"
 		}
-		return fmt.Sprintf("子任务已结束 · %s · %s", short, status)
-	case "child_agent_cancelled":
+		return fmt.Sprintf("临时 Agent 已结束 · %s · %s", short, status)
+	case "temporary_agent_cancelled":
 		reason := strings.TrimSpace(fmt.Sprint(data["reason"]))
 		if reason != "" {
-			return fmt.Sprintf("子任务已取消 · %s · %s", short, reason)
+			return fmt.Sprintf("临时 Agent 已取消 · %s · %s", short, reason)
 		}
-		return fmt.Sprintf("子任务已取消 · %s", short)
+		return fmt.Sprintf("临时 Agent 已取消 · %s", short)
 	default:
 		return ""
 	}

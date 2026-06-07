@@ -9,7 +9,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
-// TestHandleWaitAfterRecordRemoved 异步子 Agent 交付并 removeRecord 后 wait_child_agents 仍可读终态。
+// TestHandleWaitAfterRecordRemoved 异步临时 Agent 交付并 removeRecord 后 wait_temporary_agents 仍可读终态。
 func TestHandleWaitAfterRecordRemoved(t *testing.T) {
 	hub := stream.NewHub(16, nil)
 	m := NewManager(Config{Enabled: true}, hub, "agent-1", nil)

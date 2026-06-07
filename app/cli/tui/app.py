@@ -46,6 +46,7 @@ from app.cli.tui.welcome_panel import build_welcome_panel
 _HELP_HINT = "Type /help for commands, /exit to quit.  Enter 发送，Shift+Enter 换行"
 # bash command 在括号内可展示的 cell 上限；超出则在标题下方用代码框展示全文。
 _BASH_INLINE_COMMAND_MAX_CELLS = 56
+_USER_INFORMATION_TOOL_NAME = "ask_user_information"
 
 
 class DAgentsTuiApp(App[None]):
@@ -449,12 +450,11 @@ class DAgentsTuiApp(App[None]):
         self._user_info_selected_index = 0
         self._user_info_selected_ids = set()
         self._user_info_future = asyncio.get_running_loop().create_future()
-        log = self._transcript_log()
-        log.write(f"[bold cyan]Agent 询问[/bold cyan]\n{escape(request.question)}")
+        self._stop_user_info_pending_animation(request.tool_call_id)
+        self._write_user_info_merged_block()
         if request.options:
             prompt.display = False
             prompt.read_only = True
-            self._write_user_info_block()
             self._transcript_log().focus()
         else:
             prompt.display = True
@@ -643,11 +643,27 @@ class DAgentsTuiApp(App[None]):
         self._write_approval_block()
         self._refresh_approval_layout()
 
+    def _stop_user_info_pending_animation(self, tool_call_id: str) -> None:
+        """停止 ask_user_information 占位行的耗时动画，避免与合并块重复刷新。"""
+        pending = self._pending_tools.get(tool_call_id)
+        if pending is None:
+            return
+        task = pending.get("status_task")
+        if isinstance(task, asyncio.Task):
+            task.cancel()
+        pending.pop("status_task", None)
+
     def _user_info_block_text(self) -> str:
         request = self._user_info_request
-        if request is None or not request.options:
+        if request is None:
             return ""
-        lines: list[str] = []
+        lines: list[str] = [
+            "[bold cyan]Agent 询问[/bold cyan]",
+            escape(request.question),
+        ]
+        if not request.options:
+            return "\n".join(lines)
+        lines.append("")
         for index, option in enumerate(request.options):
             selected = option.id in self._user_info_selected_ids
             cursor = "[cyan]●[/cyan]" if index == self._user_info_selected_index else " "
@@ -660,9 +676,24 @@ class DAgentsTuiApp(App[None]):
             lines.append("   [dim]↑/↓ 选择，Enter 确认[/dim]")
         return "\n".join(lines)
 
-    def _write_user_info_block(self) -> None:
-        start = len(self._transcript_log().lines)
-        start, end = self._replace_log_block(start, start, self._user_info_block_text())
+    def _write_user_info_merged_block(self) -> None:
+        """将 tool_call 占位行重写为「Agent 询问 + 问题 + 选项」单块。"""
+        request = self._user_info_request
+        if request is None:
+            return
+        content = self._user_info_block_text()
+        block = self._message_block("[cyan]●[/cyan]", content, escape_text=False)
+        pending = self._pending_tools.get(request.tool_call_id)
+        if pending is not None:
+            start, end = self._replace_log_block(int(pending["start"]), int(pending["end"]), block)
+            pending["start"] = start
+            pending["end"] = end
+            pending["summary"] = "Agent 询问"
+        else:
+            log = self._transcript_log()
+            start = len(log.lines)
+            log.write(block)
+            end = len(log.lines)
         self._user_info_block = {"start": start, "end": end}
 
     def _render_user_info_block(self) -> None:
@@ -671,9 +702,15 @@ class DAgentsTuiApp(App[None]):
         start, end = self._replace_log_block(
             self._user_info_block["start"],
             self._user_info_block["end"],
-            self._user_info_block_text(),
+            self._message_block("[cyan]●[/cyan]", self._user_info_block_text(), escape_text=False),
         )
         self._user_info_block = {"start": start, "end": end}
+        request = self._user_info_request
+        if request is not None:
+            pending = self._pending_tools.get(request.tool_call_id)
+            if pending is not None:
+                pending["start"] = start
+                pending["end"] = end
 
     def _delete_user_info_block(self) -> None:
         if self._user_info_block is None:
@@ -950,7 +987,7 @@ class DAgentsTuiApp(App[None]):
         逻辑：
         1. `bash_run` 短 command 放在括号内，过长则括号内仅截断预览（全文见调用块代码框）；
         2. `trigger_create` 只展示触发器名称，避免 cron/描述等参数挤占消息行；
-        3. `write_file` 只展示 path，content 交给下方文本框；
+        3. `write_file` / `search_replace` 只展示 path，正文与 diff 在结果块展开；
         4. 其它工具按 `key=value` 摘要展示参数。
 
         关键边界：
@@ -967,6 +1004,12 @@ class DAgentsTuiApp(App[None]):
         if name == "write_file":
             path = str(arguments.get("path") or "").strip()
             return f"write_file({path or '—'})"
+        if name == "search_replace":
+            path = str(arguments.get("path") or "").strip()
+            return f"search_replace({path or '—'})"
+        if name == _USER_INFORMATION_TOOL_NAME:
+            # 问题与选项在 user_information_required 后写入同一块，此处不展开冗长参数。
+            return "Agent 询问"
         if arguments:
             args = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
             return f"{name}({args})"
@@ -1137,6 +1180,36 @@ class DAgentsTuiApp(App[None]):
         stderr = (stdout_match.group("stderr") or "").strip()
         return stdout, stderr
 
+    def _parse_search_replace_result(self, content: str) -> tuple[str, str]:
+        """解析 search_replace 结构化输出为 (折叠摘要, 展开 diff)。
+
+        逻辑：
+        1. 按 `---` 分隔元数据与 diff；
+        2. 摘要仅保留成功/失败、路径、替换次数；
+        3. 展开区优先展示 diff，无 diff 时回退元数据全文。
+        """
+        meta, _, diff = content.partition("\n---\n")
+        meta = meta.strip()
+        diff = diff.strip()
+        fields: dict[str, str] = {}
+        for line in meta.splitlines():
+            key, sep, value = line.partition(":")
+            if sep:
+                fields[key.strip()] = value.strip()
+        path = fields.get("路径", "")
+        if fields.get("成功") == "否":
+            err = fields.get("错误", "失败")
+            summary = f"失败 · {path}" if path else f"失败 · {err}"
+            detail = meta if not diff else f"{meta}\n---\n{diff}"
+            return summary, detail
+        count = fields.get("替换次数", "?")
+        summary = f"成功 · 替换 {count} 处"
+        if path:
+            summary += f" · {path}"
+        if diff:
+            return summary, diff
+        return summary, meta or content
+
     def _tool_result_text(self, data: dict[str, Any]) -> tuple[str, str]:
         """提取工具结果摘要与详情；bash 优先展示 stdout，空则 stderr。"""
         content = str(data.get("content") or "").strip()
@@ -1144,6 +1217,8 @@ class DAgentsTuiApp(App[None]):
         if tool_name == "bash_run":
             stdout, stderr = self._extract_bash_sections(content)
             detail = stdout or stderr or content
+        elif tool_name == "search_replace":
+            return self._parse_search_replace_result(content)
         else:
             detail = content
         lines = [line for line in detail.splitlines() if line.strip()]
@@ -1202,10 +1277,44 @@ class DAgentsTuiApp(App[None]):
             )
         return self._tool_dot_block(dot_style="green", body=body)
 
+    def _render_search_replace_result_block(self, result_id: str) -> Table:
+        """渲染 search_replace 结果：折叠摘要，展开为 diff 代码框。"""
+        result = self._tool_results[result_id]
+        title = self._tool_result_title_markup(
+            str(result["title"]),
+            elapsed_s=result.get("elapsed_s"),
+            rejected=bool(result.get("rejected")),
+        )
+        detail = str(result["detail"])
+        expanded = bool(result["expanded"])
+        has_detail = bool(detail.strip())
+        toggle = ""
+        if has_detail:
+            action = "收起" if expanded else "展开"
+            toggle = f" [@click=app.toggle_tool_result('{result_id}')][dim underline]{action}[/dim underline][/]"
+        if not expanded:
+            summary = self._truncate_cells(
+                str(result["summary"]).replace("\n", " ").strip() or "无输出",
+                self._tool_result_summary_width(has_toggle=has_detail),
+            )
+            body: RenderableType = Group(
+                Text.from_markup(f"{title}{toggle}"),
+                Text.from_markup(f"[dim]└─ {escape(summary)}[/dim]"),
+            )
+        else:
+            body = Group(
+                Text.from_markup(f"{title}{toggle}"),
+                self._rich_code_box(detail, lexer="diff"),
+            )
+        return self._tool_dot_block(dot_style="green", body=body)
+
     def _render_tool_result_block(self, result_id: str) -> str | Table:
         result = self._tool_results[result_id]
-        if str(result.get("tool_name") or "") == "bash_run":
+        tool_name = str(result.get("tool_name") or "")
+        if tool_name == "bash_run":
             return self._render_bash_result_block(result_id)
+        if tool_name == "search_replace":
+            return self._render_search_replace_result_block(result_id)
         summary = str(result["summary"])
         detail = str(result["detail"])
         expanded = bool(result["expanded"])

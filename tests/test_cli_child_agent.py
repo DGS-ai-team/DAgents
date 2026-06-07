@@ -7,6 +7,7 @@ from app.cli.api_client import StreamEvent
 from app.cli.approval import build_all_approved_decision, build_approval_resume, extract_tool_approval_requests
 from app.cli.child_agent import (
     ChildAgentTracker,
+    approval_queue_key,
     format_child_agents_list,
     format_child_lifecycle_line,
     should_skip_child_runtime_display,
@@ -29,14 +30,14 @@ class ChildAgentScopeTests(unittest.TestCase):
         child_data = {"child_session_id": "child-1", "content": "secret"}
         self.assertTrue(should_skip_child_runtime_display("assistant", child_data))
         self.assertFalse(should_skip_child_runtime_display("approval_required", child_data))
-        self.assertFalse(should_skip_child_runtime_display("child_agent_created", child_data))
+        self.assertFalse(should_skip_child_runtime_display("temporary_agent_created", child_data))
 
     def test_format_child_lifecycle_created(self) -> None:
         line = format_child_lifecycle_line(
-            "child_agent_created",
+            "temporary_agent_created",
             {"child_session_id": "abc", "purpose": "scan logs"},
         )
-        self.assertIn("子任务已创建", line)
+        self.assertIn("临时 Agent 已创建", line)
         self.assertIn("scan logs", line)
 
     def test_build_approval_resume_injects_child_routing(self) -> None:
@@ -57,7 +58,18 @@ class ChildAgentScopeTests(unittest.TestCase):
         self.assertEqual(resume["approval_id"], "ap-1")
 
     def test_format_child_agents_list_empty(self) -> None:
-        self.assertEqual(format_child_agents_list([]), "活跃子 Agent: (无)")
+        self.assertEqual(format_child_agents_list([]), "活跃临时 Agent: (无)")
+
+    def test_approval_queue_key_child_and_parent(self) -> None:
+        self.assertEqual(
+            approval_queue_key({"child_session_id": "child-a"}),
+            "child:child-a",
+        )
+        self.assertEqual(
+            approval_queue_key({"approval_id": "appr-1"}),
+            "parent:appr-1",
+        )
+        self.assertEqual(approval_queue_key({}), "parent:")
 
 
 class ChildAgentTrackerTests(unittest.TestCase):
@@ -94,13 +106,13 @@ class SessionControllerChildFilterTests(unittest.IsolatedAsyncioTestCase):
     async def test_child_lifecycle_emits_system_line(self) -> None:
         await self.controller._handle_stream_event(
             _event(
-                "child_agent_created",
+                "temporary_agent_created",
                 data={"child_session_id": "c1", "purpose": "task"},
             ),
         )
         self.assertEqual(len(self.updates), 1)
         self.assertEqual(self.updates[0].kind, TranscriptKind.LINE)
-        self.assertIn("子任务已创建", self.updates[0].text)
+        self.assertIn("临时 Agent 已创建", self.updates[0].text)
         self.assertEqual(self.controller.child_tracker.counts()[0], 1)
 
     async def test_approval_enqueued_without_blocking(self) -> None:

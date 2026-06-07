@@ -113,10 +113,10 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 		}
 		t.Logf("sse %s", envelope.Type)
 		switch envelope.Type {
-		case "child_agent_created":
+		case "temporary_agent_created":
 			gotCreated = true
 			childID, _ = envelope.Data["child_session_id"].(string)
-		case "child_agent_completed":
+		case "temporary_agent_completed":
 			gotCompleted = true
 		case "assistant":
 			if c, ok := envelope.Data["content"].(string); ok {
@@ -179,7 +179,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 	for childID == "" {
 		select {
 		case <-deadline:
-			t.Fatal("timeout waiting for child_agent_created")
+			t.Fatal("timeout waiting for temporary_agent_created")
 		default:
 		}
 		line, err := reader.ReadString('\n')
@@ -194,7 +194,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 			Type string         `json:"type"`
 			Data map[string]any `json:"data"`
 		}
-		if json.Unmarshal([]byte(payload), &envelope) == nil && envelope.Type == "child_agent_created" {
+		if json.Unmarshal([]byte(payload), &envelope) == nil && envelope.Type == "temporary_agent_created" {
 			childID, _ = envelope.Data["child_session_id"].(string)
 		}
 	}

@@ -1,6 +1,6 @@
-# 临时子 Agent：工具、HTTP API 与 SSE（Go Node 定稿）
+# 临时 Agent（temporary agent）：工具、HTTP API 与 SSE（Go Node 定稿）
 
-本文是 **Go Agent Node** 临时子 Agent 的**实现契约**（Phase 1）。概念背景见 [temporary-child-agents.md](../future/temporary-child-agents.md)；HTTP 总览见 [agent-node-api.md](./agent-node-api.md) §2.8。
+本文是 **Go Agent Node** 同进程**临时 Agent** 的**实现契约**（Phase 1）。与外部 **A2A** 对等调用无关。概念背景见 [temporary-child-agents.md](../future/temporary-child-agents.md)；HTTP 总览见 [agent-node-api.md](./agent-node-api.md) §2.8。
 
 **状态**：Go Node **已实现**（Phase 1）；Client TUI 适配待后续 PR。
 
@@ -23,12 +23,12 @@
 
 | 工具名 | 调用方 | 说明 |
 |--------|--------|------|
-| `create_temporary_agent` | 父 Agent | 创建并启动子 Agent |
-| `wait_child_agents` | 父 Agent | 等待多个子 Agent 终态并汇总 |
-| `child_agent_status` | 父 Agent | 非阻塞查询状态 |
-| `cancel_child_agent` | 父 Agent | 显式取消仍在运行的子 Agent |
+| `create_temporary_agent` | 父 Agent | 创建并启动临时 Agent（非 A2A） |
+| `wait_temporary_agents` | 父 Agent | 等待多个临时 Agent 终态并汇总 |
+| `temporary_agent_status` | 父 Agent | 非阻塞查询状态 |
+| `cancel_temporary_agent` | 父 Agent | 显式取消仍在运行的临时 Agent |
 
-子 Agent **不得**注册或调用以上工具，以及 `trigger_*`、`ask_user_information`。
+临时 Agent **不得**注册或调用以上工具，以及 `trigger_*`、`ask_user_information`、A2A 工具。
 
 ---
 
@@ -38,14 +38,12 @@
 
 | 字段 | 类型 | 必填 | 默认 | 约束 |
 |------|------|------|------|------|
-| `task` | string | **是** | — | 子 Agent 首条 user 消息；须自包含，禁止依赖向用户追问 |
+| `task` | string | **是** | — | 子 Agent 首条 user 消息；须自包含（含角色与约束），禁止依赖向用户追问 |
 | `purpose` | string | **是** | — | 短说明（日志 / SSE / 审计） |
-| `template_id` | string | 否 | `general-helper` | 见 §7 |
-| `allowed_tools` | string[] | 否 | 模板默认 | 须为模板默认集的**子集**，且 ⊆ 父可用工具（§8） |
+| `allowed_tools` | string[] | 否 | 见 §7 | 须 ⊆ 父可下放工具（§8） |
 | `ttl_seconds` | integer | 否 | 1800 | `60`～`child_agents.max_ttl_seconds` |
 | `max_turns` | integer | 否 | 20 | `1`～`child_agents.max_max_turns` |
 | `wait` | boolean | 否 | `false` | `true`：阻塞至子 Agent 交付结果后返回 |
-| `detached` | boolean | 否 | `false` | `true`：父 session 释放时不自动取消（高级用法，文档警示） |
 
 **不支持** `run_in_background`（由 orchestrator 专用处理）。
 
@@ -59,7 +57,6 @@
   "child_session_id": "child-a1b2c3d4e5f6",
   "status": "active",
   "purpose": "review patch",
-  "template_id": "code-review-helper",
   "expires_at": "2026-05-30T12:30:00+08:00",
   "max_turns": 20
 }
@@ -84,7 +81,7 @@
 
 ---
 
-## 4. `wait_child_agents`
+## 4. `wait_temporary_agents`
 
 | 字段 | 类型 | 必填 | 默认 |
 |------|------|------|------|
@@ -112,17 +109,17 @@
 
 ---
 
-## 5. `child_agent_status`
+## 5. `temporary_agent_status`
 
 | 字段 | 类型 | 必填 |
 |------|------|------|
 | `child_session_ids` | string[] | **是**（≥1） |
 
-返回 `wait_child_agents.results` 同结构的数组（无 `timed_out`）。
+返回 `wait_temporary_agents.results` 同结构的数组（无 `timed_out`）。
 
 ---
 
-## 6. `cancel_child_agent`
+## 6. `cancel_temporary_agent`
 
 | 字段 | 类型 | 必填 |
 |------|------|------|
@@ -143,18 +140,16 @@
 
 ---
 
-## 7. 内置模板（`template_id`）
+## 7. 默认工具与 task 约定
 
-| template_id | 说明 | 默认 `allowed_tools` | 默认 `max_turns` |
-|-------------|------|----------------------|------------------|
-| `general-helper` | 通用子任务 | `read_file`, `search_file`, `bash_run` | 20 |
-| `code-review-helper` | 只读审查 | `read_file`, `search_file` | 15 |
-| `research-helper` | 信息搜集 | `read_file`, `search_file`, `bash_run` | 25 |
-| `ops-check-helper` | 运维巡检 | `bash_run`, `read_file` | 20 |
+**无预设模板**。父 Agent 须在 `task` 中写明子任务角色、约束与交付物；Node 仅附加简短系统前缀后作为子 Agent 首条 user 消息。
 
-调用方 `allowed_tools` 只能**收紧**，不能超出模板默认集。再与父 Agent 全局可用工具求交。
+| 项 | 默认 |
+|----|------|
+| `allowed_tools`（未指定时） | `read_file`, `search_file`, `bash_run` |
+| `max_turns`（未指定时） | `child_agents.default_max_turns`（默认 20） |
 
-子 Agent **可以**使用 `load_skills` / `unload_skills` / `clear_skills`，当且仅当父 Agent 可用且模板 / `allowed_tools` 包含对应项。
+`allowed_tools` 须为 §8 可下放列表的子集，并与父 Agent 全局可用工具求交。子 Agent **可以**使用 `load_skills` / `unload_skills` / `clear_skills`，当且仅当父 Agent 可用且 `allowed_tools` 包含对应项。
 
 ---
 
@@ -166,7 +161,7 @@
 
 **永不下放：**
 
-`create_temporary_agent`, `wait_child_agents`, `child_agent_status`, `cancel_child_agent`, `ask_user_information`, `trigger_*`
+`create_temporary_agent`, `wait_temporary_agents`, `temporary_agent_status`, `cancel_temporary_agent`, `ask_user_information`, `trigger_*`
 
 ---
 
@@ -179,7 +174,7 @@ creating → active → completed | failed | cancelled | expired
                               ↓
                     向父 Agent 交付结果
                               ↓
-                    SSE child_agent_completed
+                    SSE temporary_agent_completed
                               ↓
                     回收子 runtime（生命周期结束）
 ```
@@ -191,15 +186,15 @@ creating → active → completed | failed | cancelled | expired
 | 模式 | 交付时机 |
 |------|----------|
 | `wait=true` | 工具返回 JSON `kind=result` 前交付 |
-| `wait=false` | 子 Agent 终态时写入结果缓存；父调用 `wait_child_agents` / `child_agent_status` 读取即视为已交付；**首次被父读取终态结果时**发 `child_agent_completed` 并回收（若尚未回收） |
+| `wait=false` | 临时 Agent 终态时写入结果缓存；父调用 `wait_temporary_agents` / `temporary_agent_status` 读取即视为已交付；**首次被父读取终态结果时**发 `temporary_agent_completed` 并回收（若尚未回收） |
 
-> **实现备注**：为简化 Client，推荐在子 Agent **达到终态瞬间**即发 `child_agent_completed` 并交付内部结果缓存；父 Agent 通过 wait/status 或 sync tool 读取同一结果对象。回收在 SSE 发送之后同步进行。
+> **实现备注**：为简化 Client，推荐在子 Agent **达到终态瞬间**即发 `temporary_agent_completed` 并交付内部结果缓存；父 Agent 通过 wait/status 或 sync tool 读取同一结果对象。回收在 SSE 发送之后同步进行。
 
 ### 9.2 SSE 事件（发往 **父** `session_id`）
 
 与现有 Hub 一致：`hub.Publish(parentSessionID, agentID, eventType, data)`。
 
-#### `child_agent_created`
+#### `temporary_agent_created`
 
 创建成功、子 Agent 即将/已经开始消费 `task` 时发送（`wait`  true/false 均发送）。
 
@@ -208,7 +203,6 @@ creating → active → completed | failed | cancelled | expired
   "child_session_id": "child-a1b2c3d4e5f6",
   "parent_session_id": "sess-7f2a...",
   "purpose": "review patch",
-  "template_id": "code-review-helper",
   "status": "active",
   "expires_at": "2026-05-30T12:30:00+08:00",
   "max_turns": 20,
@@ -216,7 +210,7 @@ creating → active → completed | failed | cancelled | expired
 }
 ```
 
-#### `child_agent_completed`
+#### `temporary_agent_completed`
 
 子 Agent 向父 Agent **交付结果**、生命周期结束前发送（`status=completed|failed`）。
 
@@ -231,9 +225,9 @@ creating → active → completed | failed | cancelled | expired
 }
 ```
 
-#### `child_agent_cancelled`
+#### `temporary_agent_cancelled`
 
-因 `cancel_child_agent`、HTTP cancel、TTL、父 session 清理（非 detached）而取消，交付 `cancelled` 结果后发送。
+因 `cancel_temporary_agent`、HTTP cancel、TTL、父 session 清理而取消，交付 `cancelled` 结果后发送。
 
 ```json
 {
@@ -245,7 +239,7 @@ creating → active → completed | failed | cancelled | expired
 }
 ```
 
-`expired` 可复用 `child_agent_completed`，`status=expired`，或单独 `child_agent_expired`（实现二选一，推荐统一进 `child_agent_completed`）。
+`expired` 可复用 `temporary_agent_completed`，`status=expired`，或单独 `temporary_agent_expired`（实现二选一，推荐统一进 `temporary_agent_completed`）。
 
 ### 9.3 Client 适配（后续 PR）
 
@@ -277,7 +271,7 @@ GET /v1/sessions/{parent_session_id}/child-agents
       "child_session_id": "child-a1b2c3d4e5f6",
       "status": "active",
       "purpose": "review patch",
-      "template_id": "code-review-helper",
+      "allowed_tools": ["read_file", "search_file"],
       "created_at": "2026-05-30T12:00:00+08:00",
       "expires_at": "2026-05-30T12:30:00+08:00",
       "turn_count": 2,
@@ -319,11 +313,11 @@ Content-Type: application/json
 }
 ```
 
-行为与工具 `cancel_child_agent` **相同**：
+行为与工具 `cancel_temporary_agent` **相同**：
 
 1. 取消在途 turn；
 2. 构造 `cancelled` 结果并交付父 Agent（写入 wait 缓存）；
-3. SSE `child_agent_cancelled`；
+3. SSE `temporary_agent_cancelled`；
 4. 回收子 runtime。
 
 错误：
@@ -363,20 +357,10 @@ child_agents:
 在 `.runtime/policy/` 规则模式下：
 
 - `create_temporary_agent`：**需要审批**（建议默认规则与 `bash_run` 同级或单独 `risk=high`）
-- `cancel_child_agent`：不需要审批（用户/Client 可通过 HTTP 直接 cancel）
-- `wait_child_agents` / `child_agent_status`：只读，不审批
+- `cancel_temporary_agent`：不需要审批（用户/Client 可通过 HTTP 直接 cancel）
+- `wait_temporary_agents` / `temporary_agent_status`：只读，不审批
 
----
-
-## 13. 审批策略（policy）
-
-在 `.runtime/policy/` 规则模式下：
-
-- `create_temporary_agent`：**需要审批**（建议默认规则与 `bash_run` 同级或单独 `risk=high`）
-- `cancel_child_agent`：不需要审批（用户/Client 可通过 HTTP 直接 cancel）
-- `wait_child_agents` / `child_agent_status`：只读，不审批
-
-子 Agent **内部**工具调用的审批见 §14（与「创建子 Agent」的审批是两层不同 HITL）。
+临时 Agent **内部**工具调用的审批见 §14（与「创建临时 Agent」的审批是两层不同 HITL）。
 
 ---
 
@@ -396,7 +380,7 @@ child_agents:
 ```text
 父 turn：create_temporary_agent  →  approval_required（scope=parent，无 child_session_id）
                                       ↓ 用户批准
-                               创建 child，SSE child_agent_created
+                               创建 temporary agent，SSE temporary_agent_created
 
 子 turn：bash_run 等            →  approval_required（scope=child，带 child_session_id）
                                       ↓ 用户批准
@@ -414,7 +398,7 @@ child_agents:
   "approval_type": "execute_tool",
   "approval_id": "appr-xxx",
   "execution_id": "exec-xxx",
-  "message": "子 Agent 请求执行工具，等待确认。",
+  "message": "临时 Agent 请求执行工具，等待确认。",
   "approval_args": {
     "tool_calls": [
       {
@@ -427,14 +411,13 @@ child_agents:
   "display_type": "normal_text",
   "child_session_id": "child-a1b2c3d4e5f6",
   "child_purpose": "review patch",
-  "child_template_id": "code-review-helper",
-  "hitl_scope": "child_agent"
+  "hitl_scope": "temporary_agent"
 }
 ```
 
 | 字段 | 说明 |
 |------|------|
-| `hitl_scope` | `"child_agent"` 表示子 Agent 工具审批；省略或 `"parent"` 表示父 Agent 自身 turn |
+| `hitl_scope` | `"temporary_agent"` 表示临时 Agent 工具审批；省略或 `"parent"` 表示父 Agent 自身 turn |
 | `child_session_id` | 子 session，resume 路由用 |
 | `child_purpose` | 创建时的 purpose，供 TUI 展示上下文 |
 
@@ -459,7 +442,7 @@ Content-Type: application/json
 }
 ```
 
-`selection` / `reject` 与父 Agent 相同，**必须**带 `child_session_id`（当 `hitl_scope=child_agent` 时）。
+`selection` / `reject` 与父 Agent 相同，**必须**带 `child_session_id`（当 `hitl_scope=temporary_agent` 时）。
 
 Node 逻辑：
 
@@ -477,7 +460,7 @@ Client（Go full / Python Textual）在收到带 `child_session_id` 的 `approva
 |----------|---------------|-------------------|
 | **reject**（拒绝工具） | 对应 tool 写入拒绝结果，子 turn **继续**（模型可改策略或结束） | 无直接中断；子最终 `summary` 可含「因审批未通过未能执行」 |
 | **reject all / 连续拒绝导致无法完成** | 子 turn 以 `failed` 或 `completed`（带失败说明）终态 | 交付结果时 `status` 反映实际情况 |
-| **长期不审批** | 子 Agent 保持 `active`，占用 `max_active_per_parent` 槽位；**TTL 仍计时** | TTL 到期 → `expired`，SSE `child_agent_completed(status=expired)` |
+| **长期不审批** | 子 Agent 保持 `active`，占用 `max_active_per_parent` 槽位；**TTL 仍计时** | TTL 到期 → `expired`，SSE `temporary_agent_completed(status=expired)` |
 | **HTTP cancel 子 Agent** | 立即 `cancelled`，pending HITL 作废 | 同 §10.3 |
 
 子 Agent **不得**因审批 pending 而向父 session 发送 `user_information_required`。
@@ -508,7 +491,7 @@ Client（Go full / Python Textual）在收到带 `child_session_id` 的 `approva
 
 - 子 `runtime` 复用 `turn.Orchestrator`；`hub.Publish` 包装为「子 session 事件 → 父 session_id + 子元数据」。
 - `PendingHITL` 持久化在子 session 的 `runtime_state_json`（若启用 SQLite）；恢复时仍从父 SSE 收 approval。
-- 审计日志字段：`parent_session_id`、`child_session_id`、`hitl_scope=child_agent`、`approval_id`。
+- 审计日志字段：`parent_session_id`、`child_session_id`、`hitl_scope=temporary_agent`、`approval_id`。
 
 ---
 
@@ -519,8 +502,7 @@ Client（Go full / Python Textual）在收到带 `child_session_id` 的 `approva
 ```json
 create_temporary_agent({
   "purpose": "审查 login 改动",
-  "task": "只读检查 src/auth/login.go，列出风险，不要改文件",
-  "template_id": "code-review-helper",
+  "task": "你是代码审查助手，只读检查 src/auth/login.go，列出风险，不要改文件",
   "allowed_tools": ["read_file", "search_file"],
   "wait": true
 })
@@ -530,7 +512,7 @@ create_temporary_agent({
 
 ```json
 create_temporary_agent({"purpose":"查日志","task":"……","wait":false})
-wait_child_agents({"child_session_ids":["child-aaa","child-bbb"],"timeout_seconds":600})
+wait_temporary_agents({"child_session_ids":["child-aaa","child-bbb"],"timeout_seconds":600})
 ```
 
 **用户 HTTP 停止：**

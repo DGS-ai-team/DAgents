@@ -14,6 +14,7 @@ from app.cli.approval import (
 )
 from app.cli.child_agent import (
     ChildAgentTracker,
+    approval_queue_key,
     child_session_id_from_data,
     format_child_lifecycle_line,
     should_skip_child_runtime_display,
@@ -575,7 +576,11 @@ class SessionController:
         if should_skip_child_runtime_display(event_type, data):
             return
 
-        if event_type in {"child_agent_created", "child_agent_completed", "child_agent_cancelled"}:
+        if event_type in {
+            "temporary_agent_created",
+            "temporary_agent_completed",
+            "temporary_agent_cancelled",
+        }:
             self._handle_child_lifecycle(event_type, data)
             return
 
@@ -665,17 +670,21 @@ class SessionController:
         """HITL 入队并通知 UI；子审批时标记 awaiting_approval。
 
         逻辑：
-        1. 新 approval 替换队列中已有 approval（仅最新一批与 server pending 一致）；
-        2. user_information 入队时丢弃过期 approval（server 已切到询问态）。
+        1. approval 按 `approval_queue_key` 去重，仅替换同目标旧项；
+        2. 不同子 Agent / 父与子审批可并存，队首逐条展示；
+        3. user_information 直接追加，不清理已有 approval。
         """
         if item.kind == "approval":
-            self._hitl_queue = [q for q in self._hitl_queue if q.kind != "approval"]
+            key = approval_queue_key(item.data)
+            self._hitl_queue = [
+                q
+                for q in self._hitl_queue
+                if q.kind != "approval" or approval_queue_key(q.data) != key
+            ]
             child_id = child_session_id_from_data(item.data)
             if child_id:
                 self._child_tracker.set_awaiting_approval(child_id, True)
                 self._emit_child_strip()
-        elif item.kind == "user_information":
-            self._drop_stale_approval_hitl_entries()
         self._hitl_queue.append(item)
         self._notify_hitl_pending()
 
@@ -689,22 +698,9 @@ class SessionController:
         self._emit_child_strip()
         self._notify_hitl_pending()
 
-    def _drop_stale_approval_hitl_entries(self) -> None:
-        """移除 approval 队列项并重置子 Agent awaiting_approval 标记。"""
-        if not self._hitl_queue:
-            return
-        for entry in self._hitl_queue:
-            if entry.kind != "approval":
-                continue
-            child_id = child_session_id_from_data(entry.data)
-            if child_id:
-                self._child_tracker.set_awaiting_approval(child_id, False)
-        self._hitl_queue = [q for q in self._hitl_queue if q.kind != "approval"]
-        self._emit_child_strip()
-
     def _handle_child_lifecycle(self, event_type: str, data: dict[str, Any]) -> None:
         """处理子 Agent 生命周期 SSE，写入系统行并更新 tracker。"""
-        if event_type == "child_agent_created":
+        if event_type == "temporary_agent_created":
             self._child_tracker.on_created(data)
         else:
             self._child_tracker.on_finished(child_session_id_from_data(data))

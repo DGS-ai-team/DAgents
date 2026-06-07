@@ -18,6 +18,7 @@
 - **`_process_hitl_queue`** / **`_run_approval_hitl`** / **`_run_user_info_hitl`**：非阻塞 HITL 队列处理
 - **`_refresh_input_strip`** / **`_show_children`**：子 Agent 状态条与 `/children` 命令
 - **`_begin_approval_ui`** / **`_end_approval_ui`**：通过 Textual UI 队列初始化/清理 RichLog 内审批交互；子任务审批显示青色标题
+- **`_write_user_info_merged_block`** / **`_stop_user_info_pending_animation`**：`ask_user_information` 将 tool_call 占位行重写为单条「Agent 询问」块（问题 + 选项）
 - **`_write_approval_block`** / **`_render_approval_block`** / **`_delete_approval_block`**：RichLog 内逐工具审批选项块
 - **`_refresh_approval_layout`**：审批块增删后刷新布局并滚动到底部
 - **`confirm_approval_choice`**：确认 RichLog 内审批选项当前选择

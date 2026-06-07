@@ -36,7 +36,7 @@ func TestOnStreamEventFiltersChildAssistant(t *testing.T) {
 
 	m.onStreamEvent(nodeapi.StreamEvent{Type: "approval_required", Data: map[string]any{
 		"child_session_id": "child-2",
-		"hitl_scope":       "child_agent",
+		"hitl_scope":       "temporary_agent",
 		"child_purpose":    "ops",
 		"approval_args": map[string]any{
 			"tool_calls": []any{
@@ -47,7 +47,7 @@ func TestOnStreamEventFiltersChildAssistant(t *testing.T) {
 	if len(m.hitlQueue) != 1 {
 		t.Fatalf("approval queue len = %d", len(m.hitlQueue))
 	}
-	if !clihitl.IsChildAgentApproval(m.hitlQueue[0].data) {
+	if !clihitl.IsTemporaryAgentApproval(m.hitlQueue[0].data) {
 		t.Fatal("expected child approval in queue")
 	}
 }

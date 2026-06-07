@@ -11,7 +11,6 @@ import (
 // childAgentEntry 跟踪单个子 Agent 的 TUI 展示状态。
 type childAgentEntry struct {
 	Purpose          string
-	TemplateID       string
 	AwaitingApproval bool
 }
 
@@ -38,8 +37,7 @@ func (t *childAgentTracker) onCreated(data map[string]any) {
 	}
 	t.mu.Lock()
 	t.entries[id] = &childAgentEntry{
-		Purpose:    strings.TrimSpace(fmt.Sprint(data["purpose"])),
-		TemplateID: strings.TrimSpace(fmt.Sprint(data["template_id"])),
+		Purpose: strings.TrimSpace(fmt.Sprint(data["purpose"])),
 	}
 	t.mu.Unlock()
 }
@@ -99,8 +97,7 @@ func (t *childAgentTracker) replaceFromAPI(items []nodeapi.ChildAgentListItem) {
 	next := make(map[string]*childAgentEntry, len(items))
 	for _, it := range items {
 		next[it.ChildSessionID] = &childAgentEntry{
-			Purpose:    it.Purpose,
-			TemplateID: it.TemplateID,
+			Purpose: it.Purpose,
 		}
 	}
 	t.entries = next

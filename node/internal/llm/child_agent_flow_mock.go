@@ -20,7 +20,7 @@ type ChildAgentFlowMock struct {
 	CreateArgsJSON string
 }
 
-const defaultChildAgentCreateArgs = `{"task":"检查 README 是否存在","purpose":"integration test","template_id":"general-helper","wait":true}`
+const defaultChildAgentCreateArgs = `{"task":"检查 README 是否存在","purpose":"integration test","wait":true}`
 
 // StreamChat 按父/子 session 分流模拟 LLM 行为。
 func (m *ChildAgentFlowMock) StreamChat(ctx context.Context, req ChatRequest, handler StreamHandler) (ChatResult, error) {

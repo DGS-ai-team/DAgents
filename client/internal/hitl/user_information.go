@@ -2,6 +2,7 @@ package hitl
 
 import (
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -100,6 +101,25 @@ func BuildUserInformationResumeFromOptions(req *UserInformationRequest, selected
 		return nil, fmt.Errorf("请至少选择一项")
 	}
 	return BuildUserInformationResume(req, strings.Join(labels, ", "), selectedIDs, false), nil
+}
+
+// PrintUserInformationTranscript 向 w 输出合并后的「Agent 询问」块（REPL stdin 路径）。
+func PrintUserInformationTranscript(w io.Writer, req *UserInformationRequest) {
+	for _, line := range FormatUserInformationTranscriptLines(req) {
+		fmt.Fprintln(w, line)
+	}
+}
+
+// FormatUserInformationTranscriptLines 将询问合并为 transcript 单条（对齐 Python TUI「Agent 询问」块）。
+func FormatUserInformationTranscriptLines(req *UserInformationRequest) []string {
+	if req == nil || strings.TrimSpace(req.Question) == "" {
+		return nil
+	}
+	lines := []string{"[tool] ● Agent 询问"}
+	for _, part := range strings.Split(req.Question, "\n") {
+		lines = append(lines, "    "+strings.TrimRight(part, " \t"))
+	}
+	return lines
 }
 
 // FormatUserInformationOptions 格式化选项列表（供 TUI 展示）。

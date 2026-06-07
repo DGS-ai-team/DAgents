@@ -1,6 +1,9 @@
 package hitl
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExtractUserInformationRequest(t *testing.T) {
 	req := ExtractUserInformationRequest(map[string]any{
@@ -23,6 +26,21 @@ func TestExtractUserInformationRequest(t *testing.T) {
 	}
 	if rv["answer"] != "生产" {
 		t.Fatalf("answer = %v", rv["answer"])
+	}
+}
+
+func TestFormatUserInformationTranscriptLines(t *testing.T) {
+	lines := FormatUserInformationTranscriptLines(&UserInformationRequest{
+		Question: "第一行\n第二行",
+	})
+	if len(lines) != 3 {
+		t.Fatalf("lines=%v", lines)
+	}
+	if !strings.Contains(lines[0], "Agent 询问") {
+		t.Fatalf("head=%q", lines[0])
+	}
+	if lines[1] != "    第一行" || lines[2] != "    第二行" {
+		t.Fatalf("body=%v", lines[1:])
 	}
 }
 

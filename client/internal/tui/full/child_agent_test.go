@@ -29,7 +29,7 @@ func TestChildAgentTrackerLifecycle(t *testing.T) {
 }
 
 func TestFormatChildLifecycleLine(t *testing.T) {
-	line := clihitl.FormatChildLifecycleLine("child_agent_created", map[string]any{
+	line := clihitl.FormatChildLifecycleLine("temporary_agent_created", map[string]any{
 		"child_session_id": "child-abcdef123456",
 		"purpose":          "review",
 	})

@@ -58,10 +58,10 @@ func TestChildAgentParentTurnWaitTrue(t *testing.T) {
 		case ev := <-ch:
 			t.Logf("sse type=%s data=%v", ev.Type, ev.Data)
 			switch ev.Type {
-			case "child_agent_created":
+			case "temporary_agent_created":
 				gotCreated = true
 				childID, _ = ev.Data["child_session_id"].(string)
-			case "child_agent_completed":
+			case "temporary_agent_completed":
 				gotCompleted = true
 				if s, ok := ev.Data["summary"].(string); ok && !strings.Contains(s, "README") {
 					t.Fatalf("unexpected summary: %q", s)
@@ -78,7 +78,7 @@ func TestChildAgentParentTurnWaitTrue(t *testing.T) {
 	}
 }
 
-// TestChildAgentAsyncCreateAndWait 异步创建后通过 wait_child_agents 汇总。
+// TestChildAgentAsyncCreateAndWait 异步创建后通过 wait_temporary_agents 汇总。
 func TestChildAgentAsyncCreateAndWait(t *testing.T) {
 	mock := &llm.MockClient{}
 	mgr, cm, _ := newManagerWithChildAgents(t, mock)
@@ -167,11 +167,11 @@ func TestChildAgentCancelBeforeComplete(t *testing.T) {
 	for !gotCancelled {
 		select {
 		case ev := <-ch:
-			if ev.Type == "child_agent_cancelled" {
+			if ev.Type == "temporary_agent_cancelled" {
 				gotCancelled = true
 			}
 		case <-deadline:
-			t.Fatal("timeout waiting for child_agent_cancelled")
+			t.Fatal("timeout waiting for temporary_agent_cancelled")
 		}
 	}
 }

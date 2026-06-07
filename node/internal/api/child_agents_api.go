@@ -14,9 +14,9 @@ type childAgentListResponse struct {
 type sessionChildAgentViewJSON struct {
 	ChildSessionID string `json:"child_session_id"`
 	Status         string `json:"status"`
-	Purpose        string `json:"purpose"`
-	TemplateID     string `json:"template_id"`
-	CreatedAt      string `json:"created_at"`
+	Purpose        string   `json:"purpose"`
+	AllowedTools   []string `json:"allowed_tools"`
+	CreatedAt      string   `json:"created_at"`
 	ExpiresAt      string `json:"expires_at"`
 	TurnCount      int    `json:"turn_count"`
 	MaxTurns       int    `json:"max_turns"`
@@ -50,9 +50,9 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 		out.Items = append(out.Items, sessionChildAgentViewJSON{
 			ChildSessionID: it.ChildSessionID,
 			Status:         it.Status,
-			Purpose:        it.Purpose,
-			TemplateID:     it.TemplateID,
-			CreatedAt:      it.CreatedAt.Format(timeRFC3339),
+			Purpose:      it.Purpose,
+			AllowedTools: append([]string(nil), it.AllowedTools...),
+			CreatedAt:    it.CreatedAt.Format(timeRFC3339),
 			ExpiresAt:      it.ExpiresAt.Format(timeRFC3339),
 			TurnCount:      it.TurnCount,
 			MaxTurns:       it.MaxTurns,
@@ -75,7 +75,7 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 				ChildSessionID: it.ChildSessionID,
 				Status:         it.Status,
 				Purpose:        it.Purpose,
-				TemplateID:     it.TemplateID,
+				AllowedTools:   append([]string(nil), it.AllowedTools...),
 				CreatedAt:      it.CreatedAt.Format(timeRFC3339),
 				ExpiresAt:      it.ExpiresAt.Format(timeRFC3339),
 				TurnCount:      it.TurnCount,
