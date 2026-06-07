@@ -1,5 +1,8 @@
 # Prometheus 观测说明
 
+> **注意**：下文 §2 中 **Agent API**（`app/harness/api`）的 `/metrics` 随 **Python Agent 运行时移除** 已不存在。  
+> **Register Center** 的 `/metrics` 仍适用。Go Agent Node 当前未暴露 Prometheus 端点。
+
 本文说明 **Prometheus 的基本工作机制**、**DAgents 中的落地方式**，以及 **如何安全地新增指标**。
 
 ---

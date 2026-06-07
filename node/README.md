@@ -15,7 +15,7 @@
 | `internal/turn/` | turn 编排 + 工具循环 |
 | `internal/version/` | 构建版本号 |
 
-配置模型见 [`shared/config/`](../shared/config/)。架构与联调见 [`docs/architecture/local-assistant.md`](../docs/architecture/local-assistant.md)。
+配置模型见 [`shared/config/`](../shared/config/)。内部结构见 [`docs/architecture/go-node-internals.md`](../docs/architecture/go-node-internals.md)；联调见 [`docs/architecture/local-assistant.md`](../docs/architecture/local-assistant.md)。
 
 系统服务安装：Linux [`scripts/linux/install_node_service.sh`](../scripts/linux/install_node_service.sh)；Windows [`scripts/windows/install_node_service.cmd`](../scripts/windows/install_node_service.cmd)。
 

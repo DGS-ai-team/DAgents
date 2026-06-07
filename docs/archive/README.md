@@ -2,6 +2,14 @@
 
 已从现网移除或 superseded 的设计文档，仅供历史对照。
 
+## 子目录
+
+| 目录 | 说明 |
+|------|------|
+| [python-agent-runtime/](./python-agent-runtime/) | **已移除的 Python FastAPI Agent API**（`app/harness/`、`api-reference`、turn loop 等） |
+
+## 单文件归档
+
 | 文件 | 说明 |
 |------|------|
 | [builtin-tools-routing.md](./builtin-tools-routing.md) | 旧 `tool.kind=body`/Proxy 路由（Brain/Body 方案） |

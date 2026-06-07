@@ -263,6 +263,8 @@ Manager
 
 | 路径 | 说明 |
 |------|------|
+| [`node/internal/session/README.md`](../session/README.md) | 会话 runtime、队列、父子 Orchestrator 构造 |
+| [`node/internal/turn/README.md`](../turn/README.md) | 单步 turn、system prompt、HITL |
 | `node/internal/tools/child_agent_tools.go` | 四个工具的 OpenAI schema |
 | `node/internal/session/manager_child.go` | `Host` 实现、HTTP `ListChildAgents` |
 | `node/internal/session/runtime_child.go` | `newChildRuntime`、`tryCompleteChildIfIdle` |

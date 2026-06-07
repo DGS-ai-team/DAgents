@@ -1,11 +1,11 @@
 # 技术文档（`docs/`）
 
-本目录存放 DAgents **双运行时栈**的技术说明。实现代码：
+本目录存放 DAgents 技术说明。实现代码：
 
 | 栈 | 路径 |
 |----|------|
-| **Go 本地助手** | `node/`、`client/`、`shared/config/` |
-| **Python API / A2A** | `app/`、`register_center/` |
+| **Go 本地助手（Agent 运行时）** | `node/`、`client/`、`shared/config/` |
+| **Python 辅助** | `app/cli/`（Textual TUI）、`register_center/`（A2A 控制面） |
 
 **文件命名**：Markdown 使用 **纯 ASCII 文件名**。
 
@@ -13,14 +13,14 @@
 
 | 文件 | 说明 |
 |------|------|
-| [architecture/overview.md](./architecture/overview.md) | **双栈选型**：何时用 Go Node vs Python API |
+| [architecture/overview.md](./architecture/overview.md) | **选型总览**：Go Node vs Register Center |
+| [architecture/go-node-internals.md](./architecture/go-node-internals.md) | **Go Node 内部结构**：runtime、Orchestrator、MessageQueue 及协作关系 |
 | [architecture/local-assistant.md](./architecture/local-assistant.md) | 本地助手：Go Node + Textual / Go REPL 联调 |
 | [architecture/agent-node-api.md](./architecture/agent-node-api.md) | Agent Node HTTP/SSE API（`done`：`turn_complete` / `awaiting`） |
-| [architecture/child-agent-tools.md](./architecture/child-agent-tools.md) | 临时子 Agent 工具 / HTTP / SSE 定稿（Go Node） |
+| [architecture/child-agent-tools.md](./architecture/child-agent-tools.md) | 临时子 Agent 工具 / HTTP / SSE 定稿 |
 | [architecture/client-packaging.md](./architecture/client-packaging.md) | 同包 `config.yaml` 与安装布局 |
 | [architecture/go-node-compatibility.md](./architecture/go-node-compatibility.md) | Go 静态构建 / glibc 矩阵（N7） |
 | [architecture/rhel6-acceptance-checklist.md](./architecture/rhel6-acceptance-checklist.md) | RHEL 6.9 真机验收清单 |
-| [architecture/python-runtime.md](./architecture/python-runtime.md) | Python FastAPI 分层与主流程 |
 
 ## 设计与实施
 
@@ -30,20 +30,17 @@
 | [design/three-component-model.md](./design/three-component-model.md) | Node + Client + Manage 三组件 ADR |
 | [design/agent-client-refactor-plan.md](./design/agent-client-refactor-plan.md) | AC 分步计划与 N0–N7 状态 |
 
-## 专题（按栈标注）
+## 专题
 
 | 文件 | 适用栈 | 说明 |
 |------|--------|------|
-| [api-reference.md](./api-reference.md) | Python **（已弃用 Agent 运行时）** | HTTP / SSE 契约（`app/harness/api`） |
-| [agent-input-output.md](./agent-input-output.md) | Python **（已弃用）** | 入队、`MessageQueue`、`connection_id` SSE |
-| [agent-turn-loop.md](./agent-turn-loop.md) | Python **（已弃用）** | `run_turn`、工具闭环 |
-| [context-compression-and-state.md](./context-compression-and-state.md) | 双栈 | 压缩与 prompt 侧车（Go/Python 均有实现） |
-| [a2a-and-register-center.md](./a2a-and-register-center.md) | Python | `agent_peer`、Register Center |
-| [built-in-tools.md](./built-in-tools.md) | 以 Python 为主 | 工具清单；Go 差异见各 `node/internal/tools/README.md` |
-| [triggers-design.md](./triggers-design.md) | 长期设计 | Go 落地见 [`node/internal/triggers/README.md`](../node/internal/triggers/README.md) |
-| [prometheus-metrics.md](./prometheus-metrics.md) | Python | `/metrics` |
+| [context-compression-and-state.md](./context-compression-and-state.md) | Go Node | 压缩与 prompt 侧车 |
+| [a2a-and-register-center.md](./a2a-and-register-center.md) | Register Center | `agent_peer`、登记与中继 |
+| [built-in-tools.md](./built-in-tools.md) | 双栈概念 | 工具清单；Go 实现见 `node/internal/tools/README.md` |
+| [triggers-design.md](./triggers-design.md) | Go Node | 长期设计；落地见 `node/internal/triggers/README.md` |
+| [prometheus-metrics.md](./prometheus-metrics.md) | 历史 + RC | Python Agent `/metrics` 已移除；Register Center 指标仍适用 |
 | [security-rollout.md](./security-rollout.md) | 通用 | 分阶段安全验收 |
-| [os-compatibility.md](./os-compatibility.md) | Python 发布 | glibc / Windows 兼容 |
+| [os-compatibility.md](./os-compatibility.md) | 历史参考 | CPython 兼容（Python Agent 已移除） |
 | [roadmap.md](./roadmap.md) | 通用 | 路线图 |
 
 ## 远期规划（`future/`）
@@ -52,7 +49,12 @@ Manage、A2A inbox、多租户等 **尚未实现** 的方案，见 [future/READM
 
 ## 归档（`archive/`）
 
-已废弃的 Proxy/Body 路由等，见 [archive/README.md](./archive/README.md)。
+| 目录 | 说明 |
+|------|------|
+| [archive/python-agent-runtime/](./archive/python-agent-runtime/) | **已移除的 Python FastAPI Agent API**（`api-reference`、turn loop 等） |
+| [archive/README.md](./archive/README.md) | Proxy/Body 路由等更早方案 |
+
+根目录 `api-reference.md`、`agent-input-output.md`、`agent-turn-loop.md`、`architecture-and-flows.md` 仅为**兼容跳转桩**，正文在 `archive/python-agent-runtime/`。
 
 ## 落地案例
 
@@ -62,10 +64,10 @@ Manage、A2A inbox、多租户等 **尚未实现** 的方案，见 [future/READM
 
 | 路径 | 说明 |
 |------|------|
-| [../README.md](../README.md) | 项目概览、双栈快速开始 |
+| [../README.md](../README.md) | 项目概览、快速开始 |
 | [../node/README.md](../node/README.md) | Go Agent Node |
 | [../client/README.md](../client/README.md) | Go REPL Client |
 | [../app/README.md](../app/README.md) | Python 包（含 `cli/` TUI） |
 | [../register_center/README.md](../register_center/README.md) | Register Center |
 
-`app/`、`node/` 各子目录维护 **`README.md`** / **`REFERENCE.md`**。
+`node/`、`app/` 各子目录维护 **`README.md`** / **`REFERENCE.md`**。

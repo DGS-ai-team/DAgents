@@ -282,6 +282,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball / Win
 |------|------|
 | [docs/README.md](docs/README.md) | 文档索引 |
 | [docs/architecture/overview.md](docs/architecture/overview.md) | 架构总览 |
+| [docs/architecture/go-node-internals.md](docs/architecture/go-node-internals.md) | Go Node 内部结构（runtime / queue / Orchestrator） |
 | [docs/architecture/local-assistant.md](docs/architecture/local-assistant.md) | 本地助手联调 |
 | [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md) | Go Node HTTP/SSE 契约 |
 | [docs/architecture/child-agent-tools.md](docs/architecture/child-agent-tools.md) | 子 Agent 工具 |
@@ -289,7 +290,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball / Win
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.0**） |
 | [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) | Web 前端（**独立仓库，尚未适配 v0.2.0 / Go Node API**） |
 
-> 历史文档 [docs/api-reference.md](docs/api-reference.md) 描述已移除的 Python Agent API，仅作参考；**DAgentsUI 当前仍依赖该旧契约**。
+> 已移除的 Python Agent API 文档见 [docs/archive/python-agent-runtime/](docs/archive/python-agent-runtime/)；**DAgentsUI 当前仍依赖旧 HTTP 契约**。
 
 ---
 

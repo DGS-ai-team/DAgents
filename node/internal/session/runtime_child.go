@@ -22,7 +22,9 @@ func newChildRuntime(
 	purpose string,
 	childMgr *childagent.Manager,
 ) *runtime {
+	// 创建受限工具注册表
 	restricted := childagent.NewRestrictedRegistry(baseRegistry, allowedTools)
+	// 创建子 Agent 消息中继
 	relay := &childagent.RelayHub{
 		Inner:           hub,
 		ParentSessionID: parentID,
@@ -30,10 +32,12 @@ func newChildRuntime(
 		ChildSessionID:  id,
 		ChildPurpose:    purpose,
 	}
+	// 创建子 runtime
 	rt := newRuntimeWithPublisher(
 		id, agentID, relay, hub, llmClient, restricted, policyEngine, nil, logger,
 		nil, nil, nil, 0, turnOpts, nil,
 	)
+	// 设置子 runtime 元数据
 	rt.childMeta = &childRuntimeMeta{
 		parentSessionID: parentID,
 		childMgr:        childMgr,
