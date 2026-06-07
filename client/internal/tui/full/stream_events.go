@@ -54,6 +54,11 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		m.turn.MarkTurnContent()
 		m.transcript.FinishPartial("assistant")
 		m.transcript.FinishPartial("reasoning")
+		if ev.Type == "tool_call" {
+			m.children.noteToolCall(ev.Data)
+		} else {
+			m.children.noteToolResult(ev.Data)
+		}
 		for _, line := range tuishared.FormatToolEvent(ev.Type, ev.Data, m.toolFold.Verbose()) {
 			m.transcript.Add(line)
 		}
@@ -90,21 +95,25 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 	case "temporary_agent_completed":
 		id := clihitl.ChildSessionIDFromData(ev.Data)
 		m.children.onFinished(id)
-		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
-			m.transcript.Add("[system] " + line)
-			m.notifyViewportRefresh()
-		} else {
-			m.notifyStripRefresh()
+		if !m.children.shouldSuppressLifecycle(id, ev.Type) {
+			if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
+				m.transcript.Add("[system] " + line)
+				m.notifyViewportRefresh()
+				break
+			}
 		}
+		m.notifyStripRefresh()
 	case "temporary_agent_cancelled":
 		id := clihitl.ChildSessionIDFromData(ev.Data)
 		m.children.onFinished(id)
-		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
-			m.transcript.Add("[system] " + line)
-			m.notifyViewportRefresh()
-		} else {
-			m.notifyStripRefresh()
+		if !m.children.shouldSuppressLifecycle(id, ev.Type) {
+			if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
+				m.transcript.Add("[system] " + line)
+				m.notifyViewportRefresh()
+				break
+			}
 		}
+		m.notifyStripRefresh()
 	case "approval_required":
 		m.enqueueApproval(ev.Data)
 		m.notifyHITLChanged()

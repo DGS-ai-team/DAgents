@@ -72,6 +72,16 @@ func formatToolResultEvent(data map[string]any, verbose bool) []string {
 	}
 
 	head := resultHeadline(name, rejected, content)
+	if IsTemporaryAgentTool(name) {
+		if customHead, body, ok := formatTemporaryAgentToolResult(name, content, verbose); ok {
+			head = customHead
+			lines := []string{"[tool] " + head}
+			if body != "" {
+				lines = append(lines, indentLines("    ", body)...)
+			}
+			return lines
+		}
+	}
 	lines := []string{"[tool] " + head}
 	if content == "" {
 		return lines
@@ -134,6 +144,11 @@ func summarizeToolResultContent(name, content string) string {
 		}
 		return summarizeSearchReplaceMeta(content)
 	default:
+		if IsTemporaryAgentTool(name) {
+			if _, body, ok := formatTemporaryAgentToolResult(name, content, false); ok && body != "" {
+				return body
+			}
+		}
 		if hint := summarizeJSONResult(content); hint != "" && !strings.Contains(content, "\n") {
 			return hint
 		}
@@ -373,6 +388,8 @@ func ToolDisplayName(name string, args map[string]any) string {
 		return name + "(" + path + ")"
 	case UserInformationToolName:
 		return userInformationDisplayName
+	case toolCreateTemporaryAgent, toolWaitTemporaryAgents, toolTemporaryAgentStatus, toolCancelTemporaryAgent:
+		return FormatTemporaryAgentToolTitle(name, args)
 	default:
 		if len(args) == 0 {
 			return name + "()"

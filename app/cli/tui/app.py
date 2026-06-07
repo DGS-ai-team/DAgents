@@ -28,7 +28,12 @@ from app.cli.approval import (
     clamp_menu_selection_index,
     extract_tool_approval_requests,
 )
-from app.cli.child_agent import approval_header, format_child_agents_list
+from app.cli.child_agent import (
+    approval_header,
+    format_child_agents_list,
+    format_temporary_agent_tool_title,
+    parse_temporary_agent_tool_result,
+)
 from app.cli.render import TranscriptKind, TranscriptUpdate
 from app.cli.session_controller import PendingHITL, SessionController
 from app.cli.tool_calls import normalize_tool_call_item
@@ -1010,6 +1015,9 @@ class DAgentsTuiApp(App[None]):
         if name == _USER_INFORMATION_TOOL_NAME:
             # 问题与选项在 user_information_required 后写入同一块，此处不展开冗长参数。
             return "Agent 询问"
+        temp_title = format_temporary_agent_tool_title(name, arguments)
+        if temp_title is not None:
+            return temp_title
         if arguments:
             args = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
             return f"{name}({args})"
@@ -1214,6 +1222,9 @@ class DAgentsTuiApp(App[None]):
         """提取工具结果摘要与详情；bash 优先展示 stdout，空则 stderr。"""
         content = str(data.get("content") or "").strip()
         tool_name = str(data.get("tool_name") or "")
+        parsed = parse_temporary_agent_tool_result(tool_name, content)
+        if parsed is not None:
+            return parsed
         if tool_name == "bash_run":
             stdout, stderr = self._extract_bash_sections(content)
             detail = stdout or stderr or content

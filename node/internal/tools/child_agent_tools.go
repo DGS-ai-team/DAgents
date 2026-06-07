@@ -21,7 +21,8 @@ func createTemporaryAgentToolDef() ToolDef {
 		Function: FunctionDef{
 			Name: "create_temporary_agent",
 			Description: "创建同进程临时 Agent（temporary agent）执行自包含子任务，非外部 A2A 对等调用。" +
-				"wait=true 时阻塞至完成。须在 task 中提供完整上下文，并通过 allowed_tools 指定其可用工具（仅限你当前拥有的工具子集）。",
+				"wait=true 时阻塞至完成。须在 task 中提供完整上下文，并通过 allowed_tools 指定其可用工具（仅限你当前拥有的工具子集）。" +
+				"可通过 skill_names 在创建时预加载 skills（与 load_skills 同名语义，子 Agent 运行期不可再加载 skills）。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -34,6 +35,11 @@ func createTemporaryAgentToolDef() ToolDef {
 						"type":        "array",
 						"items":       map[string]any{"type": "string"},
 						"description": "临时 Agent 可用工具子集，须在父可下放列表内；默认 read_file、search_file、bash_run",
+					},
+					"skill_names": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "创建时预加载的 skills 名称（可选）；名称须与 .runtime/skills 下子目录名一致，整组替换语义同 load_skills",
 					},
 					"ttl_seconds": map[string]any{"type": "integer", "description": "临时 Agent 生命周期（秒）"},
 					"max_turns":   map[string]any{"type": "integer", "description": "临时 Agent 最大回合数"},

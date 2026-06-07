@@ -7,6 +7,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
+	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 )
 
 func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
@@ -41,6 +42,58 @@ func TestBuildSystemPrompt_includesPromptContext(t *testing.T) {
 	})
 	if !containsAll(prompt, "用户信息与偏好", "prefer concise", "prompt_context") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing.T) {
+	hostsnapshot.CaptureAtStartup()
+	prompt := BuildChildSystemPrompt(ChildSystemPromptInput{
+		AgentID:   "ops-01",
+		FSRoot:    "/data/ws",
+		SessionID: "child-abc",
+		Purpose:   "review patch",
+	})
+	if !containsAll(prompt, "临时子 Agent", "review patch", "child-abc", "/data/ws", "当前运行环境") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "prompt_context") {
+		t.Fatalf("child prompt should omit parent sections, got %q", prompt)
+	}
+}
+
+func TestChildSystemPromptBuilder_usedByOrchestrator(t *testing.T) {
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, nil)
+	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("scan logs"))
+	prompt := orch.buildSystemPrompt("child-xyz")
+	if !containsAll(prompt, "scan logs", "child-xyz", "临时子 Agent") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestChildSystemPromptBuilder_includesLoadedSkills(t *testing.T) {
+	root := t.TempDir()
+	writeSkillForPromptTest(t, root, "writer", "---\ndescription: Write docs\n---\nWrite clearly.\n")
+	catalog := skills.NewCatalog(root, true, 2)
+	loaded := catalog.SetLoadedSkills([]string{"writer"})
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{
+		Catalog: catalog,
+		Get:     func() []skills.LoadedSkill { return loaded },
+	}, DefaultMaxToolLoops(), nil, nil, nil)
+	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("review"))
+	prompt := orch.buildSystemPrompt("child-xyz")
+	if !containsAll(prompt, "Write clearly.", "已加载技能") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func writeSkillForPromptTest(t *testing.T, root, name, body string) {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

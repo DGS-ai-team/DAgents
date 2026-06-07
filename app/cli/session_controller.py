@@ -599,6 +599,7 @@ class SessionController:
                 self._emit_transcript(format_reasoning(content))
         elif event_type == "tool_call":
             self._ensure_assistant_end()
+            self._child_tracker.note_tool_call(data)
             formatted = format_tool_call(data)
             if formatted is not None:
                 self._emit_transcript(formatted)
@@ -610,6 +611,10 @@ class SessionController:
             self._enqueue_hitl(PendingHITL(kind="user_information", data=data))
         elif event_type == "tool_result":
             self._ensure_assistant_end()
+            self._child_tracker.note_tool_result(
+                str(data.get("tool_name") or ""),
+                str(data.get("content") or ""),
+            )
             self._emit_transcript(format_tool_result(data))
         elif event_type == "usage":
             self._usage_strip = parse_usage_strip(data)
@@ -705,6 +710,9 @@ class SessionController:
         else:
             self._child_tracker.on_finished(child_session_id_from_data(data))
         self._emit_child_strip()
+        child_id = child_session_id_from_data(data)
+        if self._child_tracker.should_suppress_lifecycle(child_id, event_type):
+            return
         line = format_child_lifecycle_line(event_type, data)
         if line:
             self._emit_transcript(format_system_line(line))

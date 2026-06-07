@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,8 @@ type streamRunner struct {
 	reasoningLineOpen bool
 
 	turn *tuishared.TurnGate
+
+	lifecycleSuppress *tuishared.ChildLifecycleSuppress
 }
 
 func newStreamRunner(
@@ -42,13 +45,14 @@ func newStreamRunner(
 	turn *tuishared.TurnGate,
 ) *streamRunner {
 	return &streamRunner{
-		client:        client,
-		sessionID:     sessionID,
-		transcript:    transcript,
-		toolFold:      toolFold,
-		printMu:       printMu,
-		showReasoning: showReasoning,
-		turn:          turn,
+		client:            client,
+		sessionID:         sessionID,
+		transcript:        transcript,
+		toolFold:          toolFold,
+		printMu:           printMu,
+		showReasoning:     showReasoning,
+		turn:              turn,
+		lifecycleSuppress: tuishared.NewChildLifecycleSuppress(),
 	}
 }
 
@@ -113,8 +117,11 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 	}
 	switch ev.Type {
 	case "temporary_agent_created", "temporary_agent_completed", "temporary_agent_cancelled":
-		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
-			r.logSystem(line)
+		childID := clihitl.ChildSessionIDFromData(ev.Data)
+		if !r.lifecycleSuppress.ShouldSuppressLifecycle(childID, ev.Type) {
+			if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
+				r.logSystem(line)
+			}
 		}
 		return true, nil
 	}
@@ -130,6 +137,19 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 		OnTool: func(eventType string, data map[string]any) {
 			r.finishAssistantLine()
 			r.finishReasoningLine()
+			if eventType == "tool_call" {
+				r.lifecycleSuppress.NoteToolCallEvent(data)
+			} else if eventType == "tool_result" {
+				name := strings.TrimSpace(fmt.Sprint(data["tool_name"]))
+				if name == "" {
+					name = strings.TrimSpace(fmt.Sprint(data["name"]))
+				}
+				content := strings.TrimSpace(fmt.Sprint(data["content"]))
+				if content == "" {
+					content = strings.TrimSpace(fmt.Sprint(data["output"]))
+				}
+				r.lifecycleSuppress.NoteToolResult(name, content)
+			}
 			for _, line := range tuishared.FormatToolEvent(eventType, data, r.toolFold.Verbose()) {
 				r.logSystem(line)
 			}

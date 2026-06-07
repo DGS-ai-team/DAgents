@@ -60,7 +60,13 @@ type Orchestrator struct {
 	childMgr       *childagent.Manager
 	isChildSession bool
 
-	enqueueToolResult func(sessionID string) error
+	enqueueToolResult    func(sessionID string) error
+	systemPromptBuilder SystemPromptBuilder
+}
+
+// SetSystemPromptBuilder 注入 system prompt 构造器；nil 时使用默认 BuildSystemPrompt。
+func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
+	o.systemPromptBuilder = fn
 }
 
 // SetChildAgentTools 注入子 Agent 工具处理器；isChild 为 true 时禁止调用管理工具。
@@ -477,14 +483,18 @@ func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
 	if o.skillAccess.Get != nil {
 		loaded = o.skillAccess.Get()
 	}
-	return BuildSystemPrompt(SystemPromptInput{
+	in := SystemPromptInput{
 		AgentID:   o.agentID,
 		FSRoot:    o.fsRoot,
 		SessionID: sessionID,
 		Catalog:   o.skillAccess.Catalog,
 		Loaded:    loaded,
 		PromptCtx: o.promptCtx,
-	})
+	}
+	if o.systemPromptBuilder != nil {
+		return o.systemPromptBuilder(in)
+	}
+	return BuildSystemPrompt(in)
 }
 
 func (o *Orchestrator) processToolCalls(

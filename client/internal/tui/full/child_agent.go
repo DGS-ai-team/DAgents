@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
+	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 )
 
 // childAgentEntry 跟踪单个子 Agent 的 TUI 展示状态。
@@ -16,18 +17,25 @@ type childAgentEntry struct {
 
 // childAgentTracker 维护父 session 下活跃子 Agent 计数（SSE 驱动，HTTP 可对齐）。
 type childAgentTracker struct {
-	mu      sync.Mutex
-	entries map[string]*childAgentEntry
+	mu       sync.Mutex
+	entries  map[string]*childAgentEntry
+	suppress *tuishared.ChildLifecycleSuppress
 }
 
 func newChildAgentTracker() *childAgentTracker {
-	return &childAgentTracker{entries: make(map[string]*childAgentEntry)}
+	return &childAgentTracker{
+		entries:  make(map[string]*childAgentEntry),
+		suppress: tuishared.NewChildLifecycleSuppress(),
+	}
 }
 
 func (t *childAgentTracker) reset() {
 	t.mu.Lock()
 	t.entries = make(map[string]*childAgentEntry)
 	t.mu.Unlock()
+	if t.suppress != nil {
+		t.suppress.Reset()
+	}
 }
 
 func (t *childAgentTracker) onCreated(data map[string]any) {
@@ -101,4 +109,32 @@ func (t *childAgentTracker) replaceFromAPI(items []nodeapi.ChildAgentListItem) {
 		}
 	}
 	t.entries = next
+}
+
+func (t *childAgentTracker) noteToolCall(data map[string]any) {
+	if t.suppress != nil {
+		t.suppress.NoteToolCallEvent(data)
+	}
+}
+
+func (t *childAgentTracker) noteToolResult(data map[string]any) {
+	if t.suppress == nil {
+		return
+	}
+	name := strings.TrimSpace(fmt.Sprint(data["tool_name"]))
+	if name == "" {
+		name = strings.TrimSpace(fmt.Sprint(data["name"]))
+	}
+	content := strings.TrimSpace(fmt.Sprint(data["content"]))
+	if content == "" {
+		content = strings.TrimSpace(fmt.Sprint(data["output"]))
+	}
+	t.suppress.NoteToolResult(name, content)
+}
+
+func (t *childAgentTracker) shouldSuppressLifecycle(childID, eventType string) bool {
+	if t.suppress == nil {
+		return false
+	}
+	return t.suppress.ShouldSuppressLifecycle(childID, eventType)
 }

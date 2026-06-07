@@ -8,6 +8,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
+	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 )
 
 // SetChildAgentManager 注入子 Agent 管理器并绑定 Host。
@@ -34,6 +35,10 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 	if parent, ok := m.sessions[spec.ParentSessionID]; !ok || parent.isChildSession() {
 		return fmt.Errorf("parent session not found")
 	}
+	loadedSkills, err := m.resolveChildLoadedSkills(spec.SkillNames)
+	if err != nil {
+		return err
+	}
 	childOpts := m.turn
 	childOpts.MaxToolLoops = spec.MaxTurns
 	rt := newChildRuntime(
@@ -48,11 +53,40 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 		childOpts,
 		spec.AllowedTools,
 		spec.Purpose,
+		loadedSkills,
 		m.children,
 	)
 	m.sessions[spec.ChildSessionID] = rt
 	rt.start(m.ctx)
 	return nil
+}
+
+func (m *Manager) resolveChildLoadedSkills(names []string) ([]skills.LoadedSkill, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	catalog := skills.NewCatalog(m.turn.SkillsRoot, m.turn.SkillsEnabled, m.turn.SkillsMaxInPrompt)
+	if !catalog.Enabled() {
+		return nil, fmt.Errorf("skills are disabled")
+	}
+	var missing []string
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := catalog.SelectByName(name); !ok {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("unknown skill(s): %s", strings.Join(missing, ", "))
+	}
+	loaded := catalog.SetLoadedSkills(names)
+	if len(loaded) == 0 {
+		return nil, fmt.Errorf("no skills loaded")
+	}
+	return loaded, nil
 }
 
 // StopChild 停止子 consumer。

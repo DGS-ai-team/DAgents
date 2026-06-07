@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
+
+from app.cli.tool_calls import normalize_tool_call_item
 
 HITL_SCOPE_TEMPORARY_AGENT = "temporary_agent"
 
@@ -69,6 +72,11 @@ def format_child_lifecycle_line(event_type: str, data: dict[str, Any]) -> str:
         return f"临时 Agent 已创建 · {short}"
     if event_type == EVENT_TEMPORARY_AGENT_COMPLETED:
         status = str(data.get("status") or "completed").strip() or "completed"
+        summary = _first_nonempty_line(str(data.get("summary") or ""))
+        if summary:
+            return f"临时 Agent 已结束 · {short} · {_truncate_text(summary, 48)}"
+        if purpose:
+            return f"临时 Agent 已结束 · {purpose} · {short} · {status}"
         return f"临时 Agent 已结束 · {short} · {status}"
     if event_type == EVENT_TEMPORARY_AGENT_CANCELLED:
         reason = str(data.get("reason") or "").strip()
@@ -76,6 +84,304 @@ def format_child_lifecycle_line(event_type: str, data: dict[str, Any]) -> str:
             return f"临时 Agent 已取消 · {short} · {reason}"
         return f"临时 Agent 已取消 · {short}"
     return ""
+
+
+TEMPORARY_AGENT_TOOLS = frozenset(
+    {
+        "create_temporary_agent",
+        "wait_temporary_agents",
+        "temporary_agent_status",
+        "cancel_temporary_agent",
+    }
+)
+
+
+def format_temporary_agent_tool_title(name: str, arguments: dict[str, Any]) -> str | None:
+    """生成临时 Agent 管理工具在 transcript 中的短标题。"""
+    if name not in TEMPORARY_AGENT_TOOLS:
+        return None
+    args = arguments or {}
+    if name == "create_temporary_agent":
+        purpose = str(args.get("purpose") or "—").strip() or "—"
+        if args.get("wait"):
+            return f"创建临时 Agent · {purpose} (wait)"
+        return f"创建临时 Agent · {purpose}"
+    if name == "wait_temporary_agents":
+        ids = _string_list(args.get("child_session_ids"))
+        title = "等待临时 Agent" if not ids else f"等待 {len(ids)} 个临时 Agent"
+        timeout = _int_value(args.get("timeout_seconds"))
+        if timeout > 0:
+            title += f" · {timeout}s"
+        return title
+    if name == "temporary_agent_status":
+        ids = _string_list(args.get("child_session_ids"))
+        return "查询临时 Agent 状态" if not ids else f"查询 {len(ids)} 个临时 Agent 状态"
+    if name == "cancel_temporary_agent":
+        short = _short_child_id(str(args.get("child_session_id") or ""))
+        return "取消临时 Agent" if not short else f"取消临时 Agent · {short}"
+    return name + "()"
+
+
+def parse_temporary_agent_tool_result(tool_name: str, content: str) -> tuple[str, str] | None:
+    """将临时 Agent 工具 JSON 结果解析为 (summary, detail)。"""
+    if tool_name not in TEMPORARY_AGENT_TOOLS:
+        return None
+    text = str(content or "").strip()
+    if text.startswith("ERROR:"):
+        return text, text
+    try:
+        payload: Any = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if tool_name == "create_temporary_agent" and isinstance(payload, dict):
+        return _format_create_temporary_agent_result(payload)
+    if tool_name == "wait_temporary_agents" and isinstance(payload, dict):
+        return _format_wait_temporary_agents_result(payload)
+    if tool_name == "temporary_agent_status":
+        if isinstance(payload, list):
+            return _format_temporary_agent_batch_result("temporary_agent_status", payload, timed_out=False)
+        if isinstance(payload, dict):
+            results = payload.get("results")
+            if isinstance(results, list):
+                return _format_temporary_agent_batch_result("temporary_agent_status", results, timed_out=False)
+    if tool_name == "cancel_temporary_agent" and isinstance(payload, dict):
+        short = _short_child_id(str(payload.get("child_session_id") or ""))
+        status = str(payload.get("status") or "cancelled").strip() or "cancelled"
+        summary = "✓ 已取消临时 Agent"
+        if short:
+            summary += f" · {short}"
+        summary += f" · {status}"
+        return summary, ""
+    return None
+
+
+def _format_create_temporary_agent_result(payload: dict[str, Any]) -> tuple[str, str]:
+    kind = str(payload.get("kind") or "").strip()
+    if kind == "result":
+        return _format_single_temporary_agent_result(payload, headline_prefix="✓ 临时 Agent 完成")
+    parts = ["✓ 已创建临时 Agent"]
+    short = _short_child_id(str(payload.get("child_session_id") or ""))
+    purpose = str(payload.get("purpose") or "").strip()
+    if short:
+        parts.append(short)
+    if purpose:
+        parts.append(purpose)
+    max_turns = _int_value(payload.get("max_turns"))
+    if max_turns > 0:
+        parts.append(f"max_turns={max_turns}")
+    skills = _string_list(payload.get("loaded_skills"))
+    if skills:
+        parts.append("skills=" + ",".join(skills))
+    return " · ".join(parts), ""
+
+
+def _format_wait_temporary_agents_result(payload: dict[str, Any]) -> tuple[str, str]:
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return "✓ wait_temporary_agents · 无结果", ""
+    timed_out = bool(payload.get("timed_out"))
+    return _format_temporary_agent_batch_result("wait_temporary_agents", results, timed_out=timed_out)
+
+
+def _format_temporary_agent_batch_result(
+    tool_name: str,
+    results: list[Any],
+    *,
+    timed_out: bool,
+) -> tuple[str, str]:
+    parsed = [_normalize_temporary_agent_result(item) for item in results if isinstance(item, dict)]
+    total = len(parsed)
+    if total == 0:
+        return f"✓ {tool_name} · 无结果", ""
+    completed = sum(1 for item in parsed if item.get("status") == "completed")
+    failed = sum(
+        1
+        for item in parsed
+        if str(item.get("status") or "") in {"failed", "cancelled", "expired"}
+    )
+    summary = f"✓ {tool_name} · {completed + failed}/{total} 已结束"
+    if completed > 0:
+        summary += f"（{completed} 成功"
+        if failed > 0:
+            summary += f"，{failed} 异常"
+        summary += "）"
+    elif failed > 0:
+        summary += f"（{failed} 异常）"
+    if timed_out:
+        summary += " · 超时"
+    lines: list[str] = []
+    for index, item in enumerate(parsed, start=1):
+        short = _short_child_id(str(item.get("child_session_id") or ""))
+        status = str(item.get("status") or "unknown").strip() or "unknown"
+        prefix = f"[{index}] {short} · {status}"
+        hint = _temporary_agent_result_hint(item)
+        lines.append(f"{prefix} · {hint}" if hint else prefix)
+    return summary, "\n".join(lines)
+
+
+def _format_single_temporary_agent_result(payload: dict[str, Any], *, headline_prefix: str) -> tuple[str, str]:
+    item = _normalize_temporary_agent_result(payload)
+    short = _short_child_id(str(item.get("child_session_id") or ""))
+    status = str(item.get("status") or "unknown").strip() or "unknown"
+    summary = f"{headline_prefix} · {short} · {status}" if short else f"{headline_prefix} · {status}"
+    detail = _temporary_agent_result_detail(item, verbose=True)
+    return summary, detail
+
+
+def _normalize_temporary_agent_result(item: dict[str, Any]) -> dict[str, Any]:
+    artifacts = item.get("artifacts")
+    if not isinstance(artifacts, list):
+        artifacts = []
+    return {
+        "child_session_id": str(item.get("child_session_id") or "").strip(),
+        "status": str(item.get("status") or "").strip(),
+        "summary": str(item.get("summary") or "").strip(),
+        "error": str(item.get("error") or "").strip(),
+        "turn_count": _int_value(item.get("turn_count")),
+        "artifacts": [str(x).strip() for x in artifacts if str(x).strip()],
+    }
+
+
+def _temporary_agent_result_hint(item: dict[str, Any]) -> str:
+    err = str(item.get("error") or "").strip()
+    if err:
+        return _truncate_text(err, 72)
+    summary = str(item.get("summary") or "").strip()
+    if summary:
+        return _truncate_text(_first_nonempty_line(summary), 72)
+    return ""
+
+
+def _temporary_agent_result_detail(item: dict[str, Any], *, verbose: bool) -> str:
+    parts: list[str] = []
+    err = str(item.get("error") or "").strip()
+    if err:
+        parts.append(f"error: {err}")
+    summary = str(item.get("summary") or "").strip()
+    if summary:
+        parts.append(summary if verbose else _first_nonempty_line(summary))
+    artifacts = item.get("artifacts") or []
+    if artifacts:
+        parts.append("artifacts: " + ", ".join(str(x) for x in artifacts))
+    turn_count = _int_value(item.get("turn_count"))
+    if turn_count > 0:
+        parts.append(f"turn_count={turn_count}")
+    return "\n".join(parts)
+
+
+def _short_child_id(child_id: str) -> str:
+    child_id = str(child_id or "").strip()
+    if len(child_id) <= 16:
+        return child_id
+    return child_id[:16] + "…"
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in str(text).splitlines():
+        line = line.strip()
+        if line:
+            return line
+    return str(text).strip()
+
+
+def _truncate_text(text: str, max_len: int) -> str:
+    text = str(text)
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
+
+
+def _string_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        text = str(item).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _int_value(raw: Any) -> int:
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _terminal_child_statuses() -> frozenset[str]:
+    return frozenset({"completed", "failed", "cancelled", "expired"})
+
+
+def child_session_ids_in_wait_tool_result(content: str) -> list[str]:
+    """从 wait_temporary_agents 工具结果提取已汇总展示的 child_session_id。"""
+    text = str(content or "").strip()
+    if not text or text.startswith("ERROR:"):
+        return []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return []
+    ids: list[str] = []
+    terminal = _terminal_child_statuses()
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        child_id = str(item.get("child_session_id") or "").strip()
+        status = str(item.get("status") or "").strip()
+        if child_id and status in terminal:
+            ids.append(child_id)
+    return ids
+
+
+@dataclass
+class ChildLifecycleSuppress:
+    """抑制 wait_temporary_agents 工具结果已覆盖的 lifecycle 系统行。"""
+
+    pending_wait: set[str] = field(default_factory=set)
+    shown_in_tool: set[str] = field(default_factory=set)
+
+    def reset(self) -> None:
+        self.pending_wait.clear()
+        self.shown_in_tool.clear()
+
+    def note_tool_call(self, data: dict[str, Any]) -> None:
+        tool_calls = data.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            calls = [data]
+        else:
+            calls = [item for item in tool_calls if isinstance(item, dict)]
+        for item in calls:
+            normalized = normalize_tool_call_item(item)
+            if normalized["name"] != "wait_temporary_agents":
+                continue
+            for child_id in _string_list(normalized["arguments"].get("child_session_ids")):
+                self.pending_wait.add(child_id)
+
+    def note_tool_result(self, tool_name: str, content: str) -> None:
+        if str(tool_name or "").strip() != "wait_temporary_agents":
+            return
+        for child_id in child_session_ids_in_wait_tool_result(content):
+            self.shown_in_tool.add(child_id)
+            self.pending_wait.discard(child_id)
+
+    def should_suppress_lifecycle(self, child_id: str, event_type: str) -> bool:
+        if event_type not in {EVENT_TEMPORARY_AGENT_COMPLETED, EVENT_TEMPORARY_AGENT_CANCELLED}:
+            return False
+        child_id = str(child_id or "").strip()
+        if not child_id:
+            return False
+        if child_id in self.shown_in_tool:
+            self.shown_in_tool.discard(child_id)
+            return True
+        if child_id in self.pending_wait:
+            return True
+        return False
 
 
 def approval_header(data: dict[str, Any]) -> str:
@@ -130,9 +436,11 @@ class ChildAgentTracker:
     """跟踪父 session 下活跃临时 Agent（SSE + HTTP 对齐）。"""
 
     entries: dict[str, ChildAgentEntry] = field(default_factory=dict)
+    lifecycle_suppress: ChildLifecycleSuppress = field(default_factory=ChildLifecycleSuppress)
 
     def reset(self) -> None:
         self.entries.clear()
+        self.lifecycle_suppress.reset()
 
     def on_created(self, data: dict[str, Any]) -> None:
         child_id = child_session_id_from_data(data)
@@ -179,6 +487,15 @@ class ChildAgentTracker:
                 purpose=str(item.get("purpose") or "").strip(),
             )
         self.entries = next_entries
+
+    def note_tool_call(self, data: dict[str, Any]) -> None:
+        self.lifecycle_suppress.note_tool_call(data)
+
+    def note_tool_result(self, tool_name: str, content: str) -> None:
+        self.lifecycle_suppress.note_tool_result(tool_name, content)
+
+    def should_suppress_lifecycle(self, child_id: str, event_type: str) -> bool:
+        return self.lifecycle_suppress.should_suppress_lifecycle(child_id, event_type)
 
     def input_strip_text(self, queue_len: int = 0) -> str:
         """输入框上方状态条文案。"""

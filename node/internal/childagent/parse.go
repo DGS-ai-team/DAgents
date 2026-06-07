@@ -42,23 +42,32 @@ func parseCreateInput(argsJSON string, cfg Config) (CreateInput, error) {
 		maxTurns = cfg.MaxMaxTurns
 	}
 	wait, _ := raw["wait"].(bool)
-	var allowed []string
-	if arr, ok := raw["allowed_tools"].([]any); ok {
-		for _, item := range arr {
-			s := strings.TrimSpace(fmt.Sprint(item))
-			if s != "" && s != "<nil>" {
-				allowed = append(allowed, s)
-			}
-		}
-	}
+	allowed := parseStringSlice(raw["allowed_tools"])
+	skillNames := parseStringSlice(raw["skill_names"])
 	return CreateInput{
 		Task:         task,
 		Purpose:      purpose,
 		AllowedTools: allowed,
+		SkillNames:   skillNames,
 		TTLSeconds:   ttl,
 		MaxTurns:     maxTurns,
 		Wait:         wait,
 	}, nil
+}
+
+func parseStringSlice(raw any) []string {
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		s := strings.TrimSpace(fmt.Sprint(item))
+		if s != "" && s != "<nil>" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func resolveAllowedTools(requested []string) ([]string, error) {

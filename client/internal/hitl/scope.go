@@ -110,6 +110,12 @@ func FormatChildLifecycleLine(eventType string, data map[string]any) string {
 		if status == "" {
 			status = "completed"
 		}
+		if summary := childSummaryPreview(data["summary"]); summary != "" {
+			return fmt.Sprintf("临时 Agent 已结束 · %s · %s", short, summary)
+		}
+		if purpose != "" {
+			return fmt.Sprintf("临时 Agent 已结束 · %s · %s · %s", purpose, short, status)
+		}
 		return fmt.Sprintf("临时 Agent 已结束 · %s · %s", short, status)
 	case "temporary_agent_cancelled":
 		reason := strings.TrimSpace(fmt.Sprint(data["reason"]))
@@ -120,4 +126,23 @@ func FormatChildLifecycleLine(eventType string, data map[string]any) string {
 	default:
 		return ""
 	}
+}
+
+func childSummaryPreview(raw any) string {
+	text := strings.TrimSpace(fmt.Sprint(raw))
+	if text == "" || text == "<nil>" {
+		return ""
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			text = line
+			break
+		}
+	}
+	runes := []rune(text)
+	if len(runes) <= 48 {
+		return text
+	}
+	return string(runes[:47]) + "…"
 }

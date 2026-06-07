@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
-	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/history"
+	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
@@ -30,30 +30,39 @@ type Session struct {
 
 type runtime struct {
 	session Session
-	queue   *queue.MessageQueue
-	orch    *turn.Orchestrator
-	store   *store.SQLiteStore
-	hub     *stream.Hub
+	// 消息队列
+	queue *queue.MessageQueue
+	// 编排器
+	orch *turn.Orchestrator
+	// 存储
+	store *store.SQLiteStore
+	// 事件中心
+	hub *stream.Hub
+	// 代理 ID
 	agentID string
-	logger  *slog.Logger
+	// 日志
+	logger *slog.Logger
 
+	// 技能目录
 	skillsCatalog *skills.Catalog
-	compression   *compression.Coordinator
+	// 上下文压缩逻辑
+	compression *compression.Coordinator
 
-	mu            sync.Mutex
-	state         turn.State
-	turnCancel    context.CancelFunc
-	messages      []llm.Message
-	loadedSkills  []skills.LoadedSkill
-	pending       *turn.PendingHITL
-	toolLoopCount int
-	fsRoot        string
+	mu            sync.Mutex           // 互斥锁
+	state         turn.State           // 状态
+	turnCancel    context.CancelFunc   // 取消 turn 上下文
+	messages      []llm.Message        // 交互消息列表
+	loadedSkills  []skills.LoadedSkill // 加载的技能列表
+	pending       *turn.PendingHITL    // 暂停
+	toolLoopCount int                  // tool 循环计数
+	fsRoot        string               // 文件系统根路径
 
-	triggerDelivery triggers.DeliveryTracker
+	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
-	childMeta *childRuntimeMeta
+	childMeta *childRuntimeMeta // 子 Agent 元数据
 }
 
+// newRuntime 创建新的 session runtime
 func newRuntime(
 	id, agentID string,
 	hub *stream.Hub,
@@ -73,6 +82,7 @@ func newRuntime(
 		initial, loaded, initialPending, initialLoopCount, turnOpts, triggerDelivery)
 }
 
+// newRuntimeWithPublisher 创建新的 session runtime，并设置 publisher
 func newRuntimeWithPublisher(
 	id, agentID string,
 	pub stream.Publisher,
@@ -92,22 +102,23 @@ func newRuntimeWithPublisher(
 	catalog := skills.NewCatalog(turnOpts.SkillsRoot, turnOpts.SkillsEnabled, turnOpts.SkillsMaxInPrompt)
 	journal := history.NewJournal(turnOpts.RawMessageHistoryEnabled, turnOpts.RawMessageHistoryDir, logger)
 	rt := &runtime{
-		session:       Session{ID: id, AgentID: agentID},
-		queue:         queue.NewMessageQueue(),
-		store:         st,
-		hub:           eventHub,
-		agentID:       agentID,
-		logger:        logger,
-		skillsCatalog: catalog,
-		compression:   compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking),
-		state:         turn.StateIdle,
-		messages:      append([]llm.Message(nil), initial...),
-		loadedSkills:  append([]skills.LoadedSkill(nil), loaded...),
-		pending:       initialPending,
-		toolLoopCount: initialLoopCount,
-		fsRoot:            turnOpts.FSRoot,
-		triggerDelivery:   triggerDelivery,
+		session:         Session{ID: id, AgentID: agentID},
+		queue:           queue.NewMessageQueue(),
+		store:           st,
+		hub:             eventHub,
+		agentID:         agentID,
+		logger:          logger,
+		skillsCatalog:   catalog,
+		compression:     compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking),
+		state:           turn.StateIdle,
+		messages:        append([]llm.Message(nil), initial...),
+		loadedSkills:    append([]skills.LoadedSkill(nil), loaded...),
+		pending:         initialPending,
+		toolLoopCount:   initialLoopCount,
+		fsRoot:          turnOpts.FSRoot,
+		triggerDelivery: triggerDelivery,
 	}
+	// 创建编排器
 	rt.orch = turn.NewOrchestrator(
 		agentID,
 		turnOpts.FSRoot,
@@ -125,30 +136,37 @@ func newRuntimeWithPublisher(
 		journal,
 		logger,
 	)
+	// 设置工具结果入队器
 	rt.orch.SetToolResultEnqueuer(rt.enqueueToolResult)
+	// 返回 runtime
 	return rt
 }
 
+// getLoadedSkills 获取加载的技能列表
 func (r *runtime) getLoadedSkills() []skills.LoadedSkill {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]skills.LoadedSkill(nil), r.loadedSkills...)
 }
 
+// setLoadedSkills 设置加载的技能列表
 func (r *runtime) setLoadedSkills(items []skills.LoadedSkill) {
 	r.mu.Lock()
 	r.loadedSkills = append([]skills.LoadedSkill(nil), items...)
 	r.mu.Unlock()
 }
 
+// setTriggerDelivery 设置 trigger 消息投递跟踪器
 func (r *runtime) setTriggerDelivery(tracker triggers.DeliveryTracker) {
 	r.triggerDelivery = tracker
 }
 
+// start 启动 session runtime
 func (r *runtime) start(parent context.Context) {
 	go r.consumeLoop(parent)
 }
 
+// consumeLoop 消费消息循环
 func (r *runtime) consumeLoop(ctx context.Context) {
 	for {
 		env, err := r.queue.Dequeue(ctx)
@@ -174,14 +192,17 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 	}
 }
 
+// enqueueToolResult 将 tool 结果入队
 func (r *runtime) enqueueToolResult(_ string) error {
 	return r.enqueue(queue.Envelope{RequestType: queue.RequestTypeToolResult}, queue.PriorityToolResult)
 }
 
+// scheduleToolResult 调度 tool 结果入队
 func (r *runtime) scheduleToolResult() error {
 	return r.enqueueToolResult(r.session.ID)
 }
 
+// applyStepOutcome 应用步骤结果
 func (r *runtime) applyStepOutcome(history *[]llm.Message, outcome turn.StepOutcome) {
 	r.messages = append([]llm.Message(nil), (*history)...)
 	if outcome.Pending != nil {

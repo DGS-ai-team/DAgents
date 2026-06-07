@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any
 
 from app.cli.approval import ToolApprovalRequest
+from app.cli.child_agent import parse_temporary_agent_tool_result
 from app.cli.tool_calls import normalize_tool_call_item
 
 
@@ -74,8 +75,14 @@ def format_tool_result(data: dict[str, Any]) -> TranscriptUpdate:
     call_id = data.get("tool_call_id") or ""
     status = "rejected" if data.get("rejected") else "done"
     content = str(data.get("content") or "").strip()
+    parsed = parse_temporary_agent_tool_result(str(name), content)
     lines = [f"[tool:{status}] {name} {call_id}".rstrip()]
-    if content:
+    if parsed is not None:
+        summary, detail = parsed
+        lines[0] = f"[tool:{status}] {summary}"
+        if detail:
+            lines.append(detail)
+    elif content:
         lines.append(content)
     return TranscriptUpdate(kind=TranscriptKind.TOOL_RESULT, text="\n".join(lines), data=data)
 
