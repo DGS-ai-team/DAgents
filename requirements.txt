@@ -1,13 +1,10 @@
 # 仓库根目录：pip install -r requirements.txt
 python-dotenv>=1.0.0
-openai>=1.40.0
 pydantic>=2.7.0
 fastapi>=0.115.0
 uvicorn>=0.30.0
 httpx>=0.27.0
 prometheus-client>=0.21.0
-prompt-toolkit>=3.0.0
+textual>=0.80.0
 aiohttp>=3.7.4,<4
 PyYAML
-APScheduler
-qq-botpy

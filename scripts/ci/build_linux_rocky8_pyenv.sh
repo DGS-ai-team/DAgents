@@ -2,15 +2,16 @@
 # 在 **Rocky Linux 8**（glibc **2.28**）容器内用 **gcc-toolset-13** + **pyenv** 源码编译 CPython，再执行 PyInstaller。
 #
 # 目的：
-# 1. 默认 Linux x64 包在 **Ubuntu 20.04 (focal)** 上构建，产物往往依赖 **GLIBC_2.30+**（如 **libpthread**），在 **glibc 更旧** 但仍需运行 3.13 的主机（常见 **RHEL 8 / Rocky 8 / Alma 8**，glibc 2.28）上会启动失败。
-# 2. 本脚本在 **glibc 2.28** 工具链上链接，降低对宿主 glibc 的上限要求（仍 **不低于 2.28**）。
+# 1. Release CI 默认在 **Rocky Linux 8** 容器内构建 `dagents-cli`，在 **glibc 2.28** 上链接，覆盖 **RHEL 8 / Rocky 8 / Alma 8** 等宿主。
+# 2. 较新的 **Ubuntu 20.04 (focal)** 链（glibc 2.31）产物可能依赖 **GLIBC_2.30+**；旧环境请用本脚本而非 `build_linux_focal_pyenv.sh`。
 #
 # 硬边界：
 # - **RHEL 6 / CentOS 6（glibc 2.12）无法运行 CPython 3.13**；若必须支持，只能换更低版本 Python 或容器化部署，勿期望本仓库 PyInstaller 产物兼容。
+# - 官方 `rockylinux:8` 极简镜像不含 **find**（findutils），pyenv python-build 会因此失败；勿装完整 coreutils（与 coreutils-single 冲突）。
 #
 # 约定（与 **`build_linux_focal_pyenv.sh`** 一致）：
 # - 工作区挂载为 **/src**；
-# - **API_PI_ARGS** / **RC_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串；
+# - **CLI_PI_ARGS** / **RC_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串（至少填一项）；
 # - **PYENV_PYTHON_VERSION**：可选，默认 **3.13.2**。
 #
 # 副作用：首次编译 CPython 耗时长；workflow step 需足够 **timeout**。
@@ -18,9 +19,12 @@
 set -euxo pipefail
 
 PYENV_PYTHON_VERSION="${PYENV_PYTHON_VERSION:-3.13.2}"
+export PIP_ROOT_USER_ACTION=ignore
+export PIP_DISABLE_PIP_VERSION_CHECK=1
 
 dnf -y install \
   ca-certificates curl git \
+  findutils tar gzip \
   make patch pkg-config which \
   gcc zlib-devel bzip2-devel readline-devel sqlite-devel openssl-devel xz xz-devel \
   libffi-devel gdbm-devel \
@@ -38,16 +42,40 @@ if [ ! -x "${PYENV_ROOT}/bin/pyenv" ]; then
   git clone --depth 1 https://github.com/pyenv/pyenv.git "${PYENV_ROOT}"
 fi
 
+# 非交互 shell 须 init --path，否则 shims 不在 PATH 上（ensurepip / pip 会装到 versions/X/bin 却找不到 python）。
+eval "$(pyenv init --path)"
 eval "$(pyenv init -)"
 
-export PYTHON_CONFIGURE_OPTS="${PYTHON_CONFIGURE_OPTS:---enable-shared}"
+# --without-ensurepip：构建阶段不跑 ensurepip；装完后再显式 bootstrap pip，避免 PATH 警告导致 pyenv 误判失败。
+export PYTHON_CONFIGURE_OPTS="${PYTHON_CONFIGURE_OPTS:---enable-shared --without-ensurepip}"
 
-pyenv install -s "${PYENV_PYTHON_VERSION}"
+if ! pyenv versions --bare | grep -qx "${PYENV_PYTHON_VERSION}"; then
+  pyenv install -s "${PYENV_PYTHON_VERSION}"
+fi
 pyenv global "${PYENV_PYTHON_VERSION}"
+pyenv rehash
+
+PYENV_PYTHON="${PYENV_ROOT}/versions/${PYENV_PYTHON_VERSION}/bin/python"
+export PATH="${PYENV_ROOT}/shims:${PYENV_ROOT}/versions/${PYENV_PYTHON_VERSION}/bin:${PATH}"
+export LD_LIBRARY_PATH="${PYENV_ROOT}/versions/${PYENV_PYTHON_VERSION}/lib:${LD_LIBRARY_PATH:-}"
+
+if ! "${PYENV_PYTHON}" -c 'import pip' 2>/dev/null; then
+  "${PYENV_PYTHON}" -m ensurepip --upgrade
+fi
+"${PYENV_PYTHON}" -m pip install --upgrade pip wheel
 
 cd /src
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt pyinstaller
+"${PYENV_PYTHON}" -m pip install -r requirements.txt pyinstaller
 
-eval python -m PyInstaller ${API_PI_ARGS}
-eval python -m PyInstaller ${RC_PI_ARGS}
+if [[ -z "${CLI_PI_ARGS:-}" && -z "${RC_PI_ARGS:-}" ]]; then
+  echo "[build_linux_rocky8_pyenv] at least one of CLI_PI_ARGS, RC_PI_ARGS is required" >&2
+  exit 1
+fi
+if [[ -n "${RC_PI_ARGS:-}" ]]; then
+  eval "${PYENV_PYTHON}" -m PyInstaller ${RC_PI_ARGS}
+fi
+if [[ -n "${CLI_PI_ARGS:-}" ]]; then
+  eval "${PYENV_PYTHON}" -m PyInstaller ${CLI_PI_ARGS}
+fi
+
+echo "[build_linux_rocky8_pyenv] done: $(ls -la /src/dist/ 2>/dev/null || true)"

@@ -1,0 +1,62 @@
+// dagents-node 为 Agent Node 进程入口：加载配置、启动 HTTP/SSE API，直至收到退出信号。
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/api"
+	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/shared/config"
+)
+
+func main() {
+	// 1) 解析 -config / 环境变量 / 默认 packaging 路径。
+	configPath := flag.String("config", "", "path to config.yaml (optional; default: DAGENTS_CONFIG or packaging/agent-client/config.yaml)")
+	logLevelFlag := flag.String("log-level", "", "log level: debug, info, warn, error (overrides config log.level)")
+	flag.Parse()
+
+	resolved, err := config.ResolveConfigPath(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(2)
+	}
+
+	// 2) 加载并校验 YAML；失败时区分路径错误(2)与内容错误(1)。
+	cfg, err := config.LoadFile(resolved)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+
+	levelText := cfg.Log.Level
+	if override := *logLevelFlag; override != "" {
+		levelText = override
+	}
+	level, ok := logx.ParseLevel(levelText)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "config: invalid log level %q (use debug, info, warn, error)\n", levelText)
+		os.Exit(1)
+	}
+	logger := logx.NewLogger(os.Stderr, level)
+	slog.SetDefault(logger)
+
+	// 3) 构造 HTTP 服务（session、turn、tools、SQLite 等由 api.NewServer 内部装配）。
+	logger.Info("config loaded", "path", resolved, "log_level", level.String(), "agent_id", cfg.AgentID)
+	srv := api.NewServer(cfg, logger)
+
+	// 4) SIGINT/SIGTERM 触发 ctx 取消，ListenAndServe 优雅关闭。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := srv.ListenAndServe(ctx); err != nil {
+		logger.Error("server stopped", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("agent node exited")
+}

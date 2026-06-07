@@ -20,11 +20,17 @@ def settings_namespace(**overrides: object) -> SimpleNamespace:
         "agent_max_active_session_queues": 8,
         "agent_session_idle_evict_seconds": 0,
         "agent_session_store_enabled": False,
+        "agent_skills_max_in_prompt": 8,
         "metrics_enabled": False,
         "registry_url": "",
         "discovery_groups": [],
         "agent_id": "test-agent",
         "agent_public_base_url": "",
+        "agent_registry_ttl_seconds": 60,
+        "agent_peer_shared_token": "",
+        "agent_peer_http_retry_attempts": 2,
+        "triggers_enabled": True,
+        "trigger_scheduler_poll_seconds": 5,
         "api_cors_allow_origins": ["http://localhost:5173"],
     }
     base.update(overrides)

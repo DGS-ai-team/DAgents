@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import os
+import time
 import uuid
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+
+from metrics import metrics_text, record_a2a_operation, record_a2a_terminal_state
 
 from rc_models import (
     AgentListResponse,
@@ -20,6 +25,33 @@ from rc_models import (
     RelayResponse,
 )
 from rc_store import AgentRegistryStore
+
+_A2A_TOKEN_HEADER = "x-dagents-a2a-token"
+
+
+def _shared_token() -> str:
+    return os.environ.get("AGENT_PEER_SHARED_TOKEN", "").strip()
+
+
+def _a2a_auth_headers() -> dict[str, str]:
+    token = _shared_token()
+    if not token:
+        return {}
+    return {_A2A_TOKEN_HEADER: token}
+
+
+def _verify_shared_token(request: Request) -> None:
+    expected = _shared_token()
+    if not expected:
+        return
+    actual = (request.headers.get(_A2A_TOKEN_HEADER) or "").strip()
+    if not actual or not hmac.compare_digest(actual, expected):
+        raise HTTPException(status_code=401, detail="invalid A2A token")
+
+
+def _registry_store_path() -> str | None:
+    raw = os.environ.get("REGISTER_CENTER_STORE_PATH", "").strip()
+    return raw or None
 
 
 async def _broadcast_to_agent(
@@ -52,6 +84,7 @@ async def _broadcast_to_agent(
     - 可能触发下游 Agent 创建新会话并入队消息。
     """
 
+    started = time.monotonic()
     session_id = f"broadcast-{agent.agent_id}-{uuid.uuid4().hex[:8]}"
     client_id = f"broadcast-{uuid.uuid4().hex}"
     target_url = f"{agent.base_url}/v1/messages"
@@ -64,7 +97,7 @@ async def _broadcast_to_agent(
         "priority": "human",
     }
     try:
-        resp = await client.post(target_url, json=payload)
+        resp = await client.post(target_url, json=payload, headers=_a2a_auth_headers())
         detail = None
         try:
             body = resp.json()
@@ -73,6 +106,12 @@ async def _broadcast_to_agent(
             body = None
         if resp.status_code >= 400:
             detail = resp.text[:300]
+            record_a2a_operation(
+                component="register_center",
+                operation="broadcast_downstream",
+                status="http_error",
+                elapsed_seconds=time.monotonic() - started,
+            )
             return BroadcastResultItem(
                 agent_id=agent.agent_id,
                 base_url=agent.base_url,
@@ -83,6 +122,12 @@ async def _broadcast_to_agent(
                 client_id=client_id,
                 detail=detail,
             )
+        record_a2a_operation(
+            component="register_center",
+            operation="broadcast_downstream",
+            status="ok",
+            elapsed_seconds=time.monotonic() - started,
+        )
         return BroadcastResultItem(
             agent_id=agent.agent_id,
             base_url=agent.base_url,
@@ -94,6 +139,12 @@ async def _broadcast_to_agent(
             detail=None if body is not None else "下游返回非 JSON 响应",
         )
     except Exception as exc:
+        record_a2a_operation(
+            component="register_center",
+            operation="broadcast_downstream",
+            status="error",
+            elapsed_seconds=time.monotonic() - started,
+        )
         return BroadcastResultItem(
             agent_id=agent.agent_id,
             base_url=agent.base_url,
@@ -132,10 +183,15 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="DAgents Register Center",
-        version="0.1.0",
-        description="用于维护 agent_id -> base_url 映射的轻量目录服务（MVP 内存版）。",
+        version="0.2.2",
+        description="用于维护 agent_id -> base_url 映射的轻量目录服务。",
     )
-    store = AgentRegistryStore()
+    store = AgentRegistryStore(persist_path=_registry_store_path())
+
+    @app.get("/metrics", tags=["system"])
+    def get_metrics() -> Response:
+        body, content_type = metrics_text()
+        return Response(content=body, media_type=content_type)
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     def get_health() -> HealthResponse:
@@ -161,7 +217,7 @@ def create_app() -> FastAPI:
         return HealthResponse(status="ok", agents=store.count())
 
     @app.post("/v1/agents", response_model=AgentRecord, tags=["agents"])
-    def upsert_agent(payload: AgentUpsertRequest) -> AgentRecord:
+    def upsert_agent(payload: AgentUpsertRequest, request: Request) -> AgentRecord:
         """登记或覆盖更新一条 Agent 记录。
 
         逻辑：
@@ -183,11 +239,13 @@ def create_app() -> FastAPI:
         - 修改仓库内对应 `agent_id` 的记录。
         """
 
+        _verify_shared_token(request)
         return store.upsert(payload)
 
     @app.get("/v1/agents", response_model=AgentListResponse, tags=["agents"])
     def list_agents(
-        discovery_group: str = Query(..., description="按发现分组精确筛选（必填）。")
+        request: Request,
+        discovery_group: str = Query(..., description="按发现分组精确筛选（必填）。"),
     ) -> AgentListResponse:
         """查询指定分组下的 Agent 列表。
 
@@ -210,12 +268,14 @@ def create_app() -> FastAPI:
         - 无。
         """
 
+        _verify_shared_token(request)
         records = store.list(discovery_group=discovery_group)
         return AgentListResponse(agents=records)
 
     @app.get("/v1/agents/{agent_id}", response_model=AgentRecord, tags=["agents"])
     def get_agent(
         agent_id: str,
+        request: Request,
         discovery_group: str = Query(..., description="调用方所属分组（必填）。"),
     ) -> AgentRecord:
         """按 agent_id 查询单条 Agent 记录（分组隔离）。
@@ -238,13 +298,14 @@ def create_app() -> FastAPI:
         - 无。
         """
 
+        _verify_shared_token(request)
         record = store.get(agent_id)
         if record is None or discovery_group not in record.discovery_group:
             raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
         return record
 
     @app.delete("/v1/agents/{agent_id}", tags=["agents"])
-    def delete_agent(agent_id: str) -> dict[str, bool]:
+    def delete_agent(agent_id: str, request: Request) -> dict[str, bool]:
         """按 `agent_id` 删除登记记录。
 
         逻辑：
@@ -266,13 +327,14 @@ def create_app() -> FastAPI:
         - 可能删除 `_records` 中一条登记。
         """
 
+        _verify_shared_token(request)
         ok = store.delete(agent_id)
         if not ok:
             raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
         return {"deleted": True}
 
     @app.post("/v1/broadcast", response_model=BroadcastResponse, tags=["broadcast"])
-    async def broadcast_message(payload: BroadcastRequest) -> BroadcastResponse:
+    async def broadcast_message(payload: BroadcastRequest, request: Request) -> BroadcastResponse:
         """按分组列表向已注册 Agent 广播消息。
 
         逻辑：
@@ -297,6 +359,8 @@ def create_app() -> FastAPI:
         - 会触发多个下游 Agent 接收并处理同一条消息。
         """
 
+        _verify_shared_token(request)
+        started = time.monotonic()
         targets_by_id: dict[str, AgentRecord] = {}
         for group_id in payload.discovery_group_ids:
             group_targets = store.list(discovery_group=group_id)
@@ -304,6 +368,13 @@ def create_app() -> FastAPI:
                 targets_by_id[item.agent_id] = item
         targets = list(targets_by_id.values())
         if not targets:
+            record_a2a_operation(
+                component="register_center",
+                operation="broadcast",
+                status="no_targets",
+                elapsed_seconds=time.monotonic() - started,
+            )
+            record_a2a_terminal_state(component="register_center", operation="broadcast", final_state="no_targets")
             return BroadcastResponse(
                 message=payload.message,
                 discovery_group_ids=payload.discovery_group_ids,
@@ -327,6 +398,19 @@ def create_app() -> FastAPI:
 
         success_count = sum(1 for item in results if item.ok)
         failed_count = len(results) - success_count
+        if failed_count == 0:
+            final_status = "ok"
+        elif success_count == 0:
+            final_status = "failed"
+        else:
+            final_status = "partial"
+        record_a2a_operation(
+            component="register_center",
+            operation="broadcast",
+            status=final_status,
+            elapsed_seconds=time.monotonic() - started,
+        )
+        record_a2a_terminal_state(component="register_center", operation="broadcast", final_state=final_status)
         return BroadcastResponse(
             message=payload.message,
             discovery_group_ids=payload.discovery_group_ids,
@@ -337,7 +421,7 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/v1/relay", response_model=RelayResponse, tags=["relay"])
-    async def relay_message(payload: RelayRequest) -> RelayResponse:
+    async def relay_message(payload: RelayRequest, request: Request) -> RelayResponse:
         """按目标 Agent ID 中继单条消息到下游 Agent。
 
         逻辑：
@@ -363,10 +447,24 @@ def create_app() -> FastAPI:
         - 会触发目标 Agent 接收并处理一条新消息。
         """
 
+        _verify_shared_token(request)
+        started = time.monotonic()
         target = store.get(payload.target_agent_id)
         if target is None:
+            record_a2a_operation(
+                component="register_center",
+                operation="relay",
+                status="target_not_found",
+                elapsed_seconds=time.monotonic() - started,
+            )
             raise HTTPException(status_code=404, detail=f"agent_id={payload.target_agent_id!r} 不存在")
         if payload.caller_groups and not any(group in target.discovery_group for group in payload.caller_groups):
+            record_a2a_operation(
+                component="register_center",
+                operation="relay",
+                status="forbidden_group",
+                elapsed_seconds=time.monotonic() - started,
+            )
             raise HTTPException(status_code=404, detail=f"agent_id={payload.target_agent_id!r} 不存在")
 
         target_url = f"{target.base_url}/v1/messages"
@@ -374,21 +472,43 @@ def create_app() -> FastAPI:
             "session_id": payload.session_id,
             "client_id": payload.client_id,
             "request_type": payload.request_type,
-            "content": payload.content,
             "source": payload.source,
             "priority": payload.priority,
         }
+        if payload.request_type == "resume":
+            forward_payload["resume_value"] = payload.resume_value
+        else:
+            forward_payload["content"] = payload.content
         async with httpx.AsyncClient(timeout=20.0) as client:
             try:
-                resp = await client.post(target_url, json=forward_payload)
+                resp = await client.post(target_url, json=forward_payload, headers=_a2a_auth_headers())
             except Exception as exc:
+                record_a2a_operation(
+                    component="register_center",
+                    operation="relay",
+                    status="downstream_error",
+                    elapsed_seconds=time.monotonic() - started,
+                )
                 raise HTTPException(status_code=502, detail=f"relay 下游调用失败: {exc}") from exc
         if resp.status_code >= 400:
+            record_a2a_operation(
+                component="register_center",
+                operation="relay",
+                status="downstream_http_error",
+                elapsed_seconds=time.monotonic() - started,
+            )
             raise HTTPException(status_code=502, detail=f"relay 下游返回错误: {resp.text[:300]}")
         try:
             body = resp.json()
         except Exception:
             body = {}
+        record_a2a_operation(
+            component="register_center",
+            operation="relay",
+            status="ok",
+            elapsed_seconds=time.monotonic() - started,
+        )
+        record_a2a_terminal_state(component="register_center", operation="relay", final_state="accepted")
         return RelayResponse(
             accepted=True,
             target_agent_id=target.agent_id,

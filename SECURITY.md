@@ -8,8 +8,9 @@
 
 | 版本 | 支持状态 |
 |------|----------|
-| **v0.1.x**（当前 **0.x** 预览线） | 接受安全报告；修复以补丁小版本或次版本发布，不保证与语义化版本「仅修 CVE」的严格节奏一致。 |
-| **低于 v0.1.0** 的任意提交 | 不单独维护；建议升级到已打 tag 的 **v0.1.0** 或最新 **`main`**。 |
+| **v0.2.x**（当前 **0.x** 预览线） | 接受安全报告；修复以补丁小版本或次版本发布。 |
+| **v0.1.x** | 仅接受严重漏洞报告；建议升级到 **v0.2.2** 或最新 **`dev`** / **`main`**。 |
+| **低于 v0.1.0** 的任意提交 | 不单独维护。 |
 
 ---
 
@@ -27,7 +28,7 @@
 
 报告建议包含（在不泄露利用细节的前提下尽量完整）：
 
-- 受影响版本或 **commit**（或 **tag**，如 **`v0.1.0`**）
+- 受影响版本或 **commit**（或 **tag**，如 **`v0.2.2`**）
 - 组件范围（例如 **Agent API**、**Register Center**、依赖库等）
 - 影响类型（机密性 / 完整性 / 可用性）与大致攻击面（需认证与否、默认配置是否暴露等）
 - 复现环境（OS、Python 版本、是否 Docker / PyInstaller 包等）
@@ -62,5 +63,5 @@
 ## 相关文档
 
 - 根目录 **[README.md](README.md)**：配置与安全、**`SECURITY.md`** 引用  
-- **[doc/api-reference.md](doc/api-reference.md)**：HTTP / SSE 与 **`client_id`** 等契约（部署时需结合网络与鉴权策略）
-- **[doc/prometheus-metrics.md](doc/prometheus-metrics.md)**：**`/metrics`** 与 Prometheus 落地说明
+- **[docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md)**：Go Node HTTP / SSE 契约（部署时需结合网络与鉴权策略）
+- **[docs/prometheus-metrics.md](docs/prometheus-metrics.md)**：**`/metrics`** 与 Prometheus 落地说明

@@ -1,8 +1,10 @@
-# `startup_scripts/`
+# startup_scripts
 
-用于分发包内的开箱启动脚本，按平台拆分子目录。
+Register Center 启动脚本（开发/legacy 安装包）。
 
-| 子目录 | 说明 |
-|---|---|
-| `linux/` | Linux 启动脚本：`start.sh`（API）、`start_register_center.sh`（Register Center） |
-| `windows/` | Windows 启动脚本：`start.bat`（API）、`start_register_center.bat`（Register Center） |
+| 路径 | 说明 |
+|------|------|
+| `linux/start_register_center.sh` | 启动 Register Center |
+| `windows/start_register_center.bat` | Windows 启动 Register Center |
+
+Agent 运行时请使用 Go Node：`go run ./node/cmd/dagents-node`。

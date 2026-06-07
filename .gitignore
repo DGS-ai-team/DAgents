@@ -5,14 +5,32 @@ __pycache__/
 *.egg-info/
 .env
 
+# Agent Node + Client 本地配置（仓库只提交 *.example.yaml；含密钥/本机路径的副本勿提交）
+config.yaml
+config.local.yaml
+policy.yaml
+policy.local.yaml
+packaging/agent-client/config.yaml
+packaging/agent-client/config.local.yaml
+packaging/agent-client/policy.yaml
+packaging/agent-client/policy.local.yaml
+
 # local runtime/state files
 .runtime/
+logs/
 # 仅忽略仓库根下名为 history 的目录，避免误伤 `app/harness/history/` 源码包。
 /history/
 *.sqlite3
 
+# private planning docs
+docs/private-enterprise-positioning.md
+
 # editor / IDE
+.cursor/
 .vscode/
+
+# local worktrees
+.worktrees/
 
 # frontend/tooling artifacts (for split-repo collaboration)
 .pnpm-store/
@@ -22,7 +40,14 @@ yarn-debug.log*
 yarn-error.log*
 openapi.json
 
+# Go (Agent Node + Client)
+node/dagents-node
+client/dagents-client
+**/go.sum
+
 # PyInstaller / 本地打包中间产物（与 CI `dist/`、`bundle/` 布局一致，避免误提交二进制）
 dist/
 build/
 bundle/
+deb-root/
+rpm-build/

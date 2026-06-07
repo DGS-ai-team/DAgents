@@ -1,162 +1,147 @@
 name: Manual Package Binary
 
+# 手动打本地助手包（与 tag Release 同矩阵，不上传 GitHub Release）。
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "产物版本号后缀（写入 dagents-local-assistant-*-{version}.tar.gz/.zip）"
+        required: false
+        default: "0.0.0-manual"
+      skip_tests:
+        description: "跳过构建前 Go/Python 单测（仅调试打包脚本时用）"
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLI_PYINSTALLER_ARGS: --onefile --name dagents-cli --hidden-import=textual --hidden-import=aiohttp run_dagents_cli.py
+  RC_PI_ARGS: --onefile --name dagents_register_center --add-data register_center:register_center run_register_center.py
 
 jobs:
-  build-bundle:
-    name: Build Bundle (${{ matrix.target }})
+  test:
+    name: Pre-build tests
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            node/go.sum
+            client/go.sum
+            shared/config/go.sum
+
+      - name: Go test
+        run: |
+          go test ./shared/config/...
+          go test ./node/...
+          go test ./client/...
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Python test
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m unittest discover -s tests -p "test_*.py" -v
+
+  build-local-assistant:
+    name: Build local assistant (${{ matrix.platform }})
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: linux-x64
-            os: ubuntu-22.04
-            build_kind: docker-focal-amd64
-            python_arch: x64
-            archive_name: dagents-api-linux-x64.zip
-            api_bin_name: dagents-api
-            rc_bin_name: dagents_register_center
-            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
-          - target: linux-x86
-            os: ubuntu-22.04
-            build_kind: docker-i386
-            python_arch: x86
-            archive_name: dagents-api-linux-x86.zip
-            api_bin_name: dagents-api
-            rc_bin_name: dagents_register_center
-            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data=register_center:register_center run_register_center.py
-          - target: windows-x64
+          - platform: linux-amd64
+            os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            cli_build: docker-rocky8
+          - platform: windows-amd64
             os: windows-2022
-            build_kind: native
-            python_arch: x64
-            archive_name: dagents-api-windows-x64.zip
-            api_bin_name: dagents-api.exe
-            rc_bin_name: dagents_register_center.exe
-            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
-          - target: windows-x86
-            os: windows-2022
-            build_kind: native
-            python_arch: x86
-            archive_name: dagents-api-windows-x86.zip
-            api_bin_name: dagents-api.exe
-            rc_bin_name: dagents_register_center.exe
-            api_pyinstaller_args: --onefile --name dagents-api run_agent_api.py
-            rc_pyinstaller_args: --onefile --name dagents_register_center --hidden-import=httpx --hidden-import=fastapi --add-data="register_center;register_center" run_register_center.py
+            goos: windows
+            goarch: amd64
+            cli_build: native
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Echo matrix (OS / 位数 / 构建方式)
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            node/go.sum
+            client/go.sum
+            shared/config/go.sum
+
+      - name: Build Go binaries (dagents-node + dagents-client)
         shell: bash
         run: |
-          echo "target=${{ matrix.target }} build_kind=${{ matrix.build_kind }} python_arch=${{ matrix.python_arch }}"
+          set -euo pipefail
+          OUT_DIR="${{ github.workspace }}/dist/go-build-${{ matrix.platform }}"
+          BUILD_CLIENT=1 OUT_DIR="${OUT_DIR}" GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
+            bash scripts/ci/build_go_static.sh
+          EXE=""
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then EXE=".exe"; fi
+          mkdir -p dist
+          cp "${OUT_DIR}/bin/dagents-node${EXE}" "dist/dagents-node${EXE}"
+          cp "${OUT_DIR}/bin/dagents-client${EXE}" "dist/dagents-client${EXE}"
 
-      - name: Set up QEMU (Docker linux/386)
-        if: matrix.build_kind == 'docker-i386'
-        uses: docker/setup-qemu-action@v3
-
-      - name: Setup Python (目标架构：x64 / x86)
-        if: matrix.build_kind == 'native'
+      - name: Setup Python (Windows)
+        if: matrix.cli_build == 'native'
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          architecture: ${{ matrix.python_arch }}
           cache: pip
 
-      - name: Install dependencies (Python packages, native build only)
-        if: matrix.build_kind == 'native'
+      - name: Build Python bundles (Windows native PyInstaller)
+        if: matrix.cli_build == 'native'
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          bash scripts/ci/build_dagents_cli.sh
+          bash scripts/ci/build_dagents_register_center.sh
 
-      - name: Build single-file binaries (native PyInstaller)
-        if: matrix.build_kind == 'native'
-        shell: bash
-        run: |
-          pyinstaller ${{ matrix.api_pyinstaller_args }}
-          pyinstaller ${{ matrix.rc_pyinstaller_args }}
-
-      - name: Build single-file binaries (Linux x64 via Ubuntu 20.04 Docker + pyenv)
-        if: matrix.build_kind == 'docker-focal-amd64'
+      - name: Build Python bundles (Linux Rocky 8 Docker + pyenv, glibc 2.28)
+        if: matrix.cli_build == 'docker-rocky8'
         timeout-minutes: 120
         shell: bash
         env:
-          API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
-          RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
+          CLI_PI_ARGS: ${{ env.CLI_PYINSTALLER_ARGS }}
+          RC_PI_ARGS: ${{ env.RC_PI_ARGS }}
           PYENV_PYTHON_VERSION: "3.13.2"
         run: |
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e API_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
-            ubuntu:20.04 \
-            bash /src/scripts/ci/build_linux_focal_pyenv.sh
+            -e CLI_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
+            rockylinux:8 \
+            bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
 
-      - name: Build single-file binaries (Linux i386 / x86 via Docker + pyenv)
-        if: matrix.build_kind == 'docker-i386'
-        timeout-minutes: 120
+      - name: Assemble release archive
         shell: bash
-        env:
-          API_PI_ARGS: ${{ matrix.api_pyinstaller_args }}
-          RC_PI_ARGS: ${{ matrix.rc_pyinstaller_args }}
-          PYENV_PYTHON_VERSION: "3.13.2"
         run: |
-          set -euxo pipefail
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e API_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
-            i386/ubuntu:focal \
-            bash /src/scripts/ci/build_linux_focal_pyenv.sh
+          VERSION="${{ inputs.version }}"
+          PLATFORM="${{ matrix.platform }}" VERSION="${VERSION}" \
+            bash scripts/ci/assemble_local_assistant_bundle.sh
+          ls -la dist/dagents-local-assistant-*
 
-      - name: Prepare runtime bundle (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p bundle
-          cp "dist/${{ matrix.api_bin_name }}" bundle/
-          cp "dist/${{ matrix.rc_bin_name }}" bundle/
-          cp startup_scripts/linux/start.sh bundle/
-          cp startup_scripts/linux/start_register_center.sh bundle/
-          chmod +x bundle/start.sh
-          chmod +x bundle/start_register_center.sh
-          cp .env.example bundle/
-          cp README.md bundle/
-          mkdir -p bundle/.runtime
-          cp -a packaging/runtime/. bundle/.runtime/
-          cd bundle
-          zip -r "../${{ matrix.archive_name }}" .
-
-      - name: Prepare runtime bundle (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path bundle | Out-Null
-          Copy-Item "dist/${{ matrix.api_bin_name }}" "bundle/"
-          Copy-Item "dist/${{ matrix.rc_bin_name }}" "bundle/"
-          Copy-Item "startup_scripts/windows/start.bat" "bundle/"
-          Copy-Item "startup_scripts/windows/start_register_center.bat" "bundle/"
-          Copy-Item ".env.example" "bundle/"
-          Copy-Item "README.md" "bundle/"
-          New-Item -ItemType Directory -Force -Path "bundle/.runtime" | Out-Null
-          Copy-Item "packaging/runtime/*" "bundle/.runtime" -Recurse -Force
-          Set-Location bundle
-          tar.exe -a -c -f "../${{ matrix.archive_name }}" .
-          Set-Location ..
-
-      - name: Upload bundle artifact
+      - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.archive_name }}
-          path: ${{ matrix.archive_name }}
+          name: dagents-local-assistant-${{ matrix.platform }}
+          path: dist/dagents-local-assistant-${{ matrix.platform }}-*.*
           if-no-files-found: error

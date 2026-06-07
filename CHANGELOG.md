@@ -2,6 +2,116 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.1** 代码基础上对齐 `/health` 与 Client 版本号为 **0.2.2**；**本版重点修复工具审批（HITL）相关缺陷**。
+
+### 修复
+
+- **工具审批（HITL）**：
+  - **Go full TUI**：父 Agent 与子临时 Agent 并发出现 `approval_required` 时，审批队列曾按单一槽位去重，导致后到的审批覆盖先到、或用户批准后 `resume` 无法匹配正确 `tool_call_id`。现以 **`ApprovalQueueKey`** 分桶（父：`approval_id`；子：`child_session_id`），同键仅保留最新一条，不同 Agent 的审批可并行排队。
+  - **resume 路由**：`SubmitResume` 载荷携带 `approval_id` / `child_session_id`，与 Node pending HITL 对齐，避免审批结果投递到错误会话或静默失败。
+  - **Node**：启用临时 Agent 时，父 session 的 `resume` 曾被重复入队，导致队列积压、审批无法继续；现保证单次入队（见 `TestEnqueueResumeParentDoesNotDoubleEnqueue`）。
+  - **Textual TUI（`dagents chat`）**：审批队列与用户追问（`ask_user_information`）展示与 Go Client 语义对齐，避免子 Agent 审批与父审批互相顶替。
+
+### 变更
+
+- **临时 Agent**：工具与 SSE 统一为 **temporary agent** 命名；子 runtime 禁止 `load_skills` / `unload_skills` / `clear_skills`；`ActiveAgent` 等内部命名整理。
+- **文档**：Python Agent 运行时迁入 `docs/archive/python-agent-runtime/`；新增 [`docs/architecture/go-node-internals.md`](docs/architecture/go-node-internals.md) 与 `node/internal/session`、`turn` 包 README。
+
+（Git **tag**：`v0.2.2`。）
+
+## [0.2.1] - 2026-06-07
+
+中间 tag，**未** bump 代码内 `Version` 常量；变更已包含在 **0.2.2**。主要内容：临时 Agent 重构与文档归档（见上）。
+
+（Git **tag**：`v0.2.1`。）
+
+## [0.2.0] - 2026-05-30
+
+**0.x 预览**：**Go Agent Node + Client** 成为唯一 Agent 运行时；本地助手与终端交互以 Go 栈为主线。Python 保留 **Textual TUI Client**（`dagents chat`）与 **Register Center**，**Python FastAPI Agent API 已从仓库移除**（原 `app/harness/`、`run_agent_api.py`）。
+
+### 新增
+
+#### Go Agent Node（`node/`）
+
+- **HTTP/SSE API**：会话创建/恢复、消息提交、`/resume`、流式事件、`/cancel`、context/skills/child-agents 等（契约见 `docs/architecture/agent-node-api.md`）。
+- **Turn 编排**：OpenAI 兼容 LLM、工具循环、审批暂停、`user_information` 询问、上下文压缩（blocking/silent SSE）。
+- **工具**：`bash_run`、`read_file` / `write_file` / `search_replace`、`load_skills` / `unload_skills`、trigger 系列、子 Agent 工具（`spawn_child_agent` 等）。
+- **Triggers**：`interval`、`fire_at`、日历 **`schedule`**（含 `cmd` 门控）；SQLite/JSON 持久化。
+- **Session**：SQLite 消息持久化；多 session 队列与活跃 turn 管理。
+- **Policy / Skills**：本地 policy profile；按 session 加载 skill 元数据。
+- **Usage 事件**：SSE `usage` 含 prompt/completion、cache hit/miss、`prompt_tokens_details`（供 Client input strip）。
+
+#### Go Client（`client/`）
+
+- **bubbletea 全屏 TUI**（`tui`，默认）：上输出 / 下输入；SSE 断线按 `Last-Event-ID` 重连。
+- **行模式 REPL**（`tui --plain` / `TERM=dumb`）：老 SSH / RHEL6 兜底；turn 期间独占 stdin，完整走通 HITL。
+- **HITL（full）**：逐工具审批（↑/↓、Space、Enter）；选项式 `ask_user_information`；子 Agent 审批标题区分。
+- **展示友好化**：`[tool] ▶ 调用 bash(…)` / `✓ bash 完成`；审批展示参数/原因/风险；input strip `↑prompt ↓completion · hit N`。
+- **斜杠命令**：`/context`、`/skill`、`/children`、`/cancel`、`/tools verbose|brief`、`/reasoning on|off` 等。
+- **探测与一次性 chat**：`probe`、`chat "消息"`（非交互）。
+
+#### 共用配置（`shared/config/`、`packaging/agent-client/`）
+
+- **YAML 同包配置**：`agent_id`、`listen`、`local.endpoint`、`llm`、`data_dir` 等；Node 与双 Client 共用。
+- **本地助手打包**：`dagents-local-assistant-*` tarball/zip（Go Node + Go Client + Textual CLI + `config.example.yaml` + 启动脚本）。
+
+#### Python Textual TUI（`app/cli/`）
+
+- **`dagents chat`**：连 **Go Node**（非 Python API）；RichLog 流式输出、非阻塞 HITL、子 Agent 过滤与状态条。
+- **共用 YAML**：`--config` / `DAGENTS_CONFIG` 与 Go Client 对齐；`show session` / `delete session`。
+- **Usage strip**：消费 SSE `usage`，显示上下行 token 与 cache hit（与 Go Client 语义一致）。
+
+#### Register Center（`register_center/`）
+
+- **持久化**：可选 JSON 文件存储；TTL  prune。
+- **A2A 指标**：relay/broadcast Prometheus 计数（`register_center/metrics.py`）。
+- **安全**：共享 token 校验；relay resume 转发。
+
+#### 文档与工程
+
+- **文档重组**：原 `docs/architecture-v2/` 迁入 `docs/architecture/`、`docs/design/`、`docs/future/`、`docs/archive/`。
+- **N7 部分**：`go-node-compatibility.md`、Go 静态构建脚本、RHEL6 SysV init、Release CI Go tarball。
+- **子 Agent 设计**：`docs/architecture/child-agent-tools.md`。
+
+### 变更
+
+- **运行时主线**：本地助手默认 `go run ./node/cmd/dagents-node` + `dagents chat` 或 `dagents-client tui`；不再提供 Python Agent API 进程。
+- **`run_dev_stack.py`**：仅启动 Register Center（原 API + RC 联调入口简化）。
+- **`dagents` CLI**：移除 `serve` / `api` 子命令（原后台 `dagents-api`）；保留 `chat`、`show`、`delete`、`register-center`。
+- **CI**：PR 跑 Go `node/` / `client/` 单测 + Python CLI/RC 单测；移除 Python OpenAPI 导出步骤；`dagents-cli` 构建改用 Rocky Linux 8。
+- **`requirements.txt`**：移除 `openai`、`APScheduler` 等仅 Agent API 栈依赖。
+- **Prometheus（Register Center）**：A2A 指标从 `app/observability/` 迁至 `register_center/metrics.py`。
+
+### 移除
+
+- **Python FastAPI Agent 运行时**：`app/harness/`、`app/core/`、`app/context/`、`app/schemas/`、`app/observability/`、`run_agent_api.py`、`export_openapi_schema.py`。
+- **Legacy 打包**：`packaging/linux/dagents-backend.*`、旧全栈 `startup_scripts` 中的 `dagents-api` 启动脚本。
+- **辅助脚本**：`scripts/query_session_sqlite.py`、`scripts/migrate_runtime_layout.py`、`scripts/ci/export_openapi_for_frontend.py`。
+- **Python Node 单测**：`test_agent_service*.py`、`test_api_app.py`、`test_main_agent_*.py` 等约 20+ 文件。
+- **Windows 托盘启动器**（`scripts/windows/tray_launcher.py` 等）。
+
+### 修复
+
+- **HITL**：Python/Go Client 与 Node 间 `tool_call_id` 同步；新 `approval_required` 替换 stale 队列项。
+- **Go full TUI**：textarea 默认 Focus；placeholder UTF-8 首字节乱码（`> 输入消息...`）。
+- **Go plain REPL**：发消息后等待 `done` 再显示 `dagents>`，避免与 HITL 抢 stdin；`done` 正确收尾 assistant 行。
+- **Trigger 调度与日志**：fire 路径与 observability 对齐（Go Node）。
+
+### 已知限制（0.2.0）
+
+- **N7 真机验收**：RHEL6 / Windows Server 2012 等待测清单见 `docs/architecture/rhel6-acceptance-checklist.md`。
+- **plain REPL**：工具审批仅 y/N 全批/全拒；无 full TUI 的逐项勾选；回合等待期间不可用 `/cancel`。
+- **A2A 工具**：随 Python Agent API 移除；Register Center relay/broadcast 仍可用，Agent 侧 A2A 需后续在 Go/Manage 落地。
+- **历史文档**：`docs/api-reference.md`、`docs/architecture/python-runtime.md` 描述已删除的 Python API，仅作参考；现行契约见 `docs/architecture/agent-node-api.md`。
+- **Web UI（DAgentsUI）**：独立前端仓库 **尚未适配 v0.2.0**，仍基于旧 Python Agent API / OpenAPI；浏览器 Client 暂不可用，请使用终端 TUI。
+- **0.x 预览**：破坏性变更在 **1.0** 前仍可能出现。
+
+（Git **tag**：`v0.2.0`。）
+
+---
+
 ## [0.1.0] - 2026-05-12
 
 首个对外标记版本（**0.x 预览**）：核心 Agent API、可选 SQLite 会话持久化、SSE 流式事件、Prometheus 指标、Register Center 与配套文档/单测基线。以下 **变更 / 文档 / 仓库维护** 与首版同批交付（尚未单独发补丁版号时，仍以 **`v0.1.0`** 与 Git tag 对齐）。
@@ -14,22 +124,23 @@
 - `register_center/`：Agent 登记与发现（内存实现）。
 - 配置：`app/config/settings.py`、`.env.example`；可观测：`/metrics`（可关）。
 - 单元测试：`tests/` 下 `unittest discover`；可选联网冒烟见 `tests/integration/`。
-- `doc/`：对外技术文档除 **`api-reference.md`**、**`prometheus-metrics.md`**、**`architecture-and-flows.md`**、**`agent-input-output.md`**、**`context-compression-and-state.md`** 外，另含 **`agent-turn-loop.md`**、**`a2a-and-register-center.md`**、**`built-in-tools.md`**、**`roadmap.md`** 与 **`cases/`** 案例目录索引等；索引见 **`doc/README.md`**；其余以代码与 **`app/**/README.md`** 为准。
+- `docs/`：对外技术文档除 **`api-reference.md`**、**`prometheus-metrics.md`**、**`architecture-and-flows.md`**、**`agent-input-output.md`**、**`context-compression-and-state.md`** 外，另含 **`agent-turn-loop.md`**、**`a2a-and-register-center.md`**、**`built-in-tools.md`**、**`roadmap.md`** 与 **`cases/`** 案例目录索引等；索引见 **`docs/README.md`**；其余以代码与 **`app/**/README.md`** 为准。
 
 ### 变更
 
+- **Prometheus（LLM token）**：`dagents_llm_*` token 指标由 **Gauge `set`（末次快照）** 改为 **Counter `inc`（进程内累计）**，指标名增加 **`_total`** 后缀（例如 **`dagents_llm_prompt_tokens_total`**）；监控面板的 PromQL 与告警需改用新指标名。语义约定：每次流式 **`usage`** 分片表示 **当前 completion 请求** 的消耗；若网关上报账号级终身累计会导致重复累加。
 - **系统提示侧车**：运行时从 **`<运行根>/.runtime/prompt_context/`** 读取 **`soul.md` / `user.md` / `custom.md`**；若缺失则由 **`prompt.py`** 创建 **空 UTF-8 文件**（不覆盖已有文件），**不从其它路径拷贝文案**。**`packaging/runtime/prompt_context/`** 提供 **空文件占位**；**`packaging/runtime/`** 另含 **`scripts/`**、**`data/`** 等目录占位，随发布 zip 并入 **`bundle/.runtime/`**。
 - **异步工具**：`AsyncToolResultStore.submit_coroutine` 要求非空 **`client_id`**；`OpenAIConversationContext` 新增进程内 **`sse_client_id`**（由带 **`client_id`** 的入站 `MessageEnvelope` 刷新），异步工具终态回灌的 **`MessageEnvelope.client_id`** 与该通道对齐，保证 SSE 可投递至原客户端。
 
 ### 文档
 
-- **`doc/context-compression-and-state.md`**：补充 **SQLite 会话记忆**、侧车 Markdown、**`get_system_prompt`** 拼接顺序；索引见 **`doc/README.md`**。
-- 新增 **`doc/agent-turn-loop.md`**：讲解 **队列外层 + `run_turn` 单轮内层**、**`_run_turn_and_maybe_execute_tools`**、**`tool_result` 入队** 与审批 / **`async_tool_result`** 分支。
-- 新增 **`doc/a2a-and-register-center.md`**：**A2A（`agent_peer`）** 与 **Register Center**（登记、**`broadcast`/`relay`**、配置与审批 **`resume` 直连** 约束）。
-- 新增 **`doc/built-in-tools.md`**：**`get_tools()`** 清单、**`@tool` / `tool()`** 装饰逻辑、**docstring → LLM**、**`parameters` 与 `parse_tool_arguments` → `invoke` 管道**、异步工具与 **`client_id`**、**`host_platform` 未注册** 等。
-- 新增 **`doc/roadmap.md`**：**路线图**（已实现能力、待办、已知限制；含 **§3.4** CLI / 子 Agent / A2A 与 Register Center 增强 / 压缩 / 内置记忆书等规划方向）。
-- 新增 **`doc/cases/`**：落地案例目录（见 **`doc/cases/README.md`**），用于收录各场景实践与效果供参考。
-- **`doc/README.md`**：**`cases`** 入口链接格式修正；**`doc/roadmap.md`**：§3.4 **A2A 优化** 条目补全（广播 SSE、跨 NAT 等表述）。
+- **`docs/context-compression-and-state.md`**：补充 **SQLite 会话记忆**、侧车 Markdown、**`get_system_prompt`** 拼接顺序；索引见 **`docs/README.md`**。
+- 新增 **`docs/agent-turn-loop.md`**：讲解 **队列外层 + `run_turn` 单轮内层**、**`_run_turn_and_maybe_execute_tools`**、**`tool_result` 入队** 与审批 / **`async_tool_result`** 分支。
+- 新增 **`docs/a2a-and-register-center.md`**：**A2A（`agent_peer`）** 与 **Register Center**（登记、**`broadcast`/`relay`**、配置与审批 **`resume` 直连** 约束）。
+- 新增 **`docs/built-in-tools.md`**：**`get_tools()`** 清单、**`@tool` / `tool()`** 装饰逻辑、**docstring → LLM**、**`parameters` 与 `parse_tool_arguments` → `invoke` 管道**、异步工具与 **`client_id`**、**`host_platform` 未注册** 等。
+- 新增 **`docs/roadmap.md`**：**路线图**（已实现能力、待办、已知限制；含 **§3.4** CLI / 子 Agent / A2A 与 Register Center 增强 / 压缩 / 内置记忆书等规划方向）。
+- 新增 **`docs/cases/`**：落地案例目录（见 **`docs/cases/README.md`**），用于收录各场景实践与效果供参考。
+- **`docs/README.md`**：**`cases`** 入口链接格式修正；**`docs/roadmap.md`**：§3.4 **A2A 优化** 条目补全（广播 SSE、跨 NAT 等表述）。
 
 ### 仓库维护
 
@@ -41,5 +152,7 @@
 - **HTTP API 单测**未在仓库内全覆盖；CI 以 `requirements.txt` 安装后跑默认 `test_*.py`。
 - **`test_agent_service.py`** 在缺少完整依赖（如未安装 `openai`）时相关用例会 **skip**，与 CI 全量安装行为不同。
 - 破坏性 API 变更在迈向 **1.0** 前仍可能出现；见 [README.md](README.md) 中「版本与兼容性」。
+
+> **注**：0.1.0 中的 Python FastAPI Agent 运行时已在 **0.2.0** 移除；上文保留作该版本历史记录。
 
 （Git **tag**：`v0.1.0`；请在对应托管平台上创建 **Releases** 并与该 tag 对齐。）
