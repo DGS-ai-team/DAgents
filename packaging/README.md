@@ -25,8 +25,8 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` / `dagents_register_
 
 | 工作流 | 触发 | 产物 |
 |--------|------|------|
-| [build-and-release.yml](../.github/workflows/build-and-release.yml) | 推送 **`v*`** 标签 | GitHub Release + `dagents-local-assistant-*` |
-| [manual-package.yml](../.github/workflows/manual-package.yml) | 手动 **workflow_dispatch** | Actions Artifact（可填 `version`、可选跳过测试） |
+| [build-and-release.yml](../.github/workflows/build-and-release.yml) | 推送 **`v*`** 标签 | GitHub Release + `dagents-local-assistant-*` + **Windows `.exe` 安装包** |
+| [manual-package.yml](../.github/workflows/manual-package.yml) | 手动 **workflow_dispatch** | Actions Artifact（zip/tar.gz + Windows 安装包） |
 | [go-ac.yml](../.github/workflows/go-ac.yml) | PR / push（Go 路径） | 仅测试与编译冒烟，不打包 |
 
 | 路径 | 说明 |
@@ -34,7 +34,7 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` / `dagents_register_
 | **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`） |
 | **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等） |
 | **`linux/`** | legacy deb/rpm 脚本（**当前 Release 未使用**） |
-| **`windows/`** | legacy Inno Setup（**当前 Release 未使用**） |
+| **`windows/`** | Inno Setup 安装包（`dagents-installer.iss` + `dagents.cmd`；Release Windows 矩阵构建 `.exe`） |
 | **`OFFLINE_INSTALL.md`** | 源码离线安装（开发/调试） |
 
 架构与联调见 [local-assistant.md](../docs/architecture/local-assistant.md)。

@@ -1,4 +1,4 @@
-#define MyAppName "DAgents Backend"
+#define MyAppName "DAgents Local Assistant"
 #ifndef MyAppVersion
 #define MyAppVersion "0.0.0"
 #endif
@@ -6,18 +6,17 @@
 #define MyAppArch "x64"
 #endif
 #ifndef MyOutputBaseFilename
-#define MyOutputBaseFilename "dagents-backend-windows-x64-installer"
+#define MyOutputBaseFilename "dagents-local-assistant-windows-amd64-installer"
 #endif
 
 [Setup]
-AppId={{7C7D8A59-4D5B-44D0-9E52-DAE7D0D353A1}
+AppId={{A3B8C2D1-9E4F-4A7B-8C6D-1E2F3A4B5C6D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=DAgents
-DefaultDirName={autopf}\DAgents\Backend
+DefaultDirName={autopf}\DAgents
 DefaultGroupName=DAgents
 DisableProgramGroupPage=yes
-; 相对本 .iss 所在目录；与 CI upload-artifact 的「仓库根/dist-installer/」一致。
 OutputDir=..\..\dist-installer
 OutputBaseFilename={#MyOutputBaseFilename}
 Compression=lzma2
@@ -26,25 +25,26 @@ ArchitecturesAllowed={#MyAppArch}
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-UninstallDisplayIcon={app}\dagents-cli.exe
+UninstallDisplayIcon={app}\bin\dagents-node.exe
 ChangesEnvironment=yes
 
 [Files]
-; CI 与本地均在「仓库根」生成 bundle\；脚本在 packaging\windows\，故用 ..\..\ 回到根目录再取 bundle。
 Source: "..\..\bundle\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; 启动包装脚本与本 .iss 同目录，勿写 packaging\windows\ 前缀（否则会变成 packaging\windows\packaging\windows\...）。
 Source: "dagents.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\DAgents Backend Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"
-Name: "{group}\DAgents Chat"; Filename: "{app}\dagents.cmd"; Parameters: "chat"; WorkingDir: "{app}"
-Name: "{group}\Start DAgents Backend"; Filename: "{app}\dagents.cmd"; Parameters: "serve"; WorkingDir: "{app}"
+Name: "{group}\DAgents Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"
+Name: "{group}\Start Agent Node"; Filename: "{app}\dagents.cmd"; Parameters: "node"; WorkingDir: "{app}"
+Name: "{group}\Chat (Textual TUI)"; Filename: "{app}\dagents.cmd"; Parameters: "chat"; WorkingDir: "{app}"
+Name: "{group}\TUI (Go full-screen)"; Filename: "{app}\dagents.cmd"; Parameters: "tui"; WorkingDir: "{app}"
+Name: "{group}\REPL (Go line mode)"; Filename: "{app}\dagents.cmd"; Parameters: "tui --plain"; WorkingDir: "{app}"
+Name: "{group}\Register Center"; Filename: "{app}\dagents.cmd"; Parameters: "register-center"; WorkingDir: "{app}"
 
 [Registry]
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Check: NeedsAddPath(ExpandConstant('{app}'))
 
 [Run]
-Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "Run dagents doctor"; Flags: postinstall skipifsilent runascurrentuser
+Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "Verify installed files (dagents doctor)"; Flags: postinstall skipifsilent runascurrentuser
 
 [Code]
 function NeedsAddPath(Dir: string): Boolean;

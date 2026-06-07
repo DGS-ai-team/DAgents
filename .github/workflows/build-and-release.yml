@@ -138,11 +138,32 @@ jobs:
             bash scripts/ci/assemble_local_assistant_bundle.sh
           ls -la dist/dagents-local-assistant-*
 
+      - name: Install Inno Setup (Windows installer)
+        if: matrix.platform == 'windows-amd64'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        if: matrix.platform == 'windows-amd64'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${VERSION}" bash scripts/ci/build_windows_installer.sh
+          ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
+
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
           name: dagents-local-assistant-${{ matrix.platform }}
           path: dist/dagents-local-assistant-${{ matrix.platform }}-*.*
+          if-no-files-found: error
+
+      - name: Upload Windows installer
+        if: matrix.platform == 'windows-amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dagents-windows-installer
+          path: dist/dagents-local-assistant-windows-amd64-installer-*.exe
           if-no-files-found: error
 
   release:
@@ -156,7 +177,7 @@ jobs:
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: dagents-local-assistant-*
+          pattern: dagents-*
           merge-multiple: true
           path: dist
 
@@ -169,4 +190,5 @@ jobs:
           files: |
             dist/dagents-local-assistant-*.tar.gz
             dist/dagents-local-assistant-*.zip
+            dist/dagents-local-assistant-windows-amd64-installer-*.exe
           generate_release_notes: true

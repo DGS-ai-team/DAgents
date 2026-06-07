@@ -11,6 +11,7 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 | **`build_linux_rocky8_pyenv.sh`** | **Release CI 默认**：Rocky Linux 8 容器（glibc **2.28**）内 pyenv + PyInstaller（`CLI_PI_ARGS` + `RC_PI_ARGS`） |
 | **`build_linux_focal_pyenv.sh`** | Ubuntu 20.04 focal 容器（glibc 2.31；i386 或需较新链时手动用） |
 | **`assemble_local_assistant_bundle.sh`** | 组装 `dagents-local-assistant-*` 目录并 tar.gz/zip |
+| **`build_windows_installer.sh`** | Windows：staging `bundle/` + Inno Setup 生成 `.exe` 安装包 |
 | **`export_openapi_for_frontend.py`** | （已移除）历史：导出 OpenAPI 并同步 DAgentsUI |
 
 **Release 打包**：仓库根 `scripts/package_local_assistant.sh`；CI 见 `.github/workflows/build-and-release.yml`（`dagents-local-assistant-linux-amd64` + `windows-amd64`）。
