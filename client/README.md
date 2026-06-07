@@ -63,6 +63,13 @@ go run ./client/cmd/dagents-client chat "你好"
 
 SSE 断线后会按 `Last-Event-ID` 自动重连。
 
+**与 Python Textual Client 对齐的基础逻辑**（`client/internal/tui/shared/turn_gate.go`）：
+
+- `done` 仅语义 B（编排暂停/链结束）；`turn_complete` / `awaiting` 由 Node 下发
+- submit 后以 `seqFence` 忽略在途 turn 的陈旧 `done`
+- HITL（`approval_required` / `user_information_required`）非阻塞入队；暂停态 `done` 正常结束 turn 等待
+- 子 Agent turn SSE 过滤（`hitl.ShouldSkipChildRuntimeDisplay`）
+
 ## 测试
 
 ```bash

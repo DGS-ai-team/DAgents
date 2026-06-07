@@ -357,16 +357,38 @@ func (m *Manager) EnqueueMessage(
 		"request_type", requestType,
 	)
 	if requestType == "resume" {
+		m.logger.Info("resume enqueue request",
+			"session_id", sessionID,
+			"resume_value", resumeValue,
+		)
 		if m.children != nil && m.children.Enabled() {
 			targetParent, routeErr := m.children.RouteResume(sessionID, resumeValue)
 			if routeErr != nil {
 				return "", routeErr
 			}
 			if !targetParent {
+				m.logger.Info("resume enqueue routed",
+					"session_id", sessionID,
+					"route", "child_runtime",
+				)
 				return string(queue.PriorityResume), nil
 			}
+			// 父 session：RouteResume 内 DeliverParentResume 已入队，勿重复 enqueue。
+			m.logger.Info("resume enqueue routed",
+				"session_id", sessionID,
+				"route", "parent_deliver_only",
+			)
+			return string(queue.PriorityResume), nil
 		}
+		m.logger.Info("resume enqueue routed",
+			"session_id", sessionID,
+			"route", "direct_runtime",
+		)
 		if !rt.hasPendingHITL() {
+			m.logger.Warn("resume rejected no pending hitl",
+				"session_id", sessionID,
+				"resume_value", resumeValue,
+			)
 			return "", fmt.Errorf("no_pending_hitl")
 		}
 		env := queue.Envelope{RequestType: "resume", ResumeValue: resumeValue}

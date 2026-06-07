@@ -66,7 +66,7 @@
 
 ## `test_cli_session_controller.py`
 
-- **`SessionControllerRenderTests`**：后台 render、turn 栅栏、approval skip done。
+- **`SessionControllerRenderTests`**：后台 render、turn 栅栏、HITL 暂停 done 唤醒 `wait_user_turn`。
 - **`SessionControllerBindTriggersTests`**：`bind_triggers_to_client` PATCH 逻辑。
 
 ## `test_context_clear.py`

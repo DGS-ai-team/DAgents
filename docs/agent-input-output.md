@@ -1,5 +1,9 @@
 # 代理输入与输出（HTTP 入队 · SSE 出站）
 
+> **【历史 · Python 已移除】** 本文描述已删除的 **Python FastAPI `AgentService`** 入队与 SSE 行为。  
+> **当前 CLI / 本地助手** 连接 **Go Agent Node**；HTTP/SSE 契约与 **`done` 语义**见 **[architecture/agent-node-api.md](./architecture/agent-node-api.md)**（尤其 §2.4.1）。  
+> 下文保留作 v1 编排对照；**勿**将文中「`tool_call` 后必有 `done`」等时序直接套用到 Go Node。
+
 本文是 **DAgents 后端「入站」与「出站」** 的专题说明：**入站**指客户端经 HTTP 投递、进入 **`AgentService`** 的 **进程内优先级消息队列**；**出站**指处理链路产生的流式事件经 **内存总线** 以 **SSE** 推回客户端。字段级 HTTP/SSE 契约仍以 [api-reference.md](./api-reference.md) 为准；整体编排见 [architecture-and-flows.md](./architecture-and-flows.md)。
 
 ---
@@ -150,7 +154,7 @@ HTTP：**`POST /v1/messages`** → **`submit_message` / `submit_resume`**（**`a
 | **`tool_result`** | 同步 **`_invoke_tool`** 完成、审批拒绝占位、异步回灌、用户打断 pending | 否（每条工具一条） | 按 **`tool_call_id`** 更新卡片；注意 **`rejected`** / **`interrupted_by_user_message`** / **`partial`** |
 | **`approval_required`** | 存在需人工审批的 **`tool_calls`** | 否 | 弹出审批 UI；读 **`approval_id`**、**`approval_args`**；随后 **`POST /v1/messages` `request_type=resume`** |
 | **`error`** | 参数/上限/恢复失败等 | 否 | Toast 或会话内错误条；**通常紧跟一条 `done`** |
-| **`done`** | **一轮**编排语义结束（见下文「`done` 合并」） | 否 | **回合边界**：收起流式区、启用输入、读 **`finish_reason`**；**不断开 SSE** |
+| **`done`** | **一轮**编排语义结束（见下文「`done` 合并」） | 否 | **回合边界**：收起流式区、启用输入、读 **`finish_reason`**；**不断开 SSE**（**Go Node** 见 [agent-node-api.md §2.4.1](./architecture/agent-node-api.md)，含 `turn_complete` / `awaiting`） |
 | **`chunk`** | 未映射的编排事件（兜底） | 视 **`raw`** | 调试日志即可 |
 
 **`done` 与流式正文的关系（重要）**：
@@ -354,7 +358,7 @@ sequenceDiagram
 
 | 关注点 | 做法 |
 |--------|------|
-| **回合边界** | 以 **`done`** 为一轮处理的结束信号（**`finish_reason`** 区分 **`stop` / `tool_calls` / `error` / `resume_*`**）；**不要**在 `done` 后关闭 EventSource |
+| **回合边界** | 以 **`done`** 为一轮处理的结束信号（**`finish_reason`** 区分 **`stop` / `tool_calls` / `error` / `resume_*`**）；**不要**在 `done` 后关闭 EventSource（**Go Node**：`turn_complete` + `awaiting`，见 [agent-node-api.md §2.4.1](./architecture/agent-node-api.md)） |
 | **流式正文** | **`assistant` / `reasoning`**：按事件 **追加** `content`；收到 **`tool_call` / `approval_required` / `error`** 时结束当前流式块 |
 | **工具 UI** | **`tool_call`** 建卡 → **`tool_result`** 按 **`tool_call_id`** 填结果 → 可选在 **`done` 后**显示 loading（执行中） |
 | **审批** | 仅 **`approval_required`** 打开审批；提交 **`resume`** 后再监听 **`tool_result`** 与下一轮 **`assistant`** |

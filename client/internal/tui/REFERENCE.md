@@ -30,3 +30,4 @@
 |------|------|
 | `Transcript` | 输出行缓冲、流式 partial |
 | `ToolFold` | tool 事件折叠/展开 |
+| `TurnGate` | 用户 turn 栅栏（`BeginSubmit` / `ShouldAcceptDone` / `Wait`） |

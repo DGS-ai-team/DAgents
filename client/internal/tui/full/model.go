@@ -83,8 +83,7 @@ type model struct {
 
 	sseConnected bool
 	sseDetail    string
-	awaitingTurn bool
-	submitSeen   bool
+	turn         *tuishared.TurnGate
 	showReasoning bool
 	statusLine   string
 	helpLine     string
@@ -129,8 +128,9 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		toolFold:   &tuishared.ToolFold{},
 		showReasoning: showReasoning,
 		helpLine:   "Enter 发送 · Shift+Enter 换行 · Esc 取消 turn · /help 命令 · /quit 退出",
-		children:   newChildAgentTracker(),
+		children:            newChildAgentTracker(),
 		messagesTotalTokens: -1,
+		turn:                tuishared.NewTurnGate(),
 	}
 
 	if err := m.bootstrapSession(initialSession); err != nil {
@@ -251,12 +251,12 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		if m.awaitingTurn {
+		if m.turn.Awaiting() {
 			if err := m.cancelTurn(); err != nil {
 				m.errLine = err.Error()
 			} else {
 				m.statusLine = "已请求取消 turn"
-				m.awaitingTurn = false
+				m.turn.FinishTurn()
 			}
 		}
 		return m, nil
@@ -277,17 +277,16 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.awaitingTurn {
+		if m.turn.Awaiting() {
 			m.errLine = "上一回合尚未结束，请等待或 Esc 取消"
 			return m, nil
 		}
 		m.invalidateHITLForUserMessage()
 		m.transcript.Add("[user] " + text)
 		m.syncViewport()
-		m.awaitingTurn = true
-		m.submitSeen = false
+		m.turn.BeginSubmit()
 		if err := m.client.SubmitMessage(m.ctx, m.currentSession(), text); err != nil {
-			m.awaitingTurn = false
+			m.turn.FinishTurn()
 			m.errLine = err.Error()
 		} else {
 			m.statusLine = "等待 Agent 回复…"

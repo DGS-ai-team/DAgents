@@ -2,10 +2,13 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
+	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/history"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
@@ -32,6 +35,7 @@ type runtime struct {
 	store   *store.SQLiteStore
 	hub     *stream.Hub
 	agentID string
+	logger  *slog.Logger
 
 	skillsCatalog *skills.Catalog
 	compression   *compression.Coordinator
@@ -93,6 +97,7 @@ func newRuntimeWithPublisher(
 		store:         st,
 		hub:           eventHub,
 		agentID:       agentID,
+		logger:        logger,
 		skillsCatalog: catalog,
 		compression:   compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking),
 		state:         turn.StateIdle,
@@ -156,6 +161,7 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		}
 		switch env.RequestType {
 		case queue.RequestTypeResume:
+			r.logResumeDequeued(env.ResumeValue)
 			r.handleResume(ctx, env.ResumeValue)
 		case queue.RequestTypeAsyncToolResult:
 			r.handleAsyncToolResult(ctx, env.AsyncToolResult)
@@ -344,14 +350,39 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 	pending := r.pending
 	if pending == nil {
 		r.mu.Unlock()
+		r.logger.Info("resume ignored no pending hitl",
+			"session_id", r.session.ID,
+			"resume_value", resumeValue,
+		)
 		return
 	}
+	pendingKind, pendingToolCallID := pendingHITLLogFields(pending)
 	turnCtx, cancel := context.WithCancel(parent)
 	r.turnCancel = cancel
 	r.state = turn.StateAwaitingTool
 	history := r.messages
 	loopCount := r.toolLoopCount
 	r.mu.Unlock()
+
+	resumeKind := clihitl.ResumeValueKind(resumeValue)
+	if resumeKind != "nil" && resumeKind != "unknown" && pendingKind != "" &&
+		!resumeKindMatchesPending(pendingKind, resumeKind) {
+		r.logger.Warn("resume kind mismatch (diagnostic only, still processing)",
+			"session_id", r.session.ID,
+			"pending_kind", pendingKind,
+			"pending_tool_call_id", pendingToolCallID,
+			"resume_value_kind", resumeKind,
+			"resume_value", resumeValue,
+		)
+	}
+
+	r.logger.Info("resume handling",
+		"session_id", r.session.ID,
+		"pending_kind", pendingKind,
+		"pending_tool_call_id", pendingToolCallID,
+		"resume_value_kind", resumeKind,
+		"resume_value", resumeValue,
+	)
 
 	var scheduleToolResult bool
 	defer func() {
@@ -450,6 +481,21 @@ func (r *runtime) hasPendingHITL() bool {
 	return r.pending != nil
 }
 
+// pendingHITLLogFields 提取 pending HITL 日志字段（kind 与首个 tool_call_id）。
+func pendingHITLLogFields(pending *turn.PendingHITL) (kind string, toolCallID string) {
+	if pending == nil {
+		return "", ""
+	}
+	kind = string(pending.Kind)
+	if pending.Kind == turn.HITLUserInformation && pending.UserInfo != nil {
+		return kind, pending.UserInfo.ID
+	}
+	if pending.Kind == turn.HITLApproval && len(pending.ToolCalls) > 0 {
+		return kind, pending.ToolCalls[0].ID
+	}
+	return kind, ""
+}
+
 func (r *runtime) contextView() *ContextView {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -474,7 +520,86 @@ func (r *runtime) contextView() *ContextView {
 }
 
 func (r *runtime) enqueue(env queue.Envelope, priority queue.Priority) error {
+	if env.RequestType == queue.RequestTypeResume {
+		before := r.resumeDiagSnapshot()
+		err := r.queue.Enqueue(env, priority)
+		after := r.resumeDiagSnapshot()
+		r.logger.Info("resume enqueued",
+			"session_id", r.session.ID,
+			"resume_value_kind", clihitl.ResumeValueKind(env.ResumeValue),
+			"approval_id", resumeFieldString(env.ResumeValue, "approval_id"),
+			"tool_call_id", resumeFieldString(env.ResumeValue, "tool_call_id"),
+			"queue_len_before", before.queueLen,
+			"queue_len_after", after.queueLen,
+			"resume_in_queue_before", before.resumeInQueue,
+			"resume_in_queue_after", after.resumeInQueue,
+			"turn_state_before", before.turnState,
+			"pending_kind_before", before.pendingKind,
+			"pending_tool_call_id_before", before.pendingToolCallID,
+			"enqueue_err", fmt.Sprint(err),
+		)
+		return err
+	}
 	return r.queue.Enqueue(env, priority)
+}
+
+type resumeDiagSnapshot struct {
+	queueLen          int
+	resumeInQueue     int
+	turnState         turn.State
+	pendingKind       string
+	pendingToolCallID string
+}
+
+func (r *runtime) resumeDiagSnapshot() resumeDiagSnapshot {
+	r.mu.Lock()
+	pendingKind, pendingID := pendingHITLLogFields(r.pending)
+	state := r.state
+	r.mu.Unlock()
+	return resumeDiagSnapshot{
+		queueLen:          r.queue.Len(),
+		resumeInQueue:     r.queue.CountByRequestType(queue.RequestTypeResume),
+		turnState:         state,
+		pendingKind:       pendingKind,
+		pendingToolCallID: pendingID,
+	}
+}
+
+func (r *runtime) logResumeDequeued(resumeValue map[string]any) {
+	snap := r.resumeDiagSnapshot()
+	r.logger.Info("resume dequeued",
+		"session_id", r.session.ID,
+		"resume_value_kind", clihitl.ResumeValueKind(resumeValue),
+		"approval_id", resumeFieldString(resumeValue, "approval_id"),
+		"tool_call_id", resumeFieldString(resumeValue, "tool_call_id"),
+		"queue_len_remaining", snap.queueLen,
+		"resume_still_queued", snap.resumeInQueue,
+		"turn_state", snap.turnState,
+		"pending_kind", snap.pendingKind,
+		"pending_tool_call_id", snap.pendingToolCallID,
+	)
+}
+
+func resumeKindMatchesPending(pendingKind, resumeKind string) bool {
+	switch pendingKind {
+	case "approval":
+		return resumeKind == "approval"
+	case "user_information":
+		return resumeKind == "user_information"
+	default:
+		return false
+	}
+}
+
+func resumeFieldString(value map[string]any, key string) string {
+	if value == nil {
+		return ""
+	}
+	raw, ok := value[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
 }
 
 func (r *runtime) cancelTurn() bool {

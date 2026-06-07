@@ -38,6 +38,7 @@
 | `RunTurnPhase` | Node 状态 → Python 兼容 `run_turn_phase` |
 | `DefaultMaxToolLoops` | 工具循环默认上限（16） |
 | `RunMessageTurn` | LLM + 工具循环；SSE assistant/tool_call/tool_result/done |
+| `publishTurnIdleDone` | 语义 B 的 `done`：`finish_reason` + `turn_complete` + `awaiting`；文档见 `docs/architecture/agent-node-api.md` §2.4.1 |
 
 ## `internal/queue/queue.go`
 

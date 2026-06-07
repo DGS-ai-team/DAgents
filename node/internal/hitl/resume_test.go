@@ -13,6 +13,15 @@ func TestParseApprovalResume(t *testing.T) {
 	}
 }
 
+func TestResumeValueKind(t *testing.T) {
+	if got := ResumeValueKind(map[string]any{"type": "selection"}); got != "approval" {
+		t.Fatalf("selection = %q", got)
+	}
+	if got := ResumeValueKind(map[string]any{"type": "user_information"}); got != "user_information" {
+		t.Fatalf("user_information = %q", got)
+	}
+}
+
 func TestParseUserInformationResume(t *testing.T) {
 	text, err := ParseUserInformationResume(map[string]any{"type": "user_information", "answer": "prod"}, "tc1")
 	if err != nil || text == "" {

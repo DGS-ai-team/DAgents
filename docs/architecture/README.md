@@ -6,6 +6,6 @@
 |------|------|
 | [overview.md](./overview.md) | 双栈选型总览 |
 | [local-assistant.md](./local-assistant.md) | Go Node + 双 Client 联调 |
-| [agent-node-api.md](./agent-node-api.md) | Agent Node HTTP/SSE API |
+| [agent-node-api.md](./agent-node-api.md) | Agent Node HTTP/SSE API（含 §2.4.1 `done` 语义 B） |
 | [client-packaging.md](./client-packaging.md) | 同包配置与安装 |
 | [python-runtime.md](./python-runtime.md) | Python FastAPI 分层与流程 |

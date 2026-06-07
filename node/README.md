@@ -44,8 +44,10 @@ log:
 go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml -log-level debug
 ```
 
-**Info 级别**可见：HTTP 请求、session 创建/恢复/删除、turn 开始/结束、tool 调用、SSE 连接。  
+**Info 级别**可见：HTTP 请求、session 创建/恢复/删除、turn 开始/结束、tool 调用、SSE 连接、resume 入队/处理。  
 **Debug 级别**额外可见：Hub 事件 publish、message 入队、SSE 断开。
+
+SSE **`done`** 语义（`turn_complete` / `awaiting`）：见 [`docs/architecture/agent-node-api.md`](../docs/architecture/agent-node-api.md) §2.4.1。
 
 另开终端：
 

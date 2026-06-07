@@ -21,15 +21,17 @@ type childAgentsSyncedMsg struct {
 
 // onStreamEvent 处理 SSE 事件；HITL 仅入队不阻塞，避免丢失父 assistant 尾部。
 func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
+	m.turn.NoteSeq(ev.Seq)
+	if m.turn.IsStale(ev.Seq) {
+		return
+	}
 	switch ev.Type {
 	case "assistant":
 		if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 			return
 		}
+		m.turn.MarkTurnContent()
 		if text, ok := ev.Data["content"].(string); ok {
-			if m.awaitingTurn && !m.submitSeen {
-				m.submitSeen = true
-			}
 			m.transcript.AppendPartial("assistant", text)
 			m.notifyViewportRefresh()
 		}
@@ -37,6 +39,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 			return
 		}
+		m.turn.MarkTurnContent()
 		if !m.showReasoning {
 			return
 		}
@@ -48,6 +51,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 			return
 		}
+		m.turn.MarkTurnContent()
 		m.transcript.FinishPartial("assistant")
 		m.transcript.FinishPartial("reasoning")
 		for _, line := range tuishared.FormatToolEvent(ev.Type, ev.Data, m.toolFold.Verbose()) {
@@ -71,6 +75,10 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		}
 		m.transcript.Add("[system] error: " + msg)
 		m.notifyViewportRefresh()
+		if m.turn.Awaiting() {
+			m.turn.FinishTurn()
+			m.statusLine = "回合结束"
+		}
 	case "child_agent_created":
 		m.children.onCreated(ev.Data)
 		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
@@ -112,8 +120,8 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		}
 		m.transcript.FinishPartial("assistant")
 		m.transcript.FinishPartial("reasoning")
-		if m.awaitingTurn && m.submitSeen {
-			m.awaitingTurn = false
+		if m.turn.ShouldAcceptDone(ev.Seq) {
+			m.turn.FinishTurn()
 			m.statusLine = "回合结束"
 		}
 		m.notifyViewportRefresh()

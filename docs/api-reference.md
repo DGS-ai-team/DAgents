@@ -537,8 +537,10 @@ data: {"connection_id":"...","session_id":"...","connection_id":"...","agent_id"
   - **`display_type`**：默认 **`normal_text`**
 - **`error`**
   - **`message`**：`string`
-- **`done`**
-  - **`finish_reason`**：`string`（映射层保证存在；如 **`stop`**、**`tool_calls`**、**`error`**、**`resume_rejected`** 等）
+- **`done`**（**Go Node 现行语义**见 [agent-node-api.md §2.4.1](./architecture/agent-node-api.md)）
+  - **`finish_reason`**：`string`（Go：`stop` \| `awaiting_user_information` \| `awaiting_tool_approval` \| `error` \| `cancelled`；v1 历史另有 `tool_calls` 等）
+  - **`turn_complete`**：`bool`（Go；链结束 vs HITL 暂停）
+  - **`awaiting`**：`string \| null`（Go；`user_information` \| `tool_approval`）
   - 其余字段与 **`meta`** 合并展示
 - **`chunk`**（兜底）
   - **`raw`**：未专门映射的 payload

@@ -49,7 +49,7 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 	case "cancel":
 		err = m.cancelTurn()
 		if err == nil {
-			m.awaitingTurn = false
+			m.turn.FinishTurn()
 			m.statusLine = "已取消在途 turn"
 		}
 	case "children", "child":
@@ -166,8 +166,7 @@ func (m *model) switchSession(requested string) error {
 	m.sessionMu.Lock()
 	m.sessionID = id
 	m.sessionMu.Unlock()
-	m.awaitingTurn = false
-	m.submitSeen = false
+	m.turn.Reset()
 	m.resetHITLQueue()
 	m.resetHITLState()
 	m.children.reset()

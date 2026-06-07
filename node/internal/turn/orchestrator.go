@@ -201,7 +201,20 @@ func (o *Orchestrator) ContinueAfterResume(
 	if setState == nil {
 		setState = func(State) {}
 	}
-	o.logger.Info("turn resume", "session_id", sessionID, "hitl_kind", pending.Kind)
+	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
+	pendingToolCallID := ""
+	if pending.Kind == HITLUserInformation && pending.UserInfo != nil {
+		pendingToolCallID = pending.UserInfo.ID
+	} else if pending.Kind == HITLApproval && len(pending.ToolCalls) > 0 {
+		pendingToolCallID = pending.ToolCalls[0].ID
+	}
+	o.logger.Info("turn resume",
+		"session_id", sessionID,
+		"hitl_kind", pending.Kind,
+		"resume_tool_call_id", resumeToolCallID,
+		"pending_tool_call_id", pendingToolCallID,
+		"resume_value", resumeValue,
+	)
 	switch pending.Kind {
 	case HITLUserInformation:
 		if pending.UserInfo == nil {
@@ -335,7 +348,7 @@ func (o *Orchestrator) runOneStep(
 		o.hub.Publish(sessionID, o.agentID, "error", map[string]any{
 			"message": fmt.Sprintf("工具调用轮次超过上限：%d", o.maxToolLoops),
 		})
-		o.hub.Publish(sessionID, o.agentID, "done", map[string]any{"finish_reason": "error"})
+		o.publishTurnIdleDone(sessionID, "error")
 		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("tool loop limit exceeded")}
 	}
 
@@ -374,7 +387,7 @@ func (o *Orchestrator) runOneStep(
 			streamErr = err
 			o.logger.Error("turn llm failed", "session_id", sessionID, "loop", toolLoopCount, "error", err)
 		}
-		o.hub.Publish(sessionID, o.agentID, "done", map[string]any{"finish_reason": finishReason})
+		o.publishTurnIdleDone(sessionID, finishReason)
 		return StepOutcome{LoopCount: toolLoopCount, Err: streamErr}
 	}
 
@@ -388,7 +401,7 @@ func (o *Orchestrator) runOneStep(
 	o.appendHistory(sessionID, history, assistant)
 
 	if len(result.ToolCalls) == 0 {
-		o.hub.Publish(sessionID, o.agentID, "done", map[string]any{"finish_reason": finishReason})
+		o.publishTurnIdleDone(sessionID, finishReason)
 		o.logger.Info("turn done", "session_id", sessionID, "finish_reason", finishReason, "loop", toolLoopCount)
 		return StepOutcome{LoopCount: toolLoopCount}
 	}
@@ -402,11 +415,11 @@ func (o *Orchestrator) runOneStep(
 			finishReason = "error"
 			o.hub.Publish(sessionID, o.agentID, "error", map[string]any{"message": procErr.Error()})
 		}
-		o.hub.Publish(sessionID, o.agentID, "done", map[string]any{"finish_reason": finishReason})
+		o.publishTurnIdleDone(sessionID, finishReason)
 		return StepOutcome{LoopCount: toolLoopCount, Err: procErr}
 	}
 	if pending != nil {
-		o.hub.Publish(sessionID, o.agentID, "done", map[string]any{"finish_reason": pauseReason})
+		o.publishTurnIdleDone(sessionID, pauseReason)
 		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "loop", toolLoopCount)
 		return StepOutcome{Pending: pending, LoopCount: toolLoopCount}
 	}
@@ -417,6 +430,28 @@ func (o *Orchestrator) runOneStep(
 		return StepOutcome{LoopCount: toolLoopCount}
 	}
 	return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
+}
+
+// publishTurnIdleDone 推送语义 B 的 done：编排器暂停，轮到用户交互（非段落换行）。
+//
+// 逻辑：
+// 1. 始终带 finish_reason；
+// 2. HITL 暂停：turn_complete=false + awaiting；
+// 3. stop/error/cancelled：turn_complete=true，awaiting 为空。
+func (o *Orchestrator) publishTurnIdleDone(sessionID, finishReason string) {
+	payload := map[string]any{"finish_reason": finishReason}
+	switch finishReason {
+	case "awaiting_user_information":
+		payload["turn_complete"] = false
+		payload["awaiting"] = "user_information"
+	case "awaiting_tool_approval":
+		payload["turn_complete"] = false
+		payload["awaiting"] = "tool_approval"
+	default:
+		payload["turn_complete"] = true
+		payload["awaiting"] = nil
+	}
+	o.hub.Publish(sessionID, o.agentID, "done", payload)
 }
 
 func (o *Orchestrator) insertHistory(sessionID string, history *[]llm.Message, index int, message llm.Message) {

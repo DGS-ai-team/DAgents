@@ -15,7 +15,7 @@
 |------|------|
 | [architecture/overview.md](./architecture/overview.md) | **双栈选型**：何时用 Go Node vs Python API |
 | [architecture/local-assistant.md](./architecture/local-assistant.md) | 本地助手：Go Node + Textual / Go REPL 联调 |
-| [architecture/agent-node-api.md](./architecture/agent-node-api.md) | Agent Node HTTP/SSE API 草图 |
+| [architecture/agent-node-api.md](./architecture/agent-node-api.md) | Agent Node HTTP/SSE API（`done`：`turn_complete` / `awaiting`） |
 | [architecture/child-agent-tools.md](./architecture/child-agent-tools.md) | 临时子 Agent 工具 / HTTP / SSE 定稿（Go Node） |
 | [architecture/client-packaging.md](./architecture/client-packaging.md) | 同包 `config.yaml` 与安装布局 |
 | [architecture/go-node-compatibility.md](./architecture/go-node-compatibility.md) | Go 静态构建 / glibc 矩阵（N7） |

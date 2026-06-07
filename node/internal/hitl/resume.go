@@ -65,6 +65,36 @@ func ParseApprovalResume(value map[string]any, pendingIDs []string) (ApprovalPla
 	}
 }
 
+// ResumeValueKind 推断 resume_value 的高层类型，仅供日志与诊断（非严格校验）。
+func ResumeValueKind(value map[string]any) string {
+	if value == nil {
+		return "nil"
+	}
+	typ := strings.ToLower(strings.TrimSpace(fmt.Sprint(value["type"])))
+	switch typ {
+	case "selection", "approve", "approved", "reject", "rejected":
+		return "approval"
+	case "user_information":
+		return "user_information"
+	case "":
+		if _, ok := value["approved"]; ok {
+			return "approval"
+		}
+		if _, ok := value["rejected"]; ok {
+			return "approval"
+		}
+		if _, ok := value["answer"]; ok {
+			return "user_information"
+		}
+		if _, ok := value["selected_options"]; ok {
+			return "user_information"
+		}
+		return "unknown"
+	default:
+		return "unknown:" + typ
+	}
+}
+
 // ParseUserInformationResume 解析用户回答 resume。
 func ParseUserInformationResume(value map[string]any, toolCallID string) (content string, err error) {
 	if value == nil {

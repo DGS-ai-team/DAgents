@@ -5,6 +5,7 @@
 | [`main.py`](main.py) | `dagents` 命令入口：子命令解析、`chat` 启动 TUI |
 | [`config_file.py`](config_file.py) | 与 Go 共用的 YAML 配置加载 |
 | [`chat.py`](chat.py) | `run_chat`：构造 `SessionController` 并启动 Textual App |
+| [`log.py`](log.py) | CLI 落盘日志（`logs/session_controller.log`） |
 | [`session_controller.py`](session_controller.py) | SSE pump、后台 render 循环、用户 turn 栅栏 |
 | [`api_client.py`](api_client.py) | Agent Node HTTP/SSE 客户端 |
 | [`approval.py`](approval.py) | 工具审批载荷解析与 resume 决策构造 |
@@ -53,7 +54,7 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 
 快捷键：context 视图中按 `Esc` 返回聊天记录；输出中、工具审批或 Agent 询问中按 `Esc` 可调用 cancel 中断当前 turn。
 
-**Agent 询问（`ask_user_information`）**：Agent 调用该工具时，TUI 会展示问题；无选项时在底部输入框输入后 Enter 提交；有选项时用 ↑/↓ 选择、Space 多选切换、Enter 确认。
+**Agent 询问（`ask_user_information`）**：Node 会发 `tool_call`（工具行）与 `user_information_required`（「Agent 询问」块）；**以询问块为准**操作。无选项时在底部输入框输入后 Enter；有选项时 ↑/↓、Space 多选、Enter 确认。`done` 表示轮到用户（见 [agent-node-api.md §2.4.1](../../docs/architecture/agent-node-api.md)）。
 
 ## 架构要点
 
@@ -63,4 +64,4 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 - **长连 SSE**：`_pump_stream` 后台入队，`_render_loop` 持续渲染到 RichLog；子 Agent turn 的 assistant/tool 等事件被过滤，仅展示审批与生命周期系统行。
 - **HITL 非阻塞**：`approval_required` / `user_information_required` 入队后由 TUI 异步处理，避免阻塞 SSE 消费。
 - **子 Agent 状态条**：输入框上方 `#input-strip` 展示活跃子 Agent 数与待审批数。
-- **用户 turn 栅栏**：`submit_message` + `wait_user_turn`；在 submit 后见到内容事件之前的 `done` 被忽略。
+- **用户 turn 栅栏**：`submit_message` + `wait_user_turn`；`done` 仅语义 B（编排暂停/链结束），含 `turn_complete` 与 `awaiting`；HITL 暂停的 `done` 正常唤醒；submit 前在途 turn 的陈旧 `done`（seq ≤ fence）被忽略。

@@ -112,6 +112,19 @@ func (q *MessageQueue) Close() {
 	}
 }
 
+// CountByRequestType 统计队列中指定 request_type 的条数（诊断 resume 是否重复入队）。
+func (q *MessageQueue) CountByRequestType(requestType string) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, item := range q.items {
+		if item.env.RequestType == requestType {
+			n++
+		}
+	}
+	return n
+}
+
 // Len 返回当前队列深度（测试/观测用）。
 func (q *MessageQueue) Len() int {
 	q.mu.Lock()

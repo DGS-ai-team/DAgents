@@ -9,6 +9,8 @@ from urllib.parse import urlencode
 
 import aiohttp
 
+from app.cli.log import get_api_client_logger
+
 
 @dataclass(frozen=True, slots=True)
 class StreamEvent:
@@ -68,14 +70,37 @@ class DAgentsApiClient:
             },
         )
 
-    async def submit_resume(self, *, session_id: str, resume_value: dict[str, Any]) -> None:
-        await self._post_json(
+    async def submit_resume(
+        self,
+        *,
+        session_id: str,
+        resume_value: dict[str, Any],
+        submit_seq: int | None = None,
+    ) -> None:
+        """POST resume；`submit_seq` 与 SessionController 日志序号对齐便于对账。"""
+        logger = get_api_client_logger()
+        logger.info(
+            "http submit resume begin session_id=%s seq=%s type=%s approval_id=%s tool_call_id=%s",
+            session_id,
+            submit_seq,
+            resume_value.get("type", ""),
+            resume_value.get("approval_id", ""),
+            resume_value.get("tool_call_id", ""),
+        )
+        result = await self._post_json(
             "/v1/messages",
             {
                 "session_id": session_id,
                 "request_type": "resume",
                 "resume_value": resume_value,
             },
+        )
+        logger.info(
+            "http submit resume done session_id=%s seq=%s accepted=%s priority=%s",
+            session_id,
+            submit_seq,
+            result.get("accepted"),
+            result.get("priority"),
         )
 
     async def list_sessions(self) -> dict[str, Any]:

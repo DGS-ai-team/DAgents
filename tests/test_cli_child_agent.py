@@ -86,21 +86,17 @@ class SessionControllerChildFilterTests(unittest.IsolatedAsyncioTestCase):
         self.controller.on_transcript(lambda update: self.updates.append(update))
 
     async def test_child_assistant_not_rendered(self) -> None:
-        skip_holder = {"v": False}
         await self.controller._handle_stream_event(
             _event("assistant", data={"child_session_id": "c1", "content": "hidden"}),
-            skip_holder,
         )
         self.assertEqual(len(self.updates), 0)
 
     async def test_child_lifecycle_emits_system_line(self) -> None:
-        skip_holder = {"v": False}
         await self.controller._handle_stream_event(
             _event(
                 "child_agent_created",
                 data={"child_session_id": "c1", "purpose": "task"},
             ),
-            skip_holder,
         )
         self.assertEqual(len(self.updates), 1)
         self.assertEqual(self.updates[0].kind, TranscriptKind.LINE)
@@ -108,7 +104,6 @@ class SessionControllerChildFilterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.child_tracker.counts()[0], 1)
 
     async def test_approval_enqueued_without_blocking(self) -> None:
-        skip_holder = {"v": False}
         notified = asyncio.Event()
         self.controller.on_hitl_pending(lambda: notified.set())
         await self.controller._handle_stream_event(
@@ -121,7 +116,6 @@ class SessionControllerChildFilterTests(unittest.IsolatedAsyncioTestCase):
                     },
                 },
             ),
-            skip_holder,
         )
         await asyncio.wait_for(notified.wait(), timeout=1.0)
         item = self.controller.peek_hitl()

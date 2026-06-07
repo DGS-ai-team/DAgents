@@ -16,18 +16,24 @@
 
 - **`run_chat`**：启动 Textual TUI（`asyncio.run` + `DAgentsTuiApp.run_async`）
 
+## `log.py`
+
+- **`SESSION_CONTROLLER_LOGGER_NAME`**：SessionController 日志 logger 名称
+- **`resolve_log_dir`**：解析 `logs/` 目录（`DAGENTS_LOG_DIR` / `DAGENTS_HOME` / 仓库根）
+- **`get_session_controller_logger`**：幂等挂载 `session_controller.log`（`DAGENTS_LOG_LEVEL`）
+
 ## `session_controller.py`
 
 - **`SessionController`**：会话生命周期、SSE pump/render、turn 栅栏
   - **`start` / `stop`**：连接 Node、启停后台任务
-  - **`submit_message` / `wait_user_turn` / `cancel_current_turn`**：用户消息、轮次等待与在途 turn 取消
+  - **`submit_message` / `wait_user_turn` / `cancel_current_turn`**：用户消息、轮次等待（`done` 语义 B）与在途 turn 取消
   - **`list_sessions`**：调用 `GET /v1/sessions`
   - **`get_context`**：调用 `GET /v1/sessions/{session_id}/context`
   - **`list_skills` / `load_skill` / `unload_skill`**：调用 session skills API
   - **`list_child_agents`**：调用 `GET /v1/sessions/{id}/child-agents`
   - **`clear_context`**：调用 `POST .../clear-context`
   - **`on_transcript` / `on_hitl_pending` / `on_child_strip` / `on_status`**：UI 回调注册
-  - **`peek_hitl` / `complete_hitl_approval` / `complete_hitl_user_info` / `discard_hitl_head`**：非阻塞 HITL 队列
+  - **`peek_hitl` / `complete_hitl_approval` / `complete_hitl_user_info` / `discard_hitl_head`**：非阻塞 HITL 队列（`complete_hitl_*` 在 submit resume 前写 INFO 日志）
   - **`child_tracker`**：`ChildAgentTracker` 实例（活跃子 Agent / 待审批）
 
 ## `child_agent.py`

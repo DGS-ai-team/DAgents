@@ -36,8 +36,7 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_background_assistant_renders_without_user_submit(self) -> None:
         """空闲期 SSE 事件应被 render 回调消费，不依赖用户 submit。"""
-        skip_holder = {"v": False}
-        await self.controller._handle_stream_event(_event("assistant", content="hello"), skip_holder)
+        await self.controller._handle_stream_event(_event("assistant", content="hello"))
 
         self.assertEqual(len(self.updates), 1)
         self.assertEqual(self.updates[0].kind, TranscriptKind.ASSISTANT_DELTA)
@@ -47,29 +46,36 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         """submit 后、用户 turn 内容出现前的 done（如在途 trigger）不应结束等待。"""
         self.controller._reset_user_turn_wait()
         wait_task = asyncio.create_task(self.controller.wait_user_turn())
-        skip_holder = {"v": False}
 
-        await self.controller._handle_stream_event(_event("done"), skip_holder)
+        await self.controller._handle_stream_event(_event("done"))
         await asyncio.sleep(0)
         self.assertFalse(self.controller._user_turn_done.is_set())
 
-        await self.controller._handle_stream_event(_event("assistant", content="reply"), skip_holder)
-        await self.controller._handle_stream_event(_event("done"), skip_holder)
+        await self.controller._handle_stream_event(_event("assistant", content="reply"))
+        await self.controller._handle_stream_event(
+            _event(
+                "done",
+                data={
+                    "finish_reason": "stop",
+                    "turn_complete": True,
+                    "awaiting": None,
+                },
+            )
+        )
 
         await asyncio.wait_for(wait_task, timeout=1.0)
         self.assertTrue(self.controller._user_turn_done.is_set())
 
-    async def test_approval_enqueued_and_skip_done_after_resume(self) -> None:
-        """approval 入队不阻塞；complete 后 skip 第一条 done。"""
+    async def test_hitl_pause_done_wakes_user_turn(self) -> None:
+        """HITL 暂停的 done（turn_complete=false）应结束 wait_user_turn。"""
         mock_client = MagicMock()
         mock_client.submit_resume = AsyncMock()
         self.controller._client = mock_client
 
         self.controller._reset_user_turn_wait()
         wait_task = asyncio.create_task(self.controller.wait_user_turn())
-        skip_holder = {"v": False}
 
-        await self.controller._handle_stream_event(_event("assistant", content="plan"), skip_holder)
+        await self.controller._handle_stream_event(_event("assistant", content="plan"))
         await self.controller._handle_stream_event(
             _event(
                 "approval_required",
@@ -80,23 +86,25 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
                         ]
                     }
                 },
-            ),
-            skip_holder,
+            )
         )
+        await self.controller._handle_stream_event(
+            _event(
+                "done",
+                data={
+                    "finish_reason": "awaiting_tool_approval",
+                    "turn_complete": False,
+                    "awaiting": "tool_approval",
+                },
+            )
+        )
+
+        await asyncio.wait_for(wait_task, timeout=1.0)
         item = self.controller.peek_hitl()
         self.assertIsNotNone(item)
 
         requests = extract_tool_approval_requests(item.data)  # type: ignore[union-attr]
         await self.controller.complete_hitl_approval(build_all_approved_decision(requests))
-
-        await self.controller._handle_stream_event(_event("done"), skip_holder)
-        await asyncio.sleep(0)
-        self.assertFalse(self.controller._user_turn_done.is_set())
-
-        await self.controller._handle_stream_event(_event("assistant", content="done work"), skip_holder)
-        await self.controller._handle_stream_event(_event("done"), skip_holder)
-
-        await asyncio.wait_for(wait_task, timeout=1.0)
         mock_client.submit_resume.assert_awaited_once()
 
     async def test_submit_message_clears_hitl_queue(self) -> None:
@@ -115,7 +123,6 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
                     }
                 },
             ),
-            {"v": False},
         )
         self.assertEqual(self.controller.hitl_queue_len(), 1)
 
@@ -138,11 +145,9 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         }
         await self.controller._handle_stream_event(
             _event("approval_required", data=old_data),
-            {"v": False},
         )
         await self.controller._handle_stream_event(
             _event("approval_required", data=new_data),
-            {"v": False},
         )
         self.assertEqual(self.controller.hitl_queue_len(), 1)
         item = self.controller.peek_hitl()
@@ -158,7 +163,7 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         notified = asyncio.Event()
         self.controller.on_child_strip(lambda: notified.set())
 
-        await self.controller._handle_stream_event(_event("done"), {"v": False})
+        await self.controller._handle_stream_event(_event("done"))
         await asyncio.wait_for(notified.wait(), timeout=1.0)
 
         mock_client.get_session_context.assert_awaited_once_with("s1")

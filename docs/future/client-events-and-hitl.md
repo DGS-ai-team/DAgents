@@ -1,4 +1,4 @@
-> **待修订（2026-05）**：Backend Control Plane / `connection_id` 描述已过时。Agent+Client 阶段以 **本地 Node SSE** 为准，见 [agent-node-api.md](../architecture/agent-node-api.md)、[agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md)。
+> **待修订（2026-05）**：Backend Control Plane / `connection_id` 描述已过时。Agent+Client 阶段以 **本地 Go Node SSE** 为准，见 [agent-node-api.md](../architecture/agent-node-api.md)（**§2.4.1 `done` 语义**）、[agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md)。
 
 # Client 事件与人机交互（HITL）
 
@@ -46,7 +46,7 @@ Gateway 须关闭 SSE buffering（`X-Accel-Buffering: no`）。
 | `tool_call` | 完整 tool call | `tool_calls`, `assistant_content` |
 | `tool_result` | 工具结果 | `content`, `tool_call_id`, `tool_name`, `rejected` |
 | `error` | 错误 | `message` |
-| `done` | 本轮结束 | `finish_reason` |
+| `done` | 编排暂停、轮到用户（语义 B，**非**段落换行） | `finish_reason`、`turn_complete`、`awaiting`（见 [agent-node-api.md §2.4.1](../architecture/agent-node-api.md)） |
 
 ### 3.2 人机交互（HITL）
 

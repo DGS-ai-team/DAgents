@@ -103,6 +103,10 @@ func (m *Manager) DeliverChildResume(childSessionID string, resume map[string]an
 	if !rt.hasPendingHITL() {
 		return fmt.Errorf("no_pending_hitl")
 	}
+	m.logger.Info("resume deliver child",
+		"child_session_id", childSessionID,
+		"resume_value", resume,
+	)
 	return rt.enqueue(queue.Envelope{RequestType: "resume", ResumeValue: resume}, queue.PriorityResume)
 }
 
@@ -115,6 +119,10 @@ func (m *Manager) DeliverParentResume(parentSessionID string, resume map[string]
 	if !rt.hasPendingHITL() {
 		return fmt.Errorf("no_pending_hitl")
 	}
+	m.logger.Info("resume deliver parent",
+		"session_id", parentSessionID,
+		"resume_value", resume,
+	)
 	return rt.enqueue(queue.Envelope{RequestType: "resume", ResumeValue: resume}, queue.PriorityResume)
 }
 

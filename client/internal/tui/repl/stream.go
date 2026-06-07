@@ -29,7 +29,7 @@ type streamRunner struct {
 	assistantLineOpen bool
 	reasoningLineOpen bool
 
-	onTurnDone func()
+	turn *tuishared.TurnGate
 }
 
 func newStreamRunner(
@@ -39,7 +39,7 @@ func newStreamRunner(
 	toolFold *tuishared.ToolFold,
 	printMu *sync.Mutex,
 	showReasoning *bool,
-	onTurnDone func(),
+	turn *tuishared.TurnGate,
 ) *streamRunner {
 	return &streamRunner{
 		client:        client,
@@ -48,7 +48,7 @@ func newStreamRunner(
 		toolFold:      toolFold,
 		printMu:       printMu,
 		showReasoning: showReasoning,
-		onTurnDone:    onTurnDone,
+		turn:          turn,
 	}
 }
 
@@ -100,8 +100,16 @@ func (r *streamRunner) Run(ctx context.Context) error {
 }
 
 func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) (bool, error) {
+	r.turn.NoteSeq(ev.Seq)
+	if r.turn.IsStale(ev.Seq) {
+		return true, nil
+	}
 	if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 		return true, nil
+	}
+	switch ev.Type {
+	case "assistant", "reasoning", "tool_call", "tool_result":
+		r.turn.MarkTurnContent()
 	}
 	switch ev.Type {
 	case "child_agent_created", "child_agent_completed", "child_agent_cancelled":
@@ -135,11 +143,14 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 	}
 	// REPL 模式 HITL 走 stdin；Interact 为 nil。主循环在 turn 期间不读 stdin。
 	cont, err := clihitl.HandleStreamEvent(ctx, r.client, r.sessionID, ev, sink, nil, false)
+	if ev.Type == "error" && r.turn.Awaiting() {
+		r.turn.FinishTurn()
+	}
 	if ev.Type == "done" {
 		r.finishAssistantLine()
 		r.finishReasoningLine()
-		if r.onTurnDone != nil {
-			r.onTurnDone()
+		if r.turn.ShouldAcceptDone(ev.Seq) {
+			r.turn.FinishTurn()
 		}
 		return true, err
 	}

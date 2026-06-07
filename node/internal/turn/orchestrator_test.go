@@ -168,29 +168,41 @@ func TestRunMessageTurnUserInformationPayload(t *testing.T) {
 
 	deadline := time.After(3 * time.Second)
 	var pending *PendingHITL
-	for {
+	var gotHitlDone bool
+	var gotUserInfo bool
+	for !(gotHitlDone && gotUserInfo) {
 		select {
 		case ev := <-ch:
-			if ev.Type != "user_information_required" {
-				continue
+			switch ev.Type {
+			case "done":
+				if ev.Data["finish_reason"] != "awaiting_user_information" {
+					t.Fatalf("unexpected done finish_reason: %+v", ev.Data)
+				}
+				if ev.Data["turn_complete"] != false {
+					t.Fatalf("turn_complete = %v, want false", ev.Data["turn_complete"])
+				}
+				if ev.Data["awaiting"] != "user_information" {
+					t.Fatalf("awaiting = %v", ev.Data["awaiting"])
+				}
+				gotHitlDone = true
+			case "user_information_required":
+				args, ok := ev.Data["user_information_args"].(map[string]any)
+				if !ok {
+					t.Fatalf("user_information_args missing: %+v", ev.Data)
+				}
+				if ev.Data["content"] != "Pick one?" {
+					t.Fatalf("content = %v", ev.Data["content"])
+				}
+				if args["tool_call_id"] != "call-ask-1" {
+					t.Fatalf("tool_call_id = %v", args["tool_call_id"])
+				}
+				pending = &PendingHITL{Kind: HITLUserInformation, UserInfo: &llm.ToolCall{ID: "call-ask-1"}}
+				gotUserInfo = true
 			}
-			args, ok := ev.Data["user_information_args"].(map[string]any)
-			if !ok {
-				t.Fatalf("user_information_args missing: %+v", ev.Data)
-			}
-			if ev.Data["content"] != "Pick one?" {
-				t.Fatalf("content = %v", ev.Data["content"])
-			}
-			if args["tool_call_id"] != "call-ask-1" {
-				t.Fatalf("tool_call_id = %v", args["tool_call_id"])
-			}
-			pending = &PendingHITL{Kind: HITLUserInformation, UserInfo: &llm.ToolCall{ID: "call-ask-1"}}
-			goto resume
 		case <-deadline:
-			t.Fatal("timeout waiting user_information_required")
+			t.Fatalf("timeout hitl_done=%v user_info=%v", gotHitlDone, gotUserInfo)
 		}
 	}
-resume:
 	continueResumeAndDrain(t, orch, context.Background(), "sess-1", &history, map[string]any{
 		"type":         "user_information",
 		"tool_call_id": "call-ask-1",

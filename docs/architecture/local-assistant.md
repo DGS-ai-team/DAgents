@@ -49,7 +49,7 @@ Python TUI 直连 Node（SSE 按 `session_id` 过滤，见 `app/cli/api_client.p
 **共有（连 Node 时）**
 
 - 创建 / 恢复 session、发消息、SSE 流式回复
-- HITL：工具审批、`ask_user_information`
+- HITL：工具审批、`ask_user_information`（`user_information_required` / `approval_required` 弹 UI；`done` 仅表示轮到用户，见 [agent-node-api.md §2.4.1](./agent-node-api.md)）
 - `POST /v1/sessions/{id}/cancel` 取消在途 turn
 - `/clear`、`/status`、`/sessions`（各 Client 子集）
 - session skills（`/skill`、HTTP API）

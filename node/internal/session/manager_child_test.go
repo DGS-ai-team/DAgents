@@ -13,6 +13,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 // newManagerWithChildAgents 创建启用子 Agent 的 session Manager 与 Hub。
@@ -172,5 +173,44 @@ func TestChildAgentCancelBeforeComplete(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timeout waiting for child_agent_cancelled")
 		}
+	}
+}
+
+// TestEnqueueResumeParentDoesNotDoubleEnqueue 启用子 Agent 时父 session resume 只入队一次。
+func TestEnqueueResumeParentDoesNotDoubleEnqueue(t *testing.T) {
+	mgr, _, _ := newManagerWithChildAgents(t, &llm.MockClient{})
+	defer mgr.Stop()
+
+	parent, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := mgr.getRuntime(parent.ID)
+	if rt == nil {
+		t.Fatal("parent runtime missing")
+	}
+	rt.mu.Lock()
+	rt.pending = &turn.PendingHITL{
+		Kind: turn.HITLUserInformation,
+		UserInfo: &llm.ToolCall{
+			ID: "call-test-1",
+			Function: llm.ToolCallFunction{
+				Name:      "ask_user_information",
+				Arguments: `{"question":"q"}`,
+			},
+		},
+	}
+	rt.mu.Unlock()
+
+	resume := map[string]any{
+		"type":         "user_information",
+		"tool_call_id": "call-test-1",
+		"answer":       "yes",
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), parent.ID, "resume", "", resume); err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.queue.Len(); got != 1 {
+		t.Fatalf("resume queue depth = %d, want 1", got)
 	}
 }

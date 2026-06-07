@@ -117,19 +117,36 @@ Content-Type: application/json
 
 `request_type`：`message` | `resume`。
 
-resume 示例（审批）：
+resume 示例（审批，与 `node/internal/hitl/resume.go` 一致）：
 
 ```json
 {
   "session_id": "sess-7f2a...",
   "request_type": "resume",
   "resume_value": {
-    "kind": "tool_approval",
-    "execution_id": "exec-...",
-    "decision": "approved"
+    "type": "selection",
+    "approved": ["call_abc123"],
+    "rejected": []
   }
 }
 ```
+
+用户询问示例：
+
+```json
+{
+  "session_id": "sess-7f2a...",
+  "request_type": "resume",
+  "resume_value": {
+    "type": "user_information",
+    "tool_call_id": "call_abc123",
+    "answer": "Go",
+    "selected_options": ["go"]
+  }
+}
+```
+
+启用子 Agent 时，父 session 的 resume 经 `RouteResume` → `DeliverParentResume` **只入队一次**（`node/internal/session/manager.go`）。
 
 响应：
 
@@ -148,7 +165,41 @@ Last-Event-ID: 42
 - Phase 1 可简化为 **全局单流**（一个 Client 一个 Node 实例通常一个活跃 session）。
 - 帧格式见 [client-events-and-hitl.md](./client-events-and-hitl.md)（修订版：去掉 `connection_id` 必填，保留 `session_id` / `execution_id`）。
 
-核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`approval_required`、`user_information_required`、`execution_progress`、`error`、`done`。
+核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`approval_required`、`user_information_required`、`child_agent_created` / `child_agent_completed` / `child_agent_cancelled`、`error`、`done`。
+
+#### 2.4.1 `done` 事件（语义 B：轮到用户）
+
+`done` **仅**表示编排器在当前步暂停、**轮到用户交互**（解锁 Client 等待、进入 HITL 或自由输入）。**不**表示 assistant 流式段落结束（换行由 `assistant` / `tool_call` / `reasoning` 等事件在 Client 侧收束）。
+
+实现：`node/internal/turn/orchestrator.go` 中 `publishTurnIdleDone`。
+
+**载荷字段**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `finish_reason` | string | `stop` \| `awaiting_user_information` \| `awaiting_tool_approval` \| `error` \| `cancelled` |
+| `turn_complete` | bool | `true`：本条用户 `message` 驱动的链已结束，可自由输入；`false`：HITL 暂停，链未结束 |
+| `awaiting` | string \| null | HITL 暂停时：`user_information` \| `tool_approval`；链结束时为 `null` |
+
+**何时发送 `done`**
+
+| 场景 | 发送 | `turn_complete` | `awaiting` |
+|------|------|-----------------|------------|
+| 模型一步结束且无 `tool_calls` | ✅ | `true` | `null` |
+| `ask_user_information` / 审批 pending | ✅ | `false` | `user_information` / `tool_approval` |
+| LLM/工具错误、取消、超循环上限 | ✅ | `true` | `null` |
+| 自动工具执行后 `tool_result` 续跑 | ❌ | — | — |
+| 客户端 `resume` 刚处理完、链继续 | ❌ | — | — |
+
+**一次 `submit` 可有多条 `done`**（例如连续多轮 `ask_user_information`），每次 HITL 暂停一条；最终以 `finish_reason=stop` 且 `turn_complete=true` 收束。
+
+**与其它事件分工**
+
+- `user_information_required` / `approval_required`：弹 HITL UI（含 `tool_call_id`、选项等）。
+- `tool_call`（含 `ask_user_information`）：工具行展示；与 `user_information_required` 成对出现，**不**替代 HITL 块。
+- 子 Agent 内部 `done`：**不**转发到父 SSE（`node/internal/childagent/relay_hub.go`）。
+
+**Python Textual Client**（`app/cli/session_controller.py`）：`submit_message` 后 `wait_user_turn` 等待第一条语义 B 的 `done`；HITL 由队列 + `user_information_required` 驱动；**无** `_skip_next_done` 类补丁。
 
 ### 2.5 Skills（可选 HTTP；也可仅 tool）
 
@@ -226,10 +277,16 @@ POST {manage_url}/v1/a2a/messages/{message_id}/reply
 
 工具由 turn loop 内部调度，**不**对 Client 暴露 `POST /tools/execute`。
 
-执行生命周期通过 SSE 表达：
+执行生命周期通过 SSE 表达（**自动工具**路径中间**不发** `done`，见 §2.4.1）：
 
 ```text
-tool_call →（可选 approval_required）→ execution_progress → tool_result → done
+# 自动工具（无 HITL）
+tool_call → tool_result → assistant … → done { turn_complete: true }
+
+# 需审批 / 用户询问
+tool_call → approval_required | user_information_required
+         → done { turn_complete: false, awaiting: … }
+         →（用户 resume）→ tool_result → assistant … → done
 ```
 
 Node 内部分层（实现参考，非 HTTP）：

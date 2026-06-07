@@ -20,7 +20,7 @@ func newTestStreamRunner() *streamRunner {
 		&tuishared.ToolFold{},
 		&sync.Mutex{},
 		&show,
-		nil,
+		tuishared.NewTurnGate(),
 	)
 }
 

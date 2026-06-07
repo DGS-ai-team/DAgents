@@ -1,5 +1,8 @@
 # Agent 循环流程逻辑
 
+> **【历史 · Python 已移除】** 本文描述 v1 **`MainAgentTurnOrchestrator` / `run_turn`**。  
+> **Go Agent Node** 工具循环见 `node/internal/turn/orchestrator.go` 与 [architecture/agent-node-api.md](./architecture/agent-node-api.md) §2.4.1、§5。
+
 本文聚焦 **一条 `session_id` 上**，从 **`MessageEnvelope` 出队** 到 **多轮模型调用（ReAct 风格）** 如何闭合：外层由 **消息队列** 串行驱动，内层由 **`OpenAIImplicitReActRuntime.run_turn`** 每次只做 **一轮** Chat Completions。实现以 **`MainAgentTurnOrchestrator`**（**`app/core/main_agent/agent.py`**）与 **`OpenAIImplicitReActRuntime`**（**`app/core/main_agent/runtime_openai.py`**）为准；HTTP 与队列语义见 [agent-input-output.md](./agent-input-output.md)，整体分层见 [architecture-and-flows.md](./architecture-and-flows.md)。
 
 ---

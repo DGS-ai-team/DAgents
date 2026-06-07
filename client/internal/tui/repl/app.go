@@ -35,7 +35,7 @@ type App struct {
 	streamCancel context.CancelFunc
 	streamDone   chan struct{}
 
-	turn turnGate
+	turn *tuishared.TurnGate
 }
 
 // Run 启动行模式 REPL；initialSession 非空时尝试恢复该 session。
@@ -46,6 +46,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		transcript:    tuishared.NewTranscript(0),
 		toolFold:      &tuishared.ToolFold{},
 		showReasoning: showReasoning,
+		turn:          tuishared.NewTurnGate(),
 	}
 	res, err := probe.Node(ctx, cfg, nil)
 	if err != nil {
@@ -91,14 +92,14 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		}
 
 		app.transcript.Add("[user] " + line)
-		app.turn.begin()
+		app.turn.BeginSubmit()
 		if err := app.client.SubmitMessage(ctx, app.currentSession(), line); err != nil {
-			app.turn.finish()
+			app.turn.FinishTurn()
 			fmt.Fprintf(os.Stderr, "发送失败: %v\n", err)
 			continue
 		}
 		fmt.Fprintln(os.Stderr, "（回合进行中；若有审批/询问，请在下方提示处输入）")
-		if err := app.turn.wait(ctx); err != nil {
+		if err := app.turn.Wait(ctx); err != nil {
 			return err
 		}
 	}
@@ -130,13 +131,9 @@ func (a *App) restartStream(ctx context.Context) {
 	sid := a.currentSession()
 	go func() {
 		defer close(a.streamDone)
-		runner := newStreamRunner(a.client, sid, a.transcript, a.toolFold, &a.printMu, &a.showReasoning, a.onStreamTurnDone)
+		runner := newStreamRunner(a.client, sid, a.transcript, a.toolFold, &a.printMu, &a.showReasoning, a.turn)
 		_ = runner.Run(streamCtx)
 	}()
-}
-
-func (a *App) onStreamTurnDone() {
-	a.turn.finish()
 }
 
 func (a *App) stopStream() {

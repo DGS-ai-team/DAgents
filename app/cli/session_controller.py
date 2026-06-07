@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from app.cli.api_client import DAgentsApiClient, StreamEvent
+from app.cli.log import get_session_controller_logger
 from app.cli.approval import (
     ApprovalDecision,
     build_approval_resume,
@@ -65,8 +66,8 @@ class SessionController:
     3. `stop` 取消后台任务并关闭 HTTP 客户端。
 
     关键分支：
-    - 用户 submit 后若 session 仍有在途 turn（如 trigger），先忽略其 done，直到出现 submit 后的内容事件再认 turn 边界；
-    - approval 后 skip 一条 done（编排层暂停 done），与旧 REPL 行为一致。
+    - submit 后以 `_turn_seq_fence` 过滤在途 turn 的陈旧 `done`；本轮 turn 的 `done`（含 HITL 暂停、`seq > fence`）结束 `wait_user_turn`；
+    - `done` 仅表示语义 B（编排暂停、轮到用户）；段落换行由 assistant/tool 等事件收束，不依赖 done。
     """
 
     def __init__(
@@ -77,36 +78,37 @@ class SessionController:
         show_reasoning: bool,
         config_path: str | None = None,
     ) -> None:
-        self.api_base = api_base
-        self.config_path = config_path
-        self.initial_session_id = session_id
-        self.show_reasoning = show_reasoning
-        self.session_id = ""
-        self._client: DAgentsApiClient | None = None
-        self._events: asyncio.Queue[StreamEvent] = asyncio.Queue()
-        self._stream_task: asyncio.Task[None] | None = None
-        self._render_task: asyncio.Task[None] | None = None
-        self._transcript_cb: TranscriptCallback | None = None
-        self._user_information_cb: UserInformationCallback | None = None
-        self._status_cb: StatusCallback | None = None
-        self._hitl_pending_cb: HitlPendingCallback | None = None
-        self._child_strip_cb: ChildStripCallback | None = None
-        self._done_counter = 0
-        self._user_turn_done = asyncio.Event()
-        self._awaiting_user_turn = False
-        self._user_turn_started = False
-        self._submit_pending_marker = False
-        self._assistant_line_open = False
-        self._sse_connected = False
-        self._hitl_queue: list[PendingHITL] = []
-        self._skip_next_done = False
-        self._child_tracker = ChildAgentTracker()
-        self._last_event_seq = 0
-        self._turn_seq_fence = 0
-        self._sse_ready = asyncio.Event()
-        self._messages_total_tokens: int | None = None
-        self._usage_strip = UsageStripSnapshot()
-        self._token_refresh_task: asyncio.Task[None] | None = None
+        self.api_base = api_base # 后端地址
+        self.config_path = config_path # 配置文件路径
+        self.initial_session_id = session_id # 初始会话ID
+        self.show_reasoning = show_reasoning # 是否显示推理
+        self.session_id = "" # 当前会话ID
+        self._client: DAgentsApiClient | None = None # API客户端
+        self._events: asyncio.Queue[StreamEvent] = asyncio.Queue() # SSE事件队列
+        self._stream_task: asyncio.Task[None] | None = None # SSE任务
+        self._render_task: asyncio.Task[None] | None = None # 渲染任务
+        self._transcript_cb: TranscriptCallback | None = None # 对话区更新回调
+        self._user_information_cb: UserInformationCallback | None = None # 用户询问回调
+        self._status_cb: StatusCallback | None = None # 状态栏回调
+        self._hitl_pending_cb: HitlPendingCallback | None = None # HITL入队后通知UI处理
+        self._child_strip_cb: ChildStripCallback | None = None # 子Agent状态条变更时通知UI刷新
+        self._done_counter = 0 # 完成计数
+        self._user_turn_done = asyncio.Event() # 用户轮次完成事件
+        self._awaiting_user_turn = False # 是否等待用户轮次
+        self._user_turn_started = False # 用户轮次开始标志
+        self._submit_pending_marker = False # 提交等待标志
+        self._assistant_line_open = False # 助手行打开标志
+        self._sse_connected = False # SSE连接状态
+        self._hitl_queue: list[PendingHITL] = [] # HITL队列
+        self._child_tracker = ChildAgentTracker() # 子Agent跟踪器
+        self._last_event_seq = 0 # 最后事件序号
+        self._turn_seq_fence = 0 # 轮次序号栅栏
+        self._sse_ready = asyncio.Event() # SSE就绪事件
+        self._messages_total_tokens: int | None = None # 消息总Token数
+        self._usage_strip = UsageStripSnapshot() # 使用统计快照
+        self._token_refresh_task: asyncio.Task[None] | None = None # 上下文Token刷新任务
+        self._logger = get_session_controller_logger()
+        self._resume_submit_seq = 0
 
     def _event_seq(self, event: StreamEvent) -> int:
         """从 SSE id 或 envelope.seq 解析事件序号。"""
@@ -128,7 +130,15 @@ class SessionController:
         seq = self._event_seq(event)
         if seq > 0:
             self._last_event_seq = max(self._last_event_seq, seq)
-        return seq > 0 and seq <= self._turn_seq_fence
+        stale = seq > 0 and seq <= self._turn_seq_fence
+        if stale:
+            self._logger.debug(
+                "skip stale sse event type=%s seq=%s fence=%s",
+                event.event_type,
+                seq,
+                self._turn_seq_fence,
+            )
+        return stale
 
     def on_transcript(self, callback: TranscriptCallback) -> None:
         """注册 transcript 更新回调。"""
@@ -157,21 +167,27 @@ class SessionController:
     async def start(self) -> None:
         """连接 Agent Node 并启动 SSE pump 与 render 循环。"""
         self._client = DAgentsApiClient(self.api_base)
+        # 检查后端健康状态
         if not await self._client.health():
             raise RuntimeError(f"node health check failed: {self.api_base}/health")
         self._sse_ready.clear()
+        # 创建会话
         self.session_id = await self._client.create_session(self.initial_session_id)
+        self._logger.info("session started api=%s session_id=%s", self.api_base, self.session_id)
+        # 启动SSE泵和渲染循环
         self._stream_task = asyncio.create_task(self._pump_stream())
         self._render_task = asyncio.create_task(self._render_loop())
         try:
             await asyncio.wait_for(self._sse_ready.wait(), timeout=15.0)
         except TimeoutError as exc:
             raise RuntimeError("SSE subscription timed out") from exc
+        # 更新状态栏并启动上下文Token刷新
         self._emit_status()
         self._schedule_context_token_refresh()
 
     async def stop(self) -> None:
         """停止后台任务并关闭 API 客户端。"""
+        self._logger.info("session stopping session_id=%s", self.session_id)
         for task in (self._render_task, self._stream_task):
             if task is not None:
                 task.cancel()
@@ -193,13 +209,27 @@ class SessionController:
             raise RuntimeError("SSE not ready")
         self._drop_hitl_queue_for_user_interrupt()
         self._reset_user_turn_wait()
+        self._logger.info(
+            "submit message session_id=%s len=%s fence=%s",
+            self.session_id,
+            len(content),
+            self._turn_seq_fence,
+        )
         await self._client.submit_message(
             session_id=self.session_id,
             content=content,
         )
 
     async def wait_user_turn(self, *, timeout_seconds: float = 300.0) -> None:
-        """阻塞直到本轮用户消息对应的 turn 收到 done（含 approval skip 语义）。"""
+        """阻塞直到本轮用户消息对应的语义 B `done`（编排暂停或链结束）。
+
+        逻辑：
+        1. 仅当 `_awaiting_user_turn` 为真时等待；
+        2. `_handle_stream_event(done)` 在 `_user_turn_started` 或 `seq > _turn_seq_fence` 时 set 事件；
+        3. 超时向上抛 RuntimeError。
+
+        关键分支：submit 前在途 turn 的 `done`（seq ≤ fence 且无内容）被忽略。
+        """
         if not self._awaiting_user_turn:
             return
         try:
@@ -207,6 +237,11 @@ class SessionController:
         except TimeoutError as exc:
             self._awaiting_user_turn = False
             self._user_turn_done.set()
+            self._logger.warning(
+                "wait_user_turn timeout session_id=%s after=%ss",
+                self.session_id,
+                int(timeout_seconds),
+            )
             raise RuntimeError(
                 f"turn timed out after {int(timeout_seconds)}s (no done event; check SSE / node logs)"
             ) from exc
@@ -325,8 +360,14 @@ class SessionController:
         self._notify_hitl_pending()
 
     async def complete_hitl_approval(self, decision: ApprovalDecision) -> None:
-        """提交审批 resume 并弹出队首；编排层随后会 emit 一条可 skip 的 done。"""
+        """提交审批 resume 并弹出队首。"""
         if not self._hitl_queue or self._hitl_queue[0].kind != "approval":
+            self._logger.debug(
+                "complete_hitl_approval skipped session_id=%s queue_len=%s head_kind=%s",
+                self.session_id,
+                len(self._hitl_queue),
+                self._hitl_queue[0].kind if self._hitl_queue else None,
+            )
             return
         data = self._hitl_queue[0].data
         child_id = child_session_id_from_data(data)
@@ -335,24 +376,54 @@ class SessionController:
             self._emit_child_strip()
         self._hitl_queue.pop(0)
         assert self._client is not None
+        resume_value = build_approval_resume(data, decision)
+        self._resume_submit_seq += 1
+        seq = self._resume_submit_seq
+        self._logger.info(
+            "submit resume session_id=%s seq=%s hitl_kind=approval resume_type=%s "
+            "resume_tool_call_id=%s resume_value=%s",
+            self.session_id,
+            seq,
+            resume_value.get("type", ""),
+            resume_value.get("tool_call_id", ""),
+            resume_value,
+        )
         await self._client.submit_resume(
             session_id=self.session_id,
-            resume_value=build_approval_resume(data, decision),
+            resume_value=resume_value,
+            submit_seq=seq,
         )
-        self._skip_next_done = True
         self._notify_hitl_pending()
 
     async def complete_hitl_user_info(self, answer: UserInformationAnswer) -> None:
         """提交用户询问 resume 并弹出队首。"""
         if not self._hitl_queue or self._hitl_queue[0].kind != "user_information":
+            self._logger.debug(
+                "complete_hitl_user_info skipped session_id=%s queue_len=%s head_kind=%s",
+                self.session_id,
+                len(self._hitl_queue),
+                self._hitl_queue[0].kind if self._hitl_queue else None,
+            )
             return
         self._hitl_queue.pop(0)
         assert self._client is not None
+        resume_value = answer.to_resume_value()
+        self._resume_submit_seq += 1
+        seq = self._resume_submit_seq
+        self._logger.info(
+            "submit resume session_id=%s seq=%s hitl_kind=user_information resume_type=%s "
+            "resume_tool_call_id=%s resume_value=%s",
+            self.session_id,
+            seq,
+            resume_value.get("type", ""),
+            resume_value.get("tool_call_id", ""),
+            resume_value,
+        )
         await self._client.submit_resume(
             session_id=self.session_id,
-            resume_value=answer.to_resume_value(),
+            resume_value=resume_value,
+            submit_seq=seq,
         )
-        self._skip_next_done = True
         self._notify_hitl_pending()
 
     def reset_child_state(self) -> None:
@@ -442,6 +513,7 @@ class SessionController:
                 if event.is_stream_ready:
                     self._sse_connected = True
                     self._sse_ready.set()
+                    self._logger.info("sse connected session_id=%s", self.session_id)
                     self._emit_status()
                     await self._sync_child_agents_from_api()
                     continue
@@ -452,6 +524,7 @@ class SessionController:
             raise
         except Exception as exc:
             self._sse_connected = False
+            self._logger.exception("sse stream failed session_id=%s", self.session_id)
             self._emit_status()
             await self._events.put(
                 StreamEvent(
@@ -474,17 +547,16 @@ class SessionController:
                 self._sse_ready.set()
         finally:
             self._sse_connected = False
+            self._logger.info("sse disconnected session_id=%s", self.session_id)
             self._emit_status()
 
     async def _render_loop(self) -> None:
         """持续消费 SSE 队列并分发 transcript / approval / turn 栅栏。"""
-        skip_next_done = False
         while True:
             event = await self._events.get()
-            await self._handle_stream_event(event, skip_next_done_holder := {"v": skip_next_done})
-            skip_next_done = skip_next_done_holder["v"]
+            await self._handle_stream_event(event)
 
-    async def _handle_stream_event(self, event: StreamEvent, skip_holder: dict[str, bool]) -> None:
+    async def _handle_stream_event(self, event: StreamEvent) -> None:
         """处理单条 SSE 事件并更新 UI / turn 状态。"""
         if event.is_stream_ready:
             return
@@ -492,6 +564,13 @@ class SessionController:
             return
         data = event.data
         event_type = event.event_type
+        self._logger.debug(
+            "sse event type=%s seq=%s session_id=%s data=%s",
+            event_type,
+            self._event_seq(event),
+            event.session_id or self.session_id,
+            data,
+        )
 
         if should_skip_child_runtime_display(event_type, data):
             return
@@ -542,17 +621,44 @@ class SessionController:
                 self._awaiting_user_turn = False
                 self._user_turn_done.set()
         elif event_type == "done":
+            # done 仅语义 B：编排暂停、轮到用户；assistant 换行由块级事件收束，此处仅兜底。
             self._ensure_assistant_end()
             self._done_counter += 1
-            if skip_holder["v"] or self._skip_next_done:
-                skip_holder["v"] = False
-                self._skip_next_done = False
-            elif self._awaiting_user_turn:
-                seq = self._event_seq(event)
+            seq = self._event_seq(event)
+            finish_reason = str(data.get("finish_reason") or "")
+            turn_complete = data.get("turn_complete")
+            awaiting = data.get("awaiting")
+            if self._awaiting_user_turn:
                 # seq > fence 表示 submit 之后的新 turn 已结束（即使 assistant 增量被漏收）。
                 if self._user_turn_started or seq > self._turn_seq_fence:
                     self._awaiting_user_turn = False
                     self._user_turn_done.set()
+                    self._logger.info(
+                        "user turn idle session_id=%s seq=%s finish_reason=%s "
+                        "turn_complete=%s awaiting=%s",
+                        self.session_id,
+                        seq,
+                        finish_reason,
+                        turn_complete,
+                        awaiting,
+                    )
+                else:
+                    self._logger.debug(
+                        "done ignored before turn content session_id=%s seq=%s fence=%s",
+                        self.session_id,
+                        seq,
+                        self._turn_seq_fence,
+                    )
+            else:
+                self._logger.debug(
+                    "done without awaiting user turn session_id=%s seq=%s "
+                    "finish_reason=%s turn_complete=%s awaiting=%s",
+                    self.session_id,
+                    seq,
+                    finish_reason,
+                    turn_complete,
+                    awaiting,
+                )
             self._schedule_context_token_refresh()
 
     def _enqueue_hitl(self, item: PendingHITL) -> None:
