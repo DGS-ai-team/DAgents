@@ -2,6 +2,16 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.10] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.9** 基础上完善 **skills 工具 schema 描述**，引导模型在匹配任务时主动调用 `load_skills`。
+
+### 变更
+
+- **`load_skills` / `unload_skills` / `clear_skills` 工具描述**：集中说明目录仅含元数据、任务匹配 description 时需先加载、整组替换与清空语义、与 `available_skills` 的名称对齐规则；用法不写进 system prompt，由工具 schema 承载。
+
+（Git **tag**：`v0.2.10`。）
+
 ## [0.2.9] - 2026-06-07
 
 **0.x 预览**：在 **v0.2.8** 基础上修复 **打断工具后重复 tool 消息** 导致的 LLM 400。
