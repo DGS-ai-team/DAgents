@@ -26,7 +26,7 @@ class FormatCompactTokenCountTests(unittest.TestCase):
             }
         )
         self.assertTrue(snap.has_data)
-        self.assertEqual(format_input_strip_usage(snap), "↑100 ↓20 · hit 80")
+        self.assertEqual(format_input_strip_usage(snap), "↑100 ↓20 · hit 80 (80%)")
 
 
 if __name__ == "__main__":

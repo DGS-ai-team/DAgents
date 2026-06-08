@@ -22,12 +22,12 @@ expose_to_peers: false
 fs_root: ./.runtime
 
 llm:
-  provider: openai
-  base_url: https://api.openai.com/v1
-  model: gpt-4.1
+  provider: deepseek   # openai | deepseek（deepseek 时出站 messages 按 Thinking 文档校验/裁剪 reasoning_content）
+  base_url: https://api.deepseek.com   # provider=deepseek 且留空时默认 https://api.deepseek.com
+  model: deepseek-chat   # deepseek 示例：deepseek-reasoner 或 deepseek-chat（Thinking 模式）
   # 真实 LLM：设 mock: false，并 export OPENAI_API_KEY（或改 api_key_env）
   api_key_env: OPENAI_API_KEY
-  mock: true
+  mock: false
   max_tool_loops: 16
 
 manage:

@@ -165,6 +165,10 @@ class DAgentsTuiApp(App[None]):
         self._submit_content_seen = False
         self._cancel_task: asyncio.Task[None] | None = None
         self._context_mode = False
+        # assistant 段结束后待插入的空行（tool_call 紧随其后会取消）。
+        self._pending_segment_gap = False
+        # 工具批次结束后，下一段 prefilling/thinking/assistant 前插入一行。
+        self._needs_gap_after_tools = False
 
     def compose(self) -> ComposeResult:
         """创建 TUI 组件层次结构。"""
@@ -687,7 +691,7 @@ class DAgentsTuiApp(App[None]):
         if request is None:
             return
         content = self._user_info_block_text()
-        block = self._message_block("[cyan]●[/cyan]", content, escape_text=False)
+        block = self._message_block("cyan", content, escape_text=False)
         pending = self._pending_tools.get(request.tool_call_id)
         if pending is not None:
             start, end = self._replace_log_block(int(pending["start"]), int(pending["end"]), block)
@@ -697,7 +701,7 @@ class DAgentsTuiApp(App[None]):
         else:
             log = self._transcript_log()
             start = len(log.lines)
-            log.write(block)
+            self._log_write_block(log, block)
             end = len(log.lines)
         self._user_info_block = {"start": start, "end": end}
 
@@ -707,7 +711,7 @@ class DAgentsTuiApp(App[None]):
         start, end = self._replace_log_block(
             self._user_info_block["start"],
             self._user_info_block["end"],
-            self._message_block("[cyan]●[/cyan]", self._user_info_block_text(), escape_text=False),
+            self._message_block("cyan", self._user_info_block_text(), escape_text=False),
         )
         self._user_info_block = {"start": start, "end": end}
         request = self._user_info_request
@@ -817,39 +821,53 @@ class DAgentsTuiApp(App[None]):
         log.virtual_size = Size(log._widest_line_width, len(log.lines))
         log.refresh()
 
-    def _message_block(self, dot: str, text: str, *, escape_text: bool = True) -> str:
-        """按固定前缀列格式化 transcript 消息，保证圆点与正文对齐。"""
-        body = escape(text) if escape_text else text
-        lines = body.splitlines() or [""]
-        first_prefix = f"{dot}  "
-        next_prefix = "   "
-        return "\n".join(
-            f"{first_prefix if index == 0 else next_prefix}{line}"
-            for index, line in enumerate(lines)
-        )
+    def _dot_column_block(self, dot_style: str, body: RenderableType) -> Table:
+        """圆点列 + 正文列的统一布局（assistant / 状态 / 工具共用）。"""
+        grid = Table.grid(expand=True, padding=(0, 1))
+        grid.add_column(width=1, no_wrap=True)
+        grid.add_column(ratio=1, overflow="fold")
+        grid.add_row(Text("●", style=dot_style), body)
+        return grid
 
-    def _assistant_block(self, text: str, *, complete: bool) -> object:
+    def _text_block_body(self, text: str, *, escape_text: bool) -> RenderableType:
+        lines = text.splitlines() or [""]
+        if escape_text:
+            lines = [escape(line) for line in lines]
+            if len(lines) == 1:
+                return Text(lines[0])
+            return Group(*[Text(line) for line in lines])
+        if len(lines) == 1:
+            return Text.from_markup(lines[0])
+        return Group(*[Text.from_markup(line) for line in lines])
+
+    def _message_block(self, dot_style: str, text: str, *, escape_text: bool = True) -> Table:
+        """按固定圆点列格式化 transcript 消息，保证与工具块横向对齐。"""
+        return self._dot_column_block(dot_style, self._text_block_body(text, escape_text=escape_text))
+
+    def _log_write_block(self, log: RichLog, content: str | RenderableType) -> None:
+        if isinstance(content, str):
+            log.write(content)
+        else:
+            log.write(content, expand=True)
+
+    def _assistant_block(self, text: str, *, complete: bool) -> RenderableType:
         """格式化 assistant 消息。
 
         流式中使用普通文本，完成后用 Markdown 渲染正文；左侧圆点单独占一列以保持对齐。
         完成态正文列使用 overflow=fold，避免 Rich Table 默认 ellipsis 截断长行。
         """
         if not complete:
-            return self._message_block("[yellow blink]●[/yellow blink]", text)
-        grid = Table.grid(expand=True, padding=(0, 1))
-        grid.add_column(width=1, no_wrap=True)
-        grid.add_column(ratio=1, overflow="fold")
-        grid.add_row(Text("●", style="green"), Markdown(text))
-        return grid
+            return self._message_block("yellow blink", text)
+        return self._dot_column_block("green", Markdown(text))
 
     def _write_assistant_block(self, log: RichLog, text: str, *, complete: bool) -> None:
         """写入 assistant 块；Renderables 需 expand 才能按 RichLog 宽度折行。"""
         log.write(self._assistant_block(text, complete=complete), expand=True)
 
-    def _event_block(self, text: str) -> str:
+    def _event_block(self, text: str) -> str | Table:
         """格式化非流式事件：工具消息使用圆点，普通系统行保持原样。"""
         if text.startswith("[reasoning]"):
-            return self._message_block("[yellow blink]●[/yellow blink]", text)
+            return self._message_block("yellow blink", text)
         return text
 
     def _append_message_gap(self) -> None:
@@ -858,7 +876,20 @@ class DAgentsTuiApp(App[None]):
         if log.lines:
             log.write("")
 
-    def _status_text(self, name: str, *, done: bool = False) -> str:
+    def _last_log_line_is_blank(self, log: RichLog) -> bool:
+        if not log.lines:
+            return True
+        text = "".join(str(segment) for segment in log.lines[-1])
+        return text.strip() == ""
+
+    def _append_message_gap_if_needed(self, log: RichLog | None = None) -> None:
+        """上一条非空行后插入空行，避免重复空行。"""
+        if log is None:
+            log = self._transcript_log()
+        if log.lines and not self._last_log_line_is_blank(log):
+            log.write("")
+
+    def _status_text(self, name: str, *, done: bool = False) -> Table:
         """生成 prefilling/thinking/compression_blocking 状态行文本。"""
         state = self._status_lines.get(name)
         started_at = float(state.get("started_at", time.monotonic())) if state else time.monotonic()
@@ -868,11 +899,11 @@ class DAgentsTuiApp(App[None]):
         if name == "compression_blocking":
             label = "compressing context (blocking)"
         if done:
-            return self._message_block("[green]●[/green]", f"{label}... {elapsed}s done")
+            return self._message_block("green", f"{label}... {elapsed}s done")
         frame = int(raw_elapsed * 2) % 3
         # 省略号槽位固定 3 个字符，避免动画刷新时秒数左右抖动。
         dots = ("." * (frame + 1)).ljust(3)
-        return self._message_block("[yellow blink]●[/yellow blink]", f"{label}{dots} {elapsed}s")
+        return self._message_block("yellow blink", f"{label}{dots} {elapsed}s")
 
     def _compression_detail_line(self, mode: str, status: str, count: Any) -> str:
         """压缩结束时的摘要行（blocking/silent 文案区分）。"""
@@ -916,7 +947,7 @@ class DAgentsTuiApp(App[None]):
             "started_at": started_at,
             "task": None,
         }
-        log.write(self._status_text(name))
+        self._log_write_block(log, self._status_text(name))
         self._status_lines[name]["end"] = len(log.lines)
         self._status_lines[name]["task"] = asyncio.create_task(self._animate_status_line(name))
 
@@ -938,9 +969,22 @@ class DAgentsTuiApp(App[None]):
 
         reasoning 到达时只结束 prefilling，并新建 thinking；普通内容到达时结束所有等待态。
         """
-        self._finish_status_line("prefilling")
+        self._finish_status_line("prefilling", add_gap=False)
         if not before_reasoning:
             self._finish_status_line("thinking")
+
+    def _mark_pending_segment_gap(self) -> None:
+        self._pending_segment_gap = True
+
+    def _flush_pending_segment_gap(self) -> None:
+        if self._pending_segment_gap:
+            self._append_message_gap()
+            self._pending_segment_gap = False
+
+    def _begin_turn_segment_after_tools(self) -> None:
+        if self._needs_gap_after_tools:
+            self._append_message_gap()
+            self._needs_gap_after_tools = False
 
     def _cancel_status_lines(self) -> None:
         """取消所有状态行动画任务，用于退出或清屏。"""
@@ -961,11 +1005,7 @@ class DAgentsTuiApp(App[None]):
 
     def _tool_dot_block(self, *, dot_style: str, body: RenderableType) -> Table:
         """圆点 + 正文（可为 Group / Panel 等 Rich 组件）的 transcript 行。"""
-        grid = Table.grid(expand=True, padding=(0, 1))
-        grid.add_column(width=1)
-        grid.add_column(ratio=1)
-        grid.add_row(Text("●", style=dot_style), body)
-        return grid
+        return self._dot_column_block(dot_style, body)
 
     def _bash_command_parts(self, command: str) -> tuple[str, str | None]:
         """生成 bash 工具标题行与可选的 command 代码框。
@@ -1156,13 +1196,14 @@ class DAgentsTuiApp(App[None]):
             summary, code_content, code_lexer = self._tool_call_parts_from_call(item)
             started_at = time.monotonic()
             start = len(log.lines)
-            log.write(
+            self._log_write_block(
+                log,
                 self._tool_pending_renderable(
                     summary,
                     code_content=code_content,
                     code_lexer=code_lexer,
                     elapsed_s=0.0,
-                )
+                ),
             )
             end = len(log.lines)
             if call_id:
@@ -1347,7 +1388,7 @@ class DAgentsTuiApp(App[None]):
         for index, line in enumerate(body_lines):
             suffix = toggle if index == 0 else ""
             lines.append(f"[dim]└─ {line}[/dim]{suffix}" if index == 0 else f"[dim]   {line}[/dim]")
-        return self._message_block("[green]●[/green]", "\n".join(lines), escape_text=False)
+        return self._message_block("green", "\n".join(lines), escape_text=False)
 
     def _replace_log_block(self, start: int, end: int, content: str | RenderableType) -> tuple[int, int]:
         """替换 RichLog 指定行范围，用于 tool_result 点击展开/收起。"""
@@ -1355,7 +1396,7 @@ class DAgentsTuiApp(App[None]):
         suffix = log.lines[end:]
         log.lines = log.lines[:start]
         log._line_cache.clear()
-        log.write(content)
+        self._log_write_block(log, content)
         new_end = len(log.lines)
         log.lines.extend(suffix)
         log._widest_line_width = max(
@@ -1560,11 +1601,10 @@ class DAgentsTuiApp(App[None]):
         else:
             log = self._transcript_log()
             start = len(log.lines)
-            log.write(block)
+            self._log_write_block(log, block)
             end = len(log.lines)
         self._tool_results[result_id]["start"] = start
         self._tool_results[result_id]["end"] = end
-        self._append_message_gap()
 
     async def action_toggle_tool_result(self, result_id: str) -> None:
         """点击工具结果摘要时展开/收起详情。"""
@@ -1581,15 +1621,18 @@ class DAgentsTuiApp(App[None]):
         result["end"] = end
 
     def _write_user_message(self, value: str) -> None:
-        """写入用户消息：用户与上一条消息之间留一行，使用蓝点标识。"""
+        """写入用户消息：与上方内容、下方 Agent 回复各留一行空行。"""
         log = self._transcript_log()
-        log.write(self._message_block("[blue]●[/blue]", value))
+        self._flush_pending_segment_gap()
+        self._append_message_gap_if_needed(log)
+        self._log_write_block(log, self._message_block("blue", value))
         self._append_message_gap()
 
     def _apply_transcript(self, update: TranscriptUpdate) -> None:
         log = self._transcript_log()
         if update.kind == TranscriptKind.ASSISTANT_DELTA:
             self._submit_content_seen = True
+            self._begin_turn_segment_after_tools()
             self._finish_waiting_statuses()
             if self._assistant_stream_start is None:
                 self._assistant_stream_start = max(len(log.lines), self._transcript_base_lines)
@@ -1598,13 +1641,16 @@ class DAgentsTuiApp(App[None]):
             if self._assistant_buffer:
                 self._write_assistant_block(log, self._assistant_buffer, complete=False)
         elif update.kind == TranscriptKind.ASSISTANT_END:
-            if self._assistant_buffer:
+            had_assistant = bool(self._assistant_buffer)
+            if had_assistant:
                 self._rewind_assistant_stream_lines(log)
                 self._write_assistant_block(log, self._assistant_buffer, complete=True)
-                self._append_message_gap()
             self._finish_assistant_stream(log)
+            if had_assistant:
+                self._mark_pending_segment_gap()
         elif update.kind == TranscriptKind.TOOL_CALL:
             self._submit_content_seen = True
+            self._flush_pending_segment_gap()
             self._finish_waiting_statuses()
             self._finish_assistant_stream(log)
             self._write_tool_call(update.data)
@@ -1613,6 +1659,7 @@ class DAgentsTuiApp(App[None]):
             self._finish_waiting_statuses()
             self._finish_assistant_stream(log)
             self._write_tool_result(update.data)
+            self._needs_gap_after_tools = True
         elif update.kind == TranscriptKind.ERROR:
             self._submit_content_seen = True
             self._finish_waiting_statuses()
@@ -1641,6 +1688,7 @@ class DAgentsTuiApp(App[None]):
                         self._append_message_gap()
         elif update.kind == TranscriptKind.LINE and update.text.startswith("[reasoning]"):
             self._submit_content_seen = True
+            self._begin_turn_segment_after_tools()
             self._finish_waiting_statuses(before_reasoning=True)
             self._finish_assistant_stream(log)
             if "thinking" not in self._status_lines:
@@ -1649,7 +1697,7 @@ class DAgentsTuiApp(App[None]):
             self._submit_content_seen = True
             self._finish_waiting_statuses()
             self._finish_assistant_stream(log)
-            log.write(self._event_block(update.text))
+            self._log_write_block(log, self._event_block(update.text))
             self._append_message_gap()
 
     def _apply_top_status(self, *, connected: bool | None = None) -> None:
@@ -1672,6 +1720,8 @@ class DAgentsTuiApp(App[None]):
         self._pending_tools.clear()
         self._cancel_status_lines()
         self._finish_assistant_stream(log)
+        self._pending_segment_gap = False
+        self._needs_gap_after_tools = False
         self._transcript_base_lines = 0
 
     def _prompt_area(self) -> PromptTextArea:

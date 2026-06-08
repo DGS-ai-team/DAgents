@@ -133,6 +133,10 @@ func (d *delayedEchoMock) CompleteText(ctx context.Context, req llm.CompleteRequ
 	return (&llm.MockClient{}).CompleteText(ctx, req)
 }
 
+func (d *delayedEchoMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return (&llm.MockClient{}).NormalizeAssistant(existing, msg)
+}
+
 // TestChildAgentCancelBeforeComplete 取消进行中的子 Agent。
 func TestChildAgentCancelBeforeComplete(t *testing.T) {
 	mock := &delayedEchoMock{delay: 2 * time.Second}

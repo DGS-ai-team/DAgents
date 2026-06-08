@@ -55,6 +55,10 @@ func (m *ChildAgentFlowMock) CompleteText(_ context.Context, _ CompleteRequest) 
 	return "mock compression summary", nil
 }
 
+func (m *ChildAgentFlowMock) NormalizeAssistant(existing []Message, msg Message) Message {
+	return (&MockClient{}).NormalizeAssistant(existing, msg)
+}
+
 func (m *ChildAgentFlowMock) isParentSession(tools []tools.ToolDef) bool {
 	for _, td := range tools {
 		if td.Function.Name == "create_temporary_agent" {

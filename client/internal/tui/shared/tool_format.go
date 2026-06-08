@@ -439,6 +439,10 @@ func formatArgsDetail(args map[string]any, rawJSON string) string {
 }
 
 func indentLines(prefix, block string) []string {
+	block = strings.TrimRight(block, "\n")
+	if block == "" {
+		return nil
+	}
 	lines := strings.Split(block, "\n")
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {

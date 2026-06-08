@@ -19,6 +19,42 @@ func TestTranscriptTail(t *testing.T) {
 	}
 }
 
+func TestTranscriptAddBlockGapIfNeeded(t *testing.T) {
+	tr := NewTranscript(10)
+	tr.AddBlockGapIfNeeded()
+	if tr.Len() != 0 {
+		t.Fatalf("empty transcript should stay empty, got %d", tr.Len())
+	}
+	tr.Add("assistant")
+	tr.AddBlockGapIfNeeded()
+	if tr.Len() != 2 || tr.Lines()[1] != "" {
+		t.Fatalf("lines = %v", tr.Lines())
+	}
+	tr.AddBlockGapIfNeeded()
+	if tr.Len() != 2 {
+		t.Fatalf("duplicate gap, lines = %v", tr.Lines())
+	}
+	tr.Add("[user] hi")
+	tr.AddBlockGapIfNeeded()
+	if tr.Len() != 4 || tr.Lines()[3] != "" {
+		t.Fatalf("lines = %v", tr.Lines())
+	}
+}
+
+func TestTranscriptFinishPartialSkipsEmpty(t *testing.T) {
+	tr := NewTranscript(10)
+	tr.AppendPartial("assistant", "")
+	tr.FinishPartial("assistant")
+	if tr.Len() != 0 {
+		t.Fatalf("expected no lines, got %d: %v", tr.Len(), tr.Lines())
+	}
+	tr.AppendPartial("assistant", "hello")
+	tr.FinishPartial("assistant")
+	if tr.Len() != 1 || tr.Lines()[0] != "[assistant] hello" {
+		t.Fatalf("lines = %v", tr.Lines())
+	}
+}
+
 func TestToolFoldFormatNestedToolCall(t *testing.T) {
 	f := &ToolFold{}
 	line := f.Format("tool_call", map[string]any{

@@ -1,10 +1,42 @@
 # A2A（Agent 间协作）与 Register Center
 
-本文说明本仓库中的 **Agent-to-Agent（A2A）** 能力：**主 Agent 通过工具调用发现其它 Agent、投递消息、拉取对端 SSE、处理对端工具审批**；以及 **`register_center/`** 提供的 **轻量目录服务**（`agent_id` → `base_url`、`discovery_group`）与 **广播 / 中继** HTTP 接口。实现入口：**`app/harness/tools/agent_peer.py`**、**`app/schemas/agent_peer.py`**、**`register_center/rc_app.py`**；主 Agent API 启动时可选 **自登记**（**`app/harness/api/app.py`**）。
+> **现网状态（v0.2.0+）**  
+> - **Register Center**（**`register_center/`**）仍为独立 Python 服务：登记、**`/v1/broadcast`**、**`/v1/relay`**、可选 JSON 持久化。  
+> - **Go Agent Node 不集成 RC**：不自登记、不注册 **`agent_peer`** 工具。  
+> - **Python FastAPI Agent API 已移除**；下文 §3–§6 描述的 **`agent_*` 工具与自登记** 为 **历史行为**，源码见 [archive/python-agent-runtime/](./archive/python-agent-runtime/)。  
+> - **端到端 A2A 闭环** 计划在 **Manage** 阶段恢复，见 [future/a2a-via-manage.md](./future/a2a-via-manage.md)。
+
+本文说明 **Register Center 控制面**（现行）与 **A2A 工具链**（已归档）的设计与 HTTP 契约。RC 实现入口：**`register_center/rc_app.py`**；历史 A2A 工具：**`app/harness/tools/agent_peer.py`**（归档）。
 
 ---
 
-## 1. 组件分工
+## 1. 组件分工（现行 vs 历史）
+
+### 1.1 现行（v0.2.x）
+
+```text
+┌─────────────────────┐     可选独立启动
+│  Register Center    │     python run_register_center.py
+│  /v1/agents         │
+│  /v1/broadcast      │
+│  /v1/relay          │
+└──────────┬──────────┘
+           │ HTTP（外部调用方或未来 Manage）
+           ▼
+    （无仓库内 Agent 自动登记端）
+
+┌─────────────────────┐
+│  Go Agent Node      │  本地 turn loop；临时子 Agent（同进程）
+│  + Client           │  非 A2A peer 工具
+└─────────────────────┘
+```
+
+| 组件 | 职责 |
+|------|------|
+| **Register Center** | 目录与中继 HTTP API；详见 §2 与本目录 **`register_center/README.md`**。 |
+| **Go Agent Node** | 本地助手运行时；**`create_temporary_agent`** 等为 **同进程子 Agent**，非跨实例 A2A。 |
+
+### 1.2 历史（0.1.x Python Agent API，已移除）
 
 ```text
                     ┌─────────────────────────┐
@@ -30,9 +62,9 @@
 
 | 组件 | 职责 |
 |------|------|
-| **Register Center** | 默认以内存表维护 **`agent_id` + `base_url` + `discovery_group`（可多组）**，可通过 **`REGISTER_CENTER_STORE_PATH`** 启用 JSON 文件持久化；**不提供**全量 Agent 列表（查询必须带 **`discovery_group`**）；提供 **`/v1/broadcast`**（按分组聚合目标并 **HTTP POST** 各 Agent 的 **`/v1/messages`**）、**`/v1/relay`**（按 **`target_agent_id`** 单跳转发到对端 **`/v1/messages`**，并校验 **`caller_groups`** 与目标分组是否有交集）。 |
+| **Register Center** | 默认以内存表维护 **`agent_id` + `base_url` + `discovery_group`（可多组）**，可通过 **`REGISTER_CENTER_STORE_PATH`** 启用 JSON 文件持久化；**不提供**全量 Agent 列表（查询必须带 **`discovery_group`**）；提供 **`/v1/broadcast`**、**`/v1/relay`**。 |
 | **主 Agent（调用方）** | 通过 **`agent_*`** 工具发 HTTP；点对点投递时把 **`AgentPeerEnvelope`** JSON 放进 **`POST /v1/messages` 的 `content`**；用 **`connection_id` + `session_id`** 连接对端 **`GET /v1/streams`** 汇总 SSE。 |
-| **对端 Agent** | 与普通会话相同：入队 **`message`** → 编排器解析 **`content`**（若为 A2A 信封则由业务/模型理解）；若触发工具审批，调用方可用 **`agent_peer_approve_tools`** 向对端 **`POST resume`**。 |
+| **对端 Agent** | 与普通会话相同：入队 **`message`** → 编排器解析 **`content`**；若触发工具审批，调用方可用 **`agent_peer_approve_tools`** 向对端 **`POST resume`**。 |
 
 ---
 
@@ -58,15 +90,15 @@
 
 **存储（MVP）**：默认登记表为 **进程内内存**；设置 **`REGISTER_CENTER_STORE_PATH`** 后启用单文件 JSON 持久化，写入、删除和 TTL 清理会原子写回文件。多实例 Register Center 仍 **不**共享状态；生产多副本需替换共享存储或前置负载策略。
 
-### 2.3 主 Agent API 自登记
+### 2.3 主 Agent API 自登记（历史，Python API 已移除）
 
-在 **`app/harness/api/app.py`** 的 lifespan 中：若配置了 **`REGISTRY_URL`**、**`AGENT_PUBLIC_BASE_URL`**、非空 **`DISCOVERY_GROUPS`**、非空 **`AGENT_ID`**，则启动时 **`POST {REGISTRY_URL}/v1/agents`**（带 **`ttl_seconds`**）；登记成功后按 TTL 的一半周期续租；关闭时 **`DELETE .../v1/agents/{AGENT_ID}`**（**404** 视为幂等成功）。任一缺失则 **跳过登记** 并写日志原因。
-
-**`AGENT_PUBLIC_BASE_URL`** 必须是对其它 Agent / Register Center **可路由** 的外网或内网地址（与浏览器访问 **`/v1/messages`** 同源基座一致），否则对端无法回连。
+在 **`app/harness/api/app.py`**（归档）的 lifespan 中：若配置了 **`REGISTRY_URL`**、**`AGENT_PUBLIC_BASE_URL`**、非空 **`DISCOVERY_GROUPS`**、非空 **`AGENT_ID`**，则启动时 **`POST {REGISTRY_URL}/v1/agents`**；关闭时注销。**Go Node 当前不自登记**；未来可由 Manage 或专用 sidecar 承担。
 
 ---
 
-## 3. A2A：配置项
+## 3. A2A：配置项（历史 Agent 侧）
+
+> 以下环境变量服务于 **已移除的 Python Agent API** 与 **`agent_peer`** 工具；Register Center 服务自身仍使用 **`REGISTER_CENTER_*`** 等（见 **`register_center/README.md`**）。
 
 | 环境变量 / 配置字段 | 含义 |
 |---------------------|------|
@@ -85,9 +117,9 @@
 
 ---
 
-## 4. A2A 工具一览
+## 4. A2A 工具一览（历史，已归档）
 
-所有工具均在 **`app/harness/tools/agent_peer.py`** 注册；返回值为 **JSON 字符串**（封装 **`AgentPeerEnvelope`** 或错误语义），便于模型解析。成功 payload 会包含排障字段（如 **`delivery_mode`**、**`http_read_retry_attempts`**、**`stream_replay_from_start`**）。
+> 源码：**`docs/archive/python-agent-runtime/`** 下对应 **`agent_peer.py`**。Go Node 无等价工具；同进程协作见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。
 
 | 工具名 | 作用 |
 |--------|------|
@@ -98,15 +130,15 @@
 
 ---
 
-## 5. 协议信封：`AgentPeerEnvelope`
+## 5. 协议信封：`AgentPeerEnvelope`（历史）
 
-定义见 **`app/schemas/agent_peer.py`**。点对点消息的 **`content`** 为该对象的 **`model_dump()` JSON 文本**，便于对端模型识别 **调用方 `agent_id` / `session_id` / `discovery_groups`**、**`trace_id`**、**`intent`** 与 **`payload`**（如纯文本 **`message`**）。
+定义见归档 **`app/schemas/agent_peer.py`**。点对点消息的 **`content`** 为该对象的 **`model_dump()` JSON 文本**，便于对端模型识别 **调用方 `agent_id` / `session_id` / `discovery_groups`**、**`trace_id`**、**`intent`** 与 **`payload`**（如纯文本 **`message`**）。
 
 **注意**：**`intent` 等字段当前主要服务协议一致性与排障**；对端是否解析信封取决于系统提示与实现，并非 Register Center 路由条件。API 入站识别到合法信封时会将正文规范为 `payload.content`，并把原始信封写入 SSE `meta.peer_envelope` 便于 trace。
 
 ---
 
-## 6. 典型流程（文字）
+## 6. 典型流程（文字，历史 Python A2A）
 
 ### 6.1 点对点（`agent_send_message`）
 
@@ -129,12 +161,15 @@
 
 | 文档 | 内容 |
 |------|------|
-| [architecture-and-flows.md](./architecture-and-flows.md) | 总体架构中 Register Center 与 A2A 的占位说明 |
-| [agent-input-output.md](./agent-input-output.md) | **`/v1/messages` / `/v1/streams`**、`connection_id`、SSE 事件 |
-| [agent-turn-loop.md](./agent-turn-loop.md) | 对端 Agent 内部 **`handle_message` → `run_turn`** 循环 |
-| [api-reference.md](./api-reference.md) | HTTP 契约细字段 |
+| [architecture/overview.md](./architecture/overview.md) | 现网选型：Go Node vs Register Center |
+| [architecture/child-agent-tools.md](./architecture/child-agent-tools.md) | 同进程临时子 Agent（非 A2A） |
+| [future/a2a-via-manage.md](./future/a2a-via-manage.md) | 远期经 Manage 的 A2A |
+| [archive/python-agent-runtime/](./archive/python-agent-runtime/) | Python Agent **`/v1/messages` / turn loop** |
+| [agent-input-output.md](./agent-input-output.md) | 跳转桩 → 归档 |
+| [agent-turn-loop.md](./agent-turn-loop.md) | 跳转桩 → 归档 |
+| [api-reference.md](./api-reference.md) | 跳转桩 → 归档 |
 | **`register_center/README.md`** | 中心侧接口速查 |
 
 ---
 
-**说明**：目录与 A2A 工具随版本迭代；以 **`CHANGELOG.md`**、**`app/config/settings.py`** 与 **`agent_peer.py`** 为准。
+**说明**：**Register Center HTTP 契约**以 **`register_center/`** 与 **`CHANGELOG.md`** 为准；**Agent 侧 A2A 工具**以归档 Python 运行时为准；现网 Agent 运行时以 **Go Node**（[agent-node-api.md](./architecture/agent-node-api.md)）为准。

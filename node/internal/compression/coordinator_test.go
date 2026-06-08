@@ -24,6 +24,10 @@ func (c *countingLLM) CompleteText(_ context.Context, _ llm.CompleteRequest) (st
 	return "任务目标：t\n重要结论：c\n修改过的文件和资源：无\n下一步动作：n", nil
 }
 
+func (c *countingLLM) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 func longUserMessage() string {
 	return strings.Repeat("word ", 120)
 }

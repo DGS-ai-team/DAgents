@@ -178,11 +178,12 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 }
 
 func (r *streamRunner) printAssistant(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
 	r.printMu.Lock()
 	defer r.printMu.Unlock()
-	if text != "" {
-		r.assistantLineOpen = true
-	}
+	r.assistantLineOpen = true
 	fmt.Print(text)
 	r.transcript.AppendPartial("assistant", text)
 }

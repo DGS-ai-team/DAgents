@@ -361,6 +361,10 @@ func (m *dualReadFileMock) CompleteText(context.Context, llm.CompleteRequest) (s
 	return "", nil
 }
 
+func (m *dualReadFileMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 func TestBuildUserInformationPayload(t *testing.T) {
 	tc := llm.ToolCall{
 		ID:   "call-1",
@@ -403,6 +407,10 @@ func (m *userInfoMock) CompleteText(context.Context, llm.CompleteRequest) (strin
 	return "", nil
 }
 
+func (m *userInfoMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 type bashApprovalMock struct{ calls int }
 
 func (m *bashApprovalMock) StreamChat(ctx context.Context, req llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
@@ -426,6 +434,10 @@ func (m *bashApprovalMock) CompleteText(context.Context, llm.CompleteRequest) (s
 	return "", nil
 }
 
+func (m *bashApprovalMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 type alwaysToolMock struct{}
 
 func (alwaysToolMock) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler) (llm.ChatResult, error) {
@@ -446,6 +458,10 @@ func (alwaysToolMock) CompleteText(context.Context, llm.CompleteRequest) (string
 	return "", nil
 }
 
+func (alwaysToolMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 type blockingMock struct{}
 
 func (b *blockingMock) StreamChat(ctx context.Context, _ llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
@@ -457,6 +473,10 @@ func (b *blockingMock) CompleteText(context.Context, llm.CompleteRequest) (strin
 	return "", nil
 }
 
+func (b *blockingMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 type errMock struct{ msg string }
 
 func (e *errMock) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler) (llm.ChatResult, error) {
@@ -465,6 +485,10 @@ func (e *errMock) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler
 
 func (e *errMock) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
 	return "", fmt.Errorf("%s", e.msg)
+}
+
+func (e *errMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
 }
 
 func TestRunMessageTurnCancelled(t *testing.T) {

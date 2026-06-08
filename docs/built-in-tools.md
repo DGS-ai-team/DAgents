@@ -1,6 +1,38 @@
 # 内置工具一览
 
-本文说明 **当前注册进 OpenAI 运行时** 的内置工具：来源为 **`app/harness/tools/tool.py`** 中的 **`get_tools()`**，经 **`build_openai_toolkit()`** 生成 **tools JSON** 与 **`tool_map`**（**`app/core/main_agent/runtime_openai.py`** 请求模型时使用）。**`function.description`** 取自工具函数的 **docstring**；**`function.parameters`** 优先来自 **`args_schema.model_json_schema()`**，否则由 **`_signature_to_json_schema`** 从签名推导（见下文 **「附」**）。执行时由编排层 **`_invoke_tool`** 调用 **`OpenAIToolSpec.invoke`**。
+> **现网（v0.2.0+）**：Agent 运行时工具由 **Go Agent Node** 注册（**`node/internal/tools/registry.go`**）。配置见 **`packaging/agent-client/config.yaml`**（如 **`tools.bash_output_encoding`**）。包内说明：**`node/internal/tools/README.md`**、**`node/internal/tools/REFERENCE.md`**；子 Agent 见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。  
+> 下文 **「附」与 §1–§4** 描述 **已移除的 Python FastAPI Agent API**（**`app/harness/tools/tool.py` → `get_tools()`**），保留作行为对照与归档索引；正文在 [archive/python-agent-runtime/](./archive/python-agent-runtime/)。
+
+---
+
+## 0. Go Agent Node 已注册工具（现行）
+
+下列与 **`Registry.registerBuiltins()`** 及 **`childAgentToolDefs()`** 一致（审批由 **`node/internal/policy/`** 决定）。
+
+| 工具名 | 定义位置 | 作用概要 |
+|--------|----------|----------|
+| **`read_file`** | **`fs.go`** | 分页读文件（`FS_ROOT` 沙箱） |
+| **`write_file`** | **`fs.go`** | 写入整文件 |
+| **`search_file`** | **`fs.go`** | 流式检索 |
+| **`search_replace`** | **`fs.go`** | 子串替换 + diff |
+| **`bash_run`** | **`bash*.go`** | bash / cmd / powershell；输出按 **`tools.bash_output_encoding`** 或平台默认解码 |
+| **`background_job_status`** | **`background_job_tools.go`** | 查询后台 job |
+| **`background_job_cancel`** | **`background_job_tools.go`** | 取消后台 job |
+| **`ask_user_information`** | **`registry.go`** | HITL 用户追问 |
+| **`load_skills` / `unload_skills` / `clear_skills`** | **`skills.go`** | 会话 skill 加载 |
+| **`trigger_list` … `trigger_fire`** | **`triggers.go`** | 触发器 CRUD 与手动 fire |
+| **`create_temporary_agent`** | **`child_agent_tools.go`** | 同进程临时子 Agent |
+| **`wait_temporary_agents`** | **`child_agent_tools.go`** | 等待子 Agent 终态 |
+| **`temporary_agent_status`** | **`child_agent_tools.go`** | 非阻塞查询子 Agent |
+| **`cancel_temporary_agent`** | **`child_agent_tools.go`** | 取消子 Agent |
+
+**执行模式**：通用参数 **`run_in_background`**；**`bash_run`** 超时可降级为后台 job。详见 **`node/internal/tools/README.md`**。
+
+---
+
+## Python Agent API（归档）— 附与工具表
+
+以下说明 **历史 Python 栈** 的 **`get_tools()`** 管道。
 
 **审批**：是否进入 **`approval_required`** 由 **`decide_tool_approval`**（**`tool.py`**）结合 **`AGENT_TOOL_APPROVAL_MODE`**（**`always` / `never` / `rule`**）及 **`.runtime/policy/`** 下策略文件决定；返回值包含 **是否审批、原因、风险等级、策略来源**，并由审批卡片透出；兼容布尔入口 **`should_require_tool_approval`**。
 
@@ -159,4 +191,4 @@
 
 ---
 
-**说明**：工具集合以 **`tool.py` → `get_tools()`** 为准；**docstring / Schema / 参数管道** 见上文 **「附」**；若与 OpenAPI/前端展示不一致，以运行时代码为准。
+**说明**：**Go Node 工具**以 **`node/internal/tools/registry.go`** 为准；**Python 工具表**以归档 **`get_tools()`** 为准。

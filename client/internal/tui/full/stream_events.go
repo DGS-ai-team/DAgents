@@ -31,7 +31,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			return
 		}
 		m.turn.MarkTurnContent()
-		if text, ok := ev.Data["content"].(string); ok {
+		if text, ok := ev.Data["content"].(string); ok && text != "" {
 			m.transcript.AppendPartial("assistant", text)
 			m.notifyViewportRefresh()
 		}

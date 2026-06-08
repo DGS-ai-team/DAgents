@@ -130,6 +130,10 @@ func (s *slowMockLLM) CompleteText(_ context.Context, _ llm.CompleteRequest) (st
 	return "mock summary", nil
 }
 
+func (s *slowMockLLM) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 func TestPersistAfterTurn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.db")
 	st, err := store.Open(path)

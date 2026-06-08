@@ -254,6 +254,10 @@ func (d *sessionDelayedEchoMock) CompleteText(context.Context, llm.CompleteReque
 	return "mock", nil
 }
 
+func (d *sessionDelayedEchoMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return (&llm.MockClient{}).NormalizeAssistant(existing, msg)
+}
+
 func (d *sessionDelayedEchoMock) isParent(toolDefs []tools.ToolDef) bool {
 	for _, td := range toolDefs {
 		if td.Function.Name == "create_temporary_agent" {

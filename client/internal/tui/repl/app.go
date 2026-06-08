@@ -91,6 +91,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 			continue
 		}
 
+		app.transcript.AddBlockGapIfNeeded()
 		app.transcript.Add("[user] " + line)
 		app.turn.BeginSubmit()
 		if err := app.client.SubmitMessage(ctx, app.currentSession(), line); err != nil {

@@ -47,6 +47,18 @@ func TestFormatToolResultBashFriendly(t *testing.T) {
 	}
 }
 
+func TestFormatToolResultVerboseNoTrailingBlankLine(t *testing.T) {
+	lines := FormatToolEvent("tool_result", map[string]any{
+		"tool_name": "read_file",
+		"content":   "line1\nline2\n",
+	}, true)
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			t.Fatalf("blank line in output: %v", lines)
+		}
+	}
+}
+
 func TestToolDisplayNameTrigger(t *testing.T) {
 	got := ToolDisplayName("trigger_create", map[string]any{"name": "喝水提醒"})
 	if got != "trigger_create(喝水提醒)" {

@@ -35,8 +35,8 @@
 | 文件 | 适用栈 | 说明 |
 |------|--------|------|
 | [context-compression-and-state.md](./context-compression-and-state.md) | Go Node | 压缩与 prompt 侧车 |
-| [a2a-and-register-center.md](./a2a-and-register-center.md) | Register Center | `agent_peer`、登记与中继 |
-| [built-in-tools.md](./built-in-tools.md) | 双栈概念 | 工具清单；Go 实现见 `node/internal/tools/README.md` |
+| [a2a-and-register-center.md](./a2a-and-register-center.md) | Register Center | RC HTTP；历史 **`agent_peer`** 见文档内「历史」节 |
+| [built-in-tools.md](./built-in-tools.md) | Go Node + 归档 | §0 现行工具表；Python 见归档 |
 | [triggers-design.md](./triggers-design.md) | Go Node | 长期设计；落地见 `node/internal/triggers/README.md` |
 | [prometheus-metrics.md](./prometheus-metrics.md) | 历史 + RC | Python Agent `/metrics` 已移除；Register Center 指标仍适用 |
 | [security-rollout.md](./security-rollout.md) | 通用 | 分阶段安全验收 |

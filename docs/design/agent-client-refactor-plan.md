@@ -3,7 +3,7 @@
 本文是 **implementation 主计划**：在 **Manage 之前** 完成 **Agent Node（Go）+ Client（Go TUI）** 闭环。  
 背景与三组件边界见 [background-and-motivation.md](./background-and-motivation.md)、[three-component-model.md](./three-component-model.md)。
 
-**状态（2026-05）**：`node/`、`client/`、`shared/config/` 已落地；**N0–N6 完成**；**N7 进行中**（兼容文档、静态构建脚本、SysV init 已加；Release CI 与 RHEL6 真机验收待完成）。Python Textual 与 Go Client（**full 默认 + repl 兜底**）并存，均连 Go Node。
+**状态（2026-06）**：`node/`、`client/`、`shared/config/` 已落地；**N0–N6 完成**；**N7 基本完成**（Release CI、Windows 安装包 **v0.2.3**、Linux **`install.sh`**、静态构建与 SysV init 已就绪；**RHEL6 真机验收**仍 open）。Python Textual 与 Go Client（**full 默认 + repl 兜底**）并存，均连 Go Node。
 
 ---
 
@@ -170,7 +170,8 @@ packaging/
 - [x] 编写 [go-node-compatibility.md](../architecture/go-node-compatibility.md)（glibc / Win2012 构建矩阵）
 - [x] 静态链接构建脚本（`scripts/ci/build_go_linux_static.sh`、`scripts/package_go_agent_client.sh`）
 - [x] RHEL 6 SysV init（`scripts/linux/install_node_service_sysv.sh`）
-- [x] Windows **交叉编译** smoke（`go-ac.yml`）；发布 tarball/zip 接入 GitHub Releases / CI（linux + **windows-amd64**）
+- [x] Windows **交叉编译** smoke（`go-ac.yml`）；发布 tarball/zip 接入 GitHub Releases（linux + **windows-amd64**）
+- [x] Windows **Inno Setup 安装包**（`v0.2.3`）；Linux **`dagents` + `install.sh`**
 - [ ] RHEL 6.9 / Win2012 **真机验收**记录（见 [rhel6-acceptance-checklist.md](../architecture/rhel6-acceptance-checklist.md)）
 - [x] 单测 + 集成测试（`go test ./node/...`）
 

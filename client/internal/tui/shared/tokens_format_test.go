@@ -1,6 +1,9 @@
 package shared
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFormatInputStripTokens(t *testing.T) {
 	tests := []struct {
@@ -33,7 +36,24 @@ func TestParseUsageStrip(t *testing.T) {
 		t.Fatalf("snapshot = %+v", s)
 	}
 	got := FormatInputStripUsage(s)
-	if got != "↑100 ↓20 · hit 80" {
+	if got != "↑100 ↓20 · hit 80 (80%)" {
+		t.Fatalf("format = %q", got)
+	}
+}
+
+func TestParseUsageStripReasoningFromDetails(t *testing.T) {
+	s := ParseUsageStrip(map[string]any{
+		"prompt_tokens":     float64(10),
+		"completion_tokens": float64(5),
+		"completion_tokens_details": map[string]any{
+			"reasoning_tokens": float64(42),
+		},
+	})
+	if s.ReasoningTokens != 42 {
+		t.Fatalf("reasoning = %d", s.ReasoningTokens)
+	}
+	got := FormatInputStripUsage(s)
+	if !strings.Contains(got, "think 42") {
 		t.Fatalf("format = %q", got)
 	}
 }

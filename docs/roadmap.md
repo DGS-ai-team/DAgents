@@ -27,6 +27,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
+| **0.2.3** | **已发布** | Windows 安装包、Linux `install.sh`；`tools.bash_output_encoding`（GBK 解码）；子 Agent prompt 与双 TUI 展示（见 **CHANGELOG**）。 |
 | **0.2.2** | **已发布** | HITL 工具审批修复；临时 Agent 协议整理；文档归档与 go-node-internals（见 **CHANGELOG**）。 |
 | **0.2.0** | **已发布** | Go Agent Node + Client 本地助手主线；Python Agent 运行时移除；触发器日历调度（见 **CHANGELOG**）。 |
 | **0.1.0** | **已发布** | 首个对外标记版本：Python 核心 API、SQLite、SSE、Register Center、文档与单测基线。 |
@@ -37,38 +38,39 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 ## 3. 已实现能力（概要）
 
-以下按子域归纳，**不**替代各 **`docs/*.md`** 与 **`app/**/README.md`** 的字段级说明。
+以下按子域归纳现行 **Go 本地助手栈**；字段级契约见 [architecture/overview.md](./architecture/overview.md)、[architecture/agent-node-api.md](./architecture/agent-node-api.md) 与各包 **`README.md`**。已移除的 **Python FastAPI Agent API** 行为见 [archive/python-agent-runtime/](./archive/python-agent-runtime/)。
 
-### 3.1 Agent 服务与 HTTP
+### 3.1 Agent Node 与 HTTP/SSE
 
-- **FastAPI**：会话创建/释放、消息提交（含 **`resume`**）、**SSE** 流、取消当前 turn、健康检查等（**`app/harness/api/`**）。
-- **进程内编排**：按 **`session_id`** 的 **`MessageQueue`** 串行消费、**`AgentService`** 与 **`MainAgentTurnOrchestrator`**（见 [agent-turn-loop.md](./agent-turn-loop.md)、[agent-input-output.md](./agent-input-output.md)）。
-- **可选自登记**：启动/关闭生命周期内向 **Register Center** 登记或注销（配置齐全时，**`app/harness/api/app.py`**）。
+- **Go Agent Node**（**`node/`**）：**`GET /health`**、**`GET /v1/agent/info`**、会话创建/释放、消息提交（含 **`resume`**）、**SSE** 流、取消当前 turn、context/skills/child-agents 等（[agent-node-api.md](./architecture/agent-node-api.md)）。
+- **进程内编排**：按 **`session_id`** 的 **`MessageQueue`** 串行消费、**`Orchestrator`** turn loop（[go-node-internals.md](./architecture/go-node-internals.md)）。
+- **Client**：Go bubbletea TUI（**`dagents tui`**）+ REPL 兜底（**`--plain`**）；Python Textual（**`dagents chat`**）；均连本地 Node（[local-assistant.md](./architecture/local-assistant.md)）。
+- **同包配置**：**`packaging/agent-client/config.yaml`**（**`agent_id` / `listen` / `llm` / `data_dir` / `tools.*`**）；Node 与双 Client 共用（[client-packaging.md](./architecture/client-packaging.md)）。
 
 ### 3.2 模型运行时与工具
 
-- **OpenAI 兼容 Chat Completions**：流式、`tools`、**`AsyncOpenAI`**（**`app/core/main_agent/model.py`**）；支持 **`LLM_API_BASE`** 指向兼容网关。
-- **隐式 ReAct 单轮运行时**：**`OpenAIImplicitReActRuntime.run_turn`**，工具执行与审批在编排层（见 [agent-turn-loop.md](./agent-turn-loop.md)）。
-- **工具集**：**`bash_run`**、受限 **FS** 四件套、**`load_skills`**、**`agent_peer`**、异步工具托管等（**`app/harness/tools/`**）；**当前模型可见工具名与顺序**见 [built-in-tools.md](./built-in-tools.md)。
-- **审批**：工具级策略 + **`resume_value`** 与 **`approval_required`** SSE。
-- **异步工具**：后台协程 + 结果回灌 **`async_tool_result`**；**`connection_id`** 与 **`sse_connection_id`** 对齐（见 **CHANGELOG [Unreleased]**）。
+- **OpenAI 兼容 Chat Completions**：流式、`tools`（**`node/internal/llm/`**）；**`llm.api_base`** 指向兼容网关。
+- **Turn loop**：工具调用 → 本地 **`Execute`** → **`tool_result`** → 继续 loop；工具级审批与 **`ask_user_information`**（[go-node-internals.md](./architecture/go-node-internals.md)）。
+- **工具集**（**`node/internal/tools/`**）：**`bash_run`**（bash/cmd/powershell、GBK/UTF-8 输出解码）、受限 **FS** 四件套、**`load_skills` / `unload_skills` / `clear_skills`**、**trigger_*** 系列、**临时子 Agent**（**`create_temporary_agent`** 等，非 A2A）；**`run_in_background`** 与后台 job 工具。清单见 [built-in-tools.md](./built-in-tools.md) 与 **`node/internal/tools/README.md`**。
+- **审批（HITL）**：**`.runtime/policy/`** + **`approval_required`** SSE + Client **`resume`**（0.2.2 起修复父子 Agent 并发审批队列）。
 
 ### 3.3 上下文、压缩与提示词
 
-- **双层上下文模型**与 **summary 压缩**（静默 / 阻塞阈值、**`ctx.messages`** 区间替换）（[context-compression-and-state.md](./context-compression-and-state.md)）。
-- **可选 SQLite 会话持久化**（**`AGENT_SESSION_STORE_ENABLED`**；路径固定 **`.runtime/memory/session.sqlite3`**）。
-- **系统提示词**：静态段 + **`.runtime/prompt_context/`** 侧车（**`soul.md` / `user.md` / `custom.md`**）+ skills + 主机快照 + **JSONL 历史说明**等（**CHANGELOG [Unreleased]**、**`prompt.py`**）。
+- **Summary 压缩**：静默 / 阻塞阈值、SSE 压缩事件（[context-compression-and-state.md](./context-compression-and-state.md)）。
+- **SQLite 会话持久化**：**`data_dir/sessions.db`**；原始消息 **JSONL** 审计（**`node/internal/store/`**、**`node/internal/history/`**）。
+- **系统提示词**：静态段 + **`.runtime/prompt_context/`** 侧车 + skills 正文 + 主机快照；子 Agent 独立 **`BuildChildSystemPrompt`**。
 
-### 3.4 可观测与分发侧车
+### 3.4 触发器、子 Agent 与 Register Center
 
-- **Prometheus**：可选 **`/metrics`**（**`app/observability/`**）；已覆盖 LLM/session/queue/tool/summary 与 A2A/Register Center 操作指标。
-- **Register Center（MVP）**：默认内存登记表，可选 **`REGISTER_CENTER_STORE_PATH`** 单文件 JSON 持久化；按 **`discovery_group`** 查询、**`/v1/broadcast`**、**`/v1/relay`**（**`register_center/`**）。
-- **A2A**：**`agent_discover` / `agent_send_message` / `agent_broadcast` / `agent_peer_approve_tools`**，**`direct` / `relay`** 投递模式（[a2a-and-register-center.md](./a2a-and-register-center.md)）。
+- **触发器（Go Node）**：**`interval` / `fire_at` / 日历 `schedule`**（含 **`cmd` 门控**）；**`trigger_*`** 工具 + 调度器（**`node/internal/triggers/`**；设计见 [triggers-design.md](./triggers-design.md)）。
+- **临时子 Agent**：同进程 **`create_temporary_agent` → `wait_temporary_agents`**；非跨进程 A2A（[child-agent-tools.md](./architecture/child-agent-tools.md)）。
+- **Register Center（独立 Python 服务）**：登记、**`/v1/broadcast`**、**`/v1/relay`**、可选 JSON 持久化（**`register_center/`**）。**Go Node 不直连 RC、不自登记**；Agent 侧 **`agent_peer`** 工具已随 Python API 移除，端到端 A2A 待 **Manage** 阶段（[future/a2a-via-manage.md](./future/a2a-via-manage.md)）。
 
-### 3.5 工程与文档
+### 3.5 打包、工程与文档
 
-- **CI**：单测、PyInstaller 相关 workflow（见 **`.github/workflows/`**）。
-- **技术文档**：架构、入出站、上下文、编排循环、A2A、API、指标等（**`docs/`**）。
+- **分发**：GitHub Releases **`dagents-local-assistant-*`**（linux tarball / windows zip）；**v0.2.3** 起 **Windows Inno 安装包**、**Linux `install.sh`**（[client-packaging.md](./architecture/client-packaging.md)）。
+- **CI**：**`go-ac.yml`**（Go 单测与交叉编译）、**`manual-package`**（Release 组装）；Register Center / Python CLI 单测保留。
+- **技术文档**：架构总览、Node 内部、AC 计划、归档 Python 运行时等（**`docs/`**）。
 - **落地案例目录**：**`docs/cases/`**（索引见 **`docs/cases/README.md`**）。
 
 ---
@@ -81,11 +83,13 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 目标：企业用户能在 10 分钟内于内网机器完成一次闭环：
 
-> 启动 DAgents → 发现 Agent → 提交运维问题 → 请求工具审批 → 执行诊断脚本 → 查看结果 → 查看审计记录。
+> 启动 DAgents（Node + Client）→ 提交运维问题 → 请求工具审批 → 执行诊断脚本 → 查看结果 → 查看 JSONL 审计。
+
+**跨 Agent 发现/协作**（Register Center 目录、A2A 投递）在 **Manage 阶段**与 Agent Directory UI 一并交付；Phase 0 以 **单 Node 本地助手 + 可选 RC 独立启动** 为主。
 
 优先交付：
 
-- **一键本地启动**：后端、Register Center、UI、示例 Agent、示例 skill/script、示例审批流一起启动。
+- **一键本地启动**：Node、Client、示例 skill/script、示例审批流；Register Center 作为可选侧车（**`dagents register-center`** / 安装包入口）。
 - **Docker Compose / 本地启动脚本**：默认 SQLite，可选 PostgreSQL；支持 OpenAI-compatible provider 与本地模型网关。
 - **安装与 CLI 入口**：继续保留 Windows / Linux 安装包方向，安装后通过命令启动；CLI 作为本地调试、运维和审批入口。
 - **首次启动诊断**：检查端口占用、模型配置、Register Center 可达性、UI API base、policy 文件与 runtime 目录。
@@ -180,21 +184,22 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 ## 5. 待实现 / 演进中 / 已知限制
 
-### 5.1 代码中已标 TODO 或占位
+### 5.1 代码与验收缺口
 
 | 项 | 说明 | 参考 |
 |----|------|------|
-| **阻塞压缩失败的用户可见反馈** | 编排层在阻塞压缩失败时，**TODO**：返回更明确的错误语义（当前策略以代码为准）。 | **`app/core/main_agent/agent.py`** |
-| **外部记忆文件接入** | **`read_memory_file_cached`** 现为占位实现（恒返回空串），尚未拼入 **`get_system_prompt`**；与 **「Agent 内置记忆书」** 可合并演进。 | **`app/core/main_agent/prompt.py`** |
+| **RHEL 6 / Win2012 真机验收** | 静态构建与 SysV init 脚本已就绪；**真机 E2E 记录**仍 open（N7）。 | [rhel6-acceptance-checklist.md](./architecture/rhel6-acceptance-checklist.md)、[agent-client-refactor-plan.md](./design/agent-client-refactor-plan.md) |
+| **长期记忆文件** | **`.runtime/memory/long_term.md`** 在 prompt 中有说明位，产品化读写与治理待 Phase 2+。 | **`node/internal/turn/prompt.go`** |
+| **Manage / A2A 控制面** | Node 侧 **`manage.enabled: false`**；无 **`agent_peer`** 工具；RC relay/broadcast 需 Manage 或新 Agent 登记端才能形成闭环。 | [future/a2a-via-manage.md](./future/a2a-via-manage.md) |
 
 ### 5.2 架构级缺口（非小修）
 
 | 项 | 说明 |
 |----|------|
 | **Register Center 高可用与共享存储** | 已有默认内存表 + 可选单文件 JSON 持久化，能覆盖单实例重启恢复；多副本仍无共享状态。后续应在 Agent Directory 阶段合并设计数据库/一致性存储、鉴权、健康剔除。 |
-| **HTTP API 单测覆盖** | **0.x 已知限制**：Python API 与 Go Node 均未全路由自动化覆盖；后续应优先覆盖治理、审计、触发器与 Agent Directory。 |
-| **多运行时抽象** | 主路径深度绑定 **OpenAI SDK 形态**；短期不作为主线，除非企业私有模型接入需要统一抽象。 |
-| **触发器控制面尚未落地** | 目前仍以显式消息提交为主，尚无统一的触发器资源模型、调度器、幂等去抖、死信、触发审计和 UI。 |
+| **HTTP API 单测覆盖** | **0.x 已知限制**：Go Node 与 Register Center 均未全路由自动化覆盖；后续应优先覆盖治理、审计、触发器与 Agent Directory。 |
+| **多运行时抽象** | 主路径深度绑定 **OpenAI 兼容形态**；短期不作为主线，除非企业私有模型接入需要统一抽象。 |
+| **触发器企业控制面** | Go Node 已具备 **trigger 资源模型 + 调度器 + 工具**；尚缺 Webhook/指标阈值等类型、幂等去抖、死信、触发审计 UI 与跨租户治理。 |
 | **Skill 生命周期尚未产品化** | 当前 skills 更接近工具/提示词扩展，尚未形成可审批、可版本化、可回滚、可统计的企业 Skill Library。 |
 
 ### 5.3 文档与生态
@@ -229,4 +234,4 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 ---
 
-**最后更新**：路线图已调整为 **企业本地 Agent 控制台 + 可治理 Skill Library** 主线，并将 **触发器 / 自主行动控制面** 提升为 P0/P1 核心组件。若与代码冲突，以 **Git / CHANGELOG** 为准。
+**最后更新**：2026-06-08 — 对齐 **v0.2.3**（Go Node 本地助手、Windows/Linux 安装包、RC 独立服务）；**Agent 侧 A2A 工具已移除**，跨 Agent 协作列入 **Manage** 远期。若与代码冲突，以 **Git / CHANGELOG** 为准。

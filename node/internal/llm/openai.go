@@ -15,9 +15,10 @@ import (
 
 // OpenAIConfig 为 OpenAI 兼容客户端配置。
 type OpenAIConfig struct {
-	BaseURL string
-	Model   string
-	APIKey  string
+	BaseURL      string
+	Model        string
+	APIKey       string
+	RequestExtra map[string]any // 合并进 POST /chat/completions JSON（如 DeepSeek thinking）
 }
 
 // OpenAIClient 通过 HTTP 调用 Chat Completions（stream=true）。
@@ -33,7 +34,12 @@ func NewOpenAIClient(cfg OpenAIConfig) *OpenAIClient {
 		base = "https://api.openai.com/v1"
 	}
 	return &OpenAIClient{
-		cfg: OpenAIConfig{BaseURL: base, Model: cfg.Model, APIKey: cfg.APIKey},
+		cfg: OpenAIConfig{
+			BaseURL:      base,
+			Model:        cfg.Model,
+			APIKey:       cfg.APIKey,
+			RequestExtra: cfg.RequestExtra,
+		},
 		client: &http.Client{
 			Timeout: 0,
 		},
@@ -83,13 +89,13 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		return ChatResult{}, fmt.Errorf("llm api key is not configured")
 	}
 
-	body, err := json.Marshal(chatRequest{
+	body, err := marshalChatRequest(chatRequest{
 		Model:         c.cfg.Model,
 		Messages:      MessagesWithSystem(req.SystemPrompt, req.Messages),
 		Stream:        true,
 		Tools:         req.Tools,
 		StreamOptions: &streamOptions{IncludeUsage: true},
-	})
+	}, c.cfg.RequestExtra)
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -206,7 +212,7 @@ func (c *OpenAIClient) CompleteText(ctx context.Context, req CompleteRequest) (s
 		return "", fmt.Errorf("llm api key is not configured")
 	}
 	msgs := MessagesWithSystem(req.SystemPrompt, []Message{{Role: "user", Content: req.UserPrompt}})
-	body, err := json.Marshal(completeRequestBody{Model: c.cfg.Model, Messages: msgs})
+	body, err := marshalChatRequest(completeRequestBody{Model: c.cfg.Model, Messages: msgs}, c.cfg.RequestExtra)
 	if err != nil {
 		return "", err
 	}
@@ -278,7 +284,25 @@ func (a *toolCallAccumulator) finalize() []ToolCall {
 	return out
 }
 
-// EnvOpenAIClient 从环境变量读取 API Key 的 OpenAI 客户端包装。
+func marshalChatRequest(body any, extra map[string]any) ([]byte, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	if len(extra) == 0 {
+		return raw, nil
+	}
+	var merged map[string]any
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		return nil, err
+	}
+	for k, v := range extra {
+		merged[k] = v
+	}
+	return json.Marshal(merged)
+}
+
+// EnvOpenAIClient 从环境变量读取 API Key 的 OpenAI 客户端包装（无 provider 适配，测试/遗留用）。
 type EnvOpenAIClient struct {
 	inner  *OpenAIClient
 	keyEnv string

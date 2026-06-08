@@ -2,6 +2,29 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.4] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.3** 基础上增加 **LLM 厂商适配层**、**usage / reasoning token 统计**，并统一 **双 TUI transcript 排版**。
+
+### 新增
+
+- **LLM Provider 适配**（`node/internal/llm/`）：`llm.provider` 选择 `MessageAdapter`（`openai` / `deepseek`）；DeepSeek 自动注入 `thinking.enabled` 与 `reasoning_content` 出站校验；`RequestExtra` 合并进 Chat Completions 请求体。
+- **Usage 归一化**：`usage.go` 兼容 OpenAI `cached_tokens` 与 DeepSeek `prompt_cache_hit_tokens`；解析 `completion_tokens_details.reasoning_tokens`、顶层 `reasoning_tokens` 及 `completion_token_details` 别名；SSE `usage` 含 `prompt_cache_hit_rate` 与 `reasoning_tokens`。
+- **Turn 内 usage 累加**：工具循环多轮 LLM 调用在单条 user turn 内累加 token 统计后再发布 SSE。
+
+### 变更
+
+- **`reasoning_content` 收敛至 LLM 层**：history 不再做 assistant 规范化；由 provider adapter 在存储与出站前处理。
+- **双 TUI transcript**：圆点列统一为 Rich `Table.grid` 布局；prefilling/thinking、assistant↔tool、tool 批次↔下一段、human message 与上下文的空行规则一致化。
+- **配置示例**：`packaging/agent-client/config.example.yaml` 补充 `llm.provider` 说明。
+
+### 修复
+
+- **Go / Textual Client**：input strip 展示 cache hit 与 `· think N`（`reasoning_tokens`）；`completion_tokens_details` 嵌套字段兜底解析。
+- **Transcript 空白行**：流式 assistant 空 partial 不落行；`tool_result` 后不再重复插入空行；Go REPL/full 跳过空 assistant delta。
+
+（Git **tag**：`v0.2.4`。）
+
 ## [0.2.3] - 2026-06-08
 
 **0.x 预览**：在 **v0.2.2** 基础上增加 **Windows 安装包**、**Linux 安装脚本**，并修复 **Windows GBK 环境下 shell 工具输出乱码**；强化子 Agent 提示词与双 TUI 展示。

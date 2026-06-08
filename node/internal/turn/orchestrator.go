@@ -60,6 +60,9 @@ type Orchestrator struct {
 	childMgr       *childagent.Manager
 	isChildSession bool
 
+	turnUsageMu sync.Mutex
+	turnUsage   map[string]llm.Usage
+
 	enqueueToolResult    func(sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
 }
@@ -93,6 +96,7 @@ func (o *Orchestrator) RunMessageTurn(
 		setState = func(State) {}
 	}
 	o.appendHistory(sessionID, history, llm.Message{Role: "user", Content: userText})
+	o.resetTurnUsage(sessionID)
 	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
 	return o.runUntilQueueOrDone(ctx, sessionID, history, setState, 0)
 }
@@ -109,6 +113,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 		setState = func(State) {}
 	}
 	o.appendHistory(sessionID, history, llm.Message{Role: "user", Content: userText})
+	o.resetTurnUsage(sessionID)
 	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
 	return o.runOneStep(ctx, sessionID, history, setState, 0)
 }
@@ -379,7 +384,7 @@ func (o *Orchestrator) runOneStep(
 			})
 		},
 		OnUsage: func(u llm.Usage) {
-			o.hub.Publish(sessionID, o.agentID, "usage", u.SSEPayload())
+			o.accumulateAndPublishUsage(sessionID, u)
 		},
 	})
 	if err != nil {
@@ -460,11 +465,36 @@ func (o *Orchestrator) publishTurnIdleDone(sessionID, finishReason string) {
 	o.hub.Publish(sessionID, o.agentID, "done", payload)
 }
 
+func (o *Orchestrator) resetTurnUsage(sessionID string) {
+	if o == nil {
+		return
+	}
+	o.turnUsageMu.Lock()
+	delete(o.turnUsage, sessionID)
+	o.turnUsageMu.Unlock()
+}
+
+func (o *Orchestrator) accumulateAndPublishUsage(sessionID string, u llm.Usage) {
+	if o == nil {
+		return
+	}
+	o.turnUsageMu.Lock()
+	if o.turnUsage == nil {
+		o.turnUsage = make(map[string]llm.Usage)
+	}
+	acc := o.turnUsage[sessionID]
+	acc.AccumulateFrom(u)
+	o.turnUsage[sessionID] = acc
+	payload := acc.SSEPayload()
+	o.turnUsageMu.Unlock()
+	o.hub.Publish(sessionID, o.agentID, "usage", payload)
+}
+
 func (o *Orchestrator) insertHistory(sessionID string, history *[]llm.Message, index int, message llm.Message) {
+	normalized := o.llm.NormalizeAssistant(*history, message)
 	if o.journal != nil {
-		o.journal.InsertMessage(sessionID, history, index, message)
+		o.journal.InsertMessage(sessionID, history, index, normalized)
 	} else {
-		normalized := historypkg.NormalizeMessageForContext(*history, message, o.logger)
 		if index < 0 {
 			index = 0
 		}
@@ -754,10 +784,10 @@ func (o *Orchestrator) appendDeniedTool(sessionID string, history *[]llm.Message
 }
 
 func (o *Orchestrator) appendHistory(sessionID string, history *[]llm.Message, message llm.Message) {
+	normalized := o.llm.NormalizeAssistant(*history, message)
 	if o.journal != nil {
-		o.journal.AppendMessage(sessionID, history, message)
+		o.journal.AppendMessage(sessionID, history, normalized)
 	} else {
-		normalized := historypkg.NormalizeMessageForContext(*history, message, o.logger)
 		*history = append(*history, normalized)
 	}
 }

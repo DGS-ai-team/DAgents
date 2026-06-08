@@ -12,6 +12,8 @@ type UsageStripSnapshot struct {
 	PromptTokens     int
 	CompletionTokens int
 	CacheHitTokens   int
+	CacheHitRate     float64 // [0,1]；-1 表示未知
+	ReasoningTokens  int
 	HasData          bool
 }
 
@@ -30,10 +32,27 @@ func ParseUsageStrip(data map[string]any) UsageStripSnapshot {
 	if prompt <= 0 && completion <= 0 {
 		return UsageStripSnapshot{}
 	}
+	rate := -1.0
+	if v, ok := data["prompt_cache_hit_rate"].(float64); ok && v >= 0 {
+		rate = v
+	} else if prompt > 0 && hit > 0 {
+		rate = float64(hit) / float64(prompt)
+		if rate > 1 {
+			rate = 1
+		}
+	}
+	reasoning := intFromAny(data["reasoning_tokens"])
+	if reasoning <= 0 {
+		if details, ok := data["completion_tokens_details"].(map[string]any); ok {
+			reasoning = intFromAny(details["reasoning_tokens"])
+		}
+	}
 	return UsageStripSnapshot{
 		PromptTokens:     prompt,
 		CompletionTokens: completion,
 		CacheHitTokens:   hit,
+		CacheHitRate:     rate,
+		ReasoningTokens:  reasoning,
 		HasData:          true,
 	}
 }
@@ -45,7 +64,14 @@ func FormatInputStripUsage(s UsageStripSnapshot) string {
 	}
 	text := fmt.Sprintf("↑%s ↓%s", formatCompactCount(s.PromptTokens), formatCompactCount(s.CompletionTokens))
 	if s.CacheHitTokens > 0 {
-		text += fmt.Sprintf(" · hit %s", formatCompactCount(s.CacheHitTokens))
+		if s.CacheHitRate >= 0 {
+			text += fmt.Sprintf(" · hit %s (%.0f%%)", formatCompactCount(s.CacheHitTokens), s.CacheHitRate*100)
+		} else {
+			text += fmt.Sprintf(" · hit %s", formatCompactCount(s.CacheHitTokens))
+		}
+	}
+	if s.ReasoningTokens > 0 {
+		text += fmt.Sprintf(" · think %s", formatCompactCount(s.ReasoningTokens))
 	}
 	return text
 }

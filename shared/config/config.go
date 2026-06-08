@@ -166,6 +166,9 @@ func (c *Config) ApplyDefaults() {
 	if c.LLM.MaxToolLoops <= 0 {
 		c.LLM.MaxToolLoops = 16
 	}
+	if strings.TrimSpace(c.LLM.Provider) == "" {
+		c.LLM.Provider = "openai"
+	}
 	if c.Skills.MaxInPrompt <= 0 {
 		c.Skills.MaxInPrompt = 3
 	}

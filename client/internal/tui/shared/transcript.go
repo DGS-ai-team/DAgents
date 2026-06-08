@@ -30,6 +30,22 @@ func NewTranscript(cap int) *Transcript {
 	return &Transcript{cap: cap}
 }
 
+// AddBlockGapIfNeeded 在上一条非空行后插入空行，避免连续追加产生双空行。
+func (t *Transcript) AddBlockGapIfNeeded() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.lines) == 0 {
+		return
+	}
+	if strings.TrimSpace(t.lines[len(t.lines)-1]) == "" {
+		return
+	}
+	t.lines = append(t.lines, "")
+	if len(t.lines) > t.cap {
+		t.lines = t.lines[len(t.lines)-t.cap:]
+	}
+}
+
 // Add 追加一行；超 cap 时丢弃最旧行。
 func (t *Transcript) Add(line string) {
 	t.mu.Lock()
@@ -75,8 +91,11 @@ func (t *Transcript) Lines() []string {
 	return t.Tail(0)
 }
 
-// AppendPartial 追加流式 assistant 片段。
+// AppendPartial 追加流式 assistant/reasoning 片段；空串不创建空 partial。
 func (t *Transcript) AppendPartial(role, text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.partial == nil || t.partial.role != role {
@@ -85,19 +104,23 @@ func (t *Transcript) AppendPartial(role, text string) {
 	t.partial.buf.WriteString(text)
 }
 
-// FinishPartial 将流式片段落为一行。
+// FinishPartial 将流式片段落为一行；空缓冲不落行，避免 tool-only 回合产生空白行。
 func (t *Transcript) FinishPartial(role string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.partial == nil || t.partial.role != role {
 		return
 	}
-	line := "[" + role + "] " + t.partial.buf.String()
+	text := t.partial.buf.String()
+	t.partial = nil
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	line := "[" + role + "] " + text
 	t.lines = append(t.lines, line)
 	if len(t.lines) > t.cap {
 		t.lines = t.lines[len(t.lines)-t.cap:]
 	}
-	t.partial = nil
 }
 
 // ToolFold 控制 tool 事件折叠展示。

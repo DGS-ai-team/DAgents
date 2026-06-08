@@ -175,6 +175,8 @@ class UsageStripSnapshot:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cache_hit_tokens: int = 0
+    cache_hit_rate: float = -1.0
+    reasoning_tokens: int = 0
     has_data: bool = False
 
 
@@ -186,12 +188,28 @@ def parse_usage_strip(data: dict[str, Any]) -> UsageStripSnapshot:
     cached = _int_from_event_data(data.get("prompt_cached_tokens"))
     if hit <= 0 and cached > 0:
         hit = cached
+    rate = -1.0
+    raw_rate = data.get("prompt_cache_hit_rate")
+    if raw_rate is not None:
+        try:
+            rate = float(raw_rate)
+        except (TypeError, ValueError):
+            rate = -1.0
+    elif prompt > 0 and hit > 0:
+        rate = min(1.0, hit / prompt)
+    reasoning = _int_from_event_data(data.get("reasoning_tokens"))
+    if reasoning <= 0:
+        details = data.get("completion_tokens_details")
+        if isinstance(details, dict):
+            reasoning = _int_from_event_data(details.get("reasoning_tokens"))
     if prompt <= 0 and completion <= 0:
         return UsageStripSnapshot()
     return UsageStripSnapshot(
         prompt_tokens=prompt,
         completion_tokens=completion,
         cache_hit_tokens=hit,
+        cache_hit_rate=rate,
+        reasoning_tokens=reasoning,
         has_data=True,
     )
 
@@ -202,7 +220,12 @@ def format_input_strip_usage(snapshot: UsageStripSnapshot) -> str:
         return ""
     text = f"↑{_format_compact_count(snapshot.prompt_tokens)} ↓{_format_compact_count(snapshot.completion_tokens)}"
     if snapshot.cache_hit_tokens > 0:
-        text += f" · hit {_format_compact_count(snapshot.cache_hit_tokens)}"
+        if snapshot.cache_hit_rate >= 0:
+            text += f" · hit {_format_compact_count(snapshot.cache_hit_tokens)} ({snapshot.cache_hit_rate * 100:.0f}%)"
+        else:
+            text += f" · hit {_format_compact_count(snapshot.cache_hit_tokens)}"
+    if snapshot.reasoning_tokens > 0:
+        text += f" · think {_format_compact_count(snapshot.reasoning_tokens)}"
     return text
 
 
