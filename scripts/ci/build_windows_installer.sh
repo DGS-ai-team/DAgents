@@ -46,10 +46,17 @@ cp -a "${BUNDLE_SRC}/." "${BUNDLE_DIR}/"
 
 mkdir -p "${OUTPUT_DIR}"
 echo "[installer] compiling ${OUTPUT_BASE}.exe"
-"${ISCC}" \
-  "/DMyAppVersion=${VERSION}" \
-  "/DMyOutputBaseFilename=${OUTPUT_BASE}" \
-  "${REPO_ROOT}/packaging/windows/dagents-installer.iss"
+
+# Git Bash (MSYS) 会把 /D... 转成 D:\...，Inno Setup 会误当作第二个脚本路径。
+define_args=(
+  "//DMyAppVersion=${VERSION}"
+  "//DMyOutputBaseFilename=${OUTPUT_BASE}"
+)
+iss_file="${REPO_ROOT}/packaging/windows/dagents-installer.iss"
+if command -v cygpath >/dev/null 2>&1; then
+  iss_file="$(cygpath -w "${iss_file}")"
+fi
+"${ISCC}" "${define_args[@]}" "${iss_file}"
 
 INSTALLER="${OUTPUT_DIR}/${OUTPUT_BASE}.exe"
 if [[ ! -f "${INSTALLER}" ]]; then
