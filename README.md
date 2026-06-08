@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.2.2-20260607-green" alt="v0.2.2"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.2.5-20260608-green" alt="v0.2.5"></a>
   <a href="go.work"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
   <a href="requirements.txt"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
@@ -26,7 +26,7 @@
 
 ## 简介
 
-**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.2.2**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度。
+**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.2.5**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度。
 
 终端交互提供 **两种 Client**，共用一份 YAML 配置，按环境任选：
 
@@ -47,14 +47,15 @@
 
 ## 功能特性
 
-- **LLM Turn 编排** — OpenAI 兼容 API；流式 assistant / reasoning / tool 事件
-- **内置工具** — `bash_run`、文件读写与替换、skills 加载、trigger 管理、**临时子 Agent**
+- **LLM Turn 编排** — OpenAI 兼容 API；流式 assistant / reasoning / tool 事件；流式 cancel 保留部分 assistant 与合法 tool 序列
+- **LLM 厂商适配** — `llm.provider`（`openai` / `deepseek`）；`MessageAdapter` 统一出站序列化与 `reasoning_content` 处理
+- **内置工具** — `bash_run`（可配置 GBK/UTF-8 解码）、文件读写与替换、skills 加载、trigger 管理、**临时子 Agent**
 - **HITL** — 工具审批、`ask_user_information`；Client 侧非阻塞队列 + resume
 - **Triggers** — `interval`、`fire_at`、日历 **`schedule`**（含 cmd 门控）
-- **Session** — 多会话、SQLite 持久化、context 压缩（silent / blocking）
+- **Session** — 多会话、SQLite 持久化、context 压缩（silent / blocking）；token 估算与 `/context` 共用同一套逻辑
 - **Policy** — `.runtime/policy/*.approval.txt` 本地审批策略
-- **可观测** — SSE `usage`（prompt/completion、cache hit）；结构化 stderr 日志
-- **同包发布** — Release 资产 `dagents-local-assistant-*`（Node + 双 Client + 示例配置）
+- **可观测** — SSE `usage`（prompt/completion、cache hit、`reasoning_tokens`）；结构化 stderr 日志
+- **同包发布** — Release 资产 `dagents-local-assistant-*`（Linux tarball / Windows zip / **Windows 安装包**）
 
 ---
 
@@ -155,8 +156,10 @@ dagents-client tui sess-xxxxxxxx
 |------|------|
 | `listen.host` / `listen.port` | Node 监听地址（默认 `127.0.0.1:18765`） |
 | `local.endpoint` | Client 连接 URL |
+| `llm.provider` | `openai` / `deepseek`（DeepSeek 自动处理 Thinking 出站） |
 | `llm.mock` | `true` 时使用 mock LLM（开发默认） |
 | `llm.api_key_env` | 真实 LLM 的 API Key 环境变量名 |
+| `tools.bash_output_encoding` | `bash_run` 子进程输出解码（如 `gbk`；Windows cmd 默认 gbk） |
 | `data_dir` | SQLite 与运行时数据（默认 `./.runtime/data`） |
 | `fs_root` | 工具可访问文件根 |
 | `triggers.enabled` | 触发器调度开关 |
@@ -212,13 +215,15 @@ python run_dev_stack.py
 
 ```text
 DAgents/
-├── node/                    # Go Agent Node（运行时）
+├── node/                    # Go Agent Node（运行时；含 internal/llm、turn、session 等）
 ├── client/                  # Go TUI Client（full + plain REPL）
 ├── shared/config/           # Node / Client 共用 YAML 解析
 ├── app/cli/                 # Python Textual TUI
 ├── register_center/         # Register Center（FastAPI）
 ├── packaging/
-│   └── agent-client/        # config.example.yaml、启动脚本
+│   ├── agent-client/        # config.example.yaml、启动脚本
+│   ├── linux/               # install.sh、分发脚本
+│   └── windows/             # Inno Setup 安装包模板
 ├── docs/                    # 架构与 API 文档
 ├── tests/                   # Python CLI / RC 单测
 ├── go.work
@@ -253,7 +258,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 ## 预编译包
 
-GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball / Windows zip）：
+GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Windows zip、**Windows `.exe` 安装包**）：
 
 | 二进制 | 说明 |
 |--------|------|
@@ -282,12 +287,12 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball / Win
 |------|------|
 | [docs/README.md](docs/README.md) | 文档索引 |
 | [docs/architecture/overview.md](docs/architecture/overview.md) | 架构总览 |
-| [docs/architecture/go-node-internals.md](docs/architecture/go-node-internals.md) | Go Node 内部结构（runtime / queue / Orchestrator） |
+| [docs/architecture/go-node-internals.md](docs/architecture/go-node-internals.md) | Go Node 内部结构（runtime / queue / turn / llm） |
 | [docs/architecture/local-assistant.md](docs/architecture/local-assistant.md) | 本地助手联调 |
 | [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md) | Go Node HTTP/SSE 契约 |
 | [docs/architecture/child-agent-tools.md](docs/architecture/child-agent-tools.md) | 子 Agent 工具 |
 | [docs/architecture/go-node-compatibility.md](docs/architecture/go-node-compatibility.md) | 老旧 OS / 静态构建 |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.2**） |
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.5**） |
 | [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) | Web 前端（**独立仓库，尚未适配 v0.2.0 / Go Node API**） |
 
 > 已移除的 Python Agent API 文档见 [docs/archive/python-agent-runtime/](docs/archive/python-agent-runtime/)；**DAgentsUI 当前仍依赖旧 HTTP 契约**。
@@ -298,7 +303,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball / Win
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | **v0.2.2**（2026-06-07，0.x 预览） |
+| **当前版本** | **v0.2.5**（2026-06-08，0.x 预览；tag `v0.2.5`） |
 | **Go** | 1.25+（`node` / `client` / `shared/config`） |
 | **Python** | 3.11+ 可运行；CI 验证 3.13 |
 | **破坏性变更** | 1.0 前仍可能出现；见 [CHANGELOG.md](CHANGELOG.md) |
