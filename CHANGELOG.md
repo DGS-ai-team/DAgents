@@ -2,6 +2,30 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.8] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.7** 基础上增强 **TUI 展示**、修复 **非法 tool 序列**、统一 **Skill 元数据格式**。
+
+### 新增
+
+- **assistant usage 右对齐**：Textual 与 Go 全屏 TUI 在末行放得下时同行右对齐，否则独占下一行仍右对齐；Go transcript 用 `\x1e` 分隔正文与 usage，展示层上色。
+- **消息圆点分色**：用户 / assistant / reasoning / 工具 / 状态等类型使用不同颜色圆点。
+- **非法 tool 序列修复**：`RepairUnrespondedToolCalls` 在 LLM 调用前、新 user 消息与 idle cancel 时补写 interrupted tool 结果，避免 `tool_calls` 后缺 tool 消息导致 400。
+- **Skill 标准 frontmatter**：`name` + `description`；目录下全部 `SKILL.md` 参与元数据扫描（移除 per-skill `enabled`）。
+
+### 变更
+
+- **多工具审批 UI**：仅当前待审工具展示代码详情；`bash(...)` 标题压平参数换行。
+- **工具等待耗时**：与 prefilling 一致按整数秒递增；审批结束后重置执行计时。
+- **Esc 取消 HITL**：审批 Esc 提交全拒绝 resume；用户询问 Esc 提交 `cancelled` resume（不再只清本地队列）。
+- **内置 `write-skill`**：SKILL.md 改为标准 `name` + `description` 示例。
+
+### 修复
+
+- 用户打断或取消后 history 尾部 assistant+tool_calls 无 tool 响应时，下轮 LLM 请求失败的问题。
+
+（Git **tag**：`v0.2.8`。）
+
 ## [0.2.7] - 2026-06-08
 
 **0.x 预览**：在 **v0.2.6** 基础上增加 **`bash_run` 输出压缩**、**tool/usage SSE 展示增强** 与 **双 TUI inline token 用量**。

@@ -225,6 +225,11 @@ func (r *runtime) handleHumanMessage(parent context.Context, content string) {
 		r.pending = nil
 		r.orch.InterruptPending(r.session.ID, &r.messages, pending)
 	}
+	if r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages) {
+		r.logger.Info("repaired orphan tool_calls before user message",
+			"session_id", r.session.ID,
+		)
+	}
 	r.toolLoopCount = 0
 	r.mu.Unlock()
 
@@ -534,12 +539,20 @@ func (r *runtime) cancelTurn() bool {
 	r.mu.Lock()
 	cancel := r.turnCancel
 	state := r.state
-	r.mu.Unlock()
-	if cancel == nil || state == turn.StateIdle {
-		return false
+	if cancel != nil && state != turn.StateIdle {
+		r.mu.Unlock()
+		cancel()
+		return true
 	}
-	cancel()
-	return true
+	repaired := r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
+	r.mu.Unlock()
+	if repaired {
+		r.logger.Info("repaired orphan tool_calls on idle cancel",
+			"session_id", r.session.ID,
+		)
+		r.persist(context.Background())
+	}
+	return false
 }
 
 func (r *runtime) stop() {

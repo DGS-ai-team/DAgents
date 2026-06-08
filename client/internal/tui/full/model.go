@@ -432,7 +432,11 @@ func (m *model) applySize(w, h int) {
 }
 
 func (m *model) syncViewport() {
-	m.viewport.SetContent(strings.Join(m.transcript.Lines(), "\n"))
+	width := m.viewport.Width
+	if width <= 0 {
+		width = 80
+	}
+	m.viewport.SetContent(strings.Join(m.transcript.LinesForDisplay(width), "\n"))
 	m.viewport.GotoBottom()
 }
 

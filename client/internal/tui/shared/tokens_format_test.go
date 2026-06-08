@@ -1,7 +1,6 @@
 package shared
 
 import (
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -42,20 +41,18 @@ func TestParseUsageRoundAndInlineFormat(t *testing.T) {
 	}
 }
 
-func stripANSI(s string) string {
-	return regexp.MustCompile("\033\\[[0-9;]*m").ReplaceAllString(s, "")
-}
-
 func TestApplyRoundUsageToAssistantPartial(t *testing.T) {
 	tr := NewTranscript(0)
 	tr.AppendPartial("assistant", "hello")
 	tr.ApplyRoundUsage(" · ↑10 ↓2")
 	lines := tr.Lines()
-	if len(lines) != 1 || stripANSI(lines[0]) != "[assistant] hello · ↑10 ↓2" {
-		t.Fatalf("lines = %v", lines)
+	want := "[assistant] hello" + usageStorageSep + " · ↑10 ↓2"
+	if len(lines) != 1 || lines[0] != want {
+		t.Fatalf("lines = %v, want %q", lines, want)
 	}
-	if !strings.Contains(lines[0], "\033[90m") {
-		t.Fatalf("expected gray ANSI in %q", lines[0])
+	display := FormatTranscriptLineForDisplay(lines[0], 40)
+	if !strings.Contains(display, "hello") || !strings.Contains(stripANSI(display), "↑10 ↓2") {
+		t.Fatalf("display = %q", display)
 	}
 }
 
@@ -64,7 +61,8 @@ func TestApplyRoundUsageMultilineSameLine(t *testing.T) {
 	tr.AppendPartial("assistant", "line1\nline2\n")
 	tr.ApplyRoundUsage(" · ↑10 ↓2")
 	lines := tr.Lines()
-	if len(lines) != 1 || stripANSI(lines[0]) != "[assistant] line1\nline2 · ↑10 ↓2" {
+	want := "[assistant] line1\nline2" + usageStorageSep + " · ↑10 ↓2"
+	if len(lines) != 1 || lines[0] != want {
 		t.Fatalf("lines = %v", lines)
 	}
 }
@@ -79,7 +77,8 @@ func TestApplyRoundUsageSkipsReasoning(t *testing.T) {
 	tr.AppendPartial("assistant", "answer")
 	tr.FinishPartial("assistant")
 	lines := tr.Lines()
-	if len(lines) != 1 || stripANSI(lines[0]) != "[assistant] answer · ↑10 ↓2" {
+	want := "[assistant] answer" + usageStorageSep + " · ↑10 ↓2"
+	if len(lines) != 1 || lines[0] != want {
 		t.Fatalf("lines = %v", lines)
 	}
 }

@@ -234,7 +234,7 @@ func writeChildTestSkill(t *testing.T, root, name, body string) {
 
 func TestSpawnChildPreloadsSkills(t *testing.T) {
 	skillsRoot := t.TempDir()
-	writeChildTestSkill(t, skillsRoot, "writer", "---\ndescription: Write docs\n---\nWrite clearly.\n")
+	writeChildTestSkill(t, skillsRoot, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")
 
 	hub := stream.NewHub(64, logx.Discard())
 	reg, err := tools.NewRegistry(t.TempDir(), 30)

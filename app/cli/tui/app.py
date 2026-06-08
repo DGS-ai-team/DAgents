@@ -34,7 +34,7 @@ from app.cli.child_agent import (
     format_temporary_agent_tool_title,
     parse_temporary_agent_tool_result,
 )
-from app.cli.render import TranscriptKind, TranscriptUpdate, format_inline_usage, parse_usage_round
+from app.cli.render import TranscriptKind, TranscriptUpdate, format_inline_usage, parse_usage_round, sanitize_inline_tool_arg
 from app.cli.session_controller import PendingHITL, SessionController
 from app.cli.tool_calls import normalize_tool_call_item
 from app.cli.user_information import (
@@ -51,6 +51,17 @@ from app.cli.tui.welcome_panel import build_welcome_panel
 _HELP_HINT = "Type /help for commands, /exit to quit.  Enter 发送，Shift+Enter 换行"
 # bash command 在括号内可展示的 cell 上限；超出则在标题下方用代码框展示全文。
 _BASH_INLINE_COMMAND_MAX_CELLS = 56
+
+# Transcript 圆点颜色：按消息类型区分
+_DOT_USER = "blue"
+_DOT_ASSISTANT_STREAM = "yellow blink"
+_DOT_ASSISTANT_DONE = "green"
+_DOT_REASONING = "orange1"
+_DOT_TOOL_PENDING = "yellow blink"
+_DOT_TOOL_RESULT = "cyan"
+_DOT_STATUS_ACTIVE = "yellow blink"
+_DOT_STATUS_DONE = "green dim"
+_DOT_USER_INFO = "magenta"
 _USER_INFORMATION_TOOL_NAME = "ask_user_information"
 
 
@@ -323,7 +334,12 @@ class DAgentsTuiApp(App[None]):
             approval_future = await ready
             decision = await approval_future
         except ApprovalCancelled:
-            self._controller.discard_hitl_head()
+            try:
+                await self._controller.complete_hitl_approval(
+                    build_all_rejected_decision(list(requests))
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._transcript_log().write(f"[red]approval reject failed: {exc}[/red]")
             self.call_later(self._end_approval_ui)
             self._hitl_busy = False
             self._refresh_input_strip()
@@ -388,7 +404,21 @@ class DAgentsTuiApp(App[None]):
             answer_future = await ready
             answer = await answer_future
         except UserInformationCancelled:
-            self._controller.discard_hitl_head()
+            request = self._user_info_request
+            if request is not None:
+                try:
+                    await self._controller.complete_hitl_user_info(
+                        UserInformationAnswer(
+                            tool_call_id=request.tool_call_id,
+                            answer="",
+                            selected_options=[],
+                            cancelled=True,
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._transcript_log().write(f"[red]user info cancel failed: {exc}[/red]")
+            else:
+                self._controller.discard_hitl_head()
             self.call_later(self._end_user_info_ui)
             self._hitl_busy = False
             self.call_later(self._process_hitl_queue)
@@ -435,6 +465,7 @@ class DAgentsTuiApp(App[None]):
         # 审批期间隐藏并只读输入框，避免 Enter 误触 submit_prompt；快捷键由 App 捕获。
         prompt.display = False
         prompt.read_only = True
+        self._refresh_approval_tool_blocks()
         self._write_approval_block()
         self._refresh_approval_layout()
         self._transcript_log().focus()
@@ -448,6 +479,8 @@ class DAgentsTuiApp(App[None]):
         self._approval_selected_index = 0
         self._approval_decisions = {}
         self._delete_approval_block()
+        self._reset_pending_tools_execution_clock()
+        self._refresh_all_pending_tool_blocks()
         prompt.read_only = False
         prompt.display = True
         self._refresh_approval_layout()
@@ -627,8 +660,9 @@ class DAgentsTuiApp(App[None]):
             self._finish_approval()
             return
         self._approval_selected_index = 0
-        # 当前工具确认后，审批块要移动到下一个工具调用块下方。
+        # 当前工具确认后，折叠其详情并移动到下一个工具调用块下方。
         self._delete_approval_block()
+        self._refresh_approval_tool_blocks()
         self._write_approval_block()
         self._refresh_approval_layout()
 
@@ -650,6 +684,7 @@ class DAgentsTuiApp(App[None]):
             return
         self._approval_selected_index = 0
         self._delete_approval_block()
+        self._refresh_approval_tool_blocks()
         self._write_approval_block()
         self._refresh_approval_layout()
 
@@ -692,7 +727,7 @@ class DAgentsTuiApp(App[None]):
         if request is None:
             return
         content = self._user_info_block_text()
-        block = self._message_block("cyan", content, escape_text=False)
+        block = self._message_block(_DOT_USER_INFO, content, escape_text=False)
         pending = self._pending_tools.get(request.tool_call_id)
         if pending is not None:
             start, end = self._replace_log_block(int(pending["start"]), int(pending["end"]), block)
@@ -712,7 +747,7 @@ class DAgentsTuiApp(App[None]):
         start, end = self._replace_log_block(
             self._user_info_block["start"],
             self._user_info_block["end"],
-            self._message_block("cyan", self._user_info_block_text(), escape_text=False),
+            self._message_block(_DOT_USER_INFO, self._user_info_block_text(), escape_text=False),
         )
         self._user_info_block = {"start": start, "end": end}
         request = self._user_info_request
@@ -845,6 +880,49 @@ class DAgentsTuiApp(App[None]):
         """按固定圆点列格式化 transcript 消息，保证与工具块横向对齐。"""
         return self._dot_column_block(dot_style, self._text_block_body(text, escape_text=escape_text))
 
+    def _content_column_width(self) -> int:
+        """正文列可用 cell 宽度（扣除圆点列与间距）。"""
+        return max(20, self._transcript_content_width() - 2)
+
+    def _right_aligned_usage_row(self, suffix: str) -> Text:
+        """usage 独占一行并右对齐。"""
+        width = self._content_column_width()
+        pad = max(0, width - cell_len(suffix))
+        return Text.assemble((" " * pad, ""), (suffix, "bright_black"))
+
+    def _merge_last_line_with_usage(
+        self, last_line: str, suffix: str
+    ) -> tuple[RenderableType, RenderableType | None]:
+        """末行与 usage 同行（放得下）或拆成两行（末行 + 右对齐 usage）。"""
+        width = self._content_column_width()
+        if cell_len(last_line) + cell_len(suffix) <= width:
+            pad = max(1, width - cell_len(last_line) - cell_len(suffix))
+            return (
+                Text.assemble(
+                    (last_line, ""),
+                    (" " * pad, ""),
+                    (suffix, "bright_black"),
+                ),
+                None,
+            )
+        return Text(last_line), self._right_aligned_usage_row(suffix)
+
+    def _assistant_body_with_usage(self, text: str, suffix: str) -> RenderableType:
+        """assistant 完成态正文 + 右对齐 usage（末行放得下则同行）。"""
+        stripped = text.rstrip("\n")
+        parts = stripped.split("\n")
+        if len(parts) == 1:
+            line_render, extra = self._merge_last_line_with_usage(parts[0], suffix)
+            if extra is None:
+                return line_render
+            return Group(line_render, extra)
+        head = "\n".join(parts[:-1])
+        last_render, extra = self._merge_last_line_with_usage(parts[-1], suffix)
+        body: RenderableType = Group(Markdown(head), last_render)
+        if extra is not None:
+            body = Group(body, extra)
+        return body
+
     def _log_write_block(self, log: RichLog, content: str | RenderableType) -> None:
         if isinstance(content, str):
             log.write(content)
@@ -861,21 +939,13 @@ class DAgentsTuiApp(App[None]):
         if complete and suffix is None:
             suffix = self._pending_round_usage_suffix
         if not complete:
-            return self._message_block("yellow blink", text)
+            return self._message_block(_DOT_ASSISTANT_STREAM, text)
         if suffix:
             stripped = text.rstrip("\n")
             self._pending_round_usage_suffix = None
-            parts = stripped.split("\n")
-            if len(parts) == 1:
-                body: RenderableType = Text.assemble((parts[0], ""), (suffix, "bright_black"))
-            else:
-                head = "\n".join(parts[:-1])
-                body = Group(
-                    Markdown(head),
-                    Text.assemble((parts[-1], ""), (suffix, "bright_black")),
-                )
-            return self._dot_column_block("green", body)
-        return self._dot_column_block("green", Markdown(text))
+            body = self._assistant_body_with_usage(stripped, suffix)
+            return self._dot_column_block(_DOT_ASSISTANT_DONE, body)
+        return self._dot_column_block(_DOT_ASSISTANT_DONE, Markdown(text))
 
     def _write_assistant_block(
         self,
@@ -891,7 +961,7 @@ class DAgentsTuiApp(App[None]):
     def _event_block(self, text: str) -> str | Table:
         """格式化非流式事件：工具消息使用圆点，普通系统行保持原样。"""
         if text.startswith("[reasoning]"):
-            return self._message_block("yellow blink", text)
+            return self._message_block(_DOT_REASONING, text)
         return text
 
     def _append_message_gap(self) -> None:
@@ -923,11 +993,11 @@ class DAgentsTuiApp(App[None]):
         if name == "compression_blocking":
             label = "compressing context (blocking)"
         if done:
-            return self._message_block("green", f"{label}... {elapsed}s done")
+            return self._message_block(_DOT_STATUS_DONE, f"{label}... {elapsed}s done")
         frame = int(raw_elapsed * 2) % 3
         # 省略号槽位固定 3 个字符，避免动画刷新时秒数左右抖动。
         dots = ("." * (frame + 1)).ljust(3)
-        return self._message_block("yellow blink", f"{label}{dots} {elapsed}s")
+        return self._message_block(_DOT_STATUS_ACTIVE, f"{label}{dots} {elapsed}s")
 
     def _compression_detail_line(self, mode: str, status: str, count: Any) -> str:
         """压缩结束时的摘要行（blocking/silent 文案区分）。"""
@@ -1035,20 +1105,22 @@ class DAgentsTuiApp(App[None]):
         """生成 bash 工具标题行与可选的 command 代码框。
 
         逻辑：
-        1. 按 cell 宽度判断 command 是否可放在 `bash(...)` 括号内；
-        2. 过长时标题只保留截断预览，全文放入下方代码框；
-        3. 返回 `(title, None)` 或 `(title, full_command)`。
+        1. 参数换行压成空格，避免 `bash(...)` 标题折行；
+        2. 按 cell 宽度判断 command 是否可放在括号内；
+        3. 过长时标题只保留截断预览，全文放入下方代码框；
+        4. 返回 `(title, None)` 或 `(title, full_command)`。
 
         关键边界：
         - 空 command 显示 `bash(—)`，不附加代码框。
         """
-        cmd = str(command or "").strip()
-        if not cmd:
+        raw = str(command or "").strip()
+        if not raw:
             return "bash(—)", None
+        cmd = sanitize_inline_tool_arg(raw)
         if cell_len(cmd) <= _BASH_INLINE_COMMAND_MAX_CELLS:
             return f"bash({cmd})", None
         preview = self._truncate_cells(cmd, max(12, _BASH_INLINE_COMMAND_MAX_CELLS - 1))
-        return f"bash({preview})", cmd
+        return f"bash({preview})", raw
 
     def _tool_display_name(self, name: str, arguments: dict[str, Any]) -> str:
         """生成工具调用在 transcript 中的短标题。
@@ -1129,17 +1201,85 @@ class DAgentsTuiApp(App[None]):
         code_lexer: str = "bash",
         elapsed_s: float = 0.0,
         dot_blink: bool = True,
+        show_code: bool = True,
     ) -> Table:
         """生成执行中工具占位块（黄点 + 可选代码框 + 动态耗时）。"""
         frame = int(max(0.0, elapsed_s) * 2) % 3
         dots = ("." * (frame + 1)).ljust(3)
-        head = f"{summary}{dots} {self._format_tool_elapsed(elapsed_s)}"
-        if code_content is not None:
+        head = f"{summary}{dots} {self._format_tool_pending_elapsed(elapsed_s)}"
+        if show_code and code_content is not None:
             body: RenderableType = Group(Text(head), self._rich_code_box(code_content, lexer=code_lexer))
         else:
             body = Text(head)
-        dot_style = "yellow blink" if dot_blink else "yellow"
+        dot_style = _DOT_TOOL_PENDING if dot_blink else "yellow"
         return self._tool_dot_block(dot_style=dot_style, body=body)
+
+    def _approval_active(self) -> bool:
+        return self._approval_future is not None and not self._approval_future.done()
+
+    def _should_show_tool_detail(self, call_id: str) -> bool:
+        """审批期间仅当前待审工具展示代码框等详情。"""
+        if not self._approval_active():
+            return True
+        current = self._current_approval_request()
+        if current is None:
+            return True
+        return current.call_id == call_id
+
+    def _ensure_tool_pending_animation(self, call_id: str) -> None:
+        pending = self._pending_tools.get(call_id)
+        if pending is None:
+            return
+        task = pending.get("status_task")
+        if isinstance(task, asyncio.Task) and not task.done():
+            return
+        pending["status_task"] = asyncio.create_task(self._animate_tool_pending(call_id))
+
+    def _reset_pending_tools_execution_clock(self) -> None:
+        """审批结束后重置计时，使耗时只统计实际执行等待（不含审批耗时）。"""
+        now = time.monotonic()
+        for pending in self._pending_tools.values():
+            pending["started_at"] = now
+
+    def _refresh_tool_pending_block(self, call_id: str) -> None:
+        pending = self._pending_tools.get(call_id)
+        if pending is None:
+            return
+        show_code = self._should_show_tool_detail(call_id)
+        code_content = pending.get("code_content") if show_code else None
+        started_at = float(pending.get("started_at", time.monotonic()))
+        elapsed_s = max(0.0, time.monotonic() - started_at)
+        status_task = pending.get("status_task")
+        block = self._tool_pending_renderable(
+            str(pending.get("summary") or "tool"),
+            code_content=code_content,
+            code_lexer=str(pending.get("code_lexer") or "bash"),
+            elapsed_s=elapsed_s,
+            dot_blink=not isinstance(status_task, asyncio.Task) or not status_task.done(),
+            show_code=show_code,
+        )
+        start, end = self._replace_log_block(int(pending["start"]), int(pending["end"]), block)
+        pending["start"] = start
+        pending["end"] = end
+        self._ensure_tool_pending_animation(call_id)
+
+    def _refresh_approval_tool_blocks(self) -> None:
+        """审批期间折叠非当前工具详情，仅展开当前待审工具。"""
+        if not self._approval_active():
+            return
+        items = [item for item in self._approval_requests if item.call_id in self._pending_tools]
+        for item in reversed(items):
+            self._refresh_tool_pending_block(item.call_id)
+
+    def _refresh_all_pending_tool_blocks(self) -> None:
+        """重写所有 pending 工具块（审批结束后恢复详情展示）。"""
+        for call_id in list(self._pending_tools.keys()):
+            self._refresh_tool_pending_block(call_id)
+
+    @staticmethod
+    def _format_tool_pending_elapsed(elapsed_s: float) -> str:
+        """与 prefilling/thinking 一致：整数秒计数。"""
+        return f"{int(max(0.0, elapsed_s))}s"
 
     @staticmethod
     def _format_tool_elapsed(elapsed_s: float) -> str:
@@ -1189,9 +1329,10 @@ class DAgentsTuiApp(App[None]):
                 elapsed_s = max(0.0, time.monotonic() - started_at)
                 block = self._tool_pending_renderable(
                     str(pending.get("summary") or "tool"),
-                    code_content=pending.get("code_content"),
+                    code_content=pending.get("code_content") if self._should_show_tool_detail(call_id) else None,
                     code_lexer=str(pending.get("code_lexer") or "bash"),
                     elapsed_s=elapsed_s,
+                    show_code=self._should_show_tool_detail(call_id),
                 )
                 start, end = self._replace_log_block(
                     int(pending["start"]),
@@ -1355,7 +1496,7 @@ class DAgentsTuiApp(App[None]):
                 Text.from_markup(f"{title}{toggle}"),
                 self._rich_code_box(detail, lexer="bash"),
             )
-        return self._tool_dot_block(dot_style="green", body=body)
+        return self._tool_dot_block(dot_style=_DOT_TOOL_RESULT, body=body)
 
     def _render_search_replace_result_block(self, result_id: str) -> Table:
         """渲染 search_replace 结果：折叠摘要，展开为 diff 代码框。"""
@@ -1387,7 +1528,7 @@ class DAgentsTuiApp(App[None]):
                 Text.from_markup(f"{title}{toggle}"),
                 self._rich_code_box(detail, lexer="diff"),
             )
-        return self._tool_dot_block(dot_style="green", body=body)
+        return self._tool_dot_block(dot_style=_DOT_TOOL_RESULT, body=body)
 
     def _render_tool_result_block(self, result_id: str) -> str | Table:
         result = self._tool_results[result_id]
@@ -1418,7 +1559,7 @@ class DAgentsTuiApp(App[None]):
         for index, line in enumerate(body_lines):
             suffix = toggle if index == 0 else ""
             lines.append(f"[dim]└─ {line}[/dim]{suffix}" if index == 0 else f"[dim]   {line}[/dim]")
-        return self._message_block("green", "\n".join(lines), escape_text=False)
+        return self._message_block(_DOT_TOOL_RESULT, "\n".join(lines), escape_text=False)
 
     def _replace_log_block(self, start: int, end: int, content: str | RenderableType) -> tuple[int, int]:
         """替换 RichLog 指定行范围，用于 tool_result 点击展开/收起。"""
@@ -1666,7 +1807,7 @@ class DAgentsTuiApp(App[None]):
         log = self._transcript_log()
         self._flush_pending_segment_gap()
         self._append_message_gap_if_needed(log)
-        self._log_write_block(log, self._message_block("blue", value))
+        self._log_write_block(log, self._message_block(_DOT_USER, value))
         self._append_message_gap()
 
     def _apply_transcript(self, update: TranscriptUpdate) -> None:

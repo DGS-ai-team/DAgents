@@ -18,26 +18,26 @@ func writeSkill(t *testing.T, root, name, body string) {
 	}
 }
 
-func TestCatalogListEnabledAndMetadata(t *testing.T) {
+func TestCatalogListAndMetadata(t *testing.T) {
 	root := t.TempDir()
-	writeSkill(t, root, "alpha-skill", "---\ndescription: Alpha helper\nenabled: true\n---\nAlpha body\n")
-	writeSkill(t, root, "beta-skill", "---\ndescription: Beta\nenabled: false\n---\nHidden\n")
+	writeSkill(t, root, "alpha-skill", "---\nname: alpha-skill\ndescription: Alpha helper\n---\nAlpha body\n")
+	writeSkill(t, root, "beta-skill", "---\nname: beta-skill\ndescription: Beta\n---\nBeta body\n")
 
 	c := NewCatalog(root, true, 3)
-	defs := c.ListEnabled()
-	if len(defs) != 1 || defs[0].SkillName != "alpha-skill" {
-		t.Fatalf("enabled skills = %+v", defs)
+	defs := c.List()
+	if len(defs) != 2 {
+		t.Fatalf("skills = %+v", defs)
 	}
 
 	meta := c.ListMetadata()
-	if len(meta) != 1 || meta[0].SkillName != "alpha-skill" || meta[0].Description != "Alpha helper" {
+	if len(meta) != 2 || meta[0].SkillName != "alpha-skill" || meta[0].Description != "Alpha helper" {
 		t.Fatalf("metadata = %+v", meta)
 	}
 }
 
 func TestCatalogSelectByNameAndRender(t *testing.T) {
 	root := t.TempDir()
-	writeSkill(t, root, "writer", "---\ndescription: Write docs\n---\nWrite clearly.\n")
+	writeSkill(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")
 
 	c := NewCatalog(root, true, 2)
 	def, ok := c.SelectByName("writer")
@@ -62,8 +62,8 @@ func TestCatalogSelectByNameAndRender(t *testing.T) {
 
 func TestCatalogUnloadAndDisabled(t *testing.T) {
 	root := t.TempDir()
-	writeSkill(t, root, "a", "---\n---\nA\n")
-	writeSkill(t, root, "b", "---\n---\nB\n")
+	writeSkill(t, root, "a", "---\nname: a\ndescription: A skill\n---\nA\n")
+	writeSkill(t, root, "b", "---\nname: b\ndescription: B skill\n---\nB\n")
 
 	c := NewCatalog(root, true, 3)
 	loaded := c.SetLoadedSkills([]string{"a", "b"})
@@ -72,17 +72,28 @@ func TestCatalogUnloadAndDisabled(t *testing.T) {
 		t.Fatalf("after unload = %+v", loaded)
 	}
 
-	if c2 := NewCatalog(root, false, 3); c2.ListEnabled() != nil {
+	if c2 := NewCatalog(root, false, 3); c2.List() != nil {
 		t.Fatal("disabled catalog should return nil")
 	}
 }
 
 func TestParseFrontmatter(t *testing.T) {
-	meta, body := parseFrontmatter("---\ndescription: Demo\nenabled: true\n---\nHello skill\n")
-	if meta["description"] != "Demo" || meta["enabled"] != true {
+	meta, body := parseFrontmatter("---\nname: demo\ndescription: Demo\n---\nHello skill\n")
+	if meta["name"] != "demo" || meta["description"] != "Demo" {
 		t.Fatalf("meta = %+v", meta)
 	}
 	if body != "Hello skill" {
 		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestReadSkillUsesDirectoryWhenNameMissing(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "legacy-skill", "---\ndescription: Legacy\n---\nBody\n")
+
+	c := NewCatalog(root, true, 3)
+	def, ok := c.SelectByName("legacy-skill")
+	if !ok || def.SkillName != "legacy-skill" || def.Description != "Legacy" {
+		t.Fatalf("def = %+v ok=%v", def, ok)
 	}
 }

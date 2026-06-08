@@ -19,15 +19,14 @@ type LoadedSkill struct {
 type Definition struct {
 	SkillName   string
 	Description string
-	Enabled     bool
 	Content     string
 }
 
 // Catalog 提供 skill 目录扫描与 prompt 渲染。
 type Catalog struct {
-	root          string
-	maxInPrompt   int
-	enabled       bool
+	root        string
+	maxInPrompt int
+	enabled     bool
 }
 
 // NewCatalog 构造 skill 目录访问器。
@@ -47,8 +46,8 @@ func (c *Catalog) Enabled() bool {
 	return c != nil && c.enabled
 }
 
-// ListEnabled 扫描 `*/SKILL.md` 并返回启用 skill。
-func (c *Catalog) ListEnabled() []Definition {
+// List 扫描 `{root}/*/SKILL.md` 并返回全部 skill 元数据与正文。
+func (c *Catalog) List() []Definition {
 	if !c.enabled || c.root == "" {
 		return nil
 	}
@@ -61,12 +60,12 @@ func (c *Catalog) ListEnabled() []Definition {
 		if !ent.IsDir() {
 			continue
 		}
-		name := strings.TrimSpace(ent.Name())
-		if name == "" {
+		dirName := strings.TrimSpace(ent.Name())
+		if dirName == "" {
 			continue
 		}
-		def, ok := c.readSkill(filepath.Join(c.root, name, "SKILL.md"), name)
-		if ok && def.Enabled {
+		def, ok := c.readSkill(filepath.Join(c.root, dirName, "SKILL.md"), dirName)
+		if ok {
 			out = append(out, def)
 		}
 	}
@@ -76,7 +75,7 @@ func (c *Catalog) ListEnabled() []Definition {
 
 // ListMetadata 返回 skill_name/description 列表。
 func (c *Catalog) ListMetadata() []LoadedSkill {
-	defs := c.ListEnabled()
+	defs := c.List()
 	out := make([]LoadedSkill, 0, len(defs))
 	for _, d := range defs {
 		out = append(out, LoadedSkill{SkillName: d.SkillName, Description: d.Description})
@@ -84,13 +83,13 @@ func (c *Catalog) ListMetadata() []LoadedSkill {
 	return out
 }
 
-// SelectByName 按目录名查找启用 skill。
+// SelectByName 按目录名查找 skill。
 func (c *Catalog) SelectByName(skillName string) (Definition, bool) {
 	name := strings.TrimSpace(skillName)
 	if name == "" {
 		return Definition{}, false
 	}
-	for _, d := range c.ListEnabled() {
+	for _, d := range c.List() {
 		if d.SkillName == name {
 			return d, true
 		}
@@ -183,26 +182,22 @@ func (c *Catalog) UnloadSkills(loaded []LoadedSkill, names []string) []LoadedSki
 	return out
 }
 
-func (c *Catalog) readSkill(path, skillName string) (Definition, bool) {
+func (c *Catalog) readSkill(path, dirName string) (Definition, bool) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Definition{}, false
 	}
 	meta, body := parseFrontmatter(string(raw))
-	enabled := true
-	if v, ok := meta["enabled"]; ok {
-		switch t := v.(type) {
-		case bool:
-			enabled = t
-		case string:
-			enabled = strings.EqualFold(strings.TrimSpace(t), "true")
+	desc := strings.TrimSpace(fmt.Sprint(meta["description"]))
+	skillName := dirName
+	if v, ok := meta["name"]; ok {
+		if name := strings.TrimSpace(fmt.Sprint(v)); name != "" {
+			skillName = name
 		}
 	}
-	desc := strings.TrimSpace(fmt.Sprint(meta["description"]))
 	return Definition{
 		SkillName:   skillName,
 		Description: desc,
-		Enabled:     enabled,
 		Content:     body,
 	}, true
 }

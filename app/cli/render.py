@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -30,6 +31,11 @@ class TranscriptUpdate:
     kind: TranscriptKind
     text: str = ""
     data: dict[str, Any] = field(default_factory=dict)
+
+
+def sanitize_inline_tool_arg(text: str) -> str:
+    """将工具参数中的换行压成空格，避免 bash(...) 等标题行意外折行。"""
+    return re.sub(r"[\r\n]+", " ", str(text)).strip()
 
 
 def compact_json(value: Any, *, max_length: int = 500) -> str:

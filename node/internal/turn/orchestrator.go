@@ -359,6 +359,7 @@ func (o *Orchestrator) runOneStep(
 	setState StateSetter,
 	toolLoopCount int,
 ) StepOutcome {
+	o.RepairUnrespondedToolCalls(sessionID, history)
 	finishReason := "stop"
 	var streamErr error
 	toolLoopCount++

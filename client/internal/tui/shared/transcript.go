@@ -92,6 +92,19 @@ func (t *Transcript) Lines() []string {
 	return t.Tail(0)
 }
 
+// LinesForDisplay 按终端宽度渲染 transcript（彩色圆点、usage 右对齐）。
+func (t *Transcript) LinesForDisplay(width int) []string {
+	raw := t.Tail(0)
+	if len(raw) == 0 {
+		return raw
+	}
+	out := make([]string, len(raw))
+	for i, line := range raw {
+		out[i] = FormatTranscriptLineForDisplay(line, width)
+	}
+	return out
+}
+
 // AppendPartial 追加流式 assistant/reasoning 片段；空串不创建空 partial。
 func (t *Transcript) AppendPartial(role, text string) {
 	if strings.TrimSpace(text) == "" {
@@ -151,7 +164,15 @@ func appendUsageSuffix(content, suffix string) string {
 	if suffix == "" {
 		return content
 	}
-	return strings.TrimRight(content, "\n\r") + StyleInlineUsage(suffix)
+	plain := suffix
+	if !strings.HasPrefix(plain, " ·") {
+		trimmed := strings.TrimSpace(plain)
+		if trimmed == "" {
+			return strings.TrimRight(content, "\n\r")
+		}
+		plain = " · " + trimmed
+	}
+	return strings.TrimRight(content, "\n\r") + usageStorageSep + plain
 }
 
 func (t *Transcript) finishPartialLocked(role, suffix string) {

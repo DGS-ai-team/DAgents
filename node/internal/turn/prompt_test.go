@@ -72,7 +72,7 @@ func TestChildSystemPromptBuilder_usedByOrchestrator(t *testing.T) {
 
 func TestChildSystemPromptBuilder_includesLoadedSkills(t *testing.T) {
 	root := t.TempDir()
-	writeSkillForPromptTest(t, root, "writer", "---\ndescription: Write docs\n---\nWrite clearly.\n")
+	writeSkillForPromptTest(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")
 	catalog := skills.NewCatalog(root, true, 2)
 	loaded := catalog.SetLoadedSkills([]string{"writer"})
 	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{

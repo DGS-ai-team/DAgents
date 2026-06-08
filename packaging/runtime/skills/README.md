@@ -10,4 +10,4 @@
 |--------|------|
 | **`write-skill/`** | 如何编写 **`SKILL.md`**、路径与 **`load_skills`** 的配合；见 **`write-skill/SKILL.md`**。 |
 
-其它技能：在 **`<运行根>/.runtime/skills/<skill_name>/SKILL.md`** 下按需增删。
+其它技能：在 **`<运行根>/.runtime/skills/<name>/SKILL.md`** 下按需增删。frontmatter 须含 **`name`**（与目录名一致）与 **`description`**；目录下所有 skill 均参与元数据扫描。
