@@ -161,6 +161,9 @@ func defaultEngine() *Engine {
 	return &Engine{
 		toolModes: map[string]ApprovalMode{
 			"read_file":             ModeNever,
+			"glob_files":            ModeNever,
+			"grep_file":             ModeNever,
+			"grep_files":            ModeNever,
 			"search_file":           ModeNever,
 			"ask_user_information":  ModeNever,
 			"write_file":            ModeAlways,

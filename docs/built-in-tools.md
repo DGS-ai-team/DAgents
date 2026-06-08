@@ -13,7 +13,9 @@
 |--------|----------|----------|
 | **`read_file`** | **`fs.go`** | 分页读文件（`FS_ROOT` 沙箱） |
 | **`write_file`** | **`fs.go`** | 写入整文件 |
-| **`search_file`** | **`fs.go`** | 流式检索 |
+| **`glob_files`** | **`glob_files.go`** | 按 glob（含 `**`）列举目录内文件路径 |
+| **`grep_file`** | **`grep_file.go`** | 单文件行内容检索（分页 + 上下文） |
+| **`grep_files`** | **`grep_files.go`** | 目录树内按 glob 筛文件后行内容检索 |
 | **`search_replace`** | **`fs.go`** | 子串替换 + diff |
 | **`bash_run`** | **`bash*.go`** | bash / cmd / powershell；输出按 **`tools.bash_output_encoding`** 或平台默认解码 |
 | **`background_job_status`** | **`background_job_tools.go`** | 查询后台 job |

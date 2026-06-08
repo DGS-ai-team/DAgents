@@ -74,7 +74,7 @@ flowchart TB
 其他约定：
 
 - **`FormatChildTask`**：给子 Agent 首条 user 消息加固定系统前缀；角色与约束由父 Agent 写在 `task` 中。
-- **`DefaultChildAllowedTools`**：未指定 `allowed_tools` 时默认 `read_file`、`search_file`、`bash_run`。
+- **`DefaultChildAllowedTools`**：未指定 `allowed_tools` 时默认 `read_file`、`glob_files`、`grep_file`、`bash_run`。
 - **`IsParentOnlyTool`**：管理工具、`load_skills` / `unload_skills` / `clear_skills`、`ask_user_information`、`trigger_*` 永不下放给子 runtime。
 - **`IsTemporaryAgentTool`**：供 orchestrator 识别并专用分发（不走普通 `Registry.Execute`）。
 

@@ -69,7 +69,9 @@ func (r *Registry) Definitions() []ToolDef {
 	base := []ToolDef{
 		readFileToolDef(),
 		writeFileToolDef(),
-		searchFileToolDef(),
+		globFilesToolDef(),
+		grepFileToolDef(),
+		grepFilesToolDef(),
 		searchReplaceToolDef(),
 		bashRunToolDef(),
 		backgroundJobStatusToolDef(),
@@ -100,6 +102,9 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 func (r *Registry) registerBuiltins() {
 	r.handlers["read_file"] = r.execReadFile
 	r.handlers["write_file"] = r.execWriteFile
+	r.handlers["glob_files"] = r.execGlobFiles
+	r.handlers["grep_file"] = r.execGrepFile
+	r.handlers["grep_files"] = r.execGrepFiles
 	r.handlers["search_file"] = r.execSearchFile
 	r.handlers["search_replace"] = r.execSearchReplace
 	r.handlers["bash_run"] = r.execBashRun

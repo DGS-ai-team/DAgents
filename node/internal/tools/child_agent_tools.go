@@ -34,7 +34,7 @@ func createTemporaryAgentToolDef() ToolDef {
 					"allowed_tools": map[string]any{
 						"type":        "array",
 						"items":       map[string]any{"type": "string"},
-						"description": "临时 Agent 可用工具子集，须在父可下放列表内；默认 read_file、search_file、bash_run",
+						"description": "临时 Agent 可用工具子集，须在父可下放列表内；默认 read_file、glob_files、grep_file、bash_run",
 					},
 					"skill_names": map[string]any{
 						"type":        "array",

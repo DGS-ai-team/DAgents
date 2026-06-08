@@ -104,7 +104,7 @@ func BuildSystemPrompt(in SystemPromptInput) string {
 	if root != "" {
 		b.WriteString(fmt.Sprintf("- 文件工作区（FS_ROOT）: %s\n", root))
 	}
-	b.WriteString("- 后台执行（run_in_background）：read_file、write_file、search_file、search_replace、bash_run 支持可选 run_in_background；false=同步等待（默认），true=立即返回 job_id，完成后自动回灌。\n")
+	b.WriteString("- 后台执行（run_in_background）：read_file、write_file、glob_files、grep_file、grep_files、search_replace、bash_run 支持可选 run_in_background；false=同步等待（默认），true=立即返回 job_id，完成后自动回灌。\n")
 	b.WriteString("- bash_run 同步模式还会在 timeout_seconds 内未结束时自动降级为后台 job（status=RUNNING），进程继续运行并在完成后回灌。\n")
 	b.WriteString("- 后台任务管理：background_job_status、background_job_cancel（始终同步执行）。\n")
 	b.WriteString("- 仅同步、不支持后台：ask_user_information、load_skills、unload_skills、clear_skills。\n")

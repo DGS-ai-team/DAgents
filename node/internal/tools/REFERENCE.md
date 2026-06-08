@@ -8,7 +8,7 @@
 | `resolveShellOutputEncoding` / `decodeShellOutput` | bash_run 输出按 GBK/UTF-8 等解码为 UTF-8 |
 | `Definitions()` | LLM tools 列表 |
 | `Execute(ctx, name, arguments)` | 执行工具 |
-| `execReadFile` / `execWriteFile` / `execSearchReplace` / `execSearchFile` / `execBashRun` | 内置实现 |
+| `execReadFile` / `execWriteFile` / `execSearchReplace` / `execGlobFiles` / `execGrepFile` / `execGrepFiles` / `execSearchFile` | 内置实现（`search_file` 为 `grep_file` 别名） |
 | `runBashSyncWithAutoDegrade` | bash 同步超时自动降级后台 |
 | `resolveRunCWD` / `resolveShellType` / `blockedNonRootPasswordPromptingShell` | bash_run 参数与安全策略 |
 | `applyShellProcAttr` / `signalKillProcessGroup` | POSIX/Windows 进程组（`shell_platform_*.go`） |

@@ -56,7 +56,7 @@ func TestReadFilePagination(t *testing.T) {
 	}
 }
 
-func TestSearchFile(t *testing.T) {
+func TestGrepFilePagination(t *testing.T) {
 	dir := t.TempDir()
 	reg, err := NewRegistry(dir, 30)
 	if err != nil {
@@ -75,7 +75,7 @@ func TestSearchFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := reg.Execute(ctx, "search_file", `{"path":"s.txt","pattern":"foo","literal":true,"count_limit":2,"context_lines":0}`)
+	out, err := reg.Execute(ctx, "grep_file", `{"path":"s.txt","pattern":"foo","literal":true,"count_limit":2,"context_lines":0}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestSearchFile(t *testing.T) {
 		t.Fatalf("should not include third hit on first page: %q", out)
 	}
 
-	out2, err := reg.Execute(ctx, "search_file", `{"path":"s.txt","pattern":"foo","literal":true,"index_offset":2,"count_limit":5}`)
+	out2, err := reg.Execute(ctx, "grep_file", `{"path":"s.txt","pattern":"foo","literal":true,"index_offset":2,"count_limit":5}`)
 	if err != nil {
 		t.Fatal(err)
 	}

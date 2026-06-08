@@ -22,7 +22,7 @@ const (
 
 // DefaultChildAllowedTools 在未指定 allowed_tools 时使用的默认工具集。
 func DefaultChildAllowedTools() []string {
-	return []string{"read_file", "search_file", "bash_run"}
+	return []string{"read_file", "glob_files", "grep_file", "bash_run"}
 }
 
 // FormatChildTask 规范化临时 Agent 首条 user 任务正文（角色与边界由子 Agent system prompt 承载）。
@@ -33,7 +33,7 @@ func FormatChildTask(task string) string {
 // ParentDelegatableTools 父 Agent 可下放给临时 Agent 的工具名（不含 skills 系列）。
 func ParentDelegatableTools() []string {
 	return []string{
-		"read_file", "write_file", "search_file", "search_replace", "bash_run",
+		"read_file", "write_file", "glob_files", "grep_file", "grep_files", "search_replace", "bash_run",
 		"background_job_status", "background_job_cancel",
 	}
 }

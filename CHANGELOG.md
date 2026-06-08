@@ -2,6 +2,30 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.6] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.5** 基础上拆分 **文件发现** 与 **内容检索** 工具，降低 `search_file` 名实不符带来的模型误用。
+
+### 新增
+
+- **`glob_files`**：在 `directory` 下按 glob（含 `**` 递归）列举匹配路径，分页返回，不读文件内容。
+- **`grep_file`**：单文件行内容检索（正则/字面量、上下文、`index_offset` 翻页）；替代原 LLM 可见的 `search_file`。
+- **`grep_files`**：目录树内先 `glob_pattern` 筛文件再逐行检索，跨文件命中分页（`hit_offset` / `max_hits` / `max_files`）。
+- **共用实现**：`fs_glob.go`、`grep_shared.go`；glob 匹配依赖 `github.com/bmatcuk/doublestar/v4`。
+
+### 变更
+
+- **LLM 工具列表**：注册 `glob_files`、`grep_file`、`grep_files`；`search_file` 仍保留 handler 别名（兼容旧调用），不再出现在 `Definitions()`。
+- **子 Agent 默认工具**：`read_file`、`glob_files`、`grep_file`、`bash_run`；父 Agent 可下放列表含 `grep_files`。
+- **审批策略**：新只读工具默认 `never`（`policy` + `tool.approval.txt`）。
+- **工具描述**：各工具 `description` 仅描述自身能力，不交叉引用其它工具名。
+
+### 移除
+
+- **`search_file.go`**：逻辑并入 `grep_file` / `grep_shared`。
+
+（Git **tag**：`v0.2.6`。）
+
 ## [0.2.5] - 2026-06-08
 
 **0.x 预览**：在 **v0.2.4** 基础上收敛 **LLM 厂商适配**、**turn/session 模块边界** 与 **流式中断 history** 行为。

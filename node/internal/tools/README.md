@@ -9,6 +9,8 @@ N3 在 Node 进程内本地执行；工具均为**同步实现**，通过通用�
 | `background_jobs.go` | 后台任务注册表、`StartBackground` |
 | `background_job_tools.go` | `background_job_status` / `background_job_cancel` |
 | `fs.go` | `read_file`、`write_file`、`search_replace` |
+| `glob_files.go` / `grep_file.go` / `grep_files.go` | 按名列举、`grep_file` 单文件检索、`grep_files` 目录树检索（`search_file` 为兼容 handler 别名） |
+| `fs_glob.go` / `grep_shared.go` | glob 遍历（`doublestar`）与行匹配共用逻辑 |
 | `bash.go` / `bash_runner.go` / `bash_shell.go` / `bash_policy.go` | `bash_run`（bash/cmd/powershell、cwd、sudo/su 拦截、超时降级） |
 | `triggers.go` | `trigger_list/get/create/update/delete/fire`（见下节） |
 

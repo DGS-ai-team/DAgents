@@ -4,6 +4,9 @@
 
 # --- 免审批：只读或低风险 ---
 read_file=never
+glob_files=never
+grep_file=never
+grep_files=never
 search_file=never
 host_platform=never
 ask_user_information=never
