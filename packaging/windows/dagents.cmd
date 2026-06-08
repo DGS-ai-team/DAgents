@@ -104,8 +104,8 @@ echo   dagents version             Print version information
 echo.
 echo Config:
 echo   Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
-echo   Register Center: copy .env.example to .env for REGISTER_CENTER_* settings.
-echo   CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT / DAGENTS_API_BASE
+echo   Register Center only: copy .env.example to .env for REGISTER_CENTER_* settings.
+echo   CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
 popd >nul
 exit /b 0
 
