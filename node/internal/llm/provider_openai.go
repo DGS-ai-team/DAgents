@@ -22,4 +22,8 @@ func (openAIAdapter) PrepareOutboundMessages(messages []Message) ([]Message, err
 	return out, nil
 }
 
+func (openAIAdapter) MarshalChatRequestMessages([]Message) ([]map[string]any, bool, error) {
+	return nil, false, nil
+}
+
 func (openAIAdapter) RequestExtra() map[string]any { return nil }

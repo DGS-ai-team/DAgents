@@ -18,7 +18,31 @@
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
 | `InterruptPending` | 用户新消息打断 pending，补 interrupted tool_result |
 
-内部主要方法：`runOneStep`、`buildSystemPrompt`、`processToolCalls`、`executeAutoBatch`、`invokeTool`、`publishTurnIdleDone` 等。
+内部主要方法：`runOneStep`、`buildSystemPrompt`、`publishTurnIdleDone`（`tool_router.go` / `cancel_partial.go` / `history_write.go`）。
+
+## tool_router.go
+
+| 符号 | 说明 |
+|------|------|
+| `processToolCalls` | 工具分流与 HITL 暂停 |
+| `executeAutoBatch` / `invokeTool` / `executeTool` | 免审批工具执行 |
+| `executeSkillTool` | skills 工具与 loaded 状态写回 |
+| `publishToolCall` / `publishToolResult` | 工具 SSE |
+| `parseJSONArgs` / `buildUserInformationPayload` | HITL 载荷辅助 |
+
+## cancel_partial.go
+
+| 符号 | 说明 |
+|------|------|
+| `persistCancelledStream` | cancel 时保留部分 assistant |
+| `appendMissingToolResponses` | 未响应 tool_call 补位 |
+| `assistantMessageFromResult` | `ChatResult` → history assistant |
+
+## history_write.go
+
+| 符号 | 说明 |
+|------|------|
+| `appendHistory` / `insertHistory` | 规范化后写入 history + JSONL |
 
 ## prompt.go
 

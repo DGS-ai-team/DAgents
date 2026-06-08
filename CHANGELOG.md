@@ -2,6 +2,35 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.5] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.4** 基础上收敛 **LLM 厂商适配**、**turn/session 模块边界** 与 **流式中断 history** 行为。
+
+### 新增
+
+- **`llm/messageutil.go`**：`CloneMessage`、`EstimateMessageTokens`（含 `reasoning_content`）、DeepSeek/JSONL payload 辅助。
+- **Turn 模块拆分**：`tool_router.go`（工具分流与执行）、`cancel_partial.go`（流式 cancel 部分 assistant 落库）、`history_write.go`（history 写入）。
+- **`session/runtime_turn.go`**：`runTurnStep` / `finishTurnIdle` 统一四路 handler 脚手架。
+- **包文档**：`llm/`、`store/`、`api/`、`queue/`、`stream/`、`hitl/` 的 `README.md`。
+
+### 变更
+
+- **`MessageAdapter`**：新增 `MarshalChatRequestMessages`；DeepSeek 出站序列化集中在 `provider_deepseek.go`；`openai.go` 不再按厂商名分支。
+- **DeepSeek**：带 `tool_calls` 的 assistant 允许空 `reasoning_content`（出站强制键存在）；不再从最近 assistant 继承 reasoning。
+- **Token 估算**：压缩触发与 `GET /context` 共用 `llm.EstimateMessageTokens`。
+- **JSONL**：`messageToJournalPayload` 委托 `llm.MessageToJournalPayload`。
+
+### 修复
+
+- **流式 cancel**：`persistCancelledStream` 保留已流式输出的 assistant；未响应 `tool_calls` 补 interrupted tool 消息，保证下轮合法序列。
+- **子 Agent 结算**：`finishTurnIdle` 在 `applyStepOutcome` 之后调用，修复 `tryCompleteChildIfIdle` 看不到最终 assistant 的时序问题。
+
+### 移除
+
+- 死代码：`hitl/waiter.go`、`session.handleMessage`、`provider` 未使用的 reasoning 继承 helper。
+
+（Git **tag**：`v0.2.5`。）
+
 ## [0.2.4] - 2026-06-08
 
 **0.x 预览**：在 **v0.2.3** 基础上增加 **LLM 厂商适配层**、**usage / reasoning token 统计**，并统一 **双 TUI transcript 排版**。

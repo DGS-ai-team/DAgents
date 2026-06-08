@@ -78,7 +78,7 @@ func (j *Journal) AppendMessage(sessionID string, history *[]llm.Message, messag
 	if history == nil {
 		return
 	}
-	snapshot := cloneMessage(message)
+	snapshot := llm.CloneMessage(message)
 	*history = append(*history, message)
 	if j != nil {
 		j.RecordAppend(sessionID, snapshot)
@@ -90,7 +90,7 @@ func (j *Journal) InsertMessage(sessionID string, history *[]llm.Message, index 
 	if history == nil {
 		return
 	}
-	snapshot := cloneMessage(message)
+	snapshot := llm.CloneMessage(message)
 	if index < 0 {
 		index = 0
 	}

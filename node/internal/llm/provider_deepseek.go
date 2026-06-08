@@ -1,21 +1,19 @@
 package llm
 
 import (
-	"fmt"
 	"log/slog"
 	"strings"
 )
 
 // deepSeekAdapter 对齐 DeepSeek Thinking / Reasoner 文档：
-// - 响应含 reasoning_content；带 tool_calls 的 assistant 必须保留并回传；
-// - 纯对话 assistant（无 tool_calls）出站时移除 reasoning_content；
-// - 异步 tool_callback 合成消息缺 reasoning 时从最近 assistant 继承。
+// - 响应含 reasoning_content；带 tool_calls 的 assistant 必须保留并回传（键须存在，值可为空）；
+// - 纯对话 assistant（无 tool_calls）出站时移除 reasoning_content。
 type deepSeekAdapter struct{}
 
 func (deepSeekAdapter) Name() ProviderName { return ProviderDeepSeek }
 
 // NormalizeAssistantForStorage 规范化 assistant 消息，存储时移除 reasoning_content
-func (deepSeekAdapter) NormalizeAssistantForStorage(existing []Message, msg Message, logger *slog.Logger) Message {
+func (deepSeekAdapter) NormalizeAssistantForStorage(_ []Message, msg Message, logger *slog.Logger) Message {
 	normalized := cloneMessage(msg)
 	if normalized.Role != "assistant" || len(normalized.ToolCalls) == 0 {
 		return normalized
@@ -23,10 +21,8 @@ func (deepSeekAdapter) NormalizeAssistantForStorage(existing []Message, msg Mess
 	if strings.TrimSpace(normalized.ReasoningContent) != "" {
 		return normalized
 	}
-	if isToolCallbackMessage(normalized) {
-		normalized.ReasoningContent = latestAssistantReasoningContent(existing)
-	} else if logger != nil {
-		defaultAdapterLogger(logger).Warn("assistant tool_calls message missing reasoning_content; writing empty fallback")
+	if len(normalized.ToolCalls) > 0 && logger != nil {
+		defaultAdapterLogger(logger).Warn("assistant tool_calls message has empty reasoning_content")
 	}
 	return normalized
 }
@@ -40,14 +36,24 @@ func (deepSeekAdapter) PrepareOutboundMessages(messages []Message) ([]Message, e
 			continue
 		}
 		if len(out[i].ToolCalls) > 0 {
-			if strings.TrimSpace(out[i].ReasoningContent) == "" {
-				return nil, fmt.Errorf("deepseek: assistant message[%d] has tool_calls but missing reasoning_content", i)
-			}
 			continue
 		}
 		out[i].ReasoningContent = ""
 	}
 	return out, nil
+}
+
+// MarshalChatRequestMessages 为 DeepSeek thinking+tools 序列化出站 messages。
+func (deepSeekAdapter) MarshalChatRequestMessages(messages []Message) ([]map[string]any, bool, error) {
+	out := make([]map[string]any, len(messages))
+	for i, m := range messages {
+		payload, err := MessageToDeepSeekAPIPayload(m)
+		if err != nil {
+			return nil, false, err
+		}
+		out[i] = payload
+	}
+	return out, true, nil
 }
 
 // RequestExtra 请求额外参数

@@ -90,6 +90,7 @@ flowchart TB
 |------|------|
 | `manager.go` | `Manager`、`TurnOptions`、会话 CRUD、入队、skills、上下文 API |
 | `runtime.go` | `runtime` 结构体、构造、`consumeLoop`、human/tool/resume 处理、持久化 |
+| `runtime_turn.go` | `runTurnStep` 单步 turn 脚手架 |
 | `runtime_child.go` | `newChildRuntime`、子 session 元数据、`tryCompleteChildIfIdle` |
 | `manager_child.go` | `SpawnChild` / `StopChild`、`childagent.Host`、子任务入队与 resume 路由 |
 | `context_view.go` | `ContextView`（`GET /context`）、token 粗算 |

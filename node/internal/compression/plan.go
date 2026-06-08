@@ -16,7 +16,7 @@ type compressDecision struct {
 func shouldCompress(messages []llm.Message, silentThreshold, blockingThreshold int) compressDecision {
 	silentThreshold = max(0, silentThreshold)
 	blockingThreshold = max(0, blockingThreshold)
-	total := estimateTokens(messages)
+	total := llm.EstimateMessageTokens(messages)
 
 	var level string
 	if blockingThreshold > 0 && total >= blockingThreshold {
@@ -31,17 +31,6 @@ func shouldCompress(messages []llm.Message, silentThreshold, blockingThreshold i
 		return compressDecision{Should: false, TriggerLevel: level, TotalTokens: total}
 	}
 	return compressDecision{Should: true, TriggerLevel: level, TotalTokens: total}
-}
-
-func estimateTokens(messages []llm.Message) int {
-	total := 0
-	for _, m := range messages {
-		total += len(m.Content)/4 + 16
-		if len(m.ToolCalls) > 0 {
-			total += len(m.ToolCalls) * 32
-		}
-	}
-	return total
 }
 
 func selectCompressRange(messages []llm.Message) (start, end int, picked []llm.Message, ok bool) {

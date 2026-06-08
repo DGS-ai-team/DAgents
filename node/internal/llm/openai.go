@@ -89,13 +89,26 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		return ChatResult{}, fmt.Errorf("llm api key is not configured")
 	}
 
-	body, err := marshalChatRequest(chatRequest{
-		Model:         c.cfg.Model,
-		Messages:      MessagesWithSystem(req.SystemPrompt, req.Messages),
-		Stream:        true,
-		Tools:         req.Tools,
-		StreamOptions: &streamOptions{IncludeUsage: true},
-	}, c.cfg.RequestExtra)
+	var body []byte
+	var err error
+	if len(req.APIMessages) > 0 {
+		body, err = marshalChatRequestMap(map[string]any{
+			"model":          c.cfg.Model,
+			"messages":       req.APIMessages,
+			"stream":         true,
+			"tools":          req.Tools,
+			"stream_options": &streamOptions{IncludeUsage: true},
+		}, c.cfg.RequestExtra)
+	} else {
+		msgs := MessagesWithSystem(req.SystemPrompt, req.Messages)
+		body, err = marshalChatRequest(chatRequest{
+			Model:         c.cfg.Model,
+			Messages:      msgs,
+			Stream:        true,
+			Tools:         req.Tools,
+			StreamOptions: &streamOptions{IncludeUsage: true},
+		}, c.cfg.RequestExtra)
+	}
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -128,7 +141,11 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return ChatResult{Content: full.String(), ToolCalls: toolAcc.finalize()}, ctx.Err()
+			return ChatResult{
+				Content:          full.String(),
+				ReasoningContent: fullReasoning.String(),
+				ToolCalls:        toolAcc.finalize(),
+			}, ctx.Err()
 		default:
 		}
 		line := strings.TrimSpace(scanner.Text())
@@ -289,6 +306,18 @@ func marshalChatRequest(body any, extra map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return mergeRequestExtra(raw, extra)
+}
+
+func marshalChatRequestMap(body map[string]any, extra map[string]any) ([]byte, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	return mergeRequestExtra(raw, extra)
+}
+
+func mergeRequestExtra(raw []byte, extra map[string]any) ([]byte, error) {
 	if len(extra) == 0 {
 		return raw, nil
 	}

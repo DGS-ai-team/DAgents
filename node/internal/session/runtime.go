@@ -226,46 +226,26 @@ func (r *runtime) handleHumanMessage(parent context.Context, content string) {
 		r.orch.InterruptPending(r.session.ID, &r.messages, pending)
 	}
 	r.toolLoopCount = 0
-	if r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
-	}
-	turnCtx, cancel := context.WithCancel(parent)
-	r.turnCancel = cancel
-	r.state = turn.StateModelStreaming
-	history := r.messages
 	r.mu.Unlock()
 
-	var scheduleToolResult bool
-	defer func() {
-		r.mu.Lock()
-		r.state = turn.StateIdle
-		r.turnCancel = nil
-		r.mu.Unlock()
-		if !scheduleToolResult {
-			r.tryCompleteChildIfIdle()
-		}
-	}()
-
-	setState := func(s turn.State) {
-		r.mu.Lock()
-		r.state = s
-		r.mu.Unlock()
-	}
-
-	outcome := r.orch.RunHumanMessageTurn(turnCtx, r.session.ID, &history, content, setState)
+	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, content, setState)
+	})
 	if outcome.Err != nil {
 		r.mu.Lock()
 		r.messages = history
 		r.mu.Unlock()
 		r.persist(context.Background())
+		r.finishTurnIdle(outcome)
 		return
 	}
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	scheduleToolResult = outcome.ScheduleToolResult
 	if outcome.ScheduleToolResult {
 		_ = r.scheduleToolResult()
+	} else {
+		r.finishTurnIdle(outcome)
 	}
 	r.persist(context.Background())
 }
@@ -273,44 +253,20 @@ func (r *runtime) handleHumanMessage(parent context.Context, content string) {
 func (r *runtime) afterToolStep(outcome turn.StepOutcome) {
 	if outcome.ScheduleToolResult {
 		_ = r.scheduleToolResult()
+	} else {
+		r.finishTurnIdle(outcome)
 	}
 	r.persist(context.Background())
 }
 
 func (r *runtime) handleToolResult(parent context.Context) {
-	r.mu.Lock()
-	if r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
-	}
-	turnCtx, cancel := context.WithCancel(parent)
-	r.turnCancel = cancel
-	r.state = turn.StateModelStreaming
-	history := r.messages
-	loopCount := r.toolLoopCount
-	r.mu.Unlock()
-
-	var scheduleToolResult bool
-	defer func() {
-		r.mu.Lock()
-		r.state = turn.StateIdle
-		r.turnCancel = nil
-		r.mu.Unlock()
-		if !scheduleToolResult {
-			r.tryCompleteChildIfIdle()
-		}
-	}()
-
-	setState := func(s turn.State) {
-		r.mu.Lock()
-		r.state = s
-		r.mu.Unlock()
-	}
-
-	outcome := r.orch.RunToolMessageTurn(turnCtx, r.session.ID, &history, setState, loopCount)
+	loopCount := r.toolLoopCountSnapshot()
+	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+		return r.orch.RunToolMessageTurn(ctx, r.session.ID, history, setState, loopCount)
+	})
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	scheduleToolResult = outcome.ScheduleToolResult
 	r.afterToolStep(outcome)
 }
 
@@ -318,52 +274,21 @@ func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.A
 	if payload == nil {
 		return
 	}
-	r.mu.Lock()
-	if r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
-	}
-	turnCtx, cancel := context.WithCancel(parent)
-	r.turnCancel = cancel
-	r.state = turn.StateModelStreaming
-	history := r.messages
-	loopCount := r.toolLoopCount
-	r.mu.Unlock()
-
-	var scheduleToolResult bool
-	defer func() {
-		r.mu.Lock()
-		r.state = turn.StateIdle
-		r.turnCancel = nil
-		r.mu.Unlock()
-		if !scheduleToolResult {
-			r.tryCompleteChildIfIdle()
-		}
-	}()
-
-	setState := func(s turn.State) {
-		r.mu.Lock()
-		r.state = s
-		r.mu.Unlock()
-	}
-
-	outcome := r.orch.HandleAsyncToolResult(turnCtx, r.session.ID, &history, turn.AsyncToolResultInput{
-		JobID:      payload.JobID,
-		ToolName:   payload.ToolName,
-		ToolCallID: payload.ToolCallID,
-		Status:     payload.Status,
-		ResultText: payload.ResultText,
-		ErrorText:  payload.ErrorText,
-	}, setState, loopCount)
+	loopCount := r.toolLoopCountSnapshot()
+	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+		return r.orch.HandleAsyncToolResult(ctx, r.session.ID, history, turn.AsyncToolResultInput{
+			JobID:      payload.JobID,
+			ToolName:   payload.ToolName,
+			ToolCallID: payload.ToolCallID,
+			Status:     payload.Status,
+			ResultText: payload.ResultText,
+			ErrorText:  payload.ErrorText,
+		}, setState, loopCount)
+	})
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	scheduleToolResult = outcome.ScheduleToolResult
 	r.afterToolStep(outcome)
-}
-
-func (r *runtime) handleMessage(parent context.Context, content string) {
-	// 兼容旧调用路径；与 handleHumanMessage 等价。
-	r.handleHumanMessage(parent, content)
 }
 
 func (r *runtime) handleResume(parent context.Context, resumeValue map[string]any) {
@@ -378,10 +303,6 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		return
 	}
 	pendingKind, pendingToolCallID := pendingHITLLogFields(pending)
-	turnCtx, cancel := context.WithCancel(parent)
-	r.turnCancel = cancel
-	r.state = turn.StateAwaitingTool
-	history := r.messages
 	loopCount := r.toolLoopCount
 	r.mu.Unlock()
 
@@ -405,29 +326,12 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		"resume_value", resumeValue,
 	)
 
-	var scheduleToolResult bool
-	defer func() {
-		r.mu.Lock()
-		r.state = turn.StateIdle
-		r.turnCancel = nil
-		r.mu.Unlock()
-		if !scheduleToolResult {
-			r.tryCompleteChildIfIdle()
-		}
-	}()
-
-	setState := func(s turn.State) {
-		r.mu.Lock()
-		r.state = s
-		r.mu.Unlock()
-	}
-
-	outcome := r.orch.ContinueAfterResume(turnCtx, r.session.ID, &history, resumeValue, pending, setState, loopCount)
-
+	outcome, history := r.runTurnStep(parent, turn.StateAwaitingTool, false, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+		return r.orch.ContinueAfterResume(ctx, r.session.ID, history, resumeValue, pending, setState, loopCount)
+	})
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	scheduleToolResult = outcome.ScheduleToolResult
 	r.afterToolStep(outcome)
 }
 

@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"encoding/json"
 	"log/slog"
 	"strings"
 
@@ -19,11 +18,14 @@ const (
 // MessageAdapter 按厂商处理会话消息的存储规范化与 API 出站形态。
 //
 // 内部 history 可保留 reasoning_content；PrepareOutboundMessages 在 StreamChat 发送前
-// 按厂商规则裁剪/校验，避免 DeepSeek 等接口返回 400。
+// 按厂商规则裁剪/校验；MarshalChatRequestMessages 负责 HTTP 请求体 messages 字段的最终序列化。
 type MessageAdapter interface {
 	Name() ProviderName
 	NormalizeAssistantForStorage(existing []Message, msg Message, logger *slog.Logger) Message
 	PrepareOutboundMessages(messages []Message) ([]Message, error)
+	// MarshalChatRequestMessages 序列化出站 messages（已含 system）。
+	// ok=false 时由 OpenAIClient 使用 []Message 默认 JSON 编码；ok=true 时使用 payloads。
+	MarshalChatRequestMessages(messages []Message) (payloads []map[string]any, ok bool, err error)
 	RequestExtra() map[string]any
 }
 
@@ -38,35 +40,7 @@ func NewMessageAdapter(provider string) MessageAdapter {
 }
 
 func cloneMessage(message Message) Message {
-	raw, err := json.Marshal(message)
-	if err != nil {
-		return message
-	}
-	var out Message
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return message
-	}
-	return out
-}
-
-func latestAssistantReasoningContent(messages []Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.Role != "assistant" {
-			continue
-		}
-		return msg.ReasoningContent
-	}
-	return ""
-}
-
-func isToolCallbackMessage(msg Message) bool {
-	for _, tc := range msg.ToolCalls {
-		if tc.Function.Name == "tool_callback" {
-			return true
-		}
-	}
-	return false
+	return CloneMessage(message)
 }
 
 func defaultAdapterLogger(logger *slog.Logger) *slog.Logger {

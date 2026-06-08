@@ -53,6 +53,7 @@
 | `enqueue` | 带优先级入队；高优先级可打断当前 turn |
 | `cancelTurn` / `stop` | 取消或停止 consumer |
 | `contextView` | 组装 `ContextView` |
+| `runTurnStep` / `finishTurnIdle` | 单步 turn 脚手架；`finishTurnIdle` 在 `applyStepOutcome` 后触发子 Agent 结算 |
 | `getLoadedSkills` / `setLoadedSkills` / `setLoadedSkillsByName` 等 | skills 内存状态 |
 
 ## runtime_child.go

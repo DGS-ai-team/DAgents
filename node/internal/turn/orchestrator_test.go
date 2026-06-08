@@ -526,6 +526,63 @@ func TestRunMessageTurnCancelled(t *testing.T) {
 	}
 }
 
+func TestRunMessageTurnCancelledPersistsPartialAssistant(t *testing.T) {
+	hub := stream.NewHub(16, logx.Discard())
+	orch := testOrchestrator(t, hub, &partialCancelMock{
+		content:   "partial answer",
+		reasoning: "partial think",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var history []llm.Message
+	go func() {
+		defer close(done)
+		_, _, _ = orch.RunMessageTurn(ctx, "sess-1", &history, "hi", nil, 0)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+	if len(history) != 2 {
+		t.Fatalf("history = %+v", history)
+	}
+	assistant := history[1]
+	if assistant.Role != "assistant" || assistant.Content != "partial answer" {
+		t.Fatalf("assistant = %+v", assistant)
+	}
+	if assistant.ReasoningContent != "partial think" {
+		t.Fatalf("reasoning_content = %q", assistant.ReasoningContent)
+	}
+}
+
+type partialCancelMock struct {
+	content   string
+	reasoning string
+	toolCalls []llm.ToolCall
+}
+
+func (m *partialCancelMock) StreamChat(ctx context.Context, _ llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	if handler.OnDelta != nil && m.content != "" {
+		handler.OnDelta(m.content)
+	}
+	if handler.OnReasoningDelta != nil && m.reasoning != "" {
+		handler.OnReasoningDelta(m.reasoning)
+	}
+	<-ctx.Done()
+	return llm.ChatResult{
+		Content:          m.content,
+		ReasoningContent: m.reasoning,
+		ToolCalls:        append([]llm.ToolCall(nil), m.toolCalls...),
+	}, ctx.Err()
+}
+
+func (m *partialCancelMock) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+
+func (m *partialCancelMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 func TestRunMessageTurnLLMError(t *testing.T) {
 	hub := stream.NewHub(16, logx.Discard())
 	orch := testOrchestrator(t, hub, &errMock{msg: "boom"})

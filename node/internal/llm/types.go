@@ -35,6 +35,8 @@ type ChatRequest struct {
 	SystemPrompt string
 	Messages     []Message
 	Tools        []tools.ToolDef
+	// APIMessages 非空时直接作为 HTTP 请求体 messages 字段（已由 MessageAdapter 序列化，通常已含 system）。
+	APIMessages []map[string]any
 }
 
 // ChatResult 为一次 completion 聚合结果。

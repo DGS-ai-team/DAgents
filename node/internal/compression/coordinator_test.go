@@ -44,7 +44,7 @@ func sampleMessages() []llm.Message {
 
 func TestShouldCompressBlockingPriority(t *testing.T) {
 	msgs := sampleMessages()
-	total := estimateTokens(msgs)
+	total := llm.EstimateMessageTokens(msgs)
 	d := shouldCompress(msgs, 10, total)
 	if !d.Should || d.TriggerLevel != "blocking" {
 		t.Fatalf("decision = %+v total=%d", d, total)

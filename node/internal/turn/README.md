@@ -121,7 +121,10 @@ sequenceDiagram
 
 | 文件 | 说明 |
 |------|------|
-| `orchestrator.go` | `Orchestrator`、单步循环、工具/HITL/临时 Agent 路由、SSE |
+| `orchestrator.go` | `Orchestrator`、单步 LLM 循环、SSE、usage |
+| `tool_router.go` | 工具分流（policy/childagent/skills/HITL）、并行执行 |
+| `cancel_partial.go` | 流式 cancel 部分 assistant 落库与 tool 补位 |
+| `history_write.go` | `appendHistory` / `insertHistory` |
 | `prompt.go` | `BuildSystemPrompt`、`staticSystemPrompt`、`DefaultMaxToolLoops` |
 | `pending.go` | `PendingHITL`、`HITLKind`、`ToolUserInterruptedMessage` |
 | `step.go` | `StepOutcome`、`RuntimeToolMessageContent` |

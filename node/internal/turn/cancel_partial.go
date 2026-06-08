@@ -1,0 +1,82 @@
+package turn
+
+import (
+	"strings"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+)
+
+func assistantMessageFromResult(result llm.ChatResult) llm.Message {
+	msg := llm.Message{Role: "assistant", Content: result.Content}
+	if len(result.ToolCalls) > 0 {
+		msg.ToolCalls = result.ToolCalls
+		msg.ReasoningContent = result.ReasoningContent
+		return msg
+	}
+	if strings.TrimSpace(result.ReasoningContent) != "" {
+		msg.ReasoningContent = result.ReasoningContent
+	}
+	return msg
+}
+
+func hasPersistableAssistantPayload(msg llm.Message) bool {
+	return strings.TrimSpace(msg.Content) != "" ||
+		strings.TrimSpace(msg.ReasoningContent) != "" ||
+		len(msg.ToolCalls) > 0
+}
+
+func (o *Orchestrator) persistCancelledStream(sessionID string, history *[]llm.Message, result llm.ChatResult) {
+	assistant := assistantMessageFromResult(result)
+	if !hasPersistableAssistantPayload(assistant) {
+		return
+	}
+	o.appendHistory(sessionID, history, assistant)
+	if len(assistant.ToolCalls) > 0 {
+		o.appendMissingToolResponses(sessionID, history, assistant.ToolCalls, ToolStreamInterruptedMessage, map[string]any{"interrupted_by_stream_cancel": true})
+	}
+}
+
+func toolResponsesAfterLastAssistant(messages []llm.Message) map[string]struct{} {
+	lastAssistant := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			lastAssistant = i
+			break
+		}
+	}
+	if lastAssistant < 0 {
+		return nil
+	}
+	answered := make(map[string]struct{})
+	for i := lastAssistant + 1; i < len(messages); i++ {
+		msg := messages[i]
+		if msg.Role == "tool" && strings.TrimSpace(msg.ToolCallID) != "" {
+			answered[msg.ToolCallID] = struct{}{}
+		}
+	}
+	return answered
+}
+
+func (o *Orchestrator) appendMissingToolResponses(
+	sessionID string,
+	history *[]llm.Message,
+	calls []llm.ToolCall,
+	content string,
+	extra map[string]any,
+) {
+	if len(calls) == 0 {
+		return
+	}
+	answered := toolResponsesAfterLastAssistant(*history)
+	for _, tc := range calls {
+		if _, ok := answered[tc.ID]; ok {
+			continue
+		}
+		o.publishToolResult(sessionID, tc, content, false, extra)
+		o.appendHistory(sessionID, history, llm.Message{
+			Role:       "tool",
+			ToolCallID: tc.ID,
+			Content:    content,
+		})
+	}
+}

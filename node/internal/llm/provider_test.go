@@ -6,7 +6,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 )
 
-func TestDeepSeekAdapter_toolCallbackInheritsReasoning(t *testing.T) {
+func TestDeepSeekAdapter_toolCallbackKeepsEmptyReasoning(t *testing.T) {
 	adapter := deepSeekAdapter{}
 	existing := []Message{{
 		Role:             "assistant",
@@ -23,8 +23,8 @@ func TestDeepSeekAdapter_toolCallbackInheritsReasoning(t *testing.T) {
 			Function: ToolCallFunction{Name: "tool_callback", Arguments: "{}"},
 		}},
 	}, logx.Discard())
-	if got.ReasoningContent != "cached thinking" {
-		t.Fatalf("reasoning_content = %q", got.ReasoningContent)
+	if got.ReasoningContent != "" {
+		t.Fatalf("reasoning_content = %q, want empty", got.ReasoningContent)
 	}
 }
 
@@ -43,17 +43,68 @@ func TestDeepSeekAdapter_prepareOutbound_stripsFinalAssistantReasoning(t *testin
 	}
 }
 
-func TestDeepSeekAdapter_prepareOutbound_requiresReasoningWithToolCalls(t *testing.T) {
+func TestDeepSeekAdapter_prepareOutbound_allowsEmptyReasoningWithToolCalls(t *testing.T) {
 	adapter := deepSeekAdapter{}
-	_, err := adapter.PrepareOutboundMessages([]Message{{
+	out, err := adapter.PrepareOutboundMessages([]Message{{
 		Role: "assistant",
 		ToolCalls: []ToolCall{{
 			ID: "c1", Type: "function",
 			Function: ToolCallFunction{Name: "bash_run", Arguments: "{}"},
 		}},
 	}})
-	if err == nil {
-		t.Fatal("expected error for missing reasoning_content with tool_calls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out[0].ToolCalls) != 1 {
+		t.Fatalf("tool_calls = %+v", out[0].ToolCalls)
+	}
+	payloads, ok, err := adapter.MarshalChatRequestMessages(out)
+	if err != nil || !ok {
+		t.Fatalf("MarshalChatRequestMessages ok=%v err=%v", ok, err)
+	}
+	if _, ok := payloads[0]["reasoning_content"]; !ok {
+		t.Fatal("expected reasoning_content key in API payload")
+	}
+}
+
+func TestDeepSeekAdapter_marshalChatRequestMessages_keepsReasoningKeyForToolCalls(t *testing.T) {
+	adapter := deepSeekAdapter{}
+	payloads, ok, err := adapter.MarshalChatRequestMessages([]Message{{
+		Role: "assistant",
+		ToolCalls: []ToolCall{{
+			ID: "call-1", Type: "function",
+			Function: ToolCallFunction{Name: "bash_run", Arguments: "{}"},
+		}},
+	}})
+	if err != nil || !ok {
+		t.Fatalf("MarshalChatRequestMessages ok=%v err=%v", ok, err)
+	}
+	if payloads[0]["reasoning_content"] != "" {
+		t.Fatalf("reasoning_content = %v", payloads[0]["reasoning_content"])
+	}
+}
+
+func TestDeepSeekAdapter_marshalChatRequestMessages_omitsReasoningWithoutToolCalls(t *testing.T) {
+	adapter := deepSeekAdapter{}
+	payloads, ok, err := adapter.MarshalChatRequestMessages([]Message{{
+		Role: "assistant", Content: "hi", ReasoningContent: "think",
+	}})
+	if err != nil || !ok {
+		t.Fatalf("MarshalChatRequestMessages ok=%v err=%v", ok, err)
+	}
+	if _, exists := payloads[0]["reasoning_content"]; exists {
+		t.Fatalf("unexpected reasoning_content: %+v", payloads[0])
+	}
+}
+
+func TestOpenAIAdapter_marshalChatRequestMessages_usesDefaultEncoding(t *testing.T) {
+	adapter := openAIAdapter{}
+	payloads, ok, err := adapter.MarshalChatRequestMessages([]Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || payloads != nil {
+		t.Fatalf("ok=%v payloads=%v, want default encoding", ok, payloads)
 	}
 }
 

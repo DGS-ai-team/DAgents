@@ -4,6 +4,9 @@ import "github.com/DGS-ai-team/DAgents/node/internal/llm"
 
 const ToolUserInterruptedMessage = "用户需要补充信息，打断了工具执行。"
 
+// ToolStreamInterruptedMessage 为流式 assistant 输出或工具执行被 cancel 时的 tool 结果文案。
+const ToolStreamInterruptedMessage = "流式输出被用户中断。"
+
 // HITLKind 表示暂停等待的 HITL 类型。
 type HITLKind string
 

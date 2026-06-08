@@ -34,8 +34,19 @@ func (c *adapterClient) StreamChat(ctx context.Context, req ChatRequest, handler
 	if err != nil {
 		return ChatResult{}, err
 	}
-	req.Messages = prepared
-	return c.inner.StreamChat(ctx, req, handler)
+	outbound := ChatRequest{
+		SystemPrompt: req.SystemPrompt,
+		Messages:     prepared,
+		Tools:        req.Tools,
+	}
+	ready := MessagesWithSystem(req.SystemPrompt, prepared)
+	if payloads, ok, merr := c.adapter.MarshalChatRequestMessages(ready); ok {
+		if merr != nil {
+			return ChatResult{}, merr
+		}
+		outbound.APIMessages = payloads
+	}
+	return c.inner.StreamChat(ctx, outbound, handler)
 }
 
 func (c *adapterClient) CompleteText(ctx context.Context, req CompleteRequest) (string, error) {
