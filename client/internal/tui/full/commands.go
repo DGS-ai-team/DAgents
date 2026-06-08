@@ -21,10 +21,12 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 	cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
 	switch cmd {
 	case "help", "h", "?":
-		m.transcript.Add("[system] " + strings.TrimSpace(`命令: /status /context /sessions /switch /new /clear /cancel /children /skill /tools /reasoning /quit`))
+		m.transcript.Add("[system] " + strings.TrimSpace(`命令: /status /context /compress /sessions /switch /new /clear /cancel /children /skill /tools /reasoning /quit`))
 		m.syncViewport()
 	case "context":
 		err = m.enterContextView()
+	case "compress":
+		err = m.runCompress()
 	case "skill":
 		err = m.handleSkillCommand(parts[1:])
 	case "status":
@@ -106,6 +108,62 @@ func (m *model) enterContextView() error {
 	m.helpLine = "Esc 返回聊天记录"
 	m.viewport.SetContent(m.contextText)
 	m.statusLine = "context 视图"
+	return nil
+}
+
+func (m *model) runCompress() error {
+	if m.turn.Awaiting() {
+		return fmt.Errorf("当前 turn 进行中，请稍后再试")
+	}
+	m.statusLine = "正在压缩上下文…"
+	m.syncViewport()
+	ctx, cancel := context.WithTimeout(m.ctx, 5*time.Minute)
+	defer cancel()
+	res, err := m.client.CompressSessionContext(ctx, m.currentSession())
+	if err != nil {
+		m.statusLine = ""
+		return err
+	}
+	line := clihitl.FormatContextCompression("context_compression_blocking", map[string]any{
+		"phase":                    "end",
+		"status":                   res.Status,
+		"compressed_message_count": res.CompressedMessageCount,
+	})
+	if line == "" {
+		switch res.Status {
+		case "noop":
+			line = "[compression] 当前上下文无需压缩（消息不足或无可压缩区间）"
+		case "disabled":
+			line = "[compression] 压缩未启用（Node 未配置 LLM 或 compression）"
+		case "unsupported":
+			line = "[compression] 子 Agent session 不支持手动压缩"
+		case "in_progress":
+			mode := res.TriggerLevel
+			if mode == "" {
+				mode = "unknown"
+			}
+			if res.CompressedMessageCount > 0 {
+				line = fmt.Sprintf("[compression] 已有压缩任务进行中（%s，目标 %d 条）", mode, res.CompressedMessageCount)
+			} else {
+				line = fmt.Sprintf("[compression] 已有压缩任务进行中（%s）", mode)
+			}
+		default:
+			line = fmt.Sprintf("[compression] 压缩结束（status=%s）", res.Status)
+		}
+	}
+	m.transcript.Add("[system] " + line)
+	if res.Status == "in_progress" {
+		m.statusLine = "压缩进行中"
+		m.syncViewport()
+		return nil
+	}
+	if res.MessagesTotalTokens > 0 {
+		m.messagesTotalTokens = res.MessagesTotalTokens
+	} else {
+		m.scheduleContextTokenRefresh()
+	}
+	m.statusLine = "压缩完成"
+	m.syncViewport()
 	return nil
 }
 

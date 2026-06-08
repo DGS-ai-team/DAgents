@@ -1970,6 +1970,9 @@ class DAgentsTuiApp(App[None]):
         if value == "/context":
             await self._show_context_view()
             return
+        if value == "/compress":
+            await self._compress_context()
+            return
         if value == "/skill" or value.startswith("/skill "):
             await self._handle_skill_command(value)
             return
@@ -2115,8 +2118,16 @@ class DAgentsTuiApp(App[None]):
             f"queue_pending: {data.get('queue_pending') or 0}",
             f"has_active_turn: {'yes' if data.get('has_active_turn') else 'no'}",
             "",
-            "loaded_skills:",
+            "system_prompt:",
         ]
+        system_prompt = str(data.get("system_prompt") or "").strip()
+        if not system_prompt:
+            lines.append("  (none)")
+        else:
+            for content_line in system_prompt.splitlines():
+                safe_line = escape(content_line) if content_line else "[dim](空行)[/dim]"
+                lines.append(f"  {safe_line}")
+        lines.extend(["", "loaded_skills:"])
         loaded = data.get("loaded_skills")
         loaded_rows = loaded if isinstance(loaded, list) else []
         if not loaded_rows:
@@ -2138,6 +2149,36 @@ class DAgentsTuiApp(App[None]):
             lines.extend(self._format_context_recent_message(idx, item))
         lines.extend(["", "[dim]Esc 返回聊天记录[/dim]"])
         return "\n".join(lines)
+
+    async def _compress_context(self) -> None:
+        """手动触发阻塞压缩并在 transcript 输出结果。"""
+        log = self._transcript_log()
+        if self._controller.awaiting_user_turn:
+            log.write("[yellow]当前 turn 进行中，请稍后再试[/yellow]")
+            return
+        try:
+            result = await self._controller.compress_context()
+        except Exception as exc:
+            log.write(f"[red]compress failed: {exc}[/red]")
+            return
+        status = str(result.get("status") or "")
+        if status == "in_progress":
+            mode = str(result.get("trigger_level") or "unknown")
+            count = result.get("compressed_message_count")
+            if count:
+                log.write(
+                    f"[dim]Context compression already in progress ({mode}, target {count} messages)[/dim]"
+                )
+            else:
+                log.write(f"[dim]Context compression already in progress ({mode})[/dim]")
+            return
+        self._start_status_line("compression_blocking")
+        self._finish_status_line("compression_blocking", add_gap=False)
+        count = result.get("compressed_message_count")
+        detail = self._compression_detail_line("blocking", status, count)
+        if detail:
+            log.write(detail)
+        self._apply_top_status()
 
     def _format_context_recent_message(self, index: int, item: dict[str, Any]) -> list[str]:
         """格式化 `/context` 最近消息的一条记录。
@@ -2317,6 +2358,7 @@ class DAgentsTuiApp(App[None]):
             "  /help            Show this help",
             "  /status          Show API/session/SSE status",
             "  /context         Show current context view (Esc to return)",
+            "  /compress        Run blocking context compression once",
             "  /session         Show Agent Node sessions",
             "  /skill           Show loaded and available skills",
             "  /skill load NAME Load one skill into current session",

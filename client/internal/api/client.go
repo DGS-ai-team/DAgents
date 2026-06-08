@@ -92,8 +92,20 @@ type SessionContext struct {
 	HasActiveTurn         bool   `json:"has_active_turn"`
 	TurnState             string `json:"turn_state"`
 	RunTurnPhase          string `json:"run_turn_phase"`
+	SystemPrompt          string `json:"system_prompt"`
 	LoadedSkills          []LoadedSkillSummary `json:"loaded_skills"`
 	RecentMessages        []ContextMessagePreview `json:"recent_messages"`
+}
+
+// CompressContextResult 为 POST /v1/sessions/{id}/compress 响应。
+type CompressContextResult struct {
+	Status                 string `json:"status"`
+	TriggerLevel           string `json:"trigger_level"`
+	CompressedMessageCount int    `json:"compressed_message_count"`
+	CompressionStart       int    `json:"compression_start"`
+	CompressionEnd         int    `json:"compression_end"`
+	MessagesCount          int    `json:"messages_count"`
+	MessagesTotalTokens    int    `json:"messages_total_tokens"`
 }
 
 // LoadedSkillSummary 为 context/skills 中的已加载 skill 摘要。
@@ -162,6 +174,16 @@ func (c *Client) CancelTurn(ctx context.Context, sessionID string) (bool, error)
 func (c *Client) ClearSessionContext(ctx context.Context, sessionID string) error {
 	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/clear-context"
 	return c.postJSON(ctx, path, map[string]any{}, nil)
+}
+
+// CompressSessionContext 调用 POST /v1/sessions/{id}/compress，手动触发阻塞压缩。
+func (c *Client) CompressSessionContext(ctx context.Context, sessionID string) (*CompressContextResult, error) {
+	var out CompressContextResult
+	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/compress"
+	if err := c.postJSON(ctx, path, map[string]any{}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // DeleteSession 调用 DELETE /v1/sessions/{id}。

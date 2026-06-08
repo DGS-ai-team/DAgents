@@ -165,6 +165,10 @@ class SessionController:
     def sse_connected(self) -> bool:
         return self._sse_connected
 
+    @property
+    def awaiting_user_turn(self) -> bool:
+        return self._awaiting_user_turn
+
     async def start(self) -> None:
         """连接 Agent Node 并启动 SSE pump 与 render 循环。"""
         self._client = DAgentsApiClient(self.api_base)
@@ -282,6 +286,15 @@ class SessionController:
         """
         assert self._client is not None
         return await self._client.get_session_context(self.session_id)
+
+    async def compress_context(self) -> dict[str, Any]:
+        """手动触发一次阻塞压缩（POST /v1/sessions/{session_id}/compress）。"""
+        assert self._client is not None
+        result = await self._client.compress_session_context(self.session_id)
+        tokens = result.get("messages_total_tokens")
+        if isinstance(tokens, int) and tokens >= 0:
+            self._messages_total_tokens = tokens
+        return result
 
     async def cancel_current_turn(self) -> dict[str, Any]:
         """取消当前 session 的在途 turn，并解除本地用户轮次等待。

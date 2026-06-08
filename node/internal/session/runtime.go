@@ -429,9 +429,30 @@ func pendingHITLLogFields(pending *turn.PendingHITL) (kind string, toolCallID st
 	return kind, ""
 }
 
+func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
+	if r.isChildSession() {
+		return compression.ForceResult{Status: "unsupported"}
+	}
+	r.mu.Lock()
+	busy := r.state != turn.StateIdle || r.pending != nil
+	r.mu.Unlock()
+	if busy {
+		return compression.ForceResult{Status: "busy"}
+	}
+	if r.compression == nil {
+		return compression.ForceResult{Status: "disabled"}
+	}
+	r.mu.Lock()
+	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages)
+	r.mu.Unlock()
+	if result.Status == "applied" {
+		r.persist(ctx)
+	}
+	return result
+}
+
 func (r *runtime) contextView() *ContextView {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	msgs := append([]llm.Message(nil), r.messages...)
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
 	view := &ContextView{
@@ -449,6 +470,8 @@ func (r *runtime) contextView() *ContextView {
 	if view.LoadedSkills == nil {
 		view.LoadedSkills = []skills.LoadedSkill{}
 	}
+	r.mu.Unlock()
+	view.SystemPrompt = r.orch.SystemPromptForSession(r.session.ID)
 	return view
 }
 

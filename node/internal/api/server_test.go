@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
@@ -308,12 +309,12 @@ func TestSessionPersistenceAPI(t *testing.T) {
 	msgResp.Body.Close()
 
 	deadline := time.After(3 * time.Second)
+	var ctxBody sessionContextResponse
 	for {
 		ctxResp, err := http.Get(ts.URL + "/v1/sessions/" + created.SessionID + "/context")
 		if err != nil {
 			t.Fatal(err)
 		}
-		var ctxBody sessionContextResponse
 		_ = json.NewDecoder(ctxResp.Body).Decode(&ctxBody)
 		ctxResp.Body.Close()
 		if ctxBody.MessagesCount >= 2 {
@@ -325,6 +326,23 @@ func TestSessionPersistenceAPI(t *testing.T) {
 		default:
 			time.Sleep(30 * time.Millisecond)
 		}
+	}
+	if ctxBody.SystemPrompt == "" {
+		t.Fatal("expected non-empty system_prompt in context view")
+	}
+
+	compressResp, err := http.Post(ts.URL+"/v1/sessions/"+created.SessionID+"/compress", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compressBody compression.ForceResult
+	_ = json.NewDecoder(compressResp.Body).Decode(&compressBody)
+	compressResp.Body.Close()
+	if compressResp.StatusCode != http.StatusOK {
+		t.Fatalf("compress status = %d body=%+v", compressResp.StatusCode, compressBody)
+	}
+	if compressBody.Status != "applied" && compressBody.Status != "noop" {
+		t.Fatalf("unexpected compress status = %q", compressBody.Status)
 	}
 
 	delReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/v1/sessions/"+created.SessionID, nil)

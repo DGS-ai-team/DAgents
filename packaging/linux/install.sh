@@ -29,7 +29,7 @@ usage() {
 说明:
   - 拷贝 bin/、.runtime/、scripts/、配置示例与 dagents 启动脚本
   - 在 BIN_DIR 创建 dagents 符号链接
-  - 写入 DAGENTS_HOME 与 PATH（/etc/profile.d/dagents.sh 或 ~/.profile）
+  - 写入 DAGENTS_HOME 与 PATH（含 `bin/`、`.runtime/scripts/`；/etc/profile.d/dagents.sh 或 ~/.profile）
 EOF
 }
 
@@ -96,7 +96,7 @@ write_env_file() {
   cat > "${PREFIX}/env.sh" <<EOF
 # DAgents Local Assistant environment
 export DAGENTS_HOME="${PREFIX}"
-export PATH="${PREFIX}/bin:\${PATH}"
+export PATH="${PREFIX}/bin:${PREFIX}/.runtime/scripts:\${PATH}"
 EOF
   chmod 0644 "${PREFIX}/env.sh"
 }
@@ -112,7 +112,7 @@ setup_path_system() {
   cat > "${profile}" <<EOF
 # DAgents Local Assistant
 export DAGENTS_HOME="${PREFIX}"
-export PATH="${PREFIX}/bin:\$PATH"
+export PATH="${PREFIX}/bin:${PREFIX}/.runtime/scripts:\$PATH"
 EOF
   chmod 0644 "${profile}"
   info "wrote ${profile}"

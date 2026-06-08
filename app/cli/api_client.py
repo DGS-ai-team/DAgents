@@ -133,6 +133,13 @@ class DAgentsApiClient:
             raise ValueError("session_id is required")
         return await self._get_json(f"/v1/sessions/{sid}/context")
 
+    async def compress_session_context(self, session_id: str) -> dict[str, Any]:
+        """POST /v1/sessions/{session_id}/compress，手动触发阻塞压缩。"""
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        return await self._post_json(f"/v1/sessions/{sid}/compress", {})
+
     async def cancel_current_turn(self, session_id: str) -> dict[str, Any]:
         sid = str(session_id or "").strip()
         if not sid:

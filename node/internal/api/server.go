@@ -213,6 +213,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/sessions", s.handleListSessions)
 	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", s.handleDeleteSession)
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/clear-context", s.handleClearContext)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/compress", s.handleCompressContext)
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/context", s.handleSessionContext)
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/cancel", s.handleCancelSession)
@@ -480,6 +481,7 @@ type sessionContextResponse struct {
 	HasActiveTurn         bool                    `json:"has_active_turn"`
 	TurnState             string                  `json:"turn_state,omitempty"`
 	RunTurnPhase          string                  `json:"run_turn_phase"`
+	SystemPrompt          string                  `json:"system_prompt,omitempty"`
 	LoadedSkills          []skills.LoadedSkill    `json:"loaded_skills"`
 	RecentMessages        []contextMessagePreview `json:"recent_messages"`
 }
@@ -527,6 +529,7 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 		ToolLoopCount:         view.ToolLoopCount,
 		QueuePending:          view.QueuePending,
 		HasActiveTurn:         view.HasActiveTurn,
+		SystemPrompt:          view.SystemPrompt,
 		LoadedSkills:          view.LoadedSkills,
 		RecentMessages:        recent,
 		RunTurnPhase:          turn.RunTurnPhase(view.TurnState),
@@ -538,6 +541,32 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 		resp.LoadedSkills = []skills.LoadedSkill{}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
+	// POST compress：手动触发一次阻塞压缩（忽略 token 阈值）。
+	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	if sessionID == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		return
+	}
+	result, err := s.sessions.CompressContext(r.Context(), sessionID)
+	if err != nil {
+		if err.Error() == "session_not_found" {
+			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+		} else {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
+		}
+		return
+	}
+	if result.Status == "busy" {
+		writeAPIError(w, http.StatusConflict, "turn_busy", "当前 turn 进行中，请稍后再试", map[string]any{
+			"session_id": sessionID,
+			"status":     result.Status,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 type postMessageRequest struct {

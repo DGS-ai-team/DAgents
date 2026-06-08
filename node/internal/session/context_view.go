@@ -17,6 +17,7 @@ type ContextView struct {
 	QueuePending          int
 	HasActiveTurn         bool
 	TurnState             turn.State
+	SystemPrompt          string
 	Messages              []llm.Message
 }
 

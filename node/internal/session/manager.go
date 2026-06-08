@@ -13,6 +13,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
+	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -297,6 +298,15 @@ func (m *Manager) LoadedSkills(sessionID string) ([]skills.LoadedSkill, error) {
 		return []skills.LoadedSkill{}, nil
 	}
 	return rec.LoadedSkills, nil
+}
+
+// CompressContext 对活跃 session 手动触发一次阻塞压缩。
+func (m *Manager) CompressContext(ctx context.Context, sessionID string) (compression.ForceResult, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return compression.ForceResult{}, fmt.Errorf("session_not_found")
+	}
+	return rt.compressContext(ctx), nil
 }
 
 // ClearContext 清空对话历史；若 turn 在途则先 cancel。

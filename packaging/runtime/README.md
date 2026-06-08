@@ -5,7 +5,8 @@
 | 子路径 | 说明 |
 |--------|------|
 | **`prompt_context/`** | 侧车 **`soul.md` / `user.md` / `custom.md`**：仓库内为 **空文件占位**（无预设文案）；详见 **`prompt_context/README.md`**。 |
-| **`scripts/`** | 独立脚本区占位（与 **skills** 区分）；见 **`prompt.py`** 中 **`.runtime` 约定** 说明。 |
+| **`scripts/`** | 独立脚本区占位（与 **skills** 区分）；**Windows 包**内置 **[OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)** 二进制见 **`scripts/OFFICECLI.md`**；索引 **`scripts_menu.md`** |
+| **`scripts_menu.md`** | `.runtime/scripts/` 工具索引（Agent 查阅） |
 | **`scripts/serve/`** | `dagents serve` 的 **startup.d** / **shutdown.d** 钩子目录；见 **`scripts/serve/README.md`**。 |
 | **`data/`** | 运行期数据目录占位。 |
 | **`skills/`** | 技能资源目录；默认 **`<运行根>/.runtime/skills`**；内置初始技能 **`write-skill`**（编写 **SKILL.md** 的约定与路径说明）。 |

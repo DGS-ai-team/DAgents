@@ -26,6 +26,46 @@ require_bin() {
   [[ -x "${BIN}/${name}" ]] || die "${BIN}/${name} was not found in ${DAGENTS_HOME}"
 }
 
+probe_node() {
+  "${BIN}/dagents-client" probe -config "${ROOT}/${CFG}" >/dev/null 2>&1
+}
+
+start_node_background() {
+  require_bin dagents-node
+  mkdir -p "${ROOT}/.runtime/logs"
+  echo "[dagents] starting node in background (logs: .runtime/logs/node.log)"
+  nohup "${BIN}/dagents-node" -config "${ROOT}/${CFG}" \
+    >>"${ROOT}/.runtime/logs/node.log" 2>>"${ROOT}/.runtime/logs/node.err.log" &
+}
+
+ensure_node() {
+  require_bin dagents-client
+  if probe_node; then
+    return 0
+  fi
+  start_node_background
+  local wait=0
+  while ! probe_node; do
+    sleep 1
+    wait=$((wait + 1))
+    if [[ "${wait}" -ge 30 ]]; then
+      die "node did not become ready within 30s"
+    fi
+  done
+}
+
+parse_withnode() {
+  WITHNODE=0
+  PARSED_ARGS=()
+  for arg in "$@"; do
+    if [[ "${arg}" == "--withnode" ]]; then
+      WITHNODE=1
+    else
+      PARSED_ARGS+=("${arg}")
+    fi
+  done
+}
+
 cmd_doctor() {
   echo "DAgents installation: ${DAGENTS_HOME}"
   local ok=1 name
@@ -54,12 +94,16 @@ cmd_doctor() {
 cmd_help() {
   cat <<'EOF'
 Usage:
-  dagents chat              Textual TUI (Python; rich UI)
-  dagents tui [--plain]       Go bubbletea TUI (default full-screen; --plain for line REPL)
-  dagents node                Start Agent Node (foreground)
-  dagents register-center     Start Register Center (optional A2A)
-  dagents doctor              Check installed files
-  dagents version             Print version information
+  dagents chat [--withnode]       Textual TUI (Python; rich UI)
+  dagents tui [--withnode] [--plain]  Go bubbletea TUI (default full-screen; --plain for line REPL)
+  dagents node [--background]     Start Agent Node (foreground, or background with logs)
+  dagents register-center         Start Register Center (optional A2A)
+  dagents doctor                  Check installed files
+  dagents version                 Print version information
+
+Options:
+  --withnode     Probe Node first; start it in background if not running, then launch client
+  --background   Start Node detached; logs under .runtime/logs/node.log
 
 Config:
   Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
@@ -79,16 +123,28 @@ case "$1" in
     ;;
   chat)
     shift
+    parse_withnode "$@"
+    if [[ "${WITHNODE}" -eq 1 ]]; then
+      ensure_node
+    fi
     require_bin dagents-cli
-    exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}" "$@"
+    exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}" "${PARSED_ARGS[@]}"
     ;;
   tui)
     shift
+    parse_withnode "$@"
+    if [[ "${WITHNODE}" -eq 1 ]]; then
+      ensure_node
+    fi
     require_bin dagents-client
-    exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui "$@"
+    exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui "${PARSED_ARGS[@]}"
     ;;
   node)
     shift
+    if [[ "${1:-}" == "--background" ]]; then
+      start_node_background
+      exit 0
+    fi
     require_bin dagents-node
     exec "${BIN}/dagents-node" -config "${ROOT}/${CFG}" "$@"
     ;;

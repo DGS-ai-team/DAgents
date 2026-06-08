@@ -54,7 +54,8 @@ go run ./client/cmd/dagents-client chat "你好"
 | `/new` | 新建 session |
 | `/clear` | 清空对话上下文 |
 | `/cancel` | 取消在途 turn（不退出 TUI） |
-| `/context` | 只读 context 视图（Esc 返回，full 模式） |
+| `/context` | 只读 context 视图（含 system_prompt；Esc 返回，full 模式） |
+| `/compress` | 手动触发一次阻塞压缩（full / Textual TUI） |
 | `/skill` | 列出 skills；`/skill load\|unload NAME` |
 | `/history [n\|all]` | 查看最近输出（plain 模式） |
 | `/tools verbose\|brief` | tool 输出展开/折叠 |

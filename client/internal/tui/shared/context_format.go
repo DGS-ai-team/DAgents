@@ -25,8 +25,16 @@ func FormatSessionContext(ctx *nodeapi.SessionContext) string {
 		fmt.Sprintf("queue_pending: %d", ctx.QueuePending),
 		fmt.Sprintf("has_active_turn: %t", ctx.HasActiveTurn),
 		"",
-		"loaded_skills:",
+		"system_prompt:",
 	}
+	if strings.TrimSpace(ctx.SystemPrompt) == "" {
+		lines = append(lines, "  (none)")
+	} else {
+		for _, part := range wrapLines(strings.TrimSpace(ctx.SystemPrompt), 72) {
+			lines = append(lines, "  "+part)
+		}
+	}
+	lines = append(lines, "", "loaded_skills:")
 	if len(ctx.LoadedSkills) == 0 {
 		lines = append(lines, "  (none)")
 	} else {

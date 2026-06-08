@@ -32,9 +32,20 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` / `dagents_register_
 | 路径 | 说明 |
 |------|------|
 | **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`） |
-| **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等） |
+| **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等；**Windows** 另含 OfficeCLI 于 `scripts/`） |
 | **`linux/`** | Linux **`dagents`** 启动脚本 + **`install.sh`**（打入 tar.gz 根目录） |
 | **`windows/`** | Inno Setup 安装包（`dagents-installer.iss` + `dagents.cmd`；Release Windows 矩阵构建 `.exe`） |
 | **`OFFLINE_INSTALL.md`** | 源码离线安装（开发/调试） |
 
 架构与联调见 [local-assistant.md](../docs/architecture/local-assistant.md)。
+
+## 内置 OfficeCLI（仅 Windows）
+
+**Windows** 发布包通过 [`scripts/ci/vendor_officecli.sh`](../scripts/ci/vendor_officecli.sh) 打入：
+
+- **二进制**：`.runtime/scripts/officecli.exe`
+- **Skills**：`.runtime/skills/officecli*`（同步自上游 `skills/`）
+
+上游项目：**[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**（AGPL-3.0）。说明见 [`packaging/runtime/scripts/OFFICECLI.md`](runtime/scripts/OFFICECLI.md)。
+
+Windows 安装包 / Linux **`install.sh`** 会将 **`.runtime/scripts`** 加入 `PATH`，便于 Agent 与用户直接调用其中的工具。Linux tarball 不含 OfficeCLI；该目录可用于后续集成其它 CLI。

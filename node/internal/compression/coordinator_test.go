@@ -150,3 +150,104 @@ func TestEnabled(t *testing.T) {
 		t.Fatal("silent should enable")
 	}
 }
+
+func TestForceBlockingIgnoresThreshold(t *testing.T) {
+	client := &countingLLM{}
+	coord := NewCoordinator(client, 0, 0)
+	if coord.Enabled() {
+		t.Fatal("auto compression should be disabled")
+	}
+	msgs := sampleMessages()
+	result := coord.ForceBlocking(context.Background(), "sess-force", "agent-1", nil, &msgs)
+	if result.Status != "applied" {
+		t.Fatalf("status = %q result = %+v msgs=%d", result.Status, result, len(msgs))
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected compressed len 2, got %d: %+v", len(msgs), msgs)
+	}
+	if client.calls.Load() != 1 {
+		t.Fatalf("CompleteText calls = %d", client.calls.Load())
+	}
+}
+
+func TestForceBlockingNoop(t *testing.T) {
+	coord := NewCoordinator(&countingLLM{}, 0, 0)
+	msgs := []llm.Message{{Role: "user", Content: "only user"}}
+	result := coord.ForceBlocking(context.Background(), "sess-noop", "agent-1", nil, &msgs)
+	if result.Status != "noop" {
+		t.Fatalf("status = %q", result.Status)
+	}
+}
+
+type gateLLM struct {
+	countingLLM
+	release chan struct{}
+}
+
+func (g *gateLLM) CompleteText(ctx context.Context, req llm.CompleteRequest) (string, error) {
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	return g.countingLLM.CompleteText(ctx, req)
+}
+
+func TestForceBlockingInProgressDuringSilent(t *testing.T) {
+	gate := make(chan struct{})
+	client := &gateLLM{release: gate}
+	coord := NewCoordinator(client, 50, 0)
+	msgs := sampleMessages()
+	coord.MaybeHandle(context.Background(), "sess-dup", "agent-1", nil, &msgs)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !coord.hasRunningTask("sess-dup") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !coord.hasRunningTask("sess-dup") {
+		t.Fatal("expected silent compression task to be running")
+	}
+
+	result := coord.ForceBlocking(context.Background(), "sess-dup", "agent-1", nil, &msgs)
+	if result.Status != "in_progress" || result.TriggerLevel != "silent" {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.CompressedMessageCount <= 0 {
+		t.Fatalf("expected compressed_message_count, got %+v", result)
+	}
+
+	close(gate)
+	coord.waitTask("sess-dup")
+}
+
+func TestForceBlockingInProgressDuplicateManual(t *testing.T) {
+	gate := make(chan struct{})
+	client := &gateLLM{release: gate}
+	coord := NewCoordinator(client, 0, 0)
+	msgs := sampleMessages()
+	msgsCopy := append([]llm.Message(nil), msgs...)
+
+	done := make(chan ForceResult, 1)
+	go func() {
+		done <- coord.ForceBlocking(context.Background(), "sess-manual", "agent-1", nil, &msgs)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !coord.hasRunningTask("sess-manual") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !coord.hasRunningTask("sess-manual") {
+		t.Fatal("expected manual compression task to be running")
+	}
+
+	dup := coord.ForceBlocking(context.Background(), "sess-manual", "agent-1", nil, &msgsCopy)
+	if dup.Status != "in_progress" || dup.TriggerLevel != "blocking" {
+		t.Fatalf("duplicate result = %+v", dup)
+	}
+
+	close(gate)
+	first := <-done
+	if first.Status != "applied" {
+		t.Fatalf("first result = %+v", first)
+	}
+}

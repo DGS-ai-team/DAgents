@@ -137,7 +137,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		return err
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(runCtx))
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(runCtx), tea.WithMouseCellMotion())
 	m.program = p
 	_, err = p.Run()
 	if err != nil {
@@ -185,6 +185,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshViewportMsg:
 		m.syncViewport()
+		return m, nil
+
+	case tea.MouseMsg:
+		if !m.contextMode {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 
 	case streamErrMsg:
@@ -285,7 +293,7 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.resetUsageStrip()
 		m.transcript.AddBlockGapIfNeeded()
 		m.transcript.Add("[user] " + text)
-		m.syncViewport()
+		m.syncViewportFollow()
 		m.turn.BeginSubmit()
 		if err := m.client.SubmitMessage(m.ctx, m.currentSession(), text); err != nil {
 			m.turn.FinishTurn()
@@ -425,19 +433,37 @@ func (m *model) applySize(w, h int) {
 	if viewH < 3 {
 		viewH = 3
 	}
+	atBottom := m.viewport.AtBottom()
+	yOffset := m.viewport.YOffset
 	m.viewport = viewport.New(w, viewH)
 	m.viewport.YPosition = 0
 	m.input.SetWidth(w - 4)
-	m.syncViewport()
+	m.refreshViewportContent(atBottom, yOffset)
 }
 
+// syncViewport 刷新 transcript；若用户已上滚则保持阅读位置，仅在贴底时跟随新输出。
 func (m *model) syncViewport() {
+	m.refreshViewportContent(m.viewport.AtBottom(), -1)
+}
+
+// syncViewportFollow 刷新并强制滚到底（用户主动发消息等场景）。
+func (m *model) syncViewportFollow() {
+	m.refreshViewportContent(true, -1)
+}
+
+func (m *model) refreshViewportContent(followBottom bool, preserveYOffset int) {
 	width := m.viewport.Width
 	if width <= 0 {
 		width = 80
 	}
 	m.viewport.SetContent(strings.Join(m.transcript.LinesForDisplay(width), "\n"))
-	m.viewport.GotoBottom()
+	if followBottom {
+		m.viewport.GotoBottom()
+		return
+	}
+	if preserveYOffset >= 0 {
+		m.viewport.SetYOffset(preserveYOffset)
+	}
 }
 
 func (m *model) cancelTurn() error {

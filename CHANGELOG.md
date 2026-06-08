@@ -2,6 +2,31 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.11] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.10** 基础上增加 **手动压缩与 context 诊断**、**预编译包 Node 自启动**、**Windows 内置 OfficeCLI**，并改进 Go TUI 滚动体验。
+
+### 新增
+
+- **`POST /v1/sessions/{id}/compress`**：手动触发一次阻塞压缩（忽略 token 阈值）；turn 进行中返回 `409 turn_busy`。
+- **Go / Python TUI `/compress`**：调用上述 API；已有压缩任务进行中时展示 `in_progress` 及 `trigger_level` 等字段，不重复执行。
+- **`GET /v1/sessions/{id}/context`** 与 **`/context`**：响应/展示 **`system_prompt`**（与 turn 构建逻辑一致）。
+- **预编译包 Node 自启动**：Linux **`dagents`**、Windows **`dagents.cmd`** 支持 **`--withnode`**（Client 前探活并后台启动 Node）与 **`node --background`**（日志 `.runtime/logs/node.log`）。
+- **Windows 发布包内置 OfficeCLI**：[`scripts/ci/vendor_officecli.sh`](scripts/ci/vendor_officecli.sh) 打入 **`.runtime/scripts/officecli.exe`** 与 **`.runtime/skills/officecli*`**（上游 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**，AGPL-3.0）；Linux tarball **不含** OfficeCLI。
+- **`.runtime/scripts` 进 PATH**：Linux **`install.sh`** / systemd 服务、Windows 安装包，便于 Agent 与用户调用扩展 CLI。
+
+### 变更
+
+- **压缩协调器**：silent / blocking / 手动压缩共用 **`compressionTask`** 跟踪；手动压缩遇进行中任务返回 **`in_progress`**。
+- **Go 全屏 TUI**：transcript 上滚后新输出不再强制跳底；支持鼠标滚轮；用户发消息时仍 **`syncViewportFollow`** 贴底。
+
+### 修复
+
+- **`contextView` 死锁**：持 session 锁时调用 `SystemPromptForSession` 改为先 unlock 再构建 system prompt。
+- **Go TUI 窗口缩放**：resize 时保留 viewport 阅读位置（贴底时仍跟随）。
+
+（Git **tag**：`v0.2.11`。）
+
 ## [0.2.10] - 2026-06-07
 
 **0.x 预览**：在 **v0.2.9** 基础上完善 **skills 工具 schema 描述**，引导模型在匹配任务时主动调用 `load_skills`。

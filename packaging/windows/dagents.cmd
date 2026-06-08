@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 rem Use "%~dp0." for pushd: a trailing backslash before the closing quote breaks CMD parsing.
 pushd "%~dp0." >nul 2>&1
@@ -23,28 +23,102 @@ bin\dagents-cli.exe chat --config "%CFG%"
 goto cli_exit
 
 :dispatch
-if /I "%~1"=="chat" shift & goto run_cli
+if /I "%~1"=="chat" shift & goto run_cli_chat
 if /I "%~1"=="tui" shift & goto run_client_tui
 if /I "%~1"=="node" shift & goto run_node
 if /I "%~1"=="register-center" shift & goto run_register_center
 if /I "%~1"=="doctor" goto doctor
 if /I "%~1"=="version" goto version
-goto run_cli
+goto run_cli_pass
 
-:run_cli
+:run_cli_chat
+if not exist "bin\dagents-cli.exe" goto missing_cli
+set "WITHNODE=0"
+set "CLI_EXTRA="
+:parse_cli_next
+if "%~1"=="" goto run_cli_exec
+if /I "%~1"=="--withnode" (
+  set "WITHNODE=1"
+  shift
+  goto parse_cli_next
+)
+set "CLI_EXTRA=!CLI_EXTRA! %1"
+shift
+goto parse_cli_next
+:run_cli_exec
+if "!WITHNODE!"=="1" (
+  call :ensure_node
+  if errorlevel 1 (
+    set "EXIT_CODE=1"
+    goto cli_exit
+  )
+)
+bin\dagents-cli.exe chat --config "%CFG%" !CLI_EXTRA!
+goto cli_exit
+
+:run_cli_pass
 if not exist "bin\dagents-cli.exe" goto missing_cli
 bin\dagents-cli.exe %*
 goto cli_exit
 
 :run_client_tui
 if not exist "bin\dagents-client.exe" goto missing_client
-bin\dagents-client.exe -config "%CFG%" tui %*
+set "WITHNODE=0"
+set "TUI_EXTRA="
+:parse_tui_next
+if "%~1"=="" goto run_tui_exec
+if /I "%~1"=="--withnode" (
+  set "WITHNODE=1"
+  shift
+  goto parse_tui_next
+)
+set "TUI_EXTRA=!TUI_EXTRA! %1"
+shift
+goto parse_tui_next
+:run_tui_exec
+if "!WITHNODE!"=="1" (
+  call :ensure_node
+  if errorlevel 1 (
+    set "EXIT_CODE=1"
+    goto cli_exit
+  )
+)
+bin\dagents-client.exe -config "%CFG%" tui !TUI_EXTRA!
 goto cli_exit
 
 :run_node
 if not exist "bin\dagents-node.exe" goto missing_node
+if /I "%~1"=="--background" (
+  call :start_node_background
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
 bin\dagents-node.exe -config "%CFG%" %*
 goto cli_exit
+
+:start_node_background
+if not exist "bin\dagents-node.exe" exit /b 1
+if not exist ".runtime\logs" mkdir ".runtime\logs"
+echo [dagents] starting node in background (logs: .runtime\logs\node.log)
+start "" /B cmd /c "bin\dagents-node.exe -config \"%CFG%\" >> .runtime\logs\node.log 2>> .runtime\logs\node.err.log"
+exit /b 0
+
+:ensure_node
+if not exist "bin\dagents-client.exe" exit /b 1
+bin\dagents-client.exe probe -config "%CFG%" >nul 2>&1
+if not errorlevel 1 exit /b 0
+call :start_node_background
+if errorlevel 1 exit /b 1
+set /a NODE_WAIT=0
+:ensure_node_wait
+bin\dagents-client.exe probe -config "%CFG%" >nul 2>&1
+if not errorlevel 1 exit /b 0
+timeout /t 1 /nobreak >nul 2>nul
+if errorlevel 1 ping -n 2 127.0.0.1 >nul
+set /a NODE_WAIT+=1
+if !NODE_WAIT! lss 30 goto ensure_node_wait
+echo [dagents] node did not become ready within 30s
+exit /b 1
 
 :run_register_center
 if not exist "bin\dagents_register_center.exe" goto missing_register_center
@@ -95,12 +169,16 @@ exit /b 0
 
 :help
 echo Usage:
-echo   dagents chat              Textual TUI (Python; rich UI)
-echo   dagents tui [--plain]       Go bubbletea TUI (default full-screen; --plain for line REPL)
-echo   dagents node                Start Agent Node (foreground)
+echo   dagents chat [--withnode]   Textual TUI (Python; rich UI)
+echo   dagents tui [--withnode] [--plain]  Go bubbletea TUI (default full-screen; --plain for line REPL)
+echo   dagents node [--background] Start Agent Node (foreground, or background with logs)
 echo   dagents register-center     Start Register Center (optional A2A)
 echo   dagents doctor              Check installed files
 echo   dagents version             Print version information
+echo.
+echo Options:
+echo   --withnode   Probe Node first; start it in background if not running, then launch client
+echo   --background Start Node detached; logs under .runtime\logs\node.log
 echo.
 echo Config:
 echo   Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.

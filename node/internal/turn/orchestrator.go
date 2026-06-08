@@ -492,6 +492,11 @@ func (o *Orchestrator) accumulateAndPublishUsage(sessionID string, llmStep int, 
 	o.hub.Publish(sessionID, o.agentID, "usage", payload)
 }
 
+// SystemPromptForSession 返回当前 session 下一步 LLM 调用将使用的 system prompt。
+func (o *Orchestrator) SystemPromptForSession(sessionID string) string {
+	return o.buildSystemPrompt(sessionID)
+}
+
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
 	var loaded []skills.LoadedSkill
 	if o.skillAccess.Get != nil {

@@ -62,6 +62,13 @@ if [[ -f "${REPO_ROOT}/.env.example" ]]; then
 fi
 cp -a "${REPO_ROOT}/packaging/runtime/." "${BUNDLE_DIR}/.runtime/"
 
+# OfficeCLI 二进制 + skills（仅 Windows：.runtime/scripts + .runtime/skills/officecli*）
+if [[ "${PLATFORM}" == windows-* ]]; then
+  chmod +x "${REPO_ROOT}/scripts/ci/vendor_officecli.sh"
+  BUNDLE_DIR="${BUNDLE_DIR}" PLATFORM="${PLATFORM}" \
+    bash "${REPO_ROOT}/scripts/ci/vendor_officecli.sh"
+fi
+
 # 启动脚本与 Node 系统服务注册脚本
 mkdir -p "${BUNDLE_DIR}/scripts"
 cp -a "${REPO_ROOT}/packaging/agent-client/scripts/startup" "${BUNDLE_DIR}/scripts/"
@@ -79,27 +86,40 @@ if [[ "${PLATFORM}" == linux-* ]]; then
 fi
 
 if [[ "${PLATFORM}" == windows-* ]]; then
+  install -m 0644 "${REPO_ROOT}/packaging/windows/dagents.cmd" "${BUNDLE_DIR}/dagents.cmd"
+fi
+
+if [[ "${PLATFORM}" == windows-* ]]; then
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
 DAgents Local Assistant (Go Node + dual TUI)
 
 1. copy config.example.yaml to config.yaml and edit llm / agent_id
-2. bin\dagents-node.exe -config config.yaml
-   or scripts\startup\windows\start-node.bat
+2. Start Node:
+     dagents node --background          (recommended; logs in .runtime\logs\node.log)
+     dagents node                       (foreground)
+     bin\dagents-node.exe -config config.yaml
+     scripts\startup\windows\start-node.bat
 
 Register Center (optional A2A):
   copy .env.example .env
+  dagents register-center
   scripts\startup\windows\start-register-center.bat
 
 Install Node as SYSTEM startup task (admin CMD):
   scripts\windows\install_node_service.cmd install config.yaml
 
-TUI (pick one):
-3a. bin\dagents-cli.exe chat --config config.yaml
+TUI（pick one; --withnode auto-starts Node if not running):
+3a. dagents chat --withnode
     Python Textual TUI (rich UI, recommended on modern terminals)
-3b. bin\dagents-client.exe -config config.yaml tui
+3b. dagents tui --withnode
     Go bubbletea full-screen TUI (default; child agents, /children, etc.)
-3c. bin\dagents-client.exe -config config.yaml tui --plain
+3c. dagents tui --withnode --plain
     Go line-mode REPL (legacy SSH / dumb terminal)
+
+Office documents (bundled OfficeCLI):
+  officecli --version
+  /skill load officecli          (then ask Agent to edit .docx/.xlsx/.pptx)
+  See .runtime/scripts/OFFICECLI.md (upstream: https://github.com/iOfficeAI/OfficeCLI)
 
 See docs/architecture/local-assistant.md
 EOF
@@ -117,8 +137,10 @@ DAgents Local Assistant（Go Node + 双 TUI）
 
 便携使用：
 1. cp config.example.yaml config.yaml && 编辑 llm / agent_id
-2. ./dagents node
-   或 ./scripts/startup/linux/start-node.sh
+2. 启动 Node：
+     ./dagents node --background    （推荐；日志 .runtime/logs/node.log）
+     ./dagents node                 （前台）
+     ./scripts/startup/linux/start-node.sh
 
 安装到固定目录（推荐）：
   ./install.sh              用户级 ~/.local/share/dagents
@@ -133,10 +155,10 @@ Register Center（可选 A2A）：
 注册 Node 为 systemd 服务（需 root）：
   sudo ./scripts/linux/install_node_service.sh install --config config.yaml
 
-TUI（三选一）：
-  ./dagents chat              Python Textual TUI（现代终端，富 UI）
-  ./dagents tui               Go bubbletea 全屏 TUI（含子 Agent、/children 等）
-  ./dagents tui --plain       Go 行模式 REPL（老 SSH / dumb 终端）
+TUI（三选一；--withnode 会在 Node 未运行时自动后台启动）：
+  ./dagents chat --withnode         Python Textual TUI（现代终端，富 UI）
+  ./dagents tui --withnode          Go bubbletea 全屏 TUI（含子 Agent、/children 等）
+  ./dagents tui --withnode --plain  Go 行模式 REPL（老 SSH / dumb 终端）
 
 文档: docs/architecture/local-assistant.md
 EOF

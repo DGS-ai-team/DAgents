@@ -31,8 +31,53 @@ type pendingResult struct {
 	CompressedMessageCount int
 }
 
-type silentTask struct {
-	done chan struct{}
+// ForceResult 为手动触发阻塞压缩的结果（POST /compress）。
+type ForceResult struct {
+	Status                 string `json:"status"`
+	TriggerLevel           string `json:"trigger_level,omitempty"`
+	CompressedMessageCount int    `json:"compressed_message_count,omitempty"`
+	CompressionStart       int    `json:"compression_start,omitempty"`
+	CompressionEnd         int    `json:"compression_end,omitempty"`
+	MessagesCount          int    `json:"messages_count,omitempty"`
+	MessagesTotalTokens    int    `json:"messages_total_tokens,omitempty"`
+}
+
+type applyOutcome struct {
+	status string
+	count  int
+	start  int
+	end    int
+}
+
+type compressionTask struct {
+	done                   chan struct{}
+	triggerLevel           string
+	compressionStart       int
+	compressionEnd         int
+	compressedMessageCount int
+}
+
+func newCompressionTask(triggerLevel string, start, end, count int) *compressionTask {
+	return &compressionTask{
+		done:                   make(chan struct{}),
+		triggerLevel:           triggerLevel,
+		compressionStart:       start,
+		compressionEnd:         end,
+		compressedMessageCount: count,
+	}
+}
+
+func (t *compressionTask) forceResult(status string) ForceResult {
+	if t == nil {
+		return ForceResult{Status: status}
+	}
+	return ForceResult{
+		Status:                 status,
+		TriggerLevel:           t.triggerLevel,
+		CompressionStart:       t.compressionStart,
+		CompressionEnd:         t.compressionEnd,
+		CompressedMessageCount: t.compressedMessageCount,
+	}
 }
 
 // Coordinator 协调 silent 异步与 blocking 同步摘要压缩。
@@ -42,7 +87,7 @@ type Coordinator struct {
 	blockingTriggerTokens int
 
 	mu             sync.Mutex
-	sessionTasks   map[string]*silentTask
+	sessionTasks   map[string]*compressionTask
 	pendingResults map[string]pendingResult
 }
 
@@ -52,7 +97,7 @@ func NewCoordinator(client llm.Client, silentTriggerTokens, blockingTriggerToken
 		client:                client,
 		silentTriggerTokens:   max(0, silentTriggerTokens),
 		blockingTriggerTokens: max(0, blockingTriggerTokens),
-		sessionTasks:          make(map[string]*silentTask),
+		sessionTasks:          make(map[string]*compressionTask),
 		pendingResults:        make(map[string]pendingResult),
 	}
 }
@@ -107,6 +152,56 @@ func (c *Coordinator) MaybeHandle(
 	c.tryApplyReadyResult(sessionID, agentID, hub, messages)
 }
 
+// ForceBlocking 手动执行一次阻塞压缩：忽略 token 阈值，同步 LLM 摘要并立即应用。
+//
+// 返回 status：applied / failed / noop / stale / invalid / disabled / in_progress。
+func (c *Coordinator) ForceBlocking(
+	ctx context.Context,
+	sessionID, agentID string,
+	hub *stream.Hub,
+	messages *[]llm.Message,
+) ForceResult {
+	if c == nil || c.client == nil {
+		return ForceResult{Status: "disabled"}
+	}
+	if messages == nil {
+		return ForceResult{Status: "noop"}
+	}
+	start, end, picked, ok := selectCompressRange(*messages)
+	if !ok {
+		return ForceResult{Status: "noop"}
+	}
+	if running := c.runningTask(sessionID); running != nil {
+		return running.forceResult("in_progress")
+	}
+
+	task := newCompressionTask("blocking", start, end, len(picked))
+	if !c.registerTask(sessionID, task) {
+		if running := c.runningTask(sessionID); running != nil {
+			return running.forceResult("in_progress")
+		}
+		return ForceResult{Status: "failed"}
+	}
+	defer c.unregisterTask(sessionID, task)
+
+	if !c.runCompressionFlow(ctx, sessionID, agentID, hub, snapshotMessages(*messages), "blocking") {
+		return ForceResult{Status: "failed"}
+	}
+	out := c.applyReadyResult(sessionID, agentID, hub, messages)
+	if out.status == "" {
+		return ForceResult{Status: "failed"}
+	}
+	return ForceResult{
+		Status:                 out.status,
+		TriggerLevel:           "blocking",
+		CompressedMessageCount: out.count,
+		CompressionStart:       out.start,
+		CompressionEnd:         out.end,
+		MessagesCount:          len(*messages),
+		MessagesTotalTokens:    llm.EstimateMessageTokens(*messages),
+	}
+}
+
 // CancelSession 取消 session 在跑 silent 任务并丢弃 pending。
 func (c *Coordinator) CancelSession(sessionID string) {
 	c.mu.Lock()
@@ -115,29 +210,60 @@ func (c *Coordinator) CancelSession(sessionID string) {
 	c.mu.Unlock()
 }
 
-func (c *Coordinator) hasRunningTask(sessionID string) bool {
+func (c *Coordinator) runningTask(sessionID string) *compressionTask {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.runningTaskLocked(sessionID)
+}
+
+func (c *Coordinator) runningTaskLocked(sessionID string) *compressionTask {
 	task := c.sessionTasks[sessionID]
-	c.mu.Unlock()
 	if task == nil {
-		return false
+		return nil
 	}
 	select {
 	case <-task.done:
-		return false
+		return nil
 	default:
-		return true
+		return task
 	}
 }
 
-func (c *Coordinator) startSilentTask(sessionID, agentID string, hub *stream.Hub, messages []llm.Message) {
-	task := &silentTask{done: make(chan struct{})}
+func (c *Coordinator) registerTask(sessionID string, task *compressionTask) bool {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.runningTaskLocked(sessionID) != nil {
+		return false
+	}
 	c.sessionTasks[sessionID] = task
+	return true
+}
+
+func (c *Coordinator) unregisterTask(sessionID string, task *compressionTask) {
+	c.mu.Lock()
+	if c.sessionTasks[sessionID] == task {
+		delete(c.sessionTasks, sessionID)
+	}
 	c.mu.Unlock()
+	close(task.done)
+}
+
+func (c *Coordinator) hasRunningTask(sessionID string) bool {
+	return c.runningTask(sessionID) != nil
+}
+
+func (c *Coordinator) startSilentTask(sessionID, agentID string, hub *stream.Hub, messages []llm.Message) {
+	start, end, picked, ok := selectCompressRange(messages)
+	if !ok {
+		return
+	}
+	task := newCompressionTask("silent", start, end, len(picked))
+	if !c.registerTask(sessionID, task) {
+		return
+	}
 
 	go func() {
-		defer close(task.done)
+		defer c.unregisterTask(sessionID, task)
 		_ = c.runCompressionFlow(context.Background(), sessionID, agentID, hub, messages, "silent")
 	}()
 }
@@ -153,22 +279,22 @@ func (c *Coordinator) reapFinishedTask(sessionID string) {
 	case <-task.done:
 		delete(c.sessionTasks, sessionID)
 		c.mu.Unlock()
-		c.waitTask(sessionID)
+		return
 	default:
 		c.mu.Unlock()
 	}
 }
 
 func (c *Coordinator) waitTask(sessionID string) {
-	c.mu.Lock()
-	task := c.sessionTasks[sessionID]
-	c.mu.Unlock()
+	task := c.runningTask(sessionID)
 	if task == nil {
 		return
 	}
 	<-task.done
 	c.mu.Lock()
-	delete(c.sessionTasks, sessionID)
+	if c.sessionTasks[sessionID] == task {
+		delete(c.sessionTasks, sessionID)
+	}
 	c.mu.Unlock()
 }
 
@@ -221,6 +347,10 @@ func (c *Coordinator) runCompressionFlow(
 }
 
 func (c *Coordinator) tryApplyReadyResult(sessionID, agentID string, hub *stream.Hub, messages *[]llm.Message) {
+	c.applyReadyResult(sessionID, agentID, hub, messages)
+}
+
+func (c *Coordinator) applyReadyResult(sessionID, agentID string, hub *stream.Hub, messages *[]llm.Message) applyOutcome {
 	c.mu.Lock()
 	pending, ok := c.pendingResults[sessionID]
 	if ok {
@@ -228,33 +358,42 @@ func (c *Coordinator) tryApplyReadyResult(sessionID, agentID string, hub *stream
 	}
 	c.mu.Unlock()
 	if !ok {
-		return
+		return applyOutcome{}
 	}
 	baseEnd := map[string]any{
 		"compression_start":        pending.Start,
 		"compression_end":          pending.End,
 		"compressed_message_count": pending.CompressedMessageCount,
 	}
+	out := applyOutcome{
+		status: "invalid",
+		count:  pending.CompressedMessageCount,
+		start:  pending.Start,
+		end:    pending.End,
+	}
 	if messages == nil || pending.Start < 0 || pending.End < pending.Start ||
 		pending.End >= len(*messages) || strings.TrimSpace(pending.Content) == "" {
-		baseEnd["status"] = "invalid"
+		baseEnd["status"] = out.status
 		c.publishCompressionEvent(sessionID, agentID, hub, pending.TriggerLevel, "end", baseEnd)
-		return
+		return out
 	}
 	currentSlice := (*messages)[pending.Start : pending.End+1]
 	if pending.SourceSliceFingerprint != "" &&
 		pending.SourceSliceFingerprint != messagesFingerprint(currentSlice) {
-		baseEnd["status"] = "stale"
+		out.status = "stale"
+		baseEnd["status"] = out.status
 		c.publishCompressionEvent(sessionID, agentID, hub, pending.TriggerLevel, "end", baseEnd)
-		return
+		return out
 	}
 	replacement := llm.Message{Role: "user", Content: pending.Content}
 	rest := append([]llm.Message(nil), (*messages)[pending.End+1:]...)
-	out := append(append([]llm.Message(nil), (*messages)[:pending.Start]...), replacement)
-	out = append(out, rest...)
-	*messages = out
-	baseEnd["status"] = "applied"
+	merged := append(append([]llm.Message(nil), (*messages)[:pending.Start]...), replacement)
+	merged = append(merged, rest...)
+	*messages = merged
+	out.status = "applied"
+	baseEnd["status"] = out.status
 	c.publishCompressionEvent(sessionID, agentID, hub, pending.TriggerLevel, "end", baseEnd)
+	return out
 }
 
 func compressionEventType(triggerLevel string) string {
