@@ -36,14 +36,17 @@ func (o *Orchestrator) persistCancelledStream(sessionID string, history *[]llm.M
 	}
 }
 
-func toolResponsesAfterLastAssistant(messages []llm.Message) map[string]struct{} {
-	lastAssistant := -1
+func lastAssistantIndex(messages []llm.Message) int {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "assistant" {
-			lastAssistant = i
-			break
+			return i
 		}
 	}
+	return -1
+}
+
+func toolResponsesAfterLastAssistant(messages []llm.Message) map[string]struct{} {
+	lastAssistant := lastAssistantIndex(messages)
 	if lastAssistant < 0 {
 		return nil
 	}
@@ -58,13 +61,7 @@ func toolResponsesAfterLastAssistant(messages []llm.Message) map[string]struct{}
 }
 
 func unrespondedToolCallsAfterLastAssistant(messages []llm.Message) []llm.ToolCall {
-	lastAssistant := -1
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "assistant" {
-			lastAssistant = i
-			break
-		}
-	}
+	lastAssistant := lastAssistantIndex(messages)
 	if lastAssistant < 0 {
 		return nil
 	}
@@ -82,34 +79,50 @@ func unrespondedToolCallsAfterLastAssistant(messages []llm.Message) []llm.ToolCa
 	return out
 }
 
-// RepairUnrespondedToolCalls 为尾部 assistant 尚未配对的 tool_call 补写 tool 结果，避免 LLM 400。
-func (o *Orchestrator) RepairUnrespondedToolCalls(sessionID string, history *[]llm.Message) bool {
-	lastAssistantIdx := -1
-	for i := len(*history) - 1; i >= 0; i-- {
-		if (*history)[i].Role == "assistant" {
-			lastAssistantIdx = i
-			break
-		}
-	}
-	if lastAssistantIdx < 0 {
+func (o *Orchestrator) insertMissingToolResponsesAfterAssistant(
+	sessionID string,
+	history *[]llm.Message,
+	calls []llm.ToolCall,
+	content string,
+	extra map[string]any,
+) bool {
+	lastAssistantIdx := lastAssistantIndex(*history)
+	if lastAssistantIdx < 0 || len(calls) == 0 {
 		return false
 	}
+	answered := toolResponsesAfterLastAssistant(*history)
+	insertAt := lastAssistantIdx + 1
+	added := false
+	for _, tc := range calls {
+		if _, ok := answered[tc.ID]; ok {
+			continue
+		}
+		o.publishToolResult(sessionID, tc, content, false, extra)
+		o.insertHistory(sessionID, history, insertAt, llm.Message{
+			Role:       "tool",
+			ToolCallID: tc.ID,
+			Content:    content,
+		})
+		insertAt++
+		answered[tc.ID] = struct{}{}
+		added = true
+	}
+	return added
+}
+
+// RepairUnrespondedToolCalls 为尾部 assistant 尚未配对的 tool_call 补写 tool 结果，避免 LLM 400。
+func (o *Orchestrator) RepairUnrespondedToolCalls(sessionID string, history *[]llm.Message) bool {
 	calls := unrespondedToolCallsAfterLastAssistant(*history)
 	if len(calls) == 0 {
 		return false
 	}
-	insertAt := lastAssistantIdx + 1
-	extra := map[string]any{"repaired_orphan_tool_calls": true}
-	for _, tc := range calls {
-		o.publishToolResult(sessionID, tc, ToolUserInterruptedMessage, false, extra)
-		o.insertHistory(sessionID, history, insertAt, llm.Message{
-			Role:       "tool",
-			ToolCallID: tc.ID,
-			Content:    ToolUserInterruptedMessage,
-		})
-		insertAt++
-	}
-	return true
+	return o.insertMissingToolResponsesAfterAssistant(
+		sessionID,
+		history,
+		calls,
+		ToolUserInterruptedMessage,
+		map[string]any{"repaired_orphan_tool_calls": true},
+	)
 }
 
 func (o *Orchestrator) appendMissingToolResponses(
@@ -133,5 +146,6 @@ func (o *Orchestrator) appendMissingToolResponses(
 			ToolCallID: tc.ID,
 			Content:    content,
 		})
+		answered[tc.ID] = struct{}{}
 	}
 }

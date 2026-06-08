@@ -312,15 +312,13 @@ func (o *Orchestrator) InterruptPending(sessionID string, history *[]llm.Message
 	if pending == nil {
 		return
 	}
-	extra := map[string]any{"interrupted_by_user_message": true}
-	for _, tc := range pending.AllToolCalls() {
-		o.publishToolResult(sessionID, tc, ToolUserInterruptedMessage, false, extra)
-		o.appendHistory(sessionID, history, llm.Message{
-			Role:       "tool",
-			ToolCallID: tc.ID,
-			Content:    ToolUserInterruptedMessage,
-		})
-	}
+	o.insertMissingToolResponsesAfterAssistant(
+		sessionID,
+		history,
+		pending.AllToolCalls(),
+		ToolUserInterruptedMessage,
+		map[string]any{"interrupted_by_user_message": true},
+	)
 }
 
 func (o *Orchestrator) runUntilQueueOrDone(

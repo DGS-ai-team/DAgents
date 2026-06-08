@@ -2,6 +2,17 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.9] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.8** 基础上修复 **打断工具后重复 tool 消息** 导致的 LLM 400。
+
+### 修复
+
+- **打断 pending 工具去重**：`InterruptPending` 与 `RepairUnrespondedToolCalls` 共用 `insertMissingToolResponsesAfterAssistant`，按 `tool_call_id` 跳过已有 tool 响应，避免同一 call 写入两条「用户需要补充信息，打断了工具执行。」后 LLM 报 `Messages with role 'tool' must be a response to a preceding message with 'tool_calls'`。
+- **idle cancel 清 pending**：`cancelTurn` 在 idle 下 repair 补写 tool 后清除 `pending`，防止后续用户消息再次 interrupt 重复补位。
+
+（Git **tag**：`v0.2.9`。）
+
 ## [0.2.8] - 2026-06-08
 
 **0.x 预览**：在 **v0.2.7** 基础上增强 **TUI 展示**、修复 **非法 tool 序列**、统一 **Skill 元数据格式**。

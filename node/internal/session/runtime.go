@@ -545,6 +545,9 @@ func (r *runtime) cancelTurn() bool {
 		return true
 	}
 	repaired := r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
+	if repaired {
+		r.pending = nil
+	}
 	r.mu.Unlock()
 	if repaired {
 		r.logger.Info("repaired orphan tool_calls on idle cancel",
