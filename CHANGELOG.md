@@ -2,6 +2,30 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.3] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.2** 基础上增加 **Windows 安装包**、**Linux 安装脚本**，并修复 **Windows GBK 环境下 shell 工具输出乱码**；强化子 Agent 提示词与双 TUI 展示。
+
+### 新增
+
+- **Windows 安装包（Release / manual-package）**：Inno Setup 生成 `dagents-local-assistant-windows-amd64-installer-*.exe`；包内 `dagents.cmd` 统一入口（`node` / `chat` / `tui` / `register-center`）。
+- **Linux 分发**：tar.gz 根目录含 **`dagents`** 启动脚本与 **`install.sh`**（用户级 `~/.local/share/dagents` 或系统级 `/opt/dagents`，配置 `PATH` / `DAGENTS_HOME`）。
+- **Shell 工具输出解码**：`config.yaml` → **`tools.bash_output_encoding`**（如 `gbk` / `utf-8`）；未配置时 Windows **cmd/powershell 默认 gbk**，**bash 默认 utf-8**，解码后以 UTF-8 交给 LLM。
+- **子 Agent**：Orchestrator 注入 system prompt builder；`create_temporary_agent` 支持 **`skill_names`** 预加载；子 runtime **`BuildChildSystemPrompt`** 含已加载 skill 正文。
+
+### 变更
+
+- **`.env.example`**：仅保留 Register Center 与 Python CLI 仍读取的项；Node/LLM 主配置在 **`config.yaml`**。
+- **双 TUI**：友好格式化 `wait_temporary_agents` 等工具结果；`wait_temporary_agents` 后抑制与工具结果重复的 `temporary_agent_completed` lifecycle 行。
+- **打包文档**：`packaging/linux/`、`packaging/windows/` 与 CI assemble 说明更新。
+
+### 修复
+
+- **Release CI（Windows）**：Inno Setup 编译时 Git Bash 将 `/DMyAppVersion=…` 误转为 `D:\…` 导致 `ISCC` 失败；改用 `//D` 前缀。
+- **Windows 中文环境**：`bash_run` 捕获 GBK 字节流时 Agent 此前收到乱码；现按配置/平台解码后再写入 `[BASH_RESULT]`。
+
+（Git **tag**：`v0.2.3`。）
+
 ## [0.2.2] - 2026-06-07
 
 **0.x 预览**：在 **v0.2.1** 代码基础上对齐 `/health` 与 Client 版本号为 **0.2.2**；**本版重点修复工具审批（HITL）相关缺陷**。
