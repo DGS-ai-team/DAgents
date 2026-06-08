@@ -16,6 +16,7 @@
 | `RawMessageHistoryConfig` | `struct` | 原始消息 JSONL 开关（`enabled` 指针，缺省 true） |
 | `EnvRawMessageHistoryEnabled` | `const string` | 环境变量 `AGENT_RAW_MESSAGE_HISTORY_ENABLED` |
 | `LogConfig` | `struct` | Node stderr 日志级别（`level`，默认 `info`） |
+| `ToolsConfig` | `struct` | `bash_output_encoding`：bash_run 子进程输出解码（空=按 OS/shell 自动） |
 | `ManageConfig` | `struct` | Manage 注册开关与 URL |
 | `LoadFile` | `func(path string) (*Config, error)` | 读 YAML、展开 env、默认值、校验 |
 | `(c *Config) ApplyDefaults` | `method` | 填充 listen/local 缺省 |

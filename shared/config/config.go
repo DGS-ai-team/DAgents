@@ -34,6 +34,14 @@ type Config struct {
 	RawMessageHistory RawMessageHistoryConfig `yaml:"raw_message_history"`
 	ChildAgents       ChildAgentsConfig       `yaml:"child_agents"`
 	Log               LogConfig               `yaml:"log"`
+	Tools             ToolsConfig             `yaml:"tools"`
+}
+
+// ToolsConfig 控制内置工具行为（如 bash_run 输出解码）。
+type ToolsConfig struct {
+	// BashOutputEncoding 为 bash_run 捕获的子进程 stdout/stderr 字节编码（解码为 UTF-8 后交给 LLM）。
+	// 留空时由 Node 按 OS/shell 类型自动选择（Windows cmd/powershell→gbk，bash→utf-8）。
+	BashOutputEncoding string `yaml:"bash_output_encoding"`
 }
 
 const EnvRawMessageHistoryEnabled = "AGENT_RAW_MESSAGE_HISTORY_ENABLED"

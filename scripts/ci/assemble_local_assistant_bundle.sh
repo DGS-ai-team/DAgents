@@ -73,6 +73,11 @@ if [[ -f "${REPO_ROOT}/packaging/agent-client/scripts/README.md" ]]; then
 fi
 find "${BUNDLE_DIR}/scripts" -type f -name '*.sh' -exec chmod 0755 {} +
 
+if [[ "${PLATFORM}" == linux-* ]]; then
+  install -m 0755 "${REPO_ROOT}/packaging/linux/dagents" "${BUNDLE_DIR}/dagents"
+  install -m 0755 "${REPO_ROOT}/packaging/linux/install.sh" "${BUNDLE_DIR}/install.sh"
+fi
+
 if [[ "${PLATFORM}" == windows-* ]]; then
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
 DAgents Local Assistant (Go Node + dual TUI)
@@ -110,24 +115,28 @@ else
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
 DAgents Local Assistant（Go Node + 双 TUI）
 
+便携使用：
 1. cp config.example.yaml config.yaml && 编辑 llm / agent_id
-2. ./bin/dagents-node -config config.yaml
+2. ./dagents node
    或 ./scripts/startup/linux/start-node.sh
+
+安装到固定目录（推荐）：
+  ./install.sh              用户级 ~/.local/share/dagents
+  sudo ./install.sh         系统级 /opt/dagents（写入 /etc/profile.d/dagents.sh）
+  安装后新开 shell，执行 dagents doctor 验证
 
 Register Center（可选 A2A）：
   cp .env.example .env
-  ./scripts/startup/linux/start-register-center.sh
+  ./dagents register-center
+  或 ./scripts/startup/linux/start-register-center.sh
 
 注册 Node 为 systemd 服务（需 root）：
   sudo ./scripts/linux/install_node_service.sh install --config config.yaml
 
 TUI（三选一）：
-3a. ./bin/dagents-cli chat --config config.yaml
-    Python Textual TUI（现代终端，富 UI）
-3b. ./bin/dagents-client -config config.yaml tui
-    Go bubbletea 全屏 TUI（默认；含子 Agent、/children 等）
-3c. ./bin/dagents-client -config config.yaml tui --plain
-    Go 行模式 REPL（老 SSH / dumb 终端）
+  ./dagents chat              Python Textual TUI（现代终端，富 UI）
+  ./dagents tui               Go bubbletea 全屏 TUI（含子 Agent、/children 等）
+  ./dagents tui --plain       Go 行模式 REPL（老 SSH / dumb 终端）
 
 文档: docs/architecture/local-assistant.md
 EOF

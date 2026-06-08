@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# DAgents Local Assistant 命令行入口（对齐 packaging/windows/dagents.cmd）。
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export DAGENTS_HOME="${ROOT}"
+
+CFG="${DAGENTS_CONFIG:-config.yaml}"
+if [[ ! -f "${ROOT}/${CFG}" && -f "${ROOT}/config.example.yaml" ]]; then
+  cp "${ROOT}/config.example.yaml" "${ROOT}/config.yaml"
+  CFG="config.yaml"
+fi
+if [[ ! -f "${ROOT}/.env" && -f "${ROOT}/.env.example" ]]; then
+  cp "${ROOT}/.env.example" "${ROOT}/.env"
+fi
+
+BIN="${ROOT}/bin"
+
+die() {
+  echo "[dagents] $*" >&2
+  exit 1
+}
+
+require_bin() {
+  local name="$1"
+  [[ -x "${BIN}/${name}" ]] || die "${BIN}/${name} was not found in ${DAGENTS_HOME}"
+}
+
+cmd_doctor() {
+  echo "DAgents installation: ${DAGENTS_HOME}"
+  local ok=1 name
+  for name in dagents-node dagents-client dagents-cli dagents_register_center; do
+    if [[ -x "${BIN}/${name}" ]]; then
+      echo "[ok] bin/${name}"
+    else
+      echo "[missing] bin/${name}"
+      ok=0
+    fi
+  done
+  if [[ -f "${ROOT}/config.yaml" ]]; then
+    echo "[ok] config.yaml"
+  else
+    echo "[info] config.yaml not found; copy config.example.yaml config.yaml"
+  fi
+  if [[ -d "${ROOT}/.runtime" ]]; then
+    echo "[ok] .runtime"
+  else
+    echo "[missing] .runtime"
+    ok=0
+  fi
+  return "${ok}"
+}
+
+cmd_help() {
+  cat <<'EOF'
+Usage:
+  dagents chat              Textual TUI (Python; rich UI)
+  dagents tui [--plain]       Go bubbletea TUI (default full-screen; --plain for line REPL)
+  dagents node                Start Agent Node (foreground)
+  dagents register-center     Start Register Center (optional A2A)
+  dagents doctor              Check installed files
+  dagents version             Print version information
+
+Config:
+  Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
+  Register Center only: copy .env.example to .env for REGISTER_CENTER_* settings.
+  CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
+EOF
+}
+
+if [[ $# -eq 0 ]]; then
+  require_bin dagents-cli
+  exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}"
+fi
+
+case "$1" in
+  help|-h|--help)
+    cmd_help
+    ;;
+  chat)
+    shift
+    require_bin dagents-cli
+    exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}" "$@"
+    ;;
+  tui)
+    shift
+    require_bin dagents-client
+    exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui "$@"
+    ;;
+  node)
+    shift
+    require_bin dagents-node
+    exec "${BIN}/dagents-node" -config "${ROOT}/${CFG}" "$@"
+    ;;
+  register-center)
+    shift
+    require_bin dagents_register_center
+    exec "${BIN}/dagents_register_center" "$@"
+    ;;
+  doctor)
+    cmd_doctor
+    exit $?
+    ;;
+  version)
+    echo "DAgents Local Assistant"
+    ;;
+  *)
+    require_bin dagents-cli
+    exec "${BIN}/dagents-cli" "$@"
+    ;;
+esac

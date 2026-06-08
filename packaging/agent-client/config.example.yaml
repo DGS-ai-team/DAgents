@@ -60,6 +60,11 @@ triggers:
 log:
   level: info
 
+# bash_run 子进程输出解码（留空则 Windows cmd/powershell=gbk、bash=utf-8）
+tools:
+  # bash_output_encoding: gbk
+  # bash_output_encoding: utf-8
+
 # 临时子 Agent（见 docs/architecture/child-agent-tools.md）
 child_agents:
   enabled: true

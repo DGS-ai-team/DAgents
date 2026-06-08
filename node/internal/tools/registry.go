@@ -27,9 +27,10 @@ type ToolDef struct {
 
 // Registry 注册内置工具并在 FS_ROOT 沙箱内执行。
 type Registry struct {
-	fsRoot       string
-	bashTimeout  int
-	bgJobs       *backgroundJobRegistry
+	fsRoot              string
+	bashTimeout         int
+	shellOutputEncoding string
+	bgJobs              *backgroundJobRegistry
 	triggerStore *triggers.Store
 	triggerSched *triggers.Scheduler
 	agentID      string
@@ -39,7 +40,8 @@ type Registry struct {
 type handler func(ctx context.Context, args json.RawMessage) (string, error)
 
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。
-func NewRegistry(fsRoot string, bashTimeoutSeconds int) (*Registry, error) {
+// shellOutputEncoding 来自 config.yaml tools.bash_output_encoding；空串表示按平台/shell 自动选择。
+func NewRegistry(fsRoot string, bashTimeoutSeconds int, shellOutputEncoding ...string) (*Registry, error) {
 	root, err := resolveFSRoot(fsRoot)
 	if err != nil {
 		return nil, err
@@ -47,10 +49,15 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int) (*Registry, error) {
 	if bashTimeoutSeconds <= 0 {
 		bashTimeoutSeconds = 30
 	}
+	enc := ""
+	if len(shellOutputEncoding) > 0 {
+		enc = strings.TrimSpace(shellOutputEncoding[0])
+	}
 	r := &Registry{
-		fsRoot:      root,
-		bashTimeout: bashTimeoutSeconds,
-		bgJobs:      newBackgroundJobRegistry(),
+		fsRoot:              root,
+		bashTimeout:         bashTimeoutSeconds,
+		shellOutputEncoding: enc,
+		bgJobs:              newBackgroundJobRegistry(),
 		handlers:    make(map[string]handler),
 	}
 	r.registerBuiltins()

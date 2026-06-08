@@ -33,7 +33,7 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` / `dagents_register_
 |------|------|
 | **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`） |
 | **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等） |
-| **`linux/`** | legacy deb/rpm 脚本（**当前 Release 未使用**） |
+| **`linux/`** | Linux **`dagents`** 启动脚本 + **`install.sh`**（打入 tar.gz 根目录） |
 | **`windows/`** | Inno Setup 安装包（`dagents-installer.iss` + `dagents.cmd`；Release Windows 矩阵构建 `.exe`） |
 | **`OFFLINE_INSTALL.md`** | 源码离线安装（开发/调试） |
 

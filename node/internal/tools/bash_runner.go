@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,7 +97,7 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 		cwd:            cwd,
 		shellType:      st,
 		timeoutSec:     timeout,
-		outputEncoding: defaultOutputEnc,
+		outputEncoding: resolveShellOutputEncoding(st, r.shellOutputEncoding),
 	}, "", nil
 }
 
@@ -118,11 +119,13 @@ func runShellUntilDone(ctx context.Context, params shellRunParams) (string, erro
 	cmd := exec.CommandContext(ctx, base.Args[0], base.Args[1:]...)
 	cmd.Dir = base.Dir
 	cmd.SysProcAttr = base.SysProcAttr
-	var stdout, stderr strings.Builder
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
-	return formatShellCompletedOutput(params, stdout.String(), stderr.String(), cmd.ProcessState, runErr), nil
+	outText := decodeShellOutput(stdout.Bytes(), params.outputEncoding)
+	errText := decodeShellOutput(stderr.Bytes(), params.outputEncoding)
+	return formatShellCompletedOutput(params, outText, errText, cmd.ProcessState, runErr), nil
 }
 
 // runShellSyncWithAutoDegrade 同步等待 timeout 秒；超时则不杀进程并登记后台 job。
@@ -184,23 +187,30 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 	go func() {
 		defer close(done)
 		defer close(job.done)
-		var stdoutBuf, stderrBuf strings.Builder
 		var wg sync.WaitGroup
 		wg.Add(2)
+		var stdoutBuf, stderrBuf bytes.Buffer
+		var stdoutErr, stderrErr error
 		go func() {
-			_, _ = io.Copy(&stdoutBuf, stdoutPipe)
+			_, stdoutErr = io.Copy(&stdoutBuf, stdoutPipe)
 			wg.Done()
 		}()
 		go func() {
-			_, _ = io.Copy(&stderrBuf, stderrPipe)
+			_, stderrErr = io.Copy(&stderrBuf, stderrPipe)
 			wg.Done()
 		}()
 		wg.Wait()
 		waitErr := job.bashCmd.Wait()
 
 		job.mu.Lock()
-		job.bashStdout = stdoutBuf.String()
-		job.bashStderr = stderrBuf.String()
+		job.bashStdout = decodeShellOutput(stdoutBuf.Bytes(), params.outputEncoding)
+		job.bashStderr = decodeShellOutput(stderrBuf.Bytes(), params.outputEncoding)
+		if stdoutErr != nil && job.bashStdout == "" {
+			job.bashStdout = stdoutErr.Error()
+		}
+		if stderrErr != nil && job.bashStderr == "" {
+			job.bashStderr = stderrErr.Error()
+		}
 		if job.status == "cancelled" {
 			if job.finishedAt == 0 {
 				job.finishedAt = nowMs()
