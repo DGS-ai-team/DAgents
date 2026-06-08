@@ -28,7 +28,7 @@ func TestFormatToolCallEventNested(t *testing.T) {
 }
 
 func TestFormatToolResultBashFriendly(t *testing.T) {
-	content := "[BASH_RESULT] shell_type=bash status=OK exit_code=0\ncwd=\"/tmp\"\n--- STDOUT ---\nWeather: Sunny\nLine2\n--- STDERR ---\n"
+	content := "[BASH_RESULT] exit=0\n--- STDOUT ---\nWeather: Sunny\nLine2\n--- STDERR ---\n"
 	lines := FormatToolEvent("tool_result", map[string]any{
 		"tool_name": "bash_run",
 		"content":   content,
@@ -42,8 +42,20 @@ func TestFormatToolResultBashFriendly(t *testing.T) {
 	if !strings.Contains(lines[1], "Weather: Sunny") {
 		t.Fatalf("preview = %q", lines[1])
 	}
-	if strings.Contains(lines[1], "cwd=") {
-		t.Fatalf("should hide cwd noise: %q", lines[1])
+}
+
+func TestFormatToolResultBashCompressPct(t *testing.T) {
+	content := "[BASH_RESULT] exit=0\n--- STDOUT ---\nok\n--- STDERR ---\n"
+	lines := FormatToolEvent("tool_result", map[string]any{
+		"tool_name":                 "bash_run",
+		"content":                   content,
+		"output_compress_saved_pct": 42,
+	}, false)
+	if len(lines) == 0 {
+		t.Fatal("no lines")
+	}
+	if !strings.Contains(lines[0], "· -42%") {
+		t.Fatalf("head = %q", lines[0])
 	}
 }
 

@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,63 @@ func TestFormatInputStripTokens(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("FormatInputStripTokens(%d) = %q, want %q", tc.tokens, got, tc.want)
 		}
+	}
+}
+
+func TestParseUsageRoundAndInlineFormat(t *testing.T) {
+	s := ParseUsageRound(map[string]any{
+		"round_prompt_tokens":     float64(1200),
+		"round_completion_tokens": float64(80),
+		"round_reasoning_tokens":  float64(42),
+	})
+	if !s.HasData || s.PromptTokens != 1200 || s.ReasoningTokens != 42 {
+		t.Fatalf("round snapshot = %+v", s)
+	}
+	inline := FormatInlineUsage(s)
+	if inline != " · ↑1,200 ↓80 · think 42" {
+		t.Fatalf("inline = %q", inline)
+	}
+}
+
+func stripANSI(s string) string {
+	return regexp.MustCompile("\033\\[[0-9;]*m").ReplaceAllString(s, "")
+}
+
+func TestApplyRoundUsageToAssistantPartial(t *testing.T) {
+	tr := NewTranscript(0)
+	tr.AppendPartial("assistant", "hello")
+	tr.ApplyRoundUsage(" · ↑10 ↓2")
+	lines := tr.Lines()
+	if len(lines) != 1 || stripANSI(lines[0]) != "[assistant] hello · ↑10 ↓2" {
+		t.Fatalf("lines = %v", lines)
+	}
+	if !strings.Contains(lines[0], "\033[90m") {
+		t.Fatalf("expected gray ANSI in %q", lines[0])
+	}
+}
+
+func TestApplyRoundUsageMultilineSameLine(t *testing.T) {
+	tr := NewTranscript(0)
+	tr.AppendPartial("assistant", "line1\nline2\n")
+	tr.ApplyRoundUsage(" · ↑10 ↓2")
+	lines := tr.Lines()
+	if len(lines) != 1 || stripANSI(lines[0]) != "[assistant] line1\nline2 · ↑10 ↓2" {
+		t.Fatalf("lines = %v", lines)
+	}
+}
+
+func TestApplyRoundUsageSkipsReasoning(t *testing.T) {
+	tr := NewTranscript(0)
+	tr.AppendPartial("reasoning", "think hard")
+	tr.ApplyRoundUsage(" · ↑10 ↓2")
+	if len(tr.Lines()) != 0 {
+		t.Fatalf("reasoning should not be finalized with usage: %v", tr.Lines())
+	}
+	tr.AppendPartial("assistant", "answer")
+	tr.FinishPartial("assistant")
+	lines := tr.Lines()
+	if len(lines) != 1 || stripANSI(lines[0]) != "[assistant] answer · ↑10 ↓2" {
+		t.Fatalf("lines = %v", lines)
 	}
 }
 

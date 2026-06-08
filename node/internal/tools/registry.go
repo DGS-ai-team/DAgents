@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"sync"
+
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
@@ -30,6 +32,9 @@ type Registry struct {
 	fsRoot              string
 	bashTimeout         int
 	shellOutputEncoding string
+	bashCompress        BashCompressConfig
+	compressMu          sync.Mutex
+	bashCompressStats   map[string]*OutputCompressStats
 	bgJobs              *backgroundJobRegistry
 	triggerStore *triggers.Store
 	triggerSched *triggers.Scheduler
@@ -57,8 +62,9 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, shellOutputEncoding ...s
 		fsRoot:              root,
 		bashTimeout:         bashTimeoutSeconds,
 		shellOutputEncoding: enc,
+		bashCompress:        DefaultBashCompressConfig(),
 		bgJobs:              newBackgroundJobRegistry(),
-		handlers:    make(map[string]handler),
+		handlers:            make(map[string]handler),
 	}
 	r.registerBuiltins()
 	return r, nil

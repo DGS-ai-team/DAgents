@@ -11,10 +11,11 @@ const defaultTranscriptCap = 2000
 
 // Transcript 保存可回溯的终端输出行（供 REPL /history 或全屏 viewport）。
 type Transcript struct {
-	mu      sync.Mutex
-	lines   []string
-	cap     int
-	partial *partialEntry
+	mu                 sync.Mutex
+	lines              []string
+	cap                int
+	partial            *partialEntry
+	pendingUsageSuffix string
 }
 
 type partialEntry struct {
@@ -50,10 +51,10 @@ func (t *Transcript) AddBlockGapIfNeeded() {
 func (t *Transcript) Add(line string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.lines = append(t.lines, line)
-	if len(t.lines) > t.cap {
-		t.lines = t.lines[len(t.lines)-t.cap:]
+	if strings.HasPrefix(line, "[user] ") {
+		t.pendingUsageSuffix = ""
 	}
+	t.appendLineLocked(line)
 }
 
 // Tail 返回末尾 n 行；n≤0 时返回全部。
@@ -108,6 +109,52 @@ func (t *Transcript) AppendPartial(role, text string) {
 func (t *Transcript) FinishPartial(role string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	suffix := ""
+	if role == "assistant" && t.pendingUsageSuffix != "" {
+		suffix = t.pendingUsageSuffix
+		t.pendingUsageSuffix = ""
+	}
+	t.finishPartialLocked(role, suffix)
+}
+
+// ApplyRoundUsage 将单轮 usage 挂到 assistant 块末尾（与正文最后一行同行）；不展示在 reasoning/thinking 后。
+func (t *Transcript) ApplyRoundUsage(suffix string) {
+	if strings.TrimSpace(suffix) == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.partial != nil && t.partial.role == "assistant" {
+		text := t.partial.buf.String()
+		t.partial = nil
+		if strings.TrimSpace(text) == "" {
+			t.pendingUsageSuffix = suffix
+			return
+		}
+		t.appendLineLocked("[assistant] " + appendUsageSuffix(text, suffix))
+		return
+	}
+	for i := len(t.lines) - 1; i >= 0; i-- {
+		line := t.lines[i]
+		if strings.HasPrefix(line, "[assistant] ") {
+			if !strings.HasSuffix(line, suffix) {
+				body := strings.TrimPrefix(line, "[assistant] ")
+				t.lines[i] = "[assistant] " + appendUsageSuffix(body, suffix)
+			}
+			return
+		}
+	}
+	t.pendingUsageSuffix = suffix
+}
+
+func appendUsageSuffix(content, suffix string) string {
+	if suffix == "" {
+		return content
+	}
+	return strings.TrimRight(content, "\n\r") + StyleInlineUsage(suffix)
+}
+
+func (t *Transcript) finishPartialLocked(role, suffix string) {
 	if t.partial == nil || t.partial.role != role {
 		return
 	}
@@ -116,7 +163,11 @@ func (t *Transcript) FinishPartial(role string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	line := "[" + role + "] " + text
+	line := "[" + role + "] " + appendUsageSuffix(text, suffix)
+	t.appendLineLocked(line)
+}
+
+func (t *Transcript) appendLineLocked(line string) {
 	t.lines = append(t.lines, line)
 	if len(t.lines) > t.cap {
 		t.lines = t.lines[len(t.lines)-t.cap:]

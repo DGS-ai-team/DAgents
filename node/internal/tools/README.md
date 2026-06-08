@@ -12,6 +12,7 @@ N3 在 Node 进程内本地执行；工具均为**同步实现**，通过通用�
 | `glob_files.go` / `grep_file.go` / `grep_files.go` | 按名列举、`grep_file` 单文件检索、`grep_files` 目录树检索（`search_file` 为兼容 handler 别名） |
 | `fs_glob.go` / `grep_shared.go` | glob 遍历（`doublestar`）与行匹配共用逻辑 |
 | `bash.go` / `bash_runner.go` / `bash_shell.go` / `bash_policy.go` | `bash_run`（bash/cmd/powershell、cwd、sudo/su 拦截、超时降级） |
+| `bash_compress*.go` | bash_run 输出 L1 清洗 + rune 截断（`tools.bash_compress`） |
 | `triggers.go` | `trigger_list/get/create/update/delete/fire`（见下节） |
 
 ## 执行模式

@@ -34,7 +34,7 @@ from app.cli.child_agent import (
     format_temporary_agent_tool_title,
     parse_temporary_agent_tool_result,
 )
-from app.cli.render import TranscriptKind, TranscriptUpdate
+from app.cli.render import TranscriptKind, TranscriptUpdate, format_inline_usage, parse_usage_round
 from app.cli.session_controller import PendingHITL, SessionController
 from app.cli.tool_calls import normalize_tool_call_item
 from app.cli.user_information import (
@@ -143,6 +143,7 @@ class DAgentsTuiApp(App[None]):
         self._controller = controller
         self._assistant_buffer = ""
         self._assistant_stream_start: int | None = None
+        self._pending_round_usage_suffix: str | None = None
         # 欢迎 Panel 写入后 RichLog 行数，流式 assistant 回退不得早于该位置。
         self._transcript_base_lines = 0
         self._approval_future: asyncio.Future[ApprovalDecision] | None = None
@@ -850,19 +851,42 @@ class DAgentsTuiApp(App[None]):
         else:
             log.write(content, expand=True)
 
-    def _assistant_block(self, text: str, *, complete: bool) -> RenderableType:
+    def _assistant_block(self, text: str, *, complete: bool, usage_suffix: str | None = None) -> RenderableType:
         """格式化 assistant 消息。
 
         流式中使用普通文本，完成后用 Markdown 渲染正文；左侧圆点单独占一列以保持对齐。
         完成态正文列使用 overflow=fold，避免 Rich Table 默认 ellipsis 截断长行。
         """
+        suffix = usage_suffix
+        if complete and suffix is None:
+            suffix = self._pending_round_usage_suffix
         if not complete:
             return self._message_block("yellow blink", text)
+        if suffix:
+            stripped = text.rstrip("\n")
+            self._pending_round_usage_suffix = None
+            parts = stripped.split("\n")
+            if len(parts) == 1:
+                body: RenderableType = Text.assemble((parts[0], ""), (suffix, "bright_black"))
+            else:
+                head = "\n".join(parts[:-1])
+                body = Group(
+                    Markdown(head),
+                    Text.assemble((parts[-1], ""), (suffix, "bright_black")),
+                )
+            return self._dot_column_block("green", body)
         return self._dot_column_block("green", Markdown(text))
 
-    def _write_assistant_block(self, log: RichLog, text: str, *, complete: bool) -> None:
+    def _write_assistant_block(
+        self,
+        log: RichLog,
+        text: str,
+        *,
+        complete: bool,
+        usage_suffix: str | None = None,
+    ) -> None:
         """写入 assistant 块；Renderables 需 expand 才能按 RichLog 宽度折行。"""
-        log.write(self._assistant_block(text, complete=complete), expand=True)
+        log.write(self._assistant_block(text, complete=complete, usage_suffix=usage_suffix), expand=True)
 
     def _event_block(self, text: str) -> str | Table:
         """格式化非流式事件：工具消息使用圆点，普通系统行保持原样。"""
@@ -1135,13 +1159,16 @@ class DAgentsTuiApp(App[None]):
         *,
         elapsed_s: float | None,
         rejected: bool,
+        compress_saved_pct: int | None = None,
     ) -> str:
-        """组装工具结果标题行 Rich markup（含拒绝态与耗时）。"""
+        """组装工具结果标题行 Rich markup（含拒绝态、耗时与输出压缩率）。"""
         parts = [escape(summary)]
         if rejected:
             parts.append("[red]已拒绝[/red]")
         if elapsed_s is not None:
             parts.append(f"[dim]· {escape(self._format_tool_elapsed(elapsed_s))}[/dim]")
+        if compress_saved_pct is not None and compress_saved_pct > 0:
+            parts.append(f"[dim]· -{compress_saved_pct}%[/dim]")
         return " ".join(parts)
 
     def _cancel_tool_pending_tasks(self) -> None:
@@ -1307,6 +1334,7 @@ class DAgentsTuiApp(App[None]):
             str(result["title"]),
             elapsed_s=result.get("elapsed_s"),
             rejected=bool(result.get("rejected")),
+            compress_saved_pct=result.get("compress_saved_pct"),
         )
         detail = str(result["detail"])
         expanded = bool(result["expanded"])
@@ -1336,6 +1364,7 @@ class DAgentsTuiApp(App[None]):
             str(result["title"]),
             elapsed_s=result.get("elapsed_s"),
             rejected=bool(result.get("rejected")),
+            compress_saved_pct=result.get("compress_saved_pct"),
         )
         detail = str(result["detail"])
         expanded = bool(result["expanded"])
@@ -1383,6 +1412,7 @@ class DAgentsTuiApp(App[None]):
                 str(result["title"]),
                 elapsed_s=result.get("elapsed_s"),
                 rejected=bool(result.get("rejected")),
+                compress_saved_pct=result.get("compress_saved_pct"),
             )
         ]
         for index, line in enumerate(body_lines):
@@ -1582,6 +1612,15 @@ class DAgentsTuiApp(App[None]):
                 elapsed_s = None
         if elapsed_s is None and pending is not None:
             elapsed_s = max(0.0, time.monotonic() - float(pending.get("started_at", time.monotonic())))
+        compress_saved_pct: int | None = None
+        raw_pct = data.get("output_compress_saved_pct")
+        if raw_pct is not None:
+            try:
+                pct = int(raw_pct)
+                if pct > 0:
+                    compress_saved_pct = pct
+            except (TypeError, ValueError):
+                compress_saved_pct = None
         self._tool_result_counter += 1
         result_id = f"tool-{self._tool_result_counter}"
         self._tool_results[result_id] = {
@@ -1592,6 +1631,7 @@ class DAgentsTuiApp(App[None]):
             "expanded": False,
             "elapsed_s": elapsed_s,
             "rejected": bool(data.get("rejected")),
+            "compress_saved_pct": compress_saved_pct,
             "start": 0,
             "end": 0,
         }
@@ -1622,6 +1662,7 @@ class DAgentsTuiApp(App[None]):
 
     def _write_user_message(self, value: str) -> None:
         """写入用户消息：与上方内容、下方 Agent 回复各留一行空行。"""
+        self._pending_round_usage_suffix = None
         log = self._transcript_log()
         self._flush_pending_segment_gap()
         self._append_message_gap_if_needed(log)
@@ -1648,6 +1689,10 @@ class DAgentsTuiApp(App[None]):
             self._finish_assistant_stream(log)
             if had_assistant:
                 self._mark_pending_segment_gap()
+        elif update.kind == TranscriptKind.USAGE:
+            suffix = format_inline_usage(parse_usage_round(update.data))
+            if suffix:
+                self._pending_round_usage_suffix = suffix
         elif update.kind == TranscriptKind.TOOL_CALL:
             self._submit_content_seen = True
             self._flush_pending_segment_gap()
@@ -1716,6 +1761,7 @@ class DAgentsTuiApp(App[None]):
 
     def _reset_transcript_after_clear(self, log: RichLog) -> None:
         """清屏后重置流式状态与欢迎区行边界。"""
+        self._pending_round_usage_suffix = None
         self._cancel_tool_pending_tasks()
         self._pending_tools.clear()
         self._cancel_status_lines()

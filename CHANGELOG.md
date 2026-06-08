@@ -2,6 +2,23 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.7] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.6** 基础上增加 **`bash_run` 输出压缩**、**tool/usage SSE 展示增强** 与 **双 TUI inline token 用量**。
+
+### 新增
+
+- **`bash_run` 输出压缩（P0）**：L1 ANSI/空行/重复行清洗 + rune 上限截断；配置项 `tools.bash_compress`（`enabled`、`max_output_chars`、`max_output_chars_stderr`）。
+- **压缩统计 SSE**：`tool_result` 附加 `output_compress_saved_pct` / `output_compress_raw_runes` / `output_compress_out_runes`（仅 bash 且有节省时）；Go / Textual 工具行展示 `· -N%`。
+- **usage 单轮 + turn 累计**：SSE `usage` 含顶层 turn 累计与 `round_*` 单轮字段、`llm_step`；input strip 展示 turn 累计；assistant 块末 inline 展示单轮用量（浅灰）。
+
+### 变更
+
+- **`bash_run` tool 正文精简**：`[BASH_RESULT] exit=N` + `--- STDOUT ---` / `--- STDERR ---`；压缩元数据不再写入 LLM context。
+- **Client**：`grep`/`bash` 工具行适配新输出格式；inline usage 仅挂在 assistant 后（不在 thinking/reasoning 后）。
+
+（Git **tag**：`v0.2.7`。）
+
 ## [0.2.6] - 2026-06-08
 
 **0.x 预览**：在 **v0.2.5** 基础上拆分 **文件发现** 与 **内容检索** 工具，降低 `search_file` 名实不符带来的模型误用。

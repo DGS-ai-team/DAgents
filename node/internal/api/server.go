@@ -105,12 +105,13 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		opt(&o)
 	}
 	// 生产路径：按 FSRoot 注册内置工具；失败时回退 "." 以免 API 完全不可用。
-	if o.tools == nil {
+		if o.tools == nil {
 		reg, err := tools.NewRegistry(cfg.FSRoot, 30, cfg.Tools.BashOutputEncoding)
 		if err != nil {
 			logger.Error("tools registry init failed", "error", err)
 			reg, _ = tools.NewRegistry(".", 30, cfg.Tools.BashOutputEncoding)
 		}
+		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
 		o.tools = reg
 	}
 	if o.policyEngine == nil {
@@ -182,12 +183,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		// bash 后台任务完成时回灌 session 队列，触发新一轮 turn。
 		o.tools.SetBackgroundJobNotifier(func(sessionID string, done tools.BackgroundJobDone) {
 			if err := mgr.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
-				JobID:      done.JobID,
-				ToolName:   done.ToolName,
-				ToolCallID: done.ToolCallID,
-				Status:     done.Status,
-				ResultText: done.ResultText,
-				ErrorText:  done.ErrorText,
+				JobID:                  done.JobID,
+				ToolName:               done.ToolName,
+				ToolCallID:             done.ToolCallID,
+				Status:                 done.Status,
+				ResultText:             done.ResultText,
+				ErrorText:              done.ErrorText,
+				OutputCompressSavedPct: done.OutputCompressSavedPct,
+				OutputCompressRawRunes: done.OutputCompressRawRunes,
+				OutputCompressOutRunes: done.OutputCompressOutRunes,
 			}); err != nil {
 				logger.Warn("background tool completion enqueue failed", "session_id", sessionID, "error", err)
 			}
@@ -754,4 +758,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func toolsBashCompressFromConfig(toolsCfg config.ToolsConfig) tools.BashCompressConfig {
+	out := tools.DefaultBashCompressConfig()
+	if toolsCfg.BashCompress.Enabled != nil {
+		out.Enabled = *toolsCfg.BashCompress.Enabled
+	}
+	if toolsCfg.BashCompress.MaxOutputChars > 0 {
+		out.MaxOutputChars = toolsCfg.BashCompress.MaxOutputChars
+	}
+	if toolsCfg.BashCompress.MaxOutputCharsStderr > 0 {
+		out.MaxOutputCharsStderr = toolsCfg.BashCompress.MaxOutputCharsStderr
+	}
+	return out
 }

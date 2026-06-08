@@ -183,14 +183,24 @@ func (o *Orchestrator) publishAsyncToolCallbackSSE(sessionID string, built async
 		}},
 		"display_type": "normal_text",
 	})
-	o.hub.Publish(sessionID, o.agentID, "tool_result", map[string]any{
+	o.hub.Publish(sessionID, o.agentID, "tool_result", asyncToolResultSSEPayload(built))
+}
+
+func asyncToolResultSSEPayload(built asyncToolMessages) map[string]any {
+	payload := map[string]any{
 		"tool_call_id": built.ToolCallID,
 		"tool_name":    built.ToolName,
 		"content":      built.ToolMessage.Content,
 		"partial":      false,
 		"async_status": built.Status,
 		"display_type": "normal_text",
-	})
+	}
+	if built.OutputCompressSavedPct > 0 {
+		payload["output_compress_saved_pct"] = built.OutputCompressSavedPct
+		payload["output_compress_raw_runes"] = built.OutputCompressRawRunes
+		payload["output_compress_out_runes"] = built.OutputCompressOutRunes
+	}
+	return payload
 }
 
 // ContinueAfterResume 在 Client 提交 resume 后写入 tool 结果并调度 tool_result 续跑。
@@ -381,7 +391,7 @@ func (o *Orchestrator) runOneStep(
 			})
 		},
 		OnUsage: func(u llm.Usage) {
-			o.accumulateAndPublishUsage(sessionID, u)
+			o.accumulateAndPublishUsage(sessionID, toolLoopCount, u)
 		},
 	})
 	if err != nil {
@@ -467,7 +477,7 @@ func (o *Orchestrator) resetTurnUsage(sessionID string) {
 	o.turnUsageMu.Unlock()
 }
 
-func (o *Orchestrator) accumulateAndPublishUsage(sessionID string, u llm.Usage) {
+func (o *Orchestrator) accumulateAndPublishUsage(sessionID string, llmStep int, u llm.Usage) {
 	if o == nil {
 		return
 	}
@@ -478,7 +488,7 @@ func (o *Orchestrator) accumulateAndPublishUsage(sessionID string, u llm.Usage) 
 	acc := o.turnUsage[sessionID]
 	acc.AccumulateFrom(u)
 	o.turnUsage[sessionID] = acc
-	payload := acc.SSEPayload()
+	payload := llm.UsageSSEEvent(llmStep, u, acc)
 	o.turnUsageMu.Unlock()
 	o.hub.Publish(sessionID, o.agentID, "usage", payload)
 }

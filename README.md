@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.2.6-20260608-green" alt="v0.2.6"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.2.7-20260608-green" alt="v0.2.7"></a>
   <a href="go.work"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
   <a href="requirements.txt"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
@@ -26,7 +26,7 @@
 
 ## 简介
 
-**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.2.6**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度。
+**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.2.7**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度。
 
 终端交互提供 **两种 Client**，共用一份 YAML 配置，按环境任选：
 
@@ -292,7 +292,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 | [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md) | Go Node HTTP/SSE 契约 |
 | [docs/architecture/child-agent-tools.md](docs/architecture/child-agent-tools.md) | 子 Agent 工具 |
 | [docs/architecture/go-node-compatibility.md](docs/architecture/go-node-compatibility.md) | 老旧 OS / 静态构建 |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.6**） |
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.7**） |
 | [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) | Web 前端（**独立仓库，尚未适配 v0.2.0 / Go Node API**） |
 
 > 已移除的 Python Agent API 文档见 [docs/archive/python-agent-runtime/](docs/archive/python-agent-runtime/)；**DAgentsUI 当前仍依赖旧 HTTP 契约**。
@@ -303,7 +303,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | **v0.2.6**（2026-06-08，0.x 预览；tag `v0.2.6`） |
+| **当前版本** | **v0.2.7**（2026-06-08，0.x 预览；tag `v0.2.7`） |
 | **Go** | 1.25+（`node` / `client` / `shared/config`） |
 | **Python** | 3.11+ 可运行；CI 验证 3.13 |
 | **破坏性变更** | 1.0 前仍可能出现；见 [CHANGELOG.md](CHANGELOG.md) |

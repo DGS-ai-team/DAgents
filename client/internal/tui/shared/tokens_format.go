@@ -17,11 +17,34 @@ type UsageStripSnapshot struct {
 	HasData          bool
 }
 
-// ParseUsageStrip 从 SSE usage 事件 data 解析 strip 快照（JSON 数字可能是 float64）。
+// ParseUsageRound 从 SSE usage 事件 data 解析单轮 LLM 用量（round_* 字段）。
+func ParseUsageRound(data map[string]any) UsageStripSnapshot {
+	if data == nil {
+		return UsageStripSnapshot{}
+	}
+	roundData := map[string]any{
+		"prompt_tokens":            data["round_prompt_tokens"],
+		"completion_tokens":        data["round_completion_tokens"],
+		"prompt_cache_hit_tokens":  data["round_prompt_cache_hit_tokens"],
+		"prompt_cached_tokens":     data["round_prompt_cached_tokens"],
+		"prompt_cache_hit_rate":    data["round_prompt_cache_hit_rate"],
+		"reasoning_tokens":         data["round_reasoning_tokens"],
+	}
+	if details, ok := data["round_completion_tokens_details"].(map[string]any); ok {
+		roundData["completion_tokens_details"] = details
+	}
+	return parseUsageFields(roundData)
+}
+
+// ParseUsageStrip 从 SSE usage 事件 data 解析 turn 累计 strip 快照（JSON 数字可能是 float64）。
 func ParseUsageStrip(data map[string]any) UsageStripSnapshot {
 	if data == nil {
 		return UsageStripSnapshot{}
 	}
+	return parseUsageFields(data)
+}
+
+func parseUsageFields(data map[string]any) UsageStripSnapshot {
 	prompt := intFromAny(data["prompt_tokens"])
 	completion := intFromAny(data["completion_tokens"])
 	hit := intFromAny(data["prompt_cache_hit_tokens"])
@@ -55,6 +78,26 @@ func ParseUsageStrip(data map[string]any) UsageStripSnapshot {
 		ReasoningTokens:  reasoning,
 		HasData:          true,
 	}
+}
+
+// FormatInlineUsage 格式化 assistant 块尾部的单轮用量短文案（不含终端样式）。
+func FormatInlineUsage(s UsageStripSnapshot) string {
+	if !s.HasData {
+		return ""
+	}
+	text := fmt.Sprintf(" · ↑%s ↓%s", formatCompactCount(s.PromptTokens), formatCompactCount(s.CompletionTokens))
+	if s.ReasoningTokens > 0 {
+		text += fmt.Sprintf(" · think %s", formatCompactCount(s.ReasoningTokens))
+	}
+	return text
+}
+
+// StyleInlineUsage 为 inline usage 施加终端浅灰样式（bright black / dim）。
+func StyleInlineUsage(suffix string) string {
+	if suffix == "" {
+		return ""
+	}
+	return "\033[90m" + suffix + "\033[0m"
 }
 
 // FormatInputStripUsage 格式化 ↑上行 ↓下行 与 cache hit（无数据时返回空串）。

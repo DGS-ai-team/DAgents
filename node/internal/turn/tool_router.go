@@ -206,6 +206,7 @@ func (o *Orchestrator) executeAutoBatch(
 		tc       llm.ToolCall
 		content  string
 		rejected bool
+		extra    map[string]any
 	}
 	results := make([]batchItem, len(autoCalls))
 	var wg sync.WaitGroup
@@ -214,8 +215,8 @@ func (o *Orchestrator) executeAutoBatch(
 		go func(idx int) {
 			defer wg.Done()
 			tc := autoCalls[idx]
-			content, rejected := o.invokeTool(ctx, sessionID, tc)
-			results[idx] = batchItem{tc: tc, content: content, rejected: rejected}
+			content, rejected, extra := o.invokeTool(ctx, sessionID, tc)
+			results[idx] = batchItem{tc: tc, content: content, rejected: rejected, extra: extra}
 		}(i)
 	}
 	wg.Wait()
@@ -223,7 +224,7 @@ func (o *Orchestrator) executeAutoBatch(
 		return err
 	}
 	for _, item := range results {
-		o.publishToolResult(sessionID, item.tc, item.content, item.rejected, nil)
+		o.publishToolResult(sessionID, item.tc, item.content, item.rejected, item.extra)
 		o.appendHistory(sessionID, history, llm.Message{
 			Role:       "tool",
 			ToolCallID: item.tc.ID,
@@ -233,12 +234,12 @@ func (o *Orchestrator) executeAutoBatch(
 	return nil
 }
 
-func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall) (content string, rejected bool) {
+func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall) (content string, rejected bool, extra map[string]any) {
 	runInBackground, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
 	if tools.IsBackgroundJobTool(tc.Function.Name) {
 		runInBackground = false
 	}
-	toolCtx := tools.WithSession(ctx, sessionID)
+	toolCtx := tools.WithToolCallID(tools.WithSession(ctx, sessionID), tc.ID)
 
 	var output string
 	var execErr error
@@ -246,11 +247,12 @@ func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.
 		output, execErr = o.tools.StartBackground(toolCtx, sessionID, tc.Function.Name, tc.ID, cleanedArgs)
 	} else {
 		output, execErr = o.tools.Execute(toolCtx, tc.Function.Name, cleanedArgs)
+		extra = o.tools.TakeBashCompressStatsForCall(tc.ID)
 	}
 	if execErr != nil {
-		return execErr.Error(), true
+		return execErr.Error(), true, nil
 	}
-	return output, false
+	return output, false, extra
 }
 
 func (o *Orchestrator) executeTool(
@@ -259,8 +261,8 @@ func (o *Orchestrator) executeTool(
 	history *[]llm.Message,
 	tc llm.ToolCall,
 ) error {
-	content, rejected := o.invokeTool(ctx, sessionID, tc)
-	o.publishToolResult(sessionID, tc, content, rejected, nil)
+	content, rejected, extra := o.invokeTool(ctx, sessionID, tc)
+	o.publishToolResult(sessionID, tc, content, rejected, extra)
 	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
 	return nil
 }

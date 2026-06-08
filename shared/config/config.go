@@ -37,11 +37,20 @@ type Config struct {
 	Tools             ToolsConfig             `yaml:"tools"`
 }
 
-// ToolsConfig 控制内置工具行为（如 bash_run 输出解码）。
+// ToolsConfig 控制内置工具行为（如 bash_run 输出解码与压缩）。
 type ToolsConfig struct {
 	// BashOutputEncoding 为 bash_run 捕获的子进程 stdout/stderr 字节编码（解码为 UTF-8 后交给 LLM）。
 	// 留空时由 Node 按 OS/shell 类型自动选择（Windows cmd/powershell→gbk，bash→utf-8）。
-	BashOutputEncoding string `yaml:"bash_output_encoding"`
+	BashOutputEncoding string             `yaml:"bash_output_encoding"`
+	BashCompress       BashCompressConfig `yaml:"bash_compress"`
+}
+
+// BashCompressConfig 控制 bash_run 输出压缩（P0：清洗 + rune 截断）。
+type BashCompressConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled              *bool `yaml:"enabled"`
+	MaxOutputChars       int   `yaml:"max_output_chars"`
+	MaxOutputCharsStderr int   `yaml:"max_output_chars_stderr"`
 }
 
 const EnvRawMessageHistoryEnabled = "AGENT_RAW_MESSAGE_HISTORY_ENABLED"

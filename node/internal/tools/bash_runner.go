@@ -21,6 +21,7 @@ type shellRunParams struct {
 	shellType      shellType
 	timeoutSec     int
 	outputEncoding string
+	compress       BashCompressConfig
 }
 
 // WithBackgroundExecution 标记当前 Execute 由 StartBackground 发起，bash_run 不做同步窗口超时。
@@ -53,13 +54,19 @@ func (r *Registry) execBashRun(ctx context.Context, raw json.RawMessage) (string
 	}
 
 	if isBackgroundExecution(ctx) {
-		out, err := runShellUntilDone(ctx, params)
+		out, stats, err := runShellUntilDone(ctx, params)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v", err), nil
 		}
+		r.stashBashCompressStats(toolCallIDFromContext(ctx), stats)
 		return out, nil
 	}
-	return runShellSyncWithAutoDegrade(r, ctx, params)
+	out, stats, err := runShellSyncWithAutoDegrade(r, ctx, params)
+	if err != nil {
+		return "", err
+	}
+	r.stashBashCompressStats(toolCallIDFromContext(ctx), stats)
+	return out, nil
 }
 
 func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, error) {
@@ -98,6 +105,7 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 		shellType:      st,
 		timeoutSec:     timeout,
 		outputEncoding: resolveShellOutputEncoding(st, r.shellOutputEncoding),
+		compress:       r.bashCompress.normalized(),
 	}, "", nil
 }
 
@@ -111,10 +119,10 @@ func startShellCommand(params shellRunParams) (*exec.Cmd, error) {
 }
 
 // runShellUntilDone 在 ctx 有效期内等待 shell 结束（用于 run_in_background=true）。
-func runShellUntilDone(ctx context.Context, params shellRunParams) (string, error) {
+func runShellUntilDone(ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
 	base, err := startShellCommand(params)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	cmd := exec.CommandContext(ctx, base.Args[0], base.Args[1:]...)
 	cmd.Dir = base.Dir
@@ -125,25 +133,26 @@ func runShellUntilDone(ctx context.Context, params shellRunParams) (string, erro
 	runErr := cmd.Run()
 	outText := decodeShellOutput(stdout.Bytes(), params.outputEncoding)
 	errText := decodeShellOutput(stderr.Bytes(), params.outputEncoding)
-	return formatShellCompletedOutput(params, outText, errText, cmd.ProcessState, runErr), nil
+	out, stats := formatShellCompletedOutput(params, outText, errText, cmd.ProcessState, runErr)
+	return out, stats, nil
 }
 
 // runShellSyncWithAutoDegrade 同步等待 timeout 秒；超时则不杀进程并登记后台 job。
-func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellRunParams) (string, error) {
+func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
 	cmd, err := startShellCommand(params)
 	if err != nil {
-		return fmt.Sprintf("ERROR: %v", err), nil
+		return fmt.Sprintf("ERROR: %v", err), nil, nil
 	}
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", fmt.Errorf("bash_run 失败: %w", err)
+		return "", nil, fmt.Errorf("bash_run 失败: %w", err)
 	}
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		return "", fmt.Errorf("bash_run 失败: %w", err)
+		return "", nil, fmt.Errorf("bash_run 失败: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Sprintf("ERROR: bash_run 失败: %v", err), nil
+		return fmt.Sprintf("ERROR: bash_run 失败: %v", err), nil, nil
 	}
 
 	sessionID := sessionIDFromContext(ctx)
@@ -169,16 +178,17 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 	select {
 	case <-collectDone:
 		job.mu.Lock()
-		result := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, cmd.ProcessState, nil)
+		result, stats := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, cmd.ProcessState, nil)
+		job.compressStats = stats
 		job.mu.Unlock()
-		return result, nil
+		return result, stats, nil
 	case <-timer.C:
 		job.autoDegraded = true
 		r.bgJobs.put(job)
-		return formatShellRunningResult(job, params), nil
+		return formatShellRunningResult(job, params), nil, nil
 	case <-ctx.Done():
 		killShellProcess(cmd)
-		return "", ctx.Err()
+		return "", nil, ctx.Err()
 	}
 }
 
@@ -230,7 +240,7 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 		} else {
 			job.status = "failed"
 		}
-		job.result = formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, job.bashCmd.ProcessState, waitErr)
+		job.result, job.compressStats = formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, job.bashCmd.ProcessState, waitErr)
 		job.finishedAt = nowMs()
 		autoDegraded := job.autoDegraded
 		session := job.sessionID
@@ -243,41 +253,37 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 	return done
 }
 
-func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, state *os.ProcessState, runErr error) string {
-	outText := strings.TrimSpace(stdout)
-	errText := strings.TrimSpace(stderr)
-	outText, outTrunc := clipText(outText, maxBashOutputChars)
-	errText, errTrunc := clipText(errText, maxBashOutputChars)
-
-	bashStatus := "OK"
+func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, state *os.ProcessState, runErr error) (string, *OutputCompressStats) {
 	exitCode := 0
 	if runErr != nil {
-		bashStatus = "NON_ZERO_EXIT"
 		exitCode = 1
 	}
 	if state != nil {
 		exitCode = state.ExitCode()
-		if exitCode != 0 {
-			bashStatus = "NON_ZERO_EXIT"
-		}
 	}
+
+	cfg := params.compress.normalized()
+	outText, outMeta := compressBashStream(cfg, stdout, cfg.MaxOutputChars)
+	errLimit := stderrMaxRunes(cfg, exitCode)
+	errText, errMeta := compressBashStream(cfg, stderr, errLimit)
+	stats := aggregateBashCompressStats(outMeta, errMeta)
+
+	header := fmt.Sprintf("[BASH_RESULT] exit=%d", exitCode)
+	if outMeta.runeTruncated || errMeta.runeTruncated {
+		header += " truncated"
+	}
+
 	parts := []string{
-		fmt.Sprintf("[BASH_RESULT] shell_type=%s status=%s exit_code=%d", params.shellType, bashStatus, exitCode),
-		fmt.Sprintf("cwd=%q", params.cwd),
-		fmt.Sprintf("timeout_seconds=%d", params.timeoutSec),
-		fmt.Sprintf("output_encoding=%s", params.outputEncoding),
+		header,
 		"--- STDOUT ---",
 		outText,
 		"--- STDERR ---",
 		errText,
 	}
-	if outTrunc || errTrunc {
-		parts = append(parts, fmt.Sprintf("[TRUNCATED] 输出超过 %d 字符，已对 stdout/stderr 分别截断。", maxBashOutputChars))
-	}
 	if runErr != nil {
 		parts = append(parts, "exit_error: "+runErr.Error())
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n"), stats
 }
 
 func formatShellRunningResult(job *backgroundJob, params shellRunParams) string {
@@ -286,10 +292,8 @@ func formatShellRunningResult(job *backgroundJob, params shellRunParams) string 
 		st = shellType(job.bashShellType)
 	}
 	return strings.Join([]string{
-		fmt.Sprintf("[BASH_RESULT] shell_type=%s status=RUNNING job_id=%s", st, job.id),
-		fmt.Sprintf("cwd=%q", job.bashCwd),
-		fmt.Sprintf("timeout_seconds=%d", job.bashTimeout),
-		fmt.Sprintf("output_encoding=%s", params.outputEncoding),
+		fmt.Sprintf("[BASH_RESULT] status=RUNNING job_id=%s", job.id),
+		fmt.Sprintf("shell_type=%s", st),
 		"命令超过同步等待时间，已自动降级为后台任务；也可显式使用 run_in_background=true。",
 		"可用 background_job_status / background_job_cancel 查询或取消。",
 	}, "\n")
@@ -300,7 +304,6 @@ func formatShellJobDone(job *backgroundJob) string {
 	result := job.result
 	status := job.status
 	exitCode := job.bashExitCode
-	cwd := job.bashCwd
 	id := job.id
 	job.mu.Unlock()
 	code := -1
@@ -308,8 +311,7 @@ func formatShellJobDone(job *backgroundJob) string {
 		code = *exitCode
 	}
 	parts := []string{
-		fmt.Sprintf("[TOOL_BACKGROUND_DONE] tool_name=bash_run job_id=%s status=%s exit_code=%d", id, status, code),
-		fmt.Sprintf("cwd=%q", cwd),
+		fmt.Sprintf("[TOOL_BACKGROUND_DONE] tool_name=bash_run job_id=%s status=%s exit=%d", id, status, code),
 		"---",
 		result,
 	}

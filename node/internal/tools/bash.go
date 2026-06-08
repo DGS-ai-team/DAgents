@@ -3,7 +3,8 @@ package tools
 const (
 	defaultBashTimeoutSec = 30
 	maxBashTimeoutSec     = 600
-	maxBashOutputChars    = 12000
+	maxBashOutputRunes        = 12000
+	maxBashOutputStderrRunes  = 16000
 )
 
 type bashRunArgs struct {
@@ -18,7 +19,7 @@ func bashRunToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "bash_run",
-			Description: "执行 bash/cmd/powershell 命令；同步超时自动降级后台，或显式 run_in_background=true",
+			Description: "执行 bash/cmd/powershell 命令；同步超时自动降级后台，或显式 run_in_background=true。长输出会按配置自动清洗与截断（tools.bash_compress）。",
 			Parameters: injectRunInBackgroundParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{

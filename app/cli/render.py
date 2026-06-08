@@ -20,6 +20,7 @@ class TranscriptKind(str, Enum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     COMPRESSION = "compression"
+    USAGE = "usage"
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,8 +181,8 @@ class UsageStripSnapshot:
     has_data: bool = False
 
 
-def parse_usage_strip(data: dict[str, Any]) -> UsageStripSnapshot:
-    """从 SSE usage 事件 data 解析 strip 快照。"""
+def _parse_usage_fields(data: dict[str, Any]) -> UsageStripSnapshot:
+    """从 usage 字段 dict 解析 strip 快照。"""
     prompt = _int_from_event_data(data.get("prompt_tokens"))
     completion = _int_from_event_data(data.get("completion_tokens"))
     hit = _int_from_event_data(data.get("prompt_cache_hit_tokens"))
@@ -212,6 +213,37 @@ def parse_usage_strip(data: dict[str, Any]) -> UsageStripSnapshot:
         reasoning_tokens=reasoning,
         has_data=True,
     )
+
+
+def parse_usage_strip(data: dict[str, Any]) -> UsageStripSnapshot:
+    """从 SSE usage 事件 data 解析 turn 累计 strip 快照。"""
+    return _parse_usage_fields(data)
+
+
+def parse_usage_round(data: dict[str, Any]) -> UsageStripSnapshot:
+    """从 SSE usage 事件 data 解析单轮 LLM 用量（round_* 字段）。"""
+    round_data: dict[str, Any] = {
+        "prompt_tokens": data.get("round_prompt_tokens"),
+        "completion_tokens": data.get("round_completion_tokens"),
+        "prompt_cache_hit_tokens": data.get("round_prompt_cache_hit_tokens"),
+        "prompt_cached_tokens": data.get("round_prompt_cached_tokens"),
+        "prompt_cache_hit_rate": data.get("round_prompt_cache_hit_rate"),
+        "reasoning_tokens": data.get("round_reasoning_tokens"),
+    }
+    details = data.get("round_completion_tokens_details")
+    if isinstance(details, dict):
+        round_data["completion_tokens_details"] = details
+    return _parse_usage_fields(round_data)
+
+
+def format_inline_usage(snapshot: UsageStripSnapshot) -> str:
+    """格式化 assistant 块尾部的单轮用量短文案。"""
+    if not snapshot.has_data:
+        return ""
+    text = f" · ↑{_format_compact_count(snapshot.prompt_tokens)} ↓{_format_compact_count(snapshot.completion_tokens)}"
+    if snapshot.reasoning_tokens > 0:
+        text += f" · think {_format_compact_count(snapshot.reasoning_tokens)}"
+    return text
 
 
 def format_input_strip_usage(snapshot: UsageStripSnapshot) -> str:

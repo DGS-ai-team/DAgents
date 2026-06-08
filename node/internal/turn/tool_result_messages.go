@@ -86,6 +86,9 @@ type asyncToolMessages struct {
 	ToolName         string
 	ToolCallID       string
 	Status           string
+	OutputCompressSavedPct int
+	OutputCompressRawRunes int
+	OutputCompressOutRunes int
 }
 
 func buildAsyncToolMessages(payload AsyncToolResultInput) asyncToolMessages {
@@ -143,20 +146,26 @@ func buildAsyncToolMessages(payload AsyncToolResultInput) asyncToolMessages {
 			ToolCallID: toolCallID,
 			Content:    toolText,
 		},
-		ToolName:   toolName,
-		ToolCallID: toolCallID,
-		Status:     status,
+		ToolName:               toolName,
+		ToolCallID:             toolCallID,
+		Status:                 status,
+		OutputCompressSavedPct: payload.OutputCompressSavedPct,
+		OutputCompressRawRunes: payload.OutputCompressRawRunes,
+		OutputCompressOutRunes: payload.OutputCompressOutRunes,
 	}
 }
 
 // AsyncToolResultInput 为 HandleAsyncToolResult 入参。
 type AsyncToolResultInput struct {
-	JobID      string
-	ToolName   string
-	ToolCallID string
-	Status     string
-	ResultText string
-	ErrorText  string
+	JobID                  string
+	ToolName               string
+	ToolCallID             string
+	Status                 string
+	ResultText             string
+	ErrorText              string
+	OutputCompressSavedPct int
+	OutputCompressRawRunes int
+	OutputCompressOutRunes int
 }
 
 func shouldContinueAfterAsyncTool(tail toolResultTailKind) bool {

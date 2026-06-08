@@ -618,6 +618,7 @@ class SessionController:
             self._emit_transcript(format_tool_result(data))
         elif event_type == "usage":
             self._usage_strip = parse_usage_strip(data)
+            self._emit_transcript(TranscriptUpdate(kind=TranscriptKind.USAGE, data=data))
             self._emit_child_strip()
         elif event_type in {"context_compression_blocking", "context_compression_silent"}:
             self._ensure_assistant_end()

@@ -19,7 +19,7 @@ local:
 expose_to_peers: false
 
 # 工具可访问的文件根；运行时目录见 .gitignore 中的 .runtime/
-fs_root: ./.runtime
+fs_root: ./
 
 llm:
   provider: deepseek   # openai | deepseek（deepseek 时出站 messages 按 Thinking 文档校验/裁剪 reasoning_content）
@@ -64,6 +64,10 @@ log:
 tools:
   # bash_output_encoding: gbk
   # bash_output_encoding: utf-8
+  bash_compress:
+    enabled: true
+    max_output_chars: 12000       # stdout 最大 rune 数
+    max_output_chars_stderr: 16000
 
 # 临时子 Agent（见 docs/architecture/child-agent-tools.md）
 child_agents:

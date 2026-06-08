@@ -111,6 +111,18 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 	if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 		return true, nil
 	}
+	if ev.Type == "usage" {
+		suffix := tuishared.FormatInlineUsage(tuishared.ParseUsageRound(ev.Data))
+		if suffix != "" {
+			r.transcript.ApplyRoundUsage(suffix)
+			r.printMu.Lock()
+			if r.assistantLineOpen {
+				fmt.Print(tuishared.StyleInlineUsage(suffix))
+			}
+			r.printMu.Unlock()
+		}
+		return true, nil
+	}
 	switch ev.Type {
 	case "assistant", "reasoning", "tool_call", "tool_result":
 		r.turn.MarkTurnContent()

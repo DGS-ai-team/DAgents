@@ -72,6 +72,9 @@ func formatToolResultEvent(data map[string]any, verbose bool) []string {
 	}
 
 	head := resultHeadline(name, rejected, content)
+	if pct := outputCompressSavedPct(data); pct > 0 {
+		head += fmt.Sprintf(" · -%d%%", pct)
+	}
 	if IsTemporaryAgentTool(name) {
 		if customHead, body, ok := formatTemporaryAgentToolResult(name, content, verbose); ok {
 			head = customHead
@@ -169,10 +172,28 @@ func summarizeBashOutput(content string) string {
 
 func parseBashExitCode(content string) int {
 	first := strings.Split(content, "\n")[0]
-	if !strings.Contains(first, "exit_code=") {
+	if !strings.Contains(first, "exit") {
 		return -1
 	}
 	var code int
+	if strings.Contains(first, "exit=") {
+		if _, err := fmt.Sscanf(first, "[BASH_RESULT] exit=%d", &code); err == nil {
+			return code
+		}
+		if _, err := fmt.Sscanf(first, "[BASH_RESULT] exit=%d truncated", &code); err == nil {
+			return code
+		}
+		parts := strings.Split(first, "exit=")
+		if len(parts) >= 2 {
+			field := strings.Fields(parts[1])[0]
+			if _, err := fmt.Sscanf(field, "%d", &code); err == nil {
+				return code
+			}
+		}
+	}
+	if !strings.Contains(first, "exit_code=") {
+		return -1
+	}
 	if _, err := fmt.Sscanf(first, "[BASH_RESULT] shell_type=%*s status=%*s exit_code=%d", &code); err == nil {
 		return code
 	}
@@ -184,6 +205,22 @@ func parseBashExitCode(content string) int {
 		return code
 	}
 	return -1
+}
+
+func outputCompressSavedPct(data map[string]any) int {
+	if data == nil {
+		return 0
+	}
+	switch v := data["output_compress_saved_pct"].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
 }
 
 func splitSearchReplaceResult(content string) (meta, diff string) {

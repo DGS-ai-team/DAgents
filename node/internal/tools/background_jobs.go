@@ -33,16 +33,20 @@ type backgroundJob struct {
 	bashExitCode *int
 	bashShellType      string
 	bashOutputEncoding string
+	compressStats      *OutputCompressStats
 }
 
 // BackgroundJobDone 为后台任务完成时的结构化回灌载荷（由 session 转为 async_tool_result 入队）。
 type BackgroundJobDone struct {
-	JobID      string
-	ToolName   string
-	ToolCallID string
-	Status     string
-	ResultText string
-	ErrorText  string
+	JobID                   string
+	ToolName                string
+	ToolCallID              string
+	Status                  string
+	ResultText              string
+	ErrorText               string
+	OutputCompressSavedPct  int
+	OutputCompressRawRunes  int
+	OutputCompressOutRunes  int
 }
 
 type backgroundJobRegistry struct {
@@ -94,7 +98,7 @@ func jobDonePayloadLocked(job *backgroundJob) BackgroundJobDone {
 	if job.status == "failed" || job.status == "cancelled" {
 		errText = result
 	}
-	return BackgroundJobDone{
+	done := BackgroundJobDone{
 		JobID:      job.id,
 		ToolName:   job.toolName,
 		ToolCallID: job.toolCallID,
@@ -102,6 +106,12 @@ func jobDonePayloadLocked(job *backgroundJob) BackgroundJobDone {
 		ResultText: result,
 		ErrorText:  errText,
 	}
+	if job.compressStats != nil {
+		done.OutputCompressSavedPct = job.compressStats.SavedPct
+		done.OutputCompressRawRunes = job.compressStats.RawRunes
+		done.OutputCompressOutRunes = job.compressStats.OutRunes
+	}
+	return done
 }
 
 func jobDonePayload(job *backgroundJob) BackgroundJobDone {
@@ -130,7 +140,7 @@ func (r *Registry) StartBackground(
 	if r.bgJobs == nil {
 		return "", fmt.Errorf("background jobs not initialized")
 	}
-	jobCtx, cancel := context.WithCancel(WithBackgroundExecution(WithSession(parent, sessionID)))
+	jobCtx, cancel := context.WithCancel(WithBackgroundExecution(WithToolCallID(WithSession(parent, sessionID), toolCallID)))
 	job := &backgroundJob{
 		id:         newJobID(),
 		sessionID:  sessionID,
@@ -165,6 +175,9 @@ func (r *Registry) StartBackground(
 			if job.status == "running" {
 				job.status = "succeeded"
 			}
+		}
+		if stats := r.TakeBashCompressStatsForCall(toolCallID); stats != nil {
+			job.compressStats = outputCompressStatsFromSSEFields(stats)
 		}
 		job.finishedAt = nowMs()
 		donePayload := jobDonePayloadLocked(job)

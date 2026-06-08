@@ -277,12 +277,15 @@ func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.A
 	loopCount := r.toolLoopCountSnapshot()
 	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
 		return r.orch.HandleAsyncToolResult(ctx, r.session.ID, history, turn.AsyncToolResultInput{
-			JobID:      payload.JobID,
-			ToolName:   payload.ToolName,
-			ToolCallID: payload.ToolCallID,
-			Status:     payload.Status,
-			ResultText: payload.ResultText,
-			ErrorText:  payload.ErrorText,
+			JobID:                  payload.JobID,
+			ToolName:               payload.ToolName,
+			ToolCallID:             payload.ToolCallID,
+			Status:                 payload.Status,
+			ResultText:             payload.ResultText,
+			ErrorText:              payload.ErrorText,
+			OutputCompressSavedPct: payload.OutputCompressSavedPct,
+			OutputCompressRawRunes: payload.OutputCompressRawRunes,
+			OutputCompressOutRunes: payload.OutputCompressOutRunes,
 		}, setState, loopCount)
 	})
 	r.mu.Lock()

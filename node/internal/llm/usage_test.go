@@ -143,6 +143,22 @@ func TestUsageUnmarshalJSONCompletionTokenDetailsAlias(t *testing.T) {
 	}
 }
 
+func TestUsageSSEEventRoundAndTurnFields(t *testing.T) {
+	var turn Usage
+	turn.AccumulateFrom(Usage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120})
+	round := Usage{PromptTokens: 40, CompletionTokens: 8, TotalTokens: 48}
+	payload := UsageSSEEvent(2, round, turn)
+	if payload["llm_step"] != 2 {
+		t.Fatalf("llm_step = %v", payload["llm_step"])
+	}
+	if payload["prompt_tokens"] != 100 || payload["completion_tokens"] != 20 {
+		t.Fatalf("turn fields = %v", payload)
+	}
+	if payload["round_prompt_tokens"] != 40 || payload["round_completion_tokens"] != 8 {
+		t.Fatalf("round fields = %v", payload)
+	}
+}
+
 func TestUsageAccumulateFrom(t *testing.T) {
 	var acc Usage
 	acc.AccumulateFrom(Usage{

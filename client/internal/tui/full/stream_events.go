@@ -68,7 +68,11 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			return
 		}
 		m.usageStrip = tuishared.ParseUsageStrip(ev.Data)
+		if suffix := tuishared.FormatInlineUsage(tuishared.ParseUsageRound(ev.Data)); suffix != "" {
+			m.transcript.ApplyRoundUsage(suffix)
+		}
 		m.notifyStripRefresh()
+		m.notifyViewportRefresh()
 	case "context_compression_blocking", "context_compression_silent":
 		m.transcript.Add("[system] " + clihitl.FormatContextCompression(ev.Type, ev.Data))
 		m.notifyViewportRefresh()

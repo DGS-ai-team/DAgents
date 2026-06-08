@@ -207,6 +207,37 @@ func (u Usage) CompletionReasoningTokens() int {
 	return max(0, u.CompletionTokensDetails.ReasoningTokens)
 }
 
+// UsageSSEEvent 构造 usage SSE 载荷：顶层为 turn 累计；round_* 为单次 StreamChat 用量。
+func UsageSSEEvent(llmStep int, round, turn Usage) map[string]any {
+	payload := turn.SSEPayload()
+	if llmStep > 0 {
+		payload["llm_step"] = llmStep
+	}
+	for k, v := range round.sseFieldsWithPrefix("round_") {
+		payload[k] = v
+	}
+	return payload
+}
+
+func (u Usage) sseFieldsWithPrefix(prefix string) map[string]any {
+	norm := u
+	norm.Normalize()
+	out := map[string]any{
+		prefix + "prompt_tokens":            max(0, norm.PromptTokens),
+		prefix + "completion_tokens":        max(0, norm.CompletionTokens),
+		prefix + "total_tokens":             max(0, norm.TotalTokens),
+		prefix + "prompt_cached_tokens":     norm.PromptCachedTokens(),
+		prefix + "prompt_cache_hit_tokens":  norm.PromptCachedTokens(),
+		prefix + "prompt_cache_miss_tokens": norm.PromptCacheMissTokensEffective(),
+		prefix + "prompt_audio_tokens":      norm.PromptAudioTokens(),
+		prefix + "reasoning_tokens":         norm.CompletionReasoningTokens(),
+	}
+	if rate := norm.PromptCacheHitRate(); rate >= 0 {
+		out[prefix+"prompt_cache_hit_rate"] = rate
+	}
+	return out
+}
+
 // SSEPayload 转为 SSE usage 事件扁平字段（Client / Textual TUI 共用）。
 func (u Usage) SSEPayload() map[string]any {
 	norm := u
