@@ -2,6 +2,16 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.12] - 2026-06-08
+
+**0.x 预览**：修复 **v0.2.11** Windows 发布包组装时 OfficeCLI skills 解压失败。
+
+### 修复
+
+- **`vendor_officecli.sh`**：解 skills  tarball 时一并提取根目录 **`SKILL.md`**（`skills/officecli/SKILL.md` 为 symlink）；复制 skills 时使用 **`cp -RL`** 展开 symlink，避免 Windows CI / zip 分发出现断链。
+
+（Git **tag**：`v0.2.12`。）
+
 ## [0.2.11] - 2026-06-08
 
 **0.x 预览**：在 **v0.2.10** 基础上增加 **手动压缩与 context 诊断**、**预编译包 Node 自启动**、**Windows 内置 OfficeCLI**，并改进 Go TUI 滚动体验。

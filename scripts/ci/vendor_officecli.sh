@@ -84,13 +84,17 @@ if [[ -z "${ARCHIVE_TOP}" ]]; then
   exit 1
 fi
 
-tar -xzf "${TMP_ARCHIVE}" -C "${TMP_WORK}" "${ARCHIVE_TOP}/skills"
+# skills/officecli/SKILL.md 为 symlink -> ../../SKILL.md；须一并解压根 SKILL.md，
+# 且复制时用 cp -L 展开 symlink（Windows CI / zip 分发不接受断链）。
+tar -xzf "${TMP_ARCHIVE}" -C "${TMP_WORK}" \
+  "${ARCHIVE_TOP}/skills" \
+  "${ARCHIVE_TOP}/SKILL.md"
 
 shopt -s nullglob
 for skill_dir in "${TMP_WORK}/${ARCHIVE_TOP}/skills"/*; do
   name="$(basename "${skill_dir}")"
   rm -rf "${SKILLS_DIR}/${name}"
-  cp -a "${skill_dir}" "${SKILLS_DIR}/${name}"
+  cp -RL "${skill_dir}" "${SKILLS_DIR}/${name}"
   echo "[vendor_officecli] skill ${name}"
 done
 shopt -u nullglob
