@@ -47,6 +47,24 @@ func (t *Transcript) AddBlockGapIfNeeded() {
 	}
 }
 
+const (
+	sysPanelTitlePrefix = "[sys-panel-title] "
+	sysPanelBodyPrefix  = "[sys-panel-body] "
+)
+
+// AddSystemPanel 追加带标题的结构化 system 面板（供 /status /sessions /skill 等）。
+func (t *Transcript) AddSystemPanel(title string, bodyLines []string) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "System"
+	}
+	t.AddBlockGapIfNeeded()
+	t.Add(sysPanelTitlePrefix + title)
+	for _, line := range bodyLines {
+		t.Add(sysPanelBodyPrefix + line)
+	}
+}
+
 // Add 追加一行；超 cap 时丢弃最旧行。
 func (t *Transcript) Add(line string) {
 	t.mu.Lock()
@@ -102,6 +120,29 @@ func (t *Transcript) LinesForDisplay(width int) []string {
 	for i, line := range raw {
 		out[i] = FormatTranscriptLineForDisplay(line, width)
 	}
+	return out
+}
+
+// SnapshotLinesForDisplay 含流式 partial 缓冲，供全屏 viewport 刷新。
+func (t *Transcript) SnapshotLinesForDisplay(width int) []string {
+	lines := t.LinesForDisplay(width)
+	t.mu.Lock()
+	partial := t.partial
+	var role, text string
+	if partial != nil && partial.buf.Len() > 0 {
+		role = partial.role
+		text = partial.buf.String()
+	}
+	t.mu.Unlock()
+	if text == "" {
+		return lines
+	}
+	if role == "" {
+		role = "assistant"
+	}
+	out := make([]string, len(lines), len(lines)+1)
+	copy(out, lines)
+	out = append(out, FormatTranscriptLineForDisplay("["+role+"] "+text, width))
 	return out
 }
 

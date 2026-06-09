@@ -71,7 +71,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 - **分发**：GitHub Releases **`dagents-local-assistant-*`**（linux tarball / windows zip）；**v0.2.3** 起 **Windows Inno 安装包**、**Linux `install.sh`**（[client-packaging.md](./architecture/client-packaging.md)）。
 - **CI**：**`go-ac.yml`**（Go 单测与交叉编译）、**`manual-package`**（Release 组装）；Register Center / Python CLI 单测保留。
 - **技术文档**：架构总览、Node 内部、AC 计划、归档 Python 运行时等（**`docs/`**）。
-- **落地案例目录**：**`docs/cases/`**（索引见 **`docs/cases/README.md`**）。
+- **落地案例目录**：**[`cases/`](../../cases/)**（索引见 **[`cases/README.md`](../../cases/README.md)**；每案含 Docker 复现环境）。
 
 ---
 
@@ -206,7 +206,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 | 项 | 说明 |
 |----|------|
-| **`docs/cases/` 案例正文** | 目录与约定已就绪；后续案例应优先围绕企业本地闭环、触发器驱动诊断、审批修复和 skill 沉淀。 |
+| **[`cases/`](../../cases/) 案例** | 含 **`centos7-feature-tour`**（CentOS 7 + HTTP 特性导览）；后续可扩展 HITL、triggers 等专题 case。 |
 | **1.0 稳定性门槛** | 兼容性承诺、废弃策略、发布节奏待与 **CHANGELOG / Releases** 对齐后写清。 |
 
 ---

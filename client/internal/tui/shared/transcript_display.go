@@ -37,6 +37,12 @@ func FormatTranscriptLineForDisplay(line string, width int) string {
 		return roleDotTool + rest
 	case strings.HasPrefix(line, "[system]"):
 		return roleDotSystem + strings.TrimPrefix(line, "[system]")
+	case strings.HasPrefix(line, sysPanelTitlePrefix):
+		title := strings.TrimPrefix(line, sysPanelTitlePrefix)
+		return roleDotSystem + panelTitleStyle + title + panelReset
+	case strings.HasPrefix(line, sysPanelBodyPrefix):
+		body := strings.TrimPrefix(line, sysPanelBodyPrefix)
+		return panelBodyIndent + formatPanelBodyLine(body)
 	default:
 		return line
 	}
@@ -48,6 +54,16 @@ const (
 	roleDotReasoning  = "\033[33m●\033[0m "
 	roleDotTool       = "\033[36m●\033[0m "
 	roleDotSystem     = "\033[90m●\033[0m "
+
+	panelTitleStyle   = "\033[1;36m"
+	panelSectionStyle = "\033[36m"
+	panelLabelStyle   = "\033[90m"
+	panelLoadedStyle  = "\033[32m"
+	panelCurrentStyle = "\033[1;33m"
+	panelDimStyle     = "\033[90m"
+	panelReset        = "\033[0m"
+
+	panelBodyIndent = "  "
 )
 
 func formatRoleLineWithUsage(prefix, body, usagePlain string, width int) string {
@@ -105,6 +121,64 @@ func prefixDotPadding(prefix string) string {
 		return "  "
 	}
 	return strings.Repeat(" ", runewidth.StringWidth(stripANSI(prefix)))
+}
+
+func formatPanelBodyLine(encoded string) string {
+	kind, rest, ok := strings.Cut(encoded, "|")
+	if !ok {
+		return panelDimStyle + encoded + panelReset
+	}
+	switch kind {
+	case panelKindSection:
+		return panelSectionStyle + rest + panelReset
+	case panelKindKV:
+		label, value, _ := strings.Cut(rest, "|")
+		return formatPanelKV(label, value)
+	case panelKindLoaded:
+		name, desc, _ := strings.Cut(rest, "|")
+		line := panelLoadedStyle + "● " + name + panelReset
+		if desc != "" {
+			line += panelDimStyle + " · " + desc + panelReset
+		}
+		return line
+	case panelKindAvailable:
+		name, desc, _ := strings.Cut(rest, "|")
+		line := panelDimStyle + "○ " + name + panelReset
+		if desc != "" {
+			line += panelDimStyle + " · " + desc + panelReset
+		}
+		return line
+	case panelKindSessCur:
+		id, state, meta := splitPanelTriple(rest)
+		return panelCurrentStyle + "* " + id + panelReset +
+			panelDimStyle + "  [" + state + "]  " + meta + panelReset
+	case panelKindSess:
+		id, state, meta := splitPanelTriple(rest)
+		return panelDimStyle + "- " + id + "  [" + state + "]  " + meta + panelReset
+	case panelKindPreview:
+		return panelDimStyle + "    " + rest + panelReset
+	case panelKindEmpty:
+		return panelDimStyle + "  " + rest + panelReset
+	case panelKindNote:
+		return panelSectionStyle + rest + panelReset
+	case panelKindChild:
+		return panelLoadedStyle + rest + panelReset
+	case panelKindDetail:
+		return panelDimStyle + "   " + rest + panelReset
+	case panelKindHelp:
+		cmd, desc, _ := strings.Cut(rest, "|")
+		return panelLabelStyle + cmd + panelReset + panelDimStyle + "  " + desc + panelReset
+	default:
+		return panelDimStyle + encoded + panelReset
+	}
+}
+
+func formatPanelKV(label, value string) string {
+	padded := label
+	if len(label) < 10 {
+		padded = label + strings.Repeat(" ", 10-len(label))
+	}
+	return panelLabelStyle + padded + panelReset + "  " + value
 }
 
 func stripANSI(s string) string {

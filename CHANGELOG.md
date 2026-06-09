@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.13** 基础上增强 **TUI 斜杠命令展示与滚动体验**，并新增 **CentOS 7 特性导览** 落地案例。
+
+### 新增
+
+- **`cases/centos7-feature-tour/`**：CentOS 7 容器 + 静态 Node；README 以 **TUI 输入/观察** 为主（Mock 无需 API Key）；`scripts/verify.sh` 供 CI/运维冒烟。
+
+### 变更
+
+- **Go 全屏 TUI 命令面板**：`/status`、`/sessions`、`/skill`、`/help`、`/children` 使用结构化 system panel（标题 + 分区/键值/高亮），不再把纯文本丢进 transcript。
+- **Go / Python TUI 滚动跟随**：显式 **`viewportFollowTail` / `_transcript_follow_tail`**；流式输出、审批等待、工具详情展开（Python 点击）时，用户上滚后不再被强制拽到底；滚回底部或发送消息恢复跟随。Go 支持 **PgUp/PgDn**、输入框为空时 **↑/↓**、鼠标滚轮；流式 **partial** 实时进 viewport。
+- **Python TUI 命令面板**：`/status`、`/session`（含 `/sessions` 别名）、`/skill`、`/help`、`/children` 使用 Rich **Panel** 边框展示。
+- **案例目录**：可复现场景迁至仓库根 **`cases/`**（索引仍链到 [`docs/cases/README.md`](docs/cases/README.md)）。
+
+（Git **tag**：`v0.2.14`。）
+
 ## [0.2.13] - 2026-06-07
 
 **0.x 预览**：在 **v0.2.12** 基础上取消发布包内置 OfficeCLI、对齐 **`fs_root` 默认沙箱**、精简工具输出，并增强 skills 与 TUI 工具展示。

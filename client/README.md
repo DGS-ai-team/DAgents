@@ -62,6 +62,10 @@ go run ./client/cmd/dagents-client chat "你好"
 | `/reasoning on\|off` | 运行时切换推理流显示（也可用 `--show-reasoning` 启动） |
 | `/quit` | 退出 |
 
+**命令输出**：full 模式下 `/status`、`/sessions`、`/skill`、`/help`、`/children` 以结构化 **system panel** 展示（分区标题、键值对齐、当前 session / 已加载 skill 高亮）。
+
+**滚动**：默认贴底跟随新输出；在 transcript 区 **滚轮上滚** 或按 **PgUp**（输入框为空时 **↑**）可固定阅读位置，流式输出与审批等待期间不会被拽回底部；滚回底部或 **发送消息** 后恢复跟随。
+
 SSE 断线后会按 `Last-Event-ID` 自动重连。
 
 **与 Python Textual Client 对齐的基础逻辑**（`client/internal/tui/shared/turn_gate.go`）：

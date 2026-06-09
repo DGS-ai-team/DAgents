@@ -28,6 +28,7 @@ func TestRefreshViewportContent_staysWhenScrolledUp(t *testing.T) {
 		t.Fatal("expected scrolled up")
 	}
 	yBefore := m.viewport.YOffset
+	m.viewportFollowTail = false
 
 	m.transcript.Add("line-6")
 	m.syncViewport()

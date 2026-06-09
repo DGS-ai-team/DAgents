@@ -1,0 +1,19 @@
+# 在 cases/centos7-feature-tour/ 下执行：docker compose up --build
+services:
+  dagents-node:
+    build:
+      context: ../..
+      dockerfile: cases/centos7-feature-tour/Dockerfile
+    ports:
+      - "${DAGENTS_PORT:-18765}:18765"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_MOCK: ${LLM_MOCK:-true}
+    volumes:
+      - ./workspace:/workspace/.runtime
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:18765/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s

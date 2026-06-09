@@ -84,43 +84,6 @@ func FormatSessionContext(ctx *nodeapi.SessionContext) string {
 	return strings.Join(lines, "\n")
 }
 
-// FormatSessionSkills 格式化 skills 列表响应。
-func FormatSessionSkills(sk *nodeapi.SessionSkills) string {
-	if sk == nil {
-		return "(无 skills 数据)"
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "session=%s\n\nloaded:\n", sk.SessionID)
-	writeSkillRows(&b, sk.LoadedSkills, "  (none)")
-	b.WriteString("\navailable:\n")
-	writeSkillRows(&b, sk.AvailableSkills, "  (none)")
-	return strings.TrimRight(b.String(), "\n")
-}
-
-func writeSkillRows(b *strings.Builder, rows []any, empty string) {
-	if len(rows) == 0 {
-		b.WriteString(empty + "\n")
-		return
-	}
-	for _, raw := range rows {
-		m, ok := raw.(map[string]any)
-		if !ok {
-			b.WriteString(fmt.Sprintf("  - %v\n", raw))
-			continue
-		}
-		name := strings.TrimSpace(fmt.Sprint(m["skill_name"]))
-		if name == "" {
-			name = strings.TrimSpace(fmt.Sprint(m["name"]))
-		}
-		desc := skillDescriptionFromRow(m)
-		if desc != "" {
-			fmt.Fprintf(b, "  - %s · %s\n", name, desc)
-		} else {
-			fmt.Fprintf(b, "  - %s\n", name)
-		}
-	}
-}
-
 func skillDescriptionFromRow(m map[string]any) string {
 	if m == nil {
 		return ""

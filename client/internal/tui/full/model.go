@@ -96,6 +96,9 @@ type model struct {
 	streamDone   chan struct{}
 
 	children *childAgentTracker
+
+	// viewportFollowTail 为 true 时新输出自动滚到底；用户上滚后置 false，回到底部再恢复。
+	viewportFollowTail bool
 }
 
 // Run 启动全屏 TUI；initialSession 非空时尝试恢复该 session。
@@ -131,6 +134,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		children:            newChildAgentTracker(),
 		messagesTotalTokens: -1,
 		turn:                tuishared.NewTurnGate(),
+		viewportFollowTail:  true,
 	}
 
 	if err := m.bootstrapSession(initialSession); err != nil {
@@ -191,6 +195,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.contextMode {
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.viewportFollowTail = false
+			case tea.MouseButtonWheelDown:
+				if m.viewport.AtBottom() {
+					m.viewportFollowTail = true
+				}
+			}
 			return m, cmd
 		}
 		return m, nil
@@ -242,6 +254,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.tryViewportScrollKey(msg) {
+		return m, nil
+	}
 	if m.contextMode && msg.String() == "esc" {
 		m.exitContextView()
 		return m, nil
@@ -438,16 +453,61 @@ func (m *model) applySize(w, h int) {
 	m.viewport = viewport.New(w, viewH)
 	m.viewport.YPosition = 0
 	m.input.SetWidth(w - 4)
-	m.refreshViewportContent(atBottom, yOffset)
+	follow := m.viewportFollowTail && atBottom
+	m.refreshViewportContent(follow, yOffset)
 }
 
-// syncViewport 刷新 transcript；若用户已上滚则保持阅读位置，仅在贴底时跟随新输出。
+// tryViewportScrollKey 将 PgUp/PgDown 等交给 transcript viewport；返回 true 表示已消费。
+func (m *model) tryViewportScrollKey(msg tea.KeyMsg) bool {
+	if m.contextMode {
+		return false
+	}
+	scrolled := false
+	switch msg.String() {
+	case "pgup":
+		m.viewport.ViewUp()
+		scrolled = true
+		m.viewportFollowTail = false
+	case "pgdown":
+		m.viewport.ViewDown()
+		scrolled = true
+	case "up":
+		if m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "" {
+			delta := m.viewport.MouseWheelDelta
+			if delta <= 0 {
+				delta = 3
+			}
+			m.viewport.LineUp(delta)
+			scrolled = true
+			m.viewportFollowTail = false
+		}
+	case "down":
+		if m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "" {
+			delta := m.viewport.MouseWheelDelta
+			if delta <= 0 {
+				delta = 3
+			}
+			m.viewport.LineDown(delta)
+			scrolled = true
+		}
+	default:
+		return false
+	}
+	if scrolled && m.viewport.AtBottom() {
+		m.viewportFollowTail = true
+	}
+	return scrolled
+}
+
+// syncViewport 刷新 transcript；用户上滚后保持阅读位置，贴底且 follow 开启时才跟随新输出。
 func (m *model) syncViewport() {
-	m.refreshViewportContent(m.viewport.AtBottom(), -1)
+	follow := m.viewportFollowTail && m.viewport.AtBottom()
+	m.refreshViewportContent(follow, -1)
 }
 
 // syncViewportFollow 刷新并强制滚到底（用户主动发消息等场景）。
 func (m *model) syncViewportFollow() {
+	m.viewportFollowTail = true
 	m.refreshViewportContent(true, -1)
 }
 
@@ -456,13 +516,19 @@ func (m *model) refreshViewportContent(followBottom bool, preserveYOffset int) {
 	if width <= 0 {
 		width = 80
 	}
-	m.viewport.SetContent(strings.Join(m.transcript.LinesForDisplay(width), "\n"))
+	yBefore := preserveYOffset
+	if yBefore < 0 {
+		yBefore = m.viewport.YOffset
+	}
+	m.viewport.SetContent(strings.Join(m.transcript.SnapshotLinesForDisplay(width), "\n"))
 	if followBottom {
 		m.viewport.GotoBottom()
+		m.viewportFollowTail = true
 		return
 	}
-	if preserveYOffset >= 0 {
-		m.viewport.SetYOffset(preserveYOffset)
+	m.viewport.SetYOffset(yBefore)
+	if m.viewport.AtBottom() {
+		m.viewportFollowTail = true
 	}
 }
 

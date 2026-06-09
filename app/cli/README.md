@@ -41,11 +41,12 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 
 | 命令 | 说明 |
 |---|---|
-| `/help` | 帮助 |
-| `/status` | 在聊天记录中输出 api/session/client/sse |
+| `/help` | 帮助（Panel 展示） |
+| `/status` | 结构化展示 endpoint/session/queue/turn 等 |
 | `/context` | 打开当前 session 的 context 摘要视图；按 `Esc` 返回聊天记录 |
-| `/session` | 查询当前队列中的 active session |
-| `/skill` | 展示 loaded/available skills |
+| `/compress` | 手动触发阻塞压缩 |
+| `/session` | 列出 session（`*` 为当前；亦可用 `/sessions`） |
+| `/skill` | Panel 展示 loaded/available skills |
 | `/skill load NAME` | 加载 skill |
 | `/skill unload NAME` | 卸载 skill |
 | `/children` | 列出当前 session 下活跃子 Agent |
@@ -53,6 +54,8 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 | `/exit` | 退出，并在终端打印恢复当前会话的 `dagents chat --session ...` 命令 |
 
 快捷键：context 视图中按 `Esc` 返回聊天记录；输出中、工具审批或 Agent 询问中按 `Esc` 可调用 cancel 中断当前 turn。
+
+**滚动**：transcript 默认贴底跟随；**滚轮上滚** 后流式输出、审批等待、**点击展开工具详情** 不会强制跳底；滚回底部或发送消息后恢复。Go Client 另支持 **PgUp/PgDn**。
 
 **Agent 询问（`ask_user_information`）**：TUI 将 `tool_call` 与 `user_information_required` 合并为一条「Agent 询问」块（问题 + 选项）。无选项时在底部输入框输入后 Enter；有选项时 ↑/↓、Space 多选、Enter 确认。`done` 表示轮到用户（见 [agent-node-api.md §2.4.1](../../docs/architecture/agent-node-api.md)）。
 

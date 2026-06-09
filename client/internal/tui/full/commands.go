@@ -21,7 +21,7 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 	cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
 	switch cmd {
 	case "help", "h", "?":
-		m.transcript.Add("[system] " + strings.TrimSpace(`命令: /status /context /compress /sessions /switch /new /clear /cancel /children /skill /tools /reasoning /quit`))
+		m.transcript.AddSystemPanel("命令", tuishared.FormatHelpPanelBody())
 		m.syncViewport()
 	case "context":
 		err = m.enterContextView()
@@ -182,7 +182,7 @@ func (m *model) handleSkillCommand(args []string) error {
 		if err != nil {
 			return err
 		}
-		m.transcript.Add("[system] " + tuishared.FormatSessionSkills(sk))
+		m.transcript.AddSystemPanel("Skills", tuishared.FormatSkillsPanelBody(sk))
 		m.syncViewport()
 		return nil
 	}
@@ -195,8 +195,8 @@ func (m *model) handleSkillCommand(args []string) error {
 		if err != nil {
 			return err
 		}
-		m.transcript.Add("[system] 已加载 skill " + args[1])
-		m.transcript.Add("[system] " + tuishared.FormatSessionSkills(sk))
+		body := append([]string{tuishared.PanelNote("已加载 " + args[1])}, tuishared.FormatSkillsPanelBody(sk)...)
+		m.transcript.AddSystemPanel("Skills", body)
 		m.syncViewport()
 	case "unload":
 		if len(args) < 2 {
@@ -206,8 +206,8 @@ func (m *model) handleSkillCommand(args []string) error {
 		if err != nil {
 			return err
 		}
-		m.transcript.Add("[system] 已卸载 skill " + args[1])
-		m.transcript.Add("[system] " + tuishared.FormatSessionSkills(sk))
+		body := append([]string{tuishared.PanelNote("已卸载 " + args[1])}, tuishared.FormatSkillsPanelBody(sk)...)
+		m.transcript.AddSystemPanel("Skills", body)
 		m.syncViewport()
 	default:
 		return fmt.Errorf("未知 skill 子命令 %q（可用 load/unload）", args[0])
@@ -242,15 +242,10 @@ func (m *model) appendStatus() error {
 	if err != nil {
 		return err
 	}
-	line := fmt.Sprintf(
-		"status agent=%s node=%s client=%s msgs=%d queue=%d active_turn=%v",
-		m.probe.AgentID, m.probe.Version, version.Version,
-		ctxBody.MessagesCount, ctxBody.QueuePending, ctxBody.HasActiveTurn,
+	body := tuishared.FormatStatusPanelBody(
+		m.probe.AgentID, m.probe.Version, version.Version, m.currentSession(), ctxBody,
 	)
-	if ctxBody.TurnState != "" {
-		line += " state=" + ctxBody.TurnState
-	}
-	m.transcript.Add("[system] " + line)
+	m.transcript.AddSystemPanel("Status", body)
 	m.syncViewport()
 	return nil
 }
@@ -260,23 +255,8 @@ func (m *model) appendSessions() error {
 	if err != nil {
 		return err
 	}
-	if len(items) == 0 {
-		m.transcript.Add("[system] (无 session)")
-		m.syncViewport()
-		return nil
-	}
-	cur := m.currentSession()
-	for _, s := range items {
-		mark := " "
-		if s.SessionID == cur {
-			mark = "*"
-		}
-		preview := s.FirstUserMessage
-		if len(preview) > 40 {
-			preview = preview[:40] + "..."
-		}
-		m.transcript.Add(fmt.Sprintf("[system] %s %s msgs=%d %s", mark, s.SessionID, s.MessageCount, preview))
-	}
+	title := fmt.Sprintf("Sessions (%d)", len(items))
+	m.transcript.AddSystemPanel(title, tuishared.FormatSessionsPanelBody(items, m.currentSession()))
 	m.syncViewport()
 	return nil
 }
@@ -296,7 +276,7 @@ func (m *model) appendChildren() error {
 		}
 	}
 	awaiting := m.children.awaitingApprovalMap()
-	m.transcript.Add("[system] " + tuishared.FormatChildAgentsList(items, awaiting))
+	m.transcript.AddSystemPanel("Children", tuishared.FormatChildAgentsPanelBody(items, awaiting))
 	m.syncViewport()
 	return nil
 }

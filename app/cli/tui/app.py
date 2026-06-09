@@ -181,6 +181,8 @@ class DAgentsTuiApp(App[None]):
         self._pending_segment_gap = False
         # 工具批次结束后，下一段 prefilling/thinking/assistant 前插入一行。
         self._needs_gap_after_tools = False
+        # 为 true 时 transcript 新内容自动滚到底；用户上滚后置 false。
+        self._transcript_follow_tail = True
 
     def compose(self) -> ComposeResult:
         """创建 TUI 组件层次结构。"""
@@ -223,6 +225,25 @@ class DAgentsTuiApp(App[None]):
 
     def _transcript_log(self) -> RichLog:
         return self.query_one("#transcript", RichLog)
+
+    def _sync_transcript_follow_tail(self) -> None:
+        """用户滚回底部时恢复自动跟随。"""
+        log = self._transcript_log()
+        if log.is_vertical_scroll_end:
+            self._transcript_follow_tail = True
+        log.auto_scroll = self._transcript_follow_tail
+
+    def _transcript_scroll_end(self) -> bool:
+        return self._transcript_follow_tail
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        if event.widget.id == "transcript":
+            self._transcript_follow_tail = False
+            self._transcript_log().auto_scroll = False
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        if event.widget.id == "transcript":
+            self.call_after_refresh(self._sync_transcript_follow_tail)
 
     def _context_log(self) -> RichLog:
         """获取 context 专用 RichLog。
@@ -527,25 +548,27 @@ class DAgentsTuiApp(App[None]):
         log.refresh(layout=True)
         self._prompt_area().refresh(layout=True)
         self.refresh(layout=True)
-        scroll_end = getattr(log, "scroll_end", None)
-        if callable(scroll_end):
-            try:
-                scroll_end(animate=False)
-            except TypeError:
-                scroll_end()
+        if self._transcript_follow_tail:
+            scroll_end = getattr(log, "scroll_end", None)
+            if callable(scroll_end):
+                try:
+                    scroll_end(animate=False)
+                except TypeError:
+                    scroll_end()
 
     def _refresh_approval_layout(self) -> None:
-        """审批块增删后强制刷新布局并滚动到底部。"""
+        """审批块增删后强制刷新布局；仅 follow 时滚到底部。"""
         log = self._transcript_log()
         log.refresh(layout=True)
         self._prompt_area().refresh(layout=True)
         self.refresh(layout=True)
-        scroll_end = getattr(log, "scroll_end", None)
-        if callable(scroll_end):
-            try:
-                scroll_end(animate=False)
-            except TypeError:
-                scroll_end()
+        if self._transcript_follow_tail:
+            scroll_end = getattr(log, "scroll_end", None)
+            if callable(scroll_end):
+                try:
+                    scroll_end(animate=False)
+                except TypeError:
+                    scroll_end()
 
     async def on_key(self, event: events.Key) -> None:
         """拦截全局快捷键：Esc 取消当前 turn，审批期间处理 ↑/↓/Enter。
@@ -848,6 +871,7 @@ class DAgentsTuiApp(App[None]):
         start = max(self._assistant_stream_start, floor)
         if len(log.lines) <= start:
             return
+        scroll_y = self._preserve_transcript_scroll(log)
         log.lines = log.lines[:start]
         log._line_cache.clear()
         log._widest_line_width = max(
@@ -856,6 +880,7 @@ class DAgentsTuiApp(App[None]):
         )
         log.virtual_size = Size(log._widest_line_width, len(log.lines))
         log.refresh()
+        self._restore_transcript_scroll(log, scroll_y)
 
     def _dot_column_block(self, dot_style: str, body: RenderableType) -> Table:
         """圆点列 + 正文列的统一布局（assistant / 状态 / 工具共用）。"""
@@ -879,6 +904,29 @@ class DAgentsTuiApp(App[None]):
     def _message_block(self, dot_style: str, text: str, *, escape_text: bool = True) -> Table:
         """按固定圆点列格式化 transcript 消息，保证与工具块横向对齐。"""
         return self._dot_column_block(dot_style, self._text_block_body(text, escape_text=escape_text))
+
+    def _command_panel_block(self, title: str, body: RenderableType) -> Table:
+        """斜杠命令结构化输出：灰色圆点 + 带标题边框面板。"""
+        panel = Panel(
+            body,
+            title=title,
+            border_style="cyan",
+            title_align="left",
+            padding=(0, 1),
+        )
+        return self._dot_column_block("bright_black", panel)
+
+    def _command_kv_lines(self, rows: list[tuple[str, str]]) -> Group:
+        """键值对列表（label 灰色、value 默认色）。"""
+        parts: list[RenderableType] = []
+        for label, value in rows:
+            parts.append(
+                Text.assemble(
+                    (f"{label:<10}  ", "bright_black"),
+                    (escape(value), ""),
+                )
+            )
+        return Group(*parts)
 
     def _content_column_width(self) -> int:
         """正文列可用 cell 宽度（扣除圆点列与间距）。"""
@@ -923,11 +971,38 @@ class DAgentsTuiApp(App[None]):
             body = Group(body, extra)
         return body
 
-    def _log_write_block(self, log: RichLog, content: str | RenderableType) -> None:
+    def _log_write_block(
+        self,
+        log: RichLog,
+        content: str | RenderableType,
+        *,
+        scroll_end: bool | None = None,
+    ) -> None:
+        if scroll_end is None:
+            scroll_end = self._transcript_scroll_end()
         if isinstance(content, str):
-            log.write(content)
+            log.write(content, scroll_end=scroll_end)
         else:
-            log.write(content, expand=True)
+            log.write(content, expand=True, scroll_end=scroll_end)
+        if scroll_end and log.is_vertical_scroll_end:
+            self._transcript_follow_tail = True
+
+    def _preserve_transcript_scroll(self, log: RichLog) -> int:
+        """记录当前纵向滚动位置，供原地替换块后恢复。"""
+        return int(getattr(log, "scroll_y", 0) or 0)
+
+    def _restore_transcript_scroll(self, log: RichLog, scroll_y: int) -> None:
+        """原地编辑 transcript 后恢复滚动；follow 模式不强制跳转。"""
+        if self._transcript_follow_tail:
+            return
+        max_y = int(getattr(log, "max_scroll_y", 0) or 0)
+        target = scroll_y
+        if target > max_y:
+            target = max_y
+        if target < 0:
+            target = 0
+        if hasattr(log, "scroll_y"):
+            log.scroll_y = target
 
     def _assistant_block(self, text: str, *, complete: bool, usage_suffix: str | None = None) -> RenderableType:
         """格式化 assistant 消息。
@@ -956,7 +1031,14 @@ class DAgentsTuiApp(App[None]):
         usage_suffix: str | None = None,
     ) -> None:
         """写入 assistant 块；Renderables 需 expand 才能按 RichLog 宽度折行。"""
-        log.write(self._assistant_block(text, complete=complete, usage_suffix=usage_suffix), expand=True)
+        scroll_end = self._transcript_scroll_end()
+        log.write(
+            self._assistant_block(text, complete=complete, usage_suffix=usage_suffix),
+            expand=True,
+            scroll_end=scroll_end,
+        )
+        if scroll_end and log.is_vertical_scroll_end:
+            self._transcript_follow_tail = True
 
     def _event_block(self, text: str) -> str | Table:
         """格式化非流式事件：工具消息使用圆点，普通系统行保持原样。"""
@@ -968,7 +1050,7 @@ class DAgentsTuiApp(App[None]):
         """在消息块之间恢复一行间隔；不用于输入框间距。"""
         log = self._transcript_log()
         if log.lines:
-            log.write("")
+            log.write("", scroll_end=self._transcript_scroll_end())
 
     def _last_log_line_is_blank(self, log: RichLog) -> bool:
         if not log.lines:
@@ -981,7 +1063,7 @@ class DAgentsTuiApp(App[None]):
         if log is None:
             log = self._transcript_log()
         if log.lines and not self._last_log_line_is_blank(log):
-            log.write("")
+            log.write("", scroll_end=self._transcript_scroll_end())
 
     def _status_text(self, name: str, *, done: bool = False) -> Table:
         """生成 prefilling/thinking/compression_blocking 状态行文本。"""
@@ -1536,10 +1618,11 @@ class DAgentsTuiApp(App[None]):
     def _replace_log_block(self, start: int, end: int, content: str | RenderableType) -> tuple[int, int]:
         """替换 RichLog 指定行范围，用于 tool_result 点击展开/收起。"""
         log = self._transcript_log()
+        scroll_y = self._preserve_transcript_scroll(log)
         suffix = log.lines[end:]
         log.lines = log.lines[:start]
         log._line_cache.clear()
-        self._log_write_block(log, content)
+        self._log_write_block(log, content, scroll_end=False)
         new_end = len(log.lines)
         log.lines.extend(suffix)
         log._widest_line_width = max(
@@ -1548,12 +1631,14 @@ class DAgentsTuiApp(App[None]):
         )
         log.virtual_size = Size(log._widest_line_width, len(log.lines))
         log.refresh()
+        self._restore_transcript_scroll(log, scroll_y)
         self._shift_tracked_ranges(end, new_end - end)
         return start, new_end
 
     def _delete_log_block(self, start: int, end: int) -> None:
         """删除 RichLog 指定行范围，用于审批完成后移除选项块。"""
         log = self._transcript_log()
+        scroll_y = self._preserve_transcript_scroll(log)
         log.lines = log.lines[:start] + log.lines[end:]
         log._line_cache.clear()
         log._widest_line_width = max(
@@ -1562,6 +1647,7 @@ class DAgentsTuiApp(App[None]):
         )
         log.virtual_size = Size(log._widest_line_width, len(log.lines))
         log.refresh()
+        self._restore_transcript_scroll(log, scroll_y)
         self._shift_tracked_ranges(end, start - end)
 
     def _shift_tracked_ranges(self, anchor: int, delta: int) -> None:
@@ -1776,7 +1862,9 @@ class DAgentsTuiApp(App[None]):
     def _write_user_message(self, value: str) -> None:
         """写入用户消息：与上方内容、下方 Agent 回复各留一行空行。"""
         self._pending_round_usage_suffix = None
+        self._transcript_follow_tail = True
         log = self._transcript_log()
+        log.auto_scroll = True
         self._flush_pending_segment_gap()
         self._append_message_gap_if_needed(log)
         self._log_write_block(log, self._message_block(_DOT_USER, value))
@@ -1822,7 +1910,7 @@ class DAgentsTuiApp(App[None]):
             self._submit_content_seen = True
             self._finish_waiting_statuses()
             self._finish_assistant_stream(log)
-            log.write(f"[red]{update.text}[/red]")
+            log.write(f"[red]{update.text}[/red]", scroll_end=self._transcript_scroll_end())
             self._append_message_gap()
         elif update.kind == TranscriptKind.COMPRESSION:
             mode = str(update.data.get("mode") or "blocking")
@@ -1929,14 +2017,9 @@ class DAgentsTuiApp(App[None]):
             self._show_help()
             return
         if value == "/status":
-            log = self._transcript_log()
-            log.write(
-                f"api={self._controller.api_base} session={self._controller.session_id} "
-                f"sse={'connected' if self._controller.sse_connected else 'disconnected'}"
-            )
-            self._apply_top_status()
+            await self._show_status()
             return
-        if value == "/session":
+        if value in {"/session", "/sessions"}:
             await self._show_sessions()
             return
         if value == "/context":
@@ -1974,6 +2057,33 @@ class DAgentsTuiApp(App[None]):
         finally:
             prompt.focus()
 
+    async def _show_status(self) -> None:
+        """展示 /status 结构化面板。"""
+        log = self._transcript_log()
+        sse = "connected" if self._controller.sse_connected else "disconnected"
+        rows = [
+            ("endpoint", self._controller.api_base),
+            ("session", str(self._controller.session_id or "-")),
+            ("sse", sse),
+        ]
+        try:
+            data = await self._controller.get_context()
+            turn = str(data.get("turn_state") or "-")
+            if turn == "-" and data.get("has_active_turn"):
+                turn = "active"
+            phase = str(data.get("run_turn_phase") or "").strip()
+            if phase and phase != "idle":
+                turn = f"{turn} · {phase}"
+            rows.extend([
+                ("messages", str(data.get("messages_count") or 0)),
+                ("queue", str(data.get("queue_pending") or 0)),
+                ("turn", turn or "idle"),
+            ])
+        except Exception as exc:
+            rows.append(("context", f"(failed: {exc})"))
+        log.write(self._command_panel_block("Status", self._command_kv_lines(rows)), expand=True)
+        self._apply_top_status()
+
     async def _show_sessions(self) -> None:
         """查询并展示 Node session 列表（GET /v1/sessions → sessions）。"""
         log = self._transcript_log()
@@ -1981,34 +2091,58 @@ class DAgentsTuiApp(App[None]):
             data = await self._controller.list_sessions()
             sessions = data.get("sessions")
             rows = sessions if isinstance(sessions, list) else []
-            active_rows = [item for item in rows if isinstance(item, dict) and item.get("active")]
-            persisted_rows = [item for item in rows if isinstance(item, dict) and not item.get("active")]
-            lines = ["Active sessions (in memory):"]
-            if not active_rows:
-                lines.append("  (none)")
-            for item in active_rows:
-                sid = str(item.get("session_id") or "-")
-                pending = str(item.get("queue_pending") or 0)
-                processing = "yes" if item.get("has_active_turn") else "no"
-                phase = str(item.get("run_turn_phase") or "idle")
-                msgs = str(item.get("message_count") or 0)
-                lines.append(
-                    f"  {sid}  msgs={msgs}  pending={pending}  processing={processing}  phase={phase}"
-                )
-            lines.append("")
-            lines.append("Persisted sessions (sqlite, not in memory):")
-            if not persisted_rows:
-                lines.append("  (none)")
-            for item in persisted_rows:
-                sid = str(item.get("session_id") or "-")
-                preview = str(item.get("first_user_message") or "")
-                if len(preview) > 40:
-                    preview = preview[:40] + "..."
-                updated = str(item.get("updated_at") or "-")
-                lines.append(f"  {sid}  updated={updated}  {preview}")
-            log.write("\n".join(lines))
+            body = self._format_sessions_panel(rows, str(self._controller.session_id or ""))
+            log.write(self._command_panel_block(f"Sessions ({len(rows)})", body), expand=True)
         except Exception as exc:
             log.write(f"[red]session failed: {exc}[/red]")
+
+    def _format_sessions_panel(self, rows: list[Any], current_id: str) -> Group:
+        """格式化 session 列表面板正文。"""
+        active_rows = [item for item in rows if isinstance(item, dict) and item.get("active")]
+        persisted_rows = [item for item in rows if isinstance(item, dict) and not item.get("active")]
+        parts: list[RenderableType] = []
+        parts.append(Text("内存中", style="cyan"))
+        if not active_rows:
+            parts.append(Text("  (无)", style="bright_black"))
+        for item in active_rows:
+            parts.extend(self._format_session_row(item, current_id))
+        parts.append(Text(""))
+        parts.append(Text("已持久化", style="cyan"))
+        if not persisted_rows:
+            parts.append(Text("  (无)", style="bright_black"))
+        for item in persisted_rows:
+            parts.extend(self._format_session_row(item, current_id))
+        return Group(*parts)
+
+    def _format_session_row(self, item: dict[str, Any], current_id: str) -> list[RenderableType]:
+        sid = str(item.get("session_id") or "-")
+        is_current = sid == current_id
+        if item.get("active"):
+            state = "active"
+            if item.get("has_active_turn"):
+                state += " · turn"
+            meta = (
+                f"msgs={item.get('message_count') or 0} "
+                f"pending={item.get('queue_pending') or 0} "
+                f"phase={item.get('run_turn_phase') or 'idle'}"
+            )
+        else:
+            state = "idle"
+            meta = f"msgs={item.get('message_count') or 0}"
+            updated = str(item.get("updated_at") or "").strip()
+            if updated:
+                meta += f" updated={updated}"
+        marker = "* " if is_current else "- "
+        style = "bold yellow" if is_current else "bright_black"
+        lines: list[RenderableType] = [
+            Text.assemble((marker, style), (sid, style), (f"  [{state}]  {meta}", "bright_black"))
+        ]
+        preview = str(item.get("first_user_message") or "").strip()
+        if preview:
+            if len(preview) > 48:
+                preview = preview[:48] + "..."
+            lines.append(Text(f"    {preview}", style="bright_black"))
+        return lines
 
     async def _show_context_view(self) -> None:
         """进入 context 视图，隐藏聊天 RichLog 并展示当前 context 摘要。
@@ -2254,52 +2388,58 @@ class DAgentsTuiApp(App[None]):
         try:
             if action == "load":
                 data = await self._controller.load_skill(skill_name)
+                title = f"Skills · 已加载 {skill_name}"
             else:
                 data = await self._controller.unload_skill(skill_name)
-            log.write(self._skill_state_block(data), expand=True)
+                title = f"Skills · 已卸载 {skill_name}"
+            log.write(self._skill_state_block(data, title=title), expand=True)
         except Exception as exc:
             log.write(f"[red]skill {action} failed: {exc}[/red]")
 
-    def _format_skill_state(self, data: dict[str, Any]) -> str:
-        """将 skill API 响应格式化为纯文本（供 `_skill_state_block` 折行渲染）。"""
+    def _format_skill_state(self, data: dict[str, Any]) -> Group:
+        """将 skill API 响应格式化为面板正文。"""
         loaded = data.get("loaded_skills")
         available = data.get("available_skills")
         loaded_rows = loaded if isinstance(loaded, list) else []
         available_rows = available if isinstance(available, list) else []
-        lines = ["Skills:"]
-        lines.append("  loaded:")
+        session_id = escape(str(data.get("session_id") or "-"))
+        parts: list[RenderableType] = [
+            Text.assemble(("session     ", "bright_black"), (session_id, "")),
+            Text(""),
+            Text(f"已加载 ({len(loaded_rows)})", style="cyan"),
+        ]
         if not loaded_rows:
-            lines.append("    (none)")
+            parts.append(Text("  (无)", style="bright_black"))
+        loaded_names: set[str] = set()
         for item in loaded_rows:
             if not isinstance(item, dict):
                 continue
             name = escape(str(item.get("skill_name") or "-"))
             desc = escape(str(item.get("description") or ""))
-            lines.append(f"    - {name}{f' · {desc}' if desc else ''}")
-        lines.append("  available:")
+            loaded_names.add(str(item.get("skill_name") or ""))
+            line = Text.assemble(("● ", "green"), (name, "green"))
+            if desc:
+                line.append(f" · {desc}", style="bright_black")
+            parts.append(line)
+        parts.extend([Text(""), Text(f"可用 ({len(available_rows)})", style="cyan")])
         if not available_rows:
-            lines.append("    (none)")
-        loaded_names = {
-            str(item.get("skill_name") or "")
-            for item in loaded_rows
-            if isinstance(item, dict)
-        }
+            parts.append(Text("  (无)", style="bright_black"))
         for item in available_rows:
             if not isinstance(item, dict):
                 continue
             name = escape(str(item.get("skill_name") or "-"))
             desc = escape(str(item.get("description") or ""))
             marker = " [loaded]" if str(item.get("skill_name") or "") in loaded_names else ""
-            lines.append(f"    - {name}{marker}{f' · {desc}' if desc else ''}")
-        return "\n".join(lines)
+            line = Text.assemble(("○ ", "bright_black"), (name, "bright_black"))
+            suffix = marker + (f" · {desc}" if desc else "")
+            if suffix:
+                line.append(suffix, style="bright_black")
+            parts.append(line)
+        return Group(*parts)
 
-    def _skill_state_block(self, data: dict[str, Any]) -> RenderableType:
-        """构造 skill 列表块；按 transcript 宽度折行，避免描述超出聊天区域。"""
-        width = self._transcript_content_width()
-        grid = Table.grid(expand=True, padding=(0, 0))
-        grid.add_column(ratio=1, overflow="fold", max_width=width if width > 0 else None)
-        grid.add_row(Text.from_markup(self._format_skill_state(data)))
-        return grid
+    def _skill_state_block(self, data: dict[str, Any], *, title: str = "Skills") -> Table:
+        """构造 skill 列表面板。"""
+        return self._command_panel_block(title, self._format_skill_state(data))
 
     async def _show_children(self) -> None:
         """查询并展示当前 session 下活跃子 Agent。"""
@@ -2309,7 +2449,7 @@ class DAgentsTuiApp(App[None]):
             self._controller.child_tracker.replace_from_api(items)
             self._refresh_input_strip()
             text = format_child_agents_list(items, self._controller.child_tracker.awaiting_map())
-            log.write(text)
+            log.write(self._command_panel_block("Children", Text(text)), expand=True)
         except Exception as exc:
             log.write(f"[red]children failed: {exc}[/red]")
 
@@ -2325,18 +2465,23 @@ class DAgentsTuiApp(App[None]):
 
     def _show_help(self) -> None:
         log = self._transcript_log()
-        for line in (
-            "Commands:",
-            "  /help            Show this help",
-            "  /status          Show API/session/SSE status",
-            "  /context         Show current context view (Esc to return)",
-            "  /compress        Run blocking context compression once",
-            "  /session         Show Agent Node sessions",
-            "  /skill           Show loaded and available skills",
-            "  /skill load NAME Load one skill into current session",
-            "  /skill unload NAME Unload one skill from current session",
-            "  /children        List active child agents",
-            "  /clear           Clear server context and transcript",
-            "  /exit            Quit chat",
-        ):
-            log.write(line)
+        rows = [
+            ("/help", "Show this help"),
+            ("/status", "Show API/session/SSE status"),
+            ("/context", "Show current context view (Esc to return)"),
+            ("/compress", "Run blocking context compression once"),
+            ("/session", "Show Agent Node sessions"),
+            ("/skill", "Show loaded and available skills"),
+            ("/skill load NAME", "Load one skill into current session"),
+            ("/skill unload NAME", "Unload one skill from current session"),
+            ("/children", "List active child agents"),
+            ("/clear", "Clear server context and transcript"),
+            ("/exit", "Quit chat"),
+        ]
+        body = Group(
+            *[
+                Text.assemble((f"{cmd:<22}", "bright_black"), (desc, ""))
+                for cmd, desc in rows
+            ]
+        )
+        log.write(self._command_panel_block("Commands", body), expand=True)
