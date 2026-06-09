@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeSkill(t *testing.T, root, name, body string) {
@@ -95,5 +96,73 @@ func TestReadSkillUsesDirectoryWhenNameMissing(t *testing.T) {
 	def, ok := c.SelectByName("legacy-skill")
 	if !ok || def.SkillName != "legacy-skill" || def.Description != "Legacy" {
 		t.Fatalf("def = %+v ok=%v", def, ok)
+	}
+}
+
+func TestReadSkillMissingDescriptionNotNilLiteral(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "write-skill", "---\nname: write-skill\n---\nBody\n")
+
+	c := NewCatalog(root, true, 3)
+	meta := c.ListMetadata()
+	if len(meta) != 1 {
+		t.Fatalf("meta = %+v", meta)
+	}
+	if meta[0].Description != "" {
+		t.Fatalf("description = %q, want empty not <nil>", meta[0].Description)
+	}
+}
+
+func TestCatalogListMtimeCacheInvalidatesOnChange(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "a", "---\nname: a\ndescription: v1\n---\nA\n")
+	c := NewCatalog(root, true, 3)
+
+	defs1 := c.List()
+	if len(defs1) != 1 || defs1[0].Description != "v1" {
+		t.Fatalf("defs1 = %+v", defs1)
+	}
+	if c.List()[0].Description != "v1" {
+		t.Fatal("cache should still serve v1")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	writeSkill(t, root, "a", "---\nname: a\ndescription: v2\n---\nA\n")
+	defs2 := c.List()
+	if len(defs2) != 1 || defs2[0].Description != "v2" {
+		t.Fatalf("cache not invalidated: %+v", defs2)
+	}
+}
+
+func TestCatalogListMtimeCacheInvalidatesOnNewSkill(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "a", "---\nname: a\ndescription: A\n---\nA\n")
+	c := NewCatalog(root, true, 3)
+	if len(c.List()) != 1 {
+		t.Fatal("expected one skill")
+	}
+
+	writeSkill(t, root, "b", "---\nname: b\ndescription: B\n---\nB\n")
+	defs := c.List()
+	if len(defs) != 2 {
+		t.Fatalf("expected two skills after add: %+v", defs)
+	}
+}
+
+func TestWriteSkillPackagingDescription(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "packaging", "runtime", "skills")
+	c := NewCatalog(root, true, 3)
+	var found LoadedSkill
+	for _, m := range c.ListMetadata() {
+		if m.SkillName == "write-skill" {
+			found = m
+			break
+		}
+	}
+	if found.SkillName == "" {
+		t.Fatal("write-skill not found in catalog")
+	}
+	if strings.TrimSpace(found.Description) == "" {
+		t.Fatalf("write-skill description empty: %#v", found)
 	}
 }

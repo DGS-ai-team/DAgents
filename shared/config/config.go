@@ -172,6 +172,9 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.DataDir) == "" {
 		c.DataDir = "./.runtime/data"
 	}
+	if strings.TrimSpace(c.FSRoot) == "" {
+		c.FSRoot = c.RuntimeDir()
+	}
 	if c.LLM.MaxToolLoops <= 0 {
 		c.LLM.MaxToolLoops = 16
 	}

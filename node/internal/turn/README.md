@@ -80,8 +80,8 @@ sequenceDiagram
 1. `staticSystemPrompt`（行为准则、保密说明）
 2. skills 目录元数据（`Catalog.RenderMetadataSection`）
 3. 主机环境快照（`hostsnapshot`）
-4. `.runtime` 工作目录约定
-5. Agent ID、FS_ROOT、后台执行说明
+4. 工作区（FS_ROOT）目录约定（路径相对 FS_ROOT，默认 `./.runtime`）
+5. Agent ID、FS_ROOT 路径、后台执行说明
 6. `prompt_context` 稳定段（soul / user / long_term）
 7. 已加载 skills 正文
 8. `custom.md`

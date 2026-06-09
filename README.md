@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.2.12-20260608-green" alt="v0.2.12"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.2.13-20260607-green" alt="v0.2.13"></a>
   <a href="go.work"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
   <a href="requirements.txt"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
@@ -26,7 +26,7 @@
 
 ## 简介
 
-**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.2.12**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度。
+**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.2.13**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度。
 
 终端交互提供 **两种 Client**，共用一份 YAML 配置，按环境任选：
 
@@ -55,7 +55,7 @@
 - **Session** — 多会话、SQLite 持久化、context 压缩（silent / blocking）；TUI **`/compress`** 手动压缩；**`/context`** 含 token 估算与 **system prompt**
 - **Policy** — `.runtime/policy/*.approval.txt` 本地审批策略
 - **可观测** — SSE `usage`（prompt/completion、cache hit、`reasoning_tokens`）；结构化 stderr 日志
-- **同包发布** — Release 资产 `dagents-local-assistant-*`（Linux tarball / Windows zip / **Windows 安装包**）；**`dagents chat|tui --withnode`** 自动后台 Node；**Windows 包**内置 **[OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**（`.docx/.xlsx/.pptx` CLI + 配套 skills，AGPL-3.0）
+- **同包发布** — Release 资产 `dagents-local-assistant-*`（Linux tarball / Windows zip / **Windows 安装包**）；**`dagents chat|tui --withnode`** 自动后台 Node；第三方 CLI 见 **[推荐工具清单](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)**（如 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)，需自行安装）
 
 ---
 
@@ -161,7 +161,7 @@ dagents-client tui sess-xxxxxxxx
 | `llm.api_key_env` | 真实 LLM 的 API Key 环境变量名 |
 | `tools.bash_output_encoding` | `bash_run` 子进程输出解码（如 `gbk`；Windows cmd 默认 gbk） |
 | `data_dir` | SQLite 与运行时数据（默认 `./.runtime/data`） |
-| `fs_root` | 工具可访问文件根 |
+| `fs_root` | 工具沙箱根（默认 `./.runtime`，与运行时目录一致） |
 | `triggers.enabled` | 触发器调度开关 |
 | `child_agents.enabled` | 临时子 Agent 开关 |
 
@@ -279,17 +279,11 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 
 打包与离线安装：[packaging/agent-client/README.md](packaging/agent-client/README.md)、[packaging/OFFLINE_INSTALL.md](packaging/OFFLINE_INSTALL.md)
 
-### 内置 OfficeCLI（仅 Windows）
+### 推荐 CLI 工具（需自行安装）
 
-**Windows** 发布包（zip / `.exe` 安装包）通过 [`scripts/ci/vendor_officecli.sh`](scripts/ci/vendor_officecli.sh) 集成 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**（AGPL-3.0）。Linux tarball **不含** OfficeCLI。
+发布包**不内置** OfficeCLI 等第三方 CLI。推荐清单与安装步骤见 **[packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)**；Office 文档处理可安装 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**（AGPL-3.0），拷贝 skills 后 `/skill load officecli`。详情见 [packaging/runtime/scripts/OFFICECLI.md](packaging/runtime/scripts/OFFICECLI.md)。
 
-| 内容 | 路径 |
-|------|------|
-| CLI 二进制 | `.runtime/scripts/officecli.exe` |
-| Agent skills | `.runtime/skills/officecli*` |
-| 说明 | [packaging/runtime/scripts/OFFICECLI.md](packaging/runtime/scripts/OFFICECLI.md) |
-
-Windows 安装包会将 **`.runtime/scripts`** 加入 `PATH`，可直接 `officecli --version`。TUI 内先 `/skill load officecli` 再处理 Office 文档。
+安装 **`install.sh`** 或 Windows 安装包会将 **`.runtime/scripts`** 加入 `PATH`，便于放置自行下载的工具。
 
 ---
 
@@ -304,7 +298,8 @@ Windows 安装包会将 **`.runtime/scripts`** 加入 `PATH`，可直接 `office
 | [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md) | Go Node HTTP/SSE 契约 |
 | [docs/architecture/child-agent-tools.md](docs/architecture/child-agent-tools.md) | 子 Agent 工具 |
 | [docs/architecture/go-node-compatibility.md](docs/architecture/go-node-compatibility.md) | 老旧 OS / 静态构建 |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.12**） |
+| [packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md) | 推荐 CLI 工具（如 OfficeCLI，需自行安装） |
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.13**） |
 | [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) | Web 前端（**独立仓库，尚未适配 v0.2.0 / Go Node API**） |
 
 > 已移除的 Python Agent API 文档见 [docs/archive/python-agent-runtime/](docs/archive/python-agent-runtime/)；**DAgentsUI 当前仍依赖旧 HTTP 契约**。
@@ -315,7 +310,7 @@ Windows 安装包会将 **`.runtime/scripts`** 加入 `PATH`，可直接 `office
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | **v0.2.12**（2026-06-08，0.x 预览；tag `v0.2.12`） |
+| **当前版本** | **v0.2.13**（2026-06-07，0.x 预览；tag `v0.2.13`） |
 | **Go** | 1.25+（`node` / `client` / `shared/config`） |
 | **Python** | 3.11+ 可运行；CI 验证 3.13 |
 | **破坏性变更** | 1.0 前仍可能出现；见 [CHANGELOG.md](CHANGELOG.md) |

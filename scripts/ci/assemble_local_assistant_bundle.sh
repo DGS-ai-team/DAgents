@@ -62,13 +62,6 @@ if [[ -f "${REPO_ROOT}/.env.example" ]]; then
 fi
 cp -a "${REPO_ROOT}/packaging/runtime/." "${BUNDLE_DIR}/.runtime/"
 
-# OfficeCLI 二进制 + skills（仅 Windows：.runtime/scripts + .runtime/skills/officecli*）
-if [[ "${PLATFORM}" == windows-* ]]; then
-  chmod +x "${REPO_ROOT}/scripts/ci/vendor_officecli.sh"
-  BUNDLE_DIR="${BUNDLE_DIR}" PLATFORM="${PLATFORM}" \
-    bash "${REPO_ROOT}/scripts/ci/vendor_officecli.sh"
-fi
-
 # 启动脚本与 Node 系统服务注册脚本
 mkdir -p "${BUNDLE_DIR}/scripts"
 cp -a "${REPO_ROOT}/packaging/agent-client/scripts/startup" "${BUNDLE_DIR}/scripts/"
@@ -116,10 +109,8 @@ TUI（pick one; --withnode auto-starts Node if not running):
 3c. dagents tui --withnode --plain
     Go line-mode REPL (legacy SSH / dumb terminal)
 
-Office documents (bundled OfficeCLI):
-  officecli --version
-  /skill load officecli          (then ask Agent to edit .docx/.xlsx/.pptx)
-  See .runtime/scripts/OFFICECLI.md (upstream: https://github.com/iOfficeAI/OfficeCLI)
+Optional third-party CLIs (not bundled; see .runtime/RECOMMENDED_CLI_TOOLS.md):
+  OfficeCLI for .docx/.xlsx/.pptx — install then /skill load officecli
 
 See docs/architecture/local-assistant.md
 EOF
@@ -159,6 +150,9 @@ TUI（三选一；--withnode 会在 Node 未运行时自动后台启动）：
   ./dagents chat --withnode         Python Textual TUI（现代终端，富 UI）
   ./dagents tui --withnode          Go bubbletea 全屏 TUI（含子 Agent、/children 等）
   ./dagents tui --withnode --plain  Go 行模式 REPL（老 SSH / dumb 终端）
+
+可选第三方 CLI（发布包不含；见 .runtime/RECOMMENDED_CLI_TOOLS.md）：
+  OfficeCLI（Office 文档）— 自行安装后 /skill load officecli
 
 文档: docs/architecture/local-assistant.md
 EOF

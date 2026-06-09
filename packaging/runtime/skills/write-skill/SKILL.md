@@ -6,7 +6,7 @@ description: 指导在技能目录中编写符合约定的 Agent 技能（SKILL.
 ## 目录与标识
 
 1. **name**：与**技能目录名**一致，为唯一标识；仅使用小写字母、数字、连字符（如 `write-skill`、`my-task`）。
-2. **文件路径（默认配置）**：**`.runtime/skills/<name>/SKILL.md`**（必选）；可选 **`.runtime/skills/<name>/assets/`** 存放示例、图片、脚本等。
+2. **文件路径（FS_ROOT 下）**：**`skills/<name>/SKILL.md`**（必选）；可选 **`skills/<name>/assets/`** 存放示例、图片、脚本等。
 
 ## SKILL.md 头部元数据（frontmatter）
 
@@ -30,10 +30,10 @@ description: 简述能力与触发场景（单行）。
 
 1. **步骤化**：用有序列表写清流程与分支（与用户确认 / 禁止的操作 / 输出格式）。
 2. **安全**：技能正文勿包含密钥；示例命令避免默认破坏性 Git/磁盘操作。
-3. **复用性**：可将复杂步骤落成脚本，放在 **`.runtime/skills/<name>/assets/`** 下；正文中写明调用方式（相对技能根或绝对路径须与运行环境一致）。
+3. **复用性**：可将复杂步骤落成脚本，放在 **`skills/<name>/assets/`** 下；正文中写明调用方式（路径相对 FS_ROOT）。
 
 ## 完成后自检
 
 - 目录名与 frontmatter **`name`** 一致。
 - **`name`** 与 **`description`** 均已填写；frontmatter 可被简单 `key: value` 解析（无多行 YAML）。
-- 逻辑清晰，无前后文冲突；路径描述与 **`.runtime/skills`** 一致。
+- 逻辑清晰，无前后文冲突；路径描述与 **`skills/`**（FS_ROOT 下）一致。

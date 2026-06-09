@@ -112,13 +112,28 @@ func writeSkillRows(b *strings.Builder, rows []any, empty string) {
 		if name == "" {
 			name = strings.TrimSpace(fmt.Sprint(m["name"]))
 		}
-		desc := strings.TrimSpace(fmt.Sprint(m["description"]))
+		desc := skillDescriptionFromRow(m)
 		if desc != "" {
 			fmt.Fprintf(b, "  - %s · %s\n", name, desc)
 		} else {
 			fmt.Fprintf(b, "  - %s\n", name)
 		}
 	}
+}
+
+func skillDescriptionFromRow(m map[string]any) string {
+	if m == nil {
+		return ""
+	}
+	raw, ok := m["description"]
+	if !ok || raw == nil {
+		return ""
+	}
+	s := strings.TrimSpace(fmt.Sprint(raw))
+	if s == "" || s == "<nil>" {
+		return ""
+	}
+	return s
 }
 
 func orDash(s string) string {

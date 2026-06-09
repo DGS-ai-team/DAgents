@@ -9,6 +9,7 @@
 | 目录名 | 说明 |
 |--------|------|
 | **`write-skill/`** | 如何编写 **`SKILL.md`**、路径与 **`load_skills`** 的配合；见 **`write-skill/SKILL.md`**。 |
-| **`officecli/`** 等 | **Windows 包**：来自 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**（AGPL-3.0）；由 **`scripts/ci/vendor_officecli.sh`** 同步；用法见 **`.runtime/scripts/OFFICECLI.md`** |
 
 其它技能：在 **`<运行根>/.runtime/skills/<name>/SKILL.md`** 下按需增删。frontmatter 须含 **`name`**（与目录名一致）与 **`description`**；目录下所有 skill 均参与元数据扫描。
+
+第三方工具配套 skill（如 **[OfficeCLI](../RECOMMENDED_CLI_TOOLS.md)** 的 `officecli*`）需从上游自行拷贝，**不随发布包提供**。

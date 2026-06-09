@@ -255,17 +255,89 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 		replaced = 1
 	}
 	if newText == rawText {
-		return fmt.Sprintf("成功: 是\n路径: %s\n替换次数: 0\n匹配行: %s\n---\n(内容未变化。)", args.Path, lineHint), nil
+		return formatSearchReplaceSuccess(0, args.OldString, args.NewString, lineHint), nil
 	}
 	if err := os.WriteFile(path, []byte(newText), 0o644); err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil
 	}
-	diffText := unifiedDiffBody(rawText, newText, args.Path)
-	return fmt.Sprintf("成功: 是\n路径: %s\n替换次数: %d\n匹配行: %s\n---\n%s", args.Path, replaced, lineHint, diffText), nil
+	return formatSearchReplaceSuccess(replaced, args.OldString, args.NewString, lineHint), nil
+}
+
+const (
+	searchReplaceMaxPreviewBytes = 1500
+	searchReplacePreviewMaxLines = 8
+	searchReplacePreviewMaxRunes = 400
+)
+
+func formatSearchReplaceSuccess(replaced int, oldStr, newStr, lineHint string) string {
+	meta := fmt.Sprintf("成功: 是\n替换次数: %d", replaced)
+	preview := formatSearchReplacePreview(oldStr, newStr, replaced, lineHint)
+	if preview == "" {
+		return meta
+	}
+	return meta + "\n---\n" + preview
 }
 
 func formatSearchReplaceFail(path, msg string) string {
-	return fmt.Sprintf("成功: 否\n路径: %s\n错误: %s\n---\n", path, msg)
+	return fmt.Sprintf("成功: 否\n路径: %s\n错误: %s", path, msg)
+}
+
+// formatSearchReplacePreview 仅在多处替换或多行片段时输出局部预览（供模型验收，限流）。
+func formatSearchReplacePreview(oldStr, newStr string, replaced int, lineHint string) string {
+	multiLine := strings.Contains(oldStr, "\n") || strings.Contains(newStr, "\n")
+	if replaced <= 1 && !multiLine {
+		return ""
+	}
+	var b strings.Builder
+	switch {
+	case replaced > 1:
+		fmt.Fprintf(&b, "@@ 共 %d 处相同替换", replaced)
+		if lineHint != "" {
+			b.WriteString(" · 行 ")
+			b.WriteString(lineHint)
+		}
+		b.WriteString(" @@\n")
+	case lineHint != "":
+		fmt.Fprintf(&b, "@@ 行 %s @@\n", lineHint)
+	}
+	b.WriteString(formatDiffSnippet("-", oldStr))
+	b.WriteString(formatDiffSnippet("+", newStr))
+	out := strings.TrimSpace(b.String())
+	if len(out) > searchReplaceMaxPreviewBytes {
+		out = out[:searchReplaceMaxPreviewBytes] + "\n...(预览已截断)"
+	}
+	return out
+}
+
+func formatDiffSnippet(prefix, text string) string {
+	lines := strings.Split(text, "\n")
+	truncated := false
+	if len(lines) > searchReplacePreviewMaxLines {
+		lines = append(lines[:searchReplacePreviewMaxLines], "...")
+		truncated = true
+	}
+	var b strings.Builder
+	runes := 0
+	for _, line := range lines {
+		lineRunes := []rune(line)
+		if runes+len(lineRunes) > searchReplacePreviewMaxRunes {
+			remain := searchReplacePreviewMaxRunes - runes
+			if remain > 1 {
+				line = string(lineRunes[:remain-1]) + "…"
+			} else {
+				line = "…"
+			}
+			truncated = true
+		}
+		b.WriteString(prefix)
+		b.WriteString(line)
+		b.WriteByte('\n')
+		runes += len([]rune(line)) + 1
+		if truncated {
+			break
+		}
+	}
+	return b.String()
 }
 
 func formatHitLines(text, needle string) string {
@@ -288,43 +360,3 @@ func formatHitLines(text, needle string) string {
 	return strings.Join(hits, "、")
 }
 
-func unifiedDiffBody(oldText, newText, path string) string {
-	oldLines := strings.Split(oldText, "\n")
-	newLines := strings.Split(newText, "\n")
-	var b strings.Builder
-	fmt.Fprintf(&b, "--- a/%s\n+++ b/%s\n", path, path)
-	// 简化 diff：逐行对比并输出 +/-（MVP，非完整 Myers）
-	maxLen := len(oldLines)
-	if len(newLines) > maxLen {
-		maxLen = len(newLines)
-	}
-	changed := false
-	for i := 0; i < maxLen; i++ {
-		var o, n string
-		if i < len(oldLines) {
-			o = oldLines[i]
-		}
-		if i < len(newLines) {
-			n = newLines[i]
-		}
-		if o == n {
-			continue
-		}
-		changed = true
-		if o != "" {
-			b.WriteString("-")
-			b.WriteString(o)
-			b.WriteByte('\n')
-		}
-		if n != "" {
-			b.WriteString("+")
-			b.WriteString(n)
-			b.WriteByte('\n')
-		}
-	}
-	out := strings.TrimSpace(b.String())
-	if !changed {
-		return "(无可见差异：编辑前后内容一致。)"
-	}
-	return out
-}

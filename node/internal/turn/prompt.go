@@ -94,15 +94,15 @@ func BuildSystemPrompt(in SystemPromptInput) string {
 	b.WriteString(hostsnapshot.FormatEnvironmentSection(snap))
 	b.WriteByte('\n')
 
-	b.WriteString("\n\n## `.runtime` 工作目录约定\n\n")
-	b.WriteString(formatRuntimeWorkspaceSection())
+	root := strings.TrimSpace(in.FSRoot)
+	b.WriteString("\n\n## 工作区（FS_ROOT）目录约定\n\n")
+	b.WriteString(formatRuntimeWorkspaceSection(root))
 	b.WriteByte('\n')
 
 	b.WriteString("\n\n## 运行环境\n")
 	b.WriteString(fmt.Sprintf("- Agent ID: %s\n", strings.TrimSpace(in.AgentID)))
-	root := strings.TrimSpace(in.FSRoot)
 	if root != "" {
-		b.WriteString(fmt.Sprintf("- 文件工作区（FS_ROOT）: %s\n", root))
+		b.WriteString(fmt.Sprintf("- FS_ROOT（文件工具沙箱根）: %s\n", root))
 	}
 	b.WriteString("- 后台执行（run_in_background）：read_file、write_file、glob_files、grep_file、grep_files、search_replace、bash_run 支持可选 run_in_background；false=同步等待（默认），true=立即返回 job_id，完成后自动回灌。\n")
 	b.WriteString("- bash_run 同步模式还会在 timeout_seconds 内未结束时自动降级为后台 job（status=RUNNING），进程继续运行并在完成后回灌。\n")
@@ -153,11 +153,15 @@ func BuildChildSystemPrompt(in ChildSystemPromptInput) string {
 	b.WriteString(hostsnapshot.FormatEnvironmentSection(snap))
 	b.WriteByte('\n')
 
+	root := strings.TrimSpace(in.FSRoot)
+	b.WriteString("\n\n## 工作区（FS_ROOT）目录约定\n\n")
+	b.WriteString(formatRuntimeWorkspaceSection(root))
+	b.WriteByte('\n')
+
 	b.WriteString("\n\n## 运行环境\n")
 	b.WriteString(fmt.Sprintf("- Agent ID: %s\n", strings.TrimSpace(in.AgentID)))
-	root := strings.TrimSpace(in.FSRoot)
 	if root != "" {
-		b.WriteString(fmt.Sprintf("- 文件工作区（FS_ROOT）: %s\n", root))
+		b.WriteString(fmt.Sprintf("- FS_ROOT（文件工具沙箱根）: %s\n", root))
 	}
 
 	sessionID := strings.TrimSpace(in.SessionID)
@@ -192,20 +196,31 @@ func ChildSystemPromptBuilder(purpose string) SystemPromptBuilder {
 	}
 }
 
-func formatRuntimeWorkspaceSection() string {
+func formatRuntimeWorkspaceSection(fsRoot string) string {
+	root := strings.TrimSpace(fsRoot)
+	if root == "" {
+		root = "./.runtime"
+	}
 	lines := []string{
-		"## 重要目录说明：",
+		fmt.Sprintf("**FS_ROOT**（当前 `%s`）即 Agent 文件工作区。`read_file` / `write_file` / `glob_files` / `grep_files` / `search_replace` 的路径均**相对 FS_ROOT**（`.` 表示工作区根）；`bash_run` 默认在工作区根执行。", root),
 		"",
-		"- **`.runtime/memory/`**：会话持久化与可选长期记忆 `long_term.md`。",
-		"- **`.runtime/prompt_context/`**： **`soul.md`（你的设定） / `user.md`（用户信息与偏好） / `custom.md`（用户侧追加的临时/专项指令）**（UTF-8；已加载到 prompt 中，无需主动读取）。",
-		"- **`.runtime/agent/`**：实例标识等。",
-		"- **`.runtime/skills/`**：与 Agent **skills** 机制绑定的可复用能力。",
-		"- **`.runtime/data/`**：**临时数据区**——脚本输出、上传文件、中间产物等。",
-		"- **`.runtime/scripts/`**：**独立脚本区**——与 skills 无关联的小脚本应优先放在此处。",
+		"## 重要目录说明",
 		"",
-		"脚本索引（请保持更新）：",
-		"- **`.runtime/scripts_menu.md`**：为 **`scripts/`** 内脚本建立索引；新增或删除脚本时同步更新。",
-		"执行任务时优先判断是否有脚本能够完成任务。新增脚本前也要先判断是否已有可用的脚本。",
+		"- **`memory/`**：会话持久化与可选长期记忆 `long_term.md`。",
+		"- **`prompt_context/`**：侧车 Markdown（`soul.md` / `user.md` / `custom.md`）；已注入 prompt，无需主动读取。",
+		"- **`agent/`**：实例标识（如 `agent_id`）等。",
+		"- **`skills/`**：与 Agent **skills** 机制绑定的可复用能力（`skills/<name>/SKILL.md`）。",
+		"- **`data/`**：运行时数据（含 `sessions.db`）与用户临时文件、脚本输出、中间产物等。",
+		"- **`scripts/`**：**独立工具/脚本区**——与 skills 无绑定的 CLI、小脚本应优先放在此处。",
+		"- **`policy/`**：工具与 shell 审批策略；一般勿主动修改。",
+		"- **`history/`**：原始消息 JSONL 审计（若启用）。",
+		"- **`triggers/`**：触发器持久化（`triggers.json`）。",
+		"",
+		"工作区根文件（请保持更新）：",
+		"- **`scripts_menu.md`**：为 **`scripts/`** 内工具建立索引。",
+		"- **`RECOMMENDED_CLI_TOOLS.md`**：推荐第三方 CLI 清单（需自行安装）。",
+		"",
+		"执行任务时优先判断 `scripts/` 或已加载 skill 能否完成；新增脚本前先查阅 `scripts_menu.md` 与 `RECOMMENDED_CLI_TOOLS.md`。",
 		"",
 	}
 	return strings.Join(lines, "\n")

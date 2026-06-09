@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 // LoadedSkill 为会话已加载 skill 元信息（持久化在 session）。
@@ -27,6 +29,14 @@ type Catalog struct {
 	root        string
 	maxInPrompt int
 	enabled     bool
+
+	mu    sync.RWMutex
+	cache catalogListCache
+}
+
+type catalogListCache struct {
+	sig  string
+	defs []Definition
 }
 
 // NewCatalog 构造 skill 目录访问器。
@@ -47,29 +57,28 @@ func (c *Catalog) Enabled() bool {
 }
 
 // List 扫描 `{root}/*/SKILL.md` 并返回全部 skill 元数据与正文。
+//
+// 结果按各 SKILL.md 的 name+mtime+size 签名缓存；磁盘未变时复用内存列表，避免每步 tool loop 重复读盘。
 func (c *Catalog) List() []Definition {
 	if !c.enabled || c.root == "" {
 		return nil
 	}
-	entries, err := os.ReadDir(c.root)
+	sig, err := c.listSignature()
 	if err != nil {
 		return nil
 	}
-	out := make([]Definition, 0)
-	for _, ent := range entries {
-		if !ent.IsDir() {
-			continue
-		}
-		dirName := strings.TrimSpace(ent.Name())
-		if dirName == "" {
-			continue
-		}
-		def, ok := c.readSkill(filepath.Join(c.root, dirName, "SKILL.md"), dirName)
-		if ok {
-			out = append(out, def)
-		}
+	c.mu.RLock()
+	if c.cache.sig == sig && c.cache.defs != nil {
+		out := cloneDefinitions(c.cache.defs)
+		c.mu.RUnlock()
+		return out
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].SkillName < out[j].SkillName })
+	c.mu.RUnlock()
+
+	out := c.scanDefinitions()
+	c.mu.Lock()
+	c.cache = catalogListCache{sig: sig, defs: cloneDefinitions(out)}
+	c.mu.Unlock()
 	return out
 }
 
@@ -182,18 +191,90 @@ func (c *Catalog) UnloadSkills(loaded []LoadedSkill, names []string) []LoadedSki
 	return out
 }
 
+func (c *Catalog) scanDefinitions() []Definition {
+	entries, err := os.ReadDir(c.root)
+	if err != nil {
+		return nil
+	}
+	out := make([]Definition, 0)
+	for _, ent := range entries {
+		if !ent.IsDir() {
+			continue
+		}
+		dirName := strings.TrimSpace(ent.Name())
+		if dirName == "" {
+			continue
+		}
+		def, ok := c.readSkill(filepath.Join(c.root, dirName, "SKILL.md"), dirName)
+		if ok {
+			out = append(out, def)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SkillName < out[j].SkillName })
+	return out
+}
+
+// listSignature 汇总各子目录 SKILL.md 的目录名、mtime、size，用于判断缓存是否仍有效。
+func (c *Catalog) listSignature() (string, error) {
+	entries, err := os.ReadDir(c.root)
+	if err != nil {
+		return "", err
+	}
+	type part struct {
+		dir  string
+		mod  int64
+		size int64
+	}
+	parts := make([]part, 0)
+	for _, ent := range entries {
+		if !ent.IsDir() {
+			continue
+		}
+		dirName := strings.TrimSpace(ent.Name())
+		if dirName == "" {
+			continue
+		}
+		st, err := os.Stat(filepath.Join(c.root, dirName, "SKILL.md"))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", err
+		}
+		parts = append(parts, part{dir: dirName, mod: st.ModTime().UnixNano(), size: st.Size()})
+	}
+	sort.Slice(parts, func(i, j int) bool { return parts[i].dir < parts[j].dir })
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteString(p.dir)
+		b.WriteByte('|')
+		b.WriteString(strconv.FormatInt(p.mod, 10))
+		b.WriteByte('|')
+		b.WriteString(strconv.FormatInt(p.size, 10))
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
+}
+
+func cloneDefinitions(in []Definition) []Definition {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Definition, len(in))
+	copy(out, in)
+	return out
+}
+
 func (c *Catalog) readSkill(path, dirName string) (Definition, bool) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Definition{}, false
 	}
 	meta, body := parseFrontmatter(string(raw))
-	desc := strings.TrimSpace(fmt.Sprint(meta["description"]))
+	desc := metaString(meta, "description")
 	skillName := dirName
-	if v, ok := meta["name"]; ok {
-		if name := strings.TrimSpace(fmt.Sprint(v)); name != "" {
-			skillName = name
-		}
+	if name := metaString(meta, "name"); name != "" {
+		skillName = name
 	}
 	return Definition{
 		SkillName:   skillName,
@@ -214,6 +295,21 @@ func parseFrontmatter(text string) (map[string]any, string) {
 	metaBlock := text[4 : 4+end]
 	body := strings.TrimSpace(text[4+end+5:])
 	return parseSimpleYAML(metaBlock), body
+}
+
+func metaString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	s := strings.TrimSpace(fmt.Sprint(raw))
+	if s == "" || s == "<nil>" {
+		return ""
+	}
+	return s
 }
 
 func parseSimpleYAML(block string) map[string]any {

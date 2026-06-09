@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from app.cli.render import format_tool_call
-from app.cli.tool_calls import normalize_tool_call_item
+from app.cli.tool_calls import normalize_tool_call_item, tool_display_name
 
 
 class NormalizeToolCallItemTests(unittest.TestCase):
@@ -49,6 +49,13 @@ class NormalizeToolCallItemTests(unittest.TestCase):
         assert update is not None
         self.assertIn("read_file", update.text)
         self.assertIn("call-3", update.text)
+
+    def test_tool_display_name_uses_call_purpose(self) -> None:
+        title = tool_display_name(
+            "bash_run",
+            {"call_purpose": "检查 HTTP 端口", "command": "curl localhost:8080"},
+        )
+        self.assertEqual(title, "bash(检查 HTTP 端口)")
 
 
 if __name__ == "__main__":

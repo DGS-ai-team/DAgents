@@ -131,26 +131,23 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 		names := stringSliceField(payload, "skill_names")
 		loaded = catalog.SetLoadedSkills(names)
 		body, _ := json.Marshal(map[string]any{
-			"action":           "set_loaded_skills",
-			"loaded_skills":    loaded,
-			"available_skills": catalog.ListMetadata(),
+			"action":        "set_loaded_skills",
+			"loaded_skills": loaded,
 		})
 		output = string(body)
 	case "unload_skills":
 		names := stringSliceField(payload, "skill_names")
 		loaded = catalog.UnloadSkills(loaded, names)
 		body, _ := json.Marshal(map[string]any{
-			"action":           "unload_skills",
-			"loaded_skills":    loaded,
-			"available_skills": catalog.ListMetadata(),
+			"action":        "unload_skills",
+			"loaded_skills": loaded,
 		})
 		output = string(body)
 	case "clear_skills":
 		loaded = nil
 		body, _ := json.Marshal(map[string]any{
-			"action":           "clear_skills",
-			"loaded_skills":    []skills.LoadedSkill{},
-			"available_skills": catalog.ListMetadata(),
+			"action":        "clear_skills",
+			"loaded_skills": []skills.LoadedSkill{},
 		})
 		output = string(body)
 	default:
@@ -159,7 +156,8 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	if o.skillAccess.Set != nil {
 		o.skillAccess.Set(loaded)
 	}
-	o.publishToolResult(sessionID, tc, output, strings.HasPrefix(output, "ERROR:"), nil)
+	rejected := strings.HasPrefix(output, "ERROR:")
+	o.publishToolResult(sessionID, tc, output, rejected, nil)
 	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
 	return nil
 }

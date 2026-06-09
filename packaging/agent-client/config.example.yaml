@@ -18,8 +18,8 @@ local:
 
 expose_to_peers: false
 
-# 工具可访问的文件根；运行时目录见 .gitignore 中的 .runtime/
-fs_root: ./
+# 工具沙箱根（read_file / write_file / bash_run 等工作区）；默认与 .runtime 目录一致
+fs_root: ./.runtime
 
 llm:
   provider: deepseek   # openai | deepseek（deepseek 时出站 messages 按 Thinking 文档校验/裁剪 reasoning_content）

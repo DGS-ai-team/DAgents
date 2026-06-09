@@ -5,7 +5,8 @@
 | 子路径 | 说明 |
 |--------|------|
 | **`prompt_context/`** | 侧车 **`soul.md` / `user.md` / `custom.md`**：仓库内为 **空文件占位**（无预设文案）；详见 **`prompt_context/README.md`**。 |
-| **`scripts/`** | 独立脚本区占位（与 **skills** 区分）；**Windows 包**内置 **[OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)** 二进制见 **`scripts/OFFICECLI.md`**；索引 **`scripts_menu.md`** |
+| **`scripts/`** | 独立脚本区占位（与 **skills** 区分）；推荐第三方 CLI 见 **`RECOMMENDED_CLI_TOOLS.md`**；索引 **`scripts_menu.md`** |
+| **`RECOMMENDED_CLI_TOOLS.md`** | 推荐 CLI 工具清单（如 OfficeCLI；需自行安装） |
 | **`scripts_menu.md`** | `.runtime/scripts/` 工具索引（Agent 查阅） |
 | **`scripts/serve/`** | `dagents serve` 的 **startup.d** / **shutdown.d** 钩子目录；见 **`scripts/serve/README.md`**。 |
 | **`data/`** | 运行期数据目录占位。 |

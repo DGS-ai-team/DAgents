@@ -21,3 +21,12 @@ func TestFormatSessionContext_includesSystemPrompt(t *testing.T) {
 		t.Fatalf("missing prompt body: %q", text)
 	}
 }
+
+func TestSkillDescriptionFromRow_filtersNilLiteral(t *testing.T) {
+	if got := skillDescriptionFromRow(map[string]any{"description": "<nil>"}); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+	if got := skillDescriptionFromRow(map[string]any{"description": "  ok  "}); got != "ok" {
+		t.Fatalf("got %q, want ok", got)
+	}
+}

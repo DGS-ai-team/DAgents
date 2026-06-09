@@ -6,6 +6,16 @@ Go Node 侧 skills 目录扫描、元数据与 prompt 渲染（对齐 Python `ha
 |------|------|
 | `skills.go` | `Catalog`：扫描 `{root}/*/SKILL.md`、loaded 集合管理、渲染 system prompt 段 |
 
+## Catalog 列表缓存
+
+`List()` / `ListMetadata()` / `SelectByName()` 共用内存缓存：
+
+- **签名**：各子目录 `SKILL.md` 的目录名 + `mtime` + `size`（排序后拼接）；
+- **失效**：新增/删除 skill 目录、修改 `SKILL.md` 后自动重扫；未变时仅 `Stat`，不重复 `ReadFile`；
+- **并发**：`sync.RWMutex` 保护；每 session runtime 持有一个 `Catalog` 实例。
+
+每步 `BuildSystemPrompt` 会调用 `RenderMetadataSection` / `RenderLoadedSection`，tool loop 中 `load_skills` 亦会 `SelectByName`；缓存避免高频读盘。
+
 ## SKILL.md 格式
 
 ```markdown

@@ -11,6 +11,8 @@ const (
 	toolDetailMaxLines        = 8
 	UserInformationToolName   = "ask_user_information"
 	userInformationDisplayName = "Agent 询问"
+	// CallPurposeKey 与 Node tools.CallPurposeKey 对齐，供 Client 展示工具调用首行。
+	CallPurposeKey = "call_purpose"
 )
 
 // NormalizedToolCall 为 UI 使用的 tool call 扁平结构。
@@ -145,7 +147,10 @@ func summarizeToolResultContent(name, content string) string {
 		if diff := searchReplaceDiff(content); diff != "" {
 			return truncatePreviewLines(diff, toolDetailMaxLines, toolPreviewMaxRunes)
 		}
-		return summarizeSearchReplaceMeta(content)
+		if strings.Contains(content, "成功: 否") {
+			return summarizeSearchReplaceMeta(content)
+		}
+		return ""
 	default:
 		if IsTemporaryAgentTool(name) {
 			if _, body, ok := formatTemporaryAgentToolResult(name, content, false); ok && body != "" {
@@ -395,11 +400,22 @@ func parseToolArguments(raw any) map[string]any {
 	}
 }
 
-// ToolDisplayName 生成工具调用短标题（对齐 Python `_tool_display_name`）。
+// ToolCallPurpose 从 arguments 读取调用目的（call_purpose）。
+func ToolCallPurpose(args map[string]any) string {
+	return truncatePreview(firstNonEmptyField(args, CallPurposeKey), 48)
+}
+
+// ToolDisplayName 生成工具调用短标题（对齐 Python `tool_display_name`）。
 func ToolDisplayName(name string, args map[string]any) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "unknown"
+	}
+	if name == UserInformationToolName {
+		return userInformationDisplayName
+	}
+	if purpose := ToolCallPurpose(args); purpose != "" {
+		return toolDisplayBaseName(name) + "(" + purpose + ")"
 	}
 	switch name {
 	case "bash_run":
@@ -423,8 +439,6 @@ func ToolDisplayName(name string, args map[string]any) string {
 			path = "—"
 		}
 		return name + "(" + path + ")"
-	case UserInformationToolName:
-		return userInformationDisplayName
 	case toolCreateTemporaryAgent, toolWaitTemporaryAgents, toolTemporaryAgentStatus, toolCancelTemporaryAgent:
 		return FormatTemporaryAgentToolTitle(name, args)
 	default:
@@ -433,10 +447,25 @@ func ToolDisplayName(name string, args map[string]any) string {
 		}
 		parts := make([]string, 0, len(args))
 		for key, value := range args {
+			if key == CallPurposeKey || key == "run_in_background" {
+				continue
+			}
 			text := truncatePreview(fmt.Sprint(value), 40)
 			parts = append(parts, key+"="+text)
 		}
+		if len(parts) == 0 {
+			return name + "()"
+		}
 		return name + "(" + strings.Join(parts, ", ") + ")"
+	}
+}
+
+func toolDisplayBaseName(name string) string {
+	switch name {
+	case "bash_run":
+		return "bash"
+	default:
+		return name
 	}
 }
 

@@ -23,7 +23,7 @@ func createTemporaryAgentToolDef() ToolDef {
 			Description: "创建同进程临时 Agent（temporary agent）执行自包含子任务，非外部 A2A 对等调用。" +
 				"wait=true 时阻塞至完成。须在 task 中提供完整上下文，并通过 allowed_tools 指定其可用工具（仅限你当前拥有的工具子集）。" +
 				"可通过 skill_names 在创建时预加载 skills（与 load_skills 同名语义，子 Agent 运行期不可再加载 skills）。",
-			Parameters: map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"task": map[string]any{
@@ -39,7 +39,7 @@ func createTemporaryAgentToolDef() ToolDef {
 					"skill_names": map[string]any{
 						"type":        "array",
 						"items":       map[string]any{"type": "string"},
-						"description": "创建时预加载的 skills 名称（可选）；名称须与 .runtime/skills 下子目录名一致，整组替换语义同 load_skills",
+						"description": "创建时预加载的 skills 名称（可选）；名称须与 skills/ 下子目录名一致（FS_ROOT 内），整组替换语义同 load_skills",
 					},
 					"ttl_seconds": map[string]any{"type": "integer", "description": "临时 Agent 生命周期（秒）"},
 					"max_turns":   map[string]any{"type": "integer", "description": "临时 Agent 最大回合数"},
@@ -47,7 +47,7 @@ func createTemporaryAgentToolDef() ToolDef {
 				},
 				"required":             []string{"task", "purpose"},
 				"additionalProperties": false,
-			},
+			}),
 		},
 	}
 }
@@ -58,7 +58,7 @@ func waitTemporaryAgentsToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "wait_temporary_agents",
 			Description: "等待一个或多个临时 Agent（temporary agent）到达终态并汇总；非 A2A 消息轮询。",
-			Parameters: map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"child_session_ids": map[string]any{
@@ -71,7 +71,7 @@ func waitTemporaryAgentsToolDef() ToolDef {
 				},
 				"required":             []string{"child_session_ids"},
 				"additionalProperties": false,
-			},
+			}),
 		},
 	}
 }
@@ -82,7 +82,7 @@ func temporaryAgentStatusToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "temporary_agent_status",
 			Description: "非阻塞查询临时 Agent（temporary agent）状态；非 A2A。",
-			Parameters: map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"child_session_ids": map[string]any{
@@ -93,7 +93,7 @@ func temporaryAgentStatusToolDef() ToolDef {
 				},
 				"required":             []string{"child_session_ids"},
 				"additionalProperties": false,
-			},
+			}),
 		},
 	}
 }
@@ -104,7 +104,7 @@ func cancelTemporaryAgentToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "cancel_temporary_agent",
 			Description: "取消仍在运行的临时 Agent（temporary agent）；非 A2A。",
-			Parameters: map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"child_session_id": map[string]any{
@@ -115,7 +115,7 @@ func cancelTemporaryAgentToolDef() ToolDef {
 				},
 				"required":             []string{"child_session_id"},
 				"additionalProperties": false,
-			},
+			}),
 		},
 	}
 }

@@ -36,7 +36,7 @@ from app.cli.child_agent import (
 )
 from app.cli.render import TranscriptKind, TranscriptUpdate, format_inline_usage, parse_usage_round, sanitize_inline_tool_arg
 from app.cli.session_controller import PendingHITL, SessionController
-from app.cli.tool_calls import normalize_tool_call_item
+from app.cli.tool_calls import normalize_tool_call_item, tool_call_purpose, tool_display_name
 from app.cli.user_information import (
     UserInformationAnswer,
     UserInformationCancelled,
@@ -1123,41 +1123,8 @@ class DAgentsTuiApp(App[None]):
         return f"bash({preview})", raw
 
     def _tool_display_name(self, name: str, arguments: dict[str, Any]) -> str:
-        """生成工具调用在 transcript 中的短标题。
-
-        逻辑：
-        1. `bash_run` 短 command 放在括号内，过长则括号内仅截断预览（全文见调用块代码框）；
-        2. `trigger_create` 只展示触发器名称，避免 cron/描述等参数挤占消息行；
-        3. `write_file` / `search_replace` 只展示 path，正文与 diff 在结果块展开；
-        4. 其它工具按 `key=value` 摘要展示参数。
-
-        关键边界：
-        - 目标字段为空时使用 `—` 占位；
-        - 不修改传入 arguments，仅用于 UI 文案。
-        """
-        if name == "bash_run":
-            title, _ = self._bash_command_parts(str(arguments.get("command") or ""))
-            return title
-        if name == "trigger_create":
-            # trigger 创建参数较多，列表中只暴露 name 便于快速识别本次审批对象。
-            trigger_name = str(arguments.get("name") or "").strip()
-            return f"trigger_create({trigger_name or '—'})"
-        if name == "write_file":
-            path = str(arguments.get("path") or "").strip()
-            return f"write_file({path or '—'})"
-        if name == "search_replace":
-            path = str(arguments.get("path") or "").strip()
-            return f"search_replace({path or '—'})"
-        if name == _USER_INFORMATION_TOOL_NAME:
-            # 问题与选项在 user_information_required 后写入同一块，此处不展开冗长参数。
-            return "Agent 询问"
-        temp_title = format_temporary_agent_tool_title(name, arguments)
-        if temp_title is not None:
-            return temp_title
-        if arguments:
-            args = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
-            return f"{name}({args})"
-        return f"{name}()"
+        """生成工具调用在 transcript 中的短标题（优先 call_purpose）。"""
+        return tool_display_name(name, arguments)
 
     def _tool_call_parts_from_call(self, item: dict[str, Any]) -> tuple[str, str | None, str]:
         """从 tool_call SSE payload 解析短标题与可选代码框内容。
@@ -1174,6 +1141,11 @@ class DAgentsTuiApp(App[None]):
         name = normalized["name"]
         arguments = normalized["arguments"]
         if name == "bash_run":
+            purpose = tool_call_purpose(arguments)
+            if purpose:
+                title = tool_display_name(name, arguments)
+                command = str(arguments.get("command") or "")
+                return title, command if command else None, "bash"
             title, command = self._bash_command_parts(str(arguments.get("command") or ""))
             return title, command, "bash"
         summary = self._tool_display_name(name, arguments)
@@ -1425,7 +1397,7 @@ class DAgentsTuiApp(App[None]):
             summary += f" · {path}"
         if diff:
             return summary, diff
-        return summary, meta or content
+        return summary, ""
 
     def _tool_result_text(self, data: dict[str, Any]) -> tuple[str, str]:
         """提取工具结果摘要与详情；bash 优先展示 stdout，空则 stderr。"""

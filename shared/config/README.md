@@ -19,7 +19,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 |----|------|
 | `listen` / `local` | Node 监听与 Client 连接 endpoint |
 | `llm` | 模型、mock、tool loop 上限 |
-| `fs_root` | 工具文件沙箱根 |
+| `fs_root` | 工具文件沙箱根（缺省为 `data_dir` 的父目录，即 `./.runtime`） |
 | `skills` | 技能目录与 prompt 上限 |
 | `compression` | 上下文压缩 token 阈值 |
 | `triggers` | 触发器调度（见下表） |

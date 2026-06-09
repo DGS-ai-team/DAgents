@@ -1,29 +1,41 @@
-# OfficeCLI（第三方，仅 Windows 发布包）
+# OfficeCLI（第三方，需自行安装）
 
-**Windows** 发布包（zip / `.exe` 安装包）内置 **[OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**，用于 Agent 通过 CLI 创建、分析与修改 Office 文档（`.docx` / `.xlsx` / `.pptx`）。Linux tarball **不含** OfficeCLI。
+**[OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)** 用于 Agent 通过 CLI 创建、分析与修改 Office 文档（`.docx` / `.xlsx` / `.pptx`）。**DAgents 发布包不含此工具**；见 **[`../RECOMMENDED_CLI_TOOLS.md`](../RECOMMENDED_CLI_TOOLS.md)**。
 
 | 项 | 值 |
 |---|---|
 | 上游仓库 | https://github.com/iOfficeAI/OfficeCLI |
 | 许可证 | [GNU AGPL v3.0](https://github.com/iOfficeAI/OfficeCLI/blob/main/LICENSE) |
-| 二进制路径 | `.runtime/scripts/officecli.exe` |
-| 对应 skills | `.runtime/skills/officecli*`（由上游 `skills/` 目录同步） |
+| 建议路径 | `<运行根>/.runtime/scripts/officecli` 或 `officecli.exe` |
+| 对应 skills | 上游 `skills/officecli*` → 复制到 `<运行根>/.runtime/skills/` |
+
+## 安装
+
+1. 打开 [Releases](https://github.com/iOfficeAI/OfficeCLI/releases)，下载与平台匹配的二进制。
+2. 放入 **`.runtime/scripts/`**（或任意已在 `PATH` 中的目录）。
+3. 从上游仓库 **`skills/`** 目录复制 `officecli*` 至 **`.runtime/skills/`**。
+
+```bash
+# Linux / macOS 示例
+curl -L -o .runtime/scripts/officecli \
+  "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.106/officecli-linux-x64"
+chmod +x .runtime/scripts/officecli
+```
+
+```cmd
+REM Windows 示例：下载 officecli-win-x64.exe 并重命名
+copy officecli-win-x64.exe .runtime\scripts\officecli.exe
+```
 
 ## 使用
 
-```cmd
-REM 安装后（PATH 已含 .runtime\scripts）
+```bash
 officecli --version
-
-REM 便携解压包（未 install 时）
-.runtime\scripts\officecli.exe --version
+# 便携路径
+.runtime/scripts/officecli --version
 ```
 
-在 DAgents 中通过 `/skill load officecli`（或 `officecli-docx` / `officecli-pptx` / `officecli-xlsx` 等子 skill）加载规则后，Agent 会调用 `bash_run` 执行上述命令。
-
-## 版本
-
-打包脚本默认 pin **`OFFICECLI_VERSION=v1.0.106`**（可在 CI 覆盖）。实际版本见 `.runtime/scripts/.officecli-version`。
+在 DAgents 中通过 **`/skill load officecli`**（或 `officecli-docx` / `officecli-pptx` / `officecli-xlsx` 等子 skill）加载规则后，Agent 会调用 `bash_run` 执行上述命令。
 
 ## 修改与再分发
 

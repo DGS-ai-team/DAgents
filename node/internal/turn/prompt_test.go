@@ -19,7 +19,7 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "ops-01", "/data/ws", "read_file", "最高优先级规则", "sess-abc", "当前运行环境") {
+	if !containsAll(prompt, "ops-01", "/data/ws", "FS_ROOT", "memory/", "skills/", "最高优先级规则", "sess-abc", "当前运行环境") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 }
@@ -53,10 +53,10 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 		SessionID: "child-abc",
 		Purpose:   "review patch",
 	})
-	if !containsAll(prompt, "临时子 Agent", "review patch", "child-abc", "/data/ws", "当前运行环境") {
+	if !containsAll(prompt, "临时子 Agent", "review patch", "child-abc", "/data/ws", "memory/", "当前运行环境") {
 		t.Fatalf("prompt = %q", prompt)
 	}
-	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "prompt_context") {
+	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "用户信息与偏好") {
 		t.Fatalf("child prompt should omit parent sections, got %q", prompt)
 	}
 }

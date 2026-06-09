@@ -54,6 +54,9 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	if cfg.LLM.MaxToolLoops != 16 {
 		t.Fatalf("llm.max_tool_loops = %d, want 16", cfg.LLM.MaxToolLoops)
 	}
+	if cfg.FSRoot != runtimeDir {
+		t.Fatalf("fs_root = %q, want %q", cfg.FSRoot, runtimeDir)
+	}
 }
 
 func TestLoadFile_autoGeneratesAgentID(t *testing.T) {

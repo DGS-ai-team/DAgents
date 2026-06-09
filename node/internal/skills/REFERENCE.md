@@ -9,7 +9,7 @@
 | `Catalog` | struct | 扫描 `{root}/*/SKILL.md`、loaded 集合、prompt 段渲染 |
 | `NewCatalog` | func | 构造 Catalog（全局 `skills.enabled`、root、max_in_prompt） |
 | `(c *Catalog) Enabled` | method | skills 功能总开关 |
-| `(c *Catalog) List` | method | 扫描目录下全部 skill（加载 frontmatter 元数据） |
+| `(c *Catalog) List` | method | 扫描目录下全部 skill；按 SKILL.md mtime+size 签名缓存 |
 | `(c *Catalog) ListMetadata` | method | 返回 `skill_name` / `description` 列表 |
 | `(c *Catalog) SelectByName` | method | 按目录名或 frontmatter `name` 查找 |
 | `(c *Catalog) RenderMetadataSection` | method | system prompt 可用技能段 |

@@ -29,4 +29,4 @@ sudo ./install.sh                    # /opt/dagents + /etc/profile.d/dagents.sh
 sudo ./install.sh --uninstall        # 卸载 /opt/dagents
 ```
 
-安装后在新 shell 中执行 `dagents doctor` 验证。`install.sh` 会将 **`${PREFIX}/.runtime/scripts`** 加入 `PATH`，便于后续集成 Agent 可调用的独立工具（当前 Linux 包默认不含 OfficeCLI，该目录主要为占位与扩展用）。
+安装后在新 shell 中执行 `dagents doctor` 验证。`install.sh` 会将 **`${PREFIX}/.runtime/scripts`** 加入 `PATH`，便于放置 Agent 可调用的独立工具（见 **[`../runtime/RECOMMENDED_CLI_TOOLS.md`](../runtime/RECOMMENDED_CLI_TOOLS.md)**）。

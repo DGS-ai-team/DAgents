@@ -2,6 +2,24 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+## [0.2.13] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.12** 基础上取消发布包内置 OfficeCLI、对齐 **`fs_root` 默认沙箱**、精简工具输出，并增强 skills 与 TUI 工具展示。
+
+### 变更
+
+- **不再内置 OfficeCLI**：移除 Release 打包时的 `vendor_officecli.sh` 集成；新增 **[`packaging/runtime/RECOMMENDED_CLI_TOOLS.md`](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)** 推荐 CLI 清单（含 OfficeCLI 自行安装说明）。
+- **`fs_root` 默认为 `./.runtime`**：文件工具沙箱与运行时目录对齐；system prompt 工作区说明改为相对 FS_ROOT 的路径（`skills/`、`data/` 等）。
+- **`search_replace` 输出精简**：成功且单次单行替换仅返回元数据；多处或多行替换附限流局部预览；移除整文件逐行 diff。
+- **skills tool 结果精简**：`load_skills` / `unload_skills` / `clear_skills` 的 tool 结果 JSON 不再含 `available_skills`（仅 `action` + `loaded_skills`）。
+- **skills Catalog mtime 缓存**：`List()` 在各 `SKILL.md` 未变时复用内存列表，减少每步 prompt / `load_skills` 的重复读盘。
+- **工具 `call_purpose`**：内置工具 schema 注入 `call_purpose`；Go / Python TUI 与审批首行优先展示 `tool(purpose)` 短标题；执行前从 arguments 剥离该字段。
+- **`write-skill` 元数据**：修复 description 缺失时显示 `<nil>`；打包 skill 路径说明与 `fs_root` 默认对齐。
+
+（Git **tag**：`v0.2.13`。）
+
 ## [0.2.12] - 2026-06-08
 
 **0.x 预览**：修复 **v0.2.11** Windows 发布包组装时 OfficeCLI skills 解压失败。
