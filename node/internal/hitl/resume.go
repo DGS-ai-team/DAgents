@@ -7,8 +7,9 @@ import (
 
 // ApprovalPlan 解析 resume 后对 pending tool call 的批准/拒绝集合。
 type ApprovalPlan struct {
-	Approved map[string]struct{}
-	Rejected map[string]struct{}
+	Approved              map[string]struct{}
+	Rejected              map[string]struct{}
+	TriggerSessionTargets map[string]string // call_id -> same_session | new_session | latest_active_session
 }
 
 // ParseApprovalResume 解析审批 resume_value（兼容 approve/reject/selection）。
@@ -28,11 +29,21 @@ func ParseApprovalResume(value map[string]any, pendingIDs []string) (ApprovalPla
 		for id := range pending {
 			plan.Approved[id] = struct{}{}
 		}
+		targets, err := parseTriggerSessionTargets(value["trigger_session_targets"], pending)
+		if err != nil {
+			return ApprovalPlan{}, err
+		}
+		plan.TriggerSessionTargets = targets
 		return plan, nil
 	case "reject", "rejected":
 		plan := ApprovalPlan{Approved: make(map[string]struct{}), Rejected: make(map[string]struct{})}
 		for id := range pending {
 			plan.Rejected[id] = struct{}{}
+		}
+		if raw := value["trigger_session_targets"]; raw != nil {
+			if _, err := parseTriggerSessionTargets(raw, pending); err != nil {
+				return ApprovalPlan{}, err
+			}
 		}
 		return plan, nil
 	case "selection":
@@ -52,6 +63,16 @@ func ParseApprovalResume(value map[string]any, pendingIDs []string) (ApprovalPla
 		if len(plan.Approved)+len(plan.Rejected) != len(pending) {
 			return ApprovalPlan{}, fmt.Errorf("selection must cover all pending tool calls")
 		}
+		targets, err := parseTriggerSessionTargets(value["trigger_session_targets"], pending)
+		if err != nil {
+			return ApprovalPlan{}, err
+		}
+		for id := range targets {
+			if _, ok := plan.Approved[id]; !ok {
+				return ApprovalPlan{}, fmt.Errorf("trigger_session_targets for non-approved id: %s", id)
+			}
+		}
+		plan.TriggerSessionTargets = targets
 		return plan, nil
 	default:
 		// 兼容 kind/decision 写法
@@ -145,4 +166,12 @@ func toStringSlice(v any) []string {
 func (p ApprovalPlan) IsApproved(id string) bool {
 	_, ok := p.Approved[id]
 	return ok
+}
+
+// TriggerSessionTarget 返回 call 的 trigger 投递目标；未指定时返回空（由编排器 fallback same_session）。
+func (p ApprovalPlan) TriggerSessionTarget(id string) string {
+	if p.TriggerSessionTargets == nil {
+		return ""
+	}
+	return strings.TrimSpace(p.TriggerSessionTargets[id])
 }

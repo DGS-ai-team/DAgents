@@ -8,11 +8,11 @@ Node 与 Client 共用 YAML 配置；**仓库只提交 `*.example.yaml`**，本�
 
 | 文件 | 说明 |
 |------|------|
-| `config.example.yaml` | 配置示例（可提交）；含 listen、local、llm、data_dir、**triggers** 等 |
+| `config.example.yaml` | 配置示例（可提交）；含 listen、local、llm、**fs_root**、**triggers** 等 |
 | `scripts/` | 分发包内启动脚本（`startup/`）说明；CI 另复制 `scripts/linux|windows|service` 系统服务注册脚本 |
 | `policy.example.yaml` | **已废弃**（legacy YAML）；现用 `.runtime/policy/*.approval.txt` |
 
-`config.example.yaml` 中 **`triggers`** 块：`enabled` 开关、`poll_seconds` 轮询间隔、可选 `store_path`；condition 语法见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)。
+`config.example.yaml` 中 **`triggers`** 块：`enabled` 开关、`poll_seconds` 轮询间隔；condition 语法见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)。
 
 ## 本地配置
 

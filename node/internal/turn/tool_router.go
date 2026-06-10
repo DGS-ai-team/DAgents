@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
+	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -76,7 +77,7 @@ func (o *Orchestrator) processToolCalls(
 		}
 	}
 
-	if err := o.executeAutoBatch(ctx, sessionID, history, autoCalls); err != nil {
+	if err := o.executeAutoBatch(ctx, sessionID, history, autoCalls, nil); err != nil {
 		return nil, "", err
 	}
 
@@ -190,6 +191,7 @@ func (o *Orchestrator) executeAutoBatch(
 	sessionID string,
 	history *[]llm.Message,
 	autoCalls []llm.ToolCall,
+	plan *clihitl.ApprovalPlan,
 ) error {
 	if len(autoCalls) == 0 {
 		return nil
@@ -198,7 +200,7 @@ func (o *Orchestrator) executeAutoBatch(
 		return err
 	}
 	if len(autoCalls) == 1 {
-		return o.executeTool(ctx, sessionID, history, autoCalls[0])
+		return o.executeTool(ctx, sessionID, history, autoCalls[0], plan)
 	}
 	type batchItem struct {
 		tc       llm.ToolCall
@@ -213,7 +215,7 @@ func (o *Orchestrator) executeAutoBatch(
 		go func(idx int) {
 			defer wg.Done()
 			tc := autoCalls[idx]
-			content, rejected, extra := o.invokeTool(ctx, sessionID, tc)
+			content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
 			results[idx] = batchItem{tc: tc, content: content, rejected: rejected, extra: extra}
 		}(i)
 	}
@@ -232,12 +234,15 @@ func (o *Orchestrator) executeAutoBatch(
 	return nil
 }
 
-func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall) (content string, rejected bool, extra map[string]any) {
+func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any) {
 	runInBackground, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
 	if tools.IsBackgroundJobTool(tc.Function.Name) {
 		runInBackground = false
 	}
 	toolCtx := tools.WithToolCallID(tools.WithSession(ctx, sessionID), tc.ID)
+	if target := resolveTriggerSessionTarget(tc, plan); target != "" {
+		toolCtx = tools.WithTriggerSessionTarget(toolCtx, target)
+	}
 
 	var output string
 	var execErr error
@@ -258,11 +263,30 @@ func (o *Orchestrator) executeTool(
 	sessionID string,
 	history *[]llm.Message,
 	tc llm.ToolCall,
+	plan *clihitl.ApprovalPlan,
 ) error {
-	content, rejected, extra := o.invokeTool(ctx, sessionID, tc)
+	content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
 	o.publishToolResult(sessionID, tc, content, rejected, extra)
 	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
 	return nil
+}
+
+func resolveTriggerSessionTarget(tc llm.ToolCall, plan *clihitl.ApprovalPlan) string {
+	name := strings.ToLower(strings.TrimSpace(tc.Function.Name))
+	if name != "trigger_create" && name != "trigger_fire" {
+		return ""
+	}
+	if plan == nil {
+		return clihitl.TriggerSessionSame
+	}
+	target := plan.TriggerSessionTarget(tc.ID)
+	if target != "" {
+		return target
+	}
+	if plan.IsApproved(tc.ID) {
+		return clihitl.TriggerSessionSame
+	}
+	return ""
 }
 
 func (o *Orchestrator) appendDeniedTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, reason string) {

@@ -27,7 +27,19 @@ func buildApprovalToolItem(tc llm.ToolCall) map[string]any {
 	if risk != "" {
 		item["risk_level"] = risk
 	}
+	if isTriggerSessionApprovalTool(tc.Function.Name) {
+		item["approval_mode"] = "trigger_session"
+	}
 	return item
+}
+
+func isTriggerSessionApprovalTool(toolName string) bool {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "trigger_create", "trigger_fire":
+		return true
+	default:
+		return false
+	}
 }
 
 func describeApprovalMeta(toolName string, args map[string]any) (reason, risk string) {

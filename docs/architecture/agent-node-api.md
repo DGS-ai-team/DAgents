@@ -211,6 +211,22 @@ POST /v1/sessions/{session_id}/skills/unload
 
 与工具 `load_skills` 语义一致；HTTP 供 Client 设置页使用。
 
+### 2.6 Policy（工具 / shell 黑白名单）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/v1/policy` | 返回工具与 shell 策略快照；可选 `?shell=bash\|cmd\|powershell\|auto` |
+| PUT | `/v1/policy/tools` | 更新工具策略：`{"updates":[{"name":"read_file","decision":"allow_auto"}]}` |
+| PUT | `/v1/policy/shell/{bash\|cmd\|powershell}` | 更新 shell 命令策略：`{"updates":[{"command":"rm","decision":"deny"}]}` |
+
+**`decision` 枚举**：`allow_auto`（白名单 / txt `never`）· `require_approval`（需审批 / txt `always`）· `deny`（黑名单 / txt `deny`）。
+
+**`platform`**：`goos` 为 Node 进程 OS；`default_shell` 与 `bash_run` 默认 shell 一致（Windows→`powershell`，其余→`bash`）。
+
+写盘后 Node 热更新全部活跃 session 的 policy engine；`ask_user_information` 禁止设为 `deny`。
+
+Client 入口：`/policy` 全屏界面（Go bubbletea / Python Textual，Esc 返回）。
+
 ---
 
 ## 2.8 临时子 Agent（Client / 用户）

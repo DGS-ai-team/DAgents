@@ -143,7 +143,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	mgr := session.NewManager(cfg.AgentID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
 		FSRoot:                   cfg.FSRoot,
 		MaxToolLoops:             cfg.LLM.MaxToolLoops,
-		SkillsRoot:               cfg.Skills.Root,
+		SkillsRoot:               cfg.SkillsRoot(),
 		SkillsEnabled:            cfg.Skills.Enabled,
 		SkillsMaxInPrompt:        cfg.Skills.MaxInPrompt,
 		RuntimeDir:               cfg.RuntimeDir(),
@@ -171,6 +171,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerStore.SetLogger(logger)
 		triggerSched = triggers.NewScheduler(triggerStore, &session.TriggerSubmitter{Mgr: mgr}, cfg.Triggers.PollSeconds)
 		triggerSched.SetLogger(logger)
+		triggerSched.SetSessionResolver(mgr)
 		mgr.SetTriggerDeliveryTracker(triggerStore)
 		if o.tools != nil {
 			o.tools.SetTriggerRuntime(triggerStore, triggerSched, cfg.AgentID)
@@ -223,6 +224,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()
 	s.registerChildAgentRoutes()
+	s.registerPolicyRoutes()
 	return s
 }
 

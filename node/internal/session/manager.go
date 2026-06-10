@@ -205,6 +205,42 @@ func (m *Manager) ListActive() []*Session {
 	return out
 }
 
+// ReloadPolicy 热更新策略引擎并同步到全部活跃 session orchestrator。
+func (m *Manager) ReloadPolicy(engine *policy.Engine) {
+	if engine == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.policy = engine
+	for _, rt := range m.sessions {
+		rt.setPolicy(engine)
+	}
+}
+
+// ReloadPolicyFromRuntime 从 runtime 目录重新加载策略并热更新。
+func (m *Manager) ReloadPolicyFromRuntime(runtimeDir string) error {
+	engine, err := policy.LoadRuntime(runtimeDir)
+	if err != nil {
+		return err
+	}
+	m.ReloadPolicy(engine)
+	return nil
+}
+
+// ToolNames 返回 registry 已知工具名。
+func (m *Manager) ToolNames() []string {
+	if m.tools == nil {
+		return nil
+	}
+	defs := m.tools.Definitions()
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, def.Function.Name)
+	}
+	return names
+}
+
 // ListPersisted 返回 DB 中全部 session 摘要。
 func (m *Manager) ListPersisted(ctx context.Context) ([]store.Summary, error) {
 	if m.store == nil {

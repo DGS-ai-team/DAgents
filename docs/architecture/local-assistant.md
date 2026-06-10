@@ -38,7 +38,7 @@ Manage、远程多 Agent、Web 统一入口 **不在本文范围**（见 [three-
 
 - 路径：`packaging/agent-client/config.yaml`（从 `config.example.yaml` 复制）
 - 查找顺序：`--config` / `-config` → 环境变量 `DAGENTS_CONFIG` → 上述默认路径
-- Node 读 `listen` / `llm` / `data_dir` 等；Client 读 `local.endpoint`
+- Node 读 `listen` / `llm` / `fs_root` 等；Client 读 `local.endpoint`
 
 Python TUI 直连 Node（SSE 按 `session_id` 过滤，见 `app/cli/api_client.py`）。
 

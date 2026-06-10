@@ -26,13 +26,23 @@ const (
 	FireStatusError   FireStatus = "error"
 )
 
+// SessionTargetMode 触发器 fire 时会话解析策略。
+type SessionTargetMode string
+
+const (
+	SessionTargetFixed        SessionTargetMode = "fixed"
+	SessionTargetNewSession   SessionTargetMode = "new_session"
+	SessionTargetLatestActive SessionTargetMode = "latest_active"
+)
+
 // Definition 触发器完整定义（持久化主体）。
 type Definition struct {
-	TriggerID       string         `json:"trigger_id"`
-	Name            string         `json:"name"`
-	Condition       map[string]any `json:"condition"`
-	TargetAgentID   string         `json:"target_agent_id"`
-	TargetSessionID *string        `json:"target_session_id"`
+	TriggerID         string             `json:"trigger_id"`
+	Name              string             `json:"name"`
+	Condition         map[string]any     `json:"condition"`
+	TargetAgentID     string             `json:"target_agent_id"`
+	TargetSessionID   *string            `json:"target_session_id"`
+	SessionTargetMode SessionTargetMode  `json:"session_target_mode,omitempty"`
 	ClientID        *string        `json:"client_id"`
 	TaskTemplate    string         `json:"task_template"`
 	Enabled         bool           `json:"enabled"`
@@ -45,10 +55,11 @@ type Definition struct {
 
 // CreateInput 创建触发器入参（工具 / HTTP）。
 type CreateInput struct {
-	Name            string         `json:"name"`
-	Condition       map[string]any `json:"condition"`
-	TargetAgentID   string         `json:"target_agent_id"`
-	TargetSessionID *string        `json:"target_session_id"`
+	Name              string            `json:"name"`
+	Condition         map[string]any    `json:"condition"`
+	TargetAgentID     string            `json:"target_agent_id"`
+	TargetSessionID   *string           `json:"target_session_id"`
+	SessionTargetMode SessionTargetMode `json:"session_target_mode,omitempty"`
 	ClientID        *string        `json:"client_id"`
 	TaskTemplate    string         `json:"task_template"`
 }
@@ -153,11 +164,12 @@ func NewDefinitionFromCreate(in CreateInput, agentID string, now time.Time) (Def
 		targetAgent = "local"
 	}
 	def := Definition{
-		TriggerID:       uuid.NewString(),
-		Name:            in.Name,
-		Condition:       cloneMap(in.Condition),
-		TargetAgentID:   targetAgent,
-		TargetSessionID: copyStringPtr(in.TargetSessionID),
+		TriggerID:         uuid.NewString(),
+		Name:              in.Name,
+		Condition:         cloneMap(in.Condition),
+		TargetAgentID:     targetAgent,
+		TargetSessionID:   copyStringPtr(in.TargetSessionID),
+		SessionTargetMode: in.SessionTargetMode,
 		ClientID:        copyStringPtr(in.ClientID),
 		TaskTemplate:    in.TaskTemplate,
 		Enabled:         true,

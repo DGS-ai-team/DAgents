@@ -14,8 +14,9 @@ type ToolApprovalItem struct {
 	Name      string
 	RawArgs   string
 	Arguments map[string]any
-	Reason    string
-	Risk      string
+	Reason         string
+	Risk           string
+	ApprovalMode   string
 }
 
 // ExtractToolApprovals 从 approval_required SSE data 解析 tool_calls 列表。
@@ -61,12 +62,13 @@ func ExtractToolApprovals(data map[string]any) []ToolApprovalItem {
 			}
 		}
 		item := ToolApprovalItem{
-			CallID:    callID,
-			Name:      name,
-			RawArgs:   rawArgs,
-			Arguments: argMap,
-			Reason:    mapStringField(m, "approval_reason"),
-			Risk:      mapStringField(m, "risk_level"),
+			CallID:       callID,
+			Name:         name,
+			RawArgs:      rawArgs,
+			Arguments:    argMap,
+			Reason:       mapStringField(m, "approval_reason"),
+			Risk:         mapStringField(m, "risk_level"),
+			ApprovalMode: mapStringField(m, "approval_mode"),
 		}
 		out = append(out, item)
 	}

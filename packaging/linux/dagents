@@ -27,7 +27,7 @@ require_bin() {
 }
 
 probe_node() {
-  "${BIN}/dagents-client" probe -config "${ROOT}/${CFG}" >/dev/null 2>&1
+  "${BIN}/dagents-client" -config "${ROOT}/${CFG}" probe >/dev/null 2>&1
 }
 
 start_node_background() {

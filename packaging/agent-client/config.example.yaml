@@ -18,7 +18,8 @@ local:
 
 expose_to_peers: false
 
-# 工具沙箱根（read_file / write_file / bash_run 等工作区）；默认与 .runtime 目录一致
+# 工作区根（工具沙箱 + 运行时子目录均相对此路径硬编码，缺省 ./.runtime）
+# 子目录：data/ 临时工作区 · memory/sessions.db 会话库 · skills/ · policy/ · history/ · triggers/ · agent/
 fs_root: ./.runtime
 
 llm:
@@ -33,15 +34,12 @@ llm:
 manage:
   enabled: false
 
-# 工具审批策略位于 .runtime/policy/（首次启动从 packaging/runtime/policy 种子复制）
+# 工具审批策略位于 fs_root/policy/（首次启动从 packaging/runtime/policy 种子复制）
 # 编辑 tool.approval.txt 与 shell/*.approval.txt 即可调整审批规则。
-
-data_dir: ./.runtime/data
 
 skills:
   enabled: true
   max_in_prompt: 5
-  root: ./.runtime/skills
 
 compression:
   silent_trigger_tokens: 80000
@@ -50,7 +48,6 @@ compression:
 triggers:
   enabled: true
   poll_seconds: 5
-  # store_path: ./.runtime/triggers/triggers.json
 
 # 原始消息 JSONL 审计（对齐 Python AGENT_RAW_MESSAGE_HISTORY_ENABLED，默认 true）
 # raw_message_history:

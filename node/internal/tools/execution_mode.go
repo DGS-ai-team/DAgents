@@ -16,6 +16,8 @@ const (
 
 type sessionContextKey struct{}
 
+type triggerSessionTargetContextKey struct{}
+
 // WithSession 将 session_id 写入 context，供后台任务完成回调使用。
 func WithSession(ctx context.Context, sessionID string) context.Context {
 	if ctx == nil {
@@ -29,6 +31,25 @@ func sessionIDFromContext(ctx context.Context) string {
 		return ""
 	}
 	if v, ok := ctx.Value(sessionContextKey{}).(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+// WithTriggerSessionTarget 写入审批通过的 trigger 投递目标（same_session / new_session / latest_active_session）。
+func WithTriggerSessionTarget(ctx context.Context, target string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, triggerSessionTargetContextKey{}, strings.TrimSpace(target))
+}
+
+// TriggerSessionTargetFromContext 读取 trigger 审批投递目标。
+func TriggerSessionTargetFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(triggerSessionTargetContextKey{}).(string); ok {
 		return strings.TrimSpace(v)
 	}
 	return ""

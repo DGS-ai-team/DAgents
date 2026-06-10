@@ -25,6 +25,10 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 		m.syncViewport()
 	case "context":
 		err = m.enterContextView()
+	case "policy":
+		err = m.enterPolicyView()
+	case "triggers", "trigger":
+		err = m.appendTriggers()
 	case "compress":
 		err = m.runCompress()
 	case "skill":
@@ -257,6 +261,17 @@ func (m *model) appendSessions() error {
 	}
 	title := fmt.Sprintf("Sessions (%d)", len(items))
 	m.transcript.AddSystemPanel(title, tuishared.FormatSessionsPanelBody(items, m.currentSession()))
+	m.syncViewport()
+	return nil
+}
+
+func (m *model) appendTriggers() error {
+	items, err := m.client.ListTriggers(m.ctx)
+	if err != nil {
+		return err
+	}
+	title := fmt.Sprintf("Triggers (%d)", len(items))
+	m.transcript.AddSystemPanel(title, tuishared.FormatTriggersPanelBody(items))
 	m.syncViewport()
 	return nil
 }

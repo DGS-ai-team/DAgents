@@ -9,10 +9,10 @@
 | **`RECOMMENDED_CLI_TOOLS.md`** | 推荐 CLI 工具清单（如 OfficeCLI；需自行安装） |
 | **`scripts_menu.md`** | `.runtime/scripts/` 工具索引（Agent 查阅） |
 | **`scripts/serve/`** | `dagents serve` 的 **startup.d** / **shutdown.d** 钩子目录；见 **`scripts/serve/README.md`**。 |
-| **`data/`** | 运行期数据目录占位。 |
+| **`data/`** | **临时工作区（workspace）**占位：脚本输出、中间产物等；**不含** `sessions.db`。 |
 | **`skills/`** | 技能资源目录；默认 **`<运行根>/.runtime/skills`**；内置初始技能 **`write-skill`**（编写 **SKILL.md** 的约定与路径说明）。 |
 | **`history/`** | 原始消息 JSONL 等；默认 **`.runtime/history`**。 |
-| **`memory/`** | 可选 SQLite 会话库等；默认 **`.runtime/memory`**。 |
+| **`memory/`** | 持久化：**`sessions.db`** 会话库与可选 **`long_term.md`**；默认 **`.runtime/memory`**。 |
 | **`agent/`** | 如 **`agent_id`** 持久化文件等；默认 **`.runtime/agent`**。 |
 
 进程侧：**`prompt.py`** 仍会在首次读侧车前 **补建缺失的空文件**（不覆盖已有内容），与解压包内已有占位互为兜底。

@@ -142,6 +142,11 @@ func newRuntimeWithPublisher(
 	return rt
 }
 
+// setPolicy 热更新 orchestrator 策略。
+func (r *runtime) setPolicy(engine *policy.Engine) {
+	r.orch.SetPolicy(engine)
+}
+
 // getLoadedSkills 获取加载的技能列表
 func (r *runtime) getLoadedSkills() []skills.LoadedSkill {
 	r.mu.Lock()

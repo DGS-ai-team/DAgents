@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.15** 基础上新增 **策略（policy）API 与 TUI**、**trigger 会话目标审批** 与 **`/triggers` 命令**，并修复 **TUI 输入崩溃** 与 **Windows `--withnode` 启动**。
+
+### 新增
+
+- **`GET/PUT /v1/policy`**：工具与 shell（bash/cmd/powershell）策略读写；`policy` 包支持 ModeDeny、DecideTool、txt 存储与 Orchestrator 热更新。
+- **Go / Python TUI `/policy`**：查看与 `set` 子命令；分页展示工具与 shell 规则（Python `policy_view`）。
+- **Go / Python TUI `/triggers`**：列出调度 trigger 及下次执行时间。
+- **Trigger 会话目标**：审批 payload 可指定 `session_id`；HITL resume 与 `trigger_session` 贯通 Node / Client。
+
+### 变更
+
+- **System prompt**：精简 turn 构建逻辑与测试（`node/internal/turn/prompt.go`）。
+- **配置与 `fs_root`**：收敛默认沙箱路径说明；示例 `config.yaml` / `policy.example.yaml` 对齐。
+
+### 修复
+
+- **Python TUI 输入崩溃**：`PromptTextArea` 改用 `on_text_area_changed`，移除无效 `super()` 调用。
+- **Python TUI `/policy` Rich 报错**：Markdown 中 `[/]` 改为 `[ / ]` 避免被解析为标签。
+- **Windows `dagents chat --withnode`**：`-config` 参数顺序、`/D` 工作目录与失败时 probe / `node.err.log` 提示（`packaging/windows/dagents.cmd`）。
+- **Linux `dagents` probe**：健康检查参数顺序与 Windows 对齐。
+
+（Git **tag**：`v0.2.16`。）
+
 ## [0.2.15] - 2026-06-10
 
 **0.x 预览**：在 **v0.2.14** 基础上修复 **Python TUI usage/滚动**、增强 **工具结果展开** 与 **Go TUI usage 展示**。

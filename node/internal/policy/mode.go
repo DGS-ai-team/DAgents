@@ -9,6 +9,7 @@ const (
 	ModeAlways ApprovalMode = "always"
 	ModeNever  ApprovalMode = "never"
 	ModeRule   ApprovalMode = "rule"
+	ModeDeny   ApprovalMode = "deny"
 )
 
 func normalizeMode(raw string, fallback ApprovalMode) ApprovalMode {
@@ -19,6 +20,8 @@ func normalizeMode(raw string, fallback ApprovalMode) ApprovalMode {
 		return ModeNever
 	case string(ModeRule):
 		return ModeRule
+	case string(ModeDeny):
+		return ModeDeny
 	default:
 		return fallback
 	}

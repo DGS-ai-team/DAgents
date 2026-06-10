@@ -10,6 +10,7 @@ if not exist "config.yaml" if exist "config.example.yaml" copy /Y "config.exampl
 if not exist ".env" if exist ".env.example" copy /Y ".env.example" ".env" >nul
 
 set "CFG=config.yaml"
+set "CFG_ABS=%DAGENTS_HOME%\%CFG%"
 
 if "%~1"=="" goto cli_default_chat
 if /I "%~1"=="help" goto help
@@ -97,27 +98,51 @@ bin\dagents-node.exe -config "%CFG%" %*
 goto cli_exit
 
 :start_node_background
-if not exist "bin\dagents-node.exe" exit /b 1
-if not exist ".runtime\logs" mkdir ".runtime\logs"
-echo [dagents] starting node in background (logs: .runtime\logs\node.log)
-start "" /B cmd /c "bin\dagents-node.exe -config \"%CFG%\" >> .runtime\logs\node.log 2>> .runtime\logs\node.err.log"
+if not exist "%DAGENTS_HOME%\bin\dagents-node.exe" exit /b 1
+if not exist "%DAGENTS_HOME%\.runtime\logs" mkdir "%DAGENTS_HOME%\.runtime\logs"
+set "NODE_EXE=%DAGENTS_HOME%\bin\dagents-node.exe"
+set "NODE_LOG=%DAGENTS_HOME%\.runtime\logs\node.log"
+set "NODE_ERR=%DAGENTS_HOME%\.runtime\logs\node.err.log"
+echo [dagents] starting node in background (logs: %NODE_LOG%)
+rem /D 固定工作目录；绝对路径避免 start/cmd 子进程 cwd 漂移导致找不到 config 与 .runtime。
+start "" /B /D "%DAGENTS_HOME%" cmd /c ""%NODE_EXE%" -config "%CFG_ABS%" 1>>"%NODE_LOG%" 2>>"%NODE_ERR%""
 exit /b 0
 
 :ensure_node
-if not exist "bin\dagents-client.exe" exit /b 1
-bin\dagents-client.exe probe -config "%CFG%" >nul 2>&1
+if not exist "bin\dagents-client.exe" (
+  echo [dagents] --withnode requires bin\dagents-client.exe ^(probe^)
+  exit /b 1
+)
+bin\dagents-client.exe -config "%CFG_ABS%" probe >nul 2>&1
 if not errorlevel 1 exit /b 0
 call :start_node_background
 if errorlevel 1 exit /b 1
+timeout /t 2 /nobreak >nul 2>nul
+if errorlevel 1 ping -n 3 127.0.0.1 >nul
 set /a NODE_WAIT=0
 :ensure_node_wait
-bin\dagents-client.exe probe -config "%CFG%" >nul 2>&1
+bin\dagents-client.exe -config "%CFG_ABS%" probe >nul 2>&1
 if not errorlevel 1 exit /b 0
 timeout /t 1 /nobreak >nul 2>nul
 if errorlevel 1 ping -n 2 127.0.0.1 >nul
 set /a NODE_WAIT+=1
 if !NODE_WAIT! lss 30 goto ensure_node_wait
+call :ensure_node_failed
+exit /b 1
+
+:ensure_node_failed
 echo [dagents] node did not become ready within 30s
+echo [dagents] install dir: %DAGENTS_HOME%
+echo [dagents] probe detail:
+bin\dagents-client.exe -config "%CFG_ABS%" probe
+if exist "%DAGENTS_HOME%\.runtime\logs\node.err.log" (
+  echo [dagents] -------- node.err.log --------
+  type "%DAGENTS_HOME%\.runtime\logs\node.err.log"
+  echo [dagents] ---------------------------
+)
+if exist "%DAGENTS_HOME%\.runtime\logs\node.log" (
+  echo [dagents] hint: also check %DAGENTS_HOME%\.runtime\logs\node.log
+)
 exit /b 1
 
 :run_register_center

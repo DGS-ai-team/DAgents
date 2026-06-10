@@ -19,8 +19,8 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 |----|------|
 | `listen` / `local` | Node 监听与 Client 连接 endpoint |
 | `llm` | 模型、mock、tool loop 上限 |
-| `fs_root` | 工具文件沙箱根（缺省为 `data_dir` 的父目录，即 `./.runtime`） |
-| `skills` | 技能目录与 prompt 上限 |
+| `fs_root` | 工作区根（缺省 `./.runtime`）；`data/`、`memory/`、`skills/`、`policy/` 等子路径硬编码相对此根 |
+| `skills` | 技能开关与 prompt 上限（目录固定为 `{fs_root}/skills`） |
 | `compression` | 上下文压缩 token 阈值 |
 | `triggers` | 触发器调度（见下表） |
 | `tools` | 内置工具；`bash_output_encoding` 控制 bash_run 输出解码（空=按 OS/shell 自动） |
@@ -32,7 +32,8 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 |----|------|------|
 | `enabled` | `true` | 是否启动后台调度轮询 |
 | `poll_seconds` | `5` | 到期扫描间隔（秒，至少 1） |
-| `store_path` | `.runtime/triggers/triggers.json` | 触发器 JSON 持久化路径（可选覆盖） |
+
+持久化路径固定为 `{fs_root}/triggers/triggers.json`。
 
 condition 语义（interval / fire_at / schedule / cmd）见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)。
 

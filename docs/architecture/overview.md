@@ -20,7 +20,7 @@ DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python �
 | **Agent 运行时** | **`node/`（Go）** | 无（已移除 Python FastAPI Agent API） |
 | **终端 Client** | Textual（`app/cli/`）+ Go TUI（`client/`） | — |
 | **配置** | `packaging/agent-client/config.yaml` | Register Center 环境变量 |
-| **会话持久化** | Node SQLite（`data_dir/sessions.db`） | — |
+| **会话持久化** | Node SQLite（`.runtime/memory/sessions.db`） | — |
 | **A2A 控制面** | — | Register Center relay/broadcast |
 
 ## 文档索引

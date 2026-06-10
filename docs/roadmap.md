@@ -45,7 +45,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 - **Go Agent Node**（**`node/`**）：**`GET /health`**、**`GET /v1/agent/info`**、会话创建/释放、消息提交（含 **`resume`**）、**SSE** 流、取消当前 turn、context/skills/child-agents 等（[agent-node-api.md](./architecture/agent-node-api.md)）。
 - **进程内编排**：按 **`session_id`** 的 **`MessageQueue`** 串行消费、**`Orchestrator`** turn loop（[go-node-internals.md](./architecture/go-node-internals.md)）。
 - **Client**：Go bubbletea TUI（**`dagents tui`**）+ REPL 兜底（**`--plain`**）；Python Textual（**`dagents chat`**）；均连本地 Node（[local-assistant.md](./architecture/local-assistant.md)）。
-- **同包配置**：**`packaging/agent-client/config.yaml`**（**`agent_id` / `listen` / `llm` / `data_dir` / `tools.*`**）；Node 与双 Client 共用（[client-packaging.md](./architecture/client-packaging.md)）。
+- **同包配置**：**`packaging/agent-client/config.yaml`**（**`agent_id` / `listen` / `llm` / `fs_root` / `tools.*`**）；Node 与双 Client 共用（[client-packaging.md](./architecture/client-packaging.md)）。
 
 ### 3.2 模型运行时与工具
 
@@ -57,7 +57,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 ### 3.3 上下文、压缩与提示词
 
 - **Summary 压缩**：静默 / 阻塞阈值、SSE 压缩事件（[context-compression-and-state.md](./context-compression-and-state.md)）。
-- **SQLite 会话持久化**：**`data_dir/sessions.db`**；原始消息 **JSONL** 审计（**`node/internal/store/`**、**`node/internal/history/`**）。
+- **SQLite 会话持久化**：**`{fs_root}/memory/sessions.db`**；原始消息 **JSONL** 审计（**`node/internal/store/`**、**`node/internal/history/`**）。
 - **系统提示词**：静态段 + **`.runtime/prompt_context/`** 侧车 + skills 正文 + 主机快照；子 Agent 独立 **`BuildChildSystemPrompt`**。
 
 ### 3.4 触发器、子 Agent 与 Register Center

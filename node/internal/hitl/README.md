@@ -7,6 +7,7 @@ Turn 暂停（HITL）时 Client `resume` 载荷的解析。
 | 文件 | 说明 |
 |------|------|
 | `resume.go` | `ParseApprovalResume`、`ParseUserInformationResume`、`ApprovalPlan` |
+| `trigger_session.go` | trigger 审批四选项常量、`trigger_session_targets` 解析 |
 | `resume_test.go` | 审批/追问 resume 解析单测 |
 
 **边界**：HITL 状态机与 pending 保存在 `turn.PendingHITL` + `session.runtime`；本包只做 **resume JSON → 结构化计划**，供 `turn.ContinueAfterResume` 使用。
@@ -17,6 +18,8 @@ Turn 暂停（HITL）时 Client `resume` 载荷的解析。
 Orchestrator 暂停 → SSE approval_required / user_information_required
 Client POST resume → session.handleResume → hitl.Parse* → tool 结果写回 history
 ```
+
+审批 `selection` 可附带 `trigger_session_targets`（`same_session` / `new_session` / `latest_active_session`），供 `trigger_create` / `trigger_fire` 使用。
 
 ## 相关文档
 

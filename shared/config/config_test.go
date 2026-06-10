@@ -13,9 +13,8 @@ func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string
 	dir := t.TempDir()
 	runtimeDir = dir
 	path := filepath.Join(dir, "config.yaml")
-	dataDir := filepath.Join(dir, "data")
-	if !strings.Contains(content, "data_dir:") {
-		content = fmt.Sprintf("data_dir: %q\n", dataDir) + content
+	if !strings.Contains(content, "fs_root:") {
+		content = fmt.Sprintf("fs_root: %q\n", runtimeDir) + content
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -56,6 +55,18 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	}
 	if cfg.FSRoot != runtimeDir {
 		t.Fatalf("fs_root = %q, want %q", cfg.FSRoot, runtimeDir)
+	}
+	wantDB := filepath.Join(runtimeDir, "memory", "sessions.db")
+	if cfg.SessionDBPath() != wantDB {
+		t.Fatalf("SessionDBPath = %q, want %q", cfg.SessionDBPath(), wantDB)
+	}
+	wantData := filepath.Join(runtimeDir, "data")
+	if cfg.DataDir() != wantData {
+		t.Fatalf("DataDir = %q, want %q", cfg.DataDir(), wantData)
+	}
+	wantSkills := filepath.Join(runtimeDir, "skills")
+	if cfg.SkillsRoot() != wantSkills {
+		t.Fatalf("SkillsRoot = %q, want %q", cfg.SkillsRoot(), wantSkills)
 	}
 }
 

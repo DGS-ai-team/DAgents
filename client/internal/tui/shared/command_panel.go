@@ -3,6 +3,7 @@ package shared
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 )
@@ -222,11 +223,125 @@ func FormatChildAgentsList(items []nodeapi.ChildAgentListItem, awaitingApproval 
 	return strings.Join(out, "\n")
 }
 
+// FormatTriggersPanelBody 格式化 /triggers 面板正文。
+func FormatTriggersPanelBody(items []nodeapi.TriggerDefinition) []string {
+	if len(items) == 0 {
+		return []string{panelLine(panelKindEmpty, "(无已配置触发器)")}
+	}
+	var lines []string
+	for i, item := range items {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, triggerPanelLines(item)...)
+	}
+	return lines
+}
+
+func triggerPanelLines(item nodeapi.TriggerDefinition) []string {
+	name := strings.TrimSpace(item.Name)
+	if name == "" {
+		name = "(未命名)"
+	}
+	state := "disabled"
+	if item.Enabled {
+		state = "enabled"
+	}
+	condition := formatTriggerCondition(item.Condition)
+	nextFire := formatTriggerUnix(item.NextFireAt)
+	lastFire := formatTriggerUnix(item.LastFiredAt)
+	sessionHint := strings.TrimSpace(item.SessionTargetMode)
+	if sessionHint == "" {
+		sessionHint = "-"
+	}
+	if item.TargetSessionID != nil {
+		if sid := strings.TrimSpace(*item.TargetSessionID); sid != "" {
+			sessionHint += " · " + sid
+		}
+	}
+	task := strings.TrimSpace(item.TaskTemplate)
+	if len([]rune(task)) > 72 {
+		task = string([]rune(task)[:71]) + "…"
+	}
+	lines := []string{
+		panelLine(panelKindDetail, fmt.Sprintf("- %s [%s]", name, state)),
+		panelLine(panelKindDetail, fmt.Sprintf("id: %s", orDash(item.TriggerID))),
+		panelLine(panelKindDetail, fmt.Sprintf("调度: %s    下次: %s", condition, nextFire)),
+		panelLine(panelKindDetail, fmt.Sprintf("触发 %d 次 · 上次 %s · 会话 %s", item.FireCount, lastFire, sessionHint)),
+	}
+	if task != "" {
+		lines = append(lines, panelLine(panelKindDetail, "任务: "+task))
+	}
+	return lines
+}
+
+func formatTriggerCondition(condition map[string]any) string {
+	if len(condition) == 0 {
+		return "manual"
+	}
+	if v := triggerIntFromAny(condition["interval_seconds"]); v > 0 {
+		return fmt.Sprintf("interval %ds", v)
+	}
+	if v := triggerFloatFromAny(condition["fire_at"]); v > 0 {
+		return "once @ " + formatTriggerUnix(&v)
+	}
+	if sched, ok := condition["schedule"].(map[string]any); ok && len(sched) > 0 {
+		kind := strings.TrimSpace(fmt.Sprint(sched["kind"]))
+		if kind == "" {
+			kind = "calendar"
+		}
+		return "schedule:" + kind
+	}
+	if cmd := strings.TrimSpace(fmt.Sprint(condition["cmd"])); cmd != "" {
+		if len([]rune(cmd)) > 32 {
+			cmd = string([]rune(cmd)[:31]) + "…"
+		}
+		return "cmd gate: " + cmd
+	}
+	return "manual"
+}
+
+func formatTriggerUnix(ts *float64) string {
+	if ts == nil || *ts <= 0 {
+		return "-"
+	}
+	t := time.Unix(int64(*ts), int64((*ts-float64(int64(*ts)))*1e9))
+	return t.Local().Format("2006-01-02 15:04")
+}
+
+func triggerIntFromAny(v any) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	default:
+		return 0
+	}
+}
+
+func triggerFloatFromAny(v any) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case int:
+		return float64(t)
+	case int64:
+		return float64(t)
+	default:
+		return 0
+	}
+}
+
 // FormatHelpPanelBody 格式化 /help 面板正文。
 func FormatHelpPanelBody() []string {
 	return []string{
 		panelLine(panelKindHelp, "/status", "agent、session、队列深度"),
 		panelLine(panelKindHelp, "/context", "只读 context 视图（Esc 返回）"),
+		panelLine(panelKindHelp, "/policy", "工具/shell 策略管理（Esc 返回）"),
+		panelLine(panelKindHelp, "/triggers", "查看已配置触发器"),
 		panelLine(panelKindHelp, "/compress", "手动触发阻塞压缩"),
 		panelLine(panelKindHelp, "/sessions", "列出 session（* 为当前）"),
 		panelLine(panelKindHelp, "/switch <id>", "切换 session"),

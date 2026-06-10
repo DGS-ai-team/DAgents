@@ -25,10 +25,12 @@ from app.cli.approval import (
     ApprovalCancelled,
     ApprovalDecision,
     ToolApprovalRequest,
+    TriggerSessionTarget,
     build_all_rejected_decision,
-    build_approval_decision_from_map,
     clamp_menu_selection_index,
     extract_tool_approval_requests,
+    is_trigger_session_approval,
+    trigger_session_options,
 )
 from app.cli.child_agent import (
     approval_header,
@@ -47,11 +49,16 @@ from app.cli.user_information import (
     build_answer_from_text,
     extract_user_information_request,
 )
+from app.cli.triggers_format import format_triggers_panel
+from app.cli.tui.policy_view import PROTECTED_POLICY_TOOL, PolicyViewState
 from app.cli.tui.prompt_text_area import PromptTextArea
 from app.cli.tui.transcript_log import TranscriptLog
 from app.cli.tui.welcome_panel import build_welcome_panel
 
 _HELP_HINT = "Type /help for commands, /exit to quit.  Enter 发送，Shift+Enter 换行"
+_POLICY_HELP_HINT = (
+    "Esc 返回 · Tab 切页 · 1/2/3 改档位 · Enter 应用 · [ / ] 切换 shell · a 显示全部(shell)"
+)
 # bash command 在括号内可展示的 cell 上限；超出则在标题下方用代码框展示全文。
 _BASH_INLINE_COMMAND_MAX_CELLS = 56
 
@@ -95,6 +102,12 @@ class DAgentsTuiApp(App[None]):
         border: none;
     }
     #context-view {
+        height: 1fr;
+        margin: 0 1 1 1;
+        background: transparent;
+        border: none;
+    }
+    #policy-view {
         height: 1fr;
         margin: 0 1 1 1;
         background: transparent;
@@ -166,6 +179,7 @@ class DAgentsTuiApp(App[None]):
         self._approval_requests: list[ToolApprovalRequest] = []
         self._approval_selected_index = 0
         self._approval_decisions: dict[str, bool] = {}
+        self._approval_trigger_targets: dict[str, str] = {}
         self._approval_block: dict[str, int] | None = None
         self._approval_raw_data: dict[str, Any] | None = None
         self._hitl_busy = False
@@ -182,6 +196,7 @@ class DAgentsTuiApp(App[None]):
         self._submit_content_seen = False
         self._cancel_task: asyncio.Task[None] | None = None
         self._context_mode = False
+        self._policy_view = PolicyViewState()
         # assistant 段结束后待插入的空行（tool_call 紧随其后会取消）。
         self._pending_segment_gap = False
         # 工具批次结束后，下一段 prefilling/thinking/assistant 前插入一行。
@@ -194,6 +209,7 @@ class DAgentsTuiApp(App[None]):
         yield Static(id="top-status-bar", markup=True)
         yield TranscriptLog(id="transcript", highlight=True, markup=True, wrap=True)
         yield RichLog(id="context-view", highlight=True, markup=True, wrap=True)
+        yield RichLog(id="policy-view", highlight=True, markup=True, wrap=True)
         yield Static("", id="input-strip", markup=True)
         yield PromptTextArea(
             id="prompt",
@@ -220,6 +236,7 @@ class DAgentsTuiApp(App[None]):
             return
         self._write_welcome_panel()
         self.query_one("#context-view", RichLog).display = False
+        self.query_one("#policy-view", RichLog).display = False
         self._apply_top_status()
         self.query_one("#prompt", PromptTextArea).focus()
 
@@ -255,6 +272,17 @@ class DAgentsTuiApp(App[None]):
         - 不创建新 widget，只复用 compose 中已挂载的视图。
         """
         return self.query_one("#context-view", RichLog)
+
+    def _policy_log(self) -> RichLog:
+        return self.query_one("#policy-view", RichLog)
+
+    def _on_policy_filter_changed(self) -> None:
+        if not self._policy_view.mode:
+            return
+        self._policy_view.filter_text = self._prompt_area().text
+        self._policy_view.scroll_offset = 0
+        self._policy_view.clamp_cursor()
+        self._render_policy_view()
 
     def _write_welcome_panel(self) -> None:
         """连接成功后向 RichLog 写入一次性欢迎 Panel。
@@ -489,6 +517,7 @@ class DAgentsTuiApp(App[None]):
         self._approval_requests = list(requests)
         self._approval_selected_index = 0
         self._approval_decisions = {}
+        self._approval_trigger_targets = {}
         self._approval_future = asyncio.get_running_loop().create_future()
 
         # 审批期间隐藏并只读输入框，避免 Enter 误触 submit_prompt；快捷键由 App 捕获。
@@ -507,6 +536,7 @@ class DAgentsTuiApp(App[None]):
         self._approval_requests = []
         self._approval_selected_index = 0
         self._approval_decisions = {}
+        self._approval_trigger_targets = {}
         self._delete_approval_block()
         self._reset_pending_tools_execution_clock()
         self._refresh_all_pending_tool_blocks()
@@ -592,8 +622,14 @@ class DAgentsTuiApp(App[None]):
             if self._context_mode:
                 self._exit_context_view()
                 return
+            if self._policy_view.mode:
+                self._exit_policy_view()
+                return
             self._cancel_current_turn()
             return
+        if self._policy_view.mode:
+            if await self._handle_policy_key(event):
+                return
         if self._user_info_future is not None and not self._user_info_future.done():
             request = self._user_info_request
             if request is not None and request.options:
@@ -685,9 +721,14 @@ class DAgentsTuiApp(App[None]):
         if not options:
             self._finish_approval()
             return
-        call_id, approved = options[self._approval_selected_index]
-        self._approval_decisions[call_id] = approved
-        if len(self._approval_decisions) >= len(self._approval_requests):
+        call_id, choice = options[self._approval_selected_index]
+        if isinstance(choice, str):
+            self._approval_trigger_targets[call_id] = choice
+        elif choice is True:
+            self._approval_decisions[call_id] = True
+        else:
+            self._approval_decisions[call_id] = False
+        if self._approval_resolved_count() >= len(self._approval_requests):
             self._finish_approval()
             return
         self._approval_selected_index = 0
@@ -699,9 +740,29 @@ class DAgentsTuiApp(App[None]):
 
     def _finish_approval(self) -> None:
         """所有工具均完成单独审批后，构造最终决策。"""
-        decision = build_approval_decision_from_map(self._approval_requests, self._approval_decisions)
+        approved: list[str] = []
+        rejected: list[str] = []
+        targets: dict[str, str] = {}
+        for item in self._approval_requests:
+            if item.call_id in self._approval_trigger_targets:
+                approved.append(item.call_id)
+                targets[item.call_id] = self._approval_trigger_targets[item.call_id]
+            elif self._approval_decisions.get(item.call_id):
+                approved.append(item.call_id)
+            else:
+                rejected.append(item.call_id)
+        decision = ApprovalDecision(
+            approved=approved,
+            rejected=rejected,
+            trigger_session_targets=targets or None,
+        )
         if self._approval_future is not None and not self._approval_future.done():
             self._approval_future.set_result(decision)
+
+    def _approval_resolved_count(self) -> int:
+        resolved = set(self._approval_decisions)
+        resolved.update(self._approval_trigger_targets)
+        return len(resolved)
 
     def _set_approval_choice_for_current(self, *, approved: bool) -> None:
         """为当前待审批工具写入决策并推进到下一项或结束。"""
@@ -709,8 +770,14 @@ class DAgentsTuiApp(App[None]):
         if item is None:
             self._finish_approval()
             return
-        self._approval_decisions[item.call_id] = approved
-        if len(self._approval_decisions) >= len(self._approval_requests):
+        if is_trigger_session_approval(item):
+            if approved:
+                self._approval_trigger_targets[item.call_id] = TriggerSessionTarget.SAME.value
+            else:
+                self._approval_decisions[item.call_id] = False
+        else:
+            self._approval_decisions[item.call_id] = approved
+        if self._approval_resolved_count() >= len(self._approval_requests):
             self._finish_approval()
             return
         self._approval_selected_index = 0
@@ -1789,23 +1856,24 @@ class DAgentsTuiApp(App[None]):
         - 全部确认后返回 `None`，调用方据此完成整批审批。
         """
         for item in self._approval_requests:
-            if item.call_id not in self._approval_decisions:
-                return item
+            if item.call_id in self._approval_decisions or item.call_id in self._approval_trigger_targets:
+                continue
+            return item
         return None
 
-    def _approval_options(self) -> list[tuple[str, bool]]:
-        """生成当前工具的审批选项。
-
-        逻辑：
-        1. 定位第一个未决工具；
-        2. 只返回该工具的同意/不同意两个选项。
-
-        关键边界：
-        - 不为后续工具提前生成选项，保证 UI 按工具逐个确认。
-        """
+    def _approval_options(self) -> list[tuple[str, str | bool | None]]:
+        """生成当前工具的审批选项。"""
         item = self._current_approval_request()
         if item is None:
             return []
+        if is_trigger_session_approval(item):
+            out: list[tuple[str, str | bool | None]] = []
+            for _label, target in trigger_session_options():
+                if target is None:
+                    out.append((item.call_id, None))
+                else:
+                    out.append((item.call_id, target.value))
+            return out
         return [(item.call_id, True), (item.call_id, False)]
 
     def _approval_anchor_line(self) -> int:
@@ -1834,7 +1902,19 @@ class DAgentsTuiApp(App[None]):
         if self._approval_raw_data:
             header = approval_header(self._approval_raw_data)
             lines.append(f"[bold cyan]{escape(header)}[/bold cyan]")
-        for option_index, (_call_id, approved) in enumerate(self._approval_options()):
+        item = self._current_approval_request()
+        options = self._approval_options()
+        if item is not None and is_trigger_session_approval(item):
+            labels = [label for label, _target in trigger_session_options()]
+            for option_index, (_call_id, choice) in enumerate(options):
+                action = labels[option_index] if option_index < len(labels) else str(choice)
+                cursor = "[cyan]●[/cyan]" if option_index == self._approval_selected_index else " "
+                style = "bold" if option_index == self._approval_selected_index else "dim"
+                color = "red" if choice is None else "green"
+                lines.append(f"   {cursor} [{style}][{color}]{escape(action)}[/{color}][/{style}]")
+            lines.append("   [dim]↑/↓ 选择，Enter 确认，Y 同会话同意 / N 拒绝[/dim]")
+            return "\n".join(lines)
+        for option_index, (_call_id, approved) in enumerate(options):
             action = "同意" if approved else "不同意"
             cursor = "[cyan]●[/cyan]" if option_index == self._approval_selected_index else " "
             style = "bold" if option_index == self._approval_selected_index else "dim"
@@ -2106,6 +2186,11 @@ class DAgentsTuiApp(App[None]):
         """
         prompt = self._prompt_area()
         value = prompt.text.strip()
+        if self._policy_view.mode:
+            if value:
+                prompt.text = value
+            await self._apply_policy_current()
+            return
         prompt.text = ""
         if not value:
             return
@@ -2128,6 +2213,12 @@ class DAgentsTuiApp(App[None]):
             return
         if value == "/context":
             await self._show_context_view()
+            return
+        if value == "/policy":
+            await self._show_policy_view()
+            return
+        if value in {"/triggers", "/trigger"}:
+            await self._show_triggers()
             return
         if value == "/compress":
             await self._compress_context()
@@ -2187,6 +2278,18 @@ class DAgentsTuiApp(App[None]):
             rows.append(("context", f"(failed: {exc})"))
         log.write(self._command_panel_block("Status", self._command_kv_lines(rows)), expand=True)
         self._apply_top_status()
+
+    async def _show_triggers(self) -> None:
+        """查询并展示 Agent 触发器列表（GET /v1/triggers）。"""
+        log = self._transcript_log()
+        try:
+            data = await self._controller.list_triggers()
+            triggers = data.get("triggers")
+            rows = triggers if isinstance(triggers, list) else []
+            body = format_triggers_panel(rows)
+            log.write(self._command_panel_block(f"Triggers ({len(rows)})", body), expand=True)
+        except Exception as exc:  # noqa: BLE001
+            log.write(f"[red]triggers failed: {exc}[/red]")
 
     async def _show_sessions(self) -> None:
         """查询并展示 Node session 列表（GET /v1/sessions → sessions）。"""
@@ -2303,6 +2406,147 @@ class DAgentsTuiApp(App[None]):
         self._transcript_log().display = True
         self._prompt_area().focus()
         self.refresh(layout=True)
+
+    async def _show_policy_view(self) -> None:
+        policy_log = self._policy_log()
+        policy_log.clear()
+        try:
+            data = await self._controller.get_policy()
+            self._policy_view.load_snapshot(data)
+            self._render_policy_view()
+        except Exception as exc:
+            self._policy_view.mode = True
+            self._policy_view.error_message = str(exc)
+            policy_log.write(f"[red]policy failed: {escape(str(exc))}[/red]")
+        self._enter_policy_view()
+
+    def _enter_policy_view(self) -> None:
+        self._policy_view.mode = True
+        self._transcript_log().display = False
+        self._context_log().display = False
+        policy_log = self._policy_log()
+        policy_log.display = True
+        policy_log.auto_scroll = False
+        self._prompt_area().text = self._policy_view.filter_text
+        hint = self.query_one("#help-hint", Static)
+        hint.update(_POLICY_HELP_HINT)
+        self._prompt_area().focus()
+        self.refresh(layout=True)
+
+    def _exit_policy_view(self) -> None:
+        self._policy_view.reset()
+        self._policy_log().display = False
+        self._transcript_log().display = True
+        self._prompt_area().text = ""
+        hint = self.query_one("#help-hint", Static)
+        hint.update(_HELP_HINT)
+        self._prompt_area().focus()
+        self.refresh(layout=True)
+
+    def _render_policy_view(self) -> None:
+        if not self._policy_view.mode:
+            return
+        self._policy_view.filter_text = self._prompt_area().text
+        policy_log = self._policy_log()
+        viewport_rows = int(getattr(policy_log.size, "height", 0) or 0)
+        self._policy_view.clamp_cursor()
+        text = self._policy_view.render_text(viewport_rows)
+        policy_log.clear()
+        policy_log.write(text, scroll_end=False)
+
+    async def _handle_policy_key(self, event: events.Key) -> bool:
+        if not self._policy_view.mode:
+            return False
+        key = event.key
+        if key == "tab":
+            event.stop()
+            event.prevent_default()
+            self._policy_view.tab = "shell" if self._policy_view.tab == "tools" else "tools"
+            self._policy_view.cursor = 0
+            self._policy_view.scroll_offset = 0
+            self._policy_view.pending_decision = ""
+            self._render_policy_view()
+            return True
+        if key in {"left_bracket", "["}:
+            event.stop()
+            event.prevent_default()
+            self._policy_view.scroll_offset = 0
+            self._policy_view.cycle_shell(-1)
+            self._render_policy_view()
+            return True
+        if key in {"right_bracket", "]"}:
+            event.stop()
+            event.prevent_default()
+            self._policy_view.scroll_offset = 0
+            self._policy_view.cycle_shell(1)
+            self._render_policy_view()
+            return True
+        if key == "a" and self._policy_view.tab == "shell":
+            event.stop()
+            event.prevent_default()
+            self._policy_view.shell_show_all = not self._policy_view.shell_show_all
+            self._policy_view.scroll_offset = 0
+            self._policy_view.clamp_cursor()
+            self._render_policy_view()
+            return True
+        if key in {"1", "2", "3"}:
+            event.stop()
+            event.prevent_default()
+            mapping = {"1": "allow_auto", "2": "require_approval", "3": "deny"}
+            self._policy_view.pending_decision = mapping[key]
+            self._render_policy_view()
+            return True
+        if key in {"up", "down"}:
+            event.stop()
+            event.prevent_default()
+            rows = self._policy_view.visible_rows()
+            if not rows:
+                return True
+            delta = -1 if key == "up" else 1
+            self._policy_view.cursor = max(0, min(len(rows) - 1, self._policy_view.cursor + delta))
+            self._policy_view.pending_decision = ""
+            self._render_policy_view()
+            return True
+        return False
+
+    async def _apply_policy_current(self) -> None:
+        rows = self._policy_view.visible_rows()
+        if not rows:
+            self._policy_view.error_message = "无选中项"
+            self._render_policy_view()
+            return
+        row = rows[self._policy_view.cursor]
+        decision = self._policy_view.pending_decision or row["decision"]
+        tool_name = row["tool_name"]
+        command = row["command"]
+        if tool_name == PROTECTED_POLICY_TOOL and decision == "deny":
+            self._policy_view.error_message = f"{PROTECTED_POLICY_TOOL} 不能设为黑名单"
+            self._render_policy_view()
+            return
+        try:
+            if self._policy_view.tab == "tools":
+                await self._controller.update_tool_policy(
+                    [{"name": tool_name, "decision": decision}],
+                )
+            else:
+                await self._controller.update_shell_policy(
+                    self._policy_view.shell_type,
+                    [{"command": command, "decision": decision}],
+                )
+            self._policy_view.apply_local_update(
+                tool_name=tool_name,
+                command=command,
+                decision=decision,
+            )
+            label = tool_name or command
+            from app.cli.tui.policy_view import policy_decision_label
+
+            self._policy_view.error_message = ""
+            self._policy_view.status_message = f"已更新 {label} → {policy_decision_label(decision)}"
+            self._policy_view.pending_decision = ""
+        except Exception as exc:
+            self._policy_view.error_message = str(exc)
+        self._render_policy_view()
 
     def _format_context_state(self, data: dict[str, Any]) -> str:
         """将 context 摘要 API 响应格式化为 context 视图文本。
@@ -2573,6 +2817,8 @@ class DAgentsTuiApp(App[None]):
             ("/help", "Show this help"),
             ("/status", "Show API/session/SSE status"),
             ("/context", "Show current context view (Esc to return)"),
+            ("/policy", "Tool/shell policy manager (Esc to return)"),
+            ("/triggers", "List configured triggers"),
             ("/compress", "Run blocking context compression once"),
             ("/session", "Show Agent Node sessions"),
             ("/skill", "Show loaded and available skills"),

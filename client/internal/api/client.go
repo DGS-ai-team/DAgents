@@ -123,6 +123,46 @@ type ContextMessagePreview struct {
 	HasReasoningContent bool   `json:"has_reasoning_content"`
 }
 
+// PolicyPlatform 为 GET /v1/policy 中的 Node 平台信息。
+type PolicyPlatform struct {
+	GOOS         string `json:"goos"`
+	DefaultShell string `json:"default_shell"`
+}
+
+// PolicyToolEntry 为工具策略条目。
+type PolicyToolEntry struct {
+	Name       string `json:"name"`
+	Decision   string `json:"decision"`
+	Configured bool   `json:"configured"`
+}
+
+// PolicyShellEntry 为 shell 命令策略条目。
+type PolicyShellEntry struct {
+	Command    string `json:"command"`
+	Decision   string `json:"decision"`
+	Configured bool   `json:"configured"`
+}
+
+// PolicySnapshot 为 GET /v1/policy 响应。
+type PolicySnapshot struct {
+	PolicyDir string                       `json:"policy_dir"`
+	Platform  PolicyPlatform               `json:"platform"`
+	Tools     []PolicyToolEntry            `json:"tools"`
+	Shell     map[string][]PolicyShellEntry `json:"shell"`
+}
+
+// PolicyToolUpdate 为 PUT /v1/policy/tools 单项。
+type PolicyToolUpdate struct {
+	Name     string `json:"name"`
+	Decision string `json:"decision"`
+}
+
+// PolicyShellUpdate 为 PUT /v1/policy/shell/{type} 单项。
+type PolicyShellUpdate struct {
+	Command  string `json:"command"`
+	Decision string `json:"decision"`
+}
+
 // GetAgentInfo 调用 GET /v1/agent/info。
 func (c *Client) GetAgentInfo(ctx context.Context) (*AgentInfo, error) {
 	var info AgentInfo
@@ -174,6 +214,56 @@ func (c *Client) CancelTurn(ctx context.Context, sessionID string) (bool, error)
 func (c *Client) ClearSessionContext(ctx context.Context, sessionID string) error {
 	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/clear-context"
 	return c.postJSON(ctx, path, map[string]any{}, nil)
+}
+
+// TriggerDefinition 为 GET /v1/triggers 列表项。
+type TriggerDefinition struct {
+	TriggerID         string         `json:"trigger_id"`
+	Name              string         `json:"name"`
+	Condition         map[string]any `json:"condition"`
+	TargetAgentID     string         `json:"target_agent_id"`
+	TargetSessionID   *string        `json:"target_session_id"`
+	SessionTargetMode string         `json:"session_target_mode"`
+	TaskTemplate      string         `json:"task_template"`
+	Enabled           bool           `json:"enabled"`
+	FireCount         int            `json:"fire_count"`
+	LastFiredAt       *float64       `json:"last_fired_at"`
+	NextFireAt        *float64       `json:"next_fire_at"`
+}
+
+// ListTriggers 调用 GET /v1/triggers。
+func (c *Client) ListTriggers(ctx context.Context) ([]TriggerDefinition, error) {
+	var resp struct {
+		Triggers []TriggerDefinition `json:"triggers"`
+	}
+	if err := c.getJSON(ctx, "/v1/triggers", &resp); err != nil {
+		return nil, err
+	}
+	return resp.Triggers, nil
+}
+
+// GetPolicy 调用 GET /v1/policy；shellQuery 可为 auto/bash/cmd/powershell。
+func (c *Client) GetPolicy(ctx context.Context, shellQuery string) (*PolicySnapshot, error) {
+	path := "/v1/policy"
+	if q := strings.TrimSpace(shellQuery); q != "" {
+		path += "?shell=" + url.QueryEscape(q)
+	}
+	var snap PolicySnapshot
+	if err := c.getJSON(ctx, path, &snap); err != nil {
+		return nil, err
+	}
+	return &snap, nil
+}
+
+// UpdateToolPolicy 调用 PUT /v1/policy/tools。
+func (c *Client) UpdateToolPolicy(ctx context.Context, updates []PolicyToolUpdate) error {
+	return c.putJSON(ctx, "/v1/policy/tools", map[string]any{"updates": updates}, nil)
+}
+
+// UpdateShellPolicy 调用 PUT /v1/policy/shell/{shellType}。
+func (c *Client) UpdateShellPolicy(ctx context.Context, shellType string, updates []PolicyShellUpdate) error {
+	path := "/v1/policy/shell/" + url.PathEscape(strings.TrimSpace(shellType))
+	return c.putJSON(ctx, path, map[string]any{"updates": updates}, nil)
 }
 
 // CompressSessionContext 调用 POST /v1/sessions/{id}/compress，手动触发阻塞压缩。
@@ -379,6 +469,38 @@ func (c *Client) postJSON(ctx context.Context, path string, body any, out any) e
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("%s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	if out != nil && len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, out); err != nil {
+			return fmt.Errorf("decode %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func (c *Client) putJSON(ctx context.Context, path string, body any, out any) error {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.base+path, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}

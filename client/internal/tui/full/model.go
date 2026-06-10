@@ -72,9 +72,21 @@ type model struct {
 	contextMode bool
 	contextText string
 
-	approvalItems    []clihitl.ToolApprovalItem
-	approvalSelected map[string]bool
-	approvalCursor   int
+	policyMode            bool
+	policyText            string
+	policySnapshot        *nodeapi.PolicySnapshot
+	policyTab             policyTab
+	policyShellType       string
+	policyCursor          int
+	policyPendingDecision string
+	policyShellShowAll    bool
+
+	approvalItems               []clihitl.ToolApprovalItem
+	approvalSelected            map[string]bool
+	approvalCursor              int
+	approvalTriggerDecided      map[string]string
+	approvalTriggerRejected     map[string]bool
+	approvalTriggerOptionCursor int
 
 	userInfoReq        *clihitl.UserInformationRequest
 	userInfoSelected   map[string]bool
@@ -192,7 +204,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
-		if !m.contextMode {
+		if !m.contextMode && !m.policyMode {
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			switch msg.Button {
@@ -260,6 +272,9 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.contextMode && msg.String() == "esc" {
 		m.exitContextView()
 		return m, nil
+	}
+	if m.policyMode {
+		return m.handlePolicyKey(msg)
 	}
 	switch m.mode {
 	case modeApproval:
@@ -330,6 +345,8 @@ func (m *model) View() string {
 	viewBody := m.viewport.View()
 	if m.contextMode {
 		viewBody = lipgloss.NewStyle().Render(m.contextText)
+	} else if m.policyMode {
+		viewBody = m.viewport.View()
 	}
 	inputBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -345,7 +362,19 @@ func (m *model) View() string {
 
 	parts := []string{status, viewBody, m.renderInputStrip(), inputBox, help}
 	if m.mode == modeApproval {
-		body := clihitl.FormatApprovalInteractive(m.hitlData, m.approvalSelected, m.approvalCursor)
+		var body string
+		if clihitl.HasTriggerSessionApprovalItems(m.approvalItems) {
+			body = clihitl.FormatTriggerSessionApprovalInteractive(
+				m.hitlData,
+				m.approvalItems,
+				m.approvalTriggerDecided,
+				m.approvalTriggerRejected,
+				m.approvalCursor,
+				m.approvalTriggerOptionCursor,
+			)
+		} else {
+			body = clihitl.FormatApprovalInteractive(m.hitlData, m.approvalSelected, m.approvalCursor)
+		}
 		borderColor := lipgloss.Color("214")
 		if clihitl.IsTemporaryAgentApproval(m.hitlData) {
 			borderColor = lipgloss.Color("39")
@@ -447,7 +476,7 @@ func (m *model) applySize(w, h int) {
 
 // tryViewportScrollKey 将 PgUp/PgDown 等交给 transcript viewport；返回 true 表示已消费。
 func (m *model) tryViewportScrollKey(msg tea.KeyMsg) bool {
-	if m.contextMode {
+	if m.contextMode || m.policyMode {
 		return false
 	}
 	scrolled := false

@@ -242,18 +242,20 @@ func (r *Registry) execTriggerCreate(ctx context.Context, raw json.RawMessage) (
 	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	sessionID := sessionIDFromContext(ctx)
-	var targetSession *string
-	if sessionID != "" {
-		targetSession = &sessionID
+	approvalTarget := TriggerSessionTargetFromContext(ctx)
+	if approvalTarget == "" {
+		approvalTarget = "same_session"
 	}
+	sessionID := sessionIDFromContext(ctx)
+	mode, targetSession := triggers.SessionConfigFromApprovalTarget(approvalTarget, sessionID)
 	now := time.Now()
 	def, err := triggers.NewDefinitionFromCreate(triggers.CreateInput{
-		Name:            strings.TrimSpace(args.Name),
-		TaskTemplate:    strings.TrimSpace(args.TaskTemplate),
-		Condition:       args.Condition,
-		TargetAgentID:   r.agentID,
-		TargetSessionID: targetSession,
+		Name:              strings.TrimSpace(args.Name),
+		TaskTemplate:      strings.TrimSpace(args.TaskTemplate),
+		Condition:         args.Condition,
+		TargetAgentID:     r.agentID,
+		TargetSessionID:   targetSession,
+		SessionTargetMode: mode,
 	}, r.agentID, now)
 	if err != nil {
 		return triggerJSON(map[string]any{"ok": false, "error": err.Error()}), nil
@@ -316,7 +318,7 @@ func (r *Registry) execTriggerDelete(_ context.Context, raw json.RawMessage) (st
 	return triggerJSON(map[string]any{"ok": true, "trigger_id": args.TriggerID, "deleted": deleted}), nil
 }
 
-func (r *Registry) execTriggerFire(_ context.Context, raw json.RawMessage) (string, error) {
+func (r *Registry) execTriggerFire(ctx context.Context, raw json.RawMessage) (string, error) {
 	if r.triggerSched == nil {
 		return triggerJSON(map[string]any{"ok": false, "error": "trigger scheduler is not available"}), nil
 	}
@@ -334,7 +336,18 @@ func (r *Registry) execTriggerFire(_ context.Context, raw json.RawMessage) (stri
 	if reason == "" {
 		reason = "agent_tool"
 	}
-	record, err := r.triggerSched.FireTrigger(strings.TrimSpace(args.TriggerID), reason, args.Payload, args.Force)
+	triggerID := strings.TrimSpace(args.TriggerID)
+	approvalTarget := TriggerSessionTargetFromContext(ctx)
+	if approvalTarget == "" {
+		approvalTarget = "same_session"
+	}
+	var fireOpts *triggers.FireOptions
+	if r.triggerStore != nil {
+		if def, ok := r.triggerStore.GetTrigger(triggerID); ok && def != nil {
+			fireOpts = triggers.FireOptionsFromApprovalTarget(approvalTarget, sessionIDFromContext(ctx), *def)
+		}
+	}
+	record, err := r.triggerSched.FireTrigger(triggerID, reason, args.Payload, args.Force, fireOpts)
 	if triggers.IsNotFound(err) {
 		return triggerJSON(map[string]any{"ok": false, "error": "trigger not found", "trigger_id": args.TriggerID}), nil
 	}

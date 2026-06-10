@@ -51,12 +51,9 @@ def resolve_config_path(explicit: str | None = None) -> str | None:
 
 
 def _runtime_dir_from_config(data: dict) -> Path:
-    """由 data_dir 推导 `.runtime` 根目录（与 Go `Config.RuntimeDir` 一致）。"""
-    data_dir = str(data.get("data_dir") or "").strip() or "./.runtime/data"
-    p = Path(data_dir.rstrip("/"))
-    if p.name == "":
-        return Path(".runtime")
-    return p.parent
+    """由 fs_root 得到运行时根目录（与 Go `Config.RuntimeDir` 一致）。"""
+    fs_root = str(data.get("fs_root") or "").strip() or "./.runtime"
+    return Path(fs_root.rstrip("/"))
 
 
 def _agent_id_file_path(data: dict) -> Path:

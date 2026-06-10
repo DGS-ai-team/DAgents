@@ -80,6 +80,14 @@ func (o *Orchestrator) SetToolResultEnqueuer(fn func(sessionID string) error) {
 	o.enqueueToolResult = fn
 }
 
+// SetPolicy 热更新策略引擎（policy API 写盘后调用）。
+func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
+	if engine == nil {
+		engine, _ = policy.LoadFile("")
+	}
+	o.policy = engine
+}
+
 // RunMessageTurn 执行 human_message 回合；测试无 enqueuer 时内联多步，生产应使用 RunHumanMessageTurn 单步 + 队列。
 func (o *Orchestrator) RunMessageTurn(
 	ctx context.Context,
@@ -264,7 +272,7 @@ func (o *Orchestrator) ContinueAfterResume(
 					o.appendDeniedTool(sessionID, history, tc, "user_rejected")
 				}
 			}
-			if err := o.executeAutoBatch(ctx, sessionID, history, approved); err != nil {
+			if err := o.executeAutoBatch(ctx, sessionID, history, approved, &plan); err != nil {
 				return StepOutcome{LoopCount: toolLoopCount, Err: err}
 			}
 		}

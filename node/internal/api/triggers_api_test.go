@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,7 +18,6 @@ func triggersTestConfig(t *testing.T) *config.Config {
 	t.Helper()
 	dir := t.TempDir()
 	cfg := testConfig()
-	cfg.DataDir = filepath.Join(dir, "data")
 	cfg.FSRoot = dir
 	cfg.Triggers.Enabled = true
 	cfg.ApplyDefaults()

@@ -26,8 +26,6 @@ type Config struct {
 	FSRoot        string       `yaml:"fs_root"`
 	LLM           LLMConfig    `yaml:"llm"`
 	Manage        ManageConfig `yaml:"manage"`
-	PolicyFile    string             `yaml:"policy_file"`
-	DataDir       string             `yaml:"data_dir"`
 	Skills        SkillsConfig       `yaml:"skills"`
 	Compression   CompressionConfig  `yaml:"compression"`
 	Triggers          TriggersConfig          `yaml:"triggers"`
@@ -78,16 +76,14 @@ type LogConfig struct {
 
 // TriggersConfig 控制触发器存储与调度器。
 type TriggersConfig struct {
-	Enabled     bool   `yaml:"enabled"`
-	PollSeconds int    `yaml:"poll_seconds"`
-	StorePath   string `yaml:"store_path"`
+	Enabled     bool `yaml:"enabled"`
+	PollSeconds int  `yaml:"poll_seconds"`
 }
 
 // SkillsConfig 控制 session skills 扫描与 prompt 注入。
 type SkillsConfig struct {
-	Enabled     bool   `yaml:"enabled"`
-	MaxInPrompt int    `yaml:"max_in_prompt"`
-	Root        string `yaml:"root"`
+	Enabled     bool `yaml:"enabled"`
+	MaxInPrompt int  `yaml:"max_in_prompt"`
 }
 
 // CompressionConfig 控制上下文压缩阈值。
@@ -169,11 +165,8 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.Local.Endpoint) == "" {
 		c.Local.Endpoint = fmt.Sprintf("http://%s", c.ListenAddr())
 	}
-	if strings.TrimSpace(c.DataDir) == "" {
-		c.DataDir = "./.runtime/data"
-	}
 	if strings.TrimSpace(c.FSRoot) == "" {
-		c.FSRoot = c.RuntimeDir()
+		c.FSRoot = "./.runtime"
 	}
 	if c.LLM.MaxToolLoops <= 0 {
 		c.LLM.MaxToolLoops = 16
@@ -183,9 +176,6 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Skills.MaxInPrompt <= 0 {
 		c.Skills.MaxInPrompt = 3
-	}
-	if strings.TrimSpace(c.Skills.Root) == "" {
-		c.Skills.Root = defaultSkillsRoot(c.DataDir)
 	}
 	if c.Triggers.PollSeconds <= 0 {
 		c.Triggers.PollSeconds = 5
@@ -213,21 +203,23 @@ func (c *Config) ApplyDefaults() {
 	}
 }
 
-// RuntimeDir 返回 `.runtime` 目录路径（由 data_dir 的父目录推导）。
+// RuntimeDir 返回运行时根目录（与 `fs_root` 一致；子目录路径均相对此根硬编码）。
 func (c *Config) RuntimeDir() string {
-	base := strings.TrimRight(strings.TrimSpace(c.DataDir), "/")
-	if base == "" {
+	root := strings.TrimRight(strings.TrimSpace(c.FSRoot), "/")
+	if root == "" {
 		return "./.runtime"
 	}
-	return filepath.Dir(base)
+	return root
 }
 
-func defaultSkillsRoot(dataDir string) string {
-	base := strings.TrimSpace(dataDir)
-	if base == "" {
-		return "./.runtime/skills"
-	}
-	return filepath.Join(filepath.Dir(base), "skills")
+// DataDir 返回临时工作区目录（`<fs_root>/data`）。
+func (c *Config) DataDir() string {
+	return filepath.Join(c.RuntimeDir(), "data")
+}
+
+// SkillsRoot 返回 skills 目录（`<fs_root>/skills`）。
+func (c *Config) SkillsRoot() string {
+	return filepath.Join(c.RuntimeDir(), "skills")
 }
 
 // Validate 校验 Node 启动所需的最小字段集。
@@ -252,9 +244,14 @@ func (c *Config) ListenAddr() string {
 	return fmt.Sprintf("%s:%d", c.Listen.Host, c.Listen.Port)
 }
 
-// SessionDBPath 返回 SQLite 会话库路径。
+// MemoryDir 返回持久化记忆目录（`<runtime>/memory`）。
+func (c *Config) MemoryDir() string {
+	return filepath.Join(c.RuntimeDir(), "memory")
+}
+
+// SessionDBPath 返回 SQLite 会话库路径（`<runtime>/memory/sessions.db`）。
 func (c *Config) SessionDBPath() string {
-	return fmt.Sprintf("%s/sessions.db", strings.TrimRight(c.DataDir, "/"))
+	return filepath.Join(c.MemoryDir(), "sessions.db")
 }
 
 // RawMessageHistoryEnabled 返回是否写入原始消息 JSONL；环境变量优先于 YAML，默认 true。
@@ -284,11 +281,8 @@ func parseEnvBool(value string, defaultVal bool) bool {
 	}
 }
 
-// TriggersStorePath 返回 triggers.json 路径。
+// TriggersStorePath 返回 triggers.json 路径（`<fs_root>/triggers/triggers.json`）。
 func (c *Config) TriggersStorePath() string {
-	if p := strings.TrimSpace(c.Triggers.StorePath); p != "" {
-		return p
-	}
 	return filepath.Join(c.RuntimeDir(), "triggers", "triggers.json")
 }
 

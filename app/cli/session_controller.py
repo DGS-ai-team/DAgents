@@ -287,6 +287,23 @@ class SessionController:
         assert self._client is not None
         return await self._client.get_session_context(self.session_id)
 
+    async def list_triggers(self) -> dict[str, Any]:
+        """查询 Agent 已配置的触发器列表（GET /v1/triggers）。"""
+        assert self._client is not None
+        return await self._client.list_triggers()
+
+    async def get_policy(self, *, shell: str = "") -> dict[str, Any]:
+        assert self._client is not None
+        return await self._client.get_policy(shell=shell)
+
+    async def update_tool_policy(self, updates: list[dict[str, str]]) -> None:
+        assert self._client is not None
+        await self._client.update_tool_policy(updates)
+
+    async def update_shell_policy(self, shell_type: str, updates: list[dict[str, str]]) -> None:
+        assert self._client is not None
+        await self._client.update_shell_policy(shell_type, updates)
+
     async def compress_context(self) -> dict[str, Any]:
         """手动触发一次阻塞压缩（POST /v1/sessions/{session_id}/compress）。"""
         assert self._client is not None

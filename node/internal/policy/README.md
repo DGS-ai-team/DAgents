@@ -2,9 +2,11 @@
 
 | 文件 | 说明 |
 |------|------|
-| `engine.go` | `DecideTool`：工具 + bash shell 细粒度审批 |
+| `engine.go` | `DecideTool`：工具 + bash shell 细粒度审批（含 `deny` 硬拒绝） |
+| `store.go` | 策略快照、`ApplyToolUpdates` / `ApplyShellUpdates` 原子写盘 |
+| `decision.go` | API 三档 `allow_auto` / `require_approval` / `deny` 与内部 mode 映射 |
 | `bootstrap.go` | 确保 `.runtime/policy` 存在并从 `packaging/runtime/policy` 种子复制 |
-| `entry_file.go` | 解析 `key=mode` txt 策略（always / never / rule） |
+| `entry_file.go` | 解析 `key=mode` txt 策略（always / never / rule / deny） |
 | `shell_parse.go` | bash/cmd/powershell 命令拆分与 root command 提取 |
 | `mode.go` | 审批模式常量 |
 
@@ -15,4 +17,16 @@
 - `<runtime>/policy/shell/cmd.approval.txt`
 - `<runtime>/policy/shell/powershell.approval.txt`
 
-`bash_run=rule` 时按 shell 策略逐段判定；未命中默认为 `rule`（需审批）。种子见 [`packaging/runtime/policy`](../../packaging/runtime/policy)。
+**mode 语义**
+
+| txt mode | 编排结果 | API decision |
+|----------|----------|--------------|
+| `never` | 免审批自动执行 | `allow_auto` |
+| `always` / `rule` | 需审批（未命中 shell 条目默认 `rule`） | `require_approval` |
+| `deny` | 硬拒绝（`policy_denied`） | `deny` |
+
+`bash_run=rule` 时按 shell 策略逐段判定；任一段 `deny` 优先于审批。文件显式配置优先于 `engine.go` 内置 fallback（仅 `toolMode==rule` 时生效）。
+
+**HTTP**：`GET/PUT /v1/policy`（见 [`docs/architecture/agent-node-api.md`](../../../docs/architecture/agent-node-api.md) §2.6）。写盘前滚动备份 `*.bak`；`ask_user_information` 不可设为 `deny`。
+
+种子见 [`packaging/runtime/policy`](../../../packaging/runtime/policy)。

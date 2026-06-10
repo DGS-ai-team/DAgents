@@ -1,0 +1,91 @@
+package policy
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestModeDenyParsing(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPolicyFile(t, dir, "tool.approval.txt", "write_file=deny\nread_file=never\n")
+	e, err := loadFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Decide("write_file") != ActionDeny {
+		t.Fatal("write_file should be denied")
+	}
+	if e.Decide("read_file") != ActionAuto {
+		t.Fatal("read_file should auto")
+	}
+}
+
+func TestDecideToolExplicitNeverOverridesFallback(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPolicyFile(t, dir, "tool.approval.txt", "trigger_fire=never\n")
+	e, err := loadFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Decide("trigger_fire") != ActionAuto {
+		t.Fatal("explicit never should override trigger fallback")
+	}
+}
+
+func TestDecideToolExplicitDenyOverridesFallback(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPolicyFile(t, dir, "tool.approval.txt", "trigger_list=deny\n")
+	e, err := loadFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Decide("trigger_list") != ActionDeny {
+		t.Fatal("explicit deny should override trigger_list auto fallback")
+	}
+}
+
+func TestBashDenyPriority(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPolicyFile(t, dir, "tool.approval.txt", "bash_run=rule\n")
+	writeTestPolicyFile(t, dir, "shell/bash.approval.txt", "echo=never\nrm=deny\n")
+	e, err := loadFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.DecideTool("bash_run", map[string]any{"command": "rm -rf /tmp/x"}) != ActionDeny {
+		t.Fatal("rm should deny")
+	}
+	if e.DecideTool("bash_run", map[string]any{"command": "echo ok && rm x"}) != ActionDeny {
+		t.Fatal("mixed pipeline with deny segment should deny")
+	}
+	if e.DecideTool("bash_run", map[string]any{"command": "echo ok"}) != ActionAuto {
+		t.Fatal("echo should auto")
+	}
+}
+
+func TestYAMLDenyMapsToModeDeny(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "policy.yaml")
+	if err := os.WriteFile(path, []byte("tools:\n  write_file: deny\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Decide("write_file") != ActionDeny {
+		t.Fatal("yaml deny should map to ModeDeny")
+	}
+}
+
+func writeTestPolicyFile(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	full := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

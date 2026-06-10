@@ -4,7 +4,8 @@ Go Node 触发器：JSON 持久化、调度轮询、fire 投递 session 队列�
 
 | 文件 | 说明 |
 |------|------|
-| `models.go` | Definition / FireRecord、condition 校验（interval / fire_at / schedule 互斥） |
+| `models.go` | Definition / FireRecord、condition 校验（interval / fire_at / schedule 互斥）、`session_target_mode` |
+| `session_target.go` | 审批选项 → 持久化/fire override 映射 |
 | `schedule.go` | 结构化 `schedule` 日历调度、漏触发判定、`RescheduleNextFire` |
 | `cmd_gate.go` | schedule 自动触发前可选 bash cmd 门控（exit 0 通过） |
 | `store.go` | triggers.json CRUD、history、`ListEnabledTriggers` / `ReplaceTrigger` |
@@ -58,11 +59,19 @@ Go Node 触发器：JSON 持久化、调度轮询、fire 投递 session 队列�
 - 否则 → **只推进** `next_fire_at`（严格在 `now` 之后）
 - cmd 门控失败时同样推进 `next_fire_at`，不投递任务
 
+## session_target_mode
+
+| 值 | 行为 |
+|----|------|
+| `fixed`（缺省） | 使用 `target_session_id` |
+| `new_session` | 首次 fire 新建 session 并写回为 `fixed` |
+| `latest_active` | 每次 fire 动态解析最新活跃用户 session |
+
 ## 相关入口
 
 - HTTP：`node/internal/api/` → `/v1/triggers*`
 - Agent 工具：`node/internal/tools/triggers.go`
-- 配置：`shared/config` 的 `triggers.enabled` / `poll_seconds` / `store_path`
+- 配置：`shared/config` 的 `triggers.enabled` / `poll_seconds`；存储路径固定 `{fs_root}/triggers/triggers.json`
 
 ## 日志
 
