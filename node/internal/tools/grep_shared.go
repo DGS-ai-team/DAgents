@@ -15,6 +15,7 @@ type lineSearchOptions struct {
 	countLimit     int
 	contextLines   int
 	maxOutputBytes int
+	fileEncoding   string
 }
 
 func compileLinePattern(rawPat string, literal, caseSensitive bool) (*regexp.Regexp, error) {
@@ -169,7 +170,7 @@ func (r *Registry) grepSingleFile(relPath string, re *regexp.Regexp, opt lineSea
 			relPath,
 		), nil
 	}
-	lines, err := readAllLines(absPath)
+	lines, err := readAllLines(absPath, opt.fileEncoding)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}

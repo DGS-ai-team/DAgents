@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -38,7 +37,7 @@ func isTextReadable(path string) bool {
 	return ext == ""
 }
 
-func readAllLines(path string) ([]string, error) {
+func readAllLines(path, fileEncoding string) ([]string, error) {
 	if !isTextReadable(path) {
 		ext := filepath.Ext(path)
 		if ext == "" {
@@ -46,40 +45,26 @@ func readAllLines(path string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("不支持读取该后缀文件：%s", ext)
 	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	text, err := decodeFileContent(raw, fileEncoding)
+	if err != nil {
+		return nil, err
+	}
 	if strings.EqualFold(filepath.Ext(path), ".json") {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
 		var obj any
-		if err := json.Unmarshal(raw, &obj); err != nil {
-			return strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n"), nil
+		if err := json.Unmarshal([]byte(text), &obj); err != nil {
+			return normalizeLines(text), nil
 		}
 		pretty, err := json.MarshalIndent(obj, "", "  ")
 		if err != nil {
 			return nil, err
 		}
-		text := strings.ReplaceAll(string(pretty), "\r\n", "\n")
-		if text == "" {
-			return []string{}, nil
-		}
-		return strings.Split(text, "\n"), nil
+		return normalizeLines(string(pretty)), nil
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	var lines []string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		lines = append(lines, sc.Text())
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	return lines, nil
+	return normalizeLines(text), nil
 }
 
 func windowFromTotal(total, lineOffset, lineLimit int) (start, end int) {

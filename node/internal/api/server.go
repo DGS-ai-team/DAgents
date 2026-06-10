@@ -106,10 +106,10 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	// 生产路径：按 FSRoot 注册内置工具；失败时回退 "." 以免 API 完全不可用。
 		if o.tools == nil {
-		reg, err := tools.NewRegistry(cfg.FSRoot, 30, cfg.Tools.BashOutputEncoding)
+		reg, err := tools.NewRegistry(cfg.FSRoot, 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
 		if err != nil {
 			logger.Error("tools registry init failed", "error", err)
-			reg, _ = tools.NewRegistry(".", 30, cfg.Tools.BashOutputEncoding)
+			reg, _ = tools.NewRegistry(".", 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
 		}
 		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
 		o.tools = reg

@@ -13,15 +13,16 @@ const (
 )
 
 type grepFilesArgs struct {
-	Directory     string `json:"directory"`
-	Pattern       string `json:"pattern"`
-	GlobPattern   string `json:"glob_pattern"`
-	HitOffset     *int   `json:"hit_offset"`
-	MaxHits       *int   `json:"max_hits"`
-	MaxFiles      *int   `json:"max_files"`
-	ContextLines  *int   `json:"context_lines"`
-	CaseSensitive bool   `json:"case_sensitive"`
-	Literal       bool   `json:"literal"`
+	Directory     string  `json:"directory"`
+	Pattern       string  `json:"pattern"`
+	GlobPattern   string  `json:"glob_pattern"`
+	HitOffset     *int    `json:"hit_offset"`
+	MaxHits       *int    `json:"max_hits"`
+	MaxFiles      *int    `json:"max_files"`
+	ContextLines  *int    `json:"context_lines"`
+	CaseSensitive bool    `json:"case_sensitive"`
+	Literal       bool    `json:"literal"`
+	Encoding      *string `json:"encoding"`
 }
 
 type flatHit struct {
@@ -80,6 +81,7 @@ func grepFilesToolDef() ToolDef {
 						"type":        "boolean",
 						"description": "是否把 pattern 当普通字符串而非正则，默认 false",
 					},
+					"encoding": fileEncodingToolProperty(),
 				},
 				"required":             []string{"directory", "pattern"},
 				"additionalProperties": false,
@@ -118,12 +120,13 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 	var allHits []flatHit
 	totalHits := 0
 	indexCapped := false
+	fileEnc := r.resolveFileEncoding(args.Encoding)
 	for _, rel := range files {
 		abs, err := r.resolvePath(rel)
 		if err != nil {
 			continue
 		}
-		lines, err := readAllLines(abs)
+		lines, err := readAllLines(abs, fileEnc)
 		if err != nil {
 			continue
 		}
@@ -211,7 +214,7 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 
 	var blocks []string
 	if len(shown) > 0 {
-		blocks = formatGrepFilesBlocks(r, shown, allHits, totalHits, ctxLines)
+		blocks = formatGrepFilesBlocks(r, shown, allHits, totalHits, ctxLines, fileEnc)
 	}
 
 	header = append(header,
@@ -232,7 +235,7 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 	return out, nil
 }
 
-func formatGrepFilesBlocks(r *Registry, shown []flatHit, allHits []flatHit, totalHits, ctxLines int) []string {
+func formatGrepFilesBlocks(r *Registry, shown []flatHit, allHits []flatHit, totalHits, ctxLines int, fileEncoding string) []string {
 	hitRank := make(map[flatHit]int, len(allHits))
 	for i, h := range allHits {
 		hitRank[h] = i + 1
@@ -248,7 +251,7 @@ func formatGrepFilesBlocks(r *Registry, shown []flatHit, allHits []flatHit, tota
 				continue
 			}
 			var errRead error
-			lines, errRead = readAllLines(abs)
+			lines, errRead = readAllLines(abs, fileEncoding)
 			if errRead != nil {
 				continue
 			}

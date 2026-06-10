@@ -61,6 +61,7 @@ log:
 tools:
   # bash_output_encoding: gbk
   bash_output_encoding: utf-8
+  # file_encoding: gbk   # read/write/search_replace/grep 默认磁盘编码；省略时 Windows=gbk，其它=utf-8
   bash_compress:
     enabled: true
     max_output_chars: 12000       # stdout 最大 rune 数
