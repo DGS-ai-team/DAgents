@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-06-10
+
+**0.x 预览**：在 **v0.2.16** 基础上修复 **async 回灌清掉 pending HITL**，并为 **FS 文件工具** 增加磁盘编码支持。
+
+### 新增
+
+- **`tools.file_encoding`** 与 FS 工具可选 **`encoding`**（`utf-8` / `gbk` / `gb18030`）：`read_file`、`write_file`、`search_replace`、`grep_file`、`grep_files` 读写磁盘时按编码转码；默认 Windows→gbk，其它→utf-8；单次参数优先于 config。
+
+### 修复
+
+- **async 工具回灌保留 pending HITL**（[#25](https://github.com/DGS-ai-team/DAgents/issues/25)）：后台 job 完成时不再因 `applyStepOutcome` 清掉等待中的工具审批，避免 resume `409 no_pending_hitl`。
+
+（Git **tag**：`v0.2.17`。）
+
 ## [0.2.16] - 2026-06-07
 
 **0.x 预览**：在 **v0.2.15** 基础上新增 **策略（policy）API 与 TUI**、**trigger 会话目标审批** 与 **`/triggers` 命令**，并修复 **TUI 输入崩溃** 与 **Windows `--withnode` 启动**。

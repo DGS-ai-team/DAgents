@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.2.16-20260607-green" alt="v0.2.16"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.2.17-20260610-green" alt="v0.2.17"></a>
   <a href="go.work"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
   <a href="requirements.txt"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
@@ -26,7 +26,7 @@
 
 ## 简介
 
-**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.2.16**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度。
+**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.2.17**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度。
 
 终端交互提供 **两种 Client**，共用一份 YAML 配置，按环境任选：
 
@@ -160,6 +160,7 @@ dagents-client tui sess-xxxxxxxx
 | `llm.mock` | `true` 时使用 mock LLM（开发默认） |
 | `llm.api_key_env` | 真实 LLM 的 API Key 环境变量名 |
 | `tools.bash_output_encoding` | `bash_run` 子进程输出解码（如 `gbk`；Windows cmd 默认 gbk） |
+| `tools.file_encoding` | FS 工具磁盘读写默认编码（`read_file` 等；Windows 默认 gbk，可单次 `encoding` 覆盖） |
 | `fs_root` | 工作区根（默认 `./.runtime`）；`data/`、`memory/`、`skills/` 等子路径均相对此根硬编码 |
 | `triggers.enabled` | 触发器调度开关 |
 | `child_agents.enabled` | 临时子 Agent 开关 |
@@ -299,7 +300,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 | [docs/architecture/go-node-compatibility.md](docs/architecture/go-node-compatibility.md) | 老旧 OS / 静态构建 |
 | [packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md) | 推荐 CLI 工具（如 OfficeCLI，需自行安装） |
 | [cases/README.md](cases/README.md) | 落地案例（CentOS 7 特性导览 + Docker） |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.16**） |
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.17**） |
 | [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) | Web 前端（**独立仓库，尚未适配 v0.2.0 / Go Node API**） |
 
 > 已移除的 Python Agent API 文档见 [docs/archive/python-agent-runtime/](docs/archive/python-agent-runtime/)；**DAgentsUI 当前仍依赖旧 HTTP 契约**。
@@ -310,7 +311,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | **v0.2.16**（2026-06-07，0.x 预览；tag `v0.2.16`） |
+| **当前版本** | **v0.2.17**（2026-06-10，0.x 预览；tag `v0.2.17`） |
 | **Go** | 1.25+（`node` / `client` / `shared/config`） |
 | **Python** | 3.11+ 可运行；CI 验证 3.13 |
 | **破坏性变更** | 1.0 前仍可能出现；见 [CHANGELOG.md](CHANGELOG.md) |
