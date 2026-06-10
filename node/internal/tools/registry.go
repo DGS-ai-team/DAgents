@@ -32,6 +32,7 @@ type Registry struct {
 	fsRoot              string
 	bashTimeout         int
 	shellOutputEncoding string
+	fileEncoding        string
 	bashCompress        BashCompressConfig
 	compressMu          sync.Mutex
 	bashCompressStats   map[string]*OutputCompressStats
@@ -45,8 +46,8 @@ type Registry struct {
 type handler func(ctx context.Context, args json.RawMessage) (string, error)
 
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。
-// shellOutputEncoding 来自 config.yaml tools.bash_output_encoding；空串表示按平台/shell 自动选择。
-func NewRegistry(fsRoot string, bashTimeoutSeconds int, shellOutputEncoding ...string) (*Registry, error) {
+// encodings[0]=tools.bash_output_encoding，encodings[1]=tools.file_encoding；空串表示按平台/shell 自动选择。
+func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*Registry, error) {
 	root, err := resolveFSRoot(fsRoot)
 	if err != nil {
 		return nil, err
@@ -54,14 +55,19 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, shellOutputEncoding ...s
 	if bashTimeoutSeconds <= 0 {
 		bashTimeoutSeconds = 30
 	}
-	enc := ""
-	if len(shellOutputEncoding) > 0 {
-		enc = strings.TrimSpace(shellOutputEncoding[0])
+	shellEnc := ""
+	fileEnc := ""
+	if len(encodings) > 0 {
+		shellEnc = strings.TrimSpace(encodings[0])
+	}
+	if len(encodings) > 1 {
+		fileEnc = strings.TrimSpace(encodings[1])
 	}
 	r := &Registry{
 		fsRoot:              root,
 		bashTimeout:         bashTimeoutSeconds,
-		shellOutputEncoding: enc,
+		shellOutputEncoding: shellEnc,
+		fileEncoding:        fileEnc,
 		bashCompress:        DefaultBashCompressConfig(),
 		bgJobs:              newBackgroundJobRegistry(),
 		handlers:            make(map[string]handler),

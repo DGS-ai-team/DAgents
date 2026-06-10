@@ -23,7 +23,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | `skills` | 技能开关与 prompt 上限（目录固定为 `{fs_root}/skills`） |
 | `compression` | 上下文压缩 token 阈值 |
 | `triggers` | 触发器调度（见下表） |
-| `tools` | 内置工具；`bash_output_encoding` 控制 bash_run 输出解码（空=按 OS/shell 自动） |
+| `tools` | 内置工具；`bash_output_encoding` 控制 bash_run 输出解码；`file_encoding` 控制 FS 工具磁盘读写编码（空=按平台默认） |
 | `log` | Node stderr 日志级别 |
 
 ### `triggers`

@@ -10,10 +10,11 @@ import (
 )
 
 type readFileArgs struct {
-	Path               string `json:"path"`
-	LineOffset         *int   `json:"line_offset"`
-	LineLimit          *int   `json:"line_limit"`
-	IncludeLineNumbers bool   `json:"include_line_numbers"`
+	Path               string  `json:"path"`
+	LineOffset         *int    `json:"line_offset"`
+	LineLimit          *int    `json:"line_limit"`
+	IncludeLineNumbers bool    `json:"include_line_numbers"`
+	Encoding           *string `json:"encoding"`
 }
 
 func readFileToolDef() ToolDef {
@@ -42,6 +43,7 @@ func readFileToolDef() ToolDef {
 						"type":        "boolean",
 						"description": "是否在正文前加 1-based 行号与 tab，默认 false",
 					},
+					"encoding": fileEncodingToolProperty(),
 				},
 				"required":             []string{"path"},
 				"additionalProperties": false,
@@ -79,7 +81,7 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 		limit = *args.LineLimit
 	}
 
-	lines, err := readAllLines(path)
+	lines, err := readAllLines(path, r.resolveFileEncoding(args.Encoding))
 	if err != nil {
 		return fmt.Sprintf("ERROR: read_file 失败: %v", err), nil
 	}
@@ -109,6 +111,7 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 	}
 	header := []string{
 		fmt.Sprintf("文件修改时间: %s", fileMtimeText(path)),
+		fmt.Sprintf("文件编码: %s", r.resolveFileEncoding(args.Encoding)),
 		fmt.Sprintf("文件总行数: %d", total),
 		fmt.Sprintf("本页行区间: %d-%d / %d", pageStart, pageEnd, total),
 		fmt.Sprintf("next_line_offset: %s", nextLine),
@@ -121,8 +124,9 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 }
 
 type writeFileArgs struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path     string  `json:"path"`
+	Content  string  `json:"content"`
+	Encoding *string `json:"encoding"`
 }
 
 func writeFileToolDef() ToolDef {
@@ -142,6 +146,7 @@ func writeFileToolDef() ToolDef {
 						"type":        "string",
 						"description": "写入全文（必填）；覆盖已有内容",
 					},
+					"encoding": fileEncodingToolProperty(),
 				},
 				"required":             []string{"path", "content"},
 				"additionalProperties": false,
@@ -162,17 +167,23 @@ func (r *Registry) execWriteFile(_ context.Context, raw json.RawMessage) (string
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, []byte(args.Content), 0o644); err != nil {
+	enc := r.resolveFileEncoding(args.Encoding)
+	payload, err := encodeFileContent(args.Content, enc)
+	if err != nil {
+		return fmt.Sprintf("ERROR: write_file 失败: %v", err), nil
+	}
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("wrote %d bytes to %s", len(args.Content), args.Path), nil
+	return fmt.Sprintf("wrote %d bytes to %s (encoding=%s)", len(payload), args.Path, enc), nil
 }
 
 type searchReplaceArgs struct {
-	Path        string `json:"path"`
-	OldString   string `json:"old_string"`
-	NewString   string `json:"new_string"`
-	ReplaceAll  bool   `json:"replace_all"`
+	Path        string  `json:"path"`
+	OldString   string  `json:"old_string"`
+	NewString   string  `json:"new_string"`
+	ReplaceAll  bool    `json:"replace_all"`
+	Encoding    *string `json:"encoding"`
 }
 
 func searchReplaceToolDef() ToolDef {
@@ -200,6 +211,7 @@ func searchReplaceToolDef() ToolDef {
 						"type":        "boolean",
 						"description": "是否替换全部匹配，默认 false；为 false 时须恰好 1 处匹配",
 					},
+					"encoding": fileEncodingToolProperty(),
 				},
 				"required":             []string{"path", "old_string", "new_string"},
 				"additionalProperties": false,
@@ -231,11 +243,11 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 		return formatSearchReplaceFail(args.Path, "old_string 不能为空。"), nil
 	}
 
-	oldText, err := os.ReadFile(path)
+	oldText, err := readAllLines(path, r.resolveFileEncoding(args.Encoding))
 	if err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil
 	}
-	rawText := string(oldText)
+	rawText := strings.Join(oldText, "\n")
 	hitCount := strings.Count(rawText, args.OldString)
 	lineHint := formatHitLines(rawText, args.OldString)
 	if hitCount == 0 {
@@ -257,7 +269,12 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 	if newText == rawText {
 		return formatSearchReplaceSuccess(0, args.OldString, args.NewString, lineHint), nil
 	}
-	if err := os.WriteFile(path, []byte(newText), 0o644); err != nil {
+	enc := r.resolveFileEncoding(args.Encoding)
+	payload, err := encodeFileContent(newText, enc)
+	if err != nil {
+		return formatSearchReplaceFail(args.Path, err.Error()), nil
+	}
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil
 	}
 	return formatSearchReplaceSuccess(replaced, args.OldString, args.NewString, lineHint), nil

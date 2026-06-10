@@ -7,13 +7,14 @@ import (
 )
 
 type grepFileArgs struct {
-	Path          string `json:"path"`
-	Pattern       string `json:"pattern"`
-	IndexOffset   *int   `json:"index_offset"`
-	CountLimit    *int   `json:"count_limit"`
-	ContextLines  *int   `json:"context_lines"`
-	CaseSensitive bool   `json:"case_sensitive"`
-	Literal       bool   `json:"literal"`
+	Path          string  `json:"path"`
+	Pattern       string  `json:"pattern"`
+	IndexOffset   *int    `json:"index_offset"`
+	CountLimit    *int    `json:"count_limit"`
+	ContextLines  *int    `json:"context_lines"`
+	CaseSensitive bool    `json:"case_sensitive"`
+	Literal       bool    `json:"literal"`
+	Encoding      *string `json:"encoding"`
 }
 
 func grepFileToolDef() ToolDef {
@@ -58,6 +59,7 @@ func grepFileToolDef() ToolDef {
 						"type":        "boolean",
 						"description": "是否把 pattern 当普通字符串而非正则，默认 false",
 					},
+					"encoding": fileEncodingToolProperty(),
 				},
 				"required":             []string{"path", "pattern"},
 				"additionalProperties": false,
@@ -90,6 +92,7 @@ func (r *Registry) execGrepFile(_ context.Context, raw json.RawMessage) (string,
 	if args.ContextLines != nil {
 		opt.contextLines = *args.ContextLines
 	}
+	opt.fileEncoding = r.resolveFileEncoding(args.Encoding)
 	return r.grepSingleFile(args.Path, re, opt)
 }
 

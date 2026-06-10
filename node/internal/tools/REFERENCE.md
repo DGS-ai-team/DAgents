@@ -4,7 +4,7 @@
 |------|------|
 | `ToolDef` / `FunctionDef` | OpenAI tools JSON 结构 |
 | `Registry` | 工具注册与 dispatch |
-| `NewRegistry(fsRoot, bashTimeoutSeconds, shellOutputEncoding...)` | 创建 registry；编码来自 `config.yaml` `tools.bash_output_encoding` |
+| `NewRegistry(fsRoot, bashTimeoutSeconds, encodings...)` | 创建 registry；`encodings[0]`=bash 输出编码，`encodings[1]`=文件编码 |
 | `resolveShellOutputEncoding` / `decodeShellOutput` | bash_run 输出按 GBK/UTF-8 等解码为 UTF-8 |
 | `Definitions()` | LLM tools 列表 |
 | `Execute(ctx, name, arguments)` | 执行工具 |
