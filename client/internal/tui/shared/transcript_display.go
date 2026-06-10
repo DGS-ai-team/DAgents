@@ -81,9 +81,6 @@ func formatRoleLineWithUsage(prefix, body, usagePlain string, width int) string 
 	lastLine := lines[len(lines)-1]
 	head := strings.Join(lines[:len(lines)-1], "\n")
 
-	lastW := runewidth.StringWidth(lastLine)
-	usageW := runewidth.StringWidth(usagePlain)
-
 	var out strings.Builder
 	out.WriteString(prefix)
 	if head != "" {
@@ -91,21 +88,11 @@ func formatRoleLineWithUsage(prefix, body, usagePlain string, width int) string 
 		out.WriteByte('\n')
 		out.WriteString(prefixDotPadding(prefix))
 	}
-
-	if lastW+usageW <= contentWidth {
-		pad := contentWidth - lastW - usageW
-		if pad < 1 {
-			pad = 1
-		}
-		out.WriteString(lastLine)
-		out.WriteString(strings.Repeat(" ", pad))
-		out.WriteString(styledUsage)
-		return out.String()
-	}
-
 	out.WriteString(lastLine)
+	// usage 独占一行右对齐，避免 viewport / Rich fold 在 usage 字符串中间硬折行。
 	out.WriteByte('\n')
 	out.WriteString(prefixDotPadding(prefix))
+	usageW := runewidth.StringWidth(usagePlain)
 	pad := contentWidth - usageW
 	if pad < 0 {
 		pad = 0

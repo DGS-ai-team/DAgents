@@ -378,23 +378,11 @@ func (m *model) renderInputStrip() string {
 	if right == "" {
 		right = tuishared.FormatInputStripTokens(m.messagesTotalTokens)
 	}
-	text := left
-	if right != "" {
-		width := m.viewport.Width
-		if width <= 0 {
-			width = 80
-		}
-		gap := width - len(left) - len(right)
-		if gap < 2 {
-			text = left + "  ·  " + right
-		} else {
-			text = left + strings.Repeat(" ", gap) + right
-		}
-	}
 	width := m.viewport.Width
 	if width <= 0 {
 		width = 80
 	}
+	text := tuishared.FormatInputStripLine(left, right, width)
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	if pending > 0 {
 		style = style.Foreground(lipgloss.Color("214"))

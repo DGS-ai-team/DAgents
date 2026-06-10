@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import shlex
 import time
 from typing import Any
 
+from rich.align import Align
 from rich.cells import cell_len, set_cell_size
 from rich.console import Group, RenderableType
 from rich.markup import escape
@@ -46,6 +48,7 @@ from app.cli.user_information import (
     extract_user_information_request,
 )
 from app.cli.tui.prompt_text_area import PromptTextArea
+from app.cli.tui.transcript_log import TranscriptLog
 from app.cli.tui.welcome_panel import build_welcome_panel
 
 _HELP_HINT = "Type /help for commands, /exit to quit.  Enter 发送，Shift+Enter 换行"
@@ -155,6 +158,8 @@ class DAgentsTuiApp(App[None]):
         self._assistant_buffer = ""
         self._assistant_stream_start: int | None = None
         self._pending_round_usage_suffix: str | None = None
+        # 最近一条已完成 assistant 块（供 USAGE 晚到时的 retroactive 重写）。
+        self._last_assistant_done_block: dict[str, Any] | None = None
         # 欢迎 Panel 写入后 RichLog 行数，流式 assistant 回退不得早于该位置。
         self._transcript_base_lines = 0
         self._approval_future: asyncio.Future[ApprovalDecision] | None = None
@@ -187,7 +192,7 @@ class DAgentsTuiApp(App[None]):
     def compose(self) -> ComposeResult:
         """创建 TUI 组件层次结构。"""
         yield Static(id="top-status-bar", markup=True)
-        yield RichLog(id="transcript", highlight=True, markup=True, wrap=True)
+        yield TranscriptLog(id="transcript", highlight=True, markup=True, wrap=True)
         yield RichLog(id="context-view", highlight=True, markup=True, wrap=True)
         yield Static("", id="input-strip", markup=True)
         yield PromptTextArea(
@@ -223,27 +228,21 @@ class DAgentsTuiApp(App[None]):
         self._cancel_status_lines()
         await self._controller.stop()
 
-    def _transcript_log(self) -> RichLog:
-        return self.query_one("#transcript", RichLog)
+    def _transcript_log(self) -> TranscriptLog:
+        return self.query_one("#transcript", TranscriptLog)
 
-    def _sync_transcript_follow_tail(self) -> None:
-        """用户滚回底部时恢复自动跟随。"""
+    def _update_transcript_follow_tail(self) -> None:
+        """根据 transcript 是否在底部，同步 follow-tail 与 auto_scroll。"""
         log = self._transcript_log()
         if log.is_vertical_scroll_end:
             self._transcript_follow_tail = True
-        log.auto_scroll = self._transcript_follow_tail
+            log.auto_scroll = True
+        else:
+            self._transcript_follow_tail = False
+            log.auto_scroll = False
 
     def _transcript_scroll_end(self) -> bool:
         return self._transcript_follow_tail
-
-    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
-        if event.widget.id == "transcript":
-            self._transcript_follow_tail = False
-            self._transcript_log().auto_scroll = False
-
-    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
-        if event.widget.id == "transcript":
-            self.call_after_refresh(self._sync_transcript_follow_tail)
 
     def _context_log(self) -> RichLog:
         """获取 context 专用 RichLog。
@@ -290,20 +289,29 @@ class DAgentsTuiApp(App[None]):
         """子 Agent 状态变更时刷新输入框上方状态条。"""
         self.call_later(self._refresh_input_strip)
 
+    def _format_input_strip_line(self, left: str, right: str, width: int) -> str:
+        """组合 input strip 左右文案；按 cell 宽度右对齐 usage，必要时截断左侧。"""
+        left = left.rstrip()
+        right = str(right or "").strip()
+        if not right:
+            return left
+        if width <= 0:
+            width = 80
+        min_gap = 1
+        right_w = cell_len(right)
+        if cell_len(left) + right_w + min_gap > width:
+            max_left = max(0, width - right_w - min_gap)
+            left = self._truncate_cells(left, max_left)
+        gap = max(min_gap, width - cell_len(left) - right_w)
+        return f"{left}{' ' * gap}{right}"
+
     def _refresh_input_strip(self) -> None:
         """刷新 #input-strip 文案（子 Agent / HITL 队列 + 右侧 token 统计）。"""
         strip = self.query_one("#input-strip", Static)
         left = self._controller.child_tracker.input_strip_text(self._controller.hitl_queue_len())
         right = self._controller.input_strip_token_text()
-        if right:
-            width = int(getattr(strip.size, "width", 0) or 0)
-            if width > len(left) + len(right) + 1:
-                gap = width - len(left) - len(right)
-                line = f"{left}{' ' * gap}{right}"
-            else:
-                line = f"{left}  ·  {right}"
-        else:
-            line = left
+        width = int(getattr(strip.size, "width", 0) or 0)
+        line = self._format_input_strip_line(left, right, width)
         strip.update(f"[dim]{escape(line)}[/dim]")
 
     def _process_hitl_queue(self) -> None:
@@ -932,44 +940,25 @@ class DAgentsTuiApp(App[None]):
         """正文列可用 cell 宽度（扣除圆点列与间距）。"""
         return max(20, self._transcript_content_width() - 2)
 
-    def _right_aligned_usage_row(self, suffix: str) -> Text:
-        """usage 独占一行并右对齐。"""
+    def _right_aligned_usage_row(self, suffix: str) -> RenderableType:
+        """usage 独占一行，Rich Align 右对齐（避免空格 padding 被 overflow=fold 拆开）。"""
         width = self._content_column_width()
-        pad = max(0, width - cell_len(suffix))
-        return Text.assemble((" " * pad, ""), (suffix, "bright_black"))
-
-    def _merge_last_line_with_usage(
-        self, last_line: str, suffix: str
-    ) -> tuple[RenderableType, RenderableType | None]:
-        """末行与 usage 同行（放得下）或拆成两行（末行 + 右对齐 usage）。"""
-        width = self._content_column_width()
-        if cell_len(last_line) + cell_len(suffix) <= width:
-            pad = max(1, width - cell_len(last_line) - cell_len(suffix))
-            return (
-                Text.assemble(
-                    (last_line, ""),
-                    (" " * pad, ""),
-                    (suffix, "bright_black"),
-                ),
-                None,
-            )
-        return Text(last_line), self._right_aligned_usage_row(suffix)
+        return Align.right(
+            Text(suffix, style="bright_black", no_wrap=True),
+            width=width,
+        )
 
     def _assistant_body_with_usage(self, text: str, suffix: str) -> RenderableType:
-        """assistant 完成态正文 + 右对齐 usage（末行放得下则同行）。"""
+        """assistant 完成态正文 + usage 独占一行右对齐。"""
         stripped = text.rstrip("\n")
+        if not suffix:
+            return Markdown(stripped) if stripped else Text("")
         parts = stripped.split("\n")
+        usage_row = self._right_aligned_usage_row(suffix)
         if len(parts) == 1:
-            line_render, extra = self._merge_last_line_with_usage(parts[0], suffix)
-            if extra is None:
-                return line_render
-            return Group(line_render, extra)
+            return Group(Markdown(parts[0]), usage_row)
         head = "\n".join(parts[:-1])
-        last_render, extra = self._merge_last_line_with_usage(parts[-1], suffix)
-        body: RenderableType = Group(Markdown(head), last_render)
-        if extra is not None:
-            body = Group(body, extra)
-        return body
+        return Group(Markdown(head), Text(parts[-1]), usage_row)
 
     def _log_write_block(
         self,
@@ -984,8 +973,32 @@ class DAgentsTuiApp(App[None]):
             log.write(content, scroll_end=scroll_end)
         else:
             log.write(content, expand=True, scroll_end=scroll_end)
-        if scroll_end and log.is_vertical_scroll_end:
-            self._transcript_follow_tail = True
+
+    def _apply_round_usage(self, suffix: str) -> None:
+        """将单轮 usage 挂到 assistant：流式中暂存；已完成块 retroactive 重写（对齐 Go ApplyRoundUsage）。"""
+        if not str(suffix or "").strip():
+            return
+        if self._assistant_buffer.strip():
+            self._pending_round_usage_suffix = suffix
+            return
+        block = self._last_assistant_done_block
+        if block is not None:
+            if block.get("usage_suffix") == suffix:
+                return
+            text = str(block.get("text") or "")
+            if not text.strip():
+                self._pending_round_usage_suffix = suffix
+                return
+            new_render = self._assistant_block(text, complete=True, usage_suffix=suffix)
+            start, end = self._replace_log_block(int(block["start"]), int(block["end"]), new_render)
+            self._last_assistant_done_block = {
+                "start": start,
+                "end": end,
+                "text": text,
+                "usage_suffix": suffix,
+            }
+            return
+        self._pending_round_usage_suffix = suffix
 
     def _preserve_transcript_scroll(self, log: RichLog) -> int:
         """记录当前纵向滚动位置，供原地替换块后恢复。"""
@@ -1032,13 +1045,22 @@ class DAgentsTuiApp(App[None]):
     ) -> None:
         """写入 assistant 块；Renderables 需 expand 才能按 RichLog 宽度折行。"""
         scroll_end = self._transcript_scroll_end()
-        log.write(
-            self._assistant_block(text, complete=complete, usage_suffix=usage_suffix),
-            expand=True,
-            scroll_end=scroll_end,
-        )
-        if scroll_end and log.is_vertical_scroll_end:
-            self._transcript_follow_tail = True
+        effective_suffix = usage_suffix
+        if complete and effective_suffix is None:
+            effective_suffix = self._pending_round_usage_suffix
+        renderable = self._assistant_block(text, complete=complete, usage_suffix=usage_suffix)
+        if complete:
+            start = len(log.lines)
+            log.write(renderable, expand=True, scroll_end=scroll_end)
+            end = len(log.lines)
+            self._last_assistant_done_block = {
+                "start": start,
+                "end": end,
+                "text": text,
+                "usage_suffix": effective_suffix or None,
+            }
+        else:
+            log.write(renderable, expand=True, scroll_end=scroll_end)
 
     def _event_block(self, text: str) -> str | Table:
         """格式化非流式事件：工具消息使用圆点，普通系统行保持原样。"""
@@ -1170,14 +1192,57 @@ class DAgentsTuiApp(App[None]):
                 task.cancel()
         self._status_lines.clear()
 
-    def _rich_code_box(self, content: str, *, lexer: str = "bash") -> Panel:
+    def _rich_code_box(self, content: str, *, lexer: str = "bash", title: str | None = None) -> Panel:
         """将文本渲染为带边框的 Rich 代码框（Syntax + Panel）。"""
         text = content if content.strip() else "<empty>"
         return Panel(
             Syntax(text, lexer, theme="monokai", word_wrap=True, background_color="default"),
+            title=title,
             border_style="dim",
             padding=(0, 1),
         )
+
+    def _tool_input_from_pending(self, pending: dict[str, Any] | None, tool_name: str) -> tuple[str | None, str]:
+        """从 tool_call 占位记录提取展开时展示的输入文本与 lexer。"""
+        if pending is None:
+            return None, "json"
+        code_content = pending.get("code_content")
+        if isinstance(code_content, str) and code_content.strip():
+            return code_content, str(pending.get("code_lexer") or "bash")
+        arguments = pending.get("arguments")
+        if not isinstance(arguments, dict) or not arguments:
+            return None, "json"
+        if tool_name == "bash_run":
+            command = str(arguments.get("command") or "").strip()
+            return (command, "bash") if command else (None, "json")
+        return json.dumps(arguments, ensure_ascii=False, indent=2), "json"
+
+    def _tool_expanded_io_group(
+        self,
+        *,
+        input_content: str | None,
+        input_lexer: str,
+        output_content: str,
+        output_lexer: str,
+    ) -> RenderableType:
+        """展开工具结果时渲染输入与输出两段代码框。"""
+        parts: list[RenderableType] = []
+        if isinstance(input_content, str) and input_content.strip():
+            parts.append(self._rich_code_box(input_content, lexer=input_lexer, title="输入"))
+        if output_content.strip():
+            parts.append(self._rich_code_box(output_content, lexer=output_lexer, title="输出"))
+        elif not parts:
+            parts.append(Text("<empty>", style="dim"))
+        return Group(*parts)
+
+    def _tool_result_has_expandable_detail(self, result: dict[str, Any]) -> bool:
+        """判断工具结果是否值得提供展开/收起。"""
+        detail = str(result.get("detail") or "").strip()
+        input_content = result.get("input_content")
+        has_input = isinstance(input_content, str) and bool(input_content.strip())
+        if has_input:
+            return True
+        return bool(detail) and len(detail.splitlines()) > 1
 
     def _tool_dot_block(self, *, dot_style: str, body: RenderableType) -> Table:
         """圆点 + 正文（可为 Group / Panel 等 Rich 组件）的 transcript 行。"""
@@ -1414,7 +1479,8 @@ class DAgentsTuiApp(App[None]):
         for item in tool_calls:
             if not isinstance(item, dict):
                 continue
-            call_id = str(item.get("id") or "").strip()
+            normalized = normalize_tool_call_item(item)
+            call_id = str(normalized.get("id") or "").strip()
             summary, code_content, code_lexer = self._tool_call_parts_from_call(item)
             started_at = time.monotonic()
             start = len(log.lines)
@@ -1433,6 +1499,8 @@ class DAgentsTuiApp(App[None]):
                     "start": start,
                     "end": end,
                     "summary": summary,
+                    "tool_name": str(normalized.get("name") or ""),
+                    "arguments": normalized.get("arguments") if isinstance(normalized.get("arguments"), dict) else {},
                     "code_content": code_content,
                     "code_lexer": code_lexer,
                     "started_at": started_at,
@@ -1533,7 +1601,7 @@ class DAgentsTuiApp(App[None]):
         )
         detail = str(result["detail"])
         expanded = bool(result["expanded"])
-        has_detail = bool(detail.strip())
+        has_detail = self._tool_result_has_expandable_detail(result)
         toggle = ""
         if has_detail:
             action = "收起" if expanded else "展开"
@@ -1548,7 +1616,12 @@ class DAgentsTuiApp(App[None]):
         else:
             body = Group(
                 Text.from_markup(f"{title}{toggle}"),
-                self._rich_code_box(detail, lexer="bash"),
+                self._tool_expanded_io_group(
+                    input_content=result.get("input_content"),
+                    input_lexer=str(result.get("input_lexer") or "bash"),
+                    output_content=detail,
+                    output_lexer="bash",
+                ),
             )
         return self._tool_dot_block(dot_style=_DOT_TOOL_RESULT, body=body)
 
@@ -1563,7 +1636,7 @@ class DAgentsTuiApp(App[None]):
         )
         detail = str(result["detail"])
         expanded = bool(result["expanded"])
-        has_detail = bool(detail.strip())
+        has_detail = self._tool_result_has_expandable_detail(result)
         toggle = ""
         if has_detail:
             action = "收起" if expanded else "展开"
@@ -1580,7 +1653,12 @@ class DAgentsTuiApp(App[None]):
         else:
             body = Group(
                 Text.from_markup(f"{title}{toggle}"),
-                self._rich_code_box(detail, lexer="diff"),
+                self._tool_expanded_io_group(
+                    input_content=result.get("input_content"),
+                    input_lexer=str(result.get("input_lexer") or "json"),
+                    output_content=detail,
+                    output_lexer="diff",
+                ),
             )
         return self._tool_dot_block(dot_style=_DOT_TOOL_RESULT, body=body)
 
@@ -1594,14 +1672,36 @@ class DAgentsTuiApp(App[None]):
         summary = str(result["summary"])
         detail = str(result["detail"])
         expanded = bool(result["expanded"])
-        body = detail if expanded else summary
-        body_lines = escape(body).splitlines() or [""]
-        if not expanded and len(detail.splitlines()) > 1:
-            toggle = f" [@click=app.toggle_tool_result('{result_id}')][dim underline]展开[/dim underline][/]"
-        elif expanded:
-            toggle = f" [@click=app.toggle_tool_result('{result_id}')][dim underline]收起[/dim underline][/]"
+        has_detail = self._tool_result_has_expandable_detail(result)
+        if not expanded:
+            body = summary
+            body_lines = escape(body).splitlines() or [""]
+            if has_detail:
+                toggle = f" [@click=app.toggle_tool_result('{result_id}')][dim underline]展开[/dim underline][/]"
+            else:
+                toggle = ""
         else:
-            toggle = ""
+            toggle = f" [@click=app.toggle_tool_result('{result_id}')][dim underline]收起[/dim underline][/]"
+            return self._tool_dot_block(
+                dot_style=_DOT_TOOL_RESULT,
+                body=Group(
+                    Text.from_markup(
+                        self._tool_result_title_markup(
+                            str(result["title"]),
+                            elapsed_s=result.get("elapsed_s"),
+                            rejected=bool(result.get("rejected")),
+                            compress_saved_pct=result.get("compress_saved_pct"),
+                        )
+                        + toggle
+                    ),
+                    self._tool_expanded_io_group(
+                        input_content=result.get("input_content"),
+                        input_lexer=str(result.get("input_lexer") or "json"),
+                        output_content=detail,
+                        output_lexer="text",
+                    ),
+                ),
+            )
         lines = [
             self._tool_result_title_markup(
                 str(result["title"]),
@@ -1802,6 +1902,7 @@ class DAgentsTuiApp(App[None]):
         tool_name = str(data.get("tool_name") or "tool")
         title = pending["summary"] if pending is not None else self._tool_display_name(tool_name, {})
         summary, detail = self._tool_result_text(data)
+        input_content, input_lexer = self._tool_input_from_pending(pending, tool_name)
         elapsed_s: float | None = None
         raw_duration = data.get("duration_seconds")
         if raw_duration is not None:
@@ -1827,6 +1928,8 @@ class DAgentsTuiApp(App[None]):
             "title": title,
             "summary": summary,
             "detail": detail,
+            "input_content": input_content,
+            "input_lexer": input_lexer,
             "expanded": False,
             "elapsed_s": elapsed_s,
             "rejected": bool(data.get("rejected")),
@@ -1893,7 +1996,7 @@ class DAgentsTuiApp(App[None]):
         elif update.kind == TranscriptKind.USAGE:
             suffix = format_inline_usage(parse_usage_round(update.data))
             if suffix:
-                self._pending_round_usage_suffix = suffix
+                self._apply_round_usage(suffix)
         elif update.kind == TranscriptKind.TOOL_CALL:
             self._submit_content_seen = True
             self._flush_pending_segment_gap()
@@ -1963,6 +2066,7 @@ class DAgentsTuiApp(App[None]):
     def _reset_transcript_after_clear(self, log: RichLog) -> None:
         """清屏后重置流式状态与欢迎区行边界。"""
         self._pending_round_usage_suffix = None
+        self._last_assistant_done_block = None
         self._cancel_tool_pending_tasks()
         self._pending_tools.clear()
         self._cancel_status_lines()

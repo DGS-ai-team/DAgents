@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-06-10
+
+**0.x 预览**：在 **v0.2.14** 基础上修复 **Python TUI usage/滚动**、增强 **工具结果展开** 与 **Go TUI usage 展示**。
+
+### 修复
+
+- **Python TUI usage 折行**：assistant 完成态 usage 改用 Rich `Align.right` 独占一行，修复 `think 42` 等被 `overflow=fold` 拆开。
+- **Python TUI 滚轮崩溃**：移除 `on_mouse_scroll_*` + `event.widget.id`；改由 `TranscriptLog.watch_scroll_y` 维护 follow-tail。
+- **Python TUI USAGE 晚到**：`_apply_round_usage` retroactive 重写最近已完成 assistant 块（对齐 Go `ApplyRoundUsage`）。
+
+### 变更
+
+- **Python TUI 滚动跟随**：去掉 `_log_write_block` / `_write_assistant_block` 内冗余 follow-tail 兜底，统一由 `scroll_y` 监听驱动。
+- **Python TUI 工具结果展开**：展开时同时展示输入与输出（bash / search_replace / 通用工具）。
+- **Go TUI usage 展示**：transcript usage 独占一行右对齐；input strip 使用 `FormatInputStripLine`（runewidth 布局，窄屏截断左侧）。
+
+（Git **tag**：`v0.2.15`。）
+
 ## [0.2.14] - 2026-06-07
 
 **0.x 预览**：在 **v0.2.13** 基础上增强 **TUI 斜杠命令展示与滚动体验**，并新增 **CentOS 7 特性导览** 落地案例。

@@ -5,6 +5,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // UsageStripSnapshot 为 input strip 右侧最近一次 SSE usage 快照。
@@ -117,6 +119,34 @@ func FormatInputStripUsage(s UsageStripSnapshot) string {
 		text += fmt.Sprintf(" · think %s", formatCompactCount(s.ReasoningTokens))
 	}
 	return text
+}
+
+// FormatInputStripLine 组合左侧状态与右侧 usage/token，按 cell 宽度右对齐；必要时截断左侧，避免 usage 被折行拆开。
+func FormatInputStripLine(left, right string, width int) string {
+	left = strings.TrimRight(left, " ")
+	right = strings.TrimSpace(right)
+	if right == "" {
+		return left
+	}
+	if width <= 0 {
+		width = 80
+	}
+	const minGap = 1
+	rightW := runewidth.StringWidth(right)
+	leftW := runewidth.StringWidth(left)
+	if leftW+rightW+minGap > width {
+		maxLeft := width - rightW - minGap
+		if maxLeft < 0 {
+			maxLeft = 0
+		}
+		left = runewidth.Truncate(left, maxLeft, "…")
+		leftW = runewidth.StringWidth(left)
+	}
+	gap := width - leftW - rightW
+	if gap < minGap {
+		gap = minGap
+	}
+	return left + strings.Repeat(" ", gap) + right
 }
 
 // FormatInputStripTokens 将 context token 估算值格式化为 input strip 右侧短文案。

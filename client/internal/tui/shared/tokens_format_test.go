@@ -3,6 +3,8 @@ package shared
 import (
 	"strings"
 	"testing"
+
+	"github.com/mattn/go-runewidth"
 )
 
 func TestFormatInputStripTokens(t *testing.T) {
@@ -56,7 +58,7 @@ func TestApplyRoundUsageToAssistantPartial(t *testing.T) {
 	}
 }
 
-func TestApplyRoundUsageMultilineSameLine(t *testing.T) {
+func TestApplyRoundUsageMultilineStorageSingleLine(t *testing.T) {
 	tr := NewTranscript(0)
 	tr.AppendPartial("assistant", "line1\nline2\n")
 	tr.ApplyRoundUsage(" · ↑10 ↓2")
@@ -123,5 +125,35 @@ func TestParseUsageStripCachedFallback(t *testing.T) {
 	})
 	if s.CacheHitTokens != 6 {
 		t.Fatalf("cache hit = %d", s.CacheHitTokens)
+	}
+}
+
+func TestFormatInputStripLineRightAlignsUsage(t *testing.T) {
+	left := "临时 Agent: 2 活跃 · 1 待审批"
+	right := FormatInputStripUsage(UsageStripSnapshot{
+		PromptTokens: 7329, CompletionTokens: 64, ReasoningTokens: 42, HasData: true,
+	})
+	const width = 80
+	line := FormatInputStripLine(left, right, width)
+	if runewidth.StringWidth(line) > width {
+		t.Fatalf("line too wide: w=%d %q", runewidth.StringWidth(line), line)
+	}
+	if !strings.HasSuffix(strings.TrimRight(line, " "), right) {
+		t.Fatalf("usage not intact at end: %q", line)
+	}
+	if strings.Contains(line, "think\n") || strings.TrimSpace(line) == "42" {
+		t.Fatalf("usage split: %q", line)
+	}
+}
+
+func TestFormatInputStripLineTruncatesLeftWhenNarrow(t *testing.T) {
+	left := "临时 Agent: 9 活跃 · 9 待审批 （队列 9）"
+	right := "↑7,329 ↓64 · think 42"
+	line := FormatInputStripLine(left, right, 40)
+	if !strings.HasSuffix(strings.TrimRight(line, " "), right) {
+		t.Fatalf("usage lost when truncating left: %q", line)
+	}
+	if runewidth.StringWidth(line) > 40 {
+		t.Fatalf("exceeds width: %q", line)
 	}
 }

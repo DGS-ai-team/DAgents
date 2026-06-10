@@ -171,7 +171,7 @@ func (t *Transcript) FinishPartial(role string) {
 	t.finishPartialLocked(role, suffix)
 }
 
-// ApplyRoundUsage 将单轮 usage 挂到 assistant 块末尾（与正文最后一行同行）；不展示在 reasoning/thinking 后。
+// ApplyRoundUsage 将单轮 usage 写入 assistant 存储行（\x1e 分隔）；展示层 usage 独占一行右对齐。
 func (t *Transcript) ApplyRoundUsage(suffix string) {
 	if strings.TrimSpace(suffix) == "" {
 		return
