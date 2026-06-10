@@ -284,6 +284,11 @@ func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.A
 	if payload == nil {
 		return
 	}
+	r.mu.Lock()
+	savedPending := r.pending
+	savedLoopCount := r.toolLoopCount
+	r.mu.Unlock()
+
 	loopCount := r.toolLoopCountSnapshot()
 	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
 		return r.orch.HandleAsyncToolResult(ctx, r.session.ID, history, turn.AsyncToolResultInput{
@@ -300,6 +305,15 @@ func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.A
 	})
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
+	if savedPending != nil && outcome.Pending == nil {
+		r.pending = savedPending
+		r.toolLoopCount = savedLoopCount
+		r.logger.Info("async_tool_result preserved pending hitl",
+			"session_id", r.session.ID,
+			"job_id", payload.JobID,
+			"tool_name", payload.ToolName,
+		)
+	}
 	r.mu.Unlock()
 	r.afterToolStep(outcome)
 }

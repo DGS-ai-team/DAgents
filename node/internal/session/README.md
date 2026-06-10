@@ -60,7 +60,7 @@ flowchart TB
 |-------------|----------|------|
 | `message` / 空 | `handleHumanMessage` | 新 user 消息；若有 pending HITL 先 `InterruptPending` |
 | `tool_result` | `handleToolResult` | 工具批执行后的续跑（`RunToolMessageTurn`） |
-| `async_tool_result` | `handleAsyncToolResult` | 后台 job 完成回灌 |
+| `async_tool_result` | `handleAsyncToolResult` | 后台 job 完成回灌；若已有 pending HITL 则仍写入 history 但**保留** pending（issue #25） |
 | `resume` | `handleResume` | HITL 审批 / `ask_user_information` 恢复 |
 
 生产路径下，orchestrator 工具步结束后通过 `SetToolResultEnqueuer` 入队 `tool_result`，**单步执行 + 队列续跑**（对齐 Python 语义）。测试可直接 `RunMessageTurn` 内联多步。
