@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
+	"github.com/mattn/go-runewidth"
 )
 
 // FormatSessionContextPanelBody 构造 /context 面板正文行（panel 编码）。
@@ -183,6 +184,7 @@ func orDash(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// wrapLines 按终端显示宽度折行；避免按字节截断破坏 UTF-8（中文等尾端乱码）。
 func wrapLines(text string, width int) []string {
 	if width <= 0 {
 		return []string{text}
@@ -190,11 +192,16 @@ func wrapLines(text string, width int) []string {
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimRight(line, " ")
-		for len(line) > width {
-			out = append(out, line[:width])
-			line = line[width:]
+		rest := line
+		for runewidth.StringWidth(rest) > width {
+			chunk := runewidth.Truncate(rest, width, "")
+			if chunk == "" {
+				break
+			}
+			out = append(out, chunk)
+			rest = rest[len(chunk):]
 		}
-		out = append(out, line)
+		out = append(out, rest)
 	}
 	return out
 }
