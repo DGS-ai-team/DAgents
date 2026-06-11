@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-06-11
+
+**0.x 预览**：Windows 文件工具 GBK 写盘、jsonl/html 可读、Go TUI `/context` 中文折行修复。
+
+### 新增
+
+- **FS 工具可读后缀**：`read_file` / `grep_*` / `search_replace` 等支持 **`.jsonl`**、**`.html`**。
+
+### 修复
+
+- **Windows `write_file` GBK 编码**：GBK 无法表示的 Unicode 时回退 **GB18030**，仍失败则按 rune 替换 `?`，避免 `rune not supported by encoding`。
+- **Go TUI `/context`**：`system_prompt` / `recent_messages` 折行改用显示宽度（`runewidth`），修复中文等多字节字符尾端乱码。
+
+（Git **tag**：`v0.2.20`。）
+
 ## [0.2.19] - 2026-06-11
 
 **0.x 预览**：Linux `dagents` 启动与路径修复（任意目录执行、`set -u` 兼容）。
