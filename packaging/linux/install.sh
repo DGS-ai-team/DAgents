@@ -27,6 +27,7 @@ usage() {
   root/sudo PREFIX=/opt/dagents            BIN_DIR=/usr/local/bin
 
 说明:
+  - 若 PREFIX 下已有 .runtime/node.pid，安装前先停止对应 Node（优先 dagents node shutdown）
   - 拷贝 bin/、.runtime/、scripts/、配置示例与 dagents 启动脚本
   - 在 BIN_DIR 创建 dagents 符号链接
   - 写入 DAGENTS_HOME 与 PATH（含 `bin/`、`.runtime/scripts/`；/etc/profile.d/dagents.sh 或 ~/.profile）
@@ -40,6 +41,59 @@ die() {
 
 info() {
   echo "[install] $*"
+}
+
+NODE_STOP_TIMEOUT_SEC=15
+
+pid_alive() {
+  local pid="$1"
+  [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+}
+
+# 对指定 pid 先发 TERM，超时后 KILL（与 packaging/linux/dagents 一致）。
+stop_pid_gracefully() {
+  local pid="$1"
+  if ! pid_alive "${pid}"; then
+    return 0
+  fi
+  kill -TERM "${pid}" 2>/dev/null || true
+  local waited=0
+  while pid_alive "${pid}"; do
+    sleep 1
+    waited=$((waited + 1))
+    if [[ "${waited}" -ge "${NODE_STOP_TIMEOUT_SEC}" ]]; then
+      kill -KILL "${pid}" 2>/dev/null || true
+      sleep 1
+      break
+    fi
+  done
+}
+
+# 重装/升级同一 PREFIX 前：若已有 node.pid，先停掉旧 Node，避免覆盖二进制时进程仍占用 .runtime。
+shutdown_existing_node_before_install() {
+  local pid_file="${PREFIX}/.runtime/node.pid"
+  if [[ ! -f "${pid_file}" ]]; then
+    return 0
+  fi
+
+  info "found ${pid_file}, stopping existing node before install"
+  # 优先走已安装 dagents（含 probe 与 pgrep 兜底），与日常 shutdown 行为一致。
+  if [[ -x "${PREFIX}/dagents" ]]; then
+    if "${PREFIX}/dagents" node shutdown; then
+      return 0
+    fi
+    info "dagents node shutdown failed, falling back to pid kill"
+  fi
+
+  local pid
+  pid="$(tr -d '[:space:]' <"${pid_file}")"
+  if pid_alive "${pid}"; then
+    info "stopping node process pid=${pid}"
+    stop_pid_gracefully "${pid}"
+  else
+    info "removing stale node.pid (pid=${pid})"
+  fi
+  rm -f "${pid_file}"
 }
 
 default_paths() {
@@ -192,6 +246,7 @@ do_uninstall() {
 
 do_install() {
   default_paths
+  shutdown_existing_node_before_install
   validate_source
   install_files
   if [[ "${NO_PATH}" -eq 0 ]]; then
