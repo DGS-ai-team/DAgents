@@ -30,6 +30,9 @@ fi
 BIN="${ROOT}/bin"
 NODE_PID_FILE="${ROOT}/.runtime/node.pid"
 NODE_STOP_TIMEOUT_SEC=15
+# set -u 下空数组 "${PARSED_ARGS[@]}" 会 unbound；须预先声明并在无额外参数时分支 exec。
+WITHNODE=0
+PARSED_ARGS=()
 
 die() {
   echo "[dagents] $*" >&2
@@ -247,7 +250,11 @@ case "$1" in
       ensure_node
     fi
     require_bin dagents-cli
-    exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}" "${PARSED_ARGS[@]}"
+    if ((${#PARSED_ARGS[@]} > 0)); then
+      exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}" "${PARSED_ARGS[@]}"
+    else
+      exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}"
+    fi
     ;;
   tui)
     shift
@@ -256,7 +263,11 @@ case "$1" in
       ensure_node
     fi
     require_bin dagents-client
-    exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui "${PARSED_ARGS[@]}"
+    if ((${#PARSED_ARGS[@]} > 0)); then
+      exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui "${PARSED_ARGS[@]}"
+    else
+      exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui
+    fi
     ;;
   node)
     shift
