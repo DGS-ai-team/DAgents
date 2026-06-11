@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-06-11
+
+**0.x 预览**：Windows `dagents node` 与 Linux 对齐；TUI 行号方框与 transcript 控制符修复。
+
+### 变更
+
+- **Windows `dagents.cmd`**：`dagents node` 默认**后台**启动并等待 probe；新增 **`shutdown`/`restart`**、`--foreground`、`--no-wait`；写入 `.runtime\node.pid`；安装包快捷方式同步调整。
+
+### 修复
+
+- **`read_file` 行号**：由 `N\t` 改为空格对齐，避免 Windows TUI 将制表符显示为方框压住正文。
+- **Go TUI transcript**：展开 `\t`、剥离 C0 控制符（含 `\x1e`），修复消息行首方框遮挡文字。
+
+（Git **tag**：`v0.2.21`。）
+
 ## [0.2.20] - 2026-06-11
 
 **0.x 预览**：Windows 文件工具 GBK 写盘、jsonl/html 可读、Go TUI `/context` 中文折行修复。
