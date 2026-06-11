@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
@@ -67,20 +69,57 @@ func encodeFileContent(text, enc string) ([]byte, error) {
 	if enc == "utf-8" {
 		return []byte(text), nil
 	}
-	var t transform.Transformer
-	switch enc {
-	case "gbk":
-		t = simplifiedchinese.GBK.NewEncoder()
-	case "gb18030":
-		t = simplifiedchinese.GB18030.NewEncoder()
-	default:
-		return []byte(text), nil
+	if !utf8.ValidString(text) {
+		text = strings.ToValidUTF8(text, "?")
 	}
-	out, _, err := transform.String(t, text)
+	out, err := encodeTextToLegacyChinese(text, enc)
 	if err != nil {
 		return nil, fmt.Errorf("encode file content (%s): %w", enc, err)
 	}
-	return []byte(out), nil
+	return out, nil
+}
+
+// encodeTextToLegacyChinese 将 UTF-8 文本编码为 GBK/GB18030 字节。
+//
+// 逻辑：
+// 1. gbk：先 GBK；失败则用 GB18030（超集，覆盖 GBK 未收录的 Unicode）；
+// 2. gb18030：直接 GB18030；
+// 3. 仍失败时按 rune 编码，不可表示字符替换为 ASCII `?`。
+func encodeTextToLegacyChinese(text, enc string) ([]byte, error) {
+	switch enc {
+	case "gbk":
+		if out, _, err := transform.Bytes(simplifiedchinese.GBK.NewEncoder(), []byte(text)); err == nil {
+			return out, nil
+		}
+		if out, _, err := transform.Bytes(simplifiedchinese.GB18030.NewEncoder(), []byte(text)); err == nil {
+			return out, nil
+		}
+		return encodeTextWithReplacement(text, simplifiedchinese.GB18030.NewEncoder())
+	case "gb18030":
+		if out, _, err := transform.Bytes(simplifiedchinese.GB18030.NewEncoder(), []byte(text)); err == nil {
+			return out, nil
+		}
+		return encodeTextWithReplacement(text, simplifiedchinese.GB18030.NewEncoder())
+	default:
+		return []byte(text), nil
+	}
+}
+
+func encodeTextWithReplacement(text string, enc transform.Transformer) ([]byte, error) {
+	var buf bytes.Buffer
+	for _, r := range text {
+		if r < utf8.RuneSelf {
+			buf.WriteByte(byte(r))
+			continue
+		}
+		out, _, err := transform.Bytes(enc, []byte(string(r)))
+		if err != nil {
+			buf.WriteByte('?')
+			continue
+		}
+		buf.Write(out)
+	}
+	return buf.Bytes(), nil
 }
 
 func normalizeLines(text string) []string {

@@ -24,7 +24,7 @@ const (
 )
 
 var textSuffixes = map[string]struct{}{
-	".txt": {}, ".md": {}, ".py": {}, ".json": {}, ".yaml": {}, ".yml": {},
+	".txt": {}, ".md": {}, ".py": {}, ".json": {}, ".jsonl": {}, ".html": {}, ".yaml": {}, ".yml": {},
 	".toml": {}, ".ini": {}, ".cfg": {}, ".sh": {}, ".bat": {}, ".ps1": {},
 	".log": {}, ".csv": {}, ".ts": {}, ".tsx": {}, ".js": {}, ".jsx": {}, ".go": {},
 }

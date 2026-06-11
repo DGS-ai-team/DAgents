@@ -28,7 +28,7 @@ func readFileToolDef() ToolDef {
 				"properties": map[string]any{
 					"path": map[string]any{
 						"type":        "string",
-						"description": "工作区内相对 fs_root 的路径（必填）；支持无后缀文本文件",
+						"description": "工作区内相对 fs_root 的路径（必填）；支持无后缀及常见文本后缀（含 .jsonl、.html）",
 					},
 					"line_offset": map[string]any{
 						"type":        "integer",

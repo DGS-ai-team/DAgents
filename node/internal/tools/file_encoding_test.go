@@ -118,6 +118,46 @@ func TestSearchReplaceEncodingGBK(t *testing.T) {
 	}
 }
 
+func TestWriteFileEncodingGBKWithUnicodeBeyondGBK(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30, "", "gbk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "中文→emoji🎉"
+	out, err := reg.Execute(context.Background(), "write_file", encodeToolArgs(t, map[string]any{
+		"path":    "unicode.txt",
+		"content": content,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "ERROR:") {
+		t.Fatalf("write_file failed: %q", out)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "unicode.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, ok := transcodeShellOutput(raw, "gb18030")
+	if !ok {
+		text, ok = transcodeShellOutput(raw, "gbk")
+	}
+	if !ok || !strings.Contains(text, "中文") {
+		t.Fatalf("decoded = %q ok=%v", text, ok)
+	}
+}
+
+func TestEncodeFileContentInvalidUTF8(t *testing.T) {
+	raw, err := encodeFileContent(string([]byte{0xff, 0xfe, 'a'}), "gbk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("expected encoded bytes")
+	}
+}
+
 func encodeToolArgs(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)
