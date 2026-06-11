@@ -49,6 +49,17 @@ func TestFormatTranscriptLineForDisplayUsageDedicatedLine(t *testing.T) {
 	}
 }
 
+func TestSanitizeTerminalText_stripsControlAndExpandsTab(t *testing.T) {
+	raw := "50\t| sailfish" + usageStorageSep + "leak"
+	got := sanitizeTerminalText(raw)
+	if strings.Contains(got, "\t") || strings.Contains(got, usageStorageSep) {
+		t.Fatalf("controls remain: %q", got)
+	}
+	if !strings.HasPrefix(got, "50    | sailfish") {
+		t.Fatalf("tab expand = %q", got)
+	}
+}
+
 func TestFormatTranscriptLineForDisplayRoleDots(t *testing.T) {
 	cases := []struct {
 		line, wantSub string

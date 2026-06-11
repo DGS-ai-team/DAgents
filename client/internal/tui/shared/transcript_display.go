@@ -17,6 +17,31 @@ func SplitStoredUsage(body string) (content, usagePlain string) {
 	return body[:i], body[i+len(usageStorageSep):]
 }
 
+// sanitizeTerminalText 清理不可见控制符，避免 Windows TUI 将 \t、\x1e 等渲染为方框压住正文。
+//
+// 保留 \n / \r；\t 展开为空格；其余 C0 控制符（含 usage 存储分隔符 \x1e）丢弃。
+func sanitizeTerminalText(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\n', '\r':
+			b.WriteRune(r)
+		case '\t':
+			b.WriteString("    ")
+		default:
+			if r < 0x20 || r == 0x7f {
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // FormatTranscriptLineForDisplay 为 viewport 渲染单行：彩色圆点 + usage 右对齐。
 func FormatTranscriptLineForDisplay(line string, width int) string {
 	if width <= 0 {
@@ -26,29 +51,29 @@ func FormatTranscriptLineForDisplay(line string, width int) string {
 	case strings.HasPrefix(line, "[assistant] "):
 		body := strings.TrimPrefix(line, "[assistant] ")
 		content, usage := SplitStoredUsage(body)
-		return formatRoleLineWithUsage(roleDotAssistant, content, usage, width)
+		return formatRoleLineWithUsage(roleDotAssistant, sanitizeTerminalText(content), sanitizeTerminalText(usage), width)
 	case strings.HasPrefix(line, "[user] "):
-		return roleDotUser + strings.TrimPrefix(line, "[user] ")
+		return roleDotUser + sanitizeTerminalText(strings.TrimPrefix(line, "[user] "))
 	case strings.HasPrefix(line, "[reasoning] "):
-		return roleDotReasoning + strings.TrimPrefix(line, "[reasoning] ")
+		return roleDotReasoning + sanitizeTerminalText(strings.TrimPrefix(line, "[reasoning] "))
 	case strings.HasPrefix(line, toolPendingLinePrefix):
 		body := strings.TrimPrefix(line, toolPendingLinePrefix)
 		if i := strings.Index(body, "] "); i >= 0 {
 			body = body[i+2:]
 		}
-		return roleDotTool + body
+		return roleDotTool + sanitizeTerminalText(body)
 	case strings.HasPrefix(line, "[tool]"):
 		rest := strings.TrimPrefix(line, "[tool]")
 		rest = strings.TrimLeft(rest, " ")
-		return roleDotTool + rest
+		return roleDotTool + sanitizeTerminalText(rest)
 	case strings.HasPrefix(line, "[system]"):
-		return roleDotSystem + strings.TrimPrefix(line, "[system]")
+		return roleDotSystem + sanitizeTerminalText(strings.TrimPrefix(line, "[system]"))
 	case strings.HasPrefix(line, sysPanelTitlePrefix):
 		title := strings.TrimPrefix(line, sysPanelTitlePrefix)
 		return roleDotSystem + panelTitleStyle + title + panelReset
 	case strings.HasPrefix(line, sysPanelBodyPrefix):
 		body := strings.TrimPrefix(line, sysPanelBodyPrefix)
-		return panelBodyIndent + formatPanelBodyLine(body)
+		return panelBodyIndent + formatPanelBodyLine(sanitizeTerminalText(body))
 	default:
 		return line
 	}

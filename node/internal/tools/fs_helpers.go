@@ -92,7 +92,8 @@ func windowFromTotal(total, lineOffset, lineLimit int) (start, end int) {
 func formatNumberedLines(lines []string, startLine int) []string {
 	out := make([]string, len(lines))
 	for i, line := range lines {
-		out[i] = fmt.Sprintf("%d\t%s", startLine+i, line)
+		// 用空格对齐行号，避免 \t 在 Windows 终端/TUI 中显示为方框并压住正文。
+		out[i] = fmt.Sprintf("%6d  %s", startLine+i, line)
 	}
 	return out
 }

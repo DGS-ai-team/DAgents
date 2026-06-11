@@ -48,8 +48,11 @@ func TestReadFilePagination(t *testing.T) {
 		t.Fatal(err)
 	}
 	body2 := readFileBody(out2)
-	if !strings.Contains(body2, "4\tline4") || !strings.Contains(body2, "5\tline5") {
+	if !strings.Contains(body2, "4  line4") || !strings.Contains(body2, "5  line5") {
 		t.Fatalf("numbered body = %q", body2)
+	}
+	if strings.Contains(body2, "\t") {
+		t.Fatalf("numbered body should not contain tab: %q", body2)
 	}
 	if !strings.Contains(out2, "next_line_offset: 无") {
 		t.Fatalf("expected no more pages: %q", out2)
