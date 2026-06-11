@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.2.19] - 2026-06-11
+
+**0.x 预览**：Linux `dagents` 启动与路径修复（任意目录执行、`set -u` 兼容）。
+
+### 修复
+
+- **Linux `dagents` 工作目录**：启动前 `cd` 到安装根（对齐 Windows `pushd`），`fs_root: ./.runtime` 从任意目录执行 `dagents node` 时读写正确的 `.runtime/`（含 `prompt_context/`、`memory/`）。
+- **Linux `dagents tui/chat`**：`set -u` 下无额外参数时不再展开空 `PARSED_ARGS` 数组（`unbound variable`）。
+
+（Git **tag**：`v0.2.19`。）
+
 ## [0.2.18] - 2026-06-11
 
 **0.x 预览**：Manage 控制面 M0+M1、Register Center Phase 1、Go Node 自动注册与 Console 目录；Go TUI 体验与 Linux `dagents node` 生命周期增强。
