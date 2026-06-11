@@ -31,6 +31,12 @@ func FormatTranscriptLineForDisplay(line string, width int) string {
 		return roleDotUser + strings.TrimPrefix(line, "[user] ")
 	case strings.HasPrefix(line, "[reasoning] "):
 		return roleDotReasoning + strings.TrimPrefix(line, "[reasoning] ")
+	case strings.HasPrefix(line, toolPendingLinePrefix):
+		body := strings.TrimPrefix(line, toolPendingLinePrefix)
+		if i := strings.Index(body, "] "); i >= 0 {
+			body = body[i+2:]
+		}
+		return roleDotTool + body
 	case strings.HasPrefix(line, "[tool]"):
 		rest := strings.TrimPrefix(line, "[tool]")
 		rest = strings.TrimLeft(rest, " ")

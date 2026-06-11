@@ -11,6 +11,7 @@ import (
 func TestRefreshViewportContent_staysWhenScrolledUp(t *testing.T) {
 	m := &model{
 		transcript: tuishared.NewTranscript(0),
+		toolFold:   &tuishared.ToolFold{},
 	}
 	m.transcript.Add("line-1")
 	m.transcript.Add("line-2")
@@ -47,6 +48,7 @@ func TestRefreshViewportContent_staysWhenScrolledUp(t *testing.T) {
 func TestRefreshViewportContent_followsWhenAtBottom(t *testing.T) {
 	m := &model{
 		transcript: tuishared.NewTranscript(0),
+		toolFold:   &tuishared.ToolFold{},
 	}
 	for i := 0; i < 5; i++ {
 		m.transcript.Add("line")

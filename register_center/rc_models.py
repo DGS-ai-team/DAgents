@@ -7,6 +7,37 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from rc_a2a_recent import A2ARecentEntry
+from rc_audit import AuditEvent
+from rc_status import AgentStatus, derive_status, offline_grace_seconds
+
+AuthMethod = Literal["shared_token", "mtls", "none"]
+RiskLevel = Literal["low", "medium", "high"]
+
+
+def _normalize_string_list(value: Any, *, field_name: str, allow_empty: bool = True) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_items = [value]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        raise ValueError(f"{field_name} 必须是字符串或字符串列表")
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in raw_items:
+        if not isinstance(item, str):
+            raise ValueError(f"{field_name} 列表项必须是字符串")
+        cleaned = item.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result.append(cleaned)
+    if not allow_empty and not result:
+        raise ValueError(f"{field_name} 不能为空")
+    return result
+
 
 class AgentUpsertRequest(BaseModel):
     """登记或更新 Agent 的请求体。
@@ -51,6 +82,20 @@ class AgentUpsertRequest(BaseModel):
         le=3600,
         description="登记有效期秒数；客户端需按心跳周期刷新。",
     )
+    name: str = Field(default="", max_length=128, description="展示名；默认与 agent_id 相同。")
+    description: str = Field(default="", max_length=2048)
+    owner: str = Field(default="", max_length=256)
+    team: str = Field(default="", max_length=128)
+    capabilities: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    auth_method: AuthMethod = Field(default="shared_token")
+    risk_level: RiskLevel = Field(default="medium")
+    allowed_scopes: list[str] = Field(default_factory=list)
+    version: str = Field(default="", max_length=64)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    last_error_summary: str | None = Field(default=None, max_length=1024)
+    recent_task_summary: str | None = Field(default=None, max_length=1024)
 
     @field_validator("agent_id")
     @classmethod
@@ -187,25 +232,74 @@ class AgentUpsertRequest(BaseModel):
         - 无。
         """
 
+        return _normalize_string_list(value, field_name="capabilities_hint")
+
+    @field_validator("capabilities", "tools", "skills", "allowed_scopes", mode="before")
+    @classmethod
+    def validate_string_lists(cls, value: Any) -> list[str]:
+        field_name = "capabilities"
+        return _normalize_string_list(value, field_name=field_name)
+
+    @field_validator("name", "owner", "team", "version", mode="before")
+    @classmethod
+    def validate_trimmed_text(cls, value: Any) -> str:
         if value is None:
-            return []
-        if isinstance(value, str):
-            raw_items = [value]
-        elif isinstance(value, list):
-            raw_items = value
-        else:
-            raise ValueError("capabilities_hint 必须是字符串或字符串列表")
-        seen: set[str] = set()
-        result: list[str] = []
-        for item in raw_items:
-            if not isinstance(item, str):
-                raise ValueError("capabilities_hint 列表项必须是字符串")
-            cleaned = item.strip()
-            if not cleaned or cleaned in seen:
-                continue
-            seen.add(cleaned)
-            result.append(cleaned)
-        return result
+            return ""
+        if not isinstance(value, str):
+            raise ValueError("字段必须是字符串")
+        return value.strip()
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def validate_description(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ValueError("description 必须是字符串")
+        return value.strip()
+
+    @field_validator("last_error_summary", "recent_task_summary", mode="before")
+    @classmethod
+    def validate_optional_summary(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("摘要字段必须是字符串")
+        cleaned = value.strip()
+        return cleaned or None
+
+    @model_validator(mode="after")
+    def apply_defaults(self) -> "AgentUpsertRequest":
+        if not self.name:
+            self.name = self.agent_id
+        return self
+
+
+class AgentStoredRecord(BaseModel):
+    """持久化层 Agent 记录（不含派生 status）。"""
+
+    agent_id: str
+    base_url: str
+    discovery_group: list[str]
+    capabilities_hint: list[str] = Field(default_factory=list)
+    name: str
+    description: str = ""
+    owner: str = ""
+    team: str = ""
+    capabilities: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    auth_method: AuthMethod = "shared_token"
+    risk_level: RiskLevel = "medium"
+    allowed_scopes: list[str] = Field(default_factory=list)
+    version: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    last_error_summary: str | None = None
+    recent_task_summary: str | None = None
+    registered_at_unix: int
+    updated_at_unix: int
+    last_seen_unix: int
+    expires_at_unix: int
 
 
 class AgentRecord(BaseModel):
@@ -215,14 +309,42 @@ class AgentRecord(BaseModel):
     base_url: str
     discovery_group: list[str]
     capabilities_hint: list[str] = Field(default_factory=list)
+    name: str
+    description: str = ""
+    owner: str = ""
+    team: str = ""
+    capabilities: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    auth_method: AuthMethod = "shared_token"
+    risk_level: RiskLevel = "medium"
+    allowed_scopes: list[str] = Field(default_factory=list)
+    version: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    last_error_summary: str | None = None
+    recent_task_summary: str | None = None
     registered_at_unix: int
+    updated_at_unix: int
+    last_seen_unix: int
     expires_at_unix: int
+    status: AgentStatus
 
 
 class AgentListResponse(BaseModel):
     """Agent 列表查询返回结构。"""
 
     agents: list[AgentRecord]
+    page: int = 1
+    page_size: int = 50
+    total: int = 0
+
+
+class AuditListResponse(BaseModel):
+    events: list[AuditEvent]
+
+
+class A2ARecentListResponse(BaseModel):
+    entries: list[A2ARecentEntry]
 
 
 class HealthResponse(BaseModel):

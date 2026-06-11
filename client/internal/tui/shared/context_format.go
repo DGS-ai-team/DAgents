@@ -7,7 +7,84 @@ import (
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 )
 
-// FormatSessionContext 将 GET context 响应格式化为只读文本（供 /context 或日志）。
+// FormatSessionContextPanelBody 构造 /context 面板正文行（panel 编码）。
+func FormatSessionContextPanelBody(ctx *nodeapi.SessionContext) []string {
+	if ctx == nil {
+		return []string{panelLine(panelKindEmpty, "无 context 数据")}
+	}
+	turn := orDash(ctx.TurnState)
+	if turn == "-" && ctx.HasActiveTurn {
+		turn = "active"
+	}
+	lines := []string{
+		panelKV("session", ctx.SessionID),
+		panelKV("turn", turn),
+		panelKV("phase", orDash(ctx.RunTurnPhase)),
+		panelKV("messages", fmt.Sprintf("%d", ctx.MessagesCount)),
+		panelKV("pending_tools", fmt.Sprintf("%d", ctx.PendingToolCallsCount)),
+		panelKV("tokens", fmt.Sprintf("%d", ctx.MessagesTotalTokens)),
+		panelKV("tool_loop", fmt.Sprintf("%d", ctx.ToolLoopCount)),
+		panelKV("queue", fmt.Sprintf("%d", ctx.QueuePending)),
+		panelLine(panelKindSection, "system_prompt"),
+	}
+	if strings.TrimSpace(ctx.SystemPrompt) == "" {
+		lines = append(lines, panelLine(panelKindPreview, "(none)"))
+	} else {
+		for _, part := range wrapLines(strings.TrimSpace(ctx.SystemPrompt), 72) {
+			lines = append(lines, panelLine(panelKindPreview, part))
+		}
+	}
+	lines = append(lines, panelLine(panelKindSection, "loaded_skills"))
+	if len(ctx.LoadedSkills) == 0 {
+		lines = append(lines, panelLine(panelKindEmpty, "(none)"))
+	} else {
+		for _, sk := range ctx.LoadedSkills {
+			name := strings.TrimSpace(sk.SkillName)
+			if name == "" {
+				name = "-"
+			}
+			desc := strings.TrimSpace(sk.Description)
+			lines = append(lines, panelLine(panelKindLoaded, name, desc))
+		}
+	}
+	lines = append(lines, panelLine(panelKindSection, "recent_messages"))
+	if len(ctx.RecentMessages) == 0 {
+		lines = append(lines, panelLine(panelKindEmpty, "(none)"))
+	} else {
+		for i, msg := range ctx.RecentMessages {
+			role := strings.TrimSpace(msg.Role)
+			if role == "" {
+				role = "unknown"
+			}
+			meta := fmt.Sprintf("%d. [%s]", i+1, role)
+			if msg.ToolCallsCount > 0 {
+				meta += fmt.Sprintf(" tool_calls=%d", msg.ToolCallsCount)
+			}
+			lines = append(lines, panelLine(panelKindPreview, meta))
+			content := strings.TrimSpace(msg.Content)
+			if content == "" {
+				content = "(empty)"
+			}
+			for _, part := range wrapLines(content, 72) {
+				lines = append(lines, panelLine(panelKindPreview, "   "+part))
+			}
+		}
+	}
+	return lines
+}
+
+// FormatSessionContextPanel 将 context 格式化为带 ANSI 的面板文本（供全屏 viewport）。
+func FormatSessionContextPanel(ctx *nodeapi.SessionContext) string {
+	title := FormatTranscriptLineForDisplay(sysPanelTitlePrefix+"Session Context", 0)
+	body := FormatSessionContextPanelBody(ctx)
+	lines := []string{title}
+	for _, line := range body {
+		lines = append(lines, FormatTranscriptLineForDisplay(sysPanelBodyPrefix+line, 0))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// FormatSessionContext 将 GET context 响应格式化为只读文本（供 REPL 或日志）。
 func FormatSessionContext(ctx *nodeapi.SessionContext) string {
 	if ctx == nil {
 		return "(无 context 数据)"

@@ -176,3 +176,27 @@ func TestLoadFile_envAgentIDOverridesFile(t *testing.T) {
 		t.Fatalf("agent_id file = %q, want env-wins", raw)
 	}
 }
+
+func TestManageRegistryBaseURL_prefersRegistrationOverride(t *testing.T) {
+	cfg := &Config{
+		Local: LocalConfig{Endpoint: "http://127.0.0.1:18765"},
+		Manage: ManageConfig{
+			Registration: ManageRegistrationConfig{
+				BaseURL: "http://192.168.1.10:18765",
+			},
+		},
+	}
+	if got := cfg.ManageRegistryBaseURL(); got != "http://192.168.1.10:18765" {
+		t.Fatalf("ManageRegistryBaseURL = %q", got)
+	}
+	if cfg.ManageRegistryBaseURLIsLoopback() {
+		t.Fatal("expected loopback false for LAN base_url")
+	}
+	cfg.Manage.Registration.BaseURL = ""
+	if got := cfg.ManageRegistryBaseURL(); got != "http://127.0.0.1:18765" {
+		t.Fatalf("fallback ManageRegistryBaseURL = %q", got)
+	}
+	if !cfg.ManageRegistryBaseURLIsLoopback() {
+		t.Fatal("expected loopback true for local endpoint")
+	}
+}

@@ -3,10 +3,12 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -117,11 +119,22 @@ type LLMConfig struct {
 	MaxToolLoops int    `yaml:"max_tool_loops"`
 }
 
-// ManageConfig 控制是否向 Manage 注册；AC 阶段默认 enabled=false。
+// ManageConfig 控制是否向 Manage 注册；默认 enabled=false。
 type ManageConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	URL       string `yaml:"url"`
-	NodeToken string `yaml:"node_token"`
+	Enabled      bool                     `yaml:"enabled"`
+	URL          string                   `yaml:"url"`
+	NodeToken    string                   `yaml:"node_token"`
+	Registration ManageRegistrationConfig `yaml:"registration"`
+}
+
+// ManageRegistrationConfig 控制周期性 upsert/心跳参数。
+type ManageRegistrationConfig struct {
+	BaseURL         string `yaml:"base_url"`
+	IntervalSeconds int    `yaml:"interval_seconds"`
+	TTLSeconds      int    `yaml:"ttl_seconds"`
+	Name            string `yaml:"name"`
+	Team            string `yaml:"team"`
+	Description     string `yaml:"description"`
 }
 
 // LoadFile 从 YAML 文件加载配置并完成默认值填充与环境变量展开。
@@ -204,6 +217,12 @@ func (c *Config) ApplyDefaults() {
 	if c.ChildAgents.DefaultWaitTimeoutSeconds <= 0 {
 		c.ChildAgents.DefaultWaitTimeoutSeconds = 300
 	}
+	if c.Manage.Registration.IntervalSeconds <= 0 {
+		c.Manage.Registration.IntervalSeconds = 30
+	}
+	if c.Manage.Registration.TTLSeconds <= 0 {
+		c.Manage.Registration.TTLSeconds = 60
+	}
 }
 
 // RuntimeDir 返回运行时根目录（与 `fs_root` 一致；子目录路径均相对此根硬编码）。
@@ -239,7 +258,72 @@ func (c *Config) Validate() error {
 	if c.Manage.Enabled && strings.TrimSpace(c.Manage.URL) == "" {
 		return fmt.Errorf("manage.url is required when manage.enabled is true")
 	}
+	if c.Manage.Enabled {
+		if base := strings.TrimSpace(c.Manage.Registration.BaseURL); base != "" {
+			if _, err := url.Parse(base); err != nil {
+				return fmt.Errorf("manage.registration.base_url invalid: %w", err)
+			}
+		}
+	}
 	return nil
+}
+
+// DiscoveryGroups 返回 YAML groups 字段（**不**用于 Manage 注册；分组由 Manage 分配）。
+func (c *Config) DiscoveryGroups() []string {
+	seen := make(map[string]struct{}, len(c.Groups))
+	out := make([]string, 0, len(c.Groups))
+	for _, raw := range c.Groups {
+		group := strings.TrimSpace(raw)
+		if group == "" {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		out = append(out, group)
+	}
+	return out
+}
+
+// ManageRegistrationInterval 返回心跳/注册轮询间隔。
+func (c *Config) ManageRegistrationInterval() time.Duration {
+	if c == nil || c.Manage.Registration.IntervalSeconds <= 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(c.Manage.Registration.IntervalSeconds) * time.Second
+}
+
+// ManageRegistryBaseURL 返回上报 Manage Registry 的 base_url。
+// 优先 manage.registration.base_url；留空则回退 local.endpoint。
+func (c *Config) ManageRegistryBaseURL() string {
+	if c == nil {
+		return ""
+	}
+	if base := strings.TrimSpace(c.Manage.Registration.BaseURL); base != "" {
+		return strings.TrimRight(base, "/")
+	}
+	return strings.TrimRight(strings.TrimSpace(c.Local.Endpoint), "/")
+}
+
+// ManageRegistryBaseURLIsLoopback 判断上报地址是否为 loopback（运维/A2A 可达性提示用）。
+func (c *Config) ManageRegistryBaseURLIsLoopback() bool {
+	raw := c.ManageRegistryBaseURL()
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	host := strings.ToLower(strings.Trim(u.Hostname(), "[]"))
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // ListenAddr 返回 host:port 监听地址字符串。
@@ -311,9 +395,4 @@ func (c *Config) Capabilities() []string {
 		caps = append(caps, "triggers")
 	}
 	return caps
-}
-
-// ManageRegistered 表示当前是否已向 Manage 完成注册（N0 恒为 false）。
-func (c *Config) ManageRegistered() bool {
-	return false
 }

@@ -1,0 +1,333 @@
+// Package manage 实现 Node 向 Manage 控制面的出站注册与心跳 sidecar。
+package manage
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
+	"github.com/DGS-ai-team/DAgents/node/internal/version"
+	"github.com/DGS-ai-team/DAgents/shared/config"
+)
+
+const tokenHeader = "x-dagents-a2a-token"
+const agentIDHeader = "x-dagents-agent-id"
+
+// ToolNamesProvider 返回当前可用工具名列表（心跳时刷新）。
+type ToolNamesProvider func() []string
+
+// Registrar 周期性向 Manage 注册并发送心跳。
+type Registrar struct {
+	cfg        *config.Config
+	logger     *slog.Logger
+	client     *http.Client
+	toolNames  ToolNamesProvider
+	interval   time.Duration
+	ttlSeconds int
+
+	mu         sync.RWMutex
+	registered bool
+}
+
+// NewRegistrar 构造 Manage 注册 sidecar；cfg.Manage.Enabled 应为 true。
+func NewRegistrar(cfg *config.Config, logger *slog.Logger) *Registrar {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Registrar{
+		cfg:        cfg,
+		logger:     logger,
+		client:     &http.Client{Timeout: 15 * time.Second},
+		interval:   cfg.ManageRegistrationInterval(),
+		ttlSeconds: cfg.Manage.Registration.TTLSeconds,
+	}
+}
+
+// SetToolNamesProvider 注入工具名提供者（通常为 session.Manager.ToolNames）。
+func (r *Registrar) SetToolNamesProvider(provider ToolNamesProvider) {
+	r.toolNames = provider
+}
+
+// Registered 表示最近一次 register/heartbeat 是否成功。
+func (r *Registrar) Registered() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.registered
+}
+
+func (r *Registrar) setRegistered(ok bool) {
+	r.mu.Lock()
+	r.registered = ok
+	r.mu.Unlock()
+}
+
+// Start 启动后台注册/心跳循环；ctx 取消时 goroutine 退出（不自动 deregister）。
+func (r *Registrar) Start(ctx context.Context) {
+	go r.run(ctx)
+}
+
+// Stop 尝试优雅注销并清除注册态。
+func (r *Registrar) Stop(ctx context.Context) {
+	if err := r.deregister(ctx); err != nil {
+		r.logger.Warn("manage deregister failed", "error", err)
+	}
+	r.setRegistered(false)
+}
+
+func (r *Registrar) run(ctx context.Context) {
+	if iv := r.register(ctx); iv > 0 {
+		r.resetInterval(iv)
+	}
+
+	ticker := time.NewTicker(r.currentInterval())
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := r.heartbeat(ctx); err != nil {
+				r.logger.Warn("manage heartbeat failed", "error", err)
+				if isNotFound(err) {
+					if iv := r.register(ctx); iv > 0 {
+						ticker.Reset(iv)
+					}
+				}
+				continue
+			}
+			ticker.Reset(r.currentInterval())
+		}
+	}
+}
+
+func (r *Registrar) currentInterval() time.Duration {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.interval
+}
+
+func (r *Registrar) resetInterval(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	r.mu.Lock()
+	r.interval = d
+	r.mu.Unlock()
+}
+
+func (r *Registrar) register(ctx context.Context) time.Duration {
+	if r.cfg.ManageRegistryBaseURLIsLoopback() {
+		r.logger.Warn(
+			"manage registration base_url is loopback; set manage.registration.base_url to a reachable LAN address",
+			"base_url", r.cfg.ManageRegistryBaseURL(),
+		)
+	}
+	payload := r.buildRegisterPayload()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		r.logger.Error("manage register marshal failed", "error", err)
+		r.setRegistered(false)
+		return 0
+	}
+
+	endpoint := r.registryURL("/v1/registry/agents")
+	resp, err := r.doRequest(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		r.logger.Warn("manage register request failed", "error", err)
+		r.setRegistered(false)
+		return 0
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg := readErrorBody(resp.Body)
+		r.logger.Warn("manage register rejected", "status", resp.StatusCode, "detail", msg)
+		r.setRegistered(false)
+		return 0
+	}
+
+	var out registerResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		r.logger.Warn("manage register decode failed", "error", err)
+		r.setRegistered(false)
+		return 0
+	}
+
+	r.setRegistered(true)
+	r.logger.Info("manage registered", "agent_id", r.cfg.AgentID, "status", out.Agent.Status)
+	if out.HeartbeatIntervalSeconds > 0 {
+		return time.Duration(out.HeartbeatIntervalSeconds) * time.Second
+	}
+	return r.cfg.ManageRegistrationInterval()
+}
+
+func (r *Registrar) heartbeat(ctx context.Context) error {
+	payload := heartbeatPayload{
+		TTLSeconds:    r.ttlSeconds,
+		Version:       version.Version,
+		Tools:         r.collectTools(),
+		ExposeToPeers: boolPtr(r.cfg.ExposeToPeers),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		r.setRegistered(false)
+		return fmt.Errorf("marshal heartbeat: %w", err)
+	}
+
+	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.AgentID) + "/heartbeat")
+	resp, err := r.doRequest(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		r.setRegistered(false)
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		r.setRegistered(false)
+		return errNotFound
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		r.setRegistered(false)
+		return fmt.Errorf("heartbeat status %d: %s", resp.StatusCode, readErrorBody(resp.Body))
+	}
+	r.setRegistered(true)
+	return nil
+}
+
+func (r *Registrar) deregister(ctx context.Context) error {
+	payload := map[string]string{"reason": "shutdown"}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.AgentID) + "/deregister")
+	resp, err := r.doRequest(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("deregister status %d: %s", resp.StatusCode, readErrorBody(resp.Body))
+	}
+	return nil
+}
+
+func (r *Registrar) doRequest(ctx context.Context, method, endpoint string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(agentIDHeader, r.cfg.AgentID)
+	if token := strings.TrimSpace(r.cfg.Manage.NodeToken); token != "" {
+		req.Header.Set(tokenHeader, token)
+	}
+	return r.client.Do(req)
+}
+
+func (r *Registrar) registryURL(path string) string {
+	base := strings.TrimRight(strings.TrimSpace(r.cfg.Manage.URL), "/")
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return base + path
+}
+
+func (r *Registrar) buildRegisterPayload() registerPayload {
+	name := strings.TrimSpace(r.cfg.Manage.Registration.Name)
+	if name == "" {
+		name = r.cfg.AgentID
+	}
+	host := hostsnapshot.Get()
+	return registerPayload{
+		AgentID:          r.cfg.AgentID,
+		BaseURL:          r.cfg.ManageRegistryBaseURL(),
+		Capabilities:     r.cfg.Capabilities(),
+		Tools:           r.collectTools(),
+		TTLSeconds:      r.ttlSeconds,
+		Name:            name,
+		Description:     strings.TrimSpace(r.cfg.Manage.Registration.Description),
+		Team:            strings.TrimSpace(r.cfg.Manage.Registration.Team),
+		Version:         version.Version,
+		ExposeToPeers:   r.cfg.ExposeToPeers,
+		CapabilitiesHint: r.cfg.Capabilities(),
+		Metadata: map[string]any{
+			"node_version": version.Version,
+			"host_info": map[string]any{
+				"os_kind":          host.OSKind,
+				"sys_platform":     host.SysPlatform,
+				"platform_release": host.PlatformRelease,
+				"machine":          host.Machine,
+				"login_name":       host.LoginName,
+			},
+		},
+	}
+}
+
+func (r *Registrar) collectTools() []string {
+	if r.toolNames == nil {
+		return nil
+	}
+	return r.toolNames()
+}
+
+type registerPayload struct {
+	AgentID          string         `json:"agent_id"`
+	BaseURL          string         `json:"base_url"`
+	CapabilitiesHint []string       `json:"capabilities_hint,omitempty"`
+	Capabilities     []string       `json:"capabilities,omitempty"`
+	Tools            []string       `json:"tools,omitempty"`
+	TTLSeconds       int            `json:"ttl_seconds"`
+	Name             string         `json:"name"`
+	Description      string         `json:"description,omitempty"`
+	Team             string         `json:"team,omitempty"`
+	Version          string         `json:"version,omitempty"`
+	ExposeToPeers    bool           `json:"expose_to_peers"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
+}
+
+type heartbeatPayload struct {
+	TTLSeconds    int      `json:"ttl_seconds"`
+	Version       string   `json:"version,omitempty"`
+	Tools         []string `json:"tools,omitempty"`
+	ExposeToPeers *bool    `json:"expose_to_peers,omitempty"`
+}
+
+type registerResponse struct {
+	HeartbeatIntervalSeconds int `json:"heartbeat_interval_seconds"`
+	Agent                    struct {
+		Status string `json:"status"`
+	} `json:"agent"`
+}
+
+var errNotFound = fmt.Errorf("agent not found")
+
+func isNotFound(err error) bool {
+	return err == errNotFound
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func readErrorBody(r io.Reader) string {
+	const limit = 512
+	b, err := io.ReadAll(io.LimitReader(r, limit))
+	if err != nil || len(b) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}

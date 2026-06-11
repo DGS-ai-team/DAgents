@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DAgents Manage Console</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">MG</span>
+          <div>
+            <h1>Manage Console</h1>
+            <p class="subtitle">已注册 Agent Node 目录</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span id="health-pill" class="pill pill-muted">—</span>
+          <button type="button" id="btn-refresh" class="btn btn-primary">刷新</button>
+        </div>
+      </header>
+
+      <section class="stats-row" id="stats-row">
+        <div class="stat-card"><span class="stat-label">在线</span><strong id="stat-online">—</strong></div>
+        <div class="stat-card"><span class="stat-label">离线</span><strong id="stat-offline">—</strong></div>
+        <div class="stat-card"><span class="stat-label">合计</span><strong id="stat-total">—</strong></div>
+        <div class="stat-card"><span class="stat-label">A2A 可达</span><strong id="stat-peers">—</strong></div>
+      </section>
+
+      <section class="panel filters">
+        <div class="filters-grid">
+          <label class="field">
+            <span>discovery_group</span>
+            <input id="filter-group" type="text" placeholder="留空=全部" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>team</span>
+            <input id="filter-team" type="text" placeholder="精确匹配" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>status</span>
+            <select id="filter-status">
+              <option value="all" selected>all</option>
+              <option value="online">online</option>
+              <option value="offline">offline</option>
+            </select>
+          </label>
+          <label class="field field-grow">
+            <span>搜索</span>
+            <input id="filter-q" type="search" placeholder="name / agent_id / description" autocomplete="off" />
+          </label>
+          <label class="field field-narrow">
+            <span>每页</span>
+            <select id="filter-page-size">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+        </div>
+        <div class="filters-meta">
+          <span id="list-summary">—</span>
+          <span id="role-hint" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="panel table-wrap">
+        <div id="error-banner" class="banner banner-error hidden" role="alert"></div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>agent_id</th>
+                <th>team</th>
+                <th>status</th>
+                <th>version</th>
+                <th>last_seen</th>
+                <th>A2A</th>
+                <th>risk</th>
+                <th>tools</th>
+                <th>groups</th>
+              </tr>
+            </thead>
+            <tbody id="agent-rows">
+              <tr>
+                <td colspan="10" class="empty">加载中…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <footer class="pager">
+          <button type="button" id="btn-prev" class="btn btn-ghost" disabled>上一页</button>
+          <span id="pager-label">第 1 页</span>
+          <button type="button" id="btn-next" class="btn btn-ghost" disabled>下一页</button>
+        </footer>
+      </section>
+    </div>
+
+    <aside id="detail-drawer" class="drawer hidden" aria-hidden="true">
+      <div class="drawer-backdrop" id="drawer-backdrop"></div>
+      <div class="drawer-panel" role="dialog" aria-labelledby="drawer-title">
+        <header class="drawer-header">
+          <div>
+            <h2 id="drawer-title">—</h2>
+            <p id="drawer-subtitle" class="muted">—</p>
+          </div>
+          <button type="button" id="btn-close-drawer" class="btn btn-ghost" aria-label="关闭">✕</button>
+        </header>
+        <div class="drawer-body" id="drawer-body"></div>
+        <footer class="drawer-footer">
+          <a id="link-endpoint" class="btn btn-primary" href="#" target="_blank" rel="noopener">运维探活 endpoint</a>
+          <button type="button" class="btn btn-ghost" disabled title="M2 A2A inbox">发起 A2A（M2）</button>
+        </footer>
+      </div>
+    </aside>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>

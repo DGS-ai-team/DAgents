@@ -70,6 +70,16 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 		} else if len(parts) > 1 && strings.EqualFold(parts[1], "brief") {
 			m.toolFold.SetVerbose(false)
 			m.statusLine = "tool 输出：折叠"
+		} else if len(parts) > 1 && strings.EqualFold(parts[1], "expand") {
+			if id := m.toolBlocks.ExpandLast(); id != "" {
+				m.syncViewport()
+				m.statusLine = "已展开 " + id
+			}
+		} else if len(parts) > 1 && strings.EqualFold(parts[1], "collapse") {
+			if id := m.toolBlocks.CollapseLast(); id != "" {
+				m.syncViewport()
+				m.statusLine = "已收起 " + id
+			}
 		} else {
 			mode := "折叠"
 			if m.toolFold.Verbose() {
@@ -94,6 +104,7 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 		}
 		m.statusLine = "reasoning 显示: " + mode
 	case "quit", "exit", "q":
+		m.printResumeHint()
 		return true, nil
 	default:
 		return false, fmt.Errorf("未知命令 %q", cmd)
@@ -107,10 +118,12 @@ func (m *model) enterContextView() error {
 		return err
 	}
 	m.applyContextTokensFromView(ctxBody)
-	m.contextText = tuishared.FormatSessionContext(ctxBody)
+	m.contextText = tuishared.FormatSessionContextPanel(ctxBody)
 	m.contextMode = true
-	m.helpLine = "Esc 返回聊天记录"
-	m.viewport.SetContent(m.contextText)
+	m.viewportFollowTail = false
+	m.helpLine = "Esc 返回 · PgUp/PgDn 或 ↑/↓ 滚动"
+	m.refreshContextViewportContent(false, 0)
+	m.viewport.GotoTop()
 	m.statusLine = "context 视图"
 	return nil
 }
@@ -232,6 +245,9 @@ func (m *model) switchSession(requested string) error {
 	m.resetHITLQueue()
 	m.resetHITLState()
 	m.children.reset()
+	m.toolBlocks.Reset()
+	m.toolPending.Reset()
+	m.statusMgr.Reset()
 	m.messagesTotalTokens = -1
 	m.resetUsageStrip()
 	m.transcript.Add("[system] 已切换 session=" + id)

@@ -18,6 +18,8 @@ local:
 
 expose_to_peers: false
 
+# Manage 发现分组由 Manage Console / API 分配，Node 配置中无需 groups
+
 # 工作区根（工具沙箱 + 运行时子目录均相对此路径硬编码，缺省 ./.runtime）
 # 子目录：data/ 临时工作区 · memory/sessions.db 会话库 · skills/ · policy/ · history/ · triggers/ · agent/
 fs_root: ./.runtime
@@ -33,6 +35,14 @@ llm:
 
 manage:
   enabled: false
+  # url: http://127.0.0.1:8020
+  # registration:
+  #   base_url: http://192.168.1.10:18765   # 上报 Manage；留空则用 local.endpoint
+  #   interval_seconds: 30
+  #   ttl_seconds: 60
+  #   team: platform
+  # Node 注册时自动发送 Header: x-dagents-agent-id = agent_id
+  # node_token: 可选，仅 Manage 启用 MANAGE_TOKENS 时需要
 
 # 工具审批策略位于 fs_root/policy/（首次启动从 packaging/runtime/policy 种子复制）
 # 编辑 tool.approval.txt 与 shell/*.approval.txt 即可调整审批规则。

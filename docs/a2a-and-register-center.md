@@ -1,10 +1,11 @@
 # A2A（Agent 间协作）与 Register Center
 
-> **现网状态（v0.2.0+）**  
+> **现网状态（v0.2.17+）**  
 > - **Register Center**（**`register_center/`**）仍为独立 Python 服务：登记、**`/v1/broadcast`**、**`/v1/relay`**、可选 JSON 持久化。  
 > - **Go Agent Node 不集成 RC**：不自登记、不注册 **`agent_peer`** 工具。  
 > - **Python FastAPI Agent API 已移除**；下文 §3–§6 描述的 **`agent_*` 工具与自登记** 为 **历史行为**，源码见 [archive/python-agent-runtime/](./archive/python-agent-runtime/)。  
-> - **端到端 A2A 闭环** 计划在 **Manage** 阶段恢复，见 [future/a2a-via-manage.md](./future/a2a-via-manage.md)。
+> - **端到端 A2A 闭环** 计划在 **Manage** 阶段恢复，见 [future/a2a-via-manage.md](./future/a2a-via-manage.md)。  
+> - **Phase 1 企业目录**（扩展登记模型、admin 视图、Directory UI）见 [design/agent-directory-phase1.md](./design/agent-directory-phase1.md)（草案，未实现）。
 
 本文说明 **Register Center 控制面**（现行）与 **A2A 工具链**（已归档）的设计与 HTTP 契约。RC 实现入口：**`register_center/rc_app.py`**；历史 A2A 工具：**`app/harness/tools/agent_peer.py`**（归档）。
 
@@ -76,6 +77,8 @@
 - 源码目录：**`register_center/`**（详见该目录 **`README.md`**、**`REFERENCE.md`**）。
 
 ### 2.2 核心 HTTP 路由（与实现对齐）
+
+> **演进**：Phase 1 将扩展登记字段、admin 列表与 A2A 可观测 API，详见 [design/agent-directory-phase1.md](./design/agent-directory-phase1.md)。下表为 **v0.2.17 现行** MVP。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|

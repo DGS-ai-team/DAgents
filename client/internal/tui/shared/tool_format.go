@@ -9,6 +9,9 @@ import (
 const (
 	toolPreviewMaxRunes       = 240
 	toolDetailMaxLines        = 8
+	toolDetailLinePrefix      = "[tool-detail|"
+	toolPreviewLinePrefix     = "[tool-preview|"
+	toolPendingLinePrefix     = "[tool-pending|"
 	UserInformationToolName   = "ask_user_information"
 	userInformationDisplayName = "Agent 询问"
 	// CallPurposeKey 与 Node tools.CallPurposeKey 对齐，供 Client 展示工具调用首行。
@@ -22,19 +25,80 @@ type NormalizedToolCall struct {
 	Arguments map[string]any
 }
 
+// ToolEventID 从 SSE data 提取 tool 块 ID。
+func ToolEventID(data map[string]any) string {
+	for _, k := range []string{"tool_call_id", "call_id", "id"} {
+		if v := trimDisplayField(data[k]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// IsToolDetailLine 是否为可折叠 tool 详情行。
+func IsToolDetailLine(line string) bool {
+	return strings.HasPrefix(line, toolDetailLinePrefix)
+}
+
+// IsToolPreviewLine 是否为 tool 折叠预览行。
+func IsToolPreviewLine(line string) bool {
+	return strings.HasPrefix(line, toolPreviewLinePrefix)
+}
+
+// ToolBlockIDFromMetaLine 从 preview/detail/pending 行解析块 ID。
+func ToolBlockIDFromMetaLine(line string) string {
+	for _, prefix := range []string{toolDetailLinePrefix, toolPreviewLinePrefix, toolPendingLinePrefix} {
+		if strings.HasPrefix(line, prefix) {
+			rest := strings.TrimPrefix(line, prefix)
+			id, _, ok := strings.Cut(rest, "]")
+			if ok {
+				return strings.TrimSpace(id)
+			}
+		}
+	}
+	return ""
+}
+
+func formatToolMetaLine(prefix, id, body string) string {
+	return prefix + id + "] " + body
+}
+
 // FormatToolEvent 将 tool_call / tool_result SSE 格式化为用户可读的多行文本。
 func FormatToolEvent(eventType string, data map[string]any, verbose bool) []string {
+	id := ToolEventID(data)
+	return FormatToolEventWithID(eventType, data, id, verbose)
+}
+
+// RegisterToolCallsFromEvent 将 tool_call SSE 中的调用登记为 pending（供耗时展示）。
+func RegisterToolCallsFromEvent(data map[string]any, pending *ToolPendingTracker) {
+	if pending == nil {
+		return
+	}
+	for _, call := range extractToolCalls(data) {
+		if call.Name == UserInformationToolName {
+			continue
+		}
+		id := strings.TrimSpace(call.ID)
+		if id == "" {
+			continue
+		}
+		pending.Register(id, "调用 "+ToolDisplayName(call.Name, call.Arguments))
+	}
+}
+
+// FormatToolEventWithID 带块 ID 的 tool 事件格式化（详情行供展开过滤）。
+func FormatToolEventWithID(eventType string, data map[string]any, id string, verbose bool) []string {
 	switch eventType {
 	case "tool_call":
-		return formatToolCallEvent(data, verbose)
+		return formatToolCallEvent(data, id, verbose)
 	case "tool_result":
-		return formatToolResultEvent(data, verbose)
+		return formatToolResultEvent(data, id, verbose)
 	default:
 		return []string{fmt.Sprintf("[tool] %s", eventType)}
 	}
 }
 
-func formatToolCallEvent(data map[string]any, verbose bool) []string {
+func formatToolCallEvent(data map[string]any, blockID string, verbose bool) []string {
 	calls := extractToolCalls(data)
 	if len(calls) == 0 {
 		if verbose {
@@ -49,7 +113,11 @@ func formatToolCallEvent(data map[string]any, verbose bool) []string {
 			continue
 		}
 		title := ToolDisplayName(call.Name, call.Arguments)
-		lines = append(lines, "[tool] ▶ 调用 "+title)
+		if blockID != "" && call.ID != "" {
+			lines = append(lines, formatToolPendingLine(call.ID, "调用 "+title))
+		} else {
+			lines = append(lines, "[tool] ▶ 调用 "+title)
+		}
 		if verbose {
 			if detail := formatArgsDetail(call.Arguments, call.RawJSON); detail != "" {
 				lines = append(lines, indentLines("    ", detail)...)
@@ -59,7 +127,14 @@ func formatToolCallEvent(data map[string]any, verbose bool) []string {
 	return lines
 }
 
-func formatToolResultEvent(data map[string]any, verbose bool) []string {
+func formatToolPendingLine(blockID, title string) string {
+	if blockID == "" {
+		return "[tool] ▶ " + title
+	}
+	return formatToolMetaLine(toolPendingLinePrefix, blockID, "▶ "+title)
+}
+
+func formatToolResultEvent(data map[string]any, blockID string, verbose bool) []string {
 	name := trimDisplayField(data["tool_name"])
 	if name == "" {
 		name = trimDisplayField(data["name"])
@@ -91,15 +166,44 @@ func formatToolResultEvent(data map[string]any, verbose bool) []string {
 	if content == "" {
 		return lines
 	}
+	if blockID == "" {
+		if verbose {
+			lines = append(lines, indentLines("    ", content)...)
+			return lines
+		}
+		preview := summarizeToolResultContent(name, content)
+		if preview != "" {
+			lines = append(lines, indentLines("    ", preview)...)
+		}
+		return lines
+	}
+	fullBody := content
 	if verbose {
-		lines = append(lines, indentLines("    ", content)...)
+		lines = append(lines, splitToolDetailLines(blockID, fullBody)...)
 		return lines
 	}
 	preview := summarizeToolResultContent(name, content)
 	if preview != "" {
-		lines = append(lines, indentLines("    ", preview)...)
+		lines = append(lines, formatToolMetaLine(toolPreviewLinePrefix, blockID, preview))
 	}
+	lines = append(lines, splitToolDetailLines(blockID, fullBody)...)
 	return lines
+}
+
+func splitToolDetailLines(blockID, body string) []string {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+	parts := strings.Split(body, "\n")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimRight(p, "\r")
+		if p == "" {
+			continue
+		}
+		out = append(out, formatToolMetaLine(toolDetailLinePrefix, blockID, p))
+	}
+	return out
 }
 
 func resultHeadline(name string, rejected bool, content string) string {

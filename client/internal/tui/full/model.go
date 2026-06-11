@@ -4,8 +4,10 @@ package full
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -111,6 +113,16 @@ type model struct {
 
 	// viewportFollowTail 为 true 时新输出自动滚到底；用户上滚后置 false，回到底部再恢复。
 	viewportFollowTail bool
+
+	toolBlocks  *tuishared.ToolBlockRegistry
+	toolPending *tuishared.ToolPendingTracker
+	statusMgr   *statusLineManager
+
+	refreshDebounceUntil time.Time
+	submitContentSeen    bool
+
+	termWidth  int
+	termHeight int
 }
 
 // Run 启动全屏 TUI；initialSession 非空时尝试恢复该 session。
@@ -142,11 +154,14 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		transcript: tuishared.NewTranscript(0),
 		toolFold:   &tuishared.ToolFold{},
 		showReasoning: showReasoning,
-		helpLine:   "Enter 发送 · Shift+Enter 换行 · Esc 取消 turn · /help 命令 · /quit 退出",
+		helpLine:   "Enter 发送 · Shift+Enter 换行 · Esc 取消 · o/c 展开/收起 tool · /help",
 		children:            newChildAgentTracker(),
 		messagesTotalTokens: -1,
 		turn:                tuishared.NewTurnGate(),
 		viewportFollowTail:  true,
+		toolBlocks:          tuishared.NewToolBlockRegistry(),
+		toolPending:         tuishared.NewToolPendingTracker(),
+		statusMgr:           newStatusLineManager(),
 	}
 
 	if err := m.bootstrapSession(initialSession); err != nil {
@@ -172,11 +187,10 @@ func (m *model) bootstrapSession(initialSession string) error {
 	m.sessionID = id
 	m.sessionMu.Unlock()
 
-	welcome := fmt.Sprintf(
-		"已连接 %s · agent=%s · client=%s · session=%s",
-		m.probe.Endpoint, m.probe.AgentID, version.Version, id,
+	m.transcript.AddSystemPanel(
+		tuishared.WelcomePanelTitle(version.Version),
+		tuishared.FormatWelcomePanelBody(m.probe.Endpoint, m.probe.AgentID, version.Version, id),
 	)
-	m.transcript.Add("[system] " + welcome)
 	m.sseDetail = "连接中…"
 	m.restartStream()
 	return nil
@@ -201,6 +215,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshViewportMsg:
 		m.syncViewport()
+		return m, m.scheduleActiveTickIfNeeded()
+
+	case statusTickMsg:
+		if len(m.statusMgr.Kinds()) > 0 || m.toolPending.Len() > 0 {
+			m.syncViewport()
+			return m, m.scheduleActiveTickIfNeeded()
+		}
 		return m, nil
 
 	case tea.MouseMsg:
@@ -299,8 +320,31 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "ctrl+c":
+		m.printResumeHint()
 		m.shutdown()
 		return m, tea.Quit
+	case "o":
+		if m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "" {
+			if id := m.toolBlocks.ExpandLast(); id != "" {
+				m.syncViewport()
+				m.statusLine = "已展开 tool " + truncateID(id, 12)
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	case "c":
+		if m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "" {
+			if id := m.toolBlocks.CollapseLast(); id != "" {
+				m.syncViewport()
+				m.statusLine = "已收起 tool " + truncateID(id, 12)
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
 	case "enter":
 		text := strings.TrimSpace(m.input.Value())
 		if text == "" {
@@ -321,10 +365,14 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.invalidateHITLForUserMessage()
 		m.resetUsageStrip()
+		m.submitContentSeen = false
 		m.transcript.AddBlockGapIfNeeded()
 		m.transcript.Add("[user] " + text)
 		m.syncViewportFollow()
 		m.turn.BeginSubmit()
+		if !m.submitContentSeen {
+			m.statusMgr.Start("prefilling")
+		}
 		if err := m.client.SubmitMessage(m.ctx, m.currentSession(), text); err != nil {
 			m.turn.FinishTurn()
 			m.errLine = err.Error()
@@ -343,11 +391,7 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *model) View() string {
 	status := m.renderStatusBar()
 	viewBody := m.viewport.View()
-	if m.contextMode {
-		viewBody = lipgloss.NewStyle().Render(m.contextText)
-	} else if m.policyMode {
-		viewBody = m.viewport.View()
-	}
+
 	inputBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
@@ -361,38 +405,20 @@ func (m *model) View() string {
 	}
 
 	parts := []string{status, viewBody, m.renderInputStrip(), inputBox, help}
-	if m.mode == modeApproval {
-		var body string
-		if clihitl.HasTriggerSessionApprovalItems(m.approvalItems) {
-			body = clihitl.FormatTriggerSessionApprovalInteractive(
-				m.hitlData,
-				m.approvalItems,
-				m.approvalTriggerDecided,
-				m.approvalTriggerRejected,
-				m.approvalCursor,
-				m.approvalTriggerOptionCursor,
-			)
-		} else {
-			body = clihitl.FormatApprovalInteractive(m.hitlData, m.approvalSelected, m.approvalCursor)
-		}
-		borderColor := lipgloss.Color("214")
-		if clihitl.IsTemporaryAgentApproval(m.hitlData) {
-			borderColor = lipgloss.Color("39")
-		}
-		prompt := lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(borderColor).
-			Padding(0, 1).
-			Width(m.viewport.Width).
-			Render(clihitl.ApprovalHeader(m.hitlData) + "\n" + body)
+	if m.contextMode {
+		parts = []string{status, viewBody, help}
+	} else if m.mode == modeApproval {
+		prompt := m.renderApprovalPrompt()
 		parts = []string{status, viewBody, m.renderInputStrip(), prompt, help}
 	} else if m.mode == modeUserInfo {
-		// 问题已在 transcript「Agent 询问」块中展示；底部仅保留选项或输入框。
 		parts = []string{status, viewBody, m.renderInputStrip()}
 		if m.userInfoUseOptions && m.userInfoReq != nil {
 			opts := lipgloss.NewStyle().Render(clihitl.FormatUserInformationOptions(m.userInfoReq, m.userInfoSelected, m.userInfoCursor))
 			parts = append(parts, opts, help)
 		} else {
+			if q := m.renderUserInfoQuestionStrip(); q != "" {
+				parts = append(parts, q)
+			}
 			parts = append(parts, inputBox, help)
 		}
 	}
@@ -425,10 +451,10 @@ func (m *model) renderInputStrip() string {
 
 func (m *model) renderStatusBar() string {
 	sse := "SSE 未连接"
-	color := "203"
+	color := tuishared.ThemeSSEFail
 	if m.sseConnected {
 		sse = "SSE 已连接"
-		color = "78"
+		color = tuishared.ThemeSSEOK
 	}
 	left := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render("● " + sse)
 	if m.sseDetail != "" {
@@ -437,16 +463,37 @@ func (m *model) renderStatusBar() string {
 	if m.statusLine != "" {
 		left += " · " + m.statusLine
 	}
-	right := fmt.Sprintf("session=%s", m.currentSession())
+	if m.turn.Awaiting() && m.mode == modeChat && !m.contextMode && !m.policyMode {
+		left += " · 等待回复"
+	}
+	if len(m.hitlQueue) > 0 {
+		left += " · 审批/询问"
+	}
 	width := m.viewport.Width
 	if width <= 0 {
 		width = 80
+	}
+	sid := m.currentSession()
+	right := fmt.Sprintf("session=%s", sid)
+	if width < 100 {
+		right = fmt.Sprintf("sid=%s", truncateID(sid, 8))
+	}
+	if m.probe != nil && m.probe.AgentID != "" && width >= 100 {
+		right = fmt.Sprintf("agent=%s · %s", truncateID(m.probe.AgentID, 12), right)
 	}
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func truncateID(id string, max int) string {
+	id = strings.TrimSpace(id)
+	if max <= 0 || len(id) <= max {
+		return id
+	}
+	return id[:max] + "…"
 }
 
 func (m *model) applySize(w, h int) {
@@ -456,12 +503,9 @@ func (m *model) applySize(w, h int) {
 	if h < minViewHeight {
 		h = minViewHeight
 	}
-	viewH := h - statusHeight - inputStripHeight - inputHeight - helpHeight - 2
-	if m.mode == modeApproval {
-		viewH = h - statusHeight - inputStripHeight - 5 - helpHeight
-	} else if m.mode == modeUserInfo {
-		viewH = h - statusHeight - inputStripHeight - inputHeight - helpHeight - 3
-	}
+	m.termWidth = w
+	m.termHeight = h
+	viewH := m.computeViewHeight(h)
 	if viewH < 3 {
 		viewH = 3
 	}
@@ -470,13 +514,40 @@ func (m *model) applySize(w, h int) {
 	m.viewport = viewport.New(w, viewH)
 	m.viewport.YPosition = 0
 	m.input.SetWidth(w - 4)
-	follow := m.viewportFollowTail && atBottom
-	m.refreshViewportContent(follow, yOffset)
+	if m.contextMode {
+		m.refreshContextViewportContent(false, yOffset)
+	} else if m.policyMode {
+		m.policyRenderViewport()
+		m.viewport.SetYOffset(yOffset)
+	} else {
+		follow := m.viewportFollowTail && atBottom
+		m.refreshViewportContent(follow, yOffset)
+	}
 }
 
-// tryViewportScrollKey 将 PgUp/PgDown 等交给 transcript viewport；返回 true 表示已消费。
+// computeViewHeight 按当前 UI 模式计算 transcript/context viewport 高度。
+func (m *model) computeViewHeight(termH int) int {
+	if m.contextMode {
+		return termH - statusHeight - helpHeight - 1
+	}
+	viewH := termH - statusHeight - inputStripHeight - inputHeight - helpHeight - 2
+	if m.mode == modeApproval {
+		promptH := m.approvalPromptHeight()
+		return termH - statusHeight - inputStripHeight - promptH - helpHeight - 1
+	}
+	if m.mode == modeUserInfo {
+		extra := 0
+		if !m.userInfoUseOptions && m.renderUserInfoQuestionStrip() != "" {
+			extra = 1
+		}
+		return termH - statusHeight - inputStripHeight - inputHeight - helpHeight - 3 - extra
+	}
+	return viewH
+}
+
+// tryViewportScrollKey 将 PgUp/PgDown 等交给 viewport；context 模式始终可滚，chat 模式需输入框为空。
 func (m *model) tryViewportScrollKey(msg tea.KeyMsg) bool {
-	if m.contextMode || m.policyMode {
+	if m.policyMode {
 		return false
 	}
 	scrolled := false
@@ -484,22 +555,26 @@ func (m *model) tryViewportScrollKey(msg tea.KeyMsg) bool {
 	case "pgup":
 		m.viewport.ViewUp()
 		scrolled = true
-		m.viewportFollowTail = false
+		if !m.contextMode {
+			m.viewportFollowTail = false
+		}
 	case "pgdown":
 		m.viewport.ViewDown()
 		scrolled = true
-	case "up":
-		if m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "" {
+	case "up", "k":
+		if m.contextMode || (m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "") {
 			delta := m.viewport.MouseWheelDelta
 			if delta <= 0 {
 				delta = 3
 			}
 			m.viewport.LineUp(delta)
 			scrolled = true
-			m.viewportFollowTail = false
+			if !m.contextMode {
+				m.viewportFollowTail = false
+			}
 		}
-	case "down":
-		if m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "" {
+	case "down", "j":
+		if m.contextMode || (m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "") {
 			delta := m.viewport.MouseWheelDelta
 			if delta <= 0 {
 				delta = 3
@@ -510,7 +585,7 @@ func (m *model) tryViewportScrollKey(msg tea.KeyMsg) bool {
 	default:
 		return false
 	}
-	if scrolled && m.viewport.AtBottom() {
+	if scrolled && !m.contextMode && m.viewport.AtBottom() {
 		m.viewportFollowTail = true
 	}
 	return scrolled
@@ -537,7 +612,37 @@ func (m *model) refreshViewportContent(followBottom bool, preserveYOffset int) {
 	if yBefore < 0 {
 		yBefore = m.viewport.YOffset
 	}
-	m.viewport.SetContent(strings.Join(m.transcript.SnapshotLinesForDisplay(width), "\n"))
+	verbose := false
+	if m.toolFold != nil {
+		verbose = m.toolFold.Verbose()
+	}
+	toolOpts := &tuishared.ToolDisplayOptions{Verbose: verbose}
+	if m.toolBlocks != nil {
+		toolOpts.Registry = m.toolBlocks
+	}
+	if m.toolPending != nil {
+		toolOpts.Pending = m.toolPending
+	}
+	lines := m.transcript.SnapshotLinesForDisplay(width, toolOpts)
+	if m.statusMgr == nil {
+		m.viewport.SetContent(strings.Join(lines, "\n"))
+		if followBottom {
+			m.viewport.GotoBottom()
+			m.viewportFollowTail = true
+			return
+		}
+		m.viewport.SetYOffset(yBefore)
+		if m.viewport.AtBottom() {
+			m.viewportFollowTail = true
+		}
+		return
+	}
+	for _, kind := range m.statusMgr.Kinds() {
+		if line := m.statusMgr.FormatLine(kind); line != "" {
+			lines = append(lines, tuishared.FormatTranscriptLineForDisplay(line, width))
+		}
+	}
+	m.viewport.SetContent(strings.Join(lines, "\n"))
 	if followBottom {
 		m.viewport.GotoBottom()
 		m.viewportFollowTail = true
@@ -549,12 +654,27 @@ func (m *model) refreshViewportContent(followBottom bool, preserveYOffset int) {
 	}
 }
 
+// refreshContextViewportContent 刷新 /context 视图内容并可选保留滚动偏移。
+func (m *model) refreshContextViewportContent(followBottom bool, preserveYOffset int) {
+	yBefore := preserveYOffset
+	if yBefore < 0 {
+		yBefore = m.viewport.YOffset
+	}
+	m.viewport.SetContent(m.contextText)
+	if followBottom {
+		m.viewport.GotoBottom()
+		return
+	}
+	m.viewport.SetYOffset(yBefore)
+}
+
 func (m *model) cancelTurn() error {
 	cancelled, err := m.client.CancelTurn(m.ctx, m.currentSession())
 	if err != nil {
 		return err
 	}
 	if cancelled {
+		m.statusMgr.FinishAll()
 		m.transcript.Add("[system] turn 已取消")
 		m.syncViewport()
 	}
@@ -571,4 +691,96 @@ func (m *model) refocusInputIfNeeded() tea.Cmd {
 func (m *model) shutdown() {
 	m.stopStream()
 	m.cancel()
+}
+
+type statusTickMsg struct{}
+
+func (m *model) notifyViewportRefresh() {
+	now := time.Now()
+	if now.Before(m.refreshDebounceUntil) {
+		return
+	}
+	m.refreshDebounceUntil = now.Add(60 * time.Millisecond)
+	if m.program != nil {
+		m.program.Send(refreshViewportMsg{})
+	}
+}
+
+func (m *model) scheduleActiveTickIfNeeded() tea.Cmd {
+	if len(m.statusMgr.Kinds()) == 0 && m.toolPending.Len() == 0 {
+		return nil
+	}
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return statusTickMsg{}
+	})
+}
+
+func (m *model) renderApprovalPrompt() string {
+	var body string
+	if clihitl.HasTriggerSessionApprovalItems(m.approvalItems) {
+		body = clihitl.FormatTriggerSessionApprovalInteractive(
+			m.hitlData,
+			m.approvalItems,
+			m.approvalTriggerDecided,
+			m.approvalTriggerRejected,
+			m.approvalCursor,
+			m.approvalTriggerOptionCursor,
+		)
+	} else {
+		body = clihitl.FormatApprovalInteractive(m.hitlData, m.approvalSelected, m.approvalCursor)
+	}
+	borderColor := lipgloss.Color("214")
+	if clihitl.IsTemporaryAgentApproval(m.hitlData) {
+		borderColor = lipgloss.Color("39")
+	}
+	header := clihitl.ApprovalHeader(m.hitlData)
+	if hint := m.approvalQueueHint(); hint != "" {
+		header += hint
+	}
+	width := m.viewport.Width
+	if width <= 0 {
+		width = 80
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		Padding(0, 1).
+		Width(width).
+		Render(header + "\n" + body)
+}
+
+func (m *model) approvalPromptHeight() int {
+	if m.mode != modeApproval {
+		return 5
+	}
+	h := lipgloss.Height(m.renderApprovalPrompt())
+	if h < 3 {
+		h = 3
+	}
+	if h > 16 {
+		h = 16
+	}
+	return h
+}
+
+func (m *model) renderUserInfoQuestionStrip() string {
+	if m.userInfoReq == nil {
+		return ""
+	}
+	q := strings.TrimSpace(m.userInfoReq.Question)
+	if q == "" {
+		return ""
+	}
+	width := m.viewport.Width
+	if width <= 0 {
+		width = 80
+	}
+	if len(q) > width-4 {
+		q = truncateID(q, width-5)
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("? " + q)
+}
+
+func (m *model) printResumeHint() {
+	fmt.Fprintf(os.Stderr, "\n恢复会话: dagents-client tui --session %s\n", m.currentSession())
 }

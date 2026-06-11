@@ -2,7 +2,20 @@
 # DAgents Local Assistant 命令行入口（对齐 packaging/windows/dagents.cmd）。
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# install.sh 会在 BIN_DIR（如 /usr/local/bin）创建指向 PREFIX/dagents 的符号链接；
+# 须沿链接解析真实路径，否则 ROOT 会落在 BIN_DIR 导致查找 bin/dagents-node 失败。
+dagents_script_dir() {
+  local src="${BASH_SOURCE[1]}"
+  while [[ -L "${src}" ]]; do
+    local dir
+    dir="$(cd -P "$(dirname "${src}")" && pwd)"
+    src="$(readlink "${src}")"
+    [[ "${src}" != /* ]] && src="${dir}/${src}"
+  done
+  cd -P "$(dirname "${src}")" && pwd
+}
+
+ROOT="$(dagents_script_dir)"
 export DAGENTS_HOME="${ROOT}"
 
 CFG="${DAGENTS_CONFIG:-config.yaml}"
@@ -15,6 +28,8 @@ if [[ ! -f "${ROOT}/.env" && -f "${ROOT}/.env.example" ]]; then
 fi
 
 BIN="${ROOT}/bin"
+NODE_PID_FILE="${ROOT}/.runtime/node.pid"
+NODE_STOP_TIMEOUT_SEC=15
 
 die() {
   echo "[dagents] $*" >&2
@@ -30,12 +45,118 @@ probe_node() {
   "${BIN}/dagents-client" -config "${ROOT}/${CFG}" probe >/dev/null 2>&1
 }
 
+write_node_pid() {
+  local pid="$1"
+  mkdir -p "${ROOT}/.runtime"
+  echo "${pid}" >"${NODE_PID_FILE}"
+}
+
+clear_node_pid() {
+  rm -f "${NODE_PID_FILE}"
+}
+
+# 查找与本安装目录/config 匹配的 dagents-node 进程（无 pid 文件时兜底）。
+find_node_pids() {
+  local cfg_abs="${ROOT}/${CFG}"
+  local pattern="${BIN}/dagents-node"
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f "${pattern}.*-config[[:space:]]+${cfg_abs}" 2>/dev/null || true
+  fi
+}
+
+pid_alive() {
+  local pid="$1"
+  [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+}
+
+stop_node_process() {
+  local pid="$1"
+  if ! pid_alive "${pid}"; then
+    return 0
+  fi
+  kill -TERM "${pid}" 2>/dev/null || true
+  local waited=0
+  while pid_alive "${pid}"; do
+    sleep 1
+    waited=$((waited + 1))
+    if [[ "${waited}" -ge "${NODE_STOP_TIMEOUT_SEC}" ]]; then
+      kill -KILL "${pid}" 2>/dev/null || true
+      sleep 1
+      break
+    fi
+  done
+}
+
+shutdown_node() {
+  require_bin dagents-client
+  if ! probe_node; then
+    clear_node_pid
+    echo "[dagents] node is not running"
+    return 0
+  fi
+
+  local pid=""
+  if [[ -f "${NODE_PID_FILE}" ]]; then
+    pid="$(tr -d '[:space:]' <"${NODE_PID_FILE}")"
+  fi
+  if pid_alive "${pid}"; then
+    echo "[dagents] stopping node (pid=${pid})"
+    stop_node_process "${pid}"
+  else
+    local pids
+    pids="$(find_node_pids)"
+    if [[ -n "${pids}" ]]; then
+      echo "[dagents] stopping node (pids=${pids//$'\n'/, })"
+      while IFS= read -r p; do
+        [[ -n "${p}" ]] && stop_node_process "${p}"
+      done <<<"${pids}"
+    fi
+  fi
+
+  clear_node_pid
+  if probe_node; then
+    die "node still responds to probe after shutdown; check .runtime/logs/node.err.log"
+  fi
+  echo "[dagents] node stopped"
+}
+
 start_node_background() {
   require_bin dagents-node
   mkdir -p "${ROOT}/.runtime/logs"
   echo "[dagents] starting node in background (logs: .runtime/logs/node.log)"
   nohup "${BIN}/dagents-node" -config "${ROOT}/${CFG}" \
     >>"${ROOT}/.runtime/logs/node.log" 2>>"${ROOT}/.runtime/logs/node.err.log" &
+  write_node_pid "$!"
+}
+
+wait_node_ready() {
+  require_bin dagents-client
+  local wait=0
+  while ! probe_node; do
+    sleep 1
+    wait=$((wait + 1))
+    if [[ "${wait}" -ge 30 ]]; then
+      die "node did not become ready within 30s (see .runtime/logs/node.err.log)"
+    fi
+  done
+}
+
+start_node_default() {
+  require_bin dagents-client
+  if probe_node; then
+    echo "[dagents] node already running"
+    return 0
+  fi
+  start_node_background
+  wait_node_ready
+  echo "[dagents] node is ready"
+}
+
+restart_node() {
+  shutdown_node
+  start_node_background
+  wait_node_ready
+  echo "[dagents] node restarted"
 }
 
 ensure_node() {
@@ -44,14 +165,7 @@ ensure_node() {
     return 0
   fi
   start_node_background
-  local wait=0
-  while ! probe_node; do
-    sleep 1
-    wait=$((wait + 1))
-    if [[ "${wait}" -ge 30 ]]; then
-      die "node did not become ready within 30s"
-    fi
-  done
+  wait_node_ready
 }
 
 parse_withnode() {
@@ -96,14 +210,19 @@ cmd_help() {
 Usage:
   dagents chat [--withnode]       Textual TUI (Python; rich UI)
   dagents tui [--withnode] [--plain]  Go bubbletea TUI (default full-screen; --plain for line REPL)
-  dagents node [--background]     Start Agent Node (foreground, or background with logs)
+  dagents node                    Start Agent Node in background (default; waits until ready)
+  dagents node shutdown           Stop background Node
+  dagents node restart            Stop then start Node in background
+  dagents node --foreground       Start Node in foreground (blocks terminal)
+  dagents node --no-wait          Background start without waiting for probe
   dagents register-center         Start Register Center (optional A2A)
   dagents doctor                  Check installed files
   dagents version                 Print version information
 
 Options:
   --withnode     Probe Node first; start it in background if not running, then launch client
-  --background   Start Node detached; logs under .runtime/logs/node.log
+  --foreground   Run Node in foreground (blocks terminal)
+  --no-wait      Background start without waiting for probe (--background alias)
 
 Config:
   Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
@@ -141,12 +260,37 @@ case "$1" in
     ;;
   node)
     shift
-    if [[ "${1:-}" == "--background" ]]; then
-      start_node_background
-      exit 0
-    fi
-    require_bin dagents-node
-    exec "${BIN}/dagents-node" -config "${ROOT}/${CFG}" "$@"
+    case "${1:-}" in
+      shutdown|stop)
+        shutdown_node
+        exit 0
+      ;;
+      restart)
+        restart_node
+        exit 0
+      ;;
+      --foreground|-f)
+        shift
+        require_bin dagents-node
+        exec "${BIN}/dagents-node" -config "${ROOT}/${CFG}" "$@"
+      ;;
+      --no-wait|--background)
+        if probe_node; then
+          echo "[dagents] node already running"
+          exit 0
+        fi
+        start_node_background
+        exit 0
+      ;;
+      "")
+        start_node_default
+        exit 0
+      ;;
+      *)
+        require_bin dagents-node
+        exec "${BIN}/dagents-node" -config "${ROOT}/${CFG}" "$@"
+      ;;
+    esac
     ;;
   register-center)
     shift

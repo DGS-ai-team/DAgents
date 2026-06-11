@@ -16,6 +16,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
@@ -39,6 +40,7 @@ type Server struct {
 	store        *store.SQLiteStore
 	triggerStore *triggers.Store
 	triggerSched *triggers.Scheduler
+	registrar    *manage.Registrar
 }
 
 // Option 为 NewServer 可选配置。
@@ -198,6 +200,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 		})
 	}
+	var registrar *manage.Registrar
+	if cfg.Manage.Enabled {
+		registrar = manage.NewRegistrar(cfg, logger)
+		registrar.SetToolNamesProvider(mgr.ToolNames)
+	}
 	s := &Server{
 		cfg:          cfg,
 		logger:       logger,
@@ -207,6 +214,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		sessions:     mgr,
 		triggerStore: triggerStore,
 		triggerSched: triggerSched,
+		registrar:    registrar,
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
@@ -250,6 +258,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 
 	errCh := make(chan error, 1)
+	regCtx, regCancel := context.WithCancel(ctx)
+	defer regCancel()
+	if s.registrar != nil {
+		s.registrar.Start(regCtx)
+	}
 	go func() {
 		s.logger.Info("agent node listening", "addr", addr, "agent_id", s.cfg.AgentID)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -264,6 +277,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		s.logger.Info("agent node shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		regCancel()
+		if s.registrar != nil {
+			s.registrar.Stop(shutdownCtx)
+		}
 		// 与启动顺序相反：先停后台任务与会话，再关 HTTP 监听。
 		if s.triggerSched != nil {
 			s.triggerSched.Stop()
@@ -307,12 +324,15 @@ type agentInfoResponse struct {
 }
 
 func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
-	// 静态元数据：agent_id、capabilities；Manage 注册态来自配置而非实时探测。
+	registered := false
+	if s.registrar != nil {
+		registered = s.registrar.Registered()
+	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
 		AgentID:          s.cfg.AgentID,
 		ExposeToPeers:    s.cfg.ExposeToPeers,
 		Capabilities:     s.cfg.Capabilities(),
-		ManageRegistered: s.cfg.ManageRegistered(),
+		ManageRegistered: registered,
 	})
 }
 

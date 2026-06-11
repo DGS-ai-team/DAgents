@@ -17,10 +17,15 @@
 | `EnvRawMessageHistoryEnabled` | `const string` | 环境变量 `AGENT_RAW_MESSAGE_HISTORY_ENABLED` |
 | `LogConfig` | `struct` | Node stderr 日志级别（`level`，默认 `info`） |
 | `ToolsConfig` | `struct` | `bash_output_encoding`：bash_run 子进程输出解码；`file_encoding`：FS 工具磁盘读写默认编码 |
-| `ManageConfig` | `struct` | Manage 注册开关与 URL |
+| `ManageConfig` | `struct` | Manage 开关、URL、node_token、`registration` |
+| `ManageRegistrationConfig` | `struct` | `base_url`（上报 Manage）、`interval_seconds`（默认 30）、`ttl_seconds`（默认 60）、name/team/description |
 | `LoadFile` | `func(path string) (*Config, error)` | 读 YAML、展开 env、默认值、校验 |
-| `(c *Config) ApplyDefaults` | `method` | 填充 listen/local 缺省 |
-| `(c *Config) Validate` | `method` | 校验 agent_id、端口、endpoint |
+| `(c *Config) ApplyDefaults` | `method` | 填充 listen/local/manage 缺省 |
+| `(c *Config) Validate` | `method` | 校验 agent_id、端口、endpoint；manage.enabled 时要求 url |
+| `(c *Config) DiscoveryGroups` | `method` | YAML `groups` 字段（**不**发往 Manage） |
+| `(c *Config) ManageRegistrationInterval` | `method` | 注册/心跳轮询间隔 |
+| `(c *Config) ManageRegistryBaseURL` | `method` | 上报 Manage 的 base_url（优先 registration.base_url） |
+| `(c *Config) ManageRegistryBaseURLIsLoopback` | `method` | 上报地址是否为 loopback |
 | `(c *Config) ListenAddr` | `method` | 返回 `host:port` |
 | `(c *Config) RuntimeDir` | `method` | 与 `fs_root` 一致（默认 `./.runtime`） |
 | `(c *Config) DataDir` | `method` | 默认 `{fs_root}/data` 临时工作区 |
@@ -34,7 +39,6 @@
 | `(c *Config) RawMessageHistoryDir` | `method` | 默认 `.runtime/history` |
 | `(c *Config) TriggersStorePath` | `method` | 默认 `{fs_root}/triggers/triggers.json` |
 | `(c *Config) Capabilities` | `method` | 能力列表（含可选 triggers） |
-| `(c *Config) ManageRegistered` | `method` | N0 恒为 false |
 
 ## `agent_id.go`
 

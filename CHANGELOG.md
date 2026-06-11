@@ -4,6 +4,41 @@
 
 ## [Unreleased]
 
+## [0.2.18] - 2026-06-11
+
+**0.x 预览**：Manage 控制面 M0+M1、Register Center Phase 1、Go Node 自动注册与 Console 目录；Go TUI 体验与 Linux `dagents node` 生命周期增强。
+
+### 新增
+
+- **Manage 服务（M0+M1）**：新建 `manage/` 与 `run_manage.py`；Platform + Registry；**Console** `/console/` 展示已注册 Node 列表与状态。
+- **Go Node → Manage 自动注册**：`manage.enabled` 时周期 register/heartbeat/deregister；`manage.registration.base_url` 独立上报可达地址；Header `x-dagents-agent-id`；`discovery_group` 由 Manage **`PATCH /v1/registry/agents/{id}/groups`** 分配。
+- **Register Center Phase 1（P1.1–P1.3）**：扩展 Agent 登记模型（owner/team/tools/skills/risk_level 等）；派生 `online`/`offline`/`expired` 状态与 offline grace；admin 全局列表（分页/筛选）、`REGISTER_CENTER_TOKENS` 角色鉴权、`GET /v1/admin/audit` 与 `GET /v1/admin/a2a/recent`；relay/broadcast 仅投递 online Agent（离线 `409`）与 `X-DAgents-Trace-Id`。
+- **Agent Directory UI（P1.5）**：Register Center 内置 **`/ui/`** 只读目录页（筛选、分页、详情抽屉、A2A 摘要；token 经 sessionStorage 或 `?token=` 注入）。
+- **Go 全屏 TUI 体验增强**（`client/internal/tui/full/`、`shared/`）：
+  - **`/context` 可滚动**：viewport 渲染 + PgUp/PgDn/↑/↓；context 模式隐藏输入区；resize 不覆盖 context 内容。
+  - **启动欢迎面板**、状态栏 turn/审批提示、**`/context` 面板化**（`FormatSessionContextPanel`）、policy 决策档位着色。
+  - **工具结果键盘展开/收起**：`o`/`c`、`/tools expand`/`collapse`；`ToolBlockRegistry` + preview/detail 行折叠。
+  - **等待态行**：`prefilling` / `thinking` / `compression` 秒级刷新；流式 viewport **60ms debounce**。
+  - **工具执行耗时**：pending 占位行每秒刷新（如 `▶ 调用 bash(…) … 3s`）。
+  - **审批区动态高度**；无选项 **追问** 在输入框上方显示问题摘要。
+  - 退出时打印 **`dagents-client tui --session <id>`** 恢复提示（`/quit`、Ctrl+C）。
+- **Linux `dagents node` 生命周期**（`packaging/linux/dagents`）：
+  - **`dagents node`** 默认 **后台启动**并等待 probe 就绪；写入 `.runtime/node.pid`。
+  - **`dagents node shutdown`**（`stop`）与 **`dagents node restart`**。
+  - **`--foreground`** / **`--no-wait`**（兼容旧 `--background` 即发即走）。
+
+### 变更
+
+- **Manage Console**：未配置 token 时开放模式可直接浏览全部 Node；统计请求 `page_size` 上限对齐 API（200）。
+- **Go TUI 键盘优先**：help 与交互说明以键位为主；不新增鼠标点击类能力。
+- **`dagents node` 默认行为**：由前台 `exec` 改为后台 + 就绪探测；前台需显式 `--foreground`。
+
+### 修复
+
+- **Linux `dagents` 符号链接安装**：通过 `/usr/local/bin/dagents` 调用时正确解析 `DAGENTS_HOME`（修复 `bin/dagents-node` 路径落在 `BIN_DIR` 的问题）。
+
+（Git **tag**：`v0.2.18`。）
+
 ## [0.2.17] - 2026-06-10
 
 **0.x 预览**：在 **v0.2.16** 基础上修复 **async 回灌清掉 pending HITL**，并为 **FS 文件工具** 增加磁盘编码支持。

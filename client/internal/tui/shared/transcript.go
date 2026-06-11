@@ -123,9 +123,45 @@ func (t *Transcript) LinesForDisplay(width int) []string {
 	return out
 }
 
+// ToolDisplayOptions 控制 tool 折叠行在 viewport 中的可见性。
+type ToolDisplayOptions struct {
+	Registry *ToolBlockRegistry
+	Pending  *ToolPendingTracker
+	Verbose  bool
+}
+
 // SnapshotLinesForDisplay 含流式 partial 缓冲，供全屏 viewport 刷新。
-func (t *Transcript) SnapshotLinesForDisplay(width int) []string {
-	lines := t.LinesForDisplay(width)
+func (t *Transcript) SnapshotLinesForDisplay(width int, toolOpts *ToolDisplayOptions) []string {
+	raw := t.Tail(0)
+	if len(raw) == 0 {
+		raw = nil
+	} else if toolOpts != nil && toolOpts.Registry != nil {
+		filtered := make([]string, 0, len(raw))
+		for _, line := range raw {
+			if IsToolDetailLine(line) {
+				id := ToolBlockIDFromMetaLine(line)
+				if !toolOpts.Registry.IsExpanded(id, toolOpts.Verbose) {
+					continue
+				}
+			} else if IsToolPreviewLine(line) {
+				id := ToolBlockIDFromMetaLine(line)
+				if toolOpts.Registry.IsExpanded(id, toolOpts.Verbose) {
+					continue
+				}
+			}
+			filtered = append(filtered, line)
+		}
+		raw = filtered
+	}
+	lines := make([]string, len(raw))
+	for i, line := range raw {
+		displayLine := line
+		if toolOpts != nil && toolOpts.Pending != nil && strings.HasPrefix(line, toolPendingLinePrefix) {
+			displayLine = toolPendingLinePrefix + ToolBlockIDFromMetaLine(line) + "] " +
+				toolOpts.Pending.FormatPendingLine(line)
+		}
+		lines[i] = FormatTranscriptLineForDisplay(displayLine, width)
+	}
 	t.mu.Lock()
 	partial := t.partial
 	var role, text string
@@ -134,6 +170,9 @@ func (t *Transcript) SnapshotLinesForDisplay(width int) []string {
 		text = partial.buf.String()
 	}
 	t.mu.Unlock()
+	if len(lines) == 0 && text == "" {
+		return lines
+	}
 	if text == "" {
 		return lines
 	}
@@ -227,6 +266,25 @@ func (t *Transcript) finishPartialLocked(role, suffix string) {
 	}
 	line := "[" + role + "] " + appendUsageSuffix(text, suffix)
 	t.appendLineLocked(line)
+}
+
+// RemoveToolPendingLines 移除指定 tool 块的 pending 占位行。
+func (t *Transcript) RemoveToolPendingLines(blockID string) {
+	blockID = strings.TrimSpace(blockID)
+	if blockID == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	prefix := toolPendingLinePrefix + blockID + "]"
+	var kept []string
+	for _, line := range t.lines {
+		if strings.HasPrefix(line, prefix) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	t.lines = kept
 }
 
 func (t *Transcript) appendLineLocked(line string) {

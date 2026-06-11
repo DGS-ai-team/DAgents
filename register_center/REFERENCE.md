@@ -1,69 +1,58 @@
 # register_center / REFERENCE
 
-## `__init__.py`
-
-- 模块说明：`Register Center 包。`
-
 ## `rc_models.py`
+
+### 类型别名
+
+- `AuthMethod` — `shared_token` \| `mtls` \| `none`
+- `RiskLevel` — `low` \| `medium` \| `high`
 
 ### 类
 
-- `AgentUpsertRequest`
-  - 说明：登记/更新请求模型，负责 `agent_id`、`base_url`、`discovery_group`（字符串或字符串列表）、`capabilities_hint` 与 `ttl_seconds` 的校验与规范化。
-  - 方法：
-    - `validate_agent_id(value: str) -> str`
-    - `validate_base_url(value: str) -> str`
-- `AgentRecord`
-  - 说明：对外返回的单条登记记录结构（`discovery_group` 为非空分组列表，可含 `capabilities_hint`，含 `registered_at_unix/expires_at_unix`）。
-- `AgentListResponse`
-  - 说明：列表查询响应壳，字段为 `agents`。
-- `HealthResponse`
-  - 说明：健康检查响应结构。
-- `BroadcastRequest`
-  - 说明：广播接口请求模型，包含 `message` 与 `discovery_group_ids`。
-  - 方法：
-    - `validate_message(value: str) -> str`
-    - `validate_group_ids(value: list[str]) -> list[str]`
-- `BroadcastResultItem`
-  - 说明：单个目标 Agent 的广播结果。
-- `BroadcastResponse`
-  - 说明：广播接口聚合返回结构（成功/失败统计 + 明细列表）。
-- `RelayRequest`
-  - 说明：单目标中继请求模型，包含目标 ID、调用方分组与透传消息字段。
-  - 方法：
-    - `validate_target_agent_id(value: str) -> str`
-    - `validate_non_empty_text_fields(value: str) -> str`
-    - `validate_caller_groups(value: list[str]) -> list[str]`
-- `RelayResponse`
-  - 说明：单目标中继响应结构，含 `target_base_url` 与可选 `request_id`。
+- `AgentUpsertRequest` — 登记/心跳请求（MVP + Phase 1 扩展字段）
+- `AgentStoredRecord` — 持久化层记录（无 `status`）
+- `AgentRecord` — 对外响应（含派生 `status`）
+- `AgentListResponse` — `agents` + `page` / `page_size` / `total`
+- `AuditListResponse` / `A2ARecentListResponse` — admin 查询壳
+- `HealthResponse` / `Broadcast*` / `Relay*` — 不变契约，见源码
 
 ## `rc_store.py`
 
-### 类
-
+- `AgentListQuery` — 列表筛选（group/team/status/q/分页）
+- `stored_to_public(record) -> AgentRecord` — 附加派生 status
 - `AgentRegistryStore`
-  - 说明：基于内存字典的登记仓库，提供线程安全的增删改查与计数；可选 `persist_path` 启用 JSON 文件持久化。
-  - 方法：
-    - `__init__(persist_path: str | os.PathLike[str] | None = None) -> None`
-    - `upsert(payload: AgentUpsertRequest) -> AgentRecord`
-    - `get(agent_id: str) -> AgentRecord | None`
-    - `list(discovery_group: str | None = None) -> list[AgentRecord]`
-    - `_prune_expired_locked() -> bool`
-    - `_load_from_disk() -> None`
-    - `_persist_locked() -> None`
-    - `delete(agent_id: str) -> bool`
-    - `count() -> int`
+  - `upsert` / `get` / `list(query)` / `list_deliverable` / `delete` / `count`
+  - v2 JSON 持久化；grace 后 prune `expired`
+
+## `rc_status.py`
+
+- `offline_grace_seconds() -> int`
+- `derive_status(...) -> AgentStatus`
+- `is_deliverable(...) -> bool`
+
+## `rc_auth.py`
+
+- `AuthContext` — `token_id` / `role` / `discovery_groups`
+- `authenticate(request) -> AuthContext`
+- `require_admin(auth) -> None`
+
+## `rc_audit.py`
+
+- `AuditEvent` / `AuditLog` — `record` / `list_recent`
+
+## `rc_a2a_recent.py`
+
+- `A2ARecentEntry` / `A2ARecentLog` — `record` / `list_recent`
 
 ## `rc_app.py`
 
-### 函数
+- `create_app() -> FastAPI` — 注册 agents/admin/broadcast/relay 路由；挂载 **`/ui/`** Directory UI
+- `app` — 默认应用实例
 
-- `create_app() -> FastAPI`
-  - 说明：构建 FastAPI 应用并注册 `/health`、`/metrics`、`/v1/agents`（含 delete）、`/v1/broadcast`、`/v1/relay` 路由（查询接口按分组强隔离）；读取 `REGISTER_CENTER_STORE_PATH` 决定是否启用 JSON 持久化。
-- `_broadcast_to_agent(client, *, agent, message, source) -> BroadcastResultItem`
-  - 说明：向单个 Agent 的 `/v1/messages` 转发广播消息并收集结果。
+## `ui/`
 
-### 模块级变量
+- `index.html` / `styles.css` / `app.js` — Agent Directory 只读前端（同源调用 `/v1/*`）
 
-- `app`
-  - 说明：`create_app()` 生成的默认应用实例，供启动脚本直接加载。
+## `metrics.py`
+
+- Prometheus A2A 指标 helpers

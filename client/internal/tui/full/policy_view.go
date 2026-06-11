@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
+	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -228,7 +229,7 @@ func (m *model) policyRenderViewport() {
 			if i == m.policyCursor {
 				prefix = "> "
 			}
-			b.WriteString(fmt.Sprintf("%s%-22s %s\n", prefix, label, policyDecisionLabel(decision)))
+			b.WriteString(fmt.Sprintf("%s%-22s %s\n", prefix, label, policyDecisionStyled(decision)))
 		}
 	}
 	m.policyText = b.String()
@@ -243,6 +244,18 @@ func policyDecisionLabel(decision string) string {
 		return "黑名单"
 	default:
 		return "需审批"
+	}
+}
+
+func policyDecisionStyled(decision string) string {
+	label := policyDecisionLabel(decision)
+	switch decision {
+	case "allow_auto":
+		return "\033[" + tuishared.ThemePolicyAllow + "m" + label + "\033[0m"
+	case "deny":
+		return "\033[" + tuishared.ThemePolicyDeny + "m" + label + "\033[0m"
+	default:
+		return "\033[" + tuishared.ThemePolicyApproval + "m" + label + "\033[0m"
 	}
 }
 

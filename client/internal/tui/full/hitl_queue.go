@@ -114,6 +114,13 @@ func (m *model) showNextHITLIfIdle() {
 		m.statusLine = "等待用户回答…"
 	default:
 	}
+	m.relayoutIfKnown()
+}
+
+func (m *model) relayoutIfKnown() {
+	if m.termWidth > 0 && m.termHeight > 0 {
+		m.applySize(m.termWidth, m.termHeight)
+	}
 }
 
 func (m *model) appendUserInfoTranscript() {

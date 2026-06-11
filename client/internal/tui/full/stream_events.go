@@ -31,6 +31,9 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			return
 		}
 		m.turn.MarkTurnContent()
+		m.submitContentSeen = true
+		m.statusMgr.Finish("prefilling")
+		m.statusMgr.Finish("thinking")
 		if text, ok := ev.Data["content"].(string); ok && text != "" {
 			m.transcript.AppendPartial("assistant", text)
 			m.notifyViewportRefresh()
@@ -40,6 +43,11 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			return
 		}
 		m.turn.MarkTurnContent()
+		m.submitContentSeen = true
+		m.statusMgr.Finish("prefilling")
+		if !m.statusMgr.Has("thinking") {
+			m.statusMgr.Start("thinking")
+		}
 		if !m.showReasoning {
 			return
 		}
@@ -52,14 +60,24 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			return
 		}
 		m.turn.MarkTurnContent()
+		m.submitContentSeen = true
+		m.statusMgr.FinishAll()
 		m.transcript.FinishPartial("assistant")
 		m.transcript.FinishPartial("reasoning")
+		blockID := tuishared.ToolEventID(ev.Data)
+		if blockID == "" {
+			blockID = m.toolBlocks.NextSeqID()
+		}
 		if ev.Type == "tool_call" {
 			m.children.noteToolCall(ev.Data)
+			tuishared.RegisterToolCallsFromEvent(ev.Data, m.toolPending)
 		} else {
 			m.children.noteToolResult(ev.Data)
+			m.toolPending.Remove(blockID)
+			m.transcript.RemoveToolPendingLines(blockID)
 		}
-		for _, line := range tuishared.FormatToolEvent(ev.Type, ev.Data, m.toolFold.Verbose()) {
+		m.toolBlocks.Register(blockID)
+		for _, line := range tuishared.FormatToolEventWithID(ev.Type, ev.Data, blockID, m.toolFold.Verbose()) {
 			m.transcript.Add(line)
 		}
 		m.notifyViewportRefresh()
@@ -74,7 +92,16 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		m.notifyStripRefresh()
 		m.notifyViewportRefresh()
 	case "context_compression_blocking", "context_compression_silent":
-		m.transcript.Add("[system] " + clihitl.FormatContextCompression(ev.Type, ev.Data))
+		phase := strings.TrimSpace(fmt.Sprint(ev.Data["phase"]))
+		if ev.Type == "context_compression_blocking" && phase != "end" {
+			m.statusMgr.Start("compression")
+		} else {
+			m.statusMgr.Finish("compression")
+		}
+		line := clihitl.FormatContextCompression(ev.Type, ev.Data)
+		if line != "" {
+			m.transcript.Add("[system] " + line)
+		}
 		m.notifyViewportRefresh()
 		m.scheduleContextTokenRefresh()
 	case "error":
@@ -84,6 +111,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		}
 		m.transcript.Add("[system] error: " + msg)
 		m.notifyViewportRefresh()
+		m.statusMgr.FinishAll()
 		if m.turn.Awaiting() {
 			m.turn.FinishTurn()
 			m.statusLine = "回合结束"
@@ -133,6 +161,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		}
 		m.transcript.FinishPartial("assistant")
 		m.transcript.FinishPartial("reasoning")
+		m.statusMgr.FinishAll()
 		if m.turn.ShouldAcceptDone(ev.Seq) {
 			m.turn.FinishTurn()
 			m.statusLine = "回合结束"
@@ -140,12 +169,6 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		m.notifyViewportRefresh()
 		m.scheduleContextTokenRefresh()
 	default:
-	}
-}
-
-func (m *model) notifyViewportRefresh() {
-	if m.program != nil {
-		m.program.Send(refreshViewportMsg{})
 	}
 }
 

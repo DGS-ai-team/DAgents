@@ -27,6 +27,8 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
+| **0.2.17** | **已发布** | async 回灌保留 pending HITL（[#25](https://github.com/DGS-ai-team/DAgents/issues/25)）；`tools.file_encoding` + FS 工具 `encoding` 参数（见 **CHANGELOG**）。 |
+| **0.2.16** | **已发布** | Policy Read/Write API + TUI `/policy`；trigger 会话目标审批；TUI `/triggers`；Windows `--withnode` 等修复（见 **CHANGELOG**）。 |
 | **0.2.3** | **已发布** | Windows 安装包、Linux `install.sh`；`tools.bash_output_encoding`（GBK 解码）；子 Agent prompt 与双 TUI 展示（见 **CHANGELOG**）。 |
 | **0.2.2** | **已发布** | HITL 工具审批修复；临时 Agent 协议整理；文档归档与 go-node-internals（见 **CHANGELOG**）。 |
 | **0.2.0** | **已发布** | Go Agent Node + Client 本地助手主线；Python Agent 运行时移除；触发器日历调度（见 **CHANGELOG**）。 |
@@ -51,8 +53,9 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 - **OpenAI 兼容 Chat Completions**：流式、`tools`（**`node/internal/llm/`**）；**`llm.api_base`** 指向兼容网关。
 - **Turn loop**：工具调用 → 本地 **`Execute`** → **`tool_result`** → 继续 loop；工具级审批与 **`ask_user_information`**（[go-node-internals.md](./architecture/go-node-internals.md)）。
-- **工具集**（**`node/internal/tools/`**）：**`bash_run`**（bash/cmd/powershell、GBK/UTF-8 输出解码）、受限 **FS** 四件套、**`load_skills` / `unload_skills` / `clear_skills`**、**trigger_*** 系列、**临时子 Agent**（**`create_temporary_agent`** 等，非 A2A）；**`run_in_background`** 与后台 job 工具。清单见 [built-in-tools.md](./built-in-tools.md) 与 **`node/internal/tools/README.md`**。
-- **审批（HITL）**：**`.runtime/policy/`** + **`approval_required`** SSE + Client **`resume`**（0.2.2 起修复父子 Agent 并发审批队列）。
+- **工具集**（**`node/internal/tools/`**）：**`bash_run`**（bash/cmd/powershell、GBK/UTF-8 输出解码）、受限 **FS** 四件套（**v0.2.17** 起可选 **`encoding`**：utf-8/gbk/gb18030）、**`load_skills` / `unload_skills` / `clear_skills`**、**trigger_*** 系列、**临时子 Agent**（**`create_temporary_agent`** 等，非 A2A）；**`run_in_background`** 与后台 job 工具。清单见 [built-in-tools.md](./built-in-tools.md) 与 **`node/internal/tools/README.md`**。
+- **策略（Policy）**（**v0.2.16**）：**`GET/PUT /v1/policy`**；Go / Python TUI **`/policy`** 查看与 `set`。
+- **审批（HITL）**：**`.runtime/policy/`** + **`approval_required`** SSE + Client **`resume`**（0.2.2 起修复父子 Agent 并发审批队列；**v0.2.17** 修复 async 回灌清 pending HITL）。
 
 ### 3.3 上下文、压缩与提示词
 
@@ -62,7 +65,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 ### 3.4 触发器、子 Agent 与 Register Center
 
-- **触发器（Go Node）**：**`interval` / `fire_at` / 日历 `schedule`**（含 **`cmd` 门控**）；**`trigger_*`** 工具 + 调度器（**`node/internal/triggers/`**；设计见 [triggers-design.md](./triggers-design.md)）。
+- **触发器（Go Node）**：**`interval` / `fire_at` / 日历 `schedule`**（含 **`cmd` 门控**）；**`trigger_*`** 工具 + 调度器（**`node/internal/triggers/`**；设计见 [triggers-design.md](./triggers-design.md)）；**v0.2.16** 起 TUI **`/triggers`** 与 trigger 会话目标审批。
 - **临时子 Agent**：同进程 **`create_temporary_agent` → `wait_temporary_agents`**；非跨进程 A2A（[child-agent-tools.md](./architecture/child-agent-tools.md)）。
 - **Register Center（独立 Python 服务）**：登记、**`/v1/broadcast`**、**`/v1/relay`**、可选 JSON 持久化（**`register_center/`**）。**Go Node 不直连 RC、不自登记**；Agent 侧 **`agent_peer`** 工具已随 Python API 移除，端到端 A2A 待 **Manage** 阶段（[future/a2a-via-manage.md](./future/a2a-via-manage.md)）。
 
@@ -95,9 +98,21 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 - **首次启动诊断**：检查端口占用、模型配置、Register Center 可达性、UI API base、policy 文件与 runtime 目录。
 - **强 demo**：围绕服务延迟诊断、带审批的服务重启、会话沉淀 skill 三个场景做端到端演示。
 
+**Phase 0 进度（2026-06-10）**：
+
+| 项 | 状态 | 备注 |
+|----|------|------|
+| 一键本地启动 | **大部分完成** | `--withnode`、`dagents register-center`、安装包 |
+| Docker Compose / 本地脚本 | **部分** | [`cases/centos7-feature-tour`](../../cases/centos7-feature-tour/) 等案例；尚无企业默认 compose |
+| 安装与 CLI | **完成** | Windows / Linux 安装包 + 双 TUI |
+| 首次启动诊断 | **未做** | 端口、模型、RC、policy、runtime 一键检查 |
+| 强 demo（三场景） | **部分** | cases 与 skill 能力具备；三场景未打包为单一导览 |
+
 ### Phase 1：Agent Directory / Register Center 企业化（P0/P1）
 
 目标：将 Register Center 从技术组件升级为企业 Agent 目录。
+
+**变更草案**：[design/agent-directory-phase1.md](./design/agent-directory-phase1.md)（数据模型、API、鉴权、分阶段里程碑 P1.1–P1.6）。
 
 优先交付：
 
@@ -106,6 +121,17 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 - **Agent Directory UI**：展示在线/离线 Agent、团队、能力标签、工具、skills、权限范围、健康状态、调用入口。
 - **可信全局总览**：管理员视角支持不按 `discovery_group` 过滤的全局视图；必须配套鉴权、分页、审计和多租户边界。
 - **A2A 可观测增强**：展示 direct/relay、target session、final state、trace id、调用耗时和失败原因。
+
+**Phase 1 进度（2026-06-10）**：
+
+| 项 | 状态 | 现行基线 |
+|----|------|----------|
+| Agent 身份与能力模型 | **完成（P1.1）** | `POST /v1/agents` 扩展字段；v2 JSON 持久化 |
+| 健康状态与心跳 | **完成（P1.1）** | 派生 `status`；`REGISTER_CENTER_OFFLINE_GRACE_SECONDS` |
+| Agent Directory UI | **完成（P1.5）** | `GET /ui/` 只读表格 + 详情抽屉 |
+| 管理员全局总览 | **完成（P1.2）** | admin token 可省略 `discovery_group`；分页/筛选 |
+| A2A 可观测增强 | **部分（P1.3）** | `/v1/admin/a2a/recent`、trace 头、审计；无 UI |
+| Node 登记 sidecar | **未做（P1.6）** | Go Node 仍不自登记 |
 
 ### Phase 2：Governance, Approval & Audit（P0/P1）
 
@@ -234,4 +260,4 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 ---
 
-**最后更新**：2026-06-08 — 对齐 **v0.2.3**（Go Node 本地助手、Windows/Linux 安装包、RC 独立服务）；**Agent 侧 A2A 工具已移除**，跨 Agent 协作列入 **Manage** 远期。若与代码冲突，以 **Git / CHANGELOG** 为准。
+**最后更新**：2026-06-10 — 对齐 **v0.2.17**（policy/triggers TUI、async HITL、FS encoding）；补充 **Phase 0/1 进度表** 与 [agent-directory-phase1.md](./design/agent-directory-phase1.md) 草案。**Agent 侧 A2A 工具已移除**，跨 Agent 协作列入 **Manage** 远期。若与代码冲突，以 **Git / CHANGELOG** 为准。

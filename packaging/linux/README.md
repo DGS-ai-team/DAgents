@@ -4,7 +4,7 @@ Linux 分发辅助（随 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入�
 
 | 文件 | 说明 |
 |------|------|
-| **`dagents`** | 命令行入口（对齐 `packaging/windows/dagents.cmd`）：`chat` / `tui` / `node` / `register-center`；支持 `--withnode`、`node --background` |
+| **`dagents`** | 命令行入口：`chat` / `tui` / `node`（默认后台）/ `node shutdown` / `node restart` / `register-center`；支持 `--withnode` |
 | **`install.sh`** | 安装脚本：拷贝到固定目录、创建 `dagents` 符号链接、配置 `DAGENTS_HOME` 与 `PATH` |
 
 ## 便携使用（不解压安装）
@@ -13,7 +13,10 @@ Linux 分发辅助（随 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入�
 tar -xzf dagents-local-assistant-linux-amd64-*.tar.gz
 cd dagents-local-assistant-linux-amd64
 cp config.example.yaml config.yaml   # 编辑 llm / agent_id
-./dagents node --background          # 推荐；日志 .runtime/logs/node.log
+./dagents node                       # 默认后台启动并等待就绪；日志 .runtime/logs/node.log
+./dagents node shutdown              # 停止 Node
+./dagents node restart               # 重启 Node
+./dagents node --foreground          # 前台阻塞运行（调试）
 ./dagents chat --withnode            # Textual TUI（Node 未运行时会自动后台启动）
 ./dagents tui --withnode             # Go 全屏 TUI
 ```

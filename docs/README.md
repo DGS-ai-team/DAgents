@@ -29,6 +29,9 @@
 | [design/background-and-motivation.md](./design/background-and-motivation.md) | 老旧 OS 动机与 Go 方案 |
 | [design/three-component-model.md](./design/three-component-model.md) | Node + Client + Manage 三组件 ADR |
 | [design/agent-client-refactor-plan.md](./design/agent-client-refactor-plan.md) | AC 分步计划与 N0–N7 状态 |
+| [design/agent-directory-phase1.md](./design/agent-directory-phase1.md) | Phase 1 RC 企业化（过渡；见 Manage 方案） |
+| [design/manage-architecture.md](./design/manage-architecture.md) | Manage 统一控制面架构方案 |
+| [manage/README.md](../../manage/README.md) | **Manage 服务**（M0+M1 已落地） |
 
 ## 专题
 
