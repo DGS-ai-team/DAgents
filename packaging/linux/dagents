@@ -18,6 +18,14 @@ dagents_script_dir() {
 ROOT="$(dagents_script_dir)"
 export DAGENTS_HOME="${ROOT}"
 
+die() {
+  echo "[dagents] $*" >&2
+  exit 1
+}
+
+# 对齐 packaging/windows/dagents.cmd 的 pushd：Node 的 fs_root（默认 ./.runtime）相对进程 cwd 解析。
+cd "${ROOT}" || die "cannot cd to ${DAGENTS_HOME}"
+
 CFG="${DAGENTS_CONFIG:-config.yaml}"
 if [[ ! -f "${ROOT}/${CFG}" && -f "${ROOT}/config.example.yaml" ]]; then
   cp "${ROOT}/config.example.yaml" "${ROOT}/config.yaml"
@@ -33,11 +41,6 @@ NODE_STOP_TIMEOUT_SEC=15
 # set -u 下空数组 "${PARSED_ARGS[@]}" 会 unbound；须预先声明并在无额外参数时分支 exec。
 WITHNODE=0
 PARSED_ARGS=()
-
-die() {
-  echo "[dagents] $*" >&2
-  exit 1
-}
 
 require_bin() {
   local name="$1"
