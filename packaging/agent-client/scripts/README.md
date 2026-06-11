@@ -4,7 +4,7 @@
 |------|------|
 | `startup/linux/start-node.sh` | 前台启动 `bin/dagents-node` |
 | `startup/linux/start-register-center.sh` | 前台启动 `bin/dagents_register_center` |
-| `startup/windows/*.bat` | Windows 等价脚本 |
+| `startup/windows/start-node.bat` | 调用 `dagents.cmd node`（默认后台并等待就绪） |
 
 系统服务注册脚本来自仓库 `scripts/linux/`、`scripts/windows/`、`scripts/service/`（assemble 时一并复制）。
 

@@ -10,7 +10,9 @@ if not exist "config.yaml" if exist "config.example.yaml" copy /Y "config.exampl
 if not exist ".env" if exist ".env.example" copy /Y ".env.example" ".env" >nul
 
 set "CFG=config.yaml"
+if defined DAGENTS_CONFIG set "CFG=%DAGENTS_CONFIG%"
 set "CFG_ABS=%DAGENTS_HOME%\%CFG%"
+set "NODE_PID_FILE=%DAGENTS_HOME%\.runtime\node.pid"
 
 if "%~1"=="" goto cli_default_chat
 if /I "%~1"=="help" goto help
@@ -89,13 +91,78 @@ goto cli_exit
 
 :run_node
 if not exist "bin\dagents-node.exe" goto missing_node
-if /I "%~1"=="--background" (
-  call :start_node_background
+if "%~1"=="" (
+  call :start_node_default
   set "EXIT_CODE=!ERRORLEVEL!"
   goto cli_exit
 )
+if /I "%~1"=="shutdown" (
+  shift
+  call :shutdown_node
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="stop" (
+  shift
+  call :shutdown_node
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="restart" (
+  shift
+  call :restart_node
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="--foreground" (
+  shift
+  bin\dagents-node.exe -config "%CFG%" %*
+  goto cli_exit
+)
+if /I "%~1"=="-f" (
+  shift
+  bin\dagents-node.exe -config "%CFG%" %*
+  goto cli_exit
+)
+if /I "%~1"=="--no-wait" goto run_node_nowait
+if /I "%~1"=="--background" goto run_node_nowait
 bin\dagents-node.exe -config "%CFG%" %*
 goto cli_exit
+
+:run_node_nowait
+shift
+call :probe_node
+if not errorlevel 1 (
+  echo [dagents] node already running
+  set "EXIT_CODE=0"
+  goto cli_exit
+)
+call :start_node_background
+set "EXIT_CODE=!ERRORLEVEL!"
+goto cli_exit
+
+:start_node_default
+call :probe_node
+if not errorlevel 1 (
+  echo [dagents] node already running
+  exit /b 0
+)
+call :start_node_background
+if errorlevel 1 exit /b 1
+call :wait_node_ready
+if errorlevel 1 exit /b 1
+echo [dagents] node is ready
+exit /b 0
+
+:restart_node
+call :shutdown_node
+if errorlevel 1 exit /b 1
+call :start_node_background
+if errorlevel 1 exit /b 1
+call :wait_node_ready
+if errorlevel 1 exit /b 1
+echo [dagents] node restarted
+exit /b 0
 
 :start_node_background
 if not exist "%DAGENTS_HOME%\bin\dagents-node.exe" exit /b 1
@@ -104,31 +171,95 @@ set "NODE_EXE=%DAGENTS_HOME%\bin\dagents-node.exe"
 set "NODE_LOG=%DAGENTS_HOME%\.runtime\logs\node.log"
 set "NODE_ERR=%DAGENTS_HOME%\.runtime\logs\node.err.log"
 echo [dagents] starting node in background (logs: %NODE_LOG%)
-rem /D 固定工作目录；绝对路径避免 start/cmd 子进程 cwd 漂移导致找不到 config 与 .runtime。
+rem /D 固定工作目录；绝对 config 避免 cwd 漂移导致 fs_root 读错目录。
 start "" /B /D "%DAGENTS_HOME%" cmd /c ""%NODE_EXE%" -config "%CFG_ABS%" 1>>"%NODE_LOG%" 2>>"%NODE_ERR%""
+call :capture_node_pid
 exit /b 0
+
+:capture_node_pid
+if not exist "%DAGENTS_HOME%\.runtime" mkdir "%DAGENTS_HOME%\.runtime"
+timeout /t 1 /nobreak >nul 2>nul
+if errorlevel 1 ping -n 2 127.0.0.1 >nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg='!CFG_ABS!'; $p=Get-CimInstance Win32_Process -Filter 'Name=\"dagents-node.exe\"' | Where-Object { $_.CommandLine -like \"*$cfg*\" } | Select-Object -First 1 -ExpandProperty ProcessId; if ($p) { Set-Content -LiteralPath '!NODE_PID_FILE!' -Value $p -NoNewline }"
+exit /b 0
+
+:clear_node_pid
+if exist "%NODE_PID_FILE%" del /f /q "%NODE_PID_FILE%" >nul 2>&1
+exit /b 0
+
+:shutdown_node
+call :probe_node
+if errorlevel 1 (
+  call :clear_node_pid
+  echo [dagents] node is not running
+  exit /b 0
+)
+set "NODE_PID="
+if exist "%NODE_PID_FILE%" set /p NODE_PID=<"%NODE_PID_FILE%"
+if defined NODE_PID (
+  call :stop_node_process !NODE_PID!
+) else (
+  call :find_and_stop_node_pids
+)
+call :clear_node_pid
+call :probe_node
+if not errorlevel 1 (
+  echo [dagents] node still responds to probe after shutdown; check .runtime\logs\node.err.log
+  exit /b 1
+)
+echo [dagents] node stopped
+exit /b 0
+
+:stop_node_process
+set "TARGET_PID=%~1"
+if not defined TARGET_PID exit /b 0
+tasklist /FI "PID eq %TARGET_PID%" 2>nul | find /I "%TARGET_PID%" >nul
+if errorlevel 1 exit /b 0
+echo [dagents] stopping node (pid=%TARGET_PID%)
+taskkill /PID %TARGET_PID% /T >nul 2>&1
+set /a STOP_WAIT=0
+:stop_node_wait
+tasklist /FI "PID eq %TARGET_PID%" 2>nul | find /I "%TARGET_PID%" >nul
+if errorlevel 1 exit /b 0
+timeout /t 1 /nobreak >nul 2>nul
+if errorlevel 1 ping -n 2 127.0.0.1 >nul
+set /a STOP_WAIT+=1
+if !STOP_WAIT! lss 15 goto stop_node_wait
+taskkill /PID %TARGET_PID% /T /F >nul 2>&1
+exit /b 0
+
+:find_and_stop_node_pids
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg='!CFG_ABS!'; Get-CimInstance Win32_Process -Filter 'Name=\"dagents-node.exe\"' | Where-Object { $_.CommandLine -like \"*$cfg*\" } | ForEach-Object { Write-Host ('[dagents] stopping node (pid=' + $_.ProcessId + ')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+exit /b 0
+
+:wait_node_ready
+set /a NODE_WAIT=0
+:wait_node_ready_loop
+call :probe_node
+if not errorlevel 1 exit /b 0
+timeout /t 1 /nobreak >nul 2>nul
+if errorlevel 1 ping -n 2 127.0.0.1 >nul
+set /a NODE_WAIT+=1
+if !NODE_WAIT! lss 30 goto wait_node_ready_loop
+call :ensure_node_failed
+exit /b 1
+
+:probe_node
+if not exist "bin\dagents-client.exe" exit /b 1
+bin\dagents-client.exe -config "%CFG_ABS%" probe >nul 2>&1
+exit /b %ERRORLEVEL%
 
 :ensure_node
 if not exist "bin\dagents-client.exe" (
   echo [dagents] --withnode requires bin\dagents-client.exe ^(probe^)
   exit /b 1
 )
-bin\dagents-client.exe -config "%CFG_ABS%" probe >nul 2>&1
+call :probe_node
 if not errorlevel 1 exit /b 0
 call :start_node_background
 if errorlevel 1 exit /b 1
-timeout /t 2 /nobreak >nul 2>nul
-if errorlevel 1 ping -n 3 127.0.0.1 >nul
-set /a NODE_WAIT=0
-:ensure_node_wait
-bin\dagents-client.exe -config "%CFG_ABS%" probe >nul 2>&1
-if not errorlevel 1 exit /b 0
-timeout /t 1 /nobreak >nul 2>nul
-if errorlevel 1 ping -n 2 127.0.0.1 >nul
-set /a NODE_WAIT+=1
-if !NODE_WAIT! lss 30 goto ensure_node_wait
-call :ensure_node_failed
-exit /b 1
+call :wait_node_ready
+exit /b %ERRORLEVEL%
 
 :ensure_node_failed
 echo [dagents] node did not become ready within 30s
@@ -194,16 +325,21 @@ exit /b 0
 
 :help
 echo Usage:
-echo   dagents chat [--withnode]   Textual TUI (Python; rich UI)
+echo   dagents chat [--withnode]       Textual TUI (Python; rich UI)
 echo   dagents tui [--withnode] [--plain]  Go bubbletea TUI (default full-screen; --plain for line REPL)
-echo   dagents node [--background] Start Agent Node (foreground, or background with logs)
-echo   dagents register-center     Start Register Center (optional A2A)
-echo   dagents doctor              Check installed files
-echo   dagents version             Print version information
+echo   dagents node                    Start Agent Node in background (default; waits until ready)
+echo   dagents node shutdown           Stop background Node
+echo   dagents node restart            Stop then start Node in background
+echo   dagents node --foreground       Start Node in foreground (blocks terminal)
+echo   dagents node --no-wait          Background start without waiting for probe
+echo   dagents register-center         Start Register Center (optional A2A)
+echo   dagents doctor                  Check installed files
+echo   dagents version                 Print version information
 echo.
 echo Options:
-echo   --withnode   Probe Node first; start it in background if not running, then launch client
-echo   --background Start Node detached; logs under .runtime\logs\node.log
+echo   --withnode     Probe Node first; start it in background if not running, then launch client
+echo   --foreground   Run Node in foreground (blocks terminal)
+echo   --no-wait      Background start without waiting for probe (--background alias)
 echo.
 echo Config:
 echo   Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
