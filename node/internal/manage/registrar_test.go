@@ -62,7 +62,7 @@ func TestRegistrar_registerAndHeartbeat(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"heartbeat_interval_seconds": 2,
-				"agent":                        map[string]string{"status": "online"},
+				"agent":                      map[string]string{"status": "online"},
 			})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/heartbeat"):
 			heartbeatCalls.Add(1)
@@ -117,7 +117,7 @@ func TestRegistrar_reregistersOnHeartbeat404(t *testing.T) {
 			registerCalls.Add(1)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"heartbeat_interval_seconds": 1,
-				"agent":                        map[string]string{"status": "online"},
+				"agent":                      map[string]string{"status": "online"},
 			})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/heartbeat"):
 			w.WriteHeader(http.StatusNotFound)

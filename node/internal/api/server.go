@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -32,15 +33,17 @@ import (
 
 // Server 承载 Agent Node HTTP 路由与运行时依赖。
 type Server struct {
-	cfg          *config.Config
-	logger       *slog.Logger
-	mux          *http.ServeMux
-	sessions     *session.Manager // per-session 队列与 turn consumer
-	stream       *stream.Hub      // 进程内 SSE 事件总线
-	store        *store.SQLiteStore
-	triggerStore *triggers.Store
-	triggerSched *triggers.Scheduler
-	registrar    *manage.Registrar
+	cfg           *config.Config
+	logger        *slog.Logger
+	mux           *http.ServeMux
+	sessions      *session.Manager // per-session 队列与 turn consumer
+	stream        *stream.Hub      // 进程内 SSE 事件总线
+	store         *store.SQLiteStore
+	triggerStore  *triggers.Store
+	triggerSched  *triggers.Scheduler
+	registrar     *manage.Registrar
+	inboxPoller   *manage.InboxPoller
+	a2aCallerHITL *session.A2ACallerHITLBridge
 }
 
 // Option 为 NewServer 可选配置。
@@ -107,13 +110,19 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		opt(&o)
 	}
 	// 生产路径：按 FSRoot 注册内置工具；失败时回退 "." 以免 API 完全不可用。
-		if o.tools == nil {
+	if o.tools == nil {
 		reg, err := tools.NewRegistry(cfg.FSRoot, 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
 		if err != nil {
 			logger.Error("tools registry init failed", "error", err)
 			reg, _ = tools.NewRegistry(".", 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
 		}
+		if err := reg.SetBuiltinEnabled(cfg.Tools.NormalizedBuiltinEnabled()); err != nil {
+			logger.Error("tools.enabled_groups invalid", "error", err)
+		}
 		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
+		if cfg.Skills.Enabled {
+			reg.SetSkillsCatalog(skills.NewCatalog(cfg.SkillsRoot(), true, cfg.Skills.MaxInPrompt))
+		}
 		o.tools = reg
 	}
 	if o.policyEngine == nil {
@@ -201,20 +210,46 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		})
 	}
 	var registrar *manage.Registrar
+	var inboxPoller *manage.InboxPoller
+	var a2aBridge *session.A2ACallerHITLBridge
 	if cfg.Manage.Enabled {
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
+		a2aBridge = session.NewA2ACallerHITLBridge(cfg.AgentID, hub)
+		if o.tools != nil {
+			compliancePeer := ""
+			if card, cardErr := manage.LoadAgentCard(cfg.Manage.Registration.AgentCardPath); cardErr != nil {
+				logger.Warn("agent card load failed for agent_invoke defaults", "error", cardErr, "path", cfg.Manage.Registration.AgentCardPath)
+			} else if card != nil {
+				compliancePeer = card.CompliancePeer()
+			}
+			o.tools.SetManageRuntime(
+				a2aclient.New(cfg),
+				cfg.AgentID,
+				compliancePeer,
+				cfg.Manage.Registration.Team,
+				a2aBridge,
+			)
+		}
+		if cfg.ManageA2AEnabled() {
+			inboxPoller = manage.NewInboxPoller(cfg, logger)
+			if handler := manage.ResolveInboxHandler(cfg, mgr, logger); handler != nil {
+				inboxPoller.SetHandler(handler)
+			}
+		}
 	}
 	s := &Server{
-		cfg:          cfg,
-		logger:       logger,
-		mux:          http.NewServeMux(),
-		stream:       hub,
-		store:        st,
-		sessions:     mgr,
-		triggerStore: triggerStore,
-		triggerSched: triggerSched,
-		registrar:    registrar,
+		cfg:           cfg,
+		logger:        logger,
+		mux:           http.NewServeMux(),
+		stream:        hub,
+		store:         st,
+		sessions:      mgr,
+		triggerStore:  triggerStore,
+		triggerSched:  triggerSched,
+		registrar:     registrar,
+		inboxPoller:   inboxPoller,
+		a2aCallerHITL: a2aBridge,
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
@@ -262,6 +297,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	defer regCancel()
 	if s.registrar != nil {
 		s.registrar.Start(regCtx)
+	}
+	if s.inboxPoller != nil {
+		s.inboxPoller.Start(regCtx)
 	}
 	go func() {
 		s.logger.Info("agent node listening", "addr", addr, "agent_id", s.cfg.AgentID)
@@ -619,6 +657,14 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	requestType := strings.TrimSpace(req.RequestType)
 	if requestType == "" {
 		requestType = "message"
+	}
+	if requestType == "resume" && s.a2aCallerHITL != nil && s.a2aCallerHITL.DeliverA2ACallerResume(sessionID, req.ResumeValue) {
+		writeJSON(w, http.StatusOK, postMessageResponse{
+			Accepted:  true,
+			SessionID: sessionID,
+			Priority:  string(queue.PriorityHuman),
+		})
+		return
 	}
 
 	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ResumeValue)

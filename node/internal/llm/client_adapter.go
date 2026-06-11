@@ -55,12 +55,12 @@ func (c *adapterClient) CompleteText(ctx context.Context, req CompleteRequest) (
 
 // envAdapterClient 延迟从环境变量读取 API Key。
 type envAdapterClient struct {
-	baseURL     string
-	model       string
-	keyEnv      string
-	adapter     MessageAdapter
+	baseURL      string
+	model        string
+	keyEnv       string
+	adapter      MessageAdapter
 	requestExtra map[string]any
-	logger      *slog.Logger
+	logger       *slog.Logger
 }
 
 func newEnvAdapterClient(baseURL, model, keyEnv string, adapter MessageAdapter, logger *slog.Logger) *envAdapterClient {

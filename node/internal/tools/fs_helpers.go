@@ -12,15 +12,15 @@ import (
 )
 
 const (
-	defaultLineOffset        = 1
-	defaultLineLimit         = 100
-	defaultSearchIndexOffset = 0
-	defaultSearchCountLimit  = 5
+	defaultLineOffset         = 1
+	defaultLineLimit          = 100
+	defaultSearchIndexOffset  = 0
+	defaultSearchCountLimit   = 5
 	defaultSearchContextLines = 10
-	maxSearchContextLines    = 50
-	maxSearchHitIndexes      = 10000
-	defaultReadMaxBytes      = 3000
-	defaultSearchMaxBytes    = 8000
+	maxSearchContextLines     = 50
+	maxSearchHitIndexes       = 10000
+	defaultReadMaxBytes       = 3000
+	defaultSearchMaxBytes     = 8000
 )
 
 var textSuffixes = map[string]struct{}{

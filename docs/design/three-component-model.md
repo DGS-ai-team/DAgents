@@ -132,11 +132,11 @@ Node   → turn loop → 工具本地执行 → SSE 推送事件 → Client
 ### 5.3 A2A（跨 Agent，非子 Agent）
 
 ```text
-Agent A → Manage：discover / POST /v1/a2a/messages
+Agent A → Manage：discover / POST /v1/a2a/tasks
 Manage  → 写入 Agent B inbox
-Agent B → Manage：GET /v1/a2a/inbox → 本地 turn loop
-Agent B → Manage：POST .../reply
-Agent A → Manage：GET /v1/a2a/messages/{id} 取结果
+Agent B → Manage：GET /v1/a2a/inbox（long poll）→ 本地 turn loop
+Agent B → Manage：POST /v1/a2a/tasks/{id}/reply
+Agent A → Manage：GET /v1/a2a/tasks/{id} 取结果
 审计：A、B 各自上报 Manage
 ```
 

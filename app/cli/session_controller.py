@@ -273,6 +273,35 @@ class SessionController:
         assert self._client is not None
         return await self._client.list_sessions()
 
+    async def switch_session(self, requested_id: str | None = None) -> str:
+        """切换当前 session 并重连 SSE（live 订阅新 session）。"""
+        assert self._client is not None
+        if self._stream_task is not None:
+            self._stream_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._stream_task
+            self._stream_task = None
+        self._drain_event_queue()
+        old_id = self.session_id
+        new_id = await self._client.create_session(requested_id)
+        self.session_id = new_id
+        self._logger.info("session switched old=%s new=%s", old_id, new_id)
+        self._reset_session_local_state()
+        self._sse_ready.clear()
+        self._sse_connected = False
+        self._stream_task = asyncio.create_task(self._pump_stream())
+        try:
+            await asyncio.wait_for(self._sse_ready.wait(), timeout=15.0)
+        except TimeoutError as exc:
+            raise RuntimeError("SSE subscription timed out after session switch") from exc
+        self._emit_status()
+        self._schedule_context_token_refresh()
+        return new_id
+
+    def set_show_reasoning(self, enabled: bool) -> None:
+        """运行时开关 reasoning 流展示（默认由 --show-reasoning 初始化）。"""
+        self.show_reasoning = enabled
+
     async def get_context(self) -> dict[str, Any]:
         """查询当前 session 的 context 摘要。
 
@@ -623,6 +652,8 @@ class SessionController:
                 self._emit_transcript(format_assistant_delta(content))
                 self._assistant_line_open = True
         elif event_type == "reasoning":
+            if not self.show_reasoning:
+                return
             content = str(data.get("content") or "")
             if content:
                 self._ensure_assistant_end()
@@ -733,6 +764,26 @@ class SessionController:
         self._hitl_queue.clear()
         self._emit_child_strip()
         self._notify_hitl_pending()
+
+    def _drain_event_queue(self) -> None:
+        while True:
+            try:
+                self._events.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+    def _reset_session_local_state(self) -> None:
+        """切换 session 后重置 turn / HITL / 子 Agent 等本地状态。"""
+        self.reset_child_state()
+        self._awaiting_user_turn = False
+        self._submit_pending_marker = False
+        self._user_turn_started = False
+        self._user_turn_done.set()
+        self._assistant_line_open = False
+        self._messages_total_tokens = None
+        self._usage_strip = UsageStripSnapshot()
+        self._turn_seq_fence = 0
+        self._last_event_seq = 0
 
     def _handle_child_lifecycle(self, event_type: str, data: dict[str, Any]) -> None:
         """处理子 Agent 生命周期 SSE，写入系统行并更新 tracker。"""

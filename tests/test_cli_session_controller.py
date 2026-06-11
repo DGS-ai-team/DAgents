@@ -221,6 +221,51 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller._messages_total_tokens, 4321)
         self.assertEqual(self.controller.input_strip_token_text(), "ctx 4,321")
 
+    async def test_reasoning_suppressed_when_disabled(self) -> None:
+        self.controller.show_reasoning = False
+        await self.controller._handle_stream_event(_event("reasoning", content="think"))
+        self.assertEqual(len(self.updates), 0)
+
+    async def test_reasoning_emitted_when_enabled(self) -> None:
+        self.controller.show_reasoning = True
+        await self.controller._handle_stream_event(_event("reasoning", content="think"))
+        self.assertEqual(len(self.updates), 1)
+        self.assertIn("[reasoning]", self.updates[0].text)
+
+    async def test_switch_session_resets_local_state(self) -> None:
+        mock_client = MagicMock()
+        mock_client.create_session = AsyncMock(return_value="sess-new")
+        self.controller._client = mock_client
+        self.controller._awaiting_user_turn = True
+        self.controller._user_turn_done.clear()
+        await self.controller._handle_stream_event(
+            _event(
+                "approval_required",
+                data={
+                    "approval_args": {
+                        "tool_calls": [{"id": "call_x", "name": "bash_run", "arguments": {}}],
+                    }
+                },
+            ),
+        )
+
+        async def fake_pump() -> None:
+            self.controller._sse_ready.set()
+            self.controller._sse_connected = True
+
+        original_pump = self.controller._pump_stream
+        self.controller._pump_stream = fake_pump  # type: ignore[method-assign]
+        try:
+            new_id = await self.controller.switch_session("sess-new")
+        finally:
+            self.controller._pump_stream = original_pump
+
+        self.assertEqual(new_id, "sess-new")
+        self.assertEqual(self.controller.session_id, "sess-new")
+        self.assertEqual(self.controller.hitl_queue_len(), 0)
+        self.assertFalse(self.controller._awaiting_user_turn)
+        mock_client.create_session.assert_awaited_once_with("sess-new")
+
 
 if __name__ == "__main__":
     unittest.main()

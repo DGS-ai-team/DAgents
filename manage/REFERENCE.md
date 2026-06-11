@@ -15,7 +15,7 @@
 | `auth.py` | `AuthContext`, `authenticate`, `require_admin`, `TOKEN_HEADER` |
 | `audit.py` | `AuditEvent`, `AuditLog` |
 | `blob.py` | `BlobStore`, `BlobStoreConfig` |
-| `metrics.py` | `record_registry_operation`, `metrics_text` |
+| `metrics.py` | `record_registry_operation`, `record_a2a_operation`, `metrics_text` |
 
 ## storage/
 
@@ -32,6 +32,14 @@
 | `store.py` | `AgentRegistryStore.register`（保留已有分组）, `update_groups`, `import_rc_json` |
 | `routes.py` | `build_registry_router` |
 
+## a2a/（M2）
+
+| 模块 | 符号 |
+|------|------|
+| `models.py` | `TaskCreateRequest`, `TaskRecord`, `InboxResponse`, … |
+| `store.py` | `A2ATaskStore.create`, `poll_inbox`, `ack`, `reply`, `sweep_expired` |
+| `routes.py` | `build_a2a_router` |
+
 ## console/static/
 
 | 文件 | 说明 |
@@ -40,5 +48,4 @@
 
 | 路径 | 里程碑 |
 |------|--------|
-| `a2a/` | M2 |
 | `skills/` | M3 |

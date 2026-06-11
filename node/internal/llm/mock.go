@@ -6,8 +6,8 @@ import (
 
 // MockClient 用于单测与无 API Key 联调。
 type MockClient struct {
-	Prefix      string
-	FixedReply  string
+	Prefix     string
+	FixedReply string
 	// EnableTools 为 true 时：首轮返回 read_file tool call，次轮返回工具结果摘要。
 	EnableTools bool
 	adapter     MessageAdapter

@@ -68,6 +68,7 @@ func (m *model) invalidateHITLForUserMessage() {
 	}
 	m.resetHITLQueue()
 	m.resetHITLState()
+	m.relayoutIfKnown()
 }
 
 func (m *model) pendingHITLCount() int {
@@ -80,6 +81,8 @@ func (m *model) showNextHITLIfIdle() {
 		if m.mode == modeApproval || m.mode == modeUserInfo {
 			m.resetHITLState()
 		}
+		// 退出审批/询问后须重算 viewport，否则仍保留审批面板高度，输入栏会上移留白。
+		m.relayoutIfKnown()
 		return
 	}
 	if m.mode == modeApproval || m.mode == modeUserInfo {

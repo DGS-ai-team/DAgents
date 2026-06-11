@@ -56,6 +56,8 @@ class ManageRegistryTests(unittest.TestCase):
                 offline_grace_seconds=86400,
                 audit_max_entries=100,
                 legacy_direct_relay=False,
+                a2a_inbox_content_max_chars=4096,
+                a2a_expire_sweep_seconds=30,
             )
             app = create_app(settings)
             payload = {

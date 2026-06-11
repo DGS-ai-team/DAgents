@@ -39,6 +39,10 @@ type Config struct {
 
 // ToolsConfig 控制内置工具行为（如 bash_run 输出解码与压缩）。
 type ToolsConfig struct {
+	// EnabledGroups 为内置工具组允许列表（见 shared/config AllBuiltinToolGroupNames）；省略或为空表示启用全部。
+	EnabledGroups []string `yaml:"enabled_groups"`
+	// Enabled 已废弃；请改用 enabled_groups。
+	Enabled []string `yaml:"enabled,omitempty"`
 	// BashOutputEncoding 为 bash_run 捕获的子进程 stdout/stderr 字节编码（解码为 UTF-8 后交给 LLM）。
 	// 留空时由 Node 按 OS/shell 类型自动选择（Windows cmd/powershell→gbk，bash→utf-8）。
 	BashOutputEncoding string             `yaml:"bash_output_encoding"`
@@ -125,11 +129,20 @@ type ManageConfig struct {
 	URL          string                   `yaml:"url"`
 	NodeToken    string                   `yaml:"node_token"`
 	Registration ManageRegistrationConfig `yaml:"registration"`
+	A2A          ManageA2AConfig          `yaml:"a2a"`
+}
+
+// ManageA2AConfig 控制 Node 对 Manage A2A inbox 的 long poll sidecar。
+type ManageA2AConfig struct {
+	Enabled          *bool `yaml:"enabled"`
+	InboxPollSeconds int   `yaml:"inbox_poll_seconds"`
+	InboxWaitSeconds int   `yaml:"inbox_wait_seconds"`
 }
 
 // ManageRegistrationConfig 控制周期性 upsert/心跳参数。
 type ManageRegistrationConfig struct {
 	BaseURL         string `yaml:"base_url"`
+	AgentCardPath   string `yaml:"agent_card_path"`
 	IntervalSeconds int    `yaml:"interval_seconds"`
 	TTLSeconds      int    `yaml:"ttl_seconds"`
 	Name            string `yaml:"name"`
@@ -223,6 +236,15 @@ func (c *Config) ApplyDefaults() {
 	if c.Manage.Registration.TTLSeconds <= 0 {
 		c.Manage.Registration.TTLSeconds = 60
 	}
+	if c.Manage.A2A.InboxPollSeconds <= 0 {
+		c.Manage.A2A.InboxPollSeconds = c.Manage.Registration.IntervalSeconds
+		if c.Manage.A2A.InboxPollSeconds <= 0 {
+			c.Manage.A2A.InboxPollSeconds = 30
+		}
+	}
+	if c.Manage.A2A.InboxWaitSeconds <= 0 {
+		c.Manage.A2A.InboxWaitSeconds = 25
+	}
 }
 
 // RuntimeDir 返回运行时根目录（与 `fs_root` 一致；子目录路径均相对此根硬编码）。
@@ -264,6 +286,9 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("manage.registration.base_url invalid: %w", err)
 			}
 		}
+	}
+	if err := validateToolsEnabledConfig(&c.Tools); err != nil {
+		return err
 	}
 	return nil
 }
@@ -324,6 +349,33 @@ func (c *Config) ManageRegistryBaseURLIsLoopback() bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// ManageA2AEnabled 是否启动 A2A inbox long poll sidecar（须 manage.enabled=true；默认 true）。
+func (c *Config) ManageA2AEnabled() bool {
+	if c == nil || !c.Manage.Enabled {
+		return false
+	}
+	if c.Manage.A2A.Enabled != nil {
+		return *c.Manage.A2A.Enabled
+	}
+	return true
+}
+
+// ManageA2AInboxWait 返回 long poll wait 参数。
+func (c *Config) ManageA2AInboxWait() time.Duration {
+	if c == nil || c.Manage.A2A.InboxWaitSeconds <= 0 {
+		return 25 * time.Second
+	}
+	return time.Duration(c.Manage.A2A.InboxWaitSeconds) * time.Second
+}
+
+// ManageA2AInboxPollInterval 返回断线降级后的短 poll 间隔。
+func (c *Config) ManageA2AInboxPollInterval() time.Duration {
+	if c == nil || c.Manage.A2A.InboxPollSeconds <= 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(c.Manage.A2A.InboxPollSeconds) * time.Second
 }
 
 // ListenAddr 返回 host:port 监听地址字符串。

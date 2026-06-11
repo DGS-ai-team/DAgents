@@ -27,15 +27,15 @@ type ShellPolicyEntry struct {
 
 // PlatformInfo 描述 Node 运行环境与默认 shell。
 type PlatformInfo struct {
-	GOOS          string `json:"goos"`
-	DefaultShell  string `json:"default_shell"`
+	GOOS         string `json:"goos"`
+	DefaultShell string `json:"default_shell"`
 }
 
 // Snapshot 为 GET /v1/policy 返回的结构化视图。
 type Snapshot struct {
-	PolicyDir string                      `json:"policy_dir"`
-	Platform  PlatformInfo                `json:"platform"`
-	Tools     []ToolPolicyEntry           `json:"tools"`
+	PolicyDir string                        `json:"policy_dir"`
+	Platform  PlatformInfo                  `json:"platform"`
+	Tools     []ToolPolicyEntry             `json:"tools"`
 	Shell     map[string][]ShellPolicyEntry `json:"shell"`
 }
 

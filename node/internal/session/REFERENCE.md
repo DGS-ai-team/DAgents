@@ -17,6 +17,7 @@
 | `LoadedSkills` / `ListSessionSkills` / `LoadSessionSkill` / `UnloadSessionSkill` | skills 读写 |
 | `ClearContext` / `Delete` | 清空消息或删除 session |
 | `EnqueueMessage` | user / resume / 高优先级消息入队 |
+| `RunInboxConsultation` | A2A inbox：单 Task 跑完整 turn（订阅 SSE 聚合 assistant） |
 | `EnqueueAsyncToolResult` / `EnqueueToolResult` / `EnqueueBackgroundToolResult` | 工具续跑与后台回灌 |
 | `CancelTurn` | 取消当前 turn 上下文 |
 | `attachUserChildTools` | 父 runtime 上 `SetChildAgentTools(mgr, false)` |

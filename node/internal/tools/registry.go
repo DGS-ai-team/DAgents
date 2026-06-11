@@ -1,31 +1,17 @@
-// Package tools 提供 Node 本地工具 registry 与执行器（N3：bash/fs）。
 package tools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"sync"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
+	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
-
-// FunctionDef 为 OpenAI function tool 定义。
-type FunctionDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
-}
-
-// ToolDef 为 OpenAI tools 数组项。
-type ToolDef struct {
-	Type     string      `json:"type"`
-	Function FunctionDef `json:"function"`
-}
 
 // Registry 注册内置工具并在 FS_ROOT 沙箱内执行。
 type Registry struct {
@@ -37,13 +23,17 @@ type Registry struct {
 	compressMu          sync.Mutex
 	bashCompressStats   map[string]*OutputCompressStats
 	bgJobs              *backgroundJobRegistry
-	triggerStore *triggers.Store
-	triggerSched *triggers.Scheduler
-	agentID      string
-	handlers     map[string]handler
+	triggerStore        *triggers.Store
+	triggerSched        *triggers.Scheduler
+	manageClient        *a2aclient.Client
+	a2aCallerHITL       a2aclient.A2ACallerHITLHandler
+	compliancePeer      string
+	discoveryGroup      string
+	agentID             string
+	skillsCatalog       *skills.Catalog
+	enabledOnly         map[string]struct{}
+	handlers            map[string]handler
 }
-
-type handler func(ctx context.Context, args json.RawMessage) (string, error)
 
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。
 // encodings[0]=tools.bash_output_encoding，encodings[1]=tools.file_encoding；空串表示按平台/shell 自动选择。
@@ -99,7 +89,11 @@ func (r *Registry) Definitions() []ToolDef {
 		triggerDeleteToolDef(),
 		triggerFireToolDef(),
 	}
-	return append(base, childAgentToolDefs()...)
+	if r.manageClient != nil {
+		base = append(base, manageA2AToolDefs()...)
+	}
+	base = append(base, childAgentToolDefs()...)
+	return r.enrichDefinitions(r.filterToolDefs(base))
 }
 
 // Execute 按名称 dispatch 工具；未知工具返回 error 文本。
@@ -138,47 +132,4 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["trigger_delete"] = r.execTriggerDelete
 	r.handlers["trigger_fire"] = r.execTriggerFire
 	r.RegisterChildAgentToolStubs()
-}
-
-func resolveFSRoot(fsRoot string) (string, error) {
-	root := strings.TrimSpace(fsRoot)
-	if root == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("fs_root empty and getwd failed: %w", err)
-		}
-		root = wd
-	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
-		return "", fmt.Errorf("create fs_root: %w", err)
-	}
-	return abs, nil
-}
-
-func (r *Registry) resolvePath(rel string) (string, error) {
-	rel = strings.TrimSpace(rel)
-	if rel == "" {
-		return "", fmt.Errorf("path is required")
-	}
-	if filepath.IsAbs(rel) {
-		return "", fmt.Errorf("absolute path not allowed: %s", rel)
-	}
-	clean := filepath.Clean(rel)
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("path escapes fs_root: %s", rel)
-	}
-	full := filepath.Join(r.fsRoot, clean)
-	abs, err := filepath.Abs(full)
-	if err != nil {
-		return "", err
-	}
-	root := r.fsRoot
-	if !strings.HasPrefix(abs, root+string(os.PathSeparator)) && abs != root {
-		return "", fmt.Errorf("path escapes fs_root: %s", rel)
-	}
-	return abs, nil
 }

@@ -11,8 +11,8 @@ const ToolStreamInterruptedMessage = "流式输出被用户中断。"
 type HITLKind string
 
 const (
-	HITLApproval         HITLKind = "approval"
-	HITLUserInformation  HITLKind = "user_information"
+	HITLApproval        HITLKind = "approval"
+	HITLUserInformation HITLKind = "user_information"
 )
 
 // PendingHITL 保存分阶段 HITL 暂停时的待处理 tool call。

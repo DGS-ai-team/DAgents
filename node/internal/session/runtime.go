@@ -626,8 +626,3 @@ func (r *runtime) unloadSkillsByName(names []string) []skills.LoadedSkill {
 	r.persist(context.Background())
 	return loaded
 }
-
-func (r *runtime) clearLoadedSkills() {
-	r.setLoadedSkills(nil)
-	r.persist(context.Background())
-}

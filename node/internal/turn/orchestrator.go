@@ -10,10 +10,10 @@ import (
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
-	"github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	historypkg "github.com/DGS-ai-team/DAgents/node/internal/history"
-	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -60,7 +60,7 @@ type Orchestrator struct {
 	turnUsageMu sync.Mutex
 	turnUsage   map[string]llm.Usage
 
-	enqueueToolResult    func(sessionID string) error
+	enqueueToolResult   func(sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
 }
 

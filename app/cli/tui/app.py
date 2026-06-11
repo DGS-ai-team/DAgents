@@ -2232,6 +2232,19 @@ class DAgentsTuiApp(App[None]):
         if value == "/children":
             await self._show_children()
             return
+        if value == "/new":
+            await self._switch_session(None)
+            return
+        if value.startswith("/switch "):
+            target = value[len("/switch ") :].strip()
+            if not target:
+                self._transcript_log().write("[yellow]用法: /switch <session_id>[/yellow]")
+                return
+            await self._switch_session(target)
+            return
+        if value == "/reasoning" or value.startswith("/reasoning "):
+            self._handle_reasoning_command(value)
+            return
         if value.startswith("/"):
             log = self._transcript_log()
             log.write(f"[yellow]Unknown command: {value}[/yellow]")
@@ -2811,22 +2824,60 @@ class DAgentsTuiApp(App[None]):
         except Exception as exc:
             log.write(f"[red]clear failed: {exc}[/red]")
 
+    async def _switch_session(self, requested_id: str | None) -> None:
+        """切换 session 并重连 SSE；清本地 HITL / 流式状态。"""
+        log = self._transcript_log()
+        self._abort_local_hitl_for_user_message()
+        self._controller.clear_hitl_queue()
+        self._hitl_busy = False
+        self._cancel_tool_pending_tasks()
+        self._cancel_status_lines()
+        self._finish_assistant_stream(log)
+        try:
+            new_id = await self._controller.switch_session(requested_id)
+            log.write(f"[dim]已切换 session={escape(new_id)}[/dim]")
+            self._apply_top_status()
+            self._refresh_input_strip()
+        except Exception as exc:  # noqa: BLE001
+            log.write(f"[red]switch session failed: {escape(str(exc))}[/red]")
+
+    def _handle_reasoning_command(self, value: str) -> None:
+        log = self._transcript_log()
+        parts = value.split()
+        if len(parts) == 1:
+            mode = "开启" if self._controller.show_reasoning else "关闭"
+            log.write(f"[dim]reasoning 显示: {mode}[/dim]")
+            return
+        arg = parts[1].lower()
+        if arg in {"on", "true", "1"}:
+            self._controller.set_show_reasoning(True)
+        elif arg in {"off", "false", "0"}:
+            self._controller.set_show_reasoning(False)
+        else:
+            log.write("[yellow]用法: /reasoning on|off[/yellow]")
+            return
+        mode = "开启" if self._controller.show_reasoning else "关闭"
+        log.write(f"[dim]reasoning 显示: {mode}[/dim]")
+
     def _show_help(self) -> None:
         log = self._transcript_log()
         rows = [
-            ("/help", "Show this help"),
-            ("/status", "Show API/session/SSE status"),
-            ("/context", "Show current context view (Esc to return)"),
-            ("/policy", "Tool/shell policy manager (Esc to return)"),
-            ("/triggers", "List configured triggers"),
-            ("/compress", "Run blocking context compression once"),
-            ("/session", "Show Agent Node sessions"),
-            ("/skill", "Show loaded and available skills"),
-            ("/skill load NAME", "Load one skill into current session"),
-            ("/skill unload NAME", "Unload one skill from current session"),
-            ("/children", "List active child agents"),
-            ("/clear", "Clear server context and transcript"),
-            ("/exit", "Quit chat"),
+            ("/help", "显示本帮助"),
+            ("/status", "agent、session、队列与 turn 状态"),
+            ("/context", "只读 context 视图（Esc 返回）"),
+            ("/policy", "工具/shell 策略管理（Esc 返回）"),
+            ("/triggers", "查看已配置触发器"),
+            ("/compress", "手动触发阻塞压缩"),
+            ("/session", "列出 session（亦可用 /sessions）"),
+            ("/switch <id>", "切换 session（重连 SSE）"),
+            ("/new", "新建 session"),
+            ("/skill", "skills 列表"),
+            ("/skill load NAME", "加载 skill"),
+            ("/skill unload NAME", "卸载 skill"),
+            ("/children", "子 Agent 列表"),
+            ("/reasoning on|off", "推理流显示开关"),
+            ("/clear", "清空服务端 context 与 transcript"),
+            ("/exit", "退出（Esc 可取消在途 turn）"),
         ]
         body = Group(
             *[
@@ -2834,4 +2885,4 @@ class DAgentsTuiApp(App[None]):
                 for cmd, desc in rows
             ]
         )
-        log.write(self._command_panel_block("Commands", body), expand=True)
+        log.write(self._command_panel_block("命令", body), expand=True)

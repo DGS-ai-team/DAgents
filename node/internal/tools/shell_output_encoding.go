@@ -1,8 +1,6 @@
 package tools
 
 import (
-	"bytes"
-	"io"
 	"runtime"
 	"strings"
 	"unicode/utf8"
@@ -96,12 +94,4 @@ func transcodeShellOutput(data []byte, enc string) (string, bool) {
 		return "", false
 	}
 	return string(out), true
-}
-
-func readDecodedShellOutput(r io.Reader, enc string) (string, error) {
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		return "", err
-	}
-	return decodeShellOutput(buf.Bytes(), enc), nil
 }

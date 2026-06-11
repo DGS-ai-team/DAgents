@@ -69,6 +69,15 @@ log:
 
 # bash_run 子进程输出解码（留空则 Windows cmd/powershell=gbk、bash=utf-8）
 tools:
+  # 内置工具组允许列表；省略或留空 = 启用全部（7 组见 docs/built-in-tools.md §0 / shared/config/README.md）
+  # enabled_groups:
+  #   - fs
+  #   - bash
+  #   - hitl
+  #   - skills
+  #   - triggers
+  #   - a2a            # 须 manage.enabled
+  #   - child_agents   # 建议配合 child_agents.enabled
   # bash_output_encoding: gbk
   bash_output_encoding: utf-8
   # file_encoding: gbk   # read/write/search_replace/grep 默认磁盘编码；省略时 Windows=gbk，其它=utf-8

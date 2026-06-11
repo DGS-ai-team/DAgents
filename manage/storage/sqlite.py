@@ -34,10 +34,15 @@ class SQLiteDatabase:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
-                INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '1');
+                INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '2');
 
                 CREATE TABLE IF NOT EXISTS registry_agents (
                     agent_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS a2a_tasks (
+                    task_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL
                 );
                 """

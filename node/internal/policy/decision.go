@@ -6,9 +6,9 @@ import "strings"
 type Decision string
 
 const (
-	DecisionAllowAuto        Decision = "allow_auto"
-	DecisionRequireApproval  Decision = "require_approval"
-	DecisionDeny             Decision = "deny"
+	DecisionAllowAuto       Decision = "allow_auto"
+	DecisionRequireApproval Decision = "require_approval"
+	DecisionDeny            Decision = "deny"
 )
 
 // ModeToDecision 将内部 mode 映射为 API decision。

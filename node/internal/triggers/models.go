@@ -37,20 +37,20 @@ const (
 
 // Definition 触发器完整定义（持久化主体）。
 type Definition struct {
-	TriggerID         string             `json:"trigger_id"`
-	Name              string             `json:"name"`
-	Condition         map[string]any     `json:"condition"`
-	TargetAgentID     string             `json:"target_agent_id"`
-	TargetSessionID   *string            `json:"target_session_id"`
-	SessionTargetMode SessionTargetMode  `json:"session_target_mode,omitempty"`
-	ClientID        *string        `json:"client_id"`
-	TaskTemplate    string         `json:"task_template"`
-	Enabled         bool           `json:"enabled"`
-	FireCount       int            `json:"fire_count"`
-	LastFiredAt     *float64       `json:"last_fired_at"`
-	NextFireAt      *float64       `json:"next_fire_at"`
-	CreatedAt       float64        `json:"created_at"`
-	UpdatedAt       float64        `json:"updated_at"`
+	TriggerID         string            `json:"trigger_id"`
+	Name              string            `json:"name"`
+	Condition         map[string]any    `json:"condition"`
+	TargetAgentID     string            `json:"target_agent_id"`
+	TargetSessionID   *string           `json:"target_session_id"`
+	SessionTargetMode SessionTargetMode `json:"session_target_mode,omitempty"`
+	ClientID          *string           `json:"client_id"`
+	TaskTemplate      string            `json:"task_template"`
+	Enabled           bool              `json:"enabled"`
+	FireCount         int               `json:"fire_count"`
+	LastFiredAt       *float64          `json:"last_fired_at"`
+	NextFireAt        *float64          `json:"next_fire_at"`
+	CreatedAt         float64           `json:"created_at"`
+	UpdatedAt         float64           `json:"updated_at"`
 }
 
 // CreateInput 创建触发器入参（工具 / HTTP）。
@@ -60,8 +60,8 @@ type CreateInput struct {
 	TargetAgentID     string            `json:"target_agent_id"`
 	TargetSessionID   *string           `json:"target_session_id"`
 	SessionTargetMode SessionTargetMode `json:"session_target_mode,omitempty"`
-	ClientID        *string        `json:"client_id"`
-	TaskTemplate    string         `json:"task_template"`
+	ClientID          *string           `json:"client_id"`
+	TaskTemplate      string            `json:"task_template"`
 }
 
 // UpdatePatch 部分更新；nil 字段表示不修改。
@@ -77,16 +77,16 @@ type UpdatePatch struct {
 
 // FireRecord 单次触发历史。
 type FireRecord struct {
-	FireID     string         `json:"fire_id"`
-	TriggerID  string         `json:"trigger_id"`
-	Status     FireStatus     `json:"status"`
-	Reason     string         `json:"reason"`
-	SessionID  *string        `json:"session_id"`
-	ClientID   *string        `json:"client_id"`
-	Content    string         `json:"content"`
-	Message    string         `json:"message"`
-	Payload    map[string]any `json:"payload"`
-	FiredAt    float64        `json:"fired_at"`
+	FireID    string         `json:"fire_id"`
+	TriggerID string         `json:"trigger_id"`
+	Status    FireStatus     `json:"status"`
+	Reason    string         `json:"reason"`
+	SessionID *string        `json:"session_id"`
+	ClientID  *string        `json:"client_id"`
+	Content   string         `json:"content"`
+	Message   string         `json:"message"`
+	Payload   map[string]any `json:"payload"`
+	FiredAt   float64        `json:"fired_at"`
 }
 
 // InferScheduleKind 根据 condition 推断调度类型。
@@ -170,11 +170,11 @@ func NewDefinitionFromCreate(in CreateInput, agentID string, now time.Time) (Def
 		TargetAgentID:     targetAgent,
 		TargetSessionID:   copyStringPtr(in.TargetSessionID),
 		SessionTargetMode: in.SessionTargetMode,
-		ClientID:        copyStringPtr(in.ClientID),
-		TaskTemplate:    in.TaskTemplate,
-		Enabled:         true,
-		CreatedAt:       current,
-		UpdatedAt:       current,
+		ClientID:          copyStringPtr(in.ClientID),
+		TaskTemplate:      in.TaskTemplate,
+		Enabled:           true,
+		CreatedAt:         current,
+		UpdatedAt:         current,
 	}
 	return def.WithNextFire(now), nil
 }

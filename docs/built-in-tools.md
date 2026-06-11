@@ -1,6 +1,6 @@
 # 内置工具一览
 
-> **现网（v0.2.0+）**：Agent 运行时工具由 **Go Agent Node** 注册（**`node/internal/tools/registry.go`**）。配置见 **`packaging/agent-client/config.yaml`**（如 **`tools.bash_output_encoding`**）。包内说明：**`node/internal/tools/README.md`**、**`node/internal/tools/REFERENCE.md`**；子 Agent 见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。  
+> **现网（v0.2.0+）**：Agent 运行时工具由 **Go Agent Node** 注册（**`node/internal/tools/registry.go`**）。配置见 **`packaging/agent-client/config.yaml`**（**`tools.enabled_groups`** 工具组允许列表、**`tools.bash_output_encoding`** 等）。包内说明：**`node/internal/tools/README.md`**、**`node/internal/tools/REFERENCE.md`**；配置校验见 **`shared/config/README.md`**；子 Agent 见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。  
 > 下文 **「附」与 §1–§4** 描述 **已移除的 Python FastAPI Agent API**（**`app/harness/tools/tool.py` → `get_tools()`**），保留作行为对照与归档索引；正文在 [archive/python-agent-runtime/](./archive/python-agent-runtime/)。
 
 ---
@@ -11,24 +11,59 @@
 
 | 工具名 | 定义位置 | 作用概要 |
 |--------|----------|----------|
-| **`read_file`** | **`fs.go`** | 分页读文件（`FS_ROOT` 沙箱） |
-| **`write_file`** | **`fs.go`** | 写入整文件 |
-| **`glob_files`** | **`glob_files.go`** | 按 glob（含 `**`）列举目录内文件路径 |
-| **`grep_file`** | **`grep_file.go`** | 单文件行内容检索（分页 + 上下文） |
-| **`grep_files`** | **`grep_files.go`** | 目录树内按 glob 筛文件后行内容检索 |
-| **`search_replace`** | **`fs.go`** | 子串替换 + diff |
-| **`bash_run`** | **`bash*.go`** | bash / cmd / powershell；输出按 **`tools.bash_output_encoding`** 或平台默认解码 |
-| **`background_job_status`** | **`background_job_tools.go`** | 查询后台 job |
-| **`background_job_cancel`** | **`background_job_tools.go`** | 取消后台 job |
-| **`ask_user_information`** | **`registry.go`** | HITL 用户追问 |
-| **`load_skills` / `unload_skills` / `clear_skills`** | **`skills.go`** | 会话 skill 加载 |
-| **`trigger_list` … `trigger_fire`** | **`triggers.go`** | 触发器 CRUD 与手动 fire |
-| **`create_temporary_agent`** | **`child_agent_tools.go`** | 同进程临时子 Agent |
-| **`wait_temporary_agents`** | **`child_agent_tools.go`** | 等待子 Agent 终态 |
-| **`temporary_agent_status`** | **`child_agent_tools.go`** | 非阻塞查询子 Agent |
-| **`cancel_temporary_agent`** | **`child_agent_tools.go`** | 取消子 Agent |
+| **`read_file`** | **`fs_read.go`** | 分页读文件（`FS_ROOT` 沙箱） |
+| **`write_file`** | **`fs_write.go`** | 写入整文件 |
+| **`glob_files`** | **`fs_glob_tool.go`** | 按 glob（含 `**`）列举目录内文件路径 |
+| **`grep_file`** | **`fs_grep_file.go`** | 单文件行内容检索（分页 + 上下文） |
+| **`grep_files`** | **`fs_grep_files.go`** | 目录树内按 glob 筛文件后行内容检索 |
+| **`search_replace`** | **`fs_search_replace.go`** | 子串替换 + diff |
+| **`bash_run`** | **`bash_run_tool.go`** / **`bash_runner.go`** | bash / cmd / powershell；输出按 **`tools.bash_output_encoding`** 或平台默认解码 |
+| **`background_job_status`** | **`tool_job.go`** | 查询后台 job |
+| **`background_job_cancel`** | **`tool_job.go`** | 取消后台 job |
+| **`ask_user_information`** | **`tool_hitl.go`** | HITL 用户追问 |
+| **`load_skills`** | **`tool_skills.go`** | 加载 skill 到当前会话 |
+| **`unload_skills`** | **`tool_skills.go`** | 卸载指定 skill |
+| **`clear_skills`** | **`tool_skills.go`** | 清空会话已加载 skill |
+| **`trigger_list`** | **`tool_triggers.go`** | 列出触发器 |
+| **`trigger_get`** | **`tool_triggers.go`** | 查询单个触发器 |
+| **`trigger_create`** | **`tool_triggers.go`** | 创建触发器 |
+| **`trigger_update`** | **`tool_triggers.go`** | 更新触发器 |
+| **`trigger_delete`** | **`tool_triggers.go`** | 删除触发器 |
+| **`trigger_fire`** | **`tool_triggers.go`** | 手动 fire |
+| **`agent_invoke`** | **`tool_a2a.go`** | 经 Manage 向对端 Agent 发起 A2A Task 并等待 `result_text`（须 **`manage.enabled`**） |
+| **`agent_discover`** | **`tool_a2a.go`** | 经 Manage 发现注册 Agent（须 **`manage.enabled`**） |
+| **`create_temporary_agent`** | **`tool_childagent.go`** | 同进程临时子 Agent |
+| **`wait_temporary_agents`** | **`tool_childagent.go`** | 等待子 Agent 终态 |
+| **`temporary_agent_status`** | **`tool_childagent.go`** | 非阻塞查询子 Agent |
+| **`cancel_temporary_agent`** | **`tool_childagent.go`** | 取消子 Agent |
 
 **执行模式**：通用参数 **`run_in_background`**；**`bash_run`** 超时可降级为后台 job。详见 **`node/internal/tools/README.md`**。
+
+### `tools.enabled_groups`（允许列表）
+
+在 **`packaging/agent-client/config.yaml`** 的 **`tools.enabled_groups`** 中按**工具组**配置 LLM 可见的内置工具；**组内工具须一并启用或禁用**。
+
+| 规则 | 说明 |
+|------|------|
+| 省略或 `[]` | 启用上表全部工具 |
+| 非空列表 | 仅列出组内全部工具对 LLM 暴露；组名见下表 |
+| 校验时机 | **`LoadFile`** / **`Config.Validate`**；未知名报错 `tools.enabled_groups contains unknown group` |
+
+**可配置组（7 个）**
+
+| 组名 | 工具 |
+|------|------|
+| **`fs`** | `read_file`、`write_file`、`glob_files`、`grep_file`、`grep_files`、`search_replace` |
+| **`bash`** | `bash_run`、`background_job_status`、`background_job_cancel` |
+| **`hitl`** | `ask_user_information` |
+| **`skills`** | `load_skills`、`unload_skills`、`clear_skills` |
+| **`triggers`** | `trigger_list` … `trigger_fire` |
+| **`a2a`** | `agent_invoke`、`agent_discover` |
+| **`child_agents`** | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
+
+`tools.enabled`（逐工具名）已废弃，请改用 **`enabled_groups`**。完整工具清单见 **`AllBuiltinToolNames()`**。
+
+A2A 组在配置中可启用，但实际 handler 仍依赖 Node 启动时 **`SetManageRuntime`**（**`manage.enabled: true`**）。`child_agents` 组建议与 **`child_agents.enabled`** 一并考虑。
 
 ---
 

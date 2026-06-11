@@ -81,7 +81,7 @@ func (r *Registry) resolveRunCWD(raw string) (string, error) {
 // buildShellCommand 按 shell 类型构造 *exec.Cmd 参数（不含 Start）。
 
 // powershell 按 pwsh → powershell 顺序探测；均不存在时返回 error。
-func buildShellCommand(st shellType, command, cwd string) (*exec.Cmd, error) {
+func buildShellCommand(st shellType, command string) (*exec.Cmd, error) {
 	switch st {
 	case shellBash:
 		return exec.Command("bash", "-lc", command), nil

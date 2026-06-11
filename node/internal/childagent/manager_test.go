@@ -28,8 +28,8 @@ func (f *fakeHost) EnqueueChildTask(id, content string) error {
 	f.tasks[id] = content
 	return nil
 }
-func (f *fakeHost) ChildHasPendingHITL(id string) bool  { return f.childHitl[id] }
-func (f *fakeHost) ParentHasPendingHITL(string) bool  { return f.parentHitl }
+func (f *fakeHost) ChildHasPendingHITL(id string) bool               { return f.childHitl[id] }
+func (f *fakeHost) ParentHasPendingHITL(string) bool                 { return f.parentHitl }
 func (f *fakeHost) DeliverChildResume(string, map[string]any) error  { return nil }
 func (f *fakeHost) DeliverParentResume(string, map[string]any) error { return nil }
 

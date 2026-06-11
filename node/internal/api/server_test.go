@@ -20,17 +20,48 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-func testConfig() *config.Config {
+func testConfig(t *testing.T) *config.Config {
+	t.Helper()
 	cfg := &config.Config{
 		AgentID:       "ops-linux-01",
 		ExposeToPeers: true,
+		FSRoot:        t.TempDir(),
 	}
 	cfg.ApplyDefaults()
 	return cfg
 }
 
+// waitSessionIdle 轮询直到 session turn 结束，避免 t.TempDir() 清理时后台仍写 FSRoot。
+func waitSessionIdle(t *testing.T, baseURL, sessionID string) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		resp, err := http.Get(baseURL + "/v1/sessions")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got listSessionsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			resp.Body.Close()
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		for _, item := range got.Sessions {
+			if item.SessionID == sessionID && item.RunTurnPhase == "idle" && !item.HasActiveTurn {
+				return
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timeout waiting session %s idle", sessionID)
+		default:
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+}
+
 func TestHandleHealth(t *testing.T) {
-	srv := NewServer(testConfig(), nil)
+	srv := NewServer(testConfig(t), nil, WithSkipStore())
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -54,7 +85,7 @@ func TestHandleHealth(t *testing.T) {
 }
 
 func TestHandleAgentInfo(t *testing.T) {
-	srv := NewServer(testConfig(), nil)
+	srv := NewServer(testConfig(t), nil, WithSkipStore())
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -82,7 +113,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(NewServer(testConfig(), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore()).Handler())
+	return httptest.NewServer(NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore()).Handler())
 }
 
 func TestHandleStreamsConnectsImmediately(t *testing.T) {
@@ -244,6 +275,7 @@ func TestPostMessageAcceptsPythonClientFields(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
+	waitSessionIdle(t, ts.URL, created.SessionID)
 }
 
 func TestListSessionsActiveRuntimeFields(t *testing.T) {
@@ -289,7 +321,7 @@ func TestSessionPersistenceAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(NewServer(testConfig(), nil,
+	ts := httptest.NewServer(NewServer(testConfig(t), nil,
 		WithLLM(&llm.MockClient{}), WithTools(reg), WithStore(st)).Handler())
 	defer ts.Close()
 

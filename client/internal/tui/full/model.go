@@ -154,7 +154,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		transcript: tuishared.NewTranscript(0),
 		toolFold:   &tuishared.ToolFold{},
 		showReasoning: showReasoning,
-		helpLine:   "Enter 发送 · Shift+Enter 换行 · Esc 取消 · o/c 展开/收起 tool · /help",
+		helpLine:   "Enter 发送 · Shift+Enter 换行 · Esc 取消 turn · /help",
 		children:            newChildAgentTracker(),
 		messagesTotalTokens: -1,
 		turn:                tuishared.NewTurnGate(),
@@ -323,28 +323,6 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.printResumeHint()
 		m.shutdown()
 		return m, tea.Quit
-	case "o":
-		if m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "" {
-			if id := m.toolBlocks.ExpandLast(); id != "" {
-				m.syncViewport()
-				m.statusLine = "已展开 tool " + truncateID(id, 12)
-			}
-			return m, nil
-		}
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		return m, cmd
-	case "c":
-		if m.mode == modeChat && strings.TrimSpace(m.input.Value()) == "" {
-			if id := m.toolBlocks.CollapseLast(); id != "" {
-				m.syncViewport()
-				m.statusLine = "已收起 tool " + truncateID(id, 12)
-			}
-			return m, nil
-		}
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		return m, cmd
 	case "enter":
 		text := strings.TrimSpace(m.input.Value())
 		if text == "" {

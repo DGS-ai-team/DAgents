@@ -37,6 +37,8 @@ class ManageSettings:
     offline_grace_seconds: int
     audit_max_entries: int
     legacy_direct_relay: bool
+    a2a_inbox_content_max_chars: int
+    a2a_expire_sweep_seconds: int
 
     @classmethod
     def from_env(cls) -> "ManageSettings":
@@ -54,4 +56,6 @@ class ManageSettings:
             offline_grace_seconds=_env_int("MANAGE_OFFLINE_GRACE_SECONDS", 86400),
             audit_max_entries=_env_int("MANAGE_AUDIT_MAX_ENTRIES", 500),
             legacy_direct_relay=legacy,
+            a2a_inbox_content_max_chars=_env_int("MANAGE_A2A_INBOX_CONTENT_MAX_CHARS", 4096),
+            a2a_expire_sweep_seconds=_env_int("MANAGE_A2A_EXPIRE_SWEEP_SECONDS", 30),
         )

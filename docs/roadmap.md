@@ -216,7 +216,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 |----|------|------|
 | **RHEL 6 / Win2012 真机验收** | 静态构建与 SysV init 脚本已就绪；**真机 E2E 记录**仍 open（N7）。 | [rhel6-acceptance-checklist.md](./architecture/rhel6-acceptance-checklist.md)、[agent-client-refactor-plan.md](./design/agent-client-refactor-plan.md) |
 | **长期记忆文件** | **`.runtime/memory/long_term.md`** 在 prompt 中有说明位，产品化读写与治理待 Phase 2+。 | **`node/internal/turn/prompt.go`** |
-| **Manage / A2A 控制面** | Node 侧 **`manage.enabled: false`**；无 **`agent_peer`** 工具；RC relay/broadcast 需 Manage 或新 Agent 登记端才能形成闭环。 | [future/a2a-via-manage.md](./future/a2a-via-manage.md) |
+| **Manage / A2A 控制面** | Manage **M2 Task API** 已实现；Node **inbox poller** 骨架已接；工具层 `agent_invoke` 与 session 入队待接。 | [future/a2a-via-manage.md](./future/a2a-via-manage.md) |
 
 ### 5.2 架构级缺口（非小修）
 

@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-11
+
+**0.x 预览**：**Manage A2A（M2）** 与 **双 Node 联调案例** 落地；双 TUI 斜杠命令对齐；**Manage 官方 Docker 镜像**随 Release 发布。
+
+### 新增
+
+- **Manage A2A Task API（M2）**：`POST/GET /v1/a2a/tasks`、inbox long poll、ack/reply；Go Node **inbox poller** + **合规咨询 turn**（`ComplianceExecutor`）。
+- **Node A2A 工具**：`agent_invoke`、`agent_discover`；Manage 注册与 Agent Card 上报。
+- **案例 `cases/a2a-manage-docker/`**：Manage + 合规/运维双 Node Docker 栈与 TUI 联调说明。
+- **`packaging/manage/`**：Manage **Dockerfile**、`docker-compose`、`.env.example`；Release 附带 **`dagents-manage-<version>.tar.gz`** 镜像导出。
+- **Python TUI**：`/switch`、`/new`、`/reasoning on|off`；`/help` 中文化。
+- **Go TUI**：`/tools expand|collapse` 写入 help。
+
+### 变更
+
+- **双 TUI**：移除斜杠 **`/cancel`**（流式输出中难以输入；**Esc** 取消 turn 为主路径）。
+- **Go TUI**：移除 **`o`/`c` 单键** tool 展开/收起，避免无法输入含 `c`/`o` 的英文；改用 **`/tools expand|collapse`**。
+- **工具 registry**：按职责拆分 `tool_*.go` / `fs_*.go`；`call_purpose` 注入与 schema 整理。
+
+### 修复
+
+- **Go TUI**：工具审批结束后 **输入栏上移**（HITL 退出未 `relayout` viewport）。
+- **Python TUI**：`--show-reasoning` / `/reasoning` 实际过滤 reasoning SSE 事件。
+
+（Git **tag**：`v0.3.0`。）
+
 ## [0.2.22] - 2026-06-11
 
 **0.x 预览**：Linux `install.sh` 重装/升级前自动停止旧 Node。

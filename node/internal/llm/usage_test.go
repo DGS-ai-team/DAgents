@@ -162,15 +162,15 @@ func TestUsageSSEEventRoundAndTurnFields(t *testing.T) {
 func TestUsageAccumulateFrom(t *testing.T) {
 	var acc Usage
 	acc.AccumulateFrom(Usage{
-		PromptTokens:     100,
-		CompletionTokens: 20,
-		TotalTokens:      120,
+		PromptTokens:            100,
+		CompletionTokens:        20,
+		TotalTokens:             120,
 		CompletionTokensDetails: &CompletionTokensDetails{ReasoningTokens: 15},
 	})
 	acc.AccumulateFrom(Usage{
-		PromptTokens:     50,
-		CompletionTokens: 10,
-		TotalTokens:      60,
+		PromptTokens:            50,
+		CompletionTokens:        10,
+		TotalTokens:             60,
 		CompletionTokensDetails: &CompletionTokensDetails{ReasoningTokens: 8},
 	})
 	payload := acc.SSEPayload()

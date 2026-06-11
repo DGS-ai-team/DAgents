@@ -1,0 +1,33 @@
+# 构建上下文：仓库根目录
+ARG NODE_ROLE=a
+
+FROM golang:1.25-bookworm AS builder
+WORKDIR /src
+ENV GOWORK=off
+COPY node/go.mod node/go.sum ./node/
+COPY shared/config/go.mod shared/config/go.sum ./shared/config/
+RUN cd node && go mod download
+COPY node/ ./node/
+COPY shared/config/ ./shared/config/
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -C node -ldflags="-s -w" -o /out/dagents-node ./cmd/dagents-node
+
+FROM debian:bookworm-slim
+ARG NODE_ROLE
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl bash ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY --from=builder /out/dagents-node /usr/local/bin/dagents-node
+COPY packaging/runtime/skills /opt/dagents/seed/skills
+COPY packaging/runtime/policy /opt/dagents/seed/policy
+COPY cases/a2a-manage-docker/config/node-${NODE_ROLE}.yaml /etc/dagents/config.yaml
+COPY cases/a2a-manage-docker/agent-card/node-${NODE_ROLE}.json /etc/dagents/agent-card.json
+COPY cases/a2a-manage-docker/prompt_context/node-${NODE_ROLE}/custom.md /etc/dagents/custom.md.seed
+COPY cases/a2a-manage-docker/scripts/entrypoint-node.sh /usr/local/bin/entrypoint-node.sh
+RUN chmod +x /usr/local/bin/entrypoint-node.sh /usr/local/bin/dagents-node
+
+EXPOSE 18765
+VOLUME ["/workspace/.runtime"]
+ENTRYPOINT ["/usr/local/bin/entrypoint-node.sh"]

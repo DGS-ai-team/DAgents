@@ -77,15 +77,14 @@ sequenceDiagram
 
 拼接顺序（对齐 Python `get_system_prompt`）：
 
-1. `staticSystemPrompt`（行为准则、保密说明）
-2. skills 目录元数据（`Catalog.RenderMetadataSection`）
-3. 主机环境快照（`hostsnapshot`）
-4. 工作区（FS_ROOT）目录约定（路径相对 FS_ROOT，默认 `./.runtime`）
-5. Agent ID、FS_ROOT 路径、后台执行说明
-6. `prompt_context` 稳定段（soul / user / long_term）
-7. 已加载 skills 正文
-8. `custom.md`
-9. `session_id` 后缀
+1. `staticSystemPrompt`（行为准则、保密说明；**不含**各工具用法，见 tool schema）
+2. 主机环境快照（`hostsnapshot`）+ Agent ID / FS_ROOT / session_id
+3. 工作区（FS_ROOT）目录约定（仅目录结构，不含工具名）
+4. `prompt_context` 稳定段（soul / user / long_term）
+5. 已加载 skills 正文（动态会话状态，非工具 catalog）
+6. `custom.md`
+
+skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时注入 **`load_skills` 工具 description**（`Registry.SetSkillsCatalog`）。
 
 父与子 session **同一套** prompt 逻辑，暂无子专用分支。压缩摘要使用独立 system prompt，见 [`../compression/coordinator.go`](../compression/coordinator.go)。
 

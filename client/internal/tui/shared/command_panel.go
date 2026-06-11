@@ -347,12 +347,12 @@ func FormatHelpPanelBody() []string {
 		panelLine(panelKindHelp, "/switch <id>", "切换 session"),
 		panelLine(panelKindHelp, "/new", "新建 session"),
 		panelLine(panelKindHelp, "/clear", "清空对话上下文"),
-		panelLine(panelKindHelp, "/cancel", "取消在途 turn"),
 		panelLine(panelKindHelp, "/children", "子 Agent 列表"),
 		panelLine(panelKindHelp, "/skill", "skills 列表"),
 		panelLine(panelKindHelp, "/skill load NAME", "加载 skill"),
 		panelLine(panelKindHelp, "/skill unload NAME", "卸载 skill"),
 		panelLine(panelKindHelp, "/tools verbose|brief", "tool 输出展开/折叠"),
+		panelLine(panelKindHelp, "/tools expand|collapse", "展开/收起最近 tool 块"),
 		panelLine(panelKindHelp, "/reasoning on|off", "推理流显示"),
 		panelLine(panelKindHelp, "/quit", "退出"),
 	}

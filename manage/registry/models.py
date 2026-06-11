@@ -57,6 +57,7 @@ class AgentRegisterRequest(BaseModel):
     allowed_scopes: list[str] = Field(default_factory=list)
     version: str = Field(default="", max_length=64)
     expose_to_peers: bool = Field(default=True)
+    card: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     last_error_summary: str | None = Field(default=None, max_length=1024)
     recent_task_summary: str | None = Field(default=None, max_length=1024)
@@ -185,6 +186,7 @@ class AgentStoredRecord(BaseModel):
     allowed_scopes: list[str] = Field(default_factory=list)
     version: str = ""
     expose_to_peers: bool = True
+    card: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     last_error_summary: str | None = None
     recent_task_summary: str | None = None
@@ -208,6 +210,7 @@ class AgentDiscoverRecord(BaseModel):
     team: str = ""
     risk_level: RiskLevel = "medium"
     version: str = ""
+    card: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentListResponse(BaseModel):

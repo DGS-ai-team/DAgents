@@ -6,6 +6,8 @@ services:
       dockerfile: cases/centos7-feature-tour/Dockerfile
     ports:
       - "${DAGENTS_PORT:-18765}:18765"
+    env_file:
+      - .env
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LLM_MOCK: ${LLM_MOCK:-true}

@@ -89,10 +89,10 @@ func NewManager(cfg Config, hub *stream.Hub, agentID string, logger *slog.Logger
 		cfg.DefaultWaitTimeoutSeconds = 300
 	}
 	return &Manager{
-		cfg:       cfg,
-		hub:       hub,
-		agentID:   agentID,
-		logger:    logx.OrDefault(logger),
+		cfg:               cfg,
+		hub:               hub,
+		agentID:           agentID,
+		logger:            logx.OrDefault(logger),
 		activeByID:        make(map[string]*ActiveAgent),
 		activeIDsByParent: make(map[string][]string),
 		childToParent:     make(map[string]string),

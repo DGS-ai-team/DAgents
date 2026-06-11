@@ -21,13 +21,13 @@ type CompletionTokensDetails struct {
 // OpenAI：prompt_tokens_details.cached_tokens
 // DeepSeek：prompt_cache_hit_tokens / prompt_cache_miss_tokens（见 Normalize）
 type Usage struct {
-	PromptTokens             int                      `json:"prompt_tokens"`
-	CompletionTokens         int                      `json:"completion_tokens"`
-	TotalTokens              int                      `json:"total_tokens"`
-	PromptCacheHitTokens     int                      `json:"prompt_cache_hit_tokens"`
-	PromptCacheMissTokens    int                      `json:"prompt_cache_miss_tokens"`
-	PromptTokensDetails      *PromptTokensDetails     `json:"prompt_tokens_details"`
-	CompletionTokensDetails  *CompletionTokensDetails `json:"completion_tokens_details"`
+	PromptTokens            int                      `json:"prompt_tokens"`
+	CompletionTokens        int                      `json:"completion_tokens"`
+	TotalTokens             int                      `json:"total_tokens"`
+	PromptCacheHitTokens    int                      `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens   int                      `json:"prompt_cache_miss_tokens"`
+	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details"`
+	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details"`
 }
 
 // UnmarshalJSON 解析 usage；兼容 prompt_token_details / completion_token_details 别名，

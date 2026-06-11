@@ -1,0 +1,70 @@
+# 在 cases/a2a-manage-docker/ 下执行：docker compose up --build -d && ./scripts/verify.sh
+services:
+  manage:
+    build:
+      context: ../..
+      dockerfile: packaging/manage/Dockerfile
+      args:
+        VERSION: ${MANAGE_VERSION:-dev}
+    ports:
+      - "${MANAGE_PORT:-8020}:8020"
+    environment:
+      MANAGE_HOST: 0.0.0.0
+      MANAGE_PORT: 8020
+      MANAGE_DB_PATH: /data/manage.db
+      MANAGE_A2A_EXPIRE_SWEEP_SECONDS: 10
+    volumes:
+      - manage-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8020/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 8s
+
+  node-a:
+    build:
+      context: ../..
+      dockerfile: cases/a2a-manage-docker/Dockerfile.node
+      args:
+        NODE_ROLE: a
+    ports:
+      - "${NODE_A_PORT:-18765}:18765"
+    depends_on:
+      manage:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      LLM_MOCK: ${LLM_MOCK:-true}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:18765/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  node-b:
+    build:
+      context: ../..
+      dockerfile: cases/a2a-manage-docker/Dockerfile.node
+      args:
+        NODE_ROLE: b
+    ports:
+      - "${NODE_B_PORT:-18766}:18765"
+    depends_on:
+      manage:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      LLM_MOCK: ${LLM_MOCK:-true}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:18765/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  manage-data:

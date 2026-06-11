@@ -1,8 +1,8 @@
 package tools
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -110,7 +110,7 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 }
 
 func startShellCommand(params shellRunParams) (*exec.Cmd, error) {
-	cmd, err := buildShellCommand(params.shellType, params.command, params.cwd)
+	cmd, err := buildShellCommand(params.shellType, params.command)
 	if err != nil {
 		return nil, err
 	}
@@ -297,23 +297,4 @@ func formatShellRunningResult(job *backgroundJob, params shellRunParams) string 
 		"命令超过同步等待时间，已自动降级为后台任务；也可显式使用 run_in_background=true。",
 		"可用 background_job_status / background_job_cancel 查询或取消。",
 	}, "\n")
-}
-
-func formatShellJobDone(job *backgroundJob) string {
-	job.mu.Lock()
-	result := job.result
-	status := job.status
-	exitCode := job.bashExitCode
-	id := job.id
-	job.mu.Unlock()
-	code := -1
-	if exitCode != nil {
-		code = *exitCode
-	}
-	parts := []string{
-		fmt.Sprintf("[TOOL_BACKGROUND_DONE] tool_name=bash_run job_id=%s status=%s exit=%d", id, status, code),
-		"---",
-		result,
-	}
-	return strings.Join(parts, "\n")
 }

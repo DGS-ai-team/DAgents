@@ -177,15 +177,6 @@ func (a *App) execCommand(ctx context.Context, line string) (quit bool, err erro
 		if err == nil {
 			fmt.Fprintln(os.Stderr, "已清空对话上下文")
 		}
-	case "cancel":
-		cancelled, cancelErr := a.client.CancelTurn(ctx, a.currentSession())
-		if cancelErr != nil {
-			err = cancelErr
-		} else if cancelled {
-			fmt.Fprintln(os.Stderr, "已取消在途 turn")
-		} else {
-			fmt.Fprintln(os.Stderr, "当前无在途 turn")
-		}
 	case "history":
 		n := 20
 		if len(parts) > 1 {
@@ -290,9 +281,8 @@ func printHelp() {
   /switch <id>         切换 session
   /new                 新建 session
   /clear               清空当前对话上下文
-  /cancel              取消在途 turn（回合等待期间不可用，请等审批结束）
   /history [n|all]     查看最近 n 行输出（默认 20）
   /tools [verbose|brief]  tool 输出折叠/展开
   /reasoning [on|off]  显示/隐藏模型推理流
-  /quit                退出`)
+  /quit                退出（流式输出中请用 Esc 取消 turn）`)
 }

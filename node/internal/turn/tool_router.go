@@ -84,7 +84,7 @@ func (o *Orchestrator) processToolCalls(
 	if userInfo != nil {
 		question, uiArgs := buildUserInformationPayload(*userInfo)
 		o.hub.Publish(sessionID, o.agentID, "user_information_required", map[string]any{
-			"content":                 question,
+			"content":               question,
 			"user_information_args": uiArgs,
 			"display_type":          "normal_text",
 		})

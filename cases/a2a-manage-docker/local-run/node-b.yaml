@@ -1,0 +1,38 @@
+agent_id: node-b
+
+listen:
+  host: 127.0.0.1
+  port: 18766
+
+local:
+  endpoint: http://127.0.0.1:18766
+
+expose_to_peers: true
+
+fs_root: ./runtime/node-b
+
+llm:
+  provider: openai
+  mock: true
+  max_tool_loops: 8
+
+manage:
+  enabled: true
+  url: http://127.0.0.1:8020
+  registration:
+    base_url: http://127.0.0.1:18766
+    agent_card_path: ./agent-card/node-b.json
+    interval_seconds: 15
+    ttl_seconds: 45
+    team: a2a-lab
+  a2a:
+    enabled: false
+
+triggers:
+  enabled: false
+
+child_agents:
+  enabled: false
+
+log:
+  level: info

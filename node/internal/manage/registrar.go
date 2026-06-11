@@ -248,22 +248,37 @@ func (r *Registrar) registryURL(path string) string {
 
 func (r *Registrar) buildRegisterPayload() registerPayload {
 	name := strings.TrimSpace(r.cfg.Manage.Registration.Name)
+	description := strings.TrimSpace(r.cfg.Manage.Registration.Description)
+	card, _ := LoadAgentCard(r.cfg.Manage.Registration.AgentCardPath)
+	if card != nil {
+		if name == "" && strings.TrimSpace(card.Name) != "" {
+			name = strings.TrimSpace(card.Name)
+		}
+		if description == "" && strings.TrimSpace(card.Description) != "" {
+			description = strings.TrimSpace(card.Description)
+		}
+	}
 	if name == "" {
 		name = r.cfg.AgentID
 	}
 	host := hostsnapshot.Get()
+	caps := r.cfg.Capabilities()
+	if card != nil && len(card.Capabilities) > 0 {
+		caps = append([]string(nil), card.Capabilities...)
+	}
 	return registerPayload{
 		AgentID:          r.cfg.AgentID,
 		BaseURL:          r.cfg.ManageRegistryBaseURL(),
-		Capabilities:     r.cfg.Capabilities(),
-		Tools:           r.collectTools(),
-		TTLSeconds:      r.ttlSeconds,
-		Name:            name,
-		Description:     strings.TrimSpace(r.cfg.Manage.Registration.Description),
-		Team:            strings.TrimSpace(r.cfg.Manage.Registration.Team),
-		Version:         version.Version,
-		ExposeToPeers:   r.cfg.ExposeToPeers,
-		CapabilitiesHint: r.cfg.Capabilities(),
+		Capabilities:     caps,
+		CapabilitiesHint: caps,
+		Tools:            r.collectTools(),
+		TTLSeconds:       r.ttlSeconds,
+		Name:             name,
+		Description:      description,
+		Team:             strings.TrimSpace(r.cfg.Manage.Registration.Team),
+		Version:          version.Version,
+		ExposeToPeers:    r.cfg.ExposeToPeers,
+		Card:             card.asMap(),
 		Metadata: map[string]any{
 			"node_version": version.Version,
 			"host_info": map[string]any{
@@ -296,6 +311,7 @@ type registerPayload struct {
 	Team             string         `json:"team,omitempty"`
 	Version          string         `json:"version,omitempty"`
 	ExposeToPeers    bool           `json:"expose_to_peers"`
+	Card             map[string]any `json:"card,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
 }
 

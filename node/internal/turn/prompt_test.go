@@ -22,6 +22,9 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	if !containsAll(prompt, "ops-01", "/data/ws", "FS_ROOT", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "最高优先级规则", "sess-abc", "运行环境") {
 		t.Fatalf("prompt = %q", prompt)
 	}
+	if contains(prompt, "bash_run") || contains(prompt, "background_job") || contains(prompt, "## 可用 skills") {
+		t.Fatalf("system prompt should not embed tool-specific guidance, got %q", prompt)
+	}
 }
 
 func TestBuildSystemPrompt_includesPromptContext(t *testing.T) {

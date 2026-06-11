@@ -14,11 +14,8 @@ import (
 
 func testPolicyServer(t *testing.T) (*httptest.Server, *config.Config) {
 	t.Helper()
-	runtimeDir := t.TempDir()
-	cfg := testConfig()
-	cfg.FSRoot = runtimeDir
-	cfg.ApplyDefaults()
-	reg, err := tools.NewRegistry(t.TempDir(), 30)
+	cfg := testConfig(t)
+	reg, err := tools.NewRegistry(cfg.FSRoot, 30)
 	if err != nil {
 		t.Fatal(err)
 	}

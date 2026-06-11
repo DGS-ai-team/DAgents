@@ -1,0 +1,23 @@
+# 在 packaging/manage/ 下：docker compose up -d
+# 或指定版本：MANAGE_IMAGE=dagents-manage:0.3.0 docker compose up -d
+services:
+  manage:
+    image: ${MANAGE_IMAGE:-dagents-manage:latest}
+    build:
+      context: ../..
+      dockerfile: packaging/manage/Dockerfile
+      args:
+        VERSION: ${MANAGE_VERSION:-dev}
+    ports:
+      - "${MANAGE_PORT:-8020}:8020"
+    environment:
+      MANAGE_HOST: 0.0.0.0
+      MANAGE_PORT: 8020
+      MANAGE_DB_PATH: /data/manage.db
+      MANAGE_A2A_EXPIRE_SWEEP_SECONDS: ${MANAGE_A2A_EXPIRE_SWEEP_SECONDS:-30}
+    volumes:
+      - manage-data:/data
+    restart: unless-stopped
+
+volumes:
+  manage-data:

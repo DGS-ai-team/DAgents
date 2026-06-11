@@ -65,13 +65,13 @@ func TestSaveLoadRuntimeState(t *testing.T) {
 
 	ctx := context.Background()
 	pending := &turn.PendingHITL{
-		Kind: turn.HITLApproval,
+		Kind:      turn.HITLApproval,
 		ToolCalls: []llm.ToolCall{{ID: "c1", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run"}}},
 	}
 	if err := s.Save(ctx, Record{
-		SessionID: "sess-pending",
-		AgentID:   "a1",
-		Messages:  []llm.Message{{Role: "user", Content: "hi"}},
+		SessionID:    "sess-pending",
+		AgentID:      "a1",
+		Messages:     []llm.Message{{Role: "user", Content: "hi"}},
 		RuntimeState: RuntimeState{Pending: pending, ToolLoopCount: 2},
 	}); err != nil {
 		t.Fatal(err)

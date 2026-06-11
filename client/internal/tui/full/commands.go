@@ -52,12 +52,6 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 			m.transcript.Add("[system] 已清空对话上下文")
 			m.syncViewport()
 		}
-	case "cancel":
-		err = m.cancelTurn()
-		if err == nil {
-			m.turn.FinishTurn()
-			m.statusLine = "已取消在途 turn"
-		}
 	case "children", "child":
 		err = m.appendChildren()
 		if err == nil {

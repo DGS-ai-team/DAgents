@@ -143,16 +143,6 @@ func injectRunInBackgroundParam(params map[string]any) map[string]any {
 	return params
 }
 
-// ensureToolSchemaRequired 保证 parameters 含 OpenAI JSON Schema 的 required 数组（无必填项时为 []）。
-func ensureToolSchemaRequired(params map[string]any) {
-	if params == nil {
-		return
-	}
-	if _, ok := params["required"]; !ok {
-		params["required"] = []string{}
-	}
-}
-
 // ParseToolCallArguments 解析 run_in_background，并剥离 call_purpose / run_in_background 后返回 handler 用 JSON。
 func ParseToolCallArguments(arguments string) (background bool, cleaned string) {
 	arguments = strings.TrimSpace(arguments)

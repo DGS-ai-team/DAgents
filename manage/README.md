@@ -6,7 +6,7 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 |----|------|------|
 | **Platform** | M0 | 鉴权、审计、Blob 占位、指标 |
 | **Registry** | M1 | 注册、心跳、注销、目录、discover |
-| **A2A** | M2 待做 | inbox 消息 + Blob 文件 |
+| **A2A** | **M2 部分** | Task API + inbox long poll；Node inbox poller 骨架 |
 | **Skills** | M3 待做 | 一 zip 一 skill，审批后分发 |
 | **Console** | **部分（Registry 目录页）** | **`GET /console/`** Node 列表与详情 |
 
@@ -23,6 +23,18 @@ python run_manage.py
 
 **Console（Node 目录 UI）**：浏览器打开 **`http://<host>:<port>/console/`**  
 默认 **开放模式**：无需 token，直接查看全部 Node 状态。
+
+## Docker 部署（推荐生产 / 联调）
+
+官方镜像与 compose 见 **[`packaging/manage/`](../packaging/manage/README.md)**：
+
+```bash
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.0 .
+# 或
+cd packaging/manage && cp .env.example .env && docker compose up -d --build
+```
+
+打 **`v*`** 标签 Release 时会附带 **`dagents-manage-<version>.tar.gz`**（`docker load` 离线导入）。
 
 ## 鉴权（当前 MVP）
 
@@ -51,6 +63,8 @@ Node 出站 Header：
 | `MANAGE_AUDIT_PATH` | （空） | 审计 JSONL 追加路径 |
 | `MANAGE_AUDIT_MAX_ENTRIES` | `500` | 内存审计条数 |
 | `MANAGE_LEGACY_DIRECT_RELAY` | `0` | M2 前无效；启用 RC 式直连 relay 适配（默认关） |
+| `MANAGE_A2A_INBOX_CONTENT_MAX_CHARS` | `4096` | inbox 返回 `content` 最大字符；超出截断并设 `content_truncated` |
+| `MANAGE_A2A_EXPIRE_SWEEP_SECONDS` | `30` | 后台 TTL 过期扫描间隔；`0` 关闭（仅按需单条过期） |
 
 鉴权 Header（Token 模式）：`x-dagents-a2a-token` 或 `Authorization: Bearer …`。  
 身份 Header（Node 注册）：`x-dagents-agent-id: <agent_id>`。
@@ -70,6 +84,18 @@ Node 出站 Header：
 
 系统：`GET /health`、`GET /metrics`、`GET /v1/admin/audit`。
 
+## A2A Task API（M2）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/a2a/tasks` | 创建 Task（`kind`: invoke \| notify） |
+| GET | `/v1/a2a/inbox` | long poll 拉取 pending（`?wait=25`） |
+| POST | `/v1/a2a/tasks/{id}/ack` | 标记 processing |
+| POST | `/v1/a2a/tasks/{id}/reply` | 提交结果 |
+| GET | `/v1/a2a/tasks/{id}` | 查询状态 |
+
+协议说明：[docs/future/a2a-via-manage.md](../docs/future/a2a-via-manage.md)（**无** `/v1/a2a/messages` 兼容）。
+
 ## 目录结构
 
 ```text
@@ -80,7 +106,7 @@ manage/
   storage/      # sqlite
   registry/     # models, store, routes, status
   console/static/  # Manage Console Web UI
-  a2a/          # M2 占位
+  a2a/          # M2 Task store + routes
   skills/       # M3 占位
 ```
 
@@ -107,6 +133,10 @@ manage:
     interval_seconds: 30
     ttl_seconds: 60
     team: platform
+  a2a:
+    enabled: true              # 默认随 manage.enabled 开启
+    inbox_wait_seconds: 25     # long poll wait
+    inbox_poll_seconds: 30     # 断线降级短 poll
 ```
 
 **discovery_group** 不由 Node 传入；在 Manage Console 详情抽屉或 API 分配：

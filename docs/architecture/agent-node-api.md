@@ -252,20 +252,20 @@ Client 入口：`/policy` 全屏界面（Go bubbletea / Python Textual，Esc 返
 
 | Node 内工具 | Manage API |
 |-------------|------------|
-| `agent_discover` | `GET /v1/agents/discover` |
-| `agent_send_message` | `POST /v1/a2a/messages` + 轮询 `GET /v1/a2a/messages/{id}` |
-| `agent_broadcast` | `POST /v1/a2a/broadcast`（Phase 2） |
+| `agent_discover` | `GET /v1/registry/agents/discover` |
+| `agent_invoke` | `POST /v1/a2a/tasks` + 轮询 `GET /v1/a2a/tasks/{id}` |
+| `agent_notify` | `POST /v1/a2a/tasks`（`kind=notify`） |
 
-**Inbox 轮询**（后台 goroutine，与 heartbeat 同周期或独立）：
+**Inbox long poll**（`node/internal/manage/inbox_poller.go`）：
 
 ```http
-GET {manage_url}/v1/a2a/inbox?agent_id={self}&limit=10
+GET {manage_url}/v1/a2a/inbox?agent_id={self}&limit=10&wait=25
 ```
 
-拉取到的消息入本地 **A2A session** 队列，走 turn loop；处理完成后：
+拉取到的 Task 入本地 **A2A session** 队列，走 turn loop；处理完成后：
 
 ```http
-POST {manage_url}/v1/a2a/messages/{message_id}/reply
+POST {manage_url}/v1/a2a/tasks/{task_id}/reply
 ```
 
 ---
@@ -310,7 +310,7 @@ Node 内部分层（实现参考，非 HTTP）：
 ```text
 TurnOrchestrator
   → PolicyEngine（本地 + Manage 下发的静态策略文件）
-  → ToolRegistry（bash、fs、skills、triggers、agent_discover、agent_send_message、…）
+  → ToolRegistry（bash、fs、skills、triggers、agent_discover、agent_invoke、…）
   → Executor（os/exec、fs、sandbox）
   → AuditReporter → Manage
 ```
@@ -323,7 +323,7 @@ TurnOrchestrator
 
 - `POST /v1/agents/register`、`POST /v1/agents/{id}/heartbeat`
 - `POST /v1/audit/events`
-- **A2A**：`GET /v1/agents/discover`、`POST /v1/a2a/messages`、`GET /v1/a2a/inbox`、`POST .../reply`、`GET /v1/a2a/messages/{id}`
+- **A2A**：`GET /v1/registry/agents/discover`、`POST /v1/a2a/tasks`、`GET /v1/a2a/inbox`、`POST .../tasks/{id}/reply`、`GET /v1/a2a/tasks/{id}`
 
 **无** WebSocket control channel；**无** peer Node 直连。
 

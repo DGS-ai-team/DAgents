@@ -25,12 +25,12 @@ type SessionResolver interface {
 
 // Scheduler 轮询到期触发器并统一 fire 入口。
 type Scheduler struct {
-	store            *Store
-	submitter        MessageSubmitter
-	sessionResolver  SessionResolver
-	cmdGate          CmdGate
-	pollInterval     time.Duration
-	logger           *slog.Logger
+	store           *Store
+	submitter       MessageSubmitter
+	sessionResolver SessionResolver
+	cmdGate         CmdGate
+	pollInterval    time.Duration
+	logger          *slog.Logger
 
 	mu     sync.Mutex
 	stopCh chan struct{}

@@ -52,6 +52,8 @@ def _migrate_stored_dict(data: dict[str, object]) -> dict[str, object]:
             migrated[key] = []
     if "metadata" not in migrated or not isinstance(migrated.get("metadata"), dict):
         migrated["metadata"] = {}
+    if "card" not in migrated or not isinstance(migrated.get("card"), dict):
+        migrated["card"] = {}
     migrated.setdefault("auth_method", "shared_token")
     migrated.setdefault("risk_level", "medium")
     migrated.setdefault("expose_to_peers", True)
@@ -90,6 +92,7 @@ class AgentRegistryStore:
                 allowed_scopes=payload.allowed_scopes,
                 version=payload.version,
                 expose_to_peers=payload.expose_to_peers,
+                card=dict(payload.card),
                 metadata=payload.metadata,
                 last_error_summary=payload.last_error_summary,
                 recent_task_summary=payload.recent_task_summary,
@@ -190,6 +193,7 @@ class AgentRegistryStore:
                     team=item.team,
                     risk_level=item.risk_level,
                     version=item.version,
+                    card=dict(item.card),
                 )
             )
         return out

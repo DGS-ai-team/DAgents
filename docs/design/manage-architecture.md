@@ -132,42 +132,44 @@
 
 ---
 
-### 4.2 A2A（协作总线）— 消息 + 文件
+### 4.2 A2A（协作总线）— Task + Inbox
 
 **设计原则**
 
-- **Inbox 模型**：Manage 持久化消息；被调方 **轮询 inbox**（与 [a2a-via-manage.md](../future/a2a-via-manage.md) 一致）
+- **Task + Inbox 模型**：Manage 持久化工作单元；被调方 **long poll inbox**（与 [a2a-via-manage.md](../future/a2a-via-manage.md) 一致）
 - **无 peer URL**：调用方只持有 `to_agent_id`
-- **大 payload 走 Blob**：正文、文件、日志片段等均 **上传 Blob → 消息引用 `blob_id`**
+- **不做 messages 兼容**：API 统一 `/v1/a2a/tasks`，无 `/v1/a2a/messages`
+- **大 payload 走 Blob**：正文、文件引用 `blob_ids`
 
-#### 4.2.1 消息子系统
+#### 4.2.1 Task API（M2）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/v1/a2a/messages` | 创建消息（text 或 blob 引用） |
-| GET | `/v1/a2a/inbox` | 被调方拉取 pending |
-| POST | `/v1/a2a/messages/{id}/ack` | 已接收 |
-| POST | `/v1/a2a/messages/{id}/reply` | 回复（可含 blob） |
-| GET | `/v1/a2a/messages/{id}` | 调用方查状态/结果 |
-| POST | `/v1/a2a/broadcast` | 按 groups 扇出到多个 inbox |
+| POST | `/v1/a2a/tasks` | 创建 Task（`kind`: invoke \| notify） |
+| GET | `/v1/a2a/inbox` | 被调方 long poll（`?wait=25s`） |
+| POST | `/v1/a2a/tasks/{id}/ack` | 标记 processing |
+| POST | `/v1/a2a/tasks/{id}/reply` | 回复（可含 blob） |
+| GET | `/v1/a2a/tasks/{id}` | 调用方查状态/结果 |
+| POST | `/v1/a2a/broadcast` | 按 groups 扇出（Phase 2） |
 
-**消息体（摘要）**
+**Task 体（摘要）**
 
 ```json
 {
-  "message_id": "a2a-...",
+  "task_id": "a2a-task-...",
   "from_agent_id": "A",
   "to_agent_id": "B",
-  "kind": "text|blob_ref|structured",
+  "kind": "invoke",
   "content": "简短文本",
   "blob_ids": ["blob-..."],
   "caller_session_id": "sess-a",
+  "idempotency_key": "...",
   "ttl_seconds": 3600,
   "trace_id": "..."
 }
 ```
 
-**校验**：`to` 存在、online、`expose_to_peers=true`；caller token 对 `from_agent_id` 有权限。
+**校验**：`to` 存在、online、`expose_to_peers=true`；caller Header `x-dagents-agent-id` 与 `from_agent_id` 一致。
 
 #### 4.2.2 文件 / 制品传输（Blob）
 
@@ -183,22 +185,19 @@
 **A2A 文件流**
 
 ```text
-Node A  POST /v1/blobs          → blob_id
-        POST /v1/a2a/messages   → { blob_ids: [blob_id], to: B }
-Node B  GET  /v1/a2a/inbox      → 见 message
-        GET  /v1/blobs/{id}     → 落盘到 fs_root 或临时目录
-        POST /v1/a2a/messages/{id}/reply
+Node A  POST /v1/blobs        → blob_id
+        POST /v1/a2a/tasks    → { blob_ids: [blob_id], to: B }
+Node B  GET  /v1/a2a/inbox    → 见 task
+        GET  /v1/blobs/{id}   → 落盘
+        POST /v1/a2a/tasks/{id}/reply
 ```
 
-**限制（首版）**：单 blob 默认 ≤ 64MB；总量按 agent quota；病毒扫描/类型白名单为 Phase 2。
+#### 4.2.3 Node 侧（M2 起）
 
-#### 4.2.3 Node 侧工具（远期）
+Go Node：
 
-Go Node 新增工具（非子 Agent）：
-
-- `agent_discover` — `GET discover`
-- `agent_send_message` — `POST messages` + 轮询结果
-- `agent_upload_artifact` / `agent_fetch_artifact` — Blob 封装
+- **`manage/a2a` inbox poller** — long poll + 断线短 poll（`node/internal/manage/inbox_poller.go`）
+- 工具（待接 turn loop）：`agent_discover`、`agent_invoke`、`agent_notify`
 
 **禁止**恢复直连 `base_url` 的 `agent_peer` 旧路径。
 

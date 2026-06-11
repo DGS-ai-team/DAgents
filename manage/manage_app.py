@@ -1,4 +1,4 @@
-"""Manage FastAPI 应用装配（M0 + M1）。"""
+"""Manage FastAPI 应用装配（M0 + M1 + M2 A2A）。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from manage.platform.auth import authenticate, require_admin
 from manage.platform.blob import BlobStore, BlobStoreConfig
 from manage.platform.metrics import metrics_text
 from manage.registry.models import AuditListResponse, HealthResponse
+from manage.a2a.routes import build_a2a_router
+from manage.a2a.store import A2ATaskStore
 from manage.registry.routes import build_registry_router
 from manage.registry.store import AgentRegistryStore
 from manage.storage.sqlite import SQLiteDatabase
@@ -25,11 +27,16 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     cfg = settings or ManageSettings.from_env()
     app = FastAPI(
         title="DAgents Manage",
-        version="0.4.0-m0m1",
-        description="统一控制面：Registry（M1）+ Platform（M0）；A2A/Skills 待 M2/M3。",
+        version="0.4.0-m2",
+        description="统一控制面：Registry（M1）+ A2A Task Inbox（M2）+ Platform（M0）。",
     )
     db = SQLiteDatabase(cfg.db_path)
     store = AgentRegistryStore(db=db if db.enabled else None)
+    a2a_store = A2ATaskStore(
+        db=db if db.enabled else None,
+        inbox_content_max_chars=cfg.a2a_inbox_content_max_chars,
+        expire_sweep_seconds=cfg.a2a_expire_sweep_seconds,
+    )
     audit = AuditLog(max_entries=cfg.audit_max_entries)
     blob = BlobStore(BlobStoreConfig.from_settings(cfg))
 
@@ -52,6 +59,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
         return AuditListResponse(events=audit.list_recent(limit=limit))
 
     app.include_router(build_registry_router(store, audit))
+    app.include_router(build_a2a_router(store, a2a_store, audit))
 
     @app.get("/", include_in_schema=False)
     def root_redirect() -> RedirectResponse:
@@ -66,6 +74,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
 
     app.state.manage_settings = cfg
     app.state.registry_store = store
+    app.state.a2a_store = a2a_store
     return app
 
 

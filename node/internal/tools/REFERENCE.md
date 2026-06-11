@@ -7,6 +7,7 @@
 | `NewRegistry(fsRoot, bashTimeoutSeconds, encodings...)` | 创建 registry；`encodings[0]`=bash 输出编码，`encodings[1]`=文件编码 |
 | `resolveShellOutputEncoding` / `decodeShellOutput` | bash_run 输出按 GBK/UTF-8 等解码为 UTF-8 |
 | `encodeFileContent` / `encodeTextToLegacyChinese` | 写盘编码；GBK 失败回退 GB18030，再失败按 rune 替换 `?` |
+| `SetBuiltinEnabled(names)` | 配置 LLM 可见内置工具允许列表（空=全部） |
 | `Definitions()` | LLM tools 列表 |
 | `Execute(ctx, name, arguments)` | 执行工具 |
 | `execReadFile` / `execWriteFile` / `execSearchReplace` / `execGlobFiles` / `execGrepFile` / `execGrepFiles` / `execSearchFile` | 内置实现（`search_file` 为 `grep_file` 别名） |
@@ -16,7 +17,7 @@
 | `WithBackgroundExecution` | 标记显式后台 Execute，跳过同步窗口 |
 | `StartBackground(ctx, sessionID, toolName, toolCallID, cleanedArgs)` | 后台执行并返回 ACK |
 | `ParseRunInBackground(arguments)` | 解析并剥离 run_in_background |
-| `injectRunInBackgroundParam` / `ensureToolSchemaRequired` | 注入 run_in_background；保证 parameters 含 `required` 数组 |
+| `injectCallPurposeParam` / `injectRunInBackgroundParam` | 注入 call_purpose（加入 required）与 run_in_background |
 | `SetTriggerRuntime(store, sched, agentID)` | 注入触发器运行时 |
 | `execTriggerList` / `execTriggerGet` / `execTriggerCreate` / `execTriggerUpdate` / `execTriggerDelete` / `execTriggerFire` | 触发器工具 |
 | `IsBackgroundJobTool(name)` | 后台管理工具（强制同步） |

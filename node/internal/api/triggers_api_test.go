@@ -16,11 +16,8 @@ import (
 
 func triggersTestConfig(t *testing.T) *config.Config {
 	t.Helper()
-	dir := t.TempDir()
-	cfg := testConfig()
-	cfg.FSRoot = dir
+	cfg := testConfig(t)
 	cfg.Triggers.Enabled = true
-	cfg.ApplyDefaults()
 	return cfg
 }
 

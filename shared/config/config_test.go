@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string) {
@@ -198,5 +199,31 @@ func TestManageRegistryBaseURL_prefersRegistrationOverride(t *testing.T) {
 	}
 	if !cfg.ManageRegistryBaseURLIsLoopback() {
 		t.Fatal("expected loopback true for local endpoint")
+	}
+}
+
+func TestManageA2AConfigDefaults(t *testing.T) {
+	cfg := &Config{
+		Manage: ManageConfig{
+			Enabled: true,
+			Registration: ManageRegistrationConfig{
+				IntervalSeconds: 40,
+			},
+		},
+	}
+	cfg.ApplyDefaults()
+	if !cfg.ManageA2AEnabled() {
+		t.Fatal("expected default a2a enabled")
+	}
+	if cfg.ManageA2AInboxWait() != 25*time.Second {
+		t.Fatalf("wait=%s", cfg.ManageA2AInboxWait())
+	}
+	if cfg.ManageA2AInboxPollInterval() != 40*time.Second {
+		t.Fatalf("poll=%s", cfg.ManageA2AInboxPollInterval())
+	}
+	disabled := false
+	cfg.Manage.A2A.Enabled = &disabled
+	if cfg.ManageA2AEnabled() {
+		t.Fatal("expected explicit disable")
 	}
 }

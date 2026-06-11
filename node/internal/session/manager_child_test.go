@@ -243,9 +243,9 @@ func TestSpawnChildPreloadsSkills(t *testing.T) {
 	}
 	pol, _ := policy.LoadFile("")
 	mgr := NewManager("agent-1", hub, &llm.MockClient{}, reg, pol, nil, TurnOptions{
-		SkillsRoot:        skillsRoot,
-		SkillsEnabled:     true,
-		SkillsMaxInPrompt: 3,
+		SkillsRoot:          skillsRoot,
+		SkillsEnabled:       true,
+		SkillsMaxInPrompt:   3,
 		CompressionBlocking: 0,
 	}, logx.Discard())
 	cm := childagent.NewManager(childagent.Config{Enabled: true}, hub, "agent-1", nil)

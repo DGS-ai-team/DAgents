@@ -27,16 +27,16 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
-	FSRoot              string
-	MaxToolLoops        int
-	SkillsRoot          string
-	SkillsEnabled       bool
-	SkillsMaxInPrompt   int
-	RuntimeDir          string
-	CompressionSilent         int
-	CompressionBlocking       int
-	RawMessageHistoryEnabled  bool
-	RawMessageHistoryDir      string
+	FSRoot                   string
+	MaxToolLoops             int
+	SkillsRoot               string
+	SkillsEnabled            bool
+	SkillsMaxInPrompt        int
+	RuntimeDir               string
+	CompressionSilent        int
+	CompressionBlocking      int
+	RawMessageHistoryEnabled bool
+	RawMessageHistoryDir     string
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。

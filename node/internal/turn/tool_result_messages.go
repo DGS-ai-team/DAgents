@@ -54,10 +54,10 @@ func clipMiddle(text string, maxChars int) (string, bool) {
 type toolResultTailKind string
 
 const (
-	tailTool                        toolResultTailKind = "tail_tool"
-	tailAssistantWithToolCalls      toolResultTailKind = "tail_assistant_with_tool_calls"
-	tailAssistantWithoutToolCalls   toolResultTailKind = "tail_assistant_without_tool_calls"
-	tailOther                       toolResultTailKind = "other"
+	tailTool                      toolResultTailKind = "tail_tool"
+	tailAssistantWithToolCalls    toolResultTailKind = "tail_assistant_with_tool_calls"
+	tailAssistantWithoutToolCalls toolResultTailKind = "tail_assistant_without_tool_calls"
+	tailOther                     toolResultTailKind = "other"
 )
 
 func classifyToolResultTail(messages []llm.Message) toolResultTailKind {
@@ -80,12 +80,12 @@ func classifyToolResultTail(messages []llm.Message) toolResultTailKind {
 
 // asyncToolMessages 为 async_tool_result 写回 history 的三段消息（对齐 Python _build_tool_result_messages）。
 type asyncToolMessages struct {
-	UserMessage      llm.Message
-	AssistantMessage llm.Message
-	ToolMessage      llm.Message
-	ToolName         string
-	ToolCallID       string
-	Status           string
+	UserMessage            llm.Message
+	AssistantMessage       llm.Message
+	ToolMessage            llm.Message
+	ToolName               string
+	ToolCallID             string
+	Status                 string
 	OutputCompressSavedPct int
 	OutputCompressRawRunes int
 	OutputCompressOutRunes int

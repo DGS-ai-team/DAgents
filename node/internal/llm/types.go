@@ -49,9 +49,9 @@ type ChatResult struct {
 
 // StreamHandler 接收流式 delta 与最终 usage。
 type StreamHandler struct {
-	OnDelta           func(delta string)
-	OnReasoningDelta  func(delta string)
-	OnUsage           func(usage Usage)
+	OnDelta          func(delta string)
+	OnReasoningDelta func(delta string)
+	OnUsage          func(usage Usage)
 }
 
 // CompleteRequest 为非流式补全请求（摘要压缩等）。
