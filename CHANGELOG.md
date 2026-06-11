@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.2.22] - 2026-06-11
+
+**0.x 预览**：Linux `install.sh` 重装/升级前自动停止旧 Node。
+
+### 修复
+
+- **Linux `install.sh`**：安装前若目标 `PREFIX` 下存在 `.runtime/node.pid`，优先 `dagents node shutdown` 停止旧进程，失败则按 pid 发 TERM/KILL，避免覆盖二进制时 Node 仍占用 `.runtime`。
+
+（Git **tag**：`v0.2.22`。）
+
 ## [0.2.21] - 2026-06-11
 
 **0.x 预览**：Windows `dagents node` 与 Linux 对齐；TUI 行号方框与 transcript 控制符修复。
