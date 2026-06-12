@@ -7,7 +7,7 @@
 # 开发联调也可直接引用本文件（默认 llm.mock=true，无需 API Key）：
 #   go run ./node/cmd/dagents-node -config packaging/agent-client/config.example.yaml
 
-agent_id: ops-linux-01  # 可选；缺省时自动生成并写入 .runtime/agent/agent_id
+agent_id:   # 可选；缺省时自动生成并写入 .runtime/agent/agent_id，建议不填自动生成
 
 listen:
   host: 127.0.0.1

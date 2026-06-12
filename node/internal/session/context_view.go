@@ -18,7 +18,21 @@ type ContextView struct {
 	HasActiveTurn         bool
 	TurnState             turn.State
 	SystemPrompt          string
+	SystemPromptEstimatedTokens  int
+	SkillsCatalogEstimatedTokens int
+	SkillsCatalogBloatThreshold  int
 	Messages              []llm.Message
+}
+
+func enrichContextPromptStats(view *ContextView, catalog *skills.Catalog) {
+	if view == nil {
+		return
+	}
+	view.SystemPromptEstimatedTokens = llm.EstimateTextTokens(view.SystemPrompt)
+	view.SkillsCatalogBloatThreshold = skills.CatalogBloatTokenThreshold
+	if catalog != nil {
+		view.SkillsCatalogEstimatedTokens = catalog.EstimateCatalogTokens()
+	}
 }
 
 func estimateMessageTokens(messages []llm.Message) int {

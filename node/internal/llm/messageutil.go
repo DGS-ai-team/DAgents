@@ -15,6 +15,14 @@ func CloneMessage(message Message) Message {
 	return out
 }
 
+// EstimateTextTokens 粗算纯文本 token（len/4），与 EstimateMessageTokens 字符权重一致。
+func EstimateTextTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+	return len(text) / 4
+}
+
 // EstimateMessageTokens 粗算 messages token（content/reasoning len/4 + 固定开销 + tool_calls 加权）。
 // 供 compression 触发与 GET /context 共用，避免两处公式漂移。
 func EstimateMessageTokens(messages []Message) int {

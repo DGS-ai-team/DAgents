@@ -234,7 +234,12 @@ class DAgentsTuiApp(App[None]):
             log.write(f"[red]Failed to connect: {exc}[/red]")
             self._apply_top_status(connected=False)
             return
-        self._write_welcome_panel()
+        context_summary = None
+        try:
+            context_summary = await self._controller.get_context()
+        except Exception:
+            pass
+        self._write_welcome_panel(context_summary=context_summary)
         self.query_one("#context-view", RichLog).display = False
         self.query_one("#policy-view", RichLog).display = False
         self._apply_top_status()
@@ -284,7 +289,7 @@ class DAgentsTuiApp(App[None]):
         self._policy_view.clamp_cursor()
         self._render_policy_view()
 
-    def _write_welcome_panel(self) -> None:
+    def _write_welcome_panel(self, *, context_summary: dict | None = None) -> None:
         """连接成功后向 RichLog 写入一次性欢迎 Panel。
 
         副作用：更新 ``_transcript_base_lines`` 供流式回退边界使用。
@@ -296,6 +301,7 @@ class DAgentsTuiApp(App[None]):
                 api_base=self._controller.api_base,
                 session_id=self._controller.session_id,
                 width=panel_width if panel_width > 0 else None,
+                context_summary=context_summary,
             ),
             expand=True,
         )
@@ -2581,6 +2587,9 @@ class DAgentsTuiApp(App[None]):
             f"messages_count: {data.get('messages_count') or 0}",
             f"pending_tool_calls_count: {data.get('pending_tool_calls_count') or 0}",
             f"messages_total_tokens: {data.get('messages_total_tokens') or 0}",
+            f"system_prompt_estimated_tokens: {data.get('system_prompt_estimated_tokens') or 0}",
+            f"skills_catalog_estimated_tokens: {data.get('skills_catalog_estimated_tokens') or 0}",
+            f"skills_catalog_bloat_threshold: {data.get('skills_catalog_bloat_threshold') or 0}",
             f"tool_loop_count: {data.get('tool_loop_count') or 0}",
             f"queue_pending: {data.get('queue_pending') or 0}",
             f"has_active_turn: {'yes' if data.get('has_active_turn') else 'no'}",

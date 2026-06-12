@@ -292,6 +292,12 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 	if view.LoadedSkills == nil {
 		view.LoadedSkills = []skills.LoadedSkill{}
 	}
+	if m.turn.SkillsEnabled && strings.TrimSpace(m.turn.SkillsRoot) != "" {
+		catalog := skills.NewCatalog(m.turn.SkillsRoot, true, m.turn.SkillsMaxInPrompt)
+		enrichContextPromptStats(view, catalog)
+	} else {
+		enrichContextPromptStats(view, nil)
+	}
 	return view, nil
 }
 

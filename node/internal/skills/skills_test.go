@@ -19,6 +19,16 @@ func writeSkill(t *testing.T, root, name, body string) {
 	}
 }
 
+func TestEstimateCatalogTokens(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "alpha", "---\nname: alpha\ndescription: desc-a\n---\n"+strings.Repeat("x", 16000))
+	c := NewCatalog(root, true, 3)
+	got := c.EstimateCatalogTokens()
+	if got < 4000 {
+		t.Fatalf("EstimateCatalogTokens = %d, want >= 4000", got)
+	}
+}
+
 func TestCatalogListAndMetadata(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "alpha-skill", "---\nname: alpha-skill\ndescription: Alpha helper\n---\nAlpha body\n")

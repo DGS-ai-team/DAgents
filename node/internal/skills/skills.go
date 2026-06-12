@@ -11,6 +11,9 @@ import (
 	"sync"
 )
 
+// CatalogBloatTokenThreshold 为 skills 目录估算 token 超过该值时 TUI 提示精简。
+const CatalogBloatTokenThreshold = 4000
+
 // LoadedSkill 为会话已加载 skill 元信息（持久化在 session）。
 type LoadedSkill struct {
 	SkillName   string `json:"skill_name"`
@@ -104,6 +107,33 @@ func (c *Catalog) SelectByName(skillName string) (Definition, bool) {
 		}
 	}
 	return Definition{}, false
+}
+
+func estimateTextTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+	return len(text) / 4
+}
+
+// EstimateCatalogTokens 粗算 skills 目录占用 token（各 skill 名称、描述、正文之和；与 llm.EstimateTextTokens 同权重）。
+func EstimateCatalogTokens(defs []Definition) int {
+	total := 0
+	for _, d := range defs {
+		total += estimateTextTokens(d.SkillName)
+		total += estimateTextTokens(d.Description)
+		total += estimateTextTokens(d.Content)
+		total += 8
+	}
+	return total
+}
+
+// EstimateCatalogTokens 返回当前磁盘 catalog 的估算 token 数。
+func (c *Catalog) EstimateCatalogTokens() int {
+	if c == nil || !c.enabled {
+		return 0
+	}
+	return EstimateCatalogTokens(c.List())
 }
 
 // RenderMetadataSection 渲染可用 skills 元数据段。

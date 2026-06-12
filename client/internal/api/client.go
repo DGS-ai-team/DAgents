@@ -92,8 +92,11 @@ type SessionContext struct {
 	HasActiveTurn         bool   `json:"has_active_turn"`
 	TurnState             string `json:"turn_state"`
 	RunTurnPhase          string `json:"run_turn_phase"`
-	SystemPrompt          string `json:"system_prompt"`
-	LoadedSkills          []LoadedSkillSummary `json:"loaded_skills"`
+	SystemPrompt                   string `json:"system_prompt"`
+	SystemPromptEstimatedTokens    int    `json:"system_prompt_estimated_tokens"`
+	SkillsCatalogEstimatedTokens   int    `json:"skills_catalog_estimated_tokens"`
+	SkillsCatalogBloatThreshold    int    `json:"skills_catalog_bloat_threshold"`
+	LoadedSkills                   []LoadedSkillSummary `json:"loaded_skills"`
 	RecentMessages        []ContextMessagePreview `json:"recent_messages"`
 }
 

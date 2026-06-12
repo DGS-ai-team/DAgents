@@ -24,6 +24,8 @@ func FormatSessionContextPanelBody(ctx *nodeapi.SessionContext) []string {
 		panelKV("messages", fmt.Sprintf("%d", ctx.MessagesCount)),
 		panelKV("pending_tools", fmt.Sprintf("%d", ctx.PendingToolCallsCount)),
 		panelKV("tokens", fmt.Sprintf("%d", ctx.MessagesTotalTokens)),
+		panelKV("system_prompt_tokens", fmt.Sprintf("%d", ctx.SystemPromptEstimatedTokens)),
+		panelKV("skills_catalog_tokens", fmt.Sprintf("%d", ctx.SkillsCatalogEstimatedTokens)),
 		panelKV("tool_loop", fmt.Sprintf("%d", ctx.ToolLoopCount)),
 		panelKV("queue", fmt.Sprintf("%d", ctx.QueuePending)),
 		panelLine(panelKindSection, "system_prompt"),

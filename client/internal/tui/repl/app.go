@@ -60,6 +60,12 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 	}
 	defer app.stopStream()
 
+	if ctxBody, err := app.client.GetSessionContext(ctx, app.currentSession()); err == nil {
+		for _, line := range tuishared.SkillsBloatWarningTexts(ctxBody) {
+			fmt.Fprintln(os.Stderr, "警告: "+line)
+		}
+	}
+
 	fmt.Fprintf(os.Stderr, "已连接 %s agent_id=%s client=%s (plain REPL)\n", res.Endpoint, res.AgentID, version.Version)
 	fmt.Fprintf(os.Stderr, "session=%s（/help 查看命令）\n\n", app.currentSession())
 

@@ -540,9 +540,12 @@ type sessionContextResponse struct {
 	QueuePending          int                     `json:"queue_pending"`
 	HasActiveTurn         bool                    `json:"has_active_turn"`
 	TurnState             string                  `json:"turn_state,omitempty"`
-	RunTurnPhase          string                  `json:"run_turn_phase"`
-	SystemPrompt          string                  `json:"system_prompt,omitempty"`
-	LoadedSkills          []skills.LoadedSkill    `json:"loaded_skills"`
+	RunTurnPhase                   string                  `json:"run_turn_phase"`
+	SystemPrompt                   string                  `json:"system_prompt,omitempty"`
+	SystemPromptEstimatedTokens    int                     `json:"system_prompt_estimated_tokens"`
+	SkillsCatalogEstimatedTokens   int                     `json:"skills_catalog_estimated_tokens"`
+	SkillsCatalogBloatThreshold    int                     `json:"skills_catalog_bloat_threshold"`
+	LoadedSkills                   []skills.LoadedSkill    `json:"loaded_skills"`
 	RecentMessages        []contextMessagePreview `json:"recent_messages"`
 }
 
@@ -589,8 +592,11 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 		ToolLoopCount:         view.ToolLoopCount,
 		QueuePending:          view.QueuePending,
 		HasActiveTurn:         view.HasActiveTurn,
-		SystemPrompt:          view.SystemPrompt,
-		LoadedSkills:          view.LoadedSkills,
+		SystemPrompt:                 view.SystemPrompt,
+		SystemPromptEstimatedTokens:  view.SystemPromptEstimatedTokens,
+		SkillsCatalogEstimatedTokens: view.SkillsCatalogEstimatedTokens,
+		SkillsCatalogBloatThreshold:  view.SkillsCatalogBloatThreshold,
+		LoadedSkills:                 view.LoadedSkills,
 		RecentMessages:        recent,
 		RunTurnPhase:          turn.RunTurnPhase(view.TurnState),
 	}

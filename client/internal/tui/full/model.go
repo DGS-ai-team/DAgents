@@ -190,10 +190,11 @@ func (m *model) bootstrapSession(initialSession string) error {
 	m.sessionID = id
 	m.sessionMu.Unlock()
 
-	m.transcript.AddSystemPanel(
-		tuishared.WelcomePanelTitle(version.Version),
-		tuishared.FormatWelcomePanelBody(m.probe.Endpoint, m.probe.AgentID, version.Version, id),
-	)
+	welcomeBody := tuishared.FormatWelcomePanelBody(m.probe.Endpoint, m.probe.AgentID, version.Version, id)
+	if ctxBody, err := m.client.GetSessionContext(m.ctx, id); err == nil {
+		welcomeBody = append(welcomeBody, tuishared.SkillsBloatWarningLines(ctxBody)...)
+	}
+	m.transcript.AddSystemPanel(tuishared.WelcomePanelTitle(version.Version), welcomeBody)
 	m.sseDetail = "连接中…"
 	m.restartStream()
 	return nil

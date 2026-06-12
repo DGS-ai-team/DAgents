@@ -66,6 +66,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 ### 3.4 触发器、子 Agent 与 Register Center
 
 - **触发器（Go Node）**：**`interval` / `fire_at` / 日历 `schedule`**（含 **`cmd` 门控**）；**`trigger_*`** 工具 + 调度器（**`node/internal/triggers/`**；设计见 [triggers-design.md](./triggers-design.md)）；**v0.2.16** 起 TUI **`/triggers`** 与 trigger 会话目标审批。
+- **Hook 扩展点（设计稿）**：统一 turn 全链路 **阶段锚点** 与 `HookRegistry`；设计见 [design/agent-hooks.md](./design/agent-hooks.md)；**`node/internal/hooks/` 尚未实现**。
 - **临时子 Agent**：同进程 **`create_temporary_agent` → `wait_temporary_agents`**；非跨进程 A2A（[child-agent-tools.md](./architecture/child-agent-tools.md)）。
 - **Register Center（独立 Python 服务）**：登记、**`/v1/broadcast`**、**`/v1/relay`**、可选 JSON 持久化（**`register_center/`**）。**Go Node 不直连 RC、不自登记**；Agent 侧 **`agent_peer`** 工具已随 Python API 移除，端到端 A2A 待 **Manage** 阶段（[future/a2a-via-manage.md](./future/a2a-via-manage.md)）。
 

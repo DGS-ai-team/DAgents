@@ -31,6 +31,7 @@
 | [design/agent-client-refactor-plan.md](./design/agent-client-refactor-plan.md) | AC 分步计划与 N0–N7 状态 |
 | [design/agent-directory-phase1.md](./design/agent-directory-phase1.md) | Phase 1 RC 企业化（过渡；见 Manage 方案） |
 | [design/manage-architecture.md](./design/manage-architecture.md) | Manage 统一控制面架构方案 |
+| [design/agent-hooks.md](./design/agent-hooks.md) | **Agent Hook 扩展点**（设计稿）：Registry、phase 锚点、L1/L2/L3 分层 |
 | [manage/README.md](../../manage/README.md) | **Manage 服务**（M0+M1 已落地） |
 
 ## 专题
@@ -41,6 +42,7 @@
 | [a2a-and-register-center.md](./a2a-and-register-center.md) | Register Center | RC HTTP；历史 **`agent_peer`** 见文档内「历史」节 |
 | [built-in-tools.md](./built-in-tools.md) | Go Node + 归档 | §0 现行工具表；Python 见归档 |
 | [triggers-design.md](./triggers-design.md) | Go Node | 长期设计；落地见 `node/internal/triggers/README.md` |
+| [design/agent-hooks.md](./design/agent-hooks.md) | Go Node | **Hook 扩展点**（设计稿）；turn 全链路阶段锚点 |
 | [prometheus-metrics.md](./prometheus-metrics.md) | 历史 + RC | Python Agent `/metrics` 已移除；Register Center 指标仍适用 |
 | [security-rollout.md](./security-rollout.md) | 通用 | 分阶段安全验收 |
 | [os-compatibility.md](./os-compatibility.md) | 历史参考 | CPython 兼容（Python Agent 已移除） |

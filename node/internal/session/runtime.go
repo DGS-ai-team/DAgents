@@ -491,6 +491,7 @@ func (r *runtime) contextView() *ContextView {
 	}
 	r.mu.Unlock()
 	view.SystemPrompt = r.orch.SystemPromptForSession(r.session.ID)
+	enrichContextPromptStats(view, r.skillsCatalog)
 	return view
 }
 
