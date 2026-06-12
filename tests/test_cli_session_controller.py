@@ -221,16 +221,23 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller._messages_total_tokens, 4321)
         self.assertEqual(self.controller.input_strip_token_text(), "ctx 4,321")
 
-    async def test_reasoning_suppressed_when_disabled(self) -> None:
+    async def test_reasoning_delta_always_emitted_for_thinking_ui(self) -> None:
+        from app.cli.render import TranscriptKind
+
         self.controller.show_reasoning = False
         await self.controller._handle_stream_event(_event("reasoning", content="think"))
-        self.assertEqual(len(self.updates), 0)
+        self.assertEqual(len(self.updates), 1)
+        self.assertEqual(self.updates[0].kind, TranscriptKind.REASONING_DELTA)
+        self.assertEqual(self.updates[0].text, "think")
 
-    async def test_reasoning_emitted_when_enabled(self) -> None:
+    async def test_reasoning_delta_emitted_when_enabled(self) -> None:
+        from app.cli.render import TranscriptKind
+
         self.controller.show_reasoning = True
         await self.controller._handle_stream_event(_event("reasoning", content="think"))
         self.assertEqual(len(self.updates), 1)
-        self.assertIn("[reasoning]", self.updates[0].text)
+        self.assertEqual(self.updates[0].kind, TranscriptKind.REASONING_DELTA)
+        self.assertEqual(self.updates[0].text, "think")
 
     async def test_switch_session_resets_local_state(self) -> None:
         mock_client = MagicMock()

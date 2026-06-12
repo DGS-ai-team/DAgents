@@ -170,6 +170,8 @@ class DAgentsTuiApp(App[None]):
         self._controller = controller
         self._assistant_buffer = ""
         self._assistant_stream_start: int | None = None
+        self._reasoning_buffer = ""
+        self._reasoning_stream_start: int | None = None
         self._pending_round_usage_suffix: str | None = None
         # 最近一条已完成 assistant 块（供 USAGE 晚到时的 retroactive 重写）。
         self._last_assistant_done_block: dict[str, Any] | None = None
@@ -940,6 +942,28 @@ class DAgentsTuiApp(App[None]):
         """结束当前 assistant 流式段并重置缓冲。"""
         self._assistant_buffer = ""
         self._assistant_stream_start = None
+
+    def _finish_reasoning_stream(self, log: RichLog) -> None:
+        """结束当前 reasoning 流式段并重置缓冲。"""
+        self._reasoning_buffer = ""
+        self._reasoning_stream_start = None
+
+    def _rewind_reasoning_stream_lines(self, log: RichLog) -> None:
+        if self._reasoning_stream_start is None:
+            return
+        floor = self._transcript_base_lines
+        start = max(self._reasoning_stream_start, floor)
+        if len(log.lines) <= start:
+            return
+        scroll_y = self._preserve_transcript_scroll(log)
+        log.lines = log.lines[:start]
+        log._line_cache.clear()
+        log._widest_line_width = max(
+            (sum(segment.cell_length for segment in strip) for strip in log.lines),
+            default=0,
+        )
+        log.virtual_size = Size(log._widest_line_width, len(log.lines))
+        self._restore_transcript_scroll(log, scroll_y)
 
     def _rewind_assistant_stream_lines(self, log: RichLog) -> None:
         """回退 RichLog 中当前流式 assistant 已写入的行，便于整段重写。
@@ -2065,6 +2089,7 @@ class DAgentsTuiApp(App[None]):
             self._submit_content_seen = True
             self._begin_turn_segment_after_tools()
             self._finish_waiting_statuses()
+            self._finish_reasoning_stream(log)
             if self._assistant_stream_start is None:
                 self._assistant_stream_start = max(len(log.lines), self._transcript_base_lines)
             self._assistant_buffer += update.text
@@ -2088,17 +2113,20 @@ class DAgentsTuiApp(App[None]):
             self._flush_pending_segment_gap()
             self._finish_waiting_statuses()
             self._finish_assistant_stream(log)
+            self._finish_reasoning_stream(log)
             self._write_tool_call(update.data)
         elif update.kind == TranscriptKind.TOOL_RESULT:
             self._submit_content_seen = True
             self._finish_waiting_statuses()
             self._finish_assistant_stream(log)
+            self._finish_reasoning_stream(log)
             self._write_tool_result(update.data)
             self._needs_gap_after_tools = True
         elif update.kind == TranscriptKind.ERROR:
             self._submit_content_seen = True
             self._finish_waiting_statuses()
             self._finish_assistant_stream(log)
+            self._finish_reasoning_stream(log)
             log.write(f"[red]{update.text}[/red]", scroll_end=self._transcript_scroll_end())
             self._append_message_gap()
         elif update.kind == TranscriptKind.COMPRESSION:
@@ -2121,13 +2149,30 @@ class DAgentsTuiApp(App[None]):
                     log.write(self._compression_detail_line(mode, status, count))
                     if status in {"applied", "failed", "stale", "invalid"}:
                         self._append_message_gap()
-        elif update.kind == TranscriptKind.LINE and update.text.startswith("[reasoning]"):
+        elif update.kind == TranscriptKind.REASONING_DELTA or (
+            update.kind == TranscriptKind.LINE and update.text.startswith("[reasoning]")
+        ):
             self._submit_content_seen = True
             self._begin_turn_segment_after_tools()
             self._finish_waiting_statuses(before_reasoning=True)
             self._finish_assistant_stream(log)
             if "thinking" not in self._status_lines:
                 self._start_status_line("thinking")
+            if not self._controller.show_reasoning:
+                return
+            chunk = update.text
+            if update.kind == TranscriptKind.LINE and chunk.startswith("[reasoning]"):
+                chunk = chunk[len("[reasoning] ") :]
+            if not chunk:
+                return
+            if self._reasoning_stream_start is None:
+                self._reasoning_stream_start = max(len(log.lines), self._transcript_base_lines)
+            self._reasoning_buffer += chunk
+            self._rewind_reasoning_stream_lines(log)
+            self._log_write_block(
+                log,
+                self._message_block(_DOT_REASONING, f"[reasoning] {self._reasoning_buffer}"),
+            )
         else:
             self._submit_content_seen = True
             self._finish_waiting_statuses()
@@ -2157,6 +2202,7 @@ class DAgentsTuiApp(App[None]):
         self._pending_tools.clear()
         self._cancel_status_lines()
         self._finish_assistant_stream(log)
+        self._finish_reasoning_stream(log)
         self._pending_segment_gap = False
         self._needs_gap_after_tools = False
         self._transcript_base_lines = 0

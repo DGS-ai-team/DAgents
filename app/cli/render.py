@@ -22,6 +22,7 @@ class TranscriptKind(str, Enum):
     TOOL_RESULT = "tool_result"
     COMPRESSION = "compression"
     USAGE = "usage"
+    REASONING_DELTA = "reasoning_delta"
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,8 +115,8 @@ def format_tool_call(data: dict[str, Any]) -> TranscriptUpdate | None:
 
 
 def format_reasoning(content: str) -> TranscriptUpdate:
-    """格式化 reasoning 流事件。"""
-    return TranscriptUpdate(kind=TranscriptKind.LINE, text=f"[reasoning] {content}")
+    """格式化 reasoning 流事件（TUI 用其驱动 thinking 状态；正文由 show_reasoning 控制）。"""
+    return TranscriptUpdate(kind=TranscriptKind.REASONING_DELTA, text=content)
 
 
 def format_error(message: str) -> TranscriptUpdate:

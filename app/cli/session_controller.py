@@ -652,12 +652,10 @@ class SessionController:
                 self._emit_transcript(format_assistant_delta(content))
                 self._assistant_line_open = True
         elif event_type == "reasoning":
-            if not self.show_reasoning:
-                return
+            # 始终下发 REASONING_DELTA，供 TUI 展示 thinking 等待态；正文由 show_reasoning 控制（对齐 Go TUI）。
             content = str(data.get("content") or "")
-            if content:
-                self._ensure_assistant_end()
-                self._emit_transcript(format_reasoning(content))
+            self._ensure_assistant_end()
+            self._emit_transcript(format_reasoning(content))
         elif event_type == "tool_call":
             self._ensure_assistant_end()
             self._child_tracker.note_tool_call(data)
