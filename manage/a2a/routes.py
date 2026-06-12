@@ -38,6 +38,17 @@ def _validate_task_target(registry: AgentRegistryStore, to_agent_id: str) -> tup
     return True, None
 
 
+def _validate_task_create(
+    registry: AgentRegistryStore,
+    from_agent_id: str,
+    to_agent_id: str,
+) -> tuple[bool, str | None]:
+    ok, reason = _validate_task_target(registry, to_agent_id)
+    if not ok:
+        return ok, reason
+    return registry.can_a2a_invoke(from_agent_id, to_agent_id)
+
+
 def _ensure_task_reader(task_from: str, task_to: str, reader_agent_id: str) -> None:
     if reader_agent_id not in (task_from, task_to):
         raise HTTPException(status_code=403, detail="无权读取该 task")
@@ -51,13 +62,22 @@ def build_a2a_router(registry: AgentRegistryStore, store: A2ATaskStore, audit: A
         auth = authenticate(request)
         _ensure_node_agent_request(request, payload.from_agent_id, auth)
         try:
-            task, created = store.create(payload, validate_target=lambda agent_id: _validate_task_target(registry, agent_id))
+            task, created = store.create(
+                payload,
+                validate_target=lambda agent_id: _validate_task_create(registry, payload.from_agent_id, agent_id),
+            )
         except ValueError as exc:
             reason = str(exc)
             record_a2a_operation(operation="create", status=reason)
             if reason == "target_not_found":
                 raise HTTPException(status_code=404, detail=reason) from exc
-            if reason in ("target_offline", "target_not_exposed"):
+            if reason in (
+                "target_offline",
+                "target_not_exposed",
+                "caller_discovery_group_empty",
+                "target_discovery_group_empty",
+                "discovery_group_mismatch",
+            ):
                 raise HTTPException(status_code=403, detail=reason) from exc
             raise HTTPException(status_code=400, detail=reason) from exc
         if created:

@@ -17,7 +17,7 @@ func TestFormatToolCallEventWithCallPurpose(t *testing.T) {
 			},
 		},
 	}, false)
-	if len(lines) != 1 {
+	if len(lines) < 2 {
 		t.Fatalf("lines = %v", lines)
 	}
 	for _, part := range []string{"▶ 调用", "bash(检查服务端口)"} {
@@ -25,8 +25,8 @@ func TestFormatToolCallEventWithCallPurpose(t *testing.T) {
 			t.Fatalf("line missing %q: %q", part, lines[0])
 		}
 	}
-	if strings.Contains(lines[0], "curl") {
-		t.Fatalf("command should not appear in title: %q", lines[0])
+	if !IsToolCallCodeLine(lines[1]) || !strings.Contains(lines[1], "curl") {
+		t.Fatalf("expected command preview line: %v", lines)
 	}
 }
 
@@ -153,6 +153,20 @@ func TestFormatToolResultSearchReplaceFriendly_withPreview(t *testing.T) {
 	preview := strings.Join(lines[1:], "\n")
 	if !strings.Contains(preview, "+bar") || !strings.Contains(preview, "-foo") {
 		t.Fatalf("preview=%q", preview)
+	}
+}
+
+func TestFormatToolResultAgentDiscover(t *testing.T) {
+	content := `{"agents":[{"agent_id":"node-a","name":"Node A"},{"agent_id":"node-b","name":"Node B"}]}`
+	lines := FormatToolEvent("tool_result", map[string]any{
+		"tool_name": "agent_discover",
+		"content":   content,
+	}, false)
+	if len(lines) < 2 {
+		t.Fatalf("lines=%v", lines)
+	}
+	if !strings.Contains(lines[0], "Node A") && !strings.Contains(lines[0], "2") {
+		t.Fatalf("head=%q", lines[0])
 	}
 }
 

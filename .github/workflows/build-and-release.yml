@@ -1,6 +1,6 @@
 name: Build And Release Binary
 
-# main 推送仅跑单测；打 v* 标签时构建本地助手包（Go Node + 双 TUI + Register Center）并创建 GitHub Release。
+# main 推送仅跑单测；打 v* 标签时构建本地助手包（Go Node + 双 TUI）并创建 GitHub Release。
 on:
   push:
     branches:
@@ -14,7 +14,6 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CLI_PYINSTALLER_ARGS: --onefile --name dagents-cli --hidden-import=textual --hidden-import=aiohttp run_dagents_cli.py
-  RC_PI_ARGS: --onefile --name dagents_register_center --add-data register_center:register_center run_register_center.py
 
 jobs:
   unit-tests:
@@ -112,7 +111,6 @@ jobs:
         shell: bash
         run: |
           bash scripts/ci/build_dagents_cli.sh
-          bash scripts/ci/build_dagents_register_center.sh
 
       - name: Build Python bundles (Linux Rocky 8 Docker + pyenv, glibc 2.28)
         if: matrix.cli_build == 'docker-rocky8'
@@ -120,13 +118,12 @@ jobs:
         shell: bash
         env:
           CLI_PI_ARGS: ${{ env.CLI_PYINSTALLER_ARGS }}
-          RC_PI_ARGS: ${{ env.RC_PI_ARGS }}
           PYENV_PYTHON_VERSION: "3.13.2"
         run: |
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e CLI_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
+            -e CLI_PI_ARGS -e PYENV_PYTHON_VERSION \
             rockylinux:8 \
             bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
 

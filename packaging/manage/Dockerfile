@@ -1,5 +1,12 @@
 # Manage 统一控制面镜像（构建上下文：仓库根目录）
-#   docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.0 .
+#   docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.1 .
+FROM node:22-bookworm-slim AS frontend
+WORKDIR /src/manage/console/frontend
+COPY manage/console/frontend/package.json manage/console/frontend/package-lock.json ./
+RUN npm ci
+COPY manage/console/frontend/ ./
+RUN npm run build
+
 FROM python:3.12-slim-bookworm
 
 ARG VERSION=dev
@@ -16,6 +23,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY manage/ ./manage/
+COPY --from=frontend /src/manage/console/static /app/manage/console/static
 COPY run_manage.py .
 
 ENV MANAGE_HOST=0.0.0.0 \

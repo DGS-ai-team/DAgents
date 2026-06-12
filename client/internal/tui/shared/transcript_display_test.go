@@ -8,6 +8,14 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+func TestFormatTranscriptLineForDisplayStatusLine(t *testing.T) {
+	got := FormatTranscriptLineForDisplay("[status] 准备上下文.. 3s", 80)
+	plain := stripANSI(got)
+	if !strings.HasPrefix(plain, "● 准备上下文") {
+		t.Fatalf("status line = %q", plain)
+	}
+}
+
 func TestFormatTranscriptLineForDisplayUsageRightAlign(t *testing.T) {
 	line := "[assistant] short" + usageStorageSep + " · ↑1,200 ↓80"
 	got := FormatTranscriptLineForDisplay(line, 50)
@@ -67,6 +75,8 @@ func TestFormatTranscriptLineForDisplayRoleDots(t *testing.T) {
 		{"[user] hi", "● hi"},
 		{"[reasoning] think", "● think"},
 		{"[tool] ✓ bash", "● ✓ bash"},
+		{"[tool] ✗ bash", "● ✗ bash"},
+		{formatToolMetaLine(toolPreviewLinePrefix, "id1", "hello"), "└─ hello"},
 	}
 	for _, tc := range cases {
 		got := stripANSI(FormatTranscriptLineForDisplay(tc.line, 80))

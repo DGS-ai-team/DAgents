@@ -71,14 +71,35 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		if ev.Type == "tool_call" {
 			m.children.noteToolCall(ev.Data)
 			tuishared.RegisterToolCallsFromEvent(ev.Data, m.toolPending)
+			m.toolBlocks.Register(blockID)
+			for _, line := range tuishared.FormatToolEventWithID(ev.Type, ev.Data, blockID, m.toolFold.Verbose()) {
+				m.transcript.Add(line)
+			}
 		} else {
 			m.children.noteToolResult(ev.Data)
+			var elapsed float64 = -1
+			if raw := ev.Data["duration_seconds"]; raw != nil {
+				switch v := raw.(type) {
+				case float64:
+					elapsed = v
+				case int:
+					elapsed = float64(v)
+				case int64:
+					elapsed = float64(v)
+				}
+				if elapsed < 0 {
+					elapsed = 0
+				}
+			}
+			if elapsed < 0 {
+				elapsed = m.toolPending.ElapsedSeconds(blockID)
+			}
 			m.toolPending.Remove(blockID)
 			m.transcript.RemoveToolPendingLines(blockID)
-		}
-		m.toolBlocks.Register(blockID)
-		for _, line := range tuishared.FormatToolEventWithID(ev.Type, ev.Data, blockID, m.toolFold.Verbose()) {
-			m.transcript.Add(line)
+			m.toolBlocks.Register(blockID)
+			for _, line := range tuishared.FormatToolEventWithID(ev.Type, ev.Data, blockID, m.toolFold.Verbose(), elapsed) {
+				m.transcript.Add(line)
+			}
 		}
 		m.notifyViewportRefresh()
 	case "usage":
@@ -113,6 +134,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		m.notifyViewportRefresh()
 		m.statusMgr.FinishAll()
 		if m.turn.Awaiting() {
+			m.resetTurnWaitUI()
 			m.turn.FinishTurn()
 			m.statusLine = "回合结束"
 		}
@@ -163,6 +185,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		m.transcript.FinishPartial("reasoning")
 		m.statusMgr.FinishAll()
 		if m.turn.ShouldAcceptDone(ev.Seq) {
+			m.resetTurnWaitUI()
 			m.turn.FinishTurn()
 			m.statusLine = "回合结束"
 		}

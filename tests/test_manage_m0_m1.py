@@ -40,7 +40,8 @@ class ManageM0Tests(unittest.TestCase):
             page = client.get("/console/")
         self.assertEqual(root.status_code, 307)
         self.assertEqual(page.status_code, 200)
-        self.assertIn("Manage Console", page.text)
+        self.assertIn("DAgents Manage", page.text)
+        self.assertIn('id="app"', page.text)
 
 
 class ManageRegistryTests(unittest.TestCase):

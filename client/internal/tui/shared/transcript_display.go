@@ -57,15 +57,25 @@ func FormatTranscriptLineForDisplay(line string, width int) string {
 	case strings.HasPrefix(line, "[reasoning] "):
 		return roleDotReasoning + sanitizeTerminalText(strings.TrimPrefix(line, "[reasoning] "))
 	case strings.HasPrefix(line, toolPendingLinePrefix):
-		body := strings.TrimPrefix(line, toolPendingLinePrefix)
-		if i := strings.Index(body, "] "); i >= 0 {
-			body = body[i+2:]
-		}
-		return roleDotTool + sanitizeTerminalText(body)
+		body := metaLineBody(line, toolPendingLinePrefix)
+		return roleDotToolPending + toolPendingStyle + sanitizeTerminalText(body) + panelReset
+	case strings.HasPrefix(line, toolCallCodeLinePrefix):
+		body := metaLineBody(line, toolCallCodeLinePrefix)
+		return toolCodeIndent + toolCodeStyle + sanitizeTerminalText(body) + panelReset
+	case strings.HasPrefix(line, toolPreviewLinePrefix):
+		body := metaLineBody(line, toolPreviewLinePrefix)
+		return toolPreviewIndent + toolPreviewStyle + "└─ " + sanitizeTerminalText(body) + panelReset
+	case strings.HasPrefix(line, toolDetailLinePrefix):
+		body := metaLineBody(line, toolDetailLinePrefix)
+		return toolDetailIndent + toolDimStyle + sanitizeTerminalText(body) + panelReset
 	case strings.HasPrefix(line, "[tool]"):
 		rest := strings.TrimPrefix(line, "[tool]")
 		rest = strings.TrimLeft(rest, " ")
-		return roleDotTool + sanitizeTerminalText(rest)
+		dot, styled := formatToolResultLine(rest)
+		return dot + styled
+	case strings.HasPrefix(line, "[status] "):
+		body := sanitizeTerminalText(strings.TrimPrefix(line, "[status] "))
+		return roleDotStatus + statusActiveStyle + body + panelReset
 	case strings.HasPrefix(line, "[system]"):
 		return roleDotSystem + sanitizeTerminalText(strings.TrimPrefix(line, "[system]"))
 	case strings.HasPrefix(line, sysPanelTitlePrefix):
@@ -80,11 +90,16 @@ func FormatTranscriptLineForDisplay(line string, width int) string {
 }
 
 const (
-	roleDotUser       = "\033[34m●\033[0m "
-	roleDotAssistant  = "\033[32m●\033[0m "
-	roleDotReasoning  = "\033[33m●\033[0m "
-	roleDotTool       = "\033[36m●\033[0m "
-	roleDotSystem     = "\033[90m●\033[0m "
+	roleDotUser          = "\033[34m●\033[0m "
+	roleDotAssistant     = "\033[32m●\033[0m "
+	roleDotReasoning     = "\033[33m●\033[0m "
+	roleDotTool          = "\033[36m●\033[0m "
+	roleDotToolPending   = "\033[33m●\033[0m "
+	roleDotToolSuccess   = "\033[32m●\033[0m "
+	roleDotToolFailure   = "\033[31m●\033[0m "
+	roleDotSystem        = "\033[90m●\033[0m "
+	roleDotStatus        = "\033[33;5m●\033[0m "
+	statusActiveStyle    = "\033[33m"
 
 	panelTitleStyle   = "\033[1;36m"
 	panelSectionStyle = "\033[36m"
@@ -94,8 +109,38 @@ const (
 	panelDimStyle     = "\033[90m"
 	panelReset        = "\033[0m"
 
+	toolPendingStyle  = "\033[33m"
+	toolPreviewStyle  = "\033[90m"
+	toolCodeStyle     = "\033[37m"
+	toolDimStyle      = "\033[90m"
+	toolPreviewIndent = "  "
+	toolDetailIndent  = "     "
+	toolCodeIndent    = "  "
+
 	panelBodyIndent = "  "
 )
+
+func metaLineBody(line, prefix string) string {
+	body := strings.TrimPrefix(line, prefix)
+	if i := strings.Index(body, "] "); i >= 0 {
+		return body[i+2:]
+	}
+	return body
+}
+
+func formatToolResultLine(rest string) (dot, styled string) {
+	rest = sanitizeTerminalText(rest)
+	switch {
+	case strings.HasPrefix(rest, "✓"):
+		return roleDotToolSuccess, rest
+	case strings.HasPrefix(rest, "✗"):
+		return roleDotToolFailure, rest
+	case strings.HasPrefix(rest, "▶"):
+		return roleDotToolPending, toolPendingStyle + rest + panelReset
+	default:
+		return roleDotTool, rest
+	}
+}
 
 func formatRoleLineWithUsage(prefix, body, usagePlain string, width int) string {
 	if usagePlain == "" {

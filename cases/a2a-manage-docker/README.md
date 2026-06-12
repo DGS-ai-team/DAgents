@@ -45,13 +45,36 @@ docker compose up --build -d
 确认 `.env` 中 `LLM_MOCK=false` 且 `LLM_API_KEY` 已填写后再启动。  
 Manage 控制台（查看已注册 Node）：<http://127.0.0.1:8020/console/>
 
+`docker compose up` 会在 Node 就绪后自动运行 **`init-groups`** 服务，为 **node-a / node-b** 分配默认分组 **`a2a-lab`**（可通过环境变量 `DISCOVERY_GROUP` 覆盖）。
+
 停止环境：
 
 ```bash
 docker compose down
 ```
 
-### 1.3 修改 `.env` 后必须重建容器
+### 1.3 discovery_group（A2A 必需）
+
+Manage **不会**在 Node 注册时自动填 `discovery_group`；该字段由 Manage Console 或 API 分配。
+
+| 能力 | 规则 |
+|------|------|
+| **`agent_discover`** | 按分组过滤；默认使用 config 中 `manage.registration.team`（本案例为 `a2a-lab`） |
+| **`agent_invoke`** | caller 与 target **须至少共享一个** `discovery_group`，否则 Manage 返回 `403 discovery_group_mismatch` |
+
+**Console 设置**：打开 <http://127.0.0.1:8020/console/> → 顶栏 **「discovery_group 分配」** 批量保存，或点 Node 行在抽屉内编辑。
+
+**命令行**（与 `init-groups` / `verify.sh` 相同）：
+
+```bash
+./scripts/assign-discovery-groups.sh
+# 或
+DISCOVERY_GROUP=a2a-lab MANAGE_URL=http://127.0.0.1:8020 ./scripts/assign-discovery-groups.sh
+```
+
+若跳过 `init-groups` 或未分配分组，`agent_discover` 将返回空列表，`agent_invoke` 将被拒绝（即使 Agent Card 配置了 `compliance_peer: node-a`）。
+
+### 1.4 修改 `.env` 后必须重建容器
 
 `.env` 仅在容器 **创建 / 启动** 时通过 `env_file` 注入；**正在运行的容器不会自动读取** 你刚改好的 API Key 或 `LLM_MOCK`。
 
@@ -117,7 +140,7 @@ go run ./client/cmd/dagents-client \
 
 若出现 `401` / `Authentication Fails`，检查本目录 `.env` 的 `LLM_API_KEY` 与 `LLM_MODEL` 是否有效，并按 [§1.3](#13-修改-env-后必须重建容器) 重建容器。
 
-> node-b 已接入 **`agent_invoke`** / **`agent_discover`** 工具：`agent_invoke` 向 **node-a** 发起合规咨询并等待 `result_text`（默认目标为 Agent Card `metadata.compliance_peer`）。
+> node-b 已接入 **`agent_invoke`** / **`agent_discover`** 工具：`agent_invoke` 向 **node-a** 发起合规咨询并等待 `result_text`（默认目标为 Agent Card `metadata.compliance_peer`）。**前提**：双方在 Manage 上已分配**相同**的 `discovery_group`（见 [§1.3](#13-discovery_groupa2a-必需)）。
 
 ### 3.2 合规咨询 Task · node-a LLM 回复（原样）
 

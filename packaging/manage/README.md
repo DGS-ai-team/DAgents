@@ -1,12 +1,12 @@
 # Manage Docker 镜像
 
-将 **Manage 统一控制面**（Registry + A2A Task + Console）打包为可发布镜像，供生产部署与 [A2A 联调案例](../../cases/a2a-manage-docker/) 复用。
+将 **Manage 统一控制面**（Registry + A2A Task + **Vue Console**）打包为可发布镜像，供生产部署与 [A2A 联调案例](../../cases/a2a-manage-docker/) 复用。镜像构建含 **Console 前端 `npm run build`** 多阶段步骤。
 
 ## 快速开始
 
 ```bash
 # 仓库根目录
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.0 .
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.1 .
 
 # 或使用 compose（在 packaging/manage/ 下）
 cp .env.example .env
@@ -37,8 +37,8 @@ docker compose up -d --build
 离线加载：
 
 ```bash
-docker load -i dagents-manage-0.3.0.tar.gz
-docker run -d --name manage -p 8020:8020 -v manage-data:/data dagents-manage:0.3.0
+docker load -i dagents-manage-0.3.1.tar.gz
+docker run -d --name manage -p 8020:8020 -v manage-data:/data dagents-manage:0.3.1
 ```
 
 ## 与 Node 联调

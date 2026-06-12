@@ -1,10 +1,7 @@
 # startup_scripts
 
-Register Center 启动脚本（开发/legacy 安装包）。
+历史开发用启动脚本目录。本地助手发布包内脚本见 **`packaging/agent-client/scripts/`**。
 
-| 路径 | 说明 |
+| 脚本 | 说明 |
 |------|------|
-| `linux/start_register_center.sh` | 启动 Register Center |
-| `windows/start_register_center.bat` | Windows 启动 Register Center |
-
-Agent 运行时请使用 Go Node：`go run ./node/cmd/dagents-node`。
+| （已移除） | 原 Register Center 启动脚本；请改用 **`python run_manage.py`** 或 Docker Manage |

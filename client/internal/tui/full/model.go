@@ -120,6 +120,9 @@ type model struct {
 
 	refreshDebounceUntil time.Time
 	submitContentSeen    bool
+	turnStartedAt        time.Time
+	stallWarnIssued      bool
+	sseTurnWarnIssued    bool
 
 	termWidth  int
 	termHeight int
@@ -218,7 +221,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.scheduleActiveTickIfNeeded()
 
 	case statusTickMsg:
-		if len(m.statusMgr.Kinds()) > 0 || m.toolPending.Len() > 0 {
+		m.checkTurnWaitWarnings()
+		if len(m.statusMgr.Kinds()) > 0 || m.toolPending.Len() > 0 || m.turn.Awaiting() {
 			m.syncViewport()
 			return m, m.scheduleActiveTickIfNeeded()
 		}
@@ -241,9 +245,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case streamErrMsg:
-		m.transcript.Add("[system] " + msg.line)
+		line := msg.line
+		if m.turn.Awaiting() {
+			line = "SSE 断开 · turn 进行中 · " + line
+			if !m.sseTurnWarnIssued {
+				m.sseTurnWarnIssued = true
+				line += "（重连前可能收不到 Agent 输出）"
+			}
+		}
+		m.transcript.Add("[system] " + line)
 		m.syncViewport()
-		return m, nil
+		return m, m.scheduleActiveTickIfNeeded()
 
 	case pendingHITLChangedMsg:
 		m.showNextHITLIfIdle()
@@ -315,6 +327,7 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errLine = err.Error()
 			} else {
 				m.statusLine = "已请求取消 turn"
+				m.resetTurnWaitUI()
 				m.turn.FinishTurn()
 			}
 		}
@@ -344,21 +357,25 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.invalidateHITLForUserMessage()
 		m.resetUsageStrip()
 		m.submitContentSeen = false
+		m.stallWarnIssued = false
+		m.sseTurnWarnIssued = false
 		m.transcript.AddBlockGapIfNeeded()
 		m.transcript.Add("[user] " + text)
-		m.syncViewportFollow()
 		m.turn.BeginSubmit()
 		if !m.submitContentSeen {
 			m.statusMgr.Start("prefilling")
 		}
+		m.syncViewportFollow()
 		if err := m.client.SubmitMessage(m.ctx, m.currentSession(), text); err != nil {
 			m.turn.FinishTurn()
+			m.statusMgr.FinishAll()
+			m.resetTurnWaitUI()
 			m.errLine = err.Error()
-		} else {
-			m.statusLine = "等待 Agent 回复…"
-			m.errLine = ""
+			return m, nil
 		}
-		return m, nil
+		m.turnStartedAt = time.Now()
+		m.errLine = ""
+		return m, m.scheduleActiveTickIfNeeded()
 	default:
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
@@ -442,7 +459,7 @@ func (m *model) renderStatusBar() string {
 		left += " · " + m.statusLine
 	}
 	if m.turn.Awaiting() && m.mode == modeChat && !m.contextMode && !m.policyMode {
-		left += " · 等待回复"
+		left += m.renderTurnWaitStatus()
 	}
 	if len(m.hitlQueue) > 0 {
 		left += " · 审批/询问"
@@ -684,13 +701,64 @@ func (m *model) notifyViewportRefresh() {
 	}
 }
 
+func (m *model) resetTurnWaitUI() {
+	m.turnStartedAt = time.Time{}
+	m.stallWarnIssued = false
+	m.sseTurnWarnIssued = false
+}
+
 func (m *model) scheduleActiveTickIfNeeded() tea.Cmd {
-	if len(m.statusMgr.Kinds()) == 0 && m.toolPending.Len() == 0 {
+	if len(m.statusMgr.Kinds()) == 0 && m.toolPending.Len() == 0 && !m.turn.Awaiting() {
 		return nil
 	}
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+	interval := time.Second
+	if m.toolPending.Len() > 0 {
+		interval = 500 * time.Millisecond
+	}
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return statusTickMsg{}
 	})
+}
+
+func (m *model) renderTurnWaitStatus() string {
+	elapsed := 0
+	if !m.turnStartedAt.IsZero() {
+		elapsed = int(time.Since(m.turnStartedAt).Seconds())
+	}
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	if !m.sseConnected {
+		return style.Render(fmt.Sprintf(" · ⚠ 连接中断 %ds", elapsed))
+	}
+	if phase := m.statusMgr.ActivePhaseLabel(); phase != "" {
+		return style.Render(fmt.Sprintf(" · %s %ds", phase, elapsed))
+	}
+	if m.submitContentSeen {
+		return style.Render(fmt.Sprintf(" · 生成中 %ds", elapsed))
+	}
+	return style.Render(fmt.Sprintf(" · 等待响应 %ds", elapsed))
+}
+
+func (m *model) checkTurnWaitWarnings() {
+	if !m.turn.Awaiting() || m.turnStartedAt.IsZero() {
+		return
+	}
+	elapsed := time.Since(m.turnStartedAt)
+	if m.stallWarnIssued {
+		return
+	}
+	if !m.sseConnected && elapsed >= 8*time.Second {
+		m.stallWarnIssued = true
+		secs := int(elapsed.Seconds())
+		m.transcript.Add(fmt.Sprintf("[system] 已等待 %ds 且 SSE 未连接，可能无法收到 Agent 输出；请检查 Node 或按 Esc 取消", secs))
+		m.syncViewportFollow()
+		return
+	}
+	if m.sseConnected && !m.submitContentSeen && elapsed >= 45*time.Second {
+		m.stallWarnIssued = true
+		secs := int(elapsed.Seconds())
+		m.transcript.Add(fmt.Sprintf("[system] 已等待 %ds，Node 仍未返回内容；若异常可按 Esc 取消", secs))
+		m.syncViewportFollow()
+	}
 }
 
 func (m *model) renderApprovalPrompt() string {

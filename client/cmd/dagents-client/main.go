@@ -13,6 +13,7 @@ import (
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/client/internal/probe"
 	"github.com/DGS-ai-team/DAgents/client/internal/tui"
+	"github.com/DGS-ai-team/DAgents/client/internal/version"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -21,6 +22,10 @@ func main() {
 }
 
 func run(args []string) int {
+	if len(args) > 0 && (args[0] == "version" || args[0] == "-version" || args[0] == "--version") {
+		fmt.Println(version.Version)
+		return 0
+	}
 	fs := flag.NewFlagSet("dagents-client", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to config.yaml (optional; default: DAGENTS_CONFIG or packaging/agent-client/config.yaml)")
 	if err := fs.Parse(args); err != nil {

@@ -1,5 +1,5 @@
 # 在 packaging/manage/ 下：docker compose up -d
-# 或指定版本：MANAGE_IMAGE=dagents-manage:0.3.0 docker compose up -d
+# 或指定版本：MANAGE_IMAGE=dagents-manage:0.3.1 docker compose up -d
 services:
   manage:
     image: ${MANAGE_IMAGE:-dagents-manage:latest}

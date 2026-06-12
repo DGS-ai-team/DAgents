@@ -1,5 +1,5 @@
 """
-本地一键启动 Register Center（开发联调）。
+本地一键启动 Manage（开发联调）。
 
 用法（在 DAgents 根目录）:
   python run_dev_stack.py
@@ -28,17 +28,17 @@ class ManagedProcess:
 
 
 def parse_args() -> argparse.Namespace:
-    """解析命令行；当前仅启动 Register Center。"""
-    return argparse.ArgumentParser(description="DAgents Register Center 开发启动器").parse_args()
+    """解析命令行；当前仅启动 Manage。"""
+    return argparse.ArgumentParser(description="DAgents Manage 开发启动器").parse_args()
 
 
 def start_processes(root: Path) -> list[ManagedProcess]:
-    """启动 Register Center 子进程。"""
-    cmd = [sys.executable, "run_register_center.py"]
-    print(f"[dev-stack] starting register_center: {shlex.join(cmd)}")
+    """启动 Manage 子进程。"""
+    cmd = [sys.executable, "run_manage.py"]
+    print(f"[dev-stack] starting manage: {shlex.join(cmd)}")
     popen = subprocess.Popen(cmd, cwd=str(root), text=True, stdout=None, stderr=None)
-    print(f"[dev-stack] register_center pid={popen.pid}")
-    return [ManagedProcess(name="register_center", command=cmd, popen=popen)]
+    print(f"[dev-stack] manage pid={popen.pid}")
+    return [ManagedProcess(name="manage", command=cmd, popen=popen)]
 
 
 def stop_processes(processes: list[ManagedProcess]) -> None:
@@ -73,13 +73,13 @@ def watch_loop(processes: list[ManagedProcess]) -> int:
 
 
 def main() -> int:
-    """加载 .env、启动 Register Center 并监控。"""
+    """加载 .env、启动 Manage 并监控。"""
     root = Path(__file__).resolve().parent
     load_env(root)
     processes: list[ManagedProcess] = []
     try:
         processes = start_processes(root)
-        print("[dev-stack] Register Center started. Press Ctrl+C to stop.")
+        print("[dev-stack] Manage started. Press Ctrl+C to stop.")
         return watch_loop(processes)
     except Exception as exc:
         print(f"[dev-stack] failed: {exc}")

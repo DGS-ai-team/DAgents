@@ -1,6 +1,6 @@
 # 架构总览
 
-DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python 侧保留 **Textual TUI Client**（`app/cli/`）与 **Register Center**（`register_center/`）。
+DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python 侧保留 **Textual TUI Client**（`app/cli/`）与 **Manage 控制面**（`manage/`）。
 
 ## 决策树
 
@@ -11,17 +11,16 @@ DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python �
                dagents chat / dagents-client tui
 
 需要 Agent 登记 / 跨 Agent 协作？
-  └─ 新：**python run_manage.py**（默认 :8020）→ `manage/README.md`
-     过渡：python run_register_center.py（:8010，M5 删除）
+  └─ **python run_manage.py**（默认 :8020）或 Docker Manage → `manage/README.md`
 ```
 
 | 维度 | Go 本地助手栈 | Python 辅助组件 |
 |------|---------------|-----------------|
 | **Agent 运行时** | **`node/`（Go）** | 无（已移除 Python FastAPI Agent API） |
 | **终端 Client** | Textual（`app/cli/`）+ Go TUI（`client/`） | — |
-| **配置** | `packaging/agent-client/config.yaml` | Register Center 环境变量 |
+| **配置** | `packaging/agent-client/config.yaml` | Manage 环境变量 / Docker compose |
 | **会话持久化** | Node SQLite（`.runtime/memory/sessions.db`） | — |
-| **A2A 控制面** | Manage（M2 inbox）/ 过渡 Register Center relay | — |
+| **A2A 控制面** | Manage（Registry + Task inbox） | — |
 
 ## 文档索引
 
@@ -31,7 +30,6 @@ DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python �
 | 本地助手联调 | [local-assistant.md](./local-assistant.md) |
 | Agent Node HTTP/SSE | [agent-node-api.md](./agent-node-api.md) |
 | 同包配置与安装 | [client-packaging.md](./client-packaging.md) |
-| Register Center | [../../register_center/README.md](../../register_center/README.md)（**过渡，M5 移除**） |
 | Manage | [../../manage/README.md](../../manage/README.md) |
 | 三组件远期模型 | [../design/three-component-model.md](../design/three-component-model.md) |
 | AC 实施状态 | [../design/agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md) |

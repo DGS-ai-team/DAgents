@@ -29,7 +29,6 @@ goto cli_exit
 if /I "%~1"=="chat" shift & goto run_cli_chat
 if /I "%~1"=="tui" shift & goto run_client_tui
 if /I "%~1"=="node" shift & goto run_node
-if /I "%~1"=="register-center" shift & goto run_register_center
 if /I "%~1"=="doctor" goto doctor
 if /I "%~1"=="version" goto version
 goto run_cli_pass
@@ -276,11 +275,6 @@ if exist "%DAGENTS_HOME%\.runtime\logs\node.log" (
 )
 exit /b 1
 
-:run_register_center
-if not exist "bin\dagents_register_center.exe" goto missing_register_center
-bin\dagents_register_center.exe %*
-goto cli_exit
-
 :missing_cli
 echo [dagents] bin\dagents-cli.exe was not found in "%DAGENTS_HOME%"
 popd >nul
@@ -296,11 +290,6 @@ echo [dagents] bin\dagents-node.exe was not found in "%DAGENTS_HOME%"
 popd >nul
 exit /b 1
 
-:missing_register_center
-echo [dagents] bin\dagents_register_center.exe was not found in "%DAGENTS_HOME%"
-popd >nul
-exit /b 1
-
 :cli_exit
 set "EXIT_CODE=%ERRORLEVEL%"
 popd >nul
@@ -309,7 +298,7 @@ exit /b %EXIT_CODE%
 :doctor
 echo DAgents installation: %DAGENTS_HOME%
 set "OK=1"
-for %%F in (bin\dagents-node.exe bin\dagents-client.exe bin\dagents-cli.exe bin\dagents_register_center.exe) do (
+for %%F in (bin\dagents-node.exe bin\dagents-client.exe bin\dagents-cli.exe) do (
   if exist "%%F" (echo [ok] %%F) else (echo [missing] %%F & set "OK=0")
 )
 if exist "config.yaml" (echo [ok] config.yaml) else (echo [info] config.yaml not found; copy config.example.yaml config.yaml)
@@ -319,7 +308,23 @@ popd >nul
 exit /b 1
 
 :version
-echo DAgents Local Assistant
+set "APP_VER=unknown"
+if exist "VERSION" (
+  set /p APP_VER=<VERSION
+)
+if /I "!APP_VER!"=="unknown" if exist "bin\dagents-cli.exe" (
+  for /f "tokens=2" %%V in ('bin\dagents-cli.exe version 2^>nul') do set "APP_VER=%%V"
+)
+echo DAgents Local Assistant !APP_VER!
+if exist "bin\dagents-node.exe" (
+  for /f "delims=" %%V in ('bin\dagents-node.exe version 2^>nul') do echo   dagents-node: %%V
+)
+if exist "bin\dagents-client.exe" (
+  for /f "delims=" %%V in ('bin\dagents-client.exe version 2^>nul') do echo   dagents-client: %%V
+)
+if exist "bin\dagents-cli.exe" (
+  for /f "tokens=2" %%V in ('bin\dagents-cli.exe version 2^>nul') do echo   dagents-cli: %%V
+)
 popd >nul
 exit /b 0
 
@@ -332,7 +337,6 @@ echo   dagents node shutdown           Stop background Node
 echo   dagents node restart            Stop then start Node in background
 echo   dagents node --foreground       Start Node in foreground (blocks terminal)
 echo   dagents node --no-wait          Background start without waiting for probe
-echo   dagents register-center         Start Register Center (optional A2A)
 echo   dagents doctor                  Check installed files
 echo   dagents version                 Print version information
 echo.
@@ -343,7 +347,7 @@ echo   --no-wait      Background start without waiting for probe (--background a
 echo.
 echo Config:
 echo   Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
-echo   Register Center only: copy .env.example to .env for REGISTER_CENTER_* settings.
+echo   A2A / Registry: deploy Manage separately (packaging/manage/README.md).
 echo   CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
 popd >nul
 exit /b 0

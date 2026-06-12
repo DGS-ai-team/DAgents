@@ -6,8 +6,9 @@
 
 | 名称 | 含义 |
 |------|------|
-| **`dagents-local-assistant-*.{tar.gz,zip}`** | **Go Node + 双 TUI + Register Center**：`dagents-node`、`dagents-client`、`dagents-cli`、`dagents_register_center` + 配置、`.runtime/`、**`scripts/`**（启动与 systemd/计划任务注册） |
-| **`dagents-backend-*`**（legacy） | 旧 Python 全栈后端（api + register_center + cli）；**Release CI 已不再构建** |
+| **`dagents-local-assistant-*.{tar.gz,zip}`** | **Go Node + 双 TUI**：`dagents-node`、`dagents-client`、`dagents-cli` + 配置、`.runtime/`、**`scripts/`**（启动与 systemd/计划任务注册） |
+| **`dagents-manage-*.tar.gz`** | Manage Docker 镜像导出（Registry + A2A + Console） |
+| **`dagents-backend-*`**（legacy） | 旧 Python 全栈后端；**Release CI 已不再构建** |
 | **`dagents-cli`** | Textual TUI 单文件二进制（PyInstaller 产物名） |
 
 本地/CI 打包：
@@ -21,7 +22,7 @@ scripts/package_local_assistant.sh
 # dist/dagents-local-assistant-windows-amd64-0.2.2.zip
 ```
 
-Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` / `dagents_register_center` 在 **rockylinux:8**（glibc 2.28）容器内 PyInstaller；Go 二进制 **CGO_ENABLED=0** 静态编译。
+Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**（glibc 2.28）容器内 PyInstaller；Go 二进制 **CGO_ENABLED=0** 静态编译。
 
 | 工作流 | 触发 | 产物 |
 |--------|------|------|

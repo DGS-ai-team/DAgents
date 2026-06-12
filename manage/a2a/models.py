@@ -94,6 +94,13 @@ class TaskGetResponse(BaseModel):
     task: TaskRecord
 
 
+class AdminTaskListResponse(BaseModel):
+    tasks: list[TaskRecord]
+    total: int
+    limit: int
+    offset: int
+
+
 class TaskCallerResumeRequest(BaseModel):
     caller_agent_id: str = Field(min_length=1)
     resume_value: dict[str, object] = Field(default_factory=dict)

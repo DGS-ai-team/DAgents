@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.3.0-20260611-green" alt="v0.3.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.3.1-green" alt="v0.3.1"></a>
   <a href="go.work"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
   <a href="requirements.txt"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
@@ -26,7 +26,7 @@
 
 ## 简介
 
-**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.3.0**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度；**Manage 控制面** 提供 Registry 与 **A2A Task**（可 Docker 部署）。
+**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.3.1**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度；**Manage 控制面** 提供 Registry、**A2A Task** 与 **Vue Console**（可 Docker 部署）。
 
 终端交互提供 **两种 Client**，共用一份 YAML 配置，按环境任选：
 
@@ -37,7 +37,7 @@
 | **Go plain REPL** | 极老 SSH / RHEL6 / `TERM=dumb` | `dagents-client tui --plain` |
 | **Web UI（DAgentsUI）** | 浏览器 · **当前未适配 v0.2.0** | 暂勿用于 Go Node 联调 |
 
-另含 **Register Center**（Python）：Agent 登记与 A2A relay/broadcast 控制面，**不是** Agent 运行时。
+另含 **Manage 控制面**（Python / Docker）：Registry、A2A Task、Console；A2A 协作请用 Manage，不再随本地助手包分发 Register Center。
 
 > **v0.2.0 说明**：原 Python FastAPI Agent API（`run_agent_api.py`）已从仓库移除。详见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -50,9 +50,10 @@
 - **LLM Turn 编排** — OpenAI 兼容 API；流式 assistant / reasoning / tool 事件；流式 cancel 保留部分 assistant 与合法 tool 序列
 - **LLM 厂商适配** — `llm.provider`（`openai` / `deepseek`）；`MessageAdapter` 统一出站序列化与 `reasoning_content` 处理
 - **内置工具** — `bash_run`（可配置 GBK/UTF-8 解码）、文件读写与替换、skills 加载、trigger 管理、**临时子 Agent**
-- **HITL** — 工具审批、`ask_user_information`；Client 侧非阻塞队列 + resume
+- **HITL** — 工具审批、`ask_user_information`；Client 侧非阻塞队列 + resume（**Esc** 取消在途 turn；无 `/cancel` 斜杠命令）
+- **A2A（Manage M2）** — Node 注册 Manage、**`agent_invoke` / `agent_discover`**；Task inbox long poll；案例见 [`cases/a2a-manage-docker/`](cases/a2a-manage-docker/)
 - **Triggers** — `interval`、`fire_at`、日历 **`schedule`**（含 cmd 门控）
-- **Session** — 多会话、SQLite 持久化、context 压缩（silent / blocking）；TUI **`/compress`** 手动压缩；**`/context`** 含 token 估算与 **system prompt**
+- **Session** — 多会话、SQLite 持久化、context 压缩（silent / blocking）；TUI **`/compress`** 手动压缩；**`/context`** 含 token 估算与 **system prompt**；**`/switch` / `/new`** 切换 session
 - **Policy** — `.runtime/policy/*.approval.txt` 本地审批策略
 - **可观测** — SSE `usage`（prompt/completion、cache hit、`reasoning_tokens`）；结构化 stderr 日志
 - **同包发布** — Release 资产 `dagents-local-assistant-*`（Linux tarball / Windows zip / **Windows 安装包**）；**`dagents chat|tui --withnode`** 自动后台 Node；第三方 CLI 见 **[推荐工具清单](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)**（如 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)，需自行安装）
@@ -72,13 +73,13 @@ flowchart LR
     NODE["Agent Node (Go)<br/>HTTP + SSE · SQLite"]
   end
 
-  subgraph optional [可选]
-    RC["Register Center<br/>A2A 登记 / relay"]
+  subgraph optional [可选控制面]
+    MG["Manage<br/>Registry + A2A Task"]
   end
 
   PY -->|127.0.0.1:18765| NODE
   GO -->|127.0.0.1:18765| NODE
-  RC -.->|relay / broadcast| NODE
+  MG -.->|注册 / inbox| NODE
 ```
 
 > **Web UI**：图中未包含 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI)；该前端仍对接已移除的 Python API，**与当前 Go Node 不兼容**。
@@ -94,7 +95,7 @@ flowchart LR
 | 组件 | 要求 |
 |------|------|
 | **Go** | 1.25+（见 [`go.work`](go.work)） |
-| **Python**（Textual TUI / Register Center） | 3.11+；CI 验证 3.13 |
+| **Python**（Textual TUI / Manage） | 3.11+；CI 验证 3.13 |
 | **LLM** | 默认 `llm.mock: true`，**无需 API Key** 即可联调 |
 
 ### 1. 克隆与配置
@@ -164,6 +165,7 @@ dagents-client tui sess-xxxxxxxx
 | `fs_root` | 工作区根（默认 `./.runtime`）；`data/`、`memory/`、`skills/` 等子路径均相对此根硬编码 |
 | `triggers.enabled` | 触发器调度开关 |
 | `child_agents.enabled` | 临时子 Agent 开关 |
+| `manage.enabled` | 向 Manage 注册并启用 A2A inbox（见 [manage/README.md](manage/README.md)） |
 
 完整示例：[packaging/agent-client/config.example.yaml](packaging/agent-client/config.example.yaml)
 
@@ -179,10 +181,9 @@ dagents-client tui sess-xxxxxxxx
 dagents chat [--config PATH] [--session ID] [--show-reasoning]
 dagents show session [--config PATH]
 dagents delete session SESSION_ID [--config PATH]
-dagents register-center          # 启动 Register Center
 ```
 
-TUI 内常用：`/help` `/status` `/context` `/skill` `/children` `/clear` `/cancel` `/exit`
+TUI 内常用：`/help` `/status` `/context` `/sessions` `/switch` `/new` `/skill` `/children` `/reasoning on|off` `/clear` `/exit`（**Esc** 取消在途 turn）
 
 ### Go `dagents-client`
 
@@ -192,22 +193,23 @@ dagents-client tui [--plain] [--show-reasoning] [session_id]
 dagents-client chat "你好"        # 一次性非交互
 ```
 
-TUI 内常用：`/help` `/status` `/context` `/skill` `/children` `/tools verbose|brief` `/reasoning on|off`
+TUI 内常用：`/help` `/status` `/context` `/sessions` `/switch` `/new` `/skill` `/children` `/tools expand|collapse` `/reasoning on|off` `/clear` `/quit`（**Esc** 取消在途 turn）
 
 ---
 
-## Register Center（可选）
+## Manage 控制面（推荐）
 
-Agent 登记、分组发现、消息 **broadcast** / **relay**（A2A 控制面）。
+**Registry**、**A2A Task inbox** 与 **Console**（Node 目录、A2A Inbox 只读列表、各 Node session 观测）。默认 **`0.0.0.0:8020`**。
 
 ```bash
 pip install -r requirements.txt
-python run_register_center.py     # 默认 0.0.0.0:8010
-# 或
-python run_dev_stack.py
+python run_manage.py
+# Console: http://127.0.0.1:8020/console/
 ```
 
-文档：[register_center/README.md](register_center/README.md)
+Docker 部署与 Release 镜像导出见 [`packaging/manage/README.md`](packaging/manage/README.md)。双 Node 联调案例：[`cases/a2a-manage-docker/`](cases/a2a-manage-docker/README.md)。
+
+Node 侧在 `config.yaml` 启用 `manage.enabled` 后自动注册与 inbox poll。详见 [manage/README.md](manage/README.md)。
 
 ---
 
@@ -219,16 +221,19 @@ DAgents/
 ├── client/                  # Go TUI Client（full + plain REPL）
 ├── shared/config/           # Node / Client 共用 YAML 解析
 ├── app/cli/                 # Python Textual TUI
-├── register_center/         # Register Center（FastAPI）
+├── manage/                  # Manage 控制面（Registry + A2A + Console）
+├── cases/                   # 落地案例（CentOS7 导览、A2A Manage Docker 等）
 ├── packaging/
 │   ├── agent-client/        # config.example.yaml、启动脚本
+│   ├── manage/              # Manage Docker / compose
 │   ├── linux/               # install.sh、分发脚本
 │   └── windows/             # Inno Setup 安装包模板
 ├── docs/                    # 架构与 API 文档
-├── tests/                   # Python CLI / RC 单测
+├── tests/                   # Python CLI / Manage 单测
 ├── go.work
 ├── requirements.txt
-└── run_register_center.py
+├── run_manage.py
+└── run_dev_stack.py         # 开发：仅启动 Manage
 ```
 
 各目录 [`README.md`](node/README.md) / [`REFERENCE.md`](node/REFERENCE.md) 随源码维护。
@@ -241,7 +246,7 @@ DAgents/
 # Go 全量单测（与 CI go-ac 一致）
 go test ./node/... ./client/... ./shared/config/...
 
-# Python CLI / Register Center
+# Python CLI / Manage
 pip install -r requirements.txt
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
@@ -258,7 +263,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 ## 预编译包
 
-GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Windows zip、**Windows `.exe` 安装包**）：
+GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Windows zip、**Windows `.exe` 安装包**）及 **`dagents-manage-*`**（Manage Docker 镜像 tar.gz）：
 
 | 二进制 | 说明 |
 |--------|------|
@@ -292,15 +297,17 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 | 文档 | 内容 |
 |------|------|
 | [docs/README.md](docs/README.md) | 文档索引 |
-| [docs/architecture/overview.md](docs/architecture/overview.md) | 架构总览 |
+| [docs/architecture/overview.md](docs/architecture/overview.md) | 架构总览（Manage 控制面） |
 | [docs/architecture/go-node-internals.md](docs/architecture/go-node-internals.md) | Go Node 内部结构（runtime / queue / turn / llm） |
+| [manage/README.md](manage/README.md) | Manage 控制面 API 与 Console |
 | [docs/architecture/local-assistant.md](docs/architecture/local-assistant.md) | 本地助手联调 |
 | [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md) | Go Node HTTP/SSE 契约 |
 | [docs/architecture/child-agent-tools.md](docs/architecture/child-agent-tools.md) | 子 Agent 工具 |
 | [docs/architecture/go-node-compatibility.md](docs/architecture/go-node-compatibility.md) | 老旧 OS / 静态构建 |
+| [packaging/manage/README.md](packaging/manage/README.md) | Manage Docker 部署 |
 | [packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md) | 推荐 CLI 工具（如 OfficeCLI，需自行安装） |
-| [cases/README.md](cases/README.md) | 落地案例（CentOS 7 特性导览 + Docker） |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.2.17**） |
+| [cases/README.md](cases/README.md) | 落地案例（CentOS 7 特性导览 + A2A Manage Docker） |
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.3.1**） |
 | [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) | Web 前端（**独立仓库，尚未适配 v0.2.0 / Go Node API**） |
 
 > 已移除的 Python Agent API 文档见 [docs/archive/python-agent-runtime/](docs/archive/python-agent-runtime/)；**DAgentsUI 当前仍依赖旧 HTTP 契约**。
@@ -311,7 +318,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | **v0.2.17**（2026-06-10，0.x 预览；tag `v0.2.17`） |
+| **当前版本** | **v0.3.1**（2026-06-11，0.x 预览；tag `v0.3.1`） |
 | **Go** | 1.25+（`node` / `client` / `shared/config`） |
 | **Python** | 3.11+ 可运行；CI 验证 3.13 |
 | **破坏性变更** | 1.0 前仍可能出现；见 [CHANGELOG.md](CHANGELOG.md) |

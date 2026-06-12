@@ -60,7 +60,6 @@ Python 单元测试目录；Go 测试在 `node/`、`client/`、`shared/config/` 
 
 | 文件 | 说明 |
 |------|------|
-| `test_register_center_security.py` | 持久化、shared token、relay resume |
 | `test_cli_daemon.py` | `dagents serve` 守护进程（11 例，CI discover） |
 | `test_cli_session_controller.py` | session 控制器渲染 |
 | `test_cli_child_agent.py` | 子 Agent scope / tracker / SSE 过滤 |

@@ -39,7 +39,6 @@ Name: "{group}\Start Agent Node (foreground)"; Filename: "{app}\dagents.cmd"; Pa
 Name: "{group}\Chat (Textual TUI)"; Filename: "{app}\dagents.cmd"; Parameters: "chat --withnode"; WorkingDir: "{app}"
 Name: "{group}\TUI (Go full-screen)"; Filename: "{app}\dagents.cmd"; Parameters: "tui --withnode"; WorkingDir: "{app}"
 Name: "{group}\REPL (Go line mode)"; Filename: "{app}\dagents.cmd"; Parameters: "tui --withnode --plain"; WorkingDir: "{app}"
-Name: "{group}\Register Center"; Filename: "{app}\dagents.cmd"; Parameters: "register-center"; WorkingDir: "{app}"
 
 [Registry]
 

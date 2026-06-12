@@ -31,6 +31,15 @@ def _register_agent(client: TestClient, agent_id: str, *, expose: bool = True) -
     )
 
 
+def _assign_groups(client: TestClient, agent_id: str, groups: list[str] | None = None) -> None:
+    payload = {"discovery_group": groups or ["default-lab"]}
+    resp = client.patch(
+        f"/v1/registry/agents/{agent_id}/groups",
+        json=payload,
+    )
+    assert resp.status_code == 200, resp.text
+
+
 class ManageA2ATests(unittest.TestCase):
     def test_task_create_inbox_reply_flow(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -50,6 +59,8 @@ class ManageA2ATests(unittest.TestCase):
             with TestClient(app) as client:
                 _register_agent(client, "caller-01")
                 _register_agent(client, "callee-01")
+                _assign_groups(client, "caller-01")
+                _assign_groups(client, "callee-01")
 
                 created = client.post(
                     "/v1/a2a/tasks",
@@ -148,6 +159,8 @@ class ManageA2ATests(unittest.TestCase):
             with TestClient(app) as client:
                 _register_agent(client, "caller-01")
                 _register_agent(client, "callee-01")
+                _assign_groups(client, "caller-01")
+                _assign_groups(client, "callee-01")
                 created = client.post(
                     "/v1/a2a/tasks",
                     json={
@@ -225,6 +238,34 @@ class ManageA2ATests(unittest.TestCase):
                 )
                 self.assertEqual(done.json()["status"], "completed")
 
+    def test_create_rejects_discovery_group_mismatch(self) -> None:
+        app = create_app()
+        with TestClient(app) as client:
+            _register_agent(client, "caller-01")
+            _register_agent(client, "callee-01")
+            _assign_groups(client, "caller-01", ["ops"])
+            _assign_groups(client, "callee-01", ["staging"])
+            resp = client.post(
+                "/v1/a2a/tasks",
+                json={"from_agent_id": "caller-01", "to_agent_id": "callee-01", "content": "x"},
+                headers={"x-dagents-agent-id": "caller-01"},
+            )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["detail"], "discovery_group_mismatch")
+
+    def test_create_rejects_empty_discovery_group(self) -> None:
+        app = create_app()
+        with TestClient(app) as client:
+            _register_agent(client, "caller-01")
+            _register_agent(client, "callee-01")
+            resp = client.post(
+                "/v1/a2a/tasks",
+                json={"from_agent_id": "caller-01", "to_agent_id": "callee-01", "content": "x"},
+                headers={"x-dagents-agent-id": "caller-01"},
+            )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["detail"], "caller_discovery_group_empty")
+
     def test_create_rejects_hidden_target(self) -> None:
         app = create_app()
         with TestClient(app) as client:
@@ -287,6 +328,8 @@ class ManageA2ATests(unittest.TestCase):
             _register_agent(client, "caller-01")
             _register_agent(client, "callee-01")
             _register_agent(client, "stranger-01")
+            _assign_groups(client, "caller-01")
+            _assign_groups(client, "callee-01")
             created = client.post(
                 "/v1/a2a/tasks",
                 json={"from_agent_id": "caller-01", "to_agent_id": "callee-01", "content": "x"},
@@ -305,6 +348,8 @@ class ManageA2ATests(unittest.TestCase):
         with TestClient(app) as client:
             _register_agent(client, "caller-01")
             _register_agent(client, "callee-01")
+            _assign_groups(client, "caller-01")
+            _assign_groups(client, "callee-01")
             created = client.post(
                 "/v1/a2a/tasks",
                 json={"from_agent_id": "caller-01", "to_agent_id": "callee-01", "content": "x"},
@@ -324,6 +369,8 @@ class ManageA2ATests(unittest.TestCase):
         with TestClient(app) as client:
             _register_agent(client, "caller-01")
             _register_agent(client, "callee-01")
+            _assign_groups(client, "caller-01")
+            _assign_groups(client, "callee-01")
             created = client.post(
                 "/v1/a2a/tasks",
                 json={"from_agent_id": "caller-01", "to_agent_id": "callee-01", "content": "x"},
@@ -355,6 +402,8 @@ class ManageA2ATests(unittest.TestCase):
         with TestClient(app) as client:
             _register_agent(client, "caller-01")
             _register_agent(client, "callee-01")
+            _assign_groups(client, "caller-01")
+            _assign_groups(client, "callee-01")
             created = client.post(
                 "/v1/a2a/tasks",
                 json={"from_agent_id": "caller-01", "to_agent_id": "callee-01", "content": "x"},
@@ -409,6 +458,8 @@ class ManageA2AInboxEfficiencyTests(unittest.TestCase):
         with TestClient(app) as client:
             _register_agent(client, "caller-01")
             _register_agent(client, "callee-01")
+            _assign_groups(client, "caller-01")
+            _assign_groups(client, "callee-01")
             client.post(
                 "/v1/a2a/tasks",
                 json={

@@ -134,6 +134,37 @@ class A2ATaskStore:
                 return None
             return TaskRecord(**stored.model_dump(mode="python"))
 
+    def list_tasks(
+        self,
+        *,
+        to_agent_id: str | None = None,
+        from_agent_id: str | None = None,
+        status: TaskStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[TaskRecord], int]:
+        """只读列举 Task（不 deliver）；按 created_at 降序。"""
+        to_filter = (to_agent_id or "").strip()
+        from_filter = (from_agent_id or "").strip()
+        limit = max(1, min(200, limit))
+        offset = max(0, offset)
+        with self._lock:
+            self._expire_due_locked()
+            rows: list[TaskStoredRecord] = []
+            for stored in self._records.values():
+                if to_filter and stored.to_agent_id != to_filter:
+                    continue
+                if from_filter and stored.from_agent_id != from_filter:
+                    continue
+                if status is not None and stored.status != status:
+                    continue
+                rows.append(stored)
+            rows.sort(key=lambda item: (-item.created_at_unix, item.task_id))
+            total = len(rows)
+            page = rows[offset : offset + limit]
+            tasks = [TaskRecord(**item.model_dump(mode="python")) for item in page]
+            return tasks, total
+
     def poll_inbox(self, agent_id: str, *, limit: int = 10, wait_seconds: float = 0.0) -> tuple[list[InboxTaskItem], int]:
         cleaned = agent_id.strip()
         limit = max(1, min(50, limit))

@@ -268,7 +268,7 @@ func (t *Transcript) finishPartialLocked(role, suffix string) {
 	t.appendLineLocked(line)
 }
 
-// RemoveToolPendingLines 移除指定 tool 块的 pending 占位行。
+// RemoveToolPendingLines 移除指定 tool 块的 pending 占位行与 call 代码预览行。
 func (t *Transcript) RemoveToolPendingLines(blockID string) {
 	blockID = strings.TrimSpace(blockID)
 	if blockID == "" {
@@ -276,10 +276,20 @@ func (t *Transcript) RemoveToolPendingLines(blockID string) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	prefix := toolPendingLinePrefix + blockID + "]"
+	prefixes := []string{
+		toolPendingLinePrefix + blockID + "]",
+		toolCallCodeLinePrefix + blockID + "]",
+	}
 	var kept []string
 	for _, line := range t.lines {
-		if strings.HasPrefix(line, prefix) {
+		skip := false
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(line, prefix) {
+				skip = true
+				break
+			}
+		}
+		if skip {
 			continue
 		}
 		kept = append(kept, line)

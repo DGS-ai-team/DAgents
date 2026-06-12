@@ -70,7 +70,7 @@ func (t *ToolPendingTracker) Len() int {
 	return len(t.entries)
 }
 
-// FormatPendingLine 将 pending 存储行格式化为带耗时的展示文本（不含前缀）。
+// FormatPendingLine 将 pending 存储行格式化为带动态耗时与省略号的展示文本（不含前缀）。
 func (t *ToolPendingTracker) FormatPendingLine(storedLine string) string {
 	if t == nil {
 		return strings.TrimPrefix(storedLine, toolPendingLinePrefix)
@@ -83,15 +83,40 @@ func (t *ToolPendingTracker) FormatPendingLine(storedLine string) string {
 	entry, ok := t.entries[id]
 	t.mu.Unlock()
 	if !ok {
-		// 结果已到达但 transcript 行尚未剔除时，回退原文。
 		if idx := strings.Index(storedLine, "] "); idx >= 0 {
 			return strings.TrimPrefix(storedLine[idx+2:], "▶ ")
 		}
 		return storedLine
 	}
-	sec := int(time.Since(entry.Started).Seconds())
-	if sec < 0 {
-		sec = 0
+	elapsed := time.Since(entry.Started).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
 	}
-	return fmt.Sprintf("▶ %s … %ds", entry.Title, sec)
+	frame := int(elapsed*2) % 3
+	dots := strings.Repeat(".", frame+1)
+	for len(dots) < 3 {
+		dots += " "
+	}
+	title := strings.TrimPrefix(entry.Title, "▶ ")
+	title = strings.TrimPrefix(title, "调用 ")
+	return fmt.Sprintf("▶ %s%s %ds", title, dots, int(elapsed))
+}
+
+// ElapsedSeconds 返回指定 call 已执行秒数；不存在时返回 -1。
+func (t *ToolPendingTracker) ElapsedSeconds(id string) float64 {
+	id = strings.TrimSpace(id)
+	if id == "" || t == nil {
+		return -1
+	}
+	t.mu.Lock()
+	entry, ok := t.entries[id]
+	t.mu.Unlock()
+	if !ok {
+		return -1
+	}
+	sec := time.Since(entry.Started).Seconds()
+	if sec < 0 {
+		return 0
+	}
+	return sec
 }

@@ -111,7 +111,7 @@ default_paths() {
 
 validate_source() {
   local name
-  for name in bin/dagents-node bin/dagents-client bin/dagents-cli bin/dagents_register_center dagents; do
+  for name in bin/dagents-node bin/dagents-client bin/dagents-cli dagents; do
     [[ -e "${SOURCE}/${name}" ]] || die "missing ${SOURCE}/${name}; run install.sh from extracted bundle root"
   done
 }

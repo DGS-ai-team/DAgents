@@ -8,7 +8,7 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 | **Registry** | M1 | 注册、心跳、注销、目录、discover |
 | **A2A** | **M2 部分** | Task API + inbox long poll；Node inbox poller 骨架 |
 | **Skills** | M3 待做 | 一 zip 一 skill，审批后分发 |
-| **Console** | **部分（Registry 目录页）** | **`GET /console/`** Node 列表与详情 |
+| **Console** | **部分** | **`GET /console/`** — Node 目录、**A2A Inbox 只读列表**、Node 抽屉内 **session 列表 / context 摘要** |
 
 架构方案：[docs/design/manage-architecture.md](../docs/design/manage-architecture.md)
 
@@ -22,6 +22,8 @@ python run_manage.py
 默认 **`0.0.0.0:8020`**（`MANAGE_HOST` / `MANAGE_PORT` 可配置）。
 
 **Console（Node 目录 UI）**：浏览器打开 **`http://<host>:<port>/console/`**  
+基于 **Vue 3 + Vite**；源码在 `manage/console/frontend/`，构建产物在 `manage/console/static/`。  
+修改 UI 后执行 `./manage/console/build.sh`（或 `cd manage/console/frontend && npm run build`）。  
 默认 **开放模式**：无需 token，直接查看全部 Node 状态。
 
 ## Docker 部署（推荐生产 / 联调）
@@ -29,7 +31,7 @@ python run_manage.py
 官方镜像与 compose 见 **[`packaging/manage/`](../packaging/manage/README.md)**：
 
 ```bash
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.0 .
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.1 .
 # 或
 cd packaging/manage && cp .env.example .env && docker compose up -d --build
 ```
@@ -84,7 +86,20 @@ Node 出站 Header：
 
 系统：`GET /health`、`GET /metrics`、`GET /v1/admin/audit`。
 
+### Admin 观测（只读）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/v1/admin/a2a/tasks` | A2A Task 列表（**不会 deliver**） |
+| GET | `/v1/admin/nodes/{agent_id}/sessions` | 代理 Node `GET /v1/sessions` |
+| GET | `/v1/admin/nodes/{agent_id}/sessions/{session_id}/context` | 代理 Node context 摘要 |
+
 ## A2A Task API（M2）
+
+创建 Task 时 Manage 校验：
+
+1. target **online** 且 **expose_to_peers=true**
+2. caller 与 target 均至少有一个 **discovery_group**，且**存在交集**（否则 `403 discovery_group_mismatch` / `caller_discovery_group_empty` / `target_discovery_group_empty`）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -102,17 +117,21 @@ Node 出站 Header：
 manage/
   config.py
   manage_app.py
+  admin/        # Admin 只读 API（A2A 列表、Node session 代理）
   platform/     # auth, audit, blob, metrics
   storage/      # sqlite
   registry/     # models, store, routes, status
-  console/static/  # Manage Console Web UI
+  console/
+    frontend/   # Vue 3 源码（Vite）
+    static/     # 构建产物，挂载 /console/
+    build.sh    # npm run build 封装
   a2a/          # M2 Task store + routes
   skills/       # M3 占位
 ```
 
-## 与 Register Center 的关系
+## 历史 Register Center 数据迁移
 
-`register_center/` **尚未删除**（计划 M5）；新功能请落在 **Manage**。可从 RC JSON 导入：
+旧版 **`register_center/`** 已移除；新功能请落在 **Manage**。若仍有 RC JSON 导出，可导入 Registry：
 
 ```python
 from manage.registry.store import AgentRegistryStore

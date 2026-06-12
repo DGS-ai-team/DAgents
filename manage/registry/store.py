@@ -119,6 +119,24 @@ class AgentRegistryStore:
             self._persist_locked()
             return stored_to_public(stored, now_unix=now_unix)
 
+    def can_a2a_invoke(self, from_agent_id: str, to_agent_id: str) -> tuple[bool, str | None]:
+        """A2A Task 创建前校验：caller 与 target 须各至少有一个 discovery_group 且存在交集。"""
+        caller = self.get(from_agent_id.strip())
+        if caller is None:
+            return False, "caller_not_found"
+        target = self.get(to_agent_id.strip())
+        if target is None:
+            return False, "target_not_found"
+        caller_groups = {g.strip() for g in caller.discovery_group if g.strip()}
+        target_groups = {g.strip() for g in target.discovery_group if g.strip()}
+        if not caller_groups:
+            return False, "caller_discovery_group_empty"
+        if not target_groups:
+            return False, "target_discovery_group_empty"
+        if not caller_groups & target_groups:
+            return False, "discovery_group_mismatch"
+        return True, None
+
     def heartbeat(self, agent_id: str, payload: AgentHeartbeatRequest) -> AgentRecord | None:
         with self._lock:
             existing = self._records.get(agent_id)

@@ -189,7 +189,7 @@ parse_withnode() {
 cmd_doctor() {
   echo "DAgents installation: ${DAGENTS_HOME}"
   local ok=1 name
-  for name in dagents-node dagents-client dagents-cli dagents_register_center; do
+  for name in dagents-node dagents-client dagents-cli; do
     if [[ -x "${BIN}/${name}" ]]; then
       echo "[ok] bin/${name}"
     else
@@ -211,6 +211,55 @@ cmd_doctor() {
   return "${ok}"
 }
 
+read_app_version() {
+  local v=""
+  if [[ -f "${ROOT}/VERSION" ]]; then
+    v="$(tr -d '[:space:]' < "${ROOT}/VERSION")"
+  fi
+  if [[ -z "${v}" ]] && [[ -x "${BIN}/dagents-cli" ]]; then
+    v="$("${BIN}/dagents-cli" version 2>/dev/null | awk '{print $NF}' || true)"
+  fi
+  if [[ -z "${v}" ]] && command -v python3 >/dev/null 2>&1; then
+    local repo_root="${ROOT}"
+    while [[ ! -f "${repo_root}/app/cli/version_info.py" && "${repo_root}" != "/" ]]; do
+      repo_root="$(dirname "${repo_root}")"
+    done
+    if [[ -f "${repo_root}/app/cli/version_info.py" ]]; then
+      v="$(python3 -c "import sys; sys.path.insert(0,'${repo_root}'); from app.cli.version_info import get_cli_version; print(get_cli_version())" 2>/dev/null || true)"
+    fi
+  fi
+  if [[ -z "${v}" ]]; then
+    v="unknown"
+  fi
+  printf '%s\n' "${v}"
+}
+
+bin_version() {
+  local name="$1"
+  local bin_path="${BIN}/${name}"
+  [[ -x "${bin_path}" ]] || return 0
+  local out
+  out="$("${bin_path}" version 2>/dev/null || "${bin_path}" -version 2>/dev/null || true)"
+  if [[ -n "${out}" ]]; then
+    echo "  ${name}: ${out}"
+  fi
+}
+
+cmd_version() {
+  local ver
+  ver="$(read_app_version)"
+  echo "DAgents Local Assistant ${ver}"
+  bin_version dagents-node
+  bin_version dagents-client
+  if [[ -x "${BIN}/dagents-cli" ]]; then
+    local cli_out
+    cli_out="$("${BIN}/dagents-cli" version 2>/dev/null || true)"
+    if [[ -n "${cli_out}" ]]; then
+      echo "  ${cli_out/DAgents /dagents-cli: }"
+    fi
+  fi
+}
+
 cmd_help() {
   cat <<'EOF'
 Usage:
@@ -221,7 +270,6 @@ Usage:
   dagents node restart            Stop then start Node in background
   dagents node --foreground       Start Node in foreground (blocks terminal)
   dagents node --no-wait          Background start without waiting for probe
-  dagents register-center         Start Register Center (optional A2A)
   dagents doctor                  Check installed files
   dagents version                 Print version information
 
@@ -232,7 +280,7 @@ Options:
 
 Config:
   Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
-  Register Center only: copy .env.example to .env for REGISTER_CENTER_* settings.
+  A2A / Registry: deploy Manage separately (packaging/manage/README.md).
   CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
 EOF
 }
@@ -306,17 +354,13 @@ case "$1" in
       ;;
     esac
     ;;
-  register-center)
-    shift
-    require_bin dagents_register_center
-    exec "${BIN}/dagents_register_center" "$@"
-    ;;
   doctor)
     cmd_doctor
     exit $?
     ;;
   version)
-    echo "DAgents Local Assistant"
+    cmd_version
+    exit 0
     ;;
   *)
     require_bin dagents-cli

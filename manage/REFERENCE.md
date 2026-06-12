@@ -40,11 +40,15 @@
 | `store.py` | `A2ATaskStore.create`, `poll_inbox`, `ack`, `reply`, `sweep_expired` |
 | `routes.py` | `build_a2a_router` |
 
-## console/static/
+## console/
 
-| 文件 | 说明 |
+| 路径 | 说明 |
 |------|------|
-| `index.html` / `styles.css` / `app.js` | Manage Console：Node 列表、筛选、详情抽屉 |
+| `frontend/` | Vue 3 + Vite 源码（`npm run dev` / `npm run build`） |
+| `static/` | 构建产物：`index.html` + `assets/*`，挂载 `/console/` |
+| `build.sh` | 一键构建到 `static/` |
+
+Console 功能：Node 列表、discovery 分组、A2A Inbox、详情抽屉（session / audit）。
 
 | 路径 | 里程碑 |
 |------|--------|

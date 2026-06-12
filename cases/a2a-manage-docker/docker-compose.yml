@@ -66,5 +66,27 @@ services:
       retries: 12
       start_period: 10s
 
+  init-groups:
+    image: curlimages/curl:8.12.1
+    depends_on:
+      node-a:
+        condition: service_healthy
+      node-b:
+        condition: service_healthy
+    environment:
+      MANAGE_URL: http://manage:8020
+      DISCOVERY_GROUP: ${DISCOVERY_GROUP:-a2a-lab}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for id in node-a node-b; do
+          curl -sf -X PATCH "$${MANAGE_URL}/v1/registry/agents/$${id}/groups" \
+            -H "Content-Type: application/json" \
+            -d "{\"discovery_group\":[\"$${DISCOVERY_GROUP}\"]}"
+          echo "assigned $${DISCOVERY_GROUP} -> $${id}"
+        done
+    restart: "no"
+
 volumes:
   manage-data:

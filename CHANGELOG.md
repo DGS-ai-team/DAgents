@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-11
+
+**0.x 预览**：**Register Center 移除**，A2A 统一经 **Manage**；Console 迁 **Vue 3**；Go TUI 等待态与工具展示增强。
+
+### 新增
+
+- **Manage Console（Vue 3 + Vite）**：`manage/console/frontend/` 源码 + `build.sh`；Agent 目录、A2A Inbox、Node 抽屉（分组 / session / audit）。
+- **Manage discovery_group**：Registry PATCH 分组、Console 批量分配；`agent_discover` / `agent_invoke` **跨组校验**（须共享至少一个分组）。
+- **Go TUI 等待反馈**：prefilling / thinking 状态行（动画 + 秒数）、顶栏阶段提示、SSE 断开与长时间无响应告警；plain REPL 等待计时。
+
+### 变更
+
+- **Go TUI 工具展示**对齐 Python TUI：黄/绿/红圆点、pending 动画与耗时、`call_purpose` 标题、参数 `!r` 风格摘要。
+- **Manage Docker 镜像**多阶段构建（Node 阶段 `npm run build` Console）。
+- 开发栈 / CI / 打包入口：`run_dev_stack.py`、`dagents` 等改为启动 **Manage**（不再启动 Register Center）。
+
+### 移除
+
+- **`register_center/`** 及 `run_register_center.py`、RC 单测与 `dagents_register_center` 打包脚本（**breaking**）。A2A 登记与发现请使用 **Manage Registry**；旧 RC JSON 可经 Manage import 迁移（见 `manage/README.md`）。
+
+### 修复
+
+- **`dagents version`**：展示发版号与子组件版本（`VERSION` 文件、`dagents-cli` / `dagents-node` / `dagents-client version`）。
+
+（Git **tag**：`v0.3.1`。）
+
 ## [0.3.0] - 2026-06-11
 
 **0.x 预览**：**Manage A2A（M2）** 与 **双 Node 联调案例** 落地；双 TUI 斜杠命令对齐；**Manage 官方 Docker 镜像**随 Release 发布。

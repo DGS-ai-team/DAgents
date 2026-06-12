@@ -4,7 +4,7 @@ Linux 分发辅助（随 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入�
 
 | 文件 | 说明 |
 |------|------|
-| **`dagents`** | 命令行入口：`chat` / `tui` / `node`（默认后台）/ `node shutdown` / `node restart` / `register-center`；支持 `--withnode`；启动后 `cd` 到安装根（与 Windows `pushd` 一致，`fs_root: ./.runtime` 可从任意目录执行） |
+| **`dagents`** | 命令行入口：`chat` / `tui` / `node`（默认后台）/ `node shutdown` / `node restart`；支持 `--withnode`；启动后 `cd` 到安装根（与 Windows `pushd` 一致，`fs_root: ./.runtime` 可从任意目录执行） |
 | **`install.sh`** | 安装脚本：若目标目录已有 `.runtime/node.pid` 则先 `node shutdown` 停旧进程，再拷贝文件、创建 `dagents` 符号链接、配置 `DAGENTS_HOME` 与 `PATH` |
 
 ## 便携使用（不解压安装）

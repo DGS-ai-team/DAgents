@@ -12,10 +12,15 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/api"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/version"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 func main() {
+	if len(os.Args) >= 2 && (os.Args[1] == "version" || os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println(version.Version)
+		return
+	}
 	// 1) 解析 -config / 环境变量 / 默认 packaging 路径。
 	configPath := flag.String("config", "", "path to config.yaml (optional; default: DAGENTS_CONFIG or packaging/agent-client/config.yaml)")
 	logLevelFlag := flag.String("log-level", "", "log level: debug, info, warn, error (overrides config log.level)")

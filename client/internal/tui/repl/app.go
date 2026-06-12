@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 	"github.com/DGS-ai-team/DAgents/client/internal/probe"
@@ -99,9 +100,31 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 			fmt.Fprintf(os.Stderr, "发送失败: %v\n", err)
 			continue
 		}
-		fmt.Fprintln(os.Stderr, "（回合进行中；若有审批/询问，请在下方提示处输入）")
-		if err := app.turn.Wait(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "等待 Agent 响应…")
+		if err := waitTurnWithFeedback(ctx, app.turn); err != nil {
 			return err
+		}
+		fmt.Fprint(os.Stderr, "\r\033[K")
+	}
+}
+
+func waitTurnWithFeedback(ctx context.Context, gate *tuishared.TurnGate) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- gate.Wait(ctx)
+	}()
+	start := time.Now()
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-tick.C:
+			secs := int(time.Since(start).Seconds())
+			fmt.Fprintf(os.Stderr, "\r等待 Agent… %ds（Esc 不可用；Ctrl+C 退出）", secs)
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }

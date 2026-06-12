@@ -3,6 +3,7 @@ package shared
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -12,6 +13,8 @@ const (
 	toolDetailLinePrefix      = "[tool-detail|"
 	toolPreviewLinePrefix     = "[tool-preview|"
 	toolPendingLinePrefix     = "[tool-pending|"
+	toolCallCodeLinePrefix    = "[tool-call-code|"
+	bashInlineCommandMaxRunes = 36
 	UserInformationToolName   = "ask_user_information"
 	userInformationDisplayName = "Agent 询问"
 	// CallPurposeKey 与 Node tools.CallPurposeKey 对齐，供 Client 展示工具调用首行。
@@ -45,9 +48,14 @@ func IsToolPreviewLine(line string) bool {
 	return strings.HasPrefix(line, toolPreviewLinePrefix)
 }
 
+// IsToolCallCodeLine 是否为 tool_call 执行中代码预览行。
+func IsToolCallCodeLine(line string) bool {
+	return strings.HasPrefix(line, toolCallCodeLinePrefix)
+}
+
 // ToolBlockIDFromMetaLine 从 preview/detail/pending 行解析块 ID。
 func ToolBlockIDFromMetaLine(line string) string {
-	for _, prefix := range []string{toolDetailLinePrefix, toolPreviewLinePrefix, toolPendingLinePrefix} {
+	for _, prefix := range []string{toolDetailLinePrefix, toolPreviewLinePrefix, toolPendingLinePrefix, toolCallCodeLinePrefix} {
 		if strings.HasPrefix(line, prefix) {
 			rest := strings.TrimPrefix(line, prefix)
 			id, _, ok := strings.Cut(rest, "]")
@@ -82,17 +90,39 @@ func RegisterToolCallsFromEvent(data map[string]any, pending *ToolPendingTracker
 		if id == "" {
 			continue
 		}
-		pending.Register(id, "调用 "+ToolDisplayName(call.Name, call.Arguments))
+		pending.Register(id, ToolDisplayName(call.Name, call.Arguments))
 	}
 }
 
+// FormatToolElapsed 将工具执行秒数格式化为可读耗时（对齐 Python `_format_tool_elapsed`）。
+func FormatToolElapsed(elapsed float64) string {
+	safe := elapsed
+	if safe < 0 {
+		safe = 0
+	}
+	if safe < 1.0 {
+		return fmt.Sprintf("%.0fms", safe*1000)
+	}
+	if safe < 60.0 {
+		return fmt.Sprintf("%.1fs", safe)
+	}
+	minutes := int(safe / 60)
+	seconds := safe - float64(minutes*60)
+	return fmt.Sprintf("%dm%.0fs", minutes, seconds)
+}
+
 // FormatToolEventWithID 带块 ID 的 tool 事件格式化（详情行供展开过滤）。
-func FormatToolEventWithID(eventType string, data map[string]any, id string, verbose bool) []string {
+// elapsedSec 可选：tool_result 时追加标题耗时（秒）；省略或负值时不展示。
+func FormatToolEventWithID(eventType string, data map[string]any, id string, verbose bool, elapsedSec ...float64) []string {
+	var elapsed float64 = -1
+	if len(elapsedSec) > 0 {
+		elapsed = elapsedSec[0]
+	}
 	switch eventType {
 	case "tool_call":
 		return formatToolCallEvent(data, id, verbose)
 	case "tool_result":
-		return formatToolResultEvent(data, id, verbose)
+		return formatToolResultEvent(data, id, verbose, elapsed)
 	default:
 		return []string{fmt.Sprintf("[tool] %s", eventType)}
 	}
@@ -113,8 +143,16 @@ func formatToolCallEvent(data map[string]any, blockID string, verbose bool) []st
 			continue
 		}
 		title := ToolDisplayName(call.Name, call.Arguments)
-		if blockID != "" && call.ID != "" {
-			lines = append(lines, formatToolPendingLine(call.ID, "调用 "+title))
+		block := call.ID
+		if block == "" {
+			block = blockID
+		}
+		_, codePreview := ToolCallParts(call.Name, call.Arguments)
+		if block != "" {
+			lines = append(lines, formatToolPendingLine(block, "调用 "+title))
+			if codePreview != "" && !verbose {
+				lines = append(lines, splitToolCallCodeLines(block, codePreview)...)
+			}
 		} else {
 			lines = append(lines, "[tool] ▶ 调用 "+title)
 		}
@@ -134,7 +172,70 @@ func formatToolPendingLine(blockID, title string) string {
 	return formatToolMetaLine(toolPendingLinePrefix, blockID, "▶ "+title)
 }
 
-func formatToolResultEvent(data map[string]any, blockID string, verbose bool) []string {
+func splitToolCallCodeLines(blockID, code string) []string {
+	code = strings.TrimRight(code, "\n")
+	if strings.TrimSpace(code) == "" {
+		return nil
+	}
+	parts := strings.Split(code, "\n")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimRight(p, "\r")
+		if p == "" {
+			continue
+		}
+		out = append(out, formatToolMetaLine(toolCallCodeLinePrefix, blockID, p))
+	}
+	return out
+}
+
+// ToolCallParts 解析 tool_call 短标题与可选代码预览（对齐 Python `_tool_call_parts_from_call`）。
+func ToolCallParts(name string, args map[string]any) (summary, codeContent string) {
+	summary = ToolDisplayName(name, args)
+	switch strings.TrimSpace(name) {
+	case "bash_run":
+		cmd := strings.TrimSpace(trimDisplayField(args["command"]))
+		if ToolCallPurpose(args) != "" {
+			if cmd != "" {
+				return summary, cmd
+			}
+			return summary, ""
+		}
+		_, full := bashCommandParts(cmd)
+		return summary, full
+	case "write_file":
+		content := trimDisplayField(args["content"])
+		if content != "" {
+			return summary, content
+		}
+	}
+	return summary, ""
+}
+
+func bashCommandParts(command string) (title, fullCommand string) {
+	raw := strings.TrimSpace(command)
+	if raw == "" {
+		return "bash(—)", ""
+	}
+	cmd := sanitizeInlineToolArg(raw)
+	if len([]rune(cmd)) <= bashInlineCommandMaxRunes {
+		return "bash(" + cmd + ")", ""
+	}
+	preview := truncatePreview(cmd, bashInlineCommandMaxRunes-1)
+	return "bash(" + preview + ")", raw
+}
+
+func sanitizeInlineToolArg(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func formatToolResultEvent(data map[string]any, blockID string, verbose bool, elapsedSec float64) []string {
 	name := trimDisplayField(data["tool_name"])
 	if name == "" {
 		name = trimDisplayField(data["name"])
@@ -149,6 +250,9 @@ func formatToolResultEvent(data map[string]any, blockID string, verbose bool) []
 	}
 
 	head := resultHeadline(name, rejected, content)
+	if elapsedSec >= 0 {
+		head += " · " + FormatToolElapsed(elapsedSec)
+	}
 	if pct := outputCompressSavedPct(data); pct > 0 {
 		head += fmt.Sprintf(" · -%d%%", pct)
 	}
@@ -415,6 +519,9 @@ func summarizeJSONResult(content string) string {
 	if id := firstNonEmptyField(m, "trigger_id", "id", "job_id"); id != "" {
 		return "id=" + id
 	}
+	if agents, ok := m["agents"].([]any); ok {
+		return summarizeDiscoverAgents(agents)
+	}
 	if msg := firstNonEmptyField(m, "message", "summary"); msg != "" {
 		return truncatePreview(msg, 80)
 	}
@@ -428,6 +535,36 @@ func firstNonEmptyField(m map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func summarizeDiscoverAgents(agents []any) string {
+	n := len(agents)
+	if n == 0 {
+		return "0 个 Agent"
+	}
+	names := make([]string, 0, 3)
+	for _, item := range agents {
+		am, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		label := firstNonEmptyField(am, "name", "agent_id")
+		if label == "" {
+			continue
+		}
+		names = append(names, label)
+		if len(names) >= 3 {
+			break
+		}
+	}
+	if len(names) == 0 {
+		return fmt.Sprintf("%d 个 Agent", n)
+	}
+	out := strings.Join(names, ", ")
+	if n > len(names) {
+		out += fmt.Sprintf(" 等 %d 个", n)
+	}
+	return out
 }
 
 type parsedToolCall struct {
@@ -523,20 +660,14 @@ func ToolDisplayName(name string, args map[string]any) string {
 	}
 	switch name {
 	case "bash_run":
-		cmd := trimDisplayField(args["command"])
-		if cmd == "" {
-			return "bash(—)"
+		title, _ := bashCommandParts(trimDisplayField(args["command"]))
+		return title
+	case "trigger_create":
+		triggerName := strings.TrimSpace(trimDisplayField(args["name"]))
+		if triggerName == "" {
+			triggerName = "—"
 		}
-		if len([]rune(cmd)) > 48 {
-			cmd = string([]rune(cmd)[:47]) + "…"
-		}
-		return "bash(" + cmd + ")"
-	case "trigger_create", "trigger_update", "trigger_delete", "trigger_fire":
-		label := firstNonEmptyField(args, "name", "id")
-		if label == "" {
-			label = "—"
-		}
-		return name + "(" + label + ")"
+		return "trigger_create(" + triggerName + ")"
 	case "write_file", "read_file", "search_replace":
 		path := firstNonEmptyField(args, "path", "file_path")
 		if path == "" {
@@ -549,18 +680,61 @@ func ToolDisplayName(name string, args map[string]any) string {
 		if len(args) == 0 {
 			return name + "()"
 		}
-		parts := make([]string, 0, len(args))
-		for key, value := range args {
-			if key == CallPurposeKey || key == "run_in_background" {
-				continue
-			}
-			text := truncatePreview(fmt.Sprint(value), 40)
-			parts = append(parts, key+"="+text)
-		}
+		parts := toolDisplayGenericParts(args)
 		if len(parts) == 0 {
 			return name + "()"
 		}
 		return name + "(" + strings.Join(parts, ", ") + ")"
+	}
+}
+
+func toolDisplayGenericParts(args map[string]any) []string {
+	keys := make([]string, 0, len(args))
+	for key := range args {
+		if key == CallPurposeKey || key == "run_in_background" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+formatToolArgValue(args[key]))
+	}
+	return parts
+}
+
+// formatToolArgValue 近似 Python `value!r` 的参数展示。
+func formatToolArgValue(v any) string {
+	if v == nil {
+		return "null"
+	}
+	switch x := v.(type) {
+	case string:
+		return fmt.Sprintf("%q", x)
+	case bool:
+		if x {
+			return "True"
+		}
+		return "False"
+	case float64:
+		if x == float64(int64(x)) {
+			return fmt.Sprintf("%d", int64(x))
+		}
+		return fmt.Sprintf("%g", x)
+	case int:
+		return fmt.Sprintf("%d", x)
+	case int64:
+		return fmt.Sprintf("%d", x)
+	default:
+		b, err := json.Marshal(x)
+		if err != nil {
+			return fmt.Sprintf("%q", fmt.Sprint(x))
+		}
+		return string(b)
 	}
 }
 

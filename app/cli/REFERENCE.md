@@ -2,7 +2,7 @@
 
 ## `main.py`
 
-- **`main`** / **`build_parser`**：CLI 子命令入口（`chat` / `show` / `delete` / `register-center`）
+- **`main`** / **`build_parser`**：CLI 子命令入口（`chat` / `show` / `delete`）
 - **`_default_api_base`**：无 YAML 时从 env/.env 解析 Go Node 地址
 - **`_add_client_config_arguments`** / **`apply_client_settings`**：`--config` / `--api` 合并
 
