@@ -11,7 +11,8 @@ func loadSkillsToolDef() ToolDef {
 				"可用 skill 目录（name: description）见本工具 description 下方列表（若已配置 skills）。" +
 				"当用户任务与某 skill 的 description 匹配且尚未加载时，必须先调用本工具。" +
 				"整组替换当前已加载列表（非追加）；skill_names 传 [] 清空。" +
-				"一次可加载多个 name，数量受配置上限约束；不再需要时用 unload_skills 或 clear_skills。",
+				"一次可加载多个 name，数量受配置上限约束；不再需要时用 unload_skills 或 clear_skills。" +
+				"注意：已加载的skills中就是skill.md中的内容，如果需要修改文件不必重复读取skill.md文件",
 			Parameters: injectRunInBackgroundParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -48,7 +48,7 @@
 ## 功能特性
 
 - **LLM Turn 编排** — OpenAI 兼容 API；流式 assistant / reasoning / tool 事件；流式 cancel 保留部分 assistant 与合法 tool 序列
-- **LLM 厂商适配** — `llm.provider`（`openai` / `deepseek`）；`MessageAdapter` 统一出站序列化与 `reasoning_content` 处理
+- **LLM 厂商适配** — `llm.provider`（`openai` / `deepseek` / `qwen` / `vllm`）；`MessageAdapter` 统一出站序列化与 `reasoning_content` 处理
 - **内置工具** — `bash_run`（可配置 GBK/UTF-8 解码）、文件读写与替换、skills 加载、trigger 管理、**临时子 Agent**
 - **HITL** — 工具审批、`ask_user_information`；Client 侧非阻塞队列 + resume（**Esc** 取消在途 turn；无 `/cancel` 斜杠命令）
 - **A2A（Manage M2）** — Node 注册 Manage、**`agent_invoke` / `agent_discover`**；Task inbox long poll；案例见 [`cases/a2a-manage-docker/`](cases/a2a-manage-docker/)
@@ -157,9 +157,9 @@ dagents-client tui sess-xxxxxxxx
 |------|------|
 | `listen.host` / `listen.port` | Node 监听地址（默认 `127.0.0.1:18765`） |
 | `local.endpoint` | Client 连接 URL |
-| `llm.provider` | `openai` / `deepseek`（DeepSeek 自动处理 Thinking 出站） |
+| `llm.provider` | `openai` / `deepseek` / `qwen` / `vllm`（deepseek/qwen 支持 `/thinking` 热更新） |
 | `llm.mock` | `true` 时使用 mock LLM（开发默认） |
-| `llm.api_key_env` | 真实 LLM 的 API Key 环境变量名 |
+| `llm.api_key_env` | API Key 环境变量名（默认 `OPENAI_API_KEY`，所有 provider 共用） |
 | `tools.bash_output_encoding` | `bash_run` 子进程输出解码（如 `gbk`；Windows cmd 默认 gbk） |
 | `tools.file_encoding` | FS 工具磁盘读写默认编码（`read_file` 等；Windows 默认 gbk，可单次 `encoding` 覆盖） |
 | `fs_root` | 工作区根（默认 `./.runtime`）；`data/`、`memory/`、`skills/` 等子路径均相对此根硬编码 |

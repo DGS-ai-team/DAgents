@@ -105,7 +105,7 @@ func (s *RuntimeSettings) ApplyPatch(patch LLMSettingsPatch) (LLMSettingsView, e
 	defer s.mu.Unlock()
 	if !ThinkingSupported(s.Provider) {
 		if patch.Thinking != nil || patch.ReasoningEffort != nil {
-			return s.snapshotLocked(), fmt.Errorf("thinking controls require llm.provider=deepseek")
+			return s.snapshotLocked(), fmt.Errorf("thinking controls require llm.provider=deepseek or qwen")
 		}
 		return s.snapshotLocked(), nil
 	}
@@ -129,9 +129,14 @@ func (s *RuntimeSettings) ApplyPatch(patch LLMSettingsPatch) (LLMSettingsView, e
 	return s.snapshotLocked(), nil
 }
 
-// ThinkingSupported 表示当前 provider 是否支持 DeepSeek thinking 参数。
+// ThinkingSupported 表示当前 provider 是否支持运行时 thinking 控制。
 func ThinkingSupported(provider string) bool {
-	return ProviderName(strings.ToLower(strings.TrimSpace(provider))) == ProviderDeepSeek
+	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
+	case ProviderDeepSeek, ProviderQwen:
+		return true
+	default:
+		return false
+	}
 }
 
 // NormalizeThinkingSettings 规范化配置中的 thinking 字段。
@@ -153,14 +158,45 @@ func BuildRequestExtra(provider, thinking, effort string) map[string]any {
 		return nil
 	}
 	t, e := NormalizeThinkingSettings(provider, thinking, effort)
-	if t == "disabled" {
+	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
+	case ProviderQwen:
+		return buildQwenRequestExtra(t, e)
+	default:
+		return buildDeepSeekRequestExtra(t, e)
+	}
+}
+
+func buildDeepSeekRequestExtra(thinking, effort string) map[string]any {
+	if thinking == "disabled" {
 		return map[string]any{
 			"thinking": map[string]string{"type": "disabled"},
 		}
 	}
 	return map[string]any{
 		"thinking":         map[string]string{"type": "enabled"},
-		"reasoning_effort": e,
+		"reasoning_effort": effort,
+	}
+}
+
+func buildQwenRequestExtra(thinking, effort string) map[string]any {
+	if thinking == "disabled" {
+		return map[string]any{"enable_thinking": false}
+	}
+	extra := map[string]any{"enable_thinking": true}
+	if budget := qwenThinkingBudget(effort); budget > 0 {
+		extra["thinking_budget"] = budget
+	}
+	return extra
+}
+
+func qwenThinkingBudget(effort string) int {
+	switch effort {
+	case "max":
+		return 32768
+	case "high":
+		return 8192
+	default:
+		return 8192
 	}
 }
 

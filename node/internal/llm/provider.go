@@ -13,6 +13,8 @@ type ProviderName string
 const (
 	ProviderOpenAI   ProviderName = "openai"
 	ProviderDeepSeek ProviderName = "deepseek"
+	ProviderQwen     ProviderName = "qwen"
+	ProviderVLLM     ProviderName = "vllm"
 )
 
 // MessageAdapter 按厂商处理会话消息的存储规范化与 API 出站形态。
@@ -34,6 +36,10 @@ func NewMessageAdapter(provider string) MessageAdapter {
 	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
 	case ProviderDeepSeek:
 		return deepSeekAdapter{}
+	case ProviderQwen:
+		return qwenAdapter{}
+	case ProviderVLLM:
+		return vllmAdapter{}
 	default:
 		return openAIAdapter{}
 	}

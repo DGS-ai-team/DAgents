@@ -37,11 +37,55 @@ func TestRuntimeSettingsApplyPatch(t *testing.T) {
 	}
 }
 
+func TestBuildRequestExtra_qwen(t *testing.T) {
+	extra := BuildRequestExtra("qwen", "enabled", "max")
+	if extra["enable_thinking"] != true {
+		t.Fatalf("enable_thinking = %v", extra["enable_thinking"])
+	}
+	if extra["thinking_budget"] != 32768 {
+		t.Fatalf("thinking_budget = %v", extra["thinking_budget"])
+	}
+	disabled := BuildRequestExtra("qwen", "disabled", "max")
+	if disabled["enable_thinking"] != false {
+		t.Fatalf("disabled = %v", disabled)
+	}
+	if _, ok := disabled["thinking_budget"]; ok {
+		t.Fatalf("disabled should not set budget: %v", disabled)
+	}
+}
+
 func TestRuntimeSettingsApplyPatch_openaiRejected(t *testing.T) {
-	s := &RuntimeSettings{Provider: "openai", Model: "gpt-4"}
+	for _, provider := range []string{"openai", "vllm"} {
+		s := &RuntimeSettings{Provider: provider, Model: "gpt-4"}
+		off := "disabled"
+		_, err := s.ApplyPatch(LLMSettingsPatch{Thinking: &off})
+		if err == nil {
+			t.Fatalf("expected error for %s", provider)
+		}
+	}
+}
+
+func TestRuntimeSettingsApplyPatch_qwen(t *testing.T) {
+	s := &RuntimeSettings{Provider: "qwen", Model: "qwen-plus", Thinking: "enabled", ReasoningEffort: "high"}
 	off := "disabled"
-	_, err := s.ApplyPatch(LLMSettingsPatch{Thinking: &off})
-	if err == nil {
-		t.Fatal("expected error for openai")
+	view, err := s.ApplyPatch(LLMSettingsPatch{Thinking: &off})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Thinking != "disabled" || !view.ThinkingSupported {
+		t.Fatalf("view = %+v", view)
+	}
+}
+
+func TestThinkingSupported(t *testing.T) {
+	for _, p := range []string{"deepseek", "qwen"} {
+		if !ThinkingSupported(p) {
+			t.Fatalf("%s should support thinking", p)
+		}
+	}
+	for _, p := range []string{"openai", "vllm", ""} {
+		if ThinkingSupported(p) {
+			t.Fatalf("%s should not support thinking", p)
+		}
 	}
 }

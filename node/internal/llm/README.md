@@ -11,7 +11,7 @@ OpenAI 兼容 Chat Completions 客户端与厂商消息适配。
 | `messageutil.go` | `CloneMessage`、`EstimateMessageTokens`、`MessageToDeepSeekAPIPayload`、`MessageToJournalPayload` |
 | `openai.go` | HTTP/SSE、`tool_calls` 增量合并 |
 | `provider.go` | `MessageAdapter` 接口与工厂 |
-| `provider_openai.go` / `provider_deepseek.go` | 厂商存储规范化与出站序列化 |
+| `provider_openai.go` / `provider_deepseek.go` / `provider_qwen.go` / `provider_vllm.go` | 厂商存储规范化与出站序列化 |
 | `client_adapter.go` | `adapterClient` 包装 HTTP 客户端 |
 | `factory.go` | 从 config 构造生产 `Client` |
 
@@ -25,7 +25,14 @@ history Message
   → RequestExtra                   （合并进 POST body 顶层）
 ```
 
-DeepSeek 特有逻辑集中在 `provider_deepseek.go`；`openai.go` 不含厂商分支。
+| `provider` | 默认 `base_url` | thinking 控制 |
+|------------|-----------------|---------------|
+| `openai` | （需配置） | 否 |
+| `deepseek` | `https://api.deepseek.com` | `thinking` + `reasoning_effort` |
+| `qwen` | DashScope compatible-mode | `enable_thinking` + `thinking_budget` |
+| `vllm` | `http://127.0.0.1:8000/v1` | 否（取决于部署模型） |
+
+DeepSeek / Qwen 的 `reasoning_content` 出站规则集中在对应 adapter；`openai.go` 不含厂商分支。
 
 ## 相关文档
 

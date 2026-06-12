@@ -324,7 +324,7 @@ func printHelp() {
   /history [n|all]     查看最近 n 行输出（默认 20）
   /tools [verbose|brief]  tool 输出折叠/展开
   /reasoning [on|off]  显示/隐藏模型推理流
-  /thinking [on|off]   模型思考开关（DeepSeek）
+  /thinking [on|off]   模型思考开关（deepseek/qwen）
   /thinking effort high|max  思考强度
   /quit                退出（流式输出中请用 Esc 取消 turn）`)
 }
@@ -338,7 +338,7 @@ func orReplDash(s string) string {
 
 func (a *App) handleThinkingCommand(ctx context.Context, args []string) error {
 	if !a.probe.LLM.ThinkingSupported {
-		return fmt.Errorf("当前 provider 不支持 thinking 控制（需 deepseek）")
+		return fmt.Errorf("当前 provider 不支持 thinking 控制（需 deepseek 或 qwen）")
 	}
 	if len(args) == 0 {
 		fmt.Fprintf(os.Stderr, "thinking: %s\n", tuishared.FormatLLMThinkingSummary(a.probe.LLM))

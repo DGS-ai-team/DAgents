@@ -121,8 +121,8 @@ type LLMConfig struct {
 	APIKeyEnv       string `yaml:"api_key_env"`
 	Mock            bool   `yaml:"mock"`
 	MaxToolLoops    int    `yaml:"max_tool_loops"`
-	Thinking        string `yaml:"thinking"`         // deepseek：enabled | disabled
-	ReasoningEffort string `yaml:"reasoning_effort"` // deepseek + thinking=enabled：high | max
+	Thinking        string `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
+	ReasoningEffort string `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
 }
 
 // ManageConfig 控制是否向 Manage 注册；默认 enabled=false。
@@ -204,6 +204,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if strings.TrimSpace(c.LLM.Provider) == "" {
 		c.LLM.Provider = "openai"
+	}
+	if strings.TrimSpace(c.LLM.APIKeyEnv) == "" {
+		c.LLM.APIKeyEnv = "OPENAI_API_KEY"
 	}
 	if c.Skills.MaxInPrompt <= 0 {
 		c.Skills.MaxInPrompt = 3

@@ -2935,7 +2935,7 @@ class DAgentsTuiApp(App[None]):
         log = self._transcript_log()
         llm = self._controller.llm_info
         if not llm.get("thinking_supported"):
-            log.write("[yellow]当前 provider 不支持 thinking 控制（需 deepseek）[/yellow]")
+            log.write("[yellow]当前 provider 不支持 thinking 控制（需 deepseek 或 qwen）[/yellow]")
             return
         parts = value.split()
         if len(parts) == 1:
@@ -3003,7 +3003,7 @@ class DAgentsTuiApp(App[None]):
             ("/skill unload NAME", "卸载 skill"),
             ("/children", "子 Agent 列表"),
             ("/reasoning on|off", "推理流显示开关"),
-            ("/thinking on|off", "模型思考开关（DeepSeek）"),
+            ("/thinking on|off", "模型思考开关（deepseek/qwen）"),
             ("/thinking effort high|max", "思考强度"),
             ("/clear", "清空服务端 context 与 transcript"),
             ("/exit", "退出（Esc 可取消在途 turn）"),

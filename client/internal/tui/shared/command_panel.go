@@ -364,7 +364,7 @@ func FormatHelpPanelBody() []string {
 		panelLine(panelKindHelp, "/tools verbose|brief", "tool 输出展开/折叠"),
 		panelLine(panelKindHelp, "/tools expand|collapse", "展开/收起最近 tool 块"),
 		panelLine(panelKindHelp, "/reasoning on|off", "推理流显示"),
-		panelLine(panelKindHelp, "/thinking on|off", "模型思考开关（DeepSeek）"),
+		panelLine(panelKindHelp, "/thinking on|off", "模型思考开关（deepseek/qwen）"),
 		panelLine(panelKindHelp, "/thinking effort high|max", "思考强度"),
 		panelLine(panelKindHelp, "/quit", "退出"),
 	}

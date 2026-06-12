@@ -9,7 +9,11 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-const defaultDeepSeekBaseURL = "https://api.deepseek.com"
+const (
+	defaultDeepSeekBaseURL = "https://api.deepseek.com"
+	defaultQwenBaseURL     = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+	defaultVLLMBaseURL     = "http://127.0.0.1:8000/v1"
+)
 
 // NewFromConfig 根据 Node 配置构造 LLM Client。
 //
@@ -25,11 +29,22 @@ func NewFromConfig(cfg *config.Config, settings *RuntimeSettings) Client {
 	}
 	baseURL := cfg.LLM.BaseURL
 	if strings.TrimSpace(baseURL) == "" {
-		if adapter.Name() == ProviderDeepSeek {
-			baseURL = defaultDeepSeekBaseURL
-		}
+		baseURL = defaultBaseURL(adapter.Name())
 	}
 	return newEnvAdapterClient(baseURL, cfg.LLM.APIKeyEnv, adapter, settings, slog.Default())
+}
+
+func defaultBaseURL(provider ProviderName) string {
+	switch provider {
+	case ProviderDeepSeek:
+		return defaultDeepSeekBaseURL
+	case ProviderQwen:
+		return defaultQwenBaseURL
+	case ProviderVLLM:
+		return defaultVLLMBaseURL
+	default:
+		return ""
+	}
 }
 
 func lookupEnvAPIKey(keyEnv string) (string, error) {

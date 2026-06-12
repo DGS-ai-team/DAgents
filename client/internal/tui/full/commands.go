@@ -400,7 +400,7 @@ func (m *model) applyLLMSettings(settings *nodeapi.LLMSettings) {
 
 func (m *model) handleThinkingCommand(args []string) error {
 	if !m.probe.LLM.ThinkingSupported {
-		return fmt.Errorf("当前 provider 不支持 thinking 控制（需 deepseek）")
+		return fmt.Errorf("当前 provider 不支持 thinking 控制（需 deepseek 或 qwen）")
 	}
 	if len(args) == 0 {
 		m.statusLine = "thinking: " + tuishared.FormatLLMThinkingSummary(m.probe.LLM)
