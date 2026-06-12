@@ -56,10 +56,5 @@ func (deepSeekAdapter) MarshalChatRequestMessages(messages []Message) ([]map[str
 	return out, true, nil
 }
 
-// RequestExtra 请求额外参数
-func (deepSeekAdapter) RequestExtra() map[string]any {
-	return map[string]any{
-		"thinking":         map[string]string{"type": "enabled"},
-		"reasoning_effort": "high",
-	}
-}
+// RequestExtra 已由 RuntimeSettings.BuildRequestExtra 在出站时注入；适配器层返回 nil。
+func (deepSeekAdapter) RequestExtra() map[string]any { return nil }

@@ -128,6 +128,19 @@ func TestParseUsageStripCachedFallback(t *testing.T) {
 	}
 }
 
+func TestFormatInputStripRight(t *testing.T) {
+	got := FormatInputStripRight("开启 · high", "↑1.2k ↓300")
+	if got != "thinking 开启 · high · ↑1.2k ↓300" {
+		t.Fatalf("got %q", got)
+	}
+	if FormatInputStripRight("", "↑1k") != "↑1k" {
+		t.Fatal("usage only")
+	}
+	if FormatInputStripRight("关闭", "") != "thinking 关闭" {
+		t.Fatal("thinking only")
+	}
+}
+
 func TestFormatInputStripLineRightAlignsUsage(t *testing.T) {
 	left := "临时 Agent: 2 活跃 · 1 待审批"
 	right := FormatInputStripUsage(UsageStripSnapshot{

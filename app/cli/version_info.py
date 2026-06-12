@@ -4,7 +4,7 @@ import getpass
 import os
 
 # 与 harness API `FastAPI(..., version=...)` 对齐，供 CLI 展示。
-CLI_VERSION = "0.3.2"
+CLI_VERSION = "0.3.3"
 
 
 def get_cli_username() -> str:

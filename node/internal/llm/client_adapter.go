@@ -55,39 +55,39 @@ func (c *adapterClient) CompleteText(ctx context.Context, req CompleteRequest) (
 
 // envAdapterClient 延迟从环境变量读取 API Key。
 type envAdapterClient struct {
-	baseURL      string
-	model        string
-	keyEnv       string
-	adapter      MessageAdapter
-	requestExtra map[string]any
-	logger       *slog.Logger
+	baseURL  string
+	keyEnv   string
+	adapter  MessageAdapter
+	settings *RuntimeSettings
+	logger   *slog.Logger
 }
 
-func newEnvAdapterClient(baseURL, model, keyEnv string, adapter MessageAdapter, logger *slog.Logger) *envAdapterClient {
+func newEnvAdapterClient(baseURL, keyEnv string, adapter MessageAdapter, settings *RuntimeSettings, logger *slog.Logger) *envAdapterClient {
 	env := keyEnv
 	if env == "" {
 		env = "OPENAI_API_KEY"
 	}
-	extra := map[string]any(nil)
-	if adapter != nil {
-		extra = adapter.RequestExtra()
-	}
 	return &envAdapterClient{
-		baseURL:      baseURL,
-		model:        model,
-		keyEnv:       env,
-		adapter:      adapter,
-		requestExtra: extra,
-		logger:       logx.OrDefault(logger),
+		baseURL:  baseURL,
+		keyEnv:   env,
+		adapter:  adapter,
+		settings: settings,
+		logger:   logx.OrDefault(logger),
 	}
 }
 
 func (c *envAdapterClient) innerClient(key string) *adapterClient {
+	model := ""
+	var extra map[string]any
+	if c.settings != nil {
+		model = c.settings.ModelName()
+		extra = c.settings.RequestExtra()
+	}
 	inner := NewOpenAIClient(OpenAIConfig{
 		BaseURL:      c.baseURL,
-		Model:        c.model,
+		Model:        model,
 		APIKey:       key,
-		RequestExtra: c.requestExtra,
+		RequestExtra: extra,
 	})
 	return newAdapterClient(inner, c.adapter, c.logger)
 }

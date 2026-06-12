@@ -9,6 +9,7 @@ import (
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
+	"github.com/DGS-ai-team/DAgents/client/internal/probe"
 	"github.com/DGS-ai-team/DAgents/client/internal/version"
 	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 )
@@ -97,6 +98,8 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 			mode = "开启"
 		}
 		m.statusLine = "reasoning 显示: " + mode
+	case "thinking":
+		err = m.handleThinkingCommand(parts[1:])
 	case "quit", "exit", "q":
 		m.printResumeHint()
 		return true, nil
@@ -257,7 +260,7 @@ func (m *model) appendStatus() error {
 		return err
 	}
 	body := tuishared.FormatStatusPanelBody(
-		m.probe.AgentID, m.probe.Version, version.Version, m.currentSession(), ctxBody,
+		m.probe.AgentID, m.probe.Version, version.Version, m.currentSession(), m.llmSettings(), ctxBody,
 	)
 	m.transcript.AddSystemPanel("Status", body)
 	m.syncViewport()
@@ -368,4 +371,67 @@ func runSSELoop(ctx context.Context, m *model) {
 		case <-time.After(reconnectDelay):
 		}
 	}
+}
+
+func (m *model) llmSettings() nodeapi.LLMSettings {
+	return nodeapi.LLMSettings{
+		Provider:          m.probe.LLM.Provider,
+		Model:             m.probe.LLM.Model,
+		Mock:              m.probe.LLM.Mock,
+		ThinkingSupported: m.probe.LLM.ThinkingSupported,
+		Thinking:          m.probe.LLM.Thinking,
+		ReasoningEffort:   m.probe.LLM.ReasoningEffort,
+	}
+}
+
+func (m *model) applyLLMSettings(settings *nodeapi.LLMSettings) {
+	if settings == nil {
+		return
+	}
+	m.probe.LLM = probe.LLMInfo{
+		Provider:          settings.Provider,
+		Model:             settings.Model,
+		Mock:              settings.Mock,
+		ThinkingSupported: settings.ThinkingSupported,
+		Thinking:          settings.Thinking,
+		ReasoningEffort:   settings.ReasoningEffort,
+	}
+}
+
+func (m *model) handleThinkingCommand(args []string) error {
+	if !m.probe.LLM.ThinkingSupported {
+		return fmt.Errorf("当前 provider 不支持 thinking 控制（需 deepseek）")
+	}
+	if len(args) == 0 {
+		m.statusLine = "thinking: " + tuishared.FormatLLMThinkingSummary(m.probe.LLM)
+		return nil
+	}
+	var patch nodeapi.LLMSettingsPatch
+	switch strings.ToLower(args[0]) {
+	case "on", "enabled", "true", "1":
+		v := "enabled"
+		patch.Thinking = &v
+	case "off", "disabled", "false", "0":
+		v := "disabled"
+		patch.Thinking = &v
+	case "effort":
+		if len(args) < 2 {
+			return fmt.Errorf("用法: /thinking effort high|max")
+		}
+		v := strings.ToLower(args[1])
+		if v != "high" && v != "max" {
+			return fmt.Errorf("用法: /thinking effort high|max")
+		}
+		patch.ReasoningEffort = &v
+	default:
+		return fmt.Errorf("用法: /thinking on|off 或 /thinking effort high|max")
+	}
+	settings, err := m.client.PatchLLMSettings(m.ctx, patch)
+	if err != nil {
+		return err
+	}
+	m.applyLLMSettings(settings)
+	m.statusLine = "thinking: " + tuishared.FormatLLMThinkingSummary(m.probe.LLM)
+	m.notifyStripRefresh()
+	return nil
 }

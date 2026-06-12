@@ -53,7 +53,7 @@ from app.cli.triggers_format import format_triggers_panel
 from app.cli.tui.policy_view import PROTECTED_POLICY_TOOL, PolicyViewState
 from app.cli.tui.prompt_text_area import PromptTextArea
 from app.cli.tui.transcript_log import TranscriptLog
-from app.cli.tui.welcome_panel import build_welcome_panel
+from app.cli.tui.welcome_panel import build_welcome_panel, format_thinking_summary
 
 _HELP_HINT = "Type /help for commands, /exit to quit.  Enter 发送，Shift+Enter 换行"
 _POLICY_HELP_HINT = (
@@ -90,7 +90,7 @@ class DAgentsTuiApp(App[None]):
         height: 1;
         width: 100%;
         padding: 0 1;
-        content-align: right middle;
+        content-align: left middle;
         color: $text-muted;
         background: transparent;
         border: none;
@@ -341,11 +341,22 @@ class DAgentsTuiApp(App[None]):
         gap = max(min_gap, width - cell_len(left) - right_w)
         return f"{left}{' ' * gap}{right}"
 
+    def _input_strip_right_text(self) -> str:
+        """input strip 右侧：thinking（若有）紧贴 usage 左侧。"""
+        parts: list[str] = []
+        thinking = format_thinking_summary(self._controller.llm_info)
+        if thinking:
+            parts.append(f"thinking {thinking}")
+        token_text = self._controller.input_strip_token_text()
+        if token_text:
+            parts.append(token_text)
+        return " · ".join(parts)
+
     def _refresh_input_strip(self) -> None:
-        """刷新 #input-strip 文案（子 Agent / HITL 队列 + 右侧 token 统计）。"""
+        """刷新 #input-strip 文案（子 Agent / HITL 队列 + 右侧 thinking + token 统计）。"""
         strip = self.query_one("#input-strip", Static)
         left = self._controller.child_tracker.input_strip_text(self._controller.hitl_queue_len())
-        right = self._controller.input_strip_token_text()
+        right = self._input_strip_right_text()
         width = int(getattr(strip.size, "width", 0) or 0)
         line = self._format_input_strip_line(left, right, width)
         strip.update(f"[dim]{escape(line)}[/dim]")
@@ -2181,18 +2192,34 @@ class DAgentsTuiApp(App[None]):
             self._append_message_gap()
 
     def _apply_top_status(self, *, connected: bool | None = None) -> None:
-        """更新顶栏右侧：SSE 状态文案 + 圆点。
+        """更新顶栏：左侧 SSE 状态，右侧当前模型名。
 
         逻辑：
         1. 根据 connected（默认取 controller.sse_connected）生成「已连接/未连接」文案与圆点颜色；
-        2. 写入 #top-status-bar（Rich markup）。
+        2. 右侧展示 model（来自 agent/info.llm）；
+        3. 按终端宽度填充空格，避免 Rich markup 折行。
         """
         if connected is None:
             connected = self._controller.sse_connected
         sse_text = "SSE 已连接" if connected else "SSE 未连接"
         dot = "[green]●[/green]" if connected else "[red]●[/red]"
+        left = f"● {sse_text}"
+        if not connected:
+            left = f"[red]{left}[/red]"
+        else:
+            left = f"[green]{left}[/green]"
+        llm = self._controller.llm_info
+        model = str(llm.get("model") or "").strip() or "—"
+        right = f"model · {escape(model)}"
         bar = self.query_one("#top-status-bar", Static)
-        bar.update(f"{sse_text} {dot}")
+        width = int(getattr(bar.size, "width", 0) or 0)
+        plain_left = f"● {sse_text}"
+        plain_right = f"model · {model}"
+        if width > 0:
+            gap = max(1, width - cell_len(plain_left) - cell_len(plain_right))
+            bar.update(f"{left}{' ' * gap}{right}")
+        else:
+            bar.update(f"{left}  {right}")
 
     def _reset_transcript_after_clear(self, log: RichLog) -> None:
         """清屏后重置流式状态与欢迎区行边界。"""
@@ -2297,6 +2324,9 @@ class DAgentsTuiApp(App[None]):
         if value == "/reasoning" or value.startswith("/reasoning "):
             self._handle_reasoning_command(value)
             return
+        if value == "/thinking" or value.startswith("/thinking "):
+            await self._handle_thinking_command(value)
+            return
         if value.startswith("/"):
             log = self._transcript_log()
             log.write(f"[yellow]Unknown command: {value}[/yellow]")
@@ -2321,11 +2351,16 @@ class DAgentsTuiApp(App[None]):
         """展示 /status 结构化面板。"""
         log = self._transcript_log()
         sse = "connected" if self._controller.sse_connected else "disconnected"
+        llm = self._controller.llm_info
         rows = [
             ("endpoint", self._controller.api_base),
+            ("model", str(llm.get("model") or "-")),
             ("session", str(self._controller.session_id or "-")),
             ("sse", sse),
         ]
+        thinking = format_thinking_summary(llm)
+        if thinking:
+            rows.append(("thinking", thinking))
         try:
             data = await self._controller.get_context()
             turn = str(data.get("turn_state") or "-")
@@ -2896,6 +2931,43 @@ class DAgentsTuiApp(App[None]):
         except Exception as exc:  # noqa: BLE001
             log.write(f"[red]switch session failed: {escape(str(exc))}[/red]")
 
+    async def _handle_thinking_command(self, value: str) -> None:
+        log = self._transcript_log()
+        llm = self._controller.llm_info
+        if not llm.get("thinking_supported"):
+            log.write("[yellow]当前 provider 不支持 thinking 控制（需 deepseek）[/yellow]")
+            return
+        parts = value.split()
+        if len(parts) == 1:
+            summary = format_thinking_summary(llm) or "—"
+            log.write(f"[dim]thinking: {summary}[/dim]")
+            return
+        arg = parts[1].lower()
+        patch: dict[str, str] = {}
+        if arg in {"on", "enabled", "true", "1"}:
+            patch["thinking"] = "enabled"
+        elif arg in {"off", "disabled", "false", "0"}:
+            patch["thinking"] = "disabled"
+        elif arg == "effort":
+            if len(parts) < 3:
+                log.write("[yellow]用法: /thinking effort high|max[/yellow]")
+                return
+            effort = parts[2].lower()
+            if effort not in {"high", "max"}:
+                log.write("[yellow]用法: /thinking effort high|max[/yellow]")
+                return
+            patch["reasoning_effort"] = effort
+        else:
+            log.write("[yellow]用法: /thinking on|off 或 /thinking effort high|max[/yellow]")
+            return
+        try:
+            updated = await self._controller.patch_llm_settings(patch)
+            summary = format_thinking_summary(updated) or "—"
+            log.write(f"[dim]thinking: {summary}[/dim]")
+            self._refresh_input_strip()
+        except Exception as exc:  # noqa: BLE001
+            log.write(f"[red]thinking 更新失败: {escape(str(exc))}[/red]")
+
     def _handle_reasoning_command(self, value: str) -> None:
         log = self._transcript_log()
         parts = value.split()
@@ -2931,6 +3003,8 @@ class DAgentsTuiApp(App[None]):
             ("/skill unload NAME", "卸载 skill"),
             ("/children", "子 Agent 列表"),
             ("/reasoning on|off", "推理流显示开关"),
+            ("/thinking on|off", "模型思考开关（DeepSeek）"),
+            ("/thinking effort high|max", "思考强度"),
             ("/clear", "清空服务端 context 与 transcript"),
             ("/exit", "退出（Esc 可取消在途 turn）"),
         ]

@@ -50,6 +50,12 @@ class DAgentsApiClient:
     async def get_agent_info(self) -> dict[str, Any]:
         return await self._get_json("/v1/agent/info")
 
+    async def get_llm_settings(self) -> dict[str, Any]:
+        return await self._get_json("/v1/llm/settings")
+
+    async def patch_llm_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
+        return await self._patch_json("/v1/llm/settings", patch)
+
     async def create_session(self, session_id: str | None = None) -> str:
         payload: dict[str, Any] = {}
         if session_id:
@@ -245,6 +251,19 @@ class DAgentsApiClient:
 
     async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         async with self._session.post(f"{self.api_base}{path}", json=payload) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise RuntimeError(_format_http_error(resp.status, text))
+            if not text.strip():
+                return {}
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"invalid JSON response from {path}: {text}") from exc
+            return data if isinstance(data, dict) else {}
+
+    async def _patch_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        async with self._session.patch(f"{self.api_base}{path}", json=payload) as resp:
             text = await resp.text()
             if resp.status >= 400:
                 raise RuntimeError(_format_http_error(resp.status, text))

@@ -145,7 +145,11 @@ func TestOpenAIAdapter_prepareOutbound_stripsAllReasoning(t *testing.T) {
 }
 
 func TestDeepSeekAdapter_requestExtra(t *testing.T) {
-	extra := deepSeekAdapter{}.RequestExtra()
+	adapterExtra := deepSeekAdapter{}.RequestExtra()
+	if adapterExtra != nil {
+		t.Fatalf("adapter RequestExtra should be nil, got %v", adapterExtra)
+	}
+	extra := BuildRequestExtra("deepseek", "enabled", "high")
 	if extra["thinking"] == nil {
 		t.Fatal("missing thinking extra")
 	}

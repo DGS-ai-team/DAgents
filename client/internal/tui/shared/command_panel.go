@@ -6,6 +6,7 @@ import (
 	"time"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
+	"github.com/DGS-ai-team/DAgents/client/internal/probe"
 )
 
 const (
@@ -37,7 +38,7 @@ func panelKV(label, value string) string {
 }
 
 // FormatStatusPanelBody 格式化 /status 面板正文。
-func FormatStatusPanelBody(agentID, nodeVersion, clientVersion, sessionID string, ctx *nodeapi.SessionContext) []string {
+func FormatStatusPanelBody(agentID, nodeVersion, clientVersion, sessionID string, llm nodeapi.LLMSettings, ctx *nodeapi.SessionContext) []string {
 	if ctx == nil {
 		ctx = &nodeapi.SessionContext{}
 	}
@@ -50,8 +51,9 @@ func FormatStatusPanelBody(agentID, nodeVersion, clientVersion, sessionID string
 	if ctx.RunTurnPhase != "" && ctx.RunTurnPhase != "idle" {
 		turn += " · " + ctx.RunTurnPhase
 	}
-	return []string{
+	lines := []string{
 		panelKV("agent", orDash(agentID)),
+		panelKV("model", orDash(llm.Model)),
 		panelKV("node", orDash(nodeVersion)),
 		panelKV("client", orDash(clientVersion)),
 		panelKV("session", orDash(sessionID)),
@@ -59,6 +61,14 @@ func FormatStatusPanelBody(agentID, nodeVersion, clientVersion, sessionID string
 		panelKV("queue", fmt.Sprintf("%d", ctx.QueuePending)),
 		panelKV("turn", turn),
 	}
+	if llm.ThinkingSupported {
+		lines = append(lines, panelKV("thinking", FormatLLMThinkingSummary(probe.LLMInfo{
+			ThinkingSupported: llm.ThinkingSupported,
+			Thinking:          llm.Thinking,
+			ReasoningEffort:   llm.ReasoningEffort,
+		})))
+	}
+	return lines
 }
 
 // FormatSessionsPanelBody 格式化 /sessions 面板正文。
@@ -354,6 +364,8 @@ func FormatHelpPanelBody() []string {
 		panelLine(panelKindHelp, "/tools verbose|brief", "tool 输出展开/折叠"),
 		panelLine(panelKindHelp, "/tools expand|collapse", "展开/收起最近 tool 块"),
 		panelLine(panelKindHelp, "/reasoning on|off", "推理流显示"),
+		panelLine(panelKindHelp, "/thinking on|off", "模型思考开关（DeepSeek）"),
+		panelLine(panelKindHelp, "/thinking effort high|max", "思考强度"),
 		panelLine(panelKindHelp, "/quit", "退出"),
 	}
 }

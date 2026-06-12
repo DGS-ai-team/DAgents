@@ -1,0 +1,123 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Go Node",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/node/cmd/dagents-node",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Go Client: tui",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/client/cmd/dagents-client",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml",
+        "tui"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Go Client: tui (auto Node)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/client/cmd/dagents-client",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml",
+        "tui"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "dagents-node: background"
+    },
+    {
+      "name": "Go Client: tui --plain",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/client/cmd/dagents-client",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml",
+        "tui",
+        "--plain"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Go Client: probe",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/client/cmd/dagents-client",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml",
+        "probe"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python Client: chat",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.cli.main",
+      "args": [
+        "chat",
+        "--config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Python Client: chat (auto Node)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.cli.main",
+      "args": [
+        "chat",
+        "--config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "preLaunchTask": "dagents-node: background"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Go: Node + Client TUI",
+      "configurations": ["Go Node", "Go Client: tui"],
+      "stopAll": true
+    },
+    {
+      "name": "Python: Node + Client chat",
+      "configurations": ["Go Node", "Python Client: chat"],
+      "stopAll": true
+    }
+  ]
+}

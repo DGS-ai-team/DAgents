@@ -115,12 +115,14 @@ type LocalConfig struct {
 
 // LLMConfig 为 turn loop 使用的模型配置。
 type LLMConfig struct {
-	Provider     string `yaml:"provider"`
-	BaseURL      string `yaml:"base_url"`
-	Model        string `yaml:"model"`
-	APIKeyEnv    string `yaml:"api_key_env"`
-	Mock         bool   `yaml:"mock"`
-	MaxToolLoops int    `yaml:"max_tool_loops"`
+	Provider        string `yaml:"provider"`
+	BaseURL         string `yaml:"base_url"`
+	Model           string `yaml:"model"`
+	APIKeyEnv       string `yaml:"api_key_env"`
+	Mock            bool   `yaml:"mock"`
+	MaxToolLoops    int    `yaml:"max_tool_loops"`
+	Thinking        string `yaml:"thinking"`         // deepseek：enabled | disabled
+	ReasoningEffort string `yaml:"reasoning_effort"` // deepseek + thinking=enabled：high | max
 }
 
 // ManageConfig 控制是否向 Manage 注册；默认 enabled=false。

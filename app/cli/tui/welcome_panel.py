@@ -32,6 +32,18 @@ def _skills_bloat_warning_lines(context_summary: dict | None) -> tuple[str, ...]
     )
 
 
+def format_thinking_summary(llm_info: dict | None) -> str | None:
+    if not llm_info or not llm_info.get("thinking_supported"):
+        return None
+    thinking = str(llm_info.get("thinking") or "").strip().lower()
+    if thinking in {"disabled", "off"}:
+        return "关闭"
+    if thinking in {"enabled", "on"}:
+        effort = str(llm_info.get("reasoning_effort") or "high").strip() or "high"
+        return f"开启 · {effort}"
+    return None
+
+
 def build_welcome_panel(
     *,
     api_base: str,

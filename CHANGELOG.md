@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-06-11
+
+**0.x 预览**：DeepSeek **思考开关/强度** 运行时 API；双 TUI 顶栏展示模型、输入条展示 thinking；VS Code 调试配置。
+
+### 新增
+
+- **LLM 运行时 API**：`GET/PATCH /v1/llm/settings`；`GET /v1/agent/info` 嵌套 `llm`（model、thinking、reasoning_effort）；DeepSeek `thinking` + `reasoning_effort`（high/max）热更新。
+- **Client `/thinking`**：Go / Python TUI 与 REPL 调用 Node API 开关思考与调整强度（`/reasoning` 仍仅控制推理流**展示**）。
+- **TUI 状态展示**：顶栏右侧 **model**；输入框上方 usage **左侧** thinking 状态。
+- **开发调试**：`.vscode/launch.json` + `tasks.json`（Go/Python Client 与 Node 联调）。
+
+### 变更
+
+- `config.example.yaml` 补充 `llm.thinking` / `llm.reasoning_effort` 说明；欢迎 Panel 不再重复展示 model/thinking。
+
+（Git **tag**：`v0.3.3`。）
+
 ## [0.3.2] - 2026-06-11
 
 ### 修复

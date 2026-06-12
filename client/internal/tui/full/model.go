@@ -425,10 +425,7 @@ func (m *model) View() string {
 func (m *model) renderInputStrip() string {
 	_, pending := m.children.counts()
 	left := m.renderInputStripStyled()
-	right := tuishared.FormatInputStripUsage(m.usageStrip)
-	if right == "" {
-		right = tuishared.FormatInputStripTokens(m.messagesTotalTokens)
-	}
+	right := m.renderInputStripRight()
 	width := m.viewport.Width
 	if width <= 0 {
 		width = 80
@@ -443,6 +440,18 @@ func (m *model) renderInputStrip() string {
 		rendered += strings.Repeat(" ", width-lipgloss.Width(rendered))
 	}
 	return rendered
+}
+
+func (m *model) renderInputStripRight() string {
+	var thinking string
+	if m.probe != nil && m.probe.LLM.ThinkingSupported {
+		thinking = tuishared.FormatLLMThinkingSummary(m.probe.LLM)
+	}
+	usage := tuishared.FormatInputStripUsage(m.usageStrip)
+	if usage == "" {
+		usage = tuishared.FormatInputStripTokens(m.messagesTotalTokens)
+	}
+	return tuishared.FormatInputStripRight(thinking, usage)
 }
 
 func (m *model) renderStatusBar() string {
@@ -469,13 +478,16 @@ func (m *model) renderStatusBar() string {
 	if width <= 0 {
 		width = 80
 	}
-	sid := m.currentSession()
-	right := fmt.Sprintf("session=%s", sid)
-	if width < 100 {
-		right = fmt.Sprintf("sid=%s", truncateID(sid, 8))
+	modelName := "—"
+	if m.probe != nil && strings.TrimSpace(m.probe.LLM.Model) != "" {
+		modelName = m.probe.LLM.Model
 	}
-	if m.probe != nil && m.probe.AgentID != "" && width >= 100 {
-		right = fmt.Sprintf("agent=%s · %s", truncateID(m.probe.AgentID, 12), right)
+	sid := m.currentSession()
+	right := fmt.Sprintf("model=%s", truncateID(modelName, 24))
+	if width < 100 {
+		right += fmt.Sprintf(" · sid=%s", truncateID(sid, 8))
+	} else {
+		right += fmt.Sprintf(" · session=%s", sid)
 	}
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {

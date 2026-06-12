@@ -110,6 +110,7 @@ class SessionController:
         self._token_refresh_task: asyncio.Task[None] | None = None # 上下文Token刷新任务
         self._logger = get_session_controller_logger()
         self._resume_submit_seq = 0
+        self._llm_info: dict[str, Any] = {}
 
     def _event_seq(self, event: StreamEvent) -> int:
         """从 SSE id 或 envelope.seq 解析事件序号。"""
@@ -169,12 +170,30 @@ class SessionController:
     def awaiting_user_turn(self) -> bool:
         return self._awaiting_user_turn
 
+    @property
+    def llm_info(self) -> dict[str, Any]:
+        return dict(self._llm_info)
+
+    async def patch_llm_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
+        """PATCH /v1/llm/settings 并更新本地缓存。"""
+        assert self._client is not None
+        result = await self._client.patch_llm_settings(patch)
+        if isinstance(result, dict):
+            self._llm_info = result
+        return result
+
     async def start(self) -> None:
         """连接 Agent Node 并启动 SSE pump 与 render 循环。"""
         self._client = DAgentsApiClient(self.api_base)
         # 检查后端健康状态
         if not await self._client.health():
             raise RuntimeError(f"node health check failed: {self.api_base}/health")
+        try:
+            info = await self._client.get_agent_info()
+            llm = info.get("llm")
+            self._llm_info = llm if isinstance(llm, dict) else {}
+        except Exception:
+            self._llm_info = {}
         self._sse_ready.clear()
         # 创建会话
         self.session_id = await self._client.create_session(self.initial_session_id)

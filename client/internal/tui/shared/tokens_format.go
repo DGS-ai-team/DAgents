@@ -121,6 +121,19 @@ func FormatInputStripUsage(s UsageStripSnapshot) string {
 	return text
 }
 
+// FormatInputStripRight 组合 thinking 摘要与 usage/token（thinking 紧贴 usage 左侧）。
+func FormatInputStripRight(thinkingSummary, usage string) string {
+	thinkingSummary = strings.TrimSpace(thinkingSummary)
+	usage = strings.TrimSpace(usage)
+	if thinkingSummary != "" && usage != "" {
+		return "thinking " + thinkingSummary + " · " + usage
+	}
+	if thinkingSummary != "" {
+		return "thinking " + thinkingSummary
+	}
+	return usage
+}
+
 // FormatInputStripLine 组合左侧状态与右侧 usage/token，按 cell 宽度右对齐；必要时截断左侧，避免 usage 被折行拆开。
 func FormatInputStripLine(left, right string, width int) string {
 	left = strings.TrimRight(left, " ")

@@ -3,9 +3,30 @@ package shared
 import (
 	"fmt"
 	"os/user"
+	"strings"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
+	"github.com/DGS-ai-team/DAgents/client/internal/probe"
 )
+
+// FormatLLMThinkingSummary 格式化 thinking 运行时状态（供欢迎区与 /status）。
+func FormatLLMThinkingSummary(llm probe.LLMInfo) string {
+	if !llm.ThinkingSupported {
+		return "—"
+	}
+	switch strings.ToLower(strings.TrimSpace(llm.Thinking)) {
+	case "disabled", "off":
+		return "关闭"
+	case "enabled", "on":
+		effort := strings.TrimSpace(llm.ReasoningEffort)
+		if effort == "" {
+			effort = "high"
+		}
+		return "开启 · " + effort
+	default:
+		return "—"
+	}
+}
 
 // FormatWelcomePanelBody 构造启动欢迎面板正文（对齐 Python welcome_panel 信息密度）。
 func FormatWelcomePanelBody(endpoint, agentID, clientVersion, sessionID string) []string {

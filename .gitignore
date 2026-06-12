@@ -27,7 +27,9 @@ docs/private-enterprise-positioning.md
 
 # editor / IDE
 .cursor/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 
 # local worktrees
 .worktrees/

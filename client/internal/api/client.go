@@ -60,12 +60,29 @@ func (c *Client) CreateSession(ctx context.Context, sessionID string) (string, e
 	return resp.SessionID, nil
 }
 
+// LLMSettings 为 Node LLM 运行时参数（GET/PATCH /v1/llm/settings 与 agent/info.llm）。
+type LLMSettings struct {
+	Provider          string `json:"provider"`
+	Model             string `json:"model"`
+	Mock              bool   `json:"mock"`
+	ThinkingSupported bool   `json:"thinking_supported"`
+	Thinking          string `json:"thinking,omitempty"`
+	ReasoningEffort   string `json:"reasoning_effort,omitempty"`
+}
+
+// LLMSettingsPatch 为 PATCH /v1/llm/settings 请求体。
+type LLMSettingsPatch struct {
+	Thinking        *string `json:"thinking,omitempty"`
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+}
+
 // AgentInfo 为 GET /v1/agent/info 响应。
 type AgentInfo struct {
-	AgentID          string   `json:"agent_id"`
-	ExposeToPeers    bool     `json:"expose_to_peers"`
-	Capabilities     []string `json:"capabilities"`
-	ManageRegistered bool     `json:"manage_registered"`
+	AgentID          string      `json:"agent_id"`
+	ExposeToPeers    bool        `json:"expose_to_peers"`
+	Capabilities     []string    `json:"capabilities"`
+	ManageRegistered bool        `json:"manage_registered"`
+	LLM              LLMSettings `json:"llm"`
 }
 
 // SessionSummary 为 GET /v1/sessions 列表项。
@@ -173,6 +190,24 @@ func (c *Client) GetAgentInfo(ctx context.Context) (*AgentInfo, error) {
 		return nil, err
 	}
 	return &info, nil
+}
+
+// GetLLMSettings 调用 GET /v1/llm/settings。
+func (c *Client) GetLLMSettings(ctx context.Context) (*LLMSettings, error) {
+	var settings LLMSettings
+	if err := c.getJSON(ctx, "/v1/llm/settings", &settings); err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// PatchLLMSettings 调用 PATCH /v1/llm/settings。
+func (c *Client) PatchLLMSettings(ctx context.Context, patch LLMSettingsPatch) (*LLMSettings, error) {
+	var settings LLMSettings
+	if err := c.patchJSON(ctx, "/v1/llm/settings", patch, &settings); err != nil {
+		return nil, err
+	}
+	return &settings, nil
 }
 
 // ListSessions 调用 GET /v1/sessions。
@@ -472,6 +507,38 @@ func (c *Client) postJSON(ctx context.Context, path string, body any, out any) e
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("%s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	if out != nil && len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, out); err != nil {
+			return fmt.Errorf("decode %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func (c *Client) patchJSON(ctx context.Context, path string, body any, out any) error {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.base+path, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}

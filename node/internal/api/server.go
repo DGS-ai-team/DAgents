@@ -34,6 +34,7 @@ import (
 // Server 承载 Agent Node HTTP 路由与运行时依赖。
 type Server struct {
 	cfg           *config.Config
+	llmRuntime    *llm.RuntimeSettings
 	logger        *slog.Logger
 	mux           *http.ServeMux
 	sessions      *session.Manager // per-session 队列与 turn consumer
@@ -105,7 +106,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	o := serverOptions{llmClient: llm.NewFromConfig(cfg)}
+	llmRuntime := llm.NewRuntimeSettings(cfg)
+	o := serverOptions{llmClient: llm.NewFromConfig(cfg, llmRuntime)}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -240,6 +242,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	s := &Server{
 		cfg:           cfg,
+		llmRuntime:    llmRuntime,
 		logger:        logger,
 		mux:           http.NewServeMux(),
 		stream:        hub,
@@ -268,6 +271,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.registerTriggerRoutes()
 	s.registerChildAgentRoutes()
 	s.registerPolicyRoutes()
+	s.registerLLMRoutes()
 	return s
 }
 
@@ -355,10 +359,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 type agentInfoResponse struct {
-	AgentID          string   `json:"agent_id"`
-	ExposeToPeers    bool     `json:"expose_to_peers"`
-	Capabilities     []string `json:"capabilities"`
-	ManageRegistered bool     `json:"manage_registered"`
+	AgentID          string              `json:"agent_id"`
+	ExposeToPeers    bool                `json:"expose_to_peers"`
+	Capabilities     []string            `json:"capabilities"`
+	ManageRegistered bool                `json:"manage_registered"`
+	LLM              llm.LLMSettingsView `json:"llm"`
 }
 
 func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
@@ -366,11 +371,16 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 	if s.registrar != nil {
 		registered = s.registrar.Registered()
 	}
+	llmView := llm.LLMSettingsView{}
+	if s.llmRuntime != nil {
+		llmView = s.llmRuntime.Snapshot()
+	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
 		AgentID:          s.cfg.AgentID,
 		ExposeToPeers:    s.cfg.ExposeToPeers,
 		Capabilities:     s.cfg.Capabilities(),
 		ManageRegistered: registered,
+		LLM:              llmView,
 	})
 }
 
