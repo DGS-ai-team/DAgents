@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-11
+
+### 修复
+
+- **升级/重装不覆盖用户数据**：Linux `install.sh` 与 Windows 安装包升级时始终更新 `bin/` 与启动脚本，`.runtime/` 改为**仅补缺失路径**（`cp -n` / Inno `onlyifdoesntexist`），保留已有 policy、skills、prompt_context、`memory/`、`history/`、`logs/` 等；Windows 升级前会先 `node shutdown`。
+
+（Git **tag**：`v0.3.2`。）
+
 ## [0.3.1] - 2026-06-11
 
 **0.x 预览**：**Register Center 移除**，A2A 统一经 **Manage**；Console 迁 **Vue 3**；Go TUI 等待态与工具展示增强。

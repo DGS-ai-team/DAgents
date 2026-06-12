@@ -29,8 +29,16 @@ UninstallDisplayIcon={app}\bin\dagents-node.exe
 ChangesEnvironment=yes
 
 [Files]
-Source: "..\..\bundle\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 二进制与安装脚本：升级时始终覆盖
+Source: "..\..\bundle\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "dagents.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\bundle\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\bundle\config.example.yaml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\bundle\.env.example"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\bundle\README.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\bundle\VERSION"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; .runtime：仅补缺失路径，不覆盖已有 policy / skills / prompt_context 等
+Source: "..\..\bundle\.runtime\*"; DestDir: "{app}\.runtime"; Flags: recursesubdirs onlyifdoesntexist createallsubdirs
 
 [Icons]
 Name: "{group}\DAgents Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"
@@ -49,6 +57,17 @@ Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "Verify instal
 function PathContains(const Path, Dir: string): Boolean;
 begin
   Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Path) + ';') <> 0;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+  AppDir: string;
+begin
+  Result := '';
+  AppDir := ExpandConstant('{app}');
+  if FileExists(AppDir + '\dagents.cmd') then
+    Exec(AppDir + '\dagents.cmd', 'node shutdown', AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

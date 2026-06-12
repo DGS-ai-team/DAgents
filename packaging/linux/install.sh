@@ -28,7 +28,7 @@ usage() {
 
 说明:
   - 若 PREFIX 下已有 .runtime/node.pid，安装前先停止对应 Node（优先 dagents node shutdown）
-  - 拷贝 bin/、.runtime/、scripts/、配置示例与 dagents 启动脚本
+  - 升级/重装：bin/、scripts/、dagents 启动脚本与配置示例始终更新；.runtime/ 仅补缺失路径（不覆盖已有 policy/skills/prompt_context 等）
   - 在 BIN_DIR 创建 dagents 符号链接
   - 写入 DAGENTS_HOME 与 PATH（含 `bin/`、`.runtime/scripts/`；/etc/profile.d/dagents.sh 或 ~/.profile）
 EOF
@@ -122,11 +122,30 @@ copy_tree() {
   cp -a "${src}/." "${dst}/"
 }
 
+# 用户运行时数据目录：安装包不含内容，仅确保存在，不从 bundle 覆盖。
+RUNTIME_USER_DATA_DIRS=(memory history logs agent)
+
+ensure_runtime_user_dirs() {
+  local d
+  for d in "${RUNTIME_USER_DATA_DIRS[@]}"; do
+    mkdir -p "${PREFIX}/.runtime/${d}"
+  done
+}
+
+# .runtime 种子：仅拷贝目标尚不存在的路径（GNU cp -n），升级时不覆盖用户 policy/skills 等。
+copy_runtime_seed() {
+  local src="${SOURCE}/.runtime" dst="${PREFIX}/.runtime"
+  ensure_runtime_user_dirs
+  [[ -d "${src}" ]] || return 0
+  mkdir -p "${dst}"
+  cp -a -n "${src}/." "${dst}/"
+}
+
 install_files() {
   info "installing to ${PREFIX}"
   mkdir -p "${PREFIX}/bin" "${PREFIX}/.runtime" "${PREFIX}/scripts"
   copy_tree "${SOURCE}/bin" "${PREFIX}/bin"
-  copy_tree "${SOURCE}/.runtime" "${PREFIX}/.runtime"
+  copy_runtime_seed
   copy_tree "${SOURCE}/scripts" "${PREFIX}/scripts"
   install -m 0755 "${SOURCE}/dagents" "${PREFIX}/dagents"
   if [[ -f "${SOURCE}/config.example.yaml" ]]; then
@@ -137,6 +156,9 @@ install_files() {
   fi
   if [[ -f "${SOURCE}/README.txt" ]]; then
     install -m 0644 "${SOURCE}/README.txt" "${PREFIX}/README.txt"
+  fi
+  if [[ -f "${SOURCE}/VERSION" ]]; then
+    install -m 0644 "${SOURCE}/VERSION" "${PREFIX}/VERSION"
   fi
   if [[ ! -f "${PREFIX}/config.yaml" && -f "${PREFIX}/config.example.yaml" ]]; then
     cp "${PREFIX}/config.example.yaml" "${PREFIX}/config.yaml"
