@@ -139,7 +139,16 @@ func newRuntimeWithPublisher(
 		turnOpts.MaxToolLoops,
 		promptcontext.NewReader(turnOpts.RuntimeDir),
 		journal,
-		hooks.DuplicateConfigOrDefault(turnOpts.DuplicateToolCall),
+		hooks.RuntimeConfig{
+			Duplicate: hooks.DuplicateConfigOrDefault(turnOpts.DuplicateToolCall),
+			ToolResult: hooks.ToolResultConfigOrDefault(hooks.ToolResultConfig{
+				Enabled:         turnOpts.ToolResult.Enabled,
+				MaxHistoryTokens: turnOpts.ToolResult.MaxHistoryTokens,
+				SpillSubdir:     turnOpts.ToolResult.SpillSubdir,
+				Tools:           turnOpts.ToolResult.Tools,
+				FSRoot:          turnOpts.FSRoot,
+			}),
+		},
 		logger,
 	)
 	// 设置工具结果入队器

@@ -75,12 +75,12 @@
 
 | 符号 | 说明 |
 |------|------|
-| `modelContentMaxChars` | 写入模型的 tool 结果截断上限 |
 | `AsyncToolResultInput` | 异步回灌输入（job_id、status、content 等） |
-| `buildAsyncToolMessages` | 按尾部形态生成 assistant/tool/user 消息（user `name=async_tool`） |
+| `buildAsyncToolMessages` | async 回灌消息；经 `tool.after_each` 拆分 SSE 全文 / history 摘要 |
+| `splitToolResult` | 同步 tool：调用 `RunToolAfterEach` |
+| `ForClientContent` | async SSE 全文字段 |
 | `classifyToolResultTail` | 判断 history 尾部形态 |
 | `shouldContinueAfterAsyncTool` | 回灌后是否继续 `RunToolMessageTurn` |
-| `packageToolResult` / `clipMiddle` | 工具结果打包与截断 |
 
 ## approval_payload.go
 

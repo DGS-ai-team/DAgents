@@ -47,7 +47,7 @@ type bashStreamCompressMeta struct {
 	runeTruncated bool
 }
 
-func compressBashStream(cfg BashCompressConfig, text string, maxRunes int) (string, bashStreamCompressMeta) {
+func sanitizeBashStream(cfg BashCompressConfig, text string) (string, bashStreamCompressMeta) {
 	inRunes := utf8.RuneCountInString(text)
 	meta := bashStreamCompressMeta{
 		enabled: cfg.Enabled,
@@ -63,9 +63,16 @@ func compressBashStream(cfg BashCompressConfig, text string, maxRunes int) (stri
 		out = sanitizeCLIOutput(out)
 		meta.sanitized = out != before
 	}
-
-	out, meta.runeTruncated = clipTextRunes(out, maxRunes)
 	meta.outRunes = utf8.RuneCountInString(out)
+	return out, meta
+}
+
+func compressBashStream(cfg BashCompressConfig, text string, maxRunes int) (string, bashStreamCompressMeta) {
+	out, meta := sanitizeBashStream(cfg, text)
+	if maxRunes > 0 {
+		out, meta.runeTruncated = clipTextRunes(out, maxRunes)
+		meta.outRunes = utf8.RuneCountInString(out)
+	}
 	return out, meta
 }
 

@@ -170,6 +170,13 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			Enabled:       cfg.DuplicateToolCallHookEnabled(),
 			WindowSeconds: cfg.DuplicateToolCallWindowSeconds(),
 		},
+		ToolResult: hooks.ToolResultConfig{
+			Enabled:         cfg.ToolResultHookEnabled(),
+			MaxHistoryTokens: cfg.ToolResultMaxHistoryTokens(),
+			SpillSubdir:     cfg.ToolResultSpillSubdir(),
+			Tools:           cfg.ToolResultHookTools(),
+			FSRoot:          cfg.FSRoot,
+		},
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:                   cfg.ChildAgents.Enabled,

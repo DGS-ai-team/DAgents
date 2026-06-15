@@ -72,7 +72,7 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 }
 
 func TestChildSystemPromptBuilder_usedByOrchestrator(t *testing.T) {
-	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.DefaultDuplicateConfig(), nil)
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
 	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("scan logs"))
 	prompt := orch.buildSystemPrompt("child-xyz")
 	if !containsAll(prompt, "scan logs", "child-xyz", "临时子 Agent") {
@@ -88,7 +88,7 @@ func TestChildSystemPromptBuilder_includesLoadedSkills(t *testing.T) {
 	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{
 		Catalog: catalog,
 		Get:     func() []skills.LoadedSkill { return loaded },
-	}, DefaultMaxToolLoops(), nil, nil, hooks.DefaultDuplicateConfig(), nil)
+	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
 	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("review"))
 	prompt := orch.buildSystemPrompt("child-xyz")
 	if !containsAll(prompt, "Write clearly.", "已加载 skills") {

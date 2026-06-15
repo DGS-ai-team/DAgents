@@ -53,7 +53,7 @@ type ToolsConfig struct {
 	BashCompress BashCompressConfig `yaml:"bash_compress"`
 }
 
-// BashCompressConfig 控制 bash_run 输出压缩（P0：清洗 + rune 截断）。
+// BashCompressConfig 控制 bash_run 输出清洗（ANSI、重复行）；长度限制由 tool.after_each 落盘摘要负责。
 type BashCompressConfig struct {
 	// Enabled 为 nil 时默认 true。
 	Enabled              *bool `yaml:"enabled"`
@@ -105,6 +105,21 @@ type CompressionConfig struct {
 // HooksConfig 控制 Node turn Hook 行为。
 type HooksConfig struct {
 	DuplicateToolCall DuplicateToolCallHookConfig `yaml:"duplicate_tool_call"`
+	ToolResult        ToolResultHookConfig        `yaml:"tool_result"`
+}
+
+// ToolResultHookConfig 控制 tool.after_each 结果摘要与落盘（WS3 bash 组首版）。
+type ToolResultHookConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled *bool `yaml:"enabled"`
+	// MaxHistoryTokens 写入 history 的 token 预算（DeepSeek 粗算：汉字×0.6、其它×0.3）；省略时 12000。
+	MaxHistoryTokens int `yaml:"max_history_tokens"`
+	// MaxHistoryRunes 已废弃，请改用 max_history_tokens。
+	MaxHistoryRunes int `yaml:"max_history_runes,omitempty"`
+	// SpillSubdir 相对 fs_root 的落盘子目录，默认 .runtime/tool_outputs。
+	SpillSubdir string `yaml:"spill_subdir"`
+	// Tools 启用摘要的工具名；省略时默认仅 bash_run。
+	Tools []string `yaml:"tools"`
 }
 
 // DuplicateToolCallHookConfig 控制 rule+auto 路径的重复 tool call 检测。
@@ -131,6 +146,51 @@ func (c *Config) DuplicateToolCallWindowSeconds() int {
 		return defaultDuplicateToolCallWindowSeconds
 	}
 	return c.Hooks.DuplicateToolCall.WindowSeconds
+}
+
+const defaultToolResultMaxHistoryTokens = 12000
+const defaultToolResultSpillSubdir = ".runtime/tool_outputs"
+
+// ToolResultHookEnabled 是否启用 tool 结果摘要落盘。
+func (c *Config) ToolResultHookEnabled() bool {
+	if c == nil || c.Hooks.ToolResult.Enabled == nil {
+		return true
+	}
+	return *c.Hooks.ToolResult.Enabled
+}
+
+// ToolResultMaxHistoryTokens 返回 history token 预算（默认 12000，DeepSeek 粗算）。
+func (c *Config) ToolResultMaxHistoryTokens() int {
+	if c == nil {
+		return defaultToolResultMaxHistoryTokens
+	}
+	if c.Hooks.ToolResult.MaxHistoryTokens > 0 {
+		return c.Hooks.ToolResult.MaxHistoryTokens
+	}
+	// 兼容旧配置：按 0.6 将 runes 近似换算为 tokens
+	if c.Hooks.ToolResult.MaxHistoryRunes > 0 {
+		return int(float64(c.Hooks.ToolResult.MaxHistoryRunes) * 0.6)
+	}
+	return defaultToolResultMaxHistoryTokens
+}
+
+// ToolResultSpillSubdir 返回落盘相对目录。
+func (c *Config) ToolResultSpillSubdir() string {
+	if c == nil {
+		return defaultToolResultSpillSubdir
+	}
+	if s := strings.TrimSpace(c.Hooks.ToolResult.SpillSubdir); s != "" {
+		return s
+	}
+	return defaultToolResultSpillSubdir
+}
+
+// ToolResultHookTools 返回启用摘要的工具列表。
+func (c *Config) ToolResultHookTools() []string {
+	if c == nil || len(c.Hooks.ToolResult.Tools) == 0 {
+		return []string{"bash_run"}
+	}
+	return append([]string(nil), c.Hooks.ToolResult.Tools...)
 }
 
 // ListenConfig 描述 Agent Node HTTP 监听地址。

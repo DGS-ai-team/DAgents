@@ -164,7 +164,7 @@ func (o *Orchestrator) HandleAsyncToolResult(
 	if setState == nil {
 		setState = func(State) {}
 	}
-	built := buildAsyncToolMessages(input)
+	built := o.buildAsyncToolMessages(sessionID, input)
 	tail := classifyToolResultTail(*history)
 	switch tail {
 	case tailTool:
@@ -209,7 +209,7 @@ func asyncToolResultSSEPayload(built asyncToolMessages) map[string]any {
 	payload := map[string]any{
 		"tool_call_id": built.ToolCallID,
 		"tool_name":    built.ToolName,
-		"content":      built.ToolMessage.Content,
+		"content":      built.ForClientContent,
 		"partial":      false,
 		"async_status": built.Status,
 		"display_type": "normal_text",
@@ -303,15 +303,18 @@ func NewOrchestrator(
 	maxToolLoops int,
 	promptCtx *promptcontext.Reader,
 	journal *historypkg.Journal,
-	duplicateCfg hooks.DuplicateConfig,
+	hookCfg hooks.RuntimeConfig,
 	logger *slog.Logger,
 ) *Orchestrator {
 	if policyEngine == nil {
 		policyEngine, _ = policy.LoadFile("")
 	}
 	toolExecLog := &hooks.ToolExecutionLog{}
-	dupCfg := hooks.DuplicateConfigOrDefault(duplicateCfg)
-	toolHooks := hooks.NewRegistry(policyEngine, dupCfg)
+	hookCfg = hooks.RuntimeConfigOrDefault(hookCfg)
+	if strings.TrimSpace(hookCfg.ToolResult.FSRoot) == "" {
+		hookCfg.ToolResult.FSRoot = fsRoot
+	}
+	toolHooks := hooks.NewRegistry(policyEngine, hookCfg)
 	toolHooks.SetToolExecutionLog(toolExecLog)
 	if maxToolLoops <= 0 {
 		maxToolLoops = DefaultMaxToolLoops()

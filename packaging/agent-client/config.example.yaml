@@ -93,7 +93,7 @@ tools:
   # file_encoding: gbk   # read/write/search_replace/grep 默认磁盘编码；省略时 Windows=gbk，其它=utf-8
   bash_compress:
     enabled: true
-    max_output_chars: 12000       # stdout 最大 rune 数
+    max_output_chars: 12000       # 仅用于兼容/测试 clip 路径；bash_run 生产路径由 tool_result 摘要
     max_output_chars_stderr: 16000
 
 # 临时子 Agent（见 docs/architecture/child-agent-tools.md）
@@ -111,3 +111,9 @@ hooks:
   duplicate_tool_call:
     enabled: true
     window_seconds: 60
+  tool_result:
+    enabled: true
+    max_history_tokens: 12000
+    spill_subdir: .runtime/tool_outputs
+    tools:
+      - bash_run

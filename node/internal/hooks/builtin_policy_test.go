@@ -76,7 +76,7 @@ func TestPolicyToolHookModes(t *testing.T) {
 
 func TestRegistrySetPolicyEngine(t *testing.T) {
 	engine, _ := policy.LoadFile("")
-	reg := NewRegistry(engine, DefaultDuplicateConfig())
+	reg := NewRegistry(engine, RuntimeConfig{Duplicate: DefaultDuplicateConfig()})
 
 	out := reg.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{ToolName: "read_file"})
 	if out.Action != policy.ActionAuto {

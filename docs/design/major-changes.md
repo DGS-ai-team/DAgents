@@ -106,7 +106,7 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 | **WS1** | 后台 job 文案 + status 保持瞬时（不做 `wait_seconds`） | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) §5 | **已落地** |
 | **WS6** | `tool.before_each` + 重复调用审批 | [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | **已落地** |
 | **WS2** | status 工具统一 wait（子 Agent 等） | 合入总览 §4 | 未开始 |
-| **WS3** | tool 结果 budget / package | 合入总览 §3.2 | 未开始 |
+| **WS3** | bash 组 tool.after_each 落盘摘要 | 合入总览 §3.2.1 | **bash 已落地** |
 | **WS4** | schema 前缀稳定（enrich 瘦身） | 合入总览 §3.3 | 未开始 |
 | **WS5** | 度量（poll_count、tool_turns） | — | 未开始 |
 

@@ -263,15 +263,11 @@ func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, st
 	}
 
 	cfg := params.compress.normalized()
-	outText, outMeta := compressBashStream(cfg, stdout, cfg.MaxOutputChars)
-	errLimit := stderrMaxRunes(cfg, exitCode)
-	errText, errMeta := compressBashStream(cfg, stderr, errLimit)
+	outText, outMeta := sanitizeBashStream(cfg, stdout)
+	errText, errMeta := sanitizeBashStream(cfg, stderr)
 	stats := aggregateBashCompressStats(outMeta, errMeta)
 
 	header := fmt.Sprintf("[BASH_RESULT] exit=%d", exitCode)
-	if outMeta.runeTruncated || errMeta.runeTruncated {
-		header += " truncated"
-	}
 
 	parts := []string{
 		header,

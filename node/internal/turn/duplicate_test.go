@@ -43,7 +43,7 @@ func TestDuplicateToolCallTriggersStandardApproval(t *testing.T) {
 	}
 	hub := stream.NewHub(8, logx.Discard())
 	reg := testRegistry(t)
-	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{}, reg, engine, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.DefaultDuplicateConfig(), logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{}, reg, engine, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 
 	raw := `{"job_id":"j1","call_purpose":"poll"}`
 	fp := hooks.ToolArgsFingerprint("background_job_status", raw)
@@ -88,7 +88,7 @@ func TestDuplicateToolCallResumeUsesStandardApproval(t *testing.T) {
 	}
 	hub := stream.NewHub(8, logx.Discard())
 	reg := testRegistry(t)
-	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{}, reg, engine, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.DefaultDuplicateConfig(), logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{}, reg, engine, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 
 	raw := `{"job_id":"j1"}`
 	fp := hooks.ToolArgsFingerprint("background_job_status", raw)

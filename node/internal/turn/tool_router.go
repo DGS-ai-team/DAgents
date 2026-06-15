@@ -269,12 +269,13 @@ func (o *Orchestrator) executeAutoBatch(
 		return err
 	}
 	for _, item := range results {
-		o.publishToolResult(sessionID, item.tc, item.content, item.rejected, item.extra)
-		o.recordToolExecutionSuccess(item.tc, item.content, item.rejected)
+		forClient, forHistory := o.splitToolResult(sessionID, item.tc, item.content)
+		o.publishToolResult(sessionID, item.tc, forClient, item.rejected, item.extra)
+		o.recordToolExecutionSuccess(item.tc, forClient, item.rejected)
 		o.appendHistory(sessionID, history, llm.Message{
 			Role:       "tool",
 			ToolCallID: item.tc.ID,
-			Content:    item.content,
+			Content:    forHistory,
 		})
 	}
 	return nil
@@ -312,9 +313,10 @@ func (o *Orchestrator) executeTool(
 	plan *clihitl.ApprovalPlan,
 ) error {
 	content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
-	o.publishToolResult(sessionID, tc, content, rejected, extra)
-	o.recordToolExecutionSuccess(tc, content, rejected)
-	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
+	forClient, forHistory := o.splitToolResult(sessionID, tc, content)
+	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
+	o.recordToolExecutionSuccess(tc, forClient, rejected)
+	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: forHistory})
 	return nil
 }
 

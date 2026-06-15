@@ -2,7 +2,7 @@
 
 本文描述 **Go Agent Node** 在 turn 全链路中引入 **统一 Hook 框架** 的目标边界、阶段锚点、核心接口、配置形态与落地顺序。实现以本文件为设计基线；与代码冲突时以 **Git / CHANGELOG** 为准。
 
-**状态（2026-06）**：**设计稿**；尚未实现 `node/internal/hooks/`。现有能力以分散回调与专用模块存在（见 §2）。
+**状态（2026-06）**：**部分落地** — `tool.before_each`（policy + duplicate）、**`tool.after_each`**（`ToolResultPackageHook`，WS3 bash 组）已在 `node/internal/hooks/`。其余锚点仍为设计稿。
 
 **首版落地候选**：[tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)（`tool.before_each` + policy 三档收敛；**duplicate 仅 `rule`+auto** + 三选项审批）。
 

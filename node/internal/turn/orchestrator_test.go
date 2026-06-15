@@ -66,7 +66,7 @@ func testOrchestrator(t *testing.T, hub *stream.Hub, client llm.Client) *Orchest
 	t.Helper()
 	reg := testRegistry(t)
 	pol, _ := policy.LoadFile("")
-	return NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.DefaultDuplicateConfig(), logx.Discard())
+	return NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 }
 
 func TestRunMessageTurn(t *testing.T) {
@@ -115,7 +115,7 @@ func TestRunMessageTurnToolLoop(t *testing.T) {
 	ctx := context.Background()
 	_, _ = reg.Execute(ctx, "write_file", `{"path":"hello.txt","content":"file-body"}`)
 
-	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{EnableTools: true}, reg, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.DefaultDuplicateConfig(), logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{EnableTools: true}, reg, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
@@ -257,7 +257,7 @@ resumeApproval:
 func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	reg := testRegistry(t)
-	orch := NewOrchestrator("a1", t.TempDir(), hub, alwaysToolMock{}, reg, nil, SkillAccess{}, 2, nil, nil, hooks.DefaultDuplicateConfig(), logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), hub, alwaysToolMock{}, reg, nil, SkillAccess{}, 2, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
@@ -308,7 +308,7 @@ func TestRunMessageTurnMultiToolParallelOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch := NewOrchestrator("a1", root, hub, &dualReadFileMock{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.DefaultDuplicateConfig(), logx.Discard())
+	orch := NewOrchestrator("a1", root, hub, &dualReadFileMock{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 
 	var history []llm.Message
 	pending, _, err := orch.RunMessageTurn(ctx, "sess-1", &history, "读两个文件", nil, 0)

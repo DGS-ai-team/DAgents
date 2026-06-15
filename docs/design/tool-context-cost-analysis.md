@@ -65,7 +65,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 | **`call_purpose`** | 各 tool schema | 每 call 必填，略增 arguments 体积（UI 价值高，保留） |
 | **`Definitions()` 每步发送** | `orchestrator.runOneStep` | 全量 tools JSON 计入 **续写前缀** |
 | **`enrichDefinitions`** | `registry_enrich.go` | `load_skills` 附加 skills 元数据 → catalog 变则 **prefix miss** |
-| **`packageToolResult`** | `turn/tool_result_messages.go` | 同步 tool 结果 **middle-clip 12k 字符** 进 history |
+| **`packageToolResult`（旧）** | `turn/tool_result_messages.go` | 已由 **`tool.after_each`** 替代（§3.2.1） |
 | **bash_compress** | `bash_compress.go` | bash 输出清洗截断；stats 进 SSE |
 | **async 回灌** | `job_registry` + `HandleAsyncToolResult` | 完成时 **+2～3 条** message，但避免完成前 N 次轮询 |
 
@@ -96,10 +96,57 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 
 | 来源 | 现网缓解 | 待优化 |
 |------|----------|--------|
-| bash stdout/stderr | `bash_compress` + 12k package | 跨工具统一 budget |
-| read_file / grep | offset/limit | 模型仍整文件多次 read |
+| bash stdout/stderr | **§3.2.1** 清洗 + 落盘 + history 头尾摘要 | 其它组按 enabled_groups 逐步接入 |
+| read_file / grep | offset/limit + bytes 上限 | 模型仍整文件多次 read |
 | search_replace diff | 输出 diff 摘要 | 大 diff 仍 long |
-| agent_invoke result | 对端全文 | 截断策略 |
+| agent_invoke result | 对端全文 | 截断 + 落盘（待做） |
+
+#### 3.2.0 tool_result 压缩全链路（现网）
+
+| 阶段 | 位置 | 作用对象 | 行为 |
+|------|------|----------|------|
+| **Tool 清洗** | `bash_compress.sanitizeBashStream` | bash stdout/stderr | 去 ANSI、合并重复行；**不再**在此截断长度 |
+| **Tool 分页/上限** | `fs_*` | read/grep/glob 等 | bytes/行窗口 + 翻页 hint |
+| **Job preview** | `job_registry` | status 终态 preview | 2000 bytes；完整靠 async 回灌 |
+| **`tool.after_each`** | `hooks.ToolResultPackageHook` → `toolresult.Package` | 配置内工具（首版 **`bash_run`**） | 超长：落盘 + history 头尾摘要 + `read_file` hint |
+| **SSE / Client** | `publishToolResult` | TUI | **全文**（清洗后、未 history 摘要） |
+| **history** | `appendHistory(role=tool)` | LLM | **摘要或全文**（由 Hook 输出 `ForHistory`） |
+| **Hook 元数据** | `ToolExecutionLog` | duplicate 审批 | 结果 preview 200 bytes |
+| **TUI 展示** | `client/.../tool_format.go` | 用户界面 | 240 runes / 8 行（不进 history） |
+| **Context 压缩** | `compression.Coordinator` | 整段 messages | 摘要替换旧消息（正交） |
+
+**原则**：禁止「只截断不落盘」；history 摘要必须附带 **可 `read_file` 的相对路径**。
+
+#### 3.2.1 WS3 · bash 组（已落地）
+
+**锚点**：`tool.after_each`（`ToolResultPackageHook`）+ `node/internal/toolresult/`。
+
+```text
+bash_run Execute
+  → sanitizeBashStream（tools.bash_compress.enabled）
+  → ForClient = 全文 → SSE
+  → 若估算 tokens > hooks.tool_result.max_history_tokens（默认 12000，[DeepSeek 粗算](https://api-docs.deepseek.com/zh-cn/quick_start/token_usage)：汉字×0.6、其它×0.3）：
+       落盘 fs_root/.runtime/tool_outputs/<session>/<tool_call_id>.txt
+       ForHistory = 头 + ...（已省略约 N tokens，完整输出已写入 "path"，请 read_file 分页）... + 尾
+  → async 回灌同路径（ForClient 全文进 SSE，ForHistory 摘要进 tool message）
+```
+
+**配置**（`config.yaml`）：
+
+```yaml
+hooks:
+  tool_result:
+    enabled: true
+    max_history_tokens: 12000
+    spill_subdir: .runtime/tool_outputs
+    tools:
+      - bash_run
+tools:
+  bash_compress:
+    enabled: true   # 仅清洗，不截断
+```
+
+**代码索引**：`toolresult/`、`hooks/builtin_tool_result.go`、`turn/tool_router.go`（`splitToolResult`）、`turn/tool_result_messages.go`（async）。
 
 ### 3.3 Tools schema 前缀（P2 — WS4）
 
@@ -126,7 +173,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 | **WS1** | 后台 job 轮询治理 | bash 组：ACK 文案；**status 保持瞬时** | **P0** | **§5** | **已落地**（不实现 `wait_seconds`） |
 | **WS6** | 重复调用 Hook 审批 | `tool.before_each`；**仅 policy `rule`+auto** + 60s 指纹 + 标准审批原因 | **P0** | — | **已落地** |
 | **WS2** | Status 工具统一 wait | `temporary_agent_status` 等 | P1 | §3.1 | 未开始 |
-| **WS3** | Tool 结果 budget | `packageToolResult`、grep、A2A | P1 | §3.2 | 未开始 |
+| **WS3** | Tool 结果 budget | `tool.after_each` + 落盘；**bash 组已落地** §3.2.1 | P1 | §3.2 | **bash 已落地**；fs/a2a 待做 |
 | **WS4** | Schema 前缀稳定 | enrich 瘦身、description | P2 | §3.3 | 未开始 |
 | **WS5** | 度量 | poll_count、tool_turns | P1 | §7 | 未开始 |
 
@@ -291,7 +338,7 @@ Issue #25：pending HITL 时仍写 history 但 **恢复** pending。
 |----|------|
 | **WS6** | 仅 **`rule`+auto** 路径：60s 内同名同参 → 标准 HITL 审批原因；详见 [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) |
 | **WS2** | `temporary_agent_status.wait_seconds`（**可选**；bash job 已决不做 long-poll） |
-| **WS3** | 可配置 `model_content_max`；read 去重提示；A2A 结果截断 |
+| **WS3** | 可配置 `hooks.tool_result`；read 去重提示；A2A 结果截断+落盘 |
 | **WS4** | skills enrich 外置或缩短；enabled_groups 减面 |
 | **WS5** | `tool_turns/session`、`status_poll_count` 结构化日志 / SSE |
 
