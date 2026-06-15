@@ -11,6 +11,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -23,7 +24,8 @@ func (o *Orchestrator) processToolCalls(
 	history *[]llm.Message,
 	calls []llm.ToolCall,
 ) (*PendingHITL, string, error) {
-	var autoCalls, approvalCalls []llm.ToolCall
+	var autoCalls []llm.ToolCall
+	var approvalCalls []pendingApprovalCall
 	var userInfo *llm.ToolCall
 
 	for i, tc := range calls {
@@ -67,11 +69,17 @@ func (o *Orchestrator) processToolCalls(
 			}
 			continue
 		}
-		switch o.policy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments)) {
+		decision := o.decideToolBeforeEach(ctx, sessionID, tc)
+		switch decision.Action {
 		case policy.ActionDeny:
 			o.appendDeniedTool(sessionID, history, tc, "policy_denied")
 		case policy.ActionRequireApproval:
-			approvalCalls = append(approvalCalls, tc)
+			item := pendingApprovalCall{tc: tc}
+			if decision.ApprovalSubtype == hooks.ApprovalSubtypeDuplicateToolCall && decision.DuplicateMeta != nil {
+				meta := *decision.DuplicateMeta
+				item.duplicateMeta = &meta
+			}
+			approvalCalls = append(approvalCalls, item)
 		default:
 			autoCalls = append(autoCalls, tc)
 		}
@@ -95,20 +103,57 @@ func (o *Orchestrator) processToolCalls(
 		approvalID := newShortID("appr-")
 		executionID := newShortID("exec-")
 		toolItems := make([]map[string]any, 0, len(approvalCalls))
-		for _, tc := range approvalCalls {
-			toolItems = append(toolItems, buildApprovalToolItem(tc))
+		hasDuplicate := false
+		for _, item := range approvalCalls {
+			if item.duplicateMeta != nil {
+				hasDuplicate = true
+			}
+			toolItems = append(toolItems, buildApprovalToolItem(item.tc, item.duplicateMeta))
+		}
+		message := "检测到工具调用，等待用户确认后继续执行。"
+		if hasDuplicate {
+			message = "检测到工具调用；部分为短窗口内与上次完全相同的重复调用，请确认后再执行。"
+		}
+		pendingTools := make([]llm.ToolCall, 0, len(approvalCalls))
+		for _, item := range approvalCalls {
+			pendingTools = append(pendingTools, item.tc)
 		}
 		o.hub.Publish(sessionID, o.agentID, "approval_required", map[string]any{
 			"approval_type": "execute_tool",
 			"approval_id":   approvalID,
 			"execution_id":  executionID,
-			"message":       "检测到工具调用，等待用户确认后继续执行。",
+			"message":       message,
 			"approval_args": map[string]any{"tool_calls": toolItems},
 			"display_type":  "normal_text",
 		})
-		return &PendingHITL{Kind: HITLApproval, ToolCalls: append([]llm.ToolCall(nil), approvalCalls...)}, "awaiting_tool_approval", nil
+		return &PendingHITL{Kind: HITLApproval, ToolCalls: pendingTools}, "awaiting_tool_approval", nil
 	}
 	return nil, "", nil
+}
+
+func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID string, tc llm.ToolCall) hooks.ToolBeforeEachResult {
+	if o.toolHooks == nil {
+		action := o.policy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
+		mode := policy.ModeRule
+		if o.policy != nil {
+			mode = o.policy.ToolApprovalMode(tc.Function.Name)
+		}
+		return hooks.ToolBeforeEachResult{Action: action, ToolMode: mode}
+	}
+	return o.toolHooks.RunToolBeforeEach(ctx, hooks.ToolBeforeEachInput{
+		SessionID:    sessionID,
+		ToolName:     tc.Function.Name,
+		ToolArgs:     parseJSONArgs(tc.Function.Arguments),
+		RawArguments: tc.Function.Arguments,
+	})
+}
+
+func (o *Orchestrator) recordToolExecutionSuccess(tc llm.ToolCall, content string, rejected bool) {
+	if rejected || o.toolExecLog == nil {
+		return
+	}
+	fp := hooks.ToolArgsFingerprint(tc.Function.Name, tc.Function.Arguments)
+	o.toolExecLog.RecordSuccess(tc.Function.Name, fp, tc.ID, content)
 }
 
 func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message, tc llm.ToolCall) error {
@@ -225,6 +270,7 @@ func (o *Orchestrator) executeAutoBatch(
 	}
 	for _, item := range results {
 		o.publishToolResult(sessionID, item.tc, item.content, item.rejected, item.extra)
+		o.recordToolExecutionSuccess(item.tc, item.content, item.rejected)
 		o.appendHistory(sessionID, history, llm.Message{
 			Role:       "tool",
 			ToolCallID: item.tc.ID,
@@ -267,6 +313,7 @@ func (o *Orchestrator) executeTool(
 ) error {
 	content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
 	o.publishToolResult(sessionID, tc, content, rejected, extra)
+	o.recordToolExecutionSuccess(tc, content, rejected)
 	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
 	return nil
 }

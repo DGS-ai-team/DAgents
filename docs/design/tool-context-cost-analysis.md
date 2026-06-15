@@ -123,7 +123,8 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 
 | ID | 名称 | 范围 | 优先级 | 本文档章节 | 状态 |
 |----|------|------|--------|------------|------|
-| **WS1** | 后台 job 长轮询 | bash 组：status/cancel + ACK 文案 | **P0** | **§5** | 设计完成 |
+| **WS1** | 后台 job 长轮询 | bash 组：status/cancel + ACK 文案 | **P0** | **§5** | 文案已落地；wait_seconds 设计完成 |
+| **WS6** | 重复调用 Hook 审批 | `tool.before_each`；**仅 policy `rule`+auto** + 60s 指纹 + 标准审批原因 | **P0** | — | **H0–H2 已落地** |
 | **WS2** | Status 工具统一 wait | `temporary_agent_status` 等 | P1 | §3.1 | 未开始 |
 | **WS3** | Tool 结果 budget | `packageToolResult`、grep、A2A | P1 | §3.2 | 未开始 |
 | **WS4** | Schema 前缀稳定 | enrich 瘦身、description | P2 | §3.3 | 未开始 |
@@ -132,6 +133,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 ```text
 feat/tool-context-cost-optimization
   ├── WS1 background_job wait_seconds     ← 首个 PR（§5）
+  ├── WS6 duplicate tool hook + HITL       ← 与 WS1 并行（独立文档）
   ├── WS2 status 工具泛化
   ├── WS3 结果体积
   ├── WS4 schema
@@ -321,10 +323,11 @@ tools:
 
 ---
 
-## 6. WS2–WS5 概要（待展开）
+## 6. WS2–WS6 概要（待展开）
 
 | WS | 要点 |
 |----|------|
+| **WS6** | 仅 **`rule`+auto** 路径：60s 内同名同参 → `duplicate_tool_call` 三选项；`always`/`never` 不进入；详见 [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) |
 | **WS2** | `temporary_agent_status.wait_seconds`，与 WS1 同一套 status 约定 |
 | **WS3** | 可配置 `model_content_max`；read 去重提示；A2A 结果截断 |
 | **WS4** | skills enrich 外置或缩短；enabled_groups 减面 |

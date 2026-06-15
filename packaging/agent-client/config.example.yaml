@@ -105,3 +105,9 @@ child_agents:
   max_max_turns: 50
   max_active_per_parent: 8
   default_wait_timeout_seconds: 300
+
+# tool.before_each Hook：rule+auto 路径重复调用检测（见 docs/design/tool-before-hook-duplicate-approval.md）
+hooks:
+  duplicate_tool_call:
+    enabled: true
+    window_seconds: 60

@@ -116,6 +116,11 @@ func (e *Engine) toolMode(toolName string) ApprovalMode {
 	return ModeRule
 }
 
+// ToolApprovalMode 返回工具在 policy 中的配置档位（always / never / rule / deny）。
+func (e *Engine) ToolApprovalMode(toolName string) ApprovalMode {
+	return e.toolMode(toolName)
+}
+
 func (e *Engine) shellCommandMode(shellType ShellType, root string) ApprovalMode {
 	if e == nil {
 		return ModeRule

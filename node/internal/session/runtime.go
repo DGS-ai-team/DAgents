@@ -10,6 +10,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/history"
 	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
@@ -138,6 +139,7 @@ func newRuntimeWithPublisher(
 		turnOpts.MaxToolLoops,
 		promptcontext.NewReader(turnOpts.RuntimeDir),
 		journal,
+		hooks.DuplicateConfigOrDefault(turnOpts.DuplicateToolCall),
 		logger,
 	)
 	// 设置工具结果入队器

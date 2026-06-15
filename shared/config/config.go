@@ -35,6 +35,7 @@ type Config struct {
 	ChildAgents       ChildAgentsConfig       `yaml:"child_agents"`
 	Log               LogConfig               `yaml:"log"`
 	Tools             ToolsConfig             `yaml:"tools"`
+	Hooks             HooksConfig             `yaml:"hooks"`
 }
 
 // ToolsConfig 控制内置工具行为（如 bash_run 输出解码与压缩）。
@@ -48,8 +49,8 @@ type ToolsConfig struct {
 	BashOutputEncoding string             `yaml:"bash_output_encoding"`
 	// FileEncoding 为 read_file/write_file/search_replace/grep_* 读写磁盘文件的默认字节编码。
 	// 留空时 Windows→gbk，其它→utf-8；单次调用可用 encoding 参数覆盖。
-	FileEncoding       string             `yaml:"file_encoding"`
-	BashCompress       BashCompressConfig `yaml:"bash_compress"`
+	FileEncoding string             `yaml:"file_encoding"`
+	BashCompress BashCompressConfig `yaml:"bash_compress"`
 }
 
 // BashCompressConfig 控制 bash_run 输出压缩（P0：清洗 + rune 截断）。
@@ -99,6 +100,37 @@ type SkillsConfig struct {
 type CompressionConfig struct {
 	SilentTriggerTokens   int `yaml:"silent_trigger_tokens"`
 	BlockingTriggerTokens int `yaml:"blocking_trigger_tokens"`
+}
+
+// HooksConfig 控制 Node turn Hook 行为。
+type HooksConfig struct {
+	DuplicateToolCall DuplicateToolCallHookConfig `yaml:"duplicate_tool_call"`
+}
+
+// DuplicateToolCallHookConfig 控制 rule+auto 路径的重复 tool call 检测。
+type DuplicateToolCallHookConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled *bool `yaml:"enabled"`
+	// WindowSeconds 为指纹重复判定窗口；省略或 ≤0 时默认 60。
+	WindowSeconds int `yaml:"window_seconds"`
+}
+
+const defaultDuplicateToolCallWindowSeconds = 60
+
+// DuplicateToolCallHookEnabled 是否启用重复 tool call 检测。
+func (c *Config) DuplicateToolCallHookEnabled() bool {
+	if c == nil || c.Hooks.DuplicateToolCall.Enabled == nil {
+		return true
+	}
+	return *c.Hooks.DuplicateToolCall.Enabled
+}
+
+// DuplicateToolCallWindowSeconds 返回重复检测窗口秒数（默认 60）。
+func (c *Config) DuplicateToolCallWindowSeconds() int {
+	if c == nil || c.Hooks.DuplicateToolCall.WindowSeconds <= 0 {
+		return defaultDuplicateToolCallWindowSeconds
+	}
+	return c.Hooks.DuplicateToolCall.WindowSeconds
 }
 
 // ListenConfig 描述 Agent Node HTTP 监听地址。

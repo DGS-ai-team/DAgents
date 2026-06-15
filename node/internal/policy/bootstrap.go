@@ -101,6 +101,11 @@ func LoadRuntime(runtimeDir string) (*Engine, error) {
 	return loadFromDir(filepath.Join(runtimeDir, "policy"))
 }
 
+// LoadFromDir 从 policy 目录加载 txt 策略（单测与工具脚本）。
+func LoadFromDir(policyDir string) (*Engine, error) {
+	return loadFromDir(policyDir)
+}
+
 func loadFromDir(policyDir string) (*Engine, error) {
 	toolModes, err := parseEntryFile(filepath.Join(policyDir, "tool.approval.txt"), ModeRule)
 	if err != nil {

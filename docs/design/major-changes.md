@@ -103,7 +103,8 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 
 | ID | 内容 | 分析 | 状态 |
 |----|------|------|------|
-| **WS1** | 后台 job `wait_seconds` 长轮询（bash 组先行） | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) §5 | 设计完成 |
+| **WS1** | 后台 job 文案对齐 auto 回灌 | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) §5 | **已落地（文案）** |
+| **WS6** | `tool.before_each` + 重复调用三选项审批 | [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | 设计完成 |
 | **WS2** | status 工具统一 wait（子 Agent 等） | 合入总览 §4 | 未开始 |
 | **WS3** | tool 结果 budget / package | 合入总览 §3.2 | 未开始 |
 | **WS4** | schema 前缀稳定（enrich 瘦身） | 合入总览 §3.3 | 未开始 |
@@ -121,6 +122,28 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 - **[tool-context-cost-analysis.md](./tool-context-cost-analysis.md)**（完整分析，含 WS1 §5）
 - [context-compression-cache-analysis.md](./context-compression-cache-analysis.md)（正交）
 - [built-in-tools.md](../built-in-tools.md) §0
+
+---
+
+## 3. Tool Before Hook 与重复调用审批（规划中）
+
+| | |
+|---|---|
+| **分支/时期** | 与 `feat/tool-context-cost-optimization` 并行或独立分支（2026-06） |
+| **范围** | `node/internal/hooks/`（新）、`turn/tool_router.go`、`hitl`、双 TUI |
+| **配置** | `hooks.duplicate_tool_call_window_seconds`（默认 60） |
+
+### 背景与痛点
+
+审批逻辑仍在 `processToolCalls` 内直接调用 `policy.DecideTool`，与 [agent-hooks.md](./agent-hooks.md) 规划的 **`tool.before_each`** 未收敛。模型在短窗口内 **同名同参** 重复调用 tool（尤其 status 轮询）时，现网 HITL 仅有批准/拒绝，无法 **挂起后执行**，也无法在 Node 侧统一拦截。
+
+### 优化思路
+
+1. **`tool.before_each` Hook 链**：`PolicyToolHook`（三档 always/never/rule）+ `DuplicateToolCallHook`（**仅 `rule` 且子策略 auto**）。
+2. **指纹**：规范化参数 + 60s 窗口对比上次成功执行。
+3. **标准审批 + 重复原因**：命中 duplicate 仍走 `execute_tool`，`approval_reason` 标注；用户自行择时确认（无 defer）。
+
+**完整方案**：[tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)
 
 ---
 

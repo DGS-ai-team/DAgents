@@ -12,6 +12,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	historypkg "github.com/DGS-ai-team/DAgents/node/internal/history"
 	"github.com/DGS-ai-team/DAgents/node/internal/hitl"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
@@ -48,6 +49,8 @@ type Orchestrator struct {
 	fsRoot       string
 	tools        tools.Executor
 	policy       *policy.Engine
+	toolHooks    *hooks.Registry
+	toolExecLog  *hooks.ToolExecutionLog
 	skillAccess  SkillAccess
 	maxToolLoops int
 	promptCtx    *promptcontext.Reader
@@ -86,6 +89,9 @@ func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
 		engine, _ = policy.LoadFile("")
 	}
 	o.policy = engine
+	if o.toolHooks != nil {
+		o.toolHooks.SetPolicyEngine(engine)
+	}
 }
 
 // RunMessageTurn 执行 human_message 回合；测试无 enqueuer 时内联多步，生产应使用 RunHumanMessageTurn 单步 + 队列。
@@ -297,11 +303,16 @@ func NewOrchestrator(
 	maxToolLoops int,
 	promptCtx *promptcontext.Reader,
 	journal *historypkg.Journal,
+	duplicateCfg hooks.DuplicateConfig,
 	logger *slog.Logger,
 ) *Orchestrator {
 	if policyEngine == nil {
 		policyEngine, _ = policy.LoadFile("")
 	}
+	toolExecLog := &hooks.ToolExecutionLog{}
+	dupCfg := hooks.DuplicateConfigOrDefault(duplicateCfg)
+	toolHooks := hooks.NewRegistry(policyEngine, dupCfg)
+	toolHooks.SetToolExecutionLog(toolExecLog)
 	if maxToolLoops <= 0 {
 		maxToolLoops = DefaultMaxToolLoops()
 	}
@@ -312,6 +323,8 @@ func NewOrchestrator(
 		llm:          client,
 		tools:        toolExec,
 		policy:       policyEngine,
+		toolHooks:    toolHooks,
+		toolExecLog:  toolExecLog,
 		skillAccess:  skillAccess,
 		maxToolLoops: maxToolLoops,
 		promptCtx:    promptCtx,
