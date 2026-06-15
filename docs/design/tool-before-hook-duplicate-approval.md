@@ -302,8 +302,8 @@ sequenceDiagram
 | 手段 | 作用 |
 |------|------|
 | WS1 文案（已落地） | 降低模型 **主动** 重复 status 的概率 |
-| **本方案 duplicate hook** | 模型仍重复时 **人机环路拦截**，避免无意义 turn |
-| 后续 WS1 `wait_seconds` | 与 duplicate 正交：wait 减少轮询次数；duplicate 兜底极端重试 |
+| **本方案 duplicate hook（已落地）** | 模型仍重复时 **人机环路拦截**，避免无意义 turn |
+| status long-poll | **bash job 不实施**；子 Agent 见 WS2（可选） |
 
 ---
 

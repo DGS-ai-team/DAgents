@@ -79,13 +79,13 @@ runtime.runTurnStep（步前）
 
 ---
 
-## 2. 工具链上下文成本优化（规划中）
+## 2. 工具链上下文成本优化（进行中）
 
 | | |
 |---|---|
 | **分支/时期** | `feat/tool-context-cost-optimization`（2026-06） |
 | **范围** | 全内置工具组（`node/internal/tools`、`turn` 工具结果写回、编排 dispatch） |
-| **配置** | 按工作流分项（WS1 拟 `tools.background_job_status_max_wait_seconds` 等） |
+| **配置** | `hooks.duplicate_tool_call`（WS6）；WS3+ 按工作流分项 |
 
 ### 背景与痛点
 
@@ -103,8 +103,8 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 
 | ID | 内容 | 分析 | 状态 |
 |----|------|------|------|
-| **WS1** | 后台 job 文案对齐 auto 回灌 | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) §5 | **已落地（文案）** |
-| **WS6** | `tool.before_each` + 重复调用三选项审批 | [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | 设计完成 |
+| **WS1** | 后台 job 文案 + status 保持瞬时（不做 `wait_seconds`） | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) §5 | **已落地** |
+| **WS6** | `tool.before_each` + 重复调用审批 | [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | **已落地** |
 | **WS2** | status 工具统一 wait（子 Agent 等） | 合入总览 §4 | 未开始 |
 | **WS3** | tool 结果 budget / package | 合入总览 §3.2 | 未开始 |
 | **WS4** | schema 前缀稳定（enrich 瘦身） | 合入总览 §3.3 | 未开始 |
@@ -112,8 +112,8 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 
 ### 优化思路（总纲）
 
-1. **能 push 不 poll**：async_tool_result / 阻塞 wait 优先于 snapshot 轮询。
-2. **能一次不等 N 次**：status 类工具服务端 long-poll（`wait_seconds`）。
+1. **能 push 不 poll**：async_tool_result / `wait_temporary_agents` 优先于 snapshot 轮询。
+2. **poll 仍发生时拦截**：**WS6** duplicate hook（bash job **不**做 status long-poll）。
 3. **能短不长**：统一 tool 结果写入 history 的 budget。
 4. **能稳不动**：减少 tools schema 无谓 enrich 抖动。
 
@@ -125,13 +125,13 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 
 ---
 
-## 3. Tool Before Hook 与重复调用审批（规划中）
+## 3. Tool Before Hook 与重复调用审批（已落地 WS6）
 
 | | |
 |---|---|
-| **分支/时期** | 与 `feat/tool-context-cost-optimization` 并行或独立分支（2026-06） |
-| **范围** | `node/internal/hooks/`（新）、`turn/tool_router.go`、`hitl`、双 TUI |
-| **配置** | `hooks.duplicate_tool_call_window_seconds`（默认 60） |
+| **分支/时期** | `feat/tool-context-cost-optimization`（2026-06） |
+| **范围** | `node/internal/hooks/`、`turn/tool_router.go`、HITL |
+| **配置** | `hooks.duplicate_tool_call`（`enabled`、`window_seconds`，默认 60） |
 
 ### 背景与痛点
 

@@ -78,7 +78,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 | A2A invoke | `agent_invoke` 内 HTTP 等待 | — | — |
 | fs / triggers 等 | — | 同步执行 | — |
 
-**缺口**：snapshot 类 status 工具 **无统一 `wait_seconds`**；模型默认 **轮询**。
+**缺口**：`temporary_agent_status` 等仍为瞬时 snapshot（→ **WS2**，可选）；bash job 侧 **不** 为 `background_job_status` 增加 long-poll，靠 async 回灌 + **WS6** 重复调用审批收敛轮询。
 
 ---
 
@@ -90,7 +90,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 
 **同类模式**：`temporary_agent_status`；模型对 async job 的不信任而重复 status。
 
-**策略**：统一 **long-poll 参数** + **强调 auto-push 主路径**。
+**策略**：bash job → **async 回灌为主** + ACK 文案 + **WS6 duplicate hook**；子 Agent status → 可选 **WS2** long-poll。
 
 ### 3.2 Tool 结果膨胀（P1 — WS3）
 
@@ -123,8 +123,8 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 
 | ID | 名称 | 范围 | 优先级 | 本文档章节 | 状态 |
 |----|------|------|--------|------------|------|
-| **WS1** | 后台 job 长轮询 | bash 组：status/cancel + ACK 文案 | **P0** | **§5** | 文案已落地；wait_seconds 设计完成 |
-| **WS6** | 重复调用 Hook 审批 | `tool.before_each`；**仅 policy `rule`+auto** + 60s 指纹 + 标准审批原因 | **P0** | — | **H0–H2 已落地** |
+| **WS1** | 后台 job 轮询治理 | bash 组：ACK 文案；**status 保持瞬时** | **P0** | **§5** | **已落地**（不实现 `wait_seconds`） |
+| **WS6** | 重复调用 Hook 审批 | `tool.before_each`；**仅 policy `rule`+auto** + 60s 指纹 + 标准审批原因 | **P0** | — | **已落地** |
 | **WS2** | Status 工具统一 wait | `temporary_agent_status` 等 | P1 | §3.1 | 未开始 |
 | **WS3** | Tool 结果 budget | `packageToolResult`、grep、A2A | P1 | §3.2 | 未开始 |
 | **WS4** | Schema 前缀稳定 | enrich 瘦身、description | P2 | §3.3 | 未开始 |
@@ -132,9 +132,9 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 
 ```text
 feat/tool-context-cost-optimization
-  ├── WS1 background_job wait_seconds     ← 首个 PR（§5）
-  ├── WS6 duplicate tool hook + HITL       ← 与 WS1 并行（独立文档）
-  ├── WS2 status 工具泛化
+  ├── WS1 文案 + status 保持现状          ← 已完成（§5）
+  ├── WS6 duplicate tool hook + HITL      ← 已完成
+  ├── WS2 status 工具 wait（子 Agent 等，可选）
   ├── WS3 结果体积
   ├── WS4 schema
   └── WS5 metrics
@@ -142,9 +142,9 @@ feat/tool-context-cost-optimization
 
 ---
 
-## 5. WS1：后台 job 长轮询（bash 组）
+## 5. WS1：后台 job 轮询治理（bash 组）
 
-本节为 **首个落地工作流** 的完整分析（原 bash 轮询专题，已并入本文档）。
+本节为 bash job 轮询问题的分析与 **已落地决策**（原 bash 轮询专题，已并入本文档）。
 
 ### 5.1 观测现象与目标
 
@@ -157,10 +157,9 @@ feat/tool-context-cost-optimization
 
 | 目标 | 说明 |
 |------|------|
-| **减少 LLM 往返** | **N 次瞬时 status** → **1 次带 wait 的 status** 或 **0 次（仅回灌）** |
+| **减少 LLM 往返** | 优先 **0 次（仅 async 回灌）**；若模型仍轮询 → **WS6** 拦截 |
 | **保持兼容** | 不改 tool 名、不破坏 `enabled_groups: bash`、policy |
-| **服务端可阻塞** | tool handler 内 long-poll，不占用额外 LLM slot |
-| **对齐现有模式** | 与 `wait_temporary_agents(timeout_seconds)` 一致 |
+| **`background_job_status`** | **保持瞬时 snapshot**，不增加 `wait_seconds` |
 
 ### 5.2 现网实现
 
@@ -196,13 +195,12 @@ func (r *Registry) execBackgroundJobStatus(_ context.Context, raw json.RawMessag
 
 输出含 `status`、`started_at/finished_at`、终态 `RESULT_PREVIEW`（2000 字符）。**无** `wait_seconds`、**无** 阻塞。
 
-#### 5.2.4 引导轮询的文案
+#### 5.2.4 ACK / schema 文案（已落地）
 
-| 位置 | 问题 |
+| 位置 | 现状 |
 |------|------|
-| `formatBackgroundJobAck` | 「可用 background_job_status 查询」 |
-| `formatShellRunningResult` | 同上 |
-| `background_job_status` schema | 未提 async 回灌、未提 wait |
+| `formatBackgroundJobAck` / `formatShellRunningResult` | 强调 **async_tool_result 自动回灌**，通常无需轮询 status |
+| `background_job_status` schema | 说明完成后自动回灌；仅在取消或主动确认进度时使用 |
 
 #### 5.2.5 自动回灌（已存在）
 
@@ -231,92 +229,57 @@ Issue #25：pending HITL 时仍写 history 但 **恢复** pending。
 
 | 路径 | 完成前 LLM 次数 | 说明 |
 |------|----------------|------|
-| **A. 仅 async 回灌** | **0** | bash 后不再推理，等回灌 |
-| **B. 1 次 long-poll status** | **1** | `wait_seconds ≥ 剩余耗时` |
-| **C. 现网 N 次 snapshot** | **N** | 反模式 |
-
-`bash_run.timeout_seconds`（同步窗口）与 `background_job_status.wait_seconds`（查询阻塞）**独立**，不可互相替代。
+| **A. 仅 async 回灌** | **0** | **优选**；bash 降级后不再推理，等回灌 |
+| **B. long-poll status** | 1 | **不采用**（见 §5.5） |
+| **C. N 次 snapshot 轮询** | **N** | 反模式；**WS6 duplicate hook** 兜底 |
 
 ### 5.4 量化直觉（T_job=90s，sync=30s）
 
 | 策略 | 完成前 LLM 往返 | history 污染 |
 |------|----------------|--------------|
-| 现网 C | 4～12 | 高（重复 status 消息） |
-| B：`wait_seconds=120` 一次 | 1 | 低 |
-| A：零轮询 | 0 | 最低 |
+| 现网 C（无治理） | 4～12 | 高 |
+| **A + WS6（已落地）** | **0～1** | 低 |
+| B：long-poll（不采用） | 1 | 低 |
 
-### 5.5 优选方案：`wait_seconds` 长轮询
+### 5.5 已决方案：不实现 `background_job_status.wait_seconds`
 
-1. **L1（P0）**：`background_job_status` 增加 **`wait_seconds`**；running 时 `select(job.done, timer, ctx.Done())`。
-2. **L2（P0）**：ACK / schema 明确 **async_tool_result 为主**；查询须带 wait。
-3. **L3（P1）**：`tools.background_job_status_max_wait_seconds`（默认 120）。
+**决策（2026-06）**：`background_job_status` **保持现网瞬时 snapshot**，不为 schema 增加 `wait_seconds` 或服务端 long-poll。
 
-**不采用**：新工具名、删 status、WebSocket 推 status（Client 改造过大）。
-
-#### 参数语义
-
-| `wait_seconds` | 行为 |
-|----------------|------|
-| 省略或 0 | 现网瞬时 snapshot |
-| > 0 | running 时阻塞至多 `min(wait, max_wait)`；完成→终态；超时→`running` + `waited_seconds` + hint |
-| 已终态 | 忽略 wait |
-
-#### Handler 伪代码
-
-```go
-func (r *Registry) execBackgroundJobStatus(ctx context.Context, raw json.RawMessage) (string, error) {
-    args := parseBackgroundJobStatusArgs(raw)
-    job, ok := r.bgJobs.get(args.JobID)
-    wait := clampWait(args.WaitSeconds, r.bgJobStatusMaxWait)
-    if wait > 0 && job.isRunning() {
-        select {
-        case <-job.done:
-        case <-time.After(time.Duration(wait) * time.Second):
-        case <-ctx.Done():
-            return "", ctx.Err()
-        }
-    }
-    return job.statusTextWithWaitMeta(waited), nil
-}
-```
-
-并发：wait 监听 `job.done` channel，避免与 `cancelJob` 写锁死锁。
-
-#### 文案（L2）拟
-
-- status description：「完成后 async_tool_result 自动回灌，通常无需轮询；若查询请设 wait_seconds」
-- ACK / 降级：「通常无需 status；若查询请 wait_seconds 一次等待」
-
-#### 配置（拟）
-
-```yaml
-tools:
-  background_job_status_max_wait_seconds: 120
-```
-
-### 5.6 WS1 补充方向
-
-- 强化零轮询回灌（schema + TUI 提示）
-- 度量：`background_job_status` 调用次数、`wait_seconds` 分布（→ **WS5**）
-- P2：orchestrator defer LLM until job terminal（侵入大，不优先）
-
-### 5.7 WS1 实施步骤
-
-| 步骤 | 内容 | 文件 |
-|------|------|------|
-| 1 | config `BackgroundJobStatusMaxWaitSeconds` | `shared/config`, `config.example.yaml` |
-| 2 | handler 长轮询 + `statusTextWithWaitMeta` | `tool_job.go`, `job_registry.go` |
-| 3 | schema + ACK 文案 | `tool_job.go`, `job_registry.go`, `bash_runner.go` |
-| 4 | 单测 | `job_registry_test.go` — sleep job + wait 一次 succeeded |
-| 5 | 度量日志 | `tool_job.go`（M3 / WS5） |
-
-### 5.8 WS1 风险
-
-| 风险 | 缓解 |
+| 理由 | 说明 |
 |------|------|
-| HTTP/proxy 超时 < wait | max_wait ≤ 120；nginx `proxy_read_timeout` |
-| 用户 Esc 取消 turn | `ctx.Done()` |
-| 模型仍不传 wait | L2 文案（不默认隐式 wait，保兼容） |
+| **主路径已存在** | `async_tool_result` 在 job 终态自动回灌，零轮询即可闭环 |
+| **文案已对齐** | ACK / 降级 / status description 已引导「通常无需轮询」 |
+| **WS6 兜底** | 60s 内同名同参重复 `background_job_status` → 标准 HITL（`rule`+auto） |
+| **避免重叠语义** | `bash_run.timeout_seconds` 已是同步等待窗口；status long-poll 与 HTTP 代理超时、turn 取消交织，收益有限 |
+| **无 sleep 工具** | 等待应绑定事件（回灌 / `wait_temporary_agents`），而非 status 阻塞 |
+
+**不采用**（仍成立）：新工具名、删 status、WebSocket 推 status、通用 `sleep` 工具。
+
+> 下文 §5.5 原 long-poll 设计保留为 **历史备选**，供 WS2（子 Agent status）参考时酌情复用，**bash job 不再实施**。
+
+<details>
+<summary>历史备选：long-poll 设计（bash job 不实施）</summary>
+
+1. **L1**：`background_job_status` 增加 **`wait_seconds`**；running 时 `select(job.done, timer, ctx.Done())`。
+2. **L2**：ACK / schema 明确 async 为主。
+3. **L3**：`tools.background_job_status_max_wait_seconds`（默认 120）。
+
+</details>
+
+### 5.6 WS1 已落地项
+
+| 项 | 文件 |
+|----|------|
+| ACK / 降级文案 | `job_registry.go` |
+| status schema description | `tool_job.go` |
+| 移除 `run_in_background` schema | `execution_mode.go`、各 tool def |
+| 重复 status 审批 | `node/internal/hooks/`（WS6） |
+
+### 5.7 后续（非 WS1）
+
+- **WS5**：`background_job_status` 调用次数、`status_poll_count` 度量
+- **WS2**（可选）：仅 **子 Agent** `temporary_agent_status` 是否 long-poll，与 bash job **独立决策**
+- P2：orchestrator defer LLM until job terminal（侵入大，不优先）
 
 **不解决**：bash 单次输出过大（`bash_compress` / package）；job 运行中模型并行其他 tool。
 
@@ -326,8 +289,8 @@ tools:
 
 | WS | 要点 |
 |----|------|
-| **WS6** | 仅 **`rule`+auto** 路径：60s 内同名同参 → `duplicate_tool_call` 三选项；`always`/`never` 不进入；详见 [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) |
-| **WS2** | `temporary_agent_status.wait_seconds`，与 WS1 同一套 status 约定 |
+| **WS6** | 仅 **`rule`+auto** 路径：60s 内同名同参 → 标准 HITL 审批原因；详见 [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) |
+| **WS2** | `temporary_agent_status.wait_seconds`（**可选**；bash job 已决不做 long-poll） |
 | **WS3** | 可配置 `model_content_max`；read 去重提示；A2A 结果截断 |
 | **WS4** | skills enrich 外置或缩短；enabled_groups 减面 |
 | **WS5** | `tool_turns/session`、`status_poll_count` 结构化日志 / SSE |
@@ -338,9 +301,9 @@ tools:
 
 | 阶段 | 内容 |
 |------|------|
-| **T1** | WS1 代码 + 单测 + 文案 |
+| ~~**T1**~~ | ~~WS1~~ **已完成**（文案 + status 保持现状 + WS6） |
 | **T2** | WS5 基础度量 |
-| **T3** | WS2 子 Agent status |
+| **T3** | WS2 子 Agent status（可选） |
 | **T4** | WS3 结果 budget |
 | **T5** | WS4 schema 稳定 |
 
@@ -364,4 +327,4 @@ tools:
 
 ## 9. 结论
 
-本分支以 **「减少低信息密度 LLM 往返 + 控制 tool 写入体积 + 稳定 tools 前缀」** 为纲，覆盖 **全部内置工具组**。**WS1（bash job `wait_seconds`）** 是首个落点：Node 已有 async 回灌，但瞬时 status + ACK 引导导致 **N 次 LLM 轮询**；长轮询与文案修订预期收敛为 **0～1 次**。WS2–WS5 将同一模式扩展到子 Agent status、结果 package 与 schema enrich。与压缩/cache 优化 **应叠加评估**。
+本分支以 **「减少低信息密度 LLM 往返 + 控制 tool 写入体积 + 稳定 tools 前缀」** 为纲。**WS1 + WS6** 已落地：bash job 靠 **async 回灌 + ACK 文案** 引导零轮询，`background_job_status` **保持瞬时**；模型仍短时重复调用时由 **duplicate hook** 进 HITL。下一步优先 **WS5 度量** 与 **WS3 结果 budget**。与压缩/cache 优化 **应叠加评估**。
