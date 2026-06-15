@@ -285,16 +285,3 @@ func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, st
 	}
 	return strings.Join(parts, "\n"), stats
 }
-
-func formatShellRunningResult(job *backgroundJob, params shellRunParams) string {
-	st := params.shellType
-	if job.bashShellType != "" {
-		st = shellType(job.bashShellType)
-	}
-	return strings.Join([]string{
-		fmt.Sprintf("[BASH_RESULT] status=RUNNING job_id=%s", job.id),
-		fmt.Sprintf("shell_type=%s", st),
-		"命令超过同步等待时间，已自动降级为后台任务；也可显式使用 run_in_background=true。",
-		"可用 background_job_status / background_job_cancel 查询或取消。",
-	}, "\n")
-}

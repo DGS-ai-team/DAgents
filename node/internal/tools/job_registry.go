@@ -189,14 +189,6 @@ func (r *Registry) StartBackground(
 	return formatBackgroundJobAck(job), nil
 }
 
-func formatBackgroundJobAck(job *backgroundJob) string {
-	return strings.Join([]string{
-		fmt.Sprintf("[TOOL_BACKGROUND] tool_name=%s job_id=%s status=accepted", job.toolName, job.id),
-		"任务已在后台并行执行；完成后将自动回灌结果。",
-		"可用 background_job_status / background_job_cancel 查询或取消。",
-	}, "\n")
-}
-
 func (j *backgroundJob) statusText() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()

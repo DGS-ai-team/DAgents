@@ -15,7 +15,7 @@ func backgroundJobStatusToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "background_job_status",
-			Description: "查询 bash_run 同步超时自动降级或 run_in_background=true 提交的后台任务状态与输出摘要。",
+			Description: "查询 bash_run 后台任务状态与输出摘要。任务完成后通常已由 async_tool_result 自动回灌，无需轮询；仅在需取消或主动确认进度时使用。",
 			Parameters: injectRunInBackgroundParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{

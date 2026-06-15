@@ -58,7 +58,7 @@ func bashRunToolDef() ToolDef {
 func bashRunToolDescription(isWindows bool) string {
 	tail := descScriptsHint +
 		" 除非明确需要，否则避免 su/sudo 等需交互密码的命令。" +
-		" 同步超时自动降级后台（返回 job_id），或显式 run_in_background=true；长时任务用 background_job_status / background_job_cancel 跟进。" +
+		" 同步超时自动降级后台（返回 job_id），或显式 run_in_background=true；完成后自动回灌，通常无需轮询 status。" +
 		" 长输出会按配置自动清洗与截断（tools.bash_compress）。"
 	if isWindows {
 		return "执行 PowerShell 命令；cwd 省略时默认为工作区根。" +
