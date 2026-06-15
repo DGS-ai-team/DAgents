@@ -14,7 +14,7 @@ Go Node 侧 skills 目录扫描、元数据与 prompt 渲染（对齐 Python `ha
 - **失效**：新增/删除 skill 目录、修改 `SKILL.md` 后自动重扫；未变时仅 `Stat`，不重复 `ReadFile`；
 - **并发**：`sync.RWMutex` 保护；每 session runtime 持有一个 `Catalog` 实例。
 
-每步 `BuildSystemPrompt` 会调用 `RenderMetadataSection` / `RenderLoadedSection`，tool loop 中 `load_skills` 亦会 `SelectByName`；缓存避免高频读盘。
+每步 `BuildSystemPrompt` 会调用 `RenderLoadedSection`；catalog 元数据经 **`load_skills` 工具 description** 注入（`Registry.enrichDefinitions`）。tool loop 中 `load_skills` 亦会 `SelectByName`；缓存避免高频读盘。
 
 ## SKILL.md 格式
 

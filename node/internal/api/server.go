@@ -565,8 +565,9 @@ type sessionContextResponse struct {
 	RunTurnPhase                   string                  `json:"run_turn_phase"`
 	SystemPrompt                   string                  `json:"system_prompt,omitempty"`
 	SystemPromptEstimatedTokens    int                     `json:"system_prompt_estimated_tokens"`
-	SkillsCatalogEstimatedTokens   int                     `json:"skills_catalog_estimated_tokens"`
-	SkillsCatalogBloatThreshold    int                     `json:"skills_catalog_bloat_threshold"`
+	SkillsCatalogEstimatedTokens        int                     `json:"skills_catalog_estimated_tokens"`
+	SkillsCatalogMaxBodyEstimatedTokens int                     `json:"skills_catalog_max_body_estimated_tokens"`
+	SkillsCatalogBloatThreshold         int                     `json:"skills_catalog_bloat_threshold"`
 	LoadedSkills                   []skills.LoadedSkill    `json:"loaded_skills"`
 	RecentMessages                 []contextMessagePreview `json:"recent_messages"`
 	LastCompression                *compression.LastCompressionSnapshot `json:"last_compression,omitempty"`
@@ -617,8 +618,9 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 		HasActiveTurn:         view.HasActiveTurn,
 		SystemPrompt:                 view.SystemPrompt,
 		SystemPromptEstimatedTokens:  view.SystemPromptEstimatedTokens,
-		SkillsCatalogEstimatedTokens: view.SkillsCatalogEstimatedTokens,
-		SkillsCatalogBloatThreshold:  view.SkillsCatalogBloatThreshold,
+		SkillsCatalogEstimatedTokens:        view.SkillsCatalogEstimatedTokens,
+		SkillsCatalogMaxBodyEstimatedTokens: view.SkillsCatalogMaxBodyEstimatedTokens,
+		SkillsCatalogBloatThreshold:         view.SkillsCatalogBloatThreshold,
 		LoadedSkills:                 view.LoadedSkills,
 		RecentMessages:               recent,
 		LastCompression:              view.LastCompression,

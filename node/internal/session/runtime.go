@@ -103,13 +103,13 @@ func newRuntimeWithPublisher(
 	catalog := skills.NewCatalog(turnOpts.SkillsRoot, turnOpts.SkillsEnabled, turnOpts.SkillsMaxInPrompt)
 	journal := history.NewJournal(turnOpts.RawMessageHistoryEnabled, turnOpts.RawMessageHistoryDir, logger)
 	rt := &runtime{
-		session:         Session{ID: id, AgentID: agentID},
-		queue:           queue.NewMessageQueue(),
-		store:           st,
-		hub:             eventHub,
-		agentID:         agentID,
-		logger:          logger,
-		skillsCatalog:   catalog,
+		session:       Session{ID: id, AgentID: agentID},
+		queue:         queue.NewMessageQueue(),
+		store:         st,
+		hub:           eventHub,
+		agentID:       agentID,
+		logger:        logger,
+		skillsCatalog: catalog,
 		compression: func() *compression.Coordinator {
 			coord := compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking)
 			coord.SetLogger(logger)

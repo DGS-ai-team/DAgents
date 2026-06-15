@@ -28,15 +28,70 @@ python run_manage.py
 
 ## Docker 部署（推荐生产 / 联调）
 
-官方镜像与 compose 见 **[`packaging/manage/`](../packaging/manage/README.md)**：
+官方镜像与 compose 见 **[`packaging/manage/`](../packaging/manage/README.md)**。
+
+### 联网快速启动
 
 ```bash
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.1 .
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.7 .
 # 或
 cd packaging/manage && cp .env.example .env && docker compose up -d --build
 ```
 
 打 **`v*`** 标签 Release 时会附带 **`dagents-manage-<version>.tar.gz`**（`docker load` 离线导入）。
+
+### 离线安装（内网 / 无公网）
+
+目标机需已安装 **Docker**（或 Docker Compose），但无法访问 Docker Hub 与 GitHub。
+
+**步骤 1 — 联网机准备镜像包**
+
+| 方式 | 命令 / 说明 |
+|------|-------------|
+| Release 下载 | 从 [GitHub Releases](https://github.com/DGS-ai-team/DAgents/releases) 获取 `dagents-manage-<version>.tar.gz` |
+| 本地构建导出 | `VERSION=0.3.7 bash scripts/ci/build_manage_docker.sh` → `dist/dagents-manage-0.3.7.tar.gz` |
+| 手动导出 | `docker save dagents-manage:0.3.7 \| gzip -9 > dagents-manage-0.3.7.tar.gz` |
+
+将 tar.gz 与（可选）`packaging/manage/docker-compose.yml`、`.env.example` 拷贝至离线机。
+
+**步骤 2 — 离线机导入镜像**
+
+```bash
+docker load -i dagents-manage-0.3.7.tar.gz
+docker image ls dagents-manage   # 确认 TAG 与后续启动命令一致
+```
+
+**步骤 3 — 启动**
+
+```bash
+# 单容器
+docker run -d --name manage --restart unless-stopped \
+  -p 8020:8020 -v manage-data:/data \
+  -e MANAGE_DB_PATH=/data/manage.db \
+  dagents-manage:0.3.7
+
+# 或使用 compose（拷贝 packaging/manage/ 后）
+cd packaging/manage
+cp .env.example .env   # MANAGE_IMAGE=dagents-manage:0.3.7
+docker compose up -d   # 离线环境勿加 --build
+```
+
+**步骤 4 — 验证**
+
+```bash
+curl -sf http://127.0.0.1:8020/health
+```
+
+Console：**`http://<host>:8020/console/`**
+
+数据目录挂载在 volume `manage-data`（`/data/manage.db`）。停止 / 重启：
+
+```bash
+docker stop manage && docker start manage
+# 或 docker compose stop / docker compose start
+```
+
+更完整的变量说明与联调配置见 [`packaging/manage/README.md`](../packaging/manage/README.md)。
 
 ## 鉴权（当前 MVP）
 

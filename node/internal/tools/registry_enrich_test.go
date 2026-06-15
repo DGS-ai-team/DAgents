@@ -3,10 +3,30 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 )
+
+func repoSkillsRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		candidate := filepath.Join(dir, "packaging", "runtime", "skills")
+		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("packaging/runtime/skills not found from test cwd")
+		}
+		dir = parent
+	}
+}
 
 func TestDefinitions_loadSkillsIncludesCatalogMetadata(t *testing.T) {
 	root := t.TempDir()
@@ -40,6 +60,31 @@ func TestDefinitions_loadSkillsIncludesCatalogMetadata(t *testing.T) {
 	}
 	if !containsAll(desc, "Write docs", "可用 skills") {
 		t.Fatalf("description = %q", desc)
+	}
+}
+
+func TestDefinitions_loadSkillsIncludesPackagingWriteSkill(t *testing.T) {
+	skillsRoot := repoSkillsRoot(t)
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetSkillsCatalog(skills.NewCatalog(skillsRoot, true, 5))
+	if err := reg.SetBuiltinEnabled([]string{"load_skills"}); err != nil {
+		t.Fatal(err)
+	}
+	var desc string
+	for _, def := range reg.Definitions() {
+		if def.Function.Name == "load_skills" {
+			desc = def.Function.Description
+			break
+		}
+	}
+	if desc == "" {
+		t.Fatal("load_skills not in definitions")
+	}
+	if !strings.Contains(desc, "write-skill:") || !strings.Contains(desc, "指导在技能目录") {
+		t.Fatalf("load_skills description missing write-skill metadata: %q", desc)
 	}
 }
 

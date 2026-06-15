@@ -11,8 +11,19 @@ import (
 	"sync"
 )
 
-// CatalogBloatTokenThreshold 为 skills 目录估算 token 超过该值时 TUI 提示精简。
+// CatalogBloatTokenThreshold 为 skills 元数据或任一 SKILL 正文估算 token 超过该值时 TUI 提示精简。
 const CatalogBloatTokenThreshold = 4000
+
+// LoadSkillsMetadataPrefix 为 tools enrich 附在 load_skills description 后的固定前缀（须与 registry_enrich 一致）。
+const LoadSkillsMetadataPrefix = "\n\n可用 skills（name: description）：\n"
+
+// CatalogTokenStats 为 skills 目录 token 估算分项（避免把未加载正文与 system prompt 重复计数）。
+type CatalogTokenStats struct {
+	// MetadataTokens：每步 tools schema 中 load_skills 附带的 catalog 元数据（name + description 列表）。
+	MetadataTokens int
+	// MaxBodyTokens：单个 SKILL.md 正文的最大估算 token（load 后进入 system prompt，受 max_in_prompt 限制）。
+	MaxBodyTokens int
+}
 
 // LoadedSkill 为会话已加载 skill 元信息（持久化在 session）。
 type LoadedSkill struct {
@@ -109,6 +120,7 @@ func (c *Catalog) SelectByName(skillName string) (Definition, bool) {
 	return Definition{}, false
 }
 
+// estimateTextTokens 与 node/internal/llm.EstimateTextTokens 同公式（len/4）；skills 包不 import llm 以避免 cycle。
 func estimateTextTokens(text string) int {
 	if text == "" {
 		return 0
@@ -116,39 +128,70 @@ func estimateTextTokens(text string) int {
 	return len(text) / 4
 }
 
-// EstimateCatalogTokens 粗算 skills 目录占用 token（各 skill 名称、描述、正文之和；与 llm.EstimateTextTokens 同权重）。
-func EstimateCatalogTokens(defs []Definition) int {
-	total := 0
-	for _, d := range defs {
-		total += estimateTextTokens(d.SkillName)
-		total += estimateTextTokens(d.Description)
-		total += estimateTextTokens(d.Content)
-		total += 8
+// EstimateCatalogStats 估算 skills 目录 token 分项。
+//
+// 注意：catalog 正文不会进入 tools schema；仅 load 后写入 system prompt（已计入 system_prompt_estimated_tokens）。
+// 因此 skills_catalog_estimated_tokens 只反映 MetadataTokens，膨胀告警另看 MaxBodyTokens。
+func EstimateCatalogStats(defs []Definition) CatalogTokenStats {
+	metaSection := renderMetadataSection(defs)
+	stats := CatalogTokenStats{}
+	if metaSection != "" {
+		stats.MetadataTokens = estimateTextTokens(LoadSkillsMetadataPrefix + metaSection)
 	}
-	return total
+	for _, d := range defs {
+		bodyTokens := estimateTextTokens(d.Content)
+		if bodyTokens > stats.MaxBodyTokens {
+			stats.MaxBodyTokens = bodyTokens
+		}
+	}
+	return stats
 }
 
-// EstimateCatalogTokens 返回当前磁盘 catalog 的估算 token 数。
-func (c *Catalog) EstimateCatalogTokens() int {
-	if c == nil || !c.enabled {
-		return 0
+// BloatDisplayTokens 返回用于 TUI 告警展示的 token 数（元数据与最大正文中的较大值）。
+func (s CatalogTokenStats) BloatDisplayTokens() int {
+	if s.MaxBodyTokens > s.MetadataTokens {
+		return s.MaxBodyTokens
 	}
-	return EstimateCatalogTokens(c.List())
+	return s.MetadataTokens
+}
+
+// ExceedsBloatThreshold 判断元数据或任一 skill 正文是否超过阈值。
+func (s CatalogTokenStats) ExceedsBloatThreshold(threshold int) bool {
+	if threshold <= 0 {
+		threshold = CatalogBloatTokenThreshold
+	}
+	return s.MetadataTokens > threshold || s.MaxBodyTokens > threshold
+}
+
+// EstimateCatalogStats 返回当前磁盘 catalog 的 token 分项。
+func (c *Catalog) EstimateCatalogStats() CatalogTokenStats {
+	if c == nil || !c.enabled {
+		return CatalogTokenStats{}
+	}
+	return EstimateCatalogStats(c.List())
+}
+
+// EstimateCatalogMetadataTokens 返回 catalog 元数据在 tools schema 中的估算 token（API skills_catalog_estimated_tokens）。
+func (c *Catalog) EstimateCatalogMetadataTokens() int {
+	return c.EstimateCatalogStats().MetadataTokens
 }
 
 // RenderMetadataSection 渲染可用 skills 元数据段。
 func (c *Catalog) RenderMetadataSection() string {
-	meta := c.ListMetadata()
-	if len(meta) == 0 {
+	return renderMetadataSection(c.List())
+}
+
+func renderMetadataSection(defs []Definition) string {
+	if len(defs) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	for _, item := range meta {
-		desc := strings.TrimSpace(item.Description)
+	for _, d := range defs {
+		desc := strings.TrimSpace(d.Description)
 		if desc == "" {
-			b.WriteString(fmt.Sprintf("- %s\n", item.SkillName))
+			b.WriteString(fmt.Sprintf("- %s\n", d.SkillName))
 		} else {
-			b.WriteString(fmt.Sprintf("- %s: %s\n", item.SkillName, desc))
+			b.WriteString(fmt.Sprintf("- %s: %s\n", d.SkillName, desc))
 		}
 	}
 	return strings.TrimSpace(b.String())
@@ -314,7 +357,7 @@ func (c *Catalog) readSkill(path, dirName string) (Definition, bool) {
 }
 
 func parseFrontmatter(text string) (map[string]any, string) {
-	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(normalizeSkillTextNewlines(text))
 	if !strings.HasPrefix(text, "---\n") {
 		return map[string]any{}, text
 	}
@@ -325,6 +368,11 @@ func parseFrontmatter(text string) (map[string]any, string) {
 	metaBlock := text[4 : 4+end]
 	body := strings.TrimSpace(text[4+end+5:])
 	return parseSimpleYAML(metaBlock), body
+}
+
+func normalizeSkillTextNewlines(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
 }
 
 func metaString(meta map[string]any, key string) string {
@@ -349,7 +397,10 @@ func parseSimpleYAML(block string) map[string]any {
 		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, ":") {
 			continue
 		}
-		key, val, _ := strings.Cut(line, ":")
+		key, val, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
 		if key == "" {

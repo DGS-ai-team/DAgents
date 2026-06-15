@@ -18,17 +18,19 @@ def _skills_bloat_warning_lines(context_summary: dict | None) -> tuple[str, ...]
     if not context_summary:
         return ()
     try:
-        tokens = int(context_summary.get("skills_catalog_estimated_tokens") or 0)
+        metadata = int(context_summary.get("skills_catalog_estimated_tokens") or 0)
+        max_body = int(context_summary.get("skills_catalog_max_body_estimated_tokens") or 0)
         threshold = int(context_summary.get("skills_catalog_bloat_threshold") or 4000)
     except (TypeError, ValueError):
         return ()
     if threshold <= 0:
         threshold = 4000
-    if tokens <= threshold:
+    display = max(metadata, max_body)
+    if metadata <= threshold and max_body <= threshold:
         return ()
     return (
-        f"skills 目录估算约 {tokens:,} tokens（超过 {threshold}）",
-        "skills 过于臃肿，请精简 skill 描述或清理无用的 skills",
+        f"skills 目录估算约 {display:,} tokens（超过 {threshold}）",
+        "skills 过于臃肿，请精简 skill 描述、缩短 SKILL 正文或清理无用的 skills",
     )
 
 

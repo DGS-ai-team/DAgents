@@ -2,6 +2,11 @@ package tools
 
 import "github.com/DGS-ai-team/DAgents/node/internal/skills"
 
+// skillsCatalogHolder 承载 skills catalog 字段，使 registry.go 无需 import skills。
+type skillsCatalogHolder struct {
+	skillsCatalog *skills.Catalog
+}
+
 // SetSkillsCatalog 注入 skills 目录；启用 load_skills 时在 Definitions 中附加 available skills 列表。
 func (r *Registry) SetSkillsCatalog(c *skills.Catalog) {
 	if r == nil {
@@ -20,7 +25,7 @@ func (r *Registry) enrichDefinitions(defs []ToolDef) []ToolDef {
 		switch out[i].Function.Name {
 		case "load_skills":
 			if meta := r.skillsMetadataSection(); meta != "" {
-				out[i].Function.Description += "\n\n可用 skills（name: description）：\n" + meta
+				out[i].Function.Description += skills.LoadSkillsMetadataPrefix + meta
 			}
 		}
 	}

@@ -111,8 +111,9 @@ type SessionContext struct {
 	RunTurnPhase          string `json:"run_turn_phase"`
 	SystemPrompt                   string `json:"system_prompt"`
 	SystemPromptEstimatedTokens    int    `json:"system_prompt_estimated_tokens"`
-	SkillsCatalogEstimatedTokens   int    `json:"skills_catalog_estimated_tokens"`
-	SkillsCatalogBloatThreshold    int    `json:"skills_catalog_bloat_threshold"`
+	SkillsCatalogEstimatedTokens        int    `json:"skills_catalog_estimated_tokens"`
+	SkillsCatalogMaxBodyEstimatedTokens int    `json:"skills_catalog_max_body_estimated_tokens"`
+	SkillsCatalogBloatThreshold         int    `json:"skills_catalog_bloat_threshold"`
 	LoadedSkills                   []LoadedSkillSummary `json:"loaded_skills"`
 	RecentMessages        []ContextMessagePreview `json:"recent_messages"`
 }

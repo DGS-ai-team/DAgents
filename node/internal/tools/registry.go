@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
-	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
@@ -30,7 +29,7 @@ type Registry struct {
 	compliancePeer      string
 	discoveryGroup      string
 	agentID             string
-	skillsCatalog       *skills.Catalog
+	skillsCatalogHolder
 	enabledOnly         map[string]struct{}
 	handlers            map[string]handler
 	pathEncMu           sync.Mutex

@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-06-15
+
+**0.x 预览**：**skills 上下文成本**估算修正；双 TUI **思考内容**展示优化；Manage **离线安装**说明补全。
+
+### 变更
+
+- **skills catalog token 分项**：`skills_catalog_estimated_tokens` 仅反映 `load_skills` 工具 description 中的 catalog 元数据；新增 API 字段 **`skills_catalog_max_body_estimated_tokens`**（单 SKILL 正文上限）；TUI 膨胀告警取二者较大值。
+- **catalog 元数据注入路径**：可用 skills 列表经 `Registry.enrichDefinitions` 写入 `load_skills` description，不再拼入 system prompt 元数据段。
+- **思考内容展示（双 TUI）**：去掉 `[reasoning]` 前缀，浅灰圆点 + 浅灰正文；`/reasoning on|off` 仍控制是否展示推理流。
+
+### 修复
+
+- **`tools.Registry` × `skills` import**：`skillsCatalog` 字段迁至 `registry_enrich.go` 嵌入体，消除 gopls `missing metadata for import` 诊断。
+
+### 文档
+
+- **Manage 离线安装**：`manage/README.md` 与 `packaging/manage/README.md` 补充镜像导出/导入、`docker compose` 启动与健康检查步骤。
+
+（Git **tag**：`v0.3.7`。）
+
 ## [0.3.6] - 2026-06-15
 
 **0.x 预览**：**工具链上下文成本**治理（WS1/3/5/6）：重复调用审批、超长 tool 结果落盘摘要、任务级度量；**移除 `trigger_fire`**。

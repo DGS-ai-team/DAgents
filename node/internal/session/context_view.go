@@ -20,8 +20,9 @@ type ContextView struct {
 	TurnState             turn.State
 	SystemPrompt          string
 	SystemPromptEstimatedTokens  int
-	SkillsCatalogEstimatedTokens int
-	SkillsCatalogBloatThreshold  int
+	SkillsCatalogEstimatedTokens      int
+	SkillsCatalogMaxBodyEstimatedTokens int
+	SkillsCatalogBloatThreshold       int
 	Messages              []llm.Message
 	LastCompression       *compression.LastCompressionSnapshot
 }
@@ -33,7 +34,9 @@ func enrichContextPromptStats(view *ContextView, catalog *skills.Catalog) {
 	view.SystemPromptEstimatedTokens = llm.EstimateTextTokens(view.SystemPrompt)
 	view.SkillsCatalogBloatThreshold = skills.CatalogBloatTokenThreshold
 	if catalog != nil {
-		view.SkillsCatalogEstimatedTokens = catalog.EstimateCatalogTokens()
+		stats := catalog.EstimateCatalogStats()
+		view.SkillsCatalogEstimatedTokens = stats.MetadataTokens
+		view.SkillsCatalogMaxBodyEstimatedTokens = stats.MaxBodyTokens
 	}
 }
 

@@ -17,8 +17,9 @@ func TestSkillsBloatWarningLines_belowThreshold(t *testing.T) {
 
 func TestSkillsBloatWarningLines_aboveThreshold(t *testing.T) {
 	lines := SkillsBloatWarningLines(&nodeapi.SessionContext{
-		SkillsCatalogEstimatedTokens: 5000,
-		SkillsCatalogBloatThreshold:  4000,
+		SkillsCatalogEstimatedTokens:        100,
+		SkillsCatalogMaxBodyEstimatedTokens: 5000,
+		SkillsCatalogBloatThreshold:         4000,
 	})
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d want 2", len(lines))

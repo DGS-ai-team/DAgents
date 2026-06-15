@@ -55,7 +55,8 @@ func FormatTranscriptLineForDisplay(line string, width int) string {
 	case strings.HasPrefix(line, "[user] "):
 		return roleDotUser + sanitizeTerminalText(strings.TrimPrefix(line, "[user] "))
 	case strings.HasPrefix(line, "[reasoning] "):
-		return roleDotReasoning + sanitizeTerminalText(strings.TrimPrefix(line, "[reasoning] "))
+		body := sanitizeTerminalText(strings.TrimPrefix(line, "[reasoning] "))
+		return roleDotReasoning + panelDimStyle + body + panelReset
 	case strings.HasPrefix(line, toolPendingLinePrefix):
 		body := metaLineBody(line, toolPendingLinePrefix)
 		return roleDotToolPending + toolPendingStyle + sanitizeTerminalText(body) + panelReset
@@ -92,7 +93,7 @@ func FormatTranscriptLineForDisplay(line string, width int) string {
 const (
 	roleDotUser          = "\033[34m●\033[0m "
 	roleDotAssistant     = "\033[32m●\033[0m "
-	roleDotReasoning     = "\033[33m●\033[0m "
+	roleDotReasoning     = "\033[90m●\033[0m "
 	roleDotTool          = "\033[36m●\033[0m "
 	roleDotToolPending   = "\033[33m●\033[0m "
 	roleDotToolSuccess   = "\033[32m●\033[0m "

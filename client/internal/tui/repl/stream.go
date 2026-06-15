@@ -214,7 +214,7 @@ func (r *streamRunner) printReasoning(text string) {
 	r.printMu.Lock()
 	defer r.printMu.Unlock()
 	if !r.reasoningLineOpen {
-		fmt.Fprintf(os.Stderr, "[reasoning] ")
+		fmt.Fprint(os.Stderr, "\033[90m")
 		r.reasoningLineOpen = true
 	}
 	fmt.Fprint(os.Stderr, text)
@@ -225,7 +225,7 @@ func (r *streamRunner) finishReasoningLine() {
 	r.printMu.Lock()
 	defer r.printMu.Unlock()
 	if r.reasoningLineOpen {
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprint(os.Stderr, "\033[0m\n")
 		r.reasoningLineOpen = false
 	}
 	r.transcript.FinishPartial("reasoning")

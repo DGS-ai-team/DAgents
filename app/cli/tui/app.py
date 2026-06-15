@@ -67,7 +67,7 @@ _BASH_INLINE_COMMAND_MAX_CELLS = 56
 _DOT_USER = "blue"
 _DOT_ASSISTANT_STREAM = "yellow blink"
 _DOT_ASSISTANT_DONE = "green"
-_DOT_REASONING = "orange1"
+_DOT_REASONING = "bright_black"
 _DOT_TOOL_PENDING = "yellow blink"
 _DOT_TOOL_RESULT = "cyan"
 _DOT_STATUS_ACTIVE = "yellow blink"
@@ -1019,6 +1019,16 @@ class DAgentsTuiApp(App[None]):
             return Text.from_markup(lines[0])
         return Group(*[Text.from_markup(line) for line in lines])
 
+    def _reasoning_block(self, text: str) -> Table:
+        """思考内容：浅灰圆点 + 浅灰正文，不展示 [reasoning] 前缀。"""
+        body = text.removeprefix("[reasoning]").lstrip()
+        lines = body.splitlines() or [""]
+        if len(lines) == 1:
+            content: RenderableType = Text(escape(lines[0]), style="bright_black")
+        else:
+            content = Group(*[Text(escape(line), style="bright_black") for line in lines])
+        return self._dot_column_block(_DOT_REASONING, content)
+
     def _message_block(self, dot_style: str, text: str, *, escape_text: bool = True) -> Table:
         """按固定圆点列格式化 transcript 消息，保证与工具块横向对齐。"""
         return self._dot_column_block(dot_style, self._text_block_body(text, escape_text=escape_text))
@@ -1175,7 +1185,7 @@ class DAgentsTuiApp(App[None]):
     def _event_block(self, text: str) -> str | Table:
         """格式化非流式事件：工具消息使用圆点，普通系统行保持原样。"""
         if text.startswith("[reasoning]"):
-            return self._message_block(_DOT_REASONING, text)
+            return self._reasoning_block(text)
         return text
 
     def _append_message_gap(self) -> None:
@@ -2304,7 +2314,7 @@ class DAgentsTuiApp(App[None]):
             self._rewind_reasoning_stream_lines(log)
             self._log_write_block(
                 log,
-                self._message_block(_DOT_REASONING, f"[reasoning] {self._reasoning_buffer}"),
+                self._reasoning_block(self._reasoning_buffer),
             )
         else:
             self._submit_content_seen = True
@@ -2793,6 +2803,7 @@ class DAgentsTuiApp(App[None]):
             f"messages_total_tokens: {data.get('messages_total_tokens') or 0}",
             f"system_prompt_estimated_tokens: {data.get('system_prompt_estimated_tokens') or 0}",
             f"skills_catalog_estimated_tokens: {data.get('skills_catalog_estimated_tokens') or 0}",
+            f"skills_catalog_max_body_estimated_tokens: {data.get('skills_catalog_max_body_estimated_tokens') or 0}",
             f"skills_catalog_bloat_threshold: {data.get('skills_catalog_bloat_threshold') or 0}",
             f"tool_loop_count: {data.get('tool_loop_count') or 0}",
             f"queue_pending: {data.get('queue_pending') or 0}",

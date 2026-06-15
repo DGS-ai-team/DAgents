@@ -45,16 +45,20 @@ func FormatWelcomePanelBody(endpoint, agentID, clientVersion, sessionID string) 
 	}
 }
 
-func skillsBloatWarningTexts(tokens, threshold int) []string {
+func skillsBloatWarningTexts(tokens, maxBody, threshold int) []string {
 	if threshold <= 0 {
 		threshold = 4000
 	}
-	if tokens <= threshold {
+	display := tokens
+	if maxBody > display {
+		display = maxBody
+	}
+	if tokens <= threshold && maxBody <= threshold {
 		return nil
 	}
 	return []string{
-		fmt.Sprintf("skills 目录估算约 %d tokens（超过 %d）", tokens, threshold),
-		"skills 过于臃肿，请精简 skill 描述或清理无用的 skills",
+		fmt.Sprintf("skills 目录估算约 %d tokens（超过 %d）", display, threshold),
+		"skills 过于臃肿，请精简 skill 描述、缩短 SKILL 正文或清理无用的 skills",
 	}
 }
 
@@ -63,7 +67,11 @@ func SkillsBloatWarningTexts(ctx *nodeapi.SessionContext) []string {
 	if ctx == nil {
 		return nil
 	}
-	return skillsBloatWarningTexts(ctx.SkillsCatalogEstimatedTokens, ctx.SkillsCatalogBloatThreshold)
+	return skillsBloatWarningTexts(
+		ctx.SkillsCatalogEstimatedTokens,
+		ctx.SkillsCatalogMaxBodyEstimatedTokens,
+		ctx.SkillsCatalogBloatThreshold,
+	)
 }
 
 // SkillsBloatWarningLines 根据 GET /context 的 skills 估算 token 生成欢迎区告警行。
