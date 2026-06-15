@@ -3,6 +3,7 @@ package shared
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -148,6 +149,9 @@ func formatToolCallEvent(data map[string]any, blockID string, verbose bool) []st
 			block = blockID
 		}
 		_, codePreview := ToolCallParts(call.Name, call.Arguments)
+		if codePreview == "" && strings.TrimSpace(call.RawJSON) != "" {
+			_, codePreview = streamingToolCallParts(call.Name, call.RawJSON)
+		}
 		if block != "" {
 			lines = append(lines, formatToolPendingLine(block, "调用 "+title))
 			if codePreview != "" && !verbose {
@@ -187,6 +191,59 @@ func splitToolCallCodeLines(blockID, code string) []string {
 		out = append(out, formatToolMetaLine(toolCallCodeLinePrefix, blockID, p))
 	}
 	return out
+}
+
+// streamingToolCallParts 从不完整 arguments JSON 提取流式代码预览。
+func streamingToolCallParts(name, rawJSON string) (summary, codeContent string) {
+	raw := strings.TrimSpace(rawJSON)
+	if raw == "" {
+		return ToolDisplayName(name, nil), ""
+	}
+	args := parseToolArguments(raw)
+	if len(args) > 0 {
+		return ToolCallParts(name, args)
+	}
+	switch strings.TrimSpace(name) {
+	case "bash_run":
+		if cmd := extractPartialJSONString(raw, "command"); cmd != "" {
+			return ToolDisplayName(name, map[string]any{"command": cmd}), cmd
+		}
+	case "write_file":
+		if content := extractPartialJSONString(raw, "content"); content != "" {
+			return ToolDisplayName(name, map[string]any{"content": content}), content
+		}
+	}
+	return ToolDisplayName(name, nil), raw
+}
+
+func extractPartialJSONString(raw, key string) string {
+	re := regexp.MustCompile(`"` + regexp.QuoteMeta(key) + `"\s*:\s*"`)
+	loc := re.FindStringIndex(raw)
+	if loc == nil {
+		return ""
+	}
+	return extractPartialJSONStringFrom(raw[loc[1]:])
+}
+
+func extractPartialJSONStringFrom(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+				b.WriteByte(s[i+1])
+			default:
+				b.WriteByte(s[i+1])
+			}
+			i++
+			continue
+		}
+		if s[i] == '"' {
+			break
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // ToolCallParts 解析 tool_call 短标题与可选代码预览（对齐 Python `_tool_call_parts_from_call`）。

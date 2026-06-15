@@ -181,6 +181,11 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 			for _, tc := range chunk.Choices[0].Delta.ToolCalls {
 				toolAcc.add(tc)
 			}
+			if handler.OnToolCallDelta != nil {
+				if snap := toolAcc.snapshot(); len(snap) > 0 {
+					handler.OnToolCallDelta(snap)
+				}
+			}
 			if chunk.Choices[0].FinishReason != nil {
 				finishReason = *chunk.Choices[0].FinishReason
 			}
@@ -286,6 +291,21 @@ func (a *toolCallAccumulator) add(delta streamToolCallDelta) {
 	if delta.Function.Arguments != "" {
 		tc.Function.Arguments += delta.Function.Arguments
 	}
+}
+
+func (a *toolCallAccumulator) snapshot() []ToolCall {
+	if len(a.order) == 0 {
+		return nil
+	}
+	out := make([]ToolCall, 0, len(a.order))
+	for _, idx := range a.order {
+		tc := a.byIndex[idx]
+		if tc == nil {
+			continue
+		}
+		out = append(out, *tc)
+	}
+	return out
 }
 
 func (a *toolCallAccumulator) finalize() []ToolCall {

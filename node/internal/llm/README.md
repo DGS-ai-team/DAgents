@@ -22,7 +22,7 @@ history Message
   → NormalizeAssistantForStorage   （写入 session history）
   → PrepareOutboundMessages        （出站前裁剪 []Message）
   → MarshalChatRequestMessages     （HTTP messages 字段；openai 返回 ok=false）
-  → RequestExtra                   （合并进 POST body 顶层）
+  → RequestExtra                   （合并进 POST body 顶层：user_id=agent_id + thinking 等）
 ```
 
 | `provider` | 默认 `base_url` | thinking 控制 |

@@ -116,6 +116,7 @@ type model struct {
 
 	toolBlocks  *tuishared.ToolBlockRegistry
 	toolPending *tuishared.ToolPendingTracker
+	partialToolBlocks map[int]string
 	statusMgr   *statusLineManager
 
 	refreshDebounceUntil time.Time
@@ -164,6 +165,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		viewportFollowTail:  true,
 		toolBlocks:          tuishared.NewToolBlockRegistry(),
 		toolPending:         tuishared.NewToolPendingTracker(),
+		partialToolBlocks:   make(map[int]string),
 		statusMgr:           newStatusLineManager(),
 	}
 
@@ -357,6 +359,7 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.invalidateHITLForUserMessage()
 		m.resetUsageStrip()
+		m.clearPartialToolBlocks()
 		m.submitContentSeen = false
 		m.stallWarnIssued = false
 		m.sseTurnWarnIssued = false
@@ -718,6 +721,13 @@ func (m *model) resetTurnWaitUI() {
 	m.turnStartedAt = time.Time{}
 	m.stallWarnIssued = false
 	m.sseTurnWarnIssued = false
+}
+
+func (m *model) clearPartialToolBlocks() {
+	for _, blockID := range m.partialToolBlocks {
+		m.transcript.RemoveToolPendingLines(blockID)
+	}
+	m.partialToolBlocks = make(map[int]string)
 }
 
 func (m *model) scheduleActiveTickIfNeeded() tea.Cmd {

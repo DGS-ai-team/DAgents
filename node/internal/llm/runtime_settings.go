@@ -12,6 +12,7 @@ import (
 type RuntimeSettings struct {
 	mu sync.RWMutex
 
+	AgentID         string
 	Provider        string
 	Model           string
 	Mock            bool
@@ -42,6 +43,7 @@ func NewRuntimeSettings(cfg *config.Config) *RuntimeSettings {
 	}
 	thinking, effort := NormalizeThinkingSettings(cfg.LLM.Provider, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
 	return &RuntimeSettings{
+		AgentID:         strings.TrimSpace(cfg.AgentID),
 		Provider:        strings.TrimSpace(cfg.LLM.Provider),
 		Model:           strings.TrimSpace(cfg.LLM.Model),
 		Mock:            cfg.LLM.Mock,
@@ -86,14 +88,24 @@ func (s *RuntimeSettings) ModelName() string {
 	return s.Model
 }
 
-// RequestExtra 构造当前 provider 的 Chat Completions 顶层扩展字段。
+// RequestExtra 构造当前 provider 的 Chat Completions 顶层扩展字段（含 user_id=agent_id）。
 func (s *RuntimeSettings) RequestExtra() map[string]any {
 	if s == nil {
 		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return BuildRequestExtra(s.Provider, s.Thinking, s.ReasoningEffort)
+	var extra map[string]any
+	if built := BuildRequestExtra(s.Provider, s.Thinking, s.ReasoningEffort); len(built) > 0 {
+		extra = built
+	}
+	if uid := strings.TrimSpace(s.AgentID); uid != "" {
+		if extra == nil {
+			extra = make(map[string]any, 1)
+		}
+		extra["user_id"] = uid
+	}
+	return extra
 }
 
 // ApplyPatch 热更新 thinking / reasoning_effort。

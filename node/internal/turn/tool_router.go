@@ -26,8 +26,8 @@ func (o *Orchestrator) processToolCalls(
 	var autoCalls, approvalCalls []llm.ToolCall
 	var userInfo *llm.ToolCall
 
-	for _, tc := range calls {
-		o.publishToolCall(sessionID, tc)
+	for i, tc := range calls {
+		o.publishToolCallSSE(sessionID, tc, false, i)
 
 		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
 			if o.isChildSession {
@@ -295,13 +295,26 @@ func (o *Orchestrator) appendDeniedTool(sessionID string, history *[]llm.Message
 	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
 }
 
-func (o *Orchestrator) publishToolCall(sessionID string, tc llm.ToolCall) {
-	o.logger.Info("tool call",
-		"session_id", sessionID,
-		"tool_name", tc.Function.Name,
-		"tool_call_id", tc.ID,
-	)
-	o.hub.Publish(sessionID, o.agentID, "tool_call", map[string]any{
+func (o *Orchestrator) publishToolCallPartial(sessionID string, tc llm.ToolCall, toolIndex int) {
+	o.publishToolCallSSE(sessionID, tc, true, toolIndex)
+}
+
+func (o *Orchestrator) publishToolCallSSE(sessionID string, tc llm.ToolCall, partial bool, toolIndex int) {
+	if partial {
+		o.logger.Debug("tool call partial",
+			"session_id", sessionID,
+			"tool_name", tc.Function.Name,
+			"tool_index", toolIndex,
+		)
+	} else {
+		o.logger.Info("tool call",
+			"session_id", sessionID,
+			"tool_name", tc.Function.Name,
+			"tool_call_id", tc.ID,
+		)
+	}
+	payload := map[string]any{
+		"partial": partial,
 		"tool_calls": []map[string]any{{
 			"id":   tc.ID,
 			"type": tc.Type,
@@ -310,7 +323,11 @@ func (o *Orchestrator) publishToolCall(sessionID string, tc llm.ToolCall) {
 				"arguments": tc.Function.Arguments,
 			},
 		}},
-	})
+	}
+	if toolIndex >= 0 {
+		payload["tool_index"] = toolIndex
+	}
+	o.hub.Publish(sessionID, o.agentID, "tool_call", payload)
 }
 
 func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, content string, rejected bool, extra map[string]any) {

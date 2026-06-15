@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-12
+
+**0.x 预览**：上下文压缩与 **Prompt Cache** 对齐；user 消息 **name** 来源标识；**tool_call 流式展示**（双 TUI）；Chat Completions **`user_id=agent_id`**。
+
+### 新增
+
+- **上下文压缩 × Prompt Cache**：侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；M3 **silent 冷却**抑制重复侧车；`/last_compression` 与压缩 usage 展示；设计实录见 [major-changes.md](docs/design/major-changes.md)。
+- **User 消息 `name` 字段**：human / trigger / a2a_inbox / child_task / compression / async_tool / compression_sidecar，便于模型区分上下文来源（DeepSeek Chat API）。
+- **Tool call 流式展示**：LLM delta 阶段即推送 `partial: true` 的 tool_call SSE；Go / Python TUI 在工具名出现后展示 pending 块，arguments 边流边更新代码预览。
+- **LLM `user_id`**：每次 Chat Completions 请求附带 `user_id=agent_id`（DeepSeek 文档推荐，便于服务端观测与限流）。
+
+### 修复
+
+- **压缩死锁**：blocking 压缩与 turn 并发时的锁顺序问题。
+
+（Git **tag**：`v0.3.4`。）
+
 ## [0.3.3] - 2026-06-11
 
 **0.x 预览**：DeepSeek **思考开关/强度** 运行时 API；双 TUI 顶栏展示模型、输入条展示 thinking；VS Code 调试配置。
