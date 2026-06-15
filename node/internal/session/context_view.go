@@ -1,6 +1,7 @@
 package session
 
 import (
+	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
@@ -22,6 +23,7 @@ type ContextView struct {
 	SkillsCatalogEstimatedTokens int
 	SkillsCatalogBloatThreshold  int
 	Messages              []llm.Message
+	LastCompression       *compression.LastCompressionSnapshot
 }
 
 func enrichContextPromptStats(view *ContextView, catalog *skills.Catalog) {

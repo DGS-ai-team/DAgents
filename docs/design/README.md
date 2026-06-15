@@ -10,3 +10,5 @@
 | [agent-directory-phase1.md](./agent-directory-phase1.md) | **Phase 1** Register Center 企业化（**将被 Manage Registry 吸收**） |
 | [manage-architecture.md](./manage-architecture.md) | **Manage 统一控制面**：Registry + A2A + Skills + Platform；取代 `register_center/` |
 | [agent-hooks.md](./agent-hooks.md) | **Agent Hook 扩展点**（设计稿）：turn 全链路阶段锚点、`HookRegistry`、配置与落地顺序 |
+| [major-changes.md](./major-changes.md) | **重大设计变更与优化实录**（可读摘要 + 条目模板） |
+| [context-compression-cache-analysis.md](./context-compression-cache-analysis.md) | 压缩 × Prompt Cache 完整分析（M1–M3） |

@@ -32,13 +32,15 @@
 | [design/agent-directory-phase1.md](./design/agent-directory-phase1.md) | Phase 1 RC 企业化（过渡；见 Manage 方案） |
 | [design/manage-architecture.md](./design/manage-architecture.md) | Manage 统一控制面架构方案 |
 | [design/agent-hooks.md](./design/agent-hooks.md) | **Agent Hook 扩展点**（设计稿）：Registry、phase 锚点、L1/L2/L3 分层 |
+| [design/major-changes.md](./design/major-changes.md) | **重大设计变更与优化实录**（背景 / 思路 / 落地；含压缩 × Prompt Cache） |
+| [design/context-compression-cache-analysis.md](./design/context-compression-cache-analysis.md) | 上下文压缩与 Prompt Cache 命中率（M1–M3 技术分析） |
 | [manage/README.md](../../manage/README.md) | **Manage 服务**（M0+M1 已落地） |
 
 ## 专题
 
 | 文件 | 适用栈 | 说明 |
 |------|--------|------|
-| [context-compression-and-state.md](./context-compression-and-state.md) | Go Node | 压缩与 prompt 侧车 |
+| [context-compression-and-state.md](./context-compression-and-state.md) | Go Node：压缩与 prompt 侧车（**Go 优化实录**见 [design/major-changes.md](./design/major-changes.md)） |
 | [a2a-and-register-center.md](./a2a-and-register-center.md) | Register Center | RC HTTP；历史 **`agent_peer`** 见文档内「历史」节 |
 | [built-in-tools.md](./built-in-tools.md) | Go Node + 归档 | §0 现行工具表；Python 见归档 |
 | [triggers-design.md](./triggers-design.md) | Go Node | 长期设计；落地见 `node/internal/triggers/README.md` |
@@ -69,7 +71,7 @@ Manage、A2A inbox、多租户等 **尚未实现** 的方案，见 [future/READM
 
 | 路径 | 说明 |
 |------|------|
-| [../README.md](../README.md) | 项目概览、快速开始 |
+| [../README.md](../README.md) | 项目概览、快速开始、**设计优化与重大变更** |
 | [../node/README.md](../node/README.md) | Go Agent Node |
 | [../client/README.md](../client/README.md) | Go REPL Client |
 | [../app/README.md](../app/README.md) | Python 包（含 `cli/` TUI） |

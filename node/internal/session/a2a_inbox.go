@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
 
 const defaultInboxTurnTimeout = 5 * time.Minute
@@ -55,14 +57,14 @@ func (m *Manager) RunInboxTurn(ctx context.Context, taskID, content string, resu
 		if _, _, err := m.prepareInboxSession(sessionID); err != nil {
 			return InboxTurnResult{}, err
 		}
-		if _, err := m.EnqueueMessage(ctx, sessionID, "message", content, nil); err != nil {
+		if _, err := m.EnqueueMessage(ctx, sessionID, "message", content, nil, llm.UserNameA2AInbox); err != nil {
 			return InboxTurnResult{}, err
 		}
 	case resume != nil:
 		if m.getRuntime(sessionID) == nil {
 			return InboxTurnResult{}, fmt.Errorf("inbox session %q not found", sessionID)
 		}
-		if _, err := m.EnqueueMessage(ctx, sessionID, "resume", "", resume); err != nil {
+		if _, err := m.EnqueueMessage(ctx, sessionID, "resume", "", resume, ""); err != nil {
 			return InboxTurnResult{}, err
 		}
 	default:

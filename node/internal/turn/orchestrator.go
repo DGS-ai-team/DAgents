@@ -100,7 +100,7 @@ func (o *Orchestrator) RunMessageTurn(
 	if setState == nil {
 		setState = func(State) {}
 	}
-	o.appendHistory(sessionID, history, llm.Message{Role: "user", Content: userText})
+	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.UserNameHuman))
 	o.resetTurnUsage(sessionID)
 	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
 	return o.runUntilQueueOrDone(ctx, sessionID, history, setState, 0)
@@ -112,14 +112,19 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	sessionID string,
 	history *[]llm.Message,
 	userText string,
+	userName string,
 	setState StateSetter,
 ) StepOutcome {
 	if setState == nil {
 		setState = func(State) {}
 	}
-	o.appendHistory(sessionID, history, llm.Message{Role: "user", Content: userText})
+	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.NormalizeUserMessageName(userName)))
 	o.resetTurnUsage(sessionID)
-	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
+	o.logger.Info("turn human message start",
+		"session_id", sessionID,
+		"content_len", len(userText),
+		"user_name", llm.NormalizeUserMessageName(userName),
+	)
 	return o.runOneStep(ctx, sessionID, history, setState, 0)
 }
 
@@ -377,7 +382,7 @@ func (o *Orchestrator) runOneStep(
 		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("tool loop limit exceeded")}
 	}
 
-	toolDefs := o.tools.Definitions()
+	toolDefs := o.ToolDefinitions()
 	systemPrompt := o.buildSystemPrompt(sessionID)
 	setState(StateModelStreaming)
 	result, err := o.llm.StreamChat(ctx, llm.ChatRequest{
@@ -503,6 +508,14 @@ func (o *Orchestrator) accumulateAndPublishUsage(sessionID string, llmStep int, 
 // SystemPromptForSession 返回当前 session 下一步 LLM 调用将使用的 system prompt。
 func (o *Orchestrator) SystemPromptForSession(sessionID string) string {
 	return o.buildSystemPrompt(sessionID)
+}
+
+// ToolDefinitions 返回与 runOneStep 相同的 tools 列表（侧车压缩前缀对齐用）。
+func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
+	if o == nil || o.tools == nil {
+		return nil
+	}
+	return o.tools.Definitions()
 }
 
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {

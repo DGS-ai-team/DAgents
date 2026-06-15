@@ -128,7 +128,7 @@ func buildAsyncToolMessages(payload AsyncToolResultInput) asyncToolMessages {
 	userText := fmt.Sprintf("工具%s，job_id已完成，请获取执行结果并继续任务。", toolName)
 	argsJSON := fmt.Sprintf(`{"job_id":%q,"tool_name":%q,"status":%q}`, jobID, toolName, status)
 	return asyncToolMessages{
-		UserMessage: llm.Message{Role: "user", Content: userText},
+		UserMessage: llm.UserMessage(userText, llm.UserNameAsyncTool),
 		AssistantMessage: llm.Message{
 			Role:    "assistant",
 			Content: "",

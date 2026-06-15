@@ -152,6 +152,13 @@ def format_context_compression(event_type: str, data: dict[str, Any]) -> Transcr
             "compressed_message_count": data.get("compressed_message_count"),
             "compression_start": data.get("compression_start"),
             "compression_end": data.get("compression_end"),
+            "prompt_tokens": data.get("prompt_tokens"),
+            "completion_tokens": data.get("completion_tokens"),
+            "total_tokens": data.get("total_tokens"),
+            "token_reduction_rate": data.get("token_reduction_rate"),
+            "prompt_cache_hit_tokens": data.get("prompt_cache_hit_tokens"),
+            "prompt_cache_miss_tokens": data.get("prompt_cache_miss_tokens"),
+            "prompt_cache_hit_rate": data.get("prompt_cache_hit_rate"),
         },
     )
 

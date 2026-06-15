@@ -15,6 +15,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
+	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
@@ -556,7 +557,8 @@ type sessionContextResponse struct {
 	SkillsCatalogEstimatedTokens   int                     `json:"skills_catalog_estimated_tokens"`
 	SkillsCatalogBloatThreshold    int                     `json:"skills_catalog_bloat_threshold"`
 	LoadedSkills                   []skills.LoadedSkill    `json:"loaded_skills"`
-	RecentMessages        []contextMessagePreview `json:"recent_messages"`
+	RecentMessages                 []contextMessagePreview `json:"recent_messages"`
+	LastCompression                *compression.LastCompressionSnapshot `json:"last_compression,omitempty"`
 }
 
 func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
@@ -607,8 +609,9 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 		SkillsCatalogEstimatedTokens: view.SkillsCatalogEstimatedTokens,
 		SkillsCatalogBloatThreshold:  view.SkillsCatalogBloatThreshold,
 		LoadedSkills:                 view.LoadedSkills,
-		RecentMessages:        recent,
-		RunTurnPhase:          turn.RunTurnPhase(view.TurnState),
+		RecentMessages:               recent,
+		LastCompression:              view.LastCompression,
+		RunTurnPhase:                 turn.RunTurnPhase(view.TurnState),
 	}
 	if view.TurnState != "" {
 		resp.TurnState = string(view.TurnState)
@@ -646,10 +649,11 @@ func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
 }
 
 type postMessageRequest struct {
-	SessionID   string         `json:"session_id"`
-	RequestType string         `json:"request_type"`
-	Content     string         `json:"content"`
-	ResumeValue map[string]any `json:"resume_value"`
+	SessionID       string         `json:"session_id"`
+	RequestType     string         `json:"request_type"`
+	Content         string         `json:"content"`
+	UserMessageName string         `json:"user_message_name,omitempty"`
+	ResumeValue     map[string]any `json:"resume_value"`
 }
 
 type postMessageResponse struct {
@@ -683,7 +687,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ResumeValue)
+	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ResumeValue, req.UserMessageName)
 	if err != nil {
 		// 业务错误映射为 HTTP 状态 + 统一 error 体（见 errors.go）。
 		switch err.Error() {
