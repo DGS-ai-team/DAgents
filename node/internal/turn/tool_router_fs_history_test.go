@@ -173,6 +173,40 @@ func TestExecuteTool_globFilesHistorySpillsButSSEFull(t *testing.T) {
 	}
 }
 
+func TestExecuteTool_agentInvokeHistorySpillsButSSEFull(t *testing.T) {
+	root := t.TempDir()
+	hub := stream.NewHub(8, logx.Discard())
+	long := strings.Repeat("a", 50000)
+	orch := NewOrchestrator(
+		"a1", root, hub, &llm.MockClient{},
+		stubToolOutputExecutor{toolName: "agent_invoke", output: long},
+		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
+		hooks.RuntimeConfig{
+			Duplicate:  hooks.DefaultDuplicateConfig(),
+			ToolResult: hooks.DefaultToolResultConfig(root),
+		},
+		logx.Discard(),
+	)
+	tc := llm.ToolCall{
+		ID: "c-ai", Type: "function",
+		Function: llm.ToolCallFunction{Name: "agent_invoke", Arguments: `{"call_purpose":"t","content":"task"}`},
+	}
+	history := []llm.Message{{Role: "assistant", ToolCalls: []llm.ToolCall{tc}}}
+	if err := orch.executeTool(context.Background(), "s-ai", &history, tc, nil); err != nil {
+		t.Fatal(err)
+	}
+	if history[len(history)-1].Content == long {
+		t.Fatal("history should be summarized")
+	}
+	if !strings.Contains(history[len(history)-1].Content, "tokens") {
+		t.Fatalf("missing token hint: %q", history[len(history)-1].Content)
+	}
+	forClient, _, _ := orch.splitToolResult("s-ai", tc, long)
+	if forClient != long {
+		t.Fatalf("client content len=%d want %d", len(forClient), len(long))
+	}
+}
+
 type stubToolOutputExecutor struct {
 	toolName string
 	output   string

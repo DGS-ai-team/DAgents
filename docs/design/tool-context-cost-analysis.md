@@ -162,7 +162,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 | bash stdout/stderr | **§3.2.1** 清洗 + 落盘 + history 头尾摘要 | 其它组按 enabled_groups 逐步接入 |
 | read_file / grep / search_replace / glob | offset/limit + **token** 上限；**编码检测+缓存**（§3.2.2 阶段 2）；**阶段 3** spill | 顺序分页 multi-turn（§3.2.3，设计取舍） |
 | search_replace diff | 输出 diff 摘要 | 大 diff 仍 long |
-| agent_invoke result | 对端全文 | 截断 + 落盘（待做） |
+| agent_invoke / agent_discover | 对端全文 / 发现列表 JSON | **§3.2.4** 落盘 + 摘要（已落地） |
 
 #### 3.2.0 tool_result 压缩全链路（现网）
 
@@ -171,7 +171,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 | **Tool 清洗** | `bash_compress.sanitizeBashStream` | bash stdout/stderr | 去 ANSI、合并重复行；**不再**在此截断长度 |
 | **Tool 分页/上限** | `fs_*` | read/grep/glob 等 | **token** 窗口（DeepSeek 粗算）+ 行/命中分页 + 翻页 hint |
 | **Job preview** | `job_registry` | status 终态 preview | 2000 bytes；完整靠 async 回灌 |
-| **`tool.after_each`** | `hooks.ToolResultPackageHook` → `toolresult.Package` | 配置内工具（**bash + fs 组**） | 超长：落盘 + history 头尾摘要 + `read_file` hint |
+| **`tool.after_each`** | `hooks.ToolResultPackageHook` → `toolresult.Package` | 配置内工具（**bash + fs + a2a**） | 超长：落盘 + history 头尾摘要 + `read_file` hint |
 | **SSE / Client** | `publishToolResult` | TUI | **全文**（清洗后、未 history 摘要） |
 | **history** | `appendHistory(role=tool)` | LLM | **摘要或全文**（由 Hook 输出 `ForHistory`） |
 | **Hook 元数据** | `ToolExecutionLog` | duplicate 审批 | 结果 preview 200 bytes |
@@ -210,6 +210,8 @@ hooks:
       - grep_files
       - search_replace
       - glob_files
+      - agent_invoke
+      - agent_discover
 tools:
   bash_compress:
     enabled: true   # 仅清洗，不截断
@@ -250,6 +252,20 @@ write_file / search_replace / grep_*
 **状态**：阶段 1–3 均已落地（编码：`fs_encoding_detect.go`、`fs_path_encoding.go`；spill 默认工具含 `search_replace`、`glob_files`）。
 
 **阶段 3**：`search_replace` / `glob_files` 接入 `tool.after_each`；工具内 token 上限（replace 整段 2000 tokens、glob 单页 3000 tokens）。
+
+#### 3.2.4 WS3 · a2a 组（已落地）
+
+**工具**：`agent_invoke`（对端 `result_text`）、`agent_discover`（peer 列表 JSON）。
+
+**锚点**：与 bash/fs 相同 — `tool.after_each` + `toolresult.Package`；超长写入 `fs_root/tool_outputs/`，history 头尾摘要 + `read_file` hint；SSE 仍全文。
+
+```text
+agent_invoke / agent_discover Execute
+  → ForClient = 全文 → SSE
+  → tokens > spill_threshold_tokens → 落盘 tool_outputs/<session>/<tool_call_id>.txt
+```
+
+**说明**：现网 Go Node 仅上述两个 A2A 工具（`manage.enabled` 时注册）；无工具内截断，与 `bash_run` 一致。**WS2**（子 Agent status long-poll）本分支**不做**。
 
 #### 3.2.3 分页读取 vs 单次读完：成本对比
 
@@ -316,8 +332,8 @@ write_file / search_replace / grep_*
 |----|------|------|--------|------------|------|
 | **WS1** | 后台 job 轮询治理 | bash 组：ACK 文案；**status 保持瞬时** | **P0** | **§5** | **已落地**（不实现 `wait_seconds`） |
 | **WS6** | 重复调用 Hook 审批 | `tool.before_each`；**仅 policy `rule`+auto** + 60s 指纹 + 标准审批原因 | **P0** | — | **已落地** |
-| **WS2** | Status 工具统一 wait | `temporary_agent_status` 等 | P1 | §3.1 | 未开始 |
-| **WS3** | Tool 结果 budget | `tool.after_each` 落盘 §3.2.1–§3.2.2；**fs 阶段 1–3** | P1 | §3.2 | **bash + fs 已落地** |
+| **WS3** | Tool 结果 budget | `tool.after_each` 落盘 §3.2.1–§3.2.4（**含 a2a**） | P1 | §3.2 | **已落地** |
+| **WS2** | Status 工具统一 wait | `temporary_agent_status` 等 | P1 | §3.1 | **本分支不做** |
 | **WS4** | Schema 前缀稳定 | enrich 瘦身、description | P2 | §3.3 | 未开始 |
 | **WS5** | 度量 | poll_count、tool_turns | P1 | §6.1 | **已落地**（基础） |
 
@@ -508,8 +524,8 @@ Issue #25：pending HITL 时仍写 history 但 **恢复** pending。
 | WS | 要点 |
 |----|------|
 | **WS6** | 仅 **`rule`+auto** 路径：60s 内同名同参 → 标准 HITL 审批原因；详见 [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) |
-| **WS2** | `temporary_agent_status.wait_seconds`（**可选**；bash job 已决不做 long-poll） |
-| **WS3** | 可配置 `hooks.tool_result`；**bash + fs 全组已落地** §3.2.1–§3.2.2 阶段 3；A2A 落盘 |
+| **WS2** | **本分支不做**（子 Agent status long-poll 留后续） |
+| **WS3** | 可配置 `hooks.tool_result`；**bash + fs + a2a 已落地** §3.2.1–§3.2.4 |
 | **WS4** | skills enrich 外置或缩短；enabled_groups 减面 |
 | **WS5** | `tool_context_metrics` on `done` SSE + 结构化日志；见 §6.1 |
 
@@ -525,7 +541,7 @@ Issue #25：pending HITL 时仍写 history 但 **恢复** pending。
 | ~~**T3b**~~ | ~~WS3 fs 编码检测 + 路径缓存~~ **已完成**（§3.2.2 阶段 2） |
 | ~~**T3c**~~ | ~~WS3 fs 阶段 3~~ **已完成**（`search_replace` / `glob_files` spill + token 上限） |
 | ~~**T2**~~ | ~~WS5 基础度量~~ **已完成**（§6.1） |
-| **T4** | WS2 子 Agent status（可选）；WS3 a2a |
+| ~~**T4**~~ | ~~WS3 a2a 落盘~~ **已完成**（§3.2.4）；**WS2 不做** |
 | **T5** | WS4 schema 稳定 |
 
 ---
@@ -550,4 +566,4 @@ Issue #25：pending HITL 时仍写 history 但 **恢复** pending。
 
 ## 9. 结论
 
-本分支以 **「减少低信息密度 LLM 往返 + 控制 tool 写入体积 + 稳定 tools 前缀」** 为纲。**WS1 + WS6 + WS3 + WS5（基础）** 已落地。**下一步**：**T4**（A2A 落盘 / 可选 WS2）→ **T5**（WS4 schema）。写审批减负见 [ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md)。
+本分支以 **「减少低信息密度 LLM 往返 + 控制 tool 写入体积 + 稳定 tools 前缀」** 为纲。**WS1 + WS6 + WS3（bash/fs/a2a）+ WS5（基础）** 已落地；**WS2 本分支不做**。**下一步**：**T5 — WS4** schema 前缀稳定。写审批减负见 [ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md)。

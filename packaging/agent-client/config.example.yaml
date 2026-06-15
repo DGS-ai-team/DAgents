@@ -122,3 +122,5 @@ hooks:
       - grep_files
       - search_replace
       - glob_files
+      - agent_invoke
+      - agent_discover

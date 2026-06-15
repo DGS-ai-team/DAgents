@@ -119,7 +119,7 @@ type ToolResultHookConfig struct {
 	MaxHistoryTokens int `yaml:"max_history_tokens,omitempty"`
 	// MaxHistoryRunes 已废弃。
 	MaxHistoryRunes int `yaml:"max_history_runes,omitempty"`
-	// Tools 启用落盘摘要的工具名；省略时默认 bash + fs 组（见 defaultToolResultHookTools）。
+	// Tools 启用落盘摘要的工具名；省略时默认 bash + fs + a2a（见 defaultToolResultHookTools）。
 	Tools []string `yaml:"tools"`
 }
 
@@ -178,7 +178,10 @@ func (c *Config) ToolResultSpillThresholdTokens() int {
 
 // defaultToolResultHookTools 与 node/internal/toolresult.DefaultToolResultTools 保持一致。
 func defaultToolResultHookTools() []string {
-	return []string{"bash_run", "read_file", "grep_file", "grep_files", "search_replace", "glob_files"}
+	return []string{
+		"bash_run", "read_file", "grep_file", "grep_files",
+		"search_replace", "glob_files", "agent_invoke", "agent_discover",
+	}
 }
 
 // ToolResultHookTools 返回启用摘要的工具列表。
