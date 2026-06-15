@@ -14,10 +14,10 @@
 | `runBashSyncWithAutoDegrade` | bash 同步超时自动降级后台 |
 | `resolveRunCWD` / `resolveShellType` / `blockedNonRootPasswordPromptingShell` | bash_run 参数与安全策略 |
 | `applyShellProcAttr` / `signalKillProcessGroup` | POSIX/Windows 进程组（`shell_platform_*.go`） |
-| `WithBackgroundExecution` | 标记显式后台 Execute，跳过同步窗口 |
+| `WithBackgroundExecution` | 内部：标记后台 Execute，跳过同步窗口（不对 schema 暴露） |
 | `StartBackground(ctx, sessionID, toolName, toolCallID, cleanedArgs)` | 后台执行并返回 ACK |
-| `ParseRunInBackground(arguments)` | 解析并剥离 run_in_background |
-| `injectCallPurposeParam` / `injectRunInBackgroundParam` | 注入 call_purpose（加入 required）与 run_in_background |
+| `ParseRunInBackground(arguments)` | 剥离 call_purpose / 历史 run_in_background |
+| `injectCallPurposeParam` | 注入 call_purpose（加入 required） |
 | `SetTriggerRuntime(store, sched, agentID)` | 注入触发器运行时 |
 | `execTriggerList` / `execTriggerGet` / `execTriggerCreate` / `execTriggerUpdate` / `execTriggerDelete` / `execTriggerFire` | 触发器工具 |
 | `IsBackgroundJobTool(name)` | 后台管理工具（强制同步） |

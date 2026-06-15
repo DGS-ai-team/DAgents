@@ -45,7 +45,7 @@
 | `max_turns` | integer | 否 | 20 | `1`～`child_agents.max_max_turns` |
 | `wait` | boolean | 否 | `false` | `true`：阻塞至子 Agent 交付结果后返回 |
 
-**不支持** `run_in_background`（由 orchestrator 专用处理）。
+**不支持**模型侧后台参数；子 Agent 工具由 orchestrator 专用处理，始终同步。
 
 ### 3.2 返回（JSON 字符串）
 

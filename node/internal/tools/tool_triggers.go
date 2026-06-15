@@ -23,7 +23,7 @@ func triggerListToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "trigger_list",
 			Description: "查看已配置的触发器列表；只读，不会执行或投递任务",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"include_disabled": map[string]any{
@@ -44,7 +44,7 @@ func triggerGetToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "trigger_get",
 			Description: "查看单个触发器配置与 next_fire_at；不执行触发",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"trigger_id": map[string]any{
@@ -65,7 +65,7 @@ func triggerCreateToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "trigger_create",
 			Description: "新建触发器；condition 须含 interval_seconds、fire_at 或 schedule 之一",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"name": map[string]any{
@@ -94,7 +94,7 @@ func triggerUpdateToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "trigger_update",
 			Description: "修改已有触发器；未传字段保持不变",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"trigger_id": map[string]any{
@@ -127,7 +127,7 @@ func triggerDeleteToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "trigger_delete",
 			Description: "删除不再需要的触发器规则",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"trigger_id": map[string]any{
@@ -148,7 +148,7 @@ func triggerFireToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "trigger_fire",
 			Description: "立即执行一次触发器，将渲染后的任务投递到 Agent 队列",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"trigger_id": map[string]any{

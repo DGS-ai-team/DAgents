@@ -37,7 +37,7 @@ func grepFilesToolDef() ToolDef {
 			Name: "grep_files",
 			Description: descFSPathConvention + " 在目录树内先按 glob_pattern 筛选文件，再按 pattern 逐行搜索文本内容，分页返回跨文件命中及上下文。" +
 				"directory 为起始目录；pattern 匹配行内文本；glob_pattern 相对 directory，支持 **，默认 **/*。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"directory": map[string]any{

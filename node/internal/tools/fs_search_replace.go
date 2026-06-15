@@ -22,7 +22,7 @@ func searchReplaceToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "search_replace",
 			Description: descFSPathConvention + " " + descReadBeforeWrite + " 用精确子串替换修改文本。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{

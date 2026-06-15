@@ -25,7 +25,7 @@ func bashRunToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "bash_run",
 			Description: bashRunToolDescription(isWindows),
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command": map[string]any{
@@ -58,7 +58,7 @@ func bashRunToolDef() ToolDef {
 func bashRunToolDescription(isWindows bool) string {
 	tail := descScriptsHint +
 		" 除非明确需要，否则避免 su/sudo 等需交互密码的命令。" +
-		" 同步超时自动降级后台（返回 job_id），或显式 run_in_background=true；完成后自动回灌，通常无需轮询 status。" +
+		" 同步等待 timeout_seconds（默认 30）；超时自动降级为后台 job（返回 job_id），完成后自动回灌，通常无需轮询 status。" +
 		" 长输出会按配置自动清洗与截断（tools.bash_compress）。"
 	if isWindows {
 		return "执行 PowerShell 命令；cwd 省略时默认为工作区根。" +

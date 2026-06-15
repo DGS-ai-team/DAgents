@@ -118,7 +118,7 @@ func startShellCommand(params shellRunParams) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// runShellUntilDone 在 ctx 有效期内等待 shell 结束（用于 run_in_background=true）。
+// runShellUntilDone 在 ctx 有效期内等待 shell 结束（用于内部 StartBackground 路径）。
 func runShellUntilDone(ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
 	base, err := startShellCommand(params)
 	if err != nil {

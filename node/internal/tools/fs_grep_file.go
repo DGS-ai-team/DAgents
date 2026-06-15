@@ -24,7 +24,7 @@ func grepFileToolDef() ToolDef {
 			Name: "grep_file",
 			Description: descFSPathConvention + " 在单个文件内按行搜索文本内容（正则或字面量），分页返回命中行及上下文。" +
 				"path 须为文件路径；pattern 匹配行内文本，不是文件名。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{

@@ -20,7 +20,7 @@ func writeFileToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "write_file",
 			Description: descFSPathConvention + " " + descReadBeforeWrite + " 写入文本文件（覆盖）。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{

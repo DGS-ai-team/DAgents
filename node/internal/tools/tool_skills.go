@@ -13,7 +13,7 @@ func loadSkillsToolDef() ToolDef {
 				"整组替换当前已加载列表（非追加）；skill_names 传 [] 清空。" +
 				"一次可加载多个 name，数量受配置上限约束；不再需要时用 unload_skills 或 clear_skills。" +
 				"注意：已加载的skills中就是skill.md中的内容，如果需要修改文件不必重复读取skill.md文件",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"skill_names": map[string]any{
@@ -36,7 +36,7 @@ func unloadSkillsToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "unload_skills",
 			Description: "从当前会话已加载 skills 中移除指定项；移除后该 skill 正文不再注入后续 system prompt。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"skill_names": map[string]any{
@@ -58,7 +58,7 @@ func clearSkillsToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "clear_skills",
 			Description: "清空当前会话已加载的全部 skills，等价于 load_skills([])；清空后不再注入任何 skill 正文。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type":                 "object",
 				"properties":           map[string]any{},
 				"required":             []string{},

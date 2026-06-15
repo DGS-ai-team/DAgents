@@ -61,7 +61,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 
 | 机制 | 文件 | 对上下文的影响 |
 |------|------|----------------|
-| **`run_in_background`** | `execution_mode.go` | 任意注入工具可后台化；完成走 **async_tool_result** |
+| **`StartBackground` / async 回灌** | `execution_mode.go`、`job_registry.go` | **bash 超时降级** 与内部测试；**不在 schema 暴露** |
 | **`call_purpose`** | 各 tool schema | 每 call 必填，略增 arguments 体积（UI 价值高，保留） |
 | **`Definitions()` 每步发送** | `orchestrator.runOneStep` | 全量 tools JSON 计入 **续写前缀** |
 | **`enrichDefinitions`** | `registry_enrich.go` | `load_skills` 附加 skills 元数据 → catalog 变则 **prefix miss** |
@@ -76,7 +76,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 | 后台 bash job | — | `background_job_status` | **async_tool_result** ✅ |
 | 临时子 Agent | `wait_temporary_agents(timeout_seconds)`、`create(wait=true)` | `temporary_agent_status` | 父 session 回调 |
 | A2A invoke | `agent_invoke` 内 HTTP 等待 | — | — |
-| fs / triggers 等 `run_in_background` | — | 同 bash job 表 | async_tool_result ✅ |
+| fs / triggers 等 | — | 同步执行 | — |
 
 **缺口**：snapshot 类 status 工具 **无统一 `wait_seconds`**；模型默认 **轮询**。
 
@@ -150,7 +150,7 @@ feat/tool-context-cost-optimization
 
 生产/联调常见模式：
 
-1. `bash_run`（同步超时 **自动降级** 或 `run_in_background=true`）→ 获得 `job_id`。
+1. `bash_run` 同步等待 → **`timeout_seconds` 内未完成则自动降级** → 获得 `job_id`。
 2. 模型 **不等** `async_tool_result` 自动回灌，连续调用 `background_job_status`。
 3. 参数通常 **仅有 `job_id`**（schema **无** 等待字段）。
 4. 每次 `status=running` → 模型再推理 → 再 status，直至终态。
@@ -168,23 +168,22 @@ feat/tool-context-cost-optimization
 
 | 工具 | 执行特点 |
 |------|----------|
-| **`bash_run`** | 默认同步；`timeout_seconds` 内未完成 → **自动降级**；或 `run_in_background=true` |
+| **`bash_run`** | 默认同步；`timeout_seconds` 内未完成 → **自动降级** |
 | **`background_job_status`** | **瞬时** `statusText()`，**不阻塞** |
 | **`background_job_cancel`** | 瞬时取消 |
 
-`injectRunInBackgroundParam` 也为 fs/skills/triggers 等注入 `run_in_background`；job 管理工具 **只** 服务 `job_registry.go`。`IsBackgroundJobTool` 强制 status/cancel **同步**。
+各工具 schema 仅注入 **`call_purpose`**（无 `run_in_background`）。job 管理工具 **只** 服务 `job_registry.go`。`IsBackgroundJobTool` 强制 status/cancel **同步**。
 
-#### 5.2.2 异步两条路径
+#### 5.2.2 异步路径（bash 超时降级）
 
 ```text
-路径 A：run_in_background=true
-  invokeTool → StartBackground → [TOOL_BACKGROUND] job_id
-  → goroutine Execute → notifyDone → EnqueueAsyncToolResult → HandleAsyncToolResult
-
-路径 B：bash_run 同步超时降级
-  runShellSyncWithAutoDegrade → timer → formatShellRunningResult(job_id)
-  → collector Wait → notifyDone → 同路径 A
+bash_run 同步 Execute
+  → runShellSyncWithAutoDegrade → timer 触发
+  → formatShellRunningResult(job_id) → collector Wait
+  → notifyDone → EnqueueAsyncToolResult → HandleAsyncToolResult
 ```
+
+（内部 `StartBackground` 仍供测试与编排器兼容历史参数，不对模型暴露。）
 
 #### 5.2.3 status 现网语义
 
@@ -353,7 +352,7 @@ tools:
 |------|------|
 | 工具注册 / enrich | `node/internal/tools/registry.go`, `registry_enrich.go` |
 | bash / job | `bash_runner.go`, `bash_run_tool.go`, `job_registry.go`, `tool_job.go` |
-| run_in_background | `execution_mode.go` |
+| call_purpose / StartBackground（内部） | `execution_mode.go` |
 | 编排 | `node/internal/turn/tool_router.go` |
 | 结果写 history | `node/internal/turn/tool_result_messages.go` |
 | async 回灌 | `node/internal/session/runtime.go`, `node/internal/api/server.go` |

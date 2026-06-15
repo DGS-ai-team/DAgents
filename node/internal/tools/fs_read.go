@@ -22,7 +22,7 @@ func readFileToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "read_file",
 			Description: descFSPathConvention + " " + descPromptContext + " 按行窗口读取文本文件，大文件用 line_offset/line_limit 分页。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{

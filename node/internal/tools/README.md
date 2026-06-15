@@ -1,6 +1,6 @@
 # node/internal/tools
 
-N3 在 Node 进程内本地执行；工具均为**同步实现**，通过通用参数 **`run_in_background`** 选择串行或后台并行。
+N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。**`bash_run`** 在 `timeout_seconds` 内未完成时由 Node **自动降级**为后台 job；内部仍保留 `StartBackground` / `job_registry` 供降级与测试使用。
 
 **配置**：`tools.enabled_groups`（7 组）见 [`docs/built-in-tools.md`](../../docs/built-in-tools.md) §0、[`shared/config/README.md`](../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（[`descriptions_shared.go`](./descriptions_shared.go) + 各 `tool_*` / `fs_*` / `bash_*` 文件）。
@@ -21,7 +21,7 @@ tools/
 │   registry_enrich.go        # SetSkillsCatalog、enrichDefinitions
 │   descriptions_shared.go    # 各工具 description 共用常量
 │   executor.go               # Executor 接口
-│   execution_mode.go         # run_in_background、call_purpose、StartBackground
+│   execution_mode.go         # call_purpose、StartBackground（内部）
 │   tools_test.go             # registry 集成 smoke
 ├── 文件 fs_*
 │   fs_read.go / fs_write.go / fs_search_replace.go
@@ -66,7 +66,8 @@ tools/
 
 ## 执行模式
 
-- **`run_in_background: false`（默认）**：orchestrator 同步 `Execute`；`bash_run` 超时降级后台 job。
-- **`run_in_background: true`**：立即返回 `[TOOL_BACKGROUND] job_id=...`；完成后 `[TOOL_BACKGROUND_DONE]...` 回灌。
+- **同步（默认）**：orchestrator 调用 `Execute`；`read_file` / `write_file` / `trigger_fire` 等始终同步完成。
+- **`bash_run` 超时降级**：同步等待 `timeout_seconds`（默认 30）；超时后登记后台 job、返回 `RUNNING job_id=...`；完成后 **`async_tool_result` 自动回灌**。
+- **内部 `StartBackground`**：不在 tool schema 暴露；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段。
 
-触发器 condition 语义见 [`../triggers/README.md`](../triggers/README.md)。
+触发器 condition 语义见 [`../triggers/README.md`](../triggers/README.md).

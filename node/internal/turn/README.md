@@ -94,7 +94,7 @@ skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时�
 
 `processToolCalls` 按 `policy.DecideTool` 将 tool calls 分为：
 
-- **auto**：`executeAutoBatch` 同步或 `StartBackground`
+- **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 超时由 registry 自动降级；历史参数仍可走内部 `StartBackground`）
 - **approval**：`PendingHITL{Kind: approval}`，SSE `approval_required`
 - **user_information**：`ask_user_information`，SSE `user_information_required`
 
