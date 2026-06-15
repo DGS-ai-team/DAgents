@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
@@ -14,9 +15,14 @@ func (r *runtime) runTurnStep(
 	compressBefore bool,
 	run func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome,
 ) (turn.StepOutcome, []llm.Message) {
+	compressBeforeStep := compressBefore && r.compression != nil && r.compression.Enabled() && !r.isChildSession()
+	var sidecarPrefix compression.SidecarPrefix
+	if compressBeforeStep {
+		sidecarPrefix = r.sidecarPrefix()
+	}
 	r.mu.Lock()
-	if compressBefore && r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, r.sidecarPrefix())
+	if compressBeforeStep {
+		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix)
 	}
 	turnCtx, cancel := context.WithCancel(parent)
 	r.turnCancel = cancel

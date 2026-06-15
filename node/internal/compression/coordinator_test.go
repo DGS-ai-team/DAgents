@@ -88,7 +88,7 @@ func TestBlockingCompressionApplies(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("expected compressed len 2 (summary + last assistant), got %d: %+v", len(msgs), msgs)
 	}
-	if msgs[0].Role != "user" || !strings.Contains(msgs[0].Content, "阶段性总结论") {
+	if msgs[0].Role != "user" || msgs[0].Name != llm.UserNameCompression || !strings.Contains(msgs[0].Content, "阶段性总结论") {
 		t.Fatalf("replacement = %+v", msgs[0])
 	}
 	if msgs[1].Role != "assistant" || msgs[1].Content != "好的" {

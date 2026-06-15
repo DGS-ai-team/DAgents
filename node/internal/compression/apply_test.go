@@ -27,7 +27,7 @@ func TestApplyCompressionReplacementKeepAssistant(t *testing.T) {
 	if len(merged) != 2 {
 		t.Fatalf("len = %d, msgs = %+v", len(merged), merged)
 	}
-	if merged[0].Role != "user" || merged[0].Content != "summary" {
+	if merged[0].Role != "user" || merged[0].Content != "summary" || merged[0].Name != llm.UserNameCompression {
 		t.Fatalf("replacement = %+v", merged[0])
 	}
 	if merged[1].Role != "assistant" || merged[1].Content != "tail" {
@@ -56,7 +56,7 @@ func TestApplyCompressionReplacementMergeNextUser(t *testing.T) {
 		t.Fatalf("len = %d, msgs = %+v", len(merged), merged)
 	}
 	want := "summary\n\nnext"
-	if merged[0].Role != "user" || merged[0].Content != want {
+	if merged[0].Role != "user" || merged[0].Content != want || merged[0].Name != llm.UserNameCompression {
 		t.Fatalf("merged user = %+v", merged[0])
 	}
 }

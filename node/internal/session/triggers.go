@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 )
 
@@ -45,6 +46,6 @@ func (m *Manager) EnqueueTriggerMessage(sessionID, triggerID, content string) er
 	if rt == nil {
 		return fmt.Errorf("session_not_found")
 	}
-	env := queue.Envelope{RequestType: "message", Content: content, TriggerID: strings.TrimSpace(triggerID)}
+	env := queue.Envelope{RequestType: "message", Content: content, TriggerID: strings.TrimSpace(triggerID), UserName: llm.UserNameTrigger}
 	return rt.enqueue(env, queue.PriorityOther)
 }

@@ -195,7 +195,7 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		case queue.RequestTypeToolResult:
 			r.handleToolResult(ctx)
 		case queue.RequestTypeMessage, "":
-			r.handleHumanMessage(ctx, env.Content)
+			r.handleHumanMessage(ctx, env)
 		default:
 		}
 	}
@@ -227,7 +227,9 @@ func (r *runtime) applyStepOutcome(history *[]llm.Message, outcome turn.StepOutc
 	}
 }
 
-func (r *runtime) handleHumanMessage(parent context.Context, content string) {
+func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope) {
+	content := env.Content
+	userName := llm.NormalizeUserMessageName(env.UserName)
 	r.mu.Lock()
 	if r.pending != nil {
 		pending := r.pending
@@ -243,7 +245,7 @@ func (r *runtime) handleHumanMessage(parent context.Context, content string) {
 	r.mu.Unlock()
 
 	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
-		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, content, setState)
+		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, content, userName, setState)
 	})
 	if outcome.Err != nil {
 		r.mu.Lock()
@@ -472,8 +474,10 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	if r.compression == nil {
 		return compression.ForceResult{Status: "disabled"}
 	}
+	// sidecarPrefix → SystemPromptForSession → getLoadedSkills 会抢 r.mu，须在持锁前计算。
+	prefix := r.sidecarPrefix()
 	r.mu.Lock()
-	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, r.sidecarPrefix())
+	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, prefix)
 	r.mu.Unlock()
 	if result.Status == "applied" {
 		r.persist(ctx)

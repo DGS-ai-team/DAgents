@@ -95,7 +95,7 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 		"tool_call_id": approvalCall.ID,
 		"decision":     "approve",
 	}
-	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "resume", "", resume); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "resume", "", resume, ""); err != nil {
 		t.Fatalf("resume enqueue should succeed while pending preserved: %v", err)
 	}
 }

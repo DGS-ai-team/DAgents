@@ -106,7 +106,7 @@ func (m *Manager) EnqueueChildTask(childSessionID, content string) error {
 	if rt == nil || !rt.isChildSession() {
 		return fmt.Errorf("child session not found")
 	}
-	return rt.enqueue(queue.Envelope{RequestType: "message", Content: content}, queue.PriorityHuman)
+	return rt.enqueue(queue.Envelope{RequestType: "message", Content: content, UserName: llm.UserNameChildTask}, queue.PriorityHuman)
 }
 
 // ChildHasPendingHITL 实现 childagent.Host。

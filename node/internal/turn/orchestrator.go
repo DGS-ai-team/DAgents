@@ -100,7 +100,7 @@ func (o *Orchestrator) RunMessageTurn(
 	if setState == nil {
 		setState = func(State) {}
 	}
-	o.appendHistory(sessionID, history, llm.Message{Role: "user", Content: userText})
+	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.UserNameHuman))
 	o.resetTurnUsage(sessionID)
 	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
 	return o.runUntilQueueOrDone(ctx, sessionID, history, setState, 0)
@@ -112,14 +112,19 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	sessionID string,
 	history *[]llm.Message,
 	userText string,
+	userName string,
 	setState StateSetter,
 ) StepOutcome {
 	if setState == nil {
 		setState = func(State) {}
 	}
-	o.appendHistory(sessionID, history, llm.Message{Role: "user", Content: userText})
+	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.NormalizeUserMessageName(userName)))
 	o.resetTurnUsage(sessionID)
-	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
+	o.logger.Info("turn human message start",
+		"session_id", sessionID,
+		"content_len", len(userText),
+		"user_name", llm.NormalizeUserMessageName(userName),
+	)
 	return o.runOneStep(ctx, sessionID, history, setState, 0)
 }
 

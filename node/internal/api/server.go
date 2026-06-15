@@ -649,10 +649,11 @@ func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
 }
 
 type postMessageRequest struct {
-	SessionID   string         `json:"session_id"`
-	RequestType string         `json:"request_type"`
-	Content     string         `json:"content"`
-	ResumeValue map[string]any `json:"resume_value"`
+	SessionID       string         `json:"session_id"`
+	RequestType     string         `json:"request_type"`
+	Content         string         `json:"content"`
+	UserMessageName string         `json:"user_message_name,omitempty"`
+	ResumeValue     map[string]any `json:"resume_value"`
 }
 
 type postMessageResponse struct {
@@ -686,7 +687,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ResumeValue)
+	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ResumeValue, req.UserMessageName)
 	if err != nil {
 		// 业务错误映射为 HTTP 状态 + 统一 error 体（见 errors.go）。
 		switch err.Error() {

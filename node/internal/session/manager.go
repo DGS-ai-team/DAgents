@@ -394,10 +394,12 @@ func (m *Manager) Delete(sessionID string) (bool, error) {
 }
 
 // EnqueueMessage 将 message/resume 入队；resume 优先直投等待中的 turn。
+// userMessageName 仅对 request_type=message 生效；空串规范为 llm.UserNameHuman。
 func (m *Manager) EnqueueMessage(
 	_ context.Context,
 	sessionID, requestType, content string,
 	resumeValue map[string]any,
+	userMessageName string,
 ) (priority string, err error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
@@ -459,7 +461,12 @@ func (m *Manager) EnqueueMessage(
 			return "", fmt.Errorf("invalid_message")
 		}
 	}
-	env := queue.Envelope{RequestType: requestType, Content: content, ResumeValue: resumeValue}
+	env := queue.Envelope{
+		RequestType: requestType,
+		Content:     content,
+		UserName:    userMessageName,
+		ResumeValue: resumeValue,
+	}
 	if err := rt.enqueue(env, p); err != nil {
 		return "", err
 	}

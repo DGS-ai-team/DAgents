@@ -62,10 +62,10 @@ func BuildSidecarChatRequest(in SidecarInput, userPrompt string) llm.ChatRequest
 	case sidecarAppendAssistantAndUser:
 		msgs = append(msgs,
 			llm.Message{Role: "assistant", Content: sidecarSyntheticAssistantContent},
-			llm.Message{Role: "user", Content: userPrompt},
+			llm.UserMessage(userPrompt, llm.UserNameCompressionSidecar),
 		)
 	default:
-		msgs = append(msgs, llm.Message{Role: "user", Content: userPrompt})
+		msgs = append(msgs, llm.UserMessage(userPrompt, llm.UserNameCompressionSidecar))
 	}
 
 	toolsCopy := append([]tools.ToolDef(nil), in.Tools...)

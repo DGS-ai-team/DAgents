@@ -91,7 +91,7 @@ func TestBuildSidecarChatRequest_prefixLengthAndLastUser(t *testing.T) {
 		t.Fatalf("prefix last = %+v", req.Messages[2])
 	}
 	last := req.Messages[len(req.Messages)-1]
-	if last.Role != "user" || last.Content != summaryUserPrompt {
+	if last.Role != "user" || last.Content != summaryUserPrompt || last.Name != llm.UserNameCompressionSidecar {
 		t.Fatalf("last message = %+v", last)
 	}
 }
@@ -112,7 +112,7 @@ func TestBuildSidecarChatRequest_case1AssistantAndUser(t *testing.T) {
 	if req.Messages[2].Role != "assistant" || req.Messages[2].Content != sidecarSyntheticAssistantContent {
 		t.Fatalf("synthetic assistant = %+v", req.Messages[2])
 	}
-	if req.Messages[3].Role != "user" || req.Messages[3].Content != "custom summary prompt" {
+	if req.Messages[3].Role != "user" || req.Messages[3].Content != "custom summary prompt" || req.Messages[3].Name != llm.UserNameCompressionSidecar {
 		t.Fatalf("summary user = %+v", req.Messages[3])
 	}
 }

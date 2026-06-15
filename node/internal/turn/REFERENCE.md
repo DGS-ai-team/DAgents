@@ -12,7 +12,7 @@
 | `SetChildAgentTools` | 注入临时 Agent 管理器；`isChild` 禁止管理工具 |
 | `SetToolResultEnqueuer` | 工具步结束后入队 `tool_result` |
 | `RunMessageTurn` | 测试：内联多步直到 pending/完成/入队 |
-| `RunHumanMessageTurn` | 追加 user + 单步 |
+| `RunHumanMessageTurn` | 追加 user（含 `name` 来源标识）+ 单步 |
 | `RunToolMessageTurn` | 单步 tool_message 续跑 |
 | `HandleAsyncToolResult` | 异步工具完成写 history 并可选续跑 |
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
@@ -77,7 +77,7 @@
 |------|------|
 | `modelContentMaxChars` | 写入模型的 tool 结果截断上限 |
 | `AsyncToolResultInput` | 异步回灌输入（job_id、status、content 等） |
-| `buildAsyncToolMessages` | 按尾部形态生成 assistant/tool/user 消息 |
+| `buildAsyncToolMessages` | 按尾部形态生成 assistant/tool/user 消息（user `name=async_tool`） |
 | `classifyToolResultTail` | 判断 history 尾部形态 |
 | `shouldContinueAfterAsyncTool` | 回灌后是否继续 `RunToolMessageTurn` |
 | `packageToolResult` / `clipMiddle` | 工具结果打包与截断 |
