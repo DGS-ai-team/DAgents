@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-06-15
+
+**0.x 预览**：system prompt 与 **bash_run** 工具描述优化，减少 LLM 路径/Shell 误用导致的重试。
+
+### 修复
+
+- **System prompt 工作区路径**：保留 `data/`、`memory/` 等子目录说明，但不再暴露 `FS_ROOT` 绝对路径，避免文件工具双重拼接（如 `.runtime/.runtime/...`）。
+- **bash_run 平台描述**：Windows 下明确默认 **PowerShell** 语法；非 Windows 明确 **bash**；减少 cmd 命令以 PowerShell 执行导致的失败重试。
+
+（Git **tag**：`v0.3.5`。）
+
 ## [0.3.4] - 2026-06-12
 
 **0.x 预览**：上下文压缩与 **Prompt Cache** 对齐；user 消息 **name** 来源标识；**tool_call 流式展示**（双 TUI）；Chat Completions **`user_id=agent_id`**。
