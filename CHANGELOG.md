@@ -4,6 +4,33 @@
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-06-15
+
+**0.x 预览**：**工具链上下文成本**治理（WS1/3/5/6）：重复调用审批、超长 tool 结果落盘摘要、任务级度量；**移除 `trigger_fire`**。
+
+### 新增
+
+- **`hooks.duplicate_tool_call`**：`tool.before_each` 检测 60s 内同名同参重复调用，在 `rule`+`auto` 审批路径触发 HITL（继续 / 取消 / 强制继续）；详见 [tool-before-hook-duplicate-approval.md](docs/design/tool-before-hook-duplicate-approval.md)。
+- **`hooks.tool_result` spill**：`bash_run`、`read_file`、`grep_*`、`search_replace`、`glob_files`、`agent_invoke`、`agent_discover` 等超长结果落盘至 `{fs_root}/tool_outputs/...`，history 仅保留头尾摘要 + `read_file` 提示（默认 `spill_threshold_tokens: 12000`）。
+- **`tool_context_metrics`**：turn 结束时 SSE `done` 与日志输出 `tool_loops`、`spill_count`、`status_poll_count`、`history_result_tokens` 等（WS5 基础可观测）。
+- **FS 编码缓存**：`read_file` / `grep` 等探测编码后进程内缓存，减少错编码重读轮次。
+
+### 变更
+
+- **bash_run async 引导（WS1）**：超时降级后台 job 的 ACK 文案与自动回灌说明对齐；**不为 `background_job_status` 增加 long-poll**。
+- **`bash_run` schema**：移除 `run_in_background` 参数（async 由超时自动降级）。
+- **`tools.bash_compress`**：生产路径以 `tool_result` spill 为主；`max_output_chars` 仅保留兼容/测试 clip。
+
+### 移除
+
+- **`trigger_fire` 工具**（**breaking**）：Agent 侧仅保留 trigger CRUD；触发靠 **schedule 调度** 与 **HTTP fire API**（`node/internal/triggers/`）。
+
+### 文档
+
+- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增 [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) 与 [major-changes.md §2](docs/design/major-changes.md#2-工具链上下文成本优化已落地)。
+
+（Git **tag**：`v0.3.6`。）
+
 ## [0.3.5] - 2026-06-15
 
 **0.x 预览**：system prompt 与 **bash_run** 工具描述优化，减少 LLM 路径/Shell 误用导致的重试。

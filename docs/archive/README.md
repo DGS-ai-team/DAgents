@@ -6,7 +6,7 @@
 
 | 目录 | 说明 |
 |------|------|
-| [python-agent-runtime/](./python-agent-runtime/) | **已移除的 Python FastAPI Agent API**（`app/harness/`、`api-reference`、turn loop 等） |
+| [python-agent-runtime/](./python-agent-runtime/) | **已移除的 Python FastAPI Agent API**（`api-reference`、turn loop、`context-compression-and-state` 等） |
 
 ## 单文件归档
 

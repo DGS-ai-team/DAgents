@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.3.5-green" alt="v0.3.5"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.3.6-green" alt="v0.3.6"></a>
   <a href="go.work"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
   <a href="requirements.txt"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
@@ -26,7 +26,7 @@
 
 ## 简介
 
-**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.3.5**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度；**Manage 控制面** 提供 Registry、**A2A Task** 与 **Vue Console**（可 Docker 部署）。
+**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.3.6**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度；**Manage 控制面** 提供 Registry、**A2A Task** 与 **Vue Console**（可 Docker 部署）。
 
 终端交互提供 **两种 Client**，共用一份 YAML 配置，按环境任选：
 
@@ -67,10 +67,10 @@
 | 主题 | 摘要 | 文档 |
 |------|------|------|
 | **上下文压缩 × Prompt Cache** | 侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；改 `CompleteText` 二次序列化；M3 silent 冷却抑制重复侧车 | [major-changes.md §1](docs/design/major-changes.md#1-上下文压缩与-prompt-cache-对齐m2--m3) · [完整分析](docs/design/context-compression-cache-analysis.md) |
-| **工具链上下文成本** | 减少轮询、tool 结果膨胀、schema 前缀扰动 | [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) |
+| **工具链上下文成本** | WS1/3/5/6 已落地；WS4 skills 搁置 | [major-changes.md §2](docs/design/major-changes.md#2-工具链上下文成本优化已落地) · [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) |
 | **Tool Before Hook** | 执行前 Hook + 重复调用 60s 内三选项审批 | [tool-before-hook-duplicate-approval.md](docs/design/tool-before-hook-duplicate-approval.md) |
 
-新的大项优化请按 [major-changes.md 条目模板](docs/design/major-changes.md#条目模板复制使用) 追加。
+新的大项优化请按 [major-changes.md 条目模板](docs/design/major-changes.md#条目模板复制使用) 追加；大型专题宜用 **四段结构**（见 [docs/README.md](docs/README.md) §2）。
 
 ---
 
@@ -321,7 +321,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 | [packaging/manage/README.md](packaging/manage/README.md) | Manage Docker 部署 |
 | [packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md) | 推荐 CLI 工具（如 OfficeCLI，需自行安装） |
 | [cases/README.md](cases/README.md) | 落地案例（CentOS 7 特性导览 + A2A Manage Docker） |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.3.5**） |
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.3.6**） |
 | [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) | Web 前端（**独立仓库，尚未适配 v0.2.0 / Go Node API**） |
 
 > 已移除的 Python Agent API 文档见 [docs/archive/python-agent-runtime/](docs/archive/python-agent-runtime/)；**DAgentsUI 当前仍依赖旧 HTTP 契约**。
@@ -332,7 +332,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 
 | 项 | 说明 |
 |----|------|
-| **当前版本** | **v0.3.5**（2026-06-15，0.x 预览；tag `v0.3.5`） |
+| **当前版本** | **v0.3.6**（2026-06-15，0.x 预览；tag `v0.3.6`） |
 | **Go** | 1.25+（`node` / `client` / `shared/config`） |
 | **Python** | 3.11+ 可运行；CI 验证 3.13 |
 | **破坏性变更** | 1.0 前仍可能出现；见 [CHANGELOG.md](CHANGELOG.md) |

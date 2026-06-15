@@ -20,3 +20,4 @@
 | [api-reference.md](./api-reference.md) | `docs/api-reference.md` | Python HTTP/SSE 字段表 |
 | [agent-input-output.md](./agent-input-output.md) | `docs/agent-input-output.md` | 入队、SSE、`connection_id` |
 | [agent-turn-loop.md](./agent-turn-loop.md) | `docs/agent-turn-loop.md` | `MainAgentTurnOrchestrator` / `run_turn` |
+| [context-compression-and-state.md](./context-compression-and-state.md) | `docs/context-compression-and-state.md` | Python 上下文双层模型、压缩与侧车 |

@@ -1,7 +1,7 @@
 # Prometheus 观测说明
 
-> **注意**：下文 §2 中 **Agent API**（`app/harness/api`）的 `/metrics` 随 **Python Agent 运行时移除** 已不存在。  
-> **Register Center** 的 `/metrics` 仍适用。Go Agent Node 当前未暴露 Prometheus 端点。
+> **注意**：下文 §2 描述的 **Python Agent API** 与 **Register Center** `/metrics` 均已随运行时移除。  
+> **现网**：Go Agent Node 当前未暴露 Prometheus 端点；Manage 指标见 [manage/README.md](../manage/README.md)。
 
 本文说明 **Prometheus 的基本工作机制**、**DAgents 中的落地方式**，以及 **如何安全地新增指标**。
 
@@ -51,11 +51,11 @@ Prometheus 是一套 **主动拉取（pull）** 的时序监控系统：
 
 ## 2. DAgents 中的实现方式
 
-### 2.1 路由与开关
+### 2.1 路由与开关（历史 Python 栈）
 
-- Agent API 在 **`app/harness/api/app.py`** 中注册 **`GET /metrics`**。
-- Register Center 在 **`register_center/rc_app.py`** 中注册 **`GET /metrics`**，用于暴露 relay/broadcast 侧 A2A 指标。
-- Agent API 的 metrics 路由由配置 **`METRICS_ENABLED`**（**`Settings.metrics_enabled`**）控制；为假时不注册路由（抓取端需保证配置一致）。
+- Agent API 在 **`app/harness/api/app.py`** 中注册 **`GET /metrics`** — **已移除**。
+- Register Center 曾在 **`register_center/rc_app.py`** 注册 **`GET /metrics`** — **服务已移除**。
+- Agent API 的 metrics 路由由配置 **`METRICS_ENABLED`** 控制 — **随 Python API 移除**。
 
 响应体由 **`app/observability/metrics.py`** 中的 **`metrics_text()`** 生成：内部调用 **`prometheus_client.generate_latest()`**，返回 **`bytes`** 与 **`Content-Type`**（一般为 `CONTENT_TYPE_LATEST`）。
 

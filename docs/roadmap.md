@@ -59,7 +59,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 ### 3.3 上下文、压缩与提示词
 
-- **Summary 压缩**：静默 / 阻塞阈值、SSE 压缩事件（[context-compression-and-state.md](./context-compression-and-state.md)）。
+- **Summary 压缩**：静默 / 阻塞阈值、SSE 压缩事件（Go：[design/major-changes.md](./design/major-changes.md#1-上下文压缩与-prompt-cache-对齐m2--m3)）。
 - **SQLite 会话持久化**：**`{fs_root}/memory/sessions.db`**；原始消息 **JSONL** 审计（**`node/internal/store/`**、**`node/internal/history/`**）。
 - **系统提示词**：静态段 + **`.runtime/prompt_context/`** 侧车 + skills 正文 + 主机快照；子 Agent 独立 **`BuildChildSystemPrompt`**。
 

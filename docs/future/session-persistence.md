@@ -50,7 +50,7 @@ Layer B（durable session store，须可恢复）
 | `agent_session_store_enabled=false` | 等价 **`persistence_mode=memory`**，仅开发/单测；**不是 v2 多 Backend 生产默认** |
 | `raw_message_journal`（JSONL，可选） | 与 Layer B 并列的审计侧车；多 Backend 时路径与归属 **Phase 2+ 补充** |
 
-详见 [context-compression-and-state.md](../context-compression-and-state.md) §7。
+详见 [archive/python-agent-runtime/context-compression-and-state.md](../archive/python-agent-runtime/context-compression-and-state.md) §7（Python 历史）。
 
 ## 4. 分阶段范围（后续扩展）
 
@@ -110,4 +110,4 @@ Layer B（durable session store，须可恢复）
 | [message-queue-and-execution-control.md](./message-queue-and-execution-control.md) | Session Queue 与持久化职责边界 |
 | [cross-backend-coordination.md](./cross-backend-coordination.md) | owner 路由、Phase 2 共享状态 |
 | [migration-from-v1.md](./migration-from-v1.md) | v1 SQLite 迁移 |
-| [context-compression-and-state.md](../context-compression-and-state.md) | 当前 `SqliteMessageStore` 字段说明 |
+| [context-compression-and-state.md](../archive/python-agent-runtime/context-compression-and-state.md) | 当前 `SqliteMessageStore` 字段说明（Python 历史） |

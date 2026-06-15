@@ -479,7 +479,7 @@ MaybeHandle
 | Cache 统计 | `node/internal/llm/usage.go` |
 | Token 估算 | `node/internal/llm/messageutil.go` → `EstimateMessageTokens` |
 | 配置 | `shared/config/config.go` → `CompressionConfig` |
-| Python plan 参考 | `docs/context-compression-and-state.md` §4.2 |
+| Python plan 参考 | [archive/python-agent-runtime/context-compression-and-state.md](../archive/python-agent-runtime/context-compression-and-state.md) §4.2 |
 | 设计 Hook 点 | `docs/design/agent-hooks.md` |
 
 ---
