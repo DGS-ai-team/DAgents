@@ -78,8 +78,8 @@ sequenceDiagram
 拼接顺序（对齐 Python `get_system_prompt`）：
 
 1. `staticSystemPrompt`（行为准则、保密说明；**不含**各工具用法，见 tool schema）
-2. 主机环境快照（`hostsnapshot`）+ Agent ID / FS_ROOT / session_id
-3. 工作区（FS_ROOT）目录约定（仅目录结构，不含工具名）
+2. 主机环境快照（`hostsnapshot`）+ Agent ID / session_id（**不含** FS_ROOT 绝对路径）
+3. 工作区子目录约定（`data/`、`memory/` 等；path 相对工作区根）
 4. `prompt_context` 稳定段（soul / user / long_term）
 5. 已加载 skills 正文（动态会话状态，非工具 catalog）
 6. `custom.md`

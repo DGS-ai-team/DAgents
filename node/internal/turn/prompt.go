@@ -70,20 +70,19 @@ func DefaultMaxToolLoops() int {
 
 // BuildSystemPrompt 构造单次 LLM 请求 system prompt。
 //
-// 拼接顺序：静态规则 → 运行环境 → 工作区约定 → 侧车上下文 → 已加载 skills → custom。
+// 拼接顺序：静态规则 → 运行环境 → 工作区子目录约定 → 侧车上下文 → 已加载 skills → custom。
 func BuildSystemPrompt(in SystemPromptInput) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(staticSystemPrompt))
 
 	appendEnvironmentSection(&b, environmentSectionInput{
 		AgentID:   in.AgentID,
-		FSRoot:    in.FSRoot,
 		SessionID: in.SessionID,
 		Snapshot:  hostsnapshot.Get(),
 	})
 
-	b.WriteString("\n\n## 工作区（FS_ROOT）\n\n")
-	b.WriteString(formatRuntimeWorkspaceSection())
+	b.WriteString("\n\n## 工作区目录\n\n")
+	b.WriteString(formatWorkspaceSubdirsSection())
 
 	if in.PromptCtx != nil {
 		b.WriteString(in.PromptCtx.BuildStableContextSections())
@@ -118,13 +117,12 @@ func BuildChildSystemPrompt(in ChildSystemPromptInput) string {
 
 	appendEnvironmentSection(&b, environmentSectionInput{
 		AgentID:   in.AgentID,
-		FSRoot:    in.FSRoot,
 		SessionID: in.SessionID,
 		Snapshot:  hostsnapshot.Get(),
 	})
 
-	b.WriteString("\n\n## 工作区（FS_ROOT）\n\n")
-	b.WriteString(formatRuntimeWorkspaceSection())
+	b.WriteString("\n\n## 工作区目录\n\n")
+	b.WriteString(formatWorkspaceSubdirsSection())
 
 	return strings.TrimSpace(b.String())
 }
@@ -153,7 +151,6 @@ func ChildSystemPromptBuilder(purpose string) SystemPromptBuilder {
 
 type environmentSectionInput struct {
 	AgentID   string
-	FSRoot    string
 	SessionID string
 	Snapshot  hostsnapshot.Snapshot
 }
@@ -165,19 +162,15 @@ func appendEnvironmentSection(b *strings.Builder, in environmentSectionInput) {
 		b.WriteByte('\n')
 		b.WriteString(fmt.Sprintf("- Agent ID：`%s`", id))
 	}
-	if root := strings.TrimSpace(in.FSRoot); root != "" {
-		b.WriteByte('\n')
-		b.WriteString(fmt.Sprintf("- FS_ROOT：`%s`", root))
-	}
 	if sid := strings.TrimSpace(in.SessionID); sid != "" {
 		b.WriteByte('\n')
 		b.WriteString(fmt.Sprintf("- session_id：`%s`", sid))
 	}
 }
 
-func formatRuntimeWorkspaceSection() string {
+func formatWorkspaceSubdirsSection() string {
 	return strings.Join([]string{
-		"工作区根目录为 FS_ROOT（路径见运行环境）。",
+		"以下为内置目录。",
 		"",
 		"- `data/`：临时工作区（输出、中间产物，可清理）",
 		"- `memory/`：持久化（会话库 sessions.db、可选长期记忆 long_term.md）",

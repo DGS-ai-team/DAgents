@@ -75,7 +75,7 @@ flowchart TB
 
 | 字段 | 作用 |
 |------|------|
-| `FSRoot` | 工具沙箱与 system prompt 中的工作区路径 |
+| `FSRoot` | 工具沙箱根目录（不在 system prompt 中暴露绝对路径；子目录约定见 prompt 与 tool schema） |
 | `MaxToolLoops` | 单条 human message 内工具循环上限（子 Agent 创建时用 `SpawnSpec.MaxTurns` 覆盖） |
 | `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与 prompt 元数据 |
 | `RuntimeDir` | `promptcontext.Reader` 根目录 |

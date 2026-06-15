@@ -52,7 +52,7 @@
 | `SystemPromptInput` | `BuildSystemPrompt` 入参 |
 | `DefaultMaxToolLoops` | 工具循环默认上限（16） |
 | `BuildSystemPrompt` | 拼接完整 system prompt |
-| `formatRuntimeWorkspaceSection` | `.runtime` 目录约定段落 |
+| `formatWorkspaceSubdirsSection` | 工作区子目录约定（不含 FS_ROOT 路径） |
 | `RunTurnPhase` | `State` → Python 兼容 phase 名 |
 
 ## pending.go

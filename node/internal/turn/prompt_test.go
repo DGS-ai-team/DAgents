@@ -19,8 +19,11 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "ops-01", "/data/ws", "FS_ROOT", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "最高优先级规则", "sess-abc", "运行环境") {
+	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "prompt_context/", "最高优先级规则", "sess-abc", "运行环境", "工作区目录") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
+		t.Fatalf("system prompt should not expose fs_root path, got %q", prompt)
 	}
 	if contains(prompt, "bash_run") || contains(prompt, "background_job") || contains(prompt, "## 可用 skills") {
 		t.Fatalf("system prompt should not embed tool-specific guidance, got %q", prompt)
@@ -56,8 +59,11 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 		SessionID: "child-abc",
 		Purpose:   "review patch",
 	})
-	if !containsAll(prompt, "临时子 Agent", "review patch", "child-abc", "/data/ws", "memory/", "运行环境") {
+	if !containsAll(prompt, "临时子 Agent", "review patch", "child-abc", "memory/", "运行环境", "工作区目录") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
+		t.Fatalf("child prompt should not expose fs_root path, got %q", prompt)
 	}
 	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "用户信息与偏好") {
 		t.Fatalf("child prompt should omit parent sections, got %q", prompt)
