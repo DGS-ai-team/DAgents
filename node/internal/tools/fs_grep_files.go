@@ -120,13 +120,13 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 	var allHits []flatHit
 	totalHits := 0
 	indexCapped := false
-	fileEnc := r.resolveFileEncoding(args.Encoding)
+	fileEncArg := args.Encoding
 	for _, rel := range files {
 		abs, err := r.resolvePath(rel)
 		if err != nil {
 			continue
 		}
-		lines, err := readAllLines(abs, fileEnc)
+		lines, _, err := r.readTextLinesAt(rel, abs, fileEncArg)
 		if err != nil {
 			continue
 		}
@@ -214,7 +214,7 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 
 	var blocks []string
 	if len(shown) > 0 {
-		blocks = formatGrepFilesBlocks(r, shown, allHits, totalHits, ctxLines, fileEnc)
+		blocks = formatGrepFilesBlocks(r, shown, allHits, totalHits, ctxLines, args.Encoding)
 	}
 
 	header = append(header,
@@ -228,14 +228,14 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 	if len(blocks) > 0 {
 		fullOut = fullOut + "\n\n" + strings.Join(blocks, "\n\n")
 	}
-	out, truncated := applyMaxBytesToOutput(fullOut, defaultSearchMaxBytes)
+	out, truncated := applyMaxTokensToOutput(fullOut, defaultSearchMaxTokens)
 	if truncated {
 		out += "\nnext_hit_offset: " + nextHitOffset
 	}
 	return out, nil
 }
 
-func formatGrepFilesBlocks(r *Registry, shown []flatHit, allHits []flatHit, totalHits, ctxLines int, fileEncoding string) []string {
+func formatGrepFilesBlocks(r *Registry, shown []flatHit, allHits []flatHit, totalHits, ctxLines int, fileEncoding *string) []string {
 	hitRank := make(map[flatHit]int, len(allHits))
 	for i, h := range allHits {
 		hitRank[h] = i + 1
@@ -251,7 +251,7 @@ func formatGrepFilesBlocks(r *Registry, shown []flatHit, allHits []flatHit, tota
 				continue
 			}
 			var errRead error
-			lines, errRead = readAllLines(abs, fileEncoding)
+			lines, _, errRead = r.readTextLinesAt(h.relPath, abs, fileEncoding)
 			if errRead != nil {
 				continue
 			}

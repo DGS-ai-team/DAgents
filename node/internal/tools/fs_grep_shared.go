@@ -14,8 +14,8 @@ type lineSearchOptions struct {
 	indexOffset    int
 	countLimit     int
 	contextLines   int
-	maxOutputBytes int
-	fileEncoding   string
+	maxOutputTokens float64
+	fileEncoding   *string
 }
 
 func compileLinePattern(rawPat string, literal, caseSensitive bool) (*regexp.Regexp, error) {
@@ -48,8 +48,8 @@ func normalizeLineSearchOptions(args lineSearchOptions) lineSearchOptions {
 	if out.contextLines > maxSearchContextLines {
 		out.contextLines = maxSearchContextLines
 	}
-	if out.maxOutputBytes <= 0 {
-		out.maxOutputBytes = defaultSearchMaxBytes
+	if out.maxOutputTokens <= 0 {
+		out.maxOutputTokens = defaultSearchMaxTokens
 	}
 	return out
 }
@@ -138,7 +138,7 @@ func grepFileContentAtPath(displayPath string, lines []string, re *regexp.Regexp
 	if len(blocks) > 0 {
 		fullOut = fullOut + "\n\n" + strings.Join(blocks, "\n\n")
 	}
-	out, truncated := applyMaxBytesToOutput(fullOut, opt.maxOutputBytes)
+	out, truncated := applyMaxTokensToOutput(fullOut, opt.maxOutputTokens)
 	if truncated {
 		out += "\nnext_index_offset: " + nextIndex
 	}
@@ -170,7 +170,7 @@ func (r *Registry) grepSingleFile(relPath string, re *regexp.Regexp, opt lineSea
 			relPath,
 		), nil
 	}
-	lines, err := readAllLines(absPath, opt.fileEncoding)
+	lines, _, err := r.readTextLinesAt(relPath, absPath, opt.fileEncoding)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}

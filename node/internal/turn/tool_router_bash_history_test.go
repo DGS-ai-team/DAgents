@@ -73,7 +73,7 @@ func TestExecuteTool_bashHistorySpillsButSSEFull(t *testing.T) {
 	if toolresult.EstimateTokens(history[2].Content) > 13000 {
 		t.Fatalf("history token estimate too high: %v", toolresult.EstimateTokens(history[2].Content))
 	}
-	forClient, _ := orch.splitToolResult("sess-spill", tc, long)
+	forClient, _, _ := orch.splitToolResult("sess-spill", tc, long)
 	if forClient != long {
 		t.Fatalf("client content len=%d want %d", len(forClient), len(long))
 	}

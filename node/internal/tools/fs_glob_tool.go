@@ -102,5 +102,7 @@ func (r *Registry) execGlobFiles(_ context.Context, raw json.RawMessage) (string
 	if body == "" {
 		body = "(无匹配)"
 	}
-	return strings.Join(header, "\n") + "\n" + body, nil
+	full := strings.Join(header, "\n") + "\n" + body
+	full, _ = applyMaxTokensToOutput(full, defaultFSMaxOutputTokens)
+	return full, nil
 }

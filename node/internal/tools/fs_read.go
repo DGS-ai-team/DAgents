@@ -80,8 +80,11 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 		limit = *args.LineLimit
 	}
 
-	lines, err := readAllLines(path, r.resolveFileEncoding(args.Encoding))
+	lines, choice, err := r.readTextLinesAt(args.Path, path, args.Encoding)
 	if err != nil {
+		if _, ok := err.(*encodingDecodeError); ok {
+			return fmt.Sprintf("ERROR: read_file 失败: %v", err), nil
+		}
 		return fmt.Sprintf("ERROR: read_file 失败: %v", err), nil
 	}
 	total := len(lines)
@@ -95,10 +98,10 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 	}
 	body := strings.Join(bodyLines, "\n")
 	truncateHint := fmt.Sprintf(
-		"当前窗口超过配置上限 %d bytes；请减小 line_limit，下一页建议 line_offset=%d（若后方仍有行）。",
-		defaultReadMaxBytes, end+1,
+		"当前窗口超过约 %d tokens（DeepSeek 粗算）；请减小 line_limit，下一页建议 line_offset=%d（若后方仍有行）。",
+		defaultReadMaxTokens, end+1,
 	)
-	body, byteTruncated := applyMaxBytesToBody(body, defaultReadMaxBytes, truncateHint)
+	body, tokenTruncated := applyMaxTokensToBody(body, defaultReadMaxTokens, truncateHint)
 
 	nextLine := "无"
 	if hasMoreAfter {
@@ -110,14 +113,16 @@ func (r *Registry) execReadFile(_ context.Context, raw json.RawMessage) (string,
 	}
 	header := []string{
 		fmt.Sprintf("文件修改时间: %s", fileMtimeText(path)),
-		fmt.Sprintf("文件编码: %s", r.resolveFileEncoding(args.Encoding)),
+	}
+	header = append(header, formatEncodingHeaderLines(choice, choice.GarbledWarning)...)
+	header = append(header,
 		fmt.Sprintf("文件总行数: %d", total),
 		fmt.Sprintf("本页行区间: %d-%d / %d", pageStart, pageEnd, total),
 		fmt.Sprintf("next_line_offset: %s", nextLine),
 		fmt.Sprintf("后方是否还有未读取行: %s", yesNo(hasMoreAfter)),
 		fmt.Sprintf("正文是否包含行号: %s", yesNo(args.IncludeLineNumbers)),
-		fmt.Sprintf("本页内容是否因体积上限截断: %s", yesNo(byteTruncated)),
+		fmt.Sprintf("本页内容是否因 token 上限截断: %s", yesNo(tokenTruncated)),
 		"---",
-	}
+	)
 	return strings.Join(header, "\n") + "\n" + body, nil
 }

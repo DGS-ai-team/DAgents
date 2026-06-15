@@ -92,7 +92,7 @@ func (r *Registry) execGrepFile(_ context.Context, raw json.RawMessage) (string,
 	if args.ContextLines != nil {
 		opt.contextLines = *args.ContextLines
 	}
-	opt.fileEncoding = r.resolveFileEncoding(args.Encoding)
+	opt.fileEncoding = args.Encoding
 	return r.grepSingleFile(args.Path, re, opt)
 }
 

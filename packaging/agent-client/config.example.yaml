@@ -113,7 +113,12 @@ hooks:
     window_seconds: 60
   tool_result:
     enabled: true
-    max_history_tokens: 12000
-    spill_subdir: .runtime/tool_outputs
+    # 单条 tool 结果超过该 token 估算值时落盘并对 history 头尾摘要（作用于下方 tools 列表，非 bash 专用）
+    spill_threshold_tokens: 12000
     tools:
       - bash_run
+      - read_file
+      - grep_file
+      - grep_files
+      - search_replace
+      - glob_files

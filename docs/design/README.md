@@ -14,3 +14,4 @@
 | [context-compression-cache-analysis.md](./context-compression-cache-analysis.md) | 压缩 × Prompt Cache 完整分析（M1–M3） |
 | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) | **工具链上下文成本优化**（WS1–WS6；bash job 轮询治理 §5） |
 | [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | **tool.before_each Hook** + 重复调用三选项审批（设计稿） |
+| [ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md) | **UX 专题**：Agent 自有文件写操作审批信任链（设计稿） |

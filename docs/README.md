@@ -36,6 +36,7 @@
 | [design/context-compression-cache-analysis.md](./design/context-compression-cache-analysis.md) | 上下文压缩与 Prompt Cache 命中率（M1–M3 技术分析） |
 | [design/tool-context-cost-analysis.md](./design/tool-context-cost-analysis.md) | 工具链上下文成本优化（含 WS1 bash job 轮询治理 §5） |
 | [design/tool-before-hook-duplicate-approval.md](./design/tool-before-hook-duplicate-approval.md) | tool.before_each Hook 与重复调用三选项审批 |
+| [design/ux-agent-owned-file-approval.md](./design/ux-agent-owned-file-approval.md) | **UX 专题**：Agent 自有文件写操作审批信任链（设计稿） |
 | [manage/README.md](../../manage/README.md) | **Manage 服务**（M0+M1 已落地） |
 
 ## 专题

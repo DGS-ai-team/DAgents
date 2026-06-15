@@ -33,6 +33,8 @@ type Registry struct {
 	skillsCatalog       *skills.Catalog
 	enabledOnly         map[string]struct{}
 	handlers            map[string]handler
+	pathEncMu           sync.Mutex
+	pathEncCache        map[string]pathEncodingEntry
 }
 
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。

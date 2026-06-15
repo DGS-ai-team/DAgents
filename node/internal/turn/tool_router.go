@@ -30,6 +30,7 @@ func (o *Orchestrator) processToolCalls(
 
 	for i, tc := range calls {
 		o.publishToolCallSSE(sessionID, tc, false, i)
+		o.recordToolCall(sessionID, tc.Function.Name)
 
 		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
 			if o.isChildSession {
@@ -269,8 +270,9 @@ func (o *Orchestrator) executeAutoBatch(
 		return err
 	}
 	for _, item := range results {
-		forClient, forHistory := o.splitToolResult(sessionID, item.tc, item.content)
+		forClient, forHistory, spillPath := o.splitToolResult(sessionID, item.tc, item.content)
 		o.publishToolResult(sessionID, item.tc, forClient, item.rejected, item.extra)
+		o.recordToolResult(sessionID, item.tc.Function.Name, item.tc.Function.Arguments, forHistory, spillPath, item.rejected)
 		o.recordToolExecutionSuccess(item.tc, forClient, item.rejected)
 		o.appendHistory(sessionID, history, llm.Message{
 			Role:       "tool",
@@ -312,9 +314,11 @@ func (o *Orchestrator) executeTool(
 	tc llm.ToolCall,
 	plan *clihitl.ApprovalPlan,
 ) error {
+	o.recordToolCall(sessionID, tc.Function.Name)
 	content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
-	forClient, forHistory := o.splitToolResult(sessionID, tc, content)
+	forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
 	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
+	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, rejected)
 	o.recordToolExecutionSuccess(tc, forClient, rejected)
 	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: forHistory})
 	return nil

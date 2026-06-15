@@ -1,9 +1,6 @@
 package toolresult
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestEstimateTokens_deepseekHeuristic(t *testing.T) {
 	// 10 个 ASCII ≈ 3 tokens
@@ -16,12 +13,29 @@ func TestEstimateTokens_deepseekHeuristic(t *testing.T) {
 	}
 }
 
+func TestClipToTokenBudget(t *testing.T) {
+	text := "测"
+	for EstimateTokens(text) <= 1200 {
+		text += "测"
+	}
+	clipped, ok := ClipToTokenBudget(text, 1200)
+	if !ok {
+		t.Fatal("expected truncation")
+	}
+	if EstimateTokens(clipped) > 1200.1 {
+		t.Fatalf("clipped tokens=%v", EstimateTokens(clipped))
+	}
+	if len(clipped) >= len(text) {
+		t.Fatal("clipped should be shorter")
+	}
+}
+
 func TestPackage_spillByTokenBudget(t *testing.T) {
 	root := t.TempDir()
 	// 25000 汉字 × 0.6 = 15000 tokens > 12000
-	long := strings.Repeat("测", 25000)
+	long := stringsRepeat("测", 25000)
 	cfg := DefaultConfig(root)
-	cfg.MaxHistoryTokens = 12000
+	cfg.SpillThresholdTokens = 12000
 	res, err := Package(cfg, "s", "c", "bash_run", long)
 	if err != nil {
 		t.Fatal(err)
@@ -29,4 +43,13 @@ func TestPackage_spillByTokenBudget(t *testing.T) {
 	if !res.Spilled {
 		t.Fatal("expected spill by token estimate")
 	}
+}
+
+func stringsRepeat(s string, n int) string {
+	var b []byte
+	chunk := []byte(s)
+	for i := 0; i < n; i++ {
+		b = append(b, chunk...)
+	}
+	return string(b)
 }

@@ -108,17 +108,18 @@ type HooksConfig struct {
 	ToolResult        ToolResultHookConfig        `yaml:"tool_result"`
 }
 
-// ToolResultHookConfig 控制 tool.after_each 结果摘要与落盘（WS3 bash 组首版）。
+// ToolResultHookConfig 控制 tool.after_each 对列出的工具做落盘 + history 摘要（WS3）。
 type ToolResultHookConfig struct {
 	// Enabled 为 nil 时默认 true。
 	Enabled *bool `yaml:"enabled"`
-	// MaxHistoryTokens 写入 history 的 token 预算（DeepSeek 粗算：汉字×0.6、其它×0.3）；省略时 12000。
-	MaxHistoryTokens int `yaml:"max_history_tokens"`
-	// MaxHistoryRunes 已废弃，请改用 max_history_tokens。
+	// SpillThresholdTokens 单条 tool 结果超过该估算 token 数时落盘并对 history 头尾摘要；省略时 12000。
+	// 作用于下方 tools 列表中的每个工具，非 bash_run 专用，也非整段 session history 上限。
+	SpillThresholdTokens int `yaml:"spill_threshold_tokens"`
+	// MaxHistoryTokens 已废弃，请改用 spill_threshold_tokens。
+	MaxHistoryTokens int `yaml:"max_history_tokens,omitempty"`
+	// MaxHistoryRunes 已废弃。
 	MaxHistoryRunes int `yaml:"max_history_runes,omitempty"`
-	// SpillSubdir 相对 fs_root 的落盘子目录，默认 .runtime/tool_outputs。
-	SpillSubdir string `yaml:"spill_subdir"`
-	// Tools 启用摘要的工具名；省略时默认仅 bash_run。
+	// Tools 启用落盘摘要的工具名；省略时默认 bash + fs 组（见 defaultToolResultHookTools）。
 	Tools []string `yaml:"tools"`
 }
 
@@ -148,8 +149,7 @@ func (c *Config) DuplicateToolCallWindowSeconds() int {
 	return c.Hooks.DuplicateToolCall.WindowSeconds
 }
 
-const defaultToolResultMaxHistoryTokens = 12000
-const defaultToolResultSpillSubdir = ".runtime/tool_outputs"
+const defaultToolResultSpillThresholdTokens = 12000
 
 // ToolResultHookEnabled 是否启用 tool 结果摘要落盘。
 func (c *Config) ToolResultHookEnabled() bool {
@@ -159,36 +159,32 @@ func (c *Config) ToolResultHookEnabled() bool {
 	return *c.Hooks.ToolResult.Enabled
 }
 
-// ToolResultMaxHistoryTokens 返回 history token 预算（默认 12000，DeepSeek 粗算）。
-func (c *Config) ToolResultMaxHistoryTokens() int {
+// ToolResultSpillThresholdTokens 返回单条 tool 结果触发落盘摘要的 token 阈值（默认 12000）。
+func (c *Config) ToolResultSpillThresholdTokens() int {
 	if c == nil {
-		return defaultToolResultMaxHistoryTokens
+		return defaultToolResultSpillThresholdTokens
+	}
+	if c.Hooks.ToolResult.SpillThresholdTokens > 0 {
+		return c.Hooks.ToolResult.SpillThresholdTokens
 	}
 	if c.Hooks.ToolResult.MaxHistoryTokens > 0 {
 		return c.Hooks.ToolResult.MaxHistoryTokens
 	}
-	// 兼容旧配置：按 0.6 将 runes 近似换算为 tokens
 	if c.Hooks.ToolResult.MaxHistoryRunes > 0 {
 		return int(float64(c.Hooks.ToolResult.MaxHistoryRunes) * 0.6)
 	}
-	return defaultToolResultMaxHistoryTokens
+	return defaultToolResultSpillThresholdTokens
 }
 
-// ToolResultSpillSubdir 返回落盘相对目录。
-func (c *Config) ToolResultSpillSubdir() string {
-	if c == nil {
-		return defaultToolResultSpillSubdir
-	}
-	if s := strings.TrimSpace(c.Hooks.ToolResult.SpillSubdir); s != "" {
-		return s
-	}
-	return defaultToolResultSpillSubdir
+// defaultToolResultHookTools 与 node/internal/toolresult.DefaultToolResultTools 保持一致。
+func defaultToolResultHookTools() []string {
+	return []string{"bash_run", "read_file", "grep_file", "grep_files", "search_replace", "glob_files"}
 }
 
 // ToolResultHookTools 返回启用摘要的工具列表。
 func (c *Config) ToolResultHookTools() []string {
 	if c == nil || len(c.Hooks.ToolResult.Tools) == 0 {
-		return []string{"bash_run"}
+		return defaultToolResultHookTools()
 	}
 	return append([]string(nil), c.Hooks.ToolResult.Tools...)
 }

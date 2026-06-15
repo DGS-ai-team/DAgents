@@ -142,11 +142,10 @@ func newRuntimeWithPublisher(
 		hooks.RuntimeConfig{
 			Duplicate: hooks.DuplicateConfigOrDefault(turnOpts.DuplicateToolCall),
 			ToolResult: hooks.ToolResultConfigOrDefault(hooks.ToolResultConfig{
-				Enabled:         turnOpts.ToolResult.Enabled,
-				MaxHistoryTokens: turnOpts.ToolResult.MaxHistoryTokens,
-				SpillSubdir:     turnOpts.ToolResult.SpillSubdir,
-				Tools:           turnOpts.ToolResult.Tools,
-				FSRoot:          turnOpts.FSRoot,
+				Enabled:              turnOpts.ToolResult.Enabled,
+				SpillThresholdTokens: turnOpts.ToolResult.SpillThresholdTokens,
+				Tools:                turnOpts.ToolResult.Tools,
+				FSRoot:               turnOpts.FSRoot,
 			}),
 		},
 		logger,

@@ -8,7 +8,7 @@
 - 文件写入工具：继续依赖工具审批与精确参数 schema；模型上下文不应包含未知参数。
 - A2A 入站与 relay：入站 `AgentPeerEnvelope` 由 API 层识别并标记 `source=a2a:<caller_agent_id>`；未知或非法信封按普通文本处理，不提升权限。
 - skills：`AGENT_SKILLS_ENABLED=false` 时不暴露 skills 工具、不注入 skills prompt；`unload_skills`（含空数组清空）与 `load_skills` 只影响会话态，不删除磁盘文件。
-- 工具原始输出落盘：长输出或脱敏命中时写入 `.runtime/tool_outputs/`；模型与 SSE 展示使用脱敏/截断版本，避免敏感信息直接进入上下文。
+- 工具原始输出落盘：长输出或脱敏命中时写入 `tool_outputs/`（相对工作区根）；模型与 SSE 展示使用脱敏/截断版本，避免敏感信息直接进入上下文。
 - prompt 侧车与长期记忆：`.runtime/prompt_context/*.md` 与 `.runtime/memory/long_term.md` 只作为低优先级上下文，不应覆盖系统级安全规则。
 
 ## 审计与观测
@@ -48,5 +48,5 @@
 ## 回滚方式
 
 - 若长任务后台化出现问题，可将命令 `timeout_seconds` 调大或临时禁用相关工具策略，只保留同步短命令。
-- 若工具结果落盘影响部署，可清理 `.runtime/tool_outputs/`；模型上下文仍保留脱敏摘要。
+- 若工具结果落盘影响部署，可清理工作区下 `tool_outputs/`；模型上下文仍保留脱敏摘要。
 - 若 A2A 入站解析引发兼容问题，可让调用方发送普通文本；非法信封不会被提升权限。

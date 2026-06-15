@@ -25,7 +25,7 @@ func Package(cfg Config, sessionID, toolCallID, toolName, normalized string) (Re
 		return out, nil
 	}
 	totalTokens := EstimateTokens(text)
-	if totalTokens <= float64(cfg.MaxHistoryTokens) {
+	if totalTokens <= float64(cfg.SpillThresholdTokens) {
 		return out, nil
 	}
 	if cfg.FSRoot == "" {
@@ -40,7 +40,7 @@ func Package(cfg Config, sessionID, toolCallID, toolName, normalized string) (Re
 	}
 	out.Spilled = true
 	out.SpillPath = relPath
-	out.ForHistory = formatHeadTailWithHint(text, cfg.MaxHistoryTokens, relPath)
+	out.ForHistory = formatHeadTailWithHint(text, cfg.SpillThresholdTokens, relPath)
 	return out, nil
 }
 
@@ -59,7 +59,7 @@ func formatHeadTailWithHint(text string, maxTokens int, relPath string) string {
 	}
 	headBudget := budget / 2
 	tailBudget := budget - headBudget
-	head := takeRunesForTokenBudget(text, headBudget)
+	head := TakePrefixForTokenBudget(text, headBudget)
 	tail := takeRunesForTokenBudgetFromEnd(text, tailBudget)
 	omitted := totalTokens - EstimateTokens(head) - EstimateTokens(tail)
 	if omitted < 0 {
@@ -67,23 +67,6 @@ func formatHeadTailWithHint(text string, maxTokens int, relPath string) string {
 	}
 	hint := fmt.Sprintf(hintTemplate, int(omitted+0.5), relPath, relPath)
 	return head + hint + tail
-}
-
-func takeRunesForTokenBudget(s string, maxTokens float64) string {
-	if maxTokens <= 0 {
-		return ""
-	}
-	var b strings.Builder
-	used := 0.0
-	for _, r := range s {
-		w := tokenWeight(r)
-		if used+w > maxTokens && used > 0 {
-			break
-		}
-		b.WriteRune(r)
-		used += w
-	}
-	return b.String()
 }
 
 func takeRunesForTokenBudgetFromEnd(s string, maxTokens float64) string {

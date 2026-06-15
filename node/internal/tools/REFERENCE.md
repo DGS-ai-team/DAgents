@@ -7,6 +7,9 @@
 | `NewRegistry(fsRoot, bashTimeoutSeconds, encodings...)` | 创建 registry；`encodings[0]`=bash 输出编码，`encodings[1]`=文件编码 |
 | `resolveShellOutputEncoding` / `decodeShellOutput` | bash_run 输出按 GBK/UTF-8 等解码为 UTF-8 |
 | `encodeFileContent` / `encodeTextToLegacyChinese` | 写盘编码；GBK 失败回退 GB18030，再失败按 rune 替换 `?` |
+| `choosePathEncoding` / `readTextLinesAt` / `rememberPathEncoding` | 路径编码：参数 → 缓存(mtime) → 字节检测 → 配置默认；读写后写缓存 |
+| `detectEncodingFromBytes` / `decodePathFileContent` / `textDecodeScore` | BOM + UTF-8 校验 + gb 试解码打分；解码失败返回错误（不静默 utf-8） |
+| `formatEncodingHeaderLines` | read 结果 header：`文件编码`、`编码来源`、可选 `编码提示` |
 | `SetBuiltinEnabled(names)` | 配置 LLM 可见内置工具允许列表（空=全部） |
 | `Definitions()` | LLM tools 列表 |
 | `Execute(ctx, name, arguments)` | 执行工具 |
@@ -21,4 +24,4 @@
 | `SetTriggerRuntime(store, sched, agentID)` | 注入触发器运行时 |
 | `execTriggerList` / `execTriggerGet` / `execTriggerCreate` / `execTriggerUpdate` / `execTriggerDelete` / `execTriggerFire` | 触发器工具 |
 | `IsBackgroundJobTool(name)` | 后台管理工具（强制同步） |
-| `fs_helpers.go` | `textSuffixes`、`isTextReadable`、`readAllLines`、`windowFromTotal`、`applyMaxBytesToBody`、`mergeLineRanges` 等 |
+| `fs_helpers.go` | `textSuffixes`、`isTextReadable`、`readAllLines`、`windowFromTotal`、`applyMaxTokensToBody`、`mergeLineRanges` 等 |

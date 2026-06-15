@@ -106,9 +106,9 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 | **WS1** | 后台 job 文案 + status 保持瞬时（不做 `wait_seconds`） | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) §5 | **已落地** |
 | **WS6** | `tool.before_each` + 重复调用审批 | [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | **已落地** |
 | **WS2** | status 工具统一 wait（子 Agent 等） | 合入总览 §4 | 未开始 |
-| **WS3** | bash 组 tool.after_each 落盘摘要 | 合入总览 §3.2.1 | **bash 已落地** |
+| **WS3** | bash+fs spill + **fs 编码缓存** §3.2.2 + **fs 阶段 3** | 合入总览 §3.2.1–§3.2.2 | **已落地**（全组） |
+| **WS5** | 工具链上下文度量 §6.1 | 合入总览 | **已落地**（基础） |
 | **WS4** | schema 前缀稳定（enrich 瘦身） | 合入总览 §3.3 | 未开始 |
-| **WS5** | 度量（poll_count、tool_turns） | — | 未开始 |
 
 ### 优化思路（总纲）
 
@@ -144,6 +144,28 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 3. **标准审批 + 重复原因**：命中 duplicate 仍走 `execute_tool`，`approval_reason` 标注；用户自行择时确认（无 defer）。
 
 **完整方案**：[tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)
+
+---
+
+## 4. UX 专题：Agent 自有文件写操作审批信任链（设计稿）
+
+| | |
+|---|---|
+| **分支/时期** | 独立专题（2026-06 起稿） |
+| **范围** | `node/internal/hooks/`、`write_file` / `search_replace` HITL |
+| **与 WS3 关系** | **正交** — 降审批次数，不降 history token |
+
+### 背景与痛点
+
+`write_file` / `search_replace` 为 `always` 审批。模型在**同一自建文件**上连续编辑时，若文件未被外界改动，重复确认信息密度低。
+
+### 优化思路
+
+1. **session 级信任表**：仅 `write_file` **创建**的文件标记 `agentOwned`。
+2. **mtime 信任链**：`before_each` 时 `Stat.mtime == lastAgentWriteMtime` → 当轮免审批；写成功后更新 mtime。
+3. **不复用 `pathEncCache`**：编码缓存为进程级；信任须 per-session，且仅在写成功后更新。
+
+**完整方案**：[ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md)
 
 ---
 

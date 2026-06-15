@@ -8,28 +8,25 @@ import (
 
 // ToolResultConfig 控制 tool.after_each 结果摘要与落盘（WS3）。
 type ToolResultConfig struct {
-	Enabled          bool
-	MaxHistoryTokens int
-	SpillSubdir      string
-	Tools            []string
-	FSRoot           string
+	Enabled              bool
+	SpillThresholdTokens int
+	Tools                []string
+	FSRoot               string
 }
 
-// DefaultToolResultConfig 返回默认配置（bash_run，12k tokens 粗算）。
+// DefaultToolResultConfig 返回默认配置（bash + fs 组，12k spill 阈值）。
 func DefaultToolResultConfig(fsRoot string) ToolResultConfig {
 	c := toolresult.DefaultConfig(fsRoot)
 	return ToolResultConfig{
-		Enabled:          c.Enabled,
-		MaxHistoryTokens: c.MaxHistoryTokens,
-		SpillSubdir:      c.SpillSubdir,
-		Tools:            append([]string(nil), c.Tools...),
-		FSRoot:           c.FSRoot,
+		Enabled:              c.Enabled,
+		SpillThresholdTokens: c.SpillThresholdTokens,
+		Tools:                append([]string(nil), c.Tools...),
+		FSRoot:               c.FSRoot,
 	}
 }
 
 func toolResultConfigUnset(c ToolResultConfig) bool {
-	return c.MaxHistoryTokens == 0 &&
-		strings.TrimSpace(c.SpillSubdir) == "" &&
+	return c.SpillThresholdTokens == 0 &&
 		len(c.Tools) == 0 &&
 		strings.TrimSpace(c.FSRoot) == "" &&
 		!c.Enabled
@@ -45,11 +42,8 @@ func ToolResultConfigOrDefault(c ToolResultConfig) ToolResultConfig {
 		out.FSRoot = strings.TrimSpace(c.FSRoot)
 	}
 	out.Enabled = c.Enabled
-	if c.MaxHistoryTokens > 0 {
-		out.MaxHistoryTokens = c.MaxHistoryTokens
-	}
-	if strings.TrimSpace(c.SpillSubdir) != "" {
-		out.SpillSubdir = strings.TrimSpace(c.SpillSubdir)
+	if c.SpillThresholdTokens > 0 {
+		out.SpillThresholdTokens = c.SpillThresholdTokens
 	}
 	if len(c.Tools) > 0 {
 		out.Tools = append([]string(nil), c.Tools...)
@@ -59,11 +53,10 @@ func ToolResultConfigOrDefault(c ToolResultConfig) ToolResultConfig {
 
 func (c ToolResultConfig) toToolresultConfig() toolresult.Config {
 	return toolresult.Config{
-		Enabled:          c.Enabled,
-		MaxHistoryTokens: c.MaxHistoryTokens,
-		SpillSubdir:      c.SpillSubdir,
-		Tools:            append([]string(nil), c.Tools...),
-		FSRoot:           c.FSRoot,
+		Enabled:              c.Enabled,
+		SpillThresholdTokens: c.SpillThresholdTokens,
+		Tools:                append([]string(nil), c.Tools...),
+		FSRoot:               c.FSRoot,
 	}.Normalized()
 }
 

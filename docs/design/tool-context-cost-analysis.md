@@ -2,7 +2,7 @@
 
 > 分支：`feat/tool-context-cost-optimization`  
 > 范围：Go Agent Node 全内置工具（`node/internal/tools`、`node/internal/turn` 工具结果写回、编排 dispatch）  
-> 与 [context-compression-cache-analysis.md](./context-compression-cache-analysis.md) 的关系：**压缩降 history 体量**；本专题降 **tool loop 内无效 LLM 往返、tool 结果膨胀、schema 前缀扰动** — 二者 **正交、应叠加**。
+> 与 [context-compression-cache-analysis.md](./context-compression-cache-analysis.md) 的关系：**压缩降 history 体量**；本专题降 **tool loop 内无效 LLM 往返、tool 结果膨胀、schema 前缀扰动** — 二者 **正交、应叠加**。计费动机与 cache 策略见 **§1.2**。
 
 ---
 
@@ -21,22 +21,85 @@
 - 部分调用「信息量极低」（如 `background_job_status` 返回 `running`、重复 `read_file`、子 Agent 快照查询）。
 - 即使 Prompt Cache **高 hit**，**assistant/tool 新增 tail** 与 **completion** 仍线性累积。
 
-### 1.2 Agent turn 的成本模型（轮询场景）
+### 1.2 计费模型：为何要做上下文管理、为何要抬 cache 命中率
+
+本专题与 [context-compression-cache-analysis.md](./context-compression-cache-analysis.md) 的出发点相同：**Agent 的账单 = 多次 LLM 请求的 token 消耗 × 单价**。以生产常用的 [DeepSeek-V4-Pro](https://api-docs.deepseek.com/zh-cn/quick_start/pricing) 为例（2026-06 公示价）：
+
+| 计费项 | V4-Pro 单价 | 倍率（相对命中 input） |
+|--------|-------------|------------------------|
+| 输入（[缓存命中](https://api-docs.deepseek.com/zh-cn/guides/kv_cache)） | **0.025 元** / 百万 tokens | 1× |
+| 输入（缓存未命中） | **3 元** / 百万 tokens | **120×** |
+| 输出 | **6 元** / 百万 tokens | 240× |
+
+扣费规则：`费用 = token 消耗量 × 模型单价`（见 pricing 页）。因此 **同一 token 被 replay 时，命中与未命中的单价可差两个数量级** — 这是「既要管上下文、又要抬 cache 命中率」的直接经济原因。
+
+#### 1.2.1 上下文管理要解决的三个账单项
+
+| 账单驱动 | 机制 | 本分支对策（工作流） |
+|----------|------|----------------------|
+| **多轮 LLM 往返** | 每次 tool loop 都是一次完整 `StreamChat`；低信息调用（status 轮询、重复 read）仍产生 **output** 与新一轮 input | **WS1** 引导 async 回灌；**WS6** 拦截重复 tool call；**WS2** 可选 status wait |
+| **tool 结果写入 history** | 大段 bash/grep/read 正文进入 messages，**放大后续每轮 input**；单条过长还推高压缩频率 | **WS3** `tool.after_each` 落盘 + history 摘要（token budget） |
+| **tools schema 前缀漂移** | `load_skills` enrich 等使 **整段 tools JSON 每轮 miss**，前缀 P（常 **数千～上万 token**）按 3 元/M 重付 | **WS4** enrich 瘦身、稳定 `Definitions()` |
+
+**核心**：上下文管理不是「省磁盘」，而是 **减少无效 turn、压低每条 message 进 history 的体积、让可缓存前缀尽量稳定** — 三者共同决定 input miss 量、input hit 量、以及 output 轮数。
+
+#### 1.2.2 为何要抬 cache 命中率
+
+[Prompt Cache / KV cache](https://api-docs.deepseek.com/zh-cn/guides/kv_cache) **不改变** turn 次数，也 **不减少** 必须新增的 assistant/tool tail；它只降低 **与上一轮 input 相同的前缀** 的计费单价（3 元/M → 0.025 元/M）。
+
+典型 Agent 请求前缀 **P** = system + **全量 tools schema** + 用户任务句（全工具启用时常 **~10k tokens** 量级）。每多一轮 tool loop，P 都会在下一请求中 **再次出现**。若前缀稳定且可命中：
+
+- 多付的主要是 **每轮新增 tail**（miss，3 元/M）和 **completion**（6 元/M）；
+- 若前缀因 enrich 漂移、tools 列表变化而 **整段 miss**，则 P 在每轮按 **3 元/M** 重计 — 与压缩专题中的 cache 断档 **同质**，且在本专题中由 **轮询 / 多步 tool** 放大。
+
+**结论**：抬 cache 命中率与「减少轮数、缩小 tool 结果」**叠加** — 前者降 replay **单价**，后者降 replay **量**与 **output**；只做其一，账单仍可能偏高。
+
+#### 1.2.3 量化示例：分页 read 与 cache 的乘数效应
+
+下列为 **§3.2.3** 的货币化动机摘要（完整路径对比见该节）。场景：读完 **10000 汉字**（≈6000 tokens），工具单页 **2000 字**（≈1200 tokens/页），固定前缀 **P ≈ 10000 tokens**（[token 粗算](https://api-docs.deepseek.com/zh-cn/quick_start/token_usage)：汉字 ×0.6）。
+
+| 路径 | LLM 往返 | 各次 input 中文档 token 累计计数 |
+|------|----------|----------------------------------|
+| **A. 顺序 5 页** | 6 次 | **18000**（三角累加） |
+| **B. 1 次读完** | 2 次 | **6000** |
+
+在 V4-Pro 价下（符号：O_r=每轮 read 的 completion≈150，O_f=收尾≈500，M=tool 头≈80）：
+
+| 场景 | A（5 页） | B（1 次） | 差额 |
+|------|-----------|-----------|------|
+| **① 高 cache hit**（前缀 P 按 0.025 元/M，仅新增 tail miss） | **≈ 0.061 元** | **≈ 0.053 元** | **+15%**（~0.008 元/次） |
+| **② 全 miss**（前缀漂移 / 无 cache，各次 **全额 input** 按 3 元/M） | **≈ 0.252 元** | **≈ 0.083 元** | **≈ 3.0×**（~0.17 元/次） |
+
+从单价可读出的 **设计动机**：
+
+1. **单次 toy 任务**差额可很小（分～角），但 **长会话 × 十数轮 tool × 重复轮询** 会线性放大；观测到的「单次任务十数次 LLM」即此结构。
+2. **cache 把「replay 计数」与「replay 账单」拆开**：18000 vs 6000 的 input **计数差**在命中价下货币影响微弱，在 **全 miss** 下接近 **3×** — 故 **WS4 稳 schema** 与压缩侧 cache 策略 **必须同做**。
+3. **分页本身**（必要防线）带来的主要是 **多轮 completion** 与延迟；**WS3** 管「单页仍过长」，**WS6** 管「不该再读/再 poll」，而非取消分页。
+4. **轮询**（如 10 次 `background_job_status`）在 ② 类假设下，每轮重付 P+history，成本远高于 ① — **WS1+WS6** 的优先级由此而来。
+
+```text
+优化总公式（本分支）：
+  账单 ≈ Σ( input_miss × 3‰ + input_hit × 0.025‰ + output × 6‰ )
+  降账单 → 少 turn（WS1/WS6/WS2）+ 小 tool 写入（WS3）+ 稳前缀多 hit（WS4）+ 可观测（WS5）
+  （‰ = /10⁶；与 §1.2.3 表内用法一致）
+```
+
+### 1.3 Agent turn 的成本模型（轮询场景）
 
 Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_calls → 执行工具 → 将 **assistant + tool** 消息 append 到 `history` → 再次 `StreamChat`。
 
-- **每一次** 低信息密度 tool 调用（如瞬时 `background_job_status`），只要模型 **主动发起新一轮推理**，就是一次完整 LLM 请求。
+- **每一次** 低信息密度 tool 调用（如瞬时 `background_job_status`），只要模型 **主动发起新一轮推理**，就是一次完整 LLM 请求（§1.2.1）。
 - 请求 input 含 **整段 history** + tools schema；上下文较长时单次 input 可达数万 token。
-- 即便 [Prompt Cache](https://api-docs.deepseek.com/zh-cn/guides/kv_cache) 命中历史前缀，**本轮新增 assistant/tool** 与 **completion** 仍计费；多次轮询 **线性放大** 成本。
+- [Prompt Cache](https://api-docs.deepseek.com/zh-cn/guides/kv_cache) 命中时，重复前缀按 **0.025 元/M** 计（§1.2.2）；**新增 assistant/tool** 与 **completion** 仍按 miss / 输出价计费，多次轮询 **线性放大** output 与 tail miss。
 
-### 1.3 优化总目标
+### 1.4 优化总目标
 
 ```text
 在不大改 Agent 能力边界的前提下：
-  1. 减少「低信息密度」的 LLM 往返（轮询、重复 read、不必要的 status）
-  2. 控制写入 history 的 tool 结果体积（与 bash_compress / package 策略一致）
-  3. 稳定 tools schema 前缀（减少 enrich 漂移导致的 cache 断档）
-  4. 可度量：每任务 tool_turns、tool_result_chars、status_poll_count
+  1. 减少「低信息密度」的 LLM 往返（轮询、重复 read、不必要的 status）→ 降 turn 与 output
+  2. 控制写入 history 的 tool 结果体积（tool.after_each 落盘摘要）→ 降 tail miss 与压缩压力
+  3. 稳定 tools schema 前缀（减少 enrich 漂移）→ 抬 cache 命中率，降 P 的 miss 重付
+  4. 可度量：每任务 tool_turns、tool_result_chars、status_poll_count（WS5）→ 验证落在 §1.2.3 ① 而非 ②
 ```
 
 ---
@@ -97,7 +160,7 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 | 来源 | 现网缓解 | 待优化 |
 |------|----------|--------|
 | bash stdout/stderr | **§3.2.1** 清洗 + 落盘 + history 头尾摘要 | 其它组按 enabled_groups 逐步接入 |
-| read_file / grep | offset/limit + bytes 上限 | 模型仍整文件多次 read |
+| read_file / grep / search_replace / glob | offset/limit + **token** 上限；**编码检测+缓存**（§3.2.2 阶段 2）；**阶段 3** spill | 顺序分页 multi-turn（§3.2.3，设计取舍） |
 | search_replace diff | 输出 diff 摘要 | 大 diff 仍 long |
 | agent_invoke result | 对端全文 | 截断 + 落盘（待做） |
 
@@ -106,9 +169,9 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 | 阶段 | 位置 | 作用对象 | 行为 |
 |------|------|----------|------|
 | **Tool 清洗** | `bash_compress.sanitizeBashStream` | bash stdout/stderr | 去 ANSI、合并重复行；**不再**在此截断长度 |
-| **Tool 分页/上限** | `fs_*` | read/grep/glob 等 | bytes/行窗口 + 翻页 hint |
+| **Tool 分页/上限** | `fs_*` | read/grep/glob 等 | **token** 窗口（DeepSeek 粗算）+ 行/命中分页 + 翻页 hint |
 | **Job preview** | `job_registry` | status 终态 preview | 2000 bytes；完整靠 async 回灌 |
-| **`tool.after_each`** | `hooks.ToolResultPackageHook` → `toolresult.Package` | 配置内工具（首版 **`bash_run`**） | 超长：落盘 + history 头尾摘要 + `read_file` hint |
+| **`tool.after_each`** | `hooks.ToolResultPackageHook` → `toolresult.Package` | 配置内工具（**bash + fs 组**） | 超长：落盘 + history 头尾摘要 + `read_file` hint |
 | **SSE / Client** | `publishToolResult` | TUI | **全文**（清洗后、未 history 摘要） |
 | **history** | `appendHistory(role=tool)` | LLM | **摘要或全文**（由 Hook 输出 `ForHistory`） |
 | **Hook 元数据** | `ToolExecutionLog` | duplicate 审批 | 结果 preview 200 bytes |
@@ -125,11 +188,13 @@ Go Node 的 LLM 调用以 **turn loop** 为单位：每次模型输出 tool_call
 bash_run Execute
   → sanitizeBashStream（tools.bash_compress.enabled）
   → ForClient = 全文 → SSE
-  → 若估算 tokens > hooks.tool_result.max_history_tokens（默认 12000，[DeepSeek 粗算](https://api-docs.deepseek.com/zh-cn/quick_start/token_usage)：汉字×0.6、其它×0.3）：
-       落盘 fs_root/.runtime/tool_outputs/<session>/<tool_call_id>.txt
+  → 若估算 tokens > hooks.tool_result.spill_threshold_tokens（默认 12000）：
+       落盘 fs_root/tool_outputs/<session>/<tool_call_id>.txt（目录固定）
        ForHistory = 头 + ...（已省略约 N tokens，完整输出已写入 "path"，请 read_file 分页）... + 尾
   → async 回灌同路径（ForClient 全文进 SSE，ForHistory 摘要进 tool message）
 ```
+
+> **`spill_threshold_tokens` 语义**：`tool.after_each` 对下方 **`tools` 列表中每个工具** 单独判定；超过阈值才落盘摘要。**不是** bash_run 专用，**也不是**整段 session history 的总 token 上限。fs 组另有工具内单页上限（read/grep 等默认 3000 tokens，见 §3.2.2），两层分工：工具内控单页体积，Hook 控写入 history 的最终体积。
 
 **配置**（`config.yaml`）：
 
@@ -137,16 +202,95 @@ bash_run Execute
 hooks:
   tool_result:
     enabled: true
-    max_history_tokens: 12000
-    spill_subdir: .runtime/tool_outputs
-    tools:
+    spill_threshold_tokens: 12000   # 单条 tool 结果触发落盘摘要的阈值
+    tools:                          # 作用于列表内每个工具
       - bash_run
+      - read_file
+      - grep_file
+      - grep_files
+      - search_replace
+      - glob_files
 tools:
   bash_compress:
     enabled: true   # 仅清洗，不截断
 ```
 
 **代码索引**：`toolresult/`、`hooks/builtin_tool_result.go`、`turn/tool_router.go`（`splitToolResult`）、`turn/tool_result_messages.go`（async）。
+
+#### 3.2.2 WS3 · fs 组
+
+**阶段 1（已落地）**：`read_file` / `grep_*` 接入 `tool.after_each` 落盘摘要；单页 **3000 tokens** 预算。
+
+**阶段 2（已落地）**：**路径级文件编码检测 + 缓存** — 减少错编码乱码导致的无效重读（见下），**不做** read 结果 hint / short_circuit 去重。
+
+**问题**：错编码读出的乱码整段进入 history（**miss 价**），模型再换 `encoding` 重读 → 又多一轮 tool + LLM；比「注意力丢失后再读同一页」更浪费 token。
+
+**方案**（`node/internal/tools/fs_encoding*.go` + `Registry` 路径缓存）：
+
+| 步骤 | 行为 |
+|------|------|
+| **选用优先级**（未传 `encoding`） | ① 路径缓存（**mtime 一致**）→ ② 字节检测 → ③ `tools.file_encoding` / 平台默认 |
+| **显式 `encoding` 参数** | 最高优先；成功后 **写入缓存**（path + mtime） |
+| **检测** | UTF-8 BOM → `utf8.Valid` 打分 → gb18030/gbk 试解码 + `textDecodeScore`；取最高分；与配置同为 gb 族时对齐为配置标签 |
+| **解码** | `decodePathFileContent`：**禁止** gbk/gb18030 失败时静默 fallback utf-8 |
+| **读结果 header** | `文件编码` + `编码来源`（参数/缓存/检测/配置）；短文本用人均分判乱码，疑似时 `编码提示` |
+| **写/替换/grep** | `readTextLinesAt` / `resolveWriteEncoding` 同路径默认沿用缓存编码，读写一致 |
+| **失效** | 文件 **mtime** 变化 → 丢弃该 path 缓存，重新检测 |
+| **不做** | 同参数 read 结果缓存；path 级 HITL；read dedup hint |
+
+```text
+read_file（无 encoding）
+  → Stat mtime → 查 pathEncodingCache
+  → miss：读 raw bytes → detectEncoding → decode（禁止 gbk 失败时静默 utf-8 兜底）
+  → header 标明编码与来源；成功后 rememberPathEncoding
+write_file / search_replace / grep_*
+  → resolvePathEncoding 同路径默认取缓存
+```
+
+**状态**：阶段 1–3 均已落地（编码：`fs_encoding_detect.go`、`fs_path_encoding.go`；spill 默认工具含 `search_replace`、`glob_files`）。
+
+**阶段 3**：`search_replace` / `glob_files` 接入 `tool.after_each`；工具内 token 上限（replace 整段 2000 tokens、glob 单页 3000 tokens）。
+
+#### 3.2.3 分页读取 vs 单次读完：成本对比
+
+> **货币量化与优化动机**见 **§1.2**（V4-Pro 单价、cache 命中 vs 全 miss、与本分支 WS 的对应关系）。本节聚焦 **机制** 与 **设计取舍**。
+
+**场景**（[token 粗算](https://api-docs.deepseek.com/zh-cn/quick_start/token_usage)）：任务需消费完整 **10000 汉字** 文档；工具单页上限 **2000 字**（≈1200 tokens/页）。
+
+| 路径 | LLM 往返（典型） | 写入 history 的正文总量 | 各次请求 **input 中累积出现的文档 token** |
+|------|------------------|-------------------------|------------------------------------------|
+| **A. 分 5 次读**（顺序分页，依赖 `next_line_offset`） | **6 次**（5 轮 tool + 1 轮收尾） | 6000 tokens（5×1200） | **18000**（三角累加：0+1200+…+6000） |
+| **B. 1 次读完**（假设工具允许单页 10000 字） | **2 次**（1 轮 tool + 1 轮收尾） | 6000 tokens | **6000**（仅最后一轮 input 含全文） |
+| **C. 5 次并行 read**（模型已知各段 offset，同一轮 `tool_calls`） | **2 次** | 6000 tokens | **≈6000**（与 B 接近；多 4 组 tool_call / tool 头开销） |
+
+**结论（为何分页有额外成本）**：
+
+1. **Turn 次数**：顺序分页每读一页多 **1 次完整 `StreamChat`**（重放 system + tools schema + 迄今全部 messages）。文档正文在 history 里只存一份，但 **每一轮后续推理的 input 都会再次计入此前各页** → 文档 token 在 input 侧呈 **三角累加**，5 页时约为单次的 **3 倍**（18000 / 6000）。**全 miss 时** 该计数差接近 **3× 账单**（§1.2.3）；**高 cache hit 时** replay 按命中价计，差额主要来自 **多 4 轮 completion**（§1.2.3 ①）。
+2. **Completion**：每多一轮 read，模型还要生成 **assistant + tool_calls**（规划下一页），约数百 tokens × 额外 4 轮（输出 **6 元/M**）。
+3. **Prompt Cache**：前缀（system、tools、早期 messages）可命中 cache，**降低重复 input 的单价（120×）**，但 **不减少轮数**；新增 tail 仍按 miss 计，且 **completion 线性随轮数增加**（§1.2.2）。
+4. **WS3 spill**：若单次 10000 字（6000 tokens）仍低于 `spill_threshold_tokens`（默认 12000），**history 体积与 5 次分页相同**；spill 主要帮助「单页或 grep 块」本身超长，**不能消除分页带来的多轮往返**。
+
+**设计含义**：
+
+- **工具层分页**（2000～3000 字/页）是正确默认：防止单条 tool message 撑爆上下文、逼模型用 `line_offset` 精读。
+- **不应**为省轮数而取消分页改「一次读 10000 字」——在真实大文件场景下单次 read 会触发 spill 或更糟的截断；且单页过大反而降低模型精读质量。
+- fs 组 WS3 的重点是：**单页仍超长时落盘 + 摘要**、**抑制重复 read**；分页本身的 multi-turn 成本靠 **减少无效重读**、**并行 offset（C，仅当模型已知区间）**、以及正交的 **context 压缩** 缓解，而非取消分页。
+
+**手算附录**（建模符号 P、D、M、O_r、O_f 及逐轮 miss 表，与 §1.2.3 费用表一致）：
+
+| 符号 | 含义 | 取值 |
+|------|------|------|
+| **P** | 每轮固定前缀：system + tools schema + 用户任务句 | **10000 tokens** |
+| **D** | 单页文档正文 | 1200 tokens |
+| **M** | tool 消息头 | 80 tokens |
+| **O_r** / **O_f** | read 轮 completion / 收尾 | 150 / 500 tokens |
+
+```text
+顺序 5 页：input 侧文档 token 合计 ≈ 1200 × (1+2+3+4+5) = 18000
+单次读完：input 侧文档 token 合计 ≈ 6000
+路径 A 增量 miss input ≈ 10000 + 5×1430 = 17150；路径 B ≈ 16230
+各次请求 input 计数（全 miss 场景）：A ≈ 6P+21450，B ≈ 2P+6230
+```
 
 ### 3.3 Tools schema 前缀（P2 — WS4）
 
@@ -173,9 +317,9 @@ tools:
 | **WS1** | 后台 job 轮询治理 | bash 组：ACK 文案；**status 保持瞬时** | **P0** | **§5** | **已落地**（不实现 `wait_seconds`） |
 | **WS6** | 重复调用 Hook 审批 | `tool.before_each`；**仅 policy `rule`+auto** + 60s 指纹 + 标准审批原因 | **P0** | — | **已落地** |
 | **WS2** | Status 工具统一 wait | `temporary_agent_status` 等 | P1 | §3.1 | 未开始 |
-| **WS3** | Tool 结果 budget | `tool.after_each` + 落盘；**bash 组已落地** §3.2.1 | P1 | §3.2 | **bash 已落地**；fs/a2a 待做 |
+| **WS3** | Tool 结果 budget | `tool.after_each` 落盘 §3.2.1–§3.2.2；**fs 阶段 1–3** | P1 | §3.2 | **bash + fs 已落地** |
 | **WS4** | Schema 前缀稳定 | enrich 瘦身、description | P2 | §3.3 | 未开始 |
-| **WS5** | 度量 | poll_count、tool_turns | P1 | §7 | 未开始 |
+| **WS5** | 度量 | poll_count、tool_turns | P1 | §6.1 | **已落地**（基础） |
 
 ```text
 feat/tool-context-cost-optimization
@@ -332,15 +476,42 @@ Issue #25：pending HITL 时仍写 history 但 **恢复** pending。
 
 ---
 
+## 6.1 WS5：工具链上下文度量（已落地 · 基础）
+
+**锚点**：`node/internal/turn/context_metrics.go`；在每次 `done` SSE 与结构化日志输出 **`tool_context_metrics`**。
+
+**统计窗口**：单次用户任务（`human_message` 入队 → `turn_complete=true`）；新 `human_message` 时重置。
+
+| 字段 | 含义 |
+|------|------|
+| `tool_loops` | 本任务内 LLM↔tool 循环次数（`runOneStep` loop） |
+| `tool_calls` | 工具调用次数（含 status 类） |
+| `tool_calls_by_name` | 按工具名计数 |
+| `status_poll_count` | `background_job_status` + `temporary_agent_status` |
+| `history_result_tokens` / `history_result_chars` | 写入 history 的 tool 结果体积（DeepSeek 粗算） |
+| `spill_count` | `tool.after_each` 落盘次数 |
+| `read_file_calls` / `read_file_path_repeats` | 同任务内重复读同 path（第二次起计 repeat） |
+| `encoding_source_detect` / `encoding_source_cache` | 从 read/grep 结果 header 解析 |
+| `encoding_garbled_hints` | 含 `编码提示:` 的次数 |
+
+**输出**：
+
+- SSE `done` 事件：`tool_context_metrics` 对象（HITL 暂停时亦附带快照）
+- 日志：`turn context metrics`（`slog` 结构化字段）
+
+**未做（后续）**：Prometheus 导出、跨 session 聚合仪表盘。
+
+---
+
 ## 6. WS2–WS6 概要（待展开）
 
 | WS | 要点 |
 |----|------|
 | **WS6** | 仅 **`rule`+auto** 路径：60s 内同名同参 → 标准 HITL 审批原因；详见 [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) |
 | **WS2** | `temporary_agent_status.wait_seconds`（**可选**；bash job 已决不做 long-poll） |
-| **WS3** | 可配置 `hooks.tool_result`；read 去重提示；A2A 结果截断+落盘 |
+| **WS3** | 可配置 `hooks.tool_result`；**bash + fs 全组已落地** §3.2.1–§3.2.2 阶段 3；A2A 落盘 |
 | **WS4** | skills enrich 外置或缩短；enabled_groups 减面 |
-| **WS5** | `tool_turns/session`、`status_poll_count` 结构化日志 / SSE |
+| **WS5** | `tool_context_metrics` on `done` SSE + 结构化日志；见 §6.1 |
 
 ---
 
@@ -349,9 +520,12 @@ Issue #25：pending HITL 时仍写 history 但 **恢复** pending。
 | 阶段 | 内容 |
 |------|------|
 | ~~**T1**~~ | ~~WS1~~ **已完成**（文案 + status 保持现状 + WS6） |
-| **T2** | WS5 基础度量 |
-| **T3** | WS2 子 Agent status（可选） |
-| **T4** | WS3 结果 budget |
+| ~~**T1b**~~ | ~~WS3 bash~~ **已完成**（§3.2.1） |
+| ~~**T3a**~~ | ~~WS3 fs spill（read/grep）~~ **已完成**（§3.2.2 阶段 1） |
+| ~~**T3b**~~ | ~~WS3 fs 编码检测 + 路径缓存~~ **已完成**（§3.2.2 阶段 2） |
+| ~~**T3c**~~ | ~~WS3 fs 阶段 3~~ **已完成**（`search_replace` / `glob_files` spill + token 上限） |
+| ~~**T2**~~ | ~~WS5 基础度量~~ **已完成**（§6.1） |
+| **T4** | WS2 子 Agent status（可选）；WS3 a2a |
 | **T5** | WS4 schema 稳定 |
 
 ---
@@ -368,10 +542,12 @@ Issue #25：pending HITL 时仍写 history 但 **恢复** pending。
 | async 回灌 | `node/internal/session/runtime.go`, `node/internal/api/server.go` |
 | 子 Agent wait | `node/internal/tools/tool_childagent.go` |
 | 压缩（正交） | `node/internal/compression/` |
-| 实录 | [major-changes.md](./major-changes.md) §2 |
+| WS5 度量 | `node/internal/turn/context_metrics.go` |
+| fs 编码检测 + 缓存 | `node/internal/tools/fs_encoding_detect.go`, `fs_path_encoding.go` |
+| UX：写审批信任链（设计稿） | [ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md) |
 
 ---
 
 ## 9. 结论
 
-本分支以 **「减少低信息密度 LLM 往返 + 控制 tool 写入体积 + 稳定 tools 前缀」** 为纲。**WS1 + WS6** 已落地：bash job 靠 **async 回灌 + ACK 文案** 引导零轮询，`background_job_status` **保持瞬时**；模型仍短时重复调用时由 **duplicate hook** 进 HITL。下一步优先 **WS5 度量** 与 **WS3 结果 budget**。与压缩/cache 优化 **应叠加评估**。
+本分支以 **「减少低信息密度 LLM 往返 + 控制 tool 写入体积 + 稳定 tools 前缀」** 为纲。**WS1 + WS6 + WS3 + WS5（基础）** 已落地。**下一步**：**T4**（A2A 落盘 / 可选 WS2）→ **T5**（WS4 schema）。写审批减负见 [ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md)。

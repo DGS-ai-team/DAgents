@@ -63,6 +63,8 @@ type Orchestrator struct {
 	turnUsageMu sync.Mutex
 	turnUsage   map[string]llm.Usage
 
+	ctxMetrics *contextMetricsStore
+
 	enqueueToolResult   func(sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
 }
@@ -108,6 +110,7 @@ func (o *Orchestrator) RunMessageTurn(
 	}
 	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.UserNameHuman))
 	o.resetTurnUsage(sessionID)
+	o.resetContextMetrics(sessionID)
 	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
 	return o.runUntilQueueOrDone(ctx, sessionID, history, setState, 0)
 }
@@ -126,6 +129,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	}
 	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.NormalizeUserMessageName(userName)))
 	o.resetTurnUsage(sessionID)
+	o.resetContextMetrics(sessionID)
 	o.logger.Info("turn human message start",
 		"session_id", sessionID,
 		"content_len", len(userText),
@@ -333,6 +337,7 @@ func NewOrchestrator(
 		promptCtx:    promptCtx,
 		journal:      journal,
 		logger:       logx.OrDefault(logger),
+		ctxMetrics:   newContextMetricsStore(),
 	}
 }
 
@@ -390,6 +395,7 @@ func (o *Orchestrator) runOneStep(
 	finishReason := "stop"
 	var streamErr error
 	toolLoopCount++
+	o.recordToolLoop(sessionID, toolLoopCount)
 	if toolLoopCount > o.maxToolLoops {
 		o.hub.Publish(sessionID, o.agentID, "error", map[string]any{
 			"message": fmt.Sprintf("工具调用轮次超过上限：%d", o.maxToolLoops),
@@ -507,6 +513,10 @@ func (o *Orchestrator) publishTurnIdleDone(sessionID, finishReason string) {
 		payload["turn_complete"] = true
 		payload["awaiting"] = nil
 	}
+	if m := o.contextMetrics(sessionID); m != nil {
+		payload["tool_context_metrics"] = m.snapshot()
+	}
+	o.publishTurnContextMetrics(sessionID, finishReason)
 	o.hub.Publish(sessionID, o.agentID, "done", payload)
 }
 

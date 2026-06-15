@@ -139,9 +139,9 @@ func shouldContinueAfterAsyncTool(tail toolResultTailKind) bool {
 	return tail == tailTool || tail == tailAssistantWithoutToolCalls
 }
 
-func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw string) (forClient, forHistory string) {
+func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw string) (forClient, forHistory, spillPath string) {
 	if o.toolHooks == nil {
-		return raw, raw
+		return raw, raw, ""
 	}
 	out := o.toolHooks.RunToolAfterEach(nil, hooks.ToolAfterEachInput{
 		SessionID:  sessionID,
@@ -149,5 +149,5 @@ func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw st
 		ToolName:   tc.Function.Name,
 		RawResult:  raw,
 	})
-	return out.ForClient, out.ForHistory
+	return out.ForClient, out.ForHistory, out.SpillPath
 }
