@@ -40,7 +40,8 @@ from app.cli.child_agent import (
 )
 from app.cli.render import TranscriptKind, TranscriptUpdate, format_inline_usage, parse_usage_round, sanitize_inline_tool_arg
 from app.cli.session_controller import PendingHITL, SessionController
-from app.cli.tool_calls import normalize_tool_call_item, tool_call_purpose, tool_display_name
+from app.cli.tool_calls import normalize_tool_call_item, parse_tool_arguments, tool_call_purpose, tool_display_name
+from app.cli.tool_calls_streaming import streaming_tool_call_preview
 from app.cli.user_information import (
     UserInformationAnswer,
     UserInformationCancelled,
@@ -192,6 +193,7 @@ class DAgentsTuiApp(App[None]):
         self._user_info_selected_ids: set[str] = set()
         self._user_info_block: dict[str, int] | None = None
         self._pending_tools: dict[str, dict[str, Any]] = {}
+        self._partial_tool_index_ids: dict[int, str] = {}
         self._tool_results: dict[str, dict[str, Any]] = {}
         self._tool_result_counter = 0
         self._status_lines: dict[str, dict[str, Any]] = {}
@@ -1407,7 +1409,65 @@ class DAgentsTuiApp(App[None]):
         """生成工具调用在 transcript 中的短标题（优先 call_purpose）。"""
         return tool_display_name(name, arguments)
 
-    def _tool_call_parts_from_call(self, item: dict[str, Any]) -> tuple[str, str | None, str]:
+    def _tool_arguments_raw(self, item: dict[str, Any]) -> str:
+        """提取 SSE tool_call 项中的原始 arguments 字符串（流式未闭合 JSON）。"""
+        raw = item.get("arguments")
+        if isinstance(raw, str):
+            return raw
+        fn = item.get("function")
+        if isinstance(fn, dict):
+            fn_args = fn.get("arguments")
+            if isinstance(fn_args, str):
+                return fn_args
+        return ""
+
+    def _tool_index_from_event(self, data: dict[str, Any]) -> int | None:
+        raw = data.get("tool_index")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    def _clear_partial_tool_index_ids(self) -> None:
+        self._partial_tool_index_ids.clear()
+
+    def _resolve_tool_call_id(
+        self,
+        normalized: dict[str, Any],
+        *,
+        tool_index: int | None,
+        partial: bool,
+    ) -> str:
+        """解析 tool_call 块 ID；流式 partial 阶段用 tool_index 占位。"""
+        call_id = str(normalized.get("id") or "").strip()
+        if call_id:
+            if tool_index is not None and tool_index in self._partial_tool_index_ids:
+                old_id = self._partial_tool_index_ids.pop(tool_index)
+                if old_id != call_id and old_id in self._pending_tools:
+                    pending = self._pending_tools.pop(old_id)
+                    task = pending.get("status_task")
+                    if isinstance(task, asyncio.Task):
+                        task.cancel()
+                    self._pending_tools[call_id] = pending
+                    pending["status_task"] = asyncio.create_task(self._animate_tool_pending(call_id))
+            return call_id
+        if partial and tool_index is not None:
+            existing = self._partial_tool_index_ids.get(tool_index)
+            if existing:
+                return existing
+            placeholder = f"partial-{tool_index}"
+            self._partial_tool_index_ids[tool_index] = placeholder
+            return placeholder
+        return ""
+
+    def _tool_call_parts_from_call(
+        self,
+        item: dict[str, Any],
+        *,
+        streaming: bool = False,
+    ) -> tuple[str, str | None, str]:
         """从 tool_call SSE payload 解析短标题与可选代码框内容。
 
         逻辑：
@@ -1421,6 +1481,16 @@ class DAgentsTuiApp(App[None]):
         normalized = normalize_tool_call_item(item)
         name = normalized["name"]
         arguments = normalized["arguments"]
+        if streaming and name not in {"", "unknown"}:
+            raw = self._tool_arguments_raw(item)
+            if raw.strip():
+                stream_args, code_content, code_lexer = streaming_tool_call_preview(name, raw)
+                if stream_args:
+                    arguments = stream_args
+                summary = self._tool_display_name(name, arguments)
+                if code_content is not None:
+                    return summary, code_content, code_lexer
+                return summary, None, code_lexer
         if name == "bash_run":
             purpose = tool_call_purpose(arguments)
             if purpose:
@@ -1602,20 +1672,45 @@ class DAgentsTuiApp(App[None]):
         """写入工具调用占位行，并记录行范围以便 tool_result 到达后重写。
 
         逻辑：
-        1. 写入黄点占位并记录行号；
-        2. 记录 started_at 并启动耗时动画任务；
-        3. tool_result 到达后取消动画并展示最终耗时。
+        1. partial SSE：工具名/arguments 流式到达时 upsert 同一块；
+        2. 写入黄点占位并记录行号；
+        3. 记录 started_at 并启动耗时动画任务；
+        4. tool_result 到达后取消动画并展示最终耗时。
         """
         tool_calls = data.get("tool_calls")
         if not isinstance(tool_calls, list) or not tool_calls:
             return
+        partial = bool(data.get("partial"))
+        tool_index = self._tool_index_from_event(data)
+        if not partial and tool_index is not None:
+            self._partial_tool_index_ids.pop(tool_index, None)
         log = self._transcript_log()
         for item in tool_calls:
             if not isinstance(item, dict):
                 continue
             normalized = normalize_tool_call_item(item)
-            call_id = str(normalized.get("id") or "").strip()
-            summary, code_content, code_lexer = self._tool_call_parts_from_call(item)
+            call_id = self._resolve_tool_call_id(
+                normalized,
+                tool_index=tool_index,
+                partial=partial,
+            )
+            summary, code_content, code_lexer = self._tool_call_parts_from_call(
+                item,
+                streaming=partial,
+            )
+            if call_id in self._pending_tools:
+                pending = self._pending_tools[call_id]
+                pending["summary"] = summary
+                pending["tool_name"] = str(normalized.get("name") or "")
+                pending["arguments"] = (
+                    normalized.get("arguments")
+                    if isinstance(normalized.get("arguments"), dict)
+                    else {}
+                )
+                pending["code_content"] = code_content
+                pending["code_lexer"] = code_lexer
+                self._refresh_tool_pending_block(call_id)
+                continue
             started_at = time.monotonic()
             start = len(log.lines)
             self._log_write_block(
@@ -2113,6 +2208,7 @@ class DAgentsTuiApp(App[None]):
         """写入用户消息：与上方内容、下方 Agent 回复各留一行空行。"""
         self._pending_round_usage_suffix = None
         self._transcript_follow_tail = True
+        self._clear_partial_tool_index_ids()
         log = self._transcript_log()
         log.auto_scroll = True
         self._flush_pending_segment_gap()
@@ -2253,6 +2349,7 @@ class DAgentsTuiApp(App[None]):
         self._last_assistant_done_block = None
         self._cancel_tool_pending_tasks()
         self._pending_tools.clear()
+        self._clear_partial_tool_index_ids()
         self._cancel_status_lines()
         self._finish_assistant_stream(log)
         self._finish_reasoning_stream(log)

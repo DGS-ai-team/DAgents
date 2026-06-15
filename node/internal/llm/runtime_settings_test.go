@@ -2,6 +2,25 @@ package llm
 
 import "testing"
 
+func TestRuntimeSettings_RequestExtra_includesUserID(t *testing.T) {
+	s := &RuntimeSettings{AgentID: "agent-abc", Provider: "openai", Model: "gpt-4"}
+	extra := s.RequestExtra()
+	if extra == nil || extra["user_id"] != "agent-abc" {
+		t.Fatalf("extra = %v", extra)
+	}
+}
+
+func TestRuntimeSettings_RequestExtra_userIDWithDeepSeekThinking(t *testing.T) {
+	s := &RuntimeSettings{AgentID: "agent-xyz", Provider: "deepseek", Thinking: "enabled", ReasoningEffort: "high"}
+	extra := s.RequestExtra()
+	if extra["user_id"] != "agent-xyz" {
+		t.Fatalf("user_id = %v", extra["user_id"])
+	}
+	if extra["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %v", extra["reasoning_effort"])
+	}
+}
+
 func TestBuildRequestExtra_deepseek(t *testing.T) {
 	extra := BuildRequestExtra("deepseek", "enabled", "max")
 	if extra["reasoning_effort"] != "max" {

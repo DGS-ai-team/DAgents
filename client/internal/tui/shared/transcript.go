@@ -268,6 +268,21 @@ func (t *Transcript) finishPartialLocked(role, suffix string) {
 	t.appendLineLocked(line)
 }
 
+// ReplaceToolCallLines 替换指定 tool 块的 pending/代码预览行（用于流式 partial tool_call）。
+func (t *Transcript) ReplaceToolCallLines(blockID string, lines []string) {
+	blockID = strings.TrimSpace(blockID)
+	if blockID == "" {
+		for _, line := range lines {
+			t.Add(line)
+		}
+		return
+	}
+	t.RemoveToolPendingLines(blockID)
+	for _, line := range lines {
+		t.Add(line)
+	}
+}
+
 // RemoveToolPendingLines 移除指定 tool 块的 pending 占位行与 call 代码预览行。
 func (t *Transcript) RemoveToolPendingLines(blockID string) {
 	blockID = strings.TrimSpace(blockID)

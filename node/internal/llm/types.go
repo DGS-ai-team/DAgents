@@ -51,6 +51,7 @@ type ChatResult struct {
 type StreamHandler struct {
 	OnDelta          func(delta string)
 	OnReasoningDelta func(delta string)
+	OnToolCallDelta  func(toolCalls []ToolCall) // 流式 tool_calls 增量快照（可能不完整）
 	OnUsage          func(usage Usage)
 }
 

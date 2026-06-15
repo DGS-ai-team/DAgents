@@ -385,6 +385,7 @@ func (o *Orchestrator) runOneStep(
 	toolDefs := o.ToolDefinitions()
 	systemPrompt := o.buildSystemPrompt(sessionID)
 	setState(StateModelStreaming)
+	publishedToolPartial := make(map[int]string)
 	result, err := o.llm.StreamChat(ctx, llm.ChatRequest{
 		SystemPrompt: systemPrompt,
 		Messages:     *history,
@@ -401,6 +402,19 @@ func (o *Orchestrator) runOneStep(
 				"content":      delta,
 				"display_type": "reasoning",
 			})
+		},
+		OnToolCallDelta: func(calls []llm.ToolCall) {
+			for i, tc := range calls {
+				if strings.TrimSpace(tc.Function.Name) == "" {
+					continue
+				}
+				fp := tc.ID + "\x1e" + tc.Function.Name + "\x1e" + tc.Function.Arguments
+				if publishedToolPartial[i] == fp {
+					continue
+				}
+				publishedToolPartial[i] = fp
+				o.publishToolCallPartial(sessionID, tc, i)
+			}
 		},
 		OnUsage: func(u llm.Usage) {
 			o.accumulateAndPublishUsage(sessionID, toolLoopCount, u)

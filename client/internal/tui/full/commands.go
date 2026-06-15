@@ -249,6 +249,7 @@ func (m *model) switchSession(requested string) error {
 	m.children.reset()
 	m.toolBlocks.Reset()
 	m.toolPending.Reset()
+	m.clearPartialToolBlocks()
 	m.statusMgr.Reset()
 	m.messagesTotalTokens = -1
 	m.resetUsageStrip()
