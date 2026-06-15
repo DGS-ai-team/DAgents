@@ -12,5 +12,4 @@
 | [agent-hooks.md](./agent-hooks.md) | **Agent Hook 扩展点**（设计稿）：turn 全链路阶段锚点、`HookRegistry`、配置与落地顺序 |
 | [major-changes.md](./major-changes.md) | **重大设计变更与优化实录**（可读摘要 + 条目模板） |
 | [context-compression-cache-analysis.md](./context-compression-cache-analysis.md) | 压缩 × Prompt Cache 完整分析（M1–M3） |
-| [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) | **工具链上下文成本优化总览**（WS1–WS5 路线图） |
-| [background-job-long-poll-analysis.md](./background-job-long-poll-analysis.md) | WS1：后台 job `wait_seconds` 长轮询 |
+| [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) | **工具链上下文成本优化**（WS1–WS5；含 bash job 长轮询 §5） |

@@ -103,7 +103,7 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 
 | ID | 内容 | 分析 | 状态 |
 |----|------|------|------|
-| **WS1** | 后台 job `wait_seconds` 长轮询（bash 组先行） | [background-job-long-poll-analysis.md](./background-job-long-poll-analysis.md) | 设计完成 |
+| **WS1** | 后台 job `wait_seconds` 长轮询（bash 组先行） | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) §5 | 设计完成 |
 | **WS2** | status 工具统一 wait（子 Agent 等） | 合入总览 §4 | 未开始 |
 | **WS3** | tool 结果 budget / package | 合入总览 §3.2 | 未开始 |
 | **WS4** | schema 前缀稳定（enrich 瘦身） | 合入总览 §3.3 | 未开始 |
@@ -118,8 +118,7 @@ Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM �
 
 ### 延伸阅读
 
-- **[tool-context-cost-analysis.md](./tool-context-cost-analysis.md)**（总览）
-- [background-job-long-poll-analysis.md](./background-job-long-poll-analysis.md)（WS1 完整分析）
+- **[tool-context-cost-analysis.md](./tool-context-cost-analysis.md)**（完整分析，含 WS1 §5）
 - [context-compression-cache-analysis.md](./context-compression-cache-analysis.md)（正交）
 - [built-in-tools.md](../built-in-tools.md) §0
 
