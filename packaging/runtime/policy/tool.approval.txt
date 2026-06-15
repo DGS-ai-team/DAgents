@@ -1,17 +1,15 @@
 # 工具审批策略：tool_name=mode
-# mode: always（必须审批） / never（免审批） / rule（走 shell 子策略，bash_run 专用）
-# 未列出的工具默认为 rule（当前实现：除 bash_run 外均需要审批）。
+# mode: always（每次必须审批） / never（完全免审批） / rule（走子策略或 fallback；rule+auto 时启用 WS6 重复调用检测）
+# 未列出的工具默认为 rule。
+#
+# 「上下文治理」组（tool-context-cost 专题，见 docs/design/tool-context-cost-analysis.md）：
+# - 只读类 rule 工具首 call 走 fallback auto，60s 内同参重复 → 标准审批（WS6）
+# - 写盘/跨 Agent 类 rule 工具仍走 fallback require_approval（WS3 落盘摘要仍生效）
 
-# --- 免审批：只读或低风险 ---
-read_file=never
-glob_files=never
-grep_file=never
-grep_files=never
-search_file=never
-host_platform=never
+# --- 免审批：低风险且无需重复调用拦截 ---
 ask_user_information=never
-agent_discover=never
 load_skills=never
+search_file=never
 
 # --- 触发器 ---
 trigger_list=never
@@ -20,10 +18,23 @@ trigger_create=always
 trigger_update=always
 trigger_delete=always
 
-# --- 必须审批：写盘、改会话、跨 Agent、执行 shell ---
-write_file=always
-search_replace=always
+# --- 上下文治理：只读 + status 轮询（WS3 spill + WS6 duplicate guard）---
 bash_run=rule
+read_file=rule
+glob_files=rule
+grep_file=rule
+grep_files=rule
+agent_discover=rule
+background_job_status=rule
+
+# --- 上下文治理：写盘/跨 Agent（WS3 spill；rule 时信任链可免重复审批）---
+write_file=rule
+search_replace=rule
+agent_invoke=rule
+
+# --- 必须审批：写盘强制全审、会话协调、任务取消 ---
+# write_file=always 可显式关闭信任链绕过
 agent_send_message=always
 agent_broadcast=always
 agent_peer_approve_tools=always
+background_job_cancel=always

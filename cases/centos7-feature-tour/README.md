@@ -133,7 +133,7 @@ go run ./client/cmd/dagents-client \
 | `/usr/local/bin/dagents-node` | **CGO_ENABLED=0** 静态二进制 |
 | `/workspace/.runtime/` | **`fs_root`**（volume 挂载到宿主机 `./workspace/`） |
 | `/workspace/.runtime/skills/` | Skill 目录（首次从种子复制，含 **`write-skill`**） |
-| `/workspace/.runtime/policy/` | 工具审批策略（如 **`write_file=always`** → HITL） |
+| `/workspace/.runtime/policy/` | 工具审批策略（如 **`write_file=rule`** + 信任链；**`write_file=always`** 强制每次 HITL） |
 | `/workspace/.runtime/demo/hello.txt` | 演示只读文件（entrypoint 首次创建） |
 | `/workspace/.runtime/data/` | Session SQLite 等持久化数据 |
 | `/opt/dagents/seed/skills/`、`/opt/dagents/seed/policy/` | 内置种子 |

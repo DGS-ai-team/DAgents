@@ -62,14 +62,40 @@ func (c ToolResultConfig) toToolresultConfig() toolresult.Config {
 
 // RuntimeConfig 为 Orchestrator 注入的 Hook 运行时配置。
 type RuntimeConfig struct {
-	Duplicate  DuplicateConfig
-	ToolResult ToolResultConfig
+	Duplicate      DuplicateConfig
+	ToolResult     ToolResultConfig
+	AgentOwnedFile AgentOwnedFileConfig
 }
 
-// RuntimeConfigOrDefault 合并 duplicate 与 tool result 默认值。
+// AgentOwnedFileConfig 控制 Agent 自有文件写操作信任链。
+type AgentOwnedFileConfig struct {
+	Enabled    bool
+	PathStater PathStater
+}
+
+// DefaultAgentOwnedFileConfig 返回默认配置（启用）。
+func DefaultAgentOwnedFileConfig() AgentOwnedFileConfig {
+	return AgentOwnedFileConfig{Enabled: true}
+}
+
+// AgentOwnedFileConfigOrDefault 合并默认值。
+func AgentOwnedFileConfigOrDefault(c AgentOwnedFileConfig) AgentOwnedFileConfig {
+	if c == (AgentOwnedFileConfig{}) {
+		return DefaultAgentOwnedFileConfig()
+	}
+	out := DefaultAgentOwnedFileConfig()
+	out.Enabled = c.Enabled
+	if c.PathStater != nil {
+		out.PathStater = c.PathStater
+	}
+	return out
+}
+
+// RuntimeConfigOrDefault 合并 duplicate、tool result 与 agent owned file 默认值。
 func RuntimeConfigOrDefault(c RuntimeConfig) RuntimeConfig {
 	out := c
 	out.Duplicate = DuplicateConfigOrDefault(c.Duplicate)
 	out.ToolResult = ToolResultConfigOrDefault(c.ToolResult)
+	out.AgentOwnedFile = AgentOwnedFileConfigOrDefault(c.AgentOwnedFile)
 	return out
 }

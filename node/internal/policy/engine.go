@@ -103,7 +103,20 @@ func (e *Engine) decideToolRuleFallback(toolName string, toolArgs map[string]any
 	if name == "background_job_status" {
 		return ActionAuto
 	}
+	// tool-context-cost WS3/WS6：只读类 rule 工具首 call auto，短窗口重复由 DuplicateToolCallHook 拦截。
+	if isRuleAutoReadTool(name) {
+		return ActionAuto
+	}
 	return ActionRequireApproval
+}
+
+func isRuleAutoReadTool(toolName string) bool {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "read_file", "glob_files", "grep_file", "grep_files", "agent_discover":
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *Engine) toolMode(toolName string) ApprovalMode {
@@ -240,16 +253,18 @@ func (e *Engine) ShellConfigured(shellType ShellType, command string) bool {
 func defaultEngine() *Engine {
 	return &Engine{
 		toolModes: map[string]ApprovalMode{
-			"read_file":             ModeNever,
-			"glob_files":            ModeNever,
-			"grep_file":             ModeNever,
-			"grep_files":            ModeNever,
+			"read_file":             ModeRule,
+			"glob_files":            ModeRule,
+			"grep_file":             ModeRule,
+			"grep_files":            ModeRule,
 			"search_file":           ModeNever,
 			"ask_user_information":  ModeNever,
-			"write_file":            ModeAlways,
-			"search_replace":        ModeAlways,
+			"agent_discover":        ModeRule,
+			"agent_invoke":          ModeRule,
+			"write_file":            ModeRule,
+			"search_replace":        ModeRule,
 			"bash_run":              ModeRule,
-			"background_job_status": ModeNever,
+			"background_job_status": ModeRule,
 			"background_job_cancel": ModeAlways,
 			"trigger_list":          ModeNever,
 			"trigger_get":           ModeNever,

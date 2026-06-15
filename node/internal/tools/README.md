@@ -27,7 +27,8 @@ tools/
 │   fs_read.go / fs_write.go / fs_search_replace.go
 │   fs_glob_tool.go / fs_glob_internal.go
 │   fs_grep_file.go / fs_grep_files.go / fs_grep_shared.go
-│   fs_helpers.go / fs_encoding.go
+│   fs_helpers.go / fs_encoding.go / fs_path_encoding.go
+│   fs_stat.go                # StatRelPath（写盘信任链 Hook）
 │   fs_*_test.go
 ├── Shell bash_*
 │   bash_run_tool.go          # bashRunToolDef
@@ -68,6 +69,7 @@ tools/
 
 - **同步（默认）**：orchestrator 调用 `Execute`；`read_file` / `write_file` / `trigger_create` 等始终同步完成。
 - **`bash_run` 超时降级**：同步等待 `timeout_seconds`（默认 30）；超时后登记后台 job、返回 `RUNNING job_id=...`；完成后 **`async_tool_result` 自动回灌**。
+- **写盘信任链**：`write_file` / `search_replace` 为 `rule` 时，同 session Agent 自建文件在 mtime 未变前提下后续写操作可免 HITL（`node/internal/hooks`，见 [ux-agent-owned-file-approval.md](../../docs/design/ux-agent-owned-file-approval.md)）。
 - **内部 `StartBackground`**：不在 tool schema 暴露；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段。
 
 触发器 condition 语义见 [`../triggers/README.md`](../triggers/README.md).

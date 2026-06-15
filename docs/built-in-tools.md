@@ -64,6 +64,20 @@
 
 A2A 组在配置中可启用，但实际 handler 仍依赖 Node 启动时 **`SetManageRuntime`**（**`manage.enabled: true`**）。`child_agents` 组建议与 **`child_agents.enabled`** 一并考虑。
 
+### 写盘工具审批与信任链
+
+`write_file`、`search_replace` 是否进入 HITL 由 **`.runtime/policy/tool.approval.txt`** 档位决定；编排经 **`node/internal/hooks/`** 的 `tool.before_each` 链收敛（非 Orchestrator 内硬编码）。
+
+| 策略档位 | 行为 |
+|----------|------|
+| **`rule`**（默认种子：`write_file=rule`、`search_replace=rule`） | fallback → 须审批；**信任链**命中时降为 auto（见下） |
+| **`always`** | 每次须审批；**信任链不生效** |
+| **`never`** | 免审批（不推荐用于写盘） |
+
+**信任链**（[ux-agent-owned-file-approval.md](./design/ux-agent-owned-file-approval.md)）：同 session 内，经用户审批 **`write_file` 新建**的文件标记为 Agent 自有；若磁盘 **mtime 未变**，后续 `write_file` / `search_replace` **免重复审批**。覆盖仓库既有文件、外界改动 mtime、或新 session 仍须审批。
+
+Hook 顺序：`PolicyToolHook` → `AgentOwnedFileHook` → `DuplicateToolCallHook`（写工具不参与 duplicate 检测）。
+
 ---
 
 ## Python Agent API（归档）— 附与工具表
@@ -207,11 +221,7 @@ A2A 组在配置中可启用，但实际 handler 仍依赖 Node 启动时 **`Set
 
 ## 3. 仓库内存在但未纳入 `get_tools()` 的实现
 
-| 名称 | 位置 | 说明 |
-|------|------|------|
-| **`host_platform`** | **`app/harness/tools/host_platform.py`** | 已用 **`@tool("host_platform")`** 声明，**未**出现在 **`get_tools()`** 列表中，故 **当前模型不可见**。可用于后续与 **`bash_run`** 联动或 CLI。 |
-
-新增内置工具时，除实现函数外，须在 **`get_tools()`** 中 **显式加入** 才会进入 **`build_openai_toolkit()`**（注释写明「按稳定性逐步放开」）。
+当前 **无**。新增内置工具时，除实现函数外，须在 **`get_tools()`** 中 **显式加入** 才会进入 **`build_openai_toolkit()`**（注释写明「按稳定性逐步放开」）。
 
 ---
 

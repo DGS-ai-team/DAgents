@@ -8,25 +8,31 @@ import (
 
 // Registry 按 priority 顺序执行 tool.before_each / tool.after_each Hook 链。
 type Registry struct {
-	policyHook    *PolicyToolHook
-	duplicateHook *DuplicateToolCallHook
-	resultHook    *ToolResultPackageHook
-	beforeEach    []ToolBeforeEachHook
-	afterEach     []ToolAfterEachHook
+	policyHook      *PolicyToolHook
+	agentOwnedHook  *AgentOwnedFileHook
+	agentOwnedAfter *AgentOwnedFileAfterHook
+	duplicateHook   *DuplicateToolCallHook
+	resultHook      *ToolResultPackageHook
+	beforeEach      []ToolBeforeEachHook
+	afterEach       []ToolAfterEachHook
 }
 
-// NewRegistry 构造带内置 Policy + Duplicate + ToolResult Hook 的 Registry。
+// NewRegistry 构造带内置 Policy + AgentOwned + Duplicate + ToolResult Hook 的 Registry。
 func NewRegistry(policyEngine *policy.Engine, runtimeCfg RuntimeConfig) *Registry {
 	runtimeCfg = RuntimeConfigOrDefault(runtimeCfg)
 	ph := NewPolicyToolHook(policyEngine)
+	ah := NewAgentOwnedFileHook(runtimeCfg.AgentOwnedFile)
+	aah := NewAgentOwnedFileAfterHook(runtimeCfg.AgentOwnedFile)
 	dh := NewDuplicateToolCallHook(runtimeCfg.Duplicate)
 	rh := NewToolResultPackageHook(runtimeCfg.ToolResult)
 	return &Registry{
-		policyHook:    ph,
-		duplicateHook: dh,
-		resultHook:    rh,
-		beforeEach:    []ToolBeforeEachHook{ph, dh},
-		afterEach:     []ToolAfterEachHook{rh},
+		policyHook:      ph,
+		agentOwnedHook:  ah,
+		agentOwnedAfter: aah,
+		duplicateHook:   dh,
+		resultHook:      rh,
+		beforeEach:      []ToolBeforeEachHook{ph, ah, dh},
+		afterEach:       []ToolAfterEachHook{rh, aah},
 	}
 }
 
@@ -44,6 +50,32 @@ func (r *Registry) SetToolExecutionLog(log *ToolExecutionLog) {
 		return
 	}
 	r.duplicateHook.SetLog(log)
+}
+
+// SetAgentFileTrust 绑定 session 级 Agent 文件信任表。
+func (r *Registry) SetAgentFileTrust(trust *AgentFileTrust) {
+	if r == nil {
+		return
+	}
+	if r.agentOwnedHook != nil {
+		r.agentOwnedHook.SetTrust(trust)
+	}
+	if r.agentOwnedAfter != nil {
+		r.agentOwnedAfter.SetTrust(trust)
+	}
+}
+
+// SetPathStater 注入 FS Stat（Agent 文件信任链使用）。
+func (r *Registry) SetPathStater(stater PathStater) {
+	if r == nil {
+		return
+	}
+	if r.agentOwnedHook != nil {
+		r.agentOwnedHook.SetPathStater(stater)
+	}
+	if r.agentOwnedAfter != nil {
+		r.agentOwnedAfter.SetPathStater(stater)
+	}
 }
 
 // RunToolBeforeEach 执行 tool.before_each 链并返回合并决策。

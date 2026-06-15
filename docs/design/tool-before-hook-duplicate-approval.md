@@ -82,12 +82,13 @@ Resume（`hitl.ParseApprovalResume`）：`type=approve` | `reject` | `selection`
 
 ```text
 read_file=never          # 重复 read 不弹 duplicate
-write_file=always        # 每次写盘走标准审批
+write_file=rule          # 写盘 fallback 审批；信任链可对 agentOwned 文件降为 auto
+search_replace=rule      # 同上
 bash_run=rule            # shell 子策略 + 重复同命令可弹 duplicate
 # 未列出 → 默认 rule（走 decideToolRuleFallback）
 ```
 
-`background_job_status` 未显式配置时为 **`rule`**，fallback 结论为 **auto** → **可** 命中 duplicate（若改为 `never` 则不再拦截）。
+`write_file=always` 可显式关闭信任链（每次强制审批）。`background_job_status` 未显式配置时为 **`rule`**，fallback 结论为 **auto** → **可** 命中 duplicate（若改为 `never` 则不再拦截）。**`write_file` / `search_replace` 不参与 duplicate 检测**（即使信任链降为 auto）。
 
 ### 2.4 与 Hook 设计稿的差距
 
@@ -215,6 +216,7 @@ hooks:
 | `background_job_status=never` 后重复 status | ❌ | 用户显式放弃 duplicate guard |
 | 同命令 `bash_run=rule`，shell 子策略 auto，30s 内重复 | ✅ | rule 档典型场景 |
 | 同路径 `read_file=never` 在 30s 内重复 | ❌ | never 不进入 duplicate 链 |
+| `write_file=rule` 信任链命中后连续编辑 | ❌ | 降为 auto，不弹审批；不参与 duplicate |
 | `write_file=always` 连续两次相同参数 | ❌ | 走标准审批，不叠加 duplicate UI |
 | 同工具但 `call_purpose` 不同 | ✅（若 otherwise 满足 rule+auto+重复） | purpose 不参与 fingerprint |
 | `rule` 但子策略 `require_approval`（如 `bash_run` + `rm`） | ❌ | 走标准 `execute_tool` |

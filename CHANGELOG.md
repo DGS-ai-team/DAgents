@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **Agent 自有文件写操作审批信任链**：`write_file` / `search_replace` 为 **`rule`** 时，同 session 内 Agent 创建且未被外界改动的文件，后续写操作经 `tool.before_each` 降为 **auto**（免 HITL）；`write_file=always` 可显式关闭。详见 [ux-agent-owned-file-approval.md](docs/design/ux-agent-owned-file-approval.md)。
+
+### 变更
+
+- **默认策略**：`packaging/runtime/policy/tool.approval.txt` 中 `write_file` 由 `always` 改为 **`rule`**（与 `search_replace` 一致，启用信任链）。
+
 ## [0.3.7] - 2026-06-15
 
 **0.x 预览**：**skills 上下文成本**估算修正；双 TUI **思考内容**展示优化；Manage **离线安装**说明补全。

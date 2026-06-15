@@ -49,6 +49,9 @@ func (h *DuplicateToolCallHook) RunToolBeforeEach(_ context.Context, in ToolBefo
 	if out.ToolMode != policy.ModeRule || out.Action != policy.ActionAuto {
 		return nil
 	}
+	if isAgentOwnedTrustTool(in.ToolName) {
+		return nil
+	}
 	if h.log == nil {
 		return nil
 	}

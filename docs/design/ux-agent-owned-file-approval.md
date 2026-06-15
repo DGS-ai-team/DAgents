@@ -1,6 +1,7 @@
 # UX 专题：Agent 自有文件写操作审批信任链
 
-**状态（2026-06）**：**设计稿** — 未实现。  
+**状态（2026-06）**：**已落地**（Go Node `tool.before_each` / `tool.after_each`）。  
+**前置条件**：`write_file` / `search_replace` 策略须为 **`rule`**；`always` 为强制全审，信任链不生效。
 **专题边界**：降低 **HITL 审批摩擦**，**不**减少 tool 结果写入 history 的体积（后者见 [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) WS3）。
 
 ---
@@ -9,7 +10,7 @@
 
 | 现状 | 痛点 |
 |------|------|
-| `write_file` / `search_replace` 策略为 `always`（`packaging/runtime/policy/tool.approval.txt`） | 模型对**同一文件连续编辑**时，每轮都要用户点确认 |
+| `write_file` / `search_replace` 默认 **`rule`**（`packaging/runtime/policy/tool.approval.txt`）；`always` 可强制全审 | 模型对**同一文件连续编辑**时，每轮都要用户点确认（未命中信任链时） |
 | 首次 `write_file` 创建新文件 | 审批合理（用户需知晓新文件落盘） |
 | 后续在同文件上 `write_file`（覆盖）或 `search_replace` | 若文件**未被外界改动**，重复审批信息密度低 |
 
@@ -63,15 +64,17 @@
 | `tool.after_each` 或执行成功回调 | 写成功后更新 `Owned` / `lastAgentWriteMtime` |
 | `Registry.StatRelPath`（可选） | 供 hook 在 `FSRoot` 沙箱内 `Stat` |
 
-Hook 链顺序示意：
+Hook 链顺序：
 
 ```text
-PolicyToolHook（write_file=always → require_approval）
-  → AgentOwnedFileHook（信任命中 → auto）
-  → DuplicateToolCallHook（仅 rule+auto，不作用于 write_file）
+PolicyToolHook（write_file/search_replace=rule → fallback require_approval）
+  → AgentOwnedFileHook（仅 ModeRule；信任命中 → auto）
+  → DuplicateToolCallHook（仅 rule+auto；跳过 write_file/search_replace）
+  → … 执行 …
+  → AgentOwnedFileAfterHook（写成功 → 更新信任表）
 ```
 
-策略文件**无需**把 `write_file` 改为 `rule`；在 `ModeAlways` 路径上由 Hook **降级**即可。
+策略文件默认 `write_file=rule`；若需禁止信任绕过，改回 `write_file=always`。
 
 ### 2.4 边界与风险
 
@@ -117,17 +120,19 @@ hooks:
 | 文档 | 关系 |
 |------|------|
 | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) | 正交：管 history token，不管 HITL 次数 |
-| [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | 同 `tool.before_each` 链；duplicate 仅 `rule`+auto |
+| [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | 同 `tool.before_each` 链；duplicate 仅 `rule`+auto，且跳过写工具 |
 | [future/security-and-policy.md](../future/security-and-policy.md) | 写盘策略总原则 |
-| `packaging/runtime/policy/tool.approval.txt` | 现网 `write_file=always` |
 
 ---
 
-## 6. 代码索引（规划）
+## 6. 代码索引
 
 | 路径 | 说明 |
 |------|------|
-| `node/internal/hooks/builtin_policy.go` | 现网 `always` 决策 |
+| `node/internal/hooks/agent_file_trust.go` | session 级信任表 |
+| `node/internal/hooks/builtin_agent_owned_file.go` | `tool.before_each` 信任降级 |
+| `node/internal/hooks/builtin_agent_owned_file_after.go` | `tool.after_each` 写成功后更新 |
 | `node/internal/hooks/registry.go` | Hook 链注册 |
-| `node/internal/turn/tool_router.go` | `decideToolBeforeEach` / `recordToolExecutionSuccess` |
-| `node/internal/tools/fs_path_encoding.go` | `cachePathKey`（可复用） |
+| `node/internal/tools/fs_stat.go` | `StatRelPath` 沙箱内 Stat |
+| `node/internal/turn/orchestrator.go` | 绑定信任表与 PathStater |
+| `packaging/runtime/policy/tool.approval.txt` | `write_file=rule` |

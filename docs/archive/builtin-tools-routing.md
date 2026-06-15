@@ -47,7 +47,6 @@ Body 工具执行前提：
 | `async_tool_status` | `backend` | Backend | 否 | 保留 | 查 AsyncToolResultStore |
 | `async_tool_cancel` | `backend` | Backend | 否 | 保留 | |
 | `create_temporary_agent` | `backend` | Control Plane | 否 | v2 新增 | 见 temporary-child-agents |
-| `host_platform` | `body` 或 `backend` | 视部署 | 否 | 未注册 | 代码存在但未进 `get_tools()` |
 
 ## 3. v2 Canonical 工具名（Proxy 侧）
 
@@ -76,7 +75,6 @@ Tool Manifest 对外暴露给 LLM 的名称在迁移期可 **继续用 v1 名**�
 
 - Shell：`bash_run` → `shell_exec`
 - 文件：`read_file`、`write_file`、`search_file`、`search_replace`
-- 环境探测：`host_platform`（若启用）
 
 ### 4.3 混合 Agent 典型 Manifest
 

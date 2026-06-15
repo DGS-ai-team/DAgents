@@ -144,10 +144,12 @@ func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw st
 		return raw, raw, ""
 	}
 	out := o.toolHooks.RunToolAfterEach(nil, hooks.ToolAfterEachInput{
-		SessionID:  sessionID,
-		ToolCallID: tc.ID,
-		ToolName:   tc.Function.Name,
-		RawResult:  raw,
+		SessionID:    sessionID,
+		ToolCallID:   tc.ID,
+		ToolName:     tc.Function.Name,
+		ToolArgs:     parseJSONArgs(tc.Function.Arguments),
+		RawArguments: tc.Function.Arguments,
+		RawResult:    raw,
 	})
 	return out.ForClient, out.ForHistory, out.SpillPath
 }

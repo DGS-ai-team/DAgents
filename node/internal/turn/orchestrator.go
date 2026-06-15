@@ -314,12 +314,17 @@ func NewOrchestrator(
 		policyEngine, _ = policy.LoadFile("")
 	}
 	toolExecLog := &hooks.ToolExecutionLog{}
+	agentFileTrust := hooks.NewAgentFileTrust()
 	hookCfg = hooks.RuntimeConfigOrDefault(hookCfg)
 	if strings.TrimSpace(hookCfg.ToolResult.FSRoot) == "" {
 		hookCfg.ToolResult.FSRoot = fsRoot
 	}
 	toolHooks := hooks.NewRegistry(policyEngine, hookCfg)
 	toolHooks.SetToolExecutionLog(toolExecLog)
+	toolHooks.SetAgentFileTrust(agentFileTrust)
+	if reg, ok := toolExec.(*tools.Registry); ok {
+		toolHooks.SetPathStater(reg)
+	}
 	if maxToolLoops <= 0 {
 		maxToolLoops = DefaultMaxToolLoops()
 	}
