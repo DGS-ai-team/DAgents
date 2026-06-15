@@ -77,7 +77,7 @@ runtime.runTurnStep（步前）
 
 - 完整分析：[context-compression-cache-analysis.md](./context-compression-cache-analysis.md)
 - 模块说明：[node/internal/compression/README.md](../../node/internal/compression/README.md)
-- 用户向专题（历史 Python 栈对照）：[context-compression-and-state.md](../context-compression-and-state.md)
+- 用户向专题（历史 Python 栈对照）：[archive/python-agent-runtime/context-compression-and-state.md](../archive/python-agent-runtime/context-compression-and-state.md)
 
 ---
 

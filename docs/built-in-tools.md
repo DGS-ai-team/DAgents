@@ -179,7 +179,7 @@ A2A 组在配置中可启用，但实际 handler 仍依赖 Node 启动时 **`Set
 | **`trigger_create`** | 同步 | **`triggers.py`** | 创建触发器资源，用于沉淀定时、事件、指标等自主唤起规则；默认需要审批。 |
 | **`trigger_update`** | 同步 | **`triggers.py`** | 更新触发器条件、模板、风险等级或启用状态；默认需要审批。 |
 | **`trigger_delete`** | 同步 | **`triggers.py`** | 删除触发器资源；默认需要审批。 |
-| **`trigger_fire`** | 异步 | **`triggers.py`** | 手动触发触发器并投递到 **`AgentService`** 队列；不会绕过工具审批；默认需要审批。 |
+| ~~**`trigger_fire`**~~ | — | — | **已移除**（Go Node 靠 schedule / HTTP API 触发；见 [triggers-design.md](./triggers-design.md)）。 |
 | **`agent_discover`** | 同步 | **`app/harness/tools/agent_peer.py`** | 查询 **Register Center** 可见分组下的 Agent 列表，并尝试拉取 **`.well-known/agent-card.json`** 摘要。 |
 | **`agent_send_message`** | **异步** | **`agent_peer.py`** | 向指定 **`target_agent_id`** 投递 **`AgentPeerEnvelope`**（**`direct`/`relay`**），并汇总对端 SSE；依赖 **`REGISTRY_URL`**、**`DISCOVERY_GROUPS`** 等。 |
 | **`agent_broadcast`** | **异步** | **`agent_peer.py`** | 调用 **`POST /v1/broadcast`** 后并发拉取各目标 SSE。 |

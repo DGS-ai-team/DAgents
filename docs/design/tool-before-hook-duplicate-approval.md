@@ -1,9 +1,9 @@
 # Tool Before Hook 与重复调用审批方案
 
-> 状态：**设计稿**（待落地）  
-> 分支建议：`feat/tool-context-cost-optimization` 或独立 `feat/tool-before-hook`  
-> 前置：[agent-hooks.md](./agent-hooks.md)（Hook 框架总纲）· [tool-context-cost-analysis.md](./tool-context-cost-analysis.md)（WS1 轮询成本）  
-> 配置（拟）：`hooks.duplicate_tool_call_window_seconds`（默认 **60**）
+> 状态：**已落地**（WS6，`feat/tool-context-cost-optimization`）  
+> 配置：`hooks.duplicate_tool_call`（`enabled`、`window_seconds`，默认 60）  
+> 前置：[agent-hooks.md](./agent-hooks.md) · [tool-context-cost-analysis.md](./tool-context-cost-analysis.md)  
+> 实录：[major-changes.md](./major-changes.md#3-tool-before-hook-与重复调用审批已落地-ws6)
 
 ---
 

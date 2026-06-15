@@ -1,8 +1,9 @@
 # 触发器（条件唤起 Agent）设计方案
 
-本文在 **DAgents 现有进程内队列 + `AgentService.submit_message`** 之上，描述 **触发器（Trigger）** 的 **目标边界、按模块的职责划分、调度与基类协议、动态注册（Agent 友好）以及 `session_id` / `connection_id` / 消息回流** 的约定。实现以本文件为设计基线；与代码冲突时以 **Git / CHANGELOG** 为准。
+> **现网（Go Node）**：`node/internal/triggers/`（调度器 + **`trigger_list` … `trigger_delete`** 工具；**无 `trigger_fire`**，触发靠 schedule / HTTP API）。模块说明见该目录 `README.md`。  
+> **本文档**：首版基于 **已移除的 Python `AgentService`**，部分章节仅供历史对照；与 Go 实现冲突时以代码与 **CHANGELOG** 为准。
 
-**相关索引**：[agent-input-output.md](./agent-input-output.md)（入队与 SSE）、[architecture-and-flows.md](./architecture-and-flows.md)（分层）、[roadmap.md](./roadmap.md) §3.4「触发器」。
+**相关索引**：[agent-node-api.md](./architecture/agent-node-api.md)、[built-in-tools.md](./built-in-tools.md) §0、[roadmap.md](./roadmap.md)。
 
 ---
 

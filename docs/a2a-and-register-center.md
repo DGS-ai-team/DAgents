@@ -1,43 +1,53 @@
 # A2A（Agent 间协作）与 Register Center
 
-> **现网状态（v0.2.17+）**  
-> - **Register Center**（**`register_center/`**）仍为独立 Python 服务：登记、**`/v1/broadcast`**、**`/v1/relay`**、可选 JSON 持久化。  
-> - **Go Agent Node 不集成 RC**：不自登记、不注册 **`agent_peer`** 工具。  
-> - **Python FastAPI Agent API 已移除**；下文 §3–§6 描述的 **`agent_*` 工具与自登记** 为 **历史行为**，源码见 [archive/python-agent-runtime/](./archive/python-agent-runtime/)。  
-> - **端到端 A2A 闭环** 计划在 **Manage** 阶段恢复，见 [future/a2a-via-manage.md](./future/a2a-via-manage.md)。  
-> - **Phase 1 企业目录**（扩展登记模型、admin 视图、Directory UI）见 [design/agent-directory-phase1.md](./design/agent-directory-phase1.md)（草案，未实现）。
-
-本文说明 **Register Center 控制面**（现行）与 **A2A 工具链**（已归档）的设计与 HTTP 契约。RC 实现入口：**`register_center/rc_app.py`**；历史 A2A 工具：**`app/harness/tools/agent_peer.py`**（归档）。
+> **现网状态（v0.3.x）**  
+> - **`register_center/` 已从仓库移除**；控制面由 **[Manage](../manage/README.md)** 承担（Registry、A2A Task、Console）。  
+> - **Go Agent Node**：`manage.enabled` 时提供 **`agent_invoke` / `agent_discover`**（见 [built-in-tools.md](./built-in-tools.md) §0）。  
+> - 下文描述的 **Register Center HTTP** 与 Python **`agent_*` 工具** 均为 **历史行为**，仅供对照。  
+> - 归档运行时：[archive/python-agent-runtime/](./archive/python-agent-runtime/)。  
+> - 远期 inbox 等：[future/a2a-via-manage.md](./future/a2a-via-manage.md)。
 
 ---
 
 ## 1. 组件分工（现行 vs 历史）
 
-### 1.1 现行（v0.2.x）
+### 1.1 现行（v0.3.x）
 
 ```text
-┌─────────────────────┐     可选独立启动
-│  Register Center    │     python run_register_center.py
-│  /v1/agents         │
-│  /v1/broadcast      │
-│  /v1/relay          │
+┌─────────────────────┐     python run_manage.py
+│  Manage             │     Registry / A2A Task / Console
+│  /v1/agents …       │
 └──────────┬──────────┘
-           │ HTTP（外部调用方或未来 Manage）
+           │ HTTP（manage.enabled）
            ▼
-    （无仓库内 Agent 自动登记端）
-
 ┌─────────────────────┐
-│  Go Agent Node      │  本地 turn loop；临时子 Agent（同进程）
-│  + Client           │  非 A2A peer 工具
+│  Go Agent Node      │  agent_invoke / agent_discover
+│  + Client           │  create_temporary_agent（同进程子 Agent）
 └─────────────────────┘
 ```
 
 | 组件 | 职责 |
 |------|------|
-| **Register Center** | 目录与中继 HTTP API；详见 §2 与本目录 **`register_center/README.md`**。 |
-| **Go Agent Node** | 本地助手运行时；**`create_temporary_agent`** 等为 **同进程子 Agent**，非跨实例 A2A。 |
+| **Manage** | 统一控制面：Agent 登记、A2A Task、Console；详见 [manage/README.md](../manage/README.md)、[design/manage-architecture.md](./design/manage-architecture.md)。 |
+| **Go Agent Node** | 本地 turn loop；**`manage.enabled`** 时经 Manage 做跨实例 A2A；**`create_temporary_agent`** 为同进程子 Agent。 |
 
-### 1.2 历史（0.1.x Python Agent API，已移除）
+### 1.2 历史 Register Center（已移除）
+
+> **`register_center/`** 与 **`run_register_center.py`** 已从仓库删除；HTTP 契约见下文 §2（仅供对照）。
+
+```text
+┌─────────────────────┐     python run_register_center.py（已移除）
+│  Register Center    │
+│  /v1/agents         │
+│  /v1/broadcast      │
+│  /v1/relay          │
+└──────────┬──────────┘
+           │ HTTP
+           ▼
+    （无现网 Agent 自动登记端）
+```
+
+### 1.3 历史（0.1.x Python Agent API，已移除）
 
 ```text
                     ┌─────────────────────────┐
@@ -69,12 +79,14 @@
 
 ---
 
-## 2. Register Center
+## 2. Register Center（历史，已移除）
 
-### 2.1 运行与源码位置
+> **本节整段为归档**：`register_center/` 目录与 `run_register_center.py` 已从仓库删除；能力由 **Manage** 承接。保留 HTTP 契约供迁移对照。
 
-- 启动：**`python run_register_center.py`**（默认 **`0.0.0.0:8010`**，可用 **`REGISTER_CENTER_HOST` / `REGISTER_CENTER_PORT`** 覆盖）。  
-- 源码目录：**`register_center/`**（详见该目录 **`README.md`**、**`REFERENCE.md`**）。
+### 2.1 运行与源码位置（历史）
+
+- 启动：**`python run_register_center.py`**（默认 **`0.0.0.0:8010`**）— **已移除**。  
+- 源码目录：**`register_center/`** — **已移除**；Manage 见 [manage/README.md](../manage/README.md)。
 
 ### 2.2 核心 HTTP 路由（与实现对齐）
 
@@ -101,7 +113,7 @@
 
 ## 3. A2A：配置项（历史 Agent 侧）
 
-> 以下环境变量服务于 **已移除的 Python Agent API** 与 **`agent_peer`** 工具；Register Center 服务自身仍使用 **`REGISTER_CENTER_*`** 等（见 **`register_center/README.md`**）。
+> 以下环境变量服务于 **已移除的 Python Agent API** 与 **`agent_peer`** 工具；Register Center 服务亦已移除。
 
 | 环境变量 / 配置字段 | 含义 |
 |---------------------|------|
