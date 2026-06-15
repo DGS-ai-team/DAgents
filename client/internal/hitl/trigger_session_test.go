@@ -29,7 +29,7 @@ func TestBuildTriggerSessionApprovalResume(t *testing.T) {
 func TestBuildTriggerSessionQuickResumeReject(t *testing.T) {
 	items := []ToolApprovalItem{{
 		CallID:       "c1",
-		Name:         "trigger_fire",
+		Name:         "trigger_create",
 		ApprovalMode: ApprovalModeTriggerSession,
 	}}
 	rv := BuildTriggerSessionQuickResume(map[string]any{}, items, false)

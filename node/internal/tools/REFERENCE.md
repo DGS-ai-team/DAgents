@@ -22,6 +22,6 @@
 | `ParseRunInBackground(arguments)` | 剥离 call_purpose / 历史 run_in_background |
 | `injectCallPurposeParam` | 注入 call_purpose（加入 required） |
 | `SetTriggerRuntime(store, sched, agentID)` | 注入触发器运行时 |
-| `execTriggerList` / `execTriggerGet` / `execTriggerCreate` / `execTriggerUpdate` / `execTriggerDelete` / `execTriggerFire` | 触发器工具 |
+| `execTriggerList` / `execTriggerGet` / `execTriggerCreate` / `execTriggerUpdate` / `execTriggerDelete` | 触发器工具 |
 | `IsBackgroundJobTool(name)` | 后台管理工具（强制同步） |
 | `fs_helpers.go` | `textSuffixes`、`isTextReadable`、`readAllLines`、`windowFromTotal`、`applyMaxTokensToBody`、`mergeLineRanges` 等 |

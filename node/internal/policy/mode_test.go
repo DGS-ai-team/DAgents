@@ -23,12 +23,12 @@ func TestModeDenyParsing(t *testing.T) {
 
 func TestDecideToolExplicitNeverOverridesFallback(t *testing.T) {
 	dir := t.TempDir()
-	writeTestPolicyFile(t, dir, "tool.approval.txt", "trigger_fire=never\n")
+	writeTestPolicyFile(t, dir, "tool.approval.txt", "trigger_update=never\n")
 	e, err := loadFromDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.Decide("trigger_fire") != ActionAuto {
+	if e.Decide("trigger_update") != ActionAuto {
 		t.Fatal("explicit never should override trigger fallback")
 	}
 }

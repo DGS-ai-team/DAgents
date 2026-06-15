@@ -14,6 +14,8 @@
 
 新增条目时复制文末 **条目模板**，保持「问题 → 思路 → 落地」顺序，并链接到可长期维护的设计文档（避免只在 PR 描述里留档）。
 
+**大型专题文**（如工具链成本、压缩 cache）另用四段结构：**背景与痛点 → 分析 → 优化思路 → 落地方案**（详见 [tool-context-cost-analysis.md](./tool-context-cost-analysis.md)）；细节实录写入本页，专题文保持可扫读。
+
 ---
 
 ## 1. 上下文压缩与 Prompt Cache 对齐（M2 + M3）
@@ -79,49 +81,49 @@ runtime.runTurnStep（步前）
 
 ---
 
-## 2. 工具链上下文成本优化（进行中）
+## 2. 工具链上下文成本优化（已落地）
 
 | | |
 |---|---|
 | **分支/时期** | `feat/tool-context-cost-optimization`（2026-06） |
-| **范围** | 全内置工具组（`node/internal/tools`、`turn` 工具结果写回、编排 dispatch） |
-| **配置** | `hooks.duplicate_tool_call`（WS6）；WS3+ 按工作流分项 |
+| **范围** | 全内置工具组（`node/internal/tools`、`turn` 工具结果写回） |
+| **配置** | `hooks.duplicate_tool_call`、`hooks.tool_result` |
 
 ### 背景与痛点
 
-Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM 往返次数**。长会话中除压缩 miss 外，常见浪费包括：
+长会话中单任务仍可能 **十数次 LLM 调用**；浪费来自 **status 轮询**、**tool 结果进 history 膨胀**、**重复 tool call**。与 Prompt Cache / 压缩 **正交**。
 
-- **轮询型 status**（`background_job_status`、`temporary_agent_status` 等瞬时 snapshot）
-- **tool 结果膨胀**（bash 输出、read/grep、A2A 全文进 history）
-- **tools schema 前缀漂移**（`load_skills` enrich 随 catalog 变化）
+### 优化思路
 
-与 Prompt Cache **正交**：cache 降低重复 prefix 单价，**不减少**轮询带来的 completion 与 message tail。
+1. async 回灌优于 poll；status 保持瞬时。  
+2. 重复调用走 Hook 审批。  
+3. 超长结果落盘摘要。  
+4. 任务级度量验收。  
+5. **skills schema（WS4）搁置**；**子 Agent status wait（WS2）不做**。
 
-**总览与分工作流路线图**：[tool-context-cost-analysis.md](./tool-context-cost-analysis.md)
+### 落地方案
 
-### 工作流（本分支）
+| WS | 要点 | 状态 |
+|----|------|------|
+| WS1 | bash 文案 + async 引导 | ✅ |
+| WS6 | `tool.before_each` 重复审批 | ✅ |
+| WS3 | bash/fs/a2a `tool.after_each` spill | ✅ |
+| WS5 | `tool_context_metrics` | ✅ |
+| WS2 / WS4 | status wait / skills enrich | ❌ |
 
-| ID | 内容 | 分析 | 状态 |
-|----|------|------|------|
-| **WS1** | 后台 job 文案 + status 保持瞬时（不做 `wait_seconds`） | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) §5 | **已落地** |
-| **WS6** | `tool.before_each` + 重复调用审批 | [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | **已落地** |
-| **WS2** | status 工具统一 wait（子 Agent 等） | 合入总览 §4 | **本分支不做** |
-| **WS3** | bash+fs+a2a spill §3.2.1–§3.2.4 | 合入总览 | **已落地** |
-| **WS5** | 工具链上下文度量 §6.1 | 合入总览 | **已落地**（基础） |
-| **WS4** | schema 前缀稳定（enrich 瘦身） | 合入总览 §3.3 | 未开始 |
+另：**移除 Agent 工具 `trigger_fire`**（触发器仅 schedule / HTTP fire；Agent 保留 CRUD）。
 
-### 优化思路（总纲）
+### 效果与局限
 
-1. **能 push 不 poll**：async_tool_result / `wait_temporary_agents` 优先于 snapshot 轮询。
-2. **poll 仍发生时拦截**：**WS6** duplicate hook（bash job **不**做 status long-poll）。
-3. **能短不长**：统一 tool 结果写入 history 的 budget。
-4. **能稳不动**：减少 tools schema 无谓 enrich 抖动。
+- 轮询与巨结果写入 history 显著收敛；WS3+WS6 可叠加。  
+- 分页 read 的多 turn 成本仍在（设计取舍）。  
+- apply 压缩后主 turn cache 仍会重置（压缩专题范畴）。
 
 ### 延伸阅读
 
-- **[tool-context-cost-analysis.md](./tool-context-cost-analysis.md)**（完整分析，含 WS1 §5）
-- [context-compression-cache-analysis.md](./context-compression-cache-analysis.md)（正交）
-- [built-in-tools.md](../built-in-tools.md) §0
+- [tool-context-cost-analysis.md](./tool-context-cost-analysis.md)（精简总览）  
+- [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)  
+- [skills-context-cost-analysis.md](./skills-context-cost-analysis.md)（WS4 搁置存档）
 
 ---
 

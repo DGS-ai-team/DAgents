@@ -326,7 +326,7 @@ func (o *Orchestrator) executeTool(
 
 func resolveTriggerSessionTarget(tc llm.ToolCall, plan *clihitl.ApprovalPlan) string {
 	name := strings.ToLower(strings.TrimSpace(tc.Function.Name))
-	if name != "trigger_create" && name != "trigger_fire" {
+	if name != "trigger_create" {
 		return ""
 	}
 	if plan == nil {

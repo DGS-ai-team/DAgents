@@ -53,7 +53,7 @@ func buildApprovalToolItem(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) 
 
 func isTriggerSessionApprovalTool(toolName string) bool {
 	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case "trigger_create", "trigger_fire":
+	case "trigger_create":
 		return true
 	default:
 		return false
@@ -96,18 +96,11 @@ func describeApprovalMeta(toolName string, args map[string]any) (reason, risk st
 		return "将更新定时触发器: " + label, risk
 	case "trigger_delete":
 		risk = "high"
-		label := firstNonEmpty(args, "id", "name")
+		label := firstNonEmpty(args, "id", "name", "trigger_id")
 		if label == "" {
 			return "将删除定时触发器", risk
 		}
 		return "将删除定时触发器: " + label, risk
-	case "trigger_fire":
-		risk = "medium"
-		label := firstNonEmpty(args, "id", "name")
-		if label == "" {
-			return "将立即手动触发定时任务", risk
-		}
-		return "将立即触发: " + label, risk
 	case "background_job_cancel":
 		risk = "medium"
 		return "将取消后台任务", risk

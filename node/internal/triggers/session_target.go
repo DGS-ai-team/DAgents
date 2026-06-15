@@ -40,7 +40,7 @@ type FireOptions struct {
 	FixedSessionID    string
 }
 
-// FireOptionsFromApprovalTarget 构造 trigger_fire 审批通过后的 fire override。
+// FireOptionsFromApprovalTarget 构造审批通过后的 fire override（如 trigger_create 会话目标）。
 func FireOptionsFromApprovalTarget(approvalTarget, currentSessionID string, def Definition) *FireOptions {
 	target := strings.TrimSpace(approvalTarget)
 	if target == "" {

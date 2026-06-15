@@ -66,7 +66,7 @@ tools/
 
 ## 执行模式
 
-- **同步（默认）**：orchestrator 调用 `Execute`；`read_file` / `write_file` / `trigger_fire` 等始终同步完成。
+- **同步（默认）**：orchestrator 调用 `Execute`；`read_file` / `write_file` / `trigger_create` 等始终同步完成。
 - **`bash_run` 超时降级**：同步等待 `timeout_seconds`（默认 30）；超时后登记后台 job、返回 `RUNNING job_id=...`；完成后 **`async_tool_result` 自动回灌**。
 - **内部 `StartBackground`**：不在 tool schema 暴露；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段。
 

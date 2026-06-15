@@ -142,39 +142,6 @@ func triggerDeleteToolDef() ToolDef {
 	}
 }
 
-func triggerFireToolDef() ToolDef {
-	return ToolDef{
-		Type: "function",
-		Function: FunctionDef{
-			Name:        "trigger_fire",
-			Description: "立即执行一次触发器，将渲染后的任务投递到 Agent 队列",
-			Parameters: injectCallPurposeParam(map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"trigger_id": map[string]any{
-						"type":        "string",
-						"description": "要立即触发的触发器 ID（必填）",
-					},
-					"reason": map[string]any{
-						"type":        "string",
-						"description": "触发原因说明（可选，写入投递记录）",
-					},
-					"payload": map[string]any{
-						"type":        "object",
-						"description": "附加 JSON 载荷（可选，合并进任务上下文）",
-					},
-					"force": map[string]any{
-						"type":        "boolean",
-						"description": "是否强制触发（可选；true 时跳过 enabled 等限制，同 HTTP fire API）",
-					},
-				},
-				"required":             []string{"trigger_id"},
-				"additionalProperties": false,
-			}),
-		},
-	}
-}
-
 func (r *Registry) requireTriggerStore() (*triggers.Store, error) {
 	if r.triggerStore == nil {
 		return nil, fmt.Errorf("triggers not initialized")
@@ -316,45 +283,6 @@ func (r *Registry) execTriggerDelete(_ context.Context, raw json.RawMessage) (st
 	}
 	deleted := store.DeleteTrigger(strings.TrimSpace(args.TriggerID))
 	return triggerJSON(map[string]any{"ok": true, "trigger_id": args.TriggerID, "deleted": deleted}), nil
-}
-
-func (r *Registry) execTriggerFire(ctx context.Context, raw json.RawMessage) (string, error) {
-	if r.triggerSched == nil {
-		return triggerJSON(map[string]any{"ok": false, "error": "trigger scheduler is not available"}), nil
-	}
-	_, cleaned := ParseRunInBackground(string(raw))
-	var args struct {
-		TriggerID string         `json:"trigger_id"`
-		Reason    string         `json:"reason"`
-		Payload   map[string]any `json:"payload"`
-		Force     bool           `json:"force"`
-	}
-	if err := json.Unmarshal([]byte(cleaned), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-	reason := strings.TrimSpace(args.Reason)
-	if reason == "" {
-		reason = "agent_tool"
-	}
-	triggerID := strings.TrimSpace(args.TriggerID)
-	approvalTarget := TriggerSessionTargetFromContext(ctx)
-	if approvalTarget == "" {
-		approvalTarget = "same_session"
-	}
-	var fireOpts *triggers.FireOptions
-	if r.triggerStore != nil {
-		if def, ok := r.triggerStore.GetTrigger(triggerID); ok && def != nil {
-			fireOpts = triggers.FireOptionsFromApprovalTarget(approvalTarget, sessionIDFromContext(ctx), *def)
-		}
-	}
-	record, err := r.triggerSched.FireTrigger(triggerID, reason, args.Payload, args.Force, fireOpts)
-	if triggers.IsNotFound(err) {
-		return triggerJSON(map[string]any{"ok": false, "error": "trigger not found", "trigger_id": args.TriggerID}), nil
-	}
-	if err != nil {
-		return triggerJSON(map[string]any{"ok": false, "error": err.Error()}), nil
-	}
-	return triggerJSON(map[string]any{"ok": record.Status == triggers.FireStatusQueued, "record": record}), nil
 }
 
 func triggerJSON(payload map[string]any) string {
