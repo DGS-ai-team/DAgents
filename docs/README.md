@@ -34,6 +34,8 @@
 | [design/agent-hooks.md](./design/agent-hooks.md) | **Agent Hook 扩展点**（设计稿）：Registry、phase 锚点、L1/L2/L3 分层 |
 | [design/major-changes.md](./design/major-changes.md) | **重大设计变更与优化实录**（背景 / 思路 / 落地；含压缩 × Prompt Cache） |
 | [design/context-compression-cache-analysis.md](./design/context-compression-cache-analysis.md) | 上下文压缩与 Prompt Cache 命中率（M1–M3 技术分析） |
+| [design/tool-context-cost-analysis.md](./design/tool-context-cost-analysis.md) | 工具链上下文成本优化总览（`feat/tool-context-cost-optimization`） |
+| [design/background-job-long-poll-analysis.md](./design/background-job-long-poll-analysis.md) | WS1：后台 job 长轮询与 LLM 轮询成本 |
 | [manage/README.md](../../manage/README.md) | **Manage 服务**（M0+M1 已落地） |
 
 ## 专题

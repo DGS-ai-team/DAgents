@@ -79,6 +79,52 @@ runtime.runTurnStep（步前）
 
 ---
 
+## 2. 工具链上下文成本优化（规划中）
+
+| | |
+|---|---|
+| **分支/时期** | `feat/tool-context-cost-optimization`（2026-06） |
+| **范围** | 全内置工具组（`node/internal/tools`、`turn` 工具结果写回、编排 dispatch） |
+| **配置** | 按工作流分项（WS1 拟 `tools.background_job_status_max_wait_seconds` 等） |
+
+### 背景与痛点
+
+Agent turn 的成本 = **history 体量**（§1 压缩/cache 专题）× **LLM 往返次数**。长会话中除压缩 miss 外，常见浪费包括：
+
+- **轮询型 status**（`background_job_status`、`temporary_agent_status` 等瞬时 snapshot）
+- **tool 结果膨胀**（bash 输出、read/grep、A2A 全文进 history）
+- **tools schema 前缀漂移**（`load_skills` enrich 随 catalog 变化）
+
+与 Prompt Cache **正交**：cache 降低重复 prefix 单价，**不减少**轮询带来的 completion 与 message tail。
+
+**总览与分工作流路线图**：[tool-context-cost-analysis.md](./tool-context-cost-analysis.md)
+
+### 工作流（本分支）
+
+| ID | 内容 | 分析 | 状态 |
+|----|------|------|------|
+| **WS1** | 后台 job `wait_seconds` 长轮询（bash 组先行） | [background-job-long-poll-analysis.md](./background-job-long-poll-analysis.md) | 设计完成 |
+| **WS2** | status 工具统一 wait（子 Agent 等） | 合入总览 §4 | 未开始 |
+| **WS3** | tool 结果 budget / package | 合入总览 §3.2 | 未开始 |
+| **WS4** | schema 前缀稳定（enrich 瘦身） | 合入总览 §3.3 | 未开始 |
+| **WS5** | 度量（poll_count、tool_turns） | — | 未开始 |
+
+### 优化思路（总纲）
+
+1. **能 push 不 poll**：async_tool_result / 阻塞 wait 优先于 snapshot 轮询。
+2. **能一次不等 N 次**：status 类工具服务端 long-poll（`wait_seconds`）。
+3. **能短不长**：统一 tool 结果写入 history 的 budget。
+4. **能稳不动**：减少 tools schema 无谓 enrich 抖动。
+
+### 延伸阅读
+
+- **[tool-context-cost-analysis.md](./tool-context-cost-analysis.md)**（总览）
+- [background-job-long-poll-analysis.md](./background-job-long-poll-analysis.md)（WS1 完整分析）
+- [context-compression-cache-analysis.md](./context-compression-cache-analysis.md)（正交）
+- [built-in-tools.md](../built-in-tools.md) §0
+
+---
+
 ## 条目模板（复制使用）
 
 ```markdown
