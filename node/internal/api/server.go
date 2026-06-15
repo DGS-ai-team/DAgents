@@ -15,6 +15,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
+	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
@@ -556,7 +557,8 @@ type sessionContextResponse struct {
 	SkillsCatalogEstimatedTokens   int                     `json:"skills_catalog_estimated_tokens"`
 	SkillsCatalogBloatThreshold    int                     `json:"skills_catalog_bloat_threshold"`
 	LoadedSkills                   []skills.LoadedSkill    `json:"loaded_skills"`
-	RecentMessages        []contextMessagePreview `json:"recent_messages"`
+	RecentMessages                 []contextMessagePreview `json:"recent_messages"`
+	LastCompression                *compression.LastCompressionSnapshot `json:"last_compression,omitempty"`
 }
 
 func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
@@ -607,8 +609,9 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 		SkillsCatalogEstimatedTokens: view.SkillsCatalogEstimatedTokens,
 		SkillsCatalogBloatThreshold:  view.SkillsCatalogBloatThreshold,
 		LoadedSkills:                 view.LoadedSkills,
-		RecentMessages:        recent,
-		RunTurnPhase:          turn.RunTurnPhase(view.TurnState),
+		RecentMessages:               recent,
+		LastCompression:              view.LastCompression,
+		RunTurnPhase:                 turn.RunTurnPhase(view.TurnState),
 	}
 	if view.TurnState != "" {
 		resp.TurnState = string(view.TurnState)

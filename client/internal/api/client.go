@@ -124,8 +124,14 @@ type CompressContextResult struct {
 	CompressedMessageCount int    `json:"compressed_message_count"`
 	CompressionStart       int    `json:"compression_start"`
 	CompressionEnd         int    `json:"compression_end"`
-	MessagesCount          int    `json:"messages_count"`
-	MessagesTotalTokens    int    `json:"messages_total_tokens"`
+	MessagesCount          int     `json:"messages_count"`
+	MessagesTotalTokens    int     `json:"messages_total_tokens"`
+	PromptTokens           int     `json:"prompt_tokens"`
+	CompletionTokens       int     `json:"completion_tokens"`
+	TotalTokens            int     `json:"total_tokens"`
+	TokenReductionRate     float64 `json:"token_reduction_rate"`
+	PromptCacheHitTokens   int     `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens  int     `json:"prompt_cache_miss_tokens"`
 }
 
 // LoadedSkillSummary 为 context/skills 中的已加载 skill 摘要。

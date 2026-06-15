@@ -109,7 +109,11 @@ func newRuntimeWithPublisher(
 		agentID:         agentID,
 		logger:          logger,
 		skillsCatalog:   catalog,
-		compression:     compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking),
+		compression: func() *compression.Coordinator {
+			coord := compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking)
+			coord.SetLogger(logger)
+			return coord
+		}(),
 		state:           turn.StateIdle,
 		messages:        append([]llm.Message(nil), initial...),
 		loadedSkills:    append([]skills.LoadedSkill(nil), loaded...),
@@ -448,6 +452,13 @@ func pendingHITLLogFields(pending *turn.PendingHITL) (kind string, toolCallID st
 	return kind, ""
 }
 
+func (r *runtime) sidecarPrefix() compression.SidecarPrefix {
+	return compression.SidecarPrefix{
+		SystemPrompt: r.orch.SystemPromptForSession(r.session.ID),
+		Tools:        r.orch.ToolDefinitions(),
+	}
+}
+
 func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	if r.isChildSession() {
 		return compression.ForceResult{Status: "unsupported"}
@@ -462,7 +473,7 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 		return compression.ForceResult{Status: "disabled"}
 	}
 	r.mu.Lock()
-	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages)
+	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, r.sidecarPrefix())
 	r.mu.Unlock()
 	if result.Status == "applied" {
 		r.persist(ctx)
@@ -492,6 +503,12 @@ func (r *runtime) contextView() *ContextView {
 	r.mu.Unlock()
 	view.SystemPrompt = r.orch.SystemPromptForSession(r.session.ID)
 	enrichContextPromptStats(view, r.skillsCatalog)
+	if r.compression != nil {
+		if snap, ok := r.compression.LastCompression(r.session.ID); ok {
+			s := snap
+			view.LastCompression = &s
+		}
+	}
 	return view
 }
 

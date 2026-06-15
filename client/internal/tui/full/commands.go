@@ -142,6 +142,11 @@ func (m *model) runCompress() error {
 		"phase":                    "end",
 		"status":                   res.Status,
 		"compressed_message_count": res.CompressedMessageCount,
+		"prompt_tokens":            res.PromptTokens,
+		"completion_tokens":        res.CompletionTokens,
+		"token_reduction_rate":     res.TokenReductionRate,
+		"prompt_cache_hit_tokens":  res.PromptCacheHitTokens,
+		"prompt_cache_miss_tokens": res.PromptCacheMissTokens,
 	})
 	if line == "" {
 		switch res.Status {

@@ -1211,11 +1211,13 @@ class DAgentsTuiApp(App[None]):
         dots = ("." * (frame + 1)).ljust(3)
         return self._message_block(_DOT_STATUS_ACTIVE, f"{label}{dots} {elapsed}s")
 
-    def _compression_detail_line(self, mode: str, status: str, count: Any) -> str:
+    def _compression_detail_line(self, mode: str, status: str, count: Any, data: dict[str, Any] | None = None) -> str:
         """压缩结束时的摘要行（blocking/silent 文案区分）。"""
+        data = data or {}
         prefix = "blocking" if mode == "blocking" else "silent"
         if status == "applied":
-            return f"[dim]Context compression ({prefix}) applied — replaced {count} messages[/dim]"
+            line = f"[dim]Context compression ({prefix}) applied — replaced {count} messages[/dim]"
+            return line + self._compression_metrics_suffix(data)
         if status == "failed":
             return f"[yellow]Context compression ({prefix}) failed — keeping original context[/yellow]"
         if status == "stale":
@@ -1223,6 +1225,30 @@ class DAgentsTuiApp(App[None]):
         if status == "invalid":
             return f"[yellow]Context compression ({prefix}) result invalid — discarded[/yellow]"
         return f"[dim]Context compression ({prefix}) finished (status={status})[/dim]"
+
+    def _compression_metrics_suffix(self, data: dict[str, Any]) -> str:
+        prompt = data.get("prompt_tokens")
+        completion = data.get("completion_tokens")
+        if prompt is None or completion is None:
+            return ""
+        rate = data.get("token_reduction_rate")
+        try:
+            pct = int(round(float(rate or 0) * 100))
+        except (TypeError, ValueError):
+            pct = 0
+        suffix = f" [dim](prompt {prompt}→completion {completion} tokens, −{pct}%)[/dim]"
+        hit = data.get("prompt_cache_hit_tokens")
+        if hit is not None:
+            miss = data.get("prompt_cache_miss_tokens") or 0
+            hit_rate = data.get("prompt_cache_hit_rate")
+            cache = f" [dim](cache hit {hit} / miss {miss}"
+            if hit_rate is not None:
+                try:
+                    cache += f", {int(round(float(hit_rate) * 100))}% hit"
+                except (TypeError, ValueError):
+                    pass
+            suffix += cache + ")[/dim]"
+        return suffix
 
     def _replace_status_line(self, name: str, content: str) -> None:
         state = self._status_lines.get(name)
@@ -2150,14 +2176,14 @@ class DAgentsTuiApp(App[None]):
                     self._start_status_line("compression_blocking")
                 elif phase == "end":
                     self._finish_status_line("compression_blocking", add_gap=False)
-                    detail = self._compression_detail_line(mode, status, count)
+                    detail = self._compression_detail_line(mode, status, count, update.data)
                     log.write(detail)
                     self._append_message_gap()
             else:
                 if phase == "start":
                     log.write(f"[dim]Silent context compression started (target {count} messages)[/dim]")
                 elif phase == "end":
-                    log.write(self._compression_detail_line(mode, status, count))
+                    log.write(self._compression_detail_line(mode, status, count, update.data))
                     if status in {"applied", "failed", "stale", "invalid"}:
                         self._append_message_gap()
         elif update.kind == TranscriptKind.REASONING_DELTA or (
@@ -2732,7 +2758,7 @@ class DAgentsTuiApp(App[None]):
         self._start_status_line("compression_blocking")
         self._finish_status_line("compression_blocking", add_gap=False)
         count = result.get("compressed_message_count")
-        detail = self._compression_detail_line("blocking", status, count)
+        detail = self._compression_detail_line("blocking", status, count, result)
         if detail:
             log.write(detail)
         self._apply_top_status()

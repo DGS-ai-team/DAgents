@@ -16,7 +16,7 @@ func (r *runtime) runTurnStep(
 ) (turn.StepOutcome, []llm.Message) {
 	r.mu.Lock()
 	if compressBefore && r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
+		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, r.sidecarPrefix())
 	}
 	turnCtx, cancel := context.WithCancel(parent)
 	r.turnCancel = cancel
