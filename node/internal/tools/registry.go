@@ -33,6 +33,8 @@ type Registry struct {
 	skillsCatalog       *skills.Catalog
 	enabledOnly         map[string]struct{}
 	handlers            map[string]handler
+	pathEncMu           sync.Mutex
+	pathEncCache        map[string]pathEncodingEntry
 }
 
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。
@@ -87,7 +89,6 @@ func (r *Registry) Definitions() []ToolDef {
 		triggerCreateToolDef(),
 		triggerUpdateToolDef(),
 		triggerDeleteToolDef(),
-		triggerFireToolDef(),
 	}
 	if r.manageClient != nil {
 		base = append(base, manageA2AToolDefs()...)
@@ -130,6 +131,5 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["trigger_create"] = r.execTriggerCreate
 	r.handlers["trigger_update"] = r.execTriggerUpdate
 	r.handlers["trigger_delete"] = r.execTriggerDelete
-	r.handlers["trigger_fire"] = r.execTriggerFire
 	r.RegisterChildAgentToolStubs()
 }

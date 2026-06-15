@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
 )
 
 type searchReplaceArgs struct {
@@ -22,7 +24,7 @@ func searchReplaceToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "search_replace",
 			Description: descFSPathConvention + " " + descReadBeforeWrite + " 用精确子串替换修改文本。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
@@ -73,11 +75,11 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 		return formatSearchReplaceFail(args.Path, "old_string 不能为空。"), nil
 	}
 
-	oldText, err := readAllLines(path, r.resolveFileEncoding(args.Encoding))
+	oldLines, choice, err := r.readTextLinesAt(args.Path, path, args.Encoding)
 	if err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil
 	}
-	rawText := strings.Join(oldText, "\n")
+	rawText := strings.Join(oldLines, "\n")
 	hitCount := strings.Count(rawText, args.OldString)
 	lineHint := formatHitLines(rawText, args.OldString)
 	if hitCount == 0 {
@@ -99,7 +101,8 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 	if newText == rawText {
 		return formatSearchReplaceSuccess(0, args.OldString, args.NewString, lineHint), nil
 	}
-	enc := r.resolveFileEncoding(args.Encoding)
+	enc := choice.Encoding
+	encSrc := choice.Source
 	payload, err := encodeFileContent(newText, enc)
 	if err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil
@@ -107,13 +110,20 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil
 	}
-	return formatSearchReplaceSuccess(replaced, args.OldString, args.NewString, lineHint), nil
+	if info, err := os.Stat(path); err == nil {
+		r.rememberPathEncoding(args.Path, enc, info.ModTime(), encSrc)
+	}
+	out := formatSearchReplaceSuccess(replaced, args.OldString, args.NewString, lineHint)
+	out, _ = applyMaxTokensToOutput(out, defaultSearchReplaceMaxTokens)
+	return out, nil
 }
 
 const (
 	searchReplaceMaxPreviewBytes = 1500
 	searchReplacePreviewMaxLines = 8
 	searchReplacePreviewMaxRunes = 400
+	// defaultSearchReplaceMaxTokens search_replace 整段 tool 输出 token 上限（含 diff 预览）。
+	defaultSearchReplaceMaxTokens = 2000
 )
 
 func formatSearchReplaceSuccess(replaced int, oldStr, newStr, lineHint string) string {
@@ -151,6 +161,10 @@ func formatSearchReplacePreview(oldStr, newStr string, replaced int, lineHint st
 	out := strings.TrimSpace(b.String())
 	if len(out) > searchReplaceMaxPreviewBytes {
 		out = out[:searchReplaceMaxPreviewBytes] + "\n...(预览已截断)"
+	}
+	clipped, truncated := toolresult.ClipToTokenBudget(out, defaultSearchReplaceMaxTokens/2)
+	if truncated {
+		out = clipped + "\n...(diff 预览因 token 上限截断)"
 	}
 	return out
 }

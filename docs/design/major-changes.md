@@ -14,6 +14,8 @@
 
 新增条目时复制文末 **条目模板**，保持「问题 → 思路 → 落地」顺序，并链接到可长期维护的设计文档（避免只在 PR 描述里留档）。
 
+**大型专题文**（如工具链成本、压缩 cache）另用四段结构：**背景与痛点 → 分析 → 优化思路 → 落地方案**（详见 [tool-context-cost-analysis.md](./tool-context-cost-analysis.md)）；细节实录写入本页，专题文保持可扫读。
+
 ---
 
 ## 1. 上下文压缩与 Prompt Cache 对齐（M2 + M3）
@@ -76,6 +78,96 @@ runtime.runTurnStep（步前）
 - 完整分析：[context-compression-cache-analysis.md](./context-compression-cache-analysis.md)
 - 模块说明：[node/internal/compression/README.md](../../node/internal/compression/README.md)
 - 用户向专题（历史 Python 栈对照）：[context-compression-and-state.md](../context-compression-and-state.md)
+
+---
+
+## 2. 工具链上下文成本优化（已落地）
+
+| | |
+|---|---|
+| **分支/时期** | `feat/tool-context-cost-optimization`（2026-06） |
+| **范围** | 全内置工具组（`node/internal/tools`、`turn` 工具结果写回） |
+| **配置** | `hooks.duplicate_tool_call`、`hooks.tool_result` |
+
+### 背景与痛点
+
+长会话中单任务仍可能 **十数次 LLM 调用**；浪费来自 **status 轮询**、**tool 结果进 history 膨胀**、**重复 tool call**。与 Prompt Cache / 压缩 **正交**。
+
+### 优化思路
+
+1. async 回灌优于 poll；status 保持瞬时。  
+2. 重复调用走 Hook 审批。  
+3. 超长结果落盘摘要。  
+4. 任务级度量验收。  
+5. **skills schema（WS4）搁置**；**子 Agent status wait（WS2）不做**。
+
+### 落地方案
+
+| WS | 要点 | 状态 |
+|----|------|------|
+| WS1 | bash 文案 + async 引导 | ✅ |
+| WS6 | `tool.before_each` 重复审批 | ✅ |
+| WS3 | bash/fs/a2a `tool.after_each` spill | ✅ |
+| WS5 | `tool_context_metrics` | ✅ |
+| WS2 / WS4 | status wait / skills enrich | ❌ |
+
+另：**移除 Agent 工具 `trigger_fire`**（触发器仅 schedule / HTTP fire；Agent 保留 CRUD）。
+
+### 效果与局限
+
+- 轮询与巨结果写入 history 显著收敛；WS3+WS6 可叠加。  
+- 分页 read 的多 turn 成本仍在（设计取舍）。  
+- apply 压缩后主 turn cache 仍会重置（压缩专题范畴）。
+
+### 延伸阅读
+
+- [tool-context-cost-analysis.md](./tool-context-cost-analysis.md)（精简总览）  
+- [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)  
+- [skills-context-cost-analysis.md](./skills-context-cost-analysis.md)（WS4 搁置存档）
+
+---
+
+## 3. Tool Before Hook 与重复调用审批（已落地 WS6）
+
+| | |
+|---|---|
+| **分支/时期** | `feat/tool-context-cost-optimization`（2026-06） |
+| **范围** | `node/internal/hooks/`、`turn/tool_router.go`、HITL |
+| **配置** | `hooks.duplicate_tool_call`（`enabled`、`window_seconds`，默认 60） |
+
+### 背景与痛点
+
+审批逻辑仍在 `processToolCalls` 内直接调用 `policy.DecideTool`，与 [agent-hooks.md](./agent-hooks.md) 规划的 **`tool.before_each`** 未收敛。模型在短窗口内 **同名同参** 重复调用 tool（尤其 status 轮询）时，现网 HITL 仅有批准/拒绝，无法 **挂起后执行**，也无法在 Node 侧统一拦截。
+
+### 优化思路
+
+1. **`tool.before_each` Hook 链**：`PolicyToolHook`（三档 always/never/rule）+ `DuplicateToolCallHook`（**仅 `rule` 且子策略 auto**）。
+2. **指纹**：规范化参数 + 60s 窗口对比上次成功执行。
+3. **标准审批 + 重复原因**：命中 duplicate 仍走 `execute_tool`，`approval_reason` 标注；用户自行择时确认（无 defer）。
+
+**完整方案**：[tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)
+
+---
+
+## 4. UX 专题：Agent 自有文件写操作审批信任链（设计稿）
+
+| | |
+|---|---|
+| **分支/时期** | 独立专题（2026-06 起稿） |
+| **范围** | `node/internal/hooks/`、`write_file` / `search_replace` HITL |
+| **与 WS3 关系** | **正交** — 降审批次数，不降 history token |
+
+### 背景与痛点
+
+`write_file` / `search_replace` 为 `always` 审批。模型在**同一自建文件**上连续编辑时，若文件未被外界改动，重复确认信息密度低。
+
+### 优化思路
+
+1. **session 级信任表**：仅 `write_file` **创建**的文件标记 `agentOwned`。
+2. **mtime 信任链**：`before_each` 时 `Stat.mtime == lastAgentWriteMtime` → 当轮免审批；写成功后更新 mtime。
+3. **不复用 `pathEncCache`**：编码缓存为进程级；信任须 per-session，且仅在写成功后更新。
+
+**完整方案**：[ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md)
 
 ---
 

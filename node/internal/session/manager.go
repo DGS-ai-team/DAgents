@@ -14,6 +14,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -37,6 +38,8 @@ type TurnOptions struct {
 	CompressionBlocking      int
 	RawMessageHistoryEnabled bool
 	RawMessageHistoryDir     string
+	DuplicateToolCall hooks.DuplicateConfig
+	ToolResult        hooks.ToolResultConfig
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。

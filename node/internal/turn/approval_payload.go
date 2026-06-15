@@ -4,17 +4,25 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
 
-// buildApprovalToolItem 构造 approval_required SSE 中的单条 tool_calls 项。
+type pendingApprovalCall struct {
+	tc            llm.ToolCall
+	duplicateMeta *hooks.DuplicateMeta
+}
 
-// 逻辑：
-// 1. 写入 id/name/arguments/raw_arguments；
-// 2. 根据工具名与参数生成人类可读的 approval_reason 与 risk_level。
-func buildApprovalToolItem(tc llm.ToolCall) map[string]any {
+// buildApprovalToolItem 构造 approval_required SSE 中的单条 tool_calls 项。
+func buildApprovalToolItem(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) map[string]any {
 	args := parseJSONArgs(tc.Function.Arguments)
-	reason, risk := describeApprovalMeta(tc.Function.Name, args)
+	var reason, risk string
+	if duplicateMeta != nil {
+		reason = hooks.FormatDuplicateApprovalReason(tc.Function.Name, duplicateMeta)
+		risk = "low"
+	} else {
+		reason, risk = describeApprovalMeta(tc.Function.Name, args)
+	}
 	item := map[string]any{
 		"id":            tc.ID,
 		"name":          tc.Function.Name,
@@ -27,6 +35,16 @@ func buildApprovalToolItem(tc llm.ToolCall) map[string]any {
 	if risk != "" {
 		item["risk_level"] = risk
 	}
+	if duplicateMeta != nil {
+		item["duplicate_meta"] = map[string]any{
+			"window_seconds":               duplicateMeta.WindowSeconds,
+			"previous_tool_call_id":        duplicateMeta.PreviousToolCallID,
+			"previous_executed_at_unix_ms": duplicateMeta.PreviousExecutedAtUnixMs,
+			"seconds_since_previous":       duplicateMeta.SecondsSincePrevious,
+			"args_fingerprint":             duplicateMeta.ArgsFingerprint,
+			"result_preview":               duplicateMeta.ResultPreview,
+		}
+	}
 	if isTriggerSessionApprovalTool(tc.Function.Name) {
 		item["approval_mode"] = "trigger_session"
 	}
@@ -35,7 +53,7 @@ func buildApprovalToolItem(tc llm.ToolCall) map[string]any {
 
 func isTriggerSessionApprovalTool(toolName string) bool {
 	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case "trigger_create", "trigger_fire":
+	case "trigger_create":
 		return true
 	default:
 		return false
@@ -78,18 +96,11 @@ func describeApprovalMeta(toolName string, args map[string]any) (reason, risk st
 		return "将更新定时触发器: " + label, risk
 	case "trigger_delete":
 		risk = "high"
-		label := firstNonEmpty(args, "id", "name")
+		label := firstNonEmpty(args, "id", "name", "trigger_id")
 		if label == "" {
 			return "将删除定时触发器", risk
 		}
 		return "将删除定时触发器: " + label, risk
-	case "trigger_fire":
-		risk = "medium"
-		label := firstNonEmpty(args, "id", "name")
-		if label == "" {
-			return "将立即手动触发定时任务", risk
-		}
-		return "将立即触发: " + label, risk
 	case "background_job_cancel":
 		risk = "medium"
 		return "将取消后台任务", risk

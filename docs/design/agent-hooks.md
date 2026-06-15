@@ -2,7 +2,9 @@
 
 本文描述 **Go Agent Node** 在 turn 全链路中引入 **统一 Hook 框架** 的目标边界、阶段锚点、核心接口、配置形态与落地顺序。实现以本文件为设计基线；与代码冲突时以 **Git / CHANGELOG** 为准。
 
-**状态（2026-06）**：**设计稿**；尚未实现 `node/internal/hooks/`。现有能力以分散回调与专用模块存在（见 §2）。
+**状态（2026-06）**：**部分落地** — `tool.before_each`（policy + duplicate）、**`tool.after_each`**（`ToolResultPackageHook`，WS3 bash 组）已在 `node/internal/hooks/`。其余锚点仍为设计稿。
+
+**首版落地候选**：[tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)（`tool.before_each` + policy 三档收敛；**duplicate 仅 `rule`+auto** + 三选项审批）。
 
 **相关索引**：[three-component-model.md](./three-component-model.md)（Node / Client / Manage 边界）、[triggers-design.md](../triggers-design.md)（外部触发 turn）、[architecture/go-node-internals.md](../architecture/go-node-internals.md)（runtime 与 Orchestrator）、[security-rollout.md](../security-rollout.md)（审批与策略）。
 
@@ -139,6 +141,7 @@ flowchart TD
 
 - `prompt.build` → 将现有 `SystemPromptBuilder` 注册为内置 `BuiltinHook`
 - `tool.before_each` → **`policy.Engine` 作为最高优先级内置 hook**，而非并行两套审批逻辑
+- `DuplicateToolCallHook` → 仅 **`toolMode==rule` 且 `ResolvedAction==auto`**（见 [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)）
 - `turn.before_compress` → 在 `compression.MaybeHandle` 外包一层 `hooks.Run`
 
 ---

@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	// RunInBackgroundKey 为各工具通用可选参数：true 时后台并行执行。
+	// RunInBackgroundKey 为历史/内部参数名；已不在 tool schema 暴露，ParseToolCallArguments 仍兼容剥离。
 	RunInBackgroundKey = "run_in_background"
 	// CallPurposeKey 为各工具通用必填参数：简短说明调用目的（Client 首行展示）。
 	CallPurposeKey = "call_purpose"
@@ -55,22 +55,6 @@ func TriggerSessionTargetFromContext(ctx context.Context) string {
 	return ""
 }
 
-// runInBackgroundProperty 返回写入 tool schema 的通用参数字段定义。
-func runInBackgroundProperty() map[string]any {
-	return map[string]any{
-		"type":        "boolean",
-		"description": "可选，默认 false（同步串行等待结果）。true 时后台并行执行并立即返回 job_id，完成后自动回灌。",
-	}
-}
-
-// callPurposeProperty 返回 call_purpose 字段 schema。
-func callPurposeProperty() map[string]any {
-	return map[string]any{
-		"type":        "string",
-		"description": "必填。一句话说明本次调用该工具的目的（用户界面首行展示，如 bash(此内容)）。",
-	}
-}
-
 // injectCallPurposeParam 为 tool parameters 注入 call_purpose 并加入 required。
 func injectCallPurposeParam(params map[string]any) map[string]any {
 	if params == nil {
@@ -84,6 +68,14 @@ func injectCallPurposeParam(params map[string]any) map[string]any {
 	props[CallPurposeKey] = callPurposeProperty()
 	ensureCallPurposeRequired(params)
 	return params
+}
+
+// callPurposeProperty 返回 call_purpose 字段 schema。
+func callPurposeProperty() map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"description": "必填。一句话说明本次调用该工具的目的（用户界面首行展示，如 bash(此内容)）。",
+	}
 }
 
 func ensureCallPurposeRequired(params map[string]any) {
@@ -128,22 +120,7 @@ func containsString(list []string, target string) bool {
 	return false
 }
 
-// injectRunInBackgroundParam 为 tool parameters 注入 call_purpose 与 run_in_background 字段。
-func injectRunInBackgroundParam(params map[string]any) map[string]any {
-	params = injectCallPurposeParam(params)
-	if params == nil {
-		params = map[string]any{"type": "object", "properties": map[string]any{}}
-	}
-	props, ok := params["properties"].(map[string]any)
-	if !ok || props == nil {
-		props = map[string]any{}
-		params["properties"] = props
-	}
-	props[RunInBackgroundKey] = runInBackgroundProperty()
-	return params
-}
-
-// ParseToolCallArguments 解析 run_in_background，并剥离 call_purpose / run_in_background 后返回 handler 用 JSON。
+// ParseToolCallArguments 剥离 call_purpose（及历史 run_in_background）后返回 handler 用 JSON。
 func ParseToolCallArguments(arguments string) (background bool, cleaned string) {
 	arguments = strings.TrimSpace(arguments)
 	if arguments == "" {

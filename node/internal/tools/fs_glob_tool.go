@@ -22,7 +22,7 @@ func globFilesToolDef() ToolDef {
 			Name: "glob_files",
 			Description: descFSPathConvention + " 在指定目录下按 glob 列举匹配的路径，不读取文件内容。" +
 				"glob_pattern 相对 directory，支持 *、?、** 递归；可用 offset/max_results 分页。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"directory": map[string]any{
@@ -102,5 +102,7 @@ func (r *Registry) execGlobFiles(_ context.Context, raw json.RawMessage) (string
 	if body == "" {
 		body = "(无匹配)"
 	}
-	return strings.Join(header, "\n") + "\n" + body, nil
+	full := strings.Join(header, "\n") + "\n" + body
+	full, _ = applyMaxTokensToOutput(full, defaultFSMaxOutputTokens)
+	return full, nil
 }

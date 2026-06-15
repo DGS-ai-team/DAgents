@@ -35,6 +35,7 @@ type Config struct {
 	ChildAgents       ChildAgentsConfig       `yaml:"child_agents"`
 	Log               LogConfig               `yaml:"log"`
 	Tools             ToolsConfig             `yaml:"tools"`
+	Hooks             HooksConfig             `yaml:"hooks"`
 }
 
 // ToolsConfig 控制内置工具行为（如 bash_run 输出解码与压缩）。
@@ -48,11 +49,11 @@ type ToolsConfig struct {
 	BashOutputEncoding string             `yaml:"bash_output_encoding"`
 	// FileEncoding 为 read_file/write_file/search_replace/grep_* 读写磁盘文件的默认字节编码。
 	// 留空时 Windows→gbk，其它→utf-8；单次调用可用 encoding 参数覆盖。
-	FileEncoding       string             `yaml:"file_encoding"`
-	BashCompress       BashCompressConfig `yaml:"bash_compress"`
+	FileEncoding string             `yaml:"file_encoding"`
+	BashCompress BashCompressConfig `yaml:"bash_compress"`
 }
 
-// BashCompressConfig 控制 bash_run 输出压缩（P0：清洗 + rune 截断）。
+// BashCompressConfig 控制 bash_run 输出清洗（ANSI、重复行）；长度限制由 tool.after_each 落盘摘要负责。
 type BashCompressConfig struct {
 	// Enabled 为 nil 时默认 true。
 	Enabled              *bool `yaml:"enabled"`
@@ -99,6 +100,96 @@ type SkillsConfig struct {
 type CompressionConfig struct {
 	SilentTriggerTokens   int `yaml:"silent_trigger_tokens"`
 	BlockingTriggerTokens int `yaml:"blocking_trigger_tokens"`
+}
+
+// HooksConfig 控制 Node turn Hook 行为。
+type HooksConfig struct {
+	DuplicateToolCall DuplicateToolCallHookConfig `yaml:"duplicate_tool_call"`
+	ToolResult        ToolResultHookConfig        `yaml:"tool_result"`
+}
+
+// ToolResultHookConfig 控制 tool.after_each 对列出的工具做落盘 + history 摘要（WS3）。
+type ToolResultHookConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled *bool `yaml:"enabled"`
+	// SpillThresholdTokens 单条 tool 结果超过该估算 token 数时落盘并对 history 头尾摘要；省略时 12000。
+	// 作用于下方 tools 列表中的每个工具，非 bash_run 专用，也非整段 session history 上限。
+	SpillThresholdTokens int `yaml:"spill_threshold_tokens"`
+	// MaxHistoryTokens 已废弃，请改用 spill_threshold_tokens。
+	MaxHistoryTokens int `yaml:"max_history_tokens,omitempty"`
+	// MaxHistoryRunes 已废弃。
+	MaxHistoryRunes int `yaml:"max_history_runes,omitempty"`
+	// Tools 启用落盘摘要的工具名；省略时默认 bash + fs + a2a（见 defaultToolResultHookTools）。
+	Tools []string `yaml:"tools"`
+}
+
+// DuplicateToolCallHookConfig 控制 rule+auto 路径的重复 tool call 检测。
+type DuplicateToolCallHookConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled *bool `yaml:"enabled"`
+	// WindowSeconds 为指纹重复判定窗口；省略或 ≤0 时默认 60。
+	WindowSeconds int `yaml:"window_seconds"`
+}
+
+const defaultDuplicateToolCallWindowSeconds = 60
+
+// DuplicateToolCallHookEnabled 是否启用重复 tool call 检测。
+func (c *Config) DuplicateToolCallHookEnabled() bool {
+	if c == nil || c.Hooks.DuplicateToolCall.Enabled == nil {
+		return true
+	}
+	return *c.Hooks.DuplicateToolCall.Enabled
+}
+
+// DuplicateToolCallWindowSeconds 返回重复检测窗口秒数（默认 60）。
+func (c *Config) DuplicateToolCallWindowSeconds() int {
+	if c == nil || c.Hooks.DuplicateToolCall.WindowSeconds <= 0 {
+		return defaultDuplicateToolCallWindowSeconds
+	}
+	return c.Hooks.DuplicateToolCall.WindowSeconds
+}
+
+const defaultToolResultSpillThresholdTokens = 12000
+
+// ToolResultHookEnabled 是否启用 tool 结果摘要落盘。
+func (c *Config) ToolResultHookEnabled() bool {
+	if c == nil || c.Hooks.ToolResult.Enabled == nil {
+		return true
+	}
+	return *c.Hooks.ToolResult.Enabled
+}
+
+// ToolResultSpillThresholdTokens 返回单条 tool 结果触发落盘摘要的 token 阈值（默认 12000）。
+func (c *Config) ToolResultSpillThresholdTokens() int {
+	if c == nil {
+		return defaultToolResultSpillThresholdTokens
+	}
+	if c.Hooks.ToolResult.SpillThresholdTokens > 0 {
+		return c.Hooks.ToolResult.SpillThresholdTokens
+	}
+	if c.Hooks.ToolResult.MaxHistoryTokens > 0 {
+		return c.Hooks.ToolResult.MaxHistoryTokens
+	}
+	if c.Hooks.ToolResult.MaxHistoryRunes > 0 {
+		return int(float64(c.Hooks.ToolResult.MaxHistoryRunes) * 0.6)
+	}
+	return defaultToolResultSpillThresholdTokens
+}
+
+// defaultToolResultHookTools 与 node/internal/toolresult.DefaultToolResultTools 保持一致。
+func defaultToolResultHookTools() []string {
+	return []string{
+		"bash_run", "read_file", "grep_file", "grep_files",
+		"search_replace", "glob_files", "agent_invoke", "agent_discover",
+	}
+}
+
+// ToolResultHookTools 返回启用摘要的工具列表。
+func (c *Config) ToolResultHookTools() []string {
+	if c == nil || len(c.Hooks.ToolResult.Tools) == 0 {
+		return defaultToolResultHookTools()
+	}
+	return append([]string(nil), c.Hooks.ToolResult.Tools...)
 }
 
 // ListenConfig 描述 Agent Node HTTP 监听地址。

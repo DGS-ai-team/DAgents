@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
 )
 
 const (
@@ -19,8 +21,11 @@ const (
 	defaultSearchContextLines = 10
 	maxSearchContextLines     = 50
 	maxSearchHitIndexes       = 10000
-	defaultReadMaxBytes       = 3000
-	defaultSearchMaxBytes     = 8000
+	// defaultFSMaxOutputTokens fs 工具（read_file 正文、grep 输出）单页 token 预算（DeepSeek 粗算）。
+	// 与默认 line_limit=100 匹配，避免单页过早截断。
+	defaultFSMaxOutputTokens = 3000
+	defaultReadMaxTokens     = defaultFSMaxOutputTokens
+	defaultSearchMaxTokens   = defaultFSMaxOutputTokens
 )
 
 var textSuffixes = map[string]struct{}{
@@ -98,24 +103,22 @@ func formatNumberedLines(lines []string, startLine int) []string {
 	return out
 }
 
-func applyMaxBytesToBody(body string, byteLimit int, truncateHint string) (string, bool) {
-	b := []byte(body)
-	if len(b) <= byteLimit {
+func applyMaxTokensToBody(body string, maxTokens float64, truncateHint string) (string, bool) {
+	clipped, truncated := toolresult.ClipToTokenBudget(body, maxTokens)
+	if !truncated {
 		return body, false
 	}
-	clipped := string(b[:byteLimit])
 	return clipped + "\n\n[TRUNCATED] " + truncateHint, true
 }
 
-func applyMaxBytesToOutput(full string, byteLimit int) (string, bool) {
-	b := []byte(full)
-	if len(b) <= byteLimit {
+func applyMaxTokensToOutput(full string, maxTokens float64) (string, bool) {
+	clipped, truncated := toolresult.ClipToTokenBudget(full, maxTokens)
+	if !truncated {
 		return full, false
 	}
-	clipped := string(b[:byteLimit])
 	return clipped + fmt.Sprintf(
-		"\n\n[TRUNCATED] 输出超过 %d bytes；请减小 count_limit 或缩小检索范围，并使用 next_index_offset 翻页。",
-		byteLimit,
+		"\n\n[TRUNCATED] 输出超过约 %d tokens（DeepSeek 粗算）；请减小 count_limit 或缩小检索范围，并使用 next_index_offset 翻页。",
+		int(maxTokens+0.5),
 	), true
 }
 

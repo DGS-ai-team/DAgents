@@ -19,7 +19,7 @@ Orchestrator 暂停 → SSE approval_required / user_information_required
 Client POST resume → session.handleResume → hitl.Parse* → tool 结果写回 history
 ```
 
-审批 `selection` 可附带 `trigger_session_targets`（`same_session` / `new_session` / `latest_active_session`），供 `trigger_create` / `trigger_fire` 使用。
+审批 `selection` 可附带 `trigger_session_targets`（`same_session` / `new_session` / `latest_active_session`），供 `trigger_create` 使用。
 
 ## 相关文档
 

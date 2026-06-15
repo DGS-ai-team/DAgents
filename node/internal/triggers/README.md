@@ -24,7 +24,7 @@ Go Node 触发器：JSON 持久化、调度轮询、fire 投递 session 队列�
 | `interval_seconds` | 固定间隔（秒） |
 | `fire_at` | 单次 Unix 秒时间戳 |
 | `schedule` | 日历调度（`daily` / `weekly` / `monthly`），时区跟随主机 `time.Local` |
-| `cmd` | 可选；**仅 schedule 自动触发**时先 bash 执行，exit 0 才投递任务；手动 `trigger_fire` 不执行 |
+| `cmd` | 可选；**仅 schedule 自动触发**时先 bash 执行，exit 0 才投递任务 |
 
 ### schedule 字段
 

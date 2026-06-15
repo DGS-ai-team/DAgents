@@ -7,7 +7,7 @@ func askUserInformationToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "ask_user_information",
 			Description: "向用户询问补充信息（选项或自由文本）",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"question": map[string]any{

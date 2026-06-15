@@ -37,7 +37,7 @@ func grepFilesToolDef() ToolDef {
 			Name: "grep_files",
 			Description: descFSPathConvention + " 在目录树内先按 glob_pattern 筛选文件，再按 pattern 逐行搜索文本内容，分页返回跨文件命中及上下文。" +
 				"directory 为起始目录；pattern 匹配行内文本；glob_pattern 相对 directory，支持 **，默认 **/*。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"directory": map[string]any{
@@ -120,13 +120,13 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 	var allHits []flatHit
 	totalHits := 0
 	indexCapped := false
-	fileEnc := r.resolveFileEncoding(args.Encoding)
+	fileEncArg := args.Encoding
 	for _, rel := range files {
 		abs, err := r.resolvePath(rel)
 		if err != nil {
 			continue
 		}
-		lines, err := readAllLines(abs, fileEnc)
+		lines, _, err := r.readTextLinesAt(rel, abs, fileEncArg)
 		if err != nil {
 			continue
 		}
@@ -214,7 +214,7 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 
 	var blocks []string
 	if len(shown) > 0 {
-		blocks = formatGrepFilesBlocks(r, shown, allHits, totalHits, ctxLines, fileEnc)
+		blocks = formatGrepFilesBlocks(r, shown, allHits, totalHits, ctxLines, args.Encoding)
 	}
 
 	header = append(header,
@@ -228,14 +228,14 @@ func (r *Registry) execGrepFiles(_ context.Context, raw json.RawMessage) (string
 	if len(blocks) > 0 {
 		fullOut = fullOut + "\n\n" + strings.Join(blocks, "\n\n")
 	}
-	out, truncated := applyMaxBytesToOutput(fullOut, defaultSearchMaxBytes)
+	out, truncated := applyMaxTokensToOutput(fullOut, defaultSearchMaxTokens)
 	if truncated {
 		out += "\nnext_hit_offset: " + nextHitOffset
 	}
 	return out, nil
 }
 
-func formatGrepFilesBlocks(r *Registry, shown []flatHit, allHits []flatHit, totalHits, ctxLines int, fileEncoding string) []string {
+func formatGrepFilesBlocks(r *Registry, shown []flatHit, allHits []flatHit, totalHits, ctxLines int, fileEncoding *string) []string {
 	hitRank := make(map[flatHit]int, len(allHits))
 	for i, h := range allHits {
 		hitRank[h] = i + 1
@@ -251,7 +251,7 @@ func formatGrepFilesBlocks(r *Registry, shown []flatHit, allHits []flatHit, tota
 				continue
 			}
 			var errRead error
-			lines, errRead = readAllLines(abs, fileEncoding)
+			lines, _, errRead = r.readTextLinesAt(h.relPath, abs, fileEncoding)
 			if errRead != nil {
 				continue
 			}

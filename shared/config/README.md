@@ -49,7 +49,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | `bash` | `bash_run`、`background_job_status`、`background_job_cancel` |
 | `hitl` | `ask_user_information` |
 | `skills` | `load_skills`、`unload_skills`、`clear_skills` |
-| `triggers` | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete`、`trigger_fire` |
+| `triggers` | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete` |
 | `a2a` | `agent_invoke`、`agent_discover`（须 `manage.enabled`） |
 | `child_agents` | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
 

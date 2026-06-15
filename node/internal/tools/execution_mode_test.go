@@ -31,7 +31,6 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		"trigger_create":         {CallPurposeKey, "name", "task_template", "condition"},
 		"trigger_update":         {CallPurposeKey, "trigger_id"},
 		"trigger_delete":         {CallPurposeKey, "trigger_id"},
-		"trigger_fire":           {CallPurposeKey, "trigger_id"},
 		"create_temporary_agent": {CallPurposeKey, "task", "purpose"},
 		"wait_temporary_agents":  {CallPurposeKey, "child_session_ids"},
 		"temporary_agent_status": {CallPurposeKey, "child_session_ids"},
@@ -64,15 +63,13 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 			t.Fatalf("tool %q: call_purpose should be first, got %v", name, req)
 		}
 
-		// run_in_background 为可选，不得出现在 required。
-		for _, field := range req {
-			if field == RunInBackgroundKey {
-				t.Fatalf("tool %q: run_in_background must not be required", name)
-			}
+		// run_in_background 已移出 schema，不得出现在 properties。
+		props, _ := params["properties"].(map[string]any)
+		if _, ok := props[RunInBackgroundKey]; ok {
+			t.Fatalf("tool %q: run_in_background must not appear in schema properties", name)
 		}
 
 		// required 中每项须在 properties 存在（顶层 object）。
-		props, _ := params["properties"].(map[string]any)
 		for _, field := range req {
 			if _, ok := props[field]; !ok {
 				t.Fatalf("tool %q: required field %q missing in properties", name, field)

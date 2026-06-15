@@ -13,5 +13,5 @@
 
 - **assistant usage**：完成态独占一行、`Align.right` 右对齐（避免空格 padding 被 Rich fold 拆开）；`USAGE` SSE 晚到时 retroactive 重写最近一条已完成 assistant 块（对齐 Go `ApplyRoundUsage`）。
 - **滚动跟随**：用户上滚后流式输出不拽底；滚回底部或发消息恢复跟随。
-- **trigger 审批**：`trigger_create` / `trigger_fire` 在 SSE `approval_mode=trigger_session` 时展示四选项（同会话 / 新会话 / 最新活跃 / 不同意），resume 写入 `trigger_session_targets`。
+- **trigger 审批**：`trigger_create` 在 SSE `approval_mode=trigger_session` 时展示四选项（同会话 / 新会话 / 最新活跃 / 不同意），resume 写入 `trigger_session_targets`。
 - **`/policy`**：全屏工具/shell 黑白名单；Esc 返回 · Tab 切页 · `1/2/3` 改档位 · Enter 应用 · `[`/`]` 切换 shell · `a` 显示全部 shell 项。

@@ -16,6 +16,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
@@ -165,6 +166,16 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		CompressionBlocking:      cfg.Compression.BlockingTriggerTokens,
 		RawMessageHistoryEnabled: cfg.RawMessageHistoryEnabled(),
 		RawMessageHistoryDir:     cfg.RawMessageHistoryDir(),
+		DuplicateToolCall: hooks.DuplicateConfig{
+			Enabled:       cfg.DuplicateToolCallHookEnabled(),
+			WindowSeconds: cfg.DuplicateToolCallWindowSeconds(),
+		},
+		ToolResult: hooks.ToolResultConfig{
+			Enabled:              cfg.ToolResultHookEnabled(),
+			SpillThresholdTokens: cfg.ToolResultSpillThresholdTokens(),
+			Tools:                cfg.ToolResultHookTools(),
+			FSRoot:               cfg.FSRoot,
+		},
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:                   cfg.ChildAgents.Enabled,

@@ -95,7 +95,7 @@ def is_trigger_session_approval(item: ToolApprovalRequest) -> bool:
     if item.approval_mode == APPROVAL_MODE_TRIGGER_SESSION:
         return True
     name = item.name.strip().lower()
-    return name in {"trigger_create", "trigger_fire"}
+    return name in {"trigger_create"}
 
 
 def trigger_session_options() -> list[tuple[str, TriggerSessionTarget | None]]:

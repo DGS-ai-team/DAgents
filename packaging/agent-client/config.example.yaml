@@ -93,7 +93,7 @@ tools:
   # file_encoding: gbk   # read/write/search_replace/grep 默认磁盘编码；省略时 Windows=gbk，其它=utf-8
   bash_compress:
     enabled: true
-    max_output_chars: 12000       # stdout 最大 rune 数
+    max_output_chars: 12000       # 仅用于兼容/测试 clip 路径；bash_run 生产路径由 tool_result 摘要
     max_output_chars_stderr: 16000
 
 # 临时子 Agent（见 docs/architecture/child-agent-tools.md）
@@ -105,3 +105,22 @@ child_agents:
   max_max_turns: 50
   max_active_per_parent: 8
   default_wait_timeout_seconds: 300
+
+# tool.before_each Hook：rule+auto 路径重复调用检测（见 docs/design/tool-before-hook-duplicate-approval.md）
+hooks:
+  duplicate_tool_call:
+    enabled: true
+    window_seconds: 60
+  tool_result:
+    enabled: true
+    # 单条 tool 结果超过该 token 估算值时落盘并对 history 头尾摘要（作用于下方 tools 列表，非 bash 专用）
+    spill_threshold_tokens: 12000
+    tools:
+      - bash_run
+      - read_file
+      - grep_file
+      - grep_files
+      - search_replace
+      - glob_files
+      - agent_invoke
+      - agent_discover

@@ -97,7 +97,7 @@ func (e *Engine) decideToolRuleFallback(toolName string, toolArgs map[string]any
 	if name == "trigger_list" || name == "trigger_get" || name == "ask_user_information" {
 		return ActionAuto
 	}
-	if name == "trigger_create" || name == "trigger_update" || name == "trigger_delete" || name == "trigger_fire" {
+	if name == "trigger_create" || name == "trigger_update" || name == "trigger_delete" {
 		return ActionRequireApproval
 	}
 	if name == "background_job_status" {
@@ -114,6 +114,11 @@ func (e *Engine) toolMode(toolName string) ApprovalMode {
 		return mode
 	}
 	return ModeRule
+}
+
+// ToolApprovalMode 返回工具在 policy 中的配置档位（always / never / rule / deny）。
+func (e *Engine) ToolApprovalMode(toolName string) ApprovalMode {
+	return e.toolMode(toolName)
 }
 
 func (e *Engine) shellCommandMode(shellType ShellType, root string) ApprovalMode {
@@ -251,7 +256,6 @@ func defaultEngine() *Engine {
 			"trigger_create":        ModeAlways,
 			"trigger_update":        ModeAlways,
 			"trigger_delete":        ModeAlways,
-			"trigger_fire":          ModeAlways,
 		},
 		shellModes: map[ShellType]map[string]ApprovalMode{},
 	}

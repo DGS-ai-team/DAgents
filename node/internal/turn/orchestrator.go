@@ -12,6 +12,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	historypkg "github.com/DGS-ai-team/DAgents/node/internal/history"
 	"github.com/DGS-ai-team/DAgents/node/internal/hitl"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
@@ -48,6 +49,8 @@ type Orchestrator struct {
 	fsRoot       string
 	tools        tools.Executor
 	policy       *policy.Engine
+	toolHooks    *hooks.Registry
+	toolExecLog  *hooks.ToolExecutionLog
 	skillAccess  SkillAccess
 	maxToolLoops int
 	promptCtx    *promptcontext.Reader
@@ -59,6 +62,8 @@ type Orchestrator struct {
 
 	turnUsageMu sync.Mutex
 	turnUsage   map[string]llm.Usage
+
+	ctxMetrics *contextMetricsStore
 
 	enqueueToolResult   func(sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
@@ -86,6 +91,9 @@ func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
 		engine, _ = policy.LoadFile("")
 	}
 	o.policy = engine
+	if o.toolHooks != nil {
+		o.toolHooks.SetPolicyEngine(engine)
+	}
 }
 
 // RunMessageTurn 执行 human_message 回合；测试无 enqueuer 时内联多步，生产应使用 RunHumanMessageTurn 单步 + 队列。
@@ -102,6 +110,7 @@ func (o *Orchestrator) RunMessageTurn(
 	}
 	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.UserNameHuman))
 	o.resetTurnUsage(sessionID)
+	o.resetContextMetrics(sessionID)
 	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
 	return o.runUntilQueueOrDone(ctx, sessionID, history, setState, 0)
 }
@@ -120,6 +129,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	}
 	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.NormalizeUserMessageName(userName)))
 	o.resetTurnUsage(sessionID)
+	o.resetContextMetrics(sessionID)
 	o.logger.Info("turn human message start",
 		"session_id", sessionID,
 		"content_len", len(userText),
@@ -158,7 +168,7 @@ func (o *Orchestrator) HandleAsyncToolResult(
 	if setState == nil {
 		setState = func(State) {}
 	}
-	built := buildAsyncToolMessages(input)
+	built := o.buildAsyncToolMessages(sessionID, input)
 	tail := classifyToolResultTail(*history)
 	switch tail {
 	case tailTool:
@@ -203,7 +213,7 @@ func asyncToolResultSSEPayload(built asyncToolMessages) map[string]any {
 	payload := map[string]any{
 		"tool_call_id": built.ToolCallID,
 		"tool_name":    built.ToolName,
-		"content":      built.ToolMessage.Content,
+		"content":      built.ForClientContent,
 		"partial":      false,
 		"async_status": built.Status,
 		"display_type": "normal_text",
@@ -297,11 +307,19 @@ func NewOrchestrator(
 	maxToolLoops int,
 	promptCtx *promptcontext.Reader,
 	journal *historypkg.Journal,
+	hookCfg hooks.RuntimeConfig,
 	logger *slog.Logger,
 ) *Orchestrator {
 	if policyEngine == nil {
 		policyEngine, _ = policy.LoadFile("")
 	}
+	toolExecLog := &hooks.ToolExecutionLog{}
+	hookCfg = hooks.RuntimeConfigOrDefault(hookCfg)
+	if strings.TrimSpace(hookCfg.ToolResult.FSRoot) == "" {
+		hookCfg.ToolResult.FSRoot = fsRoot
+	}
+	toolHooks := hooks.NewRegistry(policyEngine, hookCfg)
+	toolHooks.SetToolExecutionLog(toolExecLog)
 	if maxToolLoops <= 0 {
 		maxToolLoops = DefaultMaxToolLoops()
 	}
@@ -312,11 +330,14 @@ func NewOrchestrator(
 		llm:          client,
 		tools:        toolExec,
 		policy:       policyEngine,
+		toolHooks:    toolHooks,
+		toolExecLog:  toolExecLog,
 		skillAccess:  skillAccess,
 		maxToolLoops: maxToolLoops,
 		promptCtx:    promptCtx,
 		journal:      journal,
 		logger:       logx.OrDefault(logger),
+		ctxMetrics:   newContextMetricsStore(),
 	}
 }
 
@@ -374,6 +395,7 @@ func (o *Orchestrator) runOneStep(
 	finishReason := "stop"
 	var streamErr error
 	toolLoopCount++
+	o.recordToolLoop(sessionID, toolLoopCount)
 	if toolLoopCount > o.maxToolLoops {
 		o.hub.Publish(sessionID, o.agentID, "error", map[string]any{
 			"message": fmt.Sprintf("工具调用轮次超过上限：%d", o.maxToolLoops),
@@ -491,6 +513,10 @@ func (o *Orchestrator) publishTurnIdleDone(sessionID, finishReason string) {
 		payload["turn_complete"] = true
 		payload["awaiting"] = nil
 	}
+	if m := o.contextMetrics(sessionID); m != nil {
+		payload["tool_context_metrics"] = m.snapshot()
+	}
+	o.publishTurnContextMetrics(sessionID, finishReason)
 	o.hub.Publish(sessionID, o.agentID, "done", payload)
 }
 

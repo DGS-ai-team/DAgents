@@ -17,8 +17,17 @@
 | `HandleAsyncToolResult` | 异步工具完成写 history 并可选续跑 |
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
 | `InterruptPending` | 用户新消息打断 pending，补 interrupted tool_result |
+| `publishTurnIdleDone` | `done` SSE；含 **`tool_context_metrics`**（WS5） |
 
-内部主要方法：`runOneStep`、`buildSystemPrompt`、`publishTurnIdleDone`（`tool_router.go` / `cancel_partial.go` / `history_write.go`）。
+内部主要方法：`runOneStep`、`buildSystemPrompt`（`tool_router.go` / `cancel_partial.go` / `history_write.go`）。
+
+## context_metrics.go（WS5）
+
+| 符号 | 说明 |
+|------|------|
+| `TurnContextMetrics` | 单用户任务内工具链指标快照 |
+| `recordToolCall` / `recordToolResult` / `recordToolLoop` | 编排器内埋点 |
+| `snapshot()` | 序列化为 `done.tool_context_metrics` |
 
 ## tool_router.go
 
@@ -75,12 +84,12 @@
 
 | 符号 | 说明 |
 |------|------|
-| `modelContentMaxChars` | 写入模型的 tool 结果截断上限 |
 | `AsyncToolResultInput` | 异步回灌输入（job_id、status、content 等） |
-| `buildAsyncToolMessages` | 按尾部形态生成 assistant/tool/user 消息（user `name=async_tool`） |
+| `buildAsyncToolMessages` | async 回灌消息；经 `tool.after_each` 拆分 SSE 全文 / history 摘要 |
+| `splitToolResult` | 同步 tool：调用 `RunToolAfterEach` |
+| `ForClientContent` | async SSE 全文字段 |
 | `classifyToolResultTail` | 判断 history 尾部形态 |
 | `shouldContinueAfterAsyncTool` | 回灌后是否继续 `RunToolMessageTurn` |
-| `packageToolResult` / `clipMiddle` | 工具结果打包与截断 |
 
 ## approval_payload.go
 

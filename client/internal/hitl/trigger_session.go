@@ -37,7 +37,7 @@ func IsTriggerSessionApprovalItem(item ToolApprovalItem) bool {
 		return true
 	}
 	name := strings.ToLower(strings.TrimSpace(item.Name))
-	return name == "trigger_create" || name == "trigger_fire"
+	return name == "trigger_create"
 }
 
 // HasTriggerSessionApprovalItems 判断本批审批是否含 trigger 四选项工具。

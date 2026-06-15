@@ -20,7 +20,7 @@ func writeFileToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "write_file",
 			Description: descFSPathConvention + " " + descReadBeforeWrite + " 写入文本文件（覆盖）。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
@@ -52,13 +52,23 @@ func (r *Registry) execWriteFile(_ context.Context, raw json.RawMessage) (string
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	enc := r.resolveFileEncoding(args.Encoding)
+	enc, encSrc, err := r.resolveWriteEncoding(args.Path, path, args.Encoding)
+	if err != nil {
+		return fmt.Sprintf("ERROR: write_file 失败: %v", err), nil
+	}
 	payload, err := encodeFileContent(args.Content, enc)
 	if err != nil {
 		return fmt.Sprintf("ERROR: write_file 失败: %v", err), nil
 	}
 	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		return "", err
+	}
+	if info, err := os.Stat(path); err == nil {
+		src := encSrc
+		if args.Encoding != nil {
+			src = encSourceArgument
+		}
+		r.rememberPathEncoding(args.Path, enc, info.ModTime(), src)
 	}
 	return fmt.Sprintf("wrote %d bytes to %s (encoding=%s)", len(payload), args.Path, enc), nil
 }

@@ -67,6 +67,8 @@
 | 主题 | 摘要 | 文档 |
 |------|------|------|
 | **上下文压缩 × Prompt Cache** | 侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；改 `CompleteText` 二次序列化；M3 silent 冷却抑制重复侧车 | [major-changes.md §1](docs/design/major-changes.md#1-上下文压缩与-prompt-cache-对齐m2--m3) · [完整分析](docs/design/context-compression-cache-analysis.md) |
+| **工具链上下文成本** | 减少轮询、tool 结果膨胀、schema 前缀扰动 | [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) |
+| **Tool Before Hook** | 执行前 Hook + 重复调用 60s 内三选项审批 | [tool-before-hook-duplicate-approval.md](docs/design/tool-before-hook-duplicate-approval.md) |
 
 新的大项优化请按 [major-changes.md 条目模板](docs/design/major-changes.md#条目模板复制使用) 追加。
 

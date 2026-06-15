@@ -53,7 +53,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 - **OpenAI 兼容 Chat Completions**：流式、`tools`（**`node/internal/llm/`**）；**`llm.api_base`** 指向兼容网关。
 - **Turn loop**：工具调用 → 本地 **`Execute`** → **`tool_result`** → 继续 loop；工具级审批与 **`ask_user_information`**（[go-node-internals.md](./architecture/go-node-internals.md)）。
-- **工具集**（**`node/internal/tools/`**）：**`bash_run`**（bash/cmd/powershell、GBK/UTF-8 输出解码）、受限 **FS** 四件套（**v0.2.17** 起可选 **`encoding`**：utf-8/gbk/gb18030）、**`load_skills` / `unload_skills` / `clear_skills`**、**trigger_*** 系列、**临时子 Agent**（**`create_temporary_agent`** 等，非 A2A）；**`run_in_background`** 与后台 job 工具。清单见 [built-in-tools.md](./built-in-tools.md) 与 **`node/internal/tools/README.md`**。
+- **工具集**（**`node/internal/tools/`**）：**`bash_run`**（bash/cmd/powershell、同步 + 超时降级后台 job）、受限 **FS** 四件套、**`load_skills` / `unload_skills` / `clear_skills`**、**trigger_*** 系列、**临时子 Agent** 等；**`background_job_status/cancel`** 管理降级 job。清单见 [built-in-tools.md](./built-in-tools.md) 与 **`node/internal/tools/README.md`**。
 - **策略（Policy）**（**v0.2.16**）：**`GET/PUT /v1/policy`**；Go / Python TUI **`/policy`** 查看与 `set`。
 - **审批（HITL）**：**`.runtime/policy/`** + **`approval_required`** SSE + Client **`resume`**（0.2.2 起修复父子 Agent 并发审批队列；**v0.2.17** 修复 async 回灌清 pending HITL）。
 

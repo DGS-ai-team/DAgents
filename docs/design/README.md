@@ -12,3 +12,6 @@
 | [agent-hooks.md](./agent-hooks.md) | **Agent Hook 扩展点**（设计稿）：turn 全链路阶段锚点、`HookRegistry`、配置与落地顺序 |
 | [major-changes.md](./major-changes.md) | **重大设计变更与优化实录**（可读摘要 + 条目模板） |
 | [context-compression-cache-analysis.md](./context-compression-cache-analysis.md) | 压缩 × Prompt Cache 完整分析（M1–M3） |
+| [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) | **工具链上下文成本优化**（WS1–WS6；bash job 轮询治理 §5） |
+| [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | **tool.before_each Hook** + 重复调用三选项审批（设计稿） |
+| [ux-agent-owned-file-approval.md](./ux-agent-owned-file-approval.md) | **UX 专题**：Agent 自有文件写操作审批信任链（设计稿） |

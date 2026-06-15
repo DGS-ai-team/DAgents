@@ -15,13 +15,13 @@ func backgroundJobStatusToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "background_job_status",
-			Description: "查询 bash_run 同步超时自动降级或 run_in_background=true 提交的后台任务状态与输出摘要。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Description: "查询 bash_run 后台任务状态与输出摘要。任务完成后通常已由 async_tool_result 自动回灌，无需轮询；仅在需取消或主动确认进度时使用。",
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"job_id": map[string]any{
 						"type":        "string",
-						"description": "run_in_background=true 提交时返回的后台任务 ID（必填）",
+						"description": "bash_run 超时降级或历史后台任务返回的 job_id（必填）",
 					},
 				},
 				"required":             []string{"job_id"},
@@ -37,12 +37,12 @@ func backgroundJobCancelToolDef() ToolDef {
 		Function: FunctionDef{
 			Name:        "background_job_cancel",
 			Description: "取消 bash_run 仍在运行的后台任务（含同步超时降级产生的 job）。",
-			Parameters: injectRunInBackgroundParam(map[string]any{
+			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"job_id": map[string]any{
 						"type":        "string",
-						"description": "要取消的后台任务 ID（必填）；须为 run_in_background 返回且仍在运行",
+						"description": "要取消的后台 job_id（必填）；须为 bash_run 超时降级产生且仍在运行",
 					},
 				},
 				"required":             []string{"job_id"},

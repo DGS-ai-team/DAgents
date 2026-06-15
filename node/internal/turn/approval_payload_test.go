@@ -14,7 +14,7 @@ func TestBuildApprovalToolItemTriggerCreate(t *testing.T) {
 			Name:      "trigger_create",
 			Arguments: `{"name":"喝水提醒","schedule":{"kind":"once","fire_at":"2026-06-01T12:00:00Z"}}`,
 		},
-	})
+	}, nil)
 	if item["name"] != "trigger_create" {
 		t.Fatalf("name = %v", item["name"])
 	}

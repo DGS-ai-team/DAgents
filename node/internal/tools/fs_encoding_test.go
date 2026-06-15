@@ -59,8 +59,11 @@ func TestReadWriteFileEncodingGBK(t *testing.T) {
 	if !strings.Contains(out, "中文内容") {
 		t.Fatalf("read_file = %q", out)
 	}
-	if !strings.Contains(out, "文件编码: gbk") {
+	if !strings.Contains(out, "文件编码: gbk") && !strings.Contains(out, "文件编码: gb18030") {
 		t.Fatalf("read_file header missing encoding: %q", out)
+	}
+	if !strings.Contains(out, "编码来源:") {
+		t.Fatalf("read_file header missing source: %q", out)
 	}
 
 	out, err = reg.Execute(context.Background(), "write_file", encodeToolArgs(t, map[string]any{

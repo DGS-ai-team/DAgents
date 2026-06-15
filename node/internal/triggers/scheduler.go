@@ -101,7 +101,7 @@ func (s *Scheduler) Stop() {
 
 // FireTrigger 手动或工具触发指定触发器。
 //
-// opts 非 nil 时为一次性 override（如 trigger_fire 审批选项）；nil 时使用 def 持久化配置。
+// opts 非 nil 时为一次性 override（如 HTTP fire / 审批选项）；nil 时使用 def 持久化配置。
 func (s *Scheduler) FireTrigger(triggerID, reason string, payload map[string]any, force bool, opts *FireOptions) (FireRecord, error) {
 	def, ok := s.store.GetTrigger(triggerID)
 	if !ok {

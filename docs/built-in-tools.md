@@ -29,7 +29,6 @@
 | **`trigger_create`** | **`tool_triggers.go`** | 创建触发器 |
 | **`trigger_update`** | **`tool_triggers.go`** | 更新触发器 |
 | **`trigger_delete`** | **`tool_triggers.go`** | 删除触发器 |
-| **`trigger_fire`** | **`tool_triggers.go`** | 手动 fire |
 | **`agent_invoke`** | **`tool_a2a.go`** | 经 Manage 向对端 Agent 发起 A2A Task 并等待 `result_text`（须 **`manage.enabled`**） |
 | **`agent_discover`** | **`tool_a2a.go`** | 经 Manage 发现注册 Agent（须 **`manage.enabled`**） |
 | **`create_temporary_agent`** | **`tool_childagent.go`** | 同进程临时子 Agent |
@@ -37,7 +36,7 @@
 | **`temporary_agent_status`** | **`tool_childagent.go`** | 非阻塞查询子 Agent |
 | **`cancel_temporary_agent`** | **`tool_childagent.go`** | 取消子 Agent |
 
-**执行模式**：通用参数 **`run_in_background`**；**`bash_run`** 超时可降级为后台 job。详见 **`node/internal/tools/README.md`**。
+**执行模式**：工具 schema **均为同步**；**`bash_run`** 在 `timeout_seconds` 内未完成时 **自动降级**为后台 job（完成后 async 回灌）。详见 **`node/internal/tools/README.md`**。
 
 ### `tools.enabled_groups`（允许列表）
 
@@ -57,7 +56,7 @@
 | **`bash`** | `bash_run`、`background_job_status`、`background_job_cancel` |
 | **`hitl`** | `ask_user_information` |
 | **`skills`** | `load_skills`、`unload_skills`、`clear_skills` |
-| **`triggers`** | `trigger_list` … `trigger_fire` |
+| **`triggers`** | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete` |
 | **`a2a`** | `agent_invoke`、`agent_discover` |
 | **`child_agents`** | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
 

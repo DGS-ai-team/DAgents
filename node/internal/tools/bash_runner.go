@@ -118,7 +118,7 @@ func startShellCommand(params shellRunParams) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// runShellUntilDone 在 ctx 有效期内等待 shell 结束（用于 run_in_background=true）。
+// runShellUntilDone 在 ctx 有效期内等待 shell 结束（用于内部 StartBackground 路径）。
 func runShellUntilDone(ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
 	base, err := startShellCommand(params)
 	if err != nil {
@@ -263,15 +263,11 @@ func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, st
 	}
 
 	cfg := params.compress.normalized()
-	outText, outMeta := compressBashStream(cfg, stdout, cfg.MaxOutputChars)
-	errLimit := stderrMaxRunes(cfg, exitCode)
-	errText, errMeta := compressBashStream(cfg, stderr, errLimit)
+	outText, outMeta := sanitizeBashStream(cfg, stdout)
+	errText, errMeta := sanitizeBashStream(cfg, stderr)
 	stats := aggregateBashCompressStats(outMeta, errMeta)
 
 	header := fmt.Sprintf("[BASH_RESULT] exit=%d", exitCode)
-	if outMeta.runeTruncated || errMeta.runeTruncated {
-		header += " truncated"
-	}
 
 	parts := []string{
 		header,
@@ -284,17 +280,4 @@ func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, st
 		parts = append(parts, "exit_error: "+runErr.Error())
 	}
 	return strings.Join(parts, "\n"), stats
-}
-
-func formatShellRunningResult(job *backgroundJob, params shellRunParams) string {
-	st := params.shellType
-	if job.bashShellType != "" {
-		st = shellType(job.bashShellType)
-	}
-	return strings.Join([]string{
-		fmt.Sprintf("[BASH_RESULT] status=RUNNING job_id=%s", job.id),
-		fmt.Sprintf("shell_type=%s", st),
-		"命令超过同步等待时间，已自动降级为后台任务；也可显式使用 run_in_background=true。",
-		"可用 background_job_status / background_job_cancel 查询或取消。",
-	}, "\n")
 }
