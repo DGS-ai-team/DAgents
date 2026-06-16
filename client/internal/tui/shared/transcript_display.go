@@ -57,6 +57,12 @@ func FormatTranscriptLineForDisplay(line string, width int) string {
 	case strings.HasPrefix(line, "[reasoning] "):
 		body := sanitizeTerminalText(strings.TrimPrefix(line, "[reasoning] "))
 		return roleDotReasoning + panelDimStyle + body + panelReset
+	case strings.HasPrefix(line, toolA2APendingLinePrefix):
+		body := ToolA2ALineBody(line, toolA2APendingLinePrefix)
+		return roleDotToolA2A + toolA2APendingStyle + sanitizeTerminalText(body) + panelReset
+	case strings.HasPrefix(line, toolA2AResultLinePrefix):
+		body := ToolA2ALineBody(line, toolA2AResultLinePrefix)
+		return roleDotToolA2A + toolA2AResultStyle + sanitizeTerminalText(body) + panelReset
 	case strings.HasPrefix(line, toolPendingLinePrefix):
 		body := metaLineBody(line, toolPendingLinePrefix)
 		return roleDotToolPending + toolPendingStyle + sanitizeTerminalText(body) + panelReset
@@ -96,6 +102,7 @@ const (
 	roleDotReasoning     = "\033[90m●\033[0m "
 	roleDotTool          = "\033[36m●\033[0m "
 	roleDotToolPending   = "\033[33m●\033[0m "
+	roleDotToolA2A       = "\033[96;5m●\033[0m "
 	roleDotToolSuccess   = "\033[32m●\033[0m "
 	roleDotToolFailure   = "\033[31m●\033[0m "
 	roleDotSystem        = "\033[90m●\033[0m "
@@ -111,6 +118,8 @@ const (
 	panelReset        = "\033[0m"
 
 	toolPendingStyle  = "\033[33m"
+	toolA2APendingStyle = "\033[96m"
+	toolA2AResultStyle  = "\033[96;1m"
 	toolPreviewStyle  = "\033[90m"
 	toolCodeStyle     = "\033[37m"
 	toolDimStyle      = "\033[90m"

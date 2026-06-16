@@ -113,6 +113,11 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 	if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 		return true, nil
 	}
+	if (ev.Type == "approval_required" || ev.Type == "user_information_required") && clihitl.IsA2ARelayHITL(ev.Data) {
+		if r.turn.Awaiting() {
+			r.turn.FinishTurn()
+		}
+	}
 	if ev.Type == "usage" {
 		suffix := tuishared.FormatInlineUsage(tuishared.ParseUsageRound(ev.Data))
 		if suffix != "" {

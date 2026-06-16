@@ -64,6 +64,7 @@
 | POST | `/v1/a2a/tasks/{id}/ack` | **Callee Node** | Node → Manage | 标记 processing |
 | POST | `/v1/a2a/tasks/{id}/reply` | **Callee Node** | Node → Manage | 提交结果 / `requires_input` |
 | GET | `/v1/a2a/tasks/{id}` | Caller / Callee Node | Node → Manage | 轮询状态 |
+| POST | `/v1/a2a/tasks/{id}/caller_notify` | **Caller Node** | Node → Manage | HITL 中继：caller 已收到 HITL |
 | POST | `/v1/a2a/tasks/{id}/caller_resume` | **Caller Node** | Node → Manage | HITL 中继：用户 resume |
 | GET | `/v1/a2a/tasks/{id}/caller_input?wait=` | **Callee Node** | Node → Manage | HITL 中继：取 resume 载荷 |
 
@@ -169,22 +170,34 @@ Node B (caller)                    Manage                         Node A (callee
 ```text
 1. Callee: POST .../reply  status=requires_input
 2. Task → awaiting_caller
-3. Caller: WaitForInvokeResult 识别 → A2ACallerHITLBridge 推 SSE 到 **caller 本地 TUI**
+3. Caller: WaitForInvokeResult 识别 → `POST .../caller_notify` → **caller_notified** → A2ACallerHITLBridge 推 SSE 到 **caller 本地 TUI**
 4. 用户在 caller TUI resume
-5. Caller: POST .../caller_resume
-6. Callee: GET .../caller_input?wait=  → EnqueueResume → 续跑 turn
+5. Caller: POST .../caller_resume → **caller_responded**
+6. Callee: GET .../caller_input?wait=  → **processing** → EnqueueResume → 续跑 turn
 7. Callee: POST .../reply  status=completed
 8. Caller: GET task → 得到 result_text
 ```
 
 **要点**：HITL UI 在 **caller 侧 Client↔Node** 本地完成；Manage 只做 **Task 状态与 resume 载荷中继**。
 
+**Caller Client 展示（v0.3.9+）**
+
+| 场景 | SSE / UI | 说明 |
+|------|----------|------|
+| 工具审批中继 | `approval_required` + `a2a_relay` | 合成工具块，标题含 **`from <对端名>`**（`a2a_peer_agent_name`）；审批提交后即终态，**不等** callee `tool_result` |
+| 用户询问中继 | `user_information_required` + `a2a_relay` | 释放 turn 栅栏，在 caller TUI 回答后经 `caller_resume` 回传 |
+| 对端标识来源 | callee `requires_input` JSON | `callee_agent_id` / `callee_agent_name` → caller SSE `a2a_peer_agent_*` |
+
+双 Client（Python Textual / Go bubbletea）行为对齐；联调见 `cases/a2a-manage-docker/` 与 `scripts/verify-bash-hitl.sh`。
+
+**单测索引**：`node/internal/session/a2a_*_test.go`、`node/internal/manage/compliance_executor_*_test.go`、`node/internal/a2aclient/client_a2a_test.go`、`client/internal/hitl/a2a_test.go`、`client/internal/tui/full/a2a_relay_tools_test.go`、`tests/test_cli_a2a_relay.py`、`tests/test_manage_a2a_store.py`（caller_resume）。
+
 ### 4.3 Task 状态机
 
 ```text
 queued → delivered → processing → completed | failed | expired
                       ↓
-               awaiting_caller → processing → completed
+               awaiting_caller → caller_notified → caller_responded → processing → completed
 ```
 
 Manage 侧：`manage/a2a/store.py`（poll 时 mark delivered；后台 TTL sweep）。

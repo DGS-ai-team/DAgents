@@ -17,6 +17,7 @@ from app.cli.child_agent import (
     approval_queue_key,
     child_session_id_from_data,
     format_child_lifecycle_line,
+    is_a2a_relay_hitl,
     should_skip_child_runtime_display,
 )
 from app.cli.user_information import (
@@ -770,7 +771,21 @@ class SessionController:
                 self._child_tracker.set_awaiting_approval(child_id, True)
                 self._emit_child_strip()
         self._hitl_queue.append(item)
+        if is_a2a_relay_hitl(item.data):
+            self._release_turn_wait_for_a2a_relay(item.data)
         self._notify_hitl_pending()
+
+    def _release_turn_wait_for_a2a_relay(self, data: dict[str, Any]) -> None:
+        """agent_invoke 同步等待期间对端 HITL 中继：释放 turn 等待以便 TUI 处理审批/询问。"""
+        if not self._awaiting_user_turn:
+            return
+        self._awaiting_user_turn = False
+        self._user_turn_done.set()
+        self._logger.info(
+            "a2a relay hitl released turn wait session_id=%s task_id=%s",
+            self.session_id,
+            str(data.get("a2a_task_id") or ""),
+        )
 
     def _drop_hitl_queue_for_user_interrupt(self) -> None:
         """新用户消息会打断 server pending HITL；本地队列必须同步清空。"""

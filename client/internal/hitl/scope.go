@@ -45,8 +45,23 @@ func IsChildRuntimeEvent(data map[string]any) bool {
 	return ChildSessionIDFromData(data) != ""
 }
 
+// IsA2ARelayHITL 判断 SSE data 是否为 agent_invoke 期间经 Manage 中继的对端 HITL。
+func IsA2ARelayHITL(data map[string]any) bool {
+	if data == nil {
+		return false
+	}
+	v, ok := data["a2a_relay"].(bool)
+	return ok && v
+}
+
 // ApprovalHeader 返回审批面板标题。
 func ApprovalHeader(data map[string]any) string {
+	if IsA2ARelayHITL(data) {
+		if label := A2APeerLabel(data); label != "" {
+			return "A2A 对端 Agent 请求审批 · " + label
+		}
+		return "A2A 对端 Agent 请求审批"
+	}
 	if !IsTemporaryAgentApproval(data) {
 		return "工具审批"
 	}

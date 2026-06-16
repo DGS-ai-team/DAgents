@@ -21,6 +21,7 @@ func (m *model) initApprovalState(data map[string]any) {
 	m.approvalTriggerDecided = make(map[string]string)
 	m.approvalTriggerRejected = make(map[string]bool)
 	m.approvalTriggerOptionCursor = 0
+	m.ensureA2ARelayApprovalToolBlocks(data)
 }
 
 func (m *model) initUserInfoState(data map[string]any) {

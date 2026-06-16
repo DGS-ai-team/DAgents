@@ -19,19 +19,21 @@ type InboxConsultationRunner interface {
 	RunInboxTurn(ctx context.Context, taskID, content string, resume map[string]any) (session.InboxTurnResult, error)
 }
 
-// ComplianceExecutor 合规助手 inbox 处理器：经 session turn loop 调用 LLM；HITL 时经 Manage awaiting_caller 中继至 caller。
+// ComplianceExecutor inbox 处理器：经 session turn loop 调用 LLM；HITL 时经 Manage awaiting_caller 中继至 caller。
 type ComplianceExecutor struct {
+	cfg      *config.Config
 	replier  *taskReplier
 	sessions InboxConsultationRunner
 	logger   *slog.Logger
 }
 
-// NewComplianceExecutor 构造合规 inbox 处理器。
+// NewComplianceExecutor 构造 inbox 处理器。
 func NewComplianceExecutor(cfg *config.Config, sessions InboxConsultationRunner, logger *slog.Logger) *ComplianceExecutor {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &ComplianceExecutor{
+		cfg:      cfg,
 		replier:  newTaskReplier(cfg, logger),
 		sessions: sessions,
 		logger:   logger,
@@ -64,7 +66,7 @@ func (e *ComplianceExecutor) HandleTask(ctx context.Context, task InboxTask) err
 			return e.replier.reply(ctx, task, "failed", step.Text, sessionID, err.Error())
 		}
 		if step.HITL != nil {
-			payload, err := encodeRequiresInputPayload(task, sessionID, step.HITL)
+			payload, err := encodeRequiresInputPayload(e.cfg, task, sessionID, step.HITL)
 			if err != nil {
 				return e.replier.reply(ctx, task, "failed", "", sessionID, err.Error())
 			}
@@ -101,15 +103,18 @@ func (e *ComplianceExecutor) HandleTask(ctx context.Context, task InboxTask) err
 	}
 }
 
-func encodeRequiresInputPayload(task InboxTask, calleeSessionID string, hitl *session.InboxHITLPause) (string, error) {
+func encodeRequiresInputPayload(cfg *config.Config, task InboxTask, calleeSessionID string, hitl *session.InboxHITLPause) (string, error) {
 	if hitl == nil {
 		return "", fmt.Errorf("hitl payload is nil")
 	}
+	peerID, peerName := calleeAgentMeta(cfg)
 	payload := map[string]any{
 		"hitl_kind":         hitl.Awaiting,
 		"task_id":           task.TaskID,
 		"callee_session_id": calleeSessionID,
 		"caller_session_id": strings.TrimSpace(task.CallerSessionID),
+		"callee_agent_id":   peerID,
+		"callee_agent_name": peerName,
 		"event_type":        hitl.EventType,
 		"event_data":        hitl.Data,
 	}
@@ -120,11 +125,21 @@ func encodeRequiresInputPayload(task InboxTask, calleeSessionID string, hitl *se
 	return string(raw), nil
 }
 
+func calleeAgentMeta(cfg *config.Config) (id, name string) {
+	if cfg != nil {
+		id = strings.TrimSpace(cfg.AgentID)
+	}
+	if card, _ := LoadDefaultAgentCard(); card != nil {
+		name = strings.TrimSpace(card.Name)
+	}
+	return id, name
+}
+
 func inboxSessionIDForTask(taskID string) string {
 	return session.InboxSessionID(taskID)
 }
 
-func agentRole(cfg *config.Config) string {
+func agentRole() string {
 	if card, _ := LoadDefaultAgentCard(); card != nil {
 		return card.role()
 	}
@@ -133,7 +148,7 @@ func agentRole(cfg *config.Config) string {
 
 // ResolveInboxHandler 按 Agent Card metadata.role 选择 inbox 处理器。
 func ResolveInboxHandler(cfg *config.Config, sessions *session.Manager, logger *slog.Logger) InboxTaskHandler {
-	switch agentRole(cfg) {
+	switch agentRole() {
 	case "compliance":
 		return NewComplianceExecutor(cfg, sessions, logger).HandleTask
 	default:

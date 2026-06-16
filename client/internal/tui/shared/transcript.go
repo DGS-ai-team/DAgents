@@ -294,6 +294,7 @@ func (t *Transcript) RemoveToolPendingLines(blockID string) {
 	prefixes := []string{
 		toolPendingLinePrefix + blockID + "]",
 		toolCallCodeLinePrefix + blockID + "]",
+		toolA2APendingLinePrefix + blockID + "]",
 	}
 	var kept []string
 	for _, line := range t.lines {

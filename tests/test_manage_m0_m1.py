@@ -143,6 +143,52 @@ class ManageRegistryTests(unittest.TestCase):
         self.assertEqual(missing.status_code, 422)
         self.assertEqual(ok.status_code, 200)
 
+    def test_discover_without_group_matches_caller_groups(self) -> None:
+        app = create_app()
+        with TestClient(app) as client:
+            client.post(
+                "/v1/registry/agents",
+                json={"agent_id": "caller", "base_url": "http://caller.local", "expose_to_peers": True},
+                headers={"x-dagents-agent-id": "caller"},
+            )
+            client.post(
+                "/v1/registry/agents",
+                json={"agent_id": "peer-ops", "base_url": "http://peer-ops.local", "expose_to_peers": True},
+                headers={"x-dagents-agent-id": "peer-ops"},
+            )
+            client.post(
+                "/v1/registry/agents",
+                json={"agent_id": "peer-lab", "base_url": "http://peer-lab.local", "expose_to_peers": True},
+                headers={"x-dagents-agent-id": "peer-lab"},
+            )
+            client.patch(
+                "/v1/registry/agents/caller/groups",
+                json={"discovery_group": ["ops"]},
+            )
+            client.patch(
+                "/v1/registry/agents/peer-ops/groups",
+                json={"discovery_group": ["ops"]},
+            )
+            client.patch(
+                "/v1/registry/agents/peer-lab/groups",
+                json={"discovery_group": ["lab"]},
+            )
+            discover = client.get(
+                "/v1/registry/agents/discover",
+                headers={"x-dagents-agent-id": "caller"},
+            )
+            empty = client.get(
+                "/v1/registry/agents/discover",
+                headers={"x-dagents-agent-id": "unknown-agent"},
+            )
+
+        self.assertEqual(discover.status_code, 200)
+        ids = {item["agent_id"] for item in discover.json()["agents"]}
+        self.assertIn("peer-ops", ids)
+        self.assertNotIn("peer-lab", ids)
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["agents"], [])
+
     def test_derive_status_grace(self) -> None:
         now = 10_000
         self.assertEqual(derive_status(now_unix=now, expires_at_unix=now + 1, grace_seconds=60), "online")

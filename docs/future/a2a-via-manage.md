@@ -107,14 +107,34 @@ callee inbox turn 若触发 HITL，**不** 以空 `completed` 结束；改为：
 
 1. callee `POST .../reply`，`status=requires_input`，Task 进入 **`awaiting_caller`**
 2. `result_text` 为 JSON（含 `hitl_kind`、`event_type`、`event_data`、`callee_session_id`、`caller_session_id`）
-3. caller `agent_invoke` 轮询识别后，在 **caller_session_id** 对应 TUI 展示 HITL
-4. 用户审批后 caller `POST .../caller_resume`；callee `GET .../caller_input` 取 `resume_value` 并 `EnqueueResume(callee_session_id)`
+3. caller `agent_invoke` 轮询识别后，在 **caller_session_id** 对应 TUI 展示 HITL；`POST .../caller_notify` → **`caller_notified`**
+4. 用户审批后 caller `POST .../caller_resume` → **`caller_responded`**（`pending_caller_resume`）；callee `GET .../caller_input` 取 `resume_value` → **`processing`**
 5. turn 续跑后最终 `reply(completed, result_text)`
 
 | 方法 | 路径 | 调用方 |
 |------|------|--------|
-| POST | `/v1/a2a/tasks/{id}/caller_resume` | caller（node-b） |
-| GET | `/v1/a2a/tasks/{id}/caller_input?wait=` | callee（node-a） |
+| POST | `/v1/a2a/tasks/{id}/caller_notify` | caller（node-b）已收到 HITL |
+| POST | `/v1/a2a/tasks/{id}/caller_resume` | caller（node-b）用户 resume |
+| GET | `/v1/a2a/tasks/{id}/caller_input?wait=` | callee（node-a）拉 resume |
+
+**Caller TUI（v0.3.9+）**：`approval_required` / `user_information_required` 带 `a2a_relay=true` 时，在 **调用方** session 展示 HITL（含 `from <对端 Agent>` 工具行标识）；用户 resume 后经 `caller_resume` 回 Manage，callee `RunInboxTurn(resume)` 续跑。
+
+**`requires_input` JSON 摘要**（`result_text`）：
+
+```json
+{
+  "hitl_kind": "tool_approval",
+  "task_id": "...",
+  "callee_session_id": "a2a-...",
+  "caller_session_id": "sess-b",
+  "callee_agent_id": "node-a",
+  "callee_agent_name": "合规助手",
+  "event_type": "approval_required",
+  "event_data": { "approval_id": "...", "approval_args": { "tool_calls": [] } }
+}
+```
+
+`hitl_kind` 亦可为 `user_information`；`event_data` 结构与本地 HITL SSE 一致。
 
 ### 5.1 工具层
 
@@ -154,15 +174,17 @@ Manage 环境变量：`MANAGE_A2A_INBOX_CONTENT_MAX_CHARS`（默认 4096）、`M
 
 ```text
 queued → delivered → processing → completed | failed | expired
-                      ↘ awaiting_caller → processing → completed
+                      ↘ awaiting_caller → caller_notified → caller_responded → processing → completed
 ```
 
 | 状态 | 含义 |
 |------|------|
 | `queued` | Manage 已接受，等待 callee 拉 inbox |
 | `delivered` | inbox 拉取时已标记（或 ack 前） |
-| `processing` | callee 已 ack，turn loop 运行中 |
-| `awaiting_caller` | callee 需 caller HITL；`result_text` 含 HITL JSON，等待 `caller_resume` |
+| `processing` | callee 已 ack 或已拉取 caller resume，turn loop 运行中 |
+| `awaiting_caller` | callee 需 caller HITL；`result_text` 含 HITL JSON |
+| `caller_notified` | caller 已收到 HITL 并中继至本地 TUI |
+| `caller_responded` | caller 已 `caller_resume`；`pending_caller_resume` 待 callee 拉取 |
 | `completed` | reply 已写入，caller 可读取 |
 | `failed` | callee 拒绝或执行失败 |
 | `expired` | TTL 超时未处理 |

@@ -235,6 +235,40 @@ class A2ATaskStoreTests(unittest.TestCase):
         self.assertTrue(item.content_truncated)
         self.assertEqual(len(item.content), 11)
 
+    def test_submit_caller_resume_and_poll_input(self) -> None:
+        store = _store()
+        task_id = _create(store)
+        store.ack(task_id, "callee")
+        store.reply(
+            task_id,
+            "callee",
+            TaskReplyRequest(
+                agent_id="callee",
+                status="requires_input",
+                result_text='{"hitl_kind":"tool_approval"}',
+            ),
+        )
+        store.submit_caller_notify(task_id, "caller")
+        task = store.submit_caller_resume(
+            task_id,
+            "caller",
+            {"type": "selection", "approved": ["call-1"], "rejected": []},
+        )
+        self.assertIsNotNone(task)
+        assert task is not None
+        self.assertEqual(task.status, "caller_responded")
+        resume, polled = store.poll_caller_input(task_id, "callee", wait_seconds=0)
+        self.assertIsNotNone(resume)
+        assert resume is not None
+        self.assertEqual(resume["type"], "selection")
+        assert polled is not None
+        self.assertEqual(polled.status, "processing")
+
+    def test_submit_caller_resume_rejects_invalid_state(self) -> None:
+        store = _store()
+        task_id = _create(store)
+        self.assertIsNone(store.submit_caller_resume(task_id, "caller", {"type": "approve"}))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,7 +28,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     cfg = settings or ManageSettings.from_env()
     app = FastAPI(
         title="DAgents Manage",
-        version="0.3.7",
+        version="0.3.9",
         description="统一控制面：Registry（M1）+ A2A Task Inbox（M2）+ Platform（M0）。",
     )
     db = SQLiteDatabase(cfg.db_path)

@@ -216,6 +216,8 @@ func (c *Client) waitForInvokeResult(
 	}
 	deadline := time.Now().Add(timeout)
 	var last TaskRecord
+	// 已对当前 requires_input payload 提交过 caller_resume 时，不再重复 WaitCallerHITL。
+	var relayedHitlPayload string
 	for {
 		rec, err := c.GetTask(ctx, taskID)
 		if err != nil {
@@ -231,13 +233,22 @@ func (c *Client) waitForInvokeResult(
 				msg = rec.Status
 			}
 			return rec, fmt.Errorf("task %s: %s", taskID, msg)
-		case "awaiting_caller":
+		case "awaiting_caller", "caller_notified":
 			if hitl == nil {
 				return rec, fmt.Errorf("task %s awaiting caller input", taskID)
+			}
+			hitlPayload := strings.TrimSpace(rec.ResultText)
+			if relayedHitlPayload != "" && relayedHitlPayload == hitlPayload {
+				break
 			}
 			callerSessionID = strings.TrimSpace(callerSessionID)
 			if callerSessionID == "" {
 				callerSessionID = strings.TrimSpace(rec.CallerSessionID)
+			}
+			if rec.Status == "awaiting_caller" {
+				if err := c.SubmitCallerNotify(ctx, taskID); err != nil {
+					return rec, err
+				}
 			}
 			payload, err := ParseRequiresInputPayload(rec.ResultText)
 			if err != nil {
@@ -250,6 +261,11 @@ func (c *Client) waitForInvokeResult(
 			if err := c.SubmitCallerResume(ctx, taskID, resume); err != nil {
 				return rec, err
 			}
+			relayedHitlPayload = hitlPayload
+		case "caller_responded", "processing":
+			relayedHitlPayload = ""
+		default:
+			relayedHitlPayload = ""
 		}
 		if time.Now().After(deadline) {
 			return last, fmt.Errorf("task %s: poll timeout after %s (last status=%s)", taskID, timeout, last.Status)
@@ -273,6 +289,25 @@ func ParseRequiresInputPayload(resultText string) (map[string]any, error) {
 		return nil, fmt.Errorf("parse requires_input payload: %w", err)
 	}
 	return out, nil
+}
+
+// SubmitCallerNotify 标记 caller 已收到 requires_input 并中继至本地 TUI。
+func (c *Client) SubmitCallerNotify(ctx context.Context, taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task_id is required")
+	}
+	resp, err := c.doJSON(ctx, http.MethodPost, c.manageURL("/v1/a2a/tasks/"+taskID+"/caller_notify"), map[string]any{
+		"caller_agent_id": c.cfg.AgentID,
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("caller_notify status %d: %s", resp.StatusCode, readErrorBody(resp.Body))
+	}
+	return nil
 }
 
 // SubmitCallerResume 提交 caller 侧 HITL resume。

@@ -407,11 +407,12 @@ func parseSimpleYAML(block string) map[string]any {
 			continue
 		}
 		lower := strings.ToLower(val)
-		if lower == "true" {
+		switch lower {
+		case "true":
 			out[key] = true
-		} else if lower == "false" {
+		case "false":
 			out[key] = false
-		} else {
+		default:
 			out[key] = val
 		}
 	}

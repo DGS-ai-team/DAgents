@@ -240,6 +240,26 @@ class A2ATaskStore:
             self._cond.notify_all()
             return TaskRecord(**updated.model_dump(mode="python"))
 
+    def submit_caller_notify(self, task_id: str, caller_agent_id: str) -> TaskRecord | None:
+        """Caller 已收到 requires_input 并中继至本地 TUI（awaiting_caller → caller_notified）。"""
+        with self._lock:
+            self._expire_one_locked(task_id)
+            stored = self._records.get(task_id)
+            if stored is None or stored.from_agent_id != caller_agent_id.strip():
+                return None
+            if stored.status == "caller_notified":
+                return TaskRecord(**stored.model_dump(mode="python"))
+            if stored.status != "awaiting_caller":
+                return None
+            now = int(time.time())
+            updated = self._replace_record_locked(
+                stored,
+                status="caller_notified",
+                updated_at_unix=now,
+            )
+            self._cond.notify_all()
+            return TaskRecord(**updated.model_dump(mode="python"))
+
     def submit_caller_resume(
         self,
         task_id: str,
@@ -251,11 +271,14 @@ class A2ATaskStore:
             stored = self._records.get(task_id)
             if stored is None or stored.from_agent_id != caller_agent_id.strip():
                 return None
-            if stored.status != "awaiting_caller":
+            if stored.status not in ("awaiting_caller", "caller_notified"):
+                if stored.status == "caller_responded":
+                    return TaskRecord(**stored.model_dump(mode="python"))
                 return None
             now = int(time.time())
             updated = self._replace_record_locked(
                 stored,
+                status="caller_responded",
                 updated_at_unix=now,
                 pending_caller_resume=dict(resume_value or {}),
             )
@@ -277,12 +300,15 @@ class A2ATaskStore:
                 stored = self._records.get(task_id)
                 if stored is None or stored.to_agent_id != cleaned:
                     return None, None
-                if stored.status != "awaiting_caller":
+                if stored.status == "processing":
+                    return None, TaskRecord(**stored.model_dump(mode="python"))
+                if stored.status not in ("awaiting_caller", "caller_notified", "caller_responded"):
                     return None, TaskRecord(**stored.model_dump(mode="python"))
                 pending = dict(stored.pending_caller_resume or {})
                 if pending:
                     updated = self._replace_record_locked(
                         stored,
+                        status="processing",
                         pending_caller_resume={},
                         updated_at_unix=int(time.time()),
                     )

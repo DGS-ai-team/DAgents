@@ -60,7 +60,9 @@ func (b *A2ACallerHITLBridge) WaitCallerHITL(
 	}
 	data["a2a_task_id"] = taskID
 	data["a2a_relay"] = true
+	attachA2APeerMeta(data, hitlPayload)
 	b.hub.Publish(callerSessionID, b.agentID, eventType, data)
+	b.publishRelayTurnPause(callerSessionID, hitlPayload)
 
 	select {
 	case resume := <-waiter.ch:
@@ -98,6 +100,34 @@ func (b *A2ACallerHITLBridge) clearWait(taskID, callerSessionID string) {
 	delete(b.bySess, callerSessionID)
 }
 
+// publishRelayTurnPause 推送 synthetic done，与本地 HITL 暂停对齐，便于 Client 释放 turn 等待。
+func (b *A2ACallerHITLBridge) publishRelayTurnPause(callerSessionID string, hitlPayload map[string]any) {
+	if b == nil || b.hub == nil {
+		return
+	}
+	finishReason, awaiting := relayHITLFinishReason(hitlPayload)
+	payload := map[string]any{
+		"finish_reason": finishReason,
+		"turn_complete": false,
+		"awaiting":      awaiting,
+		"a2a_relay":     true,
+	}
+	b.hub.Publish(callerSessionID, b.agentID, "done", payload)
+}
+
+func relayHITLFinishReason(hitlPayload map[string]any) (finishReason, awaiting string) {
+	kind := ""
+	if hitlPayload != nil {
+		kind, _ = hitlPayload["hitl_kind"].(string)
+	}
+	switch strings.TrimSpace(kind) {
+	case "user_information":
+		return "awaiting_user_information", "user_information"
+	default:
+		return "awaiting_tool_approval", "tool_approval"
+	}
+}
+
 func hitlPayloadToSSE(payload map[string]any) (eventType string, data map[string]any) {
 	if payload == nil {
 		return "", nil
@@ -124,4 +154,17 @@ func hitlPayloadToSSE(payload map[string]any) (eventType string, data map[string
 		}
 	}
 	return "", nil
+}
+
+// attachA2APeerMeta 将 requires_input 中的对端 Agent 标识写入 caller SSE（供 Client 展示 from 标签）。
+func attachA2APeerMeta(data, hitlPayload map[string]any) {
+	if data == nil || hitlPayload == nil {
+		return
+	}
+	if id, _ := hitlPayload["callee_agent_id"].(string); strings.TrimSpace(id) != "" {
+		data["a2a_peer_agent_id"] = strings.TrimSpace(id)
+	}
+	if name, _ := hitlPayload["callee_agent_name"].(string); strings.TrimSpace(name) != "" {
+		data["a2a_peer_agent_name"] = strings.TrimSpace(name)
+	}
 }

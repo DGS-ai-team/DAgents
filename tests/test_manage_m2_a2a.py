@@ -208,6 +208,14 @@ class ManageA2ATests(unittest.TestCase):
                 )
                 self.assertEqual(got.json()["task"]["status"], "awaiting_caller")
 
+                notified = client.post(
+                    f"/v1/a2a/tasks/{task_id}/caller_notify",
+                    json={"caller_agent_id": "caller-01"},
+                    headers={"x-dagents-agent-id": "caller-01"},
+                )
+                self.assertEqual(notified.status_code, 200)
+                self.assertEqual(notified.json()["status"], "caller_notified")
+
                 resume = client.post(
                     f"/v1/a2a/tasks/{task_id}/caller_resume",
                     json={
@@ -217,6 +225,14 @@ class ManageA2ATests(unittest.TestCase):
                     headers={"x-dagents-agent-id": "caller-01"},
                 )
                 self.assertEqual(resume.status_code, 200)
+                self.assertEqual(resume.json()["status"], "caller_responded")
+
+                got_after_resume = client.get(
+                    f"/v1/a2a/tasks/{task_id}",
+                    params={"caller_agent_id": "caller-01"},
+                    headers={"x-dagents-agent-id": "caller-01"},
+                )
+                self.assertEqual(got_after_resume.json()["task"]["status"], "caller_responded")
 
                 polled = client.get(
                     f"/v1/a2a/tasks/{task_id}/caller_input",
@@ -225,6 +241,13 @@ class ManageA2ATests(unittest.TestCase):
                 )
                 self.assertTrue(polled.json()["ready"])
                 self.assertEqual(polled.json()["resume_value"]["type"], "approval")
+
+                got_after_input = client.get(
+                    f"/v1/a2a/tasks/{task_id}",
+                    params={"caller_agent_id": "caller-01"},
+                    headers={"x-dagents-agent-id": "caller-01"},
+                )
+                self.assertEqual(got_after_input.json()["task"]["status"], "processing")
 
                 done = client.post(
                     f"/v1/a2a/tasks/{task_id}/reply",

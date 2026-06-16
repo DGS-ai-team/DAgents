@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
 const defaultInboxTurnTimeout = 5 * time.Minute
@@ -52,6 +53,10 @@ func (m *Manager) RunInboxTurn(ctx context.Context, taskID, content string, resu
 	sessionID := inboxSessionID(taskID)
 	content = strings.TrimSpace(content)
 
+	afterSeq := m.hub.CurrentSeq()
+	sub := m.hub.Subscribe(afterSeq)
+	defer m.hub.Unsubscribe(sub)
+
 	switch {
 	case content != "":
 		if _, _, err := m.prepareInboxSession(sessionID); err != nil {
@@ -71,18 +76,15 @@ func (m *Manager) RunInboxTurn(ctx context.Context, taskID, content string, resu
 		return InboxTurnResult{}, fmt.Errorf("content or resume is required")
 	}
 
-	return m.waitInboxTurn(ctx, sessionID)
+	return m.waitInboxTurnWithSub(ctx, sessionID, sub)
 }
 
-func (m *Manager) waitInboxTurn(ctx context.Context, sessionID string) (InboxTurnResult, error) {
+func (m *Manager) waitInboxTurnWithSub(ctx context.Context, sessionID string, sub <-chan stream.Event) (InboxTurnResult, error) {
 	deadline := time.NewTimer(inboxTurnTimeout(ctx))
 	defer deadline.Stop()
 
 	var assistant strings.Builder
 	var hitl *InboxHITLPause
-
-	sub := m.hub.Subscribe(0)
-	defer m.hub.Unsubscribe(sub)
 
 	for {
 		select {
@@ -116,24 +118,14 @@ func (m *Manager) waitInboxTurn(ctx context.Context, sessionID string) (InboxTur
 				awaiting, _ := ev.Data["awaiting"].(string)
 				if !turnComplete && strings.TrimSpace(awaiting) != "" {
 					if hitl == nil {
-						hitl = &InboxHITLPause{Awaiting: awaiting, EventType: awaitingEventType(awaiting), Data: map[string]any{}}
+						// hub 非阻塞投递时 done 可能先于 approval_required；继续等待 HITL 事件。
+						continue
 					}
 					return InboxTurnResult{HITL: hitl}, nil
 				}
 				return InboxTurnResult{Complete: true, Text: strings.TrimSpace(assistant.String())}, nil
 			}
 		}
-	}
-}
-
-func awaitingEventType(awaiting string) string {
-	switch strings.TrimSpace(awaiting) {
-	case "user_information":
-		return "user_information_required"
-	case "tool_approval":
-		return "approval_required"
-	default:
-		return "approval_required"
 	}
 }
 

@@ -154,6 +154,36 @@ go run ./client/cmd/dagents-client \
 
 **前提**：`.env` 中 **`LLM_MOCK=false`** 且 node-a 已 [重建容器](#14-修改-env-后必须重建容器)。可在 Manage Console 或 `docker compose logs node-a` 查看 turn / 流式过程。
 
+### 3.3 A2A · `bash_run` 审批中继（node-b → node-a 查时间）
+
+本场景验证 **跨 Agent HITL 中继**：node-a 启用 `bash_run=always`，调用方在 **node-b TUI** 审批 callee 的工具调用。
+
+| 项 | 说明 |
+|----|------|
+| **node-a 策略** | `policy/node-a/tool.approval.txt` 中 `bash_run=always`；**每次启动**覆盖写入 runtime（见 entrypoint） |
+| **node-a 行为** | `custom.md` R-TIME-01：收到查时咨询时 **必须** `bash_run` 执行 `date` |
+| **node-b 行为** | `custom.md` 指引用 `agent_invoke` 向 node-a 发起查时咨询 |
+
+**手工步骤**（[§2](#2-启动-tui) 已连 node-b TUI，`LLM_MOCK=false`，`discovery_group` 已分配）：
+
+1. 在 **node-b TUI** 输入，例如：  
+   `请向合规助手 node-a 查询当前系统时间，并把结果告诉我`
+2. **预期**：node-b 调用 `agent_invoke` → Manage 投递 Task → node-a Inbox turn → node-a 拟调用 `bash_run`（`date`）。
+3. **node-b TUI** 出现 **A2A 审批中继**（relay 来自 node-a 的 `requires_input`）；在 **调用方** 确认 `bash_run`。
+4. 批准后 node-a 完成命令，Task `completed`，node-b 收到含 `date` 输出的 `result_text` 并转述给你。
+
+排障：`docker compose exec node-a grep bash_run /workspace/.runtime/policy/tool.approval.txt` 应为 `bash_run=always`；Task 卡在 `delivered` 且日志 `(no handler)` 见 [§1.3](#13-discovery_groupa2a-必需) 与 Agent Card `metadata.role=compliance`。
+
+**自动化验证（不经 TUI）**：栈启动后执行：
+
+```bash
+bash scripts/verify-bash-hitl.sh
+```
+
+脚本经 Manage API 模拟 `caller_notify` + `caller_resume`，并轮询 node-a session 是否写入 `bash` tool 结果、Task 是否 `completed`。
+
+> `scripts/verify.sh` **不包含** TUI 人工审批场景；`verify-bash-hitl.sh` 覆盖查时 + bash HITL 中继。改 `policy/` 或 Node 代码后执行 `docker compose up --build -d`。
+
 ---
 
 ## 4. 容器内目录与关键文件
@@ -178,15 +208,17 @@ go run ./client/cmd/dagents-client \
 | `/workspace/.runtime/skills/` | Skill 目录（首次从种子复制） |
 | `/workspace/.runtime/policy/` | 工具审批策略 |
 | `/opt/dagents/seed/skills/`、`/opt/dagents/seed/policy/` | 内置种子，仅首次填充 runtime |
+| `/opt/dagents/case-policy-root/node-{a,b}/` | 案例角色 policy；存在 `tool.approval.txt` 时 **每次启动覆盖** runtime policy |
 
-启动流程见 `scripts/entrypoint-node.sh`：创建 runtime 子目录 → 种子 skills/policy → **覆盖写入** `custom.md` → 若 `LLM_MOCK=false` 则将 config 中 `mock: true` 改为 `false` → 启动 `dagents-node`。
+启动流程见 `scripts/entrypoint-node.sh`：创建 runtime 子目录 → 种子 skills/policy → **覆盖** case 角色 policy（如 node-a `bash_run=always`）→ **覆盖写入** `custom.md` → 若 `LLM_MOCK=false` 则将 config 中 `mock: true` 改为 `false` → 启动 `dagents-node`。
 
 ### 4.3 仓库内案例源文件（修改后需 `docker compose up --build`）
 
 | 路径 | 内容摘要 |
 |------|----------|
-| `prompt_context/node-a/custom.md` | 用户自定义提示词（规章、输出建议等）；经 turn 注入 system prompt |
-| `prompt_context/node-b/custom.md` | 用户自定义提示词（运维门禁、A2A 咨询格式等） |
+| `prompt_context/node-a/custom.md` | 用户自定义提示词（规章、R-TIME-01 查时须 `bash_run` 等）；经 turn 注入 system prompt |
+| `prompt_context/node-b/custom.md` | 用户自定义提示词（运维门禁、A2A 查时/HITL 中继指引等） |
+| `policy/node-a/tool.approval.txt` | node-a **`bash_run=always`**（A2A HITL 联调） |
 | `agent-card/node-a.json` | 名称「合规助手」；`metadata.role=compliance`；能力 `compliance_review` / `policy_lookup` |
 | `agent-card/node-b.json` | 名称「运维执行助手」；`metadata.compliance_peer=node-a`；能力 `deployment` / `data_export` / `shell` |
 | `config/node-a.yaml` | 开启 `manage.a2a` Inbox；`registration` 仅含 `base_url` / `team` 等（**无** `agent_card_path`）；LLM 支持 `${LLM_*}` |
@@ -195,16 +227,16 @@ go run ./client/cmd/dagents-client \
 
 ---
 
-## 5. node-a A2A 合规（真实 LLM turn）
+## 5. node-a A2A 合规（真实 LLM turn + HITL 中继）
 
 **node-a** 收到 Manage Inbox Task 后，**不走硬编码规则**，而是与 TUI 相同地进入 **session turn loop**：
 
 1. Inbox poller 拉取 Task → `ComplianceExecutor`（`node/internal/manage/compliance_executor.go`）。
-2. **ack** 后调用 `session.RunInboxConsultation`：为每个 Task 创建/清空 `a2a-<task_id>` session，入队 user 消息（咨询正文）。
-3. 经 **流式 LLM**（SSE `assistant` 增量 → `done`）与可选 **工具循环** 跑完 turn，聚合 assistant 全文。
-4. 将 LLM 聚合文本 **原样** 写入 `result_text`，Task 状态恒为 **`completed`**（不做 APPROVED/DENIED 解析，不因 turn 异常置 `failed`）。
+2. **ack** 后调用 `session.RunInboxTurn`：为每个 Task 创建/清空 `a2a-<task_id>` session，入队 user 消息（咨询正文）；若带 **resume** 则续跑 HITL。
+3. 经 **流式 LLM**、**工具循环** 与可选 **HITL**（`bash_run=always` 等）跑完一步；若需 caller 审批则 `reply(requires_input)`，否则聚合 assistant 全文并 `reply(completed)`。
+4. **caller** 在本地 TUI 完成中继 HITL 后，callee 经 `GET .../caller_input` 取 resume，再次 `RunInboxTurn` 直至 `completed`。
 
-`prompt_context/node-a/custom.md` 进入 **system prompt**，建议模型按 `APPROVED | rule=R-xxxx | …` 格式作答，但 **Node 不校验**。
+`prompt_context/node-a/custom.md` 进入 **system prompt**，建议模型按 `APPROVED | rule=R-xxxx | …` 格式作答；**Node 不强制解析** APPROVED/DENIED 字符串。
 
 ### 5.1 为何要真实 LLM
 
@@ -218,6 +250,8 @@ go run ./client/cmd/dagents-client \
 
 - **node-a / node-b 均需** `LLM_MOCK=false` 与有效 `LLM_API_KEY`（改 `.env` 后 [§1.4](#14-修改-env-后必须重建容器) 重建容器）。
 - 查询 Task 时直接阅读 **`result_text`**；是否采纳由 node-b / 人工判断。
+- **HITL 自动化**：`bash scripts/verify-bash-hitl.sh`（见 [§3.1](#31-a2a-查时--bash_run-hitl-联调)）。
+- **单测**：`go test ./node/internal/session/... ./node/internal/manage/... ./node/internal/a2aclient/...`；`pytest tests/test_cli_a2a_relay.py tests/test_manage_m2_a2a.py`。
 
 ---
 

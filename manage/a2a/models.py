@@ -7,7 +7,17 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 TaskKind = Literal["invoke", "notify"]
-TaskStatus = Literal["queued", "delivered", "processing", "awaiting_caller", "completed", "failed", "expired"]
+TaskStatus = Literal[
+    "queued",
+    "delivered",
+    "processing",
+    "awaiting_caller",
+    "caller_notified",
+    "caller_responded",
+    "completed",
+    "failed",
+    "expired",
+]
 ReplyStatus = Literal["completed", "failed", "requires_input"]
 
 
@@ -99,6 +109,15 @@ class AdminTaskListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class TaskCallerNotifyRequest(BaseModel):
+    caller_agent_id: str = Field(min_length=1)
+
+
+class TaskCallerNotifyResponse(BaseModel):
+    task_id: str
+    status: TaskStatus
 
 
 class TaskCallerResumeRequest(BaseModel):

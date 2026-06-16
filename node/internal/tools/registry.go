@@ -27,7 +27,6 @@ type Registry struct {
 	manageClient        *a2aclient.Client
 	a2aCallerHITL       a2aclient.A2ACallerHITLHandler
 	compliancePeer      string
-	discoveryGroup      string
 	agentID             string
 	skillsCatalogHolder
 	enabledOnly         map[string]struct{}

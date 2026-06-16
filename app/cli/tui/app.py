@@ -34,8 +34,9 @@ from app.cli.approval import (
 )
 from app.cli.child_agent import (
     approval_header,
+    a2a_relay_tool_suffix,
     format_child_agents_list,
-    format_temporary_agent_tool_title,
+    is_a2a_relay_hitl,
     parse_temporary_agent_tool_result,
 )
 from app.cli.render import TranscriptKind, TranscriptUpdate, format_inline_usage, parse_usage_round, sanitize_inline_tool_arg
@@ -69,7 +70,9 @@ _DOT_ASSISTANT_STREAM = "yellow blink"
 _DOT_ASSISTANT_DONE = "green"
 _DOT_REASONING = "bright_black"
 _DOT_TOOL_PENDING = "yellow blink"
+_DOT_TOOL_A2A_RELAY = "cyan blink"
 _DOT_TOOL_RESULT = "cyan"
+_DOT_TOOL_A2A_RESULT = "bright_cyan"
 _DOT_STATUS_ACTIVE = "yellow blink"
 _DOT_STATUS_DONE = "green dim"
 _DOT_USER_INFO = "magenta"
@@ -185,6 +188,7 @@ class DAgentsTuiApp(App[None]):
         self._approval_trigger_targets: dict[str, str] = {}
         self._approval_block: dict[str, int] | None = None
         self._approval_raw_data: dict[str, Any] | None = None
+        self._a2a_relay_hitl_data: dict[str, Any] | None = None
         self._hitl_busy = False
         self._hitl_task: asyncio.Task[None] | None = None
         self._user_info_future: asyncio.Future[UserInformationAnswer] | None = None
@@ -321,6 +325,9 @@ class DAgentsTuiApp(App[None]):
 
     def _on_hitl_pending(self) -> None:
         """HITL 入队后触发非阻塞处理。"""
+        item = self._controller.peek_hitl()
+        if item is not None and is_a2a_relay_hitl(item.data):
+            self._cancel_status_lines()
         self.call_later(self._process_hitl_queue)
 
     def _on_child_strip(self) -> None:
@@ -382,10 +389,11 @@ class DAgentsTuiApp(App[None]):
 
     async def _run_approval_hitl(self, item: PendingHITL) -> None:
         """展示审批 UI，完成后异步 submit resume。"""
+        relay = is_a2a_relay_hitl(item.data)
         requests = extract_tool_approval_requests(item.data)
         if not requests:
             try:
-                await self._controller.complete_hitl_approval(build_all_rejected_decision([]))
+                await self._complete_approval_decision(build_all_rejected_decision([]), relay=relay)
             except Exception as exc:  # noqa: BLE001
                 self._transcript_log().write(f"[red]approval submit failed: {exc}[/red]")
             finally:
@@ -396,6 +404,10 @@ class DAgentsTuiApp(App[None]):
         loop = asyncio.get_running_loop()
         ready: asyncio.Future[asyncio.Future[ApprovalDecision]] = loop.create_future()
         self._approval_raw_data = item.data
+        if is_a2a_relay_hitl(item.data):
+            self._a2a_relay_hitl_data = dict(item.data)
+        else:
+            self._a2a_relay_hitl_data = None
 
         def _begin() -> None:
             try:
@@ -412,13 +424,12 @@ class DAgentsTuiApp(App[None]):
             approval_future = await ready
             decision = await approval_future
         except ApprovalCancelled:
+            decision = build_all_rejected_decision(list(requests))
+            self.call_later(self._end_approval_ui, relay_a2a=relay)
             try:
-                await self._controller.complete_hitl_approval(
-                    build_all_rejected_decision(list(requests))
-                )
+                await self._complete_approval_decision(decision, relay=relay)
             except Exception as exc:  # noqa: BLE001
                 self._transcript_log().write(f"[red]approval reject failed: {exc}[/red]")
-            self.call_later(self._end_approval_ui)
             self._hitl_busy = False
             self._refresh_input_strip()
             self.call_later(self._process_hitl_queue)
@@ -437,7 +448,7 @@ class DAgentsTuiApp(App[None]):
 
         def _cleanup() -> None:
             try:
-                self._end_approval_ui()
+                self._end_approval_ui(relay_a2a=relay)
             except Exception as exc:  # noqa: BLE001
                 if not cleanup_done.done():
                     cleanup_done.set_exception(exc)
@@ -448,13 +459,20 @@ class DAgentsTuiApp(App[None]):
         self.call_later(_cleanup)
         await cleanup_done
         try:
-            await self._controller.complete_hitl_approval(decision)
+            await self._complete_approval_decision(decision, relay=relay)
         except Exception as exc:  # noqa: BLE001
             self._transcript_log().write(f"[red]approval submit failed: {exc}[/red]")
         finally:
             self._hitl_busy = False
             self._refresh_input_strip()
             self.call_later(self._process_hitl_queue)
+
+    async def _complete_approval_decision(self, decision: ApprovalDecision, *, relay: bool) -> None:
+        """提交审批 resume；A2A 中继无本端 tool_result，提交后即定格工具块。"""
+        relay_data = self._a2a_relay_hitl_data
+        await self._controller.complete_hitl_approval(decision)
+        if relay:
+            self._finalize_a2a_relay_tool_blocks(decision, relay_data)
 
     async def _run_user_info_hitl(self, item: PendingHITL) -> None:
         """展示用户询问 UI，完成后异步 submit resume。"""
@@ -544,13 +562,14 @@ class DAgentsTuiApp(App[None]):
         # 审批期间隐藏并只读输入框，避免 Enter 误触 submit_prompt；快捷键由 App 捕获。
         prompt.display = False
         prompt.read_only = True
+        self._ensure_approval_pending_tool_blocks(requests)
         self._refresh_approval_tool_blocks()
         self._write_approval_block()
         self._refresh_approval_layout()
         self._transcript_log().focus()
         return self._approval_future
 
-    def _end_approval_ui(self) -> None:
+    def _end_approval_ui(self, *, relay_a2a: bool = False) -> None:
         """在 UI 队列中清理审批状态，并恢复输入框。"""
         prompt = self._prompt_area()
         self._approval_future = None
@@ -559,12 +578,76 @@ class DAgentsTuiApp(App[None]):
         self._approval_decisions = {}
         self._approval_trigger_targets = {}
         self._delete_approval_block()
-        self._reset_pending_tools_execution_clock()
-        self._refresh_all_pending_tool_blocks()
+        self._a2a_relay_hitl_data = None
+        if not relay_a2a:
+            self._reset_pending_tools_execution_clock()
+            self._refresh_all_pending_tool_blocks()
         prompt.read_only = False
         prompt.display = True
         self._refresh_approval_layout()
         prompt.focus()
+
+    def _finalize_a2a_relay_tool_blocks(
+        self,
+        decision: ApprovalDecision,
+        relay_data: dict[str, Any] | None,
+    ) -> None:
+        """A2A 中继审批：对端执行工具，本端不会收到 tool_result，审批提交后即展示终态。"""
+        suffix = a2a_relay_tool_suffix(relay_data)
+        for call_id in decision.approved:
+            self._write_a2a_relay_tool_result(call_id, approved=True, suffix_markup=suffix)
+        for call_id in decision.rejected:
+            self._write_a2a_relay_tool_result(call_id, approved=False, suffix_markup=suffix)
+
+    def _write_a2a_relay_tool_result(
+        self,
+        call_id: str,
+        *,
+        approved: bool,
+        suffix_markup: str,
+    ) -> None:
+        pending = self._pending_tools.pop(call_id, None)
+        if pending is not None:
+            task = pending.get("status_task")
+            if isinstance(task, asyncio.Task):
+                task.cancel()
+        title = str((pending or {}).get("summary") or "tool")
+        summary = "已审批，由对端执行" if approved else "已拒绝"
+        self._tool_result_counter += 1
+        result_id = f"tool-{self._tool_result_counter}"
+        body = self._tool_dot_block(
+            dot_style=_DOT_TOOL_A2A_RESULT,
+            body=Text.from_markup(
+                self._tool_result_title_markup(
+                    title,
+                    elapsed_s=None,
+                    rejected=not approved,
+                    relay_suffix_markup=suffix_markup,
+                )
+                + f"\n[dim]└─ {escape(summary)}[/dim]"
+            ),
+        )
+        self._tool_results[result_id] = {
+            "tool_name": str((pending or {}).get("tool_name") or "tool"),
+            "title": title,
+            "summary": summary,
+            "detail": summary,
+            "expanded": False,
+            "elapsed_s": None,
+            "rejected": not approved,
+            "a2a_relay": True,
+            "start": 0,
+            "end": 0,
+        }
+        if pending is not None:
+            start, end = self._replace_log_block(int(pending["start"]), int(pending["end"]), body)
+        else:
+            log = self._transcript_log()
+            start = len(log.lines)
+            self._log_write_block(log, body)
+            end = len(log.lines)
+        self._tool_results[result_id]["start"] = start
+        self._tool_results[result_id]["end"] = end
 
     def _begin_user_info_ui(self, request: UserInformationRequest) -> asyncio.Future[UserInformationAnswer]:
         """初始化用户询问 UI 并返回等待 future。"""
@@ -1515,6 +1598,63 @@ class DAgentsTuiApp(App[None]):
             return summary, content if content else None, "text"
         return summary, None, "bash"
 
+    def _approval_request_as_tool_call(self, item: ToolApprovalRequest) -> dict[str, Any]:
+        """将审批请求转为 tool_call 形 SSE payload，供 A2A 中继等无 tool_call 事件时展示详情。"""
+        raw: dict[str, Any] = {
+            "id": item.call_id,
+            "name": item.name,
+            "arguments": item.arguments,
+        }
+        if item.raw_arguments.strip():
+            raw["raw_arguments"] = item.raw_arguments
+        if item.approval_reason:
+            raw["approval_reason"] = item.approval_reason
+        if item.risk_level:
+            raw["risk_level"] = item.risk_level
+        return raw
+
+    def _ensure_approval_pending_tool_blocks(self, requests: list[ToolApprovalRequest]) -> None:
+        """为尚无 tool_call SSE 的待审工具（如 A2A 中继）合成 pending 块。"""
+        log = self._transcript_log()
+        relay = is_a2a_relay_hitl(self._approval_raw_data)
+        relay_suffix = a2a_relay_tool_suffix(self._approval_raw_data) if relay else ""
+        for item in requests:
+            if not item.call_id or item.call_id in self._pending_tools:
+                continue
+            synthetic = self._approval_request_as_tool_call(item)
+            summary, code_content, code_lexer = self._tool_call_parts_from_call(synthetic)
+            if not code_content and item.raw_arguments.strip() and item.raw_arguments.strip() != "{}":
+                code_content = item.raw_arguments
+                code_lexer = "json"
+            started_at = time.monotonic()
+            start = len(log.lines)
+            self._log_write_block(
+                log,
+                self._tool_pending_renderable(
+                    summary,
+                    code_content=code_content,
+                    code_lexer=code_lexer,
+                    elapsed_s=0.0,
+                    show_code=True,
+                    a2a_relay=relay,
+                    suffix_markup=relay_suffix,
+                ),
+            )
+            end = len(log.lines)
+            self._pending_tools[item.call_id] = {
+                "start": start,
+                "end": end,
+                "summary": summary,
+                "tool_name": item.name,
+                "arguments": item.arguments,
+                "code_content": code_content,
+                "code_lexer": code_lexer,
+                "started_at": started_at,
+                "a2a_relay": relay,
+                "relay_suffix": relay_suffix,
+                "status_task": None if relay else asyncio.create_task(self._animate_tool_pending(item.call_id)),
+            }
+
     def _tool_summary_from_call(self, item: dict[str, Any]) -> str:
         """从 tool_call SSE payload 生成后续结果重写使用的短标题。
 
@@ -1535,16 +1675,25 @@ class DAgentsTuiApp(App[None]):
         elapsed_s: float = 0.0,
         dot_blink: bool = True,
         show_code: bool = True,
+        a2a_relay: bool = False,
+        suffix_markup: str = "",
     ) -> Table:
         """生成执行中工具占位块（黄点 + 可选代码框 + 动态耗时）。"""
-        frame = int(max(0.0, elapsed_s) * 2) % 3
-        dots = ("." * (frame + 1)).ljust(3)
-        head = f"{summary}{dots} {self._format_tool_pending_elapsed(elapsed_s)}"
-        if show_code and code_content is not None:
-            body: RenderableType = Group(Text(head), self._rich_code_box(code_content, lexer=code_lexer))
+        if a2a_relay:
+            head_markup = f"{escape(summary)}{suffix_markup} [dim]待审批[/]"
+            head: RenderableType = Text.from_markup(head_markup)
         else:
-            body = Text(head)
-        dot_style = _DOT_TOOL_PENDING if dot_blink else "yellow"
+            frame = int(max(0.0, elapsed_s) * 2) % 3
+            dots = ("." * (frame + 1)).ljust(3)
+            head = f"{summary}{dots} {self._format_tool_pending_elapsed(elapsed_s)}"
+        if show_code and code_content is not None:
+            body: RenderableType = Group(head, self._rich_code_box(code_content, lexer=code_lexer))
+        else:
+            body = head if a2a_relay else Text(head)
+        if a2a_relay:
+            dot_style = _DOT_TOOL_A2A_RELAY if dot_blink else "cyan"
+        else:
+            dot_style = _DOT_TOOL_PENDING if dot_blink else "yellow"
         return self._tool_dot_block(dot_style=dot_style, body=body)
 
     def _approval_active(self) -> bool:
@@ -1590,6 +1739,8 @@ class DAgentsTuiApp(App[None]):
             elapsed_s=elapsed_s,
             dot_blink=not isinstance(status_task, asyncio.Task) or not status_task.done(),
             show_code=show_code,
+            a2a_relay=bool(pending.get("a2a_relay")),
+            suffix_markup=str(pending.get("relay_suffix") or ""),
         )
         start, end = self._replace_log_block(int(pending["start"]), int(pending["end"]), block)
         pending["start"] = start
@@ -1633,9 +1784,12 @@ class DAgentsTuiApp(App[None]):
         elapsed_s: float | None,
         rejected: bool,
         compress_saved_pct: int | None = None,
+        relay_suffix_markup: str = "",
     ) -> str:
         """组装工具结果标题行 Rich markup（含拒绝态、耗时与输出压缩率）。"""
         parts = [escape(summary)]
+        if relay_suffix_markup:
+            parts.append(relay_suffix_markup.strip())
         if rejected:
             parts.append("[red]已拒绝[/red]")
         if elapsed_s is not None:
@@ -1658,6 +1812,8 @@ class DAgentsTuiApp(App[None]):
                 pending = self._pending_tools.get(call_id)
                 if pending is None:
                     return
+                if pending.get("a2a_relay"):
+                    return
                 started_at = float(pending.get("started_at", time.monotonic()))
                 elapsed_s = max(0.0, time.monotonic() - started_at)
                 block = self._tool_pending_renderable(
@@ -1666,6 +1822,8 @@ class DAgentsTuiApp(App[None]):
                     code_lexer=str(pending.get("code_lexer") or "bash"),
                     elapsed_s=elapsed_s,
                     show_code=self._should_show_tool_detail(call_id),
+                    a2a_relay=bool(pending.get("a2a_relay")),
+                    suffix_markup=str(pending.get("relay_suffix") or ""),
                 )
                 start, end = self._replace_log_block(
                     int(pending["start"]),
@@ -2075,6 +2233,12 @@ class DAgentsTuiApp(App[None]):
             header = approval_header(self._approval_raw_data)
             lines.append(f"[bold cyan]{escape(header)}[/bold cyan]")
         item = self._current_approval_request()
+        if item is not None:
+            lines.append(f"[bold]{escape(self._approval_request_label(item))}[/bold]")
+            if item.approval_reason:
+                lines.append(f"   [dim]原因: {escape(item.approval_reason)}[/dim]")
+            if item.risk_level:
+                lines.append(f"   [dim]风险: {escape(item.risk_level)}[/dim]")
         options = self._approval_options()
         if item is not None and is_trigger_session_approval(item):
             labels = [label for label, _target in trigger_session_options()]

@@ -239,6 +239,26 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.updates[0].kind, TranscriptKind.REASONING_DELTA)
         self.assertEqual(self.updates[0].text, "think")
 
+    async def test_a2a_relay_hitl_releases_turn_wait(self) -> None:
+        self.controller._reset_user_turn_wait()
+        wait_task = asyncio.create_task(self.controller.wait_user_turn())
+        await asyncio.sleep(0)
+        await self.controller._handle_stream_event(
+            _event(
+                "approval_required",
+                data={
+                    "a2a_relay": True,
+                    "a2a_task_id": "task-1",
+                    "approval_args": {
+                        "tool_calls": [{"id": "call_x", "name": "bash_run", "arguments": {}}],
+                    },
+                },
+            ),
+        )
+        await asyncio.wait_for(wait_task, timeout=1.0)
+        self.assertFalse(self.controller._awaiting_user_turn)
+        self.assertEqual(self.controller.hitl_queue_len(), 1)
+
     async def test_switch_session_resets_local_state(self) -> None:
         mock_client = MagicMock()
         mock_client.create_session = AsyncMock(return_value="sess-new")

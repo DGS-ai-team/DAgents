@@ -15,7 +15,7 @@ const defaultAgentInvokeTimeout = 90 * time.Second
 // SetManageRuntime 注入 Manage A2A 客户端；manage.enabled 时由 server 调用。
 func (r *Registry) SetManageRuntime(
 	client *a2aclient.Client,
-	agentID, compliancePeer, discoveryGroup string,
+	agentID, compliancePeer string,
 	hitl a2aclient.A2ACallerHITLHandler,
 ) {
 	r.manageClient = client
@@ -24,7 +24,6 @@ func (r *Registry) SetManageRuntime(
 		r.agentID = id
 	}
 	r.compliancePeer = strings.TrimSpace(compliancePeer)
-	r.discoveryGroup = strings.TrimSpace(discoveryGroup)
 	if client != nil {
 		r.handlers["agent_invoke"] = r.execAgentInvoke
 		r.handlers["agent_discover"] = r.execAgentDiscover
@@ -80,7 +79,7 @@ func agentDiscoverToolDef() ToolDef {
 				"properties": map[string]any{
 					"discovery_group": map[string]any{
 						"type":        "string",
-						"description": "发现分组（可选；省略时使用 manage.registration.team）",
+						"description": "发现分组（可选；省略时由 Manage 按调用方已分配的 discovery_group 匹配对端）",
 					},
 				},
 				"required":             []string{},
@@ -151,9 +150,6 @@ func (r *Registry) execAgentDiscover(ctx context.Context, args json.RawMessage) 
 		}
 	}
 	group := strings.TrimSpace(in.DiscoveryGroup)
-	if group == "" {
-		group = r.discoveryGroup
-	}
 	resp, err := client.DiscoverAgents(ctx, group)
 	if err != nil {
 		return "", err

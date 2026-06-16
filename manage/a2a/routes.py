@@ -8,6 +8,8 @@ from manage.a2a.models import (
     InboxResponse,
     TaskAckRequest,
     TaskCallerInputResponse,
+    TaskCallerNotifyRequest,
+    TaskCallerNotifyResponse,
     TaskCallerResumeRequest,
     TaskCallerResumeResponse,
     TaskCreateRequest,
@@ -147,6 +149,23 @@ def build_a2a_router(registry: AgentRegistryStore, store: A2ATaskStore, audit: A
         )
         record_a2a_operation(operation="reply", status="ok")
         return TaskReplyResponse(task_id=task.task_id, status=task.status)
+
+    @router.post("/v1/a2a/tasks/{task_id}/caller_notify", response_model=TaskCallerNotifyResponse)
+    def caller_notify(task_id: str, payload: TaskCallerNotifyRequest, request: Request) -> TaskCallerNotifyResponse:
+        auth = authenticate(request)
+        _ensure_node_agent_request(request, payload.caller_agent_id, auth)
+        task = store.submit_caller_notify(task_id, payload.caller_agent_id)
+        if task is None:
+            record_a2a_operation(operation="caller_notify", status="not_found")
+            raise HTTPException(status_code=404, detail=f"task_id={task_id!r} 不存在、无权操作或状态不允许")
+        audit.record(
+            actor=audit_actor(request, auth, fallback_agent_id=payload.caller_agent_id),
+            action="a2a.task.caller_notify",
+            target_agent_id=task.to_agent_id,
+            detail={"task_id": task_id},
+        )
+        record_a2a_operation(operation="caller_notify", status="ok")
+        return TaskCallerNotifyResponse(task_id=task.task_id, status=task.status)
 
     @router.post("/v1/a2a/tasks/{task_id}/caller_resume", response_model=TaskCallerResumeResponse)
     def caller_resume(task_id: str, payload: TaskCallerResumeRequest, request: Request) -> TaskCallerResumeResponse:

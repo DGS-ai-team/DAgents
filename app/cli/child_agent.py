@@ -384,8 +384,38 @@ class ChildLifecycleSuppress:
         return False
 
 
+def is_a2a_relay_hitl(data: dict[str, Any] | None) -> bool:
+    """SSE data 是否为 agent_invoke 期间经 Manage 中继的对端 HITL。"""
+    if not data:
+        return False
+    return bool(data.get("a2a_relay"))
+
+
+def a2a_peer_label(data: dict[str, Any] | None) -> str:
+    """对端 Agent 展示名（优先 card name，否则 agent_id）。"""
+    if not data:
+        return ""
+    name = str(data.get("a2a_peer_agent_name") or "").strip()
+    if name:
+        return name
+    return str(data.get("a2a_peer_agent_id") or "").strip()
+
+
+def a2a_relay_tool_suffix(data: dict[str, Any] | None) -> str:
+    """A2A 中继工具行尾部的 from 标识（Rich markup）。"""
+    label = a2a_peer_label(data)
+    if label:
+        return f" [dim cyan]from {label}[/]"
+    return " [dim cyan]from 对端 Agent[/]"
+
+
 def approval_header(data: dict[str, Any]) -> str:
     """子/父审批面板标题。"""
+    if is_a2a_relay_hitl(data):
+        label = a2a_peer_label(data)
+        if label:
+            return f"A2A 对端 Agent 请求审批 · {label}"
+        return "A2A 对端 Agent 请求审批"
     if not is_temporary_agent_approval(data):
         return "工具审批"
     purpose = str(data.get("child_purpose") or "临时 Agent").strip() or "临时 Agent"

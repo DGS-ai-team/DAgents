@@ -76,13 +76,6 @@ func compressBashStream(cfg BashCompressConfig, text string, maxRunes int) (stri
 	return out, meta
 }
 
-func stderrMaxRunes(cfg BashCompressConfig, _ int) int {
-	if cfg.MaxOutputCharsStderr > 0 {
-		return cfg.MaxOutputCharsStderr
-	}
-	return cfg.MaxOutputChars
-}
-
 var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9:;?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)`)
 
 func sanitizeCLIOutput(s string) string {

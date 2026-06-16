@@ -44,6 +44,8 @@ export function taskStatusPillClass(status) {
     delivered: "pill-task-delivered",
     processing: "pill-task-processing",
     awaiting_caller: "pill-task-awaiting",
+    caller_notified: "pill-task-caller-notified",
+    caller_responded: "pill-task-caller-responded",
     completed: "pill-task-done",
     failed: "pill-task-failed",
     expired: "pill-expired",

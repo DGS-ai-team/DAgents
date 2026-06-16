@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-06-16
+
+**0.x 预览**：A2A **HITL 中继**全链路（Manage 四段式状态机 + caller TUI 展示 + callee inbox 续跑）；双 Client 对齐「`from` 对端标识」与审批后不等 `tool_result`；配套单测与 Docker 验证脚本。
+
+### 新增
+
+- **A2A HITL 中继（caller 侧）**：`agent_invoke` 识别 `awaiting_caller` → `caller_notify` / `WaitCallerHITL` / `caller_resume`；`A2ACallerHITLBridge` 向 caller session 推送 `approval_required` / `user_information_required`（含 `a2a_relay`、`a2a_peer_agent_*`）。
+- **A2A HITL 中继（callee 侧）**：`ComplianceExecutor` + `RunInboxTurn` 支持 `requires_input` 与 resume 多步；`encodeRequiresInputPayload` 携带对端 Agent 元数据。
+- **Client 展示**：Python / Go TUI 对 A2A 中继审批合成工具块（青色 `from <对端名>`）；审批提交后即终态，不等待本地 `tool_result`。
+- **案例脚本**：`cases/a2a-manage-docker/scripts/verify-bash-hitl.sh`（不经 TUI 验证 bash HITL 全链路）。
+- **单测**：Node session/manage/a2aclient、Go/Python Client、Manage store 的 A2A 审批 / user_information / 失败路径与边界用例。
+
+### 变更
+
+- **Inbox SSE 订阅**：`RunInboxTurn` 入队前 `Subscribe(afterSeq)`，避免 resume 时回放陈旧 `approval_required`；`done` 先于 HITL 事件时继续等待。
+- **Manage Task 状态**：`caller_notified` / `caller_responded` 与 `pending_caller_resume` 拉取后转 `processing`。
+- **Agent Card 示例**：`agent-card.example.json`（compliance 被调）与 `agent-card.example.ops.json`（ops 调用方）拆分说明。
+
+### 修复
+
+- **a2aclient**：同一 `requires_input` payload 不重复 `WaitCallerHITL`（`relayedHitlPayload` 去重）。
+- **Python TUI**：A2A 中继审批提交后释放 pending 计时动画，避免黄点一直等待 `tool_result`。
+
+（Git **tag**：`v0.3.9`。）
+
 ## [0.3.8] - 2026-06-15
 
 **0.x 预览**：TUI **tool_call 流式**去重；Manage **离线 bundle** 与安装 **policy 覆盖**交互；**Agent Card 固定路径**；Manage Admin **移除 session 代理**；工具与通信参考文档。

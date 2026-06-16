@@ -16,7 +16,15 @@ listen:
 local:
   endpoint: http://127.0.0.1:18765
 
-expose_to_peers: false   # A2A 联调时建议 true（允许对端 agent_invoke 访问本 Node HTTP API）
+# 是否允许其它 Agent 经 Manage 向本 Node 投递 A2A Task（discover 可见 + create 校验）。
+# 与 agent-card.json 的 metadata.role 无关：role 控制本 Node 收到 Task 后如何本地处理。
+# 被调方（如 compliance）须 true；纯调用方（如 ops + a2a.enabled=false）可 false。
+expose_to_peers: false
+
+# Agent Card：Node 启动时工作目录下固定文件名 agent-card.json（不可经 config 改路径）。
+#   cp packaging/agent-client/agent-card.example.json agent-card.json          # 被调方（compliance）
+#   cp packaging/agent-client/agent-card.example.ops.json agent-card.json    # 纯调用方（ops）
+# 字段说明见 packaging/agent-client/README.md §Agent Card
 
 # Manage 发现分组由 Manage Console / API 分配，Node 配置中无需 groups
 
@@ -48,7 +56,7 @@ manage:
   # --- Manage + A2A（见 docs/a2a-and-register-center.md、packaging/manage/README.md）---
   # 启用步骤：
   #   1. 启动 Manage（docker compose 或 dagents-manage 镜像）
-  #   2. cp agent-card.example.json agent-card.json（固定文件名，与 config 同工作目录）
+  #   2. cp agent-card.example.json agent-card.json（被调方）或 agent-card.example.ops.json（调用方）
   #   3. 设 manage.enabled: true，取消下列注释；tools.enabled_groups 含 a2a
   # url: http://127.0.0.1:8020
   # node_token:              # 可选；Manage 启用 MANAGE_TOKENS 时填写

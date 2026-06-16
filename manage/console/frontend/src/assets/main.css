@@ -708,6 +708,14 @@ code {
   background: var(--danger-bg);
   color: var(--danger);
 }
+.pill-task-caller-notified {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.pill-task-caller-responded {
+  background: var(--info-bg);
+  color: var(--info);
+}
 .pill-task-done {
   background: var(--success-bg);
   color: var(--success);

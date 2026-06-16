@@ -241,7 +241,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 				a2aclient.New(cfg),
 				cfg.AgentID,
 				compliancePeer,
-				cfg.Manage.Registration.Team,
 				a2aBridge,
 			)
 		}

@@ -173,12 +173,14 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		}
 		m.notifyStripRefresh()
 	case "approval_required":
+		m.releaseTurnWaitForA2ARelay(ev.Data)
 		m.enqueueApproval(ev.Data)
 		m.notifyHITLChanged()
 	case "user_information_required":
 		if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 			return
 		}
+		m.releaseTurnWaitForA2ARelay(ev.Data)
 		m.enqueueUserInfo(ev.Data)
 		m.notifyHITLChanged()
 	case "done":
@@ -209,6 +211,18 @@ func (m *model) notifyStripRefresh() {
 func (m *model) notifyHITLChanged() {
 	if m.program != nil {
 		m.program.Send(pendingHITLChangedMsg{})
+	}
+}
+
+// releaseTurnWaitForA2ARelay 在 agent_invoke 同步等待期间释放 turn 栅栏，便于展示对端中继 HITL。
+func (m *model) releaseTurnWaitForA2ARelay(data map[string]any) {
+	if !clihitl.IsA2ARelayHITL(data) {
+		return
+	}
+	m.statusMgr.FinishAll()
+	m.resetTurnWaitUI()
+	if m.turn.Awaiting() {
+		m.turn.FinishTurn()
 	}
 }
 

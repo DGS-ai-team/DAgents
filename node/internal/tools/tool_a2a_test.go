@@ -42,7 +42,7 @@ func TestAgentInvokeUsesCompliancePeerDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
-	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", "node-a", "a2a-lab", nil)
+	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", "node-a", nil)
 
 	ctx := WithSession(context.Background(), "sess-x")
 	out, err := reg.Execute(ctx, "agent_invoke", `{"content":"【合规咨询】测试","call_purpose":"合规咨询"}`)
@@ -74,7 +74,7 @@ func TestAgentInvokeInDefinitionsWhenConfigured(t *testing.T) {
 		t.Fatal("expected agent_invoke absent before SetManageRuntime")
 	}
 	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: "http://127.0.0.1:1"}}
-	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", "node-a", "a2a-lab", nil)
+	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", "node-a", nil)
 	if !hasToolName(reg.Definitions(), "agent_invoke") {
 		t.Fatal("expected agent_invoke present after SetManageRuntime")
 	}
@@ -83,13 +83,16 @@ func TestAgentInvokeInDefinitionsWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestAgentDiscoverUsesDefaultGroup(t *testing.T) {
+func TestAgentDiscoverUsesCallerGroupsFromManage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/registry/agents/discover" {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
 		}
-		if got := r.URL.Query().Get("discovery_group"); got != "a2a-lab" {
-			t.Fatalf("discovery_group=%q", got)
+		if got := r.URL.Query().Get("discovery_group"); got != "" {
+			t.Fatalf("discovery_group=%q, want empty when tool omits param", got)
+		}
+		if got := r.Header.Get("x-dagents-agent-id"); got != "node-b" {
+			t.Fatalf("agent header=%q", got)
 		}
 		_ = json.NewEncoder(w).Encode(a2aclient.DiscoverResponse{
 			Agents: []a2aclient.DiscoverAgent{{AgentID: "node-a", Name: "合规助手"}},
@@ -102,7 +105,7 @@ func TestAgentDiscoverUsesDefaultGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
-	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", "", "a2a-lab", nil)
+	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", "", nil)
 
 	out, err := reg.Execute(context.Background(), "agent_discover", `{"call_purpose":"发现 peer"}`)
 	if err != nil {

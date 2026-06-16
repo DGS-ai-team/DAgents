@@ -68,7 +68,7 @@ func FormatTriggerSessionApprovalInteractive(
 	}
 	var b strings.Builder
 	if msg, ok := data["message"].(string); ok && strings.TrimSpace(msg) != "" {
-		b.WriteString(strings.TrimSpace(msg) + "\n\n")
+		fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(msg))
 	}
 	current := triggerSessionCurrentItem(items, decided, rejected)
 	if current != nil {

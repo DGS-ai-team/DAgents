@@ -55,19 +55,19 @@ func mapStringField(m map[string]any, key string) string {
 
 func writeApprovalItemDetails(b *strings.Builder, it ToolApprovalItem, indent string) {
 	if it.Risk != "" {
-		b.WriteString(indent + "风险: " + it.Risk + "\n")
+		fmt.Fprintf(b, "%s风险: %s\n", indent, it.Risk)
 	}
 	if it.Reason != "" {
-		b.WriteString(indent + "原因: " + it.Reason + "\n")
+		fmt.Fprintf(b, "%s原因: %s\n", indent, it.Reason)
 	}
 	args := formatApprovalArgs(it.RawArgs, nil, defaultApprovalArgsMaxLen)
 	if args == "" && it.Arguments != nil {
 		args = formatApprovalArgs("", it.Arguments, defaultApprovalArgsMaxLen)
 	}
 	if args != "" {
-		b.WriteString(indent + "参数:\n")
+		fmt.Fprintf(b, "%s参数:\n", indent)
 		for _, line := range strings.Split(args, "\n") {
-			b.WriteString(indent + "  " + line + "\n")
+			fmt.Fprintf(b, "%s  %s\n", indent, line)
 		}
 	}
 }

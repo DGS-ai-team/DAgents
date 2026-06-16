@@ -8,7 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from manage.platform.audit import AuditLog
-from manage.platform.auth import AuthContext, audit_actor, authenticate, ensure_node_identity
+from manage.platform.auth import AuthContext, audit_actor, authenticate, ensure_node_identity, extract_agent_id
 from manage.platform.metrics import record_registry_operation
 from manage.registry.models import (
     AgentDeregisterRequest,
@@ -36,6 +36,30 @@ def _ensure_member_groups(auth: AuthContext, groups: list[str]) -> None:
 
 def _ensure_node_agent_request(request: Request, agent_id: str, auth: AuthContext) -> None:
     ensure_node_identity(request, agent_id, auth)
+
+
+def _resolve_discover_caller_groups(
+    store: AgentRegistryStore,
+    request: Request,
+    auth: AuthContext,
+    caller_groups: list[str],
+) -> list[str] | None:
+    """解析 discover 的 caller 可见分组。
+
+    未传 discovery_group 查询参数时，Node agent_discover 依赖此结果按调用方
+    Manage 已分配的 discovery_group 与对端求交集。
+    """
+    if caller_groups:
+        return caller_groups
+    header_id = extract_agent_id(request)
+    if header_id:
+        record = store.get(header_id)
+        if record is None:
+            return []
+        return list(record.discovery_group)
+    if auth.is_admin:
+        return None
+    return auth.discovery_groups or None
 
 
 def _resolve_list_query(
@@ -166,10 +190,13 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
         caller_groups: list[str] = Query(default=[]),
     ) -> AgentDiscoverResponse:
         auth = authenticate(request)
-        groups = caller_groups or ([] if auth.is_admin else auth.discovery_groups)
+        groups = _resolve_discover_caller_groups(store, request, auth, caller_groups)
         if discovery_group and not auth.allows_discovery_group(discovery_group):
             raise HTTPException(status_code=403, detail=f"discovery_group={discovery_group!r} 不在 token 可见范围")
-        agents = store.discover(discovery_group=discovery_group, caller_groups=groups or None)
+        if discovery_group is None and groups == []:
+            agents = []
+        else:
+            agents = store.discover(discovery_group=discovery_group, caller_groups=groups)
         return AgentDiscoverResponse(agents=agents)
 
     @router.get("/v1/registry/agents/{agent_id}", response_model=AgentRecord)

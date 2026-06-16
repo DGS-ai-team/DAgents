@@ -210,7 +210,7 @@ func (m *model) policyRenderViewport() {
 	}
 	filter := strings.TrimSpace(m.input.Value())
 	if filter != "" {
-		b.WriteString(" · 过滤: " + filter)
+		fmt.Fprintf(&b, " · 过滤: %s", filter)
 	}
 	b.WriteString("\n\n")
 	if len(rows) == 0 {
