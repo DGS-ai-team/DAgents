@@ -45,19 +45,15 @@ func FormatWelcomePanelBody(endpoint, agentID, clientVersion, sessionID string) 
 	}
 }
 
-func skillsBloatWarningTexts(tokens, maxBody, threshold int) []string {
+func skillsBloatWarningTexts(metadataTokens, threshold int) []string {
 	if threshold <= 0 {
 		threshold = 4000
 	}
-	display := tokens
-	if maxBody > display {
-		display = maxBody
-	}
-	if tokens <= threshold && maxBody <= threshold {
+	if metadataTokens <= threshold {
 		return nil
 	}
 	return []string{
-		fmt.Sprintf("skills 目录估算约 %d tokens（超过 %d）", display, threshold),
+		fmt.Sprintf("skills 目录估算约 %d tokens（超过 %d）", metadataTokens, threshold),
 		"skills 过于臃肿，请精简 skill 描述、缩短 SKILL 正文或清理无用的 skills",
 	}
 }
@@ -69,7 +65,6 @@ func SkillsBloatWarningTexts(ctx *nodeapi.SessionContext) []string {
 	}
 	return skillsBloatWarningTexts(
 		ctx.SkillsCatalogEstimatedTokens,
-		ctx.SkillsCatalogMaxBodyEstimatedTokens,
 		ctx.SkillsCatalogBloatThreshold,
 	)
 }

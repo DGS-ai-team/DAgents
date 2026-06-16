@@ -17,11 +17,21 @@ func TestSkillsBloatWarningLines_belowThreshold(t *testing.T) {
 
 func TestSkillsBloatWarningLines_aboveThreshold(t *testing.T) {
 	lines := SkillsBloatWarningLines(&nodeapi.SessionContext{
-		SkillsCatalogEstimatedTokens:        100,
-		SkillsCatalogMaxBodyEstimatedTokens: 5000,
+		SkillsCatalogEstimatedTokens:        5000,
+		SkillsCatalogMaxBodyEstimatedTokens: 8000,
 		SkillsCatalogBloatThreshold:         4000,
 	})
 	if len(lines) != 2 {
 		t.Fatalf("lines = %d want 2", len(lines))
+	}
+}
+
+func TestSkillsBloatWarningLines_maxBodyOnlyAboveThreshold(t *testing.T) {
+	if got := SkillsBloatWarningLines(&nodeapi.SessionContext{
+		SkillsCatalogEstimatedTokens:        100,
+		SkillsCatalogMaxBodyEstimatedTokens: 8000,
+		SkillsCatalogBloatThreshold:         4000,
+	}); len(got) != 0 {
+		t.Fatalf("expected no lines when only max body exceeds threshold, got %v", got)
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
 // CatalogBloatTokenThreshold 为 skills 元数据或任一 SKILL 正文估算 token 超过该值时 TUI 提示精简。
@@ -120,14 +122,6 @@ func (c *Catalog) SelectByName(skillName string) (Definition, bool) {
 	return Definition{}, false
 }
 
-// estimateTextTokens 与 node/internal/llm.EstimateTextTokens 同公式（len/4）；skills 包不 import llm 以避免 cycle。
-func estimateTextTokens(text string) int {
-	if text == "" {
-		return 0
-	}
-	return len(text) / 4
-}
-
 // EstimateCatalogStats 估算 skills 目录 token 分项。
 //
 // 注意：catalog 正文不会进入 tools schema；仅 load 后写入 system prompt（已计入 system_prompt_estimated_tokens）。
@@ -136,10 +130,10 @@ func EstimateCatalogStats(defs []Definition) CatalogTokenStats {
 	metaSection := renderMetadataSection(defs)
 	stats := CatalogTokenStats{}
 	if metaSection != "" {
-		stats.MetadataTokens = estimateTextTokens(LoadSkillsMetadataPrefix + metaSection)
+		stats.MetadataTokens = tokens.EstimateInt(LoadSkillsMetadataPrefix + metaSection)
 	}
 	for _, d := range defs {
-		bodyTokens := estimateTextTokens(d.Content)
+		bodyTokens := tokens.EstimateInt(d.Content)
 		if bodyTokens > stats.MaxBodyTokens {
 			stats.MaxBodyTokens = bodyTokens
 		}

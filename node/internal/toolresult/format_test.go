@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
 func TestPackage_shortNoSpill(t *testing.T) {
@@ -49,8 +51,8 @@ func TestPackage_longBashSpillsAndHeadTail(t *testing.T) {
 	if res.ForClient != long {
 		t.Fatal("client must get full normalized output")
 	}
-	if EstimateTokens(res.ForHistory) > float64(cfg.SpillThresholdTokens)+80 {
-		t.Fatalf("history token estimate too high: %v", EstimateTokens(res.ForHistory))
+	if tokens.Estimate(res.ForHistory) > float64(cfg.SpillThresholdTokens)+80 {
+		t.Fatalf("history token estimate too high: %v", tokens.Estimate(res.ForHistory))
 	}
 	if !strings.Contains(res.ForHistory, "tokens") {
 		t.Fatalf("missing token hint: %q", res.ForHistory)
@@ -162,6 +164,21 @@ func TestPackage_longAgentDiscoverSpills(t *testing.T) {
 	}
 	if !res.Spilled {
 		t.Fatal("agent_discover should spill when over token budget")
+	}
+}
+
+func TestPackage_spillByTokenBudget(t *testing.T) {
+	root := t.TempDir()
+	// 25000 汉字 × 0.6 = 15000 tokens > 12000
+	long := strings.Repeat("测", 25000)
+	cfg := DefaultConfig(root)
+	cfg.SpillThresholdTokens = 12000
+	res, err := Package(cfg, "s", "c", "bash_run", long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Spilled {
+		t.Fatal("expected spill by token estimate")
 	}
 }
 

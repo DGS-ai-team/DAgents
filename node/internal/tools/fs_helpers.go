@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
 const (
@@ -104,7 +104,7 @@ func formatNumberedLines(lines []string, startLine int) []string {
 }
 
 func applyMaxTokensToBody(body string, maxTokens float64, truncateHint string) (string, bool) {
-	clipped, truncated := toolresult.ClipToTokenBudget(body, maxTokens)
+	clipped, truncated := tokens.ClipToTokenBudget(body, maxTokens)
 	if !truncated {
 		return body, false
 	}
@@ -112,7 +112,7 @@ func applyMaxTokensToBody(body string, maxTokens float64, truncateHint string) (
 }
 
 func applyMaxTokensToOutput(full string, maxTokens float64) (string, bool) {
-	clipped, truncated := toolresult.ClipToTokenBudget(full, maxTokens)
+	clipped, truncated := tokens.ClipToTokenBudget(full, maxTokens)
 	if !truncated {
 		return full, false
 	}

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
 type searchReplaceArgs struct {
@@ -162,7 +162,7 @@ func formatSearchReplacePreview(oldStr, newStr string, replaced int, lineHint st
 	if len(out) > searchReplaceMaxPreviewBytes {
 		out = out[:searchReplaceMaxPreviewBytes] + "\n...(预览已截断)"
 	}
-	clipped, truncated := toolresult.ClipToTokenBudget(out, defaultSearchReplaceMaxTokens/2)
+	clipped, truncated := tokens.ClipToTokenBudget(out, defaultSearchReplaceMaxTokens/2)
 	if truncated {
 		out = clipped + "\n...(diff 预览因 token 上限截断)"
 	}

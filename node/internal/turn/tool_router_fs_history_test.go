@@ -9,7 +9,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
-	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
@@ -70,8 +70,8 @@ func TestExecuteTool_readFileHistorySpillsButSSEFull(t *testing.T) {
 	if !strings.Contains(history[2].Content, "tokens") {
 		t.Fatalf("missing token hint: %q", history[2].Content)
 	}
-	if toolresult.EstimateTokens(history[2].Content) > 13000 {
-		t.Fatalf("history token estimate too high: %v", toolresult.EstimateTokens(history[2].Content))
+	if tokens.Estimate(history[2].Content) > 13000 {
+		t.Fatalf("history token estimate too high: %v", tokens.Estimate(history[2].Content))
 	}
 	forClient, _, _ := orch.splitToolResult("sess-fs", tc, long)
 	if forClient != long {

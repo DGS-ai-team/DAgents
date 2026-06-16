@@ -1,6 +1,10 @@
 package llm
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
+)
 
 // CloneMessage 深拷贝一条 chat message（JSON round-trip）。
 func CloneMessage(message Message) Message {
@@ -15,25 +19,22 @@ func CloneMessage(message Message) Message {
 	return out
 }
 
-// EstimateTextTokens 粗算纯文本 token（len/4），与 EstimateMessageTokens 字符权重一致。
+// EstimateTextTokens 粗算纯文本 token（DeepSeek 字符权重），与 EstimateMessageTokens 一致。
 func EstimateTextTokens(text string) int {
-	if text == "" {
-		return 0
-	}
-	return len(text) / 4
+	return tokens.EstimateInt(text)
 }
 
-// EstimateMessageTokens 粗算 messages token（content/reasoning len/4 + 固定开销 + tool_calls 加权）。
+// EstimateMessageTokens 粗算 messages token（content/reasoning + 固定开销 + tool_calls 加权）。
 // 供 compression 触发与 GET /context 共用，避免两处公式漂移。
 func EstimateMessageTokens(messages []Message) int {
 	total := 0
 	for _, m := range messages {
-		total += len(m.Content)/4 + 16
+		total += tokens.EstimateInt(m.Content) + 16
 		if len(m.ToolCalls) > 0 {
 			total += len(m.ToolCalls) * 32
 		}
 		if m.ReasoningContent != "" {
-			total += len(m.ReasoningContent) / 4
+			total += tokens.EstimateInt(m.ReasoningContent)
 		}
 	}
 	return total

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
 // TurnContextMetrics WS5：单次用户任务（human_message → turn_complete）内的工具链上下文指标。
@@ -108,7 +108,7 @@ func (o *Orchestrator) recordToolResult(
 		return
 	}
 	m.HistoryResultChars += len(forHistory)
-	m.HistoryResultTokens += toolresult.EstimateTokens(forHistory)
+	m.HistoryResultTokens += tokens.Estimate(forHistory)
 	if strings.TrimSpace(spillPath) != "" {
 		m.SpillCount++
 	}

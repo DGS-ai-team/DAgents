@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
 func TestReadFile_truncatesByTokenBudget(t *testing.T) {
@@ -36,8 +36,8 @@ func TestReadFile_truncatesByTokenBudget(t *testing.T) {
 		t.Fatal("missing TRUNCATED marker")
 	}
 	body := readFileBody(out)
-	if toolresult.EstimateTokens(body) > float64(defaultReadMaxTokens)+50 {
-		t.Fatalf("body tokens=%v", toolresult.EstimateTokens(body))
+	if tokens.Estimate(body) > float64(defaultReadMaxTokens)+50 {
+		t.Fatalf("body tokens=%v", tokens.Estimate(body))
 	}
 }
 
@@ -64,7 +64,7 @@ func TestGrepFile_truncatesByTokenBudget(t *testing.T) {
 	if !strings.Contains(out, "[TRUNCATED]") {
 		t.Fatalf("expected grep truncation: len=%d", len(out))
 	}
-	if toolresult.EstimateTokens(out) > float64(defaultSearchMaxTokens)+120 {
-		t.Fatalf("grep output tokens=%v", toolresult.EstimateTokens(out))
+	if tokens.Estimate(out) > float64(defaultSearchMaxTokens)+120 {
+		t.Fatalf("grep output tokens=%v", tokens.Estimate(out))
 	}
 }

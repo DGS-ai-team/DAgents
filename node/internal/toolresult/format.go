@@ -3,6 +3,8 @@ package toolresult
 import (
 	"fmt"
 	"strings"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
 // Result 为 tool.after_each 对单条 tool 结果的拆分。
@@ -24,7 +26,7 @@ func Package(cfg Config, sessionID, toolCallID, toolName, normalized string) (Re
 	if !cfg.Enabled || !cfg.appliesTo(toolName) {
 		return out, nil
 	}
-	totalTokens := EstimateTokens(text)
+	totalTokens := tokens.Estimate(text)
 	if totalTokens <= float64(cfg.SpillThresholdTokens) {
 		return out, nil
 	}
@@ -45,44 +47,26 @@ func Package(cfg Config, sessionID, toolCallID, toolName, normalized string) (Re
 }
 
 func formatHeadTailWithHint(text string, maxTokens int, relPath string) string {
-	totalTokens := EstimateTokens(text)
+	totalTokens := tokens.Estimate(text)
 	limit := float64(maxTokens)
 	if maxTokens <= 0 || totalTokens <= limit {
 		return text
 	}
 	hintTemplate := "...（已省略约 %d tokens，完整输出已写入 %q，请用 read_file(path=%q, line_offset=1, line_limit=100) 分页读取）..."
 	placeholder := fmt.Sprintf(hintTemplate, 0, relPath, relPath)
-	hintTokens := EstimateTokens(placeholder) + 4
+	hintTokens := tokens.Estimate(placeholder) + 4
 	budget := limit - hintTokens
 	if budget < 1 {
 		return fmt.Sprintf(hintTemplate, int(totalTokens+0.5), relPath, relPath)
 	}
 	headBudget := budget / 2
 	tailBudget := budget - headBudget
-	head := TakePrefixForTokenBudget(text, headBudget)
-	tail := takeRunesForTokenBudgetFromEnd(text, tailBudget)
-	omitted := totalTokens - EstimateTokens(head) - EstimateTokens(tail)
+	head := tokens.TakePrefixForTokenBudget(text, headBudget)
+	tail := tokens.TakeSuffixForTokenBudget(text, tailBudget)
+	omitted := totalTokens - tokens.Estimate(head) - tokens.Estimate(tail)
 	if omitted < 0 {
 		omitted = 0
 	}
 	hint := fmt.Sprintf(hintTemplate, int(omitted+0.5), relPath, relPath)
 	return head + hint + tail
-}
-
-func takeRunesForTokenBudgetFromEnd(s string, maxTokens float64) string {
-	if maxTokens <= 0 {
-		return ""
-	}
-	runes := []rune(s)
-	var picked []rune
-	used := 0.0
-	for i := len(runes) - 1; i >= 0; i-- {
-		w := tokenWeight(runes[i])
-		if used+w > maxTokens && used > 0 {
-			break
-		}
-		picked = append([]rune{runes[i]}, picked...)
-		used += w
-	}
-	return string(picked)
 }

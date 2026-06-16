@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
 func writeSkill(t *testing.T, root, name, body string) {
@@ -47,7 +49,7 @@ func TestEstimateCatalogStats_metadataMatchesRenderSection(t *testing.T) {
 	c := NewCatalog(root, true, 3)
 	stats := c.EstimateCatalogStats()
 	meta := c.RenderMetadataSection()
-	want := len(LoadSkillsMetadataPrefix+meta) / 4
+	want := tokens.EstimateInt(LoadSkillsMetadataPrefix + meta)
 	if stats.MetadataTokens != want {
 		t.Fatalf("metadata tokens = %d want %d", stats.MetadataTokens, want)
 	}

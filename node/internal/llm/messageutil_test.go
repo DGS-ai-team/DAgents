@@ -1,6 +1,10 @@
 package llm
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
+)
 
 func TestEstimateMessageTokens_includesReasoning(t *testing.T) {
 	got := EstimateMessageTokens([]Message{{
@@ -8,7 +12,7 @@ func TestEstimateMessageTokens_includesReasoning(t *testing.T) {
 		Content:          "abcd",
 		ReasoningContent: "wxyz",
 	}})
-	want := len("abcd")/4 + 16 + len("wxyz")/4
+	want := tokens.EstimateInt("abcd") + 16 + tokens.EstimateInt("wxyz")
 	if got != want {
 		t.Fatalf("tokens = %d want %d", got, want)
 	}
