@@ -19,13 +19,13 @@ func writeFileToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "write_file",
-			Description: descFSPathConvention + " " + descReadBeforeWrite + " 写入文本文件（覆盖）。",
+			Description: "修改已有文件前须先 read_file 核对空白、换行与上下文。写入文本文件（覆盖）。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
 						"type":        "string",
-						"description": "工作区内相对 fs_root 的路径（必填）",
+						"description": "路径（必填）",
 					},
 					"content": map[string]any{
 						"type":        "string",

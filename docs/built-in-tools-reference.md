@@ -1,0 +1,494 @@
+# Go Agent Node 内置工具全量参考
+
+> **权威来源**：`node/internal/tools/registry.go` → `Definitions()`（共 **25** 个 LLM 可见工具）。  
+> 简明索引与 Python 归档对照见 [built-in-tools.md](./built-in-tools.md)。符号级 API 见 [node/internal/tools/REFERENCE.md](../node/internal/tools/REFERENCE.md)。
+
+---
+
+## 全局约定
+
+### 路径与沙箱
+
+- 路径约定见 system prompt **「工作区目录」**：相对路径均基于工作区根（`.` = 根）；工作区内用相对路径，工作区外用绝对路径。适用于 FS 工具的 `path`/`directory` 及 `bash_run` 的 `cwd`。
+- `prompt_context/` 下 soul/user/custom 侧车 Markdown 已注入 system prompt，通常无需 `read_file`。
+- 可执行脚本见 `scripts/` 与 `scripts_menu.md`。
+
+### 通用必填参数（所有工具）
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| **`call_purpose`** | string | 一句话说明本次调用目的（TUI 首行展示，如 `bash(此内容)`） |
+
+### 文件编码（FS 读写类可选）
+
+| 参数 | 枚举 | 说明 |
+|------|------|------|
+| **`encoding`** | `utf-8` / `gbk` / `gb18030` | 磁盘字节编码；省略时用 `config.yaml` 的 `tools.file_encoding` 或平台默认（Windows 常见 gbk，其它 utf-8）。模型侧 content 始终 UTF-8。 |
+
+### 工具组（`tools.enabled_groups`）
+
+| 组名 | 包含工具 |
+|------|----------|
+| **`fs`** | read_file, write_file, glob_files, grep_file, grep_files, search_replace |
+| **`bash`** | bash_run, background_job_status, background_job_cancel |
+| **`hitl`** | ask_user_information |
+| **`skills`** | load_skills, unload_skills, clear_skills |
+| **`triggers`** | trigger_list, trigger_get, trigger_create, trigger_update, trigger_delete |
+| **`a2a`** | agent_invoke, agent_discover |
+| **`child_agents`** | create_temporary_agent, wait_temporary_agents, temporary_agent_status, cancel_temporary_agent |
+
+省略或 `[]` = 启用全部 25 个。A2A 组需 `manage.enabled: true`；子 Agent 组建议配合 `child_agents.enabled`。
+
+### 执行形态
+
+- Schema 均为**同步**；`bash_run` 在 `timeout_seconds` 内未完成时 **自动降级**为后台 job，完成后 async 回灌。
+- 标注「编排器处理」的工具由 turn 编排器特殊处理，不走普通 `Registry.Execute`。
+
+---
+
+## 一、文件系统组（`fs`）
+
+### `read_file`
+
+**源码**：`node/internal/tools/fs_read.go`
+
+**描述**：prompt_context/ 已注入 system prompt，通常无需 read。按行窗口读取文本文件，大文件用 line_offset/line_limit 分页。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `path` | ✓ | 路径（必填）；支持常见文本后缀（含 .jsonl、.html） |
+| `line_offset` | | 起始行（1-based，默认 1）；非正整数时从文件末尾倒数 |
+| `line_limit` | | 本页最多行数（默认 100） |
+| `include_line_numbers` | | 是否在正文前加行号+tab（默认 false） |
+| `encoding` | | 见「文件编码」 |
+
+**返回**：文件 mtime、编码、总行数、本页行区间、`next_line_offset`、是否因 token 上限截断等元数据 + 正文。
+
+**审批**：`rule` → 首 call **auto**（60s 内同参重复 → 审批，WS6）。
+
+---
+
+### `write_file`
+
+**源码**：`node/internal/tools/fs_write.go`
+
+**描述**：修改已有文件前须先 read_file 核对空白、换行与上下文。写入文本文件（覆盖）。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `path` | ✓ | 路径（必填） |
+| `content` | ✓ | 写入全文（覆盖已有内容） |
+| `encoding` | | 见「文件编码」 |
+
+**审批**：`rule` → 默认须审批；**信任链**命中（同 session 内用户审批新建且 mtime 未变）可降为 auto。设 `always` 则每次必审。见 [ux-agent-owned-file-approval.md](./design/ux-agent-owned-file-approval.md)。
+
+---
+
+### `glob_files`
+
+**源码**：`node/internal/tools/fs_glob_tool.go`
+
+**描述**：在指定目录下按 glob 列举匹配路径，**不读内容**。glob_pattern 相对 directory，支持 `*`、`?`、`**`；可用 offset/max_results 分页。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `directory` | ✓ | 起始目录（必填）；传 `.` 表示工作区根 |
+| `glob_pattern` | ✓ | 如 `*.go`、`**/*.yaml` |
+| `offset` | | 跳过前 N 条（默认 0） |
+| `max_results` | | 本页最多条数（默认 100） |
+| `include_dirs` | | 是否含目录项（默认 false，仅文件） |
+
+**审批**：`rule` → 首 call **auto**。
+
+---
+
+### `grep_file`
+
+**源码**：`node/internal/tools/fs_grep_file.go`
+
+**描述**：在**单个文件**内按行搜索（正则或字面量），分页返回命中行及上下文。path 须为文件；pattern 匹配行内文本，不是文件名。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `path` | ✓ | 文件路径 |
+| `pattern` | ✓ | 行内容匹配表达式；literal=true 时为普通字符串 |
+| `index_offset` | | 跳过前 N 个命中（默认 0） |
+| `count_limit` | | 本页最多展示命中数（默认 5） |
+| `context_lines` | | 命中前后上下文行数（默认 10） |
+| `case_sensitive` | | 大小写敏感（默认 true） |
+| `literal` | | pattern 当普通字符串（默认 false） |
+| `encoding` | | 见「文件编码」 |
+
+**审批**：`rule` → 首 call **auto**。
+
+---
+
+### `grep_files`
+
+**源码**：`node/internal/tools/fs_grep_files.go`
+
+**描述**：在目录树内先按 glob_pattern 筛文件，再按 pattern 逐行搜索，分页返回跨文件命中。glob_pattern 默认 `**/*`。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `directory` | ✓ | 起始目录（必填）；传 `.` 表示工作区根 |
+| `pattern` | ✓ | 行内容匹配表达式 |
+| `glob_pattern` | | 限定扫描文件（默认 `**/*`） |
+| `hit_offset` | | 跳过前 N 个跨文件命中（默认 0） |
+| `max_hits` | | 本页最多命中数（默认 10） |
+| `max_files` | | 最多扫描文件数（默认 50） |
+| `context_lines` | | 上下文行数（默认 10） |
+| `case_sensitive` | | 默认 true |
+| `literal` | | 默认 false |
+| `encoding` | | 见「文件编码」 |
+
+**审批**：`rule` → 首 call **auto**。
+
+---
+
+### `search_replace`
+
+**源码**：`node/internal/tools/fs_search_replace.go`
+
+**描述**：修改已有文件前须先 read_file。用精确子串替换修改文本。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `path` | ✓ | 路径（必填） |
+| `old_string` | ✓ | 须在磁盘中精确出现（含空格换行；勿带行号前缀） |
+| `new_string` | ✓ | 替换结果；空串 = 删除 old_string |
+| `replace_all` | | 是否替换全部（默认 false；false 时须恰好 1 处匹配） |
+| `encoding` | | 见「文件编码」 |
+
+**返回**：成功/失败、替换次数、可选 diff 预览。
+
+**审批**：同 `write_file`（`rule` + 信任链）。
+
+---
+
+## 二、Shell / 后台任务组（`bash`）
+
+### `bash_run`
+
+**源码**：`node/internal/tools/bash_run_tool.go`、`bash_runner.go`
+
+**描述（Linux/macOS）**：执行 bash 命令；cwd 省略时默认为工作区根。省略 shell_type 时默认 bash。command 须为 bash 语法（ls、grep、cat），勿用 PowerShell/cmd 语法。可执行脚本见 scripts/ 与 scripts_menu.md。除非明确需要，否则避免 su/sudo。同步等待 timeout_seconds（默认 30）；超时自动降级后台 job，完成后自动回灌。长输出按 tools.bash_compress 清洗；超长落盘并在 history 头尾摘要。
+
+**描述（Windows）**：执行 PowerShell；默认 shell_type=powershell。command 须用 PowerShell 语法（Get-ChildItem 等），勿用 cmd 语法（dir、copy）。其余同上。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `command` | ✓ | shell 命令字符串 |
+| `timeout_seconds` | | 1–600，默认 30 |
+| `cwd` | | 执行目录（默认工作区根） |
+| `shell_type` | | `bash` / `cmd` / `powershell`（平台默认不同） |
+
+**审批**：`rule` → 按 shell 子策略（`.runtime/policy/shell/*.approval.txt`）逐段判定。
+
+---
+
+### `background_job_status`
+
+**源码**：`node/internal/tools/tool_job.go`
+
+**描述**：查询 bash_run 后台任务状态与输出摘要。任务完成后通常已由 async_tool_result 自动回灌，**无需轮询**；仅在需取消或主动确认进度时使用。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `job_id` | ✓ | bash_run 超时降级返回的 job_id |
+
+**审批**：`rule` → **auto**。
+
+---
+
+### `background_job_cancel`
+
+**源码**：`node/internal/tools/tool_job.go`
+
+**描述**：取消 bash_run 仍在运行的后台任务（含同步超时降级产生的 job）。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `job_id` | ✓ | 要取消的 job_id |
+
+**审批**：**always**（每次须审批）。
+
+---
+
+## 三、人机协作组（`hitl`）
+
+### `ask_user_information`
+
+**源码**：`node/internal/tools/tool_hitl.go`
+
+**描述**：向用户询问补充信息（选项或自由文本）。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `question` | ✓ | 向用户展示的问题 |
+| `options` | | 可选项数组，每项含 `id`/`label`，可选 `value`；为空则收集自由文本 |
+| `allow_multiple` | | 是否多选（仅 options 非空时有效，默认 false） |
+| `placeholder` | | 自由文本占位提示 |
+| `required` | | 是否必须回答（默认 true；用户仍可通过 UI 取消） |
+
+**执行**：编排器发 SSE `user_information_required`，TUI 收集后 `resume(type=user_information)` 回灌。
+
+**审批**：**never**（免审批）。
+
+---
+
+## 四、Skills 组（`skills`）
+
+### `load_skills`
+
+**源码**：`node/internal/tools/tool_skills.go`
+
+**描述**：加载 skills 到当前会话，使后续 system prompt 注入已加载 skill 正文。description 下方会动态附加 available skills 列表（若已配置 catalog）。任务与某 skill 匹配且尚未加载时，**必须先调用**。整组**替换**当前已加载列表（非追加）；`skill_names=[]` 清空。已加载内容即 SKILL.md 正文，修改文件不必重复 read skill.md。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `skill_names` | ✓ | skill 名称数组；须与 `skills/<name>` 及 frontmatter `name` 一致 |
+
+**审批**：**never**。
+
+---
+
+### `unload_skills`
+
+**源码**：`node/internal/tools/tool_skills.go`
+
+**描述**：从当前会话已加载 skills 中移除指定项；移除后该 skill 正文不再注入后续 system prompt。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `skill_names` | ✓ | 要卸载的名称数组；不存在或未加载的忽略 |
+
+**审批**：未显式配置 → `rule` → **须审批**。
+
+---
+
+### `clear_skills`
+
+**源码**：`node/internal/tools/tool_skills.go`
+
+**描述**：清空当前会话已加载的全部 skills，等价于 `load_skills([])`。
+
+| 参数 | 必填 |
+|------|------|
+| （无，仅 call_purpose） | |
+
+**审批**：未显式配置 → `rule` → **须审批**。
+
+---
+
+## 五、触发器组（`triggers`）
+
+### `trigger_list`
+
+**源码**：`node/internal/tools/tool_triggers.go`
+
+**描述**：查看已配置的触发器列表；只读，不会执行或投递任务。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `include_disabled` | | 是否含 enabled=false 的触发器（默认 true） |
+
+**审批**：**never**。
+
+---
+
+### `trigger_get`
+
+**源码**：`node/internal/tools/tool_triggers.go`
+
+**描述**：查看单个触发器配置与 next_fire_at；不执行触发。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `trigger_id` | ✓ | 触发器 ID |
+
+**审批**：**never**。
+
+---
+
+### `trigger_create`
+
+**源码**：`node/internal/tools/tool_triggers.go`
+
+**描述**：新建触发器；condition 须含 **interval_seconds**、**fire_at** 或 **schedule** 之一。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `name` | ✓ | 显示名称 |
+| `task_template` | ✓ | 触发时投递的任务正文；须自包含，避免触发后再追问用户 |
+| `condition` | ✓ | 调度条件，三选一：<br>• `{"interval_seconds": N}` 周期<br>• `{"fire_at": unix秒}` 单次<br>• `{"schedule": {...}, "cmd": "可选 bash 门控"}`<br>schedule 示例：daily `{kind,hour,minute}`；weekly `{kind,weekday,hour,minute}`（0=周日）；monthly `{kind,day,hour,minute}`（-1=月末）。cmd 仅 schedule 自动触发时执行，exit 0 才投递 |
+
+**审批**：**always**。
+
+---
+
+### `trigger_update`
+
+**源码**：`node/internal/tools/tool_triggers.go`
+
+**描述**：修改已有触发器；未传字段保持不变。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `trigger_id` | ✓ | 要修改的 ID |
+| `name` | | 新名称 |
+| `task_template` | | 新任务模板 |
+| `condition` | | 新调度条件（规则同 create） |
+
+**审批**：**always**。
+
+---
+
+### `trigger_delete`
+
+**源码**：`node/internal/tools/tool_triggers.go`
+
+**描述**：删除不再需要的触发器规则。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `trigger_id` | ✓ | 要删除的 ID |
+
+**审批**：**always**。
+
+---
+
+## 六、A2A 组（`a2a`，需 `manage.enabled`）
+
+### `agent_invoke`
+
+**源码**：`node/internal/tools/tool_a2a.go`
+
+**描述**：经 Manage 向其他 Agent 发起 A2A 协作（invoke），等待对端回复后返回 result_text。禁止直连其他 Node；目标须已在 Manage 注册且 expose_to_peers=true。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `content` | ✓ | 发给目标 Agent 的任务正文 |
+| `to_agent_id` | | 目标 Agent ID；省略时用 Agent Card metadata.compliance_peer |
+| `timeout_seconds` | | 最长等待秒数（默认 90） |
+
+**审批**：`rule` → 默认**须审批**（跨 Agent）。
+
+---
+
+### `agent_discover`
+
+**源码**：`node/internal/tools/tool_a2a.go`
+
+**描述**：经 Manage 发现可 A2A 协作的对等 Agent 列表（online 且 expose_to_peers=true；响应不含 endpoint/base_url）。返回 JSON：agent_id、name、capabilities、card 等。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `discovery_group` | | 发现分组；省略时用 manage.registration.team |
+
+**审批**：`rule` → 首 call **auto**。
+
+---
+
+## 七、临时子 Agent 组（`child_agents`）
+
+### `create_temporary_agent`
+
+**源码**：`node/internal/tools/tool_childagent.go`
+
+**描述**：创建同进程临时 Agent 执行自包含子任务，**非**外部 A2A。wait=true 时阻塞至完成。task 须完整上下文；allowed_tools 指定其可用工具子集（仅限父 Agent 当前拥有的工具）。skill_names 可在创建时预加载 skills（子 Agent 运行期不可再 load_skills）。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `task` | ✓ | 首条 user 任务（自包含，含角色与约束） |
+| `purpose` | ✓ | 短说明（日志与 UI） |
+| `allowed_tools` | | 工具子集；默认 read_file、glob_files、grep_file、bash_run |
+| `skill_names` | | 预加载 skills 名称数组 |
+| `ttl_seconds` | | 生命周期（秒） |
+| `max_turns` | | 最大回合数 |
+| `wait` | | true 时阻塞等待结果 |
+
+**执行**：编排器处理。详见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。
+
+**审批**：未显式配置 → `rule` → **须审批**。
+
+---
+
+### `wait_temporary_agents`
+
+**源码**：`node/internal/tools/tool_childagent.go`
+
+**描述**：等待一个或多个临时 Agent 到达终态并汇总；非 A2A 轮询。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `child_session_ids` | ✓ | create_temporary_agent 返回的 session id 列表 |
+| `timeout_seconds` | | 最长等待秒数；0 = 立即返回当前快照 |
+| `fail_fast` | | 任一失败终态时提前返回 |
+
+**审批**：`rule` → **须审批**。
+
+---
+
+### `temporary_agent_status`
+
+**源码**：`node/internal/tools/tool_childagent.go`
+
+**描述**：非阻塞查询临时 Agent 状态。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `child_session_ids` | ✓ | session id 列表 |
+
+**审批**：`rule` → **须审批**。
+
+---
+
+### `cancel_temporary_agent`
+
+**源码**：`node/internal/tools/tool_childagent.go`
+
+**描述**：取消仍在运行的临时 Agent。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `child_session_id` | ✓ | session id |
+| `reason` | | 取消原因 |
+
+**审批**：`rule` → **须审批**。
+
+---
+
+## 附录
+
+### 内部别名（不对 LLM 暴露）
+
+| 名称 | 说明 |
+|------|------|
+| **`search_file`** | Registry handler 与 `grep_file` 行为一致，**不在** `Definitions()` 中；policy 里 `search_file=never` 为历史兼容 |
+
+### Python 栈遗留（Go Node 无此工具）
+
+policy 种子中仍可见但 Go 未注册：`agent_send_message`、`agent_broadcast`、`agent_peer_approve_tools`。
+
+### 审批档位速查
+
+种子 policy：`packaging/runtime/policy/tool.approval.txt`；引擎：`node/internal/policy/engine.go`。
+
+| 档位 | 含义 |
+|------|------|
+| **never** | 免审批 |
+| **always** | 每次须审批；写盘 always 时不走信任链 |
+| **rule** | 走 fallback + 子策略；只读类首 call 可 auto，写盘/跨 Agent 默认须审批 |
+| **deny** | 拒绝执行 |
+
+### 相关文档
+
+| 路径 | 内容 |
+|------|------|
+| [built-in-tools.md](./built-in-tools.md) | 简明索引、enabled_groups、Python 归档 |
+| [architecture/child-agent-tools.md](./architecture/child-agent-tools.md) | 子 Agent 工具与编排 |
+| [triggers-design.md](./triggers-design.md) | 触发器设计与存储 |
+| [design/ux-agent-owned-file-approval.md](./design/ux-agent-owned-file-approval.md) | 写盘信任链 |
+| [design/tool-context-cost-analysis.md](./design/tool-context-cost-analysis.md) | WS3/WS6 上下文治理 |
+| [node/internal/tools/README.md](../node/internal/tools/README.md) | 包内布局与执行模式 |

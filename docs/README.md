@@ -13,7 +13,8 @@ DAgents 文档分四层：**架构（现网）** → **设计（决策与优化�
 | 新同学 / 联调 | [architecture/local-assistant.md](./architecture/local-assistant.md) → [architecture/agent-node-api.md](./architecture/agent-node-api.md) |
 | 改 Node 内部 | [architecture/go-node-internals.md](./architecture/go-node-internals.md) + 各包 `node/internal/*/README.md` |
 | 回顾重大优化 | [design/major-changes.md](./design/major-changes.md) |
-| 查工具列表 | [built-in-tools.md](./built-in-tools.md) §0 |
+| 查 Manage 通信 | [manage-communication.md](./manage-communication.md)（全量端点与流向） |
+| 查工具列表 | [built-in-tools-reference.md](./built-in-tools-reference.md)（全量）· [built-in-tools.md](./built-in-tools.md) §0（索引） |
 
 ---
 
@@ -65,7 +66,9 @@ DAgents 文档分四层：**架构（现网）** → **设计（决策与优化�
 
 | 文件 | 说明 |
 |------|------|
-| [built-in-tools.md](./built-in-tools.md) | §0 Go 工具表；§1+ Python 归档对照 |
+| [manage-communication.md](./manage-communication.md) | Manage 与 Node/Client/Console 全量通信逻辑 |
+| [built-in-tools-reference.md](./built-in-tools-reference.md) | Go 内置工具全量参考（description、参数、审批） |
+| [built-in-tools.md](./built-in-tools.md) | §0 Go 工具索引；§1+ Python 归档对照 |
 | [triggers-design.md](./triggers-design.md) | 触发器历史设计；**现网**见 `node/internal/triggers/` |
 | [a2a-and-register-center.md](./a2a-and-register-center.md) | RC / `agent_peer` 历史；**现网 A2A** 见 Manage + `agent_invoke` |
 | [security-rollout.md](./security-rollout.md) | 分阶段安全验收 |

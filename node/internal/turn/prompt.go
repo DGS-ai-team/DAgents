@@ -170,6 +170,9 @@ func appendEnvironmentSection(b *strings.Builder, in environmentSectionInput) {
 
 func formatWorkspaceSubdirsSection() string {
 	return strings.Join([]string{
+		"所有工具的 path、directory、cwd 等路径参数：相对路径均基于工作区根目录（`.` 表示根）。" +
+			"操作工作区内资源时请使用相对路径；如需访问工作区外请使用绝对路径。",
+		"",
 		"以下为内置目录。",
 		"",
 		"- `data/`：临时工作区（输出、中间产物，可清理）",

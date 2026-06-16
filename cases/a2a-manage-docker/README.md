@@ -43,7 +43,7 @@ docker compose up --build -d
 ```
 
 确认 `.env` 中 `LLM_MOCK=false` 且 `LLM_API_KEY` 已填写后再启动。  
-Manage 控制台（查看已注册 Node）：<http://127.0.0.1:8020/console/>
+Manage 控制台（查看已注册 Node、分配 `discovery_group`；**不含** Node 远程 session 代理）：<http://127.0.0.1:8020/console/>
 
 `docker compose up` 会在 Node 就绪后自动运行 **`init-groups`** 服务，为 **node-a / node-b** 分配默认分组 **`a2a-lab`**（可通过环境变量 `DISCOVERY_GROUP` 覆盖）。
 
@@ -138,7 +138,7 @@ go run ./client/cmd/dagents-client \
 | `要把含手机号的客户明细导出到境外 SaaS 做分析，没有 CHG，怎么办？` | 强调 PII + 出境风险；**不得**给出绕过合规的步骤；建议停止或升级值班长 |
 | `脱敏日活统计要发给已备案 vendor，变更单 CHG-2026-0142，流程上还要注意什么？` | 说明须走 A2A 合规咨询；可列出变更单、脱敏范围等需写进咨询正文的信息 |
 
-若出现 `401` / `Authentication Fails`，检查本目录 `.env` 的 `LLM_API_KEY` 与 `LLM_MODEL` 是否有效，并按 [§1.3](#13-修改-env-后必须重建容器) 重建容器。
+若出现 `401` / `Authentication Fails`，检查本目录 `.env` 的 `LLM_API_KEY` 与 `LLM_MODEL` 是否有效，并按 [§1.4](#14-修改-env-后必须重建容器) 重建容器。
 
 > node-b 已接入 **`agent_invoke`** / **`agent_discover`** 工具：`agent_invoke` 向 **node-a** 发起合规咨询并等待 `result_text`（默认目标为 Agent Card `metadata.compliance_peer`）。**前提**：双方在 Manage 上已分配**相同**的 `discovery_group`（见 [§1.3](#13-discovery_groupa2a-必需)）。
 
@@ -152,7 +152,7 @@ go run ./client/cmd/dagents-client \
 | `【合规咨询】…含手机号、姓名的客户明细…境外 SaaS…无变更单` | 典型「应拒绝」场景；模型可能回复含 R-PII-01 |
 | `【合规咨询】…生产环境发布…暂无变更单` | 典型「缺 CHG」场景；模型可能回复含 R-CHG-01 |
 
-**前提**：`.env` 中 **`LLM_MOCK=false`** 且 node-a 已 [重建容器](#13-修改-env-后必须重建容器)。可在 Manage Console 或 `docker compose logs node-a` 查看 turn / 流式过程。
+**前提**：`.env` 中 **`LLM_MOCK=false`** 且 node-a 已 [重建容器](#14-修改-env-后必须重建容器)。可在 Manage Console 或 `docker compose logs node-a` 查看 turn / 流式过程。
 
 ---
 
@@ -171,7 +171,7 @@ go run ./client/cmd/dagents-client \
 | 路径 | 说明 |
 |------|------|
 | `/etc/dagents/config.yaml` | Node 配置（构建时从 `config/node-{a,b}.yaml` 打入） |
-| `/etc/dagents/agent-card.json` | 注册 Manage 时上报的 **Agent Card** |
+| `/workspace/agent-card.json` | 注册 Manage 时上报的 **Agent Card**（固定路径，相对 Node 工作目录） |
 | `/etc/dagents/custom.md.seed` | 案例 `prompt_context` 种子；**每次启动**复制到 runtime |
 | `/workspace/.runtime/` | **`fs_root`**（volume，运行时状态） |
 | `/workspace/.runtime/prompt_context/custom.md` | 生效中的侧车指令（经 turn 注入 system prompt） |
@@ -189,9 +189,9 @@ go run ./client/cmd/dagents-client \
 | `prompt_context/node-b/custom.md` | 用户自定义提示词（运维门禁、A2A 咨询格式等） |
 | `agent-card/node-a.json` | 名称「合规助手」；`metadata.role=compliance`；能力 `compliance_review` / `policy_lookup` |
 | `agent-card/node-b.json` | 名称「运维执行助手」；`metadata.compliance_peer=node-a`；能力 `deployment` / `data_export` / `shell` |
-| `config/node-a.yaml` | 开启 `manage.a2a` Inbox；LLM 字段支持 `${LLM_*}` 环境变量展开 |
-| `config/node-b.yaml` | A2A Inbox 关闭（作调用方）；同样支持 `${LLM_*}` |
-| `local-run/node-{a,b}.yaml` | **宿主机 Client/TUI** 连 `127.0.0.1` 映射端口（与容器内 `config/` 分离） |
+| `config/node-a.yaml` | 开启 `manage.a2a` Inbox；`registration` 仅含 `base_url` / `team` 等（**无** `agent_card_path`）；LLM 支持 `${LLM_*}` |
+| `config/node-b.yaml` | A2A Inbox 关闭（作调用方）；同样无 `agent_card_path` |
+| `local-run/node-{a,b}.yaml` | **宿主机 Client/TUI** 连 `127.0.0.1` 映射端口；本地联调 Node 时工作目录须含 `agent-card.json`（见 `scripts/start-local.sh`） |
 
 ---
 
@@ -216,12 +216,13 @@ go run ./client/cmd/dagents-client \
 
 ### 5.2 联调注意
 
-- **node-a / node-b 均需** `LLM_MOCK=false` 与有效 `LLM_API_KEY`（改 `.env` 后 [§1.3](#13-修改-env-后必须重建容器) 重建容器）。
+- **node-a / node-b 均需** `LLM_MOCK=false` 与有效 `LLM_API_KEY`（改 `.env` 后 [§1.4](#14-修改-env-后必须重建容器) 重建容器）。
 - 查询 Task 时直接阅读 **`result_text`**；是否采纳由 node-b / 人工判断。
 
 ---
 
 ## 延伸阅读
 
+- [Manage 通信架构](../../docs/manage-communication.md)
 - [A2A 经 Manage](../../docs/future/a2a-via-manage.md)
 - [Cases 文档约定](../README.md#case-readme-写法)

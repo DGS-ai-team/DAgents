@@ -233,14 +233,12 @@ type ManageA2AConfig struct {
 }
 
 // ManageRegistrationConfig 控制周期性 upsert/心跳参数。
+// Agent Card（name/description/capabilities/metadata）固定从工作目录 ./agent-card.json 读取，不在此重复配置。
 type ManageRegistrationConfig struct {
 	BaseURL         string `yaml:"base_url"`
-	AgentCardPath   string `yaml:"agent_card_path"`
 	IntervalSeconds int    `yaml:"interval_seconds"`
 	TTLSeconds      int    `yaml:"ttl_seconds"`
-	Name            string `yaml:"name"`
 	Team            string `yaml:"team"`
-	Description     string `yaml:"description"`
 }
 
 // LoadFile 从 YAML 文件加载配置并完成默认值填充与环境变量展开。

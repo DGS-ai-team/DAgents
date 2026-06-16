@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -147,4 +149,34 @@ func TestRegistrar_reregistersOnHeartbeat404(t *testing.T) {
 		t.Fatalf("register calls = %d, want >= 2", registerCalls.Load())
 	}
 	cancel()
+}
+
+func TestRegistrar_buildRegisterPayload_usesAgentCardName(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, AgentCardFileName), []byte(`{
+		"name": "展示名",
+		"description": "Card 描述",
+		"capabilities": ["compliance_review"]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	cfg := testManageConfig("http://127.0.0.1:8020", "")
+	cfg.AgentID = "ops-01"
+	reg := NewRegistrar(cfg, nil)
+	payload := reg.buildRegisterPayload()
+	if payload.Name != "展示名" {
+		t.Fatalf("name = %q, want 展示名", payload.Name)
+	}
+	if payload.Description != "Card 描述" {
+		t.Fatalf("description = %q", payload.Description)
+	}
+	if len(payload.Capabilities) != 1 || payload.Capabilities[0] != "compliance_review" {
+		t.Fatalf("capabilities = %v", payload.Capabilities)
+	}
 }

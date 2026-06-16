@@ -16,7 +16,7 @@ listen:
 local:
   endpoint: http://127.0.0.1:18765
 
-expose_to_peers: false
+expose_to_peers: false   # A2A 联调时建议 true（允许对端 agent_invoke 访问本 Node HTTP API）
 
 # Manage 发现分组由 Manage Console / API 分配，Node 配置中无需 groups
 
@@ -45,14 +45,23 @@ llm:
 
 manage:
   enabled: false
+  # --- Manage + A2A（见 docs/a2a-and-register-center.md、packaging/manage/README.md）---
+  # 启用步骤：
+  #   1. 启动 Manage（docker compose 或 dagents-manage 镜像）
+  #   2. cp agent-card.example.json agent-card.json（固定文件名，与 config 同工作目录）
+  #   3. 设 manage.enabled: true，取消下列注释；tools.enabled_groups 含 a2a
   # url: http://127.0.0.1:8020
+  # node_token:              # 可选；Manage 启用 MANAGE_TOKENS 时填写
   # registration:
-  #   base_url: http://192.168.1.10:18765   # 上报 Manage；留空则用 local.endpoint
-  #   interval_seconds: 30
-  #   ttl_seconds: 60
-  #   team: platform
+  #   base_url: http://192.168.1.10:18765   # 上报 Manage 的本 Node 可达地址；留空则用 local.endpoint
+  #   interval_seconds: 30                  # 注册/心跳间隔（秒）
+  #   ttl_seconds: 60                       # Manage 侧 TTL；应大于 interval_seconds
+  #   team: platform                        # Manage Console 目录分组（仅 config，勿写入 Card）
+  # a2a:
+  #   enabled: true                         # 默认 true；false = 仅注册、不拉 Inbox（纯调用方，如 agent_invoke）
+  #   inbox_wait_seconds: 25                # Inbox long poll wait（秒）
+  #   inbox_poll_seconds: 30              # 断线降级短 poll；省略时默认 = interval_seconds
   # Node 注册时自动发送 Header: x-dagents-agent-id = agent_id
-  # node_token: 可选，仅 Manage 启用 MANAGE_TOKENS 时需要
 
 # 工具审批策略位于 fs_root/policy/（首次启动从 packaging/runtime/policy 种子复制）
 # 编辑 tool.approval.txt 与 shell/*.approval.txt 即可调整审批规则。

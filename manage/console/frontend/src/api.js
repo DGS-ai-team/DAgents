@@ -78,14 +78,4 @@ export async function fetchAudit(limit = 100) {
   return apiFetch("/v1/admin/audit", { limit });
 }
 
-export async function fetchNodeSessions(agentId) {
-  return apiFetch(`/v1/admin/nodes/${encodeURIComponent(agentId)}/sessions`);
-}
-
-export async function fetchNodeSessionContext(agentId, sessionId) {
-  return apiFetch(
-    `/v1/admin/nodes/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/context`,
-  );
-}
-
 export { REGISTRY_API };

@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 PLATFORM="${PLATFORM:-linux-amd64}"
-VERSION="${VERSION:-0.3.7}"
+VERSION="${VERSION:-0.3.8}"
 
 EXE=""
 if [[ "${PLATFORM}" == windows-* ]]; then
@@ -50,6 +50,9 @@ install -m 0755 "${CLI_BIN}" "${BUNDLE_DIR}/bin/dagents-cli${EXE}"
 
 if [[ -f "${REPO_ROOT}/packaging/agent-client/config.example.yaml" ]]; then
   cp "${REPO_ROOT}/packaging/agent-client/config.example.yaml" "${BUNDLE_DIR}/config.example.yaml"
+fi
+if [[ -f "${REPO_ROOT}/packaging/agent-client/agent-card.example.json" ]]; then
+  cp "${REPO_ROOT}/packaging/agent-client/agent-card.example.json" "${BUNDLE_DIR}/agent-card.example.json"
 fi
 if [[ -f "${REPO_ROOT}/.env.example" ]]; then
   cp "${REPO_ROOT}/.env.example" "${BUNDLE_DIR}/.env.example"

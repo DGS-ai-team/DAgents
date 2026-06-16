@@ -20,7 +20,7 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "prompt_context/", "最高优先级规则", "sess-abc", "运行环境", "工作区目录") {
+	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "prompt_context/", "最高优先级规则", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
@@ -60,7 +60,7 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 		SessionID: "child-abc",
 		Purpose:   "review patch",
 	})
-	if !containsAll(prompt, "临时子 Agent", "review patch", "child-abc", "memory/", "运行环境", "工作区目录") {
+	if !containsAll(prompt, "临时子 Agent", "review patch", "child-abc", "memory/", "运行环境", "工作区目录", "相对路径均基于工作区根目录") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {

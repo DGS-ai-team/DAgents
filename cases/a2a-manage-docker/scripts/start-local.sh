@@ -8,9 +8,15 @@ NODE_BIN="${DAGENTS_NODE:-/tmp/dagents-node}"
 PID_DIR="${CASE}/local-run/pids"
 LOG_DIR="${CASE}/local-run/logs"
 
-mkdir -p "${PID_DIR}" "${LOG_DIR}" "${CASE}/runtime/node-a/prompt_context" "${CASE}/runtime/node-b/prompt_context"
+mkdir -p "${PID_DIR}" "${LOG_DIR}" \
+  "${CASE}/local-run/wd-a" "${CASE}/local-run/wd-b" \
+  "${CASE}/runtime/node-a/prompt_context" "${CASE}/runtime/node-b/prompt_context"
 cp -f "${CASE}/prompt_context/node-a/custom.md" "${CASE}/runtime/node-a/prompt_context/custom.md"
 cp -f "${CASE}/prompt_context/node-b/custom.md" "${CASE}/runtime/node-b/prompt_context/custom.md"
+cp -f "${CASE}/local-run/node-a.yaml" "${CASE}/local-run/wd-a/config.yaml"
+cp -f "${CASE}/local-run/node-b.yaml" "${CASE}/local-run/wd-b/config.yaml"
+cp -f "${CASE}/agent-card/node-a.json" "${CASE}/local-run/wd-a/agent-card.json"
+cp -f "${CASE}/agent-card/node-b.json" "${CASE}/local-run/wd-b/agent-card.json"
 
 if [ ! -x "${NODE_BIN}" ]; then
   (cd "${REPO}" && go build -o "${NODE_BIN}" ./node/cmd/dagents-node)
@@ -37,8 +43,8 @@ export MANAGE_A2A_EXPIRE_SWEEP_SECONDS=10
 (cd "${REPO}" && nohup python run_manage.py >"${LOG_DIR}/manage.log" 2>&1 & echo $! >"${PID_DIR}/manage.pid")
 sleep 2
 
-(cd "${CASE}" && nohup "${NODE_BIN}" -config ./local-run/node-a.yaml >"${LOG_DIR}/node-a.log" 2>&1 & echo $! >"${PID_DIR}/node-a.pid")
-(cd "${CASE}" && nohup "${NODE_BIN}" -config ./local-run/node-b.yaml >"${LOG_DIR}/node-b.log" 2>&1 & echo $! >"${PID_DIR}/node-b.pid")
+(cd "${CASE}/local-run/wd-a" && nohup "${NODE_BIN}" -config config.yaml >"${LOG_DIR}/node-a.log" 2>&1 & echo $! >"${PID_DIR}/node-a.pid")
+(cd "${CASE}/local-run/wd-b" && nohup "${NODE_BIN}" -config config.yaml >"${LOG_DIR}/node-b.log" 2>&1 & echo $! >"${PID_DIR}/node-b.pid")
 sleep 3
 
 for id in node-a node-b; do

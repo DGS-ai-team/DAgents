@@ -19,7 +19,8 @@ HTTP Header：`x-dagents-agent-id`（`agent_id`）；`x-dagents-a2a-token` 可�
 | 符号 | 说明 |
 |------|------|
 | `AgentCard` | Agent Card JSON 模型 |
-| `LoadAgentCard` | 从 `manage.registration.agent_card_path` 加载 |
+| `LoadDefaultAgentCard` | 从工作目录 `./agent-card.json` 加载（固定路径） |
+| `LoadAgentCard` | 按路径加载（测试/内部） |
 
 ## `compliance_executor.go`
 

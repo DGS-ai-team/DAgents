@@ -23,13 +23,13 @@ func searchReplaceToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "search_replace",
-			Description: descFSPathConvention + " " + descReadBeforeWrite + " 用精确子串替换修改文本。",
+			Description: "修改已有文件前须先 read_file 核对空白、换行与上下文。用精确子串替换修改文本。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
 						"type":        "string",
-						"description": "工作区内相对 fs_root 的路径（必填）",
+						"description": "路径（必填）",
 					},
 					"old_string": map[string]any{
 						"type":        "string",

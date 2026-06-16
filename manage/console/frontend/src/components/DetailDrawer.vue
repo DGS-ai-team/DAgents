@@ -1,18 +1,11 @@
 <script setup>
 import { computed, ref, watch } from "vue";
-import {
-  fetchAudit,
-  fetchNodeSessionContext,
-  fetchNodeSessions,
-  saveAgentGroups,
-} from "../api.js";
+import { fetchAudit, saveAgentGroups } from "../api.js";
 import {
   agentInitials,
   formatUnix,
   riskPillClass,
-  sortSessions,
   statusPillClass,
-  truncate,
 } from "../utils.js";
 
 const props = defineProps({
@@ -25,53 +18,22 @@ const groupInput = ref("");
 const groupMsg = ref("");
 const savingGroups = ref(false);
 
-const sessions = ref([]);
-const sessionsLoading = ref(false);
-const sessionsError = ref("");
-
 const auditEvents = ref([]);
 const auditLoading = ref(false);
 const auditError = ref("");
-
-const selectedSessionId = ref("");
-const sessionContext = ref(null);
-const contextLoading = ref(false);
-const contextError = ref("");
 
 const open = computed(() => Boolean(props.agent));
 
 watch(
   () => props.agent,
   async (agent) => {
-    selectedSessionId.value = "";
-    sessionContext.value = null;
-    contextError.value = "";
     if (!agent) return;
     groupInput.value = (agent.discovery_group || []).join(", ");
     groupMsg.value = "";
-    await Promise.all([loadSessions(agent), loadAudit(agent.agent_id)]);
+    await loadAudit(agent.agent_id);
   },
   { immediate: true },
 );
-
-async function loadSessions(agent) {
-  sessionsLoading.value = true;
-  sessionsError.value = "";
-  sessions.value = [];
-  if (agent.status !== "online") {
-    sessionsLoading.value = false;
-    sessionsError.value = "Node 离线，无法拉取 session 列表。";
-    return;
-  }
-  try {
-    const data = await fetchNodeSessions(agent.agent_id);
-    sessions.value = sortSessions(data.sessions || []);
-  } catch (err) {
-    sessionsError.value = err.message;
-  } finally {
-    sessionsLoading.value = false;
-  }
-}
 
 async function loadAudit(agentId) {
   auditLoading.value = true;
@@ -101,21 +63,6 @@ async function onSaveGroups() {
     groupMsg.value = err.message;
   } finally {
     savingGroups.value = false;
-  }
-}
-
-async function selectSession(sessionId) {
-  if (!props.agent) return;
-  selectedSessionId.value = sessionId;
-  contextLoading.value = true;
-  contextError.value = "";
-  sessionContext.value = null;
-  try {
-    sessionContext.value = await fetchNodeSessionContext(props.agent.agent_id, sessionId);
-  } catch (err) {
-    contextError.value = err.message;
-  } finally {
-    contextLoading.value = false;
   }
 }
 </script>
@@ -263,107 +210,6 @@ async function selectSession(sessionId) {
           <span class="muted">{{ groupMsg }}</span>
         </div>
 
-        <div class="section-title">Sessions（Manage 代理 Node API）</div>
-        <div v-if="sessionsLoading" class="muted">加载中…</div>
-        <p v-else-if="sessionsError" class="muted">{{ sessionsError }}</p>
-        <p v-else-if="!sessions.length" class="muted">暂无 session。</p>
-        <template v-else>
-          <div class="table-scroll nested-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>session_id</th>
-                  <th>状态</th>
-                  <th>messages</th>
-                  <th>turn</th>
-                  <th>首条用户消息</th>
-                  <th>updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="session in sessions"
-                  :key="session.session_id"
-                  class="session-row"
-                  :class="{ selected: selectedSessionId === session.session_id }"
-                  @click="selectSession(session.session_id)"
-                >
-                  <td><code>{{ session.session_id }}</code></td>
-                  <td>
-                    <span
-                      class="pill"
-                      :class="session.active ? 'pill-online' : 'pill-muted'"
-                    >
-                      {{ session.active ? "active" : "persisted" }}
-                    </span>
-                  </td>
-                  <td>
-                    {{ session.message_count ?? 0 }}
-                    <template v-if="session.queue_pending"> · 队列 {{ session.queue_pending }}</template>
-                  </td>
-                  <td>
-                    <span
-                      v-if="session.has_active_turn"
-                      class="pill pill-task-processing"
-                    >
-                      {{ session.run_turn_phase || "turn" }}
-                    </span>
-                    <span v-else class="muted">—</span>
-                  </td>
-                  <td class="cell-wrap">{{ truncate(session.first_user_message || "—", 80) }}</td>
-                  <td>{{ session.updated_at || "—" }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="section-title">Session 详情</div>
-          <div v-if="!selectedSessionId" class="muted">点击上方 session 查看 context 摘要。</div>
-          <div v-else-if="contextLoading" class="muted">加载 context…</div>
-          <p v-else-if="contextError" class="muted">{{ contextError }}</p>
-          <template v-else-if="sessionContext">
-            <div class="kv-grid compact">
-              <div class="kv">
-                <div class="kv-label">messages</div>
-                <div class="kv-value">{{ sessionContext.messages_count ?? 0 }}</div>
-              </div>
-              <div class="kv">
-                <div class="kv-label">tokens</div>
-                <div class="kv-value">{{ sessionContext.messages_total_tokens ?? "—" }}</div>
-              </div>
-              <div class="kv">
-                <div class="kv-label">turn</div>
-                <div class="kv-value">
-                  {{ sessionContext.run_turn_phase || sessionContext.turn_state || "—" }}
-                </div>
-              </div>
-              <div class="kv">
-                <div class="kv-label">pending_hitl</div>
-                <div class="kv-value">
-                  <span
-                    v-if="sessionContext.pending_tool_calls_count > 0"
-                    class="pill pill-task-awaiting"
-                  >
-                    待审批 {{ sessionContext.pending_tool_calls_count }}
-                  </span>
-                  <span v-else class="muted">无</span>
-                </div>
-              </div>
-              <div class="kv">
-                <div class="kv-label">queue</div>
-                <div class="kv-value">{{ sessionContext.queue_pending ?? 0 }}</div>
-              </div>
-            </div>
-            <div class="section-title">最近消息（最多 10 条，截断）</div>
-            <ul v-if="sessionContext.recent_messages?.length" class="message-list">
-              <li v-for="(m, idx) in sessionContext.recent_messages" :key="idx">
-                <strong>{{ m.role }}</strong>: {{ truncate(m.content, 300) }}
-                <span v-if="m.tool_calls_count" class="muted">({{ m.tool_calls_count }} tools)</span>
-              </li>
-            </ul>
-            <p v-else class="muted">无最近消息。</p>
-          </template>
-        </template>
-
         <div class="section-title">近期 Registry 审计</div>
         <div v-if="auditLoading" class="muted">加载中…</div>
         <p v-else-if="auditError" class="muted">{{ auditError }}</p>
@@ -388,12 +234,3 @@ async function selectSession(sessionId) {
     </div>
   </aside>
 </template>
-
-<style scoped>
-.session-row {
-  cursor: pointer;
-}
-.session-row.selected {
-  background: var(--row-hover, rgba(99, 102, 241, 0.08));
-}
-</style>

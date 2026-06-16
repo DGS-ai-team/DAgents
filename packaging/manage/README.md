@@ -6,7 +6,7 @@
 
 ```bash
 # 仓库根目录
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.7 .
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.8 .
 
 # 或使用 compose（在 packaging/manage/ 下）
 cp .env.example .env
@@ -20,65 +20,73 @@ docker compose up -d --build
 
 适用于目标机 **无法拉取 Docker Hub / GitHub Release**、但已安装 Docker 的内网环境。
 
+### 推荐：离线 bundle（镜像 + 脚本）
+
+打 **`v*`** 标签后 CI 会发布 **`dagents-manage-bundle-<version>.tar.gz`**，内含：
+
+| 路径 | 说明 |
+|------|------|
+| `image/dagents-manage-<version>.tar.gz` | Docker 镜像 |
+| `docker-compose.yml` | 离线 compose（无 build） |
+| `.env.example` | 环境变量模板 |
+| `scripts/import-image.sh` / `.bat` | 离线 `docker load` |
+| `scripts/restart.sh` / `.bat` | 启动或重启容器 |
+
+```bash
+# 联网机构建 bundle
+VERSION=0.3.8 bash scripts/ci/assemble_manage_bundle.sh
+# 产物：dist/dagents-manage-bundle-0.3.8.tar.gz
+
+# 离线机
+tar -xzf dagents-manage-bundle-0.3.8.tar.gz
+cd dagents-manage-bundle-0.3.8
+cp .env.example .env
+bash scripts/import-image.sh
+bash scripts/restart.sh
+```
+
+Windows（Docker Desktop）：解压后执行 `scripts\import-image.bat`，再 `scripts\restart.bat`。
+
 ### 1. 在联网机准备镜像包
 
-**方式 A — 从 GitHub Release 下载（推荐）**
+**方式 A — 从 GitHub Release 下载 bundle（推荐）**
 
-打 `v*` 标签后 CI 会发布 **`dagents-manage-<version>.tar.gz`**，例如 `dagents-manage-0.3.7.tar.gz`。
+例如 `dagents-manage-bundle-0.3.8.tar.gz`。
 
-**方式 B — 本地构建并导出**
+**方式 B — 仅镜像 tar.gz**
 
-```bash
-# 仓库根目录
-VERSION=0.3.7 bash scripts/ci/build_manage_docker.sh
-# 产物：dist/dagents-manage-0.3.7.tar.gz
-```
+Release 亦附 **`dagents-manage-<version>.tar.gz`**（纯镜像，无脚本）。
 
-也可手动导出已构建镜像：
+**方式 C — 本地构建**
 
 ```bash
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.7 .
-docker save dagents-manage:0.3.7 | gzip -9 > dagents-manage-0.3.7.tar.gz
+VERSION=0.3.8 bash scripts/ci/assemble_manage_bundle.sh
+# 或仅镜像：VERSION=0.3.8 bash scripts/ci/build_manage_docker.sh
 ```
-
-将 `dagents-manage-<version>.tar.gz` 拷贝到离线机（U 盘、内网文件服务等）。
 
 ### 2. 在离线机导入镜像
 
+使用 bundle 内脚本（推荐）：
+
 ```bash
-docker load -i dagents-manage-0.3.7.tar.gz
+bash scripts/import-image.sh
+```
+
+或手动：
+
+```bash
+docker load -i image/dagents-manage-0.3.8.tar.gz
 docker image ls dagents-manage
-# 应看到 REPOSITORY dagents-manage，TAG 0.3.7
 ```
 
 ### 3. 启动服务
 
-**方式 A — `docker run`（单容器）**
-
 ```bash
-docker run -d \
-  --name manage \
-  --restart unless-stopped \
-  -p 8020:8020 \
-  -v manage-data:/data \
-  -e MANAGE_HOST=0.0.0.0 \
-  -e MANAGE_PORT=8020 \
-  -e MANAGE_DB_PATH=/data/manage.db \
-  dagents-manage:0.3.7
-```
-
-**方式 B — `docker compose`（推荐）**
-
-将 `packaging/manage/` 目录（至少含 `docker-compose.yml`、`.env.example`）一并拷贝到离线机：
-
-```bash
-cd packaging/manage
 cp .env.example .env
-# 确认 .env 中 MANAGE_IMAGE=dagents-manage:0.3.7（与 load 的 tag 一致）
-docker compose up -d
+bash scripts/restart.sh
 ```
 
-> 离线环境 **不要** 使用 `docker compose up --build`（无法拉取基础镜像）；仅 `up -d` 启动已导入的本地镜像。
+**方式 B — `docker compose`（开发/联网）**
 
 ### 4. 验证
 
@@ -92,9 +100,10 @@ docker logs manage --tail 20
 ### 5. 日常运维
 
 ```bash
-docker compose -f packaging/manage/docker-compose.yml stop    # 停止
-docker compose -f packaging/manage/docker-compose.yml start   # 启动
-docker compose -f packaging/manage/docker-compose.yml logs -f   # 日志
+bash scripts/restart.sh          # bundle 内：启动或重启
+docker compose stop              # 开发目录 packaging/manage/
+docker compose start
+docker compose logs -f
 ```
 
 数据持久化在 Docker volume **`manage-data`**（Registry + A2A SQLite：`/data/manage.db`）。升级镜像时保留 volume 即可，无需迁移数据库。
@@ -115,7 +124,8 @@ docker compose -f packaging/manage/docker-compose.yml logs -f   # 日志
 打 **`v*`** 标签时 CI 会：
 
 1. 构建 `dagents-manage:<version>` 镜像
-2. 导出 `dist/dagents-manage-<version>.tar.gz` 并附到 GitHub Release
+2. 组装 `dist/dagents-manage-bundle-<version>.tar.gz`（镜像 + 离线脚本）
+3. 同时导出 `dist/dagents-manage-<version>.tar.gz` 并附到 GitHub Release
 
 ## 与 Node 联调
 

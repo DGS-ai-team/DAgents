@@ -2,7 +2,8 @@
 
 > **状态**：方案（未实现）  
 > **取代**：独立 `register_center/` 服务及其 **Node 直连 relay/broadcast** 模型  
-> **对齐**：[three-component-model.md](./three-component-model.md)、[roadmap.md](../roadmap.md) Phase 1–4
+> **对齐**：[three-component-model.md](./three-component-model.md)、[roadmap.md](../roadmap.md) Phase 1–4  
+> **现网通信全量参考**：[manage-communication.md](../manage-communication.md)
 
 ---
 

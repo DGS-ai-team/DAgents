@@ -125,7 +125,7 @@ func inboxSessionIDForTask(taskID string) string {
 }
 
 func agentRole(cfg *config.Config) string {
-	if card, _ := LoadAgentCard(cfg.Manage.Registration.AgentCardPath); card != nil {
+	if card, _ := LoadDefaultAgentCard(); card != nil {
 		return card.role()
 	}
 	return ""

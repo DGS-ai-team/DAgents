@@ -1,11 +1,13 @@
 # 内置工具一览
 
-> **现网（v0.2.0+）**：Agent 运行时工具由 **Go Agent Node** 注册（**`node/internal/tools/registry.go`**）。配置见 **`packaging/agent-client/config.yaml`**（**`tools.enabled_groups`** 工具组允许列表、**`tools.bash_output_encoding`** 等）。包内说明：**`node/internal/tools/README.md`**、**`node/internal/tools/REFERENCE.md`**；配置校验见 **`shared/config/README.md`**；子 Agent 见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。  
+> **现网（v0.2.0+）**：Agent 运行时工具由 **Go Agent Node** 注册（**`node/internal/tools/registry.go`**）。**全量 description / 参数 / 审批说明**见 **[built-in-tools-reference.md](./built-in-tools-reference.md)**。配置见 **`packaging/agent-client/config.yaml`**（**`tools.enabled_groups`** 工具组允许列表、**`tools.bash_output_encoding`** 等）。包内说明：**`node/internal/tools/README.md`**、**`node/internal/tools/REFERENCE.md`**；配置校验见 **`shared/config/README.md`**；子 Agent 见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。  
 > 下文 **「附」与 §1–§4** 描述 **已移除的 Python FastAPI Agent API**（**`app/harness/tools/tool.py` → `get_tools()`**），保留作行为对照与归档索引；正文在 [archive/python-agent-runtime/](./archive/python-agent-runtime/)。
 
 ---
 
 ## 0. Go Agent Node 已注册工具（现行）
+
+> **完整参考**（25 个工具 description、参数表、审批行为）：**[built-in-tools-reference.md](./built-in-tools-reference.md)**
 
 下列与 **`Registry.registerBuiltins()`** 及 **`childAgentToolDefs()`** 一致（审批由 **`node/internal/policy/`** 决定）。
 

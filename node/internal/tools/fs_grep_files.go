@@ -35,14 +35,14 @@ func grepFilesToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "grep_files",
-			Description: descFSPathConvention + " 在目录树内先按 glob_pattern 筛选文件，再按 pattern 逐行搜索文本内容，分页返回跨文件命中及上下文。" +
+			Description: "在目录树内先按 glob_pattern 筛选文件，再按 pattern 逐行搜索文本内容，分页返回跨文件命中及上下文。" +
 				"directory 为起始目录；pattern 匹配行内文本；glob_pattern 相对 directory，支持 **，默认 **/*。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"directory": map[string]any{
 						"type":        "string",
-						"description": "相对 fs_root 的起始目录（必填）",
+						"description": "起始目录（必填）；传 . 表示工作区根",
 					},
 					"pattern": map[string]any{
 						"type":        "string",

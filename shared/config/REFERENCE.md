@@ -23,7 +23,7 @@
 | `(t *ToolsConfig) NormalizedBuiltinEnabledGroups` | `method` | 去重规范化 `tools.enabled_groups` |
 | `(t *ToolsConfig) NormalizedBuiltinEnabled` | `method` | 将 `enabled_groups` 展开为工具名；空=未配置允许列表 |
 | `ManageConfig` | `struct` | Manage 开关、URL、node_token、`registration`、`a2a` |
-| `ManageRegistrationConfig` | `struct` | `base_url`、`agent_card_path`、`interval_seconds`（默认 30）、`ttl_seconds`（默认 60）、name/team/description |
+| `ManageRegistrationConfig` | `struct` | `base_url`、`interval_seconds`（默认 30）、`ttl_seconds`（默认 60）、`team`；Card 固定 `./agent-card.json` |
 | `ManageA2AConfig` | `struct` | `enabled`（`*bool`，默认 true）、`inbox_wait_seconds`（默认 25）、`inbox_poll_seconds` |
 | `LoadFile` | `func(path string) (*Config, error)` | 读 YAML、展开 env、默认值、校验 |
 | `(c *Config) ApplyDefaults` | `method` | 填充 listen/local/manage 缺省 |

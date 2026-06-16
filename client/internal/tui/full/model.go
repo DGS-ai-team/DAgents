@@ -114,9 +114,9 @@ type model struct {
 	// viewportFollowTail 为 true 时新输出自动滚到底；用户上滚后置 false，回到底部再恢复。
 	viewportFollowTail bool
 
-	toolBlocks  *tuishared.ToolBlockRegistry
-	toolPending *tuishared.ToolPendingTracker
-	partialToolBlocks map[int]string
+	toolBlocks      *tuishared.ToolBlockRegistry
+	toolPending     *tuishared.ToolPendingTracker
+	toolCallStream  *tuishared.ToolCallStreamState
 	statusMgr   *statusLineManager
 
 	refreshDebounceUntil time.Time
@@ -165,7 +165,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		viewportFollowTail:  true,
 		toolBlocks:          tuishared.NewToolBlockRegistry(),
 		toolPending:         tuishared.NewToolPendingTracker(),
-		partialToolBlocks:   make(map[int]string),
+		toolCallStream:      tuishared.NewToolCallStreamState(),
 		statusMgr:           newStatusLineManager(),
 	}
 
@@ -724,10 +724,9 @@ func (m *model) resetTurnWaitUI() {
 }
 
 func (m *model) clearPartialToolBlocks() {
-	for _, blockID := range m.partialToolBlocks {
-		m.transcript.RemoveToolPendingLines(blockID)
+	if m.toolCallStream != nil {
+		m.toolCallStream.Reset()
 	}
-	m.partialToolBlocks = make(map[int]string)
 }
 
 func (m *model) scheduleActiveTickIfNeeded() tea.Cmd {

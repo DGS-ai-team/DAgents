@@ -4,7 +4,6 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -88,7 +87,7 @@ class ManageAdminTests(unittest.TestCase):
                 listed2 = client.get("/v1/admin/a2a/tasks", params={"status": "delivered"})
                 self.assertTrue(any(t["task_id"] == task_id for t in listed2.json()["tasks"]))
 
-    def test_proxy_node_sessions(self) -> None:
+    def test_admin_node_session_proxy_removed(self) -> None:
         with TemporaryDirectory() as tmp:
             settings = ManageSettings(
                 host="127.0.0.1",
@@ -103,16 +102,14 @@ class ManageAdminTests(unittest.TestCase):
                 a2a_expire_sweep_seconds=0,
             )
             app = create_app(settings)
-            fake_sessions = {"sessions": [{"session_id": "s-1", "active": True, "message_count": 3}]}
             with TestClient(app) as client:
                 _register_agent(client, "node-z", base_url="http://node-z.test")
-                with patch("manage.admin.routes._proxy_node_json", return_value=fake_sessions):
-                    resp = client.get("/v1/admin/nodes/node-z/sessions")
-                self.assertEqual(resp.status_code, 200)
-                self.assertEqual(resp.json()["sessions"][0]["session_id"], "s-1")
-
-                missing = client.get("/v1/admin/nodes/unknown/sessions")
-                self.assertEqual(missing.status_code, 404)
+                for path in (
+                    "/v1/admin/nodes/node-z/sessions",
+                    "/v1/admin/nodes/node-z/sessions/s-1/context",
+                ):
+                    resp = client.get(path)
+                    self.assertEqual(resp.status_code, 404, path)
 
 
 if __name__ == "__main__":

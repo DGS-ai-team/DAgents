@@ -1,0 +1,4 @@
+{
+  "name": "本地助手",
+  "description": "DAgents 本地 Agent Node；Manage Console 展示名与简介（name 缺省时回退为 agent_id）。"
+}

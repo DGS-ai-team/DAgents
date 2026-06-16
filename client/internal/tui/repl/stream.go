@@ -33,6 +33,7 @@ type streamRunner struct {
 	turn *tuishared.TurnGate
 
 	lifecycleSuppress *tuishared.ChildLifecycleSuppress
+	toolCallStream    *tuishared.ToolCallStreamState
 }
 
 func newStreamRunner(
@@ -53,6 +54,7 @@ func newStreamRunner(
 		showReasoning:     showReasoning,
 		turn:              turn,
 		lifecycleSuppress: tuishared.NewChildLifecycleSuppress(),
+		toolCallStream:    tuishared.NewToolCallStreamState(),
 	}
 }
 
@@ -151,7 +153,19 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 			r.finishReasoningLine()
 			if eventType == "tool_call" {
 				r.lifecycleSuppress.NoteToolCallEvent(data)
-			} else if eventType == "tool_result" {
+				partial, _ := data["partial"].(bool)
+				tuishared.HandleToolCallEvent(r.transcript, r.toolCallStream, data, r.toolFold.Verbose(), nil)
+				if partial {
+					return
+				}
+				r.printMu.Lock()
+				for _, line := range tuishared.FormatToolEvent("tool_call", data, r.toolFold.Verbose()) {
+					fmt.Fprintln(os.Stderr, line)
+				}
+				r.printMu.Unlock()
+				return
+			}
+			if eventType == "tool_result" {
 				name := strings.TrimSpace(fmt.Sprint(data["tool_name"]))
 				if name == "" {
 					name = strings.TrimSpace(fmt.Sprint(data["name"]))
@@ -181,6 +195,9 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 	if ev.Type == "done" {
 		r.finishAssistantLine()
 		r.finishReasoningLine()
+		if r.toolCallStream != nil {
+			r.toolCallStream.Reset()
+		}
 		if r.turn.ShouldAcceptDone(ev.Seq) {
 			r.turn.FinishTurn()
 		}

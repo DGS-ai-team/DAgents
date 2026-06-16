@@ -22,14 +22,14 @@ func grepFileToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "grep_file",
-			Description: descFSPathConvention + " 在单个文件内按行搜索文本内容（正则或字面量），分页返回命中行及上下文。" +
+			Description: "在单个文件内按行搜索文本内容（正则或字面量），分页返回命中行及上下文。" +
 				"path 须为文件路径；pattern 匹配行内文本，不是文件名。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
 						"type":        "string",
-						"description": "相对 fs_root 的文件路径（必填，必须是文件）",
+						"description": "路径（必填，须为文件）",
 					},
 					"pattern": map[string]any{
 						"type":        "string",

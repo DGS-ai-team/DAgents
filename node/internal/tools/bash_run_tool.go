@@ -40,7 +40,7 @@ func bashRunToolDef() ToolDef {
 					},
 					"cwd": map[string]any{
 						"type":        "string",
-						"description": "执行目录（可选，默认 fs_root）；须存在且在 FS_ROOT 内",
+						"description": "执行目录（可选，默认在工作区根目录下）",
 					},
 					"shell_type": map[string]any{
 						"type":        "string",
@@ -56,7 +56,7 @@ func bashRunToolDef() ToolDef {
 }
 
 func bashRunToolDescription(isWindows bool) string {
-	tail := descScriptsHint +
+	tail := "可执行脚本见 scripts/ 与 scripts_menu.md。" +
 		" 除非明确需要，否则避免 su/sudo 等需交互密码的命令。" +
 		" 同步等待 timeout_seconds（默认 30）；超时自动降级为后台 job（返回 job_id），完成后自动回灌，通常无需轮询 status。" +
 		" 长输出会按 tools.bash_compress 清洗；超长结果落盘并在 history 中头尾摘要（hooks.tool_result）。"

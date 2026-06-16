@@ -25,7 +25,6 @@ manage:
   url: http://manage:8020
   registration:
     base_url: http://node-b:18765
-    agent_card_path: /etc/dagents/agent-card.json
     interval_seconds: 15
     ttl_seconds: 45
     team: a2a-lab

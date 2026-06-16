@@ -247,19 +247,14 @@ func (r *Registrar) registryURL(path string) string {
 }
 
 func (r *Registrar) buildRegisterPayload() registerPayload {
-	name := strings.TrimSpace(r.cfg.Manage.Registration.Name)
-	description := strings.TrimSpace(r.cfg.Manage.Registration.Description)
-	card, _ := LoadAgentCard(r.cfg.Manage.Registration.AgentCardPath)
+	card, _ := LoadDefaultAgentCard()
+	name := r.cfg.AgentID
+	description := ""
 	if card != nil {
-		if name == "" && strings.TrimSpace(card.Name) != "" {
-			name = strings.TrimSpace(card.Name)
+		if n := strings.TrimSpace(card.Name); n != "" {
+			name = n
 		}
-		if description == "" && strings.TrimSpace(card.Description) != "" {
-			description = strings.TrimSpace(card.Description)
-		}
-	}
-	if name == "" {
-		name = r.cfg.AgentID
+		description = strings.TrimSpace(card.Description)
 	}
 	host := hostsnapshot.Get()
 	caps := r.cfg.Capabilities()

@@ -8,6 +8,7 @@
 |------|------|
 | **`dagents-local-assistant-*.{tar.gz,zip}`** | **Go Node + 双 TUI**：`dagents-node`、`dagents-client`、`dagents-cli` + 配置、`.runtime/`、**`scripts/`**（启动与 systemd/计划任务注册） |
 | **`dagents-manage-*.tar.gz`** | Manage Docker 镜像导出（Registry + A2A + Console） |
+| **`dagents-manage-bundle-*.tar.gz`** | Manage **离线包**：镜像 + `docker-compose` + 导入/重启脚本 |
 | **`dagents-backend-*`**（legacy） | 旧 Python 全栈后端；**Release CI 已不再构建** |
 | **`dagents-cli`** | Textual TUI 单文件二进制（PyInstaller 产物名） |
 
@@ -26,13 +27,13 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**
 
 | 工作流 | 触发 | 产物 |
 |--------|------|------|
-| [build-and-release.yml](../.github/workflows/build-and-release.yml) | 推送 **`v*`** 标签 | GitHub Release + `dagents-local-assistant-*` + **Windows `.exe` 安装包** + **`dagents-manage-*.tar.gz`** |
+| [build-and-release.yml](../.github/workflows/build-and-release.yml) | 推送 **`v*`** 标签 | GitHub Release + `dagents-local-assistant-*` + **Windows `.exe` 安装包** + **`dagents-manage-*.tar.gz`** + **`dagents-manage-bundle-*.tar.gz`** |
 | [manual-package.yml](../.github/workflows/manual-package.yml) | 手动 **workflow_dispatch** | Actions Artifact（zip/tar.gz + Windows 安装包） |
 | [go-ac.yml](../.github/workflows/go-ac.yml) | PR / push（Go 路径） | 仅测试与编译冒烟，不打包 |
 
 | 路径 | 说明 |
 |------|------|
-| **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`） |
+| **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`、`agent-card.example.json`） |
 | **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等；**`RECOMMENDED_CLI_TOOLS.md`** 推荐第三方 CLI） |
 | **`linux/`** | Linux **`dagents`** 启动脚本 + **`install.sh`**（打入 tar.gz 根目录） |
 | **`windows/`** | Inno Setup 安装包（`dagents-installer.iss` + `dagents.cmd`；Release Windows 矩阵构建 `.exe`） |

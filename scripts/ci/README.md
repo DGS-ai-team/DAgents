@@ -12,6 +12,7 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 | **`assemble_local_assistant_bundle.sh`** | 组装 `dagents-local-assistant-*` 目录并 tar.gz/zip |
 | **`build_windows_installer.sh`** | Windows：staging `bundle/` + Inno Setup 生成 `.exe` 安装包 |
 | **`build_manage_docker.sh`** | Manage Docker 镜像构建与 tar.gz 导出 |
+| **`assemble_manage_bundle.sh`** | 组装 **`dagents-manage-bundle-*`** 离线包（镜像 + compose + 导入/重启脚本） |
 
 **Release 打包**：仓库根 `scripts/package_local_assistant.sh`；CI 见 `.github/workflows/build-and-release.yml`（`dagents-local-assistant-linux-amd64` + `windows-amd64`）。
 

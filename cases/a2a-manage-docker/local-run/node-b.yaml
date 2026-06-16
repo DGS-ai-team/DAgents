@@ -9,7 +9,7 @@ local:
 
 expose_to_peers: true
 
-fs_root: ./runtime/node-b
+fs_root: ../../runtime/node-b
 
 llm:
   provider: openai
@@ -21,7 +21,6 @@ manage:
   url: http://127.0.0.1:8020
   registration:
     base_url: http://127.0.0.1:18766
-    agent_card_path: ./agent-card/node-b.json
     interval_seconds: 15
     ttl_seconds: 45
     team: a2a-lab

@@ -14,12 +14,15 @@ PREFIX=""
 BIN_DIR=""
 NO_PATH=0
 UNINSTALL=0
+OVERWRITE_POLICY=0
+OVERWRITE_POLICY_SET=0
 MARKER="# >>> dagents >>>"
 
 usage() {
   cat <<'EOF'
 用法:
   install.sh [--prefix DIR] [--bin-dir DIR] [--no-path]
+             [--overwrite-policy | --keep-policy]
   install.sh --uninstall [--prefix DIR] [--bin-dir DIR]
 
 默认:
@@ -28,7 +31,8 @@ usage() {
 
 说明:
   - 若 PREFIX 下已有 .runtime/node.pid，安装前先停止对应 Node（优先 dagents node shutdown）
-  - 升级/重装：bin/、scripts/、dagents 启动脚本与配置示例始终更新；.runtime/ 仅补缺失路径（不覆盖已有 policy/skills/prompt_context 等）
+  - 升级/重装：bin/、scripts/、dagents 启动脚本与配置示例始终更新；.runtime/ 默认仅补缺失路径
+  - 若已有 .runtime/policy/，交互询问是否覆盖（--overwrite-policy / --keep-policy 可跳过询问）
   - 在 BIN_DIR 创建 dagents 符号链接
   - 写入 DAGENTS_HOME 与 PATH（含 `bin/`、`.runtime/scripts/`；/etc/profile.d/dagents.sh 或 ~/.profile）
 EOF
@@ -132,13 +136,39 @@ ensure_runtime_user_dirs() {
   done
 }
 
-# .runtime 种子：仅拷贝目标尚不存在的路径（GNU cp -n），升级时不覆盖用户 policy/skills 等。
+# .runtime 种子：默认仅拷贝目标尚不存在的路径（GNU cp -n）；可选覆盖 policy。
 copy_runtime_seed() {
   local src="${SOURCE}/.runtime" dst="${PREFIX}/.runtime"
   ensure_runtime_user_dirs
   [[ -d "${src}" ]] || return 0
   mkdir -p "${dst}"
   cp -a -n "${src}/." "${dst}/"
+  if [[ "${OVERWRITE_POLICY}" -eq 1 && -d "${src}/policy" ]]; then
+    info "overwriting ${dst}/policy from bundle"
+    mkdir -p "${dst}/policy"
+    cp -a "${src}/policy/." "${dst}/policy/"
+  fi
+}
+
+prompt_overwrite_policy() {
+  [[ "${OVERWRITE_POLICY_SET}" -eq 1 ]] && return 0
+  [[ -d "${SOURCE}/.runtime/policy" ]] || return 0
+  [[ -f "${PREFIX}/.runtime/policy/tool.approval.txt" ]] || return 0
+  if [[ ! -t 0 ]]; then
+    info "existing policy kept (non-interactive; use --overwrite-policy to replace)"
+    return 0
+  fi
+  local ans
+  echo ""
+  read -r -p "[install] 检测到已有 policy (${PREFIX}/.runtime/policy)，是否覆盖？[y/N] " ans
+  case "${ans}" in
+    y|Y|yes|YES)
+      OVERWRITE_POLICY=1
+      ;;
+    *)
+      OVERWRITE_POLICY=0
+      ;;
+  esac
 }
 
 install_files() {
@@ -268,6 +298,7 @@ do_uninstall() {
 
 do_install() {
   default_paths
+  prompt_overwrite_policy
   shutdown_existing_node_before_install
   validate_source
   install_files
@@ -292,6 +323,16 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-path)
       NO_PATH=1
+      shift
+      ;;
+    --overwrite-policy)
+      OVERWRITE_POLICY=1
+      OVERWRITE_POLICY_SET=1
+      shift
+      ;;
+    --keep-policy)
+      OVERWRITE_POLICY=0
+      OVERWRITE_POLICY_SET=1
       shift
       ;;
     --uninstall)

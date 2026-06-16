@@ -5,7 +5,7 @@ Linux 分发辅助（随 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入�
 | 文件 | 说明 |
 |------|------|
 | **`dagents`** | 命令行入口：`chat` / `tui` / `node`（默认后台）/ `node shutdown` / `node restart`；支持 `--withnode`；启动后 `cd` 到安装根（与 Windows `pushd` 一致，`fs_root: ./.runtime` 可从任意目录执行） |
-| **`install.sh`** | 安装脚本：若目标目录已有 `.runtime/node.pid` 则先 `node shutdown` 停旧进程；**升级时**更新 `bin/`、`scripts/`、`dagents`，`.runtime/` **仅补缺失文件**（不覆盖已有 policy、skills、prompt_context、`memory/`、`history/`、`logs/` 等）；创建 `dagents` 符号链接、配置 `DAGENTS_HOME` 与 `PATH` |
+| **`install.sh`** | 安装脚本：若目标目录已有 `.runtime/node.pid` 则先 `node shutdown` 停旧进程；**升级时**更新 `bin/`、`scripts/`、`dagents`，`.runtime/` **默认仅补缺失文件**；若已有 `policy/` 会**交互询问是否覆盖**（`--overwrite-policy` / `--keep-policy`） |
 
 ## 便携使用（不解压安装）
 
@@ -28,7 +28,8 @@ cd dagents-local-assistant-linux-amd64
 ./install.sh                         # ~/.local/share/dagents
 sudo ./install.sh                    # /opt/dagents + /etc/profile.d/dagents.sh
 ./install.sh --prefix ~/dagents --bin-dir ~/bin
-./install.sh --uninstall             # 卸载用户级默认路径
+./install.sh --overwrite-policy        # 非交互：覆盖 .runtime/policy
+./install.sh --keep-policy             # 非交互：保留已有 policy
 sudo ./install.sh --uninstall        # 卸载 /opt/dagents
 ```
 

@@ -257,15 +257,20 @@ resumeApproval:
 func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	reg := testRegistry(t)
-	orch := NewOrchestrator("a1", t.TempDir(), hub, alwaysToolMock{}, reg, nil, SkillAccess{}, 2, nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
+	hookCfg := hooks.RuntimeConfig{
+		Duplicate:  hooks.DuplicateConfig{Enabled: false, WindowSeconds: 1},
+		ToolResult: hooks.DefaultToolResultConfig(t.TempDir()),
+	}
+	orch := NewOrchestrator("a1", t.TempDir(), hub, alwaysToolMock{}, reg, nil, SkillAccess{}, 2, nil, nil, hookCfg, logx.Discard())
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
 	done := make(chan struct{})
+	var turnErr error
 	go func() {
 		defer close(done)
 		var history []llm.Message
-		_, _, _ = orch.RunMessageTurn(context.Background(), "sess-1", &history, "loop", nil, 0)
+		_, _, turnErr = orch.RunMessageTurn(context.Background(), "sess-1", &history, "loop", nil, 0)
 	}()
 
 	deadline := time.After(3 * time.Second)
@@ -280,13 +285,19 @@ func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 				}
 				gotError = true
 			case "done":
+				if reason, _ := ev.Data["finish_reason"].(string); reason != "error" {
+					t.Fatalf("done finish_reason = %q, want error", reason)
+				}
 				gotDone = true
 			}
 		case <-deadline:
-			t.Fatalf("timeout error=%v done=%v", gotError, gotDone)
+			t.Fatalf("timeout error=%v done=%v turnErr=%v", gotError, gotDone, turnErr)
 		}
 	}
 	<-done
+	if turnErr == nil || !strings.Contains(turnErr.Error(), "tool loop limit exceeded") {
+		t.Fatalf("RunMessageTurn err = %v, want tool loop limit exceeded", turnErr)
+	}
 }
 
 func TestRunMessageTurnMultiToolParallelOrder(t *testing.T) {

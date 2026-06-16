@@ -64,49 +64,23 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		m.statusMgr.FinishAll()
 		m.transcript.FinishPartial("assistant")
 		m.transcript.FinishPartial("reasoning")
-		partial, _ := ev.Data["partial"].(bool)
-		toolIndex := toolIndexFromEvent(ev.Data)
-		blockID := tuishared.ToolEventID(ev.Data)
+		blockID := tuishared.ToolCallIDFromEvent(ev.Data)
+		if blockID == "" {
+			blockID = tuishared.ToolEventID(ev.Data)
+		}
 		if ev.Type == "tool_call" {
-			if partial && toolIndex >= 0 {
-				if existing, ok := m.partialToolBlocks[toolIndex]; ok {
-					blockID = existing
-				} else if blockID == "" {
-					blockID = m.toolBlocks.NextSeqID()
-					m.partialToolBlocks[toolIndex] = blockID
-				} else {
-					m.partialToolBlocks[toolIndex] = blockID
-				}
-			} else if blockID == "" {
-				blockID = m.toolBlocks.NextSeqID()
-			}
-			if !partial {
-				if toolIndex >= 0 {
-					if oldID, ok := m.partialToolBlocks[toolIndex]; ok {
-						m.transcript.RemoveToolPendingLines(oldID)
-						delete(m.partialToolBlocks, toolIndex)
-					}
-				} else {
-					m.clearPartialToolBlocks()
-				}
-			}
 			m.children.noteToolCall(ev.Data)
-			tuishared.RegisterToolCallsFromEvent(ev.Data, m.toolPending)
-			m.toolBlocks.Register(blockID)
-			lines := tuishared.FormatToolEventWithID(ev.Type, ev.Data, blockID, m.toolFold.Verbose())
-			if partial {
-				m.transcript.ReplaceToolCallLines(blockID, lines)
-			} else {
-				m.transcript.RemoveToolPendingLines(blockID)
-				for _, line := range lines {
-					m.transcript.Add(line)
-				}
+			if blockID = tuishared.HandleToolCallEvent(m.transcript, m.toolCallStream, ev.Data, m.toolFold.Verbose(), m.toolPending); blockID != "" {
+				m.toolBlocks.Register(blockID)
 			}
 		} else {
 			if blockID == "" {
 				blockID = m.toolBlocks.NextSeqID()
 			}
 			m.children.noteToolResult(ev.Data)
+			if m.toolCallStream != nil {
+				m.toolCallStream.ForgetBlock(blockID)
+			}
 			var elapsed float64 = -1
 			if raw := ev.Data["duration_seconds"]; raw != nil {
 				switch v := raw.(type) {
@@ -223,23 +197,6 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		m.notifyViewportRefresh()
 		m.scheduleContextTokenRefresh()
 	default:
-	}
-}
-
-func toolIndexFromEvent(data map[string]any) int {
-	raw, ok := data["tool_index"]
-	if !ok || raw == nil {
-		return -1
-	}
-	switch v := raw.(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	default:
-		return -1
 	}
 }
 

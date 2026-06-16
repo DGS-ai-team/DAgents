@@ -21,13 +21,14 @@ func readFileToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "read_file",
-			Description: descFSPathConvention + " " + descPromptContext + " 按行窗口读取文本文件，大文件用 line_offset/line_limit 分页。",
+			Description: "prompt_context/ 下 soul/user/custom 侧车 Markdown 已注入 system prompt，通常无需 read_file。" +
+				" 按行窗口读取文本文件，大文件用 line_offset/line_limit 分页。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
 						"type":        "string",
-						"description": "工作区内相对 fs_root 的路径（必填）；支持无后缀及常见文本后缀（含 .jsonl、.html）",
+						"description": "路径（必填）；支持无后缀及常见文本后缀（含 .jsonl、.html）",
 					},
 					"line_offset": map[string]any{
 						"type":        "integer",

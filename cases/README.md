@@ -18,7 +18,7 @@
 | 目录 | 场景摘要 |
 |------|----------|
 | [`centos7-feature-tour/`](centos7-feature-tour/) | **CentOS 7** 静态 Node；TUI 特性导览（Mock / 真实 LLM） |
-| [`a2a-manage-docker/`](a2a-manage-docker/) | **Manage + 合规/运维双 Node**；Agent Card + A2A 合规咨询 + node-b TUI |
+| [`a2a-manage-docker/`](a2a-manage-docker/) | **Manage + 合规/运维双 Node**；固定 `agent-card.json` + A2A 合规咨询 + node-b TUI |
 
 ## 通用约定
 

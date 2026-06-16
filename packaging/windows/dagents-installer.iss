@@ -38,7 +38,9 @@ Source: "..\..\bundle\.env.example"; DestDir: "{app}"; Flags: ignoreversion skip
 Source: "..\..\bundle\README.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\..\bundle\VERSION"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; .runtime：仅补缺失路径，不覆盖已有 policy / skills / prompt_context 等
-Source: "..\..\bundle\.runtime\*"; DestDir: "{app}\.runtime"; Flags: recursesubdirs onlyifdoesntexist createallsubdirs
+Source: "..\..\bundle\.runtime\*"; DestDir: "{app}\.runtime"; Flags: recursesubdirs onlyifdoesntexist createallsubdirs; Excludes: "policy\*"
+; policy 种子：始终写入 _seed，供升级时可选覆盖
+Source: "..\..\bundle\.runtime\policy\*"; DestDir: "{app}\.runtime\_seed\policy"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\DAgents Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"
@@ -54,6 +56,58 @@ Name: "{group}\REPL (Go line mode)"; Filename: "{app}\dagents.cmd"; Parameters: 
 Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "Verify installed files (dagents doctor)"; Flags: postinstall skipifsilent runascurrentuser
 
 [Code]
+var
+  OverwritePolicy: Boolean;
+  OverwritePolicyAnswered: Boolean;
+
+function PolicyExistsAt(const AppDir: string): Boolean;
+begin
+  Result := FileExists(AppDir + '\.runtime\policy\tool.approval.txt');
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  AppDir: string;
+begin
+  Result := True;
+  if CurPageID <> wpSelectDir then
+    Exit;
+  if OverwritePolicyAnswered then
+    Exit;
+  AppDir := AddBackslash(WizardForm.DirEdit.Text);
+  if not PolicyExistsAt(AppDir) then
+  begin
+    OverwritePolicy := False;
+    OverwritePolicyAnswered := True;
+    Exit;
+  end;
+  OverwritePolicy :=
+    (MsgBox(
+      '检测到已有 policy 配置（.runtime\policy）。' + #13#10 +
+      '是否用安装包中的 policy 覆盖？' + #13#10#13#10 +
+      '选「否」将保留现有 policy。',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES);
+  OverwritePolicyAnswered := True;
+end;
+
+procedure ApplyPolicySeed;
+var
+  AppDir, SeedDir, PolicyDir: string;
+  ResultCode: Integer;
+begin
+  AppDir := ExpandConstant('{app}');
+  SeedDir := AppDir + '\.runtime\_seed\policy';
+  PolicyDir := AppDir + '\.runtime\policy';
+  if not DirExists(SeedDir) then
+    Exit;
+  if OverwritePolicy or not PolicyExistsAt(AppDir) then
+  begin
+    ForceDirectories(PolicyDir);
+    Exec(ExpandConstant('{cmd}'), '/C xcopy "' + SeedDir + '\*" "' + PolicyDir + '" /E /I /Y /Q',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
 function PathContains(const Path, Dir: string): Boolean;
 begin
   Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Path) + ';') <> 0;
@@ -74,6 +128,8 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   Path, AppDir, ScriptsDir: string;
 begin
+  if CurStep = ssPostInstall then
+    ApplyPolicySeed;
   if CurStep <> ssPostInstall then
     Exit;
   AppDir := ExpandConstant('{app}');

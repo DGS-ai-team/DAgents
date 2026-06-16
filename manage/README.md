@@ -33,7 +33,7 @@ python run_manage.py
 ### 联网快速启动
 
 ```bash
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.7 .
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.8 .
 # 或
 cd packaging/manage && cp .env.example .env && docker compose up -d --build
 ```
@@ -48,35 +48,14 @@ cd packaging/manage && cp .env.example .env && docker compose up -d --build
 
 | 方式 | 命令 / 说明 |
 |------|-------------|
-| Release 下载 | 从 [GitHub Releases](https://github.com/DGS-ai-team/DAgents/releases) 获取 `dagents-manage-<version>.tar.gz` |
-| 本地构建导出 | `VERSION=0.3.7 bash scripts/ci/build_manage_docker.sh` → `dist/dagents-manage-0.3.7.tar.gz` |
-| 手动导出 | `docker save dagents-manage:0.3.7 \| gzip -9 > dagents-manage-0.3.7.tar.gz` |
+| Release bundle（推荐） | `dagents-manage-bundle-<version>.tar.gz`（镜像 + compose + `import-image` / `restart` 脚本） |
+| Release 仅镜像 | `dagents-manage-<version>.tar.gz` |
+| 本地构建 bundle | `VERSION=0.3.8 bash scripts/ci/assemble_manage_bundle.sh` |
+| 本地仅镜像 | `VERSION=0.3.8 bash scripts/ci/build_manage_docker.sh` |
 
-将 tar.gz 与（可选）`packaging/manage/docker-compose.yml`、`.env.example` 拷贝至离线机。
+离线机解压 bundle 后：`bash scripts/import-image.sh && bash scripts/restart.sh`（详见 [`packaging/manage/README.md`](../packaging/manage/README.md)）。
 
-**步骤 2 — 离线机导入镜像**
-
-```bash
-docker load -i dagents-manage-0.3.7.tar.gz
-docker image ls dagents-manage   # 确认 TAG 与后续启动命令一致
-```
-
-**步骤 3 — 启动**
-
-```bash
-# 单容器
-docker run -d --name manage --restart unless-stopped \
-  -p 8020:8020 -v manage-data:/data \
-  -e MANAGE_DB_PATH=/data/manage.db \
-  dagents-manage:0.3.7
-
-# 或使用 compose（拷贝 packaging/manage/ 后）
-cd packaging/manage
-cp .env.example .env   # MANAGE_IMAGE=dagents-manage:0.3.7
-docker compose up -d   # 离线环境勿加 --build
-```
-
-**步骤 4 — 验证**
+**步骤 2 — 验证**
 
 ```bash
 curl -sf http://127.0.0.1:8020/health
@@ -146,8 +125,8 @@ Node 出站 Header：
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/v1/admin/a2a/tasks` | A2A Task 列表（**不会 deliver**） |
-| GET | `/v1/admin/nodes/{agent_id}/sessions` | 代理 Node `GET /v1/sessions` |
-| GET | `/v1/admin/nodes/{agent_id}/sessions/{session_id}/context` | 代理 Node context 摘要 |
+
+> **已禁用**：Admin session 代理（`/v1/admin/nodes/.../sessions`）已移除，Manage 不再出站访问 Node session API。
 
 ## A2A Task API（M2）
 
@@ -172,7 +151,7 @@ Node 出站 Header：
 manage/
   config.py
   manage_app.py
-  admin/        # Admin 只读 API（A2A 列表、Node session 代理）
+  admin/        # Admin 只读 API（A2A 列表）
   platform/     # auth, audit, blob, metrics
   storage/      # sqlite
   registry/     # models, store, routes, status
@@ -214,6 +193,8 @@ manage:
 ```
 
 **discovery_group** 不由 Node 传入；在 Manage Console 详情抽屉或 API 分配：
+
+通信逻辑全量说明见 [docs/manage-communication.md](../docs/manage-communication.md)。
 
 ```bash
 curl -X PATCH http://127.0.0.1:8020/v1/registry/agents/ops-linux-01/groups \

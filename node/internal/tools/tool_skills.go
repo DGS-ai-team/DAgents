@@ -19,7 +19,7 @@ func loadSkillsToolDef() ToolDef {
 					"skill_names": map[string]any{
 						"type":  "array",
 						"items": map[string]any{"type": "string"},
-						"description": "要加载的 skill 名称（必填）。须与本 description 下方 available skills 或 FS_ROOT/skills/<name> 目录一致；" +
+						"description": "要加载的 skill 名称（必填）。须与本 description 下方 available skills 或 skills/<name> 目录一致；" +
 							"通常等于 skills/<name> 目录名（skill_name）及 SKILL.md frontmatter 的 name 字段",
 					},
 				},

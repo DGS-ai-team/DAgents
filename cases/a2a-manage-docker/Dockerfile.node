@@ -23,7 +23,7 @@ COPY --from=builder /out/dagents-node /usr/local/bin/dagents-node
 COPY packaging/runtime/skills /opt/dagents/seed/skills
 COPY packaging/runtime/policy /opt/dagents/seed/policy
 COPY cases/a2a-manage-docker/config/node-${NODE_ROLE}.yaml /etc/dagents/config.yaml
-COPY cases/a2a-manage-docker/agent-card/node-${NODE_ROLE}.json /etc/dagents/agent-card.json
+COPY cases/a2a-manage-docker/agent-card/node-${NODE_ROLE}.json /workspace/agent-card.json
 COPY cases/a2a-manage-docker/prompt_context/node-${NODE_ROLE}/custom.md /etc/dagents/custom.md.seed
 COPY cases/a2a-manage-docker/scripts/entrypoint-node.sh /usr/local/bin/entrypoint-node.sh
 RUN chmod +x /usr/local/bin/entrypoint-node.sh /usr/local/bin/dagents-node

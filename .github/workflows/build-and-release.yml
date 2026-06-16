@@ -176,15 +176,17 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          chmod +x scripts/ci/build_manage_docker.sh
-          VERSION="${VERSION}" bash scripts/ci/build_manage_docker.sh
+          chmod +x scripts/ci/build_manage_docker.sh scripts/ci/assemble_manage_bundle.sh
+          VERSION="${VERSION}" bash scripts/ci/assemble_manage_bundle.sh
           ls -la dist/dagents-manage-*
 
       - name: Upload Manage Docker archive
         uses: actions/upload-artifact@v4
         with:
           name: dagents-manage-docker
-          path: dist/dagents-manage-*.tar.gz
+          path: |
+            dist/dagents-manage-*.tar.gz
+            dist/dagents-manage-bundle-*.tar.gz
           if-no-files-found: error
 
   release:
@@ -214,4 +216,5 @@ jobs:
             dist/dagents-local-assistant-*.zip
             dist/dagents-local-assistant-windows-amd64-installer-*.exe
             dist/dagents-manage-*.tar.gz
+            dist/dagents-manage-bundle-*.tar.gz
           generate_release_notes: true

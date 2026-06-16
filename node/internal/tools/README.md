@@ -2,8 +2,8 @@
 
 N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。**`bash_run`** 在 `timeout_seconds` 内未完成时由 Node **自动降级**为后台 job；内部仍保留 `StartBackground` / `job_registry` 供降级与测试使用。
 
-**配置**：`tools.enabled_groups`（7 组）见 [`docs/built-in-tools.md`](../../docs/built-in-tools.md) §0、[`shared/config/README.md`](../../shared/config/README.md)。  
-**工具用法**：写在各 tool schema `description` 中（[`descriptions_shared.go`](./descriptions_shared.go) + 各 `tool_*` / `fs_*` / `bash_*` 文件）。
+**配置**：`tools.enabled_groups`（7 组）见 [`docs/built-in-tools.md`](../../docs/built-in-tools.md) §0、[`docs/built-in-tools-reference.md`](../../docs/built-in-tools-reference.md)（全量 description / 参数）、[`shared/config/README.md`](../../shared/config/README.md)。  
+**工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
 
 ---
 
@@ -19,7 +19,6 @@ tools/
 │   registry_path.go          # resolveFSRoot、resolvePath
 │   registry_enabled.go       # SetBuiltinEnabled、filterToolDefs
 │   registry_enrich.go        # SetSkillsCatalog、enrichDefinitions
-│   descriptions_shared.go    # 各工具 description 共用常量
 │   executor.go               # Executor 接口
 │   execution_mode.go         # call_purpose、StartBackground（内部）
 │   tools_test.go             # registry 集成 smoke

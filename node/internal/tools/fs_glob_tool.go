@@ -20,14 +20,14 @@ func globFilesToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "glob_files",
-			Description: descFSPathConvention + " 在指定目录下按 glob 列举匹配的路径，不读取文件内容。" +
+			Description: "在指定目录下按 glob 列举匹配的路径，不读取文件内容。" +
 				"glob_pattern 相对 directory，支持 *、?、** 递归；可用 offset/max_results 分页。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"directory": map[string]any{
 						"type":        "string",
-						"description": "相对 fs_root 的起始目录（必填）；传 . 表示工作区根",
+						"description": "起始目录（必填）；传 . 表示工作区根",
 					},
 					"glob_pattern": map[string]any{
 						"type":        "string",

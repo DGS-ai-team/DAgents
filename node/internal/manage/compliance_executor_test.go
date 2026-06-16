@@ -57,11 +57,13 @@ func writeComplianceFixtures(t *testing.T) (*config.Config, *session.Manager) {
 		FSRoot:  dir,
 		Manage: config.ManageConfig{
 			Enabled: true,
-			Registration: config.ManageRegistrationConfig{
-				AgentCardPath: cardPath,
-			},
 		},
 	}
+	oldWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
 	hub := stream.NewHub(32, logx.Discard())
 	reg, err := tools.NewRegistry(dir, 30)
 	if err != nil {

@@ -7,6 +7,19 @@ import (
 	"strings"
 )
 
+// AgentCardFileName 为 Node 工作目录下固定的 Agent Card 文件名（不可通过 config 覆盖）。
+const AgentCardFileName = "agent-card.json"
+
+// DefaultAgentCardPath 返回 LoadDefaultAgentCard 使用的相对路径。
+func DefaultAgentCardPath() string {
+	return AgentCardFileName
+}
+
+// LoadDefaultAgentCard 从工作目录加载 ./agent-card.json。
+func LoadDefaultAgentCard() (*AgentCard, error) {
+	return LoadAgentCard(DefaultAgentCardPath())
+}
+
 // AgentCard 为注册时上报 Manage 的 Agent 名片（JSON 文件）。
 type AgentCard struct {
 	Name               string         `json:"name"`

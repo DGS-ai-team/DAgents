@@ -232,8 +232,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		a2aBridge = session.NewA2ACallerHITLBridge(cfg.AgentID, hub)
 		if o.tools != nil {
 			compliancePeer := ""
-			if card, cardErr := manage.LoadAgentCard(cfg.Manage.Registration.AgentCardPath); cardErr != nil {
-				logger.Warn("agent card load failed for agent_invoke defaults", "error", cardErr, "path", cfg.Manage.Registration.AgentCardPath)
+			if card, cardErr := manage.LoadDefaultAgentCard(); cardErr != nil {
+				logger.Warn("agent card load failed for agent_invoke defaults", "error", cardErr, "path", manage.DefaultAgentCardPath())
 			} else if card != nil {
 				compliancePeer = card.CompliancePeer()
 			}

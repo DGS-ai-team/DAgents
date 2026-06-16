@@ -29,6 +29,24 @@ type NormalizedToolCall struct {
 	Arguments map[string]any
 }
 
+// ToolIndexFromEvent 从 SSE data 读取 tool_index（流式 partial tool_call）。
+func ToolIndexFromEvent(data map[string]any) int {
+	raw, ok := data["tool_index"]
+	if !ok || raw == nil {
+		return -1
+	}
+	switch v := raw.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return -1
+	}
+}
+
 // ToolEventID 从 SSE data 提取 tool 块 ID。
 func ToolEventID(data map[string]any) string {
 	for _, k := range []string{"tool_call_id", "call_id", "id"} {

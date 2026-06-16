@@ -4,13 +4,30 @@
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-06-15
+
+**0.x 预览**：TUI **tool_call 流式**去重；Manage **离线 bundle** 与安装 **policy 覆盖**交互；**Agent Card 固定路径**；Manage Admin **移除 session 代理**；工具与通信参考文档。
+
 ### 新增
 
-- **Agent 自有文件写操作审批信任链**：`write_file` / `search_replace` 为 **`rule`** 时，同 session 内 Agent 创建且未被外界改动的文件，后续写操作经 `tool.before_each` 降为 **auto**（免 HITL）；`write_file=always` 可显式关闭。详见 [ux-agent-owned-file-approval.md](docs/design/ux-agent-owned-file-approval.md)。
+- **Manage 离线 bundle**：`scripts/ci/assemble_manage_bundle.sh` 产出 `dagents-manage-bundle-*.tar.gz`（镜像 + `import-image` / `restart` 脚本 + `docker-compose.offline.yml`）；Release CI 自动附加。
+- **安装 policy 交互**：Linux `install.sh`（`--overwrite-policy` / `--keep-policy` + TTY 询问）；Windows Inno Setup 安装时可选覆盖 `_seed/policy`。
+- **Agent Card 示例**：`packaging/agent-client/agent-card.example.json`；Node 工作目录固定 `./agent-card.json`（`manage.AgentCardFileName`）。
+- **文档**：[built-in-tools-reference.md](docs/built-in-tools-reference.md)（25 个内置工具全量参考）；[manage-communication.md](docs/manage-communication.md)（Manage / Node / Client 通信与数据面）。
 
 ### 变更
 
-- **默认策略**：`packaging/runtime/policy/tool.approval.txt` 中 `write_file` 由 `always` 改为 **`rule`**（与 `search_replace` 一致，启用信任链）。
+- **TUI tool_call 流式**：Full / REPL 共用 `ToolCallStreamState` partial upsert（对齐 call_id 迁移，避免重复行）。
+- **Manage 注册配置**：`manage.registration` 移除 `agent_card_path`、`name`、`description`；展示名与 A2A 语义 **仅以 Agent Card 为准**（`name` 空则回退 `agent_id`）。
+- **Manage Admin**：移除 `/v1/admin/nodes/.../sessions` 代理与 Console 远程 session UI（Node 会话仍由 Client 直连 Node）。
+- **工具 description**：长描述迁入各工具 schema；删除 `descriptions_shared.go`。
+- **Cases**：`a2a-manage-docker` / `centos7-feature-tour` README 与配置对齐 v0.3.8（Agent Card 路径、policy `write_file=rule` 信任链说明等）。
+
+### 修复
+
+- **`TestRunMessageTurnMaxToolLoops`**：显式关闭 duplicate hook 配置，避免与「工具轮次上限」断言冲突。
+
+（Git **tag**：`v0.3.8`。）
 
 ## [0.3.7] - 2026-06-15
 
