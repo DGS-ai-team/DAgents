@@ -19,6 +19,7 @@ from manage.a2a.store import A2ATaskStore
 from manage.admin.routes import build_admin_router
 from manage.llm.routes import build_llm_router
 from manage.llm.store import LLMConfigStore
+from manage.platform.blob_routes import build_blob_router
 from manage.registry.routes import build_registry_router
 from manage.registry.store import AgentRegistryStore
 from manage.storage.sqlite import SQLiteDatabase
@@ -66,6 +67,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.include_router(build_a2a_router(store, a2a_store, audit))
     app.include_router(build_admin_router(store, a2a_store))
     app.include_router(build_llm_router(llm_store, audit))
+    app.include_router(build_blob_router(blob))
 
     @app.get("/", include_in_schema=False)
     def root_redirect() -> RedirectResponse:
