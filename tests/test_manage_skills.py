@@ -75,3 +75,10 @@ class BlobTest(unittest.TestCase):
         r1 = c.post("/v1/blobs", files={"file": ("f1.zip", data, "application/zip")})
         r2 = c.post("/v1/blobs", files={"file": ("f2.zip", data, "application/zip")})
         self.assertEqual(r1.json()["blob_id"], r2.json()["blob_id"])
+
+    def test_invalid_blob_id_returns_404(self):
+        """Path-traversal guard: non-hex / short blob_id must return 404 before filesystem access."""
+        c = _blob_client()
+        self.assertEqual(c.get("/v1/blobs/not-a-valid-hash").status_code, 404)
+        self.assertEqual(c.get("/v1/blobs/../etc/passwd").status_code, 404)
+        self.assertEqual(c.get("/v1/blobs/short").status_code, 404)
