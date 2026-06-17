@@ -87,6 +87,8 @@ class BlobTest(unittest.TestCase):
 from manage.storage.sqlite import SQLiteDatabase
 from manage.skills.store import SkillPackageStore
 from manage.skills.models import SkillPackageCreate
+from manage.skills.routes import build_skills_router
+from manage.platform.audit import AuditLog
 
 
 def _skill_store():
@@ -114,3 +116,32 @@ class SkillStoreTest(unittest.TestCase):
         s.create(self._mk(), now=1); s.publish("svc-restart", "1.0.0", now=2)
         self.assertEqual(len(s.sync_manifest(since=0)), 1)
         self.assertEqual(s.sync_manifest(since=1), [])   # nothing new past current version
+
+
+def _skills_client():
+    d = tempfile.mkdtemp()
+    db = SQLiteDatabase(Path(d) / "m.db")
+    blob = BlobStore(BlobStoreConfig(root=Path(d) / "blobs", max_bytes=None))
+    app = FastAPI()
+    app.include_router(build_skills_router(SkillPackageStore(db), blob, AuditLog(max_entries=50)))
+    return TestClient(app)
+
+
+class SkillRouterTest(unittest.TestCase):
+    def test_upload_publish_catalog_download(self):
+        c = _skills_client()
+        zip_bytes = b"PK\x03\x04 fake skill zip"
+        r = c.post("/v1/skills/packages",
+                   data={"skill_id": "svc-restart", "version": "1.0.0",
+                         "name": "Service Restart", "risk_level": "medium"},
+                   files={"file": ("svc.zip", zip_bytes, "application/zip")})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["status"], "draft")
+        self.assertEqual(c.get("/v1/skills/catalog").json(), [])  # draft hidden
+        self.assertEqual(
+            c.post("/v1/skills/packages/svc-restart/versions/1.0.0/publish").status_code, 200)
+        cat = c.get("/v1/skills/catalog").json()
+        self.assertEqual(len(cat), 1)
+        dl = c.get("/v1/skills/catalog/svc-restart/versions/1.0.0/download")
+        self.assertEqual(dl.content, zip_bytes)
+        self.assertEqual(len(c.get("/v1/skills/sync/manifest?since=0").json()), 1)
