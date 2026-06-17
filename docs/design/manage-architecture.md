@@ -183,6 +183,8 @@
 | HEAD | `/v1/blobs/{id}` | 元数据 |
 | DELETE | `/v1/blobs/{id}` | Admin 或 TTL 回收 |
 
+> **实现状态（已落地）**：Platform Blob API 已在 `manage/platform/blob_routes.py` 实现。`POST /v1/blobs` 为 multipart 上传，内容寻址（`blob_id = sha256`，64 位小写十六进制），返回 `{blob_id, sha256, size}`。`GET/HEAD/DELETE /v1/blobs/{id}` 均对 `blob_id` 做严格十六进制格式校验（64 位 `[0-9a-f]`，拒绝路径穿越），`blob store disabled` 时返回 503。
+
 **A2A 文件流**
 
 ```text
@@ -212,6 +214,8 @@ Go Node：
 - **审批工作流**：draft → pending_review → approved → published → deprecated
 - **仅 published** 且 Node **有权**（team / scope）的可下载
 - Node **同步清单**：心跳返回 `skills_catalog_version`；有更新则拉取
+
+> **实现状态（精简版已落地）**：`manage/skills/` 实现了**精简版** Skills 分发（`manage/skills/{models,store,routes}.py`）。生命周期简化为 **draft / published** 两态、单步发布（`POST /v1/skills/packages/{id}/versions/{v}/publish`），多级审批工作流（pending_review → approved）**延后到后续阶段**。Skill 包 zip 以 Platform Blob API 存储与分发。`GET /v1/skills/sync/manifest?since=N` 返回信封 `{catalog_version, items}`（items 为增量清单 `[{skill_id, version, sha256, download_url}]`）；**Go Node 自动同步（心跳 `skills_catalog_version` → 拉取 → 解压）延后到后续 PR 实现**，本阶段仅交付 Manage 侧 API 契约。
 
 #### 4.3.1 Skill 包模型
 
@@ -261,6 +265,43 @@ Node  下载 → 校验 sha256 → 解压到 {fs_root}/skills/{skill_id}/
 
 - 首版：Console 按钮 + admin API；与 Node HITL **分离**（skill 发布是企业资产审批）
 - Phase 2：对接外部工单 / SSO 审批人
+
+---
+
+### 4.3a LLM 配置注册中心（已落地，`manage/llm/`）
+
+**背景**：LLM 配置（provider / base_url / model / api_key）原只存在于每个 Node 本地 `config.yaml`，多 Node 部署需逐台维护。注册中心将配置集中到 Manage，可被多 Node 或外部按 id 复用。
+
+**存储**：SQLite 表 `llm_configs`（schema v3 新增，`manage/storage/sqlite.py`）。
+
+| 关键字段 | 说明 |
+|----------|------|
+| `id` | 稳定 ID（归一化 name 或 uuid） |
+| `name` | 展示名（唯一） |
+| `provider` | `openai` / `deepseek` / `qwen` / `vllm` |
+| `base_url` | OpenAI 兼容根地址 |
+| `model` | 模型名 |
+| `api_key` | **明文存储**（本地/局域网信任模型） |
+| `is_default` | 全局至多一个为 true；置位时原子清除其它 |
+| `allowed_groups` | 限定可见/可用的 `discovery_group`；空 = 全部可用 |
+
+**API**（`manage/llm/routes.py`，前缀 `/v1/llm`）：
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|------|------|------|------|
+| POST | `/v1/llm/configs` | admin | 创建 |
+| GET | `/v1/llm/configs` | authenticate | 列表（`api_key` **掩码**为 `sk-***last4`） |
+| GET | `/v1/llm/configs/{id}` | authenticate | 详情（掩码） |
+| PUT | `/v1/llm/configs/{id}` | admin | 全量更新 |
+| DELETE | `/v1/llm/configs/{id}` | admin | 删除 |
+| GET | `/v1/llm/configs/{id}/resolve` | authenticate | **返回明文** `{model, baseURL, apiKey}` |
+| GET | `/v1/llm/configs/default/resolve` | authenticate | 默认配置的 resolve |
+
+**掩码 vs resolve**：列表 / 详情端点对 `api_key` 掩码，降低 Console 目录页/截图泄露面；`/resolve` 返回明文 PageAgent 兼容形（`base_url→baseURL`、`api_key→apiKey`），供浏览器端 PageAgent 或未来 Go Node 直接消费。
+
+**安全模型**：`api_key` 明文存于 SQLite，`/resolve` 明文返回调用方——**仅适用于本地/局域网信任部署**，与 DAgents 本地运行时定位一致；生产/公网部署须改为服务端代理 LLM 调用、key 不出服务端。
+
+**后续（暂未实现）**：Go Node 自动消费 LLM 配置（`node/internal/manage` 拉取 + turn `llm.settings` 热更）、Console UI 管理页、PageAgent 命令栏复用——均延后到后续 PR。本阶段仅交付 Manage 后端 API。
 
 ---
 

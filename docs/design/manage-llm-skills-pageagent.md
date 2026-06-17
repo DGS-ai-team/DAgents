@@ -22,6 +22,8 @@
 - Go Node 的 Skills 自动同步（心跳 `skills_catalog_version` → 拉取 → 解压到 `fs_root/skills/`）。本 PR 提供 Manage 侧 `sync/manifest` + download **API 契约**，Go 端实现留 Phase 2。
 - Skills 多级审批工作流（draft→pending_review→approved→published）。精简版仅 `draft`/`published` 两态、单步发布。
 
+> 更新(实现期)：Console UI 与 PageAgent 集成已移出本 PR，延后到后续 PR；本 PR 仅交付 Manage 后端 API。
+
 ## 3. 设计原则
 
 - **不改既有契约**：复用 `SQLiteDatabase`、`platform/auth`（`authenticate`/`require_admin`）、`BlobStore`、`build_X_router` 装配模式与 `discovery_group` 语义。

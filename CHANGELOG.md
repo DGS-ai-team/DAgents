@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **Manage LLM 配置注册中心**：`/v1/llm/configs` CRUD + `/resolve` 端点；list/detail `api_key` 掩码（`sk-***last4`），`/resolve` 返回明文 `{model,baseURL,apiKey}`（PageAgent 兼容形）；`is_default` 全局唯一；`allowed_groups` 限定可见范围；仅适用于本地/局域网信任部署。多 Node / 外部可按 id 复用；Node 自动消费、Console UI 与 PageAgent 集成延后到后续 PR。
+- **Manage Platform Blob API**：`POST /v1/blobs`（multipart 上传）、`GET/HEAD/DELETE /v1/blobs/{id}`；内容寻址（`blob_id = sha256`）；blob_id 严格 64 位十六进制校验防路径穿越；`blob store disabled` 返回 503；供 A2A 文件传输与 Skills 分发共用。
+- **Manage Skills 分发（精简版）**：`POST /v1/skills/packages`（multipart，draft）+ `POST /v1/skills/packages/{id}/versions/{v}/publish`（单步发布）+ `GET /v1/skills/catalog`/`{id}`/`{id}/versions/{v}/download`（仅 published）+ `GET /v1/skills/sync/manifest?since=N`（返回 `{catalog_version, items}` 信封）；多级审批工作流、Node 自动同步（心跳 `skills_catalog_version`→拉取→解压）、Console UI 及 PageAgent 复用 model 延后到后续 PR。
+
 ## [0.5.0] - 2026-06-21
 
 **0.x 预览**：Turn **旁路侧效应**（Produce / Apply / Continue）落地；**Hooks RunPhase** 框架；异步工具回灌消息对模型更友好；Web UI 流式状态与 deferred 旁路展示对齐 Client。
