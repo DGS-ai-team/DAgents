@@ -358,7 +358,6 @@ func (m *model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.invalidateHITLForUserMessage()
-		m.resetUsageStrip()
 		m.clearPartialToolBlocks()
 		m.submitContentSeen = false
 		m.stallWarnIssued = false

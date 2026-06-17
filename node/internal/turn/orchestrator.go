@@ -459,6 +459,9 @@ func (o *Orchestrator) runOneStep(
 			streamErr = err
 			o.logger.Error("turn llm failed", "session_id", sessionID, "loop", toolLoopCount, "error", err)
 		}
+		if finishReason == "cancelled" {
+			o.publishAccumulatedUsageIfAny(sessionID, toolLoopCount)
+		}
 		o.publishTurnIdleDone(sessionID, finishReason)
 		return StepOutcome{LoopCount: toolLoopCount, Err: streamErr}
 	}
@@ -478,6 +481,7 @@ func (o *Orchestrator) runOneStep(
 		if errors.Is(procErr, context.Canceled) {
 			finishReason = "cancelled"
 			o.appendMissingToolResponses(sessionID, history, result.ToolCalls, ToolStreamInterruptedMessage, map[string]any{"interrupted_by_stream_cancel": true})
+			o.publishAccumulatedUsageIfAny(sessionID, toolLoopCount)
 		} else {
 			finishReason = "error"
 			o.hub.Publish(sessionID, o.agentID, "error", map[string]any{"message": procErr.Error()})
@@ -547,6 +551,26 @@ func (o *Orchestrator) accumulateAndPublishUsage(sessionID string, llmStep int, 
 	o.turnUsage[sessionID] = acc
 	payload := llm.UsageSSEEvent(llmStep, u, acc)
 	o.turnUsageMu.Unlock()
+	o.hub.Publish(sessionID, o.agentID, "usage", payload)
+}
+
+// publishAccumulatedUsageIfAny 在 turn 取消时补发已累计 usage，避免客户端 strip 丢失末次快照。
+func (o *Orchestrator) publishAccumulatedUsageIfAny(sessionID string, llmStep int) {
+	if o == nil || o.hub == nil {
+		return
+	}
+	o.turnUsageMu.Lock()
+	acc, ok := o.turnUsage[sessionID]
+	o.turnUsageMu.Unlock()
+	if !ok {
+		return
+	}
+	norm := acc
+	norm.Normalize()
+	if norm.PromptTokens <= 0 && norm.CompletionTokens <= 0 {
+		return
+	}
+	payload := llm.UsageSSEEvent(llmStep, llm.Usage{}, acc)
 	o.hub.Publish(sessionID, o.agentID, "usage", payload)
 }
 

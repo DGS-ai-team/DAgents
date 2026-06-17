@@ -49,7 +49,7 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 		err = m.client.ClearSessionContext(m.ctx, m.currentSession())
 		if err == nil {
 			m.messagesTotalTokens = 0
-			m.resetUsageStrip()
+			m.clearUsageStrip()
 			m.transcript.Add("[system] 已清空对话上下文")
 			m.syncViewport()
 		}
@@ -252,7 +252,7 @@ func (m *model) switchSession(requested string) error {
 	m.clearPartialToolBlocks()
 	m.statusMgr.Reset()
 	m.messagesTotalTokens = -1
-	m.resetUsageStrip()
+	m.clearUsageStrip()
 	m.transcript.Add("[system] 已切换 session=" + id)
 	m.syncViewport()
 	m.restartStream()

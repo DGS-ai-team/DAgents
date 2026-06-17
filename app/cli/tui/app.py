@@ -34,6 +34,7 @@ from app.cli.approval import (
 )
 from app.cli.child_agent import (
     approval_header,
+    a2a_relay_approved_summary,
     a2a_relay_tool_suffix,
     format_child_agents_list,
     is_a2a_relay_hitl,
@@ -595,9 +596,13 @@ class DAgentsTuiApp(App[None]):
         """A2A 中继审批：对端执行工具，本端不会收到 tool_result，审批提交后即展示终态。"""
         suffix = a2a_relay_tool_suffix(relay_data)
         for call_id in decision.approved:
-            self._write_a2a_relay_tool_result(call_id, approved=True, suffix_markup=suffix)
+            self._write_a2a_relay_tool_result(
+                call_id, approved=True, suffix_markup=suffix, relay_data=relay_data,
+            )
         for call_id in decision.rejected:
-            self._write_a2a_relay_tool_result(call_id, approved=False, suffix_markup=suffix)
+            self._write_a2a_relay_tool_result(
+                call_id, approved=False, suffix_markup=suffix, relay_data=relay_data,
+            )
 
     def _write_a2a_relay_tool_result(
         self,
@@ -605,6 +610,7 @@ class DAgentsTuiApp(App[None]):
         *,
         approved: bool,
         suffix_markup: str,
+        relay_data: dict[str, Any] | None = None,
     ) -> None:
         pending = self._pending_tools.pop(call_id, None)
         if pending is not None:
@@ -612,7 +618,7 @@ class DAgentsTuiApp(App[None]):
             if isinstance(task, asyncio.Task):
                 task.cancel()
         title = str((pending or {}).get("summary") or "tool")
-        summary = "已审批，由对端执行" if approved else "已拒绝"
+        summary = a2a_relay_approved_summary(relay_data, approved=approved)
         self._tool_result_counter += 1
         result_id = f"tool-{self._tool_result_counter}"
         body = self._tool_dot_block(

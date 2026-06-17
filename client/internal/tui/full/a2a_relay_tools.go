@@ -9,7 +9,7 @@ func (m *model) ensureA2ARelayApprovalToolBlocks(data map[string]any) {
 	if !clihitl.IsA2ARelayHITL(data) {
 		return
 	}
-	suffix := clihitl.A2ARelayToolSuffix(data)
+	peerLabel := clihitl.A2APeerLabel(data)
 	for _, item := range clihitl.ExtractToolApprovals(data) {
 		if item.CallID == "" {
 			continue
@@ -22,7 +22,7 @@ func (m *model) ensureA2ARelayApprovalToolBlocks(data map[string]any) {
 			m.toolPending.Remove(item.CallID)
 		}
 		title := tuishared.ToolDisplayName(item.Name, item.Arguments)
-		lines := tuishared.FormatA2ARelayApprovalPending(item.CallID, title, suffix, item.RawArgs)
+		lines := tuishared.FormatA2ARelayApprovalPending(item.CallID, title, peerLabel, item.RawArgs)
 		tuishared.UpsertToolCallLines(m.transcript, m.toolCallStream, item.CallID, "", lines)
 		m.toolBlocks.Register(item.CallID)
 	}
@@ -34,7 +34,7 @@ func (m *model) finalizeA2ARelayToolBlocks(hitlData, resume map[string]any) {
 		return
 	}
 	approved, rejected := clihitl.ParseApprovalResumeSelection(resume, hitlData)
-	suffix := clihitl.A2ARelayToolSuffix(hitlData)
+	peerLabel := clihitl.A2APeerLabel(hitlData)
 	for _, item := range clihitl.ExtractToolApprovals(hitlData) {
 		id := item.CallID
 		if id == "" {
@@ -51,7 +51,7 @@ func (m *model) finalizeA2ARelayToolBlocks(hitlData, resume map[string]any) {
 			m.toolPending.Remove(id)
 		}
 		title := tuishared.ToolDisplayName(item.Name, item.Arguments)
-		lines := tuishared.FormatA2ARelayToolResult(id, title, suffix, ok)
+		lines := tuishared.FormatA2ARelayToolResult(id, title, peerLabel, ok)
 		m.transcript.ReplaceA2ARelayToolLines(id, lines)
 		m.toolBlocks.Register(id)
 	}

@@ -3,6 +3,8 @@ package hitl
 import (
 	"fmt"
 	"strings"
+
+	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 )
 
 // A2APeerLabel 返回对端 Agent 展示名（优先 card name，否则 agent_id）。
@@ -16,13 +18,14 @@ func A2APeerLabel(data map[string]any) string {
 	return mapStringField(data, "a2a_peer_agent_id")
 }
 
+// A2ARelayApprovedSummary 返回 A2A 中继工具审批提交后的终态摘要。
+func A2ARelayApprovedSummary(peerLabel string, approved bool) string {
+	return tuishared.FormatA2ARelayApprovedSummary(peerLabel, approved)
+}
+
 // A2ARelayToolSuffix 返回工具行尾部的 from 标识（纯文本，供终端展示）。
 func A2ARelayToolSuffix(data map[string]any) string {
-	label := A2APeerLabel(data)
-	if label != "" {
-		return " from " + label
-	}
-	return " from 对端 Agent"
+	return tuishared.FormatA2ARelayPeerSuffix(A2APeerLabel(data))
 }
 
 // ParseApprovalResumeSelection 从 resume_value 解析 approved/rejected call id 集合。

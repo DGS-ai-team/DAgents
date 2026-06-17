@@ -3,7 +3,7 @@ package shared
 import "testing"
 
 func TestFormatA2ARelayApprovalPending(t *testing.T) {
-	lines := FormatA2ARelayApprovalPending("call-1", "bash(echo hi)", " from Node-A", `{"command":"echo hi"}`)
+	lines := FormatA2ARelayApprovalPending("call-1", "bash(echo hi)", "Node-A", `{"command":"echo hi"}`)
 	if len(lines) < 2 {
 		t.Fatalf("lines=%v", lines)
 	}
@@ -16,7 +16,7 @@ func TestFormatA2ARelayApprovalPending(t *testing.T) {
 }
 
 func TestFormatA2ARelayToolResult(t *testing.T) {
-	lines := FormatA2ARelayToolResult("call-1", "bash(date)", " from 合规助手", true)
+	lines := FormatA2ARelayToolResult("call-1", "bash(date)", "合规助手", true)
 	if len(lines) != 2 {
 		t.Fatalf("lines=%v", lines)
 	}
@@ -27,15 +27,19 @@ func TestFormatA2ARelayToolResult(t *testing.T) {
 	if body != "bash(date) from 合规助手" {
 		t.Fatalf("body=%q", body)
 	}
+	preview := ToolA2ALineBody(lines[1], toolPreviewLinePrefix)
+	if preview != "已审批，由合规助手执行" {
+		t.Fatalf("preview=%q", preview)
+	}
 }
 
 func TestReplaceA2ARelayToolLines(t *testing.T) {
 	tr := NewTranscript(0)
-	pending := FormatA2ARelayApprovalPending("call-1", "bash", " from peer", "")
+	pending := FormatA2ARelayApprovalPending("call-1", "bash", "peer", "")
 	for _, line := range pending {
 		tr.Add(line)
 	}
-	result := FormatA2ARelayToolResult("call-1", "bash", " from peer", true)
+	result := FormatA2ARelayToolResult("call-1", "bash", "peer", true)
 	tr.ReplaceA2ARelayToolLines("call-1", result)
 	raw := tr.Lines()
 	if len(raw) != 2 {

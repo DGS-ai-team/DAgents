@@ -42,6 +42,8 @@ from app.cli.render import (
     format_tool_result,
     format_user_information_required,
     parse_usage_strip,
+    parse_usage_round,
+    accumulate_usage_strip,
 )
 
 TranscriptCallback = Callable[[TranscriptUpdate], None]
@@ -696,7 +698,10 @@ class SessionController:
             )
             self._emit_transcript(format_tool_result(data))
         elif event_type == "usage":
-            self._usage_strip = parse_usage_strip(data)
+            self._usage_strip = accumulate_usage_strip(
+                self._usage_strip,
+                parse_usage_round(data),
+            )
             self._emit_transcript(TranscriptUpdate(kind=TranscriptKind.USAGE, data=data))
             self._emit_child_strip()
         elif event_type in {"context_compression_blocking", "context_compression_silent"}:

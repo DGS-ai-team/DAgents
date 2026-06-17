@@ -401,6 +401,14 @@ def a2a_peer_label(data: dict[str, Any] | None) -> str:
     return str(data.get("a2a_peer_agent_id") or "").strip()
 
 
+def a2a_relay_approved_summary(data: dict[str, Any] | None, *, approved: bool) -> str:
+    """A2A 中继工具审批提交后的终态摘要。"""
+    if not approved:
+        return "已拒绝"
+    label = a2a_peer_label(data) or "对端 Agent"
+    return f"已审批，由{label}执行"
+
+
 def a2a_relay_tool_suffix(data: dict[str, Any] | None) -> str:
     """A2A 中继工具行尾部的 from 标识（Rich markup）。"""
     label = a2a_peer_label(data)

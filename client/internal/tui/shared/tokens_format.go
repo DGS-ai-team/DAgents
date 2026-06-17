@@ -82,6 +82,40 @@ func parseUsageFields(data map[string]any) UsageStripSnapshot {
 	}
 }
 
+// AccumulateFrom 将另一段用量累加到当前快照（input strip 会话级累计；空快照忽略）。
+func (s *UsageStripSnapshot) AccumulateFrom(other UsageStripSnapshot) {
+	if !other.HasData {
+		return
+	}
+	if !s.HasData {
+		*s = other
+		return
+	}
+	s.PromptTokens += other.PromptTokens
+	s.CompletionTokens += other.CompletionTokens
+	s.CacheHitTokens += other.CacheHitTokens
+	s.ReasoningTokens += other.ReasoningTokens
+	if s.PromptTokens > 0 && s.CacheHitTokens > 0 {
+		s.CacheHitRate = float64(s.CacheHitTokens) / float64(s.PromptTokens)
+		if s.CacheHitRate > 1 {
+			s.CacheHitRate = 1
+		}
+	}
+	s.HasData = true
+}
+
+// ApplyUsageRoundToStrip 用 SSE usage 的 round_* 累加到 strip；无 round 数据时保留原值。
+func ApplyUsageRoundToStrip(strip *UsageStripSnapshot, data map[string]any) {
+	if strip == nil {
+		return
+	}
+	round := ParseUsageRound(data)
+	if !round.HasData {
+		return
+	}
+	strip.AccumulateFrom(round)
+}
+
 // FormatInlineUsage 格式化 assistant 块尾部的单轮用量短文案（不含终端样式）。
 func FormatInlineUsage(s UsageStripSnapshot) string {
 	if !s.HasData {

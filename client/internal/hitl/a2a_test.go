@@ -19,6 +19,16 @@ func TestA2APeerLabel(t *testing.T) {
 	}
 }
 
+func TestA2ARelayApprovedSummary(t *testing.T) {
+	got := A2ARelayApprovedSummary("合规助手", true)
+	if got != "已审批，由合规助手执行" {
+		t.Fatalf("summary = %q", got)
+	}
+	if A2ARelayApprovedSummary("合规助手", false) != "已拒绝" {
+		t.Fatal("expected rejected summary")
+	}
+}
+
 func TestA2ARelayToolSuffix(t *testing.T) {
 	got := A2ARelayToolSuffix(map[string]any{"a2a_peer_agent_name": "Node-A"})
 	if got != " from Node-A" {

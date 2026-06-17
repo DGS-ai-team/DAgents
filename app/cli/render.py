@@ -234,6 +234,29 @@ def parse_usage_strip(data: dict[str, Any]) -> UsageStripSnapshot:
     return _parse_usage_fields(data)
 
 
+def accumulate_usage_strip(strip: UsageStripSnapshot, round_snap: UsageStripSnapshot) -> UsageStripSnapshot:
+    """将单轮 round 用量累加到 strip；round 无数据时保留 strip。"""
+    if not round_snap.has_data:
+        return strip
+    if not strip.has_data:
+        return round_snap
+    prompt = strip.prompt_tokens + round_snap.prompt_tokens
+    completion = strip.completion_tokens + round_snap.completion_tokens
+    hit = strip.cache_hit_tokens + round_snap.cache_hit_tokens
+    reasoning = strip.reasoning_tokens + round_snap.reasoning_tokens
+    rate = -1.0
+    if prompt > 0 and hit > 0:
+        rate = min(1.0, hit / prompt)
+    return UsageStripSnapshot(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        cache_hit_tokens=hit,
+        cache_hit_rate=rate,
+        reasoning_tokens=reasoning,
+        has_data=True,
+    )
+
+
 def parse_usage_round(data: dict[str, Any]) -> UsageStripSnapshot:
     """从 SSE usage 事件 data 解析单轮 LLM 用量（round_* 字段）。"""
     round_data: dict[str, Any] = {

@@ -128,6 +128,32 @@ func TestParseUsageStripCachedFallback(t *testing.T) {
 	}
 }
 
+func TestUsageStripAccumulateFrom(t *testing.T) {
+	var strip UsageStripSnapshot
+	strip.AccumulateFrom(ParseUsageRound(map[string]any{
+		"round_prompt_tokens":     float64(100),
+		"round_completion_tokens": float64(20),
+	}))
+	strip.AccumulateFrom(ParseUsageRound(map[string]any{
+		"round_prompt_tokens":     float64(50),
+		"round_completion_tokens": float64(10),
+	}))
+	if strip.PromptTokens != 150 || strip.CompletionTokens != 30 {
+		t.Fatalf("strip = %+v", strip)
+	}
+}
+
+func TestApplyUsageRoundToStripIgnoresEmpty(t *testing.T) {
+	strip := UsageStripSnapshot{PromptTokens: 80, CompletionTokens: 12, HasData: true}
+	ApplyUsageRoundToStrip(&strip, map[string]any{
+		"prompt_tokens":     float64(0),
+		"completion_tokens": float64(0),
+	})
+	if strip.PromptTokens != 80 || strip.CompletionTokens != 12 {
+		t.Fatalf("strip cleared: %+v", strip)
+	}
+}
+
 func TestFormatInputStripRight(t *testing.T) {
 	got := FormatInputStripRight("开启 · high", "↑1.2k ↓300")
 	if got != "thinking 开启 · high · ↑1.2k ↓300" {

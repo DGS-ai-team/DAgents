@@ -1,7 +1,6 @@
 package shared
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -11,12 +10,13 @@ const (
 )
 
 // FormatA2ARelayApprovalPending 生成 A2A 中继审批中的工具占位行（青点样式，无动态耗时）。
-func FormatA2ARelayApprovalPending(blockID, title, peerSuffix, rawArgs string) []string {
+func FormatA2ARelayApprovalPending(blockID, title, peerLabel, rawArgs string) []string {
 	blockID = strings.TrimSpace(blockID)
 	title = strings.TrimSpace(title)
 	if title == "" {
 		title = "tool"
 	}
+	peerSuffix := FormatA2ARelayPeerSuffix(peerLabel)
 	body := "▶ " + title + peerSuffix + " · 待审批"
 	lines := []string{formatToolMetaLine(toolA2APendingLinePrefix, blockID, body)}
 	if code := strings.TrimSpace(rawArgs); code != "" && code != "{}" {
@@ -26,20 +26,18 @@ func FormatA2ARelayApprovalPending(blockID, title, peerSuffix, rawArgs string) [
 }
 
 // FormatA2ARelayToolResult 生成 A2A 中继审批提交后的工具终态行（对端执行，无 tool_result SSE）。
-func FormatA2ARelayToolResult(blockID, title, peerSuffix string, approved bool) []string {
+func FormatA2ARelayToolResult(blockID, title, peerLabel string, approved bool) []string {
 	blockID = strings.TrimSpace(blockID)
 	title = strings.TrimSpace(title)
 	if title == "" {
 		title = "tool"
 	}
+	peerSuffix := FormatA2ARelayPeerSuffix(peerLabel)
 	head := title + peerSuffix
 	if !approved {
 		head += " · 已拒绝"
 	}
-	summary := "已审批，由对端执行"
-	if !approved {
-		summary = "已拒绝"
-	}
+	summary := FormatA2ARelayApprovedSummary(peerLabel, approved)
 	lines := []string{
 		formatToolMetaLine(toolA2AResultLinePrefix, blockID, head),
 		formatToolMetaLine(toolPreviewLinePrefix, blockID, summary),
@@ -111,11 +109,23 @@ func ToolA2ALineBody(line, prefix string) string {
 	return rest
 }
 
-// FormatA2ARelayPeerSuffix 供测试与 hitl 包对齐的纯文本后缀。
+// FormatA2ARelayPeerSuffix 根据对端展示名生成 from 后缀（纯文本）。
 func FormatA2ARelayPeerSuffix(peerLabel string) string {
-	peerLabel = strings.TrimSpace(peerLabel)
-	if peerLabel != "" {
-		return fmt.Sprintf(" from %s", peerLabel)
+	label := strings.TrimSpace(peerLabel)
+	if label != "" {
+		return " from " + label
 	}
 	return " from 对端 Agent"
+}
+
+// FormatA2ARelayApprovedSummary 返回 A2A 中继工具审批提交后的终态摘要。
+func FormatA2ARelayApprovedSummary(peerLabel string, approved bool) string {
+	if !approved {
+		return "已拒绝"
+	}
+	label := strings.TrimSpace(peerLabel)
+	if label == "" {
+		label = "对端 Agent"
+	}
+	return "已审批，由" + label + "执行"
 }

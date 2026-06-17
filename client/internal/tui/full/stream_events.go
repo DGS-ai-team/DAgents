@@ -110,7 +110,7 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 			return
 		}
-		m.usageStrip = tuishared.ParseUsageStrip(ev.Data)
+		m.applyUsageFromSSE(ev.Data)
 		if suffix := tuishared.FormatInlineUsage(tuishared.ParseUsageRound(ev.Data)); suffix != "" {
 			m.transcript.ApplyRoundUsage(suffix)
 		}

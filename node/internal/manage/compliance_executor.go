@@ -132,6 +132,9 @@ func calleeAgentMeta(cfg *config.Config) (id, name string) {
 	if card, _ := LoadDefaultAgentCard(); card != nil {
 		name = strings.TrimSpace(card.Name)
 	}
+	if name == "" {
+		name = id
+	}
 	return id, name
 }
 

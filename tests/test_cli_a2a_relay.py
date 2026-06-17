@@ -8,6 +8,7 @@ import unittest
 from app.cli.api_client import StreamEvent
 from app.cli.child_agent import (
     a2a_peer_label,
+    a2a_relay_approved_summary,
     a2a_relay_tool_suffix,
     approval_header,
     is_a2a_relay_hitl,
@@ -42,6 +43,12 @@ def test_a2a_relay_tool_suffix() -> None:
     assert "dim cyan" in suffix
     default = a2a_relay_tool_suffix({"a2a_relay": True})
     assert "from 对端 Agent" in default
+
+
+def test_a2a_relay_approved_summary() -> None:
+    assert a2a_relay_approved_summary({"a2a_peer_agent_name": "合规助手"}, approved=True) == "已审批，由合规助手执行"
+    assert a2a_relay_approved_summary({"a2a_peer_agent_id": "node-a"}, approved=True) == "已审批，由node-a执行"
+    assert a2a_relay_approved_summary({}, approved=False) == "已拒绝"
 
 
 def test_approval_header_a2a_includes_peer() -> None:

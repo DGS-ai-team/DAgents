@@ -166,5 +166,7 @@ func attachA2APeerMeta(data, hitlPayload map[string]any) {
 	}
 	if name, _ := hitlPayload["callee_agent_name"].(string); strings.TrimSpace(name) != "" {
 		data["a2a_peer_agent_name"] = strings.TrimSpace(name)
+	} else if peerID := strings.TrimSpace(fmt.Sprint(data["a2a_peer_agent_id"])); peerID != "" && peerID != "<nil>" {
+		data["a2a_peer_agent_name"] = peerID
 	}
 }
