@@ -38,3 +38,33 @@ class LLMStoreTest(unittest.TestCase):
         r = s.resolve(cfg)
         self.assertEqual((r.model, r.baseURL, r.apiKey),
                          ("claude-sonnet-4-6", "http://127.0.0.1:8318/v1", "sk-abcd1234"))
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from manage.llm.routes import build_llm_router
+from manage.platform.audit import AuditLog
+
+def _client():
+    app = FastAPI()
+    app.include_router(build_llm_router(_store(), AuditLog(max_entries=50)))
+    return TestClient(app)
+
+class LLMRouterTest(unittest.TestCase):
+    def test_crud_mask_resolve(self):
+        c = _client()
+        body = dict(name="cli", provider="openai",
+                    base_url="http://127.0.0.1:8318/v1", model="claude-sonnet-4-6",
+                    api_key="sk-abcd1234", is_default=True)
+        r = c.post("/v1/llm/configs", json=body)
+        self.assertEqual(r.status_code, 200, r.text)
+        cid = r.json()["id"]
+        # list masks the key
+        self.assertEqual(c.get("/v1/llm/configs").json()[0]["api_key"], "sk-***1234")
+        # resolve returns plaintext PageAgent shape
+        res = c.get(f"/v1/llm/configs/{cid}/resolve").json()
+        self.assertEqual(res, {"model": "claude-sonnet-4-6",
+                               "baseURL": "http://127.0.0.1:8318/v1",
+                               "apiKey": "sk-abcd1234"})
+        self.assertEqual(c.get("/v1/llm/configs/default/resolve").json()["apiKey"], "sk-abcd1234")
+        self.assertEqual(c.delete(f"/v1/llm/configs/{cid}").status_code, 200)
+        self.assertEqual(c.get(f"/v1/llm/configs/{cid}").status_code, 404)
