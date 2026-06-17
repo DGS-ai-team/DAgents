@@ -45,6 +45,25 @@ class SQLiteDatabase:
                     task_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS llm_configs (
+                    id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS skill_packages (
+                    skill_id TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY (skill_id, version)
+                );
+                CREATE TABLE IF NOT EXISTS blobs (
+                    blob_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL
+                );
                 """
+            )
+            conn.execute(
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','3') "
+                "ON CONFLICT(key) DO UPDATE SET value='3'"
             )
             conn.commit()
