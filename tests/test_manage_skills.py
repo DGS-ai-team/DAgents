@@ -1,4 +1,4 @@
-"""Tests for Platform Blob API (Task 4)."""
+"""Tests for Platform Blob API (Task 4) and Skills Store (Task 5)."""
 
 import hashlib
 import tempfile
@@ -82,3 +82,35 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(c.get("/v1/blobs/not-a-valid-hash").status_code, 404)
         self.assertEqual(c.get("/v1/blobs/../etc/passwd").status_code, 404)
         self.assertEqual(c.get("/v1/blobs/short").status_code, 404)
+
+
+from manage.storage.sqlite import SQLiteDatabase
+from manage.skills.store import SkillPackageStore
+from manage.skills.models import SkillPackageCreate
+
+
+def _skill_store():
+    d = tempfile.mkdtemp()
+    return SkillPackageStore(SQLiteDatabase(Path(d) / "m.db"))
+
+
+class SkillStoreTest(unittest.TestCase):
+    def _mk(self, **kw):
+        base = dict(skill_id="svc-restart", version="1.0.0", name="Service Restart",
+                    risk_level="medium", blob_id="deadbeef")
+        base.update(kw); return SkillPackageCreate(**base)
+
+    def test_draft_then_publish_appears_in_catalog(self):
+        s = _skill_store()
+        s.create(self._mk(), now=1)
+        self.assertEqual(s.catalog(), [])               # draft not in catalog
+        pub = s.publish("svc-restart", "1.0.0", now=2)
+        self.assertEqual(pub.status, "published")
+        self.assertEqual(len(s.catalog()), 1)
+        self.assertEqual(s.catalog_version(), 1)
+
+    def test_sync_manifest_since(self):
+        s = _skill_store()
+        s.create(self._mk(), now=1); s.publish("svc-restart", "1.0.0", now=2)
+        self.assertEqual(len(s.sync_manifest(since=0)), 1)
+        self.assertEqual(s.sync_manifest(since=1), [])   # nothing new past current version
