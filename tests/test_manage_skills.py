@@ -144,4 +144,6 @@ class SkillRouterTest(unittest.TestCase):
         self.assertEqual(len(cat), 1)
         dl = c.get("/v1/skills/catalog/svc-restart/versions/1.0.0/download")
         self.assertEqual(dl.content, zip_bytes)
-        self.assertEqual(len(c.get("/v1/skills/sync/manifest?since=0").json()), 1)
+        resp = c.get("/v1/skills/sync/manifest?since=0").json()
+        self.assertEqual(len(resp["items"]), 1)
+        self.assertGreaterEqual(resp["catalog_version"], 1)

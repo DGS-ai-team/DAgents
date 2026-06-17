@@ -71,9 +71,9 @@ def build_skills_router(store: SkillPackageStore, blob: BlobStore, audit: AuditL
         return store.catalog()
 
     @router.get("/sync/manifest")
-    def sync_manifest(request: Request, since: int = 0) -> list[dict]:
+    def sync_manifest(request: Request, since: int = 0) -> dict:
         authenticate(request)
-        return store.sync_manifest(since)
+        return {"catalog_version": store.catalog_version(), "items": store.sync_manifest(since)}
 
     @router.get("/catalog/{skill_id}", response_model=list[SkillPackage])
     def get_skill(skill_id: str, request: Request) -> list[SkillPackage]:
