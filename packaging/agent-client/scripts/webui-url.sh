@@ -7,7 +7,7 @@ PORT="18765"
 
 if [[ -f "${CFG}" ]]; then
   parsed="$(grep -A10 '^listen:' "${CFG}" 2>/dev/null | grep -E '^[[:space:]]+port:' | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
-  if [[ -n "${parsed}" ]]; then
+  if [[ -n "${parsed}" ]] && [[ "${parsed}" =~ ^[0-9]+$ ]]; then
     PORT="${parsed}"
   fi
 fi

@@ -169,7 +169,8 @@ exit /b 0
 
 :print_webui_url
 if exist "%DAGENTS_HOME%\scripts\webui-url.bat" (
-  for /f "delims=" %%U in ('call "%DAGENTS_HOME%\scripts\webui-url.bat" "%CFG_ABS%"') do echo [dagents] Web UI: %%U
+  <nul set /p="[dagents] Web UI: "
+  call "%DAGENTS_HOME%\scripts\webui-url.bat" "%CFG_ABS%"
 ) else (
   echo [dagents] Web UI: http://127.0.0.1:18765/ui/
 )
