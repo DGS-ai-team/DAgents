@@ -8,6 +8,7 @@ import ToolExecBubble from "./ToolExecBubble.vue";
 import { buildStream } from "../composables/useStream.js";
 import { extractToolApprovals } from "../stores/hitl.js";
 import { chromeStore, inputStripRight } from "../stores/chrome.js";
+import { workerStripText } from "../stores/remoteWorkers.js";
 
 const props = defineProps({
   entries: { type: Array, default: () => [] },
@@ -54,6 +55,8 @@ const inputStripRightText = computed(() => {
   void chromeStore.llmSettings;
   return inputStripRight();
 });
+
+const workerStrip = computed(() => workerStripText());
 
 const inputStripLeftText = computed(() => {
   if (props.cancelling) return "正在取消…";
@@ -152,6 +155,7 @@ function onKeydown(e) {
       <div class="chat__composer-card">
         <div class="chat__composer-meta">
           <div class="chat__composer-meta-left">
+            <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
             <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
             <ComposerToolbar
               :thinking-supported="thinkingSupported"

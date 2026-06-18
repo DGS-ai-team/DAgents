@@ -59,6 +59,16 @@ import {
   resetStatusLines,
 } from "./stores/statusLines.js";
 import { resetToolStream } from "./stores/toolStream.js";
+import {
+  onChildCreated,
+  onChildFinished,
+  resetRemoteWorkers,
+  resetPeerInvokeInflight,
+  setChildAwaitingApproval,
+  noteToolCallForWorkers,
+  noteToolResultForWorkers,
+  syncChildAgentsFromApi,
+} from "./stores/remoteWorkers.js";
 import { runSlashCommand } from "./utils/commands.js";
 import { approvalItemDisplayName } from "./utils/format.js";
 
@@ -97,6 +107,7 @@ async function activateSessionStream() {
   if (sessionStore.sessionId !== prev || !streamHandle.value) {
     restartStream();
   }
+  await syncChildAgentsFromApi();
 }
 
 async function refreshMeta() {
@@ -139,11 +150,13 @@ function handleEvent(ev) {
     case "tool_call":
       markTurnContent();
       finishWaitingStatuses();
+      noteToolCallForWorkers(ev.data);
       upsertToolCallFromSSE(ev.data);
       break;
     case "tool_result":
       markTurnContent();
       finishWaitingStatuses();
+      noteToolResultForWorkers(ev.data);
       applyToolResult(ev.data);
       break;
     case "usage":
@@ -164,6 +177,8 @@ function handleEvent(ev) {
         finishTurn();
         sessionStore.statusLine = `回合结束 (${ev.data.finish_reason || "stop"})`;
         resetToolStream();
+        resetPeerInvokeInflight();
+        syncChildAgentsFromApi();
       }
       refreshContextTokens();
       break;
@@ -172,6 +187,7 @@ function handleEvent(ev) {
       finalizeReasoning();
       finishWaitingStatuses();
       enqueueHitl({ kind: "approval", data: ev.data });
+      if (ev.data?.child_session_id) setChildAwaitingApproval(ev.data.child_session_id, true);
       if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
       chromeStore.hitlQueueLen = hitlStore.queue.length;
       hitlStore.busy = false;
@@ -186,8 +202,12 @@ function handleEvent(ev) {
       hitlStore.busy = false;
       break;
     case "temporary_agent_created":
+      onChildCreated(ev.data);
+      addSystem(formatChildLifecycle(ev.type, ev.data));
+      break;
     case "temporary_agent_completed":
     case "temporary_agent_cancelled":
+      onChildFinished(ev.data?.child_session_id);
       addSystem(formatChildLifecycle(ev.type, ev.data));
       break;
     case "context_compression_blocking":
@@ -261,6 +281,7 @@ async function submitHitlApproval(approveAll) {
       });
     }
     dequeueHitl();
+    if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
     chromeStore.hitlQueueLen = hitlStore.queue.length;
     hitlStore.busy = false;
     beginSubmit();
@@ -282,6 +303,7 @@ async function submitHitlOne(callId, approve) {
   try {
     await api.submitResume(sessionStore.sessionId, resume);
     dequeueHitl();
+    if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
     chromeStore.hitlQueueLen = hitlStore.queue.length;
     hitlStore.busy = false;
     beginSubmit();
@@ -309,6 +331,7 @@ async function submitHitlUserInfo(text) {
   try {
     await api.submitResume(sessionStore.sessionId, resume);
     dequeueHitl();
+    if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
     chromeStore.hitlQueueLen = hitlStore.queue.length;
     hitlStore.busy = false;
     hitlSelected.value = 0;
@@ -423,6 +446,7 @@ async function createNewSession() {
   resetUsageStrip();
   resetStatusLines();
   resetToolStream();
+  resetRemoteWorkers();
   resetEventTracking();
   clearHitl();
   restartStream();
@@ -441,11 +465,13 @@ async function switchSession(id) {
     clearTranscript();
     resetStatusLines();
     resetToolStream();
+    resetRemoteWorkers();
     resetEventTracking();
     resetUsageStrip();
     addSystem(`已切换 session: ${sessionStore.sessionId}`);
   }
   refreshContextTokens();
+  await syncChildAgentsFromApi();
   sessionPanelRef.value?.refresh?.();
 }
 

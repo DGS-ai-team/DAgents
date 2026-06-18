@@ -83,6 +83,13 @@ ui:
   enabled: true   # false 时不挂载 /ui/
 ```
 
+## 功能（v0.4.0）
+
+- **双栏工作台**：主聊天 + Runtime（会话、审批、工具执行气泡）。
+- **远程工作者条**：输入框上方显示工作中子 Agent / 对端 Agent 数量（SSE + `listChildAgents`）。
+- **`read_file` 预览**：按扩展名渲染 Markdown、HTML、JSON、CSV、代码高亮或纯文本。
+- **HITL**：内联工具审批，与终端 Client 共用 resume 流程。
+
 ## API
 
 复用 Node 现有 `/v1` HTTP/SSE，封装见 `frontend/src/api/node.js`。

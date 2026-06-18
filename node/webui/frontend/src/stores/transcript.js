@@ -202,6 +202,15 @@ export function applyToolResult(data) {
     data: { ...data, duration_seconds: elapsed },
     startedAt: idx >= 0 ? transcriptStore.entries[idx].startedAt : undefined,
   };
+  if (idx >= 0 && transcriptStore.entries[idx].kind === "tool_call") {
+    const prev = transcriptStore.entries[idx];
+    row.data = {
+      ...row.data,
+      arguments: prev.data?.arguments,
+      raw_arguments: prev.data?.raw_arguments,
+      summary: prev.summary || prev.data?.summary,
+    };
+  }
   if (idx >= 0) transcriptStore.entries[idx] = row;
   else transcriptStore.entries.push(row);
   if (callId) forgetToolBlock(callId);

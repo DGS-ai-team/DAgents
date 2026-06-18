@@ -51,7 +51,7 @@
 
 ```http
 GET /health
-→ { "status": "ok", "agent_id": "...", "version": "0.3.9" }
+→ { "status": "ok", "agent_id": "...", "version": "0.4.0" }
 
 GET /v1/agent/info
 → { "agent_id", "expose_to_peers", "capabilities", "manage_registered" }

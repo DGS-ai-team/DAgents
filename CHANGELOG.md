@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-17
+
+**0.x 预览**：Go Node **内嵌 Web UI**（`/ui/`）随 `dagents-node` 发布；`dagents node` 打印可访问地址；Windows 后台 Node 与安装包打包链路修复；Client/Node 展示与 token 估算小改进。
+
+### 新增
+
+- **Node Web UI**：Vue 3 + Vite 工作台（双栏 Chat / Runtime），`go:embed` 挂载 `GET /ui/`；复用 `/v1` HTTP/SSE，与终端 Client 能力对齐；`ui.enabled` 默认 `true`。
+- **Web UI 体验**：输入框上方展示工作中 **子 Agent / 对端 Agent** 数量；`read_file` 结果按扩展名预览（Markdown / HTML / JSON / CSV / 代码 / 纯文本）。
+- **启动与发布**：`dagents node` 就绪后打印 `[dagents] Web UI: http://127.0.0.1:<port>/ui/`；CI / Release / `manual-package` 在 `go build` 前构建 Web UI 并跑 Vitest。
+- **Client / Node**：文件工具支持 **绝对路径**；TUI **usage 累计**；A2A 工具行展示 **对端 Agent 名**。
+- **Token 估算**：抽取共享 DeepSeek estimate，Node / Client 调用方统一。
+
+### 变更
+
+- **打包**：`agent-card.example.json` / `agent-card.example.ops.json` 打入本地助手 bundle 与 Windows 安装包；`webui-url.{bat,sh}` 供启动脚本解析 `listen.port`。
+
+### 修复
+
+- **Windows 后台 Node**：`Start-Process` 脱离控制台，关闭终端后进程不被 kill；`Program Files` 等含空格安装路径下正确启动。
+- **Windows 配置路径**：后台启动传相对 `config.yaml`（单字符串 `-config` 引号），避免路径被截断。
+- **Web UI 地址显示**：`webui-url.bat` 仅在 `listen:` 段解析数字 `port`；`dagents.cmd` 不再用 `for /f` 截断含冒号的 URL。
+
+（Git **tag**：`v0.4.0`。）
+
 ## [0.3.9] - 2026-06-16
 
 **0.x 预览**：A2A **HITL 中继**全链路（Manage 四段式状态机 + caller TUI 展示 + callee inbox 续跑）；双 Client 对齐「`from` 对端标识」与审批后不等 `tool_result`；配套单测与 Docker 验证脚本。

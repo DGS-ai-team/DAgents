@@ -3,6 +3,9 @@ import { computed } from "vue";
 import { formatToolCallLine, formatToolResultDisplay, formatToolElapsed } from "../utils/format.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import { statusStore } from "../stores/statusLines.js";
+import { isReadFileTool } from "../utils/readFilePreview.js";
+import { parseToolArguments } from "../utils/toolCalls.js";
+import ReadFileResultPreview from "./ReadFileResultPreview.vue";
 
 const props = defineProps({
   entry: { type: Object, required: true },
@@ -22,6 +25,14 @@ const displayName = computed(() => {
 });
 const resultDetail = computed(() => resultDisplay.value?.detail || "");
 const codePreview = computed(() => props.entry.codePreview || "");
+const toolName = computed(() => String(props.entry.data?.tool_name || props.entry.data?.name || "").trim());
+const readFilePath = computed(() => {
+  const args = parseToolArguments(props.entry.data?.arguments ?? props.entry.data?.raw_arguments);
+  return String(args.path || args.file_path || "").trim();
+});
+const showReadFilePreview = computed(
+  () => isResult.value && !rejected.value && isReadFileTool(toolName.value) && !!resultDetail.value && !props.verbose,
+);
 const elapsedLive = computed(() => {
   void statusStore.tick;
   if (!isCall.value || !props.entry.partial || !props.entry.startedAt) return "";
@@ -56,7 +67,15 @@ const statusText = computed(() => {
           </span>
         </div>
         <div v-if="isCall" class="tool-exec-bubble__summary">{{ formatToolCallLine(entry) }}</div>
-        <pre v-if="isResult && resultDetail && !verbose" class="tool-exec-bubble__code tool-exec-bubble__result-detail">{{ resultDetail }}</pre>
+        <ReadFileResultPreview
+          v-if="showReadFilePreview"
+          :path="readFilePath"
+          :content="resultDetail"
+        />
+        <pre
+          v-else-if="isResult && resultDetail && !verbose"
+          class="tool-exec-bubble__code tool-exec-bubble__result-detail"
+        >{{ resultDetail }}</pre>
         <pre v-if="isCall && codePreview && !verbose" class="tool-exec-bubble__code">{{ codePreview }}</pre>
         <details v-if="verbose" class="tool-exec-bubble__details">
           <summary>查看详情</summary>

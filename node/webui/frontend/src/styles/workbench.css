@@ -1621,6 +1621,17 @@ input {
   font-size: 11.5px;
 }
 
+.chat__worker-strip {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-accent, #0284c7);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
 .chat__input-strip-right {
   flex: 0 0 auto;
   max-width: 55%;
