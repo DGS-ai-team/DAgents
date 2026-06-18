@@ -239,7 +239,7 @@ func TestManualFireSkipsCmdGate(t *testing.T) {
 	sched := NewScheduler(store, sub, 5)
 	gate := &stubCmdGate{ok: false}
 	sched.SetCmdGate(gate)
-	record, err := sched.FireTrigger(def.TriggerID, "agent_tool", nil, false)
+	record, err := sched.FireTrigger(def.TriggerID, "agent_tool", nil, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
@@ -65,7 +66,7 @@ func testOrchestrator(t *testing.T, hub *stream.Hub, client llm.Client) *Orchest
 	t.Helper()
 	reg := testRegistry(t)
 	pol, _ := policy.LoadFile("")
-	return NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, logx.Discard())
+	return NewOrchestrator("a1", t.TempDir(), hub, client, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 }
 
 func TestRunMessageTurn(t *testing.T) {
@@ -114,7 +115,7 @@ func TestRunMessageTurnToolLoop(t *testing.T) {
 	ctx := context.Background()
 	_, _ = reg.Execute(ctx, "write_file", `{"path":"hello.txt","content":"file-body"}`)
 
-	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{EnableTools: true}, reg, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, logx.Discard())
+	orch := NewOrchestrator("a1", t.TempDir(), hub, &llm.MockClient{EnableTools: true}, reg, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
@@ -256,15 +257,20 @@ resumeApproval:
 func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	reg := testRegistry(t)
-	orch := NewOrchestrator("a1", t.TempDir(), hub, alwaysToolMock{}, reg, nil, SkillAccess{}, 2, nil, nil, logx.Discard())
+	hookCfg := hooks.RuntimeConfig{
+		Duplicate:  hooks.DuplicateConfig{Enabled: false, WindowSeconds: 1},
+		ToolResult: hooks.DefaultToolResultConfig(t.TempDir()),
+	}
+	orch := NewOrchestrator("a1", t.TempDir(), hub, alwaysToolMock{}, reg, nil, SkillAccess{}, 2, nil, nil, hookCfg, logx.Discard())
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
 	done := make(chan struct{})
+	var turnErr error
 	go func() {
 		defer close(done)
 		var history []llm.Message
-		_, _, _ = orch.RunMessageTurn(context.Background(), "sess-1", &history, "loop", nil, 0)
+		_, _, turnErr = orch.RunMessageTurn(context.Background(), "sess-1", &history, "loop", nil, 0)
 	}()
 
 	deadline := time.After(3 * time.Second)
@@ -279,13 +285,19 @@ func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 				}
 				gotError = true
 			case "done":
+				if reason, _ := ev.Data["finish_reason"].(string); reason != "error" {
+					t.Fatalf("done finish_reason = %q, want error", reason)
+				}
 				gotDone = true
 			}
 		case <-deadline:
-			t.Fatalf("timeout error=%v done=%v", gotError, gotDone)
+			t.Fatalf("timeout error=%v done=%v turnErr=%v", gotError, gotDone, turnErr)
 		}
 	}
 	<-done
+	if turnErr == nil || !strings.Contains(turnErr.Error(), "tool loop limit exceeded") {
+		t.Fatalf("RunMessageTurn err = %v, want tool loop limit exceeded", turnErr)
+	}
 }
 
 func TestRunMessageTurnMultiToolParallelOrder(t *testing.T) {
@@ -307,7 +319,7 @@ func TestRunMessageTurnMultiToolParallelOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch := NewOrchestrator("a1", root, hub, &dualReadFileMock{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, logx.Discard())
+	orch := NewOrchestrator("a1", root, hub, &dualReadFileMock{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 
 	var history []llm.Message
 	pending, _, err := orch.RunMessageTurn(ctx, "sess-1", &history, "读两个文件", nil, 0)
@@ -361,6 +373,10 @@ func (m *dualReadFileMock) CompleteText(context.Context, llm.CompleteRequest) (s
 	return "", nil
 }
 
+func (m *dualReadFileMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 func TestBuildUserInformationPayload(t *testing.T) {
 	tc := llm.ToolCall{
 		ID:   "call-1",
@@ -403,6 +419,10 @@ func (m *userInfoMock) CompleteText(context.Context, llm.CompleteRequest) (strin
 	return "", nil
 }
 
+func (m *userInfoMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 type bashApprovalMock struct{ calls int }
 
 func (m *bashApprovalMock) StreamChat(ctx context.Context, req llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
@@ -426,6 +446,10 @@ func (m *bashApprovalMock) CompleteText(context.Context, llm.CompleteRequest) (s
 	return "", nil
 }
 
+func (m *bashApprovalMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 type alwaysToolMock struct{}
 
 func (alwaysToolMock) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler) (llm.ChatResult, error) {
@@ -446,6 +470,10 @@ func (alwaysToolMock) CompleteText(context.Context, llm.CompleteRequest) (string
 	return "", nil
 }
 
+func (alwaysToolMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 type blockingMock struct{}
 
 func (b *blockingMock) StreamChat(ctx context.Context, _ llm.ChatRequest, _ llm.StreamHandler) (llm.ChatResult, error) {
@@ -457,6 +485,10 @@ func (b *blockingMock) CompleteText(context.Context, llm.CompleteRequest) (strin
 	return "", nil
 }
 
+func (b *blockingMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 type errMock struct{ msg string }
 
 func (e *errMock) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler) (llm.ChatResult, error) {
@@ -465,6 +497,10 @@ func (e *errMock) StreamChat(context.Context, llm.ChatRequest, llm.StreamHandler
 
 func (e *errMock) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
 	return "", fmt.Errorf("%s", e.msg)
+}
+
+func (e *errMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
 }
 
 func TestRunMessageTurnCancelled(t *testing.T) {
@@ -500,6 +536,63 @@ func TestRunMessageTurnCancelled(t *testing.T) {
 	if finish != "cancelled" {
 		t.Fatalf("finish_reason = %q", finish)
 	}
+}
+
+func TestRunMessageTurnCancelledPersistsPartialAssistant(t *testing.T) {
+	hub := stream.NewHub(16, logx.Discard())
+	orch := testOrchestrator(t, hub, &partialCancelMock{
+		content:   "partial answer",
+		reasoning: "partial think",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var history []llm.Message
+	go func() {
+		defer close(done)
+		_, _, _ = orch.RunMessageTurn(ctx, "sess-1", &history, "hi", nil, 0)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+	if len(history) != 2 {
+		t.Fatalf("history = %+v", history)
+	}
+	assistant := history[1]
+	if assistant.Role != "assistant" || assistant.Content != "partial answer" {
+		t.Fatalf("assistant = %+v", assistant)
+	}
+	if assistant.ReasoningContent != "partial think" {
+		t.Fatalf("reasoning_content = %q", assistant.ReasoningContent)
+	}
+}
+
+type partialCancelMock struct {
+	content   string
+	reasoning string
+	toolCalls []llm.ToolCall
+}
+
+func (m *partialCancelMock) StreamChat(ctx context.Context, _ llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	if handler.OnDelta != nil && m.content != "" {
+		handler.OnDelta(m.content)
+	}
+	if handler.OnReasoningDelta != nil && m.reasoning != "" {
+		handler.OnReasoningDelta(m.reasoning)
+	}
+	<-ctx.Done()
+	return llm.ChatResult{
+		Content:          m.content,
+		ReasoningContent: m.reasoning,
+		ToolCalls:        append([]llm.ToolCall(nil), m.toolCalls...),
+	}, ctx.Err()
+}
+
+func (m *partialCancelMock) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+
+func (m *partialCancelMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
 }
 
 func TestRunMessageTurnLLMError(t *testing.T) {

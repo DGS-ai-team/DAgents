@@ -68,10 +68,7 @@ func (m *model) invalidateHITLForUserMessage() {
 	}
 	m.resetHITLQueue()
 	m.resetHITLState()
-}
-
-func (m *model) pendingHITLCount() int {
-	return len(m.hitlQueue)
+	m.relayoutIfKnown()
 }
 
 // showNextHITLIfIdle 在空闲时展示队首 HITL（不阻塞 SSE）。
@@ -80,6 +77,8 @@ func (m *model) showNextHITLIfIdle() {
 		if m.mode == modeApproval || m.mode == modeUserInfo {
 			m.resetHITLState()
 		}
+		// 退出审批/询问后须重算 viewport，否则仍保留审批面板高度，输入栏会上移留白。
+		m.relayoutIfKnown()
 		return
 	}
 	if m.mode == modeApproval || m.mode == modeUserInfo {
@@ -91,9 +90,12 @@ func (m *model) showNextHITLIfIdle() {
 		m.initApprovalState(head.data)
 		m.hitlPrompt = clihitl.FormatApprovalPrompt(head.data)
 		m.mode = modeApproval
-		if clihitl.IsTemporaryAgentApproval(head.data) {
+		switch {
+		case clihitl.IsA2ARelayHITL(head.data):
+			m.statusLine = "A2A 对端等待你审批（y/n）…"
+		case clihitl.IsTemporaryAgentApproval(head.data):
 			m.statusLine = "子任务等待审批…"
-		} else {
+		default:
 			m.statusLine = "等待审批…"
 		}
 	case hitlPendingUserInfo:
@@ -111,8 +113,19 @@ func (m *model) showNextHITLIfIdle() {
 		} else {
 			m.input.Placeholder = "> 输入回答后 Enter 提交, Esc 取消"
 		}
-		m.statusLine = "等待用户回答…"
+		if clihitl.IsA2ARelayHITL(head.data) {
+			m.statusLine = "A2A 对端等待你的回答…"
+		} else {
+			m.statusLine = "等待用户回答…"
+		}
 	default:
+	}
+	m.relayoutIfKnown()
+}
+
+func (m *model) relayoutIfKnown() {
+	if m.termWidth > 0 && m.termHeight > 0 {
+		m.applySize(m.termWidth, m.termHeight)
 	}
 }
 
@@ -172,6 +185,10 @@ func (m *model) cmdSubmitResume(resume map[string]any) tea.Cmd {
 }
 
 func (m *model) finishApprovalInteraction(resume map[string]any, statusLine string) (tea.Model, tea.Cmd) {
+	hitlData := m.hitlData
+	if clihitl.IsA2ARelayHITL(hitlData) {
+		m.finalizeA2ARelayToolBlocks(hitlData, resume)
+	}
 	m.popHITLQueueHead()
 	m.resetHITLState()
 	m.statusLine = statusLine

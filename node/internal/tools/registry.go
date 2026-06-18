@@ -1,45 +1,43 @@
-// Package tools 提供 Node 本地工具 registry 与执行器（N3：bash/fs）。
 package tools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
+	"sync"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
-// FunctionDef 为 OpenAI function tool 定义。
-type FunctionDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
-}
-
-// ToolDef 为 OpenAI tools 数组项。
-type ToolDef struct {
-	Type     string      `json:"type"`
-	Function FunctionDef `json:"function"`
-}
-
 // Registry 注册内置工具并在 FS_ROOT 沙箱内执行。
 type Registry struct {
-	fsRoot       string
-	bashTimeout  int
-	bgJobs       *backgroundJobRegistry
-	triggerStore *triggers.Store
-	triggerSched *triggers.Scheduler
-	agentID      string
-	handlers     map[string]handler
+	fsRoot              string
+	bashTimeout         int
+	shellOutputEncoding string
+	fileEncoding        string
+	bashCompress        BashCompressConfig
+	compressMu          sync.Mutex
+	bashCompressStats   map[string]*OutputCompressStats
+	bgJobs              *backgroundJobRegistry
+	triggerStore        *triggers.Store
+	triggerSched        *triggers.Scheduler
+	manageClient        *a2aclient.Client
+	a2aCallerHITL       a2aclient.A2ACallerHITLHandler
+	compliancePeer      string
+	agentID             string
+	skillsCatalogHolder
+	enabledOnly         map[string]struct{}
+	handlers            map[string]handler
+	pathEncMu           sync.Mutex
+	pathEncCache        map[string]pathEncodingEntry
 }
 
-type handler func(ctx context.Context, args json.RawMessage) (string, error)
-
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。
-func NewRegistry(fsRoot string, bashTimeoutSeconds int) (*Registry, error) {
+// encodings[0]=tools.bash_output_encoding，encodings[1]=tools.file_encoding；空串表示按平台/shell 自动选择。
+func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*Registry, error) {
 	root, err := resolveFSRoot(fsRoot)
 	if err != nil {
 		return nil, err
@@ -47,11 +45,22 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int) (*Registry, error) {
 	if bashTimeoutSeconds <= 0 {
 		bashTimeoutSeconds = 30
 	}
+	shellEnc := ""
+	fileEnc := ""
+	if len(encodings) > 0 {
+		shellEnc = strings.TrimSpace(encodings[0])
+	}
+	if len(encodings) > 1 {
+		fileEnc = strings.TrimSpace(encodings[1])
+	}
 	r := &Registry{
-		fsRoot:      root,
-		bashTimeout: bashTimeoutSeconds,
-		bgJobs:      newBackgroundJobRegistry(),
-		handlers:    make(map[string]handler),
+		fsRoot:              root,
+		bashTimeout:         bashTimeoutSeconds,
+		shellOutputEncoding: shellEnc,
+		fileEncoding:        fileEnc,
+		bashCompress:        DefaultBashCompressConfig(),
+		bgJobs:              newBackgroundJobRegistry(),
+		handlers:            make(map[string]handler),
 	}
 	r.registerBuiltins()
 	return r, nil
@@ -62,7 +71,9 @@ func (r *Registry) Definitions() []ToolDef {
 	base := []ToolDef{
 		readFileToolDef(),
 		writeFileToolDef(),
-		searchFileToolDef(),
+		globFilesToolDef(),
+		grepFileToolDef(),
+		grepFilesToolDef(),
 		searchReplaceToolDef(),
 		bashRunToolDef(),
 		backgroundJobStatusToolDef(),
@@ -76,9 +87,12 @@ func (r *Registry) Definitions() []ToolDef {
 		triggerCreateToolDef(),
 		triggerUpdateToolDef(),
 		triggerDeleteToolDef(),
-		triggerFireToolDef(),
 	}
-	return append(base, childAgentToolDefs()...)
+	if r.manageClient != nil {
+		base = append(base, manageA2AToolDefs()...)
+	}
+	base = append(base, childAgentToolDefs()...)
+	return r.enrichDefinitions(r.filterToolDefs(base))
 }
 
 // Execute 按名称 dispatch 工具；未知工具返回 error 文本。
@@ -93,6 +107,9 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 func (r *Registry) registerBuiltins() {
 	r.handlers["read_file"] = r.execReadFile
 	r.handlers["write_file"] = r.execWriteFile
+	r.handlers["glob_files"] = r.execGlobFiles
+	r.handlers["grep_file"] = r.execGrepFile
+	r.handlers["grep_files"] = r.execGrepFiles
 	r.handlers["search_file"] = r.execSearchFile
 	r.handlers["search_replace"] = r.execSearchReplace
 	r.handlers["bash_run"] = r.execBashRun
@@ -112,49 +129,5 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["trigger_create"] = r.execTriggerCreate
 	r.handlers["trigger_update"] = r.execTriggerUpdate
 	r.handlers["trigger_delete"] = r.execTriggerDelete
-	r.handlers["trigger_fire"] = r.execTriggerFire
 	r.RegisterChildAgentToolStubs()
-}
-
-func resolveFSRoot(fsRoot string) (string, error) {
-	root := strings.TrimSpace(fsRoot)
-	if root == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("fs_root empty and getwd failed: %w", err)
-		}
-		root = wd
-	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
-		return "", fmt.Errorf("create fs_root: %w", err)
-	}
-	return abs, nil
-}
-
-func (r *Registry) resolvePath(rel string) (string, error) {
-	rel = strings.TrimSpace(rel)
-	if rel == "" {
-		return "", fmt.Errorf("path is required")
-	}
-	if filepath.IsAbs(rel) {
-		return "", fmt.Errorf("absolute path not allowed: %s", rel)
-	}
-	clean := filepath.Clean(rel)
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("path escapes fs_root: %s", rel)
-	}
-	full := filepath.Join(r.fsRoot, clean)
-	abs, err := filepath.Abs(full)
-	if err != nil {
-		return "", err
-	}
-	root := r.fsRoot
-	if !strings.HasPrefix(abs, root+string(os.PathSeparator)) && abs != root {
-		return "", fmt.Errorf("path escapes fs_root: %s", rel)
-	}
-	return abs, nil
 }

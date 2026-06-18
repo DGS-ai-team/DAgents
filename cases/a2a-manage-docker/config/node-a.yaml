@@ -1,0 +1,43 @@
+# Node A — 合规助手（A2A 被调方）
+agent_id: node-a
+
+listen:
+  host: 0.0.0.0
+  port: 18765
+
+local:
+  endpoint: http://node-a:18765
+
+expose_to_peers: true
+
+fs_root: /workspace/.runtime
+
+llm:
+  provider: openai
+  base_url: ${LLM_API_BASE}
+  model: ${LLM_MODEL}
+  api_key_env: LLM_API_KEY
+  mock: true
+  max_tool_loops: 8
+
+manage:
+  enabled: true
+  url: http://manage:8020
+  registration:
+    base_url: http://node-a:18765
+    interval_seconds: 15
+    ttl_seconds: 45
+    team: a2a-lab
+  a2a:
+    enabled: true
+    inbox_wait_seconds: 5
+    inbox_poll_seconds: 10
+
+triggers:
+  enabled: false
+
+child_agents:
+  enabled: false
+
+log:
+  level: info

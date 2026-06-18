@@ -7,6 +7,7 @@ type Executor interface {
 	Definitions() []ToolDef
 	Execute(ctx context.Context, name, arguments string) (string, error)
 	StartBackground(ctx context.Context, sessionID, toolName, toolCallID, cleanedArgs string) (string, error)
+	TakeBashCompressStatsForCall(toolCallID string) map[string]any
 }
 
 // Ensure Registry implements Executor.

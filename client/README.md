@@ -53,13 +53,23 @@ go run ./client/cmd/dagents-client chat "你好"
 | `/switch <id>` | 切换 session |
 | `/new` | 新建 session |
 | `/clear` | 清空对话上下文 |
-| `/cancel` | 取消在途 turn（不退出 TUI） |
-| `/context` | 只读 context 视图（Esc 返回，full 模式） |
+| `/context` | 只读 context 视图（含 system_prompt；Esc 返回，full 模式） |
+| `/policy` | 工具/shell 策略管理（Esc 返回，full 模式） |
+| `/triggers` | 查看已配置触发器（full 模式） |
+| `/compress` | 手动触发一次阻塞压缩 |
 | `/skill` | 列出 skills；`/skill load\|unload NAME` |
+| `/children` | 子 Agent 列表（full 模式） |
 | `/history [n\|all]` | 查看最近输出（plain 模式） |
 | `/tools verbose\|brief` | tool 输出展开/折叠 |
-| `/reasoning on\|off` | 运行时切换推理流显示（也可用 `--show-reasoning` 启动） |
+| `/tools expand\|collapse` | 展开/收起最近 tool 块（full 模式） |
+| `/reasoning on\|off` | 运行时切换推理流显示 |
 | `/quit` | 退出 |
+
+**取消 turn**：流式输出中难以输入斜杠命令，请用 **`Esc`**（调用 `POST .../cancel`）。
+
+**命令输出**：full 模式下 `/status`、`/sessions`、`/skill`、`/help`、`/children` 以结构化 **system panel** 展示（分区标题、键值对齐、当前 session / 已加载 skill 高亮）。
+
+**滚动**：默认贴底跟随新输出；在 transcript 区 **滚轮上滚** 或按 **PgUp**（输入框为空时 **↑**）可固定阅读位置，流式输出与审批等待期间不会被拽回底部；滚回底部或 **发送消息** 后恢复跟随。
 
 SSE 断线后会按 `Last-Event-ID` 自动重连。
 

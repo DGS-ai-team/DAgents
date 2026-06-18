@@ -1,0 +1,131 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Go Node",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/node/cmd/dagents-node",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Node: run (terminal)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "go run ./node/cmd/dagents-node -config packaging/agent-client/config.example.yaml",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Web UI: Vite dev",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/node/webui/frontend",
+      "env": {
+        "DAGENTS_NODE_URL": "http://127.0.0.1:18765"
+      }
+    },
+    {
+      "name": "Web UI: Chrome (Vite)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173/ui/",
+      "webRoot": "${workspaceFolder}/node/webui/frontend/src"
+    },
+    {
+      "name": "Web UI: Chrome (Node embed)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:18765/ui/",
+      "webRoot": "${workspaceFolder}/node/webui/frontend/src"
+    },
+    {
+      "name": "Go Client: tui",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/client/cmd/dagents-client",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml",
+        "tui"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Go Client: tui --plain",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/client/cmd/dagents-client",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml",
+        "tui",
+        "--plain"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Go Client: probe",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/client/cmd/dagents-client",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml",
+        "probe"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python Client: chat",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.cli.main",
+      "args": [
+        "chat",
+        "--config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Go: Node + Client TUI",
+      "configurations": ["Go Node", "Go Client: tui"],
+      "stopAll": true
+    },
+    {
+      "name": "Python: Node + Client chat",
+      "configurations": ["Go Node", "Python Client: chat"],
+      "stopAll": true
+    },
+    {
+      "name": "Web UI: Node + Vite",
+      "configurations": ["Node: run (terminal)", "Web UI: Vite dev", "Web UI: Chrome (Vite)"],
+      "stopAll": true
+    },
+    {
+      "name": "Web UI: Node + 内嵌 UI",
+      "configurations": ["Node: run (terminal)", "Web UI: Chrome (Node embed)"],
+      "stopAll": true
+    }
+  ]
+}

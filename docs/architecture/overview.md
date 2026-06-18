@@ -1,6 +1,8 @@
 # 架构总览
 
-DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python 侧保留 **Textual TUI Client**（`app/cli/`）与 **Register Center**（`register_center/`）。
+> **已收敛至项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md) · [handbook/README.md](../handbook/README.md)
+
+DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python 侧保留 **Textual TUI Client**（`app/cli/`）与 **Manage 控制面**（`manage/`）。
 
 ## 决策树
 
@@ -10,18 +12,17 @@ DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python �
          入口：go run ./node/cmd/dagents-node
                dagents chat / dagents-client tui
 
-需要 Agent 登记 / A2A 中继（Register Center）？
-  └─ 是 → python run_register_center.py（默认 :8010）
-         文档：register_center/README.md
+需要 Agent 登记 / 跨 Agent 协作？
+  └─ **python run_manage.py**（默认 :8020）或 Docker Manage → `manage/README.md`
 ```
 
 | 维度 | Go 本地助手栈 | Python 辅助组件 |
 |------|---------------|-----------------|
 | **Agent 运行时** | **`node/`（Go）** | 无（已移除 Python FastAPI Agent API） |
 | **终端 Client** | Textual（`app/cli/`）+ Go TUI（`client/`） | — |
-| **配置** | `packaging/agent-client/config.yaml` | Register Center 环境变量 |
-| **会话持久化** | Node SQLite（`data_dir/sessions.db`） | — |
-| **A2A 控制面** | — | Register Center relay/broadcast |
+| **配置** | `packaging/agent-client/config.yaml` | Manage 环境变量 / Docker compose |
+| **会话持久化** | Node SQLite（`.runtime/memory/sessions.db`） | — |
+| **A2A 控制面** | Manage（Registry + Task inbox） | — |
 
 ## 文档索引
 
@@ -31,7 +32,7 @@ DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python �
 | 本地助手联调 | [local-assistant.md](./local-assistant.md) |
 | Agent Node HTTP/SSE | [agent-node-api.md](./agent-node-api.md) |
 | 同包配置与安装 | [client-packaging.md](./client-packaging.md) |
-| Register Center | [../../register_center/README.md](../../register_center/README.md) |
+| Manage | [../../manage/README.md](../../manage/README.md) |
 | 三组件远期模型 | [../design/three-component-model.md](../design/three-component-model.md) |
 | AC 实施状态 | [../design/agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md) |
 

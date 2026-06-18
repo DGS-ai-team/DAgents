@@ -7,9 +7,13 @@ from app.cli.api_client import StreamEvent
 from app.cli.approval import build_all_approved_decision, build_approval_resume, extract_tool_approval_requests
 from app.cli.child_agent import (
     ChildAgentTracker,
+    ChildLifecycleSuppress,
+    EVENT_TEMPORARY_AGENT_COMPLETED,
     approval_queue_key,
     format_child_agents_list,
     format_child_lifecycle_line,
+    format_temporary_agent_tool_title,
+    parse_temporary_agent_tool_result,
     should_skip_child_runtime_display,
 )
 from app.cli.render import TranscriptKind
@@ -39,6 +43,117 @@ class ChildAgentScopeTests(unittest.TestCase):
         )
         self.assertIn("临时 Agent 已创建", line)
         self.assertIn("scan logs", line)
+
+    def test_format_child_lifecycle_completed_uses_summary(self) -> None:
+        line = format_child_lifecycle_line(
+            "temporary_agent_completed",
+            {
+                "child_session_id": "child-044064da5881",
+                "status": "completed",
+                "summary": "# 东莞天气\n\n晴 25°C",
+            },
+        )
+        self.assertIn("临时 Agent 已结束", line)
+        self.assertIn("东莞天气", line)
+        self.assertNotIn("\\n", line)
+
+    def test_format_temporary_agent_tool_title_wait(self) -> None:
+        title = format_temporary_agent_tool_title(
+            "wait_temporary_agents",
+            {"child_session_ids": ["child-a", "child-b"], "timeout_seconds": 60},
+        )
+        self.assertIn("2 个临时 Agent", title)
+        self.assertIn("60s", title)
+
+    def test_parse_wait_temporary_agents_result(self) -> None:
+        content = (
+            '{"timed_out":false,"results":['
+            '{"child_session_id":"child-a","status":"completed","summary":"# 东莞天气","turn_count":1,"artifacts":[]},'
+            '{"child_session_id":"child-b","status":"completed","summary":"# 深圳天气","turn_count":1,"artifacts":[]}'
+            "]}"
+        )
+        summary, detail = parse_temporary_agent_tool_result("wait_temporary_agents", content)
+        self.assertIn("2/2", summary)
+        self.assertIn("东莞天气", detail)
+        self.assertIn("深圳天气", detail)
+        self.assertNotIn("{", detail)
+
+    def test_lifecycle_suppress_after_wait_tool_result(self) -> None:
+        suppress = ChildLifecycleSuppress()
+        suppress.note_tool_call(
+            {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "wait_temporary_agents",
+                            "arguments": '{"child_session_ids":["child-a","child-b"]}',
+                        }
+                    }
+                ]
+            }
+        )
+        self.assertTrue(
+            suppress.should_suppress_lifecycle("child-a", EVENT_TEMPORARY_AGENT_COMPLETED)
+        )
+        content = (
+            '{"timed_out":false,"results":['
+            '{"child_session_id":"child-a","status":"completed","summary":"done","turn_count":1,"artifacts":[]},'
+            '{"child_session_id":"child-b","status":"completed","summary":"done2","turn_count":1,"artifacts":[]}'
+            "]}"
+        )
+        suppress.note_tool_result("wait_temporary_agents", content)
+        self.assertTrue(
+            suppress.should_suppress_lifecycle("child-a", EVENT_TEMPORARY_AGENT_COMPLETED)
+        )
+
+    async def test_wait_tool_result_suppresses_completed_lifecycle_line(self) -> None:
+        controller = SessionController(
+            api_base="http://test",
+            session_id="parent",
+            show_reasoning=False,
+        )
+        controller.session_id = "parent"
+        updates: list = []
+        controller.on_transcript(lambda update: updates.append(update))
+        controller._child_tracker.note_tool_call(
+            {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "wait_temporary_agents",
+                            "arguments": '{"child_session_ids":["child-a"]}',
+                        }
+                    }
+                ]
+            }
+        )
+        await controller._handle_stream_event(
+            _event(
+                "tool_result",
+                data={
+                    "tool_name": "wait_temporary_agents",
+                    "content": (
+                        '{"timed_out":false,"results":['
+                        '{"child_session_id":"child-a","status":"completed","summary":"done","turn_count":1,"artifacts":[]}'
+                        "]}"
+                    ),
+                },
+            ),
+        )
+        await controller._handle_stream_event(
+            _event(
+                EVENT_TEMPORARY_AGENT_COMPLETED,
+                data={
+                    "child_session_id": "child-a",
+                    "status": "completed",
+                    "summary": "done",
+                },
+            ),
+        )
+        lifecycle_lines = [
+            u.text for u in updates if u.kind == TranscriptKind.LINE and "临时 Agent 已结束" in u.text
+        ]
+        self.assertEqual(lifecycle_lines, [])
 
     def test_build_approval_resume_injects_child_routing(self) -> None:
         data = {"child_session_id": "child-1", "approval_id": "ap-1"}

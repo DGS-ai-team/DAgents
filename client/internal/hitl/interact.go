@@ -104,6 +104,10 @@ func resolveApproval(ctx context.Context, interact *Interact, data map[string]an
 	if interact != nil && interact.PromptApproval != nil {
 		return interact.PromptApproval(ctx, data)
 	}
+	items := ExtractToolApprovals(data)
+	if HasTriggerSessionApprovalItems(items) {
+		return resolveTriggerSessionApprovalPlain(data, items)
+	}
 	prompt := FormatApprovalPrompt(data)
 	fmt.Fprintf(os.Stderr, "\n--- 工具审批 ---\n%s\n", prompt)
 	approve, err := promptYesNo(os.Stdin, "是否批准执行？(y/N): ")
@@ -111,6 +115,67 @@ func resolveApproval(ctx context.Context, interact *Interact, data map[string]an
 		return nil, err
 	}
 	return BuildApprovalResume(data, approve), nil
+}
+
+func resolveTriggerSessionApprovalPlain(data map[string]any, items []ToolApprovalItem) (map[string]any, error) {
+	options := TriggerSessionOptions()
+	decided := make(map[string]string)
+	rejected := make(map[string]bool)
+	for {
+		current := triggerSessionCurrentItemPlain(items, decided, rejected)
+		if current == nil {
+			break
+		}
+		fmt.Fprintf(os.Stderr, "\n--- 工具审批 ---\n%s (%s)\n", ToolDisplayPlain(*current), current.CallID)
+		for i, opt := range options {
+			fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, opt.Label)
+		}
+		fmt.Fprint(os.Stderr, "请选择 (1-4, y=同会话同意, n=拒绝): ")
+		line, err := readLine(os.Stdin)
+		if err != nil {
+			return nil, err
+		}
+		line = strings.ToLower(strings.TrimSpace(line))
+		if line == "y" || line == "yes" {
+			return BuildTriggerSessionQuickResume(data, items, true), nil
+		}
+		if line == "n" || line == "no" {
+			return BuildTriggerSessionQuickResume(data, items, false), nil
+		}
+		idx := 0
+		if _, err := fmt.Sscanf(line, "%d", &idx); err != nil || idx < 1 || idx > len(options) {
+			fmt.Fprintln(os.Stderr, "无效选择，请重试")
+			continue
+		}
+		opt := options[idx-1]
+		if strings.TrimSpace(opt.Target) == "" {
+			rejected[current.CallID] = true
+		} else {
+			decided[current.CallID] = opt.Target
+		}
+	}
+	return BuildTriggerSessionApprovalResume(data, items, decided, rejected), nil
+}
+
+func triggerSessionCurrentItemPlain(items []ToolApprovalItem, decided map[string]string, rejected map[string]bool) *ToolApprovalItem {
+	for i := range items {
+		it := items[i]
+		if !IsTriggerSessionApprovalItem(it) {
+			continue
+		}
+		if rejected[it.CallID] {
+			continue
+		}
+		if _, ok := decided[it.CallID]; ok {
+			continue
+		}
+		return &items[i]
+	}
+	return nil
+}
+
+func ToolDisplayPlain(it ToolApprovalItem) string {
+	return strings.TrimSpace(it.Name)
 }
 
 func resolveUserInformation(ctx context.Context, interact *Interact, data map[string]any) (map[string]any, error) {

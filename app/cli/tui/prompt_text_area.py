@@ -31,8 +31,25 @@ class PromptTextArea(TextArea):
         if event.key == "escape":
             event.stop()
             event.prevent_default()
-            cancel = getattr(self.app, "_cancel_current_turn", None)
+            app = self.app
+            if getattr(app, "_context_mode", False):
+                exit_ctx = getattr(app, "_exit_context_view", None)
+                if callable(exit_ctx):
+                    exit_ctx()
+                return
+            if getattr(app, "_policy_view", None) is not None and app._policy_view.mode:
+                exit_policy = getattr(app, "_exit_policy_view", None)
+                if callable(exit_policy):
+                    exit_policy()
+                return
+            cancel = getattr(app, "_cancel_current_turn", None)
             if callable(cancel):
                 cancel()
             return
         await super()._on_key(event)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        app = self.app
+        notify = getattr(app, "_on_policy_filter_changed", None)
+        if callable(notify):
+            notify()

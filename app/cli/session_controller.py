@@ -17,6 +17,7 @@ from app.cli.child_agent import (
     approval_queue_key,
     child_session_id_from_data,
     format_child_lifecycle_line,
+    is_a2a_relay_hitl,
     should_skip_child_runtime_display,
 )
 from app.cli.user_information import (
@@ -41,6 +42,8 @@ from app.cli.render import (
     format_tool_result,
     format_user_information_required,
     parse_usage_strip,
+    parse_usage_round,
+    accumulate_usage_strip,
 )
 
 TranscriptCallback = Callable[[TranscriptUpdate], None]
@@ -110,6 +113,7 @@ class SessionController:
         self._token_refresh_task: asyncio.Task[None] | None = None # 上下文Token刷新任务
         self._logger = get_session_controller_logger()
         self._resume_submit_seq = 0
+        self._llm_info: dict[str, Any] = {}
 
     def _event_seq(self, event: StreamEvent) -> int:
         """从 SSE id 或 envelope.seq 解析事件序号。"""
@@ -165,12 +169,34 @@ class SessionController:
     def sse_connected(self) -> bool:
         return self._sse_connected
 
+    @property
+    def awaiting_user_turn(self) -> bool:
+        return self._awaiting_user_turn
+
+    @property
+    def llm_info(self) -> dict[str, Any]:
+        return dict(self._llm_info)
+
+    async def patch_llm_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
+        """PATCH /v1/llm/settings 并更新本地缓存。"""
+        assert self._client is not None
+        result = await self._client.patch_llm_settings(patch)
+        if isinstance(result, dict):
+            self._llm_info = result
+        return result
+
     async def start(self) -> None:
         """连接 Agent Node 并启动 SSE pump 与 render 循环。"""
         self._client = DAgentsApiClient(self.api_base)
         # 检查后端健康状态
         if not await self._client.health():
             raise RuntimeError(f"node health check failed: {self.api_base}/health")
+        try:
+            info = await self._client.get_agent_info()
+            llm = info.get("llm")
+            self._llm_info = llm if isinstance(llm, dict) else {}
+        except Exception:
+            self._llm_info = {}
         self._sse_ready.clear()
         # 创建会话
         self.session_id = await self._client.create_session(self.initial_session_id)
@@ -269,6 +295,35 @@ class SessionController:
         assert self._client is not None
         return await self._client.list_sessions()
 
+    async def switch_session(self, requested_id: str | None = None) -> str:
+        """切换当前 session 并重连 SSE（live 订阅新 session）。"""
+        assert self._client is not None
+        if self._stream_task is not None:
+            self._stream_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._stream_task
+            self._stream_task = None
+        self._drain_event_queue()
+        old_id = self.session_id
+        new_id = await self._client.create_session(requested_id)
+        self.session_id = new_id
+        self._logger.info("session switched old=%s new=%s", old_id, new_id)
+        self._reset_session_local_state()
+        self._sse_ready.clear()
+        self._sse_connected = False
+        self._stream_task = asyncio.create_task(self._pump_stream())
+        try:
+            await asyncio.wait_for(self._sse_ready.wait(), timeout=15.0)
+        except TimeoutError as exc:
+            raise RuntimeError("SSE subscription timed out after session switch") from exc
+        self._emit_status()
+        self._schedule_context_token_refresh()
+        return new_id
+
+    def set_show_reasoning(self, enabled: bool) -> None:
+        """运行时开关 reasoning 流展示（默认由 --show-reasoning 初始化）。"""
+        self.show_reasoning = enabled
+
     async def get_context(self) -> dict[str, Any]:
         """查询当前 session 的 context 摘要。
 
@@ -282,6 +337,32 @@ class SessionController:
         """
         assert self._client is not None
         return await self._client.get_session_context(self.session_id)
+
+    async def list_triggers(self) -> dict[str, Any]:
+        """查询 Agent 已配置的触发器列表（GET /v1/triggers）。"""
+        assert self._client is not None
+        return await self._client.list_triggers()
+
+    async def get_policy(self, *, shell: str = "") -> dict[str, Any]:
+        assert self._client is not None
+        return await self._client.get_policy(shell=shell)
+
+    async def update_tool_policy(self, updates: list[dict[str, str]]) -> None:
+        assert self._client is not None
+        await self._client.update_tool_policy(updates)
+
+    async def update_shell_policy(self, shell_type: str, updates: list[dict[str, str]]) -> None:
+        assert self._client is not None
+        await self._client.update_shell_policy(shell_type, updates)
+
+    async def compress_context(self) -> dict[str, Any]:
+        """手动触发一次阻塞压缩（POST /v1/sessions/{session_id}/compress）。"""
+        assert self._client is not None
+        result = await self._client.compress_session_context(self.session_id)
+        tokens = result.get("messages_total_tokens")
+        if isinstance(tokens, int) and tokens >= 0:
+            self._messages_total_tokens = tokens
+        return result
 
     async def cancel_current_turn(self) -> dict[str, Any]:
         """取消当前 session 的在途 turn，并解除本地用户轮次等待。
@@ -593,12 +674,13 @@ class SessionController:
                 self._emit_transcript(format_assistant_delta(content))
                 self._assistant_line_open = True
         elif event_type == "reasoning":
+            # 始终下发 REASONING_DELTA，供 TUI 展示 thinking 等待态；正文由 show_reasoning 控制（对齐 Go TUI）。
             content = str(data.get("content") or "")
-            if content:
-                self._ensure_assistant_end()
-                self._emit_transcript(format_reasoning(content))
+            self._ensure_assistant_end()
+            self._emit_transcript(format_reasoning(content))
         elif event_type == "tool_call":
             self._ensure_assistant_end()
+            self._child_tracker.note_tool_call(data)
             formatted = format_tool_call(data)
             if formatted is not None:
                 self._emit_transcript(formatted)
@@ -610,9 +692,17 @@ class SessionController:
             self._enqueue_hitl(PendingHITL(kind="user_information", data=data))
         elif event_type == "tool_result":
             self._ensure_assistant_end()
+            self._child_tracker.note_tool_result(
+                str(data.get("tool_name") or ""),
+                str(data.get("content") or ""),
+            )
             self._emit_transcript(format_tool_result(data))
         elif event_type == "usage":
-            self._usage_strip = parse_usage_strip(data)
+            self._usage_strip = accumulate_usage_strip(
+                self._usage_strip,
+                parse_usage_round(data),
+            )
+            self._emit_transcript(TranscriptUpdate(kind=TranscriptKind.USAGE, data=data))
             self._emit_child_strip()
         elif event_type in {"context_compression_blocking", "context_compression_silent"}:
             self._ensure_assistant_end()
@@ -686,7 +776,21 @@ class SessionController:
                 self._child_tracker.set_awaiting_approval(child_id, True)
                 self._emit_child_strip()
         self._hitl_queue.append(item)
+        if is_a2a_relay_hitl(item.data):
+            self._release_turn_wait_for_a2a_relay(item.data)
         self._notify_hitl_pending()
+
+    def _release_turn_wait_for_a2a_relay(self, data: dict[str, Any]) -> None:
+        """agent_invoke 同步等待期间对端 HITL 中继：释放 turn 等待以便 TUI 处理审批/询问。"""
+        if not self._awaiting_user_turn:
+            return
+        self._awaiting_user_turn = False
+        self._user_turn_done.set()
+        self._logger.info(
+            "a2a relay hitl released turn wait session_id=%s task_id=%s",
+            self.session_id,
+            str(data.get("a2a_task_id") or ""),
+        )
 
     def _drop_hitl_queue_for_user_interrupt(self) -> None:
         """新用户消息会打断 server pending HITL；本地队列必须同步清空。"""
@@ -698,6 +802,26 @@ class SessionController:
         self._emit_child_strip()
         self._notify_hitl_pending()
 
+    def _drain_event_queue(self) -> None:
+        while True:
+            try:
+                self._events.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+    def _reset_session_local_state(self) -> None:
+        """切换 session 后重置 turn / HITL / 子 Agent 等本地状态。"""
+        self.reset_child_state()
+        self._awaiting_user_turn = False
+        self._submit_pending_marker = False
+        self._user_turn_started = False
+        self._user_turn_done.set()
+        self._assistant_line_open = False
+        self._messages_total_tokens = None
+        self._usage_strip = UsageStripSnapshot()
+        self._turn_seq_fence = 0
+        self._last_event_seq = 0
+
     def _handle_child_lifecycle(self, event_type: str, data: dict[str, Any]) -> None:
         """处理子 Agent 生命周期 SSE，写入系统行并更新 tracker。"""
         if event_type == "temporary_agent_created":
@@ -705,6 +829,9 @@ class SessionController:
         else:
             self._child_tracker.on_finished(child_session_id_from_data(data))
         self._emit_child_strip()
+        child_id = child_session_id_from_data(data)
+        if self._child_tracker.should_suppress_lifecycle(child_id, event_type):
+            return
         line = format_child_lifecycle_line(event_type, data)
         if line:
             self._emit_transcript(format_system_line(line))

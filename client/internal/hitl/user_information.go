@@ -145,7 +145,7 @@ func FormatUserInformationOptions(req *UserInformationRequest, selected map[stri
 	} else {
 		hint += "（单选）"
 	}
-	b.WriteString("\n" + hint)
+	fmt.Fprintf(&b, "\n%s", hint)
 	return strings.TrimRight(b.String(), "\n")
 }
 

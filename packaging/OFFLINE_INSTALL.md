@@ -31,7 +31,7 @@ cp .env.example .env
 python run_agent_api.py
 ```
 
-Register Center：`python run_register_center.py`。
+Manage 控制面：`python run_manage.py`（或 Docker，见 `packaging/manage/README.md`）。
 
 ## 使用其它 Python 版本
 

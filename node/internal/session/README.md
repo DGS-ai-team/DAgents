@@ -60,7 +60,7 @@ flowchart TB
 |-------------|----------|------|
 | `message` / 空 | `handleHumanMessage` | 新 user 消息；若有 pending HITL 先 `InterruptPending` |
 | `tool_result` | `handleToolResult` | 工具批执行后的续跑（`RunToolMessageTurn`） |
-| `async_tool_result` | `handleAsyncToolResult` | 后台 job 完成回灌 |
+| `async_tool_result` | `handleAsyncToolResult` | 后台 job 完成回灌；若已有 pending HITL 则仍写入 history 但**保留** pending（issue #25） |
 | `resume` | `handleResume` | HITL 审批 / `ask_user_information` 恢复 |
 
 生产路径下，orchestrator 工具步结束后通过 `SetToolResultEnqueuer` 入队 `tool_result`，**单步执行 + 队列续跑**（对齐 Python 语义）。测试可直接 `RunMessageTurn` 内联多步。
@@ -75,7 +75,7 @@ flowchart TB
 
 | 字段 | 作用 |
 |------|------|
-| `FSRoot` | 工具沙箱与 system prompt 中的工作区路径 |
+| `FSRoot` | 工具沙箱根目录（不在 system prompt 中暴露绝对路径；子目录约定见 prompt 与 tool schema） |
 | `MaxToolLoops` | 单条 human message 内工具循环上限（子 Agent 创建时用 `SpawnSpec.MaxTurns` 覆盖） |
 | `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与 prompt 元数据 |
 | `RuntimeDir` | `promptcontext.Reader` 根目录 |
@@ -90,6 +90,7 @@ flowchart TB
 |------|------|
 | `manager.go` | `Manager`、`TurnOptions`、会话 CRUD、入队、skills、上下文 API |
 | `runtime.go` | `runtime` 结构体、构造、`consumeLoop`、human/tool/resume 处理、持久化 |
+| `runtime_turn.go` | `runTurnStep` 单步 turn 脚手架 |
 | `runtime_child.go` | `newChildRuntime`、子 session 元数据、`tryCompleteChildIfIdle` |
 | `manager_child.go` | `SpawnChild` / `StopChild`、`childagent.Host`、子任务入队与 resume 路由 |
 | `context_view.go` | `ContextView`（`GET /context`）、token 粗算 |

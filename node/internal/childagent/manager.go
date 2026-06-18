@@ -43,6 +43,7 @@ type SpawnSpec struct {
 	ChildSessionID  string
 	ParentSessionID string
 	AllowedTools    []string
+	SkillNames      []string
 	MaxTurns        int
 	Purpose         string
 }
@@ -88,10 +89,10 @@ func NewManager(cfg Config, hub *stream.Hub, agentID string, logger *slog.Logger
 		cfg.DefaultWaitTimeoutSeconds = 300
 	}
 	return &Manager{
-		cfg:       cfg,
-		hub:       hub,
-		agentID:   agentID,
-		logger:    logx.OrDefault(logger),
+		cfg:               cfg,
+		hub:               hub,
+		agentID:           agentID,
+		logger:            logx.OrDefault(logger),
 		activeByID:        make(map[string]*ActiveAgent),
 		activeIDsByParent: make(map[string][]string),
 		childToParent:     make(map[string]string),
@@ -154,6 +155,7 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 		ChildSessionID:  childID,
 		ParentSessionID: parentSessionID,
 		AllowedTools:    allowed,
+		SkillNames:      append([]string(nil), input.SkillNames...),
 		MaxTurns:        input.MaxTurns,
 		Purpose:         input.Purpose,
 	}); err != nil {
@@ -200,6 +202,7 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 		"child_session_id": childID,
 		"status":           StatusActive,
 		"purpose":          input.Purpose,
+		"loaded_skills":    append([]string(nil), input.SkillNames...),
 		"expires_at":       expiresAt.Format(time.RFC3339),
 		"max_turns":        input.MaxTurns,
 	})
@@ -442,6 +445,7 @@ func (m *Manager) publishCreated(parentID string, agent *ActiveAgent, wait bool)
 		"child_session_id":  agent.ChildSessionID,
 		"parent_session_id": parentID,
 		"purpose":           agent.Purpose,
+		"loaded_skills":     append([]string(nil), agent.LoadedSkills...),
 		"status":            StatusActive,
 		"expires_at":        agent.ExpiresAt.Format(time.RFC3339),
 		"max_turns":         agent.MaxTurns,

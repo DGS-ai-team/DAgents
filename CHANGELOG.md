@@ -2,6 +2,607 @@
 
 本文档遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的条目风格；版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+## [0.4.0] - 2026-06-17
+
+**0.x 预览**：Go Node **内嵌 Web UI**（`/ui/`）随 `dagents-node` 发布；`dagents node` 打印可访问地址；Windows 后台 Node 与安装包打包链路修复；Client/Node 展示与 token 估算小改进。
+
+### 新增
+
+- **Node Web UI**：Vue 3 + Vite 工作台（双栏 Chat / Runtime），`go:embed` 挂载 `GET /ui/`；复用 `/v1` HTTP/SSE，与终端 Client 能力对齐；`ui.enabled` 默认 `true`。
+- **Web UI 体验**：输入框上方展示工作中 **子 Agent / 对端 Agent** 数量；`read_file` 结果按扩展名预览（Markdown / HTML / JSON / CSV / 代码 / 纯文本）。
+- **启动与发布**：`dagents node` 就绪后打印 `[dagents] Web UI: http://127.0.0.1:<port>/ui/`；CI / Release / `manual-package` 在 `go build` 前构建 Web UI 并跑 Vitest。
+- **Client / Node**：文件工具支持 **绝对路径**；TUI **usage 累计**；A2A 工具行展示 **对端 Agent 名**。
+- **Token 估算**：抽取共享 DeepSeek estimate，Node / Client 调用方统一。
+
+### 变更
+
+- **打包**：`agent-card.example.json` / `agent-card.example.ops.json` 打入本地助手 bundle 与 Windows 安装包；`webui-url.{bat,sh}` 供启动脚本解析 `listen.port`。
+
+### 修复
+
+- **Windows 后台 Node**：`Start-Process` 脱离控制台，关闭终端后进程不被 kill；`Program Files` 等含空格安装路径下正确启动。
+- **Windows 配置路径**：后台启动传相对 `config.yaml`（单字符串 `-config` 引号），避免路径被截断。
+- **Web UI 地址显示**：`webui-url.bat` 仅在 `listen:` 段解析数字 `port`；`dagents.cmd` 不再用 `for /f` 截断含冒号的 URL。
+
+（Git **tag**：`v0.4.0`。）
+
+## [0.3.9] - 2026-06-16
+
+**0.x 预览**：A2A **HITL 中继**全链路（Manage 四段式状态机 + caller TUI 展示 + callee inbox 续跑）；双 Client 对齐「`from` 对端标识」与审批后不等 `tool_result`；配套单测与 Docker 验证脚本。
+
+### 新增
+
+- **A2A HITL 中继（caller 侧）**：`agent_invoke` 识别 `awaiting_caller` → `caller_notify` / `WaitCallerHITL` / `caller_resume`；`A2ACallerHITLBridge` 向 caller session 推送 `approval_required` / `user_information_required`（含 `a2a_relay`、`a2a_peer_agent_*`）。
+- **A2A HITL 中继（callee 侧）**：`ComplianceExecutor` + `RunInboxTurn` 支持 `requires_input` 与 resume 多步；`encodeRequiresInputPayload` 携带对端 Agent 元数据。
+- **Client 展示**：Python / Go TUI 对 A2A 中继审批合成工具块（青色 `from <对端名>`）；审批提交后即终态，不等待本地 `tool_result`。
+- **案例脚本**：`cases/a2a-manage-docker/scripts/verify-bash-hitl.sh`（不经 TUI 验证 bash HITL 全链路）。
+- **单测**：Node session/manage/a2aclient、Go/Python Client、Manage store 的 A2A 审批 / user_information / 失败路径与边界用例。
+
+### 变更
+
+- **Inbox SSE 订阅**：`RunInboxTurn` 入队前 `Subscribe(afterSeq)`，避免 resume 时回放陈旧 `approval_required`；`done` 先于 HITL 事件时继续等待。
+- **Manage Task 状态**：`caller_notified` / `caller_responded` 与 `pending_caller_resume` 拉取后转 `processing`。
+- **Agent Card 示例**：`agent-card.example.json`（compliance 被调）与 `agent-card.example.ops.json`（ops 调用方）拆分说明。
+
+### 修复
+
+- **a2aclient**：同一 `requires_input` payload 不重复 `WaitCallerHITL`（`relayedHitlPayload` 去重）。
+- **Python TUI**：A2A 中继审批提交后释放 pending 计时动画，避免黄点一直等待 `tool_result`。
+
+（Git **tag**：`v0.3.9`。）
+
+## [0.3.8] - 2026-06-15
+
+**0.x 预览**：TUI **tool_call 流式**去重；Manage **离线 bundle** 与安装 **policy 覆盖**交互；**Agent Card 固定路径**；Manage Admin **移除 session 代理**；工具与通信参考文档。
+
+### 新增
+
+- **Manage 离线 bundle**：`scripts/ci/assemble_manage_bundle.sh` 产出 `dagents-manage-bundle-*.tar.gz`（镜像 + `import-image` / `restart` 脚本 + `docker-compose.offline.yml`）；Release CI 自动附加。
+- **安装 policy 交互**：Linux `install.sh`（`--overwrite-policy` / `--keep-policy` + TTY 询问）；Windows Inno Setup 安装时可选覆盖 `_seed/policy`。
+- **Agent Card 示例**：`packaging/agent-client/agent-card.example.json`；Node 工作目录固定 `./agent-card.json`（`manage.AgentCardFileName`）。
+- **文档**：[built-in-tools-reference.md](docs/built-in-tools-reference.md)（25 个内置工具全量参考）；[manage-communication.md](docs/manage-communication.md)（Manage / Node / Client 通信与数据面）。
+
+### 变更
+
+- **TUI tool_call 流式**：Full / REPL 共用 `ToolCallStreamState` partial upsert（对齐 call_id 迁移，避免重复行）。
+- **Manage 注册配置**：`manage.registration` 移除 `agent_card_path`、`name`、`description`；展示名与 A2A 语义 **仅以 Agent Card 为准**（`name` 空则回退 `agent_id`）。
+- **Manage Admin**：移除 `/v1/admin/nodes/.../sessions` 代理与 Console 远程 session UI（Node 会话仍由 Client 直连 Node）。
+- **工具 description**：长描述迁入各工具 schema；删除 `descriptions_shared.go`。
+- **Cases**：`a2a-manage-docker` / `centos7-feature-tour` README 与配置对齐 v0.3.8（Agent Card 路径、policy `write_file=rule` 信任链说明等）。
+
+### 修复
+
+- **`TestRunMessageTurnMaxToolLoops`**：显式关闭 duplicate hook 配置，避免与「工具轮次上限」断言冲突。
+
+（Git **tag**：`v0.3.8`。）
+
+## [0.3.7] - 2026-06-15
+
+**0.x 预览**：**skills 上下文成本**估算修正；双 TUI **思考内容**展示优化；Manage **离线安装**说明补全。
+
+### 变更
+
+- **skills catalog token 分项**：`skills_catalog_estimated_tokens` 仅反映 `load_skills` 工具 description 中的 catalog 元数据；新增 API 字段 **`skills_catalog_max_body_estimated_tokens`**（单 SKILL 正文上限）；TUI 膨胀告警取二者较大值。
+- **catalog 元数据注入路径**：可用 skills 列表经 `Registry.enrichDefinitions` 写入 `load_skills` description，不再拼入 system prompt 元数据段。
+- **思考内容展示（双 TUI）**：去掉 `[reasoning]` 前缀，浅灰圆点 + 浅灰正文；`/reasoning on|off` 仍控制是否展示推理流。
+
+### 修复
+
+- **`tools.Registry` × `skills` import**：`skillsCatalog` 字段迁至 `registry_enrich.go` 嵌入体，消除 gopls `missing metadata for import` 诊断。
+
+### 文档
+
+- **Manage 离线安装**：`manage/README.md` 与 `packaging/manage/README.md` 补充镜像导出/导入、`docker compose` 启动与健康检查步骤。
+
+（Git **tag**：`v0.3.7`。）
+
+## [0.3.6] - 2026-06-15
+
+**0.x 预览**：**工具链上下文成本**治理（WS1/3/5/6）：重复调用审批、超长 tool 结果落盘摘要、任务级度量；**移除 `trigger_fire`**。
+
+### 新增
+
+- **`hooks.duplicate_tool_call`**：`tool.before_each` 检测 60s 内同名同参重复调用，在 `rule`+`auto` 审批路径触发 HITL（继续 / 取消 / 强制继续）；详见 [tool-before-hook-duplicate-approval.md](docs/design/tool-before-hook-duplicate-approval.md)。
+- **`hooks.tool_result` spill**：`bash_run`、`read_file`、`grep_*`、`search_replace`、`glob_files`、`agent_invoke`、`agent_discover` 等超长结果落盘至 `{fs_root}/tool_outputs/...`，history 仅保留头尾摘要 + `read_file` 提示（默认 `spill_threshold_tokens: 12000`）。
+- **`tool_context_metrics`**：turn 结束时 SSE `done` 与日志输出 `tool_loops`、`spill_count`、`status_poll_count`、`history_result_tokens` 等（WS5 基础可观测）。
+- **FS 编码缓存**：`read_file` / `grep` 等探测编码后进程内缓存，减少错编码重读轮次。
+
+### 变更
+
+- **bash_run async 引导（WS1）**：超时降级后台 job 的 ACK 文案与自动回灌说明对齐；**不为 `background_job_status` 增加 long-poll**。
+- **`bash_run` schema**：移除 `run_in_background` 参数（async 由超时自动降级）。
+- **`tools.bash_compress`**：生产路径以 `tool_result` spill 为主；`max_output_chars` 仅保留兼容/测试 clip。
+
+### 移除
+
+- **`trigger_fire` 工具**（**breaking**）：Agent 侧仅保留 trigger CRUD；触发靠 **schedule 调度** 与 **HTTP fire API**（`node/internal/triggers/`）。
+
+### 文档
+
+- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增 [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) 与 [major-changes.md §2](docs/design/major-changes.md#2-工具链上下文成本优化已落地)。
+
+（Git **tag**：`v0.3.6`。）
+
+## [0.3.5] - 2026-06-15
+
+**0.x 预览**：system prompt 与 **bash_run** 工具描述优化，减少 LLM 路径/Shell 误用导致的重试。
+
+### 修复
+
+- **System prompt 工作区路径**：保留 `data/`、`memory/` 等子目录说明，但不再暴露 `FS_ROOT` 绝对路径，避免文件工具双重拼接（如 `.runtime/.runtime/...`）。
+- **bash_run 平台描述**：Windows 下明确默认 **PowerShell** 语法；非 Windows 明确 **bash**；减少 cmd 命令以 PowerShell 执行导致的失败重试。
+
+（Git **tag**：`v0.3.5`。）
+
+## [0.3.4] - 2026-06-12
+
+**0.x 预览**：上下文压缩与 **Prompt Cache** 对齐；user 消息 **name** 来源标识；**tool_call 流式展示**（双 TUI）；Chat Completions **`user_id=agent_id`**。
+
+### 新增
+
+- **上下文压缩 × Prompt Cache**：侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；M3 **silent 冷却**抑制重复侧车；`/last_compression` 与压缩 usage 展示；设计实录见 [major-changes.md](docs/design/major-changes.md)。
+- **User 消息 `name` 字段**：human / trigger / a2a_inbox / child_task / compression / async_tool / compression_sidecar，便于模型区分上下文来源（DeepSeek Chat API）。
+- **Tool call 流式展示**：LLM delta 阶段即推送 `partial: true` 的 tool_call SSE；Go / Python TUI 在工具名出现后展示 pending 块，arguments 边流边更新代码预览。
+- **LLM `user_id`**：每次 Chat Completions 请求附带 `user_id=agent_id`（DeepSeek 文档推荐，便于服务端观测与限流）。
+
+### 修复
+
+- **压缩死锁**：blocking 压缩与 turn 并发时的锁顺序问题。
+
+（Git **tag**：`v0.3.4`。）
+
+## [0.3.3] - 2026-06-11
+
+**0.x 预览**：DeepSeek **思考开关/强度** 运行时 API；双 TUI 顶栏展示模型、输入条展示 thinking；VS Code 调试配置。
+
+### 新增
+
+- **LLM 运行时 API**：`GET/PATCH /v1/llm/settings`；`GET /v1/agent/info` 嵌套 `llm`（model、thinking、reasoning_effort）；DeepSeek `thinking` + `reasoning_effort`（high/max）热更新。
+- **Client `/thinking`**：Go / Python TUI 与 REPL 调用 Node API 开关思考与调整强度（`/reasoning` 仍仅控制推理流**展示**）。
+- **TUI 状态展示**：顶栏右侧 **model**；输入框上方 usage **左侧** thinking 状态。
+- **开发调试**：`.vscode/launch.json` + `tasks.json`（Go/Python Client 与 Node 联调）。
+
+### 变更
+
+- `config.example.yaml` 补充 `llm.thinking` / `llm.reasoning_effort` 说明；欢迎 Panel 不再重复展示 model/thinking。
+
+（Git **tag**：`v0.3.3`。）
+
+## [0.3.2] - 2026-06-11
+
+### 修复
+
+- **升级/重装不覆盖用户数据**：Linux `install.sh` 与 Windows 安装包升级时始终更新 `bin/` 与启动脚本，`.runtime/` 改为**仅补缺失路径**（`cp -n` / Inno `onlyifdoesntexist`），保留已有 policy、skills、prompt_context、`memory/`、`history/`、`logs/` 等；Windows 升级前会先 `node shutdown`。
+
+（Git **tag**：`v0.3.2`。）
+
+## [0.3.1] - 2026-06-11
+
+**0.x 预览**：**Register Center 移除**，A2A 统一经 **Manage**；Console 迁 **Vue 3**；Go TUI 等待态与工具展示增强。
+
+### 新增
+
+- **Manage Console（Vue 3 + Vite）**：`manage/console/frontend/` 源码 + `build.sh`；Agent 目录、A2A Inbox、Node 抽屉（分组 / session / audit）。
+- **Manage discovery_group**：Registry PATCH 分组、Console 批量分配；`agent_discover` / `agent_invoke` **跨组校验**（须共享至少一个分组）。
+- **Go TUI 等待反馈**：prefilling / thinking 状态行（动画 + 秒数）、顶栏阶段提示、SSE 断开与长时间无响应告警；plain REPL 等待计时。
+
+### 变更
+
+- **Go TUI 工具展示**对齐 Python TUI：黄/绿/红圆点、pending 动画与耗时、`call_purpose` 标题、参数 `!r` 风格摘要。
+- **Manage Docker 镜像**多阶段构建（Node 阶段 `npm run build` Console）。
+- 开发栈 / CI / 打包入口：`run_dev_stack.py`、`dagents` 等改为启动 **Manage**（不再启动 Register Center）。
+
+### 移除
+
+- **`register_center/`** 及 `run_register_center.py`、RC 单测与 `dagents_register_center` 打包脚本（**breaking**）。A2A 登记与发现请使用 **Manage Registry**；旧 RC JSON 可经 Manage import 迁移（见 `manage/README.md`）。
+
+### 修复
+
+- **`dagents version`**：展示发版号与子组件版本（`VERSION` 文件、`dagents-cli` / `dagents-node` / `dagents-client version`）。
+
+（Git **tag**：`v0.3.1`。）
+
+## [0.3.0] - 2026-06-11
+
+**0.x 预览**：**Manage A2A（M2）** 与 **双 Node 联调案例** 落地；双 TUI 斜杠命令对齐；**Manage 官方 Docker 镜像**随 Release 发布。
+
+### 新增
+
+- **Manage A2A Task API（M2）**：`POST/GET /v1/a2a/tasks`、inbox long poll、ack/reply；Go Node **inbox poller** + **合规咨询 turn**（`ComplianceExecutor`）。
+- **Node A2A 工具**：`agent_invoke`、`agent_discover`；Manage 注册与 Agent Card 上报。
+- **案例 `cases/a2a-manage-docker/`**：Manage + 合规/运维双 Node Docker 栈与 TUI 联调说明。
+- **`packaging/manage/`**：Manage **Dockerfile**、`docker-compose`、`.env.example`；Release 附带 **`dagents-manage-<version>.tar.gz`** 镜像导出。
+- **Python TUI**：`/switch`、`/new`、`/reasoning on|off`；`/help` 中文化。
+- **Go TUI**：`/tools expand|collapse` 写入 help。
+
+### 变更
+
+- **双 TUI**：移除斜杠 **`/cancel`**（流式输出中难以输入；**Esc** 取消 turn 为主路径）。
+- **Go TUI**：移除 **`o`/`c` 单键** tool 展开/收起，避免无法输入含 `c`/`o` 的英文；改用 **`/tools expand|collapse`**。
+- **工具 registry**：按职责拆分 `tool_*.go` / `fs_*.go`；`call_purpose` 注入与 schema 整理。
+
+### 修复
+
+- **Go TUI**：工具审批结束后 **输入栏上移**（HITL 退出未 `relayout` viewport）。
+- **Python TUI**：`--show-reasoning` / `/reasoning` 实际过滤 reasoning SSE 事件。
+
+（Git **tag**：`v0.3.0`。）
+
+## [0.2.22] - 2026-06-11
+
+**0.x 预览**：Linux `install.sh` 重装/升级前自动停止旧 Node。
+
+### 修复
+
+- **Linux `install.sh`**：安装前若目标 `PREFIX` 下存在 `.runtime/node.pid`，优先 `dagents node shutdown` 停止旧进程，失败则按 pid 发 TERM/KILL，避免覆盖二进制时 Node 仍占用 `.runtime`。
+
+（Git **tag**：`v0.2.22`。）
+
+## [0.2.21] - 2026-06-11
+
+**0.x 预览**：Windows `dagents node` 与 Linux 对齐；TUI 行号方框与 transcript 控制符修复。
+
+### 变更
+
+- **Windows `dagents.cmd`**：`dagents node` 默认**后台**启动并等待 probe；新增 **`shutdown`/`restart`**、`--foreground`、`--no-wait`；写入 `.runtime\node.pid`；安装包快捷方式同步调整。
+
+### 修复
+
+- **`read_file` 行号**：由 `N\t` 改为空格对齐，避免 Windows TUI 将制表符显示为方框压住正文。
+- **Go TUI transcript**：展开 `\t`、剥离 C0 控制符（含 `\x1e`），修复消息行首方框遮挡文字。
+
+（Git **tag**：`v0.2.21`。）
+
+## [0.2.20] - 2026-06-11
+
+**0.x 预览**：Windows 文件工具 GBK 写盘、jsonl/html 可读、Go TUI `/context` 中文折行修复。
+
+### 新增
+
+- **FS 工具可读后缀**：`read_file` / `grep_*` / `search_replace` 等支持 **`.jsonl`**、**`.html`**。
+
+### 修复
+
+- **Windows `write_file` GBK 编码**：GBK 无法表示的 Unicode 时回退 **GB18030**，仍失败则按 rune 替换 `?`，避免 `rune not supported by encoding`。
+- **Go TUI `/context`**：`system_prompt` / `recent_messages` 折行改用显示宽度（`runewidth`），修复中文等多字节字符尾端乱码。
+
+（Git **tag**：`v0.2.20`。）
+
+## [0.2.19] - 2026-06-11
+
+**0.x 预览**：Linux `dagents` 启动与路径修复（任意目录执行、`set -u` 兼容）。
+
+### 修复
+
+- **Linux `dagents` 工作目录**：启动前 `cd` 到安装根（对齐 Windows `pushd`），`fs_root: ./.runtime` 从任意目录执行 `dagents node` 时读写正确的 `.runtime/`（含 `prompt_context/`、`memory/`）。
+- **Linux `dagents tui/chat`**：`set -u` 下无额外参数时不再展开空 `PARSED_ARGS` 数组（`unbound variable`）。
+
+（Git **tag**：`v0.2.19`。）
+
+## [0.2.18] - 2026-06-11
+
+**0.x 预览**：Manage 控制面 M0+M1、Register Center Phase 1、Go Node 自动注册与 Console 目录；Go TUI 体验与 Linux `dagents node` 生命周期增强。
+
+### 新增
+
+- **Manage 服务（M0+M1）**：新建 `manage/` 与 `run_manage.py`；Platform + Registry；**Console** `/console/` 展示已注册 Node 列表与状态。
+- **Go Node → Manage 自动注册**：`manage.enabled` 时周期 register/heartbeat/deregister；`manage.registration.base_url` 独立上报可达地址；Header `x-dagents-agent-id`；`discovery_group` 由 Manage **`PATCH /v1/registry/agents/{id}/groups`** 分配。
+- **Register Center Phase 1（P1.1–P1.3）**：扩展 Agent 登记模型（owner/team/tools/skills/risk_level 等）；派生 `online`/`offline`/`expired` 状态与 offline grace；admin 全局列表（分页/筛选）、`REGISTER_CENTER_TOKENS` 角色鉴权、`GET /v1/admin/audit` 与 `GET /v1/admin/a2a/recent`；relay/broadcast 仅投递 online Agent（离线 `409`）与 `X-DAgents-Trace-Id`。
+- **Agent Directory UI（P1.5）**：Register Center 内置 **`/ui/`** 只读目录页（筛选、分页、详情抽屉、A2A 摘要；token 经 sessionStorage 或 `?token=` 注入）。
+- **Go 全屏 TUI 体验增强**（`client/internal/tui/full/`、`shared/`）：
+  - **`/context` 可滚动**：viewport 渲染 + PgUp/PgDn/↑/↓；context 模式隐藏输入区；resize 不覆盖 context 内容。
+  - **启动欢迎面板**、状态栏 turn/审批提示、**`/context` 面板化**（`FormatSessionContextPanel`）、policy 决策档位着色。
+  - **工具结果键盘展开/收起**：`o`/`c`、`/tools expand`/`collapse`；`ToolBlockRegistry` + preview/detail 行折叠。
+  - **等待态行**：`prefilling` / `thinking` / `compression` 秒级刷新；流式 viewport **60ms debounce**。
+  - **工具执行耗时**：pending 占位行每秒刷新（如 `▶ 调用 bash(…) … 3s`）。
+  - **审批区动态高度**；无选项 **追问** 在输入框上方显示问题摘要。
+  - 退出时打印 **`dagents-client tui --session <id>`** 恢复提示（`/quit`、Ctrl+C）。
+- **Linux `dagents node` 生命周期**（`packaging/linux/dagents`）：
+  - **`dagents node`** 默认 **后台启动**并等待 probe 就绪；写入 `.runtime/node.pid`。
+  - **`dagents node shutdown`**（`stop`）与 **`dagents node restart`**。
+  - **`--foreground`** / **`--no-wait`**（兼容旧 `--background` 即发即走）。
+
+### 变更
+
+- **Manage Console**：未配置 token 时开放模式可直接浏览全部 Node；统计请求 `page_size` 上限对齐 API（200）。
+- **Go TUI 键盘优先**：help 与交互说明以键位为主；不新增鼠标点击类能力。
+- **`dagents node` 默认行为**：由前台 `exec` 改为后台 + 就绪探测；前台需显式 `--foreground`。
+
+### 修复
+
+- **Linux `dagents` 符号链接安装**：通过 `/usr/local/bin/dagents` 调用时正确解析 `DAGENTS_HOME`（修复 `bin/dagents-node` 路径落在 `BIN_DIR` 的问题）。
+
+（Git **tag**：`v0.2.18`。）
+
+## [0.2.17] - 2026-06-10
+
+**0.x 预览**：在 **v0.2.16** 基础上修复 **async 回灌清掉 pending HITL**，并为 **FS 文件工具** 增加磁盘编码支持。
+
+### 新增
+
+- **`tools.file_encoding`** 与 FS 工具可选 **`encoding`**（`utf-8` / `gbk` / `gb18030`）：`read_file`、`write_file`、`search_replace`、`grep_file`、`grep_files` 读写磁盘时按编码转码；默认 Windows→gbk，其它→utf-8；单次参数优先于 config。
+
+### 修复
+
+- **async 工具回灌保留 pending HITL**（[#25](https://github.com/DGS-ai-team/DAgents/issues/25)）：后台 job 完成时不再因 `applyStepOutcome` 清掉等待中的工具审批，避免 resume `409 no_pending_hitl`。
+
+（Git **tag**：`v0.2.17`。）
+
+## [0.2.16] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.15** 基础上新增 **策略（policy）API 与 TUI**、**trigger 会话目标审批** 与 **`/triggers` 命令**，并修复 **TUI 输入崩溃** 与 **Windows `--withnode` 启动**。
+
+### 新增
+
+- **`GET/PUT /v1/policy`**：工具与 shell（bash/cmd/powershell）策略读写；`policy` 包支持 ModeDeny、DecideTool、txt 存储与 Orchestrator 热更新。
+- **Go / Python TUI `/policy`**：查看与 `set` 子命令；分页展示工具与 shell 规则（Python `policy_view`）。
+- **Go / Python TUI `/triggers`**：列出调度 trigger 及下次执行时间。
+- **Trigger 会话目标**：审批 payload 可指定 `session_id`；HITL resume 与 `trigger_session` 贯通 Node / Client。
+
+### 变更
+
+- **System prompt**：精简 turn 构建逻辑与测试（`node/internal/turn/prompt.go`）。
+- **配置与 `fs_root`**：收敛默认沙箱路径说明；示例 `config.yaml` / `policy.example.yaml` 对齐。
+
+### 修复
+
+- **Python TUI 输入崩溃**：`PromptTextArea` 改用 `on_text_area_changed`，移除无效 `super()` 调用。
+- **Python TUI `/policy` Rich 报错**：Markdown 中 `[/]` 改为 `[ / ]` 避免被解析为标签。
+- **Windows `dagents chat --withnode`**：`-config` 参数顺序、`/D` 工作目录与失败时 probe / `node.err.log` 提示（`packaging/windows/dagents.cmd`）。
+- **Linux `dagents` probe**：健康检查参数顺序与 Windows 对齐。
+
+（Git **tag**：`v0.2.16`。）
+
+## [0.2.15] - 2026-06-10
+
+**0.x 预览**：在 **v0.2.14** 基础上修复 **Python TUI usage/滚动**、增强 **工具结果展开** 与 **Go TUI usage 展示**。
+
+### 修复
+
+- **Python TUI usage 折行**：assistant 完成态 usage 改用 Rich `Align.right` 独占一行，修复 `think 42` 等被 `overflow=fold` 拆开。
+- **Python TUI 滚轮崩溃**：移除 `on_mouse_scroll_*` + `event.widget.id`；改由 `TranscriptLog.watch_scroll_y` 维护 follow-tail。
+- **Python TUI USAGE 晚到**：`_apply_round_usage` retroactive 重写最近已完成 assistant 块（对齐 Go `ApplyRoundUsage`）。
+
+### 变更
+
+- **Python TUI 滚动跟随**：去掉 `_log_write_block` / `_write_assistant_block` 内冗余 follow-tail 兜底，统一由 `scroll_y` 监听驱动。
+- **Python TUI 工具结果展开**：展开时同时展示输入与输出（bash / search_replace / 通用工具）。
+- **Go TUI usage 展示**：transcript usage 独占一行右对齐；input strip 使用 `FormatInputStripLine`（runewidth 布局，窄屏截断左侧）。
+
+（Git **tag**：`v0.2.15`。）
+
+## [0.2.14] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.13** 基础上增强 **TUI 斜杠命令展示与滚动体验**，并新增 **CentOS 7 特性导览** 落地案例。
+
+### 新增
+
+- **`cases/centos7-feature-tour/`**：CentOS 7 容器 + 静态 Node；README 以 **TUI 输入/观察** 为主（Mock 无需 API Key）；`scripts/verify.sh` 供 CI/运维冒烟。
+
+### 变更
+
+- **Go 全屏 TUI 命令面板**：`/status`、`/sessions`、`/skill`、`/help`、`/children` 使用结构化 system panel（标题 + 分区/键值/高亮），不再把纯文本丢进 transcript。
+- **Go / Python TUI 滚动跟随**：显式 **`viewportFollowTail` / `_transcript_follow_tail`**；流式输出、审批等待、工具详情展开（Python 点击）时，用户上滚后不再被强制拽到底；滚回底部或发送消息恢复跟随。Go 支持 **PgUp/PgDn**、输入框为空时 **↑/↓**、鼠标滚轮；流式 **partial** 实时进 viewport。
+- **Python TUI 命令面板**：`/status`、`/session`（含 `/sessions` 别名）、`/skill`、`/help`、`/children` 使用 Rich **Panel** 边框展示。
+- **案例目录**：可复现场景迁至仓库根 **`cases/`**（索引仍链到 [`docs/cases/README.md`](docs/cases/README.md)）。
+
+（Git **tag**：`v0.2.14`。）
+
+## [0.2.13] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.12** 基础上取消发布包内置 OfficeCLI、对齐 **`fs_root` 默认沙箱**、精简工具输出，并增强 skills 与 TUI 工具展示。
+
+### 变更
+
+- **不再内置 OfficeCLI**：移除 Release 打包时的 `vendor_officecli.sh` 集成；新增 **[`packaging/runtime/RECOMMENDED_CLI_TOOLS.md`](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)** 推荐 CLI 清单（含 OfficeCLI 自行安装说明）。
+- **`fs_root` 默认为 `./.runtime`**：文件工具沙箱与运行时目录对齐；system prompt 工作区说明改为相对 FS_ROOT 的路径（`skills/`、`data/` 等）。
+- **`search_replace` 输出精简**：成功且单次单行替换仅返回元数据；多处或多行替换附限流局部预览；移除整文件逐行 diff。
+- **skills tool 结果精简**：`load_skills` / `unload_skills` / `clear_skills` 的 tool 结果 JSON 不再含 `available_skills`（仅 `action` + `loaded_skills`）。
+- **skills Catalog mtime 缓存**：`List()` 在各 `SKILL.md` 未变时复用内存列表，减少每步 prompt / `load_skills` 的重复读盘。
+- **工具 `call_purpose`**：内置工具 schema 注入 `call_purpose`；Go / Python TUI 与审批首行优先展示 `tool(purpose)` 短标题；执行前从 arguments 剥离该字段。
+- **`write-skill` 元数据**：修复 description 缺失时显示 `<nil>`；打包 skill 路径说明与 `fs_root` 默认对齐。
+
+（Git **tag**：`v0.2.13`。）
+
+## [0.2.12] - 2026-06-08
+
+**0.x 预览**：修复 **v0.2.11** Windows 发布包组装时 OfficeCLI skills 解压失败。
+
+### 修复
+
+- **`vendor_officecli.sh`**：解 skills  tarball 时一并提取根目录 **`SKILL.md`**（`skills/officecli/SKILL.md` 为 symlink）；复制 skills 时使用 **`cp -RL`** 展开 symlink，避免 Windows CI / zip 分发出现断链。
+
+（Git **tag**：`v0.2.12`。）
+
+## [0.2.11] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.10** 基础上增加 **手动压缩与 context 诊断**、**预编译包 Node 自启动**、**Windows 内置 OfficeCLI**，并改进 Go TUI 滚动体验。
+
+### 新增
+
+- **`POST /v1/sessions/{id}/compress`**：手动触发一次阻塞压缩（忽略 token 阈值）；turn 进行中返回 `409 turn_busy`。
+- **Go / Python TUI `/compress`**：调用上述 API；已有压缩任务进行中时展示 `in_progress` 及 `trigger_level` 等字段，不重复执行。
+- **`GET /v1/sessions/{id}/context`** 与 **`/context`**：响应/展示 **`system_prompt`**（与 turn 构建逻辑一致）。
+- **预编译包 Node 自启动**：Linux **`dagents`**、Windows **`dagents.cmd`** 支持 **`--withnode`**（Client 前探活并后台启动 Node）与 **`node --background`**（日志 `.runtime/logs/node.log`）。
+- **Windows 发布包内置 OfficeCLI**：[`scripts/ci/vendor_officecli.sh`](scripts/ci/vendor_officecli.sh) 打入 **`.runtime/scripts/officecli.exe`** 与 **`.runtime/skills/officecli*`**（上游 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**，AGPL-3.0）；Linux tarball **不含** OfficeCLI。
+- **`.runtime/scripts` 进 PATH**：Linux **`install.sh`** / systemd 服务、Windows 安装包，便于 Agent 与用户调用扩展 CLI。
+
+### 变更
+
+- **压缩协调器**：silent / blocking / 手动压缩共用 **`compressionTask`** 跟踪；手动压缩遇进行中任务返回 **`in_progress`**。
+- **Go 全屏 TUI**：transcript 上滚后新输出不再强制跳底；支持鼠标滚轮；用户发消息时仍 **`syncViewportFollow`** 贴底。
+
+### 修复
+
+- **`contextView` 死锁**：持 session 锁时调用 `SystemPromptForSession` 改为先 unlock 再构建 system prompt。
+- **Go TUI 窗口缩放**：resize 时保留 viewport 阅读位置（贴底时仍跟随）。
+
+（Git **tag**：`v0.2.11`。）
+
+## [0.2.10] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.9** 基础上完善 **skills 工具 schema 描述**，引导模型在匹配任务时主动调用 `load_skills`。
+
+### 变更
+
+- **`load_skills` / `unload_skills` / `clear_skills` 工具描述**：集中说明目录仅含元数据、任务匹配 description 时需先加载、整组替换与清空语义、与 `available_skills` 的名称对齐规则；用法不写进 system prompt，由工具 schema 承载。
+
+（Git **tag**：`v0.2.10`。）
+
+## [0.2.9] - 2026-06-07
+
+**0.x 预览**：在 **v0.2.8** 基础上修复 **打断工具后重复 tool 消息** 导致的 LLM 400。
+
+### 修复
+
+- **打断 pending 工具去重**：`InterruptPending` 与 `RepairUnrespondedToolCalls` 共用 `insertMissingToolResponsesAfterAssistant`，按 `tool_call_id` 跳过已有 tool 响应，避免同一 call 写入两条「用户需要补充信息，打断了工具执行。」后 LLM 报 `Messages with role 'tool' must be a response to a preceding message with 'tool_calls'`。
+- **idle cancel 清 pending**：`cancelTurn` 在 idle 下 repair 补写 tool 后清除 `pending`，防止后续用户消息再次 interrupt 重复补位。
+
+（Git **tag**：`v0.2.9`。）
+
+## [0.2.8] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.7** 基础上增强 **TUI 展示**、修复 **非法 tool 序列**、统一 **Skill 元数据格式**。
+
+### 新增
+
+- **assistant usage 右对齐**：Textual 与 Go 全屏 TUI 在末行放得下时同行右对齐，否则独占下一行仍右对齐；Go transcript 用 `\x1e` 分隔正文与 usage，展示层上色。
+- **消息圆点分色**：用户 / assistant / reasoning / 工具 / 状态等类型使用不同颜色圆点。
+- **非法 tool 序列修复**：`RepairUnrespondedToolCalls` 在 LLM 调用前、新 user 消息与 idle cancel 时补写 interrupted tool 结果，避免 `tool_calls` 后缺 tool 消息导致 400。
+- **Skill 标准 frontmatter**：`name` + `description`；目录下全部 `SKILL.md` 参与元数据扫描（移除 per-skill `enabled`）。
+
+### 变更
+
+- **多工具审批 UI**：仅当前待审工具展示代码详情；`bash(...)` 标题压平参数换行。
+- **工具等待耗时**：与 prefilling 一致按整数秒递增；审批结束后重置执行计时。
+- **Esc 取消 HITL**：审批 Esc 提交全拒绝 resume；用户询问 Esc 提交 `cancelled` resume（不再只清本地队列）。
+- **内置 `write-skill`**：SKILL.md 改为标准 `name` + `description` 示例。
+
+### 修复
+
+- 用户打断或取消后 history 尾部 assistant+tool_calls 无 tool 响应时，下轮 LLM 请求失败的问题。
+
+（Git **tag**：`v0.2.8`。）
+
+## [0.2.7] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.6** 基础上增加 **`bash_run` 输出压缩**、**tool/usage SSE 展示增强** 与 **双 TUI inline token 用量**。
+
+### 新增
+
+- **`bash_run` 输出压缩（P0）**：L1 ANSI/空行/重复行清洗 + rune 上限截断；配置项 `tools.bash_compress`（`enabled`、`max_output_chars`、`max_output_chars_stderr`）。
+- **压缩统计 SSE**：`tool_result` 附加 `output_compress_saved_pct` / `output_compress_raw_runes` / `output_compress_out_runes`（仅 bash 且有节省时）；Go / Textual 工具行展示 `· -N%`。
+- **usage 单轮 + turn 累计**：SSE `usage` 含顶层 turn 累计与 `round_*` 单轮字段、`llm_step`；input strip 展示 turn 累计；assistant 块末 inline 展示单轮用量（浅灰）。
+
+### 变更
+
+- **`bash_run` tool 正文精简**：`[BASH_RESULT] exit=N` + `--- STDOUT ---` / `--- STDERR ---`；压缩元数据不再写入 LLM context。
+- **Client**：`grep`/`bash` 工具行适配新输出格式；inline usage 仅挂在 assistant 后（不在 thinking/reasoning 后）。
+
+（Git **tag**：`v0.2.7`。）
+
+## [0.2.6] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.5** 基础上拆分 **文件发现** 与 **内容检索** 工具，降低 `search_file` 名实不符带来的模型误用。
+
+### 新增
+
+- **`glob_files`**：在 `directory` 下按 glob（含 `**` 递归）列举匹配路径，分页返回，不读文件内容。
+- **`grep_file`**：单文件行内容检索（正则/字面量、上下文、`index_offset` 翻页）；替代原 LLM 可见的 `search_file`。
+- **`grep_files`**：目录树内先 `glob_pattern` 筛文件再逐行检索，跨文件命中分页（`hit_offset` / `max_hits` / `max_files`）。
+- **共用实现**：`fs_glob.go`、`grep_shared.go`；glob 匹配依赖 `github.com/bmatcuk/doublestar/v4`。
+
+### 变更
+
+- **LLM 工具列表**：注册 `glob_files`、`grep_file`、`grep_files`；`search_file` 仍保留 handler 别名（兼容旧调用），不再出现在 `Definitions()`。
+- **子 Agent 默认工具**：`read_file`、`glob_files`、`grep_file`、`bash_run`；父 Agent 可下放列表含 `grep_files`。
+- **审批策略**：新只读工具默认 `never`（`policy` + `tool.approval.txt`）。
+- **工具描述**：各工具 `description` 仅描述自身能力，不交叉引用其它工具名。
+
+### 移除
+
+- **`search_file.go`**：逻辑并入 `grep_file` / `grep_shared`。
+
+（Git **tag**：`v0.2.6`。）
+
+## [0.2.5] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.4** 基础上收敛 **LLM 厂商适配**、**turn/session 模块边界** 与 **流式中断 history** 行为。
+
+### 新增
+
+- **`llm/messageutil.go`**：`CloneMessage`、`EstimateMessageTokens`（含 `reasoning_content`）、DeepSeek/JSONL payload 辅助。
+- **Turn 模块拆分**：`tool_router.go`（工具分流与执行）、`cancel_partial.go`（流式 cancel 部分 assistant 落库）、`history_write.go`（history 写入）。
+- **`session/runtime_turn.go`**：`runTurnStep` / `finishTurnIdle` 统一四路 handler 脚手架。
+- **包文档**：`llm/`、`store/`、`api/`、`queue/`、`stream/`、`hitl/` 的 `README.md`。
+
+### 变更
+
+- **`MessageAdapter`**：新增 `MarshalChatRequestMessages`；DeepSeek 出站序列化集中在 `provider_deepseek.go`；`openai.go` 不再按厂商名分支。
+- **DeepSeek**：带 `tool_calls` 的 assistant 允许空 `reasoning_content`（出站强制键存在）；不再从最近 assistant 继承 reasoning。
+- **Token 估算**：压缩触发与 `GET /context` 共用 `llm.EstimateMessageTokens`。
+- **JSONL**：`messageToJournalPayload` 委托 `llm.MessageToJournalPayload`。
+
+### 修复
+
+- **流式 cancel**：`persistCancelledStream` 保留已流式输出的 assistant；未响应 `tool_calls` 补 interrupted tool 消息，保证下轮合法序列。
+- **子 Agent 结算**：`finishTurnIdle` 在 `applyStepOutcome` 之后调用，修复 `tryCompleteChildIfIdle` 看不到最终 assistant 的时序问题。
+
+### 移除
+
+- 死代码：`hitl/waiter.go`、`session.handleMessage`、`provider` 未使用的 reasoning 继承 helper。
+
+（Git **tag**：`v0.2.5`。）
+
+## [0.2.4] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.3** 基础上增加 **LLM 厂商适配层**、**usage / reasoning token 统计**，并统一 **双 TUI transcript 排版**。
+
+### 新增
+
+- **LLM Provider 适配**（`node/internal/llm/`）：`llm.provider` 选择 `MessageAdapter`（`openai` / `deepseek`）；DeepSeek 自动注入 `thinking.enabled` 与 `reasoning_content` 出站校验；`RequestExtra` 合并进 Chat Completions 请求体。
+- **Usage 归一化**：`usage.go` 兼容 OpenAI `cached_tokens` 与 DeepSeek `prompt_cache_hit_tokens`；解析 `completion_tokens_details.reasoning_tokens`、顶层 `reasoning_tokens` 及 `completion_token_details` 别名；SSE `usage` 含 `prompt_cache_hit_rate` 与 `reasoning_tokens`。
+- **Turn 内 usage 累加**：工具循环多轮 LLM 调用在单条 user turn 内累加 token 统计后再发布 SSE。
+
+### 变更
+
+- **`reasoning_content` 收敛至 LLM 层**：history 不再做 assistant 规范化；由 provider adapter 在存储与出站前处理。
+- **双 TUI transcript**：圆点列统一为 Rich `Table.grid` 布局；prefilling/thinking、assistant↔tool、tool 批次↔下一段、human message 与上下文的空行规则一致化。
+- **配置示例**：`packaging/agent-client/config.example.yaml` 补充 `llm.provider` 说明。
+
+### 修复
+
+- **Go / Textual Client**：input strip 展示 cache hit 与 `· think N`（`reasoning_tokens`）；`completion_tokens_details` 嵌套字段兜底解析。
+- **Transcript 空白行**：流式 assistant 空 partial 不落行；`tool_result` 后不再重复插入空行；Go REPL/full 跳过空 assistant delta。
+
+（Git **tag**：`v0.2.4`。）
+
+## [0.2.3] - 2026-06-08
+
+**0.x 预览**：在 **v0.2.2** 基础上增加 **Windows 安装包**、**Linux 安装脚本**，并修复 **Windows GBK 环境下 shell 工具输出乱码**；强化子 Agent 提示词与双 TUI 展示。
+
+### 新增
+
+- **Windows 安装包（Release / manual-package）**：Inno Setup 生成 `dagents-local-assistant-windows-amd64-installer-*.exe`；包内 `dagents.cmd` 统一入口（`node` / `chat` / `tui` / `register-center`）。
+- **Linux 分发**：tar.gz 根目录含 **`dagents`** 启动脚本与 **`install.sh`**（用户级 `~/.local/share/dagents` 或系统级 `/opt/dagents`，配置 `PATH` / `DAGENTS_HOME`）。
+- **Shell 工具输出解码**：`config.yaml` → **`tools.bash_output_encoding`**（如 `gbk` / `utf-8`）；未配置时 Windows **cmd/powershell 默认 gbk**，**bash 默认 utf-8**，解码后以 UTF-8 交给 LLM。
+- **子 Agent**：Orchestrator 注入 system prompt builder；`create_temporary_agent` 支持 **`skill_names`** 预加载；子 runtime **`BuildChildSystemPrompt`** 含已加载 skill 正文。
+
+### 变更
+
+- **`.env.example`**：仅保留 Register Center 与 Python CLI 仍读取的项；Node/LLM 主配置在 **`config.yaml`**。
+- **双 TUI**：友好格式化 `wait_temporary_agents` 等工具结果；`wait_temporary_agents` 后抑制与工具结果重复的 `temporary_agent_completed` lifecycle 行。
+- **打包文档**：`packaging/linux/`、`packaging/windows/` 与 CI assemble 说明更新。
+
+### 修复
+
+- **Release CI（Windows）**：Inno Setup 编译时 Git Bash 将 `/DMyAppVersion=…` 误转为 `D:\…` 导致 `ISCC` 失败；改用 `//D` 前缀。
+- **Windows 中文环境**：`bash_run` 捕获 GBK 字节流时 Agent 此前收到乱码；现按配置/平台解码后再写入 `[BASH_RESULT]`。
+
+（Git **tag**：`v0.2.3`。）
+
 ## [0.2.2] - 2026-06-07
 
 **0.x 预览**：在 **v0.2.1** 代码基础上对齐 `/health` 与 Client 版本号为 **0.2.2**；**本版重点修复工具审批（HITL）相关缺陷**。

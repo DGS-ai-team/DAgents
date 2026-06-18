@@ -23,6 +23,7 @@ type CreateInput struct {
 	Task         string
 	Purpose      string
 	AllowedTools []string
+	SkillNames   []string
 	TTLSeconds   int
 	MaxTurns     int
 	Wait         bool
@@ -44,6 +45,7 @@ type ActiveAgent struct {
 	ParentSessionID string
 	Purpose         string
 	AllowedTools    []string
+	LoadedSkills    []string
 	Status          Status
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
@@ -62,6 +64,7 @@ func newActiveAgent(parentID string, input CreateInput, childID string, expiresA
 		ParentSessionID: parentID,
 		Purpose:         input.Purpose,
 		AllowedTools:    append([]string(nil), input.AllowedTools...),
+		LoadedSkills:    append([]string(nil), input.SkillNames...),
 		Status:          StatusCreating,
 		CreatedAt:       time.Now(),
 		ExpiresAt:       expiresAt,

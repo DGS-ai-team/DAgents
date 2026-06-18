@@ -20,24 +20,20 @@ const (
 	ToolClearSkills  = "clear_skills"
 )
 
-// defaultChildSystemPrefix 为临时 Agent 首条 user 消息的系统前缀（由父 Agent 在 task 中提供角色与约束）。
-const defaultChildSystemPrefix = "不要向用户追问。如果你只能完成部分任务，先完成部分任务，然后返回结果以及未完成任务的说明"
-
 // DefaultChildAllowedTools 在未指定 allowed_tools 时使用的默认工具集。
 func DefaultChildAllowedTools() []string {
-	return []string{"read_file", "search_file", "bash_run"}
+	return []string{"read_file", "glob_files", "grep_file", "bash_run"}
 }
 
-// FormatChildTask 将通用前缀与用户 task 合并为临时 Agent 首条 user 消息。
+// FormatChildTask 规范化临时 Agent 首条 user 任务正文（角色与边界由子 Agent system prompt 承载）。
 func FormatChildTask(task string) string {
-	task = strings.TrimSpace(task)
-	return strings.TrimSpace(defaultChildSystemPrefix + "\n\n任务：\n" + task)
+	return strings.TrimSpace(task)
 }
 
 // ParentDelegatableTools 父 Agent 可下放给临时 Agent 的工具名（不含 skills 系列）。
 func ParentDelegatableTools() []string {
 	return []string{
-		"read_file", "write_file", "search_file", "search_replace", "bash_run",
+		"read_file", "write_file", "glob_files", "grep_file", "grep_files", "search_replace", "bash_run",
 		"background_job_status", "background_job_cancel",
 	}
 }

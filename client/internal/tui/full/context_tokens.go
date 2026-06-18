@@ -14,8 +14,12 @@ type contextTokensSyncedMsg struct {
 	tokens int
 }
 
-func (m *model) resetUsageStrip() {
+func (m *model) clearUsageStrip() {
 	m.usageStrip = tuishared.UsageStripSnapshot{}
+}
+
+func (m *model) applyUsageFromSSE(data map[string]any) {
+	tuishared.ApplyUsageRoundToStrip(&m.usageStrip, data)
 }
 
 func (m *model) scheduleContextTokenRefresh() {

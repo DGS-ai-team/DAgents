@@ -1,6 +1,7 @@
 package session
 
 import (
+	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
@@ -17,22 +18,30 @@ type ContextView struct {
 	QueuePending          int
 	HasActiveTurn         bool
 	TurnState             turn.State
+	SystemPrompt          string
+	SystemPromptEstimatedTokens  int
+	SkillsCatalogEstimatedTokens      int
+	SkillsCatalogMaxBodyEstimatedTokens int
+	SkillsCatalogBloatThreshold       int
 	Messages              []llm.Message
+	LastCompression       *compression.LastCompressionSnapshot
 }
 
-// estimateMessageTokens 粗算 messages token（与 compression 估算一致：len/4 + 固定开销）。
-func estimateMessageTokens(messages []llm.Message) int {
-	total := 0
-	for _, m := range messages {
-		total += len(m.Content)/4 + 16
-		if len(m.ToolCalls) > 0 {
-			total += len(m.ToolCalls) * 32
-		}
-		if m.ReasoningContent != "" {
-			total += len(m.ReasoningContent) / 4
-		}
+func enrichContextPromptStats(view *ContextView, catalog *skills.Catalog) {
+	if view == nil {
+		return
 	}
-	return total
+	view.SystemPromptEstimatedTokens = llm.EstimateTextTokens(view.SystemPrompt)
+	view.SkillsCatalogBloatThreshold = skills.CatalogBloatTokenThreshold
+	if catalog != nil {
+		stats := catalog.EstimateCatalogStats()
+		view.SkillsCatalogEstimatedTokens = stats.MetadataTokens
+		view.SkillsCatalogMaxBodyEstimatedTokens = stats.MaxBodyTokens
+	}
+}
+
+func estimateMessageTokens(messages []llm.Message) int {
+	return llm.EstimateMessageTokens(messages)
 }
 
 func pendingToolCallsCount(pending *turn.PendingHITL) int {

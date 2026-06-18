@@ -1,0 +1,23 @@
+{
+  "name": "合规助手",
+  "description": "内控与数据合规审查；接收其它 Agent 经 Manage 发起的 A2A 合规咨询 Task，依据内部规章制度给出结论。Manage Console 展示用；name 缺省时回退为 agent_id。",
+  "url": "http://127.0.0.1:18765",
+  "version": "1.0.0",
+  "capabilities": [
+    "compliance_review",
+    "policy_lookup"
+  ],
+  "skills": [],
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "metadata": {
+    "role": "compliance",
+    "compliance_peer": "",
+    "department": "内控合规部",
+    "consultation_prefix": "【合规咨询】"
+  }
+}

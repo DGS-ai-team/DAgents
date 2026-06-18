@@ -13,7 +13,7 @@ func TestFormatApprovalPrompt(t *testing.T) {
 			},
 		},
 	})
-	for _, part := range []string{"bash_run", "call-1", "待审批"} {
+	for _, part := range []string{"bash(", "call-1", "待审批"} {
 		if !strings.Contains(line, part) {
 			t.Fatalf("prompt missing %q: %q", part, line)
 		}

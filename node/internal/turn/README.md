@@ -77,15 +77,14 @@ sequenceDiagram
 
 拼接顺序（对齐 Python `get_system_prompt`）：
 
-1. `staticSystemPrompt`（行为准则、保密说明）
-2. skills 目录元数据（`Catalog.RenderMetadataSection`）
-3. 主机环境快照（`hostsnapshot`）
-4. `.runtime` 工作目录约定
-5. Agent ID、FS_ROOT、后台执行说明
-6. `prompt_context` 稳定段（soul / user / long_term）
-7. 已加载 skills 正文
-8. `custom.md`
-9. `session_id` 后缀
+1. `staticSystemPrompt`（行为准则、保密说明；**不含**各工具用法，见 tool schema）
+2. 主机环境快照（`hostsnapshot`）+ Agent ID / session_id（**不含** FS_ROOT 绝对路径）
+3. 工作区子目录约定（`data/`、`memory/` 等；path 相对工作区根）
+4. `prompt_context` 稳定段（soul / user / long_term）
+5. 已加载 skills 正文（动态会话状态，非工具 catalog）
+6. `custom.md`
+
+skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时注入 **`load_skills` 工具 description**（`Registry.SetSkillsCatalog`）。
 
 父与子 session **同一套** prompt 逻辑，暂无子专用分支。压缩摘要使用独立 system prompt，见 [`../compression/coordinator.go`](../compression/coordinator.go)。
 
@@ -95,7 +94,7 @@ sequenceDiagram
 
 `processToolCalls` 按 `policy.DecideTool` 将 tool calls 分为：
 
-- **auto**：`executeAutoBatch` 同步或 `StartBackground`
+- **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 超时由 registry 自动降级；历史参数仍可走内部 `StartBackground`）
 - **approval**：`PendingHITL{Kind: approval}`，SSE `approval_required`
 - **user_information**：`ask_user_information`，SSE `user_information_required`
 
@@ -121,7 +120,10 @@ sequenceDiagram
 
 | 文件 | 说明 |
 |------|------|
-| `orchestrator.go` | `Orchestrator`、单步循环、工具/HITL/临时 Agent 路由、SSE |
+| `orchestrator.go` | `Orchestrator`、单步 LLM 循环、SSE、usage |
+| `tool_router.go` | 工具分流（policy/childagent/skills/HITL）、并行执行 |
+| `cancel_partial.go` | 流式 cancel 部分 assistant 落库与 tool 补位 |
+| `history_write.go` | `appendHistory` / `insertHistory` |
 | `prompt.go` | `BuildSystemPrompt`、`staticSystemPrompt`、`DefaultMaxToolLoops` |
 | `pending.go` | `PendingHITL`、`HITLKind`、`ToolUserInterruptedMessage` |
 | `step.go` | `StepOutcome`、`RuntimeToolMessageContent` |

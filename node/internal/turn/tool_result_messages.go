@@ -4,60 +4,17 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
-
-const modelContentMaxChars = 12000
-
-// packagedToolResult 为写入 role=tool 的模型侧正文（简化版 package_tool_result）。
-type packagedToolResult struct {
-	ModelContent string
-	RawRef       string
-}
-
-func packageToolResult(toolName, content string) packagedToolResult {
-	text := strings.TrimSpace(content)
-	if text == "" {
-		text = "（空输出）"
-	}
-	model, _ := clipMiddle(text, modelContentMaxChars)
-	rawRef := ""
-	if len(text) > modelContentMaxChars {
-		rawRef = fmt.Sprintf(".runtime/tool_outputs/%s-truncated", sanitizeToolName(toolName))
-	}
-	return packagedToolResult{ModelContent: model, RawRef: rawRef}
-}
-
-func sanitizeToolName(name string) string {
-	out := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == ':' || r == '-' {
-			return r
-		}
-		return '_'
-	}, strings.TrimSpace(name))
-	out = strings.Trim(out, "_")
-	if out == "" {
-		return "tool"
-	}
-	return out
-}
-
-func clipMiddle(text string, maxChars int) (string, bool) {
-	if len(text) <= maxChars {
-		return text, false
-	}
-	head := maxChars / 2
-	tail := maxChars - head
-	return text[:head] + fmt.Sprintf("\n[TRUNCATED] 工具输出超过 %d 字符，已保留首尾。\n", maxChars) + text[len(text)-tail:], true
-}
 
 type toolResultTailKind string
 
 const (
-	tailTool                        toolResultTailKind = "tail_tool"
-	tailAssistantWithToolCalls      toolResultTailKind = "tail_assistant_with_tool_calls"
-	tailAssistantWithoutToolCalls   toolResultTailKind = "tail_assistant_without_tool_calls"
-	tailOther                       toolResultTailKind = "other"
+	tailTool                      toolResultTailKind = "tail_tool"
+	tailAssistantWithToolCalls    toolResultTailKind = "tail_assistant_with_tool_calls"
+	tailAssistantWithoutToolCalls toolResultTailKind = "tail_assistant_without_tool_calls"
+	tailOther                     toolResultTailKind = "other"
 )
 
 func classifyToolResultTail(messages []llm.Message) toolResultTailKind {
@@ -78,17 +35,21 @@ func classifyToolResultTail(messages []llm.Message) toolResultTailKind {
 	}
 }
 
-// asyncToolMessages 为 async_tool_result 写回 history 的三段消息（对齐 Python _build_tool_result_messages）。
+// asyncToolMessages 为 async_tool_result 写回 history 的三段消息。
 type asyncToolMessages struct {
-	UserMessage      llm.Message
-	AssistantMessage llm.Message
-	ToolMessage      llm.Message
-	ToolName         string
-	ToolCallID       string
-	Status           string
+	UserMessage            llm.Message
+	AssistantMessage       llm.Message
+	ToolMessage            llm.Message
+	ForClientContent       string // SSE 展示用全文（清洗后、未 history 摘要）
+	ToolName               string
+	ToolCallID             string
+	Status                 string
+	OutputCompressSavedPct int
+	OutputCompressRawRunes int
+	OutputCompressOutRunes int
 }
 
-func buildAsyncToolMessages(payload AsyncToolResultInput) asyncToolMessages {
+func (o *Orchestrator) buildAsyncToolMessages(sessionID string, payload AsyncToolResultInput) asyncToolMessages {
 	toolName := strings.TrimSpace(payload.ToolName)
 	if toolName == "" {
 		toolName = "unknown_tool"
@@ -113,19 +74,27 @@ func buildAsyncToolMessages(payload AsyncToolResultInput) asyncToolMessages {
 			resultBody = "工具执行失败"
 		}
 	}
-	packaged := packageToolResult(toolName, resultBody)
-	rawSuffix := ""
-	if packaged.RawRef != "" {
-		rawSuffix = " raw_ref=" + packaged.RawRef
+	fullForClient := resultBody
+	historyBody := resultBody
+	if o.toolHooks != nil {
+		out := o.toolHooks.RunToolAfterEach(nil, hooks.ToolAfterEachInput{
+			SessionID:  sessionID,
+			ToolCallID: toolCallID,
+			ToolName:   toolName,
+			RawResult:  resultBody,
+		})
+		fullForClient = out.ForClient
+		historyBody = out.ForHistory
 	}
 	toolText := fmt.Sprintf(
-		"工具%s执行已完成，job_id：%s，执行结果如下：%s%s",
-		toolName, jobID, packaged.ModelContent, rawSuffix,
+		"工具%s执行已完成，job_id：%s，执行结果如下：%s",
+		toolName, jobID, historyBody,
 	)
 	userText := fmt.Sprintf("工具%s，job_id已完成，请获取执行结果并继续任务。", toolName)
 	argsJSON := fmt.Sprintf(`{"job_id":%q,"tool_name":%q,"status":%q}`, jobID, toolName, status)
+	_ = fullForClient // referenced via ForClientContent
 	return asyncToolMessages{
-		UserMessage: llm.Message{Role: "user", Content: userText},
+		UserMessage: llm.UserMessage(userText, llm.UserNameAsyncTool),
 		AssistantMessage: llm.Message{
 			Role:    "assistant",
 			Content: "",
@@ -143,22 +112,44 @@ func buildAsyncToolMessages(payload AsyncToolResultInput) asyncToolMessages {
 			ToolCallID: toolCallID,
 			Content:    toolText,
 		},
-		ToolName:   toolName,
-		ToolCallID: toolCallID,
-		Status:     status,
+		ForClientContent:       fullForClient,
+		ToolName:               toolName,
+		ToolCallID:             toolCallID,
+		Status:                 status,
+		OutputCompressSavedPct: payload.OutputCompressSavedPct,
+		OutputCompressRawRunes: payload.OutputCompressRawRunes,
+		OutputCompressOutRunes: payload.OutputCompressOutRunes,
 	}
 }
 
 // AsyncToolResultInput 为 HandleAsyncToolResult 入参。
 type AsyncToolResultInput struct {
-	JobID      string
-	ToolName   string
-	ToolCallID string
-	Status     string
-	ResultText string
-	ErrorText  string
+	JobID                  string
+	ToolName               string
+	ToolCallID             string
+	Status                 string
+	ResultText             string
+	ErrorText              string
+	OutputCompressSavedPct int
+	OutputCompressRawRunes int
+	OutputCompressOutRunes int
 }
 
 func shouldContinueAfterAsyncTool(tail toolResultTailKind) bool {
 	return tail == tailTool || tail == tailAssistantWithoutToolCalls
+}
+
+func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw string) (forClient, forHistory, spillPath string) {
+	if o.toolHooks == nil {
+		return raw, raw, ""
+	}
+	out := o.toolHooks.RunToolAfterEach(nil, hooks.ToolAfterEachInput{
+		SessionID:    sessionID,
+		ToolCallID:   tc.ID,
+		ToolName:     tc.Function.Name,
+		ToolArgs:     parseJSONArgs(tc.Function.Arguments),
+		RawArguments: tc.Function.Arguments,
+		RawResult:    raw,
+	})
+	return out.ForClient, out.ForHistory, out.SpillPath
 }

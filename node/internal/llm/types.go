@@ -35,6 +35,8 @@ type ChatRequest struct {
 	SystemPrompt string
 	Messages     []Message
 	Tools        []tools.ToolDef
+	// APIMessages 非空时直接作为 HTTP 请求体 messages 字段（已由 MessageAdapter 序列化，通常已含 system）。
+	APIMessages []map[string]any
 }
 
 // ChatResult 为一次 completion 聚合结果。
@@ -47,9 +49,10 @@ type ChatResult struct {
 
 // StreamHandler 接收流式 delta 与最终 usage。
 type StreamHandler struct {
-	OnDelta           func(delta string)
-	OnReasoningDelta  func(delta string)
-	OnUsage           func(usage Usage)
+	OnDelta          func(delta string)
+	OnReasoningDelta func(delta string)
+	OnToolCallDelta  func(toolCalls []ToolCall) // 流式 tool_calls 增量快照（可能不完整）
+	OnUsage          func(usage Usage)
 }
 
 // CompleteRequest 为非流式补全请求（摘要压缩等）。
@@ -58,8 +61,10 @@ type CompleteRequest struct {
 	UserPrompt   string
 }
 
-// Client 为可替换的 LLM 客户端（生产 OpenAI / 测试 Mock）。
+// Client 为可替换的 LLM 客户端（生产 OpenAI / DeepSeek / 测试 Mock）。
 type Client interface {
 	StreamChat(ctx context.Context, req ChatRequest, handler StreamHandler) (ChatResult, error)
 	CompleteText(ctx context.Context, req CompleteRequest) (string, error)
+	// NormalizeAssistant 写入 session history 前规范化 assistant 消息（含 reasoning_content 策略）。
+	NormalizeAssistant(existing []Message, msg Message) Message
 }

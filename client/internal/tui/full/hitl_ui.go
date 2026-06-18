@@ -18,6 +18,10 @@ func (m *model) initApprovalState(data map[string]any) {
 	m.approvalItems = clihitl.ExtractToolApprovals(data)
 	m.approvalSelected = make(map[string]bool, len(m.approvalItems))
 	m.approvalCursor = 0
+	m.approvalTriggerDecided = make(map[string]string)
+	m.approvalTriggerRejected = make(map[string]bool)
+	m.approvalTriggerOptionCursor = 0
+	m.ensureA2ARelayApprovalToolBlocks(data)
 }
 
 func (m *model) initUserInfoState(data map[string]any) {
@@ -29,6 +33,9 @@ func (m *model) initUserInfoState(data map[string]any) {
 }
 
 func (m *model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if clihitl.HasTriggerSessionApprovalItems(m.approvalItems) {
+		return m.handleTriggerSessionApprovalKey(msg)
+	}
 	switch msg.String() {
 	case "y", "Y":
 		return m.finishApprovalInteraction(
@@ -66,6 +73,73 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+func (m *model) handleTriggerSessionApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	options := clihitl.TriggerSessionOptions()
+	switch msg.String() {
+	case "y", "Y":
+		return m.finishApprovalInteraction(
+			clihitl.BuildTriggerSessionQuickResume(m.hitlData, m.approvalItems, true),
+			"已批准（同会话）",
+		)
+	case "n", "N", "esc":
+		return m.finishApprovalInteraction(
+			clihitl.BuildTriggerSessionQuickResume(m.hitlData, m.approvalItems, false),
+			"已拒绝",
+		)
+	case "up", "k":
+		if m.approvalTriggerOptionCursor > 0 {
+			m.approvalTriggerOptionCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.approvalTriggerOptionCursor < len(options)-1 {
+			m.approvalTriggerOptionCursor++
+		}
+		return m, nil
+	case "enter":
+		current := triggerSessionCurrentItem(m.approvalItems, m.approvalTriggerDecided, m.approvalTriggerRejected)
+		if current == nil {
+			return m.finishApprovalInteraction(
+				clihitl.BuildTriggerSessionApprovalResume(m.hitlData, m.approvalItems, m.approvalTriggerDecided, m.approvalTriggerRejected),
+				"已提交审批选择",
+			)
+		}
+		opt := options[m.approvalTriggerOptionCursor]
+		if strings.TrimSpace(opt.Target) == "" {
+			m.approvalTriggerRejected[current.CallID] = true
+		} else {
+			m.approvalTriggerDecided[current.CallID] = opt.Target
+		}
+		m.approvalTriggerOptionCursor = 0
+		if triggerSessionCurrentItem(m.approvalItems, m.approvalTriggerDecided, m.approvalTriggerRejected) == nil {
+			return m.finishApprovalInteraction(
+				clihitl.BuildTriggerSessionApprovalResume(m.hitlData, m.approvalItems, m.approvalTriggerDecided, m.approvalTriggerRejected),
+				"已提交审批选择",
+			)
+		}
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
+func triggerSessionCurrentItem(items []clihitl.ToolApprovalItem, decided map[string]string, rejected map[string]bool) *clihitl.ToolApprovalItem {
+	for i := range items {
+		it := items[i]
+		if !clihitl.IsTriggerSessionApprovalItem(it) {
+			continue
+		}
+		if rejected[it.CallID] {
+			continue
+		}
+		if _, ok := decided[it.CallID]; ok {
+			continue
+		}
+		return &items[i]
+	}
+	return nil
 }
 
 func (m *model) handleUserInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -147,6 +221,9 @@ func (m *model) resetHITLState() {
 	m.approvalItems = nil
 	m.approvalSelected = nil
 	m.approvalCursor = 0
+	m.approvalTriggerDecided = nil
+	m.approvalTriggerRejected = nil
+	m.approvalTriggerOptionCursor = 0
 	m.userInfoReq = nil
 	m.userInfoSelected = nil
 	m.userInfoCursor = 0

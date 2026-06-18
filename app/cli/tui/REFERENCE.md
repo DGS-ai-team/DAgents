@@ -3,8 +3,10 @@
 ## `app.py`
 
 - **`DAgentsTuiApp`**：Textual 聊天主应用
-- **`_write_welcome_panel`**：连接成功后向 RichLog 写入欢迎 Panel
-- **`_assistant_block`** / **`_write_assistant_block`**：assistant 流式/完成态渲染；完成态 Table 正文列 `overflow=fold` 避免 ellipsis 截断
+- **`_write_welcome_panel`**：连接成功后向 transcript 写入一次性欢迎 Panel
+- **`_assistant_block`** / **`_write_assistant_block`**：assistant 流式/完成态渲染；完成态 Table 正文列 `overflow=fold`；usage 独占一行 `Align.right`
+- **`_apply_round_usage`**：`USAGE` SSE 到达时挂到流式 pending 或 retroactive 重写 `_last_assistant_done_block`
+- **`_update_transcript_follow_tail`**：根据 `is_vertical_scroll_end` 同步 follow-tail 与 `auto_scroll`
 - **`_transcript_base_lines`**：欢迎 Panel 占用的行数下限（流式回退）
 - **`_exit_with_resume_hint`**：`/exit` 退出后打印 `dagents chat --session ...` 会话恢复命令
 - **`_rich_code_box`** / **`_tool_dot_block`**：Rich Panel + Syntax 代码框与圆点对齐布局
@@ -25,6 +27,10 @@
 - **`_show_sessions`**：`/session` 命令查询并展示当前队列中的 active sessions
 - **`_handle_skill_command`** / **`_format_skill_state`** / **`_skill_state_block`**：`/skill` 命令；列表按 transcript 宽度折行（`expand=True` + `overflow=fold`）
 - **`_transcript_content_width`**：RichLog 可用列宽（欢迎 Panel、skill 块等共用）
+
+## `transcript_log.py`
+
+- **`TranscriptLog`**：继承 `RichLog`；`watch_scroll_y` 回调 App `_update_transcript_follow_tail`
 
 ## `welcome_panel.py`
 

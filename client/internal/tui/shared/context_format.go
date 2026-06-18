@@ -5,9 +5,90 @@ import (
 	"strings"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
+	"github.com/mattn/go-runewidth"
 )
 
-// FormatSessionContext 将 GET context 响应格式化为只读文本（供 /context 或日志）。
+// FormatSessionContextPanelBody 构造 /context 面板正文行（panel 编码）。
+func FormatSessionContextPanelBody(ctx *nodeapi.SessionContext) []string {
+	if ctx == nil {
+		return []string{panelLine(panelKindEmpty, "无 context 数据")}
+	}
+	turn := orDash(ctx.TurnState)
+	if turn == "-" && ctx.HasActiveTurn {
+		turn = "active"
+	}
+	lines := []string{
+		panelKV("session", ctx.SessionID),
+		panelKV("turn", turn),
+		panelKV("phase", orDash(ctx.RunTurnPhase)),
+		panelKV("messages", fmt.Sprintf("%d", ctx.MessagesCount)),
+		panelKV("pending_tools", fmt.Sprintf("%d", ctx.PendingToolCallsCount)),
+		panelKV("tokens", fmt.Sprintf("%d", ctx.MessagesTotalTokens)),
+		panelKV("system_prompt_tokens", fmt.Sprintf("%d", ctx.SystemPromptEstimatedTokens)),
+		panelKV("skills_catalog_tokens", fmt.Sprintf("%d (metadata)", ctx.SkillsCatalogEstimatedTokens)),
+		panelKV("skills_max_body_tokens", fmt.Sprintf("%d", ctx.SkillsCatalogMaxBodyEstimatedTokens)),
+		panelKV("tool_loop", fmt.Sprintf("%d", ctx.ToolLoopCount)),
+		panelKV("queue", fmt.Sprintf("%d", ctx.QueuePending)),
+		panelLine(panelKindSection, "system_prompt"),
+	}
+	if strings.TrimSpace(ctx.SystemPrompt) == "" {
+		lines = append(lines, panelLine(panelKindPreview, "(none)"))
+	} else {
+		for _, part := range wrapLines(strings.TrimSpace(ctx.SystemPrompt), 72) {
+			lines = append(lines, panelLine(panelKindPreview, part))
+		}
+	}
+	lines = append(lines, panelLine(panelKindSection, "loaded_skills"))
+	if len(ctx.LoadedSkills) == 0 {
+		lines = append(lines, panelLine(panelKindEmpty, "(none)"))
+	} else {
+		for _, sk := range ctx.LoadedSkills {
+			name := strings.TrimSpace(sk.SkillName)
+			if name == "" {
+				name = "-"
+			}
+			desc := strings.TrimSpace(sk.Description)
+			lines = append(lines, panelLine(panelKindLoaded, name, desc))
+		}
+	}
+	lines = append(lines, panelLine(panelKindSection, "recent_messages"))
+	if len(ctx.RecentMessages) == 0 {
+		lines = append(lines, panelLine(panelKindEmpty, "(none)"))
+	} else {
+		for i, msg := range ctx.RecentMessages {
+			role := strings.TrimSpace(msg.Role)
+			if role == "" {
+				role = "unknown"
+			}
+			meta := fmt.Sprintf("%d. [%s]", i+1, role)
+			if msg.ToolCallsCount > 0 {
+				meta += fmt.Sprintf(" tool_calls=%d", msg.ToolCallsCount)
+			}
+			lines = append(lines, panelLine(panelKindPreview, meta))
+			content := strings.TrimSpace(msg.Content)
+			if content == "" {
+				content = "(empty)"
+			}
+			for _, part := range wrapLines(content, 72) {
+				lines = append(lines, panelLine(panelKindPreview, "   "+part))
+			}
+		}
+	}
+	return lines
+}
+
+// FormatSessionContextPanel 将 context 格式化为带 ANSI 的面板文本（供全屏 viewport）。
+func FormatSessionContextPanel(ctx *nodeapi.SessionContext) string {
+	title := FormatTranscriptLineForDisplay(sysPanelTitlePrefix+"Session Context", 0)
+	body := FormatSessionContextPanelBody(ctx)
+	lines := []string{title}
+	for _, line := range body {
+		lines = append(lines, FormatTranscriptLineForDisplay(sysPanelBodyPrefix+line, 0))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// FormatSessionContext 将 GET context 响应格式化为只读文本（供 REPL 或日志）。
 func FormatSessionContext(ctx *nodeapi.SessionContext) string {
 	if ctx == nil {
 		return "(无 context 数据)"
@@ -25,8 +106,16 @@ func FormatSessionContext(ctx *nodeapi.SessionContext) string {
 		fmt.Sprintf("queue_pending: %d", ctx.QueuePending),
 		fmt.Sprintf("has_active_turn: %t", ctx.HasActiveTurn),
 		"",
-		"loaded_skills:",
+		"system_prompt:",
 	}
+	if strings.TrimSpace(ctx.SystemPrompt) == "" {
+		lines = append(lines, "  (none)")
+	} else {
+		for _, part := range wrapLines(strings.TrimSpace(ctx.SystemPrompt), 72) {
+			lines = append(lines, "  "+part)
+		}
+	}
+	lines = append(lines, "", "loaded_skills:")
 	if len(ctx.LoadedSkills) == 0 {
 		lines = append(lines, "  (none)")
 	} else {
@@ -76,41 +165,19 @@ func FormatSessionContext(ctx *nodeapi.SessionContext) string {
 	return strings.Join(lines, "\n")
 }
 
-// FormatSessionSkills 格式化 skills 列表响应。
-func FormatSessionSkills(sk *nodeapi.SessionSkills) string {
-	if sk == nil {
-		return "(无 skills 数据)"
+func skillDescriptionFromRow(m map[string]any) string {
+	if m == nil {
+		return ""
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "session=%s\n\nloaded:\n", sk.SessionID)
-	writeSkillRows(&b, sk.LoadedSkills, "  (none)")
-	b.WriteString("\navailable:\n")
-	writeSkillRows(&b, sk.AvailableSkills, "  (none)")
-	return strings.TrimRight(b.String(), "\n")
-}
-
-func writeSkillRows(b *strings.Builder, rows []any, empty string) {
-	if len(rows) == 0 {
-		b.WriteString(empty + "\n")
-		return
+	raw, ok := m["description"]
+	if !ok || raw == nil {
+		return ""
 	}
-	for _, raw := range rows {
-		m, ok := raw.(map[string]any)
-		if !ok {
-			b.WriteString(fmt.Sprintf("  - %v\n", raw))
-			continue
-		}
-		name := strings.TrimSpace(fmt.Sprint(m["skill_name"]))
-		if name == "" {
-			name = strings.TrimSpace(fmt.Sprint(m["name"]))
-		}
-		desc := strings.TrimSpace(fmt.Sprint(m["description"]))
-		if desc != "" {
-			fmt.Fprintf(b, "  - %s · %s\n", name, desc)
-		} else {
-			fmt.Fprintf(b, "  - %s\n", name)
-		}
+	s := strings.TrimSpace(fmt.Sprint(raw))
+	if s == "" || s == "<nil>" {
+		return ""
 	}
+	return s
 }
 
 func orDash(s string) string {
@@ -120,6 +187,7 @@ func orDash(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// wrapLines 按终端显示宽度折行；避免按字节截断破坏 UTF-8（中文等尾端乱码）。
 func wrapLines(text string, width int) []string {
 	if width <= 0 {
 		return []string{text}
@@ -127,11 +195,16 @@ func wrapLines(text string, width int) []string {
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimRight(line, " ")
-		for len(line) > width {
-			out = append(out, line[:width])
-			line = line[width:]
+		rest := line
+		for runewidth.StringWidth(rest) > width {
+			chunk := runewidth.Truncate(rest, width, "")
+			if chunk == "" {
+				break
+			}
+			out = append(out, chunk)
+			rest = rest[len(chunk):]
 		}
-		out = append(out, line)
+		out = append(out, rest)
 	}
 	return out
 }

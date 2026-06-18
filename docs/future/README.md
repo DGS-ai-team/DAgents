@@ -4,7 +4,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| [manage-api-sketch.md](./manage-api-sketch.md) | Manage 控制面 API（第二步） |
+| [future/manage-api-sketch.md](./manage-api-sketch.md) | Manage API 草图（**详细架构见 [design/manage-architecture.md](../design/manage-architecture.md)**） |
 | [a2a-via-manage.md](./a2a-via-manage.md) | 经 Manage 的 A2A inbox |
 | [temporary-child-agents.md](./temporary-child-agents.md) | 临时子 Agent |
 | [ownership-and-tenancy.md](./ownership-and-tenancy.md) | 多租户与 owner |
@@ -12,4 +12,4 @@
 | [client-events-and-hitl.md](./client-events-and-hitl.md) | 旧 connection_id / Backend SSE 模型（待修订） |
 | [security-and-policy.md](./security-and-policy.md) | Control Plane 策略框架 |
 
-现网 A2A 见 [a2a-and-register-center.md](../a2a-and-register-center.md)（Python + Register Center）。
+Register Center 现网契约见 [a2a-and-register-center.md](../a2a-and-register-center.md) §2；Agent 侧 A2A 工具已移除，远期见 [a2a-via-manage.md](./a2a-via-manage.md)。

@@ -1,1 +1,0 @@
-"""Register Center 包。"""

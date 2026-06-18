@@ -166,22 +166,26 @@ Authorization: Bearer ***
 
 ---
 
-## 4. A2A 中继（非子 Agent）
+## 4. A2A Task 中继（非子 Agent）
 
-**所有跨 Agent 消息经 Manage**；Node **不得**直连其他 Node。协议详见 [a2a-via-manage.md](./a2a-via-manage.md)。
+**所有跨 Agent 协作经 Manage Task**；Node **不得**直连其他 Node。协议详见 [a2a-via-manage.md](./a2a-via-manage.md)。
 
-### 4.1 发送消息
+**不兼容** 旧 `messages` / `message_id` 命名。
+
+### 4.1 创建 Task
 
 ```http
-POST /v1/a2a/messages
-Authorization: Bearer ***
+POST /v1/a2a/tasks
+x-dagents-agent-id: peer-linux-01
 Content-Type: application/json
 
 {
   "from_agent_id": "peer-linux-01",
   "to_agent_id": "ops-win-01",
+  "kind": "invoke",
   "content": "请检查 C:\\logs\\app.log 最后 50 行",
   "caller_session_id": "sess-a-...",
+  "idempotency_key": "optional",
   "ttl_seconds": 3600
 }
 ```
@@ -190,45 +194,48 @@ Content-Type: application/json
 
 ```json
 {
-  "message_id": "a2a-msg-...",
+  "task_id": "a2a-task-...",
   "status": "queued",
   "to_agent_id": "ops-win-01"
 }
 ```
 
-Manage 校验：`to` 存在、online、`expose_to_peers=true`；否则 `403 target_not_exposed` 或 `404`。
+Manage 校验：`to` 存在、online、`expose_to_peers=true`；否则 `403 target_not_exposed` 或 `404 target_not_found`。
 
-### 4.2 收取 inbox（被调方轮询）
+### 4.2 收取 inbox（被调方 long poll）
 
 ```http
-GET /v1/a2a/inbox?agent_id=ops-win-01&limit=10
-Authorization: Bearer ***
+GET /v1/a2a/inbox?agent_id=ops-win-01&limit=10&wait=25
+x-dagents-agent-id: ops-win-01
 ```
 
 ```json
 {
-  "messages": [
+  "tasks": [
     {
-      "message_id": "a2a-msg-...",
+      "task_id": "a2a-task-...",
       "from_agent_id": "peer-linux-01",
+      "kind": "invoke",
       "content": "...",
-      "received_at_unix": 1760000100
+      "created_at_unix": 1760000100,
+      "expires_at_unix": 1760003700
     }
-  ]
+  ],
+  "pending_count": 0
 }
 ```
 
-被调方 Node 拉取后本地入队 turn loop；可选 `POST /v1/a2a/messages/{id}/ack`。
+被调方 Node 拉取后本地入队 turn loop；可选 `POST /v1/a2a/tasks/{id}/ack`。
 
 ### 4.3 回复
 
 ```http
-POST /v1/a2a/messages/{message_id}/reply
-Authorization: Bearer ***
+POST /v1/a2a/tasks/{task_id}/reply
+x-dagents-agent-id: ops-win-01
 Content-Type: application/json
 
 {
-  "from_agent_id": "ops-win-01",
+  "agent_id": "ops-win-01",
   "status": "completed",
   "result_text": "...",
   "callee_session_id": "sess-b-..."
@@ -238,17 +245,19 @@ Content-Type: application/json
 ### 4.4 查询状态（调用方轮询）
 
 ```http
-GET /v1/a2a/messages/{message_id}?caller_agent_id=peer-linux-01
-Authorization: Bearer ***
+GET /v1/a2a/tasks/{task_id}?caller_agent_id=peer-linux-01
+x-dagents-agent-id: peer-linux-01
 ```
 
 ```json
 {
-  "message_id": "a2a-msg-...",
-  "status": "completed",
-  "result_text": "...",
-  "from_agent_id": "peer-linux-01",
-  "to_agent_id": "ops-win-01"
+  "task": {
+    "task_id": "a2a-task-...",
+    "status": "completed",
+    "result_text": "...",
+    "from_agent_id": "peer-linux-01",
+    "to_agent_id": "ops-win-01"
+  }
 }
 ```
 
@@ -258,7 +267,7 @@ Authorization: Bearer ***
 POST /v1/a2a/broadcast
 ```
 
-Manage 向多个 `to_agent_id`（或 groups）写入 inbox；仍 **无** Node 间直连。
+Manage 向多个 `to_agent_id`（或 groups）写入 Task inbox；仍 **无** Node 间直连。
 
 ---
 
@@ -385,7 +394,7 @@ Phase 1 可在 Node 本地 `policy.yaml` 实现，Manage 仅审计。
 |---------------------------|-------------|
 | Agent upsert / list | `POST /v1/agents/register` + `GET /v1/agents` |
 | groups 过滤 | `GET /v1/agents/discover?groups=` |
-| relay / broadcast HTTP 直连 Agent | **改为** `POST /v1/a2a/messages` + inbox 轮询（[a2a-via-manage.md](./a2a-via-manage.md)） |
+| relay / broadcast HTTP 直连 Agent | **改为** `POST /v1/a2a/tasks` + inbox long poll（[a2a-via-manage.md](./a2a-via-manage.md)） |
 | health | `/health` |
 
 Python 仓库保留并收敛为 **Manage 服务**；`app/core`、`app/harness/service` 的 Brain 逻辑 **不**保留在 Manage。
@@ -420,14 +429,16 @@ Python 仓库保留并收敛为 **Manage 服务**；`app/core`、`app/harness/se
 
 ---
 
-### A2AMessage（Manage 持久化）
+### A2ATask（Manage 持久化）
 
 | 字段 | 说明 |
 |------|------|
-| `message_id` | 主键 |
+| `task_id` | 主键 |
 | `from_agent_id` / `to_agent_id` | 发送方 / 目标 |
+| `kind` | invoke / notify |
 | `status` | queued / delivered / processing / completed / failed / expired |
 | `content` / `result_text` | 请求与回复正文 |
+| `idempotency_key` | 调用方幂等键（可选） |
 | `ttl_seconds` | 过期 |
 
 ---
@@ -436,8 +447,8 @@ Python 仓库保留并收敛为 **Manage 服务**；`app/core`、`app/harness/se
 
 | 优先级 | API |
 |--------|-----|
-| P0 | `POST /v1/agents/register`、`POST .../heartbeat`、`GET /v1/agents/discover` |
-| P0 | `POST /v1/a2a/messages`、`GET /v1/a2a/inbox`、`POST .../reply`、`GET .../messages/{id}` |
+| P0 | `POST /v1/registry/agents`、`POST .../heartbeat`、`GET /v1/registry/agents/discover` |
+| P0 | `POST /v1/a2a/tasks`、`GET /v1/a2a/inbox`、`POST .../tasks/{id}/reply`、`GET .../tasks/{id}` |
 | P0 | `POST /v1/audit/events` |
-| P1 | `GET /v1/agents`（运维）、`GET /v1/audit/events`（查询） |
+| P1 | `GET /v1/registry/agents`（运维）、`GET /v1/audit/events`（查询） |
 | P2 | policy 下发、deregister、`POST /v1/a2a/broadcast` |

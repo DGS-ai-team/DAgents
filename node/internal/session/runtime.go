@@ -8,8 +8,9 @@ import (
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
-	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/history"
+	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
@@ -30,30 +31,39 @@ type Session struct {
 
 type runtime struct {
 	session Session
-	queue   *queue.MessageQueue
-	orch    *turn.Orchestrator
-	store   *store.SQLiteStore
-	hub     *stream.Hub
+	// 消息队列
+	queue *queue.MessageQueue
+	// 编排器
+	orch *turn.Orchestrator
+	// 存储
+	store *store.SQLiteStore
+	// 事件中心
+	hub *stream.Hub
+	// 代理 ID
 	agentID string
-	logger  *slog.Logger
+	// 日志
+	logger *slog.Logger
 
+	// 技能目录
 	skillsCatalog *skills.Catalog
-	compression   *compression.Coordinator
+	// 上下文压缩逻辑
+	compression *compression.Coordinator
 
-	mu            sync.Mutex
-	state         turn.State
-	turnCancel    context.CancelFunc
-	messages      []llm.Message
-	loadedSkills  []skills.LoadedSkill
-	pending       *turn.PendingHITL
-	toolLoopCount int
-	fsRoot        string
+	mu            sync.Mutex           // 互斥锁
+	state         turn.State           // 状态
+	turnCancel    context.CancelFunc   // 取消 turn 上下文
+	messages      []llm.Message        // 交互消息列表
+	loadedSkills  []skills.LoadedSkill // 加载的技能列表
+	pending       *turn.PendingHITL    // 暂停
+	toolLoopCount int                  // tool 循环计数
+	fsRoot        string               // 文件系统根路径
 
-	triggerDelivery triggers.DeliveryTracker
+	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
-	childMeta *childRuntimeMeta
+	childMeta *childRuntimeMeta // 子 Agent 元数据
 }
 
+// newRuntime 创建新的 session runtime
 func newRuntime(
 	id, agentID string,
 	hub *stream.Hub,
@@ -73,6 +83,7 @@ func newRuntime(
 		initial, loaded, initialPending, initialLoopCount, turnOpts, triggerDelivery)
 }
 
+// newRuntimeWithPublisher 创建新的 session runtime，并设置 publisher
 func newRuntimeWithPublisher(
 	id, agentID string,
 	pub stream.Publisher,
@@ -99,15 +110,20 @@ func newRuntimeWithPublisher(
 		agentID:       agentID,
 		logger:        logger,
 		skillsCatalog: catalog,
-		compression:   compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking),
-		state:         turn.StateIdle,
-		messages:      append([]llm.Message(nil), initial...),
-		loadedSkills:  append([]skills.LoadedSkill(nil), loaded...),
-		pending:       initialPending,
-		toolLoopCount: initialLoopCount,
-		fsRoot:            turnOpts.FSRoot,
-		triggerDelivery:   triggerDelivery,
+		compression: func() *compression.Coordinator {
+			coord := compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking)
+			coord.SetLogger(logger)
+			return coord
+		}(),
+		state:           turn.StateIdle,
+		messages:        append([]llm.Message(nil), initial...),
+		loadedSkills:    append([]skills.LoadedSkill(nil), loaded...),
+		pending:         initialPending,
+		toolLoopCount:   initialLoopCount,
+		fsRoot:          turnOpts.FSRoot,
+		triggerDelivery: triggerDelivery,
 	}
+	// 创建编排器
 	rt.orch = turn.NewOrchestrator(
 		agentID,
 		turnOpts.FSRoot,
@@ -123,32 +139,53 @@ func newRuntimeWithPublisher(
 		turnOpts.MaxToolLoops,
 		promptcontext.NewReader(turnOpts.RuntimeDir),
 		journal,
+		hooks.RuntimeConfig{
+			Duplicate: hooks.DuplicateConfigOrDefault(turnOpts.DuplicateToolCall),
+			ToolResult: hooks.ToolResultConfigOrDefault(hooks.ToolResultConfig{
+				Enabled:              turnOpts.ToolResult.Enabled,
+				SpillThresholdTokens: turnOpts.ToolResult.SpillThresholdTokens,
+				Tools:                turnOpts.ToolResult.Tools,
+				FSRoot:               turnOpts.FSRoot,
+			}),
+		},
 		logger,
 	)
+	// 设置工具结果入队器
 	rt.orch.SetToolResultEnqueuer(rt.enqueueToolResult)
+	// 返回 runtime
 	return rt
 }
 
+// setPolicy 热更新 orchestrator 策略。
+func (r *runtime) setPolicy(engine *policy.Engine) {
+	r.orch.SetPolicy(engine)
+}
+
+// getLoadedSkills 获取加载的技能列表
 func (r *runtime) getLoadedSkills() []skills.LoadedSkill {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]skills.LoadedSkill(nil), r.loadedSkills...)
 }
 
+// setLoadedSkills 设置加载的技能列表
 func (r *runtime) setLoadedSkills(items []skills.LoadedSkill) {
 	r.mu.Lock()
 	r.loadedSkills = append([]skills.LoadedSkill(nil), items...)
 	r.mu.Unlock()
 }
 
+// setTriggerDelivery 设置 trigger 消息投递跟踪器
 func (r *runtime) setTriggerDelivery(tracker triggers.DeliveryTracker) {
 	r.triggerDelivery = tracker
 }
 
+// start 启动 session runtime
 func (r *runtime) start(parent context.Context) {
 	go r.consumeLoop(parent)
 }
 
+// consumeLoop 消费消息循环
 func (r *runtime) consumeLoop(ctx context.Context) {
 	for {
 		env, err := r.queue.Dequeue(ctx)
@@ -168,20 +205,23 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		case queue.RequestTypeToolResult:
 			r.handleToolResult(ctx)
 		case queue.RequestTypeMessage, "":
-			r.handleHumanMessage(ctx, env.Content)
+			r.handleHumanMessage(ctx, env)
 		default:
 		}
 	}
 }
 
+// enqueueToolResult 将 tool 结果入队
 func (r *runtime) enqueueToolResult(_ string) error {
 	return r.enqueue(queue.Envelope{RequestType: queue.RequestTypeToolResult}, queue.PriorityToolResult)
 }
 
+// scheduleToolResult 调度 tool 结果入队
 func (r *runtime) scheduleToolResult() error {
 	return r.enqueueToolResult(r.session.ID)
 }
 
+// applyStepOutcome 应用步骤结果
 func (r *runtime) applyStepOutcome(history *[]llm.Message, outcome turn.StepOutcome) {
 	r.messages = append([]llm.Message(nil), (*history)...)
 	if outcome.Pending != nil {
@@ -197,54 +237,41 @@ func (r *runtime) applyStepOutcome(history *[]llm.Message, outcome turn.StepOutc
 	}
 }
 
-func (r *runtime) handleHumanMessage(parent context.Context, content string) {
+func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope) {
+	content := env.Content
+	userName := llm.NormalizeUserMessageName(env.UserName)
 	r.mu.Lock()
 	if r.pending != nil {
 		pending := r.pending
 		r.pending = nil
 		r.orch.InterruptPending(r.session.ID, &r.messages, pending)
 	}
-	r.toolLoopCount = 0
-	if r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
+	if r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages) {
+		r.logger.Info("repaired orphan tool_calls before user message",
+			"session_id", r.session.ID,
+		)
 	}
-	turnCtx, cancel := context.WithCancel(parent)
-	r.turnCancel = cancel
-	r.state = turn.StateModelStreaming
-	history := r.messages
+	r.toolLoopCount = 0
 	r.mu.Unlock()
 
-	var scheduleToolResult bool
-	defer func() {
-		r.mu.Lock()
-		r.state = turn.StateIdle
-		r.turnCancel = nil
-		r.mu.Unlock()
-		if !scheduleToolResult {
-			r.tryCompleteChildIfIdle()
-		}
-	}()
-
-	setState := func(s turn.State) {
-		r.mu.Lock()
-		r.state = s
-		r.mu.Unlock()
-	}
-
-	outcome := r.orch.RunHumanMessageTurn(turnCtx, r.session.ID, &history, content, setState)
+	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, content, userName, setState)
+	})
 	if outcome.Err != nil {
 		r.mu.Lock()
 		r.messages = history
 		r.mu.Unlock()
 		r.persist(context.Background())
+		r.finishTurnIdle(outcome)
 		return
 	}
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	scheduleToolResult = outcome.ScheduleToolResult
 	if outcome.ScheduleToolResult {
 		_ = r.scheduleToolResult()
+	} else {
+		r.finishTurnIdle(outcome)
 	}
 	r.persist(context.Background())
 }
@@ -252,44 +279,20 @@ func (r *runtime) handleHumanMessage(parent context.Context, content string) {
 func (r *runtime) afterToolStep(outcome turn.StepOutcome) {
 	if outcome.ScheduleToolResult {
 		_ = r.scheduleToolResult()
+	} else {
+		r.finishTurnIdle(outcome)
 	}
 	r.persist(context.Background())
 }
 
 func (r *runtime) handleToolResult(parent context.Context) {
-	r.mu.Lock()
-	if r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
-	}
-	turnCtx, cancel := context.WithCancel(parent)
-	r.turnCancel = cancel
-	r.state = turn.StateModelStreaming
-	history := r.messages
-	loopCount := r.toolLoopCount
-	r.mu.Unlock()
-
-	var scheduleToolResult bool
-	defer func() {
-		r.mu.Lock()
-		r.state = turn.StateIdle
-		r.turnCancel = nil
-		r.mu.Unlock()
-		if !scheduleToolResult {
-			r.tryCompleteChildIfIdle()
-		}
-	}()
-
-	setState := func(s turn.State) {
-		r.mu.Lock()
-		r.state = s
-		r.mu.Unlock()
-	}
-
-	outcome := r.orch.RunToolMessageTurn(turnCtx, r.session.ID, &history, setState, loopCount)
+	loopCount := r.toolLoopCountSnapshot()
+	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+		return r.orch.RunToolMessageTurn(ctx, r.session.ID, history, setState, loopCount)
+	})
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	scheduleToolResult = outcome.ScheduleToolResult
 	r.afterToolStep(outcome)
 }
 
@@ -298,51 +301,37 @@ func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.A
 		return
 	}
 	r.mu.Lock()
-	if r.compression != nil && r.compression.Enabled() && !r.isChildSession() {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages)
-	}
-	turnCtx, cancel := context.WithCancel(parent)
-	r.turnCancel = cancel
-	r.state = turn.StateModelStreaming
-	history := r.messages
-	loopCount := r.toolLoopCount
+	savedPending := r.pending
+	savedLoopCount := r.toolLoopCount
 	r.mu.Unlock()
 
-	var scheduleToolResult bool
-	defer func() {
-		r.mu.Lock()
-		r.state = turn.StateIdle
-		r.turnCancel = nil
-		r.mu.Unlock()
-		if !scheduleToolResult {
-			r.tryCompleteChildIfIdle()
-		}
-	}()
-
-	setState := func(s turn.State) {
-		r.mu.Lock()
-		r.state = s
-		r.mu.Unlock()
-	}
-
-	outcome := r.orch.HandleAsyncToolResult(turnCtx, r.session.ID, &history, turn.AsyncToolResultInput{
-		JobID:      payload.JobID,
-		ToolName:   payload.ToolName,
-		ToolCallID: payload.ToolCallID,
-		Status:     payload.Status,
-		ResultText: payload.ResultText,
-		ErrorText:  payload.ErrorText,
-	}, setState, loopCount)
+	loopCount := r.toolLoopCountSnapshot()
+	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+		return r.orch.HandleAsyncToolResult(ctx, r.session.ID, history, turn.AsyncToolResultInput{
+			JobID:                  payload.JobID,
+			ToolName:               payload.ToolName,
+			ToolCallID:             payload.ToolCallID,
+			Status:                 payload.Status,
+			ResultText:             payload.ResultText,
+			ErrorText:              payload.ErrorText,
+			OutputCompressSavedPct: payload.OutputCompressSavedPct,
+			OutputCompressRawRunes: payload.OutputCompressRawRunes,
+			OutputCompressOutRunes: payload.OutputCompressOutRunes,
+		}, setState, loopCount)
+	})
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
+	if savedPending != nil && outcome.Pending == nil {
+		r.pending = savedPending
+		r.toolLoopCount = savedLoopCount
+		r.logger.Info("async_tool_result preserved pending hitl",
+			"session_id", r.session.ID,
+			"job_id", payload.JobID,
+			"tool_name", payload.ToolName,
+		)
+	}
 	r.mu.Unlock()
-	scheduleToolResult = outcome.ScheduleToolResult
 	r.afterToolStep(outcome)
-}
-
-func (r *runtime) handleMessage(parent context.Context, content string) {
-	// 兼容旧调用路径；与 handleHumanMessage 等价。
-	r.handleHumanMessage(parent, content)
 }
 
 func (r *runtime) handleResume(parent context.Context, resumeValue map[string]any) {
@@ -357,10 +346,6 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		return
 	}
 	pendingKind, pendingToolCallID := pendingHITLLogFields(pending)
-	turnCtx, cancel := context.WithCancel(parent)
-	r.turnCancel = cancel
-	r.state = turn.StateAwaitingTool
-	history := r.messages
 	loopCount := r.toolLoopCount
 	r.mu.Unlock()
 
@@ -384,32 +369,16 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		"resume_value", resumeValue,
 	)
 
-	var scheduleToolResult bool
-	defer func() {
-		r.mu.Lock()
-		r.state = turn.StateIdle
-		r.turnCancel = nil
-		r.mu.Unlock()
-		if !scheduleToolResult {
-			r.tryCompleteChildIfIdle()
-		}
-	}()
-
-	setState := func(s turn.State) {
-		r.mu.Lock()
-		r.state = s
-		r.mu.Unlock()
-	}
-
-	outcome := r.orch.ContinueAfterResume(turnCtx, r.session.ID, &history, resumeValue, pending, setState, loopCount)
-
+	outcome, history := r.runTurnStep(parent, turn.StateAwaitingTool, false, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+		return r.orch.ContinueAfterResume(ctx, r.session.ID, history, resumeValue, pending, setState, loopCount)
+	})
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
-	scheduleToolResult = outcome.ScheduleToolResult
 	r.afterToolStep(outcome)
 }
 
+// persist 持久化 session 数据
 func (r *runtime) persist(ctx context.Context) {
 	if r.store == nil || r.isChildSession() {
 		return
@@ -496,9 +465,39 @@ func pendingHITLLogFields(pending *turn.PendingHITL) (kind string, toolCallID st
 	return kind, ""
 }
 
+func (r *runtime) sidecarPrefix() compression.SidecarPrefix {
+	return compression.SidecarPrefix{
+		SystemPrompt: r.orch.SystemPromptForSession(r.session.ID),
+		Tools:        r.orch.ToolDefinitions(),
+	}
+}
+
+func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
+	if r.isChildSession() {
+		return compression.ForceResult{Status: "unsupported"}
+	}
+	r.mu.Lock()
+	busy := r.state != turn.StateIdle || r.pending != nil
+	r.mu.Unlock()
+	if busy {
+		return compression.ForceResult{Status: "busy"}
+	}
+	if r.compression == nil {
+		return compression.ForceResult{Status: "disabled"}
+	}
+	// sidecarPrefix → SystemPromptForSession → getLoadedSkills 会抢 r.mu，须在持锁前计算。
+	prefix := r.sidecarPrefix()
+	r.mu.Lock()
+	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, prefix)
+	r.mu.Unlock()
+	if result.Status == "applied" {
+		r.persist(ctx)
+	}
+	return result
+}
+
 func (r *runtime) contextView() *ContextView {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	msgs := append([]llm.Message(nil), r.messages...)
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
 	view := &ContextView{
@@ -515,6 +514,15 @@ func (r *runtime) contextView() *ContextView {
 	view.HasActiveTurn = r.state != turn.StateIdle || r.pending != nil
 	if view.LoadedSkills == nil {
 		view.LoadedSkills = []skills.LoadedSkill{}
+	}
+	r.mu.Unlock()
+	view.SystemPrompt = r.orch.SystemPromptForSession(r.session.ID)
+	enrichContextPromptStats(view, r.skillsCatalog)
+	if r.compression != nil {
+		if snap, ok := r.compression.LastCompression(r.session.ID); ok {
+			s := snap
+			view.LastCompression = &s
+		}
 	}
 	return view
 }
@@ -606,12 +614,23 @@ func (r *runtime) cancelTurn() bool {
 	r.mu.Lock()
 	cancel := r.turnCancel
 	state := r.state
-	r.mu.Unlock()
-	if cancel == nil || state == turn.StateIdle {
-		return false
+	if cancel != nil && state != turn.StateIdle {
+		r.mu.Unlock()
+		cancel()
+		return true
 	}
-	cancel()
-	return true
+	repaired := r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
+	if repaired {
+		r.pending = nil
+	}
+	r.mu.Unlock()
+	if repaired {
+		r.logger.Info("repaired orphan tool_calls on idle cancel",
+			"session_id", r.session.ID,
+		)
+		r.persist(context.Background())
+	}
+	return false
 }
 
 func (r *runtime) stop() {
@@ -639,9 +658,4 @@ func (r *runtime) unloadSkillsByName(names []string) []skills.LoadedSkill {
 	r.setLoadedSkills(loaded)
 	r.persist(context.Background())
 	return loaded
-}
-
-func (r *runtime) clearLoadedSkills() {
-	r.setLoadedSkills(nil)
-	r.persist(context.Background())
 }

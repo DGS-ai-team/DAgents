@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 )
 
 // ToolApprovalItem 为待审批的单条 tool call 摘要。
@@ -12,8 +14,9 @@ type ToolApprovalItem struct {
 	Name      string
 	RawArgs   string
 	Arguments map[string]any
-	Reason    string
-	Risk      string
+	Reason         string
+	Risk           string
+	ApprovalMode   string
 }
 
 // ExtractToolApprovals 从 approval_required SSE data 解析 tool_calls 列表。
@@ -59,12 +62,13 @@ func ExtractToolApprovals(data map[string]any) []ToolApprovalItem {
 			}
 		}
 		item := ToolApprovalItem{
-			CallID:    callID,
-			Name:      name,
-			RawArgs:   rawArgs,
-			Arguments: argMap,
-			Reason:    mapStringField(m, "approval_reason"),
-			Risk:      mapStringField(m, "risk_level"),
+			CallID:       callID,
+			Name:         name,
+			RawArgs:      rawArgs,
+			Arguments:    argMap,
+			Reason:       mapStringField(m, "approval_reason"),
+			Risk:         mapStringField(m, "risk_level"),
+			ApprovalMode: mapStringField(m, "approval_mode"),
 		}
 		out = append(out, item)
 	}
@@ -83,7 +87,8 @@ func FormatApprovalPrompt(data map[string]any) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("待审批工具 (%d):\n", len(items)))
 	for i, it := range items {
-		b.WriteString(fmt.Sprintf("  %d. %s (%s)\n", i+1, it.Name, it.CallID))
+		title := tuishared.ToolDisplayName(it.Name, it.Arguments)
+		b.WriteString(fmt.Sprintf("  %d. %s (%s)\n", i+1, title, it.CallID))
 		writeApprovalItemDetails(&b, it, "     ")
 	}
 	return strings.TrimRight(b.String(), "\n")
@@ -169,7 +174,7 @@ func FormatApprovalInteractive(data map[string]any, approved map[string]bool, cu
 	}
 	var b strings.Builder
 	if msg, ok := data["message"].(string); ok && strings.TrimSpace(msg) != "" {
-		b.WriteString(strings.TrimSpace(msg) + "\n\n")
+		fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(msg))
 	}
 	b.WriteString(fmt.Sprintf("待审批工具 (%d):\n", len(items)))
 	for i, it := range items {
@@ -181,7 +186,7 @@ func FormatApprovalInteractive(data map[string]any, approved map[string]bool, cu
 		if i == cursor {
 			prefix = "> "
 		}
-		fmt.Fprintf(&b, "%s%s %s (%s)\n", prefix, mark, it.Name, it.CallID)
+		fmt.Fprintf(&b, "%s%s %s (%s)\n", prefix, mark, tuishared.ToolDisplayName(it.Name, it.Arguments), it.CallID)
 		writeApprovalItemDetails(&b, it, "     ")
 	}
 	b.WriteString("\n↑/↓ 移动 · Space 切换 · Enter 确认（未勾选时默认批准光标项） · Y 全批准 · N/Esc 全拒绝")

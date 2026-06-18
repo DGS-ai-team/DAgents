@@ -41,18 +41,24 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 
 | 命令 | 说明 |
 |---|---|
-| `/help` | 帮助 |
-| `/status` | 在聊天记录中输出 api/session/client/sse |
-| `/context` | 打开当前 session 的 context 摘要视图；按 `Esc` 返回聊天记录 |
-| `/session` | 查询当前队列中的 active session |
-| `/skill` | 展示 loaded/available skills |
-| `/skill load NAME` | 加载 skill |
-| `/skill unload NAME` | 卸载 skill |
-| `/children` | 列出当前 session 下活跃子 Agent |
-| `/clear` | 清空服务端 context 并清 transcript |
-| `/exit` | 退出，并在终端打印恢复当前会话的 `dagents chat --session ...` 命令 |
+| `/help` | 帮助（Panel，中文） |
+| `/status` | agent、session、队列与 turn 状态 |
+| `/context` | 只读 context 视图；`Esc` 返回 |
+| `/policy` | 工具/shell 策略管理；`Esc` 返回 |
+| `/triggers` | 查看已配置触发器 |
+| `/compress` | 手动触发阻塞压缩 |
+| `/session` | 列出 session（亦可用 `/sessions`） |
+| `/switch <id>` | 切换 session（重连 SSE） |
+| `/new` | 新建 session |
+| `/skill` | skills 列表；`/skill load\|unload NAME` |
+| `/children` | 子 Agent 列表 |
+| `/reasoning on\|off` | 推理流显示（亦可用 `--show-reasoning` 启动） |
+| `/clear` | 清空服务端 context 与 transcript |
+| `/exit` | 退出，并打印 `dagents chat --session ...` 恢复命令 |
 
-快捷键：context 视图中按 `Esc` 返回聊天记录；输出中、工具审批或 Agent 询问中按 `Esc` 可调用 cancel 中断当前 turn。
+快捷键：context / policy 视图中 `Esc` 返回；**流式输出、审批或 Agent 询问中 `Esc` 取消在途 turn**（无 `/cancel` 斜杠命令）。
+
+**滚动**：transcript 默认贴底跟随；**滚轮上滚** 后流式输出、审批等待、**点击展开工具详情** 不会强制跳底；滚回底部或发送消息后恢复。Go Client 另支持 **PgUp/PgDn**。
 
 **Agent 询问（`ask_user_information`）**：TUI 将 `tool_call` 与 `user_information_required` 合并为一条「Agent 询问」块（问题 + 选项）。无选项时在底部输入框输入后 Enter；有选项时 ↑/↓、Space 多选、Enter 确认。`done` 表示轮到用户（见 [agent-node-api.md §2.4.1](../../docs/architecture/agent-node-api.md)）。
 

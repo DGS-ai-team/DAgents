@@ -10,7 +10,7 @@ type RelayHub struct {
 	ParentSessionID string
 	AgentID         string
 	ChildSessionID  string
-	ChildPurpose string
+	ChildPurpose    string
 }
 
 // Publish 实现 stream.Publisher；忽略 orchestrator 传入的 sessionID，统一发往父 session。

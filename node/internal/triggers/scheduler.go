@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,13 +18,19 @@ type MessageSubmitter interface {
 	SubmitTriggerMessage(sessionID, triggerID, content string) error
 }
 
+// SessionResolver 解析 latest_active 投递目标。
+type SessionResolver interface {
+	ResolveLatestActiveUserSessionID(ctx context.Context) (string, error)
+}
+
 // Scheduler 轮询到期触发器并统一 fire 入口。
 type Scheduler struct {
-	store        *Store
-	submitter    MessageSubmitter
-	cmdGate      CmdGate
-	pollInterval time.Duration
-	logger       *slog.Logger
+	store           *Store
+	submitter       MessageSubmitter
+	sessionResolver SessionResolver
+	cmdGate         CmdGate
+	pollInterval    time.Duration
+	logger          *slog.Logger
 
 	mu     sync.Mutex
 	stopCh chan struct{}
@@ -59,6 +66,11 @@ func (s *Scheduler) SetCmdGate(gate CmdGate) {
 	}
 }
 
+// SetSessionResolver 注入 latest_active 会话解析器。
+func (s *Scheduler) SetSessionResolver(resolver SessionResolver) {
+	s.sessionResolver = resolver
+}
+
 // Start 启动后台轮询；已在运行则幂等忽略。
 func (s *Scheduler) Start() {
 	s.mu.Lock()
@@ -88,14 +100,14 @@ func (s *Scheduler) Stop() {
 }
 
 // FireTrigger 手动或工具触发指定触发器。
-
-// 关键分支：不存在时返回 errTriggerNotFound；手动 fire 不执行 schedule cmd 门控。
-func (s *Scheduler) FireTrigger(triggerID, reason string, payload map[string]any, force bool) (FireRecord, error) {
+//
+// opts 非 nil 时为一次性 override（如 HTTP fire / 审批选项）；nil 时使用 def 持久化配置。
+func (s *Scheduler) FireTrigger(triggerID, reason string, payload map[string]any, force bool, opts *FireOptions) (FireRecord, error) {
 	def, ok := s.store.GetTrigger(triggerID)
 	if !ok {
 		return FireRecord{}, errTriggerNotFound
 	}
-	return s.fire(*def, reason, payload, force), nil
+	return s.fire(context.Background(), *def, reason, payload, force, opts), nil
 }
 
 func (s *Scheduler) runLoop() {
@@ -125,13 +137,13 @@ func (s *Scheduler) tickDue(now time.Time) {
 				"next_fire_at", updated.NextFireAt,
 			)
 		case DueFire:
-			s.fire(def, "schedule", map[string]any{}, false)
+			s.fire(context.Background(), def, "schedule", map[string]any{}, false, nil)
 		default:
 		}
 	}
 }
 
-func (s *Scheduler) fire(def Definition, reason string, payload map[string]any, force bool) FireRecord {
+func (s *Scheduler) fire(ctx context.Context, def Definition, reason string, payload map[string]any, force bool, opts *FireOptions) FireRecord {
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -171,9 +183,11 @@ func (s *Scheduler) fire(def Definition, reason string, payload map[string]any, 
 			payload["cmd_gate"] = detail
 		}
 	}
-	requestedSession := ""
-	if def.TargetSessionID != nil {
-		requestedSession = *def.TargetSessionID
+	requestedSession, effectiveMode, bindAfterFire, err := s.resolveFireSession(ctx, def, opts)
+	if err != nil {
+		record := s.record(def, FireStatusError, reason, payload, err.Error(), nil, nil, "")
+		s.logFireRecord(record)
+		return record
 	}
 	sessionID, err := s.submitter.EnsureSession(requestedSession)
 	if err != nil {
@@ -197,9 +211,58 @@ func (s *Scheduler) fire(def Definition, reason string, payload map[string]any, 
 		s.logFireRecord(record)
 		return record
 	}
+	if bindAfterFire {
+		s.bindNewSession(def, sessionID, effectiveMode)
+	}
 	record := s.record(def, FireStatusQueued, reason, payload, "queued", &sessionID, &clientID, content)
 	s.logFireRecord(record)
 	return record
+}
+
+func (s *Scheduler) bindNewSession(def Definition, sessionID string, effectiveMode SessionTargetMode) {
+	if effectiveMode != SessionTargetNewSession {
+		return
+	}
+	if hasBoundSessionID(def) {
+		return
+	}
+	updated := def
+	updated.SessionTargetMode = SessionTargetFixed
+	updated.TargetSessionID = &sessionID
+	_ = s.store.ReplaceTrigger(updated)
+}
+
+func (s *Scheduler) resolveFireSession(ctx context.Context, def Definition, opts *FireOptions) (requestedSession string, effectiveMode SessionTargetMode, bindAfterFire bool, err error) {
+	mode := def.EffectiveSessionTargetMode()
+	fixedID := ""
+	if def.TargetSessionID != nil {
+		fixedID = strings.TrimSpace(*def.TargetSessionID)
+	}
+	if opts != nil {
+		mode = opts.SessionTargetMode
+		fixedID = strings.TrimSpace(opts.FixedSessionID)
+	}
+
+	switch mode {
+	case SessionTargetFixed:
+		return fixedID, SessionTargetFixed, false, nil
+	case SessionTargetNewSession:
+		if fixedID != "" {
+			return fixedID, SessionTargetFixed, false, nil
+		}
+		return "", SessionTargetNewSession, true, nil
+	case SessionTargetLatestActive:
+		if s.sessionResolver == nil {
+			return "", mode, false, fmt.Errorf("session resolver not configured")
+		}
+		id, err := s.sessionResolver.ResolveLatestActiveUserSessionID(ctx)
+		if err != nil {
+			return "", mode, false, err
+		}
+		return id, SessionTargetLatestActive, false, nil
+	default:
+		return fixedID, SessionTargetFixed, false, nil
+	}
 }
 
 func (s *Scheduler) runCmdGate(cmd string) (bool, string, error) {

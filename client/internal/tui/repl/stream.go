@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,9 @@ type streamRunner struct {
 	reasoningLineOpen bool
 
 	turn *tuishared.TurnGate
+
+	lifecycleSuppress *tuishared.ChildLifecycleSuppress
+	toolCallStream    *tuishared.ToolCallStreamState
 }
 
 func newStreamRunner(
@@ -42,13 +46,15 @@ func newStreamRunner(
 	turn *tuishared.TurnGate,
 ) *streamRunner {
 	return &streamRunner{
-		client:        client,
-		sessionID:     sessionID,
-		transcript:    transcript,
-		toolFold:      toolFold,
-		printMu:       printMu,
-		showReasoning: showReasoning,
-		turn:          turn,
+		client:            client,
+		sessionID:         sessionID,
+		transcript:        transcript,
+		toolFold:          toolFold,
+		printMu:           printMu,
+		showReasoning:     showReasoning,
+		turn:              turn,
+		lifecycleSuppress: tuishared.NewChildLifecycleSuppress(),
+		toolCallStream:    tuishared.NewToolCallStreamState(),
 	}
 }
 
@@ -107,14 +113,34 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 	if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 		return true, nil
 	}
+	if (ev.Type == "approval_required" || ev.Type == "user_information_required") && clihitl.IsA2ARelayHITL(ev.Data) {
+		if r.turn.Awaiting() {
+			r.turn.FinishTurn()
+		}
+	}
+	if ev.Type == "usage" {
+		suffix := tuishared.FormatInlineUsage(tuishared.ParseUsageRound(ev.Data))
+		if suffix != "" {
+			r.transcript.ApplyRoundUsage(suffix)
+			r.printMu.Lock()
+			if r.assistantLineOpen {
+				fmt.Print(tuishared.StyleInlineUsage(suffix))
+			}
+			r.printMu.Unlock()
+		}
+		return true, nil
+	}
 	switch ev.Type {
 	case "assistant", "reasoning", "tool_call", "tool_result":
 		r.turn.MarkTurnContent()
 	}
 	switch ev.Type {
 	case "temporary_agent_created", "temporary_agent_completed", "temporary_agent_cancelled":
-		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
-			r.logSystem(line)
+		childID := clihitl.ChildSessionIDFromData(ev.Data)
+		if !r.lifecycleSuppress.ShouldSuppressLifecycle(childID, ev.Type) {
+			if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
+				r.logSystem(line)
+			}
 		}
 		return true, nil
 	}
@@ -130,6 +156,31 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 		OnTool: func(eventType string, data map[string]any) {
 			r.finishAssistantLine()
 			r.finishReasoningLine()
+			if eventType == "tool_call" {
+				r.lifecycleSuppress.NoteToolCallEvent(data)
+				partial, _ := data["partial"].(bool)
+				tuishared.HandleToolCallEvent(r.transcript, r.toolCallStream, data, r.toolFold.Verbose(), nil)
+				if partial {
+					return
+				}
+				r.printMu.Lock()
+				for _, line := range tuishared.FormatToolEvent("tool_call", data, r.toolFold.Verbose()) {
+					fmt.Fprintln(os.Stderr, line)
+				}
+				r.printMu.Unlock()
+				return
+			}
+			if eventType == "tool_result" {
+				name := strings.TrimSpace(fmt.Sprint(data["tool_name"]))
+				if name == "" {
+					name = strings.TrimSpace(fmt.Sprint(data["name"]))
+				}
+				content := strings.TrimSpace(fmt.Sprint(data["content"]))
+				if content == "" {
+					content = strings.TrimSpace(fmt.Sprint(data["output"]))
+				}
+				r.lifecycleSuppress.NoteToolResult(name, content)
+			}
 			for _, line := range tuishared.FormatToolEvent(eventType, data, r.toolFold.Verbose()) {
 				r.logSystem(line)
 			}
@@ -149,6 +200,9 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 	if ev.Type == "done" {
 		r.finishAssistantLine()
 		r.finishReasoningLine()
+		if r.toolCallStream != nil {
+			r.toolCallStream.Reset()
+		}
 		if r.turn.ShouldAcceptDone(ev.Seq) {
 			r.turn.FinishTurn()
 		}
@@ -158,11 +212,12 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 }
 
 func (r *streamRunner) printAssistant(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
 	r.printMu.Lock()
 	defer r.printMu.Unlock()
-	if text != "" {
-		r.assistantLineOpen = true
-	}
+	r.assistantLineOpen = true
 	fmt.Print(text)
 	r.transcript.AppendPartial("assistant", text)
 }
@@ -181,7 +236,7 @@ func (r *streamRunner) printReasoning(text string) {
 	r.printMu.Lock()
 	defer r.printMu.Unlock()
 	if !r.reasoningLineOpen {
-		fmt.Fprintf(os.Stderr, "[reasoning] ")
+		fmt.Fprint(os.Stderr, "\033[90m")
 		r.reasoningLineOpen = true
 	}
 	fmt.Fprint(os.Stderr, text)
@@ -192,7 +247,7 @@ func (r *streamRunner) finishReasoningLine() {
 	r.printMu.Lock()
 	defer r.printMu.Unlock()
 	if r.reasoningLineOpen {
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprint(os.Stderr, "\033[0m\n")
 		r.reasoningLineOpen = false
 	}
 	r.transcript.FinishPartial("reasoning")

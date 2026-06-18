@@ -58,7 +58,7 @@ func TestAppendMessage_writesJSONLLineWithSnapshot(t *testing.T) {
 	}
 }
 
-func TestAppendMessage_normalizesAssistantToolCallsReasoningContent(t *testing.T) {
+func TestAppendMessage_recordsAssistantToolCallsReasoningKey(t *testing.T) {
 	j := NewJournal(false, t.TempDir(), logx.Discard())
 	var history []llm.Message
 	j.AppendMessage("sess-reasoning", &history, llm.Message{
@@ -72,12 +72,6 @@ func TestAppendMessage_normalizesAssistantToolCallsReasoningContent(t *testing.T
 			},
 		}},
 	})
-	if len(history) != 1 {
-		t.Fatalf("history = %+v", history)
-	}
-	if history[0].ReasoningContent != "" {
-		t.Fatalf("reasoning_content = %q, want empty", history[0].ReasoningContent)
-	}
 	payload := messageToJournalPayload(history[0])
 	if _, ok := payload["reasoning_content"]; !ok {
 		t.Fatalf("journal payload missing reasoning_content: %+v", payload)
@@ -102,36 +96,6 @@ func TestInsertMessage_prependsAndAppendsJournal(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(readFile(t, files[0])), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("lines = %d, want 1", len(lines))
-	}
-}
-
-func TestInsertMessage_toolCallbackInheritsLatestReasoningContent(t *testing.T) {
-	j := NewJournal(false, t.TempDir(), logx.Discard())
-	history := []llm.Message{{
-		Role:             "assistant",
-		ReasoningContent: "cached thinking",
-		ToolCalls: []llm.ToolCall{{
-			ID:   "call-original",
-			Type: "function",
-			Function: llm.ToolCallFunction{
-				Name:      "bash_run",
-				Arguments: "{}",
-			},
-		}},
-	}}
-	j.InsertMessage("sess-callback", &history, 0, llm.Message{
-		Role: "assistant",
-		ToolCalls: []llm.ToolCall{{
-			ID:   "call-callback",
-			Type: "function",
-			Function: llm.ToolCallFunction{
-				Name:      "tool_callback",
-				Arguments: "{}",
-			},
-		}},
-	})
-	if history[0].ReasoningContent != "cached thinking" {
-		t.Fatalf("reasoning_content = %q", history[0].ReasoningContent)
 	}
 }
 

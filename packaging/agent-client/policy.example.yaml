@@ -2,7 +2,7 @@
 #
 # 本地使用：
 #   cp packaging/agent-client/policy.example.yaml packaging/agent-client/policy.yaml
-#   # 在 config.yaml 中将 policy_file 指向 policy.yaml
+# 生产环境请编辑 fs_root/policy/*.approval.txt（见 packaging/runtime/policy 种子文件）。
 
 default: require_approval
 
@@ -19,4 +19,3 @@ tools:
   trigger_create: require_approval
   trigger_update: require_approval
   trigger_delete: require_approval
-  trigger_fire: require_approval

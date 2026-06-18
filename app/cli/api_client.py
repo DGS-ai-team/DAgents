@@ -50,6 +50,12 @@ class DAgentsApiClient:
     async def get_agent_info(self) -> dict[str, Any]:
         return await self._get_json("/v1/agent/info")
 
+    async def get_llm_settings(self) -> dict[str, Any]:
+        return await self._get_json("/v1/llm/settings")
+
+    async def patch_llm_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
+        return await self._patch_json("/v1/llm/settings", patch)
+
     async def create_session(self, session_id: str | None = None) -> str:
         payload: dict[str, Any] = {}
         if session_id:
@@ -133,6 +139,13 @@ class DAgentsApiClient:
             raise ValueError("session_id is required")
         return await self._get_json(f"/v1/sessions/{sid}/context")
 
+    async def compress_session_context(self, session_id: str) -> dict[str, Any]:
+        """POST /v1/sessions/{session_id}/compress，手动触发阻塞压缩。"""
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        return await self._post_json(f"/v1/sessions/{sid}/compress", {})
+
     async def cancel_current_turn(self, session_id: str) -> dict[str, Any]:
         sid = str(session_id or "").strip()
         if not sid:
@@ -167,6 +180,23 @@ class DAgentsApiClient:
         result = await self._get_json(f"/v1/sessions/{sid}/child-agents")
         items = result.get("items")
         return items if isinstance(items, list) else []
+
+    async def list_triggers(self) -> dict[str, Any]:
+        """GET /v1/triggers → `{ "triggers": [...] }`。"""
+        return await self._get_json("/v1/triggers")
+
+    async def get_policy(self, *, shell: str = "") -> dict[str, Any]:
+        path = "/v1/policy"
+        if str(shell or "").strip():
+            path += f"?shell={str(shell).strip()}"
+        return await self._get_json(path)
+
+    async def update_tool_policy(self, updates: list[dict[str, str]]) -> None:
+        await self._put_json("/v1/policy/tools", {"updates": updates})
+
+    async def update_shell_policy(self, shell_type: str, updates: list[dict[str, str]]) -> None:
+        shell = str(shell_type or "").strip().lower()
+        await self._put_json(f"/v1/policy/shell/{shell}", {"updates": updates})
 
     async def stream_events(self, *, session_id: str, live_only: bool = True) -> AsyncIterator[StreamEvent]:
         """订阅 SSE；默认 live_only 跳过重放（对齐 Node `live=1`）。"""
@@ -221,6 +251,32 @@ class DAgentsApiClient:
 
     async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         async with self._session.post(f"{self.api_base}{path}", json=payload) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise RuntimeError(_format_http_error(resp.status, text))
+            if not text.strip():
+                return {}
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"invalid JSON response from {path}: {text}") from exc
+            return data if isinstance(data, dict) else {}
+
+    async def _patch_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        async with self._session.patch(f"{self.api_base}{path}", json=payload) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise RuntimeError(_format_http_error(resp.status, text))
+            if not text.strip():
+                return {}
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"invalid JSON response from {path}: {text}") from exc
+            return data if isinstance(data, dict) else {}
+
+    async def _put_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        async with self._session.put(f"{self.api_base}{path}", json=payload) as resp:
             text = await resp.text()
             if resp.status >= 400:
                 raise RuntimeError(_format_http_error(resp.status, text))

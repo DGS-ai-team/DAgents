@@ -8,24 +8,40 @@ import (
 	"testing"
 )
 
-func TestAllToolDefinitionsHaveRequired(t *testing.T) {
+func TestAllToolDefinitionsRequireCallPurpose(t *testing.T) {
 	reg, err := NewRegistry(t.TempDir(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, def := range reg.Definitions() {
 		params := def.Function.Parameters
-		if params == nil {
-			t.Fatalf("tool %q missing parameters", def.Function.Name)
-		}
-		if _, ok := params["required"]; !ok {
-			t.Fatalf("tool %q parameters missing required array", def.Function.Name)
-		}
 		req, ok := params["required"].([]string)
 		if !ok {
-			t.Fatalf("tool %q required is not []string: %T", def.Function.Name, params["required"])
+			t.Fatalf("tool %q required is not []string", def.Function.Name)
 		}
-		_ = req
+		found := false
+		for _, name := range req {
+			if name == CallPurposeKey {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("tool %q missing required %q", def.Function.Name, CallPurposeKey)
+		}
+	}
+}
+
+func TestParseToolCallArgumentsStripsCallPurpose(t *testing.T) {
+	bg, cleaned := ParseToolCallArguments(`{"call_purpose":"probe port","command":"echo ok","run_in_background":true}`)
+	if !bg {
+		t.Fatal("expected background")
+	}
+	if strings.Contains(cleaned, "call_purpose") {
+		t.Fatalf("cleaned should omit call_purpose: %q", cleaned)
+	}
+	if !strings.Contains(cleaned, "command") {
+		t.Fatalf("cleaned should keep command: %q", cleaned)
 	}
 }
 
@@ -95,9 +111,79 @@ func TestSearchReplace(t *testing.T) {
 	if !strings.Contains(out, "成功: 是") || !strings.Contains(out, "替换次数: 2") {
 		t.Fatalf("out = %q", out)
 	}
+	if !strings.Contains(out, "@@ 共 2 处相同替换") || !strings.Contains(out, "-foo") || !strings.Contains(out, "+baz") {
+		t.Fatalf("expected compact preview, out = %q", out)
+	}
 	read, err := reg.Execute(ctx, "read_file", `{"path":"x.txt"}`)
 	if err != nil || readFileBody(read) != "baz bar baz" {
 		t.Fatalf("read = %q err=%v", read, err)
+	}
+}
+
+func TestSearchReplace_singleMatchOmitsPreview(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, err = reg.Execute(ctx, "write_file", `{"path":"a.txt","content":"hello world"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := reg.Execute(ctx, "search_replace", `{"path":"a.txt","old_string":"world","new_string":"there"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "成功: 是\n替换次数: 1"
+	if out != want {
+		t.Fatalf("out = %q, want %q", out, want)
+	}
+}
+
+func TestSearchReplace_multilineIncludesPreview(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, err = reg.Execute(ctx, "write_file", `{"path":"b.txt","content":"line1\nline2\nline3"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := reg.Execute(ctx, "search_replace", `{"path":"b.txt","old_string":"line2","new_string":"line2a\nline2b"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "成功: 是") || !strings.Contains(out, "替换次数: 1") {
+		t.Fatalf("out = %q", out)
+	}
+	if !strings.Contains(out, "---\n") || !strings.Contains(out, "-line2") || !strings.Contains(out, "+line2a") {
+		t.Fatalf("expected multiline preview, out = %q", out)
+	}
+	if strings.Contains(out, "-line3") {
+		t.Fatalf("should not include unrelated lines, out = %q", out)
+	}
+}
+
+func TestSearchReplace_failKeepsDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, err = reg.Execute(ctx, "write_file", `{"path":"c.txt","content":"aa\nbb\naa"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := reg.Execute(ctx, "search_replace", `{"path":"c.txt","old_string":"aa","new_string":"x"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "成功: 否") || !strings.Contains(out, "匹配 2 处") || !strings.Contains(out, "匹配行:") {
+		t.Fatalf("out = %q", out)
 	}
 }
 

@@ -13,9 +13,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
+	"github.com/DGS-ai-team/DAgents/node/internal/compression"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
@@ -26,19 +30,24 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"github.com/DGS-ai-team/DAgents/node/internal/version"
+	"github.com/DGS-ai-team/DAgents/node/internal/webui"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 // Server 承载 Agent Node HTTP 路由与运行时依赖。
 type Server struct {
-	cfg          *config.Config
-	logger       *slog.Logger
-	mux          *http.ServeMux
-	sessions     *session.Manager // per-session 队列与 turn consumer
-	stream       *stream.Hub      // 进程内 SSE 事件总线
-	store        *store.SQLiteStore
-	triggerStore *triggers.Store
-	triggerSched *triggers.Scheduler
+	cfg           *config.Config
+	llmRuntime    *llm.RuntimeSettings
+	logger        *slog.Logger
+	mux           *http.ServeMux
+	sessions      *session.Manager // per-session 队列与 turn consumer
+	stream        *stream.Hub      // 进程内 SSE 事件总线
+	store         *store.SQLiteStore
+	triggerStore  *triggers.Store
+	triggerSched  *triggers.Scheduler
+	registrar     *manage.Registrar
+	inboxPoller   *manage.InboxPoller
+	a2aCallerHITL *session.A2ACallerHITLBridge
 }
 
 // Option 为 NewServer 可选配置。
@@ -100,16 +109,24 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	o := serverOptions{llmClient: llm.NewFromConfig(cfg)}
+	llmRuntime := llm.NewRuntimeSettings(cfg)
+	o := serverOptions{llmClient: llm.NewFromConfig(cfg, llmRuntime)}
 	for _, opt := range opts {
 		opt(&o)
 	}
 	// 生产路径：按 FSRoot 注册内置工具；失败时回退 "." 以免 API 完全不可用。
 	if o.tools == nil {
-		reg, err := tools.NewRegistry(cfg.FSRoot, 30)
+		reg, err := tools.NewRegistry(cfg.FSRoot, 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
 		if err != nil {
 			logger.Error("tools registry init failed", "error", err)
-			reg, _ = tools.NewRegistry(".", 30)
+			reg, _ = tools.NewRegistry(".", 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
+		}
+		if err := reg.SetBuiltinEnabled(cfg.Tools.NormalizedBuiltinEnabled()); err != nil {
+			logger.Error("tools.enabled_groups invalid", "error", err)
+		}
+		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
+		if cfg.Skills.Enabled {
+			reg.SetSkillsCatalog(skills.NewCatalog(cfg.SkillsRoot(), true, cfg.Skills.MaxInPrompt))
 		}
 		o.tools = reg
 	}
@@ -142,7 +159,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	mgr := session.NewManager(cfg.AgentID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
 		FSRoot:                   cfg.FSRoot,
 		MaxToolLoops:             cfg.LLM.MaxToolLoops,
-		SkillsRoot:               cfg.Skills.Root,
+		SkillsRoot:               cfg.SkillsRoot(),
 		SkillsEnabled:            cfg.Skills.Enabled,
 		SkillsMaxInPrompt:        cfg.Skills.MaxInPrompt,
 		RuntimeDir:               cfg.RuntimeDir(),
@@ -150,6 +167,16 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		CompressionBlocking:      cfg.Compression.BlockingTriggerTokens,
 		RawMessageHistoryEnabled: cfg.RawMessageHistoryEnabled(),
 		RawMessageHistoryDir:     cfg.RawMessageHistoryDir(),
+		DuplicateToolCall: hooks.DuplicateConfig{
+			Enabled:       cfg.DuplicateToolCallHookEnabled(),
+			WindowSeconds: cfg.DuplicateToolCallWindowSeconds(),
+		},
+		ToolResult: hooks.ToolResultConfig{
+			Enabled:              cfg.ToolResultHookEnabled(),
+			SpillThresholdTokens: cfg.ToolResultSpillThresholdTokens(),
+			Tools:                cfg.ToolResultHookTools(),
+			FSRoot:               cfg.FSRoot,
+		},
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:                   cfg.ChildAgents.Enabled,
@@ -170,6 +197,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerStore.SetLogger(logger)
 		triggerSched = triggers.NewScheduler(triggerStore, &session.TriggerSubmitter{Mgr: mgr}, cfg.Triggers.PollSeconds)
 		triggerSched.SetLogger(logger)
+		triggerSched.SetSessionResolver(mgr)
 		mgr.SetTriggerDeliveryTracker(triggerStore)
 		if o.tools != nil {
 			o.tools.SetTriggerRuntime(triggerStore, triggerSched, cfg.AgentID)
@@ -182,26 +210,61 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		// bash 后台任务完成时回灌 session 队列，触发新一轮 turn。
 		o.tools.SetBackgroundJobNotifier(func(sessionID string, done tools.BackgroundJobDone) {
 			if err := mgr.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
-				JobID:      done.JobID,
-				ToolName:   done.ToolName,
-				ToolCallID: done.ToolCallID,
-				Status:     done.Status,
-				ResultText: done.ResultText,
-				ErrorText:  done.ErrorText,
+				JobID:                  done.JobID,
+				ToolName:               done.ToolName,
+				ToolCallID:             done.ToolCallID,
+				Status:                 done.Status,
+				ResultText:             done.ResultText,
+				ErrorText:              done.ErrorText,
+				OutputCompressSavedPct: done.OutputCompressSavedPct,
+				OutputCompressRawRunes: done.OutputCompressRawRunes,
+				OutputCompressOutRunes: done.OutputCompressOutRunes,
 			}); err != nil {
 				logger.Warn("background tool completion enqueue failed", "session_id", sessionID, "error", err)
 			}
 		})
 	}
+	var registrar *manage.Registrar
+	var inboxPoller *manage.InboxPoller
+	var a2aBridge *session.A2ACallerHITLBridge
+	if cfg.Manage.Enabled {
+		registrar = manage.NewRegistrar(cfg, logger)
+		registrar.SetToolNamesProvider(mgr.ToolNames)
+		a2aBridge = session.NewA2ACallerHITLBridge(cfg.AgentID, hub)
+		if o.tools != nil {
+			compliancePeer := ""
+			if card, cardErr := manage.LoadDefaultAgentCard(); cardErr != nil {
+				logger.Warn("agent card load failed for agent_invoke defaults", "error", cardErr, "path", manage.DefaultAgentCardPath())
+			} else if card != nil {
+				compliancePeer = card.CompliancePeer()
+			}
+			o.tools.SetManageRuntime(
+				a2aclient.New(cfg),
+				cfg.AgentID,
+				compliancePeer,
+				a2aBridge,
+			)
+		}
+		if cfg.ManageA2AEnabled() {
+			inboxPoller = manage.NewInboxPoller(cfg, logger)
+			if handler := manage.ResolveInboxHandler(cfg, mgr, logger); handler != nil {
+				inboxPoller.SetHandler(handler)
+			}
+		}
+	}
 	s := &Server{
-		cfg:          cfg,
-		logger:       logger,
-		mux:          http.NewServeMux(),
-		stream:       hub,
-		store:        st,
-		sessions:     mgr,
-		triggerStore: triggerStore,
-		triggerSched: triggerSched,
+		cfg:           cfg,
+		llmRuntime:    llmRuntime,
+		logger:        logger,
+		mux:           http.NewServeMux(),
+		stream:        hub,
+		store:         st,
+		sessions:      mgr,
+		triggerStore:  triggerStore,
+		triggerSched:  triggerSched,
+		registrar:     registrar,
+		inboxPoller:   inboxPoller,
+		a2aCallerHITL: a2aBridge,
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
@@ -209,6 +272,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/sessions", s.handleListSessions)
 	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", s.handleDeleteSession)
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/clear-context", s.handleClearContext)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/compress", s.handleCompressContext)
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/context", s.handleSessionContext)
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/cancel", s.handleCancelSession)
@@ -218,6 +282,12 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()
 	s.registerChildAgentRoutes()
+	s.registerPolicyRoutes()
+	s.registerLLMRoutes()
+	if cfg.UIEnabled() {
+		s.mux.Handle("GET /ui/", webui.Handler())
+		s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
+	}
 	return s
 }
 
@@ -243,6 +313,14 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 
 	errCh := make(chan error, 1)
+	regCtx, regCancel := context.WithCancel(ctx)
+	defer regCancel()
+	if s.registrar != nil {
+		s.registrar.Start(regCtx)
+	}
+	if s.inboxPoller != nil {
+		s.inboxPoller.Start(regCtx)
+	}
 	go func() {
 		s.logger.Info("agent node listening", "addr", addr, "agent_id", s.cfg.AgentID)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -257,6 +335,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		s.logger.Info("agent node shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		regCancel()
+		if s.registrar != nil {
+			s.registrar.Stop(shutdownCtx)
+		}
 		// 与启动顺序相反：先停后台任务与会话，再关 HTTP 监听。
 		if s.triggerSched != nil {
 			s.triggerSched.Stop()
@@ -293,19 +375,28 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 type agentInfoResponse struct {
-	AgentID          string   `json:"agent_id"`
-	ExposeToPeers    bool     `json:"expose_to_peers"`
-	Capabilities     []string `json:"capabilities"`
-	ManageRegistered bool     `json:"manage_registered"`
+	AgentID          string              `json:"agent_id"`
+	ExposeToPeers    bool                `json:"expose_to_peers"`
+	Capabilities     []string            `json:"capabilities"`
+	ManageRegistered bool                `json:"manage_registered"`
+	LLM              llm.LLMSettingsView `json:"llm"`
 }
 
 func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
-	// 静态元数据：agent_id、capabilities；Manage 注册态来自配置而非实时探测。
+	registered := false
+	if s.registrar != nil {
+		registered = s.registrar.Registered()
+	}
+	llmView := llm.LLMSettingsView{}
+	if s.llmRuntime != nil {
+		llmView = s.llmRuntime.Snapshot()
+	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
 		AgentID:          s.cfg.AgentID,
 		ExposeToPeers:    s.cfg.ExposeToPeers,
 		Capabilities:     s.cfg.Capabilities(),
-		ManageRegistered: s.cfg.ManageRegistered(),
+		ManageRegistered: registered,
+		LLM:              llmView,
 	})
 }
 
@@ -475,9 +566,15 @@ type sessionContextResponse struct {
 	QueuePending          int                     `json:"queue_pending"`
 	HasActiveTurn         bool                    `json:"has_active_turn"`
 	TurnState             string                  `json:"turn_state,omitempty"`
-	RunTurnPhase          string                  `json:"run_turn_phase"`
-	LoadedSkills          []skills.LoadedSkill    `json:"loaded_skills"`
-	RecentMessages        []contextMessagePreview `json:"recent_messages"`
+	RunTurnPhase                   string                  `json:"run_turn_phase"`
+	SystemPrompt                   string                  `json:"system_prompt,omitempty"`
+	SystemPromptEstimatedTokens    int                     `json:"system_prompt_estimated_tokens"`
+	SkillsCatalogEstimatedTokens        int                     `json:"skills_catalog_estimated_tokens"`
+	SkillsCatalogMaxBodyEstimatedTokens int                     `json:"skills_catalog_max_body_estimated_tokens"`
+	SkillsCatalogBloatThreshold         int                     `json:"skills_catalog_bloat_threshold"`
+	LoadedSkills                   []skills.LoadedSkill    `json:"loaded_skills"`
+	RecentMessages                 []contextMessagePreview `json:"recent_messages"`
+	LastCompression                *compression.LastCompressionSnapshot `json:"last_compression,omitempty"`
 }
 
 func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
@@ -523,9 +620,15 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 		ToolLoopCount:         view.ToolLoopCount,
 		QueuePending:          view.QueuePending,
 		HasActiveTurn:         view.HasActiveTurn,
-		LoadedSkills:          view.LoadedSkills,
-		RecentMessages:        recent,
-		RunTurnPhase:          turn.RunTurnPhase(view.TurnState),
+		SystemPrompt:                 view.SystemPrompt,
+		SystemPromptEstimatedTokens:  view.SystemPromptEstimatedTokens,
+		SkillsCatalogEstimatedTokens:        view.SkillsCatalogEstimatedTokens,
+		SkillsCatalogMaxBodyEstimatedTokens: view.SkillsCatalogMaxBodyEstimatedTokens,
+		SkillsCatalogBloatThreshold:         view.SkillsCatalogBloatThreshold,
+		LoadedSkills:                 view.LoadedSkills,
+		RecentMessages:               recent,
+		LastCompression:              view.LastCompression,
+		RunTurnPhase:                 turn.RunTurnPhase(view.TurnState),
 	}
 	if view.TurnState != "" {
 		resp.TurnState = string(view.TurnState)
@@ -536,11 +639,38 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
+	// POST compress：手动触发一次阻塞压缩（忽略 token 阈值）。
+	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	if sessionID == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		return
+	}
+	result, err := s.sessions.CompressContext(r.Context(), sessionID)
+	if err != nil {
+		if err.Error() == "session_not_found" {
+			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+		} else {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
+		}
+		return
+	}
+	if result.Status == "busy" {
+		writeAPIError(w, http.StatusConflict, "turn_busy", "当前 turn 进行中，请稍后再试", map[string]any{
+			"session_id": sessionID,
+			"status":     result.Status,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 type postMessageRequest struct {
-	SessionID   string         `json:"session_id"`
-	RequestType string         `json:"request_type"`
-	Content     string         `json:"content"`
-	ResumeValue map[string]any `json:"resume_value"`
+	SessionID       string         `json:"session_id"`
+	RequestType     string         `json:"request_type"`
+	Content         string         `json:"content"`
+	UserMessageName string         `json:"user_message_name,omitempty"`
+	ResumeValue     map[string]any `json:"resume_value"`
 }
 
 type postMessageResponse struct {
@@ -565,8 +695,16 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if requestType == "" {
 		requestType = "message"
 	}
+	if requestType == "resume" && s.a2aCallerHITL != nil && s.a2aCallerHITL.DeliverA2ACallerResume(sessionID, req.ResumeValue) {
+		writeJSON(w, http.StatusOK, postMessageResponse{
+			Accepted:  true,
+			SessionID: sessionID,
+			Priority:  string(queue.PriorityHuman),
+		})
+		return
+	}
 
-	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ResumeValue)
+	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ResumeValue, req.UserMessageName)
 	if err != nil {
 		// 业务错误映射为 HTTP 状态 + 统一 error 体（见 errors.go）。
 		switch err.Error() {
@@ -754,4 +892,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func toolsBashCompressFromConfig(toolsCfg config.ToolsConfig) tools.BashCompressConfig {
+	out := tools.DefaultBashCompressConfig()
+	if toolsCfg.BashCompress.Enabled != nil {
+		out.Enabled = *toolsCfg.BashCompress.Enabled
+	}
+	if toolsCfg.BashCompress.MaxOutputChars > 0 {
+		out.MaxOutputChars = toolsCfg.BashCompress.MaxOutputChars
+	}
+	if toolsCfg.BashCompress.MaxOutputCharsStderr > 0 {
+		out.MaxOutputCharsStderr = toolsCfg.BashCompress.MaxOutputCharsStderr
+	}
+	return out
 }

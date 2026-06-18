@@ -25,8 +25,8 @@ type Snapshot struct {
 }
 
 var (
-	mu       sync.RWMutex
-	cached   *Snapshot
+	mu     sync.RWMutex
+	cached *Snapshot
 )
 
 // CaptureAtStartup 显式采集并缓存快照；Node 启动路径调用一次。

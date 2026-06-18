@@ -1,8 +1,8 @@
-# 本地单 Agent 助手：双 Client 模式
+# 本地单 Agent 助手：多 Client 模式
 
-本文描述 **Phase AC** 目标形态：**Go Agent Node** 为唯一运行时，人机交互通过 **两种可选 Client** 连接本机 Node，用户按终端环境自行选择。
+本文描述 **Phase AC** 目标形态：**Go Agent Node** 为唯一运行时，人机交互通过 **终端或浏览器 Client** 连接本机 Node，用户按环境自行选择。
 
-Manage、远程多 Agent、Web 统一入口 **不在本文范围**（见 [three-component-model.md](../design/three-component-model.md)）。
+Manage、远程多 Agent 统一运维入口 **不在本文范围**（见 [three-component-model.md](../design/three-component-model.md)）；本机浏览器 Client 为 Node 内嵌 **`/ui/`**，非历史独立 DAgentsUI 仓库。
 
 ---
 
@@ -13,6 +13,7 @@ Manage、远程多 Agent、Web 统一入口 **不在本文范围**（见 [three-
 | **Agent Node** | `node/` | LLM turn、工具、session、SQLite；`HTTP + SSE` API |
 | **Go Client（full + repl）** | `client/` | SSH 默认全屏 TUI；`--plain` 行模式兜底 |
 | **Python Textual TUI** | `app/cli/` | 现代终端首选：`dagents chat` |
+| **Node Web UI** | `node/webui/` | 浏览器 Client：`http://127.0.0.1:<port>/ui/` |
 
 ```text
 ┌──────────────────┐     HTTP/SSE      ┌─────────────────┐
@@ -20,7 +21,9 @@ Manage、远程多 Agent、Web 统一入口 **不在本文范围**（见 [three-
 │ dagents chat     │                   │  Agent Node     │
 ├──────────────────┤ ────────────────► │  (Go)           │
 │ Go REPL          │                   │  127.0.0.1:port │
-│ dagents-client   │                   └─────────────────┘
+│ dagents-client   │                   │  + GET /ui/     │
+├──────────────────┤ ────────────────► └─────────────────┘
+│ 浏览器 /ui/      │
 └──────────────────┘
 ```
 
@@ -32,13 +35,14 @@ Manage、远程多 Agent、Web 统一入口 **不在本文范围**（见 [three-
 |------|------|------|
 | 现代终端（WSL、新 Linux、Windows Terminal） | **Python Textual** | `dagents chat`（读共用 `config.yaml`） |
 | 老 SSH、RHEL6、无 Python、脚本 | **Go Client** | `dagents-client tui`（全屏）；`tui --plain` 兜底 |
+| 老 Windows + 浏览器（Chrome/Edge） | **Node Web UI** | 启动 Node 后打开 `http://127.0.0.1:<port>/ui/` |
 | 探活 | 任意 | `dagents-client probe` / `curl …/health` |
 
 **共用配置文件**
 
 - 路径：`packaging/agent-client/config.yaml`（从 `config.example.yaml` 复制）
 - 查找顺序：`--config` / `-config` → 环境变量 `DAGENTS_CONFIG` → 上述默认路径
-- Node 读 `listen` / `llm` / `data_dir` 等；Client 读 `local.endpoint`
+- Node 读 `listen` / `llm` / `fs_root` 等；Client 读 `local.endpoint`
 
 Python TUI 直连 Node（SSE 按 `session_id` 过滤，见 `app/cli/api_client.py`）。
 

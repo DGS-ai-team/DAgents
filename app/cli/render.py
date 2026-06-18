@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 from app.cli.approval import ToolApprovalRequest
+from app.cli.child_agent import parse_temporary_agent_tool_result
 from app.cli.tool_calls import normalize_tool_call_item
 
 
@@ -19,6 +21,8 @@ class TranscriptKind(str, Enum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     COMPRESSION = "compression"
+    USAGE = "usage"
+    REASONING_DELTA = "reasoning_delta"
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +32,11 @@ class TranscriptUpdate:
     kind: TranscriptKind
     text: str = ""
     data: dict[str, Any] = field(default_factory=dict)
+
+
+def sanitize_inline_tool_arg(text: str) -> str:
+    """将工具参数中的换行压成空格，避免 bash(...) 等标题行意外折行。"""
+    return re.sub(r"[\r\n]+", " ", str(text)).strip()
 
 
 def compact_json(value: Any, *, max_length: int = 500) -> str:
@@ -74,8 +83,14 @@ def format_tool_result(data: dict[str, Any]) -> TranscriptUpdate:
     call_id = data.get("tool_call_id") or ""
     status = "rejected" if data.get("rejected") else "done"
     content = str(data.get("content") or "").strip()
+    parsed = parse_temporary_agent_tool_result(str(name), content)
     lines = [f"[tool:{status}] {name} {call_id}".rstrip()]
-    if content:
+    if parsed is not None:
+        summary, detail = parsed
+        lines[0] = f"[tool:{status}] {summary}"
+        if detail:
+            lines.append(detail)
+    elif content:
         lines.append(content)
     return TranscriptUpdate(kind=TranscriptKind.TOOL_RESULT, text="\n".join(lines), data=data)
 
@@ -100,8 +115,8 @@ def format_tool_call(data: dict[str, Any]) -> TranscriptUpdate | None:
 
 
 def format_reasoning(content: str) -> TranscriptUpdate:
-    """格式化 reasoning 流事件。"""
-    return TranscriptUpdate(kind=TranscriptKind.LINE, text=f"[reasoning] {content}")
+    """格式化 reasoning 流事件（TUI 用其驱动 thinking 状态；正文由 show_reasoning 控制）。"""
+    return TranscriptUpdate(kind=TranscriptKind.REASONING_DELTA, text=content)
 
 
 def format_error(message: str) -> TranscriptUpdate:
@@ -137,6 +152,13 @@ def format_context_compression(event_type: str, data: dict[str, Any]) -> Transcr
             "compressed_message_count": data.get("compressed_message_count"),
             "compression_start": data.get("compression_start"),
             "compression_end": data.get("compression_end"),
+            "prompt_tokens": data.get("prompt_tokens"),
+            "completion_tokens": data.get("completion_tokens"),
+            "total_tokens": data.get("total_tokens"),
+            "token_reduction_rate": data.get("token_reduction_rate"),
+            "prompt_cache_hit_tokens": data.get("prompt_cache_hit_tokens"),
+            "prompt_cache_miss_tokens": data.get("prompt_cache_miss_tokens"),
+            "prompt_cache_hit_rate": data.get("prompt_cache_hit_rate"),
         },
     )
 
@@ -168,25 +190,97 @@ class UsageStripSnapshot:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cache_hit_tokens: int = 0
+    cache_hit_rate: float = -1.0
+    reasoning_tokens: int = 0
     has_data: bool = False
 
 
-def parse_usage_strip(data: dict[str, Any]) -> UsageStripSnapshot:
-    """从 SSE usage 事件 data 解析 strip 快照。"""
+def _parse_usage_fields(data: dict[str, Any]) -> UsageStripSnapshot:
+    """从 usage 字段 dict 解析 strip 快照。"""
     prompt = _int_from_event_data(data.get("prompt_tokens"))
     completion = _int_from_event_data(data.get("completion_tokens"))
     hit = _int_from_event_data(data.get("prompt_cache_hit_tokens"))
     cached = _int_from_event_data(data.get("prompt_cached_tokens"))
     if hit <= 0 and cached > 0:
         hit = cached
+    rate = -1.0
+    raw_rate = data.get("prompt_cache_hit_rate")
+    if raw_rate is not None:
+        try:
+            rate = float(raw_rate)
+        except (TypeError, ValueError):
+            rate = -1.0
+    elif prompt > 0 and hit > 0:
+        rate = min(1.0, hit / prompt)
+    reasoning = _int_from_event_data(data.get("reasoning_tokens"))
+    if reasoning <= 0:
+        details = data.get("completion_tokens_details")
+        if isinstance(details, dict):
+            reasoning = _int_from_event_data(details.get("reasoning_tokens"))
     if prompt <= 0 and completion <= 0:
         return UsageStripSnapshot()
     return UsageStripSnapshot(
         prompt_tokens=prompt,
         completion_tokens=completion,
         cache_hit_tokens=hit,
+        cache_hit_rate=rate,
+        reasoning_tokens=reasoning,
         has_data=True,
     )
+
+
+def parse_usage_strip(data: dict[str, Any]) -> UsageStripSnapshot:
+    """从 SSE usage 事件 data 解析 turn 累计 strip 快照。"""
+    return _parse_usage_fields(data)
+
+
+def accumulate_usage_strip(strip: UsageStripSnapshot, round_snap: UsageStripSnapshot) -> UsageStripSnapshot:
+    """将单轮 round 用量累加到 strip；round 无数据时保留 strip。"""
+    if not round_snap.has_data:
+        return strip
+    if not strip.has_data:
+        return round_snap
+    prompt = strip.prompt_tokens + round_snap.prompt_tokens
+    completion = strip.completion_tokens + round_snap.completion_tokens
+    hit = strip.cache_hit_tokens + round_snap.cache_hit_tokens
+    reasoning = strip.reasoning_tokens + round_snap.reasoning_tokens
+    rate = -1.0
+    if prompt > 0 and hit > 0:
+        rate = min(1.0, hit / prompt)
+    return UsageStripSnapshot(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        cache_hit_tokens=hit,
+        cache_hit_rate=rate,
+        reasoning_tokens=reasoning,
+        has_data=True,
+    )
+
+
+def parse_usage_round(data: dict[str, Any]) -> UsageStripSnapshot:
+    """从 SSE usage 事件 data 解析单轮 LLM 用量（round_* 字段）。"""
+    round_data: dict[str, Any] = {
+        "prompt_tokens": data.get("round_prompt_tokens"),
+        "completion_tokens": data.get("round_completion_tokens"),
+        "prompt_cache_hit_tokens": data.get("round_prompt_cache_hit_tokens"),
+        "prompt_cached_tokens": data.get("round_prompt_cached_tokens"),
+        "prompt_cache_hit_rate": data.get("round_prompt_cache_hit_rate"),
+        "reasoning_tokens": data.get("round_reasoning_tokens"),
+    }
+    details = data.get("round_completion_tokens_details")
+    if isinstance(details, dict):
+        round_data["completion_tokens_details"] = details
+    return _parse_usage_fields(round_data)
+
+
+def format_inline_usage(snapshot: UsageStripSnapshot) -> str:
+    """格式化 assistant 块尾部的单轮用量短文案。"""
+    if not snapshot.has_data:
+        return ""
+    text = f" · ↑{_format_compact_count(snapshot.prompt_tokens)} ↓{_format_compact_count(snapshot.completion_tokens)}"
+    if snapshot.reasoning_tokens > 0:
+        text += f" · think {_format_compact_count(snapshot.reasoning_tokens)}"
+    return text
 
 
 def format_input_strip_usage(snapshot: UsageStripSnapshot) -> str:
@@ -195,7 +289,12 @@ def format_input_strip_usage(snapshot: UsageStripSnapshot) -> str:
         return ""
     text = f"↑{_format_compact_count(snapshot.prompt_tokens)} ↓{_format_compact_count(snapshot.completion_tokens)}"
     if snapshot.cache_hit_tokens > 0:
-        text += f" · hit {_format_compact_count(snapshot.cache_hit_tokens)}"
+        if snapshot.cache_hit_rate >= 0:
+            text += f" · hit {_format_compact_count(snapshot.cache_hit_tokens)} ({snapshot.cache_hit_rate * 100:.0f}%)"
+        else:
+            text += f" · hit {_format_compact_count(snapshot.cache_hit_tokens)}"
+    if snapshot.reasoning_tokens > 0:
+        text += f" · think {_format_compact_count(snapshot.reasoning_tokens)}"
     return text
 
 

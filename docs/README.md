@@ -1,73 +1,38 @@
-# 技术文档（`docs/`）
+# 技术文档
 
-本目录存放 DAgents 技术说明。实现代码：
+> **文档已收敛** — 完整项目手册见 **[handbook/README.md](./handbook/README.md)**（唯一正文入口）。
+>
+> 本目录下 `architecture/`、`design/`、`future/` 等子目录**仅保留跳转桩**；旧路径对照见 [handbook/附录/旧文档迁移对照表.md](./handbook/附录/旧文档迁移对照表.md)。
 
-| 栈 | 路径 |
-|----|------|
-| **Go 本地助手（Agent 运行时）** | `node/`、`client/`、`shared/config/` |
-| **Python 辅助** | `app/cli/`（Textual TUI）、`register_center/`（A2A 控制面） |
+---
 
-**文件命名**：Markdown 使用 **纯 ASCII 文件名**。
+## 快速入口
 
-## 架构（先读）
+| 需求 | 手册章节 |
+|------|----------|
+| 新人 / 联调 | [handbook/00-导读.md](./handbook/00-导读.md) → [01-愿景与架构.md](./handbook/01-愿景与架构.md) |
+| 改 Node 内部 | [handbook/02-Agent-Node-核心.md](./handbook/02-Agent-Node-核心.md) |
+| HTTP/SSE / Client | [handbook/03-API与Client.md](./handbook/03-API与Client.md) |
+| 工具 / 压缩 / policy | [handbook/04-能力与策略.md](./handbook/04-能力与策略.md) |
+| Manage / A2A | [handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md) |
+| 打包 / 案例 | [handbook/06-运维与案例.md](./handbook/06-运维与案例.md) |
+| 内置工具全表 | [handbook/附录/内置工具参考.md](./handbook/附录/内置工具参考.md) |
+| 术语 | [handbook/附录/术语表.md](./handbook/附录/术语表.md) |
 
-| 文件 | 说明 |
-|------|------|
-| [architecture/overview.md](./architecture/overview.md) | **选型总览**：Go Node vs Register Center |
-| [architecture/go-node-internals.md](./architecture/go-node-internals.md) | **Go Node 内部结构**：runtime、Orchestrator、MessageQueue 及协作关系 |
-| [architecture/local-assistant.md](./architecture/local-assistant.md) | 本地助手：Go Node + Textual / Go REPL 联调 |
-| [architecture/agent-node-api.md](./architecture/agent-node-api.md) | Agent Node HTTP/SSE API（`done`：`turn_complete` / `awaiting`） |
-| [architecture/child-agent-tools.md](./architecture/child-agent-tools.md) | 临时子 Agent 工具 / HTTP / SSE 定稿 |
-| [architecture/client-packaging.md](./architecture/client-packaging.md) | 同包 `config.yaml` 与安装布局 |
-| [architecture/go-node-compatibility.md](./architecture/go-node-compatibility.md) | Go 静态构建 / glibc 矩阵（N7） |
-| [architecture/rhel6-acceptance-checklist.md](./architecture/rhel6-acceptance-checklist.md) | RHEL 6.9 真机验收清单 |
+---
 
-## 设计与实施
-
-| 文件 | 说明 |
-|------|------|
-| [design/background-and-motivation.md](./design/background-and-motivation.md) | 老旧 OS 动机与 Go 方案 |
-| [design/three-component-model.md](./design/three-component-model.md) | Node + Client + Manage 三组件 ADR |
-| [design/agent-client-refactor-plan.md](./design/agent-client-refactor-plan.md) | AC 分步计划与 N0–N7 状态 |
-
-## 专题
-
-| 文件 | 适用栈 | 说明 |
-|------|--------|------|
-| [context-compression-and-state.md](./context-compression-and-state.md) | Go Node | 压缩与 prompt 侧车 |
-| [a2a-and-register-center.md](./a2a-and-register-center.md) | Register Center | `agent_peer`、登记与中继 |
-| [built-in-tools.md](./built-in-tools.md) | 双栈概念 | 工具清单；Go 实现见 `node/internal/tools/README.md` |
-| [triggers-design.md](./triggers-design.md) | Go Node | 长期设计；落地见 `node/internal/triggers/README.md` |
-| [prometheus-metrics.md](./prometheus-metrics.md) | 历史 + RC | Python Agent `/metrics` 已移除；Register Center 指标仍适用 |
-| [security-rollout.md](./security-rollout.md) | 通用 | 分阶段安全验收 |
-| [os-compatibility.md](./os-compatibility.md) | 历史参考 | CPython 兼容（Python Agent 已移除） |
-| [roadmap.md](./roadmap.md) | 通用 | 路线图 |
-
-## 远期规划（`future/`）
-
-Manage、A2A inbox、多租户等 **尚未实现** 的方案，见 [future/README.md](./future/README.md)。
-
-## 归档（`archive/`）
-
-| 目录 | 说明 |
-|------|------|
-| [archive/python-agent-runtime/](./archive/python-agent-runtime/) | **已移除的 Python FastAPI Agent API**（`api-reference`、turn loop 等） |
-| [archive/README.md](./archive/README.md) | Proxy/Body 路由等更早方案 |
-
-根目录 `api-reference.md`、`agent-input-output.md`、`agent-turn-loop.md`、`architecture-and-flows.md` 仅为**兼容跳转桩**，正文在 `archive/python-agent-runtime/`。
-
-## 落地案例
-
-[cases/README.md](./cases/README.md)
-
-## 仓库内 README 索引
+## 模块级文档（与代码同目录，继续维护）
 
 | 路径 | 说明 |
 |------|------|
-| [../README.md](../README.md) | 项目概览、快速开始 |
-| [../node/README.md](../node/README.md) | Go Agent Node |
-| [../client/README.md](../client/README.md) | Go REPL Client |
-| [../app/README.md](../app/README.md) | Python 包（含 `cli/` TUI） |
-| [../register_center/README.md](../register_center/README.md) | Register Center |
+| `node/internal/*/README.md` | Go Node 包说明 |
+| `node/internal/*/REFERENCE.md` | API / 字段参考 |
+| `shared/config/REFERENCE.md` | 配置校验细节 |
+| `manage/README.md` | Manage 运维 |
+| `packaging/agent-client/README.md` | 安装与 Agent Card |
 
-`node/`、`app/` 各子目录维护 **`README.md`** / **`REFERENCE.md`**。
+---
+
+## 归档
+
+已移除的 Python Agent API 等：`archive/`（历史只读）。

@@ -13,6 +13,8 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
+	"github.com/DGS-ai-team/DAgents/node/internal/compression"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -26,16 +28,18 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
-	FSRoot              string
-	MaxToolLoops        int
-	SkillsRoot          string
-	SkillsEnabled       bool
-	SkillsMaxInPrompt   int
-	RuntimeDir          string
-	CompressionSilent         int
-	CompressionBlocking       int
-	RawMessageHistoryEnabled  bool
-	RawMessageHistoryDir      string
+	FSRoot                   string
+	MaxToolLoops             int
+	SkillsRoot               string
+	SkillsEnabled            bool
+	SkillsMaxInPrompt        int
+	RuntimeDir               string
+	CompressionSilent        int
+	CompressionBlocking      int
+	RawMessageHistoryEnabled bool
+	RawMessageHistoryDir     string
+	DuplicateToolCall hooks.DuplicateConfig
+	ToolResult        hooks.ToolResultConfig
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。
@@ -204,6 +208,42 @@ func (m *Manager) ListActive() []*Session {
 	return out
 }
 
+// ReloadPolicy 热更新策略引擎并同步到全部活跃 session orchestrator。
+func (m *Manager) ReloadPolicy(engine *policy.Engine) {
+	if engine == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.policy = engine
+	for _, rt := range m.sessions {
+		rt.setPolicy(engine)
+	}
+}
+
+// ReloadPolicyFromRuntime 从 runtime 目录重新加载策略并热更新。
+func (m *Manager) ReloadPolicyFromRuntime(runtimeDir string) error {
+	engine, err := policy.LoadRuntime(runtimeDir)
+	if err != nil {
+		return err
+	}
+	m.ReloadPolicy(engine)
+	return nil
+}
+
+// ToolNames 返回 registry 已知工具名。
+func (m *Manager) ToolNames() []string {
+	if m.tools == nil {
+		return nil
+	}
+	defs := m.tools.Definitions()
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, def.Function.Name)
+	}
+	return names
+}
+
 // ListPersisted 返回 DB 中全部 session 摘要。
 func (m *Manager) ListPersisted(ctx context.Context) ([]store.Summary, error) {
 	if m.store == nil {
@@ -255,6 +295,12 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 	if view.LoadedSkills == nil {
 		view.LoadedSkills = []skills.LoadedSkill{}
 	}
+	if m.turn.SkillsEnabled && strings.TrimSpace(m.turn.SkillsRoot) != "" {
+		catalog := skills.NewCatalog(m.turn.SkillsRoot, true, m.turn.SkillsMaxInPrompt)
+		enrichContextPromptStats(view, catalog)
+	} else {
+		enrichContextPromptStats(view, nil)
+	}
 	return view, nil
 }
 
@@ -297,6 +343,15 @@ func (m *Manager) LoadedSkills(sessionID string) ([]skills.LoadedSkill, error) {
 		return []skills.LoadedSkill{}, nil
 	}
 	return rec.LoadedSkills, nil
+}
+
+// CompressContext 对活跃 session 手动触发一次阻塞压缩。
+func (m *Manager) CompressContext(ctx context.Context, sessionID string) (compression.ForceResult, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return compression.ForceResult{}, fmt.Errorf("session_not_found")
+	}
+	return rt.compressContext(ctx), nil
 }
 
 // ClearContext 清空对话历史；若 turn 在途则先 cancel。
@@ -342,10 +397,12 @@ func (m *Manager) Delete(sessionID string) (bool, error) {
 }
 
 // EnqueueMessage 将 message/resume 入队；resume 优先直投等待中的 turn。
+// userMessageName 仅对 request_type=message 生效；空串规范为 llm.UserNameHuman。
 func (m *Manager) EnqueueMessage(
 	_ context.Context,
 	sessionID, requestType, content string,
 	resumeValue map[string]any,
+	userMessageName string,
 ) (priority string, err error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
@@ -407,7 +464,12 @@ func (m *Manager) EnqueueMessage(
 			return "", fmt.Errorf("invalid_message")
 		}
 	}
-	env := queue.Envelope{RequestType: requestType, Content: content, ResumeValue: resumeValue}
+	env := queue.Envelope{
+		RequestType: requestType,
+		Content:     content,
+		UserName:    userMessageName,
+		ResumeValue: resumeValue,
+	}
 	if err := rt.enqueue(env, p); err != nil {
 		return "", err
 	}

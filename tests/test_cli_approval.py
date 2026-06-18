@@ -4,12 +4,18 @@ import unittest
 
 from app.cli.api_client import _decode_utf8_chunks, _parse_sse_block
 from app.cli.approval import (
+    APPROVAL_MODE_TRIGGER_SESSION,
+    ApprovalDecision,
+    ToolApprovalRequest,
+    TriggerSessionTarget,
     build_all_approved_decision,
     build_all_rejected_decision,
     build_approval_decision_from_map,
+    build_approval_resume,
     build_selection_decision,
     clamp_menu_selection_index,
     extract_tool_approval_requests,
+    is_trigger_session_approval,
     parse_selection_tokens,
 )
 
@@ -55,8 +61,6 @@ class CliApprovalTests(unittest.TestCase):
         self.assertEqual(rejected, {"type": "selection", "approved": [], "rejected": ["call_1", "call_2"]})
 
     def test_build_approval_resume_routes_child_session(self) -> None:
-        from app.cli.approval import build_approval_resume
-
         requests = extract_tool_approval_requests(self._payload())
         data = {"child_session_id": "child-s1", "approval_id": "ap-99"}
         resume = build_approval_resume(data, build_all_approved_decision(requests))
@@ -90,6 +94,25 @@ class CliApprovalTests(unittest.TestCase):
         self.assertEqual(clamp_menu_selection_index(0, 1, 2), 1)
         self.assertEqual(clamp_menu_selection_index(1, 1, 2), 1)
         self.assertEqual(clamp_menu_selection_index(1, -1, 2), 0)
+
+    def test_build_trigger_session_decision_in_resume(self) -> None:
+        decision = ApprovalDecision(
+            approved=["c1"],
+            rejected=[],
+            trigger_session_targets={"c1": TriggerSessionTarget.NEW.value},
+        )
+        resume = build_approval_resume({}, decision)
+        self.assertEqual(resume["trigger_session_targets"], {"c1": "new_session"})
+
+    def test_is_trigger_session_approval(self) -> None:
+        req = ToolApprovalRequest(
+            call_id="c1",
+            name="trigger_create",
+            arguments={},
+            raw_arguments="{}",
+            approval_mode=APPROVAL_MODE_TRIGGER_SESSION,
+        )
+        self.assertTrue(is_trigger_session_approval(req))
 
     def test_build_approval_decision_from_map(self) -> None:
         requests = extract_tool_approval_requests(self._payload())

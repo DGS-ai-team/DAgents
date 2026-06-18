@@ -27,8 +27,6 @@ llm:
 manage:
   enabled: false
 
-data_dir: ./.runtime/data
-
 triggers:
   enabled: true
   poll_seconds: 5
@@ -47,7 +45,8 @@ triggers:
   etc/config.yaml
   etc/policy.yaml
   var/workspace/          # fs_root
-  var/data/sessions.db    # SQLite
+    memory/sessions.db    # SQLite 会话库
+    data/                 # 临时工作区
 ```
 
 ## 3. 启动顺序

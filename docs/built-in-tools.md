@@ -1,6 +1,90 @@
 # 内置工具一览
 
-本文说明 **当前注册进 OpenAI 运行时** 的内置工具：来源为 **`app/harness/tools/tool.py`** 中的 **`get_tools()`**，经 **`build_openai_toolkit()`** 生成 **tools JSON** 与 **`tool_map`**（**`app/core/main_agent/runtime_openai.py`** 请求模型时使用）。**`function.description`** 取自工具函数的 **docstring**；**`function.parameters`** 优先来自 **`args_schema.model_json_schema()`**，否则由 **`_signature_to_json_schema`** 从签名推导（见下文 **「附」**）。执行时由编排层 **`_invoke_tool`** 调用 **`OpenAIToolSpec.invoke`**。
+> **现网（v0.2.0+）**：Agent 运行时工具由 **Go Agent Node** 注册（**`node/internal/tools/registry.go`**）。**全量 description / 参数 / 审批说明**见 **[built-in-tools-reference.md](./built-in-tools-reference.md)**。配置见 **`packaging/agent-client/config.yaml`**（**`tools.enabled_groups`** 工具组允许列表、**`tools.bash_output_encoding`** 等）。包内说明：**`node/internal/tools/README.md`**、**`node/internal/tools/REFERENCE.md`**；配置校验见 **`shared/config/README.md`**；子 Agent 见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。  
+> 下文 **「附」与 §1–§4** 描述 **已移除的 Python FastAPI Agent API**（**`app/harness/tools/tool.py` → `get_tools()`**），保留作行为对照与归档索引；正文在 [archive/python-agent-runtime/](./archive/python-agent-runtime/)。
+
+---
+
+## 0. Go Agent Node 已注册工具（现行）
+
+> **完整参考**（25 个工具 description、参数表、审批行为）：**[built-in-tools-reference.md](./built-in-tools-reference.md)**
+
+下列与 **`Registry.registerBuiltins()`** 及 **`childAgentToolDefs()`** 一致（审批由 **`node/internal/policy/`** 决定）。
+
+| 工具名 | 定义位置 | 作用概要 |
+|--------|----------|----------|
+| **`read_file`** | **`fs_read.go`** | 分页读文件（`FS_ROOT` 沙箱） |
+| **`write_file`** | **`fs_write.go`** | 写入整文件 |
+| **`glob_files`** | **`fs_glob_tool.go`** | 按 glob（含 `**`）列举目录内文件路径 |
+| **`grep_file`** | **`fs_grep_file.go`** | 单文件行内容检索（分页 + 上下文） |
+| **`grep_files`** | **`fs_grep_files.go`** | 目录树内按 glob 筛文件后行内容检索 |
+| **`search_replace`** | **`fs_search_replace.go`** | 子串替换 + diff |
+| **`bash_run`** | **`bash_run_tool.go`** / **`bash_runner.go`** | bash / cmd / powershell；输出按 **`tools.bash_output_encoding`** 或平台默认解码 |
+| **`background_job_status`** | **`tool_job.go`** | 查询后台 job |
+| **`background_job_cancel`** | **`tool_job.go`** | 取消后台 job |
+| **`ask_user_information`** | **`tool_hitl.go`** | HITL 用户追问 |
+| **`load_skills`** | **`tool_skills.go`** | 加载 skill 到当前会话 |
+| **`unload_skills`** | **`tool_skills.go`** | 卸载指定 skill |
+| **`clear_skills`** | **`tool_skills.go`** | 清空会话已加载 skill |
+| **`trigger_list`** | **`tool_triggers.go`** | 列出触发器 |
+| **`trigger_get`** | **`tool_triggers.go`** | 查询单个触发器 |
+| **`trigger_create`** | **`tool_triggers.go`** | 创建触发器 |
+| **`trigger_update`** | **`tool_triggers.go`** | 更新触发器 |
+| **`trigger_delete`** | **`tool_triggers.go`** | 删除触发器 |
+| **`agent_invoke`** | **`tool_a2a.go`** | 经 Manage 向对端 Agent 发起 A2A Task 并等待 `result_text`（须 **`manage.enabled`**） |
+| **`agent_discover`** | **`tool_a2a.go`** | 经 Manage 发现注册 Agent（须 **`manage.enabled`**） |
+| **`create_temporary_agent`** | **`tool_childagent.go`** | 同进程临时子 Agent |
+| **`wait_temporary_agents`** | **`tool_childagent.go`** | 等待子 Agent 终态 |
+| **`temporary_agent_status`** | **`tool_childagent.go`** | 非阻塞查询子 Agent |
+| **`cancel_temporary_agent`** | **`tool_childagent.go`** | 取消子 Agent |
+
+**执行模式**：工具 schema **均为同步**；**`bash_run`** 在 `timeout_seconds` 内未完成时 **自动降级**为后台 job（完成后 async 回灌）。详见 **`node/internal/tools/README.md`**。
+
+### `tools.enabled_groups`（允许列表）
+
+在 **`packaging/agent-client/config.yaml`** 的 **`tools.enabled_groups`** 中按**工具组**配置 LLM 可见的内置工具；**组内工具须一并启用或禁用**。
+
+| 规则 | 说明 |
+|------|------|
+| 省略或 `[]` | 启用上表全部工具 |
+| 非空列表 | 仅列出组内全部工具对 LLM 暴露；组名见下表 |
+| 校验时机 | **`LoadFile`** / **`Config.Validate`**；未知名报错 `tools.enabled_groups contains unknown group` |
+
+**可配置组（7 个）**
+
+| 组名 | 工具 |
+|------|------|
+| **`fs`** | `read_file`、`write_file`、`glob_files`、`grep_file`、`grep_files`、`search_replace` |
+| **`bash`** | `bash_run`、`background_job_status`、`background_job_cancel` |
+| **`hitl`** | `ask_user_information` |
+| **`skills`** | `load_skills`、`unload_skills`、`clear_skills` |
+| **`triggers`** | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete` |
+| **`a2a`** | `agent_invoke`、`agent_discover` |
+| **`child_agents`** | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
+
+`tools.enabled`（逐工具名）已废弃，请改用 **`enabled_groups`**。完整工具清单见 **`AllBuiltinToolNames()`**。
+
+A2A 组在配置中可启用，但实际 handler 仍依赖 Node 启动时 **`SetManageRuntime`**（**`manage.enabled: true`**）。`child_agents` 组建议与 **`child_agents.enabled`** 一并考虑。
+
+### 写盘工具审批与信任链
+
+`write_file`、`search_replace` 是否进入 HITL 由 **`.runtime/policy/tool.approval.txt`** 档位决定；编排经 **`node/internal/hooks/`** 的 `tool.before_each` 链收敛（非 Orchestrator 内硬编码）。
+
+| 策略档位 | 行为 |
+|----------|------|
+| **`rule`**（默认种子：`write_file=rule`、`search_replace=rule`） | fallback → 须审批；**信任链**命中时降为 auto（见下） |
+| **`always`** | 每次须审批；**信任链不生效** |
+| **`never`** | 免审批（不推荐用于写盘） |
+
+**信任链**（[ux-agent-owned-file-approval.md](./design/ux-agent-owned-file-approval.md)）：同 session 内，经用户审批 **`write_file` 新建**的文件标记为 Agent 自有；若磁盘 **mtime 未变**，后续 `write_file` / `search_replace` **免重复审批**。覆盖仓库既有文件、外界改动 mtime、或新 session 仍须审批。
+
+Hook 顺序：`PolicyToolHook` → `AgentOwnedFileHook` → `DuplicateToolCallHook`（写工具不参与 duplicate 检测）。
+
+---
+
+## Python Agent API（归档）— 附与工具表
+
+以下说明 **历史 Python 栈** 的 **`get_tools()`** 管道。
 
 **审批**：是否进入 **`approval_required`** 由 **`decide_tool_approval`**（**`tool.py`**）结合 **`AGENT_TOOL_APPROVAL_MODE`**（**`always` / `never` / `rule`**）及 **`.runtime/policy/`** 下策略文件决定；返回值包含 **是否审批、原因、风险等级、策略来源**，并由审批卡片透出；兼容布尔入口 **`should_require_tool_approval`**。
 
@@ -111,7 +195,7 @@
 | **`trigger_create`** | 同步 | **`triggers.py`** | 创建触发器资源，用于沉淀定时、事件、指标等自主唤起规则；默认需要审批。 |
 | **`trigger_update`** | 同步 | **`triggers.py`** | 更新触发器条件、模板、风险等级或启用状态；默认需要审批。 |
 | **`trigger_delete`** | 同步 | **`triggers.py`** | 删除触发器资源；默认需要审批。 |
-| **`trigger_fire`** | 异步 | **`triggers.py`** | 手动触发触发器并投递到 **`AgentService`** 队列；不会绕过工具审批；默认需要审批。 |
+| ~~**`trigger_fire`**~~ | — | — | **已移除**（Go Node 靠 schedule / HTTP API 触发；见 [triggers-design.md](./triggers-design.md)）。 |
 | **`agent_discover`** | 同步 | **`app/harness/tools/agent_peer.py`** | 查询 **Register Center** 可见分组下的 Agent 列表，并尝试拉取 **`.well-known/agent-card.json`** 摘要。 |
 | **`agent_send_message`** | **异步** | **`agent_peer.py`** | 向指定 **`target_agent_id`** 投递 **`AgentPeerEnvelope`**（**`direct`/`relay`**），并汇总对端 SSE；依赖 **`REGISTRY_URL`**、**`DISCOVERY_GROUPS`** 等。 |
 | **`agent_broadcast`** | **异步** | **`agent_peer.py`** | 调用 **`POST /v1/broadcast`** 后并发拉取各目标 SSE。 |
@@ -139,11 +223,7 @@
 
 ## 3. 仓库内存在但未纳入 `get_tools()` 的实现
 
-| 名称 | 位置 | 说明 |
-|------|------|------|
-| **`host_platform`** | **`app/harness/tools/host_platform.py`** | 已用 **`@tool("host_platform")`** 声明，**未**出现在 **`get_tools()`** 列表中，故 **当前模型不可见**。可用于后续与 **`bash_run`** 联动或 CLI。 |
-
-新增内置工具时，除实现函数外，须在 **`get_tools()`** 中 **显式加入** 才会进入 **`build_openai_toolkit()`**（注释写明「按稳定性逐步放开」）。
+当前 **无**。新增内置工具时，除实现函数外，须在 **`get_tools()`** 中 **显式加入** 才会进入 **`build_openai_toolkit()`**（注释写明「按稳定性逐步放开」）。
 
 ---
 
@@ -159,4 +239,4 @@
 
 ---
 
-**说明**：工具集合以 **`tool.py` → `get_tools()`** 为准；**docstring / Schema / 参数管道** 见上文 **「附」**；若与 OpenAPI/前端展示不一致，以运行时代码为准。
+**说明**：**Go Node 工具**以 **`node/internal/tools/registry.go`** 为准；**Python 工具表**以归档 **`get_tools()`** 为准。

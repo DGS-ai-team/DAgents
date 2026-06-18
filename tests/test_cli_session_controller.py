@@ -221,6 +221,78 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller._messages_total_tokens, 4321)
         self.assertEqual(self.controller.input_strip_token_text(), "ctx 4,321")
 
+    async def test_reasoning_delta_always_emitted_for_thinking_ui(self) -> None:
+        from app.cli.render import TranscriptKind
+
+        self.controller.show_reasoning = False
+        await self.controller._handle_stream_event(_event("reasoning", content="think"))
+        self.assertEqual(len(self.updates), 1)
+        self.assertEqual(self.updates[0].kind, TranscriptKind.REASONING_DELTA)
+        self.assertEqual(self.updates[0].text, "think")
+
+    async def test_reasoning_delta_emitted_when_enabled(self) -> None:
+        from app.cli.render import TranscriptKind
+
+        self.controller.show_reasoning = True
+        await self.controller._handle_stream_event(_event("reasoning", content="think"))
+        self.assertEqual(len(self.updates), 1)
+        self.assertEqual(self.updates[0].kind, TranscriptKind.REASONING_DELTA)
+        self.assertEqual(self.updates[0].text, "think")
+
+    async def test_a2a_relay_hitl_releases_turn_wait(self) -> None:
+        self.controller._reset_user_turn_wait()
+        wait_task = asyncio.create_task(self.controller.wait_user_turn())
+        await asyncio.sleep(0)
+        await self.controller._handle_stream_event(
+            _event(
+                "approval_required",
+                data={
+                    "a2a_relay": True,
+                    "a2a_task_id": "task-1",
+                    "approval_args": {
+                        "tool_calls": [{"id": "call_x", "name": "bash_run", "arguments": {}}],
+                    },
+                },
+            ),
+        )
+        await asyncio.wait_for(wait_task, timeout=1.0)
+        self.assertFalse(self.controller._awaiting_user_turn)
+        self.assertEqual(self.controller.hitl_queue_len(), 1)
+
+    async def test_switch_session_resets_local_state(self) -> None:
+        mock_client = MagicMock()
+        mock_client.create_session = AsyncMock(return_value="sess-new")
+        self.controller._client = mock_client
+        self.controller._awaiting_user_turn = True
+        self.controller._user_turn_done.clear()
+        await self.controller._handle_stream_event(
+            _event(
+                "approval_required",
+                data={
+                    "approval_args": {
+                        "tool_calls": [{"id": "call_x", "name": "bash_run", "arguments": {}}],
+                    }
+                },
+            ),
+        )
+
+        async def fake_pump() -> None:
+            self.controller._sse_ready.set()
+            self.controller._sse_connected = True
+
+        original_pump = self.controller._pump_stream
+        self.controller._pump_stream = fake_pump  # type: ignore[method-assign]
+        try:
+            new_id = await self.controller.switch_session("sess-new")
+        finally:
+            self.controller._pump_stream = original_pump
+
+        self.assertEqual(new_id, "sess-new")
+        self.assertEqual(self.controller.session_id, "sess-new")
+        self.assertEqual(self.controller.hitl_queue_len(), 0)
+        self.assertFalse(self.controller._awaiting_user_turn)
+        mock_client.create_session.assert_awaited_once_with("sess-new")
+
 
 if __name__ == "__main__":
     unittest.main()

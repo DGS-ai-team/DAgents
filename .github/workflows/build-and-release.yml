@@ -1,6 +1,6 @@
 name: Build And Release Binary
 
-# main 推送仅跑单测；打 v* 标签时构建本地助手包（Go Node + 双 TUI + Register Center）并创建 GitHub Release。
+# main 推送仅跑单测；打 v* 标签时构建本地助手包（Go Node + 双 TUI）并创建 GitHub Release。
 on:
   push:
     branches:
@@ -14,15 +14,29 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CLI_PYINSTALLER_ARGS: --onefile --name dagents-cli --hidden-import=textual --hidden-import=aiohttp run_dagents_cli.py
-  RC_PI_ARGS: --onefile --name dagents_register_center --add-data register_center:register_center run_register_center.py
 
 jobs:
   unit-tests:
-    name: Unit tests (Go + Python)
+    name: Unit tests (Go + Python + Web UI)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: node/webui/frontend/package-lock.json
+
+      - name: Test Web UI
+        run: |
+          npm ci --prefix node/webui/frontend
+          npm test --prefix node/webui/frontend
+
+      - name: Build Web UI
+        run: bash node/webui/build.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -78,6 +92,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: node/webui/frontend/package-lock.json
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -112,7 +133,6 @@ jobs:
         shell: bash
         run: |
           bash scripts/ci/build_dagents_cli.sh
-          bash scripts/ci/build_dagents_register_center.sh
 
       - name: Build Python bundles (Linux Rocky 8 Docker + pyenv, glibc 2.28)
         if: matrix.cli_build == 'docker-rocky8'
@@ -120,13 +140,12 @@ jobs:
         shell: bash
         env:
           CLI_PI_ARGS: ${{ env.CLI_PYINSTALLER_ARGS }}
-          RC_PI_ARGS: ${{ env.RC_PI_ARGS }}
           PYENV_PYTHON_VERSION: "3.13.2"
         run: |
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e CLI_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
+            -e CLI_PI_ARGS -e PYENV_PYTHON_VERSION \
             rockylinux:8 \
             bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
 
@@ -138,6 +157,19 @@ jobs:
             bash scripts/ci/assemble_local_assistant_bundle.sh
           ls -la dist/dagents-local-assistant-*
 
+      - name: Install Inno Setup (Windows installer)
+        if: matrix.platform == 'windows-amd64'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        if: matrix.platform == 'windows-amd64'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${VERSION}" bash scripts/ci/build_windows_installer.sh
+          ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
+
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
@@ -145,18 +177,53 @@ jobs:
           path: dist/dagents-local-assistant-${{ matrix.platform }}-*.*
           if-no-files-found: error
 
+      - name: Upload Windows installer
+        if: matrix.platform == 'windows-amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dagents-windows-installer
+          path: dist/dagents-local-assistant-windows-amd64-installer-*.exe
+          if-no-files-found: error
+
+  build-manage-docker:
+    name: Build Manage Docker image
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and export Manage image
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          chmod +x scripts/ci/build_manage_docker.sh scripts/ci/assemble_manage_bundle.sh
+          VERSION="${VERSION}" bash scripts/ci/assemble_manage_bundle.sh
+          ls -la dist/dagents-manage-*
+
+      - name: Upload Manage Docker archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: dagents-manage-docker
+          path: |
+            dist/dagents-manage-*.tar.gz
+            dist/dagents-manage-bundle-*.tar.gz
+          if-no-files-found: error
+
   release:
     name: Create GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
     needs:
       - build-local-assistant
+      - build-manage-docker
     runs-on: ubuntu-latest
 
     steps:
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: dagents-local-assistant-*
+          pattern: dagents-*
           merge-multiple: true
           path: dist
 
@@ -169,4 +236,7 @@ jobs:
           files: |
             dist/dagents-local-assistant-*.tar.gz
             dist/dagents-local-assistant-*.zip
+            dist/dagents-local-assistant-windows-amd64-installer-*.exe
+            dist/dagents-manage-*.tar.gz
+            dist/dagents-manage-bundle-*.tar.gz
           generate_release_notes: true

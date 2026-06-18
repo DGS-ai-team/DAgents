@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import unittest
 
-from app.cli.render import format_compact_token_count, format_input_strip_usage, parse_usage_strip
+from app.cli.render import (
+    accumulate_usage_strip,
+    format_compact_token_count,
+    format_inline_usage,
+    format_input_strip_usage,
+    parse_usage_round,
+    parse_usage_strip,
+    UsageStripSnapshot,
+)
 
 
 class FormatCompactTokenCountTests(unittest.TestCase):
@@ -26,7 +34,37 @@ class FormatCompactTokenCountTests(unittest.TestCase):
             }
         )
         self.assertTrue(snap.has_data)
-        self.assertEqual(format_input_strip_usage(snap), "↑100 ↓20 · hit 80")
+        self.assertEqual(format_input_strip_usage(snap), "↑100 ↓20 · hit 80 (80%)")
+
+    def test_parse_usage_round_and_inline(self) -> None:
+        snap = parse_usage_round(
+            {
+                "round_prompt_tokens": 1200,
+                "round_completion_tokens": 80,
+                "round_reasoning_tokens": 42,
+            }
+        )
+        self.assertTrue(snap.has_data)
+        self.assertEqual(format_inline_usage(snap), " · ↑1,200 ↓80 · think 42")
+
+    def test_accumulate_usage_strip_ignores_empty_round(self) -> None:
+        base = UsageStripSnapshot(prompt_tokens=80, completion_tokens=12, has_data=True)
+        kept = accumulate_usage_strip(base, UsageStripSnapshot())
+        self.assertEqual(kept.prompt_tokens, 80)
+        self.assertEqual(kept.completion_tokens, 12)
+
+    def test_accumulate_usage_strip_sums_rounds(self) -> None:
+        base = UsageStripSnapshot()
+        base = accumulate_usage_strip(
+            base,
+            parse_usage_round({"round_prompt_tokens": 100, "round_completion_tokens": 20}),
+        )
+        base = accumulate_usage_strip(
+            base,
+            parse_usage_round({"round_prompt_tokens": 50, "round_completion_tokens": 10}),
+        )
+        self.assertEqual(base.prompt_tokens, 150)
+        self.assertEqual(base.completion_tokens, 30)
 
 
 if __name__ == "__main__":

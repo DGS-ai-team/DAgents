@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 	"github.com/DGS-ai-team/DAgents/client/internal/probe"
@@ -59,7 +60,18 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 	}
 	defer app.stopStream()
 
-	fmt.Fprintf(os.Stderr, "已连接 %s agent_id=%s client=%s (plain REPL)\n", res.Endpoint, res.AgentID, version.Version)
+	if ctxBody, err := app.client.GetSessionContext(ctx, app.currentSession()); err == nil {
+		for _, line := range tuishared.SkillsBloatWarningTexts(ctxBody) {
+			fmt.Fprintln(os.Stderr, "警告: "+line)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "已连接 %s agent_id=%s model=%s client=%s (plain REPL)\n",
+		res.Endpoint, res.AgentID, orReplDash(res.LLM.Model), version.Version)
+	if res.LLM.ThinkingSupported {
+		fmt.Fprintf(os.Stderr, "thinking: %s（/thinking on|off · /thinking effort high|max）\n",
+			tuishared.FormatLLMThinkingSummary(res.LLM))
+	}
 	fmt.Fprintf(os.Stderr, "session=%s（/help 查看命令）\n\n", app.currentSession())
 
 	reader := bufio.NewReader(os.Stdin)
@@ -91,6 +103,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 			continue
 		}
 
+		app.transcript.AddBlockGapIfNeeded()
 		app.transcript.Add("[user] " + line)
 		app.turn.BeginSubmit()
 		if err := app.client.SubmitMessage(ctx, app.currentSession(), line); err != nil {
@@ -98,9 +111,31 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 			fmt.Fprintf(os.Stderr, "发送失败: %v\n", err)
 			continue
 		}
-		fmt.Fprintln(os.Stderr, "（回合进行中；若有审批/询问，请在下方提示处输入）")
-		if err := app.turn.Wait(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "等待 Agent 响应…")
+		if err := waitTurnWithFeedback(ctx, app.turn); err != nil {
 			return err
+		}
+		fmt.Fprint(os.Stderr, "\r\033[K")
+	}
+}
+
+func waitTurnWithFeedback(ctx context.Context, gate *tuishared.TurnGate) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- gate.Wait(ctx)
+	}()
+	start := time.Now()
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-tick.C:
+			secs := int(time.Since(start).Seconds())
+			fmt.Fprintf(os.Stderr, "\r等待 Agent… %ds（Esc 不可用；Ctrl+C 退出）", secs)
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }
@@ -176,15 +211,6 @@ func (a *App) execCommand(ctx context.Context, line string) (quit bool, err erro
 		if err == nil {
 			fmt.Fprintln(os.Stderr, "已清空对话上下文")
 		}
-	case "cancel":
-		cancelled, cancelErr := a.client.CancelTurn(ctx, a.currentSession())
-		if cancelErr != nil {
-			err = cancelErr
-		} else if cancelled {
-			fmt.Fprintln(os.Stderr, "已取消在途 turn")
-		} else {
-			fmt.Fprintln(os.Stderr, "当前无在途 turn")
-		}
 	case "history":
 		n := 20
 		if len(parts) > 1 {
@@ -226,6 +252,8 @@ func (a *App) execCommand(ctx context.Context, line string) (quit bool, err erro
 			mode = "开启"
 		}
 		fmt.Fprintf(os.Stderr, "reasoning 显示: %s（/reasoning on|off）\n", mode)
+	case "thinking":
+		err = a.handleThinkingCommand(ctx, parts[1:])
 	case "quit", "exit", "q":
 		return true, nil
 	default:
@@ -240,6 +268,10 @@ func (a *App) printStatus(ctx context.Context) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "agent_id:      %s\n", a.probe.AgentID)
+	fmt.Fprintf(os.Stderr, "model:         %s\n", orReplDash(a.probe.LLM.Model))
+	if a.probe.LLM.ThinkingSupported {
+		fmt.Fprintf(os.Stderr, "thinking:      %s\n", tuishared.FormatLLMThinkingSummary(a.probe.LLM))
+	}
 	fmt.Fprintf(os.Stderr, "node_version:  %s\n", a.probe.Version)
 	fmt.Fprintf(os.Stderr, "client_version:%s\n", version.Version)
 	fmt.Fprintf(os.Stderr, "endpoint:      %s\n", a.probe.Endpoint)
@@ -289,9 +321,61 @@ func printHelp() {
   /switch <id>         切换 session
   /new                 新建 session
   /clear               清空当前对话上下文
-  /cancel              取消在途 turn（回合等待期间不可用，请等审批结束）
   /history [n|all]     查看最近 n 行输出（默认 20）
   /tools [verbose|brief]  tool 输出折叠/展开
   /reasoning [on|off]  显示/隐藏模型推理流
-  /quit                退出`)
+  /thinking [on|off]   模型思考开关（deepseek/qwen）
+  /thinking effort high|max  思考强度
+  /quit                退出（流式输出中请用 Esc 取消 turn）`)
+}
+
+func orReplDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "—"
+	}
+	return s
+}
+
+func (a *App) handleThinkingCommand(ctx context.Context, args []string) error {
+	if !a.probe.LLM.ThinkingSupported {
+		return fmt.Errorf("当前 provider 不支持 thinking 控制（需 deepseek 或 qwen）")
+	}
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "thinking: %s\n", tuishared.FormatLLMThinkingSummary(a.probe.LLM))
+		return nil
+	}
+	var patch nodeapi.LLMSettingsPatch
+	switch strings.ToLower(args[0]) {
+	case "on", "enabled", "true", "1":
+		v := "enabled"
+		patch.Thinking = &v
+	case "off", "disabled", "false", "0":
+		v := "disabled"
+		patch.Thinking = &v
+	case "effort":
+		if len(args) < 2 {
+			return fmt.Errorf("用法: /thinking effort high|max")
+		}
+		v := strings.ToLower(args[1])
+		if v != "high" && v != "max" {
+			return fmt.Errorf("用法: /thinking effort high|max")
+		}
+		patch.ReasoningEffort = &v
+	default:
+		return fmt.Errorf("用法: /thinking on|off 或 /thinking effort high|max")
+	}
+	settings, err := a.client.PatchLLMSettings(ctx, patch)
+	if err != nil {
+		return err
+	}
+	a.probe.LLM = probe.LLMInfo{
+		Provider:          settings.Provider,
+		Model:             settings.Model,
+		Mock:              settings.Mock,
+		ThinkingSupported: settings.ThinkingSupported,
+		Thinking:          settings.Thinking,
+		ReasoningEffort:   settings.ReasoningEffort,
+	}
+	fmt.Fprintf(os.Stderr, "thinking: %s\n", tuishared.FormatLLMThinkingSummary(a.probe.LLM))
+	return nil
 }

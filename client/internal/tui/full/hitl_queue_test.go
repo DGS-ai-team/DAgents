@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
 	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 )
@@ -106,5 +107,41 @@ func TestInvalidateHITLForUserMessageClearsQueue(t *testing.T) {
 	}
 	if m.hitlData != nil {
 		t.Fatal("hitlData should be nil after invalidate")
+	}
+}
+
+func TestShowNextHITLIfIdleEmptyQueueRestoresChatViewport(t *testing.T) {
+	const w, h = 80, 24
+	ta := textarea.New()
+	ta.SetHeight(inputHeight - 1)
+	m := &model{
+		termWidth:   w,
+		termHeight:  h,
+		input:       ta,
+		transcript:  tuishared.NewTranscript(0),
+		children:    newChildAgentTracker(),
+		toolBlocks:  tuishared.NewToolBlockRegistry(),
+		toolPending: tuishared.NewToolPendingTracker(),
+		statusMgr:   newStatusLineManager(),
+	}
+	m.mode = modeApproval
+	m.initApprovalState(approvalData("call_1"))
+	m.applySize(w, h)
+	approvalViewH := m.viewport.Height
+
+	// 模拟 finishApprovalInteraction：先 reset 再 showNext（队列为空）。
+	m.resetHITLState()
+	m.showNextHITLIfIdle()
+
+	if m.mode != modeChat {
+		t.Fatalf("mode = %v, want modeChat", m.mode)
+	}
+	chatViewH := m.viewport.Height
+	wantChatH := m.computeViewHeight(h)
+	if chatViewH != wantChatH {
+		t.Fatalf("chat viewport height = %d, want %d", chatViewH, wantChatH)
+	}
+	if chatViewH <= approvalViewH {
+		t.Fatalf("chat viewport should be taller than approval: chat=%d approval=%d", chatViewH, approvalViewH)
 	}
 }

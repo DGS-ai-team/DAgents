@@ -59,6 +59,14 @@ func (r *RestrictedRegistry) StartBackground(ctx context.Context, sessionID, too
 	return r.inner.StartBackground(ctx, sessionID, toolName, toolCallID, cleanedArgs)
 }
 
+// TakeBashCompressStatsForCall 委托底层 registry 取出 bash 压缩 SSE 字段。
+func (r *RestrictedRegistry) TakeBashCompressStatsForCall(toolCallID string) map[string]any {
+	if r.inner == nil {
+		return nil
+	}
+	return r.inner.TakeBashCompressStatsForCall(toolCallID)
+}
+
 func (r *RestrictedRegistry) check(name string) error {
 	if IsParentOnlyTool(name) {
 		return fmt.Errorf("tool %q is not allowed for child agent", name)

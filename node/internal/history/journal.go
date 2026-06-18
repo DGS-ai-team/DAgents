@@ -71,42 +71,26 @@ func (j *Journal) RecordAppend(sessionID string, message llm.Message) {
 	}
 }
 
-// AppendMessage 在 history 末尾追加一条消息并同步写入 JSONL。
-
-// 逻辑：
-// 1. 规范化待写入消息；
-// 2. 深拷贝快照；
-// 3. append 到 history；
-// 4. RecordAppend。
-
-// 副作用：修改 history；可能写本地 JSONL。
+// AppendMessage 在 history 末尾追加一条已规范化的消息并同步写入 JSONL。
+//
+// 调用方（Orchestrator）须先经 llm.Client.NormalizeAssistant 处理 assistant 消息。
 func (j *Journal) AppendMessage(sessionID string, history *[]llm.Message, message llm.Message) {
 	if history == nil {
 		return
 	}
-	existing := *history
-	normalized := NormalizeMessageForContext(existing, message, j.safeLogger())
-	snapshot := cloneMessage(normalized)
-	*history = append(*history, normalized)
+	snapshot := llm.CloneMessage(message)
+	*history = append(*history, message)
 	if j != nil {
 		j.RecordAppend(sessionID, snapshot)
 	}
 }
 
-// InsertMessage 在 history 指定下标插入一条消息并同步写入 JSONL。
-
-// 逻辑：
-// 1. 规范化 → 深拷贝快照 → insert；
-// 2. JSONL 按调用顺序追加，与列表下标无关。
-
-// 副作用：修改 history；可能写本地 JSONL。
+// InsertMessage 在 history 指定下标插入一条已规范化的消息并同步写入 JSONL。
 func (j *Journal) InsertMessage(sessionID string, history *[]llm.Message, index int, message llm.Message) {
 	if history == nil {
 		return
 	}
-	existing := *history
-	normalized := NormalizeMessageForContext(existing, message, j.safeLogger())
-	snapshot := cloneMessage(normalized)
+	snapshot := llm.CloneMessage(message)
 	if index < 0 {
 		index = 0
 	}
@@ -114,7 +98,7 @@ func (j *Journal) InsertMessage(sessionID string, history *[]llm.Message, index 
 		index = len(*history)
 	}
 	out := append([]llm.Message(nil), (*history)[:index]...)
-	out = append(out, normalized)
+	out = append(out, message)
 	out = append(out, (*history)[index:]...)
 	*history = out
 	if j != nil {

@@ -101,7 +101,7 @@ func TestSchedulerFireTriggerQueuesMessage(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
-	record, err := sched.FireTrigger(def.TriggerID, "agent_tool", nil, false)
+	record, err := sched.FireTrigger(def.TriggerID, "agent_tool", nil, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,14 +133,14 @@ func TestSchedulerSkipsWhenPendingDelivery(t *testing.T) {
 	}
 	sub := &fakeSubmitter{}
 	sched := NewScheduler(store, sub, 5)
-	first, err := sched.FireTrigger(def.TriggerID, "manual", nil, false)
+	first, err := sched.FireTrigger(def.TriggerID, "manual", nil, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.Status != FireStatusQueued {
 		t.Fatalf("first status = %s", first.Status)
 	}
-	second, err := sched.FireTrigger(def.TriggerID, "manual", nil, false)
+	second, err := sched.FireTrigger(def.TriggerID, "manual", nil, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestSchedulerSkipsWhenPendingDelivery(t *testing.T) {
 		t.Fatalf("messages = %v", sub.messages)
 	}
 	store.ClearPendingDelivery(def.TriggerID)
-	third, err := sched.FireTrigger(def.TriggerID, "manual", nil, false)
+	third, err := sched.FireTrigger(def.TriggerID, "manual", nil, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

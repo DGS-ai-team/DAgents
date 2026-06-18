@@ -17,8 +17,9 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-func testConfigChildAgentsEnabled() *config.Config {
-	cfg := testConfig()
+func testConfigChildAgentsEnabled(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := testConfig(t)
 	cfg.ChildAgents.Enabled = true
 	return cfg
 }
@@ -29,7 +30,7 @@ func newChildAgentTestServer(t *testing.T, llmClient llm.Client) *httptest.Serve
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(NewServer(testConfigChildAgentsEnabled(), nil,
+	return httptest.NewServer(NewServer(testConfigChildAgentsEnabled(t), nil,
 		WithLLM(llmClient), WithTools(reg), WithSkipStore()).Handler())
 }
 
@@ -252,6 +253,10 @@ func (d *sessionDelayedEchoMock) StreamChat(ctx context.Context, req llm.ChatReq
 
 func (d *sessionDelayedEchoMock) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
 	return "mock", nil
+}
+
+func (d *sessionDelayedEchoMock) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return (&llm.MockClient{}).NormalizeAssistant(existing, msg)
 }
 
 func (d *sessionDelayedEchoMock) isParent(toolDefs []tools.ToolDef) bool {

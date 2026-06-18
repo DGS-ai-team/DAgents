@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string) {
@@ -13,9 +14,8 @@ func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string
 	dir := t.TempDir()
 	runtimeDir = dir
 	path := filepath.Join(dir, "config.yaml")
-	dataDir := filepath.Join(dir, "data")
-	if !strings.Contains(content, "data_dir:") {
-		content = fmt.Sprintf("data_dir: %q\n", dataDir) + content
+	if !strings.Contains(content, "fs_root:") {
+		content = fmt.Sprintf("fs_root: %q\n", runtimeDir) + content
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -53,6 +53,21 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	}
 	if cfg.LLM.MaxToolLoops != 16 {
 		t.Fatalf("llm.max_tool_loops = %d, want 16", cfg.LLM.MaxToolLoops)
+	}
+	if cfg.FSRoot != runtimeDir {
+		t.Fatalf("fs_root = %q, want %q", cfg.FSRoot, runtimeDir)
+	}
+	wantDB := filepath.Join(runtimeDir, "memory", "sessions.db")
+	if cfg.SessionDBPath() != wantDB {
+		t.Fatalf("SessionDBPath = %q, want %q", cfg.SessionDBPath(), wantDB)
+	}
+	wantData := filepath.Join(runtimeDir, "data")
+	if cfg.DataDir() != wantData {
+		t.Fatalf("DataDir = %q, want %q", cfg.DataDir(), wantData)
+	}
+	wantSkills := filepath.Join(runtimeDir, "skills")
+	if cfg.SkillsRoot() != wantSkills {
+		t.Fatalf("SkillsRoot = %q, want %q", cfg.SkillsRoot(), wantSkills)
 	}
 }
 
@@ -160,5 +175,55 @@ func TestLoadFile_envAgentIDOverridesFile(t *testing.T) {
 	raw, _ := os.ReadFile(idFile)
 	if strings.TrimSpace(string(raw)) != "env-wins" {
 		t.Fatalf("agent_id file = %q, want env-wins", raw)
+	}
+}
+
+func TestManageRegistryBaseURL_prefersRegistrationOverride(t *testing.T) {
+	cfg := &Config{
+		Local: LocalConfig{Endpoint: "http://127.0.0.1:18765"},
+		Manage: ManageConfig{
+			Registration: ManageRegistrationConfig{
+				BaseURL: "http://192.168.1.10:18765",
+			},
+		},
+	}
+	if got := cfg.ManageRegistryBaseURL(); got != "http://192.168.1.10:18765" {
+		t.Fatalf("ManageRegistryBaseURL = %q", got)
+	}
+	if cfg.ManageRegistryBaseURLIsLoopback() {
+		t.Fatal("expected loopback false for LAN base_url")
+	}
+	cfg.Manage.Registration.BaseURL = ""
+	if got := cfg.ManageRegistryBaseURL(); got != "http://127.0.0.1:18765" {
+		t.Fatalf("fallback ManageRegistryBaseURL = %q", got)
+	}
+	if !cfg.ManageRegistryBaseURLIsLoopback() {
+		t.Fatal("expected loopback true for local endpoint")
+	}
+}
+
+func TestManageA2AConfigDefaults(t *testing.T) {
+	cfg := &Config{
+		Manage: ManageConfig{
+			Enabled: true,
+			Registration: ManageRegistrationConfig{
+				IntervalSeconds: 40,
+			},
+		},
+	}
+	cfg.ApplyDefaults()
+	if !cfg.ManageA2AEnabled() {
+		t.Fatal("expected default a2a enabled")
+	}
+	if cfg.ManageA2AInboxWait() != 25*time.Second {
+		t.Fatalf("wait=%s", cfg.ManageA2AInboxWait())
+	}
+	if cfg.ManageA2AInboxPollInterval() != 40*time.Second {
+		t.Fatalf("poll=%s", cfg.ManageA2AInboxPollInterval())
+	}
+	disabled := false
+	cfg.Manage.A2A.Enabled = &disabled
+	if cfg.ManageA2AEnabled() {
+		t.Fatal("expected explicit disable")
 	}
 }

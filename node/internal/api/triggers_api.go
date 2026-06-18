@@ -129,7 +129,7 @@ func (s *Server) handleFireTrigger(w http.ResponseWriter, r *http.Request) {
 	if reason == "" {
 		reason = "manual"
 	}
-	record, err := s.triggerSched.FireTrigger(id, reason, body.Payload, body.Force)
+	record, err := s.triggerSched.FireTrigger(id, reason, body.Payload, body.Force, nil)
 	if triggers.IsNotFound(err) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "trigger not found", map[string]any{"trigger_id": id})
 		return

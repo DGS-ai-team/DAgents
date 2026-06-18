@@ -31,7 +31,10 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			return
 		}
 		m.turn.MarkTurnContent()
-		if text, ok := ev.Data["content"].(string); ok {
+		m.submitContentSeen = true
+		m.statusMgr.Finish("prefilling")
+		m.statusMgr.Finish("thinking")
+		if text, ok := ev.Data["content"].(string); ok && text != "" {
 			m.transcript.AppendPartial("assistant", text)
 			m.notifyViewportRefresh()
 		}
@@ -40,6 +43,11 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			return
 		}
 		m.turn.MarkTurnContent()
+		m.submitContentSeen = true
+		m.statusMgr.Finish("prefilling")
+		if !m.statusMgr.Has("thinking") {
+			m.statusMgr.Start("thinking")
+		}
 		if !m.showReasoning {
 			return
 		}
@@ -52,20 +60,73 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			return
 		}
 		m.turn.MarkTurnContent()
+		m.submitContentSeen = true
+		m.statusMgr.FinishAll()
 		m.transcript.FinishPartial("assistant")
 		m.transcript.FinishPartial("reasoning")
-		for _, line := range tuishared.FormatToolEvent(ev.Type, ev.Data, m.toolFold.Verbose()) {
-			m.transcript.Add(line)
+		blockID := tuishared.ToolCallIDFromEvent(ev.Data)
+		if blockID == "" {
+			blockID = tuishared.ToolEventID(ev.Data)
+		}
+		if ev.Type == "tool_call" {
+			m.children.noteToolCall(ev.Data)
+			if blockID = tuishared.HandleToolCallEvent(m.transcript, m.toolCallStream, ev.Data, m.toolFold.Verbose(), m.toolPending); blockID != "" {
+				m.toolBlocks.Register(blockID)
+			}
+		} else {
+			if blockID == "" {
+				blockID = m.toolBlocks.NextSeqID()
+			}
+			m.children.noteToolResult(ev.Data)
+			if m.toolCallStream != nil {
+				m.toolCallStream.ForgetBlock(blockID)
+			}
+			var elapsed float64 = -1
+			if raw := ev.Data["duration_seconds"]; raw != nil {
+				switch v := raw.(type) {
+				case float64:
+					elapsed = v
+				case int:
+					elapsed = float64(v)
+				case int64:
+					elapsed = float64(v)
+				}
+				if elapsed < 0 {
+					elapsed = 0
+				}
+			}
+			if elapsed < 0 {
+				elapsed = m.toolPending.ElapsedSeconds(blockID)
+			}
+			m.toolPending.Remove(blockID)
+			m.transcript.RemoveToolPendingLines(blockID)
+			m.toolBlocks.Register(blockID)
+			for _, line := range tuishared.FormatToolEventWithID(ev.Type, ev.Data, blockID, m.toolFold.Verbose(), elapsed) {
+				m.transcript.Add(line)
+			}
 		}
 		m.notifyViewportRefresh()
 	case "usage":
 		if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 			return
 		}
-		m.usageStrip = tuishared.ParseUsageStrip(ev.Data)
+		m.applyUsageFromSSE(ev.Data)
+		if suffix := tuishared.FormatInlineUsage(tuishared.ParseUsageRound(ev.Data)); suffix != "" {
+			m.transcript.ApplyRoundUsage(suffix)
+		}
 		m.notifyStripRefresh()
+		m.notifyViewportRefresh()
 	case "context_compression_blocking", "context_compression_silent":
-		m.transcript.Add("[system] " + clihitl.FormatContextCompression(ev.Type, ev.Data))
+		phase := strings.TrimSpace(fmt.Sprint(ev.Data["phase"]))
+		if ev.Type == "context_compression_blocking" && phase != "end" {
+			m.statusMgr.Start("compression")
+		} else {
+			m.statusMgr.Finish("compression")
+		}
+		line := clihitl.FormatContextCompression(ev.Type, ev.Data)
+		if line != "" {
+			m.transcript.Add("[system] " + line)
+		}
 		m.notifyViewportRefresh()
 		m.scheduleContextTokenRefresh()
 	case "error":
@@ -75,7 +136,9 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		}
 		m.transcript.Add("[system] error: " + msg)
 		m.notifyViewportRefresh()
+		m.statusMgr.FinishAll()
 		if m.turn.Awaiting() {
+			m.resetTurnWaitUI()
 			m.turn.FinishTurn()
 			m.statusLine = "回合结束"
 		}
@@ -90,28 +153,34 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 	case "temporary_agent_completed":
 		id := clihitl.ChildSessionIDFromData(ev.Data)
 		m.children.onFinished(id)
-		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
-			m.transcript.Add("[system] " + line)
-			m.notifyViewportRefresh()
-		} else {
-			m.notifyStripRefresh()
+		if !m.children.shouldSuppressLifecycle(id, ev.Type) {
+			if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
+				m.transcript.Add("[system] " + line)
+				m.notifyViewportRefresh()
+				break
+			}
 		}
+		m.notifyStripRefresh()
 	case "temporary_agent_cancelled":
 		id := clihitl.ChildSessionIDFromData(ev.Data)
 		m.children.onFinished(id)
-		if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
-			m.transcript.Add("[system] " + line)
-			m.notifyViewportRefresh()
-		} else {
-			m.notifyStripRefresh()
+		if !m.children.shouldSuppressLifecycle(id, ev.Type) {
+			if line := clihitl.FormatChildLifecycleLine(ev.Type, ev.Data); line != "" {
+				m.transcript.Add("[system] " + line)
+				m.notifyViewportRefresh()
+				break
+			}
 		}
+		m.notifyStripRefresh()
 	case "approval_required":
+		m.releaseTurnWaitForA2ARelay(ev.Data)
 		m.enqueueApproval(ev.Data)
 		m.notifyHITLChanged()
 	case "user_information_required":
 		if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 			return
 		}
+		m.releaseTurnWaitForA2ARelay(ev.Data)
 		m.enqueueUserInfo(ev.Data)
 		m.notifyHITLChanged()
 	case "done":
@@ -120,19 +189,16 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		}
 		m.transcript.FinishPartial("assistant")
 		m.transcript.FinishPartial("reasoning")
+		m.statusMgr.FinishAll()
 		if m.turn.ShouldAcceptDone(ev.Seq) {
+			m.resetTurnWaitUI()
+			m.clearPartialToolBlocks()
 			m.turn.FinishTurn()
 			m.statusLine = "回合结束"
 		}
 		m.notifyViewportRefresh()
 		m.scheduleContextTokenRefresh()
 	default:
-	}
-}
-
-func (m *model) notifyViewportRefresh() {
-	if m.program != nil {
-		m.program.Send(refreshViewportMsg{})
 	}
 }
 
@@ -145,6 +211,18 @@ func (m *model) notifyStripRefresh() {
 func (m *model) notifyHITLChanged() {
 	if m.program != nil {
 		m.program.Send(pendingHITLChangedMsg{})
+	}
+}
+
+// releaseTurnWaitForA2ARelay 在 agent_invoke 同步等待期间释放 turn 栅栏，便于展示对端中继 HITL。
+func (m *model) releaseTurnWaitForA2ARelay(data map[string]any) {
+	if !clihitl.IsA2ARelayHITL(data) {
+		return
+	}
+	m.statusMgr.FinishAll()
+	m.resetTurnWaitUI()
+	if m.turn.Awaiting() {
+		m.turn.FinishTurn()
 	}
 }
 

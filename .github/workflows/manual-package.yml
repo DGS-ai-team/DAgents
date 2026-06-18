@@ -16,16 +16,30 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CLI_PYINSTALLER_ARGS: --onefile --name dagents-cli --hidden-import=textual --hidden-import=aiohttp run_dagents_cli.py
-  RC_PI_ARGS: --onefile --name dagents_register_center --add-data register_center:register_center run_register_center.py
 
 jobs:
   test:
-    name: Pre-build tests
+    name: Pre-build tests (Go + Python + Web UI)
     if: ${{ !inputs.skip_tests }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: node/webui/frontend/package-lock.json
+
+      - name: Test Web UI
+        run: |
+          npm ci --prefix node/webui/frontend
+          npm test --prefix node/webui/frontend
+
+      - name: Build Web UI
+        run: bash node/webui/build.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -79,6 +93,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: node/webui/frontend/package-lock.json
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -113,7 +134,6 @@ jobs:
         shell: bash
         run: |
           bash scripts/ci/build_dagents_cli.sh
-          bash scripts/ci/build_dagents_register_center.sh
 
       - name: Build Python bundles (Linux Rocky 8 Docker + pyenv, glibc 2.28)
         if: matrix.cli_build == 'docker-rocky8'
@@ -121,13 +141,12 @@ jobs:
         shell: bash
         env:
           CLI_PI_ARGS: ${{ env.CLI_PYINSTALLER_ARGS }}
-          RC_PI_ARGS: ${{ env.RC_PI_ARGS }}
           PYENV_PYTHON_VERSION: "3.13.2"
         run: |
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e CLI_PI_ARGS -e RC_PI_ARGS -e PYENV_PYTHON_VERSION \
+            -e CLI_PI_ARGS -e PYENV_PYTHON_VERSION \
             rockylinux:8 \
             bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
 
@@ -139,9 +158,30 @@ jobs:
             bash scripts/ci/assemble_local_assistant_bundle.sh
           ls -la dist/dagents-local-assistant-*
 
+      - name: Install Inno Setup (Windows installer)
+        if: matrix.platform == 'windows-amd64'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        if: matrix.platform == 'windows-amd64'
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION}" bash scripts/ci/build_windows_installer.sh
+          ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
+
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
           name: dagents-local-assistant-${{ matrix.platform }}
           path: dist/dagents-local-assistant-${{ matrix.platform }}-*.*
+          if-no-files-found: error
+
+      - name: Upload Windows installer
+        if: matrix.platform == 'windows-amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dagents-windows-installer
+          path: dist/dagents-local-assistant-windows-amd64-installer-*.exe
           if-no-files-found: error

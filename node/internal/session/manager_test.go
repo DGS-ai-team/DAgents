@@ -59,7 +59,7 @@ func TestEnqueueMessageTurn(t *testing.T) {
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
-	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "hello", nil); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "hello", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,7 +89,7 @@ func TestEnqueueMessageTurn(t *testing.T) {
 func TestEnqueueMessageSessionNotFound(t *testing.T) {
 	mgr := testManager(t)
 	defer mgr.Stop()
-	if _, err := mgr.EnqueueMessage(context.Background(), "missing", "message", "x", nil); err == nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), "missing", "message", "x", nil, ""); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -102,7 +102,7 @@ func TestCancelTurn(t *testing.T) {
 	defer mgr.Stop()
 
 	s, _, _ := mgr.Create("")
-	_, _ = mgr.EnqueueMessage(context.Background(), s.ID, "message", "long", nil)
+	_, _ = mgr.EnqueueMessage(context.Background(), s.ID, "message", "long", nil, "")
 
 	time.Sleep(30 * time.Millisecond)
 	if !mgr.CancelTurn(s.ID) {
@@ -130,6 +130,10 @@ func (s *slowMockLLM) CompleteText(_ context.Context, _ llm.CompleteRequest) (st
 	return "mock summary", nil
 }
 
+func (s *slowMockLLM) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
 func TestPersistAfterTurn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.db")
 	st, err := store.Open(path)
@@ -147,7 +151,7 @@ func TestPersistAfterTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "persist-me", nil); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "persist-me", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.After(2 * time.Second)

@@ -6,11 +6,24 @@ import (
 
 // MockClient 用于单测与无 API Key 联调。
 type MockClient struct {
-	Prefix      string
-	FixedReply  string
+	Prefix     string
+	FixedReply string
 	// EnableTools 为 true 时：首轮返回 read_file tool call，次轮返回工具结果摘要。
 	EnableTools bool
+	adapter     MessageAdapter
 	callCount   int
+}
+
+func (m *MockClient) NormalizeAssistant(existing []Message, msg Message) Message {
+	if m.adapter == nil {
+		m.adapter = openAIAdapter{}
+	}
+	return m.adapter.NormalizeAssistantForStorage(existing, msg, nil)
+}
+
+// StubNormalizeAssistant 供测试 mock 实现 llm.Client 时复用。
+func StubNormalizeAssistant(existing []Message, msg Message) Message {
+	return NewMessageAdapter("openai").NormalizeAssistantForStorage(existing, msg, nil)
 }
 
 // StreamChat 模拟流式输出；EnableTools 时驱动工具循环测试。

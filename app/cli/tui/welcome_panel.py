@@ -14,6 +14,36 @@ _RISK_LINES = (
 )
 
 
+def _skills_bloat_warning_lines(context_summary: dict | None) -> tuple[str, ...]:
+    if not context_summary:
+        return ()
+    try:
+        metadata = int(context_summary.get("skills_catalog_estimated_tokens") or 0)
+        threshold = int(context_summary.get("skills_catalog_bloat_threshold") or 4000)
+    except (TypeError, ValueError):
+        return ()
+    if threshold <= 0:
+        threshold = 4000
+    if metadata <= threshold:
+        return ()
+    return (
+        f"skills 目录估算约 {metadata:,} tokens（超过 {threshold}）",
+        "skills 过于臃肿，请精简 skill 描述、缩短 SKILL 正文或清理无用的 skills",
+    )
+
+
+def format_thinking_summary(llm_info: dict | None) -> str | None:
+    if not llm_info or not llm_info.get("thinking_supported"):
+        return None
+    thinking = str(llm_info.get("thinking") or "").strip().lower()
+    if thinking in {"disabled", "off"}:
+        return "关闭"
+    if thinking in {"enabled", "on"}:
+        effort = str(llm_info.get("reasoning_effort") or "high").strip() or "high"
+        return f"开启 · {effort}"
+    return None
+
+
 def build_welcome_panel(
     *,
     api_base: str,
@@ -21,6 +51,7 @@ def build_welcome_panel(
     username: str | None = None,
     version: str | None = None,
     width: int | None = None,
+    context_summary: dict | None = None,
 ) -> Panel:
     """构造进入聊天时写入 RichLog 的欢迎 Panel（连接成功后一次性写入，不再更新）。
 
@@ -49,6 +80,8 @@ def build_welcome_panel(
     left.append(f"用户 · {user}\n", style="dim")
     left.append(f"backend · {backend}\n", style="dim")
     left.append(f"session · {session}", style="dim")
+    for line in _skills_bloat_warning_lines(context_summary):
+        left.append(f"\n{line}", style="bold yellow")
 
     right = Text("风险提示\n", style="bold red")
     for line in _RISK_LINES:

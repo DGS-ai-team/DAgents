@@ -5,6 +5,25 @@ from dataclasses import dataclass
 from typing import Any
 
 
+from enum import StrEnum
+
+
+class TriggerSessionTarget(StrEnum):
+    SAME = "same_session"
+    NEW = "new_session"
+    LATEST_ACTIVE = "latest_active_session"
+
+
+TRIGGER_SESSION_OPTION_LABELS: tuple[tuple[str, TriggerSessionTarget | None], ...] = (
+    ("同意（在同一个会话中触发）", TriggerSessionTarget.SAME),
+    ("同意（在新会话中触发）", TriggerSessionTarget.NEW),
+    ("同意（在最新一个活跃会话中触发）", TriggerSessionTarget.LATEST_ACTIVE),
+    ("不同意", None),
+)
+
+APPROVAL_MODE_TRIGGER_SESSION = "trigger_session"
+
+
 @dataclass(frozen=True, slots=True)
 class ToolApprovalRequest:
     call_id: str
@@ -20,9 +39,17 @@ class ToolApprovalRequest:
 class ApprovalDecision:
     approved: list[str]
     rejected: list[str]
+    trigger_session_targets: dict[str, str] | None = None
 
     def to_resume_value(self) -> dict[str, Any]:
-        return {"type": "selection", "approved": self.approved, "rejected": self.rejected}
+        resume: dict[str, Any] = {
+            "type": "selection",
+            "approved": self.approved,
+            "rejected": self.rejected,
+        }
+        if self.trigger_session_targets:
+            resume["trigger_session_targets"] = dict(self.trigger_session_targets)
+        return resume
 
 
 class ApprovalCancelled(Exception):
@@ -62,6 +89,17 @@ def extract_tool_approval_requests(data: dict[str, Any]) -> list[ToolApprovalReq
             )
         )
     return requests
+
+
+def is_trigger_session_approval(item: ToolApprovalRequest) -> bool:
+    if item.approval_mode == APPROVAL_MODE_TRIGGER_SESSION:
+        return True
+    name = item.name.strip().lower()
+    return name in {"trigger_create"}
+
+
+def trigger_session_options() -> list[tuple[str, TriggerSessionTarget | None]]:
+    return list(TRIGGER_SESSION_OPTION_LABELS)
 
 
 def build_all_approved_decision(requests: list[ToolApprovalRequest]) -> ApprovalDecision:

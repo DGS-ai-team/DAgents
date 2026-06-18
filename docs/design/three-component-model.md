@@ -1,5 +1,7 @@
 # 三组件模型：Client / Agent Node / Manage
 
+> **已收敛至项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md) §2 · [handbook/README.md](../handbook/README.md)
+
 本文档描述 v2 **重设计**后的目标形态，取代旧文档中「Python Backend = Brain + Control、Go Proxy = 出站 Body」的假设。
 
 ## 1. 总览
@@ -132,11 +134,11 @@ Node   → turn loop → 工具本地执行 → SSE 推送事件 → Client
 ### 5.3 A2A（跨 Agent，非子 Agent）
 
 ```text
-Agent A → Manage：discover / POST /v1/a2a/messages
+Agent A → Manage：discover / POST /v1/a2a/tasks
 Manage  → 写入 Agent B inbox
-Agent B → Manage：GET /v1/a2a/inbox → 本地 turn loop
-Agent B → Manage：POST .../reply
-Agent A → Manage：GET /v1/a2a/messages/{id} 取结果
+Agent B → Manage：GET /v1/a2a/inbox（long poll）→ 本地 turn loop
+Agent B → Manage：POST /v1/a2a/tasks/{id}/reply
+Agent A → Manage：GET /v1/a2a/tasks/{id} 取结果
 审计：A、B 各自上报 Manage
 ```
 

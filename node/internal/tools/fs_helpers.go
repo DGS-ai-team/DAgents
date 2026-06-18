@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,22 +9,27 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
 
 const (
-	defaultLineOffset        = 1
-	defaultLineLimit         = 100
-	defaultSearchIndexOffset = 0
-	defaultSearchCountLimit  = 5
+	defaultLineOffset         = 1
+	defaultLineLimit          = 100
+	defaultSearchIndexOffset  = 0
+	defaultSearchCountLimit   = 5
 	defaultSearchContextLines = 10
-	maxSearchContextLines    = 50
-	maxSearchHitIndexes      = 10000
-	defaultReadMaxBytes      = 3000
-	defaultSearchMaxBytes    = 8000
+	maxSearchContextLines     = 50
+	maxSearchHitIndexes       = 10000
+	// defaultFSMaxOutputTokens fs 工具（read_file 正文、grep 输出）单页 token 预算（DeepSeek 粗算）。
+	// 与默认 line_limit=100 匹配，避免单页过早截断。
+	defaultFSMaxOutputTokens = 3000
+	defaultReadMaxTokens     = defaultFSMaxOutputTokens
+	defaultSearchMaxTokens   = defaultFSMaxOutputTokens
 )
 
 var textSuffixes = map[string]struct{}{
-	".txt": {}, ".md": {}, ".py": {}, ".json": {}, ".yaml": {}, ".yml": {},
+	".txt": {}, ".md": {}, ".py": {}, ".json": {}, ".jsonl": {}, ".html": {}, ".yaml": {}, ".yml": {},
 	".toml": {}, ".ini": {}, ".cfg": {}, ".sh": {}, ".bat": {}, ".ps1": {},
 	".log": {}, ".csv": {}, ".ts": {}, ".tsx": {}, ".js": {}, ".jsx": {}, ".go": {},
 }
@@ -38,7 +42,7 @@ func isTextReadable(path string) bool {
 	return ext == ""
 }
 
-func readAllLines(path string) ([]string, error) {
+func readAllLines(path, fileEncoding string) ([]string, error) {
 	if !isTextReadable(path) {
 		ext := filepath.Ext(path)
 		if ext == "" {
@@ -46,40 +50,26 @@ func readAllLines(path string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("不支持读取该后缀文件：%s", ext)
 	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	text, err := decodeFileContent(raw, fileEncoding)
+	if err != nil {
+		return nil, err
+	}
 	if strings.EqualFold(filepath.Ext(path), ".json") {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
 		var obj any
-		if err := json.Unmarshal(raw, &obj); err != nil {
-			return strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n"), nil
+		if err := json.Unmarshal([]byte(text), &obj); err != nil {
+			return normalizeLines(text), nil
 		}
 		pretty, err := json.MarshalIndent(obj, "", "  ")
 		if err != nil {
 			return nil, err
 		}
-		text := strings.ReplaceAll(string(pretty), "\r\n", "\n")
-		if text == "" {
-			return []string{}, nil
-		}
-		return strings.Split(text, "\n"), nil
+		return normalizeLines(string(pretty)), nil
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	var lines []string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		lines = append(lines, sc.Text())
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	return lines, nil
+	return normalizeLines(text), nil
 }
 
 func windowFromTotal(total, lineOffset, lineLimit int) (start, end int) {
@@ -107,29 +97,28 @@ func windowFromTotal(total, lineOffset, lineLimit int) (start, end int) {
 func formatNumberedLines(lines []string, startLine int) []string {
 	out := make([]string, len(lines))
 	for i, line := range lines {
-		out[i] = fmt.Sprintf("%d\t%s", startLine+i, line)
+		// 用空格对齐行号，避免 \t 在 Windows 终端/TUI 中显示为方框并压住正文。
+		out[i] = fmt.Sprintf("%6d  %s", startLine+i, line)
 	}
 	return out
 }
 
-func applyMaxBytesToBody(body string, byteLimit int, truncateHint string) (string, bool) {
-	b := []byte(body)
-	if len(b) <= byteLimit {
+func applyMaxTokensToBody(body string, maxTokens float64, truncateHint string) (string, bool) {
+	clipped, truncated := tokens.ClipToTokenBudget(body, maxTokens)
+	if !truncated {
 		return body, false
 	}
-	clipped := string(b[:byteLimit])
 	return clipped + "\n\n[TRUNCATED] " + truncateHint, true
 }
 
-func applyMaxBytesToOutput(full string, byteLimit int) (string, bool) {
-	b := []byte(full)
-	if len(b) <= byteLimit {
+func applyMaxTokensToOutput(full string, maxTokens float64) (string, bool) {
+	clipped, truncated := tokens.ClipToTokenBudget(full, maxTokens)
+	if !truncated {
 		return full, false
 	}
-	clipped := string(b[:byteLimit])
 	return clipped + fmt.Sprintf(
-		"\n\n[TRUNCATED] 输出超过 %d bytes；请减小 count_limit 或缩小检索范围，并使用 next_index_offset 翻页。",
-		byteLimit,
+		"\n\n[TRUNCATED] 输出超过约 %d tokens（DeepSeek 粗算）；请减小 count_limit 或缩小检索范围，并使用 next_index_offset 翻页。",
+		int(maxTokens+0.5),
 	), true
 }
 

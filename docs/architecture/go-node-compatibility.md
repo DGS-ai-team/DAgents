@@ -79,6 +79,8 @@ bin\dagents-client.exe -config config.yaml tui --plain
 
 ## 4. RHEL 6 部署注意
 
+**Docker 特性导览**：[`cases/centos7-feature-tour/`](../../cases/centos7-feature-tour/)（CentOS 7 + `./scripts/verify.sh`）。RHEL 6 真机仍见 [rhel6-acceptance-checklist.md](./rhel6-acceptance-checklist.md)。
+
 | 项 | 做法 |
 |----|------|
 | 服务托管 | `scripts/linux/install_node_service_sysv.sh`（SysV init，非 systemd） |

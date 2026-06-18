@@ -1,0 +1,388 @@
+#!/usr/bin/env bash
+# DAgents Local Assistant 命令行入口（对齐 packaging/windows/dagents.cmd）。
+set -euo pipefail
+
+# install.sh 会在 BIN_DIR（如 /usr/local/bin）创建指向 PREFIX/dagents 的符号链接；
+# 须沿链接解析真实路径，否则 ROOT 会落在 BIN_DIR 导致查找 bin/dagents-node 失败。
+dagents_script_dir() {
+  local src="${BASH_SOURCE[1]}"
+  while [[ -L "${src}" ]]; do
+    local dir
+    dir="$(cd -P "$(dirname "${src}")" && pwd)"
+    src="$(readlink "${src}")"
+    [[ "${src}" != /* ]] && src="${dir}/${src}"
+  done
+  cd -P "$(dirname "${src}")" && pwd
+}
+
+ROOT="$(dagents_script_dir)"
+export DAGENTS_HOME="${ROOT}"
+
+die() {
+  echo "[dagents] $*" >&2
+  exit 1
+}
+
+# 对齐 packaging/windows/dagents.cmd 的 pushd：Node 的 fs_root（默认 ./.runtime）相对进程 cwd 解析。
+cd "${ROOT}" || die "cannot cd to ${DAGENTS_HOME}"
+
+CFG="${DAGENTS_CONFIG:-config.yaml}"
+if [[ ! -f "${ROOT}/${CFG}" && -f "${ROOT}/config.example.yaml" ]]; then
+  cp "${ROOT}/config.example.yaml" "${ROOT}/config.yaml"
+  CFG="config.yaml"
+fi
+if [[ ! -f "${ROOT}/.env" && -f "${ROOT}/.env.example" ]]; then
+  cp "${ROOT}/.env.example" "${ROOT}/.env"
+fi
+
+BIN="${ROOT}/bin"
+NODE_PID_FILE="${ROOT}/.runtime/node.pid"
+NODE_STOP_TIMEOUT_SEC=15
+# set -u 下空数组 "${PARSED_ARGS[@]}" 会 unbound；须预先声明并在无额外参数时分支 exec。
+WITHNODE=0
+PARSED_ARGS=()
+
+require_bin() {
+  local name="$1"
+  [[ -x "${BIN}/${name}" ]] || die "${BIN}/${name} was not found in ${DAGENTS_HOME}"
+}
+
+probe_node() {
+  "${BIN}/dagents-client" -config "${ROOT}/${CFG}" probe >/dev/null 2>&1
+}
+
+write_node_pid() {
+  local pid="$1"
+  mkdir -p "${ROOT}/.runtime"
+  echo "${pid}" >"${NODE_PID_FILE}"
+}
+
+clear_node_pid() {
+  rm -f "${NODE_PID_FILE}"
+}
+
+# 查找与本安装目录/config 匹配的 dagents-node 进程（无 pid 文件时兜底）。
+find_node_pids() {
+  local cfg_abs="${ROOT}/${CFG}"
+  local pattern="${BIN}/dagents-node"
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f "${pattern}.*-config[[:space:]]+${cfg_abs}" 2>/dev/null || true
+  fi
+}
+
+pid_alive() {
+  local pid="$1"
+  [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+}
+
+stop_node_process() {
+  local pid="$1"
+  if ! pid_alive "${pid}"; then
+    return 0
+  fi
+  kill -TERM "${pid}" 2>/dev/null || true
+  local waited=0
+  while pid_alive "${pid}"; do
+    sleep 1
+    waited=$((waited + 1))
+    if [[ "${waited}" -ge "${NODE_STOP_TIMEOUT_SEC}" ]]; then
+      kill -KILL "${pid}" 2>/dev/null || true
+      sleep 1
+      break
+    fi
+  done
+}
+
+shutdown_node() {
+  require_bin dagents-client
+  if ! probe_node; then
+    clear_node_pid
+    echo "[dagents] node is not running"
+    return 0
+  fi
+
+  local pid=""
+  if [[ -f "${NODE_PID_FILE}" ]]; then
+    pid="$(tr -d '[:space:]' <"${NODE_PID_FILE}")"
+  fi
+  if pid_alive "${pid}"; then
+    echo "[dagents] stopping node (pid=${pid})"
+    stop_node_process "${pid}"
+  else
+    local pids
+    pids="$(find_node_pids)"
+    if [[ -n "${pids}" ]]; then
+      echo "[dagents] stopping node (pids=${pids//$'\n'/, })"
+      while IFS= read -r p; do
+        [[ -n "${p}" ]] && stop_node_process "${p}"
+      done <<<"${pids}"
+    fi
+  fi
+
+  clear_node_pid
+  if probe_node; then
+    die "node still responds to probe after shutdown; check .runtime/logs/node.err.log"
+  fi
+  echo "[dagents] node stopped"
+}
+
+start_node_background() {
+  require_bin dagents-node
+  mkdir -p "${ROOT}/.runtime/logs"
+  echo "[dagents] starting node in background (logs: .runtime/logs/node.log)"
+  nohup "${BIN}/dagents-node" -config "${ROOT}/${CFG}" \
+    >>"${ROOT}/.runtime/logs/node.log" 2>>"${ROOT}/.runtime/logs/node.err.log" &
+  write_node_pid "$!"
+}
+
+print_webui_url() {
+  local url="http://127.0.0.1:18765/ui/"
+  if [[ -x "${ROOT}/scripts/webui-url.sh" ]]; then
+    url="$("${ROOT}/scripts/webui-url.sh" "${ROOT}/${CFG}")"
+  elif [[ -f "${ROOT}/${CFG}" ]]; then
+    local port
+    port="$(grep -A10 '^listen:' "${ROOT}/${CFG}" 2>/dev/null | grep -E '^[[:space:]]+port:' | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
+    [[ -n "${port}" ]] && url="http://127.0.0.1:${port}/ui/"
+  fi
+  echo "[dagents] Web UI: ${url}"
+}
+
+wait_node_ready() {
+  require_bin dagents-client
+  local wait=0
+  while ! probe_node; do
+    sleep 1
+    wait=$((wait + 1))
+    if [[ "${wait}" -ge 30 ]]; then
+      die "node did not become ready within 30s (see .runtime/logs/node.err.log)"
+    fi
+  done
+}
+
+start_node_default() {
+  require_bin dagents-client
+  if probe_node; then
+    echo "[dagents] node already running"
+    print_webui_url
+    return 0
+  fi
+  start_node_background
+  wait_node_ready
+  echo "[dagents] node is ready"
+  print_webui_url
+}
+
+restart_node() {
+  shutdown_node
+  start_node_background
+  wait_node_ready
+  echo "[dagents] node restarted"
+  print_webui_url
+}
+
+ensure_node() {
+  require_bin dagents-client
+  if probe_node; then
+    return 0
+  fi
+  start_node_background
+  wait_node_ready
+}
+
+parse_withnode() {
+  WITHNODE=0
+  PARSED_ARGS=()
+  for arg in "$@"; do
+    if [[ "${arg}" == "--withnode" ]]; then
+      WITHNODE=1
+    else
+      PARSED_ARGS+=("${arg}")
+    fi
+  done
+}
+
+cmd_doctor() {
+  echo "DAgents installation: ${DAGENTS_HOME}"
+  local ok=1 name
+  for name in dagents-node dagents-client dagents-cli; do
+    if [[ -x "${BIN}/${name}" ]]; then
+      echo "[ok] bin/${name}"
+    else
+      echo "[missing] bin/${name}"
+      ok=0
+    fi
+  done
+  if [[ -f "${ROOT}/config.yaml" ]]; then
+    echo "[ok] config.yaml"
+  else
+    echo "[info] config.yaml not found; copy config.example.yaml config.yaml"
+  fi
+  if [[ -d "${ROOT}/.runtime" ]]; then
+    echo "[ok] .runtime"
+  else
+    echo "[missing] .runtime"
+    ok=0
+  fi
+  return "${ok}"
+}
+
+read_app_version() {
+  local v=""
+  if [[ -f "${ROOT}/VERSION" ]]; then
+    v="$(tr -d '[:space:]' < "${ROOT}/VERSION")"
+  fi
+  if [[ -z "${v}" ]] && [[ -x "${BIN}/dagents-cli" ]]; then
+    v="$("${BIN}/dagents-cli" version 2>/dev/null | awk '{print $NF}' || true)"
+  fi
+  if [[ -z "${v}" ]] && command -v python3 >/dev/null 2>&1; then
+    local repo_root="${ROOT}"
+    while [[ ! -f "${repo_root}/app/cli/version_info.py" && "${repo_root}" != "/" ]]; do
+      repo_root="$(dirname "${repo_root}")"
+    done
+    if [[ -f "${repo_root}/app/cli/version_info.py" ]]; then
+      v="$(python3 -c "import sys; sys.path.insert(0,'${repo_root}'); from app.cli.version_info import get_cli_version; print(get_cli_version())" 2>/dev/null || true)"
+    fi
+  fi
+  if [[ -z "${v}" ]]; then
+    v="unknown"
+  fi
+  printf '%s\n' "${v}"
+}
+
+bin_version() {
+  local name="$1"
+  local bin_path="${BIN}/${name}"
+  [[ -x "${bin_path}" ]] || return 0
+  local out
+  out="$("${bin_path}" version 2>/dev/null || "${bin_path}" -version 2>/dev/null || true)"
+  if [[ -n "${out}" ]]; then
+    echo "  ${name}: ${out}"
+  fi
+}
+
+cmd_version() {
+  local ver
+  ver="$(read_app_version)"
+  echo "DAgents Local Assistant ${ver}"
+  bin_version dagents-node
+  bin_version dagents-client
+  if [[ -x "${BIN}/dagents-cli" ]]; then
+    local cli_out
+    cli_out="$("${BIN}/dagents-cli" version 2>/dev/null || true)"
+    if [[ -n "${cli_out}" ]]; then
+      echo "  ${cli_out/DAgents /dagents-cli: }"
+    fi
+  fi
+}
+
+cmd_help() {
+  cat <<'EOF'
+Usage:
+  dagents chat [--withnode]       Textual TUI (Python; rich UI)
+  dagents tui [--withnode] [--plain]  Go bubbletea TUI (default full-screen; --plain for line REPL)
+  dagents node                    Start Agent Node in background (default; waits until ready)
+  dagents node shutdown           Stop background Node
+  dagents node restart            Stop then start Node in background
+  dagents node --foreground       Start Node in foreground (blocks terminal)
+  dagents node --no-wait          Background start without waiting for probe
+  dagents doctor                  Check installed files
+  dagents version                 Print version information
+
+Web UI (browser Client, embedded in dagents-node):
+  After `dagents node`, open http://127.0.0.1:<listen.port>/ui/ (default port 18765).
+  Disable with ui.enabled: false in config.yaml. No separate UI package required.
+
+Options:
+  --withnode     Probe Node first; start it in background if not running, then launch client
+  --foreground   Run Node in foreground (blocks terminal)
+  --no-wait      Background start without waiting for probe (--background alias)
+
+Config:
+  Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
+  A2A / Registry: deploy Manage separately (packaging/manage/README.md).
+  CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
+EOF
+}
+
+if [[ $# -eq 0 ]]; then
+  require_bin dagents-cli
+  exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}"
+fi
+
+case "$1" in
+  help|-h|--help)
+    cmd_help
+    ;;
+  chat)
+    shift
+    parse_withnode "$@"
+    if [[ "${WITHNODE}" -eq 1 ]]; then
+      ensure_node
+    fi
+    require_bin dagents-cli
+    if ((${#PARSED_ARGS[@]} > 0)); then
+      exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}" "${PARSED_ARGS[@]}"
+    else
+      exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}"
+    fi
+    ;;
+  tui)
+    shift
+    parse_withnode "$@"
+    if [[ "${WITHNODE}" -eq 1 ]]; then
+      ensure_node
+    fi
+    require_bin dagents-client
+    if ((${#PARSED_ARGS[@]} > 0)); then
+      exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui "${PARSED_ARGS[@]}"
+    else
+      exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui
+    fi
+    ;;
+  node)
+    shift
+    case "${1:-}" in
+      shutdown|stop)
+        shutdown_node
+        exit 0
+      ;;
+      restart)
+        restart_node
+        exit 0
+      ;;
+      --foreground|-f)
+        shift
+        require_bin dagents-node
+        exec "${BIN}/dagents-node" -config "${ROOT}/${CFG}" "$@"
+      ;;
+      --no-wait|--background)
+        if probe_node; then
+          echo "[dagents] node already running"
+          exit 0
+        fi
+        start_node_background
+        exit 0
+      ;;
+      "")
+        start_node_default
+        exit 0
+      ;;
+      *)
+        require_bin dagents-node
+        exec "${BIN}/dagents-node" -config "${ROOT}/${CFG}" "$@"
+      ;;
+    esac
+    ;;
+  doctor)
+    cmd_doctor
+    exit $?
+    ;;
+  version)
+    cmd_version
+    exit 0
+    ;;
+  *)
+    require_bin dagents-cli
+    exec "${BIN}/dagents-cli" "$@"
+    ;;
+esac

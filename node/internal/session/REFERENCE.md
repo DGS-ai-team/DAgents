@@ -17,6 +17,7 @@
 | `LoadedSkills` / `ListSessionSkills` / `LoadSessionSkill` / `UnloadSessionSkill` | skills 读写 |
 | `ClearContext` / `Delete` | 清空消息或删除 session |
 | `EnqueueMessage` | user / resume / 高优先级消息入队 |
+| `RunInboxConsultation` | A2A inbox：单 Task 跑完整 turn（订阅 SSE 聚合 assistant） |
 | `EnqueueAsyncToolResult` / `EnqueueToolResult` / `EnqueueBackgroundToolResult` | 工具续跑与后台回灌 |
 | `CancelTurn` | 取消当前 turn 上下文 |
 | `attachUserChildTools` | 父 runtime 上 `SetChildAgentTools(mgr, false)` |
@@ -53,6 +54,7 @@
 | `enqueue` | 带优先级入队；高优先级可打断当前 turn |
 | `cancelTurn` / `stop` | 取消或停止 consumer |
 | `contextView` | 组装 `ContextView` |
+| `runTurnStep` / `finishTurnIdle` | 单步 turn 脚手架；`finishTurnIdle` 在 `applyStepOutcome` 后触发子 Agent 结算 |
 | `getLoadedSkills` / `setLoadedSkills` / `setLoadedSkillsByName` 等 | skills 内存状态 |
 
 ## runtime_child.go

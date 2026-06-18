@@ -1,0 +1,9 @@
+# 宿主机 Client / TUI 连接 Docker 映射端口（容器内 Node 见 config.yaml）
+agent_id: case-write-skill
+
+local:
+  endpoint: http://127.0.0.1:18765
+
+listen:
+  host: 127.0.0.1
+  port: 18765

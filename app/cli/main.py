@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -62,12 +61,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_delete_session(apply_client_settings(args))
         parser.parse_args(["delete", "--help"])
         return 1
-    if args.command == "register-center":
-        return _run_installed_or_python("dagents_register_center", "run_register_center.py", args.extra)
     if args.command == "doctor":
         return _doctor()
     if args.command == "version":
-        print("DAgents")
+        from app.cli.version_info import get_cli_version
+
+        print(f"DAgents {get_cli_version()}")
         return 0
     parser.print_help()
     return 0
@@ -96,47 +95,25 @@ def build_parser() -> argparse.ArgumentParser:
     delete_session.add_argument("session_id", help="Session ID to release")
     _add_client_config_arguments(delete_session)
 
-    register_center = subparsers.add_parser("register-center", help="Start the Register Center")
-    register_center.add_argument("extra", nargs=argparse.REMAINDER)
-
     subparsers.add_parser("doctor", help="Check installed files")
     subparsers.add_parser("version", help="Print version information")
     return parser
 
 
-def _run_installed_or_python(binary_stem: str, script_name: str, extra_args: list[str]) -> int:
-    home = _runtime_home()
-    exe_name = f"{binary_stem}.exe" if os.name == "nt" else binary_stem
-    binary = home / exe_name
-    if binary.exists():
-        return subprocess.call([str(binary), *extra_args], cwd=str(home))
-    script = _repo_root() / script_name
-    if script.exists():
-        return subprocess.call([sys.executable, str(script), *extra_args], cwd=str(_repo_root()))
-    print(f"[dagents] missing {exe_name} and {script_name}", file=sys.stderr)
-    return 1
-
-
 def _doctor() -> int:
     home = _runtime_home()
-    print(f"DAgents installation: {home}")
-    ok = True
-    for name in _expected_binary_names():
-        path = home / name
-        found = path.exists()
-        print(("[ok] " if found else "[missing] ") + name)
-        ok = ok and found
-    env_path = home / ".env"
-    print("[ok] .env found" if env_path.exists() else "[info] .env not found; defaults and .env.example will be used")
+    print(f"DAgents CLI home: {home}")
+    manage_script = _repo_root() / "run_manage.py"
+    if manage_script.exists():
+        print("[ok] run_manage.py (Manage 控制面，源码开发)")
+    config = home / "config.yaml"
+    if config.exists():
+        print("[ok] config.yaml")
+    else:
+        print("[info] config.yaml not found")
     runtime_dir = home / ".runtime"
-    print("[ok] .runtime found" if runtime_dir.exists() else "[missing] .runtime")
-    return 0 if ok else 1
-
-
-def _expected_binary_names() -> list[str]:
-    if os.name == "nt":
-        return ["dagents_register_center.exe"]
-    return ["dagents_register_center"]
+    print("[ok] .runtime found" if runtime_dir.exists() else "[info] .runtime not found")
+    return 0
 
 
 def _runtime_home() -> Path:

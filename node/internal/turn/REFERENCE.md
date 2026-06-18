@@ -12,13 +12,46 @@
 | `SetChildAgentTools` | 注入临时 Agent 管理器；`isChild` 禁止管理工具 |
 | `SetToolResultEnqueuer` | 工具步结束后入队 `tool_result` |
 | `RunMessageTurn` | 测试：内联多步直到 pending/完成/入队 |
-| `RunHumanMessageTurn` | 追加 user + 单步 |
+| `RunHumanMessageTurn` | 追加 user（含 `name` 来源标识）+ 单步 |
 | `RunToolMessageTurn` | 单步 tool_message 续跑 |
 | `HandleAsyncToolResult` | 异步工具完成写 history 并可选续跑 |
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
 | `InterruptPending` | 用户新消息打断 pending，补 interrupted tool_result |
+| `publishTurnIdleDone` | `done` SSE；含 **`tool_context_metrics`**（WS5） |
 
-内部主要方法：`runOneStep`、`buildSystemPrompt`、`processToolCalls`、`executeAutoBatch`、`invokeTool`、`publishTurnIdleDone` 等。
+内部主要方法：`runOneStep`、`buildSystemPrompt`（`tool_router.go` / `cancel_partial.go` / `history_write.go`）。
+
+## context_metrics.go（WS5）
+
+| 符号 | 说明 |
+|------|------|
+| `TurnContextMetrics` | 单用户任务内工具链指标快照 |
+| `recordToolCall` / `recordToolResult` / `recordToolLoop` | 编排器内埋点 |
+| `snapshot()` | 序列化为 `done.tool_context_metrics` |
+
+## tool_router.go
+
+| 符号 | 说明 |
+|------|------|
+| `processToolCalls` | 工具分流与 HITL 暂停 |
+| `executeAutoBatch` / `invokeTool` / `executeTool` | 免审批工具执行 |
+| `executeSkillTool` | skills 工具与 loaded 状态写回 |
+| `publishToolCall` / `publishToolResult` | 工具 SSE |
+| `parseJSONArgs` / `buildUserInformationPayload` | HITL 载荷辅助 |
+
+## cancel_partial.go
+
+| 符号 | 说明 |
+|------|------|
+| `persistCancelledStream` | cancel 时保留部分 assistant |
+| `appendMissingToolResponses` | 未响应 tool_call 补位 |
+| `assistantMessageFromResult` | `ChatResult` → history assistant |
+
+## history_write.go
+
+| 符号 | 说明 |
+|------|------|
+| `appendHistory` / `insertHistory` | 规范化后写入 history + JSONL |
 
 ## prompt.go
 
@@ -28,7 +61,7 @@
 | `SystemPromptInput` | `BuildSystemPrompt` 入参 |
 | `DefaultMaxToolLoops` | 工具循环默认上限（16） |
 | `BuildSystemPrompt` | 拼接完整 system prompt |
-| `formatRuntimeWorkspaceSection` | `.runtime` 目录约定段落 |
+| `formatWorkspaceSubdirsSection` | 工作区子目录约定（不含 FS_ROOT 路径） |
 | `RunTurnPhase` | `State` → Python 兼容 phase 名 |
 
 ## pending.go
@@ -51,12 +84,12 @@
 
 | 符号 | 说明 |
 |------|------|
-| `modelContentMaxChars` | 写入模型的 tool 结果截断上限 |
 | `AsyncToolResultInput` | 异步回灌输入（job_id、status、content 等） |
-| `buildAsyncToolMessages` | 按尾部形态生成 assistant/tool/user 消息 |
+| `buildAsyncToolMessages` | async 回灌消息；经 `tool.after_each` 拆分 SSE 全文 / history 摘要 |
+| `splitToolResult` | 同步 tool：调用 `RunToolAfterEach` |
+| `ForClientContent` | async SSE 全文字段 |
 | `classifyToolResultTail` | 判断 history 尾部形态 |
 | `shouldContinueAfterAsyncTool` | 回灌后是否继续 `RunToolMessageTurn` |
-| `packageToolResult` / `clipMiddle` | 工具结果打包与截断 |
 
 ## approval_payload.go
 

@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
+	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 )
 
 func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
@@ -18,8 +20,14 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "ops-01", "/data/ws", "read_file", "最高优先级规则", "sess-abc", "当前运行环境") {
+	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "prompt_context/", "最高优先级规则", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
+		t.Fatalf("system prompt should not expose fs_root path, got %q", prompt)
+	}
+	if contains(prompt, "bash_run") || contains(prompt, "background_job") || contains(prompt, "## 可用 skills") {
+		t.Fatalf("system prompt should not embed tool-specific guidance, got %q", prompt)
 	}
 }
 
@@ -41,6 +49,61 @@ func TestBuildSystemPrompt_includesPromptContext(t *testing.T) {
 	})
 	if !containsAll(prompt, "用户信息与偏好", "prefer concise", "prompt_context") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing.T) {
+	hostsnapshot.CaptureAtStartup()
+	prompt := BuildChildSystemPrompt(ChildSystemPromptInput{
+		AgentID:   "ops-01",
+		FSRoot:    "/data/ws",
+		SessionID: "child-abc",
+		Purpose:   "review patch",
+	})
+	if !containsAll(prompt, "临时子 Agent", "review patch", "child-abc", "memory/", "运行环境", "工作区目录", "相对路径均基于工作区根目录") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
+		t.Fatalf("child prompt should not expose fs_root path, got %q", prompt)
+	}
+	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "用户信息与偏好") {
+		t.Fatalf("child prompt should omit parent sections, got %q", prompt)
+	}
+}
+
+func TestChildSystemPromptBuilder_usedByOrchestrator(t *testing.T) {
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
+	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("scan logs"))
+	prompt := orch.buildSystemPrompt("child-xyz")
+	if !containsAll(prompt, "scan logs", "child-xyz", "临时子 Agent") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestChildSystemPromptBuilder_includesLoadedSkills(t *testing.T) {
+	root := t.TempDir()
+	writeSkillForPromptTest(t, root, "writer", "---\nname: writer\ndescription: Write docs\n---\nWrite clearly.\n")
+	catalog := skills.NewCatalog(root, true, 2)
+	loaded := catalog.SetLoadedSkills([]string{"writer"})
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{
+		Catalog: catalog,
+		Get:     func() []skills.LoadedSkill { return loaded },
+	}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig("/data/ws")}, nil)
+	orch.SetSystemPromptBuilder(ChildSystemPromptBuilder("review"))
+	prompt := orch.buildSystemPrompt("child-xyz")
+	if !containsAll(prompt, "Write clearly.", "已加载 skills") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func writeSkillForPromptTest(t *testing.T, root, name, body string) {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

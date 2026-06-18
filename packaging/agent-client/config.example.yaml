@@ -7,7 +7,7 @@
 # 开发联调也可直接引用本文件（默认 llm.mock=true，无需 API Key）：
 #   go run ./node/cmd/dagents-node -config packaging/agent-client/config.example.yaml
 
-agent_id: ops-linux-01  # 可选；缺省时自动生成并写入 .runtime/agent/agent_id
+agent_id:   # 可选；缺省时自动生成并写入 .runtime/agent/agent_id，建议不填自动生成
 
 listen:
   host: 127.0.0.1
@@ -16,32 +16,67 @@ listen:
 local:
   endpoint: http://127.0.0.1:18765
 
+# 是否允许其它 Agent 经 Manage 向本 Node 投递 A2A Task（discover 可见 + create 校验）。
+# 与 agent-card.json 的 metadata.role 无关：role 控制本 Node 收到 Task 后如何本地处理。
+# 被调方（如 compliance）须 true；纯调用方（如 ops + a2a.enabled=false）可 false。
 expose_to_peers: false
 
-# 工具可访问的文件根；运行时目录见 .gitignore 中的 .runtime/
+# Agent Card：Node 启动时工作目录下固定文件名 agent-card.json（不可经 config 改路径）。
+#   cp packaging/agent-client/agent-card.example.json agent-card.json          # 被调方（compliance）
+#   cp packaging/agent-client/agent-card.example.ops.json agent-card.json    # 纯调用方（ops）
+# 字段说明见 packaging/agent-client/README.md §Agent Card
+
+# Manage 发现分组由 Manage Console / API 分配，Node 配置中无需 groups
+
+# 工作区根（工具沙箱 + 运行时子目录均相对此路径硬编码，缺省 ./.runtime）
+# 子目录：data/ 临时工作区 · memory/sessions.db 会话库 · skills/ · policy/ · history/ · triggers/ · agent/
 fs_root: ./.runtime
 
 llm:
-  provider: openai
-  base_url: https://api.openai.com/v1
-  model: gpt-4.1
-  # 真实 LLM：设 mock: false，并 export OPENAI_API_KEY（或改 api_key_env）
+  provider: deepseek   # openai | deepseek | qwen | vllm
+  base_url: https://api.deepseek.com   # 留空时按 provider 默认：deepseek→api.deepseek.com · qwen→dashscope compatible-mode/v1 · vllm→127.0.0.1:8000/v1
+  model: deepseek-chat   # deepseek 示例：deepseek-reasoner 或 deepseek-chat（Thinking 模式）
+  # 思考控制（provider=deepseek|qwen；运行时可由 Client /thinking 或 PATCH /v1/llm/settings 热更新）
+  # thinking: enabled      # enabled | disabled；默认 enabled
+  # reasoning_effort: high  # thinking=enabled 时：high | max；qwen 映射为 thinking_budget
+  # 真实 LLM：设 mock: false，并 export OPENAI_API_KEY（所有 provider 共用；也可改 api_key_env）
   api_key_env: OPENAI_API_KEY
-  mock: true
-  max_tool_loops: 16
+  # --- 其他 provider 示例（取消注释并改 provider；api_key_env 仍用 OPENAI_API_KEY）---
+  # provider: qwen
+  # base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  # model: qwen-plus
+  # provider: vllm
+  # base_url: http://127.0.0.1:8000/v1
+  # model: your-model-name
+  mock: false
+  max_tool_loops: 32
 
 manage:
   enabled: false
+  # --- Manage + A2A（见 docs/a2a-and-register-center.md、packaging/manage/README.md）---
+  # 启用步骤：
+  #   1. 启动 Manage（docker compose 或 dagents-manage 镜像）
+  #   2. cp agent-card.example.json agent-card.json（被调方）或 agent-card.example.ops.json（调用方）
+  #   3. 设 manage.enabled: true，取消下列注释；tools.enabled_groups 含 a2a
+  # url: http://127.0.0.1:8020
+  # node_token:              # 可选；Manage 启用 MANAGE_TOKENS 时填写
+  # registration:
+  #   base_url: http://192.168.1.10:18765   # 上报 Manage 的本 Node 可达地址；留空则用 local.endpoint
+  #   interval_seconds: 30                  # 注册/心跳间隔（秒）
+  #   ttl_seconds: 60                       # Manage 侧 TTL；应大于 interval_seconds
+  #   team: platform                        # Manage Console 目录分组（仅 config，勿写入 Card）
+  # a2a:
+  #   enabled: true                         # 默认 true；false = 仅注册、不拉 Inbox（纯调用方，如 agent_invoke）
+  #   inbox_wait_seconds: 25                # Inbox long poll wait（秒）
+  #   inbox_poll_seconds: 30              # 断线降级短 poll；省略时默认 = interval_seconds
+  # Node 注册时自动发送 Header: x-dagents-agent-id = agent_id
 
-# 工具审批策略位于 .runtime/policy/（首次启动从 packaging/runtime/policy 种子复制）
+# 工具审批策略位于 fs_root/policy/（首次启动从 packaging/runtime/policy 种子复制）
 # 编辑 tool.approval.txt 与 shell/*.approval.txt 即可调整审批规则。
-
-data_dir: ./.runtime/data
 
 skills:
   enabled: true
-  max_in_prompt: 3
-  root: ./.runtime/skills
+  max_in_prompt: 5
 
 compression:
   silent_trigger_tokens: 80000
@@ -50,7 +85,6 @@ compression:
 triggers:
   enabled: true
   poll_seconds: 5
-  # store_path: ./.runtime/triggers/triggers.json
 
 # 原始消息 JSONL 审计（对齐 Python AGENT_RAW_MESSAGE_HISTORY_ENABLED，默认 true）
 # raw_message_history:
@@ -59,6 +93,29 @@ triggers:
 # Node stderr 日志级别：debug | info | warn | error
 log:
   level: info
+
+# 内嵌浏览器 Web UI（/ui/）；老 Windows 可用 Chrome/Edge 打开 http://127.0.0.1:<port>/ui/
+ui:
+  enabled: true
+
+# bash_run 子进程输出解码（留空则 Windows cmd/powershell=gbk、bash=utf-8）
+tools:
+  # 内置工具组允许列表；省略或留空 = 启用全部（7 组见 docs/built-in-tools.md §0 / shared/config/README.md）
+  # enabled_groups:
+  #   - fs
+  #   - bash
+  #   - hitl
+  #   - skills
+  #   - triggers
+  #   - a2a            # 须 manage.enabled
+  #   - child_agents   # 建议配合 child_agents.enabled
+  # bash_output_encoding: gbk
+  bash_output_encoding: utf-8
+  # file_encoding: gbk   # read/write/search_replace/grep 默认磁盘编码；省略时 Windows=gbk，其它=utf-8
+  bash_compress:
+    enabled: true
+    max_output_chars: 12000       # 仅用于兼容/测试 clip 路径；bash_run 生产路径由 tool_result 摘要
+    max_output_chars_stderr: 16000
 
 # 临时子 Agent（见 docs/architecture/child-agent-tools.md）
 child_agents:
@@ -69,3 +126,22 @@ child_agents:
   max_max_turns: 50
   max_active_per_parent: 8
   default_wait_timeout_seconds: 300
+
+# tool.before_each Hook：rule+auto 路径重复调用检测（见 docs/design/tool-before-hook-duplicate-approval.md）
+hooks:
+  duplicate_tool_call:
+    enabled: true
+    window_seconds: 60
+  tool_result:
+    enabled: true
+    # 单条 tool 结果超过该 token 估算值时落盘并对 history 头尾摘要（作用于下方 tools 列表，非 bash 专用）
+    spill_threshold_tokens: 12000
+    tools:
+      - bash_run
+      - read_file
+      - grep_file
+      - grep_files
+      - search_replace
+      - glob_files
+      - agent_invoke
+      - agent_discover

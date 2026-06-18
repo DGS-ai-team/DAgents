@@ -6,8 +6,10 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func newChildRuntime(
@@ -20,6 +22,7 @@ func newChildRuntime(
 	turnOpts TurnOptions,
 	allowedTools []string,
 	purpose string,
+	initialLoaded []skills.LoadedSkill,
 	childMgr *childagent.Manager,
 ) *runtime {
 	// 创建受限工具注册表
@@ -35,7 +38,7 @@ func newChildRuntime(
 	// 创建子 runtime
 	rt := newRuntimeWithPublisher(
 		id, agentID, relay, hub, llmClient, restricted, policyEngine, nil, logger,
-		nil, nil, nil, 0, turnOpts, nil,
+		nil, initialLoaded, nil, 0, turnOpts, nil,
 	)
 	// 设置子 runtime 元数据
 	rt.childMeta = &childRuntimeMeta{
@@ -43,6 +46,7 @@ func newChildRuntime(
 		childMgr:        childMgr,
 	}
 	rt.orch.SetChildAgentTools(childMgr, true)
+	rt.orch.SetSystemPromptBuilder(turn.ChildSystemPromptBuilder(purpose))
 	return rt
 }
 
