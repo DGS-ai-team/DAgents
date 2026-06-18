@@ -36,12 +36,12 @@ const tab = ref("llm");
   </div>
 
   <LLMView
-    v-show="tab === 'llm'"
+    v-if="tab === 'llm'"
     :active="active && tab === 'llm'"
     @toast="emit('toast', $event)"
   />
   <SkillsView
-    v-show="tab === 'skills'"
+    v-if="tab === 'skills'"
     :active="active && tab === 'skills'"
     @toast="emit('toast', $event)"
   />

@@ -1,8 +1,8 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import { fetchAgents, fetchHealth, fetchInboxTasks } from "./api.js";
-import AgentBar from "./components/AgentBar.vue";
 import AppSidebar from "./components/AppSidebar.vue";
+import AskAiButton from "./components/AskAiButton.vue";
 import BulkGroupsPanel from "./components/BulkGroupsPanel.vue";
 import DetailDrawer from "./components/DetailDrawer.vue";
 import InboxView from "./components/InboxView.vue";
@@ -262,8 +262,6 @@ onMounted(async () => {
       />
 
       <main class="page-content">
-        <AgentBar @toast="showToast($event.message, $event.type)" />
-
         <StatsRow
           v-show="view === 'registry' || view === 'inbox'"
           :online="stats.online"
@@ -312,7 +310,7 @@ onMounted(async () => {
         />
 
         <NodeAdminView
-          v-show="view === 'nodeadmin'"
+          v-if="view === 'nodeadmin'"
           :active="view === 'nodeadmin'"
           @toast="showToast($event.message, $event.type)"
         />
@@ -325,6 +323,8 @@ onMounted(async () => {
     @close="drawerAgent = null"
     @groups-saved="onDrawerGroupsSaved"
   />
+
+  <AskAiButton @toast="showToast($event.message, $event.type)" />
 
   <ToastHost :toasts="toasts" />
 </template>
