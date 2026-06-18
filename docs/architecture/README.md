@@ -1,16 +1,13 @@
-# `docs/architecture/`
+# 架构文档（已收敛）
 
-当前已落地的运行时架构说明（非远期规划）。
+> **正文已迁至项目手册** → [../handbook/README.md](../handbook/README.md)
+>
+> | 原文件 | 手册章节 |
+> |--------|----------|
+> | `overview.md` | [01-愿景与架构](../handbook/01-愿景与架构.md) |
+> | `go-node-internals.md` | [02-Agent-Node-核心](../handbook/02-Agent-Node-核心.md) |
+> | `local-assistant.md` | [03-API与Client](../handbook/03-API与Client.md) |
+> | `agent-node-api.md` | [03-API与Client](../handbook/03-API与Client.md) + [SSE事件速查](../handbook/附录/SSE事件速查.md) |
+> | 其余 | [旧文档迁移对照表](../handbook/附录/旧文档迁移对照表.md) |
 
-| 文件 | 说明 |
-|------|------|
-| [overview.md](./overview.md) | 选型总览（Go Node + Register Center） |
-| [go-node-internals.md](./go-node-internals.md) | **Go Node 内部结构**：Manager、runtime、queue、Orchestrator |
-| [local-assistant.md](./local-assistant.md) | Go Node + 双 Client 联调 |
-| [agent-node-api.md](./agent-node-api.md) | Agent Node HTTP/SSE API（含 §2.4.1 `done` 语义） |
-| [child-agent-tools.md](./child-agent-tools.md) | 临时子 Agent 工具 / HTTP / SSE |
-| [client-packaging.md](./client-packaging.md) | 同包配置与安装 |
-| [go-node-compatibility.md](./go-node-compatibility.md) | 静态构建与 glibc 矩阵 |
-| [rhel6-acceptance-checklist.md](./rhel6-acceptance-checklist.md) | RHEL 6.9 验收清单 |
-
-已移除的 Python Agent 运行时说明见 [../archive/python-agent-runtime/](../archive/python-agent-runtime/)；`python-runtime.md` 为跳转桩。
+本目录下 `.md` 文件保留作跳转桩；请勿在此新增正文。

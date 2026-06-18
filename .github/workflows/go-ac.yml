@@ -32,6 +32,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: node/webui/frontend/package-lock.json
+
+      - name: Build Web UI
+        run: bash node/webui/build.sh
+
+      - name: Test Web UI
+        run: npm test --prefix node/webui/frontend
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -60,12 +73,12 @@ jobs:
 
       - name: Static build smoke
         run: |
-          BUILD_CLIENT=1 bash scripts/ci/build_go_linux_static.sh
+          BUILD_CLIENT=1 SKIP_WEBUI_BUILD=1 bash scripts/ci/build_go_linux_static.sh
           test -x dist/go-linux-amd64/bin/dagents-node
           test -x dist/go-linux-amd64/bin/dagents-client
 
       - name: Windows cross-compile smoke
         run: |
-          BUILD_CLIENT=1 OUT_DIR=dist/go-windows-amd64 GOOS=windows GOARCH=amd64 bash scripts/ci/build_go_static.sh
+          BUILD_CLIENT=1 SKIP_WEBUI_BUILD=1 OUT_DIR=dist/go-windows-amd64 GOOS=windows GOARCH=amd64 bash scripts/ci/build_go_static.sh
           test -f dist/go-windows-amd64/bin/dagents-node.exe
           test -f dist/go-windows-amd64/bin/dagents-client.exe

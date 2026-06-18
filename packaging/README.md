@@ -6,7 +6,7 @@
 
 | 名称 | 含义 |
 |------|------|
-| **`dagents-local-assistant-*.{tar.gz,zip}`** | **Go Node + 双 TUI**：`dagents-node`、`dagents-client`、`dagents-cli` + 配置、`.runtime/`、**`scripts/`**（启动与 systemd/计划任务注册） |
+| **`dagents-local-assistant-*.{tar.gz,zip}`** | **Go Node + 双 TUI + 内嵌 Web UI**：`dagents-node`（含 `go:embed` 的 `/ui/` 静态资源）、`dagents-client`、`dagents-cli` + 配置、`.runtime/`、**`scripts/`** |
 | **`dagents-manage-*.tar.gz`** | Manage Docker 镜像导出（Registry + A2A + Console） |
 | **`dagents-manage-bundle-*.tar.gz`** | Manage **离线包**：镜像 + `docker-compose` + 导入/重启脚本 |
 | **`dagents-backend-*`**（legacy） | 旧 Python 全栈后端；**Release CI 已不再构建** |
@@ -23,7 +23,13 @@ scripts/package_local_assistant.sh
 # dist/dagents-local-assistant-windows-amd64-0.2.2.zip
 ```
 
-Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**（glibc 2.28）容器内 PyInstaller；Go 二进制 **CGO_ENABLED=0** 静态编译。
+Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**（glibc 2.28）容器内 PyInstaller；Go 二进制 **CGO_ENABLED=0** 静态编译；**Release 构建前执行 `node/webui/build.sh`**，将 Web UI 嵌入 `dagents-node`。
+
+### Web UI 与安装包
+
+- **无需单独 UI 安装包**：浏览器 Client 静态资源通过 `go:embed` 打进 **`dagents-node`**，启动 Node 后访问 `http://127.0.0.1:<port>/ui/`。
+- **开发**时可用 Vite 热更新（见 [`node/webui/README.md`](../node/webui/README.md)）；**生产/Release** 须在 `go build` 前运行 `bash node/webui/build.sh`（CI 已自动化）。
+- 若 `ui.enabled: false`，Node 不挂载 `/ui/` 路由；终端 Client（TUI）不受影响。
 
 | 工作流 | 触发 | 产物 |
 |--------|------|------|

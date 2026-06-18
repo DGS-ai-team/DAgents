@@ -14,6 +14,11 @@ GOOS="${GOOS:-linux}"
 GOARCH="${GOARCH:-amd64}"
 LDFLAGS="${LDFLAGS:--s -w}"
 
+if [[ "${SKIP_WEBUI_BUILD:-0}" != "1" ]]; then
+  echo "[build] embedding Web UI (node/webui/build.sh)"
+  bash "${REPO_ROOT}/node/webui/build.sh"
+fi
+
 EXE=""
 if [[ "${GOOS}" == "windows" ]]; then
 	EXE=".exe"
@@ -61,7 +66,8 @@ DAgents Agent Node + Client (Go static build)
 
 1. cp config.example.yaml config.yaml && 编辑 llm / agent_id
 2. ./bin/dagents-node -config config.yaml
-3. ./bin/dagents-client -config config.yaml tui
+3. 浏览器打开 http://127.0.0.1:<listen.port>/ui/（默认 18765；ui.enabled 默认 true）
+4. ./bin/dagents-client -config config.yaml tui
    老终端: ./bin/dagents-client -config config.yaml tui --plain
 
 文档: docs/architecture/go-node-compatibility.md

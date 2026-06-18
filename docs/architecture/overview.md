@@ -1,5 +1,7 @@
 # 架构总览
 
+> **已收敛至项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md) · [handbook/README.md](../handbook/README.md)
+
 DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python 侧保留 **Textual TUI Client**（`app/cli/`）与 **Manage 控制面**（`manage/`）。
 
 ## 决策树

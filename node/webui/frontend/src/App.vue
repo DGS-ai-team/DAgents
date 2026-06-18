@@ -1,0 +1,656 @@
+<script setup>
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import * as api from "./api/node.js";
+import { connectStream } from "./sse/stream.js";
+import AppHeader from "./components/AppHeader.vue";
+import MainChatPanel from "./components/MainChatPanel.vue";
+import RuntimeStatusPanel from "./components/RuntimeStatusPanel.vue";
+import SessionPanel from "./components/SessionPanel.vue";
+import ContextPanel from "./components/ContextPanel.vue";
+import {
+  sessionStore,
+  persistSessionId,
+  ensureSession,
+  beginSubmit,
+  finishTurn,
+  markTurnContent,
+  shouldAcceptDone,
+  isStaleEvent,
+  isDuplicateEvent,
+  markEventApplied,
+  resetEventTracking,
+} from "./stores/session.js";
+import {
+  transcriptStore,
+  noteSeq,
+  addUser,
+  addSystem,
+  appendAssistant,
+  appendReasoning,
+  finalizeAssistant,
+  finalizeReasoning,
+  upsertToolCallFromSSE,
+  applyToolResult,
+  clearTranscript,
+  applyRoundUsage,
+} from "./stores/transcript.js";
+import {
+  hitlStore,
+  enqueueHitl,
+  peekHitl,
+  dequeueHitl,
+  clearHitl,
+  isA2ARelay,
+  a2aRelaySuffix,
+  a2aApprovedSummary,
+  extractToolApprovals,
+  buildApprovalResume,
+  extractUserInfo,
+  buildUserInfoResume,
+  buildUserInfoResumeFromSelection,
+  shouldSkipChildRuntimeDisplay,
+} from "./stores/hitl.js";
+import { chromeStore, setUsageFromSSE, resetUsageStrip } from "./stores/chrome.js";
+import {
+  startStatus,
+  finishStatus,
+  finishWaitingStatuses,
+  hasStatus,
+  resetStatusLines,
+} from "./stores/statusLines.js";
+import { resetToolStream } from "./stores/toolStream.js";
+import { runSlashCommand } from "./utils/commands.js";
+import { approvalItemDisplayName } from "./utils/format.js";
+
+const hitlSelected = ref(0);
+const cancelling = ref(false);
+const streamHandle = ref(null);
+const panelTitle = ref("");
+const panelBody = ref("");
+const apiBase = typeof window !== "undefined" ? window.location.origin : "";
+const sessionPanelRef = ref(null);
+
+const entries = computed(() => transcriptStore.entries);
+const hasUserInfoHitl = computed(() => peekHitl()?.kind === "user_information");
+const canSend = computed(() => {
+  if (hitlStore.busy) return false;
+  if (hasUserInfoHitl.value) return true;
+  return !sessionStore.awaitingTurn && !peekHitl()?.kind;
+});
+const sending = computed(() => sessionStore.awaitingTurn);
+const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_supported);
+
+function restartStream() {
+  streamHandle.value?.close();
+  streamHandle.value = connectStream({
+    getSessionId: () => sessionStore.sessionId,
+    onStatus: (s) => {
+      chromeStore.sseStatus = s;
+    },
+    onEvent: handleEvent,
+  });
+}
+
+async function activateSessionStream() {
+  const prev = sessionStore.sessionId;
+  await ensureSession();
+  if (sessionStore.sessionId !== prev || !streamHandle.value) {
+    restartStream();
+  }
+}
+
+async function refreshMeta() {
+  try {
+    const [health, info, llm] = await Promise.all([api.getHealth(), api.getAgentInfo(), api.getLLMSettings()]);
+    chromeStore.agentInfo = { ...health, ...info };
+    chromeStore.llmSettings = llm;
+  } catch (e) {
+    sessionStore.error = e.message;
+  }
+}
+
+async function refreshContextTokens() {
+  if (!sessionStore.sessionId) return;
+  try {
+    const ctx = await api.getSessionContext(sessionStore.sessionId);
+    chromeStore.contextTokens = Number(ctx.messages_total_tokens ?? -1);
+  } catch {
+    /* keep last */
+  }
+}
+
+function handleEvent(ev) {
+  noteSeq(ev.seq);
+  if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
+  if (shouldSkipChildRuntimeDisplay(ev.type, ev.data)) return;
+
+  switch (ev.type) {
+    case "assistant":
+      markTurnContent();
+      finishWaitingStatuses();
+      appendAssistant(String(ev.data.content || ""));
+      break;
+    case "reasoning":
+      markTurnContent();
+      finishWaitingStatuses({ beforeReasoning: true });
+      if (!hasStatus("thinking")) startStatus("thinking");
+      appendReasoning(String(ev.data.content || ""));
+      break;
+    case "tool_call":
+      markTurnContent();
+      finishWaitingStatuses();
+      upsertToolCallFromSSE(ev.data);
+      break;
+    case "tool_result":
+      markTurnContent();
+      finishWaitingStatuses();
+      applyToolResult(ev.data);
+      break;
+    case "usage":
+      setUsageFromSSE(ev.data);
+      applyRoundUsage(ev.data);
+      break;
+    case "error":
+      markTurnContent();
+      finishWaitingStatuses();
+      addSystem(`error: ${ev.data.message || "unknown"}`);
+      if (sessionStore.awaitingTurn) finishTurn();
+      break;
+    case "done":
+      finalizeAssistant();
+      finalizeReasoning();
+      finishWaitingStatuses();
+      if (shouldAcceptDone(ev.seq)) {
+        finishTurn();
+        sessionStore.statusLine = `回合结束 (${ev.data.finish_reason || "stop"})`;
+        resetToolStream();
+      }
+      refreshContextTokens();
+      break;
+    case "approval_required":
+      finalizeAssistant();
+      finalizeReasoning();
+      finishWaitingStatuses();
+      enqueueHitl({ kind: "approval", data: ev.data });
+      if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
+      chromeStore.hitlQueueLen = hitlStore.queue.length;
+      hitlStore.busy = false;
+      break;
+    case "user_information_required":
+      finalizeAssistant();
+      finalizeReasoning();
+      finishWaitingStatuses();
+      enqueueHitl({ kind: "user_information", data: ev.data });
+      if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
+      chromeStore.hitlQueueLen = hitlStore.queue.length;
+      hitlStore.busy = false;
+      break;
+    case "temporary_agent_created":
+    case "temporary_agent_completed":
+    case "temporary_agent_cancelled":
+      addSystem(formatChildLifecycle(ev.type, ev.data));
+      break;
+    case "context_compression_blocking":
+    case "context_compression_silent":
+      handleCompressionEvent(ev.type, ev.data);
+      refreshContextTokens();
+      break;
+    default:
+      break;
+  }
+  markEventApplied(ev.seq);
+}
+
+function handleCompressionEvent(type, data) {
+  const phase = String(data.phase || "");
+  const mode = type === "context_compression_blocking" ? "blocking" : "silent";
+  if (mode === "blocking") {
+    if (phase === "start") startStatus("compression_blocking");
+    else if (phase === "end") {
+      finishStatus("compression_blocking");
+      addSystem(formatCompressionDetail(mode, data));
+    }
+    return;
+  }
+  if (phase === "start") {
+    addSystem(`[compression] silent · start · target ${data.compressed_message_count || "?"}`);
+  } else if (phase === "end") {
+    addSystem(formatCompressionDetail(mode, data));
+  }
+}
+
+function formatChildLifecycle(type, data) {
+  const id = String(data.child_session_id || "").slice(0, 16);
+  const purpose = String(data.purpose || "").trim();
+  if (type === "temporary_agent_created") return `临时 Agent 已创建 · ${purpose || id}`;
+  if (type === "temporary_agent_cancelled") return `临时 Agent 已取消 · ${id}`;
+  return `临时 Agent 已结束 · ${id} · ${data.status || "completed"}`;
+}
+
+function formatCompressionDetail(mode, data) {
+  const status = data.status || "done";
+  const count = data.compressed_message_count || 0;
+  if (status === "applied") {
+    let line = `[compression] ${mode} applied — replaced ${count} messages`;
+    const prompt = data.prompt_tokens;
+    const completion = data.completion_tokens;
+    if (prompt != null && completion != null) {
+      const rate = data.token_reduction_rate != null ? `, −${Math.round(Number(data.token_reduction_rate) * 100)}%` : "";
+      line += ` (prompt ${prompt}→completion ${completion}${rate})`;
+    }
+    return line;
+  }
+  if (status === "failed") return `[compression] ${mode} failed — keeping original context`;
+  if (status === "stale") return `[compression] ${mode} stale — discarded`;
+  if (status === "invalid") return `[compression] ${mode} invalid — discarded`;
+  return `[compression] ${mode} finished (${status})`;
+}
+
+async function submitHitlApproval(approveAll) {
+  const item = peekHitl();
+  if (!item || item.kind !== "approval") return;
+  hitlStore.busy = true;
+  const resume = buildApprovalResume(item.data, { approveAll });
+  try {
+    await api.submitResume(sessionStore.sessionId, resume);
+    if (isA2ARelay(item.data)) {
+      const suffix = a2aRelaySuffix(item.data);
+      extractToolApprovals(item.data).forEach((it) => {
+        const approved = approveAll !== false && resume.approved?.includes(it.callId);
+        addSystem(`${approvalItemDisplayName(it)}${suffix} · ${a2aApprovedSummary(item.data, approved)}`);
+      });
+    }
+    dequeueHitl();
+    chromeStore.hitlQueueLen = hitlStore.queue.length;
+    hitlStore.busy = false;
+    beginSubmit();
+    if (!sessionStore.turnContentSeen) startStatus("prefilling");
+  } catch (e) {
+    sessionStore.error = e.message;
+    hitlStore.busy = false;
+  }
+}
+
+async function submitHitlOne(callId, approve) {
+  const item = peekHitl();
+  if (!item || item.kind !== "approval") return;
+  hitlStore.busy = true;
+  const resume = buildApprovalResume(item.data, {
+    approved: approve ? [callId] : [],
+    rejected: approve ? [] : [callId],
+  });
+  try {
+    await api.submitResume(sessionStore.sessionId, resume);
+    dequeueHitl();
+    chromeStore.hitlQueueLen = hitlStore.queue.length;
+    hitlStore.busy = false;
+    beginSubmit();
+    if (!sessionStore.turnContentSeen) startStatus("prefilling");
+  } catch (e) {
+    sessionStore.error = e.message;
+    hitlStore.busy = false;
+  }
+}
+
+async function submitHitlUserInfo(text) {
+  const item = peekHitl();
+  if (!item || item.kind !== "user_information") return;
+  const req = extractUserInfo(item.data);
+  let resume;
+  if (req.options.length) {
+    const opt = req.options[hitlSelected.value] || req.options[0];
+    resume = req.allowMultiple
+      ? buildUserInfoResumeFromSelection(item.data, [opt.id])
+      : buildUserInfoResumeFromSelection(item.data, [opt.id]);
+  } else {
+    resume = buildUserInfoResume(item.data, text);
+  }
+  hitlStore.busy = true;
+  try {
+    await api.submitResume(sessionStore.sessionId, resume);
+    dequeueHitl();
+    chromeStore.hitlQueueLen = hitlStore.queue.length;
+    hitlStore.busy = false;
+    hitlSelected.value = 0;
+    beginSubmit();
+    if (!sessionStore.turnContentSeen) startStatus("prefilling");
+  } catch (e) {
+    sessionStore.error = e.message;
+    hitlStore.busy = false;
+  }
+}
+
+async function onSendMessage(text) {
+  sessionStore.error = "";
+
+  if (text.startsWith("/")) {
+    await handleCommand(text);
+    return;
+  }
+
+  const hitl = peekHitl();
+  if (hitl?.kind === "user_information") {
+    await submitHitlUserInfo(text);
+    return;
+  }
+
+  if (sessionStore.awaitingTurn) {
+    sessionStore.error = "上一回合尚未结束";
+    return;
+  }
+
+  await activateSessionStream();
+  clearHitl();
+  addUser(text);
+  beginSubmit();
+  try {
+    await api.submitMessage(sessionStore.sessionId, text);
+    sessionStore.statusLine = "等待 Agent 回复…";
+    if (!sessionStore.turnContentSeen) startStatus("prefilling");
+  } catch (e) {
+    finishStatus("prefilling");
+    finishTurn();
+    sessionStore.error = e.message;
+  }
+}
+
+async function handleCommand(cmd) {
+  const res = await runSlashCommand(cmd, { toolFoldVerbose: transcriptStore.toolFoldVerbose });
+  if (res.system) {
+    addSystem(res.system);
+    return;
+  }
+  if (res.error) {
+    sessionStore.error = res.error;
+    return;
+  }
+  if (res.action === "cancel") {
+    await cancelTurn();
+    return;
+  }
+  if (res.action === "clear") {
+    await api.clearContext(await ensureSession());
+    clearTranscript();
+    resetStatusLines();
+    resetToolStream();
+    resetEventTracking();
+    resetUsageStrip();
+    chromeStore.contextTokens = 0;
+    addSystem("已清空对话上下文");
+    return;
+  }
+  if (res.action === "compress") {
+    const out = await api.compressContext(await ensureSession());
+    addSystem(`压缩: ${out.status || "done"}`);
+    refreshContextTokens();
+    return;
+  }
+  if (res.action === "new") {
+    await createNewSession();
+    return;
+  }
+  if (res.action === "switch") {
+    if (!res.arg) {
+      sessionStore.error = "用法: /switch <session_id>";
+      return;
+    }
+    await switchSession(res.arg);
+    return;
+  }
+  if (res.action === "reasoning") {
+    transcriptStore.showReasoning = ["on", "true", "1"].includes(String(res.arg).toLowerCase());
+    addSystem(`reasoning 显示: ${transcriptStore.showReasoning ? "开启" : "关闭"}`);
+    return;
+  }
+  if (res.action === "thinking") {
+    await handleThinkingCommand(res.arg);
+    return;
+  }
+  if (res.action === "tools_verbose") {
+    transcriptStore.toolFoldVerbose = !!res.on;
+    addSystem(`tool 输出: ${transcriptStore.toolFoldVerbose ? "详细" : "折叠"}`);
+    return;
+  }
+  if (res.panel) {
+    await openPanel(res.panel, res.arg);
+  }
+}
+
+async function createNewSession() {
+  const created = await api.createSession("");
+  persistSessionId(created.session_id);
+  clearTranscript();
+  resetUsageStrip();
+  resetStatusLines();
+  resetToolStream();
+  resetEventTracking();
+  clearHitl();
+  restartStream();
+  addSystem(`新 session: ${created.session_id}`);
+  sessionPanelRef.value?.refresh?.();
+}
+
+async function switchSession(id) {
+  const prev = sessionStore.sessionId;
+  persistSessionId(id);
+  await ensureSession();
+  restartStream();
+  finishTurn();
+  clearHitl();
+  if (id !== prev) {
+    clearTranscript();
+    resetStatusLines();
+    resetToolStream();
+    resetEventTracking();
+    resetUsageStrip();
+    addSystem(`已切换 session: ${sessionStore.sessionId}`);
+  }
+  refreshContextTokens();
+  sessionPanelRef.value?.refresh?.();
+}
+
+async function deleteSessionById(id) {
+  const sid = String(id || "").trim();
+  if (!sid) return;
+  const label = sessionDisplayTitle({ session_id: sid, first_user_message: "" });
+  if (!window.confirm(`确定删除会话「${label}」？\n\n将停止该会话并清除持久化记录，不可恢复。`)) return;
+  sessionStore.error = "";
+  sessionPanelRef.value?.setDeleting?.(sid);
+  try {
+    await api.deleteSession(sid);
+    if (sessionStore.sessionId === sid) {
+      await createNewSession();
+    } else {
+      addSystem(`已删除 session: ${sid.slice(0, 16)}…`);
+      sessionPanelRef.value?.refresh?.();
+    }
+  } catch (e) {
+    sessionStore.error = e.message;
+  } finally {
+    sessionPanelRef.value?.setDeleting?.("");
+  }
+}
+
+async function openContextPanel() {
+  sessionStore.error = "";
+  await ensureSession();
+  chromeStore.panel = "context";
+}
+
+async function toggleThinkingMode() {
+  if (!chromeStore.llmSettings?.thinking_supported) {
+    sessionStore.error = "当前 provider 不支持 thinking 控制（需 deepseek 或 qwen）";
+    return;
+  }
+  sessionStore.error = "";
+  const t = String(chromeStore.llmSettings.thinking || "").toLowerCase();
+  const enabled = !["disabled", "off"].includes(t);
+  try {
+    chromeStore.llmSettings = await api.patchLLMSettings({ thinking: enabled ? "disabled" : "enabled" });
+  } catch (e) {
+    sessionStore.error = e.message;
+  }
+}
+
+async function cycleThinkingEffort() {
+  if (!chromeStore.llmSettings?.thinking_supported) return;
+  sessionStore.error = "";
+  const current = String(chromeStore.llmSettings.reasoning_effort || "high").toLowerCase();
+  const next = current === "max" ? "high" : "max";
+  try {
+    chromeStore.llmSettings = await api.patchLLMSettings({ reasoning_effort: next });
+  } catch (e) {
+    sessionStore.error = e.message;
+  }
+}
+
+async function handleThinkingCommand(arg) {
+  const parts = String(arg || "").trim().split(/\s+/);
+  const patch = {};
+  if (!parts[0]) {
+    addSystem(`thinking: ${chromeStore.llmSettings?.thinking || "-"}`);
+    return;
+  }
+  if (["on", "enabled", "true", "1"].includes(parts[0])) patch.thinking = "enabled";
+  else if (["off", "disabled", "false", "0"].includes(parts[0])) patch.thinking = "disabled";
+  else if (parts[0] === "effort" && ["high", "max"].includes(parts[1])) patch.reasoning_effort = parts[1];
+  else {
+    sessionStore.error = "用法: /thinking on|off 或 /thinking effort high|max";
+    return;
+  }
+  chromeStore.llmSettings = await api.patchLLMSettings(patch);
+  addSystem(`thinking: ${chromeStore.llmSettings.thinking || "-"}`);
+}
+
+async function openPanel(name, arg) {
+  await ensureSession();
+  panelTitle.value = name;
+  try {
+    if (name === "status") {
+      await refreshMeta();
+      panelBody.value = JSON.stringify({ health: chromeStore.agentInfo, llm: chromeStore.llmSettings, session: sessionStore.sessionId }, null, 2);
+    } else if (name === "sessions") {
+      panelBody.value = JSON.stringify(await api.listSessions(), null, 2);
+    } else if (name === "context") {
+      chromeStore.panel = "context";
+      return;
+    } else if (name === "skills") {
+      if (arg?.startsWith("load ")) {
+        await api.loadSkill(sessionStore.sessionId, arg.slice(5).trim());
+      } else if (arg?.startsWith("unload ")) {
+        await api.unloadSkill(sessionStore.sessionId, arg.slice(7).trim());
+      }
+      panelBody.value = JSON.stringify(await api.listSkills(sessionStore.sessionId), null, 2);
+    } else if (name === "children") {
+      panelBody.value = JSON.stringify(await api.listChildAgents(sessionStore.sessionId), null, 2);
+    } else if (name === "triggers") {
+      panelBody.value = JSON.stringify(await api.listTriggers(), null, 2);
+    } else if (name === "policy") {
+      panelBody.value = JSON.stringify(await api.getPolicy(), null, 2);
+    }
+    chromeStore.panel = name;
+  } catch (e) {
+    sessionStore.error = e.message;
+    chromeStore.panel = null;
+  }
+}
+
+function closePanel() {
+  chromeStore.panel = null;
+}
+
+async function cancelTurn() {
+  if (!sessionStore.sessionId || cancelling.value || !sessionStore.awaitingTurn) return;
+  cancelling.value = true;
+  sessionStore.error = "";
+  try {
+    finishWaitingStatuses();
+    await api.cancelTurn(sessionStore.sessionId);
+    finishTurn();
+    clearHitl();
+    finalizeAssistant();
+    finalizeReasoning();
+    resetToolStream();
+    sessionStore.statusLine = "已请求取消 turn";
+    addSystem("turn 已取消");
+  } catch (e) {
+    sessionStore.error = e.message;
+  } finally {
+    cancelling.value = false;
+  }
+}
+
+function onKeydown(e) {
+  if (e.key === "Escape" && chromeStore.panel) {
+    closePanel();
+  }
+}
+
+onMounted(async () => {
+  await refreshMeta();
+  await activateSessionStream();
+  refreshContextTokens();
+  window.addEventListener("keydown", onKeydown);
+});
+
+onUnmounted(() => {
+  streamHandle.value?.close();
+  window.removeEventListener("keydown", onKeydown);
+});
+
+watch(
+  () => sessionStore.sessionId,
+  () => {
+    chromeStore.hitlQueueLen = hitlStore.queue.length;
+  },
+);
+</script>
+
+<template>
+  <div class="app">
+    <AppHeader subtitle="Node Web UI · 本机 Agent" />
+
+    <div class="app__body app__body--two-col">
+      <MainChatPanel
+        :entries="entries"
+        :hitl-queue="hitlStore.queue"
+        :show-reasoning="transcriptStore.showReasoning"
+        :tool-verbose="transcriptStore.toolFoldVerbose"
+        :disabled="!canSend"
+        :sending="sending"
+        :cancelling="cancelling"
+        :hitl-busy="hitlStore.busy"
+        :thinking-supported="thinkingSupported"
+        :llm-settings="chromeStore.llmSettings"
+        @send="onSendMessage"
+        @cancel="cancelTurn"
+        @open-context="openContextPanel"
+        @toggle-thinking="toggleThinkingMode"
+        @cycle-effort="cycleThinkingEffort"
+        @approve-all="submitHitlApproval(true)"
+        @reject-all="submitHitlApproval(false)"
+        @approve-one="(id) => submitHitlOne(id, true)"
+        @reject-one="(id) => submitHitlOne(id, false)"
+        @user-info-submit="submitHitlUserInfo('')"
+      />
+
+      <aside class="app__col app__col--aside">
+        <RuntimeStatusPanel :api-base="apiBase" />
+        <SessionPanel ref="sessionPanelRef" @switch="switchSession" @new="createNewSession" @delete="deleteSessionById" />
+      </aside>
+    </div>
+
+    <div v-if="chromeStore.panel" class="panel-overlay" @click.self="closePanel">
+      <ContextPanel v-if="chromeStore.panel === 'context'" @close="closePanel" />
+      <section v-else class="panel panel-overlay__card">
+        <header class="panel__header">
+          <div class="panel__title">{{ panelTitle }}</div>
+          <button type="button" class="btn btn--ghost btn--sm" @click="closePanel">关闭 (Esc)</button>
+        </header>
+        <div class="panel__body">
+          <pre>{{ panelBody }}</pre>
+        </div>
+      </section>
+    </div>
+  </div>
+</template>

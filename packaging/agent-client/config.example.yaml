@@ -94,6 +94,10 @@ triggers:
 log:
   level: info
 
+# 内嵌浏览器 Web UI（/ui/）；老 Windows 可用 Chrome/Edge 打开 http://127.0.0.1:<port>/ui/
+ui:
+  enabled: true
+
 # bash_run 子进程输出解码（留空则 Windows cmd/powershell=gbk、bash=utf-8）
 tools:
   # 内置工具组允许列表；省略或留空 = 启用全部（7 组见 docs/built-in-tools.md §0 / shared/config/README.md）

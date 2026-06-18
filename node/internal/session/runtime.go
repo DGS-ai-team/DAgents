@@ -378,6 +378,7 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 	r.afterToolStep(outcome)
 }
 
+// persist 持久化 session 数据
 func (r *runtime) persist(ctx context.Context) {
 	if r.store == nil || r.isChildSession() {
 		return

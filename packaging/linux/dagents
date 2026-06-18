@@ -135,6 +135,18 @@ start_node_background() {
   write_node_pid "$!"
 }
 
+print_webui_url() {
+  local url="http://127.0.0.1:18765/ui/"
+  if [[ -x "${ROOT}/scripts/webui-url.sh" ]]; then
+    url="$("${ROOT}/scripts/webui-url.sh" "${ROOT}/${CFG}")"
+  elif [[ -f "${ROOT}/${CFG}" ]]; then
+    local port
+    port="$(grep -A10 '^listen:' "${ROOT}/${CFG}" 2>/dev/null | grep -E '^[[:space:]]+port:' | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
+    [[ -n "${port}" ]] && url="http://127.0.0.1:${port}/ui/"
+  fi
+  echo "[dagents] Web UI: ${url}"
+}
+
 wait_node_ready() {
   require_bin dagents-client
   local wait=0
@@ -151,11 +163,13 @@ start_node_default() {
   require_bin dagents-client
   if probe_node; then
     echo "[dagents] node already running"
+    print_webui_url
     return 0
   fi
   start_node_background
   wait_node_ready
   echo "[dagents] node is ready"
+  print_webui_url
 }
 
 restart_node() {
@@ -163,6 +177,7 @@ restart_node() {
   start_node_background
   wait_node_ready
   echo "[dagents] node restarted"
+  print_webui_url
 }
 
 ensure_node() {
@@ -272,6 +287,10 @@ Usage:
   dagents node --no-wait          Background start without waiting for probe
   dagents doctor                  Check installed files
   dagents version                 Print version information
+
+Web UI (browser Client, embedded in dagents-node):
+  After `dagents node`, open http://127.0.0.1:<listen.port>/ui/ (default port 18765).
+  Disable with ui.enabled: false in config.yaml. No separate UI package required.
 
 Options:
   --withnode     Probe Node first; start it in background if not running, then launch client

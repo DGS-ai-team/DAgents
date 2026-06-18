@@ -36,6 +36,21 @@ type Config struct {
 	Log               LogConfig               `yaml:"log"`
 	Tools             ToolsConfig             `yaml:"tools"`
 	Hooks             HooksConfig             `yaml:"hooks"`
+	UI                UIConfig                `yaml:"ui"`
+}
+
+// UIConfig 控制 Node 内嵌 Web UI（/ui/）是否挂载。
+type UIConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled *bool `yaml:"enabled"`
+}
+
+// UIEnabled 是否挂载浏览器 Web UI。
+func (c *Config) UIEnabled() bool {
+	if c == nil || c.UI.Enabled == nil {
+		return true
+	}
+	return *c.UI.Enabled
 }
 
 // ToolsConfig 控制内置工具行为（如 bash_run 输出解码与压缩）。

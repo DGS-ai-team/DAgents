@@ -1,0 +1,154 @@
+import { reactive } from "vue";
+
+export const hitlStore = reactive({
+  queue: [],
+  busy: false,
+});
+
+export function enqueueHitl(item) {
+  if (item.kind === "approval") {
+    const key = approvalQueueKey(item.data);
+    hitlStore.queue = hitlStore.queue.filter(
+      (q) => q.kind !== "approval" || approvalQueueKey(q.data) !== key,
+    );
+  }
+  hitlStore.queue.push(item);
+}
+
+export function dequeueHitl() {
+  return hitlStore.queue.shift();
+}
+
+export function peekHitl() {
+  return hitlStore.queue[0] || null;
+}
+
+export function clearHitl() {
+  hitlStore.queue = [];
+}
+
+function approvalQueueKey(data) {
+  const child = String(data?.child_session_id || "").trim();
+  if (child) return `child:${child}`;
+  const id = String(data?.approval_id || "").trim();
+  return id ? `parent:${id}` : "parent:";
+}
+
+export function isA2ARelay(data) {
+  return !!data?.a2a_relay;
+}
+
+export function a2aPeerLabel(data) {
+  const name = String(data?.a2a_peer_agent_name || "").trim();
+  if (name) return name;
+  return String(data?.a2a_peer_agent_id || "").trim();
+}
+
+export function a2aRelaySuffix(data) {
+  const label = a2aPeerLabel(data);
+  return label ? ` from ${label}` : " from 对端 Agent";
+}
+
+export function a2aApprovedSummary(data, approved) {
+  if (!approved) return "已拒绝";
+  const label = a2aPeerLabel(data) || "对端 Agent";
+  return `已审批，由${label}执行`;
+}
+
+import { parseToolArguments } from "../utils/toolCalls.js";
+
+export function extractToolApprovals(data) {
+  const args = data?.approval_args;
+  const calls = args?.tool_calls;
+  if (!Array.isArray(calls)) return [];
+  return calls
+    .map((m) => {
+      const rawArgs = String(m?.raw_arguments || JSON.stringify(m?.arguments || {}));
+      return {
+        callId: String(m?.id || "").trim(),
+        name: String(m?.name || "unknown").trim(),
+        rawArgs,
+        arguments: parseToolArguments(m?.arguments ?? m?.raw_arguments ?? rawArgs),
+        reason: String(m?.approval_reason || ""),
+        risk: String(m?.risk_level || ""),
+      };
+    })
+    .filter((it) => it.callId);
+}
+
+export function buildApprovalResume(data, { approveAll, approved = [], rejected = [] }) {
+  const items = extractToolApprovals(data);
+  const rv = { type: "selection", approved: [...approved], rejected: [...rejected] };
+  if (approveAll === true) {
+    rv.approved = items.map((it) => it.callId);
+    rv.rejected = [];
+  } else if (approveAll === false) {
+    rv.approved = [];
+    rv.rejected = items.map((it) => it.callId);
+  }
+  if (data?.child_session_id) rv.child_session_id = data.child_session_id;
+  if (data?.approval_id) rv.approval_id = data.approval_id;
+  return rv;
+}
+
+export function extractUserInfo(data) {
+  const args = data?.user_information_args;
+  const src = args && typeof args === "object" ? args : data || {};
+  const options = [];
+  if (Array.isArray(src.options)) {
+    for (const raw of src.options) {
+      if (!raw || typeof raw !== "object") continue;
+      const id = String(raw.id || "").trim();
+      const label = String(raw.label || "").trim();
+      if (!id || !label) continue;
+      options.push({
+        id,
+        label,
+        value: String(raw.value || label).trim() || label,
+      });
+    }
+  }
+  return {
+    toolCallId: String(src.tool_call_id || data?.tool_call_id || "").trim(),
+    question: String(src.question || data?.content || data?.message || "请提供信息").trim(),
+    options,
+    allowMultiple: !!src.allow_multiple,
+    placeholder: String(src.placeholder || ""),
+    required: src.required !== false,
+  };
+}
+
+export function buildUserInfoResume(data, answer, selectedOptions = []) {
+  const req = extractUserInfo(data);
+  const rv = {
+    type: "user_information",
+    tool_call_id: req.toolCallId || data?.tool_call_id,
+    answer: String(answer || "").trim(),
+    selected_options: [...selectedOptions],
+    cancelled: false,
+  };
+  if (data?.child_session_id) rv.child_session_id = data.child_session_id;
+  return rv;
+}
+
+export function buildUserInfoResumeFromSelection(data, selectedIds) {
+  const req = extractUserInfo(data);
+  const selected = new Set(selectedIds.map((id) => String(id).trim()).filter(Boolean));
+  const labels = req.options.filter((o) => selected.has(o.id)).map((o) => o.label);
+  return buildUserInfoResume(data, labels.join(", "), [...selected].sort());
+}
+
+/** 对齐 Go hitl.ShouldSkipChildRuntimeDisplay：隐藏子 Agent turn 的运行时 SSE。 */
+export function shouldSkipChildRuntimeDisplay(eventType, data) {
+  const childId = String(data?.child_session_id || "").trim();
+  if (!childId) return false;
+  switch (eventType) {
+    case "approval_required":
+    case "temporary_agent_created":
+    case "temporary_agent_completed":
+    case "temporary_agent_cancelled":
+      return false;
+    default:
+      return true;
+  }
+}

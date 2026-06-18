@@ -1,5 +1,7 @@
 # Go Agent Node 内置工具全量参考
 
+> **已收敛至项目手册** → [handbook/附录/内置工具参考.md](./handbook/附录/内置工具参考.md)
+
 > **权威来源**：`node/internal/tools/registry.go` → `Definitions()`（共 **25** 个 LLM 可见工具）。  
 > 简明索引与 Python 归档对照见 [built-in-tools.md](./built-in-tools.md)。符号级 API 见 [node/internal/tools/REFERENCE.md](../node/internal/tools/REFERENCE.md)。
 

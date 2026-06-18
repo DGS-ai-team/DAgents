@@ -30,6 +30,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"github.com/DGS-ai-team/DAgents/node/internal/version"
+	"github.com/DGS-ai-team/DAgents/node/internal/webui"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -283,6 +284,10 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.registerChildAgentRoutes()
 	s.registerPolicyRoutes()
 	s.registerLLMRoutes()
+	if cfg.UIEnabled() {
+		s.mux.Handle("GET /ui/", webui.Handler())
+		s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
+	}
 	return s
 }
 

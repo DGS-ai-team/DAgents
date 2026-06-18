@@ -1,15 +1,17 @@
 <p align="center">
   <h1 align="center">DAgents</h1>
   <p align="center">
-    本地单 Agent 助手运行时 — Go Agent Node + 双终端 Client
+    本地单 Agent 助手运行时 — Go Agent Node + 终端与浏览器 Client
     <br />
+    <a href="docs/handbook/README.md"><strong>项目手册 »</strong></a>
+    ·
     <a href="docs/architecture/local-assistant.md"><strong>快速上手 »</strong></a>
     ·
     <a href="CHANGELOG.md">变更记录</a>
     ·
     <a href="docs/architecture/agent-node-api.md">HTTP/SSE API</a>
     ·
-    <a href="https://github.com/DGS-ai-team/DAgentsUI">Web UI（独立仓库，尚未适配 v0.2.0）</a>
+    <a href="node/webui/README.md">Web UI（Node 内嵌 /ui/）</a>
   </p>
 </p>
 
@@ -19,7 +21,7 @@
   <a href="go.work"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
   <a href="requirements.txt"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
-  <a href="https://github.com/DGS-ai-team/DAgentsUI"><img src="https://img.shields.io/badge/Web%20UI-尚未适配%20v0.2.0-orange" alt="Web UI lagging"></a>
+  <a href="node/webui/README.md"><img src="https://img.shields.io/badge/Web%20UI-Node%20内嵌%20%2Fui%2F-brightgreen" alt="Node Web UI"></a>
 </p>
 
 ---
@@ -28,20 +30,20 @@
 
 **DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.3.9**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度；**Manage 控制面** 提供 Registry、**A2A Task** 与 **Vue Console**（可 Docker 部署）。
 
-终端交互提供 **两种 Client**，共用一份 YAML 配置，按环境任选：
+终端交互提供 **多种 Client**，共用一份 YAML 配置，按环境任选：
 
-| Client | 适用场景 | 命令 |
-|--------|----------|------|
+| Client | 适用场景 | 命令 / 入口 |
+|--------|----------|-------------|
 | **Python Textual TUI** | 现代终端（WSL、新 Linux、Windows Terminal） | `dagents chat` |
 | **Go bubbletea TUI** | SSH 全屏、脚本、无 Python 环境 | `dagents-client tui` |
 | **Go plain REPL** | 极老 SSH / RHEL6 / `TERM=dumb` | `dagents-client tui --plain` |
-| **Web UI（DAgentsUI）** | 浏览器 · **当前未适配 v0.2.0** | 暂勿用于 Go Node 联调 |
+| **Node Web UI** | 老 Windows + Chrome/Edge；无需 Python、无需现代终端 | `http://127.0.0.1:<port>/ui/`（`ui.enabled: true`） |
 
 另含 **Manage 控制面**（Python / Docker）：Registry、A2A Task、Console；A2A 协作请用 Manage，不再随本地助手包分发 Register Center。
 
 > **v0.2.0 说明**：原 Python FastAPI Agent API（`run_agent_api.py`）已从仓库移除。详见 [CHANGELOG.md](CHANGELOG.md)。
 
-> **Web UI 状态**：独立前端仓库 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) **仍基于旧版 Python Agent API / OpenAPI 契约，尚未跟进 v0.2.0 的 Go Agent Node**。浏览器联调暂不可用；请优先使用 **`dagents chat`** 或 **`dagents-client tui`**。Web UI 适配计划在 DAgentsUI 仓库单独推进。
+> **浏览器 Client**：Go Node 进程内嵌 **Web UI**（`node/webui/`，`go:embed` 挂载 `/ui/`），复用现有 `/v1` HTTP/SSE，与终端 Client 能力对齐。原独立前端仓库 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) 面向已移除的 Python Agent API，**不再作为本仓库浏览器 Client 路径**。
 
 ---
 
@@ -76,11 +78,14 @@
 
 ## 架构
 
+> 完整技术说明见 **[项目手册（docs/handbook/）](docs/handbook/README.md)**。
+
 ```mermaid
 flowchart LR
-  subgraph clients [终端 Client]
+  subgraph clients [Client]
     PY["Python Textual<br/>dagents chat"]
     GO["Go Client<br/>dagents-client tui"]
+    WEB["浏览器<br/>/ui/"]
   end
 
   subgraph runtime [本机运行时]
@@ -93,10 +98,11 @@ flowchart LR
 
   PY -->|127.0.0.1:18765| NODE
   GO -->|127.0.0.1:18765| NODE
+  WEB -->|127.0.0.1:18765| NODE
   MG -.->|注册 / inbox| NODE
 ```
 
-> **Web UI**：图中未包含 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI)；该前端仍对接已移除的 Python API，**与当前 Go Node 不兼容**。
+> **Web UI**：内嵌于 Agent Node（`GET /ui/`），源码见 [`node/webui/`](node/webui/)。不替代 Manage Console 的跨 Agent 运维入口。
 
 配置：`packaging/agent-client/config.yaml`（Node 读 `listen` / `llm`；Client 读 `local.endpoint`）。
 
@@ -136,9 +142,9 @@ curl -s http://127.0.0.1:18765/health | jq .
 go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml probe
 ```
 
-### 3. 启动 Client（二选一）
+### 3. 启动 Client（按环境任选）
 
-**Textual TUI（推荐）**
+**Textual TUI（现代终端推荐）**
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -155,6 +161,16 @@ go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml tu
 # 老终端行模式
 go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml tui --plain
 ```
+
+**浏览器 Web UI（老 Windows + Chrome/Edge）**
+
+Node 启动后在本机浏览器打开：
+
+```text
+http://127.0.0.1:18765/ui/
+```
+
+详见 [node/webui/README.md](node/webui/README.md)。可通过 `ui.enabled: false` 关闭挂载。
 
 恢复已有 session：
 
@@ -180,6 +196,7 @@ dagents-client tui sess-xxxxxxxx
 | `triggers.enabled` | 触发器调度开关 |
 | `child_agents.enabled` | 临时子 Agent 开关 |
 | `manage.enabled` | 向 Manage 注册并启用 A2A inbox（见 [manage/README.md](manage/README.md)） |
+| `ui.enabled` | Node 内嵌 Web UI（`/ui/`）；省略时默认 `true` |
 
 完整示例：[packaging/agent-client/config.example.yaml](packaging/agent-client/config.example.yaml)
 
@@ -321,10 +338,10 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 | [packaging/manage/README.md](packaging/manage/README.md) | Manage Docker 部署 |
 | [packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md) | 推荐 CLI 工具（如 OfficeCLI，需自行安装） |
 | [cases/README.md](cases/README.md) | 落地案例（CentOS 7 特性导览 + A2A Manage Docker） |
+| [node/webui/README.md](node/webui/README.md) | Node 内嵌 Web UI（`/ui/`） |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.3.9**） |
-| [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) | Web 前端（**独立仓库，尚未适配 v0.2.0 / Go Node API**） |
 
-> 已移除的 Python Agent API 文档见 [docs/archive/python-agent-runtime/](docs/archive/python-agent-runtime/)；**DAgentsUI 当前仍依赖旧 HTTP 契约**。
+> 已移除的 Python Agent API 文档见 [docs/archive/python-agent-runtime/](docs/archive/python-agent-runtime/)。历史独立前端 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) 仅对接旧 Python API，现网浏览器 Client 请用 Node `/ui/`。
 
 ---
 
@@ -336,7 +353,7 @@ GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Win
 | **Go** | 1.25+（`node` / `client` / `shared/config`） |
 | **Python** | 3.11+ 可运行；CI 验证 3.13 |
 | **破坏性变更** | 1.0 前仍可能出现；见 [CHANGELOG.md](CHANGELOG.md) |
-| **Web UI（DAgentsUI）** | **落后于本仓库 v0.2.0**；未对接 Go Node，暂无可用浏览器 Client |
+| **浏览器 Client** | Node 内嵌 Web UI（`/ui/`）；`ui.enabled` 默认 `true` |
 
 OS 与 glibc 说明：[docs/os-compatibility.md](docs/os-compatibility.md)
 

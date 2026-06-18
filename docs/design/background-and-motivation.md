@@ -1,6 +1,6 @@
 # 重构背景与动机
 
-> **2026-05 重设计**：实现路径已改为 **Agent Node（Go）+ Client（Go TUI）+ Manage（Python）**，见 [three-component-model.md](./three-component-model.md)。下文 §1–§2 痛点仍然成立；§3 起为 **新** 解决思路。
+> **已收敛至项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md) §1 · [handbook/README.md](../handbook/README.md)
 
 ## 1. 问题：Agent 能力受限于 Python 运行时可达范围
 

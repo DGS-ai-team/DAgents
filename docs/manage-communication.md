@@ -1,5 +1,7 @@
 # Manage 通信逻辑全量参考
 
+> **已收敛至项目手册** → [handbook/05-Manage与A2A.md](../handbook/05-Manage与A2A.md) · [handbook/README.md](../handbook/README.md)
+
 > **设计原则**（[manage-architecture.md](./design/manage-architecture.md)、[a2a-via-manage.md](./future/a2a-via-manage.md)）：  
 > **Node 仅出站连 Manage**；**禁止 Node-to-Node**；**Client 不连 Manage**。  
 > 文档描述 **v0.3.x 现网实现**；与方案差异见 §8。

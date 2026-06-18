@@ -25,6 +25,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | `triggers` | 触发器调度（见下表） |
 | `tools` | 内置工具行为与允许列表（见下表） |
 | `log` | Node stderr 日志级别 |
+| `ui` | 内嵌浏览器 Web UI（`GET /ui/`）；`enabled` 省略时默认 `true` |
 
 ### `tools`
 

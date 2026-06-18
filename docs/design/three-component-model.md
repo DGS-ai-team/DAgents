@@ -1,5 +1,7 @@
 # 三组件模型：Client / Agent Node / Manage
 
+> **已收敛至项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md) §2 · [handbook/README.md](../handbook/README.md)
+
 本文档描述 v2 **重设计**后的目标形态，取代旧文档中「Python Backend = Brain + Control、Go Proxy = 出站 Body」的假设。
 
 ## 1. 总览

@@ -62,6 +62,12 @@ cp -a "${REPO_ROOT}/packaging/runtime/." "${BUNDLE_DIR}/.runtime/"
 # 启动脚本与 Node 系统服务注册脚本
 mkdir -p "${BUNDLE_DIR}/scripts"
 cp -a "${REPO_ROOT}/packaging/agent-client/scripts/startup" "${BUNDLE_DIR}/scripts/"
+if [[ -f "${REPO_ROOT}/packaging/agent-client/scripts/webui-url.sh" ]]; then
+  install -m 0755 "${REPO_ROOT}/packaging/agent-client/scripts/webui-url.sh" "${BUNDLE_DIR}/scripts/webui-url.sh"
+fi
+if [[ -f "${REPO_ROOT}/packaging/agent-client/scripts/webui-url.bat" ]]; then
+  install -m 0644 "${REPO_ROOT}/packaging/agent-client/scripts/webui-url.bat" "${BUNDLE_DIR}/scripts/webui-url.bat"
+fi
 cp -a "${REPO_ROOT}/scripts/linux" "${BUNDLE_DIR}/scripts/"
 cp -a "${REPO_ROOT}/scripts/windows" "${BUNDLE_DIR}/scripts/"
 cp -a "${REPO_ROOT}/scripts/service" "${BUNDLE_DIR}/scripts/"
@@ -91,6 +97,8 @@ DAgents Local Assistant (Go Node + dual TUI)
      dagents node                       (foreground)
      bin\dagents-node.exe -config config.yaml
      scripts\startup\windows\start-node.bat
+3. Browser Web UI (embedded in dagents-node; no separate UI installer):
+     http://127.0.0.1:<listen.port>/ui/   (default 18765; ui.enabled defaults to true)
 
 Install Node as SYSTEM startup task (admin CMD):
   scripts\windows\install_node_service.cmd install config.yaml
@@ -126,6 +134,8 @@ DAgents Local Assistant（Go Node + 双 TUI）
      ./dagents node --background    （推荐；日志 .runtime/logs/node.log）
      ./dagents node                 （前台）
      ./scripts/startup/linux/start-node.sh
+3. 浏览器 Web UI（内嵌于 dagents-node，无需单独安装）：
+     http://127.0.0.1:<listen.port>/ui/   （默认 18765；config 中 ui.enabled 默认 true）
 
 安装到固定目录（推荐）：
   ./install.sh              用户级 ~/.local/share/dagents
@@ -141,6 +151,8 @@ TUI（三选一；--withnode 会在 Node 未运行时自动后台启动）：
   ./dagents chat --withnode         Python Textual TUI（现代终端，富 UI）
   ./dagents tui --withnode          Go bubbletea 全屏 TUI（含子 Agent、/children 等）
   ./dagents tui --withnode --plain  Go 行模式 REPL（老 SSH / dumb 终端）
+
+Web UI 与 TUI 可并存；dagents-node 二进制已通过 go:embed 打包前端静态资源。
 
 可选第三方 CLI（发布包不含；见 .runtime/RECOMMENDED_CLI_TOOLS.md）：
   OfficeCLI（Office 文档）— 自行安装后 /skill load officecli

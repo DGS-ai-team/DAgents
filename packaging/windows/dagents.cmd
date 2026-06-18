@@ -133,6 +133,7 @@ shift
 call :probe_node
 if not errorlevel 1 (
   echo [dagents] node already running
+  call :print_webui_url
   set "EXIT_CODE=0"
   goto cli_exit
 )
@@ -144,6 +145,7 @@ goto cli_exit
 call :probe_node
 if not errorlevel 1 (
   echo [dagents] node already running
+  call :print_webui_url
   exit /b 0
 )
 call :start_node_background
@@ -151,6 +153,7 @@ if errorlevel 1 exit /b 1
 call :wait_node_ready
 if errorlevel 1 exit /b 1
 echo [dagents] node is ready
+call :print_webui_url
 exit /b 0
 
 :restart_node
@@ -161,6 +164,15 @@ if errorlevel 1 exit /b 1
 call :wait_node_ready
 if errorlevel 1 exit /b 1
 echo [dagents] node restarted
+call :print_webui_url
+exit /b 0
+
+:print_webui_url
+if exist "%DAGENTS_HOME%\scripts\webui-url.bat" (
+  for /f "delims=" %%U in ('call "%DAGENTS_HOME%\scripts\webui-url.bat" "%CFG_ABS%"') do echo [dagents] Web UI: %%U
+) else (
+  echo [dagents] Web UI: http://127.0.0.1:18765/ui/
+)
 exit /b 0
 
 :start_node_background
@@ -339,6 +351,10 @@ echo   dagents node --foreground       Start Node in foreground (blocks terminal
 echo   dagents node --no-wait          Background start without waiting for probe
 echo   dagents doctor                  Check installed files
 echo   dagents version                 Print version information
+echo.
+echo Web UI (browser Client, embedded in dagents-node):
+echo   After dagents node, open http://127.0.0.1:^<listen.port^>/ui/ (default 18765).
+echo   Disable with ui.enabled: false in config.yaml. No separate UI package required.
 echo.
 echo Options:
 echo   --withnode     Probe Node first; start it in background if not running, then launch client

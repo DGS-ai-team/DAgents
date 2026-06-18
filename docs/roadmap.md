@@ -46,8 +46,8 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 - **Go Agent Node**（**`node/`**）：**`GET /health`**、**`GET /v1/agent/info`**、会话创建/释放、消息提交（含 **`resume`**）、**SSE** 流、取消当前 turn、context/skills/child-agents 等（[agent-node-api.md](./architecture/agent-node-api.md)）。
 - **进程内编排**：按 **`session_id`** 的 **`MessageQueue`** 串行消费、**`Orchestrator`** turn loop（[go-node-internals.md](./architecture/go-node-internals.md)）。
-- **Client**：Go bubbletea TUI（**`dagents tui`**）+ REPL 兜底（**`--plain`**）；Python Textual（**`dagents chat`**）；均连本地 Node（[local-assistant.md](./architecture/local-assistant.md)）。
-- **同包配置**：**`packaging/agent-client/config.yaml`**（**`agent_id` / `listen` / `llm` / `fs_root` / `tools.*`**）；Node 与双 Client 共用（[client-packaging.md](./architecture/client-packaging.md)）。
+- **Client**：Go bubbletea TUI（**`dagents tui`**）+ REPL 兜底（**`--plain`**）；Python Textual（**`dagents chat`**）；Node 内嵌 Web UI（**`/ui/`**）；均连本地 Node（[local-assistant.md](./architecture/local-assistant.md)）。
+- **同包配置**：**`packaging/agent-client/config.yaml`**（**`agent_id` / `listen` / `llm` / `fs_root` / `tools.*` / `ui.*`**）；Node 与各 Client 共用（[client-packaging.md](./architecture/client-packaging.md)）。
 
 ### 3.2 模型运行时与工具
 

@@ -44,8 +44,23 @@
 | `internal/llm/` | LLM 客户端与消息适配 |
 | `internal/store/`、`history/` | SQLite 与 JSONL 审计 |
 | `internal/version/` | 构建版本号 |
+| `internal/webui/` | 内嵌浏览器 Web UI（`go:embed` 静态资源，`GET /ui/`） |
+| `webui/` | Web UI 前端源码（Vue 3 + Vite）与 `build.sh` |
 
 系统服务安装：Linux [`scripts/linux/install_node_service.sh`](../scripts/linux/install_node_service.sh)；Windows [`scripts/windows/install_node_service.cmd`](../scripts/windows/install_node_service.cmd)。
+
+## Web UI（浏览器 Client）
+
+适用于无法运行 Python Textual 或 Go full TUI 的老 Windows（Chrome/Edge）：Node 启动后在本机浏览器打开：
+
+```text
+http://127.0.0.1:<listen.port>/ui/
+```
+
+- 配置：`ui.enabled`（默认 `true`；`false` 时不挂载 `/ui/`）
+- 构建：`bash node/webui/build.sh`（产出 `node/internal/webui/static/`，嵌入二进制）
+- 开发：`cd node/webui/frontend && npm run dev`（Vite 代理 `/v1`、`/health` 到 Node）
+- 能力：对话、SSE 流式、HITL 审批/询问、斜杠命令、Sessions/Context/Skills/Children/Policy/Triggers 面板
 
 ## 本地运行
 
