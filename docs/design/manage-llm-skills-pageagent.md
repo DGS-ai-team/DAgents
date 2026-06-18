@@ -22,7 +22,8 @@
 - Go Node 的 Skills 自动同步（心跳 `skills_catalog_version` → 拉取 → 解压到 `fs_root/skills/`）。本 PR 提供 Manage 侧 `sync/manifest` + download **API 契约**，Go 端实现留 Phase 2。
 - Skills 多级审批工作流（draft→pending_review→approved→published）。精简版仅 `draft`/`published` 两态、单步发布。
 
-> 更新(实现期)：Console UI 与 PageAgent 集成已移出本 PR，延后到后续 PR；本 PR 仅交付 Manage 后端 API。
+> 更新(实现期 1)：先交付 Manage 后端 API，Console UI 与 PageAgent 暂缓。
+> 更新(实现期 2)：Console 集成已补齐并纳入本 PR —— Vue SPA(`manage/console/frontend/`)新增 **LLM 配置页**、**Skills 页** 导航与视图,以及 **PageAgent 命令栏**(`AgentBar.vue`,经 `npm i page-agent` + 动态 import 懒加载,`resolve` 配置后 `new PageAgent(...)` 操作控制台)。仍不改 Go Node(Node 自动消费留 Phase 2)。
 
 ## 3. 设计原则
 

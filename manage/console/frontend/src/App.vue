@@ -1,12 +1,15 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import { fetchAgents, fetchHealth, fetchInboxTasks } from "./api.js";
+import AgentBar from "./components/AgentBar.vue";
 import AppSidebar from "./components/AppSidebar.vue";
 import BulkGroupsPanel from "./components/BulkGroupsPanel.vue";
 import DetailDrawer from "./components/DetailDrawer.vue";
 import InboxView from "./components/InboxView.vue";
+import LLMView from "./components/LLMView.vue";
 import PageHeader from "./components/PageHeader.vue";
 import RegistryView from "./components/RegistryView.vue";
+import SkillsView from "./components/SkillsView.vue";
 import StatsRow from "./components/StatsRow.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { useToast } from "./composables/useToast.js";
@@ -151,9 +154,10 @@ function navigate(nextView) {
   if (nextView === "inbox") {
     inbox.page = 1;
     loadInbox();
-  } else {
+  } else if (nextView === "registry") {
     loadAgents();
   }
+  // llm / skills 视图自加载（见各组件的 active watch）
 }
 
 async function onRefresh() {
@@ -163,7 +167,7 @@ async function onRefresh() {
     if (view.value === "registry") {
       registry.page = 1;
       await loadAgents();
-    } else {
+    } else if (view.value === "inbox") {
       inbox.page = 1;
       await loadInbox();
     }
@@ -259,7 +263,10 @@ onMounted(async () => {
       />
 
       <main class="page-content">
+        <AgentBar @toast="showToast($event.message, $event.type)" />
+
         <StatsRow
+          v-show="view === 'registry' || view === 'inbox'"
           :online="stats.online"
           :offline="stats.offline"
           :total="stats.total"
@@ -303,6 +310,18 @@ onMounted(async () => {
           @filter-change="onInboxFilterChange"
           @page-prev="inboxPrevPage"
           @page-next="inboxNextPage"
+        />
+
+        <LLMView
+          v-show="view === 'llm'"
+          :active="view === 'llm'"
+          @toast="showToast($event.message, $event.type)"
+        />
+
+        <SkillsView
+          v-show="view === 'skills'"
+          :active="view === 'skills'"
+          @toast="showToast($event.message, $event.type)"
         />
       </main>
     </div>

@@ -6,9 +6,10 @@
 
 ### 新增
 
-- **Manage LLM 配置注册中心**：`/v1/llm/configs` CRUD + `/resolve` 端点；list/detail `api_key` 掩码（`sk-***last4`），`/resolve` 返回明文 `{model,baseURL,apiKey}`（PageAgent 兼容形）；`is_default` 全局唯一；`allowed_groups` 限定可见范围；仅适用于本地/局域网信任部署。多 Node / 外部可按 id 复用；Node 自动消费、Console UI 与 PageAgent 集成延后到后续 PR。
+- **Manage LLM 配置注册中心**：`/v1/llm/configs` CRUD + `/resolve` 端点；list/detail `api_key` 掩码（`sk-***last4`），`/resolve` 返回明文 `{model,baseURL,apiKey}`（PageAgent 兼容形）；`is_default` 全局唯一；`allowed_groups` 限定可见范围；仅适用于本地/局域网信任部署。多 Node / 外部可按 id 复用；Node 自动消费（热更/同步）延后到后续 PR，Console 管理页见下。
 - **Manage Platform Blob API**：`POST /v1/blobs`（multipart 上传）、`GET/HEAD/DELETE /v1/blobs/{id}`；内容寻址（`blob_id = sha256`）；blob_id 严格 64 位十六进制校验防路径穿越；`blob store disabled` 返回 503；供 A2A 文件传输与 Skills 分发共用。
-- **Manage Skills 分发（精简版）**：`POST /v1/skills/packages`（multipart，draft）+ `POST /v1/skills/packages/{id}/versions/{v}/publish`（单步发布）+ `GET /v1/skills/catalog`/`{id}`/`{id}/versions/{v}/download`（仅 published）+ `GET /v1/skills/sync/manifest?since=N`（返回 `{catalog_version, items}` 信封）；多级审批工作流、Node 自动同步（心跳 `skills_catalog_version`→拉取→解压）、Console UI 及 PageAgent 复用 model 延后到后续 PR。
+- **Manage Skills 分发（精简版）**：`POST /v1/skills/packages`（multipart，draft）+ `POST /v1/skills/packages/{id}/versions/{v}/publish`（单步发布）+ `GET /v1/skills/catalog`/`{id}`/`{id}/versions/{v}/download`（仅 published）+ `GET /v1/skills/sync/manifest?since=N`（返回 `{catalog_version, items}` 信封）；多级审批工作流、Node 自动同步（心跳 `skills_catalog_version`→拉取→解压）延后到后续 PR，Console 管理页见下。
+- **Manage Console 集成（Vue SPA）**：新增 **LLM 配置** 与 **Skills** 两个管理页（导航 + 视图：LLM 配置 CRUD/掩码、Skill 上传/发布/下载），以及全局 **PageAgent 命令栏**——选定一个 LLM 配置后经 `/resolve` 取 `{model,baseURL,apiKey}`、`new PageAgent(...)` 用自然语言操作控制台；`page-agent` 经 npm 依赖 + 动态 import 懒加载分包（不依赖运行期外网 CDN）。
 
 ## [0.5.0] - 2026-06-21
 

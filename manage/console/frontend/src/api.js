@@ -78,4 +78,61 @@ export async function fetchAudit(limit = 100) {
   return apiFetch("/v1/admin/audit", { limit });
 }
 
+// --- LLM 配置注册中心 ---
+export async function fetchLLMConfigs() {
+  return apiFetch("/v1/llm/configs");
+}
+
+export async function createLLMConfig(body) {
+  return apiFetch("/v1/llm/configs", {}, { method: "POST", body });
+}
+
+export async function deleteLLMConfig(id) {
+  return apiFetch(`/v1/llm/configs/${encodeURIComponent(id)}`, {}, { method: "DELETE" });
+}
+
+export async function resolveLLMConfig(id) {
+  return apiFetch(`/v1/llm/configs/${encodeURIComponent(id)}/resolve`);
+}
+
+// --- Skills 分发 ---
+export async function fetchSkillCatalog() {
+  return apiFetch("/v1/skills/catalog");
+}
+
+export async function publishSkill(skillId, version) {
+  return apiFetch(
+    `/v1/skills/packages/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(version)}/publish`,
+    {},
+    { method: "POST" },
+  );
+}
+
+// 上传走 multipart，不能用 apiFetch(JSON)。
+export async function uploadSkillPackage({ skillId, version, name, riskLevel, file }) {
+  const form = new FormData();
+  form.set("skill_id", skillId);
+  form.set("version", version);
+  form.set("name", name);
+  form.set("risk_level", riskLevel || "low");
+  form.set("file", file);
+  const resp = await fetch(new URL("/v1/skills/packages", window.location.origin), {
+    method: "POST",
+    body: form,
+  });
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
+    const err = new Error(message);
+    err.status = resp.status;
+    throw err;
+  }
+  return body;
+}
+
 export { REGISTRY_API };
