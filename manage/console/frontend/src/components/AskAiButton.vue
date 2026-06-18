@@ -64,8 +64,8 @@ async function openConsole() {
 <style scoped>
 .askai-fab {
   position: fixed;
-  left: 16px;
-  bottom: 16px;
+  right: 20px;
+  bottom: 20px;
   z-index: 60;
   display: inline-flex;
   align-items: center;
