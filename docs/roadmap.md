@@ -183,6 +183,17 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 - **会话沉淀 skill**：从一次排障会话生成 candidate skill，经测试和审批后发布。
 - **触发器联动**：允许触发器调用已发布 skill，但必须继承 skill 的风险等级、权限要求和审批策略。
 
+### Phase 4b：Manage 能力市场与发布中枢（P1）
+
+> 详细契约：[design/manage-phase2-capabilities.md](./design/manage-phase2-capabilities.md)
+
+在 PR #31（LLM 注册 + Skills 精简分发 + Blob）基础上：
+
+- **能力市场**：Manage 作 Skill / Plugin **目录**；Node **主动**请求 catalog/manifest，**选择**下载与移除（云端登记 + 本地卸载）；非「publish 即全员强推」。
+- **版本发布中枢**：Manage 登记组件版本；Node 查询 `/v1/releases/check`，由运维确认是否升级。
+- **资源中转**：Blob + `shared_artifacts`；Agent 间文件分享经 Manage，A2A Task 用 `artifact_ref` 引用。
+- **复杂 Workflow**（P1/P2）：多 Agent **执行计划**（步骤、顺序、验收、最终目标），超越文字型单 Task；见同文档 §3。
+
 ### Phase 5：Ops-oriented Workflows（P1/P2）
 
 目标：优先围绕企业运维场景形成强 demo 和可复用模板，而不是泛化工作流编排平台。
