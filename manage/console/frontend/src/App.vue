@@ -6,10 +6,9 @@ import AppSidebar from "./components/AppSidebar.vue";
 import BulkGroupsPanel from "./components/BulkGroupsPanel.vue";
 import DetailDrawer from "./components/DetailDrawer.vue";
 import InboxView from "./components/InboxView.vue";
-import LLMView from "./components/LLMView.vue";
+import NodeAdminView from "./components/NodeAdminView.vue";
 import PageHeader from "./components/PageHeader.vue";
 import RegistryView from "./components/RegistryView.vue";
-import SkillsView from "./components/SkillsView.vue";
 import StatsRow from "./components/StatsRow.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { useToast } from "./composables/useToast.js";
@@ -312,15 +311,9 @@ onMounted(async () => {
           @page-next="inboxNextPage"
         />
 
-        <LLMView
-          v-show="view === 'llm'"
-          :active="view === 'llm'"
-          @toast="showToast($event.message, $event.type)"
-        />
-
-        <SkillsView
-          v-show="view === 'skills'"
-          :active="view === 'skills'"
+        <NodeAdminView
+          v-show="view === 'nodeadmin'"
+          :active="view === 'nodeadmin'"
           @toast="showToast($event.message, $event.type)"
         />
       </main>

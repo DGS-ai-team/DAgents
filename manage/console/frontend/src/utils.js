@@ -83,12 +83,8 @@ export const VIEW_META = {
     title: "A2A Inbox",
     subtitle: "A2A Task 只读观测（不会 deliver）",
   },
-  llm: {
-    title: "LLM 配置",
-    subtitle: "多 Node / 外部可复用的 LLM 配置注册中心",
-  },
-  skills: {
-    title: "Skills",
-    subtitle: "Skill 包上传、发布与目录分发",
+  nodeadmin: {
+    title: "Node 管理",
+    subtitle: "多 Node 复用的 LLM 配置与 Skills 分发",
   },
 };
