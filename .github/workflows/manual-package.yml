@@ -19,12 +19,27 @@ env:
 
 jobs:
   test:
-    name: Pre-build tests
+    name: Pre-build tests (Go + Python + Web UI)
     if: ${{ !inputs.skip_tests }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: node/webui/frontend/package-lock.json
+
+      - name: Test Web UI
+        run: |
+          npm ci --prefix node/webui/frontend
+          npm test --prefix node/webui/frontend
+
+      - name: Build Web UI
+        run: bash node/webui/build.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -77,6 +92,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: node/webui/frontend/package-lock.json
 
       - name: Setup Go
         uses: actions/setup-go@v5
