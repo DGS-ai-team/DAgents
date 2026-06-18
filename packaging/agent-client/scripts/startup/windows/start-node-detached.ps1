@@ -14,10 +14,6 @@ if (-not (Test-Path -LiteralPath $NodeExe)) {
     exit 1
 }
 
-if (Test-Path -LiteralPath $Config) {
-    $Config = (Resolve-Path -LiteralPath $Config).Path
-}
-
 $logDir = Split-Path -Parent $LogOut
 if (-not (Test-Path -LiteralPath $logDir)) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -31,11 +27,34 @@ function Read-LogTail {
     return "`n" + ($tail -join "`n")
 }
 
-# 直接 Start-Process dagents-node；避免 cmd /c 在含空格路径（如 Program Files）下引号/重定向失败。
+# 与 dagents.cmd 前台启动一致：WorkingDirectory 已指向安装根时优先用相对 config，避免
+# Start-Process -ArgumentList 数组在「Program Files」等含空格绝对路径上被拆成 D:\Program。
+function Resolve-ConfigArgument {
+    param([string]$ConfigPath, [string]$WorkDir)
+
+    $candidate = $ConfigPath
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+        $candidate = Join-Path $WorkDir $candidate
+    }
+    if (Test-Path -LiteralPath $candidate) {
+        $resolvedConfig = (Resolve-Path -LiteralPath $candidate).Path
+        $resolvedWd = (Resolve-Path -LiteralPath $WorkDir).Path.TrimEnd('\')
+        if ($resolvedConfig.StartsWith($resolvedWd, [StringComparison]::OrdinalIgnoreCase)) {
+            return $resolvedConfig.Substring($resolvedWd.Length).TrimStart('\')
+        }
+        return $resolvedConfig
+    }
+    return $ConfigPath
+}
+
+$configArg = Resolve-ConfigArgument -ConfigPath $Config -WorkDir $WorkingDirectory
+# ProcessStartInfo.Arguments 单字符串：含空格路径须显式加引号。
+$argumentString = "-config `"$configArg`""
+
 try {
     $proc = Start-Process `
         -FilePath $NodeExe `
-        -ArgumentList @("-config", $Config) `
+        -ArgumentList $argumentString `
         -WorkingDirectory $WorkingDirectory `
         -WindowStyle Hidden `
         -PassThru `

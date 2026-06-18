@@ -189,7 +189,7 @@ if not exist "%NODE_START_PS1%" (
 )
 powershell -NoProfile -ExecutionPolicy Bypass -File "%NODE_START_PS1%" ^
   -NodeExe "%NODE_EXE%" ^
-  -Config "%CFG_ABS%" ^
+  -Config "%CFG%" ^
   -WorkingDirectory "%DAGENTS_HOME%" ^
   -LogOut "%NODE_LOG%" ^
   -LogErr "%NODE_ERR%" ^
@@ -243,7 +243,7 @@ taskkill /PID %TARGET_PID% /T /F >nul 2>&1
 exit /b 0
 
 :find_and_stop_node_pids
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg='!CFG_ABS!'; Get-CimInstance Win32_Process -Filter 'Name=\"dagents-node.exe\"' | Where-Object { $_.CommandLine -like \"*$cfg*\" } | ForEach-Object { Write-Host ('[dagents] stopping node (pid=' + $_.ProcessId + ')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$home='!DAGENTS_HOME!'; $cfg='!CFG!'; $cfgAbs='!CFG_ABS!'; Get-CimInstance Win32_Process -Filter 'Name=\"dagents-node.exe\"' | Where-Object { $cl=$_.CommandLine; ($cl -like \"*$cfgAbs*\") -or ($cl -like \"*-config* $cfg*\") -or ($cl -like \"*-config `\"$cfg`\"*\") -or ($cl -like \"*$($home)\bin\dagents-node.exe*\") } | ForEach-Object { Write-Host ('[dagents] stopping node (pid=' + $_.ProcessId + ')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 exit /b 0
 
 :wait_node_ready
