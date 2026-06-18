@@ -181,17 +181,20 @@ if not exist "%DAGENTS_HOME%\.runtime\logs" mkdir "%DAGENTS_HOME%\.runtime\logs"
 set "NODE_EXE=%DAGENTS_HOME%\bin\dagents-node.exe"
 set "NODE_LOG=%DAGENTS_HOME%\.runtime\logs\node.log"
 set "NODE_ERR=%DAGENTS_HOME%\.runtime\logs\node.err.log"
+set "NODE_START_PS1=%DAGENTS_HOME%\scripts\startup\windows\start-node-detached.ps1"
 echo [dagents] starting node in background (logs: %NODE_LOG%)
-rem /D 固定工作目录；绝对 config 避免 cwd 漂移导致 fs_root 读错目录。
-start "" /B /D "%DAGENTS_HOME%" cmd /c ""%NODE_EXE%" -config "%CFG_ABS%" 1>>"%NODE_LOG%" 2>>"%NODE_ERR%""
-call :capture_node_pid
-exit /b 0
-
-:capture_node_pid
-if not exist "%DAGENTS_HOME%\.runtime" mkdir "%DAGENTS_HOME%\.runtime"
-timeout /t 1 /nobreak >nul 2>nul
-if errorlevel 1 ping -n 2 127.0.0.1 >nul
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg='!CFG_ABS!'; $p=Get-CimInstance Win32_Process -Filter 'Name=\"dagents-node.exe\"' | Where-Object { $_.CommandLine -like \"*$cfg*\" } | Select-Object -First 1 -ExpandProperty ProcessId; if ($p) { Set-Content -LiteralPath '!NODE_PID_FILE!' -Value $p -NoNewline }"
+if not exist "%NODE_START_PS1%" (
+  echo [dagents] missing %NODE_START_PS1%
+  exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%NODE_START_PS1%" ^
+  -NodeExe "%NODE_EXE%" ^
+  -Config "%CFG_ABS%" ^
+  -WorkingDirectory "%DAGENTS_HOME%" ^
+  -LogOut "%NODE_LOG%" ^
+  -LogErr "%NODE_ERR%" ^
+  -PidFile "%NODE_PID_FILE%"
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :clear_node_pid
@@ -355,6 +358,9 @@ echo.
 echo Web UI (browser Client, embedded in dagents-node):
 echo   After dagents node, open http://127.0.0.1:^<listen.port^>/ui/ (default 18765).
 echo   Disable with ui.enabled: false in config.yaml. No separate UI package required.
+echo.
+echo Background node survives closing this terminal (detached via Start-Process).
+echo   For boot persistence use scripts\windows\install_node_service.cmd (admin).
 echo.
 echo Options:
 echo   --withnode     Probe Node first; start it in background if not running, then launch client

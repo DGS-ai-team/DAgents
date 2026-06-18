@@ -54,6 +54,9 @@ fi
 if [[ -f "${REPO_ROOT}/packaging/agent-client/agent-card.example.json" ]]; then
   cp "${REPO_ROOT}/packaging/agent-client/agent-card.example.json" "${BUNDLE_DIR}/agent-card.example.json"
 fi
+if [[ -f "${REPO_ROOT}/packaging/agent-client/agent-card.example.ops.json" ]]; then
+  cp "${REPO_ROOT}/packaging/agent-client/agent-card.example.ops.json" "${BUNDLE_DIR}/agent-card.example.ops.json"
+fi
 if [[ -f "${REPO_ROOT}/.env.example" ]]; then
   cp "${REPO_ROOT}/.env.example" "${BUNDLE_DIR}/.env.example"
 fi
@@ -92,6 +95,8 @@ if [[ "${PLATFORM}" == windows-* ]]; then
 DAgents Local Assistant (Go Node + dual TUI)
 
 1. copy config.example.yaml to config.yaml and edit llm / agent_id
+   copy agent-card.example.json agent-card.json          (Manage/A2A callee)
+   copy agent-card.example.ops.json agent-card.json      (ops caller only)
 2. Start Node:
      dagents node --background          (recommended; logs in .runtime\logs\node.log)
      dagents node                       (foreground)
@@ -130,6 +135,8 @@ DAgents Local Assistant（Go Node + 双 TUI）
 
 便携使用：
 1. cp config.example.yaml config.yaml && 编辑 llm / agent_id
+   cp agent-card.example.json agent-card.json            # Manage/A2A 被调方
+   cp agent-card.example.ops.json agent-card.json        # 纯调用方（ops）
 2. 启动 Node：
      ./dagents node --background    （推荐；日志 .runtime/logs/node.log）
      ./dagents node                 （前台）
