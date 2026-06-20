@@ -64,7 +64,7 @@ flowchart TB
 | `async_tool_result` | `handleAsyncToolResult` | 后台 job 完成回灌；若已有 pending HITL 则仍写入 history 但**保留** pending（issue #25） |
 | `resume` | `handleResume` | HITL 审批 / `ask_user_information` 恢复 |
 
-生产路径下，orchestrator 工具步结束后通过 `SetToolResultEnqueuer` 入队 `tool_result`，**单步执行 + 队列续跑**（对齐 Python 语义）。测试可直接 `RunMessageTurn` 内联多步。
+生产路径下，orchestrator 工具步结束后通过 `SetToolResultEnqueuer` 入队 `tool_result`，**单步执行 + 队列续跑**（对齐 Python 语义）。单测可用 `orchestrator_test.go` 的 `runMessageTurnInline` 内联多步。
 
 `handleHumanMessage` / `handleToolResult` 在步前对**非子** session 调用 `compression.MaybeHandle`；步末 `persist`（子 session 的 `store` 为 nil 时 no-op）。
 

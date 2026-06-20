@@ -65,7 +65,6 @@ sequenceDiagram
 | `ContinueAfterResume` | HITL resume 写入 tool 结果并调度续跑 |
 | `HandleAsyncToolResult` | 后台 job 完成，按尾部形态补 history 并可选续跑 |
 | `InterruptPending` | 新 user 消息打断 pending tool calls |
-| `RunMessageTurn` | 测试用：内联多步直到 pending 或结束 |
 
 每步返回 `StepOutcome`：`Pending`、`LoopCount`、`ScheduleToolResult`、`Err`。
 

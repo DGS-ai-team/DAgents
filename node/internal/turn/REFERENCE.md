@@ -12,7 +12,6 @@
 | `SetChildAgentManager` | 父 session 注入临时 Agent 管理器 |
 | `SetChildSession` | 子 session 标记；禁止管理类工具与 `ask_user` |
 | `SetToolResultEnqueuer` | 工具步结束后入队 `tool_result` |
-| `RunMessageTurn` | 测试：内联多步直到 pending/完成/入队 |
 | `RunHumanMessageTurn` | 追加 user（含 `name` 来源标识）+ 单步 |
 | `RunToolMessageTurn` | 单步 tool_message 续跑 |
 | `HandleAsyncToolResult` | 异步工具完成写 history 并可选续跑 |
@@ -20,7 +19,7 @@
 | `InterruptPending` | 用户新消息打断 pending，补 interrupted tool_result |
 | `publishTurnIdleDone` | `done` SSE；含 **`tool_context_metrics`**（WS5） |
 
-内部主要方法：`runOneStep`、`buildSystemPrompt`（`tool_router.go` / `cancel_partial.go` / `history_write.go`）。
+内部主要方法：`runOneStep`、`buildSystemPrompt`（`tool_router.go` / `cancel_partial.go` / `history_write.go`）。单测内联多步见 `orchestrator_test.go` → `runMessageTurnInline`。
 
 ## context_metrics.go（WS5）
 

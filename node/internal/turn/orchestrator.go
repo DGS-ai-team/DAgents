@@ -100,25 +100,6 @@ func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
 	}
 }
 
-// RunMessageTurn 执行 human_message 回合；测试无 enqueuer 时内联多步，生产应使用 RunHumanMessageTurn 单步 + 队列。
-func (o *Orchestrator) RunMessageTurn(
-	ctx context.Context,
-	sessionID string,
-	history *[]llm.Message,
-	userText string,
-	setState StateSetter,
-	toolLoopCount int,
-) (*PendingHITL, int, error) {
-	if setState == nil {
-		setState = func(State) {}
-	}
-	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.UserNameHuman))
-	o.resetTurnUsage(sessionID)
-	o.resetContextMetrics(sessionID)
-	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
-	return o.runUntilQueueOrDone(ctx, sessionID, history, setState, 0)
-}
-
 // RunHumanMessageTurn 追加 user 消息后执行单步模型回合（human_message）。
 func (o *Orchestrator) RunHumanMessageTurn(
 	ctx context.Context,
@@ -366,35 +347,6 @@ func (o *Orchestrator) InterruptPending(sessionID string, history *[]llm.Message
 	)
 }
 
-func (o *Orchestrator) runUntilQueueOrDone(
-	ctx context.Context,
-	sessionID string,
-	history *[]llm.Message,
-	setState StateSetter,
-	toolLoopCount int,
-) (*PendingHITL, int, error) {
-	for {
-		outcome := o.runOneStep(ctx, sessionID, history, setState, toolLoopCount)
-		if outcome.Err != nil {
-			return outcome.Pending, outcome.LoopCount, outcome.Err
-		}
-		if outcome.Pending != nil {
-			return outcome.Pending, outcome.LoopCount, nil
-		}
-		if outcome.ScheduleToolResult {
-			if o.enqueueToolResult != nil {
-				if err := o.enqueueToolResult(sessionID); err != nil {
-					return nil, outcome.LoopCount, err
-				}
-				return nil, outcome.LoopCount, nil
-			}
-			toolLoopCount = outcome.LoopCount
-			continue
-		}
-		return nil, outcome.LoopCount, nil
-	}
-}
-
 func (o *Orchestrator) runOneStep(
 	ctx context.Context,
 	sessionID string,
@@ -549,6 +501,7 @@ func (o *Orchestrator) publishTurnIdleDone(sessionID, finishReason string) {
 	o.hub.Publish(sessionID, o.agentID, "done", payload)
 }
 
+// resetTurnUsage 新 user 消息 turn 开始时清零 token 累计，避免上轮用量带入 SSE usage。
 func (o *Orchestrator) resetTurnUsage(sessionID string) {
 	if o == nil {
 		return
