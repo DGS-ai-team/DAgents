@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -94,6 +95,40 @@ func TestChildSystemPromptBuilder_includesLoadedSkills(t *testing.T) {
 	if !containsAll(prompt, "Write clearly.", "已加载 skills") {
 		t.Fatalf("prompt = %q", prompt)
 	}
+}
+
+func TestBuildSystemPrompt_runPromptBuildPhase(t *testing.T) {
+	orch := NewOrchestrator("ops-01", "/data/ws", nil, nil, nil, nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{
+		Duplicate:  hooks.DefaultDuplicateConfig(),
+		ToolResult: hooks.DefaultToolResultConfig("/data/ws"),
+	}, nil)
+	orch.toolHooks.RegisterPhaseHook(promptInjectHook{t: t}, hooks.RegisterOpts{Priority: 0})
+
+	prompt := orch.buildSystemPrompt("sess-hook")
+	if !contains(prompt, "## Injected By Hook") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+	if !containsAll(prompt, "ops-01", "sess-hook") {
+		t.Fatalf("builtin system prompt missing base content: %q", prompt)
+	}
+}
+
+type promptInjectHook struct {
+	t *testing.T
+}
+
+func (h promptInjectHook) Name() string    { return "test.prompt.inject" }
+func (h promptInjectHook) Phases() []hooks.Phase { return []hooks.Phase{hooks.PhasePromptBuild} }
+func (h promptInjectHook) Run(_ context.Context, hc *hooks.Context) (hooks.Result, error) {
+	base := ""
+	if hc.PromptBuild != nil {
+		base = hc.PromptBuild.SystemPrompt
+	}
+	return hooks.Result{
+		Mutations: map[string]any{
+			hooks.MutationSystemPrompt: base + "\n## Injected By Hook",
+		},
+	}, nil
 }
 
 func writeSkillForPromptTest(t *testing.T, root, name, body string) {

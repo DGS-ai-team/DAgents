@@ -332,7 +332,7 @@ func NewOrchestrator(
 	if maxToolLoops <= 0 {
 		maxToolLoops = DefaultMaxToolLoops()
 	}
-	return &Orchestrator{
+	orch := &Orchestrator{
 		agentID:      agentID,
 		fsRoot:       fsRoot,
 		hub:          hub,
@@ -348,6 +348,8 @@ func NewOrchestrator(
 		logger:       logx.OrDefault(logger),
 		ctxMetrics:   newContextMetricsStore(),
 	}
+	registerSystemPromptBuildHook(orch)
+	return orch
 }
 
 // InterruptPending 在用户插入新 message 时打断 pending tool calls。
@@ -470,6 +472,19 @@ func (o *Orchestrator) runOneStep(
 		return StepOutcome{LoopCount: toolLoopCount, Err: streamErr}
 	}
 
+	result, hookErr := o.runLLMAfterCallPhase(ctx, sessionID, result)
+	if hookErr != nil {
+		msg := hookErr.Error()
+		if isLLMAfterCallAbort(hookErr) {
+			o.logger.Warn("llm.after_call aborted turn", "session_id", sessionID, "error", hookErr)
+		} else {
+			o.logger.Warn("llm.after_call hook failed", "session_id", sessionID, "error", hookErr)
+		}
+		o.hub.Publish(sessionID, o.agentID, "error", map[string]any{"message": msg})
+		o.publishTurnIdleDone(sessionID, "error")
+		return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
+	}
+
 	assistant := assistantMessageFromResult(result)
 	o.appendHistory(sessionID, history, assistant)
 
@@ -514,6 +529,7 @@ func (o *Orchestrator) runOneStep(
 // 2. HITL 暂停：turn_complete=false + awaiting；
 // 3. stop/error/cancelled：turn_complete=true，awaiting 为空。
 func (o *Orchestrator) publishTurnIdleDone(sessionID, finishReason string) {
+	o.runTurnDonePhase(sessionID, finishReason)
 	payload := map[string]any{"finish_reason": finishReason}
 	switch finishReason {
 	case "awaiting_user_information":
@@ -592,6 +608,30 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 }
 
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
+	if o.toolHooks == nil {
+		return o.composeSystemPrompt(sessionID)
+	}
+	hc := hooks.BuildPromptBuildContext(sessionID, o.agentID, "")
+	out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhasePromptBuild, hc)
+	if err != nil {
+		return o.composeSystemPrompt(sessionID)
+	}
+	prompt := hooks.SystemPromptFrom(out, "")
+	if prompt == "" {
+		return o.composeSystemPrompt(sessionID)
+	}
+	return prompt
+}
+
+func (o *Orchestrator) runTurnDonePhase(sessionID, finishReason string) {
+	if o.toolHooks == nil {
+		return
+	}
+	hc := hooks.BuildTurnDoneContext(sessionID, o.agentID, finishReason)
+	_, _ = o.toolHooks.RunPhase(context.Background(), hooks.PhaseTurnDone, hc)
+}
+
+func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 	var loaded []skills.LoadedSkill
 	if o.skillAccess.Get != nil {
 		loaded = o.skillAccess.Get()

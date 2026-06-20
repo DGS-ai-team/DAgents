@@ -164,7 +164,7 @@ func TestRegistryAgentOwnedTrustChain(t *testing.T) {
 	hooksReg.SetAgentFileTrust(trust)
 
 	// first write: require approval
-	out := hooksReg.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{
+	out := registryToolBeforeEach(hooksReg, ToolBeforeEachInput{
 		ToolName: "write_file",
 		ToolArgs: map[string]any{"path": "x.txt", "content": "a"},
 	})
@@ -181,14 +181,14 @@ func TestRegistryAgentOwnedTrustChain(t *testing.T) {
 	if err != nil || !exists {
 		t.Fatal(err)
 	}
-	_ = hooksReg.RunToolAfterEach(context.Background(), ToolAfterEachInput{
+	_ = registryToolAfterEach(hooksReg, ToolAfterEachInput{
 		ToolName:     "write_file",
 		RawArguments: `{"path":"x.txt","content":"a","call_purpose":"t"}`,
 		RawResult:    "ok",
 	})
 
 	// second edit: auto
-	out = hooksReg.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{
+	out = registryToolBeforeEach(hooksReg, ToolBeforeEachInput{
 		ToolName: "search_replace",
 		ToolArgs: map[string]any{"path": "x.txt", "old_string": "a", "new_string": "b"},
 	})
@@ -201,7 +201,7 @@ func TestRegistryAgentOwnedTrustChain(t *testing.T) {
 	if err := os.Chtimes(path, time.Now(), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	out = hooksReg.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{
+	out = registryToolBeforeEach(hooksReg, ToolBeforeEachInput{
 		ToolName: "write_file",
 		ToolArgs: map[string]any{"path": "x.txt", "content": "c"},
 	})

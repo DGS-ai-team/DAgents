@@ -119,8 +119,25 @@ type CompressionConfig struct {
 
 // HooksConfig 控制 Node turn Hook 行为。
 type HooksConfig struct {
+	// Enabled 为 true 时才允许注册 type=http / command 的外部 hook；journal 不受此限制。
+	Enabled           *bool             `yaml:"enabled"`
+	Entries           []HookEntryConfig `yaml:"entries"`
 	DuplicateToolCall DuplicateToolCallHookConfig `yaml:"duplicate_tool_call"`
 	ToolResult        ToolResultHookConfig        `yaml:"tool_result"`
+}
+
+// HookEntryConfig 为 YAML 配置的外部 Hook 条目（journal / http / command）。
+type HookEntryConfig struct {
+	Name         string   `yaml:"name"`
+	Type         string   `yaml:"type"`
+	Phases       []string `yaml:"phases"`
+	Priority     int      `yaml:"priority"`
+	OnError      string   `yaml:"on_error"`
+	TimeoutMS    int      `yaml:"timeout_ms"`
+	URL          string   `yaml:"url"`
+	Command      []string `yaml:"command"`
+	AllowedPaths []string `yaml:"allowed_paths"`
+	JournalPath  string   `yaml:"journal_path"`
 }
 
 // ToolResultHookConfig 控制 tool.after_each 对列出的工具做落盘 + history 摘要（WS3）。
@@ -147,6 +164,14 @@ type DuplicateToolCallHookConfig struct {
 }
 
 const defaultDuplicateToolCallWindowSeconds = 60
+
+// HooksExternalEnabled 是否启用 http/command 类外部 hook（默认 false）。
+func (c *Config) HooksExternalEnabled() bool {
+	if c == nil || c.Hooks.Enabled == nil {
+		return false
+	}
+	return *c.Hooks.Enabled
+}
 
 // DuplicateToolCallHookEnabled 是否启用重复 tool call 检测。
 func (c *Config) DuplicateToolCallHookEnabled() bool {

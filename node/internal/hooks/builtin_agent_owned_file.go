@@ -37,6 +37,11 @@ func (h *AgentOwnedFileHook) Name() string { return "builtin.agent_owned_file" }
 // Phases 返回支持的 phase 列表。
 func (h *AgentOwnedFileHook) Phases() []Phase { return []Phase{PhaseToolBeforeEach} }
 
+// Run 实现通用 Hook，委托 RunToolBeforeEach。
+func (h *AgentOwnedFileHook) Run(ctx context.Context, hc *Context) (Result, error) {
+	return runToolBeforeEachHook(ctx, hc, h.Name(), h.RunToolBeforeEach)
+}
+
 // RunToolBeforeEach 信任命中时将 rule+require_approval 降为 auto；always 档位不生效。
 func (h *AgentOwnedFileHook) RunToolBeforeEach(_ context.Context, in ToolBeforeEachInput, out *ToolBeforeEachResult) error {
 	if h == nil || !h.cfg.Enabled {

@@ -65,6 +65,8 @@ type RuntimeConfig struct {
 	Duplicate      DuplicateConfig
 	ToolResult     ToolResultConfig
 	AgentOwnedFile AgentOwnedFileConfig
+	External       ExternalHooksConfig
+	ExternalDeps   ExternalDeps
 }
 
 // AgentOwnedFileConfig 控制 Agent 自有文件写操作信任链。

@@ -147,6 +147,10 @@ func newRuntimeWithPublisher(
 				Tools:                turnOpts.ToolResult.Tools,
 				FSRoot:               turnOpts.FSRoot,
 			}),
+			External: turnOpts.ExternalHooks,
+			ExternalDeps: hooks.ExternalDeps{
+				Logger: logger,
+			},
 		},
 		logger,
 	)

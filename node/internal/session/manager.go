@@ -38,8 +38,9 @@ type TurnOptions struct {
 	CompressionBlocking      int
 	RawMessageHistoryEnabled bool
 	RawMessageHistoryDir     string
-	DuplicateToolCall hooks.DuplicateConfig
-	ToolResult        hooks.ToolResultConfig
+	DuplicateToolCall        hooks.DuplicateConfig
+	ToolResult               hooks.ToolResultConfig
+	ExternalHooks            hooks.ExternalHooksConfig
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。
