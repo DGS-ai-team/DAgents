@@ -74,9 +74,13 @@ func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
 }
 
-// SetChildAgentTools 注入子 Agent 工具处理器；isChild 为 true 时禁止调用管理工具。
-func (o *Orchestrator) SetChildAgentTools(m *childagent.Manager, isChild bool) {
+// SetChildAgentManager 注入临时 Agent 管理器（仅父 session 调用）。
+func (o *Orchestrator) SetChildAgentManager(m *childagent.Manager) {
 	o.childMgr = m
+}
+
+// SetChildSession 标记当前 orchestrator 运行在子 session（禁止管理类工具与 ask_user）。
+func (o *Orchestrator) SetChildSession(isChild bool) {
 	o.isChildSession = isChild
 }
 

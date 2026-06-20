@@ -45,7 +45,8 @@ flowchart TB
 | 工具 | 完整 `*tools.Registry` | `RestrictedRegistry`（白名单） |
 | SQLite | 有 | `nil`（不持久化） |
 | 上下文压缩 | 有（若启用） | **跳过** |
-| `SetChildAgentTools` | `false`（可 `create_temporary_agent`） | `true`（禁止管理类临时 Agent 工具） |
+| `SetChildAgentManager` | 注入管理器（可 `create_temporary_agent`） | 不调用 |
+| `SetChildSession` | 不调用 | `true`（禁止管理类临时 Agent 工具与 `ask_user`） |
 | 终态 | 用户持久化 / 恢复 | `tryCompleteChildIfIdle` → `OnChildSettled` |
 
 建议跟读路径：`Manager.Create` → `consumeLoop` → `handleHumanMessage` / `handleToolResult` / `handleResume`；子 Agent：`SpawnChild` → `newChildRuntime` → `EnqueueChildTask`。

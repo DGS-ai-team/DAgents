@@ -9,7 +9,8 @@
 | `SkillAccess` | orchestrator 读写 session `loaded_skills`（Catalog + Get/Set） |
 | `Orchestrator` | LLM + 工具循环 + SSE |
 | `NewOrchestrator` | 构造；`policy` 默认加载、`maxToolLoops` 默认 16 |
-| `SetChildAgentTools` | 注入临时 Agent 管理器；`isChild` 禁止管理工具 |
+| `SetChildAgentManager` | 父 session 注入临时 Agent 管理器 |
+| `SetChildSession` | 子 session 标记；禁止管理类工具与 `ask_user` |
 | `SetToolResultEnqueuer` | 工具步结束后入队 `tool_result` |
 | `RunMessageTurn` | 测试：内联多步直到 pending/完成/入队 |
 | `RunHumanMessageTurn` | 追加 user（含 `name` 来源标识）+ 单步 |

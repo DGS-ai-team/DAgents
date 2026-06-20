@@ -567,7 +567,7 @@ func (m *Manager) attachUserChildTools(rt *runtime) {
 	if rt == nil || rt.isChildSession() || m.children == nil || !m.children.Enabled() {
 		return
 	}
-	rt.orch.SetChildAgentTools(m.children, false)
+	rt.orch.SetChildAgentManager(m.children)
 }
 
 func generateSessionID() (string, error) {

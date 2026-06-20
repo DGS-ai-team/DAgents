@@ -49,7 +49,8 @@ sequenceDiagram
 **事后注入**（由 `session.newRuntimeWithPublisher` 完成）：
 
 - `SetToolResultEnqueuer`：工具步结束后入队 `tool_result`（生产必须）
-- `SetChildAgentTools(mgr, isChild)`：父 `false` 可创建临时 Agent；子 `true` 禁止
+- `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
+- `SetChildSession(true)`：子 session 禁止管理类工具与 `ask_user`
 
 `policy == nil` 时加载默认策略文件；`maxToolLoops <= 0` 时用默认 **16**。
 
