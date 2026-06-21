@@ -120,7 +120,8 @@ skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时�
 
 | 文件 | 说明 |
 |------|------|
-| `orchestrator.go` | `Orchestrator`、单步 LLM 循环、SSE、usage |
+| `orchestrator.go` | `Orchestrator`、单步 LLM 循环、usage |
+| `sse_publish.go` | 全部 SSE `publish*` 入口 |
 | `tool_router.go` | 工具分流（policy/childagent/skills/HITL）、并行执行 |
 | `cancel_partial.go` | 流式 cancel 部分 assistant 落库与 tool 补位 |
 | `history_write.go` | `appendHistory` / `insertHistory` |

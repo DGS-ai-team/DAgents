@@ -29,12 +29,14 @@ func (o *Orchestrator) processToolCalls(
 	var userInfo *llm.ToolCall
 
 	for i, tc := range calls {
-		o.publishToolCallSSE(sessionID, tc, false, i)
+		o.publishToolCall(sessionID, tc, false, i)
 		o.recordToolCall(sessionID, tc.Function.Name)
 
 		if childagent.IsTemporaryAgentTool(tc.Function.Name) {
 			if o.isChildSession {
-				o.appendDeniedTool(sessionID, history, tc, "child_forbidden")
+				msg := "rejected: child_forbidden"
+				o.publishToolResult(sessionID, tc, msg, true, nil)
+				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
 				continue
 			}
 			if o.childMgr == nil || !o.childMgr.Enabled() {
@@ -55,7 +57,9 @@ func (o *Orchestrator) processToolCalls(
 
 		if tools.IsAskUserInformation(tc.Function.Name) {
 			if o.isChildSession {
-				o.appendDeniedTool(sessionID, history, tc, "ask_user_forbidden_for_child")
+				msg := "rejected: ask_user_forbidden_for_child"
+				o.publishToolResult(sessionID, tc, msg, true, nil)
+				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
 				continue
 			}
 			if userInfo == nil {
@@ -73,7 +77,9 @@ func (o *Orchestrator) processToolCalls(
 		decision := o.decideToolBeforeEach(ctx, sessionID, tc)
 		switch decision.Action {
 		case policy.ActionDeny:
-			o.appendDeniedTool(sessionID, history, tc, "policy_denied")
+			msg := "rejected: policy_denied"
+			o.publishToolResult(sessionID, tc, msg, true, nil)
+			o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
 		case policy.ActionRequireApproval:
 			item := pendingApprovalCall{tc: tc}
 			if decision.ApprovalSubtype == hooks.ApprovalSubtypeDuplicateToolCall && decision.DuplicateMeta != nil {
@@ -92,11 +98,7 @@ func (o *Orchestrator) processToolCalls(
 
 	if userInfo != nil {
 		question, uiArgs := buildUserInformationPayload(*userInfo)
-		o.hub.Publish(sessionID, o.agentID, "user_information_required", map[string]any{
-			"content":               question,
-			"user_information_args": uiArgs,
-			"display_type":          "normal_text",
-		})
+		o.publishUserInformationRequired(sessionID, question, uiArgs)
 		return &PendingHITL{Kind: HITLUserInformation, UserInfo: userInfo}, "awaiting_user_information", nil
 	}
 
@@ -119,14 +121,7 @@ func (o *Orchestrator) processToolCalls(
 		for _, item := range approvalCalls {
 			pendingTools = append(pendingTools, item.tc)
 		}
-		o.hub.Publish(sessionID, o.agentID, "approval_required", map[string]any{
-			"approval_type": "execute_tool",
-			"approval_id":   approvalID,
-			"execution_id":  executionID,
-			"message":       message,
-			"approval_args": map[string]any{"tool_calls": toolItems},
-			"display_type":  "normal_text",
-		})
+		o.publishApprovalRequired(sessionID, approvalID, executionID, message, toolItems)
 		return &PendingHITL{Kind: HITLApproval, ToolCalls: pendingTools}, "awaiting_tool_approval", nil
 	}
 	return nil, "", nil
@@ -345,60 +340,6 @@ func resolveTriggerSessionTarget(tc llm.ToolCall, plan *clihitl.ApprovalPlan) st
 		return clihitl.TriggerSessionSame
 	}
 	return ""
-}
-
-func (o *Orchestrator) appendDeniedTool(sessionID string, history *[]llm.Message, tc llm.ToolCall, reason string) {
-	msg := "rejected: " + reason
-	o.publishToolResult(sessionID, tc, msg, true, nil)
-	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
-}
-
-func (o *Orchestrator) publishToolCallPartial(sessionID string, tc llm.ToolCall, toolIndex int) {
-	o.publishToolCallSSE(sessionID, tc, true, toolIndex)
-}
-
-func (o *Orchestrator) publishToolCallSSE(sessionID string, tc llm.ToolCall, partial bool, toolIndex int) {
-	if partial {
-		o.logger.Debug("tool call partial",
-			"session_id", sessionID,
-			"tool_name", tc.Function.Name,
-			"tool_index", toolIndex,
-		)
-	} else {
-		o.logger.Info("tool call",
-			"session_id", sessionID,
-			"tool_name", tc.Function.Name,
-			"tool_call_id", tc.ID,
-		)
-	}
-	payload := map[string]any{
-		"partial": partial,
-		"tool_calls": []map[string]any{{
-			"id":   tc.ID,
-			"type": tc.Type,
-			"function": map[string]any{
-				"name":      tc.Function.Name,
-				"arguments": tc.Function.Arguments,
-			},
-		}},
-	}
-	if toolIndex >= 0 {
-		payload["tool_index"] = toolIndex
-	}
-	o.hub.Publish(sessionID, o.agentID, "tool_call", payload)
-}
-
-func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, content string, rejected bool, extra map[string]any) {
-	payload := map[string]any{
-		"tool_call_id": tc.ID,
-		"tool_name":    tc.Function.Name,
-		"content":      content,
-		"rejected":     rejected,
-	}
-	for k, v := range extra {
-		payload[k] = v
-	}
-	o.hub.Publish(sessionID, o.agentID, "tool_result", payload)
 }
 
 func buildUserInformationPayload(tc llm.ToolCall) (question string, uiArgs map[string]any) {

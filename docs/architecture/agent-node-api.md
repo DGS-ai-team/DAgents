@@ -171,7 +171,7 @@ Last-Event-ID: 42
 
 `done` **仅**表示编排器在当前步暂停、**轮到用户交互**（解锁 Client 等待、进入 HITL 或自由输入）。**不**表示 assistant 流式段落结束（换行由 `assistant` / `tool_call` / `reasoning` 等事件在 Client 侧收束）。
 
-实现：`node/internal/turn/orchestrator.go` 中 `publishTurnIdleDone`。
+实现：`node/internal/turn/sse_publish.go` 中 `publishDone`。
 
 **载荷字段**
 

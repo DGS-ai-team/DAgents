@@ -54,7 +54,7 @@ A2A caller relay 可能含 synthetic 工具块事件；见 [05-Manage与A2A](../
 | 自动工具后 `tool_result` 续跑 | ❌ | — |
 | resume 后继续链 | ❌ | — |
 
-实现：`publishTurnIdleDone`（`orchestrator.go`）。
+实现：`publishDone`（`sse_publish.go`）。
 
 ---
 

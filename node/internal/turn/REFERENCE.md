@@ -17,7 +17,9 @@
 | `HandleAsyncToolResult` | 异步工具完成写 history 并可选续跑 |
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
 | `InterruptPending` | 用户新消息打断 pending，补 interrupted tool_result |
-| `publishTurnIdleDone` | `done` SSE；含 **`tool_context_metrics`**（WS5） |
+| `publishDone` | `done` SSE；含 **`tool_context_metrics`**（WS5） |
+
+SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / `publishToolResult` / `publishError` / `publishUsage` 等）。
 
 内部主要方法：`runOneStep`、`buildSystemPrompt`（`tool_router.go` / `cancel_partial.go` / `history_write.go`）。单测内联多步见 `orchestrator_test.go` → `runMessageTurnInline`。
 
@@ -27,7 +29,20 @@
 |------|------|
 | `TurnContextMetrics` | 单用户任务内工具链指标快照 |
 | `recordToolCall` / `recordToolResult` / `recordToolLoop` | 编排器内埋点 |
+| `logTurnContextMetrics` | 指标结构化日志（非 SSE） |
 | `snapshot()` | 序列化为 `done.tool_context_metrics` |
+
+## sse_publish.go
+
+| 符号 | 说明 |
+|------|------|
+| `publishAssistant` / `publishReasoning` | 流式 delta |
+| `publishError` | `error` SSE |
+| `publishUserInformationRequired` / `publishApprovalRequired` | HITL SSE |
+| `publishToolCall` / `publishToolResult` | 工具 SSE |
+| `publishAsyncToolCallback` | async 回灌 tool_call + tool_result |
+| `publishDone` | `done` SSE |
+| `publishUsage` / `publishUsageIfAccumulated` | `usage` SSE |
 
 ## tool_router.go
 
@@ -36,7 +51,6 @@
 | `processToolCalls` | 工具分流与 HITL 暂停 |
 | `executeAutoBatch` / `invokeTool` / `executeTool` | 免审批工具执行 |
 | `executeSkillTool` | skills 工具与 loaded 状态写回 |
-| `publishToolCall` / `publishToolResult` | 工具 SSE |
 | `parseJSONArgs` / `buildUserInformationPayload` | HITL 载荷辅助 |
 
 ## cancel_partial.go

@@ -43,14 +43,14 @@
 
 ```text
 for each tool_call in assistant batch:
-  publishToolCallSSE
+  publishToolCall
   → child_agent / ask_user / skills 特殊分支
   → policy.DecideTool(name, args)
-       deny          → appendDeniedTool
+       deny          → publishToolResult(rejected) + appendHistory(tool)
        require_approval → 加入 approvalCalls
        auto          → 加入 autoCalls
 executeAutoBatch(autoCalls)
-if approvalCalls → SSE approval_required → PendingHITL{Kind: approval}
+if approvalCalls → publishApprovalRequired → PendingHITL{Kind: approval}
 ```
 
 锚点文件：`node/internal/turn/tool_router.go`。
@@ -111,7 +111,7 @@ processToolCalls
     … 特殊工具分支 …
     decision := hooks.RunPhase(PhaseToolBeforeEach, ToolHookContext{tc, session, ToolMode, ResolvedAction, …})
     switch decision.Action:
-      AbortTool / Deny     → appendDeniedTool
+      AbortTool / Deny     → publishToolResult(rejected) + appendHistory(tool)
       RequireApproval      → approvalCalls (+ ApprovalReason / ApprovalSubtype 元数据)
       Auto                 → autoCalls
   … 后续 executeAutoBatch / approval SSE 不变 …
@@ -134,7 +134,7 @@ processToolCalls
 | `rule` | require_approval | — | 标准 `execute_tool` 审批 |
 | `rule` | auto | 否 | 直接 auto |
 | `rule` | auto | **是** | **标准 `execute_tool` 审批**（`approval_reason` 标注重复） |
-| 任意 | deny | — | appendDeniedTool |
+| 任意 | deny | — | publishToolResult(rejected) + appendHistory |
 
 `DuplicateToolCallHook` **不覆盖** `always` / `never` 的语义；`deny` 在 Policy 层已短路，不进入 duplicate。
 

@@ -69,7 +69,7 @@ runOneStep(ctx, sessionID, history, setState, toolLoopCount)
   ├─ appendHistory(assistant)            // 整段 assistant 落库
   │
   ├─ len(ToolCalls)==0 ?
-  │     └─ publishTurnIdleDone(stop)     → SSE done，return
+  │     └─ publishDone(stop)             → SSE done，return
   │
   └─ setState(awaiting_tool)
         processToolCalls                 → tool_router.go

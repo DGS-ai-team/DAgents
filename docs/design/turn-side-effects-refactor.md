@@ -147,7 +147,7 @@ H₁ = [ … , user(U), assistant(tool_calls=[tc₁]), tool(tc₁ → result) ]
 | C2 | `toolLoopCountSnapshot()` → 0；`runTurnStep`，`history := H₁` | `h = H₁` | `H₁` | `[]` |
 | C3 | `RunToolMessageTurn` → `runOneStep`（**不**追加 user） | `h = H₁` | `H₁` | `[]` |
 | C4 | `StreamChat` → 无 `tool_calls` | `… + A₂(text)` | `H₁` | `[]` |
-| C5 | `publishTurnIdleDone(stop)` | 同上 | `H₁` | `[]` |
+| C5 | `publishDone(stop)` | 同上 | `H₁` | `[]` |
 | C6 | `StepOutcome{LoopCount:1}` | 同上 | `H₁` | `[]` |
 | C7 | `applyStepOutcome` commit | — | **`H₂ = H₁ + A₂`** | `[]` |
 | C8 | 无后续 enqueue → `persist`，idle | — | `H₂` | `[]` |
@@ -224,7 +224,7 @@ sequenceDiagram
     Loop->>RTS: handleHumanMessage
     RTS->>Orch: RunHumanMessageTurn → runOneStep
     Note over Orch: h: +user +assistant(text)
-    Orch->>Loop: publishTurnIdleDone(stop)
+    Orch->>Loop: publishDone(stop)
     RTS->>Loop: applyStepOutcome → H commit
     Note over Q: 无 tool_result 入队
 ```
@@ -236,7 +236,7 @@ sequenceDiagram
 | A1 | 入队 `message` | `H₀` | `[message]` | idle |
 | B1 | Dequeue → `handleHumanMessage` | `H₀` | `[]` | — |
 | B2 | `appendHistory(user)` + `runOneStep` | `H₀+U+A(text)` | `[]` | 步内 streaming |
-| B3 | 无 tool_calls → `publishTurnIdleDone(stop)` | 同上 | `[]` | — |
+| B3 | 无 tool_calls → `publishDone(stop)` | 同上 | `[]` | — |
 | B4 | `StepOutcome{LoopCount:1}`；**不** enqueue | 同上 | `[]` | — |
 | B5 | `applyStepOutcome` commit | **`H₁=H₀+U+A(text)`** | `[]` | idle, pending=nil, toolLoopCount=0 |
 | B6 | `persist` | `H₁` | `[]` | — |

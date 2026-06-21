@@ -192,7 +192,7 @@ func (m *TurnContextMetrics) snapshot() map[string]any {
 	return out
 }
 
-func (o *Orchestrator) publishTurnContextMetrics(sessionID, finishReason string) {
+func (o *Orchestrator) logTurnContextMetrics(sessionID, finishReason string) {
 	m := o.contextMetrics(sessionID)
 	if m == nil || o.logger == nil {
 		return
