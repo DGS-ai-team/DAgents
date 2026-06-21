@@ -233,7 +233,8 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 事后设置：
 
 - `SetToolResultEnqueuer` — 工具步结束后入队 `tool_result`
-- `SetChildAgentTools(mgr, isChild)` — 父可 `create_temporary_agent`；子禁止管理类工具
+- `SetChildAgentManager(mgr)` — 父 session 注入管理器，可 `create_temporary_agent`
+- `SetChildSession(true)` — 子 session 禁止管理类工具
 
 ### 6.2 单步主路径（`runOneStep`）
 
@@ -259,7 +260,7 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 | 项 | 父 | 子（临时 Agent） |
 |----|-----|------------------|
 | 创建 | `Manager.Create` | `childagent` → `SpawnChild` |
-| Orchestrator | `NewOrchestrator` + `SetChildAgentTools(false)` | 同上 + `SetChildAgentTools(true)` |
+| Orchestrator | `NewOrchestrator` + `SetChildAgentManager` | 同上 + `SetChildSession(true)` |
 | SSE | 直接 `Hub.Publish(sessionID)` | `RelayHub` → 父 `session_id` |
 | 持久化 | SQLite | 无 |
 | 压缩 | 可选 | 关闭 |

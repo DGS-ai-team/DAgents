@@ -78,7 +78,7 @@ func TestRegistrySetPolicyEngine(t *testing.T) {
 	engine, _ := policy.LoadFile("")
 	reg := NewRegistry(engine, RuntimeConfig{Duplicate: DefaultDuplicateConfig()})
 
-	out := reg.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{ToolName: "read_file"})
+	out := registryToolBeforeEach(reg, ToolBeforeEachInput{ToolName: "read_file"})
 	if out.Action != policy.ActionAuto {
 		t.Fatalf("before reload Action = %q", out.Action)
 	}
@@ -90,7 +90,7 @@ func TestRegistrySetPolicyEngine(t *testing.T) {
 	}
 	reg.SetPolicyEngine(reloaded)
 
-	out = reg.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{ToolName: "read_file"})
+	out = registryToolBeforeEach(reg, ToolBeforeEachInput{ToolName: "read_file"})
 	if out.Action != policy.ActionRequireApproval {
 		t.Fatalf("after reload Action = %q", out.Action)
 	}
@@ -99,9 +99,9 @@ func TestRegistrySetPolicyEngine(t *testing.T) {
 	}
 }
 
-func TestRunToolBeforeEachNilRegistry(t *testing.T) {
+func TestRunPhase_nilRegistryToolBeforeEach(t *testing.T) {
 	var reg *Registry
-	out := reg.RunToolBeforeEach(context.Background(), ToolBeforeEachInput{ToolName: "read_file"})
+	out := registryToolBeforeEach(reg, ToolBeforeEachInput{ToolName: "read_file"})
 	if out.Action != policy.ActionRequireApproval {
 		t.Fatalf("nil registry should be conservative, got %q", out.Action)
 	}

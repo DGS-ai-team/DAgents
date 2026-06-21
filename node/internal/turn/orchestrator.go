@@ -74,9 +74,13 @@ func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
 }
 
-// SetChildAgentTools 注入子 Agent 工具处理器；isChild 为 true 时禁止调用管理工具。
-func (o *Orchestrator) SetChildAgentTools(m *childagent.Manager, isChild bool) {
+// SetChildAgentManager 注入临时 Agent 管理器（仅父 session 调用）。
+func (o *Orchestrator) SetChildAgentManager(m *childagent.Manager) {
 	o.childMgr = m
+}
+
+// SetChildSession 标记当前 orchestrator 运行在子 session（禁止管理类工具与 ask_user）。
+func (o *Orchestrator) SetChildSession(isChild bool) {
 	o.isChildSession = isChild
 }
 
@@ -94,25 +98,6 @@ func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
 	if o.toolHooks != nil {
 		o.toolHooks.SetPolicyEngine(engine)
 	}
-}
-
-// RunMessageTurn 执行 human_message 回合；测试无 enqueuer 时内联多步，生产应使用 RunHumanMessageTurn 单步 + 队列。
-func (o *Orchestrator) RunMessageTurn(
-	ctx context.Context,
-	sessionID string,
-	history *[]llm.Message,
-	userText string,
-	setState StateSetter,
-	toolLoopCount int,
-) (*PendingHITL, int, error) {
-	if setState == nil {
-		setState = func(State) {}
-	}
-	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.UserNameHuman))
-	o.resetTurnUsage(sessionID)
-	o.resetContextMetrics(sessionID)
-	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
-	return o.runUntilQueueOrDone(ctx, sessionID, history, setState, 0)
 }
 
 // RunHumanMessageTurn 追加 user 消息后执行单步模型回合（human_message）。
@@ -328,7 +313,7 @@ func NewOrchestrator(
 	if maxToolLoops <= 0 {
 		maxToolLoops = DefaultMaxToolLoops()
 	}
-	return &Orchestrator{
+	orch := &Orchestrator{
 		agentID:      agentID,
 		fsRoot:       fsRoot,
 		hub:          hub,
@@ -344,6 +329,8 @@ func NewOrchestrator(
 		logger:       logx.OrDefault(logger),
 		ctxMetrics:   newContextMetricsStore(),
 	}
+	registerSystemPromptBuildHook(orch)
+	return orch
 }
 
 // InterruptPending 在用户插入新 message 时打断 pending tool calls。
@@ -358,35 +345,6 @@ func (o *Orchestrator) InterruptPending(sessionID string, history *[]llm.Message
 		ToolUserInterruptedMessage,
 		map[string]any{"interrupted_by_user_message": true},
 	)
-}
-
-func (o *Orchestrator) runUntilQueueOrDone(
-	ctx context.Context,
-	sessionID string,
-	history *[]llm.Message,
-	setState StateSetter,
-	toolLoopCount int,
-) (*PendingHITL, int, error) {
-	for {
-		outcome := o.runOneStep(ctx, sessionID, history, setState, toolLoopCount)
-		if outcome.Err != nil {
-			return outcome.Pending, outcome.LoopCount, outcome.Err
-		}
-		if outcome.Pending != nil {
-			return outcome.Pending, outcome.LoopCount, nil
-		}
-		if outcome.ScheduleToolResult {
-			if o.enqueueToolResult != nil {
-				if err := o.enqueueToolResult(sessionID); err != nil {
-					return nil, outcome.LoopCount, err
-				}
-				return nil, outcome.LoopCount, nil
-			}
-			toolLoopCount = outcome.LoopCount
-			continue
-		}
-		return nil, outcome.LoopCount, nil
-	}
 }
 
 func (o *Orchestrator) runOneStep(
@@ -466,6 +424,19 @@ func (o *Orchestrator) runOneStep(
 		return StepOutcome{LoopCount: toolLoopCount, Err: streamErr}
 	}
 
+	result, hookErr := o.runLLMAfterCallPhase(ctx, sessionID, result)
+	if hookErr != nil {
+		msg := hookErr.Error()
+		if isLLMAfterCallAbort(hookErr) {
+			o.logger.Warn("llm.after_call aborted turn", "session_id", sessionID, "error", hookErr)
+		} else {
+			o.logger.Warn("llm.after_call hook failed", "session_id", sessionID, "error", hookErr)
+		}
+		o.hub.Publish(sessionID, o.agentID, "error", map[string]any{"message": msg})
+		o.publishTurnIdleDone(sessionID, "error")
+		return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
+	}
+
 	assistant := assistantMessageFromResult(result)
 	o.appendHistory(sessionID, history, assistant)
 
@@ -510,6 +481,7 @@ func (o *Orchestrator) runOneStep(
 // 2. HITL 暂停：turn_complete=false + awaiting；
 // 3. stop/error/cancelled：turn_complete=true，awaiting 为空。
 func (o *Orchestrator) publishTurnIdleDone(sessionID, finishReason string) {
+	o.runTurnDonePhase(sessionID, finishReason)
 	payload := map[string]any{"finish_reason": finishReason}
 	switch finishReason {
 	case "awaiting_user_information":
@@ -529,6 +501,7 @@ func (o *Orchestrator) publishTurnIdleDone(sessionID, finishReason string) {
 	o.hub.Publish(sessionID, o.agentID, "done", payload)
 }
 
+// resetTurnUsage 新 user 消息 turn 开始时清零 token 累计，避免上轮用量带入 SSE usage。
 func (o *Orchestrator) resetTurnUsage(sessionID string) {
 	if o == nil {
 		return
@@ -588,6 +561,30 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 }
 
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
+	if o.toolHooks == nil {
+		return o.composeSystemPrompt(sessionID)
+	}
+	hc := hooks.BuildPromptBuildContext(sessionID, o.agentID, "")
+	out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhasePromptBuild, hc)
+	if err != nil {
+		return o.composeSystemPrompt(sessionID)
+	}
+	prompt := hooks.SystemPromptFrom(out, "")
+	if prompt == "" {
+		return o.composeSystemPrompt(sessionID)
+	}
+	return prompt
+}
+
+func (o *Orchestrator) runTurnDonePhase(sessionID, finishReason string) {
+	if o.toolHooks == nil {
+		return
+	}
+	hc := hooks.BuildTurnDoneContext(sessionID, o.agentID, finishReason)
+	_, _ = o.toolHooks.RunPhase(context.Background(), hooks.PhaseTurnDone, hc)
+}
+
+func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 	var loaded []skills.LoadedSkill
 	if o.skillAccess.Get != nil {
 		loaded = o.skillAccess.Get()

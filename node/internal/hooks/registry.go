@@ -1,20 +1,18 @@
 package hooks
 
 import (
-	"context"
-
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 )
 
-// Registry 按 priority 顺序执行 tool.before_each / tool.after_each Hook 链。
+// Registry 按 priority 顺序执行 tool.before_each / tool.after_each 与通用 RunPhase Hook 链。
 type Registry struct {
 	policyHook      *PolicyToolHook
 	agentOwnedHook  *AgentOwnedFileHook
 	agentOwnedAfter *AgentOwnedFileAfterHook
 	duplicateHook   *DuplicateToolCallHook
 	resultHook      *ToolResultPackageHook
-	beforeEach      []ToolBeforeEachHook
-	afterEach       []ToolAfterEachHook
+	phaseHooks      []registeredPhaseHook
+	journal         ExecutionJournal
 }
 
 // NewRegistry 构造带内置 Policy + AgentOwned + Duplicate + ToolResult Hook 的 Registry。
@@ -25,15 +23,17 @@ func NewRegistry(policyEngine *policy.Engine, runtimeCfg RuntimeConfig) *Registr
 	aah := NewAgentOwnedFileAfterHook(runtimeCfg.AgentOwnedFile)
 	dh := NewDuplicateToolCallHook(runtimeCfg.Duplicate)
 	rh := NewToolResultPackageHook(runtimeCfg.ToolResult)
-	return &Registry{
+	r := &Registry{
 		policyHook:      ph,
 		agentOwnedHook:  ah,
 		agentOwnedAfter: aah,
 		duplicateHook:   dh,
 		resultHook:      rh,
-		beforeEach:      []ToolBeforeEachHook{ph, ah, dh},
-		afterEach:       []ToolAfterEachHook{rh, aah},
 	}
+	registerBuiltinToolBeforeEachHooks(r, ph, ah, dh)
+	registerBuiltinToolAfterEachHooks(r, rh, aah)
+	RegisterExternalEntries(r, runtimeCfg.External, runtimeCfg.ExternalDeps)
+	return r
 }
 
 // SetPolicyEngine 热更新 policy（session policy API 写盘后调用）。
@@ -76,34 +76,4 @@ func (r *Registry) SetPathStater(stater PathStater) {
 	if r.agentOwnedAfter != nil {
 		r.agentOwnedAfter.SetPathStater(stater)
 	}
-}
-
-// RunToolBeforeEach 执行 tool.before_each 链并返回合并决策。
-func (r *Registry) RunToolBeforeEach(ctx context.Context, in ToolBeforeEachInput) ToolBeforeEachResult {
-	out := ToolBeforeEachResult{
-		Action:   policy.ActionRequireApproval,
-		ToolMode: policy.ModeRule,
-	}
-	if r == nil {
-		return out
-	}
-	for _, hook := range r.beforeEach {
-		_ = hook.RunToolBeforeEach(ctx, in, &out)
-	}
-	return out
-}
-
-// RunToolAfterEach 执行 tool.after_each 链，拆分 Client 与 history 正文。
-func (r *Registry) RunToolAfterEach(ctx context.Context, in ToolAfterEachInput) ToolAfterEachOutput {
-	out := ToolAfterEachOutput{
-		ForClient:  in.RawResult,
-		ForHistory: in.RawResult,
-	}
-	if r == nil {
-		return out
-	}
-	for _, hook := range r.afterEach {
-		_ = hook.RunToolAfterEach(ctx, in, &out)
-	}
-	return out
 }

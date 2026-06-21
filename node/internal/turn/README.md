@@ -49,7 +49,8 @@ sequenceDiagram
 **事后注入**（由 `session.newRuntimeWithPublisher` 完成）：
 
 - `SetToolResultEnqueuer`：工具步结束后入队 `tool_result`（生产必须）
-- `SetChildAgentTools(mgr, isChild)`：父 `false` 可创建临时 Agent；子 `true` 禁止
+- `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
+- `SetChildSession(true)`：子 session 禁止管理类工具与 `ask_user`
 
 `policy == nil` 时加载默认策略文件；`maxToolLoops <= 0` 时用默认 **16**。
 
@@ -64,7 +65,6 @@ sequenceDiagram
 | `ContinueAfterResume` | HITL resume 写入 tool 结果并调度续跑 |
 | `HandleAsyncToolResult` | 后台 job 完成，按尾部形态补 history 并可选续跑 |
 | `InterruptPending` | 新 user 消息打断 pending tool calls |
-| `RunMessageTurn` | 测试用：内联多步直到 pending 或结束 |
 
 每步返回 `StepOutcome`：`Pending`、`LoopCount`、`ScheduleToolResult`、`Err`。
 

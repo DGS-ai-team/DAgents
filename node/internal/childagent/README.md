@@ -227,7 +227,7 @@ Client 只订阅父 SSE；子 turn 的 `assistant` / `tool_result` 等由 Client
 
 父 turn 遇到 `IsTemporaryAgentTool` 时**不走**普通 `Registry.Execute`：
 
-- 子 runtime（`isChildSession=true`）调用同名校验 → `child_forbidden`
+- 子 runtime（`SetChildSession(true)`）调用同名校验 → `child_forbidden`
 - 父 runtime → `childMgr.HandleParentTool`
 
 子 Agent **不得**再创建临时 Agent，**不得**调用 `ask_user_information`。

@@ -145,3 +145,15 @@ hooks:
       - glob_files
       - agent_invoke
       - agent_discover
+  # 外部 Hook（journal / http / command）；command 与 http 须 enabled: true
+  # enabled: true
+  # entries:
+  #   - name: audit-jsonl
+  #     type: journal
+  #     phases: [tool.before_each, turn.done]
+  #   - name: llm-redact
+  #     type: command
+  #     command: ["/absolute/path/to/.runtime/hooks/redaction.sh"]
+  #     phases: [llm.after_call]
+  #     allowed_paths: ["/absolute/path/to/.runtime/hooks"]
+  #     on_error: continue

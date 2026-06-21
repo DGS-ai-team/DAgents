@@ -141,12 +141,17 @@ func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID strin
 		}
 		return hooks.ToolBeforeEachResult{Action: action, ToolMode: mode}
 	}
-	return o.toolHooks.RunToolBeforeEach(ctx, hooks.ToolBeforeEachInput{
+	hc := hooks.BuildToolBeforeEachContext(hooks.ToolBeforeEachInput{
 		SessionID:    sessionID,
 		ToolName:     tc.Function.Name,
 		ToolArgs:     parseJSONArgs(tc.Function.Arguments),
 		RawArguments: tc.Function.Arguments,
 	})
+	out, err := o.toolHooks.RunPhase(ctx, hooks.PhaseToolBeforeEach, hc)
+	if err != nil {
+		return hooks.DefaultToolBeforeEachResult()
+	}
+	return hooks.ToolBeforeEachDecisionFrom(out)
 }
 
 func (o *Orchestrator) recordToolExecutionSuccess(tc llm.ToolCall, content string, rejected bool) {

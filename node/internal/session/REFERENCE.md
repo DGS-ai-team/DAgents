@@ -20,7 +20,7 @@
 | `RunInboxConsultation` | A2A inbox：单 Task 跑完整 turn（订阅 SSE 聚合 assistant） |
 | `EnqueueAsyncToolResult` / `EnqueueToolResult` / `EnqueueBackgroundToolResult` | 工具续跑与后台回灌 |
 | `CancelTurn` | 取消当前 turn 上下文 |
-| `attachUserChildTools` | 父 runtime 上 `SetChildAgentTools(mgr, false)` |
+| `attachUserChildTools` | 父 runtime 上 `SetChildAgentManager(mgr)` |
 
 ## manager_child.go
 
@@ -61,7 +61,7 @@
 
 | 符号 | 说明 |
 |------|------|
-| `newChildRuntime` | 子 session：`RelayHub` + `RestrictedRegistry` + `SetChildAgentTools(true)` |
+| `newChildRuntime` | 子 session：`RelayHub` + `RestrictedRegistry` + `SetChildSession(true)` |
 | `childRuntimeMeta` | 父 ID、childMgr、completing 标志 |
 | `isChildSession` | 是否子 runtime |
 | `tryCompleteChildIfIdle` | 队列空且无 pending 时通知 `OnChildSettled` |

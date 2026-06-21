@@ -45,7 +45,7 @@ func newChildRuntime(
 		parentSessionID: parentID,
 		childMgr:        childMgr,
 	}
-	rt.orch.SetChildAgentTools(childMgr, true)
+	rt.orch.SetChildSession(true)
 	rt.orch.SetSystemPromptBuilder(turn.ChildSystemPromptBuilder(purpose))
 	return rt
 }

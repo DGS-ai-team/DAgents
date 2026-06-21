@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -77,14 +78,18 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, payload AsyncToo
 	fullForClient := resultBody
 	historyBody := resultBody
 	if o.toolHooks != nil {
-		out := o.toolHooks.RunToolAfterEach(nil, hooks.ToolAfterEachInput{
+		hc := hooks.BuildToolAfterEachContext(hooks.ToolAfterEachInput{
 			SessionID:  sessionID,
 			ToolCallID: toolCallID,
 			ToolName:   toolName,
 			RawResult:  resultBody,
 		})
-		fullForClient = out.ForClient
-		historyBody = out.ForHistory
+		out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhaseToolAfterEach, hc)
+		if err == nil {
+			split := hooks.ToolAfterEachOutputFrom(out)
+			fullForClient = split.ForClient
+			historyBody = split.ForHistory
+		}
 	}
 	toolText := fmt.Sprintf(
 		"工具%s执行已完成，job_id：%s，执行结果如下：%s",
@@ -143,7 +148,7 @@ func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw st
 	if o.toolHooks == nil {
 		return raw, raw, ""
 	}
-	out := o.toolHooks.RunToolAfterEach(nil, hooks.ToolAfterEachInput{
+	hc := hooks.BuildToolAfterEachContext(hooks.ToolAfterEachInput{
 		SessionID:    sessionID,
 		ToolCallID:   tc.ID,
 		ToolName:     tc.Function.Name,
@@ -151,5 +156,10 @@ func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw st
 		RawArguments: tc.Function.Arguments,
 		RawResult:    raw,
 	})
-	return out.ForClient, out.ForHistory, out.SpillPath
+	out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhaseToolAfterEach, hc)
+	if err != nil {
+		return raw, raw, ""
+	}
+	split := hooks.ToolAfterEachOutputFrom(out)
+	return split.ForClient, split.ForHistory, split.SpillPath
 }

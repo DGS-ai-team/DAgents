@@ -38,8 +38,9 @@ type TurnOptions struct {
 	CompressionBlocking      int
 	RawMessageHistoryEnabled bool
 	RawMessageHistoryDir     string
-	DuplicateToolCall hooks.DuplicateConfig
-	ToolResult        hooks.ToolResultConfig
+	DuplicateToolCall        hooks.DuplicateConfig
+	ToolResult               hooks.ToolResultConfig
+	ExternalHooks            hooks.ExternalHooksConfig
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。
@@ -567,7 +568,7 @@ func (m *Manager) attachUserChildTools(rt *runtime) {
 	if rt == nil || rt.isChildSession() || m.children == nil || !m.children.Enabled() {
 		return
 	}
-	rt.orch.SetChildAgentTools(m.children, false)
+	rt.orch.SetChildAgentManager(m.children)
 }
 
 func generateSessionID() (string, error) {

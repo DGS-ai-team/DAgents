@@ -47,6 +47,39 @@ func drainToolResultSteps(
 	}
 }
 
+// runMessageTurnInline 测试用：RunHumanMessageTurn + RunToolMessageTurn 内联跑完一条 user 消息 turn。
+func runMessageTurnInline(
+	t *testing.T,
+	orch *Orchestrator,
+	ctx context.Context,
+	sessionID string,
+	history *[]llm.Message,
+	userText string,
+	setState StateSetter,
+) (*PendingHITL, int, error) {
+	t.Helper()
+	if setState == nil {
+		setState = func(State) {}
+	}
+	outcome := orch.RunHumanMessageTurn(ctx, sessionID, history, userText, llm.UserNameHuman, setState)
+	if outcome.Err != nil {
+		return outcome.Pending, outcome.LoopCount, outcome.Err
+	}
+	if outcome.Pending != nil {
+		return outcome.Pending, outcome.LoopCount, nil
+	}
+	for outcome.ScheduleToolResult {
+		outcome = orch.RunToolMessageTurn(ctx, sessionID, history, setState, outcome.LoopCount)
+		if outcome.Err != nil {
+			return outcome.Pending, outcome.LoopCount, outcome.Err
+		}
+		if outcome.Pending != nil {
+			return outcome.Pending, outcome.LoopCount, nil
+		}
+	}
+	return nil, outcome.LoopCount, nil
+}
+
 func continueResumeAndDrain(
 	t *testing.T,
 	orch *Orchestrator,
@@ -76,7 +109,7 @@ func TestRunMessageTurn(t *testing.T) {
 	defer hub.Unsubscribe(ch)
 
 	var history []llm.Message
-	_, _, err := orch.RunMessageTurn(context.Background(), "sess-1", &history, "hi", nil, 0)
+	_, _, err := runMessageTurnInline(t, orch, context.Background(), "sess-1", &history, "hi", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +153,7 @@ func TestRunMessageTurnToolLoop(t *testing.T) {
 	defer hub.Unsubscribe(ch)
 
 	var history []llm.Message
-	pending, _, err := orch.RunMessageTurn(ctx, "sess-1", &history, "读文件", nil, 0)
+	pending, _, err := runMessageTurnInline(t, orch, ctx, "sess-1", &history, "读文件", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +194,7 @@ func TestRunMessageTurnUserInformationPayload(t *testing.T) {
 	var history []llm.Message
 	go func() {
 		defer close(done)
-		pending, _, _ := orch.RunMessageTurn(context.Background(), "sess-1", &history, "ask me", nil, 0)
+		pending, _, _ := runMessageTurnInline(t, orch, context.Background(), "sess-1", &history, "ask me", nil)
 		if pending == nil {
 			t.Error("expected pending hitl")
 		}
@@ -223,7 +256,7 @@ func TestRunMessageTurnApproval(t *testing.T) {
 	var history []llm.Message
 	go func() {
 		defer close(done)
-		_, _, _ = orch.RunMessageTurn(context.Background(), "sess-1", &history, "run echo", nil, 0)
+		_, _, _ = runMessageTurnInline(t, orch, context.Background(), "sess-1", &history, "run echo", nil)
 	}()
 
 	deadline := time.After(3 * time.Second)
@@ -270,7 +303,7 @@ func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 	go func() {
 		defer close(done)
 		var history []llm.Message
-		_, _, turnErr = orch.RunMessageTurn(context.Background(), "sess-1", &history, "loop", nil, 0)
+		_, _, turnErr = runMessageTurnInline(t, orch, context.Background(), "sess-1", &history, "loop", nil)
 	}()
 
 	deadline := time.After(3 * time.Second)
@@ -296,7 +329,7 @@ func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 	}
 	<-done
 	if turnErr == nil || !strings.Contains(turnErr.Error(), "tool loop limit exceeded") {
-		t.Fatalf("RunMessageTurn err = %v, want tool loop limit exceeded", turnErr)
+		t.Fatalf("runMessageTurnInline err = %v, want tool loop limit exceeded", turnErr)
 	}
 }
 
@@ -322,7 +355,7 @@ func TestRunMessageTurnMultiToolParallelOrder(t *testing.T) {
 	orch := NewOrchestrator("a1", root, hub, &dualReadFileMock{}, reg, pol, SkillAccess{}, DefaultMaxToolLoops(), nil, nil, hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.DefaultToolResultConfig(t.TempDir())}, logx.Discard())
 
 	var history []llm.Message
-	pending, _, err := orch.RunMessageTurn(ctx, "sess-1", &history, "读两个文件", nil, 0)
+	pending, _, err := runMessageTurnInline(t, orch, ctx, "sess-1", &history, "读两个文件", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,7 +547,7 @@ func TestRunMessageTurnCancelled(t *testing.T) {
 	go func() {
 		defer close(done)
 		var history []llm.Message
-		_, _, _ = orch.RunMessageTurn(ctx, "sess-1", &history, "hi", nil, 0)
+		_, _, _ = runMessageTurnInline(t, orch, ctx, "sess-1", &history, "hi", nil)
 	}()
 
 	time.Sleep(20 * time.Millisecond)
@@ -549,7 +582,7 @@ func TestRunMessageTurnCancelledPersistsPartialAssistant(t *testing.T) {
 	var history []llm.Message
 	go func() {
 		defer close(done)
-		_, _, _ = orch.RunMessageTurn(ctx, "sess-1", &history, "hi", nil, 0)
+		_, _, _ = runMessageTurnInline(t, orch, ctx, "sess-1", &history, "hi", nil)
 	}()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
@@ -602,7 +635,7 @@ func TestRunMessageTurnLLMError(t *testing.T) {
 	defer hub.Unsubscribe(ch)
 
 	var history []llm.Message
-	_, _, err := orch.RunMessageTurn(context.Background(), "sess-1", &history, "hi", nil, 0)
+	_, _, err := runMessageTurnInline(t, orch, context.Background(), "sess-1", &history, "hi", nil)
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err = %v", err)
 	}
