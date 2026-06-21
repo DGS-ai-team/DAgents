@@ -129,6 +129,33 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 		}
 		m.notifyViewportRefresh()
 		m.scheduleContextTokenRefresh()
+	case "side_effect_turn_start":
+		m.turn.BeginImplicitTurn()
+		m.statusLine = "处理旁路回调…"
+		m.notifyViewportRefresh()
+	case "user_message_deferred":
+		content := strings.TrimSpace(fmt.Sprint(ev.Data["content"]))
+		userName := strings.TrimSpace(fmt.Sprint(ev.Data["user_name"]))
+		line := content
+		if userName != "" {
+			line = fmt.Sprintf("[%s deferred] %s", userName, content)
+		} else if line != "" {
+			line = "[deferred] " + line
+		}
+		if line != "" {
+			m.transcript.Add("[system] " + line)
+			m.notifyViewportRefresh()
+		}
+	case "side_effect_applied":
+		if line := tuishared.FormatSideEffectSeqLine("已入库", ev.Data["seqs"]); line != "" {
+			m.transcript.Add("[system] " + line)
+			m.notifyViewportRefresh()
+		}
+	case "side_effects_cleared":
+		if line := tuishared.FormatSideEffectSeqLine("已失效", ev.Data["seqs"]); line != "" {
+			m.transcript.Add("[system] " + line)
+			m.notifyViewportRefresh()
+		}
 	case "error":
 		msg := strings.TrimSpace(fmt.Sprint(ev.Data["message"]))
 		if msg == "" {
@@ -172,6 +199,10 @@ func (m *model) onStreamEvent(ev nodeapi.StreamEvent) {
 			}
 		}
 		m.notifyStripRefresh()
+	case "hitl_required":
+		m.releaseTurnWaitForA2ARelay(ev.Data)
+		m.enqueueHITLRequired(ev.Data)
+		m.notifyHITLChanged()
 	case "approval_required":
 		m.releaseTurnWaitForA2ARelay(ev.Data)
 		m.enqueueApproval(ev.Data)

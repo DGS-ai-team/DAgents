@@ -2,272 +2,476 @@
 
 ## 本章回答什么问题
 
-读完本章，你应能：
+读完本章，你应能（**按推荐顺序**）：
 
-- 从 `main.go` 跟到 `api.NewServer` 的装配链  
-- 解释 Manager、runtime、MessageQueue、Orchestrator 的**拥有关系**与调用方向  
-- 跟读一条 user 消息从 `POST /v1/messages` 到 `done` SSE 的完整路径  
-- 区分父 session 与子 Agent runtime 的差异  
-- 打开 `runtime.go`、`orchestrator.go`、`tool_router.go` 时知道当前在哪个阶段  
+1. 跟读 **一次 LLM 调用**（`runOneStep`）里发生了什么  
+2. 理解 **多步 LLM loop** 如何把多次调用串成一条 user 消息的处理链  
+3. 说明 **多种消息来源** 如何经 **队列** 进入同一 session 的 consumer  
+4. 解释 **session 隔离**：多 session 并存时，哪些状态共享、哪些独占  
 
 ---
 
-## 1. 进程启动与装配
+## 阅读地图
 
-### 1.1 入口
-
-**文件**：`node/cmd/dagents-node/main.go`
+Agent Node 运行时由外向内四层；**本章正文按「单次 → 循环 → 队列 → session」展开**，与代码认知顺序一致：
 
 ```text
-ResolveConfigPath → config.LoadFile → logx.NewLogger
-  → api.NewServer(cfg, logger) → ListenAndServe(ctx)
+§4 Session 隔离     Manager → runtime × N（每 session 独占队列 + history + orch）
+       ↑
+§3 队列与消息来源   consumeLoop 出队 → 调用 §2 的入口
+       ↑
+§2 LLM Loop         RunHumanMessageTurn / RunToolMessageTurn → 多次 §1
+       ↑
+§1 单次 LLM 调用    runOneStep → StreamChat → 可选 processToolCalls
 ```
 
-信号：`SIGINT` / `SIGTERM` → `context` 取消 → 优雅关闭。
+进程装配（`main` → `api.NewServer`）见 **§4.5**；SSE Hub 见 **§4.6**；端到端时序见 **§5**。
 
-### 1.2 `api.NewServer` 装配顺序
+---
 
-**文件**：`node/internal/api/server.go`（`NewServer` 函数体）
+## 1. 单次 LLM 调用
 
-| 步骤 | 创建对象 | 用途 |
-|------|----------|------|
-| 1 | `stream.NewHub()` | 进程级 SSE 总线 |
-| 2 | `store.OpenSQLite(...)` | 会话持久化 |
-| 3 | `llm.NewClient(...)` | 模型调用 |
-| 4 | `tools.NewRegistry(...)` | 内置工具 + A2A |
-| 5 | `policy.NewEngine(...)` | `.runtime/policy/*.approval.txt` |
-| 6 | `session.NewManager(...)` | 会话表 + TurnOptions |
-| 7 | `triggers.NewScheduler(...)` | 定时/日历触发 |
-| 8 | `manage.NewRegistrar(...)` | Manage 注册/心跳 |
-| 9 | `manage.NewInboxPoller(...)` | A2A inbox long poll |
-| 10 | `session.NewA2ACallerHITLBridge(...)` | caller 侧 A2A 审批中继 |
+### 1.1 「一步」是什么
 
-`Manager` 构造时注入：Hub、LLM、Registry、Policy、`TurnOptions`（FS 根、压缩阈值、skills 等）。
+Node 里 **一步（one step）** = **一次** `llm.StreamChat` 请求 + 将其结果写入 `history` + **同步**处理本步产生的 `tool_calls`（执行、挂起 HITL，或调度下一步）。
 
-### 1.3 源码索引
+**唯一入口**：`turn.Orchestrator.runOneStep`（`node/internal/turn/orchestrator.go`）。
+
+上层 API（`RunHumanMessageTurn`、`RunToolMessageTurn`）最终都调用 `runOneStep`；差别在于**进这一步之前**是否往 `history` 追加 user 消息。
+
+| 调用方 | 方法 | 进入 `runOneStep` 前 |
+|--------|------|----------------------|
+| 新 user 消息 | `RunHumanMessageTurn` | `appendHistory(user)` |
+| 工具批已闭合 | `RunToolMessageTurn` | history 已含 `tool` 结果，不追加 user |
+| HITL resume 后 | `ContinueAfterResume` | 写入审批/用户输入对应的 `tool` 消息后再 `RunToolMessageTurn` |
+
+### 1.2 跟读 `runOneStep`（建议打开 `orchestrator.go` 对照）
+
+```text
+runOneStep(ctx, sessionID, history, setState, toolLoopCount)
+  │
+  ├─ RepairUnrespondedToolCalls          // 修复 orphan tool_calls
+  ├─ toolLoopCount++                     // 本 user 链上的步序号
+  ├─ 若 > maxToolLoops → error + done    // 默认 16，config 可改
+  │
+  ├─ buildSystemPrompt(sessionID)        → prompt.go
+  ├─ ToolDefinitions()                   → tools.Registry
+  ├─ setState(model_streaming)
+  │
+  ├─ llm.StreamChat(system + history + tools)
+  │     OnDelta            → SSE assistant
+  │     OnReasoningDelta   → SSE reasoning
+  │     OnToolCallDelta    → SSE tool_call（流式参数）
+  │     OnUsage            → SSE usage（累计）
+  │
+  ├─ 错误 / cancel → persistCancelledStream、done、return Err
+  │
+  ├─ appendHistory(assistant)            // 整段 assistant 落库
+  │
+  ├─ len(ToolCalls)==0 ?
+  │     └─ publishDone(stop)             → SSE done，return
+  │
+  └─ setState(awaiting_tool)
+        processToolCalls                 → tool_router.go
+          ├─ auto      → Execute，SSE tool_result
+          ├─ HITL       → PendingHITL.Items[]，SSE hitl_required
+          │               （ask_user + approval 同批；分步 resume）
+          └─ childagent → HandleParentTool
+        pending ? → done(awaiting_hitl)，return Pending（可部分 resume 后仍 pending）
+        否则 enqueueToolResult 或 ScheduleToolResult=true
+```
+
+**要点**：单次调用结束时，要么 **没有 tool_calls**（模型直接回答），要么 **tool_calls 已在本步内处理完**（auto 执行）或 **挂起**（HITL），或 **交给队列续跑**（`ScheduleToolResult`）。
+
+### 1.3 输入：system prompt 与 history
+
+**System prompt**（`turn/prompt.go` → `BuildSystemPrompt`）每步重建，顺序：
+
+1. 静态行为准则（**不含**各工具用法——用法在 tool schema）  
+2. 主机快照 + `agent_id` / `session_id`  
+3. 工作区子目录约定  
+4. `prompt_context`（soul / user / long_term）  
+5. 已加载 skills 正文  
+6. `custom.md`  
+
+**History**：`[]llm.Message`，由 **runtime** 持有；`runOneStep` 通过指针读写，步末由 runtime `applyStepOutcome` 写回。
+
+**Tools**：本步可见的 function 列表来自 `Registry.Definitions()`（skills 元数据通过 `load_skills` description 注入，见 [04 §4.3](./04-能力与策略.md)）。
+
+### 1.4 流式与 SSE
+
+流式阶段 `setState(StateModelStreaming)`。Hub 按 `session_id` 发布（见 §4.6）：
+
+| 阶段 | SSE 事件 |
+|------|----------|
+| 正文流 | `assistant`（`display_type: delta`） |
+| 推理流 | `reasoning` |
+| 工具参数流 | `tool_call`（partial） |
+| 用量 | `usage` |
+| 本步结束 | `done`（语义 B：轮到用户，见 [附录/SSE事件速查](./附录/SSE事件速查.md)） |
+
+Cancel：`context.Canceled` → `cancel_partial.go` 保留部分 assistant，补占位 `tool` 消息，再 `done(cancelled)`。
+
+### 1.5 本步内的工具处理（预告）
+
+`processToolCalls`（`tool_router.go`）在 **同一步** 内同步跑完 **auto** 工具批；需要人介入则返回 `PendingHITL`，**不会**在同一步内再次调用 LLM。
+
+**下一步 LLM 调用** 属于 §2 的 loop——由队列触发 `RunToolMessageTurn`，history 已闭合 `assistant(tool_calls) → tool(s)`。
+
+### 1.6 源码索引（§1）
 
 | 概念 | 文件 |
 |------|------|
-| HTTP 路由表 | `server.go` → `registerRoutes` |
-| 入队 API | `messages.go`、`resume.go` |
-| SSE 订阅 | `stream.go`（api 层）→ `stream.Hub` |
+| 单步主函数 | `turn/orchestrator.go` → `runOneStep` |
+| System prompt | `turn/prompt.go` |
+| 工具分流 | `turn/tool_router.go` → `processToolCalls` |
+| 流式 cancel | `turn/cancel_partial.go` |
+| LLM 客户端 | `llm/client.go`、`llm/adapter*.go` |
+| 步结果类型 | `turn/step.go` → `StepOutcome` |
 
 ---
 
-## 2. 组件层级（谁拥有谁）
+## 2. 将单次 LLM 调用组合成 LLM Loop
+
+### 2.1 为什么需要 loop
+
+用户发一句「查日志并重启服务」，模型往往 **多次** 调用工具，每次工具结果又要 **再问一次模型**。  
+因此：**一条 user 消息** 对应 **多步** `runOneStep`，直到：
+
+- 某步 **无 tool_calls**（自然结束），或  
+- **HITL 暂停**（审批 / `ask_user_information`），或  
+- **出错 / cancel / 超循环上限**。
+
+### 2.2 `StepOutcome`：一步的四种去向
+
+**文件**：`turn/step.go`
+
+```go
+type StepOutcome struct {
+    Pending            *PendingHITL   // 非 nil → 链暂停，等 resume
+    LoopCount          int            // 当前 user 链上已跑步数
+    ScheduleToolResult bool           // true → runtime 入队 tool_result，稍后 RunToolMessageTurn
+    Err                error
+}
+```
+
+| Outcome | 含义 | 下一步 |
+|---------|------|--------|
+| 无 Pending，无 Schedule，无 Err | 本步模型已给出最终回答 | `done(turn_complete=true)`，链结束 |
+| `Pending != nil` | HITL | Client `resume` → §3 → `ContinueAfterResume` |
+| `ScheduleToolResult` | auto 工具已执行，history 已闭合 | 入队 `tool_result` → `RunToolMessageTurn` → 又一次 §1 |
+| `Err != nil` | LLM/工具/cancel/超限 | `done` + 持久化，链结束 |
+
+### 2.3 生产路径：单步执行 + 队列续跑
+
+**生产环境**（`runtime` + `consumeLoop`）每次只跑 **一步** Orchestrator API，续跑靠 **MessageQueue**（§3）：
+
+```text
+handleHumanMessage
+  → runTurnStep → RunHumanMessageTurn → runOneStep        // 第 1 次 LLM
+  → ScheduleToolResult ?
+        → enqueue(tool_result)
+consumeLoop 再次出队
+  → handleToolResult
+  → runTurnStep → RunToolMessageTurn → runOneStep         // 第 2 次 LLM
+  → … 直到无 ScheduleToolResult
+```
+
+`runTurnStep`（`session/runtime_turn.go`）是 runtime 侧脚手架：
+
+- 可选步前 **压缩**（`compression.MaybeHandle`，仅父 session）  
+- 设置 `turnCancel`、更新 `state`  
+- 调用传入的 `run` 闭包（内部是 `RunHumanMessageTurn` 等）  
+- 步末 `state → idle`  
+
+### 2.4 测试路径：内联多步
+
+单测在 `orchestrator_test.go` 用 **`runMessageTurnInline`**（`RunHumanMessageTurn` + `RunToolMessageTurn` 循环）在 **同一 goroutine** 内跑完工具链，等价于生产「单步 + 队列入队 `tool_result`」的语义，但无需 session 队列。
+
+读源码时：生产 turn 走 **queue + handleToolResult**；内联 helper 仅存在于 `_test.go`。
+
+### 2.5 HITL 打断与 resume
+
+| 场景 | 行为 |
+|------|------|
+| 新 user 消息到达且存在 `pending` | `InterruptPending`：orphan tool_calls 补中断说明，再开新链 |
+| 审批 / 用户输入 | `handleResume` → `ContinueAfterResume`：写 `tool` 结果，`ScheduleToolResult` 或继续 loop |
+| `done` 与 HITL | HITL 暂停时 `turn_complete=false`；resume 后续跑 **不再** 立即发 `done`（见 SSE 速查） |
+
+**文件**：`turn/pending.go`、`session/runtime.go` → `handleResume`；Client 载荷见 [03 §2.3](./03-API与Client.md)。
+
+### 2.6 Loop 上限与计数
+
+- `toolLoopCount`：当前 **一条 user 消息** 触发的链上，`runOneStep` 执行次数。  
+- 新 `handleHumanMessage` 时 **归零**。  
+- 超过 `maxToolLoops`（默认 16，`config llm.max_tool_loops`）→ error SSE + 链结束。
+
+### 2.7 源码索引（§2）
+
+| 概念 | 文件 |
+|------|------|
+| Human / Tool 步入口 | `orchestrator.go` → `RunHumanMessageTurn`、`RunToolMessageTurn` |
+| 单测内联多步 | `orchestrator_test.go` → `runMessageTurnInline` |
+| Resume | `orchestrator.go` → `ContinueAfterResume` |
+| runtime 脚手架 | `session/runtime_turn.go` → `runTurnStep` |
+| 应用 outcome | `session/runtime.go` → `applyStepOutcome`、`afterToolStep` |
+| HITL 状态 | `turn/pending.go` |
+
+---
+
+## 3. 多消息来源与队列设计
+
+### 3.1 为什么需要队列
+
+同一 session 上，turn 的触发来源 **不只** Client 的 user 消息：
+
+| 来源 | 说明 |
+|------|------|
+| **Client** | `POST /v1/messages`（`request_type: message`） |
+| **HITL resume** | `POST /v1/messages`（`request_type: resume`） |
+| **工具续跑** | Orchestrator 在本步 auto 工具完成后 `enqueue(tool_result)` |
+| **异步工具** | 后台 job 完成 → `async_tool_result` |
+| **Trigger** | 调度器 fire → `trigger_message`（`TriggerID` + `UserName=trigger`） |
+| **A2A inbox** | `a2a_inbox_message` 入队（见 [05](./05-Manage与A2A.md)） |
+
+若全部同步调用 Orchestrator，会难以保证 **tool_result 优先闭合序列**、**resume 与 human 的竞态**、**单 session 串行消费**。  
+因此：**每 session 一个 `MessageQueue` + 单 goroutine `consumeLoop`**，统一出队后再进入 §2。
+
+### 3.2 队列模型
+
+**路径**：`node/internal/queue/`
+
+```text
+Enqueue(Envelope, Priority)  ──►  优先级排序  ──►  Dequeue(ctx)  ──►  consumeLoop
+```
+
+- **无内嵌 consumer**（与旧 Python 约定一致）：队列只负责存与取；**谁消费** 是 runtime 的 `consumeLoop`。  
+- **FIFO 同优先级**；`seq` 单调递增。  
+- `Dequeue` 阻塞直到有项或 ctx 取消。
+
+### 3.3 `Envelope` 与 `RequestType`
+
+**文件**：`queue/envelope.go`
+
+| `RequestType` | 常量 | 典型来源 | consume 处理 |
+|---------------|------|----------|--------------|
+| `message` | `RequestTypeMessage` | Client user | `handleHumanMessage` |
+| `resume` | `RequestTypeResume` | Client HITL 提交 | `handleResume` |
+| `tool_result` | `RequestTypeToolResult` | Orchestrator 回调 | `handleToolResult` |
+| `async_tool_result` | `RequestTypeAsyncToolResult` | 后台 job | `handleSideEffectProduceAsync`（Produce） |
+| `trigger_message` | `RequestTypeTriggerMessage` | trigger fire | `handleSideEffectProduceExternal` |
+| `a2a_inbox_message` | `RequestTypeA2AInboxMessage` | Manage inbox | `handleSideEffectProduceExternal` |
+| `side_effect_continue` | `RequestTypeSideEffectContinue` | Apply 后被动续跑 | `handleSideEffectContinue` |
+
+`Envelope` 还携带：`Content`、`UserName`（A2A/trigger 可非 human）、`ResumeValue`、`TriggerID`、`AsyncToolResult` 等。
+
+### 3.4 优先级
+
+出队顺序（数值越小越优先；同档 FIFO 按 `seq`）：
+
+```text
+tool_result > human > resume > async_completion > other
+```
+
+| 档位 | 整数值 | 典型 `request_type` |
+|------|--------|---------------------|
+| `tool_result` | -1 | `tool_result` / `side_effect_continue` |
+| `human` | 0 | `message`（CLI/API user） |
+| `resume` | 1 | `resume` |
+| `async_completion` | 2 | `async_tool_result` |
+| `other` | 10 | `trigger_message` / `a2a_inbox_message` |
+
+**设计意图**（与 `node/internal/queue/queue.go` → `priorityValue` 一致）：
+
+1. **`tool_result` 最高**：同步工具批闭合后尽快续跑，避免 `assistant(tool_calls)` 长期缺 `tool`。
+2. **`human` 高于 `resume`**：排队中的新 user message 可先出队；`handleHumanMessage` 会 `InterruptPending`，未消费的 stale `resume` 在 `pending==nil` 时被忽略（对齐旧 Python 语义）。
+3. **`resume` 高于 `async_completion` / `other`**：HITL 提交优先于后台 job 回灌与 trigger。
+4. **`async_completion` 低于 human/resume**：Go 有意与旧 Python「async 升格为 `tool_result`」区分，审批等待期优先处理用户交互；与 open batch 交错时的风险见 [Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32) 与 [`turn-side-effects-refactor.md`](../design/turn-side-effects-refactor.md)。
+5. **`other` 最低**：trigger 不抢 human / resume / tool 闭环。
+
+### 3.5 `consumeLoop` 分流
+
+**文件**：`session/runtime.go`
+
+```text
+consumeLoop(ctx)
+  env := queue.Dequeue(ctx)
+  switch env.RequestType:
+    resume              → handleResume
+    async_tool_result   → handleSideEffectProduceAsync
+    trigger_message / a2a_inbox_message → handleSideEffectProduceExternal
+    side_effect_continue → handleSideEffectContinue
+    tool_result         → handleToolResult
+    message / ""        → handleHumanMessage
+```
+
+旁路条目 **Produce 时**不改 history；**Apply** 在 `runTurnStep` 步首或 `side_effect_continue` 前写入。Trigger `ClearPendingDelivery` 在 **Apply 成功**时，非 dequeue。详见 [turn-side-effects-refactor.md](../design/turn-side-effects-refactor.md)。
+
+**串行保证**：同一 session 上任意时刻只有一个 handler 在跑；不会出现两个 `runOneStep` 并发写同一 `history`。
+
+### 3.6 队列与 Orchestrator 的分工
+
+| 层 | 职责 | 不负责 |
+|----|------|--------|
+| **MessageQueue** | **何时**跑下一步；合并多来源；优先级 | 调 LLM、执行工具 |
+| **Orchestrator** | **这一步**跑什么（§1 单次调用） | 消费队列、session CRUD |
+| **runtime** | 拥有 queue + orch + history；`consumeLoop` 桥接二者 | 进程级 session 表（Manager） |
+
+Orchestrator 通过 `SetToolResultEnqueuer(rt.enqueueToolResult)` **回调入队**，不在 orchestrator 内直接 `handleToolResult`。
+
+### 3.7 从 HTTP 到队列（Client 路径）
+
+```text
+POST /v1/messages
+  → api/messages.go
+  → Manager.EnqueueMessage(sessionID, content, …)
+  → runtime.enqueue(Envelope{RequestType: message}, PriorityHuman)
+  → consumeLoop → handleHumanMessage → §2
+```
+
+`POST resume` 同理，优先级 `PriorityResume`。
+
+### 3.8 源码索引（§3）
+
+| 概念 | 文件 |
+|------|------|
+| 队列实现 | `queue/queue.go` |
+| 入队类型 | `queue/envelope.go` |
+| Consumer | `session/runtime.go` → `consumeLoop`、各 `handle*` |
+| 入队 API | `session/manager.go` → `EnqueueMessage`、`EnqueueResume` |
+| HTTP 入口 | `api/messages.go`、`api/resume.go` |
+| Trigger 入队 | `session/triggers.go` → `EnqueueTriggerMessage` |
+| A2A inbox 入队 | `session/a2a_inbox.go` |
+
+---
+
+## 4. 会话隔离（Session）
+
+### 4.1 Session 是什么
+
+**Session** = 一条独立对话上下文 + 其 **runtime**（队列 consumer + 内存状态 + Orchestrator 实例 + 可选 SQLite 行）。
+
+**Manager**（`session/manager.go`）维护 `sessions map[string]*runtime`；对外 CRUD、入队、skills、子 Agent spawn。
 
 ```mermaid
 flowchart TB
-    subgraph Process["Go Agent Node 进程"]
-        API["internal/api"]
-        MGR["session.Manager<br/>sessions map"]
-        HUB["stream.Hub"]
-
-        subgraph RT["runtime（每 session 一个）"]
-            Q["queue.MessageQueue"]
-            LOOP["consumeLoop goroutine"]
-            ORCH["turn.Orchestrator"]
-            STATE["messages · pending · toolLoopCount"]
-            STORE["store（父有，子 nil）"]
-        end
+    subgraph Manager["session.Manager（进程级）"]
+        MAP["sessions[id → runtime"]
+        OPT["TurnOptions（共享配置）"]
+        HUB["stream.Hub（SSE 总线）"]
+        LLM["llm.Client（共享）"]
+        REG["tools.Registry（共享）"]
     end
 
-    API --> MGR
-    MGR --> RT
-    LOOP --> ORCH
-    ORCH --> HUB
-    ORCH --> LLM["llm.Client"]
-    ORCH --> TOOLS["tools.Executor"]
+    subgraph RTA["runtime · session A"]
+        QA["MessageQueue"]
+        LA["consumeLoop"]
+        MA["messages · pending"]
+        OA["Orchestrator"]
+        SA["SQLite 行"]
+    end
+
+    subgraph RTB["runtime · session B"]
+        QB["MessageQueue"]
+        LB["consumeLoop"]
+        MB["messages · pending"]
+        OB["Orchestrator"]
+        SB["SQLite 行"]
+    end
+
+    MAP --> RTA
+    MAP --> RTB
+    RTA --> HUB
+    RTB --> HUB
+    OA --> LLM
+    OB --> LLM
 ```
 
-**关键**：`runtime` **拥有** `Orchestrator`（字段 `orch`），不是反过来。Orchestrator **不**消费队列；`consumeLoop` 出队后调用 `RunHumanMessageTurn` 等。
+### 4.2 每 session 独占 vs 进程共享
 
----
+| 独占（每 runtime） | 共享（Manager 注入） |
+|--------------------|----------------------|
+| `MessageQueue` | `llm.Client` |
+| `consumeLoop` goroutine | `tools.Registry` / `policy.Engine` |
+| `messages`、`pending`、`toolLoopCount` | `stream.Hub`（事件带 `session_id`） |
+| `turn.Orchestrator` 实例 | `TurnOptions`（FS 根、压缩阈值等） |
+| 父 session：`SQLiteStore` 持久化 | `agent_id`（单进程单 id） |
 
-## 3. session.Manager
+**隔离效果**：session A 的队列与 history **不会**被 session B 的入队直接修改；SSE 订阅方可按 `session_id` 过滤（Client 实现见 [03](./03-API与Client.md)）。
 
-**路径**：`node/internal/session/manager.go`
+### 4.3 runtime 构造与生命周期
 
-| 职责 | 方法 / 说明 |
-|------|-------------|
-| 会话 CRUD | `Create`、`Get`、`List`、`Delete` |
-| 入队 | `EnqueueMessage`、`EnqueueResume` |
-| skills | `LoadSkill`、`ListLoadedSkills` |
-| 子 Agent | `SpawnChild`、`StopChild`（`manager_child.go`） |
-| 上下文 API | `ContextView`（`context_view.go`） |
-
-`TurnOptions`（Manager 持有，传入每个 runtime）：
-
-| 字段 | 作用 |
-|------|------|
-| `FSRoot` | 工具沙箱根；prompt 不暴露绝对路径 |
-| `MaxToolLoops` | 单条 user 消息内工具步上限（默认 16） |
-| `SkillsRoot` / `SkillsEnabled` | skills 目录与 prompt 注入 |
-| `CompressionSilent` / `CompressionBlocking` | 压缩 token 阈值 |
-| `RuntimeDir` | `prompt_context/` 根 |
-
----
-
-## 4. runtime 与 consumeLoop
-
-**路径**：`node/internal/session/runtime.go`
-
-### 4.1 构造
-
-- **父**：`Manager.Create` → `newRuntime` → `newRuntimeWithPublisher`
-- **子**：`SpawnChild` → `newChildRuntime`（`runtime_child.go`）
-
-`newRuntimeWithPublisher` 内：
-
-1. `skills.Catalog`、`compression.Coordinator`
-2. `rt.orch = turn.NewOrchestrator(...)`
-3. `rt.orch.SetToolResultEnqueuer(rt.enqueueToolResult)` — **生产路径必须**
-4. 启动 `go rt.consumeLoop()`
-
-### 4.2 内存状态（runtime 权威）
-
-| 字段 | 说明 |
-|------|------|
-| `messages` | OpenAI 格式 history |
-| `pending` | `PendingHITL`（approval / user_information） |
-| `toolLoopCount` | 当前 user 链上已跑工具步数 |
-| `state` | `idle` / `model_streaming` / `awaiting_tool` |
-| `loadedSkills` | 已通过 `load_skills` 加载的正文 |
-
-Orchestrator 经 `SkillAccess{Get, Set}` 读写 `loadedSkills`。
-
-### 4.3 出队分流
-
-**文件**：`runtime.go` → `consumeLoop`
-
-| `Envelope.RequestType` | 处理函数 | 说明 |
-|------------------------|----------|------|
-| `message` | `handleHumanMessage` | 新 user；有 pending 则先 `InterruptPending` |
-| `tool_result` | `handleToolResult` | 工具批后续跑 `RunToolMessageTurn` |
-| `resume` | `handleResume` | HITL 恢复 → `ContinueAfterResume` |
-| `async_tool_result` | `handleAsyncToolResult` | 后台 job 完成回灌 |
-
-### 4.4 步前压缩与持久化
-
-- **父 session**：`handleHumanMessage` / `handleToolResult` **步前** `compression.MaybeHandle`（见 [04 §4.6](./04-能力与策略.md)）
-- **步末**：`persist()` 写 SQLite（子 session `store=nil` → no-op）
-
----
-
-## 5. MessageQueue
-
-**路径**：`node/internal/queue/queue.go`、`envelope.go`
-
-每个 runtime **独占**一个队列；**无内嵌 consumer**（与旧 Python 约定一致）。
-
-### 5.1 优先级
+**父 session**：`Manager.Create` → `newRuntime` → `newRuntimeWithPublisher`
 
 ```text
-tool_result > resume > human > async_completion > other
+newRuntimeWithPublisher
+  ├─ queue.NewMessageQueue()
+  ├─ compression.Coordinator（父 session）
+  ├─ orch = turn.NewOrchestrator(..., hub, llm, tools, policy, ...)
+  ├─ orch.SetToolResultEnqueuer(enqueueToolResult)
+  ├─ orch.SetChildAgentManager(childMgr)          // 父 session
+  ├─ orch.SetChildSession(true)                   // 子 session
+  └─ go consumeLoop(ctx)
 ```
 
-意图：尽快闭合 `assistant(tool_calls) → tool` 序列。
+**删除**：`Manager.Delete` → 取消 ctx、关闭 queue、从 map 移除。
 
-### 5.2 与 turn 的分工
+**恢复**：启动时 `store` 加载 messages / loadedSkills → 新建 runtime。
 
-| 层 | 负责 |
-|----|------|
-| **Queue** | 何时跑下一步 |
-| **Orchestrator** | 这一步跑什么（一步 LLM + 工具批） |
+### 4.4 父 session 与临时子 Agent
 
-生产路径：**单步执行 + 队列续跑**——一次 `handleHumanMessage` 通常只调一次 `RunHumanMessageTurn`；若 `ScheduleToolResult=true`，入队 `tool_result`，consumer 稍后调 `RunToolMessageTurn`。
+子 Agent 是 **同一 Manager 下的另一条 runtime**，不是新进程、新端口：
 
----
-
-## 6. turn.Orchestrator
-
-**路径**：`node/internal/turn/orchestrator.go`、`tool_router.go`
-
-### 6.1 公开 API（runtime 调用）
-
-| 方法 | 场景 |
-|------|------|
-| `RunHumanMessageTurn` | 追加 user 后**单步** |
-| `RunToolMessageTurn` | history 已含 tool 结果后**单步** |
-| `ContinueAfterResume` | HITL resume 写入 tool 结果并调度续跑 |
-| `InterruptPending` | 新 user 打断 pending tool calls |
-| `RunMessageTurn` | **仅测试**：内联多步 |
-
-返回 `StepOutcome`：`Pending`、`ScheduleToolResult`、`LoopCount`、`Err`。
-
-### 6.2 单步主路径（`runOneStep`）
-
-跟读顺序：
-
-```text
-buildSystemPrompt(sessionID)          → prompt.go
-StreamChat(system + history)          → llm.Client
-  → SSE: assistant_delta / reasoning / usage
-processToolCalls                      → tool_router.go
-  ├─ policy auto → executeAutoBatch → tools.Execute
-  ├─ approval → PendingHITL → SSE approval_required
-  ├─ user_information → SSE user_information_required
-  └─ childagent 工具 → childagent.Manager.HandleParentTool
-无 tool_calls → SSE done
-```
-
-### 6.3 System prompt 拼接
-
-**文件**：`node/internal/turn/prompt.go` → `BuildSystemPrompt`
-
-顺序：
-
-1. `staticSystemPrompt`（行为准则；**不含**各工具用法——在 tool schema）
-2. `hostsnapshot` + agent_id / session_id
-3. 工作区子目录约定（`data/`、`memory/` 等）
-4. `prompt_context` 稳定段（soul / user / long_term）
-5. 已加载 skills 正文
-6. `custom.md`
-
-skills **目录**不再整段进 system prompt；启用时通过 **`load_skills` 工具 description** 暴露元数据（`Registry.SetSkillsCatalog`）。
-
-### 6.4 HITL 暂停
-
-**文件**：`pending.go`、`approval_payload.go`
-
-`PendingHITL` 挂在 runtime；SSE 推送 `approval_required` 或 `user_information_required`；Client `POST /v1/messages`（`request_type: resume`）→ `handleResume` → `ContinueAfterResume`。
-
----
-
-## 7. stream.Hub（SSE）
-
-**路径**：`node/internal/stream/hub.go`
-
-| 概念 | 说明 |
-|------|------|
-| Manager 级单例 | 所有 session 事件经 Hub 发布 |
-| `CurrentSeq()` | 单调序号 |
-| `Subscribe(afterSeq)` | 只收 `afterSeq` **之后**的事件（断点续传） |
-| 子 Agent | `childagent.RelayHub` 转发到父 `session_id` |
-
-**A2A inbox 注意**（v0.3.9 修复）：`RunInboxTurn` 须在入队**前**取 `afterSeq := hub.CurrentSeq()` 再订阅，避免 resume 时误收历史 `approval_required`。
-
-**文件**：`node/internal/session/a2a_inbox.go`
-
----
-
-## 8. 父 session vs 子 Agent runtime
-
-| 项 | 父 | 子（临时 Agent） |
-|----|-----|------------------|
+| 项 | 父 session | 子 session（临时 Agent） |
+|----|------------|--------------------------|
 | 创建 | `Manager.Create` | `SpawnChild` |
-| SSE | `*stream.Hub` | `*RelayHub` → 父 session |
+| SSE | `*stream.Hub` | `*childagent.RelayHub` → 父 `session_id` |
 | 工具 | 完整 `Registry` | `RestrictedRegistry` 白名单 |
-| SQLite | 有 | `nil` |
+| SQLite | 有 | `nil`（不持久化） |
 | 压缩 | 有 | **跳过** |
-| `create_temporary_agent` | 父可用 | 子**禁止** |
-| 终态 | 用户持久化 | `tryCompleteChildIfIdle` → `OnChildSettled` |
+| 队列 / consumeLoop | 有 | 有（**独立** queue 与 history） |
 
-跟读：`manager_child.go` → `runtime_child.go` → `childagent/`
+子 session 仍有 **完整 §1–§3 语义**，但事件 **relay** 到父 session 供 Client 展示；终态 `tryCompleteChildIfIdle` → `OnChildSettled`。
+
+**跟读**：`manager_child.go`、`runtime_child.go`、`childagent/`。
+
+### 4.5 进程启动与装配
+
+**入口**：`node/cmd/dagents-node/main.go` → `api.NewServer`
+
+| 步骤 | 对象 | 与 session 关系 |
+|------|------|-----------------|
+| `stream.NewHub()` | SSE 总线 | 所有 session 共用，按 id 区分 |
+| `store.OpenSQLite` | 持久化 | 按 `session_id` 存 messages |
+| `session.NewManager(...)` | 会话表 | 创建 §4 中 runtime |
+| `manage.NewInboxPoller` | A2A | 向 **inbox 专用 session** 入队 |
+
+完整装配表见旧版 §1.2；路由：`api/server.go` → `registerRoutes`。
+
+### 4.6 SSE Hub 与 session_id
+
+**文件**：`stream/hub.go`
+
+- Manager 级 **单例** Hub；Orchestrator 经 `stream.Publisher` 发布。  
+- 每条事件带 **`session_id`**，Client 只展示当前 session。  
+- `Subscribe(afterSeq)`：断点续传；A2A `RunInboxTurn` 须在入队前取 `CurrentSeq()`（v0.3.9 修复，见 `a2a_inbox.go`）。
+
+### 4.7 源码索引（§4）
+
+| 概念 | 文件 |
+|------|------|
+| Manager | `session/manager.go` |
+| runtime | `session/runtime.go` |
+| 持久化 | `store/` |
+| 子 Agent | `session/manager_child.go`、`runtime_child.go` |
+| Hub | `stream/hub.go` |
+| 进程入口 | `cmd/dagents-node/main.go`、`api/server.go` |
+
+模块 REFERENCE：`session/REFERENCE.md`、`turn/REFERENCE.md`
 
 ---
 
-## 9. 端到端时序：一条 user 消息
+## 5. 端到端时序（串起 §1–§4）
 
 ```mermaid
 sequenceDiagram
@@ -278,7 +482,6 @@ sequenceDiagram
     participant Q as MessageQueue
     participant L as consumeLoop
     participant O as Orchestrator
-    participant H as stream.Hub
 
     C->>API: POST /v1/messages
     API->>M: EnqueueMessage
@@ -286,68 +489,42 @@ sequenceDiagram
     RT->>Q: Enqueue
     L->>Q: Dequeue
     L->>RT: handleHumanMessage
-    Note over RT: 步前 compression.MaybeHandle
-    RT->>O: RunHumanMessageTurn
-    O->>H: assistant_delta / usage
-    alt 有 tool_calls 且 auto
-        O->>O: Execute tools
-        O->>H: tool_call / tool_result
-        O-->>RT: ScheduleToolResult=true
+    RT->>O: RunHumanMessageTurn → runOneStep
+    Note over O: §1 单次 LLM
+    alt auto 工具
+        O-->>RT: ScheduleToolResult
         RT->>Q: Enqueue(tool_result)
         L->>RT: handleToolResult
-        RT->>O: RunToolMessageTurn
-    else 需审批
-        O->>H: approval_required
-        O-->>RT: PendingHITL
+        RT->>O: RunToolMessageTurn → runOneStep
+        Note over O: §2 第 N 次 LLM
+    else HITL
+        O-->>RT: Pending
         C->>API: POST resume
-        API->>RT: handleResume
         RT->>O: ContinueAfterResume
     else 无 tool_calls
-        O->>H: done
+        O-->>RT: 链结束
     end
     RT->>RT: persist()
 ```
 
-### 9.1 建议跟读清单（按顺序）
+### 5.1 建议跟读顺序
 
-1. `node/cmd/dagents-node/main.go`  
-2. `node/internal/api/messages.go` — 入队入口  
-3. `node/internal/session/manager.go` — `EnqueueMessage`  
-4. `node/internal/session/runtime.go` — `consumeLoop`、`handleHumanMessage`  
-5. `node/internal/session/runtime_turn.go` — `runTurnStep`  
-6. `node/internal/turn/orchestrator.go` — `RunHumanMessageTurn`、`runOneStep`  
-7. `node/internal/turn/tool_router.go` — `processToolCalls`  
-8. `node/internal/tools/registry.go` — 具体工具 Execute  
+1. `turn/orchestrator.go` → `runOneStep`（**§1**）  
+2. `turn/orchestrator.go` → `RunHumanMessageTurn`、`RunToolMessageTurn`（**§2**）  
+3. `session/runtime.go` → `consumeLoop`、`handleHumanMessage`、`handleToolResult`（**§3**）  
+4. `queue/queue.go`、`queue/envelope.go`（**§3**）  
+5. `session/manager.go`、`runtime.go` → `newRuntimeWithPublisher`（**§4**）  
+6. `turn/tool_router.go` → `processToolCalls`（§1 工具分支）  
+7. `api/messages.go`（HTTP → 队列）
 
-### 9.2 相关测试
+### 5.2 相关测试
 
 ```bash
-go test ./node/internal/session/... ./node/internal/turn/... -count=1
+go test ./node/internal/session/... ./node/internal/turn/... ./node/internal/queue/... -count=1
 ```
 
-重点：`orchestrator_test.go`、`runtime_*_test.go`、HITL / cancel 相关用例。
-
 ---
 
-## 10. 源码与配置索引
+## 6. 下一章
 
-| 概念 | 路径 |
-|------|------|
-| Manager | `session/manager.go` |
-| runtime / consumeLoop | `session/runtime.go` |
-| 单步脚手架 | `session/runtime_turn.go` |
-| 子 Agent | `session/runtime_child.go`、`manager_child.go` |
-| Orchestrator | `turn/orchestrator.go` |
-| 工具分流 | `turn/tool_router.go` |
-| 队列 | `queue/queue.go` |
-| SQLite | `store/` |
-| 压缩 | `compression/coordinator.go` |
-| A2A inbox turn | `session/a2a_inbox.go` |
-
-模块 REFERENCE：`node/internal/session/REFERENCE.md`、`node/internal/turn/REFERENCE.md`
-
----
-
-## 11. 下一章
-
-→ [03-API与Client](./03-API与Client.md)：HTTP/SSE 契约、HITL resume 载荷、多 Client 与转录展示。
+→ [03-API与Client](./03-API与Client.md)：HTTP/SSE 契约、HITL resume 载荷、双 Client 与转录展示。

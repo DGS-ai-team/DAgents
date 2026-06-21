@@ -45,7 +45,7 @@ func TestTurnContextMetrics_statusPollAndDoneSSE(t *testing.T) {
 	if m == nil || m.StatusPollCount != 1 || m.ToolCalls != 1 {
 		t.Fatalf("metrics after executeTool = %+v", m)
 	}
-	orch.publishTurnIdleDone("sess-m", "stop")
+	orch.publishDone("sess-m", "stop")
 	var donePayload map[string]any
 	for i := 0; i < 5; i++ {
 		ev := <-ch

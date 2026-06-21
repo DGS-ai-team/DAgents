@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
@@ -27,12 +28,15 @@ func TestEnqueueTriggerMessageCarriesTriggerID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if env.RequestType != queue.RequestTypeTriggerMessage {
+		t.Fatalf("request_type = %q, want %q", env.RequestType, queue.RequestTypeTriggerMessage)
+	}
 	if env.TriggerID != "trig-abc" || env.Content != "hello trigger" {
 		t.Fatalf("env = %+v", env)
 	}
 }
 
-func TestConsumeLoopClearsTriggerPending(t *testing.T) {
+func TestConsumeLoopClearsTriggerPendingAfterApply(t *testing.T) {
 	store, err := triggers.OpenStore(t.TempDir()+"/t.json", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -49,16 +53,24 @@ func TestConsumeLoopClearsTriggerPending(t *testing.T) {
 	if rt == nil {
 		t.Fatal("runtime missing")
 	}
+
+	rt.mu.Lock()
+	rt.messages = []llm.Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "ok"},
+	}
+	rt.mu.Unlock()
+
 	store.MarkPendingDelivery("trig-1")
-	if err := rt.enqueue(queue.Envelope{RequestType: "message", Content: "x", TriggerID: "trig-1"}, queue.PriorityOther); err != nil {
+	if err := mgr.EnqueueTriggerMessage(sess.ID, "trig-1", "trigger fired"); err != nil {
 		t.Fatal(err)
 	}
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(5 * time.Second)
 	for store.HasPendingDelivery("trig-1") {
 		select {
 		case <-deadline:
-			t.Fatal("pending not cleared after dequeue")
+			t.Fatal("pending not cleared after side effect apply")
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}

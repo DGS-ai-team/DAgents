@@ -5,10 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 )
 
 type seqSubmitter struct {
 	sessions []string
+	lastEnv  queue.Envelope
 }
 
 func (s *seqSubmitter) EnsureSession(requestedID string) (string, error) {
@@ -21,6 +24,11 @@ func (s *seqSubmitter) EnsureSession(requestedID string) (string, error) {
 }
 
 func (s *seqSubmitter) SubmitTriggerMessage(sessionID, triggerID, content string) error {
+	s.lastEnv = queue.Envelope{
+		RequestType: queue.RequestTypeTriggerMessage,
+		Content:     content,
+		TriggerID:   triggerID,
+	}
 	return nil
 }
 
@@ -112,5 +120,8 @@ func TestLatestActiveFireUsesResolver(t *testing.T) {
 	}
 	if len(sub.sessions) != 1 || sub.sessions[0] != "sess-active" {
 		t.Fatalf("sessions = %v", sub.sessions)
+	}
+	if sub.lastEnv.RequestType != queue.RequestTypeTriggerMessage {
+		t.Fatalf("request_type = %q", sub.lastEnv.RequestType)
 	}
 }

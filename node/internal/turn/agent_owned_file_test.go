@@ -68,7 +68,7 @@ func TestAgentOwnedFileTrustChain_autoAfterCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state != "awaiting_tool_approval" || pending == nil {
+	if state != "awaiting_hitl" || pending == nil {
 		t.Fatalf("first create state=%q pending=%v", state, pending)
 	}
 
@@ -88,7 +88,7 @@ func TestAgentOwnedFileTrustChain_autoAfterCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending2 != nil || state2 == "awaiting_tool_approval" {
+	if pending2 != nil || state2 == "awaiting_hitl" {
 		t.Fatalf("trusted edit should auto: state=%q pending=%v", state2, pending2)
 	}
 	if len(history) < 2 {
@@ -110,7 +110,7 @@ func TestAgentOwnedFileTrustChain_existingFileAlwaysApproves(t *testing.T) {
 		ID: "c1", Type: "function",
 		Function: llm.ToolCallFunction{Name: "write_file", Arguments: `{"path":"readme.txt","content":"v2","call_purpose":"t"}`},
 	}})
-	if err != nil || state != "awaiting_tool_approval" {
+	if err != nil || state != "awaiting_hitl" {
 		t.Fatalf("overwrite existing: state=%q err=%v", state, err)
 	}
 	continueResumeAndDrain(t, orch, ctx, "sess-1", &history, map[string]any{"type": "approve"}, pending, 0)
@@ -122,7 +122,7 @@ func TestAgentOwnedFileTrustChain_existingFileAlwaysApproves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending2 == nil || state2 != "awaiting_tool_approval" {
+	if pending2 == nil || state2 != "awaiting_hitl" {
 		t.Fatalf("non-owned overwrite should re-approve: state=%q pending=%v", state2, pending2)
 	}
 }
@@ -155,7 +155,7 @@ func TestAgentOwnedFileTrustChain_externalMtimeChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending2 == nil || state2 != "awaiting_tool_approval" {
+	if pending2 == nil || state2 != "awaiting_hitl" {
 		t.Fatalf("external mtime change should require approval: state=%q pending=%v", state2, pending2)
 	}
 }

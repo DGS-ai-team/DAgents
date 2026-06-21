@@ -66,6 +66,26 @@ func HandleStreamEvent(
 		} else {
 			fmt.Fprintln(os.Stderr, line)
 		}
+	case "hitl_required":
+		userInfos, approval := ExpandHITLRequired(ev.Data)
+		for _, ui := range userInfos {
+			rv, err := resolveUserInformation(ctx, interact, ui)
+			if err != nil {
+				return true, err
+			}
+			if err := client.SubmitResume(ctx, sessionID, rv); err != nil {
+				return true, err
+			}
+		}
+		if approval != nil {
+			rv, err := resolveApproval(ctx, interact, approval)
+			if err != nil {
+				return true, err
+			}
+			if err := client.SubmitResume(ctx, sessionID, rv); err != nil {
+				return true, err
+			}
+		}
 	case "approval_required":
 		rv, err := resolveApproval(ctx, interact, ev.Data)
 		if err != nil {

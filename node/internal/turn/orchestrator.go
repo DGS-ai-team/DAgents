@@ -74,9 +74,13 @@ func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
 }
 
-// SetChildAgentTools 注入子 Agent 工具处理器；isChild 为 true 时禁止调用管理工具。
-func (o *Orchestrator) SetChildAgentTools(m *childagent.Manager, isChild bool) {
+// SetChildAgentManager 注入临时 Agent 管理器（仅父 session 调用）。
+func (o *Orchestrator) SetChildAgentManager(m *childagent.Manager) {
 	o.childMgr = m
+}
+
+// SetChildSession 标记当前 orchestrator 运行在子 session（禁止管理类工具与 ask_user）。
+func (o *Orchestrator) SetChildSession(isChild bool) {
 	o.isChildSession = isChild
 }
 
@@ -94,25 +98,6 @@ func (o *Orchestrator) SetPolicy(engine *policy.Engine) {
 	if o.toolHooks != nil {
 		o.toolHooks.SetPolicyEngine(engine)
 	}
-}
-
-// RunMessageTurn 执行 human_message 回合；测试无 enqueuer 时内联多步，生产应使用 RunHumanMessageTurn 单步 + 队列。
-func (o *Orchestrator) RunMessageTurn(
-	ctx context.Context,
-	sessionID string,
-	history *[]llm.Message,
-	userText string,
-	setState StateSetter,
-	toolLoopCount int,
-) (*PendingHITL, int, error) {
-	if setState == nil {
-		setState = func(State) {}
-	}
-	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.UserNameHuman))
-	o.resetTurnUsage(sessionID)
-	o.resetContextMetrics(sessionID)
-	o.logger.Info("turn human message start", "session_id", sessionID, "content_len", len(userText))
-	return o.runUntilQueueOrDone(ctx, sessionID, history, setState, 0)
 }
 
 // RunHumanMessageTurn 追加 user 消息后执行单步模型回合（human_message）。
@@ -156,76 +141,6 @@ func (o *Orchestrator) RunToolMessageTurn(
 	return o.runOneStep(ctx, sessionID, history, setState, toolLoopCount)
 }
 
-// HandleAsyncToolResult 将异步工具完成写回 history 并按尾部形态决定是否继续 tool_message 回合。
-func (o *Orchestrator) HandleAsyncToolResult(
-	ctx context.Context,
-	sessionID string,
-	history *[]llm.Message,
-	input AsyncToolResultInput,
-	setState StateSetter,
-	toolLoopCount int,
-) StepOutcome {
-	if setState == nil {
-		setState = func(State) {}
-	}
-	built := o.buildAsyncToolMessages(sessionID, input)
-	tail := classifyToolResultTail(*history)
-	switch tail {
-	case tailTool:
-		o.appendHistory(sessionID, history, built.AssistantMessage)
-		o.appendHistory(sessionID, history, built.ToolMessage)
-	case tailAssistantWithToolCalls:
-		insertAt := len(*history) - 1
-		o.insertHistory(sessionID, history, insertAt, built.AssistantMessage)
-		o.insertHistory(sessionID, history, insertAt+1, built.ToolMessage)
-	case tailAssistantWithoutToolCalls:
-		o.appendHistory(sessionID, history, built.UserMessage)
-		o.appendHistory(sessionID, history, built.AssistantMessage)
-		o.appendHistory(sessionID, history, built.ToolMessage)
-	default:
-		o.appendHistory(sessionID, history, built.AssistantMessage)
-		o.appendHistory(sessionID, history, built.ToolMessage)
-	}
-	o.publishAsyncToolCallbackSSE(sessionID, built)
-	if !shouldContinueAfterAsyncTool(tail) {
-		return StepOutcome{LoopCount: toolLoopCount}
-	}
-	return o.RunToolMessageTurn(ctx, sessionID, history, setState, toolLoopCount)
-}
-
-func (o *Orchestrator) publishAsyncToolCallbackSSE(sessionID string, built asyncToolMessages) {
-	o.hub.Publish(sessionID, o.agentID, "tool_call", map[string]any{
-		"assistant_content": "",
-		"tool_calls": []map[string]any{{
-			"id":   built.ToolCallID,
-			"name": "tool_callback",
-			"arguments": map[string]any{
-				"job_id": built.AssistantMessage.ToolCalls[0].Function.Arguments,
-			},
-			"raw_arguments": built.AssistantMessage.ToolCalls[0].Function.Arguments,
-		}},
-		"display_type": "normal_text",
-	})
-	o.hub.Publish(sessionID, o.agentID, "tool_result", asyncToolResultSSEPayload(built))
-}
-
-func asyncToolResultSSEPayload(built asyncToolMessages) map[string]any {
-	payload := map[string]any{
-		"tool_call_id": built.ToolCallID,
-		"tool_name":    built.ToolName,
-		"content":      built.ForClientContent,
-		"partial":      false,
-		"async_status": built.Status,
-		"display_type": "normal_text",
-	}
-	if built.OutputCompressSavedPct > 0 {
-		payload["output_compress_saved_pct"] = built.OutputCompressSavedPct
-		payload["output_compress_raw_runes"] = built.OutputCompressRawRunes
-		payload["output_compress_out_runes"] = built.OutputCompressOutRunes
-	}
-	return payload
-}
-
 // ContinueAfterResume 在 Client 提交 resume 后写入 tool 结果并调度 tool_result 续跑。
 func (o *Orchestrator) ContinueAfterResume(
 	ctx context.Context,
@@ -244,57 +159,27 @@ func (o *Orchestrator) ContinueAfterResume(
 	}
 	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
 	pendingToolCallID := ""
-	if pending.Kind == HITLUserInformation && pending.UserInfo != nil {
-		pendingToolCallID = pending.UserInfo.ID
-	} else if pending.Kind == HITLApproval && len(pending.ToolCalls) > 0 {
-		pendingToolCallID = pending.ToolCalls[0].ID
+	pending.Normalize()
+	pendingCount := len(pending.Items)
+	if pendingCount > 0 {
+		pendingToolCallID = pending.Items[0].ToolCall.ID
 	}
 	o.logger.Info("turn resume",
 		"session_id", sessionID,
-		"hitl_kind", pending.Kind,
+		"pending_items", pendingCount,
 		"resume_tool_call_id", resumeToolCallID,
 		"pending_tool_call_id", pendingToolCallID,
+		"resume_value_kind", hitl.ResumeValueKind(resumeValue),
 		"resume_value", resumeValue,
 	)
-	switch pending.Kind {
-	case HITLUserInformation:
-		if pending.UserInfo == nil {
-			return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("missing user_information tool call")}
-		}
-		tc := *pending.UserInfo
-		content, err := hitl.ParseUserInformationResume(resumeValue, tc.ID)
-		if err != nil {
-			content = err.Error()
-		}
-		o.publishToolResult(sessionID, tc, content, false, nil)
-		o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
-	case HITLApproval:
-		ids := make([]string, 0, len(pending.ToolCalls))
-		for _, tc := range pending.ToolCalls {
-			ids = append(ids, tc.ID)
-		}
-		plan, err := hitl.ParseApprovalResume(resumeValue, ids)
-		if err != nil {
-			for _, tc := range pending.ToolCalls {
-				o.appendDeniedTool(sessionID, history, tc, err.Error())
-			}
-		} else {
-			var approved []llm.ToolCall
-			for _, tc := range pending.ToolCalls {
-				if plan.IsApproved(tc.ID) {
-					approved = append(approved, tc)
-				} else {
-					o.appendDeniedTool(sessionID, history, tc, "user_rejected")
-				}
-			}
-			if err := o.executeAutoBatch(ctx, sessionID, history, approved, &plan); err != nil {
-				return StepOutcome{LoopCount: toolLoopCount, Err: err}
-			}
-		}
+	switch hitl.ResumeValueKind(resumeValue) {
+	case "user_information":
+		return o.continueAfterUserInformationResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
+	case "approval":
+		return o.continueAfterApprovalResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
 	default:
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("unknown pending hitl kind")}
+		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("unsupported resume type")}
 	}
-	return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
 }
 
 func NewOrchestrator(
@@ -328,7 +213,7 @@ func NewOrchestrator(
 	if maxToolLoops <= 0 {
 		maxToolLoops = DefaultMaxToolLoops()
 	}
-	return &Orchestrator{
+	orch := &Orchestrator{
 		agentID:      agentID,
 		fsRoot:       fsRoot,
 		hub:          hub,
@@ -344,6 +229,8 @@ func NewOrchestrator(
 		logger:       logx.OrDefault(logger),
 		ctxMetrics:   newContextMetricsStore(),
 	}
+	registerSystemPromptBuildHook(orch)
+	return orch
 }
 
 // InterruptPending 在用户插入新 message 时打断 pending tool calls。
@@ -360,35 +247,6 @@ func (o *Orchestrator) InterruptPending(sessionID string, history *[]llm.Message
 	)
 }
 
-func (o *Orchestrator) runUntilQueueOrDone(
-	ctx context.Context,
-	sessionID string,
-	history *[]llm.Message,
-	setState StateSetter,
-	toolLoopCount int,
-) (*PendingHITL, int, error) {
-	for {
-		outcome := o.runOneStep(ctx, sessionID, history, setState, toolLoopCount)
-		if outcome.Err != nil {
-			return outcome.Pending, outcome.LoopCount, outcome.Err
-		}
-		if outcome.Pending != nil {
-			return outcome.Pending, outcome.LoopCount, nil
-		}
-		if outcome.ScheduleToolResult {
-			if o.enqueueToolResult != nil {
-				if err := o.enqueueToolResult(sessionID); err != nil {
-					return nil, outcome.LoopCount, err
-				}
-				return nil, outcome.LoopCount, nil
-			}
-			toolLoopCount = outcome.LoopCount
-			continue
-		}
-		return nil, outcome.LoopCount, nil
-	}
-}
-
 func (o *Orchestrator) runOneStep(
 	ctx context.Context,
 	sessionID string,
@@ -402,10 +260,8 @@ func (o *Orchestrator) runOneStep(
 	toolLoopCount++
 	o.recordToolLoop(sessionID, toolLoopCount)
 	if toolLoopCount > o.maxToolLoops {
-		o.hub.Publish(sessionID, o.agentID, "error", map[string]any{
-			"message": fmt.Sprintf("工具调用轮次超过上限：%d", o.maxToolLoops),
-		})
-		o.publishTurnIdleDone(sessionID, "error")
+		o.publishError(sessionID, fmt.Sprintf("工具调用轮次超过上限：%d", o.maxToolLoops))
+		o.publishDone(sessionID, "error")
 		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("tool loop limit exceeded")}
 	}
 
@@ -419,16 +275,10 @@ func (o *Orchestrator) runOneStep(
 		Tools:        toolDefs,
 	}, llm.StreamHandler{
 		OnDelta: func(delta string) {
-			o.hub.Publish(sessionID, o.agentID, "assistant", map[string]any{
-				"content":      delta,
-				"display_type": "delta",
-			})
+			o.publishAssistant(sessionID, delta)
 		},
 		OnReasoningDelta: func(delta string) {
-			o.hub.Publish(sessionID, o.agentID, "reasoning", map[string]any{
-				"content":      delta,
-				"display_type": "reasoning",
-			})
+			o.publishReasoning(sessionID, delta)
 		},
 		OnToolCallDelta: func(calls []llm.ToolCall) {
 			for i, tc := range calls {
@@ -440,11 +290,11 @@ func (o *Orchestrator) runOneStep(
 					continue
 				}
 				publishedToolPartial[i] = fp
-				o.publishToolCallPartial(sessionID, tc, i)
+				o.publishToolCall(sessionID, tc, true, i)
 			}
 		},
 		OnUsage: func(u llm.Usage) {
-			o.accumulateAndPublishUsage(sessionID, toolLoopCount, u)
+			o.publishUsage(sessionID, toolLoopCount, u)
 		},
 	})
 	if err != nil {
@@ -454,23 +304,36 @@ func (o *Orchestrator) runOneStep(
 			o.logger.Info("turn llm cancelled", "session_id", sessionID, "loop", toolLoopCount)
 			o.persistCancelledStream(sessionID, history, result)
 		} else {
-			o.hub.Publish(sessionID, o.agentID, "error", map[string]any{"message": err.Error()})
+			o.publishError(sessionID, err.Error())
 			finishReason = "error"
 			streamErr = err
 			o.logger.Error("turn llm failed", "session_id", sessionID, "loop", toolLoopCount, "error", err)
 		}
 		if finishReason == "cancelled" {
-			o.publishAccumulatedUsageIfAny(sessionID, toolLoopCount)
+			o.publishUsageIfAccumulated(sessionID, toolLoopCount)
 		}
-		o.publishTurnIdleDone(sessionID, finishReason)
+		o.publishDone(sessionID, finishReason)
 		return StepOutcome{LoopCount: toolLoopCount, Err: streamErr}
+	}
+
+	result, hookErr := o.runLLMAfterCallPhase(ctx, sessionID, result)
+	if hookErr != nil {
+		msg := hookErr.Error()
+		if isLLMAfterCallAbort(hookErr) {
+			o.logger.Warn("llm.after_call aborted turn", "session_id", sessionID, "error", hookErr)
+		} else {
+			o.logger.Warn("llm.after_call hook failed", "session_id", sessionID, "error", hookErr)
+		}
+		o.publishError(sessionID, msg)
+		o.publishDone(sessionID, "error")
+		return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
 	}
 
 	assistant := assistantMessageFromResult(result)
 	o.appendHistory(sessionID, history, assistant)
 
 	if len(result.ToolCalls) == 0 {
-		o.publishTurnIdleDone(sessionID, finishReason)
+		o.publishDone(sessionID, finishReason)
 		o.logger.Info("turn done", "session_id", sessionID, "finish_reason", finishReason, "loop", toolLoopCount)
 		return StepOutcome{LoopCount: toolLoopCount}
 	}
@@ -481,16 +344,16 @@ func (o *Orchestrator) runOneStep(
 		if errors.Is(procErr, context.Canceled) {
 			finishReason = "cancelled"
 			o.appendMissingToolResponses(sessionID, history, result.ToolCalls, ToolStreamInterruptedMessage, map[string]any{"interrupted_by_stream_cancel": true})
-			o.publishAccumulatedUsageIfAny(sessionID, toolLoopCount)
+			o.publishUsageIfAccumulated(sessionID, toolLoopCount)
 		} else {
 			finishReason = "error"
-			o.hub.Publish(sessionID, o.agentID, "error", map[string]any{"message": procErr.Error()})
+			o.publishError(sessionID, procErr.Error())
 		}
-		o.publishTurnIdleDone(sessionID, finishReason)
+		o.publishDone(sessionID, finishReason)
 		return StepOutcome{LoopCount: toolLoopCount, Err: procErr}
 	}
 	if pending != nil {
-		o.publishTurnIdleDone(sessionID, pauseReason)
+		o.publishDone(sessionID, pauseReason)
 		o.logger.Info("turn paused", "session_id", sessionID, "finish_reason", pauseReason, "loop", toolLoopCount)
 		return StepOutcome{Pending: pending, LoopCount: toolLoopCount}
 	}
@@ -503,32 +366,7 @@ func (o *Orchestrator) runOneStep(
 	return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
 }
 
-// publishTurnIdleDone 推送语义 B 的 done：编排器暂停，轮到用户交互（非段落换行）。
-//
-// 逻辑：
-// 1. 始终带 finish_reason；
-// 2. HITL 暂停：turn_complete=false + awaiting；
-// 3. stop/error/cancelled：turn_complete=true，awaiting 为空。
-func (o *Orchestrator) publishTurnIdleDone(sessionID, finishReason string) {
-	payload := map[string]any{"finish_reason": finishReason}
-	switch finishReason {
-	case "awaiting_user_information":
-		payload["turn_complete"] = false
-		payload["awaiting"] = "user_information"
-	case "awaiting_tool_approval":
-		payload["turn_complete"] = false
-		payload["awaiting"] = "tool_approval"
-	default:
-		payload["turn_complete"] = true
-		payload["awaiting"] = nil
-	}
-	if m := o.contextMetrics(sessionID); m != nil {
-		payload["tool_context_metrics"] = m.snapshot()
-	}
-	o.publishTurnContextMetrics(sessionID, finishReason)
-	o.hub.Publish(sessionID, o.agentID, "done", payload)
-}
-
+// resetTurnUsage 新 user 消息 turn 开始时清零 token 累计，避免上轮用量带入 SSE usage。
 func (o *Orchestrator) resetTurnUsage(sessionID string) {
 	if o == nil {
 		return
@@ -536,42 +374,6 @@ func (o *Orchestrator) resetTurnUsage(sessionID string) {
 	o.turnUsageMu.Lock()
 	delete(o.turnUsage, sessionID)
 	o.turnUsageMu.Unlock()
-}
-
-func (o *Orchestrator) accumulateAndPublishUsage(sessionID string, llmStep int, u llm.Usage) {
-	if o == nil {
-		return
-	}
-	o.turnUsageMu.Lock()
-	if o.turnUsage == nil {
-		o.turnUsage = make(map[string]llm.Usage)
-	}
-	acc := o.turnUsage[sessionID]
-	acc.AccumulateFrom(u)
-	o.turnUsage[sessionID] = acc
-	payload := llm.UsageSSEEvent(llmStep, u, acc)
-	o.turnUsageMu.Unlock()
-	o.hub.Publish(sessionID, o.agentID, "usage", payload)
-}
-
-// publishAccumulatedUsageIfAny 在 turn 取消时补发已累计 usage，避免客户端 strip 丢失末次快照。
-func (o *Orchestrator) publishAccumulatedUsageIfAny(sessionID string, llmStep int) {
-	if o == nil || o.hub == nil {
-		return
-	}
-	o.turnUsageMu.Lock()
-	acc, ok := o.turnUsage[sessionID]
-	o.turnUsageMu.Unlock()
-	if !ok {
-		return
-	}
-	norm := acc
-	norm.Normalize()
-	if norm.PromptTokens <= 0 && norm.CompletionTokens <= 0 {
-		return
-	}
-	payload := llm.UsageSSEEvent(llmStep, llm.Usage{}, acc)
-	o.hub.Publish(sessionID, o.agentID, "usage", payload)
 }
 
 // SystemPromptForSession 返回当前 session 下一步 LLM 调用将使用的 system prompt。
@@ -588,6 +390,30 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 }
 
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
+	if o.toolHooks == nil {
+		return o.composeSystemPrompt(sessionID)
+	}
+	hc := hooks.BuildPromptBuildContext(sessionID, o.agentID, "")
+	out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhasePromptBuild, hc)
+	if err != nil {
+		return o.composeSystemPrompt(sessionID)
+	}
+	prompt := hooks.SystemPromptFrom(out, "")
+	if prompt == "" {
+		return o.composeSystemPrompt(sessionID)
+	}
+	return prompt
+}
+
+func (o *Orchestrator) runTurnDonePhase(sessionID, finishReason string) {
+	if o.toolHooks == nil {
+		return
+	}
+	hc := hooks.BuildTurnDoneContext(sessionID, o.agentID, finishReason)
+	_, _ = o.toolHooks.RunPhase(context.Background(), hooks.PhaseTurnDone, hc)
+}
+
+func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 	var loaded []skills.LoadedSkill
 	if o.skillAccess.Get != nil {
 		loaded = o.skillAccess.Get()

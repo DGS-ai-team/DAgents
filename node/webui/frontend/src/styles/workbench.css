@@ -171,6 +171,18 @@ input {
   grid-template-columns: minmax(0, 1fr) 360px;
 }
 
+.app__main-col {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app__main-col > .panel-overlay {
+  position: absolute;
+}
+
 .app__col {
   display: flex;
   flex-direction: column;
@@ -811,7 +823,8 @@ input {
 }
 
 .msg--reasoning-collapsed,
-.msg--generating {
+.msg--generating,
+.msg--status {
   margin: 6px 0;
 }
 
@@ -2128,8 +2141,9 @@ input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.45;
+  opacity: 0.72;
   transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+  flex-shrink: 0;
 }
 
 .session-history-item:hover .session-history-item__delete,

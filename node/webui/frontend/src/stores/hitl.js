@@ -30,7 +30,7 @@ export function clearHitl() {
 function approvalQueueKey(data) {
   const child = String(data?.child_session_id || "").trim();
   if (child) return `child:${child}`;
-  const id = String(data?.approval_id || "").trim();
+  const id = String(data?.approval_id || data?.hitl_id || "").trim();
   return id ? `parent:${id}` : "parent:";
 }
 
@@ -138,12 +138,63 @@ export function buildUserInfoResumeFromSelection(data, selectedIds) {
   return buildUserInfoResume(data, labels.join(", "), [...selected].sort());
 }
 
+const HITL_TYPE_USER_INFORMATION = "user_information";
+const HITL_TYPE_EXECUTE_TOOL = "execute_tool";
+
+function hitlItemsFromData(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item) => item && typeof item === "object");
+}
+
+function userInformationDataFromHITLItem(item) {
+  const data = { display_type: "normal_text" };
+  const content = String(item?.content || "").trim();
+  if (content) data.content = content;
+  if (item?.user_information_args && typeof item.user_information_args === "object") {
+    data.user_information_args = item.user_information_args;
+  }
+  return data;
+}
+
+function approvalDataFromHITLBatch(batch, executeItems) {
+  if (!executeItems.length) return null;
+  const data = {
+    approval_type: "execute_tool",
+    approval_args: { tool_calls: executeItems },
+    display_type: "normal_text",
+  };
+  const hitlId = String(batch?.hitl_id || "").trim();
+  if (hitlId) data.approval_id = hitlId;
+  const message = String(batch?.message || "").trim();
+  if (message) data.message = message;
+  return data;
+}
+
+/** 将 hitl_required 展开为 Client 可入队的 user_information / approval 队列项。 */
+export function expandHitlRequired(data) {
+  const userInfos = [];
+  const executeItems = [];
+  for (const item of hitlItemsFromData(data?.items)) {
+    const hitlType = String(item.hitl_type || "").trim();
+    if (hitlType === HITL_TYPE_USER_INFORMATION) {
+      userInfos.push(userInformationDataFromHITLItem(item));
+    } else if (hitlType === HITL_TYPE_EXECUTE_TOOL) {
+      executeItems.push(item);
+    }
+  }
+  return {
+    userInfos,
+    approval: approvalDataFromHITLBatch(data, executeItems),
+  };
+}
+
 /** 对齐 Go hitl.ShouldSkipChildRuntimeDisplay：隐藏子 Agent turn 的运行时 SSE。 */
 export function shouldSkipChildRuntimeDisplay(eventType, data) {
   const childId = String(data?.child_session_id || "").trim();
   if (!childId) return false;
   switch (eventType) {
     case "approval_required":
+    case "hitl_required":
     case "temporary_agent_created":
     case "temporary_agent_completed":
     case "temporary_agent_cancelled":

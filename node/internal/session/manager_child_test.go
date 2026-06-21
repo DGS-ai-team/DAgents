@@ -197,14 +197,15 @@ func TestEnqueueResumeParentDoesNotDoubleEnqueue(t *testing.T) {
 	}
 	rt.mu.Lock()
 	rt.pending = &turn.PendingHITL{
-		Kind: turn.HITLUserInformation,
-		UserInfo: &llm.ToolCall{
-			ID: "call-test-1",
-			Function: llm.ToolCallFunction{
-				Name:      "ask_user_information",
-				Arguments: `{"question":"q"}`,
+		Items: []turn.PendingHITLItem{{
+			ToolCall: llm.ToolCall{
+				ID: "call-test-1",
+				Function: llm.ToolCallFunction{
+					Name:      "ask_user_information",
+					Arguments: `{"question":"q"}`,
+				},
 			},
-		},
+		}},
 	}
 	rt.mu.Unlock()
 

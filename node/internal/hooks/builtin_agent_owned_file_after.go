@@ -38,6 +38,11 @@ func (h *AgentOwnedFileAfterHook) Name() string { return "builtin.agent_owned_fi
 // Phases 返回支持的 phase 列表。
 func (h *AgentOwnedFileAfterHook) Phases() []Phase { return []Phase{PhaseToolAfterEach} }
 
+// Run 实现通用 Hook，委托 RunToolAfterEach。
+func (h *AgentOwnedFileAfterHook) Run(ctx context.Context, hc *Context) (Result, error) {
+	return runToolAfterEachHook(ctx, hc, h.Name(), h.RunToolAfterEach)
+}
+
 // RunToolAfterEach 写成功后更新 Owned / mtime。
 func (h *AgentOwnedFileAfterHook) RunToolAfterEach(_ context.Context, in ToolAfterEachInput, _ *ToolAfterEachOutput) error {
 	if h == nil || !h.cfg.Enabled || h.trust == nil {

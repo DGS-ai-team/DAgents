@@ -37,8 +37,8 @@
 | `BuildSystemPrompt` | 最小 system prompt（静态规则 + agent/FS_ROOT） |
 | `RunTurnPhase` | Node 状态 → Python 兼容 `run_turn_phase` |
 | `DefaultMaxToolLoops` | 工具循环默认上限（16） |
-| `RunMessageTurn` | LLM + 工具循环；SSE assistant/tool_call/tool_result/done |
-| `publishTurnIdleDone` | 语义 B 的 `done`：`finish_reason` + `turn_complete` + `awaiting`；文档见 `docs/architecture/agent-node-api.md` §2.4.1 |
+| `RunHumanMessageTurn` / `RunToolMessageTurn` | 单步 LLM + 工具；生产经 session 队列续跑 |
+| `publishDone` | 语义 B 的 `done`：`finish_reason` + `turn_complete` + `awaiting`；实现见 `node/internal/turn/sse_publish.go` |
 
 ## `internal/queue/queue.go`
 

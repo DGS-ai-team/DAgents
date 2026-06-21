@@ -65,8 +65,9 @@ func TestSaveLoadRuntimeState(t *testing.T) {
 
 	ctx := context.Background()
 	pending := &turn.PendingHITL{
-		Kind:      turn.HITLApproval,
-		ToolCalls: []llm.ToolCall{{ID: "c1", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run"}}},
+		Items: []turn.PendingHITLItem{{
+			ToolCall: llm.ToolCall{ID: "c1", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run"}},
+		}},
 	}
 	if err := s.Save(ctx, Record{
 		SessionID:    "sess-pending",

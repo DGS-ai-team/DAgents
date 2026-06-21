@@ -177,6 +177,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			Tools:                cfg.ToolResultHookTools(),
 			FSRoot:               cfg.FSRoot,
 		},
+		ExternalHooks: hooks.ExternalHooksConfigFromShared(cfg.Hooks, cfg.RuntimeDir()),
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:                   cfg.ChildAgents.Enabled,

@@ -50,13 +50,35 @@ export function formatTemporaryAgentToolTitle(name, args = {}) {
 }
 
 function formatGenericToolTitle(name, args = {}) {
-  const parts = [];
-  for (const [key, value] of Object.entries(args || {})) {
-    if (key === "call_purpose" || key === "run_in_background") continue;
-    parts.push(`${key}=${JSON.stringify(value)}`);
-  }
-  if (!parts.length) return `${name}()`;
+  const keys = Object.keys(args || {})
+    .filter((key) => key !== "call_purpose" && key !== "run_in_background")
+    .sort();
+  if (!keys.length) return `${name}()`;
+  const parts = keys.map((key) => `${key}=${formatToolArgValue(args[key])}`);
   return `${name}(${parts.join(", ")})`;
+}
+
+function formatToolArgValue(value) {
+  if (value == null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "True" : "False";
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? String(value) : String(value);
+  }
+  return JSON.stringify(value);
+}
+
+export function resolveToolArgumentsFromData(data) {
+  if (!data || typeof data !== "object") return {};
+  if (data.arguments && typeof data.arguments === "object" && !Array.isArray(data.arguments)) {
+    return data.arguments;
+  }
+  const fn = data.function;
+  if (fn && typeof fn === "object") {
+    const fromFn = parseToolArguments(fn.arguments);
+    if (Object.keys(fromFn).length) return fromFn;
+  }
+  return parseToolArguments(data.raw_arguments ?? data.arguments);
 }
 
 export function parseToolArguments(raw) {

@@ -55,6 +55,16 @@ func (m *model) enqueueUserInfo(data map[string]any) {
 	m.hitlQueue = append(m.hitlQueue, hitlPending{kind: hitlPendingUserInfo, data: data})
 }
 
+func (m *model) enqueueHITLRequired(data map[string]any) {
+	userInfos, approval := clihitl.ExpandHITLRequired(data)
+	for _, ui := range userInfos {
+		m.enqueueUserInfo(ui)
+	}
+	if approval != nil {
+		m.enqueueApproval(approval)
+	}
+}
+
 func (m *model) invalidateHITLForUserMessage() {
 	if len(m.hitlQueue) == 0 && m.mode != modeApproval && m.mode != modeUserInfo {
 		return

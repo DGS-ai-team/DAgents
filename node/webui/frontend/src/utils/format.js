@@ -67,10 +67,14 @@ export function formatRelativeTime(iso) {
   return new Date(ts).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
+export function sessionRecordId(session) {
+  return String(session?.session_id || session?.SessionID || "").trim();
+}
+
 export function sessionDisplayTitle(session) {
   const first = String(session?.first_user_message || session?.FirstUserMessage || "").trim();
   if (first) return first.length > 48 ? `${first.slice(0, 48)}…` : first;
-  const id = String(session?.session_id || "").trim();
+  const id = sessionRecordId(session);
   if (id) return `会话 ${id.slice(0, 8)}`;
   return "新对话";
 }

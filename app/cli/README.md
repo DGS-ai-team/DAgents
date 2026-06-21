@@ -10,7 +10,8 @@
 | [`api_client.py`](api_client.py) | Agent Node HTTP/SSE 客户端 |
 | [`approval.py`](approval.py) | 工具审批载荷解析与 resume 决策构造 |
 | [`child_agent.py`](child_agent.py) | 子 Agent SSE 过滤、生命周期文案、`ChildAgentTracker` |
-| [`user_information.py`](user_information.py) | `ask_user_information` SSE 解析与用户回答 resume 构造 |
+| [`hitl_batch.py`](hitl_batch.py) | `hitl_required` → user_info / approval 队列展开 |
+| [`user_information.py`](user_information.py) | `ask_user_information` 载荷解析与用户回答 resume 构造 |
 | [`session_commands.py`](session_commands.py) | `dagents show session` / `dagents delete session` |
 | [`tui/`](tui/) | Textual UI：主 App、进入欢迎区、审批 Modal |
 | [`version_info.py`](version_info.py) | CLI 版本号与用户名解析 |
@@ -60,7 +61,7 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 
 **滚动**：transcript 默认贴底跟随；**滚轮上滚** 后流式输出、审批等待、**点击展开工具详情** 不会强制跳底；滚回底部或发送消息后恢复。Go Client 另支持 **PgUp/PgDn**。
 
-**Agent 询问（`ask_user_information`）**：TUI 将 `tool_call` 与 `user_information_required` 合并为一条「Agent 询问」块（问题 + 选项）。无选项时在底部输入框输入后 Enter；有选项时 ↑/↓、Space 多选、Enter 确认。`done` 表示轮到用户（见 [agent-node-api.md §2.4.1](../../docs/architecture/agent-node-api.md)）。
+**Agent 询问（`ask_user_information`）**：TUI 将 `tool_call` 与询问正文合并为一条「Agent 询问」块（问题 + 选项）；载荷来自 **`hitl_required`** 的 `user_information` item（A2A 仍可能为 `user_information_required`）。无选项时在底部输入框输入后 Enter；有选项时 ↑/↓、Space 多选、Enter 确认。`done` 表示轮到用户（见 [agent-node-api.md §2.4.1](../../docs/architecture/agent-node-api.md)）。
 
 ## 架构要点
 
@@ -68,6 +69,6 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 - **TUI 主题**：固定 `textual-dark` 暗色（`DAgentsTuiApp.theme`），不跟随终端配色。
 - **进入欢迎区**：连接成功后 `build_welcome_panel()` 以 Rich `Panel` 写入 RichLog，随消息一起滚动；`/clear` 清屏时一并清除。
 - **长连 SSE**：`_pump_stream` 后台入队，`_render_loop` 持续渲染到 RichLog；子 Agent turn 的 assistant/tool 等事件被过滤，仅展示审批与生命周期系统行。
-- **HITL 非阻塞**：`approval_required` / `user_information_required` 入队后由 TUI 异步处理，避免阻塞 SSE 消费。
+- **HITL 非阻塞**：**`hitl_required`** 展开入队（`hitl_batch.expand_hitl_required`）；仍兼容 A2A 的 `approval_required` / `user_information_required`。TUI 异步处理，避免阻塞 SSE 消费。
 - **子 Agent 状态条**：输入框上方 `#input-strip` 展示活跃子 Agent 数与待审批数。
 - **用户 turn 栅栏**：`submit_message` + `wait_user_turn`；`done` 仅语义 B（编排暂停/链结束），含 `turn_complete` 与 `awaiting`；HITL 暂停的 `done` 正常唤醒；submit 前在途 turn 的陈旧 `done`（seq ≤ fence）被忽略。

@@ -1,7 +1,7 @@
 package turn
 
 import (
-	"fmt"
+	"context"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
@@ -15,7 +15,20 @@ const (
 	tailAssistantWithToolCalls    toolResultTailKind = "tail_assistant_with_tool_calls"
 	tailAssistantWithoutToolCalls toolResultTailKind = "tail_assistant_without_tool_calls"
 	tailOther                     toolResultTailKind = "other"
+
+	// TailAssistantWithoutToolCalls 供 session 等外部包判定桥接态。
+	TailAssistantWithoutToolCalls = tailAssistantWithoutToolCalls
 )
+
+// ClassifyToolResultTail 导出尾部形态判定。
+func ClassifyToolResultTail(messages []llm.Message) toolResultTailKind {
+	return classifyToolResultTail(messages)
+}
+
+// IsBridgeTail 任务已完成桥接态（尾部纯 assistant）。
+func IsBridgeTail(messages []llm.Message) bool {
+	return classifyToolResultTail(messages) == tailAssistantWithoutToolCalls
+}
 
 func classifyToolResultTail(messages []llm.Message) toolResultTailKind {
 	if len(messages) == 0 {
@@ -49,7 +62,7 @@ type asyncToolMessages struct {
 	OutputCompressOutRunes int
 }
 
-func (o *Orchestrator) buildAsyncToolMessages(sessionID string, payload AsyncToolResultInput) asyncToolMessages {
+func (o *Orchestrator) buildAsyncToolMessages(sessionID string, history []llm.Message, payload AsyncToolResultInput) asyncToolMessages {
 	toolName := strings.TrimSpace(payload.ToolName)
 	if toolName == "" {
 		toolName = "unknown_tool"
@@ -62,10 +75,8 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, payload AsyncToo
 	if status == "" {
 		status = "succeeded"
 	}
-	toolCallID := strings.TrimSpace(payload.ToolCallID)
-	if toolCallID == "" {
-		toolCallID = "async-job-" + jobID
-	}
+	src := lookupAsyncSourceFromHistory(history, toolName, jobID, payload.ToolCallID)
+	toolCallID := asyncCallbackToolCallID(jobID)
 	resultBody := strings.TrimSpace(payload.ResultText)
 	if status != "succeeded" {
 		if errText := strings.TrimSpace(payload.ErrorText); errText != "" {
@@ -77,21 +88,22 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, payload AsyncToo
 	fullForClient := resultBody
 	historyBody := resultBody
 	if o.toolHooks != nil {
-		out := o.toolHooks.RunToolAfterEach(nil, hooks.ToolAfterEachInput{
+		hc := hooks.BuildToolAfterEachContext(hooks.ToolAfterEachInput{
 			SessionID:  sessionID,
 			ToolCallID: toolCallID,
 			ToolName:   toolName,
 			RawResult:  resultBody,
 		})
-		fullForClient = out.ForClient
-		historyBody = out.ForHistory
+		out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhaseToolAfterEach, hc)
+		if err == nil {
+			split := hooks.ToolAfterEachOutputFrom(out)
+			fullForClient = split.ForClient
+			historyBody = split.ForHistory
+		}
 	}
-	toolText := fmt.Sprintf(
-		"工具%s执行已完成，job_id：%s，执行结果如下：%s",
-		toolName, jobID, historyBody,
-	)
-	userText := fmt.Sprintf("工具%s，job_id已完成，请获取执行结果并继续任务。", toolName)
-	argsJSON := fmt.Sprintf(`{"job_id":%q,"tool_name":%q,"status":%q}`, jobID, toolName, status)
+	toolText := formatAsyncToolResultContent(toolName, jobID, status, src, historyBody)
+	userText := formatAsyncToolUserMessage(toolName, jobID, status, src.CallPurpose)
+	argsJSON := formatAsyncToolCallbackArgs(toolName, jobID, status, src)
 	_ = fullForClient // referenced via ForClientContent
 	return asyncToolMessages{
 		UserMessage: llm.UserMessage(userText, llm.UserNameAsyncTool),
@@ -122,7 +134,7 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, payload AsyncToo
 	}
 }
 
-// AsyncToolResultInput 为 HandleAsyncToolResult 入参。
+// AsyncToolResultInput 为 async 旁路 side-effect 消息构建入参。
 type AsyncToolResultInput struct {
 	JobID                  string
 	ToolName               string
@@ -143,7 +155,7 @@ func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw st
 	if o.toolHooks == nil {
 		return raw, raw, ""
 	}
-	out := o.toolHooks.RunToolAfterEach(nil, hooks.ToolAfterEachInput{
+	hc := hooks.BuildToolAfterEachContext(hooks.ToolAfterEachInput{
 		SessionID:    sessionID,
 		ToolCallID:   tc.ID,
 		ToolName:     tc.Function.Name,
@@ -151,5 +163,10 @@ func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw st
 		RawArguments: tc.Function.Arguments,
 		RawResult:    raw,
 	})
-	return out.ForClient, out.ForHistory, out.SpillPath
+	out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhaseToolAfterEach, hc)
+	if err != nil {
+		return raw, raw, ""
+	}
+	split := hooks.ToolAfterEachOutputFrom(out)
+	return split.ForClient, split.ForHistory, split.SpillPath
 }

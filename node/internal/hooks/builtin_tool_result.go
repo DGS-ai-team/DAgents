@@ -21,6 +21,11 @@ func (h *ToolResultPackageHook) Name() string { return "tool_result_package" }
 
 func (h *ToolResultPackageHook) Phases() []Phase { return []Phase{PhaseToolAfterEach} }
 
+// Run 实现通用 Hook，委托 RunToolAfterEach。
+func (h *ToolResultPackageHook) Run(ctx context.Context, hc *Context) (Result, error) {
+	return runToolAfterEachHook(ctx, hc, h.Name(), h.RunToolAfterEach)
+}
+
 func (h *ToolResultPackageHook) RunToolAfterEach(_ context.Context, in ToolAfterEachInput, out *ToolAfterEachOutput) error {
 	raw := strings.TrimSpace(in.RawResult)
 	if raw == "" && in.RawResult == "" {

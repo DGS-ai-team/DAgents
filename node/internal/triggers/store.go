@@ -213,7 +213,7 @@ func (s *Store) MarkFired(id string, firedAt time.Time) (Definition, error) {
 	return updated, nil
 }
 
-// HasPendingDelivery 判断 trigger 是否仍有未 dequeue 的队列消息。
+// HasPendingDelivery 判断 trigger 是否仍有未 Apply 的 side-effect 投递。
 func (s *Store) HasPendingDelivery(triggerID string) bool {
 	if s == nil || s.pending == nil {
 		return false
@@ -228,7 +228,7 @@ func (s *Store) MarkPendingDelivery(triggerID string) {
 	}
 }
 
-// ClearPendingDelivery 在 session dequeue 后清除待消费标记。
+// ClearPendingDelivery 在 side-effect Apply 成功或 ClearSession 丢弃缓冲时清除待消费标记。
 func (s *Store) ClearPendingDelivery(triggerID string) {
 	if s != nil && s.pending != nil {
 		s.pending.ClearPendingDelivery(triggerID)

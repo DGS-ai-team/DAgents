@@ -1,6 +1,6 @@
 package tools
 
-// askUserInformationToolDef 供 LLM 调用；实际由 turn 编排器发 user_information_required 处理。
+// askUserInformationToolDef 供 LLM 调用；实际由 turn 编排器在 hitl_required 中处理。
 func askUserInformationToolDef() ToolDef {
 	return ToolDef{
 		Type: "function",

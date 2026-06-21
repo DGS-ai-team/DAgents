@@ -38,8 +38,9 @@ type TurnOptions struct {
 	CompressionBlocking      int
 	RawMessageHistoryEnabled bool
 	RawMessageHistoryDir     string
-	DuplicateToolCall hooks.DuplicateConfig
-	ToolResult        hooks.ToolResultConfig
+	DuplicateToolCall        hooks.DuplicateConfig
+	ToolResult               hooks.ToolResultConfig
+	ExternalHooks            hooks.ExternalHooksConfig
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。
@@ -489,6 +490,27 @@ func (m *Manager) EnqueueAsyncToolResult(sessionID string, payload queue.AsyncTo
 	return rt.enqueue(env, queue.PriorityAsyncCompletion)
 }
 
+// EnqueueA2AInboxMessage 将 a2a inbox 首条消息入队（旁路 side-effect 路径）。
+func (m *Manager) EnqueueA2AInboxMessage(_ context.Context, sessionID, content string) (string, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return "", fmt.Errorf("session_not_found")
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return "", fmt.Errorf("invalid_message")
+	}
+	env := queue.Envelope{
+		RequestType: queue.RequestTypeA2AInboxMessage,
+		Content:     content,
+		UserName:    llm.UserNameA2AInbox,
+	}
+	if err := rt.enqueue(env, queue.PriorityOther); err != nil {
+		return "", err
+	}
+	return string(queue.PriorityOther), nil
+}
+
 // EnqueueToolResult 将 tool_result 续跑请求入队（同步工具批处理完成后使用）。
 func (m *Manager) EnqueueToolResult(sessionID string) error {
 	rt := m.getRuntime(sessionID)
@@ -567,7 +589,7 @@ func (m *Manager) attachUserChildTools(rt *runtime) {
 	if rt == nil || rt.isChildSession() || m.children == nil || !m.children.Enabled() {
 		return
 	}
-	rt.orch.SetChildAgentTools(m.children, false)
+	rt.orch.SetChildAgentManager(m.children)
 }
 
 func generateSessionID() (string, error) {

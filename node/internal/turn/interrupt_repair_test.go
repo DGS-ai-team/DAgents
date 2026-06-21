@@ -29,10 +29,11 @@ func TestInterruptPendingThenRepair_noDuplicate(t *testing.T) {
 		}}},
 	}
 	pending := &PendingHITL{
-		Kind: HITLApproval,
-		ToolCalls: []llm.ToolCall{{
-			ID: "call-bash", Type: "function",
-			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"echo hi"}`},
+		Items: []PendingHITLItem{{
+			ToolCall: llm.ToolCall{
+				ID: "call-bash", Type: "function",
+				Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"echo hi"}`},
+			},
 		}},
 	}
 
@@ -58,10 +59,11 @@ func TestRepairThenInterrupt_noDuplicate(t *testing.T) {
 		}}},
 	}
 	pending := &PendingHITL{
-		Kind: HITLApproval,
-		ToolCalls: []llm.ToolCall{{
-			ID: "call-bash", Type: "function",
-			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"echo hi"}`},
+		Items: []PendingHITLItem{{
+			ToolCall: llm.ToolCall{
+				ID: "call-bash", Type: "function",
+				Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"echo hi"}`},
+			},
 		}},
 	}
 
@@ -81,8 +83,9 @@ func TestInterruptPending_twiceNoDuplicate(t *testing.T) {
 		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "call-bash", Function: llm.ToolCallFunction{Name: "bash_run"}}}},
 	}
 	pending := &PendingHITL{
-		Kind:      HITLApproval,
-		ToolCalls: []llm.ToolCall{{ID: "call-bash", Function: llm.ToolCallFunction{Name: "bash_run"}}},
+		Items: []PendingHITLItem{{
+			ToolCall: llm.ToolCall{ID: "call-bash", Function: llm.ToolCallFunction{Name: "bash_run"}},
+		}},
 	}
 
 	orch.InterruptPending("sess-1", &history, pending)

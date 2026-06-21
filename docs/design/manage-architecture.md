@@ -291,6 +291,21 @@ GET  /v1/audit/timeline   ← 按 session 串联（Phase 2）
 
 ---
 
+### 4.5 后续能力（Phase 2+ 规划）
+
+PR #31 及 M3 精简 Skills 之后，Manage 演进四条主线（**契约预留、Node 主动拉取、非强制推送**）：
+
+| 主线 | 角色 | 要点 |
+|------|------|------|
+| **能力市场** | Skill / Plugin 目录 | Node 拉 catalog、**选择**安装/移除；`installs` 登记；见 [manage-phase2-capabilities.md](./manage-phase2-capabilities.md) §1 |
+| **版本发布中枢** | Release Hub | `/v1/releases/check`；Node 查询升级，人工确认后本地安装 |
+| **复杂 Workflow** | 多 Agent 执行计划 | 超越单条 A2A Task；步骤、依赖、验收、最终目标；`manage/workflows/` |
+| **资源中转站** | Shared Artifacts | Blob 之上 artifact 元数据 + 跨 Agent 分享；A2A `attachments[]` 引用 |
+
+全文：[manage-phase2-capabilities.md](./manage-phase2-capabilities.md)。
+
+---
+
 ## 5. 代码目录框架（目标仓库布局）
 
 **移除** `register_center/` 后，新建：

@@ -23,7 +23,7 @@
 1. `dagents-node` 启动后 `GET /health` 返回 `agent_id`。
 2. `dagents-client`（或 `dagents chat` 新实现）创建 session、发消息、收 **SSE** 流式回复。
 3. 至少一条工具链路：`bash_run` 或 `read_file` 在 Node 内执行并回传 `tool_result`。
-4. **HITL**：`approval_required` → Client resume → turn 继续（可先支持 `bash_run` 审批）。
+4. **HITL**：`hitl_required` → Client 分步 resume → turn 继续（可与 ask_user 同批）。
 5. Node 重启后 **session 可恢复**（SQLite 中有历史 messages）。
 6. 在 **WSL / Linux** 上端到端演示；Windows 构建列为 N7 交叉编译目标。
 
@@ -135,9 +135,9 @@ packaging/
 ### N4：HITL 与策略（约 5–7 天）
 
 - [x] 本地 `.runtime/policy/*.approval.txt` 策略
-- [x] `approval_required` SSE + `POST /v1/messages` `request_type=resume`
-- [x] `ask_user_information` → `user_information_required` + resume
-- [x] Client：Textual 与 Go REPL 审批 / 询问 UI
+- [x] HITL SSE + `POST /v1/messages` `request_type=resume`（本地 **`hitl_required`**；A2A 仍 `approval_required` / `user_information_required`）
+- [x] `ask_user_information` + 审批工具可**同批** pending，Client 分步 resume
+- [x] Client：Textual / Go full+repl / Web UI 审批与询问 UI
 
 **产出**：bash 审批链路与 v1 体验等价。
 
@@ -207,7 +207,7 @@ packaging/
 **SSE 事件（必须）**
 
 - `assistant`、`tool_call`、`tool_result`
-- `approval_required`、`user_information_required`
+- `hitl_required`（本地 turn）；A2A 中继仍可能为 `approval_required` / `user_information_required`
 - `error`、`done`
 
 **HTTP（N5+ 可选）**

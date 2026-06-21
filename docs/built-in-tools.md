@@ -86,7 +86,7 @@ Hook 顺序：`PolicyToolHook` → `AgentOwnedFileHook` → `DuplicateToolCallHo
 
 以下说明 **历史 Python 栈** 的 **`get_tools()`** 管道。
 
-**审批**：是否进入 **`approval_required`** 由 **`decide_tool_approval`**（**`tool.py`**）结合 **`AGENT_TOOL_APPROVAL_MODE`**（**`always` / `never` / `rule`**）及 **`.runtime/policy/`** 下策略文件决定；返回值包含 **是否审批、原因、风险等级、策略来源**，并由审批卡片透出；兼容布尔入口 **`should_require_tool_approval`**。
+**审批**：是否进入 HITL（本地 SSE **`hitl_required`** 的 `execute_tool` item）由 **`decide_tool_approval`**（**`tool.py`**）结合 **`AGENT_TOOL_APPROVAL_MODE`**（**`always` / `never` / `rule`**）及 **`.runtime/policy/`** 下策略文件决定；返回值包含 **是否审批、原因、风险等级、策略来源**，并由审批卡片透出；兼容布尔入口 **`should_require_tool_approval`**。
 
 ---
 
@@ -183,7 +183,7 @@ Hook 顺序：`PolicyToolHook` → `AgentOwnedFileHook` → `DuplicateToolCallHo
 
 | 工具名 | 执行形态 | 定义位置 | 作用概要 |
 |--------|----------|----------|----------|
-| **`ask_user_information`** | 编排器特殊处理 | **`app/harness/tools/user_information.py`** | 向用户询问自由文本或选项式信息；发 SSE `user_information_required`，TUI 收集回答后经 `resume(type=user_information)` 回灌为 tool 结果。 |
+| **`ask_user_information`** | 编排器特殊处理 | **`app/harness/tools/user_information.py`** | 向用户询问自由文本或选项式信息；本地 turn 发 **`hitl_required`**（`user_information` item），TUI 收集后经 `resume(type=user_information)` 回灌为 tool 结果。可与需审批工具**同批** pending。 |
 | **`load_skills`** | 同步 | **`app/harness/tools/skills.py`** | 按名称加载会话 **`loaded_skills`**，并返回可用技能元数据（受 **`agent_skills_max_in_prompt`** 等配置影响）。 |
 | **`read_file`** | 同步 | **`app/harness/tools/fs.py`** | 流式按 **`line_offset`/`line_limit`** 分页；头含 **`next_line_offset`**；默认无行号，可用 **`include_line_numbers`** 输出 `行号<TAB>正文`。 |
 | **`search_file`** | 同步 | **`fs.py`** | 流式检索；支持 regex/literal、大小写敏感开关、上下文行数与 **`next_index_offset`** 翻页；命中块建议 **`read_file`** 参数；相邻命中合并上下文。 |

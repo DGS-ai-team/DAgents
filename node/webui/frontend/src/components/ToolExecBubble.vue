@@ -4,7 +4,7 @@ import { formatToolCallLine, formatToolResultDisplay, formatToolElapsed } from "
 import { resolveToolVisual } from "../utils/toolSource.js";
 import { statusStore } from "../stores/statusLines.js";
 import { isReadFileTool } from "../utils/readFilePreview.js";
-import { parseToolArguments } from "../utils/toolCalls.js";
+import { parseToolArguments, toolDisplayName, resolveToolArgumentsFromData } from "../utils/toolCalls.js";
 import ReadFileResultPreview from "./ReadFileResultPreview.vue";
 
 const props = defineProps({
@@ -19,15 +19,14 @@ const visual = computed(() => resolveToolVisual(props.entry));
 const resultDisplay = computed(() =>
   isResult.value ? formatToolResultDisplay(props.entry, { verbose: props.verbose }) : null,
 );
-const displayName = computed(() => {
-  if (isResult.value && resultDisplay.value) return resultDisplay.value.headline;
-  return props.entry.summary || props.entry.data?.summary || props.entry.data?.tool_name || props.entry.data?.name || "tool";
-});
+const toolName = computed(() => String(props.entry.data?.tool_name || props.entry.data?.name || "").trim());
+const toolArgs = computed(() => resolveToolArgumentsFromData(props.entry.data));
+const toolTitle = computed(() => toolDisplayName(toolName.value || "tool", toolArgs.value));
+const displayName = computed(() => toolTitle.value);
 const resultDetail = computed(() => resultDisplay.value?.detail || "");
 const codePreview = computed(() => props.entry.codePreview || "");
-const toolName = computed(() => String(props.entry.data?.tool_name || props.entry.data?.name || "").trim());
 const readFilePath = computed(() => {
-  const args = parseToolArguments(props.entry.data?.arguments ?? props.entry.data?.raw_arguments);
+  const args = toolArgs.value;
   return String(args.path || args.file_path || "").trim();
 });
 const showReadFilePreview = computed(
@@ -39,6 +38,8 @@ const elapsedLive = computed(() => {
   return formatToolElapsed((Date.now() - props.entry.startedAt) / 1000);
 });
 const statusText = computed(() => {
+  if (props.entry.sideEffectApplied) return "已入库";
+  if (props.entry.sideEffectStale) return "已失效";
   if (isCall.value) {
     if (props.entry.partial) return elapsedLive.value ? `生成中${elapsedLive.value}` : "生成中";
     return "待执行";
@@ -51,7 +52,7 @@ const statusText = computed(() => {
 <template>
   <div class="msg msg--tool-centered">
     <div class="msg__body msg__body--wide">
-      <div class="tool-exec-bubble" :class="`tool-exec-bubble--${visual.kind}`">
+      <div class="tool-exec-bubble" :class="[`tool-exec-bubble--${visual.kind}`, { 'tool-exec-bubble--applied': entry.sideEffectApplied, 'tool-exec-bubble--stale': entry.sideEffectStale && !entry.sideEffectApplied }]">
         <div class="tool-exec-bubble__source">
           <span class="tool-source-badge" :class="`tool-source-badge--${visual.kind}`" :title="visual.label">
             <span class="tool-source-badge__icon" aria-hidden="true">{{ visual.icon }}</span>
@@ -91,6 +92,12 @@ const statusText = computed(() => {
 </template>
 
 <style scoped>
+.tool-exec-bubble--applied {
+  opacity: 1;
+}
+.tool-exec-bubble--stale {
+  opacity: 0.55;
+}
 .tool-exec-bubble__result-detail {
   margin-top: 4px;
   white-space: pre-wrap;

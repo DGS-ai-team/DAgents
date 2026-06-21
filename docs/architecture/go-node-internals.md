@@ -156,20 +156,31 @@ HTTP / CLI（internal/api）
 
 | 类型 | 常量 | 典型来源 | consume 处理 |
 |------|------|----------|--------------|
-| 用户消息 | `message` | `POST /v1/messages` | `handleHumanMessage` |
+| 用户消息 | `message` | `POST /v1/messages` | `handleHumanMessage`（步首 Apply 缓冲） |
 | HITL 恢复 | `resume` | 审批 / `ask_user_information` 提交 | `handleResume` |
 | 工具续跑 | `tool_result` | orchestrator 经 `SetToolResultEnqueuer` 回调 | `handleToolResult` |
-| 异步工具完成 | `async_tool_result` | 后台 job 完成 | `handleAsyncToolResult` |
+| 旁路续跑 | `side_effect_continue` | Produce 后 / Cancel 恢复 | `handleSideEffectContinue` |
+| 异步工具完成 | `async_tool_result` | 后台 job 完成 | `handleSideEffectProduceAsync`（Produce） |
+| Trigger | `trigger_message` | trigger fire | `handleSideEffectProduceExternal` |
+| A2A inbox | `a2a_inbox_message` | Manage inbox | `handleSideEffectProduceExternal` |
 
 ### 4.2 优先级（`Priority`）
 
-高优先级项先出队（同优先级 FIFO）：
+高优先级项先出队（同优先级 FIFO 按 `seq`）。实现见 `queue.go` → `priorityValue`。
 
 ```text
-tool_result > resume > human > async_completion > other
+side_effect_continue(-1) = tool_result(-1) > human(0) > resume(1) > async_completion(2) > other(10)
 ```
 
-设计意图：工具结果尽快回灌，以满足 OpenAI 消息序列 `assistant(tool_calls) → tool` 的闭合。
+| 档位 | 典型 `request_type` | 说明 |
+|------|----------------------|------|
+| `tool_result` | `tool_result` / `side_effect_continue` | 同步工具闭合续跑；旁路 Apply 后续跑 LLM |
+| `human` | `message` | 新 user 输入；**高于**排队的 `resume` |
+| `resume` | `resume` | HITL 提交 |
+| `async_completion` | `async_tool_result` | 后台 job **Produce**（缓冲 + SSE） |
+| `other` | `trigger_message` / `a2a_inbox_message` | trigger / A2A inbox **Produce** |
+
+**注意**：`async_tool_result` 等在 pending HITL 期间仍会被 **Produce**，但 **不** inline 改 history（`sideEffectStore`）。open batch 下 Apply 在步首或 TaskComplete/Cancel 时 continue。见 [turn-side-effects-refactor.md](../design/turn-side-effects-refactor.md)。
 
 ### 4.3 与 turn 的关系
 
@@ -233,7 +244,8 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 事后设置：
 
 - `SetToolResultEnqueuer` — 工具步结束后入队 `tool_result`
-- `SetChildAgentTools(mgr, isChild)` — 父可 `create_temporary_agent`；子禁止管理类工具
+- `SetChildAgentManager(mgr)` — 父 session 注入管理器，可 `create_temporary_agent`
+- `SetChildSession(true)` — 子 session 禁止管理类工具
 
 ### 6.2 单步主路径（`runOneStep`）
 
@@ -259,7 +271,7 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 | 项 | 父 | 子（临时 Agent） |
 |----|-----|------------------|
 | 创建 | `Manager.Create` | `childagent` → `SpawnChild` |
-| Orchestrator | `NewOrchestrator` + `SetChildAgentTools(false)` | 同上 + `SetChildAgentTools(true)` |
+| Orchestrator | `NewOrchestrator` + `SetChildAgentManager` | 同上 + `SetChildSession(true)` |
 | SSE | 直接 `Hub.Publish(sessionID)` | `RelayHub` → 父 `session_id` |
 | 持久化 | SQLite | 无 |
 | 压缩 | 可选 | 关闭 |

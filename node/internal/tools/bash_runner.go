@@ -156,10 +156,12 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 	}
 
 	sessionID := sessionIDFromContext(ctx)
+	toolCallID := toolCallIDFromContext(ctx)
 	job := &backgroundJob{
-		id:                 newJobID(),
-		sessionID:          sessionID,
-		toolName:           "bash_run",
+		id:         newJobID(),
+		sessionID:  sessionID,
+		toolName:   "bash_run",
+		toolCallID: toolCallID,
 		status:             "running",
 		startedAt:          nowMs(),
 		done:               make(chan struct{}),

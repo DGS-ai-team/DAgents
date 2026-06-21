@@ -49,7 +49,8 @@ sequenceDiagram
 **事后注入**（由 `session.newRuntimeWithPublisher` 完成）：
 
 - `SetToolResultEnqueuer`：工具步结束后入队 `tool_result`（生产必须）
-- `SetChildAgentTools(mgr, isChild)`：父 `false` 可创建临时 Agent；子 `true` 禁止
+- `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
+- `SetChildSession(true)`：子 session 禁止管理类工具与 `ask_user`
 
 `policy == nil` 时加载默认策略文件；`maxToolLoops <= 0` 时用默认 **16**。
 
@@ -62,9 +63,9 @@ sequenceDiagram
 | `RunHumanMessageTurn` | 追加 user 消息后**单步**模型回合 |
 | `RunToolMessageTurn` | history 已含 tool 结果后**单步**续跑 |
 | `ContinueAfterResume` | HITL resume 写入 tool 结果并调度续跑 |
-| `HandleAsyncToolResult` | 后台 job 完成，按尾部形态补 history 并可选续跑 |
 | `InterruptPending` | 新 user 消息打断 pending tool calls |
-| `RunMessageTurn` | 测试用：内联多步直到 pending 或结束 |
+
+旁路 side-effect（Produce/Apply/Continue）见 [`side_effect_messages.go`](./side_effect_messages.go)、[`task_complete.go`](./task_complete.go)；session 侧 [`../session/side_effects.go`](../session/side_effects.go)。规格：[`../../../docs/design/turn-side-effects-refactor.md`](../../../docs/design/turn-side-effects-refactor.md)。
 
 每步返回 `StepOutcome`：`Pending`、`LoopCount`、`ScheduleToolResult`、`Err`。
 
@@ -95,12 +96,16 @@ skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时�
 `processToolCalls` 按 `policy.DecideTool` 将 tool calls 分为：
 
 - **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 超时由 registry 自动降级；历史参数仍可走内部 `StartBackground`）
-- **approval**：`PendingHITL{Kind: approval}`，SSE `approval_required`
-- **user_information**：`ask_user_information`，SSE `user_information_required`
+- **HITL pending**：`ask_user_information` 与 `require_approval` 工具合并为 **`PendingHITL.Items[]`**（不再区分 `HITLKind`）
+- **SSE**：本地 turn 发 **`hitl_required`**（`items[]` 每项 `hitl_type`：`user_information` \| `execute_tool`）；`done` 为 `awaiting_hitl` / `awaiting=hitl`
+
+**分步 resume**：Client 按 item 类型提交 `resume`（`type=user_information` 或 `type=approval|selection`）；Node `ContinueAfterResume` 部分消 pending，全部 resolved 后 `ScheduleToolResult`。
+
+**仍用旧事件的路径**：A2A caller 中继（`approval_required` / `user_information_required`）、子 Agent 审批 relay（`approval_required` + `child_session_id`）。
 
 临时 Agent 四类工具在父 session 转 `childagent.Manager.HandleParentTool`；子 session 调用管理类工具会被拒绝。
 
-`pending.go` 定义 `PendingHITL`、`HITLKind`；`approval_payload.go` 构造审批展示字段。
+`pending.go` 定义 `PendingHITL`、`PendingHITLItem`；`hitl_payload.go` / `approval_payload.go` 构造 SSE 展示字段。
 
 ---
 
@@ -120,14 +125,19 @@ skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时�
 
 | 文件 | 说明 |
 |------|------|
-| `orchestrator.go` | `Orchestrator`、单步 LLM 循环、SSE、usage |
+| `orchestrator.go` | `Orchestrator`、单步 LLM 循环、usage |
+| `sse_publish.go` | 全部 SSE `publish*` 入口 |
 | `tool_router.go` | 工具分流（policy/childagent/skills/HITL）、并行执行 |
 | `cancel_partial.go` | 流式 cancel 部分 assistant 落库与 tool 补位 |
 | `history_write.go` | `appendHistory` / `insertHistory` |
 | `prompt.go` | `BuildSystemPrompt`、`staticSystemPrompt`、`DefaultMaxToolLoops` |
-| `pending.go` | `PendingHITL`、`HITLKind`、`ToolUserInterruptedMessage` |
+| `pending.go` | `PendingHITL`、`PendingHITLItem`、`ToolUserInterruptedMessage` |
+| `hitl_payload.go` | `hitl_required` SSE 载荷 |
+| `pending_resume.go` | `ContinueAfterResume` 分步消 pending |
 | `step.go` | `StepOutcome`、`RuntimeToolMessageContent` |
-| `tool_result_messages.go` | 异步工具回灌 history 形态与截断 |
+| `side_effect_messages.go` | 旁路 Apply 计划、合并 `get_callback` batch |
+| `task_complete.go` | `TaskComplete` / `TaskPhase` 判定 |
+| `tool_result_messages.go` | async 消息 bundle 构建、tail 分类 |
 | `approval_payload.go` | HITL 审批 SSE 载荷辅助 |
 | `*_test.go` | 单测 |
 

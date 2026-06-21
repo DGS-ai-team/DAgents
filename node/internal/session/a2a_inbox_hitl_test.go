@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +86,9 @@ func approvalIDFromHITL(hitl *InboxHITLPause) string {
 	if hitl == nil || hitl.Data == nil {
 		return ""
 	}
+	if id, ok := hitl.Data["hitl_id"].(string); ok && strings.TrimSpace(id) != "" {
+		return strings.TrimSpace(id)
+	}
 	if id, ok := hitl.Data["approval_id"].(string); ok {
 		return strings.TrimSpace(id)
 	}
@@ -94,6 +98,9 @@ func approvalIDFromHITL(hitl *InboxHITLPause) string {
 func toolCallIDsFromHITL(hitl *InboxHITLPause) []string {
 	if hitl == nil || hitl.Data == nil {
 		return nil
+	}
+	if hitl.EventType == "hitl_required" {
+		return executeToolCallIDsFromHITLItems(hitl.Data["items"])
 	}
 	args, _ := hitl.Data["approval_args"].(map[string]any)
 	if args == nil {
@@ -106,6 +113,37 @@ func toolCallIDsFromHITL(hitl *InboxHITLPause) []string {
 		}
 	}
 	return ids
+}
+
+func executeToolCallIDsFromHITLItems(raw any) []string {
+	items := hitlItemsFromSSE(raw)
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(fmt.Sprint(item["hitl_type"])) != "execute_tool" {
+			continue
+		}
+		if id, ok := item["id"].(string); ok && strings.TrimSpace(id) != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func hitlItemsFromSSE(raw any) []map[string]any {
+	switch items := raw.(type) {
+	case []any:
+		out := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	case []map[string]any:
+		return items
+	default:
+		return nil
+	}
 }
 
 func toolCallsFromApprovalArgs(args map[string]any) []map[string]any {
@@ -142,7 +180,7 @@ func TestRunInboxTurn_approvalResumeExecutesBashRun(t *testing.T) {
 	if step1.Complete {
 		t.Fatalf("expected HITL pause, got complete text=%q", step1.Text)
 	}
-	if step1.HITL == nil || step1.HITL.Awaiting != "tool_approval" {
+	if step1.HITL == nil || step1.HITL.Awaiting != "hitl" {
 		t.Fatalf("hitl=%+v", step1.HITL)
 	}
 	approved := toolCallIDsFromHITL(step1.HITL)
@@ -158,8 +196,8 @@ func TestRunInboxTurn_approvalResumeExecutesBashRun(t *testing.T) {
 	if view.PendingToolCallsCount != 1 {
 		t.Fatalf("pending=%d want 1", view.PendingToolCallsCount)
 	}
-	if view.MessagesCount != 2 {
-		t.Fatalf("messages=%d want 2 (user+assistant)", view.MessagesCount)
+	if view.MessagesCount != 4 {
+		t.Fatalf("messages=%d want 4 (bridge user+callback+tool + assistant tool_calls)", view.MessagesCount)
 	}
 
 	resume := map[string]any{
@@ -263,10 +301,10 @@ func TestRunInboxTurn_userInformationResumeCompletes(t *testing.T) {
 	if step1.Complete {
 		t.Fatalf("expected user_information pause, complete text=%q", step1.Text)
 	}
-	if step1.HITL == nil || step1.HITL.Awaiting != "user_information" {
+	if step1.HITL == nil || step1.HITL.Awaiting != "hitl" {
 		t.Fatalf("hitl=%+v", step1.HITL)
 	}
-	if step1.HITL.EventType != "user_information_required" {
+	if step1.HITL.EventType != "hitl_required" {
 		t.Fatalf("event_type=%q", step1.HITL.EventType)
 	}
 

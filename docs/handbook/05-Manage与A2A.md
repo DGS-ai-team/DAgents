@@ -120,7 +120,7 @@ InboxPoller 收到 Task
 |------|------|
 | 专用 inbox session | 与 Client session 隔离 |
 | SSE 订阅 | 入队**前** `afterSeq := hub.CurrentSeq()`，再 `Subscribe(afterSeq)` |
-| 多步 HITL | 循环等待 `approval_required` / `user_information_required` |
+| 多步 HITL | 循环等待 `hitl_required`（inbox 本地 turn）；caller 中继仍为 `approval_required` / `user_information_required` |
 | `requires_input` | reply 载荷含 `callee_agent_*` 元数据供 caller 展示 |
 
 ### 4.3 跟读清单

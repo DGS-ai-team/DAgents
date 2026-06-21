@@ -12,6 +12,7 @@ import {
   persistSessionId,
   ensureSession,
   beginSubmit,
+  beginImplicitTurn,
   finishTurn,
   markTurnContent,
   shouldAcceptDone,
@@ -24,6 +25,9 @@ import {
   transcriptStore,
   noteSeq,
   addUser,
+  addDeferredUser,
+  markSideEffectsApplied,
+  markSideEffectsStale,
   addSystem,
   appendAssistant,
   appendReasoning,
@@ -48,6 +52,7 @@ import {
   extractUserInfo,
   buildUserInfoResume,
   buildUserInfoResumeFromSelection,
+  expandHitlRequired,
   shouldSkipChildRuntimeDisplay,
 } from "./stores/hitl.js";
 import { chromeStore, setUsageFromSSE, resetUsageStrip } from "./stores/chrome.js";
@@ -70,7 +75,7 @@ import {
   syncChildAgentsFromApi,
 } from "./stores/remoteWorkers.js";
 import { runSlashCommand } from "./utils/commands.js";
-import { approvalItemDisplayName } from "./utils/format.js";
+import { approvalItemDisplayName, sessionDisplayTitle } from "./utils/format.js";
 
 const hitlSelected = ref(0);
 const cancelling = ref(false);
@@ -89,6 +94,14 @@ const canSend = computed(() => {
 });
 const sending = computed(() => sessionStore.awaitingTurn);
 const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_supported);
+
+function syncReasoningDisplay(llm) {
+  if (!llm?.thinking_supported) return;
+  const t = String(llm.thinking || "").trim().toLowerCase();
+  if (t && !["disabled", "off", "false", "0"].includes(t)) {
+    transcriptStore.showReasoning = true;
+  }
+}
 
 function restartStream() {
   streamHandle.value?.close();
@@ -115,6 +128,7 @@ async function refreshMeta() {
     const [health, info, llm] = await Promise.all([api.getHealth(), api.getAgentInfo(), api.getLLMSettings()]);
     chromeStore.agentInfo = { ...health, ...info };
     chromeStore.llmSettings = llm;
+    syncReasoningDisplay(llm);
   } catch (e) {
     sessionStore.error = e.message;
   }
@@ -182,6 +196,24 @@ function handleEvent(ev) {
       }
       refreshContextTokens();
       break;
+    case "hitl_required":
+      finalizeAssistant();
+      finalizeReasoning();
+      finishWaitingStatuses();
+      {
+        const { userInfos, approval } = expandHitlRequired(ev.data);
+        for (const ui of userInfos) {
+          enqueueHitl({ kind: "user_information", data: ui });
+        }
+        if (approval) {
+          enqueueHitl({ kind: "approval", data: approval });
+          if (approval.child_session_id) setChildAwaitingApproval(approval.child_session_id, true);
+        }
+      }
+      if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
+      chromeStore.hitlQueueLen = hitlStore.queue.length;
+      hitlStore.busy = false;
+      break;
     case "approval_required":
       finalizeAssistant();
       finalizeReasoning();
@@ -214,6 +246,23 @@ function handleEvent(ev) {
     case "context_compression_silent":
       handleCompressionEvent(ev.type, ev.data);
       refreshContextTokens();
+      break;
+    case "side_effect_turn_start":
+      beginImplicitTurn();
+      sessionStore.statusLine = "处理旁路回调…";
+      break;
+    case "user_message_deferred":
+      addDeferredUser(
+        String(ev.data.content || ""),
+        String(ev.data.user_name || ""),
+        Number(ev.data.side_effect_seq) || 0,
+      );
+      break;
+    case "side_effect_applied":
+      markSideEffectsApplied(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);
+      break;
+    case "side_effects_cleared":
+      markSideEffectsStale(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);
       break;
     default:
       break;
@@ -475,16 +524,22 @@ async function switchSession(id) {
   sessionPanelRef.value?.refresh?.();
 }
 
-async function deleteSessionById(id) {
-  const sid = String(id || "").trim();
-  if (!sid) return;
-  const label = sessionDisplayTitle({ session_id: sid, first_user_message: "" });
+async function deleteSessionById(payload) {
+  const sid = String(typeof payload === "string" ? payload : payload?.id || "").trim();
+  if (!sid) {
+    sessionStore.error = "无法删除：会话 ID 无效";
+    return;
+  }
+  const session = typeof payload === "object" && payload?.session ? payload.session : { session_id: sid };
+  const label = sessionDisplayTitle(session);
   if (!window.confirm(`确定删除会话「${label}」？\n\n将停止该会话并清除持久化记录，不可恢复。`)) return;
   sessionStore.error = "";
   sessionPanelRef.value?.setDeleting?.(sid);
   try {
     await api.deleteSession(sid);
     if (sessionStore.sessionId === sid) {
+      finishTurn();
+      hitlStore.busy = false;
       await createNewSession();
     } else {
       addSystem(`已删除 session: ${sid.slice(0, 16)}…`);
@@ -513,6 +568,7 @@ async function toggleThinkingMode() {
   const enabled = !["disabled", "off"].includes(t);
   try {
     chromeStore.llmSettings = await api.patchLLMSettings({ thinking: enabled ? "disabled" : "enabled" });
+    syncReasoningDisplay(chromeStore.llmSettings);
   } catch (e) {
     sessionStore.error = e.message;
   }
@@ -637,46 +693,48 @@ watch(
     <AppHeader subtitle="Node Web UI · 本机 Agent" />
 
     <div class="app__body app__body--two-col">
-      <MainChatPanel
-        :entries="entries"
-        :hitl-queue="hitlStore.queue"
-        :show-reasoning="transcriptStore.showReasoning"
-        :tool-verbose="transcriptStore.toolFoldVerbose"
-        :disabled="!canSend"
-        :sending="sending"
-        :cancelling="cancelling"
-        :hitl-busy="hitlStore.busy"
-        :thinking-supported="thinkingSupported"
-        :llm-settings="chromeStore.llmSettings"
-        @send="onSendMessage"
-        @cancel="cancelTurn"
-        @open-context="openContextPanel"
-        @toggle-thinking="toggleThinkingMode"
-        @cycle-effort="cycleThinkingEffort"
-        @approve-all="submitHitlApproval(true)"
-        @reject-all="submitHitlApproval(false)"
-        @approve-one="(id) => submitHitlOne(id, true)"
-        @reject-one="(id) => submitHitlOne(id, false)"
-        @user-info-submit="submitHitlUserInfo('')"
-      />
+      <div class="app__main-col">
+        <MainChatPanel
+          :entries="entries"
+          :hitl-queue="hitlStore.queue"
+          :show-reasoning="transcriptStore.showReasoning"
+          :tool-verbose="transcriptStore.toolFoldVerbose"
+          :disabled="!canSend"
+          :sending="sending"
+          :cancelling="cancelling"
+          :hitl-busy="hitlStore.busy"
+          :thinking-supported="thinkingSupported"
+          :llm-settings="chromeStore.llmSettings"
+          @send="onSendMessage"
+          @cancel="cancelTurn"
+          @open-context="openContextPanel"
+          @toggle-thinking="toggleThinkingMode"
+          @cycle-effort="cycleThinkingEffort"
+          @approve-all="submitHitlApproval(true)"
+          @reject-all="submitHitlApproval(false)"
+          @approve-one="(id) => submitHitlOne(id, true)"
+          @reject-one="(id) => submitHitlOne(id, false)"
+          @user-info-submit="submitHitlUserInfo('')"
+        />
+
+        <div v-if="chromeStore.panel" class="panel-overlay" @click.self="closePanel">
+          <ContextPanel v-if="chromeStore.panel === 'context'" @close="closePanel" />
+          <section v-else class="panel panel-overlay__card">
+            <header class="panel__header">
+              <div class="panel__title">{{ panelTitle }}</div>
+              <button type="button" class="btn btn--ghost btn--sm" @click="closePanel">关闭 (Esc)</button>
+            </header>
+            <div class="panel__body">
+              <pre>{{ panelBody }}</pre>
+            </div>
+          </section>
+        </div>
+      </div>
 
       <aside class="app__col app__col--aside">
         <RuntimeStatusPanel :api-base="apiBase" />
         <SessionPanel ref="sessionPanelRef" @switch="switchSession" @new="createNewSession" @delete="deleteSessionById" />
       </aside>
-    </div>
-
-    <div v-if="chromeStore.panel" class="panel-overlay" @click.self="closePanel">
-      <ContextPanel v-if="chromeStore.panel === 'context'" @close="closePanel" />
-      <section v-else class="panel panel-overlay__card">
-        <header class="panel__header">
-          <div class="panel__title">{{ panelTitle }}</div>
-          <button type="button" class="btn btn--ghost btn--sm" @click="closePanel">关闭 (Esc)</button>
-        </header>
-        <div class="panel__body">
-          <pre>{{ panelBody }}</pre>
-        </div>
-      </section>
     </div>
   </div>
 </template>

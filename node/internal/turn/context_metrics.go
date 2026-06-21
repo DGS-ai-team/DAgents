@@ -62,6 +62,7 @@ func (s *contextMetricsStore) get(sessionID string) *TurnContextMetrics {
 	return m
 }
 
+// resetContextMetrics 新 user 消息 turn 开始时清零工具链指标，供 done 的 tool_context_metrics 使用。
 func (o *Orchestrator) resetContextMetrics(sessionID string) {
 	if o == nil || o.ctxMetrics == nil {
 		return
@@ -191,7 +192,7 @@ func (m *TurnContextMetrics) snapshot() map[string]any {
 	return out
 }
 
-func (o *Orchestrator) publishTurnContextMetrics(sessionID, finishReason string) {
+func (o *Orchestrator) logTurnContextMetrics(sessionID, finishReason string) {
 	m := o.contextMetrics(sessionID)
 	if m == nil || o.logger == nil {
 		return
