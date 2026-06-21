@@ -51,12 +51,13 @@ type SideEffectApplyPlan struct {
 func (o *Orchestrator) BuildSideEffectMessages(
 	kind SideEffectKind,
 	sessionID string,
+	history []llm.Message,
 	async queue.AsyncToolResultPayload,
 	content, userName string,
 ) SideEffectMessages {
 	switch kind {
 	case SideEffectAsync:
-		built := o.buildAsyncToolMessages(sessionID, AsyncToolResultInput{
+		built := o.buildAsyncToolMessages(sessionID, history, AsyncToolResultInput{
 			JobID:                  async.JobID,
 			ToolName:               async.ToolName,
 			ToolCallID:             async.ToolCallID,
@@ -303,7 +304,7 @@ func SideEffectAlreadyApplied(messages []llm.Message, kind SideEffectKind, async
 	jobID := strings.TrimSpace(async.JobID)
 	if kind == SideEffectAsync && jobID != "" {
 		for _, m := range messages {
-			if m.Role == "tool" && strings.Contains(m.Content, "job_id："+jobID) {
+			if m.Role == "tool" && asyncToolResultAppliedInHistory(m.Content, jobID) {
 				return true
 			}
 		}

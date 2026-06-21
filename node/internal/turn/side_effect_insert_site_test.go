@@ -12,7 +12,7 @@ import (
 func TestResolveSideEffectInsertSite_table(t *testing.T) {
 	hub := stream.NewHub(4, logx.Discard())
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
-	built := orch.BuildSideEffectMessages(SideEffectAsync, "s", queue.AsyncToolResultPayload{
+	built := orch.BuildSideEffectMessages(SideEffectAsync, "s", nil, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", Status: "succeeded", ResultText: "done",
 	}, "", "")
 

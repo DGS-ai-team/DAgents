@@ -2,7 +2,6 @@ package turn
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
@@ -63,7 +62,7 @@ type asyncToolMessages struct {
 	OutputCompressOutRunes int
 }
 
-func (o *Orchestrator) buildAsyncToolMessages(sessionID string, payload AsyncToolResultInput) asyncToolMessages {
+func (o *Orchestrator) buildAsyncToolMessages(sessionID string, history []llm.Message, payload AsyncToolResultInput) asyncToolMessages {
 	toolName := strings.TrimSpace(payload.ToolName)
 	if toolName == "" {
 		toolName = "unknown_tool"
@@ -76,10 +75,8 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, payload AsyncToo
 	if status == "" {
 		status = "succeeded"
 	}
-	toolCallID := strings.TrimSpace(payload.ToolCallID)
-	if toolCallID == "" {
-		toolCallID = "async-job-" + jobID
-	}
+	src := lookupAsyncSourceFromHistory(history, toolName, jobID, payload.ToolCallID)
+	toolCallID := asyncCallbackToolCallID(jobID)
 	resultBody := strings.TrimSpace(payload.ResultText)
 	if status != "succeeded" {
 		if errText := strings.TrimSpace(payload.ErrorText); errText != "" {
@@ -104,12 +101,9 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, payload AsyncToo
 			historyBody = split.ForHistory
 		}
 	}
-	toolText := fmt.Sprintf(
-		"工具%s执行已完成，job_id：%s，执行结果如下：%s",
-		toolName, jobID, historyBody,
-	)
-	userText := fmt.Sprintf("工具%s，job_id已完成，请获取执行结果并继续任务。", toolName)
-	argsJSON := fmt.Sprintf(`{"job_id":%q,"tool_name":%q,"status":%q}`, jobID, toolName, status)
+	toolText := formatAsyncToolResultContent(toolName, jobID, status, src, historyBody)
+	userText := formatAsyncToolUserMessage(toolName, jobID, status, src.CallPurpose)
+	argsJSON := formatAsyncToolCallbackArgs(toolName, jobID, status, src)
 	_ = fullForClient // referenced via ForClientContent
 	return asyncToolMessages{
 		UserMessage: llm.UserMessage(userText, llm.UserNameAsyncTool),

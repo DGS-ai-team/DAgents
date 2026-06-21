@@ -13,7 +13,7 @@ func TestPlanSingleSideEffectApply_emptyHistoryBridge(t *testing.T) {
 	hub := stream.NewHub(4, logx.Discard())
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
 
-	built := orch.BuildSideEffectMessages(SideEffectExternalMessage, "sess-1", queue.AsyncToolResultPayload{}, "hello inbox", llm.UserNameA2AInbox)
+	built := orch.BuildSideEffectMessages(SideEffectExternalMessage, "sess-1", nil, queue.AsyncToolResultPayload{}, "hello inbox", llm.UserNameA2AInbox)
 	plan := PlanSingleSideEffectApply(nil, built)
 	if len(plan.Messages) != 3 {
 		t.Fatalf("messages = %d, want 3 (user+assistant+tool)", len(plan.Messages))
@@ -43,12 +43,12 @@ func TestBuildMergedCallbackBatch_twoAsync(t *testing.T) {
 	async2 := queue.AsyncToolResultPayload{JobID: "job-2", ToolName: "bash_run", Status: "failed", ErrorText: "exit 1"}
 	e1 := SideEffectBatchEntry{
 		Kind:  SideEffectAsync,
-		Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", async1, "", ""),
+		Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", history, async1, "", ""),
 		Async: async1,
 	}
 	e2 := SideEffectBatchEntry{
 		Kind:  SideEffectAsync,
-		Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", async2, "", ""),
+		Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", history, async2, "", ""),
 		Async: async2,
 	}
 	plan := BuildMergedCallbackBatch([]SideEffectBatchEntry{e1, e2}, history)

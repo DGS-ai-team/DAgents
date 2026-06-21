@@ -82,7 +82,7 @@ func (s *sideEffectStore) Produce(
 	if in.Async != nil {
 		async = *in.Async
 	}
-	built := orch.BuildSideEffectMessages(in.Kind, sessionID, async, in.MessageContent, in.UserName)
+	built := orch.BuildSideEffectMessages(in.Kind, sessionID, messages, async, in.MessageContent, in.UserName)
 
 	switch in.Kind {
 	case turn.SideEffectAsync:

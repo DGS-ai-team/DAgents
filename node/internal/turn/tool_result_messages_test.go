@@ -22,7 +22,7 @@ func TestPlanSingleSideEffectApply_tailToolAppendsCallbackNotUser(t *testing.T) 
 		{Role: "tool", ToolCallID: "call-bg-1", Content: "accepted"},
 	}
 
-	built := orch.BuildSideEffectMessages(SideEffectAsync, "sess-1", queue.AsyncToolResultPayload{
+	built := orch.BuildSideEffectMessages(SideEffectAsync, "sess-1", history, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", ToolCallID: "async-job-1", Status: "succeeded", ResultText: "done",
 	}, "", "")
 	plan := PlanSingleSideEffectApply(history, built)

@@ -23,12 +23,12 @@ func TestBuildMergedCallbackBatch_asyncAndTrigger(t *testing.T) {
 	entries := []SideEffectBatchEntry{
 		{
 			Kind:  SideEffectAsync,
-			Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", async, "", ""),
+			Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", history, async, "", ""),
 			Async: async,
 		},
 		{
 			Kind:           SideEffectExternalMessage,
-			Built:          orch.BuildSideEffectMessages(SideEffectExternalMessage, "s", queue.AsyncToolResultPayload{}, "trigger text", llm.UserNameTrigger),
+			Built:          orch.BuildSideEffectMessages(SideEffectExternalMessage, "s", history, queue.AsyncToolResultPayload{}, "trigger text", llm.UserNameTrigger),
 			MessageContent: "trigger text",
 			UserName:       llm.UserNameTrigger,
 			TriggerID:      "trig-1",
@@ -68,7 +68,7 @@ func TestBuildMergedCallbackBatch_asyncAndTrigger(t *testing.T) {
 func TestPlanSingleSideEffectApply_singleStillToolCallback(t *testing.T) {
 	hub := stream.NewHub(4, logx.Discard())
 	orch := testOrchestrator(t, hub, &llm.MockClient{})
-	built := orch.BuildSideEffectMessages(SideEffectAsync, "s", queue.AsyncToolResultPayload{
+	built := orch.BuildSideEffectMessages(SideEffectAsync, "s", nil, queue.AsyncToolResultPayload{
 		JobID: "job-1", ToolName: "bash_run", Status: "succeeded", ResultText: "done",
 	}, "", "")
 	history := []llm.Message{
