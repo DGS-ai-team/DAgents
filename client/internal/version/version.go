@@ -2,4 +2,4 @@
 package version
 
 // Version 为对外日志与 /status 使用的语义化版本。
-const Version = "0.4.0"
+const Version = "0.5.0"

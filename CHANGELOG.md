@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-21
+
+**0.x 预览**：Turn **旁路侧效应**（Produce / Apply / Continue）落地；**Hooks RunPhase** 框架；异步工具回灌消息对模型更友好；Web UI 流式状态与 deferred 旁路展示对齐 Client。
+
+### 新增
+
+- **旁路侧效应（side-effect）**：`async_tool_result` / `trigger_message` / `a2a_inbox_message` 走 **Produce**（缓冲 + 立即 SSE，不改 history）与 **Apply**（TaskComplete / 步首入库）；`side_effect_continue` 被动续跑 LLM；SSE 事件 `user_message_deferred`、`side_effect_applied`、`side_effects_cleared`、`side_effect_turn_start`。
+- **Hooks RunPhase**：`tool.before_each` / `tool.after_each` / `llm.after_call` 等阶段 Hook；内置 duplicate、policy、agent-owned-file、tool_result 压缩；支持外部 Hook 目录加载。
+- **异步回灌结构化文案**：user / tool / `tool_callback` 携带 `job_id`、`status`、`call_purpose` 与关键参数摘要；从 history 反查原始 tool call；tool 结果以 `[ASYNC_TOOL_RESULT]` 结构化头 + 正文。
+- **Web UI**：`StreamStatusBubble` 展示 LLM / 工具阶段耗时；deferred 旁路与 `tool_callback` 标题解析（含 `call_purpose`）；双栏布局与会话删除交互改进。
+
+### 变更
+
+- **SSE 发布**：turn 层统一为 `sse_publish.go`（`PublishSideEffectCallback` 等）。
+- **Turn**：移除 `RunMessageTurn`，单测与 inline 路径对齐；`SetChildAgentManager` / `SetChildSession` 拆分。
+- **bash 超时降级**：后台 job 保留 `toolCallID`，便于异步回灌关联原始调用。
+
+### 修复
+
+- **异步 user 消息**：修复 `job_id` 未填入实际值（文案误为字面量「job_id已完成」）。
+- **旁路幂等**：`SideEffectAlreadyApplied` 仅匹配 `[ASYNC_TOOL_RESULT]`，避免与 `[TOOL_BACKGROUND] job_id=` 误判。
+- **Issue #32**：pending HITL / open batch 期间 Produce 不 inline 改 history 的回归测试与规格文档。
+
+（Git **tag**：`v0.5.0`。）
+
 ## [0.4.0] - 2026-06-17
 
 **0.x 预览**：Go Node **内嵌 Web UI**（`/ui/`）随 `dagents-node` 发布；`dagents node` 打印可访问地址；Windows 后台 Node 与安装包打包链路修复；Client/Node 展示与 token 估算小改进。
