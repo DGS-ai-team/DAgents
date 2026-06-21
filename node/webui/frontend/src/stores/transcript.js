@@ -2,7 +2,9 @@ import { reactive } from "vue";
 import {
   extractToolCallsFromEvent,
   toolCallParts,
+  toolDisplayName,
   toolIndexFromEvent,
+  resolveToolArgumentsFromData,
   USER_INFORMATION_TOOL,
 } from "../utils/toolCalls.js";
 import {
@@ -252,12 +254,24 @@ export function applyToolResult(data) {
   };
   if (idx >= 0 && transcriptStore.entries[idx].kind === "tool_call") {
     const prev = transcriptStore.entries[idx];
+    const args = prev.data?.arguments || resolveToolArgumentsFromData(prev.data);
+    const toolName = String(data.tool_name || prev.data?.tool_name || prev.data?.name || "tool").trim();
+    const summary = toolDisplayName(toolName, args);
     row.data = {
       ...row.data,
-      arguments: prev.data?.arguments,
+      arguments: args,
       raw_arguments: prev.data?.raw_arguments,
-      summary: prev.summary || prev.data?.summary,
+      summary,
     };
+    row.summary = summary;
+  } else {
+    const args = resolveToolArgumentsFromData(data);
+    const toolName = String(data?.tool_name || data?.name || "tool").trim();
+    if (Object.keys(args).length) {
+      const summary = toolDisplayName(toolName, args);
+      row.data = { ...row.data, arguments: args, summary };
+      row.summary = summary;
+    }
   }
   if (idx >= 0) transcriptStore.entries[idx] = row;
   else transcriptStore.entries.push(row);

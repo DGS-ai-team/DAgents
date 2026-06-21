@@ -4,7 +4,7 @@ import { formatToolCallLine, formatToolResultDisplay, formatToolElapsed } from "
 import { resolveToolVisual } from "../utils/toolSource.js";
 import { statusStore } from "../stores/statusLines.js";
 import { isReadFileTool } from "../utils/readFilePreview.js";
-import { parseToolArguments } from "../utils/toolCalls.js";
+import { parseToolArguments, toolDisplayName, resolveToolArgumentsFromData } from "../utils/toolCalls.js";
 import ReadFileResultPreview from "./ReadFileResultPreview.vue";
 
 const props = defineProps({
@@ -19,15 +19,14 @@ const visual = computed(() => resolveToolVisual(props.entry));
 const resultDisplay = computed(() =>
   isResult.value ? formatToolResultDisplay(props.entry, { verbose: props.verbose }) : null,
 );
-const displayName = computed(() => {
-  if (isResult.value && resultDisplay.value) return resultDisplay.value.headline;
-  return props.entry.summary || props.entry.data?.summary || props.entry.data?.tool_name || props.entry.data?.name || "tool";
-});
+const toolName = computed(() => String(props.entry.data?.tool_name || props.entry.data?.name || "").trim());
+const toolArgs = computed(() => resolveToolArgumentsFromData(props.entry.data));
+const toolTitle = computed(() => toolDisplayName(toolName.value || "tool", toolArgs.value));
+const displayName = computed(() => toolTitle.value);
 const resultDetail = computed(() => resultDisplay.value?.detail || "");
 const codePreview = computed(() => props.entry.codePreview || "");
-const toolName = computed(() => String(props.entry.data?.tool_name || props.entry.data?.name || "").trim());
 const readFilePath = computed(() => {
-  const args = parseToolArguments(props.entry.data?.arguments ?? props.entry.data?.raw_arguments);
+  const args = toolArgs.value;
   return String(args.path || args.file_path || "").trim();
 });
 const showReadFilePreview = computed(

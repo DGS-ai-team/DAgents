@@ -2,7 +2,7 @@
 import { ref, onMounted } from "vue";
 import * as api from "../api/node.js";
 import { sessionStore } from "../stores/session.js";
-import { formatRelativeTime, sessionDisplayTitle } from "../utils/format.js";
+import { formatRelativeTime, sessionDisplayTitle, sessionRecordId } from "../utils/format.js";
 
 const emit = defineEmits(["switch", "new", "delete"]);
 
@@ -30,9 +30,10 @@ function createNew() {
   emit("new");
 }
 
-function onDelete(id) {
-  if (!id || deletingId.value) return;
-  emit("delete", id);
+function onDelete(session) {
+  const id = sessionRecordId(session);
+  if (!id || deletingId.value === id) return;
+  emit("delete", { id, session });
 }
 
 function setDeleting(id) {
@@ -58,13 +59,13 @@ defineExpose({ refresh, setDeleting });
       <ul v-else class="session-history-list">
         <li
           v-for="s in sessions"
-          :key="s.session_id"
+          :key="sessionRecordId(s)"
           class="session-history-item"
           :class="{
-            'session-history-item--active': s.session_id === sessionStore.sessionId,
+            'session-history-item--active': sessionRecordId(s) === sessionStore.sessionId,
             'session-history-item--running': s.has_active_turn || s.HasActiveTurn,
           }"
-          @click="select(s.session_id)"
+          @click="select(sessionRecordId(s))"
         >
           <div class="session-history-item__avatar" aria-hidden="true">
             <span v-if="s.has_active_turn || s.HasActiveTurn" class="session-history-item__pulse" />
@@ -79,17 +80,17 @@ defineExpose({ refresh, setDeleting });
             <div class="session-history-item__meta">
               <span class="session-history-item__count">{{ s.message_count ?? s.MessageCount ?? 0 }} 条</span>
               <span v-if="s.updated_at" class="session-history-item__time">{{ formatRelativeTime(s.updated_at) }}</span>
-              <span class="session-history-item__id" :title="s.session_id">{{ s.session_id?.slice(0, 12) }}…</span>
+              <span class="session-history-item__id" :title="sessionRecordId(s)">{{ sessionRecordId(s).slice(0, 12) }}…</span>
             </div>
           </div>
           <button
             type="button"
             class="session-history-item__delete"
             title="删除会话"
-            :disabled="deletingId === s.session_id"
-            @click.stop="onDelete(s.session_id)"
+            :disabled="deletingId === sessionRecordId(s)"
+            @click.stop="onDelete(s)"
           >
-            {{ deletingId === s.session_id ? "…" : "×" }}
+            {{ deletingId === sessionRecordId(s) ? "…" : "×" }}
           </button>
         </li>
         <li v-if="!sessions.length" class="session-panel__empty">暂无历史会话</li>

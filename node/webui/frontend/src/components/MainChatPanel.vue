@@ -2,6 +2,7 @@
 import { computed, ref, watch, nextTick } from "vue";
 import ComposerToolbar from "./ComposerToolbar.vue";
 import MessageBubble from "./MessageBubble.vue";
+import StreamStatusBubble from "./StreamStatusBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
 import UserInfoBubble from "./UserInfoBubble.vue";
 import ToolExecBubble from "./ToolExecBubble.vue";
@@ -9,6 +10,7 @@ import { buildStream } from "../composables/useStream.js";
 import { extractToolApprovals } from "../stores/hitl.js";
 import { chromeStore, inputStripRight } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
+import { statusStore, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
 
 const props = defineProps({
   entries: { type: Array, default: () => [] },
@@ -43,6 +45,11 @@ const userInfoSelected = ref(0);
 
 const stream = computed(() => buildStream(props.entries, props.hitlQueue));
 
+const activeStatusPhases = computed(() => {
+  void statusStore.tick;
+  return statusPhaseOrder.filter((phase) => hasStatus(phase));
+});
+
 const pendingApprovals = computed(() =>
   props.hitlQueue
     .filter((h) => h.kind === "approval")
@@ -74,7 +81,7 @@ const showCancel = computed(() => props.sending && !props.hitlBusy);
 const canSubmit = computed(() => !props.disabled && !props.sending && !!input.value.trim());
 
 watch(
-  () => stream.value.length,
+  () => [stream.value.length, activeStatusPhases.value.length],
   async () => {
     await nextTick();
     const el = streamRef.value;
@@ -149,6 +156,11 @@ function onKeydown(e) {
           @submit="emit('user-info-submit', '')"
         />
       </template>
+      <StreamStatusBubble
+        v-for="phase in activeStatusPhases"
+        :key="`status-${phase}`"
+        :phase="phase"
+      />
     </div>
 
     <footer class="chat__composer">

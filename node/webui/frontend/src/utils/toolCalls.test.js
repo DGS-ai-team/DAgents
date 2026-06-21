@@ -7,6 +7,7 @@ import {
   parseToolArguments,
   toolDisplayName,
   toolCallParts,
+  resolveToolArgumentsFromData,
 } from "./toolCalls.js";
 
 describe("parseToolArguments", () => {
@@ -47,6 +48,23 @@ describe("toolDisplayName", () => {
 
   it("formats write_file with path", () => {
     expect(toolDisplayName("write_file", { path: "/tmp/out.txt" })).toBe("write_file(/tmp/out.txt)");
+  });
+
+  it("formats generic tools with sorted args", () => {
+    expect(toolDisplayName("glob_files", { pattern: "**/*.go", root: "/src" })).toBe(
+      'glob_files(pattern="**/*.go", root="/src")',
+    );
+  });
+});
+
+describe("resolveToolArgumentsFromData", () => {
+  it("reads nested function.arguments", () => {
+    expect(
+      resolveToolArgumentsFromData({
+        tool_name: "write_file",
+        function: { arguments: '{"path":"/tmp/a"}' },
+      }),
+    ).toEqual({ path: "/tmp/a" });
   });
 });
 

@@ -1,9 +1,9 @@
 import { reactive } from "vue";
 
 const PHASE_LABELS = {
-  prefilling: "prefilling",
-  thinking: "thinking",
-  compression_blocking: "compressing context (blocking)",
+  prefilling: "准备上下文",
+  thinking: "思考中",
+  compression_blocking: "压缩上下文",
 };
 
 export const statusPhaseOrder = ["prefilling", "thinking", "compression_blocking"];
@@ -63,8 +63,12 @@ export function resetStatusLines() {
   stopTickIfIdle();
 }
 
+export function statusPhaseLabel(phase) {
+  return PHASE_LABELS[phase] || phase;
+}
+
 export function formatStatusText(phase, state, now = statusStore.tick) {
-  const label = PHASE_LABELS[phase] || phase;
+  const label = statusPhaseLabel(phase);
   const elapsed = Math.max(0, Math.floor((now - state.startedAt) / 1000));
   if (state.done) return `${label}... ${elapsed}s done`;
   const frame = Math.floor((now - state.startedAt) / 500) % 3;
