@@ -13,7 +13,7 @@
 | `Store.SetLogger` | 注入 logger（create/update/delete 打 Info） |
 | `Store.ListTriggers` / `GetTrigger` / `CreateTrigger` / `UpdateTrigger` / `DeleteTrigger` | CRUD |
 | `Store.ListEnabledTriggers` / `ReplaceTrigger` | 调度 tick 内部更新 |
-| `Store.HasPendingDelivery` / `MarkPendingDelivery` / `ClearPendingDelivery` | trigger 消息待 dequeue 去重 |
+| `Store.HasPendingDelivery` / `MarkPendingDelivery` / `ClearPendingDelivery` | trigger 待投递去重；**Clear** 在 side-effect Apply 成功或 ClearSession 丢弃时 |
 | `DeliveryTracker` | 待消费跟踪接口 |
 | `MessageSubmitter` | fire 时创建 session 并入队 |
 | `NewScheduler` / `Start` / `Stop` / `FireTrigger` / `SetCmdGate` / `SetLogger` | 调度器 |

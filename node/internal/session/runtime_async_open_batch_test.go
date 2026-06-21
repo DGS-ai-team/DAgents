@@ -47,8 +47,7 @@ func TestAsyncToolResultDuringApprovalOpenBatchDoesNotViolateHistory(t *testing.
 		{Role: "tool", ToolCallID: "call-bg-1", Content: "[TOOL_BACKGROUND] job_id=job-1 status=accepted"},
 	}
 	rt.pending = &turn.PendingHITL{
-		Kind:      turn.HITLApproval,
-		ToolCalls: []llm.ToolCall{approvalCall},
+		Items: []turn.PendingHITLItem{{ToolCall: approvalCall}},
 	}
 	rt.toolLoopCount = 1
 	rt.mu.Unlock()
@@ -77,7 +76,7 @@ func TestAsyncToolResultDuringApprovalOpenBatchDoesNotViolateHistory(t *testing.
 	pending := rt.pending
 	rt.mu.Unlock()
 
-	if pending == nil || pending.Kind != turn.HITLApproval {
+	if pending == nil || len(pending.Items) != 1 {
 		t.Fatalf("pending approval should be preserved, got %#v", pending)
 	}
 	if turnHistoryHasOpenToolBatchViolation(msgs) {

@@ -33,6 +33,7 @@ export function connectStream({ getSessionId, onEvent, onStatus }) {
       "usage",
       "error",
       "done",
+      "hitl_required",
       "approval_required",
       "user_information_required",
       "temporary_agent_created",

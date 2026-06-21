@@ -8,7 +8,7 @@
 | `Manager` | 会话表；每 session 独立 runtime + 队列 |
 | `NewManager` | 绑定 agent、Hub、LLM、Registry、policy、store、TurnOptions |
 | `SetChildAgentManager` | 注入 `childagent.Manager` 并 `BindHost` |
-| `SetTriggerDeliveryTracker` | trigger 出队后清除 pending delivery |
+| `SetTriggerDeliveryTracker` | trigger Apply/ClearSession 时清除 pending delivery |
 | `Stop` | 取消 Manager 上下文并停止所有 runtime |
 | `Create` | 创建或恢复 session；`newRuntime` + `attachUserChildTools` + `start` |
 | `Get` / `ListActive` / `ListPersisted` | 查询活跃或持久化会话 |
@@ -47,11 +47,12 @@
 | `start` / `consumeLoop` | 启动队列消费 goroutine |
 | `handleHumanMessage` | human_message 单步 + 可选入队 tool_result |
 | `handleToolResult` | tool_message 单步续跑 |
-| `handleAsyncToolResult` | 异步工具完成回灌 |
+| `handleSideEffectProduceAsync` / `handleSideEffectProduceExternal` | 旁路 Produce（缓冲 + SSE） |
+| `handleSideEffectContinue` | 旁路 Apply + 被动 LLM 续跑 |
 | `handleResume` | HITL resume 续跑 |
 | `applyStepOutcome` | 同步 messages / pending / toolLoopCount |
 | `persist` / `clearMessages` | SQLite 持久化 |
-| `enqueue` | 带优先级入队；高优先级可打断当前 turn |
+| `enqueue` | 带优先级入队；高优先级项先出队（见 `queue/README.md`）；`human` 先于 `resume` |
 | `cancelTurn` / `stop` | 取消或停止 consumer |
 | `contextView` | 组装 `ContextView` |
 | `runTurnStep` / `finishTurnIdle` | 单步 turn 脚手架；`finishTurnIdle` 在 `applyStepOutcome` 后触发子 Agent 结算 |
@@ -82,3 +83,13 @@
 | `EnsureSession` | `Manager.Create` 包装 |
 | `SubmitTriggerMessage` | 入队 trigger 渲染后的 user 消息 |
 | `EnqueueTriggerMessage` | 校验 content → EnsureSession → `PriorityOther` 入队 |
+
+## side_effects.go / runtime_side_effects.go
+
+| 符号 | 说明 |
+|------|------|
+| `sideEffectStore` | 旁路 Produce 缓冲（FIFO seq）；`Produce` / `ApplyReady` / `ReconcileAfterStep` |
+| `handleSideEffectProduceAsync` / `handleSideEffectProduceExternal` | consumeLoop → Produce + SSE |
+| `handleSideEffectContinue` | Apply + `ContinueAfterSideEffects` 被动 LLM |
+| `runTurnStepWithSideEffects` | 步首 `ApplyReady`、步末 `ReconcileAfterStep` |
+| `maybeScheduleContinueAfterCancel` | Cancel 三分法：无 pending 且有缓冲 → continue |

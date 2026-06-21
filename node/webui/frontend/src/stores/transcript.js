@@ -31,6 +31,48 @@ export function addUser(text) {
   transcriptStore.entries.push({ id: ++idSeq, kind: "user", text });
 }
 
+export function addDeferredUser(text, userName = "", sideEffectSeq = 0) {
+  abortStreaming();
+  transcriptStore.entries.push({
+    id: ++idSeq,
+    kind: "user_deferred",
+    text,
+    userName: String(userName || "").trim(),
+    sideEffectSeq: Number(sideEffectSeq) || 0,
+    sideEffectApplied: false,
+    sideEffectStale: false,
+  });
+}
+
+function sideEffectSeqFromData(data) {
+  const raw = data?.side_effect_seq;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function markSideEffectsApplied(seqs) {
+  const set = new Set((seqs || []).map((s) => Number(s)).filter((n) => n > 0));
+  if (!set.size) return;
+  for (const e of transcriptStore.entries) {
+    const seq = e.sideEffectSeq || sideEffectSeqFromData(e.data);
+    if (seq > 0 && set.has(seq)) {
+      e.sideEffectApplied = true;
+      e.sideEffectStale = false;
+    }
+  }
+}
+
+export function markSideEffectsStale(seqs) {
+  const set = new Set((seqs || []).map((s) => Number(s)).filter((n) => n > 0));
+  if (!set.size) return;
+  for (const e of transcriptStore.entries) {
+    const seq = e.sideEffectSeq || sideEffectSeqFromData(e.data);
+    if (seq > 0 && set.has(seq) && !e.sideEffectApplied) {
+      e.sideEffectStale = true;
+    }
+  }
+}
+
 export function addSystem(text) {
   transcriptStore.entries.push({ id: ++idSeq, kind: "system", text });
 }
@@ -164,6 +206,9 @@ function upsertToolCallEntry(blockId, migrateFrom, payload) {
     id: prev?.id ?? ++idSeq,
     kind: "tool_call",
     blockId,
+    sideEffectSeq: payload.data?.deferred ? sideEffectSeqFromData(payload.data) : prev?.sideEffectSeq || 0,
+    sideEffectApplied: prev?.sideEffectApplied || false,
+    sideEffectStale: prev?.sideEffectStale || false,
     ...payload,
     startedAt: prev?.startedAt ?? Date.now(),
   };
@@ -199,6 +244,9 @@ export function applyToolResult(data) {
     kind: "tool_result",
     blockId: callId || `tool-${idSeq}`,
     partial: false,
+    sideEffectSeq: data?.deferred ? sideEffectSeqFromData(data) : transcriptStore.entries[idx]?.sideEffectSeq || 0,
+    sideEffectApplied: transcriptStore.entries[idx]?.sideEffectApplied || false,
+    sideEffectStale: transcriptStore.entries[idx]?.sideEffectStale || false,
     data: { ...data, duration_seconds: elapsed },
     startedAt: idx >= 0 ? transcriptStore.entries[idx].startedAt : undefined,
   };

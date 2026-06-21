@@ -12,6 +12,7 @@ import {
   persistSessionId,
   ensureSession,
   beginSubmit,
+  beginImplicitTurn,
   finishTurn,
   markTurnContent,
   shouldAcceptDone,
@@ -24,6 +25,9 @@ import {
   transcriptStore,
   noteSeq,
   addUser,
+  addDeferredUser,
+  markSideEffectsApplied,
+  markSideEffectsStale,
   addSystem,
   appendAssistant,
   appendReasoning,
@@ -48,6 +52,7 @@ import {
   extractUserInfo,
   buildUserInfoResume,
   buildUserInfoResumeFromSelection,
+  expandHitlRequired,
   shouldSkipChildRuntimeDisplay,
 } from "./stores/hitl.js";
 import { chromeStore, setUsageFromSSE, resetUsageStrip } from "./stores/chrome.js";
@@ -182,6 +187,24 @@ function handleEvent(ev) {
       }
       refreshContextTokens();
       break;
+    case "hitl_required":
+      finalizeAssistant();
+      finalizeReasoning();
+      finishWaitingStatuses();
+      {
+        const { userInfos, approval } = expandHitlRequired(ev.data);
+        for (const ui of userInfos) {
+          enqueueHitl({ kind: "user_information", data: ui });
+        }
+        if (approval) {
+          enqueueHitl({ kind: "approval", data: approval });
+          if (approval.child_session_id) setChildAwaitingApproval(approval.child_session_id, true);
+        }
+      }
+      if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
+      chromeStore.hitlQueueLen = hitlStore.queue.length;
+      hitlStore.busy = false;
+      break;
     case "approval_required":
       finalizeAssistant();
       finalizeReasoning();
@@ -214,6 +237,23 @@ function handleEvent(ev) {
     case "context_compression_silent":
       handleCompressionEvent(ev.type, ev.data);
       refreshContextTokens();
+      break;
+    case "side_effect_turn_start":
+      beginImplicitTurn();
+      sessionStore.statusLine = "处理旁路回调…";
+      break;
+    case "user_message_deferred":
+      addDeferredUser(
+        String(ev.data.content || ""),
+        String(ev.data.user_name || ""),
+        Number(ev.data.side_effect_seq) || 0,
+      );
+      break;
+    case "side_effect_applied":
+      markSideEffectsApplied(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);
+      break;
+    case "side_effects_cleared":
+      markSideEffectsStale(Array.isArray(ev.data.seqs) ? ev.data.seqs : []);
       break;
     default:
       break;

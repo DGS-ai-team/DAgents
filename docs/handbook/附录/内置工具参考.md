@@ -233,7 +233,7 @@
 | `placeholder` | | 自由文本占位提示 |
 | `required` | | 是否必须回答（默认 true；用户仍可通过 UI 取消） |
 
-**执行**：编排器发 SSE `user_information_required`，TUI 收集后 `resume(type=user_information)` 回灌。
+**执行**：编排器在本地 turn 发 SSE **`hitl_required`**（`items[]` 中 `hitl_type=user_information`），TUI 收集后 `resume(type=user_information)` 回灌。
 
 **审批**：**never**（免审批）。
 

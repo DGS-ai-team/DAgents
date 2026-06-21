@@ -34,7 +34,7 @@ def approval_queue_key(data: dict[str, Any]) -> str:
     child_id = child_session_id_from_data(data)
     if child_id:
         return f"child:{child_id}"
-    approval_id = str(data.get("approval_id") or "").strip()
+    approval_id = str(data.get("approval_id") or data.get("hitl_id") or "").strip()
     if approval_id:
         return f"parent:{approval_id}"
     return "parent:"
@@ -53,6 +53,7 @@ def should_skip_child_runtime_display(event_type: str, data: dict[str, Any]) -> 
         return False
     if event_type in {
         "approval_required",
+        "hitl_required",
         EVENT_TEMPORARY_AGENT_CREATED,
         EVENT_TEMPORARY_AGENT_COMPLETED,
         EVENT_TEMPORARY_AGENT_CANCELLED,

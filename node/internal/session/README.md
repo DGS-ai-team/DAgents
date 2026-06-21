@@ -59,10 +59,14 @@ flowchart TB
 
 | RequestType | 处理函数 | 说明 |
 |-------------|----------|------|
-| `message` / 空 | `handleHumanMessage` | 新 user 消息；若有 pending HITL 先 `InterruptPending` |
+| `message` / 空 | `handleHumanMessage` | 新 user 消息；若有 pending HITL 先 `InterruptPending`；步首 Apply 缓冲 |
 | `tool_result` | `handleToolResult` | 工具批执行后的续跑（`RunToolMessageTurn`） |
-| `async_tool_result` | `handleAsyncToolResult` | 后台 job 完成回灌；若已有 pending HITL 则仍写入 history 但**保留** pending（issue #25） |
+| `async_tool_result` | `handleSideEffectProduceAsync` | 后台 job **Produce**（SSE + 缓冲，不 inline 改 history） |
+| `trigger_message` / `a2a_inbox_message` | `handleSideEffectProduceExternal` | trigger / A2A inbox **Produce** |
+| `side_effect_continue` | `handleSideEffectContinue` | 步首 Apply 缓冲 + `ContinueAfterSideEffects` |
 | `resume` | `handleResume` | HITL 审批 / `ask_user_information` 恢复 |
+
+旁路缓冲见 `side_effects.go` / `runtime_side_effects.go`：`ApplyReady` 在 `runTurnStepWithSideEffects` 步首；`ReconcileAfterStep` 在步末于 `TaskComplete` 时 schedule continue。Trigger delivery 在 **Apply 成功**时清除，不在 dequeue 时清除。
 
 生产路径下，orchestrator 工具步结束后通过 `SetToolResultEnqueuer` 入队 `tool_result`，**单步执行 + 队列续跑**（对齐 Python 语义）。单测可用 `orchestrator_test.go` 的 `runMessageTurnInline` 内联多步。
 

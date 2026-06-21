@@ -13,7 +13,7 @@ type pendingApprovalCall struct {
 	duplicateMeta *hooks.DuplicateMeta
 }
 
-// buildApprovalToolItem 构造 approval_required SSE 中的单条 tool_calls 项。
+// buildApprovalToolItem 构造 HITL execute_tool item 的展示字段（用于 hitl_required；A2A 仍走 approval_required）。
 func buildApprovalToolItem(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) map[string]any {
 	args := parseJSONArgs(tc.Function.Arguments)
 	var reason, risk string

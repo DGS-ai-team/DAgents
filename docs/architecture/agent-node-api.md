@@ -97,6 +97,15 @@ DELETE /v1/sessions/{session_id}
 POST /v1/sessions/{session_id}/cancel
 POST /v1/sessions/{session_id}/clear-context
 GET /v1/sessions/{session_id}/context
+```
+
+**Cancel / Clear 与旁路缓冲**（详见 §2.4.3）：
+
+- **`cancel`**：中止在途流式 LLM；若 side-effect 缓冲非空且无 pending HITL，会 schedule `side_effect_continue` 被动续跑。
+- **`clear-context`**：清空 messages；**丢弃** side-effect 缓冲（Produce 已发出的 SSE 行可能留在 Client transcript，属预期 orphan）。
+- **`DELETE`**：停止 runtime 并丢弃缓冲（同 clear）。
+
+```http
 GET /v1/sessions/{session_id}/child-agents
 GET /v1/sessions/{session_id}/child-agents/{child_session_id}
 POST /v1/sessions/{session_id}/child-agents/{child_session_id}/cancel
@@ -165,7 +174,9 @@ Last-Event-ID: 42
 - Phase 1 可简化为 **全局单流**（一个 Client 一个 Node 实例通常一个活跃 session）。
 - 帧格式见 [client-events-and-hitl.md](./client-events-and-hitl.md)（修订版：去掉 `connection_id` 必填，保留 `session_id` / `execution_id`）。
 
-核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`approval_required`、`user_information_required`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`done`。
+核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`hitl_required`、`user_message_deferred`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`done`。
+
+**兼容 / 中继**：A2A caller 中继与子 Agent 审批仍可能发送 `approval_required` / `user_information_required`（见 §3、 [manage-communication.md](../manage-communication.md)）。**本地 turn** 统一为 `hitl_required`。
 
 #### 2.4.1 `done` 事件（语义 B：轮到用户）
 
@@ -177,16 +188,16 @@ Last-Event-ID: 42
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `finish_reason` | string | `stop` \| `awaiting_user_information` \| `awaiting_tool_approval` \| `error` \| `cancelled` |
+| `finish_reason` | string | `stop` \| `awaiting_hitl` \| `error` \| `cancelled`（历史兼容：`awaiting_user_information` / `awaiting_tool_approval` 仍映射为 HITL 暂停） |
 | `turn_complete` | bool | `true`：本条用户 `message` 驱动的链已结束，可自由输入；`false`：HITL 暂停，链未结束 |
-| `awaiting` | string \| null | HITL 暂停时：`user_information` \| `tool_approval`；链结束时为 `null` |
+| `awaiting` | string \| null | HITL 暂停时：`hitl`；链结束时为 `null`（历史：`user_information` / `tool_approval`） |
 
 **何时发送 `done`**
 
 | 场景 | 发送 | `turn_complete` | `awaiting` |
 |------|------|-----------------|------------|
 | 模型一步结束且无 `tool_calls` | ✅ | `true` | `null` |
-| `ask_user_information` / 审批 pending | ✅ | `false` | `user_information` / `tool_approval` |
+| `ask_user_information` / 审批 pending | ✅ | `false` | `hitl` |
 | LLM/工具错误、取消、超循环上限 | ✅ | `true` | `null` |
 | 自动工具执行后 `tool_result` 续跑 | ❌ | — | — |
 | 客户端 `resume` 刚处理完、链继续 | ❌ | — | — |
@@ -195,11 +206,61 @@ Last-Event-ID: 42
 
 **与其它事件分工**
 
-- `user_information_required` / `approval_required`：弹 HITL UI（含 `tool_call_id`、选项等）。
-- `tool_call`（含 `ask_user_information`）：工具行展示；与 `user_information_required` 成对出现，**不**替代 HITL 块。
+- **`hitl_required`**：本地 turn 统一 HITL 事件；`items[]` 每项含 `hitl_type`：`user_information`（`ask_user_information`）或 `execute_tool`（需审批工具）。Client 按 item 类型展示并分别 `POST resume`；同批可混合 ask + approval，Node 侧为单一 `PendingHITL.Items`。
+- **`approval_required` / `user_information_required`**：A2A caller 中继、子 Agent 审批等路径仍使用；Client 兼容处理。
+- `tool_call`（含 `ask_user_information`）：工具行展示；**不**替代 HITL 块。
 - 子 Agent 内部 `done`：**不**转发到父 SSE（`node/internal/childagent/relay_hub.go`）。
 
-**Python Textual Client**（`app/cli/session_controller.py`）：`submit_message` 后 `wait_user_turn` 等待第一条语义 B 的 `done`；HITL 由队列 + `user_information_required` 驱动；**无** `_skip_next_done` 类补丁。
+**Client**（Go / Python Textual / Web UI）：收到 `hitl_required` 后展开为 HITL 队列（先 user_information item，再 execute_tool 合并为 approval 面板）；每步 resume 后 Node 可部分消 pending，全部 resolved 才续跑 tool loop。`submit_message` 后 `wait_user_turn` 等待语义 B 的 `done`（`turn_complete=false` 时 HITL 暂停正常结束等待）。
+
+#### 2.4.2 `hitl_required` 载荷（本地 turn）
+
+| 字段 | 说明 |
+|------|------|
+| `hitl_id` | 批次 id |
+| `message` | 摘要文案 |
+| `items[]` | 待交互项；每项含 `hitl_type` |
+
+| `items[].hitl_type` | 额外字段 | Client resume |
+|---------------------|----------|---------------|
+| `user_information` | `content`、`user_information_args`（含 `tool_call_id`） | `type=user_information` |
+| `execute_tool` | `id`、`name`、`arguments`、`approval_reason`、`risk_level`、… | `type=approval` / `selection` |
+
+实现：`turn/hitl_payload.go` → `publishHITLRequired`（`sse_publish.go`）。
+
+#### 2.4.3 旁路 side-effect 事件（Produce / 被动续跑）
+
+async / trigger / a2a inbox 在 **任务未完成**（HITL、open batch、tool loop）时 **Produce**：立即 SSE、写入 `sideEffectStore`，**不改** `runtime.messages`、**不**跑 LLM。Apply 在 `runTurnStep` 步首；被动续跑经内部队列 `side_effect_continue`（与 `tool_result` 同优先级 -1）。
+
+| 事件 | 何时发送 | 典型 `data` | Client 行为 |
+|------|----------|-------------|-------------|
+| `user_message_deferred` | external Produce 且 tail 为**任务已完成桥接态**（纯 assistant stop） | `content`、`user_name`、`deferred: true`、`side_effect_seq?`、`trigger_id?` | transcript 插入 **deferred** 样式 user 行；**不** `finishTurn` |
+| `side_effect_turn_start` | `handleSideEffectContinue` **跑 LLM 之前** | `source`（`side_effect_continue` \| `cancel_recovery` \| `task_complete_produce`）、`side_effect_pending`、`implicit_turn: true` | **`beginImplicitTurn` / `beginSubmit`**，进入被动等待态 |
+| `side_effect_applied` | `ApplyReady` 成功写入 history 后 | `seqs: number[]` | 将 `side_effect_seq` 匹配的 deferred / callback 行标为 **已入库** |
+| `side_effects_cleared` | `ClearContext` / `Delete` 丢弃 server 缓冲 | `dropped`、`seqs: number[]` | 将未入库条目标为 **已失效** |
+| `tool_call` / `tool_result`（Produce） | async / 非桥接 external Produce | 与正常工具事件相同，可含 `deferred: true`、`side_effect_seq` | idle 时仍渲染；**不**因 Produce 单独 `finishTurn` |
+
+**Produce vs Apply**
+
+| 时刻 | Server history | Client transcript |
+|------|----------------|-------------------|
+| Produce ×N | 缓冲 | N 条 callback / deferred user（SSE 已发） |
+| Apply（步首，可合并 `get_callback`） | 写入 1 条或多条 | **`side_effect_applied`**（无新 callback SSE） |
+| Continue LLM | 正常 assistant 流 | 流式 + `done` |
+
+**`implicit_turn` 语义**：**非**用户 `POST /v1/messages` 驱动的 turn。Client 收到 `side_effect_turn_start` 后应开启与 user submit 相同的 turn 栅栏（Go `TurnGate.BeginImplicitTurn`、Web `beginImplicitTurn`、Python `begin_implicit_turn`），以便接收后续 `assistant` / `done`。
+
+**Cancel 与缓冲**（`POST /v1/sessions/{id}/cancel`）：
+
+| 条件 | 行为 |
+|------|------|
+| 在途 LLM（`state != idle`） | `turnCtx` cancel → `done(cancelled)` |
+| 缓冲非空 **且** `pending == nil` | 额外 `scheduleSideEffectContinue("cancel_recovery")` → `side_effect_turn_start` → Apply + LLM |
+| 缓冲空 | 仅 abort，**不** schedule continue |
+| `pending` HITL **且** 缓冲非空 | **不** schedule continue；resume / human 步首 Apply |
+| `POST .../clear-context` / `DELETE ...` | **丢弃** server 缓冲并发送 `side_effects_cleared`（与 Cancel 保留缓冲不同） |
+
+实现：`session/side_effects.go`、`session/runtime_side_effects.go`、`turn/sse_publish.go` → `PublishExternalSideEffectDeferred` / `PublishSideEffectTurnStart` / `PublishSideEffectApplied` / `PublishSideEffectsCleared`。
 
 ### 2.5 Skills（可选 HTTP；也可仅 tool）
 
@@ -299,10 +360,11 @@ POST {manage_url}/v1/a2a/tasks/{task_id}/reply
 # 自动工具（无 HITL）
 tool_call → tool_result → assistant … → done { turn_complete: true }
 
-# 需审批 / 用户询问
-tool_call → approval_required | user_information_required
-         → done { turn_complete: false, awaiting: … }
-         →（用户 resume）→ tool_result → assistant … → done
+# 需 HITL（审批 / ask_user）
+tool_call → hitl_required { items: [ user_information?, execute_tool*, … ] }
+         → done { turn_complete: false, awaiting: hitl, finish_reason: awaiting_hitl }
+         →（用户 resume，可多次：type=user_information / type=approval|selection）
+         → tool_result → assistant … → done { turn_complete: true }
 ```
 
 Node 内部分层（实现参考，非 HTTP）：

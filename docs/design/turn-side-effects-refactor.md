@@ -1,16 +1,39 @@
 # Turn 旁路侧效应重构：场景规格
 
-> **状态**：规格起草（`feature/turn-side-effects`）  
+> **状态**：**缓冲门控已实现**（`sideEffectStore` + `side_effect_continue` + Client SSE）  
 > **关联**：[Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32)（async + open batch）  
 > **代码基准**：`dev` 合并 PR #33 之后
+
+## 实现摘要（2026-06）
+
+| 阶段 | 行为 |
+|------|------|
+| **Produce** | `async_tool_result` / `trigger_message` / `a2a_inbox_message` → 缓冲 + 立即 SSE；不改 `runtime.messages` |
+| **Apply** | `runTurnStepWithSideEffects` 步首 `ApplyReady`；≥2 条合并为 `get_callback` batch |
+| **Continue** | `side_effect_continue`（priority -1）→ `PublishSideEffectTurnStart` → LLM |
+| **Cancel** | 无 pending + 有缓冲 → schedule continue；ClearContext/Delete 丢弃缓冲 |
+| **Client** | `user_message_deferred`、`side_effect_turn_start` → passive `beginImplicitTurn`；`side_effect_applied` / `side_effects_cleared` → 标记 Produce 行已入库/已失效 |
+
+### 验收测试（2026-06）
+
+| 场景 | 测试文件 |
+|------|----------|
+| TaskComplete 判定 | `turn/task_complete_test.go` |
+| InsertSite 五分支 | `turn/side_effect_insert_site_test.go` |
+| 合并 `get_callback` batch | `turn/merged_callback_batch_test.go`、`turn/side_effect_messages_test.go` |
+| Produce 不破坏 open batch / pending | `session/runtime_async_open_batch_test.go`、`session/runtime_async_hitl_test.go` |
+| Cancel 三分法 / Clear 丢弃 / human 抢占 | `session/side_effects_cancel_test.go`（含 `side_effect_turn_start` / `side_effect_applied` / `side_effects_cleared` SSE） |
+| FIFO / continue 去重 / A2A 空 history | `session/side_effects_test.go` |
+| trigger 入队与 delivery | `session/triggers_test.go` |
+| Client 被动 turn + applied/cleared UX | `client/.../turn_gate_test.go`、`client/.../stream_events_turn_test.go`、`client/.../side_effect_format_test.go`、`tests/test_cli_session_controller.py` |
 
 ---
 
 ## 1. 背景与目标
 
-同步 tool loop（场景一）在单 consumer、单步 `runTurnStep` 下大体正确。引入 **async 工具回灌**、**trigger 投递**、**HITL 拆批** 后，队列事件可在「logical turn 未结束」时改 `history`，且 async 存在 **inline 续跑** 与 **`tool_result` 队列续跑** 双轨。
+同步 tool loop（场景一）在单 consumer、单步 `runTurnStep` 下大体正确。引入 **async 工具回灌**、**trigger 投递**、**HITL 拆批** 后，旧实现曾在 logical turn 未结束时 inline 改 `history`，且 async 存在 **inline 续跑** 与 **`tool_result` 队列续跑** 双轨（Issue #32）。
 
-重构前须先把典型场景写清：**history 变更轨迹**、**MessageQueue 变更轨迹**、**runtime 状态**（`pending` / `toolLoopCount` / `state`）。本文档为后续 defer/flush 实现的验收基准。
+**当前**（见文首实现摘要）：旁路事件仅 **Produce**（缓冲 + SSE），**Apply** 在步首/Continue 前写入，续跑经 **`side_effect_continue`**。下文场景规格仍作验收基准；§12 对照旧目标与现实现。
 
 ### 1.1 目标不变量
 
@@ -35,11 +58,11 @@
 
 | Priority | 值 | request_type |
 |----------|-----|--------------|
-| `tool_result` | -1 | `tool_result` |
+| `side_effect_continue` / `tool_result` | -1 | `side_effect_continue` / `tool_result` |
 | human | 0 | `message`（含 CLI/API user） |
 | `resume` | 1 | `resume` |
 | async | 2 | `async_tool_result` |
-| other | 10 | `message`（trigger 等） |
+| other | 10 | `trigger_message` / `a2a_inbox_message` |
 
 ### 1.4 关键代码入口
 
@@ -50,7 +73,7 @@
 | history commit | `runtime.go` → `applyStepOutcome` |
 | 单步 LLM + 工具 | `node/internal/turn/orchestrator.go` → `runOneStep` |
 | 工具批 + enqueue | `orchestrator.go` / `tool_router.go` → `processToolCalls` |
-| async 回灌 | `orchestrator.go` → `HandleAsyncToolResult` |
+| async 旁路 | `session/side_effects.go` → Produce / ApplyReady；`runtime_side_effects.go` |
 
 ---
 
@@ -63,11 +86,11 @@
 | **3** | 多 tool auto batch | 一步内多个 `T`；仍一次 `tool_result` enqueue | ✅ §5 |
 | **4** | auto + approval 拆批 + pending | open batch；Q 不因 pending 暂停 | ✅ §6 |
 | **5** | resume 后继续 | `resume` → 写 tool → `ScheduleToolResult` 续跑 | ✅ §7 |
-| **6** | bash background + async 回灌 | `async_tool_result`；inline `RunToolMessageTurn` | ✅ §8 |
+| **6** | bash background + async 回灌 | Produce → Apply → `side_effect_continue` | ✅ §8 |
 | **7** | trigger message | `PriorityOther`；可 `InterruptPending` | ✅ §9 |
 | **8** | 新 human 打断 pending | 步前 `InterruptPending` 改 H | ✅ §10 |
 
-场景 **4、6** 为 Issue #32 与 defer 重构的主要靶点。
+场景 **4、6** 为 Issue #32 与 defer 重构的主要靶点（**已实现**，见文首测试矩阵）。
 
 ---
 
@@ -321,7 +344,7 @@ H:  H₀ → H₀+U+A+T₁…Tₙ → …+assistant(终稿)
 
 - 模型第一步返回 **2 个** tool_calls：`tc_auto`（policy auto）、`tc_appr`（require approval）。
 - `processToolCalls` 顺序：先 `executeAutoBatch([tc_auto])`，再因 `approvalCalls` 非空返回 `PendingHITL`。
-- **不** enqueue `tool_result`；Client 见 `approval_required` + `done(awaiting=tool_approval)`。
+- **不** enqueue `tool_result`；Client 见 `hitl_required` + `done(awaiting=hitl)`。
 
 ### 6.2 总览时序
 
@@ -358,29 +381,28 @@ H₁ = [ … , user, assistant(tc_auto, tc_appr), tool(tc_auto) ]
 |----|-----|
 | Q | **`[]`**（第一步未 enqueue） |
 | H | 保持 `H₁` 直至 resume / 打断 / async handler |
-| `pending` | `HITLApproval{ToolCalls:[tc_appr]}` |
+| `pending` | `PendingHITL{Items:[{ToolCall: tc_appr}]}` |
 | `toolLoopCount` | `1` |
 | `state` | idle（handler 已返回） |
 
 **重要**：`consumeLoop` **不因 pending 暂停**；此期间入队的 `async_tool_result`、`message`、`resume` 仍会被消费。
 
-### 6.5 子场景 4b：pending 期间 async 插队（Issue #32，当前缺陷）
+### 6.5 子场景 4b：pending 期间 async 插队（Issue #32，**已由 Produce 缓冲修复**）
 
 **附加前提**：`tc_auto` 为 background bash，已写 `T(ACK)`；后台 job 在 **仍等 tc_appr 审批** 时完成。
 
-| 时刻 | 事件 | H 变化 | Q | 问题 |
-|------|------|--------|---|------|
+| 时刻 | 事件 | H 变化 | Q | 行为（当前） |
+|------|------|--------|---|--------------|
 | P0 | 处于 §6.4 状态 | `H₁` open batch | `[]` | — |
-| P1 | `EnqueueAsyncToolResult` | `H₁` | `[async]` | — |
-| P2 | `handleAsyncToolResult` | +callback 对（`A_cb+T_async`） | `[]` | **在 open batch 中间插入新 assistant** |
-| P3 | `shouldContinueAfterAsyncTool(tailTool)` → inline `RunToolMessageTurn` | +可能 `A*` | `[]` | **绕过 tool_result 队列续跑** |
-| P4 | `savedPending` 回滚 | pending 恢复 | `[]` | **history 与 pending 分裂** |
+| P1 | `EnqueueAsyncToolResult` | `H₁` 不变 | `[async]` | — |
+| P2 | `handleSideEffectProduceAsync` | **不改 H** | `[]` | SSE + `sideEffectStore` 缓冲 |
+| P3 | 步首 / Cancel / TaskComplete 时 Apply | 步首写入 callback | `[]` | 不 inline 破坏 open batch |
+| P4 | `side_effect_continue` 被动续跑 | +可能 `A*` | `[]` | 经队列，非 inline `RunToolMessageTurn` |
 
-**违反的不变量**
+**旧缺陷（已移除 `HandleAsyncToolResult` inline 路径）**
 
 - open batch 未闭合即写 callback / 续跑 LLM。
 - async 续跑与同步主线双轨。
-- 重构靶点：§11 defer + flush + 统一 `tool_result`。
 
 ### 6.6 相对场景一
 
@@ -454,7 +476,7 @@ H:  H₁(open)
 
 ### 7.6 `ask_user_information` 变体
 
-- `pending` 为 `HITLUserInformation`。
+- `pending` 为 `PendingHITL` 中含 `ask_user_information` 的 item；可与 `execute_tool` **同批**。SSE **`hitl_required`**；分步 resume。
 - `ContinueAfterResume` 写 **单个** ask_user 的 `tool`，同样返回 `ScheduleToolResult: true`。
 - 后续队列 / commit 轨迹与审批路径一致。
 
@@ -474,12 +496,12 @@ H:  H₁(open)
 - Job 完成后 `SetBackgroundJobNotifier` → `EnqueueAsyncToolResult`。
 - 不含场景四的 approval pending（batch 在第一步已闭合）。
 
-### 8.2 三阶段 LLM（典型设计）
+### 8.2 三阶段 LLM（当前实现：Produce / Apply / Continue）
 
 ```text
-阶段 A  handleHumanMessage   → U + A(tc) + T(ACK)     → enqueue tool_result
-阶段 B  handleToolResult      → A₂（如「任务运行中」）   → 可能已 done，job 仍跑
-阶段 C  handleAsyncToolResult → 写 callback + 续跑 LLM → A₃（终稿）
+阶段 A  handleHumanMessage        → U + A(tc) + T(ACK)     → enqueue tool_result
+阶段 B  handleToolResult           → A₂（如「任务运行中」）   → 可能已 done，job 仍跑
+阶段 C  Produce → Apply → Continue → 写 callback + 被动 LLM → A₃（终稿）
 ```
 
 ### 8.3 阶段 A–B（同步段，同场景一）
@@ -491,26 +513,28 @@ H:  H₁(open)
 
 若 `A₂` 为纯文本，此时 Client 已见 `done(stop)`，但 job 未完成。
 
-### 8.4 阶段 C — `handleAsyncToolResult`
+### 8.4 阶段 C — Produce / Apply / `side_effect_continue`
 
-Job 完成 → Q: `[async]` → `handleAsyncToolResult`。
+Job 完成 → Q: `[async]` → `handleSideEffectProduceAsync`（**Produce**：SSE + 缓冲，不改 H）。
 
-**尾部分类**（`classifyToolResultTail`）：
+**Apply**（`runTurnStep` 步首、`Cancel` 恢复、或 `TaskComplete` 后 `ReconcileAfterStep`）按 `PlanSingleSideEffectApply` 写入 history，并推送 `side_effect_applied`。
 
-| 进入 async 时末条 | 插入方式 | 是否 inline 续跑 |
-|-------------------|----------|------------------|
+**Continue**：`scheduleSideEffectContinue` → `side_effect_turn_start` → `handleSideEffectContinue` → 被动 `RunToolMessageTurn`。
+
+**尾部分类**（`classifyToolResultTail` / `selectSideEffectSegments`）：
+
+| 进入 Apply 时末条 | 写入段 | 是否 Continue |
+|-------------------|--------|---------------|
 | `tool`（末条为 ACK） | append `A_cb + T(result)` | **是**（`tailTool`） |
-| `assistant` 无 tc（末条为 A₂ 文本） | append `U_async + A_cb + T(result)` | **是**（`tailAssistantWithoutToolCalls`） |
-| `assistant` 带未闭合 tc | insert 在末条 assistant 前 | **否**（`tailAssistantWithToolCalls`） |
-
-本场景（无 open batch）常见前两行；续跑走 **`RunToolMessageTurn` inline**，**不**经 `tool_result` 队列。
+| `assistant` 无 tc（末条为 A₂ 文本） | append `U_async + A_cb + T(result)` | **是**（桥接态） |
+| `assistant` 带未闭合 tc | insert 在末条 assistant 前 | **否**（等 batch 闭合） |
 
 | 子阶段 | 事件 | H | Q |
 |--------|------|---|---|
-| C1 | Dequeue async | `H₂` | `[]` |
-| C2 | 写 callback 对（+ 可能 `U_async`） | 步内 | `[]` |
-| C3 | inline `RunToolMessageTurn` → `+A₃` | **`H₃`** | `[]` |
-| C4 | commit；无 `ScheduleToolResult` | `H₃` | `[]` |
+| C1 | Dequeue async → Produce | `H₂` 不变 | `[]` |
+| C2 | Apply（步首或 continue 前） | **`H₃'`**（+callback） | `[]` |
+| C3 | `side_effect_continue` → passive LLM | **`H₃`**（+终稿） | `[]` |
+| C4 | commit；无 inline async 续跑 | `H₃` | `[]` |
 
 ### 8.5 队列 / History 汇总
 
@@ -525,15 +549,15 @@ H:  H₀ → H₁(ACK) → H₂(+A₂) → H₃(+callback+终稿)
 | 对比项 | 场景一 | 场景六 |
 |--------|--------|--------|
 | tool 第一步内容 | 最终结果 | ACK |
-| 续跑次数 | 1× `tool_result` | 1× `tool_result` + **1× inline** |
-| 旁路入队 | 无 | `async_tool_result` |
-| SSE | 一次 done 链 | 可能 **两次** done（B 与 C 各一次） |
+| 续跑次数 | 1× `tool_result` | 1× `tool_result` + **1× `side_effect_continue`** |
+| 旁路入队 | 无 | `async_tool_result` → Produce；Continue 经内部队列 |
+| SSE | 一次 done 链 | 可能 **两次** done（B 与 C 各一次）+ `side_effect_applied` |
 
 ### 8.7 不变量（当前实现）
 
 - 步内单写者仍成立。
-- **不**成立：续跑统一走 `tool_result`（async 段为双轨）。
-- 重构目标：async 写 history 后仍 **`enqueue tool_result`**，禁止 inline。
+- Produce **不**改 history；Apply 在步首/Continue 前统一写入。
+- 被动续跑经 **`side_effect_continue`**，非 consume 内 inline `RunToolMessageTurn`。
 
 ---
 
@@ -541,31 +565,29 @@ H:  H₀ → H₁(ACK) → H₂(+A₂) → H₃(+callback+终稿)
 
 ### 9.1 前提
 
-- Scheduler / 工具 `trigger_fire` → `EnqueueTriggerMessage`。
-- 入队：`request_type=message`，`PriorityOther(10)`，`UserName=trigger`，`TriggerID` 非空。
+- Scheduler / 工具 `trigger_fire` → `EnqueueTriggerMessage`（`request_type=trigger_message`）。
+- 入队：`PriorityOther(10)`，`UserName=trigger`，`TriggerID` 非空。
 - 分 **7a 空闲投递** 与 **7b pending 时投递**。
 
 ### 9.2 子场景 7a：无 pending（同场景二 + trigger 元数据）
 
 | 时刻 | 事件 | Q | H |
 |------|------|---|---|
-| T0 | `SubmitTriggerMessage` | `[message@other]` | `H₀` |
-| T1 | Dequeue → `ClearPendingDelivery(TriggerID)` | `[]` | `H₀` |
-| T2 | `handleHumanMessage`（**不**走 Interrupt） | | |
-| T3 | `RunHumanMessageTurn` → 无 tool | **`H₀+U_trigger+A(text)`** | `[]` |
+| T0 | `SubmitTriggerMessage` | `[trigger_message@other]` | `H₀` |
+| T1 | Dequeue → Produce（**Apply 前**不清 delivery） | `[]` | `H₀` |
+| T2 | TaskComplete / human 步首 Apply | | |
+| T3 | 桥接态：deferred user + callback；否则 callback SSE | **`H₀+…`** | `[]` |
 
-- 与场景二相同，仅 user 的 `Name=trigger`。
-- Trigger store：`HasPendingDelivery` 在入队前置位，dequeue 时清除，允许再次 fire。
+- Trigger store：`HasPendingDelivery` 在 fire 前置位；**Apply 成功**后 `ClearPendingDelivery`。
 
 ### 9.3 子场景 7b：存在 approval pending 时 fire
 
 | 时刻 | 事件 | H | Q | runtime |
 |------|------|---|---|---------|
 | T0 | 处于场景四 pending | `H₁` open | `[]` | pending≠nil |
-| T1 | Trigger 入队 | `H₁` | `[message@other]` | 不变 |
-| T2 | Dequeue trigger | `H₁` | `[]` | — |
-| T3 | 步前 **`InterruptPending`** | **`H₁'`**：为 pending 的 tc 写 interrupt `tool` | `[]` | pending 清空 |
-| T4 | 新 turn：`+U_trigger` + 后续 LLM | 见下 | | toolLoopCount=0 |
+| T1 | Trigger 入队 | `H₁` | `[trigger_message@other]` | 不变 |
+| T2 | Dequeue → Produce（缓冲，不改 H） | `H₁` | `[]` | pending 仍在 |
+| T3 | human 步首 Apply + `InterruptPending` 后新 turn | 见场景八 | | |
 
 ```text
 H₁' = H₁ + tool(tc_appr → ToolUserInterruptedMessage)   ← batch 强制闭合
@@ -575,12 +597,12 @@ H₁' = H₁ + tool(tc_appr → ToolUserInterruptedMessage)   ← batch 强制�
 
 ### 9.4 与 async 优先级
 
-若 Q 中同时有 `[async(2), trigger(10)]`（先入 async），则 **先** `handleAsyncToolResult`，**后** trigger。Trigger 不会跳过 async。
+若 Q 中同时有 `[async(2), trigger(10)]`（先入 async），则 **先** Produce async，**后** Produce trigger。Trigger 不会跳过 async。
 
 ### 9.5 队列 / History 汇总（7b）
 
 ```text
-Q:  [] → [message@other] → []
+Q:  [] → [trigger_message@other] → []
 
 H:  H₁(open,pending)
       │ InterruptPending + 新 human turn
@@ -590,7 +612,7 @@ H:  H₁(open,pending)
 
 ### 9.6 不变量
 
-- Trigger **不丢**：dequeue 即 `ClearPendingDelivery`；若 `HasPendingDelivery` 则 scheduler **跳过** fire（直到上次被消费）。
+- Trigger **不丢**：Apply 成功后 `ClearPendingDelivery`；若 `HasPendingDelivery` 则 scheduler **跳过** fire。
 - 7b **主动抢占** pending：与场景八同类，属产品语义而非 bug。
 
 ---
@@ -638,7 +660,7 @@ H₂ = H₁ + tool(tc_appr → interrupted) + user(U_new) + …
 | 队列优先级 | 0 | 10 |
 | 步前逻辑 | 相同 `InterruptPending` | 相同 |
 | user `Name` | human（默认） | trigger |
-| TriggerID / delivery | 无 | dequeue 清 pending delivery |
+| TriggerID / delivery | 无 | Apply 成功后清 pending delivery |
 
 ### 10.5 队列 / History 汇总
 
@@ -658,7 +680,7 @@ H:  H₁(open)
 
 - 旧 pending **不会**通过 resume 继续；interrupt tool 闭合旧 batch。
 - 新 turn 的 enqueue / 续跑规则回到场景一或场景四。
-- **不**恢复旧 `pending`（与 async 的 `savedPending` 回滚不同）。
+- **不**恢复旧 `pending`（Produce 缓冲不改 pending；无旧 `savedPending` 回滚路径）。
 
 ---
 
@@ -671,19 +693,21 @@ H:  H₁(open)
 | 3 | 2 | `tool_result` | nil | enqueue ×1 | — |
 | 4 | 1 | `[]` | approval | 等 resume | open batch + 旁路插队 |
 | 5 | 2+ | `tool_result` | nil（resume 后） | ScheduleToolResult | — |
-| 6 | 2+async | `tool_result` + async | nil | enqueue + **inline** | 双轨续跑 |
-| 7 | 1 | `[]` | 7b 打断 | 同 2/1 | 抢占 pending |
+| 6 | 2+async | `tool_result` + async | nil | `side_effect_continue` | open batch 下须 Produce 不 Apply |
+| 7 | 1 | `[]` | 7b 打断 | Apply + continue / 同 2 | 抢占 pending |
 | 8 | 1+ | 视新 turn | 打断后 nil | 同 1/4 | 抢占 pending |
 
 ---
 
-## 12. 重构方向（概要）
+## 12. 重构目标 ↔ 现实现
 
-1. **OpenBatch 门闩**：`unrespondedToolCallsAfterLastAssistant > 0` 或 `pending != nil` 时，async 只 defer + SSE，不写 history、不续跑 LLM（修复场景 **4b**）。
-2. **Flush 时机**：batch 闭合（场景 5）、`InterruptPending` 之后（场景 7b/8）、新 human/trigger turn 边界。
-3. **统一续跑**：flush 后仅 `enqueue tool_result`；移除场景 **6** 中 inline `RunToolMessageTurn`。
-4. **Turn epoch**：场景 **7/8** 打断或 `cancel_turn` 时递增 epoch，丢弃过期 deferred。
-5. **去掉 `savedPending` 回滚**：async 要么 defer，要么在 flush 时与 pending 状态一致地 commit（修复场景 4b 分裂）。
+| # | 原目标 | 现实现 |
+|---|--------|--------|
+| 1 | OpenBatch 门闩：pending/open batch 时 async 只 defer | ✅ `sideEffectStore.Produce`；`runtime_async_open_batch_test.go` |
+| 2 | Flush 于 batch 闭合 / Interrupt / TaskComplete | ✅ `ApplyReady` 步首；`ReconcileAfterStep` 步末 |
+| 3 | 统一续跑，禁止 consume 内 inline async | ✅ `side_effect_continue`（priority -1） |
+| 4 | Turn epoch 丢弃过期 deferred | ⏳ 未做（ClearContext 发 `side_effects_cleared`；orphan Produce 行由 Client 标失效） |
+| 5 | 去掉 `savedPending` 回滚 | ✅ 已移除 `HandleAsyncToolResult` inline 路径 |
 
 ---
 
@@ -693,3 +717,4 @@ H:  H₁(open)
 |------|------|
 | 2026-06-21 | 初稿：场景索引 + 场景一完整规格 |
 | 2026-06-21 | 补充场景二～八完整规格 + 对照总表 |
+| 2026-06-20 | 实现闭环：Produce/Apply/Continue、`side_effect_applied`/`cleared`、移除 inline `HandleAsyncToolResult` |

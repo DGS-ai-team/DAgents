@@ -20,6 +20,7 @@ from app.cli.child_agent import (
     is_a2a_relay_hitl,
     should_skip_child_runtime_display,
 )
+from app.cli.hitl_batch import expand_hitl_required
 from app.cli.user_information import (
     UserInformationAnswer,
     UserInformationCancelled,
@@ -522,6 +523,10 @@ class SessionController:
         self._turn_seq_fence = self._last_event_seq
         self._user_turn_done.clear()
 
+    def begin_implicit_turn(self) -> None:
+        """被动续跑（side_effect_continue）：等同 submit 栅栏但不 POST message。"""
+        self._reset_user_turn_wait()
+
     def _emit_transcript(self, update: TranscriptUpdate) -> None:
         if self._transcript_cb is not None:
             self._transcript_cb(update)
@@ -684,6 +689,13 @@ class SessionController:
             formatted = format_tool_call(data)
             if formatted is not None:
                 self._emit_transcript(formatted)
+        elif event_type == "hitl_required":
+            self._ensure_assistant_end()
+            user_infos, approval = expand_hitl_required(data)
+            for ui in user_infos:
+                self._enqueue_hitl(PendingHITL(kind="user_information", data=ui))
+            if approval:
+                self._enqueue_hitl(PendingHITL(kind="approval", data=approval))
         elif event_type == "approval_required":
             self._ensure_assistant_end()
             self._enqueue_hitl(PendingHITL(kind="approval", data=data))
@@ -708,6 +720,26 @@ class SessionController:
             self._ensure_assistant_end()
             self._emit_transcript(format_context_compression(event_type, data))
             self._schedule_context_token_refresh()
+        elif event_type == "side_effect_turn_start":
+            self.begin_implicit_turn()
+        elif event_type == "user_message_deferred":
+            self._ensure_assistant_end()
+            content = str(data.get("content") or "")
+            user_name = str(data.get("user_name") or "").strip()
+            prefix = f"[{user_name} deferred] " if user_name else "[deferred] "
+            self._emit_transcript(format_system_line(prefix + content))
+        elif event_type == "side_effect_applied":
+            self._ensure_assistant_end()
+            seqs = data.get("seqs") or []
+            if seqs:
+                joined = ", ".join(f"#{s}" for s in seqs)
+                self._emit_transcript(format_system_line(f"旁路回调 已入库: {joined}"))
+        elif event_type == "side_effects_cleared":
+            self._ensure_assistant_end()
+            seqs = data.get("seqs") or []
+            if seqs:
+                joined = ", ".join(f"#{s}" for s in seqs)
+                self._emit_transcript(format_system_line(f"旁路回调 已失效: {joined}"))
         elif event_type == "error":
             self._ensure_assistant_end()
             message = str(data.get("message") or "unknown error")

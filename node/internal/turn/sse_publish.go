@@ -1,6 +1,8 @@
 package turn
 
 import (
+	"strings"
+
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
 
@@ -34,7 +36,7 @@ func (o *Orchestrator) publishUserInformationRequired(sessionID, question string
 	})
 }
 
-// publishApprovalRequired 推送 approval required SSE。
+// publishApprovalRequired 推送 approval required SSE（A2A 中继等仍使用）。
 func (o *Orchestrator) publishApprovalRequired(sessionID, approvalID, executionID, message string, toolItems []map[string]any) {
 	o.hub.Publish(sessionID, o.agentID, "approval_required", map[string]any{
 		"approval_type": "execute_tool",
@@ -43,6 +45,20 @@ func (o *Orchestrator) publishApprovalRequired(sessionID, approvalID, executionI
 		"message":       message,
 		"approval_args": map[string]any{"tool_calls": toolItems},
 		"display_type":  "normal_text",
+	})
+}
+
+// publishHITLRequired 推送统一 HITL SSE；Client 按 item.hitl_type 展示与 resume。
+func (o *Orchestrator) publishHITLRequired(sessionID, hitlID, message string, items []map[string]any) {
+	sseItems := make([]any, len(items))
+	for i, item := range items {
+		sseItems[i] = item
+	}
+	o.hub.Publish(sessionID, o.agentID, "hitl_required", map[string]any{
+		"hitl_id":      hitlID,
+		"message":      message,
+		"items":        sseItems,
+		"display_type": "normal_text",
 	})
 }
 
@@ -97,56 +113,14 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 	o.hub.Publish(sessionID, o.agentID, "tool_result", payload)
 }
 
-// publishAsyncToolCallback 推送 async tool callback SSE。
-func (o *Orchestrator) publishAsyncToolCallback(sessionID string, built asyncToolMessages) {
-	o.publishToolCallPayload(sessionID, map[string]any{
-		"assistant_content": "",
-		"tool_calls": []map[string]any{{
-			"id":   built.ToolCallID,
-			"name": "tool_callback",
-			"arguments": map[string]any{
-				"job_id": built.AssistantMessage.ToolCalls[0].Function.Arguments,
-			},
-			"raw_arguments": built.AssistantMessage.ToolCalls[0].Function.Arguments,
-		}},
-		"display_type": "normal_text",
-	})
-	tc := llm.ToolCall{
-		ID:   built.ToolCallID,
-		Type: "function",
-		Function: llm.ToolCallFunction{
-			Name: built.ToolName,
-		},
-	}
-	o.publishToolResult(sessionID, tc, built.ForClientContent, false, asyncToolResultExtra(built))
-}
-
-// asyncToolResultExtra 构建 async tool result 额外字段。
-func asyncToolResultExtra(built asyncToolMessages) map[string]any {
-	extra := map[string]any{
-		"partial":      false,
-		"async_status": built.Status,
-		"display_type": "normal_text",
-	}
-	if built.OutputCompressSavedPct > 0 {
-		extra["output_compress_saved_pct"] = built.OutputCompressSavedPct
-		extra["output_compress_raw_runes"] = built.OutputCompressRawRunes
-		extra["output_compress_out_runes"] = built.OutputCompressOutRunes
-	}
-	return extra
-}
-
 // publishDone 推送 done SSE：finish_reason、turn_complete/awaiting、tool_context_metrics。
 func (o *Orchestrator) publishDone(sessionID, finishReason string) {
 	o.runTurnDonePhase(sessionID, finishReason)
 	payload := map[string]any{"finish_reason": finishReason}
 	switch finishReason {
-	case "awaiting_user_information":
+	case "awaiting_hitl", "awaiting_user_information", "awaiting_tool_approval":
 		payload["turn_complete"] = false
-		payload["awaiting"] = "user_information"
-	case "awaiting_tool_approval":
-		payload["turn_complete"] = false
-		payload["awaiting"] = "tool_approval"
+		payload["awaiting"] = "hitl"
 	default:
 		payload["turn_complete"] = true
 		payload["awaiting"] = nil
@@ -193,4 +167,88 @@ func (o *Orchestrator) publishUsageIfAccumulated(sessionID string, llmStep int) 
 	}
 	payload := llm.UsageSSEEvent(llmStep, llm.Usage{}, acc)
 	o.hub.Publish(sessionID, o.agentID, "usage", payload)
+}
+
+// PublishSideEffectCallback Produce 时推送 callback 形态 SSE（async / external tool loop）。
+func (o *Orchestrator) PublishSideEffectCallback(sessionID string, built SideEffectMessages, sideEffectSeq uint64) {
+	o.publishToolCallPayload(sessionID, map[string]any{
+		"assistant_content": "",
+		"tool_calls": []map[string]any{{
+			"id":            built.ToolCallID,
+			"name":          "tool_callback",
+			"raw_arguments": built.AssistantMessage.ToolCalls[0].Function.Arguments,
+		}},
+		"display_type":    "normal_text",
+		"deferred":        true,
+		"side_effect_seq": sideEffectSeq,
+	})
+	tc := llm.ToolCall{
+		ID:   built.ToolCallID,
+		Type: "function",
+		Function: llm.ToolCallFunction{
+			Name: built.ToolName,
+		},
+	}
+	extra := map[string]any{
+		"partial":         false,
+		"display_type":    "normal_text",
+		"deferred":        true,
+		"side_effect_seq": sideEffectSeq,
+	}
+	if built.Status != "" {
+		extra["async_status"] = built.Status
+	}
+	o.publishToolResult(sessionID, tc, built.ForClientContent, false, extra)
+}
+
+// PublishExternalSideEffectDeferred Produce 桥接态 user_message_deferred SSE。
+func (o *Orchestrator) PublishExternalSideEffectDeferred(sessionID, content, userName, triggerID string, seq uint64) {
+	payload := map[string]any{
+		"content":         content,
+		"user_name":       llm.NormalizeUserMessageName(userName),
+		"deferred":        true,
+		"side_effect_seq": seq,
+	}
+	if strings.TrimSpace(triggerID) != "" {
+		payload["trigger_id"] = triggerID
+	}
+	o.hub.Publish(sessionID, o.agentID, "user_message_deferred", payload)
+}
+
+// PublishSideEffectTurnStart 被动续跑 LLM 前通知 Client。
+func (o *Orchestrator) PublishSideEffectTurnStart(sessionID, source string, pending int) {
+	o.hub.Publish(sessionID, o.agentID, "side_effect_turn_start", map[string]any{
+		"source":              source,
+		"side_effect_pending": pending,
+		"implicit_turn":       true,
+	})
+}
+
+// PublishSideEffectApplied Apply 成功后将 Produce 条目标为已入库。
+func (o *Orchestrator) PublishSideEffectApplied(sessionID string, seqs []uint64) {
+	if len(seqs) == 0 {
+		return
+	}
+	out := make([]any, len(seqs))
+	for i, s := range seqs {
+		out[i] = s
+	}
+	o.hub.Publish(sessionID, o.agentID, "side_effect_applied", map[string]any{
+		"seqs": out,
+	})
+}
+
+// PublishSideEffectsCleared ClearContext/Delete 丢弃 server 缓冲时通知 Client。
+func (o *Orchestrator) PublishSideEffectsCleared(sessionID string, dropped int, seqs []uint64) {
+	if dropped <= 0 {
+		return
+	}
+	out := make([]any, len(seqs))
+	for i, s := range seqs {
+		out[i] = s
+	}
+	o.hub.Publish(sessionID, o.agentID, "side_effects_cleared", map[string]any{
+		"dropped": dropped,
+		"seqs":    out,
+	})
 }

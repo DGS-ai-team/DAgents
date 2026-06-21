@@ -2,6 +2,7 @@ package turn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -209,28 +210,39 @@ func TestRunMessageTurnUserInformationPayload(t *testing.T) {
 		case ev := <-ch:
 			switch ev.Type {
 			case "done":
-				if ev.Data["finish_reason"] != "awaiting_user_information" {
+				if ev.Data["finish_reason"] != "awaiting_hitl" {
 					t.Fatalf("unexpected done finish_reason: %+v", ev.Data)
 				}
 				if ev.Data["turn_complete"] != false {
 					t.Fatalf("turn_complete = %v, want false", ev.Data["turn_complete"])
 				}
-				if ev.Data["awaiting"] != "user_information" {
+				if ev.Data["awaiting"] != "hitl" {
 					t.Fatalf("awaiting = %v", ev.Data["awaiting"])
 				}
 				gotHitlDone = true
-			case "user_information_required":
-				args, ok := ev.Data["user_information_args"].(map[string]any)
-				if !ok {
-					t.Fatalf("user_information_args missing: %+v", ev.Data)
+			case "hitl_required":
+				items, ok := ev.Data["items"].([]any)
+				if !ok || len(items) != 1 {
+					t.Fatalf("items missing: %+v", ev.Data)
 				}
-				if ev.Data["content"] != "Pick one?" {
-					t.Fatalf("content = %v", ev.Data["content"])
+				item, ok := items[0].(map[string]any)
+				if !ok {
+					t.Fatalf("item invalid: %+v", items[0])
+				}
+				if item["hitl_type"] != hitlTypeUserInformation {
+					t.Fatalf("hitl_type = %v", item["hitl_type"])
+				}
+				args, ok := item["user_information_args"].(map[string]any)
+				if !ok {
+					t.Fatalf("user_information_args missing: %+v", item)
+				}
+				if item["content"] != "Pick one?" {
+					t.Fatalf("content = %v", item["content"])
 				}
 				if args["tool_call_id"] != "call-ask-1" {
 					t.Fatalf("tool_call_id = %v", args["tool_call_id"])
 				}
-				pending = &PendingHITL{Kind: HITLUserInformation, UserInfo: &llm.ToolCall{ID: "call-ask-1"}}
+				pending = &PendingHITL{Items: []PendingHITLItem{{ToolCall: llm.ToolCall{ID: "call-ask-1"}}}}
 				gotUserInfo = true
 			}
 		case <-deadline:
@@ -264,8 +276,8 @@ func TestRunMessageTurnApproval(t *testing.T) {
 	for {
 		select {
 		case ev := <-ch:
-			if ev.Type == "approval_required" {
-				pending = &PendingHITL{Kind: HITLApproval, ToolCalls: []llm.ToolCall{{ID: "call-bash-1"}}}
+			if ev.Type == "hitl_required" {
+				pending = &PendingHITL{Items: []PendingHITLItem{{ToolCall: llm.ToolCall{ID: "call-bash-1"}}}}
 				goto resumeApproval
 			}
 		case <-deadline:
@@ -284,6 +296,100 @@ resumeApproval:
 		case <-deadline:
 			t.Fatal("timeout waiting done")
 		}
+	}
+}
+
+func TestProcessToolCallsMixedHITL(t *testing.T) {
+	hub := stream.NewHub(32, logx.Discard())
+	orch := testOrchestrator(t, hub, &llm.MockClient{})
+	ch := hub.Subscribe(0)
+	defer hub.Unsubscribe(ch)
+
+	var history []llm.Message
+	pending, state, err := orch.processToolCalls(context.Background(), "sess-1", &history, []llm.ToolCall{
+		{
+			ID: "call-ask-1", Type: "function",
+			Function: llm.ToolCallFunction{
+				Name:      "ask_user_information",
+				Arguments: `{"question":"Which env?"}`,
+			},
+		},
+		{
+			ID: "call-bash-1", Type: "function",
+			Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"echo ok"}`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != "awaiting_hitl" {
+		t.Fatalf("state = %q, want awaiting_hitl", state)
+	}
+	if pending == nil || len(pending.Items) != 2 {
+		t.Fatalf("pending = %+v", pending)
+	}
+
+	deadline := time.After(2 * time.Second)
+	gotHitl := false
+	for !gotHitl {
+		select {
+		case ev := <-ch:
+			if ev.Type == "hitl_required" {
+				if len(hitlSSEItems(ev.Data)) != 2 {
+					t.Fatalf("hitl items = %+v", ev.Data["items"])
+				}
+				gotHitl = true
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting hitl_required SSE")
+		}
+	}
+
+	outcome := orch.ContinueAfterResume(context.Background(), "sess-1", &history, map[string]any{
+		"type":         "user_information",
+		"tool_call_id": "call-ask-1",
+		"answer":       "prod",
+	}, pending, nil, 1)
+	if outcome.Err != nil {
+		t.Fatal(outcome.Err)
+	}
+	if outcome.ScheduleToolResult {
+		t.Fatal("expected partial pending after user_information resume")
+	}
+	if outcome.Pending == nil || len(outcome.Pending.Items) != 1 {
+		t.Fatalf("partial pending = %+v", outcome.Pending)
+	}
+	if outcome.Pending.Items[0].ToolCall.ID != "call-bash-1" {
+		t.Fatalf("remaining pending = %+v", outcome.Pending.Items[0])
+	}
+	continueResumeAndDrain(t, orch, context.Background(), "sess-1", &history, map[string]any{"type": "approve"}, outcome.Pending, 1)
+}
+
+func hitlSSEItems(data map[string]any) []map[string]any {
+	raw := data["items"]
+	switch items := raw.(type) {
+	case []any:
+		out := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	case []map[string]any:
+		return items
+	default:
+		return nil
+	}
+}
+
+func TestPendingHITLLegacyJSON(t *testing.T) {
+	var pending PendingHITL
+	if err := json.Unmarshal([]byte(`{"kind":"approval","tool_calls":[{"id":"c1","type":"function","function":{"name":"bash_run"}}]}`), &pending); err != nil {
+		t.Fatal(err)
+	}
+	if len(pending.Items) != 1 || pending.Items[0].ToolCall.ID != "c1" {
+		t.Fatalf("pending = %+v", pending.Items)
 	}
 }
 

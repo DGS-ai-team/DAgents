@@ -1,4 +1,4 @@
-> **待修订（2026-05）**：Backend Control Plane / `connection_id` 描述已过时。Agent+Client 阶段以 **本地 Go Node SSE** 为准，见 [agent-node-api.md](../architecture/agent-node-api.md)（**§2.4.1 `done` 语义**）、[agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md)。
+> **待修订（2026-05）**：Backend Control Plane / `connection_id` 描述已过时。Agent+Client 阶段以 **本地 Go Node SSE** 为准，见 [agent-node-api.md](../architecture/agent-node-api.md)（**§2.4.1 `done` 语义**）、[附录/SSE事件速查.md](../handbook/附录/SSE事件速查.md)。**本地 turn HITL 已统一为 `hitl_required`**（A2A 中继仍用 `approval_required` / `user_information_required`）。
 
 # Client 事件与人机交互（HITL）
 
@@ -65,6 +65,27 @@ Gateway 须关闭 SSE buffering（`X-Accel-Buffering: no`）。
 | `policy_denied` | 1 | 策略拒绝（也可仅通过 `tool_result` + `rejected` 表达） |
 
 Phase 1 可将 execution 生命周期折叠进 `tool_call` / `tool_result`；独立事件便于 UI 展示进度条与取消按钮。
+
+### 3.4 旁路 side-effect（Go Node，2026-06）
+
+async / trigger / a2a inbox 在任务未完成时 **Produce**（SSE + 缓冲），**Apply** 在 `runTurnStep` 步首；被动 LLM 续跑经 `side_effect_continue`。
+
+| type | 说明 | 典型 `data` |
+|------|------|-------------|
+| `user_message_deferred` | external 桥接 Produce | `content`, `user_name`, `deferred`, `side_effect_seq?`, `trigger_id?` |
+| `side_effect_turn_start` | 被动续跑 LLM 开始前 | `source`, `side_effect_pending`, `implicit_turn: true` |
+| `side_effect_applied` | Apply 写入 history | `seqs: number[]` |
+| `side_effects_cleared` | ClearContext/Delete 丢弃缓冲 | `dropped`, `seqs: number[]` |
+
+**Client 约定**
+
+1. **`user_message_deferred`**：写入 transcript（虚线/deferred 样式）；**不**调用 `finishTurn`。
+2. **`side_effect_turn_start`**：调用 `beginImplicitTurn`（等同 user submit 的 turn 栅栏，但不 POST message）。
+3. **Cancel 恢复**：`POST .../cancel` 后若收到 `side_effect_turn_start`，按被动 turn 等待 `assistant` + `done`。
+4. **ClearContext**：Server 丢弃缓冲并发送 `side_effects_cleared`；Client 将对应 Produce 行标为已失效。
+5. **Apply**：Server 发送 `side_effect_applied`；Client 将对应 Produce 行标为已入库。
+
+Produce 阶段仍可能发送常规 `tool_call` / `tool_result`（async callback）；与 `user_message_deferred` 一样，idle 期 **不**应误触发 turn 结束。Produce 事件可含 `side_effect_seq` 供 Client 与 applied/cleared 关联。
 
 ## 4. 工具审批（`approval_required`）
 
@@ -194,16 +215,31 @@ A2A 触发的 body 写操作默认 `require_approval`，审批人为 **目标 Ag
 
 ## 7. 异步工具与 HITL 顺序
 
-同一 session 内优先级（与 v1 队列一致）：
+### 7.1 旧 Python / 理想 v1 语义（归档）
 
 ```text
-tool_result / async_tool_result  >  human message  >  resume  >  other
+tool_result / async_tool_result（升格后）  >  human message  >  resume  >  other
+```
+
+- 异步 body 任务完成时，`async_tool_result` **可**优先于新的 human message 被消费（Python `submit_message` 对 async 的 priority 升格逻辑）。
+
+### 7.2 Go Node 当前实现（2026-06，side-effect 缓冲）
+
+**与 §7.1 不同**，见 `node/internal/queue/queue.go`：
+
+```text
+side_effect_continue(-1) = tool_result(-1) > human(0) > resume(1) > async_completion(2) > other(10)
 ```
 
 含义：
 
-- 异步 body 任务完成时，`async_tool_result` 优先于新的 human message 被消费。
-- 用户可在 `approval_required` 等待期间发送 human message（可能打断当前 turn，见 v1 `interrupted_by_user_message` 语义）。
+- **`async_tool_result` / `trigger_message` / `a2a_inbox_message`**：**Produce** 入 `sideEffectStore` + 立即 SSE；**不** inline 改 history（Issue #32 修复）。
+- **Apply** 在 `runTurnStep` 步首；**Continue** 经 `side_effect_continue`（`PublishSideEffectTurnStart` → LLM）。
+- **`async_tool_result` 低于 human 与 resume**：HITL 审批与用户新消息先处理。
+- **`consumeLoop` 不因 pending HITL 暂停**：Produce 仍会被消费；HITL 期间 **不** schedule continue，等 resume/human 步首 Apply。
+- **`POST .../cancel`**：缓冲非空且无 pending 时 schedule continue（`cancel_recovery`）；ClearContext/Delete **丢弃**缓冲。
+
+详述：[turn-side-effects-refactor.md](../design/turn-side-effects-refactor.md)、[agent-node-api.md §2.4.3](../architecture/agent-node-api.md)。
 
 ## 8. A2A Client 的 HITL
 
@@ -220,7 +256,8 @@ Client 须实现：
 2. `GET /v1/streams?connection_id=...` 长连接
 3. 处理 `approval_required` → UI 确认 → `resume(type=approval)`
 4. 处理 `user_information_required` → 表单/选项 → `resume(type=user_information)`
-5. （可选）`execution_started` / cancel API
+5. 处理 `user_message_deferred` / `side_effect_turn_start`（旁路 Produce 与被动续跑，§3.4）
+6. （可选）`execution_started` / cancel API
 
 ## 10. Phase 1 最小集
 

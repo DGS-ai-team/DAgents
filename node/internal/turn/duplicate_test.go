@@ -61,14 +61,14 @@ func TestDuplicateToolCallTriggersStandardApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state != "awaiting_tool_approval" {
+	if state != "awaiting_hitl" {
 		t.Fatalf("state = %q", state)
 	}
-	if pending == nil || len(pending.ToolCalls) != 1 {
+	if pending == nil || len(pending.Items) != 1 {
 		t.Fatalf("pending = %+v", pending)
 	}
 
-	item := buildApprovalToolItem(pending.ToolCalls[0], &hooks.DuplicateMeta{
+	item := buildApprovalToolItem(pending.Items[0].ToolCall, &hooks.DuplicateMeta{
 		WindowSeconds:        60,
 		PreviousToolCallID:   "call-prev",
 		SecondsSincePrevious: 12,

@@ -38,15 +38,19 @@
 
 ## `child_agent.py`
 
-- **`approval_queue_key`**：HITL approval 去重键（子按 `child_session_id`，父按 `approval_id`）
+- **`approval_queue_key`**：HITL approval 去重键（子按 `child_session_id`，父按 `approval_id` / `hitl_id`）
 - **`should_skip_child_runtime_display`**：子 turn SSE 是否应对用户隐藏
 - **`format_child_lifecycle_line`** / **`approval_header`** / **`format_child_agents_list`**：TUI 文案
 - **`ChildAgentTracker`**：跟踪活跃子 Agent 与 `input_strip_text`
 
+## `hitl_batch.py`
+
+- **`expand_hitl_required`**：将 `hitl_required` SSE 展开为 user_info 列表 + approval 载荷
+
 ## `user_information.py`
 
 - **`UserInformationRequest`** / **`UserInformationAnswer`**：SSE 询问与用户回答模型
-- **`extract_user_information_request`**：解析 `user_information_required` 载荷
+- **`extract_user_information_request`**：解析 user_information 载荷（`hitl_required` item 或 `user_information_required`）
 - **`build_answer_from_text`** / **`build_answer_from_options`**：构造 resume 回答
 - **`UserInformationCancelled`**：用户 Esc 取消信号
 
@@ -60,7 +64,7 @@
 ## `approval.py`
 
 - **`ToolApprovalRequest`** / **`ApprovalDecision`** / **`ApprovalCancelled`**：审批模型与用户取消信号
-- **`extract_tool_approval_requests`**：从 SSE `approval_required.data` 提取工具列表
+- **`extract_tool_approval_requests`**：从 approval 载荷提取工具列表（`hitl_required` 展开或 `approval_required`）
 - **`build_*_decision`** / **`parse_selection_tokens`** / **`build_approval_resume`**：resume 决策构造（含子 Agent 路由字段）
 - **`clamp_menu_selection_index`** / **`build_approval_decision_from_map`**：TUI 菜单光标与决策表
 

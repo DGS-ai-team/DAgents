@@ -182,6 +182,37 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         kinds = [item.kind for item in self.controller._hitl_queue]
         self.assertEqual(kinds, ["approval", "user_information"])
 
+    async def test_hitl_required_expands_mixed_batch(self) -> None:
+        await self.controller._handle_stream_event(
+            _event(
+                "hitl_required",
+                data={
+                    "hitl_id": "hitl-1",
+                    "items": [
+                        {
+                            "hitl_type": "user_information",
+                            "content": "Which?",
+                            "user_information_args": {
+                                "tool_call_id": "call_ask",
+                                "question": "Which?",
+                            },
+                        },
+                        {
+                            "hitl_type": "execute_tool",
+                            "id": "call_bash",
+                            "name": "bash_run",
+                            "arguments": {},
+                        },
+                    ],
+                },
+            ),
+        )
+        self.assertEqual(self.controller.hitl_queue_len(), 2)
+        self.assertEqual(
+            [item.kind for item in self.controller._hitl_queue],
+            ["user_information", "approval"],
+        )
+
     async def test_new_approval_replaces_stale_approval_in_queue(self) -> None:
         """同一父级目标的 approval_required 应替换队列中旧 approval。"""
         old_data = {
@@ -292,6 +323,60 @@ class SessionControllerRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.hitl_queue_len(), 0)
         self.assertFalse(self.controller._awaiting_user_turn)
         mock_client.create_session.assert_awaited_once_with("sess-new")
+
+    async def test_side_effect_turn_start_begins_implicit_turn(self) -> None:
+        self.controller.begin_implicit_turn()
+        wait_task = asyncio.create_task(self.controller.wait_user_turn())
+
+        await self.controller._handle_stream_event(_event("assistant", content="handled"))
+        await self.controller._handle_stream_event(
+            _event(
+                "done",
+                data={
+                    "finish_reason": "stop",
+                    "turn_complete": True,
+                    "awaiting": None,
+                },
+            )
+        )
+
+        await asyncio.wait_for(wait_task, timeout=1.0)
+        self.assertFalse(self.controller._awaiting_user_turn)
+
+    async def test_user_message_deferred_renders_system_line(self) -> None:
+        await self.controller._handle_stream_event(
+            _event(
+                "user_message_deferred",
+                data={
+                    "content": "trigger fired",
+                    "user_name": "trigger",
+                    "deferred": True,
+                },
+            )
+        )
+        self.assertEqual(len(self.updates), 1)
+        self.assertEqual(self.updates[0].kind, TranscriptKind.LINE)
+        self.assertIn("trigger fired", self.updates[0].text)
+        self.assertIn("deferred", self.updates[0].text)
+
+    async def test_side_effect_applied_renders_system_line(self) -> None:
+        await self.controller._handle_stream_event(
+            _event("side_effect_applied", data={"seqs": [1, 2]})
+        )
+        self.assertEqual(len(self.updates), 1)
+        self.assertEqual(self.updates[0].kind, TranscriptKind.LINE)
+        self.assertIn("已入库", self.updates[0].text)
+        self.assertIn("#1", self.updates[0].text)
+        self.assertIn("#2", self.updates[0].text)
+
+    async def test_side_effects_cleared_renders_system_line(self) -> None:
+        await self.controller._handle_stream_event(
+            _event("side_effects_cleared", data={"dropped": 1, "seqs": [3]})
+        )
+        self.assertEqual(len(self.updates), 1)
+        self.assertEqual(self.updates[0].kind, TranscriptKind.LINE)
+        self.assertIn("已失效", self.updates[0].text)
+        self.assertIn("#3", self.updates[0].text)
 
 
 if __name__ == "__main__":

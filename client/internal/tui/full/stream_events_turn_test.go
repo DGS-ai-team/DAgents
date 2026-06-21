@@ -66,3 +66,36 @@ func TestOnStreamEventIgnoresStaleDoneBeforeTurnContent(t *testing.T) {
 		t.Fatal("turn should finish after content + done")
 	}
 }
+
+func TestOnStreamEventSideEffectTurnStartBeginsImplicitTurn(t *testing.T) {
+	m := &model{
+		transcript: tuishared.NewTranscript(0),
+		toolFold:   &tuishared.ToolFold{},
+		turn:       tuishared.NewTurnGate(),
+	}
+	m.turn.NoteSeq(1)
+
+	m.onStreamEvent(nodeapi.StreamEvent{
+		Type: "side_effect_turn_start",
+		Seq:  2,
+		Data: map[string]any{
+			"source":              "cancel_recovery",
+			"side_effect_pending": float64(1),
+			"implicit_turn":       true,
+		},
+	})
+	if !m.turn.Awaiting() {
+		t.Fatal("side_effect_turn_start should begin implicit turn")
+	}
+
+	m.onStreamEvent(nodeapi.StreamEvent{Type: "assistant", Seq: 3, Data: map[string]any{
+		"content": "handled",
+	}})
+	m.onStreamEvent(nodeapi.StreamEvent{Type: "done", Seq: 4, Data: map[string]any{
+		"finish_reason": "stop",
+		"turn_complete": true,
+	}})
+	if m.turn.Awaiting() {
+		t.Fatal("implicit turn should finish on done after content")
+	}
+}

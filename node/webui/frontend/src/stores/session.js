@@ -38,6 +38,15 @@ export async function ensureSession() {
 }
 
 export function beginSubmit() {
+  beginTurnWait();
+}
+
+/** 被动续跑（side_effect_continue）：等同 beginSubmit 但不 POST user message。 */
+export function beginImplicitTurn() {
+  beginTurnWait();
+}
+
+function beginTurnWait() {
   sessionStore.awaitingTurn = true;
   sessionStore.turnContentSeen = false;
   sessionStore.seqFence = transcriptStore.lastSeq;

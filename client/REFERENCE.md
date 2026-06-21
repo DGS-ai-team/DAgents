@@ -41,7 +41,8 @@
 | `Interact` | HITL 回调（全屏 TUI）；nil 时 stdin |
 | `HandleStreamEvent` | 处理事件与 HITL；支持 `context_compression_*` |
 | `BuildApprovalSelectionResume` | 逐条勾选审批 resume |
-| `ApprovalQueueKey` | HITL approval 队列去重键 |
+| `ExpandHITLRequired` | 将 `hitl_required` 展开为 user_info / approval 队列项 |
+| `ApprovalQueueKey` | HITL approval 队列去重键（含 `hitl_id` 回退） |
 | `ExtractUserInformationRequest` | 解析 ask_user_information |
 | `FormatUserInformationTranscriptLines` | 合并「Agent 询问」transcript 行 |
 | `PrintUserInformationTranscript` | REPL 输出合并询问块 |

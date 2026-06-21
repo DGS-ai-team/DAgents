@@ -99,7 +99,7 @@ func ShouldSkipChildRuntimeDisplay(eventType string, data map[string]any) bool {
 		return false
 	}
 	switch eventType {
-	case "approval_required", "temporary_agent_created", "temporary_agent_completed", "temporary_agent_cancelled":
+	case "approval_required", "hitl_required", "temporary_agent_created", "temporary_agent_completed", "temporary_agent_cancelled":
 		return false
 	default:
 		return true

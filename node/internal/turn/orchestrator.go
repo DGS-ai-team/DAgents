@@ -141,43 +141,6 @@ func (o *Orchestrator) RunToolMessageTurn(
 	return o.runOneStep(ctx, sessionID, history, setState, toolLoopCount)
 }
 
-// HandleAsyncToolResult 将异步工具完成写回 history 并按尾部形态决定是否继续 tool_message 回合。
-func (o *Orchestrator) HandleAsyncToolResult(
-	ctx context.Context,
-	sessionID string,
-	history *[]llm.Message,
-	input AsyncToolResultInput,
-	setState StateSetter,
-	toolLoopCount int,
-) StepOutcome {
-	if setState == nil {
-		setState = func(State) {}
-	}
-	built := o.buildAsyncToolMessages(sessionID, input)
-	tail := classifyToolResultTail(*history)
-	switch tail {
-	case tailTool:
-		o.appendHistory(sessionID, history, built.AssistantMessage)
-		o.appendHistory(sessionID, history, built.ToolMessage)
-	case tailAssistantWithToolCalls:
-		insertAt := len(*history) - 1
-		o.insertHistory(sessionID, history, insertAt, built.AssistantMessage)
-		o.insertHistory(sessionID, history, insertAt+1, built.ToolMessage)
-	case tailAssistantWithoutToolCalls:
-		o.appendHistory(sessionID, history, built.UserMessage)
-		o.appendHistory(sessionID, history, built.AssistantMessage)
-		o.appendHistory(sessionID, history, built.ToolMessage)
-	default:
-		o.appendHistory(sessionID, history, built.AssistantMessage)
-		o.appendHistory(sessionID, history, built.ToolMessage)
-	}
-	o.publishAsyncToolCallback(sessionID, built)
-	if !shouldContinueAfterAsyncTool(tail) {
-		return StepOutcome{LoopCount: toolLoopCount}
-	}
-	return o.RunToolMessageTurn(ctx, sessionID, history, setState, toolLoopCount)
-}
-
 // ContinueAfterResume 在 Client 提交 resume 后写入 tool 结果并调度 tool_result 续跑。
 func (o *Orchestrator) ContinueAfterResume(
 	ctx context.Context,
@@ -196,61 +159,27 @@ func (o *Orchestrator) ContinueAfterResume(
 	}
 	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
 	pendingToolCallID := ""
-	if pending.Kind == HITLUserInformation && pending.UserInfo != nil {
-		pendingToolCallID = pending.UserInfo.ID
-	} else if pending.Kind == HITLApproval && len(pending.ToolCalls) > 0 {
-		pendingToolCallID = pending.ToolCalls[0].ID
+	pending.Normalize()
+	pendingCount := len(pending.Items)
+	if pendingCount > 0 {
+		pendingToolCallID = pending.Items[0].ToolCall.ID
 	}
 	o.logger.Info("turn resume",
 		"session_id", sessionID,
-		"hitl_kind", pending.Kind,
+		"pending_items", pendingCount,
 		"resume_tool_call_id", resumeToolCallID,
 		"pending_tool_call_id", pendingToolCallID,
+		"resume_value_kind", hitl.ResumeValueKind(resumeValue),
 		"resume_value", resumeValue,
 	)
-	switch pending.Kind {
-	case HITLUserInformation:
-		if pending.UserInfo == nil {
-			return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("missing user_information tool call")}
-		}
-		tc := *pending.UserInfo
-		content, err := hitl.ParseUserInformationResume(resumeValue, tc.ID)
-		if err != nil {
-			content = err.Error()
-		}
-		o.publishToolResult(sessionID, tc, content, false, nil)
-		o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
-	case HITLApproval:
-		ids := make([]string, 0, len(pending.ToolCalls))
-		for _, tc := range pending.ToolCalls {
-			ids = append(ids, tc.ID)
-		}
-		plan, err := hitl.ParseApprovalResume(resumeValue, ids)
-		if err != nil {
-			for _, tc := range pending.ToolCalls {
-				msg := "rejected: " + err.Error()
-				o.publishToolResult(sessionID, tc, msg, true, nil)
-				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
-			}
-		} else {
-			var approved []llm.ToolCall
-			for _, tc := range pending.ToolCalls {
-				if plan.IsApproved(tc.ID) {
-					approved = append(approved, tc)
-				} else {
-					msg := "rejected: user_rejected"
-					o.publishToolResult(sessionID, tc, msg, true, nil)
-					o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
-				}
-			}
-			if err := o.executeAutoBatch(ctx, sessionID, history, approved, &plan); err != nil {
-				return StepOutcome{LoopCount: toolLoopCount, Err: err}
-			}
-		}
+	switch hitl.ResumeValueKind(resumeValue) {
+	case "user_information":
+		return o.continueAfterUserInformationResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
+	case "approval":
+		return o.continueAfterApprovalResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
 	default:
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("unknown pending hitl kind")}
+		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("unsupported resume type")}
 	}
-	return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
 }
 
 func NewOrchestrator(

@@ -74,10 +74,10 @@ runOneStep(ctx, sessionID, history, setState, toolLoopCount)
   └─ setState(awaiting_tool)
         processToolCalls                 → tool_router.go
           ├─ auto      → Execute，SSE tool_result
-          ├─ approval  → PendingHITL，SSE approval_required
-          ├─ user_info → PendingHITL，SSE user_information_required
+          ├─ HITL       → PendingHITL.Items[]，SSE hitl_required
+          │               （ask_user + approval 同批；分步 resume）
           └─ childagent → HandleParentTool
-        pending ? → done(awaiting_*)，return Pending
+        pending ? → done(awaiting_hitl)，return Pending（可部分 resume 后仍 pending）
         否则 enqueueToolResult 或 ScheduleToolResult=true
 ```
 
@@ -231,8 +231,8 @@ consumeLoop 再次出队
 | **HITL resume** | `POST /v1/messages`（`request_type: resume`） |
 | **工具续跑** | Orchestrator 在本步 auto 工具完成后 `enqueue(tool_result)` |
 | **异步工具** | 后台 job 完成 → `async_tool_result` |
-| **Trigger** | 调度器 fire → synthetic user 消息（带 `TriggerID`） |
-| **A2A inbox** | `RunInboxTurn` 向 inbox session 入队（见 [05](./05-Manage与A2A.md)） |
+| **Trigger** | 调度器 fire → `trigger_message`（`TriggerID` + `UserName=trigger`） |
+| **A2A inbox** | `a2a_inbox_message` 入队（见 [05](./05-Manage与A2A.md)） |
 
 若全部同步调用 Orchestrator，会难以保证 **tool_result 优先闭合序列**、**resume 与 human 的竞态**、**单 session 串行消费**。  
 因此：**每 session 一个 `MessageQueue` + 单 goroutine `consumeLoop`**，统一出队后再进入 §2。
@@ -255,22 +255,39 @@ Enqueue(Envelope, Priority)  ──►  优先级排序  ──►  Dequeue(ctx)
 
 | `RequestType` | 常量 | 典型来源 | consume 处理 |
 |---------------|------|----------|--------------|
-| `message` | `RequestTypeMessage` | Client / Trigger / A2A | `handleHumanMessage` |
+| `message` | `RequestTypeMessage` | Client user | `handleHumanMessage` |
 | `resume` | `RequestTypeResume` | Client HITL 提交 | `handleResume` |
 | `tool_result` | `RequestTypeToolResult` | Orchestrator 回调 | `handleToolResult` |
-| `async_tool_result` | `RequestTypeAsyncToolResult` | 后台 job | `handleAsyncToolResult` |
+| `async_tool_result` | `RequestTypeAsyncToolResult` | 后台 job | `handleSideEffectProduceAsync`（Produce） |
+| `trigger_message` | `RequestTypeTriggerMessage` | trigger fire | `handleSideEffectProduceExternal` |
+| `a2a_inbox_message` | `RequestTypeA2AInboxMessage` | Manage inbox | `handleSideEffectProduceExternal` |
+| `side_effect_continue` | `RequestTypeSideEffectContinue` | Apply 后被动续跑 | `handleSideEffectContinue` |
 
 `Envelope` 还携带：`Content`、`UserName`（A2A/trigger 可非 human）、`ResumeValue`、`TriggerID`、`AsyncToolResult` 等。
 
 ### 3.4 优先级
 
+出队顺序（数值越小越优先；同档 FIFO 按 `seq`）：
+
 ```text
-tool_result > resume > human > async_completion > other
+tool_result > human > resume > async_completion > other
 ```
 
-**设计意图**：工具结果尽快回灌，保证 OpenAI 消息序列 `assistant(tool_calls) → tool` 及时闭合；避免 human 插队导致模型看到未闭合 tool_calls。
+| 档位 | 整数值 | 典型 `request_type` |
+|------|--------|---------------------|
+| `tool_result` | -1 | `tool_result` / `side_effect_continue` |
+| `human` | 0 | `message`（CLI/API user） |
+| `resume` | 1 | `resume` |
+| `async_completion` | 2 | `async_tool_result` |
+| `other` | 10 | `trigger_message` / `a2a_inbox_message` |
 
-实现：`queue.go` → `priorityValue` + 稳定排序。
+**设计意图**（与 `node/internal/queue/queue.go` → `priorityValue` 一致）：
+
+1. **`tool_result` 最高**：同步工具批闭合后尽快续跑，避免 `assistant(tool_calls)` 长期缺 `tool`。
+2. **`human` 高于 `resume`**：排队中的新 user message 可先出队；`handleHumanMessage` 会 `InterruptPending`，未消费的 stale `resume` 在 `pending==nil` 时被忽略（对齐旧 Python 语义）。
+3. **`resume` 高于 `async_completion` / `other`**：HITL 提交优先于后台 job 回灌与 trigger。
+4. **`async_completion` 低于 human/resume**：Go 有意与旧 Python「async 升格为 `tool_result`」区分，审批等待期优先处理用户交互；与 open batch 交错时的风险见 [Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32) 与 [`turn-side-effects-refactor.md`](../design/turn-side-effects-refactor.md)。
+5. **`other` 最低**：trigger 不抢 human / resume / tool 闭环。
 
 ### 3.5 `consumeLoop` 分流
 
@@ -279,13 +296,16 @@ tool_result > resume > human > async_completion > other
 ```text
 consumeLoop(ctx)
   env := queue.Dequeue(ctx)
-  if env.TriggerID != "" → ClearPendingDelivery
   switch env.RequestType:
-    resume           → handleResume
-    async_tool_result → handleAsyncToolResult
-    tool_result      → handleToolResult
-    message / ""     → handleHumanMessage
+    resume              → handleResume
+    async_tool_result   → handleSideEffectProduceAsync
+    trigger_message / a2a_inbox_message → handleSideEffectProduceExternal
+    side_effect_continue → handleSideEffectContinue
+    tool_result         → handleToolResult
+    message / ""        → handleHumanMessage
 ```
+
+旁路条目 **Produce 时**不改 history；**Apply** 在 `runTurnStep` 步首或 `side_effect_continue` 前写入。Trigger `ClearPendingDelivery` 在 **Apply 成功**时，非 dequeue。详见 [turn-side-effects-refactor.md](../design/turn-side-effects-refactor.md)。
 
 **串行保证**：同一 session 上任意时刻只有一个 handler 在跑；不会出现两个 `runOneStep` 并发写同一 `history`。
 

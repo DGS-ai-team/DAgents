@@ -60,6 +60,8 @@ type runtime struct {
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
+	sideEffects *sideEffectStore // 旁路回灌缓冲（子 session 跳过）
+
 	childMeta *childRuntimeMeta // 子 Agent 元数据
 }
 
@@ -122,6 +124,7 @@ func newRuntimeWithPublisher(
 		toolLoopCount:   initialLoopCount,
 		fsRoot:          turnOpts.FSRoot,
 		triggerDelivery: triggerDelivery,
+		sideEffects:     newSideEffectStore(),
 	}
 	// 创建编排器
 	rt.orch = turn.NewOrchestrator(
@@ -196,16 +199,17 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		// trigger 消息出队即视为已消费，允许同一 trigger 再次 fire。
-		if env.TriggerID != "" && r.triggerDelivery != nil {
-			r.triggerDelivery.ClearPendingDelivery(env.TriggerID)
-		}
+		// Trigger delivery 在 Apply 成功时清除，不在 dequeue 时清除。
 		switch env.RequestType {
 		case queue.RequestTypeResume:
 			r.logResumeDequeued(env.ResumeValue)
 			r.handleResume(ctx, env.ResumeValue)
 		case queue.RequestTypeAsyncToolResult:
-			r.handleAsyncToolResult(ctx, env.AsyncToolResult)
+			r.handleSideEffectProduceAsync(ctx, env.AsyncToolResult)
+		case queue.RequestTypeTriggerMessage, queue.RequestTypeA2AInboxMessage:
+			r.handleSideEffectProduceExternal(ctx, env)
+		case queue.RequestTypeSideEffectContinue:
+			r.handleSideEffectContinue(ctx, env.SideEffectContinueSource)
 		case queue.RequestTypeToolResult:
 			r.handleToolResult(ctx)
 		case queue.RequestTypeMessage, "":
@@ -258,7 +262,7 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 	r.toolLoopCount = 0
 	r.mu.Unlock()
 
-	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
 		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, content, userName, setState)
 	})
 	if outcome.Err != nil {
@@ -291,49 +295,11 @@ func (r *runtime) afterToolStep(outcome turn.StepOutcome) {
 
 func (r *runtime) handleToolResult(parent context.Context) {
 	loopCount := r.toolLoopCountSnapshot()
-	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
 		return r.orch.RunToolMessageTurn(ctx, r.session.ID, history, setState, loopCount)
 	})
 	r.mu.Lock()
 	r.applyStepOutcome(&history, outcome)
-	r.mu.Unlock()
-	r.afterToolStep(outcome)
-}
-
-func (r *runtime) handleAsyncToolResult(parent context.Context, payload *queue.AsyncToolResultPayload) {
-	if payload == nil {
-		return
-	}
-	r.mu.Lock()
-	savedPending := r.pending
-	savedLoopCount := r.toolLoopCount
-	r.mu.Unlock()
-
-	loopCount := r.toolLoopCountSnapshot()
-	outcome, history := r.runTurnStep(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
-		return r.orch.HandleAsyncToolResult(ctx, r.session.ID, history, turn.AsyncToolResultInput{
-			JobID:                  payload.JobID,
-			ToolName:               payload.ToolName,
-			ToolCallID:             payload.ToolCallID,
-			Status:                 payload.Status,
-			ResultText:             payload.ResultText,
-			ErrorText:              payload.ErrorText,
-			OutputCompressSavedPct: payload.OutputCompressSavedPct,
-			OutputCompressRawRunes: payload.OutputCompressRawRunes,
-			OutputCompressOutRunes: payload.OutputCompressOutRunes,
-		}, setState, loopCount)
-	})
-	r.mu.Lock()
-	r.applyStepOutcome(&history, outcome)
-	if savedPending != nil && outcome.Pending == nil {
-		r.pending = savedPending
-		r.toolLoopCount = savedLoopCount
-		r.logger.Info("async_tool_result preserved pending hitl",
-			"session_id", r.session.ID,
-			"job_id", payload.JobID,
-			"tool_name", payload.ToolName,
-		)
-	}
 	r.mu.Unlock()
 	r.afterToolStep(outcome)
 }
@@ -354,11 +320,11 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 	r.mu.Unlock()
 
 	resumeKind := clihitl.ResumeValueKind(resumeValue)
-	if resumeKind != "nil" && resumeKind != "unknown" && pendingKind != "" &&
-		!resumeKindMatchesPending(pendingKind, resumeKind) {
+	if resumeKind != "nil" && resumeKind != "unknown" && pending != nil &&
+		!resumeKindMatchesPending(pending, resumeKind) {
 		r.logger.Warn("resume kind mismatch (diagnostic only, still processing)",
 			"session_id", r.session.ID,
-			"pending_kind", pendingKind,
+			"pending_summary", pendingKind,
 			"pending_tool_call_id", pendingToolCallID,
 			"resume_value_kind", resumeKind,
 			"resume_value", resumeValue,
@@ -373,7 +339,7 @@ func (r *runtime) handleResume(parent context.Context, resumeValue map[string]an
 		"resume_value", resumeValue,
 	)
 
-	outcome, history := r.runTurnStep(parent, turn.StateAwaitingTool, false, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
+	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateAwaitingTool, false, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
 		return r.orch.ContinueAfterResume(ctx, r.session.ID, history, resumeValue, pending, setState, loopCount)
 	})
 	r.mu.Lock()
@@ -408,6 +374,9 @@ func (r *runtime) persist(ctx context.Context) {
 func (r *runtime) clearMessages(ctx context.Context) {
 	if r.compression != nil {
 		r.compression.CancelSession(r.session.ID)
+	}
+	if r.sideEffectsEnabled() {
+		r.sideEffects.ClearSession(r.session.ID, r.orch, r.triggerDelivery)
 	}
 	r.mu.Lock()
 	r.messages = nil
@@ -454,19 +423,15 @@ func (r *runtime) hasPendingHITL() bool {
 	return r.pending != nil
 }
 
-// pendingHITLLogFields 提取 pending HITL 日志字段（kind 与首个 tool_call_id）。
-func pendingHITLLogFields(pending *turn.PendingHITL) (kind string, toolCallID string) {
-	if pending == nil {
+// pendingHITLLogFields 提取 pending HITL 日志字段。
+func pendingHITLLogFields(pending *turn.PendingHITL) (summary string, toolCallID string) {
+	if pending == nil || len(pending.Items) == 0 {
 		return "", ""
 	}
-	kind = string(pending.Kind)
-	if pending.Kind == turn.HITLUserInformation && pending.UserInfo != nil {
-		return kind, pending.UserInfo.ID
+	if len(pending.Items) == 1 {
+		return "hitl", pending.Items[0].ToolCall.ID
 	}
-	if pending.Kind == turn.HITLApproval && len(pending.ToolCalls) > 0 {
-		return kind, pending.ToolCalls[0].ID
-	}
-	return kind, ""
+	return fmt.Sprintf("hitl(%d)", len(pending.Items)), pending.Items[0].ToolCall.ID
 }
 
 func (r *runtime) sidecarPrefix() compression.SidecarPrefix {
@@ -592,15 +557,24 @@ func (r *runtime) logResumeDequeued(resumeValue map[string]any) {
 	)
 }
 
-func resumeKindMatchesPending(pendingKind, resumeKind string) bool {
-	switch pendingKind {
-	case "approval":
-		return resumeKind == "approval"
-	case "user_information":
-		return resumeKind == "user_information"
-	default:
+func resumeKindMatchesPending(pending *turn.PendingHITL, resumeKind string) bool {
+	if pending == nil {
 		return false
 	}
+	for _, item := range pending.Items {
+		name := item.ToolCall.Function.Name
+		switch resumeKind {
+		case "user_information":
+			if tools.IsAskUserInformation(name) {
+				return true
+			}
+		case "approval":
+			if !tools.IsAskUserInformation(name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func resumeFieldString(value map[string]any, key string) string {
@@ -621,6 +595,7 @@ func (r *runtime) cancelTurn() bool {
 	if cancel != nil && state != turn.StateIdle {
 		r.mu.Unlock()
 		cancel()
+		r.maybeScheduleContinueAfterCancel()
 		return true
 	}
 	repaired := r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
@@ -634,12 +609,16 @@ func (r *runtime) cancelTurn() bool {
 		)
 		r.persist(context.Background())
 	}
+	r.maybeScheduleContinueAfterCancel()
 	return false
 }
 
 func (r *runtime) stop() {
 	if r.compression != nil {
 		r.compression.CancelSession(r.session.ID)
+	}
+	if r.sideEffectsEnabled() {
+		r.sideEffects.ClearSession(r.session.ID, r.orch, r.triggerDelivery)
 	}
 	r.queue.Close()
 }

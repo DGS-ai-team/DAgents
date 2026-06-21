@@ -117,8 +117,9 @@ GET /v1/stream?after_seq=0
 | `assistant_delta` | 流式正文 |
 | `reasoning_delta` | 推理链（若模型支持） |
 | `tool_call` / `tool_result` | 工具调用与结果 |
-| `approval_required` | 需人工审批 |
-| `user_information_required` | 需用户输入 |
+| `hitl_required` | 本地 turn 统一 HITL（`items[]` 含 ask / 审批） |
+| `approval_required` | 需人工审批（A2A / 子 Agent） |
+| `user_information_required` | 需用户输入（A2A 中继） |
 | `usage` | token 统计（**独占一行**展示） |
 | `done` | 本步 turn 结束（**不等于**整个多步工具链结束） |
 
@@ -152,9 +153,10 @@ GET /v1/stream?after_seq=0
 |--------|------|------|
 | Python TUI | `app/cli/tui/app.py` | Textual 组件、HITL 弹窗 |
 | Python API | `app/cli/api_client.py` | SSE 按 session 过滤 |
+| Python HITL | `app/cli/hitl_batch.py` | `expand_hitl_required` |
 | Python A2A relay | `app/cli/child_agent.py` | `a2a_relay` 工具块样式 |
 | Go full TUI | `client/internal/tui/full/` | bubbletea、HITL 队列 |
-| Go HITL | `client/internal/hitl/` | approval、A2A relay |
+| Go HITL | `client/internal/hitl/` | `hitl_batch.go` 展开、`approval`、A2A relay |
 | Go A2A 展示 | `client/internal/tui/full/a2a_relay_tools.go` | `from <对端>` 标识 |
 | Go plain REPL | `client/internal/tui/repl/` | 行模式 |
 | Node Web UI | `node/webui/frontend/` | Vue 3 + Vite；`go:embed` 挂载 `/ui/` |
@@ -162,7 +164,7 @@ GET /v1/stream?after_seq=0
 
 ### 3.2 HITL 与 Client 行为
 
-- Client 维护 **非阻塞 HITL 队列**；收到 `approval_required` 弹 UI，用户提交后 `POST resume`。  
+- Client 维护 **非阻塞 HITL 队列**；收到 **`hitl_required`** 后按 `hitl_type` 展开入队（先 ask_user，再 approval）；用户分步 `POST resume`（`user_information` / `approval`）。仍兼容 `approval_required` / `user_information_required`（A2A）。  
 - **Esc**：取消在途 turn（`POST .../cancel`），非 `/cancel` 斜杠。  
 - **A2A relay**（v0.3.9）：caller 侧收到 relay 审批后，提交 Manage `caller_resume`；TUI **不等**本地 `tool_result`，审批后直接终态（青点 → 灰点）。  
 - 源码：`client/internal/hitl/a2a.go`、`node/internal/session/a2a_caller_hitl.go`。

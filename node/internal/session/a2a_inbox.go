@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
@@ -62,7 +61,7 @@ func (m *Manager) RunInboxTurn(ctx context.Context, taskID, content string, resu
 		if _, _, err := m.prepareInboxSession(sessionID); err != nil {
 			return InboxTurnResult{}, err
 		}
-		if _, err := m.EnqueueMessage(ctx, sessionID, "message", content, nil, llm.UserNameA2AInbox); err != nil {
+		if _, err := m.EnqueueA2AInboxMessage(ctx, sessionID, content); err != nil {
 			return InboxTurnResult{}, err
 		}
 	case resume != nil:
@@ -100,6 +99,12 @@ func (m *Manager) waitInboxTurnWithSub(ctx context.Context, sessionID string, su
 			case "assistant":
 				if c, ok := ev.Data["content"].(string); ok {
 					assistant.WriteString(c)
+				}
+			case "hitl_required":
+				hitl = &InboxHITLPause{
+					Awaiting:  "hitl",
+					EventType: "hitl_required",
+					Data:      cloneEventData(ev.Data),
 				}
 			case "user_information_required":
 				hitl = &InboxHITLPause{

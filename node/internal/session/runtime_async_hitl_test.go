@@ -45,8 +45,7 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{approvalCall}},
 	}
 	rt.pending = &turn.PendingHITL{
-		Kind:      turn.HITLApproval,
-		ToolCalls: []llm.ToolCall{approvalCall},
+		Items: []turn.PendingHITLItem{{ToolCall: approvalCall}},
 	}
 	rt.toolLoopCount = 1
 	rt.mu.Unlock()
@@ -80,14 +79,17 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 	msgCount := len(rt.messages)
 	rt.mu.Unlock()
 
-	if pending == nil || pending.Kind != turn.HITLApproval {
+	if pending == nil || len(pending.Items) != 1 {
 		t.Fatalf("pending HITL should be preserved, got %#v", pending)
 	}
 	if loopCount != 1 {
 		t.Fatalf("toolLoopCount = %d, want 1", loopCount)
 	}
-	if msgCount < 7 {
-		t.Fatalf("async callback should append history, got %d messages", msgCount)
+	if msgCount != 5 {
+		t.Fatalf("async produce should not append history while pending, got %d messages", msgCount)
+	}
+	if !rt.sideEffects.HasReady() {
+		t.Fatal("async side effect should be buffered as ready")
 	}
 
 	resume := map[string]any{
@@ -97,5 +99,46 @@ func TestAsyncToolResultPreservesPendingHITL_issue25(t *testing.T) {
 	}
 	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "resume", "", resume, ""); err != nil {
 		t.Fatalf("resume enqueue should succeed while pending preserved: %v", err)
+	}
+	waitQueueDrain(t, rt, 8*time.Second)
+
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if !historyContainsJobID(rt.messages, "job-old") {
+		t.Fatal("resume turn should apply buffered async side effect at step start")
+	}
+}
+
+func TestTriggerProduceDuringHITLDoesNotScheduleContinue(t *testing.T) {
+	mgr := testManager(t)
+	defer mgr.Stop()
+
+	sess, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := mgr.getRuntime(sess.ID)
+	approvalCall := llm.ToolCall{
+		ID: "call-sync-1", Type: "function",
+		Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"a.txt"}`},
+	}
+	rt.mu.Lock()
+	rt.messages = []llm.Message{
+		{Role: "user", Content: "x"},
+		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{approvalCall}},
+	}
+	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: approvalCall}}}
+	rt.mu.Unlock()
+
+	if err := mgr.EnqueueTriggerMessage(sess.ID, "trig-1", "deferred trigger"); err != nil {
+		t.Fatal(err)
+	}
+	waitQueueDrain(t, rt, 3*time.Second)
+
+	if !rt.sideEffects.HasReady() {
+		t.Fatal("trigger should be buffered")
+	}
+	if sideEffectContinueDepth(rt) != 0 {
+		t.Fatalf("HITL should defer continue, depth=%d", sideEffectContinueDepth(rt))
 	}
 }

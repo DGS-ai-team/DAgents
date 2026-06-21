@@ -18,7 +18,7 @@ turn.Orchestrator / session / childagent
         → GET /v1/streams 长连接推送给 Client
 ```
 
-常见 `type`：`assistant`、`reasoning`、`tool_call`、`tool_result`、`usage`、`done`、`approval_required` 等。
+常见 `type`：`assistant`、`reasoning`、`tool_call`、`tool_result`、`usage`、`done`、`hitl_required` 等。A2A / 子 Agent 路径仍可能出现 `approval_required`、`user_information_required`。
 
 ## 相关文档
 

@@ -113,7 +113,36 @@ func (r *streamRunner) handleEvent(ctx context.Context, ev nodeapi.StreamEvent) 
 	if clihitl.ShouldSkipChildRuntimeDisplay(ev.Type, ev.Data) {
 		return true, nil
 	}
-	if (ev.Type == "approval_required" || ev.Type == "user_information_required") && clihitl.IsA2ARelayHITL(ev.Data) {
+	switch ev.Type {
+	case "side_effect_turn_start":
+		r.turn.BeginImplicitTurn()
+		r.logSystem("处理旁路回调…")
+		return true, nil
+	case "user_message_deferred":
+		content := strings.TrimSpace(fmt.Sprint(ev.Data["content"]))
+		userName := strings.TrimSpace(fmt.Sprint(ev.Data["user_name"]))
+		line := content
+		if userName != "" {
+			line = fmt.Sprintf("[%s deferred] %s", userName, content)
+		} else if line != "" {
+			line = "[deferred] " + line
+		}
+		if line != "" {
+			r.logSystem(line)
+		}
+		return true, nil
+	case "side_effect_applied":
+		if line := tuishared.FormatSideEffectSeqLine("已入库", ev.Data["seqs"]); line != "" {
+			r.logSystem(line)
+		}
+		return true, nil
+	case "side_effects_cleared":
+		if line := tuishared.FormatSideEffectSeqLine("已失效", ev.Data["seqs"]); line != "" {
+			r.logSystem(line)
+		}
+		return true, nil
+	}
+	if (ev.Type == "approval_required" || ev.Type == "user_information_required" || ev.Type == "hitl_required") && clihitl.IsA2ARelayHITL(ev.Data) {
 		if r.turn.Awaiting() {
 			r.turn.FinishTurn()
 		}

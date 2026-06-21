@@ -14,9 +14,9 @@
 | `SetToolResultEnqueuer` | 工具步结束后入队 `tool_result` |
 | `RunHumanMessageTurn` | 追加 user（含 `name` 来源标识）+ 单步 |
 | `RunToolMessageTurn` | 单步 tool_message 续跑 |
-| `HandleAsyncToolResult` | 异步工具完成写 history 并可选续跑 |
 | `ContinueAfterResume` | resume 后写 tool 结果并 `ScheduleToolResult` |
 | `InterruptPending` | 用户新消息打断 pending，补 interrupted tool_result |
+| `PublishSideEffectCallback` / `PublishSideEffectApplied` / `PublishSideEffectsCleared` | 旁路 Produce/Apply UX SSE |
 | `publishDone` | `done` SSE；含 **`tool_context_metrics`**（WS5） |
 
 SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / `publishToolResult` / `publishError` / `publishUsage` 等）。
@@ -38,9 +38,11 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 |------|------|
 | `publishAssistant` / `publishReasoning` | 流式 delta |
 | `publishError` | `error` SSE |
-| `publishUserInformationRequired` / `publishApprovalRequired` | HITL SSE |
+| `publishUserInformationRequired` / `publishApprovalRequired` | A2A 中继等仍使用的 HITL SSE |
+| `publishHITLRequired` | 本地 turn 统一 HITL SSE |
 | `publishToolCall` / `publishToolResult` | 工具 SSE |
-| `publishAsyncToolCallback` | async 回灌 tool_call + tool_result |
+| `PublishSideEffectCallback` / `PublishExternalSideEffectDeferred` | 旁路 Produce SSE |
+| `PublishSideEffectApplied` / `PublishSideEffectsCleared` | Apply / ClearContext UX SSE |
 | `publishDone` | `done` SSE |
 | `publishUsage` / `publishUsageIfAccumulated` | `usage` SSE |
 
@@ -83,8 +85,8 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 | 符号 | 说明 |
 |------|------|
 | `ToolUserInterruptedMessage` | 用户打断工具时的 tool 结果文案 |
-| `HITLKind` | `approval` / `user_information` |
-| `PendingHITL` | 暂停时的待处理 tool call |
+| `PendingHITLItem` | 单条待 HITL tool call（含可选 `DuplicateMeta`） |
+| `PendingHITL` | 暂停时的待处理批次（`Items[]`）；JSON 兼容旧 `kind`/`tool_calls` |
 | `PendingHITL.AllToolCalls` | 用于 `InterruptPending` 的 call 列表 |
 
 ## step.go
@@ -98,17 +100,34 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 
 | 符号 | 说明 |
 |------|------|
-| `AsyncToolResultInput` | 异步回灌输入（job_id、status、content 等） |
-| `buildAsyncToolMessages` | async 回灌消息；经 `tool.after_each` 拆分 SSE 全文 / history 摘要 |
+| `AsyncToolResultInput` | async 旁路回灌输入（job_id、status、content 等） |
+| `buildAsyncToolMessages` | async 旁路消息 bundle；经 `tool.after_each` 拆分 SSE 全文 / history 摘要 |
 | `splitToolResult` | 同步 tool：调用 `RunToolAfterEach` |
 | `ForClientContent` | async SSE 全文字段 |
 | `classifyToolResultTail` | 判断 history 尾部形态 |
-| `shouldContinueAfterAsyncTool` | 回灌后是否继续 `RunToolMessageTurn` |
+| `shouldContinueAfterAsyncTool` | Apply 后是否 schedule `side_effect_continue` |
+
+## side_effect_messages.go
+
+| 符号 | 说明 |
+|------|------|
+| `SideEffectKind` / `SideEffectMessages` | async / external 旁路 bundle |
+| `BuildSideEffectMessages` | Produce/Apply 用消息预构建 |
+| `ResolveSideEffectInsertSite` / `PlanSingleSideEffectApply` | 按 tail 解析 Apply 插入点 |
+| `BuildMergedCallbackBatch` | ≥2 条合并为 `get_callback` tool 消息 |
+| `ContinueAfterSideEffects` | 被动 LLM 续跑（`RunToolMessageTurn`） |
+
+## task_complete.go
+
+| 符号 | 说明 |
+|------|------|
+| `TaskPhase` | `open_batch` / `bridge` / `complete` |
+| `TaskComplete` | 尾部形态 + pending 判定任务是否已完成（可 Apply/Continue） |
 
 ## approval_payload.go
 
 | 符号 | 说明 |
 |------|------|
-| `buildApprovalToolItem` | 构造 `approval_required` 中单条 tool 展示 |
+| `buildApprovalToolItem` | 构造 HITL item（`execute_tool`）展示字段 |
 | `describeApprovalMeta` | 按工具名生成 reason / risk 文案 |
 | `firstNonEmpty` | 从 args map 取首个非空字符串字段 |

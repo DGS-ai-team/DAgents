@@ -51,6 +51,15 @@ func (g *TurnGate) NoteSeq(seq int) {
 
 // BeginSubmit 在用户 submit 后调用：以当前 lastSeq 设栅栏并阻塞 Wait。
 func (g *TurnGate) BeginSubmit() {
+	g.beginTurnWait()
+}
+
+// BeginImplicitTurn 被动续跑（side_effect_continue 等）：等同 BeginSubmit 但不绑 user submit。
+func (g *TurnGate) BeginImplicitTurn() {
+	g.beginTurnWait()
+}
+
+func (g *TurnGate) beginTurnWait() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.awaiting = true

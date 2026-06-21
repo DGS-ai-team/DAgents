@@ -6,6 +6,18 @@ import (
 	"time"
 )
 
+func TestTurnGateBeginImplicitTurn(t *testing.T) {
+	g := NewTurnGate()
+	g.NoteSeq(5)
+	g.BeginImplicitTurn()
+	if !g.Awaiting() {
+		t.Fatal("expected awaiting after BeginImplicitTurn")
+	}
+	if !g.IsStale(5) {
+		t.Fatal("seq at fence should be stale")
+	}
+}
+
 func TestTurnGateIgnoresStaleDoneBeforeContent(t *testing.T) {
 	g := NewTurnGate()
 	g.NoteSeq(10)

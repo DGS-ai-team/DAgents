@@ -216,7 +216,7 @@ OnChildSettled → finishWithEvent(completed)
 
 1. **忽略子 turn 的 `done`** — 避免 Client 误判父 session 回合结束
 2. **所有事件附加 `child_session_id`**
-3. **`approval_required` 附加** `hitl_scope=temporary_agent`、`child_purpose`
+3. **`approval_required` 附加** `hitl_scope=temporary_agent`、`child_purpose`（子 turn 仍走该事件；父 session 本地 turn 为 **`hitl_required`**）
 4. **统一 `Publish` 到父 `session_id`**
 
 Client 只订阅父 SSE；子 turn 的 `assistant` / `tool_result` 等由 Client 按 `child_session_id` 过滤隐藏，仅展示审批与生命周期行。

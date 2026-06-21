@@ -96,35 +96,24 @@ func (o *Orchestrator) processToolCalls(
 		return nil, "", err
 	}
 
+	var pendingItems []PendingHITLItem
 	if userInfo != nil {
-		question, uiArgs := buildUserInformationPayload(*userInfo)
-		o.publishUserInformationRequired(sessionID, question, uiArgs)
-		return &PendingHITL{Kind: HITLUserInformation, UserInfo: userInfo}, "awaiting_user_information", nil
+		pendingItems = append(pendingItems, PendingHITLItem{ToolCall: *userInfo})
 	}
-
-	if len(approvalCalls) > 0 {
-		approvalID := newShortID("appr-")
-		executionID := newShortID("exec-")
-		toolItems := make([]map[string]any, 0, len(approvalCalls))
-		hasDuplicate := false
-		for _, item := range approvalCalls {
-			if item.duplicateMeta != nil {
-				hasDuplicate = true
-			}
-			toolItems = append(toolItems, buildApprovalToolItem(item.tc, item.duplicateMeta))
+	for _, item := range approvalCalls {
+		pendingItem := PendingHITLItem{ToolCall: item.tc}
+		if item.duplicateMeta != nil {
+			meta := *item.duplicateMeta
+			pendingItem.DuplicateMeta = &meta
 		}
-		message := "检测到工具调用，等待用户确认后继续执行。"
-		if hasDuplicate {
-			message = "检测到工具调用；部分为短窗口内与上次完全相同的重复调用，请确认后再执行。"
-		}
-		pendingTools := make([]llm.ToolCall, 0, len(approvalCalls))
-		for _, item := range approvalCalls {
-			pendingTools = append(pendingTools, item.tc)
-		}
-		o.publishApprovalRequired(sessionID, approvalID, executionID, message, toolItems)
-		return &PendingHITL{Kind: HITLApproval, ToolCalls: pendingTools}, "awaiting_tool_approval", nil
+		pendingItems = append(pendingItems, pendingItem)
 	}
-	return nil, "", nil
+	if len(pendingItems) == 0 {
+		return nil, "", nil
+	}
+	message, sseItems := buildHITLRequiredPayload(pendingItems)
+	o.publishHITLRequired(sessionID, newShortID("hitl-"), message, sseItems)
+	return pendingFromItems(pendingItems), "awaiting_hitl", nil
 }
 
 func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID string, tc llm.ToolCall) hooks.ToolBeforeEachResult {
