@@ -107,7 +107,7 @@ GET /v1/stream?after_seq=0
 ```
 
 - 单 TUI 通常 **一个 SSE 连接**；事件带 `session_id` 字段供过滤。  
-- `after_seq`：断点续传；见 [02 §7](./02-Agent-Node-核心.md)。  
+- `after_seq`：断点续传；见 [02 §4.6](./02-Agent-Node-核心.md)。  
 - 事件类型速查：[附录/SSE事件速查](./附录/SSE事件速查.md)。
 
 **关键事件**：
