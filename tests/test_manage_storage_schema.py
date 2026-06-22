@@ -10,7 +10,9 @@ class SchemaTest(unittest.TestCase):
             with db.connect() as conn:
                 rows = {r[0] for r in conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'")}
-            self.assertEqual({"llm_configs", "skill_packages", "blobs"} - rows, set())
+            self.assertEqual({"llm_configs", "skill_packages"} - rows, set())
+            # Blob 元数据在 sidecar JSON，不入 SQLite：blobs 表不应存在。
+            self.assertNotIn("blobs", rows)
             with db.connect() as conn:
                 ver = conn.execute(
                     "SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]

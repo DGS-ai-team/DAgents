@@ -56,10 +56,8 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL,
                     PRIMARY KEY (skill_id, version)
                 );
-                CREATE TABLE IF NOT EXISTS blobs (
-                    blob_id TEXT PRIMARY KEY,
-                    payload_json TEXT NOT NULL
-                );
+                -- Blob 元数据随内容寻址文件落在 MANAGE_BLOB_DIR/{sha256}.json sidecar，
+                -- 不入 SQLite；故此处不建 blobs 表。
                 """
             )
             conn.execute(

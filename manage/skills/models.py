@@ -5,9 +5,12 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+_SLUG = r"^[A-Za-z0-9._-]+$"  # URL 路径段安全：字母数字与 . _ -
+
+
 class SkillPackageCreate(BaseModel):
-    skill_id: str = Field(min_length=1)
-    version: str = Field(min_length=1)
+    skill_id: str = Field(min_length=1, max_length=128, pattern=_SLUG)
+    version: str = Field(min_length=1, max_length=64, pattern=_SLUG)
     name: str = Field(min_length=1)
     description: str = ""
     owner: str = ""

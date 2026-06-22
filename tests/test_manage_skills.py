@@ -117,6 +117,23 @@ class SkillStoreTest(unittest.TestCase):
         self.assertEqual(len(s.sync_manifest(since=0)), 1)
         self.assertEqual(s.sync_manifest(since=1), [])   # nothing new past current version
 
+    def test_publish_is_idempotent(self):
+        s = _skill_store()
+        s.create(self._mk(), now=1)
+        s.publish("svc-restart", "1.0.0", now=2)
+        self.assertEqual(s.catalog_version(), 1)
+        again = s.publish("svc-restart", "1.0.0", now=3)   # re-publish
+        self.assertEqual(again.status, "published")
+        self.assertEqual(s.catalog_version(), 1)            # no double bump
+        self.assertEqual(len(s.catalog()), 1)
+
+    def test_invalid_skill_id_rejected(self):
+        import pydantic
+        with self.assertRaises(pydantic.ValidationError):
+            SkillPackageCreate(skill_id="bad id/../x", version="1.0.0", name="x")
+        with self.assertRaises(pydantic.ValidationError):
+            SkillPackageCreate(skill_id="ok", version="../1", name="x")
+
 
 def _skills_client():
     d = tempfile.mkdtemp()
@@ -147,3 +164,10 @@ class SkillRouterTest(unittest.TestCase):
         resp = c.get("/v1/skills/sync/manifest?since=0").json()
         self.assertEqual(len(resp["items"]), 1)
         self.assertGreaterEqual(resp["catalog_version"], 1)
+
+    def test_upload_rejects_invalid_skill_id(self):
+        c = _skills_client()
+        r = c.post("/v1/skills/packages",
+                   data={"skill_id": "bad id/../x", "version": "1.0.0", "name": "X"},
+                   files={"file": ("x.zip", b"PK\x03\x04", "application/zip")})
+        self.assertEqual(r.status_code, 422, r.text)

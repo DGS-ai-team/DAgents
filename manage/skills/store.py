@@ -76,6 +76,8 @@ class SkillPackageStore:
             pkg = self.get_version(skill_id, version)
             if not pkg:
                 return None
+            if pkg.status == "published":
+                return pkg  # 幂等：重复发布不再 bump catalog_version
             pkg.status = "published"
             pkg.updated_at = now
             pkg.catalog_seq = self._bump_version()

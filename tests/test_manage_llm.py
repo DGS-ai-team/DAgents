@@ -1,4 +1,4 @@
-import tempfile, unittest
+import json, os, tempfile, unittest
 from pathlib import Path
 from manage.storage.sqlite import SQLiteDatabase
 from manage.llm.store import LLMConfigStore
@@ -68,3 +68,55 @@ class LLMRouterTest(unittest.TestCase):
         self.assertEqual(c.get("/v1/llm/configs/default/resolve").json()["apiKey"], "sk-abcd1234")
         self.assertEqual(c.delete(f"/v1/llm/configs/{cid}").status_code, 200)
         self.assertEqual(c.get(f"/v1/llm/configs/{cid}").status_code, 404)
+
+
+class LLMAllowedGroupsTest(unittest.TestCase):
+    """allowed_groups 作为 discovery_group 命名空间的可见性约束：
+    member 仅能看到 allowed_groups 含其分组或为空的配置。"""
+
+    ADMIN = "admin-tok"
+    MEMBER = "member-tok"
+
+    def setUp(self):
+        self._prev = os.environ.get("MANAGE_TOKENS")
+        os.environ["MANAGE_TOKENS"] = json.dumps([
+            {"id": "adm", "token": self.ADMIN, "role": "admin"},
+            {"id": "ops", "token": self.MEMBER, "role": "member", "discovery_groups": ["ops"]},
+        ])
+        self.c = _client()
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("MANAGE_TOKENS", None)
+        else:
+            os.environ["MANAGE_TOKENS"] = self._prev
+
+    def _h(self, token):
+        return {"x-dagents-a2a-token": token}
+
+    def _create(self, name, allowed_groups, is_default=False):
+        body = dict(name=name, provider="openai", base_url="http://h/v1",
+                    model="m", api_key="sk-abcd1234",
+                    is_default=is_default, allowed_groups=allowed_groups)
+        r = self.c.post("/v1/llm/configs", json=body, headers=self._h(self.ADMIN))
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["id"]
+
+    def test_member_sees_only_permitted_groups(self):
+        pub = self._create("public", [])
+        ops = self._create("ops-only", ["ops"])
+        sec = self._create("sec-only", ["sec"])
+        ids = {c["id"] for c in self.c.get("/v1/llm/configs", headers=self._h(self.MEMBER)).json()}
+        self.assertEqual(ids, {pub, ops})            # sec hidden from ops member
+        # hidden config -> 404 on get & resolve
+        self.assertEqual(self.c.get(f"/v1/llm/configs/{sec}", headers=self._h(self.MEMBER)).status_code, 404)
+        self.assertEqual(self.c.get(f"/v1/llm/configs/{sec}/resolve", headers=self._h(self.MEMBER)).status_code, 404)
+        # permitted config resolves
+        self.assertEqual(self.c.get(f"/v1/llm/configs/{ops}/resolve", headers=self._h(self.MEMBER)).status_code, 200)
+        # admin sees all three
+        self.assertEqual(len(self.c.get("/v1/llm/configs", headers=self._h(self.ADMIN)).json()), 3)
+
+    def test_default_resolve_respects_groups(self):
+        self._create("sec-default", ["sec"], is_default=True)
+        self.assertEqual(self.c.get("/v1/llm/configs/default/resolve", headers=self._h(self.MEMBER)).status_code, 404)
+        self.assertEqual(self.c.get("/v1/llm/configs/default/resolve", headers=self._h(self.ADMIN)).status_code, 200)

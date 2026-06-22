@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
+from pydantic import ValidationError
 
 from manage.platform.audit import AuditLog
 from manage.platform.auth import authenticate, require_admin
@@ -30,18 +31,22 @@ def build_skills_router(store: SkillPackageStore, blob: BlobStore, audit: AuditL
     ) -> SkillPackage:
         auth = authenticate(request)
         require_admin(auth)
+        # 先校验元数据（skill_id / version slug 等），避免无效输入仍写入 blob。
+        try:
+            payload = SkillPackageCreate(
+                skill_id=skill_id,
+                version=version,
+                name=name,
+                description=description,
+                owner=owner,
+                team=team,
+                risk_level=risk_level,
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail="invalid skill metadata") from exc
         data = await file.read()
         meta = blob.put(data, content_type="application/zip")
-        payload = SkillPackageCreate(
-            skill_id=skill_id,
-            version=version,
-            name=name,
-            description=description,
-            owner=owner,
-            team=team,
-            risk_level=risk_level,
-            blob_id=meta["blob_id"],
-        )
+        payload = payload.model_copy(update={"blob_id": meta["blob_id"]})
         pkg = store.create(payload, now=int(time.time()))
         audit.record(
             actor=auth.token_id,

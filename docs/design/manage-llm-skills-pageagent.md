@@ -46,7 +46,7 @@
 | `reasoning_effort` | str? | 可选：`high`/`max` |
 | `thinking` | str? | 可选：`enabled`/`disabled` |
 | `is_default` | bool | 是否默认配置（全局至多一个为 true，置位时清除其它） |
-| `allowed_groups` | list[str] | 可选：限定可见/可用的 `discovery_group`；空=全部可用 |
+| `allowed_groups` | list[str] | 可选：限定可见/可用的 `discovery_group`；空=全部可用。**已在 list/get/resolve 强制**（见下） |
 | `created_at` / `updated_at` | int (unix) | |
 
 存储扩展 `manage/storage/sqlite.py` 的 `_init_schema`：`CREATE TABLE IF NOT EXISTS llm_configs (...)`，并登记 `schema_meta` 版本号。
@@ -68,6 +68,8 @@
 | GET | `/v1/llm/configs/default/resolve` | authenticate | 默认配置的 resolve |
 
 > `resolve` 把内部字段映射为 PageAgent 的驼峰形：`base_url→baseURL`、`api_key→apiKey`、`model→model`。列表/详情掩码，`resolve` 才出明文——避免目录页泄露 key。
+>
+> **`allowed_groups` 可见性强制**：非 admin 调用方，对 `allowed_groups` 非空且与其 `discovery_groups` 无交集的配置一律不可见——`GET /configs` 过滤、`GET /configs/{id}`、`/{id}/resolve` 与 `default/resolve` 返回 404（复用 `auth.allows_resource_groups`，规则同 A2A 跨组校验；admin / `*` 始终可见）。空 `allowed_groups` = 全部已鉴权调用方可见。
 
 装配：`manage_app.py` 的 `create_app()` 内 `app.include_router(build_llm_router(llm_store, audit))`，并 `db` 共用。
 
@@ -132,10 +134,13 @@ Console 为纯静态页（FastAPI `StaticFiles` 挂 `/console`）。新增三部
 - 列表/详情端点对 `api_key` 掩码，降低 Console 目录页/截图泄露面。
 - 所有**写**端点（configs/skills 的 POST/PUT/DELETE/publish、blobs 写/删）走 `require_admin`；读端点 `authenticate`。
 - 文档显著标注：生产/公网部署须改为"Manage 反代 LLM 调用、key 不出服务端"（Phase 2 可选增强），不要直接暴露公网。
+- **Console 鉴权**：`manage/console/frontend/src/api.js` 当前**不附 token header**，假定 Manage 运行在**开放模式**（未配置 `MANAGE_TOKENS`/`MANAGE_SHARED_TOKEN`，与既有 Registry/A2A Console 一致）。一旦配置 token，Console 请求将 401——前端注入 token（sessionStorage / `?token=`）为后续增强。allowed_groups 的服务端强制不依赖 Console，对 API 直连同样生效。
 
 ## 8. 存储变更汇总（`manage/storage/sqlite.py`）
 
-`_init_schema` 新增三表：`llm_configs`、`skill_packages`、`blobs`（blob 元数据：`blob_id, sha256, size, content_type, created_at`；字节落盘 `MANAGE_BLOB_DIR`）。`schema_meta` 升版本。无破坏性迁移（仅新增表）。
+`_init_schema` 新增两表：`llm_configs`、`skill_packages`。`schema_meta` 升版本。无破坏性迁移（仅新增表）。
+
+> Blob **不入 SQLite**：内容寻址字节落盘 `MANAGE_BLOB_DIR/{sha256}`，元数据（`sha256/size/content_type`）随同名 `{sha256}.json` sidecar 存储（见 `manage/platform/blob.py`）。故不建 `blobs` 表，避免空表与文件系统真相源不一致。
 
 ## 9. 测试（stdlib `unittest`，`tests/`）
 
