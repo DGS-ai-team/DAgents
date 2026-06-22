@@ -45,6 +45,23 @@ class SQLiteDatabase:
                     task_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS llm_configs (
+                    id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS skill_packages (
+                    skill_id TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY (skill_id, version)
+                );
+                -- Blob 元数据随内容寻址文件落在 MANAGE_BLOB_DIR/{sha256}.json sidecar，
+                -- 不入 SQLite；故此处不建 blobs 表。
                 """
+            )
+            conn.execute(
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','3') "
+                "ON CONFLICT(key) DO UPDATE SET value='3'"
             )
             conn.commit()

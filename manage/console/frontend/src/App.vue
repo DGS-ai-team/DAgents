@@ -2,9 +2,11 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { fetchAgents, fetchHealth, fetchInboxTasks } from "./api.js";
 import AppSidebar from "./components/AppSidebar.vue";
+import AskAiButton from "./components/AskAiButton.vue";
 import BulkGroupsPanel from "./components/BulkGroupsPanel.vue";
 import DetailDrawer from "./components/DetailDrawer.vue";
 import InboxView from "./components/InboxView.vue";
+import NodeAdminView from "./components/NodeAdminView.vue";
 import PageHeader from "./components/PageHeader.vue";
 import RegistryView from "./components/RegistryView.vue";
 import StatsRow from "./components/StatsRow.vue";
@@ -151,9 +153,10 @@ function navigate(nextView) {
   if (nextView === "inbox") {
     inbox.page = 1;
     loadInbox();
-  } else {
+  } else if (nextView === "registry") {
     loadAgents();
   }
+  // llm / skills 视图自加载（见各组件的 active watch）
 }
 
 async function onRefresh() {
@@ -163,7 +166,7 @@ async function onRefresh() {
     if (view.value === "registry") {
       registry.page = 1;
       await loadAgents();
-    } else {
+    } else if (view.value === "inbox") {
       inbox.page = 1;
       await loadInbox();
     }
@@ -260,6 +263,7 @@ onMounted(async () => {
 
       <main class="page-content">
         <StatsRow
+          v-show="view === 'registry' || view === 'inbox'"
           :online="stats.online"
           :offline="stats.offline"
           :total="stats.total"
@@ -304,6 +308,12 @@ onMounted(async () => {
           @page-prev="inboxPrevPage"
           @page-next="inboxNextPage"
         />
+
+        <NodeAdminView
+          v-if="view === 'nodeadmin'"
+          :active="view === 'nodeadmin'"
+          @toast="showToast($event.message, $event.type)"
+        />
       </main>
     </div>
   </div>
@@ -313,6 +323,8 @@ onMounted(async () => {
     @close="drawerAgent = null"
     @groups-saved="onDrawerGroupsSaved"
   />
+
+  <AskAiButton @toast="showToast($event.message, $event.type)" />
 
   <ToastHost :toasts="toasts" />
 </template>

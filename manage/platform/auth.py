@@ -34,6 +34,14 @@ class AuthContext:
             return True
         return group in self.discovery_groups
 
+    def allows_resource_groups(self, allowed_groups: list[str]) -> bool:
+        """资源（如 LLM 配置）按 `allowed_groups` 限定可见/可用范围：空 = 全部可见；
+        非空时调用方 `discovery_groups` 须与之有交集（admin / `*` 始终可见）。
+        与 Registry `discovery_group` 同一命名空间，仅作 Manage 侧可见性约束。"""
+        if not allowed_groups:
+            return True
+        return any(self.allows_discovery_group(group) for group in allowed_groups)
+
     def requires_group_on_list(self) -> bool:
         return not self.is_admin
 
