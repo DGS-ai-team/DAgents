@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -28,9 +29,8 @@ func TestResolveFileEncodingPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := reg2.resolveFileEncoding(nil)
-	if got != defaultFileEncoding() {
-		t.Fatalf("platform default = %q, want %q", got, defaultFileEncoding())
+	if got := reg2.resolveFileEncoding(nil); got != "utf-8" {
+		t.Fatalf("platform default = %q, want utf-8", got)
 	}
 }
 
@@ -158,6 +158,81 @@ func TestEncodeFileContentInvalidUTF8(t *testing.T) {
 	}
 	if len(raw) == 0 {
 		t.Fatal("expected encoded bytes")
+	}
+}
+
+func TestSearchReplacePreservesUTF8BOM(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := append(append([]byte(nil), utf8BOMPrefix...), []byte("# script\r\nold line\r\n")...)
+	if err := os.WriteFile(filepath.Join(dir, "script.ps1"), original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := reg.Execute(context.Background(), "search_replace", encodeToolArgs(t, map[string]any{
+		"path":       "script.ps1",
+		"old_string": "old line",
+		"new_string": "new line",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "成功: 是") {
+		t.Fatalf("search_replace = %q", out)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "script.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) < 3 || raw[0] != 0xEF || raw[1] != 0xBB || raw[2] != 0xBF {
+		t.Fatalf("UTF-8 BOM missing after replace: % x", raw[:min(8, len(raw))])
+	}
+	if !strings.Contains(string(raw[3:]), "new line") {
+		t.Fatalf("content = %q", string(raw[3:]))
+	}
+}
+
+func TestWriteFileNewFileNoBOM(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := reg.Execute(context.Background(), "write_file", encodeToolArgs(t, map[string]any{
+		"path":    "new.txt",
+		"content": "hello",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "ERROR:") {
+		t.Fatalf("write_file = %q", out)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "new.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasPrefix(raw, utf8BOMPrefix) {
+		t.Fatal("new file should not get BOM by default")
+	}
+}
+
+func TestEncodeFileContentWithBOM(t *testing.T) {
+	raw, err := encodeFileContentWithBOM("test", "utf-8", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(raw, utf8BOMPrefix) {
+		t.Fatalf("missing BOM: % x", raw)
+	}
+	raw, err = encodeFileContentWithBOM("test", "gbk", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasPrefix(raw, utf8BOMPrefix) {
+		t.Fatal("gbk should not prepend UTF-8 BOM")
 	}
 }
 

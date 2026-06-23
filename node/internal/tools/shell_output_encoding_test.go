@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"runtime"
 	"testing"
 	"unicode/utf8"
 
@@ -38,18 +37,11 @@ func TestResolveShellOutputEncodingOverride(t *testing.T) {
 	}
 }
 
-func TestResolveShellOutputEncodingPowerShellDefault(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		if got := resolveShellOutputEncoding(shellPowerShell, ""); got != "utf-8" {
-			t.Fatalf("powershell default = %q, want utf-8", got)
+func TestResolveShellOutputEncodingDefaultsUTF8(t *testing.T) {
+	for _, st := range []shellType{shellCmd, shellBash, shellPowerShell} {
+		if got := resolveShellOutputEncoding(st, ""); got != "utf-8" {
+			t.Fatalf("%s default = %q, want utf-8", st, got)
 		}
-		if got := resolveShellOutputEncoding(shellCmd, ""); got != "gbk" {
-			t.Fatalf("cmd default = %q, want gbk", got)
-		}
-		return
-	}
-	if got := resolveShellOutputEncoding(shellPowerShell, ""); got != "utf-8" {
-		t.Fatalf("non-windows default = %q", got)
 	}
 }
 

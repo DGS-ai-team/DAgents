@@ -60,10 +60,10 @@ type ToolsConfig struct {
 	// Enabled 已废弃；请改用 enabled_groups。
 	Enabled []string `yaml:"enabled,omitempty"`
 	// BashOutputEncoding 为 bash_run 捕获的子进程 stdout/stderr 字节编码（解码为 UTF-8 后交给 LLM）。
-	// 留空时由 Node 按 OS/shell 类型自动选择（Windows cmd/powershell→gbk，bash→utf-8）。
+	// 留空时默认 utf-8；单次 bash_run 可用 output_encoding 覆盖。
 	BashOutputEncoding string             `yaml:"bash_output_encoding"`
 	// FileEncoding 为 read_file/write_file/search_replace/grep_* 读写磁盘文件的默认字节编码。
-	// 留空时 Windows→gbk，其它→utf-8；单次调用可用 encoding 参数覆盖。
+	// 留空时默认 utf-8；GBK 遗留文件仍可通过字节检测或 encoding 参数读取。
 	FileEncoding string             `yaml:"file_encoding"`
 	BashCompress BashCompressConfig `yaml:"bash_compress"`
 }

@@ -109,9 +109,9 @@ tools:
   #   - triggers
   #   - a2a            # 须 manage.enabled
   #   - child_agents   # 建议配合 child_agents.enabled
-  # bash_output_encoding: gbk
+  # bash_output_encoding: gbk   # 留空默认 utf-8
   bash_output_encoding: utf-8
-  # file_encoding: gbk   # read/write/search_replace/grep 默认磁盘编码；省略时 Windows=gbk，其它=utf-8
+  # file_encoding: gbk   # FS 工具默认磁盘编码；省略时 utf-8；GBK 遗留文件可依赖检测或 encoding 参数
   bash_compress:
     enabled: true
     max_output_chars: 12000       # 仅用于兼容/测试 clip 路径；bash_run 生产路径由 tool_result 摘要

@@ -103,7 +103,7 @@ func (r *Registry) execSearchReplace(_ context.Context, raw json.RawMessage) (st
 	}
 	enc := choice.Encoding
 	encSrc := choice.Source
-	payload, err := encodeFileContent(newText, enc)
+	payload, err := encodeFileContentWithBOM(newText, enc, choice.UTF8BOM)
 	if err != nil {
 		return formatSearchReplaceFail(args.Path, err.Error()), nil
 	}

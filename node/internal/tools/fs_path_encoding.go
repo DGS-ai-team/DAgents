@@ -100,6 +100,9 @@ func formatEncodingHeaderLines(choice pathEncodingChoice, garbled bool) []string
 	if garbled {
 		lines = append(lines, "编码提示: 正文疑似乱码，可尝试 encoding=utf-8 或 encoding=gbk 重新读取")
 	}
+	if choice.UTF8BOM {
+		lines = append(lines, "UTF-8 BOM: 是（search_replace/write_file 写入时将保留）")
+	}
 	return lines
 }
 
@@ -123,6 +126,7 @@ func (r *Registry) readTextLinesAt(relPath, absPath string, argEnc *string) ([]s
 		return nil, pathEncodingChoice{}, err
 	}
 	choice := r.choosePathEncoding(relPath, raw, mtime, argEnc)
+	choice.UTF8BOM = fileHadUTF8BOM(raw, choice.Encoding)
 	text, err := decodePathFileContent(raw, choice.Encoding)
 	if err != nil {
 		return nil, choice, err
@@ -132,16 +136,25 @@ func (r *Registry) readTextLinesAt(relPath, absPath string, argEnc *string) ([]s
 	return normalizeLines(text), choice, nil
 }
 
-func (r *Registry) resolveWriteEncoding(relPath, absPath string, argEnc *string) (string, encodingSource, error) {
+func fileHadUTF8BOM(raw []byte, enc string) bool {
+	if normalizeOutputEncoding(enc) != "utf-8" {
+		return false
+	}
+	_, had := stripUTF8BOM(raw)
+	return had
+}
+
+func (r *Registry) resolveWriteEncodingChoice(relPath, absPath string, argEnc *string) (pathEncodingChoice, error) {
 	raw := []byte{}
 	mtime := time.Time{}
 	if info, err := os.Stat(absPath); err == nil && !info.IsDir() {
 		var errRead error
 		raw, mtime, errRead = readRawFile(absPath)
 		if errRead != nil {
-			return "", "", errRead
+			return pathEncodingChoice{}, errRead
 		}
 	}
 	choice := r.choosePathEncoding(relPath, raw, mtime, argEnc)
-	return choice.Encoding, choice.Source, nil
+	choice.UTF8BOM = fileHadUTF8BOM(raw, choice.Encoding)
+	return choice, nil
 }

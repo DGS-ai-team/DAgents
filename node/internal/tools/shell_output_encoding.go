@@ -11,20 +11,12 @@ import (
 
 // resolveShellOutputEncoding 决定子进程 stdout/stderr 的字节编码，解码为 UTF-8 后交给 LLM。
 //
-// 优先级：bash_run output_encoding > config.yaml tools.bash_output_encoding > 平台/shell 默认。
-// Windows：powershell/bash 默认 utf-8（pipe 前缀已对齐 UTF-8）；cmd 默认 gbk（OEM CP936）。
+// 优先级：bash_run output_encoding > config.yaml tools.bash_output_encoding > 默认 utf-8。
 func resolveShellOutputEncoding(st shellType, configured string) string {
 	if enc := normalizeOutputEncoding(configured); enc != "" {
 		return enc
 	}
-	if runtime.GOOS == "windows" {
-		switch st {
-		case shellBash, shellPowerShell:
-			return "utf-8"
-		default:
-			return "gbk"
-		}
-	}
+	_ = st
 	return defaultOutputEnc
 }
 
