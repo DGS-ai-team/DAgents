@@ -10,7 +10,8 @@
 | **`scripts_menu.md`** | `.runtime/scripts/` 工具索引（Agent 查阅） |
 | **`scripts/serve/`** | `dagents serve` 的 **startup.d** / **shutdown.d** 钩子目录；见 **`scripts/serve/README.md`**。 |
 | **`data/`** | **临时工作区（workspace）**占位：脚本输出、中间产物等；**不含** `sessions.db`。 |
-| **`skills/`** | 技能资源目录；默认 **`<运行根>/.runtime/skills`**；内置初始技能 **`write-skill`**（编写 **SKILL.md** 的约定与路径说明）。 |
+| **`skills/`** | 技能资源目录；默认 **`<运行根>/.runtime/skills`**；内置 **`write-skill`**、**`write-hook`**。 |
+| **`plugins/`** | 全局 Hook plugin 占位；`.so` 由 `config.yaml` → `hooks.plugins` 加载；见 **`plugins/README.md`**。 |
 | **`history/`** | 原始消息 JSONL 等；默认 **`.runtime/history`**。 |
 | **`memory/`** | 持久化：**`sessions.db`** 会话库与可选 **`long_term.md`**；默认 **`.runtime/memory`**。 |
 | **`agent/`** | 如 **`agent_id`** 持久化文件等；默认 **`.runtime/agent`**。 |

@@ -1,14 +1,20 @@
 package tools
 
-import "github.com/DGS-ai-team/DAgents/node/internal/skills"
+// loadSkillsMetadataPrefix 附在 load_skills description 后的固定前缀（须与 skills.LoadSkillsMetadataPrefix 一致）。
+const loadSkillsMetadataPrefix = "\n\n可用 skills（name: description）：\n"
+
+// SkillsCatalogEnricher 提供 load_skills 工具 description 所需的 catalog 元数据段。
+type SkillsCatalogEnricher interface {
+	RenderMetadataSection() string
+}
 
 // skillsCatalogHolder 承载 skills catalog 字段，使 registry.go 无需 import skills。
 type skillsCatalogHolder struct {
-	skillsCatalog *skills.Catalog
+	skillsCatalog SkillsCatalogEnricher
 }
 
 // SetSkillsCatalog 注入 skills 目录；启用 load_skills 时在 Definitions 中附加 available skills 列表。
-func (r *Registry) SetSkillsCatalog(c *skills.Catalog) {
+func (r *Registry) SetSkillsCatalog(c SkillsCatalogEnricher) {
 	if r == nil {
 		return
 	}
@@ -25,7 +31,7 @@ func (r *Registry) enrichDefinitions(defs []ToolDef) []ToolDef {
 		switch out[i].Function.Name {
 		case "load_skills":
 			if meta := r.skillsMetadataSection(); meta != "" {
-				out[i].Function.Description += skills.LoadSkillsMetadataPrefix + meta
+				out[i].Function.Description += loadSkillsMetadataPrefix + meta
 			}
 		}
 	}

@@ -119,7 +119,7 @@ type promptInjectHook struct {
 
 func (h promptInjectHook) Name() string    { return "test.prompt.inject" }
 func (h promptInjectHook) Phases() []hooks.Phase { return []hooks.Phase{hooks.PhasePromptBuild} }
-func (h promptInjectHook) Run(_ context.Context, hc *hooks.Context) (hooks.Result, error) {
+func (h promptInjectHook) Run(_ context.Context, hc *hooks.Context, _ hooks.Host) (hooks.Result, error) {
 	base := ""
 	if hc.PromptBuild != nil {
 		base = hc.PromptBuild.SystemPrompt

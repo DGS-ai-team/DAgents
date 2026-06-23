@@ -2,7 +2,7 @@
 
 本文描述 **Go Agent Node** 在 turn 全链路中引入 **统一 Hook 框架** 的目标边界、阶段锚点、核心接口、配置形态与落地顺序。实现以本文件为设计基线；与代码冲突时以 **Git / CHANGELOG** 为准。
 
-**状态（2026-06）**：**部分落地** — `tool.before_each`（policy + agent_owned_file + duplicate）、**`tool.after_each`**（`ToolResultPackageHook` + agent_owned_file 信任表更新）已在 `node/internal/hooks/`。其余锚点仍为设计稿。
+**状态（2026-06）**：**Hook 统一 in-process 插件栈已落地** — 内置 Hook、全局 `hooks.plugins`、skill `hooks/*.so` 共用 `Hook.Run(ctx, *Context, Host)`；`tool.before_each` / `tool.after_each` / `prompt.build` / `llm.before_call` / `llm.after_call` / `turn.done` 及多数 phase 已接线。已**废弃** command/http YAML 外部 Hook。
 
 **首版落地候选**：[tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)（`tool.before_each` + policy 三档收敛；**duplicate 仅 `rule`+auto** + 三选项审批）。
 
@@ -39,7 +39,7 @@ Go Node 已具备若干 **「类 Hook」** 扩展点，但缺少统一命名、�
 
 - **不在 Client TUI / Python CLI** 实现业务 Hook（最多展示层 filter）。
 - **不在 `app/core/main_agent/`** 复制一套（Python 栈仅 API 参考）。
-- **不做** 任意 `exec` 插件市场；`command` hook 须显式开启 + 路径白名单 + 超时。
+- **不做** command/http shell hook；扩展仅通过 **Go in-process plugin**（`.so` + `Register` 符号）。
 - **不把 SSE 当作唯一扩展点**；Hook 是执行链组成部分，SSE 是副作用 / 展示。
 - **首版不承诺** Manage 实时改写正在执行的 turn（仅配置热更新 + 异步审计）。
 
@@ -50,7 +50,7 @@ Go Node 已具备若干 **「类 Hook」** 扩展点，但缺少统一命名、�
 1. **Hook 落在 Go Node** — 与 [v2 代码布局](../../.cursor/rules/v2-code-layout.mdc) 一致；Manage 做 fleet 观测 / 策略，不替代单 turn 细粒度 Hook。
 2. **分三层，避免一开始做万能插件**：
    - **L1 进程内接口**（同步、低延迟、可改 context）
-   - **L2 配置驱动**（YAML 注册 journal / HTTP / command hook）
+   - **L2 配置驱动**（YAML 注册 `hooks.plugins` 全局 `.so`；skill `hooks/*.so` 随 load_skills 加载）
    - **L3 控制面**（Manage webhook / 审计，只读或异步策略）
 3. **Hook 必须声明语义**：只读观测 vs 可修改 vs 可阻断；默认 **观测类 fail-open**，**安全 / 合规类 fail-closed**。
 4. **与 SSE 解耦**：Hook 在执行链内同步或受控异步运行；`stream.Hub.Publish` 仍独立推送 UI。
@@ -199,77 +199,56 @@ type Result struct {
 type Hook interface {
     Name() string
     Phases() []Phase
-    Run(ctx context.Context, hc *Context) (Result, error)
+    Run(ctx context.Context, hc *Context, host Host) (Result, error)
 }
 
-// Registry 按 priority 顺序执行；RunPhase 负责超时、journal 幂等与 Action 语义。
-type Registry struct { /* ... */ }
-
-func (r *Registry) RunPhase(ctx context.Context, phase Phase, hc *Context) (Context, error)
+func (r *Registry) RunPhase(ctx context.Context, phase Phase, hc *Context, host Host) (Context, error)
 ```
 
 **设计要点**：
 
-- **顺序执行**：YAML 配置 `hooks: [{ name, phases, priority }]`
-- **超时**：每个 hook 单独 `context.WithTimeout`（内联建议 500ms；HTTP hook 默认 5s）
-- **幂等**：`TurnID + Phase + HookName` 写入 journal / SQLite sidecar，resume 不重复副作用
-- **Cancel**：hook 不得阻塞 `context.Cancel`；HTTP hook 必须传递 `ctx`
+- **顺序执行**：`RegisterOpts.Priority` 升序（数值越小越先）
+- **超时**：每个 hook 单独 `context.WithTimeout`（默认 500ms，plugin 可配置 `timeout_ms`）
+- **幂等**：`TurnID + Phase + HookName` 写入 ExecutionJournal，resume 不重复副作用
+- **Cancel**：hook 须 respect `ctx.Done()`
+- **Host**：plugin 经 `Host` 读写 `hook_store`、调用 `LLMComplete`（turn 级配额）
 
 ---
 
-## 6. 三类 Hook 实现（分阶段落地）
+## 6. Plugin 加载（唯一扩展方式）
 
-### Phase A — 内置 + Go 注册（MVP）
+### 全局 plugin
 
-**范围**：L1 进程内；约 1～2 周量级。
-
-- 新建 `node/internal/hooks/`：`Registry`、`RunPhase`、journal 幂等
-- 将 **`policy`、`SystemPromptBuilder`** 迁成 `BuiltinHook`
-- 接入 **4 个高价值锚点**：`prompt.build`、`tool.before_each`、`llm.after_call`、`turn.done`
-- 提供 2～3 个示例：PII 脱敏、禁止危险 bash 参数、turn 结束打 metrics
-- 单测：每个 phase 至少一条 hook 链测试
-
-### Phase B — 配置驱动（企业常用）
-
-**范围**：L2 YAML + HTTP / command。
-
-`config.yaml` 示意：
+Node 启动时读取 `config.yaml`：
 
 ```yaml
 hooks:
-  enabled: false          # command / http 默认关；显式 true 才启用外部 hook
-  entries:
-    - name: audit-jsonl
-      type: journal       # 只写 JSONL，不改行为
-      phases: [tool.before_each, tool.after_each, turn.done]
+  plugins:
+    - path: .runtime/plugins/redact.so
+      phases: [tool.after_each]
+      priority: 100
+      timeout_ms: 2000
       on_error: continue
-    - name: compliance-http
-      type: http
-      url: http://127.0.0.1:9000/hooks
-      phases: [tool.before_each]
-      timeout_ms: 3000
-      on_error: abort     # 合规类 fail-closed
-    - name: redact-shell
-      type: command
-      command: ["/opt/dagents/hooks/redact.sh"]
-      phases: [llm.after_call]
-      on_error: continue
-      allowed_paths:      # command 白名单根目录
-        - /opt/dagents/hooks
+  host:
+    max_llm_calls: 2
+    # history_window: 100  # 可选；省略或 ≤0 时不截断
 ```
 
-**HTTP 契约**（建议）：
+`plugin.Open(path)` → 查找 `Register` → `PluginRegistrar.Register(hook, opts)`。
 
-- **POST** JSON `HookContext` → JSON `HookResult`（与 Manage Admin API 风格一致，便于日后 Manage 代理）
-- 响应超时 / 5xx：`on_error: abort` 时 fail-closed；否则记录并 continue
+### Skill plugin
 
-**`journal` type**：追加 `.runtime/logs/hooks.jsonl` 或复用 `history.Journal`，零网络、默认开启成本低。
+- 路径：`skills/<name>/hooks/*.so`
+- 时机：`load_skills` 成功后加载；`unload_skills` / clear-context 时按 `skill/<name>/` 前缀从 Registry 移除
+- Go `plugin` 无法 unload 已加载 `.so`；仅停止调用
 
-### Phase C — 控制面（可选，P2）
+### 导出约定
 
-- Manage 下发 **Node 级 hook 配置**（类似 `discovery_group` 的分组策略）
-- Manage 订阅 **`turn.done` / agent offline** 做 fleet 审计（只读 webhook）
-- **不在 Manage 里同步执行 tool hook**
+```go
+func Register(reg *hooks.PluginRegistrar) error
+```
+
+编写指南见 **`packaging/runtime/skills/write-hook/SKILL.md`**。
 
 ---
 
@@ -277,11 +256,11 @@ hooks:
 
 | 需求 | 建议 |
 |------|------|
-| 日志、指标、SIEM | L1 `journal` hook 或 SSE 消费 |
-| 改 prompt / 工具参数 | L1 同步 hook |
-| 合规拦截 bash | 扩展 `policy` + `tool.before_each` |
-| 跨系统编排 | L2 HTTP hook 或 A2A（已有 Manage） |
-| 用户自定义脚本 | L2 `command` hook，**沙箱 + 超时 + 无网络** |
+| 改 prompt / 工具参数 / 结果 | Go plugin，`prompt.build` / `tool.*` phase |
+| 合规拦截 bash | 内置 `policy` + `tool.before_each`（priority 最高之一） |
+| session 跨 turn 状态 | `Host.SessionStoreSet` → SQLite `hook_store` |
+| Hook 内二次 LLM | `Host.LLMComplete`（`reuse_system_prompt`） |
+| 跨系统编排 | A2A / triggers（已有）；不在 Hook 内做 HTTP 代理 |
 
 ---
 
@@ -289,69 +268,27 @@ hooks:
 
 | 风险 | 缓解 |
 |------|------|
-| 同步 hook 过多拖慢首 token | LLM 前后只放轻量 hook；重组件放 `turn.done` 异步 |
+| 同步 hook 过多拖慢首 token | LLM 前后只放轻量 hook；重组件放 `turn.done` |
 | HITL 重入状态不一致 | `hitl.after_resume` 与 `PendingHITL` 单一路径；单测覆盖 double-resume |
-| HTTP hook 阻塞 cancel | 传 `ctx`；超时硬切断 |
-| command hook RCE | 默认 `hooks.enabled: false`；路径白名单；无网络；独立 OS 用户（远期） |
-| 与 policy 双轨审批 | policy 作为 `tool.before_each` 最高优先级内置 hook，禁止并行 ad-hoc 审批 |
+| plugin 与 Node Go 版本不一致 | 同版本编译 `.so`；文档与 `write-hook` skill 强调 |
+| `hook_store` key 冲突 | 约定命名空间前缀（`skill/<name>/…`、`global/…`） |
+| 与 policy 双轨审批 | policy 作为 `tool.before_each` 内置 hook，禁止并行 ad-hoc 审批 |
 
 ---
 
-## 9. 实施顺序（建议）
+## 9. 验收标准
 
-| 步骤 | 内容 | 产出 |
-|------|------|------|
-| 1 | 文档化现有扩展点 | 本文 §2、§4.1（**已完成**） |
-| 2 | `node/internal/hooks` 包 | `Registry`、`RunPhase`、journal 幂等 |
-| 3 | 接 4 个高价值锚点 | `prompt.build`、`tool.before_each`、`llm.after_call`、`turn.done` |
-| 4 | policy / SystemPromptBuilder 收敛 | 删除 Orchestrator 上冗余 `SetX` 倾向 |
-| 5 | YAML + HTTP hook | 合规场景可配置 |
-| 6 | Manage 只读 webhook | P2，fleet 审计 |
+1. 全局 `.so` 与 skill `.so` 均为 `Hook.Run(ctx, hc, host)` 同一调用栈。
+2. plugin 可在 `tool.after_each` 读 `Context.History`、写 `hook_store`，reload session 后仍在。
+3. `Host.LLMComplete(reuse_system_prompt=true)` 受 `hooks.host.max_llm_calls` 限制。
+4. clear-context / unload skill 后对应 plugin 或 store 行为符合预期。
+5. 内置 policy/duplicate 回归通过。
 
 ---
 
-## 10. 与相关模块的关系
-
-```text
-┌─────────────────────────────────────────────────────────┐
-│  Client (Go TUI / Python Textual)                       │
-│  仅消费 SSE；不做业务 Hook                               │
-└───────────────────────────┬─────────────────────────────┘
-                            │ HTTP / SSE
-┌───────────────────────────▼─────────────────────────────┐
-│  Go Agent Node                                          │
-│  session.runtime ── hooks ── turn.Orchestrator          │
-│       │                      │                          │
-│       ├── compression        ├── policy (builtin hook)  │
-│       ├── triggers           ├── tools.Executor           │
-│       └── stream.Hub (SSE)   └── childagent.Manager       │
-└───────────────────────────┬─────────────────────────────┘
-                            │ 配置 / 只读 webhook
-┌───────────────────────────▼─────────────────────────────┐
-│  Manage（fleet 配置、审计；不同步执行 tool hook）          │
-└─────────────────────────────────────────────────────────┘
-```
-
-**刻意不做**：
-
-- Python `app/core/main_agent/` 复制 Hook 链
-- Client 侧拦截 tool 参数（安全边界必须在 Node）
-- 用 SSE 订阅替代 Hook（延迟、无阻断语义）
-
----
-
-## 11. 验收标准（Phase A DoD）
-
-1. `hooks.RunPhase` 在 4 个锚点被调用，单测覆盖 Continue / Abort 路径。
-2. 现有 HITL / tool 审批行为与引入 Hook 前一致（policy 回归测试通过）。
-3. 配置 `hooks.enabled: false` 时零开销（benchmark 或 fast path 断言）。
-4. `command` / `http` 未显式启用时，外部 hook **不可**被触发。
-5. 文档：`node/internal/hooks/README.md` + `REFERENCE.md` 与本文 phase 列表一致。
-
----
-
-## 12. 变更记录
+## 10. 变更记录
 
 | 日期 | 说明 |
 |------|------|
-| 2026-06-11 | 初稿：HookRegistry、12 phase、L1/L2/L3 分层、与现有代码映射 |
+| 2026-06-11 | 初稿：HookRegistry、14 phase、分层设计 |
+| 2026-06-22 | 统一 in-process plugin 栈；废弃 command/http YAML；落地 Host / hook_store |

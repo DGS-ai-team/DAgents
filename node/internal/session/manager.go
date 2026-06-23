@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -40,7 +41,8 @@ type TurnOptions struct {
 	RawMessageHistoryDir     string
 	DuplicateToolCall        hooks.DuplicateConfig
 	ToolResult               hooks.ToolResultConfig
-	ExternalHooks            hooks.ExternalHooksConfig
+	PluginHooks              hooks.PluginsConfig
+	HookHost                 turn.HookHostConfig
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。
@@ -126,16 +128,17 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			m.logger.Info("session reuse", "session_id", id)
 			return &existing.session, false, nil
 		}
-		msgs, loaded, pending, loopCount, err := m.loadSessionData(id)
+		msgs, loaded, pending, loopCount, hookStore, err := m.loadSessionData(id)
 		if err != nil {
 			m.logger.Error("session load failed", "session_id", id, "error", err)
 			return nil, false, err
 		}
 		created := len(msgs) == 0 && !m.sessionExistsInStore(id)
-		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, m.turn, m.triggerDelivery)
+		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, hookStore, m.turn, m.triggerDelivery)
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
 		rt.start(m.ctx)
+		rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
 		if created {
 			rt.persist(context.Background())
 		}
@@ -153,31 +156,32 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, 0, m.turn, m.triggerDelivery)
+	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, 0, nil, m.turn, m.triggerDelivery)
 	m.sessions[newID] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
+	rt.orch.RunSessionLifecyclePhase(context.Background(), newID, "create")
 	rt.persist(context.Background())
 	m.logger.Info("session created", "session_id", newID, "restored", false)
 	return &rt.session, true, nil
 }
 
-func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, error) {
+func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, error) {
 	if m.store == nil {
-		return nil, nil, nil, 0, nil
+		return nil, nil, nil, 0, nil, nil
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
-		return nil, nil, nil, 0, err
+		return nil, nil, nil, 0, nil, err
 	}
 	if rec == nil {
-		return nil, nil, nil, 0, nil
+		return nil, nil, nil, 0, nil, nil
 	}
 	var pending *turn.PendingHITL
 	if rec.RuntimeState.Pending != nil {
 		pending = rec.RuntimeState.Pending
 	}
-	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, nil
+	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, nil
 }
 
 func (m *Manager) sessionExistsInStore(sessionID string) bool {

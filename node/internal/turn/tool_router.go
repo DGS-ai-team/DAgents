@@ -74,7 +74,7 @@ func (o *Orchestrator) processToolCalls(
 			}
 			continue
 		}
-		decision := o.decideToolBeforeEach(ctx, sessionID, tc)
+		decision := o.decideToolBeforeEach(ctx, sessionID, history, tc)
 		switch decision.Action {
 		case policy.ActionDeny:
 			msg := "rejected: policy_denied"
@@ -113,10 +113,11 @@ func (o *Orchestrator) processToolCalls(
 	}
 	message, sseItems := buildHITLRequiredPayload(pendingItems)
 	o.publishHITLRequired(sessionID, newShortID("hitl-"), message, sseItems)
+	o.runHITLBeforePausePhase(ctx, sessionID, history, "awaiting_hitl")
 	return pendingFromItems(pendingItems), "awaiting_hitl", nil
 }
 
-func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID string, tc llm.ToolCall) hooks.ToolBeforeEachResult {
+func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {
 	if o.toolHooks == nil {
 		action := o.policy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
 		mode := policy.ModeRule
@@ -131,7 +132,7 @@ func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID strin
 		ToolArgs:     parseJSONArgs(tc.Function.Arguments),
 		RawArguments: tc.Function.Arguments,
 	})
-	out, err := o.toolHooks.RunPhase(ctx, hooks.PhaseToolBeforeEach, hc)
+	out, err := o.runPhase(ctx, hooks.PhaseToolBeforeEach, hc, sessionID, history, "")
 	if err != nil {
 		return hooks.DefaultToolBeforeEachResult()
 	}

@@ -123,7 +123,7 @@ processToolCalls
 |--------|------|------|
 | 10 | **`PolicyToolHook`** | 解析 `toolMode`（always/never/rule）+ `DecideTool` → `ResolvedAction`（deny / require_approval / auto） |
 | 20 | **`DuplicateToolCallHook`** | **仅 `toolMode==rule` 且 `ResolvedAction==auto`** 时做 fingerprint；窗口内重复 → `RequireApproval`（subtype=`duplicate_tool_call`） |
-| 30+ | （预留）YAML / HTTP 观测 hook | 只读 journal |
+| 30+ | （预留）in-process plugin | 只读 journal / 观测 |
 
 **决策矩阵**（Hook 链出口）：
 

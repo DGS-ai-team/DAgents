@@ -145,15 +145,12 @@ hooks:
       - glob_files
       - agent_invoke
       - agent_discover
-  # 外部 Hook（journal / http / command）；command 与 http 须 enabled: true
-  # enabled: true
-  # entries:
-  #   - name: audit-jsonl
-  #     type: journal
-  #     phases: [tool.before_each, turn.done]
-  #   - name: llm-redact
-  #     type: command
-  #     command: ["/absolute/path/to/.runtime/hooks/redaction.sh"]
-  #     phases: [llm.after_call]
-  #     allowed_paths: ["/absolute/path/to/.runtime/hooks"]
+  # in-process Go plugin（.so）；须与 dagents-node 同 Go 版本编译，导出 Register
+  # plugins:
+  #   - path: .runtime/plugins/redact.so
+  #     phases: [tool.after_each]
+  #     priority: 100
   #     on_error: continue
+  # host:
+  #   max_llm_calls: 2
+  #   history_window: 100  # 可选；省略或 ≤0 时不截断 Hook Context history

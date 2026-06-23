@@ -15,7 +15,12 @@
 | `(c *Catalog) RenderMetadataSection` | method | catalog 元数据段（注入 `load_skills` 工具 description） |
 | `(c *Catalog) RenderLoadedSection` | method | 已加载 skill 正文段 |
 | `(c *Catalog) SetLoadedSkills` | method | 按名称整组替换 loaded（`load_skills` 语义） |
+| `(c *Catalog) Root` | method | skills 目录根路径 |
 | `(c *Catalog) UnloadSkills` | method | 从 loaded 集合移除指定名称 |
+
+## Skill hooks
+
+skill 级 Hook 为 `skills/<name>/hooks/*.so`（Go in-process plugin，导出 `Register`）；`load_skills` 后由 `hooks.LoadSkillPluginsFromDir` 加载，`turn.SyncLoadedSkillHooks` 在 load/unload/clear-context 时同步 Registry。
 
 ## SKILL.md 约定
 

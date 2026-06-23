@@ -13,7 +13,7 @@ func registryToolBeforeEach(reg *Registry, in ToolBeforeEachInput) ToolBeforeEac
 		return DefaultToolBeforeEachResult()
 	}
 	hc := BuildToolBeforeEachContext(in)
-	out, err := reg.RunPhase(context.Background(), PhaseToolBeforeEach, hc)
+	out, err := reg.RunPhase(context.Background(), PhaseToolBeforeEach, hc, NoopHost())
 	if err != nil {
 		return DefaultToolBeforeEachResult()
 	}
@@ -25,7 +25,7 @@ func registryToolAfterEach(reg *Registry, in ToolAfterEachInput) ToolAfterEachOu
 		return defaultToolAfterEachOutput(in.RawResult)
 	}
 	hc := BuildToolAfterEachContext(in)
-	out, err := reg.RunPhase(context.Background(), PhaseToolAfterEach, hc)
+	out, err := reg.RunPhase(context.Background(), PhaseToolAfterEach, hc, NoopHost())
 	if err != nil {
 		return defaultToolAfterEachOutput(in.RawResult)
 	}
@@ -138,7 +138,7 @@ func TestRunToolBeforeEachViaRunPhase_contextCarriesDecision(t *testing.T) {
 	}
 	reg := NewRegistry(engine, RuntimeConfig{Duplicate: DefaultDuplicateConfig()})
 	hc := contextFromToolBeforeEachInput(ToolBeforeEachInput{ToolName: "read_file"})
-	out, err := reg.RunPhase(context.Background(), PhaseToolBeforeEach, hc)
+	out, err := reg.RunPhase(context.Background(), PhaseToolBeforeEach, hc, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestRunToolAfterEachViaRunPhase_contextCarriesOutput(t *testing.T) {
 		ToolName:   "read_file",
 		RawResult:  "payload",
 	})
-	out, err := reg.RunPhase(context.Background(), PhaseToolAfterEach, hc)
+	out, err := reg.RunPhase(context.Background(), PhaseToolAfterEach, hc, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestRegisterPhaseHook_customToolBeforeEach(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "custom.deny_all",
 		phases: []Phase{PhaseToolBeforeEach},
-		fn: func(_ context.Context, hc *Context) (Result, error) {
+		fn: func(_ context.Context, hc *Context, _ Host) (Result, error) {
 			decision := ensureToolDecision(hc)
 			decision.Action = policy.ActionDeny
 			return Result{Action: ActionContinue}, nil
@@ -207,7 +207,7 @@ func TestPolicyToolHookRun_nativeHook(t *testing.T) {
 	}
 	hook := NewPolicyToolHook(engine)
 	hc := contextFromToolBeforeEachInput(ToolBeforeEachInput{ToolName: "read_file"})
-	if _, err := hook.Run(context.Background(), hc); err != nil {
+	if _, err := hook.Run(context.Background(), hc, NoopHost()); err != nil {
 		t.Fatal(err)
 	}
 	if hc.ToolDecision == nil || hc.ToolDecision.Action != policy.ActionAuto {
@@ -221,7 +221,7 @@ func TestToolResultPackageHookRun_disabled(t *testing.T) {
 	hc := contextFromToolAfterEachInput(ToolAfterEachInput{
 		SessionID: "s1", ToolCallID: "tc-1", ToolName: "read_file", RawResult: raw,
 	})
-	if _, err := hook.Run(context.Background(), hc); err != nil {
+	if _, err := hook.Run(context.Background(), hc, NoopHost()); err != nil {
 		t.Fatal(err)
 	}
 	if hc.ToolAfterEachOutput.ForHistory != raw {

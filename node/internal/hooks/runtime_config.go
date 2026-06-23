@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
@@ -65,8 +66,8 @@ type RuntimeConfig struct {
 	Duplicate      DuplicateConfig
 	ToolResult     ToolResultConfig
 	AgentOwnedFile AgentOwnedFileConfig
-	External       ExternalHooksConfig
-	ExternalDeps   ExternalDeps
+	Plugins        PluginsConfig
+	Logger         *slog.Logger
 }
 
 // AgentOwnedFileConfig 控制 Agent 自有文件写操作信任链。

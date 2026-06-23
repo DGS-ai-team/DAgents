@@ -31,40 +31,42 @@ hooks:
 	}
 }
 
-func TestHooksExternalEntriesYAML(t *testing.T) {
+func TestHooksPluginsYAML(t *testing.T) {
 	path, _ := testConfigPath(t, `
 hooks:
-  enabled: true
-  entries:
-    - name: audit-jsonl
-      type: journal
-      phases: [turn.done, tool.before_each]
-      on_error: continue
-    - name: compliance-http
-      type: http
-      url: http://127.0.0.1:9000/hooks
-      phases: [tool.before_each]
-      timeout_ms: 3000
+  plugins:
+    - path: .runtime/plugins/redact.so
+      phases: [tool.after_each]
+      priority: 100
       on_error: abort
+  host:
+    max_llm_calls: 3
+    history_window: 30
 `)
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.HooksExternalEnabled() {
-		t.Fatal("expected external hooks enabled")
+	if len(cfg.Hooks.Plugins) != 1 {
+		t.Fatalf("plugins = %d", len(cfg.Hooks.Plugins))
 	}
-	if len(cfg.Hooks.Entries) != 2 {
-		t.Fatalf("entries = %d", len(cfg.Hooks.Entries))
+	if cfg.Hooks.Plugins[0].OnError != "abort" {
+		t.Fatalf("on_error = %q", cfg.Hooks.Plugins[0].OnError)
 	}
-	if cfg.Hooks.Entries[1].OnError != "abort" {
-		t.Fatalf("on_error = %q", cfg.Hooks.Entries[1].OnError)
+	if cfg.HooksHostMaxLLMCalls() != 3 {
+		t.Fatalf("max_llm_calls = %d", cfg.HooksHostMaxLLMCalls())
+	}
+	if cfg.HooksHostHistoryWindow() != 30 {
+		t.Fatalf("history_window = %d", cfg.HooksHostHistoryWindow())
 	}
 }
 
-func TestHooksExternalEnabledDefaultFalse(t *testing.T) {
+func TestHooksHostDefaults(t *testing.T) {
 	var cfg Config
-	if cfg.HooksExternalEnabled() {
-		t.Fatal("expected false by default")
+	if cfg.HooksHostMaxLLMCalls() != 2 {
+		t.Fatalf("max_llm_calls = %d", cfg.HooksHostMaxLLMCalls())
+	}
+	if cfg.HooksHostHistoryWindow() != 0 {
+		t.Fatalf("history_window = %d", cfg.HooksHostHistoryWindow())
 	}
 }

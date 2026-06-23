@@ -16,7 +16,7 @@ import (
 // CatalogBloatTokenThreshold 为 skills 元数据或任一 SKILL 正文估算 token 超过该值时 TUI 提示精简。
 const CatalogBloatTokenThreshold = 4000
 
-// LoadSkillsMetadataPrefix 为 tools enrich 附在 load_skills description 后的固定前缀（须与 registry_enrich 一致）。
+// LoadSkillsMetadataPrefix 为 tools enrich 附在 load_skills description 后的固定前缀（须与 tools.loadSkillsMetadataPrefix 一致）。
 const LoadSkillsMetadataPrefix = "\n\n可用 skills（name: description）：\n"
 
 // CatalogTokenStats 为 skills 目录 token 估算分项（避免把未加载正文与 system prompt 重复计数）。
@@ -70,6 +70,14 @@ func NewCatalog(root string, enabled bool, maxInPrompt int) *Catalog {
 // Enabled 表示 skills 功能是否开启。
 func (c *Catalog) Enabled() bool {
 	return c != nil && c.enabled
+}
+
+// Root 返回 skills 目录根路径（{fs_root}/skills）。
+func (c *Catalog) Root() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.root)
 }
 
 // List 扫描 `{root}/*/SKILL.md` 并返回全部 skill 元数据与正文。

@@ -34,12 +34,6 @@ type turnErrorDTO struct {
 	Message string `json:"message,omitempty"`
 }
 
-type externalResultDTO struct {
-	Action    Action         `json:"action"`
-	Mutations map[string]any `json:"mutations,omitempty"`
-	Error     string         `json:"error,omitempty"`
-}
-
 func contextToDTO(hc *Context) hookContextDTO {
 	if hc == nil {
 		return hookContextDTO{}
@@ -75,25 +69,3 @@ func contextToDTO(hc *Context) hookContextDTO {
 func marshalHookContext(hc *Context) ([]byte, error) {
 	return json.Marshal(contextToDTO(hc))
 }
-
-func parseExternalResult(raw []byte) (Result, error) {
-	if len(raw) == 0 {
-		return Result{Action: ActionContinue}, nil
-	}
-	var dto externalResultDTO
-	if err := json.Unmarshal(raw, &dto); err != nil {
-		return Result{}, err
-	}
-	out := Result{
-		Action:    normalizeAction(dto.Action),
-		Mutations: dto.Mutations,
-	}
-	if dto.Error != "" {
-		out.Err = errString(dto.Error)
-	}
-	return out, nil
-}
-
-type errString string
-
-func (e errString) Error() string { return string(e) }

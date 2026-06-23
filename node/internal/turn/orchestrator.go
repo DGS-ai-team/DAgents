@@ -52,6 +52,9 @@ type Orchestrator struct {
 	toolHooks    *hooks.Registry
 	toolExecLog  *hooks.ToolExecutionLog
 	skillAccess  SkillAccess
+	hookRuntimeCfg hooks.RuntimeConfig
+	hookHostCfg    HookHostConfig
+	hookHostState  *hookHostState
 	maxToolLoops int
 	promptCtx    *promptcontext.Reader
 	journal      *historypkg.Journal
@@ -67,6 +70,19 @@ type Orchestrator struct {
 
 	enqueueToolResult   func(sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
+}
+
+// SetHookHostConfig 注入 Host 路径与配额配置。
+func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
+	if o == nil {
+		return
+	}
+	o.hookHostCfg = cfg.normalized()
+	if o.hookHostState != nil {
+		o.hookHostState.mu.Lock()
+		o.hookHostState.fsRoot = o.fsRoot
+		o.hookHostState.mu.Unlock()
+	}
 }
 
 // SetSystemPromptBuilder 注入 system prompt 构造器；nil 时使用默认 BuildSystemPrompt。
@@ -113,6 +129,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 		setState = func(State) {}
 	}
 	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.NormalizeUserMessageName(userName)))
+	o.runMessageEnqueuedPhase(ctx, sessionID, history, userText, map[string]any{"source": userName})
 	o.resetTurnUsage(sessionID)
 	o.resetContextMetrics(sessionID)
 	o.logger.Info("turn human message start",
@@ -157,6 +174,8 @@ func (o *Orchestrator) ContinueAfterResume(
 	if setState == nil {
 		setState = func(State) {}
 	}
+	resumeKind := strings.TrimSpace(fmt.Sprint(resumeValue["type"]))
+	o.runHITLAfterResumePhase(ctx, sessionID, history, resumeKind)
 	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
 	pendingToolCallID := ""
 	pending.Normalize()
@@ -214,20 +233,21 @@ func NewOrchestrator(
 		maxToolLoops = DefaultMaxToolLoops()
 	}
 	orch := &Orchestrator{
-		agentID:      agentID,
-		fsRoot:       fsRoot,
-		hub:          hub,
-		llm:          client,
-		tools:        toolExec,
-		policy:       policyEngine,
-		toolHooks:    toolHooks,
-		toolExecLog:  toolExecLog,
-		skillAccess:  skillAccess,
-		maxToolLoops: maxToolLoops,
-		promptCtx:    promptCtx,
-		journal:      journal,
-		logger:       logx.OrDefault(logger),
-		ctxMetrics:   newContextMetricsStore(),
+		agentID:        agentID,
+		fsRoot:         fsRoot,
+		hub:            hub,
+		llm:            client,
+		tools:          toolExec,
+		policy:         policyEngine,
+		toolHooks:      toolHooks,
+		toolExecLog:    toolExecLog,
+		skillAccess:    skillAccess,
+		hookRuntimeCfg: hookCfg,
+		maxToolLoops:   maxToolLoops,
+		promptCtx:      promptCtx,
+		journal:        journal,
+		logger:         logx.OrDefault(logger),
+		ctxMetrics:     newContextMetricsStore(),
 	}
 	registerSystemPromptBuildHook(orch)
 	return orch
@@ -255,6 +275,7 @@ func (o *Orchestrator) runOneStep(
 	toolLoopCount int,
 ) StepOutcome {
 	o.RepairUnrespondedToolCalls(sessionID, history)
+	o.runTurnBeforeStepPhase(ctx, sessionID, history, "model_step", toolLoopCount)
 	finishReason := "stop"
 	var streamErr error
 	toolLoopCount++
@@ -267,6 +288,13 @@ func (o *Orchestrator) runOneStep(
 
 	toolDefs := o.ToolDefinitions()
 	systemPrompt := o.buildSystemPrompt(sessionID)
+	msgs, systemPrompt, hookErr := o.runLLMBeforeCallPhase(ctx, sessionID, history, systemPrompt, toolDefs)
+	if hookErr != nil {
+		o.publishError(sessionID, hookErr.Error())
+		o.publishDone(sessionID, "error")
+		return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
+	}
+	*history = msgs
 	setState(StateModelStreaming)
 	publishedToolPartial := make(map[int]string)
 	result, err := o.llm.StreamChat(ctx, llm.ChatRequest{
@@ -316,7 +344,7 @@ func (o *Orchestrator) runOneStep(
 		return StepOutcome{LoopCount: toolLoopCount, Err: streamErr}
 	}
 
-	result, hookErr := o.runLLMAfterCallPhase(ctx, sessionID, result)
+	result, hookErr = o.runLLMAfterCallPhase(ctx, sessionID, result)
 	if hookErr != nil {
 		msg := hookErr.Error()
 		if isLLMAfterCallAbort(hookErr) {
@@ -394,7 +422,7 @@ func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
 		return o.composeSystemPrompt(sessionID)
 	}
 	hc := hooks.BuildPromptBuildContext(sessionID, o.agentID, "")
-	out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhasePromptBuild, hc)
+	out, err := o.runPhase(context.Background(), hooks.PhasePromptBuild, hc, sessionID, nil, "")
 	if err != nil {
 		return o.composeSystemPrompt(sessionID)
 	}
@@ -410,7 +438,7 @@ func (o *Orchestrator) runTurnDonePhase(sessionID, finishReason string) {
 		return
 	}
 	hc := hooks.BuildTurnDoneContext(sessionID, o.agentID, finishReason)
-	_, _ = o.toolHooks.RunPhase(context.Background(), hooks.PhaseTurnDone, hc)
+	_, _ = o.runPhase(context.Background(), hooks.PhaseTurnDone, hc, sessionID, nil, finishReason)
 }
 
 func (o *Orchestrator) composeSystemPrompt(sessionID string) string {

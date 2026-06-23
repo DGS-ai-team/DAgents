@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -78,11 +79,12 @@ func newRuntime(
 	loaded []skills.LoadedSkill,
 	initialPending *turn.PendingHITL,
 	initialLoopCount int,
+	initialHookStore map[string]json.RawMessage,
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
 	return newRuntimeWithPublisher(id, agentID, hub, hub, llmClient, registry, policyEngine, st, logger,
-		initial, loaded, initialPending, initialLoopCount, turnOpts, triggerDelivery)
+		initial, loaded, initialPending, initialLoopCount, initialHookStore, turnOpts, triggerDelivery)
 }
 
 // newRuntimeWithPublisher 创建新的 session runtime，并设置 publisher
@@ -99,6 +101,7 @@ func newRuntimeWithPublisher(
 	loaded []skills.LoadedSkill,
 	initialPending *turn.PendingHITL,
 	initialLoopCount int,
+	initialHookStore map[string]json.RawMessage,
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
@@ -150,15 +153,18 @@ func newRuntimeWithPublisher(
 				Tools:                turnOpts.ToolResult.Tools,
 				FSRoot:               turnOpts.FSRoot,
 			}),
-			External: turnOpts.ExternalHooks,
-			ExternalDeps: hooks.ExternalDeps{
-				Logger: logger,
-			},
+			Plugins: turnOpts.PluginHooks,
+			Logger:  logger,
 		},
 		logger,
 	)
+	rt.orch.SetHookHostConfig(turnOpts.HookHost)
+	if len(initialHookStore) > 0 {
+		rt.orch.SetHookStore(initialHookStore)
+	}
 	// 设置工具结果入队器
 	rt.orch.SetToolResultEnqueuer(rt.enqueueToolResult)
+	rt.orch.SyncLoadedSkillHooks(loaded)
 	// 返回 runtime
 	return rt
 }
@@ -180,6 +186,9 @@ func (r *runtime) setLoadedSkills(items []skills.LoadedSkill) {
 	r.mu.Lock()
 	r.loadedSkills = append([]skills.LoadedSkill(nil), items...)
 	r.mu.Unlock()
+	if r.orch != nil {
+		r.orch.SyncLoadedSkillHooks(items)
+	}
 }
 
 // setTriggerDelivery 设置 trigger 消息投递跟踪器
@@ -367,6 +376,7 @@ func (r *runtime) persist(ctx context.Context) {
 		RuntimeState: store.RuntimeState{
 			Pending:       pending,
 			ToolLoopCount: loopCount,
+			HookStore:     hooks.CloneSessionStore(r.orch.HookStoreSnapshot()),
 		},
 	})
 }
@@ -384,6 +394,10 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	r.pending = nil
 	r.toolLoopCount = 0
 	r.mu.Unlock()
+	if r.orch != nil {
+		r.orch.ClearHookStore()
+		r.orch.SyncLoadedSkillHooks(nil)
+	}
 	if r.store != nil {
 		_ = r.store.ClearMessages(ctx, r.session.ID)
 	}

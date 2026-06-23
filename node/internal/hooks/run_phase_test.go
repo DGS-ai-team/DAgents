@@ -15,14 +15,14 @@ type stubPhaseHook struct {
 	name     string
 	phases   []Phase
 	priority int
-	fn       func(ctx context.Context, hc *Context) (Result, error)
+	fn       func(ctx context.Context, hc *Context, host Host) (Result, error)
 }
 
-func (h stubPhaseHook) Name() string       { return h.name }
-func (h stubPhaseHook) Phases() []Phase    { return h.phases }
-func (h stubPhaseHook) Run(ctx context.Context, hc *Context) (Result, error) {
+func (h stubPhaseHook) Name() string    { return h.name }
+func (h stubPhaseHook) Phases() []Phase { return h.phases }
+func (h stubPhaseHook) Run(ctx context.Context, hc *Context, host Host) (Result, error) {
 	if h.fn != nil {
-		return h.fn(ctx, hc)
+		return h.fn(ctx, hc, host)
 	}
 	return Result{Action: ActionContinue}, nil
 }
@@ -32,14 +32,14 @@ func TestRunPhase_priorityOrder(t *testing.T) {
 	reg := NewRegistry(nil, RuntimeConfig{Duplicate: DefaultDuplicateConfig()})
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name: "b", phases: []Phase{PhasePromptBuild},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			order = append(order, "b")
 			return Result{}, nil
 		},
 	}, RegisterOpts{Priority: 20})
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name: "a", phases: []Phase{PhasePromptBuild},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			order = append(order, "a")
 			return Result{}, nil
 		},
@@ -49,7 +49,7 @@ func TestRunPhase_priorityOrder(t *testing.T) {
 		SessionID: "s1",
 		TurnID:    "t1",
 		PromptBuild: &PromptBuildPayload{SystemPrompt: "base"},
-	})
+	}, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestRunPhase_appliesMutations(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "inject",
 		phases: []Phase{PhasePromptBuild},
-		fn: func(_ context.Context, hc *Context) (Result, error) {
+		fn: func(_ context.Context, hc *Context, _ Host) (Result, error) {
 			base := ""
 			if hc.PromptBuild != nil {
 				base = hc.PromptBuild.SystemPrompt
@@ -80,9 +80,9 @@ func TestRunPhase_appliesMutations(t *testing.T) {
 	}, RegisterOpts{})
 
 	out, err := reg.RunPhase(context.Background(), PhasePromptBuild, &Context{
-		TurnID: "t1",
+		TurnID:      "t1",
 		PromptBuild: &PromptBuildPayload{SystemPrompt: "root"},
-	})
+	}, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,20 +97,20 @@ func TestRunPhase_actionSkip(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "skipper",
 		phases: []Phase{PhaseTurnDone},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			return Result{Action: ActionSkip}, nil
 		},
 	}, RegisterOpts{Priority: 0})
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "later",
 		phases: []Phase{PhaseTurnDone},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			ranSecond.Store(true)
 			return Result{}, nil
 		},
 	}, RegisterOpts{Priority: 1})
 
-	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"})
+	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"}, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestRunPhase_actionAbortTurn(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "guard",
 		phases: []Phase{PhaseLLMAfterCall},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			return Result{
 				Action: ActionAbortTurn,
 				Err:    errors.New("policy violation"),
@@ -132,7 +132,7 @@ func TestRunPhase_actionAbortTurn(t *testing.T) {
 		},
 	}, RegisterOpts{})
 
-	_, err := reg.RunPhase(context.Background(), PhaseLLMAfterCall, &Context{TurnID: "t1"})
+	_, err := reg.RunPhase(context.Background(), PhaseLLMAfterCall, &Context{TurnID: "t1"}, NoopHost())
 	if err == nil {
 		t.Fatal("expected abort error")
 	}
@@ -151,13 +151,13 @@ func TestRunPhase_filtersByPhase(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "prompt-only",
 		phases: []Phase{PhasePromptBuild},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			ran.Store(true)
 			return Result{}, nil
 		},
 	}, RegisterOpts{})
 
-	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"})
+	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"}, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,20 +172,20 @@ func TestRunPhase_onErrorContinue(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "fail",
 		phases: []Phase{PhaseTurnDone},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			return Result{}, errors.New("boom")
 		},
 	}, RegisterOpts{OnError: OnErrorContinue})
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "after",
 		phases: []Phase{PhaseTurnDone},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			ranAfter.Store(true)
 			return Result{}, nil
 		},
 	}, RegisterOpts{Priority: 1})
 
-	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"})
+	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"}, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,12 +199,12 @@ func TestRunPhase_onErrorAbort(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "fail",
 		phases: []Phase{PhaseTurnDone},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			return Result{}, errors.New("boom")
 		},
 	}, RegisterOpts{OnError: OnErrorAbort})
 
-	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"})
+	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"}, NoopHost())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -217,17 +217,17 @@ func TestRunPhase_sideEffectJournalSkipsReplay(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "once",
 		phases: []Phase{PhaseTurnDone},
-		fn: func(_ context.Context, _ *Context) (Result, error) {
+		fn: func(_ context.Context, _ *Context, _ Host) (Result, error) {
 			runs.Add(1)
 			return Result{}, nil
 		},
 	}, RegisterOpts{SideEffect: true})
 
 	hc := &Context{TurnID: "turn-42"}
-	if _, err := reg.RunPhase(context.Background(), PhaseTurnDone, hc); err != nil {
+	if _, err := reg.RunPhase(context.Background(), PhaseTurnDone, hc, NoopHost()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reg.RunPhase(context.Background(), PhaseTurnDone, hc); err != nil {
+	if _, err := reg.RunPhase(context.Background(), PhaseTurnDone, hc, NoopHost()); err != nil {
 		t.Fatal(err)
 	}
 	if runs.Load() != 1 {
@@ -240,7 +240,7 @@ func TestRunPhase_timeoutFailOpen(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "slow",
 		phases: []Phase{PhaseTurnDone},
-		fn: func(ctx context.Context, _ *Context) (Result, error) {
+		fn: func(ctx context.Context, _ *Context, _ Host) (Result, error) {
 			select {
 			case <-ctx.Done():
 				return Result{}, ctx.Err()
@@ -250,7 +250,7 @@ func TestRunPhase_timeoutFailOpen(t *testing.T) {
 		},
 	}, RegisterOpts{Timeout: 20 * time.Millisecond, OnError: OnErrorContinue})
 
-	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"})
+	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{TurnID: "t1"}, NoopHost())
 	if err != nil {
 		t.Fatalf("timeout should fail-open: %v", err)
 	}
@@ -259,9 +259,9 @@ func TestRunPhase_timeoutFailOpen(t *testing.T) {
 func TestRunPhase_nilRegistry(t *testing.T) {
 	var reg *Registry
 	out, err := reg.RunPhase(context.Background(), PhaseTurnDone, &Context{
-		TurnID:    "t1",
-		TurnDone:  &TurnDonePayload{FinishReason: "stop"},
-	})
+		TurnID:   "t1",
+		TurnDone: &TurnDonePayload{FinishReason: "stop"},
+	}, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestRunPhase_nilRegistry(t *testing.T) {
 
 func TestRunPhase_nilContext(t *testing.T) {
 	reg := NewRegistry(nil, RuntimeConfig{Duplicate: DefaultDuplicateConfig()})
-	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, nil)
+	_, err := reg.RunPhase(context.Background(), PhaseTurnDone, nil, NoopHost())
 	if err == nil {
 		t.Fatal("expected error for nil context")
 	}

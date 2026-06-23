@@ -177,7 +177,13 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			Tools:                cfg.ToolResultHookTools(),
 			FSRoot:               cfg.FSRoot,
 		},
-		ExternalHooks: hooks.ExternalHooksConfigFromShared(cfg.Hooks, cfg.RuntimeDir()),
+		PluginHooks: hooks.PluginsConfigFromShared(cfg.Hooks, cfg.RuntimeDir()),
+		HookHost: turn.HookHostConfig{
+			MaxLLMCalls:   cfg.HooksHostMaxLLMCalls(),
+			HistoryWindow: cfg.HooksHostHistoryWindow(),
+			RuntimeDir:    cfg.RuntimeDir(),
+			SkillsRoot:    cfg.SkillsRoot(),
+		},
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:                   cfg.ChildAgents.Enabled,

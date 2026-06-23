@@ -16,6 +16,11 @@ const (
 	shellCmd         shellType = "cmd"
 	shellPowerShell  shellType = "powershell"
 	defaultOutputEnc           = "utf-8"
+
+	// powerShellPipeEncodingPrefix 对齐管道输出与交互控制台编码。
+	// PS 5.1 交互窗口走 [Console]::OutputEncoding（中文系统常为 GB2312/GBK），
+	// stdout 被 pipe 捕获时默认走 $OutputEncoding（常为 US-ASCII），中文会在 Go 解码前已损坏。
+	powerShellPipeEncodingPrefix = "$OutputEncoding = [Console]::OutputEncoding; "
 )
 
 // resolveShellType 解析最终 shell：显式优先，否则 Windows→powershell，其余→bash。
@@ -78,10 +83,22 @@ func (r *Registry) resolveRunCWD(raw string) (string, error) {
 	return abs, nil
 }
 
+// wrapShellCommandForPipe 在子进程 stdout 被 pipe 捕获前对齐 shell 输出编码（见 powerShellPipeEncodingPrefix）。
+func wrapShellCommandForPipe(st shellType, command string) string {
+	if runtime.GOOS != "windows" {
+		return command
+	}
+	if st == shellPowerShell {
+		return powerShellPipeEncodingPrefix + command
+	}
+	return command
+}
+
 // buildShellCommand 按 shell 类型构造 *exec.Cmd 参数（不含 Start）。
 
 // powershell 按 pwsh → powershell 顺序探测；均不存在时返回 error。
 func buildShellCommand(st shellType, command string) (*exec.Cmd, error) {
+	command = wrapShellCommandForPipe(st, command)
 	switch st {
 	case shellBash:
 		return exec.Command("bash", "-lc", command), nil

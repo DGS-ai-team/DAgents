@@ -7,7 +7,7 @@ func loadSkillsToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "load_skills",
-			Description: "加载 skills 到当前会话，使后续回合 system prompt 注入已加载 skill 正文。" +
+			Description: "加载 skills 到当前会话，使后续回合 system prompt 注入已加载 skill 正文；并同步注册各 skill 的 hooks/ 目录下 Hook（unload/clear 时移除）。" +
 				"可用 skill 目录（name: description）见本工具 description 下方列表（若已配置 skills）。" +
 				"当用户任务与某 skill 的 description 匹配且尚未加载时，必须先调用本工具。" +
 				"整组替换当前已加载列表（非追加）；skill_names 传 [] 清空。" +

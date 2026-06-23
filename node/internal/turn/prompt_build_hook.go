@@ -20,7 +20,7 @@ func (h *systemPromptBuildHook) Name() string { return systemPromptBuildHookName
 
 func (h *systemPromptBuildHook) Phases() []hooks.Phase { return []hooks.Phase{hooks.PhasePromptBuild} }
 
-func (h *systemPromptBuildHook) Run(_ context.Context, hc *hooks.Context) (hooks.Result, error) {
+func (h *systemPromptBuildHook) Run(_ context.Context, hc *hooks.Context, _ hooks.Host) (hooks.Result, error) {
 	if h == nil || h.compose == nil || hc == nil {
 		return hooks.Result{Action: hooks.ActionContinue}, nil
 	}

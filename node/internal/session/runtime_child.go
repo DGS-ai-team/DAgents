@@ -38,7 +38,7 @@ func newChildRuntime(
 	// 创建子 runtime
 	rt := newRuntimeWithPublisher(
 		id, agentID, relay, hub, llmClient, restricted, policyEngine, nil, logger,
-		nil, initialLoaded, nil, 0, turnOpts, nil,
+		nil, initialLoaded, nil, 0, nil, turnOpts, nil,
 	)
 	// 设置子 runtime 元数据
 	rt.childMeta = &childRuntimeMeta{
