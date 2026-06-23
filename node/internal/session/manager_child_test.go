@@ -214,11 +214,12 @@ func TestEnqueueResumeParentDoesNotDoubleEnqueue(t *testing.T) {
 		"tool_call_id": "call-test-1",
 		"answer":       "yes",
 	}
+	before := rt.queue.TotalEnqueued()
 	if _, err := mgr.EnqueueMessage(context.Background(), parent.ID, "resume", "", resume, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := rt.queue.Len(); got != 1 {
-		t.Fatalf("resume queue depth = %d, want 1", got)
+	if got := rt.queue.TotalEnqueued() - before; got != 1 {
+		t.Fatalf("resume enqueue count = %d, want 1", got)
 	}
 }
 

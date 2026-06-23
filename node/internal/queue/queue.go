@@ -134,6 +134,13 @@ func (q *MessageQueue) Len() int {
 	return len(q.items)
 }
 
+// TotalEnqueued 返回累计入队次数（含已被 consumer 取走的条目；测试断言「只入队一次」时用）。
+func (q *MessageQueue) TotalEnqueued() uint64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.seq
+}
+
 func priorityValue(p Priority) int {
 	switch p {
 	case PriorityToolResult:
