@@ -11,17 +11,19 @@ import (
 
 // resolveShellOutputEncoding 决定子进程 stdout/stderr 的字节编码，解码为 UTF-8 后交给 LLM。
 //
-// 优先级：config.yaml tools.bash_output_encoding > 平台/shell 默认。
-// Windows：cmd/powershell 默认 gbk（中文系统 OEM CP936）；Git Bash 默认 utf-8。
+// 优先级：bash_run output_encoding > config.yaml tools.bash_output_encoding > 平台/shell 默认。
+// Windows：powershell/bash 默认 utf-8（pipe 前缀已对齐 UTF-8）；cmd 默认 gbk（OEM CP936）。
 func resolveShellOutputEncoding(st shellType, configured string) string {
 	if enc := normalizeOutputEncoding(configured); enc != "" {
 		return enc
 	}
 	if runtime.GOOS == "windows" {
-		if st == shellBash {
+		switch st {
+		case shellBash, shellPowerShell:
 			return "utf-8"
+		default:
+			return "gbk"
 		}
-		return "gbk"
 	}
 	return defaultOutputEnc
 }
@@ -61,11 +63,12 @@ func decodeShellOutput(data []byte, enc string) string {
 		}
 		return string(data)
 	case "gbk", "gb18030":
-		if text, ok := transcodeShellOutput(data, enc); ok {
-			return text
-		}
+		// UTF-8 工具（agent-browser 等）在全局 gbk 配置下仍可能输出合法 UTF-8 字节。
 		if utf8.Valid(data) {
 			return string(data)
+		}
+		if text, ok := transcodeShellOutput(data, enc); ok {
+			return text
 		}
 		return string(data)
 	default:

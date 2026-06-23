@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"runtime"
 	"testing"
 	"unicode/utf8"
 
@@ -34,6 +35,29 @@ func TestDecodeShellOutputUTF8Passthrough(t *testing.T) {
 func TestResolveShellOutputEncodingOverride(t *testing.T) {
 	if got := resolveShellOutputEncoding(shellCmd, "utf-8"); got != "utf-8" {
 		t.Fatalf("override = %q", got)
+	}
+}
+
+func TestResolveShellOutputEncodingPowerShellDefault(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		if got := resolveShellOutputEncoding(shellPowerShell, ""); got != "utf-8" {
+			t.Fatalf("powershell default = %q, want utf-8", got)
+		}
+		if got := resolveShellOutputEncoding(shellCmd, ""); got != "gbk" {
+			t.Fatalf("cmd default = %q, want gbk", got)
+		}
+		return
+	}
+	if got := resolveShellOutputEncoding(shellPowerShell, ""); got != "utf-8" {
+		t.Fatalf("non-windows default = %q", got)
+	}
+}
+
+func TestDecodeShellOutputGBKPrefersValidUTF8(t *testing.T) {
+	src := "网页标题：测试"
+	got := decodeShellOutput([]byte(src), "gbk")
+	if got != src {
+		t.Fatalf("valid utf-8 under gbk config = %q, want %q", got, src)
 	}
 }
 

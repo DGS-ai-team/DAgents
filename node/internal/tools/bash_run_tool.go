@@ -16,6 +16,7 @@ type bashRunArgs struct {
 	TimeoutSeconds *int    `json:"timeout_seconds"`
 	Cwd            *string `json:"cwd"`
 	ShellType      *string `json:"shell_type"`
+	OutputEncoding *string `json:"output_encoding"`
 }
 
 func bashRunToolDef() ToolDef {
@@ -46,6 +47,10 @@ func bashRunToolDef() ToolDef {
 						"type":        "string",
 						"enum":        []string{"bash", "cmd", "powershell"},
 						"description": bashRunShellTypeParamDescription(isWindows),
+					},
+					"output_encoding": map[string]any{
+						"type":        "string",
+						"description": "stdout/stderr 字节编码（可选，如 utf-8、gbk；默认按 shell 与 tools.bash_output_encoding 自动选择）",
 					},
 				},
 				"required":             []string{"command"},

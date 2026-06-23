@@ -99,12 +99,16 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 	if blocked := blockedNonRootPasswordPromptingShell(cmdText, st); blocked != "" {
 		return shellRunParams{}, blocked, nil
 	}
+	encConfigured := r.shellOutputEncoding
+	if args.OutputEncoding != nil {
+		encConfigured = strings.TrimSpace(*args.OutputEncoding)
+	}
 	return shellRunParams{
 		command:        cmdText,
 		cwd:            cwd,
 		shellType:      st,
 		timeoutSec:     timeout,
-		outputEncoding: resolveShellOutputEncoding(st, r.shellOutputEncoding),
+		outputEncoding: resolveShellOutputEncoding(st, encConfigured),
 		compress:       r.bashCompress.normalized(),
 	}, "", nil
 }

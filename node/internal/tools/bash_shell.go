@@ -17,10 +17,10 @@ const (
 	shellPowerShell  shellType = "powershell"
 	defaultOutputEnc           = "utf-8"
 
-	// powerShellPipeEncodingPrefix 对齐管道输出与交互控制台编码。
-	// PS 5.1 交互窗口走 [Console]::OutputEncoding（中文系统常为 GB2312/GBK），
-	// stdout 被 pipe 捕获时默认走 $OutputEncoding（常为 US-ASCII），中文会在 Go 解码前已损坏。
-	powerShellPipeEncodingPrefix = "$OutputEncoding = [Console]::OutputEncoding; "
+	// powerShellPipeEncodingPrefix 在 pipe 模式下统一 Console 与 $OutputEncoding 为 UTF-8。
+	// PS 5.1 默认 $OutputEncoding 常为 US-ASCII，Console 为 GBK；外部 exe（如 agent-browser）与
+	// cmdlet 输出编码不一致时会在 Go 解码前损坏。UTF-8 可同时覆盖 PS 内置中文与 UTF-8 工具输出。
+	powerShellPipeEncodingPrefix = "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
 )
 
 // resolveShellType 解析最终 shell：显式优先，否则 Windows→powershell，其余→bash。
