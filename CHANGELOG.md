@@ -10,6 +10,23 @@
 - **Manage Platform Blob API**：`POST /v1/blobs`（multipart 上传）、`GET/HEAD/DELETE /v1/blobs/{id}`；内容寻址（`blob_id = sha256`），字节落盘 `MANAGE_BLOB_DIR/{sha256}` + 元数据 `{sha256}.json` sidecar（不入 SQLite）；blob_id 严格 64 位十六进制校验防路径穿越；`blob store disabled` 返回 503；供 A2A 文件传输与 Skills 分发共用。
 - **Manage Skills 分发（精简版）**：`POST /v1/skills/packages`（multipart，draft；`skill_id`/`version` 限 URL 安全 slug，非法返回 422）+ `POST /v1/skills/packages/{id}/versions/{v}/publish`（单步发布，**幂等**：重复发布不再 bump `catalog_version`）+ `GET /v1/skills/catalog`/`{id}`/`{id}/versions/{v}/download`（仅 published）+ `GET /v1/skills/sync/manifest?since=N`（返回 `{catalog_version, items}` 信封）；多级审批工作流、Node 自动同步（心跳 `skills_catalog_version`→拉取→解压）延后到 Phase 2，Console 管理页见下。
 - **Manage Console 集成（Vue SPA）**：新增 **Node 管理** 菜单（含 **LLM 配置** / **Skills** 两个子标签：LLM 配置 CRUD/掩码、Skill 上传/发布/下载），以及全局 **PageAgent 命令栏**——选定一个 LLM 配置后经 `/resolve` 取 `{model,baseURL,apiKey}`、`new PageAgent(...)` 用自然语言操作控制台；`page-agent` 经 npm 依赖 + 动态 import 懒加载分包（不依赖运行期外网 CDN）。
+- **Hook in-process 插件栈**：内置 Hook、全局 `hooks.plugins`（`.so` + `Register`）、skill 级 `skills/<name>/hooks/*.so` 统一 `Hook.Run(ctx, *Context, Host)`；`Host` 提供 `SessionStore*` / `LLMComplete` / 只读快照；session 级 `hook_store` 持久化于 SQLite；`llm.before_call` 及多数 lifecycle phase 已接线。
+- **write-hook skill**：随包发布 `packaging/runtime/skills/write-hook/`，指导编写 Go Hook plugin（phase、mutation、编译与 config）。
+- **`packaging/runtime/plugins/`**：全局 Hook plugin 占位目录说明。
+
+### 变更
+
+- **Hook 架构收敛**：废弃 command / http / YAML 外部 Hook 与 `packaging/runtime/hooks/` shell 示例；`load_skills` / `unload_skills` / clear-context 同步 skill plugin Registry。
+- **Hook Host**：`hooks.host.history_window` 省略或 ≤0 时不截断 Context history（移除默认 50 条上限）。
+- **write-skill**：Hook 编写说明拆至 **write-hook** skill。
+
+### 移除
+
+- **`node/internal/hooks/external_*`**（command/http/journal 外部栈）及 `packaging/runtime/hooks/redaction.sh`。
+
+### 修复
+
+- **Windows `bash_run` 中文乱码（pipe 模式）**：PowerShell 交互窗口走 `[Console]::OutputEncoding`，stdout 被 pipe 捕获时默认走 `$OutputEncoding`（常为 US-ASCII），中文在 Go 解码前已损坏；`bash_run` 执行前自动注入 `$OutputEncoding = [Console]::OutputEncoding`，与交互式行为对齐。
 
 ## [0.5.0] - 2026-06-21
 
