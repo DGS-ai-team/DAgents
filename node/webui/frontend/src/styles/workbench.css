@@ -1637,8 +1637,21 @@ input {
   min-width: 0;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
+}
+
+.chat__composer-toolbar {
+  flex: 0 0 auto;
+}
+
+.chat__composer-meta-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 10px;
+  overflow: hidden;
 }
 
 .chat__input-strip-left {

@@ -172,9 +172,8 @@ function onKeydown(e) {
       <div class="chat__composer-card">
         <div class="chat__composer-meta">
           <div class="chat__composer-meta-left">
-            <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
-            <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
             <ComposerToolbar
+              class="chat__composer-toolbar"
               :thinking-supported="thinkingSupported"
               :llm-settings="llmSettings"
               :disabled="disabled || cancelling"
@@ -182,6 +181,10 @@ function onKeydown(e) {
               @toggle-thinking="emit('toggle-thinking')"
               @cycle-effort="emit('cycle-effort')"
             />
+            <div v-if="workerStrip || inputStripLeftText" class="chat__composer-meta-status">
+              <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
+              <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
+            </div>
           </div>
           <span v-if="inputStripRightText" class="chat__input-strip-right" :title="inputStripRightText">
             {{ inputStripRightText }}
