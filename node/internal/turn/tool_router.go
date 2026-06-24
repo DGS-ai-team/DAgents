@@ -77,7 +77,7 @@ func (o *Orchestrator) processToolCalls(
 		decision := o.decideToolBeforeEach(ctx, sessionID, history, tc)
 		switch decision.Action {
 		case policy.ActionDeny:
-			msg := "rejected: policy_denied"
+			msg := hooks.ToolDenyMessage(decision)
 			o.publishToolResult(sessionID, tc, msg, true, nil)
 			o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
 		case policy.ActionRequireApproval:

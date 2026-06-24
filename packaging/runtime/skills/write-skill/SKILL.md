@@ -13,6 +13,7 @@ description: 指导在技能目录中编写符合约定的 Agent 技能（SKILL.
    - **`skills/<name>/data/`**：任务需持续保留的数据（历史记录、持久化产物等）
    - **`skills/<name>/config/`**：配置类文件（见下文「config 与安全」）
    - **`skills/<name>/hooks/`**：可选，存放本 skill 的 Hook plugin（`*.so`）；编写约定见 **`write-hook`** skill
+   - **`write-skill` 内置防护**：Node 自带 `builtin.loaded_skill_file_guard`（`tool.before_each`），当会话 `loaded_skills` 非空时，禁止 `write_file` / `search_replace` / 会改文件的 `bash_run` 触及 `skills/<已加载名>/` 下任意路径；返回「已加载的技能文件不允许修改」。定制逻辑可编译 `hooks/protect-loaded-skill/` 为 `.so`。
 
 ## SKILL.md 头部元数据（frontmatter）
 

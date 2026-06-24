@@ -66,6 +66,15 @@ def streaming_tool_call_preview(
             args = {"content": content}
             return args, content, "text"
 
+    if name == "search_replace":
+        path = _extract_partial_json_string(raw, "path")
+        args: dict[str, Any] = {}
+        if path:
+            args["path"] = path
+        if args:
+            return args, None, "text"
+        return {}, None, "text"
+
     return {}, raw, "json"
 
 

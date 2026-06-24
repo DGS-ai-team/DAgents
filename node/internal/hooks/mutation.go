@@ -142,6 +142,9 @@ func applyToolBeforeEachMutation(hc *Context, val any) error {
 	if mode, ok := m["tool_mode"].(string); ok && mode != "" {
 		decision.ToolMode = policy.ApprovalMode(mode)
 	}
+	if reason, ok := m["approval_reason"].(string); ok && reason != "" {
+		decision.ApprovalReason = reason
+	}
 	return nil
 }
 

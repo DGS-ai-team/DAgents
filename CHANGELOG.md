@@ -6,6 +6,9 @@
 
 ### 新增
 
+- **loaded skill 文件保护 Hook**：`builtin.loaded_skill_file_guard`（`tool.before_each`）阻止 `write_file` / `search_replace` / 会改文件的 `bash_run` 修改已加载 skill 目录；`write-skill` 可选 `hooks/protect-loaded-skill/` plugin。
+- **HITL 大参数诊断**：`scripts/test_python_hitl_large_args.py` 与 `tests/test_cli_hitl_large_args.py`（SSE / HITL 展开 / 入队分层验证）。
+- **Open Issue 文档**：[Issue 001](docs/issues/001-python-tui-hitl-approval-ui-stuck.md) — Python TUI `search_replace` HITL 审批 UI 不出现（排查暂停）。
 - **Manage LLM 配置注册中心**：`/v1/llm/configs` CRUD + `/resolve` 端点；list/detail `api_key` 掩码（`sk-***last4`），`/resolve` 返回明文 `{model,baseURL,apiKey}`（PageAgent 兼容形）；`is_default` 全局唯一；`allowed_groups` 按 `discovery_group` 命名空间**强制可见性**（非 admin：list 过滤、get/resolve/default-resolve 不可见返回 404）；仅适用于本地/局域网信任部署。多 Node / 外部可按 id 复用；Node 自动消费（热更/同步）延后到 Phase 2，Console 管理页见下。
 - **Manage Platform Blob API**：`POST /v1/blobs`（multipart 上传）、`GET/HEAD/DELETE /v1/blobs/{id}`；内容寻址（`blob_id = sha256`），字节落盘 `MANAGE_BLOB_DIR/{sha256}` + 元数据 `{sha256}.json` sidecar（不入 SQLite）；blob_id 严格 64 位十六进制校验防路径穿越；`blob store disabled` 返回 503；供 A2A 文件传输与 Skills 分发共用。
 - **Manage Skills 分发（精简版）**：`POST /v1/skills/packages`（multipart，draft；`skill_id`/`version` 限 URL 安全 slug，非法返回 422）+ `POST /v1/skills/packages/{id}/versions/{v}/publish`（单步发布，**幂等**：重复发布不再 bump `catalog_version`）+ `GET /v1/skills/catalog`/`{id}`/`{id}/versions/{v}/download`（仅 published）+ `GET /v1/skills/sync/manifest?since=N`（返回 `{catalog_version, items}` 信封）；多级审批工作流、Node 自动同步（心跳 `skills_catalog_version`→拉取→解压）延后到 Phase 2，Console 管理页见下。
@@ -19,6 +22,7 @@
 - **Hook 架构收敛**：废弃 command / http / YAML 外部 Hook 与 `packaging/runtime/hooks/` shell 示例；`load_skills` / `unload_skills` / clear-context 同步 skill plugin Registry。
 - **Hook Host**：`hooks.host.history_window` 省略或 ≤0 时不截断 Context history（移除默认 50 条上限）。
 - **write-skill**：Hook 编写说明拆至 **write-hook** skill。
+- **tool.before_each deny**：Hook mutation 支持 `approval_reason`；`ActionDeny` 的 tool 结果文案走 `ToolDenyMessage`（不再固定 `policy_denied`）。
 
 ### 移除
 
@@ -26,6 +30,7 @@
 
 ### 修复
 
+- **Python TUI HITL（待现场回归）**：审批 UI 在 UI 线程同步弹出（避免 `call_later` 排在大量 `tool_call` partial 之后）；timeout/abort 时 cancel 在途 `_hitl_task`；`search_replace` 流式 partial 不再展示 growing raw JSON。详见 [Issue 001](docs/issues/001-python-tui-hitl-approval-ui-stuck.md)。
 - **Windows `bash_run` 中文乱码（pipe 模式）**：PowerShell 交互窗口走 `[Console]::OutputEncoding`，stdout 被 pipe 捕获时默认走 `$OutputEncoding`（常为 US-ASCII），中文在 Go 解码前已损坏；`bash_run` 执行前自动注入 `$OutputEncoding = [Console]::OutputEncoding`，与交互式行为对齐。
 
 ## [0.5.0] - 2026-06-21

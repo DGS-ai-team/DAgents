@@ -384,83 +384,93 @@ class DAgentsTuiApp(App[None]):
             return
         self._hitl_busy = True
         if item.kind == "approval":
-            self._hitl_task = asyncio.create_task(self._run_approval_hitl(item))
+            self._start_approval_hitl(item)
         else:
-            self._hitl_task = asyncio.create_task(self._run_user_info_hitl(item))
+            self._start_user_info_hitl(item)
 
-    async def _run_approval_hitl(self, item: PendingHITL) -> None:
-        """展示审批 UI，完成后异步 submit resume。"""
+    def _start_approval_hitl(self, item: PendingHITL) -> None:
+        """在 UI 线程同步弹出审批块，避免 call_later 排在大量 transcript 更新之后。"""
         relay = is_a2a_relay_hitl(item.data)
         requests = extract_tool_approval_requests(item.data)
         if not requests:
-            try:
-                await self._complete_approval_decision(build_all_rejected_decision([]), relay=relay)
-            except Exception as exc:  # noqa: BLE001
-                self._transcript_log().write(f"[red]approval submit failed: {exc}[/red]")
-            finally:
-                self._hitl_busy = False
-                self._refresh_input_strip()
-                self.call_later(self._process_hitl_queue)
+            self._hitl_task = asyncio.create_task(self._run_empty_approval_hitl(relay=relay))
             return
-        loop = asyncio.get_running_loop()
-        ready: asyncio.Future[asyncio.Future[ApprovalDecision]] = loop.create_future()
         self._approval_raw_data = item.data
-        if is_a2a_relay_hitl(item.data):
-            self._a2a_relay_hitl_data = dict(item.data)
-        else:
-            self._a2a_relay_hitl_data = None
-
-        def _begin() -> None:
-            try:
-                future = self._begin_approval_ui(list(requests))
-            except Exception as exc:  # noqa: BLE001
-                if not ready.done():
-                    ready.set_exception(exc)
-            else:
-                if not ready.done():
-                    ready.set_result(future)
-
-        self.call_later(_begin)
+        self._a2a_relay_hitl_data = dict(item.data) if relay else None
         try:
-            approval_future = await ready
-            decision = await approval_future
-        except ApprovalCancelled:
-            decision = build_all_rejected_decision(list(requests))
-            self.call_later(self._end_approval_ui, relay_a2a=relay)
-            try:
-                await self._complete_approval_decision(decision, relay=relay)
-            except Exception as exc:  # noqa: BLE001
-                self._transcript_log().write(f"[red]approval reject failed: {exc}[/red]")
-            self._hitl_busy = False
-            self._refresh_input_strip()
-            self.call_later(self._process_hitl_queue)
-            return
+            approval_future = self._begin_approval_ui(list(requests))
         except Exception as exc:  # noqa: BLE001
             self._controller.discard_hitl_head()
-            self.call_later(self._end_approval_ui)
+            self._approval_raw_data = None
+            self._a2a_relay_hitl_data = None
             self._transcript_log().write(f"[red]approval ui failed: {exc}[/red]")
             self._hitl_busy = False
             self._refresh_input_strip()
             self.call_later(self._process_hitl_queue)
             return
-        finally:
-            self._approval_raw_data = None
-        cleanup_done: asyncio.Future[None] = loop.create_future()
+        self._hitl_task = asyncio.create_task(
+            self._finish_approval_hitl(approval_future, list(requests), relay=relay)
+        )
 
-        def _cleanup() -> None:
-            try:
-                self._end_approval_ui(relay_a2a=relay)
-            except Exception as exc:  # noqa: BLE001
-                if not cleanup_done.done():
-                    cleanup_done.set_exception(exc)
-            else:
-                if not cleanup_done.done():
-                    cleanup_done.set_result(None)
-
-        self.call_later(_cleanup)
-        await cleanup_done
+    async def _run_empty_approval_hitl(self, *, relay: bool) -> None:
         try:
+            await self._complete_approval_decision(build_all_rejected_decision([]), relay=relay)
+        except Exception as exc:  # noqa: BLE001
+            self._transcript_log().write(f"[red]approval submit failed: {exc}[/red]")
+        finally:
+            self._hitl_busy = False
+            self._refresh_input_strip()
+            self.call_later(self._process_hitl_queue)
+
+    async def _finish_approval_hitl(
+        self,
+        approval_future: asyncio.Future[ApprovalDecision],
+        requests: list[ToolApprovalRequest],
+        *,
+        relay: bool,
+    ) -> None:
+        """等待用户审批并 submit resume。"""
+        try:
+            try:
+                decision = await approval_future
+            except ApprovalCancelled:
+                decision = build_all_rejected_decision(list(requests))
+                self.call_later(self._end_approval_ui, relay_a2a=relay)
+                try:
+                    await self._complete_approval_decision(decision, relay=relay)
+                except Exception as exc:  # noqa: BLE001
+                    self._transcript_log().write(f"[red]approval reject failed: {exc}[/red]")
+                return
+            except asyncio.CancelledError:
+                self.call_later(self._end_approval_ui, relay_a2a=relay)
+                raise
+            except Exception as exc:  # noqa: BLE001
+                self._controller.discard_hitl_head()
+                self.call_later(self._end_approval_ui)
+                self._transcript_log().write(f"[red]approval ui failed: {exc}[/red]")
+                return
+            finally:
+                self._approval_raw_data = None
+                self._a2a_relay_hitl_data = None
+
+            loop = asyncio.get_running_loop()
+            cleanup_done: asyncio.Future[None] = loop.create_future()
+
+            def _cleanup() -> None:
+                try:
+                    self._end_approval_ui(relay_a2a=relay)
+                except Exception as exc:  # noqa: BLE001
+                    if not cleanup_done.done():
+                        cleanup_done.set_exception(exc)
+                else:
+                    if not cleanup_done.done():
+                        cleanup_done.set_result(None)
+
+            self.call_later(_cleanup)
+            await cleanup_done
             await self._complete_approval_decision(decision, relay=relay)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:  # noqa: BLE001
             self._transcript_log().write(f"[red]approval submit failed: {exc}[/red]")
         finally:
@@ -475,67 +485,72 @@ class DAgentsTuiApp(App[None]):
         if relay:
             self._finalize_a2a_relay_tool_blocks(decision, relay_data)
 
-    async def _run_user_info_hitl(self, item: PendingHITL) -> None:
-        """展示用户询问 UI，完成后异步 submit resume。"""
+    def _start_user_info_hitl(self, item: PendingHITL) -> None:
+        """在 UI 线程同步弹出用户询问块。"""
         request = extract_user_information_request(item.data)
         if request is None:
             self._controller.discard_hitl_head()
             self._hitl_busy = False
             self.call_later(self._process_hitl_queue)
             return
-        loop = asyncio.get_running_loop()
-        ready: asyncio.Future[asyncio.Future[UserInformationAnswer]] = loop.create_future()
-
-        def _begin() -> None:
-            try:
-                future = self._begin_user_info_ui(request)
-            except Exception as exc:  # noqa: BLE001
-                if not ready.done():
-                    ready.set_exception(exc)
-            else:
-                if not ready.done():
-                    ready.set_result(future)
-
-        self.call_later(_begin)
         try:
-            answer_future = await ready
-            answer = await answer_future
-        except UserInformationCancelled:
-            request = self._user_info_request
-            if request is not None:
-                try:
-                    await self._controller.complete_hitl_user_info(
-                        UserInformationAnswer(
-                            tool_call_id=request.tool_call_id,
-                            answer="",
-                            selected_options=[],
-                            cancelled=True,
-                        )
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    self._transcript_log().write(f"[red]user info cancel failed: {exc}[/red]")
-            else:
-                self._controller.discard_hitl_head()
-            self.call_later(self._end_user_info_ui)
+            answer_future = self._begin_user_info_ui(request)
+        except Exception as exc:  # noqa: BLE001
+            self._controller.discard_hitl_head()
+            self._transcript_log().write(f"[red]user info ui failed: {exc}[/red]")
             self._hitl_busy = False
             self.call_later(self._process_hitl_queue)
             return
-        cleanup_done: asyncio.Future[None] = loop.create_future()
+        self._hitl_task = asyncio.create_task(self._finish_user_info_hitl(answer_future))
 
-        def _cleanup() -> None:
-            try:
-                self._end_user_info_ui()
-            except Exception as exc:  # noqa: BLE001
-                if not cleanup_done.done():
-                    cleanup_done.set_exception(exc)
-            else:
-                if not cleanup_done.done():
-                    cleanup_done.set_result(None)
-
-        self.call_later(_cleanup)
-        await cleanup_done
+    async def _finish_user_info_hitl(
+        self,
+        answer_future: asyncio.Future[UserInformationAnswer],
+    ) -> None:
+        """等待用户回答并 submit resume。"""
         try:
+            try:
+                answer = await answer_future
+            except UserInformationCancelled:
+                request = self._user_info_request
+                if request is not None:
+                    try:
+                        await self._controller.complete_hitl_user_info(
+                            UserInformationAnswer(
+                                tool_call_id=request.tool_call_id,
+                                answer="",
+                                selected_options=[],
+                                cancelled=True,
+                            )
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self._transcript_log().write(f"[red]user info cancel failed: {exc}[/red]")
+                else:
+                    self._controller.discard_hitl_head()
+                self.call_later(self._end_user_info_ui)
+                return
+            except asyncio.CancelledError:
+                self.call_later(self._end_user_info_ui)
+                raise
+
+            loop = asyncio.get_running_loop()
+            cleanup_done: asyncio.Future[None] = loop.create_future()
+
+            def _cleanup() -> None:
+                try:
+                    self._end_user_info_ui()
+                except Exception as exc:  # noqa: BLE001
+                    if not cleanup_done.done():
+                        cleanup_done.set_exception(exc)
+                else:
+                    if not cleanup_done.done():
+                        cleanup_done.set_result(None)
+
+            self.call_later(_cleanup)
+            await cleanup_done
             await self._controller.complete_hitl_user_info(answer)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:  # noqa: BLE001
             self._transcript_log().write(f"[red]user info submit failed: {exc}[/red]")
         finally:
@@ -797,8 +812,16 @@ class DAgentsTuiApp(App[None]):
         self._finish_assistant_stream(self._transcript_log())
         self._cancel_task = asyncio.create_task(self._cancel_current_turn_request())
 
+    def _cancel_active_hitl_task(self) -> None:
+        """取消在途 HITL asyncio 任务，避免 _hitl_busy 永久锁死。"""
+        task = self._hitl_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._hitl_task = None
+
     def _abort_local_hitl_for_user_message(self) -> None:
         """关闭本地 HITL UI；新用户消息或 Esc 会打断 server pending，勿再 submit 旧 call_id。"""
+        self._cancel_active_hitl_task()
         if self._approval_future is not None and not self._approval_future.done():
             self._approval_future.set_exception(ApprovalCancelled())
             self.call_later(self._end_approval_ui)
@@ -2645,6 +2668,8 @@ class DAgentsTuiApp(App[None]):
             await self._controller.wait_user_turn()
         except Exception as exc:
             self._finish_status_line("prefilling")
+            self._abort_local_hitl_for_user_message()
+            self._controller.clear_hitl_queue()
             log = self._transcript_log()
             log.write(f"[red]send failed: {exc}[/red]")
         finally:

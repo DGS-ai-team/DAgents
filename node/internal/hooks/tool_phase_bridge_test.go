@@ -86,11 +86,16 @@ func TestRunToolBeforeEachViaRunPhase_duplicate(t *testing.T) {
 func TestRunToolBeforeEachViaRunPhase_registersThreePhaseHooks(t *testing.T) {
 	reg := NewRegistry(nil, RuntimeConfig{Duplicate: DefaultDuplicateConfig()})
 	matched := reg.phaseHooksFor(PhaseToolBeforeEach)
-	if len(matched) != 3 {
-		t.Fatalf("before_each phaseHooks = %d, want 3", len(matched))
+	if len(matched) != 4 {
+		t.Fatalf("before_each phaseHooks = %d, want 4", len(matched))
 	}
 	names := hookNames(matched)
-	want := []string{"builtin.policy", "builtin.agent_owned_file", "builtin.duplicate_tool_call"}
+	want := []string{
+		"builtin.policy",
+		"builtin.agent_owned_file",
+		"builtin.loaded_skill_file_guard",
+		"builtin.duplicate_tool_call",
+	}
 	for i, name := range want {
 		if names[i] != name {
 			t.Fatalf("names = %v, want %v", names, want)

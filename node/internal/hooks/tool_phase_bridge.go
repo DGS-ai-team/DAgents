@@ -296,6 +296,12 @@ func registerBuiltinToolBeforeEachHooks(r *Registry, ph *PolicyToolHook, ah *Age
 		o.Priority = toolBeforeEachPriorityDuplicate
 		r.RegisterPhaseHook(dh, o)
 	}
+	guard := NewLoadedSkillFileGuardHook()
+	if guard != nil {
+		o := opts
+		o.Priority = loadedSkillFileGuardPriority
+		r.RegisterPhaseHook(guard, o)
+	}
 }
 
 func registerBuiltinToolAfterEachHooks(r *Registry, rh *ToolResultPackageHook, aah *AgentOwnedFileAfterHook) {
