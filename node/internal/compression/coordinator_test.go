@@ -183,16 +183,33 @@ func TestStalePendingDiscarded(t *testing.T) {
 	msgs := sampleMessages()
 	prefix := testSidecarPrefix()
 	coord.MaybeHandle(context.Background(), "sess-3", "agent-1", nil, &msgs, prefix)
+	waitReadyCompression(t, coord, "sess-3")
+
+	before := len(msgs)
+	msgs[1].Content = "modified within compressed range"
+	out := coord.applyReadyCompression("sess-3", "agent-1", nil, &msgs)
+	if out.status != "stale" {
+		t.Fatalf("status = %q, want stale", out.status)
+	}
+	if len(msgs) != before {
+		t.Fatalf("stale compression should not apply after slice content changed, len=%d want %d", len(msgs), before)
+	}
+}
+
+func waitReadyCompression(t *testing.T, coord *Coordinator, sessionID string) {
+	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && client.streamCalls.Load() < 1 {
+	for time.Now().Before(deadline) {
+		coord.reapFinishedTask(sessionID)
+		coord.mu.Lock()
+		_, ok := coord.readyCompressions[sessionID]
+		coord.mu.Unlock()
+		if ok {
+			return
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
-
-	msgs[1].Content = "modified within compressed range"
-	coord.MaybeHandle(context.Background(), "sess-3", "agent-1", nil, &msgs, prefix)
-	if len(msgs) == 2 {
-		t.Fatal("stale compression should not apply after slice content changed")
-	}
+	t.Fatal("timeout waiting ready compression")
 }
 
 func TestBlockingCompressionMergeNextUser(t *testing.T) {
