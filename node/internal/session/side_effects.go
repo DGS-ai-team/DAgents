@@ -303,7 +303,7 @@ func (s *sideEffectStore) ReconcileAfterStep(
 		return outcome
 	}
 	apply := s.ApplyReady(sessionID, orch, history, delivery)
-	if apply.Continue && pending == nil {
+	if apply.Continue {
 		scheduleContinue()
 	}
 	return outcome

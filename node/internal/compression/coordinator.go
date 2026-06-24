@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
@@ -87,6 +88,7 @@ type Coordinator struct {
 	client                llm.Client
 	silentTriggerTokens   int
 	blockingTriggerTokens int
+	rawMessageHistoryEnabled bool
 
 	mu                sync.Mutex
 	sessionTasks      map[string]*compressionTask
@@ -364,6 +366,7 @@ func (c *Coordinator) runCompressionFlow(
 		})
 		return false
 	}
+	summary = FinalizeCompressionSummary(summary, sessionID, c.rawMessageHistoryEnabled, time.Now())
 	c.mu.Lock()
 	c.readyCompressions[sessionID] = readyCompression{
 		End:                    plan.End,

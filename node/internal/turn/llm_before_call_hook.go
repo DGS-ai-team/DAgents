@@ -5,10 +5,9 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
-	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-func (o *Orchestrator) runLLMBeforeCallPhase(ctx context.Context, sessionID string, history *[]llm.Message, systemPrompt string, toolDefs []tools.ToolDef) ([]llm.Message, string, error) {
+func (o *Orchestrator) runLLMBeforeCallPhase(ctx context.Context, sessionID string, history *[]llm.Message, systemPrompt string) ([]llm.Message, string, error) {
 	if o.toolHooks == nil {
 		return *history, systemPrompt, nil
 	}

@@ -38,8 +38,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 |------|------|
 | `publishAssistant` / `publishReasoning` | 流式 delta |
 | `publishError` | `error` SSE |
-| `publishUserInformationRequired` / `publishApprovalRequired` | A2A 中继等仍使用的 HITL SSE |
-| `publishHITLRequired` | 本地 turn 统一 HITL SSE |
+| `publishHITLRequired` | 本地 turn 统一 HITL SSE（A2A 中继在 session/a2a 层发 `approval_required` / `user_information_required`） |
 | `publishToolCall` / `publishToolResult` | 工具 SSE |
 | `PublishSideEffectCallback` / `PublishExternalSideEffectDeferred` | 旁路 Produce SSE |
 | `PublishSideEffectApplied` / `PublishSideEffectsCleared` | Apply / ClearContext UX SSE |

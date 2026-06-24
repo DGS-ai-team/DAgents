@@ -78,6 +78,7 @@ func TestShouldCompressBlockingPriority(t *testing.T) {
 func TestBlockingCompressionApplies(t *testing.T) {
 	client := &countingLLM{}
 	coord := NewCoordinator(client, 0, 50)
+	coord.SetRawMessageHistoryEnabled(true)
 	hub := stream.NewHub(16, nil)
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
@@ -90,6 +91,9 @@ func TestBlockingCompressionApplies(t *testing.T) {
 	}
 	if msgs[0].Role != "user" || msgs[0].Name != llm.UserNameCompression || !strings.Contains(msgs[0].Content, "阶段性总结论") {
 		t.Fatalf("replacement = %+v", msgs[0])
+	}
+	if !strings.Contains(msgs[0].Content, "历史的原始消息请查阅 history/") {
+		t.Fatalf("expected journal footer, got %q", msgs[0].Content)
 	}
 	if msgs[1].Role != "assistant" || msgs[1].Content != "好的" {
 		t.Fatalf("tail assistant = %+v", msgs[1])

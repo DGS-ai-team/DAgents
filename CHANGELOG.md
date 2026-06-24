@@ -6,7 +6,11 @@
 
 ### 新增
 
-- **loaded skill 文件保护 Hook**：`builtin.loaded_skill_file_guard`（`tool.before_each`）阻止 `write_file` / `search_replace` / 会改文件的 `bash_run` 修改已加载 skill 目录；`write-skill` 可选 `hooks/protect-loaded-skill/` plugin。
+- **loaded skill 文件保护 Hook**：`builtin.loaded_skill_file_guard`（`tool.before_each`）阻止 `write_file` / `search_replace` / 会改文件的 `bash_run` 修改已加载 skill 目录；`write-skill` 可选 `hooks/protect-loaded-skill/` plugin（见 `node/plugins/`）。
+- **无动作自动压缩**：`compression.idle_auto_compress_seconds` / `idle_auto_compress_poll_seconds` / `idle_auto_compress_min_tokens`；后台扫描 idle session，超时且 token 达阈值时 `ForceBlocking` 压缩；压缩后 `runtime_state.idle_auto_compress_applied` 打标跳过重复扫描，用户新对话等入队时清标。
+- **压缩摘要 JSONL 脚注**：启用 `raw_message_history` 时，压缩写回前在摘要末尾追加 `history/YYYYMMDD/<session>.jsonl` 指引（`FinalizeCompressionSummary`）。
+- **protect-loaded-skill plugin 构建**：源码迁至 `node/plugins/protect-loaded-skill/`（node 模块内 build）；`go test ./node/plugins/...` 与 CI 构建 smoke；packaging `hooks/build.sh` 委托 node 路径。
+- **Turn Hook phase 接线**：`turn.error` / `turn.cancel` 在 LLM 失败、流式 cancel、tool 处理 cancel 等路径触发。
 - **HITL 大参数诊断**：`scripts/test_python_hitl_large_args.py` 与 `tests/test_cli_hitl_large_args.py`（SSE / HITL 展开 / 入队分层验证）。
 - **Open Issue 文档**：[Issue 001](docs/issues/001-python-tui-hitl-approval-ui-stuck.md) — Python TUI `search_replace` HITL 审批 UI 不出现（排查暂停）。
 - **Python TUI 上次 session 记忆**：退出时写入 `<runtime>/client/last_session.json`；下次 `dagents chat` 未指定 `--session` 时默认复用（按 `api_base` 匹配）；`/switch` 同步更新。
@@ -20,7 +24,9 @@
 
 ### 变更
 
-- **原始消息 JSONL 目录**：由 `history/<session>_YYYYMMDD.jsonl` 改为 **`history/YYYYMMDD/<session>.jsonl`**（按自然日分子目录）；启用 `raw_message_history` 时 system prompt 工作区说明与 `read_file` 描述补充该路径及 `read_file` 复盘用法。废弃 command / http / YAML 外部 Hook 与 `packaging/runtime/hooks/` shell 示例；`load_skills` / `unload_skills` / clear-context 同步 skill plugin Registry。
+- **原始消息 JSONL 目录**：由 `history/<session>_YYYYMMDD.jsonl` 改为 **`history/YYYYMMDD/<session>.jsonl`**（按自然日分子目录）；启用 `raw_message_history` 时 system prompt 工作区说明与 `read_file` 描述补充该路径及 `grep_file`/`read_file` 复盘用法。废弃 command / http / YAML 外部 Hook 与 `packaging/runtime/hooks/` shell 示例；`load_skills` / `unload_skills` / clear-context 同步 skill plugin Registry。
+- **压缩侧车 prompt**：已完成/进行中任务三行式说明微调；摘要末尾可保留少量关键指令（≤三行）。
+- **protect-loaded-skill 布局**：删除 packaging 下独立 `go.mod`（无法 import `internal/hooks`）；canonical 源码在 `node/plugins/`。
 - **Hook Host**：`hooks.host.history_window` 省略或 ≤0 时不截断 Context history（移除默认 50 条上限）。
 - **write-skill**：Hook 编写说明拆至 **write-hook** skill。
 - **tool.before_each deny**：Hook mutation 支持 `approval_reason`；`ActionDeny` 的 tool 结果文案走 `ToolDenyMessage`（不再固定 `policy_denied`）。
@@ -28,6 +34,7 @@
 ### 移除
 
 - **`node/internal/hooks/external_*`**（command/http/journal 外部栈）及 `packaging/runtime/hooks/redaction.sh`。
+- **Turn 层 dead SSE helper**：`publishUserInformationRequired` / `publishApprovalRequired`（本地 turn 已统一 `hitl_required`；A2A 仍在 session 层发旧事件）。
 
 ### 修复
 

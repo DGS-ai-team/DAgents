@@ -101,13 +101,20 @@ func TestInsertMessage_prependsAndAppendsJournal(t *testing.T) {
 }
 
 func TestJournalFilePath_usesDateSubdir(t *testing.T) {
+	now := time.Now()
 	path := journalFilePath("/tmp/history", "sess-a")
-	wantSuffix := filepath.Join(time.Now().Format("20060102"), "sess-a.jsonl")
+	wantSuffix := filepath.Join(now.Format("20060102"), "sess-a.jsonl")
 	if !strings.HasSuffix(path, wantSuffix) {
 		t.Fatalf("path = %q, want suffix %q", path, wantSuffix)
 	}
-	if strings.Contains(filepath.Dir(path), "sess-a_") {
-		t.Fatalf("path should not embed date in filename: %q", path)
+}
+
+func TestJournalRelativePath_workspaceRelative(t *testing.T) {
+	at := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	got := JournalRelativePath("sess-a", at)
+	want := "history/20260621/sess-a.jsonl"
+	if got != want {
+		t.Fatalf("JournalRelativePath = %q, want %q", got, want)
 	}
 }
 

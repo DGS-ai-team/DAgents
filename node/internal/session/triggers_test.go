@@ -14,7 +14,7 @@ func TestEnqueueTriggerMessageCarriesTriggerID(t *testing.T) {
 	mgr := NewManager("agent-1", nil, nil, nil, nil, nil, TurnOptions{}, nil)
 	sid := "sess-trigger-env"
 	mgr.mu.Lock()
-	rt := newRuntime(sid, mgr.agentID, mgr.hub, mgr.llm, mgr.tools, mgr.policy, mgr.store, mgr.logger, nil, nil, nil, 0, nil, mgr.turn, mgr.triggerDelivery)
+	rt := newRuntime(sid, mgr.agentID, mgr.hub, mgr.llm, mgr.tools, mgr.policy, mgr.store, mgr.logger, nil, nil, nil, 0, nil, false, mgr.turn, mgr.triggerDelivery)
 	mgr.sessions[sid] = rt
 	mgr.mu.Unlock()
 

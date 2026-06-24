@@ -23,8 +23,13 @@ Go Node 侧上下文摘要压缩：silent 异步 + blocking 同步；M2 侧车 `
 
 - `silent_trigger_tokens`：`<=0` 关闭 silent
 - `blocking_trigger_tokens`：`<=0` 关闭 blocking
+- `idle_auto_compress_seconds`：session 无动作超过该秒数后后台自动 `ForceBlocking` 压缩；`<=0` 关闭
+- `idle_auto_compress_poll_seconds`：扫描间隔（默认 60s）
+- `idle_auto_compress_min_tokens`：上下文估算 token 低于该值时不触发 idle 自动压缩；`<=0` 表示不限制
 
 阻塞优先于静默。silent 在 `readyCompressions` pending 或 apply 后冷却期（默认 60s / +4000 tokens）内不重复启动侧车。
+
+**Idle 自动压缩**：以 SQLite `updated_at`（最后 persist 时间）为「无动作」基准；压缩成功或 `noop` 后在 `runtime_state.idle_auto_compress_applied` 打标，扫描器跳过该 session；用户新消息 / resume / trigger 等入队时清除标记，下次 idle 周期可再次压缩。
 
 **History 与 system（P9）**：session/SQLite `messages` 仅含 user/assistant/tool；`BuildSystemPrompt` 经 `llm.MessagesWithSystem` 出站注入，不落库。压缩区间自 `leadingSystemSkip` 起（生产恒为 0）；journal 异常写入 leading `system` 时跳过以免与侧车 `SystemPrompt` 重复。
 

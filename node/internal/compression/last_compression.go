@@ -100,3 +100,13 @@ func (c *Coordinator) SetLogger(logger *slog.Logger) {
 	c.logger = logger
 	c.mu.Unlock()
 }
+
+// SetRawMessageHistoryEnabled 控制压缩摘要末尾是否追加 JSONL 审计文件路径指引。
+func (c *Coordinator) SetRawMessageHistoryEnabled(enabled bool) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.rawMessageHistoryEnabled = enabled
+	c.mu.Unlock()
+}

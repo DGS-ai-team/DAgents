@@ -186,7 +186,7 @@ func formatWorkspaceSubdirsSection(includeHistoryJournal bool) string {
 		lines = append(lines,
 			"- `history/`：原始对话 JSONL 审计（按自然日分子目录 `history/YYYYMMDD/<session_id>.jsonl`；"+
 				"每行一条 JSON，含 `recorded_at` 与 `message`）。"+
-				"非 LLM 上下文的一部分；需复盘或检索历史 utterance 时可用 `read_file` 分页读取对应文件。",
+				"非 LLM 上下文的一部分；需复盘或检索历史 utterance 时可用 `grep_file`,`read_file`等工具 分页读取对应文件。",
 		)
 	}
 	return strings.Join(lines, "\n")

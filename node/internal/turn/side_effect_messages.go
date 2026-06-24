@@ -89,7 +89,7 @@ func sideEffectFromAsync(b asyncToolMessages) SideEffectMessages {
 	}
 }
 
-func (o *Orchestrator) buildExternalSideEffectMessages(sessionID, content, userName string) SideEffectMessages {
+func (o *Orchestrator) buildExternalSideEffectMessages(_ string, content, userName string) SideEffectMessages {
 	content = strings.TrimSpace(content)
 	userName = llm.NormalizeUserMessageName(userName)
 	toolCallID := fmt.Sprintf("external-%s", shortHash(content+userName))
