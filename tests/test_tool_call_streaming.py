@@ -29,5 +29,6 @@ def test_streaming_search_replace_partial_no_raw_json() -> None:
     raw = '{"path": "data/count.py", "old_string": "SELECT *'
     args, code, lexer = streaming_tool_call_preview("search_replace", raw)
     assert args.get("path") == "data/count.py"
+    assert args.get("old_string") is None
     assert code is None
     assert lexer == "text"
