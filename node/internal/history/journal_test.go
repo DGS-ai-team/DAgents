@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
@@ -15,13 +16,13 @@ func TestRecordAppend_disabledOrEmptySessionSkipsWrite(t *testing.T) {
 	dir := t.TempDir()
 	j := NewJournal(false, dir, logx.Discard())
 	j.RecordAppend("s1", llm.Message{Role: "user", Content: "x"})
-	if files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl")); len(files) != 0 {
+	if files, _ := filepath.Glob(filepath.Join(dir, "*", "*.jsonl")); len(files) != 0 {
 		t.Fatalf("expected no files, got %v", files)
 	}
 
 	enabled := NewJournal(true, dir, logx.Discard())
 	enabled.RecordAppend("", llm.Message{Role: "user", Content: "x"})
-	if files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl")); len(files) != 0 {
+	if files, _ := filepath.Glob(filepath.Join(dir, "*", "*.jsonl")); len(files) != 0 {
 		t.Fatalf("expected no files for empty session, got %v", files)
 	}
 }
@@ -34,7 +35,7 @@ func TestAppendMessage_writesJSONLLineWithSnapshot(t *testing.T) {
 	if len(history) != 1 || history[0].Content != "hello" {
 		t.Fatalf("history = %+v", history)
 	}
-	files, err := filepath.Glob(filepath.Join(dir, "sess-a_*.jsonl"))
+	files, err := filepath.Glob(filepath.Join(dir, "*", "sess-a.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestInsertMessage_prependsAndAppendsJournal(t *testing.T) {
 	if history[0].Role != "system" || history[1].Content != "old" {
 		t.Fatalf("history = %+v", history)
 	}
-	files, err := filepath.Glob(filepath.Join(dir, "sess-b_*.jsonl"))
+	files, err := filepath.Glob(filepath.Join(dir, "*", "sess-b.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +97,17 @@ func TestInsertMessage_prependsAndAppendsJournal(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(readFile(t, files[0])), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("lines = %d, want 1", len(lines))
+	}
+}
+
+func TestJournalFilePath_usesDateSubdir(t *testing.T) {
+	path := journalFilePath("/tmp/history", "sess-a")
+	wantSuffix := filepath.Join(time.Now().Format("20060102"), "sess-a.jsonl")
+	if !strings.HasSuffix(path, wantSuffix) {
+		t.Fatalf("path = %q, want suffix %q", path, wantSuffix)
+	}
+	if strings.Contains(filepath.Dir(path), "sess-a_") {
+		t.Fatalf("path should not embed date in filename: %q", path)
 	}
 }
 

@@ -19,7 +19,7 @@ const maxSessionFilenamePartLen = 200
 
 var sessionIDSanitizePattern = regexp.MustCompile(`[^\w.\-]+`)
 
-// Journal 按 session + 自然日追加 JSONL 原始消息记录。
+// Journal 按 session + 自然日追加 JSONL 原始消息记录（`<baseDir>/YYYYMMDD/<session>.jsonl`）。
 type Journal struct {
 	enabled bool
 	baseDir string
@@ -132,7 +132,7 @@ func sanitizeSessionIDForFilename(sessionID string) string {
 func journalFilePath(baseDir, sessionID string) string {
 	day := time.Now().Format("20060102")
 	safeSID := sanitizeSessionIDForFilename(sessionID)
-	return filepath.Join(baseDir, fmt.Sprintf("%s_%s.jsonl", safeSID, day))
+	return filepath.Join(baseDir, day, safeSID+".jsonl")
 }
 
 func formatRecordedAt(t time.Time) string {

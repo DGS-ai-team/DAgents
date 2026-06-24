@@ -20,7 +20,7 @@
 
 ### 变更
 
-- **Hook 架构收敛**：废弃 command / http / YAML 外部 Hook 与 `packaging/runtime/hooks/` shell 示例；`load_skills` / `unload_skills` / clear-context 同步 skill plugin Registry。
+- **原始消息 JSONL 目录**：由 `history/<session>_YYYYMMDD.jsonl` 改为 **`history/YYYYMMDD/<session>.jsonl`**（按自然日分子目录）；启用 `raw_message_history` 时 system prompt 工作区说明与 `read_file` 描述补充该路径及 `read_file` 复盘用法。废弃 command / http / YAML 外部 Hook 与 `packaging/runtime/hooks/` shell 示例；`load_skills` / `unload_skills` / clear-context 同步 skill plugin Registry。
 - **Hook Host**：`hooks.host.history_window` 省略或 ≤0 时不截断 Context history（移除默认 50 条上限）。
 - **write-skill**：Hook 编写说明拆至 **write-hook** skill。
 - **tool.before_each deny**：Hook mutation 支持 `approval_reason`；`ActionDeny` 的 tool 结果文案走 `ToolDenyMessage`（不再固定 `policy_denied`）。

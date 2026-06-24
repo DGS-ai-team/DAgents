@@ -453,6 +453,7 @@ func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 		Catalog:   o.skillAccess.Catalog,
 		Loaded:    loaded,
 		PromptCtx: o.promptCtx,
+		IncludeHistoryJournal: o.journal != nil && o.journal.Enabled(),
 	}
 	if o.systemPromptBuilder != nil {
 		return o.systemPromptBuilder(in)

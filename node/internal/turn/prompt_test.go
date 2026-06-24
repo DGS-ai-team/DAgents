@@ -32,6 +32,28 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_includesHistoryJournalWhenEnabled(t *testing.T) {
+	prompt := BuildSystemPrompt(SystemPromptInput{
+		AgentID:               "ops-01",
+		SessionID:             "sess-a",
+		IncludeHistoryJournal: true,
+	})
+	if !containsAll(prompt, "history/", "YYYYMMDD", "read_file") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestBuildSystemPrompt_omitsHistoryJournalWhenDisabled(t *testing.T) {
+	prompt := BuildSystemPrompt(SystemPromptInput{
+		AgentID:               "ops-01",
+		SessionID:             "sess-a",
+		IncludeHistoryJournal: false,
+	})
+	if contains(prompt, "history/") {
+		t.Fatalf("prompt should omit history journal section, got %q", prompt)
+	}
+}
+
 func TestBuildSystemPrompt_includesPromptContext(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".runtime")
 	dir := filepath.Join(root, "prompt_context")

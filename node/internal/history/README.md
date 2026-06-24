@@ -2,6 +2,8 @@
 
 原始 OpenAI 消息 **JSONL 审计侧车**（对齐原 Python `raw_message_journal`）。
 
+**落盘路径**：`<runtime>/history/YYYYMMDD/<session_id>.jsonl`（按自然日分子目录；文件名经 sanitize）。
+
 | 文件 | 说明 |
 |------|------|
 | `journal.go` | `Journal`：按条追加 JSONL、`AppendMessage` / `InsertMessage`（调用方须先经 `llm.Client.NormalizeAssistant`） |
