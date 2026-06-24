@@ -22,7 +22,8 @@ const (
 	ThemeChild    = "39"
 	ThemeHelp     = "240"
 	ThemeErr      = "203"
-	ThemePolicyAllow = "78"
+	ThemePolicyAllow    = "78"
 	ThemePolicyApproval = "214"
-	ThemePolicyDeny    = "203"
+	ThemePolicyRule     = "75"
+	ThemePolicyDeny     = "203"
 )

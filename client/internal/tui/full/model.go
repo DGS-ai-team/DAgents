@@ -80,7 +80,7 @@ type model struct {
 	policyTab             policyTab
 	policyShellType       string
 	policyCursor          int
-	policyPendingDecision string
+	policyPendingMode string
 	policyShellShowAll    bool
 
 	approvalItems               []clihitl.ToolApprovalItem

@@ -1,8 +1,3 @@
-export const HELP_TEXT = `命令:
-/help /status /sessions /switch <id> /new /clear /context /skill /children
-/policy /triggers /compress /reasoning on|off /thinking on|off|effort high|max
-/cancel 或点「取消」中断在途 turn`;
-
 export async function runSlashCommand(cmd, ctx) {
   const parts = cmd.trim().split(/\s+/);
   const name = (parts[0] || "").toLowerCase();
@@ -10,7 +5,7 @@ export async function runSlashCommand(cmd, ctx) {
     case "/help":
     case "/h":
     case "/?":
-      return { system: HELP_TEXT };
+      return { panel: "help" };
     case "/status":
       return { panel: "status" };
     case "/sessions":

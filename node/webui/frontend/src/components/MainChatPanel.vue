@@ -112,6 +112,12 @@ function onKeydown(e) {
     submit();
   }
 }
+
+defineExpose({
+  setDraft(text) {
+    input.value = String(text || "");
+  },
+});
 </script>
 
 <template>

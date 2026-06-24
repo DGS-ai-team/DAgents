@@ -74,6 +74,29 @@ func TestStoreApplyShellUpdatesRoundtrip(t *testing.T) {
 	}
 }
 
+func TestStoreApplyShellPolicyChangesDelete(t *testing.T) {
+	dir := t.TempDir()
+	policyDir := filepath.Join(dir, "policy")
+	if err := EnsureRuntimePolicy(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyShellUpdates(policyDir, ShellBash, []ShellUpdate{
+		{Command: "ls", Decision: DecisionAllowAuto},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyShellPolicyChanges(policyDir, ShellBash, nil, []string{"ls"}); err != nil {
+		t.Fatal(err)
+	}
+	e, err := loadFromDir(policyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.DecideTool("bash_run", map[string]any{"command": "ls"}) != ActionRequireApproval {
+		t.Fatal("deleted ls should fall back to require approval")
+	}
+}
+
 func TestLoadSnapshotIncludesRegistryTools(t *testing.T) {
 	dir := t.TempDir()
 	policyDir := filepath.Join(dir, "policy")

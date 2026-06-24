@@ -1,7 +1,8 @@
 <script setup>
-import { ref, watch, onMounted } from "vue";
+import { ref, watch, onMounted, computed } from "vue";
 import * as api from "../api/node.js";
 import { sessionStore } from "../stores/session.js";
+import { buildContextMessageView } from "../utils/contextMessagePreview.js";
 import { formatNumber } from "../utils/markdown.js";
 
 const props = defineProps({
@@ -14,12 +15,30 @@ const loading = ref(false);
 const error = ref("");
 const ctx = ref(null);
 const showRaw = ref(false);
+const expandedRows = ref(new Set());
+
+const messageViews = computed(() => {
+  const msgs = ctx.value?.recent_messages || [];
+  return msgs.map((m) => buildContextMessageView(m.content));
+});
+
+function toggleExpand(index) {
+  const next = new Set(expandedRows.value);
+  if (next.has(index)) next.delete(index);
+  else next.add(index);
+  expandedRows.value = next;
+}
+
+function isExpanded(index) {
+  return expandedRows.value.has(index);
+}
 
 async function load() {
   const sid = props.sessionId || sessionStore.sessionId;
   if (!sid) return;
   loading.value = true;
   error.value = "";
+  expandedRows.value = new Set();
   try {
     ctx.value = await api.getSessionContext(sid);
   } catch (e) {
@@ -86,7 +105,26 @@ watch(() => props.sessionId || sessionStore.sessionId, load);
           <ul class="context-message-list">
             <li v-for="(m, i) in ctx.recent_messages || []" :key="i" class="context-message-item">
               <span class="context-message-item__role">{{ m.role }}</span>
-              <span class="context-message-item__text">{{ m.content }}</span>
+              <div class="context-message-item__body">
+                <button
+                  v-if="messageViews[i]?.expandable"
+                  type="button"
+                  class="context-message-item__text context-message-item__text--expandable"
+                  :aria-expanded="isExpanded(i)"
+                  @click="toggleExpand(i)"
+                >
+                  {{ isExpanded(i) ? messageViews[i].full : messageViews[i].preview }}
+                </button>
+                <span v-else class="context-message-item__text">{{ messageViews[i]?.full }}</span>
+                <button
+                  v-if="messageViews[i]?.expandable"
+                  type="button"
+                  class="context-message-item__toggle"
+                  @click="toggleExpand(i)"
+                >
+                  {{ isExpanded(i) ? "收起" : "展开全文" }}
+                </button>
+              </div>
             </li>
             <li v-if="!(ctx.recent_messages || []).length" class="context-panel__empty">暂无消息</li>
           </ul>

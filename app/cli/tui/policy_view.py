@@ -19,12 +19,55 @@ def policy_list_page_size(viewport_rows: int, *, extra_footer: bool = False) -> 
     return max(1, viewport_rows - chrome)
 
 
-def policy_decision_label(decision: str) -> str:
+def decision_to_mode(decision: str) -> str:
     if decision == "allow_auto":
-        return "白名单"
+        return "never"
     if decision == "deny":
-        return "黑名单"
-    return "需审批"
+        return "deny"
+    if decision == "require_approval":
+        return "always"
+    return "rule"
+
+
+def entry_mode(item: dict[str, Any]) -> str:
+    mode = str(item.get("mode") or "").strip()
+    if mode:
+        return mode
+    return decision_to_mode(str(item.get("decision") or ""))
+
+
+def policy_mode_label(mode: str) -> str:
+    if mode == "never":
+        return "自动允许"
+    if mode == "always":
+        return "需审批"
+    if mode == "rule":
+        return "特殊规则"
+    if mode == "deny":
+        return "禁止"
+    return mode or "—"
+
+
+def policy_decision_label(decision: str) -> str:
+    """兼容旧 decision 字段。"""
+    return policy_mode_label(decision_to_mode(decision))
+
+
+def normalize_shell_command(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    return text.split()[0].lower()
+
+
+def mode_to_legacy_decision(mode: str) -> str:
+    if mode == "never":
+        return "allow_auto"
+    if mode == "deny":
+        return "deny"
+    if mode == "always":
+        return "require_approval"
+    return "require_approval"
 
 
 @dataclass
@@ -34,8 +77,7 @@ class PolicyViewState:
     tab: str = "tools"
     shell_type: str = "bash"
     cursor: int = 0
-    pending_decision: str = ""
-    shell_show_all: bool = False
+    pending_mode: str = ""
     filter_text: str = ""
     scroll_offset: int = 0
     status_message: str = ""
@@ -47,8 +89,7 @@ class PolicyViewState:
         self.tab = "tools"
         self.shell_type = "bash"
         self.cursor = 0
-        self.pending_decision = ""
-        self.shell_show_all = False
+        self.pending_mode = ""
         self.filter_text = ""
         self.scroll_offset = 0
         self.status_message = ""
@@ -61,8 +102,7 @@ class PolicyViewState:
         self.shell_type = default_shell
         self.tab = "tools"
         self.cursor = 0
-        self.pending_decision = ""
-        self.shell_show_all = False
+        self.pending_mode = ""
         self.filter_text = ""
         self.scroll_offset = 0
         goos = str(platform.get("goos") or "-")
@@ -83,7 +123,7 @@ class PolicyViewState:
                 name = str(item.get("name") or "")
                 if filt and filt not in name.lower():
                     continue
-                rows.append({"tool_name": name, "command": "", "decision": str(item.get("decision") or "")})
+                rows.append({"tool_name": name, "command": "", "mode": entry_mode(item)})
             return rows
         shell = self.snapshot.get("shell")
         items: list[Any] = []
@@ -96,13 +136,9 @@ class PolicyViewState:
             if not isinstance(item, dict):
                 continue
             command = str(item.get("command") or "")
-            decision = str(item.get("decision") or "")
-            if not filt and not self.shell_show_all:
-                if decision not in {"allow_auto", "deny"}:
-                    continue
             if filt and filt not in command.lower():
                 continue
-            rows.append({"tool_name": "", "command": command, "decision": decision})
+            rows.append({"tool_name": "", "command": command, "mode": entry_mode(item)})
         return rows
 
     def clamp_cursor(self) -> None:
@@ -143,7 +179,7 @@ class PolicyViewState:
         self.shell_type = POLICY_SHELL_ORDER[idx]
         self.cursor = 0
         self.scroll_offset = 0
-        self.pending_decision = ""
+        self.pending_mode = ""
 
     def render_text(self, viewport_rows: int = 20) -> str:
         rows = self.visible_rows()
@@ -158,8 +194,7 @@ class PolicyViewState:
         header = f"Tab {tab_tools} {tab_shell}"
         if self.tab == "shell":
             header += f" · shell={self.shell_type}"
-            if not self.shell_show_all:
-                header += " · 仅白+黑"
+            header += " · 未列出默认需审批"
         if self.filter_text.strip():
             header += f" · 过滤: {self.filter_text.strip()}"
         lines = [header, ""]
@@ -169,11 +204,11 @@ class PolicyViewState:
             for i in range(start, end):
                 row = rows[i]
                 label = row["tool_name"] or row["command"]
-                decision = row["decision"]
-                if i == self.cursor and self.pending_decision:
-                    decision = self.pending_decision
+                mode = row["mode"]
+                if i == self.cursor and self.pending_mode:
+                    mode = self.pending_mode
                 prefix = "> " if i == self.cursor else "  "
-                lines.append(f"{prefix}{label:<22} {policy_decision_label(decision)}")
+                lines.append(f"{prefix}{label:<22} {policy_mode_label(mode)}")
             if len(rows) > page:
                 lines.extend(["", f"显示 {start + 1}-{end} / {len(rows)} · ↑↓ 移动"])
         if self.error_message:
@@ -182,7 +217,7 @@ class PolicyViewState:
             lines.extend(["", self.status_message])
         return "\n".join(lines)
 
-    def apply_local_update(self, *, tool_name: str, command: str, decision: str) -> None:
+    def apply_local_update(self, *, tool_name: str, command: str, mode: str) -> None:
         if not isinstance(self.snapshot, dict):
             return
         if tool_name:
@@ -192,10 +227,18 @@ class PolicyViewState:
                 self.snapshot["tools"] = tools
             for item in tools:
                 if isinstance(item, dict) and item.get("name") == tool_name:
-                    item["decision"] = decision
+                    item["mode"] = mode
+                    item["decision"] = mode_to_legacy_decision(mode)
                     item["configured"] = True
                     return
-            tools.append({"name": tool_name, "decision": decision, "configured": True})
+            tools.append(
+                {
+                    "name": tool_name,
+                    "mode": mode,
+                    "decision": mode_to_legacy_decision(mode),
+                    "configured": True,
+                }
+            )
             return
         shell = self.snapshot.setdefault("shell", {})
         if not isinstance(shell, dict):
@@ -205,9 +248,37 @@ class PolicyViewState:
         if not isinstance(items, list):
             items = []
             shell[self.shell_type] = items
+        cmd = normalize_shell_command(command)
         for item in items:
-            if isinstance(item, dict) and item.get("command") == command:
-                item["decision"] = decision
+            if isinstance(item, dict) and normalize_shell_command(str(item.get("command") or "")) == cmd:
+                item["command"] = cmd
+                item["mode"] = mode
+                item["decision"] = mode_to_legacy_decision(mode)
                 item["configured"] = True
                 return
-        items.append({"command": command, "decision": decision, "configured": True})
+        items.append(
+            {
+                "command": cmd,
+                "mode": mode,
+                "decision": mode_to_legacy_decision(mode),
+                "configured": True,
+            }
+        )
+
+    def remove_local_shell_entry(self, *, command: str) -> None:
+        if not isinstance(self.snapshot, dict):
+            return
+        cmd = normalize_shell_command(command)
+        shell = self.snapshot.setdefault("shell", {})
+        if not isinstance(shell, dict):
+            shell = {}
+            self.snapshot["shell"] = shell
+        items = shell.setdefault(self.shell_type, [])
+        if not isinstance(items, list):
+            items = []
+            shell[self.shell_type] = items
+        shell[self.shell_type] = [
+            item
+            for item in items
+            if not (isinstance(item, dict) and normalize_shell_command(str(item.get("command") or "")) == cmd)
+        ]

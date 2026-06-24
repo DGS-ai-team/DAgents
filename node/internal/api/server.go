@@ -591,7 +591,7 @@ type sessionContextResponse struct {
 }
 
 func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
-	// GET context：只读快照；recent_messages 最多 10 条、content 截断 200 字符。
+	// GET context：只读快照；recent_messages 最多 10 条、content 截断 8000 rune（前端折叠预览）。
 	sessionID := strings.TrimSpace(r.PathValue("session_id"))
 	if sessionID == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
@@ -612,11 +612,10 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 		start = len(view.Messages) - previewLimit
 	}
 	recent := make([]contextMessagePreview, 0, len(view.Messages)-start)
+const contextMessagePreviewRunes = 8000
+
 	for _, m := range view.Messages[start:] {
-		content := m.Content
-		if len(content) > 200 {
-			content = content[:200] + "..."
-		}
+		content := truncateContextPreview(m.Content, contextMessagePreviewRunes)
 		recent = append(recent, contextMessagePreview{
 			Role:                m.Role,
 			Content:             content,

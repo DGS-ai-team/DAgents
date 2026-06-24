@@ -7,14 +7,26 @@ import (
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 )
 
-func TestPolicyDecisionLabel(t *testing.T) {
-	if policyDecisionLabel("allow_auto") != "白名单" {
+func TestPolicyModeLabel(t *testing.T) {
+	if policyModeLabel("never") != "自动允许" {
 		t.Fatal()
 	}
-	if policyDecisionLabel("deny") != "黑名单" {
+	if policyModeLabel("always") != "需审批" {
 		t.Fatal()
 	}
-	if policyDecisionLabel("require_approval") != "需审批" {
+	if policyModeLabel("rule") != "特殊规则" {
+		t.Fatal()
+	}
+	if policyModeLabel("deny") != "禁止" {
+		t.Fatal()
+	}
+}
+
+func TestPolicyEntryMode(t *testing.T) {
+	if policyEntryMode("rule", "require_approval") != "rule" {
+		t.Fatal()
+	}
+	if policyEntryMode("", "allow_auto") != "never" {
 		t.Fatal()
 	}
 }
@@ -24,8 +36,8 @@ func TestPolicyVisibleRowsFilter(t *testing.T) {
 		policyMode: true,
 		policySnapshot: &nodeapi.PolicySnapshot{
 			Tools: []nodeapi.PolicyToolEntry{
-				{Name: "read_file", Decision: "allow_auto"},
-				{Name: "write_file", Decision: "require_approval"},
+				{Name: "read_file", Mode: "never"},
+				{Name: "write_file", Mode: "always"},
 			},
 		},
 	}

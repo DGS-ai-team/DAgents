@@ -1,0 +1,48 @@
+import { describe, expect, it } from "vitest";
+import { renderMarkdown } from "./markdown.js";
+
+describe("renderMarkdown", () => {
+  it("renders headings and inline formatting", () => {
+    const html = renderMarkdown("# Title\n\n**bold** and `code`");
+    expect(html).toContain("<h1>Title</h1>");
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain("<code>code</code>");
+  });
+
+  it("renders horizontal rules", () => {
+    const html = renderMarkdown("above\n\n---\n\nbelow");
+    expect(html).toContain("<hr>");
+    expect(html).toContain("above");
+    expect(html).toContain("below");
+    expect(html).toMatch(/<hr>\s*<p>below<\/p>/);
+  });
+
+  it("renders markdown tables", () => {
+    const md = [
+      "| Name | Value |",
+      "| --- | --- |",
+      "| foo | 1 |",
+      "| bar | 2 |",
+    ].join("\n");
+    const html = renderMarkdown(md);
+    expect(html).toContain("<table>");
+    expect(html).toContain("<th>Name</th>");
+    expect(html).toContain("<th>Value</th>");
+    expect(html).toContain("<td>foo</td>");
+    expect(html).toContain("<td>bar</td>");
+    expect(html).not.toContain("<br>|");
+  });
+
+  it("does not treat table separator as horizontal rule", () => {
+    const md = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+    const html = renderMarkdown(md);
+    expect(html).toContain("<table>");
+    expect(html).not.toContain("<hr>");
+  });
+
+  it("preserves fenced code blocks", () => {
+    const html = renderMarkdown("```\n| not | table |\n---\n```");
+    expect(html).toContain("<pre><code>| not | table |\n---</code></pre>");
+    expect(html).not.toContain("<table>");
+  });
+});

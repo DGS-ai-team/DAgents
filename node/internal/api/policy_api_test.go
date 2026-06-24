@@ -105,6 +105,21 @@ func TestHandlePutShellPolicy(t *testing.T) {
 	if putResp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT shell status = %d", putResp.StatusCode)
 	}
+
+	putBody2 := []byte(`{"deletes":["rm"]}`)
+	req2, err := http.NewRequest(http.MethodPut, ts.URL+"/v1/policy/shell/bash", bytes.NewReader(putBody2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req2.Header.Set("Content-Type", "application/json")
+	putResp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putResp2.Body.Close()
+	if putResp2.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE shell status = %d", putResp2.StatusCode)
+	}
 }
 
 func TestHandlePutPolicyProtectAskUserInformation(t *testing.T) {

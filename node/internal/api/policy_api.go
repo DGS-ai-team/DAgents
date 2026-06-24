@@ -73,6 +73,7 @@ func (s *Server) handlePutToolPolicy(w http.ResponseWriter, r *http.Request) {
 
 type policyShellUpdatesBody struct {
 	Updates []policy.ShellUpdate `json:"updates"`
+	Deletes []string             `json:"deletes"`
 }
 
 func (s *Server) handlePutShellPolicy(w http.ResponseWriter, r *http.Request) {
@@ -87,12 +88,12 @@ func (s *Server) handlePutShellPolicy(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if len(body.Updates) == 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_updates", "updates is required", nil)
+	if len(body.Updates) == 0 && len(body.Deletes) == 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_updates", "updates or deletes is required", nil)
 		return
 	}
 	policyDir := s.cfg.PolicyDir()
-	if err := policy.ApplyShellUpdates(policyDir, shellType, body.Updates); err != nil {
+	if err := policy.ApplyShellPolicyChanges(policyDir, shellType, body.Updates, body.Deletes); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "policy_update_failed", err.Error(), nil)
 		return
 	}
@@ -100,7 +101,7 @@ func (s *Server) handlePutShellPolicy(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "policy_reload_failed", err.Error(), nil)
 		return
 	}
-	s.logger.Info("policy shell updated", "shell", shellType, "count", len(body.Updates))
+	s.logger.Info("policy shell updated", "shell", shellType, "updates", len(body.Updates), "deletes", len(body.Deletes))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
