@@ -49,6 +49,7 @@ import {
   a2aApprovedSummary,
   extractToolApprovals,
   buildApprovalResume,
+  buildApprovalOneResume,
   extractUserInfo,
   buildUserInfoResume,
   buildUserInfoResumeFromSelection,
@@ -345,10 +346,7 @@ async function submitHitlOne(callId, approve) {
   const item = peekHitl();
   if (!item || item.kind !== "approval") return;
   hitlStore.busy = true;
-  const resume = buildApprovalResume(item.data, {
-    approved: approve ? [callId] : [],
-    rejected: approve ? [] : [callId],
-  });
+  const resume = buildApprovalOneResume(item.data, callId, approve);
   try {
     await api.submitResume(sessionStore.sessionId, resume);
     dequeueHitl();

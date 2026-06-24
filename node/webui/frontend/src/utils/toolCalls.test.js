@@ -5,9 +5,9 @@ import {
   extractToolCallsFromEvent,
   normalizeToolCallItem,
   parseToolArguments,
+  resolveToolArgumentsFromData,
   toolDisplayName,
   toolCallParts,
-  resolveToolArgumentsFromData,
 } from "./toolCalls.js";
 
 describe("parseToolArguments", () => {
@@ -65,6 +65,16 @@ describe("resolveToolArgumentsFromData", () => {
         function: { arguments: '{"path":"/tmp/a"}' },
       }),
     ).toEqual({ path: "/tmp/a" });
+  });
+
+  it("falls back to raw_arguments when arguments map is empty", () => {
+    expect(
+      resolveToolArgumentsFromData({
+        tool_name: "read_file",
+        arguments: {},
+        raw_arguments: '{"path":"/tmp/a.txt"}',
+      }),
+    ).toEqual({ path: "/tmp/a.txt" });
   });
 });
 

@@ -71,7 +71,7 @@ function formatToolArgValue(value) {
 export function resolveToolArgumentsFromData(data) {
   if (!data || typeof data !== "object") return {};
   if (data.arguments && typeof data.arguments === "object" && !Array.isArray(data.arguments)) {
-    return data.arguments;
+    if (Object.keys(data.arguments).length > 0) return data.arguments;
   }
   const fn = data.function;
   if (fn && typeof fn === "object") {
@@ -108,11 +108,22 @@ export function normalizeToolCallItem(item) {
       argsRaw = fn.arguments;
     }
   }
-  const rawArguments = typeof argsRaw === "string" ? argsRaw : argsRaw ? JSON.stringify(argsRaw) : "";
+  const rawArguments =
+    typeof argsRaw === "string" && argsRaw.trim()
+      ? argsRaw
+      : item.raw_arguments && typeof item.raw_arguments === "string" && item.raw_arguments.trim()
+        ? item.raw_arguments
+        : argsRaw
+          ? JSON.stringify(argsRaw)
+          : "";
+  let parsedArgs = parseToolArguments(argsRaw);
+  if (!Object.keys(parsedArgs).length && rawArguments.trim()) {
+    parsedArgs = parseToolArguments(rawArguments);
+  }
   return {
     id: callId,
     name: name || "unknown",
-    arguments: parseToolArguments(argsRaw),
+    arguments: parsedArgs,
     rawArguments,
   };
 }
