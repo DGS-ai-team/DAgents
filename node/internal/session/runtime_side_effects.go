@@ -13,7 +13,7 @@ func (r *runtime) sideEffectsEnabled() bool {
 	return r.sideEffects != nil && !r.isChildSession()
 }
 
-func (r *runtime) handleSideEffectProduceAsync(parent context.Context, payload *queue.AsyncToolResultPayload) {
+func (r *runtime) handleSideEffectProduceAsync(_ context.Context, payload *queue.AsyncToolResultPayload) {
 	if payload == nil || !r.sideEffectsEnabled() {
 		return
 	}
@@ -29,7 +29,7 @@ func (r *runtime) handleSideEffectProduceAsync(parent context.Context, payload *
 	r.maybeScheduleSideEffectContinueAfterProduce(msgs, pending)
 }
 
-func (r *runtime) handleSideEffectProduceExternal(parent context.Context, env queue.Envelope) {
+func (r *runtime) handleSideEffectProduceExternal(_ context.Context, env queue.Envelope) {
 	if !r.sideEffectsEnabled() {
 		return
 	}

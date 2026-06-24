@@ -38,8 +38,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 |------|------|
 | `publishAssistant` / `publishReasoning` | 流式 delta |
 | `publishError` | `error` SSE |
-| `publishUserInformationRequired` / `publishApprovalRequired` | A2A 中继等仍使用的 HITL SSE |
-| `publishHITLRequired` | 本地 turn 统一 HITL SSE |
+| `publishHITLRequired` | 本地 turn 统一 HITL SSE（A2A 中继在 session/a2a 层发 `approval_required` / `user_information_required`） |
 | `publishToolCall` / `publishToolResult` | 工具 SSE |
 | `PublishSideEffectCallback` / `PublishExternalSideEffectDeferred` | 旁路 Produce SSE |
 | `PublishSideEffectApplied` / `PublishSideEffectsCleared` | Apply / ClearContext UX SSE |
@@ -77,7 +76,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 | `SystemPromptInput` | `BuildSystemPrompt` 入参 |
 | `DefaultMaxToolLoops` | 工具循环默认上限（16） |
 | `BuildSystemPrompt` | 拼接完整 system prompt |
-| `formatWorkspaceSubdirsSection` | 工作区子目录约定（不含 FS_ROOT 路径） |
+| `formatWorkspaceSubdirsSection` | 工作区子目录约定；`includeHistoryJournal` 为 true 时含 `history/YYYYMMDD/` JSONL 说明 |
 | `RunTurnPhase` | `State` → Python 兼容 phase 名 |
 
 ## pending.go

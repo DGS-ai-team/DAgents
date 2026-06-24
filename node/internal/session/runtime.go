@@ -64,6 +64,8 @@ type runtime struct {
 	sideEffects *sideEffectStore // 旁路回灌缓冲（子 session 跳过）
 
 	childMeta *childRuntimeMeta // 子 Agent 元数据
+
+	idleAutoCompressApplied bool // 无动作自动压缩已完成；新对话时清除
 }
 
 // newRuntime 创建新的 session runtime
@@ -80,11 +82,12 @@ func newRuntime(
 	initialPending *turn.PendingHITL,
 	initialLoopCount int,
 	initialHookStore map[string]json.RawMessage,
+	idleAutoCompressApplied bool,
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
 	return newRuntimeWithPublisher(id, agentID, hub, hub, llmClient, registry, policyEngine, st, logger,
-		initial, loaded, initialPending, initialLoopCount, initialHookStore, turnOpts, triggerDelivery)
+		initial, loaded, initialPending, initialLoopCount, initialHookStore, idleAutoCompressApplied, turnOpts, triggerDelivery)
 }
 
 // newRuntimeWithPublisher 创建新的 session runtime，并设置 publisher
@@ -102,6 +105,7 @@ func newRuntimeWithPublisher(
 	initialPending *turn.PendingHITL,
 	initialLoopCount int,
 	initialHookStore map[string]json.RawMessage,
+	idleAutoCompressApplied bool,
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
@@ -118,6 +122,7 @@ func newRuntimeWithPublisher(
 		compression: func() *compression.Coordinator {
 			coord := compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking)
 			coord.SetLogger(logger)
+			coord.SetRawMessageHistoryEnabled(turnOpts.RawMessageHistoryEnabled)
 			return coord
 		}(),
 		state:           turn.StateIdle,
@@ -128,6 +133,7 @@ func newRuntimeWithPublisher(
 		fsRoot:          turnOpts.FSRoot,
 		triggerDelivery: triggerDelivery,
 		sideEffects:     newSideEffectStore(),
+		idleAutoCompressApplied: idleAutoCompressApplied,
 	}
 	// 创建编排器
 	rt.orch = turn.NewOrchestrator(
@@ -211,17 +217,21 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		// Trigger delivery 在 Apply 成功时清除，不在 dequeue 时清除。
 		switch env.RequestType {
 		case queue.RequestTypeResume:
+			r.clearIdleAutoCompressMark()
 			r.logResumeDequeued(env.ResumeValue)
 			r.handleResume(ctx, env.ResumeValue)
 		case queue.RequestTypeAsyncToolResult:
+			r.clearIdleAutoCompressMark()
 			r.handleSideEffectProduceAsync(ctx, env.AsyncToolResult)
 		case queue.RequestTypeTriggerMessage, queue.RequestTypeA2AInboxMessage:
+			r.clearIdleAutoCompressMark()
 			r.handleSideEffectProduceExternal(ctx, env)
 		case queue.RequestTypeSideEffectContinue:
 			r.handleSideEffectContinue(ctx, env.SideEffectContinueSource)
 		case queue.RequestTypeToolResult:
 			r.handleToolResult(ctx)
 		case queue.RequestTypeMessage, "":
+			r.clearIdleAutoCompressMark()
 			r.handleHumanMessage(ctx, env)
 		default:
 		}
@@ -367,6 +377,7 @@ func (r *runtime) persist(ctx context.Context) {
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
 	pending := r.pending
 	loopCount := r.toolLoopCount
+	idleMarked := r.idleAutoCompressApplied
 	r.mu.Unlock()
 	_ = r.store.Save(ctx, store.Record{
 		SessionID:    r.session.ID,
@@ -374,9 +385,10 @@ func (r *runtime) persist(ctx context.Context) {
 		Messages:     msgs,
 		LoadedSkills: loaded,
 		RuntimeState: store.RuntimeState{
-			Pending:       pending,
-			ToolLoopCount: loopCount,
-			HookStore:     hooks.CloneSessionStore(r.orch.HookStoreSnapshot()),
+			Pending:                 pending,
+			ToolLoopCount:           loopCount,
+			HookStore:               hooks.CloneSessionStore(r.orch.HookStoreSnapshot()),
+			IdleAutoCompressApplied: idleMarked,
 		},
 	})
 }

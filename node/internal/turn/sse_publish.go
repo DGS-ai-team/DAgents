@@ -27,27 +27,6 @@ func (o *Orchestrator) publishError(sessionID, message string) {
 	o.hub.Publish(sessionID, o.agentID, "error", map[string]any{"message": message})
 }
 
-// publishUserInformationRequired 推送 user information required SSE。
-func (o *Orchestrator) publishUserInformationRequired(sessionID, question string, uiArgs map[string]any) {
-	o.hub.Publish(sessionID, o.agentID, "user_information_required", map[string]any{
-		"content":               question,
-		"user_information_args": uiArgs,
-		"display_type":          "normal_text",
-	})
-}
-
-// publishApprovalRequired 推送 approval required SSE（A2A 中继等仍使用）。
-func (o *Orchestrator) publishApprovalRequired(sessionID, approvalID, executionID, message string, toolItems []map[string]any) {
-	o.hub.Publish(sessionID, o.agentID, "approval_required", map[string]any{
-		"approval_type": "execute_tool",
-		"approval_id":   approvalID,
-		"execution_id":  executionID,
-		"message":       message,
-		"approval_args": map[string]any{"tool_calls": toolItems},
-		"display_type":  "normal_text",
-	})
-}
-
 // publishHITLRequired 推送统一 HITL SSE；Client 按 item.hitl_type 展示与 resume。
 func (o *Orchestrator) publishHITLRequired(sessionID, hitlID, message string, items []map[string]any) {
 	sseItems := make([]any, len(items))

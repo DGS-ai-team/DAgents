@@ -113,8 +113,11 @@ type SkillsConfig struct {
 
 // CompressionConfig 控制上下文压缩阈值。
 type CompressionConfig struct {
-	SilentTriggerTokens   int `yaml:"silent_trigger_tokens"`
-	BlockingTriggerTokens int `yaml:"blocking_trigger_tokens"`
+	SilentTriggerTokens          int `yaml:"silent_trigger_tokens"`
+	BlockingTriggerTokens        int `yaml:"blocking_trigger_tokens"`
+	IdleAutoCompressSeconds      int `yaml:"idle_auto_compress_seconds"`
+	IdleAutoCompressPollSeconds  int `yaml:"idle_auto_compress_poll_seconds"`
+	IdleAutoCompressMinTokens    int `yaml:"idle_auto_compress_min_tokens"`
 }
 
 // HooksConfig 控制 Node turn Hook 行为。
@@ -387,6 +390,22 @@ func (c *Config) ApplyDefaults() {
 	if c.Manage.A2A.InboxWaitSeconds <= 0 {
 		c.Manage.A2A.InboxWaitSeconds = 25
 	}
+	if c.Compression.IdleAutoCompressPollSeconds <= 0 {
+		c.Compression.IdleAutoCompressPollSeconds = 60
+	}
+}
+
+// IdleAutoCompressEnabled 是否在 session 无动作超过 idle_auto_compress_seconds 后自动压缩。
+func (c *Config) IdleAutoCompressEnabled() bool {
+	return c != nil && c.Compression.IdleAutoCompressSeconds > 0
+}
+
+// IdleAutoCompressPollInterval 返回 idle 自动压缩扫描间隔（默认 60s）。
+func (c *Config) IdleAutoCompressPollInterval() time.Duration {
+	if c == nil || c.Compression.IdleAutoCompressPollSeconds <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(c.Compression.IdleAutoCompressPollSeconds) * time.Second
 }
 
 // RuntimeDir 返回运行时根目录（与 `fs_root` 一致；子目录路径均相对此根硬编码）。

@@ -85,6 +85,7 @@ flowchart TB
 | `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与 prompt 元数据 |
 | `RuntimeDir` | `promptcontext.Reader` 根目录 |
 | `CompressionSilent` / `CompressionBlocking` | 压缩阈值 |
+| `IdleAutoCompressSeconds` / `IdleAutoCompressPollSeconds` / `IdleAutoCompressMinTokens` | 无动作自动压缩（见 `idle_auto_compress.go`） |
 | `RawMessageHistoryEnabled` / `RawMessageHistoryDir` | 原始 message journal |
 
 ---
@@ -94,6 +95,7 @@ flowchart TB
 | 文件 | 说明 |
 |------|------|
 | `manager.go` | `Manager`、`TurnOptions`、会话 CRUD、入队、skills、上下文 API |
+| `idle_auto_compress.go` | 无动作自动压缩后台扫描与 `idle_auto_compress_applied` 标记 |
 | `runtime.go` | `runtime` 结构体、构造、`consumeLoop`、human/tool/resume 处理、持久化 |
 | `runtime_turn.go` | `runTurnStep` 单步 turn 脚手架 |
 | `runtime_child.go` | `newChildRuntime`、子 session 元数据、`tryCompleteChildIfIdle` |

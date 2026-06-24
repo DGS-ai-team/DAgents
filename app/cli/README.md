@@ -6,6 +6,7 @@
 | [`config_file.py`](config_file.py) | 与 Go 共用的 YAML 配置加载 |
 | [`chat.py`](chat.py) | `run_chat`：构造 `SessionController` 并启动 Textual App |
 | [`log.py`](log.py) | CLI 落盘日志（`logs/session_controller.log`） |
+| [`last_session.py`](last_session.py) | 退出时记录、下次启动默认恢复的 `session_id`（`<runtime>/client/last_session.json`） |
 | [`session_controller.py`](session_controller.py) | SSE pump、后台 render 循环、用户 turn 栅栏 |
 | [`api_client.py`](api_client.py) | Agent Node HTTP/SSE 客户端 |
 | [`approval.py`](approval.py) | 工具审批载荷解析与 resume 决策构造 |
@@ -34,7 +35,7 @@ dagents delete session SESSION_ID [--config PATH] [--api URL]
 配置查找顺序：`--config` → `DAGENTS_CONFIG` → `packaging/agent-client/config.yaml`。  
 无 YAML 时 `--api` 回退 `DAGENTS_NODE_ENDPOINT`（默认 `http://127.0.0.1:18765`）。
 
-恢复会话：在 `show session` 输出中找到目标 `session_id`，然后 `dagents chat --session SESSION_ID`。
+**Session 恢复**：退出 TUI 时自动记录当前 `session_id` 到 `<runtime>/client/last_session.json`（按 `api_base` 区分）。下次 `dagents chat` **未指定 `--session`** 时默认进入该 session。显式 `--session ID` 始终优先；`/switch` 切换后也会更新记录。仍可用 `dagents show session` 查看列表。
 
 双 Client 选型见 [local-assistant.md](../../docs/architecture/local-assistant.md)。
 

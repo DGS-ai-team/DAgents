@@ -132,6 +132,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	o.runMessageEnqueuedPhase(ctx, sessionID, history, userText, map[string]any{"source": userName})
 	o.resetTurnUsage(sessionID)
 	o.resetContextMetrics(sessionID)
+	o.resetHookHostLLMQuota()
 	o.logger.Info("turn human message start",
 		"session_id", sessionID,
 		"content_len", len(userText),
@@ -281,15 +282,18 @@ func (o *Orchestrator) runOneStep(
 	toolLoopCount++
 	o.recordToolLoop(sessionID, toolLoopCount)
 	if toolLoopCount > o.maxToolLoops {
+		limitErr := fmt.Errorf("tool loop limit exceeded")
+		o.runTurnErrorPhase(ctx, sessionID, history, limitErr)
 		o.publishError(sessionID, fmt.Sprintf("工具调用轮次超过上限：%d", o.maxToolLoops))
 		o.publishDone(sessionID, "error")
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("tool loop limit exceeded")}
+		return StepOutcome{LoopCount: toolLoopCount, Err: limitErr}
 	}
 
 	toolDefs := o.ToolDefinitions()
 	systemPrompt := o.buildSystemPrompt(sessionID)
-	msgs, systemPrompt, hookErr := o.runLLMBeforeCallPhase(ctx, sessionID, history, systemPrompt, toolDefs)
+	msgs, systemPrompt, hookErr := o.runLLMBeforeCallPhase(ctx, sessionID, history, systemPrompt)
 	if hookErr != nil {
+		o.runTurnErrorPhase(ctx, sessionID, history, hookErr)
 		o.publishError(sessionID, hookErr.Error())
 		o.publishDone(sessionID, "error")
 		return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
@@ -329,9 +333,11 @@ func (o *Orchestrator) runOneStep(
 		if errors.Is(err, context.Canceled) {
 			finishReason = "cancelled"
 			streamErr = err
+			o.runTurnCancelPhase(ctx, sessionID, history, "llm_stream_cancelled")
 			o.logger.Info("turn llm cancelled", "session_id", sessionID, "loop", toolLoopCount)
 			o.persistCancelledStream(sessionID, history, result)
 		} else {
+			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
 			finishReason = "error"
 			streamErr = err
@@ -346,6 +352,7 @@ func (o *Orchestrator) runOneStep(
 
 	result, hookErr = o.runLLMAfterCallPhase(ctx, sessionID, result)
 	if hookErr != nil {
+		o.runTurnErrorPhase(ctx, sessionID, history, hookErr)
 		msg := hookErr.Error()
 		if isLLMAfterCallAbort(hookErr) {
 			o.logger.Warn("llm.after_call aborted turn", "session_id", sessionID, "error", hookErr)
@@ -371,9 +378,11 @@ func (o *Orchestrator) runOneStep(
 	if procErr != nil {
 		if errors.Is(procErr, context.Canceled) {
 			finishReason = "cancelled"
+			o.runTurnCancelPhase(ctx, sessionID, history, "tool_processing_cancelled")
 			o.appendMissingToolResponses(sessionID, history, result.ToolCalls, ToolStreamInterruptedMessage, map[string]any{"interrupted_by_stream_cancel": true})
 			o.publishUsageIfAccumulated(sessionID, toolLoopCount)
 		} else {
+			o.runTurnErrorPhase(ctx, sessionID, history, procErr)
 			finishReason = "error"
 			o.publishError(sessionID, procErr.Error())
 		}
@@ -453,6 +462,7 @@ func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 		Catalog:   o.skillAccess.Catalog,
 		Loaded:    loaded,
 		PromptCtx: o.promptCtx,
+		IncludeHistoryJournal: o.journal != nil && o.journal.Enabled(),
 	}
 	if o.systemPromptBuilder != nil {
 		return o.systemPromptBuilder(in)

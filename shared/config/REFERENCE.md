@@ -11,7 +11,7 @@
 | `LocalConfig` | `struct` | Client 用 endpoint 与可选 agent_id 校验 |
 | `LLMConfig` | `struct` | LLM 配置；`mock=true` 时用 MockClient；`max_tool_loops` 默认 16 |
 | `SkillsConfig` | `struct` | skills 开关、`max_in_prompt` |
-| `CompressionConfig` | `struct` | `silent_trigger_tokens`、`blocking_trigger_tokens`（`<=0` 关闭对应档位） |
+| `CompressionConfig` | `struct` | `silent_trigger_tokens`、`blocking_trigger_tokens`（`<=0` 关闭对应档位）；`idle_auto_compress_seconds` / `idle_auto_compress_poll_seconds` / `idle_auto_compress_min_tokens`（无动作自动压缩） |
 | `TriggersConfig` | `struct` | `enabled`、`poll_seconds` |
 | `RawMessageHistoryConfig` | `struct` | 原始消息 JSONL 开关（`enabled` 指针，缺省 true） |
 | `EnvRawMessageHistoryEnabled` | `const string` | 环境变量 `AGENT_RAW_MESSAGE_HISTORY_ENABLED` |

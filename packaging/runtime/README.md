@@ -12,7 +12,7 @@
 | **`data/`** | **临时工作区（workspace）**占位：脚本输出、中间产物等；**不含** `sessions.db`。 |
 | **`skills/`** | 技能资源目录；默认 **`<运行根>/.runtime/skills`**；内置 **`write-skill`**、**`write-hook`**。 |
 | **`plugins/`** | 全局 Hook plugin 占位；`.so` 由 `config.yaml` → `hooks.plugins` 加载；见 **`plugins/README.md`**。 |
-| **`history/`** | 原始消息 JSONL 等；默认 **`.runtime/history`**。 |
+| **`history/`** | 原始消息 JSONL 等；默认 **`.runtime/history/YYYYMMDD/<session>.jsonl`**。 |
 | **`memory/`** | 持久化：**`sessions.db`** 会话库与可选 **`long_term.md`**；默认 **`.runtime/memory`**。 |
 | **`agent/`** | 如 **`agent_id`** 持久化文件等；默认 **`.runtime/agent`**。 |
 

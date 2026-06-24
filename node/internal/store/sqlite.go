@@ -220,6 +220,20 @@ UPDATE sessions SET messages_json = '[]', runtime_state_json = '{}', loaded_skil
 	return nil
 }
 
+// BackdateUpdatedAt 显式设置 session updated_at（测试与 idle 自动压缩扫描）。
+func (s *SQLiteStore) BackdateUpdatedAt(ctx context.Context, sessionID string, at time.Time) error {
+	now := at.UTC().Format(time.RFC3339Nano)
+	res, err := s.db.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE session_id = ?`, now, strings.TrimSpace(sessionID))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func firstUserMessage(messages []llm.Message) string {
 	for _, m := range messages {
 		if m.Role == "user" && strings.TrimSpace(m.Content) != "" {

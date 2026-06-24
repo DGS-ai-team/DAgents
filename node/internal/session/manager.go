@@ -35,9 +35,12 @@ type TurnOptions struct {
 	SkillsEnabled            bool
 	SkillsMaxInPrompt        int
 	RuntimeDir               string
-	CompressionSilent        int
-	CompressionBlocking      int
-	RawMessageHistoryEnabled bool
+	CompressionSilent             int
+	CompressionBlocking           int
+	IdleAutoCompressSeconds       int
+	IdleAutoCompressPollSeconds   int
+	IdleAutoCompressMinTokens     int
+	RawMessageHistoryEnabled      bool
 	RawMessageHistoryDir     string
 	DuplicateToolCall        hooks.DuplicateConfig
 	ToolResult               hooks.ToolResultConfig
@@ -128,13 +131,13 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			m.logger.Info("session reuse", "session_id", id)
 			return &existing.session, false, nil
 		}
-		msgs, loaded, pending, loopCount, hookStore, err := m.loadSessionData(id)
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, err := m.loadSessionData(id)
 		if err != nil {
 			m.logger.Error("session load failed", "session_id", id, "error", err)
 			return nil, false, err
 		}
 		created := len(msgs) == 0 && !m.sessionExistsInStore(id)
-		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, hookStore, m.turn, m.triggerDelivery)
+		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, msgs, loaded, pending, loopCount, hookStore, idleMarked, m.turn, m.triggerDelivery)
 		m.sessions[id] = rt
 		m.attachUserChildTools(rt)
 		rt.start(m.ctx)
@@ -156,7 +159,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, 0, nil, m.turn, m.triggerDelivery)
+	rt := newRuntime(newID, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger, nil, nil, nil, 0, nil, false, m.turn, m.triggerDelivery)
 	m.sessions[newID] = rt
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
@@ -166,22 +169,22 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	return &rt.session, true, nil
 }
 
-func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, error) {
+func (m *Manager) loadSessionData(sessionID string) ([]llm.Message, []skills.LoadedSkill, *turn.PendingHITL, int, map[string]json.RawMessage, bool, error) {
 	if m.store == nil {
-		return nil, nil, nil, 0, nil, nil
+		return nil, nil, nil, 0, nil, false, nil
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
-		return nil, nil, nil, 0, nil, err
+		return nil, nil, nil, 0, nil, false, err
 	}
 	if rec == nil {
-		return nil, nil, nil, 0, nil, nil
+		return nil, nil, nil, 0, nil, false, nil
 	}
 	var pending *turn.PendingHITL
 	if rec.RuntimeState.Pending != nil {
 		pending = rec.RuntimeState.Pending
 	}
-	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, nil
+	return rec.Messages, rec.LoadedSkills, pending, rec.RuntimeState.ToolLoopCount, rec.RuntimeState.HookStore, rec.RuntimeState.IdleAutoCompressApplied, nil
 }
 
 func (m *Manager) sessionExistsInStore(sessionID string) bool {

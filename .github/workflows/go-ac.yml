@@ -60,6 +60,9 @@ jobs:
           go mod download -C node
           go mod download -C client
 
+      - name: Build protect-loaded-skill plugin
+        run: go build -buildmode=plugin -o /tmp/protect-loaded-skill.so ./node/plugins/protect-loaded-skill
+
       - name: Test
         run: |
           go test ./shared/config/...

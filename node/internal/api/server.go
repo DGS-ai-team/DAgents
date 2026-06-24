@@ -163,9 +163,12 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		SkillsEnabled:            cfg.Skills.Enabled,
 		SkillsMaxInPrompt:        cfg.Skills.MaxInPrompt,
 		RuntimeDir:               cfg.RuntimeDir(),
-		CompressionSilent:        cfg.Compression.SilentTriggerTokens,
-		CompressionBlocking:      cfg.Compression.BlockingTriggerTokens,
-		RawMessageHistoryEnabled: cfg.RawMessageHistoryEnabled(),
+		CompressionSilent:           cfg.Compression.SilentTriggerTokens,
+		CompressionBlocking:         cfg.Compression.BlockingTriggerTokens,
+		IdleAutoCompressSeconds:     cfg.Compression.IdleAutoCompressSeconds,
+		IdleAutoCompressPollSeconds: cfg.Compression.IdleAutoCompressPollSeconds,
+		IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
+		RawMessageHistoryEnabled:    cfg.RawMessageHistoryEnabled(),
 		RawMessageHistoryDir:     cfg.RawMessageHistoryDir(),
 		DuplicateToolCall: hooks.DuplicateConfig{
 			Enabled:       cfg.DuplicateToolCallHookEnabled(),
@@ -195,6 +198,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		DefaultWaitTimeoutSeconds: cfg.ChildAgents.DefaultWaitTimeoutSeconds,
 	}, hub, cfg.AgentID, logger)
 	mgr.SetChildAgentManager(childMgr)
+	if cfg.IdleAutoCompressEnabled() {
+		mgr.StartIdleAutoCompressScanner()
+	}
 	var triggerStore *triggers.Store
 	var triggerSched *triggers.Scheduler
 	if opened, err := triggers.OpenStore(cfg.TriggersStorePath(), 200); err != nil {

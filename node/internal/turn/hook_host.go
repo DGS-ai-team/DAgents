@@ -134,6 +134,14 @@ func (o *Orchestrator) setHookHostRuntime(toolLoopCount int, pending bool) {
 	o.hookHostState.pendingHITL = pending
 }
 
+// resetHookHostLLMQuota 在新 user turn 开始时清零 turn 内 Hook LLM 配额计数。
+func (o *Orchestrator) resetHookHostLLMQuota() {
+	o.ensureHookHostState()
+	o.hookHostState.mu.Lock()
+	o.hookHostState.llmCalls = 0
+	o.hookHostState.mu.Unlock()
+}
+
 func (h *sessionHookHost) Snapshot() hooks.HostSnapshot {
 	if h == nil || h.state == nil {
 		return hooks.HostSnapshot{}

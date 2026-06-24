@@ -78,6 +78,7 @@ func TestShouldCompressBlockingPriority(t *testing.T) {
 func TestBlockingCompressionApplies(t *testing.T) {
 	client := &countingLLM{}
 	coord := NewCoordinator(client, 0, 50)
+	coord.SetRawMessageHistoryEnabled(true)
 	hub := stream.NewHub(16, nil)
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
@@ -90,6 +91,9 @@ func TestBlockingCompressionApplies(t *testing.T) {
 	}
 	if msgs[0].Role != "user" || msgs[0].Name != llm.UserNameCompression || !strings.Contains(msgs[0].Content, "阶段性总结论") {
 		t.Fatalf("replacement = %+v", msgs[0])
+	}
+	if !strings.Contains(msgs[0].Content, "历史的原始消息请查阅 history/") {
+		t.Fatalf("expected journal footer, got %q", msgs[0].Content)
 	}
 	if msgs[1].Role != "assistant" || msgs[1].Content != "好的" {
 		t.Fatalf("tail assistant = %+v", msgs[1])
@@ -179,16 +183,33 @@ func TestStalePendingDiscarded(t *testing.T) {
 	msgs := sampleMessages()
 	prefix := testSidecarPrefix()
 	coord.MaybeHandle(context.Background(), "sess-3", "agent-1", nil, &msgs, prefix)
+	waitReadyCompression(t, coord, "sess-3")
+
+	before := len(msgs)
+	msgs[1].Content = "modified within compressed range"
+	out := coord.applyReadyCompression("sess-3", "agent-1", nil, &msgs)
+	if out.status != "stale" {
+		t.Fatalf("status = %q, want stale", out.status)
+	}
+	if len(msgs) != before {
+		t.Fatalf("stale compression should not apply after slice content changed, len=%d want %d", len(msgs), before)
+	}
+}
+
+func waitReadyCompression(t *testing.T, coord *Coordinator, sessionID string) {
+	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && client.streamCalls.Load() < 1 {
+	for time.Now().Before(deadline) {
+		coord.reapFinishedTask(sessionID)
+		coord.mu.Lock()
+		_, ok := coord.readyCompressions[sessionID]
+		coord.mu.Unlock()
+		if ok {
+			return
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
-
-	msgs[1].Content = "modified within compressed range"
-	coord.MaybeHandle(context.Background(), "sess-3", "agent-1", nil, &msgs, prefix)
-	if len(msgs) == 2 {
-		t.Fatal("stale compression should not apply after slice content changed")
-	}
+	t.Fatal("timeout waiting ready compression")
 }
 
 func TestBlockingCompressionMergeNextUser(t *testing.T) {

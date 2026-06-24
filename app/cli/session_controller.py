@@ -21,6 +21,7 @@ from app.cli.child_agent import (
     should_skip_child_runtime_display,
 )
 from app.cli.hitl_batch import expand_hitl_required
+from app.cli.last_session import save_last_session
 from app.cli.user_information import (
     UserInformationAnswer,
     UserInformationCancelled,
@@ -212,10 +213,12 @@ class SessionController:
         # 更新状态栏并启动上下文Token刷新
         self._emit_status()
         self._schedule_context_token_refresh()
+        self.remember_last_session()
 
     async def stop(self) -> None:
         """停止后台任务并关闭 API 客户端。"""
         self._logger.info("session stopping session_id=%s", self.session_id)
+        self.remember_last_session()
         for task in (self._render_task, self._stream_task):
             if task is not None:
                 task.cancel()
@@ -319,7 +322,15 @@ class SessionController:
             raise RuntimeError("SSE subscription timed out after session switch") from exc
         self._emit_status()
         self._schedule_context_token_refresh()
+        self.remember_last_session()
         return new_id
+
+    def remember_last_session(self) -> None:
+        """将当前 session_id 写入 Client 本地状态（按 api_base 区分）。"""
+        sid = str(self.session_id or "").strip()
+        if not sid:
+            return
+        save_last_session(self.api_base, sid, config_path=self.config_path)
 
     def set_show_reasoning(self, enabled: bool) -> None:
         """运行时开关 reasoning 流展示（默认由 --show-reasoning 初始化）。"""

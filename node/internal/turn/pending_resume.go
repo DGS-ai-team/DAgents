@@ -11,7 +11,7 @@ import (
 )
 
 func (o *Orchestrator) continueAfterUserInformationResume(
-	ctx context.Context,
+	_ context.Context,
 	sessionID string,
 	history *[]llm.Message,
 	resumeValue map[string]any,

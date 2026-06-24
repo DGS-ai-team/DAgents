@@ -81,6 +81,10 @@ skills:
 compression:
   silent_trigger_tokens: 80000
   blocking_trigger_tokens: 100000
+  # 无动作超过该秒数后自动压缩上下文；0 或未设 = 关闭
+  # idle_auto_compress_seconds: 3600
+  # idle_auto_compress_poll_seconds: 60
+  # idle_auto_compress_min_tokens: 80000
 
 triggers:
   enabled: true

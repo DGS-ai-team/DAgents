@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestSideEffectContinueAppliesExternalOnEmptyHistory(t *testing.T) {
 	}
 	rt := mgr.getRuntime(sess.ID)
 
-	if _, err := mgr.EnqueueA2AInboxMessage(nil, sess.ID, "inbox hello"); err != nil {
+	if _, err := mgr.EnqueueA2AInboxMessage(context.Background(), sess.ID, "inbox hello"); err != nil {
 		t.Fatal(err)
 	}
 	waitQueueDrain(t, rt, 5*time.Second)
