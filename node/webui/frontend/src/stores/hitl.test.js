@@ -3,6 +3,7 @@ import { approvalItemDisplayName } from "../utils/toolCalls.js";
 import {
   buildApprovalOneResume,
   buildApprovalSelectionResume,
+  expandHitlRequired,
   extractToolApprovals,
 } from "./hitl.js";
 
@@ -62,6 +63,30 @@ describe("buildApprovalSelectionResume", () => {
     expect(resume.approved).toEqual(["call-a"]);
     expect(resume.rejected).toEqual(["call-b"]);
     expect(resume.approved.length + resume.rejected.length).toBe(2);
+  });
+});
+
+describe("expandHitlRequired", () => {
+  it("preserves child_session_id for temporary agent tool approval", () => {
+    const { userInfos, approval } = expandHitlRequired({
+      hitl_id: "hitl-child-1",
+      child_session_id: "child-abc",
+      hitl_scope: "temporary_agent",
+      child_purpose: "research",
+      items: [
+        {
+          hitl_type: "execute_tool",
+          id: "call-1",
+          name: "bash_run",
+          raw_arguments: '{"command":"ls"}',
+        },
+      ],
+    });
+    expect(userInfos).toHaveLength(0);
+    expect(approval?.child_session_id).toBe("child-abc");
+    expect(approval?.hitl_scope).toBe("temporary_agent");
+    expect(approval?.child_purpose).toBe("research");
+    expect(buildApprovalOneResume(approval, "call-1", true).child_session_id).toBe("child-abc");
   });
 });
 

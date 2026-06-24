@@ -189,12 +189,25 @@ function userInformationDataFromHITLItem(item) {
   return data;
 }
 
+function hitlRoutingFieldsFromBatch(batch) {
+  if (!batch || typeof batch !== "object") return {};
+  const out = {};
+  const childId = String(batch.child_session_id || "").trim();
+  if (childId) out.child_session_id = childId;
+  const scope = String(batch.hitl_scope || "").trim();
+  if (scope) out.hitl_scope = scope;
+  const purpose = String(batch.child_purpose || "").trim();
+  if (purpose) out.child_purpose = purpose;
+  return out;
+}
+
 function approvalDataFromHITLBatch(batch, executeItems) {
   if (!executeItems.length) return null;
   const data = {
     approval_type: "execute_tool",
     approval_args: { tool_calls: executeItems },
     display_type: "normal_text",
+    ...hitlRoutingFieldsFromBatch(batch),
   };
   const hitlId = String(batch?.hitl_id || "").trim();
   if (hitlId) data.approval_id = hitlId;
@@ -205,12 +218,13 @@ function approvalDataFromHITLBatch(batch, executeItems) {
 
 /** 将 hitl_required 展开为 Client 可入队的 user_information / approval 队列项。 */
 export function expandHitlRequired(data) {
+  const routing = hitlRoutingFieldsFromBatch(data);
   const userInfos = [];
   const executeItems = [];
   for (const item of hitlItemsFromData(data?.items)) {
     const hitlType = String(item.hitl_type || "").trim();
     if (hitlType === HITL_TYPE_USER_INFORMATION) {
-      userInfos.push(userInformationDataFromHITLItem(item));
+      userInfos.push({ ...userInformationDataFromHITLItem(item), ...routing });
     } else if (hitlType === HITL_TYPE_EXECUTE_TOOL) {
       executeItems.push(item);
     }
