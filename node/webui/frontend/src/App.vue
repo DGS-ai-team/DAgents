@@ -37,6 +37,7 @@ import {
   applyToolResult,
   clearTranscript,
   applyRoundUsage,
+  resumeReasoningReveal,
 } from "./stores/transcript.js";
 import {
   hitlStore,
@@ -99,9 +100,10 @@ const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_sup
 function syncReasoningDisplay(llm) {
   if (!llm?.thinking_supported) return;
   const t = String(llm.thinking || "").trim().toLowerCase();
-  if (t && !["disabled", "off", "false", "0"].includes(t)) {
-    transcriptStore.showReasoning = true;
-  }
+  const enable = t && !["disabled", "off", "false", "0"].includes(t);
+  const wasHidden = !transcriptStore.showReasoning;
+  if (enable) transcriptStore.showReasoning = true;
+  if (enable && wasHidden) resumeReasoningReveal();
 }
 
 function restartStream() {

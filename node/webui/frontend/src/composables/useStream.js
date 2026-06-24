@@ -3,7 +3,7 @@ import { computed } from "vue";
 export function buildStream(entries, hitlQueue = []) {
   const items = [];
   for (const entry of entries) {
-    if (entry.kind === "reasoning" && !entry.text?.trim()) continue;
+    if (entry.kind === "reasoning" && !entry.text?.trim() && !entry.streaming) continue;
     if ((entry.kind === "assistant" || entry.kind === "user") && !entry.text?.trim() && !entry.streaming) continue;
     items.push({ key: `e-${entry.id}`, kind: entry.kind, entry });
   }

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { statusStore, hasStatus } from "../stores/statusLines.js";
+import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.js";
 
 const props = defineProps({
   thinkingSupported: { type: Boolean, default: false },
@@ -18,11 +19,11 @@ const effort = computed(() => String(props.llmSettings?.reasoning_effort || "hig
 
 const prefillingActive = computed(() => {
   void statusStore.tick;
-  return hasStatus("prefilling");
+  return hasStatus("prefilling") && !hasStreamingTextContent();
 });
 const thinkingActive = computed(() => {
   void statusStore.tick;
-  return hasStatus("thinking");
+  return hasStatus("thinking") && !hasStreamingKind("reasoning");
 });
 </script>
 
@@ -33,7 +34,7 @@ const thinkingActive = computed(() => {
     <button
       type="button"
       class="composer-toolbar__btn"
-      title="查看上下文 (/context)"
+      title="View context (/context)"
       :disabled="disabled"
       @click="emit('open-context')"
     >
@@ -45,7 +46,7 @@ const thinkingActive = computed(() => {
       type="button"
       class="composer-toolbar__btn"
       :class="{ 'composer-toolbar__btn--active': thinkingEnabled }"
-      :title="thinkingEnabled ? '思考已开启，点击关闭' : '思考已关闭，点击开启'"
+      :title="thinkingEnabled ? 'Thinking enabled — click to disable' : 'Thinking disabled — click to enable'"
       :disabled="disabled"
       @click="emit('toggle-thinking')"
     >
@@ -56,7 +57,7 @@ const thinkingActive = computed(() => {
       v-if="thinkingSupported && thinkingEnabled"
       type="button"
       class="composer-toolbar__btn composer-toolbar__btn--secondary"
-      :title="`思考强度：${effort}，点击切换 high/max`"
+      :title="`Reasoning effort: ${effort} — click to cycle high/max`"
       :disabled="disabled"
       @click="emit('cycle-effort')"
     >

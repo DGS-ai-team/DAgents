@@ -8,6 +8,7 @@ import UserInfoBubble from "./UserInfoBubble.vue";
 import ToolExecBubble from "./ToolExecBubble.vue";
 import { buildStream } from "../composables/useStream.js";
 import { extractToolApprovals } from "../stores/hitl.js";
+import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.js";
 import { chromeStore, inputStripRight } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { statusStore, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
@@ -47,7 +48,12 @@ const stream = computed(() => buildStream(props.entries, props.hitlQueue));
 
 const activeStatusPhases = computed(() => {
   void statusStore.tick;
-  return statusPhaseOrder.filter((phase) => hasStatus(phase));
+  return statusPhaseOrder.filter((phase) => {
+    if (!hasStatus(phase)) return false;
+    if (phase === "thinking" && hasStreamingKind("reasoning")) return false;
+    if (phase === "prefilling" && hasStreamingTextContent()) return false;
+    return true;
+  });
 });
 
 const pendingApprovals = computed(() =>
