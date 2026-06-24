@@ -61,10 +61,10 @@ function intVal(v) {
 export function formatThinkingSummary(llm) {
   if (!llm?.thinking_supported) return "";
   const thinking = String(llm.thinking || "").trim().toLowerCase();
-  if (["disabled", "off"].includes(thinking)) return "关闭";
+  if (["disabled", "off"].includes(thinking)) return "off";
   if (["enabled", "on"].includes(thinking) || thinking) {
     const effort = String(llm.reasoning_effort || "high").trim() || "high";
-    return `开启 · ${effort}`;
+    return `on · ${effort}`;
   }
   return "";
 }

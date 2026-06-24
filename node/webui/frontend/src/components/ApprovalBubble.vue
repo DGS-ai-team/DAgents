@@ -28,13 +28,6 @@ const visual = computed(() => resolveToolVisual({ data: props.data }));
           </span>
           <span v-if="a2a()" class="approval-bubble__relay">{{ suffix() }}</span>
         </div>
-        <div v-if="items().length > 1" class="approval-bubble__bulk-actions">
-          <span class="approval-bubble__bulk-text">{{ items().length }} 个工具调用待处理</span>
-          <div class="approval-tool-item__inline-actions">
-            <button type="button" class="approval-action-btn approval-action-btn--reject" :disabled="busy" @click="emit('reject-all')">全部拒绝</button>
-            <button type="button" class="approval-action-btn approval-action-btn--approve" :disabled="busy" @click="emit('approve-all')">{{ busy ? "处理中…" : "全部批准" }}</button>
-          </div>
-        </div>
         <ul class="approval-tool-list">
           <li v-for="it in items()" :key="it.callId" class="approval-tool-item">
             <header class="approval-tool-item__head">
@@ -55,6 +48,13 @@ const visual = computed(() => resolveToolVisual({ data: props.data }));
             <pre class="tool-card__args tool-card__args--compact">{{ it.rawArgs }}</pre>
           </li>
         </ul>
+        <div v-if="items().length > 1" class="approval-bubble__bulk-actions approval-bubble__bulk-actions--footer">
+          <span class="approval-bubble__bulk-text">{{ items().length }} 个工具调用待处理</span>
+          <div class="approval-tool-item__inline-actions">
+            <button type="button" class="approval-action-btn approval-action-btn--reject" :disabled="busy" @click="emit('reject-all')">全部拒绝</button>
+            <button type="button" class="approval-action-btn approval-action-btn--approve" :disabled="busy" @click="emit('approve-all')">{{ busy ? "处理中…" : "全部批准" }}</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

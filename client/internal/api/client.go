@@ -159,14 +159,16 @@ type PolicyPlatform struct {
 // PolicyToolEntry 为工具策略条目。
 type PolicyToolEntry struct {
 	Name       string `json:"name"`
-	Decision   string `json:"decision"`
+	Mode       string `json:"mode"`
+	Decision   string `json:"decision,omitempty"`
 	Configured bool   `json:"configured"`
 }
 
 // PolicyShellEntry 为 shell 命令策略条目。
 type PolicyShellEntry struct {
 	Command    string `json:"command"`
-	Decision   string `json:"decision"`
+	Mode       string `json:"mode"`
+	Decision   string `json:"decision,omitempty"`
 	Configured bool   `json:"configured"`
 }
 
@@ -181,13 +183,15 @@ type PolicySnapshot struct {
 // PolicyToolUpdate 为 PUT /v1/policy/tools 单项。
 type PolicyToolUpdate struct {
 	Name     string `json:"name"`
-	Decision string `json:"decision"`
+	Mode     string `json:"mode,omitempty"`
+	Decision string `json:"decision,omitempty"`
 }
 
 // PolicyShellUpdate 为 PUT /v1/policy/shell/{type} 单项。
 type PolicyShellUpdate struct {
 	Command  string `json:"command"`
-	Decision string `json:"decision"`
+	Mode     string `json:"mode,omitempty"`
+	Decision string `json:"decision,omitempty"`
 }
 
 // GetAgentInfo 调用 GET /v1/agent/info。
@@ -305,10 +309,14 @@ func (c *Client) UpdateToolPolicy(ctx context.Context, updates []PolicyToolUpdat
 	return c.putJSON(ctx, "/v1/policy/tools", map[string]any{"updates": updates}, nil)
 }
 
-// UpdateShellPolicy 调用 PUT /v1/policy/shell/{shellType}。
-func (c *Client) UpdateShellPolicy(ctx context.Context, shellType string, updates []PolicyShellUpdate) error {
+// UpdateShellPolicy 调用 PUT /v1/policy/shell/{shellType}；deletes 移除显式条目（未列出命令默认需审批）。
+func (c *Client) UpdateShellPolicy(ctx context.Context, shellType string, updates []PolicyShellUpdate, deletes ...string) error {
 	path := "/v1/policy/shell/" + url.PathEscape(strings.TrimSpace(shellType))
-	return c.putJSON(ctx, path, map[string]any{"updates": updates}, nil)
+	body := map[string]any{"updates": updates}
+	if len(deletes) > 0 {
+		body["deletes"] = deletes
+	}
+	return c.putJSON(ctx, path, body, nil)
 }
 
 // CompressSessionContext 调用 POST /v1/sessions/{id}/compress，手动触发阻塞压缩。

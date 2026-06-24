@@ -41,6 +41,7 @@ func ApprovalDataFromHITLBatch(batch map[string]any, executeItems []map[string]a
 		"approval_args": map[string]any{"tool_calls": toolCalls},
 		"display_type":  "normal_text",
 	}
+	copyHitlRoutingFields(batch, data)
 	if hitlID := strings.TrimSpace(fmt.Sprint(batch["hitl_id"])); hitlID != "" && hitlID != "<nil>" {
 		data["approval_id"] = hitlID
 	}
@@ -48,6 +49,21 @@ func ApprovalDataFromHITLBatch(batch map[string]any, executeItems []map[string]a
 		data["message"] = msg
 	}
 	return data
+}
+
+func copyHitlRoutingFields(batch map[string]any, dst map[string]any) {
+	if batch == nil || dst == nil {
+		return
+	}
+	if id := ChildSessionIDFromData(batch); id != "" {
+		dst["child_session_id"] = id
+	}
+	if scope := strings.TrimSpace(fmt.Sprint(batch["hitl_scope"])); scope != "" && scope != "<nil>" {
+		dst["hitl_scope"] = scope
+	}
+	if purpose := strings.TrimSpace(fmt.Sprint(batch["child_purpose"])); purpose != "" && purpose != "<nil>" {
+		dst["child_purpose"] = purpose
+	}
 }
 
 func hitlItemsFromData(raw any) []map[string]any {
@@ -74,6 +90,7 @@ func ExpandHITLRequired(data map[string]any) (userInfo []map[string]any, approva
 		switch strings.TrimSpace(fmt.Sprint(item["hitl_type"])) {
 		case HITLTypeUserInformation:
 			if ui := UserInformationDataFromHITLItem(item); ui != nil {
+				copyHitlRoutingFields(data, ui)
 				userInfo = append(userInfo, ui)
 			}
 		case HITLTypeExecuteTool:

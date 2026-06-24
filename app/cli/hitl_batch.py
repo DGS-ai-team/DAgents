@@ -31,6 +31,20 @@ def user_information_data_from_hitl_item(item: dict[str, Any]) -> dict[str, Any]
     return data
 
 
+def _hitl_routing_fields_from_batch(batch: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    child_id = str(batch.get("child_session_id") or "").strip()
+    if child_id:
+        out["child_session_id"] = child_id
+    scope = str(batch.get("hitl_scope") or "").strip()
+    if scope:
+        out["hitl_scope"] = scope
+    purpose = str(batch.get("child_purpose") or "").strip()
+    if purpose:
+        out["child_purpose"] = purpose
+    return out
+
+
 def approval_data_from_hitl_batch(batch: dict[str, Any], execute_items: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not execute_items:
         return None
@@ -38,6 +52,7 @@ def approval_data_from_hitl_batch(batch: dict[str, Any], execute_items: list[dic
         "approval_type": "execute_tool",
         "approval_args": {"tool_calls": list(execute_items)},
         "display_type": "normal_text",
+        **_hitl_routing_fields_from_batch(batch),
     }
     hitl_id = str(batch.get("hitl_id") or "").strip()
     if hitl_id:
@@ -50,6 +65,7 @@ def approval_data_from_hitl_batch(batch: dict[str, Any], execute_items: list[dic
 
 def expand_hitl_required(data: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """将 hitl_required 展开为 (user_information 队列项, approval 队列项)。"""
+    routing = _hitl_routing_fields_from_batch(data)
     user_infos: list[dict[str, Any]] = []
     execute_items: list[dict[str, Any]] = []
     for item in _hitl_items_from_data(data.get("items")):
@@ -57,7 +73,7 @@ def expand_hitl_required(data: dict[str, Any]) -> tuple[list[dict[str, Any]], di
         if hitl_type == HITL_TYPE_USER_INFORMATION:
             ui = user_information_data_from_hitl_item(item)
             if ui:
-                user_infos.append(ui)
+                user_infos.append({**ui, **routing})
         elif hitl_type == HITL_TYPE_EXECUTE_TOOL:
             execute_items.append(item)
     approval = approval_data_from_hitl_batch(data, execute_items)

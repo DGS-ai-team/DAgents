@@ -1,9 +1,9 @@
 import { reactive } from "vue";
 
 const PHASE_LABELS = {
-  prefilling: "准备上下文",
-  thinking: "思考中",
-  compression_blocking: "压缩上下文",
+  prefilling: "prefilling",
+  thinking: "thinking",
+  compression_blocking: "compressing",
 };
 
 export const statusPhaseOrder = ["prefilling", "thinking", "compression_blocking"];
@@ -64,14 +64,12 @@ export function resetStatusLines() {
 }
 
 export function statusPhaseLabel(phase) {
-  return PHASE_LABELS[phase] || phase;
+  return PHASE_LABELS[phase] || String(phase || "").trim() || "status";
 }
 
 export function formatStatusText(phase, state, now = statusStore.tick) {
   const label = statusPhaseLabel(phase);
   const elapsed = Math.max(0, Math.floor((now - state.startedAt) / 1000));
-  if (state.done) return `${label}... ${elapsed}s done`;
-  const frame = Math.floor((now - state.startedAt) / 500) % 3;
-  const dots = ".".repeat(frame + 1).padEnd(3, " ");
-  return `${label}${dots} ${elapsed}s`;
+  if (state.done) return `${label} · done · ${elapsed}s`;
+  return `${label} · ${elapsed}s`;
 }

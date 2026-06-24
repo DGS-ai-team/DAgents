@@ -36,7 +36,8 @@ defineProps({
         </div>
       </div>
       <div v-else class="msg__bubble msg__bubble--assistant-md">
-        <div class="tool-exec-bubble__markdown assistant-msg__md" v-html="renderMarkdown(entry.text)" />
+        <pre v-if="entry.streaming" class="assistant-msg__stream-plain">{{ entry.text }}</pre>
+        <div v-else class="tool-exec-bubble__markdown assistant-msg__md" v-html="renderMarkdown(entry.text)" />
         <div v-if="entry.usage" class="msg__usage">{{ entry.usage }}</div>
       </div>
     </div>
@@ -69,6 +70,15 @@ defineProps({
   font-size: 11px;
   color: var(--color-text-subtle);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.assistant-msg__stream-plain {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-text);
 }
 .msg__bubble--deferred {
   opacity: 0.85;

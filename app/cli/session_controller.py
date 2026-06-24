@@ -363,9 +363,15 @@ class SessionController:
         assert self._client is not None
         await self._client.update_tool_policy(updates)
 
-    async def update_shell_policy(self, shell_type: str, updates: list[dict[str, str]]) -> None:
+    async def update_shell_policy(
+        self,
+        shell_type: str,
+        updates: list[dict[str, str]] | None = None,
+        *,
+        deletes: list[str] | None = None,
+    ) -> None:
         assert self._client is not None
-        await self._client.update_shell_policy(shell_type, updates)
+        await self._client.update_shell_policy(shell_type, updates, deletes=deletes)
 
     async def compress_context(self) -> dict[str, Any]:
         """手动触发一次阻塞压缩（POST /v1/sessions/{session_id}/compress）。"""

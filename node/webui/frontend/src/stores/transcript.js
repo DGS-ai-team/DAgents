@@ -12,6 +12,13 @@ import {
   markToolBlockActive,
   resolveToolBlockId,
 } from "./toolStream.js";
+import {
+  configureStreamReveal,
+  flushReveal,
+  markRevealStreaming,
+  resetStreamReveal,
+  scheduleReveal,
+} from "./streamReveal.js";
 
 let idSeq = 0;
 
@@ -23,6 +30,25 @@ export const transcriptStore = reactive({
   showReasoning: false,
   toolFoldVerbose: false,
 });
+
+configureStreamReveal({
+  getSourceText(kind) {
+    if (kind === "assistant") return transcriptStore.assistantBuffer;
+    if (kind === "reasoning") return transcriptStore.reasoningBuffer;
+    return "";
+  },
+  onRevealText(kind, text, _flushed) {
+    upsertStreaming(kind, text);
+  },
+});
+
+export function hasStreamingKind(kind) {
+  return transcriptStore.entries.some((e) => e.streaming && e.kind === kind);
+}
+
+export function hasStreamingTextContent() {
+  return hasStreamingKind("assistant") || hasStreamingKind("reasoning");
+}
 
 export function noteSeq(seq) {
   if (seq > transcriptStore.lastSeq) transcriptStore.lastSeq = seq;
@@ -83,18 +109,29 @@ export function appendAssistant(delta) {
   if (!delta) return;
   finalizeReasoning();
   transcriptStore.assistantBuffer += delta;
-  upsertStreaming("assistant", transcriptStore.assistantBuffer);
+  if (!hasStreamingKind("assistant")) upsertStreaming("assistant", "");
+  markRevealStreaming("assistant", true);
+  scheduleReveal();
 }
 
 export function appendReasoning(delta) {
   if (!delta) return;
   finalizeAssistant();
-  if (!transcriptStore.showReasoning) return;
   transcriptStore.reasoningBuffer += delta;
-  upsertStreaming("reasoning", transcriptStore.reasoningBuffer);
+  if (!transcriptStore.showReasoning) return;
+  if (!hasStreamingKind("reasoning")) upsertStreaming("reasoning", "");
+  markRevealStreaming("reasoning", true);
+  scheduleReveal();
+}
+
+export function resumeReasoningReveal() {
+  if (!transcriptStore.reasoningBuffer || !transcriptStore.showReasoning) return;
+  markRevealStreaming("reasoning", true);
+  scheduleReveal();
 }
 
 export function finalizeAssistant() {
+  flushReveal("assistant");
   const text = transcriptStore.assistantBuffer;
   const usage = pendingUsageSuffix;
   removeStreaming("assistant");
@@ -110,6 +147,7 @@ export function finalizeAssistant() {
 }
 
 export function finalizeReasoning() {
+  flushReveal("reasoning");
   const text = transcriptStore.reasoningBuffer;
   removeStreaming("reasoning");
   transcriptStore.reasoningBuffer = "";
@@ -137,6 +175,7 @@ export function addAssistantFinal(text, usage = "") {
 let pendingUsageSuffix = "";
 
 function abortStreaming() {
+  resetStreamReveal();
   removeStreaming("assistant");
   removeStreaming("reasoning");
   transcriptStore.assistantBuffer = "";

@@ -1,10 +1,16 @@
-from app.cli.tui.policy_view import PolicyViewState, policy_decision_label
+from app.cli.tui.policy_view import PolicyViewState, entry_mode, policy_mode_label
 
 
-def test_policy_decision_label() -> None:
-    assert policy_decision_label("allow_auto") == "白名单"
-    assert policy_decision_label("deny") == "黑名单"
-    assert policy_decision_label("require_approval") == "需审批"
+def test_policy_mode_label() -> None:
+    assert policy_mode_label("never") == "自动允许"
+    assert policy_mode_label("always") == "需审批"
+    assert policy_mode_label("rule") == "特殊规则"
+    assert policy_mode_label("deny") == "禁止"
+
+
+def test_entry_mode_prefers_mode_field() -> None:
+    assert entry_mode({"mode": "rule", "decision": "require_approval"}) == "rule"
+    assert entry_mode({"decision": "allow_auto"}) == "never"
 
 
 def test_policy_visible_rows_tools_filter() -> None:
@@ -12,8 +18,8 @@ def test_policy_visible_rows_tools_filter() -> None:
     state.mode = True
     state.snapshot = {
         "tools": [
-            {"name": "read_file", "decision": "allow_auto"},
-            {"name": "write_file", "decision": "require_approval"},
+            {"name": "read_file", "mode": "never"},
+            {"name": "write_file", "mode": "always"},
         ],
         "shell": {},
     }
@@ -21,9 +27,10 @@ def test_policy_visible_rows_tools_filter() -> None:
     rows = state.visible_rows()
     assert len(rows) == 1
     assert rows[0]["tool_name"] == "read_file"
+    assert rows[0]["mode"] == "never"
 
 
-def test_policy_shell_default_filter() -> None:
+def test_policy_shell_lists_all_configured_entries() -> None:
     state = PolicyViewState()
     state.mode = True
     state.tab = "shell"
@@ -32,18 +39,15 @@ def test_policy_shell_default_filter() -> None:
         "tools": [],
         "shell": {
             "bash": [
-                {"command": "ls", "decision": "allow_auto"},
-                {"command": "git", "decision": "require_approval"},
-                {"command": "rm", "decision": "deny"},
+                {"command": "ls", "mode": "never"},
+                {"command": "git", "mode": "always"},
+                {"command": "rm", "mode": "deny"},
             ],
         },
     }
     rows = state.visible_rows()
     names = {row["command"] for row in rows}
-    assert names == {"ls", "rm"}
-    state.shell_show_all = True
-    rows_all = state.visible_rows()
-    assert len(rows_all) == 3
+    assert names == {"ls", "git", "rm"}
 
 
 def test_policy_render_text_paginates_by_viewport() -> None:
@@ -55,7 +59,7 @@ def test_policy_render_text_paginates_by_viewport() -> None:
         "tools": [],
         "shell": {
             "bash": [
-                {"command": f"cmd{i:02d}", "decision": "allow_auto"}
+                {"command": f"cmd{i:02d}", "mode": "never"}
                 for i in range(40)
             ],
         },
@@ -70,3 +74,12 @@ def test_policy_render_text_paginates_by_viewport() -> None:
     text_page2 = state.render_text(viewport_rows=12)
     assert "> cmd25" in text_page2
     assert "显示" in text_page2
+
+
+def test_policy_remove_local_shell_entry() -> None:
+    state = PolicyViewState()
+    state.tab = "shell"
+    state.shell_type = "bash"
+    state.snapshot = {"shell": {"bash": [{"command": "ls", "mode": "never"}]}}
+    state.remove_local_shell_entry(command="ls")
+    assert state.visible_rows() == []

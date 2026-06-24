@@ -1,4 +1,5 @@
 import { toolDisplayName, approvalItemDisplayName, parseToolArguments } from "./toolCalls.js";
+import { truncateGraphemes } from "./textTruncate.js";
 import { parseTemporaryAgentToolResult } from "./temporaryAgentResults.js";
 
 export { toolDisplayName, approvalItemDisplayName };
@@ -73,7 +74,7 @@ export function sessionRecordId(session) {
 
 export function sessionDisplayTitle(session) {
   const first = String(session?.first_user_message || session?.FirstUserMessage || "").trim();
-  if (first) return first.length > 48 ? `${first.slice(0, 48)}…` : first;
+  if (first) return first.length > 48 ? truncateGraphemes(first, 48) : first;
   const id = sessionRecordId(session);
   if (id) return `会话 ${id.slice(0, 8)}`;
   return "新对话";

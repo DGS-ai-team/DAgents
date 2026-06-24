@@ -69,10 +69,7 @@ func describeApprovalMeta(toolName string, args map[string]any) (reason, risk st
 		if cmd == "" {
 			return "将执行 Shell 命令（参数未提供 command）", risk
 		}
-		if len(cmd) > 160 {
-			cmd = cmd[:160] + "..."
-		}
-		return "将执行 Shell 命令: " + cmd, risk
+		return "将执行 Shell 命令: " + truncateRunes(cmd, 160), risk
 	case "write_file", "search_replace":
 		risk = "medium"
 		path := firstNonEmpty(args, "path", "file_path")
@@ -121,4 +118,18 @@ func firstNonEmpty(args map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max == 1 {
+		return "…"
+	}
+	return string(r[:max-1]) + "…"
 }

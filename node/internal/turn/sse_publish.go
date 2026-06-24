@@ -86,6 +86,12 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 		"content":      content,
 		"rejected":     rejected,
 	}
+	if args := parseJSONArgs(tc.Function.Arguments); len(args) > 0 {
+		payload["arguments"] = args
+	}
+	if raw := strings.TrimSpace(tc.Function.Arguments); raw != "" {
+		payload["raw_arguments"] = raw
+	}
 	for k, v := range extra {
 		payload[k] = v
 	}

@@ -7,6 +7,13 @@ import MainChatPanel from "./components/MainChatPanel.vue";
 import RuntimeStatusPanel from "./components/RuntimeStatusPanel.vue";
 import SessionPanel from "./components/SessionPanel.vue";
 import ContextPanel from "./components/ContextPanel.vue";
+import SkillsPanel from "./components/SkillsPanel.vue";
+import HelpPanel from "./components/HelpPanel.vue";
+import StatusPanel from "./components/StatusPanel.vue";
+import SessionsPanel from "./components/SessionsPanel.vue";
+import PolicyPanel from "./components/PolicyPanel.vue";
+import TriggersPanel from "./components/TriggersPanel.vue";
+import ChildrenPanel from "./components/ChildrenPanel.vue";
 import {
   sessionStore,
   persistSessionId,
@@ -37,6 +44,7 @@ import {
   applyToolResult,
   clearTranscript,
   applyRoundUsage,
+  resumeReasoningReveal,
 } from "./stores/transcript.js";
 import {
   hitlStore,
@@ -49,6 +57,7 @@ import {
   a2aApprovedSummary,
   extractToolApprovals,
   buildApprovalResume,
+  buildApprovalOneResume,
   extractUserInfo,
   buildUserInfoResume,
   buildUserInfoResumeFromSelection,
@@ -80,10 +89,9 @@ import { approvalItemDisplayName, sessionDisplayTitle } from "./utils/format.js"
 const hitlSelected = ref(0);
 const cancelling = ref(false);
 const streamHandle = ref(null);
-const panelTitle = ref("");
-const panelBody = ref("");
 const apiBase = typeof window !== "undefined" ? window.location.origin : "";
 const sessionPanelRef = ref(null);
+const chatPanelRef = ref(null);
 
 const entries = computed(() => transcriptStore.entries);
 const hasUserInfoHitl = computed(() => peekHitl()?.kind === "user_information");
@@ -98,9 +106,10 @@ const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_sup
 function syncReasoningDisplay(llm) {
   if (!llm?.thinking_supported) return;
   const t = String(llm.thinking || "").trim().toLowerCase();
-  if (t && !["disabled", "off", "false", "0"].includes(t)) {
-    transcriptStore.showReasoning = true;
-  }
+  const enable = t && !["disabled", "off", "false", "0"].includes(t);
+  const wasHidden = !transcriptStore.showReasoning;
+  if (enable) transcriptStore.showReasoning = true;
+  if (enable && wasHidden) resumeReasoningReveal();
 }
 
 function restartStream() {
@@ -345,10 +354,7 @@ async function submitHitlOne(callId, approve) {
   const item = peekHitl();
   if (!item || item.kind !== "approval") return;
   hitlStore.busy = true;
-  const resume = buildApprovalResume(item.data, {
-    approved: approve ? [callId] : [],
-    rejected: approve ? [] : [callId],
-  });
+  const resume = buildApprovalOneResume(item.data, callId, approve);
   try {
     await api.submitResume(sessionStore.sessionId, resume);
     dequeueHitl();
@@ -606,29 +612,13 @@ async function handleThinkingCommand(arg) {
 
 async function openPanel(name, arg) {
   await ensureSession();
-  panelTitle.value = name;
   try {
-    if (name === "status") {
-      await refreshMeta();
-      panelBody.value = JSON.stringify({ health: chromeStore.agentInfo, llm: chromeStore.llmSettings, session: sessionStore.sessionId }, null, 2);
-    } else if (name === "sessions") {
-      panelBody.value = JSON.stringify(await api.listSessions(), null, 2);
-    } else if (name === "context") {
-      chromeStore.panel = "context";
-      return;
-    } else if (name === "skills") {
+    if (name === "skills") {
       if (arg?.startsWith("load ")) {
         await api.loadSkill(sessionStore.sessionId, arg.slice(5).trim());
       } else if (arg?.startsWith("unload ")) {
         await api.unloadSkill(sessionStore.sessionId, arg.slice(7).trim());
       }
-      panelBody.value = JSON.stringify(await api.listSkills(sessionStore.sessionId), null, 2);
-    } else if (name === "children") {
-      panelBody.value = JSON.stringify(await api.listChildAgents(sessionStore.sessionId), null, 2);
-    } else if (name === "triggers") {
-      panelBody.value = JSON.stringify(await api.listTriggers(), null, 2);
-    } else if (name === "policy") {
-      panelBody.value = JSON.stringify(await api.getPolicy(), null, 2);
     }
     chromeStore.panel = name;
   } catch (e) {
@@ -639,6 +629,16 @@ async function openPanel(name, arg) {
 
 function closePanel() {
   chromeStore.panel = null;
+}
+
+function onHelpPick(cmd) {
+  closePanel();
+  chatPanelRef.value?.setDraft?.(cmd);
+}
+
+async function onSessionSwitch(sessionId) {
+  closePanel();
+  await switchSession(sessionId);
 }
 
 async function cancelTurn() {
@@ -695,6 +695,7 @@ watch(
     <div class="app__body app__body--two-col">
       <div class="app__main-col">
         <MainChatPanel
+          ref="chatPanelRef"
           :entries="entries"
           :hitl-queue="hitlStore.queue"
           :show-reasoning="transcriptStore.showReasoning"
@@ -719,15 +720,13 @@ watch(
 
         <div v-if="chromeStore.panel" class="panel-overlay" @click.self="closePanel">
           <ContextPanel v-if="chromeStore.panel === 'context'" @close="closePanel" />
-          <section v-else class="panel panel-overlay__card">
-            <header class="panel__header">
-              <div class="panel__title">{{ panelTitle }}</div>
-              <button type="button" class="btn btn--ghost btn--sm" @click="closePanel">关闭 (Esc)</button>
-            </header>
-            <div class="panel__body">
-              <pre>{{ panelBody }}</pre>
-            </div>
-          </section>
+          <SkillsPanel v-else-if="chromeStore.panel === 'skills'" @close="closePanel" />
+          <HelpPanel v-else-if="chromeStore.panel === 'help'" @close="closePanel" @pick="onHelpPick" />
+          <StatusPanel v-else-if="chromeStore.panel === 'status'" @close="closePanel" />
+          <SessionsPanel v-else-if="chromeStore.panel === 'sessions'" @close="closePanel" @switch="onSessionSwitch" />
+          <PolicyPanel v-else-if="chromeStore.panel === 'policy'" @close="closePanel" />
+          <TriggersPanel v-else-if="chromeStore.panel === 'triggers'" @close="closePanel" />
+          <ChildrenPanel v-else-if="chromeStore.panel === 'children'" @close="closePanel" />
         </div>
       </div>
 

@@ -194,9 +194,18 @@ class DAgentsApiClient:
     async def update_tool_policy(self, updates: list[dict[str, str]]) -> None:
         await self._put_json("/v1/policy/tools", {"updates": updates})
 
-    async def update_shell_policy(self, shell_type: str, updates: list[dict[str, str]]) -> None:
+    async def update_shell_policy(
+        self,
+        shell_type: str,
+        updates: list[dict[str, str]] | None = None,
+        *,
+        deletes: list[str] | None = None,
+    ) -> None:
         shell = str(shell_type or "").strip().lower()
-        await self._put_json(f"/v1/policy/shell/{shell}", {"updates": updates})
+        body: dict[str, Any] = {"updates": updates or []}
+        if deletes:
+            body["deletes"] = deletes
+        await self._put_json(f"/v1/policy/shell/{shell}", body)
 
     async def stream_events(self, *, session_id: str, live_only: bool = True) -> AsyncIterator[StreamEvent]:
         """订阅 SSE；默认 live_only 跳过重放（对齐 Node `live=1`）。"""

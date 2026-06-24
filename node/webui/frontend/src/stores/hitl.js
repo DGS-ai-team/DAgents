@@ -55,25 +55,60 @@ export function a2aApprovedSummary(data, approved) {
   return `已审批，由${label}执行`;
 }
 
-import { parseToolArguments } from "../utils/toolCalls.js";
+import { normalizeToolCallItem } from "../utils/toolCalls.js";
+
+function attachApprovalRouting(data, resume) {
+  const rv = { ...resume };
+  if (data?.child_session_id) rv.child_session_id = data.child_session_id;
+  if (data?.approval_id) rv.approval_id = data.approval_id;
+  return rv;
+}
 
 export function extractToolApprovals(data) {
-  const args = data?.approval_args;
-  const calls = args?.tool_calls;
+  const calls = data?.approval_args?.tool_calls;
   if (!Array.isArray(calls)) return [];
   return calls
     .map((m) => {
-      const rawArgs = String(m?.raw_arguments || JSON.stringify(m?.arguments || {}));
+      const norm = normalizeToolCallItem(m);
       return {
-        callId: String(m?.id || "").trim(),
-        name: String(m?.name || "unknown").trim(),
-        rawArgs,
-        arguments: parseToolArguments(m?.arguments ?? m?.raw_arguments ?? rawArgs),
+        callId: norm.id,
+        name: norm.name,
+        rawArgs: norm.rawArguments,
+        arguments: norm.arguments,
         reason: String(m?.approval_reason || ""),
         risk: String(m?.risk_level || ""),
       };
     })
     .filter((it) => it.callId);
+}
+
+export function buildApprovalSelectionResume(data, approvedByCallId) {
+  const items = extractToolApprovals(data);
+  if (!items.length) {
+    return attachApprovalRouting(data, { type: "reject" });
+  }
+  const approved = [];
+  const rejected = [];
+  for (const it of items) {
+    if (approvedByCallId[it.callId]) approved.push(it.callId);
+    else rejected.push(it.callId);
+  }
+  return attachApprovalRouting(data, { type: "selection", approved, rejected });
+}
+
+/** 单条批准：仅执行所选工具，其余拒绝。单条拒绝：整批全部拒绝（不自动批准 siblings）。 */
+export function buildApprovalOneResume(data, callId, approve) {
+  const items = extractToolApprovals(data);
+  if (!items.length) {
+    return attachApprovalRouting(data, { type: "reject" });
+  }
+  if (approve) {
+    const approved = items.filter((it) => it.callId === callId).map((it) => it.callId);
+    const rejected = items.filter((it) => it.callId !== callId).map((it) => it.callId);
+    return attachApprovalRouting(data, { type: "selection", approved, rejected });
+  }
+  const rejected = items.map((it) => it.callId);
+  return attachApprovalRouting(data, { type: "selection", approved: [], rejected });
 }
 
 export function buildApprovalResume(data, { approveAll, approved = [], rejected = [] }) {
@@ -86,9 +121,7 @@ export function buildApprovalResume(data, { approveAll, approved = [], rejected 
     rv.approved = [];
     rv.rejected = items.map((it) => it.callId);
   }
-  if (data?.child_session_id) rv.child_session_id = data.child_session_id;
-  if (data?.approval_id) rv.approval_id = data.approval_id;
-  return rv;
+  return attachApprovalRouting(data, rv);
 }
 
 export function extractUserInfo(data) {
@@ -156,12 +189,25 @@ function userInformationDataFromHITLItem(item) {
   return data;
 }
 
+function hitlRoutingFieldsFromBatch(batch) {
+  if (!batch || typeof batch !== "object") return {};
+  const out = {};
+  const childId = String(batch.child_session_id || "").trim();
+  if (childId) out.child_session_id = childId;
+  const scope = String(batch.hitl_scope || "").trim();
+  if (scope) out.hitl_scope = scope;
+  const purpose = String(batch.child_purpose || "").trim();
+  if (purpose) out.child_purpose = purpose;
+  return out;
+}
+
 function approvalDataFromHITLBatch(batch, executeItems) {
   if (!executeItems.length) return null;
   const data = {
     approval_type: "execute_tool",
     approval_args: { tool_calls: executeItems },
     display_type: "normal_text",
+    ...hitlRoutingFieldsFromBatch(batch),
   };
   const hitlId = String(batch?.hitl_id || "").trim();
   if (hitlId) data.approval_id = hitlId;
@@ -172,12 +218,13 @@ function approvalDataFromHITLBatch(batch, executeItems) {
 
 /** 将 hitl_required 展开为 Client 可入队的 user_information / approval 队列项。 */
 export function expandHitlRequired(data) {
+  const routing = hitlRoutingFieldsFromBatch(data);
   const userInfos = [];
   const executeItems = [];
   for (const item of hitlItemsFromData(data?.items)) {
     const hitlType = String(item.hitl_type || "").trim();
     if (hitlType === HITL_TYPE_USER_INFORMATION) {
-      userInfos.push(userInformationDataFromHITLItem(item));
+      userInfos.push({ ...userInformationDataFromHITLItem(item), ...routing });
     } else if (hitlType === HITL_TYPE_EXECUTE_TOOL) {
       executeItems.push(item);
     }

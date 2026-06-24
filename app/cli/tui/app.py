@@ -53,14 +53,14 @@ from app.cli.user_information import (
     extract_user_information_request,
 )
 from app.cli.triggers_format import format_triggers_panel
-from app.cli.tui.policy_view import PROTECTED_POLICY_TOOL, PolicyViewState
+from app.cli.tui.policy_view import PROTECTED_POLICY_TOOL, PolicyViewState, normalize_shell_command
 from app.cli.tui.prompt_text_area import PromptTextArea
 from app.cli.tui.transcript_log import TranscriptLog
 from app.cli.tui.welcome_panel import build_welcome_panel, format_thinking_summary
 
 _HELP_HINT = "Type /help for commands, /exit to quit.  Enter 发送，Shift+Enter 换行"
 _POLICY_HELP_HINT = (
-    "Esc 返回 · Tab 切页 · 1/2/3 改档位 · Enter 应用 · [ / ] 切换 shell · a 显示全部(shell)"
+    "Esc 返回 · Tab 切页 · 1/2/3/4 改档位 · Enter 应用 · [ / ] 切换 shell · + 添加(shell) · d 删除(shell)"
 )
 # bash command 在括号内可展示的 cell 上限；超出则在标题下方用代码框展示全文。
 _BASH_INLINE_COMMAND_MAX_CELLS = 56
@@ -2898,7 +2898,7 @@ class DAgentsTuiApp(App[None]):
             self._policy_view.tab = "shell" if self._policy_view.tab == "tools" else "tools"
             self._policy_view.cursor = 0
             self._policy_view.scroll_offset = 0
-            self._policy_view.pending_decision = ""
+            self._policy_view.pending_mode = ""
             self._render_policy_view()
             return True
         if key in {"left_bracket", "["}:
@@ -2915,19 +2915,21 @@ class DAgentsTuiApp(App[None]):
             self._policy_view.cycle_shell(1)
             self._render_policy_view()
             return True
-        if key == "a" and self._policy_view.tab == "shell":
+        if key in {"plus", "+"} and self._policy_view.tab == "shell":
             event.stop()
             event.prevent_default()
-            self._policy_view.shell_show_all = not self._policy_view.shell_show_all
-            self._policy_view.scroll_offset = 0
-            self._policy_view.clamp_cursor()
-            self._render_policy_view()
+            await self._add_policy_shell()
             return True
-        if key in {"1", "2", "3"}:
+        if key in {"d", "delete"} and self._policy_view.tab == "shell":
             event.stop()
             event.prevent_default()
-            mapping = {"1": "allow_auto", "2": "require_approval", "3": "deny"}
-            self._policy_view.pending_decision = mapping[key]
+            await self._delete_policy_shell()
+            return True
+        if key in {"1", "2", "3", "4"}:
+            event.stop()
+            event.prevent_default()
+            mapping = {"1": "never", "2": "always", "3": "rule", "4": "deny"}
+            self._policy_view.pending_mode = mapping[key]
             self._render_policy_view()
             return True
         if key in {"up", "down"}:
@@ -2938,10 +2940,60 @@ class DAgentsTuiApp(App[None]):
                 return True
             delta = -1 if key == "up" else 1
             self._policy_view.cursor = max(0, min(len(rows) - 1, self._policy_view.cursor + delta))
-            self._policy_view.pending_decision = ""
+            self._policy_view.pending_mode = ""
             self._render_policy_view()
             return True
         return False
+
+    async def _add_policy_shell(self) -> None:
+        cmd = normalize_shell_command(self._prompt_area().text)
+        if not cmd:
+            self._policy_view.error_message = "请输入要添加的命令名"
+            self._render_policy_view()
+            return
+        mode = self._policy_view.pending_mode or "never"
+        try:
+            await self._controller.update_shell_policy(
+                self._policy_view.shell_type,
+                [{"command": cmd, "mode": mode}],
+            )
+            self._policy_view.apply_local_update(tool_name="", command=cmd, mode=mode)
+            from app.cli.tui.policy_view import policy_mode_label
+
+            self._policy_view.error_message = ""
+            self._policy_view.status_message = f"已添加 {cmd} → {policy_mode_label(mode)}"
+            self._policy_view.pending_mode = ""
+            self._prompt_area().text = ""
+            self._policy_view.filter_text = ""
+        except Exception as exc:
+            self._policy_view.error_message = str(exc)
+        self._render_policy_view()
+
+    async def _delete_policy_shell(self) -> None:
+        rows = self._policy_view.visible_rows()
+        if not rows:
+            self._policy_view.error_message = "无选中项"
+            self._render_policy_view()
+            return
+        row = rows[self._policy_view.cursor]
+        command = row["command"]
+        if not command:
+            self._policy_view.error_message = "无选中项"
+            self._render_policy_view()
+            return
+        try:
+            await self._controller.update_shell_policy(
+                self._policy_view.shell_type,
+                deletes=[command],
+            )
+            self._policy_view.remove_local_shell_entry(command=command)
+            self._policy_view.error_message = ""
+            self._policy_view.status_message = f"已删除 {command}（未列出默认需审批）"
+            self._policy_view.pending_mode = ""
+            self._policy_view.clamp_cursor()
+        except Exception as exc:
+            self._policy_view.error_message = str(exc)
+        self._render_policy_view()
 
     async def _apply_policy_current(self) -> None:
         rows = self._policy_view.visible_rows()
@@ -2950,34 +3002,34 @@ class DAgentsTuiApp(App[None]):
             self._render_policy_view()
             return
         row = rows[self._policy_view.cursor]
-        decision = self._policy_view.pending_decision or row["decision"]
+        mode = self._policy_view.pending_mode or row["mode"]
         tool_name = row["tool_name"]
         command = row["command"]
-        if tool_name == PROTECTED_POLICY_TOOL and decision == "deny":
-            self._policy_view.error_message = f"{PROTECTED_POLICY_TOOL} 不能设为黑名单"
+        if tool_name == PROTECTED_POLICY_TOOL and mode == "deny":
+            self._policy_view.error_message = f"{PROTECTED_POLICY_TOOL} 不能设为禁止"
             self._render_policy_view()
             return
         try:
             if self._policy_view.tab == "tools":
                 await self._controller.update_tool_policy(
-                    [{"name": tool_name, "decision": decision}],
+                    [{"name": tool_name, "mode": mode}],
                 )
             else:
                 await self._controller.update_shell_policy(
                     self._policy_view.shell_type,
-                    [{"command": command, "decision": decision}],
+                    [{"command": command, "mode": mode}],
                 )
             self._policy_view.apply_local_update(
                 tool_name=tool_name,
                 command=command,
-                decision=decision,
+                mode=mode,
             )
             label = tool_name or command
-            from app.cli.tui.policy_view import policy_decision_label
+            from app.cli.tui.policy_view import policy_mode_label
 
             self._policy_view.error_message = ""
-            self._policy_view.status_message = f"已更新 {label} → {policy_decision_label(decision)}"
-            self._policy_view.pending_decision = ""
+            self._policy_view.status_message = f"已更新 {label} → {policy_mode_label(mode)}"
+            self._policy_view.pending_mode = ""
         except Exception as exc:
             self._policy_view.error_message = str(exc)
         self._render_policy_view()

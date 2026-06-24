@@ -1,3 +1,5 @@
+import { truncateGraphemes } from "./textTruncate.js";
+
 export const USER_INFORMATION_TOOL = "ask_user_information";
 
 const TEMPORARY_AGENT_TOOLS = new Set([
@@ -10,7 +12,7 @@ const TEMPORARY_AGENT_TOOLS = new Set([
 function shortChildId(id) {
   const s = String(id || "").trim();
   if (!s) return "";
-  return s.length <= 16 ? s : `${s.slice(0, 16)}…`;
+  return s.length <= 16 ? s : truncateGraphemes(s, 16);
 }
 
 function stringList(value) {
@@ -71,7 +73,7 @@ function formatToolArgValue(value) {
 export function resolveToolArgumentsFromData(data) {
   if (!data || typeof data !== "object") return {};
   if (data.arguments && typeof data.arguments === "object" && !Array.isArray(data.arguments)) {
-    return data.arguments;
+    if (Object.keys(data.arguments).length > 0) return data.arguments;
   }
   const fn = data.function;
   if (fn && typeof fn === "object") {
@@ -108,11 +110,22 @@ export function normalizeToolCallItem(item) {
       argsRaw = fn.arguments;
     }
   }
-  const rawArguments = typeof argsRaw === "string" ? argsRaw : argsRaw ? JSON.stringify(argsRaw) : "";
+  const rawArguments =
+    typeof argsRaw === "string" && argsRaw.trim()
+      ? argsRaw
+      : item.raw_arguments && typeof item.raw_arguments === "string" && item.raw_arguments.trim()
+        ? item.raw_arguments
+        : argsRaw
+          ? JSON.stringify(argsRaw)
+          : "";
+  let parsedArgs = parseToolArguments(argsRaw);
+  if (!Object.keys(parsedArgs).length && rawArguments.trim()) {
+    parsedArgs = parseToolArguments(rawArguments);
+  }
   return {
     id: callId,
     name: name || "unknown",
-    arguments: parseToolArguments(argsRaw),
+    arguments: parsedArgs,
     rawArguments,
   };
 }
@@ -137,7 +150,7 @@ export function toolIndexFromEvent(data) {
 export function toolCallPurpose(args) {
   const value = String(args?.call_purpose || "").trim();
   if (!value) return "";
-  return value.length > 48 ? `${value.slice(0, 47)}…` : value;
+  return value.length > 48 ? truncateGraphemes(value, 48) : value;
 }
 
 function sanitizeInline(text) {
@@ -153,7 +166,7 @@ export function toolDisplayName(name, args = {}) {
   if (n === "bash_run") {
     const cmd = sanitizeInline(args.command);
     if (!cmd) return "bash(—)";
-    return `bash(${cmd.length > 48 ? `${cmd.slice(0, 47)}…` : cmd})`;
+    return `bash(${cmd.length > 48 ? truncateGraphemes(cmd, 48) : cmd})`;
   }
   if (n === "trigger_create") {
     return `trigger_create(${sanitizeInline(args.name) || "—"})`;

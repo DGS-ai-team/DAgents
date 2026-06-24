@@ -115,10 +115,12 @@ export function updateToolPolicy(updates) {
   return apiFetch("/v1/policy/tools", { method: "PUT", body: { updates } });
 }
 
-export function updateShellPolicy(shellType, updates) {
+export function updateShellPolicy(shellType, updates, deletes = []) {
+  const body = { updates: updates || [] };
+  if (Array.isArray(deletes) && deletes.length) body.deletes = deletes;
   return apiFetch(`/v1/policy/shell/${encodeURIComponent(shellType)}`, {
     method: "PUT",
-    body: { updates },
+    body,
   });
 }
 
