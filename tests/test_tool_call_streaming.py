@@ -12,6 +12,9 @@ def test_streaming_bash_command_partial() -> None:
 def test_streaming_invalid_json_fallback() -> None:
     raw = '{"path": "/etc/pass'
     args, code, lexer = streaming_tool_call_preview("read_file", raw)
+    # read_file intentionally does not support partial argument extraction
+    # for invalid/incomplete JSON and must use the raw JSON fallback.
+    assert args.get("path") is None
     assert args == {}
     assert code == raw
     assert lexer == "json"
