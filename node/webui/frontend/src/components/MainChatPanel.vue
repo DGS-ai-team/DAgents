@@ -73,7 +73,6 @@ const inputStripLeftText = computed(() => {
   if (props.hitlQueue.length > 1) {
     return `HITL 队列 ${props.hitlQueue.length}`;
   }
-  if (props.sending) return "Agent 回复中，可点「取消」中断";
   return "";
 });
 
@@ -187,7 +186,7 @@ function onKeydown(e) {
             v-model="input"
             class="chat__textarea"
             rows="2"
-            placeholder="输入消息或 /help 命令（Enter 发送，Ctrl+Enter 换行；回复中可点「取消」）"
+            placeholder="输入消息或 /help 命令（Enter 发送，Ctrl+Enter 换行）"
             :disabled="disabled || sending || cancelling"
             @keydown="onKeydown"
           />

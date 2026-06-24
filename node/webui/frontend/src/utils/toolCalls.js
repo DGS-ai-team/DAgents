@@ -1,3 +1,5 @@
+import { truncateGraphemes } from "./textTruncate.js";
+
 export const USER_INFORMATION_TOOL = "ask_user_information";
 
 const TEMPORARY_AGENT_TOOLS = new Set([
@@ -10,7 +12,7 @@ const TEMPORARY_AGENT_TOOLS = new Set([
 function shortChildId(id) {
   const s = String(id || "").trim();
   if (!s) return "";
-  return s.length <= 16 ? s : `${s.slice(0, 16)}…`;
+  return s.length <= 16 ? s : truncateGraphemes(s, 16);
 }
 
 function stringList(value) {
@@ -148,7 +150,7 @@ export function toolIndexFromEvent(data) {
 export function toolCallPurpose(args) {
   const value = String(args?.call_purpose || "").trim();
   if (!value) return "";
-  return value.length > 48 ? `${value.slice(0, 47)}…` : value;
+  return value.length > 48 ? truncateGraphemes(value, 48) : value;
 }
 
 function sanitizeInline(text) {
@@ -164,7 +166,7 @@ export function toolDisplayName(name, args = {}) {
   if (n === "bash_run") {
     const cmd = sanitizeInline(args.command);
     if (!cmd) return "bash(—)";
-    return `bash(${cmd.length > 48 ? `${cmd.slice(0, 47)}…` : cmd})`;
+    return `bash(${cmd.length > 48 ? truncateGraphemes(cmd, 48) : cmd})`;
   }
   if (n === "trigger_create") {
     return `trigger_create(${sanitizeInline(args.name) || "—"})`;

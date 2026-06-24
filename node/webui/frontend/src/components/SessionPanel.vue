@@ -67,15 +67,11 @@ defineExpose({ refresh, setDeleting });
           }"
           @click="select(sessionRecordId(s))"
         >
-          <div class="session-history-item__avatar" aria-hidden="true">
-            <span v-if="s.has_active_turn || s.HasActiveTurn" class="session-history-item__pulse" />
-            {{ sessionDisplayTitle(s).slice(0, 1).toUpperCase() }}
-          </div>
           <div class="session-history-item__main">
             <div class="session-history-item__title-row">
               <span class="session-history-item__title">{{ sessionDisplayTitle(s) }}</span>
               <span v-if="s.active" class="session-history-item__badge session-history-item__badge--live">活跃</span>
-              <span v-else-if="s.has_active_turn || s.HasActiveTurn" class="session-history-item__badge">进行中</span>
+              <span v-else-if="s.has_active_turn || s.HasActiveTurn" class="session-history-item__badge session-history-item__badge--running">进行中</span>
             </div>
             <div class="session-history-item__meta">
               <span class="session-history-item__count">{{ s.message_count ?? s.MessageCount ?? 0 }} 条</span>
