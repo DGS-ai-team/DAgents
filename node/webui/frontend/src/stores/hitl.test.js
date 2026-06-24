@@ -72,9 +72,9 @@ describe("buildApprovalOneResume", () => {
     expect(resume.rejected).toEqual(["call-b"]);
   });
 
-  it("rejects one tool and approves the rest", () => {
+  it("reject-one rejects entire batch without approving siblings", () => {
     const resume = buildApprovalOneResume(multiToolApprovalData, "call-b", false);
-    expect(resume.approved).toEqual(["call-a"]);
-    expect(resume.rejected).toEqual(["call-b"]);
+    expect(resume.approved).toEqual([]);
+    expect(resume.rejected).toEqual(["call-a", "call-b"]);
   });
 });

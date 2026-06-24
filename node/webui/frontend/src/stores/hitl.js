@@ -96,14 +96,19 @@ export function buildApprovalSelectionResume(data, approvedByCallId) {
   return attachApprovalRouting(data, { type: "selection", approved, rejected });
 }
 
-/** 单条批准/拒绝：其余 pending 取相反决策，满足 Node selection 必须全覆盖。 */
+/** 单条批准：仅执行所选工具，其余拒绝。单条拒绝：整批全部拒绝（不自动批准 siblings）。 */
 export function buildApprovalOneResume(data, callId, approve) {
   const items = extractToolApprovals(data);
-  const approvedByCallId = {};
-  for (const it of items) {
-    approvedByCallId[it.callId] = it.callId === callId ? approve : !approve;
+  if (!items.length) {
+    return attachApprovalRouting(data, { type: "reject" });
   }
-  return buildApprovalSelectionResume(data, approvedByCallId);
+  if (approve) {
+    const approved = items.filter((it) => it.callId === callId).map((it) => it.callId);
+    const rejected = items.filter((it) => it.callId !== callId).map((it) => it.callId);
+    return attachApprovalRouting(data, { type: "selection", approved, rejected });
+  }
+  const rejected = items.map((it) => it.callId);
+  return attachApprovalRouting(data, { type: "selection", approved: [], rejected });
 }
 
 export function buildApprovalResume(data, { approveAll, approved = [], rejected = [] }) {
