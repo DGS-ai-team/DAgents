@@ -2577,10 +2577,16 @@ class DAgentsTuiApp(App[None]):
         """
         session_id = self._controller.session_id.strip()
         if not session_id:
-            self.exit(message="已退出。当前 session_id 为空，无法生成恢复命令。")
+            self.exit(message="已退出。当前 session_id 为空，无法记录会话。")
             return
+        self._controller.remember_last_session()
         command = f"dagents chat --session {shlex.quote(session_id)}"
-        self.exit(message=f"已退出。恢复当前会话：{command}")
+        self.exit(
+            message=(
+                f"已退出。下次 `dagents chat` 将默认进入 session={session_id}；"
+                f"也可显式恢复：{command}"
+            )
+        )
 
     async def submit_prompt(self) -> None:
         """处理 TextArea 提交：命令或发消息（Enter）。

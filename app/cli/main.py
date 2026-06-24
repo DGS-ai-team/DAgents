@@ -78,7 +78,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     chat = subparsers.add_parser("chat", help="Start an interactive Textual TUI chat")
     _add_client_config_arguments(chat)
-    chat.add_argument("--session", default=None, help="Session ID to create or reuse")
+    chat.add_argument(
+        "--session",
+        default=None,
+        help="Session ID to create or reuse（省略时默认进入上次退出时的 session）",
+    )
     chat.add_argument("--show-reasoning", action="store_true", help="Print reasoning stream events")
 
     show = subparsers.add_parser("show", help="Show runtime resources")
