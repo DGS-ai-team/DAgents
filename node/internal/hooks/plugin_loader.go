@@ -13,9 +13,10 @@ const pluginRegisterSymbol = "Register"
 
 // PluginRegistrar 供 .so 插件注册 Hook（与内置 RegisterPhaseHook 同路径）。
 type PluginRegistrar struct {
-	registry *Registry
-	opts     RegisterOpts
-	prefix   string
+	registry      *Registry
+	opts          RegisterOpts
+	prefix        string
+	allowedPhases []Phase // 非空时与插件声明 phases 取交集
 }
 
 // Register 注册单条 Hook。
@@ -33,7 +34,14 @@ func (r *PluginRegistrar) Register(h Hook, opts RegisterOpts) {
 	if opts.OnError == "" && r.opts.OnError != "" {
 		opts.OnError = r.opts.OnError
 	}
-	r.registry.RegisterPhaseHook(&prefixedHook{prefix: r.prefix, inner: h}, opts)
+	wrapped := Hook(h)
+	if len(r.allowedPhases) > 0 {
+		wrapped = newPhaseConstrainedHook(h, r.allowedPhases)
+	}
+	if r.prefix != "" {
+		wrapped = &prefixedHook{prefix: r.prefix, inner: wrapped}
+	}
+	r.registry.RegisterPhaseHook(wrapped, opts)
 }
 
 type prefixedHook struct {
@@ -60,6 +68,50 @@ func (h *prefixedHook) Phases() []Phase {
 }
 
 func (h *prefixedHook) Run(ctx context.Context, hc *Context, host Host) (Result, error) {
+	if h == nil || h.inner == nil {
+		return Result{Action: ActionContinue}, nil
+	}
+	return h.inner.Run(ctx, hc, host)
+}
+
+type phaseConstrainedHook struct {
+	inner   Hook
+	allowed map[Phase]struct{}
+}
+
+func newPhaseConstrainedHook(inner Hook, allowed []Phase) Hook {
+	set := make(map[Phase]struct{}, len(allowed))
+	for _, p := range allowed {
+		set[p] = struct{}{}
+	}
+	return &phaseConstrainedHook{inner: inner, allowed: set}
+}
+
+func (h *phaseConstrainedHook) Name() string {
+	if h == nil || h.inner == nil {
+		return ""
+	}
+	return h.inner.Name()
+}
+
+func (h *phaseConstrainedHook) Phases() []Phase {
+	if h == nil || h.inner == nil {
+		return nil
+	}
+	inner := h.inner.Phases()
+	if len(h.allowed) == 0 {
+		return inner
+	}
+	out := make([]Phase, 0, len(inner))
+	for _, p := range inner {
+		if _, ok := h.allowed[p]; ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (h *phaseConstrainedHook) Run(ctx context.Context, hc *Context, host Host) (Result, error) {
 	if h == nil || h.inner == nil {
 		return Result{Action: ActionContinue}, nil
 	}
@@ -123,9 +175,10 @@ func loadPluginFile(r *Registry, entry PluginHookEntry, namePrefix string, logge
 		return fmt.Errorf("plugin Register symbol has wrong type")
 	}
 	reg := &PluginRegistrar{
-		registry: r,
-		opts:     pluginRegisterOpts(entry),
-		prefix:   namePrefix,
+		registry:      r,
+		opts:          pluginRegisterOpts(entry),
+		prefix:        namePrefix,
+		allowedPhases: append([]Phase(nil), entry.Phases...),
 	}
 	if err := regFn(reg); err != nil {
 		return fmt.Errorf("plugin Register: %w", err)

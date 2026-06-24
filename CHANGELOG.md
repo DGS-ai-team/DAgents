@@ -38,6 +38,8 @@
 
 ### 修复
 
+- **Hook Host LLM 配额**：`RunHumanMessageTurn` 开始时重置 `hookHostState.llmCalls`，避免同一 session 后续 user turn 误触 `ErrLLMQuotaExceeded`。
+- **Plugin YAML phases**：全局 plugin 注册时用配置 phases 与插件声明 phases **取交集** 约束注册阶段（skill 目录 `.so` 仍用插件自身 phases）。
 - **Python TUI HITL（待现场回归）**：审批 UI 在 UI 线程同步弹出（避免 `call_later` 排在大量 `tool_call` partial 之后）；timeout/abort 时 cancel 在途 `_hitl_task`；`search_replace` 流式 partial 不再展示 growing raw JSON。详见 [Issue 001](docs/issues/001-python-tui-hitl-approval-ui-stuck.md)。
 - **Windows `bash_run` 中文乱码（pipe 模式）**：PowerShell 交互窗口走 `[Console]::OutputEncoding`，stdout 被 pipe 捕获时默认走 `$OutputEncoding`（常为 US-ASCII），中文在 Go 解码前已损坏；`bash_run` 执行前自动注入 `$OutputEncoding = [Console]::OutputEncoding`，与交互式行为对齐。
 

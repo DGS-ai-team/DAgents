@@ -132,6 +132,7 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	o.runMessageEnqueuedPhase(ctx, sessionID, history, userText, map[string]any{"source": userName})
 	o.resetTurnUsage(sessionID)
 	o.resetContextMetrics(sessionID)
+	o.resetHookHostLLMQuota()
 	o.logger.Info("turn human message start",
 		"session_id", sessionID,
 		"content_len", len(userText),
