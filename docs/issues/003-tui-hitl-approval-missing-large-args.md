@@ -3,6 +3,7 @@
 | 字段 | 值 |
 |------|-----|
 | **状态** | **Open**（现象已确认，根因排查中） |
+| **GitHub** | [#40](https://github.com/DGS-ai-team/DAgents/issues/40) |
 | **组件** | **终端 Client**（Python Textual TUI `dagents chat`、Go bubbletea TUI `dagents-client tui` / `--plain`） |
 | **对比** | **Node Web UI**（`/ui/`）同场景 **可正常** 弹出内联审批 |
 | **影响** | 用户无法点击批准/拒绝；工具块可能长时间 **pending**（黄点 + 计时），直至 `wait_user_turn` timeout 或 Esc 取消 |
@@ -27,7 +28,7 @@
 
 ## 2. 与 Issue 001 的关系
 
-| 项 | Issue 001 | 本 Issue |
+| 项 | Issue 001 ([#39](https://github.com/DGS-ai-team/DAgents/issues/39)) | 本 Issue ([#40](https://github.com/DGS-ai-team/DAgents/issues/40)) |
 |----|-----------|----------|
 | 范围 | Python TUI + **`search_replace`** 为主 | **终端 TUI 通用**（参数过长） |
 | Web UI | 未强调对比 | **明确 Web UI 正常** |

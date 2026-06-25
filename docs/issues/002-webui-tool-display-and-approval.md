@@ -3,7 +3,7 @@
 | 字段 | 值 |
 |------|-----|
 | 组件 | Node Web UI（`node/webui/frontend`） |
-| 状态 | **Fixing**（分支 `fix/webui-tool-display-and-approval`） |
+| 状态 | **Closed**（#35 已合并修复） |
 | GitHub | [#35](https://github.com/DGS-ai-team/DAgents/issues/35) |
 | 发现 | 2026-06-21 |
 
