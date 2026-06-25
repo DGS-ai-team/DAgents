@@ -3,7 +3,7 @@
 | 字段 | 值 |
 |------|-----|
 | **状态** | **Open**（现象已确认，根因排查中） |
-| **GitHub** | [#40](https://github.com/DGS-ai-team/DAgents/issues/40) |
+| **GitHub** | [#40](https://github.com/DGS-ai-team/DAgents/issues/40)（与 [#39](https://github.com/DGS-ai-team/DAgents/issues/39) **同一根因**，合并跟踪） |
 | **组件** | **终端 Client**（Python Textual TUI `dagents chat`、Go bubbletea TUI `dagents-client tui` / `--plain`） |
 | **对比** | **Node Web UI**（`/ui/`）同场景 **可正常** 弹出内联审批 |
 | **影响** | 用户无法点击批准/拒绝；工具块可能长时间 **pending**（黄点 + 计时），直至 `wait_user_turn` timeout 或 Esc 取消 |
@@ -26,16 +26,24 @@
 
 ---
 
-## 2. 与 Issue 001 的关系
+## 2. 与 Issue 001（#39）— 同一根因
+
+**结论**：与 [#39](https://github.com/DGS-ai-team/DAgents/issues/39) **同一根因**，应 **合并跟踪**；修复一处、关闭时互相引用。
 
 | 项 | Issue 001 ([#39](https://github.com/DGS-ai-team/DAgents/issues/39)) | 本 Issue ([#40](https://github.com/DGS-ai-team/DAgents/issues/40)) |
 |----|-----------|----------|
-| 范围 | Python TUI + **`search_replace`** 为主 | **终端 TUI 通用**（参数过长） |
-| Web UI | 未强调对比 | **明确 Web UI 正常** |
-| Go TUI | 清单项「待对比」 | 纳入同一现象 |
-| 根因假设 | Textual `call_later` 队列 + partial 洪水 | 可能 **共享**（流式 partial 与 HITL 启动竞态）；亦可能有 **Client 栈差异** |
+| 范围 | Python TUI + **`search_replace`** 专项现场 | **终端 TUI 通用**（长 arguments + Web UI 对比） |
+| Go TUI | — | 纳入同一现象（待复测） |
 
-若最终证实仅为 Python 栈问题，可将本 Issue **合并入 001** 并关闭；当前先独立记录「**TUI vs Web UI**」对比与 **参数长度** 触发条件。
+**共享根因（待最终代码验证）**：
+
+```text
+大量 partial tool_call（长 arguments 全文渲染）占满 UI 队列
+  → HITL 审批 UI 启动被推迟或永久挂起（Textual call_later / bubbletea Update）
+  → 审批卡片/面板不出现；Web UI 因独立 hitlStore 不受影响
+```
+
+相关代码：`app/cli/tui/app.py`（#39）、`client/internal/tui/full/hitl_queue.go`（#40 待测）、`node/internal/turn/tool_router.go`（先 publishToolCall 再 HITL）。
 
 ---
 

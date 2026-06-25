@@ -3,7 +3,7 @@
 | 字段 | 值 |
 |------|-----|
 | **状态** | **Open**（排查暂停，后续继续） |
-| **GitHub** | [#39](https://github.com/DGS-ai-team/DAgents/issues/39) |
+| **GitHub** | [#39](https://github.com/DGS-ai-team/DAgents/issues/39)（与 [#40](https://github.com/DGS-ai-team/DAgents/issues/40) **同一根因**，合并跟踪） |
 | **组件** | Python Textual TUI（`app/cli/tui/`） |
 | **影响** | 用户无法点击「同意/不同意」；工具块黄点 pending 计时直至 `wait_user_turn` timeout（默认 300s） |
 | **Server 侧** | 行为符合预期（HITL 暂停，等 Client `POST resume`） |
