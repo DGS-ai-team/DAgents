@@ -16,7 +16,7 @@ bash node/webui/build.sh
 cd node/webui/frontend && npm test
 ```
 
-产出写入 `node/internal/webui/static/`（与 `manage/console/static` 相同策略），由 `dagents-node` 内嵌提供。
+产出写入 `node/internal/webui/static/`（**不入库**，CI / Release 构建；本地 `go test` / `go build` 前须先执行本脚本），由 `dagents-node` 内嵌提供。
 
 ## 部署后带 UI 启动
 

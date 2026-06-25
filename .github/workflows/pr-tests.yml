@@ -17,6 +17,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: manage/console/frontend/package-lock.json
+
+      - name: Build Manage Console
+        run: bash manage/console/build.sh
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:

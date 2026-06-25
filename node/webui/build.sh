@@ -11,4 +11,5 @@ if [[ ! -d node_modules ]]; then
   fi
 fi
 npm run build
+touch "${ROOT}/node/internal/webui/static/.gitkeep"
 echo "Built -> ${ROOT}/node/internal/webui/static/"

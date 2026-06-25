@@ -45,7 +45,7 @@
 | 路径 | 说明 |
 |------|------|
 | `frontend/` | Vue 3 + Vite 源码（`npm run dev` / `npm run build`） |
-| `static/` | 构建产物：`index.html` + `assets/*`，挂载 `/console/` |
+| `static/` | 构建产物（不入库）：`index.html` + `assets/*`，挂载 `/console/` |
 | `build.sh` | 一键构建到 `static/` |
 
 Console 功能：Node 列表、discovery 分组、A2A Inbox、详情抽屉（session / audit）。

@@ -58,7 +58,7 @@ http://127.0.0.1:<listen.port>/ui/
 ```
 
 - 配置：`ui.enabled`（默认 `true`；`false` 时不挂载 `/ui/`）
-- 构建：`bash node/webui/build.sh`（产出 `node/internal/webui/static/`，嵌入二进制）
+- 构建：`bash node/webui/build.sh`（产出 `node/internal/webui/static/`，不入库，嵌入二进制）
 - 开发：`cd node/webui/frontend && npm run dev`（Vite 代理 `/v1`、`/health` 到 Node）
 - 能力：对话、SSE 流式、HITL 审批/询问、斜杠命令、Sessions/Context/Skills/Children/Policy/Triggers 面板
 

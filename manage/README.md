@@ -22,7 +22,7 @@ python run_manage.py
 默认 **`0.0.0.0:8020`**（`MANAGE_HOST` / `MANAGE_PORT` 可配置）。
 
 **Console（Node 目录 UI）**：浏览器打开 **`http://<host>:<port>/console/`**  
-基于 **Vue 3 + Vite**；源码在 `manage/console/frontend/`，构建产物在 `manage/console/static/`。  
+基于 **Vue 3 + Vite**；源码在 `manage/console/frontend/`，构建产物在 `manage/console/static/`（**不入库**，CI / Docker 多阶段构建；本地运行 Manage 或跑 Python 单测前须先 build）。  
 修改 UI 后执行 `./manage/console/build.sh`（或 `cd manage/console/frontend && npm run build`）。  
 默认 **开放模式**：无需 token，直接查看全部 Node 状态。
 
