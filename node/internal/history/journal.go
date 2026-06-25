@@ -3,6 +3,7 @@ package history
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -164,7 +165,7 @@ func formatRecordedAt(t time.Time) string {
 	)
 }
 
-func appendJournalLine(path, line string) error {
+func appendJournalLine(path, line string) (err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -172,7 +173,15 @@ func appendJournalLine(path, line string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			if err != nil {
+				err = errors.Join(err, closeErr)
+			} else {
+				err = closeErr
+			}
+		}
+	}()
 	_, err = f.WriteString(line)
 	return err
 }
