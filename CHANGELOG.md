@@ -16,7 +16,7 @@
 - **protect-loaded-skill plugin 构建**：源码迁至 `node/plugins/protect-loaded-skill/`（node 模块内 build）；`go test ./node/plugins/...` 与 CI 构建 smoke；packaging `hooks/build.sh` 委托 node 路径。
 - **Turn Hook phase 接线**：`turn.error` / `turn.cancel` 在 LLM 失败、流式 cancel、tool 处理 cancel 等路径触发。
 - **HITL 大参数诊断**：`scripts/test_python_hitl_large_args.py` 与 `tests/test_cli_hitl_large_args.py`（SSE / HITL 展开 / 入队分层验证）。
-- **Open Issue 文档**：[Issue 001 / #39](docs/issues/001-python-tui-hitl-approval-ui-stuck.md) — Python TUI `search_replace` HITL；[Issue 003 / #40](docs/issues/003-tui-hitl-approval-missing-large-args.md) — 终端 TUI 大参数无审批（Web UI 正常）。
+- **Open Issue**：[#39](https://github.com/DGS-ai-team/DAgents/issues/39) / [#40](https://github.com/DGS-ai-team/DAgents/issues/40)（同一根因：终端 TUI partial 与 HITL UI 竞态；Web UI 正常）。
 - **Python TUI 上次 session 记忆**：退出时写入 `<runtime>/client/last_session.json`；下次 `dagents chat` 未指定 `--session` 时默认复用（按 `api_base` 匹配）；`/switch` 同步更新。
 - **Manage LLM 配置注册中心**：`/v1/llm/configs` CRUD + `/resolve` 端点；list/detail `api_key` 掩码（`sk-***last4`），`/resolve` 返回明文 `{model,baseURL,apiKey}`（PageAgent 兼容形）；`is_default` 全局唯一；`allowed_groups` 按 `discovery_group` 命名空间**强制可见性**（非 admin：list 过滤、get/resolve/default-resolve 不可见返回 404）；仅适用于本地/局域网信任部署。多 Node / 外部可按 id 复用；Node 自动消费（热更/同步）延后到 Phase 2，Console 管理页见下。
 - **Manage Platform Blob API**：`POST /v1/blobs`（multipart 上传）、`GET/HEAD/DELETE /v1/blobs/{id}`；内容寻址（`blob_id = sha256`），字节落盘 `MANAGE_BLOB_DIR/{sha256}` + 元数据 `{sha256}.json` sidecar（不入 SQLite）；blob_id 严格 64 位十六进制校验防路径穿越；`blob store disabled` 返回 503；供 A2A 文件传输与 Skills 分发共用。
@@ -47,7 +47,7 @@
 
 - **Hook Host LLM 配额**：`RunHumanMessageTurn` 开始时重置 `hookHostState.llmCalls`，避免同一 session 后续 user turn 误触 `ErrLLMQuotaExceeded`。
 - **Plugin YAML phases**：全局 plugin 注册时用配置 phases 与插件声明 phases **取交集** 约束注册阶段（skill 目录 `.so` 仍用插件自身 phases）。
-- **Python TUI HITL（待现场回归）**：审批 UI 在 UI 线程同步弹出（避免 `call_later` 排在大量 `tool_call` partial 之后）；timeout/abort 时 cancel 在途 `_hitl_task`；`search_replace` 流式 partial 不再展示 growing raw JSON。详见 [Issue 001](docs/issues/001-python-tui-hitl-approval-ui-stuck.md)。
+- **Python TUI HITL（待现场回归）**：审批 UI 在 UI 线程同步弹出（避免 `call_later` 排在大量 `tool_call` partial 之后）；timeout/abort 时 cancel 在途 `_hitl_task`；`search_replace` 流式 partial 不再展示 growing raw JSON。详见 [#39](https://github.com/DGS-ai-team/DAgents/issues/39) / [#40](https://github.com/DGS-ai-team/DAgents/issues/40)。
 - **Windows `bash_run` 中文乱码（pipe 模式）**：PowerShell 交互窗口走 `[Console]::OutputEncoding`，stdout 被 pipe 捕获时默认走 `$OutputEncoding`（常为 US-ASCII），中文在 Go 解码前已损坏；`bash_run` 执行前自动注入 `$OutputEncoding = [Console]::OutputEncoding`，与交互式行为对齐。
 
 （Git **tag**：`v0.5.1`。）
