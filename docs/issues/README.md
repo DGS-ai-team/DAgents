@@ -6,5 +6,6 @@
 |----|------|------|------|
 | [001](./001-python-tui-hitl-approval-ui-stuck.md) | Python TUI：`search_replace` HITL 审批 UI 不出现、工具块 pending 至 timeout | Python Textual TUI | **Open**（排查暂停） |
 | [002](./002-webui-tool-display-and-approval.md) | Web UI：工具名 `tool(—)`、多项审批点「批准」导致全部拒绝 | Node Web UI | **Fixing** |
+| [003](./003-tui-hitl-approval-missing-large-args.md) | 终端 TUI：工具参数过长时审批卡片不出现（Web UI 正常） | Python + Go TUI | **Open** |
 
 同步 GitHub Issue 时，可将对应 `.md` 正文粘贴为 issue body，并在本表补充链接。
