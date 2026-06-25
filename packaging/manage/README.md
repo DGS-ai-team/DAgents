@@ -6,7 +6,7 @@
 
 ```bash
 # 仓库根目录
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.8 .
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.5.1 .
 
 # 或使用 compose（在 packaging/manage/ 下）
 cp .env.example .env
@@ -34,12 +34,12 @@ docker compose up -d --build
 
 ```bash
 # 联网机构建 bundle
-VERSION=0.3.8 bash scripts/ci/assemble_manage_bundle.sh
-# 产物：dist/dagents-manage-bundle-0.3.8.tar.gz
+VERSION=0.5.1 bash scripts/ci/assemble_manage_bundle.sh
+# 产物：dist/dagents-manage-bundle-0.5.1.tar.gz
 
 # 离线机
-tar -xzf dagents-manage-bundle-0.3.8.tar.gz
-cd dagents-manage-bundle-0.3.8
+tar -xzf dagents-manage-bundle-0.5.1.tar.gz
+cd dagents-manage-bundle-0.5.1
 cp .env.example .env
 bash scripts/import-image.sh
 bash scripts/restart.sh
@@ -51,7 +51,7 @@ Windows（Docker Desktop）：解压后执行 `scripts\import-image.bat`，再 `
 
 **方式 A — 从 GitHub Release 下载 bundle（推荐）**
 
-例如 `dagents-manage-bundle-0.3.8.tar.gz`。
+例如 `dagents-manage-bundle-0.5.1.tar.gz`。
 
 **方式 B — 仅镜像 tar.gz**
 
@@ -60,8 +60,8 @@ Release 亦附 **`dagents-manage-<version>.tar.gz`**（纯镜像，无脚本）�
 **方式 C — 本地构建**
 
 ```bash
-VERSION=0.3.8 bash scripts/ci/assemble_manage_bundle.sh
-# 或仅镜像：VERSION=0.3.8 bash scripts/ci/build_manage_docker.sh
+VERSION=0.5.1 bash scripts/ci/assemble_manage_bundle.sh
+# 或仅镜像：VERSION=0.5.1 bash scripts/ci/build_manage_docker.sh
 ```
 
 ### 2. 在离线机导入镜像
@@ -75,7 +75,7 @@ bash scripts/import-image.sh
 或手动：
 
 ```bash
-docker load -i image/dagents-manage-0.3.8.tar.gz
+docker load -i image/dagents-manage-0.5.1.tar.gz
 docker image ls dagents-manage
 ```
 

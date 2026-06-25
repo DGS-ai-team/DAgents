@@ -13,7 +13,8 @@
 | `internal/api/` | Node HTTP/SSE 客户端 |
 | `internal/hitl/` | 审批与用户询问（含 `Interact` 回调） |
 | `internal/tui/` | 终端入口：`full/` 全屏、`repl/` 行模式、`shared/` 共用 |
-| `internal/version/` | Client 版本号 |
+
+版本展示以 Node `GET /health` 为准（`dagents-client version` 探活后输出）；canonical 常量见 `node/internal/version/`。
 
 ## 本地运行
 

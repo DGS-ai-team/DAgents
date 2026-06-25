@@ -13,7 +13,6 @@ import (
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/client/internal/probe"
 	"github.com/DGS-ai-team/DAgents/client/internal/tui"
-	"github.com/DGS-ai-team/DAgents/client/internal/version"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -23,8 +22,7 @@ func main() {
 
 func run(args []string) int {
 	if len(args) > 0 && (args[0] == "version" || args[0] == "-version" || args[0] == "--version") {
-		fmt.Println(version.Version)
-		return 0
+		return cmdVersion("")
 	}
 	fs := flag.NewFlagSet("dagents-client", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to config.yaml (optional; default: DAGENTS_CONFIG or packaging/agent-client/config.yaml)")
@@ -49,6 +47,28 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "unknown command %q (supported: probe, chat, tui)\n", cmd)
 		return 2
 	}
+}
+
+func cmdVersion(configPath string) int {
+	resolved, err := config.ResolveConfigPath(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "version unavailable: %v\n", err)
+		return 1
+	}
+	cfg, err := config.LoadFile(resolved)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "version unavailable: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := probe.Node(ctx, cfg, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "version unavailable: probe failed: %v\n", err)
+		return 1
+	}
+	fmt.Println(res.Version)
+	return 0
 }
 
 func cmdProbe(configPath string) int {

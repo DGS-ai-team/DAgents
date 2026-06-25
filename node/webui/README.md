@@ -83,7 +83,7 @@ ui:
   enabled: true   # false 时不挂载 /ui/
 ```
 
-## 功能（v0.4.0）
+## 功能
 
 - **双栏工作台**：主聊天 + Runtime（会话、审批、工具执行气泡）。
 - **远程工作者条**：输入框上方显示工作中子 Agent / 对端 Agent 数量（SSE + `listChildAgents`）。

@@ -18,7 +18,6 @@ import (
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/client/internal/probe"
 	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
-	"github.com/DGS-ai-team/DAgents/client/internal/version"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -192,11 +191,11 @@ func (m *model) bootstrapSession(initialSession string) error {
 	m.sessionID = id
 	m.sessionMu.Unlock()
 
-	welcomeBody := tuishared.FormatWelcomePanelBody(m.probe.Endpoint, m.probe.AgentID, version.Version, id)
+	welcomeBody := tuishared.FormatWelcomePanelBody(m.probe.Endpoint, m.probe.AgentID, m.probe.Version, id)
 	if ctxBody, err := m.client.GetSessionContext(m.ctx, id); err == nil {
 		welcomeBody = append(welcomeBody, tuishared.SkillsBloatWarningLines(ctxBody)...)
 	}
-	m.transcript.AddSystemPanel(tuishared.WelcomePanelTitle(version.Version), welcomeBody)
+	m.transcript.AddSystemPanel(tuishared.WelcomePanelTitle(m.probe.Version), welcomeBody)
 	m.sseDetail = "连接中…"
 	m.restartStream()
 	return nil

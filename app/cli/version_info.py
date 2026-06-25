@@ -1,10 +1,33 @@
 from __future__ import annotations
 
 import getpass
+import json
 import os
+import urllib.error
+import urllib.request
 
-# 与 harness API `FastAPI(..., version=...)` 对齐，供 CLI 展示。
-CLI_VERSION = "0.4.0"
+
+def fetch_node_health(api_base: str, *, timeout_seconds: float = 5.0) -> dict[str, str] | None:
+    """同步 GET /health；成功且 status=ok 时返回摘要，否则 None。"""
+    url = f"{api_base.rstrip('/')}/health"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_seconds) as resp:
+            if resp.status != 200:
+                return None
+            raw = resp.read()
+    except (OSError, urllib.error.URLError, TimeoutError):
+        return None
+    try:
+        data = json.loads(raw.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or str(data.get("status") or "").strip().lower() != "ok":
+        return None
+    return {
+        "status": str(data.get("status") or ""),
+        "agent_id": str(data.get("agent_id") or ""),
+        "version": str(data.get("version") or ""),
+    }
 
 
 def get_cli_username() -> str:
@@ -26,8 +49,3 @@ def get_cli_username() -> str:
         if value:
             return value
     return "guest"
-
-
-def get_cli_version() -> str:
-    """返回 CLI 展示用版本号字符串。"""
-    return CLI_VERSION

@@ -15,7 +15,6 @@ import (
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 	"github.com/DGS-ai-team/DAgents/client/internal/probe"
 	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
-	"github.com/DGS-ai-team/DAgents/client/internal/version"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -66,8 +65,8 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "已连接 %s agent_id=%s model=%s client=%s (plain REPL)\n",
-		res.Endpoint, res.AgentID, orReplDash(res.LLM.Model), version.Version)
+	fmt.Fprintf(os.Stderr, "已连接 %s agent_id=%s model=%s version=%s (plain REPL)\n",
+		res.Endpoint, res.AgentID, orReplDash(res.LLM.Model), res.Version)
 	if res.LLM.ThinkingSupported {
 		fmt.Fprintf(os.Stderr, "thinking: %s（/thinking on|off · /thinking effort high|max）\n",
 			tuishared.FormatLLMThinkingSummary(res.LLM))
@@ -272,8 +271,7 @@ func (a *App) printStatus(ctx context.Context) error {
 	if a.probe.LLM.ThinkingSupported {
 		fmt.Fprintf(os.Stderr, "thinking:      %s\n", tuishared.FormatLLMThinkingSummary(a.probe.LLM))
 	}
-	fmt.Fprintf(os.Stderr, "node_version:  %s\n", a.probe.Version)
-	fmt.Fprintf(os.Stderr, "client_version:%s\n", version.Version)
+	fmt.Fprintf(os.Stderr, "version:       %s\n", a.probe.Version)
 	fmt.Fprintf(os.Stderr, "endpoint:      %s\n", a.probe.Endpoint)
 	fmt.Fprintf(os.Stderr, "session_id:    %s\n", a.currentSession())
 	fmt.Fprintf(os.Stderr, "messages:      %d\n", ctxBody.MessagesCount)

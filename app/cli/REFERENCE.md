@@ -85,8 +85,8 @@
 
 ## `version_info.py`
 
-- **`CLI_VERSION`**：CLI 展示版本（与仓库标记版本 `0.2.2` 对齐）
-- **`get_cli_username`** / **`get_cli_version`**：欢迎区用户名与版本
+- **`fetch_node_health`**：同步 GET `/health` 摘要（版本以 Node 为准）
+- **`get_cli_username`**：欢迎区用户名
 
 ## `tui/app.py`
 
@@ -103,7 +103,7 @@
 
 ## `tui/welcome_panel.py`
 
-- **`build_welcome_panel`**：生成进入时 Rich `Panel`（版本、欢迎语、用户名、backend、session、风险提示）
+- **`build_welcome_panel`**：Rich `Panel`（Node `version`、欢迎语、backend、session、风险提示）
 
 ## `tui/approval_screen.py`
 

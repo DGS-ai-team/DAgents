@@ -43,7 +43,7 @@
 | `internal/childagent/` | 临时子 Agent |
 | `internal/llm/` | LLM 客户端与消息适配 |
 | `internal/store/`、`history/` | SQLite 与 JSONL 审计 |
-| `internal/version/` | 构建版本号 |
+| `internal/version/` | **全项目唯一**构建版本号（`GET /health.version`） |
 | `internal/webui/` | 内嵌浏览器 Web UI（`go:embed` 静态资源，`GET /ui/`） |
 | `webui/` | Web UI 前端源码（Vue 3 + Vite）与 `build.sh` |
 

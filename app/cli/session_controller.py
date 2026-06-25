@@ -116,6 +116,7 @@ class SessionController:
         self._logger = get_session_controller_logger()
         self._resume_submit_seq = 0
         self._llm_info: dict[str, Any] = {}
+        self._node_version = ""
 
     def _event_seq(self, event: StreamEvent) -> int:
         """从 SSE id 或 envelope.seq 解析事件序号。"""
@@ -179,6 +180,10 @@ class SessionController:
     def llm_info(self) -> dict[str, Any]:
         return dict(self._llm_info)
 
+    @property
+    def node_version(self) -> str:
+        return self._node_version
+
     async def patch_llm_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
         """PATCH /v1/llm/settings 并更新本地缓存。"""
         assert self._client is not None
@@ -190,9 +195,10 @@ class SessionController:
     async def start(self) -> None:
         """连接 Agent Node 并启动 SSE pump 与 render 循环。"""
         self._client = DAgentsApiClient(self.api_base)
-        # 检查后端健康状态
-        if not await self._client.health():
-            raise RuntimeError(f"node health check failed: {self.api_base}/health")
+        health = await self._client.get_health()
+        if str(health.get("status") or "").strip().lower() != "ok":
+            raise RuntimeError(f"node unhealthy: status={health.get('status')!r}")
+        self._node_version = str(health.get("version") or "").strip()
         try:
             info = await self._client.get_agent_info()
             llm = info.get("llm")

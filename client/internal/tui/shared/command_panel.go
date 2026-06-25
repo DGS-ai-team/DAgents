@@ -38,7 +38,7 @@ func panelKV(label, value string) string {
 }
 
 // FormatStatusPanelBody 格式化 /status 面板正文。
-func FormatStatusPanelBody(agentID, nodeVersion, clientVersion, sessionID string, llm nodeapi.LLMSettings, ctx *nodeapi.SessionContext) []string {
+func FormatStatusPanelBody(agentID, nodeVersion, sessionID string, llm nodeapi.LLMSettings, ctx *nodeapi.SessionContext) []string {
 	if ctx == nil {
 		ctx = &nodeapi.SessionContext{}
 	}
@@ -54,8 +54,7 @@ func FormatStatusPanelBody(agentID, nodeVersion, clientVersion, sessionID string
 	lines := []string{
 		panelKV("agent", orDash(agentID)),
 		panelKV("model", orDash(llm.Model)),
-		panelKV("node", orDash(nodeVersion)),
-		panelKV("client", orDash(clientVersion)),
+		panelKV("version", orDash(nodeVersion)),
 		panelKV("session", orDash(sessionID)),
 		panelKV("messages", fmt.Sprintf("%d", ctx.MessagesCount)),
 		panelKV("queue", fmt.Sprintf("%d", ctx.QueuePending)),

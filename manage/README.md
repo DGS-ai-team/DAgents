@@ -33,7 +33,7 @@ python run_manage.py
 ### 联网快速启动
 
 ```bash
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.8 .
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.5.1 .
 # 或
 cd packaging/manage && cp .env.example .env && docker compose up -d --build
 ```
@@ -50,8 +50,8 @@ cd packaging/manage && cp .env.example .env && docker compose up -d --build
 |------|-------------|
 | Release bundle（推荐） | `dagents-manage-bundle-<version>.tar.gz`（镜像 + compose + `import-image` / `restart` 脚本） |
 | Release 仅镜像 | `dagents-manage-<version>.tar.gz` |
-| 本地构建 bundle | `VERSION=0.3.8 bash scripts/ci/assemble_manage_bundle.sh` |
-| 本地仅镜像 | `VERSION=0.3.8 bash scripts/ci/build_manage_docker.sh` |
+| 本地构建 bundle | `VERSION=0.5.1 bash scripts/ci/assemble_manage_bundle.sh` |
+| 本地仅镜像 | `VERSION=0.5.1 bash scripts/ci/build_manage_docker.sh` |
 
 离线机解压 bundle 后：`bash scripts/import-image.sh && bash scripts/restart.sh`（详见 [`packaging/manage/README.md`](../packaging/manage/README.md)）。
 

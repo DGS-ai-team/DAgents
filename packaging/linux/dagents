@@ -231,17 +231,8 @@ read_app_version() {
   if [[ -f "${ROOT}/VERSION" ]]; then
     v="$(tr -d '[:space:]' < "${ROOT}/VERSION")"
   fi
-  if [[ -z "${v}" ]] && [[ -x "${BIN}/dagents-cli" ]]; then
-    v="$("${BIN}/dagents-cli" version 2>/dev/null | awk '{print $NF}' || true)"
-  fi
-  if [[ -z "${v}" ]] && command -v python3 >/dev/null 2>&1; then
-    local repo_root="${ROOT}"
-    while [[ ! -f "${repo_root}/app/cli/version_info.py" && "${repo_root}" != "/" ]]; do
-      repo_root="$(dirname "${repo_root}")"
-    done
-    if [[ -f "${repo_root}/app/cli/version_info.py" ]]; then
-      v="$(python3 -c "import sys; sys.path.insert(0,'${repo_root}'); from app.cli.version_info import get_cli_version; print(get_cli_version())" 2>/dev/null || true)"
-    fi
+  if [[ -z "${v}" ]] && [[ -x "${BIN}/dagents-node" ]]; then
+    v="$("${BIN}/dagents-node" version 2>/dev/null | awk '{print $NF}' || true)"
   fi
   if [[ -z "${v}" ]]; then
     v="unknown"
@@ -249,30 +240,10 @@ read_app_version() {
   printf '%s\n' "${v}"
 }
 
-bin_version() {
-  local name="$1"
-  local bin_path="${BIN}/${name}"
-  [[ -x "${bin_path}" ]] || return 0
-  local out
-  out="$("${bin_path}" version 2>/dev/null || "${bin_path}" -version 2>/dev/null || true)"
-  if [[ -n "${out}" ]]; then
-    echo "  ${name}: ${out}"
-  fi
-}
-
 cmd_version() {
   local ver
   ver="$(read_app_version)"
-  echo "DAgents Local Assistant ${ver}"
-  bin_version dagents-node
-  bin_version dagents-client
-  if [[ -x "${BIN}/dagents-cli" ]]; then
-    local cli_out
-    cli_out="$("${BIN}/dagents-cli" version 2>/dev/null || true)"
-    if [[ -n "${cli_out}" ]]; then
-      echo "  ${cli_out/DAgents /dagents-cli: }"
-    fi
-  fi
+  echo "DAgents ${ver}"
 }
 
 cmd_help() {

@@ -10,7 +10,6 @@ import (
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/client/internal/probe"
-	"github.com/DGS-ai-team/DAgents/client/internal/version"
 	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 )
 
@@ -266,7 +265,7 @@ func (m *model) appendStatus() error {
 		return err
 	}
 	body := tuishared.FormatStatusPanelBody(
-		m.probe.AgentID, m.probe.Version, version.Version, m.currentSession(), m.llmSettings(), ctxBody,
+		m.probe.AgentID, m.probe.Version, m.currentSession(), m.llmSettings(), ctxBody,
 	)
 	m.transcript.AddSystemPanel("Status", body)
 	m.syncViewport()

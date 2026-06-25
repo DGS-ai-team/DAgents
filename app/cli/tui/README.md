@@ -6,7 +6,7 @@
 | [`policy_view.py`](policy_view.py) | `/policy` 状态与渲染（过滤、Tab、三档决策） |
 | [`transcript_log.py`](transcript_log.py) | `TranscriptLog`：监听 `scroll_y`，同步 `_transcript_follow_tail` / `auto_scroll` |
 | [`prompt_text_area.py`](prompt_text_area.py) | 两行 `TextArea` 输入（Enter 发送，Shift+Enter 换行，Esc 取消当前 turn） |
-| [`welcome_panel.py`](welcome_panel.py) | `build_welcome_panel()`：连接后写入 transcript 的欢迎 Panel |
+| [`welcome_panel.py`](welcome_panel.py) | `build_welcome_panel()`：连接后写入 transcript；**version 来自 Node `/health`** |
 | [`approval_screen.py`](approval_screen.py) | 旧工具审批 Modal（保留备用） |
 
 ## 展示约定

@@ -53,8 +53,10 @@ GET /health
 ```
 
 ```json
-{ "status": "ok", "agent_id": "ops-win-01", "version": "0.2.2" }
+{ "status": "ok", "agent_id": "ops-win-01", "version": "0.5.1" }
 ```
+
+`version` 字段为全项目唯一语义化版本（源码：`node/internal/version/version.go`）。
 
 ```http
 GET /v1/agent/info

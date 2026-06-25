@@ -51,10 +51,14 @@
 
 ```http
 GET /health
-→ { "status": "ok", "agent_id": "...", "version": "0.4.0" }
+→ { "status": "ok", "agent_id": "...", "version": "0.5.1" }
+```
 
+`version` 与 `node/internal/version/version.go` 及当前发版 tag 一致；**全项目唯一语义化版本**，Client/TUI 启动时探活读取，不维护独立 Client 版本号。
+
+```http
 GET /v1/agent/info
-→ { "agent_id", "expose_to_peers", "capabilities", "manage_registered" }
+→ { "agent_id", "expose_to_peers", "capabilities", "manage_registered", "llm": { ... } }
 ```
 
 ### 2.2 Session
@@ -159,7 +163,7 @@ GET /v1/stream?after_seq=0
 | Go HITL | `client/internal/hitl/` | `hitl_batch.go` 展开、`approval`、A2A relay |
 | Go A2A 展示 | `client/internal/tui/full/a2a_relay_tools.go` | `from <对端>` 标识 |
 | Go plain REPL | `client/internal/tui/repl/` | 行模式 |
-| Node Web UI | `node/webui/frontend/` | Vue 3 + Vite；`go:embed` 挂载 `/ui/` |
+| Node Web UI | `node/webui/frontend/` | Vue 3 + Vite；构建产物 **不入库**；`go:embed` 挂载 `/ui/` |
 | Web UI API | `node/webui/frontend/src/api/node.js` | 复用 `/v1` HTTP/SSE |
 
 ### 3.2 HITL 与 Client 行为
@@ -261,6 +265,9 @@ local:
 ```bash
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 
+# 首次 go test / go build 前（Web UI 静态资源不入库）
+bash node/webui/build.sh
+
 # 终端 1
 go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 
@@ -269,6 +276,8 @@ dagents chat
 # 或
 go run ./client/cmd/dagents-client tui -config packaging/agent-client/config.yaml
 ```
+
+`dagents version` / `dagents-client version` / TUI 欢迎区均展示 **`GET /health` 的 `version`**（需 Node 在线）。
 
 默认 `llm.mock: true` 时可无 API Key 联调。
 

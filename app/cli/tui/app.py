@@ -309,6 +309,7 @@ class DAgentsTuiApp(App[None]):
             build_welcome_panel(
                 api_base=self._controller.api_base,
                 session_id=self._controller.session_id,
+                version=self._controller.node_version,
                 width=panel_width if panel_width > 0 else None,
                 context_summary=context_summary,
             ),

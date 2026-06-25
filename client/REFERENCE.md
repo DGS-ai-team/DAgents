@@ -53,8 +53,4 @@
 
 见 [`internal/tui/REFERENCE.md`](internal/tui/REFERENCE.md)：`dispatch.Run`、`full/`、`repl/`、`shared/`。
 
-## `internal/version/version.go`
-
-| 符号 | 说明 |
-|------|------|
-| `Version` | Client 语义化版本 |
+版本号以 Node `GET /health` 为准（`dagents-client version` 探活后输出）；canonical 常量见 `node/internal/version/`。

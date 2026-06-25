@@ -34,11 +34,14 @@
 - **Hook Host**：`hooks.host.history_window` 省略或 ≤0 时不截断 Context history（移除默认 50 条上限）。
 - **write-skill**：Hook 编写说明拆至 **write-hook** skill。
 - **tool.before_each deny**：Hook mutation 支持 `approval_reason`；`ActionDeny` 的 tool 结果文案走 `ToolDenyMessage`（不再固定 `policy_denied`）。
+- **前端静态资源不入库**：`node/internal/webui/static/`、`manage/console/static/` 改 CI / `build.sh` 构建；PR 与 Release 工作流补 Manage Console build。
+- **全项目唯一版本号**：canonical 仅 `node/internal/version/`；Client/TUI 欢迎区与 `dagents version` / `dagents-client version` 均读 Node `GET /health`（移除 `client/internal/version`、`CLI_VERSION`）。
 
 ### 移除
 
 - **`node/internal/hooks/external_*`**（command/http/journal 外部栈）及 `packaging/runtime/hooks/redaction.sh`。
 - **Turn 层 dead SSE helper**：`publishUserInformationRequired` / `publishApprovalRequired`（本地 turn 已统一 `hitl_required`；A2A 仍在 session 层发旧事件）。
+- **`client/internal/version/`**、Python **`CLI_VERSION`**；已落地的 **`docs/superpowers/plans/`** 实施 plan（设计见 `docs/design/manage-llm-skills-pageagent.md`）。
 
 ### 修复
 

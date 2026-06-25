@@ -4,7 +4,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from app.cli.version_info import get_cli_username, get_cli_version
+from app.cli.version_info import get_cli_username
 
 # 进入 TUI 时右侧固定风险提示（中文）。
 _RISK_LINES = (
@@ -44,6 +44,11 @@ def format_thinking_summary(llm_info: dict | None) -> str | None:
     return None
 
 
+def _display_version(value: str | None) -> str:
+    text = str(value or "").strip()
+    return text if text else "—"
+
+
 def build_welcome_panel(
     *,
     api_base: str,
@@ -56,22 +61,22 @@ def build_welcome_panel(
     """构造进入聊天时写入 RichLog 的欢迎 Panel（连接成功后一次性写入，不再更新）。
 
     逻辑：
-    1. 左栏：欢迎语、用户名、backend、session；
+    1. 左栏：欢迎语、用户名、backend、version（Node GET /health）、session；
     2. 右栏：风险提示列表；
-    3. 外层 Panel 标题为版本号，边框使用红色系以贴近原 TUI 卡片样式。
+    3. 外层 Panel 标题为 Node 版本。
 
     Args:
         api_base: 后端根地址。
         session_id: 当前 session id（空则展示 —）。
         username: 系统用户名，默认 `get_cli_username()`。
-        version: CLI 版本，默认 `get_cli_version()`。
+        version: Node 版本（GET /health.version）；空则标题与 version 行展示 —。
         width: RichLog 可用宽度；传入时 Panel 边框与 transcript 同宽。
 
     Returns:
         可直接 ``RichLog.write(panel, expand=True)`` 的 Rich Panel（须 expand 才能铺满 transcript 宽度）。
     """
     user = username if username is not None else get_cli_username()
-    ver = version if version is not None else get_cli_version()
+    ver = _display_version(version)
     backend = api_base.strip() or "—"
     session = session_id.strip() or "—"
 
@@ -79,6 +84,7 @@ def build_welcome_panel(
     left.append(f"欢迎回来 {user}！\n", style="bold")
     left.append(f"用户 · {user}\n", style="dim")
     left.append(f"backend · {backend}\n", style="dim")
+    left.append(f"version · {ver}\n", style="dim")
     left.append(f"session · {session}", style="dim")
     for line in _skills_bloat_warning_lines(context_summary):
         left.append(f"\n{line}", style="bold yellow")

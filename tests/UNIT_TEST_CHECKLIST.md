@@ -81,7 +81,7 @@
 | `node/cmd/dagents-node` | — | main 入口 | ⬜ |
 | `client/cmd/dagents-client` | — | main 入口 | ⬜ |
 | `client/internal/tui`（顶层 dispatch） | — | full/repl 模式切换 | ⬜ |
-| `node/internal/version`, `client/internal/version` | — | 版本常量 | ⬜ |
+| `node/internal/version` | — | 版本常量（全项目唯一） | ⬜ |
 
 ---
 

@@ -64,9 +64,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "doctor":
         return _doctor()
     if args.command == "version":
-        from app.cli.version_info import get_cli_version
+        from app.cli.version_info import fetch_node_health
 
-        print(f"DAgents {get_cli_version()}")
+        api_base = _default_api_base()
+        health = fetch_node_health(api_base)
+        if health and health.get("version"):
+            print(f"DAgents {health['version']}")
+        else:
+            print(f"[dagents] version unavailable: node unreachable @ {api_base}", file=sys.stderr)
+            return 1
         return 0
     parser.print_help()
     return 0

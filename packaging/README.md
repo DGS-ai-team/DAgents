@@ -19,8 +19,8 @@
 scripts/package_local_assistant.sh
 
 # 产物示例
-# dist/dagents-local-assistant-linux-amd64-0.2.2.tar.gz
-# dist/dagents-local-assistant-windows-amd64-0.2.2.zip
+# dist/dagents-local-assistant-linux-amd64-0.5.1.tar.gz
+# dist/dagents-local-assistant-windows-amd64-0.5.1.zip
 ```
 
 Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**（glibc 2.28）容器内 PyInstaller；Go 二进制 **CGO_ENABLED=0** 静态编译；**Release 构建前执行 `node/webui/build.sh`**（Web UI 不入库，嵌入 `dagents-node`）；Manage Console 由 **`manage/console/build.sh`** 或 Docker 多阶段构建。

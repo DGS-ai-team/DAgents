@@ -43,9 +43,23 @@ class DAgentsApiClient:
     async def close(self) -> None:
         await self._session.close()
 
-    async def health(self) -> bool:
+    async def get_health(self) -> dict[str, Any]:
+        """GET /health → `{ status, agent_id, version }`。"""
         async with self._session.get(f"{self.api_base}/health") as resp:
-            return resp.status == 200
+            if resp.status != 200:
+                body = (await resp.text())[:512]
+                raise RuntimeError(f"GET /health: status {resp.status}: {body.strip()}")
+            data = await resp.json()
+            if not isinstance(data, dict):
+                raise RuntimeError("GET /health: invalid JSON")
+            return data
+
+    async def health(self) -> bool:
+        try:
+            payload = await self.get_health()
+        except Exception:
+            return False
+        return str(payload.get("status") or "").strip().lower() == "ok"
 
     async def get_agent_info(self) -> dict[str, Any]:
         return await self._get_json("/v1/agent/info")

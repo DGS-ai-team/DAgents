@@ -84,7 +84,7 @@ Manage 登记 **DAgents 各组件**（`dagents-node`、`dagents-client`、`dagen
 | GET | `/v1/releases/latest` | `?component=dagents-node&platform=linux-amd64` → `{version, published_at, release_notes_url, assets[]}` |
 | GET | `/v1/releases` | Admin 列表历史版本 |
 | POST | `/v1/releases` | Admin 登记新版本（或 CI webhook 写入） |
-| GET | `/v1/releases/check` | Node 批量检查：`?components=node,client&current=0.4.0` → `[{component, current, latest, upgrade_available}]` |
+| GET | `/v1/releases/check` | Node 批量检查：`?components=node&current=0.5.1` → `[{component, current, latest, upgrade_available}]`（Phase 2；版本以 Node 为准，无独立 client 组件版本） |
 
 **资产**：`assets[]` 指向 GitHub Release URL 或企业内网镜像地址；Manage **可不托管二进制**，只做 **索引与策略**（哪些环境允许自动提示/禁止降级）。
 
