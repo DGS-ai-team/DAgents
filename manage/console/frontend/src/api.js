@@ -204,4 +204,99 @@ export async function uploadReleasePackage({
   return body;
 }
 
+// --- Cases 案例库 ---
+export async function fetchCases() {
+  return apiFetch("/v1/cases");
+}
+
+export async function createCase({ caseId, name, description = "", skillIds = "", pluginIds = "", file = null }) {
+  const form = new FormData();
+  form.set("case_id", caseId);
+  form.set("name", name);
+  form.set("description", description);
+  form.set("skill_ids", skillIds);
+  form.set("plugin_ids", pluginIds);
+  if (file) form.set("file", file);
+  const resp = await fetch(new URL("/v1/cases", window.location.origin), {
+    method: "POST",
+    body: form,
+  });
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
+    throw new Error(message);
+  }
+  return body;
+}
+
+export async function patchCase(caseId, payload) {
+  return apiFetch(`/v1/cases/${encodeURIComponent(caseId)}`, {}, { method: "PATCH", body: payload });
+}
+
+export async function deleteCase(caseId) {
+  return apiFetch(`/v1/cases/${encodeURIComponent(caseId)}`, {}, { method: "DELETE" });
+}
+
+export async function importCaseJsonl(caseId, file, { replace = true } = {}) {
+  const form = new FormData();
+  form.set("file", file);
+  form.set("replace", replace ? "true" : "false");
+  const resp = await fetch(
+    new URL(`/v1/cases/${encodeURIComponent(caseId)}/import-jsonl`, window.location.origin),
+    { method: "POST", body: form },
+  );
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
+    throw new Error(message);
+  }
+  return body;
+}
+
+export async function insertCaseMessage(caseId, payload) {
+  return apiFetch(`/v1/cases/${encodeURIComponent(caseId)}/messages`, {}, { method: "POST", body: payload });
+}
+
+export async function updateCaseMessage(caseId, messageId, payload) {
+  return apiFetch(
+    `/v1/cases/${encodeURIComponent(caseId)}/messages/${encodeURIComponent(messageId)}`,
+    {},
+    { method: "PATCH", body: payload },
+  );
+}
+
+export async function deleteCaseMessage(caseId, messageId) {
+  return apiFetch(
+    `/v1/cases/${encodeURIComponent(caseId)}/messages/${encodeURIComponent(messageId)}`,
+    {},
+    { method: "DELETE" },
+  );
+}
+
+export async function exportCaseJsonl(caseId) {
+  const resp = await fetch(
+    new URL(`/v1/cases/${encodeURIComponent(caseId)}/export/jsonl`, window.location.origin),
+  );
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status}`);
+  }
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${caseId}.jsonl`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export { REGISTRY_API };

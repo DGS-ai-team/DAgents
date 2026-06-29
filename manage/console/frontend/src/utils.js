@@ -87,4 +87,8 @@ export const VIEW_META = {
     title: "Node 配置",
     subtitle: "多 Node 复用的 LLM 配置与 Skills 分发",
   },
+  cases: {
+    title: "案例库",
+    subtitle: "演示会话 JSONL、关联 Skills / Plugins",
+  },
 };

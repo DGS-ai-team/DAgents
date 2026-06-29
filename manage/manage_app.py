@@ -23,6 +23,8 @@ from manage.llm.store import LLMConfigStore
 from manage.platform.blob_routes import build_blob_router
 from manage.registry.routes import build_registry_router
 from manage.registry.store import AgentRegistryStore
+from manage.cases.routes import build_cases_router
+from manage.cases.store import CaseExampleStore
 from manage.releases.routes import build_releases_router
 from manage.releases.seed import seed_bundled_releases
 from manage.releases.store import ReleasePackageStore
@@ -83,6 +85,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
         return AuditListResponse(events=audit.list_recent(limit=limit))
 
     skills_store = SkillPackageStore(db=db if db.enabled else None)
+    cases_store = CaseExampleStore(db=db if db.enabled else None)
 
     app.include_router(build_registry_router(store, audit))
     app.include_router(build_a2a_router(store, a2a_store, audit))
@@ -90,6 +93,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))
     app.include_router(build_skills_router(skills_store, blob, audit))
+    app.include_router(build_cases_router(cases_store, audit))
     app.include_router(
         build_releases_router(
             releases_store,
@@ -115,6 +119,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.state.a2a_store = a2a_store
     app.state.llm_store = llm_store
     app.state.skills_store = skills_store
+    app.state.cases_store = cases_store
     app.state.releases_store = releases_store
     return app
 
