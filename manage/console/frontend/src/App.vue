@@ -7,6 +7,7 @@ import BulkGroupsPanel from "./components/BulkGroupsPanel.vue";
 import DetailDrawer from "./components/DetailDrawer.vue";
 import InboxView from "./components/InboxView.vue";
 import NodeAdminView from "./components/NodeAdminView.vue";
+import CasesView from "./components/CasesView.vue";
 import PageHeader from "./components/PageHeader.vue";
 import RegistryView from "./components/RegistryView.vue";
 import StatsRow from "./components/StatsRow.vue";
@@ -312,6 +313,12 @@ onMounted(async () => {
         <NodeAdminView
           v-if="view === 'nodeadmin'"
           :active="view === 'nodeadmin'"
+          @toast="showToast($event.message, $event.type)"
+        />
+
+        <CasesView
+          v-if="view === 'cases'"
+          :active="view === 'cases'"
           @toast="showToast($event.message, $event.type)"
         />
       </main>

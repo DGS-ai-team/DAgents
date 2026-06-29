@@ -145,6 +145,25 @@ Node 出站 Header：
 
 协议说明：[docs/future/a2a-via-manage.md](../docs/future/a2a-via-manage.md)（**无** `/v1/a2a/messages` 兼容）。
 
+### 案例库（Cases）
+
+Console → **案例库**：上传 Node history JSONL 创建演示案例，可编辑消息（插入 / 修改 / 删除），并关联 Skills、Plugins。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/v1/cases` | 案例列表 |
+| POST | `/v1/cases` | 创建（multipart：元数据 + 可选 JSONL） |
+| GET | `/v1/cases/{case_id}` | 详情（含消息列表） |
+| PATCH | `/v1/cases/{case_id}` | 更新名称、描述、关联资源 |
+| DELETE | `/v1/cases/{case_id}` | 删除 |
+| POST | `/v1/cases/{case_id}/import-jsonl` | 导入 JSONL（replace 或追加） |
+| POST | `/v1/cases/{case_id}/messages` | 插入消息 |
+| PATCH | `/v1/cases/{case_id}/messages/{id}` | 修改消息 |
+| DELETE | `/v1/cases/{case_id}/messages/{id}` | 删除消息 |
+| GET | `/v1/cases/{case_id}/export/jsonl` | 导出 JSONL |
+
+JSONL 行格式对齐 Node `history/*.jsonl`：`{"recorded_at":"...","message":{"role":"user","content":"..."}}`。
+
 ## 目录结构
 
 ```text
@@ -160,6 +179,7 @@ manage/
     static/     # 构建产物，挂载 /console/
     build.sh    # npm run build 封装
   a2a/          # M2 Task store + routes
+  cases/        # 案例库（JSONL 演示会话 + 关联资源）
   skills/       # M3 占位
 ```
 

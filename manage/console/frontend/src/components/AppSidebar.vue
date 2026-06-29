@@ -58,6 +58,17 @@ const emit = defineEmits(["navigate"]);
       <button
         type="button"
         class="nav-tab"
+        :class="{ active: view === 'cases' }"
+        @click="emit('navigate', 'cases')"
+      >
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm3 2h6v2H7V5zm0 4h6v2H7V9zm0 4h4v2H7v-2z" />
+        </svg>
+        案例库
+      </button>
+      <button
+        type="button"
+        class="nav-tab"
         :class="{ active: view === 'nodeadmin' }"
         @click="emit('navigate', 'nodeadmin')"
       >
