@@ -35,6 +35,10 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 		err = m.handleSkillCommand(parts[1:])
 	case "status":
 		err = m.appendStatus()
+	case "version":
+		err = m.appendVersion()
+	case "update":
+		err = m.appendUpdate()
 	case "sessions", "ls":
 		err = m.appendSessions()
 	case "switch":
@@ -268,6 +272,50 @@ func (m *model) appendStatus() error {
 		m.probe.AgentID, m.probe.Version, m.currentSession(), m.llmSettings(), ctxBody,
 	)
 	m.transcript.AddSystemPanel("Status", body)
+	m.syncViewport()
+	return nil
+}
+
+func (m *model) turnInProgress() bool {
+	if len(m.hitlQueue) > 0 {
+		return true
+	}
+	for _, kind := range statusKindOrder {
+		if m.statusMgr.Has(kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *model) appendVersion() error {
+	status, err := m.client.GetAgentUpdate(m.ctx)
+	if err != nil {
+		return err
+	}
+	body := tuishared.FormatVersionPanelBody(
+		status.CurrentVersion,
+		status.LatestVersion,
+		status.Platform,
+		status.Channel,
+		status.Message,
+		status.ManageReachable,
+		status.UpgradeAvailable,
+	)
+	m.transcript.AddSystemPanel("Version", body)
+	m.syncViewport()
+	return nil
+}
+
+func (m *model) appendUpdate() error {
+	if m.turnInProgress() {
+		return fmt.Errorf("turn 或 HITL 进行中，请稍后再试 /update")
+	}
+	status, err := m.client.GetAgentUpdate(m.ctx)
+	if err != nil {
+		return err
+	}
+	m.transcript.AddSystemPanel("Update", tuishared.FormatUpdatePanelBody(status))
 	m.syncViewport()
 	return nil
 }

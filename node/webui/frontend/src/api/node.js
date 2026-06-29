@@ -33,6 +33,10 @@ export function getAgentInfo() {
   return apiFetch("/v1/agent/info");
 }
 
+export function getAgentUpdate() {
+  return apiFetch("/v1/agent/update");
+}
+
 export function getLLMSettings() {
   return apiFetch("/v1/llm/settings");
 }

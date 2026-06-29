@@ -145,6 +145,23 @@ Node 出站 Header：
 
 协议说明：[docs/future/a2a-via-manage.md](../docs/future/a2a-via-manage.md)（**无** `/v1/a2a/messages` 兼容）。
 
+## Release Hub（安装包托管）
+
+Manage 在 `MANAGE_RELEASES_DIR`（默认 `/data/releases`）托管 `dagents-local-assistant` 安装包。Console → **管理 → 版本发布** 可上传草稿、发布、设为 latest。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/releases/packages` | Admin 上传（默认 draft） |
+| GET | `/v1/releases/packages` | 列表 |
+| POST | `/v1/releases/packages/{artifact}/{channel}/{platform}/{version}/publish` | 发布 |
+| POST | `/v1/releases/packages/{artifact}/{channel}/{platform}/{version}/promote` | 设为 latest |
+| GET | `/v1/releases/check` | Node 版本检查 |
+| GET | `/v1/releases/packages/.../latest/download` | 下载 latest |
+
+发版时 CI 将同版本 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入 Manage Docker 镜像与 offline bundle（`/app/bundled/releases` seed）。详见 [docs/design/release-update-hub.md](../docs/design/release-update-hub.md)。
+
+Node：`GET /v1/agent/update`（需 `manage.enabled`）。
+
 ## 目录结构
 
 ```text
@@ -160,6 +177,7 @@ manage/
     static/     # 构建产物，挂载 /console/
     build.sh    # npm run build 封装
   a2a/          # M2 Task store + routes
+  releases/     # Release Hub（安装包托管 + 版本检查）
   skills/       # M3 占位
 ```
 

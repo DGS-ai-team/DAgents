@@ -193,11 +193,19 @@ jobs:
   build-manage-docker:
     name: Build Manage Docker image
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: unit-tests
+    needs:
+      - unit-tests
+      - build-local-assistant
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download linux-amd64 local assistant
+        uses: actions/download-artifact@v4
+        with:
+          name: dagents-local-assistant-linux-amd64
+          path: dist
 
       - name: Build and export Manage image
         shell: bash

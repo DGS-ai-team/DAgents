@@ -43,6 +43,14 @@ cp "${REPO_ROOT}/packaging/manage/scripts/import-image.bat" "${BUNDLE_DIR}/scrip
 cp "${REPO_ROOT}/packaging/manage/scripts/restart.bat" "${BUNDLE_DIR}/scripts/"
 chmod +x "${BUNDLE_DIR}/scripts/"*.sh
 
+ASSISTANT_TAR="${REPO_ROOT}/dist/dagents-local-assistant-linux-amd64-${VERSION}.tar.gz"
+if [[ -f "${ASSISTANT_TAR}" ]]; then
+  RELEASE_DIR="${BUNDLE_DIR}/releases/dagents-local-assistant/stable/linux-amd64/${VERSION}"
+  mkdir -p "${RELEASE_DIR}"
+  cp "${ASSISTANT_TAR}" "${RELEASE_DIR}/"
+  echo "[assemble-manage] bundled release: ${ASSISTANT_TAR}"
+fi
+
 echo "${VERSION}" > "${BUNDLE_DIR}/VERSION"
 
 cat > "${BUNDLE_DIR}/README.txt" <<EOF

@@ -10,6 +10,7 @@ import ContextPanel from "./components/ContextPanel.vue";
 import SkillsPanel from "./components/SkillsPanel.vue";
 import HelpPanel from "./components/HelpPanel.vue";
 import StatusPanel from "./components/StatusPanel.vue";
+import UpdatePanel from "./components/UpdatePanel.vue";
 import SessionsPanel from "./components/SessionsPanel.vue";
 import PolicyPanel from "./components/PolicyPanel.vue";
 import TriggersPanel from "./components/TriggersPanel.vue";
@@ -740,6 +741,7 @@ watch(
           <SkillsPanel v-else-if="chromeStore.panel === 'skills'" @close="closePanel" />
           <HelpPanel v-else-if="chromeStore.panel === 'help'" @close="closePanel" @pick="onHelpPick" />
           <StatusPanel v-else-if="chromeStore.panel === 'status'" @close="closePanel" />
+          <UpdatePanel v-else-if="chromeStore.panel === 'update'" @close="closePanel" />
           <SessionsPanel v-else-if="chromeStore.panel === 'sessions'" @close="closePanel" @switch="onSessionSwitch" />
           <PolicyPanel v-else-if="chromeStore.panel === 'policy'" @close="closePanel" />
           <TriggersPanel v-else-if="chromeStore.panel === 'triggers'" @close="closePanel" />

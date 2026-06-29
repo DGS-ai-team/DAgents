@@ -56,12 +56,20 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL,
                     PRIMARY KEY (skill_id, version)
                 );
+                CREATE TABLE IF NOT EXISTS release_packages (
+                    artifact TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY (artifact, channel, platform, version)
+                );
                 -- Blob 元数据随内容寻址文件落在 MANAGE_BLOB_DIR/{sha256}.json sidecar，
                 -- 不入 SQLite；故此处不建 blobs 表。
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','3') "
-                "ON CONFLICT(key) DO UPDATE SET value='3'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','4') "
+                "ON CONFLICT(key) DO UPDATE SET value='4'"
             )
             conn.commit()

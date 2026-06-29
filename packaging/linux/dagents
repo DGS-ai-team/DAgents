@@ -246,6 +246,74 @@ cmd_version() {
   echo "DAgents ${ver}"
 }
 
+cmd_update() {
+  local force=0 check=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force|-f) force=1 ;;
+      --check) check=1 ;;
+      --from-client) ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+    shift
+  done
+
+  require_bin dagents-client
+  if ! probe_node; then
+    die "node is not running; start with: dagents node"
+  fi
+
+  if [[ "${check}" -eq 1 ]]; then
+    "${BIN}/dagents-client" -config "${ROOT}/${CFG}" update --check
+    return $?
+  fi
+
+  local tmp_pkg
+  tmp_pkg="$(mktemp "${ROOT}/.runtime/dagents-update.XXXXXX.tar.gz")"
+  local extra=()
+  [[ "${force}" -eq 1 ]] && extra+=(--force)
+
+  set +e
+  "${BIN}/dagents-client" -config "${ROOT}/${CFG}" update --output "${tmp_pkg}" "${extra[@]}"
+  local rc=$?
+  set -e
+
+  if [[ "${rc}" -eq 3 ]]; then
+    rm -f "${tmp_pkg}"
+    echo "[dagents] already up to date"
+    return 0
+  fi
+  if [[ "${rc}" -ne 0 ]]; then
+    rm -f "${tmp_pkg}"
+    return "${rc}"
+  fi
+  if [[ ! -s "${tmp_pkg}" ]]; then
+    rm -f "${tmp_pkg}"
+    die "update download produced an empty file"
+  fi
+
+  shutdown_node
+
+  local staging
+  staging="$(mktemp -d "${ROOT}/.runtime/dagents-update-staging.XXXXXX")"
+  tar -xzf "${tmp_pkg}" -C "${staging}"
+  local bundle=""
+  bundle="$(find "${staging}" -mindepth 1 -maxdepth 1 -type d | head -1)"
+  if [[ -z "${bundle}" || ! -f "${bundle}/install.sh" ]]; then
+    rm -rf "${staging}" "${tmp_pkg}"
+    die "invalid update package (missing install.sh)"
+  fi
+
+  echo "[dagents] applying update from ${bundle##*/}"
+  (cd "${bundle}" && ./install.sh --prefix "${ROOT}" --overwrite-policy --keep-policy)
+
+  rm -rf "${staging}" "${tmp_pkg}"
+  restart_node
+  echo "[dagents] update complete"
+}
+
 cmd_help() {
   cat <<'EOF'
 Usage:
@@ -258,6 +326,9 @@ Usage:
   dagents node --no-wait          Background start without waiting for probe
   dagents doctor                  Check installed files
   dagents version                 Print version information
+  dagents version --check         Check for updates (via Manage Release Hub)
+  dagents update [--check]        Download and apply latest release
+  dagents update --force          Apply without confirmation prompt
 
 Web UI (browser Client, embedded in dagents-node):
   After `dagents node`, open http://127.0.0.1:<listen.port>/ui/ (default port 18765).
@@ -348,7 +419,21 @@ case "$1" in
     cmd_doctor
     exit $?
     ;;
+  update)
+    shift
+    cmd_update "$@"
+    exit $?
+    ;;
   version)
+    shift
+    if [[ "${1:-}" == "--check" ]]; then
+      require_bin dagents-client
+      if ! probe_node; then
+        die "node is not running; start with: dagents node"
+      fi
+      "${BIN}/dagents-client" -config "${ROOT}/${CFG}" update --check
+      exit $?
+    fi
     cmd_version
     exit 0
     ;;

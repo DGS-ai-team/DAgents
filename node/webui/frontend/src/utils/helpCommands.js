@@ -10,6 +10,8 @@ export const HELP_SECTIONS = [
     title: "Session",
     items: [
       { cmd: "/status", desc: "Agent、LLM 与当前 session 状态" },
+      { cmd: "/version", desc: "当前版本与更新检查" },
+      { cmd: "/update", desc: "查看可用升级（终端执行 dagents update）" },
       { cmd: "/sessions", desc: "列出 session（/ls 同义）" },
       { cmd: "/switch <id>", desc: "切换到指定 session" },
       { cmd: "/new", desc: "新建 session" },

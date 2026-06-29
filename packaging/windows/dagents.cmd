@@ -30,7 +30,8 @@ if /I "%~1"=="chat" shift & goto run_cli_chat
 if /I "%~1"=="tui" shift & goto run_client_tui
 if /I "%~1"=="node" shift & goto run_node
 if /I "%~1"=="doctor" goto doctor
-if /I "%~1"=="version" goto version
+if /I "%~1"=="version" shift & goto version_cmd
+if /I "%~1"=="update" shift & goto update_cmd
 goto run_cli_pass
 
 :run_cli_chat
@@ -323,6 +324,93 @@ if "%OK%"=="1" (popd >nul & exit /b 0)
 popd >nul
 exit /b 1
 
+:version_cmd
+if /I "%~1"=="--check" (
+  if not exist "bin\dagents-client.exe" goto missing_client
+  call :ensure_node
+  if errorlevel 1 (
+    set "EXIT_CODE=1"
+    goto cli_exit
+  )
+  bin\dagents-client.exe -config "%CFG_ABS%" update --check
+  goto cli_exit
+)
+goto version
+
+:update_cmd
+if not exist "bin\dagents-client.exe" goto missing_client
+call :ensure_node
+if errorlevel 1 (
+  set "EXIT_CODE=1"
+  goto cli_exit
+)
+set "UPDATE_FORCE="
+set "UPDATE_CHECK="
+:parse_update_next
+if "%~1"=="" goto run_update_exec
+if /I "%~1"=="--force" (
+  set "UPDATE_FORCE=--force"
+  shift
+  goto parse_update_next
+)
+if /I "%~1"=="--check" (
+  set "UPDATE_CHECK=--check"
+  shift
+  goto parse_update_next
+)
+if /I "%~1"=="--from-client" (
+  shift
+  goto parse_update_next
+)
+echo [dagents] unknown update option: %~1
+set "EXIT_CODE=2"
+goto cli_exit
+:run_update_exec
+if defined UPDATE_CHECK (
+  bin\dagents-client.exe -config "%CFG_ABS%" update --check
+  goto cli_exit
+)
+set "TMP_PKG=%DAGENTS_HOME%\.runtime\dagents-update-%RANDOM%.pkg"
+bin\dagents-client.exe -config "%CFG_ABS%" update --output "%TMP_PKG%" !UPDATE_FORCE!
+set "UPDATE_RC=!ERRORLEVEL!"
+if "!UPDATE_RC!"=="3" (
+  if exist "!TMP_PKG!" del /f /q "!TMP_PKG!"
+  echo [dagents] already up to date
+  goto cli_exit
+)
+if not "!UPDATE_RC!"=="0" (
+  if exist "!TMP_PKG!" del /f /q "!TMP_PKG!"
+  set "EXIT_CODE=!UPDATE_RC!"
+  goto cli_exit
+)
+call :shutdown_node
+if errorlevel 1 (
+  if exist "!TMP_PKG!" del /f /q "!TMP_PKG!"
+  set "EXIT_CODE=1"
+  goto cli_exit
+)
+powershell -NoProfile -Command ^
+  "$pkg='%TMP_PKG%'; $prefix='%DAGENTS_HOME%';" ^
+  "$staging=Join-Path $env:TEMP ('dagents-update-' + [guid]::NewGuid().ToString());" ^
+  "New-Item -ItemType Directory -Path $staging | Out-Null;" ^
+  "try { if ($pkg -match '\.zip$') { Expand-Archive -Path $pkg -DestinationPath $staging -Force } else { tar -xf $pkg -C $staging } } catch { exit 2 };" ^
+  "$bundle=Get-ChildItem -Path $staging -Directory | Select-Object -First 1;" ^
+  "if (-not $bundle) { exit 2 };" ^
+  "Copy-Item -Path (Join-Path $bundle.FullName 'bin\*') -Destination (Join-Path $prefix 'bin') -Recurse -Force;" ^
+  "if (Test-Path (Join-Path $bundle.FullName 'dagents.cmd')) { Copy-Item -Path (Join-Path $bundle.FullName 'dagents.cmd') -Destination $prefix -Force };" ^
+  "if (Test-Path (Join-Path $bundle.FullName 'VERSION')) { Copy-Item -Path (Join-Path $bundle.FullName 'VERSION') -Destination $prefix -Force };" ^
+  "Remove-Item -Recurse -Force $staging; exit 0"
+set "INSTALL_RC=!ERRORLEVEL!"
+if exist "!TMP_PKG!" del /f /q "!TMP_PKG!"
+if not "!INSTALL_RC!"=="0" (
+  echo [dagents] update install failed
+  set "EXIT_CODE=!INSTALL_RC!"
+  goto cli_exit
+)
+call :restart_node
+echo [dagents] update complete
+goto cli_exit
+
 :version
 set "APP_VER=unknown"
 if exist "VERSION" (
@@ -355,6 +443,9 @@ echo   dagents node --foreground       Start Node in foreground (blocks terminal
 echo   dagents node --no-wait          Background start without waiting for probe
 echo   dagents doctor                  Check installed files
 echo   dagents version                 Print version information
+echo   dagents version --check         Check for updates (via Manage Release Hub)
+echo   dagents update [--check]        Download and apply latest release
+echo   dagents update --force          Apply without confirmation prompt
 echo.
 echo Web UI (browser Client, embedded in dagents-node):
 echo   After dagents node, open http://127.0.0.1:^<listen.port^>/ui/ (default 18765).

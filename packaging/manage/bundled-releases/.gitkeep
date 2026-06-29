@@ -1,0 +1,1 @@
+# CI 构建 Manage 镜像前由 scripts/ci/build_manage_docker.sh 填充；本地可为空。

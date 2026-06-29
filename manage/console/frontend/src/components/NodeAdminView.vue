@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import LLMView from "./LLMView.vue";
 import SkillsView from "./SkillsView.vue";
+import ReleasesView from "./ReleasesView.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -33,6 +34,16 @@ const tab = ref("llm");
     >
       Skills
     </button>
+    <button
+      type="button"
+      class="subtab"
+      :class="{ active: tab === 'releases' }"
+      role="tab"
+      :aria-selected="tab === 'releases'"
+      @click="tab = 'releases'"
+    >
+      版本发布
+    </button>
   </div>
 
   <LLMView
@@ -43,6 +54,11 @@ const tab = ref("llm");
   <SkillsView
     v-if="tab === 'skills'"
     :active="active && tab === 'skills'"
+    @toast="emit('toast', $event)"
+  />
+  <ReleasesView
+    v-if="tab === 'releases'"
+    :active="active && tab === 'releases'"
     @toast="emit('toast', $event)"
   />
 </template>

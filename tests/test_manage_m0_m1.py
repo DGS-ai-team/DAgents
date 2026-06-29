@@ -48,18 +48,7 @@ class ManageRegistryTests(unittest.TestCase):
     def test_register_discover_and_sqlite_persist(self) -> None:
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "manage.db"
-            settings = ManageSettings(
-                host="127.0.0.1",
-                port=8020,
-                db_path=db_path,
-                blob_dir=None,
-                blob_max_bytes=None,
-                offline_grace_seconds=86400,
-                audit_max_entries=100,
-                legacy_direct_relay=False,
-                a2a_inbox_content_max_chars=4096,
-                a2a_expire_sweep_seconds=30,
-            )
+            settings = ManageSettings.for_test(db_path=db_path)
             app = create_app(settings)
             payload = {
                 "agent_id": "ops-01",

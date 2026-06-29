@@ -64,6 +64,10 @@ class DAgentsApiClient:
     async def get_agent_info(self) -> dict[str, Any]:
         return await self._get_json("/v1/agent/info")
 
+    async def get_agent_update(self) -> dict[str, Any]:
+        """GET /v1/agent/update → Release Hub 更新摘要。"""
+        return await self._get_json("/v1/agent/update")
+
     async def get_llm_settings(self) -> dict[str, Any]:
         return await self._get_json("/v1/llm/settings")
 

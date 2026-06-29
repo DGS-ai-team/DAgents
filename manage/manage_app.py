@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Query, Request, Response
@@ -22,6 +23,9 @@ from manage.llm.store import LLMConfigStore
 from manage.platform.blob_routes import build_blob_router
 from manage.registry.routes import build_registry_router
 from manage.registry.store import AgentRegistryStore
+from manage.releases.routes import build_releases_router
+from manage.releases.seed import seed_bundled_releases
+from manage.releases.store import ReleasePackageStore
 from manage.skills.routes import build_skills_router
 from manage.skills.store import SkillPackageStore
 from manage.storage.sqlite import SQLiteDatabase
@@ -31,11 +35,6 @@ _CONSOLE_DIR = Path(__file__).resolve().parent / "console" / "static"
 
 def create_app(settings: ManageSettings | None = None) -> FastAPI:
     cfg = settings or ManageSettings.from_env()
-    app = FastAPI(
-        title="DAgents Manage",
-        version="0.5.1",
-        description="统一控制面：Registry（M1）+ A2A Task Inbox（M2）+ Platform（M0）。",
-    )
     db = SQLiteDatabase(cfg.db_path)
     store = AgentRegistryStore(db=db if db.enabled else None)
     a2a_store = A2ATaskStore(
@@ -46,6 +45,24 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     llm_store = LLMConfigStore(db=db if db.enabled else None)
     audit = AuditLog(max_entries=cfg.audit_max_entries)
     blob = BlobStore(BlobStoreConfig.from_settings(cfg))
+    releases_store = ReleasePackageStore(db=db if db.enabled else None)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        seed_bundled_releases(
+            bundled_dir=cfg.bundled_releases_dir,
+            releases_dir=cfg.releases_dir,
+            store=releases_store,
+            enabled=cfg.seed_bundled_releases,
+        )
+        yield
+
+    app = FastAPI(
+        title="DAgents Manage",
+        version="0.5.1",
+        description="统一控制面：Registry（M1）+ A2A Task Inbox（M2）+ Platform（M0）。",
+        lifespan=lifespan,
+    )
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     def health() -> HealthResponse:
@@ -73,6 +90,14 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))
     app.include_router(build_skills_router(skills_store, blob, audit))
+    app.include_router(
+        build_releases_router(
+            releases_store,
+            audit,
+            releases_dir=cfg.releases_dir,
+            release_max_bytes=cfg.release_max_bytes,
+        )
+    )
 
     @app.get("/", include_in_schema=False)
     def root_redirect() -> RedirectResponse:
@@ -90,6 +115,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.state.a2a_store = a2a_store
     app.state.llm_store = llm_store
     app.state.skills_store = skills_store
+    app.state.releases_store = releases_store
     return app
 
 

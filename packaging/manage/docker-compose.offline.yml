@@ -9,6 +9,8 @@ services:
       MANAGE_HOST: 0.0.0.0
       MANAGE_PORT: 8020
       MANAGE_DB_PATH: /data/manage.db
+      MANAGE_RELEASES_DIR: /data/releases
+      MANAGE_SEED_BUNDLED_RELEASES: ${MANAGE_SEED_BUNDLED_RELEASES:-1}
       MANAGE_A2A_EXPIRE_SWEEP_SECONDS: ${MANAGE_A2A_EXPIRE_SWEEP_SECONDS:-30}
     volumes:
       - manage-data:/data
