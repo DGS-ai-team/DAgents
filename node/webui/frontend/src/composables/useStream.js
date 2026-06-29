@@ -8,7 +8,7 @@ export function buildStream(entries, hitlQueue = []) {
     items.push({ key: `e-${entry.id}`, kind: entry.kind, entry });
   }
   hitlQueue.forEach((hitl, idx) => {
-    items.push({ key: `hitl-${idx}-${hitl.kind}`, kind: hitl.kind, hitl });
+    items.push({ key: `hitl-${idx}-${hitl.kind}`, kind: hitl.kind, hitl, hitlIndex: idx });
   });
   return items;
 }
