@@ -140,15 +140,10 @@ onMounted(() => {
 
 <template>
   <section class="panel-card">
-    <header class="panel-card__head">
-      <div>
-        <h2 class="panel-card__title">版本发布</h2>
-        <p class="panel-card__sub">上传 dagents-local-assistant 安装包；默认草稿，发布后可设为 latest 供 Node 检查更新。</p>
-      </div>
-    </header>
-
-    <div class="upload-form">
-      <div class="upload-grid">
+    <div class="form-block">
+      <h3 class="form-block__title">上传安装包</h3>
+      <p class="muted filters-note">默认草稿；发布后可设为 latest 供 Node 检查更新</p>
+      <div class="form-grid upload-grid">
         <label>
           <span>version</span>
           <input v-model="form.version" placeholder="0.5.2" />
@@ -165,16 +160,16 @@ onMounted(() => {
           <span>channel</span>
           <input v-model="form.channel" placeholder="stable" />
         </label>
-        <label class="upload-grid__wide">
+        <label class="form-grid__wide">
           <span>release notes</span>
           <input v-model="form.releaseNotes" placeholder="可选" />
         </label>
-        <label class="upload-grid__wide">
+        <label class="form-grid__wide">
           <span>安装包 (.tar.gz / .zip)</span>
           <input ref="fileInput" type="file" accept=".tar.gz,.zip,application/gzip,application/zip" @change="onFile" />
         </label>
       </div>
-      <div class="upload-options">
+      <div class="form-options">
         <label class="checkbox-row">
           <input v-model="form.publish" type="checkbox" />
           <span>上传后立即发布</span>
@@ -184,123 +179,65 @@ onMounted(() => {
           <span>同时设为 latest</span>
         </label>
       </div>
-      <div class="upload-actions">
+      <div class="panel-actions">
         <button class="btn btn-primary" :disabled="uploading" @click="onUpload">
           {{ uploading ? "上传中…" : "上传" }}
         </button>
       </div>
     </div>
 
-    <p v-if="error" class="error-text">{{ error }}</p>
+    <p v-if="error" class="banner banner-error" role="alert">{{ error }}</p>
     <p v-if="loading" class="muted">加载中…</p>
 
     <div v-if="drafts().length" class="table-block">
-      <h3>草稿</h3>
-      <table class="data-table">
-        <thead>
-          <tr><th>version</th><th>platform</th><th>大小</th><th>来源</th><th>操作</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="pkg in drafts()" :key="`${pkg.platform}-${pkg.version}-draft`">
-            <td><strong>{{ pkg.version }}</strong></td>
-            <td>{{ pkg.platform }}</td>
-            <td>{{ formatSize(pkg.size_bytes) }}</td>
-            <td>{{ pkg.source || "upload" }}</td>
-            <td class="actions-cell">
-              <button class="btn btn-sm" @click="onPublish(pkg, false)">发布</button>
-              <button class="btn btn-sm btn-primary" @click="onPublish(pkg, true)">发布并 latest</button>
-              <button class="btn btn-sm btn-danger" @click="onDelete(pkg)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <h3 class="table-block__title">草稿</h3>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr><th>version</th><th>platform</th><th>大小</th><th>来源</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="pkg in drafts()" :key="`${pkg.platform}-${pkg.version}-draft`">
+              <td><strong>{{ pkg.version }}</strong></td>
+              <td>{{ pkg.platform }}</td>
+              <td>{{ formatSize(pkg.size_bytes) }}</td>
+              <td>{{ pkg.source || "upload" }}</td>
+              <td class="actions-cell">
+                <button class="btn btn-sm btn-ghost" @click="onPublish(pkg, false)">发布</button>
+                <button class="btn btn-sm btn-primary" @click="onPublish(pkg, true)">发布并 latest</button>
+                <button class="btn btn-sm btn-danger" @click="onDelete(pkg)">删除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div v-if="published().length" class="table-block">
-      <h3>已发布</h3>
-      <table class="data-table">
-        <thead>
-          <tr><th>version</th><th>platform</th><th>latest</th><th>大小</th><th>操作</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="pkg in published()" :key="`${pkg.platform}-${pkg.version}-pub`">
-            <td><strong>{{ pkg.version }}</strong></td>
-            <td>{{ pkg.platform }}</td>
-            <td>
-              <span v-if="pkg.is_latest" class="pill pill-ok">latest</span>
-              <span v-else class="muted">—</span>
-            </td>
-            <td>{{ formatSize(pkg.size_bytes) }}</td>
-            <td class="actions-cell">
-              <a class="btn btn-sm" :href="downloadUrl(pkg)" target="_blank" rel="noopener">下载</a>
-              <button v-if="!pkg.is_latest" class="btn btn-sm btn-primary" @click="onPromote(pkg)">设为 latest</button>
-              <button v-if="!pkg.is_latest" class="btn btn-sm btn-danger" @click="onDelete(pkg)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <h3 class="table-block__title">已发布</h3>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr><th>version</th><th>platform</th><th>latest</th><th>大小</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="pkg in published()" :key="`${pkg.platform}-${pkg.version}-pub`">
+              <td><strong>{{ pkg.version }}</strong></td>
+              <td>{{ pkg.platform }}</td>
+              <td>
+                <span v-if="pkg.is_latest" class="pill pill-ok">latest</span>
+                <span v-else class="muted">—</span>
+              </td>
+              <td>{{ formatSize(pkg.size_bytes) }}</td>
+              <td class="actions-cell">
+                <a class="btn btn-sm btn-ghost" :href="downloadUrl(pkg)" target="_blank" rel="noopener">下载</a>
+                <button v-if="!pkg.is_latest" class="btn btn-sm btn-primary" @click="onPromote(pkg)">设为 latest</button>
+                <button v-if="!pkg.is_latest" class="btn btn-sm btn-danger" @click="onDelete(pkg)">删除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </section>
 </template>
-
-<style scoped>
-.upload-form {
-  margin-bottom: 20px;
-  padding: 16px;
-  border: 1px solid var(--border, #e5e7eb);
-  border-radius: 8px;
-}
-.upload-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-.upload-grid__wide {
-  grid-column: 1 / -1;
-}
-.upload-grid label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-}
-.upload-grid input,
-.upload-grid select {
-  padding: 8px 10px;
-  border: 1px solid var(--border, #e5e7eb);
-  border-radius: 6px;
-}
-.upload-options {
-  display: flex;
-  gap: 16px;
-  margin-top: 12px;
-}
-.checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-}
-.upload-actions {
-  margin-top: 12px;
-}
-.table-block {
-  margin-top: 20px;
-}
-.table-block h3 {
-  margin: 0 0 8px;
-  font-size: 15px;
-}
-.actions-cell {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.pill-ok {
-  background: #dcfce7;
-  color: #166534;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-}
-</style>

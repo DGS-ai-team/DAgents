@@ -100,93 +100,92 @@ defineExpose({ load });
 </script>
 
 <template>
-  <section class="panel">
-    <div class="panel-head">
-      <h2 class="panel-title">上传 Skill 包</h2>
-      <span class="panel-meta">上传为 draft，发布后进入目录</span>
-    </div>
-    <div class="filters-grid">
-      <label class="field">
-        <span>skill_id</span>
-        <input v-model="form.skill_id" placeholder="service-restart" />
-      </label>
-      <label class="field field-narrow">
-        <span>version</span>
-        <input v-model="form.version" placeholder="1.0.0" />
-      </label>
-      <label class="field field-grow">
-        <span>名称</span>
-        <input v-model="form.name" placeholder="Service Restart" />
-      </label>
-      <label class="field field-narrow">
-        <span>风险等级</span>
-        <select v-model="form.risk_level">
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-        </select>
-      </label>
-      <label class="field field-grow">
-        <span>zip 文件</span>
-        <input ref="fileInput" type="file" accept=".zip" @change="onFile" />
-      </label>
-      <div class="field field-narrow">
-        <span>&nbsp;</span>
+  <section class="panel-card">
+    <div class="form-block">
+      <h3 class="form-block__title">上传 Skill 包</h3>
+      <p class="muted filters-note">上传为 draft，发布后进入目录</p>
+      <div class="form-grid">
+        <label>
+          <span>skill_id</span>
+          <input v-model="form.skill_id" placeholder="service-restart" />
+        </label>
+        <label>
+          <span>version</span>
+          <input v-model="form.version" placeholder="1.0.0" />
+        </label>
+        <label>
+          <span>风险等级</span>
+          <select v-model="form.risk_level">
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </label>
+        <label class="form-grid__wide">
+          <span>名称</span>
+          <input v-model="form.name" placeholder="Service Restart" />
+        </label>
+        <label class="form-grid__wide">
+          <span>zip 文件</span>
+          <input ref="fileInput" type="file" accept=".zip" @change="onFile" />
+        </label>
+      </div>
+      <div class="panel-actions">
         <button class="btn btn-primary" :disabled="uploading" @click="onUpload">
           {{ uploading ? "上传中…" : "上传" }}
         </button>
       </div>
     </div>
-  </section>
 
-  <section v-if="drafts.length" class="table-panel">
-    <div class="panel-head">
-      <h2 class="panel-title">草稿（待发布）</h2>
-      <span class="panel-meta">{{ drafts.length }} 条</span>
+    <div v-if="drafts.length" class="table-block">
+      <div class="panel-head">
+        <h3 class="table-block__title">草稿（待发布）</h3>
+        <span class="panel-meta">{{ drafts.length }} 条</span>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr><th>skill_id</th><th>version</th><th>名称</th><th>风险</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="d in drafts" :key="d.skill_id + '@' + d.version">
+              <td><strong>{{ d.skill_id }}</strong></td>
+              <td>{{ d.version }}</td>
+              <td>{{ d.name }}</td>
+              <td><span class="pill" :class="riskPillClass(d.risk_level)">{{ d.risk_level }}</span></td>
+              <td><button class="btn btn-primary btn-sm" @click="onPublish(d)">发布</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
-    <div class="table-scroll">
-      <table class="data-table">
-        <thead>
-          <tr><th>skill_id</th><th>version</th><th>名称</th><th>风险</th><th>操作</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="d in drafts" :key="d.skill_id + '@' + d.version">
-            <td><strong>{{ d.skill_id }}</strong></td>
-            <td>{{ d.version }}</td>
-            <td>{{ d.name }}</td>
-            <td><span class="pill" :class="riskPillClass(d.risk_level)">{{ d.risk_level }}</span></td>
-            <td><button class="btn btn-primary" @click="onPublish(d)">发布</button></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
 
-  <section class="table-panel">
-    <div class="panel-head">
-      <h2 class="panel-title">已发布目录</h2>
-      <span class="panel-meta">{{ loading ? "加载中…" : `${catalog.length} 条` }}</span>
-    </div>
-    <p v-if="error" class="banner-error">{{ error }}</p>
-    <div class="table-scroll">
-      <table class="data-table">
-        <thead>
-          <tr><th>skill_id</th><th>version</th><th>名称</th><th>风险</th><th>owner/team</th><th>下载</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="p in catalog" :key="p.skill_id + '@' + p.version">
-            <td><strong>{{ p.skill_id }}</strong></td>
-            <td>{{ p.version }}</td>
-            <td>{{ p.name }}</td>
-            <td><span class="pill" :class="riskPillClass(p.risk_level)">{{ p.risk_level }}</span></td>
-            <td class="muted">{{ p.owner || "—" }} / {{ p.team || "—" }}</td>
-            <td><a class="btn btn-ghost" :href="downloadUrl(p)">下载 zip</a></td>
-          </tr>
-          <tr v-if="!loading && catalog.length === 0">
-            <td colspan="6" class="empty">暂无已发布 Skill</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="table-block">
+      <div class="panel-head">
+        <h3 class="table-block__title">已发布目录</h3>
+        <span class="panel-meta">{{ loading ? "加载中…" : `${catalog.length} 条` }}</span>
+      </div>
+      <p v-if="error" class="banner banner-error" role="alert">{{ error }}</p>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr><th>skill_id</th><th>version</th><th>名称</th><th>风险</th><th>owner/team</th><th>下载</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in catalog" :key="p.skill_id + '@' + p.version">
+              <td><strong>{{ p.skill_id }}</strong></td>
+              <td>{{ p.version }}</td>
+              <td>{{ p.name }}</td>
+              <td><span class="pill" :class="riskPillClass(p.risk_level)">{{ p.risk_level }}</span></td>
+              <td class="muted">{{ p.owner || "—" }} / {{ p.team || "—" }}</td>
+              <td><a class="btn btn-ghost btn-sm" :href="downloadUrl(p)">下载 zip</a></td>
+            </tr>
+            <tr v-if="!loading && catalog.length === 0">
+              <td colspan="6" class="empty">暂无已发布 Skill</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </section>
 </template>

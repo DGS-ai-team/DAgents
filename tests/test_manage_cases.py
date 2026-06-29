@@ -125,6 +125,22 @@ class CaseRoutesTest(unittest.TestCase):
         first = json.loads(lines[0])
         self.assertEqual(first["message"]["role"], "system")
 
+    def test_parse_jsonl_preview(self):
+        client, _store = _cases_client()
+        jsonl = (
+            b'{"recorded_at":"t1","message":{"role":"user","content":"start"}}\n'
+            b'{"recorded_at":"t2","message":{"role":"assistant","content":"ok"}}\n'
+        )
+        r = client.post(
+            "/v1/cases/parse-jsonl",
+            files={"file": ("sess.jsonl", jsonl, "application/x-ndjson")},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(len(body), 2)
+        self.assertEqual(body[0]["role"], "user")
+        self.assertEqual(body[1]["content"], "ok")
+
     def test_duplicate_case_id(self):
         client, _store = _cases_client()
         data = {"case_id": "dup", "name": "One", "description": "", "skill_ids": "", "plugin_ids": ""}

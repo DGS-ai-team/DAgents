@@ -34,6 +34,21 @@ def build_cases_router(store: CaseExampleStore, audit: AuditLog) -> APIRouter:
         authenticate(request)
         return store.list()
 
+    @router.post("/parse-jsonl", response_model=list[CaseMessage])
+    async def parse_jsonl_preview(
+        request: Request,
+        file: UploadFile = File(...),
+    ) -> list[CaseMessage]:
+        auth = authenticate(request)
+        require_admin(auth)
+        data = await file.read()
+        if not data.strip():
+            raise HTTPException(status_code=422, detail="empty file")
+        try:
+            return parse_jsonl_bytes(data)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @router.post("", response_model=CaseExample)
     async def create_case(
         request: Request,

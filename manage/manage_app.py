@@ -61,7 +61,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="DAgents Manage",
-        version="0.5.1",
+        version="0.5.2",
         description="统一控制面：Registry（M1）+ A2A Task Inbox（M2）+ Platform（M0）。",
         lifespan=lifespan,
     )

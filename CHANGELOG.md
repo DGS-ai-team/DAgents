@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-06-29
+
+**Manage Console 案例库体验**：JSONL 先解析再填元数据；消息列表按 role 分模式展示，tool 消息展示工具名/参数/结果。
+
+### 新增
+
+- **案例新建两步流**：先上传 JSONL 解析，再进入编辑页填写 case 元数据并调整消息列表；`POST /v1/cases/parse-jsonl` 仅解析不落库。
+- **CaseMessageList 组件**：默认只读卡片展示；点击「编辑」进入表格模式（前插/改/删）；tool 消息展示工具名、参数（关联 assistant `tool_calls`）、结果。
+
+### 变更
+
+- **Manage Console 表单布局**：LLM / Skills / Releases / Node 管理页统一 `form-block` + `form-grid` 样式。
+- **Console 字体**：移除 Google Fonts 外链，改用系统字体栈（代理/离线环境不再报错）。
+
+### 修复
+
+- **VS Code 调试**：补充 Manage 与 Console Vite dev 的 `launch.json` 配置项。
+
+（Git **tag**：`v0.5.2`。）
+
 ## [0.5.1] - 2026-06-25
 
 **0.x 预览**：Hook **in-process 插件栈**、**Manage Console**（LLM 配置 / Skills 分发 / PageAgent）、**idle 自动压缩**、Python TUI **上次 session 记忆**等。

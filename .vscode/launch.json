@@ -104,6 +104,44 @@
       },
       "console": "integratedTerminal",
       "justMyCode": false
+    },
+    {
+      "name": "Manage: run",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_manage.py",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "MANAGE_HOST": "127.0.0.1",
+        "MANAGE_PORT": "8020",
+        "MANAGE_DB_PATH": "${workspaceFolder}/.runtime/manage.db",
+        "MANAGE_BLOB_DIR": "${workspaceFolder}/.runtime/manage-blobs",
+        "MANAGE_RELEASES_DIR": "${workspaceFolder}/.runtime/releases"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Manage Console: Vite dev",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/manage/console/frontend"
+    },
+    {
+      "name": "Manage Console: Chrome (Vite)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173/console/",
+      "webRoot": "${workspaceFolder}/manage/console/frontend/src"
+    },
+    {
+      "name": "Manage Console: Chrome (embed)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:8020/console/",
+      "webRoot": "${workspaceFolder}/manage/console/frontend/src"
     }
   ],
   "compounds": [
@@ -125,6 +163,21 @@
     {
       "name": "Web UI: Node + 内嵌 UI",
       "configurations": ["Node: run (terminal)", "Web UI: Chrome (Node embed)"],
+      "stopAll": true
+    },
+    {
+      "name": "Manage: Server + Console Vite",
+      "configurations": ["Manage: run", "Manage Console: Vite dev", "Manage Console: Chrome (Vite)"],
+      "stopAll": true
+    },
+    {
+      "name": "Manage: Server + 内嵌 Console",
+      "configurations": ["Manage: run", "Manage Console: Chrome (embed)"],
+      "stopAll": true
+    },
+    {
+      "name": "Go: Node + Manage",
+      "configurations": ["Go Node", "Manage: run"],
       "stopAll": true
     }
   ]

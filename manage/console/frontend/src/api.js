@@ -209,6 +209,34 @@ export async function fetchCases() {
   return apiFetch("/v1/cases");
 }
 
+export async function parseCaseJsonl(file) {
+  const form = new FormData();
+  form.set("file", file);
+  const resp = await fetch(new URL("/v1/cases/parse-jsonl", window.location.origin), {
+    method: "POST",
+    body: form,
+  });
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
+    throw new Error(message);
+  }
+  return body;
+}
+
+export async function replaceCaseMessages(caseId, messages) {
+  return apiFetch(
+    `/v1/cases/${encodeURIComponent(caseId)}/messages`,
+    {},
+    { method: "PUT", body: { messages } },
+  );
+}
+
 export async function createCase({ caseId, name, description = "", skillIds = "", pluginIds = "", file = null }) {
   const form = new FormData();
   form.set("case_id", caseId);
