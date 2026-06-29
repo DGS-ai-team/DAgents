@@ -236,6 +236,17 @@ export function upsertToolCallFromSSE(data) {
   }
 }
 
+/** turn 结束/取消时清除仍标记为 partial 的 tool_call，避免僵死「生成中」。 */
+export function finalizePartialToolCalls({ interrupted = false } = {}) {
+  for (const entry of transcriptStore.entries) {
+    if (entry.kind !== "tool_call" || !entry.partial) continue;
+    entry.partial = false;
+    if (interrupted) {
+      entry.data = { ...entry.data, interrupted: true };
+    }
+  }
+}
+
 function upsertToolCallEntry(blockId, migrateFrom, payload) {
   if (migrateFrom && migrateFrom !== blockId) {
     removeToolCallByBlockId(migrateFrom);

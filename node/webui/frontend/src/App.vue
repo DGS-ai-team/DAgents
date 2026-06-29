@@ -45,6 +45,7 @@ import {
   clearTranscript,
   applyRoundUsage,
   resumeReasoningReveal,
+  finalizePartialToolCalls,
 } from "./stores/transcript.js";
 import {
   hitlStore,
@@ -190,6 +191,7 @@ function handleEvent(ev) {
     case "error":
       markTurnContent();
       finishWaitingStatuses();
+      finalizePartialToolCalls({ interrupted: true });
       addSystem(`error: ${ev.data.message || "unknown"}`);
       if (sessionStore.awaitingTurn) finishTurn();
       break;
@@ -197,6 +199,7 @@ function handleEvent(ev) {
       finalizeAssistant();
       finalizeReasoning();
       finishWaitingStatuses();
+      finalizePartialToolCalls({ interrupted: true });
       if (shouldAcceptDone(ev.seq)) {
         finishTurn();
         sessionStore.statusLine = `回合结束 (${ev.data.finish_reason || "stop"})`;
@@ -659,6 +662,7 @@ async function cancelTurn() {
   sessionStore.error = "";
   try {
     finishWaitingStatuses();
+    finalizePartialToolCalls({ interrupted: true });
     await api.cancelTurn(sessionStore.sessionId);
     finishTurn();
     clearHitl();

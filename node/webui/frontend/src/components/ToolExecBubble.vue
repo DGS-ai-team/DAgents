@@ -15,6 +15,7 @@ const props = defineProps({
 const isCall = computed(() => props.entry.kind === "tool_call");
 const isResult = computed(() => props.entry.kind === "tool_result");
 const rejected = computed(() => !!props.entry.data?.rejected);
+const interrupted = computed(() => !!props.entry.data?.interrupted);
 const visual = computed(() => resolveToolVisual(props.entry));
 const resultDisplay = computed(() =>
   isResult.value ? formatToolResultDisplay(props.entry, { verbose: props.verbose }) : null,
@@ -41,6 +42,7 @@ const statusText = computed(() => {
   if (props.entry.sideEffectApplied) return "已入库";
   if (props.entry.sideEffectStale) return "已失效";
   if (isCall.value) {
+    if (interrupted.value) return "已中断";
     if (props.entry.partial) return elapsedLive.value ? `生成中${elapsedLive.value}` : "生成中";
     return "待执行";
   }
@@ -63,7 +65,7 @@ const statusText = computed(() => {
           <span class="tool-exec-bubble__name">{{ displayName }}</span>
           <span class="tool-exec-bubble__status">
             <span v-if="isCall && entry.partial" class="tool-exec-spinner" aria-hidden="true" />
-            <span v-else class="tool-exec-status-icon tool-exec-status-icon--success" aria-hidden="true">{{ rejected ? "−" : "✓" }}</span>
+            <span v-else class="tool-exec-status-icon tool-exec-status-icon--success" aria-hidden="true">{{ rejected || interrupted ? "−" : "✓" }}</span>
             <span>{{ statusText }}</span>
           </span>
         </div>
