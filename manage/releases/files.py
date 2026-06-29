@@ -7,7 +7,7 @@ import re
 import shutil
 from pathlib import Path
 
-from manage.releases.models import DEFAULT_ARTIFACT, DEFAULT_CHANNEL, ReleasePackage
+from manage.releases.models import ReleasePackage
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 

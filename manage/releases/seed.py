@@ -11,14 +11,13 @@ from pathlib import Path
 
 from manage.releases.files import (
     content_type_for_filename,
-    package_file_path,
     rel_path_for,
     validate_slug,
     version_dir,
     write_latest_pointer,
     write_manifest,
 )
-from manage.releases.models import DEFAULT_ARTIFACT, DEFAULT_CHANNEL, ReleasePackageCreate
+from manage.releases.models import DEFAULT_ARTIFACT, ReleasePackageCreate
 from manage.releases.store import ReleasePackageStore
 
 logger = logging.getLogger(__name__)
