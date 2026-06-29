@@ -3,6 +3,8 @@ import { reactive } from "vue";
 export const hitlStore = reactive({
   queue: [],
   busy: false,
+  /** 正在 resume 的队列项 index；-1 表示无。 */
+  busyIndex: -1,
 });
 
 export function enqueueHitl(item) {
@@ -16,22 +18,45 @@ export function enqueueHitl(item) {
 }
 
 export function dequeueHitl() {
-  return hitlStore.queue.shift();
+  return dequeueHitlAt(0);
+}
+
+export function dequeueHitlAt(index) {
+  if (index < 0 || index >= hitlStore.queue.length) return null;
+  return hitlStore.queue.splice(index, 1)[0] || null;
+}
+
+export function getHitlAt(index) {
+  if (index < 0 || index >= hitlStore.queue.length) return null;
+  return hitlStore.queue[index] || null;
 }
 
 export function peekHitl() {
-  return hitlStore.queue[0] || null;
+  return getHitlAt(0);
 }
 
 export function clearHitl() {
   hitlStore.queue = [];
+  hitlStore.busy = false;
+  hitlStore.busyIndex = -1;
 }
 
-function approvalQueueKey(data) {
+/** 队列去重 / resume 路由用的稳定 key。 */
+export function approvalQueueKey(data) {
   const child = String(data?.child_session_id || "").trim();
   if (child) return `child:${child}`;
+  const a2aTask = String(data?.a2a_task_id || "").trim();
+  if (a2aTask) return `a2a:${a2aTask}`;
   const id = String(data?.approval_id || data?.hitl_id || "").trim();
-  return id ? `parent:${id}` : "parent:";
+  if (id) return `parent:${id}`;
+  const calls = extractToolApprovals(data);
+  const callIds = calls
+    .map((c) => c.callId)
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  if (callIds) return `calls:${callIds}`;
+  return "parent:anonymous";
 }
 
 export function isA2ARelay(data) {
@@ -61,6 +86,7 @@ function attachApprovalRouting(data, resume) {
   const rv = { ...resume };
   if (data?.child_session_id) rv.child_session_id = data.child_session_id;
   if (data?.approval_id) rv.approval_id = data.approval_id;
+  if (data?.a2a_task_id) rv.a2a_task_id = data.a2a_task_id;
   return rv;
 }
 
@@ -198,6 +224,13 @@ function hitlRoutingFieldsFromBatch(batch) {
   if (scope) out.hitl_scope = scope;
   const purpose = String(batch.child_purpose || "").trim();
   if (purpose) out.child_purpose = purpose;
+  const a2aTask = String(batch.a2a_task_id || "").trim();
+  if (a2aTask) out.a2a_task_id = a2aTask;
+  if (batch.a2a_relay) out.a2a_relay = true;
+  const peerName = String(batch.a2a_peer_agent_name || "").trim();
+  if (peerName) out.a2a_peer_agent_name = peerName;
+  const peerId = String(batch.a2a_peer_agent_id || "").trim();
+  if (peerId) out.a2a_peer_agent_id = peerId;
   return out;
 }
 

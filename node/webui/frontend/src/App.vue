@@ -49,8 +49,9 @@ import {
 import {
   hitlStore,
   enqueueHitl,
+  getHitlAt,
+  dequeueHitlAt,
   peekHitl,
-  dequeueHitl,
   clearHitl,
   isA2ARelay,
   a2aRelaySuffix,
@@ -324,10 +325,11 @@ function formatCompressionDetail(mode, data) {
   return `[compression] ${mode} finished (${status})`;
 }
 
-async function submitHitlApproval(approveAll) {
-  const item = peekHitl();
+async function submitHitlApproval(approveAll, hitlIndex = 0) {
+  const item = getHitlAt(hitlIndex);
   if (!item || item.kind !== "approval") return;
   hitlStore.busy = true;
+  hitlStore.busyIndex = hitlIndex;
   const resume = buildApprovalResume(item.data, { approveAll });
   try {
     await api.submitResume(sessionStore.sessionId, resume);
@@ -338,39 +340,46 @@ async function submitHitlApproval(approveAll) {
         addSystem(`${approvalItemDisplayName(it)}${suffix} · ${a2aApprovedSummary(item.data, approved)}`);
       });
     }
-    dequeueHitl();
+    dequeueHitlAt(hitlIndex);
     if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
     chromeStore.hitlQueueLen = hitlStore.queue.length;
     hitlStore.busy = false;
+    hitlStore.busyIndex = -1;
     beginSubmit();
     if (!sessionStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     sessionStore.error = e.message;
     hitlStore.busy = false;
+    hitlStore.busyIndex = -1;
   }
 }
 
-async function submitHitlOne(callId, approve) {
-  const item = peekHitl();
+async function submitHitlOne(payload, approve) {
+  const hitlIndex = typeof payload === "object" ? payload.index : 0;
+  const callId = typeof payload === "object" ? payload.callId : payload;
+  const item = getHitlAt(hitlIndex);
   if (!item || item.kind !== "approval") return;
   hitlStore.busy = true;
+  hitlStore.busyIndex = hitlIndex;
   const resume = buildApprovalOneResume(item.data, callId, approve);
   try {
     await api.submitResume(sessionStore.sessionId, resume);
-    dequeueHitl();
+    dequeueHitlAt(hitlIndex);
     if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
     chromeStore.hitlQueueLen = hitlStore.queue.length;
     hitlStore.busy = false;
+    hitlStore.busyIndex = -1;
     beginSubmit();
     if (!sessionStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     sessionStore.error = e.message;
     hitlStore.busy = false;
+    hitlStore.busyIndex = -1;
   }
 }
 
-async function submitHitlUserInfo(text) {
-  const item = peekHitl();
+async function submitHitlUserInfo(hitlIndex, text) {
+  const item = getHitlAt(hitlIndex);
   if (!item || item.kind !== "user_information") return;
   const req = extractUserInfo(item.data);
   let resume;
@@ -383,18 +392,21 @@ async function submitHitlUserInfo(text) {
     resume = buildUserInfoResume(item.data, text);
   }
   hitlStore.busy = true;
+  hitlStore.busyIndex = hitlIndex;
   try {
     await api.submitResume(sessionStore.sessionId, resume);
-    dequeueHitl();
+    dequeueHitlAt(hitlIndex);
     if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
     chromeStore.hitlQueueLen = hitlStore.queue.length;
     hitlStore.busy = false;
+    hitlStore.busyIndex = -1;
     hitlSelected.value = 0;
     beginSubmit();
     if (!sessionStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     sessionStore.error = e.message;
     hitlStore.busy = false;
+    hitlStore.busyIndex = -1;
   }
 }
 
@@ -408,7 +420,7 @@ async function onSendMessage(text) {
 
   const hitl = peekHitl();
   if (hitl?.kind === "user_information") {
-    await submitHitlUserInfo(text);
+    await submitHitlUserInfo(0, text);
     return;
   }
 
@@ -704,6 +716,7 @@ watch(
           :sending="sending"
           :cancelling="cancelling"
           :hitl-busy="hitlStore.busy"
+          :hitl-busy-index="hitlStore.busyIndex"
           :thinking-supported="thinkingSupported"
           :llm-settings="chromeStore.llmSettings"
           @send="onSendMessage"
@@ -711,11 +724,11 @@ watch(
           @open-context="openContextPanel"
           @toggle-thinking="toggleThinkingMode"
           @cycle-effort="cycleThinkingEffort"
-          @approve-all="submitHitlApproval(true)"
-          @reject-all="submitHitlApproval(false)"
-          @approve-one="(id) => submitHitlOne(id, true)"
-          @reject-one="(id) => submitHitlOne(id, false)"
-          @user-info-submit="submitHitlUserInfo('')"
+          @approve-all="(idx) => submitHitlApproval(true, idx)"
+          @reject-all="(idx) => submitHitlApproval(false, idx)"
+          @approve-one="(payload) => submitHitlOne(payload, true)"
+          @reject-one="(payload) => submitHitlOne(payload, false)"
+          @user-info-submit="(idx) => submitHitlUserInfo(idx, '')"
         />
 
         <div v-if="chromeStore.panel" class="panel-overlay" @click.self="closePanel">

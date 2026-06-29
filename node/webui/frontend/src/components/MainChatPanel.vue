@@ -22,6 +22,7 @@ const props = defineProps({
   sending: { type: Boolean, default: false },
   cancelling: { type: Boolean, default: false },
   hitlBusy: { type: Boolean, default: false },
+  hitlBusyIndex: { type: Number, default: -1 },
   thinkingSupported: { type: Boolean, default: false },
   llmSettings: { type: Object, default: null },
 });
@@ -153,18 +154,18 @@ defineExpose({
         <ApprovalBubble
           v-else-if="item.kind === 'approval'"
           :data="item.hitl.data"
-          :busy="hitlBusy"
-          @approve-all="emit('approve-all')"
-          @reject-all="emit('reject-all')"
-          @approve-one="(id) => emit('approve-one', id)"
-          @reject-one="(id) => emit('reject-one', id)"
+          :busy="hitlBusy && hitlBusyIndex === item.hitlIndex"
+          @approve-all="emit('approve-all', item.hitlIndex)"
+          @reject-all="emit('reject-all', item.hitlIndex)"
+          @approve-one="(id) => emit('approve-one', { index: item.hitlIndex, callId: id })"
+          @reject-one="(id) => emit('reject-one', { index: item.hitlIndex, callId: id })"
         />
         <UserInfoBubble
           v-else-if="item.kind === 'user_information'"
           :data="item.hitl.data"
           :selected="userInfoSelected"
           @update:selected="(v) => { userInfoSelected = v; emit('user-info-selected', v); }"
-          @submit="emit('user-info-submit', '')"
+          @submit="emit('user-info-submit', item.hitlIndex)"
         />
       </template>
       <StreamStatusBubble

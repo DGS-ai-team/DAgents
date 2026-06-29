@@ -3,8 +3,13 @@ import { approvalItemDisplayName } from "../utils/toolCalls.js";
 import {
   buildApprovalOneResume,
   buildApprovalSelectionResume,
+  approvalQueueKey,
+  clearHitl,
+  dequeueHitlAt,
+  enqueueHitl,
   expandHitlRequired,
   extractToolApprovals,
+  hitlStore,
 } from "./hitl.js";
 
 const multiToolApprovalData = {
@@ -101,5 +106,42 @@ describe("buildApprovalOneResume", () => {
     const resume = buildApprovalOneResume(multiToolApprovalData, "call-b", false);
     expect(resume.approved).toEqual([]);
     expect(resume.rejected).toEqual(["call-a", "call-b"]);
+  });
+
+  it("includes a2a_task_id in resume routing", () => {
+    const data = { ...multiToolApprovalData, a2a_task_id: "task-xyz" };
+    const resume = buildApprovalOneResume(data, "call-a", true);
+    expect(resume.a2a_task_id).toBe("task-xyz");
+  });
+});
+
+describe("approvalQueueKey", () => {
+  it("distinguishes concurrent A2A tasks", () => {
+    const a = approvalQueueKey({ a2a_task_id: "task-a", approval_args: { tool_calls: [] } });
+    const b = approvalQueueKey({ a2a_task_id: "task-b", approval_args: { tool_calls: [] } });
+    expect(a).not.toBe(b);
+  });
+
+  it("does not collapse missing ids to the same key", () => {
+    const a = approvalQueueKey({
+      approval_args: { tool_calls: [{ id: "call-1", name: "read_file", arguments: {} }] },
+    });
+    const b = approvalQueueKey({
+      approval_args: { tool_calls: [{ id: "call-2", name: "bash_run", arguments: {} }] },
+    });
+    expect(a).not.toBe(b);
+  });
+});
+
+describe("dequeueHitlAt", () => {
+  it("removes the item at the given index", () => {
+    clearHitl();
+    enqueueHitl({ kind: "approval", data: { approval_id: "a", approval_args: { tool_calls: [] } } });
+    enqueueHitl({ kind: "approval", data: { approval_id: "b", approval_args: { tool_calls: [] } } });
+    const removed = dequeueHitlAt(1);
+    expect(removed?.data?.approval_id).toBe("b");
+    expect(hitlStore.queue).toHaveLength(1);
+    expect(hitlStore.queue[0].data.approval_id).toBe("a");
+    clearHitl();
   });
 });
