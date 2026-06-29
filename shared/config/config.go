@@ -274,6 +274,14 @@ type ManageConfig struct {
 	NodeToken    string                   `yaml:"node_token"`
 	Registration ManageRegistrationConfig `yaml:"registration"`
 	A2A          ManageA2AConfig          `yaml:"a2a"`
+	Update       ManageUpdateConfig       `yaml:"update"`
+}
+
+// ManageUpdateConfig 控制 Node 向 Manage Release Hub 查询更新。
+type ManageUpdateConfig struct {
+	Enabled              *bool  `yaml:"enabled"`
+	CheckIntervalSeconds int    `yaml:"check_interval_seconds"`
+	Channel              string `yaml:"channel"`
 }
 
 // ManageA2AConfig 控制 Node 对 Manage A2A inbox 的 long poll sidecar。
@@ -389,6 +397,12 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Manage.A2A.InboxWaitSeconds <= 0 {
 		c.Manage.A2A.InboxWaitSeconds = 25
+	}
+	if c.Manage.Update.CheckIntervalSeconds <= 0 {
+		c.Manage.Update.CheckIntervalSeconds = 6 * 3600
+	}
+	if strings.TrimSpace(c.Manage.Update.Channel) == "" {
+		c.Manage.Update.Channel = "stable"
 	}
 	if c.Compression.IdleAutoCompressPollSeconds <= 0 {
 		c.Compression.IdleAutoCompressPollSeconds = 60
@@ -521,6 +535,25 @@ func (c *Config) ManageA2AEnabled() bool {
 		return *c.Manage.A2A.Enabled
 	}
 	return true
+}
+
+// ManageUpdateEnabled 是否向 Manage Release Hub 查询更新（须 manage.enabled=true；默认 true）。
+func (c *Config) ManageUpdateEnabled() bool {
+	if c == nil || !c.Manage.Enabled {
+		return false
+	}
+	if c.Manage.Update.Enabled != nil {
+		return *c.Manage.Update.Enabled
+	}
+	return true
+}
+
+// ManageUpdateCheckInterval 返回版本检查间隔（默认 6h）。
+func (c *Config) ManageUpdateCheckInterval() time.Duration {
+	if c == nil || c.Manage.Update.CheckIntervalSeconds <= 0 {
+		return 6 * time.Hour
+	}
+	return time.Duration(c.Manage.Update.CheckIntervalSeconds) * time.Second
 }
 
 // ManageA2AInboxWait 返回 long poll wait 参数。

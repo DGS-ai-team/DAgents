@@ -8,6 +8,10 @@ export async function runSlashCommand(cmd, ctx) {
       return { panel: "help" };
     case "/status":
       return { panel: "status" };
+    case "/version":
+      return { panel: "update" };
+    case "/update":
+      return { panel: "update" };
     case "/sessions":
     case "/ls":
       return { panel: "sessions" };

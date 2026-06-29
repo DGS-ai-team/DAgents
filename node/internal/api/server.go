@@ -47,6 +47,7 @@ type Server struct {
 	triggerSched  *triggers.Scheduler
 	registrar     *manage.Registrar
 	inboxPoller   *manage.InboxPoller
+	updateChecker *manage.UpdateChecker
 	a2aCallerHITL *session.A2ACallerHITLBridge
 }
 
@@ -239,10 +240,12 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	var registrar *manage.Registrar
 	var inboxPoller *manage.InboxPoller
+	var updateChecker *manage.UpdateChecker
 	var a2aBridge *session.A2ACallerHITLBridge
 	if cfg.Manage.Enabled {
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
+		updateChecker = manage.NewUpdateChecker(cfg, logger)
 		a2aBridge = session.NewA2ACallerHITLBridge(cfg.AgentID, hub)
 		if o.tools != nil {
 			compliancePeer := ""
@@ -277,10 +280,12 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerSched:  triggerSched,
 		registrar:     registrar,
 		inboxPoller:   inboxPoller,
+		updateChecker: updateChecker,
 		a2aCallerHITL: a2aBridge,
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
+	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("POST /v1/sessions", s.handleCreateSession)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleListSessions)
 	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", s.handleDeleteSession)
@@ -333,6 +338,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 	if s.inboxPoller != nil {
 		s.inboxPoller.Start(regCtx)
+	}
+	if s.updateChecker != nil {
+		s.updateChecker.Start(regCtx)
 	}
 	go func() {
 		s.logger.Info("agent node listening", "addr", addr, "agent_id", s.cfg.AgentID)
@@ -411,6 +419,22 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 		ManageRegistered: registered,
 		LLM:              llmView,
 	})
+}
+
+func (s *Server) handleAgentUpdate(w http.ResponseWriter, _ *http.Request) {
+	if s.updateChecker == nil {
+		writeJSON(w, http.StatusOK, manage.UpdateStatus{
+			CurrentVersion:  version.Version,
+			LatestVersion:   version.Version,
+			ManageReachable: false,
+			Platform:        manage.ReleasePlatform(),
+			Channel:         "stable",
+			ApplyCommand:    "dagents update",
+			Message:         "Manage 未启用，无法检查更新",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.updateChecker.Snapshot())
 }
 
 type createSessionRequest struct {

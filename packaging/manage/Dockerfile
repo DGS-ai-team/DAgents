@@ -24,11 +24,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY manage/ ./manage/
 COPY --from=frontend /src/manage/console/static /app/manage/console/static
+COPY packaging/manage/bundled-releases/ /app/bundled/releases/
 COPY run_manage.py .
 
 ENV MANAGE_HOST=0.0.0.0 \
     MANAGE_PORT=8020 \
-    MANAGE_DB_PATH=/data/manage.db
+    MANAGE_DB_PATH=/data/manage.db \
+    MANAGE_RELEASES_DIR=/data/releases \
+    MANAGE_SEED_BUNDLED_RELEASES=1 \
+    MANAGE_BUNDLED_RELEASES_DIR=/app/bundled/releases
 
 EXPOSE 8020
 

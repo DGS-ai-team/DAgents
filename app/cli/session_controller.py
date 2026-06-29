@@ -356,6 +356,11 @@ class SessionController:
         assert self._client is not None
         return await self._client.get_session_context(self.session_id)
 
+    async def get_agent_update(self) -> dict[str, Any]:
+        """查询 Local Assistant 更新状态（GET /v1/agent/update）。"""
+        assert self._client is not None
+        return await self._client.get_agent_update()
+
     async def list_triggers(self) -> dict[str, Any]:
         """查询 Agent 已配置的触发器列表（GET /v1/triggers）。"""
         assert self._client is not None

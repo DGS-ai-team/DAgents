@@ -12,6 +12,18 @@ TAR="${OUT_DIR}/dagents-manage-${VERSION}.tar.gz"
 
 mkdir -p "${OUT_DIR}"
 
+BUNDLED="${ROOT}/packaging/manage/bundled-releases"
+ASSISTANT_TAR="${ROOT}/dist/dagents-local-assistant-linux-amd64-${VERSION}.tar.gz"
+rm -rf "${BUNDLED}"
+if [[ -f "${ASSISTANT_TAR}" ]]; then
+  echo "== stage bundled release ${ASSISTANT_TAR} =="
+  mkdir -p "${BUNDLED}/dagents-local-assistant/stable/linux-amd64/${VERSION}"
+  cp "${ASSISTANT_TAR}" "${BUNDLED}/dagents-local-assistant/stable/linux-amd64/${VERSION}/"
+else
+  echo "== no local-assistant tar for seed (skip bundled release) =="
+  mkdir -p "${BUNDLED}"
+fi
+
 echo "== build ${IMAGE} =="
 docker build \
   -f packaging/manage/Dockerfile \

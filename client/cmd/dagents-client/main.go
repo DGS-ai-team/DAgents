@@ -13,6 +13,7 @@ import (
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/client/internal/probe"
 	"github.com/DGS-ai-team/DAgents/client/internal/tui"
+	"github.com/DGS-ai-team/DAgents/client/internal/update"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -43,10 +44,39 @@ func run(args []string) int {
 		return cmdChat(*configPath, rest)
 	case "tui":
 		return cmdTUI(*configPath, rest)
+	case "update":
+		return cmdUpdate(*configPath, rest)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q (supported: probe, chat, tui)\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q (supported: probe, chat, tui, update)\n", cmd)
 		return 2
 	}
+}
+
+func cmdUpdate(configPath string, args []string) int {
+	fs := flag.NewFlagSet("update", flag.ExitOnError)
+	checkOnly := fs.Bool("check", false, "only check for updates")
+	force := fs.Bool("force", false, "skip confirmation prompt")
+	output := fs.String("output", "", "download package to this path")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	resolved, err := config.ResolveConfigPath(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		return 2
+	}
+	cfg, err := config.LoadFile(resolved)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	return update.Run(ctx, cfg, update.Options{
+		CheckOnly: *checkOnly,
+		Force:     *force,
+		Output:    *output,
+	})
 }
 
 func cmdVersion(configPath string) int {

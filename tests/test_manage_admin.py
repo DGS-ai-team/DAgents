@@ -41,18 +41,7 @@ def _assign_groups(client: TestClient, agent_id: str, groups: list[str] | None =
 class ManageAdminTests(unittest.TestCase):
     def test_list_a2a_tasks_readonly(self) -> None:
         with TemporaryDirectory() as tmp:
-            settings = ManageSettings(
-                host="127.0.0.1",
-                port=8020,
-                db_path=Path(tmp) / "manage.db",
-                blob_dir=None,
-                blob_max_bytes=None,
-                offline_grace_seconds=86400,
-                audit_max_entries=100,
-                legacy_direct_relay=False,
-                a2a_inbox_content_max_chars=4096,
-                a2a_expire_sweep_seconds=0,
-            )
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db", a2a_expire_sweep_seconds=0)
             app = create_app(settings)
             with TestClient(app) as client:
                 _register_agent(client, "caller-x")
@@ -89,18 +78,7 @@ class ManageAdminTests(unittest.TestCase):
 
     def test_admin_node_session_proxy_removed(self) -> None:
         with TemporaryDirectory() as tmp:
-            settings = ManageSettings(
-                host="127.0.0.1",
-                port=8020,
-                db_path=Path(tmp) / "manage.db",
-                blob_dir=None,
-                blob_max_bytes=None,
-                offline_grace_seconds=86400,
-                audit_max_entries=100,
-                legacy_direct_relay=False,
-                a2a_inbox_content_max_chars=4096,
-                a2a_expire_sweep_seconds=0,
-            )
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db", a2a_expire_sweep_seconds=0)
             app = create_app(settings)
             with TestClient(app) as client:
                 _register_agent(client, "node-z", base_url="http://node-z.test")

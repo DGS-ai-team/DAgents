@@ -365,8 +365,65 @@ func FormatHelpPanelBody() []string {
 		panelLine(panelKindHelp, "/reasoning on|off", "推理流显示"),
 		panelLine(panelKindHelp, "/thinking on|off", "模型思考开关（deepseek/qwen）"),
 		panelLine(panelKindHelp, "/thinking effort high|max", "思考强度"),
+		panelLine(panelKindHelp, "/version", "当前版本与更新检查"),
+		panelLine(panelKindHelp, "/update", "查看可用升级（终端执行 dagents update）"),
 		panelLine(panelKindHelp, "/quit", "退出"),
 	}
+}
+
+// FormatVersionPanelBody 格式化 /version 面板正文。
+func FormatVersionPanelBody(current, latest, platform, channel, message string, manageReachable, upgradeAvailable bool) []string {
+	lines := []string{
+		panelKV("当前版本", orDash(current)),
+		panelKV("最新版本", orDash(latest)),
+		panelKV("平台", orDash(platform)),
+		panelKV("渠道", orDash(channel)),
+	}
+	if manageReachable {
+		lines = append(lines, panelKV("Manage", "可达"))
+	} else {
+		lines = append(lines, panelKV("Manage", "不可达"))
+	}
+	if msg := strings.TrimSpace(message); msg != "" {
+		lines = append(lines, panelLine(panelKindNote, msg))
+	}
+	if upgradeAvailable {
+		lines = append(lines, panelLine(panelKindNote, "有新版本可用；请在终端运行: dagents update"))
+	}
+	return lines
+}
+
+// FormatUpdatePanelBody 格式化 /update 面板正文。
+func FormatUpdatePanelBody(status *nodeapi.AgentUpdateStatus) []string {
+	if status == nil {
+		return []string{panelLine(panelKindNote, "无法获取更新信息")}
+	}
+	body := FormatVersionPanelBody(
+		status.CurrentVersion,
+		status.LatestVersion,
+		status.Platform,
+		status.Channel,
+		status.Message,
+		status.ManageReachable,
+		status.UpgradeAvailable,
+	)
+	if notes := strings.TrimSpace(status.ReleaseNotes); notes != "" {
+		body = append(body, panelLine(panelKindSection, "Release notes"))
+		for _, line := range strings.Split(notes, "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				body = append(body, panelLine(panelKindNote, line))
+			}
+		}
+	}
+	cmd := strings.TrimSpace(status.ApplyCommand)
+	if cmd == "" {
+		cmd = "dagents update"
+	}
+	if status.UpgradeAvailable {
+		body = append(body, panelLine(panelKindNote, "安装: 在终端执行 "+cmd))
+	}
+	return body
 }
 
 func formatPanelBodyPlain(encoded string) string {

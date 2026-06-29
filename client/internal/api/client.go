@@ -203,6 +203,30 @@ func (c *Client) GetAgentInfo(ctx context.Context) (*AgentInfo, error) {
 	return &info, nil
 }
 
+// AgentUpdateStatus 为 GET /v1/agent/update 响应（Manage Release Hub 摘要）。
+type AgentUpdateStatus struct {
+	CurrentVersion   string         `json:"current_version"`
+	LatestVersion    string         `json:"latest_version"`
+	UpgradeAvailable bool           `json:"upgrade_available"`
+	ManageReachable  bool           `json:"manage_reachable"`
+	LastCheckedAt    string         `json:"last_checked_at,omitempty"`
+	Channel          string         `json:"channel"`
+	Platform         string         `json:"platform"`
+	ReleaseNotes     string         `json:"release_notes,omitempty"`
+	Message          string         `json:"message,omitempty"`
+	ApplyCommand     string         `json:"apply_command"`
+	Asset            map[string]any `json:"asset,omitempty"`
+}
+
+// GetAgentUpdate 调用 GET /v1/agent/update。
+func (c *Client) GetAgentUpdate(ctx context.Context) (*AgentUpdateStatus, error) {
+	var status AgentUpdateStatus
+	if err := c.getJSON(ctx, "/v1/agent/update", &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
 // GetLLMSettings 调用 GET /v1/llm/settings。
 func (c *Client) GetLLMSettings(ctx context.Context) (*LLMSettings, error) {
 	var settings LLMSettings

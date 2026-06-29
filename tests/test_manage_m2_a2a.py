@@ -43,18 +43,7 @@ def _assign_groups(client: TestClient, agent_id: str, groups: list[str] | None =
 class ManageA2ATests(unittest.TestCase):
     def test_task_create_inbox_reply_flow(self) -> None:
         with TemporaryDirectory() as tmp:
-            settings = ManageSettings(
-                host="127.0.0.1",
-                port=8020,
-                db_path=Path(tmp) / "manage.db",
-                blob_dir=None,
-                blob_max_bytes=None,
-                offline_grace_seconds=86400,
-                audit_max_entries=100,
-                legacy_direct_relay=False,
-                a2a_inbox_content_max_chars=4096,
-                a2a_expire_sweep_seconds=0,
-            )
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db", a2a_expire_sweep_seconds=0)
             app = create_app(settings)
             with TestClient(app) as client:
                 _register_agent(client, "caller-01")
@@ -143,18 +132,7 @@ class ManageA2ATests(unittest.TestCase):
 
     def test_task_awaiting_caller_resume_flow(self) -> None:
         with TemporaryDirectory() as tmp:
-            settings = ManageSettings(
-                host="127.0.0.1",
-                port=8020,
-                db_path=Path(tmp) / "manage.db",
-                blob_dir=None,
-                blob_max_bytes=None,
-                offline_grace_seconds=86400,
-                audit_max_entries=100,
-                legacy_direct_relay=False,
-                a2a_inbox_content_max_chars=4096,
-                a2a_expire_sweep_seconds=0,
-            )
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db", a2a_expire_sweep_seconds=0)
             app = create_app(settings)
             with TestClient(app) as client:
                 _register_agent(client, "caller-01")
@@ -465,15 +443,8 @@ class ManageA2ATests(unittest.TestCase):
 
 class ManageA2AInboxEfficiencyTests(unittest.TestCase):
     def test_inbox_truncates_large_content(self) -> None:
-        settings = ManageSettings(
-            host="127.0.0.1",
-            port=8020,
+        settings = ManageSettings.for_test(
             db_path=None,
-            blob_dir=None,
-            blob_max_bytes=None,
-            offline_grace_seconds=86400,
-            audit_max_entries=100,
-            legacy_direct_relay=False,
             a2a_inbox_content_max_chars=16,
             a2a_expire_sweep_seconds=0,
         )

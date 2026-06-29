@@ -135,6 +135,75 @@ export async function uploadSkillPackage({ skillId, version, name, riskLevel, fi
   return body;
 }
 
+// --- Release Hub ---
+export async function fetchReleasePackages(params = {}) {
+  return apiFetch("/v1/releases/packages", params);
+}
+
+export async function publishReleasePackage(pkg, { setLatest = false } = {}) {
+  const { artifact, channel, platform, version } = pkg;
+  return apiFetch(
+    `/v1/releases/packages/${encodeURIComponent(artifact)}/${encodeURIComponent(channel)}/${encodeURIComponent(platform)}/${encodeURIComponent(version)}/publish`,
+    {},
+    { method: "POST", body: { set_latest: setLatest } },
+  );
+}
+
+export async function promoteReleasePackage(pkg) {
+  const { artifact, channel, platform, version } = pkg;
+  return apiFetch(
+    `/v1/releases/packages/${encodeURIComponent(artifact)}/${encodeURIComponent(channel)}/${encodeURIComponent(platform)}/${encodeURIComponent(version)}/promote`,
+    {},
+    { method: "POST" },
+  );
+}
+
+export async function deleteReleasePackage(pkg) {
+  const { artifact, channel, platform, version } = pkg;
+  return apiFetch(
+    `/v1/releases/packages/${encodeURIComponent(artifact)}/${encodeURIComponent(channel)}/${encodeURIComponent(platform)}/${encodeURIComponent(version)}`,
+    {},
+    { method: "DELETE" },
+  );
+}
+
+export async function uploadReleasePackage({
+  version,
+  platform,
+  channel = "stable",
+  releaseNotes = "",
+  publish = false,
+  setLatest = false,
+  file,
+}) {
+  const form = new FormData();
+  form.set("artifact", "dagents-local-assistant");
+  form.set("version", version);
+  form.set("platform", platform);
+  form.set("channel", channel);
+  form.set("release_notes", releaseNotes);
+  form.set("publish", publish ? "true" : "false");
+  form.set("set_latest", setLatest ? "true" : "false");
+  form.set("file", file);
+  const resp = await fetch(new URL("/v1/releases/packages", window.location.origin), {
+    method: "POST",
+    body: form,
+  });
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
+    const err = new Error(message);
+    err.status = resp.status;
+    throw err;
+  }
+  return body;
+}
+
 // --- Cases 案例库 ---
 export async function fetchCases() {
   return apiFetch("/v1/cases");

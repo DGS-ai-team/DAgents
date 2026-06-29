@@ -56,6 +56,14 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL,
                     PRIMARY KEY (skill_id, version)
                 );
+                CREATE TABLE IF NOT EXISTS release_packages (
+                    artifact TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY (artifact, channel, platform, version)
+                );
                 CREATE TABLE IF NOT EXISTS case_examples (
                     case_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL
@@ -65,7 +73,7 @@ class SQLiteDatabase:
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','4') "
-                "ON CONFLICT(key) DO UPDATE SET value='4'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','5') "
+                "ON CONFLICT(key) DO UPDATE SET value='5'"
             )
             conn.commit()

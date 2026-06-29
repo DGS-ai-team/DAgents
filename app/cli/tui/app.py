@@ -2620,6 +2620,12 @@ class DAgentsTuiApp(App[None]):
         if value == "/status":
             await self._show_status()
             return
+        if value == "/version":
+            await self._show_version()
+            return
+        if value == "/update" or value.startswith("/update "):
+            await self._handle_update_command(value)
+            return
         if value in {"/session", "/sessions"}:
             await self._show_sessions()
             return
@@ -2713,6 +2719,67 @@ class DAgentsTuiApp(App[None]):
             rows.append(("context", f"(failed: {exc})"))
         log.write(self._command_panel_block("Status", self._command_kv_lines(rows)), expand=True)
         self._apply_top_status()
+
+    def _format_update_panel(self, data: dict[str, Any]) -> Group:
+        rows = [
+            ("当前版本", str(data.get("current_version") or "-")),
+            ("最新版本", str(data.get("latest_version") or "-")),
+            ("平台", str(data.get("platform") or "-")),
+            ("渠道", str(data.get("channel") or "-")),
+            ("Manage", "可达" if data.get("manage_reachable") else "不可达"),
+        ]
+        body_lines: list[RenderableType] = list(self._command_kv_lines(rows))
+        message = str(data.get("message") or "").strip()
+        if message:
+            body_lines.append(Text(message, style="dim"))
+        notes = str(data.get("release_notes") or "").strip()
+        if notes:
+            body_lines.append(Text("Release notes:", style="bold"))
+            body_lines.extend(Text(line, style="dim") for line in notes.splitlines() if line.strip())
+        if data.get("upgrade_available"):
+            cmd = str(data.get("apply_command") or "dagents update").strip() or "dagents update"
+            body_lines.append(Text(f"安装: 在终端执行 {cmd}", style="yellow"))
+        return Group(*body_lines)
+
+    async def _show_version(self) -> None:
+        log = self._transcript_log()
+        try:
+            data = await self._controller.get_agent_update()
+            log.write(self._command_panel_block("Version", self._format_update_panel(data)), expand=True)
+        except Exception as exc:  # noqa: BLE001
+            log.write(f"[red]version failed: {exc}[/red]")
+
+    async def _handle_update_command(self, value: str) -> None:
+        log = self._transcript_log()
+        if self._controller.awaiting_user_turn:
+            log.write("[yellow]turn 进行中，请稍后再试 /update[/yellow]")
+            return
+        parts = value.split()
+        force = len(parts) > 1 and parts[1].lower() in {"--force", "force", "yes", "confirm"}
+        try:
+            data = await self._controller.get_agent_update()
+        except Exception as exc:  # noqa: BLE001
+            log.write(f"[red]update failed: {exc}[/red]")
+            return
+        if not data.get("upgrade_available"):
+            log.write(self._command_panel_block("Update", self._format_update_panel(data)), expand=True)
+            return
+        if not force:
+            log.write(self._command_panel_block("Update", self._format_update_panel(data)), expand=True)
+            log.write("[dim]确认安装请执行: /update confirm 或在终端运行 dagents update[/dim]")
+            return
+        import os
+        import shutil
+
+        home = os.environ.get("DAGENTS_HOME", "").strip()
+        dagents_bin = os.path.join(home, "dagents") if home else shutil.which("dagents")
+        if not dagents_bin:
+            log.write("[red]未找到 dagents 可执行文件（设置 DAGENTS_HOME 或加入 PATH）[/red]")
+            return
+        log.write("[yellow]正在退出 TUI 以执行 dagents update…[/yellow]")
+        self._controller.remember_last_session()
+        args = [dagents_bin, "update", "--from-client", "--force"]
+        os.execv(dagents_bin, args)
 
     async def _show_triggers(self) -> None:
         """查询并展示 Agent 触发器列表（GET /v1/triggers）。"""
@@ -3393,6 +3460,8 @@ class DAgentsTuiApp(App[None]):
             ("/reasoning on|off", "推理流显示开关"),
             ("/thinking on|off", "模型思考开关（deepseek/qwen）"),
             ("/thinking effort high|max", "思考强度"),
+            ("/version", "当前版本与更新检查"),
+            ("/update", "查看可用升级（/update confirm 或终端 dagents update）"),
             ("/clear", "清空服务端 context 与 transcript"),
             ("/exit", "退出（Esc 可取消在途 turn）"),
         ]
