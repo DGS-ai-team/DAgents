@@ -44,6 +44,8 @@ const emit = defineEmits([
 const input = ref("");
 const streamRef = ref(null);
 const userInfoSelected = ref(0);
+const followTail = ref(true);
+const SCROLL_TAIL_THRESHOLD = 48;
 
 const stream = computed(() => buildStream(props.entries, props.hitlQueue));
 
@@ -91,13 +93,28 @@ watch(
   async () => {
     await nextTick();
     const el = streamRef.value;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && followTail.value) el.scrollTop = el.scrollHeight;
   },
 );
+
+function onStreamScroll() {
+  const el = streamRef.value;
+  if (!el) return;
+  followTail.value = el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_TAIL_THRESHOLD;
+}
+
+function scrollToTail() {
+  followTail.value = true;
+  nextTick(() => {
+    const el = streamRef.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
 
 async function submit() {
   const text = input.value.trim();
   if (!text || props.disabled || props.sending) return;
+  scrollToTail();
   emit("send", text);
   input.value = "";
 }
@@ -133,7 +150,7 @@ defineExpose({
       </div>
     </header>
 
-    <div ref="streamRef" class="chat__stream">
+    <div ref="streamRef" class="chat__stream" @scroll="onStreamScroll">
       <div v-if="!stream.length" class="chat__empty">
         <div class="chat__empty-inner">
           <div class="chat__empty-title">开始对话</div>
