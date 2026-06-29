@@ -118,7 +118,7 @@ def seed_bundled_releases(
                     rel_path=rel,
                     source="bundled_seed",
                 )
-                pkg = store.create_draft(payload, now=now)
+                store.create_draft(payload, now=now)
                 published = store.publish(
                     DEFAULT_ARTIFACT,
                     channel,
