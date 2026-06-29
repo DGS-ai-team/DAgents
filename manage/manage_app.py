@@ -22,6 +22,8 @@ from manage.llm.store import LLMConfigStore
 from manage.platform.blob_routes import build_blob_router
 from manage.registry.routes import build_registry_router
 from manage.registry.store import AgentRegistryStore
+from manage.cases.routes import build_cases_router
+from manage.cases.store import CaseExampleStore
 from manage.skills.routes import build_skills_router
 from manage.skills.store import SkillPackageStore
 from manage.storage.sqlite import SQLiteDatabase
@@ -66,6 +68,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
         return AuditListResponse(events=audit.list_recent(limit=limit))
 
     skills_store = SkillPackageStore(db=db if db.enabled else None)
+    cases_store = CaseExampleStore(db=db if db.enabled else None)
 
     app.include_router(build_registry_router(store, audit))
     app.include_router(build_a2a_router(store, a2a_store, audit))
@@ -73,6 +76,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))
     app.include_router(build_skills_router(skills_store, blob, audit))
+    app.include_router(build_cases_router(cases_store, audit))
 
     @app.get("/", include_in_schema=False)
     def root_redirect() -> RedirectResponse:
@@ -90,6 +94,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.state.a2a_store = a2a_store
     app.state.llm_store = llm_store
     app.state.skills_store = skills_store
+    app.state.cases_store = cases_store
     return app
 
 
