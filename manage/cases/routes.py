@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from manage.cases.jsonl import export_jsonl_bytes, parse_jsonl_bytes
 from manage.cases.models import (
+    CaseAttachment,
     CaseCreate,
     CaseExample,
     CaseMessage,
@@ -18,16 +19,37 @@ from manage.cases.models import (
     CaseResources,
 )
 from manage.cases.store import CaseExampleStore
+from manage.cases.validate import validate_case_resources
+from manage.externaltools.store import ExternalToolPackageStore
 from manage.platform.audit import AuditLog
 from manage.platform.auth import authenticate, require_admin
+from manage.platform.blob import BlobStore
+from manage.plugins.store import PluginPackageStore
+from manage.skills.store import SkillPackageStore
 
 
 def _parse_csv_ids(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
-def build_cases_router(store: CaseExampleStore, audit: AuditLog) -> APIRouter:
+def build_cases_router(
+    store: CaseExampleStore,
+    audit: AuditLog,
+    *,
+    blob: BlobStore | None = None,
+    skills_store: SkillPackageStore | None = None,
+    plugins_store: PluginPackageStore | None = None,
+    externaltools_store: ExternalToolPackageStore | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/v1/cases", tags=["cases"])
+
+    def _validate_resources(resources: CaseResources) -> None:
+        validate_case_resources(
+            resources,
+            skills_store=skills_store,
+            plugins_store=plugins_store,
+            externaltools_store=externaltools_store,
+        )
 
     @router.get("", response_model=list[CaseExample])
     def list_cases(request: Request) -> list[CaseExample]:
@@ -62,16 +84,18 @@ def build_cases_router(store: CaseExampleStore, audit: AuditLog) -> APIRouter:
     ) -> CaseExample:
         auth = authenticate(request)
         require_admin(auth)
+        resources = CaseResources(
+            skill_ids=_parse_csv_ids(skill_ids),
+            plugin_ids=_parse_csv_ids(plugin_ids),
+            externaltool_ids=_parse_csv_ids(externaltool_ids),
+        )
+        _validate_resources(resources)
         try:
             payload = CaseCreate(
                 case_id=case_id.strip(),
                 name=name.strip(),
                 description=description,
-                resources=CaseResources(
-                    skill_ids=_parse_csv_ids(skill_ids),
-                    plugin_ids=_parse_csv_ids(plugin_ids),
-                    externaltool_ids=_parse_csv_ids(externaltool_ids),
-                ),
+                resources=resources,
             )
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail="invalid case metadata") from exc
@@ -102,6 +126,8 @@ def build_cases_router(store: CaseExampleStore, audit: AuditLog) -> APIRouter:
     def patch_case(case_id: str, body: CaseMetadataPatch, request: Request) -> CaseExample:
         auth = authenticate(request)
         require_admin(auth)
+        if body.resources is not None:
+            _validate_resources(body.resources)
         case = store.patch_metadata(case_id, body, now=int(time.time()))
         if not case:
             raise HTTPException(status_code=404, detail="not found")
@@ -117,6 +143,51 @@ def build_cases_router(store: CaseExampleStore, audit: AuditLog) -> APIRouter:
             raise HTTPException(status_code=404, detail="not found")
         audit.record(actor=auth.token_id, action="case.delete", target_agent_id=case_id)
         return {"status": "deleted", "case_id": case_id}
+
+    @router.post("/{case_id}/attachments", response_model=CaseExample)
+    async def upload_attachment(
+        case_id: str,
+        request: Request,
+        file: UploadFile = File(...),
+    ) -> CaseExample:
+        auth = authenticate(request)
+        require_admin(auth)
+        if blob is None or not blob.enabled:
+            raise HTTPException(status_code=503, detail="blob store disabled")
+        data = await file.read()
+        if not data:
+            raise HTTPException(status_code=422, detail="empty file")
+        content_type = file.content_type or "application/octet-stream"
+        meta = blob.put(data, content_type=content_type)
+        attachment = CaseAttachment(
+            blob_id=meta["blob_id"],
+            filename=file.filename or "",
+            content_type=content_type,
+            size=int(meta.get("size") or len(data)),
+        )
+        case = store.add_attachment(case_id, attachment, now=int(time.time()))
+        if not case:
+            raise HTTPException(status_code=404, detail="not found")
+        audit.record(
+            actor=auth.token_id,
+            action="case.attachment.upload",
+            target_agent_id=f"{case_id}/{attachment.blob_id[:12]}",
+        )
+        return case
+
+    @router.delete("/{case_id}/attachments/{blob_id}", response_model=CaseExample)
+    def delete_attachment(case_id: str, blob_id: str, request: Request) -> CaseExample:
+        auth = authenticate(request)
+        require_admin(auth)
+        case = store.remove_attachment(case_id, blob_id, now=int(time.time()))
+        if not case:
+            raise HTTPException(status_code=404, detail="not found")
+        audit.record(
+            actor=auth.token_id,
+            action="case.attachment.delete",
+            target_agent_id=f"{case_id}/{blob_id[:12]}",
+        )
+        return case
 
     @router.post("/{case_id}/import-jsonl", response_model=CaseExample)
     async def import_jsonl(

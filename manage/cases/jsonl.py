@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from manage.cases.models import CaseMessage
+from manage.cases.tool_resolve import filter_unlinked_tool_messages
 
 
 def _content_to_str(content: Any) -> str:
@@ -48,7 +49,7 @@ def parse_jsonl_bytes(data: bytes) -> list[CaseMessage]:
                 raw=message,
             )
         )
-    return out
+    return filter_unlinked_tool_messages(out)
 
 
 def export_jsonl_bytes(messages: list[CaseMessage]) -> bytes:

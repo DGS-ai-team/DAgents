@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 import sys
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,6 +16,7 @@ if str(_ROOT) not in sys.path:
 
 from manage.config import ManageSettings  # noqa: E402
 from manage.manage_app import create_app  # noqa: E402
+from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
 
 
 def _register_agent(client: TestClient, agent_id: str, *, base_url: str | None = None) -> None:
@@ -75,6 +79,54 @@ class ManageAdminTests(unittest.TestCase):
 
                 listed2 = client.get("/v1/admin/a2a/tasks", params={"status": "delivered"})
                 self.assertTrue(any(t["task_id"] == task_id for t in listed2.json()["tasks"]))
+
+    def test_list_a2a_tasks_with_surrogate_content(self) -> None:
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "manage.db"
+            settings = ManageSettings.for_test(db_path=db_path, a2a_expire_sweep_seconds=0)
+            now = int(time.time())
+            base = {
+                "task_id": "task-surrogate",
+                "from_agent_id": "caller-s",
+                "to_agent_id": "callee-s",
+                "kind": "invoke",
+                "content": "bad surrogate",
+                "blob_ids": [],
+                "caller_session_id": "",
+                "idempotency_key": "",
+                "trace_id": "",
+                "status": "queued",
+                "created_at_unix": now,
+                "updated_at_unix": now,
+                "expires_at_unix": now + 3600,
+                "delivered_at_unix": None,
+                "result_text": "",
+                "result_status": None,
+                "callee_session_id": "",
+                "error_detail": "",
+                "pending_caller_resume": {},
+            }
+            raw = json.loads(json.dumps(base).replace("bad surrogate", "bad\\uDC80unicode"))
+            self.assertIn("\udc80", raw["content"])
+            corrupt_json = json.dumps(base).replace("bad surrogate", "bad\\uDC80unicode")
+
+            SQLiteDatabase(db_path)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "INSERT INTO a2a_tasks(task_id, payload_json) VALUES (?, ?)",
+                    ("task-surrogate", corrupt_json),
+                )
+                conn.commit()
+
+            app = create_app(settings)
+            with TestClient(app) as client:
+                listed = client.get("/v1/admin/a2a/tasks")
+                self.assertEqual(listed.status_code, 200, listed.text)
+                body = listed.json()
+                self.assertGreaterEqual(body["total"], 1)
+                content = next(t["content"] for t in body["tasks"] if t["task_id"] == "task-surrogate")
+                self.assertNotIn("\udc80", content)
+                content.encode("utf-8")
 
     def test_admin_node_session_proxy_removed(self) -> None:
         with TemporaryDirectory() as tmp:

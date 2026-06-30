@@ -47,8 +47,9 @@ type Server struct {
 	triggerSched  *triggers.Scheduler
 	registrar     *manage.Registrar
 	inboxPoller   *manage.InboxPoller
-	updateChecker *manage.UpdateChecker
-	a2aCallerHITL *session.A2ACallerHITLBridge
+	updateChecker   *manage.UpdateChecker
+	packageUploader *manage.PackageUploader
+	a2aCallerHITL   *session.A2ACallerHITLBridge
 }
 
 // Option 为 NewServer 可选配置。
@@ -241,11 +242,13 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var registrar *manage.Registrar
 	var inboxPoller *manage.InboxPoller
 	var updateChecker *manage.UpdateChecker
+	var packageUploader *manage.PackageUploader
 	var a2aBridge *session.A2ACallerHITLBridge
 	if cfg.Manage.Enabled {
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
 		updateChecker = manage.NewUpdateChecker(cfg, logger)
+		packageUploader = manage.NewPackageUploader(cfg, logger)
 		a2aBridge = session.NewA2ACallerHITLBridge(cfg.AgentID, hub)
 		if o.tools != nil {
 			compliancePeer := ""
@@ -280,8 +283,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerSched:  triggerSched,
 		registrar:     registrar,
 		inboxPoller:   inboxPoller,
-		updateChecker: updateChecker,
-		a2aCallerHITL: a2aBridge,
+		updateChecker:   updateChecker,
+		packageUploader: packageUploader,
+		a2aCallerHITL:   a2aBridge,
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
@@ -302,6 +306,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.registerChildAgentRoutes()
 	s.registerPolicyRoutes()
 	s.registerLLMRoutes()
+	s.registerManageUploadRoutes()
 	if cfg.UIEnabled() {
 		s.mux.Handle("GET /ui/", webui.Handler())
 		s.mux.HandleFunc("GET /ui", webui.RedirectHandler())

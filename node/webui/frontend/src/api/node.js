@@ -131,3 +131,24 @@ export function updateShellPolicy(shellType, updates, deletes = []) {
 export function listTriggers() {
   return apiFetch("/v1/triggers");
 }
+
+export function uploadSkillToManage({ path, skillId, version, name, publish = false }) {
+  return apiFetch("/v1/manage/upload/skill", {
+    method: "POST",
+    body: { path, skill_id: skillId, version, name, publish },
+  });
+}
+
+export function uploadExternalToolToManage({ path, toolId, version, name, platform = "", publish = false }) {
+  return apiFetch("/v1/manage/upload/externaltool", {
+    method: "POST",
+    body: { path, tool_id: toolId, version, name, platform, publish },
+  });
+}
+
+export function uploadPluginToManage({ path, pluginId, version, name, platform = "", publish = false }) {
+  return apiFetch("/v1/manage/upload/plugin", {
+    method: "POST",
+    body: { path, plugin_id: pluginId, version, name, platform, publish },
+  });
+}

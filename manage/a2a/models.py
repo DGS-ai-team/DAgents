@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from manage.platform.text import sanitize_json_value
 
 TaskKind = Literal["invoke", "notify"]
 TaskStatus = Literal[
@@ -31,6 +33,13 @@ class TaskCreateRequest(BaseModel):
     idempotency_key: str = ""
     ttl_seconds: int = Field(default=3600, ge=1, le=86400)
     trace_id: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sanitize_text_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return sanitize_json_value(data)
+        return data
 
 
 class TaskCreateResponse(BaseModel):
@@ -59,6 +68,13 @@ class TaskStoredRecord(BaseModel):
     callee_session_id: str = ""
     error_detail: str = ""
     pending_caller_resume: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sanitize_text_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return sanitize_json_value(data)
+        return data
 
 
 class TaskRecord(TaskStoredRecord):
@@ -94,6 +110,13 @@ class TaskReplyRequest(BaseModel):
     callee_session_id: str = ""
     error_detail: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _sanitize_text_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return sanitize_json_value(data)
+        return data
+
 
 class TaskReplyResponse(BaseModel):
     task_id: str
@@ -123,6 +146,13 @@ class TaskCallerNotifyResponse(BaseModel):
 class TaskCallerResumeRequest(BaseModel):
     caller_agent_id: str = Field(min_length=1)
     resume_value: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sanitize_text_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return sanitize_json_value(data)
+        return data
 
 
 class TaskCallerResumeResponse(BaseModel):

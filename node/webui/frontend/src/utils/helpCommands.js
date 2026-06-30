@@ -31,6 +31,14 @@ export const HELP_SECTIONS = [
     ],
   },
   {
+    title: "Manage 上传",
+    items: [
+      { cmd: "/upload skill PATH ID VER [NAME] [--publish]", desc: "上传 skill zip 至 Manage" },
+      { cmd: "/upload externaltool PATH ID VER [NAME] [--platform] [--publish]", desc: "上传外置 CLI" },
+      { cmd: "/upload plugin PATH ID VER [NAME] [--platform] [--publish]", desc: "上传 Hook plugin (.so)" },
+    ],
+  },
+  {
     title: "策略与触发器",
     items: [
       { cmd: "/policy", desc: "工具 / Shell 策略" },

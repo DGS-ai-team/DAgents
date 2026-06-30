@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-06-30
+
+**Manage 案例库与制品分发**：案例关联已发布 Skills/Plugins/External Tools、支持附件；Plugins 包 API；Node `/upload` 斜杠命令；Console 列表页与 A2A 修复。
+
+### 新增
+
+- **案例库资源选择器**：Skills / Plugins / External Tools 从已发布目录多选（`ResourcePicker`），保存时校验 catalog 引用。
+- **案例附件**：`POST/DELETE /v1/cases/{id}/attachments`；编辑页上传、详情页下载。
+- **Manage Plugins 分发**：`POST/GET /v1/plugins/*`；Console **Node 配置 → Plugins** 管理页。
+- **Node → Manage 上传**：`POST /v1/manage/upload/{skill|externaltool|plugin}`；TUI / WebUI **`/upload`** 斜杠命令（`manage.enabled` 时）。
+- **案例 tool 消息过滤**：导入 JSONL 与 Console 展示时过滤无法解析工具名的 orphan `role=tool` 消息。
+
+### 变更
+
+- **Manage Console 案例库**：卡片列表 + 搜索分页；详情顶栏紧凑化；Registry / Inbox 表格纵向填满视口；移除批量 discovery_group 面板。
+- **A2A Task 序列化**：入库/出库前清理非法 UTF-16 surrogate，修复 Admin 任务列表 500。
+
+### 修复
+
+- **页头刷新按钮**：SVG 误用 `btn-icon` 导致文字前空白。
+
+（Git **tag**：`v0.5.4`。）
+
 ## [0.5.3] - 2026-06-30
 
 **外置工具目录与 Manage 分发**：`.runtime/externaltools/` 替代 `scripts/`；Manage External Tools API 与 Console 管理页；案例库 `externaltool_ids`；文档收敛至 handbook。

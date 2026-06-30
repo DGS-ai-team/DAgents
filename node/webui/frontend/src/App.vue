@@ -505,8 +505,37 @@ async function handleCommand(cmd) {
     addSystem(`tool 输出: ${transcriptStore.toolFoldVerbose ? "详细" : "折叠"}`);
     return;
   }
+  if (res.action === "upload") {
+    await handleUploadCommand(res.upload);
+    return;
+  }
   if (res.panel) {
     await openPanel(res.panel, res.arg);
+  }
+}
+
+async function handleUploadCommand(spec) {
+  if (!spec || spec.error) {
+    sessionStore.error = spec?.error || "upload 参数无效";
+    return;
+  }
+  const { kind, path, id, version, name, platform, publish } = spec;
+  try {
+    let out;
+    if (kind === "skill" || kind === "skills") {
+      out = await api.uploadSkillToManage({ path, skillId: id, version, name, publish });
+    } else if (["externaltool", "externaltools", "tool", "tools"].includes(kind)) {
+      out = await api.uploadExternalToolToManage({ path, toolId: id, version, name, platform, publish });
+    } else if (kind === "plugin" || kind === "plugins") {
+      out = await api.uploadPluginToManage({ path, pluginId: id, version, name, platform, publish });
+    } else {
+      sessionStore.error = `未知 upload 类型: ${kind}`;
+      return;
+    }
+    const note = out.message ? ` — ${out.message}` : "";
+    addSystem(`已上传 ${out.kind} ${out.id}@${out.version}（${out.status}${note}）`);
+  } catch (err) {
+    sessionStore.error = err.message;
   }
 }
 

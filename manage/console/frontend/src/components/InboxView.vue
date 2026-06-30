@@ -43,7 +43,7 @@ function emitFilters(immediate = false) {
 </script>
 
 <template>
-  <div>
+  <div class="list-page">
     <section class="panel filters-panel">
       <div class="panel-head">
         <h2 class="panel-title">Task 筛选</h2>
@@ -100,7 +100,7 @@ function emitFilters(immediate = false) {
       <p class="filters-note muted">只读观测列表，不会触发 deliver。</p>
     </section>
 
-    <section class="panel table-panel">
+    <section class="panel table-panel table-panel--stretch">
       <div v-if="error" class="banner banner-error" role="alert">{{ error }}</div>
       <div class="table-scroll">
         <table class="data-table">

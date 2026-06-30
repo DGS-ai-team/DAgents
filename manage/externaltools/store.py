@@ -98,6 +98,9 @@ class ExternalToolPackageStore:
             key=lambda p: p.catalog_seq,
         )
 
+    def published_ids(self) -> set[str]:
+        return {p.tool_id for p in self.catalog()}
+
     def sync_manifest(self, since: int) -> list[dict]:
         return [
             {

@@ -409,6 +409,54 @@ func (c *Client) UnloadSessionSkill(ctx context.Context, sessionID, skillName st
 	return &out, nil
 }
 
+// ManagePackageUploadResult 为 Node 代传 Manage 上传的结果。
+type ManagePackageUploadResult struct {
+	Kind    string `json:"kind"`
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// UploadSkillToManage 调用 POST /v1/manage/upload/skill。
+func (c *Client) UploadSkillToManage(ctx context.Context, path, skillID, version, name string, publish bool) (*ManagePackageUploadResult, error) {
+	var out ManagePackageUploadResult
+	err := c.postJSON(ctx, "/v1/manage/upload/skill", map[string]any{
+		"path": path, "skill_id": skillID, "version": version, "name": name, "publish": publish,
+	}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UploadExternalToolToManage 调用 POST /v1/manage/upload/externaltool。
+func (c *Client) UploadExternalToolToManage(ctx context.Context, path, toolID, version, name, platform string, publish bool) (*ManagePackageUploadResult, error) {
+	var out ManagePackageUploadResult
+	err := c.postJSON(ctx, "/v1/manage/upload/externaltool", map[string]any{
+		"path": path, "tool_id": toolID, "version": version, "name": name,
+		"platform": platform, "publish": publish,
+	}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UploadPluginToManage 调用 POST /v1/manage/upload/plugin。
+func (c *Client) UploadPluginToManage(ctx context.Context, path, pluginID, version, name, platform string, publish bool) (*ManagePackageUploadResult, error) {
+	var out ManagePackageUploadResult
+	err := c.postJSON(ctx, "/v1/manage/upload/plugin", map[string]any{
+		"path": path, "plugin_id": pluginID, "version": version, "name": name,
+		"platform": platform, "publish": publish,
+	}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {

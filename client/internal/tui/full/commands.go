@@ -33,6 +33,8 @@ func (m *model) execCommand(line string) (quit bool, err error) {
 		err = m.runCompress()
 	case "skill":
 		err = m.handleSkillCommand(parts[1:])
+	case "upload":
+		err = m.handleUploadCommand(parts[1:])
 	case "status":
 		err = m.appendStatus()
 	case "version":

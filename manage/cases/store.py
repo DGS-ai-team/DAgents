@@ -12,6 +12,7 @@ from manage.cases.models import (
     CaseMessage,
     CaseMetadataPatch,
     CaseResources,
+    CaseAttachment,
 )
 from manage.storage.sqlite import SQLiteDatabase
 
@@ -181,6 +182,38 @@ class CaseExampleStore:
             if len(messages) == len(case.messages):
                 return None
             updated = case.model_copy(update={"messages": messages, "updated_at": now})
+            self._save(updated)
+            return updated
+
+    def add_attachment(
+        self,
+        case_id: str,
+        attachment: CaseAttachment,
+        now: int,
+    ) -> CaseExample | None:
+        with self._lock:
+            case = self.get(case_id)
+            if not case:
+                return None
+            attachments = [
+                a for a in case.resources.attachments if a.blob_id != attachment.blob_id
+            ]
+            attachments.append(attachment)
+            resources = case.resources.model_copy(update={"attachments": attachments})
+            updated = case.model_copy(update={"resources": resources, "updated_at": now})
+            self._save(updated)
+            return updated
+
+    def remove_attachment(self, case_id: str, blob_id: str, now: int) -> CaseExample | None:
+        with self._lock:
+            case = self.get(case_id)
+            if not case:
+                return None
+            attachments = [a for a in case.resources.attachments if a.blob_id != blob_id]
+            if len(attachments) == len(case.resources.attachments):
+                return None
+            resources = case.resources.model_copy(update={"attachments": attachments})
+            updated = case.model_copy(update={"resources": resources, "updated_at": now})
             self._save(updated)
             return updated
 

@@ -3,7 +3,6 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { fetchAgents, fetchHealth, fetchInboxTasks } from "./api.js";
 import AppSidebar from "./components/AppSidebar.vue";
 import AskAiButton from "./components/AskAiButton.vue";
-import BulkGroupsPanel from "./components/BulkGroupsPanel.vue";
 import DetailDrawer from "./components/DetailDrawer.vue";
 import InboxView from "./components/InboxView.vue";
 import NodeAdminView from "./components/NodeAdminView.vue";
@@ -220,11 +219,6 @@ function inboxNextPage() {
   }
 }
 
-function onGroupsSaved(count) {
-  showToast(`已为 ${count} 个 Node 分配分组`, "success");
-  loadAgents();
-}
-
 function onDrawerGroupsSaved({ agentId, updated }) {
   showToast(`${agentId} 分组已更新`, "success");
   const idx = registry.agents.findIndex((a) => a.agent_id === agentId);
@@ -269,13 +263,6 @@ onMounted(async () => {
           :offline="stats.offline"
           :total="stats.total"
           :peers="stats.peers"
-        />
-
-        <BulkGroupsPanel
-          v-show="view === 'registry'"
-          :agents="registry.agents"
-          @saved="onGroupsSaved"
-          @error="showToast($event, 'error')"
         />
 
         <RegistryView

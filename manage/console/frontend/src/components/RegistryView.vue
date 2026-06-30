@@ -47,7 +47,7 @@ function emitFilters(immediate = false) {
 </script>
 
 <template>
-  <div>
+  <div class="list-page">
     <section class="panel filters-panel">
       <div class="panel-head">
         <h2 class="panel-title">筛选与搜索</h2>

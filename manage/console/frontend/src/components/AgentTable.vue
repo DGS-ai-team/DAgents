@@ -11,7 +11,7 @@ const emit = defineEmits(["open"]);
 </script>
 
 <template>
-  <section class="panel table-panel">
+  <section class="panel table-panel table-panel--stretch">
     <div v-if="error" class="banner banner-error" role="alert">{{ error }}</div>
     <div class="table-scroll">
       <table class="data-table">

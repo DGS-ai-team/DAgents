@@ -51,17 +51,6 @@ export async function saveAgentGroups(agentId, raw) {
   );
 }
 
-export async function bulkAssignGroups(agents, rawGroups) {
-  const groups = parseGroupInput(rawGroups);
-  if (!groups.length) {
-    throw new Error("至少填写一个 discovery_group");
-  }
-  for (const agent of agents) {
-    await saveAgentGroups(agent.agent_id, groups.join(", "));
-    agent.discovery_group = groups;
-  }
-}
-
 export async function fetchHealth() {
   return apiFetch("/health");
 }
@@ -156,6 +145,46 @@ export async function uploadExternalToolPackage({ toolId, version, name, platfor
   form.set("risk_level", riskLevel || "low");
   form.set("file", file);
   const resp = await fetch(new URL("/v1/externaltools/packages", window.location.origin), {
+    method: "POST",
+    body: form,
+  });
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
+    const err = new Error(message);
+    err.status = resp.status;
+    throw err;
+  }
+  return body;
+}
+
+// --- Plugins 分发 ---
+export async function fetchPluginCatalog() {
+  return apiFetch("/v1/plugins/catalog");
+}
+
+export async function publishPlugin(pluginId, version) {
+  return apiFetch(
+    `/v1/plugins/packages/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(version)}/publish`,
+    {},
+    { method: "POST" },
+  );
+}
+
+export async function uploadPluginPackage({ pluginId, version, name, platform, riskLevel, file }) {
+  const form = new FormData();
+  form.set("plugin_id", pluginId);
+  form.set("version", version);
+  form.set("name", name);
+  form.set("platform", platform || "any");
+  form.set("risk_level", riskLevel || "low");
+  form.set("file", file);
+  const resp = await fetch(new URL("/v1/plugins/packages", window.location.origin), {
     method: "POST",
     body: form,
   });
@@ -280,18 +309,18 @@ export async function createCase({
   caseId,
   name,
   description = "",
-  skillIds = "",
-  pluginIds = "",
-  externaltoolIds = "",
+  skillIds = [],
+  pluginIds = [],
+  externaltoolIds = [],
   file = null,
 }) {
   const form = new FormData();
   form.set("case_id", caseId);
   form.set("name", name);
   form.set("description", description);
-  form.set("skill_ids", skillIds);
-  form.set("plugin_ids", pluginIds);
-  form.set("externaltool_ids", externaltoolIds);
+  form.set("skill_ids", (skillIds || []).join(", "));
+  form.set("plugin_ids", (pluginIds || []).join(", "));
+  form.set("externaltool_ids", (externaltoolIds || []).join(", "));
   if (file) form.set("file", file);
   const resp = await fetch(new URL("/v1/cases", window.location.origin), {
     method: "POST",
@@ -373,6 +402,38 @@ export async function exportCaseJsonl(caseId) {
   a.download = `${caseId}.jsonl`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export async function uploadCaseAttachment(caseId, file) {
+  const form = new FormData();
+  form.set("file", file);
+  const resp = await fetch(
+    new URL(`/v1/cases/${encodeURIComponent(caseId)}/attachments`, window.location.origin),
+    { method: "POST", body: form },
+  );
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
+    throw new Error(message);
+  }
+  return body;
+}
+
+export async function deleteCaseAttachment(caseId, blobId) {
+  return apiFetch(
+    `/v1/cases/${encodeURIComponent(caseId)}/attachments/${encodeURIComponent(blobId)}`,
+    {},
+    { method: "DELETE" },
+  );
+}
+
+export function blobDownloadUrl(blobId) {
+  return `/v1/blobs/${encodeURIComponent(blobId)}`;
 }
 
 export { REGISTRY_API };

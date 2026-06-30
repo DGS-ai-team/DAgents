@@ -74,12 +74,18 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL,
                     PRIMARY KEY (tool_id, version)
                 );
+                CREATE TABLE IF NOT EXISTS plugin_packages (
+                    plugin_id TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY (plugin_id, version)
+                );
                 -- Blob 元数据随内容寻址文件落在 MANAGE_BLOB_DIR/{sha256}.json sidecar，
                 -- 不入 SQLite；故此处不建 blobs 表。
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','6') "
-                "ON CONFLICT(key) DO UPDATE SET value='6'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','7') "
+                "ON CONFLICT(key) DO UPDATE SET value='7'"
             )
             conn.commit()

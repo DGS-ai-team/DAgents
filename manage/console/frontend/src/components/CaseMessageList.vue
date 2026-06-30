@@ -1,5 +1,10 @@
 <script setup>
 import { computed } from "vue";
+import {
+  buildToolCallMap,
+  filterLinkedToolMessages,
+  resolveToolName,
+} from "../caseToolResolve.js";
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -8,23 +13,11 @@ const props = defineProps({
 
 const emit = defineEmits(["insert", "edit", "delete"]);
 
-const toolCallMap = computed(() => {
-  const map = new Map();
-  for (const msg of props.messages) {
-    const raw = msg.raw;
-    if (!raw?.tool_calls || !Array.isArray(raw.tool_calls)) continue;
-    for (const tc of raw.tool_calls) {
-      const id = tc?.id;
-      if (!id) continue;
-      const fn = tc.function || {};
-      map.set(id, {
-        name: fn.name || tc.name || "",
-        arguments: fn.arguments ?? "",
-      });
-    }
-  }
-  return map;
-});
+const displayMessages = computed(() =>
+  props.editing ? props.messages : filterLinkedToolMessages(props.messages),
+);
+
+const toolCallMap = computed(() => buildToolCallMap(props.messages));
 
 function rolePillClass(role) {
   const map = {
@@ -44,12 +37,41 @@ function messageBody(msg) {
   return "";
 }
 
-function toolDetails(msg) {
+function resolveArgs(raw, priorRaws) {
+  const callId = String(raw.tool_call_id || "").trim();
+  const content = messageBody({ content: raw.content, raw });
+  if (callId.startsWith("async-job-")) {
+    const srcId = content.split("\n").map((l) => l.trim()).find((l) => l.startsWith("source_tool_call_id="));
+    if (srcId) {
+      const id = srcId.slice("source_tool_call_id=".length).trim();
+      if (toolCallMap.value.has(id)) return toolCallMap.value.get(id).arguments ?? "";
+    }
+    const jobId = callId.slice("async-job-".length).trim();
+    if (jobId) {
+      for (let i = priorRaws.length - 1; i >= 0; i -= 1) {
+        const prev = priorRaws[i];
+        if (prev.role !== "tool") continue;
+        const prevContent = String(prev.content ?? "");
+        if (!prevContent.includes(jobId)) continue;
+        const prevCall = String(prev.tool_call_id || "").trim();
+        if (prevCall && toolCallMap.value.has(prevCall)) {
+          return toolCallMap.value.get(prevCall).arguments ?? "";
+        }
+      }
+    }
+  }
+  if (callId && toolCallMap.value.has(callId)) {
+    return toolCallMap.value.get(callId).arguments ?? "";
+  }
+  return "";
+}
+
+function toolDetails(msg, msgIndex) {
+  const raws = props.messages.map((m) => m.raw || {});
+  const prior = raws.slice(0, msgIndex >= 0 ? msgIndex : raws.indexOf(msg.raw || {}));
   const raw = msg.raw || {};
-  const callId = raw.tool_call_id || "";
-  const matched = callId ? toolCallMap.value.get(callId) : null;
-  const toolName = raw.name || matched?.name || "—";
-  const args = matched?.arguments ?? "";
+  const toolName = resolveToolName(raw, prior, toolCallMap.value) || "—";
+  const args = resolveArgs(raw, prior);
   const result = messageBody(msg) || "—";
   return { toolName, args: formatToolArgs(args), result };
 }
@@ -70,6 +92,10 @@ function preview(text, max = 120) {
   return `${s.slice(0, max)}…`;
 }
 
+function sourceIndex(msg) {
+  return props.messages.findIndex((m) => m.id === msg.id);
+}
+
 function onInsert(index) {
   emit("insert", index);
 }
@@ -85,9 +111,9 @@ function onDelete(msg) {
 
 <template>
   <div v-if="!editing" class="case-msg-list-wrap">
-    <ul v-if="messages.length" class="case-msg-list">
+    <ul v-if="displayMessages.length" class="case-msg-list">
       <li
-        v-for="(msg, idx) in messages"
+        v-for="(msg, idx) in displayMessages"
         :key="msg.id"
         class="case-msg-item"
         :class="`case-msg-item--${msg.role || 'user'}`"
@@ -101,15 +127,15 @@ function onDelete(msg) {
           <dl class="case-msg-tool__grid">
             <div>
               <dt>工具名</dt>
-              <dd class="mono">{{ toolDetails(msg).toolName }}</dd>
+              <dd class="mono">{{ toolDetails(msg, sourceIndex(msg)).toolName }}</dd>
             </div>
             <div>
               <dt>参数</dt>
-              <dd class="mono case-msg-tool__pre">{{ toolDetails(msg).args }}</dd>
+              <dd class="mono case-msg-tool__pre">{{ toolDetails(msg, sourceIndex(msg)).args }}</dd>
             </div>
             <div>
               <dt>结果</dt>
-              <dd class="case-msg-tool__pre">{{ toolDetails(msg).result }}</dd>
+              <dd class="case-msg-tool__pre">{{ toolDetails(msg, sourceIndex(msg)).result }}</dd>
             </div>
           </dl>
         </div>
@@ -138,7 +164,7 @@ function onDelete(msg) {
           </td>
           <td class="cell-wrap">
             <template v-if="msg.role === 'tool'">
-              {{ toolDetails(msg).toolName }} · {{ preview(toolDetails(msg).result) }}
+              {{ toolDetails(msg, idx).toolName }} · {{ preview(toolDetails(msg, idx).result) }}
             </template>
             <template v-else>{{ preview(messageBody(msg)) }}</template>
           </td>
