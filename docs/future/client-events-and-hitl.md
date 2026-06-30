@@ -2,7 +2,7 @@
 
 # Client 事件与人机交互（HITL）
 
-本文定义 **Client Plane** 与 Backend 之间的 SSE 事件协议，以及 **审批**、**用户询问** 两类人机交互在 v2 中的归属与 resume 约定。v1 行为以 [agent-input-output.md](../agent-input-output.md) 为准；v2 在保留语义基础上增加 `connection_id`、`execution_id`、`body_id` 等字段。
+本文 v1 行为以 [handbook/03-API与Client.md](../handbook/03-API与Client.md) 为准；v2 在保留语义基础上增加 `connection_id`、`execution_id`、`body_id` 等字段。
 
 ## 1. 设计原则
 

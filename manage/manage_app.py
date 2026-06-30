@@ -28,6 +28,8 @@ from manage.cases.store import CaseExampleStore
 from manage.releases.routes import build_releases_router
 from manage.releases.seed import seed_bundled_releases
 from manage.releases.store import ReleasePackageStore
+from manage.externaltools.routes import build_externaltools_router
+from manage.externaltools.store import ExternalToolPackageStore
 from manage.skills.routes import build_skills_router
 from manage.skills.store import SkillPackageStore
 from manage.storage.sqlite import SQLiteDatabase
@@ -61,7 +63,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="DAgents Manage",
-        version="0.5.2",
+        version="0.5.3",
         description="统一控制面：Registry（M1）+ A2A Task Inbox（M2）+ Platform（M0）。",
         lifespan=lifespan,
     )
@@ -85,6 +87,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
         return AuditListResponse(events=audit.list_recent(limit=limit))
 
     skills_store = SkillPackageStore(db=db if db.enabled else None)
+    externaltools_store = ExternalToolPackageStore(db=db if db.enabled else None)
     cases_store = CaseExampleStore(db=db if db.enabled else None)
 
     app.include_router(build_registry_router(store, audit))
@@ -93,6 +96,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))
     app.include_router(build_skills_router(skills_store, blob, audit))
+    app.include_router(build_externaltools_router(externaltools_store, blob, audit))
     app.include_router(build_cases_router(cases_store, audit))
     app.include_router(
         build_releases_router(
@@ -119,6 +123,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.state.a2a_store = a2a_store
     app.state.llm_store = llm_store
     app.state.skills_store = skills_store
+    app.state.externaltools_store = externaltools_store
     app.state.cases_store = cases_store
     app.state.releases_store = releases_store
     return app

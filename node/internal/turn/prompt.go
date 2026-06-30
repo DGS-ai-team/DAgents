@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/externaltools"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -85,6 +86,10 @@ func BuildSystemPrompt(in SystemPromptInput) string {
 
 	b.WriteString("\n\n## 工作区目录\n\n")
 	b.WriteString(formatWorkspaceSubdirsSection(in.IncludeHistoryJournal))
+
+	if section := externaltools.NewCatalog(in.FSRoot).RenderPromptSection(); section != "" {
+		b.WriteString(section)
+	}
 
 	if in.PromptCtx != nil {
 		b.WriteString(in.PromptCtx.BuildStableContextSections())
@@ -179,7 +184,8 @@ func formatWorkspaceSubdirsSection(includeHistoryJournal bool) string {
 		"",
 		"- `data/`：临时工作区（输出、中间产物，可清理）",
 		"- `memory/`：持久化（会话库 sessions.db、可选长期记忆 long_term.md）",
-		"- `skills/`、`scripts/`：技能与脚本目录",
+		"- `skills/`：Agent 技能（`SKILL.md`）",
+		"- `externaltools/`：外置 CLI / 编译二进制 / shell 脚本（索引见 `externaltools_menu.md`；安装后多在 `PATH` 中）",
 		"- `prompt_context/`：侧车 Markdown 上下文（soul / user / custom）",
 	}
 	if includeHistoryJournal {

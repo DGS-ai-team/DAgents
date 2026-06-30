@@ -307,7 +307,7 @@ Resume、异步工具、trigger 入队路径见 `runtime.consumeLoop` 的 `switc
 | `OpenAIImplicitReActRuntime.run_turn` | `runOneStep` / `RunHumanMessageTurn` |
 | `InMemoryEventBus` | `stream.Hub` |
 
-历史说明见 [archive/python-agent-runtime/README.md](../archive/python-agent-runtime/README.md)。
+Go Node 会话持久化见 [handbook/02-Agent-Node-核心.md](../handbook/02-Agent-Node-核心.md) §4。
 
 ---
 

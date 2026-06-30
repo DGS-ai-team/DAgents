@@ -54,6 +54,28 @@ func TestBuildSystemPrompt_omitsHistoryJournalWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".runtime")
+	cliDir := filepath.Join(root, "externaltools")
+	if err := os.MkdirAll(cliDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "externaltools_menu.md"), []byte("# tools\n\n| x | y |\n| a | b |\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cliDir, "mycli"), []byte("#!/bin/sh\ntrue"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hostsnapshot.CaptureAtStartup()
+	prompt := BuildSystemPrompt(SystemPromptInput{
+		AgentID: "ops-01",
+		FSRoot:  root,
+	})
+	if !containsAll(prompt, "外置 CLI 与工具", "mycli", "externaltools_menu.md", "编译好的二进制") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
 func TestBuildSystemPrompt_includesPromptContext(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".runtime")
 	dir := filepath.Join(root, "prompt_context")

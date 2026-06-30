@@ -36,6 +36,7 @@ const draftMeta = reactive({
   description: "",
   skill_ids: "",
   plugin_ids: "",
+  externaltool_ids: "",
 });
 const draftMessages = ref([]);
 const messagesEditing = ref(false);
@@ -46,6 +47,7 @@ const editMeta = reactive({
   description: "",
   skill_ids: "",
   plugin_ids: "",
+  externaltool_ids: "",
 });
 
 const messageEditor = reactive({
@@ -67,6 +69,9 @@ const skillTags = computed(() =>
 const pluginTags = computed(() =>
   (selectedCase.value?.resources?.plugin_ids || []).filter(Boolean),
 );
+const externaltoolTags = computed(() =>
+  (selectedCase.value?.resources?.externaltool_ids || []).filter(Boolean),
+);
 
 function selectCase(item) {
   selectedId.value = item.case_id;
@@ -75,6 +80,7 @@ function selectCase(item) {
   editMeta.description = item.description || "";
   editMeta.skill_ids = (item.resources?.skill_ids || []).join(", ");
   editMeta.plugin_ids = (item.resources?.plugin_ids || []).join(", ");
+  editMeta.externaltool_ids = (item.resources?.externaltool_ids || []).join(", ");
 }
 
 function resetDraft() {
@@ -83,6 +89,7 @@ function resetDraft() {
   draftMeta.description = "";
   draftMeta.skill_ids = "";
   draftMeta.plugin_ids = "";
+  draftMeta.externaltool_ids = "";
   draftMessages.value = [];
 }
 
@@ -156,6 +163,7 @@ async function onFinalizeCreate() {
       description: draftMeta.description.trim(),
       skillIds: draftMeta.skill_ids,
       pluginIds: draftMeta.plugin_ids,
+      externaltoolIds: draftMeta.externaltool_ids,
     });
     const updated = await replaceCaseMessages(created.case_id, draftMessages.value);
     cases.value = [updated, ...cases.value.filter((c) => c.case_id !== updated.case_id)];
@@ -180,6 +188,7 @@ async function onSaveMeta() {
       resources: {
         skill_ids: editMeta.skill_ids.split(",").map((s) => s.trim()).filter(Boolean),
         plugin_ids: editMeta.plugin_ids.split(",").map((s) => s.trim()).filter(Boolean),
+        externaltool_ids: editMeta.externaltool_ids.split(",").map((s) => s.trim()).filter(Boolean),
       },
     });
     cases.value = cases.value.map((c) => (c.case_id === updated.case_id ? updated : c));
@@ -436,8 +445,12 @@ defineExpose({ load });
               <input v-model="draftMeta.skill_ids" placeholder="service-restart, ops-runbook" />
             </label>
             <label class="form-grid__wide">
-              <span>关联 Plugins（逗号分隔）</span>
-              <input v-model="draftMeta.plugin_ids" placeholder="officecli" />
+              <span>关联 Plugins（Hook 插件，逗号分隔）</span>
+              <input v-model="draftMeta.plugin_ids" placeholder="protect-loaded-skill" />
+            </label>
+            <label class="form-grid__wide">
+              <span>关联 External Tools（外置 CLI，逗号分隔）</span>
+              <input v-model="draftMeta.externaltool_ids" placeholder="officecli, my-tool" />
             </label>
           </div>
           <div class="panel-actions">
@@ -487,9 +500,10 @@ defineExpose({ load });
         <div>
           <h2 class="panel-title">{{ selectedCase.name }}</h2>
           <span class="panel-meta mono">{{ selectedCase.case_id }}</span>
-          <div v-if="skillTags.length || pluginTags.length" class="detail-meta-row">
+          <div v-if="skillTags.length || pluginTags.length || externaltoolTags.length" class="detail-meta-row">
             <span v-for="id in skillTags" :key="'s-' + id" class="tag-pill tag-pill--skill">{{ id }}</span>
             <span v-for="id in pluginTags" :key="'p-' + id" class="tag-pill tag-pill--plugin">{{ id }}</span>
+            <span v-for="id in externaltoolTags" :key="'e-' + id" class="tag-pill tag-pill--externaltool">{{ id }}</span>
           </div>
         </div>
         <div class="panel-actions">
@@ -525,8 +539,12 @@ defineExpose({ load });
               <input v-model="editMeta.skill_ids" placeholder="skill-a, skill-b" />
             </label>
             <label class="form-grid__wide">
-              <span>Plugins</span>
-              <input v-model="editMeta.plugin_ids" />
+              <span>Plugins（Hook 插件）</span>
+              <input v-model="editMeta.plugin_ids" placeholder="protect-loaded-skill" />
+            </label>
+            <label class="form-grid__wide">
+              <span>External Tools（外置 CLI）</span>
+              <input v-model="editMeta.externaltool_ids" placeholder="officecli, my-tool" />
             </label>
           </div>
           <div class="panel-actions">

@@ -34,7 +34,7 @@ usage() {
   - 升级/重装：bin/、scripts/、dagents 启动脚本与配置示例始终更新；.runtime/ 默认仅补缺失路径
   - 若已有 .runtime/policy/，交互询问是否覆盖（--overwrite-policy / --keep-policy 可跳过询问）
   - 在 BIN_DIR 创建 dagents 符号链接
-  - 写入 DAGENTS_HOME 与 PATH（含 `bin/`、`.runtime/scripts/`；/etc/profile.d/dagents.sh 或 ~/.profile）
+  - 写入 DAGENTS_HOME 与 PATH（含 `bin/`、`.runtime/externaltools/`；/etc/profile.d/dagents.sh 或 ~/.profile）
 EOF
 }
 
@@ -208,7 +208,7 @@ write_env_file() {
   cat > "${PREFIX}/env.sh" <<EOF
 # DAgents Local Assistant environment
 export DAGENTS_HOME="${PREFIX}"
-export PATH="${PREFIX}/bin:${PREFIX}/.runtime/scripts:\${PATH}"
+export PATH="${PREFIX}/bin:${PREFIX}/.runtime/externaltools:\${PATH}"
 EOF
   chmod 0644 "${PREFIX}/env.sh"
 }
@@ -224,7 +224,7 @@ setup_path_system() {
   cat > "${profile}" <<EOF
 # DAgents Local Assistant
 export DAGENTS_HOME="${PREFIX}"
-export PATH="${PREFIX}/bin:${PREFIX}/.runtime/scripts:\$PATH"
+export PATH="${PREFIX}/bin:${PREFIX}/.runtime/externaltools:\$PATH"
 EOF
   chmod 0644 "${profile}"
   info "wrote ${profile}"

@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-06-30
+
+**外置工具目录与 Manage 分发**：`.runtime/externaltools/` 替代 `scripts/`；Manage External Tools API 与 Console 管理页；案例库 `externaltool_ids`；文档收敛至 handbook。
+
+### 新增
+
+- **外置工具目录**：`.runtime/externaltools/`（索引 **`externaltools_menu.md`**）；`externaltools` 包、`bash_run` 描述与 system prompt 同步更新；安装脚本 PATH 加入 `externaltools/`。
+- **Manage External Tools 分发**：`POST/GET /v1/externaltools/*`；Console **Node 配置 → External Tools** 管理页。
+- **案例库资源**：`resources.externaltool_ids` 与 Skills、Plugins 分列。
+
+### 变更
+
+- **文档清理**：删除 `docs/archive/`、Python 运行时跳转桩与重复的内置工具参考；**handbook** 为唯一正文入口。
+
+（Git **tag**：`v0.5.3`。）
+
 ## [0.5.2] - 2026-06-29
 
 **Manage Console 案例库体验**：JSONL 先解析再填元数据；消息列表按 role 分模式展示，tool 消息展示工具名/参数/结果。

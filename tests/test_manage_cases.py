@@ -82,6 +82,7 @@ class CaseRoutesTest(unittest.TestCase):
                 "description": "from test",
                 "skill_ids": "skill-x",
                 "plugin_ids": "plug-y",
+                "externaltool_ids": "officecli",
             },
             files={"file": ("sess.jsonl", jsonl, "application/x-ndjson")},
         )
@@ -90,6 +91,8 @@ class CaseRoutesTest(unittest.TestCase):
         self.assertEqual(body["case_id"], "demo-route")
         self.assertEqual(len(body["messages"]), 2)
         self.assertEqual(body["resources"]["skill_ids"], ["skill-x"])
+        self.assertEqual(body["resources"]["plugin_ids"], ["plug-y"])
+        self.assertEqual(body["resources"]["externaltool_ids"], ["officecli"])
 
         listed = client.get("/v1/cases")
         self.assertEqual(listed.status_code, 200)
@@ -143,7 +146,14 @@ class CaseRoutesTest(unittest.TestCase):
 
     def test_duplicate_case_id(self):
         client, _store = _cases_client()
-        data = {"case_id": "dup", "name": "One", "description": "", "skill_ids": "", "plugin_ids": ""}
+        data = {
+            "case_id": "dup",
+            "name": "One",
+            "description": "",
+            "skill_ids": "",
+            "plugin_ids": "",
+            "externaltool_ids": "",
+        }
         self.assertEqual(client.post("/v1/cases", data=data).status_code, 200)
         self.assertEqual(client.post("/v1/cases", data=data).status_code, 409)
 

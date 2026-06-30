@@ -634,6 +634,11 @@ func (c *Config) ShellPolicyDir() string {
 	return filepath.Join(c.PolicyDir(), "shell")
 }
 
+// ExternalToolsDir 返回外置 CLI/工具目录（`<fs_root>/externaltools`）。
+func (c *Config) ExternalToolsDir() string {
+	return filepath.Join(c.RuntimeDir(), "externaltools")
+}
+
 // Capabilities 返回对外声明的能力列表。
 func (c *Config) Capabilities() []string {
 	caps := []string{"shell", "filesystem"}

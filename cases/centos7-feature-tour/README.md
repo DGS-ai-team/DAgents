@@ -108,7 +108,7 @@ go run ./client/cmd/dagents-client \
 | 你在 TUI 输入 | 预期结果 |
 |---------------|----------|
 | `请读取 demo/hello.txt，用一句话总结内容。` | 出现 **`read_file`** 工具调用与结果；assistant 给出摘要；`/context` 中 `tool_loop_count` 可能 > 0 |
-| `在 demo 目录下创建 notes.txt，内容为 ok。` | 首次 **`write_file`** 弹出 **HITL 审批**（默认 `write_file=rule`）；Approve 后文件落盘；同 session 内若 Agent 再次写入**同一新建文件**可能经信任链 **免审**（见 [内置工具参考 §write_file](../../docs/built-in-tools-reference.md)）；Reject 则不写入 |
+| `在 demo 目录下创建 notes.txt，内容为 ok。` | 首次 **`write_file`** 弹出 **HITL 审批**（默认 `write_file=rule`）；Approve 后文件落盘；同 session 内若 Agent 再次写入**同一新建文件**可能经信任链 **免审**（见 [内置工具参考 §write_file](../../docs/handbook/附录/内置工具参考.md)）；Reject 则不写入 |
 | 多轮对话后 `/compress` | 压缩完成提示；`/context` 中 `messages_count` 下降 |
 | `/reasoning on` 后发送较复杂问题 | 若模型支持，可见推理流；底栏或 transcript 有 usage 统计 |
 
@@ -155,7 +155,7 @@ go run ./client/cmd/dagents-client \
 ## 延伸阅读
 
 - [Cases 文档约定](../README.md#case-readme-写法)
-- [内置工具参考](../../docs/built-in-tools-reference.md)
+- [内置工具参考](../../docs/handbook/附录/内置工具参考.md)
 - [Client 斜杠命令](../../client/README.md)
 - [Agent Node API](../../docs/architecture/agent-node-api.md)
 - [本地助手架构](../../docs/architecture/local-assistant.md)

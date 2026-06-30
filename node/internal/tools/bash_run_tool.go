@@ -61,7 +61,7 @@ func bashRunToolDef() ToolDef {
 }
 
 func bashRunToolDescription(isWindows bool) string {
-	tail := "可执行脚本见 scripts/ 与 scripts_menu.md。" +
+	tail := "外置 CLI、编译二进制与 shell 脚本见 `externaltools/` 与根目录 `externaltools_menu.md`（可通过命令名或 `externaltools/<tool>` 调用）。" +
 		" 除非明确需要，否则避免 su/sudo 等需交互密码的命令。" +
 		" 同步等待 timeout_seconds（默认 30）；超时自动降级为后台 job（返回 job_id），完成后自动回灌，通常无需轮询 status。" +
 		" 长输出会按 tools.bash_compress 清洗；超长结果落盘并在 history 中头尾摘要（hooks.tool_result）。"

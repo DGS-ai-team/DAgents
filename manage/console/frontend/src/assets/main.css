@@ -627,6 +627,12 @@ code {
   border-color: #bae6fd;
 }
 
+.tag-pill--externaltool {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
 .subtabs {
   display: flex;
   gap: 4px;

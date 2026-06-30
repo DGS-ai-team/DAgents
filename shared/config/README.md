@@ -54,7 +54,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | `a2a` | `agent_invoke`、`agent_discover`（须 `manage.enabled`） |
 | `child_agents` | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
 
-各工具作用见 [`docs/built-in-tools.md`](../../docs/built-in-tools.md) §0；示例见 [`packaging/agent-client/config.example.yaml`](../../packaging/agent-client/config.example.yaml)。
+各工具作用见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1；示例见 [`packaging/agent-client/config.example.yaml`](../../packaging/agent-client/config.example.yaml)。
 
 ### `triggers`
 

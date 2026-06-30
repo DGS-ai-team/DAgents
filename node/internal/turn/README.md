@@ -80,10 +80,11 @@ sequenceDiagram
 
 1. `staticSystemPrompt`（行为准则、保密说明；**不含**各工具用法，见 tool schema）
 2. 主机环境快照（`hostsnapshot`）+ Agent ID / session_id（**不含** FS_ROOT 绝对路径）
-3. 工作区子目录约定（`data/`、`memory/` 等；path 相对工作区根）
-4. `prompt_context` 稳定段（soul / user / long_term）
-5. 已加载 skills 正文（动态会话状态，非工具 catalog）
-6. `custom.md`
+3. 工作区子目录约定（`data/`、`memory/`、`externaltools/` 外置 CLI 等；path 相对工作区根）
+4. **外置 CLI 与工具**（`externaltools_menu.md` + `externaltools/` 可执行文件扫描，见 [`../externaltools/`](../externaltools/)）
+5. `prompt_context` 稳定段（soul / user / long_term）
+6. 已加载 skills 正文（动态会话状态，非工具 catalog）
+7. `custom.md`
 
 skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时注入 **`load_skills` 工具 description**（`Registry.SetSkillsCatalog`）。
 

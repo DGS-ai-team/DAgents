@@ -68,12 +68,18 @@ class SQLiteDatabase:
                     case_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS externaltool_packages (
+                    tool_id TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY (tool_id, version)
+                );
                 -- Blob 元数据随内容寻址文件落在 MANAGE_BLOB_DIR/{sha256}.json sidecar，
                 -- 不入 SQLite；故此处不建 blobs 表。
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','5') "
-                "ON CONFLICT(key) DO UPDATE SET value='5'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','6') "
+                "ON CONFLICT(key) DO UPDATE SET value='6'"
             )
             conn.commit()

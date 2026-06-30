@@ -1,8 +1,6 @@
 # 技术文档
 
-> **文档已收敛** — 完整项目手册见 **[handbook/README.md](./handbook/README.md)**（唯一正文入口）。
->
-> 本目录下 `architecture/`、`design/`、`future/` 等子目录**仅保留跳转桩**；旧路径对照见 [handbook/附录/旧文档迁移对照表.md](./handbook/附录/旧文档迁移对照表.md)。
+> **唯一正文入口** → **[handbook/README.md](./handbook/README.md)**
 
 ---
 
@@ -21,7 +19,20 @@
 
 ---
 
-## 模块级文档（与代码同目录，继续维护）
+## 专题（与手册互补）
+
+| 路径 | 说明 |
+|------|------|
+| [architecture/](./architecture/) | Node 内部结构、HTTP 契约、打包兼容 |
+| [design/](./design/) | 设计实录与专题分析 |
+| [future/](./future/) | 尚未完全落地的远期方案 |
+| [manage-communication.md](./manage-communication.md) | Manage / Node / Client 通信 |
+| [roadmap.md](./roadmap.md) | 产品路线图 |
+| [cases/](./cases/) | 案例索引 |
+
+---
+
+## 模块级文档（与代码同目录）
 
 | 路径 | 说明 |
 |------|------|
@@ -30,9 +41,3 @@
 | `shared/config/REFERENCE.md` | 配置校验细节 |
 | `manage/README.md` | Manage 运维 |
 | `packaging/agent-client/README.md` | 安装与 Agent Card |
-
----
-
-## 归档
-
-已移除的 Python Agent API 等：`archive/`（历史只读）。

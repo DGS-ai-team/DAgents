@@ -108,7 +108,6 @@ export async function publishSkill(skillId, version) {
   );
 }
 
-// 上传走 multipart，不能用 apiFetch(JSON)。
 export async function uploadSkillPackage({ skillId, version, name, riskLevel, file }) {
   const form = new FormData();
   form.set("skill_id", skillId);
@@ -117,6 +116,46 @@ export async function uploadSkillPackage({ skillId, version, name, riskLevel, fi
   form.set("risk_level", riskLevel || "low");
   form.set("file", file);
   const resp = await fetch(new URL("/v1/skills/packages", window.location.origin), {
+    method: "POST",
+    body: form,
+  });
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    const message = typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`;
+    const err = new Error(message);
+    err.status = resp.status;
+    throw err;
+  }
+  return body;
+}
+
+// --- External Tools 分发 ---
+export async function fetchExternalToolCatalog() {
+  return apiFetch("/v1/externaltools/catalog");
+}
+
+export async function publishExternalTool(toolId, version) {
+  return apiFetch(
+    `/v1/externaltools/packages/${encodeURIComponent(toolId)}/versions/${encodeURIComponent(version)}/publish`,
+    {},
+    { method: "POST" },
+  );
+}
+
+export async function uploadExternalToolPackage({ toolId, version, name, platform, riskLevel, file }) {
+  const form = new FormData();
+  form.set("tool_id", toolId);
+  form.set("version", version);
+  form.set("name", name);
+  form.set("platform", platform || "any");
+  form.set("risk_level", riskLevel || "low");
+  form.set("file", file);
+  const resp = await fetch(new URL("/v1/externaltools/packages", window.location.origin), {
     method: "POST",
     body: form,
   });
@@ -237,13 +276,22 @@ export async function replaceCaseMessages(caseId, messages) {
   );
 }
 
-export async function createCase({ caseId, name, description = "", skillIds = "", pluginIds = "", file = null }) {
+export async function createCase({
+  caseId,
+  name,
+  description = "",
+  skillIds = "",
+  pluginIds = "",
+  externaltoolIds = "",
+  file = null,
+}) {
   const form = new FormData();
   form.set("case_id", caseId);
   form.set("name", name);
   form.set("description", description);
   form.set("skill_ids", skillIds);
   form.set("plugin_ids", pluginIds);
+  form.set("externaltool_ids", externaltoolIds);
   if (file) form.set("file", file);
   const resp = await fetch(new URL("/v1/cases", window.location.origin), {
     method: "POST",

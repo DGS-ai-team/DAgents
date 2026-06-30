@@ -29,7 +29,7 @@ expose_to_peers: false
 # Manage 发现分组由 Manage Console / API 分配，Node 配置中无需 groups
 
 # 工作区根（工具沙箱 + 运行时子目录均相对此路径硬编码，缺省 ./.runtime）
-# 子目录：data/ 临时工作区 · memory/sessions.db 会话库 · skills/ · policy/ · history/ · triggers/ · agent/
+# 子目录：data/ 临时工作区 · memory/sessions.db 会话库 · skills/ · externaltools/ 外置CLI · policy/ · history/ · triggers/ · agent/
 fs_root: ./.runtime
 
 llm:
@@ -104,7 +104,7 @@ ui:
 
 # bash_run 子进程输出解码（留空则 Windows cmd/powershell=gbk、bash=utf-8）
 tools:
-  # 内置工具组允许列表；省略或留空 = 启用全部（7 组见 docs/built-in-tools.md §0 / shared/config/README.md）
+  # 内置工具组允许列表；省略或留空 = 启用全部（7 组见 docs/handbook/04-能力与策略.md §1 / shared/config/README.md）
   # enabled_groups:
   #   - fs
   #   - bash

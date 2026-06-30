@@ -2,7 +2,7 @@
 
 N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。**`bash_run`** 在 `timeout_seconds` 内未完成时由 Node **自动降级**为后台 job；内部仍保留 `StartBackground` / `job_registry` 供降级与测试使用。
 
-**配置**：`tools.enabled_groups`（7 组）见 [`docs/built-in-tools.md`](../../docs/built-in-tools.md) §0、[`docs/built-in-tools-reference.md`](../../docs/built-in-tools-reference.md)（全量 description / 参数）、[`shared/config/README.md`](../../shared/config/README.md)。  
+**配置**：`tools.enabled_groups`（7 组）见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
 
 ---

@@ -16,7 +16,7 @@ Node 与 Client 共用 YAML 配置；**仓库只提交 `*.example.yaml`**，本�
 
 `config.example.yaml` 中 **`triggers`** 块：`enabled` 开关、`poll_seconds` 轮询间隔；condition 语法见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)。
 
-**`tools.enabled_groups`**：按工具组配置 LLM 可见内置工具（省略=全部）；7 组定义见 [`docs/built-in-tools.md`](../../docs/built-in-tools.md) §0 与 [`shared/config/README.md`](../../shared/config/README.md)。
+**`tools.enabled_groups`**：按工具组配置 LLM 可见内置工具（省略=全部）；7 组定义见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1 与 [`shared/config/README.md`](../../shared/config/README.md)。
 
 ## 本地配置
 

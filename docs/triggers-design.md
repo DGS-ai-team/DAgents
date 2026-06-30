@@ -3,7 +3,7 @@
 > **现网（Go Node）**：`node/internal/triggers/`（调度器 + **`trigger_list` … `trigger_delete`** 工具；**无 `trigger_fire`**，触发靠 schedule / HTTP API）。模块说明见该目录 `README.md`。  
 > **本文档**：首版基于 **已移除的 Python `AgentService`**，部分章节仅供历史对照；与 Go 实现冲突时以代码与 **CHANGELOG** 为准。
 
-**相关索引**：[agent-node-api.md](./architecture/agent-node-api.md)、[built-in-tools.md](./built-in-tools.md) §0、[roadmap.md](./roadmap.md)。
+**相关索引**：[agent-node-api.md](./architecture/agent-node-api.md)、[handbook/附录/内置工具参考.md](./handbook/附录/内置工具参考.md)、[roadmap.md](./roadmap.md)。
 
 ---
 
@@ -13,7 +13,7 @@
 
 - 客户端通过 **HTTP** 创建会话并 **`POST` 提交消息**，经校验后调用 **`AgentService.submit_message`**（见 **`app/harness/api/app.py`**）。
 - 每条会话对应进程内 **`MessageQueue`**，**串行消费**；**`MessageEnvelope`** 含 **`request_type` / `content` / `connection_id` / `source`** 等（见 **`app/harness/queue/message_queue.py`**）。
-- **SSE** 按 **`session_id` + `connection_id`** 分桶；无订阅方时事件仍可产生，但无人接收（见 **`docs/agent-input-output.md`**）。
+- **SSE** 按 **`session_id`** 分桶推送；无订阅方时事件仍可产生，但无人接收（见 [handbook/03-API与Client.md](./handbook/03-API与Client.md) §2、[handbook/附录/SSE事件速查.md](./handbook/附录/SSE事件速查.md)）。
 
 ### 1.2 目标
 
@@ -205,7 +205,7 @@ flowchart LR
 | 模拟用户一句 | `submit_message(..., request_type="message", ...)` | 默认 **`other`**，避免抢 **`human` / `resume`**；紧急任务若配 **`human`** 须在配置中 **显式警告**。 |
 | 审批继续 | `submit_resume(...)` | **`resume`** |
 
-**与 `MessageQueue`**：**不**为触发器单独建队列；同一 **`session_id`** **单消费者串行**，与 [agent-turn-loop.md](./agent-turn-loop.md) 一致。**背压**：队列满时捕获异常、日志、指标，可选退避重试（见 **`TriggerDelivery`**）。
+**与 `MessageQueue`**：同一 **`session_id`** **单消费者串行**，见 [handbook/02-Agent-Node-核心.md](./handbook/02-Agent-Node-核心.md) §2。
 
 ---
 
@@ -255,7 +255,7 @@ triggers:
 | 里程碑 | 交付物 |
 |--------|--------|
 | **M1** | `Trigger` ABC + **`IntervalTrigger`** + **`Registry` + `Scheduler` + `Delivery`**；静态 YAML 加载；日志。 |
-| **M2** | **`CronTrigger`** + 幂等窗口；**`connection_id` / `source`** 与 **`api-reference.md`** 脚注对齐。 |
+| **M2** | **`CronTrigger`** + 幂等窗口；与 [agent-node-api.md](./architecture/agent-node-api.md) 对齐。 |
 | **M3** | **动态 `register_trigger` 工具** + 可选 **HTTP 内部注册**；鉴权 + 限流。 |
 | **M4** | **Webhook** + HMAC；可选 **`auto_create_session`**、Prometheus 计数器。 |
 
@@ -272,7 +272,6 @@ triggers:
 
 ## 11. 文档维护
 
-- 实现后：**`docs/api-reference.md`** 增加内部注册 / Webhook 路由；**`docs/agent-input-output.md`** 增加「触发器 **`connection_id` 桶**」脚注。
-- **`docs/roadmap.md`** §3.4 与实现状态对齐。
+- 实现后：更新 [agent-node-api.md](./architecture/agent-node-api.md) 与 [handbook/附录/SSE事件速查.md](./handbook/附录/SSE事件速查.md)。
 
 **最后更新**：按「调度器轮询 + 触发器基类 + 动态注册 + session/connection/回流」蓝图重写模块划分与推荐方案。

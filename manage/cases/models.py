@@ -24,6 +24,7 @@ class CaseResources(BaseModel):
 
     skill_ids: list[str] = Field(default_factory=list)
     plugin_ids: list[str] = Field(default_factory=list)
+    externaltool_ids: list[str] = Field(default_factory=list)
 
 
 class CaseCreate(BaseModel):

@@ -57,6 +57,7 @@ def build_cases_router(store: CaseExampleStore, audit: AuditLog) -> APIRouter:
         description: str = Form(""),
         skill_ids: str = Form(""),
         plugin_ids: str = Form(""),
+        externaltool_ids: str = Form(""),
         file: UploadFile | None = File(None),
     ) -> CaseExample:
         auth = authenticate(request)
@@ -69,6 +70,7 @@ def build_cases_router(store: CaseExampleStore, audit: AuditLog) -> APIRouter:
                 resources=CaseResources(
                     skill_ids=_parse_csv_ids(skill_ids),
                     plugin_ids=_parse_csv_ids(plugin_ids),
+                    externaltool_ids=_parse_csv_ids(externaltool_ids),
                 ),
             )
         except ValidationError as exc:

@@ -2,10 +2,9 @@
 
 > **现网状态（v0.3.x）**  
 > - **`register_center/` 已从仓库移除**；控制面由 **[Manage](../manage/README.md)** 承担（Registry、A2A Task、Console）。  
-> - **Go Agent Node**：`manage.enabled` 时提供 **`agent_invoke` / `agent_discover`**（见 [built-in-tools.md](./built-in-tools.md) §0）。  
+> - **Go Agent Node**：`manage.enabled` 时提供 **`agent_invoke` / `agent_discover`**（见 [handbook/附录/内置工具参考.md](./handbook/附录/内置工具参考.md)）。  
 > - 下文描述的 **Register Center HTTP** 与 Python **`agent_*` 工具** 均为 **历史行为**，仅供对照。  
-> - 归档运行时：[archive/python-agent-runtime/](./archive/python-agent-runtime/)。  
-> - 远期 inbox 等：[future/a2a-via-manage.md](./future/a2a-via-manage.md)。
+> - 现网 A2A 见 [handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md)；远期 inbox 等：[future/a2a-via-manage.md](./future/a2a-via-manage.md)。
 
 ---
 
@@ -134,7 +133,7 @@
 
 ## 4. A2A 工具一览（历史，已归档）
 
-> 源码：**`docs/archive/python-agent-runtime/`** 下对应 **`agent_peer.py`**。Go Node 无等价工具；同进程协作见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。
+> 源码：已移除的 Python **`agent_peer.py`**。Go Node 无等价工具；同进程协作见 [architecture/child-agent-tools.md](./architecture/child-agent-tools.md)。
 
 | 工具名 | 作用 |
 |--------|------|
@@ -178,13 +177,9 @@
 |------|------|
 | [architecture/overview.md](./architecture/overview.md) | 现网选型：Go Node vs Register Center |
 | [architecture/child-agent-tools.md](./architecture/child-agent-tools.md) | 同进程临时子 Agent（非 A2A） |
+| [handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md) | 现网 Manage / A2A |
 | [future/a2a-via-manage.md](./future/a2a-via-manage.md) | 远期经 Manage 的 A2A |
-| [archive/python-agent-runtime/](./archive/python-agent-runtime/) | Python Agent **`/v1/messages` / turn loop** |
-| [agent-input-output.md](./agent-input-output.md) | 跳转桩 → 归档 |
-| [agent-turn-loop.md](./agent-turn-loop.md) | 跳转桩 → 归档 |
-| [api-reference.md](./api-reference.md) | 跳转桩 → 归档 |
-| **`register_center/README.md`** | 中心侧接口速查 |
 
 ---
 
-**说明**：**Register Center HTTP 契约**以 **`register_center/`** 与 **`CHANGELOG.md`** 为准；**Agent 侧 A2A 工具**以归档 Python 运行时为准；现网 Agent 运行时以 **Go Node**（[agent-node-api.md](./architecture/agent-node-api.md)）为准。
+**说明**：**Register Center** 已从仓库移除；现网 Agent 运行时以 **Go Node**（[agent-node-api.md](./architecture/agent-node-api.md)）为准，控制面见 **Manage**（[handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md)）。

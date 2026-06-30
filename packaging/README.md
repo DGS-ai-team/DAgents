@@ -52,4 +52,4 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**
 
 发布包**不内置**第三方 CLI。推荐清单（含 **[OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)** 安装与 skills 同步）见 [`runtime/RECOMMENDED_CLI_TOOLS.md`](runtime/RECOMMENDED_CLI_TOOLS.md)。
 
-Windows 安装包 / Linux **`install.sh`** 会将 **`.runtime/scripts`** 加入 `PATH`，便于放置自行下载的工具。
+Windows 安装包 / Linux **`install.sh`** 会将 **`.runtime/externaltools`** 加入 `PATH`，便于放置自行下载的工具。

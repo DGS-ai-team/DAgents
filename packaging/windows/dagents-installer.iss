@@ -128,19 +128,19 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Path, AppDir, ScriptsDir: string;
+  Path, AppDir, ExternalToolsDir: string;
 begin
   if CurStep = ssPostInstall then
     ApplyPolicySeed;
   if CurStep <> ssPostInstall then
     Exit;
   AppDir := ExpandConstant('{app}');
-  ScriptsDir := AppDir + '\.runtime\scripts';
+  ExternalToolsDir := AppDir + '\.runtime\externaltools';
   if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path) then
     Path := '';
   if not PathContains(Path, AppDir) then
     Path := Path + ';' + AppDir;
-  if not PathContains(Path, ScriptsDir) then
-    Path := Path + ';' + ScriptsDir;
+  if not PathContains(Path, ExternalToolsDir) then
+    Path := Path + ';' + ExternalToolsDir;
   RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path);
 end;

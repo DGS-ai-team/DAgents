@@ -38,8 +38,7 @@ DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python �
 
 ## 历史说明
 
-原 **Python FastAPI Agent API**（`run_agent_api.py`、`app/harness/`）已从仓库移除；HTTP/SSE 契约以 Go Node 为准（[agent-node-api.md](./agent-node-api.md)）。  
-相关文档已归档至 [../archive/python-agent-runtime/](../archive/python-agent-runtime/)；根目录旧链名为跳转桩。
+原 **Python FastAPI Agent API**（`run_agent_api.py`、`app/harness/`）已从仓库移除；HTTP/SSE 契约以 Go Node 为准（[agent-node-api.md](./agent-node-api.md)）。
 
 ## 已移除方案
 

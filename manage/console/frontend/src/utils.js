@@ -85,10 +85,10 @@ export const VIEW_META = {
   },
   nodeadmin: {
     title: "Node 配置",
-    subtitle: "多 Node 复用的 LLM 配置与 Skills 分发",
+    subtitle: "LLM 配置、Skills / External Tools 分发与版本发布",
   },
   cases: {
     title: "案例库",
-    subtitle: "演示会话 JSONL、关联 Skills / Plugins",
+    subtitle: "演示会话 JSONL、关联 Skills / Plugins / External Tools",
   },
 };

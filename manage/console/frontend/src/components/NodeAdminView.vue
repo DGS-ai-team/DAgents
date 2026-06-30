@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import LLMView from "./LLMView.vue";
 import SkillsView from "./SkillsView.vue";
+import ExternalToolsView from "./ExternalToolsView.vue";
 import ReleasesView from "./ReleasesView.vue";
 
 const props = defineProps({
@@ -14,6 +15,7 @@ const tab = ref("llm");
 const TAB_HINTS = {
   llm: "多 Node 共用的 LLM 端点与模型配置",
   skills: "Skill 包上传、草稿发布与目录分发",
+  externaltools: "外置 CLI / 二进制上传、发布与目录分发（`.runtime/externaltools/`）",
   releases: "本地助手安装包版本发布与 latest 标记",
 };
 </script>
@@ -44,6 +46,16 @@ const TAB_HINTS = {
       <button
         type="button"
         class="subtab"
+        :class="{ active: tab === 'externaltools' }"
+        role="tab"
+        :aria-selected="tab === 'externaltools'"
+        @click="tab = 'externaltools'"
+      >
+        External Tools
+      </button>
+      <button
+        type="button"
+        class="subtab"
         :class="{ active: tab === 'releases' }"
         role="tab"
         :aria-selected="tab === 'releases'"
@@ -62,6 +74,11 @@ const TAB_HINTS = {
     <SkillsView
       v-if="tab === 'skills'"
       :active="active && tab === 'skills'"
+      @toast="emit('toast', $event)"
+    />
+    <ExternalToolsView
+      v-if="tab === 'externaltools'"
+      :active="active && tab === 'externaltools'"
       @toast="emit('toast', $event)"
     />
     <ReleasesView
