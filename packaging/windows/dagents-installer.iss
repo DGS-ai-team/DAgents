@@ -1,4 +1,4 @@
-#define MyAppName "DAgents 本地助手"
+﻿#define MyAppName "DAgents 本地助手"
 #ifndef MyAppVersion
 #define MyAppVersion "0.0.0"
 #endif
