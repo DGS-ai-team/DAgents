@@ -1,13 +1,23 @@
 agent_id: node-b
 
+agent:
+  name: 运维执行助手
+  description: 负责发布、数据导出与日常运维；高风险操作前须向合规助手发起 A2A 咨询。
+  role: ops
+  compliance_peer: node-a
+  capabilities:
+    - deployment
+    - data_export
+    - shell
+  metadata:
+    team: 平台运维
+
 listen:
   host: 127.0.0.1
   port: 18766
 
 local:
   endpoint: http://127.0.0.1:18766
-
-expose_to_peers: true
 
 fs_root: ../../runtime/node-b
 
@@ -24,8 +34,6 @@ manage:
     interval_seconds: 15
     ttl_seconds: 45
     team: a2a-lab
-  a2a:
-    enabled: false
 
 triggers:
   enabled: false

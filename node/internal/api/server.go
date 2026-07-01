@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
+	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
@@ -50,6 +51,7 @@ type Server struct {
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
 	a2aCallerHITL   *session.A2ACallerHITLBridge
+	tools           *tools.Registry
 }
 
 // Option 为 NewServer 可选配置。
@@ -126,9 +128,19 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		if err := reg.SetBuiltinEnabled(cfg.Tools.NormalizedBuiltinEnabled()); err != nil {
 			logger.Error("tools.enabled_groups invalid", "error", err)
 		}
+		reg.SetMultimodalEnabled(cfg.MultimodalEnabled())
 		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
 		if cfg.Skills.Enabled {
 			reg.SetSkillsCatalog(skills.NewCatalog(cfg.SkillsRoot(), true, cfg.Skills.MaxInPrompt))
+		}
+		if cfg.BrowserEnabled() {
+			bm, err := browser.NewManager(cfg, nil)
+			if err != nil {
+				logger.Error("browser manager init failed", "error", err)
+			} else {
+				reg.SetBrowserManager(bm)
+				logger.Info("browser tools enabled", "headed", cfg.BrowserHeaded())
+			}
 		}
 		o.tools = reg
 	}
@@ -189,6 +201,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			RuntimeDir:    cfg.RuntimeDir(),
 			SkillsRoot:    cfg.SkillsRoot(),
 		},
+		MultimodalEnabled: cfg.MultimodalEnabled(),
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:                   cfg.ChildAgents.Enabled,
@@ -245,22 +258,17 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var packageUploader *manage.PackageUploader
 	var a2aBridge *session.A2ACallerHITLBridge
 	if cfg.Manage.Enabled {
+		manage.LogA2AProfileWarnings(cfg, logger)
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
 		updateChecker = manage.NewUpdateChecker(cfg, logger)
 		packageUploader = manage.NewPackageUploader(cfg, logger)
 		a2aBridge = session.NewA2ACallerHITLBridge(cfg.AgentID, hub)
 		if o.tools != nil {
-			compliancePeer := ""
-			if card, cardErr := manage.LoadDefaultAgentCard(); cardErr != nil {
-				logger.Warn("agent card load failed for agent_invoke defaults", "error", cardErr, "path", manage.DefaultAgentCardPath())
-			} else if card != nil {
-				compliancePeer = card.CompliancePeer()
-			}
 			o.tools.SetManageRuntime(
 				a2aclient.New(cfg),
 				cfg.AgentID,
-				compliancePeer,
+				cfg.CompliancePeer(),
 				a2aBridge,
 			)
 		}
@@ -286,6 +294,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		updateChecker:   updateChecker,
 		packageUploader: packageUploader,
 		a2aCallerHITL:   a2aBridge,
+		tools:           o.tools,
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
@@ -370,6 +379,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			s.triggerSched.Stop()
 		}
 		s.sessions.Stop()
+		if s.tools != nil {
+			_ = s.tools.CloseBrowser()
+		}
 		if s.store != nil {
 			_ = s.store.Close()
 		}
@@ -401,11 +413,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 type agentInfoResponse struct {
-	AgentID          string              `json:"agent_id"`
-	ExposeToPeers    bool                `json:"expose_to_peers"`
-	Capabilities     []string            `json:"capabilities"`
-	ManageRegistered bool                `json:"manage_registered"`
-	LLM              llm.LLMSettingsView `json:"llm"`
+	AgentID           string              `json:"agent_id"`
+	ExposeToPeers     bool                `json:"expose_to_peers"`
+	Capabilities      []string            `json:"capabilities"`
+	MultimodalEnabled bool                `json:"multimodal_enabled"`
+	ManageRegistered  bool                `json:"manage_registered"`
+	LLM               llm.LLMSettingsView `json:"llm"`
 }
 
 func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
@@ -418,11 +431,12 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 		llmView = s.llmRuntime.Snapshot()
 	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
-		AgentID:          s.cfg.AgentID,
-		ExposeToPeers:    s.cfg.ExposeToPeers,
-		Capabilities:     s.cfg.Capabilities(),
-		ManageRegistered: registered,
-		LLM:              llmView,
+		AgentID:           s.cfg.AgentID,
+		ExposeToPeers:     s.cfg.ExposeToPeersEffective(),
+		Capabilities:      s.cfg.Capabilities(),
+		MultimodalEnabled: s.cfg.MultimodalEnabled(),
+		ManageRegistered:  registered,
+		LLM:               llmView,
 	})
 }
 
@@ -644,7 +658,7 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 const contextMessagePreviewRunes = 8000
 
 	for _, m := range view.Messages[start:] {
-		content := truncateContextPreview(m.Content, contextMessagePreviewRunes)
+		content := truncateContextPreview(llm.MessageTextSummary(m), contextMessagePreviewRunes)
 		recent = append(recent, contextMessagePreview{
 			Role:                m.Role,
 			Content:             content,
@@ -707,11 +721,12 @@ func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
 }
 
 type postMessageRequest struct {
-	SessionID       string         `json:"session_id"`
-	RequestType     string         `json:"request_type"`
-	Content         string         `json:"content"`
-	UserMessageName string         `json:"user_message_name,omitempty"`
-	ResumeValue     map[string]any `json:"resume_value"`
+	SessionID       string           `json:"session_id"`
+	RequestType     string           `json:"request_type"`
+	Content         string           `json:"content"`
+	ContentParts    []llm.ContentPart `json:"content_parts,omitempty"`
+	UserMessageName string           `json:"user_message_name,omitempty"`
+	ResumeValue     map[string]any   `json:"resume_value"`
 }
 
 type postMessageResponse struct {
@@ -745,7 +760,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ResumeValue, req.UserMessageName)
+	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.ResumeValue, req.UserMessageName)
 	if err != nil {
 		// 业务错误映射为 HTTP 状态 + 统一 error 体（见 errors.go）。
 		switch err.Error() {
@@ -753,6 +768,8 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
 		case "invalid_message":
 			writeAPIError(w, http.StatusBadRequest, "invalid_message", "content 不能为空", nil)
+		case "multimodal_disabled":
+			writeAPIError(w, http.StatusBadRequest, "multimodal_disabled", "多模态未启用（config multimodal.enabled）", nil)
 		case "invalid_request_type":
 			writeAPIError(w, http.StatusBadRequest, "invalid_request_type", "不支持的 request_type", nil)
 		case "no_pending_hitl":

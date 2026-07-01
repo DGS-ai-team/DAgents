@@ -13,9 +13,10 @@ const (
 	UserNameCompression        = "compression"
 	UserNameAsyncTool          = "async_tool"
 	UserNameCompressionSidecar = "compression_sidecar"
+	UserNameToolVision         = "tool_vision"
 )
 
-// UserMessage 构造 role=user 消息；name 为来源标识，空串则不设置。
+// UserMessage 构造纯文本 role=user 消息；name 为来源标识，空串则不设置。
 func UserMessage(content, name string) Message {
 	m := Message{Role: "user", Content: content}
 	if n := strings.TrimSpace(name); n != "" {

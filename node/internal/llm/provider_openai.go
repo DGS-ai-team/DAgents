@@ -22,8 +22,17 @@ func (openAIAdapter) PrepareOutboundMessages(messages []Message) ([]Message, err
 	return out, nil
 }
 
-func (openAIAdapter) MarshalChatRequestMessages([]Message) ([]map[string]any, bool, error) {
-	return nil, false, nil
+func (openAIAdapter) MarshalChatRequestMessages(messages []Message) ([]map[string]any, bool, error) {
+	out := make([]map[string]any, len(messages))
+	for i, m := range messages {
+		payload, err := MessageToAPIPayload(m)
+		if err != nil {
+			return nil, false, err
+		}
+		delete(payload, "reasoning_content")
+		out[i] = payload
+	}
+	return out, true, nil
 }
 
 func (openAIAdapter) RequestExtra() map[string]any { return nil }

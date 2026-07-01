@@ -38,3 +38,14 @@ agent_send_message=always
 agent_broadcast=always
 agent_peer_approve_tools=always
 background_job_cancel=always
+
+# --- Browser（Phase 1 browser_*；见 docs/design/browser-tools-and-demonstration.md）---
+browser_start=always
+browser_stop=rule
+browser_navigate=always
+browser_click=always
+browser_fill=always
+browser_press=always
+browser_screenshot=rule
+browser_wait=rule
+browser_snapshot=rule

@@ -15,8 +15,6 @@ cp -f "${CASE}/prompt_context/node-a/custom.md" "${CASE}/runtime/node-a/prompt_c
 cp -f "${CASE}/prompt_context/node-b/custom.md" "${CASE}/runtime/node-b/prompt_context/custom.md"
 cp -f "${CASE}/local-run/node-a.yaml" "${CASE}/local-run/wd-a/config.yaml"
 cp -f "${CASE}/local-run/node-b.yaml" "${CASE}/local-run/wd-b/config.yaml"
-cp -f "${CASE}/agent-card/node-a.json" "${CASE}/local-run/wd-a/agent-card.json"
-cp -f "${CASE}/agent-card/node-b.json" "${CASE}/local-run/wd-b/agent-card.json"
 
 if [ ! -x "${NODE_BIN}" ]; then
   (cd "${REPO}" && go build -o "${NODE_BIN}" ./node/cmd/dagents-node)

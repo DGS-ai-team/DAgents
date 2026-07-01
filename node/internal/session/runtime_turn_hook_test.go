@@ -35,7 +35,7 @@ func TestHumanMessageWithCompressionAndHooksDoesNotDeadlock(t *testing.T) {
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
-	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "hello", nil, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "hello", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 

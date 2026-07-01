@@ -21,7 +21,7 @@ func testManager(t *testing.T) *Manager {
 		t.Fatal(err)
 	}
 	pol, _ := policy.LoadFile("")
-	return NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{SkillsEnabled: false, CompressionBlocking: 0}, logx.Discard())
+	return NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{SkillsEnabled: false, CompressionBlocking: 0, MultimodalEnabled: true}, logx.Discard())
 }
 
 func TestCreateAndList(t *testing.T) {
@@ -59,7 +59,7 @@ func TestEnqueueMessageTurn(t *testing.T) {
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
-	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "hello", nil, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "hello", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,8 +89,44 @@ func TestEnqueueMessageTurn(t *testing.T) {
 func TestEnqueueMessageSessionNotFound(t *testing.T) {
 	mgr := testManager(t)
 	defer mgr.Stop()
-	if _, err := mgr.EnqueueMessage(context.Background(), "missing", "message", "x", nil, ""); err == nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), "missing", "message", "x", nil, nil, ""); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestEnqueueMessageMultimodal(t *testing.T) {
+	mgr := testManager(t)
+	defer mgr.Stop()
+	s, _, _ := mgr.Create("")
+	parts := []llm.ContentPart{{
+		Type:     "image_url",
+		ImageURL: &llm.ImageURLPart{URL: "https://example.com/a.png"},
+	}}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "describe this", parts, nil, ""); err != nil {
+		t.Fatalf("enqueue multimodal: %v", err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "", nil, nil, ""); err == nil {
+		t.Fatal("expected invalid empty message")
+	}
+}
+
+func TestEnqueueMessageMultimodalDisabled(t *testing.T) {
+	reg, err := tools.NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := policy.LoadFile("")
+	mgr := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{MultimodalEnabled: false}, logx.Discard())
+	defer mgr.Stop()
+	s, _, _ := mgr.Create("")
+	parts := []llm.ContentPart{{
+		Type:     "image_url",
+		ImageURL: &llm.ImageURLPart{URL: "https://example.com/a.png"},
+	}}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "describe this", parts, nil, ""); err == nil {
+		t.Fatal("expected multimodal_disabled")
+	} else if err.Error() != "multimodal_disabled" {
+		t.Fatalf("err = %q, want multimodal_disabled", err)
 	}
 }
 
@@ -102,7 +138,7 @@ func TestCancelTurn(t *testing.T) {
 	defer mgr.Stop()
 
 	s, _, _ := mgr.Create("")
-	_, _ = mgr.EnqueueMessage(context.Background(), s.ID, "message", "long", nil, "")
+	_, _ = mgr.EnqueueMessage(context.Background(), s.ID, "message", "long", nil, nil, "")
 
 	time.Sleep(30 * time.Millisecond)
 	if !mgr.CancelTurn(s.ID) {
@@ -151,7 +187,7 @@ func TestPersistAfterTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "persist-me", nil, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "persist-me", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.After(2 * time.Second)

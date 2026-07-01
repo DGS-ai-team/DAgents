@@ -108,8 +108,11 @@ func TestResolveSideEffectInsertSite_table(t *testing.T) {
 			if len(plan.Messages) == 0 {
 				t.Fatal("expected non-empty apply plan")
 			}
-			if tc.wantMode == "bridge_user_callback" && len(plan.Messages) != 3 {
-				t.Fatalf("bridge plan len = %d, want 3", len(plan.Messages))
+			if tc.wantMode == "bridge_user_callback" && len(plan.Messages) != 1 {
+				t.Fatalf("bridge plan len = %d, want 1", len(plan.Messages))
+			}
+			if tc.wantMode == "bridge_user_callback" && plan.Messages[0].Role != "user" {
+				t.Fatalf("bridge plan role = %q", plan.Messages[0].Role)
 			}
 		})
 	}

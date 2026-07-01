@@ -207,7 +207,7 @@ func TestHumanMessagePreemptAppliesBufferedSideEffects(t *testing.T) {
 		t.Fatal("human preempt path must not rely on cancel recovery continue")
 	}
 
-	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "message", "human preempt", nil, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "message", "human preempt", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	waitQueueDrain(t, rt, 8*time.Second)

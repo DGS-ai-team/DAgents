@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,9 +16,12 @@ import (
 
 func testManageConfig(serverURL, token string) *config.Config {
 	cfg := &config.Config{
-		AgentID:       "ops-01",
-		ExposeToPeers: true,
-		Local:         config.LocalConfig{Endpoint: "http://127.0.0.1:18765"},
+		AgentID: "ops-01",
+		Agent: config.AgentConfig{
+			Name: "展示名",
+			Role: "compliance",
+		},
+		Local: config.LocalConfig{Endpoint: "http://127.0.0.1:18765"},
 		Manage: config.ManageConfig{
 			Enabled:   true,
 			URL:       serverURL,
@@ -151,23 +152,15 @@ func TestRegistrar_reregistersOnHeartbeat404(t *testing.T) {
 	cancel()
 }
 
-func TestRegistrar_buildRegisterPayload_usesAgentCardName(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, AgentCardFileName), []byte(`{
-		"name": "展示名",
-		"description": "Card 描述",
-		"capabilities": ["compliance_review"]
-	}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	oldWD, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWD) })
-
+func TestRegistrar_buildRegisterPayload_usesAgentConfig(t *testing.T) {
 	cfg := testManageConfig("http://127.0.0.1:8020", "")
 	cfg.AgentID = "ops-01"
+	cfg.Agent = config.AgentConfig{
+		Name:         "展示名",
+		Description:  "Card 描述",
+		Capabilities: []string{"compliance_review"},
+		Role:         "compliance",
+	}
 	reg := NewRegistrar(cfg, nil)
 	payload := reg.buildRegisterPayload()
 	if payload.Name != "展示名" {
@@ -178,5 +171,18 @@ func TestRegistrar_buildRegisterPayload_usesAgentCardName(t *testing.T) {
 	}
 	if len(payload.Capabilities) != 1 || payload.Capabilities[0] != "compliance_review" {
 		t.Fatalf("capabilities = %v", payload.Capabilities)
+	}
+	if !payload.ExposeToPeers {
+		t.Fatal("expected expose true for compliance role")
+	}
+}
+
+func TestRegistrar_buildRegisterPayload_exposeFromComplianceRole(t *testing.T) {
+	cfg := testManageConfig("http://127.0.0.1:8020", "")
+	cfg.Agent = config.AgentConfig{Role: "compliance"}
+	reg := NewRegistrar(cfg, nil)
+	payload := reg.buildRegisterPayload()
+	if !payload.ExposeToPeers {
+		t.Fatal("expected expose true for compliance role")
 	}
 }

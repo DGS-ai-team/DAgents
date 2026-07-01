@@ -48,7 +48,7 @@ func TestChildAgentParentTurnWaitTrue(t *testing.T) {
 	defer hub.Unsubscribe(ch)
 
 	ctx := context.Background()
-	if _, err := mgr.EnqueueMessage(ctx, parent.ID, "message", "请委派子任务检查 README", nil, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(ctx, parent.ID, "message", "请委派子任务检查 README", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -215,7 +215,7 @@ func TestEnqueueResumeParentDoesNotDoubleEnqueue(t *testing.T) {
 		"answer":       "yes",
 	}
 	before := rt.queue.TotalEnqueued()
-	if _, err := mgr.EnqueueMessage(context.Background(), parent.ID, "resume", "", resume, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), parent.ID, "resume", "", nil, resume, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := rt.queue.TotalEnqueued() - before; got != 1 {

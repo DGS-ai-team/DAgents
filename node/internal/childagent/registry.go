@@ -77,4 +77,12 @@ func (r *RestrictedRegistry) check(name string) error {
 	return nil
 }
 
+// TakeReadImageVisionForCall 委托底层 registry 取出 read_image 视觉 follow-up。
+func (r *RestrictedRegistry) TakeReadImageVisionForCall(toolCallID string) *tools.ReadImageVisionPayload {
+	if r.inner == nil {
+		return nil
+	}
+	return r.inner.TakeReadImageVisionForCall(toolCallID)
+}
+
 var _ tools.Executor = (*RestrictedRegistry)(nil)

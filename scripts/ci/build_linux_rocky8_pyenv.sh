@@ -11,7 +11,7 @@
 #
 # 约定（与 **`build_linux_focal_pyenv.sh`** 一致）：
 # - 工作区挂载为 **/src**；
-# - **CLI_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串。
+# - **CLI_PI_ARGS** / **BROWSER_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串。
 # - **PYENV_PYTHON_VERSION**：可选，默认 **3.13.2**。
 #
 # 副作用：首次编译 CPython 耗时长；workflow step 需足够 **timeout**。
@@ -67,10 +67,16 @@ fi
 cd /src
 "${PYENV_PYTHON}" -m pip install -r requirements.txt pyinstaller
 
-if [[ -z "${CLI_PI_ARGS:-}" ]]; then
-  echo "[build_linux_rocky8_pyenv] CLI_PI_ARGS is required" >&2
+if [[ -z "${CLI_PI_ARGS:-}" && -z "${BROWSER_PI_ARGS:-}" ]]; then
+  echo "[build_linux_rocky8_pyenv] at least one of CLI_PI_ARGS or BROWSER_PI_ARGS is required" >&2
   exit 1
 fi
-eval "${PYENV_PYTHON}" -m PyInstaller ${CLI_PI_ARGS}
+if [[ -n "${CLI_PI_ARGS:-}" ]]; then
+  eval "${PYENV_PYTHON}" -m PyInstaller ${CLI_PI_ARGS}
+fi
+if [[ -n "${BROWSER_PI_ARGS:-}" ]]; then
+  "${PYENV_PYTHON}" -m pip install -r /src/browser-service/requirements.txt
+  eval "${PYENV_PYTHON}" -m PyInstaller ${BROWSER_PI_ARGS}
+fi
 
 echo "[build_linux_rocky8_pyenv] done: $(ls -la /src/dist/ 2>/dev/null || true)"

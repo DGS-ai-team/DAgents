@@ -414,8 +414,11 @@ async function submitHitlUserInfo(hitlIndex, text) {
   }
 }
 
-async function onSendMessage(text) {
+async function onSendMessage(payload) {
   sessionStore.error = "";
+  const text = typeof payload === "string" ? payload : String(payload?.text || "").trim();
+  const contentParts = typeof payload === "string" ? null : payload?.contentParts;
+  const images = typeof payload === "string" ? [] : payload?.images || [];
 
   if (text.startsWith("/")) {
     await handleCommand(text);
@@ -435,10 +438,10 @@ async function onSendMessage(text) {
 
   await activateSessionStream();
   clearHitl();
-  addUser(text);
+  addUser(text, images);
   beginSubmit();
   try {
-    await api.submitMessage(sessionStore.sessionId, text);
+    await api.submitMessage(sessionStore.sessionId, text, contentParts);
     sessionStore.statusLine = "等待 Agent 回复…";
     if (!sessionStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {

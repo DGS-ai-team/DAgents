@@ -31,6 +31,9 @@ func (s stubReadFileExecutor) StartBackground(context.Context, string, string, s
 }
 
 func (s stubReadFileExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
+func (s stubReadFileExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
+	return nil
+}
 
 func TestExecuteTool_readFileHistorySpillsButSSEFull(t *testing.T) {
 	root := t.TempDir()
@@ -226,3 +229,6 @@ func (s stubToolOutputExecutor) StartBackground(context.Context, string, string,
 }
 
 func (s stubToolOutputExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
+func (s stubToolOutputExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
+	return nil
+}

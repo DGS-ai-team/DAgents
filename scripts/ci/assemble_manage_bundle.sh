@@ -68,8 +68,8 @@ DAgents Manage 离线包 (${VERSION})
   curl -sf http://127.0.0.1:8020/health
   浏览器: http://<主机>:8020/console/
 
-数据持久化在 Docker volume manage-data。
-升级: 重新 import 新镜像后执行 restart.sh（保留 volume 即可）。
+数据持久化在 Docker volume dagents-manage-data（/data/manage.db 等）。
+升级: 重新 import 新镜像后执行 restart.sh；volume 名固定，换 bundle 目录不会丢数据。
 
 详见 packaging/manage/README.md
 EOF

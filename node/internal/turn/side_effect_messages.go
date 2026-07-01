@@ -164,7 +164,7 @@ func ResolveSideEffectInsertSite(messages []llm.Message, built SideEffectMessage
 func PlanSingleSideEffectApply(messages []llm.Message, built SideEffectMessages) SideEffectApplyPlan {
 	if len(messages) == 0 {
 		return SideEffectApplyPlan{
-			Messages: []llm.Message{built.UserMessage, built.AssistantMessage, built.ToolMessage},
+			Messages: []llm.Message{bridgeApplyUserMessage(built)},
 			Continue: true,
 			Mode:     "empty_history_bridge",
 		}
@@ -185,10 +185,50 @@ func PlanSingleSideEffectApply(messages []llm.Message, built SideEffectMessages)
 func selectSideEffectSegments(built SideEffectMessages, tail toolResultTailKind) []llm.Message {
 	switch tail {
 	case tailAssistantWithoutToolCalls:
-		return []llm.Message{built.UserMessage, built.AssistantMessage, built.ToolMessage}
+		return []llm.Message{bridgeApplyUserMessage(built)}
 	default:
 		return []llm.Message{built.AssistantMessage, built.ToolMessage}
 	}
+}
+
+// bridgeApplyUserMessage 桥接态 Apply：单条合成 user（合并原 user 提示与 tool 正文）。
+func bridgeApplyUserMessage(built SideEffectMessages) llm.Message {
+	name := strings.TrimSpace(built.UserMessage.Name)
+	if name == "" {
+		name = llm.UserNameAsyncTool
+	}
+	content := mergeBridgeUserContent(built)
+	return llm.UserMessage(content, name)
+}
+
+func mergeBridgeUserContent(built SideEffectMessages) string {
+	user := strings.TrimSpace(built.UserMessage.Content)
+	tool := strings.TrimSpace(built.ToolMessage.Content)
+	switch {
+	case user == "":
+		return tool
+	case tool == "":
+		return user
+	default:
+		return user + "\n\n" + tool
+	}
+}
+
+func isSideEffectBridgeUserName(name string) bool {
+	switch strings.TrimSpace(name) {
+	case llm.UserNameAsyncTool, llm.UserNameTrigger, llm.UserNameA2AInbox, llm.UserNameChildTask:
+		return true
+	default:
+		return false
+	}
+}
+
+func isSideEffectBridgeUserTail(messages []llm.Message) bool {
+	if len(messages) == 0 {
+		return false
+	}
+	last := messages[len(messages)-1]
+	return last.Role == "user" && isSideEffectBridgeUserName(last.Name)
 }
 
 type mergedCallbackItem struct {
@@ -256,14 +296,17 @@ func BuildMergedCallbackBatch(entries []SideEffectBatchEntry, messages []llm.Mes
 	}
 	if tail == tailAssistantWithoutToolCalls {
 		out.Messages = []llm.Message{
-			llm.UserMessage("似乎已经有回调事件了，请查看", llm.UserNameAsyncTool),
-			assistant,
-			toolMsg,
+			llm.UserMessage(formatMergedBridgeUserMessage(items), llm.UserNameAsyncTool),
 		}
 	} else {
 		out.Messages = []llm.Message{assistant, toolMsg}
 	}
 	return out
+}
+
+func formatMergedBridgeUserMessage(items []mergedCallbackItem) string {
+	body, _ := json.Marshal(map[string]any{"callbacks": items})
+	return "似乎已经有回调事件了，请查看并继续任务。\n\n" + string(body)
 }
 
 // SideEffectBatchEntry Apply 批量收集条目。
@@ -294,9 +337,16 @@ func shouldContinueAfterSideEffectApply(tail toolResultTailKind) bool {
 	return shouldContinueAfterAsyncTool(tail)
 }
 
+func shouldContinueAfterSideEffectApplyMessages(messages []llm.Message) bool {
+	if shouldContinueAfterSideEffectApply(classifyToolResultTail(messages)) {
+		return true
+	}
+	return isSideEffectBridgeUserTail(messages)
+}
+
 // ShouldContinueAfterSideEffectApply 供 runtime reconcile 判定。
 func ShouldContinueAfterSideEffectApply(messages []llm.Message) bool {
-	return shouldContinueAfterSideEffectApply(classifyToolResultTail(messages))
+	return shouldContinueAfterSideEffectApplyMessages(messages)
 }
 
 // SideEffectAlreadyApplied 幂等：async job_id 或 external 内容已在 history。
@@ -304,7 +354,7 @@ func SideEffectAlreadyApplied(messages []llm.Message, kind SideEffectKind, async
 	jobID := strings.TrimSpace(async.JobID)
 	if kind == SideEffectAsync && jobID != "" {
 		for _, m := range messages {
-			if m.Role == "tool" && asyncToolResultAppliedInHistory(m.Content, jobID) {
+			if asyncToolResultAppliedInHistory(m.Content, jobID) {
 				return true
 			}
 		}
@@ -336,9 +386,16 @@ func (o *Orchestrator) ContinueAfterSideEffects(
 	if setState == nil {
 		setState = func(State) {}
 	}
+	if !shouldContinueAfterSideEffectApplyMessages(*history) {
+		return StepOutcome{LoopCount: toolLoopCount}
+	}
 	tail := classifyToolResultTail(*history)
-	if shouldContinueAfterSideEffectApply(tail) {
+	if tail == tailTool {
 		return o.RunToolMessageTurn(ctx, sessionID, history, setState, toolLoopCount)
 	}
-	return StepOutcome{LoopCount: toolLoopCount}
+	o.logger.Info("turn side effect bridge continue",
+		"session_id", sessionID,
+		"user_name", (*history)[len(*history)-1].Name,
+	)
+	return o.runOneStep(ctx, sessionID, history, setState, toolLoopCount)
 }

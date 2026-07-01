@@ -11,4 +11,7 @@
 | `agent-client-refactor-plan.md` | [01](../handbook/01-愿景与架构.md) §5 |
 | `manage-architecture.md` | [05-Manage与A2A](../handbook/05-Manage与A2A.md) |
 
+| `browser-tools-and-demonstration.md` | Browser Tools + 演示录制/回放 |
+| `browser-remote-service-mode-a.md` | 模式 A：browser-use 薄服务 |
+
 新正文优先写入 **handbook**；本目录保留需独立维护的深度设计稿。

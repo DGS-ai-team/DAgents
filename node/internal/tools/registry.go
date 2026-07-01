@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
+	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
@@ -21,6 +22,8 @@ type Registry struct {
 	bashCompress        BashCompressConfig
 	compressMu          sync.Mutex
 	bashCompressStats   map[string]*OutputCompressStats
+	visionMu            sync.Mutex
+	readImageVision     map[string]*ReadImageVisionPayload
 	bgJobs              *backgroundJobRegistry
 	triggerStore        *triggers.Store
 	triggerSched        *triggers.Scheduler
@@ -30,6 +33,8 @@ type Registry struct {
 	agentID             string
 	skillsCatalogHolder
 	enabledOnly         map[string]struct{}
+	multimodalEnabled   bool
+	browser             *browser.Manager
 	handlers            map[string]handler
 	pathEncMu           sync.Mutex
 	pathEncCache        map[string]pathEncodingEntry
@@ -70,6 +75,11 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*R
 func (r *Registry) Definitions() []ToolDef {
 	base := []ToolDef{
 		readFileToolDef(),
+	}
+	if r.multimodalEnabled {
+		base = append(base, readImageToolDef())
+	}
+	base = append(base,
 		writeFileToolDef(),
 		globFilesToolDef(),
 		grepFileToolDef(),
@@ -87,9 +97,12 @@ func (r *Registry) Definitions() []ToolDef {
 		triggerCreateToolDef(),
 		triggerUpdateToolDef(),
 		triggerDeleteToolDef(),
-	}
+	)
 	if r.manageClient != nil {
 		base = append(base, manageA2AToolDefs()...)
+	}
+	if r.browserToolsEnabled() {
+		base = append(base, r.browserToolDefs()...)
 	}
 	base = append(base, childAgentToolDefs()...)
 	return r.enrichDefinitions(r.filterToolDefs(base))
@@ -106,6 +119,7 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 
 func (r *Registry) registerBuiltins() {
 	r.handlers["read_file"] = r.execReadFile
+	r.handlers["read_image"] = r.execReadImage
 	r.handlers["write_file"] = r.execWriteFile
 	r.handlers["glob_files"] = r.execGlobFiles
 	r.handlers["grep_file"] = r.execGrepFile

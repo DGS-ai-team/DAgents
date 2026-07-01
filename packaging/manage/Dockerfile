@@ -31,6 +31,8 @@ ENV MANAGE_HOST=0.0.0.0 \
     MANAGE_PORT=8020 \
     MANAGE_DB_PATH=/data/manage.db \
     MANAGE_RELEASES_DIR=/data/releases \
+    MANAGE_BLOB_DIR=/data/blobs \
+    MANAGE_AUDIT_PATH=/data/audit.jsonl \
     MANAGE_SEED_BUNDLED_RELEASES=1 \
     MANAGE_BUNDLED_RELEASES_DIR=/app/bundled/releases
 

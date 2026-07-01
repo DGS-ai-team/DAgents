@@ -37,6 +37,7 @@ fi
 
 BIN="${ROOT}/bin"
 NODE_PID_FILE="${ROOT}/.runtime/node.pid"
+BROWSER_PID_FILE="${ROOT}/.runtime/browser.pid"
 NODE_STOP_TIMEOUT_SEC=15
 # set -u 下空数组 "${PARSED_ARGS[@]}" 会 unbound；须预先声明并在无额外参数时分支 exec。
 WITHNODE=0
@@ -126,6 +127,94 @@ shutdown_node() {
   echo "[dagents] node stopped"
 }
 
+probe_browser() {
+  curl -fsS --max-time 2 http://127.0.0.1:18766/health >/dev/null 2>&1
+}
+
+write_browser_pid() {
+  local pid="$1"
+  mkdir -p "${ROOT}/.runtime"
+  echo "${pid}" >"${BROWSER_PID_FILE}"
+}
+
+clear_browser_pid() {
+  rm -f "${BROWSER_PID_FILE}"
+}
+
+find_browser_pids() {
+  local cfg_abs="${ROOT}/${CFG}"
+  local pattern="${BIN}/dagents-browser"
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f "${pattern}.*--config[[:space:]]+${cfg_abs}" 2>/dev/null || true
+  fi
+}
+
+stop_browser_process() {
+  stop_node_process "$1"
+}
+
+shutdown_browser() {
+  if ! probe_browser; then
+    clear_browser_pid
+    echo "[dagents] browser service is not running"
+    return 0
+  fi
+
+  local pid=""
+  if [[ -f "${BROWSER_PID_FILE}" ]]; then
+    pid="$(tr -d '[:space:]' <"${BROWSER_PID_FILE}")"
+  fi
+  if pid_alive "${pid}"; then
+    echo "[dagents] stopping browser service (pid=${pid})"
+    stop_browser_process "${pid}"
+  else
+    local pids
+    pids="$(find_browser_pids)"
+    if [[ -n "${pids}" ]]; then
+      echo "[dagents] stopping browser service (pids=${pids//$'\n'/, })"
+      while IFS= read -r p; do
+        [[ -n "${p}" ]] && stop_browser_process "${p}"
+      done <<<"${pids}"
+    fi
+  fi
+
+  clear_browser_pid
+  if probe_browser; then
+    die "browser service still responds after shutdown; check .runtime/logs/browser.err.log"
+  fi
+  echo "[dagents] browser service stopped"
+}
+
+start_browser_background() {
+  require_bin dagents-browser
+  mkdir -p "${ROOT}/.runtime/logs"
+  echo "[dagents] starting browser service in background (logs: .runtime/logs/browser.log)"
+  nohup "${BIN}/dagents-browser" --config "${ROOT}/${CFG}" \
+    >>"${ROOT}/.runtime/logs/browser.log" 2>>"${ROOT}/.runtime/logs/browser.err.log" &
+  write_browser_pid "$!"
+}
+
+wait_browser_ready() {
+  local wait=0
+  while ! probe_browser; do
+    sleep 1
+    wait=$((wait + 1))
+    if [[ "${wait}" -ge 30 ]]; then
+      die "browser service did not become ready within 30s (see .runtime/logs/browser.err.log)"
+    fi
+  done
+}
+
+start_browser_default() {
+  if probe_browser; then
+    echo "[dagents] browser service already running"
+    return 0
+  fi
+  start_browser_background
+  wait_browser_ready
+  echo "[dagents] browser service is ready"
+}
+
 start_node_background() {
   require_bin dagents-node
   mkdir -p "${ROOT}/.runtime/logs"
@@ -204,7 +293,7 @@ parse_withnode() {
 cmd_doctor() {
   echo "DAgents installation: ${DAGENTS_HOME}"
   local ok=1 name
-  for name in dagents-node dagents-client dagents-cli; do
+  for name in dagents-node dagents-client dagents-cli dagents-browser; do
     if [[ -x "${BIN}/${name}" ]]; then
       echo "[ok] bin/${name}"
     else
@@ -324,6 +413,9 @@ Usage:
   dagents node restart            Stop then start Node in background
   dagents node --foreground       Start Node in foreground (blocks terminal)
   dagents node --no-wait          Background start without waiting for probe
+  dagents browser                 Start browser-use service in background (browser.enabled)
+  dagents browser stop            Stop browser-use service
+  dagents browser --foreground    Run browser service in foreground
   dagents doctor                  Check installed files
   dagents version                 Print version information
   dagents version --check         Check for updates (via Manage Release Hub)
@@ -412,6 +504,36 @@ case "$1" in
       *)
         require_bin dagents-node
         exec "${BIN}/dagents-node" -config "${ROOT}/${CFG}" "$@"
+      ;;
+    esac
+    ;;
+  browser)
+    shift
+    case "${1:-}" in
+      shutdown|stop)
+        shutdown_browser
+        exit 0
+      ;;
+      --foreground|-f)
+        shift
+        require_bin dagents-browser
+        exec "${BIN}/dagents-browser" --config "${ROOT}/${CFG}" "$@"
+      ;;
+      --no-wait|--background)
+        if probe_browser; then
+          echo "[dagents] browser service already running"
+          exit 0
+        fi
+        start_browser_background
+        exit 0
+      ;;
+      "")
+        start_browser_default
+        exit 0
+      ;;
+      *)
+        require_bin dagents-browser
+        exec "${BIN}/dagents-browser" --config "${ROOT}/${CFG}" "$@"
       ;;
     esac
     ;;

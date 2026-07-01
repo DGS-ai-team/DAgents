@@ -71,10 +71,10 @@ func TestSideEffectContinueAppliesExternalOnEmptyHistory(t *testing.T) {
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	if len(rt.messages) < 3 {
-		t.Fatalf("history len = %d, want user+assistant+tool after continue", len(rt.messages))
+	if len(rt.messages) < 1 {
+		t.Fatalf("history len = %d, want bridge user after continue", len(rt.messages))
 	}
-	if rt.messages[0].Role != "user" || rt.messages[0].Content != "inbox hello" {
+	if rt.messages[0].Role != "user" || !strings.Contains(rt.messages[0].Content, "inbox hello") {
 		t.Fatalf("first message = %+v", rt.messages[0])
 	}
 }
@@ -150,14 +150,14 @@ func TestSideEffectFIFOApplyOrder(t *testing.T) {
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	var toolContent string
+	var mergedContent string
 	for _, m := range rt.messages {
-		if m.Role == "tool" && strings.Contains(m.Content, "callbacks") {
-			toolContent = m.Content
+		if strings.Contains(m.Content, "callbacks") {
+			mergedContent = m.Content
 			break
 		}
 	}
-	if toolContent == "" {
+	if mergedContent == "" {
 		// 未合并时仍须按 FIFO 出现在独立 tool 消息中
 		idx1, idx2 := -1, -1
 		for i, m := range rt.messages {
@@ -173,10 +173,10 @@ func TestSideEffectFIFOApplyOrder(t *testing.T) {
 		}
 		return
 	}
-	pos1 := strings.Index(toolContent, "job-1")
-	pos2 := strings.Index(toolContent, "job-2")
+	pos1 := strings.Index(mergedContent, "job-1")
+	pos2 := strings.Index(mergedContent, "job-2")
 	if pos1 < 0 || pos2 < 0 || pos1 > pos2 {
-		t.Fatalf("FIFO violated in merged callbacks: %q", toolContent)
+		t.Fatalf("FIFO violated in merged callbacks: %q", mergedContent)
 	}
 }
 

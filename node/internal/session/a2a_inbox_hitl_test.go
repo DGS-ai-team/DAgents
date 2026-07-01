@@ -196,8 +196,8 @@ func TestRunInboxTurn_approvalResumeExecutesBashRun(t *testing.T) {
 	if view.PendingToolCallsCount != 1 {
 		t.Fatalf("pending=%d want 1", view.PendingToolCallsCount)
 	}
-	if view.MessagesCount != 4 {
-		t.Fatalf("messages=%d want 4 (bridge user+callback+tool + assistant tool_calls)", view.MessagesCount)
+	if view.MessagesCount != 2 {
+		t.Fatalf("messages=%d want 2 (bridge user + assistant tool_calls)", view.MessagesCount)
 	}
 
 	resume := map[string]any{

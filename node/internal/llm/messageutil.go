@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
 )
@@ -29,7 +30,7 @@ func EstimateTextTokens(text string) int {
 func EstimateMessageTokens(messages []Message) int {
 	total := 0
 	for _, m := range messages {
-		total += tokens.EstimateInt(m.Content) + 16
+		total += EstimateMessageContentTokens(m) + 16
 		if len(m.ToolCalls) > 0 {
 			total += len(m.ToolCalls) * 32
 		}
@@ -40,15 +41,38 @@ func EstimateMessageTokens(messages []Message) int {
 	return total
 }
 
+// MessageToAPIPayload 序列化单条消息为 OpenAI chat/completions messages[] 元素。
+func MessageToAPIPayload(m Message) (map[string]any, error) {
+	payload := map[string]any{"role": m.Role}
+	if n := strings.TrimSpace(m.Name); n != "" {
+		payload["name"] = n
+	}
+	if len(m.ToolCalls) > 0 {
+		payload["tool_calls"] = m.ToolCalls
+	}
+	if id := strings.TrimSpace(m.ToolCallID); id != "" {
+		payload["tool_call_id"] = id
+	}
+	if len(m.ContentParts) > 0 {
+		parts := make([]map[string]any, len(m.ContentParts))
+		for i, part := range m.ContentParts {
+			parts[i] = contentPartToMap(part)
+		}
+		payload["content"] = parts
+	} else {
+		payload["content"] = m.Content
+	}
+	return payload, nil
+}
+
 // messageMapPayload 将 Message 转为 map，供出站 API / JSONL 二次加工。
 func messageMapPayload(m Message) (map[string]any, error) {
-	raw, err := json.Marshal(m)
+	payload, err := MessageToAPIPayload(m)
 	if err != nil {
 		return nil, err
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, err
+	if m.ReasoningContent != "" {
+		payload["reasoning_content"] = m.ReasoningContent
 	}
 	return payload, nil
 }

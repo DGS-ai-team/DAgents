@@ -10,7 +10,18 @@ defineProps({
 <template>
   <div v-if="entry.kind === 'user'" class="msg msg--user">
     <div class="msg__body">
-      <div class="msg__bubble msg__bubble--user">{{ entry.text }}</div>
+      <div class="msg__bubble msg__bubble--user">
+        <div v-if="entry.images?.length" class="msg__images">
+          <img
+            v-for="(src, idx) in entry.images"
+            :key="idx"
+            class="msg__image"
+            :src="src"
+            alt="用户上传图片"
+          />
+        </div>
+        <div v-if="entry.text">{{ entry.text }}</div>
+      </div>
     </div>
   </div>
 
@@ -64,6 +75,19 @@ defineProps({
 </template>
 
 <style scoped>
+.msg__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.msg__image {
+  max-width: min(240px, 100%);
+  max-height: 180px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.15);
+}
 .msg__usage {
   margin-top: 8px;
   text-align: right;

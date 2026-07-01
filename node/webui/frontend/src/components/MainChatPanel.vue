@@ -42,6 +42,8 @@ const emit = defineEmits([
 ]);
 
 const input = ref("");
+const pendingImages = ref([]);
+const fileInputRef = ref(null);
 const streamRef = ref(null);
 const userInfoSelected = ref(0);
 const followTail = ref(true);
@@ -86,7 +88,57 @@ const inputStripLeftText = computed(() => {
 });
 
 const showCancel = computed(() => props.sending && !props.hitlBusy);
-const canSubmit = computed(() => !props.disabled && !props.sending && !!input.value.trim());
+const multimodalEnabled = computed(() => Boolean(chromeStore.agentInfo?.multimodal_enabled));
+const canSubmit = computed(
+  () => !props.disabled && !props.sending && (!!input.value.trim() || pendingImages.value.length > 0),
+);
+
+const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const maxImageBytes = 10 * 1024 * 1024;
+
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addImageFiles(fileList) {
+  if (!multimodalEnabled.value) return;
+  const files = Array.from(fileList || []);
+  for (const file of files) {
+    if (!allowedImageTypes.has(file.type)) continue;
+    if (file.size > maxImageBytes) continue;
+    if (pendingImages.value.length >= 8) break;
+    const url = await readFileAsDataURL(file);
+    pendingImages.value.push({ name: file.name, url });
+  }
+}
+
+function removePendingImage(index) {
+  pendingImages.value.splice(index, 1);
+}
+
+function openImagePicker() {
+  fileInputRef.value?.click();
+}
+
+async function onImageSelected(event) {
+  await addImageFiles(event.target.files);
+  event.target.value = "";
+}
+
+function buildContentParts(text, images) {
+  const parts = [];
+  const trimmed = String(text || "").trim();
+  if (trimmed) parts.push({ type: "text", text: trimmed });
+  for (const img of images) {
+    if (img?.url) parts.push({ type: "image_url", image_url: { url: img.url } });
+  }
+  return parts;
+}
 
 watch(
   () => [stream.value.length, activeStatusPhases.value.length],
@@ -113,10 +165,13 @@ function scrollToTail() {
 
 async function submit() {
   const text = input.value.trim();
-  if (!text || props.disabled || props.sending) return;
+  const images = pendingImages.value.slice();
+  if ((!text && !images.length) || props.disabled || props.sending) return;
   scrollToTail();
-  emit("send", text);
+  const contentParts = buildContentParts(text, images);
+  emit("send", { text, contentParts, images: images.map((img) => img.url) });
   input.value = "";
+  pendingImages.value = [];
 }
 
 function onCancel() {
@@ -214,7 +269,32 @@ defineExpose({
             {{ inputStripRightText }}
           </span>
         </div>
+        <div v-if="multimodalEnabled && pendingImages.length" class="chat__pending-images">
+          <div v-for="(img, idx) in pendingImages" :key="`${img.name}-${idx}`" class="chat__pending-image">
+            <img class="chat__pending-image-thumb" :src="img.url" :alt="img.name" />
+            <button type="button" class="chat__pending-image-remove" @click="removePendingImage(idx)">×</button>
+          </div>
+        </div>
         <div class="chat__composer-row">
+          <input
+            v-if="multimodalEnabled"
+            ref="fileInputRef"
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            multiple
+            hidden
+            @change="onImageSelected"
+          />
+          <button
+            v-if="multimodalEnabled"
+            type="button"
+            class="btn btn--ghost chat__attach-btn"
+            title="添加图片"
+            :disabled="disabled || sending || cancelling || pendingImages.length >= 8"
+            @click="openImagePicker"
+          >
+            🖼
+          </button>
           <textarea
             v-model="input"
             class="chat__textarea"

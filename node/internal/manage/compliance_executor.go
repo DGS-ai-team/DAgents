@@ -128,9 +128,7 @@ func encodeRequiresInputPayload(cfg *config.Config, task InboxTask, calleeSessio
 func calleeAgentMeta(cfg *config.Config) (id, name string) {
 	if cfg != nil {
 		id = strings.TrimSpace(cfg.AgentID)
-	}
-	if card, _ := LoadDefaultAgentCard(); card != nil {
-		name = strings.TrimSpace(card.Name)
+		name = cfg.AgentDisplayName()
 	}
 	if name == "" {
 		name = id
@@ -142,16 +140,12 @@ func inboxSessionIDForTask(taskID string) string {
 	return session.InboxSessionID(taskID)
 }
 
-func agentRole() string {
-	if card, _ := LoadDefaultAgentCard(); card != nil {
-		return card.role()
-	}
-	return ""
-}
-
-// ResolveInboxHandler 按 Agent Card metadata.role 选择 inbox 处理器。
+// ResolveInboxHandler 按 config agent.role 选择 inbox 处理器。
 func ResolveInboxHandler(cfg *config.Config, sessions *session.Manager, logger *slog.Logger) InboxTaskHandler {
-	switch agentRole() {
+	if cfg == nil {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.AgentRole())) {
 	case "compliance":
 		return NewComplianceExecutor(cfg, sessions, logger).HandleTask
 	default:

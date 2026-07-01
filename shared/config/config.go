@@ -21,9 +21,9 @@ const (
 // Config 为 Node 与 Client 共享的配置根结构；Client 仅使用 local 等子集。
 type Config struct {
 	AgentID       string       `yaml:"agent_id"`
+	Agent         AgentConfig  `yaml:"agent"`
 	Listen        ListenConfig `yaml:"listen"`
 	Local         LocalConfig  `yaml:"local"`
-	ExposeToPeers bool         `yaml:"expose_to_peers"`
 	Groups        []string     `yaml:"groups"`
 	FSRoot        string       `yaml:"fs_root"`
 	LLM           LLMConfig    `yaml:"llm"`
@@ -37,6 +37,22 @@ type Config struct {
 	Tools             ToolsConfig             `yaml:"tools"`
 	Hooks             HooksConfig             `yaml:"hooks"`
 	UI                UIConfig                `yaml:"ui"`
+	Multimodal        MultimodalConfig        `yaml:"multimodal"`
+	Browser           BrowserConfig           `yaml:"browser"`
+}
+
+// MultimodalConfig 控制 user 多模态输入（content_parts 图片）与 read_image vision 注入。
+type MultimodalConfig struct {
+	// Enabled 为 nil 时默认 false（须显式启用并配合 vision 模型）。
+	Enabled *bool `yaml:"enabled"`
+}
+
+// MultimodalEnabled 是否启用多模态 user 消息与 read_image 工具。
+func (c *Config) MultimodalEnabled() bool {
+	if c == nil || c.Multimodal.Enabled == nil {
+		return false
+	}
+	return *c.Multimodal.Enabled
 }
 
 // UIConfig 控制 Node 内嵌 Web UI（/ui/）是否挂载。
@@ -292,7 +308,7 @@ type ManageA2AConfig struct {
 }
 
 // ManageRegistrationConfig 控制周期性 upsert/心跳参数。
-// Agent Card（name/description/capabilities/metadata）固定从工作目录 ./agent-card.json 读取，不在此重复配置。
+// Agent 身份（name/description/role/capabilities）在 config.yaml 的 agent 块配置。
 type ManageRegistrationConfig struct {
 	BaseURL         string `yaml:"base_url"`
 	IntervalSeconds int    `yaml:"interval_seconds"`
@@ -407,6 +423,7 @@ func (c *Config) ApplyDefaults() {
 	if c.Compression.IdleAutoCompressPollSeconds <= 0 {
 		c.Compression.IdleAutoCompressPollSeconds = 60
 	}
+	c.applyBrowserDefaults()
 }
 
 // IdleAutoCompressEnabled 是否在 session 无动作超过 idle_auto_compress_seconds 后自动压缩。
@@ -465,7 +482,7 @@ func (c *Config) Validate() error {
 	if err := validateToolsEnabledConfig(&c.Tools); err != nil {
 		return err
 	}
-	return nil
+	return validateBrowserConfig(c)
 }
 
 // DiscoveryGroups 返回 YAML groups 字段（**不**用于 Manage 注册；分组由 Manage 分配）。
@@ -524,17 +541,6 @@ func (c *Config) ManageRegistryBaseURLIsLoopback() bool {
 		return ip.IsLoopback()
 	}
 	return false
-}
-
-// ManageA2AEnabled 是否启动 A2A inbox long poll sidecar（须 manage.enabled=true；默认 true）。
-func (c *Config) ManageA2AEnabled() bool {
-	if c == nil || !c.Manage.Enabled {
-		return false
-	}
-	if c.Manage.A2A.Enabled != nil {
-		return *c.Manage.A2A.Enabled
-	}
-	return true
 }
 
 // ManageUpdateEnabled 是否向 Manage Release Hub 查询更新（须 manage.enabled=true；默认 true）。
@@ -642,6 +648,9 @@ func (c *Config) ExternalToolsDir() string {
 // Capabilities 返回对外声明的能力列表。
 func (c *Config) Capabilities() []string {
 	caps := []string{"shell", "filesystem"}
+	if c.MultimodalEnabled() {
+		caps = append(caps, "multimodal")
+	}
 	if c.Triggers.Enabled {
 		caps = append(caps, "triggers")
 	}

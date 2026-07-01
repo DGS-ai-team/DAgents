@@ -6,8 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,17 +31,13 @@ func (s *stubInboxRunner) RunInboxTurn(_ context.Context, _, _ string, _ map[str
 }
 
 func TestEncodeRequiresInputPayload(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "agent-card.json"), []byte(`{"name":"合规助手","metadata":{"role":"compliance"}}`), 0o644); err != nil {
-		t.Fatal(err)
+	cfg := &config.Config{
+		AgentID: "compliance-a",
+		Agent: config.AgentConfig{
+			Name: "合规助手",
+			Role: "compliance",
+		},
 	}
-	oldWD, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWD) })
-
-	cfg := &config.Config{AgentID: "compliance-a"}
 	payload, err := encodeRequiresInputPayload(cfg, InboxTask{
 		TaskID:          "task-enc",
 		FromAgentID:     "node-b",

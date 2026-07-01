@@ -236,8 +236,14 @@ func (s *SQLiteStore) BackdateUpdatedAt(ctx context.Context, sessionID string, a
 
 func firstUserMessage(messages []llm.Message) string {
 	for _, m := range messages {
-		if m.Role == "user" && strings.TrimSpace(m.Content) != "" {
-			return m.Content
+		if m.Role != "user" {
+			continue
+		}
+		if summary := strings.TrimSpace(llm.MessageTextSummary(m)); summary != "" {
+			return summary
+		}
+		if llm.MessageHasImages(m) {
+			return "[image]"
 		}
 	}
 	return ""

@@ -165,6 +165,7 @@ func newRuntimeWithPublisher(
 		logger,
 	)
 	rt.orch.SetHookHostConfig(turnOpts.HookHost)
+	rt.orch.SetMultimodalEnabled(turnOpts.MultimodalEnabled)
 	if len(initialHookStore) > 0 {
 		rt.orch.SetHookStore(initialHookStore)
 	}
@@ -265,8 +266,12 @@ func (r *runtime) applyStepOutcome(history *[]llm.Message, outcome turn.StepOutc
 }
 
 func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope) {
-	content := env.Content
 	userName := llm.NormalizeUserMessageName(env.UserName)
+	userMsg, err := llm.BuildUserMessage(env.Content, env.ContentParts, userName)
+	if err != nil {
+		r.logger.Warn("invalid user message", "session_id", r.session.ID, "error", err)
+		return
+	}
 	r.mu.Lock()
 	if r.pending != nil {
 		pending := r.pending
@@ -282,7 +287,7 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 	r.mu.Unlock()
 
 	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
-		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, content, userName, setState)
+		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, userMsg, setState)
 	})
 	if outcome.Err != nil {
 		r.mu.Lock()

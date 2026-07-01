@@ -31,6 +31,9 @@ func (s stubBashExecutor) StartBackground(context.Context, string, string, strin
 }
 
 func (s stubBashExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
+func (s stubBashExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
+	return nil
+}
 
 func TestExecuteTool_bashHistorySpillsButSSEFull(t *testing.T) {
 	root := t.TempDir()

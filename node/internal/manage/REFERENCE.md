@@ -14,20 +14,19 @@
 
 HTTP Header：`x-dagents-agent-id`（`agent_id`）；`x-dagents-a2a-token` 可选（Token 模式）。
 
-## `agentcard.go`
+## `a2a_profile.go`
 
 | 符号 | 说明 |
 |------|------|
-| `AgentCard` | Agent Card JSON 模型 |
-| `LoadDefaultAgentCard` | 从工作目录 `./agent-card.json` 加载（固定路径） |
-| `LoadAgentCard` | 按路径加载（测试/内部） |
+| `RegistrationCard` | 从 `config.yaml` `agent` 块组装 Manage 注册 card |
+| `LogA2AProfileWarnings` | 启动时校验 `agent.role` 与 inbox 配置 |
 
 ## `compliance_executor.go`
 
 | 符号 | 说明 |
 |------|------|
 | `ComplianceExecutor` | 合规 inbox：ack → `session.RunInboxConsultation`（流式 LLM turn）→ reply |
-| `ResolveInboxHandler` | 按 Agent Card `metadata.role` 选择 handler；需 `*session.Manager` |
+| `ResolveInboxHandler` | 按 `config agent.role` 选择 handler；需 `*session.Manager` |
 
 ## `inbox_poller.go`
 

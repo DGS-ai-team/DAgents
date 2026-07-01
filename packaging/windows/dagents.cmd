@@ -13,6 +13,7 @@ set "CFG=config.yaml"
 if defined DAGENTS_CONFIG set "CFG=%DAGENTS_CONFIG%"
 set "CFG_ABS=%DAGENTS_HOME%\%CFG%"
 set "NODE_PID_FILE=%DAGENTS_HOME%\.runtime\node.pid"
+set "BROWSER_PID_FILE=%DAGENTS_HOME%\.runtime\browser.pid"
 
 if "%~1"=="" goto cli_default_chat
 if /I "%~1"=="help" goto help
@@ -29,6 +30,7 @@ goto cli_exit
 if /I "%~1"=="chat" shift & goto run_cli_chat
 if /I "%~1"=="tui" shift & goto run_client_tui
 if /I "%~1"=="node" shift & goto run_node
+if /I "%~1"=="browser" shift & goto run_browser
 if /I "%~1"=="doctor" goto doctor
 if /I "%~1"=="version" shift & goto version_cmd
 if /I "%~1"=="update" shift & goto update_cmd
@@ -128,6 +130,157 @@ if /I "%~1"=="--no-wait" goto run_node_nowait
 if /I "%~1"=="--background" goto run_node_nowait
 bin\dagents-node.exe -config "%CFG%" %*
 goto cli_exit
+
+:run_browser
+if not exist "bin\dagents-browser.exe" goto missing_browser
+if "%~1"=="" (
+  call :start_browser_default
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="shutdown" (
+  shift
+  call :shutdown_browser
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="stop" (
+  shift
+  call :shutdown_browser
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="--foreground" (
+  shift
+  bin\dagents-browser.exe --config "%CFG%" %*
+  goto cli_exit
+)
+if /I "%~1"=="-f" (
+  shift
+  bin\dagents-browser.exe --config "%CFG%" %*
+  goto cli_exit
+)
+if /I "%~1"=="--no-wait" goto run_browser_nowait
+if /I "%~1"=="--background" goto run_browser_nowait
+bin\dagents-browser.exe --config "%CFG%" %*
+goto cli_exit
+
+:run_browser_nowait
+shift
+call :probe_browser
+if not errorlevel 1 (
+  echo [dagents] browser service already running
+  set "EXIT_CODE=0"
+  goto cli_exit
+)
+call :start_browser_background
+set "EXIT_CODE=!ERRORLEVEL!"
+goto cli_exit
+
+:start_browser_default
+call :probe_browser
+if not errorlevel 1 (
+  echo [dagents] browser service already running
+  exit /b 0
+)
+call :start_browser_background
+if errorlevel 1 exit /b 1
+call :wait_browser_ready
+if errorlevel 1 exit /b 1
+echo [dagents] browser service is ready
+exit /b 0
+
+:start_browser_background
+if not exist "%DAGENTS_HOME%\bin\dagents-browser.exe" exit /b 1
+if not exist "%DAGENTS_HOME%\.runtime\logs" mkdir "%DAGENTS_HOME%\.runtime\logs"
+set "BROWSER_EXE=%DAGENTS_HOME%\bin\dagents-browser.exe"
+set "BROWSER_LOG=%DAGENTS_HOME%\.runtime\logs\browser.log"
+set "BROWSER_ERR=%DAGENTS_HOME%\.runtime\logs\browser.err.log"
+set "BROWSER_START_PS1=%DAGENTS_HOME%\scripts\startup\windows\start-browser-detached.ps1"
+echo [dagents] starting browser service in background (logs: %BROWSER_LOG%)
+if not exist "%BROWSER_START_PS1%" (
+  echo [dagents] missing %BROWSER_START_PS1%
+  exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%BROWSER_START_PS1%" ^
+  -BrowserExe "%BROWSER_EXE%" ^
+  -Config "%CFG%" ^
+  -WorkingDirectory "%DAGENTS_HOME%" ^
+  -LogOut "%BROWSER_LOG%" ^
+  -LogErr "%BROWSER_ERR%" ^
+  -PidFile "%BROWSER_PID_FILE%"
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:clear_browser_pid
+if exist "%BROWSER_PID_FILE%" del /f /q "%BROWSER_PID_FILE%" >nul 2>&1
+exit /b 0
+
+:shutdown_browser
+call :probe_browser
+if errorlevel 1 (
+  call :clear_browser_pid
+  echo [dagents] browser service is not running
+  exit /b 0
+)
+set "BROWSER_PID="
+if exist "%BROWSER_PID_FILE%" set /p BROWSER_PID=<"%BROWSER_PID_FILE%"
+if defined BROWSER_PID (
+  call :stop_browser_process !BROWSER_PID!
+) else (
+  call :find_and_stop_browser_pids
+)
+call :clear_browser_pid
+call :probe_browser
+if not errorlevel 1 (
+  echo [dagents] browser service still responds after shutdown; check .runtime\logs\browser.err.log
+  exit /b 1
+)
+echo [dagents] browser service stopped
+exit /b 0
+
+:stop_browser_process
+set "TARGET_PID=%~1"
+if not defined TARGET_PID exit /b 0
+tasklist /FI "PID eq %TARGET_PID%" 2>nul | find /I "%TARGET_PID%" >nul
+if errorlevel 1 exit /b 0
+echo [dagents] stopping browser service (pid=%TARGET_PID%)
+taskkill /PID %TARGET_PID% /T >nul 2>&1
+set /a STOP_WAIT=0
+:stop_browser_wait
+tasklist /FI "PID eq %TARGET_PID%" 2>nul | find /I "%TARGET_PID%" >nul
+if errorlevel 1 exit /b 0
+timeout /t 1 /nobreak >nul 2>nul
+if errorlevel 1 ping -n 2 127.0.0.1 >nul
+set /a STOP_WAIT+=1
+if !STOP_WAIT! lss 15 goto stop_browser_wait
+taskkill /PID %TARGET_PID% /T /F >nul 2>&1
+exit /b 0
+
+:find_and_stop_browser_pids
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$home='!DAGENTS_HOME!'; $cfg='!CFG!'; $cfgAbs='!CFG_ABS!'; Get-CimInstance Win32_Process -Filter 'Name=\"dagents-browser.exe\"' | Where-Object { $cl=$_.CommandLine; ($cl -like \"*$cfgAbs*\") -or ($cl -like \"*--config* $cfg*\") -or ($cl -like \"*--config `\"$cfg`\"*\") -or ($cl -like \"*$($home)\bin\dagents-browser.exe*\") } | ForEach-Object { Write-Host ('[dagents] stopping browser service (pid=' + $_.ProcessId + ')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+exit /b 0
+
+:wait_browser_ready
+set /a BROWSER_WAIT=0
+:wait_browser_ready_loop
+call :probe_browser
+if not errorlevel 1 exit /b 0
+timeout /t 1 /nobreak >nul 2>nul
+if errorlevel 1 ping -n 2 127.0.0.1 >nul
+set /a BROWSER_WAIT+=1
+if !BROWSER_WAIT! lss 30 goto wait_browser_ready_loop
+echo [dagents] browser service did not become ready within 30s
+if exist "%DAGENTS_HOME%\.runtime\logs\browser.err.log" (
+  echo [dagents] -------- browser.err.log --------
+  type "%DAGENTS_HOME%\.runtime\logs\browser.err.log"
+  echo [dagents] ---------------------------
+)
+exit /b 1
+
+:probe_browser
+powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:18766/health).StatusCode | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+exit /b %ERRORLEVEL%
 
 :run_node_nowait
 shift
@@ -307,6 +460,11 @@ echo [dagents] bin\dagents-node.exe was not found in "%DAGENTS_HOME%"
 popd >nul
 exit /b 1
 
+:missing_browser
+echo [dagents] bin\dagents-browser.exe was not found in "%DAGENTS_HOME%"
+popd >nul
+exit /b 1
+
 :cli_exit
 set "EXIT_CODE=%ERRORLEVEL%"
 popd >nul
@@ -315,7 +473,7 @@ exit /b %EXIT_CODE%
 :doctor
 echo DAgents installation: %DAGENTS_HOME%
 set "OK=1"
-for %%F in (bin\dagents-node.exe bin\dagents-client.exe bin\dagents-cli.exe) do (
+for %%F in (bin\dagents-node.exe bin\dagents-client.exe bin\dagents-cli.exe bin\dagents-browser.exe) do (
   if exist "%%F" (echo [ok] %%F) else (echo [missing] %%F & set "OK=0")
 )
 if exist "config.yaml" (echo [ok] config.yaml) else (echo [info] config.yaml not found; copy config.example.yaml config.yaml)
@@ -441,6 +599,9 @@ echo   dagents node shutdown           Stop background Node
 echo   dagents node restart            Stop then start Node in background
 echo   dagents node --foreground       Start Node in foreground (blocks terminal)
 echo   dagents node --no-wait          Background start without waiting for probe
+echo   dagents browser                 Start browser-use service in background (browser.enabled)
+echo   dagents browser stop            Stop browser-use service
+echo   dagents browser --foreground    Run browser service in foreground
 echo   dagents doctor                  Check installed files
 echo   dagents version                 Print version information
 echo   dagents version --check         Check for updates (via Manage Release Hub)

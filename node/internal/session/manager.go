@@ -46,6 +46,7 @@ type TurnOptions struct {
 	ToolResult               hooks.ToolResultConfig
 	PluginHooks              hooks.PluginsConfig
 	HookHost                 turn.HookHostConfig
+	MultimodalEnabled        bool
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。
@@ -406,9 +407,11 @@ func (m *Manager) Delete(sessionID string) (bool, error) {
 
 // EnqueueMessage 将 message/resume 入队；resume 优先直投等待中的 turn。
 // userMessageName 仅对 request_type=message 生效；空串规范为 llm.UserNameHuman。
+// contentParts 非空时与 content 合并为多模态 user 消息（image_url + text）。
 func (m *Manager) EnqueueMessage(
 	_ context.Context,
 	sessionID, requestType, content string,
+	contentParts []llm.ContentPart,
 	resumeValue map[string]any,
 	userMessageName string,
 ) (priority string, err error) {
@@ -468,15 +471,19 @@ func (m *Manager) EnqueueMessage(
 		return "", err
 	}
 	if requestType == "message" {
-		if strings.TrimSpace(content) == "" {
+		if !llm.UserInputValid(content, contentParts) {
 			return "", fmt.Errorf("invalid_message")
+		}
+		if !m.turn.MultimodalEnabled && llm.UserInputHasImages(content, contentParts) {
+			return "", fmt.Errorf("multimodal_disabled")
 		}
 	}
 	env := queue.Envelope{
-		RequestType: requestType,
-		Content:     content,
-		UserName:    userMessageName,
-		ResumeValue: resumeValue,
+		RequestType:  requestType,
+		Content:      content,
+		ContentParts: contentParts,
+		UserName:     userMessageName,
+		ResumeValue:  resumeValue,
 	}
 	if err := rt.enqueue(env, p); err != nil {
 		return "", err

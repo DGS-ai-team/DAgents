@@ -204,6 +204,7 @@ func TestManageRegistryBaseURL_prefersRegistrationOverride(t *testing.T) {
 
 func TestManageA2AConfigDefaults(t *testing.T) {
 	cfg := &Config{
+		Agent: AgentConfig{Role: "compliance"},
 		Manage: ManageConfig{
 			Enabled: true,
 			Registration: ManageRegistrationConfig{
@@ -213,8 +214,13 @@ func TestManageA2AConfigDefaults(t *testing.T) {
 	}
 	cfg.ApplyDefaults()
 	if !cfg.ManageA2AEnabled() {
-		t.Fatal("expected default a2a enabled")
+		t.Fatal("expected default a2a enabled for compliance role")
 	}
+	cfg.Agent.Role = "ops"
+	if cfg.ManageA2AEnabled() {
+		t.Fatal("expected default a2a disabled for ops role")
+	}
+	cfg.Agent.Role = "compliance"
 	if cfg.ManageA2AInboxWait() != 25*time.Second {
 		t.Fatalf("wait=%s", cfg.ManageA2AInboxWait())
 	}
@@ -225,5 +231,38 @@ func TestManageA2AConfigDefaults(t *testing.T) {
 	cfg.Manage.A2A.Enabled = &disabled
 	if cfg.ManageA2AEnabled() {
 		t.Fatal("expected explicit disable")
+	}
+}
+
+func TestMultimodalEnabled_defaultFalse(t *testing.T) {
+	path, _ := testConfigPath(t, "agent_id: test-agent\n")
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if cfg.MultimodalEnabled() {
+		t.Fatal("expected default multimodal disabled")
+	}
+}
+
+func TestMultimodalEnabled_explicitTrue(t *testing.T) {
+	path, _ := testConfigPath(t, "agent_id: test-agent\nmultimodal:\n  enabled: true\n")
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if !cfg.MultimodalEnabled() {
+		t.Fatal("expected multimodal enabled")
+	}
+	caps := cfg.Capabilities()
+	found := false
+	for _, c := range caps {
+		if c == "multimodal" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("capabilities = %v, want multimodal", caps)
 	}
 }

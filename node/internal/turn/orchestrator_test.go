@@ -62,7 +62,7 @@ func runMessageTurnInline(
 	if setState == nil {
 		setState = func(State) {}
 	}
-	outcome := orch.RunHumanMessageTurn(ctx, sessionID, history, userText, llm.UserNameHuman, setState)
+	outcome := orch.RunHumanMessageTurn(ctx, sessionID, history, llm.UserMessage(userText, llm.UserNameHuman), setState)
 	if outcome.Err != nil {
 		return outcome.Pending, outcome.LoopCount, outcome.Err
 	}

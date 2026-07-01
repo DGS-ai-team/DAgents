@@ -42,7 +42,7 @@ func applyCompressionReplacement(
 		if sourceFingerprint != "" && sourceFingerprint != current {
 			return nil, "stale"
 		}
-		replacement := llm.UserMessage(mergeSummaryWithUser(summary, messages[plan.End+1].Content), llm.UserNameCompression)
+		replacement := llm.UserMessage(mergeSummaryWithUser(summary, llm.MessageTextSummary(messages[plan.End+1])), llm.UserNameCompression)
 		merged = append(append([]llm.Message(nil), messages[:start]...), replacement)
 		merged = append(merged, messages[plan.End+2:]...)
 		return merged, "applied"

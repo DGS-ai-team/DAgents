@@ -71,11 +71,12 @@ export function getSessionContext(sessionId) {
   return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/context`);
 }
 
-export function submitMessage(sessionId, content) {
-  return apiFetch("/v1/messages", {
-    method: "POST",
-    body: { session_id: sessionId, request_type: "message", content },
-  });
+export function submitMessage(sessionId, content, contentParts = null) {
+  const body = { session_id: sessionId, request_type: "message", content: content || "" };
+  if (Array.isArray(contentParts) && contentParts.length) {
+    body.content_parts = contentParts;
+  }
+  return apiFetch("/v1/messages", { method: "POST", body });
 }
 
 export function submitResume(sessionId, resumeValue) {

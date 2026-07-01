@@ -2,6 +2,20 @@ package tools
 
 import "strings"
 
+// SetMultimodalEnabled 控制 read_image、browser 视觉模式与 vision 载荷暂存；默认 false。
+func (r *Registry) SetMultimodalEnabled(enabled bool) {
+	if r == nil {
+		return
+	}
+	r.multimodalEnabled = enabled
+	r.registerBrowserTools()
+}
+
+// MultimodalEnabled 是否已启用多模态工具能力。
+func (r *Registry) MultimodalEnabled() bool {
+	return r != nil && r.multimodalEnabled
+}
+
 // SetBuiltinEnabled 设置 LLM 可见/可调用的内置工具允许列表；names 为空表示全部启用。
 func (r *Registry) SetBuiltinEnabled(names []string) error {
 	if r == nil {
@@ -60,6 +74,7 @@ func (r *Registry) filterToolDefs(defs []ToolDef) []ToolDef {
 // knownBuiltinTools 与 shared/config/builtin_tools.go 保持一致。
 var knownBuiltinTools = map[string]struct{}{
 	"read_file":              {},
+	"read_image":             {},
 	"write_file":             {},
 	"glob_files":             {},
 	"grep_file":              {},
@@ -83,6 +98,29 @@ var knownBuiltinTools = map[string]struct{}{
 	"wait_temporary_agents":  {},
 	"temporary_agent_status": {},
 	"cancel_temporary_agent": {},
+	"browser_start":          {},
+	"browser_stop":           {},
+	"browser_navigate":       {},
+	"browser_click":          {},
+	"browser_click_coordinate": {},
+	"browser_fill":           {},
+	"browser_press":          {},
+	"browser_screenshot":     {},
+	"browser_wait":           {},
+	"browser_snapshot":         {},
+	"browser_search":           {},
+	"browser_go_back":          {},
+	"browser_scroll":           {},
+	"browser_find_text":        {},
+	"browser_switch_tab":       {},
+	"browser_close_tab":        {},
+	"browser_extract":          {},
+	"browser_evaluate":         {},
+	"browser_find_elements":    {},
+	"browser_search_page":      {},
+	"browser_upload_file":      {},
+	"browser_dropdown_options": {},
+	"browser_select_dropdown":  {},
 }
 
 func unknownBuiltinToolError(name string) error {

@@ -23,9 +23,11 @@ import (
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
-		AgentID:       "ops-linux-01",
-		ExposeToPeers: true,
-		FSRoot:        t.TempDir(),
+		AgentID: "ops-linux-01",
+		Agent: config.AgentConfig{
+			Role: "compliance",
+		},
+		FSRoot: t.TempDir(),
 	}
 	cfg.ApplyDefaults()
 	return cfg

@@ -7,14 +7,17 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-// Message 为 OpenAI chat message（支持 tool call / tool result / reasoning）。
+// Message 为 OpenAI chat message（支持 tool call / tool result / reasoning / 多模态 user）。
+//
+// 纯文本时仅使用 Content；多模态 user 消息使用 ContentParts，Content 为 text part 摘要。
 type Message struct {
-	Role             string     `json:"role"`
-	Content          string     `json:"content,omitempty"`
-	ReasoningContent string     `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string     `json:"tool_call_id,omitempty"`
-	Name             string     `json:"name,omitempty"`
+	Role             string        `json:"role"`
+	Content          string        `json:"content,omitempty"`
+	ContentParts     []ContentPart `json:"content_parts,omitempty"`
+	ReasoningContent string        `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID       string        `json:"tool_call_id,omitempty"`
+	Name             string        `json:"name,omitempty"`
 }
 
 // ToolCall 为 assistant 消息中的 tool_calls 项。

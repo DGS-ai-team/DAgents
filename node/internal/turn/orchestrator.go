@@ -70,6 +70,8 @@ type Orchestrator struct {
 
 	enqueueToolResult   func(sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
+
+	multimodalEnabled bool
 }
 
 // SetHookHostConfig 注入 Host 路径与配额配置。
@@ -88,6 +90,14 @@ func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
 // SetSystemPromptBuilder 注入 system prompt 构造器；nil 时使用默认 BuildSystemPrompt。
 func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
+}
+
+// SetMultimodalEnabled 控制 read_image 后的 vision user 消息注入。
+func (o *Orchestrator) SetMultimodalEnabled(enabled bool) {
+	if o == nil {
+		return
+	}
+	o.multimodalEnabled = enabled
 }
 
 // SetChildAgentManager 注入临时 Agent 管理器（仅父 session 调用）。
@@ -121,22 +131,30 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	ctx context.Context,
 	sessionID string,
 	history *[]llm.Message,
-	userText string,
-	userName string,
+	userMsg llm.Message,
 	setState StateSetter,
 ) StepOutcome {
 	if setState == nil {
 		setState = func(State) {}
 	}
-	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.NormalizeUserMessageName(userName)))
-	o.runMessageEnqueuedPhase(ctx, sessionID, history, userText, map[string]any{"source": userName})
+	if userMsg.Role == "" {
+		userMsg.Role = "user"
+	}
+	o.appendHistory(sessionID, history, userMsg)
+	summary := llm.MessageTextSummary(userMsg)
+	o.runMessageEnqueuedPhase(ctx, sessionID, history, summary, map[string]any{
+		"source":       userMsg.Name,
+		"has_images":   llm.MessageHasImages(userMsg),
+		"content_len":  len(summary),
+	})
 	o.resetTurnUsage(sessionID)
 	o.resetContextMetrics(sessionID)
 	o.resetHookHostLLMQuota()
 	o.logger.Info("turn human message start",
 		"session_id", sessionID,
-		"content_len", len(userText),
-		"user_name", llm.NormalizeUserMessageName(userName),
+		"content_len", len(summary),
+		"has_images", llm.MessageHasImages(userMsg),
+		"user_name", llm.NormalizeUserMessageName(userMsg.Name),
 	)
 	return o.runOneStep(ctx, sessionID, history, setState, 0)
 }

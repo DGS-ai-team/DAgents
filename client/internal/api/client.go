@@ -483,10 +483,31 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 }
 
 func (c *Client) SubmitMessage(ctx context.Context, sessionID, content string) error {
+	return c.SubmitUserMessage(ctx, sessionID, content, nil)
+}
+
+// ContentPart 为 POST /v1/messages 多模态 content_parts 项。
+type ContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *ImageURLPart `json:"image_url,omitempty"`
+}
+
+// ImageURLPart 为 image_url 载荷。
+type ImageURLPart struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// SubmitUserMessage 调用 POST /v1/messages；contentParts 非空时发送多模态 user 消息。
+func (c *Client) SubmitUserMessage(ctx context.Context, sessionID, content string, contentParts []ContentPart) error {
 	body := map[string]any{
 		"session_id":   sessionID,
 		"request_type": "message",
 		"content":      content,
+	}
+	if len(contentParts) > 0 {
+		body["content_parts"] = contentParts
 	}
 	var resp struct {
 		Accepted bool `json:"accepted"`

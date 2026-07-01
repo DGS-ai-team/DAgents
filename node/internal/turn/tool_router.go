@@ -260,17 +260,31 @@ func (o *Orchestrator) executeAutoBatch(
 		return err
 	}
 	for _, item := range results {
-		forClient, forHistory, spillPath := o.splitToolResult(sessionID, item.tc, item.content)
-		o.publishToolResult(sessionID, item.tc, forClient, item.rejected, item.extra)
-		o.recordToolResult(sessionID, item.tc.Function.Name, item.tc.Function.Arguments, forHistory, spillPath, item.rejected)
-		o.recordToolExecutionSuccess(item.tc, forClient, item.rejected)
-		o.appendHistory(sessionID, history, llm.Message{
-			Role:       "tool",
-			ToolCallID: item.tc.ID,
-			Content:    forHistory,
-		})
+		o.commitToolResult(sessionID, history, item.tc, item.content, item.rejected, item.extra)
 	}
 	return nil
+}
+
+func (o *Orchestrator) commitToolResult(
+	sessionID string,
+	history *[]llm.Message,
+	tc llm.ToolCall,
+	content string,
+	rejected bool,
+	extra map[string]any,
+) {
+	forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
+	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
+	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, rejected)
+	o.recordToolExecutionSuccess(tc, forClient, rejected)
+	o.appendHistory(sessionID, history, llm.Message{
+		Role:       "tool",
+		ToolCallID: tc.ID,
+		Content:    forHistory,
+	})
+	if !rejected {
+		o.maybeAppendToolVisionUserMessage(sessionID, history, tc)
+	}
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any) {
@@ -306,11 +320,7 @@ func (o *Orchestrator) executeTool(
 ) error {
 	o.recordToolCall(sessionID, tc.Function.Name)
 	content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
-	forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
-	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
-	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, rejected)
-	o.recordToolExecutionSuccess(tc, forClient, rejected)
-	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: forHistory})
+	o.commitToolResult(sessionID, history, tc, content, rejected, extra)
 	return nil
 }
 

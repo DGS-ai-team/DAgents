@@ -181,12 +181,6 @@ install_files() {
   if [[ -f "${SOURCE}/config.example.yaml" ]]; then
     install -m 0644 "${SOURCE}/config.example.yaml" "${PREFIX}/config.example.yaml"
   fi
-  if [[ -f "${SOURCE}/agent-card.example.json" ]]; then
-    install -m 0644 "${SOURCE}/agent-card.example.json" "${PREFIX}/agent-card.example.json"
-  fi
-  if [[ -f "${SOURCE}/agent-card.example.ops.json" ]]; then
-    install -m 0644 "${SOURCE}/agent-card.example.ops.json" "${PREFIX}/agent-card.example.ops.json"
-  fi
   if [[ -f "${SOURCE}/.env.example" ]]; then
     install -m 0644 "${SOURCE}/.env.example" "${PREFIX}/.env.example"
   fi

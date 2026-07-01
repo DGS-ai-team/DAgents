@@ -42,7 +42,7 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**
 | **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`、`agent-card.example.json`） |
 | **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等；**`RECOMMENDED_CLI_TOOLS.md`** 推荐第三方 CLI） |
 | **`linux/`** | Linux **`dagents`** 启动脚本 + **`install.sh`**（打入 tar.gz 根目录） |
-| **`windows/`** | Inno Setup 安装包（`dagents-installer.iss` + `dagents.cmd`；Release Windows 矩阵构建 `.exe`） |
+| **`windows/`** | Inno Setup 安装包（`dagents-installer.iss` + 分步配置向导 + `write-install-config.ps1`） |
 | **`manage/`** | **Manage 控制面 Docker 镜像**（Registry + A2A + Console；见 [`manage/README.md`](manage/README.md)） |
 | **`OFFLINE_INSTALL.md`** | 源码离线安装（开发/调试） |
 

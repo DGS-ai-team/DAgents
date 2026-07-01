@@ -15,8 +15,11 @@ func TestPlanSingleSideEffectApply_emptyHistoryBridge(t *testing.T) {
 
 	built := orch.BuildSideEffectMessages(SideEffectExternalMessage, "sess-1", nil, queue.AsyncToolResultPayload{}, "hello inbox", llm.UserNameA2AInbox)
 	plan := PlanSingleSideEffectApply(nil, built)
-	if len(plan.Messages) != 3 {
-		t.Fatalf("messages = %d, want 3 (user+assistant+tool)", len(plan.Messages))
+	if len(plan.Messages) != 1 {
+		t.Fatalf("messages = %d, want 1 (bridge user only)", len(plan.Messages))
+	}
+	if plan.Messages[0].Role != "user" {
+		t.Fatalf("bridge message role = %q", plan.Messages[0].Role)
 	}
 	if !plan.Continue || plan.Mode != "empty_history_bridge" {
 		t.Fatalf("plan = %+v", plan)

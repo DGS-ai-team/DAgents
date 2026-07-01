@@ -68,7 +68,7 @@ func (m *Manager) RunInboxTurn(ctx context.Context, taskID, content string, resu
 		if m.getRuntime(sessionID) == nil {
 			return InboxTurnResult{}, fmt.Errorf("inbox session %q not found", sessionID)
 		}
-		if _, err := m.EnqueueMessage(ctx, sessionID, "resume", "", resume, ""); err != nil {
+		if _, err := m.EnqueueMessage(ctx, sessionID, "resume", "", nil, resume, ""); err != nil {
 			return InboxTurnResult{}, err
 		}
 	default:

@@ -48,13 +48,12 @@ func writeComplianceFixtures(t *testing.T) (*config.Config, *session.Manager) {
 	if err := os.WriteFile(filepath.Join(promptDir, "custom.md"), []byte(sampleComplianceCustom), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cardPath := filepath.Join(dir, "agent-card.json")
-	if err := os.WriteFile(cardPath, []byte(`{"metadata":{"role":"compliance"}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	cfg := &config.Config{
 		AgentID: "compliance-a",
-		FSRoot:  dir,
+		Agent: config.AgentConfig{
+			Role: "compliance",
+		},
+		FSRoot: dir,
 		Manage: config.ManageConfig{
 			Enabled: true,
 		},

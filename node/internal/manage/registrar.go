@@ -176,7 +176,7 @@ func (r *Registrar) heartbeat(ctx context.Context) error {
 		TTLSeconds:    r.ttlSeconds,
 		Version:       version.Version,
 		Tools:         r.collectTools(),
-		ExposeToPeers: boolPtr(r.cfg.ExposeToPeers),
+		ExposeToPeers: boolPtr(r.cfg.ExposeToPeersEffective()),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -247,20 +247,10 @@ func (r *Registrar) registryURL(path string) string {
 }
 
 func (r *Registrar) buildRegisterPayload() registerPayload {
-	card, _ := LoadDefaultAgentCard()
-	name := r.cfg.AgentID
-	description := ""
-	if card != nil {
-		if n := strings.TrimSpace(card.Name); n != "" {
-			name = n
-		}
-		description = strings.TrimSpace(card.Description)
-	}
+	name := r.cfg.AgentDisplayName()
+	description := r.cfg.AgentDescription()
 	host := hostsnapshot.Get()
-	caps := r.cfg.Capabilities()
-	if card != nil && len(card.Capabilities) > 0 {
-		caps = append([]string(nil), card.Capabilities...)
-	}
+	caps := r.cfg.RegistrationCapabilities()
 	return registerPayload{
 		AgentID:          r.cfg.AgentID,
 		BaseURL:          r.cfg.ManageRegistryBaseURL(),
@@ -272,8 +262,8 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 		Description:      description,
 		Team:             strings.TrimSpace(r.cfg.Manage.Registration.Team),
 		Version:          version.Version,
-		ExposeToPeers:    r.cfg.ExposeToPeers,
-		Card:             card.asMap(),
+		ExposeToPeers:    r.cfg.ExposeToPeersEffective(),
+		Card:             RegistrationCard(r.cfg),
 		Metadata: map[string]any{
 			"node_version": version.Version,
 			"host_info": map[string]any{

@@ -154,7 +154,7 @@ func TestIdleAutoCompressClearsMarkOnUserMessage(t *testing.T) {
 	rt.mu.Unlock()
 	rt.persist(context.Background())
 
-	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "message", "hello", nil, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, "message", "hello", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(3 * time.Second)

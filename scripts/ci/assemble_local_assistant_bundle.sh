@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# 将已编译的 dagents-node + dagents-client + dagents-cli
+# 将已编译的 dagents-node + dagents-client + dagents-cli + dagents-browser
 # 与配置、.runtime、scripts/ 组装为发布目录并压缩。
 #
 # 用法：
 #   PLATFORM=linux-amd64 VERSION=0.2.2 scripts/ci/assemble_local_assistant_bundle.sh
 #   PLATFORM=windows-amd64 VERSION=0.2.2 scripts/ci/assemble_local_assistant_bundle.sh
+#   SKIP_BROWSER=1 ...   # 跳过 dagents-browser（本地调试无 PyInstaller 产物时）
 #
-# 前置：dist/dagents-node[.exe]、dist/dagents-cli[.exe] 已存在（或由 NODE_BIN/CLI_BIN 指定）。
+# 前置：dist/dagents-node[.exe]、dist/dagents-cli[.exe]、dist/dagents-browser[.exe] 已存在。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +24,7 @@ fi
 NODE_BIN="${NODE_BIN:-${REPO_ROOT}/dist/dagents-node${EXE}}"
 CLIENT_BIN="${CLIENT_BIN:-${REPO_ROOT}/dist/dagents-client${EXE}}"
 CLI_BIN="${CLI_BIN:-${REPO_ROOT}/dist/dagents-cli${EXE}}"
+BROWSER_BIN="${BROWSER_BIN:-${REPO_ROOT}/dist/dagents-browser${EXE}}"
 
 if [[ ! -f "${NODE_BIN}" ]]; then
   echo "[assemble] missing node binary: ${NODE_BIN}" >&2
@@ -36,6 +38,14 @@ if [[ ! -f "${CLI_BIN}" ]]; then
   echo "[assemble] missing cli binary: ${CLI_BIN}" >&2
   exit 1
 fi
+if [[ ! -f "${BROWSER_BIN}" ]]; then
+  if [[ "${SKIP_BROWSER:-}" == "1" ]]; then
+    echo "[assemble] SKIP_BROWSER=1: omitting dagents-browser"
+  else
+    echo "[assemble] missing browser binary: ${BROWSER_BIN} (run build_dagents_browser.sh or set SKIP_BROWSER=1)" >&2
+    exit 1
+  fi
+fi
 
 BUNDLE_NAME="dagents-local-assistant-${PLATFORM}"
 BUNDLE_DIR="${REPO_ROOT}/dist/${BUNDLE_NAME}"
@@ -47,15 +57,12 @@ mkdir -p "${BUNDLE_DIR}/bin" "${BUNDLE_DIR}/.runtime"
 install -m 0755 "${NODE_BIN}" "${BUNDLE_DIR}/bin/dagents-node${EXE}"
 install -m 0755 "${CLIENT_BIN}" "${BUNDLE_DIR}/bin/dagents-client${EXE}"
 install -m 0755 "${CLI_BIN}" "${BUNDLE_DIR}/bin/dagents-cli${EXE}"
+if [[ -f "${BROWSER_BIN}" ]]; then
+  install -m 0755 "${BROWSER_BIN}" "${BUNDLE_DIR}/bin/dagents-browser${EXE}"
+fi
 
 if [[ -f "${REPO_ROOT}/packaging/agent-client/config.example.yaml" ]]; then
   cp "${REPO_ROOT}/packaging/agent-client/config.example.yaml" "${BUNDLE_DIR}/config.example.yaml"
-fi
-if [[ -f "${REPO_ROOT}/packaging/agent-client/agent-card.example.json" ]]; then
-  cp "${REPO_ROOT}/packaging/agent-client/agent-card.example.json" "${BUNDLE_DIR}/agent-card.example.json"
-fi
-if [[ -f "${REPO_ROOT}/packaging/agent-client/agent-card.example.ops.json" ]]; then
-  cp "${REPO_ROOT}/packaging/agent-client/agent-card.example.ops.json" "${BUNDLE_DIR}/agent-card.example.ops.json"
 fi
 if [[ -f "${REPO_ROOT}/.env.example" ]]; then
   cp "${REPO_ROOT}/.env.example" "${BUNDLE_DIR}/.env.example"
@@ -88,32 +95,35 @@ fi
 
 if [[ "${PLATFORM}" == windows-* ]]; then
   install -m 0644 "${REPO_ROOT}/packaging/windows/dagents.cmd" "${BUNDLE_DIR}/dagents.cmd"
+  install -m 0644 "${REPO_ROOT}/packaging/windows/write-install-config.ps1" "${BUNDLE_DIR}/scripts/windows/write-install-config.ps1"
 fi
 
 if [[ "${PLATFORM}" == windows-* ]]; then
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
 DAgents Local Assistant (Go Node + dual TUI)
 
-1. copy config.example.yaml to config.yaml and edit llm / agent_id
-   copy agent-card.example.json agent-card.json          (Manage/A2A callee)
-   copy agent-card.example.ops.json agent-card.json      (ops caller only)
+1. copy config.example.yaml to config.yaml and edit llm / agent_id / agent.role (Manage A2A)
 2. Start Node:
      dagents node --background          (recommended; logs in .runtime\logs\node.log)
      dagents node                       (foreground)
      bin\dagents-node.exe -config config.yaml
      scripts\startup\windows\start-node.bat
-3. Browser Web UI (embedded in dagents-node; no separate UI installer):
+3. Browser 工具（config 中 browser.enabled: true 时）：
+     dagents browser --background          (推荐；日志 .runtime\logs\browser.log)
+     dagents browser stop
+     bin\dagents-browser.exe --config config.yaml
+4. Browser Web UI (embedded in dagents-node; no separate UI installer):
      http://127.0.0.1:<listen.port>/ui/   (default 18765; ui.enabled defaults to true)
 
 Install Node as SYSTEM startup task (admin CMD):
   scripts\windows\install_node_service.cmd install config.yaml
 
 TUI（pick one; --withnode auto-starts Node if not running):
-3a. dagents chat --withnode
+5a. dagents chat --withnode
     Python Textual TUI (rich UI, recommended on modern terminals)
-3b. dagents tui --withnode
+5b. dagents tui --withnode
     Go bubbletea full-screen TUI (default; child agents, /children, etc.)
-3c. dagents tui --withnode --plain
+5c. dagents tui --withnode --plain
     Go line-mode REPL (legacy SSH / dumb terminal)
 
 Optional third-party CLIs (not bundled; see .runtime/RECOMMENDED_CLI_TOOLS.md):
@@ -134,14 +144,16 @@ else
 DAgents Local Assistant（Go Node + 双 TUI）
 
 便携使用：
-1. cp config.example.yaml config.yaml && 编辑 llm / agent_id
-   cp agent-card.example.json agent-card.json            # Manage/A2A 被调方
-   cp agent-card.example.ops.json agent-card.json        # 纯调用方（ops）
+1. cp config.example.yaml config.yaml && 编辑 llm / agent_id / agent.role（Manage A2A）
 2. 启动 Node：
      ./dagents node --background    （推荐；日志 .runtime/logs/node.log）
      ./dagents node                 （前台）
      ./scripts/startup/linux/start-node.sh
-3. 浏览器 Web UI（内嵌于 dagents-node，无需单独安装）：
+3. Browser 工具（config 中 browser.enabled: true 时）：
+     ./dagents browser --background    （推荐；日志 .runtime/logs/browser.log）
+     ./dagents browser stop
+     ./bin/dagents-browser --config config.yaml
+4. 浏览器 Web UI（内嵌于 dagents-node，无需单独安装）：
      http://127.0.0.1:<listen.port>/ui/   （默认 18765；config 中 ui.enabled 默认 true）
 
 安装到固定目录（推荐）：

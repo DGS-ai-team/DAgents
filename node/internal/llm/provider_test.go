@@ -97,14 +97,24 @@ func TestDeepSeekAdapter_marshalChatRequestMessages_omitsReasoningWithoutToolCal
 	}
 }
 
-func TestOpenAIAdapter_marshalChatRequestMessages_usesDefaultEncoding(t *testing.T) {
+func TestOpenAIAdapter_marshalChatRequestMessages_serializesMultimodal(t *testing.T) {
 	adapter := openAIAdapter{}
-	payloads, ok, err := adapter.MarshalChatRequestMessages([]Message{{Role: "user", Content: "hi"}})
+	msg, err := BuildUserMessage("look", []ContentPart{{
+		Type:     "image_url",
+		ImageURL: &ImageURLPart{URL: "https://example.com/a.png"},
+	}}, "")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("BuildUserMessage: %v", err)
 	}
-	if ok || payloads != nil {
-		t.Fatalf("ok=%v payloads=%v, want default encoding", ok, payloads)
+	payloads, ok, err := adapter.MarshalChatRequestMessages([]Message{msg})
+	if err != nil || !ok {
+		t.Fatalf("MarshalChatRequestMessages ok=%v err=%v", ok, err)
+	}
+	if len(payloads) != 1 {
+		t.Fatalf("payloads = %d", len(payloads))
+	}
+	if _, isArr := payloads[0]["content"].([]map[string]any); !isArr {
+		t.Fatalf("content = %#v", payloads[0]["content"])
 	}
 }
 

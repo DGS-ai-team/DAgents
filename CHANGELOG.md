@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-07-01
+
+**Browser 模式 A 与发布打包**：browser-use 薄服务 `dagents-browser`、Go `browser_*` 工具组、多模态视觉；Agent 身份迁入 `config.yaml`；Windows 安装向导与 PyInstaller CI。
+
+### 新增
+
+- **Browser 模式 A（browser-use 薄服务）**：Python `browser-service/`（`dagents_browser`）驱动本机 Chrome；Go `BrowserManager` + 23 个 `browser_*` 工具（navigate/click/fill/snapshot/extract 等）；设计见 `docs/design/browser-remote-service-mode-a.md`。
+- **PyInstaller `dagents-browser`**：CI / 本地打包脚本 `scripts/ci/build_dagents_browser.sh`；Release workflow 与 `dagents-cli` 并列构建；组装进 `bin/dagents-browser[.exe]`。
+- **多模态 / Vision**：`multimodal.enabled` + `read_image`；开启后 `browser_*` 自动切视觉模式（`browser_snapshot` 截图注入、`browser_click_coordinate`）。
+- **Agent 配置化**：`agent.name` / `description` / `role` / `capabilities` / `metadata` 写入 `config.yaml`，替代工作目录 `agent-card.json`；Manage 注册与 A2A 行为由 `shared/config` 推导。
+- **Windows 安装向导**：Inno Setup 三批向导（LLM / Manage / 功能开关）、简体中文 UI；`write-install-config.ps1` 按选项生成 `config.yaml`；启用 Browser 时创建 `.runtime/browser/`。
+- **CLI `dagents browser`**：Windows `dagents.cmd` / Linux `dagents` 支持 `browser` / `browser stop` / `--background` 后台启动薄服务。
+- **Web UI**：消息气泡支持 tool 参数/结果折叠展示；工作台样式微调。
+
+### 变更
+
+- **A2A 案例与打包**：`cases/a2a-manage-docker` 改用 `agent:` 块；删除 `agent-card.example*.json` 与 `packaging/agent-client/agent-card.*`；`config.example.yaml` 补充 `browser` / `multimodal` / `ui` / `hooks` 注释块。
+- **Manage 离线包**：`docker-compose` 补充环境变量示例；assemble 脚本路径对齐。
+- **LLM 消息模型**：`ContentPart` 多模态片段；OpenAI provider 透传 image URL / base64。
+
+### 移除
+
+- **`node/internal/manage/agentcard.go`** 及独立 Agent Card 文件路径逻辑；注册 Card 由 config 合成。
+
+（Git **tag**：`v0.5.5`。）
+
 ## [0.5.4] - 2026-06-30
 
 **Manage 案例库与制品分发**：案例关联已发布 Skills/Plugins/External Tools、支持附件；Plugins 包 API；Node `/upload` 斜杠命令；Console 列表页与 A2A 修复。

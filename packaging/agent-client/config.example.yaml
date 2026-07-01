@@ -158,3 +158,18 @@ hooks:
   # host:
   #   max_llm_calls: 2
   #   history_window: 100  # 可选；省略或 ≤0 时不截断 Hook Context history
+# Browser 模式 A：browser-use 薄服务（见 docs/design/browser-remote-service-mode-a.md）
+# browser:
+#   enabled: false
+#   service_url: http://127.0.0.1:18766
+#   headed: true
+#   chrome_path: ""
+#   cdp_url: ""
+#   debug_port: 9222
+#   default_timeout_ms: 30000
+#   output_dir: browser
+#   max_sessions: 1
+#   ignore_https_errors: false
+# 多模态（vision 模型 + read_image；开启后 browser_* 自动切视觉模式）
+# multimodal:
+#   enabled: false

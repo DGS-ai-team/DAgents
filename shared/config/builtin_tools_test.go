@@ -81,7 +81,7 @@ func TestAllToolsAssignedToExactlyOneGroup(t *testing.T) {
 
 func TestBuiltinToolGroupMembers(t *testing.T) {
 	members, ok := BuiltinToolGroupMembers("fs")
-	if !ok || len(members) != 6 {
+	if !ok || len(members) != 7 {
 		t.Fatalf("fs members = %v ok=%v", members, ok)
 	}
 	if _, ok := BuiltinToolGroupMembers("nope"); ok {

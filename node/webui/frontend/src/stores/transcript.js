@@ -54,9 +54,14 @@ export function noteSeq(seq) {
   if (seq > transcriptStore.lastSeq) transcriptStore.lastSeq = seq;
 }
 
-export function addUser(text) {
+export function addUser(text, images = []) {
   abortStreaming();
-  transcriptStore.entries.push({ id: ++idSeq, kind: "user", text });
+  transcriptStore.entries.push({
+    id: ++idSeq,
+    kind: "user",
+    text,
+    images: Array.isArray(images) ? images.filter(Boolean) : [],
+  });
 }
 
 export function addDeferredUser(text, userName = "", sideEffectSeq = 0) {
