@@ -127,7 +127,8 @@ var
 begin
   { 批次 1/3：LLM }
   LLMProviderPage := CreateCustomPage(wpSelectDir,
-    'LLM 配置 (1/3)', '选择大模型 Provider 并填写连接信息。',
+    'LLM 配置 (1/3)',
+    '选择大模型 Provider 并填写连接信息。'#13#10 +
     'API Key 请在安装完成后写入系统环境变量（默认变量名 OPENAI_API_KEY）。');
   TopY := 16;
   with TNewStaticText.Create(LLMProviderPage) do
@@ -163,7 +164,8 @@ begin
 
   { 批次 2/3：Manage }
   ManageEnablePage := CreateCustomPage(LLMDetailPage.ID,
-    'Manage 配置 (2/3)', '是否连接 DAgents Manage 控制台（注册、A2A、Release Hub）。',
+    'Manage 配置 (2/3)',
+    '是否连接 DAgents Manage 控制台（注册、A2A、Release Hub）。'#13#10 +
     '纯本机助手可跳过；企业内网通常启用 Manage。');
   ManageEnableCheck := TNewCheckBox.Create(ManageEnablePage);
   with ManageEnableCheck do
@@ -186,7 +188,8 @@ begin
 
   { 批次 3/3：功能开关 }
   FeaturesPage := CreateCustomPage(ManageDetailPage.ID,
-    '功能开关 (3/3)', '选择要启用的能力与工具组。',
+    '功能开关 (3/3)',
+    '选择要启用的能力与工具组。'#13#10 +
     '浏览器工具需本机已安装 Chrome；发布包已含 dagents-browser.exe（config 中 browser.enabled: true 时用 dagents browser 启动）。');
   TopY := 0;
   FeatureSkills := TNewCheckBox.Create(FeaturesPage);
