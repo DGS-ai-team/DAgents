@@ -5,6 +5,7 @@
 | 文件 | 说明 |
 |------|------|
 | `dagents-installer.iss` | Inno Setup 6 脚本（分步配置向导 + 安装） |
+| `languages/ChineseSimplified.isl` | 简体中文向导文案（CI choco 安装的 Inno 不含此文件，仓库自带） |
 | `dagents.cmd` | 安装目录入口 |
 | `write-install-config.ps1` | 根据向导 JSON 从 `config.example.yaml` 生成 `config.yaml` |
 

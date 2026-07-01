@@ -34,7 +34,7 @@ ShowLanguageDialog=no
 SetupIconFile=compiler:SetupClassicIcon.ico
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
 
 [CustomMessages]
 chinesesimp.WelcomeLabel2=本向导将分三批引导您完成 LLM、Manage 与功能开关配置，并生成 config.yaml。%n%n安装后请在系统环境变量中设置 API Key（如 OPENAI_API_KEY）。
