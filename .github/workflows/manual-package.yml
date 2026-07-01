@@ -138,6 +138,9 @@ jobs:
       - name: Build Python bundles (Windows native PyInstaller)
         if: matrix.cli_build == 'native'
         shell: bash
+        env:
+          CLI_PI_ARGS: ${{ env.CLI_PYINSTALLER_ARGS }}
+          BROWSER_PI_ARGS: ${{ env.BROWSER_PYINSTALLER_ARGS }}
         run: |
           bash scripts/ci/build_dagents_cli.sh
           bash scripts/ci/build_dagents_browser.sh

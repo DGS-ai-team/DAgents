@@ -14,29 +14,10 @@ python -m pip install --upgrade pip
 python -m pip install -r browser-service/requirements.txt pyinstaller
 
 if [[ -z "${BROWSER_PI_ARGS:-}" ]]; then
-  # shellcheck disable=SC2016
-  BROWSER_PI_ARGS='--onefile --name dagents-browser \
-    --paths browser-service \
-    --collect-submodules browser_use \
-    --collect-submodules uvicorn \
-    --collect-submodules fastapi \
-    --collect-submodules pydantic \
-    --hidden-import=dagents_browser \
-    --hidden-import=dagents_browser.main \
-    --hidden-import=dagents_browser.server \
-    --hidden-import=dagents_browser.driver \
-    --hidden-import=dagents_browser.action_runner \
-    --hidden-import=uvicorn.logging \
-    --hidden-import=uvicorn.loops \
-    --hidden-import=uvicorn.loops.auto \
-    --hidden-import=uvicorn.protocols \
-    --hidden-import=uvicorn.protocols.http \
-    --hidden-import=uvicorn.protocols.http.auto \
-    --hidden-import=uvicorn.lifespan \
-    --hidden-import=uvicorn.lifespan.on \
-    browser-service/run_dagents_browser.py'
+  BROWSER_PI_ARGS='--onefile --name dagents-browser --paths browser-service --collect-submodules browser_use --collect-submodules uvicorn --collect-submodules fastapi --collect-submodules pydantic --hidden-import=dagents_browser --hidden-import=dagents_browser.main --hidden-import=dagents_browser.server --hidden-import=dagents_browser.driver --hidden-import=dagents_browser.action_runner --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=uvicorn.lifespan --hidden-import=uvicorn.lifespan.on browser-service/run_dagents_browser.py'
 fi
 
-eval python -m PyInstaller ${BROWSER_PI_ARGS}
+# shellcheck disable=SC2086
+python -m PyInstaller ${BROWSER_PI_ARGS}
 
 echo "[done] ${REPO_ROOT}/dist/dagents-browser*"
