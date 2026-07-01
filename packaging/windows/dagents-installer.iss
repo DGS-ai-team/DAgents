@@ -58,7 +58,7 @@ Name: "{group}\Start Agent Node (foreground)"; Filename: "{app}\dagents.cmd"; Pa
 Name: "{group}\Chat (Textual TUI)"; Filename: "{app}\dagents.cmd"; Parameters: "chat --withnode"; WorkingDir: "{app}"
 Name: "{group}\TUI (Go full-screen)"; Filename: "{app}\dagents.cmd"; Parameters: "tui --withnode"; WorkingDir: "{app}"
 Name: "{group}\REPL (Go line mode)"; Filename: "{app}\dagents.cmd"; Parameters: "tui --withnode --plain"; WorkingDir: "{app}"
-Name: "{group}\打开 Web UI"; Filename: "http://127.0.0.1:18765/ui/"; Flags: shellexec
+Name: "{group}\打开 Web UI"; Filename: "http://127.0.0.1:18765/ui/"
 
 [Registry]
 
