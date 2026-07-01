@@ -1,20 +1,19 @@
-# 根据安装向导 JSON 设置，基于 config.example.yaml 生成 config.yaml（保留注释块）。
+﻿# 根据安装向导 JSON 设置，基于 config.example.yaml 生成 config.yaml（保留注释块）。
+# 须 UTF-8 BOM，供 Windows PowerShell 5.1 正确解析中文。
 param(
     [Parameter(Mandatory = $true)][string]$TemplatePath,
     [Parameter(Mandatory = $true)][string]$OutputPath,
-    [Parameter(Mandatory = $true)][string]$SettingsPath
+    [Parameter(Mandatory = $true)][string]$SettingsPath,
+    [string]$LogPath = (Join-Path $env:TEMP 'dagents-write-install-config.log')
 )
 
 $ErrorActionPreference = 'Stop'
-if (-not (Test-Path -LiteralPath $TemplatePath)) {
-    throw "template not found: $TemplatePath"
-}
-if (-not (Test-Path -LiteralPath $SettingsPath)) {
-    throw "settings not found: $SettingsPath"
-}
 
-$settings = Get-Content -LiteralPath $SettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$content = Get-Content -LiteralPath $TemplatePath -Raw -Encoding UTF8
+function Write-InstallConfigLog {
+    param([string]$Message)
+    $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
+    Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+}
 
 function Set-ScalarLine {
     param([string]$Text, [string]$Pattern, [string]$Replacement)
@@ -25,22 +24,37 @@ function Bool-Yaml([bool]$v) {
     if ($v) { 'true' } else { 'false' }
 }
 
-# --- llm ---
-$llm = $settings.llm
-$content = Set-ScalarLine $content '(?m)^  provider:\s*.*$' "  provider: $($llm.provider)"
-$content = Set-ScalarLine $content '(?m)^  base_url:\s*.*$' "  base_url: $($llm.base_url)"
-$content = Set-ScalarLine $content '(?m)^  model:\s*.*$' "  model: $($llm.model)"
-$content = Set-ScalarLine $content '(?m)^  api_key_env:\s*.*$' "  api_key_env: $($llm.api_key_env)"
-$content = Set-ScalarLine $content '(?m)^  mock:\s*.*$' "  mock: $(Bool-Yaml ([bool]$llm.mock))"
+try {
+    if (-not (Test-Path -LiteralPath $TemplatePath)) {
+        throw "template not found: $TemplatePath"
+    }
+    if (-not (Test-Path -LiteralPath $SettingsPath)) {
+        throw "settings not found: $SettingsPath"
+    }
 
-# --- expose_to_peers ---
-$feat = $settings.features
-$content = Set-ScalarLine $content '(?m)^expose_to_peers:\s*.*$' "expose_to_peers: $(Bool-Yaml ([bool]$feat.expose_to_peers))"
+    Write-InstallConfigLog "TemplatePath=$TemplatePath"
+    Write-InstallConfigLog "OutputPath=$OutputPath"
+    Write-InstallConfigLog "SettingsPath=$SettingsPath"
 
-# --- manage ---
-$mg = $settings.manage
-if ([bool]$mg.enabled) {
-    $manageBlock = @"
+    $settings = Get-Content -LiteralPath $SettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $content = Get-Content -LiteralPath $TemplatePath -Raw -Encoding UTF8
+
+    # --- llm ---
+    $llm = $settings.llm
+    $content = Set-ScalarLine $content '(?m)^  provider:\s*.*$' "  provider: $($llm.provider)"
+    $content = Set-ScalarLine $content '(?m)^  base_url:\s*.*$' "  base_url: $($llm.base_url)"
+    $content = Set-ScalarLine $content '(?m)^  model:\s*.*$' "  model: $($llm.model)"
+    $content = Set-ScalarLine $content '(?m)^  api_key_env:\s*.*$' "  api_key_env: $($llm.api_key_env)"
+    $content = Set-ScalarLine $content '(?m)^  mock:\s*.*$' "  mock: $(Bool-Yaml ([bool]$llm.mock))"
+
+    # --- expose_to_peers ---
+    $feat = $settings.features
+    $content = Set-ScalarLine $content '(?m)^expose_to_peers:\s*.*$' "expose_to_peers: $(Bool-Yaml ([bool]$feat.expose_to_peers))"
+
+    # --- manage ---
+    $mg = $settings.manage
+    if ([bool]$mg.enabled) {
+        $manageBlock = @"
 manage:
   enabled: true
   url: $($mg.url)
@@ -49,55 +63,49 @@ manage:
     ttl_seconds: 60
     team: $($mg.team)
 "@
-    if ($mg.registration_base_url -and ($mg.registration_base_url.ToString().Trim() -ne '')) {
-        $manageBlock += "`n    base_url: $($mg.registration_base_url)"
+        if ($mg.registration_base_url -and ($mg.registration_base_url.ToString().Trim() -ne '')) {
+            $manageBlock += "`n    base_url: $($mg.registration_base_url)"
+        } else {
+            $manageBlock += "`n    # base_url: http://192.168.1.10:18765"
+        }
+        $manageBlock += "`n  a2a:`n    enabled: $(Bool-Yaml ([bool]$mg.a2a_enabled))"
+        $manageBlock += "`n    inbox_wait_seconds: 25"
+        $manageBlock += "`n    inbox_poll_seconds: 30"
+        $content = [regex]::Replace(
+            $content,
+            '(?ms)^manage:\r?\n(?:  .*\r?\n|# .*\r?\n)*',
+            ($manageBlock + "`n"),
+            1
+        )
     } else {
-        $manageBlock += "`n    # base_url: http://192.168.1.10:18765"
-    }
-    $manageBlock += "`n  a2a:`n    enabled: $(Bool-Yaml ([bool]$mg.a2a_enabled))"
-    $manageBlock += "`n    inbox_wait_seconds: 25"
-    $manageBlock += "`n    inbox_poll_seconds: 30"
-    $content = [regex]::Replace(
-        $content,
-        '(?ms)^manage:\r?\n(?:  .*\r?\n|# .*\r?\n)*',
-        ($manageBlock + "`n"),
-        1
-    )
-} else {
-    $disabledManage = @"
+        $disabledManage = @"
 manage:
   enabled: false
   # --- Manage + A2A（见 docs/a2a-and-register-center.md、packaging/manage/README.md）---
-  # 启用步骤：
-  #   1. 启动 Manage（docker compose 或 dagents-manage 镜像）
-  #   2. cp agent-card.example.json agent-card.json（被调方）或 agent-card.example.ops.json（调用方）
-  #   3. 设 manage.enabled: true，取消下列注释；tools.enabled_groups 含 a2a
   # url: http://127.0.0.1:8020
-  # node_token:              # 可选；Manage 启用 MANAGE_TOKENS 时填写
   # registration:
-  #   base_url: http://192.168.1.10:18765   # 上报 Manage 的本 Node 可达地址；留空则用 local.endpoint
-  #   interval_seconds: 30                  # 注册/心跳间隔（秒）
-  #   ttl_seconds: 60                       # Manage 侧 TTL；应大于 interval_seconds
-  #   team: platform                        # Manage Console 目录分组（仅 config，勿写入 Card）
+  #   base_url: http://192.168.1.10:18765
+  #   interval_seconds: 30
+  #   ttl_seconds: 60
+  #   team: platform
   # a2a:
-  #   enabled: true                         # 默认 true；false = 仅注册、不拉 Inbox（纯调用方，如 agent_invoke）
-  #   inbox_wait_seconds: 25                # Inbox long poll wait（秒）
-  #   inbox_poll_seconds: 30              # 断线降级短 poll；省略时默认 = interval_seconds
-  # Node 注册时自动发送 Header: x-dagents-agent-id = agent_id
+  #   enabled: true
+  #   inbox_wait_seconds: 25
+  #   inbox_poll_seconds: 30
 
 "@
-    $content = [regex]::Replace($content, '(?ms)^manage:\r?\n(?:  .*\r?\n|# .*\r?\n)*', $disabledManage, 1)
-}
+        $content = [regex]::Replace($content, '(?ms)^manage:\r?\n(?:  .*\r?\n|# .*\r?\n)*', $disabledManage, 1)
+    }
 
-# --- feature toggles ---
-$feat = $settings.features
-$content = [regex]::Replace($content, '(?ms)^(skills:\r?\n  enabled:)\s*\S+', "`${1} $(Bool-Yaml ([bool]$feat.skills_enabled))", 1)
-$content = [regex]::Replace($content, '(?ms)^(triggers:\r?\n  enabled:)\s*\S+', "`${1} $(Bool-Yaml ([bool]$feat.triggers_enabled))", 1)
-$content = [regex]::Replace($content, '(?ms)^(child_agents:\r?\n  enabled:)\s*\S+', "`${1} $(Bool-Yaml ([bool]$feat.child_agents_enabled))", 1)
-$content = [regex]::Replace($content, '(?ms)^(ui:\r?\n  enabled:)\s*\S+', "`${1} $(Bool-Yaml ([bool]$feat.ui_enabled))", 1)
+    # --- feature toggles ---
+    $feat = $settings.features
+    $content = [regex]::Replace($content, '(?ms)^(skills:\r?\n  enabled:)\s*\S+', "`${1} $(Bool-Yaml ([bool]$feat.skills_enabled))", 1)
+    $content = [regex]::Replace($content, '(?ms)^(triggers:\r?\n  enabled:)\s*\S+', "`${1} $(Bool-Yaml ([bool]$feat.triggers_enabled))", 1)
+    $content = [regex]::Replace($content, '(?ms)^(child_agents:\r?\n  enabled:)\s*\S+', "`${1} $(Bool-Yaml ([bool]$feat.child_agents_enabled))", 1)
+    $content = [regex]::Replace($content, '(?ms)^(ui:\r?\n  enabled:)\s*\S+', "`${1} $(Bool-Yaml ([bool]$feat.ui_enabled))", 1)
 
-# --- browser block ---
-$browserBlock = @"
+    # --- browser block ---
+    $browserBlock = @"
 # Browser 模式 A：browser-use 薄服务（见 docs/design/browser-remote-service-mode-a.md）
 browser:
   enabled: $(Bool-Yaml ([bool]$feat.browser_enabled))
@@ -111,8 +119,8 @@ browser:
   max_sessions: 1
   ignore_https_errors: false
 "@
-if (-not [bool]$feat.browser_enabled) {
-    $browserBlock = @"
+    if (-not [bool]$feat.browser_enabled) {
+        $browserBlock = @"
 # Browser 模式 A：browser-use 薄服务（见 docs/design/browser-remote-service-mode-a.md）
 # browser:
 #   enabled: false
@@ -126,50 +134,64 @@ if (-not [bool]$feat.browser_enabled) {
 #   max_sessions: 1
 #   ignore_https_errors: false
 "@
-}
-$content = [regex]::Replace(
-    $content,
-    '(?ms)^# Browser 模式 A：.*?(?=^# 多模态|\z)',
-    ($browserBlock + "`n"),
-    1
-)
+    }
+    $content = [regex]::Replace(
+        $content,
+        '(?ms)^# Browser 模式 A：.*?(?=^# 多模态|\z)',
+        ($browserBlock + "`n"),
+        1
+    )
 
-# --- multimodal ---
-$multiBlock = if ([bool]$feat.multimodal_enabled) {
-    @"
+    # --- multimodal ---
+    $multiBlock = if ([bool]$feat.multimodal_enabled) {
+        @"
 # 多模态（vision 模型 + read_image；开启后 browser_* 自动切视觉模式）
 multimodal:
   enabled: true
 "@
-} else {
-    @"
+    } else {
+        @"
 # 多模态（vision 模型 + read_image；开启后 browser_* 自动切视觉模式）
 # multimodal:
 #   enabled: false
 "@
-}
-$content = [regex]::Replace(
-    $content,
-    '(?ms)^# 多模态.*',
-    $multiBlock.TrimEnd(),
-    1
-)
-
-# --- tools.enabled_groups ---
-$groups = @('fs', 'bash', 'hitl', 'skills', 'triggers', 'child_agents')
-if ([bool]$feat.browser_enabled) { $groups += 'browser' }
-if ([bool]$mg.enabled -and [bool]$mg.a2a_enabled) { $groups += 'a2a' }
-
-if ([bool]$feat.restrict_tool_groups) {
-    $groupsYaml = "  enabled_groups:`n" + (($groups | ForEach-Object { "    - $_" }) -join "`n")
+    }
     $content = [regex]::Replace(
         $content,
-        '(?ms)^  # enabled_groups:\r?\n(?:  #   - .*\r?\n)*',
-        ($groupsYaml + "`n"),
+        '(?ms)^# 多模态.*',
+        $multiBlock.TrimEnd(),
         1
     )
-}
 
-$utf8NoBom = New-Object System.Text.UTF8Encoding $false
-[System.IO.File]::WriteAllText($OutputPath, $content, $utf8NoBom)
-Write-Host "[write-install-config] wrote $OutputPath"
+    # --- tools.enabled_groups ---
+    $groups = @('fs', 'bash', 'hitl', 'skills', 'triggers', 'child_agents')
+    if ([bool]$feat.browser_enabled) { $groups += 'browser' }
+    if ([bool]$mg.enabled -and [bool]$mg.a2a_enabled) { $groups += 'a2a' }
+
+    if ([bool]$feat.restrict_tool_groups) {
+        $groupsYaml = "  enabled_groups:`n" + (($groups | ForEach-Object { "    - $_" }) -join "`n")
+        $content = [regex]::Replace(
+            $content,
+            '(?ms)^  # enabled_groups:\r?\n(?:  #   - .*\r?\n)*',
+            ($groupsYaml + "`n"),
+            1
+        )
+    }
+
+    $outDir = Split-Path -Parent $OutputPath
+    if ($outDir -and -not (Test-Path -LiteralPath $outDir)) {
+        New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($OutputPath, $content, $utf8NoBom)
+    Write-InstallConfigLog "wrote $OutputPath"
+    Write-Host "[write-install-config] wrote $OutputPath"
+} catch {
+    Write-InstallConfigLog $_.Exception.Message
+    if ($_.ScriptStackTrace) {
+        Write-InstallConfigLog $_.ScriptStackTrace
+    }
+    Write-Error $_.Exception.Message
+    exit 1
+}

@@ -356,26 +356,38 @@ end;
 
 procedure GenerateConfigYaml;
 var
-  AppDir, JsonPath, Ps1, TemplatePath, OutPath, CmdLine: string;
+  AppDir, JsonPath, LogPath, ErrTail, CmdLine: string;
   ResultCode: Integer;
 begin
   AppDir := ExpandConstant('{app}');
   if not ShouldWriteConfig(AppDir) then
     Exit;
   JsonPath := ExpandConstant('{tmp}\dagents-install-settings.json');
+  LogPath := ExpandConstant('{tmp}\dagents-write-install-config.log');
   WriteInstallSettingsJson(JsonPath);
-  TemplatePath := AppDir + '\config.example.yaml';
-  OutPath := AppDir + '\config.yaml';
-  Ps1 := AppDir + '\scripts\windows\write-install-config.ps1';
-  if not FileExists(Ps1) then
+  if not FileExists(AppDir + '\scripts\windows\write-install-config.ps1') then
   begin
-    MsgBox('缺少配置脚本: ' + Ps1, mbError, MB_OK);
+    MsgBox('缺少配置脚本: ' + AppDir + '\scripts\windows\write-install-config.ps1', mbError, MB_OK);
     Exit;
   end;
-  CmdLine := '-NoProfile -ExecutionPolicy Bypass -File "' + Ps1 + '" -TemplatePath "' + TemplatePath + '" -OutputPath "' + OutPath + '" -SettingsPath "' + JsonPath + '"';
-  if not Exec('powershell.exe', CmdLine, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  if not FileExists(AppDir + '\config.example.yaml') then
+  begin
+    MsgBox('缺少配置模板: ' + AppDir + '\config.example.yaml', mbError, MB_OK);
+    Exit;
+  end;
+  { 相对路径 + WorkingDir={app}，避免 Program Files 等含空格路径在 Exec 参数中被拆坏 }
+  CmdLine :=
+    '-NoProfile -ExecutionPolicy Bypass -File "scripts\windows\write-install-config.ps1" ' +
+    '-TemplatePath "config.example.yaml" -OutputPath "config.yaml" -SettingsPath "' + JsonPath + '" ' +
+    '-LogPath "' + LogPath + '"';
+  if not Exec('powershell.exe', CmdLine, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  begin
+    ErrTail := '';
+    if FileExists(LogPath) then
+      ErrTail := #13#10 + '详见日志: ' + LogPath;
     MsgBox('生成 config.yaml 失败（PowerShell 退出码 ' + IntToStr(ResultCode) + '）。' + #13#10 +
-      '可手动复制 config.example.yaml 为 config.yaml。', mbError, MB_OK);
+      '可手动复制 config.example.yaml 为 config.yaml。' + ErrTail, mbError, MB_OK);
+  end;
 end;
 
 procedure ApplyPolicySeed;
