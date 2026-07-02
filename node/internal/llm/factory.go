@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -27,9 +26,9 @@ func NewFromConfig(cfg *config.Config, settings *RuntimeSettings) Client {
 	if cfg.LLM.Mock {
 		return &MockClient{Prefix: "", adapter: adapter}
 	}
-	baseURL := cfg.LLM.BaseURL
-	if strings.TrimSpace(baseURL) == "" {
-		baseURL = defaultBaseURL(adapter.Name())
+	baseURL := resolveBaseURL(adapter.Name(), cfg.LLM.BaseURL)
+	if warn := mismatchBaseURLWarning(adapter.Name(), cfg.LLM.BaseURL); warn != "" {
+		slog.Default().Warn(warn, "provider", adapter.Name(), "base_url", cfg.LLM.BaseURL, "resolved", baseURL)
 	}
 	return newEnvAdapterClient(baseURL, cfg.LLM.APIKeyEnv, adapter, settings, slog.Default())
 }

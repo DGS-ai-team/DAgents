@@ -8,7 +8,7 @@
 | `resolveShellOutputEncoding` / `decodeShellOutput` | bash_run 输出按 GBK/UTF-8 等解码为 UTF-8 |
 | `encodeFileContent` / `encodeTextToLegacyChinese` | 写盘编码；GBK 失败回退 GB18030，再失败按 rune 替换 `?` |
 | `choosePathEncoding` / `readTextLinesAt` / `rememberPathEncoding` | 路径编码：参数 → 缓存(mtime) → 字节检测 → 配置默认；读写后写缓存 |
-| `detectEncodingFromBytes` / `decodePathFileContent` / `textDecodeScore` | BOM + UTF-8 校验 + gb 试解码打分；解码失败返回错误（不静默 utf-8） |
+| `encodeFileContentWithBOM` / `shouldWriteUTF8BOM` | 写入 utf-8 时可选 BOM；`.ps1`/`.cmd` 新建或替换时自动加 BOM（PowerShell 5.1 须 UTF-8 BOM）；已有 BOM 的文件仍保留 |
 | `formatEncodingHeaderLines` | read 结果 header：`文件编码`、`编码来源`、可选 `编码提示` |
 | `SetBuiltinEnabled(names)` | 配置 LLM 可见内置工具允许列表（空=全部） |
 | `Definitions()` | LLM tools 列表 |

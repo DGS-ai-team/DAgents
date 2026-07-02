@@ -29,7 +29,7 @@ type OpenAIClient struct {
 
 // NewOpenAIClient 构造 OpenAI 兼容客户端。
 func NewOpenAIClient(cfg OpenAIConfig) *OpenAIClient {
-	base := strings.TrimRight(cfg.BaseURL, "/")
+	base := normalizeOpenAIBaseURL(cfg.BaseURL)
 	if base == "" {
 		base = "https://api.openai.com/v1"
 	}
@@ -113,7 +113,8 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 		return ChatResult{}, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
+	endpoint := chatCompletionsEndpoint(c.cfg.BaseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -128,7 +129,7 @@ func (c *OpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler 
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return ChatResult{}, fmt.Errorf("llm http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return ChatResult{}, fmt.Errorf("llm http %d: %s (POST %s)", resp.StatusCode, strings.TrimSpace(string(raw)), endpoint)
 	}
 
 	var full strings.Builder
@@ -238,7 +239,8 @@ func (c *OpenAIClient) CompleteText(ctx context.Context, req CompleteRequest) (s
 	if err != nil {
 		return "", err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
+	endpoint := chatCompletionsEndpoint(c.cfg.BaseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -251,7 +253,7 @@ func (c *OpenAIClient) CompleteText(ctx context.Context, req CompleteRequest) (s
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("llm http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return "", fmt.Errorf("llm http %d: %s (POST %s)", resp.StatusCode, strings.TrimSpace(string(raw)), endpoint)
 	}
 	var parsed completeResponseBody
 	if err := json.Unmarshal(raw, &parsed); err != nil {

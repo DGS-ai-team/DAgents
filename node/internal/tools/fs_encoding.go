@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -74,6 +75,25 @@ func encodeFileContentWithBOM(text, enc string, utf8BOM bool) ([]byte, error) {
 }
 
 var utf8BOMPrefix = []byte{0xEF, 0xBB, 0xBF}
+
+// fileNeedsUTF8BOM 为 Windows 脚本扩展名；PowerShell 5.1 / cmd 解析 UTF-8 源文件须 BOM。
+func fileNeedsUTF8BOM(relPath string) bool {
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(relPath)))
+	switch ext {
+	case ".ps1", ".cmd":
+		return true
+	default:
+		return false
+	}
+}
+
+// shouldWriteUTF8BOM 决定是否以 UTF-8 BOM 写盘（仅 enc=utf-8 时生效）。
+func shouldWriteUTF8BOM(relPath, enc string, hadBOM bool) bool {
+	if normalizeOutputEncoding(enc) != "utf-8" {
+		return false
+	}
+	return hadBOM || fileNeedsUTF8BOM(relPath)
+}
 
 func encodeFileContentRaw(text, enc string) ([]byte, error) {
 	enc = normalizeOutputEncoding(enc)

@@ -101,7 +101,7 @@ func formatEncodingHeaderLines(choice pathEncodingChoice, garbled bool) []string
 		lines = append(lines, "编码提示: 正文疑似乱码，可尝试 encoding=utf-8 或 encoding=gbk 重新读取")
 	}
 	if choice.UTF8BOM {
-		lines = append(lines, "UTF-8 BOM: 是（search_replace/write_file 写入时将保留）")
+		lines = append(lines, "UTF-8 BOM: 是（write_file/search_replace 写入 utf-8 时将带 BOM）")
 	}
 	return lines
 }
@@ -126,7 +126,7 @@ func (r *Registry) readTextLinesAt(relPath, absPath string, argEnc *string) ([]s
 		return nil, pathEncodingChoice{}, err
 	}
 	choice := r.choosePathEncoding(relPath, raw, mtime, argEnc)
-	choice.UTF8BOM = fileHadUTF8BOM(raw, choice.Encoding)
+	choice.UTF8BOM = shouldWriteUTF8BOM(relPath, choice.Encoding, fileHadUTF8BOM(raw, choice.Encoding))
 	text, err := decodePathFileContent(raw, choice.Encoding)
 	if err != nil {
 		return nil, choice, err
@@ -155,6 +155,6 @@ func (r *Registry) resolveWriteEncodingChoice(relPath, absPath string, argEnc *s
 		}
 	}
 	choice := r.choosePathEncoding(relPath, raw, mtime, argEnc)
-	choice.UTF8BOM = fileHadUTF8BOM(raw, choice.Encoding)
+	choice.UTF8BOM = shouldWriteUTF8BOM(relPath, choice.Encoding, fileHadUTF8BOM(raw, choice.Encoding))
 	return choice, nil
 }

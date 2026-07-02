@@ -34,16 +34,17 @@ fs_root: ./.runtime
 
 llm:
   provider: deepseek   # openai | deepseek | qwen | vllm
-  base_url: https://api.deepseek.com   # 留空时按 provider 默认：deepseek→api.deepseek.com · qwen→dashscope compatible-mode/v1 · vllm→127.0.0.1:8000/v1
+  base_url: https://api.deepseek.com   # 留空时按 provider 默认；qwen 业务空间示例：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   model: deepseek-chat   # deepseek 示例：deepseek-reasoner 或 deepseek-chat（Thinking 模式）
   # 思考控制（provider=deepseek|qwen；运行时可由 Client /thinking 或 PATCH /v1/llm/settings 热更新）
   # thinking: enabled      # enabled | disabled；默认 enabled
   # reasoning_effort: high  # thinking=enabled 时：high | max；qwen 映射为 thinking_budget
-  # 真实 LLM：设 mock: false，并 export OPENAI_API_KEY（所有 provider 共用；也可改 api_key_env）
+  # 真实 LLM：设 mock: false，并 export OPENAI_API_KEY（所有 provider 共用；也可改 api_key_env 如 QWEN_API_KEY）
   api_key_env: OPENAI_API_KEY
   # --- 其他 provider 示例（取消注释并改 provider；api_key_env 仍用 OPENAI_API_KEY）---
   # provider: qwen
   # base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  # base_url: https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   # model: qwen-plus
   # provider: vllm
   # base_url: http://127.0.0.1:8000/v1

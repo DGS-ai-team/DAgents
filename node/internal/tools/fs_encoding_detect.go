@@ -22,7 +22,7 @@ type pathEncodingChoice struct {
 	Source         encodingSource
 	Detected       string // 检测最高分编码；与本次相同时为空
 	GarbledWarning bool
-	UTF8BOM        bool // 原文件含 UTF-8 BOM；写入 utf-8 时保留
+	UTF8BOM        bool // 写入 utf-8 时带 BOM（原文件已有，或 .ps1/.cmd 自动添加）
 }
 
 func stripUTF8BOM(data []byte) ([]byte, bool) {
