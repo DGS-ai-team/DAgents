@@ -1,6 +1,7 @@
 package processlock
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -14,7 +15,7 @@ func TestAcquireNode_serialSameConfig(t *testing.T) {
 	defer release()
 
 	_, err = AcquireNode(cfg)
-	if err != ErrAlreadyRunning {
+	if !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("second acquire = %v, want ErrAlreadyRunning", err)
 	}
 }

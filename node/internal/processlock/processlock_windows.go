@@ -3,11 +3,7 @@
 package processlock
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -19,12 +15,11 @@ var (
 
 // AcquireNode 为 dagents-node 创建全局命名 Mutex；configPath 区分安装根/配置。
 func AcquireNode(configPath string) (Release, error) {
-	abs, err := filepath.Abs(strings.TrimSpace(configPath))
+	_, key, err := configLockKey(configPath)
 	if err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256([]byte(strings.ToLower(abs)))
-	name := fmt.Sprintf("Global\\DAgents-Node-%s", hex.EncodeToString(sum[:8]))
+	name := fmt.Sprintf("Global\\DAgents-Node-%s", key)
 	return acquire(name)
 }
 
