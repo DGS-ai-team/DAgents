@@ -13,6 +13,11 @@ type pendingApprovalCall struct {
 	duplicateMeta *hooks.DuplicateMeta
 }
 
+// BuildApprovalToolItem 构造 HITL execute_tool item 的展示字段（用于 hitl_required / hydrate transcript）。
+func BuildApprovalToolItem(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) map[string]any {
+	return buildApprovalToolItem(tc, duplicateMeta)
+}
+
 // buildApprovalToolItem 构造 HITL execute_tool item 的展示字段（用于 hitl_required；A2A 仍走 approval_required）。
 func buildApprovalToolItem(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) map[string]any {
 	args := parseJSONArgs(tc.Function.Arguments)

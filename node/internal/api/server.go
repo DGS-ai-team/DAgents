@@ -305,6 +305,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/clear-context", s.handleClearContext)
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/compress", s.handleCompressContext)
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/context", s.handleSessionContext)
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/hydrate", s.handleSessionHydrate)
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/cancel", s.handleCancelSession)
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/skills", s.handleListSessionSkills)
@@ -692,6 +693,46 @@ const contextMessagePreviewRunes = 8000
 		resp.LoadedSkills = []skills.LoadedSkill{}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+type sessionHydrateResponse struct {
+	SessionID     string                    `json:"session_id"`
+	RunTurnPhase  string                    `json:"run_turn_phase"`
+	HasActiveTurn bool                      `json:"has_active_turn"`
+	QueuePending  int                       `json:"queue_pending"`
+	Transcript    []session.TranscriptEntry `json:"transcript"`
+	PendingHITL   map[string]any            `json:"pending_hitl"`
+	SSESeqHint    int                       `json:"sse_seq_hint"`
+}
+
+func (s *Server) handleSessionHydrate(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	if sessionID == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		return
+	}
+	view, err := s.sessions.GetHydrateView(sessionID)
+	if err != nil {
+		if err.Error() == "session_not_found" {
+			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+		} else {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
+		}
+		return
+	}
+	transcript := view.Transcript
+	if transcript == nil {
+		transcript = []session.TranscriptEntry{}
+	}
+	writeJSON(w, http.StatusOK, sessionHydrateResponse{
+		SessionID:     view.SessionID,
+		RunTurnPhase:  view.RunTurnPhase,
+		HasActiveTurn: view.HasActiveTurn,
+		QueuePending:  view.QueuePending,
+		Transcript:    transcript,
+		PendingHITL:   view.PendingHITL,
+		SSESeqHint:    s.stream.CurrentSeq(),
+	})
 }
 
 func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
