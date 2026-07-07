@@ -8,6 +8,7 @@
 
 ### 新增
 
+- **v0.6.0 Web UI Hydrate（F-H7–H9/H17/X6）**：进入/切换 session 与 F5 刷新时调用 `GET /hydrate` 灌入 transcript 与 pending HITL；SSE `live=1` 与 `seqFence` 去重；支持 `?session=&focus=hitl` 深链。
 - **v0.6.0 Hydrate API（F-H1/H2/H14）**：`GET /v1/sessions/{id}/hydrate` 返回 `transcript`、`pending_hitl`、`run_turn_phase`、`sse_seq_hint`；Node 侧 `MessagesToTranscriptEntries` 与 `BuildHITLRequiredSnapshot`。
 - **v0.6.0 Shell 基础（实现中）**：`dagents-shell.exe`；启动 ensure Node、退出 stop Node；Shell/Node 单实例 Mutex；Node crash 自动重启（含探活防抖与重启退避）；`scripts/ci/build_dagents_shell.sh` + Release CI。
 - **v0.6 – v0.7 开发路径**：[`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) — v0.6.0 Shell+HITL+Hydrate → v0.6.1 `show_image`+Media → v0.6.2 自更新+路径粘贴 → v0.7.0 TUI hydrate 与体验收尾。

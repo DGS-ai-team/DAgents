@@ -71,6 +71,10 @@ export function getSessionContext(sessionId) {
   return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/context`);
 }
 
+export function getSessionHydrate(sessionId) {
+  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/hydrate`);
+}
+
 export function submitMessage(sessionId, content, contentParts = null) {
   const body = { session_id: sessionId, request_type: "message", content: content || "" };
   if (Array.isArray(contentParts) && contentParts.length) {

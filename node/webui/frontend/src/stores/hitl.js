@@ -268,6 +268,22 @@ export function expandHitlRequired(data) {
   };
 }
 
+/** 将 hitl_required / hydrate pending_hitl 展开并入队。 */
+export function enqueueHitlRequired(data) {
+  if (!data?.items?.length) {
+    return { userInfos: [], approval: null };
+  }
+  const { userInfos, approval } = expandHitlRequired(data);
+  for (const ui of userInfos) {
+    enqueueHitl({ kind: "user_information", data: ui });
+  }
+  if (approval) {
+    enqueueHitl({ kind: "approval", data: approval });
+  }
+  hitlStore.busy = false;
+  return { userInfos, approval };
+}
+
 /** 对齐 Go hitl.ShouldSkipChildRuntimeDisplay：隐藏子 Agent turn 的运行时 SSE。 */
 export function shouldSkipChildRuntimeDisplay(eventType, data) {
   const childId = String(data?.child_session_id || "").trim();

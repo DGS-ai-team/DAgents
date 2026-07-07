@@ -347,6 +347,32 @@ export function clearTranscript() {
   abortStreaming();
 }
 
+/** 从 hydrate API 快照灌入 transcript（F-H7）；替换当前 entries。 */
+export function loadTranscriptFromHydrate(entries) {
+  abortStreaming();
+  transcriptStore.entries = [];
+  if (!Array.isArray(entries)) return;
+  for (const raw of entries) {
+    if (!raw || typeof raw !== "object") continue;
+    const kind = String(raw.kind || "").trim();
+    if (!kind) continue;
+    const row = {
+      ...raw,
+      id: ++idSeq,
+      kind,
+      partial: raw.partial === true,
+      streaming: false,
+    };
+    if (kind === "user" && !Array.isArray(row.images)) {
+      row.images = [];
+    }
+    transcriptStore.entries.push(row);
+    if (kind === "tool_call" && row.blockId) {
+      markToolBlockActive(row.blockId);
+    }
+  }
+}
+
 function upsertStreaming(kind, text) {
   const idx = transcriptStore.entries.findIndex((e) => e.streaming && e.kind === kind);
   const row = { id: idx >= 0 ? transcriptStore.entries[idx].id : ++idSeq, kind, text, streaming: true };

@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import { transcriptStore } from "./transcript.js";
+import { transcriptStore, noteSeq } from "./transcript.js";
 import * as api from "../api/node.js";
 
 const SESSION_KEY = "dagents_webui_session_id";
@@ -70,6 +70,35 @@ export function markEventApplied(seq) {
 export function resetEventTracking() {
   sessionStore.lastAppliedSeq = transcriptStore.lastSeq;
   sessionStore.seqFence = 0;
+}
+
+/** hydrate 后设置 SSE 去重水位（F-H9）：忽略 seq <= hint 的 replay。 */
+export function applyHydrateSeqHint(seq) {
+  const hint = Number(seq) || 0;
+  if (hint > 0) noteSeq(hint);
+  sessionStore.lastAppliedSeq = hint > 0 ? hint : transcriptStore.lastSeq;
+  sessionStore.seqFence = hint > 0 ? hint : 0;
+}
+
+/** 根据 hydrate 的 turn 状态恢复 awaitingTurn（F-H7）。 */
+export function applyHydrateTurnState({ run_turn_phase, has_active_turn, pending_hitl }) {
+  const phase = String(run_turn_phase || "").trim();
+  const hasPending = pending_hitl && Array.isArray(pending_hitl.items) && pending_hitl.items.length > 0;
+  if (hasPending || phase === "awaiting_hitl") {
+    sessionStore.awaitingTurn = false;
+    sessionStore.turnContentSeen = false;
+    sessionStore.error = "";
+    return;
+  }
+  const activePhases = new Set(["model_streaming", "awaiting_tool_execution", "tool_loop", "open_batch", "other"]);
+  if (has_active_turn && activePhases.has(phase)) {
+    sessionStore.awaitingTurn = true;
+    sessionStore.turnContentSeen = true;
+    sessionStore.error = "";
+    return;
+  }
+  sessionStore.awaitingTurn = false;
+  sessionStore.turnContentSeen = false;
 }
 
 export function finishTurn() {

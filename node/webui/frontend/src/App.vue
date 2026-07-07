@@ -64,9 +64,10 @@ import {
   extractUserInfo,
   buildUserInfoResume,
   buildUserInfoResumeFromSelection,
-  expandHitlRequired,
+  enqueueHitlRequired,
   shouldSkipChildRuntimeDisplay,
 } from "./stores/hitl.js";
+import { consumeStartupURL, hydrateSession } from "./stores/hydrate.js";
 import { chromeStore, setUsageFromSSE, resetUsageStrip } from "./stores/chrome.js";
 import {
   startStatus,
@@ -128,7 +129,7 @@ function restartStream() {
 
 async function activateSessionStream() {
   const prev = sessionStore.sessionId;
-  await ensureSession();
+  await hydrateSession();
   if (sessionStore.sessionId !== prev || !streamHandle.value) {
     restartStream();
   }
@@ -215,18 +216,11 @@ function handleEvent(ev) {
       finalizeReasoning();
       finishWaitingStatuses();
       {
-        const { userInfos, approval } = expandHitlRequired(ev.data);
-        for (const ui of userInfos) {
-          enqueueHitl({ kind: "user_information", data: ui });
-        }
-        if (approval) {
-          enqueueHitl({ kind: "approval", data: approval });
-          if (approval.child_session_id) setChildAwaitingApproval(approval.child_session_id, true);
-        }
+        const { approval } = enqueueHitlRequired(ev.data);
+        if (approval?.child_session_id) setChildAwaitingApproval(approval.child_session_id, true);
       }
       if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
       chromeStore.hitlQueueLen = hitlStore.queue.length;
-      hitlStore.busy = false;
       break;
     case "approval_required":
       finalizeAssistant();
@@ -467,10 +461,10 @@ async function handleCommand(cmd) {
   }
   if (res.action === "clear") {
     await api.clearContext(await ensureSession());
-    clearTranscript();
+    await hydrateSession();
+    restartStream();
     resetStatusLines();
     resetToolStream();
-    resetEventTracking();
     resetUsageStrip();
     chromeStore.contextTokens = 0;
     addSystem("已清空对话上下文");
@@ -560,17 +554,22 @@ async function createNewSession() {
 async function switchSession(id) {
   const prev = sessionStore.sessionId;
   persistSessionId(id);
-  await ensureSession();
-  restartStream();
-  finishTurn();
-  clearHitl();
-  if (id !== prev) {
+  resetStatusLines();
+  resetToolStream();
+  resetRemoteWorkers();
+  resetUsageStrip();
+  try {
+    await hydrateSession();
+  } catch (e) {
+    sessionStore.error = e.message;
     clearTranscript();
-    resetStatusLines();
-    resetToolStream();
-    resetRemoteWorkers();
+    clearHitl();
     resetEventTracking();
-    resetUsageStrip();
+    finishTurn();
+    return;
+  }
+  restartStream();
+  if (id !== prev) {
     addSystem(`已切换 session: ${sessionStore.sessionId}`);
   }
   refreshContextTokens();
@@ -718,8 +717,12 @@ function onKeydown(e) {
 }
 
 onMounted(async () => {
+  const { focusHitl } = consumeStartupURL();
   await refreshMeta();
   await activateSessionStream();
+  if (focusHitl && hitlStore.queue.length) {
+    hitlSelected.value = 0;
+  }
   refreshContextTokens();
   window.addEventListener("keydown", onKeydown);
 });
