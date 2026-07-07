@@ -178,11 +178,21 @@ func TestSilentCompressionAsyncApply(t *testing.T) {
 }
 
 func TestStalePendingDiscarded(t *testing.T) {
-	client := &countingLLM{}
+	gate := make(chan struct{})
+	client := &gateLLM{release: gate}
 	coord := NewCoordinator(client, 50, 0)
 	msgs := sampleMessages()
 	prefix := testSidecarPrefix()
 	coord.MaybeHandle(context.Background(), "sess-3", "agent-1", nil, &msgs, prefix)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !coord.hasRunningTask("sess-3") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !coord.hasRunningTask("sess-3") {
+		t.Fatal("expected silent compression task to be running")
+	}
+	close(gate)
 	waitReadyCompression(t, coord, "sess-3")
 
 	before := len(msgs)
