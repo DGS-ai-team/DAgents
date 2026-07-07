@@ -12,6 +12,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/api"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/processlock"
 	"github.com/DGS-ai-team/DAgents/node/internal/version"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -31,6 +32,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		os.Exit(2)
 	}
+
+	release, err := processlock.AcquireNode(resolved)
+	if err != nil {
+		if err == processlock.ErrAlreadyRunning {
+			fmt.Fprintf(os.Stderr, "dagents-node: another instance is already running for this config\n")
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "dagents-node: process lock: %v\n", err)
+		os.Exit(1)
+	}
+	defer release()
 
 	// 2) 加载并校验 YAML；失败时区分路径错误(2)与内容错误(1)。
 	cfg, err := config.LoadFile(resolved)

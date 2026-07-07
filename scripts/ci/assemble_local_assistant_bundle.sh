@@ -61,6 +61,13 @@ if [[ -f "${BROWSER_BIN}" ]]; then
   install -m 0755 "${BROWSER_BIN}" "${BUNDLE_DIR}/bin/dagents-browser${EXE}"
 fi
 
+SHELL_BIN="${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}"
+if [[ -f "${SHELL_BIN}" ]]; then
+  install -m 0755 "${SHELL_BIN}" "${BUNDLE_DIR}/bin/dagents-shell${EXE}"
+elif [[ "${PLATFORM}" == windows-* && "${SKIP_SHELL:-}" != "1" ]]; then
+  echo "[assemble] note: dagents-shell${EXE} not found (run build_dagents_shell.sh or set SKIP_SHELL=1)" >&2
+fi
+
 if [[ -f "${REPO_ROOT}/packaging/agent-client/config.example.yaml" ]]; then
   cp "${REPO_ROOT}/packaging/agent-client/config.example.yaml" "${BUNDLE_DIR}/config.example.yaml"
 fi

@@ -16,7 +16,7 @@ func TestResolveLayout_fromBinDir(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte("listen:\n  port: 18765\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	fakeExe := filepath.Join(binDir, "dagents-tray.exe")
+	fakeExe := filepath.Join(binDir, "dagents-shell.exe")
 	if err := os.WriteFile(fakeExe, []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}

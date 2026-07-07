@@ -40,14 +40,15 @@ func Start(ctx context.Context, layout *Layout, cfg *config.Config, waitReady ti
 	if err != nil {
 		return err
 	}
-	defer logOut.Close()
 	logErr, err := os.OpenFile(layout.LogErr, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
+		_ = logOut.Close()
 		return err
 	}
-	defer logErr.Close()
+	// 不关闭 logOut/logErr：Node 为后台常驻进程，关闭父进程侧句柄会导致 Windows 上日志写入异常。
 
-	cmd := exec.CommandContext(ctx, layout.NodeExe, "-config", configArg)
+	// 不用 CommandContext：调用方 ctx 在 Start 返回后会被 cancel，会误杀已启动的 Node。
+	cmd := exec.Command(layout.NodeExe, "-config", configArg)
 	cmd.Dir = layout.Home
 	cmd.Stdout = logOut
 	cmd.Stderr = logErr
@@ -56,6 +57,8 @@ func Start(ctx context.Context, layout *Layout, cfg *config.Config, waitReady ti
 		CreationFlags: createNoWindow,
 	}
 	if err := cmd.Start(); err != nil {
+		_ = logOut.Close()
+		_ = logErr.Close()
 		return fmt.Errorf("start node: %w", err)
 	}
 
@@ -63,6 +66,8 @@ func Start(ctx context.Context, layout *Layout, cfg *config.Config, waitReady ti
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err := <-done:
+		_ = logOut.Close()
+		_ = logErr.Close()
 		if err != nil {
 			return fmt.Errorf("node exited immediately: %w; see %s", err, layout.LogErr)
 		}
@@ -76,7 +81,12 @@ func Start(ctx context.Context, layout *Layout, cfg *config.Config, waitReady ti
 
 	waitCtx, cancel := context.WithTimeout(ctx, waitReady)
 	defer cancel()
-	return waitHealthy(waitCtx, cfg)
+	if err := waitHealthy(waitCtx, cfg); err != nil {
+		_ = exec.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F").Run()
+		_ = os.Remove(layout.PidFile)
+		return err
+	}
+	return nil
 }
 
 // Stop 停止 dagents-node 并清理 pid 文件。

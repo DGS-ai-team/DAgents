@@ -1,65 +1,61 @@
-# `desktop/tray/` — Windows 托盘范例（最小）
+# `desktop/tray/` — Windows Desktop Shell（`dagents-shell.exe`）
 
-**Windows 专用**托盘程序：通过系统托盘图标 **启动 / 停止 / 重启** `dagents-node`，并每 3 秒探活 `GET /health`。
+**Windows 专用**托盘 Shell：监护 `dagents-node` 生命周期，系统托盘启停与探活。
 
-> 范例性质：尚未接入 Release 安装包；后续可扩展 Web UI、资源管理器 Shell 等。
+> **功能清单与路线图** → [`docs/design/windows-desktop-shell.md`](../../docs/design/windows-desktop-shell.md)、[`docs/design/v0.6-v0.7-roadmap.md`](../../docs/design/v0.6-v0.7-roadmap.md)
 
-## 功能
+## 功能（v0.6.0 第一步已实现部分）
+
+| 能力 | 状态 |
+|------|------|
+| 启动时 **ensure Node**（F-L9） | ✅ |
+| 退出 Shell **stop Node**（F-L10） | ✅ |
+| **Shell 单实例** Mutex（F-L12） | ✅ |
+| health 失败 **自动重启**（F-L13 基础） | ✅（用户手动停止后不重启） |
+| 二进制名 **`dagents-shell.exe`**（F-L15） | ✅ |
+| Node **单实例** Mutex（F-L8，在 `dagents-node`） | ✅ |
+| HITL Toast / SSE / Hydrate | ❌ 见 roadmap v0.6.0 后续 |
+
+## 菜单
 
 | 菜单 | 行为 |
 |------|------|
-| 状态 | 只读，显示运行中 agent_id 或「未运行」 |
-| 启动 Node | 后台启动 `bin/dagents-node.exe`，等待 `/health` 就绪（≤30s） |
-| 停止 Node | 按 `.runtime/node.pid` taskkill，确认 `/health` 不可用 |
-| 重启 Node | 先停后启 |
-| 退出托盘 | 退出托盘进程（**默认不停止 Node**） |
+| 状态 | 只读，运行中 agent_id 或「未运行」 |
+| 启动 / 停止 / 重启 Node | 与 `nodectl` 一致 |
+| 退出 Shell | 停止 Node 后退出进程 |
 
 ## 路径约定
 
-与安装包布局一致：
-
 ```text
 <安装根>/
-  bin/dagents-tray.exe
+  bin/dagents-shell.exe
   bin/dagents-node.exe
   config.yaml
   .runtime/node.pid
   .runtime/logs/node.log
 ```
 
-安装根解析：`DAGENTS_HOME` → 可执行文件在 `bin/` 时取父目录 → 当前工作目录。
+安装根：`DAGENTS_HOME` → 可执行文件在 `bin/` 时取父目录 → 当前工作目录。
 
-配置：`-config` / `DAGENTS_CONFIG` / 默认 `packaging/agent-client/config.yaml`（与 Node、Client 相同）。
-
-## 构建（须在 Windows 上，且 CGO 开启）
+## 构建（Windows，CGO 开启）
 
 ```bat
 cd desktop\tray
 set CGO_ENABLED=1
-go build -o dagents-tray.exe .
+go build -o dagents-shell.exe .
 ```
 
-将 `dagents-tray.exe` 放到安装根 `bin\`，并确保同目录有 `dagents-node.exe` 与 `config.yaml`。
+或仓库根目录：
+
+```bash
+bash scripts/ci/build_dagents_shell.sh
+```
 
 ## 运行
 
 ```bat
-cd C:\path\to\install
-bin\dagents-tray.exe -config config.yaml
+bin\dagents-shell.exe -config config.yaml
 ```
-
-开发仓库（WSL 内先编好 node 再拷到 Windows 测）：
-
-```bash
-# 仓库根目录
-go build -o desktop/tray/bin/dagents-node.exe ./node/cmd/dagents-node
-# 在 Windows 宿主编译 tray 后，设 DAGENTS_HOME 指向含 config 的目录
-```
-
-## 依赖
-
-- [`github.com/getlantern/systray`](https://github.com/getlantern/systray)（Windows 需 CGO）
-- [`shared/config`](../../shared/config/)（endpoint、配置路径）
 
 ## 测试
 
@@ -67,10 +63,9 @@ go build -o desktop/tray/bin/dagents-node.exe ./node/cmd/dagents-node
 cd desktop/tray && go test ./...
 ```
 
-（`control_windows.go` 仅在 Windows 上编译；Linux/WSL 下可跑 `home_test`、`probe` 相关测试。）
+Windows 上额外运行 `singleinstance` 互斥测试。
 
-## 后续
+## 依赖
 
-- 安装包：`packaging/windows/dagents-installer.iss` 增加可选组件
-- Shell 右键：`dagents-tray.exe --open-paths`（见设计讨论）
-- 与 `dagents.cmd node` 对齐的 PID 回退查找（无 pid 文件时）
+- [`github.com/getlantern/systray`](https://github.com/getlantern/systray)（Windows 需 CGO）
+- [`shared/config`](../../shared/config/)

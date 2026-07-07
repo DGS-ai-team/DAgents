@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+**规划 v0.6 – v0.7**：**v0.6.0 第一步（Shell 基础）已开始实现**。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md)。
+
+### 新增
+
+- **v0.6.0 Shell 基础（实现中）**：`dagents-shell.exe`；启动 ensure Node、退出 stop Node；Shell/Node 单实例 Mutex；Node crash 自动重启；`scripts/ci/build_dagents_shell.sh` + Release CI。
+- **v0.6 – v0.7 开发路径**：[`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) — v0.6.0 Shell+HITL+Hydrate → v0.6.1 `show_image`+Media → v0.6.2 自更新+路径粘贴 → v0.7.0 TUI hydrate 与体验收尾。
+- **Windows Desktop Shell 设计**：[`docs/design/windows-desktop-shell.md`](docs/design/windows-desktop-shell.md) — Shell 监护 Node、HITL Toast 通知、Web UI Hydrate、idle session 维护（压缩 + 卸内存）、v0.6.0 发布范围（§4.1）。
+- **Shell 为安装态更新 orchestrator（D36–D38）**：Windows 桌面路径由 Shell poll Manage 并 orchestrate apply；Node 仅提供 `upgrade-readiness`；详见 Shell 文档 §3.11、§8.7 与 [`docs/design/release-update-hub.md`](docs/design/release-update-hub.md) §10。
+- **Node → Web UI 图片展示（设计）**：**`show_image` 工具** + Session Media Artifact + `GET …/media/{id}`；见 [`docs/design/node-ui-media-display.md`](docs/design/node-ui-media-display.md)（交付 **v0.6.1**）。
+
+---
+
 ## [0.5.5] - 2026-07-01
 
 **Browser 模式 A 与发布打包**：browser-use 薄服务 `dagents-browser`、Go `browser_*` 工具组、多模态视觉；Agent 身份迁入 `config.yaml`；Windows 安装向导与 PyInstaller CI。
