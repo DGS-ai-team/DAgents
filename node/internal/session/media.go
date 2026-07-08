@@ -4,7 +4,15 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
 )
 
-// OpenSessionMedia 打开 session 内已注册媒体的文件（F-M1）。
+// RegisterSessionMedia 注册 session 内图片引用（F-M0）。
+func (m *Manager) RegisterSessionMedia(sessionID string, opts media.RegisterOpts) (*media.Artifact, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil || rt.media == nil {
+		return nil, media.ErrNotFound
+	}
+	return rt.media.RegisterFromRelPath(opts)
+}
+
 func (m *Manager) OpenSessionMedia(sessionID, mediaID string) (*media.Artifact, string, error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil || rt.media == nil {

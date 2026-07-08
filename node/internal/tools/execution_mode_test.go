@@ -14,6 +14,7 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 
 	want := map[string][]string{
 		"read_file":              {CallPurposeKey, "path"},
+		"show_image":             {CallPurposeKey, "path"},
 		"read_image":             {CallPurposeKey, "path"},
 		"write_file":             {CallPurposeKey, "path", "content"},
 		"search_replace":         {CallPurposeKey, "path", "old_string", "new_string"},

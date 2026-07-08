@@ -85,4 +85,12 @@ func (r *RestrictedRegistry) TakeReadImageVisionForCall(toolCallID string) *tool
 	return r.inner.TakeReadImageVisionForCall(toolCallID)
 }
 
+// TakeToolResultMediaForCall 委托底层 registry 取出 tool result media[] SSE 字段。
+func (r *RestrictedRegistry) TakeToolResultMediaForCall(toolCallID string) map[string]any {
+	if r.inner == nil {
+		return nil
+	}
+	return r.inner.TakeToolResultMediaForCall(toolCallID)
+}
+
 var _ tools.Executor = (*RestrictedRegistry)(nil)

@@ -9,6 +9,7 @@ import (
 // knownBuiltinTools 为 Node 可配置启用的内置工具名全集（与 node/internal/tools/registry.go 对齐）。
 var knownBuiltinTools = map[string]struct{}{
 	"read_file":                {},
+	"show_image":               {},
 	"read_image":               {},
 	"write_file":               {},
 	"glob_files":               {},
@@ -62,6 +63,7 @@ var knownBuiltinTools = map[string]struct{}{
 var builtinToolGroups = map[string][]string{
 	"fs": {
 		"read_file",
+		"show_image",
 		"read_image",
 		"write_file",
 		"glob_files",

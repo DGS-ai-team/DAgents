@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { connectStream } from "../sse/stream.js";
@@ -149,6 +149,8 @@ async function activateSessionStream() {
     restartStream();
   }
   await syncChildAgentsFromApi();
+  await nextTick();
+  chatPanelRef.value?.scrollToLastAssistant?.();
 }
 
 async function refreshMeta() {
@@ -592,6 +594,8 @@ async function switchSession(id) {
   await syncChildAgentsFromApi();
   syncRouteSession(id);
   sessionPanelRef.value?.refresh?.();
+  await nextTick();
+  chatPanelRef.value?.scrollToLastAssistant?.();
 }
 
 async function deleteSessionById(payload) {

@@ -26,6 +26,11 @@ func WithSession(ctx context.Context, sessionID string) context.Context {
 	return context.WithValue(ctx, sessionContextKey{}, strings.TrimSpace(sessionID))
 }
 
+// SessionIDFromContext 读取 context 中的 session_id。
+func SessionIDFromContext(ctx context.Context) string {
+	return sessionIDFromContext(ctx)
+}
+
 func sessionIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""

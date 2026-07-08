@@ -36,7 +36,7 @@ defineProps({
     </div>
   </div>
 
-  <div v-else-if="entry.kind === 'assistant'" class="msg msg--assistant" :class="{ 'msg--generating': entry.streaming }">
+  <div v-else-if="entry.kind === 'assistant'" class="msg msg--assistant" data-kind="assistant" :class="{ 'msg--generating': entry.streaming }">
     <div class="msg__body">
       <div v-if="entry.streaming && !entry.text" class="msg__body--hint-only">
         <div class="msg__hint msg__hint--stream-meta">

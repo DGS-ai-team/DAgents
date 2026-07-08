@@ -74,6 +74,7 @@ func (r *Registry) filterToolDefs(defs []ToolDef) []ToolDef {
 // knownBuiltinTools 与 shared/config/builtin_tools.go 保持一致。
 var knownBuiltinTools = map[string]struct{}{
 	"read_file":              {},
+	"show_image":             {},
 	"read_image":             {},
 	"write_file":             {},
 	"glob_files":             {},

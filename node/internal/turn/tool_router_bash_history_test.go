@@ -31,6 +31,7 @@ func (s stubBashExecutor) StartBackground(context.Context, string, string, strin
 }
 
 func (s stubBashExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
+func (s stubBashExecutor) TakeToolResultMediaForCall(string) map[string]any    { return nil }
 func (s stubBashExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
 	return nil
 }

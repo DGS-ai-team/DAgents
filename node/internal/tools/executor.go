@@ -8,6 +8,7 @@ type Executor interface {
 	Execute(ctx context.Context, name, arguments string) (string, error)
 	StartBackground(ctx context.Context, sessionID, toolName, toolCallID, cleanedArgs string) (string, error)
 	TakeBashCompressStatsForCall(toolCallID string) map[string]any
+	TakeToolResultMediaForCall(toolCallID string) map[string]any
 	TakeReadImageVisionForCall(toolCallID string) *ReadImageVisionPayload
 }
 

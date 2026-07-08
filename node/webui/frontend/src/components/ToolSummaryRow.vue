@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
 import { toolStepIsInProgress, toolStepStatusText, toolStepUserSummary } from "../utils/toolUserLabel.js";
+import { entryMedia } from "../utils/showImage.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
 
 const props = defineProps({
@@ -15,6 +16,7 @@ const summary = computed(() => toolStepUserSummary({ callEntry: props.callEntry,
 const status = computed(() => toolStepStatusText({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const inProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
+const inlineMedia = computed(() => entryMedia(props.resultEntry));
 
 function toggle() {
   expanded.value = !expanded.value;
@@ -26,6 +28,14 @@ function toggle() {
     <button type="button" class="tool-summary-row__head" @click="toggle">
       <span class="tool-summary-row__icon" aria-hidden="true">{{ inProgress ? "⏳" : "✓" }}</span>
       <span class="tool-summary-row__text">{{ summary }}</span>
+      <span v-if="inlineMedia.length && !expanded" class="tool-summary-row__thumb-wrap">
+        <img
+          class="tool-summary-row__thumb"
+          :src="inlineMedia[0].url"
+          :alt="inlineMedia[0].label || '图片'"
+          loading="lazy"
+        />
+      </span>
       <span v-if="status" class="tool-summary-row__status">{{ status }}</span>
       <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
     </button>
@@ -76,6 +86,20 @@ function toggle() {
   font-size: 13px;
   color: var(--color-text);
   line-height: 1.4;
+}
+
+.tool-summary-row__thumb-wrap {
+  flex: 0 0 auto;
+  line-height: 0;
+}
+
+.tool-summary-row__thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: #fff;
 }
 
 .tool-summary-row__status {

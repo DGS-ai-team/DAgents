@@ -38,6 +38,9 @@ type Registry struct {
 	handlers            map[string]handler
 	pathEncMu           sync.Mutex
 	pathEncCache        map[string]pathEncodingEntry
+	mediaMu             sync.Mutex
+	mediaRegister       MediaRegisterFunc
+	toolResultMedia     map[string][]map[string]any
 }
 
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。
@@ -75,6 +78,7 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*R
 func (r *Registry) Definitions() []ToolDef {
 	base := []ToolDef{
 		readFileToolDef(),
+		showImageToolDef(),
 	}
 	if r.multimodalEnabled {
 		base = append(base, readImageToolDef())
@@ -119,6 +123,7 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 
 func (r *Registry) registerBuiltins() {
 	r.handlers["read_file"] = r.execReadFile
+	r.handlers["show_image"] = r.execShowImage
 	r.handlers["read_image"] = r.execReadImage
 	r.handlers["write_file"] = r.execWriteFile
 	r.handlers["glob_files"] = r.execGlobFiles

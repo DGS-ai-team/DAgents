@@ -112,7 +112,7 @@ func (e *Engine) decideToolRuleFallback(toolName string, toolArgs map[string]any
 
 func isRuleAutoReadTool(toolName string) bool {
 	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case "read_file", "glob_files", "grep_file", "grep_files", "agent_discover":
+	case "read_file", "show_image", "glob_files", "grep_file", "grep_files", "agent_discover":
 		return true
 	default:
 		return false

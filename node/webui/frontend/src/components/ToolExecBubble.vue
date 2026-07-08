@@ -7,6 +7,8 @@ import { isReadFileTool } from "../utils/readFilePreview.js";
 import { parseToolArguments, toolDisplayName, resolveToolArgumentsFromData } from "../utils/toolCalls.js";
 import { toolStepUserSummary } from "../utils/toolUserLabel.js";
 import ReadFileResultPreview from "./ReadFileResultPreview.vue";
+import ImageResultPreview from "./ImageResultPreview.vue";
+import { hasToolMedia, isShowImageTool } from "../utils/showImage.js";
 
 const props = defineProps({
   entry: { type: Object, required: true },
@@ -40,6 +42,13 @@ const readFilePath = computed(() => {
 });
 const showReadFilePreview = computed(
   () => isResult.value && !rejected.value && isReadFileTool(toolName.value) && !!resultDetail.value && !props.verbose,
+);
+const showImagePreview = computed(
+  () =>
+    isResult.value &&
+    !rejected.value &&
+    !props.verbose &&
+    (hasToolMedia(props.entry) || isShowImageTool(toolName.value)),
 );
 const elapsedLive = computed(() => {
   void statusStore.tick;
@@ -83,6 +92,7 @@ const statusText = computed(() => {
           :path="readFilePath"
           :content="resultDetail"
         />
+        <ImageResultPreview v-else-if="showImagePreview" :entry="entry" />
         <pre
           v-else-if="isResult && resultDetail && !verbose"
           class="tool-exec-bubble__code tool-exec-bubble__result-detail"

@@ -303,7 +303,7 @@ func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.
 		output, execErr = o.tools.StartBackground(toolCtx, sessionID, tc.Function.Name, tc.ID, cleanedArgs)
 	} else {
 		output, execErr = o.tools.Execute(toolCtx, tc.Function.Name, cleanedArgs)
-		extra = o.tools.TakeBashCompressStatsForCall(tc.ID)
+		extra = mergeToolResultExtra(o.tools.TakeBashCompressStatsForCall(tc.ID), o.tools.TakeToolResultMediaForCall(tc.ID))
 	}
 	if execErr != nil {
 		return execErr.Error(), true, nil
@@ -382,4 +382,20 @@ func newShortID(prefix string) string {
 	var b [6]byte
 	_, _ = rand.Read(b[:])
 	return prefix + hex.EncodeToString(b[:])
+}
+
+func mergeToolResultExtra(parts ...map[string]any) map[string]any {
+	var out map[string]any
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any, len(part))
+		}
+		for k, v := range part {
+			out[k] = v
+		}
+	}
+	return out
 }

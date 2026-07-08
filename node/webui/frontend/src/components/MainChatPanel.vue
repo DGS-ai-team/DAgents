@@ -156,6 +156,21 @@ function scrollToTail() {
   });
 }
 
+function scrollToLastAssistant() {
+  followTail.value = false;
+  nextTick(() => {
+    const el = streamRef.value;
+    if (!el) return;
+    const nodes = el.querySelectorAll(".msg[data-kind='assistant']");
+    const target = nodes.length ? nodes[nodes.length - 1] : null;
+    if (target) {
+      target.scrollIntoView({ block: "end", behavior: "auto" });
+      return;
+    }
+    scrollToTail();
+  });
+}
+
 async function submit() {
   const text = input.value.trim();
   const images = pendingImages.value.slice();
@@ -183,6 +198,8 @@ defineExpose({
   setDraft(text) {
     input.value = String(text || "");
   },
+  scrollToLastAssistant,
+  scrollToTail,
 });
 </script>
 

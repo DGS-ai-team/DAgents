@@ -21,6 +21,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
@@ -235,6 +236,30 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		}
 	}
 	if o.tools != nil {
+		o.tools.SetMediaRegister(func(ctx context.Context, toolCallID, relPath, source, label, caption string) (*tools.MediaArtifactRef, error) {
+			sid := tools.SessionIDFromContext(ctx)
+			if sid == "" {
+				return nil, fmt.Errorf("session required for media register")
+			}
+			art, err := mgr.RegisterSessionMedia(sid, media.RegisterOpts{
+				RelPath:    relPath,
+				Source:     source,
+				ToolCallID: toolCallID,
+				Label:      label,
+				Caption:    caption,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return &tools.MediaArtifactRef{
+				ID:      art.ID,
+				Kind:    art.Kind,
+				MIME:    art.MIME,
+				URL:     art.PublicURL(),
+				Label:   art.Label,
+				Caption: art.Caption,
+			}, nil
+		})
 		// bash 后台任务完成时回灌 session 队列，触发新一轮 turn。
 		o.tools.SetBackgroundJobNotifier(func(sessionID string, done tools.BackgroundJobDone) {
 			if err := mgr.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
