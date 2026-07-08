@@ -447,6 +447,8 @@ Node（运行时）
 
 #### 验收要点（Smoke）
 
+完整检查表：[`v0.6.0-smoke-checklist.md`](./v0.6.0-smoke-checklist.md)
+
 1. 安装后登录 → Shell 自启 → Node health 正常。  
 2. Web UI 关闭时触发 HITL → **一条** Toast → 点击 → 深链 session → **transcript + pending** 可见并可 resume。  
 3. Web UI 关闭时 Agent **正常回复完成**（末条 assistant 未读）→ Shell 待办 + **托盘图标特殊效果**（F-E13 / F-N10）。  

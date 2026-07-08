@@ -4,25 +4,33 @@
 
 ## [Unreleased]
 
-**规划 v0.6 – v0.7**：**v0.6.0 第 ⑧ 步安装发布（F-I1/I3/I8–I10）已实现**。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md)。
+**规划 v0.6 – v0.7**：当前开发 **`v0.6.1`**（`show_image` + Session Media API）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §3；设计见 [`docs/design/node-ui-media-display.md`](docs/design/node-ui-media-display.md)。
+
+### 新增
+
+（v0.6.1 待交付：F-M0–M5、F-H10/H11。）
+
+---
+
+## [0.6.0] - 2026-07-08
+
+**Windows Desktop Shell 闭环**：自启 Shell 监护 Node、HITL Toast、Hydrate、IM cursor 未读、idle 卸内存、Windows 安装包含 Shell 登录自启。Smoke 清单：[`docs/design/v0.6.0-smoke-checklist.md`](docs/design/v0.6.0-smoke-checklist.md)。
 
 ### 新增
 
 - **v0.6.0 安装发布（F-I1/I3/I8–I10）**：Windows 包必含 `dagents-shell.exe`；Inno 安装后注册 Shell 登录自启并可选立即启动；`dagents.cmd shell`（start/status/stop）；卸载/升级清理 Run 键并 stop Shell。
 - **F-NM1–NM5 idle session 维护（Node）**：`Manager.Release`；idle 扫描内压缩后卸内存；pending HITL 可 evict。
-- **F-E13 IM cursor（Node + Web UI + Shell）**：`runtime_state_json` 持久化 `notify_seq`/`ack_seq`；Hub 发布时 bump notify；`POST /v1/sessions/{id}/ack`；hydrate/list 返回 `has_unread`；Web UI SSE/hydrate 后 ack；Shell 待办表改从 `GET /v1/sessions` 同步，移除本地 `MarkUnread`/`MarkConsumed`。
+- **F-E13 IM cursor（Node + Web UI + Shell）**：`runtime_state_json` 持久化 `notify_seq`/`ack_seq`；Hub 发布时 bump notify；`POST /v1/sessions/{id}/ack`；hydrate/list 返回 `has_unread`；Web UI SSE/hydrate 后 ack；Shell 待办表改从 `GET /v1/sessions` 同步。
 - **v0.6.0 Shell 通知与深链（F-N1–N3/N10, F-U1–U3, F-E13）**：Windows Toast + 点击打开 `?session=<id>`；托盘待办子菜单与 `icon_pending` 态；未读 assistant 待办（IM cursor）；「打开控制台」菜单。
-- **v0.6.0 Shell SSE 待办（F-E1–E4/E10–E12）**：`dagents-shell` 常驻订阅 `GET /v1/streams?live=1`；按 session 聚合 HITL/A2A 事件维护待办表；`done` 与 `GET /v1/sessions` 对齐消除；可选 `DAGENTS_CLIENT_TOKEN` Bearer 鉴权；托盘「待办」菜单与 tooltip 摘要。
-- **v0.6.0 Hydrate API（F-H1/H2/H14）**：`GET /v1/sessions/{id}/hydrate` 返回 `transcript`、`pending_hitl`、`run_turn_phase`、`sse_seq_hint`；Node 侧 `MessagesToTranscriptEntries` 与 `BuildHITLRequiredSnapshot`。
-- **v0.6.0 Shell 基础（实现中）**：`dagents-shell.exe`；启动 ensure Node、退出 stop Node；Shell/Node 单实例 Mutex；Node crash 自动重启（含探活防抖与重启退避）；`scripts/ci/build_dagents_shell.sh` + Release CI。
-- **v0.6 – v0.7 开发路径**：[`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) — v0.6.0 Shell+HITL+Hydrate → v0.6.1 `show_image`+Media → v0.6.2 自更新+路径粘贴 → v0.7.0 TUI hydrate 与体验收尾。
-- **Windows Desktop Shell 设计**：[`docs/design/windows-desktop-shell.md`](docs/design/windows-desktop-shell.md) — Shell 监护 Node、HITL Toast 通知、Web UI Hydrate、idle session 维护（压缩 + 卸内存）、v0.6.0 发布范围（§4.1）。
-- **Shell 为安装态更新 orchestrator（D36–D38）**：Windows 桌面路径由 Shell poll Manage 并 orchestrate apply；Node 仅提供 `upgrade-readiness`；详见 Shell 文档 §3.11、§8.7 与 [`docs/design/release-update-hub.md`](docs/design/release-update-hub.md) §10。
-- **Node → Web UI 图片展示（设计）**：**`show_image` 工具** + Session Media Artifact + `GET …/media/{id}`；见 [`docs/design/node-ui-media-display.md`](docs/design/node-ui-media-display.md)（交付 **v0.6.1**）。
+- **v0.6.0 Shell SSE 待办（F-E1–E4/E10–E12）**：`dagents-shell` 常驻订阅 `GET /v1/streams?live=1`；按 session 聚合 HITL/A2A 事件；`GET /v1/sessions` 轮询兜底；可选 `DAGENTS_CLIENT_TOKEN` Bearer 鉴权。
+- **v0.6.0 Hydrate API（F-H1/H2/H14/H7–H9/H17）**：`GET /v1/sessions/{id}/hydrate`；Web UI hydrate 管线；evicted session 可恢复。
+- **v0.6.0 Shell 基础（F-L8–L10/L12–L13/L15）**：`dagents-shell.exe`；启动 ensure Node、退出 stop Node；Shell/Node 单实例 Mutex；Node crash 自动重启；`scripts/ci/build_dagents_shell.sh` + Release CI。
 
 ### 修复
 
 - **Shell Node 启动**：修复 `nodectl.Start` 使用 `CommandContext` 导致 `ctx` cancel 后误杀后台 Node 的问题。
+
+（Git **tag**：`v0.6.0`。）
 
 ---
 
