@@ -328,6 +328,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
+	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.mux.HandleFunc("POST /v1/sessions", s.handleCreateSession)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleListSessions)
 	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", s.handleDeleteSession)
@@ -486,6 +487,10 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.updateChecker.Snapshot())
+}
+
+func (s *Server) handleAgentUpgradeReadiness(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.sessions.UpgradeReadiness())
 }
 
 type createSessionRequest struct {

@@ -368,7 +368,7 @@ Node（运行时）
 | F-I11 | P1 | 共享 update 库（check + download + sha256） | ❌ | D38；自 `node/internal/manage/update_checker.go` 等抽取 |
 | F-I12 | P1 | `dagents.cmd update` → Shell | ❌ | Shell  absent 时回退 `dagents-client update` |
 | F-X8 | P1 | Web UI UpdatePanel → Shell localhost API | ❌ | 见 §3.7 |
-| F-ND1 | P1 | Node **`GET /v1/agent/upgrade-readiness`**：`has_active_turn` / 可升级 | ❌ | Apply 前 Shell 必查；无 turn 才允许 F-U6 |
+| F-ND1 | P1 | Node **`GET /v1/agent/upgrade-readiness`**：`has_active_turn` / 可升级 | ✅ | Apply 前 Shell 必查；无 turn 才允许 F-U6 |
 | F-ND2 | P2 | Windows+Shell：`/v1/agent/update` **deprecated** | ⚠️ 现由 Node 提供 | 返回 `{"delegate":"shell",…}` 或文档说明；Linux/headless **保留** Node 路径 |
 
 **与 v0.6.0**：§4.1 中 **架构决策 D36–D38 写入**；**实现**（F-U5/U6、F-ND*、F-X8）标 **v0.6.x**；v0.6.0 可先让 **`dagents update` 的 stop/start 走 Shell**（与 F-L10 一致），Node `UpdateChecker` **暂保留**。

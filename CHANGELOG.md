@@ -4,7 +4,17 @@
 
 ## [Unreleased]
 
-**规划 v0.6 – v0.7**：当前开发 **`v0.6.1`**（**产品化 Web UI** + `show_image` + Session Media API）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §3；UI 设计见 [`docs/design/web-ui-redesign-v0.6.1.md`](docs/design/web-ui-redesign-v0.6.1.md)；Media 见 [`docs/design/node-ui-media-display.md`](docs/design/node-ui-media-display.md)。
+**规划 v0.6 – v0.7**：当前开发 **`v0.6.2`**（桌面体验 + Shell 自更新）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §4。
+
+### 新增
+
+- **F-ND1 `GET /v1/agent/upgrade-readiness`**：返回 `ready` / `has_active_turn` / 活跃 session 列表；Shell apply 升级前查询 Node 是否空闲。
+
+---
+
+## [0.6.1] - 2026-07-08
+
+**产品化 Web UI 1.0** + `show_image` + Session Media API。Smoke 清单：[`docs/design/v0.6.1-smoke-checklist.md`](docs/design/v0.6.1-smoke-checklist.md)。
 
 ### 新增
 
@@ -34,7 +44,7 @@
 - **工具展示**：`toolUserLabel` 与 tool 占位符；禁止空白 `tool()` 摘要。
 - **Hydrate 工具行**：`buildStream` 按 `blockId` 合并 tool_call + tool_result，避免历史还原成「进行中 + 已完成」两行。
 
-（v0.6.1 功能开发已完成；打 tag 前见 [`docs/design/v0.6.1-smoke-checklist.md`](docs/design/v0.6.1-smoke-checklist.md)。）
+（Git **tag**：待 Smoke 后 `v0.6.1`。）
 
 ---
 
