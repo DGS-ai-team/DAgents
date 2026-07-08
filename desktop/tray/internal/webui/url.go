@@ -25,3 +25,9 @@ func SessionURL(endpoint, sessionID string) string {
 func ConsoleURL(endpoint string) string {
 	return SessionURL(endpoint, "")
 }
+
+// SettingsAboutURL 返回设置 › 关于页 URL（F-N9 / F-X8）。
+func SettingsAboutURL(endpoint string) string {
+	base := strings.TrimRight(strings.TrimSpace(endpoint), "/") + "/ui/settings/about"
+	return base
+}

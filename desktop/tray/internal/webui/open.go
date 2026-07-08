@@ -18,14 +18,23 @@ func EnsureNodeAndOpen(
 	cfg *config.Config,
 	sessionID string,
 ) error {
+	return EnsureNodeAndOpenURL(ctx, layout, cfg, SessionURL(cfg.Local.Endpoint, sessionID))
+}
+
+// EnsureNodeAndOpenURL 先 ensure Node 再打开指定 URL。
+func EnsureNodeAndOpenURL(
+	ctx context.Context,
+	layout *nodectl.Layout,
+	cfg *config.Config,
+	targetURL string,
+) error {
 	if layout == nil || cfg == nil {
 		return fmt.Errorf("layout or config is nil")
 	}
 	if err := nodectl.Start(ctx, layout, cfg, 30*time.Second); err != nil {
 		return err
 	}
-	target := SessionURL(cfg.Local.Endpoint, sessionID)
-	return OpenURL(target)
+	return OpenURL(targetURL)
 }
 
 // OpenConsole ensure Node 后打开控制台首页（F-U1）。

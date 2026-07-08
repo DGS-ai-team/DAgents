@@ -1,23 +1,30 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
-import * as api from "../api/node.js";
+import * as desktopApi from "../api/desktop.js";
 
 const emit = defineEmits(["close"]);
 
 const loading = ref(false);
+const applying = ref(false);
 const error = ref("");
 const data = ref(null);
+const source = ref("node");
 
 const applyCommand = computed(() => {
   const cmd = String(data.value?.apply_command || "dagents update").trim();
   return cmd || "dagents update";
 });
 
+const shellManaged = computed(() => source.value === "shell");
+const canApplyInUI = computed(() => shellManaged.value && !!data.value?.upgrade_available);
+
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    data.value = await api.getAgentUpdate();
+    const result = await desktopApi.getUpdateStatus();
+    source.value = result.source;
+    data.value = result.data;
   } catch (e) {
     error.value = e.message;
     data.value = null;
@@ -34,6 +41,26 @@ async function copyApplyCommand() {
   }
 }
 
+async function applyUpgrade() {
+  if (!canApplyInUI.value || applying.value) return;
+  const latest = String(data.value?.latest_version || "").trim();
+  if (!latest) return;
+  if (!window.confirm(`升级到 ${latest}？升级期间 Node 将短暂停止。`)) return;
+  applying.value = true;
+  error.value = "";
+  try {
+    const result = await desktopApi.applyDesktopUpdate({ force: false });
+    if (result?.message) {
+      window.alert(result.message);
+    }
+    await load();
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    applying.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -42,10 +69,13 @@ onMounted(load);
     <header class="panel__header command-panel__header">
       <div>
         <div class="panel__title">Update</div>
-        <div class="command-panel__subtitle">Local Assistant 版本与 Release Hub 检查</div>
+        <div class="command-panel__subtitle">
+          Local Assistant 版本与 Release Hub 检查
+          <span v-if="shellManaged" class="command-panel__source"> · Shell</span>
+        </div>
       </div>
       <div class="command-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
+        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || applying" @click="load">刷新</button>
         <button type="button" class="btn btn--ghost btn--sm" @click="emit('close')">关闭</button>
       </div>
     </header>
@@ -82,13 +112,28 @@ onMounted(load);
 
         <section v-if="data.upgrade_available" class="command-section">
           <h3 class="command-section__title">安装</h3>
-          <p class="command-panel__hint">Web UI 无法直接更新二进制，请在安装目录终端执行：</p>
-          <div class="command-panel__copy-row">
-            <code class="command-kv__mono">{{ applyCommand }}</code>
-            <button type="button" class="btn btn--ghost btn--sm" @click="copyApplyCommand">复制</button>
-          </div>
+          <template v-if="canApplyInUI">
+            <p class="command-panel__hint">Shell 可在此直接升级（会先检查 Node 是否空闲）。</p>
+            <button type="button" class="btn btn--primary btn--sm" :disabled="applying" @click="applyUpgrade">
+              {{ applying ? "升级中…" : `升级到 ${data.latest_version}` }}
+            </button>
+          </template>
+          <template v-else>
+            <p class="command-panel__hint">请在安装目录终端执行：</p>
+            <div class="command-panel__copy-row">
+              <code class="command-kv__mono">{{ applyCommand }}</code>
+              <button type="button" class="btn btn--ghost btn--sm" @click="copyApplyCommand">复制</button>
+            </div>
+          </template>
         </section>
       </template>
     </div>
   </section>
 </template>
+
+<style scoped>
+.command-panel__source {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+</style>

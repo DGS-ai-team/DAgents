@@ -22,6 +22,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/webui"
 	"github.com/DGS-ai-team/DAgents/shared/config"
+	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
 	"github.com/getlantern/systray"
 )
 
@@ -119,6 +120,7 @@ type trayApp struct {
 	mPending         *systray.MenuItem
 	mPendingSessions [maxPendingMenuSlots]*systray.MenuItem
 	mOpenConsole     *systray.MenuItem
+	mUpdate          *systray.MenuItem
 	mStart           *systray.MenuItem
 	mStop            *systray.MenuItem
 	mRestart         *systray.MenuItem
@@ -141,6 +143,8 @@ func (a *trayApp) onReady() {
 	}
 	systray.AddSeparator()
 	a.mOpenConsole = systray.AddMenuItem("打开控制台", "在浏览器中打开 Web UI")
+	a.mUpdate = systray.AddMenuItem("更新：检查中…", "查看版本与升级")
+	a.mUpdate.Disable()
 	systray.AddSeparator()
 	a.mStart = systray.AddMenuItem("启动 Node", "后台启动 dagents-node")
 	a.mStop = systray.AddMenuItem("停止 Node", "停止 dagents-node")
@@ -160,6 +164,14 @@ func (a *trayApp) startBackgroundServices() {
 	bgCtx, cancel := context.WithCancel(context.Background())
 	a.bgCancel = cancel
 	a.updateChecker = update.NewChecker(a.cfg, a.layout.Home, nil)
+	a.updateChecker.SetUpgradeCallback(func(status sharedupdate.Status) {
+		if a.notifier != nil {
+			if err := a.notifier.PushUpdateAvailable(a.cfg.Local.Endpoint, status.LatestVersion); err != nil {
+				log.Printf("update toast: %v", err)
+			}
+		}
+		a.refreshUpdateUI()
+	})
 	a.updateApplier = update.NewApplier(a.cfg, a.layout, a.updateChecker, a.nodeClient)
 	a.desktopAPI = desktopapi.New(a.updateChecker, a.updateApplier)
 	go a.updateChecker.Start(bgCtx)
@@ -213,6 +225,8 @@ func (a *trayApp) clickLoop() {
 		select {
 		case <-a.mOpenConsole.ClickedCh:
 			a.openConsole()
+		case <-a.mUpdate.ClickedCh:
+			a.openUpdateSettings()
 		case <-a.mStart.ClickedCh:
 			a.setHoldStopped(false)
 			a.runAction("启动", func(ctx context.Context) error {
@@ -268,6 +282,40 @@ func (a *trayApp) openConsole() {
 			log.Printf("open console: %v", err)
 		}
 	}()
+}
+
+func (a *trayApp) openUpdateSettings() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
+		defer cancel()
+		if err := webui.EnsureNodeAndOpenURL(ctx, a.layout, a.cfg, webui.SettingsAboutURL(a.cfg.Local.Endpoint)); err != nil {
+			log.Printf("open update settings: %v", err)
+		}
+	}()
+}
+
+func (a *trayApp) refreshUpdateUI() {
+	if a.mUpdate == nil || a.updateChecker == nil {
+		return
+	}
+	status := a.updateChecker.Snapshot()
+	if !a.cfg.ManageUpdateEnabled() {
+		a.mUpdate.SetTitle("更新：未启用")
+		a.mUpdate.Disable()
+		return
+	}
+	if !status.ManageReachable {
+		a.mUpdate.SetTitle("更新：Manage 不可达")
+		a.mUpdate.Disable()
+		return
+	}
+	if status.UpgradeAvailable {
+		a.mUpdate.SetTitle(fmt.Sprintf("更新：新版本 %s 可用", status.LatestVersion))
+		a.mUpdate.Enable()
+		return
+	}
+	a.mUpdate.SetTitle("更新：已是最新")
+	a.mUpdate.Disable()
 }
 
 func (a *trayApp) openFirstPendingSession() {
@@ -418,6 +466,7 @@ func (a *trayApp) refreshStatus() {
 	}
 	a.refreshTooltip(showRunning)
 	a.refreshPendingUI()
+	a.refreshUpdateUI()
 }
 
 func (a *trayApp) refreshPendingUI() {

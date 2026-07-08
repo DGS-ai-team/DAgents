@@ -193,7 +193,7 @@
 | F-N10 | P0 | **有待办时托盘图标特殊效果**（角标/高亮/备用 icon 等） | ❌ | D39；与 F-N3 待办表联动 |
 | F-N4 | P1 | `dagents://session/<id>` 协议与 Toast 激活 | ❌ | |
 | F-N8 | P1 | 通知文案：session 摘要（如「3 项待处理」） | ❌ | 同 session 合并 |
-| F-N9 | P1 | **新版本 Toast / 托盘入口**（Manage 有 upgrade 时） | ❌ | D36；非静默，点击进升级确认 |
+| F-N9 | P1 | **新版本 Toast / 托盘入口**（Manage 有 upgrade 时） | ✅ | D36；非静默，点击进升级确认 |
 | F-N6 | P2 | tooltip 待办摘要 | ❌ | |
 
 ### 3.4 核心 — 打开 Web UI
@@ -241,7 +241,7 @@
 | F-X6 | P0 | **Session hydrate 编排**：`ensureSession` 后拉快照并恢复 UI | Web UI | 见 §3.9 |
 | F-X4 | P1 | 输入框 paste/drop 文件 → 路径 | Web UI + Shell | F-P* |
 | F-X5 | P1 | 加载时 `POST` Shell「ui.focus」`（session_id） | Web UI | 可选 localhost |
-| F-X8 | P1 | Web UI **Update 面板**改读 Shell `GET /v1/desktop/update`（非 Node `/v1/agent/update`） | ⚠️ Shell API 已就绪 | localhost；Apply 仍经 Shell 确认 |
+| F-X8 | P1 | Web UI **Update 面板**改读 Shell `GET /v1/desktop/update`（非 Node `/v1/agent/update`） | ✅ | localhost；Apply 经 Shell 确认 |
 | F-X3 | P2 | `ui.enabled: false` 时 Shell 提示 | Shell | |
 
 ### 3.9 Session 历史与 Pending HITL 恢复（跨端，Web UI P0）
@@ -364,10 +364,10 @@ Node（运行时）
 |----|--------|------|------|------|
 | F-U5 | P1 | Shell poll Manage + 缓存 `UpdateStatus` | ✅ | 见 §3.4；可读 `VERSION` + 各 bin 版本 |
 | F-U6 | P1 | Shell apply orchestration | ✅ | 见 §3.4；D37 |
-| F-N9 | P1 | 新版本 Toast / 托盘菜单 | ❌ | 见 §3.3 |
+| F-N9 | P1 | 新版本 Toast / 托盘菜单 | ✅ | 见 §3.3 |
 | F-I11 | P1 | 共享 update 库（check + download + sha256） | ✅ | D38；自 `node/internal/manage/update_checker.go` 等抽取 |
 | F-I12 | P1 | `dagents.cmd update` → Shell | ✅ | Shell absent 时回退 `dagents-client update` |
-| F-X8 | P1 | Web UI UpdatePanel → Shell localhost API | ⚠️ Shell API 已就绪 | 见 §3.7 |
+| F-X8 | P1 | Web UI UpdatePanel → Shell localhost API | ✅ | 见 §3.7 |
 | F-ND1 | P1 | Node **`GET /v1/agent/upgrade-readiness`**：`has_active_turn` / 可升级 | ✅ | Apply 前 Shell 必查；无 turn 才允许 F-U6 |
 | F-ND2 | P2 | Windows+Shell：`/v1/agent/update` **deprecated** | ⚠️ 现由 Node 提供 | 返回 `{"delegate":"shell",…}` 或文档说明；Linux/headless **保留** Node 路径 |
 

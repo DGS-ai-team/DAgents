@@ -16,3 +16,11 @@ func TestConsoleURL(t *testing.T) {
 		t.Fatalf("url = %q", got)
 	}
 }
+
+func TestSettingsAboutURL(t *testing.T) {
+	got := SettingsAboutURL("http://127.0.0.1:18765")
+	want := "http://127.0.0.1:18765/ui/settings/about"
+	if got != want {
+		t.Fatalf("url = %q want %q", got, want)
+	}
+}

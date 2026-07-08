@@ -27,10 +27,11 @@ const (
 
 // ApplyOptions 控制 Shell apply orchestration（F-U6）。
 type ApplyOptions struct {
-	CheckOnly bool
-	Force     bool
-	Out       io.Writer
-	ErrOut    io.Writer
+	CheckOnly   bool
+	Force       bool
+	SkipConfirm bool // HTTP/Web UI 调用时已由用户确认
+	Out         io.Writer
+	ErrOut      io.Writer
 }
 
 // ApplyResult 为 check/apply 结果摘要。
@@ -98,7 +99,7 @@ func (a *Applier) Run(ctx context.Context, opt ApplyOptions) (ApplyResult, int) 
 		return result, code
 	}
 
-	if !opt.Force {
+	if !opt.Force && !opt.SkipConfirm {
 		ok, err := confirmUpgrade(opt, status.LatestVersion)
 		if err != nil {
 			fmt.Fprintf(optErr(opt), "confirm failed: %v\n", err)

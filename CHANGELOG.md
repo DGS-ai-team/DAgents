@@ -14,6 +14,8 @@
 - **F-X8（骨架）Shell localhost `GET /v1/desktop/update`**：默认 `127.0.0.1:18767`；Web UI Update 面板后续改读此 API。
 - **F-U6 Shell apply orchestration**：`POST /v1/desktop/update/apply`；查 `upgrade-readiness` → 下载 → stop Node → 覆盖 `bin/*`/`VERSION` → start Node。
 - **F-I12 `dagents.cmd update` → Shell**：Shell 在跑时委托 `dagents-shell.exe update`（localhost API）；API 不可达时回退 `dagents-client update`。
+- **F-N9 新版本 Toast / 托盘菜单**：Manage 有新版本时 Toast 通知 + 托盘「更新：新版本 x 可用」入口（打开设置 › 关于）。
+- **F-X8 Web UI Update 面板**：设置 › 关于优先读 Shell `GET /v1/desktop/update`；Shell 可用时支持页面内一键升级。
 
 ---
 

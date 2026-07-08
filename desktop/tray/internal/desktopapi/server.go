@@ -49,6 +49,11 @@ func New(updates UpdateProvider, applier *shellupdate.Applier) *Server {
 	return s
 }
 
+// Handler 返回带 CORS 的 HTTP handler（Web UI 跨端口访问）。
+func (s *Server) Handler() http.Handler {
+	return withLocalhostCORS(s.mux)
+}
+
 // Start 在后台监听；ctx 取消时优雅关闭。
 func (s *Server) Start(ctx context.Context) {
 	if s == nil {
@@ -57,7 +62,7 @@ func (s *Server) Start(ctx context.Context) {
 	s.mu.Lock()
 	s.srv = &http.Server{
 		Addr:              s.addr,
-		Handler:           s.mux,
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	s.mu.Unlock()
@@ -105,7 +110,8 @@ func (s *Server) handleDesktopUpdateApply(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
 	defer cancel()
 	result, code := s.applier.Run(ctx, shellupdate.ApplyOptions{
-		Force: req.Force,
+		Force:       req.Force,
+		SkipConfirm: true,
 	})
 	status := http.StatusOK
 	writeJSON(w, status, applyResponse{

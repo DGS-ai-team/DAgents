@@ -15,6 +15,9 @@ import (
 	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
 )
 
+// UpgradeCallback 在新版本可用时回调（每个 latest 版本仅一次，F-N9）。
+type UpgradeCallback func(status sharedupdate.Status)
+
 // Checker 周期性向 Manage 查询是否有新版本；不依赖 Node 在跑。
 type Checker struct {
 	cfg    *config.Config
@@ -22,8 +25,11 @@ type Checker struct {
 	logger *slog.Logger
 	client *http.Client
 
-	mu     sync.RWMutex
-	status sharedupdate.Status
+	onUpgrade UpgradeCallback
+
+	mu               sync.RWMutex
+	status           sharedupdate.Status
+	lastUpgradeToast string
 }
 
 // NewChecker 构造 Shell Release 检查 sidecar。
@@ -68,6 +74,16 @@ func ReadInstallVersion(installHome string) string {
 	return v
 }
 
+// SetUpgradeCallback 注册新版本 Toast/托盘回调（F-N9）。
+func (c *Checker) SetUpgradeCallback(fn UpgradeCallback) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.onUpgrade = fn
+	c.mu.Unlock()
+}
+
 // Snapshot 返回最近一次检查结果副本。
 func (c *Checker) Snapshot() sharedupdate.Status {
 	c.mu.RLock()
@@ -100,9 +116,23 @@ func (c *Checker) run(ctx context.Context) {
 
 func (c *Checker) checkOnce() {
 	status := c.fetchCheck()
+	var cb UpgradeCallback
+	var shouldNotify bool
 	c.mu.Lock()
+	prevToast := c.lastUpgradeToast
 	c.status = status
+	if status.ManageReachable && status.UpgradeAvailable {
+		latest := strings.TrimSpace(status.LatestVersion)
+		if latest != "" && latest != prevToast {
+			c.lastUpgradeToast = latest
+			shouldNotify = true
+			cb = c.onUpgrade
+		}
+	} else if !status.UpgradeAvailable {
+		c.lastUpgradeToast = ""
+	}
 	c.mu.Unlock()
+
 	if status.ManageReachable && status.UpgradeAvailable {
 		c.logger.Info(
 			"release update available",
@@ -110,6 +140,9 @@ func (c *Checker) checkOnce() {
 			"latest", status.LatestVersion,
 			"platform", status.Platform,
 		)
+	}
+	if shouldNotify && cb != nil {
+		cb(status)
 	}
 }
 
