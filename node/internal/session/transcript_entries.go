@@ -7,6 +7,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
@@ -16,13 +17,22 @@ type TranscriptEntry map[string]any
 
 // MessagesToTranscriptEntries 将持久化 messages 映射为静态 transcript 快照（F-H14）。
 func MessagesToTranscriptEntries(messages []llm.Message) []TranscriptEntry {
+	return messagesToTranscriptEntries(messages, nil)
+}
+
+// MessagesToTranscriptEntriesWithMedia 在 user 条目附带 media[]（F-M5 hydrate）。
+func MessagesToTranscriptEntriesWithMedia(messages []llm.Message, reg *media.Registry) []TranscriptEntry {
+	return messagesToTranscriptEntries(messages, reg)
+}
+
+func messagesToTranscriptEntries(messages []llm.Message, reg *media.Registry) []TranscriptEntry {
 	if len(messages) == 0 {
 		return []TranscriptEntry{}
 	}
 	callIndex := buildToolCallIndex(messages)
 	out := make([]TranscriptEntry, 0, len(messages))
 	for _, msg := range messages {
-		out = append(out, messageToTranscriptEntries(msg, callIndex)...)
+		out = append(out, messageToTranscriptEntries(msg, callIndex, reg)...)
 	}
 	return out
 }
@@ -43,10 +53,10 @@ func buildToolCallIndex(messages []llm.Message) map[string]llm.ToolCall {
 	return index
 }
 
-func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCall) []TranscriptEntry {
+func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCall, reg *media.Registry) []TranscriptEntry {
 	switch strings.TrimSpace(msg.Role) {
 	case "user":
-		return []TranscriptEntry{userEntry(msg)}
+		return []TranscriptEntry{userEntry(msg, reg)}
 	case "assistant":
 		return assistantEntries(msg)
 	case "tool":
@@ -57,10 +67,22 @@ func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCa
 	return nil
 }
 
-func userEntry(msg llm.Message) TranscriptEntry {
+func userEntry(msg llm.Message, reg *media.Registry) TranscriptEntry {
 	entry := TranscriptEntry{
 		"kind": "user",
 		"text": llm.MessageTextSummary(msg),
+	}
+	if reg != nil {
+		images, mediaItems := media.UserMediaFromMessage(msg, reg)
+		if len(images) > 0 {
+			entry["images"] = images
+		} else {
+			entry["images"] = []string{}
+		}
+		if len(mediaItems) > 0 {
+			entry["media"] = mediaItems
+		}
+		return entry
 	}
 	if images := userImageURLs(msg); len(images) > 0 {
 		entry["images"] = images

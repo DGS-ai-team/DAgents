@@ -15,6 +15,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -72,6 +73,7 @@ type Orchestrator struct {
 	systemPromptBuilder SystemPromptBuilder
 
 	multimodalEnabled bool
+	mediaReg          *media.Registry
 }
 
 // SetHookHostConfig 注入 Host 路径与配额配置。
@@ -98,6 +100,14 @@ func (o *Orchestrator) SetMultimodalEnabled(enabled bool) {
 		return
 	}
 	o.multimodalEnabled = enabled
+}
+
+// SetMediaRegistry 注入 session media registry（用户图 LLM 展开，F-M5）。
+func (o *Orchestrator) SetMediaRegistry(reg *media.Registry) {
+	if o == nil {
+		return
+	}
+	o.mediaReg = reg
 }
 
 // SetChildAgentManager 注入临时 Agent 管理器（仅父 session 调用）。
@@ -319,9 +329,10 @@ func (o *Orchestrator) runOneStep(
 	*history = msgs
 	setState(StateModelStreaming)
 	publishedToolPartial := make(map[int]string)
+	llmMessages := media.ExpandMessagesForLLM(*history, o.mediaReg)
 	result, err := o.llm.StreamChat(ctx, llm.ChatRequest{
 		SystemPrompt: systemPrompt,
-		Messages:     *history,
+		Messages:     llmMessages,
 		Tools:        toolDefs,
 	}, llm.StreamHandler{
 		OnDelta: func(delta string) {

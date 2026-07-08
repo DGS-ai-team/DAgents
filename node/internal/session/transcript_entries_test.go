@@ -1,9 +1,11 @@
 package session
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 )
 
 func TestMessagesToTranscriptEntries_basicTurn(t *testing.T) {
@@ -80,6 +82,36 @@ func TestMessagesToTranscriptEntries_userImages(t *testing.T) {
 	images, ok := entries[0]["images"].([]string)
 	if !ok || len(images) != 1 || images[0] != "data:image/png;base64,abc" {
 		t.Fatalf("images = %#v", entries[0]["images"])
+	}
+}
+
+func TestMessagesToTranscriptEntries_userMediaRef(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	reg, err := media.NewRegistry("sess-tr", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4e, 0x47})
+	stored, err := media.PersistUserMessageImages(reg, llm.Message{
+		Role:    "user",
+		Content: "pic",
+		ContentParts: []llm.ContentPart{{
+			Type:     "image_url",
+			ImageURL: &llm.ImageURLPart{URL: dataURL},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := MessagesToTranscriptEntriesWithMedia([]llm.Message{stored}, reg)
+	images, _ := entries[0]["images"].([]string)
+	mediaItems, _ := entries[0]["media"].([]map[string]any)
+	if len(images) != 1 || len(mediaItems) != 1 {
+		t.Fatalf("entry=%#v", entries[0])
+	}
+	if images[0] != mediaItems[0]["url"] {
+		t.Fatalf("images=%v media=%v", images, mediaItems)
 	}
 }
 

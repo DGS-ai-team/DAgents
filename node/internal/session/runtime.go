@@ -182,6 +182,7 @@ func newRuntimeWithPublisher(
 	)
 	rt.orch.SetHookHostConfig(turnOpts.HookHost)
 	rt.orch.SetMultimodalEnabled(turnOpts.MultimodalEnabled)
+	rt.orch.SetMediaRegistry(rt.media)
 	if len(initialHookStore) > 0 {
 		rt.orch.SetHookStore(initialHookStore)
 	}
@@ -287,6 +288,14 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 	if err != nil {
 		r.logger.Warn("invalid user message", "session_id", r.session.ID, "error", err)
 		return
+	}
+	if r.media != nil && llm.MessageHasImages(userMsg) {
+		persisted, perr := media.PersistUserMessageImages(r.media, userMsg)
+		if perr != nil {
+			r.logger.Warn("persist user images failed", "session_id", r.session.ID, "error", perr)
+			return
+		}
+		userMsg = persisted
 	}
 	r.mu.Lock()
 	if r.pending != nil {

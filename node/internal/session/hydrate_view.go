@@ -66,7 +66,7 @@ func (m *Manager) buildHydrateView(
 	notifySeq int,
 	ackSeq int,
 ) *HydrateView {
-	transcript := MessagesToTranscriptEntries(messages)
+	transcript := MessagesToTranscriptEntriesWithMedia(messages, m.mediaRegistry(sessionID))
 	if transcript == nil {
 		transcript = []TranscriptEntry{}
 	}

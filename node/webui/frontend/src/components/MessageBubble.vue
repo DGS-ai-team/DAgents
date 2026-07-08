@@ -1,9 +1,18 @@
 <script setup>
+import { computed } from "vue";
 import { renderMarkdown } from "../utils/markdown.js";
 
-defineProps({
+const props = defineProps({
   entry: { type: Object, required: true },
   showReasoning: { type: Boolean, default: false },
+});
+
+const userImageSrcs = computed(() => {
+  if (props.entry.kind !== "user") return [];
+  const images = Array.isArray(props.entry.images) ? props.entry.images.filter(Boolean) : [];
+  if (images.length) return images;
+  const media = Array.isArray(props.entry.media) ? props.entry.media : [];
+  return media.map((item) => String(item?.url || "").trim()).filter(Boolean);
 });
 </script>
 
@@ -11,13 +20,14 @@ defineProps({
   <div v-if="entry.kind === 'user'" class="msg msg--user">
     <div class="msg__body">
       <div class="msg__bubble msg__bubble--user">
-        <div v-if="entry.images?.length" class="msg__images">
+        <div v-if="userImageSrcs.length" class="msg__images">
           <img
-            v-for="(src, idx) in entry.images"
+            v-for="(src, idx) in userImageSrcs"
             :key="idx"
             class="msg__image"
             :src="src"
             alt="用户上传图片"
+            loading="lazy"
           />
         </div>
         <div v-if="entry.text">{{ entry.text }}</div>
