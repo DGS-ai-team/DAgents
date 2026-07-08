@@ -1,9 +1,9 @@
 import { reactive } from "vue";
 
 const PHASE_LABELS = {
-  prefilling: "prefilling",
-  thinking: "thinking",
-  compression_blocking: "compressing",
+  prefilling: "准备回复",
+  thinking: "思考中",
+  compression_blocking: "压缩上下文",
 };
 
 export const statusPhaseOrder = ["prefilling", "thinking", "compression_blocking"];
@@ -31,22 +31,16 @@ function stopTickIfIdle() {
 
 export function startStatus(phase) {
   if (hasStatus(phase)) return;
-  statusStore.phases[phase] = { startedAt: Date.now(), done: false };
+  statusStore.phases[phase] = { startedAt: Date.now() };
   statusStore.tick = Date.now();
   ensureTick();
 }
 
 export function finishStatus(phase) {
-  const state = statusStore.phases[phase];
-  if (!state || state.done) return;
-  state.done = true;
+  if (!statusStore.phases[phase]) return;
+  delete statusStore.phases[phase];
   statusStore.tick = Date.now();
-  setTimeout(() => {
-    if (statusStore.phases[phase]?.done) {
-      delete statusStore.phases[phase];
-      stopTickIfIdle();
-    }
-  }, 600);
+  stopTickIfIdle();
 }
 
 export function finishWaitingStatuses({ beforeReasoning = false } = {}) {
@@ -55,7 +49,7 @@ export function finishWaitingStatuses({ beforeReasoning = false } = {}) {
 }
 
 export function hasStatus(phase) {
-  return !!statusStore.phases[phase] && !statusStore.phases[phase].done;
+  return !!statusStore.phases[phase];
 }
 
 export function resetStatusLines() {
@@ -64,12 +58,11 @@ export function resetStatusLines() {
 }
 
 export function statusPhaseLabel(phase) {
-  return PHASE_LABELS[phase] || String(phase || "").trim() || "status";
+  return PHASE_LABELS[phase] || String(phase || "").trim() || "状态";
 }
 
 export function formatStatusText(phase, state, now = statusStore.tick) {
   const label = statusPhaseLabel(phase);
   const elapsed = Math.max(0, Math.floor((now - state.startedAt) / 1000));
-  if (state.done) return `${label} · done · ${elapsed}s`;
   return `${label} · ${elapsed}s`;
 }

@@ -1,12 +1,16 @@
 <script setup>
 import { HELP_SECTIONS, HELP_SHORTCUTS } from "../utils/helpCommands.js";
 
+defineProps({
+  embedded: { type: Boolean, default: false },
+});
+
 const emit = defineEmits(["close", "pick"]);
 </script>
 
 <template>
-  <section class="panel panel-overlay__card help-panel">
-    <header class="panel__header help-panel__header">
+  <section class="panel panel-overlay__card help-panel" :class="{ 'help-panel--embedded': embedded }">
+    <header v-if="!embedded" class="panel__header help-panel__header">
       <div>
         <div class="panel__title">命令帮助</div>
         <div class="help-panel__subtitle">在输入框输入以 <code>/</code> 开头的命令</div>

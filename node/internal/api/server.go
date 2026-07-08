@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -561,11 +562,14 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		queuePending, hasActiveTurn, turnState, _ := s.sessions.RuntimeInfo(sess.ID)
 		count, _, _ := s.sessions.ContextSummary(sess.ID)
 		notify := s.sessions.NotificationState(sess.ID)
+		firstUser, updated := s.sessions.SessionDisplayMeta(sess.ID)
 		items = append(items, sessionSummary{
 			SessionID:        sess.ID,
 			AgentID:          sess.AgentID,
 			Active:           true,
 			MessageCount:     count,
+			FirstUserMessage: firstUser,
+			UpdatedAt:        updated.UTC().Format(time.RFC3339Nano),
 			QueuePending:     queuePending,
 			HasActiveTurn:    hasActiveTurn,
 			RunTurnPhase:     turn.RunTurnPhase(turnState),
@@ -596,6 +600,17 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			PendingHITLItems: notify.PendingHITLItems,
 		})
 	}
+	sort.Slice(items, func(i, j int) bool {
+		ti, ei := time.Parse(time.RFC3339Nano, items[i].UpdatedAt)
+		tj, ej := time.Parse(time.RFC3339Nano, items[j].UpdatedAt)
+		if ei != nil {
+			ti = time.Time{}
+		}
+		if ej != nil {
+			tj = time.Time{}
+		}
+		return ti.After(tj)
+	})
 	writeJSON(w, http.StatusOK, listSessionsResponse{Sessions: items})
 }
 
@@ -680,11 +695,32 @@ type sessionContextResponse struct {
 	SkillsCatalogBloatThreshold         int                     `json:"skills_catalog_bloat_threshold"`
 	LoadedSkills                   []skills.LoadedSkill    `json:"loaded_skills"`
 	RecentMessages                 []contextMessagePreview `json:"recent_messages"`
+	Messages                       *[]contextMessagePreview `json:"messages,omitempty"`
 	LastCompression                *compression.LastCompressionSnapshot `json:"last_compression,omitempty"`
 }
 
+func buildContextMessagePreviews(messages []llm.Message, maxRunes int) []contextMessagePreview {
+	out := make([]contextMessagePreview, 0, len(messages))
+	for _, m := range messages {
+		content := truncateContextPreview(llm.MessageTextSummary(m), maxRunes)
+		out = append(out, contextMessagePreview{
+			Role:                m.Role,
+			Content:             content,
+			ToolCallID:          m.ToolCallID,
+			ToolCallsCount:      len(m.ToolCalls),
+			HasReasoningContent: strings.TrimSpace(m.ReasoningContent) != "",
+		})
+	}
+	return out
+}
+
+func queryBoolParam(r *http.Request, key string) bool {
+	v := strings.TrimSpace(r.URL.Query().Get(key))
+	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+}
+
 func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
-	// GET context：只读快照；recent_messages 最多 10 条、content 截断 8000 rune（前端折叠预览）。
+	// GET context：只读快照；默认 recent_messages 最多 10 条；full_messages=1 返回完整 messages 列表。
 	sessionID := strings.TrimSpace(r.PathValue("session_id"))
 	if sessionID == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
@@ -700,23 +736,12 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	const previewLimit = 10
+	const contextMessagePreviewRunes = 8000
 	start := 0
 	if len(view.Messages) > previewLimit {
 		start = len(view.Messages) - previewLimit
 	}
-	recent := make([]contextMessagePreview, 0, len(view.Messages)-start)
-const contextMessagePreviewRunes = 8000
-
-	for _, m := range view.Messages[start:] {
-		content := truncateContextPreview(llm.MessageTextSummary(m), contextMessagePreviewRunes)
-		recent = append(recent, contextMessagePreview{
-			Role:                m.Role,
-			Content:             content,
-			ToolCallID:          m.ToolCallID,
-			ToolCallsCount:      len(m.ToolCalls),
-			HasReasoningContent: strings.TrimSpace(m.ReasoningContent) != "",
-		})
-	}
+	recent := buildContextMessagePreviews(view.Messages[start:], contextMessagePreviewRunes)
 	resp := sessionContextResponse{
 		SessionID:             view.SessionID,
 		MessagesCount:         view.MessagesCount,
@@ -734,6 +759,10 @@ const contextMessagePreviewRunes = 8000
 		RecentMessages:               recent,
 		LastCompression:              view.LastCompression,
 		RunTurnPhase:                 turn.RunTurnPhase(view.TurnState),
+	}
+	if queryBoolParam(r, "full_messages") {
+		msgs := buildContextMessagePreviews(view.Messages, contextMessagePreviewRunes)
+		resp.Messages = &msgs
 	}
 	if view.TurnState != "" {
 		resp.TurnState = string(view.TurnState)

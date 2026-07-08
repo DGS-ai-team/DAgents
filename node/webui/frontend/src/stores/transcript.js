@@ -22,12 +22,22 @@ import {
 
 let idSeq = 0;
 
+const SHOW_REASONING_KEY = "dagents_webui_show_reasoning";
+
+function readShowReasoningPref() {
+  try {
+    return localStorage.getItem(SHOW_REASONING_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export const transcriptStore = reactive({
   entries: [],
   lastSeq: 0,
   assistantBuffer: "",
   reasoningBuffer: "",
-  showReasoning: false,
+  showReasoning: readShowReasoningPref(),
   toolFoldVerbose: false,
 });
 
@@ -133,6 +143,18 @@ export function resumeReasoningReveal() {
   if (!transcriptStore.reasoningBuffer || !transcriptStore.showReasoning) return;
   markRevealStreaming("reasoning", true);
   scheduleReveal();
+}
+
+export function setShowReasoning(enabled) {
+  const on = !!enabled;
+  transcriptStore.showReasoning = on;
+  try {
+    if (on) localStorage.setItem(SHOW_REASONING_KEY, "1");
+    else localStorage.removeItem(SHOW_REASONING_KEY);
+  } catch {
+    /* ignore storage failures */
+  }
+  if (on) resumeReasoningReveal();
 }
 
 export function finalizeAssistant() {
@@ -363,6 +385,10 @@ export function loadTranscriptFromHydrate(entries) {
       partial: raw.partial === true,
       streaming: false,
     };
+    if (kind === "tool_call" || kind === "tool_result") {
+      const blockId = String(row.blockId || row.data?.tool_call_id || row.data?.id || "").trim();
+      if (blockId) row.blockId = blockId;
+    }
     if (kind === "user" && !Array.isArray(row.images)) {
       row.images = [];
     }

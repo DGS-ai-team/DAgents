@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import * as api from "../api/node.js";
 import { sessionStore } from "../stores/session.js";
 import { formatRelativeTime, sessionDisplayTitle, sessionRecordId } from "../utils/format.js";
@@ -9,6 +9,27 @@ const emit = defineEmits(["switch", "new", "delete"]);
 const sessions = ref([]);
 const loading = ref(false);
 const deletingId = ref("");
+
+function sessionSortTime(session) {
+  const iso = session?.updated_at || session?.UpdatedAt;
+  const ts = Date.parse(iso || "");
+  if (Number.isFinite(ts)) return ts;
+  if (session?.active || session?.Active) return Date.now();
+  return 0;
+}
+
+const sortedSessions = computed(() => {
+  const currentId = String(sessionStore.sessionId || "").trim();
+  return [...sessions.value].sort((a, b) => {
+    const aId = sessionRecordId(a);
+    const bId = sessionRecordId(b);
+    const aCurrent = currentId && aId === currentId;
+    const bCurrent = currentId && bId === currentId;
+    if (aCurrent && !bCurrent) return -1;
+    if (!aCurrent && bCurrent) return 1;
+    return sessionSortTime(b) - sessionSortTime(a);
+  });
+});
 
 async function refresh() {
   loading.value = true;
@@ -48,17 +69,14 @@ defineExpose({ refresh, setDeleting });
 <template>
   <section class="panel session-panel">
     <header class="panel__header session-panel__header">
-      <div>
-        <div class="panel__title">历史会话</div>
-        <div class="session-panel__subtitle">点击切换，+ 新建</div>
-      </div>
+      <div class="panel__title">历史会话</div>
       <button type="button" class="session-panel__icon-btn" title="新建会话" @click="createNew">+</button>
     </header>
     <div class="panel__body session-panel__body">
       <div v-if="loading" class="session-panel__loading">加载中…</div>
       <ul v-else class="session-history-list">
         <li
-          v-for="s in sessions"
+          v-for="s in sortedSessions"
           :key="sessionRecordId(s)"
           class="session-history-item"
           :class="{

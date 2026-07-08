@@ -67,8 +67,10 @@ export function compressContext(sessionId) {
   return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/compress`, { method: "POST", body: {} });
 }
 
-export function getSessionContext(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/context`);
+export function getSessionContext(sessionId, { fullMessages = false } = {}) {
+  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/context`, {
+    params: fullMessages ? { full_messages: "1" } : {},
+  });
 }
 
 export function getSessionHydrate(sessionId) {
@@ -123,6 +125,14 @@ export function listChildAgents(sessionId) {
   return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/child-agents`);
 }
 
+export function cancelChildAgent(sessionId, childSessionId, reason = "") {
+  const body = reason ? { reason } : {};
+  return apiFetch(
+    `/v1/sessions/${encodeURIComponent(sessionId)}/child-agents/${encodeURIComponent(childSessionId)}/cancel`,
+    { method: "POST", body },
+  );
+}
+
 export function getPolicy(shellQuery) {
   return apiFetch("/v1/policy", { params: shellQuery ? { shell: shellQuery } : {} });
 }
@@ -142,6 +152,25 @@ export function updateShellPolicy(shellType, updates, deletes = []) {
 
 export function listTriggers() {
   return apiFetch("/v1/triggers");
+}
+
+export function getTrigger(triggerId) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`);
+}
+
+export function createTrigger(body) {
+  return apiFetch("/v1/triggers", { method: "POST", body });
+}
+
+export function updateTrigger(triggerId, patch) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`, {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
+export function deleteTrigger(triggerId) {
+  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`, { method: "DELETE" });
 }
 
 export function uploadSkillToManage({ path, skillId, version, name, publish = false }) {

@@ -7,27 +7,55 @@ function shouldSkipEntry(entry) {
   return false;
 }
 
+export function entryBlockId(entry) {
+  return String(entry?.blockId || entry?.data?.tool_call_id || entry?.data?.id || "").trim();
+}
+
+function isSkippableBetweenTools(entry) {
+  if (!entry) return true;
+  if (entry.kind === "system") return true;
+  return shouldSkipEntry(entry);
+}
+
+function findMatchingToolResult(entries, startIdx, blockId) {
+  const bid = String(blockId || "").trim();
+  if (!bid) return -1;
+  for (let j = startIdx + 1; j < entries.length; j += 1) {
+    const next = entries[j];
+    if (isSkippableBetweenTools(next)) continue;
+    if (next.kind === "tool_result") {
+      return entryBlockId(next) === bid ? j : -1;
+    }
+    return -1;
+  }
+  return -1;
+}
+
 /** 合并同 blockId 的 tool_call + tool_result 为 tool_step（F-UI6）。 */
 export function buildStream(entries, hitlQueue = []) {
   const items = [];
+  const mergedResultIndices = new Set();
+
   for (let i = 0; i < entries.length; i += 1) {
+    if (mergedResultIndices.has(i)) continue;
     const entry = entries[i];
     if (shouldSkipEntry(entry)) continue;
 
     if (entry.kind === "tool_call") {
-      const next = entries[i + 1];
-      if (next?.kind === "tool_result" && next.blockId === entry.blockId) {
+      const blockId = entryBlockId(entry);
+      const resultIdx = findMatchingToolResult(entries, i, blockId);
+      if (resultIdx >= 0) {
+        mergedResultIndices.add(resultIdx);
         items.push({
-          key: `tool-step-${entry.blockId}`,
+          key: `tool-step-${blockId || entry.id}`,
           kind: "tool_step",
           callEntry: entry,
-          resultEntry: next,
+          resultEntry: entries[resultIdx],
         });
-        i += 1;
         continue;
       }
       items.push({
-        key: `tool-call-${entry.blockId || entry.id}`,
+        key: `tool-call-${blockId || entry.id}`,
         kind: "tool_step",
         callEntry: entry,
         resultEntry: null,
@@ -37,13 +65,15 @@ export function buildStream(entries, hitlQueue = []) {
 
     if (entry.kind === "tool_result") {
       items.push({
-        key: `tool-result-${entry.blockId || entry.id}`,
+        key: `tool-result-${entryBlockId(entry) || entry.id}`,
         kind: "tool_step",
         callEntry: null,
         resultEntry: entry,
       });
       continue;
     }
+
+    if (entry.kind === "system") continue;
 
     items.push({ key: `e-${entry.id}`, kind: entry.kind, entry });
   }

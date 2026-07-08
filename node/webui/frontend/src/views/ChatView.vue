@@ -4,10 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { connectStream } from "../sse/stream.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
-import DiagnosticsPanel from "../components/sidebar/DiagnosticsPanel.vue";
 import SessionPanel from "../components/SessionPanel.vue";
-import ContextPanel from "../components/ContextPanel.vue";
-import HelpPanel from "../components/HelpPanel.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
 import {
   sessionStore,
@@ -39,7 +36,7 @@ import {
   applyToolResult,
   clearTranscript,
   applyRoundUsage,
-  resumeReasoningReveal,
+  setShowReasoning,
   finalizePartialToolCalls,
 } from "../stores/transcript.js";
 import {
@@ -62,6 +59,12 @@ import {
   shouldSkipChildRuntimeDisplay,
 } from "../stores/hitl.js";
 import { consumeStartupURL, hydrateSession } from "../stores/hydrate.js";
+import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
+import {
+  formatChildLifecycle,
+  formatCompressionDetail,
+  formatCompressionStart,
+} from "../utils/activityFormat.js";
 import { chromeStore, setUsageFromSSE, resetUsageStrip } from "../stores/chrome.js";
 import {
   startStatus,
@@ -82,7 +85,7 @@ import {
   syncChildAgentsFromApi,
 } from "../stores/remoteWorkers.js";
 import { runSlashCommand } from "../utils/commands.js";
-import { approvalItemDisplayName, sessionDisplayTitle } from "../utils/format.js";
+import { approvalItemDisplayName, sessionDisplayTitle, sessionRecordId } from "../utils/format.js";
 
 const router = useRouter();
 const route = useRoute();
@@ -90,7 +93,6 @@ const route = useRoute();
 const hitlSelected = ref(0);
 const cancelling = ref(false);
 const streamHandle = ref(null);
-const apiBase = typeof window !== "undefined" ? window.location.origin : "";
 const sessionPanelRef = ref(null);
 const chatPanelRef = ref(null);
 
@@ -103,11 +105,10 @@ const canSend = computed(() => {
 });
 const sending = computed(() => sessionStore.awaitingTurn);
 const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_supported);
-const pendingApprovals = computed(() =>
-  hitlStore.queue.filter((h) => h.kind === "approval").reduce((n, h) => n + extractToolApprovals(h.data).length, 0),
-);
 
 const PANEL_SETTINGS_ROUTES = {
+  help: "/settings/help",
+  context: "/settings/context",
   skills: "/settings/skills",
   triggers: "/settings/triggers",
   policy: "/settings/security",
@@ -126,9 +127,7 @@ function syncReasoningDisplay(llm) {
   if (!llm?.thinking_supported) return;
   const t = String(llm.thinking || "").trim().toLowerCase();
   const enable = t && !["disabled", "off", "false", "0"].includes(t);
-  const wasHidden = !transcriptStore.showReasoning;
-  if (enable) transcriptStore.showReasoning = true;
-  if (enable && wasHidden) resumeReasoningReveal();
+  if (enable) setShowReasoning(true);
 }
 
 function restartStream() {
@@ -150,7 +149,7 @@ async function activateSessionStream() {
   }
   await syncChildAgentsFromApi();
   await nextTick();
-  chatPanelRef.value?.scrollToLastAssistant?.();
+  chatPanelRef.value?.scrollToTail?.();
 }
 
 async function refreshAfterPageRestore() {
@@ -324,37 +323,10 @@ function handleCompressionEvent(type, data) {
     return;
   }
   if (phase === "start") {
-    addSystem(`[compression] silent · start · target ${data.compressed_message_count || "?"}`);
+    addSystem(formatCompressionStart(mode, data));
   } else if (phase === "end") {
     addSystem(formatCompressionDetail(mode, data));
   }
-}
-
-function formatChildLifecycle(type, data) {
-  const id = String(data.child_session_id || "").slice(0, 16);
-  const purpose = String(data.purpose || "").trim();
-  if (type === "temporary_agent_created") return `临时 Agent 已创建 · ${purpose || id}`;
-  if (type === "temporary_agent_cancelled") return `临时 Agent 已取消 · ${id}`;
-  return `临时 Agent 已结束 · ${id} · ${data.status || "completed"}`;
-}
-
-function formatCompressionDetail(mode, data) {
-  const status = data.status || "done";
-  const count = data.compressed_message_count || 0;
-  if (status === "applied") {
-    let line = `[compression] ${mode} applied — replaced ${count} messages`;
-    const prompt = data.prompt_tokens;
-    const completion = data.completion_tokens;
-    if (prompt != null && completion != null) {
-      const rate = data.token_reduction_rate != null ? `, −${Math.round(Number(data.token_reduction_rate) * 100)}%` : "";
-      line += ` (prompt ${prompt}→completion ${completion}${rate})`;
-    }
-    return line;
-  }
-  if (status === "failed") return `[compression] ${mode} failed — keeping original context`;
-  if (status === "stale") return `[compression] ${mode} stale — discarded`;
-  if (status === "invalid") return `[compression] ${mode} invalid — discarded`;
-  return `[compression] ${mode} finished (${status})`;
 }
 
 async function submitHitlApproval(approveAll, hitlIndex = 0) {
@@ -523,7 +495,7 @@ async function handleCommand(cmd) {
     return;
   }
   if (res.action === "reasoning") {
-    transcriptStore.showReasoning = ["on", "true", "1"].includes(String(res.arg).toLowerCase());
+    setShowReasoning(["on", "true", "1"].includes(String(res.arg).toLowerCase()));
     addSystem(`reasoning 显示: ${transcriptStore.showReasoning ? "开启" : "关闭"}`);
     return;
   }
@@ -581,13 +553,13 @@ async function createNewSession() {
   resetEventTracking();
   clearHitl();
   restartStream();
-  addSystem(`新 session: ${created.session_id}`);
   syncRouteSession(created.session_id);
   sessionPanelRef.value?.refresh?.();
+  await nextTick();
+  chatPanelRef.value?.scrollToTail?.();
 }
 
 async function switchSession(id) {
-  const prev = sessionStore.sessionId;
   persistSessionId(id);
   resetStatusLines();
   resetToolStream();
@@ -604,15 +576,12 @@ async function switchSession(id) {
     return;
   }
   restartStream();
-  if (id !== prev) {
-    addSystem(`已切换 session: ${sessionStore.sessionId}`);
-  }
   refreshContextTokens();
   await syncChildAgentsFromApi();
   syncRouteSession(id);
   sessionPanelRef.value?.refresh?.();
   await nextTick();
-  chatPanelRef.value?.scrollToLastAssistant?.();
+  chatPanelRef.value?.scrollToTail?.();
 }
 
 async function deleteSessionById(payload) {
@@ -624,29 +593,43 @@ async function deleteSessionById(payload) {
   const session = typeof payload === "object" && payload?.session ? payload.session : { session_id: sid };
   const label = sessionDisplayTitle(session);
   if (!window.confirm(`确定删除会话「${label}」？\n\n将停止该会话并清除持久化记录，不可恢复。`)) return;
+  const deletingCurrent = sessionStore.sessionId === sid;
   sessionStore.error = "";
   sessionPanelRef.value?.setDeleting?.(sid);
   try {
     await api.deleteSession(sid);
-    if (sessionStore.sessionId === sid) {
+    streamHandle.value?.close();
+    streamHandle.value = null;
+
+    if (deletingCurrent) {
       finishTurn();
       hitlStore.busy = false;
-      await createNewSession();
+      clearTranscript();
+      clearHitl();
+      resetStatusLines();
+      resetToolStream();
+      resetRemoteWorkers();
+      resetEventTracking();
+      persistSessionId("");
+
+      const res = await api.listSessions();
+      const remaining = (res.sessions || res.items || []).filter((row) => sessionRecordId(row) !== sid);
+      if (remaining.length > 0) {
+        await switchSession(sessionRecordId(remaining[0]));
+      } else {
+        await createNewSession();
+      }
     } else {
-      addSystem(`已删除 session: ${sid.slice(0, 16)}…`);
-      sessionPanelRef.value?.refresh?.();
+      await sessionPanelRef.value?.refresh?.();
     }
   } catch (e) {
     sessionStore.error = e.message;
+    if (deletingCurrent && sessionStore.sessionId === sid) {
+      await activateSessionStream();
+    }
   } finally {
     sessionPanelRef.value?.setDeleting?.("");
   }
-}
-
-async function openContextPanel() {
-  sessionStore.error = "";
-  await ensureSession();
-  chromeStore.panel = "context";
 }
 
 async function toggleThinkingMode() {
@@ -730,9 +713,15 @@ function closePanel() {
   chromeStore.panel = null;
 }
 
-function onHelpPick(cmd) {
-  closePanel();
-  chatPanelRef.value?.setDraft?.(cmd);
+function consumeComposerDraft() {
+  try {
+    const cmd = sessionStorage.getItem(COMPOSER_DRAFT_KEY);
+    if (!cmd) return;
+    sessionStorage.removeItem(COMPOSER_DRAFT_KEY);
+    nextTick(() => chatPanelRef.value?.setDraft?.(cmd));
+  } catch {
+    /* ignore */
+  }
 }
 
 async function onSessionSwitch(sessionId) {
@@ -785,6 +774,7 @@ onMounted(async () => {
   await refreshMeta();
   await activateSessionStream();
   refreshContextTokens();
+  consumeComposerDraft();
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("pageshow", onPageShow);
 });
@@ -793,6 +783,7 @@ onActivated(() => {
   if (sessionStore.sessionId && !streamHandle.value) {
     void activateSessionStream();
   }
+  consumeComposerDraft();
 });
 
 watch(
@@ -825,9 +816,6 @@ watch(
     </aside>
 
     <div class="app__main-col">
-      <div v-if="pendingApprovals > 0" class="chat-hitl-sticky">
-        {{ pendingApprovals }} 项待你确认 — 请在对话中批准或拒绝
-      </div>
       <div v-if="sessionStore.error" class="chat-error-banner">{{ sessionStore.error }}</div>
 
       <MainChatPanel
@@ -845,7 +833,6 @@ watch(
         :llm-settings="chromeStore.llmSettings"
         @send="onSendMessage"
         @cancel="cancelTurn"
-        @open-context="openContextPanel"
         @toggle-thinking="toggleThinkingMode"
         @cycle-effort="cycleThinkingEffort"
         @approve-all="(idx) => submitHitlApproval(true, idx)"
@@ -857,12 +844,8 @@ watch(
       />
 
       <div v-if="chromeStore.panel" class="panel-overlay" @click.self="closePanel">
-        <ContextPanel v-if="chromeStore.panel === 'context'" @close="closePanel" />
-        <HelpPanel v-else-if="chromeStore.panel === 'help'" @close="closePanel" @pick="onHelpPick" />
-        <ChildrenPanel v-else-if="chromeStore.panel === 'children'" @close="closePanel" />
+        <ChildrenPanel v-if="chromeStore.panel === 'children'" @close="closePanel" />
       </div>
     </div>
-
-    <DiagnosticsPanel :api-base="apiBase" @open-context="openContextPanel" />
   </div>
 </template>

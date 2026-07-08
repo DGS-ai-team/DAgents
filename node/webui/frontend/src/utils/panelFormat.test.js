@@ -13,7 +13,7 @@ describe("panelFormat", () => {
   });
 
   it("formats trigger interval condition", () => {
-    expect(formatTriggerCondition({ interval_seconds: 300 })).toBe("interval 300s");
+    expect(formatTriggerCondition({ interval_seconds: 300 })).toBe("每 300 秒");
   });
 
   it("formats unix timestamp", () => {

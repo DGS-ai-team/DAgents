@@ -8,7 +8,33 @@
 
 ### 新增
 
-（v0.6.1 待交付：F-M0–M5、F-H10/H11、F-UI0–UI13。）
+- **v0.6.1 Web UI 产品化（F-UI1–UI6, F-UI8–UI11）**：`vue-router` 聊天/设置路由；两栏聊天布局与产品化顶栏；工具 **一行摘要 + 展开详情**（`ToolSummaryRow`）；Composer 简化（Enter 发送）；HITL sticky 与会话未读/待审批 badge；**设置** 导航（通用 / 技能 / 定时任务 / 安全 / 关于 / 帮助 / 上下文）。
+- **F-UI10 定时任务管理**：设置 › 定时任务 — 列表、新建、编辑、启用/禁用、删除（无手动 fire / history）。
+- **F-UI11 子 Agent 取消（Web UI）**：设置 › 通用 › 子 Agent 列表；运行中项可 **取消**（`POST …/child-agents/{id}/cancel`）；`/children` overlay 同步支持。
+- **F-UI7 system 消息降级**：压缩、子 Agent 生命周期等 system 消息不再插入主消息流（聊天区不展示）。
+- **F-UI9 图片 lightbox**：工具结果与用户消息缩略图点击全屏预览（Esc / 遮罩关闭，多图可切换）。
+- **设置 › 通用 › 显示思考过程**：控制对话区是否展示 reasoning / thinking 流（`localStorage` 持久化；`/reasoning on|off` 仍可用）。
+- **设置 › 上下文**：完整会话消息浏览（`GET …/context?full_messages=1`）；自 Composer 移除「上下文」按钮。
+- **Media 轨道（F-M0–M5, F-H10）**：`show_image` 工具；`MediaRegistry` + `GET …/media/{id}`；工具结果与 hydrate 含 `media[]`；`ImageResultPreview` 内联缩略图；F5 hydrate 回放。
+- **品牌与顶栏**：雪花 favicon / 顶栏图标；帮助迁入 **设置 › 帮助**；顶栏「设置」改为齿轮图标。
+
+### 变更
+
+- **聊天滚动**：统一滚到底部 + `followTail`；手动上滚暂停跟随，发消息或回到底部恢复。
+- **会话侧栏**：按 `updated_at` 降序；当前会话置顶；删除当前会话后自动切换或新建；切换/新建不再插入 system 切换提示；移除副标题「点击切换，+ 新建」。
+- **布局**：移除右侧常驻诊断栏；连接状态保留顶栏指示；帮助页与设置页取消 640px 宽度限制。
+- **Node**：tool 消息持久化 `Name`；hydrate 回溯 `tool_name`；列表 API 补活跃 session 的 `updated_at` / `first_user_message`。
+- **主路径文案中文化（F-UI12）**：流式状态（准备回复 / 思考中 / 压缩上下文）、压缩活动记录等改为中文。
+- **流式状态展示（方案 A）**：有正文流式输出后不再单独显示「准备回复」；状态行完成后立即移除；「准备回复」「正在生成」与思考过程流式均为纯三点动画（无文字标签），完成后只保留正文。
+- **CSS 拆分（F-UI13）**：`styles/tokens.css`、`styles/layout.css`；`workbench.css` 保留组件样式并通过 `@import` 引用。
+
+### 修复
+
+- **Web UI**：UserInfo 选项提交、`user_message_deferred` 等旁路 SSE 可见；删除会话后仍停留原 session 的问题。
+- **工具展示**：`toolUserLabel` 与 tool 占位符；禁止空白 `tool()` 摘要。
+- **Hydrate 工具行**：`buildStream` 按 `blockId` 合并 tool_call + tool_result，避免历史还原成「进行中 + 已完成」两行。
+
+（v0.6.1 功能开发已完成；打 tag 前见 [`docs/design/v0.6.1-smoke-checklist.md`](docs/design/v0.6.1-smoke-checklist.md)。）
 
 ---
 

@@ -1,6 +1,6 @@
 # Web UI 产品化重构（v0.6.1）
 
-**状态（2026-07）**：已确认产品决策，待实现。  
+**状态（2026-07）**：**已实现**（待 Smoke 与 tag `v0.6.1`）。  
 **版本**：Git tag **`v0.6.1`**（与 Media API、`show_image` 同 tag 交付）。  
 **读者**：Web UI / Node 前端实现；与 [node-ui-media-display.md](./node-ui-media-display.md)、[windows-desktop-shell.md](./windows-desktop-shell.md) 配套。
 
@@ -349,17 +349,19 @@ Phase 7   F-UI7 + F-UI9 + F-UI12 + F-UI13   活动记录、lightbox、文案、C
 
 ## 10. 验收（Smoke 扩展，tag v0.6.1）
 
-在 [v0.6.0-smoke-checklist.md](./v0.6.0-smoke-checklist.md) 基础上增加：
+完整检查表（含记录模板）：[`v0.6.1-smoke-checklist.md`](./v0.6.1-smoke-checklist.md)
 
-1. **布局**：首次打开见会话列表 + 聊天，**无** SSE/API 常驻；诊断默认折叠，展开可见连接信息。  
-2. **对话**：Enter 发送；工具执行默认 **一行摘要**，点击可展开。  
-3. **图片**：`show_image` / browser 截图见缩略图；F5 后仍在。  
-4. **未读**：Shell 未读 session 在列表有 **点/badge**；打开后消除（与 ack 一致）。  
-5. **HITL**：待审批 sticky + inline 批准；UserInfo 选项选择正确提交。  
-6. **旁路**：trigger 产生 deferred 消息 → Web UI **可见**（F-UI0a）。  
-7. **Triggers**：设置 › 定时任务 — 编辑调度、禁用、再启用生效；**无**「立即运行」按钮。  
-8. **深链**：Shell `?session=` 与 `/chat/:id` 均可打开正确会话。  
-9. **Slash**：`/help` 仍可用（帮助页或 overlay）；power user 路径不回归。
+摘要：
+
+1. **布局**：两栏（会话 + 聊天）；顶栏连接点 + 设置；**无** SSE/API 常驻诊断栏。  
+2. **对话**：Enter 发送；工具 **一行摘要** + 展开；hydrate 后 tool 行不重复。  
+3. **图片**：`show_image` / browser 截图 + lightbox；F5 后仍在。  
+4. **未读 / HITL**：会话 badge；inline 审批；UserInfo 选项正确。  
+5. **旁路**：trigger deferred 消息可见。  
+6. **Triggers**：设置 › 定时任务 — 编辑/启停/删除；**无** fire。  
+7. **深链**：`?session=` 与 `/chat/:id` 可用。  
+8. **设置**：显示思考过程、子 Agent 取消、上下文页。  
+9. **Slash**：`/help`、`/reasoning` 等 power user 路径仍可用。
 
 ---
 
@@ -378,3 +380,4 @@ Phase 7   F-UI7 + F-UI9 + F-UI12 + F-UI13   活动记录、lightbox、文案、C
 | 日期 | 变更 |
 |------|------|
 | 2026-07 | 初稿：产品决策确认（Windows 普通用户、可折叠诊断、工具摘要+展开、Triggers 编辑启停无 fire、vue-router） |
+| 2026-07 | **实现完成**：两栏布局、设置导航、Media、F-UI7–13；Smoke 见 [`v0.6.1-smoke-checklist.md`](./v0.6.1-smoke-checklist.md) |

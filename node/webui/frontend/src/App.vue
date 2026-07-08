@@ -1,5 +1,6 @@
 <script setup>
 import { RouterView } from "vue-router";
+import ImageLightbox from "./components/ImageLightbox.vue";
 
 defineOptions({ name: "AppRoot" });
 </script>
@@ -10,4 +11,5 @@ defineOptions({ name: "AppRoot" });
       <component :is="Component" />
     </KeepAlive>
   </RouterView>
+  <ImageLightbox />
 </template>

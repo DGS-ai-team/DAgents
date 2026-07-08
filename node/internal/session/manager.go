@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 
@@ -263,6 +264,19 @@ func (m *Manager) ListPersisted(ctx context.Context) ([]store.Summary, error) {
 		return nil, nil
 	}
 	return m.store.List(ctx)
+}
+
+// SessionDisplayMeta 用于 session 列表展示：优先 DB 中的 updated_at / 首条用户消息；新活跃 session 用当前时间。
+func (m *Manager) SessionDisplayMeta(sessionID string) (firstUser string, updatedAt time.Time) {
+	updatedAt = time.Now().UTC()
+	if m.store == nil {
+		return "", updatedAt
+	}
+	rec, err := m.store.Load(context.Background(), sessionID)
+	if err != nil || rec == nil {
+		return "", updatedAt
+	}
+	return rec.FirstUserMessage, rec.UpdatedAt
 }
 
 // RuntimeInfo 返回 session 运行时观测（队列深度、turn 状态）。

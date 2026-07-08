@@ -6,9 +6,11 @@ const route = useRoute();
 
 const nav = [
   { to: "/settings/general", label: "通用" },
+  { to: "/settings/context", label: "上下文" },
   { to: "/settings/skills", label: "技能" },
   { to: "/settings/triggers", label: "定时任务" },
   { to: "/settings/security", label: "安全" },
+  { to: "/settings/help", label: "帮助" },
   { to: "/settings/about", label: "关于" },
 ];
 </script>

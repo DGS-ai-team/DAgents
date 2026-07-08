@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { entryMedia, showImageCaption } from "../utils/showImage.js";
+import { openLightbox } from "../stores/lightbox.js";
 
 const props = defineProps({
   entry: { type: Object, default: null },
@@ -8,19 +9,28 @@ const props = defineProps({
 
 const media = computed(() => entryMedia(props.entry));
 const caption = computed(() => showImageCaption(props.entry));
+
+function openImage(index) {
+  openLightbox(
+    media.value.map((item) => ({
+      src: item.url,
+      alt: item.label || item.caption || caption.value || "图片",
+    })),
+    index,
+  );
+}
 </script>
 
 <template>
   <div v-if="media.length" class="tool-media-preview">
     <p v-if="caption" class="tool-media-preview__caption">{{ caption }}</p>
     <div class="tool-media-preview__grid">
-      <a
-        v-for="item in media"
+      <button
+        v-for="(item, index) in media"
         :key="item.id || item.url"
-        class="tool-media-preview__link"
-        :href="item.url"
-        target="_blank"
-        rel="noopener noreferrer"
+        type="button"
+        class="tool-media-preview__btn"
+        @click="openImage(index)"
       >
         <img
           class="tool-exec-bubble__image tool-media-preview__img"
@@ -28,7 +38,7 @@ const caption = computed(() => showImageCaption(props.entry));
           :alt="item.label || item.caption || '图片'"
           loading="lazy"
         />
-      </a>
+      </button>
     </div>
   </div>
 </template>
@@ -51,9 +61,13 @@ const caption = computed(() => showImageCaption(props.entry));
   gap: 8px;
 }
 
-.tool-media-preview__link {
+.tool-media-preview__btn {
   display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
   line-height: 0;
+  cursor: zoom-in;
 }
 
 .tool-media-preview__img {

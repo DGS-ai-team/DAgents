@@ -5,7 +5,7 @@ import TriggersPanel from "../../components/TriggersPanel.vue";
 <template>
   <div class="settings-page settings-embedded">
     <h1 class="settings-page__title">定时任务</h1>
-    <p class="settings-page__hint">查看与管理自动触发的任务（编辑与启停将在后续版本完善）。</p>
+    <p class="settings-page__hint">查看与管理自动触发的任务：编辑调度、启用或禁用、新建与删除。</p>
     <TriggersPanel @close="() => {}" />
   </div>
 </template>

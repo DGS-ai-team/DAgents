@@ -67,21 +67,42 @@ function floatFromAny(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** 对齐 TUI formatTriggerCondition。 */
+const WEEKDAY_LABELS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+function formatClock(hour, minute) {
+  const pad = (x) => String(x).padStart(2, "0");
+  return `${pad(hour)}:${pad(minute)}`;
+}
+
+/** 对齐 TUI formatTriggerCondition（产品 UI 中文摘要）。 */
 export function formatTriggerCondition(condition) {
-  if (!condition || typeof condition !== "object") return "manual";
+  if (!condition || typeof condition !== "object") return "手动";
   const interval = intFromAny(condition.interval_seconds);
-  if (interval > 0) return `interval ${interval}s`;
+  if (interval > 0) return `每 ${interval} 秒`;
   const fireAt = floatFromAny(condition.fire_at);
-  if (fireAt > 0) return `once @ ${formatUnixTime(fireAt)}`;
+  if (fireAt > 0) return `单次 · ${formatUnixTime(fireAt)}`;
   const sched = condition.schedule;
   if (sched && typeof sched === "object" && Object.keys(sched).length > 0) {
-    const kind = String(sched.kind || "calendar").trim() || "calendar";
-    return `schedule:${kind}`;
+    const kind = String(sched.kind || "daily").trim().toLowerCase();
+    const hour = intFromAny(sched.hour);
+    const minute = intFromAny(sched.minute);
+    const clock = formatClock(hour, minute);
+    if (kind === "daily") return `每天 ${clock}`;
+    if (kind === "weekly") {
+      const wd = intFromAny(sched.weekday);
+      const label = WEEKDAY_LABELS[wd] || `周${wd}`;
+      return `每${label} ${clock}`;
+    }
+    if (kind === "monthly") {
+      const day = intFromAny(sched.day);
+      const dayLabel = day < 0 ? `倒数第 ${-day} 天` : `${day} 日`;
+      return `每月 ${dayLabel} ${clock}`;
+    }
+    return `日历 ${kind} ${clock}`;
   }
   const cmd = String(condition.cmd || "").trim();
-  if (cmd) return `cmd gate: ${truncateText(cmd, 32)}`;
-  return "manual";
+  if (cmd) return `门控脚本 · ${truncateText(cmd, 32)}`;
+  return "手动";
 }
 
 export function formatUnixTime(ts) {

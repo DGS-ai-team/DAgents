@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
-import * as api from "../api/node.js";
+import { computed, ref } from "vue";
 import { sessionStore } from "../stores/session.js";
+import { useChildAgents, formatChildAgentStatus, isChildAgentActive } from "../composables/useChildAgents.js";
+import { formatRelativeTime } from "../utils/format.js";
 import { shortId } from "../utils/panelFormat.js";
 
 const props = defineProps({
@@ -10,46 +11,26 @@ const props = defineProps({
 
 const emit = defineEmits(["close"]);
 
-const loading = ref(false);
-const error = ref("");
+const sessionId = computed(() => props.sessionId || sessionStore.sessionId);
 const showRaw = ref(false);
-const data = ref(null);
 
-const items = computed(() => {
-  const rows = data.value?.items;
-  return Array.isArray(rows) ? rows : [];
-});
-
-async function load() {
-  const sid = props.sessionId || sessionStore.sessionId;
-  if (!sid) return;
-  loading.value = true;
-  error.value = "";
-  try {
-    data.value = await api.listChildAgents(sid);
-  } catch (e) {
-    error.value = e.message;
-    data.value = null;
-  } finally {
-    loading.value = false;
-  }
-}
-
-function isActive(status) {
-  const s = String(status || "").toLowerCase();
-  return s && !["completed", "failed", "cancelled", "expired"].includes(s);
-}
-
-onMounted(load);
-watch(() => props.sessionId || sessionStore.sessionId, load);
+const {
+  loading,
+  error,
+  data,
+  items,
+  cancellingId,
+  load,
+  cancelChild,
+} = useChildAgents(sessionId);
 </script>
 
 <template>
   <section class="panel panel-overlay__card command-panel children-panel">
     <header class="panel__header command-panel__header">
       <div>
-        <div class="panel__title">Children</div>
-        <div class="command-panel__subtitle">{{ sessionId || sessionStore.sessionId || "—" }}</div>
+        <div class="panel__title">子 Agent</div>
+        <div class="command-panel__subtitle">{{ sessionId || "—" }}</div>
       </div>
       <div class="command-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
@@ -72,31 +53,48 @@ watch(() => props.sessionId || sessionStore.sessionId, load);
               v-for="(item, index) in items"
               :key="item.child_session_id"
               class="command-card"
-              :class="{ 'command-card--active-child': isActive(item.status) }"
+              :class="{ 'command-card--active-child': isChildAgentActive(item.status) }"
             >
               <div class="command-card__main">
                 <div class="command-card__title">
-                  {{ index + 1 }}. {{ shortId(item.child_session_id, 32) }}
-                  <span class="command-card__badge" :class="isActive(item.status) ? 'command-card__badge--active' : ''">
-                    {{ item.status || "unknown" }}
+                  {{ index + 1 }}. {{ item.purpose?.trim() || shortId(item.child_session_id, 24) }}
+                  <span
+                    class="command-card__badge"
+                    :class="isChildAgentActive(item.status) ? 'command-card__badge--active' : 'command-card__badge--muted'"
+                  >
+                    {{ formatChildAgentStatus(item.status) }}
                   </span>
                 </div>
                 <dl class="command-kv-list command-kv-list--compact">
-                  <div class="command-kv"><dt>Purpose</dt><dd>{{ item.purpose || "—" }}</dd></div>
+                  <div class="command-kv"><dt>ID</dt><dd>{{ shortId(item.child_session_id, 32) }}</dd></div>
+                  <div class="command-kv"><dt>用途</dt><dd>{{ item.purpose || "—" }}</dd></div>
                   <div class="command-kv">
-                    <dt>Tools</dt>
+                    <dt>工具</dt>
                     <dd>{{ (item.allowed_tools || []).join(", ") || "—" }}</dd>
                   </div>
                   <div class="command-kv">
-                    <dt>Turns</dt>
+                    <dt>轮次</dt>
                     <dd>{{ item.turn_count ?? 0 }} / {{ item.max_turns ?? "—" }}</dd>
                   </div>
-                  <div class="command-kv"><dt>Expires</dt><dd>{{ item.expires_at || "—" }}</dd></div>
+                  <div class="command-kv">
+                    <dt>过期</dt>
+                    <dd>{{ item.expires_at ? formatRelativeTime(item.expires_at) : "—" }}</dd>
+                  </div>
                 </dl>
+                <div v-if="isChildAgentActive(item.status)" class="command-card__actions">
+                  <button
+                    type="button"
+                    class="btn btn--ghost btn--sm"
+                    :disabled="cancellingId === item.child_session_id"
+                    @click="cancelChild(item.child_session_id)"
+                  >
+                    {{ cancellingId === item.child_session_id ? "取消中…" : "取消" }}
+                  </button>
+                </div>
               </div>
             </li>
           </ul>
-          <p v-else class="command-panel__empty">当前 session 无活跃临时 Agent</p>
+          <p v-else class="command-panel__empty">当前 session 无临时 Agent</p>
         </section>
       </template>
     </div>

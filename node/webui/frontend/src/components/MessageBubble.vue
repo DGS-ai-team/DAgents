@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { renderMarkdown } from "../utils/markdown.js";
+import { openLightbox } from "../stores/lightbox.js";
 
 const props = defineProps({
   entry: { type: Object, required: true },
@@ -14,6 +15,13 @@ const userImageSrcs = computed(() => {
   const media = Array.isArray(props.entry.media) ? props.entry.media : [];
   return media.map((item) => String(item?.url || "").trim()).filter(Boolean);
 });
+
+function openUserImage(index) {
+  openLightbox(
+    userImageSrcs.value.map((src) => ({ src, alt: "用户上传图片" })),
+    index,
+  );
+}
 </script>
 
 <template>
@@ -21,14 +29,20 @@ const userImageSrcs = computed(() => {
     <div class="msg__body">
       <div class="msg__bubble msg__bubble--user">
         <div v-if="userImageSrcs.length" class="msg__images">
-          <img
+          <button
             v-for="(src, idx) in userImageSrcs"
             :key="idx"
-            class="msg__image"
-            :src="src"
-            alt="用户上传图片"
-            loading="lazy"
-          />
+            type="button"
+            class="msg__image-btn"
+            @click="openUserImage(idx)"
+          >
+            <img
+              class="msg__image"
+              :src="src"
+              alt="用户上传图片"
+              loading="lazy"
+            />
+          </button>
         </div>
         <div v-if="entry.text">{{ entry.text }}</div>
       </div>
@@ -49,8 +63,7 @@ const userImageSrcs = computed(() => {
   <div v-else-if="entry.kind === 'assistant'" class="msg msg--assistant" data-kind="assistant" :class="{ 'msg--generating': entry.streaming }">
     <div class="msg__body">
       <div v-if="entry.streaming && !entry.text" class="msg__body--hint-only">
-        <div class="msg__hint msg__hint--stream-meta">
-          <span class="msg__meta-label">generating</span>
+        <div class="msg__hint msg__hint--stream-meta msg__hint--dots-only" aria-label="正在生成">
           <span class="msg__meta-dots" aria-hidden="true">
             <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
           </span>
@@ -64,27 +77,32 @@ const userImageSrcs = computed(() => {
     </div>
   </div>
 
-  <div v-else-if="entry.kind === 'reasoning' && showReasoning" class="msg msg--reasoning" :class="{ 'msg--reasoning-collapsed': !entry.text && entry.streaming }">
+  <div
+    v-else-if="entry.kind === 'reasoning' && showReasoning"
+    class="msg msg--reasoning"
+    :class="{ 'msg--reasoning-streaming': entry.streaming }"
+  >
     <div class="msg__body">
-      <div class="msg__hint msg__hint--stream-meta">
-        <span class="msg__meta-label">thinking</span>
-        <span v-if="entry.streaming" class="msg__meta-dots" aria-hidden="true">
-          <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
-        </span>
-        <span v-else class="msg__meta-done">done</span>
+      <div v-if="entry.streaming && !entry.text" class="msg__body--hint-only">
+        <div class="msg__hint msg__hint--stream-meta msg__hint--dots-only" aria-label="思考中">
+          <span class="msg__meta-dots" aria-hidden="true">
+            <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
+          </span>
+        </div>
       </div>
       <div v-if="entry.text" class="msg__bubble msg__bubble--reasoning">{{ entry.text }}</div>
-    </div>
-  </div>
-
-  <div v-else-if="entry.kind === 'system'" class="msg msg--system">
-    <div class="msg__body msg__body--wide">
-      <div class="msg__bubble msg__bubble--system">{{ entry.text }}</div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.msg__image-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  line-height: 0;
+}
 .msg__images {
   display: flex;
   flex-wrap: wrap;

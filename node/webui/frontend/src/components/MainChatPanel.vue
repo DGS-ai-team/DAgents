@@ -30,7 +30,6 @@ const props = defineProps({
 const emit = defineEmits([
   "send",
   "cancel",
-  "open-context",
   "toggle-thinking",
   "cycle-effort",
   "approve-all",
@@ -133,14 +132,29 @@ function buildContentParts(text, images) {
   return parts;
 }
 
-watch(
-  () => [stream.value.length, activeStatusPhases.value.length],
-  async () => {
-    await nextTick();
+/** 消息/HITL/状态条等内容变化指纹；流式 assistant 改 text 长度也会触发。 */
+const tailContentKey = computed(() => {
+  const parts = [stream.value.length, props.hitlQueue.length, activeStatusPhases.value.length];
+  for (const entry of props.entries) {
+    parts.push(entry.id, entry.kind, (entry.text || "").length, entry.streaming ? 1 : 0);
+  }
+  for (const hitl of props.hitlQueue) {
+    parts.push(hitl.kind, hitl.data?.request_id || hitl.data?.approval_id || "");
+  }
+  return parts.join("\0");
+});
+
+function maybeScrollToTail() {
+  if (!followTail.value) return;
+  nextTick(() => {
     const el = streamRef.value;
-    if (el && followTail.value) el.scrollTop = el.scrollHeight;
-  },
-);
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
+
+watch(tailContentKey, () => {
+  maybeScrollToTail();
+});
 
 function onStreamScroll() {
   const el = streamRef.value;
@@ -150,25 +164,7 @@ function onStreamScroll() {
 
 function scrollToTail() {
   followTail.value = true;
-  nextTick(() => {
-    const el = streamRef.value;
-    if (el) el.scrollTop = el.scrollHeight;
-  });
-}
-
-function scrollToLastAssistant() {
-  followTail.value = false;
-  nextTick(() => {
-    const el = streamRef.value;
-    if (!el) return;
-    const nodes = el.querySelectorAll(".msg[data-kind='assistant']");
-    const target = nodes.length ? nodes[nodes.length - 1] : null;
-    if (target) {
-      target.scrollIntoView({ block: "end", behavior: "auto" });
-      return;
-    }
-    scrollToTail();
-  });
+  maybeScrollToTail();
 }
 
 async function submit() {
@@ -198,7 +194,6 @@ defineExpose({
   setDraft(text) {
     input.value = String(text || "");
   },
-  scrollToLastAssistant,
   scrollToTail,
 });
 </script>
@@ -219,12 +214,12 @@ defineExpose({
       <div v-if="!stream.length" class="chat__empty">
         <div class="chat__empty-inner">
           <div class="chat__empty-title">开始对话</div>
-          <div class="chat__empty-hint">输入消息与 Agent 协作，或使用 <code>/help</code> 查看命令</div>
+          <div class="chat__empty-hint">输入消息与 Agent 协作，或在设置 › 帮助中查看命令</div>
         </div>
       </div>
       <template v-for="item in stream" :key="item.key">
         <MessageBubble
-          v-if="['user', 'assistant', 'reasoning', 'system'].includes(item.kind)"
+          v-if="['user', 'assistant', 'reasoning'].includes(item.kind)"
           :entry="item.entry"
           :show-reasoning="showReasoning"
         />
@@ -267,7 +262,6 @@ defineExpose({
               :thinking-supported="thinkingSupported"
               :llm-settings="llmSettings"
               :disabled="disabled || cancelling"
-              @open-context="emit('open-context')"
               @toggle-thinking="emit('toggle-thinking')"
               @cycle-effort="emit('cycle-effort')"
             />

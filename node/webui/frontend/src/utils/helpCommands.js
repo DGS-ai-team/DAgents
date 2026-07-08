@@ -1,4 +1,6 @@
 /** Web UI slash 命令帮助（对齐 TUI FormatHelpPanelBody，仅含 Web 已实现的命令）。 */
+export const COMPOSER_DRAFT_KEY = "dagents.ui.composerDraft";
+
 export const HELP_SHORTCUTS = [
   { keys: "Enter", desc: "发送消息" },
   { keys: "Shift+Enter", desc: "输入框内换行" },
@@ -22,7 +24,7 @@ export const HELP_SECTIONS = [
   {
     title: "上下文与 Skills",
     items: [
-      { cmd: "/context", desc: "只读 context 视图（消息、token、skills）" },
+      { cmd: "/context", desc: "设置 › 上下文：完整 LLM 消息列表" },
       { cmd: "/skill", desc: "已加载 / 可用 skills 列表" },
       { cmd: "/skill load NAME", desc: "加载 skill 到当前 session" },
       { cmd: "/skill unload NAME", desc: "从 session 卸载 skill" },

@@ -9,7 +9,7 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["open-context", "toggle-thinking", "cycle-effort"]);
+const emit = defineEmits(["toggle-thinking", "cycle-effort"]);
 
 const thinkingEnabled = computed(() => {
   const t = String(props.llmSettings?.thinking || "").toLowerCase();
@@ -31,16 +31,6 @@ const thinkingActive = computed(() => {
   <div class="composer-toolbar">
     <span v-if="prefillingActive" class="composer-toolbar__pulse composer-toolbar__pulse--prefill" title="prefilling" />
     <span v-if="thinkingActive" class="composer-toolbar__pulse composer-toolbar__pulse--think" title="thinking" />
-    <button
-      type="button"
-      class="composer-toolbar__btn"
-      title="查看上下文"
-      :disabled="disabled"
-      @click="emit('open-context')"
-    >
-      <span class="composer-toolbar__icon" aria-hidden="true">◫</span>
-      <span class="composer-toolbar__label">上下文</span>
-    </button>
     <button
       v-if="thinkingSupported"
       type="button"
