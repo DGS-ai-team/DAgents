@@ -16,6 +16,9 @@ type HydrateView struct {
 	RunTurnPhase  string
 	HasActiveTurn bool
 	QueuePending  int
+	NotifySeq     int
+	AckSeq        int
+	HasUnread     bool
 }
 
 // GetHydrateView 返回 session hydrate 快照（活跃 runtime 或 DB 持久化）。
@@ -40,7 +43,7 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	if pending != nil {
 		state = turn.StateAwaitingTool
 	}
-	return buildHydrateView(sessionID, rec.Messages, pending, state, 0, hasActiveTurn), nil
+	return buildHydrateView(sessionID, rec.Messages, pending, state, 0, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
 }
 
 func (r *runtime) hydrateView() *HydrateView {
@@ -50,8 +53,10 @@ func (r *runtime) hydrateView() *HydrateView {
 	state := r.state
 	queuePending := r.queue.Len()
 	hasActiveTurn := r.state != turn.StateIdle || r.pending != nil
+	notifySeq := r.notifySeq
+	ackSeq := r.ackSeq
 	r.mu.Unlock()
-	return buildHydrateView(r.session.ID, msgs, pending, state, queuePending, hasActiveTurn)
+	return buildHydrateView(r.session.ID, msgs, pending, state, queuePending, hasActiveTurn, notifySeq, ackSeq)
 }
 
 func buildHydrateView(
@@ -61,6 +66,8 @@ func buildHydrateView(
 	state turn.State,
 	queuePending int,
 	hasActiveTurn bool,
+	notifySeq int,
+	ackSeq int,
 ) *HydrateView {
 	transcript := MessagesToTranscriptEntries(messages)
 	if transcript == nil {
@@ -73,6 +80,9 @@ func buildHydrateView(
 		RunTurnPhase:  hydrateRunTurnPhase(messages, pending, state, hasActiveTurn),
 		HasActiveTurn: hasActiveTurn,
 		QueuePending:  queuePending,
+		NotifySeq:     notifySeq,
+		AckSeq:        ackSeq,
+		HasUnread:     notifySeq > ackSeq,
 	}
 }
 

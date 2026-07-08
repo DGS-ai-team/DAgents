@@ -66,6 +66,9 @@ type runtime struct {
 	childMeta *childRuntimeMeta // 子 Agent 元数据
 
 	idleAutoCompressApplied bool // 无动作自动压缩已完成；新对话时清除
+
+	notifySeq int // F-E13：最后需 Client 关注的 SSE seq
+	ackSeq    int // F-E13：Client 已确认看到的最大 SSE seq
 }
 
 // newRuntime 创建新的 session runtime
@@ -83,11 +86,13 @@ func newRuntime(
 	initialLoopCount int,
 	initialHookStore map[string]json.RawMessage,
 	idleAutoCompressApplied bool,
+	initialNotifySeq int,
+	initialAckSeq int,
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
 	return newRuntimeWithPublisher(id, agentID, hub, hub, llmClient, registry, policyEngine, st, logger,
-		initial, loaded, initialPending, initialLoopCount, initialHookStore, idleAutoCompressApplied, turnOpts, triggerDelivery)
+		initial, loaded, initialPending, initialLoopCount, initialHookStore, idleAutoCompressApplied, initialNotifySeq, initialAckSeq, turnOpts, triggerDelivery)
 }
 
 // newRuntimeWithPublisher 创建新的 session runtime，并设置 publisher
@@ -106,6 +111,8 @@ func newRuntimeWithPublisher(
 	initialLoopCount int,
 	initialHookStore map[string]json.RawMessage,
 	idleAutoCompressApplied bool,
+	initialNotifySeq int,
+	initialAckSeq int,
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
@@ -134,6 +141,8 @@ func newRuntimeWithPublisher(
 		triggerDelivery: triggerDelivery,
 		sideEffects:     newSideEffectStore(),
 		idleAutoCompressApplied: idleAutoCompressApplied,
+		notifySeq:               initialNotifySeq,
+		ackSeq:                  initialAckSeq,
 	}
 	// 创建编排器
 	rt.orch = turn.NewOrchestrator(
@@ -383,6 +392,8 @@ func (r *runtime) persist(ctx context.Context) {
 	pending := r.pending
 	loopCount := r.toolLoopCount
 	idleMarked := r.idleAutoCompressApplied
+	notifySeq := r.notifySeq
+	ackSeq := r.ackSeq
 	r.mu.Unlock()
 	_ = r.store.Save(ctx, store.Record{
 		SessionID:    r.session.ID,
@@ -394,6 +405,8 @@ func (r *runtime) persist(ctx context.Context) {
 			ToolLoopCount:           loopCount,
 			HookStore:               hooks.CloneSessionStore(r.orch.HookStoreSnapshot()),
 			IdleAutoCompressApplied: idleMarked,
+			NotifySeq:               notifySeq,
+			AckSeq:                  ackSeq,
 		},
 	})
 }

@@ -717,12 +717,9 @@ function onKeydown(e) {
 }
 
 onMounted(async () => {
-  const { focusHitl } = consumeStartupURL();
+  consumeStartupURL();
   await refreshMeta();
   await activateSessionStream();
-  if (focusHitl && hitlStore.queue.length) {
-    hitlSelected.value = 0;
-  }
   refreshContextTokens();
   window.addEventListener("keydown", onKeydown);
 });

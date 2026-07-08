@@ -1,113 +1,50 @@
 package pending
 
 import (
+	"time"
+
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodeclient"
 )
 
-// ApplyEvent 根据 SSE 事件更新待办表（F-E2/E11/E13）。
-func ApplyEvent(store *Store, ev nodeclient.StreamEvent) bool {
-	if store == nil {
-		return false
-	}
+// ShouldSyncOnEvent SSE 事件是否应触发从 Node 同步待办表（F-E13）。
+func ShouldSyncOnEvent(ev nodeclient.StreamEvent) bool {
 	sessionID := trim(ev.SessionID)
 	if sessionID == "" {
 		return false
 	}
 	switch ev.Type {
-	case "hitl_required":
-		store.MarkHITL(sessionID, countItems(ev.Data["items"]), ev.Type)
+	case "hitl_required", "approval_required", "user_information_required", "done":
 		return true
-	case "approval_required", "user_information_required":
-		store.MarkHITL(sessionID, 1, ev.Type)
-		return true
-	case "done":
-		changed := false
-		if shouldClearHITLOnDone(ev.Data) && store.ClearHITL(sessionID) {
-			changed = true
-		}
-		if shouldMarkUnreadOnDone(ev.Data) {
-			store.MarkUnread(sessionID)
-			changed = true
-		}
-		if shouldClearSessionOnDone(ev.Data) && store.ClearSession(sessionID) {
-			changed = true
-		}
-		return changed
 	}
 	return false
 }
 
-// SyncActiveAwaiting 用 GET /v1/sessions 清除已非 awaiting_hitl 的 HITL 待办（F-E10）。
-func SyncActiveAwaiting(store *Store, sessions []nodeclient.SessionSummary) {
+// SyncFromSessions 用 GET /v1/sessions 的 Node 真相源重建待办表（F-E10/E13）。
+func SyncFromSessions(store *Store, sessions []nodeclient.SessionSummary) bool {
 	if store == nil {
-		return
+		return false
 	}
-	clearHITL := make(map[string]struct{})
+	incoming := make(map[string]Entry)
+	now := time.Now()
 	for _, sess := range sessions {
-		if !sess.Active {
+		if !sess.HasUnread && !sess.HasPendingHITL {
 			continue
 		}
-		phase := trim(sess.RunTurnPhase)
-		if phase == "" {
-			continue
+		items := sess.PendingHITLItems
+		if items <= 0 && sess.HasPendingHITL {
+			items = 1
 		}
-		if phase != "awaiting_hitl" {
-			clearHITL[sess.SessionID] = struct{}{}
+		eventType := ""
+		if sess.HasPendingHITL {
+			eventType = "hitl_required"
+		}
+		incoming[sess.SessionID] = Entry{
+			SessionID: sess.SessionID,
+			HITLItems: items,
+			HasUnread: sess.HasUnread,
+			EventType: eventType,
+			UpdatedAt: now,
 		}
 	}
-	store.ClearHITLForSessions(clearHITL)
-}
-
-func shouldClearHITLOnDone(data map[string]any) bool {
-	if data == nil {
-		return true
-	}
-	if awaiting, _ := data["awaiting"].(string); awaiting == "hitl" {
-		return false
-	}
-	finish, _ := data["finish_reason"].(string)
-	switch finish {
-	case "awaiting_hitl", "awaiting_user_information", "awaiting_tool_approval":
-		return false
-	}
-	return true
-}
-
-func shouldMarkUnreadOnDone(data map[string]any) bool {
-	if data == nil {
-		return false
-	}
-	if awaiting, _ := data["awaiting"].(string); awaiting == "hitl" {
-		return false
-	}
-	finish, _ := data["finish_reason"].(string)
-	switch finish {
-	case "awaiting_hitl", "awaiting_user_information", "awaiting_tool_approval", "error", "cancelled":
-		return false
-	}
-	turnComplete, ok := data["turn_complete"].(bool)
-	if ok {
-		return turnComplete
-	}
-	return finish == "stop" || finish == ""
-}
-
-func shouldClearSessionOnDone(data map[string]any) bool {
-	if data == nil {
-		return false
-	}
-	finish, _ := data["finish_reason"].(string)
-	switch finish {
-	case "error", "cancelled":
-		return true
-	}
-	return false
-}
-
-func countItems(raw any) int {
-	items, ok := raw.([]any)
-	if !ok || len(items) == 0 {
-		return 1
-	}
-	return len(items)
+	return store.ReplaceFromNode(incoming)
 }

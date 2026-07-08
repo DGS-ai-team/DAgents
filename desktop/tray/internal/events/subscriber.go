@@ -105,8 +105,8 @@ func (s *Subscriber) connectOnce(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return false
 		}
-		if pending.ApplyEvent(s.store, ev) {
-			s.notifyChange()
+		if pending.ShouldSyncOnEvent(ev) {
+			s.syncSessions(ctx)
 		}
 		return true
 	})
@@ -120,9 +120,7 @@ func (s *Subscriber) syncSessions(ctx context.Context) {
 		log.Printf("shell sync sessions: %v", err)
 		return
 	}
-	before := s.store.Summary().SessionCount
-	pending.SyncActiveAwaiting(s.store, sessions)
-	if after := s.store.Summary().SessionCount; after != before {
+	if pending.SyncFromSessions(s.store, sessions) {
 		s.notifyChange()
 	}
 }

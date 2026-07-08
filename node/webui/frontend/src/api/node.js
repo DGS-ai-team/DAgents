@@ -75,6 +75,13 @@ export function getSessionHydrate(sessionId) {
   return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/hydrate`);
 }
 
+export function postSessionAck(sessionId, sseSeq) {
+  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/ack`, {
+    method: "POST",
+    body: { sse_seq: sseSeq },
+  });
+}
+
 export function submitMessage(sessionId, content, contentParts = null) {
   const body = { session_id: sessionId, request_type: "message", content: content || "" };
   if (Array.isArray(contentParts) && contentParts.length) {

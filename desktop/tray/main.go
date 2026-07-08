@@ -251,7 +251,7 @@ func (a *trayApp) openFirstPendingSession() {
 		a.openConsole()
 		return
 	}
-	a.openSession(entries[0].SessionID, entries[0].FocusHITL())
+	a.openSession(entries[0].SessionID)
 }
 
 func (a *trayApp) openPendingSession(slot int) {
@@ -262,25 +262,17 @@ func (a *trayApp) openPendingSession(slot int) {
 	if sessionID == "" {
 		return
 	}
-	focusHitl := false
-	for _, e := range a.pendingStore.Entries() {
-		if e.SessionID == sessionID {
-			focusHitl = e.FocusHITL()
-			break
-		}
-	}
-	a.openSession(sessionID, focusHitl)
+	a.openSession(sessionID)
 }
 
-func (a *trayApp) openSession(sessionID string, focusHitl bool) {
+func (a *trayApp) openSession(sessionID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
 		defer cancel()
-		if err := webui.EnsureNodeAndOpen(ctx, a.layout, a.cfg, sessionID, focusHitl); err != nil {
+		if err := webui.EnsureNodeAndOpen(ctx, a.layout, a.cfg, sessionID); err != nil {
 			log.Printf("open session %s: %v", sessionID, err)
 			return
 		}
-		a.pendingStore.MarkConsumed(sessionID)
 		a.refreshPendingUI()
 	}()
 }

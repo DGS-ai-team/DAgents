@@ -3,9 +3,9 @@ package webui
 import "testing"
 
 func TestSessionURL(t *testing.T) {
-	got := SessionURL("http://127.0.0.1:18765", "sess-abc", true)
-	want := "http://127.0.0.1:18765/ui/?focus=hitl&session=sess-abc"
-	if got != want && got != "http://127.0.0.1:18765/ui/?session=sess-abc&focus=hitl" {
+	got := SessionURL("http://127.0.0.1:18765", "sess-abc")
+	want := "http://127.0.0.1:18765/ui/?session=sess-abc"
+	if got != want {
 		t.Fatalf("url = %q", got)
 	}
 }

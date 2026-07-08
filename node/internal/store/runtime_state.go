@@ -12,4 +12,13 @@ type RuntimeState struct {
 	ToolLoopCount           int                      `json:"tool_loop_count"`
 	HookStore               map[string]json.RawMessage `json:"hook_store,omitempty"`
 	IdleAutoCompressApplied bool                     `json:"idle_auto_compress_applied,omitempty"`
+	// NotifySeq 为最后需要 Client 关注的 SSE seq（F-E13 IM cursor）。
+	NotifySeq int `json:"notify_seq,omitempty"`
+	// AckSeq 为各 Client 已确认看到的最大 SSE seq。
+	AckSeq int `json:"ack_seq,omitempty"`
+}
+
+// HasUnread 未读 = notify_seq > ack_seq。
+func (rs RuntimeState) HasUnread() bool {
+	return rs.NotifySeq > rs.AckSeq
 }

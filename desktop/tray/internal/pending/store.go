@@ -53,11 +53,6 @@ func (e Entry) SummaryLabel() string {
 	}
 }
 
-// FocusHITL 深链是否带 focus=hitl。
-func (e Entry) FocusHITL() bool {
-	return e.HITLItems > 0
-}
-
 // Summary 为托盘展示的待办聚合。
 type Summary struct {
 	SessionCount int
@@ -65,129 +60,54 @@ type Summary struct {
 	Label        string
 }
 
-// Store 为 session_id → 待办条目。
+// Store 为 session_id → 待办条目（由 Node GET /v1/sessions 同步）。
 type Store struct {
 	mu        sync.RWMutex
 	bySession map[string]Entry
-	consumed  map[string]struct{}
 }
 
 // NewStore 构造空待办表。
 func NewStore() *Store {
 	return &Store{
 		bySession: make(map[string]Entry),
-		consumed:  make(map[string]struct{}),
 	}
 }
 
-// MarkHITL 标记 session 有 HITL 待办。
-func (s *Store) MarkHITL(sessionID string, itemCount int, eventType string) {
-	sessionID = trim(sessionID)
-	if sessionID == "" {
-		return
-	}
-	if itemCount <= 0 {
-		itemCount = 1
-	}
+// ReplaceFromNode 用 Node 同步结果替换本地待办表；有变化时返回 true。
+func (s *Store) ReplaceFromNode(incoming map[string]Entry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.bySession[sessionID]
-	e.SessionID = sessionID
-	e.HITLItems = itemCount
-	e.EventType = trim(eventType)
-	e.UpdatedAt = time.Now()
-	s.bySession[sessionID] = e
-	delete(s.consumed, sessionID)
-}
-
-// MarkUnread 标记 session 有未读 assistant 回复（F-E13）。
-func (s *Store) MarkUnread(sessionID string) {
-	sessionID = trim(sessionID)
-	if sessionID == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.consumed[sessionID]; ok {
-		return
-	}
-	e := s.bySession[sessionID]
-	e.SessionID = sessionID
-	e.HasUnread = true
-	e.UpdatedAt = time.Now()
-	s.bySession[sessionID] = e
-	s.pruneLocked(sessionID)
-}
-
-// MarkConsumed 用户已通过 Shell 打开 UI 消费该 session（清除未读，F-E13）。
-func (s *Store) MarkConsumed(sessionID string) {
-	sessionID = trim(sessionID)
-	if sessionID == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.consumed[sessionID] = struct{}{}
-	e, ok := s.bySession[sessionID]
-	if !ok {
-		return
-	}
-	e.HasUnread = false
-	s.bySession[sessionID] = e
-	s.pruneLocked(sessionID)
-}
-
-// ClearHITL 清除 session 的 HITL 待办。
-func (s *Store) ClearHITL(sessionID string) bool {
-	sessionID = trim(sessionID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e, ok := s.bySession[sessionID]
-	if !ok || e.HITLItems <= 0 {
+	if mapsEqual(s.bySession, incoming) {
 		return false
 	}
-	e.HITLItems = 0
-	s.bySession[sessionID] = e
-	s.pruneLocked(sessionID)
-	return true
-}
-
-// ClearSession 清除 session 全部待办。
-func (s *Store) ClearSession(sessionID string) bool {
-	sessionID = trim(sessionID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.bySession[sessionID]; !ok {
-		return false
-	}
-	delete(s.bySession, sessionID)
-	delete(s.consumed, sessionID)
-	return true
-}
-
-// ClearHITLForSessions 批量清除 HITL（F-E10 sync）。
-func (s *Store) ClearHITLForSessions(sessionIDs map[string]struct{}) {
-	if len(sessionIDs) == 0 {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id := range sessionIDs {
-		e, ok := s.bySession[id]
-		if !ok || e.HITLItems <= 0 {
-			continue
+	next := make(map[string]Entry, len(incoming))
+	for id, e := range incoming {
+		if e.Active() {
+			next[id] = e
 		}
-		e.HITLItems = 0
-		s.bySession[id] = e
-		s.pruneLocked(id)
 	}
+	s.bySession = next
+	return true
 }
 
-func (s *Store) pruneLocked(sessionID string) {
-	e, ok := s.bySession[sessionID]
-	if !ok || !e.Active() {
-		delete(s.bySession, sessionID)
+func mapsEqual(a, b map[string]Entry) bool {
+	if len(a) != len(b) {
+		return false
 	}
+	for id, ea := range a {
+		eb, ok := b[id]
+		if !ok || !entriesEqual(ea, eb) {
+			return false
+		}
+	}
+	return true
+}
+
+func entriesEqual(a, b Entry) bool {
+	return a.SessionID == b.SessionID &&
+		a.HITLItems == b.HITLItems &&
+		a.HasUnread == b.HasUnread &&
+		a.EventType == b.EventType
 }
 
 // Summary 返回当前待办聚合。

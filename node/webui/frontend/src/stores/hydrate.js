@@ -5,6 +5,7 @@ import { setChildAwaitingApproval } from "./remoteWorkers.js";
 import {
   applyHydrateSeqHint,
   applyHydrateTurnState,
+  ackSessionAfterHydrate,
   ensureSession,
   finishTurn,
   sessionStore,
@@ -22,6 +23,7 @@ export async function hydrateSession() {
     setChildAwaitingApproval(approval.child_session_id, true);
   }
   applyHydrateSeqHint(data?.sse_seq_hint);
+  ackSessionAfterHydrate();
   applyHydrateTurnState({
     run_turn_phase: data?.run_turn_phase,
     has_active_turn: !!data?.has_active_turn,
@@ -34,12 +36,11 @@ export async function hydrateSession() {
   return data;
 }
 
-/** 解析 Shell 深链 ?session=&focus=hitl（F-X1 / F-H12 基础）。 */
+/** 解析 Shell 深链 ?session=（F-U3）。 */
 export function consumeStartupURL() {
-  if (typeof window === "undefined") return { focusHitl: false };
+  if (typeof window === "undefined") return;
   const params = new URLSearchParams(window.location.search);
   const session = params.get("session")?.trim();
-  const focusHitl = params.get("focus")?.trim() === "hitl";
   if (session) {
     sessionStore.sessionId = session;
     try {
@@ -48,5 +49,4 @@ export function consumeStartupURL() {
       /* ignore */
     }
   }
-  return { focusHitl };
 }

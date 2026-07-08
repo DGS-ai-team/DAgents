@@ -17,7 +17,6 @@ func EnsureNodeAndOpen(
 	layout *nodectl.Layout,
 	cfg *config.Config,
 	sessionID string,
-	focusHitl bool,
 ) error {
 	if layout == nil || cfg == nil {
 		return fmt.Errorf("layout or config is nil")
@@ -25,11 +24,11 @@ func EnsureNodeAndOpen(
 	if err := nodectl.Start(ctx, layout, cfg, 30*time.Second); err != nil {
 		return err
 	}
-	target := SessionURL(cfg.Local.Endpoint, sessionID, focusHitl)
+	target := SessionURL(cfg.Local.Endpoint, sessionID)
 	return OpenURL(target)
 }
 
 // OpenConsole ensure Node 后打开控制台首页（F-U1）。
 func OpenConsole(ctx context.Context, layout *nodectl.Layout, cfg *config.Config) error {
-	return EnsureNodeAndOpen(ctx, layout, cfg, "", false)
+	return EnsureNodeAndOpen(ctx, layout, cfg, "")
 }

@@ -6,89 +6,55 @@ import (
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodeclient"
 )
 
-func TestApplyEvent_hitlAndDone(t *testing.T) {
+func TestSyncFromSessions(t *testing.T) {
 	store := NewStore()
-	changed := ApplyEvent(store, nodeclient.StreamEvent{
-		Type:      "hitl_required",
-		SessionID: "sess-1",
-		Data: map[string]any{
-			"items": []any{map[string]any{"hitl_type": "user_information"}, map[string]any{"hitl_type": "execute_tool"}},
-		},
+	changed := SyncFromSessions(store, []nodeclient.SessionSummary{
+		{SessionID: "sess-hitl", HasPendingHITL: true, PendingHITLItems: 2},
+		{SessionID: "sess-unread", HasUnread: true, NotifySeq: 10, AckSeq: 5},
+		{SessionID: "sess-clear", HasUnread: false, HasPendingHITL: false},
 	})
 	if !changed {
-		t.Fatal("expected pending mark")
+		t.Fatal("expected initial sync to change store")
 	}
 	sum := store.Summary()
-	if sum.SessionCount != 1 || sum.ItemCount != 2 {
+	if sum.SessionCount != 2 || sum.ItemCount != 3 {
 		t.Fatalf("summary = %+v", sum)
 	}
 
-	ApplyEvent(store, nodeclient.StreamEvent{
-		Type:      "done",
-		SessionID: "sess-1",
-		Data:      map[string]any{"finish_reason": "awaiting_hitl", "awaiting": "hitl", "turn_complete": false},
-	})
-	if store.Summary().SessionCount != 1 {
-		t.Fatal("awaiting_hitl done should keep pending")
+	if SyncFromSessions(store, []nodeclient.SessionSummary{
+		{SessionID: "sess-hitl", HasPendingHITL: true, PendingHITLItems: 2},
+		{SessionID: "sess-unread", HasUnread: true, NotifySeq: 10, AckSeq: 5},
+	}) {
+		t.Fatal("identical sync should not report change")
 	}
 
-	ApplyEvent(store, nodeclient.StreamEvent{
-		Type:      "done",
-		SessionID: "sess-1",
-		Data:      map[string]any{"finish_reason": "stop", "turn_complete": true},
+	changed = SyncFromSessions(store, []nodeclient.SessionSummary{
+		{SessionID: "sess-unread", HasUnread: false, AckSeq: 10, NotifySeq: 10},
 	})
-	if store.Summary().SessionCount != 1 {
-		t.Fatalf("stop should mark unread, summary = %+v", store.Summary())
+	if !changed {
+		t.Fatal("expected change when unread cleared")
 	}
-	e := store.Entries()[0]
-	if !e.HasUnread || e.HITLItems != 0 {
-		t.Fatalf("entry = %+v", e)
-	}
-	store.MarkConsumed("sess-1")
 	if store.Summary().SessionCount != 0 {
-		t.Fatalf("consumed should clear unread, summary = %+v", store.Summary())
+		t.Fatalf("expected empty store, got %+v", store.Summary())
 	}
 }
 
-func TestApplyEvent_unreadOnly(t *testing.T) {
-	store := NewStore()
-	ApplyEvent(store, nodeclient.StreamEvent{
-		Type:      "done",
-		SessionID: "sess-reply",
-		Data:      map[string]any{"finish_reason": "stop", "turn_complete": true},
-	})
-	e := store.Entries()[0]
-	if e.HITLItems != 0 {
-		t.Fatalf("entry = %+v", e)
+func TestShouldSyncOnEvent(t *testing.T) {
+	if !ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "done", SessionID: "s1"}) {
+		t.Fatal("done should trigger sync")
 	}
-	if e.FocusHITL() {
-		t.Fatal("unread-only should not focus hitl")
+	if ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "assistant", SessionID: "s1"}) {
+		t.Fatal("assistant should not trigger sync")
 	}
 }
 
-func TestApplyEvent_a2aEvents(t *testing.T) {
-	store := NewStore()
-	for _, typ := range []string{"approval_required", "user_information_required"} {
-		ApplyEvent(store, nodeclient.StreamEvent{Type: typ, SessionID: "sess-a2a", Data: map[string]any{}})
+func TestEntrySummaryLabel(t *testing.T) {
+	e := Entry{SessionID: "abcd1234efgh", HITLItems: 1, HasUnread: true}
+	if e.SummaryLabel() == "" {
+		t.Fatal("expected label")
 	}
-	if got := store.Summary().SessionCount; got != 1 {
-		t.Fatalf("session count = %d", got)
-	}
-}
-
-func TestSyncActiveAwaiting(t *testing.T) {
-	store := NewStore()
-	store.MarkHITL("sess-active", 1, "hitl_required")
-	store.MarkHITL("sess-idle", 1, "hitl_required")
-	store.MarkUnread("sess-unread")
-
-	SyncActiveAwaiting(store, []nodeclient.SessionSummary{
-		{SessionID: "sess-active", Active: true, RunTurnPhase: "awaiting_hitl"},
-		{SessionID: "sess-idle", Active: true, RunTurnPhase: "idle"},
-	})
-
-	entries := store.Entries()
-	if len(entries) != 2 {
-		t.Fatalf("entries = %+v", entries)
+	e2 := Entry{SessionID: "sess-x", HasUnread: true}
+	if e2.SummaryLabel() == "" {
+		t.Fatal("expected unread label")
 	}
 }

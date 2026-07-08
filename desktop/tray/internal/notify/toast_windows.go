@@ -68,7 +68,7 @@ func (n *Notifier) Sync(entries []pending.Entry) {
 func (n *Notifier) push(e pending.Entry) error {
 	title := "DAgents 待处理"
 	message := e.SummaryLabel()
-	target := webui.SessionURL(n.endpoint, e.SessionID, e.FocusHITL())
+	target := webui.SessionURL(n.endpoint, e.SessionID)
 
 	notification := toast.Notification{
 		AppID:               toastAppID,

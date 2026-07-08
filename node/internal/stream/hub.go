@@ -30,6 +30,7 @@ type Hub struct {
 	historyN int
 	subs     map[chan Event]struct{}
 	logger   *slog.Logger
+	onPublish func(Event)
 }
 
 // NewHub 创建事件总线；historyN 为回放上限，≤0 时用默认值；logger 可为 nil。
@@ -42,6 +43,16 @@ func NewHub(historyN int, logger *slog.Logger) *Hub {
 		subs:     make(map[chan Event]struct{}),
 		logger:   logx.OrDefault(logger),
 	}
+}
+
+// SetEventListener 注册 Publish 后回调（如 F-E13 notify_seq 推进）；fn 可为 nil。
+func (h *Hub) SetEventListener(fn func(Event)) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.onPublish = fn
+	h.mu.Unlock()
 }
 
 // Publish 分配 seq、写入历史并投递给全部订阅者。
@@ -57,7 +68,6 @@ func (h *Hub) Publish(sessionID, agentID, eventType string, data map[string]any)
 		data = map[string]any{}
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	h.seq++
 	ev := Event{
@@ -79,11 +89,17 @@ func (h *Hub) Publish(sessionID, agentID, eventType string, data map[string]any)
 			// 慢消费者丢弃，避免阻塞 turn。
 		}
 	}
+	listener := h.onPublish
+	h.mu.Unlock()
+
 	h.logger.Debug("stream publish",
 		"session_id", sessionID,
 		"type", eventType,
 		"seq", ev.Seq,
 	)
+	if listener != nil {
+		listener(ev)
+	}
 	return ev
 }
 

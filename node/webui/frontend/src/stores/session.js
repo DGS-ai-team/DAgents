@@ -65,6 +65,22 @@ export function isDuplicateEvent(seq) {
 
 export function markEventApplied(seq) {
   if (seq > sessionStore.lastAppliedSeq) sessionStore.lastAppliedSeq = seq;
+  void ackSessionRead(sessionStore.lastAppliedSeq);
+}
+
+async function ackSessionRead(seq) {
+  const sessionId = sessionStore.sessionId?.trim();
+  const sseSeq = Number(seq) || 0;
+  if (!sessionId || sseSeq <= 0) return;
+  try {
+    await api.postSessionAck(sessionId, sseSeq);
+  } catch {
+    /* ignore transient ack failures */
+  }
+}
+
+export function ackSessionAfterHydrate() {
+  void ackSessionRead(sessionStore.lastAppliedSeq);
 }
 
 export function resetEventTracking() {

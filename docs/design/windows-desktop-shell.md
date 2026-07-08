@@ -66,7 +66,7 @@
 | # | 决策 | 说明 |
 |---|------|------|
 | D17 | **每 session 一条 HITL 通知** | 同一 session 内多个 HITL 项（`hitl_required` 多 item、或连续事件）**合并为一条 Toast**；不逐条刷屏。 |
-| D18 | **点击通知 → 打开该 session 的 UI** | 深链携带 `session_id`（及 `focus=hitl`）；用户在 Web UI 内处理全部待办项。 |
+| D18 | **点击通知 → 打开该 session 的 UI** | 深链携带 `session_id`；hydrate 恢复 transcript + pending HITL |
 | D23 | **Shell 仅通知，不在 Toast 内审批** | Phase 1 不做 Toast 批准/拒绝按钮；复杂 HITL 一律进 Web UI。 |
 | D39 | **有待办时托盘图标须有明显态** | 任意 session 存在待办（HITL 或 **未读回复**，见 D40）时，托盘图标切换为 **特殊效果**（角标/高亮/备用 icon 等，实现待定）；与菜单「待办」、Toast 一致。 |
 | D40 | **待办含「未读 assistant 回复」** | Node 当轮 **正常结束**（`done` + `finish_reason: stop` 等，非 HITL 暂停）且末条 assistant **尚未被 Client 消费** 时，该 session **也算一条待办**；与 HITL 共用 session 聚合表（F-E3）。 |
@@ -180,7 +180,7 @@
 | F-E10 | P0 | **待办消除**：该 session 在 Node 侧无 pending HITL 时清除 Shell 状态 | ❌ | 见 §8.5；**不依赖**从通知打开 UI |
 | F-E11 | P0 | 订阅 **A2A relay** 事件：`approval_required` / `user_information_required` | ❌ | §8.5；与 `hitl_required` 一并入 session 待办表 |
 | F-E12 | P0 | Shell 访问 Node **SSE/REST 鉴权**（API key header，与 Web UI 对齐） | ❌ | 共用 `config.yaml` / `DAGENTS_HOME` |
-| F-E13 | P0 | **未读回复待办**：当轮正常 `done(stop)` 后，Client 尚未消费末条 assistant 时 session 入待办表 | ❌ | D40；与 HITL 合并计数；消除见 §8.5 |
+| F-E13 | P0 | **未读回复待办（IM cursor）**：Node 持久化 `notify_seq`/`ack_seq`；`has_unread = notify_seq > ack_seq`；Client `POST /ack` 消费 | ✅ | D40；§8.5.1；Shell 仅同步 Node，不本地推断 |
 | F-E7 | P2 | 可选订阅 `error` / 子 Agent 事件 | ❌ | |
 
 ### 3.3 核心 — 通知
@@ -202,7 +202,7 @@
 |----|--------|------|------|------|
 | F-U1 | P0 | 托盘「打开控制台」→ 浏览器 `/ui/` | ❌ | |
 | F-U2 | P0 | Node 未运行时先 ensure 再打开 | ❌ | |
-| F-U3 | P0 | Web UI URL：`?session=<id>&focus=hitl` | ❌ | F-X1 |
+| F-U3 | P0 | Web UI URL：`?session=<id>` | ❌ | F-X1 |
 | F-U4 | P1 | 打开后通知 Shell「已聚焦 session」 | ❌ | 配合 F-E9 |
 | F-U5 | P1 | Shell **轮询 Manage**（`manage.update` 配置）缓存 `UpdateStatus` | ❌ | D36/D38；**不依赖 Node 在跑** |
 | F-U6 | P1 | Shell **执行 apply**：确认 → stop Node → 下载/解压/覆盖 `bin/*` → start Node | ❌ | D37；复用现 `dagents.cmd update` 文件布局逻辑 |
@@ -274,7 +274,7 @@
 
 | ID | 优先级 | 功能 | 备注 |
 |----|--------|------|------|
-| F-H12 | P0 | Shell 深链 `?session=&focus=hitl` 触发 F-H7–H8 | 通知闭环 |
+| F-H12 | P0 | Shell 深链 `?session=` 触发 hydrate（F-H7–H8） | 通知闭环 |
 | F-H17 | P0 | **evicted session 端到端**：`ensureSession`（`POST /v1/sessions` 带 id）→ hydrate → 可 resume | 与 F-NM7 联调；`active=false` 时必走 Create |
 | F-H13 | P1 | hydrate 完成后可选上报 Shell `ui.focus` | 配合 F-E9 |
 
@@ -466,7 +466,7 @@ Node（运行时）
 | 共享 HITL 包 | `shared/hitl` vs 导出 `client/internal/hitl` — **待定** |
 | Toast 库 | go-toast / WinRT — **待定** |
 | **托盘 icon 待办态** | 角标 overlay / 双色 icon / 轻动画 — **待定**（F-N10） |
-| **未读回复判定** | Shell 记 `done` seq + focus/消费 ack vs Node 扩展字段 — **待定**（F-E13） |
+| **未读回复判定** | **已决**：Node `runtime_state_json` 存 `notify_seq`/`ack_seq`；`has_unread = notify_seq > ack_seq`（F-E13 / §8.5.1） |
 | Shell↔UI localhost 端口 | 固定端口 vs 命名管道 vs 写 config — **待定** |
 | Node 单实例锁 | 全局 Mutex 名 vs 仅 `.runtime/node.pid` — **待定** |
 | Hydrate API 形态 | 独立 `/hydrate` vs 扩展 `/context` | 倾向独立或 `/context?hydrate=1` — **待定** |
@@ -614,30 +614,75 @@ Node ◄─SSE/API─► Web UI（用户手工打开） → 用户点 resume
 
 用户在 UI 里 `POST /v1/messages`（resume）后，Node 继续 turn 并 **再发 SSE**；Shell 在同一连接上都能收到，**与 UI 从哪打开无关**。
 
-#### Shell 侧 session 待办状态机（建议）
+#### Shell 侧 session 待办状态机（F-E10 / F-E13）
 
 待办 **类型**（同 session 可并存，对外 **合并为一条** 通知态，F-E3 / D17）：
 
-| 类型 | 触发 | 消除 |
-|------|------|------|
-| **HITL** | `hitl_required` / `approval_required` / `user_information_required` | Node 无 pending HITL（SSE `done` + `/v1/sessions` 对齐，F-E10） |
-| **未读回复** | 当轮正常结束：`done` 且 `finish_reason: stop`（或等价 `turn_complete: true`、非 HITL 暂停），且末条 assistant **尚未被 Client 消费**（D40 / F-E13） | Client **消费**该 session 末轮 assistant（见下） |
+| 类型 | Node 真相源 | Shell 行为 |
+|------|-------------|------------|
+| **HITL** | `pending_hitl` 非空 或 `run_turn_phase == awaiting_hitl` | `GET /v1/sessions` 同步 `has_pending_hitl` / `pending_hitl_items` |
+| **未读回复** | `has_unread`（`notify_seq > ack_seq`） | 同上；**不**在 Shell 本地解析 `done` 推断 |
 
-**Client 消费（F-E13）** 指：Web UI / TUI 已将该 session 末轮 assistant 展示给用户——例如 session **处于 focus** 且 transcript 已渲染至该轮 `done` 对应 seq；或 hydrate 灌入后已展示。UI 未打开、或未 focus 该 session、或 reconnect 后尚未展示，视为 **未消费**。
+Shell **不维护** 本地 `consumed` / `MarkUnread`；SSE 仅 **触发** `GET /v1/sessions` 刷新；60s 轮询兜底（F-E5）。
+
+#### 8.5.1 IM cursor（F-E13 / D40）
+
+**持久化**（SQLite `runtime_state_json`）：
+
+```json
+{
+  "notify_seq": 128,
+  "ack_seq": 120
+}
+```
+
+| 字段 | 含义 | 更新时机 |
+|------|------|----------|
+| `notify_seq` | 最后需要 Client 关注的事件 SSE `seq` | `hitl_required` / A2A HITL 事件；`done` 且 turn 正常结束（非 HITL 暂停，见 `ShouldBumpNotifySeq`） |
+| `ack_seq` | 各 Client 已确认看到的最大 SSE `seq` | `POST /v1/sessions/{id}/ack` `{ "sse_seq": N }`，取 `max(ack_seq, N)` |
+| `has_unread` | 派生：`notify_seq > ack_seq` | hydrate / list / ack 响应中返回 |
+
+**Node API**
+
+| 方法 | 路径 | 请求 | 响应字段（相关） |
+|------|------|------|------------------|
+| GET | `/v1/sessions/{id}/hydrate` | — | `notify_seq`, `ack_seq`, `has_unread`, `sse_seq_hint`, `pending_hitl`, `run_turn_phase` |
+| POST | `/v1/sessions/{id}/ack` | `{ "sse_seq": 128 }` | `session_id`, `notify_seq`, `ack_seq`, `has_unread` |
+| GET | `/v1/sessions` | — | 每项：`notify_seq`, `ack_seq`, `has_unread`, `has_pending_hitl`, `pending_hitl_items`, `run_turn_phase` |
+
+**Web UI（Client）**
+
+| 时机 | 动作 |
+|------|------|
+| hydrate 灌入 transcript + `applyHydrateSeqHint` 后 | `POST /ack` with `lastAppliedSeq` |
+| SSE 事件 `markEventApplied(seq)` 后 | `POST /ack` with `max(lastAppliedSeq, seq)` |
+
+**Shell（Client）**
+
+| 时机 | 动作 |
+|------|------|
+| 启动 / SSE 重连 / 相关 SSE 事件 / 60s 轮询 | `GET /v1/sessions` → 重建待办表 |
+| 打开 `/ui/?session=` 深链 | **不**本地 ack；由 Web UI hydrate/SSE 后 `POST /ack` |
+
+**待办表条目**（Shell 内存，由 Node 同步）：
+
+```text
+active(session) := has_pending_hitl || has_unread
+item_count      := pending_hitl_items + (has_unread ? 1 : 0)
+```
+
+#### 8.5.2 HITL 消除（F-E10）
 
 | 事件 | Shell 行为 |
 |------|------------|
-| HITL 类 SSE（上表） | 该 `session_id` 标记 **HITL 待办**；更新计数/摘要（D17） |
-| `assistant` + `done(stop)`（正常结束一轮） | 若该 session **未消费** → 标记 **未读回复待办**（F-E13） |
-| `done` 且 `awaiting == "hitl"`（或 `finish_reason` 为 `awaiting_hitl` 等） | **保持** HITL 待办 |
-| `done` 且 HITL 已清 / 非 HITL 暂停 | 清除 **HITL** 类待办；**未读回复** 仍保留直至 Client 消费 |
-| Client 消费（focus + 已展示 / hydrate） | 清除该 session **未读回复** 待办（可与 F-E9 / F-X5 联动） |
-| `done` 且 `finish_reason: error` / `cancelled` | 按产品规则清除 **HITL** 待办；未读回复若已产生则保留至消费 |
-| SSE 断线重连后 | `GET /v1/sessions` 核对 `run_turn_phase`；非 `awaiting_hitl` 的 session 清除 **HITL** 待办（F-E5）；未读回复仍以 SSE + 消费态为准 |
+| HITL 类 SSE | 触发 `GET /v1/sessions` 同步（Node 已 bump `notify_seq`） |
+| `done(awaiting_hitl)` | 同步后仍 `has_pending_hitl` → 保持 HITL 待办 |
+| HITL 全部处理完 | Node 清 `pending` → 同步后 `has_pending_hitl=false` |
+| SSE 断线重连 | `GET /v1/sessions` 核对 `run_turn_phase` / `has_pending_hitl`（F-E5） |
 
-要点：**以 Node 运行时是否仍「awaiting HITL」为准**，不要只靠「用户是否点过通知」。
+要点：**以 Node 运行时 pending HITL 与 notify cursor 为准**，Shell 不解析 `done` 语义。
 
-#### 同 session 多条 HITL（D17）
+#### 8.5.3 同 session 多条 HITL（D17）
 
 - 通知 **一条**，内部计数随 `hitl_required` 的 item 数或队列深度 **递增**。
 - 用户在 UI 中 **逐条 resume**，在全部处理完之前 Node 仍会发 `done(awaiting_hitl)` → Shell **不消除**。
@@ -731,3 +776,4 @@ Apply 流程（Windows）：
 | 2026-07 | D36–D38、§3.11、§8.7：Shell 为 Windows 安装态更新 orchestrator；联动 release-update-hub §10 |
 | 2026-07 | §4.1 链至 [v0.6-v0.7-roadmap.md](./v0.6-v0.7-roadmap.md) |
 | 2026-07 | D39–D40、F-E13、F-N10：托盘图标待办态 + 未读 assistant 回复纳入待办 |
+| 2026-07 | F-E13 IM cursor：`notify_seq`/`ack_seq`/`POST /ack`；Shell 从 Node 同步，§8.5.1 |

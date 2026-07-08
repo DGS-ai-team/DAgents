@@ -9,11 +9,16 @@ import (
 
 // SessionSummary 为 GET /v1/sessions 列表项。
 type SessionSummary struct {
-	SessionID     string `json:"session_id"`
-	AgentID       string `json:"agent_id"`
-	Active        bool   `json:"active"`
-	RunTurnPhase  string `json:"run_turn_phase,omitempty"`
-	HasActiveTurn bool   `json:"has_active_turn,omitempty"`
+	SessionID        string `json:"session_id"`
+	AgentID          string `json:"agent_id"`
+	Active           bool   `json:"active"`
+	RunTurnPhase     string `json:"run_turn_phase,omitempty"`
+	HasActiveTurn    bool   `json:"has_active_turn,omitempty"`
+	NotifySeq        int    `json:"notify_seq,omitempty"`
+	AckSeq           int    `json:"ack_seq,omitempty"`
+	HasUnread        bool   `json:"has_unread,omitempty"`
+	HasPendingHITL   bool   `json:"has_pending_hitl,omitempty"`
+	PendingHITLItems int    `json:"pending_hitl_items,omitempty"`
 }
 
 type listSessionsResponse struct {

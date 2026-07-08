@@ -296,6 +296,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		a2aCallerHITL:   a2aBridge,
 		tools:           o.tools,
 	}
+	hub.SetEventListener(func(ev stream.Event) {
+		mgr.OnStreamEvent(ev)
+	})
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
@@ -306,6 +309,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/compress", s.handleCompressContext)
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/context", s.handleSessionContext)
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/hydrate", s.handleSessionHydrate)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/ack", s.handleSessionAck)
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/cancel", s.handleCancelSession)
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/skills", s.handleListSessionSkills)
@@ -503,6 +507,12 @@ type sessionSummary struct {
 	QueuePending  int    `json:"queue_pending,omitempty"`
 	HasActiveTurn bool   `json:"has_active_turn,omitempty"`
 	RunTurnPhase  string `json:"run_turn_phase,omitempty"`
+	// F-E13 IM cursor（活跃与持久化 session 均可用）。
+	NotifySeq        int  `json:"notify_seq,omitempty"`
+	AckSeq           int  `json:"ack_seq,omitempty"`
+	HasUnread        bool `json:"has_unread,omitempty"`
+	HasPendingHITL   bool `json:"has_pending_hitl,omitempty"`
+	PendingHITLItems int  `json:"pending_hitl_items,omitempty"`
 }
 
 type listSessionsResponse struct {
@@ -524,20 +534,27 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		seen[sess.ID] = struct{}{}
 		queuePending, hasActiveTurn, turnState, _ := s.sessions.RuntimeInfo(sess.ID)
 		count, _, _ := s.sessions.ContextSummary(sess.ID)
+		notify := s.sessions.NotificationState(sess.ID)
 		items = append(items, sessionSummary{
-			SessionID:     sess.ID,
-			AgentID:       sess.AgentID,
-			Active:        true,
-			MessageCount:  count,
-			QueuePending:  queuePending,
-			HasActiveTurn: hasActiveTurn,
-			RunTurnPhase:  turn.RunTurnPhase(turnState),
+			SessionID:        sess.ID,
+			AgentID:          sess.AgentID,
+			Active:           true,
+			MessageCount:     count,
+			QueuePending:     queuePending,
+			HasActiveTurn:    hasActiveTurn,
+			RunTurnPhase:     turn.RunTurnPhase(turnState),
+			NotifySeq:        notify.NotifySeq,
+			AckSeq:           notify.AckSeq,
+			HasUnread:        notify.HasUnread,
+			HasPendingHITL:   notify.HasPendingHITL,
+			PendingHITLItems: notify.PendingHITLItems,
 		})
 	}
 	for _, sum := range persisted {
 		if _, ok := seen[sum.SessionID]; ok {
 			continue // 已在内存活跃列表中出现过
 		}
+		notify := s.sessions.NotificationState(sum.SessionID)
 		items = append(items, sessionSummary{
 			SessionID:        sum.SessionID,
 			AgentID:          sum.AgentID,
@@ -545,6 +562,12 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			MessageCount:     sum.MessageCount,
 			FirstUserMessage: sum.FirstUserMessage,
 			UpdatedAt:        sum.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			RunTurnPhase:     persistedRunTurnPhase(notify.HasPendingHITL),
+			NotifySeq:        notify.NotifySeq,
+			AckSeq:           notify.AckSeq,
+			HasUnread:        notify.HasUnread,
+			HasPendingHITL:   notify.HasPendingHITL,
+			PendingHITLItems: notify.PendingHITLItems,
 		})
 	}
 	writeJSON(w, http.StatusOK, listSessionsResponse{Sessions: items})
@@ -703,6 +726,16 @@ type sessionHydrateResponse struct {
 	Transcript    []session.TranscriptEntry `json:"transcript"`
 	PendingHITL   map[string]any            `json:"pending_hitl"`
 	SSESeqHint    int                       `json:"sse_seq_hint"`
+	NotifySeq     int                       `json:"notify_seq"`
+	AckSeq        int                       `json:"ack_seq"`
+	HasUnread     bool                      `json:"has_unread"`
+}
+
+func persistedRunTurnPhase(hasPendingHITL bool) string {
+	if hasPendingHITL {
+		return string(turn.TaskPhaseAwaitingHITL)
+	}
+	return string(turn.TaskPhaseComplete)
 }
 
 func (s *Server) handleSessionHydrate(w http.ResponseWriter, r *http.Request) {
@@ -732,6 +765,55 @@ func (s *Server) handleSessionHydrate(w http.ResponseWriter, r *http.Request) {
 		Transcript:    transcript,
 		PendingHITL:   view.PendingHITL,
 		SSESeqHint:    s.stream.CurrentSeq(),
+		NotifySeq:     view.NotifySeq,
+		AckSeq:        view.AckSeq,
+		HasUnread:     view.HasUnread,
+	})
+}
+
+type sessionAckRequest struct {
+	SSESeq int `json:"sse_seq"`
+}
+
+type sessionAckResponse struct {
+	SessionID string `json:"session_id"`
+	NotifySeq int    `json:"notify_seq"`
+	AckSeq    int    `json:"ack_seq"`
+	HasUnread bool   `json:"has_unread"`
+}
+
+func (s *Server) handleSessionAck(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	if sessionID == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		return
+	}
+	var req sessionAckRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
+		return
+	}
+	if req.SSESeq <= 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sse_seq must be positive", nil)
+		return
+	}
+	state, err := s.sessions.AckSession(r.Context(), sessionID, req.SSESeq)
+	if err != nil {
+		switch err.Error() {
+		case "session_not_found":
+			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+		case "session_id is required", "sse_seq must be positive":
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
+		default:
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, sessionAckResponse{
+		SessionID: sessionID,
+		NotifySeq: state.NotifySeq,
+		AckSeq:    state.AckSeq,
+		HasUnread: state.HasUnread,
 	})
 }
 
