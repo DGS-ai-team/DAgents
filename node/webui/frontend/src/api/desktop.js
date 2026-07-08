@@ -50,3 +50,8 @@ export async function isShellDesktopAvailable() {
     return false;
   }
 }
+
+/** @returns {Promise<{ paths: string[] }>} Shell CF_HDROP 路径（F-P2）；不可达时抛错。 */
+export async function getDesktopClipboardFiles() {
+  return desktopFetch("/v1/desktop/clipboard/files");
+}

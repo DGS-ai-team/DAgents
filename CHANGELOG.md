@@ -16,6 +16,8 @@
 - **F-I12 `dagents.cmd update` → Shell**：Shell 在跑时委托 `dagents-shell.exe update`（localhost API）；API 不可达时回退 `dagents-client update`。
 - **F-N9 新版本 Toast / 托盘菜单**：Manage 有新版本时 Toast 通知 + 托盘「更新：新版本 x 可用」入口（打开设置 › 关于）。
 - **F-X8 Web UI Update 面板**：设置 › 关于优先读 Shell `GET /v1/desktop/update`；Shell 可用时支持页面内一键升级。
+- **F-P2 Shell clipboard API**：`GET /v1/desktop/clipboard/files` 读取 Windows `CF_HDROP` 完整路径（localhost `127.0.0.1:18767`）。
+- **F-P1 / F-P3 / F-X4 路径粘贴**：Composer paste/drop 插入绝对路径；浏览器无路径时调 Shell API；多文件换行分隔。
 
 ---
 

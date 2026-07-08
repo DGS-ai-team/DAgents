@@ -55,3 +55,22 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Fatalf("status=%d", rec.Code)
 	}
 }
+
+func TestClipboardFilesEndpoint(t *testing.T) {
+	srv := New(nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/desktop/clipboard/files", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Paths == nil {
+		t.Fatal("paths must be array")
+	}
+}

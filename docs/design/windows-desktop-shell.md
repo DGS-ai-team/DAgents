@@ -211,9 +211,9 @@
 
 | ID | 优先级 | 功能 | 现状 | 备注 |
 |----|--------|------|------|------|
-| F-P1 | P1 | Web UI：paste/drop 文件时插入 **绝对路径** 到输入框 | ❌ | D19；改 `node/webui` |
-| F-P2 | P1 | Shell：`GET /v1/desktop/clipboard/files`（或等价）返回路径列表 | ❌ | 读 CF_HDROP；仅 localhost |
-| F-P3 | P1 | Web UI paste 时若 `clipboardData.files` 无路径则 **调 Shell API** | ❌ | |
+| F-P1 | P1 | Web UI：paste/drop 文件时插入 **绝对路径** 到输入框 | ✅ | D19；`MainChatPanel` Composer |
+| F-P2 | P1 | Shell：`GET /v1/desktop/clipboard/files`（或等价）返回路径列表 | ✅ | 读 CF_HDROP；仅 localhost |
+| F-P3 | P1 | Web UI paste 时若 `clipboardData.files` 无路径则 **调 Shell API** | ✅ | |
 | F-P4 | P2 | 拖入多个文件 → 多行路径或约定分隔符 | ❌ | 产品可再定格式 |
 | F-P5 | P2 | 路径是否在 `fs_root` 内校验提示 | ❌ | 可选，Node 侧仍会拦 |
 
@@ -239,7 +239,7 @@
 |----|--------|------|--------|------|
 | F-X1 | P0 | URL 深链 + 聚焦 HITL | Web UI | 依赖 F-H8 |
 | F-X6 | P0 | **Session hydrate 编排**：`ensureSession` 后拉快照并恢复 UI | Web UI | 见 §3.9 |
-| F-X4 | P1 | 输入框 paste/drop 文件 → 路径 | Web UI + Shell | F-P* |
+| F-X4 | P1 | 输入框 paste/drop 文件 → 路径 | ✅ | Web UI + Shell；F-P* |
 | F-X5 | P1 | 加载时 `POST` Shell「ui.focus」`（session_id） | Web UI | 可选 localhost |
 | F-X8 | P1 | Web UI **Update 面板**改读 Shell `GET /v1/desktop/update`（非 Node `/v1/agent/update`） | ✅ | localhost；Apply 经 Shell 确认 |
 | F-X3 | P2 | `ui.enabled: false` 时 Shell 提示 | Shell | |

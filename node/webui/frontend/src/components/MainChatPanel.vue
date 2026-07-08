@@ -12,6 +12,14 @@ import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.
 import { chromeStore } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { statusStore, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
+import { getDesktopClipboardFiles } from "../api/desktop.js";
+import {
+  formatPathsForComposer,
+  mergePathInsertion,
+  pathsFromFileList,
+  pathsFromUriList,
+  shouldResolvePathsViaShell,
+} from "../utils/filePathPaste.js";
 
 const props = defineProps({
   entries: { type: Array, default: () => [] },
@@ -43,6 +51,7 @@ const emit = defineEmits([
 const input = ref("");
 const pendingImages = ref([]);
 const fileInputRef = ref(null);
+const textareaRef = ref(null);
 const streamRef = ref(null);
 const userInfoSelected = ref(0);
 const followTail = ref(true);
@@ -190,6 +199,83 @@ function onKeydown(e) {
   }
 }
 
+function applyPathInsertion(paths) {
+  const formatted = formatPathsForComposer(paths);
+  if (!formatted) return false;
+  const el = textareaRef.value;
+  const start = el?.selectionStart ?? input.value.length;
+  const end = el?.selectionEnd ?? start;
+  const { value, cursor } = mergePathInsertion(input.value, formatted, { start, end });
+  input.value = value;
+  nextTick(() => {
+    if (el) {
+      el.selectionStart = cursor;
+      el.selectionEnd = cursor;
+      el.focus();
+    }
+  });
+  return true;
+}
+
+async function resolveFilePaths({ text, files, uriList }) {
+  let paths = pathsFromFileList(files);
+  if (!paths.length && uriList) {
+    paths = pathsFromUriList(uriList);
+  }
+  if (!paths.length && shouldResolvePathsViaShell({ text, files })) {
+    try {
+      const data = await getDesktopClipboardFiles();
+      paths = data?.paths || [];
+    } catch {
+      /* Shell 不可用 */
+    }
+  }
+  return paths;
+}
+
+function isImageOnlyFileList(fileList) {
+  const files = Array.from(fileList || []);
+  return files.length > 0 && files.every((f) => allowedImageTypes.has(f.type));
+}
+
+async function onComposerPaste(e) {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  const text = dt.getData("text/plain") || "";
+  const files = dt.files;
+  if (multimodalEnabled.value && isImageOnlyFileList(files)) {
+    e.preventDefault();
+    await addImageFiles(files);
+    return;
+  }
+  const paths = await resolveFilePaths({
+    text,
+    files,
+    uriList: dt.getData("text/uri-list") || dt.getData("text/plain"),
+  });
+  if (paths.length && applyPathInsertion(paths)) {
+    e.preventDefault();
+  }
+}
+
+async function onComposerDrop(e) {
+  const dt = e.dataTransfer;
+  if (!dt) return;
+  e.preventDefault();
+  const paths = await resolveFilePaths({
+    text: "",
+    files: dt.files,
+    uriList: dt.getData("text/uri-list") || dt.getData("text/plain"),
+  });
+  if (paths.length) {
+    applyPathInsertion(paths);
+    return;
+  }
+  if (multimodalEnabled.value && isImageOnlyFileList(dt.files)) {
+    await addImageFiles(dt.files);
+  }
+}
+
 defineExpose({
   setDraft(text) {
     input.value = String(text || "");
@@ -298,12 +384,16 @@ defineExpose({
             🖼
           </button>
           <textarea
+            ref="textareaRef"
             v-model="input"
             class="chat__textarea"
             rows="2"
-            placeholder="输入消息，或向助手提问…（Enter 发送，Shift+Enter 换行）"
+            placeholder="输入消息，或向助手提问…（Enter 发送，Shift+Enter 换行；可粘贴/拖入文件路径）"
             :disabled="disabled || sending || cancelling"
             @keydown="onKeydown"
+            @paste="onComposerPaste"
+            @drop="onComposerDrop"
+            @dragover.prevent
           />
           <button
             v-if="showCancel"

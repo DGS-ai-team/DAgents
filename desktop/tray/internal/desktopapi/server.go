@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/clipboard"
 	shellupdate "github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
 	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
 )
@@ -46,6 +47,7 @@ func New(updates UpdateProvider, applier *shellupdate.Applier) *Server {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/desktop/update", s.handleDesktopUpdate)
 	s.mux.HandleFunc("POST /v1/desktop/update/apply", s.handleDesktopUpdateApply)
+	s.mux.HandleFunc("GET /v1/desktop/clipboard/files", s.handleClipboardFiles)
 	return s
 }
 
@@ -93,6 +95,21 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleDesktopUpdate(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.updates.Snapshot())
+}
+
+func (s *Server) handleClipboardFiles(w http.ResponseWriter, _ *http.Request) {
+	paths, err := clipboard.FilePaths()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"paths":   []string{},
+			"message": err.Error(),
+		})
+		return
+	}
+	if paths == nil {
+		paths = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"paths": paths})
 }
 
 func (s *Server) handleDesktopUpdateApply(w http.ResponseWriter, r *http.Request) {
