@@ -3425,3 +3425,215 @@ input {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* --- v0.6.1 product layout --- */
+
+.app__body--chat-v61 {
+  grid-template-columns: 240px minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+
+.app__col--sessions {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app__col--sessions .session-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+.product-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.product-header__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-right: 4px;
+}
+
+.product-header__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-subtle);
+}
+
+.product-header__dot--online {
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px var(--color-success-soft);
+}
+
+.product-header__dot--connecting {
+  background: var(--color-warning);
+}
+
+.product-header__dot--offline {
+  background: var(--color-danger);
+}
+
+.product-header__btn {
+  text-decoration: none;
+}
+
+.session-history-item__badge--unread {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+}
+
+.session-history-item__badge--hitl {
+  background: rgba(217, 119, 6, 0.16);
+  color: #b45309;
+}
+
+.diagnostics-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 320px;
+  transition: max-width 0.2s ease;
+}
+
+.diagnostics-panel:not(.diagnostics-panel--expanded) {
+  max-width: 44px;
+  align-items: stretch;
+}
+
+.diagnostics-panel__toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  min-height: 120px;
+}
+
+.diagnostics-panel--expanded .diagnostics-panel__toggle {
+  writing-mode: horizontal-tb;
+  flex-direction: row;
+  min-height: auto;
+  margin-bottom: 8px;
+}
+
+.diagnostics-panel__summary {
+  font-size: 10px;
+  color: var(--color-text-subtle);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  padding: 4px 2px;
+  overflow: hidden;
+  max-height: 200px;
+}
+
+.diagnostics-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.diagnostics-panel__link {
+  margin-top: 8px;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.runtime__value--mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.chat-error-banner {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  color: #991b1b;
+  font-size: 13px;
+}
+
+.chat-hitl-sticky {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 16px;
+  padding: 0 16px 16px;
+  min-height: 0;
+}
+
+.settings-layout__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.settings-layout__link {
+  display: block;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.settings-layout__link:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.settings-layout__link--active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
+  font-weight: 600;
+}
+
+.settings-layout__main {
+  min-height: 480px;
+  overflow: auto;
+}
+
+.settings-page__title {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.settings-page__hint {
+  margin: 0 0 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.settings-embedded .panel {
+  box-shadow: none;
+  border: 1px solid var(--color-border);
+}
+
+.settings-embedded .panel__header .btn--ghost.btn--sm {
+  display: none;
+}

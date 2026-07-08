@@ -36,13 +36,13 @@ func (o *Orchestrator) processToolCalls(
 			if o.isChildSession {
 				msg := "rejected: child_forbidden"
 				o.publishToolResult(sessionID, tc, msg, true, nil)
-				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 				continue
 			}
 			if o.childMgr == nil || !o.childMgr.Enabled() {
 				output := "ERROR: child agents disabled"
 				o.publishToolResult(sessionID, tc, output, true, nil)
-				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 				continue
 			}
 			_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
@@ -51,7 +51,7 @@ func (o *Orchestrator) processToolCalls(
 				return nil, "", err
 			}
 			o.publishToolResult(sessionID, tc, output, strings.HasPrefix(output, "ERROR:"), nil)
-			o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 			continue
 		}
 
@@ -59,7 +59,7 @@ func (o *Orchestrator) processToolCalls(
 			if o.isChildSession {
 				msg := "rejected: ask_user_forbidden_for_child"
 				o.publishToolResult(sessionID, tc, msg, true, nil)
-				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 				continue
 			}
 			if userInfo == nil {
@@ -79,7 +79,7 @@ func (o *Orchestrator) processToolCalls(
 		case policy.ActionDeny:
 			msg := hooks.ToolDenyMessage(decision)
 			o.publishToolResult(sessionID, tc, msg, true, nil)
-			o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 		case policy.ActionRequireApproval:
 			item := pendingApprovalCall{tc: tc}
 			if decision.ApprovalSubtype == hooks.ApprovalSubtypeDuplicateToolCall && decision.DuplicateMeta != nil {
@@ -152,7 +152,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	if catalog == nil || !catalog.Enabled() {
 		output := "ERROR: skills 功能已禁用"
 		o.publishToolResult(sessionID, tc, output, true, nil)
-		o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 		return nil
 	}
 	loaded := []skills.LoadedSkill{}
@@ -195,7 +195,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	}
 	rejected := strings.HasPrefix(output, "ERROR:")
 	o.publishToolResult(sessionID, tc, output, rejected, nil)
-	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 	return nil
 }
 
@@ -277,11 +277,11 @@ func (o *Orchestrator) commitToolResult(
 	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
 	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, rejected)
 	o.recordToolExecutionSuccess(tc, forClient, rejected)
-	o.appendHistory(sessionID, history, llm.Message{
-		Role:       "tool",
-		ToolCallID: tc.ID,
-		Content:    forHistory,
-	})
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(
+		tc.ID,
+		tc.Function.Name,
+		forHistory,
+	))
 	if !rejected {
 		o.maybeAppendToolVisionUserMessage(sessionID, history, tc)
 	}

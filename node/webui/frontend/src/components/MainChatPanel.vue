@@ -5,11 +5,11 @@ import MessageBubble from "./MessageBubble.vue";
 import StreamStatusBubble from "./StreamStatusBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
 import UserInfoBubble from "./UserInfoBubble.vue";
-import ToolExecBubble from "./ToolExecBubble.vue";
+import ToolSummaryRow from "./ToolSummaryRow.vue";
 import { buildStream } from "../composables/useStream.js";
 import { extractToolApprovals } from "../stores/hitl.js";
 import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.js";
-import { chromeStore, inputStripRight } from "../stores/chrome.js";
+import { chromeStore } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { statusStore, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
 
@@ -66,13 +66,6 @@ const pendingApprovals = computed(() =>
     .filter((h) => h.kind === "approval")
     .reduce((n, h) => n + extractToolApprovals(h.data).length, 0),
 );
-
-const inputStripRightText = computed(() => {
-  void chromeStore.usageStrip;
-  void chromeStore.contextTokens;
-  void chromeStore.llmSettings;
-  return inputStripRight();
-});
 
 const workerStrip = computed(() => workerStripText());
 
@@ -180,7 +173,7 @@ function onCancel() {
 }
 
 function onKeydown(e) {
-  if (e.key === "Enter" && !e.ctrlKey) {
+  if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     submit();
   }
@@ -198,7 +191,7 @@ defineExpose({
     <header class="chat__header">
       <div class="chat__title">
         <span class="chat__title-main">对话</span>
-        <span class="chat__title-sub">与 Agent 协作</span>
+        <span class="chat__title-sub">与助手对话</span>
       </div>
       <div class="chat__header-meta">
         <span v-if="pendingApprovals > 0" class="pill pill--warn">{{ pendingApprovals }} 待审批</span>
@@ -218,9 +211,10 @@ defineExpose({
           :entry="item.entry"
           :show-reasoning="showReasoning"
         />
-        <ToolExecBubble
-          v-else-if="item.kind === 'tool_call' || item.kind === 'tool_result'"
-          :entry="item.entry"
+        <ToolSummaryRow
+          v-else-if="item.kind === 'tool_step'"
+          :call-entry="item.callEntry"
+          :result-entry="item.resultEntry"
           :verbose="toolVerbose"
         />
         <ApprovalBubble
@@ -265,9 +259,6 @@ defineExpose({
               <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
             </div>
           </div>
-          <span v-if="inputStripRightText" class="chat__input-strip-right" :title="inputStripRightText">
-            {{ inputStripRightText }}
-          </span>
         </div>
         <div v-if="multimodalEnabled && pendingImages.length" class="chat__pending-images">
           <div v-for="(img, idx) in pendingImages" :key="`${img.name}-${idx}`" class="chat__pending-image">
@@ -299,7 +290,7 @@ defineExpose({
             v-model="input"
             class="chat__textarea"
             rows="2"
-            placeholder="输入消息或 /help 命令（Enter 发送，Ctrl+Enter 换行）"
+            placeholder="输入消息，或向助手提问…（Enter 发送，Shift+Enter 换行）"
             :disabled="disabled || sending || cancelling"
             @keydown="onKeydown"
           />

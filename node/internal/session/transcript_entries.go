@@ -1,6 +1,8 @@
 package session
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
@@ -17,21 +19,38 @@ func MessagesToTranscriptEntries(messages []llm.Message) []TranscriptEntry {
 	if len(messages) == 0 {
 		return []TranscriptEntry{}
 	}
+	callIndex := buildToolCallIndex(messages)
 	out := make([]TranscriptEntry, 0, len(messages))
 	for _, msg := range messages {
-		out = append(out, messageToTranscriptEntries(msg)...)
+		out = append(out, messageToTranscriptEntries(msg, callIndex)...)
 	}
 	return out
 }
 
-func messageToTranscriptEntries(msg llm.Message) []TranscriptEntry {
+func buildToolCallIndex(messages []llm.Message) map[string]llm.ToolCall {
+	index := make(map[string]llm.ToolCall)
+	for _, msg := range messages {
+		if strings.TrimSpace(msg.Role) != "assistant" {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			id := strings.TrimSpace(tc.ID)
+			if id != "" {
+				index[id] = tc
+			}
+		}
+	}
+	return index
+}
+
+func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCall) []TranscriptEntry {
 	switch strings.TrimSpace(msg.Role) {
 	case "user":
 		return []TranscriptEntry{userEntry(msg)}
 	case "assistant":
 		return assistantEntries(msg)
 	case "tool":
-		if entry := toolResultEntry(msg); entry != nil {
+		if entry := toolResultEntry(msg, callIndex); entry != nil {
 			return []TranscriptEntry{entry}
 		}
 	}
@@ -91,6 +110,9 @@ func toolCallEntryFromCall(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) 
 	data := turn.BuildApprovalToolItem(tc, duplicateMeta)
 	data["tool_name"] = tc.Function.Name
 	data["tool_call_id"] = tc.ID
+	if args := parseToolArgumentsMap(tc.Function.Arguments); len(args) > 0 {
+		data["arguments"] = args
+	}
 	summary := toolCallSummary(data)
 	data["summary"] = summary
 	return TranscriptEntry{
@@ -102,6 +124,18 @@ func toolCallEntryFromCall(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) 
 	}
 }
 
+func parseToolArgumentsMap(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func toolCallSummary(data map[string]any) string {
 	if s, ok := data["approval_reason"].(string); ok && strings.TrimSpace(s) != "" {
 		return s
@@ -110,7 +144,23 @@ func toolCallSummary(data map[string]any) string {
 	if name == "" {
 		return "tool"
 	}
+	if purpose, ok := data["arguments"].(map[string]any); ok {
+		if cp := strings.TrimSpace(stringField(purpose, "call_purpose")); cp != "" {
+			return name + "(" + cp + ")"
+		}
+	}
 	return name + "()"
+}
+
+func stringField(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	v, ok := m[key]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
 }
 
 func fmtToolName(data map[string]any) string {
@@ -123,12 +173,21 @@ func fmtToolName(data map[string]any) string {
 	return ""
 }
 
-func toolResultEntry(msg llm.Message) TranscriptEntry {
+func toolResultEntry(msg llm.Message, callIndex map[string]llm.ToolCall) TranscriptEntry {
 	callID := strings.TrimSpace(msg.ToolCallID)
 	if callID == "" {
 		return nil
 	}
 	toolName := strings.TrimSpace(msg.Name)
+	var args map[string]any
+	if tc, ok := callIndex[callID]; ok {
+		if toolName == "" {
+			toolName = strings.TrimSpace(tc.Function.Name)
+		}
+		if parsed := parseToolArgumentsMap(tc.Function.Arguments); len(parsed) > 0 {
+			args = parsed
+		}
+	}
 	data := map[string]any{
 		"tool_call_id": callID,
 		"id":           callID,
@@ -138,10 +197,10 @@ func toolResultEntry(msg llm.Message) TranscriptEntry {
 		data["tool_name"] = toolName
 		data["name"] = toolName
 	}
-	summary := toolName
-	if summary == "" {
-		summary = "tool"
+	if len(args) > 0 {
+		data["arguments"] = args
 	}
+	summary := toolResultSummary(data)
 	data["summary"] = summary
 	return TranscriptEntry{
 		"kind":    "tool_result",
@@ -150,4 +209,17 @@ func toolResultEntry(msg llm.Message) TranscriptEntry {
 		"data":    data,
 		"summary": summary,
 	}
+}
+
+func toolResultSummary(data map[string]any) string {
+	name := strings.TrimSpace(fmtToolName(data))
+	if name == "" {
+		return "tool"
+	}
+	if args, ok := data["arguments"].(map[string]any); ok {
+		if cp := strings.TrimSpace(stringField(args, "call_purpose")); cp != "" {
+			return name + "(" + cp + ")"
+		}
+	}
+	return name + "()"
 }

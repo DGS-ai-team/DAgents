@@ -113,11 +113,11 @@ func (o *Orchestrator) buildExternalSideEffectMessages(_ string, content, userNa
 				},
 			}},
 		},
-		ToolMessage: llm.Message{
-			Role:       "tool",
-			ToolCallID: toolCallID,
-			Content:    fmt.Sprintf("外部消息（%s）：%s", userName, toolText),
-		},
+		ToolMessage: llm.ToolResultMessage(
+			toolCallID,
+			toolName,
+			fmt.Sprintf("外部消息（%s）：%s", userName, toolText),
+		),
 		ForClientContent: toolText,
 		ToolName:         toolName,
 		ToolCallID:       toolCallID,
@@ -285,11 +285,7 @@ func BuildMergedCallbackBatch(entries []SideEffectBatchEntry, messages []llm.Mes
 			},
 		}},
 	}
-	toolMsg := llm.Message{
-		Role:       "tool",
-		ToolCallID: toolCallID,
-		Content:    string(body),
-	}
+	toolMsg := llm.ToolResultMessage(toolCallID, "get_callback", string(body))
 	out := SideEffectApplyPlan{
 		Continue: shouldContinueAfterSideEffectApply(tail),
 		Mode:     "merged_get_callback",

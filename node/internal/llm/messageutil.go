@@ -20,6 +20,16 @@ func CloneMessage(message Message) Message {
 	return out
 }
 
+// ToolResultMessage 构造 tool 角色历史消息（含 function name，供 hydrate / Web UI 展示）。
+func ToolResultMessage(toolCallID, name, content string) Message {
+	return Message{
+		Role:       "tool",
+		ToolCallID: strings.TrimSpace(toolCallID),
+		Name:       strings.TrimSpace(name),
+		Content:    content,
+	}
+}
+
 // EstimateTextTokens 粗算纯文本 token（DeepSeek 字符权重），与 EstimateMessageTokens 一致。
 func EstimateTextTokens(text string) int {
 	return tokens.EstimateInt(text)

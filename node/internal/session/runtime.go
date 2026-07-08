@@ -13,6 +13,7 @@ import (
 	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -58,6 +59,7 @@ type runtime struct {
 	pending       *turn.PendingHITL    // 暂停
 	toolLoopCount int                  // tool 循环计数
 	fsRoot        string               // 文件系统根路径
+	media         *media.Registry      // session 媒体索引（F-M1）
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
@@ -143,6 +145,11 @@ func newRuntimeWithPublisher(
 		idleAutoCompressApplied: idleAutoCompressApplied,
 		notifySeq:               initialNotifySeq,
 		ackSeq:                  initialAckSeq,
+	}
+	if reg, err := media.NewRegistry(id, turnOpts.FSRoot); err == nil {
+		rt.media = reg
+	} else if logger != nil {
+		logger.Warn("session media registry init failed", "session_id", id, "error", err)
 	}
 	// 创建编排器
 	rt.orch = turn.NewOrchestrator(

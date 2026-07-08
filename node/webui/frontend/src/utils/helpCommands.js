@@ -1,7 +1,7 @@
 /** Web UI slash 命令帮助（对齐 TUI FormatHelpPanelBody，仅含 Web 已实现的命令）。 */
 export const HELP_SHORTCUTS = [
   { keys: "Enter", desc: "发送消息" },
-  { keys: "Ctrl+Enter", desc: "输入框内换行" },
+  { keys: "Shift+Enter", desc: "输入框内换行" },
   { keys: "Esc", desc: "关闭弹窗面板" },
 ];
 

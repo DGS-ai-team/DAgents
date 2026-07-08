@@ -318,6 +318,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()
 	s.registerChildAgentRoutes()
+	s.registerMediaRoutes()
 	s.registerPolicyRoutes()
 	s.registerLLMRoutes()
 	s.registerManageUploadRoutes()

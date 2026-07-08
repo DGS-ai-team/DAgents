@@ -119,11 +119,7 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, history []llm.Me
 				},
 			}},
 		},
-		ToolMessage: llm.Message{
-			Role:       "tool",
-			ToolCallID: toolCallID,
-			Content:    toolText,
-		},
+		ToolMessage: llm.ToolResultMessage(toolCallID, toolName, toolText),
 		ForClientContent:       fullForClient,
 		ToolName:               toolName,
 		ToolCallID:             toolCallID,

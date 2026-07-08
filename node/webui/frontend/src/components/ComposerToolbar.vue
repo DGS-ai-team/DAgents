@@ -34,30 +34,30 @@ const thinkingActive = computed(() => {
     <button
       type="button"
       class="composer-toolbar__btn"
-      title="View context (/context)"
+      title="查看上下文"
       :disabled="disabled"
       @click="emit('open-context')"
     >
       <span class="composer-toolbar__icon" aria-hidden="true">◫</span>
-      <span class="composer-toolbar__label">Context</span>
+      <span class="composer-toolbar__label">上下文</span>
     </button>
     <button
       v-if="thinkingSupported"
       type="button"
       class="composer-toolbar__btn"
       :class="{ 'composer-toolbar__btn--active': thinkingEnabled }"
-      :title="thinkingEnabled ? 'Thinking enabled — click to disable' : 'Thinking disabled — click to enable'"
+      :title="thinkingEnabled ? '思考模式已开启，点击关闭' : '思考模式已关闭，点击开启'"
       :disabled="disabled"
       @click="emit('toggle-thinking')"
     >
       <span class="composer-toolbar__icon" aria-hidden="true">◔</span>
-      <span class="composer-toolbar__label">{{ thinkingEnabled ? "Think" : "Think off" }}</span>
+      <span class="composer-toolbar__label">{{ thinkingEnabled ? "思考" : "思考关" }}</span>
     </button>
     <button
       v-if="thinkingSupported && thinkingEnabled"
       type="button"
       class="composer-toolbar__btn composer-toolbar__btn--secondary"
-      :title="`Reasoning effort: ${effort} — click to cycle high/max`"
+      :title="`推理强度 ${effort}，点击切换 high/max`"
       :disabled="disabled"
       @click="emit('cycle-effort')"
     >

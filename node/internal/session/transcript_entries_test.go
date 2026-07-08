@@ -82,3 +82,38 @@ func TestMessagesToTranscriptEntries_userImages(t *testing.T) {
 		t.Fatalf("images = %#v", entries[0]["images"])
 	}
 }
+
+func TestMessagesToTranscriptEntries_toolResultBackfillName(t *testing.T) {
+	t.Parallel()
+	messages := []llm.Message{
+		{Role: "user", Content: "run"},
+		{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID:   "call-x",
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      "bash_run",
+					Arguments: `{"command":"echo hi","call_purpose":"test weather"}`,
+				},
+			}},
+		},
+		{Role: "tool", ToolCallID: "call-x", Content: "hi\n"},
+	}
+	entries := MessagesToTranscriptEntries(messages)
+	if len(entries) != 3 {
+		t.Fatalf("len = %d, want 3 (user + tool_call + tool_result)", len(entries))
+	}
+	res := entries[2]
+	if res["kind"] != "tool_result" {
+		t.Fatalf("kind = %#v", res["kind"])
+	}
+	data, _ := res["data"].(map[string]any)
+	if data["tool_name"] != "bash_run" {
+		t.Fatalf("tool_name = %#v", data["tool_name"])
+	}
+	args, _ := data["arguments"].(map[string]any)
+	if args["call_purpose"] != "test weather" {
+		t.Fatalf("arguments = %#v", data["arguments"])
+	}
+}

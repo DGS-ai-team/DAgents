@@ -41,6 +41,10 @@ export function connectStream({ getSessionId, onEvent, onStatus }) {
       "temporary_agent_cancelled",
       "context_compression_blocking",
       "context_compression_silent",
+      "user_message_deferred",
+      "side_effect_turn_start",
+      "side_effect_applied",
+      "side_effects_cleared",
     ];
     types.forEach((type) => {
       es.addEventListener(type, (ev) => {

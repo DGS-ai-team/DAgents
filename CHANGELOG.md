@@ -4,11 +4,11 @@
 
 ## [Unreleased]
 
-**规划 v0.6 – v0.7**：当前开发 **`v0.6.1`**（`show_image` + Session Media API）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §3；设计见 [`docs/design/node-ui-media-display.md`](docs/design/node-ui-media-display.md)。
+**规划 v0.6 – v0.7**：当前开发 **`v0.6.1`**（**产品化 Web UI** + `show_image` + Session Media API）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §3；UI 设计见 [`docs/design/web-ui-redesign-v0.6.1.md`](docs/design/web-ui-redesign-v0.6.1.md)；Media 见 [`docs/design/node-ui-media-display.md`](docs/design/node-ui-media-display.md)。
 
 ### 新增
 
-（v0.6.1 待交付：F-M0–M5、F-H10/H11。）
+（v0.6.1 待交付：F-M0–M5、F-H10/H11、F-UI0–UI13。）
 
 ---
 

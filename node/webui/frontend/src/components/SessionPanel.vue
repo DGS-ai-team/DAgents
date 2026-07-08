@@ -70,13 +70,18 @@ defineExpose({ refresh, setDeleting });
           <div class="session-history-item__main">
             <div class="session-history-item__title-row">
               <span class="session-history-item__title">{{ sessionDisplayTitle(s) }}</span>
+              <span v-if="s.has_unread || s.HasUnread" class="session-history-item__badge session-history-item__badge--unread" title="有新消息">未读</span>
+              <span
+                v-if="s.has_pending_hitl || s.HasPendingHITL || (s.pending_hitl_items ?? s.PendingHITLItems) > 0"
+                class="session-history-item__badge session-history-item__badge--hitl"
+                title="待你确认"
+              >待确认</span>
               <span v-if="s.active" class="session-history-item__badge session-history-item__badge--live">活跃</span>
               <span v-else-if="s.has_active_turn || s.HasActiveTurn" class="session-history-item__badge session-history-item__badge--running">进行中</span>
             </div>
             <div class="session-history-item__meta">
               <span class="session-history-item__count">{{ s.message_count ?? s.MessageCount ?? 0 }} 条</span>
               <span v-if="s.updated_at" class="session-history-item__time">{{ formatRelativeTime(s.updated_at) }}</span>
-              <span class="session-history-item__id" :title="sessionRecordId(s)">{{ sessionRecordId(s).slice(0, 12) }}…</span>
             </div>
           </div>
           <button

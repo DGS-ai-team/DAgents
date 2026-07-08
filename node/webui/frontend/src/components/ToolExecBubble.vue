@@ -5,6 +5,7 @@ import { resolveToolVisual } from "../utils/toolSource.js";
 import { statusStore } from "../stores/statusLines.js";
 import { isReadFileTool } from "../utils/readFilePreview.js";
 import { parseToolArguments, toolDisplayName, resolveToolArgumentsFromData } from "../utils/toolCalls.js";
+import { toolStepUserSummary } from "../utils/toolUserLabel.js";
 import ReadFileResultPreview from "./ReadFileResultPreview.vue";
 
 const props = defineProps({
@@ -22,7 +23,14 @@ const resultDisplay = computed(() =>
 );
 const toolName = computed(() => String(props.entry.data?.tool_name || props.entry.data?.name || "").trim());
 const toolArgs = computed(() => resolveToolArgumentsFromData(props.entry.data));
-const toolTitle = computed(() => toolDisplayName(toolName.value || "tool", toolArgs.value));
+const toolTitle = computed(() => {
+  const userSummary = toolStepUserSummary({
+    callEntry: isCall.value ? props.entry : null,
+    resultEntry: isResult.value ? props.entry : null,
+  });
+  if (userSummary) return userSummary;
+  return toolDisplayName(toolName.value || "tool", toolArgs.value);
+});
 const displayName = computed(() => toolTitle.value);
 const resultDetail = computed(() => resultDisplay.value?.detail || "");
 const codePreview = computed(() => props.entry.codePreview || "");

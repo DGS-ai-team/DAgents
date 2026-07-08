@@ -52,7 +52,7 @@ func (o *Orchestrator) continueAfterUserInformationResume(
 		content = err.Error()
 	}
 	o.publishToolResult(sessionID, tc, content, false, nil)
-	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, content))
 
 	remaining := pending.withoutIndex(targetIdx)
 	if remaining == nil {
@@ -86,7 +86,7 @@ func (o *Orchestrator) continueAfterApprovalResume(
 			tc := item.ToolCall
 			msg := "rejected: " + err.Error()
 			o.publishToolResult(sessionID, tc, msg, true, nil)
-			o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 		}
 	} else {
 		var approved []llm.ToolCall
@@ -97,7 +97,7 @@ func (o *Orchestrator) continueAfterApprovalResume(
 			} else {
 				msg := "rejected: user_rejected"
 				o.publishToolResult(sessionID, tc, msg, true, nil)
-				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 			}
 		}
 		if err := o.executeAutoBatch(ctx, sessionID, history, approved, &plan); err != nil {
