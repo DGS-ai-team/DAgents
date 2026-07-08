@@ -19,6 +19,7 @@
 
 - 写入 `config.yaml`（保留 `config.example.yaml` 中的注释块；按选项展开 browser/multimodal/manage 等）
 - 按选项创建 `.runtime/browser/`（启用 Browser 时）
+- **注册 Shell 登录自启**（`HKCU\...\Run` → `dagents shell --background`）并可选立即启动托盘
 - 弹出后续步骤提示（API Key、Browser 启动等）
 
 升级安装：若已存在 `config.yaml`，会询问是否覆盖。

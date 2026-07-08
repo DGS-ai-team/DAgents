@@ -13,6 +13,7 @@ set "CFG=config.yaml"
 if defined DAGENTS_CONFIG set "CFG=%DAGENTS_CONFIG%"
 set "CFG_ABS=%DAGENTS_HOME%\%CFG%"
 set "NODE_PID_FILE=%DAGENTS_HOME%\.runtime\node.pid"
+set "SHELL_PID_FILE=%DAGENTS_HOME%\.runtime\shell.pid"
 set "BROWSER_PID_FILE=%DAGENTS_HOME%\.runtime\browser.pid"
 
 if "%~1"=="" goto cli_default_chat
@@ -31,6 +32,7 @@ if /I "%~1"=="chat" shift & goto run_cli_chat
 if /I "%~1"=="tui" shift & goto run_client_tui
 if /I "%~1"=="node" shift & goto run_node
 if /I "%~1"=="browser" shift & goto run_browser
+if /I "%~1"=="shell" shift & goto run_shell
 if /I "%~1"=="doctor" goto doctor
 if /I "%~1"=="version" shift & goto version_cmd
 if /I "%~1"=="update" shift & goto update_cmd
@@ -130,6 +132,163 @@ if /I "%~1"=="--no-wait" goto run_node_nowait
 if /I "%~1"=="--background" goto run_node_nowait
 bin\dagents-node.exe -config "%CFG%" %*
 goto cli_exit
+
+:run_shell
+if not exist "bin\dagents-shell.exe" goto missing_shell
+if "%~1"=="" (
+  call :start_shell_default
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="start" (
+  shift
+  call :start_shell_default
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="status" (
+  shift
+  call :probe_shell
+  if not errorlevel 1 (
+    echo [dagents] shell is running
+    set "EXIT_CODE=0"
+  ) else (
+    echo [dagents] shell is not running
+    set "EXIT_CODE=1"
+  )
+  goto cli_exit
+)
+if /I "%~1"=="stop" (
+  shift
+  call :shutdown_shell
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="shutdown" (
+  shift
+  call :shutdown_shell
+  set "EXIT_CODE=!ERRORLEVEL!"
+  goto cli_exit
+)
+if /I "%~1"=="--foreground" (
+  shift
+  bin\dagents-shell.exe -config "%CFG%" %*
+  goto cli_exit
+)
+if /I "%~1"=="-f" (
+  shift
+  bin\dagents-shell.exe -config "%CFG%" %*
+  goto cli_exit
+)
+if /I "%~1"=="--no-wait" goto run_shell_nowait
+if /I "%~1"=="--background" goto run_shell_nowait
+call :start_shell_default
+set "EXIT_CODE=!ERRORLEVEL!"
+goto cli_exit
+
+:run_shell_nowait
+shift
+call :probe_shell
+if not errorlevel 1 (
+  echo [dagents] shell already running
+  set "EXIT_CODE=0"
+  goto cli_exit
+)
+call :start_shell_background
+set "EXIT_CODE=!ERRORLEVEL!"
+goto cli_exit
+
+:start_shell_default
+call :probe_shell
+if not errorlevel 1 (
+  echo [dagents] shell already running
+  exit /b 0
+)
+call :start_shell_background
+if errorlevel 1 exit /b 1
+echo [dagents] shell started (system tray)
+exit /b 0
+
+:start_shell_background
+if not exist "%DAGENTS_HOME%\bin\dagents-shell.exe" exit /b 1
+if not exist "%DAGENTS_HOME%\.runtime\logs" mkdir "%DAGENTS_HOME%\.runtime\logs"
+set "SHELL_EXE=%DAGENTS_HOME%\bin\dagents-shell.exe"
+set "SHELL_LOG=%DAGENTS_HOME%\.runtime\logs\shell.log"
+set "SHELL_ERR=%DAGENTS_HOME%\.runtime\logs\shell.err.log"
+set "SHELL_START_PS1=%DAGENTS_HOME%\scripts\startup\windows\start-shell-detached.ps1"
+echo [dagents] starting shell in background (logs: %SHELL_LOG%)
+if not exist "%SHELL_START_PS1%" (
+  echo [dagents] missing %SHELL_START_PS1%
+  exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SHELL_START_PS1%" ^
+  -ShellExe "%SHELL_EXE%" ^
+  -Config "%CFG%" ^
+  -WorkingDirectory "%DAGENTS_HOME%" ^
+  -LogOut "%SHELL_LOG%" ^
+  -LogErr "%SHELL_ERR%" ^
+  -PidFile "%SHELL_PID_FILE%"
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:clear_shell_pid
+if exist "%SHELL_PID_FILE%" del /f /q "%SHELL_PID_FILE%" >nul 2>&1
+exit /b 0
+
+:shutdown_shell
+call :probe_shell
+if errorlevel 1 (
+  call :clear_shell_pid
+  echo [dagents] shell is not running
+  exit /b 0
+)
+set "SHELL_PID="
+if exist "%SHELL_PID_FILE%" set /p SHELL_PID=<"%SHELL_PID_FILE%"
+if defined SHELL_PID (
+  call :stop_shell_process !SHELL_PID!
+) else (
+  call :find_and_stop_shell_pids
+)
+call :clear_shell_pid
+call :probe_shell
+if not errorlevel 1 (
+  echo [dagents] shell still running after shutdown; check .runtime\logs\shell.err.log
+  exit /b 1
+)
+echo [dagents] shell stopped
+exit /b 0
+
+:stop_shell_process
+set "TARGET_PID=%~1"
+if not defined TARGET_PID exit /b 0
+tasklist /FI "PID eq %TARGET_PID%" 2>nul | find /I "%TARGET_PID%" >nul
+if errorlevel 1 exit /b 0
+echo [dagents] stopping shell (pid=%TARGET_PID%)
+taskkill /PID %TARGET_PID% /T >nul 2>&1
+set /a STOP_WAIT=0
+:stop_shell_wait
+tasklist /FI "PID eq %TARGET_PID%" 2>nul | find /I "%TARGET_PID%" >nul
+if errorlevel 1 exit /b 0
+timeout /t 1 /nobreak >nul 2>nul
+if errorlevel 1 ping -n 2 127.0.0.1 >nul
+set /a STOP_WAIT+=1
+if !STOP_WAIT! lss 15 goto stop_shell_wait
+taskkill /PID %TARGET_PID% /T /F >nul 2>&1
+exit /b 0
+
+:find_and_stop_shell_pids
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$home='!DAGENTS_HOME!'; $cfg='!CFG!'; $cfgAbs='!CFG_ABS!'; Get-CimInstance Win32_Process -Filter 'Name=\"dagents-shell.exe\"' | Where-Object { $cl=$_.CommandLine; ($cl -like \"*$cfgAbs*\") -or ($cl -like \"*-config* $cfg*\") -or ($cl -like \"*-config `\"$cfg`\"*\") -or ($cl -like \"*$($home)\bin\dagents-shell.exe*\") } | ForEach-Object { Write-Host ('[dagents] stopping shell (pid=' + $_.ProcessId + ')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+exit /b 0
+
+:probe_shell
+set "SHELL_PID="
+if exist "%SHELL_PID_FILE%" set /p SHELL_PID=<"%SHELL_PID_FILE%"
+if defined SHELL_PID (
+  tasklist /FI "PID eq %SHELL_PID%" 2>nul | find /I "%SHELL_PID%" >nul
+  if not errorlevel 1 exit /b 0
+)
+powershell -NoProfile -Command "$home='!DAGENTS_HOME!'; $cfgAbs='!CFG_ABS!'; $cfg='!CFG!'; $found=$false; Get-CimInstance Win32_Process -Filter 'Name=\"dagents-shell.exe\"' | ForEach-Object { $cl=$_.CommandLine; if (($cl -like \"*$cfgAbs*\") -or ($cl -like \"*-config* $cfg*\") -or ($cl -like \"*$($home)\bin\dagents-shell.exe*\")) { $found=$true } }; if ($found) { exit 0 } else { exit 1 }" >nul 2>&1
+exit /b %ERRORLEVEL%
 
 :run_browser
 if not exist "bin\dagents-browser.exe" goto missing_browser
@@ -465,6 +624,11 @@ echo [dagents] bin\dagents-browser.exe was not found in "%DAGENTS_HOME%"
 popd >nul
 exit /b 1
 
+:missing_shell
+echo [dagents] bin\dagents-shell.exe was not found in "%DAGENTS_HOME%"
+popd >nul
+exit /b 1
+
 :cli_exit
 set "EXIT_CODE=%ERRORLEVEL%"
 popd >nul
@@ -473,8 +637,10 @@ exit /b %EXIT_CODE%
 :doctor
 echo DAgents installation: %DAGENTS_HOME%
 set "OK=1"
-for %%F in (bin\dagents-node.exe bin\dagents-client.exe bin\dagents-cli.exe bin\dagents-browser.exe) do (
-  if exist "%%F" (echo [ok] %%F) else (echo [missing] %%F & set "OK=0")
+for %%F in (bin\dagents-node.exe bin\dagents-client.exe bin\dagents-cli.exe bin\dagents-browser.exe bin\dagents-shell.exe) do (
+  if exist "%%F" (echo [ok] %%F) else (
+    if "%%F"=="bin\dagents-browser.exe" (echo [optional] %%F) else if "%%F"=="bin\dagents-shell.exe" (echo [optional] %%F) else (echo [missing] %%F & set "OK=0")
+  )
 )
 if exist "config.yaml" (echo [ok] config.yaml) else (echo [info] config.yaml not found; copy config.example.yaml config.yaml)
 if exist ".runtime" (echo [ok] .runtime) else (echo [missing] .runtime)
@@ -602,6 +768,10 @@ echo   dagents node --no-wait          Background start without waiting for prob
 echo   dagents browser                 Start browser-use service in background (browser.enabled)
 echo   dagents browser stop            Stop browser-use service
 echo   dagents browser --foreground    Run browser service in foreground
+echo   dagents shell                   Start Desktop Shell in background (tray + Node)
+echo   dagents shell status            Check Shell process
+echo   dagents shell stop              Stop Desktop Shell (and Node via tray exit)
+echo   dagents shell --foreground      Run Shell in foreground (blocks terminal)
 echo   dagents doctor                  Check installed files
 echo   dagents version                 Print version information
 echo   dagents version --check         Check for updates (via Manage Release Hub)
@@ -613,7 +783,9 @@ echo   After dagents node, open http://127.0.0.1:^<listen.port^>/ui/ (default 18
 echo   Disable with ui.enabled: false in config.yaml. No separate UI package required.
 echo.
 echo Background node survives closing this terminal (detached via Start-Process).
-echo   For boot persistence use scripts\windows\install_node_service.cmd (admin).
+echo   Desktop Shell (dagents shell) supervises Node and shows HITL toasts in the tray.
+echo   For boot persistence Shell registers login autostart via the Windows installer.
+echo   Legacy: scripts\windows\install_node_service.cmd (admin) for Node-only service.
 echo.
 echo Options:
 echo   --withnode     Probe Node first; start it in background if not running, then launch client

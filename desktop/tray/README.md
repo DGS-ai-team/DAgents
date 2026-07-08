@@ -17,6 +17,7 @@
 | **SSE 订阅 + session 待办表**（F-E1–E4/E10–E12） | ✅ v0.6.0 第 ⑤ 步 |
 | **未读 assistant 回复待办**（F-E13） | ✅ IM cursor：`notify_seq`/`ack_seq`；Node `POST /ack`；Shell 同步 `has_unread` |
 | **Toast + 深链 + 打开控制台 + 托盘 icon 态**（F-N1–N3/N10, F-U1–U3） | ✅ v0.6.0 第 ⑥ 步 |
+| **安装发布**（F-I1/I3/I8–I10） | ✅ v0.6.0 第 ⑧ 步 |
 | Hydrate（Node + Web UI） | ✅ v0.6.0 第 ③④ 步 |
 
 ## 菜单
@@ -83,6 +84,11 @@ Windows 上额外运行 `singleinstance` 互斥测试。
 - **托盘 icon**（F-N10）：有待办时切换 `icon_pending.ico` 并显示 `●` 标题角标。
 - **打开控制台**（F-U1/U2）：ensure Node 后 `rundll32` 调起默认浏览器。
 - Web UI hydrate/SSE 后 **`POST /v1/sessions/{id}/ack`** 清除未读（F-E13）；Shell 打开深链不本地 ack。
+
+## 安装与自启（v0.6.0 第 ⑧ 步）
+
+- Windows 安装包 **`bin/dagents-shell.exe`** + Inno **登录自启**（HKCU Run → `dagents shell --background`）。
+- 命令行：`dagents shell` / `shell status` / `shell stop`（F-I9）；卸载时清理自启项（F-I10）。
 
 包布局：`internal/nodeclient`、`internal/pending`、`internal/events`、`internal/notify`、`internal/webui`。
 

@@ -8,6 +8,8 @@
 #ifndef MyOutputBaseFilename
 #define MyOutputBaseFilename "dagents-local-assistant-windows-amd64-installer"
 #endif
+#define ShellAutostartRunName "DAgents Shell"
+#define ShellAutostartRegKey "Software\Microsoft\Windows\CurrentVersion\Run"
 
 [Setup]
 AppId={{A3B8C2D1-9E4F-4A7B-8C6D-1E2F3A4B5C6D}
@@ -52,6 +54,7 @@ Source: "..\..\bundle\.runtime\*"; DestDir: "{app}\.runtime"; Flags: recursesubd
 Source: "..\..\bundle\.runtime\policy\*"; DestDir: "{app}\.runtime\_seed\policy"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
+Name: "{group}\DAgents Shell（系统托盘）"; Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; WorkingDir: "{app}"
 Name: "{group}\DAgents Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"
 Name: "{group}\Start Agent Node (background)"; Filename: "{app}\dagents.cmd"; Parameters: "node"; WorkingDir: "{app}"
 Name: "{group}\Start Agent Node (foreground)"; Filename: "{app}\dagents.cmd"; Parameters: "node --foreground"; WorkingDir: "{app}"
@@ -64,6 +67,7 @@ Name: "{group}\打开 Web UI"; Filename: "http://127.0.0.1:18765/ui/"
 
 [Run]
 Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "验证安装文件 (dagents doctor)"; Flags: postinstall skipifsilent runascurrentuser
+Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; Description: "启动 DAgents Shell（托盘监护 Node）"; Flags: postinstall nowait skipifsilent runascurrentuser
 
 [Code]
 var
@@ -225,8 +229,9 @@ begin
   CreateWizardPages;
   WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents 本地助手';
   WizardForm.WelcomeLabel2.Caption :=
-    '本安装包包含 Agent Node、Client 与 CLI。' + #13#10 +
-    '向导将分三批配置 LLM、Manage 与功能开关，并生成 config.yaml。';
+    '本安装包包含 Agent Node、Desktop Shell（系统托盘）、Client 与 CLI。' + #13#10 +
+    '向导将分三批配置 LLM、Manage 与功能开关，并生成 config.yaml。' + #13#10 +
+    '安装完成后 Shell 将随用户登录自启并监护 Node。';
   WizardForm.FinishedLabel.Caption := 'DAgents 已安装完成。';
   WizardForm.FinishedHeadingLabel.Caption := '安装完成';
 end;
@@ -428,6 +433,8 @@ begin
     Tips := Tips + '• Manage 已启用：' + Trim(ManageDetailPage.Values[0]) + #13#10;
   if FeatureBrowser.Checked then
     Tips := Tips + '• Browser 已启用：执行 dagents browser 启动薄服务（默认 127.0.0.1:18766；需本机 Chrome）' + #13#10;
+  if FileExists(ExpandConstant('{app}') + '\bin\dagents-shell.exe') then
+    Tips := Tips + '• Desktop Shell 已安装：托盘图标监护 Node；登录时自动启动（dagents shell status）' + #13#10;
   if UseMockLLM then
     Tips := Tips + '• 当前为 Mock LLM，生产环境请编辑 config.yaml 并设置 API Key' + #13#10;
   if not UseMockLLM then
@@ -449,7 +456,42 @@ begin
   Result := '';
   AppDir := ExpandConstant('{app}');
   if FileExists(AppDir + '\dagents.cmd') then
+  begin
+    if FileExists(AppDir + '\bin\dagents-shell.exe') then
+      Exec(AppDir + '\dagents.cmd', 'shell stop', AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(AppDir + '\dagents.cmd', 'node shutdown', AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
+procedure InstallShellAutostart;
+var
+  AppDir, CmdLine: string;
+begin
+  AppDir := ExpandConstant('{app}');
+  if not FileExists(AppDir + '\bin\dagents-shell.exe') then
+    Exit;
+  CmdLine := '"' + AppDir + '\dagents.cmd" shell --background';
+  RegWriteStringValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}', CmdLine);
+end;
+
+procedure RemoveShellAutostart;
+begin
+  if RegValueExists(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}') then
+    RegDeleteValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}');
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TSetupUninstallStep);
+var
+  ResultCode: Integer;
+  AppDir: string;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    AppDir := ExpandConstant('{app}');
+    if FileExists(AppDir + '\dagents.cmd') and FileExists(AppDir + '\bin\dagents-shell.exe') then
+      Exec(AppDir + '\dagents.cmd', 'shell stop', AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    RemoveShellAutostart;
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -461,6 +503,7 @@ begin
     ApplyPolicySeed;
     GenerateConfigYaml;
     EnsureBrowserRuntimeDir;
+    InstallShellAutostart;
     ShowPostInstallTips;
   end;
   if CurStep <> ssPostInstall then

@@ -221,15 +221,15 @@
 
 | ID | 优先级 | 功能 | 现状 | 备注 |
 |----|--------|------|------|------|
-| F-I1 | P0 | `bin/dagents-shell.exe` + `dagents-node.exe` 布局 | ❌ | |
-| F-I3 | P0 | **当前用户开机自启 Shell** | ❌ | D21 |
+| F-I1 | P0 | `bin/dagents-shell.exe` + `dagents-node.exe` 布局 | ✅ | assemble + Inno `bin/*` |
+| F-I3 | P0 | **当前用户开机自启 Shell** | ✅ | HKCU Run + `dagents shell --background` |
 | F-I2 | P1 | Inno Setup 组件 | ❌ | |
 | F-I4 | P1 | 共用 `-config` / `DAGENTS_HOME` | ✅ | |
 | F-I5 | P2 | `.runtime/logs/shell.log` | ❌ | |
 | F-I7 | P1 | 文档：Windows 默认 Client 改为 Shell + Web UI | ❌ | D22 |
-| F-I8 | P0 | **CI / Release workflow** 构建 `dagents-shell.exe` | ❌ | 与 `dagents-node` / `dagents-cli` 并列 |
-| F-I9 | P0 | **`dagents.cmd shell`** 子命令（启动 / 状态；可选 stop） | ❌ | Windows 入口与安装包一致 |
-| F-I10 | P0 | **卸载 / 升级** 时清理 Shell **开机自启**注册表项 | ❌ | 与 F-I3 配对 |
+| F-I8 | P0 | **CI / Release workflow** 构建 `dagents-shell.exe` | ✅ | `build_dagents_shell.sh` + assemble 必含 |
+| F-I9 | P0 | **`dagents.cmd shell`** 子命令（start / status / stop） | ✅ | `--background` / `--foreground` |
+| F-I10 | P0 | **卸载 / 升级** 时清理 Shell **开机自启**注册表项 | ✅ | Inno `RemoveShellAutostart` |
 | F-I11 | P1 | **`shared/update`**（或等价）抽取 Manage check + 下载校验 | ❌ | D38 |
 | F-I12 | P1 | **`dagents.cmd update`** 委托 Shell（Shell 未运行时回退现 client 路径） | ❌ | 与 F-U6 同一 orchestrator |
 

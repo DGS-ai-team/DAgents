@@ -65,7 +65,8 @@ SHELL_BIN="${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}"
 if [[ -f "${SHELL_BIN}" ]]; then
   install -m 0755 "${SHELL_BIN}" "${BUNDLE_DIR}/bin/dagents-shell${EXE}"
 elif [[ "${PLATFORM}" == windows-* && "${SKIP_SHELL:-}" != "1" ]]; then
-  echo "[assemble] note: dagents-shell${EXE} not found (run build_dagents_shell.sh or set SKIP_SHELL=1)" >&2
+  echo "[assemble] missing dagents-shell${EXE} (run build_dagents_shell.sh or set SKIP_SHELL=1)" >&2
+  exit 1
 fi
 
 if [[ -f "${REPO_ROOT}/packaging/agent-client/config.example.yaml" ]]; then
@@ -107,19 +108,22 @@ fi
 
 if [[ "${PLATFORM}" == windows-* ]]; then
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
-DAgents Local Assistant (Go Node + dual TUI)
+DAgents Local Assistant (Go Node + Desktop Shell + dual TUI)
 
 1. copy config.example.yaml to config.yaml and edit llm / agent_id / agent.role (Manage A2A)
-2. Start Node:
-     dagents node --background          (recommended; logs in .runtime\logs\node.log)
+2. Start Desktop Shell (recommended; tray supervises Node + HITL toasts):
+     dagents shell --background          (logs in .runtime\logs\shell.log)
+     dagents shell status / shell stop
+3. Or start Node only (legacy / debug):
+     dagents node --background          (logs in .runtime\logs\node.log)
      dagents node                       (foreground)
      bin\dagents-node.exe -config config.yaml
      scripts\startup\windows\start-node.bat
-3. Browser 工具（config 中 browser.enabled: true 时）：
+4. Browser 工具（config 中 browser.enabled: true 时）：
      dagents browser --background          (推荐；日志 .runtime\logs\browser.log)
      dagents browser stop
      bin\dagents-browser.exe --config config.yaml
-4. Browser Web UI (embedded in dagents-node; no separate UI installer):
+5. Browser Web UI (embedded in dagents-node; no separate UI installer):
      http://127.0.0.1:<listen.port>/ui/   (default 18765; ui.enabled defaults to true)
 
 Install Node as SYSTEM startup task (admin CMD):
