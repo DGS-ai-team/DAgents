@@ -12,12 +12,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/desktopapi"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/events"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodectl"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodeclient"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/notify"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/pending"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/singleinstance"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/webui"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 	"github.com/getlantern/systray"
@@ -40,10 +42,15 @@ func main() {
 }
 
 func run(args []string) int {
-	fs := flag.NewFlagSet("dagents-shell", flag.ExitOnError)
+	fs := flag.NewFlagSet("dagents-shell", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	configFlag := fs.String("config", "", "path to config.yaml")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	rest := fs.Args()
+	if len(rest) > 0 && rest[0] == "update" {
+		return runUpdateCommand(rest[1:])
 	}
 
 	cfgPath, err := config.ResolveConfigPath(*configFlag)
@@ -99,6 +106,10 @@ type trayApp struct {
 	nodeClient   *nodeclient.Client
 	pendingStore *pending.Store
 	notifier     *notify.Notifier
+	updateChecker *update.Checker
+	updateApplier *update.Applier
+	desktopAPI   *desktopapi.Server
+	bgCancel     context.CancelFunc
 	sseSub       *events.Subscriber
 	sseCancel    context.CancelFunc
 
@@ -141,7 +152,18 @@ func (a *trayApp) onReady() {
 	go a.pollLoop()
 	go a.clickLoop()
 	go a.pendingClickLoop()
+	a.startBackgroundServices()
 	a.startSSESubscriber()
+}
+
+func (a *trayApp) startBackgroundServices() {
+	bgCtx, cancel := context.WithCancel(context.Background())
+	a.bgCancel = cancel
+	a.updateChecker = update.NewChecker(a.cfg, a.layout.Home, nil)
+	a.updateApplier = update.NewApplier(a.cfg, a.layout, a.updateChecker, a.nodeClient)
+	a.desktopAPI = desktopapi.New(a.updateChecker, a.updateApplier)
+	go a.updateChecker.Start(bgCtx)
+	go a.desktopAPI.Start(bgCtx)
 }
 
 func (a *trayApp) startSSESubscriber() {
@@ -175,6 +197,9 @@ func (a *trayApp) ensureNodeOnStart() {
 }
 
 func (a *trayApp) onExit() {
+	if a.bgCancel != nil {
+		a.bgCancel()
+	}
 	a.stopSSESubscriber()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

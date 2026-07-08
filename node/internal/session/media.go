@@ -34,7 +34,7 @@ func (m *Manager) RegisterSessionMedia(sessionID string, opts media.RegisterOpts
 	if reg == nil {
 		return nil, media.ErrNotFound
 	}
-	return reg.RegisterFromRelPath(opts)
+	return reg.RegisterFromPath(opts)
 }
 
 // OpenSessionMedia 打开 session 内已注册媒体的文件（F-M1）。

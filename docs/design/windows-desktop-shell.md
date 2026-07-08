@@ -204,8 +204,8 @@
 | F-U2 | P0 | Node 未运行时先 ensure 再打开 | ❌ | |
 | F-U3 | P0 | Web UI URL：`?session=<id>` | ❌ | F-X1 |
 | F-U4 | P1 | 打开后通知 Shell「已聚焦 session」 | ❌ | 配合 F-E9 |
-| F-U5 | P1 | Shell **轮询 Manage**（`manage.update` 配置）缓存 `UpdateStatus` | ❌ | D36/D38；**不依赖 Node 在跑** |
-| F-U6 | P1 | Shell **执行 apply**：确认 → stop Node → 下载/解压/覆盖 `bin/*` → start Node | ❌ | D37；复用现 `dagents.cmd update` 文件布局逻辑 |
+| F-U5 | P1 | Shell **轮询 Manage**（`manage.update` 配置）缓存 `UpdateStatus` | ✅ | D36/D38；**不依赖 Node 在跑** |
+| F-U6 | P1 | Shell **执行 apply**：确认 → stop Node → 下载/解压/覆盖 `bin/*` → start Node | ✅ | D37；复用现 `dagents.cmd update` 文件布局逻辑 |
 
 ### 3.5 文件路径与输入框（非扩展名关联）
 
@@ -230,8 +230,8 @@
 | F-I8 | P0 | **CI / Release workflow** 构建 `dagents-shell.exe` | ✅ | `build_dagents_shell.sh` + assemble 必含 |
 | F-I9 | P0 | **`dagents.cmd shell`** 子命令（start / status / stop） | ✅ | `--background` / `--foreground` |
 | F-I10 | P0 | **卸载 / 升级** 时清理 Shell **开机自启**注册表项 | ✅ | Inno `RemoveShellAutostart` |
-| F-I11 | P1 | **`shared/update`**（或等价）抽取 Manage check + 下载校验 | ❌ | D38 |
-| F-I12 | P1 | **`dagents.cmd update`** 委托 Shell（Shell 未运行时回退现 client 路径） | ❌ | 与 F-U6 同一 orchestrator |
+| F-I11 | P1 | **`shared/update`**（或等价）抽取 Manage check + 下载校验 | ✅ | D38 |
+| F-I12 | P1 | **`dagents.cmd update`** 委托 Shell（Shell 未运行时回退现 client 路径） | ✅ | 与 F-U6 同一 orchestrator |
 
 ### 3.7 Web UI / Node 配合项
 
@@ -241,7 +241,7 @@
 | F-X6 | P0 | **Session hydrate 编排**：`ensureSession` 后拉快照并恢复 UI | Web UI | 见 §3.9 |
 | F-X4 | P1 | 输入框 paste/drop 文件 → 路径 | Web UI + Shell | F-P* |
 | F-X5 | P1 | 加载时 `POST` Shell「ui.focus」`（session_id） | Web UI | 可选 localhost |
-| F-X8 | P1 | Web UI **Update 面板**改读 Shell `GET /v1/desktop/update`（非 Node `/v1/agent/update`） | Web UI + Shell | localhost；Apply 仍经 Shell 确认 |
+| F-X8 | P1 | Web UI **Update 面板**改读 Shell `GET /v1/desktop/update`（非 Node `/v1/agent/update`） | ⚠️ Shell API 已就绪 | localhost；Apply 仍经 Shell 确认 |
 | F-X3 | P2 | `ui.enabled: false` 时 Shell 提示 | Shell | |
 
 ### 3.9 Session 历史与 Pending HITL 恢复（跨端，Web UI P0）
@@ -362,12 +362,12 @@ Node（运行时）
 
 | ID | 优先级 | 功能 | 现状 | 备注 |
 |----|--------|------|------|------|
-| F-U5 | P1 | Shell poll Manage + 缓存 `UpdateStatus` | ❌ | 见 §3.4；可读 `VERSION` + 各 bin 版本 |
-| F-U6 | P1 | Shell apply orchestration | ❌ | 见 §3.4；D37 |
+| F-U5 | P1 | Shell poll Manage + 缓存 `UpdateStatus` | ✅ | 见 §3.4；可读 `VERSION` + 各 bin 版本 |
+| F-U6 | P1 | Shell apply orchestration | ✅ | 见 §3.4；D37 |
 | F-N9 | P1 | 新版本 Toast / 托盘菜单 | ❌ | 见 §3.3 |
-| F-I11 | P1 | 共享 update 库（check + download + sha256） | ❌ | D38；自 `node/internal/manage/update_checker.go` 等抽取 |
-| F-I12 | P1 | `dagents.cmd update` → Shell | ❌ | Shell  absent 时回退 `dagents-client update` |
-| F-X8 | P1 | Web UI UpdatePanel → Shell localhost API | ❌ | 见 §3.7 |
+| F-I11 | P1 | 共享 update 库（check + download + sha256） | ✅ | D38；自 `node/internal/manage/update_checker.go` 等抽取 |
+| F-I12 | P1 | `dagents.cmd update` → Shell | ✅ | Shell absent 时回退 `dagents-client update` |
+| F-X8 | P1 | Web UI UpdatePanel → Shell localhost API | ⚠️ Shell API 已就绪 | 见 §3.7 |
 | F-ND1 | P1 | Node **`GET /v1/agent/upgrade-readiness`**：`has_active_turn` / 可升级 | ✅ | Apply 前 Shell 必查；无 turn 才允许 F-U6 |
 | F-ND2 | P2 | Windows+Shell：`/v1/agent/update` **deprecated** | ⚠️ 现由 Node 提供 | 返回 `{"delegate":"shell",…}` 或文档说明；Linux/headless **保留** Node 路径 |
 

@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/DGS-ai-team/DAgents/shared/config v0.0.0
+	github.com/DGS-ai-team/DAgents/shared/update v0.0.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/google/uuid v1.6.0
 	golang.org/x/text v0.22.0
@@ -23,3 +24,5 @@ require (
 )
 
 replace github.com/DGS-ai-team/DAgents/shared/config => ../shared/config
+
+replace github.com/DGS-ai-team/DAgents/shared/update => ../shared/update

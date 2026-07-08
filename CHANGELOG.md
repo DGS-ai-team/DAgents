@@ -9,6 +9,11 @@
 ### 新增
 
 - **F-ND1 `GET /v1/agent/upgrade-readiness`**：返回 `ready` / `has_active_turn` / 活跃 session 列表；Shell apply 升级前查询 Node 是否空闲。
+- **F-I11 `shared/update`**：Manage check URL、manifest 解析、`download_url` 补全、安装包下载与 sha256 校验；Node `UpdateChecker` 改调共享库。
+- **F-U5 Shell UpdateChecker**：Shell 后台 poll Manage（`manage.update` 配置），读安装根 `VERSION` 缓存 `UpdateStatus`；**不依赖 Node 在跑**。
+- **F-X8（骨架）Shell localhost `GET /v1/desktop/update`**：默认 `127.0.0.1:18767`；Web UI Update 面板后续改读此 API。
+- **F-U6 Shell apply orchestration**：`POST /v1/desktop/update/apply`；查 `upgrade-readiness` → 下载 → stop Node → 覆盖 `bin/*`/`VERSION` → start Node。
+- **F-I12 `dagents.cmd update` → Shell**：Shell 在跑时委托 `dagents-shell.exe update`（localhost API）；API 不可达时回退 `dagents-client update`。
 
 ---
 

@@ -32,14 +32,14 @@ func readImageToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "read_image",
-			Description: "读取 FS_ROOT 内图片文件供视觉模型分析。返回元数据；图像通过后续 user 多模态消息注入 LLM（需 vision 模型）。" +
-				" 支持 .jpg/.jpeg/.png/.gif/.webp，单文件最大 10MB。",
+			Description: "读取图片文件" +
+				" 支持.jpg/.jpeg/.png/.gif/.webp，单文件最大 10MB。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
 						"type":        "string",
-						"description": "图片路径（必填，相对 FS_ROOT）",
+						"description": "图片路径（必填）",
 					},
 					"detail": map[string]any{
 						"type":        "string",

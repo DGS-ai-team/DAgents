@@ -1,12 +1,55 @@
 package media
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
+
+func TestRehydrateFromMessages_showImageAbsolutePath(t *testing.T) {
+	fsRoot := t.TempDir()
+	externalDir := t.TempDir()
+	imgPath := filepath.Join(externalDir, "chart.png")
+	if err := os.WriteFile(imgPath, []byte{0x89, 0x50, 0x4e, 0x47}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := NewRegistry("sess-1", fsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := []llm.Message{
+		{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID:   "call-1",
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      "show_image",
+					Arguments: fmt.Sprintf(`{"path":%q,"call_purpose":"展示"}`, imgPath),
+				},
+			}},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Name:       "show_image",
+			Content:    fmt.Sprintf("[SHOW_IMAGE]\npath=%s\nstatus=ok", imgPath),
+		},
+	}
+	callIndex := map[string]llm.ToolCall{"call-1": messages[0].ToolCalls[0]}
+	out := RehydrateFromMessages(reg, messages, callIndex)
+	items := out["call-1"]
+	if len(items) != 1 || items[0]["url"] == "" {
+		t.Fatalf("media=%v", out)
+	}
+	artID, _ := items[0]["id"].(string)
+	if _, abs, err := reg.OpenFile(artID); err != nil || abs != imgPath {
+		t.Fatalf("open external media: id=%q abs=%q err=%v", artID, abs, err)
+	}
+}
 
 func TestRehydrateFromMessages_showImage(t *testing.T) {
 	dir := t.TempDir()

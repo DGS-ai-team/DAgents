@@ -59,7 +59,41 @@ func ResolveUnderRoot(fsRoot, raw string) (string, error) {
 	return abs, nil
 }
 
-// MIMEForPath 根据扩展名返回 image MIME，不支持则空字符串。
+// ResolveImagePath 解析图片路径；相对路径在 fs_root 内，绝对路径可直接引用（可位于 fs_root 外）。
+func ResolveImagePath(fsRoot, raw string) (abs string, external bool, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false, fmt.Errorf("path is required")
+	}
+	if filepath.IsAbs(raw) {
+		abs, err = filepath.Abs(filepath.Clean(raw))
+		if err != nil {
+			return "", false, err
+		}
+		root, err := ResolveFSRoot(fsRoot)
+		if err != nil {
+			return "", false, err
+		}
+		return abs, !pathUnderRoot(abs, root), nil
+	}
+	abs, err = ResolveUnderRoot(fsRoot, raw)
+	if err != nil {
+		return "", false, err
+	}
+	return abs, false, nil
+}
+
+func pathUnderRoot(abs, root string) bool {
+	abs, err := filepath.Abs(abs)
+	if err != nil {
+		return false
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	return abs == root || strings.HasPrefix(abs, root+string(os.PathSeparator))
+}
 func MIMEForPath(relPath string) string {
 	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(relPath)))
 	switch ext {

@@ -1,0 +1,123 @@
+// Package desktopapi 提供 Shell localhost 辅助 HTTP API（update、后续 clipboard 等）。
+package desktopapi
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	shellupdate "github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
+	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
+)
+
+// DefaultListenAddr 为 Shell localhost API 默认监听地址（与 browser 18766、Node 18765 错开）。
+const DefaultListenAddr = "127.0.0.1:18767"
+
+// UpdateProvider 暴露缓存的更新状态。
+type UpdateProvider interface {
+	Snapshot() sharedupdate.Status
+}
+
+// Server 提供 Shell localhost HTTP API。
+type Server struct {
+	addr    string
+	updates UpdateProvider
+	applier *shellupdate.Applier
+	mux     *http.ServeMux
+	srv     *http.Server
+
+	mu sync.Mutex
+}
+
+// New 构造 localhost API 服务；updates 可为 nil（返回空状态）。
+func New(updates UpdateProvider, applier *shellupdate.Applier) *Server {
+	if updates == nil {
+		updates = shellupdate.DisabledProvider{}
+	}
+	s := &Server{
+		addr:    DefaultListenAddr,
+		updates: updates,
+		applier: applier,
+		mux:     http.NewServeMux(),
+	}
+	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /v1/desktop/update", s.handleDesktopUpdate)
+	s.mux.HandleFunc("POST /v1/desktop/update/apply", s.handleDesktopUpdateApply)
+	return s
+}
+
+// Start 在后台监听；ctx 取消时优雅关闭。
+func (s *Server) Start(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.srv = &http.Server{
+		Addr:              s.addr,
+		Handler:           s.mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	s.mu.Unlock()
+
+	go func() {
+		log.Printf("desktop API listening on http://%s", s.addr)
+		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("desktop API: %v", err)
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.mu.Lock()
+		srv := s.srv
+		s.mu.Unlock()
+		if srv != nil {
+			_ = srv.Shutdown(shutdownCtx)
+		}
+	}()
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleDesktopUpdate(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.updates.Snapshot())
+}
+
+func (s *Server) handleDesktopUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if s.applier == nil {
+		writeJSON(w, http.StatusServiceUnavailable, applyResponse{
+			OK:      false,
+			Message: "update apply unavailable",
+		})
+		return
+	}
+	var req applyRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
+	defer cancel()
+	result, code := s.applier.Run(ctx, shellupdate.ApplyOptions{
+		Force: req.Force,
+	})
+	status := http.StatusOK
+	writeJSON(w, status, applyResponse{
+		OK:      code == 0 || code == shellupdate.ExitUpToDate,
+		Message: result.Message,
+		Code:    code,
+		Status:  result.Status,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}

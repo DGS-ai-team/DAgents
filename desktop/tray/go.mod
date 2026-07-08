@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/DGS-ai-team/DAgents/shared/config v0.0.0
+	github.com/DGS-ai-team/DAgents/shared/update v0.0.0
 	github.com/getlantern/systray v1.2.2
 	github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4
 )
@@ -23,3 +24,5 @@ require (
 )
 
 replace github.com/DGS-ai-team/DAgents/shared/config => ../../shared/config
+
+replace github.com/DGS-ai-team/DAgents/shared/update => ../../shared/update

@@ -243,7 +243,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 				return nil, fmt.Errorf("session required for media register")
 			}
 			art, err := mgr.RegisterSessionMedia(sid, media.RegisterOpts{
-				RelPath:    relPath,
+				Path:       relPath,
 				Source:     source,
 				ToolCallID: toolCallID,
 				Label:      label,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -20,15 +21,14 @@ func showImageToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "show_image",
-			Description: "向用户界面展示 FS_ROOT 内已有图片（缩略图 + 可选说明）。" +
-				" 用于让用户查看截图、对比图或任意图片文件；不读取图像内容供 LLM 分析（读图请用 read_image）。" +
-				" 支持 .jpg/.jpeg/.png/.gif/.webp，单文件最大 10MB。",
+			Description: "向用户界面展示已有图片（缩略图 + 可选说明）。" +
+				" 支持.jpg/.jpeg/.png/.gif/.webp，单文件最大 10MB。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
 						"type":        "string",
-						"description": "图片路径（必填，相对 FS_ROOT）",
+						"description": "图片路径（必填）",
 					},
 					"caption": map[string]any{
 						"type":        "string",
@@ -73,7 +73,11 @@ func (r *Registry) execShowImage(ctx context.Context, raw json.RawMessage) (stri
 	}
 	caption := strings.TrimSpace(args.Caption)
 	r.registerToolMedia(ctx, toolCallIDFromContext(ctx), relPath, "show_image", "show_image", caption)
-	return formatShowImageSuccess(relPath, mime, int(info.Size()), caption), nil
+	displayPath := relPath
+	if filepath.IsAbs(relPath) {
+		displayPath = filepath.ToSlash(absPath)
+	}
+	return formatShowImageSuccess(displayPath, mime, int(info.Size()), caption), nil
 }
 
 func formatShowImageSuccess(relPath, mime string, bytes int, caption string) string {

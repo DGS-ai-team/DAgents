@@ -58,7 +58,7 @@ func RehydrateFromMessages(reg *Registry, messages []llm.Message, callIndex map[
 		if !ok {
 			continue
 		}
-		art, err := reg.RegisterFromRelPath(RegisterOpts{
+		art, err := reg.RegisterFromPath(RegisterOpts{
 			RelPath:    spec.RelPath,
 			Source:     spec.Source,
 			ToolCallID: callID,

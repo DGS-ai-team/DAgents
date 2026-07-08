@@ -28,6 +28,7 @@ type Artifact struct {
 	Source     string    `json:"source"`
 	ToolCallID string    `json:"tool_call_id,omitempty"`
 	RelPath    string    `json:"rel_path"`
+	AbsPath    string    `json:"-"` // fs_root 外绝对路径；非空时 OpenFile 直接读取
 	Label      string    `json:"label,omitempty"`
 	Caption    string    `json:"caption,omitempty"`
 	Bytes      int64     `json:"bytes"`
@@ -41,7 +42,8 @@ func (a Artifact) PublicURL() string {
 
 // RegisterOpts 注册媒体时的元数据。
 type RegisterOpts struct {
-	RelPath    string
+	Path       string // 相对 fs_root 或绝对路径
+	RelPath    string // Path 别名（兼容旧调用）
 	Source     string
 	ToolCallID string
 	Label      string
@@ -69,17 +71,28 @@ func NewRegistry(sessionID, fsRoot string) (*Registry, error) {
 	}, nil
 }
 
-// RegisterFromRelPath 引用 fs_root 内已有图片文件。
+// RegisterFromRelPath 引用已有图片文件（相对 fs_root 或绝对路径）。
 func (r *Registry) RegisterFromRelPath(opts RegisterOpts) (*Artifact, error) {
-	rel := strings.TrimSpace(opts.RelPath)
-	if rel == "" {
+	if strings.TrimSpace(opts.Path) == "" {
+		opts.Path = opts.RelPath
+	}
+	return r.RegisterFromPath(opts)
+}
+
+// RegisterFromPath 注册可读图片；相对路径在 fs_root 内解析，绝对路径可直接引用。
+func (r *Registry) RegisterFromPath(opts RegisterOpts) (*Artifact, error) {
+	raw := strings.TrimSpace(opts.Path)
+	if raw == "" {
+		raw = strings.TrimSpace(opts.RelPath)
+	}
+	if raw == "" {
 		return nil, ErrInvalidImage
 	}
-	mime := MIMEForPath(rel)
+	mime := MIMEForPath(raw)
 	if mime == "" {
 		return nil, ErrInvalidImage
 	}
-	abs, err := ResolveUnderRoot(r.fsRoot, rel)
+	abs, external, err := ResolveImagePath(r.fsRoot, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -104,11 +117,20 @@ func (r *Registry) RegisterFromRelPath(opts RegisterOpts) (*Artifact, error) {
 		MIME:       mime,
 		Source:     strings.TrimSpace(opts.Source),
 		ToolCallID: strings.TrimSpace(opts.ToolCallID),
-		RelPath:    filepath.ToSlash(rel),
 		Label:      strings.TrimSpace(opts.Label),
 		Caption:    strings.TrimSpace(opts.Caption),
 		Bytes:      info.Size(),
 		CreatedAt:  time.Now().UTC(),
+	}
+	if external {
+		art.AbsPath = abs
+		art.RelPath = filepath.ToSlash(abs)
+	} else {
+		rel, err := filepath.Rel(r.fsRoot, abs)
+		if err != nil {
+			return nil, err
+		}
+		art.RelPath = filepath.ToSlash(rel)
 	}
 	r.mu.Lock()
 	r.byID[id] = art
@@ -134,7 +156,7 @@ func (r *Registry) OpenFile(id string) (*Artifact, string, error) {
 	if !ok {
 		return nil, "", ErrNotFound
 	}
-	abs, err := ResolveUnderRoot(r.fsRoot, art.RelPath)
+	abs, err := r.artifactAbsPath(art)
 	if err != nil {
 		return nil, "", err
 	}
@@ -145,6 +167,16 @@ func (r *Registry) OpenFile(id string) (*Artifact, string, error) {
 		return nil, "", err
 	}
 	return art, abs, nil
+}
+
+func (r *Registry) artifactAbsPath(art *Artifact) (string, error) {
+	if art == nil {
+		return "", ErrNotFound
+	}
+	if p := strings.TrimSpace(art.AbsPath); p != "" {
+		return filepath.Abs(p)
+	}
+	return ResolveUnderRoot(r.fsRoot, art.RelPath)
 }
 
 func newMediaID() (string, error) {

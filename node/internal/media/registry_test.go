@@ -42,6 +42,36 @@ func TestRegistryRegisterAndOpen(t *testing.T) {
 	}
 }
 
+func TestRegistryRegisterExternalAbsolutePath(t *testing.T) {
+	fsRoot := t.TempDir()
+	externalDir := t.TempDir()
+	imgPath := filepath.Join(externalDir, "remote.png")
+	if err := os.WriteFile(imgPath, []byte{0x89, 0x50, 0x4e, 0x47}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := NewRegistry("sess-ext", fsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, err := reg.RegisterFromPath(RegisterOpts{
+		Path:   imgPath,
+		Source: "show_image",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.AbsPath == "" {
+		t.Fatal("expected external AbsPath")
+	}
+	_, abs, err := reg.OpenFile(art.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abs != imgPath {
+		t.Fatalf("abs=%q want %q", abs, imgPath)
+	}
+}
+
 func TestRegistryRejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
 	reg, err := NewRegistry("sess-x", dir)

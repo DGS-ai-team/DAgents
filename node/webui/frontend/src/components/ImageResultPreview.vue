@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { entryMedia, showImageCaption } from "../utils/showImage.js";
+import { entryMedia, showImageCaption, isShowImageTool, showImageResultSucceeded } from "../utils/showImage.js";
 import { openLightbox } from "../stores/lightbox.js";
 
 const props = defineProps({
@@ -9,6 +9,9 @@ const props = defineProps({
 
 const media = computed(() => entryMedia(props.entry));
 const caption = computed(() => showImageCaption(props.entry));
+const missingMedia = computed(
+  () => isShowImageTool(props.entry?.data?.tool_name || props.entry?.data?.name) && showImageResultSucceeded(props.entry) && media.value.length === 0,
+);
 
 function openImage(index) {
   openLightbox(
@@ -41,6 +44,9 @@ function openImage(index) {
       </button>
     </div>
   </div>
+  <p v-else-if="missingMedia" class="tool-media-preview__missing">
+    图片未能加载，请确认文件仍存在且路径有效。
+  </p>
 </template>
 
 <style scoped>
@@ -72,5 +78,12 @@ function openImage(index) {
 
 .tool-media-preview__img {
   max-height: 220px;
+}
+
+.tool-media-preview__missing {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
 }
 </style>

@@ -12,6 +12,11 @@ export function isShowImageTool(name) {
   return String(name || "").trim() === "show_image";
 }
 
+export function showImageResultSucceeded(entry) {
+  const content = String(entry?.data?.content || "");
+  return content.includes("[SHOW_IMAGE]") && content.includes("status=ok");
+}
+
 export function showImageCaption(entry) {
   const args = entry?.data?.arguments || {};
   const fromArgs = String(args.caption || "").trim();

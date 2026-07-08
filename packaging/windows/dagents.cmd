@@ -663,6 +663,15 @@ goto version
 
 :update_cmd
 if not exist "bin\dagents-client.exe" goto missing_client
+call :probe_shell
+if not errorlevel 1 (
+  bin\dagents-shell.exe -config "%CFG%" update %*
+  set "UPDATE_RC=!ERRORLEVEL!"
+  if "!UPDATE_RC!"=="2" goto update_client_fallback
+  set "EXIT_CODE=!UPDATE_RC!"
+  goto cli_exit
+)
+:update_client_fallback
 call :ensure_node
 if errorlevel 1 (
   set "EXIT_CODE=1"
