@@ -9,7 +9,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// StartIdleAutoCompressScanner 启动后台扫描；IdleAutoCompressSeconds <= 0 时不启动。
+// StartIdleAutoCompressScanner 启动 idle session 维护扫描（压缩 + 卸内存，F-NM2）。
 func (m *Manager) StartIdleAutoCompressScanner() {
 	if m == nil || m.turn.IdleAutoCompressSeconds <= 0 {
 		return
@@ -18,7 +18,7 @@ func (m *Manager) StartIdleAutoCompressScanner() {
 	if interval <= 0 {
 		interval = 60 * time.Second
 	}
-	m.logger.Info("idle auto compress scanner started",
+	m.logger.Info("idle session maintenance scanner started",
 		"idle_seconds", m.turn.IdleAutoCompressSeconds,
 		"poll_seconds", int(interval/time.Second),
 		"min_tokens", m.turn.IdleAutoCompressMinTokens,
@@ -34,16 +34,18 @@ func (m *Manager) runIdleAutoCompressLoop(interval time.Duration) {
 		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
-			m.scanIdleAutoCompress(context.Background())
+			m.scanIdleSessionMaintenance(context.Background())
 		}
 	}
 }
 
-func (m *Manager) scanIdleAutoCompress(ctx context.Context) {
+// scanIdleSessionMaintenance 对 eligible session 顺序执行可选压缩 → Release（F-NM2–NM5）。
+func (m *Manager) scanIdleSessionMaintenance(ctx context.Context) {
 	if m.turn.IdleAutoCompressSeconds <= 0 {
 		return
 	}
 	threshold := time.Duration(m.turn.IdleAutoCompressSeconds) * time.Second
+	minTokens := m.turn.IdleAutoCompressMinTokens
 	now := time.Now()
 
 	for _, sess := range m.ListActiveUser() {
@@ -51,7 +53,7 @@ func (m *Manager) scanIdleAutoCompress(ctx context.Context) {
 		if rt == nil {
 			continue
 		}
-		m.tryRuntimeIdleAutoCompress(ctx, rt, threshold, m.turn.IdleAutoCompressMinTokens, now)
+		m.tryRuntimeIdleMaintenance(ctx, rt, threshold, minTokens, now)
 	}
 
 	if m.store == nil {
@@ -59,7 +61,7 @@ func (m *Manager) scanIdleAutoCompress(ctx context.Context) {
 	}
 	persisted, err := m.store.List(ctx)
 	if err != nil {
-		m.logger.Warn("idle auto compress list sessions failed", "error", err)
+		m.logger.Warn("idle session maintenance list sessions failed", "error", err)
 		return
 	}
 	for _, sum := range persisted {
@@ -69,36 +71,32 @@ func (m *Manager) scanIdleAutoCompress(ctx context.Context) {
 		if active {
 			continue
 		}
-		m.tryPersistedIdleAutoCompress(ctx, sum, threshold, now)
+		m.tryPersistedIdleMaintenance(ctx, sum, threshold, minTokens, now)
 	}
 }
 
-func (m *Manager) tryPersistedIdleAutoCompress(ctx context.Context, sum store.Summary, threshold time.Duration, now time.Time) {
+// scanIdleAutoCompress 保留旧名供测试调用。
+func (m *Manager) scanIdleAutoCompress(ctx context.Context) {
+	m.scanIdleSessionMaintenance(ctx)
+}
+
+func (m *Manager) tryPersistedIdleMaintenance(ctx context.Context, sum store.Summary, threshold time.Duration, minTokens int, now time.Time) {
 	rec, err := m.store.Load(ctx, sum.SessionID)
-	if err != nil || rec == nil {
-		return
-	}
-	if rec.RuntimeState.IdleAutoCompressApplied {
-		return
-	}
-	if rec.RuntimeState.Pending != nil || len(rec.Messages) == 0 {
+	if err != nil || rec == nil || len(rec.Messages) == 0 {
 		return
 	}
 	if now.Sub(rec.UpdatedAt) < threshold {
 		return
 	}
-	if !idleAutoCompressMeetsMinTokens(rec.Messages, m.turn.IdleAutoCompressMinTokens) {
-		return
-	}
 	rt, err := m.ensureRuntime(sum.SessionID)
 	if err != nil || rt == nil {
-		m.logger.Warn("idle auto compress restore session failed",
+		m.logger.Warn("idle session maintenance restore session failed",
 			"session_id", sum.SessionID,
 			"error", err,
 		)
 		return
 	}
-	m.tryRuntimeIdleAutoCompress(ctx, rt, threshold, m.turn.IdleAutoCompressMinTokens, now)
+	m.tryRuntimeIdleMaintenance(ctx, rt, threshold, minTokens, now)
 }
 
 func (m *Manager) ensureRuntime(sessionID string) (*runtime, error) {
@@ -117,8 +115,37 @@ func (m *Manager) ensureRuntime(sessionID string) (*runtime, error) {
 	m.attachUserChildTools(rt)
 	rt.start(m.ctx)
 	rt.orch.RunSessionLifecyclePhase(context.Background(), sessionID, "create")
-	m.logger.Info("session restored for idle auto compress", "session_id", sessionID, "messages", len(msgs))
+	m.logger.Info("session restored for idle maintenance", "session_id", sessionID, "messages", len(msgs))
 	return rt, nil
+}
+
+func (m *Manager) tryRuntimeIdleMaintenance(ctx context.Context, rt *runtime, threshold time.Duration, minTokens int, now time.Time) {
+	if rt == nil || rt.isChildSession() {
+		return
+	}
+	sessionID := rt.session.ID
+	if rt.isBusyForMaintenance() {
+		m.logger.Debug("idle session maintenance skipped busy", "session_id", sessionID)
+		return
+	}
+	if !rt.meetsIdleThreshold(threshold, now) {
+		return
+	}
+	if rt.eligibleForIdleAutoCompress(threshold, minTokens, now) {
+		m.tryRuntimeIdleAutoCompress(ctx, rt, threshold, minTokens, now)
+	}
+	if m.getRuntime(sessionID) == nil {
+		return
+	}
+	if rt.isBusyForMaintenance() {
+		return
+	}
+	// 不在此重检 updated_at：压缩 persist 会刷新 updated_at（D31）。
+	if released, err := m.Release(sessionID); err != nil {
+		m.logger.Warn("idle session maintenance release failed", "session_id", sessionID, "error", err)
+	} else if released {
+		m.logger.Info("idle session maintenance evicted", "session_id", sessionID)
+	}
 }
 
 func (m *Manager) tryRuntimeIdleAutoCompress(ctx context.Context, rt *runtime, threshold time.Duration, minTokens int, now time.Time) {
@@ -142,6 +169,33 @@ func (m *Manager) tryRuntimeIdleAutoCompress(ctx context.Context, rt *runtime, t
 			"status", result.Status,
 		)
 	}
+}
+
+// isBusyForMaintenance turn 进行中或队列非空时跳过；pending HITL 暂停视为 idle（可 evict，F-NM4）。
+func (r *runtime) isBusyForMaintenance() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.queue.Len() > 0 {
+		return true
+	}
+	if r.pending != nil {
+		return false
+	}
+	return r.state != turn.StateIdle
+}
+
+func (r *runtime) meetsIdleThreshold(idleThreshold time.Duration, now time.Time) bool {
+	if r.isChildSession() || r.store == nil {
+		return false
+	}
+	rec, err := r.store.Load(context.Background(), r.session.ID)
+	if err != nil || rec == nil {
+		return false
+	}
+	if len(rec.Messages) == 0 {
+		return false
+	}
+	return now.Sub(rec.UpdatedAt) >= idleThreshold
 }
 
 func (r *runtime) eligibleForIdleAutoCompress(idleThreshold time.Duration, minTokens int, now time.Time) bool {

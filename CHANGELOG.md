@@ -4,10 +4,11 @@
 
 ## [Unreleased]
 
-**规划 v0.6 – v0.7**：**v0.6.0 第 ⑥ 步 Shell Toast/深链已实现**。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md)。
+**规划 v0.6 – v0.7**：**v0.6.0 第 ⑦ 步 idle 维护（F-NM1–NM5/NM7）已实现**。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md)。
 
 ### 新增
 
+- **F-NM1–NM5 idle session 维护（Node）**：`Manager.Release`；`scanIdleSessionMaintenance` 在同一循环内可选压缩后卸内存；pending HITL 可 evict；DB-only 路径不再泄漏内存。
 - **F-E13 IM cursor（Node + Web UI + Shell）**：`runtime_state_json` 持久化 `notify_seq`/`ack_seq`；Hub 发布时 bump notify；`POST /v1/sessions/{id}/ack`；hydrate/list 返回 `has_unread`；Web UI SSE/hydrate 后 ack；Shell 待办表改从 `GET /v1/sessions` 同步，移除本地 `MarkUnread`/`MarkConsumed`。
 - **v0.6.0 Shell 通知与深链（F-N1–N3/N10, F-U1–U3, F-E13）**：Windows Toast + 点击打开 `?session=<id>`；托盘待办子菜单与 `icon_pending` 态；未读 assistant 待办（IM cursor）；「打开控制台」菜单。
 - **v0.6.0 Shell SSE 待办（F-E1–E4/E10–E12）**：`dagents-shell` 常驻订阅 `GET /v1/streams?live=1`；按 session 聚合 HITL/A2A 事件维护待办表；`done` 与 `GET /v1/sessions` 对齐消除；可选 `DAGENTS_CLIENT_TOKEN` Bearer 鉴权；托盘「待办」菜单与 tooltip 摘要。

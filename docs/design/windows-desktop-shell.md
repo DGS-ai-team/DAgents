@@ -304,12 +304,10 @@ GET /v1/sessions/{session_id}/hydrate
 
 ### 3.10 Node — 不活跃 Session 统一维护（D31–D35）
 
-**现状**：`idle_auto_compress.go` 单独扫描；压缩后 session **仍占内存**；DB-only session 压缩时会 **加载并常驻**。**无** `Release`。
-
-**目标**：一个后台循环，替代「仅压缩」语义。
+**现状（2026-07）**：`scanIdleSessionMaintenance` 在同一循环内 **压缩 + Release**；DB-only 路径临时 `ensureRuntime` 后 **必 Release**（D35）。
 
 ```text
-scanIdleSessionMaintenance()   // 原 scanIdleAutoCompress，扩展
+scanIdleSessionMaintenance()   // 原 scanIdleAutoCompress，已扩展
   对每个 eligible session（updated_at 超阈值 + idle）:
     1. 若在 DB-only → ensureRuntime（临时加载）
     2. 若满足 min_tokens 且未 idle_auto_compress_applied → ForceBlocking 压缩 → 打标
@@ -319,13 +317,13 @@ scanIdleSessionMaintenance()   // 原 scanIdleAutoCompress，扩展
 
 | ID | 优先级 | 功能 | 现状 | 备注 |
 |----|--------|------|------|------|
-| F-NM1 | P1 | `Manager.Release(sessionID)` | ❌ | persist → stop → 移出 map；不 `store.Delete` |
-| F-NM2 | P1 | 合并进 `scanIdleSessionMaintenance`（原 idle compress loop） | ❌ | D31；**不单开** evict scanner |
-| F-NM3 | P1 | 压缩步：复用 `tryRuntimeIdleAutoCompress` 逻辑 | ⚠️ 部分已有 | 无 pending、非 child |
-| F-NM4 | P1 | evict 步：凡通过 idle 判定 **且非 busy** 均 Release | ❌ | 含「已压缩跳过」与「token 不足仅 evict」 |
-| F-NM5 | P1 | DB-only 路径：压缩后 **必须** Release（D35） | ❌ | 修现 `ensureRuntime` 泄漏 |
+| F-NM1 | P1 | `Manager.Release(sessionID)` | ✅ | persist → stop → 移出 map；不 `store.Delete` |
+| F-NM2 | P1 | 合并进 `scanIdleSessionMaintenance`（原 idle compress loop） | ✅ | D31；**不单开** evict scanner |
+| F-NM3 | P1 | 压缩步：复用 `tryRuntimeIdleAutoCompress` 逻辑 | ✅ | 无 pending、非 child |
+| F-NM4 | P1 | evict 步：凡通过 idle 判定 **且非 busy** 均 Release | ✅ | 含「已压缩跳过」与「token 不足仅 evict」 |
+| F-NM5 | P1 | DB-only 路径：压缩后 **必须** Release（D35） | ✅ | 修现 `ensureRuntime` 泄漏 |
 | F-NM6 | P2 | 配置：沿用 `compression.idle_auto_compress_*`；文档说明 **含 evict** | ⚠️ | 可选 rename 为 `idle_session_*` |
-| F-NM7 | P1 | evict 后 `EnqueueMessage` 须先 `Create` | ❌ | 与 hydrate 配套 |
+| F-NM7 | P1 | evict 后 `EnqueueMessage` 须先 `Create` | ✅ | Web UI `ensureSession` + hydrate |
 | F-NM8 | P2 | log/metric：`compressed` / `evicted` / `skipped_busy` | ❌ | |
 
 **eligible 摘要**（与现 `eligibleForIdleAutoCompress` 对齐并扩展）：

@@ -59,8 +59,12 @@ func TestIdleAutoCompressMarksAndSkipsRescan(t *testing.T) {
 	}
 
 	mgr.scanIdleAutoCompress(context.Background())
-	if !rt.idleAutoCompressApplied {
-		t.Fatal("expected idle auto compress mark after scan")
+	rec, err := st.Load(context.Background(), sess.ID)
+	if err != nil || rec == nil || !rec.RuntimeState.IdleAutoCompressApplied {
+		t.Fatal("expected idle auto compress mark in DB after scan")
+	}
+	if mgr.getRuntime(sess.ID) != nil {
+		t.Fatal("expected session evicted after maintenance scan")
 	}
 	before := llmClient.streamCalls.Load()
 	mgr.scanIdleAutoCompress(context.Background())
@@ -110,8 +114,15 @@ func TestIdleAutoCompressSkipsBelowMinTokens(t *testing.T) {
 	}
 
 	mgr.scanIdleAutoCompress(context.Background())
-	if rt.idleAutoCompressApplied {
+	rec, err := st.Load(context.Background(), sess.ID)
+	if err != nil || rec == nil {
+		t.Fatal(err)
+	}
+	if rec.RuntimeState.IdleAutoCompressApplied {
 		t.Fatal("expected no compress mark when below min tokens")
+	}
+	if mgr.getRuntime(sess.ID) != nil {
+		t.Fatal("expected session evicted even without compress")
 	}
 	if llmClient.streamCalls.Load() != 0 {
 		t.Fatalf("expected no LLM compress call, got %d", llmClient.streamCalls.Load())
