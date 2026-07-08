@@ -68,6 +68,8 @@
 | D17 | **每 session 一条 HITL 通知** | 同一 session 内多个 HITL 项（`hitl_required` 多 item、或连续事件）**合并为一条 Toast**；不逐条刷屏。 |
 | D18 | **点击通知 → 打开该 session 的 UI** | 深链携带 `session_id`（及 `focus=hitl`）；用户在 Web UI 内处理全部待办项。 |
 | D23 | **Shell 仅通知，不在 Toast 内审批** | Phase 1 不做 Toast 批准/拒绝按钮；复杂 HITL 一律进 Web UI。 |
+| D39 | **有待办时托盘图标须有明显态** | 任意 session 存在待办（HITL 或 **未读回复**，见 D40）时，托盘图标切换为 **特殊效果**（角标/高亮/备用 icon 等，实现待定）；与菜单「待办」、Toast 一致。 |
+| D40 | **待办含「未读 assistant 回复」** | Node 当轮 **正常结束**（`done` + `finish_reason: stop` 等，非 HITL 暂停）且末条 assistant **尚未被 Client 消费** 时，该 session **也算一条待办**；与 HITL 共用 session 聚合表（F-E3）。 |
 
 ### 2.4 文件与输入（产品确认 2026-07）
 
@@ -154,7 +156,7 @@
 | F-L2 | P0 | 停止 Node | ✅ `nodectl.Stop` | |
 | F-L3 | P0 | 重启 Node | ✅ `nodectl.Restart` | |
 | F-L4 | P0 | health 探活 | ✅ 3s `Probe` | |
-| F-L5 | P0 | 托盘启停与状态 | ✅ 基础 | 待办数待做 |
+| F-L5 | P0 | 托盘启停与状态 | ✅ 基础 | 待办数 ✅；**图标特殊效果** → F-N10 |
 | F-L8 | P0 | **Node 单实例**：已运行时不再拉起 | ❌ | D20；Mutex / pid+health |
 | F-L9 | P0 | Shell 启动时 **立即 ensure Node running** | ❌ | D21 |
 | F-L10 | P0 | **退出 Shell 时 stop Node**（graceful，超时可强制） | ❌ | D29；替代现 tray「不停止 Node」 |
@@ -178,6 +180,7 @@
 | F-E10 | P0 | **待办消除**：该 session 在 Node 侧无 pending HITL 时清除 Shell 状态 | ❌ | 见 §8.5；**不依赖**从通知打开 UI |
 | F-E11 | P0 | 订阅 **A2A relay** 事件：`approval_required` / `user_information_required` | ❌ | §8.5；与 `hitl_required` 一并入 session 待办表 |
 | F-E12 | P0 | Shell 访问 Node **SSE/REST 鉴权**（API key header，与 Web UI 对齐） | ❌ | 共用 `config.yaml` / `DAGENTS_HOME` |
+| F-E13 | P0 | **未读回复待办**：当轮正常 `done(stop)` 后，Client 尚未消费末条 assistant 时 session 入待办表 | ❌ | D40；与 HITL 合并计数；消除见 §8.5 |
 | F-E7 | P2 | 可选订阅 `error` / 子 Agent 事件 | ❌ | |
 
 ### 3.3 核心 — 通知
@@ -187,6 +190,7 @@
 | F-N1 | P0 | 每 session 一条 Toast（有待办 HITL） | ❌ | D17 |
 | F-N2 | P0 | 点击 Toast → 打开该 session 的 `/ui/` | ❌ | D18 |
 | F-N3 | P0 | 托盘：待办 session 数 / 列表入口 | ❌ | |
+| F-N10 | P0 | **有待办时托盘图标特殊效果**（角标/高亮/备用 icon 等） | ❌ | D39；与 F-N3 待办表联动 |
 | F-N4 | P1 | `dagents://session/<id>` 协议与 Toast 激活 | ❌ | |
 | F-N8 | P1 | 通知文案：session 摘要（如「3 项待处理」） | ❌ | 同 session 合并 |
 | F-N9 | P1 | **新版本 Toast / 托盘入口**（Manage 有 upgrade 时） | ❌ | D36；非静默，点击进升级确认 |
@@ -387,7 +391,7 @@ Node（运行时）
 
 | 阶段 | 目标 | 功能 ID |
 |------|------|---------|
-| **Phase 1** | 通知闭环 + **Shell 监护 Node** + 单/双实例 + 自启 + 可安装 | F-L1–5, **8–10,12–13,15**,9, F-E1–E4, **E10–E12**, F-N1–3, F-U1–3, F-X1, F-X6, **F-H1–H2, H7–H9, H12, H14, H17**, F-I1, **I3, I8–I10** |
+| **Phase 1** | 通知闭环 + **Shell 监护 Node** + 单/双实例 + 自启 + 可安装 | F-L1–5, **8–10,12–13,15**,9, F-E1–E4, **E10–E13**, **F-N1–3, N10**, F-U1–3, F-X1, F-X6, **F-H1–H2, H7–H9, H12, H14, H17**, F-I1, **I3, I8–I10** |
 | **Phase 2** | 路径粘贴 + hydrate 完善 + **idle 维护（压+卸）** + 安装包 + **Shell 更新 orchestrator** | F-P1–3, F-E9, F-U4, **F-U5–U6**, F-X4–5, **F-X8**, F-N4, F-N8, **F-N9**, F-H10–H11, F-H13, **F-NM1–NM5, NM7**, **F-I11–I12, F-ND1**, F-I2, F-I7, F-L11 |
 | **Phase 3** | 体验、TUI hydrate、运维、Node update 下线 | F-E5, F-E7, F-P4–5, F-N6, F-H5–H6, F-I5, **F-ND2**, F-S*, F-L6 |
 
@@ -404,8 +408,8 @@ Node（运行时）
 | 主题 | 功能 ID |
 |------|---------|
 | Shell 演进与生命周期 | F-L1–5, **F-L8–L10, L12–L13, L15** |
-| 事件与待办 | F-E1–E4, **F-E10–E12** |
-| 通知与打开 UI | F-N1–N3, F-U1–U3 |
+| 事件与待办 | F-E1–E4, **F-E10–E13** |
+| 通知与打开 UI | **F-N1–N3, N10**, F-U1–U3 |
 | Client Hydrate | **F-H1–H2, H7–H9, H12, H14, H17**, F-X1, F-X6 |
 | 不活跃 Session 维护 | **F-NM1–NM5, NM7** |
 | 安装与发布 | F-I1, F-I3, **F-I8–I10**；**F-I2**（Inno 含 Shell 组件） |
@@ -437,8 +441,8 @@ Node（运行时）
 ② F-L9–L10/L12–L13     监护生命周期 + Shell 单实例 + crash 恢复
 ③ F-H1/H2/H14          Hydrate API + transcript 映射
 ④ F-H7–H9/H17/X6       Web UI hydrate + evicted 路径
-⑤ F-E1–E4/E10–E12      Shell SSE + 待办表 + 鉴权
-⑥ F-N1–N3/U1–U3/H12    Toast + 深链
+⑤ F-E1–E4/E10–E13     Shell SSE、待办表（含未读回复）、鉴权
+⑥ F-N1–N3/N10/U1–U3  Toast + 托盘图标态 + 深链
 ⑦ F-NM1–NM5/NM7        idle 维护（压 + 卸）
 ⑧ F-I1–I3/I2/I9–I10    安装包 + 自启 + cmd + 卸载清理
 ```
@@ -447,9 +451,10 @@ Node（运行时）
 
 1. 安装后登录 → Shell 自启 → Node health 正常。  
 2. Web UI 关闭时触发 HITL → **一条** Toast → 点击 → 深链 session → **transcript + pending** 可见并可 resume。  
-3. 手工打开 `/ui/` 处理 HITL → Shell 待办 **自动消除**（F-E10）。  
-4. 退出 Shell → Node **停止**；二次启动 Shell → 仅 **一个** Shell 实例（F-L12）。  
-5. 长期 idle session → 压缩（若满足）→ **卸内存**；再打开该 session → Create + hydrate 正常（F-NM*, F-H17）。
+3. Web UI 关闭时 Agent **正常回复完成**（末条 assistant 未读）→ Shell 待办 + **托盘图标特殊效果**（F-E13 / F-N10）。  
+4. 手工打开 `/ui/` 处理 HITL 或 **阅读回复** → Shell 待办 **自动消除**（F-E10 / F-E13）。  
+5. 退出 Shell → Node **停止**；二次启动 Shell → 仅 **一个** Shell 实例（F-L12）。  
+6. 长期 idle session → 压缩（若满足）→ **卸内存**；再打开该 session → Create + hydrate 正常（F-NM*, F-H17）。
 
 ---
 
@@ -460,6 +465,8 @@ Node（运行时）
 | 目录/二进制名 | 倾向 `desktop/shell`、`dagents-shell.exe` — **待定** |
 | 共享 HITL 包 | `shared/hitl` vs 导出 `client/internal/hitl` — **待定** |
 | Toast 库 | go-toast / WinRT — **待定** |
+| **托盘 icon 待办态** | 角标 overlay / 双色 icon / 轻动画 — **待定**（F-N10） |
+| **未读回复判定** | Shell 记 `done` seq + focus/消费 ack vs Node 扩展字段 — **待定**（F-E13） |
 | Shell↔UI localhost 端口 | 固定端口 vs 命名管道 vs 写 config — **待定** |
 | Node 单实例锁 | 全局 Mutex 名 vs 仅 `.runtime/node.pid` — **待定** |
 | Hydrate API 形态 | 独立 `/hydrate` vs 扩展 `/context` | 倾向独立或 `/context?hydrate=1` — **待定** |
@@ -609,13 +616,24 @@ Node ◄─SSE/API─► Web UI（用户手工打开） → 用户点 resume
 
 #### Shell 侧 session 待办状态机（建议）
 
+待办 **类型**（同 session 可并存，对外 **合并为一条** 通知态，F-E3 / D17）：
+
+| 类型 | 触发 | 消除 |
+|------|------|------|
+| **HITL** | `hitl_required` / `approval_required` / `user_information_required` | Node 无 pending HITL（SSE `done` + `/v1/sessions` 对齐，F-E10） |
+| **未读回复** | 当轮正常结束：`done` 且 `finish_reason: stop`（或等价 `turn_complete: true`、非 HITL 暂停），且末条 assistant **尚未被 Client 消费**（D40 / F-E13） | Client **消费**该 session 末轮 assistant（见下） |
+
+**Client 消费（F-E13）** 指：Web UI / TUI 已将该 session 末轮 assistant 展示给用户——例如 session **处于 focus** 且 transcript 已渲染至该轮 `done` 对应 seq；或 hydrate 灌入后已展示。UI 未打开、或未 focus 该 session、或 reconnect 后尚未展示，视为 **未消费**。
+
 | 事件 | Shell 行为 |
 |------|------------|
-| `hitl_required` / `approval_required` / `user_information_required` | 该 `session_id` 标记为 **有待办**；若无 Toast 则弹一条，有则 **更新计数/摘要**（D17） |
-| `done` 且 `awaiting == "hitl"`（或 `finish_reason` 为 `awaiting_hitl` 等） | **保持** 有待办（同 session 可能还有未处理项） |
-| `done` 且 `awaiting` 为空 / `turn_complete == true`（如 `finish_reason: stop`） | 该 session **清除待办**；撤销 Toast / 更新托盘计数 |
-| `done` 且 `finish_reason: error` / `cancelled` | 按产品规则清除或保留（默认可清除「等待审批」态） |
-| SSE 断线重连后 | `GET /v1/sessions` 核对 `run_turn_phase`；非 `awaiting_hitl` 的 session 从待办表移除（F-E5） |
+| HITL 类 SSE（上表） | 该 `session_id` 标记 **HITL 待办**；更新计数/摘要（D17） |
+| `assistant` + `done(stop)`（正常结束一轮） | 若该 session **未消费** → 标记 **未读回复待办**（F-E13） |
+| `done` 且 `awaiting == "hitl"`（或 `finish_reason` 为 `awaiting_hitl` 等） | **保持** HITL 待办 |
+| `done` 且 HITL 已清 / 非 HITL 暂停 | 清除 **HITL** 类待办；**未读回复** 仍保留直至 Client 消费 |
+| Client 消费（focus + 已展示 / hydrate） | 清除该 session **未读回复** 待办（可与 F-E9 / F-X5 联动） |
+| `done` 且 `finish_reason: error` / `cancelled` | 按产品规则清除 **HITL** 待办；未读回复若已产生则保留至消费 |
+| SSE 断线重连后 | `GET /v1/sessions` 核对 `run_turn_phase`；非 `awaiting_hitl` 的 session 清除 **HITL** 待办（F-E5）；未读回复仍以 SSE + 消费态为准 |
 
 要点：**以 Node 运行时是否仍「awaiting HITL」为准**，不要只靠「用户是否点过通知」。
 
@@ -628,6 +646,7 @@ Node ◄─SSE/API─► Web UI（用户手工打开） → 用户点 resume
 #### Toast 与托盘 UI
 
 - **托盘菜单/角标**：随 Shell 内存待办表即时更新（可靠）。
+- **托盘图标（F-N10 / D39）**：有待办时切换 **特殊效果**（如角标、高亮、备用 `.ico`）；无待办恢复默认 icon。
 - **系统 Toast**：Windows 对「程序化撤销」支持有限；实现上可用 **固定 Toast Group/Tag（ per session）** 在消除待办时 **Replace/Remove** 同 tag 通知；若 API 不支持撤销，则允许 Toast 自然过期，以 **托盘状态为准**（实现细节见 §5）。
 
 #### 可选加速（F-X5，非必须）
@@ -711,3 +730,4 @@ Apply 流程（Windows）：
 | 2026-07 | 补项 F-L12/13/15、F-E11/12、F-H14/17、F-I8–I10；§4.1 v0.6.0 发布范围 |
 | 2026-07 | D36–D38、§3.11、§8.7：Shell 为 Windows 安装态更新 orchestrator；联动 release-update-hub §10 |
 | 2026-07 | §4.1 链至 [v0.6-v0.7-roadmap.md](./v0.6-v0.7-roadmap.md) |
+| 2026-07 | D39–D40、F-E13、F-N10：托盘图标待办态 + 未读 assistant 回复纳入待办 |

@@ -14,13 +14,18 @@
 | health 失败 **自动重启**（F-L13 基础） | ✅（用户手动停止后不重启） |
 | 二进制名 **`dagents-shell.exe`**（F-L15） | ✅ |
 | Node **单实例** Mutex（F-L8，在 `dagents-node`） | ✅ |
-| HITL Toast / SSE / Hydrate | ❌ 见 roadmap v0.6.0 后续 |
+| **SSE 订阅 + session 待办表**（F-E1–E4/E10–E12） | ✅ v0.6.0 第 ⑤ 步 |
+| **未读 assistant 回复待办**（F-E13） | ✅ v0.6.0 第 ⑤ 步扩展 |
+| **Toast + 深链 + 打开控制台 + 托盘 icon 态**（F-N1–N3/N10, F-U1–U3） | ✅ v0.6.0 第 ⑥ 步 |
+| Hydrate（Node + Web UI） | ✅ v0.6.0 第 ③④ 步 |
 
 ## 菜单
 
 | 菜单 | 行为 |
 |------|------|
 | 状态 | 只读，运行中 agent_id 或「未运行」 |
+| **待办** | 有待办时显示摘要；子菜单列出各 session，点击深链打开 Web UI |
+| **打开控制台** | ensure Node 后打开 `/ui/`（F-U1/U2） |
 | 启动 / 停止 / 重启 Node | 与 `nodectl` 一致 |
 | 退出 Shell | 停止 Node 后退出进程 |
 
@@ -64,6 +69,22 @@ cd desktop/tray && go test ./...
 ```
 
 Windows 上额外运行 `singleinstance` 互斥测试。
+
+## SSE 与鉴权（v0.6.0 第 ⑤ 步）
+
+- Shell 常驻订阅 `GET /v1/streams?live=1`（全局），断线 5s 重连（F-E1/E4）。
+- 解析 HITL / A2A 事件 + **`done(stop)` 未读回复**（F-E2/E10/E11/**E13**）维护 session 待办表。
+- 每 60s + 重连时 `GET /v1/sessions` 对齐活跃 session 的 `run_turn_phase`（F-E10）。
+- 可选鉴权：`Authorization: Bearer $DAGENTS_CLIENT_TOKEN`（F-E12）。
+
+## 通知与深链（v0.6.0 第 ⑥ 步）
+
+- **Windows Toast**（F-N1/N2）：每 session 一条，点击或「打开」按钮 → `?session=&focus=hitl` 深链。
+- **托盘 icon**（F-N10）：有待办时切换 `icon_pending.ico` 并显示 `●` 标题角标。
+- **打开控制台**（F-U1/U2）：ensure Node 后 `rundll32` 调起默认浏览器。
+- 经 Shell 打开 session 后 **MarkConsumed** 清除未读回复待办。
+
+包布局：`internal/nodeclient`、`internal/pending`、`internal/events`、`internal/notify`、`internal/webui`。
 
 ## 依赖
 

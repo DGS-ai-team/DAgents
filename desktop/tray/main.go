@@ -12,8 +12,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/events"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodectl"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodeclient"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/notify"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/pending"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/singleinstance"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/webui"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 	"github.com/getlantern/systray"
 )
@@ -21,9 +26,13 @@ import (
 //go:embed assets/icon.ico
 var iconData []byte
 
+//go:embed assets/icon_pending.ico
+var iconPendingData []byte
+
 const (
-	ensureNodeTimeout = 45 * time.Second
-	probeInterval     = 3 * time.Second
+	ensureNodeTimeout    = 45 * time.Second
+	probeInterval        = 3 * time.Second
+	maxPendingMenuSlots  = 8
 )
 
 func main() {
@@ -64,7 +73,13 @@ func run(args []string) int {
 		return 1
 	}
 
-	app := &trayApp{cfg: cfg, layout: layout}
+	app := &trayApp{
+		cfg:          cfg,
+		layout:       layout,
+		nodeClient:   nodeclient.New(cfg.Local.Endpoint),
+		pendingStore: pending.NewStore(),
+		notifier:     notify.New(cfg.Local.Endpoint, iconData),
+	}
 	systray.Run(app.onReady, app.onExit)
 	return 0
 }
@@ -81,11 +96,22 @@ type trayApp struct {
 	recovering  bool
 	sup         supervisor
 
-	mStatus  *systray.MenuItem
-	mStart   *systray.MenuItem
-	mStop    *systray.MenuItem
-	mRestart *systray.MenuItem
-	mQuit    *systray.MenuItem
+	nodeClient   *nodeclient.Client
+	pendingStore *pending.Store
+	notifier     *notify.Notifier
+	sseSub       *events.Subscriber
+	sseCancel    context.CancelFunc
+
+	pendingSessionIDs [maxPendingMenuSlots]string
+
+	mStatus          *systray.MenuItem
+	mPending         *systray.MenuItem
+	mPendingSessions [maxPendingMenuSlots]*systray.MenuItem
+	mOpenConsole     *systray.MenuItem
+	mStart           *systray.MenuItem
+	mStop            *systray.MenuItem
+	mRestart         *systray.MenuItem
+	mQuit            *systray.MenuItem
 }
 
 func (a *trayApp) onReady() {
@@ -95,6 +121,15 @@ func (a *trayApp) onReady() {
 
 	a.mStatus = systray.AddMenuItem("状态：检测中…", "")
 	a.mStatus.Disable()
+	a.mPending = systray.AddMenuItem("待办：无", "有待办 HITL 或未读回复")
+	a.mPending.Disable()
+	for i := range a.mPendingSessions {
+		a.mPendingSessions[i] = a.mPending.AddSubMenuItem("", "")
+		a.mPendingSessions[i].Disable()
+		a.mPendingSessions[i].Hide()
+	}
+	systray.AddSeparator()
+	a.mOpenConsole = systray.AddMenuItem("打开控制台", "在浏览器中打开 Web UI")
 	systray.AddSeparator()
 	a.mStart = systray.AddMenuItem("启动 Node", "后台启动 dagents-node")
 	a.mStop = systray.AddMenuItem("停止 Node", "停止 dagents-node")
@@ -105,6 +140,26 @@ func (a *trayApp) onReady() {
 	go a.ensureNodeOnStart()
 	go a.pollLoop()
 	go a.clickLoop()
+	go a.pendingClickLoop()
+	a.startSSESubscriber()
+}
+
+func (a *trayApp) startSSESubscriber() {
+	ctx, cancel := context.WithCancel(context.Background())
+	a.sseCancel = cancel
+	a.sseSub = events.NewSubscriber(a.nodeClient, a.pendingStore, func() {
+		a.refreshPendingUI()
+	})
+	a.sseSub.Start(ctx)
+}
+
+func (a *trayApp) stopSSESubscriber() {
+	if a.sseSub != nil {
+		a.sseSub.Stop()
+	}
+	if a.sseCancel != nil {
+		a.sseCancel()
+	}
 }
 
 func (a *trayApp) ensureNodeOnStart() {
@@ -120,6 +175,7 @@ func (a *trayApp) ensureNodeOnStart() {
 }
 
 func (a *trayApp) onExit() {
+	a.stopSSESubscriber()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := nodectl.Stop(ctx, a.layout, a.cfg); err != nil {
@@ -130,6 +186,8 @@ func (a *trayApp) onExit() {
 func (a *trayApp) clickLoop() {
 	for {
 		select {
+		case <-a.mOpenConsole.ClickedCh:
+			a.openConsole()
 		case <-a.mStart.ClickedCh:
 			a.setHoldStopped(false)
 			a.runAction("启动", func(ctx context.Context) error {
@@ -150,6 +208,81 @@ func (a *trayApp) clickLoop() {
 			return
 		}
 	}
+}
+
+func (a *trayApp) pendingClickLoop() {
+	for {
+		select {
+		case <-a.mPending.ClickedCh:
+			a.openFirstPendingSession()
+		case <-a.mPendingSessions[0].ClickedCh:
+			a.openPendingSession(0)
+		case <-a.mPendingSessions[1].ClickedCh:
+			a.openPendingSession(1)
+		case <-a.mPendingSessions[2].ClickedCh:
+			a.openPendingSession(2)
+		case <-a.mPendingSessions[3].ClickedCh:
+			a.openPendingSession(3)
+		case <-a.mPendingSessions[4].ClickedCh:
+			a.openPendingSession(4)
+		case <-a.mPendingSessions[5].ClickedCh:
+			a.openPendingSession(5)
+		case <-a.mPendingSessions[6].ClickedCh:
+			a.openPendingSession(6)
+		case <-a.mPendingSessions[7].ClickedCh:
+			a.openPendingSession(7)
+		}
+	}
+}
+
+func (a *trayApp) openConsole() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
+		defer cancel()
+		if err := webui.OpenConsole(ctx, a.layout, a.cfg); err != nil {
+			log.Printf("open console: %v", err)
+		}
+	}()
+}
+
+func (a *trayApp) openFirstPendingSession() {
+	entries := a.pendingStore.Entries()
+	if len(entries) == 0 {
+		a.openConsole()
+		return
+	}
+	a.openSession(entries[0].SessionID, entries[0].FocusHITL())
+}
+
+func (a *trayApp) openPendingSession(slot int) {
+	if slot < 0 || slot >= maxPendingMenuSlots {
+		return
+	}
+	sessionID := a.pendingSessionIDs[slot]
+	if sessionID == "" {
+		return
+	}
+	focusHitl := false
+	for _, e := range a.pendingStore.Entries() {
+		if e.SessionID == sessionID {
+			focusHitl = e.FocusHITL()
+			break
+		}
+	}
+	a.openSession(sessionID, focusHitl)
+}
+
+func (a *trayApp) openSession(sessionID string, focusHitl bool) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
+		defer cancel()
+		if err := webui.EnsureNodeAndOpen(ctx, a.layout, a.cfg, sessionID, focusHitl); err != nil {
+			log.Printf("open session %s: %v", sessionID, err)
+			return
+		}
+		a.pendingStore.MarkConsumed(sessionID)
+		a.refreshPendingUI()
+	}()
 }
 
 func (a *trayApp) setHoldStopped(v bool) {
@@ -267,6 +400,50 @@ func (a *trayApp) refreshStatus() {
 		a.mRestart.Disable()
 	}
 	a.refreshTooltip(showRunning)
+	a.refreshPendingUI()
+}
+
+func (a *trayApp) refreshPendingUI() {
+	if a.mPending == nil || a.pendingStore == nil {
+		return
+	}
+	entries := a.pendingStore.Entries()
+	sum := a.pendingStore.Summary()
+
+	if sum.SessionCount == 0 {
+		a.mPending.SetTitle("待办：无")
+		a.mPending.Disable()
+		systray.SetIcon(iconData)
+		systray.SetTitle("DAgents")
+	} else {
+		a.mPending.SetTitle("待办：" + sum.Label)
+		a.mPending.Enable()
+		if len(iconPendingData) > 0 {
+			systray.SetIcon(iconPendingData)
+		}
+		systray.SetTitle("●")
+	}
+
+	for i := range a.mPendingSessions {
+		a.mPendingSessions[i].Hide()
+		a.mPendingSessions[i].Disable()
+		a.pendingSessionIDs[i] = ""
+	}
+	limit := len(entries)
+	if limit > maxPendingMenuSlots {
+		limit = maxPendingMenuSlots
+	}
+	for i := 0; i < limit; i++ {
+		e := entries[i]
+		a.pendingSessionIDs[i] = e.SessionID
+		a.mPendingSessions[i].SetTitle("打开 · " + e.SummaryLabel())
+		a.mPendingSessions[i].Enable()
+		a.mPendingSessions[i].Show()
+	}
+
+	if a.notifier != nil {
+		a.notifier.Sync(entries)
+	}
 }
 
 func (a *trayApp) refreshTooltip(showRunning bool) {
@@ -274,6 +451,11 @@ func (a *trayApp) refreshTooltip(showRunning bool) {
 	defer a.mu.Unlock()
 
 	base := fmt.Sprintf("DAgents Shell @ %s", a.layout.Home)
+	if a.pendingStore != nil {
+		if sum := a.pendingStore.Summary(); sum.SessionCount > 0 {
+			base += "\n" + sum.Label
+		}
+	}
 	if showRunning && a.lastGood != nil {
 		systray.SetTooltip(fmt.Sprintf("%s\nNode 运行中 · %s · %s", base, a.lastGood.AgentID, a.lastGood.Version))
 		return

@@ -4,11 +4,12 @@
 
 ## [Unreleased]
 
-**规划 v0.6 – v0.7**：**v0.6.0 第 ③ 步 Hydrate API 已实现**。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md)。
+**规划 v0.6 – v0.7**：**v0.6.0 第 ⑥ 步 Shell Toast/深链已实现**。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md)。
 
 ### 新增
 
-- **v0.6.0 Web UI Hydrate（F-H7–H9/H17/X6）**：进入/切换 session 与 F5 刷新时调用 `GET /hydrate` 灌入 transcript 与 pending HITL；SSE `live=1` 与 `seqFence` 去重；支持 `?session=&focus=hitl` 深链。
+- **v0.6.0 Shell 通知与深链（F-N1–N3/N10, F-U1–U3, F-E13）**：Windows Toast + 点击打开 `?session=&focus=hitl`；托盘待办子菜单与 `icon_pending` 态；`done(stop)` 未读 assistant 入待办；「打开控制台」菜单。
+- **v0.6.0 Shell SSE 待办（F-E1–E4/E10–E12）**：`dagents-shell` 常驻订阅 `GET /v1/streams?live=1`；按 session 聚合 HITL/A2A 事件维护待办表；`done` 与 `GET /v1/sessions` 对齐消除；可选 `DAGENTS_CLIENT_TOKEN` Bearer 鉴权；托盘「待办」菜单与 tooltip 摘要。
 - **v0.6.0 Hydrate API（F-H1/H2/H14）**：`GET /v1/sessions/{id}/hydrate` 返回 `transcript`、`pending_hitl`、`run_turn_phase`、`sse_seq_hint`；Node 侧 `MessagesToTranscriptEntries` 与 `BuildHITLRequiredSnapshot`。
 - **v0.6.0 Shell 基础（实现中）**：`dagents-shell.exe`；启动 ensure Node、退出 stop Node；Shell/Node 单实例 Mutex；Node crash 自动重启（含探活防抖与重启退避）；`scripts/ci/build_dagents_shell.sh` + Release CI。
 - **v0.6 – v0.7 开发路径**：[`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) — v0.6.0 Shell+HITL+Hydrate → v0.6.1 `show_image`+Media → v0.6.2 自更新+路径粘贴 → v0.7.0 TUI hydrate 与体验收尾。
