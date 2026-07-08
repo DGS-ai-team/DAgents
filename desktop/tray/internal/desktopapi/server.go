@@ -1,4 +1,4 @@
-// Package desktopapi 提供 Shell localhost 辅助 HTTP API（update、后续 clipboard 等）。
+// Package desktopapi 提供 Shell localhost 辅助 HTTP API（update、clipboard、ui focus 等）。
 package desktopapi
 
 import (
@@ -11,6 +11,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/clipboard"
 	shellupdate "github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/uifocus"
 	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
 )
 
@@ -27,6 +28,7 @@ type Server struct {
 	addr    string
 	updates UpdateProvider
 	applier *shellupdate.Applier
+	uiFocus *uifocus.Store
 	mux     *http.ServeMux
 	srv     *http.Server
 
@@ -34,7 +36,7 @@ type Server struct {
 }
 
 // New 构造 localhost API 服务；updates 可为 nil（返回空状态）。
-func New(updates UpdateProvider, applier *shellupdate.Applier) *Server {
+func New(updates UpdateProvider, applier *shellupdate.Applier, uiFocus *uifocus.Store) *Server {
 	if updates == nil {
 		updates = shellupdate.DisabledProvider{}
 	}
@@ -42,12 +44,14 @@ func New(updates UpdateProvider, applier *shellupdate.Applier) *Server {
 		addr:    DefaultListenAddr,
 		updates: updates,
 		applier: applier,
+		uiFocus: uiFocus,
 		mux:     http.NewServeMux(),
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/desktop/update", s.handleDesktopUpdate)
 	s.mux.HandleFunc("POST /v1/desktop/update/apply", s.handleDesktopUpdateApply)
 	s.mux.HandleFunc("GET /v1/desktop/clipboard/files", s.handleClipboardFiles)
+	s.mux.HandleFunc("POST /v1/desktop/ui/focus", s.handleUIFocus)
 	return s
 }
 
@@ -112,6 +116,24 @@ func (s *Server) handleClipboardFiles(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"paths": paths})
 }
 
+func (s *Server) handleUIFocus(w http.ResponseWriter, r *http.Request) {
+	var req uiFocusRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	ttl := uifocus.DefaultTTL
+	if req.TTLSeconds > 0 {
+		ttl = time.Duration(req.TTLSeconds) * time.Second
+	}
+	if s.uiFocus != nil {
+		s.uiFocus.Report(req.SessionID, ttl)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"session_id": req.SessionID,
+	})
+}
+
 func (s *Server) handleDesktopUpdateApply(w http.ResponseWriter, r *http.Request) {
 	if s.applier == nil {
 		writeJSON(w, http.StatusServiceUnavailable, applyResponse{
@@ -143,4 +165,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+type uiFocusRequest struct {
+	SessionID  string `json:"session_id"`
+	TTLSeconds int    `json:"ttl_seconds,omitempty"`
 }

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/uifocus"
 	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
 )
 
@@ -28,7 +30,7 @@ func TestDesktopUpdateEndpoint(t *testing.T) {
 		ApplyCommand:     "dagents update",
 		Message:          "新版本 0.6.2 可用",
 	}}
-	srv := New(provider, nil)
+	srv := New(provider, nil, uifocus.NewStore())
 	mux := srv.mux
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/desktop/update", nil)
@@ -47,7 +49,7 @@ func TestDesktopUpdateEndpoint(t *testing.T) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	srv := New(nil, nil)
+	srv := New(nil, nil, uifocus.NewStore())
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)
@@ -57,7 +59,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestClipboardFilesEndpoint(t *testing.T) {
-	srv := New(nil, nil)
+	srv := New(nil, nil, uifocus.NewStore())
 	req := httptest.NewRequest(http.MethodGet, "/v1/desktop/clipboard/files", nil)
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)
@@ -72,5 +74,20 @@ func TestClipboardFilesEndpoint(t *testing.T) {
 	}
 	if got.Paths == nil {
 		t.Fatal("paths must be array")
+	}
+}
+
+func TestUIFocusEndpoint(t *testing.T) {
+	focus := uifocus.NewStore()
+	srv := New(nil, nil, focus)
+	body := strings.NewReader(`{"session_id":"sess-1","ttl_seconds":60}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/desktop/ui/focus", body)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !focus.IsFocused("sess-1") {
+		t.Fatal("expected session focused")
 	}
 }

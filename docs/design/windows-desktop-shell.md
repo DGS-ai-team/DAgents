@@ -176,7 +176,7 @@
 | F-E3 | P0 | 同 session 多条 HITL **合并为一条通知态** | ❌ | 更新计数/摘要，不重复 Toast |
 | F-E4 | P0 | SSE 断线重连 | ❌ | |
 | F-E5 | P1 | `GET /v1/sessions` 轮询兜底 | ❌ | |
-| F-E9 | P1 | UI 打开某 session 时 Shell **抑制该 session 新 Toast** | ❌ | UI→Shell 心跳或 focus 上报 |
+| F-E9 | P1 | UI 打开某 session 时 Shell **抑制该 session 新 Toast** | ✅ | `POST /v1/desktop/ui/focus` + TTL 心跳 |
 | F-E10 | P0 | **待办消除**：该 session 在 Node 侧无 pending HITL 时清除 Shell 状态 | ❌ | 见 §8.5；**不依赖**从通知打开 UI |
 | F-E11 | P0 | 订阅 **A2A relay** 事件：`approval_required` / `user_information_required` | ❌ | §8.5；与 `hitl_required` 一并入 session 待办表 |
 | F-E12 | P0 | Shell 访问 Node **SSE/REST 鉴权**（API key header，与 Web UI 对齐） | ❌ | 共用 `config.yaml` / `DAGENTS_HOME` |
@@ -203,7 +203,7 @@
 | F-U1 | P0 | 托盘「打开控制台」→ 浏览器 `/ui/` | ❌ | |
 | F-U2 | P0 | Node 未运行时先 ensure 再打开 | ❌ | |
 | F-U3 | P0 | Web UI URL：`?session=<id>` | ❌ | F-X1 |
-| F-U4 | P1 | 打开后通知 Shell「已聚焦 session」 | ❌ | 配合 F-E9 |
+| F-U4 | P1 | 打开后通知 Shell「已聚焦 session」 | ✅ | `POST /v1/desktop/ui/focus`（F-X5） |
 | F-U5 | P1 | Shell **轮询 Manage**（`manage.update` 配置）缓存 `UpdateStatus` | ✅ | D36/D38；**不依赖 Node 在跑** |
 | F-U6 | P1 | Shell **执行 apply**：确认 → stop Node → 下载/解压/覆盖 `bin/*` → start Node | ✅ | D37；复用现 `dagents.cmd update` 文件布局逻辑 |
 
@@ -240,7 +240,7 @@
 | F-X1 | P0 | URL 深链 + 聚焦 HITL | Web UI | 依赖 F-H8 |
 | F-X6 | P0 | **Session hydrate 编排**：`ensureSession` 后拉快照并恢复 UI | Web UI | 见 §3.9 |
 | F-X4 | P1 | 输入框 paste/drop 文件 → 路径 | ✅ | Web UI + Shell；F-P* |
-| F-X5 | P1 | 加载时 `POST` Shell「ui.focus」`（session_id） | Web UI | 可选 localhost |
+| F-X5 | P1 | 加载时 `POST` Shell「ui.focus」`（session_id） | ✅ | hydrate + 30s 心跳 |
 | F-X8 | P1 | Web UI **Update 面板**改读 Shell `GET /v1/desktop/update`（非 Node `/v1/agent/update`） | ✅ | localhost；Apply 经 Shell 确认 |
 | F-X3 | P2 | `ui.enabled: false` 时 Shell 提示 | Shell | |
 
@@ -276,7 +276,7 @@
 |----|--------|------|------|
 | F-H12 | P0 | Shell 深链 `?session=` 触发 hydrate（F-H7–H8） | 通知闭环 |
 | F-H17 | P0 | **evicted session 端到端**：`ensureSession`（`POST /v1/sessions` 带 id）→ hydrate → 可 resume | 与 F-NM7 联调；`active=false` 时必走 Create |
-| F-H13 | P1 | hydrate 完成后可选上报 Shell `ui.focus` | 配合 F-E9 |
+| F-H13 | P1 | hydrate 完成后可选上报 Shell `ui.focus` | ✅ | `hydrateSession` → F-X5 |
 
 #### 建议 API 形态（草案）
 

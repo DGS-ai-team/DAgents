@@ -20,6 +20,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/pending"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/singleinstance"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/uifocus"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/webui"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
@@ -110,6 +111,7 @@ type trayApp struct {
 	updateChecker *update.Checker
 	updateApplier *update.Applier
 	desktopAPI   *desktopapi.Server
+	uiFocus      *uifocus.Store
 	bgCancel     context.CancelFunc
 	sseSub       *events.Subscriber
 	sseCancel    context.CancelFunc
@@ -173,7 +175,8 @@ func (a *trayApp) startBackgroundServices() {
 		a.refreshUpdateUI()
 	})
 	a.updateApplier = update.NewApplier(a.cfg, a.layout, a.updateChecker, a.nodeClient)
-	a.desktopAPI = desktopapi.New(a.updateChecker, a.updateApplier)
+	a.uiFocus = uifocus.NewStore()
+	a.desktopAPI = desktopapi.New(a.updateChecker, a.updateApplier, a.uiFocus)
 	go a.updateChecker.Start(bgCtx)
 	go a.desktopAPI.Start(bgCtx)
 }
@@ -508,7 +511,17 @@ func (a *trayApp) refreshPendingUI() {
 	}
 
 	if a.notifier != nil {
-		a.notifier.Sync(entries)
+		toastEntries := entries
+		if a.uiFocus != nil {
+			filtered := make([]pending.Entry, 0, len(entries))
+			for _, e := range entries {
+				if !a.uiFocus.IsFocused(e.SessionID) {
+					filtered = append(filtered, e)
+				}
+			}
+			toastEntries = filtered
+		}
+		a.notifier.Sync(toastEntries)
 	}
 }
 

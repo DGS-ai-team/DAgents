@@ -1,4 +1,5 @@
 import * as api from "../api/node.js";
+import { reportDesktopUIFocus } from "../api/desktop.js";
 import { chromeStore } from "./chrome.js";
 import { clearHitl, enqueueHitlRequired, hitlStore } from "./hitl.js";
 import { setChildAwaitingApproval } from "./remoteWorkers.js";
@@ -33,6 +34,7 @@ export async function hydrateSession() {
     finishTurn();
   }
   chromeStore.hitlQueueLen = hitlStore.queue.length;
+  void reportDesktopUIFocus(sessionId);
   return data;
 }
 

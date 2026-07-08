@@ -59,6 +59,7 @@ import {
   shouldSkipChildRuntimeDisplay,
 } from "../stores/hitl.js";
 import { consumeStartupURL, hydrateSession } from "../stores/hydrate.js";
+import { reportDesktopUIFocus } from "../api/desktop.js";
 import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
 import {
   formatChildLifecycle,
@@ -95,6 +96,26 @@ const cancelling = ref(false);
 const streamHandle = ref(null);
 const sessionPanelRef = ref(null);
 const chatPanelRef = ref(null);
+
+const FOCUS_HEARTBEAT_MS = 30_000;
+let focusHeartbeatId = null;
+
+function startFocusHeartbeat() {
+  stopFocusHeartbeat();
+  const tick = () => {
+    void reportDesktopUIFocus(sessionStore.sessionId);
+  };
+  tick();
+  focusHeartbeatId = window.setInterval(tick, FOCUS_HEARTBEAT_MS);
+}
+
+function stopFocusHeartbeat() {
+  if (focusHeartbeatId != null) {
+    clearInterval(focusHeartbeatId);
+    focusHeartbeatId = null;
+  }
+  void reportDesktopUIFocus("");
+}
 
 const entries = computed(() => transcriptStore.entries);
 const hasUserInfoHitl = computed(() => peekHitl()?.kind === "user_information");
@@ -775,6 +796,7 @@ onMounted(async () => {
   await activateSessionStream();
   refreshContextTokens();
   consumeComposerDraft();
+  startFocusHeartbeat();
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("pageshow", onPageShow);
 });
@@ -784,6 +806,7 @@ onActivated(() => {
     void activateSessionStream();
   }
   consumeComposerDraft();
+  startFocusHeartbeat();
 });
 
 watch(
@@ -796,6 +819,7 @@ watch(
 );
 
 onUnmounted(() => {
+  stopFocusHeartbeat();
   streamHandle.value?.close();
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("pageshow", onPageShow);
@@ -803,7 +827,8 @@ onUnmounted(() => {
 
 watch(
   () => sessionStore.sessionId,
-  () => {
+  (sid) => {
+    void reportDesktopUIFocus(sid);
     chromeStore.hitlQueueLen = hitlStore.queue.length;
   },
 );

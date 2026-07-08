@@ -55,3 +55,15 @@ export async function isShellDesktopAvailable() {
 export async function getDesktopClipboardFiles() {
   return desktopFetch("/v1/desktop/clipboard/files");
 }
+
+/** F-X5 / F-E9：上报 Web UI 当前聚焦 session；空串清除。Shell 不可达时静默忽略。 */
+export async function reportDesktopUIFocus(sessionId, { ttlSeconds = 90 } = {}) {
+  try {
+    await desktopFetch("/v1/desktop/ui/focus", {
+      method: "POST",
+      body: { session_id: sessionId || "", ttl_seconds: ttlSeconds },
+    });
+  } catch {
+    /* Shell unavailable */
+  }
+}

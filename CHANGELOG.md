@@ -18,6 +18,7 @@
 - **F-X8 Web UI Update 面板**：设置 › 关于优先读 Shell `GET /v1/desktop/update`；Shell 可用时支持页面内一键升级。
 - **F-P2 Shell clipboard API**：`GET /v1/desktop/clipboard/files` 读取 Windows `CF_HDROP` 完整路径（localhost `127.0.0.1:18767`）。
 - **F-P1 / F-P3 / F-X4 路径粘贴**：Composer paste/drop 插入绝对路径；浏览器无路径时调 Shell API；多文件换行分隔。
+- **F-E9 / F-X5 / F-H13 UI focus 抑制 Toast**：Web UI hydrate/切换 session 时 `POST /v1/desktop/ui/focus`；Shell 抑制同 session 新 HITL Toast（托盘待办仍更新）。
 
 ---
 
