@@ -17,6 +17,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -65,6 +66,9 @@ type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*runtime
 	logger   *slog.Logger
+
+	mediaOnlyMu sync.Mutex
+	mediaOnly   map[string]*media.Registry
 
 	triggerDelivery triggers.DeliveryTracker
 

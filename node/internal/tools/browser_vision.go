@@ -9,11 +9,15 @@ import (
 )
 
 func (r *Registry) stashBrowserVisionFromScreenshot(ctx context.Context, relPath, toolName string) {
-	if r == nil || !r.multimodalEnabled {
+	if r == nil {
 		return
 	}
 	relPath = strings.TrimSpace(relPath)
 	if relPath == "" {
+		return
+	}
+	r.registerToolMedia(ctx, toolCallIDFromContext(ctx), relPath, "browser", toolName, "")
+	if !r.multimodalEnabled {
 		return
 	}
 	payload, err := r.buildVisionPayloadFromPath(relPath, "auto", browserVisionPrompt(toolName, relPath))

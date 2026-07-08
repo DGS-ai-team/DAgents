@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
@@ -25,7 +26,16 @@ type HydrateView struct {
 func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	rt := m.getRuntime(sessionID)
 	if rt != nil {
-		return rt.hydrateView(), nil
+		rt.mu.Lock()
+		messages := append([]llm.Message(nil), rt.messages...)
+		pending := rt.pending
+		state := rt.state
+		queuePending := rt.queue.Len()
+		hasActiveTurn := rt.state != turn.StateIdle || rt.pending != nil
+		notifySeq := rt.notifySeq
+		ackSeq := rt.ackSeq
+		rt.mu.Unlock()
+		return m.buildHydrateView(sessionID, messages, pending, state, queuePending, hasActiveTurn, notifySeq, ackSeq), nil
 	}
 	if m.store == nil {
 		return nil, fmt.Errorf("session_not_found")
@@ -43,23 +53,10 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 	if pending != nil {
 		state = turn.StateAwaitingTool
 	}
-	return buildHydrateView(sessionID, rec.Messages, pending, state, 0, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
+	return m.buildHydrateView(sessionID, rec.Messages, pending, state, 0, hasActiveTurn, rec.RuntimeState.NotifySeq, rec.RuntimeState.AckSeq), nil
 }
 
-func (r *runtime) hydrateView() *HydrateView {
-	r.mu.Lock()
-	msgs := append([]llm.Message(nil), r.messages...)
-	pending := r.pending
-	state := r.state
-	queuePending := r.queue.Len()
-	hasActiveTurn := r.state != turn.StateIdle || r.pending != nil
-	notifySeq := r.notifySeq
-	ackSeq := r.ackSeq
-	r.mu.Unlock()
-	return buildHydrateView(r.session.ID, msgs, pending, state, queuePending, hasActiveTurn, notifySeq, ackSeq)
-}
-
-func buildHydrateView(
+func (m *Manager) buildHydrateView(
 	sessionID string,
 	messages []llm.Message,
 	pending *turn.PendingHITL,
@@ -72,6 +69,11 @@ func buildHydrateView(
 	transcript := MessagesToTranscriptEntries(messages)
 	if transcript == nil {
 		transcript = []TranscriptEntry{}
+	}
+	if reg := m.mediaRegistry(sessionID); reg != nil {
+		callIndex := buildToolCallIndex(messages)
+		mediaByCall := media.RehydrateFromMessages(reg, messages, callIndex)
+		EnrichTranscriptMedia(transcript, mediaByCall)
 	}
 	return &HydrateView{
 		SessionID:     sessionID,

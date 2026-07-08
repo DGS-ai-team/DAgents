@@ -223,3 +223,30 @@ func toolResultSummary(data map[string]any) string {
 	}
 	return name + "()"
 }
+
+// EnrichTranscriptMedia 将 hydrate 重建的 media[] 写入 tool_result 条目（F-M4）。
+func EnrichTranscriptMedia(entries []TranscriptEntry, mediaByCall map[string][]map[string]any) {
+	if len(entries) == 0 || len(mediaByCall) == 0 {
+		return
+	}
+	for i, entry := range entries {
+		if entry == nil || entry["kind"] != "tool_result" {
+			continue
+		}
+		blockID := strings.TrimSpace(fmt.Sprint(entry["blockId"]))
+		if blockID == "" {
+			continue
+		}
+		items, ok := mediaByCall[blockID]
+		if !ok || len(items) == 0 {
+			continue
+		}
+		data, ok := entry["data"].(map[string]any)
+		if !ok || data == nil {
+			data = map[string]any{}
+			entry["data"] = data
+		}
+		data["media"] = items
+		entries[i] = entry
+	}
+}

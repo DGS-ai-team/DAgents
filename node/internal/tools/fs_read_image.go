@@ -101,6 +101,7 @@ func (r *Registry) execReadImage(ctx context.Context, raw json.RawMessage) (stri
 		}
 	}
 	dataURL := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+	r.registerToolMedia(ctx, toolCallIDFromContext(ctx), relPath, "read_image", "read_image", "")
 	r.stashReadImageVision(toolCallIDFromContext(ctx), &ReadImageVisionPayload{
 		RelPath: relPath,
 		Detail:  detail,

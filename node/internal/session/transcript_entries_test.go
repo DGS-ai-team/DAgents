@@ -117,3 +117,22 @@ func TestMessagesToTranscriptEntries_toolResultBackfillName(t *testing.T) {
 		t.Fatalf("arguments = %#v", data["arguments"])
 	}
 }
+
+func TestEnrichTranscriptMedia(t *testing.T) {
+	t.Parallel()
+	entries := []TranscriptEntry{
+		{
+			"kind":    "tool_result",
+			"blockId": "call-img",
+			"data":    map[string]any{"tool_name": "show_image"},
+		},
+	}
+	EnrichTranscriptMedia(entries, map[string][]map[string]any{
+		"call-img": {{"id": "med_1", "url": "/v1/sessions/s/media/med_1"}},
+	})
+	data, _ := entries[0]["data"].(map[string]any)
+	media, _ := data["media"].([]map[string]any)
+	if len(media) != 1 || media[0]["id"] != "med_1" {
+		t.Fatalf("media = %#v", data["media"])
+	}
+}
