@@ -4,21 +4,34 @@
 
 ## [Unreleased]
 
-**规划 v0.6 – v0.7**：当前开发 **`v0.6.2`**（桌面体验 + Shell 自更新）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §4。
+**规划 v0.6 – v0.7**：下一里程碑 **`v0.7.0`**（跨端与体验收尾）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §5。
+
+---
+
+## [0.6.2] - 2026-07-08
+
+**桌面体验 + Shell 自更新**：路径粘贴、Shell 检查/应用更新、UI focus 抑制 HITL Toast。Smoke 清单：[`docs/design/v0.6.2-smoke-checklist.md`](docs/design/v0.6.2-smoke-checklist.md)。
 
 ### 新增
 
 - **F-ND1 `GET /v1/agent/upgrade-readiness`**：返回 `ready` / `has_active_turn` / 活跃 session 列表；Shell apply 升级前查询 Node 是否空闲。
 - **F-I11 `shared/update`**：Manage check URL、manifest 解析、`download_url` 补全、安装包下载与 sha256 校验；Node `UpdateChecker` 改调共享库。
 - **F-U5 Shell UpdateChecker**：Shell 后台 poll Manage（`manage.update` 配置），读安装根 `VERSION` 缓存 `UpdateStatus`；**不依赖 Node 在跑**。
-- **F-X8（骨架）Shell localhost `GET /v1/desktop/update`**：默认 `127.0.0.1:18767`；Web UI Update 面板后续改读此 API。
+- **F-X8 Shell localhost Desktop API**：默认 `127.0.0.1:18767`（update、clipboard、ui focus）；Web UI 跨端口 CORS。
 - **F-U6 Shell apply orchestration**：`POST /v1/desktop/update/apply`；查 `upgrade-readiness` → 下载 → stop Node → 覆盖 `bin/*`/`VERSION` → start Node。
 - **F-I12 `dagents.cmd update` → Shell**：Shell 在跑时委托 `dagents-shell.exe update`（localhost API）；API 不可达时回退 `dagents-client update`。
 - **F-N9 新版本 Toast / 托盘菜单**：Manage 有新版本时 Toast 通知 + 托盘「更新：新版本 x 可用」入口（打开设置 › 关于）。
 - **F-X8 Web UI Update 面板**：设置 › 关于优先读 Shell `GET /v1/desktop/update`；Shell 可用时支持页面内一键升级。
-- **F-P2 Shell clipboard API**：`GET /v1/desktop/clipboard/files` 读取 Windows `CF_HDROP` 完整路径（localhost `127.0.0.1:18767`）。
+- **F-P2 Shell clipboard API**：`GET /v1/desktop/clipboard/files` 读取 Windows `CF_HDROP` 完整路径。
 - **F-P1 / F-P3 / F-X4 路径粘贴**：Composer paste/drop 插入绝对路径；浏览器无路径时调 Shell API；多文件换行分隔。
 - **F-E9 / F-X5 / F-H13 UI focus 抑制 Toast**：Web UI hydrate/切换 session 时 `POST /v1/desktop/ui/focus`；Shell 抑制同 session 新 HITL Toast（托盘待办仍更新）。
+
+### 修复
+
+- **图片路径**：`show_image` / `read_image` 支持 FS_ROOT 外绝对路径；`MediaRegistry` 注册绝对路径；UI 无 media 时提示。
+- **Hydrate 工具行**：按 `blockId` 合并 tool_call + tool_result，避免历史还原成双行。
+
+（Git **tag**：待 Smoke 后 `v0.6.2`。）
 
 ---
 

@@ -18,6 +18,7 @@
 | `v0.6-v0.7-roadmap.md` | **v0.6.0 – v0.7.0 开发路径总览** |
 | `v0.6.0-smoke-checklist.md` | **v0.6.0** Smoke 验收检查清单 |
 | `v0.6.1-smoke-checklist.md` | **v0.6.1** Smoke 验收检查清单 |
+| `v0.6.2-smoke-checklist.md` | **v0.6.2** Smoke 验收检查清单 |
 | `windows-desktop-shell.md` | Windows Desktop Shell：功能清单与架构决策 |
 
 新正文优先写入 **handbook**；本目录保留需独立维护的深度设计稿。

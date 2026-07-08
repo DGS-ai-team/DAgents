@@ -19,6 +19,9 @@
 | **Toast + 深链 + 打开控制台 + 托盘 icon 态**（F-N1–N3/N10, F-U1–U3） | ✅ v0.6.0 第 ⑥ 步 |
 | **安装发布**（F-I1/I3/I8–I10） | ✅ v0.6.0 第 ⑧ 步 |
 | Hydrate（Node + Web UI） | ✅ v0.6.0 第 ③④ 步 |
+| **Shell 自更新 + Desktop API**（F-U5–U6, F-I11–I12, F-ND1, F-X8, F-N9） | ✅ v0.6.2 |
+| **路径粘贴 + clipboard API**（F-P1–P3, F-P2, F-X4） | ✅ v0.6.2 |
+| **UI focus 抑制 Toast**（F-E9, F-X5, F-H13） | ✅ v0.6.2 |
 
 ## 菜单
 
@@ -26,6 +29,7 @@
 |------|------|
 | 状态 | 只读，运行中 agent_id 或「未运行」 |
 | **待办** | 有待办时显示摘要；子菜单列出各 session，点击深链打开 Web UI |
+| **更新** | Manage 有新版本时显示版本摘要；点击打开设置 › 关于（F-N9） |
 | **打开控制台** | ensure Node 后打开 `/ui/`（F-U1/U2） |
 | 启动 / 停止 / 重启 Node | 与 `nodectl` 一致 |
 | 退出 Shell | 停止 Node 后退出进程 |
@@ -84,13 +88,28 @@ Windows 上额外运行 `singleinstance` 互斥测试。
 - **托盘 icon**（F-N10）：有待办时切换 `icon_pending.ico` 并显示 `●` 标题角标。
 - **打开控制台**（F-U1/U2）：ensure Node 后 `rundll32` 调起默认浏览器。
 - Web UI hydrate/SSE 后 **`POST /v1/sessions/{id}/ack`** 清除未读（F-E13）；Shell 打开深链不本地 ack。
+- **UI focus 抑制**（F-E9）：Web UI 上报 `POST /v1/desktop/ui/focus` 后，同 session **不再弹新 Toast**（托盘待办仍更新）。
+
+## localhost Desktop API（v0.6.2）
+
+默认 **`http://127.0.0.1:18767`**（仅本机；Web UI CORS 白名单）：
+
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| GET | `/health` | 探活 |
+| GET | `/v1/desktop/update` | 更新状态（F-U5 / F-X8） |
+| POST | `/v1/desktop/update/apply` | 应用升级（F-U6） |
+| GET | `/v1/desktop/clipboard/files` | Windows 剪贴板文件路径（F-P2） |
+| POST | `/v1/desktop/ui/focus` | Web UI 聚焦 session（F-E9 / F-X5） |
+
+CLI：`dagents-shell.exe update [--check|--force]` 转发上述 API（F-I12）。
 
 ## 安装与自启（v0.6.0 第 ⑧ 步）
 
 - Windows 安装包 **`bin/dagents-shell.exe`** + Inno **登录自启**（HKCU Run → `dagents shell --background`）。
 - 命令行：`dagents shell` / `shell status` / `shell stop`（F-I9）；卸载时清理自启项（F-I10）。
 
-包布局：`internal/nodeclient`、`internal/pending`、`internal/events`、`internal/notify`、`internal/webui`。
+包布局：`internal/nodeclient`、`internal/pending`、`internal/events`、`internal/notify`、`internal/webui`、`internal/desktopapi`、`internal/update`、`internal/clipboard`、`internal/uifocus`。
 
 ## 依赖
 
