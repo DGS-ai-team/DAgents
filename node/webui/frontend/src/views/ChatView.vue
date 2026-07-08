@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch, nextTick } from "vue";
+import { computed, onMounted, onUnmounted, onActivated, ref, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { connectStream } from "../sse/stream.js";
@@ -151,6 +151,23 @@ async function activateSessionStream() {
   await syncChildAgentsFromApi();
   await nextTick();
   chatPanelRef.value?.scrollToLastAssistant?.();
+}
+
+async function refreshAfterPageRestore() {
+  resetStatusLines();
+  resetToolStream();
+  resetRemoteWorkers();
+  resetUsageStrip();
+  resetEventTracking();
+  await activateSessionStream();
+  refreshContextTokens();
+  sessionPanelRef.value?.refresh?.();
+}
+
+function onPageShow(event) {
+  if (event?.persisted) {
+    void refreshAfterPageRestore();
+  }
 }
 
 async function refreshMeta() {
@@ -769,6 +786,13 @@ onMounted(async () => {
   await activateSessionStream();
   refreshContextTokens();
   window.addEventListener("keydown", onKeydown);
+  window.addEventListener("pageshow", onPageShow);
+});
+
+onActivated(() => {
+  if (sessionStore.sessionId && !streamHandle.value) {
+    void activateSessionStream();
+  }
 });
 
 watch(
@@ -783,6 +807,7 @@ watch(
 onUnmounted(() => {
   streamHandle.value?.close();
   window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("pageshow", onPageShow);
 });
 
 watch(

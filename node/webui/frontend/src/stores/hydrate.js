@@ -36,6 +36,11 @@ export async function hydrateSession() {
   return data;
 }
 
+/** F-H10：浏览器 F5 / bfcache 恢复后重新 hydrate（与 F-H7 同路径）。 */
+export async function refreshSessionAfterPageRestore() {
+  return hydrateSession();
+}
+
 /** 解析 Shell 深链 ?session=（F-U3）。 */
 export function consumeStartupURL() {
   if (typeof window === "undefined") return;

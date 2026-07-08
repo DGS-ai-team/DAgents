@@ -380,7 +380,7 @@ begin
     MsgBox('缺少配置模板: ' + AppDir + '\config.example.yaml', mbError, MB_OK);
     Exit;
   end;
-  { 相对路径 + WorkingDir={app}，避免 Program Files 等含空格路径在 Exec 参数中被拆坏 }
+  { 相对路径 + WorkingDir 设为安装目录，避免 Program Files 等含空格路径在 Exec 参数中被拆坏 }
   CmdLine :=
     '-NoProfile -ExecutionPolicy Bypass -File "scripts\windows\write-install-config.ps1" ' +
     '-TemplatePath "config.example.yaml" -OutputPath "config.yaml" -SettingsPath "' + JsonPath + '" ' +
