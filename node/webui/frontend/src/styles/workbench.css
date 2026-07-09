@@ -741,6 +741,12 @@
   max-width: none;
   width: 100%;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  gap: 16px;
 }
 
 .settings-layout__main .settings-field__input {
@@ -833,6 +839,52 @@
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: inherit;
+}
+
+.setup-config-panel .panel__header {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.setup-config-panel__subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.setup-config-panel__subtitle code {
+  font-size: 11.5px;
+}
+
+.setup-config-panel__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.setup-config-panel__body {
+  overflow-y: auto;
+}
+
+.setup-config-panel__hint,
+.setup-config-panel__status {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.setup-config-panel__hint {
+  color: var(--color-text-muted);
+}
+
+.setup-config-panel__status {
+  color: var(--color-primary-strong);
+}
+
+.setup-config-panel__toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .settings-path {
@@ -1501,6 +1553,15 @@
   gap: 10px;
 }
 
+.chat__composer-meta-right {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-left: auto;
+}
+
 .chat__composer-toolbar {
   flex: 0 0 auto;
 }
@@ -1538,9 +1599,6 @@
 
 .chat__input-strip-right {
   flex: 0 0 auto;
-  max-width: 55%;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
@@ -1612,131 +1670,6 @@
 
 .stat--wide {
   grid-column: span 2;
-}
-
-.runtime__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 0;
-  font-size: 12.5px;
-}
-
-.runtime__row + .runtime__row {
-  border-top: 1px dashed var(--color-border);
-}
-
-.runtime__label {
-  color: var(--color-text-subtle);
-}
-
-.runtime__value {
-  color: var(--color-text);
-  font-weight: 500;
-}
-
-.runtime__error {
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  font-size: 12.5px;
-}
-
-.runtime__hint {
-  margin-top: 8px;
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.runtime__hint--ok {
-  background: var(--color-success-soft);
-  color: var(--color-success);
-}
-
-.runtime-panel--compact .panel__header {
-  padding: 10px 14px;
-}
-
-.runtime-panel__body--compact {
-  padding: 10px 14px;
-}
-
-.runtime-compact-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.runtime-compact-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
-}
-
-.runtime-compact-card__label {
-  font-size: 11px;
-  color: var(--color-text-subtle);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.runtime-compact-card__value {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.runtime-sse-status {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.runtime-sse-status--online {
-  color: var(--color-success);
-}
-
-.runtime-sse-status--offline {
-  color: var(--color-danger);
-}
-
-.runtime-api-base {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  margin-top: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-subtle);
-  font-size: 12px;
-}
-
-.runtime-api-base__label {
-  flex: 0 0 auto;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.runtime-api-base__value {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 /* ---------- sub agent tabs & view ---------- */
@@ -2708,6 +2641,10 @@
   max-height: 88vh;
 }
 
+.settings-embedded .command-panel {
+  max-height: none;
+}
+
 .command-panel__header {
   align-items: flex-start;
 }
@@ -3228,7 +3165,6 @@
 }
 
 .status-panel,
-.sessions-panel,
 .policy-panel,
 .triggers-panel,
 .children-panel {

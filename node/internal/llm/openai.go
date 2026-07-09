@@ -352,39 +352,3 @@ func mergeRequestExtra(raw []byte, extra map[string]any) ([]byte, error) {
 	}
 	return json.Marshal(merged)
 }
-
-// EnvOpenAIClient 从环境变量读取 API Key 的 OpenAI 客户端包装（无 provider 适配，测试/遗留用）。
-type EnvOpenAIClient struct {
-	inner  *OpenAIClient
-	keyEnv string
-}
-
-// NewEnvOpenAIClient 创建延迟读取 API Key 的客户端。
-func NewEnvOpenAIClient(baseURL, model, apiKeyEnv string) *EnvOpenAIClient {
-	env := apiKeyEnv
-	if env == "" {
-		env = "OPENAI_API_KEY"
-	}
-	return &EnvOpenAIClient{
-		inner:  NewOpenAIClient(OpenAIConfig{BaseURL: baseURL, Model: model}),
-		keyEnv: env,
-	}
-}
-
-func (c *EnvOpenAIClient) StreamChat(ctx context.Context, req ChatRequest, handler StreamHandler) (ChatResult, error) {
-	key, err := lookupEnvAPIKey(c.keyEnv)
-	if err != nil {
-		return ChatResult{}, err
-	}
-	c.inner.cfg.APIKey = key
-	return c.inner.StreamChat(ctx, req, handler)
-}
-
-func (c *EnvOpenAIClient) CompleteText(ctx context.Context, req CompleteRequest) (string, error) {
-	key, err := lookupEnvAPIKey(c.keyEnv)
-	if err != nil {
-		return "", err
-	}
-	c.inner.cfg.APIKey = key
-	return c.inner.CompleteText(ctx, req)
-}

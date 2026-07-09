@@ -4,25 +4,25 @@
 
 | 文件 | 说明 |
 |------|------|
-| `dagents-installer.iss` | Inno Setup 6 脚本（分步配置向导 + 安装；**须 UTF-8 BOM**，否则 `[Code]` 中文会编译失败） |
+| `dagents-installer.iss` | Inno Setup 6 脚本（安装 + 可选 policy 覆盖；**须 UTF-8 BOM**，否则 `[Code]` 中文会编译失败） |
 | `languages/ChineseSimplified.isl` | 简体中文向导文案（CI choco 安装的 Inno 不含此文件，仓库自带） |
 | `dagents.cmd` | 安装目录入口 |
-| `write-install-config.ps1` | 根据向导 JSON 从 `config.example.yaml` 生成 `config.yaml`（**须 UTF-8 BOM**，供 Windows PowerShell 5.1 解析中文） |
+| `write-install-config.ps1` | 从 JSON 生成 `config.yaml` 的辅助脚本（仍随包分发；**安装器不再调用**） |
 
-## 安装向导（三批）
+## 安装流程
 
-1. **LLM (1/3)**：Provider、Base URL、Model、API Key 环境变量名；可选 Mock
-2. **Manage (2/3)**：是否启用 Manage、URL、team、registration base_url
-3. **功能开关 (3/3)**：Skills / Triggers / Child Agents / Web UI / Browser / 多模态 / expose_to_peers / A2A / tools.enabled_groups
+安装程序**不再**在安装向导中配置 LLM / Manage / 功能开关。首次安装时：
 
-安装结束时：
-
-- 写入 `config.yaml`（保留 `config.example.yaml` 中的注释块；按选项展开 browser/multimodal/manage 等）
-- 按选项创建 `.runtime/browser/`（启用 Browser 时）
+- 若不存在 `config.yaml`，从 `config.example.yaml` **复制**一份（不覆盖已有配置）
+- 可选覆盖 `policy.yaml` 种子
+- 创建 `.runtime/browser/` 目录
 - **注册 Shell 登录自启**（`HKCU\...\Run` → `dagents shell --background`）并可选立即启动托盘
-- 弹出后续步骤提示（API Key、Browser 启动等）
+- 将安装目录与 `.runtime/externaltools` 追加到用户 `PATH`
+- 完成页提示打开 Web UI **「设置 › 连接」** 完成 LLM、Manage 与功能开关配置
 
-升级安装：若已存在 `config.yaml`，会询问是否覆盖。
+**API Key** 仍通过系统环境变量提供（如 `OPENAI_API_KEY`），Web UI 只配置环境变量名（`api_key_env`）。
+
+升级安装：若已存在 `config.yaml`，不会被覆盖；policy 覆盖仍可选询问。
 
 ## 构建
 

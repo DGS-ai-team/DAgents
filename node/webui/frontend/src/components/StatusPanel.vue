@@ -47,7 +47,7 @@ onMounted(load);
           {{ showRaw ? "友好视图" : "JSON" }}
         </button>
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
-        <button type="button" class="btn btn--ghost btn--sm" @click="emit('close')">关闭</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
 

@@ -18,7 +18,6 @@ func (o *Orchestrator) continueAfterUserInformationResume(
 	pending *PendingHITL,
 	toolLoopCount int,
 ) StepOutcome {
-	pending.Normalize()
 	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
 	var targetIdx = -1
 	if resumeToolCallID != "" {
@@ -69,7 +68,6 @@ func (o *Orchestrator) continueAfterApprovalResume(
 	pending *PendingHITL,
 	toolLoopCount int,
 ) StepOutcome {
-	pending.Normalize()
 	approvalItems := pending.approvalItems()
 	if len(approvalItems) == 0 {
 		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("no pending approval tool calls")}

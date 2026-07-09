@@ -27,7 +27,7 @@
 | `Client` | LLM 接口（支持 tools） |
 | `ChatRequest` / `ChatResult` | 含 messages 与 tool_calls |
 | `MockClient` | mock；`EnableTools` 驱动工具环测 |
-| `EnvOpenAIClient` | OpenAI 兼容流式 HTTP |
+| `envAdapterClient` | 环境变量 API Key + MessageAdapter 出站 |
 
 ## `internal/turn/`
 

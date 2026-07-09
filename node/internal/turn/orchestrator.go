@@ -207,7 +207,6 @@ func (o *Orchestrator) ContinueAfterResume(
 	o.runHITLAfterResumePhase(ctx, sessionID, history, resumeKind)
 	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
 	pendingToolCallID := ""
-	pending.Normalize()
 	pendingCount := len(pending.Items)
 	if pendingCount > 0 {
 		pendingToolCallID = pending.Items[0].ToolCall.ID

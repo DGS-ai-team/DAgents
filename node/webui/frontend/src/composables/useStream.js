@@ -1,5 +1,3 @@
-import { computed } from "vue";
-
 function shouldSkipEntry(entry) {
   if (!entry) return true;
   if (entry.kind === "reasoning" && !entry.text?.trim() && !entry.streaming) return true;
@@ -7,7 +5,7 @@ function shouldSkipEntry(entry) {
   return false;
 }
 
-export function entryBlockId(entry) {
+function entryBlockId(entry) {
   return String(entry?.blockId || entry?.data?.tool_call_id || entry?.data?.id || "").trim();
 }
 
@@ -82,8 +80,4 @@ export function buildStream(entries, hitlQueue = []) {
     items.push({ key: `hitl-${idx}-${hitl.kind}`, kind: hitl.kind, hitl, hitlIndex: idx });
   });
   return items;
-}
-
-export function useStream(entriesRef, hitlQueueRef) {
-  return computed(() => buildStream(entriesRef.value, hitlQueueRef.value));
 }

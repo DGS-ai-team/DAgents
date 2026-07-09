@@ -73,7 +73,7 @@ func TestAppendMessage_recordsAssistantToolCallsReasoningKey(t *testing.T) {
 			},
 		}},
 	})
-	payload := messageToJournalPayload(history[0])
+	payload := llm.MessageToJournalPayload(history[0])
 	if _, ok := payload["reasoning_content"]; !ok {
 		t.Fatalf("journal payload missing reasoning_content: %+v", payload)
 	}

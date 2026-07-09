@@ -55,6 +55,3 @@ func (deepSeekAdapter) MarshalChatRequestMessages(messages []Message) ([]map[str
 	}
 	return out, true, nil
 }
-
-// RequestExtra 已由 RuntimeSettings.BuildRequestExtra 在出站时注入；适配器层返回 nil。
-func (deepSeekAdapter) RequestExtra() map[string]any { return nil }

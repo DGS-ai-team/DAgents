@@ -40,6 +40,7 @@ import (
 // Server 承载 Agent Node HTTP 路由与运行时依赖。
 type Server struct {
 	cfg           *config.Config
+	configPath    string
 	llmRuntime    *llm.RuntimeSettings
 	logger        *slog.Logger
 	mux           *http.ServeMux
@@ -65,6 +66,14 @@ type serverOptions struct {
 	policyEngine *policy.Engine
 	sqliteStore  *store.SQLiteStore
 	skipStore    bool
+	configPath   string
+}
+
+// WithConfigPath 记录 Node 启动时加载的 config.yaml 路径（供 Web UI 保存设置）。
+func WithConfigPath(path string) Option {
+	return func(o *serverOptions) {
+		o.configPath = strings.TrimSpace(path)
+	}
 }
 
 // WithLLM 注入 LLM 客户端（单测/mock 用）。
@@ -309,6 +318,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 	s := &Server{
 		cfg:           cfg,
+		configPath:    o.configPath,
 		llmRuntime:    llmRuntime,
 		logger:        logger,
 		mux:           http.NewServeMux(),
@@ -350,6 +360,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.registerMediaRoutes()
 	s.registerPolicyRoutes()
 	s.registerLLMRoutes()
+	s.registerSetupRoutes()
 	s.registerManageUploadRoutes()
 	if cfg.UIEnabled() {
 		s.mux.Handle("GET /ui/", webui.Handler())
@@ -454,6 +465,12 @@ type agentInfoResponse struct {
 	MultimodalEnabled bool                `json:"multimodal_enabled"`
 	ManageRegistered  bool                `json:"manage_registered"`
 	LLM               llm.LLMSettingsView `json:"llm"`
+	Compression       compressionInfo     `json:"compression"`
+}
+
+type compressionInfo struct {
+	SilentTriggerTokens   int `json:"silent_trigger_tokens"`
+	BlockingTriggerTokens int `json:"blocking_trigger_tokens"`
 }
 
 func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
@@ -465,6 +482,11 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 	if s.llmRuntime != nil {
 		llmView = s.llmRuntime.Snapshot()
 	}
+	comp := compressionInfo{}
+	if s.cfg != nil {
+		comp.SilentTriggerTokens = s.cfg.Compression.SilentTriggerTokens
+		comp.BlockingTriggerTokens = s.cfg.Compression.BlockingTriggerTokens
+	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
 		AgentID:           s.cfg.AgentID,
 		ExposeToPeers:     s.cfg.ExposeToPeersEffective(),
@@ -472,6 +494,7 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 		MultimodalEnabled: s.cfg.MultimodalEnabled(),
 		ManageRegistered:  registered,
 		LLM:               llmView,
+		Compression:       comp,
 	})
 }
 

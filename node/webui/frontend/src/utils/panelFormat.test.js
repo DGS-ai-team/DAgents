@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatPolicyDecision,
+  formatPolicyMode,
   formatTriggerCondition,
   formatUnixTime,
 } from "./panelFormat.js";
 
 describe("panelFormat", () => {
   it("labels policy modes in Chinese", () => {
-    expect(formatPolicyDecision("allow_auto")).toBe("自动允许");
-    expect(formatPolicyDecision("require_approval")).toBe("需审批");
-    expect(formatPolicyDecision("deny")).toBe("禁止");
+    expect(formatPolicyMode("never")).toBe("自动允许");
+    expect(formatPolicyMode("always")).toBe("需审批");
+    expect(formatPolicyMode("deny")).toBe("禁止");
   });
 
   it("formats trigger interval condition", () => {

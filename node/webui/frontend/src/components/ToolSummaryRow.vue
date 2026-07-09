@@ -1,5 +1,6 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
+import { formatToolElapsed } from "../utils/format.js";
 import { toolStepIsInProgress, toolStepStatusText, toolStepUserSummary } from "../utils/toolUserLabel.js";
 import { entryMedia } from "../utils/showImage.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
@@ -11,12 +12,49 @@ const props = defineProps({
 });
 
 const expanded = ref(false);
+/** 本地时钟：tool_call 长参数期间 statusStore 可能已停表，不能依赖它刷新耗时。 */
+const nowTick = ref(Date.now());
+let tickTimer = null;
 
 const summary = computed(() => toolStepUserSummary({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const status = computed(() => toolStepStatusText({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const inProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
 const inlineMedia = computed(() => entryMedia(props.resultEntry));
+/** 长参数 tool_call 期间正文未必可见增长；用耗时 + 动画表达「仍在生成」。 */
+const status = computed(() => {
+  void nowTick.value;
+  const base = toolStepStatusText({ callEntry: props.callEntry, resultEntry: props.resultEntry });
+  if (!props.callEntry?.partial || !props.callEntry?.startedAt) return base;
+  const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);
+  if (!elapsed) return base || "生成中";
+  return `生成中${elapsed}`;
+});
+
+function stopTick() {
+  if (tickTimer) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
+}
+
+function ensureTick() {
+  if (tickTimer) return;
+  nowTick.value = Date.now();
+  tickTimer = setInterval(() => {
+    nowTick.value = Date.now();
+  }, 400);
+}
+
+watch(
+  inProgress,
+  (active) => {
+    if (active) ensureTick();
+    else stopTick();
+  },
+  { immediate: true },
+);
+
+onUnmounted(stopTick);
 
 function toggle() {
   expanded.value = !expanded.value;
@@ -26,7 +64,10 @@ function toggle() {
 <template>
   <div class="tool-summary-row" :class="{ 'tool-summary-row--expanded': expanded, 'tool-summary-row--progress': inProgress }">
     <button type="button" class="tool-summary-row__head" @click="toggle">
-      <span class="tool-summary-row__icon" aria-hidden="true">{{ inProgress ? "⏳" : "✓" }}</span>
+      <span class="tool-summary-row__icon" aria-hidden="true">
+        <span v-if="inProgress" class="tool-exec-spinner" />
+        <span v-else>✓</span>
+      </span>
       <span class="tool-summary-row__text">{{ summary }}</span>
       <span v-if="inlineMedia.length && !expanded" class="tool-summary-row__thumb-wrap">
         <img
@@ -36,7 +77,12 @@ function toggle() {
           loading="lazy"
         />
       </span>
-      <span v-if="status" class="tool-summary-row__status">{{ status }}</span>
+      <span v-if="status" class="tool-summary-row__status">
+        <span v-if="inProgress" class="msg__meta-dots tool-summary-row__dots" aria-hidden="true">
+          <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
+        </span>
+        {{ status }}
+      </span>
       <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
     </button>
     <div v-if="expanded && detailEntry" class="tool-summary-row__detail">
@@ -54,7 +100,18 @@ function toggle() {
 }
 
 .tool-summary-row--progress {
-  border-color: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.4);
+  animation: tool-summary-progress-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes tool-summary-progress-pulse {
+  0%,
+  100% {
+    border-color: rgba(99, 102, 241, 0.28);
+  }
+  50% {
+    border-color: rgba(99, 102, 241, 0.55);
+  }
 }
 
 .tool-summary-row__head {
@@ -77,6 +134,10 @@ function toggle() {
 
 .tool-summary-row__icon {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
   font-size: 13px;
 }
 
@@ -104,8 +165,16 @@ function toggle() {
 
 .tool-summary-row__status {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--color-text-subtle);
+}
+
+.tool-summary-row__dots {
+  --stream-meta-dot-size: 4px;
+  --stream-meta-dot-gap: 2px;
 }
 
 .tool-summary-row__chevron {

@@ -49,8 +49,3 @@ export function buildContextMessageView(content, previewLen = 160) {
     expandable: preview !== full,
   };
 }
-
-/** @deprecated 使用 buildContextMessageView；保留供单测与旧调用。 */
-export function formatContextMessageContent(content, maxLen = 200) {
-  return truncateGraphemes(buildContextMessageText(content), maxLen);
-}

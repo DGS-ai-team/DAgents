@@ -20,8 +20,6 @@ export function useChildAgents(sessionIdSource) {
 
   const items = computed(() => sortChildAgentItems(childAgentItems(data.value)));
 
-  const activeCount = computed(() => items.value.filter((item) => isChildAgentActive(item.status)).length);
-
   async function load() {
     const sid = sessionId.value;
     if (!sid) {
@@ -70,7 +68,6 @@ export function useChildAgents(sessionIdSource) {
     error,
     data,
     items,
-    activeCount,
     cancellingId,
     statusMessage,
     load,

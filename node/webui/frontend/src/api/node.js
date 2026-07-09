@@ -45,6 +45,14 @@ export function patchLLMSettings(patch) {
   return apiFetch("/v1/llm/settings", { method: "PATCH", body: patch });
 }
 
+export function getSetupConfig() {
+  return apiFetch("/v1/setup/config");
+}
+
+export function patchSetupConfig(patch) {
+  return apiFetch("/v1/setup/config", { method: "PATCH", body: patch });
+}
+
 export function createSession(sessionId) {
   const body = {};
   if (sessionId) body.session_id = sessionId;
@@ -152,10 +160,6 @@ export function updateShellPolicy(shellType, updates, deletes = []) {
 
 export function listTriggers() {
   return apiFetch("/v1/triggers");
-}
-
-export function getTrigger(triggerId) {
-  return apiFetch(`/v1/triggers/${encodeURIComponent(triggerId)}`);
 }
 
 export function createTrigger(body) {

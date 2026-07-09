@@ -42,15 +42,6 @@ export async function applyDesktopUpdate({ force = false } = {}) {
   });
 }
 
-export async function isShellDesktopAvailable() {
-  try {
-    await desktopFetch("/health");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** @returns {Promise<{ paths: string[] }>} Shell CF_HDROP 路径（F-P2）；不可达时抛错。 */
 export async function getDesktopClipboardFiles() {
   return desktopFetch("/v1/desktop/clipboard/files");

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, nextTick } from "vue";
 import ComposerToolbar from "./ComposerToolbar.vue";
+import ContextMeter from "./ContextMeter.vue";
 import MessageBubble from "./MessageBubble.vue";
 import StreamStatusBubble from "./StreamStatusBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
@@ -9,7 +10,7 @@ import ToolSummaryRow from "./ToolSummaryRow.vue";
 import { buildStream } from "../composables/useStream.js";
 import { extractToolApprovals } from "../stores/hitl.js";
 import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.js";
-import { chromeStore } from "../stores/chrome.js";
+import { chromeStore, inputStripRight } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { statusStore, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
 import { getDesktopClipboardFiles } from "../api/desktop.js";
@@ -87,6 +88,8 @@ const inputStripLeftText = computed(() => {
   }
   return "";
 });
+
+const inputStripRightText = computed(() => inputStripRight());
 
 const showCancel = computed(() => props.sending && !props.hitlBusy);
 const multimodalEnabled = computed(() => Boolean(chromeStore.agentInfo?.multimodal_enabled));
@@ -355,6 +358,14 @@ defineExpose({
               <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
               <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
             </div>
+          </div>
+          <div class="chat__composer-meta-right">
+            <span
+              v-if="inputStripRightText"
+              class="chat__input-strip-right"
+              :title="inputStripRightText"
+            >{{ inputStripRightText }}</span>
+            <ContextMeter />
           </div>
         </div>
         <div v-if="multimodalEnabled && pendingImages.length" class="chat__pending-images">

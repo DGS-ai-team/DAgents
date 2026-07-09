@@ -6,6 +6,34 @@
 
 ---
 
+## [0.7.3] - 2026-07-09
+
+**Web UI 设置化 + 上下文体验**：安装向导不再配参；连接/压缩阈值写入 config.yaml；OpenAI thinking 与上下文占比环。
+
+### 新增
+
+- **设置 › 连接**：`GET/PATCH /v1/setup/config`，Web UI 配置 LLM、Manage、功能开关；`shared/config.SaveFile` 原子写 YAML；保存后 `llm.SyncFromConfig` 热同步 provider/model/mock。
+- **设置 › 上下文 › 压缩阈值**：配置 `compression.silent_trigger_tokens` / `blocking_trigger_tokens` 及 idle 自动压缩参数。
+- **ContextMeter**：Composer 状态栏右侧上下文 **已用占比** 进度环（相对 blocking/silent 阈值）；恢复 token usage 与缓存命中率展示。
+- **OpenAI thinking**：`provider=openai` 支持 `thinking` / `reasoning_effort` 出站与运行时热更新（与 DeepSeek 同形）。
+- **ToolSummaryRow**：长参数 `tool_call` 进行中显示 spinner、本地计时与边框呼吸动画（不流式展示参数正文）。
+
+### 变更
+
+- **Windows 安装器**：Inno 向导不再配置 LLM / Manage / 功能开关；首次安装复制 `config.example.yaml`；完成页引导 **设置 › 连接**。
+- **Web UI 清理**：移除 `AppHeader`、`SessionsPanel`、`ChildAgentsPanel`、`RuntimeStatusPanel`、`StatusLineBubble` 等孤立组件与死 store/API；统一 `utils/usage.js` 解析 usage。
+- **Node 清理**：移除 `EnvOpenAIClient`、journal `normalize` 包装、未使用的 HITL 导出等；history 直接使用 `llm.MessageToJournalPayload`。
+- **设置页 overlay**：关闭按钮加 `data-panel-close`，嵌入设置页时隐藏以免误点。
+
+### 修复
+
+- **usage 条截断**：移除 `.chat__input-strip-right` 的 `max-width: 55%` 限制。
+- **OpenAI adapter**：tool_calls 对齐时保留 `reasoning_content`。
+
+（Git **tag**：`v0.7.3`。）
+
+---
+
 ## [0.7.2] - 2026-07-09
 
 **Shell 待办提醒 + 安装包 CI 修复**。

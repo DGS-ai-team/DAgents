@@ -15,7 +15,7 @@ const emit = defineEmits(["close", "pick"]);
         <div class="panel__title">命令帮助</div>
         <div class="help-panel__subtitle">在输入框输入以 <code>/</code> 开头的命令</div>
       </div>
-      <button type="button" class="btn btn--ghost btn--sm" @click="emit('close')">关闭</button>
+      <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
     </header>
 
     <div class="panel__body help-panel__body">

@@ -73,14 +73,24 @@ func TestBuildRequestExtra_qwen(t *testing.T) {
 	}
 }
 
-func TestRuntimeSettingsApplyPatch_openaiRejected(t *testing.T) {
-	for _, provider := range []string{"openai", "vllm"} {
-		s := &RuntimeSettings{Provider: provider, Model: "gpt-4"}
-		off := "disabled"
-		_, err := s.ApplyPatch(LLMSettingsPatch{Thinking: &off})
-		if err == nil {
-			t.Fatalf("expected error for %s", provider)
-		}
+func TestRuntimeSettingsApplyPatch_vllmRejected(t *testing.T) {
+	s := &RuntimeSettings{Provider: "vllm", Model: "local"}
+	off := "disabled"
+	_, err := s.ApplyPatch(LLMSettingsPatch{Thinking: &off})
+	if err == nil {
+		t.Fatal("expected error for vllm")
+	}
+}
+
+func TestRuntimeSettingsApplyPatch_openai(t *testing.T) {
+	s := &RuntimeSettings{Provider: "openai", Model: "gpt-4", Thinking: "enabled", ReasoningEffort: "high"}
+	off := "disabled"
+	view, err := s.ApplyPatch(LLMSettingsPatch{Thinking: &off})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Thinking != "disabled" || !view.ThinkingSupported {
+		t.Fatalf("view = %+v", view)
 	}
 }
 
@@ -97,12 +107,12 @@ func TestRuntimeSettingsApplyPatch_qwen(t *testing.T) {
 }
 
 func TestThinkingSupported(t *testing.T) {
-	for _, p := range []string{"deepseek", "qwen"} {
+	for _, p := range []string{"deepseek", "qwen", "openai"} {
 		if !ThinkingSupported(p) {
 			t.Fatalf("%s should support thinking", p)
 		}
 	}
-	for _, p := range []string{"openai", "vllm", ""} {
+	for _, p := range []string{"vllm", ""} {
 		if ThinkingSupported(p) {
 			t.Fatalf("%s should not support thinking", p)
 		}

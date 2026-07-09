@@ -61,16 +61,9 @@ func (p *PendingHITL) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Normalize 为 no-op（保留调用点以兼容旧代码路径）。
-func (p *PendingHITL) Normalize() {}
-
 // AllToolCalls 返回当前 pending 对应的 tool call 列表（用于打断补位）。
 func (p *PendingHITL) AllToolCalls() []llm.ToolCall {
-	if p == nil {
-		return nil
-	}
-	p.Normalize()
-	if len(p.Items) == 0 {
+	if p == nil || len(p.Items) == 0 {
 		return nil
 	}
 	out := make([]llm.ToolCall, 0, len(p.Items))
@@ -81,7 +74,9 @@ func (p *PendingHITL) AllToolCalls() []llm.ToolCall {
 }
 
 func (p *PendingHITL) findItem(toolCallID string) (PendingHITLItem, int, bool) {
-	p.Normalize()
+	if p == nil {
+		return PendingHITLItem{}, -1, false
+	}
 	for i, item := range p.Items {
 		if item.ToolCall.ID == toolCallID {
 			return item, i, true
@@ -103,7 +98,9 @@ func (p *PendingHITL) withoutIndex(idx int) *PendingHITL {
 }
 
 func (p *PendingHITL) approvalItems() []PendingHITLItem {
-	p.Normalize()
+	if p == nil {
+		return nil
+	}
 	out := make([]PendingHITLItem, 0, len(p.Items))
 	for _, item := range p.Items {
 		if !tools.IsAskUserInformation(item.ToolCall.Function.Name) {
@@ -114,7 +111,9 @@ func (p *PendingHITL) approvalItems() []PendingHITLItem {
 }
 
 func (p *PendingHITL) userInformationItems() []PendingHITLItem {
-	p.Normalize()
+	if p == nil {
+		return nil
+	}
 	out := make([]PendingHITLItem, 0, len(p.Items))
 	for _, item := range p.Items {
 		if tools.IsAskUserInformation(item.ToolCall.Function.Name) {

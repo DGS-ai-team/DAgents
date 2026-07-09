@@ -274,7 +274,6 @@ function handleEvent(ev) {
         if (approval?.child_session_id) setChildAwaitingApproval(approval.child_session_id, true);
       }
       if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
-      chromeStore.hitlQueueLen = hitlStore.queue.length;
       break;
     case "approval_required":
       finalizeAssistant();
@@ -283,7 +282,6 @@ function handleEvent(ev) {
       enqueueHitl({ kind: "approval", data: ev.data });
       if (ev.data?.child_session_id) setChildAwaitingApproval(ev.data.child_session_id, true);
       if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
-      chromeStore.hitlQueueLen = hitlStore.queue.length;
       hitlStore.busy = false;
       break;
     case "user_information_required":
@@ -292,7 +290,6 @@ function handleEvent(ev) {
       finishWaitingStatuses();
       enqueueHitl({ kind: "user_information", data: ev.data });
       if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
-      chromeStore.hitlQueueLen = hitlStore.queue.length;
       hitlStore.busy = false;
       break;
     case "temporary_agent_created":
@@ -367,7 +364,6 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
     }
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
-    chromeStore.hitlQueueLen = hitlStore.queue.length;
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
@@ -391,7 +387,6 @@ async function submitHitlOne(payload, approve) {
     await api.submitResume(sessionStore.sessionId, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
-    chromeStore.hitlQueueLen = hitlStore.queue.length;
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
@@ -422,7 +417,6 @@ async function submitHitlUserInfo(hitlIndex, text) {
     await api.submitResume(sessionStore.sessionId, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
-    chromeStore.hitlQueueLen = hitlStore.queue.length;
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     hitlSelected.value = 0;
@@ -745,10 +739,6 @@ function consumeComposerDraft() {
   }
 }
 
-async function onSessionSwitch(sessionId) {
-  closePanel();
-  await switchSession(sessionId);
-}
 
 async function bootstrapSessionFromRoute() {
   const fromRoute = String(route.params.sessionId || "").trim();
@@ -829,7 +819,6 @@ watch(
   () => sessionStore.sessionId,
   (sid) => {
     void reportDesktopUIFocus(sid);
-    chromeStore.hitlQueueLen = hitlStore.queue.length;
   },
 );
 </script>

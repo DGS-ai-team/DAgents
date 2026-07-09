@@ -65,7 +65,7 @@ func main() {
 
 	// 3) 构造 HTTP 服务（session、turn、tools、SQLite 等由 api.NewServer 内部装配）。
 	logger.Info("config loaded", "path", resolved, "log_level", level.String(), "agent_id", cfg.AgentID)
-	srv := api.NewServer(cfg, logger)
+	srv := api.NewServer(cfg, logger, api.WithConfigPath(resolved))
 
 	// 4) SIGINT/SIGTERM 触发 ctx 取消，ListenAndServe 优雅关闭。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

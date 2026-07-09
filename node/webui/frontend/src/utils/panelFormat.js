@@ -29,34 +29,6 @@ export function policyModeClass(mode) {
   }
 }
 
-/** @deprecated 使用 formatPolicyMode */
-export function formatPolicyDecision(decision) {
-  switch (String(decision || "").trim()) {
-    case "allow_auto":
-      return "自动允许";
-    case "deny":
-      return "禁止";
-    case "require_approval":
-      return "需审批";
-    default:
-      return decision || "—";
-  }
-}
-
-/** @deprecated 使用 policyModeClass */
-export function policyDecisionClass(decision) {
-  switch (String(decision || "").trim()) {
-    case "allow_auto":
-      return "decision-pill--allow";
-    case "require_approval":
-      return "decision-pill--approval";
-    case "deny":
-      return "decision-pill--deny";
-    default:
-      return "";
-  }
-}
-
 function intFromAny(v) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.floor(n) : 0;

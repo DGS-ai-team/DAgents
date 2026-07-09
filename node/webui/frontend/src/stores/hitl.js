@@ -17,10 +17,6 @@ export function enqueueHitl(item) {
   hitlStore.queue.push(item);
 }
 
-export function dequeueHitl() {
-  return dequeueHitlAt(0);
-}
-
 export function dequeueHitlAt(index) {
   if (index < 0 || index >= hitlStore.queue.length) return null;
   return hitlStore.queue.splice(index, 1)[0] || null;

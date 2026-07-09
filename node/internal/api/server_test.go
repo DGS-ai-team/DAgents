@@ -28,6 +28,10 @@ func testConfig(t *testing.T) *config.Config {
 			Role: "compliance",
 		},
 		FSRoot: t.TempDir(),
+		Compression: config.CompressionConfig{
+			SilentTriggerTokens:   80000,
+			BlockingTriggerTokens: 100000,
+		},
 	}
 	cfg.ApplyDefaults()
 	return cfg
@@ -106,6 +110,9 @@ func TestHandleAgentInfo(t *testing.T) {
 	}
 	if got.ManageRegistered {
 		t.Fatal("N0 manage_registered should be false")
+	}
+	if got.Compression.SilentTriggerTokens != 80000 || got.Compression.BlockingTriggerTokens != 100000 {
+		t.Fatalf("compression = %+v", got.Compression)
 	}
 }
 

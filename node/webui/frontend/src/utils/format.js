@@ -12,10 +12,6 @@ export function formatToolCallLine(entry, { a2a = false, peerSuffix = "" } = {})
   return `▶ ${name}${relay || partial}`;
 }
 
-export function formatToolResultSummary(entry) {
-  return formatToolResultDisplay(entry).headline;
-}
-
 /** 对齐 Python format_tool_result / parse_temporary_agent_tool_result。 */
 export function formatToolResultDisplay(entry, { verbose = false } = {}) {
   const data = entry?.data || entry || {};

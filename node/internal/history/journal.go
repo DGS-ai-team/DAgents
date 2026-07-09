@@ -59,7 +59,7 @@ func (j *Journal) RecordAppend(sessionID string, message llm.Message) {
 	path := journalFilePath(j.baseDir, sid)
 	record := map[string]any{
 		"recorded_at": formatRecordedAt(time.Now()),
-		"message":     messageToJournalPayload(message),
+		"message":     llm.MessageToJournalPayload(message),
 	}
 	raw, err := json.Marshal(record)
 	if err != nil {

@@ -136,7 +136,7 @@ func TestDeepSeekAdapter_prepareOutbound_keepsReasoningWithToolCalls(t *testing.
 	}
 }
 
-func TestOpenAIAdapter_prepareOutbound_stripsAllReasoning(t *testing.T) {
+func TestOpenAIAdapter_prepareOutbound_keepsReasoningWithToolCalls(t *testing.T) {
 	adapter := openAIAdapter{}
 	out, err := adapter.PrepareOutboundMessages([]Message{{
 		Role:             "assistant",
@@ -149,16 +149,41 @@ func TestOpenAIAdapter_prepareOutbound_stripsAllReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if out[0].ReasoningContent != "hidden" {
+		t.Fatalf("expected kept reasoning, got %q", out[0].ReasoningContent)
+	}
+}
+
+func TestOpenAIAdapter_prepareOutbound_stripsFinalAssistantReasoning(t *testing.T) {
+	adapter := openAIAdapter{}
+	out, err := adapter.PrepareOutboundMessages([]Message{{
+		Role:             "assistant",
+		Content:          "answer",
+		ReasoningContent: "think",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if out[0].ReasoningContent != "" {
 		t.Fatalf("expected stripped, got %q", out[0].ReasoningContent)
 	}
 }
 
-func TestDeepSeekAdapter_requestExtra(t *testing.T) {
-	adapterExtra := deepSeekAdapter{}.RequestExtra()
-	if adapterExtra != nil {
-		t.Fatalf("adapter RequestExtra should be nil, got %v", adapterExtra)
+func TestOpenAIBuildRequestExtra(t *testing.T) {
+	extra := BuildRequestExtra("openai", "enabled", "high")
+	if extra["thinking"] == nil {
+		t.Fatal("missing thinking")
 	}
+	if extra["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %v", extra["reasoning_effort"])
+	}
+	disabled := BuildRequestExtra("openai", "disabled", "high")
+	if disabled["thinking"] == nil {
+		t.Fatal("missing thinking disabled")
+	}
+}
+
+func TestDeepSeekBuildRequestExtra(t *testing.T) {
 	extra := BuildRequestExtra("deepseek", "enabled", "high")
 	if extra["thinking"] == nil {
 		t.Fatal("missing thinking extra")

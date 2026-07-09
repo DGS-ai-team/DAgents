@@ -117,7 +117,7 @@ func (s *RuntimeSettings) ApplyPatch(patch LLMSettingsPatch) (LLMSettingsView, e
 	defer s.mu.Unlock()
 	if !ThinkingSupported(s.Provider) {
 		if patch.Thinking != nil || patch.ReasoningEffort != nil {
-			return s.snapshotLocked(), fmt.Errorf("thinking controls require llm.provider=deepseek or qwen")
+			return s.snapshotLocked(), fmt.Errorf("thinking controls require llm.provider=deepseek, qwen, or openai")
 		}
 		return s.snapshotLocked(), nil
 	}
@@ -141,10 +141,26 @@ func (s *RuntimeSettings) ApplyPatch(patch LLMSettingsPatch) (LLMSettingsView, e
 	return s.snapshotLocked(), nil
 }
 
+// SyncFromConfig 将 config.yaml 中的 LLM 连接字段同步到运行时（保存设置后调用）。
+func (s *RuntimeSettings) SyncFromConfig(cfg *config.Config) {
+	if s == nil || cfg == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Provider = strings.TrimSpace(cfg.LLM.Provider)
+	s.Model = strings.TrimSpace(cfg.LLM.Model)
+	s.Mock = cfg.LLM.Mock
+	thinking, effort := NormalizeThinkingSettings(s.Provider, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
+	s.Thinking = thinking
+	s.ReasoningEffort = effort
+}
+
 // ThinkingSupported 表示当前 provider 是否支持运行时 thinking 控制。
+// openai 按 OpenAI 兼容网关常见约定注入 thinking / reasoning_effort（与 DeepSeek 同形）。
 func ThinkingSupported(provider string) bool {
 	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
-	case ProviderDeepSeek, ProviderQwen:
+	case ProviderDeepSeek, ProviderQwen, ProviderOpenAI:
 		return true
 	default:
 		return false
@@ -173,8 +189,10 @@ func BuildRequestExtra(provider, thinking, effort string) map[string]any {
 	switch ProviderName(strings.ToLower(strings.TrimSpace(provider))) {
 	case ProviderQwen:
 		return buildQwenRequestExtra(t, e)
-	default:
+	case ProviderDeepSeek, ProviderOpenAI:
 		return buildDeepSeekRequestExtra(t, e)
+	default:
+		return nil
 	}
 }
 
