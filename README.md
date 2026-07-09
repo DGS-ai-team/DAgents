@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="desktop/tray/assets/icon.ico" width="96" height="96" alt="DAgents" />
+  <img src="node/webui/frontend/public/favicon.png" width="96" height="96" alt="DAgents" />
 </p>
 
 <p align="center">
