@@ -4,12 +4,75 @@ import * as api from "../api/node.js";
 
 const SESSION_KEY = "dagents_webui_session_id";
 
+let pendingAckSeq = 0;
+let lastAckedSeq = 0;
+let ackInFlight = false;
+
+function resetAckScheduler() {
+  pendingAckSeq = 0;
+  lastAckedSeq = 0;
+  ackInFlight = false;
+}
+
+/** 对齐 Go session.ShouldBumpNotifySeq：仅完整消息/HITL 才推进 ack。 */
+export function shouldAckSSEEvent(type, data) {
+  switch (type) {
+    case "hitl_required":
+    case "approval_required":
+    case "user_information_required":
+      return true;
+    case "done":
+      return shouldAckOnDone(data);
+    default:
+      return false;
+  }
+}
+
+function shouldAckOnDone(data) {
+  if (!data || typeof data !== "object") return false;
+  if (String(data.awaiting || "") === "hitl") return false;
+  const finish = String(data.finish_reason || "");
+  if (
+    finish === "awaiting_hitl" ||
+    finish === "awaiting_user_information" ||
+    finish === "awaiting_tool_approval" ||
+    finish === "error" ||
+    finish === "cancelled"
+  ) {
+    return false;
+  }
+  if (typeof data.turn_complete === "boolean") return data.turn_complete;
+  return finish === "stop" || finish === "";
+}
+
+function requestAck(seq) {
+  const sseSeq = Number(seq) || 0;
+  if (sseSeq <= 0) return;
+  if (sseSeq > pendingAckSeq) pendingAckSeq = sseSeq;
+  void flushAck();
+}
+
+async function flushAck() {
+  const sessionId = sessionStore.sessionId?.trim();
+  const sseSeq = pendingAckSeq;
+  if (!sessionId || sseSeq <= 0 || sseSeq <= lastAckedSeq || ackInFlight) return;
+  ackInFlight = true;
+  try {
+    await api.postSessionAck(sessionId, sseSeq);
+    lastAckedSeq = sseSeq;
+  } catch {
+    /* ignore transient ack failures; later events will reschedule */
+  } finally {
+    ackInFlight = false;
+    if (pendingAckSeq > lastAckedSeq) void flushAck();
+  }
+}
+
 export const sessionStore = reactive({
   sessionId: localStorage.getItem(SESSION_KEY) || "",
   awaitingTurn: false,
   turnContentSeen: false,
   seqFence: 0,
-  lastAppliedSeq: 0,
   statusLine: "",
   error: "",
 });
@@ -60,39 +123,29 @@ export function isStaleEvent(seq) {
 
 /** 同一 seq 的重复投递（双 SSE 连接等）。 */
 export function isDuplicateEvent(seq) {
-  return seq > 0 && seq <= sessionStore.lastAppliedSeq;
+  return seq > 0 && seq <= transcriptStore.lastSeq;
 }
 
-export function markEventApplied(seq) {
-  if (seq > sessionStore.lastAppliedSeq) sessionStore.lastAppliedSeq = seq;
-  void ackSessionRead(sessionStore.lastAppliedSeq);
-}
-
-async function ackSessionRead(seq) {
-  const sessionId = sessionStore.sessionId?.trim();
-  const sseSeq = Number(seq) || 0;
-  if (!sessionId || sseSeq <= 0) return;
-  try {
-    await api.postSessionAck(sessionId, sseSeq);
-  } catch {
-    /* ignore transient ack failures */
-  }
+/** 更新 SSE 去重水位；ack 仅在与 notify_seq 对齐的完整消息时发送。 */
+export function markEventApplied(seq, { ack = false } = {}) {
+  noteSeq(seq);
+  if (ack) requestAck(seq);
 }
 
 export function ackSessionAfterHydrate() {
-  void ackSessionRead(sessionStore.lastAppliedSeq);
+  pendingAckSeq = transcriptStore.lastSeq;
+  void flushAck();
 }
 
 export function resetEventTracking() {
-  sessionStore.lastAppliedSeq = transcriptStore.lastSeq;
   sessionStore.seqFence = 0;
+  resetAckScheduler();
 }
 
 /** hydrate 后设置 SSE 去重水位（F-H9）：忽略 seq <= hint 的 replay。 */
 export function applyHydrateSeqHint(seq) {
   const hint = Number(seq) || 0;
   if (hint > 0) noteSeq(hint);
-  sessionStore.lastAppliedSeq = hint > 0 ? hint : transcriptStore.lastSeq;
   sessionStore.seqFence = hint > 0 ? hint : 0;
 }
 

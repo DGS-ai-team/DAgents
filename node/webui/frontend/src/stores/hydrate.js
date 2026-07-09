@@ -1,5 +1,4 @@
 import * as api from "../api/node.js";
-import { reportDesktopUIFocus } from "../api/desktop.js";
 import { clearHitl, enqueueA2ARelayPending, enqueueHitlRequired } from "./hitl.js";
 import { setChildAwaitingApproval } from "./remoteWorkers.js";
 import {
@@ -34,7 +33,6 @@ export async function hydrateSession() {
   if (data?.pending_hitl?.items?.length || data?.pending_a2a_relay?.event_type) {
     finishTurn();
   }
-  void reportDesktopUIFocus(sessionId);
   return data;
 }
 

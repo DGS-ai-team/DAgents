@@ -1,7 +1,9 @@
 <script setup>
-import { computed } from "vue";
-import StatusPanel from "../../components/StatusPanel.vue";
+import RuntimeConfigPanel from "../../components/RuntimeConfigPanel.vue";
+import ChildAgentsLimitsPanel from "../../components/ChildAgentsLimitsPanel.vue";
 import ChildAgentsSection from "../../components/settings/ChildAgentsSection.vue";
+import StatusPanel from "../../components/StatusPanel.vue";
+import { computed } from "vue";
 import { transcriptStore, setShowReasoning } from "../../stores/transcript.js";
 
 const showReasoning = computed({
@@ -13,12 +15,14 @@ const showReasoning = computed({
 <template>
   <div class="settings-page settings-embedded">
     <h1 class="settings-page__title">通用</h1>
-    <p class="settings-page__hint">模型与助手运行信息。思考模式可在对话输入框旁切换。</p>
+    <p class="settings-page__hint">运行时路径、Agent 身份与运行状态。Node 监听地址须改 config.yaml。</p>
 
+    <RuntimeConfigPanel />
+    <ChildAgentsLimitsPanel />
     <ChildAgentsSection />
 
-    <section class="settings-section">
-      <h2 class="settings-section__title">高级</h2>
+    <section class="settings-section settings-embedded-panel panel">
+      <h2 class="settings-section__title">界面</h2>
       <label class="settings-toggle">
         <input v-model="showReasoning" type="checkbox" />
         <span>显示思考过程</span>

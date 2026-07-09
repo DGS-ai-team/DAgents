@@ -6,6 +6,26 @@
 
 ---
 
+## [0.7.4] - 2026-07-09
+
+**Web UI 稳定性 + 设置扩展**：修复 SSE ack 洪泛与运行时 JS 错误；除 Node 监听地址外其余配置迁入设置菜单。
+
+### 新增
+
+- **设置页全量配置（除 Node 地址）**：`GET/PATCH /v1/setup/config` 扩展 `runtime`、`agent`、`child_agents`、`browser`、`tools`、`hooks` 与 `features` 高级项；Web UI 分区面板（通用 / 连接 / 上下文 / 安全）+ `useSetupConfig` 共享 load/save。
+- **单测**：`session.test.js`（ack/seq 水位）、`desktopFocus.test.js`（Shell focus 心跳）。
+
+### 修复
+
+- **`clearPartialToolIndex is not defined`**：`transcript.js` 补全从 `toolStream.js` 的 import。
+- **`POST /ack` → `ERR_INSUFFICIENT_RESOURCES`**：流式 SSE 不再每条事件 ack；与 Node `notify_seq` 对齐，仅在 `done`（回合完成）与 HITL 事件 ack；hydrate 仍立即 ack `sse_seq_hint`。
+- **SSE seq 水位**：合并 `lastAppliedSeq` 与 `transcriptStore.lastSeq`；仅在事件实际处理后推进 seq；子 Agent 跳过渲染的事件仍计入去重水位。
+- **Shell UI focus 重复上报**：`desktopFocus.js` 统一管理心跳与 1s 去重；从 `hydrateSession` 与 `sessionId` watch 移除重复 POST。
+
+（Git **tag**：`v0.7.4`。）
+
+---
+
 ## [0.7.3] - 2026-07-09
 
 **Web UI 设置化 + 上下文体验**：安装向导不再配参；连接/压缩阈值写入 config.yaml；OpenAI thinking 与上下文占比环。

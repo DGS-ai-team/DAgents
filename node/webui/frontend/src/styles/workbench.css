@@ -887,6 +887,20 @@
   gap: 10px;
 }
 
+.setup-config-panel__field-grid,
+.setup-config-panel__readonly-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px 16px;
+}
+
+.setup-config-panel__readonly-grid .command-stat {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
 .settings-path {
   display: block;
   padding: 10px 12px;

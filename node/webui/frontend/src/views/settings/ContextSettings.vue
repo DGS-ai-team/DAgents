@@ -1,13 +1,15 @@
 <script setup>
 import CompressionConfigPanel from "../../components/CompressionConfigPanel.vue";
+import HooksConfigPanel from "../../components/HooksConfigPanel.vue";
 import ContextPanel from "../../components/ContextPanel.vue";
 </script>
 
 <template>
   <div class="settings-page settings-embedded">
     <h1 class="settings-page__title">上下文</h1>
-    <p class="settings-page__hint">配置压缩阈值，并查看当前会话在 Node 中的完整 LLM 消息列表。</p>
+    <p class="settings-page__hint">压缩阈值、Tool 结果摘要，以及当前会话 LLM 消息列表。</p>
     <CompressionConfigPanel />
+    <HooksConfigPanel />
     <ContextPanel embedded />
   </div>
 </template>

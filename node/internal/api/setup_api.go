@@ -34,8 +34,8 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if patch.LLM == nil && patch.Manage == nil && patch.Features == nil && patch.Compression == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "至少提供一个配置块（llm / manage / features / compression）", nil)
+	if !setup.PatchHasBlock(patch) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "至少提供一个配置块", nil)
 		return
 	}
 	updated, err := setup.ApplyPatch(s.cfg, patch)

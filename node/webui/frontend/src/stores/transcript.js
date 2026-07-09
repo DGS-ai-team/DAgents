@@ -8,6 +8,7 @@ import {
   USER_INFORMATION_TOOL,
 } from "../utils/toolCalls.js";
 import {
+  clearPartialToolIndex,
   forgetToolBlock,
   markToolBlockActive,
   resolveToolBlockId,
