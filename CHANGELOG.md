@@ -6,6 +6,22 @@
 
 ---
 
+## [0.7.2] - 2026-07-09
+
+**Shell 待办提醒 + 安装包 CI 修复**。
+
+### 新增
+
+- **F-N10 托盘图标闪烁**：有待办 HITL / 未读时，`icon.ico` ↔ `icon_pending.ico` 每 600ms 交替闪烁，并保留 `●` 角标；待办清零后恢复默认 icon。
+
+### 修复
+
+- **Windows 安装包 CI**：Inno Setup `[Code]` 中 `CurUninstallStepChanged` 参数类型 `TSetupUninstallStep` → `TUninstallStep`，修复 Release 构建在编译安装脚本时失败。
+
+（Git **tag**：`v0.7.2`。）
+
+---
+
 ## [0.7.1] - 2026-07-09
 
 **品牌图标统一**：程序与文档视觉资源对齐 `desktop/tray/assets/icon.ico`。
@@ -19,6 +35,8 @@
 （Git **tag**：`v0.7.1`。）
 
 ---
+
+## [0.7.0] - 2026-07-09
 
 **跨端与体验收尾**：TUI hydrate、媒体缩略图/lightbox、Windows 更新迁移、A2A relay hydrate、Shell 运维兜底。Smoke 清单：[`docs/design/v0.7.0-smoke-checklist.md`](docs/design/v0.7.0-smoke-checklist.md)。
 
