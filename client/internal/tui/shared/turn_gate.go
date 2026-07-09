@@ -128,6 +128,25 @@ func (g *TurnGate) Reset() {
 	}
 }
 
+// ApplyHydrateSeqHint 设置 SSE 去重水位（F-H5，对齐 Web applyHydrateSeqHint）。
+func (g *TurnGate) ApplyHydrateSeqHint(seq int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if seq > 0 {
+		g.lastSeq = seq
+		g.seqFence = seq
+	} else {
+		g.seqFence = 0
+	}
+}
+
+// SSEStartSeq 返回 hydrate 后 SSE 订阅起始 seq。
+func (g *TurnGate) SSEStartSeq() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.lastSeq
+}
+
 // Wait 阻塞至 FinishTurn 或 ctx 取消。
 func (g *TurnGate) Wait(ctx context.Context) error {
 	g.mu.Lock()

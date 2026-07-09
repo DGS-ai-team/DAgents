@@ -31,6 +31,15 @@ func NewTranscript(cap int) *Transcript {
 	return &Transcript{cap: cap}
 }
 
+// Reset 清空 transcript（session 切换 / hydrate 前）。
+func (t *Transcript) Reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lines = nil
+	t.partial = nil
+	t.pendingUsageSuffix = ""
+}
+
 // AddBlockGapIfNeeded 在上一条非空行后插入空行，避免连续追加产生双空行。
 func (t *Transcript) AddBlockGapIfNeeded() {
 	t.mu.Lock()

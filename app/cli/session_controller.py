@@ -49,6 +49,7 @@ from app.cli.render import (
 )
 
 TranscriptCallback = Callable[[TranscriptUpdate], None]
+TranscriptClearCallback = Callable[[], None]
 UserInformationCallback = Callable[[UserInformationRequest], Awaitable[UserInformationAnswer]]
 StatusCallback = Callable[[str], None]
 HitlPendingCallback = Callable[[], None]
@@ -94,6 +95,7 @@ class SessionController:
         self._stream_task: asyncio.Task[None] | None = None # SSE任务
         self._render_task: asyncio.Task[None] | None = None # 渲染任务
         self._transcript_cb: TranscriptCallback | None = None # 对话区更新回调
+        self._transcript_clear_cb: TranscriptClearCallback | None = None
         self._user_information_cb: UserInformationCallback | None = None # 用户询问回调
         self._status_cb: StatusCallback | None = None # 状态栏回调
         self._hitl_pending_cb: HitlPendingCallback | None = None # HITL入队后通知UI处理
@@ -151,6 +153,10 @@ class SessionController:
     def on_transcript(self, callback: TranscriptCallback) -> None:
         """注册 transcript 更新回调。"""
         self._transcript_cb = callback
+
+    def on_transcript_clear(self, callback: TranscriptClearCallback) -> None:
+        """hydrate 前清空 UI transcript。"""
+        self._transcript_clear_cb = callback
 
     def on_hitl_pending(self, callback: HitlPendingCallback) -> None:
         """HITL 入队后通知 UI 处理（非阻塞，避免丢 SSE）。"""
@@ -220,6 +226,29 @@ class SessionController:
         self._emit_status()
         self._schedule_context_token_refresh()
         self.remember_last_session()
+        await self.hydrate_session()
+
+    async def hydrate_session(self) -> None:
+        """GET /hydrate 恢复 transcript 与 pending HITL（F-H6）。"""
+        assert self._client is not None
+        if self._transcript_clear_cb is not None:
+            self._transcript_clear_cb()
+        try:
+            data = await self._client.get_session_hydrate(self.session_id)
+        except Exception as exc:
+            self._logger.warning("hydrate failed session_id=%s err=%s", self.session_id, exc)
+            self._emit_transcript(format_system_line(f"hydrate 失败: {exc}"))
+            return
+        from app.cli.hydrate import apply_session_hydrate
+
+        await apply_session_hydrate(self, data)
+
+    async def _post_session_ack(self, sse_seq: int) -> None:
+        assert self._client is not None
+        try:
+            await self._client.post_session_ack(self.session_id, sse_seq)
+        except Exception:
+            pass
 
     async def stop(self) -> None:
         """停止后台任务并关闭 API 客户端。"""
@@ -329,6 +358,7 @@ class SessionController:
         self._emit_status()
         self._schedule_context_token_refresh()
         self.remember_last_session()
+        await self.hydrate_session()
         return new_id
 
     def remember_last_session(self) -> None:

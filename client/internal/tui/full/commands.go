@@ -258,6 +258,10 @@ func (m *model) switchSession(requested string) error {
 	m.statusMgr.Reset()
 	m.messagesTotalTokens = -1
 	m.clearUsageStrip()
+	m.sseFromSeq = 0
+	if err := m.hydrateSession(); err != nil {
+		m.transcript.Add("[system] hydrate 失败: " + err.Error())
+	}
 	m.transcript.Add("[system] 已切换 session=" + id)
 	m.syncViewport()
 	m.restartStream()
@@ -386,7 +390,7 @@ func (m *model) stopStream() {
 
 func runSSELoop(ctx context.Context, m *model) {
 	const reconnectDelay = 5 * time.Second
-	lastSeq := 0
+	lastSeq := m.sseFromSeq
 	for {
 		if ctx.Err() != nil {
 			return

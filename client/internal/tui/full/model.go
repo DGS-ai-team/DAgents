@@ -96,6 +96,7 @@ type model struct {
 
 	sseConnected bool
 	sseDetail    string
+	sseFromSeq   int
 	turn         *tuishared.TurnGate
 	showReasoning bool
 	statusLine   string
@@ -191,11 +192,17 @@ func (m *model) bootstrapSession(initialSession string) error {
 	m.sessionID = id
 	m.sessionMu.Unlock()
 
-	welcomeBody := tuishared.FormatWelcomePanelBody(m.probe.Endpoint, m.probe.AgentID, m.probe.Version, id)
-	if ctxBody, err := m.client.GetSessionContext(m.ctx, id); err == nil {
-		welcomeBody = append(welcomeBody, tuishared.SkillsBloatWarningLines(ctxBody)...)
+	m.sseFromSeq = 0
+	if err := m.hydrateSession(); err != nil {
+		m.transcript.Add("[system] hydrate 失败: " + err.Error())
 	}
-	m.transcript.AddSystemPanel(tuishared.WelcomePanelTitle(m.probe.Version), welcomeBody)
+	if m.transcript.Len() == 0 {
+		welcomeBody := tuishared.FormatWelcomePanelBody(m.probe.Endpoint, m.probe.AgentID, m.probe.Version, id)
+		if ctxBody, err := m.client.GetSessionContext(m.ctx, id); err == nil {
+			welcomeBody = append(welcomeBody, tuishared.SkillsBloatWarningLines(ctxBody)...)
+		}
+		m.transcript.AddSystemPanel(tuishared.WelcomePanelTitle(m.probe.Version), welcomeBody)
+	}
 	m.sseDetail = "连接中…"
 	m.restartStream()
 	return nil

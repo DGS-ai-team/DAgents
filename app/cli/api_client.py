@@ -157,6 +157,19 @@ class DAgentsApiClient:
             raise ValueError("session_id is required")
         return await self._get_json(f"/v1/sessions/{sid}/context")
 
+    async def get_session_hydrate(self, session_id: str) -> dict[str, Any]:
+        """GET /v1/sessions/{id}/hydrate → transcript + pending HITL（F-H6）。"""
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        return await self._get_json(f"/v1/sessions/{sid}/hydrate")
+
+    async def post_session_ack(self, session_id: str, sse_seq: int) -> None:
+        sid = str(session_id or "").strip()
+        if not sid or int(sse_seq or 0) <= 0:
+            return
+        await self._post_json(f"/v1/sessions/{sid}/ack", {"sse_seq": int(sse_seq)})
+
     async def compress_session_context(self, session_id: str) -> dict[str, Any]:
         """POST /v1/sessions/{session_id}/compress，手动触发阻塞压缩。"""
         sid = str(session_id or "").strip()

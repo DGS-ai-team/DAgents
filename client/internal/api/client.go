@@ -266,6 +266,47 @@ func (c *Client) GetSessionContext(ctx context.Context, sessionID string) (*Sess
 	return &ctxBody, nil
 }
 
+// TranscriptEntry 为 hydrate transcript 单条（与 Node JSON 对齐）。
+type TranscriptEntry map[string]any
+
+// SessionHydrate 为 GET /v1/sessions/{id}/hydrate 响应（F-H5）。
+type SessionHydrate struct {
+	SessionID     string            `json:"session_id"`
+	RunTurnPhase  string            `json:"run_turn_phase"`
+	HasActiveTurn bool              `json:"has_active_turn"`
+	QueuePending  int               `json:"queue_pending"`
+	Transcript    []TranscriptEntry `json:"transcript"`
+	PendingHITL   map[string]any    `json:"pending_hitl"`
+	SSESeqHint    int               `json:"sse_seq_hint"`
+	NotifySeq     int               `json:"notify_seq"`
+	AckSeq        int               `json:"ack_seq"`
+	HasUnread     bool              `json:"has_unread"`
+}
+
+// GetSessionHydrate 调用 GET /v1/sessions/{id}/hydrate。
+func (c *Client) GetSessionHydrate(ctx context.Context, sessionID string) (*SessionHydrate, error) {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	var out SessionHydrate
+	path := "/v1/sessions/" + url.PathEscape(sid) + "/hydrate"
+	if err := c.getJSON(ctx, path, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PostSessionAck 调用 POST /v1/sessions/{id}/ack（IM cursor，F-E13）。
+func (c *Client) PostSessionAck(ctx context.Context, sessionID string, sseSeq int) error {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" || sseSeq <= 0 {
+		return nil
+	}
+	path := "/v1/sessions/" + url.PathEscape(sid) + "/ack"
+	return c.postJSON(ctx, path, map[string]any{"sse_seq": sseSeq}, nil)
+}
+
 // CancelTurn 调用 POST /v1/sessions/{id}/cancel，取消在途 turn。
 func (c *Client) CancelTurn(ctx context.Context, sessionID string) (bool, error) {
 	sid := strings.TrimSpace(sessionID)

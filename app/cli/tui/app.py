@@ -231,6 +231,7 @@ class DAgentsTuiApp(App[None]):
     async def on_mount(self) -> None:
         """挂载后注册 controller 回调并聚焦输入框。"""
         self._controller.on_transcript(self._on_transcript)
+        self._controller.on_transcript_clear(self._clear_transcript_for_hydrate)
         self._controller.on_status(self._on_status)
         self._controller.on_hitl_pending(self._on_hitl_pending)
         self._controller.on_child_strip(self._on_child_strip)
@@ -243,12 +244,13 @@ class DAgentsTuiApp(App[None]):
             log.write(f"[red]Failed to connect: {exc}[/red]")
             self._apply_top_status(connected=False)
             return
-        context_summary = None
-        try:
-            context_summary = await self._controller.get_context()
-        except Exception:
-            pass
-        self._write_welcome_panel(context_summary=context_summary)
+        if len(self._transcript_log().lines) == 0:
+            context_summary = None
+            try:
+                context_summary = await self._controller.get_context()
+            except Exception:
+                pass
+            self._write_welcome_panel(context_summary=context_summary)
         self.query_one("#context-view", RichLog).display = False
         self.query_one("#policy-view", RichLog).display = False
         self._apply_top_status()
@@ -316,6 +318,11 @@ class DAgentsTuiApp(App[None]):
             expand=True,
         )
         self._transcript_base_lines = len(log.lines)
+
+    def _clear_transcript_for_hydrate(self) -> None:
+        log = self._transcript_log()
+        log.clear()
+        self._reset_transcript_after_clear(log)
 
     def _on_transcript(self, update: TranscriptUpdate) -> None:
         """将 controller transcript 更新调度到 UI 线程。"""
@@ -3370,7 +3377,7 @@ class DAgentsTuiApp(App[None]):
             log.write(f"[red]clear failed: {exc}[/red]")
 
     async def _switch_session(self, requested_id: str | None) -> None:
-        """切换 session 并重连 SSE；清本地 HITL / 流式状态。"""
+        """切换 session 并重连 SSE；controller hydrate 恢复历史。"""
         log = self._transcript_log()
         self._abort_local_hitl_for_user_message()
         self._controller.clear_hitl_queue()

@@ -4,7 +4,12 @@
 
 ## [Unreleased]
 
-**规划 v0.6 – v0.7**：下一里程碑 **`v0.7.0`**（跨端与体验收尾）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §5。
+**规划 v0.6 – v0.7**：当前开发 **`v0.7.0`**（跨端与体验收尾）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §5。
+
+### 新增
+
+- **F-H5 Go TUI hydrate**：切换/启动 session 后 `GET /v1/sessions/{id}/hydrate` 恢复 transcript 与 pending HITL。
+- **F-H6 Python TUI hydrate**：Textual TUI 同上，复用 Node hydrate API。
 
 ---
 
