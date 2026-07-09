@@ -81,8 +81,17 @@ func TestAllToolsAssignedToExactlyOneGroup(t *testing.T) {
 
 func TestBuiltinToolGroupMembers(t *testing.T) {
 	members, ok := BuiltinToolGroupMembers("fs")
-	if !ok || len(members) != 7 {
-		t.Fatalf("fs members = %v ok=%v", members, ok)
+	want := []string{
+		"read_file", "show_image", "read_image", "write_file",
+		"glob_files", "grep_file", "grep_files", "search_replace",
+	}
+	if !ok || len(members) != len(want) {
+		t.Fatalf("fs members = %v ok=%v want len %d", members, ok, len(want))
+	}
+	for i := range want {
+		if members[i] != want[i] {
+			t.Fatalf("fs members[%d] = %q want %q (full=%v)", i, members[i], want[i], members)
+		}
 	}
 	if _, ok := BuiltinToolGroupMembers("nope"); ok {
 		t.Fatal("expected false for unknown group")
