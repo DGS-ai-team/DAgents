@@ -122,7 +122,13 @@ func newTestServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore()).Handler())
+	ts := httptest.NewServer(NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore()).Handler())
+	// 须在 testConfig 的 t.TempDir 清理之前关闭 Server，否则 FSRoot 仍被后台写入。
+	t.Cleanup(func() {
+		ts.Close()
+		time.Sleep(50 * time.Millisecond)
+	})
+	return ts
 }
 
 func TestHandleStreamsConnectsImmediately(t *testing.T) {
