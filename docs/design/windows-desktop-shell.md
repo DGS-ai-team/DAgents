@@ -256,7 +256,7 @@
 | F-H2 | P0 | **Transcript 快照 API** | ❌ | **(a)** `GET …/transcript` 返回可渲染 entries；**(b)** 扩展 `/context` 全量 `messages` + 映射规则 |
 | F-H14 | P0 | Node 侧 **`MessagesToTranscriptEntries`**（或等价）组装 hydrate `transcript` | ❌ | F-H2 实现子项；映射规则与 Web UI SSE 渲染对齐 |
 | F-H3 | P1 | Hydrate 响应含 `run_turn_phase` / `has_active_turn` | ⚠️ 部分已有 | `/context` 已有字段 |
-| F-H4 | P1 | 子 Agent / A2A relay pending 的 hydrate | ❌ | 与 relay 字段对齐 |
+| F-H4 | P1 | 子 Agent / A2A relay pending 的 hydrate | ✅ | `pending_a2a_relay` 与 relay 字段对齐 |
 | F-H5 | P2 | TUI hydrate（Go full TUI） | ✅ | `/switch` 后 GET /hydrate |
 | F-H6 | P2 | Python TUI hydrate | ✅ | Textual TUI 同上 |
 

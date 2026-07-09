@@ -268,6 +268,24 @@ export function expandHitlRequired(data) {
   };
 }
 
+/** 将 hydrate pending_a2a_relay 展开并入队（F-H4）。 */
+export function enqueueA2ARelayPending(relay) {
+  if (!relay?.event_type || !relay?.data) return;
+  const data = { ...relay.data };
+  if (relay.a2a_task_id && !data.a2a_task_id) data.a2a_task_id = relay.a2a_task_id;
+  if (relay.a2a_relay && !data.a2a_relay) data.a2a_relay = true;
+  switch (String(relay.event_type).trim()) {
+    case "approval_required":
+      enqueueHitl({ kind: "approval", data });
+      break;
+    case "user_information_required":
+      enqueueHitl({ kind: "user_information", data });
+      break;
+    default:
+      break;
+  }
+}
+
 /** 将 hitl_required / hydrate pending_hitl 展开并入队。 */
 export function enqueueHitlRequired(data) {
   if (!data?.items?.length) {

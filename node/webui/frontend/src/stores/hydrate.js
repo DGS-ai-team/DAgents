@@ -1,7 +1,7 @@
 import * as api from "../api/node.js";
 import { reportDesktopUIFocus } from "../api/desktop.js";
 import { chromeStore } from "./chrome.js";
-import { clearHitl, enqueueHitlRequired, hitlStore } from "./hitl.js";
+import { clearHitl, enqueueA2ARelayPending, enqueueHitlRequired, hitlStore } from "./hitl.js";
 import { setChildAwaitingApproval } from "./remoteWorkers.js";
 import {
   applyHydrateSeqHint,
@@ -20,6 +20,7 @@ export async function hydrateSession() {
   loadTranscriptFromHydrate(data?.transcript);
   clearHitl();
   const { approval } = enqueueHitlRequired(data?.pending_hitl);
+  enqueueA2ARelayPending(data?.pending_a2a_relay);
   if (approval?.child_session_id) {
     setChildAwaitingApproval(approval.child_session_id, true);
   }
@@ -29,8 +30,9 @@ export async function hydrateSession() {
     run_turn_phase: data?.run_turn_phase,
     has_active_turn: !!data?.has_active_turn,
     pending_hitl: data?.pending_hitl,
+    pending_a2a_relay: data?.pending_a2a_relay,
   });
-  if (data?.pending_hitl?.items?.length) {
+  if (data?.pending_hitl?.items?.length || data?.pending_a2a_relay?.event_type) {
     finishTurn();
   }
   chromeStore.hitlQueueLen = hitlStore.queue.length;

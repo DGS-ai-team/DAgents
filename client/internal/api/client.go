@@ -274,16 +274,17 @@ type TranscriptEntry map[string]any
 
 // SessionHydrate 为 GET /v1/sessions/{id}/hydrate 响应（F-H5）。
 type SessionHydrate struct {
-	SessionID     string            `json:"session_id"`
-	RunTurnPhase  string            `json:"run_turn_phase"`
-	HasActiveTurn bool              `json:"has_active_turn"`
-	QueuePending  int               `json:"queue_pending"`
-	Transcript    []TranscriptEntry `json:"transcript"`
-	PendingHITL   map[string]any    `json:"pending_hitl"`
-	SSESeqHint    int               `json:"sse_seq_hint"`
-	NotifySeq     int               `json:"notify_seq"`
-	AckSeq        int               `json:"ack_seq"`
-	HasUnread     bool              `json:"has_unread"`
+	SessionID       string            `json:"session_id"`
+	RunTurnPhase    string            `json:"run_turn_phase"`
+	HasActiveTurn   bool              `json:"has_active_turn"`
+	QueuePending    int               `json:"queue_pending"`
+	Transcript      []TranscriptEntry `json:"transcript"`
+	PendingHITL     map[string]any    `json:"pending_hitl"`
+	PendingA2ARelay map[string]any    `json:"pending_a2a_relay,omitempty"`
+	SSESeqHint      int               `json:"sse_seq_hint"`
+	NotifySeq       int               `json:"notify_seq"`
+	AckSeq          int               `json:"ack_seq"`
+	HasUnread       bool              `json:"has_unread"`
 }
 
 // GetSessionHydrate 调用 GET /v1/sessions/{id}/hydrate。

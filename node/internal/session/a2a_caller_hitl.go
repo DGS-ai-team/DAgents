@@ -10,8 +10,11 @@ import (
 )
 
 type a2aCallerWait struct {
-	taskID string
-	ch     chan map[string]any
+	taskID          string
+	ch              chan map[string]any
+	eventType       string
+	eventData       map[string]any
+	callerSessionID string
 }
 
 // A2ACallerHITLBridge 供 agent_invoke 在 Task awaiting_caller 时将 HITL 中继到 caller session TUI。
@@ -47,7 +50,11 @@ func (b *A2ACallerHITLBridge) WaitCallerHITL(
 	if callerSessionID == "" || taskID == "" {
 		return nil, fmt.Errorf("caller_session_id and task_id are required")
 	}
-	waiter := &a2aCallerWait{taskID: taskID, ch: make(chan map[string]any, 1)}
+	waiter := &a2aCallerWait{
+		taskID:          taskID,
+		ch:              make(chan map[string]any, 1),
+		callerSessionID: callerSessionID,
+	}
 	b.mu.Lock()
 	b.byTask[taskID] = waiter
 	b.bySess[callerSessionID] = taskID
@@ -61,6 +68,8 @@ func (b *A2ACallerHITLBridge) WaitCallerHITL(
 	data["a2a_task_id"] = taskID
 	data["a2a_relay"] = true
 	attachA2APeerMeta(data, hitlPayload)
+	waiter.eventType = eventType
+	waiter.eventData = cloneEventData(data)
 	b.hub.Publish(callerSessionID, b.agentID, eventType, data)
 	b.publishRelayTurnPause(callerSessionID, hitlPayload)
 
@@ -98,6 +107,27 @@ func (b *A2ACallerHITLBridge) clearWait(taskID, callerSessionID string) {
 	defer b.mu.Unlock()
 	delete(b.byTask, taskID)
 	delete(b.bySess, callerSessionID)
+}
+
+// PendingRelaySnapshot 返回 caller session 上仍在等待的 A2A relay HITL（F-H4 hydrate）。
+func (b *A2ACallerHITLBridge) PendingRelaySnapshot(callerSessionID string) map[string]any {
+	if b == nil {
+		return nil
+	}
+	callerSessionID = strings.TrimSpace(callerSessionID)
+	b.mu.Lock()
+	taskID := b.bySess[callerSessionID]
+	waiter := b.byTask[taskID]
+	b.mu.Unlock()
+	if waiter == nil || strings.TrimSpace(waiter.eventType) == "" || len(waiter.eventData) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"event_type":   waiter.eventType,
+		"data":         cloneEventData(waiter.eventData),
+		"a2a_task_id":  strings.TrimSpace(waiter.taskID),
+		"a2a_relay":    true,
+	}
 }
 
 // publishRelayTurnPause 推送 synthetic done，与本地 HITL 暂停对齐，便于 Client 释放 turn 等待。

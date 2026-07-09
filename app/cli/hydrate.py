@@ -76,7 +76,9 @@ def apply_hydrate_turn_state(controller: SessionController, data: dict[str, Any]
     pending = data.get("pending_hitl")
     items = pending.get("items") if isinstance(pending, dict) else None
     has_pending = isinstance(items, list) and len(items) > 0
-    if has_pending or phase == "awaiting_hitl":
+    relay = data.get("pending_a2a_relay")
+    has_relay = isinstance(relay, dict) and relay.get("event_type") and isinstance(relay.get("data"), dict)
+    if has_pending or has_relay or phase == "awaiting_hitl":
         controller._awaiting_user_turn = False
         controller._user_turn_started = False
         controller._user_turn_done.set()
@@ -112,6 +114,22 @@ async def apply_session_hydrate(controller: SessionController, data: dict[str, A
             controller._enqueue_hitl(PendingHITL(kind="user_information", data=ui))
         if approval:
             controller._enqueue_hitl(PendingHITL(kind="approval", data=approval))
+    relay = data.get("pending_a2a_relay")
+    if isinstance(relay, dict):
+        event_type = str(relay.get("event_type") or "").strip()
+        relay_data = relay.get("data")
+        if isinstance(relay_data, dict):
+            payload = dict(relay_data)
+            if relay.get("a2a_task_id") and not payload.get("a2a_task_id"):
+                payload["a2a_task_id"] = relay["a2a_task_id"]
+            if relay.get("a2a_relay"):
+                payload["a2a_relay"] = True
+            if event_type == "approval_required":
+                controller._enqueue_hitl(PendingHITL(kind="approval", data=payload))
+                controller._release_turn_wait_for_a2a_relay(payload)
+            elif event_type == "user_information_required":
+                controller._enqueue_hitl(PendingHITL(kind="user_information", data=payload))
+                controller._release_turn_wait_for_a2a_relay(payload)
     apply_hydrate_seq_hint(controller, data.get("sse_seq_hint"))
     apply_hydrate_turn_state(controller, data)
     seq = int(data.get("sse_seq_hint") or 0)
