@@ -69,11 +69,13 @@ bin\dagents-shell.exe -config config.yaml
 
 ## 测试
 
+**Windows 专用**：在 Windows 上运行：
+
 ```bash
 cd desktop/tray && go test ./...
 ```
 
-Windows 上额外运行 `singleinstance` 互斥测试。
+Linux CI **不**编译/测试本模块（托盘与 Desktop API 仅服务 Windows 安装态；Linux 管理功能另行规划）。
 
 ## SSE 与鉴权（v0.6.0 第 ⑤ 步）
 

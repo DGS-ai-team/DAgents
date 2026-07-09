@@ -61,7 +61,6 @@ jobs:
           go mod download -C shared/config
           go mod download -C node
           go mod download -C client
-          go mod download -C desktop/tray
 
       - name: Build protect-loaded-skill plugin
         run: go build -buildmode=plugin -o /tmp/protect-loaded-skill.so ./node/plugins/protect-loaded-skill
@@ -71,7 +70,7 @@ jobs:
           go test ./shared/config/...
           go test ./node/...
           go test ./client/...
-          go test ./desktop/tray/...
+          # desktop/tray (dagents-shell) is Windows-only; see build-and-release windows-amd64 job.
 
       - name: Build
         run: |
