@@ -40,6 +40,11 @@ func (a Artifact) PublicURL() string {
 	return fmt.Sprintf("/v1/sessions/%s/media/%s", a.SessionID, a.ID)
 }
 
+// ThumbnailURL 返回带 thumbnail=1 的相对 API 路径（F-M6）。
+func (a Artifact) ThumbnailURL() string {
+	return a.PublicURL() + "?thumbnail=1"
+}
+
 // RegisterOpts 注册媒体时的元数据。
 type RegisterOpts struct {
 	Path       string // 相对 fs_root 或绝对路径

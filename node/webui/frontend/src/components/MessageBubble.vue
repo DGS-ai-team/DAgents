@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { renderMarkdown } from "../utils/markdown.js";
+import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
 
 const props = defineProps({
@@ -18,9 +19,13 @@ const userImageSrcs = computed(() => {
 
 function openUserImage(index) {
   openLightbox(
-    userImageSrcs.value.map((src) => ({ src, alt: "用户上传图片" })),
+    userImageSrcs.value.map((src) => ({ src: mediaFullUrl(src), alt: "用户上传图片" })),
     index,
   );
+}
+
+function userImageThumb(src) {
+  return mediaThumbnailUrl(src);
 }
 </script>
 
@@ -38,7 +43,7 @@ function openUserImage(index) {
           >
             <img
               class="msg__image"
-              :src="src"
+              :src="userImageThumb(src)"
               alt="用户上传图片"
               loading="lazy"
             />

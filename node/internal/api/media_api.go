@@ -2,12 +2,18 @@ package api
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
 )
+
+func wantsMediaThumbnail(r *http.Request) bool {
+	v := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("thumbnail")))
+	return v == "1" || v == "true" || v == "yes"
+}
 
 func (s *Server) registerMediaRoutes() {
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/media/{media_id}", s.handleGetSessionMedia)
@@ -39,6 +45,18 @@ func (s *Server) handleGetSessionMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+	if wantsMediaThumbnail(r) {
+		if data, contentType, served, thumbErr := media.ThumbnailFromReader(f, art.MIME); thumbErr == nil && served {
+			w.Header().Set("Content-Type", contentType)
+			w.Header().Set("Cache-Control", "private, max-age=3600")
+			_, _ = w.Write(data)
+			return
+		}
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "media_read_failed", err.Error(), nil)
+			return
+		}
+	}
 	info, err := f.Stat()
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "media_read_failed", err.Error(), nil)

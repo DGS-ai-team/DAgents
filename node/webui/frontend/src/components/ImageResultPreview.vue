@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { entryMedia, showImageCaption, isShowImageTool, showImageResultSucceeded } from "../utils/showImage.js";
+import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
 
 const props = defineProps({
@@ -16,8 +17,10 @@ const missingMedia = computed(
 function openImage(index) {
   openLightbox(
     media.value.map((item) => ({
-      src: item.url,
+      src: mediaFullUrl(item.url),
       alt: item.label || item.caption || caption.value || "图片",
+      label: item.label,
+      caption: item.caption,
     })),
     index,
   );
@@ -37,7 +40,7 @@ function openImage(index) {
       >
         <img
           class="tool-exec-bubble__image tool-media-preview__img"
-          :src="item.url"
+          :src="mediaThumbnailUrl(item.url)"
           :alt="item.label || item.caption || '图片'"
           loading="lazy"
         />

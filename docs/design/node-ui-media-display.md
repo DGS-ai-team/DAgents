@@ -153,7 +153,7 @@ Web UI
 |----|------|
 | 鉴权 | 与 Node 其它 API 相同（`Authorization` / 配置 API key）；**须**校验 `media.session_id == path session_id` |
 | 响应 | `200` + `Content-Type: image/*`；`404` media 不存在或文件已删 |
-| Query | `thumbnail=1`（P2）：最长边 ≤480px，JPEG/PNG 服务端缩放 |
+| Query | `thumbnail=1`（P2）：最长边 ≤480px，JPEG/PNG/GIF 服务端缩放；WebP 暂回退原图 |
 | 缓存 | `Cache-Control: private, max-age=3600`；artifact 不可变（id 对应固定文件） |
 
 **不提供**泛化 `GET /fs?path=`：避免路径遍历与 UI 侧解析工具文本。

@@ -6,12 +6,26 @@ import {
   stepLightbox,
   currentLightboxItem,
 } from "../stores/lightbox.js";
+import { mediaDownloadName, mediaFullUrl } from "../utils/media.js";
 
 const current = computed(() => currentLightboxItem());
 const hasMany = computed(() => lightboxStore.items.length > 1);
 const counter = computed(() =>
   hasMany.value ? `${lightboxStore.index + 1} / ${lightboxStore.items.length}` : "",
 );
+
+function downloadCurrent() {
+  const item = current.value;
+  const src = mediaFullUrl(item?.src);
+  if (!src) return;
+  const link = document.createElement("a");
+  link.href = src;
+  link.download = mediaDownloadName(item);
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
 
 function onKeydown(event) {
   if (!lightboxStore.open) return;
@@ -42,6 +56,15 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
       @click.self="closeLightbox"
     >
       <button type="button" class="image-lightbox__close" aria-label="关闭" @click="closeLightbox">×</button>
+      <button
+        type="button"
+        class="image-lightbox__download"
+        aria-label="下载图片"
+        title="下载"
+        @click="downloadCurrent"
+      >
+        ↓
+      </button>
       <button
         v-if="hasMany"
         type="button"
@@ -126,6 +149,21 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.image-lightbox__download {
+  position: absolute;
+  top: 16px;
+  right: 64px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
 }
