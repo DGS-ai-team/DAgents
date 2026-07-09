@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="node/webui/frontend/public/favicon.png" width="96" height="96" alt="DAgents" />
+  <img src="https://cdn.jsdelivr.net/gh/DGS-ai-team/DAgents@dev/node/webui/frontend/public/favicon.png" width="96" height="96" alt="DAgents" />
 </p>
 
 <p align="center">
