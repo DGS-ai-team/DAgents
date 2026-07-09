@@ -33,7 +33,7 @@ ChangesEnvironment=yes
 WizardStyle=modern
 WizardSizePercent=110
 ShowLanguageDialog=no
-SetupIconFile=compiler:SetupClassicIcon.ico
+SetupIconFile=..\..\desktop\tray\assets\icon.ico
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"

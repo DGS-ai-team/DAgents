@@ -6,7 +6,19 @@
 
 ---
 
-## [0.7.0] - 2026-07-09
+## [0.7.1] - 2026-07-09
+
+**品牌图标统一**：程序与文档视觉资源对齐 `desktop/tray/assets/icon.ico`。
+
+### 变更
+
+- **README**：顶部增加品牌图标（引用 `desktop/tray/assets/icon.ico`）。
+- **Web UI**：`favicon.ico` / `favicon.png` 与顶栏 `brand-icon.png` 统一为托盘同源图标；`index.html` 优先使用 `.ico`。
+- **Windows 安装包**：Inno Setup 向导图标改为 `desktop/tray/assets/icon.ico`（替换默认 Classic 图标）。
+
+（Git **tag**：`v0.7.1`。）
+
+---
 
 **跨端与体验收尾**：TUI hydrate、媒体缩略图/lightbox、Windows 更新迁移、A2A relay hydrate、Shell 运维兜底。Smoke 清单：[`docs/design/v0.7.0-smoke-checklist.md`](docs/design/v0.7.0-smoke-checklist.md)。
 
