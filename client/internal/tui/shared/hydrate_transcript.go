@@ -31,6 +31,9 @@ func LoadTranscriptFromHydrate(tr *Transcript, entries []nodeapi.TranscriptEntry
 			if text != "" && text != "<nil>" {
 				tr.Add("[user] " + text)
 			}
+			for _, hint := range UserMediaHintLines(raw) {
+				tr.Add("    " + hint)
+			}
 		case "assistant":
 			tr.FinishPartial("reasoning")
 			text := strings.TrimSpace(fmt.Sprint(raw["text"]))

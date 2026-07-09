@@ -343,30 +343,30 @@ func formatToolResultEvent(data map[string]any, blockID string, verbose bool, el
 	}
 	lines := []string{"[tool] " + head}
 	if content == "" {
-		return lines
+		return appendMediaHintLines(lines, data, blockID)
 	}
 	if blockID == "" {
 		if verbose {
 			lines = append(lines, indentLines("    ", content)...)
-			return lines
+			return appendMediaHintLines(lines, data, blockID)
 		}
 		preview := summarizeToolResultContent(name, content)
 		if preview != "" {
 			lines = append(lines, indentLines("    ", preview)...)
 		}
-		return lines
+		return appendMediaHintLines(lines, data, blockID)
 	}
 	fullBody := content
 	if verbose {
 		lines = append(lines, splitToolDetailLines(blockID, fullBody)...)
-		return lines
+		return appendMediaHintLines(lines, data, blockID)
 	}
 	preview := summarizeToolResultContent(name, content)
 	if preview != "" {
 		lines = append(lines, formatToolMetaLine(toolPreviewLinePrefix, blockID, preview))
 	}
 	lines = append(lines, splitToolDetailLines(blockID, fullBody)...)
-	return lines
+	return appendMediaHintLines(lines, data, blockID)
 }
 
 func splitToolDetailLines(blockID, body string) []string {

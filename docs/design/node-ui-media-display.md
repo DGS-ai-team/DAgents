@@ -352,7 +352,7 @@ read_image / browser 截图
 | F-M5 | P1 | 用户发图落盘 + Hydrate 回放 | Node + Web UI |
 | F-M6 | P2 | `thumbnail=1` | Node |
 | F-M7 | P2 | Lightbox / 下载 | Web UI |
-| F-M8 | P2 | TUI 打印 path / URL（不渲染图） | Client |
+| F-M8 | P2 | TUI 打印 path / URL（不渲染图） | ✅ | Go + Python TUI |
 
 ### 版本归属
 

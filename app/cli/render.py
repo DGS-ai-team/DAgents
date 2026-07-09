@@ -8,6 +8,7 @@ from typing import Any
 
 from app.cli.approval import ToolApprovalRequest
 from app.cli.child_agent import parse_temporary_agent_tool_result
+from app.cli.media_hint import media_hint_lines
 from app.cli.tool_calls import normalize_tool_call_item
 
 
@@ -92,6 +93,8 @@ def format_tool_result(data: dict[str, Any]) -> TranscriptUpdate:
             lines.append(detail)
     elif content:
         lines.append(content)
+    for hint in media_hint_lines(data):
+        lines.append(hint)
     return TranscriptUpdate(kind=TranscriptKind.TOOL_RESULT, text="\n".join(lines), data=data)
 
 

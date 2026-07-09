@@ -4,6 +4,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Callable
 
 from app.cli.hitl_batch import expand_hitl_required
+from app.cli.media_hint import user_media_hint_lines
 from app.cli.render import (
     TranscriptKind,
     TranscriptUpdate,
@@ -36,6 +37,8 @@ def transcript_updates_from_hydrate(
             text = str(raw.get("text") or "").strip()
             if text:
                 updates.append(TranscriptUpdate(kind=TranscriptKind.LINE, text=text))
+            for hint in user_media_hint_lines(raw):
+                updates.append(TranscriptUpdate(kind=TranscriptKind.LINE, text=f"    {hint}"))
         elif kind == "assistant":
             text = str(raw.get("text") or "").strip()
             if text:

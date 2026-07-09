@@ -40,6 +40,7 @@ from app.cli.child_agent import (
     is_a2a_relay_hitl,
     parse_temporary_agent_tool_result,
 )
+from app.cli.media_hint import media_hint_lines
 from app.cli.render import TranscriptKind, TranscriptUpdate, format_inline_usage, parse_usage_round, sanitize_inline_tool_arg
 from app.cli.session_controller import PendingHITL, SessionController
 from app.cli.tool_calls import normalize_tool_call_item, parse_tool_arguments, tool_call_purpose, tool_display_name
@@ -1997,6 +1998,10 @@ class DAgentsTuiApp(App[None]):
             return self._parse_search_replace_result(content)
         else:
             detail = content
+        hints = media_hint_lines(data)
+        if hints:
+            hint_block = "\n".join(hints)
+            detail = f"{detail}\n{hint_block}".strip() if detail else hint_block
         lines = [line for line in detail.splitlines() if line.strip()]
         summary = lines[0] if lines else "无输出"
         return summary, detail

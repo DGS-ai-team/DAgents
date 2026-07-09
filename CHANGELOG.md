@@ -4,7 +4,11 @@
 
 ## [Unreleased]
 
-**规划 v0.6 – v0.7**：当前开发 **`v0.7.0`**（跨端与体验收尾）。总路线图见 [`docs/design/v0.6-v0.7-roadmap.md`](docs/design/v0.6-v0.7-roadmap.md) §5。
+---
+
+## [0.7.0] - 2026-07-09
+
+**跨端与体验收尾**：TUI hydrate、媒体缩略图/lightbox、Windows 更新迁移、A2A relay hydrate、Shell 运维兜底。Smoke 清单：[`docs/design/v0.7.0-smoke-checklist.md`](docs/design/v0.7.0-smoke-checklist.md)。
 
 ### 新增
 
@@ -12,10 +16,13 @@
 - **F-H6 Python TUI hydrate**：Textual TUI 同上，复用 Node hydrate API。
 - **F-M6 媒体缩略图**：`GET …/media/{id}?thumbnail=1` 服务端缩放（最长边 ≤480px；JPEG/PNG/GIF；WebP 回退原图）。
 - **F-M7 Lightbox 下载**：Web UI 列表/气泡用缩略图 URL，lightbox 全屏原图 + 下载按钮。
+- **F-M8 TUI 媒体提示**：Go/Python TUI 在 tool_result / hydrate 中打印 media URL 或 path（不渲染像素）。
 - **F-ND2 Windows 下线 Node update**：Windows 上 Node 不再 poll Manage；`GET /v1/agent/update` 返回 `delegate=shell`；Client/TUI 自动改读 Shell Desktop API。
-- **F-H4 A2A relay hydrate**：`GET /hydrate` 返回 `pending_a2a_relay`（含 `a2a_relay` / 对端 meta）；Web/Go/Python TUI 恢复中继 HITL 队列。
+- **F-H4 A2A relay hydrate**：`GET /hydrate` 返回 `pending_a2a_relay`；Web/Go/Python TUI 恢复中继 HITL 队列。
 - **F-E5 Shell sessions 轮询兜底**：SSE 断线期间仍每 60s `GET /v1/sessions` 同步待办表。
 - **F-I5 shell.log**：Shell 进程内 `log` 追加写入 `.runtime/logs/shell.log`。
+
+（Git **tag**：`v0.7.0`。）
 
 ---
 
