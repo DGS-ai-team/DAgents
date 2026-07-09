@@ -38,6 +38,7 @@ const (
 	ensureNodeTimeout    = 45 * time.Second
 	probeInterval        = 3 * time.Second
 	maxPendingMenuSlots  = 8
+	iconBlinkInterval    = 600 * time.Millisecond
 )
 
 func main() {
@@ -133,6 +134,9 @@ type trayApp struct {
 	mStop            *systray.MenuItem
 	mRestart         *systray.MenuItem
 	mQuit            *systray.MenuItem
+
+	iconBlinkMu   sync.Mutex
+	iconBlinkStop chan struct{}
 }
 
 func (a *trayApp) onReady() {
@@ -218,6 +222,7 @@ func (a *trayApp) ensureNodeOnStart() {
 }
 
 func (a *trayApp) onExit() {
+	a.stopIconBlink()
 	if a.bgCancel != nil {
 		a.bgCancel()
 	}
@@ -488,15 +493,12 @@ func (a *trayApp) refreshPendingUI() {
 	if sum.SessionCount == 0 {
 		a.mPending.SetTitle("待办：无")
 		a.mPending.Disable()
-		systray.SetIcon(iconData)
-		systray.SetTitle("DAgents")
+		a.stopIconBlink()
+		a.setTrayIconNormal()
 	} else {
 		a.mPending.SetTitle("待办：" + sum.Label)
 		a.mPending.Enable()
-		if len(iconPendingData) > 0 {
-			systray.SetIcon(iconPendingData)
-		}
-		systray.SetTitle("●")
+		a.startIconBlink()
 	}
 
 	for i := range a.mPendingSessions {
@@ -550,4 +552,56 @@ func (a *trayApp) refreshTooltip(showRunning bool) {
 		return
 	}
 	systray.SetTooltip(base + "\nNode 未运行")
+}
+
+func (a *trayApp) setTrayIconNormal() {
+	systray.SetIcon(iconData)
+	systray.SetTitle("DAgents")
+}
+
+func (a *trayApp) setTrayIconPendingFrame(showPending bool) {
+	if showPending && len(iconPendingData) > 0 {
+		systray.SetIcon(iconPendingData)
+	} else {
+		systray.SetIcon(iconData)
+	}
+	systray.SetTitle("●")
+}
+
+func (a *trayApp) stopIconBlink() {
+	a.iconBlinkMu.Lock()
+	defer a.iconBlinkMu.Unlock()
+	if a.iconBlinkStop != nil {
+		close(a.iconBlinkStop)
+		a.iconBlinkStop = nil
+	}
+}
+
+func (a *trayApp) startIconBlink() {
+	a.iconBlinkMu.Lock()
+	if a.iconBlinkStop != nil {
+		a.iconBlinkMu.Unlock()
+		return
+	}
+	stop := make(chan struct{})
+	a.iconBlinkStop = stop
+	a.iconBlinkMu.Unlock()
+
+	go a.iconBlinkLoop(stop)
+}
+
+func (a *trayApp) iconBlinkLoop(stop <-chan struct{}) {
+	ticker := time.NewTicker(iconBlinkInterval)
+	defer ticker.Stop()
+	showPending := true
+	a.setTrayIconPendingFrame(showPending)
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			showPending = !showPending
+			a.setTrayIconPendingFrame(showPending)
+		}
+	}
 }

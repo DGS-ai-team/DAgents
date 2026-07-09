@@ -480,7 +480,7 @@ begin
     RegDeleteValue(HKEY_CURRENT_USER, '{#ShellAutostartRegKey}', '{#ShellAutostartRunName}');
 end;
 
-procedure CurUninstallStepChanged(CurUninstallStep: TSetupUninstallStep);
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ResultCode: Integer;
   AppDir: string;
