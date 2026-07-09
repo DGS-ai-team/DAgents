@@ -31,7 +31,7 @@
 - **图片路径**：`show_image` / `read_image` 支持 FS_ROOT 外绝对路径；`MediaRegistry` 注册绝对路径；UI 无 media 时提示。
 - **Hydrate 工具行**：按 `blockId` 合并 tool_call + tool_result，避免历史还原成双行。
 
-（Git **tag**：待 Smoke 后 `v0.6.2`。）
+（Git **tag**：`v0.6.2`。）
 
 ---
 
@@ -67,7 +67,7 @@
 - **工具展示**：`toolUserLabel` 与 tool 占位符；禁止空白 `tool()` 摘要。
 - **Hydrate 工具行**：`buildStream` 按 `blockId` 合并 tool_call + tool_result，避免历史还原成「进行中 + 已完成」两行。
 
-（Git **tag**：待 Smoke 后 `v0.6.1`。）
+（Git **tag**：`v0.6.1`。）
 
 ---
 
