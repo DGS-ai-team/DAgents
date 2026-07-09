@@ -12,6 +12,7 @@
 - **F-H6 Python TUI hydrate**：Textual TUI 同上，复用 Node hydrate API。
 - **F-M6 媒体缩略图**：`GET …/media/{id}?thumbnail=1` 服务端缩放（最长边 ≤480px；JPEG/PNG/GIF；WebP 回退原图）。
 - **F-M7 Lightbox 下载**：Web UI 列表/气泡用缩略图 URL，lightbox 全屏原图 + 下载按钮。
+- **F-ND2 Windows 下线 Node update**：Windows 上 Node 不再 poll Manage；`GET /v1/agent/update` 返回 `delegate=shell`；Client/TUI 自动改读 Shell Desktop API。
 
 ---
 

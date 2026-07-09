@@ -287,7 +287,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		manage.LogA2AProfileWarnings(cfg, logger)
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
-		updateChecker = manage.NewUpdateChecker(cfg, logger)
+		if !manage.UpdateDelegatedToShell() {
+			updateChecker = manage.NewUpdateChecker(cfg, logger)
+		}
 		packageUploader = manage.NewPackageUploader(cfg, logger)
 		a2aBridge = session.NewA2ACallerHITLBridge(cfg.AgentID, hub)
 		if o.tools != nil {
@@ -474,6 +476,14 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleAgentUpdate(w http.ResponseWriter, _ *http.Request) {
+	if manage.UpdateDelegatedToShell() {
+		channel := "stable"
+		if s.cfg != nil {
+			channel = strings.TrimSpace(s.cfg.Manage.Update.Channel)
+		}
+		writeJSON(w, http.StatusOK, manage.ShellDelegateUpdateStatus(channel))
+		return
+	}
 	if s.updateChecker == nil {
 		writeJSON(w, http.StatusOK, manage.UpdateStatus{
 			CurrentVersion:  version.Version,

@@ -9,6 +9,7 @@ import (
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
 	clihitl "github.com/DGS-ai-team/DAgents/client/internal/hitl"
+	"github.com/DGS-ai-team/DAgents/client/internal/desktop"
 	"github.com/DGS-ai-team/DAgents/client/internal/probe"
 	tuishared "github.com/DGS-ai-team/DAgents/client/internal/tui/shared"
 )
@@ -295,18 +296,19 @@ func (m *model) turnInProgress() bool {
 }
 
 func (m *model) appendVersion() error {
-	status, err := m.client.GetAgentUpdate(m.ctx)
+	status, err := desktop.ResolveAgentUpdate(m.ctx, m.client, nil)
 	if err != nil {
 		return err
 	}
+	agent := desktop.ToAgentUpdateStatus(status)
 	body := tuishared.FormatVersionPanelBody(
-		status.CurrentVersion,
-		status.LatestVersion,
-		status.Platform,
-		status.Channel,
-		status.Message,
-		status.ManageReachable,
-		status.UpgradeAvailable,
+		agent.CurrentVersion,
+		agent.LatestVersion,
+		agent.Platform,
+		agent.Channel,
+		agent.Message,
+		agent.ManageReachable,
+		agent.UpgradeAvailable,
 	)
 	m.transcript.AddSystemPanel("Version", body)
 	m.syncViewport()
@@ -317,11 +319,11 @@ func (m *model) appendUpdate() error {
 	if m.turnInProgress() {
 		return fmt.Errorf("turn 或 HITL 进行中，请稍后再试 /update")
 	}
-	status, err := m.client.GetAgentUpdate(m.ctx)
+	status, err := desktop.ResolveAgentUpdate(m.ctx, m.client, nil)
 	if err != nil {
 		return err
 	}
-	m.transcript.AddSystemPanel("Update", tuishared.FormatUpdatePanelBody(status))
+	m.transcript.AddSystemPanel("Update", tuishared.FormatUpdatePanelBody(desktop.ToAgentUpdateStatus(status)))
 	m.syncViewport()
 	return nil
 }

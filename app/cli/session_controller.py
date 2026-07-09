@@ -387,9 +387,11 @@ class SessionController:
         return await self._client.get_session_context(self.session_id)
 
     async def get_agent_update(self) -> dict[str, Any]:
-        """查询 Local Assistant 更新状态（GET /v1/agent/update）。"""
+        """查询 Local Assistant 更新状态；Windows delegate 时改读 Shell。"""
+        from app.cli.desktop import resolve_agent_update
+
         assert self._client is not None
-        return await self._client.get_agent_update()
+        return await resolve_agent_update(self._client)
 
     async def list_triggers(self) -> dict[str, Any]:
         """查询 Agent 已配置的触发器列表（GET /v1/triggers）。"""

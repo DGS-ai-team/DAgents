@@ -14,7 +14,9 @@ import (
 	"time"
 
 	nodeapi "github.com/DGS-ai-team/DAgents/client/internal/api"
+	"github.com/DGS-ai-team/DAgents/client/internal/desktop"
 	"github.com/DGS-ai-team/DAgents/shared/config"
+	"github.com/DGS-ai-team/DAgents/shared/update"
 )
 
 const (
@@ -32,10 +34,10 @@ type Options struct {
 	Output    string
 }
 
-// Run 查询 Node /v1/agent/update，可选下载安装包到 Output。
+// Run 查询更新状态（Windows 经 Shell delegate），可选下载安装包到 Output。
 func Run(ctx context.Context, cfg *config.Config, opt Options) int {
 	client := nodeapi.New(cfg.Local.Endpoint, &http.Client{Timeout: 30 * time.Second})
-	status, err := client.GetAgentUpdate(ctx)
+	status, err := desktop.ResolveAgentUpdate(ctx, client, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "update check failed: %v\n", err)
 		return 1
@@ -70,7 +72,7 @@ func Run(ctx context.Context, cfg *config.Config, opt Options) int {
 	return 0
 }
 
-func printStatus(status *nodeapi.AgentUpdateStatus) {
+func printStatus(status *update.Status) {
 	fmt.Printf("当前版本: %s\n", status.CurrentVersion)
 	fmt.Printf("最新版本: %s\n", status.LatestVersion)
 	fmt.Printf("平台: %s  渠道: %s\n", status.Platform, status.Channel)
@@ -106,7 +108,7 @@ func confirm(prompt string) (bool, error) {
 	return ans == "y" || ans == "yes", nil
 }
 
-func downloadPackage(ctx context.Context, cfg *config.Config, status *nodeapi.AgentUpdateStatus, destPath string) error {
+func downloadPackage(ctx context.Context, cfg *config.Config, status *update.Status, destPath string) error {
 	if status.Asset == nil {
 		return fmt.Errorf("update response missing asset")
 	}

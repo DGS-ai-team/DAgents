@@ -130,7 +130,7 @@ Manage ──GET /v1/releases/check──► Shell（UpdateChecker）
 |------|------|
 | **v0.6.0** | 文档定 D36–D38；`dagents update` 的 **stop/start 改由 Shell**（若 Shell 在跑） |
 | **v0.6.x** | Shell UpdateChecker + Toast + F-X8 + F-ND1 |
-| **v0.7** | Windows 默认路径 **移除** Node `UpdateChecker`；`/v1/agent/update` 返回 delegate |
+| **v0.7** | Windows 默认路径 **移除** Node `UpdateChecker`；`/v1/agent/update` 返回 delegate ✅ |
 
 ### 10.6 不变量
 
