@@ -175,7 +175,7 @@
 | F-E2 | P0 | 解析 HITL 事件并入 **session 待办表** | ❌ | D17 |
 | F-E3 | P0 | 同 session 多条 HITL **合并为一条通知态** | ❌ | 更新计数/摘要，不重复 Toast |
 | F-E4 | P0 | SSE 断线重连 | ❌ | |
-| F-E5 | P1 | `GET /v1/sessions` 轮询兜底 | ❌ | |
+| F-E5 | P1 | `GET /v1/sessions` 轮询兜底 | ✅ | SSE 断线时仍 60s 同步 |
 | F-E9 | P1 | UI 打开某 session 时 Shell **抑制该 session 新 Toast** | ✅ | `POST /v1/desktop/ui/focus` + TTL 心跳 |
 | F-E10 | P0 | **待办消除**：该 session 在 Node 侧无 pending HITL 时清除 Shell 状态 | ❌ | 见 §8.5；**不依赖**从通知打开 UI |
 | F-E11 | P0 | 订阅 **A2A relay** 事件：`approval_required` / `user_information_required` | ❌ | §8.5；与 `hitl_required` 一并入 session 待办表 |
@@ -225,7 +225,7 @@
 | F-I3 | P0 | **当前用户开机自启 Shell** | ✅ | HKCU Run + `dagents shell --background` |
 | F-I2 | P1 | Inno Setup 组件 | ❌ | |
 | F-I4 | P1 | 共用 `-config` / `DAGENTS_HOME` | ✅ | |
-| F-I5 | P2 | `.runtime/logs/shell.log` | ❌ | |
+| F-I5 | P2 | `.runtime/logs/shell.log` | ✅ | 进程内 log 追加；`dagents.cmd` 亦重定向 stdout |
 | F-I7 | P1 | 文档：Windows 默认 Client 改为 Shell + Web UI | ❌ | D22 |
 | F-I8 | P0 | **CI / Release workflow** 构建 `dagents-shell.exe` | ✅ | `build_dagents_shell.sh` + assemble 必含 |
 | F-I9 | P0 | **`dagents.cmd shell`** 子命令（start / status / stop） | ✅ | `--background` / `--foreground` |

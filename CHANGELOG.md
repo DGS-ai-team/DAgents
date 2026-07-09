@@ -14,6 +14,8 @@
 - **F-M7 Lightbox 下载**：Web UI 列表/气泡用缩略图 URL，lightbox 全屏原图 + 下载按钮。
 - **F-ND2 Windows 下线 Node update**：Windows 上 Node 不再 poll Manage；`GET /v1/agent/update` 返回 `delegate=shell`；Client/TUI 自动改读 Shell Desktop API。
 - **F-H4 A2A relay hydrate**：`GET /hydrate` 返回 `pending_a2a_relay`（含 `a2a_relay` / 对端 meta）；Web/Go/Python TUI 恢复中继 HITL 队列。
+- **F-E5 Shell sessions 轮询兜底**：SSE 断线期间仍每 60s `GET /v1/sessions` 同步待办表。
+- **F-I5 shell.log**：Shell 进程内 `log` 追加写入 `.runtime/logs/shell.log`。
 
 ---
 

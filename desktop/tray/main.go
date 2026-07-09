@@ -18,6 +18,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodeclient"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/notify"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/pending"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/shelllog"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/singleinstance"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/uifocus"
@@ -80,6 +81,11 @@ func run(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dagents-shell: %v\n", err)
 		return 1
+	}
+	if closer, err := shelllog.Setup(layout.Home); err != nil {
+		fmt.Fprintf(os.Stderr, "dagents-shell: shell log: %v\n", err)
+	} else if closer != nil {
+		defer closer.Close()
 	}
 
 	app := &trayApp{

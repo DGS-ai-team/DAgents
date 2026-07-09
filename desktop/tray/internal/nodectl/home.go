@@ -15,8 +15,10 @@ type Layout struct {
 	ConfigPath string
 	NodeExe    string
 	PidFile    string
-	LogOut     string
-	LogErr     string
+	LogOut      string
+	LogErr      string
+	ShellLog    string
+	ShellLogErr string
 }
 
 // ResolveLayout 解析安装根与 Node 相关路径。
@@ -47,6 +49,8 @@ func ResolveLayout(configPath string) (*Layout, error) {
 		PidFile:    filepath.Join(runtimeDir, "node.pid"),
 		LogOut:     filepath.Join(runtimeDir, "logs", "node.log"),
 		LogErr:     filepath.Join(runtimeDir, "logs", "node.err.log"),
+		ShellLog:   filepath.Join(runtimeDir, "logs", "shell.log"),
+		ShellLogErr: filepath.Join(runtimeDir, "logs", "shell.err.log"),
 	}, nil
 }
 

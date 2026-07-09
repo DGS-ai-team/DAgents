@@ -25,7 +25,7 @@ type listSessionsResponse struct {
 	Sessions []SessionSummary `json:"sessions"`
 }
 
-// ListSessions 拉取 session 列表（F-E10 轮询兜底）。
+// ListSessions 拉取 session 列表（F-E5 轮询兜底 / F-E10 待办同步）。
 func (c *Client) ListSessions(ctx context.Context) ([]SessionSummary, error) {
 	if c == nil || c.base == "" {
 		return nil, fmt.Errorf("node client: empty base URL")

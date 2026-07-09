@@ -35,7 +35,7 @@ func NewSubscriber(client *nodeclient.Client, store *pending.Store, onChange fun
 	}
 }
 
-// Start 启动后台 SSE 循环。
+// Start 启动后台 SSE 循环与 60s sessions 轮询兜底（F-E5）。
 func (s *Subscriber) Start(parent context.Context) {
 	if s == nil || s.client == nil || s.store == nil {
 		return
@@ -49,10 +49,11 @@ func (s *Subscriber) Start(parent context.Context) {
 	s.cancel = cancel
 	s.mu.Unlock()
 
+	go s.pollLoop(ctx)
 	go s.loop(ctx)
 }
 
-// Stop 停止 SSE 订阅。
+// Stop 停止 SSE 订阅与轮询。
 func (s *Subscriber) Stop() {
 	if s == nil {
 		return
@@ -82,26 +83,23 @@ func (s *Subscriber) loop(ctx context.Context) {
 	}
 }
 
+func (s *Subscriber) pollLoop(ctx context.Context) {
+	s.syncSessions(ctx)
+	ticker := time.NewTicker(syncInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.syncSessions(ctx)
+		}
+	}
+}
+
 func (s *Subscriber) connectOnce(ctx context.Context) error {
 	s.syncSessions(ctx)
-
-	streamCtx, streamCancel := context.WithCancel(ctx)
-	defer streamCancel()
-
-	go func() {
-		ticker := time.NewTicker(syncInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-streamCtx.Done():
-				return
-			case <-ticker.C:
-				s.syncSessions(ctx)
-			}
-		}
-	}()
-
-	return s.client.StreamEvents(streamCtx, func(ev nodeclient.StreamEvent) bool {
+	return s.client.StreamEvents(ctx, func(ev nodeclient.StreamEvent) bool {
 		if ctx.Err() != nil {
 			return false
 		}
