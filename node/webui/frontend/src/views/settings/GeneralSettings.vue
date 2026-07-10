@@ -21,7 +21,7 @@ const showReasoning = computed({
     <ChildAgentsLimitsPanel />
     <ChildAgentsSection />
 
-    <section class="settings-section settings-embedded-panel panel">
+    <section class="settings-section">
       <h2 class="settings-section__title">界面</h2>
       <label class="settings-toggle">
         <input v-model="showReasoning" type="checkbox" />

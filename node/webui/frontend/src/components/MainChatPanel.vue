@@ -51,7 +51,8 @@ const emit = defineEmits([
 
 const input = ref("");
 const pendingImages = ref([]);
-const fileInputRef = ref(null);
+const imageInputRef = ref(null);
+const attachInputRef = ref(null);
 const textareaRef = ref(null);
 const streamRef = ref(null);
 const userInfoSelected = ref(0);
@@ -126,13 +127,36 @@ function removePendingImage(index) {
 }
 
 function openImagePicker() {
-  fileInputRef.value?.click();
+  imageInputRef.value?.click();
+}
+
+function openAttachmentPicker() {
+  attachInputRef.value?.click();
 }
 
 async function onImageSelected(event) {
   await addImageFiles(event.target.files);
   event.target.value = "";
 }
+
+async function onAttachmentSelected(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = "";
+  if (!files.length) return;
+
+  const paths = pathsFromFileList(files);
+  if (paths.length) {
+    applyPathInsertion(paths);
+    return;
+  }
+  const names = files.map((f) => f.name).filter(Boolean);
+  if (names.length) applyPathInsertion(names);
+}
+
+const attachDisabled = computed(() => props.disabled || props.sending || props.cancelling);
+const imageAttachDisabled = computed(
+  () => attachDisabled.value || pendingImages.value.length >= 8,
+);
 
 function buildContentParts(text, images) {
   const parts = [];
@@ -354,6 +378,52 @@ defineExpose({
               @toggle-thinking="emit('toggle-thinking')"
               @cycle-effort="emit('cycle-effort')"
             />
+            <div class="composer-toolbar composer-toolbar--attach">
+              <input
+                v-if="multimodalEnabled"
+                ref="imageInputRef"
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                multiple
+                hidden
+                @change="onImageSelected"
+              />
+              <input
+                ref="attachInputRef"
+                type="file"
+                multiple
+                hidden
+                @change="onAttachmentSelected"
+              />
+              <button
+                v-if="multimodalEnabled"
+                type="button"
+                class="composer-toolbar__btn composer-toolbar__btn--icon"
+                title="添加图片"
+                aria-label="添加图片"
+                :disabled="imageAttachDisabled"
+                @click="openImagePicker"
+              >
+                <svg class="composer-toolbar__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.25" />
+                  <circle cx="5.25" cy="6" r="1.25" fill="currentColor" />
+                  <path d="M2 11.5l3.25-3 2.25 2.25L9 8l4.5 3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="composer-toolbar__btn composer-toolbar__btn--icon"
+                title="添加附件（插入文件路径）"
+                aria-label="添加附件"
+                :disabled="attachDisabled"
+                @click="openAttachmentPicker"
+              >
+                <svg class="composer-toolbar__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M9 1.75H4.5A1.75 1.75 0 002.75 3.5v9A1.75 1.75 0 004.5 14.25h7A1.75 1.75 0 0013.25 12.5V5.75L9 1.75z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
+                  <path d="M9 1.75v4h4" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
+                </svg>
+              </button>
+            </div>
             <div v-if="workerStrip || inputStripLeftText" class="chat__composer-meta-status">
               <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
               <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
@@ -375,25 +445,6 @@ defineExpose({
           </div>
         </div>
         <div class="chat__composer-row">
-          <input
-            v-if="multimodalEnabled"
-            ref="fileInputRef"
-            type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp"
-            multiple
-            hidden
-            @change="onImageSelected"
-          />
-          <button
-            v-if="multimodalEnabled"
-            type="button"
-            class="btn btn--ghost chat__attach-btn"
-            title="添加图片"
-            :disabled="disabled || sending || cancelling || pendingImages.length >= 8"
-            @click="openImagePicker"
-          >
-            🖼
-          </button>
           <textarea
             ref="textareaRef"
             v-model="input"

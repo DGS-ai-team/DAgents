@@ -31,7 +31,7 @@ const nav = [
           {{ item.label }}
         </router-link>
       </nav>
-      <main class="settings-layout__main panel">
+      <main class="settings-layout__main">
         <router-view />
       </main>
     </div>

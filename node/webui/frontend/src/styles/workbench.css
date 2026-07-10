@@ -743,10 +743,22 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  gap: 16px;
+  gap: 0;
+  min-height: min-content;
+}
+
+.settings-layout__main .settings-page__title,
+.settings-layout__main .settings-page__hint {
+  flex-shrink: 0;
+}
+
+.settings-layout__main .settings-page__hint {
+  margin-bottom: 20px;
+}
+
+.settings-section {
+  margin-bottom: 0;
+  padding-bottom: 20px;
 }
 
 .settings-layout__main .settings-field__input {
@@ -756,10 +768,6 @@
 .settings-page__hint {
   font-size: 13px;
   color: var(--color-text-muted);
-}
-
-.settings-section {
-  margin-bottom: 24px;
 }
 
 .settings-section__head {
@@ -863,7 +871,7 @@
 }
 
 .setup-config-panel__body {
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .setup-config-panel__hint,
@@ -1530,12 +1538,25 @@
   cursor: pointer;
 }
 
-.chat__attach-btn {
+.composer-toolbar__btn--icon {
+  padding: 4px 8px;
+  min-width: 28px;
+  justify-content: center;
+}
+
+.composer-toolbar__btn--icon .composer-toolbar__icon {
+  font-size: 14px;
+}
+
+.composer-toolbar__btn--icon .composer-toolbar__svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex-shrink: 0;
+}
+
+.composer-toolbar--attach {
   flex: 0 0 auto;
-  align-self: stretch;
-  min-width: 42px;
-  padding: 0 10px;
-  font-size: 16px;
 }
 
 .chat__composer-btn {
@@ -2657,6 +2678,13 @@
 
 .settings-embedded .command-panel {
   max-height: none;
+}
+
+.settings-embedded .status-panel,
+.settings-embedded .policy-panel,
+.settings-embedded .triggers-panel,
+.settings-embedded .children-panel {
+  width: 100%;
 }
 
 .command-panel__header {
