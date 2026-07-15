@@ -44,27 +44,35 @@ class CaseStoreTest(unittest.TestCase):
     def test_message_crud(self):
         store = CaseExampleStore(SQLiteDatabase(Path(tempfile.mkdtemp()) / "m.db"))
         payload = CaseCreate(
-            case_id="demo-a",
             name="Demo A",
             description="desc",
             resources=CaseResources(skill_ids=["skill-a"], plugin_ids=["plug-a"]),
         )
-        store.create(payload, messages=[], now=1)
+        created = store.create(payload, messages=[], now=1)
+        self.assertRegex(created.case_id, r"^[0-9a-f]{32}$")
         msg = CaseMessage(id="m1", role="user", content="ping")
-        updated = store.insert_message("demo-a", msg, index=None, now=2)
+        updated = store.insert_message(created.case_id, msg, index=None, now=2)
         assert updated is not None
         self.assertEqual(len(updated.messages), 1)
         updated = store.update_message(
-            "demo-a",
+            created.case_id,
             "m1",
             CaseMessage(id="m1", role="user", content="pong"),
             now=3,
         )
         assert updated is not None
         self.assertEqual(updated.messages[0].content, "pong")
-        updated = store.delete_message("demo-a", "m1", now=4)
+        updated = store.delete_message(created.case_id, "m1", now=4)
         assert updated is not None
         self.assertEqual(updated.messages, [])
+
+    def test_create_assigns_uuid_case_id(self):
+        store = CaseExampleStore(SQLiteDatabase(Path(tempfile.mkdtemp()) / "m.db"))
+        first = store.create(CaseCreate(name="Route Demo"), messages=[], now=1)
+        second = store.create(CaseCreate(name="Route Demo"), messages=[], now=2)
+        self.assertRegex(first.case_id, r"^[0-9a-f]{32}$")
+        self.assertRegex(second.case_id, r"^[0-9a-f]{32}$")
+        self.assertNotEqual(first.case_id, second.case_id)
 
 
 class CaseRoutesTest(unittest.TestCase):
@@ -77,7 +85,6 @@ class CaseRoutesTest(unittest.TestCase):
         r = client.post(
             "/v1/cases",
             data={
-                "case_id": "demo-route",
                 "name": "Route Demo",
                 "description": "from test",
                 "skill_ids": "skill-x",
@@ -88,7 +95,8 @@ class CaseRoutesTest(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 200, r.text)
         body = r.json()
-        self.assertEqual(body["case_id"], "demo-route")
+        case_id = body["case_id"]
+        self.assertRegex(case_id, r"^[0-9a-f]{32}$")
         self.assertEqual(len(body["messages"]), 2)
         self.assertEqual(body["resources"]["skill_ids"], ["skill-x"])
         self.assertEqual(body["resources"]["plugin_ids"], ["plug-y"])
@@ -100,14 +108,14 @@ class CaseRoutesTest(unittest.TestCase):
 
         msg_id = body["messages"][0]["id"]
         r2 = client.patch(
-            f"/v1/cases/demo-route/messages/{msg_id}",
+            f"/v1/cases/{case_id}/messages/{msg_id}",
             json={"id": msg_id, "role": "user", "content": "edited", "recorded_at": "t1"},
         )
         self.assertEqual(r2.status_code, 200)
         self.assertEqual(r2.json()["messages"][0]["content"], "edited")
 
         r3 = client.post(
-            "/v1/cases/demo-route/messages",
+            f"/v1/cases/{case_id}/messages",
             json={
                 "index": 1,
                 "message": {"id": "new-msg", "role": "system", "content": "hint", "recorded_at": ""},
@@ -117,11 +125,11 @@ class CaseRoutesTest(unittest.TestCase):
         self.assertEqual(len(r3.json()["messages"]), 3)
         self.assertEqual(r3.json()["messages"][1]["role"], "system")
 
-        r4 = client.delete(f"/v1/cases/demo-route/messages/{msg_id}")
+        r4 = client.delete(f"/v1/cases/{case_id}/messages/{msg_id}")
         self.assertEqual(r4.status_code, 200)
         self.assertEqual(len(r4.json()["messages"]), 2)
 
-        export = client.get("/v1/cases/demo-route/export/jsonl")
+        export = client.get(f"/v1/cases/{case_id}/export/jsonl")
         self.assertEqual(export.status_code, 200)
         lines = [ln for ln in export.content.decode().splitlines() if ln.strip()]
         self.assertEqual(len(lines), 2)
@@ -144,18 +152,23 @@ class CaseRoutesTest(unittest.TestCase):
         self.assertEqual(body[0]["role"], "user")
         self.assertEqual(body[1]["content"], "ok")
 
-    def test_duplicate_case_id(self):
+    def test_each_create_gets_unique_case_id(self):
         client, _store = _cases_client()
         data = {
-            "case_id": "dup",
             "name": "One",
             "description": "",
             "skill_ids": "",
             "plugin_ids": "",
             "externaltool_ids": "",
         }
-        self.assertEqual(client.post("/v1/cases", data=data).status_code, 200)
-        self.assertEqual(client.post("/v1/cases", data=data).status_code, 409)
+        r1 = client.post("/v1/cases", data=data)
+        r2 = client.post("/v1/cases", data=data)
+        self.assertEqual(r1.status_code, 200, r1.text)
+        self.assertEqual(r2.status_code, 200, r2.text)
+        id1, id2 = r1.json()["case_id"], r2.json()["case_id"]
+        self.assertRegex(id1, r"^[0-9a-f]{32}$")
+        self.assertRegex(id2, r"^[0-9a-f]{32}$")
+        self.assertNotEqual(id1, id2)
 
 
 if __name__ == "__main__":

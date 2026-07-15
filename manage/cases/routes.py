@@ -74,7 +74,6 @@ def build_cases_router(
     @router.post("", response_model=CaseExample)
     async def create_case(
         request: Request,
-        case_id: str = Form(...),
         name: str = Form(...),
         description: str = Form(""),
         skill_ids: str = Form(""),
@@ -92,7 +91,6 @@ def build_cases_router(
         _validate_resources(resources)
         try:
             payload = CaseCreate(
-                case_id=case_id.strip(),
                 name=name.strip(),
                 description=description,
                 resources=resources,
@@ -107,11 +105,8 @@ def build_cases_router(
                     messages = parse_jsonl_bytes(data)
                 except ValueError as exc:
                     raise HTTPException(status_code=422, detail=str(exc)) from exc
-        try:
-            case = store.create(payload, messages=messages, now=int(time.time()))
-        except KeyError as exc:
-            raise HTTPException(status_code=409, detail="case_id already exists") from exc
-        audit.record(actor=auth.token_id, action="case.create", target_agent_id=payload.case_id)
+        case = store.create(payload, messages=messages, now=int(time.time()))
+        audit.record(actor=auth.token_id, action="case.create", target_agent_id=case.case_id)
         return case
 
     @router.get("/{case_id}", response_model=CaseExample)

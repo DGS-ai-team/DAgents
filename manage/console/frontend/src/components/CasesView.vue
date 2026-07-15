@@ -49,7 +49,6 @@ const listFilters = reactive({
 });
 
 const draftMeta = reactive({
-  case_id: "",
   name: "",
   description: "",
   skill_ids: [],
@@ -198,7 +197,6 @@ function cancelEdit() {
 }
 
 function resetDraft() {
-  draftMeta.case_id = "";
   draftMeta.name = "";
   draftMeta.description = "";
   draftMeta.skill_ids = [];
@@ -304,14 +302,13 @@ async function onUploadJsonl(e) {
 }
 
 async function onFinalizeCreate() {
-  if (!draftMeta.case_id.trim() || !draftMeta.name.trim()) {
-    emit("toast", { message: "case_id 与名称必填", type: "error" });
+  if (!draftMeta.name.trim()) {
+    emit("toast", { message: "名称必填", type: "error" });
     return;
   }
   saving.value = true;
   try {
     const created = await createCase({
-      caseId: draftMeta.case_id.trim(),
       name: draftMeta.name.trim(),
       description: draftMeta.description.trim(),
       skillIds: draftMeta.skill_ids,
@@ -656,10 +653,6 @@ defineExpose({ load });
         <div class="form-block">
           <h3 class="form-block__title">案例信息</h3>
           <div class="form-grid">
-            <label>
-              <span>case_id</span>
-              <input v-model="draftMeta.case_id" placeholder="demo-restart-service" />
-            </label>
             <label>
               <span>名称</span>
               <input v-model="draftMeta.name" placeholder="服务重启演示" />

@@ -36,13 +36,15 @@ class CaseResources(BaseModel):
 
 
 class CaseCreate(BaseModel):
-    case_id: str = Field(min_length=1, max_length=128, pattern=_SLUG)
+    """创建入参；`case_id` 由 store 生成为 `uuid4().hex`。"""
+
     name: str = Field(min_length=1, max_length=256)
     description: str = ""
     resources: CaseResources = Field(default_factory=CaseResources)
 
 
 class CaseExample(CaseCreate):
+    case_id: str = Field(min_length=1, max_length=128, pattern=_SLUG)
     messages: list[CaseMessage] = Field(default_factory=list)
     created_at: int
     updated_at: int

@@ -306,7 +306,6 @@ export async function replaceCaseMessages(caseId, messages) {
 }
 
 export async function createCase({
-  caseId,
   name,
   description = "",
   skillIds = [],
@@ -315,7 +314,6 @@ export async function createCase({
   file = null,
 }) {
   const form = new FormData();
-  form.set("case_id", caseId);
   form.set("name", name);
   form.set("description", description);
   form.set("skill_ids", (skillIds || []).join(", "));

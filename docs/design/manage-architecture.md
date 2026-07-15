@@ -226,7 +226,7 @@ Docker 启动时 `seed_bundled_releases` 可从 `/app/bundled/releases` 预置�
 
 ### 3.7 Cases（案例库）
 
-演示会话管理：上传 Node history JSONL、编辑消息（插入 / 修改 / 删除）、关联 Skills / Plugins / ExternalTools、附件 Blob、导出 JSONL。前缀 `/v1/cases`（`manage/cases/routes.py`）。JSONL 行格式对齐 Node `history/*.jsonl`。
+演示会话管理：上传 Node history JSONL、编辑消息（插入 / 修改 / 删除）、关联 Skills / Plugins / ExternalTools、附件 Blob、导出 JSONL。前缀 `/v1/cases`（`manage/cases/routes.py`）。创建时 **`case_id` 由服务端生成 `uuid4().hex`**；JSONL 行格式对齐 Node `history/*.jsonl`。
 
 ---
 

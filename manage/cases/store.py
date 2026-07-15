@@ -52,9 +52,9 @@ class CaseExampleStore:
 
     def create(self, payload: CaseCreate, *, messages: list[CaseMessage], now: int) -> CaseExample:
         with self._lock:
-            if self.get(payload.case_id):
-                raise KeyError("case_id already exists")
+            case_id = uuid.uuid4().hex
             case = CaseExample(
+                case_id=case_id,
                 **payload.model_dump(),
                 messages=messages,
                 created_at=now,

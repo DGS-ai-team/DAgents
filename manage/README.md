@@ -171,7 +171,7 @@ Console → **案例库**：上传 Node history JSONL 创建演示案例，可�
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/v1/cases` | 案例列表 |
-| POST | `/v1/cases` | 创建（multipart：元数据 + 可选 JSONL） |
+| POST | `/v1/cases` | 创建（multipart：`name` + 可选描述/资源/JSONL；**`case_id` 为服务端 `uuid4().hex`**） |
 | GET | `/v1/cases/{case_id}` | 详情（含消息列表） |
 | PATCH | `/v1/cases/{case_id}` | 更新名称、描述、关联资源 |
 | DELETE | `/v1/cases/{case_id}` | 删除 |
