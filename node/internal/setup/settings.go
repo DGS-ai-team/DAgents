@@ -69,10 +69,9 @@ type RuntimeSettings struct {
 
 // AgentSettings Agent 身份（config agent 块）。
 type AgentSettings struct {
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	Role           string `json:"role"`
-	CompliancePeer string `json:"compliance_peer"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Role        string `json:"role"`
 }
 
 // ChildAgentsLimits 子 Agent 配额（enabled 见 features）。
@@ -206,10 +205,9 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			LogLevel: cfg.Log.Level,
 		},
 		Agent: AgentSettings{
-			Name:           cfg.Agent.Name,
-			Description:    cfg.Agent.Description,
-			Role:           cfg.Agent.Role,
-			CompliancePeer: cfg.Agent.CompliancePeer,
+			Name:        cfg.Agent.Name,
+			Description: cfg.Agent.Description,
+			Role:        cfg.Agent.Role,
 		},
 		ChildAgents: ChildAgentsLimits{
 			DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
@@ -433,7 +431,6 @@ func applyAgentPatch(cfg *config.Config, p AgentSettings) {
 	cfg.Agent.Name = strings.TrimSpace(p.Name)
 	cfg.Agent.Description = strings.TrimSpace(p.Description)
 	cfg.Agent.Role = strings.TrimSpace(p.Role)
-	cfg.Agent.CompliancePeer = strings.TrimSpace(p.CompliancePeer)
 }
 
 func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -256,4 +257,89 @@ func TestRestoreSessionFromStore(t *testing.T) {
 		t.Fatalf("count=%d msgs=%d err=%v", count, len(messages), err)
 	}
 	_ = s
+}
+
+type captureMultimodalLLM struct {
+	lastMessages []llm.Message
+}
+
+func (c *captureMultimodalLLM) StreamChat(_ context.Context, req llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	c.lastMessages = append([]llm.Message(nil), req.Messages...)
+	if handler.OnDelta != nil {
+		handler.OnDelta("ok")
+	}
+	return llm.ChatResult{Content: "ok", FinishReason: "stop"}, nil
+}
+
+func (c *captureMultimodalLLM) CompleteText(_ context.Context, _ llm.CompleteRequest) (string, error) {
+	return "mock summary", nil
+}
+
+func (c *captureMultimodalLLM) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
+func TestHumanMessageImageExpandedForLLM(t *testing.T) {
+	fsRoot := t.TempDir()
+	hub := stream.NewHub(32, logx.Discard())
+	reg, err := tools.NewRegistry(fsRoot, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := policy.LoadFile("")
+	capture := &captureMultimodalLLM{}
+	mgr := NewManager("agent-1", hub, capture, reg, pol, nil, TurnOptions{
+		FSRoot:            fsRoot,
+		SkillsEnabled:     false,
+		MultimodalEnabled: true,
+	}, logx.Discard())
+	defer mgr.Stop()
+
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dataURL := "data:image/png;base64,iVBORw0KGgo="
+	parts := []llm.ContentPart{{
+		Type:     "image_url",
+		ImageURL: &llm.ImageURLPart{URL: dataURL},
+	}}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "这个是什么图片", parts, nil, ""); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	deadline := time.After(3 * time.Second)
+	for capture.lastMessages == nil {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for llm call")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	var userMsg *llm.Message
+	for i := range capture.lastMessages {
+		if capture.lastMessages[i].Role == "user" {
+			userMsg = &capture.lastMessages[i]
+			break
+		}
+	}
+	if userMsg == nil {
+		t.Fatalf("no user message in llm request: %+v", capture.lastMessages)
+	}
+	if !llm.MessageHasImages(*userMsg) {
+		t.Fatalf("user message has no images: %+v", userMsg)
+	}
+	gotURL := ""
+	for _, part := range userMsg.ContentParts {
+		if part.Type == "image_url" && part.ImageURL != nil {
+			gotURL = part.ImageURL.URL
+			break
+		}
+	}
+	if !strings.HasPrefix(gotURL, "data:image/png;base64,") {
+		t.Fatalf("expected expanded data url, got %q parts=%+v", gotURL, userMsg.ContentParts)
+	}
 }

@@ -32,7 +32,6 @@ cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 | `name` | Manage 展示名；空则回退 `agent_id` |
 | `description` | Console 简介 |
 | `role` | **`compliance`** = 被调方（自动 expose + inbox + 合规 handler）；**`ops`** 等 = 调用方 |
-| `compliance_peer` | 调用方：`agent_invoke` 省略 `to_agent_id` 时的默认目标 |
 | `capabilities` | 可选；非空时覆盖 config 默认 capabilities（shell/filesystem 等） |
 | `metadata` | 可选自定义键，原样进入 Manage `card.metadata` |
 

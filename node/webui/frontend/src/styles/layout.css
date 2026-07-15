@@ -155,8 +155,10 @@
   color: var(--color-text-muted);
 }
 
-.product-header__icon-btn svg {
+.product-header__svg {
   display: block;
+  width: 16px;
+  height: 16px;
 }
 
 .session-history-item__badge--unread {

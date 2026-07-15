@@ -3,7 +3,16 @@ import { onMounted } from "vue";
 import ConfigPanelShell from "./ConfigPanelShell.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
-const TOOL_GROUPS = ["a2a", "bash", "child_agents", "fs", "hitl", "skills", "triggers"];
+const TOOL_GROUPS = [
+  { name: "a2a" },
+  { name: "bash" },
+  { name: "browser", beta: true },
+  { name: "child_agents" },
+  { name: "fs" },
+  { name: "hitl" },
+  { name: "skills" },
+  { name: "triggers" },
+];
 
 const { loading, saving, error, statusMessage, configPath, configWritable, form, load, save } =
   useSetupConfig();
@@ -49,11 +58,18 @@ onMounted(load);
   >
     <section class="settings-section">
       <h2 class="settings-section__title">内置工具组</h2>
-      <p class="setup-config-panel__hint">留空表示启用全部；勾选为允许列表。</p>
+      <p class="setup-config-panel__hint">留空表示启用全部；勾选为允许列表。标注 Beta 的组功能仍在试验中。</p>
       <div class="setup-config-panel__toggles">
-        <label v-for="g in TOOL_GROUPS" :key="g" class="settings-toggle">
-          <input type="checkbox" :checked="form.tools.enabled_groups?.includes(g)" @change="toggleGroup(g)" />
-          <span>{{ g }}</span>
+        <label v-for="g in TOOL_GROUPS" :key="g.name" class="settings-toggle">
+          <input
+            type="checkbox"
+            :checked="form.tools.enabled_groups?.includes(g.name)"
+            @change="toggleGroup(g.name)"
+          />
+          <span class="settings-toggle__label">
+            {{ g.name }}
+            <span v-if="g.beta" class="badge badge--beta" title="试验功能，接口与稳定性可能变更">Beta</span>
+          </span>
         </label>
       </div>
     </section>

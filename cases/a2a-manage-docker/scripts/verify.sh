@@ -107,7 +107,7 @@ check "Agent Card 已注册（合规助手）" bash -ec "
 
 check "Agent Card 已注册（运维助手）" bash -ec "
   curl -sf '${MANAGE_URL}/v1/registry/agents/node-b?discovery_group=${DISCOVERY_GROUP}' \\
-    | python3 -c \"import json,sys; a=json.load(sys.stdin); assert a['card']['metadata']['compliance_peer']=='node-a', a; assert a['card']['name']=='运维执行助手', a; print('ok')\"
+    | python3 -c \"import json,sys; a=json.load(sys.stdin); assert a['card']['name']=='运维执行助手', a; print('ok')\"
 "
 
 check "custom.md 与 Agent Card 角色" bash -c '

@@ -12,7 +12,21 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-func TestAgentInvokeUsesCompliancePeerDefault(t *testing.T) {
+func TestAgentInvokeRequiresToAgentID(t *testing.T) {
+	reg, err := NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: "http://127.0.0.1:1"}}
+	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", nil)
+
+	_, err = reg.Execute(context.Background(), "agent_invoke", `{"content":"test","call_purpose":"test"}`)
+	if err == nil || !strings.Contains(err.Error(), "to_agent_id is required") {
+		t.Fatalf("expected to_agent_id required, got %v", err)
+	}
+}
+
+func TestAgentInvokeWithExplicitToAgentID(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/a2a/tasks":
@@ -42,10 +56,10 @@ func TestAgentInvokeUsesCompliancePeerDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
-	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", "node-a", nil)
+	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", nil)
 
 	ctx := WithSession(context.Background(), "sess-x")
-	out, err := reg.Execute(ctx, "agent_invoke", `{"content":"【合规咨询】测试","call_purpose":"合规咨询"}`)
+	out, err := reg.Execute(ctx, "agent_invoke", `{"content":"【合规咨询】测试","to_agent_id":"node-a","call_purpose":"合规咨询"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +73,7 @@ func TestAgentInvokeRequiresManageRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = reg.Execute(context.Background(), "agent_invoke", `{"content":"x","call_purpose":"test"}`)
+	_, err = reg.Execute(context.Background(), "agent_invoke", `{"content":"x","to_agent_id":"node-a","call_purpose":"test"}`)
 	if err == nil || !strings.Contains(err.Error(), "unknown tool") {
 		t.Fatalf("expected unknown tool error, got %v", err)
 	}
@@ -74,7 +88,7 @@ func TestAgentInvokeInDefinitionsWhenConfigured(t *testing.T) {
 		t.Fatal("expected agent_invoke absent before SetManageRuntime")
 	}
 	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: "http://127.0.0.1:1"}}
-	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", "node-a", nil)
+	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", nil)
 	if !hasToolName(reg.Definitions(), "agent_invoke") {
 		t.Fatal("expected agent_invoke present after SetManageRuntime")
 	}
@@ -105,7 +119,7 @@ func TestAgentDiscoverUsesCallerGroupsFromManage(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
-	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", "", nil)
+	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", nil)
 
 	out, err := reg.Execute(context.Background(), "agent_discover", `{"call_purpose":"发现 peer"}`)
 	if err != nil {

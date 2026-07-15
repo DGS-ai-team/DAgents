@@ -55,5 +55,5 @@ func UserUploadRelPath(sessionID, mediaID, ext string) string {
 	if ext != "" && !strings.HasPrefix(ext, ".") {
 		ext = "." + ext
 	}
-	return ".runtime/media/" + sessionID + "/" + mediaID + ext
+	return "media/" + sessionID + "/" + mediaID + ext
 }

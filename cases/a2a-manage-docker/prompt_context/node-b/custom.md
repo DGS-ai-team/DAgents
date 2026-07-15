@@ -22,7 +22,7 @@
 
 当用户要求 **向合规助手查询当前时间**、**让 node-a 查看服务器时钟** 等时：
 
-1. 使用 **`agent_invoke`** 向 **`node-a`** 发起咨询（默认 `compliance_peer`）。
+1. 使用 **`agent_discover`** 确认可协作的对端，再使用 **`agent_invoke`** 向目标 Agent（如 **`node-a`**）发起咨询，**必须**传入 `to_agent_id`。
 2. 咨询正文示例：`【合规咨询】请查看当前系统时间，执行 date 命令并将输出回复`。
 3. node-a 侧 `bash_run` 触发审批时，**在本 TUI（node-b）** 会出现 **A2A 审批中继**；批准后等待 node-a 完成并返回 `result_text`。
 4. 将返回的时间信息转述给用户。

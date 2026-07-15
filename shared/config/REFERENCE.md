@@ -23,7 +23,7 @@
 | `(t *ToolsConfig) NormalizedBuiltinEnabledGroups` | `method` | 去重规范化 `tools.enabled_groups` |
 | `(t *ToolsConfig) NormalizedBuiltinEnabled` | `method` | 将 `enabled_groups` 展开为工具名；空=未配置允许列表 |
 | `ManageConfig` | `struct` | Manage 开关、URL、node_token、`registration`、`a2a` |
-| `AgentConfig` | `struct` | `name`、`description`、`role`、`compliance_peer`、`capabilities`、`metadata` |
+| `AgentConfig` | `struct` | `name`、`description`、`role`、`capabilities`、`metadata` |
 | `(c *Config) AgentRole` | `method` | A2A 角色（compliance/ops） |
 | `(c *Config) ExposeToPeersEffective` | `method` | role=compliance 时为 true |
 | `(c *Config) ManageA2AEnabled` | `method` | 是否启动 inbox poller（默认随 role） |

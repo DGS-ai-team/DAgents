@@ -305,7 +305,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			o.tools.SetManageRuntime(
 				a2aclient.New(cfg),
 				cfg.AgentID,
-				cfg.CompliancePeer(),
 				a2aBridge,
 			)
 		}

@@ -27,10 +27,9 @@ type Registry struct {
 	bgJobs              *backgroundJobRegistry
 	triggerStore        *triggers.Store
 	triggerSched        *triggers.Scheduler
-	manageClient        *a2aclient.Client
-	a2aCallerHITL       a2aclient.A2ACallerHITLHandler
-	compliancePeer      string
-	agentID             string
+	manageClient  *a2aclient.Client
+	a2aCallerHITL a2aclient.A2ACallerHITLHandler
+	agentID       string
 	skillsCatalogHolder
 	enabledOnly         map[string]struct{}
 	multimodalEnabled   bool

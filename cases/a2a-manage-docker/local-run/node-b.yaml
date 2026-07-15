@@ -4,7 +4,6 @@ agent:
   name: 运维执行助手
   description: 负责发布、数据导出与日常运维；高风险操作前须向合规助手发起 A2A 咨询。
   role: ops
-  compliance_peer: node-a
   capabilities:
     - deployment
     - data_export

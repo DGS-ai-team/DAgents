@@ -72,7 +72,7 @@ Manage **不会**在 Node 注册时自动填 `discovery_group`；该字段由 Ma
 DISCOVERY_GROUP=a2a-lab MANAGE_URL=http://127.0.0.1:8020 ./scripts/assign-discovery-groups.sh
 ```
 
-若跳过 `init-groups` 或未分配分组，`agent_discover` 将返回空列表，`agent_invoke` 将被拒绝（即使 Agent Card 配置了 `compliance_peer: node-a`）。
+若跳过 `init-groups` 或未分配分组，`agent_discover` 将返回空列表，`agent_invoke` 将被拒绝。
 
 ### 1.4 修改 `.env` 后必须重建容器
 
@@ -140,7 +140,7 @@ go run ./client/cmd/dagents-client \
 
 若出现 `401` / `Authentication Fails`，检查本目录 `.env` 的 `LLM_API_KEY` 与 `LLM_MODEL` 是否有效，并按 [§1.4](#14-修改-env-后必须重建容器) 重建容器。
 
-> node-b 已接入 **`agent_invoke`** / **`agent_discover`** 工具：`agent_invoke` 向 **node-a** 发起合规咨询并等待 `result_text`（默认目标为 Agent Card `metadata.compliance_peer`）。**前提**：双方在 Manage 上已分配**相同**的 `discovery_group`（见 [§1.3](#13-discovery_groupa2a-必需)）。
+> node-b 已接入 **`agent_invoke`** / **`agent_discover`** 工具：须先发现对端，再向目标 Agent（如 **node-a**）发起合规咨询并等待 `result_text`（**必须**传入 `to_agent_id`）。**前提**：双方在 Manage 上已分配**相同**的 `discovery_group`（见 [§1.3](#13-discovery_groupa2a-必需)）。
 
 ### 3.2 合规咨询 Task · node-a LLM 回复（原样）
 
@@ -220,7 +220,7 @@ bash scripts/verify-bash-hitl.sh
 | `prompt_context/node-b/custom.md` | 用户自定义提示词（运维门禁、A2A 查时/HITL 中继指引等） |
 | `policy/node-a/tool.approval.txt` | node-a **`bash_run=always`**（A2A HITL 联调） |
 | `agent-card/node-a.json` | 名称「合规助手」；`metadata.role=compliance`；能力 `compliance_review` / `policy_lookup` |
-| `agent-card/node-b.json` | 名称「运维执行助手」；`metadata.compliance_peer=node-a`；能力 `deployment` / `data_export` / `shell` |
+| `agent-card/node-b.json` | 名称「运维执行助手」；`metadata.role=ops`；能力 `deployment` / `data_export` / `shell` |
 | `config/node-a.yaml` | 开启 `manage.a2a` Inbox；`registration` 仅含 `base_url` / `team` 等（**无** `agent_card_path`）；LLM 支持 `${LLM_*}` |
 | `config/node-b.yaml` | A2A Inbox 关闭（作调用方）；同样无 `agent_card_path` |
 | `local-run/node-{a,b}.yaml` | **宿主机 Client/TUI** 连 `127.0.0.1` 映射端口；本地联调 Node 时工作目录须含 `agent-card.json`（见 `scripts/start-local.sh`） |

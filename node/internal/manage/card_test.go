@@ -28,17 +28,3 @@ func TestRegistrationCard_fromConfig(t *testing.T) {
 		t.Fatalf("metadata = %v", card["metadata"])
 	}
 }
-
-func TestRegistrationCard_compliancePeer(t *testing.T) {
-	cfg := &config.Config{
-		Agent: config.AgentConfig{
-			Role:           "ops",
-			CompliancePeer: "node-a",
-		},
-	}
-	card := RegistrationCard(cfg)
-	meta := card["metadata"].(map[string]any)
-	if meta["compliance_peer"] != "node-a" {
-		t.Fatalf("peer = %v", meta["compliance_peer"])
-	}
-}

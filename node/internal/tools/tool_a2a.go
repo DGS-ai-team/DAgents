@@ -15,7 +15,7 @@ const defaultAgentInvokeTimeout = 90 * time.Second
 // SetManageRuntime 注入 Manage A2A 客户端；manage.enabled 时由 server 调用。
 func (r *Registry) SetManageRuntime(
 	client *a2aclient.Client,
-	agentID, compliancePeer string,
+	agentID string,
 	hitl a2aclient.A2ACallerHITLHandler,
 ) {
 	r.manageClient = client
@@ -23,7 +23,6 @@ func (r *Registry) SetManageRuntime(
 	if id := strings.TrimSpace(agentID); id != "" {
 		r.agentID = id
 	}
-	r.compliancePeer = strings.TrimSpace(compliancePeer)
 	if client != nil {
 		r.handlers["agent_invoke"] = r.execAgentInvoke
 		r.handlers["agent_discover"] = r.execAgentDiscover
@@ -53,14 +52,14 @@ func agentInvokeToolDef() ToolDef {
 					},
 					"to_agent_id": map[string]any{
 						"type":        "string",
-						"description": "目标 Agent ID（可选；省略时使用 Agent Card metadata.compliance_peer）",
+						"description": "目标 Agent ID（必填；可先 agent_discover 确认对端）",
 					},
 					"timeout_seconds": map[string]any{
 						"type":        "integer",
 						"description": "最长等待对端回复秒数（可选，默认 90）",
 					},
 				},
-				"required":             []string{"content"},
+				"required":             []string{"content", "to_agent_id"},
 				"additionalProperties": false,
 			}),
 		},
@@ -115,10 +114,7 @@ func (r *Registry) execAgentInvoke(ctx context.Context, args json.RawMessage) (s
 	}
 	toAgentID := strings.TrimSpace(in.ToAgentID)
 	if toAgentID == "" {
-		toAgentID = r.compliancePeer
-	}
-	if toAgentID == "" {
-		return "", fmt.Errorf("to_agent_id is required (or set Agent Card metadata.compliance_peer)")
+		return "", fmt.Errorf("to_agent_id is required")
 	}
 	timeout := defaultAgentInvokeTimeout
 	if in.TimeoutSeconds > 0 {

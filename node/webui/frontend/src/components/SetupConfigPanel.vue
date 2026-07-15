@@ -157,7 +157,13 @@ onMounted(load);
         <label class="settings-toggle"><input v-model="form.features.triggers_enabled" type="checkbox" /><span>Triggers</span></label>
         <label class="settings-toggle"><input v-model="form.features.child_agents_enabled" type="checkbox" /><span>Child Agents</span></label>
         <label class="settings-toggle"><input v-model="form.features.ui_enabled" type="checkbox" /><span>Web UI</span></label>
-        <label class="settings-toggle"><input v-model="form.features.browser_enabled" type="checkbox" /><span>Browser 工具</span></label>
+        <label class="settings-toggle">
+          <input v-model="form.features.browser_enabled" type="checkbox" />
+          <span class="settings-toggle__label">
+            Browser 工具
+            <span class="badge badge--beta" title="试验功能，接口与稳定性可能变更">Beta</span>
+          </span>
+        </label>
         <label class="settings-toggle"><input v-model="form.features.multimodal_enabled" type="checkbox" /><span>多模态 / Vision</span></label>
         <label class="settings-toggle"><input v-model="form.features.raw_message_history_enabled" type="checkbox" /><span>原始消息 JSONL</span></label>
       </div>
@@ -174,7 +180,11 @@ onMounted(load);
     </section>
 
     <section v-if="form.features.browser_enabled" class="settings-section">
-      <h2 class="settings-section__title">Browser 服务</h2>
+      <h2 class="settings-section__title">
+        Browser 服务
+        <span class="badge badge--beta" title="试验功能，接口与稳定性可能变更">Beta</span>
+      </h2>
+      <p class="setup-config-panel__hint">Browser 工具组目前为 Beta：依赖独立 browser 服务，能力与 schema 可能后续调整。</p>
       <label class="settings-field">
         <span class="settings-field__label">Service URL</span>
         <input v-model="form.browser.service_url" class="settings-field__input" type="text" autocomplete="off" />

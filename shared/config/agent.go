@@ -4,12 +4,11 @@ import "strings"
 
 // AgentConfig 描述 Agent 对外身份与 A2A 角色（原 agent-card.json 内容）。
 type AgentConfig struct {
-	Name           string         `yaml:"name"`
-	Description    string         `yaml:"description"`
-	Role           string         `yaml:"role"`
-	CompliancePeer string         `yaml:"compliance_peer"`
-	Capabilities   []string       `yaml:"capabilities"`
-	Metadata       map[string]any `yaml:"metadata"`
+	Name         string         `yaml:"name"`
+	Description  string         `yaml:"description"`
+	Role         string         `yaml:"role"`
+	Capabilities []string       `yaml:"capabilities"`
+	Metadata     map[string]any `yaml:"metadata"`
 }
 
 // AgentRole 返回 A2A 角色（如 compliance、ops）；空串表示非 A2A 专用角色。
@@ -37,14 +36,6 @@ func (c *Config) AgentDescription() string {
 		return ""
 	}
 	return strings.TrimSpace(c.Agent.Description)
-}
-
-// CompliancePeer 返回 agent_invoke 默认目标 Agent ID。
-func (c *Config) CompliancePeer() string {
-	if c == nil {
-		return ""
-	}
-	return strings.TrimSpace(c.Agent.CompliancePeer)
 }
 
 // RegistrationCapabilities 返回注册 Manage 时的 capabilities；agent.capabilities 非空时覆盖 config 默认。

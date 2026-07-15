@@ -80,10 +80,6 @@ onMounted(load);
         <span class="settings-field__label">Role（A2A）</span>
         <input v-model="form.agent.role" class="settings-field__input" type="text" placeholder="compliance / ops" autocomplete="off" />
       </label>
-      <label class="settings-field">
-        <span class="settings-field__label">默认 compliance_peer</span>
-        <input v-model="form.agent.compliance_peer" class="settings-field__input" type="text" autocomplete="off" />
-      </label>
     </section>
   </ConfigPanelShell>
 </template>

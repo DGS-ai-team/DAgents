@@ -31,9 +31,6 @@ func RegistrationCard(cfg *config.Config) map[string]any {
 	if role := cfg.AgentRole(); role != "" {
 		meta["role"] = role
 	}
-	if peer := cfg.CompliancePeer(); peer != "" {
-		meta["compliance_peer"] = peer
-	}
 	if len(meta) > 0 {
 		out["metadata"] = meta
 	}

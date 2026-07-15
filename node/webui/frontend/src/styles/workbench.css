@@ -201,6 +201,22 @@
 .badge--low { background: var(--color-success-soft); color: var(--color-success); }
 .badge--medium { background: var(--color-warning-soft); color: var(--color-warning); }
 .badge--high { background: var(--color-danger-soft); color: var(--color-danger); }
+.badge--beta {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4f46e5;
+  vertical-align: middle;
+}
+
+.settings-toggle__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-section__title .badge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
 
 /* ---------- approval tool bubble (inline in chat stream) ---------- */
 

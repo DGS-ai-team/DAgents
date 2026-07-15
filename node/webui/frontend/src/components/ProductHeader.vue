@@ -47,11 +47,13 @@ function openChat() {
         aria-label="返回对话"
         @click="openChat"
       >
-        <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">
+        <svg class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path
-            fill-rule="evenodd"
-            d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-            clip-rule="evenodd"
+            d="M10.5 3.5 6 8l4.5 4.5"
+            stroke="currentColor"
+            stroke-width="1.25"
+            stroke-linecap="round"
+            stroke-linejoin="round"
           />
         </svg>
       </button>
@@ -62,11 +64,13 @@ function openChat() {
         title="设置"
         aria-label="设置"
       >
-        <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">
+        <svg class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.25" />
           <path
-            fill-rule="evenodd"
-            d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886 0 1.951-.864 2.494-1.56.384-1.56 2.6 0 2.978a1.532 1.532 0 01.948 2.286c-.836 1.372.734 2.942 2.106 2.106 1.372-.836 2.942.734 2.106 2.106a1.532 1.532 0 012.286.948c.384 1.56 2.6 1.56 2.978 0a1.533 1.533 0 012.286-.948c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.948-2.286c1.372-.836.734-2.942-2.106-2.106a1.532 1.532 0 01-.948-2.286c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.286-.948zM10 13a3 3 0 100-6 3 3 0 000 6z"
-            clip-rule="evenodd"
+            d="M8 2.25v1.5M8 12.25v1.5M2.25 8h1.5M12.25 8h1.5M3.7 3.7l1.06 1.06M11.24 11.24l1.06 1.06M3.7 12.3l1.06-1.06M11.24 4.76l1.06-1.06"
+            stroke="currentColor"
+            stroke-width="1.25"
+            stroke-linecap="round"
           />
         </svg>
       </router-link>
