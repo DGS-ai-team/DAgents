@@ -1,6 +1,6 @@
 # `.runtime/skills/`（发布包内）
 
-随预编译包放入 **`bundle/.runtime/skills/`**；与代码包 **`app/harness/skills/`**（**`load_skills`** 实现）不同。
+随预编译包放入 **`bundle/.runtime/skills/`**；加载实现见 Go **`node/internal/skills/`**（`load_skills` 工具）。
 
 技能根目录固定为 **`<运行根>/.runtime/skills`**（**`runtime_layout.skills_dir()`**）。
 

@@ -8,8 +8,15 @@
 |------|----------|
 | `three-component-model.md` | [01-愿景与架构](../handbook/01-愿景与架构.md) §2 |
 | `major-changes.md` | [附录/重大设计变更实录](../handbook/附录/重大设计变更实录.md) |
-| `agent-client-refactor-plan.md` | [01](../handbook/01-愿景与架构.md) §5 |
+| `agent-client-refactor-plan.md` | [01](../handbook/01-愿景与架构.md) §5（已完成，实施记录） |
 | `manage-architecture.md` | [05-Manage与A2A](../handbook/05-Manage与A2A.md) |
+| `manage-phase2-capabilities.md` | Manage Phase 2 规划（制品同步、Workflow 等） |
+| `release-update-hub.md` | Release Hub（Manage 托管 + Node 更新检查） |
+| `agent-hooks.md` | Hook 扩展点（已落地） |
+| `turn-side-effects-refactor.md` | 旁路事件 Produce/Apply 规格 |
+| `context-compression-cache-analysis.md` | 压缩 × Prompt Cache 分析 |
+| `tool-context-cost-analysis.md` | 工具链上下文成本（WS1/3/5/6） |
+| `background-and-motivation.md` | 重构动机 → handbook §1 |
 
 | `browser-tools-and-demonstration.md` | Browser Tools + 演示录制/回放 |
 | `browser-remote-service-mode-a.md` | 模式 A：browser-use 薄服务 |

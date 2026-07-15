@@ -240,7 +240,7 @@ local:
 
 - Release：`dagents-local-assistant-*`（Linux tarball / Windows zip / 安装包）  
 - `dagents chat|tui --withnode`：自动后台起 Node  
-- 详见 [06 §6.2](./06-运维与案例.md)
+- 详见 [06 §2 打包与安装](./06-运维与案例.md#2-打包与安装)
 
 ---
 

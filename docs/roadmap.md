@@ -32,7 +32,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 | **0.2.3** | **已发布** | Windows 安装包、Linux `install.sh`；`tools.bash_output_encoding`（GBK 解码）；子 Agent prompt 与双 TUI 展示（见 **CHANGELOG**）。 |
 | **0.2.2** | **已发布** | HITL 工具审批修复；临时 Agent 协议整理；文档归档与 go-node-internals（见 **CHANGELOG**）。 |
 | **0.2.0** | **已发布** | Go Agent Node + Client 本地助手主线；Python Agent 运行时移除；触发器日历调度（见 **CHANGELOG**）。 |
-| **0.1.0** | **已发布** | 首个对外标记版本：Python 核心 API、SQLite、SSE、Register Center、文档与单测基线。 |
+| **0.1.0** | **已发布** | 首个对外标记版本（详见 **CHANGELOG**）。 |
 | **0.x** | **进行中** | 以 Go 本地助手 + 企业治理为主线；**1.0** 前允许不兼容调整。 |
 | **1.0** | **目标** | 企业本地闭环、Agent Directory、治理审计、触发器控制面、Skill Library 的核心 API 与配置形态相对稳定。 |
 
@@ -59,23 +59,23 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 ### 3.3 上下文、压缩与提示词
 
-- **Summary 压缩**：静默 / 阻塞阈值、SSE 压缩事件（Go：[design/major-changes.md](./design/major-changes.md#1-上下文压缩与-prompt-cache-对齐m2--m3)）。
+- **Summary 压缩**：静默 / 阻塞阈值、SSE 压缩事件（Go：[handbook/附录/重大设计变更实录.md](./handbook/附录/重大设计变更实录.md#1-上下文压缩与-prompt-cache-对齐m2--m3)）。
 - **SQLite 会话持久化**：**`{fs_root}/memory/sessions.db`**；原始消息 **JSONL** 审计（**`node/internal/store/`**、**`node/internal/history/`**）。
 - **系统提示词**：静态段 + **`.runtime/prompt_context/`** 侧车 + skills 正文 + 主机快照；子 Agent 独立 **`BuildChildSystemPrompt`**。
 
-### 3.4 触发器、子 Agent 与 Register Center
+### 3.4 触发器、子 Agent 与 Manage
 
 - **触发器（Go Node）**：**`interval` / `fire_at` / 日历 `schedule`**（含 **`cmd` 门控**）；**`trigger_*`** 工具 + 调度器（**`node/internal/triggers/`**；设计见 [triggers-design.md](./triggers-design.md)）；**v0.2.16** 起 TUI **`/triggers`** 与 trigger 会话目标审批。
-- **Hook 扩展点（设计稿）**：统一 turn 全链路 **阶段锚点** 与 `HookRegistry`；设计见 [design/agent-hooks.md](./design/agent-hooks.md)；**`node/internal/hooks/` 尚未实现**。
+- **Hook 扩展点**：统一 turn 全链路阶段锚点与 `HookRegistry`；**已落地**于 `node/internal/hooks/`（见 [design/agent-hooks.md](./design/agent-hooks.md)）。
 - **临时子 Agent**：同进程 **`create_temporary_agent` → `wait_temporary_agents`**；非跨进程 A2A（[child-agent-tools.md](./architecture/child-agent-tools.md)）。
-- **Register Center（独立 Python 服务）**：登记、**`/v1/broadcast`**、**`/v1/relay`**、可选 JSON 持久化（**`register_center/`**）。**Go Node 不直连 RC、不自登记**；Agent 侧 **`agent_peer`** 工具已随 Python API 移除，端到端 A2A 待 **Manage** 阶段（[future/a2a-via-manage.md](./future/a2a-via-manage.md)）。
+- **Manage 统一控制面**：`manage/`（Registry、A2A、Console 等）。Go Node `manage.enabled` 时自动注册并提供 `agent_invoke` / `agent_discover`（[handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md)）。
 
 ### 3.5 打包、工程与文档
 
 - **分发**：GitHub Releases **`dagents-local-assistant-*`**（linux tarball / windows zip）；**v0.2.3** 起 **Windows Inno 安装包**、**Linux `install.sh`**（[client-packaging.md](./architecture/client-packaging.md)）。
-- **CI**：**`go-ac.yml`**（Go 单测与交叉编译）、**`manual-package`**（Release 组装）；Register Center / Python CLI 单测保留。
+- **CI**：**`go-ac.yml`**（Go 单测与交叉编译）、**`manual-package`**（Release 组装）；Manage / Python CLI 单测。
 - **技术文档**：架构总览、Node 内部、AC 计划、归档 Python 运行时等（**`docs/`**）。
-- **落地案例目录**：**[`cases/`](../../cases/)**（索引见 **[`cases/README.md`](../../cases/README.md)**；每案含 Docker 复现环境）。
+- **落地案例目录**：**[`cases/`](../cases/)**（索引见 **[`cases/README.md`](../cases/README.md)**；每案含 Docker 复现环境）。
 
 ---
 
@@ -89,31 +89,31 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 > 启动 DAgents（Node + Client）→ 提交运维问题 → 请求工具审批 → 执行诊断脚本 → 查看结果 → 查看 JSONL 审计。
 
-**跨 Agent 发现/协作**（Register Center 目录、A2A 投递）在 **Manage 阶段**与 Agent Directory UI 一并交付；Phase 0 以 **单 Node 本地助手 + 可选 RC 独立启动** 为主。
+**跨 Agent 发现/协作**经 **Manage**（Registry + A2A）。Phase 0 以 **单 Node 本地助手 + 可选 Manage** 为主。
 
 优先交付：
 
-- **一键本地启动**：Node、Client、示例 skill/script、示例审批流；Register Center 作为可选侧车（**`dagents register-center`** / 安装包入口）。
-- **Docker Compose / 本地启动脚本**：默认 SQLite，可选 PostgreSQL；支持 OpenAI-compatible provider 与本地模型网关。
-- **安装与 CLI 入口**：继续保留 Windows / Linux 安装包方向，安装后通过命令启动；CLI 作为本地调试、运维和审批入口。
-- **首次启动诊断**：检查端口占用、模型配置、Register Center 可达性、UI API base、policy 文件与 runtime 目录。
+- **一键本地启动**：Node、Client、示例 skill/script、示例审批流；可选 Manage（`python run_manage.py` / Docker）。
+- **Docker Compose / 本地启动脚本**：默认 SQLite；支持 OpenAI-compatible provider 与本地模型网关。
+- **安装与 CLI 入口**：Windows / Linux 安装包；CLI 作为本地调试、运维和审批入口。
+- **首次启动诊断**：检查端口占用、模型配置、Manage 可达性、policy 文件与 runtime 目录。
 - **强 demo**：围绕服务延迟诊断、带审批的服务重启、会话沉淀 skill 三个场景做端到端演示。
 
-**Phase 0 进度（2026-06-10）**：
+**Phase 0 进度**：
 
 | 项 | 状态 | 备注 |
 |----|------|------|
-| 一键本地启动 | **大部分完成** | `--withnode`、`dagents register-center`、安装包 |
-| Docker Compose / 本地脚本 | **部分** | [`cases/centos7-feature-tour`](../../cases/centos7-feature-tour/) 等案例；尚无企业默认 compose |
+| 一键本地启动 | **大部分完成** | `--withnode`、Manage Docker、安装包 |
+| Docker Compose / 本地脚本 | **部分** | `cases/` 案例；尚无企业默认 compose |
 | 安装与 CLI | **完成** | Windows / Linux 安装包 + 双 TUI |
-| 首次启动诊断 | **未做** | 端口、模型、RC、policy、runtime 一键检查 |
+| 首次启动诊断 | **未做** | 端口、模型、Manage、policy、runtime 一键检查 |
 | 强 demo（三场景） | **部分** | cases 与 skill 能力具备；三场景未打包为单一导览 |
 
-### Phase 1：Agent Directory / Register Center 企业化（P0/P1）
+### Phase 1：Manage Registry 企业化（P0/P1）
 
-目标：将 Register Center 从技术组件升级为企业 Agent 目录。
+目标：将 Agent 目录从 MVP 升级为企业可治理的 Registry。
 
-**变更草案**：[design/agent-directory-phase1.md](./design/agent-directory-phase1.md)（数据模型、API、鉴权、分阶段里程碑 P1.1–P1.6）。
+**架构**：[design/manage-architecture.md](./design/manage-architecture.md) §3.1。
 
 优先交付：
 
@@ -160,7 +160,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
   - Webhook / 队列触发：CI、告警平台、工单系统、内部事件总线。
   - 文件 / 配置变更触发：配置漂移、日志文件变化、目录事件。
   - 指标阈值触发：Prometheus 指标、健康检查、SLO/错误率阈值。
-  - Register Center 事件触发：Agent 上线/下线、能力变更、broadcast/relay 过滤匹配。
+  - Manage Registry 事件触发：Agent 上线/下线、能力变更。
 - **触发器资源模型**：`trigger_id`、`name`、`description`、`owner`、`team`、`source_type`、`condition`、`target_agent_id`、`session_template`、`task_template`、`risk_level`、`enabled`、`last_fired_at`、`next_fire_at`、`cooldown`、`max_concurrency`、`approval_policy`。
 - **幂等与去抖**：按事件 key、时间窗口、状态版本去重，避免告警风暴或重复执行。
 - **并发与队列语义**：触发器最终应映射为向既有 `session_id` 投递消息，或模板化创建会话并投递首轮任务；必须尊重 `MessageQueue` 串行消费。
@@ -215,7 +215,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 - **企业身份集成**：先做 `admin`、`operator`、`developer`、`viewer`、`agent-service-account`，后续接 LDAP/OIDC/SSO/RBAC。
 - **模型路由**：OpenAI-compatible、Ollama/vLLM/LM Studio/私有网关；按任务和数据敏感级别路由；记录 token 和成本。
 - **安全沙箱**：script sandbox、工作目录隔离、超时、资源限制、网络限制、环境变量白名单、secret masking、dry-run、diff preview、command allowlist/denylist。
-- **Register Center HA**：共享存储、鉴权、健康剔除、备份恢复、多副本部署。
+- **Manage HA**：共享存储、鉴权、健康剔除、备份恢复、多副本部署。
 - **HTTP API 覆盖**：补齐关键路由自动化测试，尤其是审批、审计、触发器、Agent Directory、Skill Library。
 
 ---
@@ -228,15 +228,15 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 |----|------|------|
 | **RHEL 6 / Win2012 真机验收** | 静态构建与 SysV init 脚本已就绪；**真机 E2E 记录**仍 open（N7）。 | [rhel6-acceptance-checklist.md](./architecture/rhel6-acceptance-checklist.md)、[agent-client-refactor-plan.md](./design/agent-client-refactor-plan.md) |
 | **长期记忆文件** | **`.runtime/memory/long_term.md`** 在 prompt 中有说明位，产品化读写与治理待 Phase 2+。 | **`node/internal/turn/prompt.go`** |
-| **Manage / A2A 控制面** | Manage **M2 Task API** 已实现；Node **inbox poller** 骨架已接；工具层 `agent_invoke` 与 session 入队待接。 | [future/a2a-via-manage.md](./future/a2a-via-manage.md) |
+| **Manage / A2A** | Registry、A2A Task、HITL 中继、`agent_invoke` 已落地；broadcast、Node 制品同步待做。 | [manage-architecture.md](./design/manage-architecture.md) |
 | **Browser Tools + 操作演示** | Phase 1/1.5 已落地（**模式 A：browser-use 薄服务**）→ 录制 → 回放 | [design/browser-tools-and-demonstration.md](./design/browser-tools-and-demonstration.md) |
 
 ### 5.2 架构级缺口（非小修）
 
 | 项 | 说明 |
 |----|------|
-| **Register Center 高可用与共享存储** | 已有默认内存表 + 可选单文件 JSON 持久化，能覆盖单实例重启恢复；多副本仍无共享状态。后续应在 Agent Directory 阶段合并设计数据库/一致性存储、鉴权、健康剔除。 |
-| **HTTP API 单测覆盖** | **0.x 已知限制**：Go Node 与 Register Center 均未全路由自动化覆盖；后续应优先覆盖治理、审计、触发器与 Agent Directory。 |
+| **Manage 高可用与共享存储** | SQLite 单实例；多副本 PostgreSQL / 共享 Blob 待设计。 |
+| **HTTP API 单测覆盖** | **0.x 已知限制**：部分路由未全自动化覆盖；优先治理、审计、触发器、Manage。 |
 | **多运行时抽象** | 主路径深度绑定 **OpenAI 兼容形态**；短期不作为主线，除非企业私有模型接入需要统一抽象。 |
 | **触发器企业控制面** | Go Node 已具备 **trigger 资源模型 + 调度器 + 工具**；尚缺 Webhook/指标阈值等类型、幂等去抖、死信、触发审计 UI 与跨租户治理。 |
 | **Skill 生命周期尚未产品化** | 当前 skills 更接近工具/提示词扩展，尚未形成可审批、可版本化、可回滚、可统计的企业 Skill Library。 |
@@ -245,7 +245,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 | 项 | 说明 |
 |----|------|
-| **[`cases/`](../../cases/) 案例** | 含 **`centos7-feature-tour`**（CentOS 7 + HTTP 特性导览）；后续可扩展 HITL、triggers 等专题 case。 |
+| **[`cases/`](../cases/) 案例** | 含 **`centos7-feature-tour`**（CentOS 7 + HTTP 特性导览）；后续可扩展 HITL、triggers 等专题 case。 |
 | **1.0 稳定性门槛** | 兼容性承诺、废弃策略、发布节奏待与 **CHANGELOG / Releases** 对齐后写清。 |
 
 ---
@@ -273,4 +273,4 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 ---
 
-**最后更新**：2026-06-10 — 对齐 **v0.2.17**（policy/triggers TUI、async HITL、FS encoding）；补充 **Phase 0/1 进度表** 与 [agent-directory-phase1.md](./design/agent-directory-phase1.md) 草案。**Agent 侧 A2A 工具已移除**，跨 Agent 协作列入 **Manage** 远期。若与代码冲突，以 **Git / CHANGELOG** 为准。
+**最后更新**：2026-07-13 — Manage 控制面见 [design/manage-architecture.md](./design/manage-architecture.md)。若与代码冲突，以 **Git / CHANGELOG** 为准。

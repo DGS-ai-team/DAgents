@@ -1,7 +1,7 @@
 # Manage 后续能力规划（Phase 2+）
 
 > **状态**：规划稿（2026-06-18）  
-> **对齐**：[manage-architecture.md](./manage-architecture.md)、[manage-llm-skills-pageagent.md](./manage-llm-skills-pageagent.md)（PR #31 基线）  
+> **对齐**：[manage-architecture.md](./manage-architecture.md)  
 > **读者**：Manage / Node 开发者、PR #31 及后续迭代作者
 
 PR #31 交付 Manage 侧 **LLM 配置注册**、**Skills 精简分发**、**Blob API** 与 Console 管理页。本文定义 **Phase 2+** 四条主线，并要求在 PR #31 及后续实现中 **预留接口契约**，避免与「全量强推同步」绑死。
@@ -72,6 +72,8 @@ Node  GET /v1/marketplace/catalog（或 manifest）
 ---
 
 ## 2. 版本发布中枢（Release Hub）
+
+> **实现状态（2026-07）**：**Manage 侧已落地**（`manage/releases/`、`GET /v1/releases/check`、Console 版本发布页）；Node `UpdateChecker` 已对接。本文 §2.2 路径为早期草图，**现网 API 见 [release-update-hub.md](./release-update-hub.md) 与 [manage/README.md](../../manage/README.md)**。
 
 ### 2.1 定位
 

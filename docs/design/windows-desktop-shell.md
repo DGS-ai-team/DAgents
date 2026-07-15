@@ -1,6 +1,6 @@
 # Windows Desktop Shell — 功能清单与架构决策
 
-**状态（2026-07）**：规划中（`desktop/tray/` 为最小范例，尚未接入安装包）。  
+**状态（2026-07）**：**v0.6.0 已发布**；`desktop/tray/` 为 `dagents-shell`（SSE/Hydrate/Toast/更新编排）。  
 **范围**：**仅 Windows**（不含 Linux/macOS 桌面壳）。  
 **读者**：产品 / 实现 / 安装包；与 [local-assistant.md](../architecture/local-assistant.md)、[client-packaging.md](../architecture/client-packaging.md) 配套。
 

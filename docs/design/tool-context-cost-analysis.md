@@ -3,7 +3,7 @@
 > 分支：`feat/tool-context-cost-optimization`（**已落地**）  
 > 范围：Go Node 内置工具、`turn` 工具结果写回、编排 dispatch  
 > 正交专题：[context-compression-cache-analysis.md](./context-compression-cache-analysis.md)（history 体量 + 侧车 cache）  
-> 实录索引：[major-changes.md](./major-changes.md) §2
+> 实录索引：[handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md) §2
 
 ---
 
@@ -127,4 +127,4 @@ tools:
 
 ## 5. 文档格式说明
 
-后续大型优化专题建议采用本文四段结构：**背景与痛点 → 分析 → 优化思路 → 落地方案**；细节实录写入 [major-changes.md](./major-changes.md)，专题文保持可扫读。
+后续大型优化专题建议采用本文四段结构：**背景与痛点 → 分析 → 优化思路 → 落地方案**；细节实录写入 [handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md)，专题文保持可扫读。

@@ -1,6 +1,6 @@
 # Client + Agent Node 同包发布
 
-与 [agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md) 配套；Manage 阶段之前使用。
+与 [agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md) 配套；描述本地助手同包发布与安装布局。
 
 ## 1. 配置（单文件示例）
 

@@ -15,7 +15,3 @@
 | [`cases/a2a-manage-docker/`](../../cases/a2a-manage-docker/) | **合规 + 运维双 Node**；Manage Registry / A2A；`agent-card.json` 固定路径 |
 
 新增案例时请更新 **[`cases/README.md`](../../cases/README.md)** 与本表。
-
-## 历史说明
-
-早期约定曾将案例放在 `docs/cases/` 正文目录；自 **v0.2.13** 起改为 **`cases/<name>/`**（文档 + Docker 同级），便于独立复现与 CI 集成。

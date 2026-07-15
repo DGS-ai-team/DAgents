@@ -1,6 +1,6 @@
 # Web UI 产品化重构（v0.6.1）
 
-**状态（2026-07）**：**已实现**（待 Smoke 与 tag `v0.6.1`）。  
+**状态（2026-07）**：**v0.6.1 已发布**（tag `v0.6.1`）。  
 **版本**：Git tag **`v0.6.1`**（与 Media API、`show_image` 同 tag 交付）。  
 **读者**：Web UI / Node 前端实现；与 [node-ui-media-display.md](./node-ui-media-display.md)、[windows-desktop-shell.md](./windows-desktop-shell.md) 配套。
 

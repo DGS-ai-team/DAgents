@@ -2,7 +2,7 @@
 
 > **已收敛至项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md) · [handbook/README.md](../handbook/README.md)
 
-DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python 侧保留 **Textual TUI Client**（`app/cli/`）与 **Manage 控制面**（`manage/`）。
+DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python 侧：**Textual TUI Client**（`app/cli/`）与 **Manage 控制面**（`manage/`）。
 
 ## 决策树
 
@@ -13,16 +13,16 @@ DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python �
                dagents chat / dagents-client tui
 
 需要 Agent 登记 / 跨 Agent 协作？
-  └─ **python run_manage.py**（默认 :8020）或 Docker Manage → `manage/README.md`
+  └─ python run_manage.py（默认 :8020）或 Docker Manage → manage/README.md
 ```
 
 | 维度 | Go 本地助手栈 | Python 辅助组件 |
 |------|---------------|-----------------|
-| **Agent 运行时** | **`node/`（Go）** | 无（已移除 Python FastAPI Agent API） |
+| **Agent 运行时** | `node/`（Go） | — |
 | **终端 Client** | Textual（`app/cli/`）+ Go TUI（`client/`） | — |
+| **控制面** | — | `manage/`（Registry、A2A、Console） |
 | **配置** | `packaging/agent-client/config.yaml` | Manage 环境变量 / Docker compose |
 | **会话持久化** | Node SQLite（`.runtime/memory/sessions.db`） | — |
-| **A2A 控制面** | Manage（Registry + Task inbox） | — |
 
 ## 文档索引
 
@@ -33,13 +33,4 @@ DAgents 本地 **Agent 运行时** 为 **Go Agent Node**（`node/`）。Python �
 | Agent Node HTTP/SSE | [agent-node-api.md](./agent-node-api.md) |
 | 同包配置与安装 | [client-packaging.md](./client-packaging.md) |
 | Manage | [../../manage/README.md](../../manage/README.md) |
-| 三组件远期模型 | [../design/three-component-model.md](../design/three-component-model.md) |
-| AC 实施状态 | [../design/agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md) |
-
-## 历史说明
-
-原 **Python FastAPI Agent API**（`run_agent_api.py`、`app/harness/`）已从仓库移除；HTTP/SSE 契约以 Go Node 为准（[agent-node-api.md](./agent-node-api.md)）。
-
-## 已移除方案
-
-Brain/Body + Proxy、`app/**/v2/` execution 子目录 **不在本仓库**；Python Agent 运行时 **已移除**。
+| 三组件模型 | [../design/three-component-model.md](../design/three-component-model.md) |

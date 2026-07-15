@@ -43,5 +43,5 @@ go test ./node/internal/compression/...
 
 ## 延伸阅读
 
-- 可读摘要（背景 / 思路 / 落地）：[docs/design/major-changes.md](../../../docs/design/major-changes.md#1-上下文压缩与-prompt-cache-对齐m2--m3)
+- 可读摘要（背景 / 思路 / 落地）：[docs/handbook/附录/重大设计变更实录.md](../../../docs/handbook/附录/重大设计变更实录.md#1-上下文压缩与-prompt-cache-对齐m2--m3)
 - 完整技术分析：[docs/design/context-compression-cache-analysis.md](../../../docs/design/context-compression-cache-analysis.md)

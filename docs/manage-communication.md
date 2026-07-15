@@ -1,10 +1,11 @@
 # Manage 通信逻辑全量参考
 
-> **已收敛至项目手册** → [handbook/05-Manage与A2A.md](../handbook/05-Manage与A2A.md) · [handbook/README.md](../handbook/README.md)
+> **已收敛至项目手册** → [handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md) · [handbook/README.md](./handbook/README.md)
 
 > **设计原则**（[manage-architecture.md](./design/manage-architecture.md)、[a2a-via-manage.md](./future/a2a-via-manage.md)）：  
 > **Node 仅出站连 Manage**；**禁止 Node-to-Node**；**Client 不连 Manage**。  
-> 文档描述 **v0.3.x 现网实现**；与方案差异见 §8。
+> 文档描述 **v0.7.x 现网实现**；与方案差异见 §7.2。  
+> 扩展域（Skills / LLM / Releases / Cases 等）API 见 [manage/README.md](../manage/README.md)；下文 §2 聚焦 Registry + A2A 核心路径。
 
 ---
 
@@ -70,21 +71,31 @@
 | POST | `/v1/a2a/tasks/{id}/caller_resume` | **Caller Node** | Node → Manage | HITL 中继：用户 resume |
 | GET | `/v1/a2a/tasks/{id}/caller_input?wait=` | **Callee Node** | Node → Manage | HITL 中继：取 resume 载荷 |
 
-**未实现**：`POST /v1/a2a/broadcast`、`/v1/blobs/*`。
+### 2.4 Platform Blob（`/v1/blobs/...`）
 
-### 2.4 Admin 观测（`/v1/admin/...`）
+| 方法 | 路径 | 发起方 | 说明 |
+|------|------|--------|------|
+| POST | `/v1/blobs` | Node / Console | multipart 上传；返回 `blob_id`（sha256） |
+| GET | `/v1/blobs/{id}` | Node / Console | 下载 |
+| HEAD | `/v1/blobs/{id}` | Node / Console | 元数据 |
+| DELETE | `/v1/blobs/{id}` | Admin | 删除 |
+
+实现：`manage/platform/blob_routes.py`。A2A 大 payload、Skills/Plugins 包、Cases 附件均复用 Blob。
+
+**未实现**：`POST /v1/a2a/broadcast`。
+
+### 2.5 Admin 观测（`/v1/admin/...`）
 
 | 方法 | 路径 | 发起方 | 方向 | 说明 |
 |------|------|--------|------|------|
 | GET | `/v1/admin/a2a/tasks` | Console | Browser → Manage | 只读 Task 列表 |
 
-> **已禁用**：`/v1/admin/nodes/{id}/sessions` 与 `.../context` 代理已移除。
-
-### 2.5 Go Node 本地 API（与 Manage 相关部分）
+### 2.6 Go Node 本地 API（与 Manage 相关部分）
 
 | 方法 | 路径 | 调用方 | 说明 |
 |------|------|--------|------|
 | GET | `/v1/agent/info` | Client | 含 `manage_registered` |
+| GET | `/v1/agent/update` | Client / Shell | Release 检查（需 `manage.enabled`） |
 | GET | `/v1/sessions`、`/v1/sessions/{id}/context` | Client | 本地运维 / TUI（**不经 Manage**） |
 | POST `/v1/sessions/.../messages`、SSE 等 | Client | 本地 turn，**不经 Manage** |
 
@@ -182,7 +193,7 @@ Node B (caller)                    Manage                         Node A (callee
 
 **要点**：HITL UI 在 **caller 侧 Client↔Node** 本地完成；Manage 只做 **Task 状态与 resume 载荷中继**。
 
-**Caller Client 展示（v0.3.9+）**
+**Caller Client 展示**
 
 | 场景 | SSE / UI | 说明 |
 |------|----------|------|
@@ -232,12 +243,14 @@ Manage 侧：`manage/a2a/store.py`（poll 时 mark delivered；后台 TTL sweep�
 | 分组 | `PATCH /v1/registry/agents/{id}/groups` |
 | A2A 观测 | `GET /v1/admin/a2a/tasks` |
 | 审计 | `GET /v1/admin/audit` |
+| Node 配置 | `GET/POST /v1/llm/*`、`/v1/skills/*`、`/v1/plugins/*`、`/v1/externaltools/*`、`/v1/releases/*` |
+| 案例库 | `GET/POST /v1/cases/*` |
 
 Console **从不直连 Node**（Agent 详情抽屉中的 `base_url` 链接供人工打开 Node，非 Manage 代理）。
 
 ---
 
-## 7. 与「Manage–Node 单向」设计对照
+## 7. 与设计方案对照
 
 ### 7.1 符合设计的部分
 
@@ -248,19 +261,20 @@ Console **从不直连 Node**（Agent 详情抽屉中的 `base_url` 链接供人
 | 注册 / 心跳 / deregister | Node 出站 |
 | Inbox 收信 | Callee **long poll** Manage（非 Manage push） |
 | Client 边界 | 不连 Manage |
-| 旧 RC relay/broadcast | 已删除；`MANAGE_LEGACY_DIRECT_RELAY` 无路由实现 |
 
-### 7.2 其余说明
+### 7.2 缺口与说明
 
 | 项 | 说明 |
 |----|------|
-| **`base_url`** | Node 注册上报，Console 展示与人工跳转；**A2A 路由不用**。Admin session 代理已禁用，Manage 不再因 Console 出站访问 Node。 |
+| **`base_url`** | Node 注册上报，Console 展示与人工跳转；**A2A 路由不用**。Admin session 代理已禁用。 |
 | **Node 本地 HTTP 入站** | 仅 **Client** 会话需要 Node 监听端口。 |
-| **方案未落地** | 设计中的 Node→Manage **审计 ingest**、**Skills 同步**、**Blob API** — 现无 Go 出站实现。 |
+| **Node 自动同步** | Manage 已提供 Skills/Plugins/ExternalTools `sync/manifest` + download、LLM `/resolve`；**Go Node 尚无自动拉取/解压/热更**。 |
+| **审计 ingest** | `POST /v1/audit/events` **未实现**；现仅有 Manage 侧内存/JSONL 审计。 |
+| **`POST /v1/a2a/broadcast`** | 未实现。 |
 | **Inbox handler** | 仅 `metadata.role=compliance` 等注册 handler 会跑 turn；其它 role 收 Task 可能仅日志。 |
 | **开放模式鉴权** | 未配置 token 时 Console 开放浏览（MVP）。 |
 
-**结论**：现网 **Manage ↔ Node 协作路径** 为 Node 出站（注册、心跳、A2A inbox/reply）；Manage **不**再主动 HTTP 访问 Node。
+**结论**：现网 **Manage ↔ Node 协作路径** 为 Node 出站（注册、心跳、A2A inbox/reply、Release 检查）；Manage **不**主动 HTTP 访问 Node。
 
 ---
 
@@ -293,8 +307,12 @@ manage:
 | `manage/a2a/routes.py` | A2A HTTP |
 | `manage/a2a/store.py` | Inbox、状态机、long poll |
 | `manage/admin/routes.py` | Admin A2A 列表（无 Node 代理） |
+| `manage/platform/blob_routes.py` | Blob HTTP |
 | `manage/platform/auth.py` | 鉴权 |
+| `manage/skills/`、`manage/releases/`、`manage/llm/` | 扩展域 |
 | `node/internal/manage/registrar.go` | 注册 / 心跳 |
+| `node/internal/manage/update_checker.go` | Release 版本检查 |
+| `node/internal/manage/package_uploader.go` | 向 Manage 上传制品 |
 | `node/internal/manage/inbox_poller.go` | Inbox long poll |
 | `node/internal/manage/compliance_executor.go` | Inbox turn |
 | `node/internal/manage/task_replier.go` | ack / reply / caller_input |

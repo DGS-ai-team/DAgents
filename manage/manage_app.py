@@ -1,4 +1,4 @@
-"""Manage FastAPI 应用装配（M0 + M1 + M2 A2A）。"""
+"""Manage FastAPI 应用装配。"""
 
 from __future__ import annotations
 

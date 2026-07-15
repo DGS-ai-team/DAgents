@@ -2,9 +2,9 @@
 
 本文定义 **主 Agent 之间** 的 A2A 协作规则：**一律经 Manage**，**禁止 Agent Node 直连其他 Agent Node**。
 
-**不做** 旧 Register Center `messages` / relay / broadcast HTTP 直连兼容；初始阶段统一 **Task → Inbox → Reply** 语义。
+**不做** 直连 peer HTTP；统一 **Task → Inbox → Reply** 语义。
 
-**子 Agent**（临时、Node 内创建）不参与本节；其通信仅在 **同一 Agent Node 进程内** 完成（见 [temporary-child-agents.md](./temporary-child-agents.md)）。
+**子 Agent**（临时、Node 内创建）不参与本节；其通信仅在 **同一 Agent Node 进程内** 完成（见 [child-agent-tools.md](../architecture/child-agent-tools.md)）。
 
 ---
 
@@ -64,9 +64,9 @@ Agent A ──HTTP──► Agent B   ❌
 
 ---
 
-## 4. Manage API（M2 已实现）
+## 4. Manage API
 
-完整字段见 [manage-api-sketch.md](./manage-api-sketch.md) §4。
+完整字段见 [manage-architecture.md](../design/manage-architecture.md) §3.2。
 
 | 方法 | 路径 | 调用方 | 说明 |
 |------|------|--------|------|
@@ -152,7 +152,7 @@ callee inbox turn 若触发 HITL，**不** 以空 `completed` 结束；改为：
 - 收到 Task 后映射为 **A2A session** 入队（handler 待接 session 层）。
 - 配置：`manage.a2a.enabled`（默认随 `manage.enabled` 开启）、`inbox_wait_seconds`、`inbox_poll_seconds`。
 
-**Manage 侧 inbox 效率（M2 P0）**
+**Manage 侧 inbox 效率（P0 优化项）**
 
 | 机制 | 说明 |
 |------|------|
@@ -200,20 +200,9 @@ queued → delivered → processing → completed | failed | expired
 
 ---
 
-## 8. 相对旧 Register Center
+## 9. 待做
 
-| 旧 RC | 新 Manage |
-|-------|-----------|
-| `POST /v1/relay` → callee `/v1/messages` | `POST /v1/a2a/tasks` + inbox |
-| `messages` / `message_id` | **`tasks` / `task_id`**（不兼容） |
-| 直连 `base_url` | **禁止** |
-
----
-
-## 9. 阶段优先级
-
-| 优先级 | 能力 | 状态 |
-|--------|------|------|
-| P0 | tasks + inbox + reply + get | **M2 已实现（Manage + Node poller 骨架）** |
-| P1 | ack、TTL 过期、idempotency、工具层 + session 入队 | 部分（ack/TTL/idempotency 已有） |
-| P2 | broadcast、Blob 大 payload、progress 经 Manage | 待做 |
+| 能力 | 状态 |
+|------|------|
+| `POST /v1/a2a/broadcast` | 未实现 |
+| progress 经 Manage 中继 | 未实现 |

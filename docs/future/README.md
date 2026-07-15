@@ -1,15 +1,12 @@
 # `docs/future/`
 
-**尚未实现**或需大幅修订的远期方案；阅读前请先看 [architecture/overview.md](../architecture/overview.md) 确认现网能力。
+尚未完全落地的远期方案。现网能力以 [handbook/README.md](../handbook/README.md) 与 [design/manage-architecture.md](../design/manage-architecture.md) 为准。
 
 | 文件 | 说明 |
 |------|------|
-| [future/manage-api-sketch.md](./manage-api-sketch.md) | Manage API 草图（**详细架构见 [design/manage-architecture.md](../design/manage-architecture.md)**） |
-| [a2a-via-manage.md](./a2a-via-manage.md) | 经 Manage 的 A2A inbox |
-| [temporary-child-agents.md](./temporary-child-agents.md) | 临时子 Agent |
-| [ownership-and-tenancy.md](./ownership-and-tenancy.md) | 多租户与 owner |
-| [session-persistence.md](./session-persistence.md) | 跨 Backend 持久化（含 Redis 讨论） |
-| [client-events-and-hitl.md](./client-events-and-hitl.md) | 旧 connection_id / Backend SSE 模型（待修订） |
-| [security-and-policy.md](./security-and-policy.md) | Control Plane 策略框架 |
+| [a2a-via-manage.md](./a2a-via-manage.md) | A2A Task + Inbox 契约（**主体已落地**；细节与 Manage 实现对齐） |
+| [session-persistence.md](./session-persistence.md) | 跨 Node 集中持久化（远期占位） |
 
-Register Center 现网契约见 [a2a-and-register-center.md](../a2a-and-register-center.md) §2；Agent 侧 A2A 工具已移除，远期见 [a2a-via-manage.md](./a2a-via-manage.md)。
+**已落地**（勿在 `future/` 找正文）：A2A 运维见 [handbook/05-Manage与A2A.md](../handbook/05-Manage与A2A.md)；安全与本地 policy 见 [security-rollout.md](../security-rollout.md)、handbook [04](../handbook/04-能力与策略.md) §1。
+
+后续规划：[design/manage-phase2-capabilities.md](../design/manage-phase2-capabilities.md)。

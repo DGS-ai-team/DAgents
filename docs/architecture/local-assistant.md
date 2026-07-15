@@ -112,6 +112,6 @@ go run ./client/cmd/dagents-client tui
 
 ## 6. 与 v2 总文档的关系
 
-- [agent-client-refactor-plan.md](./agent-client-refactor-plan.md) 原写「Go TUI 替代 Python textual」；**现改为双 Client 并存**，Go REPL 为兜底而非唯一 TUI。
-- [three-component-model.md](./three-component-model.md) 中「Client 仅连本机 Node」仍成立；**Client 实现**可为 Python 或 Go。
+- [agent-client-refactor-plan.md](../design/agent-client-refactor-plan.md) 原写「Go TUI 替代 Python textual」；**现改为双 Client 并存**，Go REPL 为兜底而非唯一 TUI。
+- [three-component-model.md](../design/three-component-model.md) 中「Client 仅连本机 Node」仍成立；**Client 实现**可为 Python 或 Go。
 - Manage 启用与否不影响本地助手闭环（`manage.enabled: false`）。

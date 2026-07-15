@@ -2,11 +2,9 @@
 
 > **已收敛至项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md) §1 · [handbook/README.md](../handbook/README.md)
 
-## 1. 问题：Agent 能力受限于 Python 运行时可达范围
+## 1. 问题：老旧 OS 上 Python Agent 栈不可行
 
-DAgents 当前主要由 Python 实现。Agent 的 LLM 推理、工具执行、文件访问、TUI 交互和 A2A 协作都运行在同一个 Python 运行时附近。这让系统简单，但也带来一个根本限制：**Agent 只能完整部署在能稳定运行 Python 3.11+ 及其依赖的机器上**。
-
-现实环境中，大量机器无法满足这个条件：
+DAgents 早期由 **Python Agent API** 承载本地助手。该栈要求目标机稳定运行 Python 3.11+、大量依赖与现代终端（textual），在下列环境中部署成本高或交互不可靠：
 
 | 环境 | 主要限制 | 结论 |
 |------|----------|------|
@@ -40,7 +38,7 @@ DAgents 当前主要由 Python 实现。Agent 的 LLM 推理、工具执行、�
 
 ## 3. 新洞察：Agent 本体下沉到 Go，Python 只做 Manage
 
-v2 **重设计** 不再把「思考」留在 Python Backend、「行动」放在出站 Proxy，而是：
+v2 **重设计** 不再把「思考」留在 Python Backend、「行动」放在出站 Proxy，而是采用现网三组件：
 
 ```text
 Agent Node（Go，部署在目标机或同网机器）
@@ -63,7 +61,7 @@ Manage（Python，部署在较新环境）
 
 **Python 保留价值：**
 
-- **Manage** 跑在较新 Linux/容器/cloud，复用现有 FastAPI、Register Center、审计存储生态。
+- **Manage** 跑在较新 Linux/容器/cloud；与 Go Node 通过 HTTP 协作。
 - 不要求 Manage 部署在 RHEL 6 等极限环境。
 
 ## 4. 网络模型：Node 仅出站 Manage；A2A 不经 peer 直连
@@ -99,6 +97,6 @@ Manage（Python，部署在较新环境）
 ## 7. 相关文档
 
 - [three-component-model.md](./three-component-model.md) — 三组件边界  
-- [agent-node-api.md](../architecture/agent-node-api.md) / [manage-api-sketch.md](../future/manage-api-sketch.md) — API  
-- [documentation-plan.md](./documentation-plan.md) — 文档索引与实施阶段  
+- [manage-architecture.md](../design/manage-architecture.md) — Manage API  
 - [../os-compatibility.md](../os-compatibility.md) — Python/Manage 构建兼容参考  
+- [../handbook/README.md](../handbook/README.md) — 手册索引

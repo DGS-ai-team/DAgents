@@ -60,7 +60,7 @@ tools/
 
 ## 阶段 B（未做）
 
-子 package + `Register(r *Registry)`，见上文「阶段 B」历史说明；待阶段 A 稳定后再开。
+子 package + `Register(r *Registry)`；待阶段 A 稳定后再开。
 
 ---
 

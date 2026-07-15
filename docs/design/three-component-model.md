@@ -2,7 +2,7 @@
 
 > **已收敛至项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md) §2 · [handbook/README.md](../handbook/README.md)
 
-本文档描述 v2 **重设计**后的目标形态，取代旧文档中「Python Backend = Brain + Control、Go Proxy = 出站 Body」的假设。
+本文档描述 **Client / Agent Node / Manage** 三组件边界与协作原则。
 
 ## 1. 总览
 
@@ -54,7 +54,7 @@
 | **临时子 Agent** | 由主 Agent 在 Node 内创建；与主 Agent **共用** Node 资源（进程、端口、FS 根等）；**不单独暴露**端口或对外 API |
 | **对其他 Agent 可见性** | 由 **配置** 决定是否在 Manage 发现结果中标记为「可被其他 Agent 调用」；**无论是否暴露，都必须注册到 Manage** |
 
-子 Agent 的会话、工具权限、TTL 等由 Node 内策略约束（详见后续 `temporary-child-agents.md` 修订版）。
+子 Agent 的会话、工具权限、TTL 等由 Node 内策略约束（见 [child-agent-tools.md](../architecture/child-agent-tools.md)）。
 
 ### 2.3 与其他 Agent 通信（非子 Agent）
 
@@ -99,16 +99,9 @@
 
 ### 4.3 Python 代码库定位
 
-**保留并实现 Manage 相关功能**；原 `app/core/main_agent`、`app/harness/service` 中面向 Brain/会话/工具执行的逻辑 **迁移到 Go Agent Node**，不在 Python 中保留双份。
+**`app/cli/`**（Textual TUI）与 **`manage/`**（控制面）。Agent 执行、turn loop、工具均在 **Go Node**。
 
-Manage 侧可复用/演进的方向包括：
-
-- Register Center 式 HTTP API（注册、发现、groups）
-- 审计 ingest 与查询 API
-- 策略/审批配置的集中存储（若 Phase 1 仍由 Manage 下发给 Node）
-- 运维只读 Dashboard 所需 API
-
-具体模块切分见 [migration-from-v1.md](./migration-from-v1.md) 后续修订。
+Manage 职责：Registry、A2A、制品分发、Console、审计（规划 ingest）。
 
 ---
 
@@ -146,32 +139,18 @@ Agent A → Manage：GET /v1/a2a/tasks/{id} 取结果
 
 ---
 
-## 6. 与旧 v2 概念对照
-
-| 旧概念 | 新归属 |
-|--------|--------|
-| Python Backend Brain | **Agent Node（Go）** |
-| Python Backend Control Plane（session 执行路由） | **Agent Node** 内会话与调度；Manage 仅元数据 |
-| Go Proxy 出站 Body | **取消**；宿主机能力即 Node 本地 executor |
-| Register Center | **Manage** 发现 API |
-| Python TUI / textual | **Client（Go TUI）** |
-| `connection_id` + 多 Backend SSE | 简化为 **单 Node 本地 SSE**；多 Backend 议题延后 |
-| control channel WebSocket | **废弃**（Node 不再连 Manage/Backend 收 execute） |
-
----
-
-## 7. 相关文档（已落地草图）
+## 6. 相关文档
 
 - [agent-node-api.md](../architecture/agent-node-api.md) — Agent Node HTTP/SSE API  
-- [manage-api-sketch.md](./manage-api-sketch.md) — Manage 注册/发现/审计 API  
+- [manage-architecture.md](./manage-architecture.md) — Manage 控制面架构与 API  
 - [a2a-via-manage.md](./a2a-via-manage.md) — A2A 经 Manage 中继（禁止 Node 直连）
-- [documentation-plan.md](./documentation-plan.md) — 文档规划与阅读顺序
+- [../handbook/README.md](../handbook/README.md) — 手册索引
 
-## 8. 架构决策记录（ADR 摘要）
+## 7. 架构决策摘要
 
 1. **LLM / turn loop 在 Agent Node（Go）** — Node 负责思考与工具调用。
 2. **一端口一 `agent_id`** — 临时子 Agent 不暴露；可配置 peer 可见性；**必须**注册 Manage。
 3. **Manage：注册 + 心跳 + 审计 ingest** — Client 不访问 Manage。
 4. **Client 只连本地 Node** — 与 Node 同发布、同配置。
-5. **Python 仓库仅保留 Manage** — Brain/执行迁移至 Go Node。
+5. **Python 仓库**：`app/cli/`（TUI）+ `manage/`（控制面）；Agent 执行在 Go Node。
 6. **A2A 经 Manage 中继** — 非子 Agent **禁止 Node 直连**；inbox 轮询收信。

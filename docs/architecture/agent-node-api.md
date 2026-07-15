@@ -1,6 +1,6 @@
 # Agent Node HTTP API
 
-本文描述 **Agent Node（Go）** 对外 HTTP/SSE 接口，与 `node/internal/api/` 对齐维护。Manage 远期 API 见 [manage-api-sketch.md](../future/manage-api-sketch.md)。
+本文描述 **Agent Node（Go）** 对外 HTTP/SSE 接口，与 `node/internal/api/` 对齐维护。Manage API 见 [manage-architecture.md](../design/manage-architecture.md)。
 
 ## 1. 设计原则
 
@@ -174,7 +174,7 @@ Last-Event-ID: 42
 ```
 
 - Phase 1 可简化为 **全局单流**（一个 Client 一个 Node 实例通常一个活跃 session）。
-- 帧格式见 [client-events-and-hitl.md](./client-events-and-hitl.md)（修订版：去掉 `connection_id` 必填，保留 `session_id` / `execution_id`）。
+- 帧格式见 [附录/SSE事件速查.md](../handbook/附录/SSE事件速查.md)。
 
 核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`hitl_required`、`user_message_deferred`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`done`。
 
@@ -311,7 +311,7 @@ Client 入口：`/policy` 全屏界面（Go bubbletea / Python Textual，Esc 返
 
 ## 3. A2A（经 Manage，无入站 API）
 
-非子 Agent 的 A2A **不**在本 Node 暴露 HTTP 路由；由工具层调用 **Manage**（见 [a2a-via-manage.md](./a2a-via-manage.md)、[manage-api-sketch.md](./manage-api-sketch.md) §4）。
+非子 Agent 的 A2A **不**在本 Node 暴露 HTTP 路由；由工具层调用 **Manage**（见 [a2a-via-manage.md](../future/a2a-via-manage.md)、[manage-architecture.md](../design/manage-architecture.md) §3.2）。
 
 | Node 内工具 | Manage API |
 |-------------|------------|
@@ -383,11 +383,11 @@ TurnOrchestrator
 
 ## 6. 与 Manage 的出站调用（Node 作为客户端）
 
-见 [manage-api-sketch.md](./manage-api-sketch.md)：
+见 [manage-architecture.md](../design/manage-architecture.md) 与 [manage-communication.md](../manage-communication.md)：
 
-- `POST /v1/agents/register`、`POST /v1/agents/{id}/heartbeat`
-- `POST /v1/audit/events`
+- `POST /v1/registry/agents`、`POST /v1/registry/agents/{id}/heartbeat`
 - **A2A**：`GET /v1/registry/agents/discover`、`POST /v1/a2a/tasks`、`GET /v1/a2a/inbox`、`POST .../tasks/{id}/reply`、`GET /v1/a2a/tasks/{id}`
+- **Releases**：`GET /v1/releases/check`
 
 **无** WebSocket control channel；**无** peer Node 直连。
 
@@ -429,4 +429,4 @@ local:
 | P0 | `/health`、`POST /v1/sessions`、`POST /v1/messages`、`GET /v1/streams` |
 | P0 | Manage 注册/心跳/审计（出站） |
 | P1 | HITL resume、skills HTTP、A2A inbox 轮询 + Manage 工具 |
-| P2 | **临时子 Agent**（[child-agent-tools.md](./child-agent-tools.md)）、execution_progress 细粒度事件 |
+| P2 | **临时子 Agent**（[child-agent-tools.md](./child-agent-tools.md)）— **已实现**；execution_progress 细粒度事件仍为远期 |

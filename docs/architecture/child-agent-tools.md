@@ -1,8 +1,6 @@
 # 临时 Agent（temporary agent）：工具、HTTP API 与 SSE（Go Node 定稿）
 
-本文是 **Go Agent Node** 同进程**临时 Agent** 的**实现契约**（Phase 1）。与外部 **A2A** 对等调用无关。概念背景见 [temporary-child-agents.md](../future/temporary-child-agents.md)；HTTP 总览见 [agent-node-api.md](./agent-node-api.md) §2.8。
-
-**状态**：Go Node **已实现**（Phase 1）；Client TUI 适配待后续 PR。
+本文是 **Go Agent Node** 同进程**临时子 Agent** 的**实现契约**。与外部 **A2A** 无关。HTTP 总览见 [agent-node-api.md](./agent-node-api.md) §2.8。
 
 ---
 

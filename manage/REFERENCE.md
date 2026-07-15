@@ -32,13 +32,29 @@
 | `store.py` | `AgentRegistryStore.register`（保留已有分组）, `update_groups`, `import_rc_json` |
 | `routes.py` | `build_registry_router` |
 
-## a2a/（M2）
+## a2a/
 
 | 模块 | 符号 |
 |------|------|
 | `models.py` | `TaskCreateRequest`, `TaskRecord`, `InboxResponse`, … |
 | `store.py` | `A2ATaskStore.create`, `poll_inbox`, `ack`, `reply`, `sweep_expired` |
 | `routes.py` | `build_a2a_router` |
+
+## skills/ · plugins/ · externaltools/
+
+| 模块 | 符号 |
+|------|------|
+| `models.py` | 制品包模型 |
+| `store.py` | `*PackageStore`（draft/publish/catalog/sync） |
+| `routes.py` | `build_*_router` |
+
+## llm/ · releases/ · cases/
+
+| 路径 | 说明 |
+|------|------|
+| `llm/` | LLM 配置 CRUD + `/resolve` |
+| `releases/` | Release Hub（上传/发布/check/download） |
+| `cases/` | 案例库 JSONL + 关联资源 |
 
 ## console/
 
@@ -48,8 +64,8 @@
 | `static/` | 构建产物（不入库）：`index.html` + `assets/*`，挂载 `/console/` |
 | `build.sh` | 一键构建到 `static/` |
 
-Console 功能：Node 列表、discovery 分组、A2A Inbox、详情抽屉（session / audit）。
+Console 功能：Node 列表、discovery 分组、A2A Inbox、案例库、Node 配置（LLM/Skills/Plugins/ExternalTools/版本发布）。
 
-| 路径 | 里程碑 |
-|------|--------|
-| `skills/` | M3 |
+| 路径 | 说明 |
+|------|------|
+| `platform/blob_routes.py` | Blob API |

@@ -68,15 +68,15 @@
 
 ## 设计优化与重大变更
 
-除 [CHANGELOG.md](CHANGELOG.md) 中的版本记录外，仓库维护 **[设计优化实录](docs/design/major-changes.md)**，用「背景 → 思路 → 落地」说明架构级改进，便于回顾取舍与 onboarding。
+除 [CHANGELOG.md](CHANGELOG.md) 中的版本记录外，仓库维护 **[设计优化实录](docs/handbook/附录/重大设计变更实录.md)**，用「背景 → 思路 → 落地」说明架构级改进，便于回顾取舍与 onboarding。
 
 | 主题 | 摘要 | 文档 |
 |------|------|------|
-| **上下文压缩 × Prompt Cache** | 侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；改 `CompleteText` 二次序列化；M3 silent 冷却抑制重复侧车 | [major-changes.md §1](docs/design/major-changes.md#1-上下文压缩与-prompt-cache-对齐m2--m3) · [完整分析](docs/design/context-compression-cache-analysis.md) |
-| **工具链上下文成本** | WS1/3/5/6 已落地；WS4 skills 搁置 | [major-changes.md §2](docs/design/major-changes.md#2-工具链上下文成本优化已落地) · [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) |
+| **上下文压缩 × Prompt Cache** | 侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；改 `CompleteText` 二次序列化；M3 silent 冷却抑制重复侧车 | [实录 §1](docs/handbook/附录/重大设计变更实录.md#1-上下文压缩与-prompt-cache-对齐m2--m3) · [完整分析](docs/design/context-compression-cache-analysis.md) |
+| **工具链上下文成本** | WS1/3/5/6 已落地；WS4 skills 搁置 | [实录 §2](docs/handbook/附录/重大设计变更实录.md#2-工具链上下文成本优化已落地) · [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) |
 | **Tool Before Hook** | 执行前 Hook + 重复调用 60s 内三选项审批 | [tool-before-hook-duplicate-approval.md](docs/design/tool-before-hook-duplicate-approval.md) |
 
-新的大项优化请按 [major-changes.md 条目模板](docs/design/major-changes.md#条目模板复制使用) 追加；大型专题宜用 **四段结构**（见 [docs/README.md](docs/README.md) §2）。
+新的大项优化请按 [实录条目模板](docs/handbook/附录/重大设计变更实录.md#条目模板复制使用) 追加；大型专题宜用 **四段结构**（见 [docs/README.md](docs/README.md)）。
 
 ---
 

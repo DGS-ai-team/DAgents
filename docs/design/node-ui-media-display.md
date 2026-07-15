@@ -1,6 +1,6 @@
 # Node → Web UI 图片 / 截图展示方案
 
-**状态（2026-07）**：规划中。  
+**状态（2026-07）**：**v0.6.1 已发布**（`show_image` + Media API）。  
 **范围**：Agent Node 将工具截图、读图结果、用户上传图等 **展示到 Web UI**（含 SSE 实时与 Hydrate 回放）。  
 **读者**：Node / Web UI 实现；与 [browser-remote-service-mode-a.md](./browser-remote-service-mode-a.md)、[windows-desktop-shell.md](./windows-desktop-shell.md) §3.9 Hydrate 配套。
 

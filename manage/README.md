@@ -4,11 +4,14 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 
 | 域 | 状态 | 说明 |
 |----|------|------|
-| **Platform** | M0 | 鉴权、审计、Blob 占位、指标 |
-| **Registry** | M1 | 注册、心跳、注销、目录、discover |
-| **A2A** | **M2 部分** | Task API + inbox long poll；Node inbox poller 骨架 |
-| **Skills** | M3 待做 | 一 zip 一 skill，审批后分发 |
-| **Console** | **部分** | **`GET /console/`** — Node 目录、**A2A Inbox 只读列表**、Node 抽屉内 **session 列表 / context 摘要** |
+| **Platform** | ✅ | 鉴权、审计、Blob、指标 |
+| **Registry** | ✅ | 注册、心跳、注销、目录、discover |
+| **A2A** | ✅ | Task API + inbox long poll + HITL 中继；Node InboxPoller + `agent_invoke`/`agent_discover` |
+| **Skills / Plugins / ExternalTools** | ✅（Manage 侧） | 精简分发（draft → publish）；**Node 自动 sync 待 Phase 2** |
+| **LLM** | ✅（Manage 侧） | 集中 CRUD + `/resolve`；**Node 自动消费待做** |
+| **Releases** | ✅ | 安装包托管 + `/v1/releases/check`；Node `UpdateChecker` |
+| **Cases** | ✅ | 案例库（JSONL 演示会话 + 关联资源） |
+| **Console** | ✅ | Agent 目录、A2A Inbox、案例库、Node 配置（LLM/Skills/Plugins/ExternalTools/版本发布） |
 
 架构方案：[docs/design/manage-architecture.md](../docs/design/manage-architecture.md)
 
@@ -98,14 +101,13 @@ Node 出站 Header：
 | `MANAGE_SHARED_TOKEN` | （空） | **可选**；单 shared admin token |
 | `MANAGE_AUDIT_PATH` | （空） | 审计 JSONL 追加路径 |
 | `MANAGE_AUDIT_MAX_ENTRIES` | `500` | 内存审计条数 |
-| `MANAGE_LEGACY_DIRECT_RELAY` | `0` | M2 前无效；启用 RC 式直连 relay 适配（默认关） |
 | `MANAGE_A2A_INBOX_CONTENT_MAX_CHARS` | `4096` | inbox 返回 `content` 最大字符；超出截断并设 `content_truncated` |
 | `MANAGE_A2A_EXPIRE_SWEEP_SECONDS` | `30` | 后台 TTL 过期扫描间隔；`0` 关闭（仅按需单条过期） |
 
 鉴权 Header（Token 模式）：`x-dagents-a2a-token` 或 `Authorization: Bearer …`。  
 身份 Header（Node 注册）：`x-dagents-agent-id: <agent_id>`。
 
-## Registry API（M1）
+## Registry API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -128,7 +130,7 @@ Node 出站 Header：
 
 > **已禁用**：Admin session 代理（`/v1/admin/nodes/.../sessions`）已移除，Manage 不再出站访问 Node session API。
 
-## A2A Task API（M2）
+## A2A Task API
 
 创建 Task 时 Manage 校验：
 
@@ -187,28 +189,21 @@ JSONL 行格式对齐 Node `history/*.jsonl`：`{"recorded_at":"...","message":{
 manage/
   config.py
   manage_app.py
-  admin/        # Admin 只读 API（A2A 列表）
-  platform/     # auth, audit, blob, metrics
-  storage/      # sqlite
-  registry/     # models, store, routes, status
+  admin/            # Admin 只读 API（A2A 列表）
+  platform/         # auth, audit, blob, metrics
+  storage/          # sqlite
+  registry/         # models, store, routes, status
+  a2a/              # Task store + routes
+  llm/              # LLM 配置注册中心
+  skills/           # Skill 包分发
+  plugins/          # Hook Plugin 分发
+  externaltools/    # 外置工具分发
+  releases/         # Release Hub
+  cases/            # 案例库
   console/
-    frontend/   # Vue 3 源码（Vite）
-    static/     # 构建产物，挂载 /console/
-    build.sh    # npm run build 封装
-  a2a/          # M2 Task store + routes
-  releases/     # Release Hub（安装包托管 + 版本检查）
-  cases/        # 案例库（JSONL 演示会话 + 关联资源）
-  skills/       # M3 占位
-```
-
-## 历史 Register Center 数据迁移
-
-旧版 **`register_center/`** 已移除；新功能请落在 **Manage**。若仍有 RC JSON 导出，可导入 Registry：
-
-```python
-from manage.registry.store import AgentRegistryStore
-from manage.storage.sqlite import SQLiteDatabase
-# AgentRegistryStore.import_rc_json(db, json.load(...))
+    frontend/       # Vue 3 源码（Vite）
+    static/         # 构建产物，挂载 /console/
+    build.sh
 ```
 
 ## Go Node 自动注册

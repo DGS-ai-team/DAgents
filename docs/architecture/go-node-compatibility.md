@@ -1,6 +1,6 @@
 # Go Agent Node / Client 兼容性与构建矩阵（N7）
 
-本文定义 **Phase AC** 发布物的目标平台、构建方式与验收方法。Python PyInstaller 矩阵见 [os-compatibility.md](./os-compatibility.md)。
+本文定义 **Phase AC** 发布物的目标平台、构建方式与验收方法。Python PyInstaller 矩阵见 [os-compatibility.md](../os-compatibility.md)。
 
 ---
 

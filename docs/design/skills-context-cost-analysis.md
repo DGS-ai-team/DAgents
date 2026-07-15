@@ -2,7 +2,7 @@
 
 > **状态**：**搁置** — 不改动 skills 现网机制（成本评估见本文 §4、§9）。  
 > 分支：`feat/tool-context-cost-optimization`  
-> 总览：[tool-context-cost-analysis.md](./tool-context-cost-analysis.md) · 实录：[major-changes.md](./major-changes.md)
+> 总览：[tool-context-cost-analysis.md](./tool-context-cost-analysis.md) · 实录：[handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md)
 
 ---
 

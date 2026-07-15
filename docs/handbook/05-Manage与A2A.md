@@ -51,7 +51,7 @@ manage.enabled=true
 | 组件 | 文件 |
 |------|------|
 | Registrar | `node/internal/manage/registrar.go` |
-| Agent Card 读取 | `node/internal/manage/agentcard.go` |
+| Agent Card | `node/internal/manage/a2a_profile.go`（`RegistrationCard`） |
 | Inbox 轮询 | `node/internal/manage/inbox_poller.go` |
 
 ### 2.2 Agent Card
