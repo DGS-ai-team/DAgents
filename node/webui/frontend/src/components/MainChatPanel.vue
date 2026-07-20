@@ -36,6 +36,7 @@ const props = defineProps({
   hitlBusyIndex: { type: Number, default: -1 },
   thinkingSupported: { type: Boolean, default: false },
   llmSettings: { type: Object, default: null },
+  agentTitle: { type: String, default: "" },
 });
 
 const emit = defineEmits([
@@ -352,8 +353,7 @@ defineExpose({
   <section class="panel panel--flex chat">
     <header class="chat__header">
       <div class="chat__title">
-        <span class="chat__title-main">对话</span>
-        <span class="chat__title-sub">与助手对话</span>
+        <span class="chat__title-main">{{ agentTitle || "助手" }}</span>
       </div>
       <div class="chat__header-meta">
         <span v-if="pendingApprovals > 0" class="pill pill--warn">{{ pendingApprovals }} 待审批</span>

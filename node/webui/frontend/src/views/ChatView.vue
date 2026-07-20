@@ -105,6 +105,7 @@ const agentPanelRef = ref(null);
 const showAgentCreateModal = ref(false);
 const createModalTemplateId = ref("");
 const agentListCount = ref(null);
+const agentList = ref([]);
 const chatPanelRef = ref(null);
 
 const entries = computed(() => transcriptStore.entries);
@@ -119,6 +120,12 @@ const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_sup
 const showNoAgentWelcome = computed(
   () => !sessionStore.sessionId && agentListCount.value === 0
 );
+const currentAgentTitle = computed(() => {
+  const id = String(sessionStore.sessionId || "").trim();
+  if (!id) return "";
+  const agent = agentList.value.find((a) => agentRecordId(a) === id);
+  return agent ? agentDisplayTitle(agent) : `Agent ${id.slice(0, 8)}`;
+});
 
 const PANEL_SETTINGS_ROUTES = {
   help: "/settings/about",
@@ -582,7 +589,8 @@ async function openCreateWizard(templateId = "") {
 }
 
 function onAgentsUpdated(list) {
-  agentListCount.value = Array.isArray(list) ? list.length : 0;
+  agentList.value = Array.isArray(list) ? list.slice() : [];
+  agentListCount.value = agentList.value.length;
 }
 
 function onCreateModalClose() {
@@ -678,6 +686,7 @@ async function deleteAgentById(payload) {
         } else {
         syncRouteAgent("");
         chromeStore.sseStatus = "idle";
+        agentList.value = [];
         agentListCount.value = 0;
       }
     } else {
@@ -961,6 +970,7 @@ onUnmounted(() => {
         :hitl-busy-index="hitlStore.busyIndex"
         :thinking-supported="thinkingSupported"
         :llm-settings="chromeStore.llmSettings"
+        :agent-title="currentAgentTitle"
         @send="onSendMessage"
         @cancel="cancelTurn"
         @toggle-thinking="toggleThinkingMode"
