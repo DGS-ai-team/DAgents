@@ -1,14 +1,3 @@
-const TOOL_GROUPS = [
-  { name: "fs", label: "文件系统" },
-  { name: "skills", label: "Skills" },
-  { name: "bash", label: "Shell / Bash" },
-  { name: "child_agents", label: "子 Agent" },
-  { name: "triggers", label: "触发器" },
-  { name: "hitl", label: "人工审批" },
-  { name: "browser", label: "浏览器", beta: true },
-  { name: "a2a", label: "A2A", beta: true },
-];
-
 function clone(value) {
   return JSON.parse(JSON.stringify(value ?? null));
 }
@@ -24,17 +13,7 @@ export function emptyAgentDraft() {
     description: "",
     sandboxEnabled: false,
     sandboxBackend: "process",
-    enabledGroups: [],
-    maxToolLoops: 16,
-    childAgentsEnabled: true,
-    skillsEnabled: true,
-    hooks: {
-      inject_today_date_enabled: true,
-      tool_result_enabled: true,
-      tool_result_spill_threshold_tokens: 12000,
-      duplicate_tool_call_enabled: true,
-      duplicate_tool_call_window_seconds: 60,
-    },
+    llmProfileId: "",
   };
 }
 
@@ -42,12 +21,7 @@ export function readTemplateDefaults(template) {
   return asObject(template?.defaults);
 }
 
-export function enabledGroupsFromDefaults(defaults) {
-  const groups = defaults?.tools?.enabled_groups;
-  return Array.isArray(groups) ? [...groups] : [];
-}
-
-export function draftFromTemplate(template, nodeHooks = {}) {
+export function draftFromTemplate(template, llmProfileIds = []) {
   const defaults = readTemplateDefaults(template);
   const draft = emptyAgentDraft();
   draft.templateId = String(template?.id || "").trim();
@@ -55,40 +29,23 @@ export function draftFromTemplate(template, nodeHooks = {}) {
   draft.description = String(template?.description || "").trim();
   draft.sandboxEnabled = !!template?.sandbox?.enabled;
   draft.sandboxBackend = String(template?.sandbox?.backend || "process").trim() || "process";
-  draft.enabledGroups = enabledGroupsFromDefaults(defaults);
-  draft.maxToolLoops = Number(defaults?.llm?.max_tool_loops) || draft.maxToolLoops;
-  draft.childAgentsEnabled = defaults?.child_agents?.enabled !== false;
-  draft.skillsEnabled = defaults?.skills?.enabled !== false;
-  draft.hooks = {
-    ...draft.hooks,
-    ...clone(nodeHooks),
-    ...clone(defaults?.hooks || {}),
-  };
+  const fromTpl = String(defaults?.llm?.active || "").trim();
+  const ids = Array.isArray(llmProfileIds) ? llmProfileIds.map((x) => String(x || "").trim()).filter(Boolean) : [];
+  if (fromTpl && ids.includes(fromTpl)) {
+    draft.llmProfileId = fromTpl;
+  } else {
+    draft.llmProfileId = ids[0] || fromTpl || "";
+  }
   return draft;
 }
 
+/** 仅覆盖 Agent 专属字段：绑定的 LLM 配置 id；工具/Hook 等沿用模板与 Node 全局。 */
 export function buildCreateAgentPayload(draft) {
-  const defaults = {
-    llm: {
-      max_tool_loops: Number(draft.maxToolLoops) || 16,
-    },
-    tools: {
-      enabled_groups: [...(draft.enabledGroups || [])].sort(),
-    },
-    skills: {
-      enabled: !!draft.skillsEnabled,
-    },
-    child_agents: {
-      enabled: !!draft.childAgentsEnabled,
-    },
-    hooks: {
-      inject_today_date_enabled: !!draft.hooks.inject_today_date_enabled,
-      tool_result_enabled: !!draft.hooks.tool_result_enabled,
-      tool_result_spill_threshold_tokens: Number(draft.hooks.tool_result_spill_threshold_tokens) || 12000,
-      duplicate_tool_call_enabled: !!draft.hooks.duplicate_tool_call_enabled,
-      duplicate_tool_call_window_seconds: Number(draft.hooks.duplicate_tool_call_window_seconds) || 60,
-    },
-  };
+  const llmActive = String(draft.llmProfileId || "").trim();
+  const defaults = {};
+  if (llmActive) {
+    defaults.llm = { active: llmActive };
+  }
   return {
     templateId: draft.templateId,
     displayName: String(draft.displayName || "").trim() || undefined,
@@ -100,11 +57,19 @@ export function buildCreateAgentPayload(draft) {
   };
 }
 
-export function toggleToolGroup(draft, name) {
-  const set = new Set(draft.enabledGroups || []);
-  if (set.has(name)) set.delete(name);
-  else set.add(name);
-  draft.enabledGroups = [...set].sort();
+export function llmActiveFromAgentView(agent) {
+  const snap = agent?.config_snapshot;
+  let parsed = snap;
+  if (typeof snap === "string") {
+    try {
+      parsed = JSON.parse(snap);
+    } catch {
+      return "";
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return "";
+  const active = parsed?.defaults?.llm?.active;
+  return String(active || "").trim();
 }
 
-export { TOOL_GROUPS };
+export { clone };

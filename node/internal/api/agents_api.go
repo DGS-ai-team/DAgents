@@ -258,6 +258,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 
 type patchAgentRequest struct {
 	DisplayName *string `json:"display_name"`
+	LLMActive   *string `json:"llm_active"`
 }
 
 func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
@@ -280,16 +281,55 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if req.DisplayName == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "display_name is required", nil)
+	if req.DisplayName == nil && req.LLMActive == nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "display_name or llm_active is required", nil)
 		return
 	}
-	name := strings.TrimSpace(*req.DisplayName)
-	if name == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "display_name cannot be empty", nil)
-		return
+	if req.DisplayName != nil {
+		name := strings.TrimSpace(*req.DisplayName)
+		if name == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_patch", "display_name cannot be empty", nil)
+			return
+		}
+		rec.DisplayName = name
 	}
-	rec.DisplayName = name
+	if req.LLMActive != nil {
+		active := strings.TrimSpace(*req.LLMActive)
+		if active == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_patch", "llm_active cannot be empty", nil)
+			return
+		}
+		if s.cfg != nil {
+			if _, ok := s.cfg.LLM.GetProfile(active); !ok {
+				writeAPIError(w, http.StatusBadRequest, "invalid_patch", fmt.Sprintf("llm profile %q not found", active), nil)
+				return
+			}
+		}
+		snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_invalid", err.Error(), nil)
+			return
+		}
+		if snap.Defaults == nil {
+			snap.Defaults = map[string]any{}
+		}
+		llmMap, _ := snap.Defaults["llm"].(map[string]any)
+		if llmMap == nil {
+			llmMap = map[string]any{}
+		}
+		llmMap["active"] = active
+		snap.Defaults["llm"] = llmMap
+		raw, err := json.Marshal(snap)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
+			return
+		}
+		rec.ConfigSnapshot = raw
+		if err := s.switchActiveLLMProfile(active); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_llm_settings", err.Error(), nil)
+			return
+		}
+	}
 	rec.UpdatedAt = time.Now().UTC()
 	if err := s.agents.Save(r.Context(), *rec); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
@@ -348,9 +388,6 @@ func (s *Server) ensureAgentRuntime(ctx context.Context, agentID string) error {
 	if s.sessions == nil {
 		return fmt.Errorf("sessions manager not configured")
 	}
-	if s.sessions.Get(id) != nil {
-		return nil
-	}
 	rec, err := s.agents.Get(ctx, id)
 	if err != nil {
 		return err
@@ -358,12 +395,21 @@ func (s *Server) ensureAgentRuntime(ctx context.Context, agentID string) error {
 	if rec == nil || rec.Archived {
 		return fmt.Errorf("agent_not_found")
 	}
-	if err := s.ensureAgentWorkspace(id); err != nil {
-		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
-	}
 	snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
 	if err != nil {
 		return fmt.Errorf("parse agent snapshot: %w", err)
+	}
+	// 切换 / 确保 Agent 时应用其绑定的 LLM 配置。
+	if active := agentruntime.LLMActiveFromDefaults(snapParsed); active != "" {
+		if err := s.switchActiveLLMProfile(active); err != nil {
+			s.logger.Warn("apply agent llm profile failed", "agent_id", id, "profile", active, "error", err)
+		}
+	}
+	if s.sessions.Get(id) != nil {
+		return nil
+	}
+	if err := s.ensureAgentWorkspace(id); err != nil {
+		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
 	}
 	built, err := agentruntime.Build(agentruntime.BuildParams{
 		NodeCFG:  s.cfg,

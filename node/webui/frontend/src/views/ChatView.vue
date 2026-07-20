@@ -604,6 +604,7 @@ async function onAgentCreated(created) {
   agentPanelRef.value?.refresh?.();
   try {
     await hydrateSession();
+    await refreshLLMSettings();
   } catch (e) {
     sessionStore.error = e.message;
   }
@@ -619,6 +620,7 @@ async function switchAgent(id) {
   resetUsageStrip();
   try {
     await hydrateSession();
+    await refreshLLMSettings();
   } catch (e) {
     sessionStore.error = e.message;
     clearTranscript();
@@ -715,13 +717,28 @@ async function cycleThinkingEffort() {
   }
 }
 
+async function refreshLLMSettings() {
+  try {
+    chromeStore.llmSettings = await api.getLLMSettings();
+    syncReasoningDisplay(chromeStore.llmSettings);
+  } catch {
+    /* best-effort */
+  }
+}
+
 async function switchLLMProfile(id) {
   const profileId = String(id || "").trim();
   if (!profileId) return;
   if (profileId === chromeStore.llmSettings?.active_profile) return;
   sessionStore.error = "";
   try {
-    chromeStore.llmSettings = await api.patchLLMSettings({ active_profile: profileId });
+    if (sessionStore.sessionId) {
+      // 绑定到当前 Agent，并同步全局运行时
+      await api.patchAgent(sessionStore.sessionId, { llm_active: profileId });
+      chromeStore.llmSettings = await api.getLLMSettings();
+    } else {
+      chromeStore.llmSettings = await api.patchLLMSettings({ active_profile: profileId });
+    }
     syncReasoningDisplay(chromeStore.llmSettings);
     try {
       chromeStore.agentInfo = await api.getAgentInfo();
