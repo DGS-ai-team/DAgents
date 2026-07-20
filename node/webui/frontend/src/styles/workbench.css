@@ -1671,6 +1671,41 @@
   overflow: hidden;
 }
 
+.chat__activity-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.chat__activity-pill:hover {
+  color: var(--color-text);
+  border-color: rgba(55, 148, 255, 0.35);
+}
+
+.chat__activity-pill-label {
+  font-weight: 500;
+}
+
+.chat__activity-pill-add {
+  color: var(--color-success);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.chat__activity-pill-cmd {
+  color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
 .chat__composer-statusline-right {
   flex: 0 0 auto;
   margin-left: auto;

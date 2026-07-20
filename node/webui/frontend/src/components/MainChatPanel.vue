@@ -13,6 +13,8 @@ import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.
 import { chromeStore, inputStripRight } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { statusStore, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
+import { transcriptStore } from "../stores/transcript.js";
+import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 import { getDesktopClipboardFiles } from "../api/desktop.js";
 import {
   formatPathsForComposer,
@@ -92,6 +94,15 @@ const inputStripLeftText = computed(() => {
 });
 
 const inputStripRightText = computed(() => inputStripRight());
+
+const activitySnap = computed(() => deriveActivityFromTranscript(transcriptStore.entries));
+const activityFileCount = computed(() => activitySnap.value.file_count || 0);
+const activityCmdCount = computed(() => activitySnap.value.command_count || 0);
+const showActivityPill = computed(() => activityFileCount.value > 0 || activityCmdCount.value > 0);
+
+function openActivityRail() {
+  chromeStore.panel = "activity";
+}
 
 const showCancel = computed(() => props.sending && !props.hitlBusy);
 const multimodalEnabled = computed(() => {
@@ -495,6 +506,17 @@ defineExpose({
 
       <div class="chat__composer-statusline">
         <div class="chat__composer-statusline-left">
+          <button
+            v-if="showActivityPill"
+            type="button"
+            class="chat__activity-pill"
+            title="打开变更与上下文"
+            @click="openActivityRail"
+          >
+            <span class="chat__activity-pill-label">Changes</span>
+            <span v-if="activityFileCount" class="chat__activity-pill-add">+{{ activityFileCount }}</span>
+            <span v-if="activityCmdCount" class="chat__activity-pill-cmd">{{ activityCmdCount }} cmd</span>
+          </button>
           <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
           <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
         </div>

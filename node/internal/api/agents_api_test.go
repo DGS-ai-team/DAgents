@@ -62,6 +62,43 @@ func TestAgentsAPI_CRUD(t *testing.T) {
 		t.Fatalf("created = %+v", created)
 	}
 
+	body, _ = json.Marshal(map[string]any{
+		"template_id":  "general",
+		"display_name": "自定义工具",
+		"defaults": map[string]any{
+			"tools": map[string]any{
+				"enabled_groups": []string{"fs", "bash"},
+			},
+			"hooks": map[string]any{
+				"inject_today_date_enabled": false,
+			},
+		},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create with defaults status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var custom agentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &custom); err != nil {
+		t.Fatal(err)
+	}
+	var snap map[string]any
+	if err := json.Unmarshal(custom.ConfigSnapshot, &snap); err != nil {
+		t.Fatal(err)
+	}
+	def, _ := snap["defaults"].(map[string]any)
+	tools, _ := def["tools"].(map[string]any)
+	groups, _ := tools["enabled_groups"].([]any)
+	if len(groups) != 2 {
+		t.Fatalf("enabled_groups = %#v", tools["enabled_groups"])
+	}
+	hooks, _ := def["hooks"].(map[string]any)
+	if hooks["inject_today_date_enabled"] != false {
+		t.Fatalf("hooks = %#v", hooks)
+	}
+
 	req = httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
 	rr = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
