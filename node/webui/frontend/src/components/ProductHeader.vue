@@ -21,7 +21,7 @@ const statusLabel = computed(() => {
 const inSettings = computed(() => route.path.startsWith("/settings"));
 
 function openChat() {
-  router.push({ name: "chat" });
+  router.push({ name: "agents" });
 }
 </script>
 

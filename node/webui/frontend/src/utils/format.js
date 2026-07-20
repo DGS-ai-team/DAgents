@@ -65,7 +65,7 @@ export function formatRelativeTime(iso) {
 }
 
 export function sessionRecordId(session) {
-  return String(session?.session_id || session?.SessionID || "").trim();
+  return String(session?.session_id || session?.SessionID || session?.agent_id || session?.AgentID || "").trim();
 }
 
 export function sessionDisplayTitle(session) {
@@ -74,4 +74,16 @@ export function sessionDisplayTitle(session) {
   const id = sessionRecordId(session);
   if (id) return `会话 ${id.slice(0, 8)}`;
   return "新对话";
+}
+
+export function agentRecordId(agent) {
+  return String(agent?.agent_id || agent?.AgentID || "").trim();
+}
+
+export function agentDisplayTitle(agent) {
+  const name = String(agent?.display_name || agent?.DisplayName || "").trim();
+  if (name) return name.length > 48 ? truncateGraphemes(name, 48) : name;
+  const id = agentRecordId(agent);
+  if (id) return `Agent ${id.slice(0, 8)}`;
+  return "未命名 Agent";
 }

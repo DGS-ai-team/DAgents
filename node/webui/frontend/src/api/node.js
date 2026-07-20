@@ -53,16 +53,68 @@ export function patchSetupConfig(patch) {
   return apiFetch("/v1/setup/config", { method: "PATCH", body: patch });
 }
 
+export function listAgentTemplates() {
+  return apiFetch("/v1/agent-templates");
+}
+
+export function getAgentTemplate(templateId) {
+  return apiFetch(`/v1/agent-templates/${encodeURIComponent(templateId)}`);
+}
+
+export function createAgent({ templateId, displayName, sandbox } = {}) {
+  const body = { template_id: templateId };
+  if (displayName) body.display_name = displayName;
+  if (sandbox && typeof sandbox === "object") body.sandbox = sandbox;
+  return apiFetch("/v1/agents", { method: "POST", body });
+}
+
+export function listAgents() {
+  return apiFetch("/v1/agents");
+}
+
+export function getAgent(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`);
+}
+
+export function patchAgent(agentId, patch) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body: patch });
+}
+
+export function deleteAgent(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
+}
+
+export function ensureAgentRuntime(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/ensure`, { method: "POST", body: {} });
+}
+
+export function getAgentHydrate(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/hydrate`);
+}
+
+export function getAgentContext(agentId, { fullMessages = false } = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/context`, {
+    params: fullMessages ? { full_messages: "1" } : {},
+  });
+}
+
+export function cancelAgentTurn(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/cancel`, { method: "POST", body: {} });
+}
+
+/** @deprecated Phase 3 起优先用 Agent API；过渡期保留 session 路径。 */
 export function createSession(sessionId) {
   const body = {};
   if (sessionId) body.session_id = sessionId;
   return apiFetch("/v1/sessions", { method: "POST", body });
 }
 
+/** @deprecated */
 export function listSessions() {
   return apiFetch("/v1/sessions");
 }
 
+/** @deprecated */
 export function deleteSession(sessionId) {
   return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
 }
@@ -76,13 +128,11 @@ export function compressContext(sessionId) {
 }
 
 export function getSessionContext(sessionId, { fullMessages = false } = {}) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/context`, {
-    params: fullMessages ? { full_messages: "1" } : {},
-  });
+  return getAgentContext(sessionId, { fullMessages });
 }
 
 export function getSessionHydrate(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/hydrate`);
+  return getAgentHydrate(sessionId);
 }
 
 export function postSessionAck(sessionId, sseSeq) {
@@ -92,23 +142,23 @@ export function postSessionAck(sessionId, sseSeq) {
   });
 }
 
-export function submitMessage(sessionId, content, contentParts = null) {
-  const body = { session_id: sessionId, request_type: "message", content: content || "" };
+export function submitMessage(agentId, content, contentParts = null) {
+  const body = { agent_id: agentId, request_type: "message", content: content || "" };
   if (Array.isArray(contentParts) && contentParts.length) {
     body.content_parts = contentParts;
   }
   return apiFetch("/v1/messages", { method: "POST", body });
 }
 
-export function submitResume(sessionId, resumeValue) {
+export function submitResume(agentId, resumeValue) {
   return apiFetch("/v1/messages", {
     method: "POST",
-    body: { session_id: sessionId, request_type: "resume", resume_value: resumeValue },
+    body: { agent_id: agentId, request_type: "resume", resume_value: resumeValue },
   });
 }
 
-export function cancelTurn(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, { method: "POST", body: {} });
+export function cancelTurn(agentId) {
+  return cancelAgentTurn(agentId);
 }
 
 export function listSkills(sessionId) {

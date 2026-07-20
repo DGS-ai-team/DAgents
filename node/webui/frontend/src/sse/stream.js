@@ -1,15 +1,18 @@
 const RECONNECT_MS = 5000;
 
-export function connectStream({ getSessionId, onEvent, onStatus }) {
+export function connectStream({ getSessionId, getAgentId, onEvent, onStatus }) {
   let es = null;
   let stopped = false;
   let reconnectTimer = null;
 
   function open() {
     if (stopped) return;
-    const sessionId = getSessionId?.() ?? "";
+    const agentId = (getAgentId?.() ?? getSessionId?.() ?? "").trim();
     const params = new URLSearchParams({ live: "1" });
-    if (sessionId) params.set("session_id", sessionId);
+    if (agentId) {
+      params.set("agent_id", agentId);
+      params.set("session_id", agentId);
+    }
     const url = `/v1/streams?${params}`;
     es = new EventSource(url);
     onStatus?.("connecting");

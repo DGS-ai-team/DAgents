@@ -359,7 +359,7 @@ GET /v1/node/info
 - [x] 过渡：创建 Agent 时同步内部 session（同 id）
 - [x] Phase 1 单元测试（config / store / template / agents API）
 - [ ] 删除对外 `POST/GET /v1/sessions`（Phase 3 UI 切换后彻底移除；现保留兼容）
-- [ ] Web UI Agent 列表面板（Phase 3）
+- [x] Web UI Agent 列表面板（Phase 3）
 
 ### Phase 2 — 运行时 per-agent
 
@@ -374,10 +374,11 @@ GET /v1/node/info
 
 ### Phase 3 — Web UI
 
-- [ ] Agent 列表、模板向导、重命名
-- [ ] 路由 `/agents/:agentId`
-- [ ] 移除 session 相关 UI 与 store
-
+- [x] Agent 列表、模板向导、重命名
+- [x] 路由 `/agents/:agentId`（`/chat` 重定向兼容）
+- [x] `ensureAgentRuntime`：重启 / Release 后按快照恢复沙箱
+- [x] messages / streams / hydrate 走 `agent_id`
+- [ ] 彻底移除 session 相关 UI 文案残留与 `/v1/sessions`（后续清理）
 ### Phase 4 — 删除 TUI/CLI + 打包
 
 - [ ] 删除 client TUI、app/cli

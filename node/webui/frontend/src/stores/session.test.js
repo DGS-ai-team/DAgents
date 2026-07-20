@@ -9,6 +9,7 @@ vi.stubGlobal("localStorage", {
 vi.mock("../api/node.js", () => ({
   postSessionAck: vi.fn(() => Promise.resolve({ ack_seq: 1 })),
   createSession: vi.fn(),
+  ensureAgentRuntime: vi.fn(() => Promise.resolve({ ok: true })),
 }));
 
 let sessionStore;

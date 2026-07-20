@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -10,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
+	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 )
 
@@ -23,7 +24,8 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}", s.handleGetAgent)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}", s.handlePatchAgent)
 	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}", s.handleDeleteAgent)
-	// Phase 2：agent 路径别名（内部仍走 session 实现，id 相同）。
+	// Phase 2/3：agent 路径别名（内部仍走 session 实现，id 相同）。
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ensure", s.handleAgentEnsure)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/hydrate", s.handleAgentHydrate)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/cancel", s.handleAgentCancel)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/context", s.handleAgentContext)
@@ -323,12 +325,83 @@ func generateAgentInstanceID() (string, error) {
 	return fmt.Sprintf("agt-%x", b), nil
 }
 
+// ensureAgentRuntime 按 agents.db 快照把 Agent 装入内存（CreateWithOptions）。
+// Node 重启或 idle Release 后必须调用，否则会落到默认 TurnOptions / Registry。
+func (s *Server) ensureAgentRuntime(ctx context.Context, agentID string) error {
+	id := strings.TrimSpace(agentID)
+	if id == "" {
+		return fmt.Errorf("agent_id is required")
+	}
+	if s.agents == nil {
+		return fmt.Errorf("agents store not configured")
+	}
+	if s.sessions == nil {
+		return fmt.Errorf("sessions manager not configured")
+	}
+	if s.sessions.Get(id) != nil {
+		return nil
+	}
+	rec, err := s.agents.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rec == nil || rec.Archived {
+		return fmt.Errorf("agent_not_found")
+	}
+	if err := s.ensureAgentWorkspace(id); err != nil {
+		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
+	}
+	snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+	if err != nil {
+		return fmt.Errorf("parse agent snapshot: %w", err)
+	}
+	built, err := agentruntime.Build(agentruntime.BuildParams{
+		NodeCFG:  s.cfg,
+		BaseTurn: s.sessions.DefaultTurnOptions(),
+		AgentID:  id,
+		Snapshot: snapParsed,
+	})
+	if err != nil {
+		return fmt.Errorf("build agent runtime: %w", err)
+	}
+	if _, _, err := s.sessions.CreateWithOptions(id, built.TurnOptions, built.Registry); err != nil {
+		return err
+	}
+	s.logger.Info("agent runtime ensured", "agent_id", id, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
+	return nil
+}
+
+func (s *Server) handleAgentEnsure(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("agent_id"))
+	if id == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
+		return
+	}
+	if err := s.ensureAgentRuntime(r.Context(), id); err != nil {
+		if err.Error() == "agent_not_found" {
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+			return
+		}
+		writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
+}
+
 // agent 路径别名：把 PathValue agent_id 映射为 session_id 后复用既有 handler。
 func (s *Server) withAgentAsSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimSpace(r.PathValue("agent_id"))
 		if id == "" {
 			writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
+			return
+		}
+		if err := s.ensureAgentRuntime(r.Context(), id); err != nil {
+			if err.Error() == "agent_not_found" {
+				writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+				return
+			}
+			writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})
 			return
 		}
 		r.SetPathValue("session_id", id)

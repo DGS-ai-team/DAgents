@@ -123,6 +123,103 @@ sandbox:
 	}
 }
 
+func TestPhase3_ensureAgentRuntimeAfterRelease(t *testing.T) {
+	root, err := os.MkdirTemp("", "dagents-phase3-ensure-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+
+	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
+	cfg.ApplyDefaults()
+	cfg.LLM.Mock = true
+
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	userDir := cfg.AgentTemplatesDir()
+	_ = os.MkdirAll(userDir, 0o755)
+	_ = os.WriteFile(filepath.Join(userDir, "code-reviewer.yaml"), []byte(`
+id: code-reviewer
+display_name: 审查
+defaults:
+  tools:
+    enabled_groups: [fs, skills]
+sandbox:
+  enabled: true
+  backend: process
+  workspace_subdir: data
+  fs_root_isolation: true
+  allow_bash: false
+  allow_network_tools: false
+`), 0o644)
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+	t.Cleanup(func() {
+		if srv.sessions != nil {
+			srv.sessions.Stop()
+		}
+		_ = agentsDB.Close()
+	})
+
+	body, _ := json.Marshal(map[string]any{
+		"template_id":  "code-reviewer",
+		"display_name": "审查沙箱",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var created agentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	wantFS := filepath.Join(cfg.FSRoot, "agents", created.AgentID, "data")
+	if fs, ok := srv.sessions.SessionFSRoot(created.AgentID); !ok || fs != wantFS {
+		t.Fatalf("initial fsRoot=%q ok=%v want %q", fs, ok, wantFS)
+	}
+
+	if _, err := srv.sessions.Release(created.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := srv.sessions.SessionFSRoot(created.AgentID); ok {
+		t.Fatal("expected runtime released")
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/agents/"+created.AgentID+"/ensure", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ensure status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	fsRoot, ok := srv.sessions.SessionFSRoot(created.AgentID)
+	if !ok {
+		t.Fatal("runtime missing after ensure")
+	}
+	if fsRoot != wantFS {
+		t.Fatalf("fsRoot after ensure=%q want %q", fsRoot, wantFS)
+	}
+
+	// hydrate 也应隐式 ensure
+	if _, err := srv.sessions.Release(created.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/v1/agents/"+created.AgentID+"/hydrate", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("hydrate status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if fs, ok := srv.sessions.SessionFSRoot(created.AgentID); !ok || fs != wantFS {
+		t.Fatalf("hydrate ensure fsRoot=%q ok=%v", fs, ok)
+	}
+}
+
 func TestResolveConversationID(t *testing.T) {
 	id, err := resolveConversationID("", "agt-1")
 	if err != nil || id != "agt-1" {

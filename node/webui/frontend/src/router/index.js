@@ -14,11 +14,18 @@ import ConnectionSettings from "../views/settings/ConnectionSettings.vue";
 const router = createRouter({
   history: createWebHistory("/ui/"),
   routes: [
-    { path: "/", redirect: "/chat" },
+    { path: "/", redirect: "/agents" },
     {
       path: "/chat/:sessionId?",
+      redirect: (to) => {
+        const id = String(to.params.sessionId || "").trim();
+        return id ? `/agents/${encodeURIComponent(id)}` : "/agents";
+      },
+    },
+    {
+      path: "/agents/:agentId?",
       component: ChatLayout,
-      children: [{ path: "", name: "chat", component: ChatView }],
+      children: [{ path: "", name: "agents", component: ChatView }],
     },
     {
       path: "/settings",

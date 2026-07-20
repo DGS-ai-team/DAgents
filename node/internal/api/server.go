@@ -1005,6 +1005,15 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_session", err.Error(), nil)
 		return
 	}
+	// 若该 id 是 Agent 实例，先按快照装入 runtime（避免重启后落到默认沙箱配置）。
+	if s.agents != nil {
+		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
+			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": sessionID})
+				return
+			}
+		}
+	}
 	requestType := strings.TrimSpace(req.RequestType)
 	if requestType == "" {
 		requestType = "message"
