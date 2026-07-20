@@ -142,6 +142,59 @@ func (m *Manager) Stop() {
 	}
 }
 
+// DefaultTurnOptions 返回 Manager 启动时的默认 TurnOptions 副本。
+func (m *Manager) DefaultTurnOptions() TurnOptions {
+	if m == nil {
+		return TurnOptions{}
+	}
+	return m.turn
+}
+
+// DefaultTools 返回 Manager 共享的默认 Registry。
+func (m *Manager) DefaultTools() *tools.Registry {
+	if m == nil {
+		return nil
+	}
+	return m.tools
+}
+
+// CreateWithOptions 用指定 TurnOptions 与工具执行器创建/复用 session（per-agent 沙箱用）。
+// toolExec 为 nil 时回退到 Manager 默认 Registry。
+func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, toolExec tools.Executor) (*Session, bool, error) {
+	id := strings.TrimSpace(requestedID)
+	if id == "" {
+		return nil, false, fmt.Errorf("session id is required for CreateWithOptions")
+	}
+	if toolExec == nil {
+		toolExec = m.tools
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.sessions[id]; ok {
+		m.logger.Info("session reuse", "session_id", id)
+		return &existing.session, false, nil
+	}
+	msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, err := m.loadSessionData(id)
+	if err != nil {
+		m.logger.Error("session load failed", "session_id", id, "error", err)
+		return nil, false, err
+	}
+	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
+	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, m.policy, m.store, m.logger,
+		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
+	m.sessions[id] = rt
+	m.attachUserChildTools(rt)
+	rt.start(m.ctx)
+	rt.orch.RunSessionLifecyclePhase(context.Background(), id, "create")
+	if created {
+		rt.persist(context.Background())
+		m.logger.Info("session created", "session_id", id, "restored", false, "fs_root", turnOpts.FSRoot)
+	} else {
+		m.logger.Info("session restored", "session_id", id, "messages", len(msgs), "has_pending_hitl", pending != nil)
+	}
+	return &rt.session, created, nil
+}
+
 // Create 创建或复用 session；若 DB 中已有则加载历史并启动 consumer。
 func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 	id := strings.TrimSpace(requestedID)
@@ -624,6 +677,15 @@ func (m *Manager) UnloadSessionSkill(sessionID, skillName string) ([]skills.Load
 		return nil, fmt.Errorf("session_not_found")
 	}
 	return rt.unloadSkillsByName([]string{skillName}), nil
+}
+
+// SessionFSRoot 返回指定 session/agent 的有效 FSRoot（测试与调试用）。
+func (m *Manager) SessionFSRoot(sessionID string) (string, bool) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return "", false
+	}
+	return rt.fsRoot, true
 }
 
 func (m *Manager) getRuntime(sessionID string) *runtime {

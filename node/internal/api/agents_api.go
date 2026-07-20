@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 )
 
@@ -22,6 +23,10 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}", s.handleGetAgent)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}", s.handlePatchAgent)
 	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}", s.handleDeleteAgent)
+	// Phase 2：agent 路径别名（内部仍走 session 实现，id 相同）。
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/hydrate", s.handleAgentHydrate)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/cancel", s.handleAgentCancel)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/context", s.handleAgentContext)
 }
 
 func (s *Server) templateLoader() *agenttemplate.Loader {
@@ -178,10 +183,27 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.ensureAgentWorkspace(agentID); err != nil {
 		s.logger.Warn("agent workspace create failed", "agent_id", agentID, "error", err)
 	}
-	// 过渡：同步创建同 id 的内部 session，使现有 messages/hydrate 路径可用（Phase 2 再切纯 agent）。
+	// Phase 2：按快照构造 per-agent FSRoot / Registry，并桥接同 id 的内部 session。
 	if s.sessions != nil {
-		if _, _, err := s.sessions.Create(agentID); err != nil {
-			s.logger.Warn("bridge session create failed", "agent_id", agentID, "error", err)
+		snapParsed, err := agentruntime.ParseSnapshot(snapRaw)
+		if err != nil {
+			s.logger.Warn("parse agent snapshot failed", "agent_id", agentID, "error", err)
+		} else {
+			built, err := agentruntime.Build(agentruntime.BuildParams{
+				NodeCFG:   s.cfg,
+				BaseTurn:  s.sessions.DefaultTurnOptions(),
+				AgentID:   agentID,
+				Snapshot:  snapParsed,
+			})
+			if err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "agent_runtime_failed", err.Error(), nil)
+				return
+			}
+			if _, _, err := s.sessions.CreateWithOptions(agentID, built.TurnOptions, built.Registry); err != nil {
+				s.logger.Warn("bridge session create failed", "agent_id", agentID, "error", err)
+			} else {
+				s.logger.Info("agent runtime ready", "agent_id", agentID, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, agentViewFromRecord(rec))
@@ -299,4 +321,29 @@ func generateAgentInstanceID() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("agt-%x", b), nil
+}
+
+// agent 路径别名：把 PathValue agent_id 映射为 session_id 后复用既有 handler。
+func (s *Server) withAgentAsSession(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSpace(r.PathValue("agent_id"))
+		if id == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
+			return
+		}
+		r.SetPathValue("session_id", id)
+		next(w, r)
+	}
+}
+
+func (s *Server) handleAgentHydrate(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleSessionHydrate)(w, r)
+}
+
+func (s *Server) handleAgentCancel(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleCancelSession)(w, r)
+}
+
+func (s *Server) handleAgentContext(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleSessionContext)(w, r)
 }

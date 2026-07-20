@@ -1,0 +1,125 @@
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/store"
+	"github.com/DGS-ai-team/DAgents/shared/config"
+)
+
+func TestPhase2_agentSandboxMessageByAgentID(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+	cfg.LLM.Mock = true
+
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+
+	userDir := cfg.AgentTemplatesDir()
+	_ = os.MkdirAll(userDir, 0o755)
+	_ = os.WriteFile(filepath.Join(userDir, "code-reviewer.yaml"), []byte(`
+id: code-reviewer
+display_name: 审查
+defaults:
+  tools:
+    enabled_groups: [fs, skills]
+sandbox:
+  enabled: true
+  backend: process
+  workspace_subdir: data
+  fs_root_isolation: true
+  allow_bash: false
+  allow_network_tools: false
+`), 0o644)
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	body, _ := json.Marshal(map[string]any{
+		"template_id":  "code-reviewer",
+		"display_name": "审查沙箱",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var created agentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	fsRoot, ok := srv.sessions.SessionFSRoot(created.AgentID)
+	if !ok {
+		t.Fatal("runtime missing")
+	}
+	want := filepath.Join(cfg.FSRoot, "agents", created.AgentID, "data")
+	if fsRoot != want {
+		t.Fatalf("fsRoot=%q want %q", fsRoot, want)
+	}
+
+	msgBody, _ := json.Marshal(map[string]any{
+		"agent_id":     created.AgentID,
+		"request_type": "message",
+		"content":      "hello agent",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(msgBody))
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("message status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var msgResp postMessageResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &msgResp)
+	if msgResp.AgentID != created.AgentID || msgResp.SessionID != created.AgentID {
+		t.Fatalf("msgResp=%+v", msgResp)
+	}
+
+	// hydrate alias
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		req = httptest.NewRequest(http.MethodGet, "/v1/agents/"+created.AgentID+"/hydrate", nil)
+		rr = httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, req)
+		if rr.Code == http.StatusOK {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("hydrate status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !strings.Contains(rr.Body.String(), created.AgentID) && !strings.Contains(rr.Body.String(), "session_id") {
+		t.Fatalf("hydrate body unexpected: %s", rr.Body.String())
+	}
+}
+
+func TestResolveConversationID(t *testing.T) {
+	id, err := resolveConversationID("", "agt-1")
+	if err != nil || id != "agt-1" {
+		t.Fatalf("%q %v", id, err)
+	}
+	id, err = resolveConversationID("agt-1", "agt-1")
+	if err != nil || id != "agt-1" {
+		t.Fatalf("%q %v", id, err)
+	}
+	if _, err := resolveConversationID("a", "b"); err == nil {
+		t.Fatal("expected mismatch error")
+	}
+	if _, err := resolveConversationID("", ""); err == nil {
+		t.Fatal("expected required error")
+	}
+}

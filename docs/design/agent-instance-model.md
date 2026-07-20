@@ -350,23 +350,27 @@ GET /v1/node/info
 - [x] `shared/config`：`node_id` 重命名
 - [ ] OpenAPI / handbook 修订计划
 
-### Phase 1 — 数据与 API（进行中）
+### Phase 1 — 数据与 API
 
 - [x] `agents` 表 + `agents.db`
 - [x] 模板加载器 `packaging/agent-templates/` + `node/internal/agenttemplate`
 - [x] `POST/GET/PATCH/DELETE /v1/agents` + `GET /v1/agent-templates`
 - [x] `node_id` 配置与环境变量（`NODE_ID`，兼容读 `AGENT_ID`）
 - [x] 过渡：创建 Agent 时同步内部 session（同 id）
+- [x] Phase 1 单元测试（config / store / template / agents API）
 - [ ] 删除对外 `POST/GET /v1/sessions`（Phase 3 UI 切换后彻底移除；现保留兼容）
 - [ ] Web UI Agent 列表面板（Phase 3）
 
 ### Phase 2 — 运行时 per-agent
 
-- [ ] `agent.Manager` + `AgentRuntime`
-- [ ] per-agent TurnOptions、Registry、LLM settings
-- [ ] **沙箱 FSRoot 隔离**
-- [ ] Child agent 挂接新模型
-- [ ] SSE / messages 全面改用 `agent_id`
+- [x] `CreateWithOptions` + per-agent TurnOptions / Registry（挂在 session.Manager）
+- [x] `agentruntime`：EffectiveFSRoot、工具组沙箱约束、Build
+- [x] **沙箱 FSRoot 隔离**（`process` 后端）
+- [x] messages / streams 接受 `agent_id` 别名
+- [x] `/v1/agents/{id}/hydrate|cancel|context` 路径别名
+- [x] Phase 2 单元测试
+- [ ] Child agent 完全按新 Agent 模型挂接（仍用父 runtime；后续细化）
+- [ ] Docker 沙箱后端（后续增强）
 
 ### Phase 3 — Web UI
 

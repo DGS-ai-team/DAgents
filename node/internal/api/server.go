@@ -961,30 +961,48 @@ func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
 }
 
 type postMessageRequest struct {
-	SessionID       string           `json:"session_id"`
-	RequestType     string           `json:"request_type"`
-	Content         string           `json:"content"`
+	SessionID       string            `json:"session_id"`
+	AgentID         string            `json:"agent_id"`
+	RequestType     string            `json:"request_type"`
+	Content         string            `json:"content"`
 	ContentParts    []llm.ContentPart `json:"content_parts,omitempty"`
-	UserMessageName string           `json:"user_message_name,omitempty"`
-	ResumeValue     map[string]any   `json:"resume_value"`
+	UserMessageName string            `json:"user_message_name,omitempty"`
+	ResumeValue     map[string]any    `json:"resume_value"`
 }
 
 type postMessageResponse struct {
 	Accepted  bool   `json:"accepted"`
 	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id,omitempty"`
 	Priority  string `json:"priority"`
+}
+
+func resolveConversationID(sessionID, agentID string) (string, error) {
+	sid := strings.TrimSpace(sessionID)
+	aid := strings.TrimSpace(agentID)
+	if sid != "" && aid != "" && sid != aid {
+		return "", fmt.Errorf("session_id and agent_id differ")
+	}
+	if sid != "" {
+		return sid, nil
+	}
+	if aid != "" {
+		return aid, nil
+	}
+	return "", fmt.Errorf("session_id or agent_id is required")
 }
 
 func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// POST /v1/messages：message 入队 human 优先级；resume 用于 HITL 续跑。
+	// Phase 2：接受 agent_id 作为 session_id 别名（1 Agent = 1 对话）。
 	var req postMessageRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	sessionID := strings.TrimSpace(req.SessionID)
-	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+	sessionID, err := resolveConversationID(req.SessionID, req.AgentID)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_session", err.Error(), nil)
 		return
 	}
 	requestType := strings.TrimSpace(req.RequestType)
@@ -995,6 +1013,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, postMessageResponse{
 			Accepted:  true,
 			SessionID: sessionID,
+			AgentID:   sessionID,
 			Priority:  string(queue.PriorityHuman),
 		})
 		return
@@ -1002,10 +1021,9 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 
 	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.ResumeValue, req.UserMessageName)
 	if err != nil {
-		// 业务错误映射为 HTTP 状态 + 统一 error 体（见 errors.go）。
 		switch err.Error() {
 		case "session_not_found":
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "session_not_found", "session/agent 不存在", map[string]any{"session_id": sessionID, "agent_id": sessionID})
 		case "invalid_message":
 			writeAPIError(w, http.StatusBadRequest, "invalid_message", "content 不能为空", nil)
 		case "multimodal_disabled":
@@ -1022,6 +1040,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, postMessageResponse{
 		Accepted:  true,
 		SessionID: sessionID,
+		AgentID:   sessionID,
 		Priority:  priority,
 	})
 }
@@ -1050,7 +1069,7 @@ func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
-	// GET /v1/streams：SSE 长连接；Client 用 session_id 查询参数在本地过滤事件。
+	// GET /v1/streams：SSE 长连接；Client 用 session_id 或 agent_id 查询参数过滤事件。
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "streaming not supported", nil)
@@ -1058,6 +1077,9 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionFilter := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionFilter == "" {
+		sessionFilter = strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	}
 	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
 	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"
 	// live=1：TUI 重连时只收增量，避免 replay 历史 done 干扰 wait_user_turn。
