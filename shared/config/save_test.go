@@ -11,7 +11,7 @@ func TestSaveFile_roundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	cfg := &Config{
-		AgentID: "save-test",
+		NodeID: "save-test",
 		FSRoot:  dir,
 	}
 	cfg.LLM.Provider = "deepseek"

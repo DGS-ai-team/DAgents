@@ -25,6 +25,7 @@ defaults:
 
 sandbox:
   enabled: true
+  backend: process   # 具备 Docker 后可改为 docker，仅隔离工具执行
   workspace_subdir: data
   fs_root_isolation: true
   allow_bash: true

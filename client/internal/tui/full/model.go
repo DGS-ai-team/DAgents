@@ -197,7 +197,7 @@ func (m *model) bootstrapSession(initialSession string) error {
 		m.transcript.Add("[system] hydrate 失败: " + err.Error())
 	}
 	if m.transcript.Len() == 0 {
-		welcomeBody := tuishared.FormatWelcomePanelBody(m.probe.Endpoint, m.probe.AgentID, m.probe.Version, id)
+		welcomeBody := tuishared.FormatWelcomePanelBody(m.probe.Endpoint, m.probe.NodeID, m.probe.Version, id)
 		if ctxBody, err := m.client.GetSessionContext(m.ctx, id); err == nil {
 			welcomeBody = append(welcomeBody, tuishared.SkillsBloatWarningLines(ctxBody)...)
 		}

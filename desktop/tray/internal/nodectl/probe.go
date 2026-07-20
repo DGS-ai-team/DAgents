@@ -16,13 +16,13 @@ import (
 type Health struct {
 	OK      bool
 	Status  string
-	AgentID string
+	NodeID  string
 	Version string
 }
 
 type healthPayload struct {
 	Status  string `json:"status"`
-	AgentID string `json:"agent_id"`
+	NodeID  string `json:"node_id"`
 	Version string `json:"version"`
 }
 
@@ -55,7 +55,7 @@ func Probe(ctx context.Context, cfg *config.Config, client *http.Client) (*Healt
 	return &Health{
 		OK:      payload.Status == "ok",
 		Status:  payload.Status,
-		AgentID: payload.AgentID,
+		NodeID:  payload.NodeID,
 		Version: payload.Version,
 	}, nil
 }

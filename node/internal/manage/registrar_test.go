@@ -16,7 +16,7 @@ import (
 
 func testManageConfig(serverURL, token string) *config.Config {
 	cfg := &config.Config{
-		AgentID: "ops-01",
+		NodeID: "ops-01",
 		Agent: config.AgentConfig{
 			Name: "展示名",
 			Role: "compliance",
@@ -154,7 +154,7 @@ func TestRegistrar_reregistersOnHeartbeat404(t *testing.T) {
 
 func TestRegistrar_buildRegisterPayload_usesAgentConfig(t *testing.T) {
 	cfg := testManageConfig("http://127.0.0.1:8020", "")
-	cfg.AgentID = "ops-01"
+	cfg.NodeID = "ops-01"
 	cfg.Agent = config.AgentConfig{
 		Name:         "展示名",
 		Description:  "Card 描述",

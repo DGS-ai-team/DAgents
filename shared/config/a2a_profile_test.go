@@ -42,7 +42,7 @@ func TestAgentRoleExposeEffective(t *testing.T) {
 }
 
 func TestAgentDisplayNameFallback(t *testing.T) {
-	cfg := &Config{AgentID: "node-a"}
+	cfg := &Config{NodeID: "node-a"}
 	if cfg.AgentDisplayName() != "node-a" {
 		t.Fatalf("name = %q", cfg.AgentDisplayName())
 	}

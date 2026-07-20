@@ -25,6 +25,7 @@ defaults:
 
 sandbox:
   enabled: false
+  backend: process
   fs_root_isolation: false
   allow_bash: true
   allow_network_tools: true

@@ -66,7 +66,7 @@ func Run(ctx context.Context, cfg *config.Config, initialSession string, showRea
 	}
 
 	fmt.Fprintf(os.Stderr, "已连接 %s agent_id=%s model=%s version=%s (plain REPL)\n",
-		res.Endpoint, res.AgentID, orReplDash(res.LLM.Model), res.Version)
+		res.Endpoint, res.NodeID, orReplDash(res.LLM.Model), res.Version)
 	if res.LLM.ThinkingSupported {
 		fmt.Fprintf(os.Stderr, "thinking: %s（/thinking on|off · /thinking effort high|max）\n",
 			tuishared.FormatLLMThinkingSummary(res.LLM))
@@ -266,7 +266,7 @@ func (a *App) printStatus(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "agent_id:      %s\n", a.probe.AgentID)
+	fmt.Fprintf(os.Stderr, "agent_id:      %s\n", a.probe.NodeID)
 	fmt.Fprintf(os.Stderr, "model:         %s\n", orReplDash(a.probe.LLM.Model))
 	if a.probe.LLM.ThinkingSupported {
 		fmt.Fprintf(os.Stderr, "thinking:      %s\n", tuishared.FormatLLMThinkingSummary(a.probe.LLM))

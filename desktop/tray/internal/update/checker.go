@@ -156,7 +156,7 @@ func (c *Checker) fetchCheck() sharedupdate.Status {
 		CurrentVersion: ReadInstallVersion(c.home),
 		Platform:       sharedupdate.ReleasePlatform(),
 		Channel:        channel,
-		AgentID:        c.cfg.AgentID,
+		AgentID:        c.cfg.NodeID,
 		NodeToken:      c.cfg.Manage.NodeToken,
 		ApplyCommand:   "dagents update",
 		Client:         c.client,

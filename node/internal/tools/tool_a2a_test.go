@@ -17,7 +17,7 @@ func TestAgentInvokeRequiresToAgentID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: "http://127.0.0.1:1"}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: "http://127.0.0.1:1"}}
 	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", nil)
 
 	_, err = reg.Execute(context.Background(), "agent_invoke", `{"content":"test","call_purpose":"test"}`)
@@ -55,7 +55,7 @@ func TestAgentInvokeWithExplicitToAgentID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
 	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", nil)
 
 	ctx := WithSession(context.Background(), "sess-x")
@@ -87,7 +87,7 @@ func TestAgentInvokeInDefinitionsWhenConfigured(t *testing.T) {
 	if hasToolName(reg.Definitions(), "agent_invoke") {
 		t.Fatal("expected agent_invoke absent before SetManageRuntime")
 	}
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: "http://127.0.0.1:1"}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: "http://127.0.0.1:1"}}
 	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", nil)
 	if !hasToolName(reg.Definitions(), "agent_invoke") {
 		t.Fatal("expected agent_invoke present after SetManageRuntime")
@@ -118,7 +118,7 @@ func TestAgentDiscoverUsesCallerGroupsFromManage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
 	reg.SetManageRuntime(a2aclient.New(cfg), "node-b", nil)
 
 	out, err := reg.Execute(context.Background(), "agent_discover", `{"call_purpose":"发现 peer"}`)

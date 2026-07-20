@@ -26,7 +26,7 @@ func TestUpdateCheckerFetchCheck(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{AgentID: "node-1"}
+	cfg := &config.Config{NodeID: "node-1"}
 	cfg.Manage.Enabled = true
 	cfg.Manage.URL = srv.URL
 	checker := NewUpdateChecker(cfg, nil)

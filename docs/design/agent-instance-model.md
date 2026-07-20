@@ -152,6 +152,21 @@ sandbox:
 
 ### 4.4 沙箱语义
 
+```yaml
+sandbox:
+  enabled: true
+  backend: process   # process | docker（默认 process；docker 为后续增强）
+  workspace_subdir: data
+  allow_bash: false
+  allow_network_tools: false
+  fs_root_isolation: true
+  # docker 专用（backend=docker 时）：
+  # image: dagents-sandbox:latest
+  # network: none          # none | bridge | …
+  # memory: 512m
+  # cpus: "1.0"
+```
+
 `sandbox.enabled: true` 时：
 
 | 能力 | 行为 |
@@ -164,6 +179,24 @@ sandbox:
 | **非沙箱** | `sandbox.enabled: false` 时共享 Node `fs_root`（兼容「全权限助手」） |
 
 实现上：`AgentRuntime` 构造 `tools.Registry` 时注入 **effective FSRoot** 与 **enabled_groups 过滤**。
+
+#### 4.4.1 沙箱后端（可插拔，Docker 后续）
+
+| `backend` | 说明 | 阶段 |
+|-----------|------|------|
+| **`process`（默认）** | 应用层：effective FSRoot + 工具组白名单 + policy | Phase 2 必达 |
+| **`docker`（可选）** | 工具执行（尤其 bash）进容器；工作区 bind-mount | **后续独立增强**，非 Phase 2 阻塞 |
+
+Docker 后端要点（设计预留，暂不实现）：
+
+- **不把整个 Node 放进容器**，只隔离危险工具执行路径。
+- Agent 工作区挂载为容器内 `/workspace`；默认 `network: none`、非 root、CPU/内存上限。
+- 无 Docker 时：创建 `backend: docker` 的 Agent 应失败并提示，或显式配置允许降级为 `process`。
+- 生命周期：创建 Agent 时可预热容器；空闲回收；删除 Agent 时 `docker rm`。
+- 与 policy 叠层：容器外仍走 HITL 审批；容器内再加资源/网络限制。
+- Windows / 无 Docker 环境必须保留 `process` 兜底，**不得**强制所有 Agent 依赖 Docker。
+
+模板示例：`ops-runner` 可先 `backend: process`；具备 Docker 后再切 `docker`。
 
 ---
 
@@ -309,20 +342,23 @@ GET /v1/node/info
 
 ## 11. 分阶段实施
 
-### Phase 0 — 设计落地（当前）
+### Phase 0 — 设计落地
 
 - [x] 本文档
-- [ ] 2–3 个内置模板 YAML 样例
-- [ ] `shared/config`：`node_id` 重命名草案
+- [x] 2–3 个内置模板 YAML 样例
+- [x] 沙箱可插拔后端（`process` | `docker`）设计预留
+- [x] `shared/config`：`node_id` 重命名
 - [ ] OpenAPI / handbook 修订计划
 
-### Phase 1 — 数据与 API
+### Phase 1 — 数据与 API（进行中）
 
-- [ ] `agents` 表 + `agents.db`；删除 `sessions` API
-- [ ] 模板加载器 `packaging/agent-templates/`
-- [ ] `POST/GET/PATCH/DELETE /v1/agents`
-- [ ] `node_id` 配置与环境变量
-- [ ] 破坏性清空旧 DB 的启动逻辑
+- [x] `agents` 表 + `agents.db`
+- [x] 模板加载器 `packaging/agent-templates/` + `node/internal/agenttemplate`
+- [x] `POST/GET/PATCH/DELETE /v1/agents` + `GET /v1/agent-templates`
+- [x] `node_id` 配置与环境变量（`NODE_ID`，兼容读 `AGENT_ID`）
+- [x] 过渡：创建 Agent 时同步内部 session（同 id）
+- [ ] 删除对外 `POST/GET /v1/sessions`（Phase 3 UI 切换后彻底移除；现保留兼容）
+- [ ] Web UI Agent 列表面板（Phase 3）
 
 ### Phase 2 — 运行时 per-agent
 

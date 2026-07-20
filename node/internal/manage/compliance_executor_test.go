@@ -49,7 +49,7 @@ func writeComplianceFixtures(t *testing.T) (*config.Config, *session.Manager) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{
-		AgentID: "compliance-a",
+		NodeID: "compliance-a",
 		Agent: config.AgentConfig{
 			Role: "compliance",
 		},
@@ -69,7 +69,7 @@ func writeComplianceFixtures(t *testing.T) (*config.Config, *session.Manager) {
 		t.Fatal(err)
 	}
 	pol, _ := policy.LoadFile("")
-	mgr := session.NewManager(cfg.AgentID, hub, &llm.MockClient{
+	mgr := session.NewManager(cfg.NodeID, hub, &llm.MockClient{
 		FixedReply: "APPROVED | rule=R-ANON-01 | mock compliance reply",
 	}, reg, pol, nil, session.TurnOptions{RuntimeDir: dir, SkillsEnabled: false}, logx.Discard())
 	t.Cleanup(mgr.Stop)

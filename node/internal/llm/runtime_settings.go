@@ -57,7 +57,7 @@ func NewRuntimeSettings(cfg *config.Config) *RuntimeSettings {
 	}
 	thinking, effort := NormalizeThinkingSettings(cfg.LLM.Provider, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
 	return &RuntimeSettings{
-		AgentID:           strings.TrimSpace(cfg.AgentID),
+		AgentID:           strings.TrimSpace(cfg.NodeID),
 		ActiveProfile:     cfg.LLM.ActiveProfileID(),
 		profileIDs:        cfg.LLM.ProfileIDs(),
 		Provider:          strings.TrimSpace(cfg.LLM.Provider),

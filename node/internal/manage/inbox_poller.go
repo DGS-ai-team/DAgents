@@ -105,7 +105,7 @@ func (p *InboxPoller) pollOnce(ctx context.Context, wait time.Duration) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set(agentIDHeader, p.cfg.AgentID)
+	req.Header.Set(agentIDHeader, p.cfg.NodeID)
 	if token := strings.TrimSpace(p.cfg.Manage.NodeToken); token != "" {
 		req.Header.Set(tokenHeader, token)
 	}
@@ -146,7 +146,7 @@ func (p *InboxPoller) inboxURL(wait time.Duration) (string, error) {
 		return "", err
 	}
 	q := u.Query()
-	q.Set("agent_id", p.cfg.AgentID)
+	q.Set("agent_id", p.cfg.NodeID)
 	q.Set("limit", "10")
 	if wait > 0 {
 		q.Set("wait", fmt.Sprintf("%.0f", wait.Seconds()))

@@ -25,7 +25,7 @@ type LLMInfo struct {
 // Result 为一次 Node 探活的结果摘要。
 type Result struct {
 	Endpoint         string
-	AgentID          string
+	NodeID           string
 	Status           string
 	Version          string
 	ExposeToPeers    bool
@@ -36,7 +36,7 @@ type Result struct {
 
 type healthPayload struct {
 	Status  string `json:"status"`
-	AgentID string `json:"agent_id"`
+	NodeID  string `json:"node_id"`
 	Version string `json:"version"`
 }
 
@@ -50,22 +50,14 @@ type llmInfoPayload struct {
 }
 
 type agentInfoPayload struct {
-	AgentID          string         `json:"agent_id"`
+	NodeID           string         `json:"node_id"`
 	ExposeToPeers    bool           `json:"expose_to_peers"`
 	Capabilities     []string       `json:"capabilities"`
 	ManageRegistered bool           `json:"manage_registered"`
 	LLM              llmInfoPayload `json:"llm"`
 }
 
-// Node 对 local.endpoint 执行 GET /health 与 GET /v1/agent/info，并可选校验配置中的 agent_id。
-
-// 逻辑：
-// 1. 规范化 endpoint 并 GET /health；
-// 2. status 非 ok 或 HTTP 非 200 则失败；
-// 3. GET /v1/agent/info 并解析；
-// 4. 若 cfg.Local.AgentID 非空且与响应不一致则失败。
-//
-// 异常：网络错误、非 200、JSON 解析失败、agent_id 不一致均返回 error。
+// Node 对 local.endpoint 执行 GET /health 与 GET /v1/agent/info，并可选校验配置中的 node_id。
 func Node(ctx context.Context, cfg *config.Config, httpClient *http.Client) (*Result, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
@@ -85,20 +77,20 @@ func Node(ctx context.Context, cfg *config.Config, httpClient *http.Client) (*Re
 		return nil, err
 	}
 
-	expectedID := strings.TrimSpace(cfg.Local.AgentID)
+	expectedID := strings.TrimSpace(cfg.Local.NodeID)
 	if expectedID == "" {
-		expectedID = strings.TrimSpace(cfg.AgentID)
+		expectedID = strings.TrimSpace(cfg.NodeID)
 	}
-	if expectedID != "" && health.AgentID != expectedID {
-		return nil, fmt.Errorf("agent_id mismatch: config %q, node %q", expectedID, health.AgentID)
+	if expectedID != "" && health.NodeID != expectedID {
+		return nil, fmt.Errorf("node_id mismatch: config %q, node %q", expectedID, health.NodeID)
 	}
-	if expectedID != "" && info.AgentID != expectedID {
-		return nil, fmt.Errorf("agent info agent_id mismatch: config %q, node %q", expectedID, info.AgentID)
+	if expectedID != "" && info.NodeID != expectedID {
+		return nil, fmt.Errorf("agent info node_id mismatch: config %q, node %q", expectedID, info.NodeID)
 	}
 
 	return &Result{
 		Endpoint:         base,
-		AgentID:          health.AgentID,
+		NodeID:           health.NodeID,
 		Status:           health.Status,
 		Version:          health.Version,
 		ExposeToPeers:    info.ExposeToPeers,

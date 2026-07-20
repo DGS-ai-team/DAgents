@@ -124,7 +124,7 @@ func cmdProbe(configPath string) int {
 	}
 
 	fmt.Printf("ok endpoint=%s agent_id=%s version=%s capabilities=%v manage_registered=%v\n",
-		res.Endpoint, res.AgentID, res.Version, res.Capabilities, res.ManageRegistered)
+		res.Endpoint, res.NodeID, res.Version, res.Capabilities, res.ManageRegistered)
 	return 0
 }
 

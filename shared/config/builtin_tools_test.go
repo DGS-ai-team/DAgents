@@ -16,7 +16,7 @@ func TestValidateBuiltinToolNames(t *testing.T) {
 
 func TestLoadFile_rejectsUnknownBuiltinToolGroup(t *testing.T) {
 	path, _ := testConfigPath(t, `
-agent_id: test-agent
+node_id: test-agent
 tools:
   enabled_groups:
     - fs
@@ -30,7 +30,7 @@ tools:
 
 func TestLoadFile_rejectsDeprecatedToolsEnabled(t *testing.T) {
 	path, _ := testConfigPath(t, `
-agent_id: test-agent
+node_id: test-agent
 tools:
   enabled:
     - read_file

@@ -147,7 +147,7 @@ func writeComplianceHitlFixtures(t *testing.T) (*config.Config, *session.Manager
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWD) })
 	cfg := &config.Config{
-		AgentID: "compliance-a",
+		NodeID: "compliance-a",
 		Agent: config.AgentConfig{
 			Role: "compliance",
 		},
@@ -171,7 +171,7 @@ func writeComplianceHitlFixtures(t *testing.T) (*config.Config, *session.Manager
 		t.Fatal(err)
 	}
 	mock := &bashDateComplianceMock{}
-	mgr := session.NewManager(cfg.AgentID, hub, mock, reg, pol, nil, session.TurnOptions{
+	mgr := session.NewManager(cfg.NodeID, hub, mock, reg, pol, nil, session.TurnOptions{
 		RuntimeDir:    cfg.FSRoot,
 		SkillsEnabled: false,
 	}, logx.Discard())

@@ -44,8 +44,9 @@ type Server struct {
 	llmRuntime    *llm.RuntimeSettings
 	logger        *slog.Logger
 	mux           *http.ServeMux
-	sessions      *session.Manager // per-session 队列与 turn consumer
-	stream        *stream.Hub      // 进程内 SSE 事件总线
+	sessions      *session.Manager // per-session 队列与 turn consumer（过渡期与 agent_id 1:1）
+	agents        *store.AgentStore
+	stream        *stream.Hub // 进程内 SSE 事件总线
 	store         *store.SQLiteStore
 	triggerStore  *triggers.Store
 	triggerSched  *triggers.Scheduler
@@ -177,11 +178,20 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			st = opened
 		}
 	}
+	var agentsStore *store.AgentStore
+	if !o.skipStore {
+		opened, err := store.OpenAgents(cfg.AgentsDBPath())
+		if err != nil {
+			logger.Error("agents store init failed", "error", err, "path", cfg.AgentsDBPath())
+		} else {
+			agentsStore = opened
+		}
+	}
 
 	hub := stream.NewHub(256, logger)
 	hostsnapshot.CaptureAtStartup()
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
-	mgr := session.NewManager(cfg.AgentID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
+	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
 		FSRoot:                   cfg.FSRoot,
 		MaxToolLoops:             cfg.LLM.MaxToolLoops,
 		SkillsRoot:               cfg.SkillsRoot(),
@@ -222,7 +232,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		MaxMaxTurns:               cfg.ChildAgents.MaxMaxTurns,
 		MaxActivePerParent:        cfg.ChildAgents.MaxActivePerParent,
 		DefaultWaitTimeoutSeconds: cfg.ChildAgents.DefaultWaitTimeoutSeconds,
-	}, hub, cfg.AgentID, logger)
+	}, hub, cfg.NodeID, logger)
 	mgr.SetChildAgentManager(childMgr)
 	if cfg.IdleAutoCompressEnabled() {
 		mgr.StartIdleAutoCompressScanner()
@@ -239,7 +249,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerSched.SetSessionResolver(mgr)
 		mgr.SetTriggerDeliveryTracker(triggerStore)
 		if o.tools != nil {
-			o.tools.SetTriggerRuntime(triggerStore, triggerSched, cfg.AgentID)
+			o.tools.SetTriggerRuntime(triggerStore, triggerSched, cfg.NodeID)
 		}
 		if cfg.Triggers.Enabled && triggerSched != nil {
 			triggerSched.Start()
@@ -300,11 +310,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			updateChecker = manage.NewUpdateChecker(cfg, logger)
 		}
 		packageUploader = manage.NewPackageUploader(cfg, logger)
-		a2aBridge = session.NewA2ACallerHITLBridge(cfg.AgentID, hub)
+		a2aBridge = session.NewA2ACallerHITLBridge(cfg.NodeID, hub)
 		if o.tools != nil {
 			o.tools.SetManageRuntime(
 				a2aclient.New(cfg),
-				cfg.AgentID,
+				cfg.NodeID,
 				a2aBridge,
 			)
 		}
@@ -323,6 +333,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		mux:           http.NewServeMux(),
 		stream:        hub,
 		store:         st,
+		agents:        agentsStore,
 		sessions:      mgr,
 		triggerStore:  triggerStore,
 		triggerSched:  triggerSched,
@@ -340,6 +351,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
+	s.registerAgentRoutes()
 	s.mux.HandleFunc("POST /v1/sessions", s.handleCreateSession)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleListSessions)
 	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", s.handleDeleteSession)
@@ -402,7 +414,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		s.updateChecker.Start(regCtx)
 	}
 	go func() {
-		s.logger.Info("agent node listening", "addr", addr, "agent_id", s.cfg.AgentID)
+		s.logger.Info("agent node listening", "addr", addr, "agent_id", s.cfg.NodeID)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		} else {
@@ -430,6 +442,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.store != nil {
 			_ = s.store.Close()
 		}
+		if s.agents != nil {
+			_ = s.agents.Close()
+		}
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}
@@ -444,7 +459,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 type healthResponse struct {
 	Status  string `json:"status"`
-	AgentID string `json:"agent_id"`
+	NodeID  string `json:"node_id"`
 	Version string `json:"version"`
 }
 
@@ -452,13 +467,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	// 探活：Client 启动前与运维脚本使用；无鉴权。
 	writeJSON(w, http.StatusOK, healthResponse{
 		Status:  "ok",
-		AgentID: s.cfg.AgentID,
+		NodeID:  s.cfg.NodeID,
 		Version: version.Version,
 	})
 }
 
 type agentInfoResponse struct {
-	AgentID           string              `json:"agent_id"`
+	NodeID            string              `json:"node_id"`
 	ExposeToPeers     bool                `json:"expose_to_peers"`
 	Capabilities      []string            `json:"capabilities"`
 	MultimodalEnabled bool                `json:"multimodal_enabled"`
@@ -487,7 +502,7 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 		comp.BlockingTriggerTokens = s.cfg.Compression.BlockingTriggerTokens
 	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
-		AgentID:           s.cfg.AgentID,
+		NodeID:            s.cfg.NodeID,
 		ExposeToPeers:     s.cfg.ExposeToPeersEffective(),
 		Capabilities:      s.cfg.Capabilities(),
 		MultimodalEnabled: s.cfg.MultimodalEnabled(),

@@ -19,7 +19,7 @@ func (c *Config) AgentRole() string {
 	return strings.TrimSpace(c.Agent.Role)
 }
 
-// AgentDisplayName 返回 Manage 展示名；空则回退 agent_id。
+// AgentDisplayName 返回 Manage 展示名；空则回退 node_id。
 func (c *Config) AgentDisplayName() string {
 	if c == nil {
 		return ""
@@ -27,7 +27,7 @@ func (c *Config) AgentDisplayName() string {
 	if n := strings.TrimSpace(c.Agent.Name); n != "" {
 		return n
 	}
-	return strings.TrimSpace(c.AgentID)
+	return strings.TrimSpace(c.NodeID)
 }
 
 // AgentDescription 返回 Agent 简介。

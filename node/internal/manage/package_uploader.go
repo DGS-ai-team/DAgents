@@ -291,7 +291,7 @@ func (u *PackageUploader) setAuthHeaders(req *http.Request) {
 	if token := strings.TrimSpace(u.cfg.Manage.NodeToken); token != "" {
 		req.Header.Set(tokenHeader, token)
 	}
-	if id := strings.TrimSpace(u.cfg.AgentID); id != "" {
+	if id := strings.TrimSpace(u.cfg.NodeID); id != "" {
 		req.Header.Set(agentIDHeader, id)
 	}
 }

@@ -28,7 +28,7 @@ func TestCheckerFetchCheck(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{AgentID: "shell-1"}
+	cfg := &config.Config{NodeID: "shell-1"}
 	cfg.Manage.Enabled = true
 	cfg.Manage.URL = srv.URL
 	checker := NewChecker(cfg, t.TempDir(), nil)

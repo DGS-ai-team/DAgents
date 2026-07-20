@@ -23,7 +23,7 @@ import (
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
-		AgentID: "ops-linux-01",
+		NodeID: "ops-linux-01",
 		Agent: config.AgentConfig{
 			Role: "compliance",
 		},
@@ -85,7 +85,7 @@ func TestHandleHealth(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != "ok" || got.AgentID != "ops-linux-01" || got.Version != version.Version {
+	if got.Status != "ok" || got.NodeID != "ops-linux-01" || got.Version != version.Version {
 		t.Fatalf("unexpected body: %+v", got)
 	}
 }
@@ -105,7 +105,7 @@ func TestHandleAgentInfo(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.AgentID != "ops-linux-01" || !got.ExposeToPeers {
+	if got.NodeID != "ops-linux-01" || !got.ExposeToPeers {
 		t.Fatalf("unexpected agent info: %+v", got)
 	}
 	if got.ManageRegistered {

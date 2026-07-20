@@ -276,7 +276,7 @@ func (m *model) appendStatus() error {
 		return err
 	}
 	body := tuishared.FormatStatusPanelBody(
-		m.probe.AgentID, m.probe.Version, m.currentSession(), m.llmSettings(), ctxBody,
+		m.probe.NodeID, m.probe.Version, m.currentSession(), m.llmSettings(), ctxBody,
 	)
 	m.transcript.AddSystemPanel("Status", body)
 	m.syncViewport()

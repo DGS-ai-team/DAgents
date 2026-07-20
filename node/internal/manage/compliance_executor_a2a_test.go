@@ -32,7 +32,7 @@ func (s *stubInboxRunner) RunInboxTurn(_ context.Context, _, _ string, _ map[str
 
 func TestEncodeRequiresInputPayload(t *testing.T) {
 	cfg := &config.Config{
-		AgentID: "compliance-a",
+		NodeID: "compliance-a",
 		Agent: config.AgentConfig{
 			Name: "合规助手",
 			Role: "compliance",
@@ -78,7 +78,7 @@ func TestEncodeRequiresInputPayload(t *testing.T) {
 }
 
 func TestEncodeRequiresInputPayload_userInformation(t *testing.T) {
-	cfg := &config.Config{AgentID: "compliance-a"}
+	cfg := &config.Config{NodeID: "compliance-a"}
 	payload, err := encodeRequiresInputPayload(cfg, InboxTask{TaskID: "task-ui"}, "a2a-task-ui", &session.InboxHITLPause{
 		Awaiting:  "user_information",
 		EventType: "user_information_required",
@@ -106,7 +106,7 @@ func TestEncodeRequiresInputPayload_userInformation(t *testing.T) {
 
 func TestComplianceExecutor_turnErrorRepliesFailed(t *testing.T) {
 	cfg := &config.Config{
-		AgentID: "compliance-a",
+		NodeID: "compliance-a",
 		Manage:  config.ManageConfig{Enabled: true},
 	}
 	var replyBody map[string]string
@@ -139,7 +139,7 @@ func TestComplianceExecutor_turnErrorRepliesFailed(t *testing.T) {
 
 func TestComplianceExecutor_nilSessionsRepliesFailed(t *testing.T) {
 	cfg := &config.Config{
-		AgentID: "compliance-a",
+		NodeID: "compliance-a",
 		Manage:  config.ManageConfig{Enabled: true},
 	}
 	var replyBody map[string]string
@@ -164,7 +164,7 @@ func TestComplianceExecutor_nilSessionsRepliesFailed(t *testing.T) {
 
 func TestComplianceExecutor_requiresInputThenFailedOnSecondTurn(t *testing.T) {
 	cfg := &config.Config{
-		AgentID: "compliance-a",
+		NodeID: "compliance-a",
 		Manage:  config.ManageConfig{Enabled: true},
 	}
 	var bodies []map[string]string

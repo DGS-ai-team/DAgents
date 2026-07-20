@@ -48,8 +48,8 @@ onMounted(load);
     <section class="settings-section">
       <h2 class="settings-section__title">身份与路径</h2>
       <label class="settings-field">
-        <span class="settings-field__label">Agent ID</span>
-        <input v-model="form.runtime.agent_id" class="settings-field__input" type="text" autocomplete="off" />
+        <span class="settings-field__label">Node ID</span>
+        <input v-model="form.runtime.node_id" class="settings-field__input" type="text" autocomplete="off" />
       </label>
       <label class="settings-field">
         <span class="settings-field__label">工作区根目录 (fs_root)</span>

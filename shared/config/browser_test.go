@@ -30,7 +30,7 @@ func TestBrowserEnabled(t *testing.T) {
 func TestValidateBrowserRejectsFileScheme(t *testing.T) {
 	on := true
 	cfg := &Config{
-		AgentID: "test-agent",
+		NodeID: "test-agent",
 		Browser: BrowserConfig{
 			Enabled:           &on,
 			AllowedURLSchemes: []string{"file"},

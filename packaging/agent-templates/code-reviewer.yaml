@@ -25,6 +25,7 @@ defaults:
 
 sandbox:
   enabled: true
+  backend: process   # 后续可改为 docker
   workspace_subdir: data
   fs_root_isolation: true
   allow_bash: false

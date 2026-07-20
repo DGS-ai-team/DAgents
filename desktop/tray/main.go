@@ -465,8 +465,8 @@ func (a *trayApp) refreshStatus() {
 
 	if showRunning {
 		agentID := "…"
-		if displayHealth != nil && displayHealth.AgentID != "" {
-			agentID = displayHealth.AgentID
+		if displayHealth != nil && displayHealth.NodeID != "" {
+			agentID = displayHealth.NodeID
 		}
 		a.mStatus.SetTitle(fmt.Sprintf("状态：运行中 (%s)", agentID))
 		a.mStart.Disable()
@@ -544,7 +544,7 @@ func (a *trayApp) refreshTooltip(showRunning bool) {
 		}
 	}
 	if showRunning && a.lastGood != nil {
-		systray.SetTooltip(fmt.Sprintf("%s\nNode 运行中 · %s · %s", base, a.lastGood.AgentID, a.lastGood.Version))
+		systray.SetTooltip(fmt.Sprintf("%s\nNode 运行中 · %s · %s", base, a.lastGood.NodeID, a.lastGood.Version))
 		return
 	}
 	if a.lastErr != nil {

@@ -77,7 +77,7 @@ type NodeEndpointView struct {
 
 // RuntimeSettings 运行时路径与日志（不含 listen/local）。
 type RuntimeSettings struct {
-	AgentID  string `json:"agent_id"`
+	NodeID   string `json:"node_id"`
 	FSRoot   string `json:"fs_root"`
 	LogLevel string `json:"log_level"`
 }
@@ -217,7 +217,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
 		},
 		Runtime: RuntimeSettings{
-			AgentID:  cfg.AgentID,
+			NodeID:   cfg.NodeID,
 			FSRoot:   cfg.FSRoot,
 			LogLevel: cfg.Log.Level,
 		},
@@ -497,8 +497,8 @@ func applyCompressionPatch(cfg *config.Config, p CompressionSettings) error {
 }
 
 func applyRuntimePatch(cfg *config.Config, p RuntimeSettings) error {
-	if id := strings.TrimSpace(p.AgentID); id != "" {
-		cfg.AgentID = id
+	if id := strings.TrimSpace(p.NodeID); id != "" {
+		cfg.NodeID = id
 	}
 	if root := strings.TrimSpace(p.FSRoot); root != "" {
 		cfg.FSRoot = root

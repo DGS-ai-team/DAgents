@@ -9,7 +9,7 @@ import (
 func testBaseConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
-		AgentID: "setup-test",
+		NodeID: "setup-test",
 		FSRoot:  t.TempDir(),
 	}
 	cfg.ApplyDefaults()

@@ -164,7 +164,7 @@ func (r *Registrar) register(ctx context.Context) time.Duration {
 	}
 
 	r.setRegistered(true)
-	r.logger.Info("manage registered", "agent_id", r.cfg.AgentID, "status", out.Agent.Status)
+	r.logger.Info("manage registered", "agent_id", r.cfg.NodeID, "status", out.Agent.Status)
 	if out.HeartbeatIntervalSeconds > 0 {
 		return time.Duration(out.HeartbeatIntervalSeconds) * time.Second
 	}
@@ -184,7 +184,7 @@ func (r *Registrar) heartbeat(ctx context.Context) error {
 		return fmt.Errorf("marshal heartbeat: %w", err)
 	}
 
-	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.AgentID) + "/heartbeat")
+	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.NodeID) + "/heartbeat")
 	resp, err := r.doRequest(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		r.setRegistered(false)
@@ -210,7 +210,7 @@ func (r *Registrar) deregister(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.AgentID) + "/deregister")
+	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.NodeID) + "/deregister")
 	resp, err := r.doRequest(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return err
@@ -231,7 +231,7 @@ func (r *Registrar) doRequest(ctx context.Context, method, endpoint string, body
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(agentIDHeader, r.cfg.AgentID)
+	req.Header.Set(agentIDHeader, r.cfg.NodeID)
 	if token := strings.TrimSpace(r.cfg.Manage.NodeToken); token != "" {
 		req.Header.Set(tokenHeader, token)
 	}
@@ -252,7 +252,7 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 	host := hostsnapshot.Get()
 	caps := r.cfg.RegistrationCapabilities()
 	return registerPayload{
-		AgentID:          r.cfg.AgentID,
+		AgentID:          r.cfg.NodeID,
 		BaseURL:          r.cfg.ManageRegistryBaseURL(),
 		Capabilities:     caps,
 		CapabilitiesHint: caps,

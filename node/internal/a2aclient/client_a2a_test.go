@@ -42,7 +42,7 @@ func TestWaitForInvokeResult_taskFailed(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
 	_, err := New(cfg).WaitForCompletion(context.Background(), "task-fail", 3*time.Second)
 	if err == nil {
 		t.Fatal("expected error")
@@ -63,7 +63,7 @@ func TestWaitForInvokeResult_taskExpired(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
 	_, err := New(cfg).WaitForCompletion(context.Background(), "task-exp", 3*time.Second)
 	if err == nil {
 		t.Fatal("expected error")
@@ -85,7 +85,7 @@ func TestWaitForInvokeResult_awaitingCallerNoHandler(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
 	_, err := New(cfg).WaitForCompletion(context.Background(), "task-await", 3*time.Second)
 	if err == nil {
 		t.Fatal("expected error")
@@ -131,7 +131,7 @@ func TestWaitForInvokeResult_userInformationRelay(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
 	handler := &stubCallerHITL{
 		t:     t,
 		calls: &hitlCalls,
