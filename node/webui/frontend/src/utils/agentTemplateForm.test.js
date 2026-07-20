@@ -1,47 +1,57 @@
 import { describe, expect, it } from "vitest";
-import { buildCreateAgentPayload, draftFromTemplate } from "./agentTemplateForm.js";
+import { buildCreateAgentPayload, draftFromTemplate, llmActiveFromAgentView } from "./agentTemplateForm.js";
 
 describe("agentTemplateForm", () => {
-  it("builds draft from template defaults", () => {
-    const draft = draftFromTemplate({
-      id: "ops-runner",
-      display_name: "运维执行助手",
-      description: "沙箱运维",
-      defaults: {
-        llm: { max_tool_loops: 24 },
-        tools: { enabled_groups: ["fs", "bash"] },
-        child_agents: { enabled: true },
-        skills: { enabled: true },
+  it("builds draft from template with llm profile bind", () => {
+    const draft = draftFromTemplate(
+      {
+        id: "ops-runner",
+        display_name: "运维执行助手",
+        description: "沙箱运维",
+        defaults: {
+          llm: { active: "deepseek", max_tool_loops: 24 },
+        },
+        sandbox: { enabled: true, backend: "process" },
       },
-      sandbox: { enabled: true, backend: "process" },
-    });
+      ["default", "deepseek"],
+    );
     expect(draft.templateId).toBe("ops-runner");
-    expect(draft.enabledGroups).toEqual(["fs", "bash"]);
-    expect(draft.maxToolLoops).toBe(24);
     expect(draft.sandboxEnabled).toBe(true);
+    expect(draft.llmProfileId).toBe("deepseek");
   });
 
-  it("builds create payload with defaults overrides", () => {
+  it("falls back to first llm profile when template active missing", () => {
+    const draft = draftFromTemplate(
+      {
+        id: "general",
+        display_name: "通用",
+        defaults: { llm: { active: "missing" } },
+        sandbox: { enabled: false },
+      },
+      ["default", "qwen"],
+    );
+    expect(draft.llmProfileId).toBe("default");
+  });
+
+  it("builds create payload with llm active only", () => {
     const payload = buildCreateAgentPayload({
       templateId: "general",
       displayName: "我的助手",
       sandboxEnabled: false,
       sandboxBackend: "process",
-      enabledGroups: ["fs", "skills"],
-      maxToolLoops: 20,
-      childAgentsEnabled: false,
-      skillsEnabled: true,
-      hooks: {
-        inject_today_date_enabled: false,
-        tool_result_enabled: true,
-        tool_result_spill_threshold_tokens: 8000,
-        duplicate_tool_call_enabled: true,
-        duplicate_tool_call_window_seconds: 45,
-      },
+      llmProfileId: "qwen-plus",
     });
     expect(payload.templateId).toBe("general");
-    expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "skills"]);
-    expect(payload.defaults.hooks.inject_today_date_enabled).toBe(false);
-    expect(payload.defaults.llm.max_tool_loops).toBe(20);
+    expect(payload.defaults).toEqual({ llm: { active: "qwen-plus" } });
+    expect(payload.defaults.tools).toBeUndefined();
+    expect(payload.defaults.hooks).toBeUndefined();
+  });
+
+  it("reads llm active from agent view snapshot", () => {
+    expect(
+      llmActiveFromAgentView({
+        config_snapshot: { defaults: { llm: { active: "deepseek" } } },
+      }),
+    ).toBe("deepseek");
   });
 });

@@ -85,10 +85,9 @@ onMounted(load);
         <section class="command-section">
           <h3 class="command-section__title">LLM</h3>
           <dl class="command-kv-list">
+            <div class="command-kv"><dt>配置</dt><dd>{{ data.llm?.active_profile || "—" }}</dd></div>
             <div class="command-kv"><dt>Model</dt><dd>{{ data.llm?.model || "—" }}</dd></div>
-            <div class="command-kv"><dt>Thinking</dt><dd>{{ data.llm?.thinking || "—" }}</dd></div>
-            <div class="command-kv"><dt>Effort</dt><dd>{{ data.llm?.reasoning_effort || "—" }}</dd></div>
-            <div class="command-kv"><dt>Base URL</dt><dd class="command-kv__mono">{{ data.llm?.base_url || "—" }}</dd></div>
+            <div class="command-kv"><dt>Provider</dt><dd>{{ data.llm?.provider || "—" }}</dd></div>
           </dl>
         </section>
       </template>

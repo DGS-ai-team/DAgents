@@ -1,12 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
-import {
-  TOOL_GROUPS,
-  buildCreateAgentPayload,
-  draftFromTemplate,
-  emptyAgentDraft,
-} from "../utils/agentTemplateForm.js";
+import { buildCreateAgentPayload, draftFromTemplate, emptyAgentDraft } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -19,12 +14,13 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const templates = ref([]);
+const llmProfiles = ref([]);
 const draft = reactive(emptyAgentDraft());
-const nodeHooksCache = ref({});
 
 const selectedTemplate = computed(
   () => templates.value.find((t) => t.id === draft.templateId) || null,
 );
+const llmProfileIds = computed(() => llmProfiles.value.map((p) => p.id).filter(Boolean));
 
 async function loadTemplates() {
   loading.value = true;
@@ -35,11 +31,17 @@ async function loadTemplates() {
       api.getSetupConfig().catch(() => null),
     ]);
     templates.value = tplRes.templates || [];
-    nodeHooksCache.value = setup?.hooks || {};
+    llmProfiles.value = Array.isArray(setup?.llm?.profiles)
+      ? setup.llm.profiles.map((p) => ({
+          id: String(p.id || "").trim(),
+          provider: p.provider || "",
+          model: p.model || "",
+        })).filter((p) => p.id)
+      : [];
     const prefer = String(props.initialTemplateId || "").trim();
     const preferred = prefer ? templates.value.find((t) => t.id === prefer) : null;
     const first = preferred || templates.value[0];
-    if (first) applyTemplate(first, nodeHooksCache.value);
+    if (first) applyTemplate(first);
   } catch (e) {
     error.value = e.message || "加载模板失败";
     templates.value = [];
@@ -48,25 +50,21 @@ async function loadTemplates() {
   }
 }
 
-function applyTemplate(template, nodeHooks = {}) {
-  const next = draftFromTemplate(template, nodeHooks);
-  Object.assign(draft, next);
+function applyTemplate(template) {
+  Object.assign(draft, draftFromTemplate(template, llmProfileIds.value));
 }
 
 function onPickTemplate(template) {
   applyTemplate(template);
 }
 
-function toggleGroup(name) {
-  const set = new Set(draft.enabledGroups || []);
-  if (set.has(name)) set.delete(name);
-  else set.add(name);
-  draft.enabledGroups = [...set].sort();
-}
-
 async function submit() {
   if (!draft.templateId) {
     error.value = "请选择一个模板";
+    return;
+  }
+  if (!draft.llmProfileId) {
+    error.value = "请选择 LLM 配置";
     return;
   }
   saving.value = true;
@@ -105,7 +103,7 @@ watch(
         <header class="agent-create-modal__header">
           <div>
             <h2 id="agent-create-title" class="agent-create-modal__title">新建 Agent</h2>
-            <p class="agent-create-modal__subtitle">选择模板预设，再在下方调整工具、Hook 与沙箱配置</p>
+            <p class="agent-create-modal__subtitle">选择模板与 LLM；工具 / Hook 等沿用全局设置与模板默认</p>
           </div>
           <button type="button" class="agent-create-modal__close" aria-label="关闭" :disabled="saving" @click="emit('close')">
             ×
@@ -154,6 +152,21 @@ watch(
                 </section>
 
                 <section class="agent-create-section">
+                  <h3 class="agent-create-section__title">LLM</h3>
+                  <label class="agent-create-field">
+                    <span>使用的 LLM 配置</span>
+                    <select v-model="draft.llmProfileId" class="agent-create-input">
+                      <option disabled value="">请选择</option>
+                      <option v-for="p in llmProfiles" :key="p.id" :value="p.id">
+                        {{ p.id }}{{ p.model ? ` · ${p.model}` : "" }}
+                      </option>
+                    </select>
+                  </label>
+                  <p v-if="!llmProfiles.length" class="agent-create-hint">请先在「设置 › 连接」中添加 LLM 配置</p>
+                  <p v-else class="agent-create-hint">名称与输入栏选择器一致；可在连接设置中改名。</p>
+                </section>
+
+                <section class="agent-create-section agent-create-section--wide">
                   <h3 class="agent-create-section__title">沙箱</h3>
                   <label class="agent-create-check">
                     <input v-model="draft.sandboxEnabled" type="checkbox" />
@@ -167,77 +180,6 @@ watch(
                     </select>
                   </label>
                 </section>
-
-                <section class="agent-create-section agent-create-section--wide">
-                  <h3 class="agent-create-section__title">工具组</h3>
-                  <p class="agent-create-hint">基于模板预设，可在此增删允许的工具组。</p>
-                  <div class="agent-create-toggles">
-                    <label v-for="g in TOOL_GROUPS" :key="g.name" class="agent-create-check">
-                      <input
-                        type="checkbox"
-                        :checked="draft.enabledGroups.includes(g.name)"
-                        @change="toggleGroup(g.name)"
-                      />
-                      <span>
-                        {{ g.label }}
-                        <span v-if="g.beta" class="agent-create-beta">Beta</span>
-                      </span>
-                    </label>
-                  </div>
-                </section>
-
-                <section class="agent-create-section">
-                  <h3 class="agent-create-section__title">运行参数</h3>
-                  <label class="agent-create-field">
-                    <span>max_tool_loops</span>
-                    <input v-model.number="draft.maxToolLoops" type="number" min="1" class="agent-create-input" />
-                  </label>
-                  <label class="agent-create-check">
-                    <input v-model="draft.skillsEnabled" type="checkbox" />
-                    <span>启用 Skills</span>
-                  </label>
-                  <label class="agent-create-check">
-                    <input v-model="draft.childAgentsEnabled" type="checkbox" />
-                    <span>启用子 Agent</span>
-                  </label>
-                </section>
-
-                <section class="agent-create-section agent-create-section--wide">
-                  <h3 class="agent-create-section__title">Hook</h3>
-                  <div class="agent-create-toggles agent-create-toggles--hooks">
-                    <label class="agent-create-check">
-                      <input v-model="draft.hooks.inject_today_date_enabled" type="checkbox" />
-                      <span>inject_today_date</span>
-                    </label>
-                    <label class="agent-create-check">
-                      <input v-model="draft.hooks.tool_result_enabled" type="checkbox" />
-                      <span>tool_result</span>
-                    </label>
-                    <label class="agent-create-field">
-                      <span>tool_result 落盘阈值</span>
-                      <input
-                        v-model.number="draft.hooks.tool_result_spill_threshold_tokens"
-                        type="number"
-                        min="1"
-                        step="500"
-                        class="agent-create-input"
-                      />
-                    </label>
-                    <label class="agent-create-check">
-                      <input v-model="draft.hooks.duplicate_tool_call_enabled" type="checkbox" />
-                      <span>duplicate_tool_call</span>
-                    </label>
-                    <label class="agent-create-field">
-                      <span>重复检测窗口（秒）</span>
-                      <input
-                        v-model.number="draft.hooks.duplicate_tool_call_window_seconds"
-                        type="number"
-                        min="1"
-                        class="agent-create-input"
-                      />
-                    </label>
-                  </div>
-                </section>
               </div>
             </div>
           </template>
@@ -250,7 +192,7 @@ watch(
             <button
               type="button"
               class="btn btn--primary"
-              :disabled="saving || loading || !draft.templateId"
+              :disabled="saving || loading || !draft.templateId || !draft.llmProfileId"
               @click="submit"
             >
               {{ saving ? "创建中…" : "创建 Agent" }}
@@ -487,22 +429,6 @@ watch(
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--color-text-subtle);
-}
-
-.agent-create-toggles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 4px 12px;
-}
-
-.agent-create-toggles--hooks {
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-}
-
-.agent-create-beta {
-  margin-left: 4px;
-  font-size: 10px;
-  color: var(--color-warning);
 }
 
 .agent-create-modal__error {

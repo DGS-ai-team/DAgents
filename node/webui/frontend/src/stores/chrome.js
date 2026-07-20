@@ -27,8 +27,7 @@ export function setUsageFromSSE(data) {
 }
 
 export function inputStripRight() {
-  // thinking 已由 ComposerToolbar 展示；右侧保留 usage / cache hit。
-  // 上下文占用改由 ContextMeter 展示，这里不再重复 ctx N。
+  // 状态栏右侧：token 用量 → 思考开关 → ContextMeter。
   return formatInputStripUsage(chromeStore.usageStrip);
 }
 

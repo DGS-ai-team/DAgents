@@ -22,7 +22,7 @@ const draft = reactive(emptyDraft());
 const localError = reactive({ message: "" });
 
 const title = computed(() => (props.mode === "create" ? "新建 LLM 配置" : "编辑 LLM 配置"));
-const idEditable = computed(() => props.mode === "create");
+const originalId = computed(() => String(props.profile?.id || "").trim());
 
 function emptyDraft() {
   return {
@@ -83,15 +83,17 @@ function submit() {
   localError.message = "";
   const id = String(draft.id || "").trim();
   if (!id) {
-    localError.message = "请填写配置名称";
+    localError.message = "请填写配置名称（将显示在输入栏）";
     return;
   }
-  if (props.mode === "create" && (props.existingIds || []).includes(id)) {
+  const others = (props.existingIds || []).filter((x) => x !== originalId.value);
+  if (others.includes(id)) {
     localError.message = `配置「${id}」已存在`;
     return;
   }
   emit("confirm", {
     id,
+    original_id: originalId.value || undefined,
     provider: draft.provider,
     base_url: draft.base_url,
     model: draft.model,
@@ -123,14 +125,12 @@ watch(
         <div class="llm-profile-modal__body">
           <div class="llm-profile-modal__grid">
             <label class="settings-field">
-              <span class="settings-field__label">名称</span>
+              <span class="settings-field__label">名称（输入栏展示）</span>
               <input
                 v-model="draft.id"
                 class="settings-field__input"
                 type="text"
-                :readonly="!idEditable"
-                :disabled="!idEditable"
-                placeholder="如 default"
+                placeholder="如 DeepSeek / 默认"
                 autocomplete="off"
               />
             </label>

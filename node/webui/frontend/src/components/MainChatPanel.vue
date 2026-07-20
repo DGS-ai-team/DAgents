@@ -36,6 +36,7 @@ const props = defineProps({
   hitlBusyIndex: { type: Number, default: -1 },
   thinkingSupported: { type: Boolean, default: false },
   llmSettings: { type: Object, default: null },
+  agentTitle: { type: String, default: "" },
 });
 
 const emit = defineEmits([
@@ -51,6 +52,14 @@ const emit = defineEmits([
   "user-info-submit",
   "user-info-selected",
 ]);
+
+const thinkingEnabled = computed(() => {
+  const t = String(props.llmSettings?.thinking || "").toLowerCase();
+  return !["disabled", "off"].includes(t);
+});
+const thinkingEffort = computed(() =>
+  String(props.llmSettings?.reasoning_effort || "high").toLowerCase(),
+);
 
 const input = ref("");
 const pendingImages = ref([]);
@@ -344,8 +353,7 @@ defineExpose({
   <section class="panel panel--flex chat">
     <header class="chat__header">
       <div class="chat__title">
-        <span class="chat__title-main">对话</span>
-        <span class="chat__title-sub">与助手对话</span>
+        <span class="chat__title-main">{{ agentTitle || "助手" }}</span>
       </div>
       <div class="chat__header-meta">
         <span v-if="pendingApprovals > 0" class="pill pill--warn">{{ pendingApprovals }} 待审批</span>
@@ -468,11 +476,8 @@ defineExpose({
         <div class="chat__composer-pill-right">
           <ComposerToolbar
             class="chat__composer-toolbar"
-            :thinking-supported="thinkingSupported"
             :llm-settings="llmSettings"
             :disabled="disabled || cancelling"
-            @toggle-thinking="emit('toggle-thinking')"
-            @cycle-effort="emit('cycle-effort')"
             @switch-profile="(id) => emit('switch-profile', id)"
           />
           <button
@@ -526,6 +531,28 @@ defineExpose({
             class="chat__input-strip-right"
             :title="inputStripRightText"
           >{{ inputStripRightText }}</span>
+          <div v-if="thinkingSupported" class="chat__statusline-thinking">
+            <button
+              type="button"
+              class="composer-toolbar__btn"
+              :class="{ 'composer-toolbar__btn--active': thinkingEnabled }"
+              :title="thinkingEnabled ? '思考模式已开启，点击关闭' : '思考模式已关闭，点击开启'"
+              :disabled="disabled || cancelling"
+              @click="emit('toggle-thinking')"
+            >
+              <span class="composer-toolbar__label">{{ thinkingEnabled ? "思考" : "思考关" }}</span>
+            </button>
+            <button
+              v-if="thinkingEnabled"
+              type="button"
+              class="composer-toolbar__btn composer-toolbar__btn--secondary"
+              :title="`推理强度 ${thinkingEffort}，点击切换 high/max`"
+              :disabled="disabled || cancelling"
+              @click="emit('cycle-effort')"
+            >
+              <span class="composer-toolbar__label">{{ thinkingEffort }}</span>
+            </button>
+          </div>
           <ContextMeter />
         </div>
       </div>
