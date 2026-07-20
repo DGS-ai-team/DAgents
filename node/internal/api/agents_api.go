@@ -75,6 +75,7 @@ type createAgentRequest struct {
 		Enabled *bool   `json:"enabled"`
 		Backend *string `json:"backend"`
 	} `json:"sandbox"`
+	Defaults map[string]any `json:"defaults"`
 }
 
 type agentView struct {
@@ -161,7 +162,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	snapshot := map[string]any{
 		"template_id": tpl.ID,
-		"defaults":    tpl.Defaults,
+		"defaults":    agentruntime.MergeDefaults(tpl.Defaults, req.Defaults),
 		"sandbox": map[string]any{
 			"enabled":              sandboxEnabled,
 			"backend":              sandboxBackend,

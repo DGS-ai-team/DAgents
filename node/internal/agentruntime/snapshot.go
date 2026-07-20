@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
+	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -150,4 +152,94 @@ func MultimodalEnabledFromDefaults(snap Snapshot) *bool {
 		}
 	}
 	return nil
+}
+
+// MaxToolLoopsFromDefaults 读取 defaults.llm.max_tool_loops；无则返回 0。
+func MaxToolLoopsFromDefaults(snap Snapshot) int {
+	llmRaw, ok := snap.Defaults["llm"]
+	if !ok || llmRaw == nil {
+		return 0
+	}
+	llmMap, ok := llmRaw.(map[string]any)
+	if !ok {
+		return 0
+	}
+	switch v := llmMap["max_tool_loops"].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+// ApplyDefaultsToTurnOptions 将快照 defaults 中的 llm / hooks 覆盖写入 TurnOptions。
+func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
+	if turn == nil {
+		return
+	}
+	if n := MaxToolLoopsFromDefaults(snap); n > 0 {
+		turn.MaxToolLoops = n
+	}
+	hooksRaw, ok := snap.Defaults["hooks"]
+	if !ok || hooksRaw == nil {
+		return
+	}
+	m, ok := hooksRaw.(map[string]any)
+	if !ok {
+		return
+	}
+	if v, ok := boolPtrFromAny(m["inject_today_date_enabled"]); ok {
+		turn.InjectTodayDate.Enabled = v
+	}
+	if v, ok := boolFromAny(m["tool_result_enabled"]); ok {
+		turn.ToolResult.Enabled = v
+	}
+	if v, ok := intFromAny(m["tool_result_spill_threshold_tokens"]); ok && v > 0 {
+		turn.ToolResult.SpillThresholdTokens = v
+	}
+	if v, ok := boolFromAny(m["duplicate_tool_call_enabled"]); ok {
+		turn.DuplicateToolCall.Enabled = v
+	}
+	if v, ok := intFromAny(m["duplicate_tool_call_window_seconds"]); ok && v > 0 {
+		turn.DuplicateToolCall.WindowSeconds = v
+	}
+	_ = hooks.InjectTodayDateConfigOrDefault(turn.InjectTodayDate)
+}
+
+func boolPtrFromAny(v any) (*bool, bool) {
+	if v == nil {
+		return nil, false
+	}
+	switch b := v.(type) {
+	case bool:
+		out := b
+		return &out, true
+	default:
+		return nil, false
+	}
+}
+
+func boolFromAny(v any) (bool, bool) {
+	if v == nil {
+		return false, false
+	}
+	b, ok := v.(bool)
+	return b, ok
+}
+
+func intFromAny(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	default:
+		return 0, false
+	}
 }
