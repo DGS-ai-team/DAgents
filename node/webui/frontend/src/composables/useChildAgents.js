@@ -9,19 +9,19 @@ import {
 
 export { formatChildAgentStatus, isChildAgentActive };
 
-export function useChildAgents(sessionIdSource) {
+export function useChildAgents(agentIdSource) {
   const loading = ref(false);
   const error = ref("");
   const data = ref(null);
   const cancellingId = ref("");
   const statusMessage = ref("");
 
-  const sessionId = computed(() => String(unref(sessionIdSource) || "").trim());
+  const agentId = computed(() => String(unref(agentIdSource) || "").trim());
 
   const items = computed(() => sortChildAgentItems(childAgentItems(data.value)));
 
   async function load() {
-    const sid = sessionId.value;
+    const sid = agentId.value;
     if (!sid) {
       data.value = null;
       error.value = "";
@@ -41,7 +41,7 @@ export function useChildAgents(sessionIdSource) {
   }
 
   async function cancelChild(childSessionId) {
-    const sid = sessionId.value;
+    const sid = agentId.value;
     const childId = String(childSessionId || "").trim();
     if (!sid || !childId || cancellingId.value === childId) return false;
     if (!window.confirm("确定取消该子 Agent？")) return false;
@@ -61,7 +61,7 @@ export function useChildAgents(sessionIdSource) {
     }
   }
 
-  watch(sessionId, load, { immediate: true });
+  watch(agentId, load, { immediate: true });
 
   return {
     loading,

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import { chromeStore } from "../stores/chrome.js";
-import { sessionStore } from "../stores/session.js";
+import { agentStore } from "../stores/agent.js";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 
@@ -41,7 +41,7 @@ const summaryLine = computed(() => {
   return parts.join(" · ") || "暂无活动";
 });
 
-const agentId = computed(() => String(sessionStore.sessionId || "").trim());
+const agentId = computed(() => String(agentStore.agentId || "").trim());
 const agentIdShort = computed(() => {
   const id = agentId.value;
   if (!id) return "—";
@@ -115,7 +115,7 @@ function truncateCmd(cmd, max = 64) {
 }
 
 async function refresh() {
-  const id = sessionStore.sessionId?.trim();
+  const id = agentStore.agentId?.trim();
   if (!id) {
     remote.value = null;
     return;
@@ -132,7 +132,7 @@ async function refresh() {
 }
 
 watch(
-  () => sessionStore.sessionId,
+  () => agentStore.agentId,
   () => {
     void refresh();
   },

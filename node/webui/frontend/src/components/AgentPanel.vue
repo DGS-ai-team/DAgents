@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from "vue";
 import * as api from "../api/node.js";
-import { sessionStore } from "../stores/session.js";
+import { agentStore } from "../stores/agent.js";
 import { formatRelativeTime, agentDisplayTitle, agentRecordId } from "../utils/format.js";
 
 const emit = defineEmits(["switch", "created", "delete", "create", "agents-updated"]);
@@ -19,7 +19,7 @@ function agentSortTime(agent) {
 }
 
 const sortedAgents = computed(() => {
-  const currentId = String(sessionStore.sessionId || "").trim();
+  const currentId = String(agentStore.agentId || "").trim();
   return [...agents.value].sort((a, b) => {
     const aId = agentRecordId(a);
     const bId = agentRecordId(b);
@@ -73,7 +73,7 @@ async function commitRename(agent) {
     await api.patchAgent(id, { display_name: name });
     await refresh();
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
   }
 }
 
@@ -87,46 +87,46 @@ defineExpose({ refresh, setDeleting, openCreate });
 </script>
 
 <template>
-  <section class="panel session-panel agent-panel">
-    <header class="panel__header session-panel__header">
+  <section class="panel agent-panel">
+    <header class="panel__header agent-panel__header">
       <div class="panel__title">我的 Agent</div>
-      <button type="button" class="session-panel__icon-btn" title="新建 Agent" @click="openCreate">+</button>
+      <button type="button" class="agent-panel__icon-btn" title="新建 Agent" @click="openCreate">+</button>
     </header>
-    <div class="panel__body session-panel__body">
-      <div v-if="loading" class="session-panel__loading">加载中…</div>
-      <ul v-else class="session-history-list">
+    <div class="panel__body agent-panel__body">
+      <div v-if="loading" class="agent-panel__loading">加载中…</div>
+      <ul v-else class="agent-list">
         <li
           v-for="a in sortedAgents"
           :key="agentRecordId(a)"
-          class="session-history-item"
+          class="agent-list-item"
           :class="{
-            'session-history-item--active': agentRecordId(a) === sessionStore.sessionId,
+            'agent-list-item--active': agentRecordId(a) === agentStore.agentId,
           }"
           @click="select(agentRecordId(a))"
         >
-          <div class="session-history-item__main">
-            <div class="session-history-item__title-row">
+          <div class="agent-list-item__main">
+            <div class="agent-list-item__title-row">
               <input
                 v-if="renamingId === agentRecordId(a)"
                 v-model="renameDraft"
-                class="session-history-item__title-input"
+                class="agent-list-item__title-input"
                 @click.stop
                 @keydown.enter.prevent="commitRename(a)"
                 @keydown.esc.prevent="renamingId = ''"
                 @blur="commitRename(a)"
               />
-              <span v-else class="session-history-item__title" @dblclick.stop="startRename(a)">{{ agentDisplayTitle(a) }}</span>
+              <span v-else class="agent-list-item__title" @dblclick.stop="startRename(a)">{{ agentDisplayTitle(a) }}</span>
             </div>
-            <div class="session-history-item__meta">
-              <span class="session-history-item__count">{{ a.template_id || "—" }}</span>
-              <span v-if="a.sandbox_enabled" class="session-history-item__badge session-history-item__badge--live">沙箱</span>
-              <span v-if="a.updated_at" class="session-history-item__time">{{ formatRelativeTime(a.updated_at) }}</span>
+            <div class="agent-list-item__meta">
+              <span class="agent-list-item__count">{{ a.template_id || "—" }}</span>
+              <span v-if="a.sandbox_enabled" class="agent-list-item__badge agent-list-item__badge--live">沙箱</span>
+              <span v-if="a.updated_at" class="agent-list-item__time">{{ formatRelativeTime(a.updated_at) }}</span>
             </div>
           </div>
-          <div class="session-history-item__actions">
+          <div class="agent-list-item__actions">
             <button
               type="button"
-              class="session-history-item__edit"
+              class="agent-list-item__edit"
               title="重命名"
               @click.stop="startRename(a)"
             >
@@ -134,7 +134,7 @@ defineExpose({ refresh, setDeleting, openCreate });
             </button>
             <button
               type="button"
-              class="session-history-item__delete"
+              class="agent-list-item__delete"
               title="删除 Agent"
               :disabled="deletingId === agentRecordId(a)"
               @click.stop="onDelete(a)"
@@ -143,7 +143,7 @@ defineExpose({ refresh, setDeleting, openCreate });
             </button>
           </div>
         </li>
-        <li v-if="!agents.length" class="session-panel__empty">暂无 Agent，点击 + 从模板创建</li>
+        <li v-if="!agents.length" class="agent-panel__empty">暂无 Agent，点击 + 从模板创建</li>
       </ul>
     </div>
   </section>

@@ -10,7 +10,7 @@ import AgentEmptyState from "../components/AgentEmptyState.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
 import ActivityPanel from "../components/ActivityPanel.vue";
 import {
-  sessionStore,
+  agentStore,
   persistAgentId,
   ensureAgent,
   beginSubmit,
@@ -23,7 +23,7 @@ import {
   markEventApplied,
   shouldAckSSEEvent,
   resetEventTracking,
-} from "../stores/session.js";
+} from "../stores/agent.js";
 import {
   transcriptStore,
   addUser,
@@ -61,7 +61,7 @@ import {
   enqueueHitlRequired,
   shouldSkipChildRuntimeDisplay,
 } from "../stores/hitl.js";
-import { consumeStartupURL, hydrateSession } from "../stores/hydrate.js";
+import { consumeStartupURL, hydrateAgent } from "../stores/hydrate.js";
 import {
   startDesktopFocusHeartbeat,
   stopDesktopFocusHeartbeat,
@@ -113,15 +113,15 @@ const hasUserInfoHitl = computed(() => peekHitl()?.kind === "user_information");
 const canSend = computed(() => {
   if (hitlStore.busy) return false;
   if (hasUserInfoHitl.value) return true;
-  return !sessionStore.awaitingTurn && !peekHitl()?.kind;
+  return !agentStore.awaitingTurn && !peekHitl()?.kind;
 });
-const sending = computed(() => sessionStore.awaitingTurn);
+const sending = computed(() => agentStore.awaitingTurn);
 const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_supported);
 const showNoAgentWelcome = computed(
-  () => !sessionStore.sessionId && agentListCount.value === 0
+  () => !agentStore.agentId && agentListCount.value === 0
 );
 const currentAgentTitle = computed(() => {
-  const id = String(sessionStore.sessionId || "").trim();
+  const id = String(agentStore.agentId || "").trim();
   if (!id) return "";
   const agent = agentList.value.find((a) => agentRecordId(a) === id);
   return agent ? agentDisplayTitle(agent) : `Agent ${id.slice(0, 8)}`;
@@ -156,12 +156,12 @@ function syncReasoningDisplay(llm) {
 
 function restartStream() {
   streamHandle.value?.close();
-  if (!sessionStore.sessionId) {
+  if (!agentStore.agentId) {
     streamHandle.value = null;
     return;
   }
   streamHandle.value = connectStream({
-    getAgentId: () => sessionStore.sessionId,
+    getAgentId: () => agentStore.agentId,
     onStatus: (s) => {
       chromeStore.sseStatus = s;
     },
@@ -170,7 +170,7 @@ function restartStream() {
 }
 
 async function activateAgentStream() {
-  if (!sessionStore.sessionId) {
+  if (!agentStore.agentId) {
     clearTranscript();
     clearHitl();
     finishTurn();
@@ -179,9 +179,9 @@ async function activateAgentStream() {
     chromeStore.sseStatus = "idle";
     return;
   }
-  const prev = sessionStore.sessionId;
-  await hydrateSession();
-  if (sessionStore.sessionId !== prev || !streamHandle.value) {
+  const prev = agentStore.agentId;
+  await hydrateAgent();
+  if (agentStore.agentId !== prev || !streamHandle.value) {
     restartStream();
   }
   await syncChildAgentsFromApi();
@@ -220,15 +220,15 @@ async function refreshMeta() {
       chromeStore.llmSettings = llm;
       syncReasoningDisplay(llm);
     } catch (e2) {
-      sessionStore.error = e2.message || e.message;
+      agentStore.error = e2.message || e.message;
     }
   }
 }
 
 async function refreshContextTokens() {
-  if (!sessionStore.sessionId) return;
+  if (!agentStore.agentId) return;
   try {
-    const ctx = await api.getAgentContext(sessionStore.sessionId);
+    const ctx = await api.getAgentContext(agentStore.agentId);
     chromeStore.contextTokens = Number(ctx.messages_total_tokens ?? -1);
   } catch {
     /* keep last */
@@ -273,7 +273,7 @@ function handleEvent(ev) {
       finishWaitingStatuses();
       finalizePartialToolCalls({ interrupted: true });
       addSystem(`error: ${ev.data.message || "unknown"}`);
-      if (sessionStore.awaitingTurn) finishTurn();
+      if (agentStore.awaitingTurn) finishTurn();
       break;
     case "done":
       finalizeAssistant();
@@ -282,7 +282,6 @@ function handleEvent(ev) {
       finalizePartialToolCalls({ interrupted: true });
       if (shouldAcceptDone(ev.seq)) {
         finishTurn();
-        sessionStore.statusLine = `回合结束 (${ev.data.finish_reason || "stop"})`;
         resetToolStream();
         resetPeerInvokeInflight();
         syncChildAgentsFromApi();
@@ -297,7 +296,7 @@ function handleEvent(ev) {
         const { approval } = enqueueHitlRequired(ev.data);
         if (approval?.child_session_id) setChildAwaitingApproval(approval.child_session_id, true);
       }
-      if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
+      if (isA2ARelay(ev.data) && agentStore.awaitingTurn) finishTurn();
       break;
     case "approval_required":
       finalizeAssistant();
@@ -305,7 +304,7 @@ function handleEvent(ev) {
       finishWaitingStatuses();
       enqueueHitl({ kind: "approval", data: ev.data });
       if (ev.data?.child_session_id) setChildAwaitingApproval(ev.data.child_session_id, true);
-      if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
+      if (isA2ARelay(ev.data) && agentStore.awaitingTurn) finishTurn();
       hitlStore.busy = false;
       break;
     case "user_information_required":
@@ -313,7 +312,7 @@ function handleEvent(ev) {
       finalizeReasoning();
       finishWaitingStatuses();
       enqueueHitl({ kind: "user_information", data: ev.data });
-      if (isA2ARelay(ev.data) && sessionStore.awaitingTurn) finishTurn();
+      if (isA2ARelay(ev.data) && agentStore.awaitingTurn) finishTurn();
       hitlStore.busy = false;
       break;
     case "temporary_agent_created":
@@ -332,7 +331,6 @@ function handleEvent(ev) {
       break;
     case "side_effect_turn_start":
       beginImplicitTurn();
-      sessionStore.statusLine = "处理旁路回调…";
       break;
     case "user_message_deferred":
       addDeferredUser(
@@ -380,7 +378,7 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
   hitlStore.busyIndex = hitlIndex;
   const resume = buildApprovalResume(item.data, { approveAll });
   try {
-    await api.submitResume(sessionStore.sessionId, resume);
+    await api.submitResume(agentStore.agentId, resume);
     if (isA2ARelay(item.data)) {
       const suffix = a2aRelaySuffix(item.data);
       extractToolApprovals(item.data).forEach((it) => {
@@ -393,9 +391,9 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
-    if (!sessionStore.turnContentSeen) startStatus("prefilling");
+    if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
   }
@@ -410,15 +408,15 @@ async function submitHitlOne(payload, approve) {
   hitlStore.busyIndex = hitlIndex;
   const resume = buildApprovalOneResume(item.data, callId, approve);
   try {
-    await api.submitResume(sessionStore.sessionId, resume);
+    await api.submitResume(agentStore.agentId, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
-    if (!sessionStore.turnContentSeen) startStatus("prefilling");
+    if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
   }
@@ -440,23 +438,23 @@ async function submitHitlUserInfo(hitlIndex, text) {
   hitlStore.busy = true;
   hitlStore.busyIndex = hitlIndex;
   try {
-    await api.submitResume(sessionStore.sessionId, resume);
+    await api.submitResume(agentStore.agentId, resume);
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     hitlSelected.value = 0;
     beginSubmit();
-    if (!sessionStore.turnContentSeen) startStatus("prefilling");
+    if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
   }
 }
 
 async function onSendMessage(payload) {
-  sessionStore.error = "";
+  agentStore.error = "";
   const text = typeof payload === "string" ? payload : String(payload?.text || "").trim();
   const contentParts = typeof payload === "string" ? null : payload?.contentParts;
   const images = typeof payload === "string" ? [] : payload?.images || [];
@@ -472,8 +470,8 @@ async function onSendMessage(payload) {
     return;
   }
 
-  if (sessionStore.awaitingTurn) {
-    sessionStore.error = "上一回合尚未结束";
+  if (agentStore.awaitingTurn) {
+    agentStore.error = "上一回合尚未结束";
     return;
   }
 
@@ -482,13 +480,12 @@ async function onSendMessage(payload) {
   addUser(text, images);
   beginSubmit();
   try {
-    await api.submitMessage(sessionStore.sessionId, text, contentParts);
-    sessionStore.statusLine = "等待 Agent 回复…";
-    if (!sessionStore.turnContentSeen) startStatus("prefilling");
+    await api.submitMessage(agentStore.agentId, text, contentParts);
+    if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     finishStatus("prefilling");
     finishTurn();
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
   }
 }
 
@@ -499,7 +496,7 @@ async function handleCommand(cmd) {
     return;
   }
   if (res.error) {
-    sessionStore.error = res.error;
+    agentStore.error = res.error;
     return;
   }
   if (res.action === "cancel") {
@@ -508,7 +505,7 @@ async function handleCommand(cmd) {
   }
   if (res.action === "clear") {
     await api.clearContext(await ensureAgent());
-    await hydrateSession();
+    await hydrateAgent();
     restartStream();
     resetStatusLines();
     resetToolStream();
@@ -529,7 +526,7 @@ async function handleCommand(cmd) {
   }
   if (res.action === "switch") {
     if (!res.arg) {
-      sessionStore.error = "用法: /switch <agent_id>";
+      agentStore.error = "用法: /switch <agent_id>";
       return;
     }
     await switchAgent(res.arg);
@@ -560,7 +557,7 @@ async function handleCommand(cmd) {
 
 async function handleUploadCommand(spec) {
   if (!spec || spec.error) {
-    sessionStore.error = spec?.error || "upload 参数无效";
+    agentStore.error = spec?.error || "upload 参数无效";
     return;
   }
   const { kind, path, id, version, name, platform, publish } = spec;
@@ -573,13 +570,13 @@ async function handleUploadCommand(spec) {
     } else if (kind === "plugin" || kind === "plugins") {
       out = await api.uploadPluginToManage({ path, pluginId: id, version, name, platform, publish });
     } else {
-      sessionStore.error = `未知 upload 类型: ${kind}`;
+      agentStore.error = `未知 upload 类型: ${kind}`;
       return;
     }
     const note = out.message ? ` — ${out.message}` : "";
     addSystem(`已上传 ${out.kind} ${out.id}@${out.version}（${out.status}${note}）`);
   } catch (err) {
-    sessionStore.error = err.message;
+    agentStore.error = err.message;
   }
 }
 
@@ -615,10 +612,10 @@ async function onAgentCreated(created) {
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
   try {
-    await hydrateSession();
+    await hydrateAgent();
     await refreshLLMSettings();
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
   }
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
@@ -631,10 +628,10 @@ async function switchAgent(id) {
   resetRemoteWorkers();
   resetUsageStrip();
   try {
-    await hydrateSession();
+    await hydrateAgent();
     await refreshLLMSettings();
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
     clearTranscript();
     clearHitl();
     resetEventTracking();
@@ -654,14 +651,14 @@ async function switchAgent(id) {
 async function deleteAgentById(payload) {
   const aid = String(typeof payload === "string" ? payload : payload?.id || "").trim();
   if (!aid) {
-    sessionStore.error = "无法删除：Agent ID 无效";
+    agentStore.error = "无法删除：Agent ID 无效";
     return;
   }
   const agent = typeof payload === "object" && payload?.agent ? payload.agent : { agent_id: aid };
   const label = agentDisplayTitle(agent);
   if (!window.confirm(`确定删除 Agent「${label}」？\n\n将停止该实例并归档记录，不可恢复。`)) return;
-  const deletingCurrent = sessionStore.sessionId === aid;
-  sessionStore.error = "";
+  const deletingCurrent = agentStore.agentId === aid;
+  agentStore.error = "";
   agentPanelRef.value?.setDeleting?.(aid);
   try {
     await api.deleteAgent(aid);
@@ -695,8 +692,8 @@ async function deleteAgentById(payload) {
       await agentPanelRef.value?.refresh?.();
     }
   } catch (e) {
-    sessionStore.error = e.message;
-    if (deletingCurrent && sessionStore.sessionId === aid) {
+    agentStore.error = e.message;
+    if (deletingCurrent && agentStore.agentId === aid) {
       await activateAgentStream();
     }
   } finally {
@@ -706,29 +703,29 @@ async function deleteAgentById(payload) {
 
 async function toggleThinkingMode() {
   if (!chromeStore.llmSettings?.thinking_supported) {
-    sessionStore.error = "当前 provider 不支持 thinking 控制（需 deepseek 或 qwen）";
+    agentStore.error = "当前 provider 不支持 thinking 控制（需 deepseek 或 qwen）";
     return;
   }
-  sessionStore.error = "";
+  agentStore.error = "";
   const t = String(chromeStore.llmSettings.thinking || "").toLowerCase();
   const enabled = !["disabled", "off"].includes(t);
   try {
     chromeStore.llmSettings = await api.patchLLMSettings({ thinking: enabled ? "disabled" : "enabled" });
     syncReasoningDisplay(chromeStore.llmSettings);
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
   }
 }
 
 async function cycleThinkingEffort() {
   if (!chromeStore.llmSettings?.thinking_supported) return;
-  sessionStore.error = "";
+  agentStore.error = "";
   const current = String(chromeStore.llmSettings.reasoning_effort || "high").toLowerCase();
   const next = current === "max" ? "high" : "max";
   try {
     chromeStore.llmSettings = await api.patchLLMSettings({ reasoning_effort: next });
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
   }
 }
 
@@ -745,11 +742,11 @@ async function switchLLMProfile(id) {
   const profileId = String(id || "").trim();
   if (!profileId) return;
   if (profileId === chromeStore.llmSettings?.active_profile) return;
-  sessionStore.error = "";
+  agentStore.error = "";
   try {
-    if (sessionStore.sessionId) {
+    if (agentStore.agentId) {
       // 绑定到当前 Agent，并同步全局运行时
-      await api.patchAgent(sessionStore.sessionId, { llm_active: profileId });
+      await api.patchAgent(agentStore.agentId, { llm_active: profileId });
       chromeStore.llmSettings = await api.getLLMSettings();
     } else {
       chromeStore.llmSettings = await api.patchLLMSettings({ active_profile: profileId });
@@ -761,7 +758,7 @@ async function switchLLMProfile(id) {
       /* agent info refresh best-effort */
     }
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
   }
 }
 
@@ -776,7 +773,7 @@ async function handleThinkingCommand(arg) {
   else if (["off", "disabled", "false", "0"].includes(parts[0])) patch.thinking = "disabled";
   else if (parts[0] === "effort" && ["high", "max"].includes(parts[1])) patch.reasoning_effort = parts[1];
   else {
-    sessionStore.error = "用法: /thinking on|off 或 /thinking effort high|max";
+    agentStore.error = "用法: /thinking on|off 或 /thinking effort high|max";
     return;
   }
   chromeStore.llmSettings = await api.patchLLMSettings(patch);
@@ -786,26 +783,26 @@ async function handleThinkingCommand(arg) {
 async function openPanel(name, arg) {
   const settingsPath = PANEL_SETTINGS_ROUTES[name];
   if (settingsPath) {
-    if (!sessionStore.sessionId) {
-      sessionStore.error = "请先创建或选择一个 Agent";
+    if (!agentStore.agentId) {
+      agentStore.error = "请先创建或选择一个 Agent";
       return;
     }
     try {
       await ensureAgent();
       if (name === "skills") {
         if (arg?.startsWith("load ")) {
-          await api.loadSkill(sessionStore.sessionId, arg.slice(5).trim());
+          await api.loadSkill(agentStore.agentId, arg.slice(5).trim());
         } else if (arg?.startsWith("unload ")) {
-          await api.unloadSkill(sessionStore.sessionId, arg.slice(7).trim());
+          await api.unloadSkill(agentStore.agentId, arg.slice(7).trim());
         }
       }
       await router.push(settingsPath);
     } catch (e) {
-      sessionStore.error = e.message;
+      agentStore.error = e.message;
     }
     return;
   }
-  if (name === "agents" || name === "sessions") {
+  if (name === "agents") {
     agentPanelRef.value?.refresh?.();
     return;
   }
@@ -813,15 +810,15 @@ async function openPanel(name, arg) {
     chromeStore.panel = name === "changes" ? "activity" : name;
     return;
   }
-  if (!sessionStore.sessionId) {
-    sessionStore.error = "请先创建或选择一个 Agent";
+  if (!agentStore.agentId) {
+    agentStore.error = "请先创建或选择一个 Agent";
     return;
   }
   try {
     await ensureAgent();
     chromeStore.panel = name;
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
     chromeStore.panel = null;
   }
 }
@@ -849,11 +846,11 @@ async function bootstrapAgentFromRoute() {
     return;
   }
   consumeStartupURL();
-  if (sessionStore.sessionId) {
+  if (agentStore.agentId) {
     // 校验持久化 id 是否仍存在
     try {
-      await api.getAgent(sessionStore.sessionId);
-      syncRouteAgent(sessionStore.sessionId);
+      await api.getAgent(agentStore.agentId);
+      syncRouteAgent(agentStore.agentId);
     } catch {
       persistAgentId("");
     }
@@ -861,22 +858,21 @@ async function bootstrapAgentFromRoute() {
 }
 
 async function cancelTurn() {
-  if (!sessionStore.sessionId || cancelling.value || !sessionStore.awaitingTurn) return;
+  if (!agentStore.agentId || cancelling.value || !agentStore.awaitingTurn) return;
   cancelling.value = true;
-  sessionStore.error = "";
+  agentStore.error = "";
   try {
     finishWaitingStatuses();
     finalizePartialToolCalls({ interrupted: true });
-    await api.cancelTurn(sessionStore.sessionId);
+    await api.cancelAgentTurn(agentStore.agentId);
     finishTurn();
     clearHitl();
     finalizeAssistant();
     finalizeReasoning();
     resetToolStream();
-    sessionStore.statusLine = "已请求取消 turn";
     addSystem("turn 已取消");
   } catch (e) {
-    sessionStore.error = e.message;
+    agentStore.error = e.message;
   } finally {
     cancelling.value = false;
   }
@@ -894,17 +890,17 @@ onMounted(async () => {
   await activateAgentStream();
   refreshContextTokens();
   consumeComposerDraft();
-  startDesktopFocusHeartbeat(() => sessionStore.sessionId);
+  startDesktopFocusHeartbeat(() => agentStore.agentId);
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("pageshow", onPageShow);
 });
 
 onActivated(() => {
-  if (sessionStore.sessionId && !streamHandle.value) {
+  if (agentStore.agentId && !streamHandle.value) {
     void activateAgentStream();
   }
   consumeComposerDraft();
-  startDesktopFocusHeartbeat(() => sessionStore.sessionId);
+  startDesktopFocusHeartbeat(() => agentStore.agentId);
 });
 
 watch(
@@ -912,13 +908,13 @@ watch(
   async (id, prev) => {
     const aid = String(id || "").trim();
     if (!aid) {
-      if (sessionStore.sessionId) {
+      if (agentStore.agentId) {
         // 允许停留在 /agents 空态
         return;
       }
       return;
     }
-    if (aid === sessionStore.sessionId || aid === prev) return;
+    if (aid === agentStore.agentId || aid === prev) return;
     await switchAgent(aid);
   },
 );
@@ -936,7 +932,7 @@ onUnmounted(() => {
     class="app__body app__body--chat-v61"
     :class="{ 'app__body--with-activity': chromeStore.panel === 'activity' }"
   >
-    <aside class="app__col app__col--sessions">
+    <aside class="app__col app__col--agents">
       <AgentPanel
         ref="agentPanelRef"
         @switch="switchAgent"
@@ -948,13 +944,13 @@ onUnmounted(() => {
     </aside>
 
     <div class="app__main-col">
-      <div v-if="sessionStore.error" class="chat-error-banner">{{ sessionStore.error }}</div>
+      <div v-if="agentStore.error" class="chat-error-banner">{{ agentStore.error }}</div>
       <AgentEmptyState
         v-if="showNoAgentWelcome"
         @create="openCreateWizard()"
         @pick-template="openCreateWizard"
       />
-      <div v-else-if="!sessionStore.sessionId" class="chat-empty-agent">
+      <div v-else-if="!agentStore.agentId" class="chat-empty-agent">
         <p>选择左侧 Agent，或点击 + 从模板新建。</p>
       </div>
 

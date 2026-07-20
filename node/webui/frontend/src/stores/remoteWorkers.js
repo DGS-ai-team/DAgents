@@ -1,8 +1,8 @@
 import { reactive } from "vue";
 import * as api from "../api/node.js";
-import { sessionStore } from "./session.js";
+import { agentStore } from "./agent.js";
 
-/** 父 session 下活跃临时子 Agent（对齐 Python ChildAgentTracker）。 */
+/** 父 Agent 下活跃临时子 Agent（对齐 Python ChildAgentTracker）。 */
 const entries = reactive(new Map());
 
 /** 进行中的 agent_invoke（对端 Agent 执行任务）。 */
@@ -72,7 +72,7 @@ export function replaceChildrenFromApi(items) {
 }
 
 export async function syncChildAgentsFromApi() {
-  const sid = sessionStore.sessionId;
+  const sid = agentStore.agentId;
   if (!sid) return;
   try {
     const res = await api.listChildAgents(sid);

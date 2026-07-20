@@ -1,17 +1,17 @@
 <script setup>
 import { computed, ref } from "vue";
-import { sessionStore } from "../stores/session.js";
+import { agentStore } from "../stores/agent.js";
 import { useChildAgents, formatChildAgentStatus, isChildAgentActive } from "../composables/useChildAgents.js";
 import { formatRelativeTime } from "../utils/format.js";
 import { shortId } from "../utils/panelFormat.js";
 
 const props = defineProps({
-  sessionId: { type: String, default: "" },
+  agentId: { type: String, default: "" },
 });
 
 const emit = defineEmits(["close"]);
 
-const sessionId = computed(() => props.sessionId || sessionStore.sessionId);
+const agentId = computed(() => props.agentId || agentStore.agentId);
 const showRaw = ref(false);
 
 const {
@@ -22,7 +22,7 @@ const {
   cancellingId,
   load,
   cancelChild,
-} = useChildAgents(sessionId);
+} = useChildAgents(agentId);
 </script>
 
 <template>
@@ -30,7 +30,7 @@ const {
     <header class="panel__header command-panel__header">
       <div>
         <div class="panel__title">子 Agent</div>
-        <div class="command-panel__subtitle">{{ sessionId || "—" }}</div>
+        <div class="command-panel__subtitle">{{ agentId || "—" }}</div>
       </div>
       <div class="command-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
@@ -94,7 +94,7 @@ const {
               </div>
             </li>
           </ul>
-          <p v-else class="command-panel__empty">当前 session 无临时 Agent</p>
+          <p v-else class="command-panel__empty">当前 Agent 无临时子 Agent</p>
         </section>
       </template>
     </div>

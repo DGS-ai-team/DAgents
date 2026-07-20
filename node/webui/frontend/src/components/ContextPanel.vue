@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, onMounted, computed } from "vue";
 import * as api from "../api/node.js";
-import { sessionStore } from "../stores/session.js";
+import { agentStore } from "../stores/agent.js";
 import { buildContextMessageView } from "../utils/contextMessagePreview.js";
 import { formatNumber } from "../utils/markdown.js";
 import { shortId } from "../utils/panelFormat.js";
@@ -19,7 +19,7 @@ const ctx = ref(null);
 const showRaw = ref(false);
 const expandedRows = ref(new Set());
 
-const sessionId = computed(() => sessionStore.sessionId || "");
+const agentId = computed(() => agentStore.agentId || "");
 
 const displayMessages = computed(() => {
   if (!ctx.value) return [];
@@ -56,7 +56,7 @@ function roleLabel(role) {
 }
 
 async function load() {
-  const sid = sessionId.value;
+  const sid = agentId.value;
   if (!sid) {
     ctx.value = null;
     error.value = "";
@@ -66,7 +66,7 @@ async function load() {
   error.value = "";
   expandedRows.value = new Set();
   try {
-    ctx.value = await api.getSessionContext(sid, { fullMessages: true });
+    ctx.value = await api.getAgentContext(sid, { fullMessages: true });
   } catch (e) {
     error.value = e.message;
     ctx.value = null;
@@ -76,21 +76,21 @@ async function load() {
 }
 
 onMounted(load);
-watch(sessionId, load);
+watch(agentId, load);
 </script>
 
 <template>
   <section class="panel panel-overlay__card context-panel" :class="{ 'context-panel--embedded': embedded }">
     <header v-if="!embedded" class="panel__header context-panel__header">
       <div>
-        <div class="panel__title">会话上下文</div>
-        <div class="context-panel__subtitle">{{ sessionId || "—" }}</div>
+        <div class="panel__title">对话上下文</div>
+        <div class="context-panel__subtitle">{{ agentId || "—" }}</div>
       </div>
       <div class="context-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
           {{ showRaw ? "友好视图" : "JSON" }}
         </button>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="!sessionId || loading" @click="load">刷新</button>
+        <button type="button" class="btn btn--ghost btn--sm" :disabled="!agentId || loading" @click="load">刷新</button>
         <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
@@ -99,17 +99,17 @@ watch(sessionId, load);
       <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
         {{ showRaw ? "友好视图" : "JSON" }}
       </button>
-      <button type="button" class="btn btn--ghost btn--sm" :disabled="!sessionId || loading" @click="load">刷新</button>
+      <button type="button" class="btn btn--ghost btn--sm" :disabled="!agentId || loading" @click="load">刷新</button>
     </div>
 
     <div class="panel__body context-panel__body">
-      <div v-if="!sessionId" class="context-panel__empty">请先在对话页选择或创建一个 Agent。</div>
+      <div v-if="!agentId" class="context-panel__empty">请先在对话页选择或创建一个 Agent。</div>
       <div v-else-if="loading" class="context-panel__loading">加载中…</div>
       <div v-else-if="error" class="context-panel__error">{{ error }}</div>
       <pre v-else-if="showRaw && ctx" class="context-panel__raw">{{ JSON.stringify(ctx, null, 2) }}</pre>
       <template v-else-if="ctx">
-        <div class="context-panel__session-meta">
-          当前 Agent <code class="context-panel__session-id">{{ shortId(sessionId, 40) }}</code>
+        <div class="context-panel__agent-meta">
+          当前 Agent <code class="context-panel__agent-id">{{ shortId(agentId, 40) }}</code>
         </div>
 
         <div class="context-panel__stats">

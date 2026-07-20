@@ -31,7 +31,7 @@ function resetAckScheduler() {
   ackInFlight = false;
 }
 
-/** 对齐 Go session.ShouldBumpNotifySeq：仅完整消息/HITL 才推进 ack。 */
+/** 对齐运行时 ShouldBumpNotifySeq：仅完整消息/HITL 才推进 ack。 */
 export function shouldAckSSEEvent(type, data) {
   switch (type) {
     case "hitl_required":
@@ -70,12 +70,12 @@ function requestAck(seq) {
 }
 
 async function flushAck() {
-  const agentId = sessionStore.sessionId?.trim();
+  const agentId = agentStore.agentId?.trim();
   const sseSeq = pendingAckSeq;
   if (!agentId || sseSeq <= 0 || sseSeq <= lastAckedSeq || ackInFlight) return;
   ackInFlight = true;
   try {
-    await api.postSessionAck(agentId, sseSeq);
+    await api.postAgentAck(agentId, sseSeq);
     lastAckedSeq = sseSeq;
   } catch {
     /* ignore transient ack failures; later events will reschedule */
@@ -85,18 +85,17 @@ async function flushAck() {
   }
 }
 
-export const sessionStore = reactive({
-  /** 当前激活的 Agent 实例 id（1 Agent = 1 主对话；字段名保留兼容既有组件）。 */
-  sessionId: loadPersistedAgentId(),
+export const agentStore = reactive({
+  /** 当前激活的 Agent 实例 id（1 Agent = 1 主对话）。 */
+  agentId: loadPersistedAgentId(),
   awaitingTurn: false,
   turnContentSeen: false,
   seqFence: 0,
-  statusLine: "",
   error: "",
 });
 
 export function persistAgentId(id) {
-  sessionStore.sessionId = id || "";
+  agentStore.agentId = id || "";
   try {
     if (id) {
       localStorage.setItem(AGENT_KEY, id);
@@ -110,28 +109,18 @@ export function persistAgentId(id) {
   }
 }
 
-/** @deprecated 使用 persistAgentId */
-export function persistSessionId(id) {
-  persistAgentId(id);
-}
-
 /**
  * 激活已有 Agent：ensure runtime（按快照 CreateWithOptions）。
  * 无选中 Agent 时不自动新建（走模板向导）。
  */
 export async function ensureAgent() {
-  const existing = sessionStore.sessionId?.trim() || "";
+  const existing = agentStore.agentId?.trim() || "";
   if (!existing) {
     throw new Error("请先创建或选择一个 Agent");
   }
   await api.ensureAgentRuntime(existing);
   persistAgentId(existing);
   return existing;
-}
-
-/** @deprecated 使用 ensureAgent */
-export async function ensureSession() {
-  return ensureAgent();
 }
 
 export function beginSubmit() {
@@ -144,15 +133,15 @@ export function beginImplicitTurn() {
 }
 
 function beginTurnWait() {
-  sessionStore.awaitingTurn = true;
-  sessionStore.turnContentSeen = false;
-  sessionStore.seqFence = transcriptStore.lastSeq;
-  sessionStore.error = "";
+  agentStore.awaitingTurn = true;
+  agentStore.turnContentSeen = false;
+  agentStore.seqFence = transcriptStore.lastSeq;
+  agentStore.error = "";
 }
 
 /** 对齐 Go TurnGate.IsStale：seq<=seqFence 的在途/回放事件一律忽略。 */
 export function isStaleEvent(seq) {
-  return seq > 0 && seq <= sessionStore.seqFence;
+  return seq > 0 && seq <= agentStore.seqFence;
 }
 
 /** 同一 seq 的重复投递（双 SSE 连接等）。 */
@@ -166,13 +155,13 @@ export function markEventApplied(seq, { ack = false } = {}) {
   if (ack) requestAck(seq);
 }
 
-export function ackSessionAfterHydrate() {
+export function ackAgentAfterHydrate() {
   pendingAckSeq = transcriptStore.lastSeq;
   void flushAck();
 }
 
 export function resetEventTracking() {
-  sessionStore.seqFence = 0;
+  agentStore.seqFence = 0;
   resetAckScheduler();
 }
 
@@ -180,7 +169,7 @@ export function resetEventTracking() {
 export function applyHydrateSeqHint(seq) {
   const hint = Number(seq) || 0;
   if (hint > 0) noteSeq(hint);
-  sessionStore.seqFence = hint > 0 ? hint : 0;
+  agentStore.seqFence = hint > 0 ? hint : 0;
 }
 
 /** 根据 hydrate 的 turn 状态恢复 awaitingTurn（F-H7）。 */
@@ -189,31 +178,31 @@ export function applyHydrateTurnState({ run_turn_phase, has_active_turn, pending
   const hasPending = pending_hitl && Array.isArray(pending_hitl.items) && pending_hitl.items.length > 0;
   const hasRelay = pending_a2a_relay && pending_a2a_relay.event_type && pending_a2a_relay.data;
   if (hasPending || hasRelay || phase === "awaiting_hitl") {
-    sessionStore.awaitingTurn = false;
-    sessionStore.turnContentSeen = false;
-    sessionStore.error = "";
+    agentStore.awaitingTurn = false;
+    agentStore.turnContentSeen = false;
+    agentStore.error = "";
     return;
   }
   const activePhases = new Set(["model_streaming", "awaiting_tool_execution", "tool_loop", "open_batch", "other"]);
   if (has_active_turn && activePhases.has(phase)) {
-    sessionStore.awaitingTurn = true;
-    sessionStore.turnContentSeen = true;
-    sessionStore.error = "";
+    agentStore.awaitingTurn = true;
+    agentStore.turnContentSeen = true;
+    agentStore.error = "";
     return;
   }
-  sessionStore.awaitingTurn = false;
-  sessionStore.turnContentSeen = false;
+  agentStore.awaitingTurn = false;
+  agentStore.turnContentSeen = false;
 }
 
 export function finishTurn() {
-  sessionStore.awaitingTurn = false;
+  agentStore.awaitingTurn = false;
 }
 
 export function markTurnContent() {
-  if (sessionStore.awaitingTurn) sessionStore.turnContentSeen = true;
+  if (agentStore.awaitingTurn) agentStore.turnContentSeen = true;
 }
 
 export function shouldAcceptDone(seq) {
-  if (!sessionStore.awaitingTurn) return false;
-  return sessionStore.turnContentSeen || seq > sessionStore.seqFence;
+  if (!agentStore.awaitingTurn) return false;
+  return agentStore.turnContentSeen || seq > agentStore.seqFence;
 }

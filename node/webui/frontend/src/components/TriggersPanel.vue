@@ -161,7 +161,7 @@ async function removeTriggerConfirmed(item) {
   }
 }
 
-function sessionHint(item) {
+function targetHint(item) {
   let hint = String(item.session_target_mode || "—");
   if (item.target_session_id) hint += ` · ${shortId(item.target_session_id, 20)}`;
   return hint;
@@ -247,8 +247,8 @@ onMounted(load);
                       <dd>{{ item.fire_count ?? 0 }} 次 · 上次 {{ formatUnixTime(item.last_fired_at) }}</dd>
                     </div>
                     <div class="command-kv">
-                      <dt>会话</dt>
-                      <dd>{{ sessionHint(item) }}</dd>
+                      <dt>目标</dt>
+                      <dd>{{ targetHint(item) }}</dd>
                     </div>
                   </dl>
                   <div v-if="item.task_template" class="command-card__preview">

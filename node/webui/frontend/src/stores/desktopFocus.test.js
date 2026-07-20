@@ -31,7 +31,7 @@ afterEach(() => {
 
 describe("desktopFocus", () => {
   it("reports immediately on start and renews on heartbeat", async () => {
-    startDesktopFocusHeartbeat(() => "sess-a");
+    startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
     expect(reportDesktopUIFocus).toHaveBeenCalledTimes(1);
 
@@ -43,25 +43,25 @@ describe("desktopFocus", () => {
   });
 
   it("debounces rapid duplicate reports within 1s", async () => {
-    startDesktopFocusHeartbeat(() => "sess-a");
+    startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
-    startDesktopFocusHeartbeat(() => "sess-a");
+    startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
     expect(reportDesktopUIFocus).toHaveBeenCalledTimes(1);
   });
 
-  it("pulse forces report on session switch", async () => {
-    startDesktopFocusHeartbeat(() => "sess-a");
+  it("pulse forces report on agent switch", async () => {
+    startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
     vi.mocked(reportDesktopUIFocus).mockClear();
 
-    startDesktopFocusHeartbeat(() => "sess-b");
+    startDesktopFocusHeartbeat(() => "agt-b");
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledWith("sess-b", { ttlSeconds: 90 });
+    expect(reportDesktopUIFocus).toHaveBeenCalledWith("agt-b", { ttlSeconds: 90 });
   });
 
   it("clears focus on stop", async () => {
-    startDesktopFocusHeartbeat(() => "sess-a");
+    startDesktopFocusHeartbeat(() => "agt-a");
     await Promise.resolve();
     vi.mocked(reportDesktopUIFocus).mockClear();
 

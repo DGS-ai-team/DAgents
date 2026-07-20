@@ -16,13 +16,6 @@ const router = createRouter({
   routes: [
     { path: "/", redirect: "/agents" },
     {
-      path: "/chat/:sessionId?",
-      redirect: (to) => {
-        const id = String(to.params.sessionId || "").trim();
-        return id ? `/agents/${encodeURIComponent(id)}` : "/agents";
-      },
-    },
-    {
       path: "/agents/:agentId?",
       component: ChatLayout,
       children: [{ path: "", name: "agents", component: ChatView }],
