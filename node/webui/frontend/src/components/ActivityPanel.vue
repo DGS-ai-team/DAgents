@@ -11,6 +11,12 @@ const loading = ref(false);
 const error = ref("");
 const remote = ref(null);
 const tab = ref("files"); // files | commands
+const expandedCmd = ref({});
+
+function toggleCmd(key) {
+  const k = String(key);
+  expandedCmd.value = { ...expandedCmd.value, [k]: !expandedCmd.value[k] };
+}
 
 const live = computed(() => deriveActivityFromTranscript(transcriptStore.entries));
 
@@ -103,7 +109,8 @@ defineExpose({ refresh });
       <template v-else>
         <ul v-if="commands.length" class="activity-list">
           <li v-for="(c, i) in commands" :key="c.tool_call_id || i" class="activity-list__item">
-            <div class="activity-list__main">
+            <button type="button" class="activity-list__cmd-head" @click="toggleCmd(c.tool_call_id || i)">
+              <span class="activity-list__chevron">{{ expandedCmd[c.tool_call_id || i] ? "▾" : "▸" }}</span>
               <code class="activity-list__cmd">$ {{ c.command }}</code>
               <span
                 class="activity-chip"
@@ -112,8 +119,11 @@ defineExpose({ refresh });
                   'activity-chip--danger': c.status === 'error' || c.status === 'rejected',
                 }"
               >{{ c.status }}</span>
-            </div>
-            <div v-if="c.content_preview" class="activity-list__preview">{{ c.content_preview }}</div>
+            </button>
+            <pre
+              v-if="expandedCmd[c.tool_call_id || i] && c.content_preview"
+              class="activity-list__preview activity-list__preview--folded"
+            >{{ c.content_preview }}</pre>
           </li>
         </ul>
         <p v-else class="activity-panel__empty">尚无 shell 命令记录</p>
@@ -222,6 +232,25 @@ defineExpose({ refresh });
   gap: 4px;
   flex-shrink: 0;
 }
+.activity-list__cmd-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+.activity-list__chevron {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--color-text-subtle);
+  margin-top: 2px;
+}
 .activity-list__preview {
   margin-top: 6px;
   font-family: var(--font-mono);
@@ -231,6 +260,16 @@ defineExpose({ refresh });
   word-break: break-word;
   max-height: 4.5em;
   overflow: hidden;
+}
+.activity-list__preview--folded {
+  max-height: 12em;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: #0d0d0d;
+  border: 1px solid var(--color-border-strong);
+  color: #d4d4d4;
 }
 .activity-chip {
   font-size: 10px;

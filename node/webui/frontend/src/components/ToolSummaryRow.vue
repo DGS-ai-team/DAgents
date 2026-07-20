@@ -3,6 +3,7 @@ import { computed, onUnmounted, ref, watch } from "vue";
 import { formatToolElapsed } from "../utils/format.js";
 import { toolStepIsInProgress, toolStepStatusText, toolStepUserSummary } from "../utils/toolUserLabel.js";
 import { entryMedia } from "../utils/showImage.js";
+import { resolveToolVisual } from "../utils/toolSource.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
 
 const props = defineProps({
@@ -12,7 +13,6 @@ const props = defineProps({
 });
 
 const expanded = ref(false);
-/** 本地时钟：tool_call 长参数期间 statusStore 可能已停表，不能依赖它刷新耗时。 */
 const nowTick = ref(Date.now());
 let tickTimer = null;
 
@@ -20,7 +20,8 @@ const summary = computed(() => toolStepUserSummary({ callEntry: props.callEntry,
 const inProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
 const inlineMedia = computed(() => entryMedia(props.resultEntry));
-/** 长参数 tool_call 期间正文未必可见增长；用耗时 + 动画表达「仍在生成」。 */
+const visual = computed(() => resolveToolVisual(props.resultEntry || props.callEntry || {}));
+
 const status = computed(() => {
   void nowTick.value;
   const base = toolStepStatusText({ callEntry: props.callEntry, resultEntry: props.resultEntry });
@@ -62,12 +63,20 @@ function toggle() {
 </script>
 
 <template>
-  <div class="tool-summary-row" :class="{ 'tool-summary-row--expanded': expanded, 'tool-summary-row--progress': inProgress }">
+  <div
+    class="tool-summary-row"
+    :class="{
+      'tool-summary-row--expanded': expanded,
+      'tool-summary-row--progress': inProgress,
+      [`tool-summary-row--${visual.kind}`]: true,
+    }"
+  >
     <button type="button" class="tool-summary-row__head" @click="toggle">
-      <span class="tool-summary-row__icon" aria-hidden="true">
+      <span class="tool-summary-row__glyph" aria-hidden="true">
         <span v-if="inProgress" class="tool-exec-spinner" />
-        <span v-else>✓</span>
+        <span v-else class="tool-summary-row__check">✓</span>
       </span>
+      <span class="tool-summary-row__kind">{{ visual.label }}</span>
       <span class="tool-summary-row__text">{{ summary }}</span>
       <span v-if="inlineMedia.length && !expanded" class="tool-summary-row__thumb-wrap">
         <img
@@ -86,32 +95,28 @@ function toggle() {
       <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
     </button>
     <div v-if="expanded && detailEntry" class="tool-summary-row__detail">
-      <ToolExecBubble :entry="detailEntry" :verbose="verbose" />
+      <ToolExecBubble :entry="detailEntry" :verbose="verbose" embedded />
     </div>
   </div>
 </template>
 
 <style scoped>
 .tool-summary-row {
-  margin: 4px 0;
-  border-radius: 10px;
+  margin: 2px 0;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  max-width: 100%;
+}
+
+.tool-summary-row:hover,
+.tool-summary-row--expanded {
   background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
+  border-color: var(--color-border);
 }
 
 .tool-summary-row--progress {
-  border-color: rgba(99, 102, 241, 0.4);
-  animation: tool-summary-progress-pulse 1.6s ease-in-out infinite;
-}
-
-@keyframes tool-summary-progress-pulse {
-  0%,
-  100% {
-    border-color: rgba(99, 102, 241, 0.28);
-  }
-  50% {
-    border-color: rgba(99, 102, 241, 0.55);
-  }
+  border-color: rgba(55, 148, 255, 0.35);
 }
 
 .tool-summary-row__head {
@@ -119,34 +124,64 @@ function toggle() {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 5px 8px;
   border: none;
   background: transparent;
   text-align: left;
   cursor: pointer;
   font: inherit;
   color: var(--color-text-muted);
+  border-radius: 6px;
 }
 
-.tool-summary-row__head:hover {
-  background: var(--color-surface-hover);
-}
-
-.tool-summary-row__icon {
+.tool-summary-row__glyph {
   flex: 0 0 auto;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 14px;
-  font-size: 13px;
+  justify-content: center;
+  color: var(--color-success);
+  font-size: 12px;
+}
+
+.tool-summary-row__check {
+  opacity: 0.9;
+}
+
+.tool-summary-row__kind {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+}
+
+.tool-summary-row--shell .tool-summary-row__kind {
+  color: #e2a053;
+  border-color: rgba(226, 160, 83, 0.25);
+  background: rgba(226, 160, 83, 0.08);
+}
+
+.tool-summary-row--fs .tool-summary-row__kind {
+  color: var(--color-success);
+  border-color: rgba(137, 209, 133, 0.25);
+  background: var(--color-success-soft);
 }
 
 .tool-summary-row__text {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--color-text);
-  line-height: 1.4;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
 }
 
 .tool-summary-row__thumb-wrap {
@@ -155,12 +190,12 @@ function toggle() {
 }
 
 .tool-summary-row__thumb {
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 4px;
   border: 1px solid var(--color-border);
-  background: #fff;
+  background: var(--color-surface);
 }
 
 .tool-summary-row__status {
@@ -179,12 +214,12 @@ function toggle() {
 
 .tool-summary-row__chevron {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-text-subtle);
 }
 
 .tool-summary-row__detail {
-  padding: 0 8px 8px;
+  padding: 0 8px 8px 30px;
   border-top: 1px solid var(--color-border);
 }
 
