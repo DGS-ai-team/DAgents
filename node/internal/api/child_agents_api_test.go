@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +21,24 @@ import (
 
 func testConfigChildAgentsEnabled(t *testing.T) *config.Config {
 	t.Helper()
-	cfg := testConfig(t)
+	// 独立目录：session 后台写盘时，避免 testing.TempDir RemoveAll 竞态失败。
+	root, err := os.MkdirTemp("", "dagents-child-api-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	cfg := &config.Config{
+		NodeID: "ops-linux-01",
+		Agent: config.AgentConfig{
+			Role: "compliance",
+		},
+		FSRoot: filepath.Join(root, "runtime"),
+		Compression: config.CompressionConfig{
+			SilentTriggerTokens:   80000,
+			BlockingTriggerTokens: 100000,
+		},
+	}
+	cfg.ApplyDefaults()
 	cfg.ChildAgents.Enabled = true
 	return cfg
 }
@@ -30,8 +49,18 @@ func newChildAgentTestServer(t *testing.T, llmClient llm.Client) *httptest.Serve
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(NewServer(testConfigChildAgentsEnabled(t), nil,
-		WithLLM(llmClient), WithTools(reg), WithSkipStore()).Handler())
+	srv := NewServer(testConfigChildAgentsEnabled(t), nil,
+		WithLLM(llmClient), WithTools(reg), WithSkipStore())
+	ts := httptest.NewServer(srv.Handler())
+	// 须在 t.TempDir 清理前停止 session，避免后台仍写 prompt_context 导致 RemoveAll 失败。
+	t.Cleanup(func() {
+		ts.Close()
+		if srv.sessions != nil {
+			srv.sessions.Stop()
+		}
+		time.Sleep(50 * time.Millisecond)
+	})
+	return ts
 }
 
 func createSession(t *testing.T, baseURL string) string {
@@ -224,6 +253,9 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 	if cancelled.Status != "cancelled" {
 		t.Fatalf("unexpected status: %+v", cancelled)
 	}
+
+	// 父 turn / 子 cancel 可能仍在收尾写盘；等 idle 后再让 t.TempDir 清理。
+	waitSessionIdleDeadline(t, ts.URL, parentID, 8*time.Second)
 }
 
 // sessionDelayedEchoMock 供 api 包 cancel 测试使用（避免 import cycle）。
