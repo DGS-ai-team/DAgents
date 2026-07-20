@@ -7,7 +7,8 @@
 # 开发联调也可直接引用本文件（默认 llm.mock=true，无需 API Key）：
 #   go run ./node/cmd/dagents-node -config packaging/agent-client/config.example.yaml
 
-agent_id:   # 可选；缺省时自动生成并写入 .runtime/agent/agent_id，建议不填自动生成
+agent_id:   # 已废弃；请改用 node_id（加载时仍可读 agent_id 并合并）
+node_id:    # 可选；缺省时自动生成并写入 .runtime/node/node_id，建议不填自动生成
 
 listen:
   host: 127.0.0.1
@@ -33,6 +34,21 @@ expose_to_peers: false
 fs_root: ./.runtime
 
 llm:
+  # 多档案（可选）：profiles + active；顶层 provider/model 等为当前生效快照（兼容旧配置）
+  # active: deepseek-main
+  # profiles:
+  #   deepseek-main:
+  #     provider: deepseek
+  #     base_url: https://api.deepseek.com
+  #     model: deepseek-chat
+  #     api_key_env: OPENAI_API_KEY
+  #     multimodal_enabled: false
+  #   qwen-plus:
+  #     provider: qwen
+  #     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #     model: qwen-plus
+  #     api_key_env: QWEN_API_KEY
+  #     multimodal_enabled: true   # 多模态跟随档案；切换 active 时同步到 multimodal.enabled
   provider: deepseek   # openai | deepseek | qwen | vllm
   base_url: https://api.deepseek.com   # 留空时按 provider 默认；qwen 业务空间示例：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   model: deepseek-chat   # deepseek 示例：deepseek-reasoner 或 deepseek-chat（Thinking 模式）

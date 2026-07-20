@@ -103,13 +103,13 @@ watch(sessionId, load);
     </div>
 
     <div class="panel__body context-panel__body">
-      <div v-if="!sessionId" class="context-panel__empty">请先在对话页选择或创建一个会话。</div>
+      <div v-if="!sessionId" class="context-panel__empty">请先在对话页选择或创建一个 Agent。</div>
       <div v-else-if="loading" class="context-panel__loading">加载中…</div>
       <div v-else-if="error" class="context-panel__error">{{ error }}</div>
       <pre v-else-if="showRaw && ctx" class="context-panel__raw">{{ JSON.stringify(ctx, null, 2) }}</pre>
       <template v-else-if="ctx">
         <div class="context-panel__session-meta">
-          当前会话 <code class="context-panel__session-id">{{ shortId(sessionId, 40) }}</code>
+          当前 Agent <code class="context-panel__session-id">{{ shortId(sessionId, 40) }}</code>
         </div>
 
         <div class="context-panel__stats">

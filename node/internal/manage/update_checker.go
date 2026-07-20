@@ -105,7 +105,7 @@ func (u *UpdateChecker) fetchCheck() UpdateStatus {
 		CurrentVersion: version.Version,
 		Platform:       ReleasePlatform(),
 		Channel:        channel,
-		AgentID:        u.cfg.AgentID,
+		AgentID:        u.cfg.NodeID,
 		NodeToken:      u.cfg.Manage.NodeToken,
 		ApplyCommand:   "dagents update",
 		Client:         u.client,

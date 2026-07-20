@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **Agent 实例模型（v0.8 规划落地 Phase 0–4）**：单 Node 多 Agent；`node_id` 替代进程级 `agent_id`；Web UI 以 Agent 为首实体（`/ui/agents/:id`）。
+- **移除终端对话 Client**：删除 Go bubbletea TUI（`client/internal/tui`）与 Python Textual CLI（`app/cli` / `dagents-cli`）；`dagents-client` 仅保留 `probe` / `update` / `version`。
+- **打包收敛**：`dagents-local-assistant` 以 Node + 内嵌 Web UI 为主；`dagents` / `dagents.cmd` 默认启动 Node 并打印 Web UI 地址。
+- **Agent API 别名**：ack / clear-context / compress / skills / child-agents 提供 `/v1/agents/{id}/…` 路径（Web UI 已切换）。
+- **Web UI Cursor 风格工作台**：深色 IDE chrome token；新增「变更与命令」面板（`/activity`）。
+- **聚合只读 API**：`GET /v1/ui/bootstrap`（health+info+llm）；`GET /v1/agents/{id}/workspace-activity`（改过的文件 / 执行过的命令）。
+
 ---
 
 ## [0.7.5] - 2026-07-10

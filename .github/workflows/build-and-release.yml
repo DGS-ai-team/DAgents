@@ -1,6 +1,6 @@
 name: Build And Release Binary
 
-# main 推送仅跑单测；打 v* 标签时构建本地助手包（Go Node + 双 TUI）并创建 GitHub Release。
+# main 推送仅跑单测；打 v* 标签时构建本地助手包（Go Node + Web UI）并创建 GitHub Release。
 on:
   push:
     branches:
@@ -13,7 +13,6 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  CLI_PYINSTALLER_ARGS: --onefile --name dagents-cli --hidden-import=textual --hidden-import=aiohttp run_dagents_cli.py
   BROWSER_PYINSTALLER_ARGS: --onefile --name dagents-browser --paths browser-service --collect-submodules browser_use --collect-submodules uvicorn --collect-submodules fastapi --collect-submodules pydantic --hidden-import=dagents_browser --hidden-import=dagents_browser.main --hidden-import=dagents_browser.server --hidden-import=dagents_browser.driver --hidden-import=dagents_browser.action_runner --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=uvicorn.lifespan --hidden-import=uvicorn.lifespan.on browser-service/run_dagents_browser.py
 
 jobs:
@@ -87,12 +86,12 @@ jobs:
             os: ubuntu-latest
             goos: linux
             goarch: amd64
-            cli_build: docker-rocky8
+            py_build: docker-rocky8
           - platform: windows-amd64
             os: windows-2022
             goos: windows
             goarch: amd64
-            cli_build: native
+            py_build: native
 
     steps:
       - name: Checkout
@@ -135,35 +134,32 @@ jobs:
           bash scripts/ci/build_dagents_shell.sh
 
       - name: Setup Python (Windows)
-        if: matrix.cli_build == 'native'
+        if: matrix.py_build == 'native'
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
 
-      - name: Build Python bundles (Windows native PyInstaller)
-        if: matrix.cli_build == 'native'
+      - name: Build dagents-browser (Windows native PyInstaller)
+        if: matrix.py_build == 'native'
         shell: bash
         env:
-          CLI_PI_ARGS: ${{ env.CLI_PYINSTALLER_ARGS }}
           BROWSER_PI_ARGS: ${{ env.BROWSER_PYINSTALLER_ARGS }}
         run: |
-          bash scripts/ci/build_dagents_cli.sh
           bash scripts/ci/build_dagents_browser.sh
 
-      - name: Build Python bundles (Linux Rocky 8 Docker + pyenv, glibc 2.28)
-        if: matrix.cli_build == 'docker-rocky8'
+      - name: Build dagents-browser (Linux Rocky 8 Docker + pyenv, glibc 2.28)
+        if: matrix.py_build == 'docker-rocky8'
         timeout-minutes: 120
         shell: bash
         env:
-          CLI_PI_ARGS: ${{ env.CLI_PYINSTALLER_ARGS }}
           BROWSER_PI_ARGS: ${{ env.BROWSER_PYINSTALLER_ARGS }}
           PYENV_PYTHON_VERSION: "3.13.2"
         run: |
           set -euxo pipefail
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e CLI_PI_ARGS -e BROWSER_PI_ARGS -e PYENV_PYTHON_VERSION \
+            -e BROWSER_PI_ARGS -e PYENV_PYTHON_VERSION \
             rockylinux:8 \
             bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
 

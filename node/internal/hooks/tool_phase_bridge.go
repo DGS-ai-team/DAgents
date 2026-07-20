@@ -323,11 +323,11 @@ func registerBuiltinToolAfterEachHooks(r *Registry, rh *ToolResultPackageHook, a
 
 const injectTodayDatePriority = 50
 
-func registerBuiltinInjectTodayDateHook(r *Registry) {
+func registerBuiltinInjectTodayDateHook(r *Registry, cfg InjectTodayDateConfig) {
 	if r == nil {
 		return
 	}
-	r.RegisterPhaseHook(NewInjectTodayDateHook(), RegisterOpts{
+	r.RegisterPhaseHook(NewInjectTodayDateHook(cfg), RegisterOpts{
 		Priority: injectTodayDatePriority,
 		Timeout:  DefaultInlineHookTimeout,
 		OnError:  OnErrorContinue,

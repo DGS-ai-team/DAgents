@@ -139,12 +139,9 @@ function userImageThumb(src) {
 }
 .msg__bubble--deferred {
   opacity: 0.85;
-  border-style: dashed;
 }
 .msg--user-applied .msg__bubble--deferred {
   opacity: 1;
-  border-style: solid;
-  border-color: var(--color-border-subtle, #444);
 }
 .msg--user-stale .msg__bubble--deferred {
   opacity: 0.55;

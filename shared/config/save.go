@@ -19,6 +19,7 @@ func SaveFile(path string, cfg *Config) error {
 		return fmt.Errorf("empty config path")
 	}
 	work := *cfg
+	work.SyncActiveProfileFromFlat()
 	work.ApplyDefaults()
 	if err := work.Validate(); err != nil {
 		return fmt.Errorf("validate config: %w", err)

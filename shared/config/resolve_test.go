@@ -9,7 +9,7 @@ import (
 func TestResolveConfigPath_explicit(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte("agent_id: x\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("node_id: x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ResolveConfigPath(path)
@@ -24,7 +24,7 @@ func TestResolveConfigPath_explicit(t *testing.T) {
 func TestResolveConfigPath_env(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "from-env.yaml")
-	if err := os.WriteFile(path, []byte("agent_id: x\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("node_id: x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(EnvConfigPath, path)

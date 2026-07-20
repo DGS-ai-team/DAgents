@@ -8,7 +8,7 @@ import (
 
 func TestRegistrationCard_fromConfig(t *testing.T) {
 	cfg := &config.Config{
-		AgentID: "node-a",
+		NodeID: "node-a",
 		Agent: config.AgentConfig{
 			Name:        "合规助手",
 			Description: "合规审查",

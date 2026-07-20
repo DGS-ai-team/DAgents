@@ -78,7 +78,7 @@ func (c *Client) doJSON(ctx context.Context, method, rawURL string, body any) (*
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(agentIDHeader, c.cfg.AgentID)
+	req.Header.Set(agentIDHeader, c.cfg.NodeID)
 	if token := strings.TrimSpace(c.cfg.Manage.NodeToken); token != "" {
 		req.Header.Set(tokenHeader, token)
 	}
@@ -92,7 +92,7 @@ func (c *Client) CreateInvokeTask(ctx context.Context, toAgentID, content, calle
 		return CreateResponse{}, fmt.Errorf("to_agent_id is required")
 	}
 	payload := map[string]string{
-		"from_agent_id":     c.cfg.AgentID,
+		"from_agent_id":     c.cfg.NodeID,
 		"to_agent_id":       toAgentID,
 		"kind":              "invoke",
 		"content":           content,
@@ -165,7 +165,7 @@ func (c *Client) GetTask(ctx context.Context, taskID string) (TaskRecord, error)
 		return TaskRecord{}, fmt.Errorf("task_id is required")
 	}
 	q := url.Values{}
-	q.Set("caller_agent_id", c.cfg.AgentID)
+	q.Set("caller_agent_id", c.cfg.NodeID)
 	rawURL := c.manageURL("/v1/a2a/tasks/"+taskID) + "?" + q.Encode()
 	resp, err := c.doJSON(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -298,7 +298,7 @@ func (c *Client) SubmitCallerNotify(ctx context.Context, taskID string) error {
 		return fmt.Errorf("task_id is required")
 	}
 	resp, err := c.doJSON(ctx, http.MethodPost, c.manageURL("/v1/a2a/tasks/"+taskID+"/caller_notify"), map[string]any{
-		"caller_agent_id": c.cfg.AgentID,
+		"caller_agent_id": c.cfg.NodeID,
 	})
 	if err != nil {
 		return err
@@ -317,7 +317,7 @@ func (c *Client) SubmitCallerResume(ctx context.Context, taskID string, resume m
 		return fmt.Errorf("task_id is required")
 	}
 	resp, err := c.doJSON(ctx, http.MethodPost, c.manageURL("/v1/a2a/tasks/"+taskID+"/caller_resume"), map[string]any{
-		"caller_agent_id": c.cfg.AgentID,
+		"caller_agent_id": c.cfg.NodeID,
 		"resume_value":    resume,
 	})
 	if err != nil {

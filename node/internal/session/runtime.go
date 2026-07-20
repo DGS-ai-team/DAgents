@@ -175,8 +175,9 @@ func newRuntimeWithPublisher(
 				Tools:                turnOpts.ToolResult.Tools,
 				FSRoot:               turnOpts.FSRoot,
 			}),
-			Plugins: turnOpts.PluginHooks,
-			Logger:  logger,
+			InjectTodayDate: hooks.InjectTodayDateConfigOrDefault(turnOpts.InjectTodayDate),
+			Plugins:         turnOpts.PluginHooks,
+			Logger:          logger,
 		},
 		logger,
 	)

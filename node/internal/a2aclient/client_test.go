@@ -46,7 +46,7 @@ func TestClientCreateAndWait(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
 	client := New(cfg)
 	ctx := context.Background()
 	created, err := client.CreateInvokeTask(ctx, "node-a", "consult", "sess-1")
@@ -105,7 +105,7 @@ func TestWaitForInvokeResultDoesNotRePromptAfterCallerResume(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
 	client := New(cfg)
 	handler := &stubCallerHITL{t: t, calls: &hitlCalls, resume: map[string]any{"type": "selection", "approved": []string{"call-1"}}}
 	rec, err := client.WaitForInvokeResult(context.Background(), "task-hitl", "sess-caller", 8*time.Second, handler)
@@ -152,7 +152,7 @@ func TestClientDiscover(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{AgentID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
+	cfg := &config.Config{NodeID: "node-b", Manage: config.ManageConfig{URL: srv.URL}}
 	resp, err := New(cfg).DiscoverAgents(context.Background(), "lab")
 	if err != nil {
 		t.Fatal(err)

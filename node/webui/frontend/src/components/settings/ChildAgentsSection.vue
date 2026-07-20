@@ -30,7 +30,7 @@ const {
       当前会话下由主 Agent 派生的临时子 Agent。运行中的任务可在此取消。
     </p>
 
-    <p v-if="!sessionId" class="child-agents-section__empty">请先在聊天页打开一个会话。</p>
+    <p v-if="!sessionId" class="child-agents-section__empty">请先在聊天页打开一个 Agent。</p>
     <div v-else-if="loading && !items.length" class="child-agents-section__empty">加载中…</div>
     <div v-else-if="error" class="command-panel__error">{{ error }}</div>
     <p v-else-if="statusMessage" class="child-agents-section__status">{{ statusMessage }}</p>

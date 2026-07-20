@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { chromeStore } from "../stores/chrome.js";
+import { sessionStore } from "../stores/session.js";
 import brandIcon from "../assets/brand-icon.png";
 
 const router = useRouter();
@@ -19,9 +20,15 @@ const statusLabel = computed(() => {
   return "离线";
 });
 const inSettings = computed(() => route.path.startsWith("/settings"));
+const canOpenActivity = computed(() => !inSettings.value && !!sessionStore.sessionId);
 
 function openChat() {
-  router.push({ name: "chat" });
+  router.push({ name: "agents" });
+}
+
+function openActivity() {
+  if (!sessionStore.sessionId) return;
+  chromeStore.panel = "activity";
 }
 </script>
 
@@ -39,6 +46,23 @@ function openChat() {
         <span class="product-header__dot" :class="statusClass" aria-hidden="true" />
         <span class="product-header__status-text">{{ statusLabel }}</span>
       </span>
+      <button
+        v-if="canOpenActivity"
+        type="button"
+        class="app__icon-btn product-header__icon-btn"
+        title="变更与命令"
+        aria-label="变更与命令"
+        @click="openActivity"
+      >
+        <svg class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M3.5 3.5h9v2h-9v-2Zm0 3.5h9v2h-9V7Zm0 3.5h6V13h-6v-2.5Z"
+            stroke="currentColor"
+            stroke-width="1.1"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
       <button
         v-if="inSettings"
         type="button"

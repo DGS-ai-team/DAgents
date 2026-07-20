@@ -37,7 +37,7 @@ func TestInboxPoller_pollOnce(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &config.Config{
-		AgentID: "callee-01",
+		NodeID: "callee-01",
 		Manage: config.ManageConfig{
 			Enabled: true,
 			URL:     srv.URL,
@@ -118,7 +118,7 @@ func TestConfigManageA2AInboxPollInterval(t *testing.T) {
 
 func TestInboxPoller_inboxURLIncludesWait(t *testing.T) {
 	cfg := &config.Config{
-		AgentID: "node-1",
+		NodeID: "node-1",
 		Manage: config.ManageConfig{
 			URL: "http://manage.local:8020",
 			A2A: config.ManageA2AConfig{InboxWaitSeconds: 25},
@@ -141,7 +141,7 @@ func TestInboxPoller_pollOnce_http_error(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &config.Config{
-		AgentID: "callee",
+		NodeID: "callee",
 		Manage:  config.ManageConfig{URL: srv.URL},
 	}
 	p := NewInboxPoller(cfg, nil)

@@ -11,12 +11,12 @@ func TestSaveFile_roundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	cfg := &Config{
-		AgentID: "save-test",
+		NodeID: "save-test",
 		FSRoot:  dir,
 	}
-	cfg.ApplyDefaults()
 	cfg.LLM.Provider = "deepseek"
 	cfg.LLM.Model = "deepseek-chat"
+	cfg.ApplyDefaults()
 
 	if err := SaveFile(path, cfg); err != nil {
 		t.Fatalf("SaveFile: %v", err)
@@ -35,6 +35,9 @@ func TestSaveFile_roundTrip(t *testing.T) {
 	}
 	if loaded.LLM.Provider != "deepseek" || loaded.LLM.Model != "deepseek-chat" {
 		t.Fatalf("loaded llm = %+v", loaded.LLM)
+	}
+	if loaded.LLM.Active != "default" {
+		t.Fatalf("active = %q", loaded.LLM.Active)
 	}
 }
 

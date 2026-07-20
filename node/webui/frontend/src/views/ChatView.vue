@@ -4,12 +4,13 @@ import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { connectStream } from "../sse/stream.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
-import SessionPanel from "../components/SessionPanel.vue";
+import AgentPanel from "../components/AgentPanel.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
+import ActivityPanel from "../components/ActivityPanel.vue";
 import {
   sessionStore,
-  persistSessionId,
-  ensureSession,
+  persistAgentId,
+  ensureAgent,
   beginSubmit,
   beginImplicitTurn,
   finishTurn,
@@ -90,7 +91,7 @@ import {
   syncChildAgentsFromApi,
 } from "../stores/remoteWorkers.js";
 import { runSlashCommand } from "../utils/commands.js";
-import { approvalItemDisplayName, sessionDisplayTitle, sessionRecordId } from "../utils/format.js";
+import { approvalItemDisplayName, agentDisplayTitle, agentRecordId } from "../utils/format.js";
 
 const router = useRouter();
 const route = useRoute();
@@ -98,7 +99,7 @@ const route = useRoute();
 const hitlSelected = ref(0);
 const cancelling = ref(false);
 const streamHandle = ref(null);
-const sessionPanelRef = ref(null);
+const agentPanelRef = ref(null);
 const chatPanelRef = ref(null);
 
 const entries = computed(() => transcriptStore.entries);
@@ -121,11 +122,10 @@ const PANEL_SETTINGS_ROUTES = {
   status: "/settings/general",
 };
 
-function syncRouteSession(sessionId) {
-  const id = String(sessionId || "").trim();
-  if (!id) return;
-  if (route.params.sessionId === id) return;
-  router.replace({ name: "chat", params: { sessionId: id } });
+function syncRouteAgent(agentId) {
+  const id = String(agentId || "").trim();
+  if (route.params.agentId === id) return;
+  router.replace({ name: "agents", params: id ? { agentId: id } : {} });
 }
 
 function syncReasoningDisplay(llm) {
@@ -137,8 +137,12 @@ function syncReasoningDisplay(llm) {
 
 function restartStream() {
   streamHandle.value?.close();
+  if (!sessionStore.sessionId) {
+    streamHandle.value = null;
+    return;
+  }
   streamHandle.value = connectStream({
-    getSessionId: () => sessionStore.sessionId,
+    getAgentId: () => sessionStore.sessionId,
     onStatus: (s) => {
       chromeStore.sseStatus = s;
     },
@@ -146,7 +150,16 @@ function restartStream() {
   });
 }
 
-async function activateSessionStream() {
+async function activateAgentStream() {
+  if (!sessionStore.sessionId) {
+    clearTranscript();
+    clearHitl();
+    finishTurn();
+    streamHandle.value?.close();
+    streamHandle.value = null;
+    chromeStore.sseStatus = "idle";
+    return;
+  }
   const prev = sessionStore.sessionId;
   await hydrateSession();
   if (sessionStore.sessionId !== prev || !streamHandle.value) {
@@ -163,9 +176,9 @@ async function refreshAfterPageRestore() {
   resetRemoteWorkers();
   resetUsageStrip();
   resetEventTracking();
-  await activateSessionStream();
+  await activateAgentStream();
   refreshContextTokens();
-  sessionPanelRef.value?.refresh?.();
+  agentPanelRef.value?.refresh?.();
 }
 
 function onPageShow(event) {
@@ -176,19 +189,27 @@ function onPageShow(event) {
 
 async function refreshMeta() {
   try {
-    const [health, info, llm] = await Promise.all([api.getHealth(), api.getAgentInfo(), api.getLLMSettings()]);
-    chromeStore.agentInfo = { ...health, ...info };
-    chromeStore.llmSettings = llm;
-    syncReasoningDisplay(llm);
+    const boot = await api.getUIBootstrap();
+    chromeStore.agentInfo = { ...(boot.health || {}), ...(boot.info || {}) };
+    chromeStore.llmSettings = boot.llm || null;
+    syncReasoningDisplay(chromeStore.llmSettings);
   } catch (e) {
-    sessionStore.error = e.message;
+    // 回退到旧的并行请求（兼容旧 Node）
+    try {
+      const [health, info, llm] = await Promise.all([api.getHealth(), api.getAgentInfo(), api.getLLMSettings()]);
+      chromeStore.agentInfo = { ...health, ...info };
+      chromeStore.llmSettings = llm;
+      syncReasoningDisplay(llm);
+    } catch (e2) {
+      sessionStore.error = e2.message || e.message;
+    }
   }
 }
 
 async function refreshContextTokens() {
   if (!sessionStore.sessionId) return;
   try {
-    const ctx = await api.getSessionContext(sessionStore.sessionId);
+    const ctx = await api.getAgentContext(sessionStore.sessionId);
     chromeStore.contextTokens = Number(ctx.messages_total_tokens ?? -1);
   } catch {
     /* keep last */
@@ -437,7 +458,7 @@ async function onSendMessage(payload) {
     return;
   }
 
-  await activateSessionStream();
+  await activateAgentStream();
   clearHitl();
   addUser(text, images);
   beginSubmit();
@@ -467,7 +488,7 @@ async function handleCommand(cmd) {
     return;
   }
   if (res.action === "clear") {
-    await api.clearContext(await ensureSession());
+    await api.clearContext(await ensureAgent());
     await hydrateSession();
     restartStream();
     resetStatusLines();
@@ -478,21 +499,21 @@ async function handleCommand(cmd) {
     return;
   }
   if (res.action === "compress") {
-    const out = await api.compressContext(await ensureSession());
+    const out = await api.compressContext(await ensureAgent());
     addSystem(`压缩: ${out.status || "done"}`);
     refreshContextTokens();
     return;
   }
   if (res.action === "new") {
-    await createNewSession();
+    openCreateWizard();
     return;
   }
   if (res.action === "switch") {
     if (!res.arg) {
-      sessionStore.error = "用法: /switch <session_id>";
+      sessionStore.error = "用法: /switch <agent_id>";
       return;
     }
-    await switchSession(res.arg);
+    await switchAgent(res.arg);
     return;
   }
   if (res.action === "reasoning") {
@@ -543,9 +564,14 @@ async function handleUploadCommand(spec) {
   }
 }
 
-async function createNewSession() {
-  const created = await api.createSession("");
-  persistSessionId(created.session_id);
+async function openCreateWizard() {
+  agentPanelRef.value?.openWizard?.();
+}
+
+async function onAgentCreated(created) {
+  const id = agentRecordId(created);
+  if (!id) return;
+  persistAgentId(id);
   clearTranscript();
   resetUsageStrip();
   resetStatusLines();
@@ -553,16 +579,22 @@ async function createNewSession() {
   resetRemoteWorkers();
   resetEventTracking();
   clearHitl();
+  finishTurn();
   restartStream();
-  syncRouteSession(created.session_id);
+  syncRouteAgent(id);
   pulseDesktopFocus();
-  sessionPanelRef.value?.refresh?.();
+  agentPanelRef.value?.refresh?.();
+  try {
+    await hydrateSession();
+  } catch (e) {
+    sessionStore.error = e.message;
+  }
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
 }
 
-async function switchSession(id) {
-  persistSessionId(id);
+async function switchAgent(id) {
+  persistAgentId(id);
   resetStatusLines();
   resetToolStream();
   resetRemoteWorkers();
@@ -580,27 +612,27 @@ async function switchSession(id) {
   restartStream();
   refreshContextTokens();
   await syncChildAgentsFromApi();
-  syncRouteSession(id);
+  syncRouteAgent(id);
   pulseDesktopFocus();
-  sessionPanelRef.value?.refresh?.();
+  agentPanelRef.value?.refresh?.();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
 }
 
-async function deleteSessionById(payload) {
-  const sid = String(typeof payload === "string" ? payload : payload?.id || "").trim();
-  if (!sid) {
-    sessionStore.error = "无法删除：会话 ID 无效";
+async function deleteAgentById(payload) {
+  const aid = String(typeof payload === "string" ? payload : payload?.id || "").trim();
+  if (!aid) {
+    sessionStore.error = "无法删除：Agent ID 无效";
     return;
   }
-  const session = typeof payload === "object" && payload?.session ? payload.session : { session_id: sid };
-  const label = sessionDisplayTitle(session);
-  if (!window.confirm(`确定删除会话「${label}」？\n\n将停止该会话并清除持久化记录，不可恢复。`)) return;
-  const deletingCurrent = sessionStore.sessionId === sid;
+  const agent = typeof payload === "object" && payload?.agent ? payload.agent : { agent_id: aid };
+  const label = agentDisplayTitle(agent);
+  if (!window.confirm(`确定删除 Agent「${label}」？\n\n将停止该实例并归档记录，不可恢复。`)) return;
+  const deletingCurrent = sessionStore.sessionId === aid;
   sessionStore.error = "";
-  sessionPanelRef.value?.setDeleting?.(sid);
+  agentPanelRef.value?.setDeleting?.(aid);
   try {
-    await api.deleteSession(sid);
+    await api.deleteAgent(aid);
     streamHandle.value?.close();
     streamHandle.value = null;
 
@@ -613,25 +645,26 @@ async function deleteSessionById(payload) {
       resetToolStream();
       resetRemoteWorkers();
       resetEventTracking();
-      persistSessionId("");
+      persistAgentId("");
 
-      const res = await api.listSessions();
-      const remaining = (res.sessions || res.items || []).filter((row) => sessionRecordId(row) !== sid);
+      const res = await api.listAgents();
+      const remaining = (res.agents || []).filter((row) => agentRecordId(row) !== aid);
       if (remaining.length > 0) {
-        await switchSession(sessionRecordId(remaining[0]));
+        await switchAgent(agentRecordId(remaining[0]));
       } else {
-        await createNewSession();
+        syncRouteAgent("");
+        chromeStore.sseStatus = "idle";
       }
     } else {
-      await sessionPanelRef.value?.refresh?.();
+      await agentPanelRef.value?.refresh?.();
     }
   } catch (e) {
     sessionStore.error = e.message;
-    if (deletingCurrent && sessionStore.sessionId === sid) {
-      await activateSessionStream();
+    if (deletingCurrent && sessionStore.sessionId === aid) {
+      await activateAgentStream();
     }
   } finally {
-    sessionPanelRef.value?.setDeleting?.("");
+    agentPanelRef.value?.setDeleting?.("");
   }
 }
 
@@ -663,6 +696,24 @@ async function cycleThinkingEffort() {
   }
 }
 
+async function switchLLMProfile(id) {
+  const profileId = String(id || "").trim();
+  if (!profileId) return;
+  if (profileId === chromeStore.llmSettings?.active_profile) return;
+  sessionStore.error = "";
+  try {
+    chromeStore.llmSettings = await api.patchLLMSettings({ active_profile: profileId });
+    syncReasoningDisplay(chromeStore.llmSettings);
+    try {
+      chromeStore.agentInfo = await api.getAgentInfo();
+    } catch {
+      /* agent info refresh best-effort */
+    }
+  } catch (e) {
+    sessionStore.error = e.message;
+  }
+}
+
 async function handleThinkingCommand(arg) {
   const parts = String(arg || "").trim().split(/\s+/);
   const patch = {};
@@ -684,8 +735,12 @@ async function handleThinkingCommand(arg) {
 async function openPanel(name, arg) {
   const settingsPath = PANEL_SETTINGS_ROUTES[name];
   if (settingsPath) {
-    await ensureSession();
+    if (!sessionStore.sessionId) {
+      sessionStore.error = "请先创建或选择一个 Agent";
+      return;
+    }
     try {
+      await ensureAgent();
       if (name === "skills") {
         if (arg?.startsWith("load ")) {
           await api.loadSkill(sessionStore.sessionId, arg.slice(5).trim());
@@ -699,12 +754,20 @@ async function openPanel(name, arg) {
     }
     return;
   }
-  if (name === "sessions") {
-    sessionPanelRef.value?.refresh?.();
+  if (name === "agents" || name === "sessions") {
+    agentPanelRef.value?.refresh?.();
     return;
   }
-  await ensureSession();
+  if (name === "activity" || name === "changes" || name === "children") {
+    chromeStore.panel = name === "changes" ? "activity" : name;
+    return;
+  }
+  if (!sessionStore.sessionId) {
+    sessionStore.error = "请先创建或选择一个 Agent";
+    return;
+  }
   try {
+    await ensureAgent();
     chromeStore.panel = name;
   } catch (e) {
     sessionStore.error = e.message;
@@ -728,15 +791,21 @@ function consumeComposerDraft() {
 }
 
 
-async function bootstrapSessionFromRoute() {
-  const fromRoute = String(route.params.sessionId || "").trim();
+async function bootstrapAgentFromRoute() {
+  const fromRoute = String(route.params.agentId || "").trim();
   if (fromRoute) {
-    persistSessionId(fromRoute);
+    persistAgentId(fromRoute);
     return;
   }
   consumeStartupURL();
   if (sessionStore.sessionId) {
-    syncRouteSession(sessionStore.sessionId);
+    // 校验持久化 id 是否仍存在
+    try {
+      await api.getAgent(sessionStore.sessionId);
+      syncRouteAgent(sessionStore.sessionId);
+    } catch {
+      persistAgentId("");
+    }
   }
 }
 
@@ -769,9 +838,9 @@ function onKeydown(e) {
 }
 
 onMounted(async () => {
-  await bootstrapSessionFromRoute();
+  await bootstrapAgentFromRoute();
   await refreshMeta();
-  await activateSessionStream();
+  await activateAgentStream();
   refreshContextTokens();
   consumeComposerDraft();
   startDesktopFocusHeartbeat(() => sessionStore.sessionId);
@@ -781,18 +850,25 @@ onMounted(async () => {
 
 onActivated(() => {
   if (sessionStore.sessionId && !streamHandle.value) {
-    void activateSessionStream();
+    void activateAgentStream();
   }
   consumeComposerDraft();
   startDesktopFocusHeartbeat(() => sessionStore.sessionId);
 });
 
 watch(
-  () => route.params.sessionId,
+  () => route.params.agentId,
   async (id, prev) => {
-    const sid = String(id || "").trim();
-    if (!sid || sid === sessionStore.sessionId || sid === prev) return;
-    await switchSession(sid);
+    const aid = String(id || "").trim();
+    if (!aid) {
+      if (sessionStore.sessionId) {
+        // 允许停留在 /agents 空态
+        return;
+      }
+      return;
+    }
+    if (aid === sessionStore.sessionId || aid === prev) return;
+    await switchAgent(aid);
   },
 );
 
@@ -807,13 +883,22 @@ onUnmounted(() => {
 <template>
   <div class="app__body app__body--chat-v61">
     <aside class="app__col app__col--sessions">
-      <SessionPanel ref="sessionPanelRef" @switch="switchSession" @new="createNewSession" @delete="deleteSessionById" />
+      <AgentPanel
+        ref="agentPanelRef"
+        @switch="switchAgent"
+        @created="onAgentCreated"
+        @delete="deleteAgentById"
+      />
     </aside>
 
     <div class="app__main-col">
       <div v-if="sessionStore.error" class="chat-error-banner">{{ sessionStore.error }}</div>
+      <div v-if="!sessionStore.sessionId" class="chat-empty-agent">
+        <p>选择左侧 Agent，或点击 + 从模板新建。</p>
+      </div>
 
       <MainChatPanel
+        v-else
         ref="chatPanelRef"
         :entries="entries"
         :hitl-queue="hitlStore.queue"
@@ -830,6 +915,7 @@ onUnmounted(() => {
         @cancel="cancelTurn"
         @toggle-thinking="toggleThinkingMode"
         @cycle-effort="cycleThinkingEffort"
+        @switch-profile="switchLLMProfile"
         @approve-all="(idx) => submitHitlApproval(true, idx)"
         @reject-all="(idx) => submitHitlApproval(false, idx)"
         @approve-one="(payload) => submitHitlOne(payload, true)"
@@ -840,6 +926,7 @@ onUnmounted(() => {
 
       <div v-if="chromeStore.panel" class="panel-overlay" @click.self="closePanel">
         <ChildrenPanel v-if="chromeStore.panel === 'children'" @close="closePanel" />
+        <ActivityPanel v-else-if="chromeStore.panel === 'activity'" @close="closePanel" />
       </div>
     </div>
   </div>

@@ -183,7 +183,7 @@ func (a *Applier) downloadPackage(ctx context.Context, status sharedupdate.Statu
 		URL:            downloadURL,
 		DestPath:       pkgPath,
 		ExpectedSHA256: expectedSHA,
-		AgentID:        a.cfg.AgentID,
+		AgentID:        a.cfg.NodeID,
 		NodeToken:      a.cfg.Manage.NodeToken,
 		Client:         a.httpClient,
 	}); err != nil {

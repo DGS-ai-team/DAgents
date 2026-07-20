@@ -124,7 +124,7 @@ func downloadPackage(ctx context.Context, cfg *config.Config, status *update.Sta
 	if err != nil {
 		return err
 	}
-	if id := strings.TrimSpace(cfg.AgentID); id != "" {
+	if id := strings.TrimSpace(cfg.NodeID); id != "" {
 		req.Header.Set(agentIDHeader, id)
 	}
 	if token := strings.TrimSpace(cfg.Manage.NodeToken); token != "" {

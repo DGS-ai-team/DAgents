@@ -33,6 +33,15 @@ export function getAgentInfo() {
   return apiFetch("/v1/agent/info");
 }
 
+/** 聚合 health + agent/info + llm/settings（Chat 首屏）。 */
+export function getUIBootstrap() {
+  return apiFetch("/v1/ui/bootstrap");
+}
+
+export function getWorkspaceActivity(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/workspace-activity`);
+}
+
 export function getAgentUpdate() {
   return apiFetch("/v1/agent/update");
 }
@@ -53,90 +62,123 @@ export function patchSetupConfig(patch) {
   return apiFetch("/v1/setup/config", { method: "PATCH", body: patch });
 }
 
-export function createSession(sessionId) {
-  const body = {};
-  if (sessionId) body.session_id = sessionId;
-  return apiFetch("/v1/sessions", { method: "POST", body });
+export function listAgentTemplates() {
+  return apiFetch("/v1/agent-templates");
 }
 
-export function listSessions() {
-  return apiFetch("/v1/sessions");
+export function getAgentTemplate(templateId) {
+  return apiFetch(`/v1/agent-templates/${encodeURIComponent(templateId)}`);
 }
 
-export function deleteSession(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+export function createAgent({ templateId, displayName, sandbox } = {}) {
+  const body = { template_id: templateId };
+  if (displayName) body.display_name = displayName;
+  if (sandbox && typeof sandbox === "object") body.sandbox = sandbox;
+  return apiFetch("/v1/agents", { method: "POST", body });
 }
 
-export function clearContext(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/clear-context`, { method: "POST", body: {} });
+export function listAgents() {
+  return apiFetch("/v1/agents");
 }
 
-export function compressContext(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/compress`, { method: "POST", body: {} });
+export function getAgent(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`);
 }
 
-export function getSessionContext(sessionId, { fullMessages = false } = {}) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/context`, {
+export function patchAgent(agentId, patch) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body: patch });
+}
+
+export function deleteAgent(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
+}
+
+export function ensureAgentRuntime(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/ensure`, { method: "POST", body: {} });
+}
+
+export function getAgentHydrate(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/hydrate`);
+}
+
+export function getAgentContext(agentId, { fullMessages = false } = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/context`, {
     params: fullMessages ? { full_messages: "1" } : {},
   });
 }
 
-export function getSessionHydrate(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/hydrate`);
+export function cancelAgentTurn(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/cancel`, { method: "POST", body: {} });
 }
 
-export function postSessionAck(sessionId, sseSeq) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/ack`, {
+export function clearContext(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/clear-context`, { method: "POST", body: {} });
+}
+
+export function compressContext(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/compress`, { method: "POST", body: {} });
+}
+
+export function getSessionContext(agentId, { fullMessages = false } = {}) {
+  return getAgentContext(agentId, { fullMessages });
+}
+
+export function getSessionHydrate(agentId) {
+  return getAgentHydrate(agentId);
+}
+
+export function postSessionAck(agentId, sseSeq) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/ack`, {
     method: "POST",
     body: { sse_seq: sseSeq },
   });
 }
 
-export function submitMessage(sessionId, content, contentParts = null) {
-  const body = { session_id: sessionId, request_type: "message", content: content || "" };
+export function submitMessage(agentId, content, contentParts = null) {
+  const body = { agent_id: agentId, request_type: "message", content: content || "" };
   if (Array.isArray(contentParts) && contentParts.length) {
     body.content_parts = contentParts;
   }
   return apiFetch("/v1/messages", { method: "POST", body });
 }
 
-export function submitResume(sessionId, resumeValue) {
+export function submitResume(agentId, resumeValue) {
   return apiFetch("/v1/messages", {
     method: "POST",
-    body: { session_id: sessionId, request_type: "resume", resume_value: resumeValue },
+    body: { agent_id: agentId, request_type: "resume", resume_value: resumeValue },
   });
 }
 
-export function cancelTurn(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, { method: "POST", body: {} });
+export function cancelTurn(agentId) {
+  return cancelAgentTurn(agentId);
 }
 
-export function listSkills(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/skills`);
+export function listSkills(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/skills`);
 }
 
-export function loadSkill(sessionId, skillName) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/skills/load`, {
+export function loadSkill(agentId, skillName) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/skills/load`, {
     method: "POST",
     body: { skill_name: skillName },
   });
 }
 
-export function unloadSkill(sessionId, skillName) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/skills/unload`, {
+export function unloadSkill(agentId, skillName) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/skills/unload`, {
     method: "POST",
     body: { skill_name: skillName },
   });
 }
 
-export function listChildAgents(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/child-agents`);
+export function listChildAgents(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/child-agents`);
 }
 
-export function cancelChildAgent(sessionId, childSessionId, reason = "") {
+export function cancelChildAgent(agentId, childSessionId, reason = "") {
   const body = reason ? { reason } : {};
   return apiFetch(
-    `/v1/sessions/${encodeURIComponent(sessionId)}/child-agents/${encodeURIComponent(childSessionId)}/cancel`,
+    `/v1/agents/${encodeURIComponent(agentId)}/child-agents/${encodeURIComponent(childSessionId)}/cancel`,
     { method: "POST", body },
   );
 }

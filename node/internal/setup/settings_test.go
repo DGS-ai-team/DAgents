@@ -9,7 +9,7 @@ import (
 func testBaseConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
-		AgentID: "setup-test",
+		NodeID: "setup-test",
 		FSRoot:  t.TempDir(),
 	}
 	cfg.ApplyDefaults()
@@ -31,6 +31,43 @@ func TestViewFromConfig(t *testing.T) {
 	}
 }
 
+func TestApplyPatch_llmProfiles(t *testing.T) {
+	cfg := testBaseConfig(t)
+	updated, err := ApplyPatch(cfg, SettingsPatch{
+		LLM: &LLMSettings{
+			Active:       "qwen",
+			MaxToolLoops: 20,
+			Profiles: []LLMProfileSettings{
+				{ID: "default", Provider: "deepseek", Model: "deepseek-chat", APIKeyEnv: "OPENAI_API_KEY", MultimodalEnabled: false},
+				{ID: "qwen", Provider: "qwen", Model: "qwen-plus", APIKeyEnv: "QWEN_API_KEY", MultimodalEnabled: true},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LLM.Active != "qwen" || updated.LLM.Provider != "qwen" || updated.LLM.Model != "qwen-plus" {
+		t.Fatalf("llm = %+v", updated.LLM)
+	}
+	if !updated.MultimodalEnabled() {
+		t.Fatal("expected multimodal enabled from active profile")
+	}
+	view := ViewFromConfig(updated)
+	if view.LLM.Active != "qwen" || len(view.LLM.Profiles) != 2 {
+		t.Fatalf("view llm = %+v", view.LLM)
+	}
+	var qwen *LLMProfileSettings
+	for i := range view.LLM.Profiles {
+		if view.LLM.Profiles[i].ID == "qwen" {
+			qwen = &view.LLM.Profiles[i]
+			break
+		}
+	}
+	if qwen == nil || !qwen.MultimodalEnabled {
+		t.Fatalf("qwen profile view = %+v", qwen)
+	}
+}
+
 func TestApplyPatch_llmAndFeatures(t *testing.T) {
 	cfg := testBaseConfig(t)
 	updated, err := ApplyPatch(cfg, SettingsPatch{
@@ -41,8 +78,8 @@ func TestApplyPatch_llmAndFeatures(t *testing.T) {
 			Mock:      true,
 		},
 		Features: &FeatureSettings{
-			SkillsEnabled:   false,
-			BrowserEnabled:  true,
+			SkillsEnabled:     false,
+			BrowserEnabled:    true,
 			MultimodalEnabled: true,
 		},
 	})
@@ -116,5 +153,34 @@ func TestApplyPatch_compressionBlockingLessThanSilent(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected blocking < silent error")
+	}
+}
+
+func TestApplyPatch_injectTodayDateHook(t *testing.T) {
+	cfg := testBaseConfig(t)
+	if !cfg.InjectTodayDateHookEnabled() {
+		t.Fatal("expected default enabled")
+	}
+	view := ViewFromConfig(cfg)
+	if !view.Hooks.InjectTodayDateEnabled {
+		t.Fatal("view should show enabled")
+	}
+	updated, err := ApplyPatch(cfg, SettingsPatch{
+		Hooks: &HooksSettings{
+			DuplicateToolCallEnabled:       true,
+			DuplicateToolCallWindowSeconds: 60,
+			ToolResultEnabled:              true,
+			ToolResultSpillThresholdTokens: 12000,
+			InjectTodayDateEnabled:         false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.InjectTodayDateHookEnabled() {
+		t.Fatal("expected disabled after patch")
+	}
+	if ViewFromConfig(updated).Hooks.InjectTodayDateEnabled {
+		t.Fatal("view should show disabled")
 	}
 }

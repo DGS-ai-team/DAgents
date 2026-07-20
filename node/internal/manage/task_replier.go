@@ -54,7 +54,7 @@ func (r *taskReplier) doJSON(ctx context.Context, method, url string, body any) 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(agentIDHeader, r.cfg.AgentID)
+	req.Header.Set(agentIDHeader, r.cfg.NodeID)
 	if token := strings.TrimSpace(r.cfg.Manage.NodeToken); token != "" {
 		req.Header.Set(tokenHeader, token)
 	}
@@ -63,7 +63,7 @@ func (r *taskReplier) doJSON(ctx context.Context, method, url string, body any) 
 
 func (r *taskReplier) ack(ctx context.Context, taskID string) error {
 	resp, err := r.doJSON(ctx, http.MethodPost, r.manageURL("/v1/a2a/tasks/"+taskID+"/ack"), map[string]string{
-		"agent_id": r.cfg.AgentID,
+		"agent_id": r.cfg.NodeID,
 	})
 	if err != nil {
 		return err
@@ -77,7 +77,7 @@ func (r *taskReplier) ack(ctx context.Context, taskID string) error {
 
 func (r *taskReplier) reply(ctx context.Context, task InboxTask, status, resultText, calleeSessionID, errorDetail string) error {
 	body := map[string]string{
-		"agent_id":          r.cfg.AgentID,
+		"agent_id":          r.cfg.NodeID,
 		"status":            status,
 		"result_text":       resultText,
 		"callee_session_id": calleeSessionID,
@@ -100,7 +100,7 @@ func (r *taskReplier) replyRequiresInput(ctx context.Context, task InboxTask, re
 
 func (r *taskReplier) pollCallerInput(ctx context.Context, taskID string, wait time.Duration) (map[string]any, error) {
 	q := url.Values{}
-	q.Set("agent_id", r.cfg.AgentID)
+	q.Set("agent_id", r.cfg.NodeID)
 	if wait > 0 {
 		q.Set("wait", fmt.Sprintf("%.0f", wait.Seconds()))
 	}

@@ -2,11 +2,28 @@ import { reactive } from "vue";
 import { transcriptStore, noteSeq } from "./transcript.js";
 import * as api from "../api/node.js";
 
-const SESSION_KEY = "dagents_webui_session_id";
+const AGENT_KEY = "dagents_webui_agent_id";
+const LEGACY_SESSION_KEY = "dagents_webui_session_id";
 
 let pendingAckSeq = 0;
 let lastAckedSeq = 0;
 let ackInFlight = false;
+
+function loadPersistedAgentId() {
+  try {
+    const cur = localStorage.getItem(AGENT_KEY);
+    if (cur) return cur;
+    const legacy = localStorage.getItem(LEGACY_SESSION_KEY);
+    if (legacy) {
+      localStorage.setItem(AGENT_KEY, legacy);
+      localStorage.removeItem(LEGACY_SESSION_KEY);
+      return legacy;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
 
 function resetAckScheduler() {
   pendingAckSeq = 0;
@@ -53,12 +70,12 @@ function requestAck(seq) {
 }
 
 async function flushAck() {
-  const sessionId = sessionStore.sessionId?.trim();
+  const agentId = sessionStore.sessionId?.trim();
   const sseSeq = pendingAckSeq;
-  if (!sessionId || sseSeq <= 0 || sseSeq <= lastAckedSeq || ackInFlight) return;
+  if (!agentId || sseSeq <= 0 || sseSeq <= lastAckedSeq || ackInFlight) return;
   ackInFlight = true;
   try {
-    await api.postSessionAck(sessionId, sseSeq);
+    await api.postSessionAck(agentId, sseSeq);
     lastAckedSeq = sseSeq;
   } catch {
     /* ignore transient ack failures; later events will reschedule */
@@ -69,7 +86,8 @@ async function flushAck() {
 }
 
 export const sessionStore = reactive({
-  sessionId: localStorage.getItem(SESSION_KEY) || "",
+  /** 当前激活的 Agent 实例 id（1 Agent = 1 主对话；字段名保留兼容既有组件）。 */
+  sessionId: loadPersistedAgentId(),
   awaitingTurn: false,
   turnContentSeen: false,
   seqFence: 0,
@@ -77,27 +95,43 @@ export const sessionStore = reactive({
   error: "",
 });
 
-export function persistSessionId(id) {
+export function persistAgentId(id) {
   sessionStore.sessionId = id || "";
-  if (id) localStorage.setItem(SESSION_KEY, id);
-  else localStorage.removeItem(SESSION_KEY);
+  try {
+    if (id) {
+      localStorage.setItem(AGENT_KEY, id);
+      localStorage.removeItem(LEGACY_SESSION_KEY);
+    } else {
+      localStorage.removeItem(AGENT_KEY);
+      localStorage.removeItem(LEGACY_SESSION_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
-/** 恢复或创建 session，并在 Node 内存中激活 consumer（重启 Node 后须 POST /v1/sessions 恢复）。 */
-export async function ensureSession() {
+/** @deprecated 使用 persistAgentId */
+export function persistSessionId(id) {
+  persistAgentId(id);
+}
+
+/**
+ * 激活已有 Agent：ensure runtime（按快照 CreateWithOptions）。
+ * 无选中 Agent 时不自动新建（走模板向导）。
+ */
+export async function ensureAgent() {
   const existing = sessionStore.sessionId?.trim() || "";
-  if (existing) {
-    try {
-      const res = await api.createSession(existing);
-      persistSessionId(res.session_id);
-      return res.session_id;
-    } catch {
-      persistSessionId("");
-    }
+  if (!existing) {
+    throw new Error("请先创建或选择一个 Agent");
   }
-  const res = await api.createSession("");
-  persistSessionId(res.session_id);
-  return res.session_id;
+  await api.ensureAgentRuntime(existing);
+  persistAgentId(existing);
+  return existing;
+}
+
+/** @deprecated 使用 ensureAgent */
+export async function ensureSession() {
+  return ensureAgent();
 }
 
 export function beginSubmit() {

@@ -8,30 +8,39 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// RuntimeSettings 为可热更新的 LLM 运行时参数（model、DeepSeek thinking 等）。
+// RuntimeSettings 为可热更新的 LLM 运行时参数（连接 + model + thinking 等）。
 type RuntimeSettings struct {
 	mu sync.RWMutex
 
 	AgentID         string
+	ActiveProfile   string
+	profileIDs      []string
 	Provider        string
+	BaseURL         string
+	APIKeyEnv       string
 	Model           string
 	Mock            bool
+	MultimodalEnabled bool
 	Thinking        string
 	ReasoningEffort string
 }
 
 // LLMSettingsView 为 GET /v1/llm/settings 与 agent/info 嵌套字段。
 type LLMSettingsView struct {
-	Provider          string `json:"provider"`
-	Model             string `json:"model"`
-	Mock              bool   `json:"mock"`
-	ThinkingSupported bool   `json:"thinking_supported"`
-	Thinking          string `json:"thinking,omitempty"`
-	ReasoningEffort   string `json:"reasoning_effort,omitempty"`
+	ActiveProfile     string   `json:"active_profile,omitempty"`
+	Profiles          []string `json:"profiles,omitempty"`
+	Provider          string   `json:"provider"`
+	Model             string   `json:"model"`
+	Mock              bool     `json:"mock"`
+	MultimodalEnabled bool     `json:"multimodal_enabled"`
+	ThinkingSupported bool     `json:"thinking_supported"`
+	Thinking          string   `json:"thinking,omitempty"`
+	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`
 }
 
 // LLMSettingsPatch 为 PATCH /v1/llm/settings 请求体（字段均可选）。
 type LLMSettingsPatch struct {
+	ActiveProfile   *string `json:"active_profile"`
 	Thinking        *string `json:"thinking"`
 	ReasoningEffort *string `json:"reasoning_effort"`
 }
@@ -39,16 +48,26 @@ type LLMSettingsPatch struct {
 // NewRuntimeSettings 从配置初始化运行时 LLM 参数。
 func NewRuntimeSettings(cfg *config.Config) *RuntimeSettings {
 	if cfg == nil {
-		return &RuntimeSettings{Provider: string(ProviderOpenAI), Thinking: "enabled", ReasoningEffort: "high"}
+		return &RuntimeSettings{
+			Provider:        string(ProviderOpenAI),
+			APIKeyEnv:       "OPENAI_API_KEY",
+			Thinking:        "enabled",
+			ReasoningEffort: "high",
+		}
 	}
 	thinking, effort := NormalizeThinkingSettings(cfg.LLM.Provider, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
 	return &RuntimeSettings{
-		AgentID:         strings.TrimSpace(cfg.AgentID),
-		Provider:        strings.TrimSpace(cfg.LLM.Provider),
-		Model:           strings.TrimSpace(cfg.LLM.Model),
-		Mock:            cfg.LLM.Mock,
-		Thinking:        thinking,
-		ReasoningEffort: effort,
+		AgentID:           strings.TrimSpace(cfg.NodeID),
+		ActiveProfile:     cfg.LLM.ActiveProfileID(),
+		profileIDs:        cfg.LLM.ProfileIDs(),
+		Provider:          strings.TrimSpace(cfg.LLM.Provider),
+		BaseURL:           strings.TrimSpace(cfg.LLM.BaseURL),
+		APIKeyEnv:         strings.TrimSpace(cfg.LLM.APIKeyEnv),
+		Model:             strings.TrimSpace(cfg.LLM.Model),
+		Mock:              cfg.LLM.Mock,
+		MultimodalEnabled: cfg.MultimodalEnabled(),
+		Thinking:          thinking,
+		ReasoningEffort:   effort,
 	}
 }
 
@@ -64,9 +83,12 @@ func (s *RuntimeSettings) Snapshot() LLMSettingsView {
 
 func (s *RuntimeSettings) snapshotLocked() LLMSettingsView {
 	view := LLMSettingsView{
+		ActiveProfile:     s.ActiveProfile,
+		Profiles:          append([]string(nil), s.profileIDs...),
 		Provider:          s.Provider,
 		Model:             s.Model,
 		Mock:              s.Mock,
+		MultimodalEnabled: s.MultimodalEnabled,
 		ThinkingSupported: ThinkingSupported(s.Provider),
 	}
 	if view.ThinkingSupported {
@@ -76,6 +98,20 @@ func (s *RuntimeSettings) snapshotLocked() LLMSettingsView {
 		}
 	}
 	return view
+}
+
+// Connection 返回当前连接参数（线程安全）。
+func (s *RuntimeSettings) Connection() (provider, baseURL, keyEnv string, mock bool) {
+	if s == nil {
+		return string(ProviderOpenAI), "", "OPENAI_API_KEY", false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	keyEnv = strings.TrimSpace(s.APIKeyEnv)
+	if keyEnv == "" {
+		keyEnv = "OPENAI_API_KEY"
+	}
+	return s.Provider, s.BaseURL, keyEnv, s.Mock
 }
 
 // Model 返回当前模型名（线程安全）。
@@ -108,13 +144,22 @@ func (s *RuntimeSettings) RequestExtra() map[string]any {
 	return extra
 }
 
-// ApplyPatch 热更新 thinking / reasoning_effort。
+// ApplyPatch 热更新 active_profile / thinking / reasoning_effort。
+// active_profile 仅更新运行时视图字段名提示；实际切档案需经 setup 写盘 + SyncFromConfig，
+// 或由 Server 在 PATCH 中先 SetActiveLLMProfile 再 SyncFromConfig。
 func (s *RuntimeSettings) ApplyPatch(patch LLMSettingsPatch) (LLMSettingsView, error) {
 	if s == nil {
 		return LLMSettingsView{}, fmt.Errorf("llm settings unavailable")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if patch.ActiveProfile != nil {
+		id := strings.TrimSpace(*patch.ActiveProfile)
+		if id == "" {
+			return s.snapshotLocked(), fmt.Errorf("active_profile is required")
+		}
+		s.ActiveProfile = id
+	}
 	if !ThinkingSupported(s.Provider) {
 		if patch.Thinking != nil || patch.ReasoningEffort != nil {
 			return s.snapshotLocked(), fmt.Errorf("thinking controls require llm.provider=deepseek, qwen, or openai")
@@ -141,16 +186,21 @@ func (s *RuntimeSettings) ApplyPatch(patch LLMSettingsPatch) (LLMSettingsView, e
 	return s.snapshotLocked(), nil
 }
 
-// SyncFromConfig 将 config.yaml 中的 LLM 连接字段同步到运行时（保存设置后调用）。
+// SyncFromConfig 将 config.yaml 中的 LLM 连接字段同步到运行时（保存设置 / 切换档案后调用）。
 func (s *RuntimeSettings) SyncFromConfig(cfg *config.Config) {
 	if s == nil || cfg == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ActiveProfile = cfg.LLM.ActiveProfileID()
+	s.profileIDs = cfg.LLM.ProfileIDs()
 	s.Provider = strings.TrimSpace(cfg.LLM.Provider)
+	s.BaseURL = strings.TrimSpace(cfg.LLM.BaseURL)
+	s.APIKeyEnv = strings.TrimSpace(cfg.LLM.APIKeyEnv)
 	s.Model = strings.TrimSpace(cfg.LLM.Model)
 	s.Mock = cfg.LLM.Mock
+	s.MultimodalEnabled = cfg.MultimodalEnabled()
 	thinking, effort := NormalizeThinkingSettings(s.Provider, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
 	s.Thinking = thinking
 	s.ReasoningEffort = effort

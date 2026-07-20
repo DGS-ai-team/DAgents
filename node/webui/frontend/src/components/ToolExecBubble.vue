@@ -1,19 +1,27 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { formatToolCallLine, formatToolResultDisplay, formatToolElapsed } from "../utils/format.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import { statusStore } from "../stores/statusLines.js";
 import { isReadFileTool } from "../utils/readFilePreview.js";
-import { parseToolArguments, toolDisplayName, resolveToolArgumentsFromData } from "../utils/toolCalls.js";
+import { toolDisplayName, resolveToolArgumentsFromData } from "../utils/toolCalls.js";
 import { toolStepUserSummary } from "../utils/toolUserLabel.js";
 import ReadFileResultPreview from "./ReadFileResultPreview.vue";
 import ImageResultPreview from "./ImageResultPreview.vue";
 import { hasToolMedia, isShowImageTool } from "../utils/showImage.js";
 
+const FOLD_LINE_THRESHOLD = 8;
+const FOLD_CHAR_THRESHOLD = 480;
+const PREVIEW_LINES = 4;
+
 const props = defineProps({
   entry: { type: Object, required: true },
   verbose: { type: Boolean, default: false },
+  /** 嵌在 ToolSummaryRow 内时隐藏重复标题/徽章 */
+  embedded: { type: Boolean, default: false },
 });
+
+const outputExpanded = ref(false);
 
 const isCall = computed(() => props.entry.kind === "tool_call");
 const isResult = computed(() => props.entry.kind === "tool_result");
@@ -33,7 +41,6 @@ const toolTitle = computed(() => {
   if (userSummary) return userSummary;
   return toolDisplayName(toolName.value || "tool", toolArgs.value);
 });
-const displayName = computed(() => toolTitle.value);
 const resultDetail = computed(() => resultDisplay.value?.detail || "");
 const codePreview = computed(() => props.entry.codePreview || "");
 const readFilePath = computed(() => {
@@ -50,6 +57,42 @@ const showImagePreview = computed(
     !props.verbose &&
     (hasToolMedia(props.entry) || isShowImageTool(toolName.value)),
 );
+
+const isShellOutput = computed(() => toolName.value === "bash_run" || visual.value.kind === "shell");
+const outputText = computed(() => {
+  if (isResult.value && resultDetail.value) return resultDetail.value;
+  if (isCall.value && codePreview.value) return codePreview.value;
+  return "";
+});
+const outputLines = computed(() => {
+  const t = outputText.value;
+  if (!t) return [];
+  return t.split(/\r?\n/);
+});
+const shouldFoldOutput = computed(() => {
+  if (props.verbose) return false;
+  if (!outputText.value) return false;
+  if (showReadFilePreview.value || showImagePreview.value) return false;
+  const lines = outputLines.value.length;
+  return lines > FOLD_LINE_THRESHOLD || outputText.value.length > FOLD_CHAR_THRESHOLD;
+});
+const previewText = computed(() => {
+  const lines = outputLines.value;
+  if (lines.length <= PREVIEW_LINES) return outputText.value;
+  return `${lines.slice(0, PREVIEW_LINES).join("\n")}\n…`;
+});
+const foldMeta = computed(() => {
+  const n = outputLines.value.length;
+  return n > 1 ? `${n} 行` : `${outputText.value.length} 字符`;
+});
+
+watch(
+  () => props.entry?.id ?? props.entry?.blockId ?? outputText.value.slice(0, 40),
+  () => {
+    outputExpanded.value = false;
+  },
+);
+
 const elapsedLive = computed(() => {
   void statusStore.tick;
   if (!isCall.value || !props.entry.partial || !props.entry.startedAt) return "";
@@ -66,40 +109,71 @@ const statusText = computed(() => {
   if (rejected.value) return "已拒绝";
   return "已完成";
 });
+
+function toggleOutput() {
+  outputExpanded.value = !outputExpanded.value;
+}
 </script>
 
 <template>
-  <div class="msg msg--tool-centered">
+  <div class="msg msg--tool-centered" :class="{ 'msg--tool-embedded': embedded }">
     <div class="msg__body msg__body--wide">
-      <div class="tool-exec-bubble" :class="[`tool-exec-bubble--${visual.kind}`, { 'tool-exec-bubble--applied': entry.sideEffectApplied, 'tool-exec-bubble--stale': entry.sideEffectStale && !entry.sideEffectApplied }]">
-        <div class="tool-exec-bubble__source">
-          <span class="tool-source-badge" :class="`tool-source-badge--${visual.kind}`" :title="visual.label">
-            <span class="tool-source-badge__icon" aria-hidden="true">{{ visual.icon }}</span>
-            <span class="tool-source-badge__text">{{ visual.label }}</span>
-          </span>
-        </div>
-        <div class="tool-exec-bubble__head">
-          <span class="tool-exec-bubble__name">{{ displayName }}</span>
-          <span class="tool-exec-bubble__status">
-            <span v-if="isCall && entry.partial" class="tool-exec-spinner" aria-hidden="true" />
-            <span v-else class="tool-exec-status-icon tool-exec-status-icon--success" aria-hidden="true">{{ rejected || interrupted ? "−" : "✓" }}</span>
-            <span>{{ statusText }}</span>
-          </span>
-        </div>
-        <div v-if="isCall" class="tool-exec-bubble__summary">{{ formatToolCallLine(entry) }}</div>
+      <div
+        class="tool-exec-bubble"
+        :class="[
+          `tool-exec-bubble--${visual.kind}`,
+          {
+            'tool-exec-bubble--applied': entry.sideEffectApplied,
+            'tool-exec-bubble--stale': entry.sideEffectStale && !entry.sideEffectApplied,
+            'tool-exec-bubble--embedded': embedded,
+            'tool-exec-bubble--shell-out': isShellOutput,
+          },
+        ]"
+      >
+        <template v-if="!embedded">
+          <div class="tool-exec-bubble__source">
+            <span class="tool-source-badge" :class="`tool-source-badge--${visual.kind}`" :title="visual.label">
+              <span class="tool-source-badge__icon" aria-hidden="true">{{ visual.icon }}</span>
+              <span class="tool-source-badge__text">{{ visual.label }}</span>
+            </span>
+          </div>
+          <div class="tool-exec-bubble__head">
+            <span class="tool-exec-bubble__name">{{ toolTitle }}</span>
+            <span class="tool-exec-bubble__status">
+              <span v-if="isCall && entry.partial" class="tool-exec-spinner" aria-hidden="true" />
+              <span v-else class="tool-exec-status-icon tool-exec-status-icon--success" aria-hidden="true">{{
+                rejected || interrupted ? "−" : "✓"
+              }}</span>
+              <span>{{ statusText }}</span>
+            </span>
+          </div>
+          <div v-if="isCall" class="tool-exec-bubble__summary">{{ formatToolCallLine(entry) }}</div>
+        </template>
+
         <ReadFileResultPreview
           v-if="showReadFilePreview"
           :path="readFilePath"
           :content="resultDetail"
         />
         <ImageResultPreview v-else-if="showImagePreview" :entry="entry" />
-        <pre
-          v-else-if="isResult && resultDetail && !verbose"
-          class="tool-exec-bubble__code tool-exec-bubble__result-detail"
-        >{{ resultDetail }}</pre>
-        <pre v-if="isCall && codePreview && !verbose" class="tool-exec-bubble__code">{{ codePreview }}</pre>
-        <details v-if="verbose" class="tool-exec-bubble__details">
-          <summary>查看详情</summary>
+
+        <div v-else-if="outputText && !verbose" class="tool-output">
+          <pre
+            class="tool-exec-bubble__code tool-exec-bubble__result-detail"
+            :class="{ 'tool-output__pre--shell': isShellOutput }"
+          >{{ shouldFoldOutput && !outputExpanded ? previewText : outputText }}</pre>
+          <button
+            v-if="shouldFoldOutput"
+            type="button"
+            class="tool-output__toggle"
+            @click="toggleOutput"
+          >
+            {{ outputExpanded ? "收起输出" : `展开输出（${foldMeta}）` }}
+          </button>
+        </div>
+
+        <details v-if="verbose" class="tool-exec-bubble__details" open>
+          <summary>原始输出</summary>
           <div class="tool-exec-bubble__details-body">
             <pre class="tool-card__args tool-card__args--compact">{{
               entry.data?.content || entry.data?.raw_arguments || entry.data?.output || JSON.stringify(entry.data, null, 2)
@@ -118,9 +192,29 @@ const statusText = computed(() => {
 .tool-exec-bubble--stale {
   opacity: 0.55;
 }
-.tool-exec-bubble__result-detail {
-  margin-top: 4px;
-  white-space: pre-wrap;
-  word-break: break-word;
+.tool-exec-bubble--embedded {
+  padding: 6px 0 0;
+  gap: 6px;
+}
+.tool-output {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.tool-output__toggle {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 11.5px;
+  padding: 0;
+  cursor: pointer;
+}
+.tool-output__toggle:hover {
+  text-decoration: underline;
+}
+.tool-output__pre--shell {
+  max-height: none;
 }
 </style>

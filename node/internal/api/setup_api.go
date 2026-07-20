@@ -51,6 +51,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	if s.llmRuntime != nil {
 		s.llmRuntime.SyncFromConfig(s.cfg)
 	}
+	s.applyMultimodalRuntime(s.cfg.MultimodalEnabled())
 	view := setup.ViewFromConfig(s.cfg)
 	view.ConfigPath = s.configPath
 	view.ConfigWritable = true

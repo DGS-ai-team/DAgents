@@ -12,9 +12,13 @@ export async function runSlashCommand(cmd, ctx) {
       return { panel: "update" };
     case "/update":
       return { panel: "update" };
+    case "/agents":
     case "/sessions":
     case "/ls":
-      return { panel: "sessions" };
+      return { panel: "agents" };
+    case "/activity":
+    case "/changes":
+      return { panel: "activity" };
     case "/context":
       return { panel: "context" };
     case "/skill":

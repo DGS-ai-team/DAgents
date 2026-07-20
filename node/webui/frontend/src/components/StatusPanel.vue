@@ -58,8 +58,8 @@ onMounted(load);
       <template v-else-if="data">
         <div class="command-panel__stats">
           <div class="command-stat">
-            <span class="command-stat__label">Agent</span>
-            <span class="command-stat__value">{{ data.agent?.agent_id || data.health?.agent_id || "—" }}</span>
+            <span class="command-stat__label">Node</span>
+            <span class="command-stat__value">{{ data.agent?.node_id || data.health?.node_id || "—" }}</span>
           </div>
           <div class="command-stat">
             <span class="command-stat__label">Version</span>

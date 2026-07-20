@@ -16,81 +16,35 @@ set "NODE_PID_FILE=%DAGENTS_HOME%\.runtime\node.pid"
 set "SHELL_PID_FILE=%DAGENTS_HOME%\.runtime\shell.pid"
 set "BROWSER_PID_FILE=%DAGENTS_HOME%\.runtime\browser.pid"
 
-if "%~1"=="" goto cli_default_chat
+if "%~1"=="" goto default_start_node
 if /I "%~1"=="help" goto help
 if /I "%~1"=="--help" goto help
 if /I "%~1"=="-h" goto help
 goto dispatch
 
-:cli_default_chat
-if not exist "bin\dagents-cli.exe" goto missing_cli
-bin\dagents-cli.exe chat --config "%CFG%"
+:default_start_node
+call :start_node_default
+set "EXIT_CODE=!ERRORLEVEL!"
 goto cli_exit
 
 :dispatch
-if /I "%~1"=="chat" shift & goto run_cli_chat
-if /I "%~1"=="tui" shift & goto run_client_tui
+if /I "%~1"=="chat" shift & goto tui_removed
+if /I "%~1"=="tui" shift & goto tui_removed
 if /I "%~1"=="node" shift & goto run_node
 if /I "%~1"=="browser" shift & goto run_browser
 if /I "%~1"=="shell" shift & goto run_shell
 if /I "%~1"=="doctor" goto doctor
 if /I "%~1"=="version" shift & goto version_cmd
 if /I "%~1"=="update" shift & goto update_cmd
-goto run_cli_pass
-
-:run_cli_chat
-if not exist "bin\dagents-cli.exe" goto missing_cli
-set "WITHNODE=0"
-set "CLI_EXTRA="
-:parse_cli_next
-if "%~1"=="" goto run_cli_exec
-if /I "%~1"=="--withnode" (
-  set "WITHNODE=1"
-  shift
-  goto parse_cli_next
-)
-set "CLI_EXTRA=!CLI_EXTRA! %1"
-shift
-goto parse_cli_next
-:run_cli_exec
-if "!WITHNODE!"=="1" (
-  call :ensure_node
-  if errorlevel 1 (
-    set "EXIT_CODE=1"
-    goto cli_exit
-  )
-)
-bin\dagents-cli.exe chat --config "%CFG%" !CLI_EXTRA!
+echo [dagents] unknown command: %~1
+echo [dagents] run `dagents help` for usage
+set "EXIT_CODE=2"
 goto cli_exit
 
-:run_cli_pass
-if not exist "bin\dagents-cli.exe" goto missing_cli
-bin\dagents-cli.exe %*
-goto cli_exit
-
-:run_client_tui
-if not exist "bin\dagents-client.exe" goto missing_client
-set "WITHNODE=0"
-set "TUI_EXTRA="
-:parse_tui_next
-if "%~1"=="" goto run_tui_exec
-if /I "%~1"=="--withnode" (
-  set "WITHNODE=1"
-  shift
-  goto parse_tui_next
-)
-set "TUI_EXTRA=!TUI_EXTRA! %1"
-shift
-goto parse_tui_next
-:run_tui_exec
-if "!WITHNODE!"=="1" (
-  call :ensure_node
-  if errorlevel 1 (
-    set "EXIT_CODE=1"
-    goto cli_exit
-  )
-)
-bin\dagents-client.exe -config "%CFG%" tui !TUI_EXTRA!
+:tui_removed
+echo [dagents] chat/tui removed in Phase 4. Start the node and open Web UI:
+call :print_webui_url
+set "EXIT_CODE=1"
 goto cli_exit
 
 :run_node
@@ -605,7 +559,8 @@ if exist "%DAGENTS_HOME%\.runtime\logs\node.log" (
 exit /b 1
 
 :missing_cli
-echo [dagents] bin\dagents-cli.exe was not found in "%DAGENTS_HOME%"
+echo [dagents] dagents-cli was removed in Phase 4; use Web UI instead
+call :print_webui_url
 popd >nul
 exit /b 1
 
@@ -637,11 +592,12 @@ exit /b %EXIT_CODE%
 :doctor
 echo DAgents installation: %DAGENTS_HOME%
 set "OK=1"
-for %%F in (bin\dagents-node.exe bin\dagents-client.exe bin\dagents-cli.exe bin\dagents-browser.exe bin\dagents-shell.exe) do (
+for %%F in (bin\dagents-node.exe bin\dagents-client.exe bin\dagents-browser.exe bin\dagents-shell.exe) do (
   if exist "%%F" (echo [ok] %%F) else (
     if "%%F"=="bin\dagents-browser.exe" (echo [optional] %%F) else if "%%F"=="bin\dagents-shell.exe" (echo [optional] %%F) else (echo [missing] %%F & set "OK=0")
   )
 )
+if exist "bin\dagents-cli.exe" (echo [optional] bin\dagents-cli.exe ^(removed in Phase 4^)) else (echo [info] bin\dagents-cli.exe not present ^(removed in Phase 4^))
 if exist "config.yaml" (echo [ok] config.yaml) else (echo [info] config.yaml not found; copy config.example.yaml config.yaml)
 if exist ".runtime" (echo [ok] .runtime) else (echo [missing] .runtime)
 if "%OK%"=="1" (popd >nul & exit /b 0)
@@ -749,9 +705,6 @@ set "APP_VER=unknown"
 if exist "VERSION" (
   set /p APP_VER=<VERSION
 )
-if /I "!APP_VER!"=="unknown" if exist "bin\dagents-cli.exe" (
-  for /f "tokens=2" %%V in ('bin\dagents-cli.exe version 2^>nul') do set "APP_VER=%%V"
-)
 echo DAgents Local Assistant !APP_VER!
 if exist "bin\dagents-node.exe" (
   for /f "delims=" %%V in ('bin\dagents-node.exe version 2^>nul') do echo   dagents-node: %%V
@@ -759,16 +712,12 @@ if exist "bin\dagents-node.exe" (
 if exist "bin\dagents-client.exe" (
   for /f "delims=" %%V in ('bin\dagents-client.exe version 2^>nul') do echo   dagents-client: %%V
 )
-if exist "bin\dagents-cli.exe" (
-  for /f "tokens=2" %%V in ('bin\dagents-cli.exe version 2^>nul') do echo   dagents-cli: %%V
-)
 popd >nul
 exit /b 0
 
 :help
 echo Usage:
-echo   dagents chat [--withnode]       Textual TUI (Python; rich UI)
-echo   dagents tui [--withnode] [--plain]  Go bubbletea TUI (default full-screen; --plain for line REPL)
+echo   dagents                         Start Agent Node in background (default; waits until ready)
 echo   dagents node                    Start Agent Node in background (default; waits until ready)
 echo   dagents node shutdown           Stop background Node
 echo   dagents node restart            Stop then start Node in background
@@ -787,8 +736,9 @@ echo   dagents version --check         Check for updates (via Manage Release Hub
 echo   dagents update [--check]        Download and apply latest release
 echo   dagents update --force          Apply without confirmation prompt
 echo.
-echo Web UI (browser Client, embedded in dagents-node):
-echo   After dagents node, open http://127.0.0.1:^<listen.port^>/ui/ (default 18765).
+echo Web UI (browser client, embedded in dagents-node):
+echo   After `dagents` or `dagents node`, open http://127.0.0.1:^<listen.port^>/ui/ (default 18765).
+echo   chat/tui terminal clients were removed in Phase 4; use Web UI instead.
 echo   Disable with ui.enabled: false in config.yaml. No separate UI package required.
 echo.
 echo Background node survives closing this terminal (detached via Start-Process).
@@ -797,7 +747,6 @@ echo   For boot persistence Shell registers login autostart via the Windows inst
 echo   Legacy: scripts\windows\install_node_service.cmd (admin) for Node-only service.
 echo.
 echo Options:
-echo   --withnode     Probe Node first; start it in background if not running, then launch client
 echo   --foreground   Run Node in foreground (blocks terminal)
 echo   --no-wait      Background start without waiting for probe (--background alias)
 echo.

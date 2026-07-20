@@ -9,13 +9,20 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["toggle-thinking", "cycle-effort"]);
+const emit = defineEmits(["toggle-thinking", "cycle-effort", "switch-profile"]);
 
 const thinkingEnabled = computed(() => {
   const t = String(props.llmSettings?.thinking || "").toLowerCase();
   return !["disabled", "off"].includes(t);
 });
 const effort = computed(() => String(props.llmSettings?.reasoning_effort || "high").toLowerCase());
+
+const profiles = computed(() => {
+  const list = props.llmSettings?.profiles;
+  return Array.isArray(list) ? list : [];
+});
+const activeProfile = computed(() => String(props.llmSettings?.active_profile || "").trim());
+const showProfileSwitch = computed(() => profiles.value.length > 1);
 
 const prefillingActive = computed(() => {
   void statusStore.tick;
@@ -25,12 +32,35 @@ const thinkingActive = computed(() => {
   void statusStore.tick;
   return hasStatus("thinking") && !hasStreamingKind("reasoning");
 });
+
+function onProfileChange(event) {
+  const id = event?.target?.value;
+  if (id) emit("switch-profile", id);
+}
 </script>
 
 <template>
   <div class="composer-toolbar">
     <span v-if="prefillingActive" class="composer-toolbar__pulse composer-toolbar__pulse--prefill" title="prefilling" />
     <span v-if="thinkingActive" class="composer-toolbar__pulse composer-toolbar__pulse--think" title="thinking" />
+    <label v-if="showProfileSwitch" class="composer-toolbar__profile">
+      <select
+        class="composer-toolbar__select"
+        :value="activeProfile"
+        :disabled="disabled"
+        :title="`${llmSettings?.provider || ''} / ${llmSettings?.model || ''}`"
+        @change="onProfileChange"
+      >
+        <option v-for="id in profiles" :key="id" :value="id">{{ id }}</option>
+      </select>
+    </label>
+    <span
+      v-else
+      class="composer-toolbar__model"
+      :title="`${llmSettings?.provider || ''} / ${llmSettings?.model || activeProfile || 'model'}`"
+    >
+      {{ llmSettings?.model || activeProfile || "Auto" }}
+    </span>
     <button
       v-if="thinkingSupported"
       type="button"
@@ -40,7 +70,6 @@ const thinkingActive = computed(() => {
       :disabled="disabled"
       @click="emit('toggle-thinking')"
     >
-      <span class="composer-toolbar__icon" aria-hidden="true">◔</span>
       <span class="composer-toolbar__label">{{ thinkingEnabled ? "思考" : "思考关" }}</span>
     </button>
     <button
@@ -51,7 +80,6 @@ const thinkingActive = computed(() => {
       :disabled="disabled"
       @click="emit('cycle-effort')"
     >
-      <span class="composer-toolbar__icon" aria-hidden="true">⤒</span>
       <span class="composer-toolbar__label">{{ effort }}</span>
     </button>
   </div>

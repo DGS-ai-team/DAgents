@@ -127,7 +127,7 @@ func encodeRequiresInputPayload(cfg *config.Config, task InboxTask, calleeSessio
 
 func calleeAgentMeta(cfg *config.Config) (id, name string) {
 	if cfg != nil {
-		id = strings.TrimSpace(cfg.AgentID)
+		id = strings.TrimSpace(cfg.NodeID)
 		name = cfg.AgentDisplayName()
 	}
 	if name == "" {

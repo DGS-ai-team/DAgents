@@ -5,16 +5,17 @@ import {
   applyHydrateSeqHint,
   applyHydrateTurnState,
   ackSessionAfterHydrate,
-  ensureSession,
+  ensureAgent,
   finishTurn,
+  persistAgentId,
   sessionStore,
 } from "./session.js";
 import { loadTranscriptFromHydrate } from "./transcript.js";
 
-/** ensureSession → GET /hydrate → 灌 transcript + pending HITL + SSE 水位（F-H7/H8/H9/H17, F-X6）。 */
+/** ensureAgent → GET /v1/agents/{id}/hydrate → 灌 transcript + pending HITL + SSE 水位。 */
 export async function hydrateSession() {
-  const sessionId = await ensureSession();
-  const data = await api.getSessionHydrate(sessionId);
+  const agentId = await ensureAgent();
+  const data = await api.getAgentHydrate(agentId);
   loadTranscriptFromHydrate(data?.transcript);
   clearHitl();
   const { approval } = enqueueHitlRequired(data?.pending_hitl);
@@ -36,17 +37,12 @@ export async function hydrateSession() {
   return data;
 }
 
-/** 解析 Shell 深链 ?session=（F-U3）。 */
+/** 解析深链 ?agent= 或旧 ?session=。 */
 export function consumeStartupURL() {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams(window.location.search);
-  const session = params.get("session")?.trim();
-  if (session) {
-    sessionStore.sessionId = session;
-    try {
-      localStorage.setItem("dagents_webui_session_id", session);
-    } catch {
-      /* ignore */
-    }
+  const agent = params.get("agent")?.trim() || params.get("session")?.trim();
+  if (agent) {
+    persistAgentId(agent);
   }
 }

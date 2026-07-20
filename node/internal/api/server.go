@@ -44,8 +44,9 @@ type Server struct {
 	llmRuntime    *llm.RuntimeSettings
 	logger        *slog.Logger
 	mux           *http.ServeMux
-	sessions      *session.Manager // per-session 队列与 turn consumer
-	stream        *stream.Hub      // 进程内 SSE 事件总线
+	sessions      *session.Manager // per-session 队列与 turn consumer（过渡期与 agent_id 1:1）
+	agents        *store.AgentStore
+	stream        *stream.Hub // 进程内 SSE 事件总线
 	store         *store.SQLiteStore
 	triggerStore  *triggers.Store
 	triggerSched  *triggers.Scheduler
@@ -177,11 +178,21 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			st = opened
 		}
 	}
+	var agentsStore *store.AgentStore
+	if !o.skipStore {
+		opened, err := store.OpenAgents(cfg.AgentsDBPath())
+		if err != nil {
+			logger.Error("agents store init failed", "error", err, "path", cfg.AgentsDBPath())
+		} else {
+			agentsStore = opened
+		}
+	}
 
 	hub := stream.NewHub(256, logger)
 	hostsnapshot.CaptureAtStartup()
+	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
-	mgr := session.NewManager(cfg.AgentID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
+	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
 		FSRoot:                   cfg.FSRoot,
 		MaxToolLoops:             cfg.LLM.MaxToolLoops,
 		SkillsRoot:               cfg.SkillsRoot(),
@@ -205,6 +216,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			Tools:                cfg.ToolResultHookTools(),
 			FSRoot:               cfg.FSRoot,
 		},
+		InjectTodayDate: hooks.InjectTodayDateConfig{Enabled: &injectTodayDateEnabled},
 		PluginHooks: hooks.PluginsConfigFromShared(cfg.Hooks, cfg.RuntimeDir()),
 		HookHost: turn.HookHostConfig{
 			MaxLLMCalls:   cfg.HooksHostMaxLLMCalls(),
@@ -222,7 +234,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		MaxMaxTurns:               cfg.ChildAgents.MaxMaxTurns,
 		MaxActivePerParent:        cfg.ChildAgents.MaxActivePerParent,
 		DefaultWaitTimeoutSeconds: cfg.ChildAgents.DefaultWaitTimeoutSeconds,
-	}, hub, cfg.AgentID, logger)
+	}, hub, cfg.NodeID, logger)
 	mgr.SetChildAgentManager(childMgr)
 	if cfg.IdleAutoCompressEnabled() {
 		mgr.StartIdleAutoCompressScanner()
@@ -239,7 +251,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerSched.SetSessionResolver(mgr)
 		mgr.SetTriggerDeliveryTracker(triggerStore)
 		if o.tools != nil {
-			o.tools.SetTriggerRuntime(triggerStore, triggerSched, cfg.AgentID)
+			o.tools.SetTriggerRuntime(triggerStore, triggerSched, cfg.NodeID)
 		}
 		if cfg.Triggers.Enabled && triggerSched != nil {
 			triggerSched.Start()
@@ -300,11 +312,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			updateChecker = manage.NewUpdateChecker(cfg, logger)
 		}
 		packageUploader = manage.NewPackageUploader(cfg, logger)
-		a2aBridge = session.NewA2ACallerHITLBridge(cfg.AgentID, hub)
+		a2aBridge = session.NewA2ACallerHITLBridge(cfg.NodeID, hub)
 		if o.tools != nil {
 			o.tools.SetManageRuntime(
 				a2aclient.New(cfg),
-				cfg.AgentID,
+				cfg.NodeID,
 				a2aBridge,
 			)
 		}
@@ -323,6 +335,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		mux:           http.NewServeMux(),
 		stream:        hub,
 		store:         st,
+		agents:        agentsStore,
 		sessions:      mgr,
 		triggerStore:  triggerStore,
 		triggerSched:  triggerSched,
@@ -340,6 +353,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
+	s.registerAgentRoutes()
+	s.registerUIAggregateRoutes()
 	s.mux.HandleFunc("POST /v1/sessions", s.handleCreateSession)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleListSessions)
 	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", s.handleDeleteSession)
@@ -402,7 +417,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		s.updateChecker.Start(regCtx)
 	}
 	go func() {
-		s.logger.Info("agent node listening", "addr", addr, "agent_id", s.cfg.AgentID)
+		s.logger.Info("agent node listening", "addr", addr, "agent_id", s.cfg.NodeID)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		} else {
@@ -430,6 +445,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.store != nil {
 			_ = s.store.Close()
 		}
+		if s.agents != nil {
+			_ = s.agents.Close()
+		}
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}
@@ -444,7 +462,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 type healthResponse struct {
 	Status  string `json:"status"`
-	AgentID string `json:"agent_id"`
+	NodeID  string `json:"node_id"`
 	Version string `json:"version"`
 }
 
@@ -452,13 +470,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	// 探活：Client 启动前与运维脚本使用；无鉴权。
 	writeJSON(w, http.StatusOK, healthResponse{
 		Status:  "ok",
-		AgentID: s.cfg.AgentID,
+		NodeID:  s.cfg.NodeID,
 		Version: version.Version,
 	})
 }
 
 type agentInfoResponse struct {
-	AgentID           string              `json:"agent_id"`
+	NodeID            string              `json:"node_id"`
 	ExposeToPeers     bool                `json:"expose_to_peers"`
 	Capabilities      []string            `json:"capabilities"`
 	MultimodalEnabled bool                `json:"multimodal_enabled"`
@@ -487,7 +505,7 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 		comp.BlockingTriggerTokens = s.cfg.Compression.BlockingTriggerTokens
 	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
-		AgentID:           s.cfg.AgentID,
+		NodeID:            s.cfg.NodeID,
 		ExposeToPeers:     s.cfg.ExposeToPeersEffective(),
 		Capabilities:      s.cfg.Capabilities(),
 		MultimodalEnabled: s.cfg.MultimodalEnabled(),
@@ -946,31 +964,58 @@ func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
 }
 
 type postMessageRequest struct {
-	SessionID       string           `json:"session_id"`
-	RequestType     string           `json:"request_type"`
-	Content         string           `json:"content"`
+	SessionID       string            `json:"session_id"`
+	AgentID         string            `json:"agent_id"`
+	RequestType     string            `json:"request_type"`
+	Content         string            `json:"content"`
 	ContentParts    []llm.ContentPart `json:"content_parts,omitempty"`
-	UserMessageName string           `json:"user_message_name,omitempty"`
-	ResumeValue     map[string]any   `json:"resume_value"`
+	UserMessageName string            `json:"user_message_name,omitempty"`
+	ResumeValue     map[string]any    `json:"resume_value"`
 }
 
 type postMessageResponse struct {
 	Accepted  bool   `json:"accepted"`
 	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id,omitempty"`
 	Priority  string `json:"priority"`
+}
+
+func resolveConversationID(sessionID, agentID string) (string, error) {
+	sid := strings.TrimSpace(sessionID)
+	aid := strings.TrimSpace(agentID)
+	if sid != "" && aid != "" && sid != aid {
+		return "", fmt.Errorf("session_id and agent_id differ")
+	}
+	if sid != "" {
+		return sid, nil
+	}
+	if aid != "" {
+		return aid, nil
+	}
+	return "", fmt.Errorf("session_id or agent_id is required")
 }
 
 func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// POST /v1/messages：message 入队 human 优先级；resume 用于 HITL 续跑。
+	// Phase 2：接受 agent_id 作为 session_id 别名（1 Agent = 1 对话）。
 	var req postMessageRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	sessionID := strings.TrimSpace(req.SessionID)
-	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+	sessionID, err := resolveConversationID(req.SessionID, req.AgentID)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_session", err.Error(), nil)
 		return
+	}
+	// 若该 id 是 Agent 实例，先按快照装入 runtime（避免重启后落到默认沙箱配置）。
+	if s.agents != nil {
+		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
+			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": sessionID})
+				return
+			}
+		}
 	}
 	requestType := strings.TrimSpace(req.RequestType)
 	if requestType == "" {
@@ -980,6 +1025,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, postMessageResponse{
 			Accepted:  true,
 			SessionID: sessionID,
+			AgentID:   sessionID,
 			Priority:  string(queue.PriorityHuman),
 		})
 		return
@@ -987,10 +1033,9 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 
 	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.ResumeValue, req.UserMessageName)
 	if err != nil {
-		// 业务错误映射为 HTTP 状态 + 统一 error 体（见 errors.go）。
 		switch err.Error() {
 		case "session_not_found":
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "session_not_found", "session/agent 不存在", map[string]any{"session_id": sessionID, "agent_id": sessionID})
 		case "invalid_message":
 			writeAPIError(w, http.StatusBadRequest, "invalid_message", "content 不能为空", nil)
 		case "multimodal_disabled":
@@ -1007,6 +1052,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, postMessageResponse{
 		Accepted:  true,
 		SessionID: sessionID,
+		AgentID:   sessionID,
 		Priority:  priority,
 	})
 }
@@ -1035,7 +1081,7 @@ func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
-	// GET /v1/streams：SSE 长连接；Client 用 session_id 查询参数在本地过滤事件。
+	// GET /v1/streams：SSE 长连接；Client 用 session_id 或 agent_id 查询参数过滤事件。
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "streaming not supported", nil)
@@ -1043,6 +1089,9 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionFilter := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionFilter == "" {
+		sessionFilter = strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	}
 	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
 	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"
 	// live=1：TUI 重连时只收增量，避免 replay 历史 done 干扰 wait_user_turn。

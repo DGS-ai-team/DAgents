@@ -24,22 +24,22 @@ func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string
 }
 
 func TestLoadFile_appliesDefaults(t *testing.T) {
-	path, runtimeDir := testConfigPath(t, "agent_id: test-agent\n")
+	path, runtimeDir := testConfigPath(t, "node_id: test-agent\n")
 
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if cfg.AgentID != "test-agent" {
-		t.Fatalf("agent_id = %q, want test-agent", cfg.AgentID)
+	if cfg.NodeID != "test-agent" {
+		t.Fatalf("node_id = %q, want test-agent", cfg.NodeID)
 	}
-	idFile := filepath.Join(runtimeDir, "agent", "agent_id")
+	idFile := filepath.Join(runtimeDir, "node", "node_id")
 	raw, err := os.ReadFile(idFile)
 	if err != nil {
-		t.Fatalf("read agent_id file: %v", err)
+		t.Fatalf("read node_id file: %v", err)
 	}
 	if strings.TrimSpace(string(raw)) != "test-agent" {
-		t.Fatalf("agent_id file = %q, want test-agent", raw)
+		t.Fatalf("node_id file = %q, want test-agent", raw)
 	}
 	if cfg.Listen.Host != DefaultListenHost {
 		t.Fatalf("listen.host = %q, want %q", cfg.Listen.Host, DefaultListenHost)
@@ -71,29 +71,29 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadFile_autoGeneratesAgentID(t *testing.T) {
+func TestLoadFile_autoGeneratesNodeID(t *testing.T) {
 	path, runtimeDir := testConfigPath(t, "listen:\n  port: 8080\n")
 
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if strings.TrimSpace(cfg.AgentID) == "" {
-		t.Fatal("expected generated agent_id")
+	if strings.TrimSpace(cfg.NodeID) == "" {
+		t.Fatal("expected generated node_id")
 	}
-	idFile := filepath.Join(runtimeDir, "agent", "agent_id")
+	idFile := filepath.Join(runtimeDir, "node", "node_id")
 	raw, err := os.ReadFile(idFile)
 	if err != nil {
-		t.Fatalf("read agent_id file: %v", err)
+		t.Fatalf("read node_id file: %v", err)
 	}
-	if strings.TrimSpace(string(raw)) != cfg.AgentID {
-		t.Fatalf("file agent_id = %q, cfg = %q", raw, cfg.AgentID)
+	if strings.TrimSpace(string(raw)) != cfg.NodeID {
+		t.Fatalf("file node_id = %q, cfg = %q", raw, cfg.NodeID)
 	}
 }
 
-func TestLoadFile_readsAgentIDFromFile(t *testing.T) {
-	path, runtimeDir := testConfigPath(t, "agent_id: yaml-should-not-win\n")
-	idFile := filepath.Join(runtimeDir, "agent", "agent_id")
+func TestLoadFile_readsNodeIDFromFile(t *testing.T) {
+	path, runtimeDir := testConfigPath(t, "node_id: yaml-should-not-win\n")
+	idFile := filepath.Join(runtimeDir, "node", "node_id")
 	if err := os.MkdirAll(filepath.Dir(idFile), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -105,33 +105,33 @@ func TestLoadFile_readsAgentIDFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if cfg.AgentID != "from-file" {
-		t.Fatalf("agent_id = %q, want from-file", cfg.AgentID)
+	if cfg.NodeID != "from-file" {
+		t.Fatalf("node_id = %q, want from-file", cfg.NodeID)
 	}
 }
 
 func TestLoadFile_expandsEnv(t *testing.T) {
-	path, runtimeDir := testConfigPath(t, "agent_id: ${TEST_DAGENTS_AGENT_ID}\n")
+	path, runtimeDir := testConfigPath(t, "node_id: ${TEST_DAGENTS_AGENT_ID}\n")
 	t.Setenv("TEST_DAGENTS_AGENT_ID", "from-env")
 
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if cfg.AgentID != "from-env" {
-		t.Fatalf("agent_id = %q, want from-env", cfg.AgentID)
+	if cfg.NodeID != "from-env" {
+		t.Fatalf("node_id = %q, want from-env", cfg.NodeID)
 	}
-	raw, err := os.ReadFile(filepath.Join(runtimeDir, "agent", "agent_id"))
+	raw, err := os.ReadFile(filepath.Join(runtimeDir, "node", "node_id"))
 	if err != nil {
-		t.Fatalf("read agent_id file: %v", err)
+		t.Fatalf("read node_id file: %v", err)
 	}
 	if strings.TrimSpace(string(raw)) != "from-env" {
-		t.Fatalf("agent_id file = %q, want from-env", raw)
+		t.Fatalf("node_id file = %q, want from-env", raw)
 	}
 }
 
 func TestRawMessageHistoryEnabled_envOverridesYAML(t *testing.T) {
-	path, _ := testConfigPath(t, "agent_id: test-agent\nraw_message_history:\n  enabled: true\n")
+	path, _ := testConfigPath(t, "node_id: test-agent\nraw_message_history:\n  enabled: true\n")
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
@@ -143,7 +143,7 @@ func TestRawMessageHistoryEnabled_envOverridesYAML(t *testing.T) {
 }
 
 func TestRawMessageHistoryDir(t *testing.T) {
-	path, runtimeDir := testConfigPath(t, "agent_id: test-agent\n")
+	path, runtimeDir := testConfigPath(t, "node_id: test-agent\n")
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
@@ -154,27 +154,27 @@ func TestRawMessageHistoryDir(t *testing.T) {
 	}
 }
 
-func TestLoadFile_envAgentIDOverridesFile(t *testing.T) {
+func TestLoadFile_envNodeIDOverridesFile(t *testing.T) {
 	path, runtimeDir := testConfigPath(t, "")
-	idFile := filepath.Join(runtimeDir, "agent", "agent_id")
+	idFile := filepath.Join(runtimeDir, "node", "node_id")
 	if err := os.MkdirAll(filepath.Dir(idFile), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(idFile, []byte("old-id"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(EnvAgentID, "env-wins")
+	t.Setenv(EnvNodeID, "env-wins")
 
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if cfg.AgentID != "env-wins" {
-		t.Fatalf("agent_id = %q, want env-wins", cfg.AgentID)
+	if cfg.NodeID != "env-wins" {
+		t.Fatalf("node_id = %q, want env-wins", cfg.NodeID)
 	}
 	raw, _ := os.ReadFile(idFile)
 	if strings.TrimSpace(string(raw)) != "env-wins" {
-		t.Fatalf("agent_id file = %q, want env-wins", raw)
+		t.Fatalf("node_id file = %q, want env-wins", raw)
 	}
 }
 
@@ -235,7 +235,7 @@ func TestManageA2AConfigDefaults(t *testing.T) {
 }
 
 func TestMultimodalEnabled_defaultFalse(t *testing.T) {
-	path, _ := testConfigPath(t, "agent_id: test-agent\n")
+	path, _ := testConfigPath(t, "node_id: test-agent\n")
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
@@ -246,7 +246,7 @@ func TestMultimodalEnabled_defaultFalse(t *testing.T) {
 }
 
 func TestMultimodalEnabled_explicitTrue(t *testing.T) {
-	path, _ := testConfigPath(t, "agent_id: test-agent\nmultimodal:\n  enabled: true\n")
+	path, _ := testConfigPath(t, "node_id: test-agent\nmultimodal:\n  enabled: true\n")
 	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)

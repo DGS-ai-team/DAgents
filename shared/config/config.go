@@ -20,8 +20,10 @@ const (
 
 // Config 为 Node 与 Client 共享的配置根结构；Client 仅使用 local 等子集。
 type Config struct {
-	AgentID       string       `yaml:"agent_id"`
-	Agent         AgentConfig  `yaml:"agent"`
+	NodeID string `yaml:"node_id"`
+	// LegacyAgentID 仅用于读取旧 YAML 的 agent_id；加载后合并进 NodeID 并清空。
+	LegacyAgentID string      `yaml:"agent_id,omitempty"`
+	Agent         AgentConfig `yaml:"agent"`
 	Listen        ListenConfig `yaml:"listen"`
 	Local         LocalConfig  `yaml:"local"`
 	Groups        []string     `yaml:"groups"`
@@ -142,6 +144,7 @@ type HooksConfig struct {
 	Host              HookHostConfig              `yaml:"host"`
 	DuplicateToolCall DuplicateToolCallHookConfig `yaml:"duplicate_tool_call"`
 	ToolResult        ToolResultHookConfig        `yaml:"tool_result"`
+	InjectTodayDate   InjectTodayDateHookConfig   `yaml:"inject_today_date"`
 }
 
 // HookPluginConfig 为 in-process Go plugin（.so）配置。
@@ -182,6 +185,12 @@ type DuplicateToolCallHookConfig struct {
 	WindowSeconds int `yaml:"window_seconds"`
 }
 
+// InjectTodayDateHookConfig 控制 turn.before_step 注入「当天日期为：YYYYMMDD」human message。
+type InjectTodayDateHookConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled *bool `yaml:"enabled"`
+}
+
 const defaultDuplicateToolCallWindowSeconds = 60
 
 // HooksHostMaxLLMCalls 返回 turn 内 Hook LLM 调用配额（默认 2）。
@@ -214,6 +223,14 @@ func (c *Config) DuplicateToolCallWindowSeconds() int {
 		return defaultDuplicateToolCallWindowSeconds
 	}
 	return c.Hooks.DuplicateToolCall.WindowSeconds
+}
+
+// InjectTodayDateHookEnabled 是否启用当天日期注入 Hook。
+func (c *Config) InjectTodayDateHookEnabled() bool {
+	if c == nil || c.Hooks.InjectTodayDate.Enabled == nil {
+		return true
+	}
+	return *c.Hooks.InjectTodayDate.Enabled
 }
 
 const defaultToolResultSpillThresholdTokens = 12000
@@ -265,22 +282,42 @@ type ListenConfig struct {
 	Port int    `yaml:"port"`
 }
 
-// LocalConfig 描述 Client 连接本地 Node 的 endpoint；agent_id 可选，用于与 Node 响应交叉校验。
+// LocalConfig 描述 Client 连接本地 Node 的 endpoint；node_id 可选，用于与 Node 响应交叉校验。
 type LocalConfig struct {
 	Endpoint string `yaml:"endpoint"`
-	AgentID  string `yaml:"agent_id"`
+	NodeID   string `yaml:"node_id"`
+	// AgentID 为旧字段；加载时若 NodeID 为空则合并。
+	AgentID string `yaml:"agent_id,omitempty"`
 }
 
 // LLMConfig 为 turn loop 使用的模型配置。
+//
+// 兼容单配置：顶层 provider/base_url/model 等为「当前生效」快照。
+// 多配置：profiles 存命名档案，active 指向当前档案 id；切换时把档案字段复制到顶层快照。
 type LLMConfig struct {
-	Provider        string `yaml:"provider"`
-	BaseURL         string `yaml:"base_url"`
-	Model           string `yaml:"model"`
-	APIKeyEnv       string `yaml:"api_key_env"`
-	Mock            bool   `yaml:"mock"`
-	MaxToolLoops    int    `yaml:"max_tool_loops"`
-	Thinking        string `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
-	ReasoningEffort string `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
+	Active          string                     `yaml:"active,omitempty"`
+	Profiles        map[string]LLMProfileConfig `yaml:"profiles,omitempty"`
+	Provider        string                     `yaml:"provider"`
+	BaseURL         string                     `yaml:"base_url"`
+	Model           string                     `yaml:"model"`
+	APIKeyEnv       string                     `yaml:"api_key_env"`
+	Mock            bool                       `yaml:"mock"`
+	MaxToolLoops    int                        `yaml:"max_tool_loops"`
+	Thinking        string                     `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
+	ReasoningEffort string                     `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
+}
+
+// LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_tool_loops）。
+type LLMProfileConfig struct {
+	Provider           string `yaml:"provider"`
+	BaseURL            string `yaml:"base_url"`
+	Model              string `yaml:"model"`
+	APIKeyEnv          string `yaml:"api_key_env"`
+	Mock               bool   `yaml:"mock"`
+	Thinking           string `yaml:"thinking,omitempty"`
+	ReasoningEffort    string `yaml:"reasoning_effort,omitempty"`
+	// MultimodalEnabled 为 nil 时视为 false；切换档案时同步到顶层 multimodal.enabled。
+	MultimodalEnabled *bool `yaml:"multimodal_enabled,omitempty"`
 }
 
 // ManageConfig 控制是否向 Manage 注册；默认 enabled=false。
@@ -321,8 +358,8 @@ type ManageRegistrationConfig struct {
 // 逻辑：
 // 1. 读文件并 os.ExpandEnv；
 // 2. yaml.Unmarshal 到 Config；
-// 3. ApplyDefaults；
-// 4. ResolveAgentID（`.runtime/agent/agent_id` 持久化）；
+// 3. ApplyDefaults（合并遗留 agent_id → node_id）；
+// 4. ResolveNodeID（`.runtime/node/node_id` 持久化）；
 // 5. Validate 后返回。
 //
 // 异常：文件不存在、YAML 语法错误、校验失败均向上返回 error。
@@ -338,7 +375,7 @@ func LoadFile(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
 	cfg.ApplyDefaults()
-	if err := cfg.ResolveAgentID(); err != nil {
+	if err := cfg.ResolveNodeID(); err != nil {
 		return nil, err
 	}
 	if err := cfg.Validate(); err != nil {
@@ -351,6 +388,14 @@ func LoadFile(path string) (*Config, error) {
 //
 // 副作用：修改接收者字段。
 func (c *Config) ApplyDefaults() {
+	if strings.TrimSpace(c.NodeID) == "" {
+		c.NodeID = strings.TrimSpace(c.LegacyAgentID)
+	}
+	c.LegacyAgentID = ""
+	if strings.TrimSpace(c.Local.NodeID) == "" {
+		c.Local.NodeID = strings.TrimSpace(c.Local.AgentID)
+	}
+	c.Local.AgentID = ""
 	if strings.TrimSpace(c.Listen.Host) == "" {
 		c.Listen.Host = DefaultListenHost
 	}
@@ -369,6 +414,10 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.LLM.Provider) == "" {
 		c.LLM.Provider = "openai"
 	}
+	if strings.TrimSpace(c.LLM.APIKeyEnv) == "" {
+		c.LLM.APIKeyEnv = "OPENAI_API_KEY"
+	}
+	c.normalizeLLMProfiles()
 	if strings.TrimSpace(c.LLM.APIKeyEnv) == "" {
 		c.LLM.APIKeyEnv = "OPENAI_API_KEY"
 	}
@@ -460,8 +509,8 @@ func (c *Config) SkillsRoot() string {
 
 // Validate 校验 Node 启动所需的最小字段集。
 func (c *Config) Validate() error {
-	if strings.TrimSpace(c.AgentID) == "" {
-		return fmt.Errorf("agent_id is required")
+	if strings.TrimSpace(c.NodeID) == "" {
+		return fmt.Errorf("node_id is required")
 	}
 	if c.Listen.Port < 1 || c.Listen.Port > 65535 {
 		return fmt.Errorf("listen.port must be 1-65535, got %d", c.Listen.Port)
@@ -588,9 +637,25 @@ func (c *Config) MemoryDir() string {
 	return filepath.Join(c.RuntimeDir(), "memory")
 }
 
-// SessionDBPath 返回 SQLite 会话库路径（`<runtime>/memory/sessions.db`）。
+// SessionDBPath 返回旧版 SQLite 会话库路径（`<runtime>/memory/sessions.db`）。
+// Phase 2 起对话历史迁入 agents；过渡期消息路径仍可能使用本库。
 func (c *Config) SessionDBPath() string {
 	return filepath.Join(c.MemoryDir(), "sessions.db")
+}
+
+// AgentsDBPath 返回 Agent 实例元数据库路径（`<runtime>/agents.db`）。
+func (c *Config) AgentsDBPath() string {
+	return filepath.Join(c.RuntimeDir(), "agents.db")
+}
+
+// AgentsDir 返回 Agent 实例目录根（`<runtime>/agents`）。
+func (c *Config) AgentsDir() string {
+	return filepath.Join(c.RuntimeDir(), "agents")
+}
+
+// AgentTemplatesDir 返回用户自定义模板目录（`<runtime>/agent-templates`）。
+func (c *Config) AgentTemplatesDir() string {
+	return filepath.Join(c.RuntimeDir(), "agent-templates")
 }
 
 // RawMessageHistoryEnabled 返回是否写入原始消息 JSONL；环境变量优先于 YAML，默认 true。
