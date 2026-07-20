@@ -40,7 +40,12 @@ func testConfig(t *testing.T) *config.Config {
 // waitSessionIdle 轮询直到 session turn 结束，避免 t.TempDir() 清理时后台仍写 FSRoot。
 func waitSessionIdle(t *testing.T, baseURL, sessionID string) {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	waitSessionIdleDeadline(t, baseURL, sessionID, 3*time.Second)
+}
+
+func waitSessionIdleDeadline(t *testing.T, baseURL, sessionID string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
 	for {
 		resp, err := http.Get(baseURL + "/v1/sessions")
 		if err != nil {
