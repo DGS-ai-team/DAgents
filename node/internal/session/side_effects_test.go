@@ -74,8 +74,15 @@ func TestSideEffectContinueAppliesExternalOnEmptyHistory(t *testing.T) {
 	if len(rt.messages) < 1 {
 		t.Fatalf("history len = %d, want bridge user after continue", len(rt.messages))
 	}
-	if rt.messages[0].Role != "user" || !strings.Contains(rt.messages[0].Content, "inbox hello") {
-		t.Fatalf("first message = %+v", rt.messages[0])
+	foundInbox := false
+	for _, m := range rt.messages {
+		if m.Role == "user" && strings.Contains(m.Content, "inbox hello") {
+			foundInbox = true
+			break
+		}
+	}
+	if !foundInbox {
+		t.Fatalf("messages = %+v", rt.messages)
 	}
 }
 

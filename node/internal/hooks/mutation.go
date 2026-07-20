@@ -20,7 +20,14 @@ const (
 	MutationToolBeforeEach   = "tool_before_each"
 	MutationSessionStore     = "session_store"
 	MutationHistoryAppend    = "history_append"
+	MutationHistoryInsert    = "history_insert"
 )
+
+// HistoryInsertMutation 在 history 指定下标插入一条消息（不可改写已有条目）。
+type HistoryInsertMutation struct {
+	Index   int
+	Message llm.Message
+}
 
 func applyMutations(hc *Context, mutations map[string]any) error {
 	if hc == nil || len(mutations) == 0 {
@@ -103,6 +110,27 @@ func applyMutation(hc *Context, key string, val any) error {
 			return err
 		}
 		hc.History = append(hc.History, msg)
+		return nil
+	case MutationHistoryInsert:
+		ins, ok := val.(HistoryInsertMutation)
+		if !ok {
+			return fmt.Errorf("hooks: mutation %q expects HistoryInsertMutation", key)
+		}
+		if err := validateHistoryAppendMessage(ins.Message); err != nil {
+			return err
+		}
+		idx := ins.Index
+		if idx < 0 {
+			idx = 0
+		}
+		if idx > len(hc.History) {
+			idx = len(hc.History)
+		}
+		out := make([]llm.Message, 0, len(hc.History)+1)
+		out = append(out, hc.History[:idx]...)
+		out = append(out, ins.Message)
+		out = append(out, hc.History[idx:]...)
+		hc.History = out
 		return nil
 	default:
 		return fmt.Errorf("hooks: unknown mutation key %q", key)
