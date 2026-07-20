@@ -44,7 +44,6 @@ function onProfileChange(event) {
     <span v-if="prefillingActive" class="composer-toolbar__pulse composer-toolbar__pulse--prefill" title="prefilling" />
     <span v-if="thinkingActive" class="composer-toolbar__pulse composer-toolbar__pulse--think" title="thinking" />
     <label v-if="showProfileSwitch" class="composer-toolbar__profile">
-      <span class="composer-toolbar__label">模型</span>
       <select
         class="composer-toolbar__select"
         :value="activeProfile"
@@ -55,6 +54,13 @@ function onProfileChange(event) {
         <option v-for="id in profiles" :key="id" :value="id">{{ id }}</option>
       </select>
     </label>
+    <span
+      v-else
+      class="composer-toolbar__model"
+      :title="`${llmSettings?.provider || ''} / ${llmSettings?.model || activeProfile || 'model'}`"
+    >
+      {{ llmSettings?.model || activeProfile || "Auto" }}
+    </span>
     <button
       v-if="thinkingSupported"
       type="button"
@@ -64,7 +70,6 @@ function onProfileChange(event) {
       :disabled="disabled"
       @click="emit('toggle-thinking')"
     >
-      <span class="composer-toolbar__icon" aria-hidden="true">◔</span>
       <span class="composer-toolbar__label">{{ thinkingEnabled ? "思考" : "思考关" }}</span>
     </button>
     <button
@@ -75,7 +80,6 @@ function onProfileChange(event) {
       :disabled="disabled"
       @click="emit('cycle-effort')"
     >
-      <span class="composer-toolbar__icon" aria-hidden="true">⤒</span>
       <span class="composer-toolbar__label">{{ effort }}</span>
     </button>
   </div>

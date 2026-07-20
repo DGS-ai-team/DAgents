@@ -104,6 +104,18 @@ const canSubmit = computed(
   () => !props.disabled && !props.sending && (!!input.value.trim() || pendingImages.value.length > 0),
 );
 
+function resizeTextarea() {
+  const el = textareaRef.value;
+  if (!el) return;
+  el.style.height = "0px";
+  el.style.height = `${Math.min(Math.max(el.scrollHeight, 28), 160)}px`;
+}
+
+watch(input, async () => {
+  await nextTick();
+  resizeTextarea();
+});
+
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const maxImageBytes = 10 * 1024 * 1024;
 
@@ -373,115 +385,126 @@ defineExpose({
     </div>
 
     <footer class="chat__composer">
-      <div class="chat__composer-card">
-        <div class="chat__composer-meta">
-          <div class="chat__composer-meta-left">
-            <ComposerToolbar
-              class="chat__composer-toolbar"
-              :thinking-supported="thinkingSupported"
-              :llm-settings="llmSettings"
-              :disabled="disabled || cancelling"
-              @toggle-thinking="emit('toggle-thinking')"
-              @cycle-effort="emit('cycle-effort')"
-              @switch-profile="(id) => emit('switch-profile', id)"
-            />
-            <div class="composer-toolbar composer-toolbar--attach">
-              <input
-                v-if="multimodalEnabled"
-                ref="imageInputRef"
-                type="file"
-                accept="image/jpeg,image/png,image/gif,image/webp"
-                multiple
-                hidden
-                @change="onImageSelected"
-              />
-              <input
-                ref="attachInputRef"
-                type="file"
-                multiple
-                hidden
-                @change="onAttachmentSelected"
-              />
-              <button
-                v-if="multimodalEnabled"
-                type="button"
-                class="composer-toolbar__btn composer-toolbar__btn--icon"
-                title="添加图片"
-                aria-label="添加图片"
-                :disabled="imageAttachDisabled"
-                @click="openImagePicker"
-              >
-                <svg class="composer-toolbar__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.25" />
-                  <circle cx="5.25" cy="6" r="1.25" fill="currentColor" />
-                  <path d="M2 11.5l3.25-3 2.25 2.25L9 8l4.5 3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                class="composer-toolbar__btn composer-toolbar__btn--icon"
-                title="添加附件（插入文件路径）"
-                aria-label="添加附件"
-                :disabled="attachDisabled"
-                @click="openAttachmentPicker"
-              >
-                <svg class="composer-toolbar__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M9 1.75H4.5A1.75 1.75 0 002.75 3.5v9A1.75 1.75 0 004.5 14.25h7A1.75 1.75 0 0013.25 12.5V5.75L9 1.75z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
-                  <path d="M9 1.75v4h4" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" />
-                </svg>
-              </button>
-            </div>
-            <div v-if="workerStrip || inputStripLeftText" class="chat__composer-meta-status">
-              <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
-              <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
+      <div class="chat__composer-pill">
+        <input
+          v-if="multimodalEnabled"
+          ref="imageInputRef"
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          multiple
+          hidden
+          @change="onImageSelected"
+        />
+        <input
+          ref="attachInputRef"
+          type="file"
+          multiple
+          hidden
+          @change="onAttachmentSelected"
+        />
+
+        <div class="chat__composer-pill-left">
+          <button
+            type="button"
+            class="chat__composer-plus"
+            title="添加附件（插入文件路径）"
+            aria-label="添加附件"
+            :disabled="attachDisabled"
+            @click="openAttachmentPicker"
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 3.25v9.5M3.25 8h9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </button>
+          <button
+            v-if="multimodalEnabled"
+            type="button"
+            class="chat__composer-plus chat__composer-plus--secondary"
+            title="添加图片"
+            aria-label="添加图片"
+            :disabled="imageAttachDisabled"
+            @click="openImagePicker"
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.25" />
+              <circle cx="5.25" cy="6" r="1.25" fill="currentColor" />
+              <path d="M2 11.5l3.25-3 2.25 2.25L9 8l4.5 3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="chat__composer-pill-center">
+          <div v-if="multimodalEnabled && pendingImages.length" class="chat__pending-images">
+            <div v-for="(img, idx) in pendingImages" :key="`${img.name}-${idx}`" class="chat__pending-image">
+              <img class="chat__pending-image-thumb" :src="img.url" :alt="img.name" />
+              <button type="button" class="chat__pending-image-remove" @click="removePendingImage(idx)">×</button>
             </div>
           </div>
-          <div class="chat__composer-meta-right">
-            <span
-              v-if="inputStripRightText"
-              class="chat__input-strip-right"
-              :title="inputStripRightText"
-            >{{ inputStripRightText }}</span>
-            <ContextMeter />
-          </div>
-        </div>
-        <div v-if="multimodalEnabled && pendingImages.length" class="chat__pending-images">
-          <div v-for="(img, idx) in pendingImages" :key="`${img.name}-${idx}`" class="chat__pending-image">
-            <img class="chat__pending-image-thumb" :src="img.url" :alt="img.name" />
-            <button type="button" class="chat__pending-image-remove" @click="removePendingImage(idx)">×</button>
-          </div>
-        </div>
-        <div class="chat__composer-row">
           <textarea
             ref="textareaRef"
             v-model="input"
             class="chat__textarea"
-            rows="2"
-            placeholder="输入消息，或向助手提问…（Enter 发送，Shift+Enter 换行；可粘贴/拖入文件路径）"
+            rows="1"
+            placeholder="输入消息，或向助手提问…"
             :disabled="disabled || sending || cancelling"
             @keydown="onKeydown"
             @paste="onComposerPaste"
             @drop="onComposerDrop"
             @dragover.prevent
           />
+        </div>
+
+        <div class="chat__composer-pill-right">
+          <ComposerToolbar
+            class="chat__composer-toolbar"
+            :thinking-supported="thinkingSupported"
+            :llm-settings="llmSettings"
+            :disabled="disabled || cancelling"
+            @toggle-thinking="emit('toggle-thinking')"
+            @cycle-effort="emit('cycle-effort')"
+            @switch-profile="(id) => emit('switch-profile', id)"
+          />
           <button
             v-if="showCancel"
             type="button"
-            class="btn btn--danger chat__composer-btn"
+            class="chat__composer-send chat__composer-send--cancel"
+            title="取消"
+            aria-label="取消"
             :disabled="cancelling"
             @click="onCancel"
           >
-            {{ cancelling ? "取消中…" : "取消" }}
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            </svg>
           </button>
           <button
             v-else
             type="button"
-            class="btn btn--primary chat__composer-btn"
+            class="chat__composer-send"
+            title="发送"
+            aria-label="发送"
             :disabled="!canSubmit"
             @click="submit"
           >
-            发送
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
           </button>
+        </div>
+      </div>
+
+      <div class="chat__composer-statusline">
+        <div class="chat__composer-statusline-left">
+          <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
+          <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
+        </div>
+        <div class="chat__composer-statusline-right">
+          <span
+            v-if="inputStripRightText"
+            class="chat__input-strip-right"
+            :title="inputStripRightText"
+          >{{ inputStripRightText }}</span>
+          <ContextMeter />
         </div>
       </div>
     </footer>
