@@ -931,25 +931,25 @@
 }
 
 .llm-config-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-top: 14px;
+  width: 100%;
 }
 
 .llm-config-card {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
   overflow: hidden;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.llm-config-card--active {
-  border-color: color-mix(in srgb, var(--color-primary-strong) 55%, var(--color-border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary-strong) 25%, transparent);
 }
 
 .llm-config-card--default {
@@ -958,17 +958,22 @@
 
 .llm-config-card__hit {
   all: unset;
-  display: block;
-  padding: 14px 14px 10px;
-  cursor: pointer;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
   flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  cursor: pointer;
 }
 
 .llm-config-card__title-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .llm-config-card__id {
@@ -991,13 +996,14 @@
 }
 
 .llm-config-card__meta {
-  margin-top: 8px;
+  margin-top: 0;
   font-size: 12.5px;
   color: var(--color-text-muted);
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  flex: 1;
 }
 
 .llm-config-card__meta span {
@@ -1011,20 +1017,35 @@
 }
 
 .llm-config-card__key {
-  margin-top: 10px;
+  margin-top: 0;
+  margin-left: auto;
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--color-text-muted);
 }
 
-.llm-config-card__key--warn {
-  color: #c2410c;
-}
-
 .llm-config-card__actions {
   display: flex;
+  align-items: center;
   gap: 4px;
-  padding: 0 10px 10px;
-  border-top: 1px solid transparent;
+  padding: 0 10px 0 0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .llm-config-card__hit {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+
+  .llm-config-card__meta {
+    flex: 1 1 100%;
+    order: 3;
+  }
+
+  .llm-config-card__key {
+    margin-left: 0;
+  }
 }
 
 .btn--compact {
@@ -1033,22 +1054,12 @@
   min-height: 28px;
 }
 
-.llm-config-add {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
+.llm-config-loops {
   margin-top: 14px;
-  flex-wrap: wrap;
+  max-width: 280px;
 }
 
-.llm-config-add__field {
-  flex: 1;
-  min-width: 180px;
-  margin-top: 0;
-}
-
-.settings-section--llm,
-.settings-section--editor {
+.settings-section--llm {
   padding-bottom: 24px;
   margin-bottom: 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
@@ -1056,6 +1067,29 @@
 
 .settings-section + .settings-section {
   margin-top: 8px;
+}
+
+.settings-section--standalone {
+  margin-top: 16px;
+  padding: 16px 0 8px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+}
+
+.settings-section--debug .settings-section__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.settings-section--debug .settings-section__desc {
+  margin-bottom: 12px;
+}
+
+.settings-embedded .settings-embedded-panel + .settings-embedded-panel,
+.settings-embedded .settings-embedded-panel + .settings-section,
+.settings-embedded .settings-section + .settings-embedded-panel,
+.settings-embedded .settings-section--standalone + .settings-embedded-panel {
+  margin-top: 16px;
 }
 
 .setup-config-panel__readonly-grid .command-stat {

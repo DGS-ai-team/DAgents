@@ -10,6 +10,7 @@ import {
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  initialTemplateId: { type: String, default: "" },
 });
 
 const emit = defineEmits(["close", "created"]);
@@ -19,6 +20,7 @@ const saving = ref(false);
 const error = ref("");
 const templates = ref([]);
 const draft = reactive(emptyAgentDraft());
+const nodeHooksCache = ref({});
 
 const selectedTemplate = computed(
   () => templates.value.find((t) => t.id === draft.templateId) || null,
@@ -33,9 +35,11 @@ async function loadTemplates() {
       api.getSetupConfig().catch(() => null),
     ]);
     templates.value = tplRes.templates || [];
-    const nodeHooks = setup?.hooks || {};
-    const first = templates.value[0];
-    if (first) applyTemplate(first, nodeHooks);
+    nodeHooksCache.value = setup?.hooks || {};
+    const prefer = String(props.initialTemplateId || "").trim();
+    const preferred = prefer ? templates.value.find((t) => t.id === prefer) : null;
+    const first = preferred || templates.value[0];
+    if (first) applyTemplate(first, nodeHooksCache.value);
   } catch (e) {
     error.value = e.message || "加载模板失败";
     templates.value = [];

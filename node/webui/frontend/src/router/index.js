@@ -8,8 +8,8 @@ import TriggersSettings from "../views/settings/TriggersSettings.vue";
 import SecuritySettings from "../views/settings/SecuritySettings.vue";
 import AboutSettings from "../views/settings/AboutSettings.vue";
 import ContextSettings from "../views/settings/ContextSettings.vue";
-import HelpSettings from "../views/settings/HelpSettings.vue";
 import ConnectionSettings from "../views/settings/ConnectionSettings.vue";
+import CapabilitiesSettings from "../views/settings/CapabilitiesSettings.vue";
 
 const router = createRouter({
   history: createWebHistory("/ui/"),
@@ -34,11 +34,12 @@ const router = createRouter({
       children: [
         { path: "general", name: "settings-general", component: GeneralSettings },
         { path: "connection", name: "settings-connection", component: ConnectionSettings },
+        { path: "capabilities", name: "settings-capabilities", component: CapabilitiesSettings },
         { path: "context", name: "settings-context", component: ContextSettings },
         { path: "skills", name: "settings-skills", component: SkillsSettings },
         { path: "triggers", name: "settings-triggers", component: TriggersSettings },
         { path: "security", name: "settings-security", component: SecuritySettings },
-        { path: "help", name: "settings-help", component: HelpSettings },
+        { path: "help", redirect: "/settings/about" },
         { path: "about", name: "settings-about", component: AboutSettings },
       ],
     },

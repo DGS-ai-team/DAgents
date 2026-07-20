@@ -188,6 +188,11 @@
   height: 16px;
 }
 
+.product-header__icon-btn[aria-label="设置"] .product-header__svg {
+  width: 17px;
+  height: 17px;
+}
+
 .session-history-item__badge--unread {
   background: rgba(239, 68, 68, 0.14);
   color: #b91c1c;
@@ -211,6 +216,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 1;
   min-height: 40vh;
   padding: 24px;
   color: var(--color-text-subtle, #888);

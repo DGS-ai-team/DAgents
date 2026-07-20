@@ -15,6 +15,10 @@ import {
 } from "../utils/policyEditor.js";
 import { formatPolicyMode, policyModeClass } from "../utils/panelFormat.js";
 
+const props = defineProps({
+  embedded: { type: Boolean, default: false },
+});
+
 const emit = defineEmits(["close"]);
 
 const SHELL_ORDER = ["bash", "cmd", "powershell"];
@@ -150,22 +154,20 @@ onMounted(load);
 </script>
 
 <template>
-  <section class="panel panel-overlay__card command-panel policy-panel">
+  <section class="panel panel-overlay__card command-panel policy-panel" :class="{ 'settings-embedded-panel': embedded }">
     <header class="panel__header command-panel__header">
       <div>
-        <div class="panel__title">Policy</div>
-        <div class="command-panel__subtitle">
-          {{ data?.platform?.goos || "—" }} · 默认 shell {{ data?.platform?.default_shell || "—" }}
-        </div>
+        <div class="panel__title">审批策略</div>
+        <div class="command-panel__subtitle">点击选项即可生效</div>
       </div>
       <div class="command-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "友好视图" : "JSON" }}
+          {{ showRaw ? "摘要" : "详情" }}
         </button>
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || !!busyKey" @click="load">
           刷新
         </button>
-        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
 
@@ -344,7 +346,7 @@ onMounted(load);
         </section>
 
         <p class="command-panel__foot">
-          点击档位即时保存 · {{ data.policy_dir || "policy_dir" }}
+          点击选项即可生效
         </p>
       </template>
     </div>

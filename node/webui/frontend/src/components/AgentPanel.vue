@@ -4,7 +4,7 @@ import * as api from "../api/node.js";
 import { sessionStore } from "../stores/session.js";
 import { formatRelativeTime, agentDisplayTitle, agentRecordId } from "../utils/format.js";
 
-const emit = defineEmits(["switch", "created", "delete", "create"]);
+const emit = defineEmits(["switch", "created", "delete", "create", "agents-updated"]);
 
 const agents = ref([]);
 const loading = ref(false);
@@ -40,6 +40,7 @@ async function refresh() {
     agents.value = [];
   } finally {
     loading.value = false;
+    emit("agents-updated", agents.value.slice());
   }
 }
 

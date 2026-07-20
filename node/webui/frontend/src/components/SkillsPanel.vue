@@ -5,6 +5,7 @@ import { sessionStore } from "../stores/session.js";
 
 const props = defineProps({
   sessionId: { type: String, default: "" },
+  embedded: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["close"]);
@@ -96,20 +97,20 @@ watch(() => props.sessionId || sessionStore.sessionId, load);
 </script>
 
 <template>
-  <section class="panel panel-overlay__card skills-panel">
+  <section class="panel panel-overlay__card skills-panel" :class="{ 'settings-embedded-panel': embedded }">
     <header class="panel__header skills-panel__header">
       <div>
-        <div class="panel__title">Skills</div>
-        <div class="skills-panel__subtitle">{{ sessionId || sessionStore.sessionId || "—" }}</div>
+        <div class="panel__title">技能</div>
+        <div v-if="!embedded" class="skills-panel__subtitle">{{ sessionId || sessionStore.sessionId || "—" }}</div>
       </div>
       <div class="skills-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "友好视图" : "JSON" }}
+          {{ showRaw ? "摘要" : "详情" }}
         </button>
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || !!busySkill" @click="load">
           刷新
         </button>
-        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
 

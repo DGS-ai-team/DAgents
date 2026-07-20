@@ -6,6 +6,7 @@ import { connectStream } from "../sse/stream.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
 import AgentPanel from "../components/AgentPanel.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
+import AgentEmptyState from "../components/AgentEmptyState.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
 import ActivityPanel from "../components/ActivityPanel.vue";
 import {
@@ -102,6 +103,8 @@ const cancelling = ref(false);
 const streamHandle = ref(null);
 const agentPanelRef = ref(null);
 const showAgentCreateModal = ref(false);
+const createModalTemplateId = ref("");
+const agentListCount = ref(null);
 const chatPanelRef = ref(null);
 
 const entries = computed(() => transcriptStore.entries);
@@ -113,9 +116,12 @@ const canSend = computed(() => {
 });
 const sending = computed(() => sessionStore.awaitingTurn);
 const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_supported);
+const showNoAgentWelcome = computed(
+  () => !sessionStore.sessionId && agentListCount.value === 0
+);
 
 const PANEL_SETTINGS_ROUTES = {
-  help: "/settings/help",
+  help: "/settings/about",
   context: "/settings/context",
   skills: "/settings/skills",
   triggers: "/settings/triggers",
@@ -566,8 +572,18 @@ async function handleUploadCommand(spec) {
   }
 }
 
-async function openCreateWizard() {
+async function openCreateWizard(templateId = "") {
+  createModalTemplateId.value = String(templateId || "").trim();
   showAgentCreateModal.value = true;
+}
+
+function onAgentsUpdated(list) {
+  agentListCount.value = Array.isArray(list) ? list.length : 0;
+}
+
+function onCreateModalClose() {
+  showAgentCreateModal.value = false;
+  createModalTemplateId.value = "";
 }
 
 async function onAgentCreated(created) {
@@ -653,9 +669,10 @@ async function deleteAgentById(payload) {
       const remaining = (res.agents || []).filter((row) => agentRecordId(row) !== aid);
       if (remaining.length > 0) {
         await switchAgent(agentRecordId(remaining[0]));
-      } else {
+        } else {
         syncRouteAgent("");
         chromeStore.sseStatus = "idle";
+        agentListCount.value = 0;
       }
     } else {
       await agentPanelRef.value?.refresh?.();
@@ -891,15 +908,21 @@ onUnmounted(() => {
       <AgentPanel
         ref="agentPanelRef"
         @switch="switchAgent"
-        @create="openCreateWizard"
+        @create="openCreateWizard()"
         @created="onAgentCreated"
         @delete="deleteAgentById"
+        @agents-updated="onAgentsUpdated"
       />
     </aside>
 
     <div class="app__main-col">
       <div v-if="sessionStore.error" class="chat-error-banner">{{ sessionStore.error }}</div>
-      <div v-if="!sessionStore.sessionId" class="chat-empty-agent">
+      <AgentEmptyState
+        v-if="showNoAgentWelcome"
+        @create="openCreateWizard()"
+        @pick-template="openCreateWizard"
+      />
+      <div v-else-if="!sessionStore.sessionId" class="chat-empty-agent">
         <p>选择左侧 Agent，或点击 + 从模板新建。</p>
       </div>
 
@@ -941,7 +964,8 @@ onUnmounted(() => {
 
     <AgentCreateModal
       :open="showAgentCreateModal"
-      @close="showAgentCreateModal = false"
+      :initial-template-id="createModalTemplateId"
+      @close="onCreateModalClose"
       @created="onAgentCreated"
     />
   </div>

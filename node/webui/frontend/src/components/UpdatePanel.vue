@@ -2,6 +2,10 @@
 import { computed, onMounted, ref } from "vue";
 import * as desktopApi from "../api/desktop.js";
 
+defineProps({
+  embedded: { type: Boolean, default: false },
+});
+
 const emit = defineEmits(["close"]);
 
 const loading = ref(false);
@@ -65,18 +69,15 @@ onMounted(load);
 </script>
 
 <template>
-  <section class="panel panel-overlay__card command-panel status-panel">
+  <section class="panel panel-overlay__card command-panel status-panel" :class="{ 'settings-embedded-panel': embedded }">
     <header class="panel__header command-panel__header">
       <div>
-        <div class="panel__title">Update</div>
-        <div class="command-panel__subtitle">
-          Local Assistant 版本与 Release Hub 检查
-          <span v-if="shellManaged" class="command-panel__source"> · Shell</span>
-        </div>
+        <div class="panel__title">版本与更新</div>
+        <div v-if="!embedded" class="command-panel__subtitle">检查可用更新</div>
       </div>
       <div class="command-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || applying" @click="load">刷新</button>
-        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
 

@@ -78,10 +78,7 @@ export function useSetupConfig() {
       const data = await api.patchSetupConfig(patch);
       fillForm(data);
       statusMessage.value =
-        successHint ||
-        (data.restart_required
-          ? "已保存。LLM 配置写入本地加密库；部分项需重启 Node 后生效。"
-          : "已保存。");
+        successHint || (data.restart_required ? "已保存。部分设置需重启后生效。" : "已保存。");
       return true;
     } catch (e) {
       error.value = e.message;
