@@ -21,6 +21,7 @@ const statusLabel = computed(() => {
 });
 const inSettings = computed(() => route.path.startsWith("/settings"));
 const canOpenActivity = computed(() => !inSettings.value && !!sessionStore.sessionId);
+const activityOpen = computed(() => chromeStore.panel === "activity");
 
 function openChat() {
   router.push({ name: "agents" });
@@ -28,7 +29,7 @@ function openChat() {
 
 function openActivity() {
   if (!sessionStore.sessionId) return;
-  chromeStore.panel = "activity";
+  chromeStore.panel = chromeStore.panel === "activity" ? null : "activity";
 }
 </script>
 
@@ -50,8 +51,10 @@ function openActivity() {
         v-if="canOpenActivity"
         type="button"
         class="app__icon-btn product-header__icon-btn"
-        title="变更与命令"
-        aria-label="变更与命令"
+        :class="{ 'product-header__icon-btn--active': activityOpen }"
+        title="变更与上下文"
+        aria-label="变更与上下文"
+        :aria-pressed="activityOpen"
         @click="openActivity"
       >
         <svg class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">

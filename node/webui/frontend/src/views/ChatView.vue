@@ -881,7 +881,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app__body app__body--chat-v61">
+  <div
+    class="app__body app__body--chat-v61"
+    :class="{ 'app__body--with-activity': chromeStore.panel === 'activity' }"
+  >
     <aside class="app__col app__col--sessions">
       <AgentPanel
         ref="agentPanelRef"
@@ -924,10 +927,13 @@ onUnmounted(() => {
         @user-info-selected="(v) => { hitlSelected = v; }"
       />
 
-      <div v-if="chromeStore.panel" class="panel-overlay" @click.self="closePanel">
-        <ChildrenPanel v-if="chromeStore.panel === 'children'" @close="closePanel" />
-        <ActivityPanel v-else-if="chromeStore.panel === 'activity'" @close="closePanel" />
+      <div v-if="chromeStore.panel === 'children'" class="panel-overlay" @click.self="closePanel">
+        <ChildrenPanel @close="closePanel" />
       </div>
     </div>
+
+    <aside v-if="chromeStore.panel === 'activity'" class="app__col app__col--activity">
+      <ActivityPanel @close="closePanel" />
+    </aside>
   </div>
 </template>
