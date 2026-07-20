@@ -17,7 +17,14 @@ import (
 )
 
 func TestPhase2_agentSandboxMessageByAgentID(t *testing.T) {
-	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	// 使用独立目录，避免 session 后台写入导致 testing.TempDir 清理失败。
+	root, err := os.MkdirTemp("", "dagents-phase2-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+
+	cfg := &config.Config{NodeID: "node-test", FSRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
 	cfg.LLM.Mock = true
 
@@ -25,7 +32,6 @@ func TestPhase2_agentSandboxMessageByAgentID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer agentsDB.Close()
 
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
@@ -46,6 +52,12 @@ sandbox:
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 	srv.agents = agentsDB
+	t.Cleanup(func() {
+		if srv.sessions != nil {
+			srv.sessions.Stop()
+		}
+		_ = agentsDB.Close()
+	})
 
 	body, _ := json.Marshal(map[string]any{
 		"template_id":  "code-reviewer",
@@ -88,21 +100,25 @@ sandbox:
 		t.Fatalf("msgResp=%+v", msgResp)
 	}
 
-	// hydrate alias
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		req = httptest.NewRequest(http.MethodGet, "/v1/agents/"+created.AgentID+"/hydrate", nil)
-		rr = httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rr, req)
-		if rr.Code == http.StatusOK {
+		_, hasTurn, _, err := srv.sessions.RuntimeInfo(created.AgentID)
+		if err == nil && !hasTurn {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("hydrate status=%d body=%s", rr.Code, rr.Body.String())
+			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if !strings.Contains(rr.Body.String(), created.AgentID) && !strings.Contains(rr.Body.String(), "session_id") {
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/agents/"+created.AgentID+"/hydrate", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("hydrate status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "session_id") && !strings.Contains(rr.Body.String(), created.AgentID) {
 		t.Fatalf("hydrate body unexpected: %s", rr.Body.String())
 	}
 }
