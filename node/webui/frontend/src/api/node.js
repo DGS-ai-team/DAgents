@@ -70,10 +70,11 @@ export function getAgentTemplate(templateId) {
   return apiFetch(`/v1/agent-templates/${encodeURIComponent(templateId)}`);
 }
 
-export function createAgent({ templateId, displayName, sandbox } = {}) {
+export function createAgent({ templateId, displayName, sandbox, defaults } = {}) {
   const body = { template_id: templateId };
   if (displayName) body.display_name = displayName;
   if (sandbox && typeof sandbox === "object") body.sandbox = sandbox;
+  if (defaults && typeof defaults === "object") body.defaults = defaults;
   return apiFetch("/v1/agents", { method: "POST", body });
 }
 

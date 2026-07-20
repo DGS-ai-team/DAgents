@@ -73,6 +73,7 @@ func Build(p BuildParams) (Built, error) {
 	turnOpts.FSRoot = fsRoot
 	turnOpts.ToolResult.FSRoot = fsRoot
 	turnOpts.MultimodalEnabled = mm
+	ApplyDefaultsToTurnOptions(&turnOpts, p.Snapshot)
 
 	return Built{
 		FSRoot:      fsRoot,

@@ -5,6 +5,7 @@ import * as api from "../api/node.js";
 import { connectStream } from "../sse/stream.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
 import AgentPanel from "../components/AgentPanel.vue";
+import AgentCreateModal from "../components/AgentCreateModal.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
 import ActivityPanel from "../components/ActivityPanel.vue";
 import {
@@ -100,6 +101,7 @@ const hitlSelected = ref(0);
 const cancelling = ref(false);
 const streamHandle = ref(null);
 const agentPanelRef = ref(null);
+const showAgentCreateModal = ref(false);
 const chatPanelRef = ref(null);
 
 const entries = computed(() => transcriptStore.entries);
@@ -565,7 +567,7 @@ async function handleUploadCommand(spec) {
 }
 
 async function openCreateWizard() {
-  agentPanelRef.value?.openWizard?.();
+  showAgentCreateModal.value = true;
 }
 
 async function onAgentCreated(created) {
@@ -886,6 +888,7 @@ onUnmounted(() => {
       <AgentPanel
         ref="agentPanelRef"
         @switch="switchAgent"
+        @create="openCreateWizard"
         @created="onAgentCreated"
         @delete="deleteAgentById"
       />
@@ -929,5 +932,11 @@ onUnmounted(() => {
         <ActivityPanel v-else-if="chromeStore.panel === 'activity'" @close="closePanel" />
       </div>
     </div>
+
+    <AgentCreateModal
+      :open="showAgentCreateModal"
+      @close="showAgentCreateModal = false"
+      @created="onAgentCreated"
+    />
   </div>
 </template>
