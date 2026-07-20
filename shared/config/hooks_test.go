@@ -31,6 +31,28 @@ hooks:
 	}
 }
 
+func TestInjectTodayDateHookConfigDefaults(t *testing.T) {
+	var cfg Config
+	if !cfg.InjectTodayDateHookEnabled() {
+		t.Fatal("expected enabled by default")
+	}
+}
+
+func TestInjectTodayDateHookConfigYAML(t *testing.T) {
+	path, _ := testConfigPath(t, `
+hooks:
+  inject_today_date:
+    enabled: false
+`)
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InjectTodayDateHookEnabled() {
+		t.Fatal("expected disabled")
+	}
+}
+
 func TestHooksPluginsYAML(t *testing.T) {
 	path, _ := testConfigPath(t, `
 hooks:

@@ -32,7 +32,7 @@ func NewRegistry(policyEngine *policy.Engine, runtimeCfg RuntimeConfig) *Registr
 	}
 	registerBuiltinToolBeforeEachHooks(r, ph, ah, dh)
 	registerBuiltinToolAfterEachHooks(r, rh, aah)
-	registerBuiltinInjectTodayDateHook(r)
+	registerBuiltinInjectTodayDateHook(r, runtimeCfg.InjectTodayDate)
 	_ = RegisterPlugins(r, runtimeCfg.Plugins, runtimeCfg.Logger)
 	return r
 }

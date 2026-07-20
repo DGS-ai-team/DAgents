@@ -46,6 +46,7 @@ type TurnOptions struct {
 	RawMessageHistoryDir     string
 	DuplicateToolCall        hooks.DuplicateConfig
 	ToolResult               hooks.ToolResultConfig
+	InjectTodayDate          hooks.InjectTodayDateConfig
 	PluginHooks              hooks.PluginsConfig
 	HookHost                 turn.HookHostConfig
 	MultimodalEnabled        bool
