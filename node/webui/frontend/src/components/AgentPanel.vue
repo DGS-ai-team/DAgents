@@ -18,6 +18,15 @@ function agentSortTime(agent) {
   return Number.isFinite(ts) ? ts : 0;
 }
 
+function agentOrigin(agent) {
+  const raw = String(agent?.origin || "").trim().toLowerCase();
+  return raw === "remote" ? "remote" : "local";
+}
+
+function agentOriginLabel(agent) {
+  return agentOrigin(agent) === "remote" ? "远端 Agent" : "本地 Agent";
+}
+
 const sortedAgents = computed(() => {
   const currentId = String(agentStore.agentId || "").trim();
   return [...agents.value].sort((a, b) => {
@@ -101,9 +110,42 @@ defineExpose({ refresh, setDeleting, openCreate });
           class="agent-list-item"
           :class="{
             'agent-list-item--active': agentRecordId(a) === agentStore.agentId,
+            'agent-list-item--remote': agentOrigin(a) === 'remote',
           }"
           @click="select(agentRecordId(a))"
         >
+          <span
+            class="agent-list-item__origin"
+            :class="`agent-list-item__origin--${agentOrigin(a)}`"
+            :title="agentOriginLabel(a)"
+            :aria-label="agentOriginLabel(a)"
+          >
+            <svg
+              v-if="agentOrigin(a) === 'local'"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              aria-hidden="true"
+            >
+              <rect x="2.5" y="2.5" width="11" height="8" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4" />
+              <path d="M5.5 13.5h5M8 10.5v3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            </svg>
+            <svg
+              v-else
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              aria-hidden="true"
+            >
+              <path
+                d="M5.2 12.2h6.1c1.5 0 2.7-1.2 2.7-2.6 0-1.3-1-2.4-2.3-2.6-.2-1.8-1.7-3.2-3.6-3.2-1.5 0-2.8.9-3.3 2.2-.2 0-.3-.1-.5-.1-1.3 0-2.3 1-2.3 2.3 0 1.3 1 2.4 2.2 2.4z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.3"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
           <div class="agent-list-item__main">
             <div class="agent-list-item__title-row">
               <input
