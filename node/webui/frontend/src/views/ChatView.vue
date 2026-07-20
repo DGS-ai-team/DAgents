@@ -137,10 +137,14 @@ function syncRouteAgent(agentId) {
 }
 
 function syncReasoningDisplay(llm) {
-  if (!llm?.thinking_supported) return;
+  // 「显示思考过程」并入思考开关：开启思考时展示 reasoning，关闭时隐藏。
+  if (!llm?.thinking_supported) {
+    setShowReasoning(false);
+    return;
+  }
   const t = String(llm.thinking || "").trim().toLowerCase();
   const enable = t && !["disabled", "off", "false", "0"].includes(t);
-  if (enable) setShowReasoning(true);
+  setShowReasoning(enable);
 }
 
 function restartStream() {

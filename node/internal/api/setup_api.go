@@ -93,6 +93,12 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 	if s.llmConfigs == nil {
 		return nil
 	}
+	existing := map[string]store.LLMConfigRecord{}
+	if records, err := s.llmConfigs.List(ctx); err == nil {
+		for _, rec := range records {
+			existing[rec.ID] = rec
+		}
+	}
 	records := make([]store.LLMConfigRecord, 0, len(profiles))
 	keys := map[string]string{}
 	clearIDs := map[string]bool{}
@@ -101,6 +107,16 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 		if id == "" {
 			continue
 		}
+		thinking := strings.TrimSpace(p.Thinking)
+		effort := strings.TrimSpace(p.ReasoningEffort)
+		if old, ok := existing[id]; ok {
+			if thinking == "" {
+				thinking = old.Thinking
+			}
+			if effort == "" {
+				effort = old.ReasoningEffort
+			}
+		}
 		records = append(records, store.LLMConfigRecord{
 			ID:                id,
 			SortOrder:         i,
@@ -108,8 +124,8 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 			BaseURL:           p.BaseURL,
 			Model:             p.Model,
 			Mock:              p.Mock,
-			Thinking:          p.Thinking,
-			ReasoningEffort:   p.ReasoningEffort,
+			Thinking:          thinking,
+			ReasoningEffort:   effort,
 			MultimodalEnabled: p.MultimodalEnabled,
 		})
 		if p.ClearAPIKey {

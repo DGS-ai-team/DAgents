@@ -1884,6 +1884,14 @@
 .chat__composer-statusline-right {
   flex: 0 0 auto;
   margin-left: auto;
+  justify-content: flex-end;
+}
+
+.chat__statusline-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
 }
 
 .chat__input-strip-left {

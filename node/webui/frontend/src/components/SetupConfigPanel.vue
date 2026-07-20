@@ -128,8 +128,7 @@ function llmPayload() {
       api_key: p.api_key || undefined,
       clear_api_key: !!p.clear_api_key,
       mock: p.mock || p.provider === "mock",
-      thinking: p.thinking || undefined,
-      reasoning_effort: p.reasoning_effort || undefined,
+      // thinking / reasoning_effort 由状态栏运行时控制，不在连接配置里重复落盘
       multimodal_enabled: !!p.multimodal_enabled,
     })),
   };

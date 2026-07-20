@@ -8,6 +8,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/setup"
+	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -59,8 +60,77 @@ func (s *Server) handlePatchLLMSettings(w http.ResponseWriter, r *http.Request) 
 			writeAPIError(w, http.StatusBadRequest, "invalid_llm_settings", err.Error(), nil)
 			return
 		}
+		// 思考开关仅在状态栏控制；同步写入当前 LLM 配置，避免与连接设置互相覆盖。
+		if err := s.persistActiveLLMThinking(r.Context()); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "llm_thinking_save_failed", err.Error(), nil)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, s.llmSettingsView())
+}
+
+func (s *Server) persistActiveLLMThinking(ctx context.Context) error {
+	if s.cfg == nil || s.llmRuntime == nil {
+		return nil
+	}
+	view := s.llmRuntime.Snapshot()
+	if !view.ThinkingSupported {
+		return nil
+	}
+	thinking := strings.TrimSpace(view.Thinking)
+	effort := strings.TrimSpace(view.ReasoningEffort)
+	if thinking == "" {
+		thinking = "enabled"
+	}
+	if effort == "" {
+		effort = "high"
+	}
+
+	updated := *s.cfg
+	id := strings.TrimSpace(view.ActiveProfile)
+	if id == "" {
+		id = updated.LLM.ActiveProfileID()
+	}
+	if id == "" {
+		id = updated.LLM.FirstProfileID()
+	}
+
+	updated.LLM.Thinking = thinking
+	updated.LLM.ReasoningEffort = effort
+	if id != "" {
+		updated.LLM.Active = id
+	}
+	updated.SyncActiveProfileFromFlat()
+	updated.ApplyDefaults()
+
+	if s.llmConfigs != nil {
+		id = updated.LLM.ActiveProfileID()
+		records, err := s.llmConfigs.List(ctx)
+		if err != nil {
+			return err
+		}
+		if id != "" && len(records) > 0 {
+			for i := range records {
+				if records[i].ID != id {
+					continue
+				}
+				records[i].Thinking = thinking
+				records[i].ReasoningEffort = effort
+			}
+			if err := s.llmConfigs.ReplaceAll(ctx, records, nil, nil); err != nil {
+				return err
+			}
+			store.ApplyLLMConfigsToConfig(&updated, records, id)
+		}
+	}
+
+	if s.configPath != "" && configPathWritable(s.configPath) {
+		if err := config.SaveFile(s.configPath, &updated); err != nil {
+			return err
+		}
+	}
+	setup.CopyConfig(s.cfg, &updated)
+	return nil
 }
 
 func (s *Server) llmSettingsView() llm.LLMSettingsView {

@@ -340,14 +340,27 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 			if id == "" {
 				return fmt.Errorf("llm config id is required")
 			}
+			prevThinking, prevEffort := "", ""
+			if prev, ok := cfg.LLM.GetProfile(id); ok {
+				prevThinking = prev.Thinking
+				prevEffort = prev.ReasoningEffort
+			}
+			thinking := strings.TrimSpace(item.Thinking)
+			if thinking == "" {
+				thinking = prevThinking
+			}
+			effort := strings.TrimSpace(item.ReasoningEffort)
+			if effort == "" {
+				effort = prevEffort
+			}
 			if err := upsertProfileIntoMap(next, id, config.LLMProfileConfig{
 				Provider:          item.Provider,
 				BaseURL:           item.BaseURL,
 				Model:             item.Model,
 				APIKeyEnv:         item.APIKeyEnv,
 				Mock:              item.Mock,
-				Thinking:          item.Thinking,
-				ReasoningEffort:   item.ReasoningEffort,
+				Thinking:          thinking,
+				ReasoningEffort:   effort,
 				MultimodalEnabled: boolPtr(item.MultimodalEnabled),
 			}); err != nil {
 				return err
