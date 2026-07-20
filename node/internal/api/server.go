@@ -46,6 +46,7 @@ type Server struct {
 	mux           *http.ServeMux
 	sessions      *session.Manager // per-session 队列与 turn consumer（过渡期与 agent_id 1:1）
 	agents        *store.AgentStore
+	llmConfigs    *store.LLMConfigStore
 	stream        *stream.Hub // 进程内 SSE 事件总线
 	store         *store.SQLiteStore
 	triggerStore  *triggers.Store
@@ -185,6 +186,30 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			logger.Error("agents store init failed", "error", err, "path", cfg.AgentsDBPath())
 		} else {
 			agentsStore = opened
+		}
+	}
+	var llmConfigStore *store.LLMConfigStore
+	if !o.skipStore {
+		opened, err := store.OpenLLMConfigs(cfg.LLMConfigsDBPath(), cfg.RuntimeDir())
+		if err != nil {
+			logger.Error("llm configs store init failed", "error", err, "path", cfg.LLMConfigsDBPath())
+		} else {
+			llmConfigStore = opened
+			if err := store.MigrateLLMConfigsFromConfig(context.Background(), llmConfigStore, cfg); err != nil {
+				logger.Error("llm configs migrate failed", "error", err)
+			} else if records, err := llmConfigStore.List(context.Background()); err != nil {
+				logger.Error("llm configs list failed", "error", err)
+			} else if len(records) > 0 {
+				active := cfg.LLM.ActiveProfileID()
+				if active == "" {
+					active = records[0].ID
+				}
+				store.ApplyLLMConfigsToConfig(cfg, records, active)
+				llmRuntime.SyncFromConfig(cfg)
+				if key, err := llmConfigStore.ResolveAPIKey(context.Background(), cfg.LLM.ActiveProfileID()); err == nil {
+					llmRuntime.SetAPIKey(key)
+				}
+			}
 		}
 	}
 
@@ -336,6 +361,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		stream:        hub,
 		store:         st,
 		agents:        agentsStore,
+		llmConfigs:    llmConfigStore,
 		sessions:      mgr,
 		triggerStore:  triggerStore,
 		triggerSched:  triggerSched,

@@ -46,9 +46,13 @@ func defaultBaseURL(provider ProviderName) string {
 }
 
 func lookupEnvAPIKey(keyEnv string) (string, error) {
+	keyEnv = strings.TrimSpace(keyEnv)
+	if keyEnv == "" {
+		return "", fmt.Errorf("LLM API key is not configured; set it in 设置 › 连接 › LLM 配置")
+	}
 	key := os.Getenv(keyEnv)
 	if key == "" {
-		return "", fmt.Errorf("LLM API key not set in %s", keyEnv)
+		return "", fmt.Errorf("LLM API key not set in %s (or configure api_key in settings)", keyEnv)
 	}
 	return key, nil
 }

@@ -7,27 +7,30 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// LLMProfileSettings 单个 LLM 档案（Web UI / setup API）。
+// LLMProfileSettings 单个 LLM 配置（Web UI / setup API）。
 type LLMProfileSettings struct {
-	ID                 string `json:"id"`
-	Provider           string `json:"provider"`
-	BaseURL            string `json:"base_url"`
-	Model              string `json:"model"`
-	APIKeyEnv          string `json:"api_key_env"`
-	Mock               bool   `json:"mock"`
-	Thinking           string `json:"thinking,omitempty"`
-	ReasoningEffort    string `json:"reasoning_effort,omitempty"`
-	MultimodalEnabled  bool   `json:"multimodal_enabled"`
+	ID                string `json:"id"`
+	Provider          string `json:"provider"`
+	BaseURL           string `json:"base_url"`
+	Model             string `json:"model"`
+	APIKeyEnv         string `json:"api_key_env,omitempty"` // 兼容旧客户端；新流程请用 api_key
+	APIKey            string `json:"api_key,omitempty"`     // 仅 PATCH 写入；GET 不回传明文
+	HasAPIKey         bool   `json:"has_api_key"`
+	ClearAPIKey       bool   `json:"clear_api_key,omitempty"`
+	Mock              bool   `json:"mock"`
+	Thinking          string `json:"thinking,omitempty"`
+	ReasoningEffort   string `json:"reasoning_effort,omitempty"`
+	MultimodalEnabled bool   `json:"multimodal_enabled"`
 }
 
-// LLMSettings LLM 连接配置（支持多档案）。
+// LLMSettings LLM 连接配置（支持多配置；列表顺序中第一条为默认）。
 type LLMSettings struct {
-	Active       string               `json:"active"`
+	Active       string               `json:"active,omitempty"` // 运行时当前选用；缺省取 profiles[0]
 	Profiles     []LLMProfileSettings `json:"profiles"`
 	Provider     string               `json:"provider"`
 	BaseURL      string               `json:"base_url"`
 	Model        string               `json:"model"`
-	APIKeyEnv    string               `json:"api_key_env"`
+	APIKeyEnv    string               `json:"api_key_env,omitempty"`
 	Mock         bool                 `json:"mock"`
 	MaxToolLoops int                  `json:"max_tool_loops"`
 }
@@ -331,10 +334,11 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 
 	if len(p.Profiles) > 0 {
 		next := make(map[string]config.LLMProfileConfig, len(p.Profiles))
+		order := make([]string, 0, len(p.Profiles))
 		for _, item := range p.Profiles {
 			id := strings.TrimSpace(item.ID)
 			if id == "" {
-				return fmt.Errorf("llm profile id is required")
+				return fmt.Errorf("llm config id is required")
 			}
 			if err := upsertProfileIntoMap(next, id, config.LLMProfileConfig{
 				Provider:          item.Provider,
@@ -348,10 +352,22 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 			}); err != nil {
 				return err
 			}
+			order = append(order, id)
 		}
 		cfg.LLM.Profiles = next
+		cfg.LLM.ProfileOrder = order
+		// 默认取第一条；若请求带了 active 且存在则用作运行时选用。
+		active := strings.TrimSpace(p.Active)
+		if active == "" || !cfgHasProfile(cfg, active) {
+			active = order[0]
+		}
+		if err := cfg.SetActiveLLMProfile(active); err != nil {
+			return err
+		}
+		cfg.ApplyDefaults()
+		return nil
 	} else if provider := strings.ToLower(strings.TrimSpace(p.Provider)); provider != "" {
-		// 兼容旧客户端：只提交顶层字段时，更新当前 active 档案。
+		// 兼容旧客户端：只提交顶层字段时，更新当前 active 配置。
 		mock := p.Mock || provider == "mock"
 		if provider == "mock" {
 			mock = true
@@ -382,9 +398,19 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 		}
 	} else if cfg.LLM.ActiveProfileID() != "" {
 		cfg.ApplyActiveToFlat()
+	} else if first := cfg.LLM.FirstProfileID(); first != "" {
+		_ = cfg.SetActiveLLMProfile(first)
 	}
 	cfg.ApplyDefaults()
 	return nil
+}
+
+func cfgHasProfile(cfg *config.Config, id string) bool {
+	if cfg == nil {
+		return false
+	}
+	_, ok := cfg.LLM.GetProfile(id)
+	return ok
 }
 
 func upsertProfileIntoMap(dst map[string]config.LLMProfileConfig, id string, prof config.LLMProfileConfig) error {

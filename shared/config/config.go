@@ -293,18 +293,20 @@ type LocalConfig struct {
 // LLMConfig 为 turn loop 使用的模型配置。
 //
 // 兼容单配置：顶层 provider/base_url/model 等为「当前生效」快照。
-// 多配置：profiles 存命名档案，active 指向当前档案 id；切换时把档案字段复制到顶层快照。
+// 多配置：profiles 存命名配置，ProfileOrder 决定顺序（第一条为默认）；
+// active 为运行时当前选用（可热切换），缺省时取第一条。
 type LLMConfig struct {
-	Active          string                     `yaml:"active,omitempty"`
+	Active          string                      `yaml:"active,omitempty"`
 	Profiles        map[string]LLMProfileConfig `yaml:"profiles,omitempty"`
-	Provider        string                     `yaml:"provider"`
-	BaseURL         string                     `yaml:"base_url"`
-	Model           string                     `yaml:"model"`
-	APIKeyEnv       string                     `yaml:"api_key_env"`
-	Mock            bool                       `yaml:"mock"`
-	MaxToolLoops    int                        `yaml:"max_tool_loops"`
-	Thinking        string                     `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
-	ReasoningEffort string                     `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
+	ProfileOrder    []string                    `yaml:"profile_order,omitempty"`
+	Provider        string                      `yaml:"provider"`
+	BaseURL         string                      `yaml:"base_url"`
+	Model           string                      `yaml:"model"`
+	APIKeyEnv       string                      `yaml:"api_key_env"`
+	Mock            bool                        `yaml:"mock"`
+	MaxToolLoops    int                         `yaml:"max_tool_loops"`
+	Thinking        string                      `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
+	ReasoningEffort string                      `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
 }
 
 // LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_tool_loops）。
@@ -646,6 +648,11 @@ func (c *Config) SessionDBPath() string {
 // AgentsDBPath 返回 Agent 实例元数据库路径（`<runtime>/agents.db`）。
 func (c *Config) AgentsDBPath() string {
 	return filepath.Join(c.RuntimeDir(), "agents.db")
+}
+
+// LLMConfigsDBPath 返回 LLM 配置库路径（`<runtime>/llm_configs.db`）。
+func (c *Config) LLMConfigsDBPath() string {
+	return filepath.Join(c.RuntimeDir(), "llm_configs.db")
 }
 
 // AgentsDir 返回 Agent 实例目录根（`<runtime>/agents`）。

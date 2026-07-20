@@ -12,17 +12,18 @@ import (
 type RuntimeSettings struct {
 	mu sync.RWMutex
 
-	AgentID         string
-	ActiveProfile   string
-	profileIDs      []string
-	Provider        string
-	BaseURL         string
-	APIKeyEnv       string
-	Model           string
-	Mock            bool
+	AgentID           string
+	ActiveProfile     string
+	profileIDs        []string
+	Provider          string
+	BaseURL           string
+	APIKeyEnv         string // 兼容旧逻辑：无明文 key 时回退环境变量
+	APIKey            string // 当前配置的明文 key（内存中，来自 SQLite 解密）
+	Model             string
+	Mock              bool
 	MultimodalEnabled bool
-	Thinking        string
-	ReasoningEffort string
+	Thinking          string
+	ReasoningEffort   string
 }
 
 // LLMSettingsView 为 GET /v1/llm/settings 与 agent/info 嵌套字段。
@@ -112,6 +113,26 @@ func (s *RuntimeSettings) Connection() (provider, baseURL, keyEnv string, mock b
 		keyEnv = "OPENAI_API_KEY"
 	}
 	return s.Provider, s.BaseURL, keyEnv, s.Mock
+}
+
+// APIKeyValue 返回当前明文 API Key（可能为空）。
+func (s *RuntimeSettings) APIKeyValue() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return strings.TrimSpace(s.APIKey)
+}
+
+// SetAPIKey 更新内存中的 API Key（切换配置 / 保存后调用）。
+func (s *RuntimeSettings) SetAPIKey(key string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.APIKey = strings.TrimSpace(key)
 }
 
 // Model 返回当前模型名（线程安全）。

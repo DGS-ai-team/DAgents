@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -83,13 +84,15 @@ func (s *Server) switchActiveLLMProfile(id string) error {
 		return err
 	}
 	updated.ApplyDefaults()
+	// 运行时切换不改「默认第一条」顺序，也不强制写回 active 到 yaml 作为 default。
+	// 若 yaml 可写则仍同步当前选用，便于进程重启前的热切换状态落盘。
 	if s.configPath != "" && configPathWritable(s.configPath) {
 		if err := config.SaveFile(s.configPath, &updated); err != nil {
 			return err
 		}
 	}
 	setup.CopyConfig(s.cfg, &updated)
-	s.llmRuntime.SyncFromConfig(s.cfg)
+	s.syncLLMRuntimeFromStore(context.Background())
 	s.applyMultimodalRuntime(s.cfg.MultimodalEnabled())
 	return nil
 }

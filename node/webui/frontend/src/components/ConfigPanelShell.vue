@@ -21,7 +21,8 @@ const emit = defineEmits(["refresh", "save"]);
         <div class="setup-config-panel__subtitle">
           <template v-if="subtitle">{{ subtitle }}</template>
           <template v-else>
-            写入 <code v-if="configPath">{{ configPath }}</code><span v-else>config.yaml</span>
+            写入 <code v-if="configPath">{{ configPath }}</code><span v-else>本地配置</span>
+            <span>（LLM Key 加密存 SQLite）</span>
             <span v-if="!configWritable"> · 只读</span>
           </template>
         </div>

@@ -37,11 +37,13 @@ func (c *Config) normalizeLLMProfiles() {
 			}
 			if !c.LLM.hasProfile(id) {
 				c.LLM.Profiles[id] = p
+				if len(c.LLM.ProfileOrder) == 0 {
+					c.LLM.ProfileOrder = []string{id}
+				}
 			}
 			c.LLM.Active = id
 		} else {
-			ids := c.LLM.ProfileIDs()
-			c.LLM.Active = ids[0]
+			c.LLM.Active = c.LLM.FirstProfileID()
 		}
 	}
 	c.applyLLMProfile(c.LLM.Active)
@@ -127,10 +129,39 @@ func boolPtrCopy(v bool) *bool {
 	return &b
 }
 
-// ProfileIDs 返回排序后的档案 id 列表。
+// ProfileIDs 返回配置 id 列表：优先 ProfileOrder，否则按字母序。
 func (l LLMConfig) ProfileIDs() []string {
-	ids := make([]string, 0, len(l.Profiles))
-	for id := range l.Profiles {
+	if len(l.ProfileOrder) > 0 {
+		out := make([]string, 0, len(l.ProfileOrder))
+		seen := make(map[string]struct{}, len(l.ProfileOrder))
+		for _, id := range l.ProfileOrder {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if !l.hasProfile(id) {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+		for _, id := range sortedProfileIDs(l.Profiles) {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			out = append(out, id)
+		}
+		return out
+	}
+	return sortedProfileIDs(l.Profiles)
+}
+
+func sortedProfileIDs(profiles map[string]LLMProfileConfig) []string {
+	ids := make([]string, 0, len(profiles))
+	for id := range profiles {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
@@ -139,6 +170,15 @@ func (l LLMConfig) ProfileIDs() []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// FirstProfileID 返回第一条配置 id（默认选用）。
+func (l LLMConfig) FirstProfileID() string {
+	ids := l.ProfileIDs()
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
 }
 
 // ActiveProfileID 返回当前生效档案 id。
@@ -198,9 +238,18 @@ func (c *Config) DeleteProfile(id string) error {
 		return fmt.Errorf("cannot delete the last llm profile")
 	}
 	delete(c.LLM.Profiles, id)
+	if order := c.LLM.ProfileOrder; len(order) > 0 {
+		next := make([]string, 0, len(order))
+		for _, item := range order {
+			if item == id {
+				continue
+			}
+			next = append(next, item)
+		}
+		c.LLM.ProfileOrder = next
+	}
 	if c.LLM.Active == id {
-		ids := c.LLM.ProfileIDs()
-		c.applyLLMProfile(ids[0])
+		c.applyLLMProfile(c.LLM.FirstProfileID())
 	}
 	return nil
 }
@@ -261,9 +310,6 @@ func normalizeLLMProfile(p LLMProfileConfig) LLMProfileConfig {
 		mock = true
 	}
 	apiKeyEnv := strings.TrimSpace(p.APIKeyEnv)
-	if apiKeyEnv == "" {
-		apiKeyEnv = "OPENAI_API_KEY"
-	}
 	out := LLMProfileConfig{
 		Provider:        provider,
 		BaseURL:         strings.TrimSpace(p.BaseURL),
