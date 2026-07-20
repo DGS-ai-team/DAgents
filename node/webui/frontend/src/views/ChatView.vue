@@ -683,11 +683,13 @@ async function deleteAgentById(payload) {
       const remaining = (res.agents || []).filter((row) => agentRecordId(row) !== aid);
       if (remaining.length > 0) {
         await switchAgent(agentRecordId(remaining[0]));
-        } else {
+      } else {
         syncRouteAgent("");
         chromeStore.sseStatus = "idle";
         agentList.value = [];
         agentListCount.value = 0;
+        // 最后一个 Agent 被删时 switchAgent 不会跑，需显式刷新侧栏列表
+        await agentPanelRef.value?.refresh?.();
       }
     } else {
       await agentPanelRef.value?.refresh?.();
