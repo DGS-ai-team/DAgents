@@ -61,3 +61,46 @@ func TestDeleteLastProfileRejected(t *testing.T) {
 		t.Fatal("expected error deleting last profile")
 	}
 }
+
+func TestLLMProfile_multimodalFollowsActive(t *testing.T) {
+	cfg := &Config{}
+	on := true
+	off := false
+	cfg.LLM.Profiles = map[string]LLMProfileConfig{
+		"text":   {Provider: "deepseek", Model: "deepseek-chat", APIKeyEnv: "OPENAI_API_KEY", MultimodalEnabled: &off},
+		"vision": {Provider: "openai", Model: "gpt-4o", APIKeyEnv: "OPENAI_API_KEY", MultimodalEnabled: &on},
+	}
+	cfg.LLM.Active = "text"
+	cfg.ApplyDefaults()
+	if cfg.MultimodalEnabled() {
+		t.Fatal("text profile should disable multimodal")
+	}
+	if err := cfg.SetActiveLLMProfile("vision"); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.MultimodalEnabled() {
+		t.Fatal("vision profile should enable multimodal")
+	}
+	p, ok := cfg.LLM.GetProfile("vision")
+	if !ok || !ProfileMultimodalEnabled(p) {
+		t.Fatalf("vision profile = %+v", p)
+	}
+}
+
+func TestMigrateMultimodalIntoProfiles(t *testing.T) {
+	on := true
+	cfg := &Config{}
+	cfg.Multimodal.Enabled = &on
+	cfg.LLM.Profiles = map[string]LLMProfileConfig{
+		"default": {Provider: "openai", Model: "gpt-4o", APIKeyEnv: "OPENAI_API_KEY"},
+	}
+	cfg.LLM.Active = "default"
+	cfg.ApplyDefaults()
+	p, ok := cfg.LLM.GetProfile("default")
+	if !ok || !ProfileMultimodalEnabled(p) {
+		t.Fatalf("expected legacy multimodal.enabled migrated onto profile, got %+v", p)
+	}
+	if !cfg.MultimodalEnabled() {
+		t.Fatal("expected multimodal still enabled after normalize")
+	}
+}

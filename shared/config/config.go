@@ -290,13 +290,15 @@ type LLMConfig struct {
 
 // LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_tool_loops）。
 type LLMProfileConfig struct {
-	Provider        string `yaml:"provider"`
-	BaseURL         string `yaml:"base_url"`
-	Model           string `yaml:"model"`
-	APIKeyEnv       string `yaml:"api_key_env"`
-	Mock            bool   `yaml:"mock"`
-	Thinking        string `yaml:"thinking,omitempty"`
-	ReasoningEffort string `yaml:"reasoning_effort,omitempty"`
+	Provider           string `yaml:"provider"`
+	BaseURL            string `yaml:"base_url"`
+	Model              string `yaml:"model"`
+	APIKeyEnv          string `yaml:"api_key_env"`
+	Mock               bool   `yaml:"mock"`
+	Thinking           string `yaml:"thinking,omitempty"`
+	ReasoningEffort    string `yaml:"reasoning_effort,omitempty"`
+	// MultimodalEnabled 为 nil 时视为 false；切换档案时同步到顶层 multimodal.enabled。
+	MultimodalEnabled *bool `yaml:"multimodal_enabled,omitempty"`
 }
 
 // ManageConfig 控制是否向 Manage 注册；默认 enabled=false。

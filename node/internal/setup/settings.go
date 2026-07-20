@@ -9,14 +9,15 @@ import (
 
 // LLMProfileSettings 单个 LLM 档案（Web UI / setup API）。
 type LLMProfileSettings struct {
-	ID              string `json:"id"`
-	Provider        string `json:"provider"`
-	BaseURL         string `json:"base_url"`
-	Model           string `json:"model"`
-	APIKeyEnv       string `json:"api_key_env"`
-	Mock            bool   `json:"mock"`
-	Thinking        string `json:"thinking,omitempty"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ID                 string `json:"id"`
+	Provider           string `json:"provider"`
+	BaseURL            string `json:"base_url"`
+	Model              string `json:"model"`
+	APIKeyEnv          string `json:"api_key_env"`
+	Mock               bool   `json:"mock"`
+	Thinking           string `json:"thinking,omitempty"`
+	ReasoningEffort    string `json:"reasoning_effort,omitempty"`
+	MultimodalEnabled  bool   `json:"multimodal_enabled"`
 }
 
 // LLMSettings LLM 连接配置（支持多档案）。
@@ -278,6 +279,8 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 	}
 	if patch.Features != nil {
 		applyFeaturesPatch(&out, *patch.Features)
+		// 功能开关里的 multimodal 写回当前 LLM 档案（兼容旧客户端）。
+		out.SyncActiveProfileFromFlat()
 	}
 	if patch.Compression != nil {
 		if err := applyCompressionPatch(&out, *patch.Compression); err != nil {
@@ -332,13 +335,14 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 				return fmt.Errorf("llm profile id is required")
 			}
 			if err := upsertProfileIntoMap(next, id, config.LLMProfileConfig{
-				Provider:        item.Provider,
-				BaseURL:         item.BaseURL,
-				Model:           item.Model,
-				APIKeyEnv:       item.APIKeyEnv,
-				Mock:            item.Mock,
-				Thinking:        item.Thinking,
-				ReasoningEffort: item.ReasoningEffort,
+				Provider:          item.Provider,
+				BaseURL:           item.BaseURL,
+				Model:             item.Model,
+				APIKeyEnv:         item.APIKeyEnv,
+				Mock:              item.Mock,
+				Thinking:          item.Thinking,
+				ReasoningEffort:   item.ReasoningEffort,
+				MultimodalEnabled: boolPtr(item.MultimodalEnabled),
 			}); err != nil {
 				return err
 			}
@@ -375,7 +379,7 @@ func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
 			return err
 		}
 	} else if cfg.LLM.ActiveProfileID() != "" {
-		cfg.LLM.ApplyActiveToFlat()
+		cfg.ApplyActiveToFlat()
 	}
 	cfg.ApplyDefaults()
 	return nil
@@ -403,14 +407,15 @@ func llmProfilesFromConfig(cfg *config.Config) []LLMProfileSettings {
 			continue
 		}
 		out = append(out, LLMProfileSettings{
-			ID:              id,
-			Provider:        p.Provider,
-			BaseURL:         p.BaseURL,
-			Model:           p.Model,
-			APIKeyEnv:       p.APIKeyEnv,
-			Mock:            p.Mock,
-			Thinking:        p.Thinking,
-			ReasoningEffort: p.ReasoningEffort,
+			ID:                id,
+			Provider:          p.Provider,
+			BaseURL:           p.BaseURL,
+			Model:             p.Model,
+			APIKeyEnv:         p.APIKeyEnv,
+			Mock:              p.Mock,
+			Thinking:          p.Thinking,
+			ReasoningEffort:   p.ReasoningEffort,
+			MultimodalEnabled: config.ProfileMultimodalEnabled(p),
 		})
 	}
 	return out

@@ -671,6 +671,11 @@ async function switchLLMProfile(id) {
   try {
     chromeStore.llmSettings = await api.patchLLMSettings({ active_profile: profileId });
     syncReasoningDisplay(chromeStore.llmSettings);
+    try {
+      chromeStore.agentInfo = await api.getAgentInfo();
+    } catch {
+      /* agent info refresh best-effort */
+    }
   } catch (e) {
     sessionStore.error = e.message;
   }

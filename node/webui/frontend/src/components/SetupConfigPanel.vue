@@ -34,6 +34,7 @@ function ensureProfiles() {
       model: form.llm.model || "",
       api_key_env: form.llm.api_key_env || "OPENAI_API_KEY",
       mock: !!form.llm.mock,
+      multimodal_enabled: !!form.features?.multimodal_enabled,
     });
     form.llm.active = id;
   }
@@ -69,6 +70,7 @@ function addProfile() {
     model: PROVIDER_PRESETS.deepseek.model,
     api_key_env: "OPENAI_API_KEY",
     mock: false,
+    multimodal_enabled: false,
   });
   editingId.value = id;
   newProfileId.value = "";
@@ -90,7 +92,11 @@ function removeProfile(id) {
 }
 
 function featuresPayload() {
-  return { ...form.features };
+  const payload = { ...form.features };
+  // 多模态跟随当前启用的 LLM 档案，不再由功能开关单独写入。
+  const active = form.llm.profiles?.find((p) => p.id === form.llm.active);
+  payload.multimodal_enabled = !!active?.multimodal_enabled;
+  return payload;
 }
 
 function llmPayload() {
@@ -108,6 +114,7 @@ function llmPayload() {
       mock: p.mock || p.provider === "mock",
       thinking: p.thinking || undefined,
       reasoning_effort: p.reasoning_effort || undefined,
+      multimodal_enabled: !!p.multimodal_enabled,
     })),
   };
 }
@@ -220,6 +227,10 @@ onMounted(async () => {
         <input v-model="editingProfile.mock" type="checkbox" />
         <span>Mock 模式（不调用真实 LLM）</span>
       </label>
+      <label class="settings-toggle">
+        <input v-model="editingProfile.multimodal_enabled" type="checkbox" />
+        <span>多模态 / Vision（本档案）</span>
+      </label>
       <label class="settings-field">
         <span class="settings-field__label">单条消息工具步上限（全局）</span>
         <input v-model.number="form.llm.max_tool_loops" class="settings-field__input" type="number" min="1" />
@@ -279,14 +290,12 @@ onMounted(async () => {
         <label class="settings-toggle"><input v-model="form.features.triggers_enabled" type="checkbox" /><span>Triggers</span></label>
         <label class="settings-toggle"><input v-model="form.features.child_agents_enabled" type="checkbox" /><span>Child Agents</span></label>
         <label class="settings-toggle"><input v-model="form.features.ui_enabled" type="checkbox" /><span>Web UI</span></label>
-        <label class="settings-toggle">
-          <input v-model="form.features.browser_enabled" type="checkbox" />
+        <label class="settings-toggle"><input v-model="form.features.browser_enabled" type="checkbox" />
           <span class="settings-toggle__label">
             Browser 工具
             <span class="badge badge--beta" title="试验功能，接口与稳定性可能变更">Beta</span>
           </span>
         </label>
-        <label class="settings-toggle"><input v-model="form.features.multimodal_enabled" type="checkbox" /><span>多模态 / Vision</span></label>
         <label class="settings-toggle"><input v-model="form.features.raw_message_history_enabled" type="checkbox" /><span>原始消息 JSONL</span></label>
       </div>
       <div class="setup-config-panel__field-grid">

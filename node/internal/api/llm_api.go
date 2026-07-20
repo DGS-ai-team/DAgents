@@ -90,5 +90,15 @@ func (s *Server) switchActiveLLMProfile(id string) error {
 	}
 	setup.CopyConfig(s.cfg, &updated)
 	s.llmRuntime.SyncFromConfig(s.cfg)
+	s.applyMultimodalRuntime(s.cfg.MultimodalEnabled())
 	return nil
+}
+
+func (s *Server) applyMultimodalRuntime(enabled bool) {
+	if s.tools != nil {
+		s.tools.SetMultimodalEnabled(enabled)
+	}
+	if s.sessions != nil {
+		s.sessions.SetMultimodalEnabled(enabled)
+	}
 }

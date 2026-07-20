@@ -20,6 +20,7 @@ type RuntimeSettings struct {
 	APIKeyEnv       string
 	Model           string
 	Mock            bool
+	MultimodalEnabled bool
 	Thinking        string
 	ReasoningEffort string
 }
@@ -31,6 +32,7 @@ type LLMSettingsView struct {
 	Provider          string   `json:"provider"`
 	Model             string   `json:"model"`
 	Mock              bool     `json:"mock"`
+	MultimodalEnabled bool     `json:"multimodal_enabled"`
 	ThinkingSupported bool     `json:"thinking_supported"`
 	Thinking          string   `json:"thinking,omitempty"`
 	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`
@@ -55,16 +57,17 @@ func NewRuntimeSettings(cfg *config.Config) *RuntimeSettings {
 	}
 	thinking, effort := NormalizeThinkingSettings(cfg.LLM.Provider, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
 	return &RuntimeSettings{
-		AgentID:         strings.TrimSpace(cfg.AgentID),
-		ActiveProfile:   cfg.LLM.ActiveProfileID(),
-		profileIDs:      cfg.LLM.ProfileIDs(),
-		Provider:        strings.TrimSpace(cfg.LLM.Provider),
-		BaseURL:         strings.TrimSpace(cfg.LLM.BaseURL),
-		APIKeyEnv:       strings.TrimSpace(cfg.LLM.APIKeyEnv),
-		Model:           strings.TrimSpace(cfg.LLM.Model),
-		Mock:            cfg.LLM.Mock,
-		Thinking:        thinking,
-		ReasoningEffort: effort,
+		AgentID:           strings.TrimSpace(cfg.AgentID),
+		ActiveProfile:     cfg.LLM.ActiveProfileID(),
+		profileIDs:        cfg.LLM.ProfileIDs(),
+		Provider:          strings.TrimSpace(cfg.LLM.Provider),
+		BaseURL:           strings.TrimSpace(cfg.LLM.BaseURL),
+		APIKeyEnv:         strings.TrimSpace(cfg.LLM.APIKeyEnv),
+		Model:             strings.TrimSpace(cfg.LLM.Model),
+		Mock:              cfg.LLM.Mock,
+		MultimodalEnabled: cfg.MultimodalEnabled(),
+		Thinking:          thinking,
+		ReasoningEffort:   effort,
 	}
 }
 
@@ -85,6 +88,7 @@ func (s *RuntimeSettings) snapshotLocked() LLMSettingsView {
 		Provider:          s.Provider,
 		Model:             s.Model,
 		Mock:              s.Mock,
+		MultimodalEnabled: s.MultimodalEnabled,
 		ThinkingSupported: ThinkingSupported(s.Provider),
 	}
 	if view.ThinkingSupported {
@@ -196,6 +200,7 @@ func (s *RuntimeSettings) SyncFromConfig(cfg *config.Config) {
 	s.APIKeyEnv = strings.TrimSpace(cfg.LLM.APIKeyEnv)
 	s.Model = strings.TrimSpace(cfg.LLM.Model)
 	s.Mock = cfg.LLM.Mock
+	s.MultimodalEnabled = cfg.MultimodalEnabled()
 	thinking, effort := NormalizeThinkingSettings(s.Provider, cfg.LLM.Thinking, cfg.LLM.ReasoningEffort)
 	s.Thinking = thinking
 	s.ReasoningEffort = effort

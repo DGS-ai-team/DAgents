@@ -38,8 +38,8 @@ func TestApplyPatch_llmProfiles(t *testing.T) {
 			Active:       "qwen",
 			MaxToolLoops: 20,
 			Profiles: []LLMProfileSettings{
-				{ID: "default", Provider: "deepseek", Model: "deepseek-chat", APIKeyEnv: "OPENAI_API_KEY"},
-				{ID: "qwen", Provider: "qwen", Model: "qwen-plus", APIKeyEnv: "QWEN_API_KEY"},
+				{ID: "default", Provider: "deepseek", Model: "deepseek-chat", APIKeyEnv: "OPENAI_API_KEY", MultimodalEnabled: false},
+				{ID: "qwen", Provider: "qwen", Model: "qwen-plus", APIKeyEnv: "QWEN_API_KEY", MultimodalEnabled: true},
 			},
 		},
 	})
@@ -49,9 +49,22 @@ func TestApplyPatch_llmProfiles(t *testing.T) {
 	if updated.LLM.Active != "qwen" || updated.LLM.Provider != "qwen" || updated.LLM.Model != "qwen-plus" {
 		t.Fatalf("llm = %+v", updated.LLM)
 	}
+	if !updated.MultimodalEnabled() {
+		t.Fatal("expected multimodal enabled from active profile")
+	}
 	view := ViewFromConfig(updated)
 	if view.LLM.Active != "qwen" || len(view.LLM.Profiles) != 2 {
 		t.Fatalf("view llm = %+v", view.LLM)
+	}
+	var qwen *LLMProfileSettings
+	for i := range view.LLM.Profiles {
+		if view.LLM.Profiles[i].ID == "qwen" {
+			qwen = &view.LLM.Profiles[i]
+			break
+		}
+	}
+	if qwen == nil || !qwen.MultimodalEnabled {
+		t.Fatalf("qwen profile view = %+v", qwen)
 	}
 }
 

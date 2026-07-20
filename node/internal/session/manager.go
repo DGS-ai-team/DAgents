@@ -106,6 +106,21 @@ func NewManager(
 	}
 }
 
+// SetMultimodalEnabled 热更新多模态开关（跟随 LLM 档案切换）。
+func (m *Manager) SetMultimodalEnabled(enabled bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.turn.MultimodalEnabled = enabled
+	for _, rt := range m.sessions {
+		if rt != nil && rt.orch != nil {
+			rt.orch.SetMultimodalEnabled(enabled)
+		}
+	}
+}
+
 // SetTriggerDeliveryTracker 注入 trigger 待消费跟踪器；对已存在 session 同步生效。
 func (m *Manager) SetTriggerDeliveryTracker(tracker triggers.DeliveryTracker) {
 	m.mu.Lock()

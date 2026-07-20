@@ -94,7 +94,12 @@ const inputStripLeftText = computed(() => {
 const inputStripRightText = computed(() => inputStripRight());
 
 const showCancel = computed(() => props.sending && !props.hitlBusy);
-const multimodalEnabled = computed(() => Boolean(chromeStore.agentInfo?.multimodal_enabled));
+const multimodalEnabled = computed(() => {
+  if (typeof chromeStore.llmSettings?.multimodal_enabled === "boolean") {
+    return chromeStore.llmSettings.multimodal_enabled;
+  }
+  return Boolean(chromeStore.agentInfo?.multimodal_enabled);
+});
 const canSubmit = computed(
   () => !props.disabled && !props.sending && (!!input.value.trim() || pendingImages.value.length > 0),
 );
