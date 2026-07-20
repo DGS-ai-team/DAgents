@@ -68,7 +68,7 @@ func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 	}
 	hostsnapshot.CaptureAtStartup()
 	prompt := BuildSystemPrompt(SystemPromptInput{
-		NodeID: "ops-01",
+		AgentID: "ops-01",
 		FSRoot:  root,
 	})
 	if !containsAll(prompt, "外置 CLI 与工具", "mycli", "externaltools_menu.md", "编译好的二进制") {
