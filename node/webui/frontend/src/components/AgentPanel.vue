@@ -160,7 +160,6 @@ defineExpose({ refresh, setDeleting, openCreate });
               <span v-else class="agent-list-item__title" @dblclick.stop="startRename(a)">{{ agentDisplayTitle(a) }}</span>
             </div>
             <div class="agent-list-item__meta">
-              <span class="agent-list-item__count">{{ a.template_id || "—" }}</span>
               <span v-if="a.sandbox_enabled" class="agent-list-item__badge agent-list-item__badge--live">沙箱</span>
               <span v-if="a.updated_at" class="agent-list-item__time">{{ formatRelativeTime(a.updated_at) }}</span>
             </div>
