@@ -16,12 +16,16 @@ const TodayDateMessageName = llm.UserNameDate
 
 // InjectTodayDateHook 在 turn.before_step 检查 history，必要时追加当天日期 human message。
 type InjectTodayDateHook struct {
+	cfg InjectTodayDateConfig
 	now func() time.Time
 }
 
 // NewInjectTodayDateHook 构造内置当天日期注入 Hook。
-func NewInjectTodayDateHook() *InjectTodayDateHook {
-	return &InjectTodayDateHook{now: time.Now}
+func NewInjectTodayDateHook(cfg InjectTodayDateConfig) *InjectTodayDateHook {
+	return &InjectTodayDateHook{
+		cfg: InjectTodayDateConfigOrDefault(cfg),
+		now: time.Now,
+	}
 }
 
 // SetNow 注入时钟（单测）。
@@ -40,7 +44,7 @@ func (h *InjectTodayDateHook) Phases() []Phase { return []Phase{PhaseTurnBeforeS
 // Run 若 history 中尚无「当天日期为：YYYYMMDD」则插入一条 user 消息。
 // 插入位置：若末条为非日期 user，则插在其前，避免盖住本轮用户问题；否则追加到末尾。
 func (h *InjectTodayDateHook) Run(_ context.Context, hc *Context, _ Host) (Result, error) {
-	if h == nil {
+	if h == nil || !h.cfg.IsEnabled() {
 		return Result{Action: ActionContinue}, nil
 	}
 	nowFn := h.now

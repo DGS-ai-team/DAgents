@@ -190,6 +190,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 
 	hub := stream.NewHub(256, logger)
 	hostsnapshot.CaptureAtStartup()
+	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
 	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
 		FSRoot:                   cfg.FSRoot,
@@ -215,6 +216,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			Tools:                cfg.ToolResultHookTools(),
 			FSRoot:               cfg.FSRoot,
 		},
+		InjectTodayDate: hooks.InjectTodayDateConfig{Enabled: &injectTodayDateEnabled},
 		PluginHooks: hooks.PluginsConfigFromShared(cfg.Hooks, cfg.RuntimeDir()),
 		HookHost: turn.HookHostConfig{
 			MaxLLMCalls:   cfg.HooksHostMaxLLMCalls(),

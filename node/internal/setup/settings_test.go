@@ -155,3 +155,32 @@ func TestApplyPatch_compressionBlockingLessThanSilent(t *testing.T) {
 		t.Fatal("expected blocking < silent error")
 	}
 }
+
+func TestApplyPatch_injectTodayDateHook(t *testing.T) {
+	cfg := testBaseConfig(t)
+	if !cfg.InjectTodayDateHookEnabled() {
+		t.Fatal("expected default enabled")
+	}
+	view := ViewFromConfig(cfg)
+	if !view.Hooks.InjectTodayDateEnabled {
+		t.Fatal("view should show enabled")
+	}
+	updated, err := ApplyPatch(cfg, SettingsPatch{
+		Hooks: &HooksSettings{
+			DuplicateToolCallEnabled:       true,
+			DuplicateToolCallWindowSeconds: 60,
+			ToolResultEnabled:              true,
+			ToolResultSpillThresholdTokens: 12000,
+			InjectTodayDateEnabled:         false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.InjectTodayDateHookEnabled() {
+		t.Fatal("expected disabled after patch")
+	}
+	if ViewFromConfig(updated).Hooks.InjectTodayDateEnabled {
+		t.Fatal("view should show disabled")
+	}
+}

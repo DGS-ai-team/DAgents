@@ -144,6 +144,7 @@ type HooksConfig struct {
 	Host              HookHostConfig              `yaml:"host"`
 	DuplicateToolCall DuplicateToolCallHookConfig `yaml:"duplicate_tool_call"`
 	ToolResult        ToolResultHookConfig        `yaml:"tool_result"`
+	InjectTodayDate   InjectTodayDateHookConfig   `yaml:"inject_today_date"`
 }
 
 // HookPluginConfig 为 in-process Go plugin（.so）配置。
@@ -184,6 +185,12 @@ type DuplicateToolCallHookConfig struct {
 	WindowSeconds int `yaml:"window_seconds"`
 }
 
+// InjectTodayDateHookConfig 控制 turn.before_step 注入「当天日期为：YYYYMMDD」human message。
+type InjectTodayDateHookConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled *bool `yaml:"enabled"`
+}
+
 const defaultDuplicateToolCallWindowSeconds = 60
 
 // HooksHostMaxLLMCalls 返回 turn 内 Hook LLM 调用配额（默认 2）。
@@ -216,6 +223,14 @@ func (c *Config) DuplicateToolCallWindowSeconds() int {
 		return defaultDuplicateToolCallWindowSeconds
 	}
 	return c.Hooks.DuplicateToolCall.WindowSeconds
+}
+
+// InjectTodayDateHookEnabled 是否启用当天日期注入 Hook。
+func (c *Config) InjectTodayDateHookEnabled() bool {
+	if c == nil || c.Hooks.InjectTodayDate.Enabled == nil {
+		return true
+	}
+	return *c.Hooks.InjectTodayDate.Enabled
 }
 
 const defaultToolResultSpillThresholdTokens = 12000

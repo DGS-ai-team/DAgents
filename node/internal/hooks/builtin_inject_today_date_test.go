@@ -37,7 +37,7 @@ func TestHasTodayDateMessage(t *testing.T) {
 }
 
 func TestInjectTodayDateHook_insertsBeforeLastUserWhenMissing(t *testing.T) {
-	hook := NewInjectTodayDateHook()
+	hook := NewInjectTodayDateHook(DefaultInjectTodayDateConfig())
 	hook.SetNow(func() time.Time {
 		return time.Date(2026, 7, 20, 9, 0, 0, 0, time.Local)
 	})
@@ -62,7 +62,7 @@ func TestInjectTodayDateHook_insertsBeforeLastUserWhenMissing(t *testing.T) {
 }
 
 func TestInjectTodayDateHook_skipsWhenTodayPresent(t *testing.T) {
-	hook := NewInjectTodayDateHook()
+	hook := NewInjectTodayDateHook(DefaultInjectTodayDateConfig())
 	hook.SetNow(func() time.Time {
 		return time.Date(2026, 7, 20, 9, 0, 0, 0, time.Local)
 	})
@@ -83,7 +83,7 @@ func TestInjectTodayDateHook_skipsWhenTodayPresent(t *testing.T) {
 }
 
 func TestInjectTodayDateHook_insertsWhenStaleDate(t *testing.T) {
-	hook := NewInjectTodayDateHook()
+	hook := NewInjectTodayDateHook(DefaultInjectTodayDateConfig())
 	hook.SetNow(func() time.Time {
 		return time.Date(2026, 7, 20, 9, 0, 0, 0, time.Local)
 	})
@@ -101,6 +101,22 @@ func TestInjectTodayDateHook_insertsWhenStaleDate(t *testing.T) {
 	ins, ok := res.Mutations[MutationHistoryInsert].(HistoryInsertMutation)
 	if !ok || ins.Message.Content != "当天日期为：20260720" || ins.Index != 1 {
 		t.Fatalf("mutations = %+v", res.Mutations)
+	}
+}
+
+func TestInjectTodayDateHook_disabled(t *testing.T) {
+	enabled := false
+	hook := NewInjectTodayDateHook(InjectTodayDateConfig{Enabled: &enabled})
+	hc := &Context{
+		Phase:   PhaseTurnBeforeStep,
+		History: []llm.Message{llm.UserMessage("hi", llm.UserNameHuman)},
+	}
+	res, err := hook.Run(context.Background(), hc, NoopHost())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Mutations) != 0 {
+		t.Fatalf("expected no mutation when disabled, got %+v", res.Mutations)
 	}
 }
 

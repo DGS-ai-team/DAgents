@@ -63,11 +63,12 @@ func (c ToolResultConfig) toToolresultConfig() toolresult.Config {
 
 // RuntimeConfig 为 Orchestrator 注入的 Hook 运行时配置。
 type RuntimeConfig struct {
-	Duplicate      DuplicateConfig
-	ToolResult     ToolResultConfig
-	AgentOwnedFile AgentOwnedFileConfig
-	Plugins        PluginsConfig
-	Logger         *slog.Logger
+	Duplicate       DuplicateConfig
+	ToolResult      ToolResultConfig
+	AgentOwnedFile  AgentOwnedFileConfig
+	InjectTodayDate InjectTodayDateConfig
+	Plugins         PluginsConfig
+	Logger          *slog.Logger
 }
 
 // AgentOwnedFileConfig 控制 Agent 自有文件写操作信任链。
@@ -100,5 +101,6 @@ func RuntimeConfigOrDefault(c RuntimeConfig) RuntimeConfig {
 	out.Duplicate = DuplicateConfigOrDefault(c.Duplicate)
 	out.ToolResult = ToolResultConfigOrDefault(c.ToolResult)
 	out.AgentOwnedFile = AgentOwnedFileConfigOrDefault(c.AgentOwnedFile)
+	out.InjectTodayDate = InjectTodayDateConfigOrDefault(c.InjectTodayDate)
 	return out
 }

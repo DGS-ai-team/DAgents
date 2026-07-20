@@ -123,10 +123,11 @@ type ToolsSettings struct {
 
 // HooksSettings 常用 Hook 开关（不含 plugin 列表）。
 type HooksSettings struct {
-	DuplicateToolCallEnabled      bool `json:"duplicate_tool_call_enabled"`
+	DuplicateToolCallEnabled       bool `json:"duplicate_tool_call_enabled"`
 	DuplicateToolCallWindowSeconds int  `json:"duplicate_tool_call_window_seconds"`
-	ToolResultEnabled             bool `json:"tool_result_enabled"`
+	ToolResultEnabled              bool `json:"tool_result_enabled"`
 	ToolResultSpillThresholdTokens int  `json:"tool_result_spill_threshold_tokens"`
+	InjectTodayDateEnabled         bool `json:"inject_today_date_enabled"`
 }
 
 // SettingsView GET /v1/setup/config 响应。
@@ -257,6 +258,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			DuplicateToolCallWindowSeconds: cfg.DuplicateToolCallWindowSeconds(),
 			ToolResultEnabled:              cfg.ToolResultHookEnabled(),
 			ToolResultSpillThresholdTokens: cfg.ToolResultSpillThresholdTokens(),
+			InjectTodayDateEnabled:         cfg.InjectTodayDateHookEnabled(),
 		},
 	}
 }
@@ -589,6 +591,7 @@ func applyHooksPatch(cfg *config.Config, p HooksSettings) error {
 	if p.ToolResultSpillThresholdTokens > 0 {
 		cfg.Hooks.ToolResult.SpillThresholdTokens = p.ToolResultSpillThresholdTokens
 	}
+	cfg.Hooks.InjectTodayDate.Enabled = boolPtr(p.InjectTodayDateEnabled)
 	return nil
 }
 
