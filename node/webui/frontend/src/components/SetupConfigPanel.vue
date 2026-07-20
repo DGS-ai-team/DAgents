@@ -67,11 +67,18 @@ function onModalConfirm(payload) {
       multimodal_enabled: !!payload.multimodal_enabled,
     });
   } else {
-    const target = form.llm.profiles.find((p) => p.id === editingId.value);
+    const fromId = String(payload.original_id || editingId.value || "").trim();
+    const target = form.llm.profiles.find((p) => p.id === fromId);
     if (!target) {
       error.value = "配置不存在";
       return;
     }
+    const nextId = String(payload.id || "").trim();
+    if (nextId !== fromId && form.llm.profiles.some((p) => p.id === nextId)) {
+      error.value = `配置「${nextId}」已存在`;
+      return;
+    }
+    target.id = nextId;
     target.provider = payload.provider;
     target.base_url = payload.base_url;
     target.model = payload.model;
@@ -79,6 +86,7 @@ function onModalConfirm(payload) {
     target.clear_api_key = !!payload.clear_api_key;
     target.mock = !!payload.mock;
     target.multimodal_enabled = !!payload.multimodal_enabled;
+    editingId.value = nextId;
   }
   modalOpen.value = false;
 }
@@ -171,7 +179,7 @@ onMounted(async () => {
         <h2 class="settings-section__title">LLM 配置</h2>
         <button type="button" class="btn btn--ghost btn--sm" @click="openCreateModal">新增</button>
       </div>
-      <p class="settings-section__desc">列表第一条为默认；点击卡片可编辑，Key 可留空。</p>
+      <p class="settings-section__desc">列表第一条为默认；点击卡片可编辑名称（输入栏展示）。Key 可留空。</p>
 
       <div class="llm-config-cards">
         <article

@@ -87,7 +87,14 @@ export function getAgent(agentId) {
 }
 
 export function patchAgent(agentId, patch) {
-  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body: patch });
+  const body = {};
+  if (patch?.displayName != null || patch?.display_name != null) {
+    body.display_name = patch.displayName ?? patch.display_name;
+  }
+  if (patch?.llmActive != null || patch?.llm_active != null) {
+    body.llm_active = patch.llmActive ?? patch.llm_active;
+  }
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body });
 }
 
 export function deleteAgent(agentId) {

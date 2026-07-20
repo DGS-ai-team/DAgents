@@ -19,10 +19,11 @@ const effort = computed(() => String(props.llmSettings?.reasoning_effort || "hig
 
 const profiles = computed(() => {
   const list = props.llmSettings?.profiles;
-  return Array.isArray(list) ? list : [];
+  return Array.isArray(list) ? list.map((id) => String(id || "").trim()).filter(Boolean) : [];
 });
 const activeProfile = computed(() => String(props.llmSettings?.active_profile || "").trim());
-const showProfileSwitch = computed(() => profiles.value.length > 1);
+const showProfileSwitch = computed(() => profiles.value.length > 0);
+const activeLabel = computed(() => activeProfile.value || props.llmSettings?.model || "Auto");
 
 const prefillingActive = computed(() => {
   void statusStore.tick;
@@ -47,8 +48,8 @@ function onProfileChange(event) {
       <select
         class="composer-toolbar__select"
         :value="activeProfile"
-        :disabled="disabled"
-        :title="`${llmSettings?.provider || ''} / ${llmSettings?.model || ''}`"
+        :disabled="disabled || profiles.length <= 1"
+        :title="`${llmSettings?.provider || ''} / ${llmSettings?.model || activeLabel}`"
         @change="onProfileChange"
       >
         <option v-for="id in profiles" :key="id" :value="id">{{ id }}</option>
@@ -57,9 +58,9 @@ function onProfileChange(event) {
     <span
       v-else
       class="composer-toolbar__model"
-      :title="`${llmSettings?.provider || ''} / ${llmSettings?.model || activeProfile || 'model'}`"
+      :title="`${llmSettings?.provider || ''} / ${llmSettings?.model || activeLabel}`"
     >
-      {{ llmSettings?.model || activeProfile || "Auto" }}
+      {{ activeLabel }}
     </span>
     <button
       v-if="thinkingSupported"

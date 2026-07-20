@@ -154,6 +154,20 @@ func MultimodalEnabledFromDefaults(snap Snapshot) *bool {
 	return nil
 }
 
+// LLMActiveFromDefaults 读取 defaults.llm.active（Agent 绑定的 Node LLM 配置 id）。
+func LLMActiveFromDefaults(snap Snapshot) string {
+	llmRaw, ok := snap.Defaults["llm"]
+	if !ok || llmRaw == nil {
+		return ""
+	}
+	llmMap, ok := llmRaw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	active, _ := llmMap["active"].(string)
+	return strings.TrimSpace(active)
+}
+
 // MaxToolLoopsFromDefaults 读取 defaults.llm.max_tool_loops；无则返回 0。
 func MaxToolLoopsFromDefaults(snap Snapshot) int {
 	llmRaw, ok := snap.Defaults["llm"]
