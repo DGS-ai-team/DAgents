@@ -4,16 +4,15 @@ import { setChildAwaitingApproval } from "./remoteWorkers.js";
 import {
   applyHydrateSeqHint,
   applyHydrateTurnState,
-  ackSessionAfterHydrate,
+  ackAgentAfterHydrate,
   ensureAgent,
   finishTurn,
   persistAgentId,
-  sessionStore,
-} from "./session.js";
+} from "./agent.js";
 import { loadTranscriptFromHydrate } from "./transcript.js";
 
 /** ensureAgent → GET /v1/agents/{id}/hydrate → 灌 transcript + pending HITL + SSE 水位。 */
-export async function hydrateSession() {
+export async function hydrateAgent() {
   const agentId = await ensureAgent();
   const data = await api.getAgentHydrate(agentId);
   loadTranscriptFromHydrate(data?.transcript);
@@ -24,7 +23,7 @@ export async function hydrateSession() {
     setChildAwaitingApproval(approval.child_session_id, true);
   }
   applyHydrateSeqHint(data?.sse_seq_hint);
-  ackSessionAfterHydrate();
+  ackAgentAfterHydrate();
   applyHydrateTurnState({
     run_turn_phase: data?.run_turn_phase,
     has_active_turn: !!data?.has_active_turn,
@@ -37,11 +36,11 @@ export async function hydrateSession() {
   return data;
 }
 
-/** 解析深链 ?agent= 或旧 ?session=。 */
+/** 解析深链 ?agent=。 */
 export function consumeStartupURL() {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams(window.location.search);
-  const agent = params.get("agent")?.trim() || params.get("session")?.trim();
+  const agent = params.get("agent")?.trim();
   if (agent) {
     persistAgentId(agent);
   }

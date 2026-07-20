@@ -9,9 +9,9 @@ export const HELP_SHORTCUTS = [
 
 export const HELP_SECTIONS = [
   {
-    title: "Session",
+    title: "Agent",
     items: [
-      { cmd: "/status", desc: "Agent、LLM 与当前 session 状态" },
+      { cmd: "/status", desc: "Agent、LLM 与当前对话状态" },
       { cmd: "/version", desc: "当前版本与更新检查" },
       { cmd: "/update", desc: "查看可用升级（终端执行 dagents update）" },
       { cmd: "/agents", desc: "列出 Agent（/ls 同义）" },
@@ -27,8 +27,8 @@ export const HELP_SECTIONS = [
     items: [
       { cmd: "/context", desc: "设置 › 上下文：完整 LLM 消息列表" },
       { cmd: "/skill", desc: "已加载 / 可用 skills 列表" },
-      { cmd: "/skill load NAME", desc: "加载 skill 到当前 session" },
-      { cmd: "/skill unload NAME", desc: "从 session 卸载 skill" },
+      { cmd: "/skill load NAME", desc: "加载 skill 到当前 Agent" },
+      { cmd: "/skill unload NAME", desc: "从当前 Agent 卸载 skill" },
       { cmd: "/children", desc: "子 Agent 列表（/child 同义）" },
       { cmd: "/compress", desc: "手动触发阻塞压缩" },
     ],

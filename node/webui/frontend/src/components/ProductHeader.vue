@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { chromeStore } from "../stores/chrome.js";
-import { sessionStore } from "../stores/session.js";
+import { agentStore } from "../stores/agent.js";
 import { themeStore, toggleTheme } from "../stores/theme.js";
 import brandIcon from "../assets/brand-icon.png";
 
@@ -21,7 +21,7 @@ const statusLabel = computed(() => {
   return "离线";
 });
 const inSettings = computed(() => route.path.startsWith("/settings"));
-const canOpenActivity = computed(() => !inSettings.value && !!sessionStore.sessionId);
+const canOpenActivity = computed(() => !inSettings.value && !!agentStore.agentId);
 const activityOpen = computed(() => chromeStore.panel === "activity");
 const themeLabel = computed(() => (themeStore.mode === "dark" ? "切换浅色主题" : "切换深色主题"));
 
@@ -30,7 +30,7 @@ function openChat() {
 }
 
 function openActivity() {
-  if (!sessionStore.sessionId) return;
+  if (!agentStore.agentId) return;
   chromeStore.panel = chromeStore.panel === "activity" ? null : "activity";
 }
 

@@ -9,8 +9,8 @@ import ContextPanel from "../../components/ContextPanel.vue";
     <ContextConfigPanel />
 
     <section class="settings-section settings-section--standalone settings-section--debug">
-      <h2 class="settings-section__title">当前会话消息</h2>
-      <p class="settings-section__desc">用于查看本会话已发给模型的消息，一般无需日常调整。</p>
+      <h2 class="settings-section__title">当前对话消息</h2>
+      <p class="settings-section__desc">用于查看本 Agent 已发给模型的消息，一般无需日常调整。</p>
       <ContextPanel embedded />
     </section>
   </div>

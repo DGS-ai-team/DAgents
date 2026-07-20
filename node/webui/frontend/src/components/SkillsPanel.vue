@@ -1,10 +1,10 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
-import { sessionStore } from "../stores/session.js";
+import { agentStore } from "../stores/agent.js";
 
 const props = defineProps({
-  sessionId: { type: String, default: "" },
+  agentId: { type: String, default: "" },
   embedded: { type: Boolean, default: false },
 });
 
@@ -48,7 +48,7 @@ function isLoaded(name) {
 }
 
 async function load() {
-  const sid = props.sessionId || sessionStore.sessionId;
+  const sid = props.agentId || agentStore.agentId;
   if (!sid) return;
   loading.value = true;
   error.value = "";
@@ -63,7 +63,7 @@ async function load() {
 }
 
 async function handleLoad(name) {
-  const sid = props.sessionId || sessionStore.sessionId;
+  const sid = props.agentId || agentStore.agentId;
   if (!sid || !name || busySkill.value) return;
   busySkill.value = name;
   error.value = "";
@@ -78,7 +78,7 @@ async function handleLoad(name) {
 }
 
 async function handleUnload(name) {
-  const sid = props.sessionId || sessionStore.sessionId;
+  const sid = props.agentId || agentStore.agentId;
   if (!sid || !name || busySkill.value) return;
   busySkill.value = name;
   error.value = "";
@@ -93,7 +93,7 @@ async function handleUnload(name) {
 }
 
 onMounted(load);
-watch(() => props.sessionId || sessionStore.sessionId, load);
+watch(() => props.agentId || agentStore.agentId, load);
 </script>
 
 <template>
@@ -101,7 +101,7 @@ watch(() => props.sessionId || sessionStore.sessionId, load);
     <header class="panel__header skills-panel__header">
       <div>
         <div class="panel__title">技能</div>
-        <div v-if="!embedded" class="skills-panel__subtitle">{{ sessionId || sessionStore.sessionId || "—" }}</div>
+        <div v-if="!embedded" class="skills-panel__subtitle">{{ agentId || agentStore.agentId || "—" }}</div>
       </div>
       <div class="skills-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
@@ -137,7 +137,7 @@ watch(() => props.sessionId || sessionStore.sessionId, load);
               </button>
             </li>
           </ul>
-          <p v-else class="skills-panel__empty">当前 session 未加载任何 skill</p>
+          <p v-else class="skills-panel__empty">当前 Agent 未加载任何 skill</p>
         </section>
 
         <section class="skills-section">

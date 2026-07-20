@@ -1,11 +1,11 @@
 <script setup>
 import { computed } from "vue";
-import { sessionStore } from "../../stores/session.js";
+import { agentStore } from "../../stores/agent.js";
 import { useChildAgents, formatChildAgentStatus, isChildAgentActive } from "../../composables/useChildAgents.js";
 import { formatRelativeTime } from "../../utils/format.js";
 import { shortId } from "../../utils/panelFormat.js";
 
-const sessionId = computed(() => sessionStore.sessionId);
+const agentId = computed(() => agentStore.agentId);
 
 const {
   loading,
@@ -15,27 +15,27 @@ const {
   statusMessage,
   load,
   cancelChild,
-} = useChildAgents(sessionId);
+} = useChildAgents(agentId);
 </script>
 
 <template>
   <section class="settings-section child-agents-section">
     <div class="settings-section__head">
       <h2 class="settings-section__title">子 Agent</h2>
-      <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || !sessionId" @click="load">
+      <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || !agentId" @click="load">
         刷新
       </button>
     </div>
     <p class="settings-section__desc">
-      当前会话下由主 Agent 派生的临时子 Agent。运行中的任务可在此取消。
+      当前 Agent 下由主 Agent 派生的临时子 Agent。运行中的任务可在此取消。
     </p>
 
-    <p v-if="!sessionId" class="child-agents-section__empty">请先在聊天页打开一个 Agent。</p>
+    <p v-if="!agentId" class="child-agents-section__empty">请先在聊天页打开一个 Agent。</p>
     <div v-else-if="loading && !items.length" class="child-agents-section__empty">加载中…</div>
     <div v-else-if="error" class="command-panel__error">{{ error }}</div>
     <p v-else-if="statusMessage" class="child-agents-section__status">{{ statusMessage }}</p>
 
-    <ul v-if="sessionId && items.length" class="command-card-list child-agents-section__list">
+    <ul v-if="agentId && items.length" class="command-card-list child-agents-section__list">
       <li
         v-for="item in items"
         :key="item.child_session_id"
@@ -80,6 +80,6 @@ const {
         </div>
       </li>
     </ul>
-    <p v-else-if="sessionId && !loading && !error" class="child-agents-section__empty">当前会话暂无子 Agent</p>
+    <p v-else-if="agentId && !loading && !error" class="child-agents-section__empty">当前 Agent 暂无子 Agent</p>
   </section>
 </template>

@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref } from "vue";
 import * as api from "../api/node.js";
-import { sessionStore } from "../stores/session.js";
+import { agentStore } from "../stores/agent.js";
 import { chromeStore } from "../stores/chrome.js";
 
 defineProps({
@@ -24,7 +24,7 @@ async function load() {
       health,
       agent: info,
       llm,
-      session_id: sessionStore.sessionId,
+      agent_id: agentStore.agentId,
     };
     chromeStore.agentInfo = { ...health, ...info };
     chromeStore.llmSettings = llm;
@@ -73,8 +73,8 @@ onMounted(load);
             <span class="command-stat__value">{{ data.health?.version || "—" }}</span>
           </div>
           <div class="command-stat">
-            <span class="command-stat__label">Session</span>
-            <span class="command-stat__value command-stat__value--mono">{{ data.session_id || "—" }}</span>
+            <span class="command-stat__label">Agent</span>
+            <span class="command-stat__value command-stat__value--mono">{{ data.agent_id || "—" }}</span>
           </div>
           <div class="command-stat">
             <span class="command-stat__label">Health</span>

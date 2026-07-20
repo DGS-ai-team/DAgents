@@ -71,6 +71,7 @@ func (s *Server) handleGetAgentTemplate(w http.ResponseWriter, r *http.Request) 
 type createAgentRequest struct {
 	TemplateID  string `json:"template_id"`
 	DisplayName string `json:"display_name"`
+	Origin      string `json:"origin"` // 预留：local | remote；缺省 local
 	Sandbox     *struct {
 		Enabled *bool   `json:"enabled"`
 		Backend *string `json:"backend"`
@@ -82,6 +83,7 @@ type agentView struct {
 	AgentID        string          `json:"agent_id"`
 	DisplayName    string          `json:"display_name"`
 	TemplateID     string          `json:"template_id"`
+	Origin         string          `json:"origin"`
 	SandboxEnabled bool            `json:"sandbox_enabled"`
 	SandboxBackend string          `json:"sandbox_backend"`
 	ConfigSnapshot json.RawMessage `json:"config_snapshot,omitempty"`
@@ -94,6 +96,7 @@ func agentViewFromRecord(rec store.AgentRecord) agentView {
 		AgentID:        rec.AgentID,
 		DisplayName:    rec.DisplayName,
 		TemplateID:     rec.TemplateID,
+		Origin:         store.NormalizeAgentOrigin(rec.Origin),
 		SandboxEnabled: rec.SandboxEnabled,
 		SandboxBackend: rec.SandboxBackend,
 		ConfigSnapshot: rec.ConfigSnapshot,
@@ -182,6 +185,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		AgentID:        agentID,
 		DisplayName:    name,
 		TemplateID:     tpl.ID,
+		Origin:         store.NormalizeAgentOrigin(req.Origin),
 		SandboxEnabled: sandboxEnabled,
 		SandboxBackend: sandboxBackend,
 		ConfigSnapshot: snapRaw,

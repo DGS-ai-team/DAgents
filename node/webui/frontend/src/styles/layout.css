@@ -109,7 +109,7 @@
   grid-template-columns: 240px minmax(0, 1fr) minmax(260px, 300px);
 }
 
-.app__col--sessions {
+.app__col--agents {
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -118,7 +118,7 @@
   background: var(--color-sidebar);
 }
 
-.app__col--sessions .session-panel {
+.app__col--agents .agent-panel {
   flex: 1;
   min-height: 0;
 }
@@ -193,12 +193,12 @@
   height: 17px;
 }
 
-.session-history-item__badge--unread {
+.agent-list-item__badge--unread {
   background: rgba(239, 68, 68, 0.14);
   color: #b91c1c;
 }
 
-.session-history-item__badge--hitl {
+.agent-list-item__badge--hitl {
   background: rgba(217, 119, 6, 0.16);
   color: #b45309;
 }

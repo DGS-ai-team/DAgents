@@ -127,15 +127,7 @@ export function compressContext(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/compress`, { method: "POST", body: {} });
 }
 
-export function getSessionContext(agentId, { fullMessages = false } = {}) {
-  return getAgentContext(agentId, { fullMessages });
-}
-
-export function getSessionHydrate(agentId) {
-  return getAgentHydrate(agentId);
-}
-
-export function postSessionAck(agentId, sseSeq) {
+export function postAgentAck(agentId, sseSeq) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/ack`, {
     method: "POST",
     body: { sse_seq: sseSeq },
@@ -155,10 +147,6 @@ export function submitResume(agentId, resumeValue) {
     method: "POST",
     body: { agent_id: agentId, request_type: "resume", resume_value: resumeValue },
   });
-}
-
-export function cancelTurn(agentId) {
-  return cancelAgentTurn(agentId);
 }
 
 export function listSkills(agentId) {

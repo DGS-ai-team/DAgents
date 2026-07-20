@@ -7,25 +7,25 @@ vi.stubGlobal("localStorage", {
 });
 
 vi.mock("../api/node.js", () => ({
-  postSessionAck: vi.fn(() => Promise.resolve({ ack_seq: 1 })),
+  postAgentAck: vi.fn(() => Promise.resolve({ ack_seq: 1 })),
   ensureAgentRuntime: vi.fn(() => Promise.resolve({ ok: true })),
 }));
 
-let sessionStore;
+let agentStore;
 let markEventApplied;
 let resetEventTracking;
-let ackSessionAfterHydrate;
+let ackAgentAfterHydrate;
 let shouldAckSSEEvent;
 let transcriptStore;
 let api;
 
 beforeAll(async () => {
   api = await import("../api/node.js");
-  const mod = await import("./session.js");
-  sessionStore = mod.sessionStore;
+  const mod = await import("./agent.js");
+  agentStore = mod.agentStore;
   markEventApplied = mod.markEventApplied;
   resetEventTracking = mod.resetEventTracking;
-  ackSessionAfterHydrate = mod.ackSessionAfterHydrate;
+  ackAgentAfterHydrate = mod.ackAgentAfterHydrate;
   shouldAckSSEEvent = mod.shouldAckSSEEvent;
   transcriptStore = (await import("./transcript.js")).transcriptStore;
 });
@@ -48,10 +48,10 @@ describe("shouldAckSSEEvent", () => {
   });
 });
 
-describe("session ack", () => {
+describe("agent ack", () => {
   beforeEach(() => {
-    vi.mocked(api.postSessionAck).mockClear();
-    sessionStore.sessionId = "sess-test";
+    vi.mocked(api.postAgentAck).mockClear();
+    agentStore.agentId = "agt-test";
     transcriptStore.lastSeq = 0;
     resetEventTracking();
   });
@@ -66,20 +66,20 @@ describe("session ack", () => {
     markEventApplied(3);
     await Promise.resolve();
     expect(transcriptStore.lastSeq).toBe(3);
-    expect(api.postSessionAck).not.toHaveBeenCalled();
+    expect(api.postAgentAck).not.toHaveBeenCalled();
   });
 
   it("POSTs ack only when ack flag set", async () => {
     markEventApplied(5, { ack: true });
     await Promise.resolve();
-    expect(api.postSessionAck).toHaveBeenCalledTimes(1);
-    expect(api.postSessionAck).toHaveBeenCalledWith("sess-test", 5);
+    expect(api.postAgentAck).toHaveBeenCalledTimes(1);
+    expect(api.postAgentAck).toHaveBeenCalledWith("agt-test", 5);
   });
 
-  it("ackSessionAfterHydrate flushes immediately", async () => {
+  it("ackAgentAfterHydrate flushes immediately", async () => {
     transcriptStore.lastSeq = 12;
-    ackSessionAfterHydrate();
+    ackAgentAfterHydrate();
     await Promise.resolve();
-    expect(api.postSessionAck).toHaveBeenCalledWith("sess-test", 12);
+    expect(api.postAgentAck).toHaveBeenCalledWith("agt-test", 12);
   });
 });

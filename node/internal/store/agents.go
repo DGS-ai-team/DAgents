@@ -13,11 +13,28 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Agent 来源（预留）：本地本机实例 / 远端对等节点。
+const (
+	AgentOriginLocal  = "local"
+	AgentOriginRemote = "remote"
+)
+
+// NormalizeAgentOrigin 规范化 origin；空值默认 local。
+func NormalizeAgentOrigin(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case AgentOriginRemote:
+		return AgentOriginRemote
+	default:
+		return AgentOriginLocal
+	}
+}
+
 // AgentRecord 为 Agent 实例元数据。
 type AgentRecord struct {
 	AgentID        string
 	DisplayName    string
 	TemplateID     string
+	Origin         string // local | remote（预留远端对等）
 	SandboxEnabled bool
 	SandboxBackend string
 	ConfigSnapshot json.RawMessage
@@ -67,6 +84,7 @@ CREATE TABLE IF NOT EXISTS agents (
   agent_id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
   template_id TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'local',
   sandbox_enabled INTEGER NOT NULL DEFAULT 0,
   sandbox_backend TEXT NOT NULL DEFAULT 'process',
   config_snapshot_json TEXT NOT NULL DEFAULT '{}',
@@ -75,6 +93,40 @@ CREATE TABLE IF NOT EXISTS agents (
   updated_at TEXT NOT NULL
 );
 `)
+	if err != nil {
+		return err
+	}
+	return s.ensureOriginColumn()
+}
+
+// ensureOriginColumn 兼容旧库：补 origin 列。
+func (s *AgentStore) ensureOriginColumn() error {
+	rows, err := s.db.Query(`PRAGMA table_info(agents)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	hasOrigin := false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "origin" {
+			hasOrigin = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if hasOrigin {
+		return nil
+	}
+	_, err = s.db.Exec(`ALTER TABLE agents ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'`)
 	return err
 }
 
@@ -95,6 +147,7 @@ func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 	if tpl == "" {
 		return fmt.Errorf("template_id is required")
 	}
+	origin := NormalizeAgentOrigin(rec.Origin)
 	backend := strings.TrimSpace(rec.SandboxBackend)
 	if backend == "" {
 		backend = "process"
@@ -122,18 +175,19 @@ func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO agents (
-  agent_id, display_name, template_id, sandbox_enabled, sandbox_backend,
+  agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
   config_snapshot_json, archived, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(agent_id) DO UPDATE SET
   display_name=excluded.display_name,
   template_id=excluded.template_id,
+  origin=excluded.origin,
   sandbox_enabled=excluded.sandbox_enabled,
   sandbox_backend=excluded.sandbox_backend,
   config_snapshot_json=excluded.config_snapshot_json,
   archived=excluded.archived,
   updated_at=excluded.updated_at
-`, id, name, tpl, sandbox, backend, string(snap), archived,
+`, id, name, tpl, origin, sandbox, backend, string(snap), archived,
 		created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano))
 	return err
 }
@@ -145,7 +199,7 @@ func (s *AgentStore) Get(ctx context.Context, agentID string) (*AgentRecord, err
 	}
 	agentID = strings.TrimSpace(agentID)
 	row := s.db.QueryRowContext(ctx, `
-SELECT agent_id, display_name, template_id, sandbox_enabled, sandbox_backend,
+SELECT agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
        config_snapshot_json, archived, created_at, updated_at
 FROM agents WHERE agent_id = ?`, agentID)
 	return scanAgent(row)
@@ -157,7 +211,7 @@ func (s *AgentStore) List(ctx context.Context) ([]AgentRecord, error) {
 		return nil, fmt.Errorf("agent store unavailable")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT agent_id, display_name, template_id, sandbox_enabled, sandbox_backend,
+SELECT agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
        config_snapshot_json, archived, created_at, updated_at
 FROM agents WHERE archived = 0
 ORDER BY updated_at DESC`)
@@ -203,10 +257,10 @@ type scannable interface {
 
 func scanAgent(row scannable) (*AgentRecord, error) {
 	var (
-		id, name, tpl, backend, snap, created, updated string
-		sandbox, archived                              int
+		id, name, tpl, origin, backend, snap, created, updated string
+		sandbox, archived                                      int
 	)
-	if err := row.Scan(&id, &name, &tpl, &sandbox, &backend, &snap, &archived, &created, &updated); err != nil {
+	if err := row.Scan(&id, &name, &tpl, &origin, &sandbox, &backend, &snap, &archived, &created, &updated); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -218,6 +272,7 @@ func scanAgent(row scannable) (*AgentRecord, error) {
 		AgentID:        id,
 		DisplayName:    name,
 		TemplateID:     tpl,
+		Origin:         NormalizeAgentOrigin(origin),
 		SandboxEnabled: sandbox != 0,
 		SandboxBackend: backend,
 		ConfigSnapshot: json.RawMessage(snap),
