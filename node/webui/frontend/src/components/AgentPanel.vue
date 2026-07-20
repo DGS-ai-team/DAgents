@@ -123,23 +123,25 @@ defineExpose({ refresh, setDeleting, openCreate });
               <span v-if="a.updated_at" class="session-history-item__time">{{ formatRelativeTime(a.updated_at) }}</span>
             </div>
           </div>
-          <button
-            type="button"
-            class="session-history-item__edit"
-            title="重命名"
-            @click.stop="startRename(a)"
-          >
-            ✎
-          </button>
-          <button
-            type="button"
-            class="session-history-item__delete"
-            title="删除 Agent"
-            :disabled="deletingId === agentRecordId(a)"
-            @click.stop="onDelete(a)"
-          >
-            {{ deletingId === agentRecordId(a) ? "…" : "×" }}
-          </button>
+          <div class="session-history-item__actions">
+            <button
+              type="button"
+              class="session-history-item__edit"
+              title="重命名"
+              @click.stop="startRename(a)"
+            >
+              ✎
+            </button>
+            <button
+              type="button"
+              class="session-history-item__delete"
+              title="删除 Agent"
+              :disabled="deletingId === agentRecordId(a)"
+              @click.stop="onDelete(a)"
+            >
+              {{ deletingId === agentRecordId(a) ? "…" : "×" }}
+            </button>
+          </div>
         </li>
         <li v-if="!agents.length" class="session-panel__empty">暂无 Agent，点击 + 从模板创建</li>
       </ul>
