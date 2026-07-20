@@ -71,7 +71,5 @@ export function agentRecordId(agent) {
 export function agentDisplayTitle(agent) {
   const name = String(agent?.display_name || agent?.DisplayName || "").trim();
   if (name) return name.length > 48 ? truncateGraphemes(name, 48) : name;
-  const id = agentRecordId(agent);
-  if (id) return `Agent ${id.slice(0, 8)}`;
   return "未命名 Agent";
 }

@@ -106,7 +106,9 @@ const showAgentCreateModal = ref(false);
 const createModalTemplateId = ref("");
 const agentListCount = ref(null);
 const agentList = ref([]);
+const currentAgentDisplayName = ref("");
 const chatPanelRef = ref(null);
+let agentNameSyncToken = 0;
 
 const entries = computed(() => transcriptStore.entries);
 const hasUserInfoHitl = computed(() => peekHitl()?.kind === "user_information");
@@ -121,11 +123,35 @@ const showNoAgentWelcome = computed(
   () => !agentStore.agentId && agentListCount.value === 0
 );
 const currentAgentTitle = computed(() => {
-  const id = String(agentStore.agentId || "").trim();
-  if (!id) return "";
-  const agent = agentList.value.find((a) => agentRecordId(a) === id);
-  return agent ? agentDisplayTitle(agent) : `Agent ${id.slice(0, 8)}`;
+  if (!String(agentStore.agentId || "").trim()) return "";
+  return String(currentAgentDisplayName.value || "").trim() || "未命名 Agent";
 });
+
+async function syncCurrentAgentDisplayName() {
+  const id = String(agentStore.agentId || "").trim();
+  const token = ++agentNameSyncToken;
+  if (!id) {
+    currentAgentDisplayName.value = "";
+    return;
+  }
+  const fromList = agentList.value.find((a) => agentRecordId(a) === id);
+  if (fromList) {
+    const name = String(fromList.display_name || fromList.DisplayName || "").trim();
+    if (token === agentNameSyncToken) {
+      currentAgentDisplayName.value = name || "未命名 Agent";
+    }
+    return;
+  }
+  try {
+    const agent = await api.getAgent(id);
+    if (token !== agentNameSyncToken) return;
+    const name = String(agent?.display_name || agent?.DisplayName || "").trim();
+    currentAgentDisplayName.value = name || "未命名 Agent";
+  } catch {
+    if (token !== agentNameSyncToken) return;
+    currentAgentDisplayName.value = "未命名 Agent";
+  }
+}
 
 const PANEL_SETTINGS_ROUTES = {
   help: "/settings/about",
@@ -588,6 +614,7 @@ async function openCreateWizard(templateId = "") {
 function onAgentsUpdated(list) {
   agentList.value = Array.isArray(list) ? list.slice() : [];
   agentListCount.value = agentList.value.length;
+  void syncCurrentAgentDisplayName();
 }
 
 function onCreateModalClose() {
@@ -598,6 +625,8 @@ function onCreateModalClose() {
 async function onAgentCreated(created) {
   const id = agentRecordId(created);
   if (!id) return;
+  const createdName = String(created?.display_name || created?.DisplayName || "").trim();
+  if (createdName) currentAgentDisplayName.value = createdName;
   persistAgentId(id);
   clearTranscript();
   resetUsageStrip();
@@ -617,6 +646,7 @@ async function onAgentCreated(created) {
   } catch (e) {
     agentStore.error = e.message;
   }
+  await syncCurrentAgentDisplayName();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
 }
@@ -627,6 +657,7 @@ async function switchAgent(id) {
   resetToolStream();
   resetRemoteWorkers();
   resetUsageStrip();
+  void syncCurrentAgentDisplayName();
   try {
     await hydrateAgent();
     await refreshLLMSettings();
@@ -644,6 +675,7 @@ async function switchAgent(id) {
   syncRouteAgent(id);
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
+  await syncCurrentAgentDisplayName();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
 }
@@ -685,6 +717,7 @@ async function deleteAgentById(payload) {
         chromeStore.sseStatus = "idle";
         agentList.value = [];
         agentListCount.value = 0;
+        currentAgentDisplayName.value = "";
         // 最后一个 Agent 被删时 switchAgent 不会跑，需显式刷新侧栏列表
         await agentPanelRef.value?.refresh?.();
       }
@@ -886,6 +919,7 @@ function onKeydown(e) {
 
 onMounted(async () => {
   await bootstrapAgentFromRoute();
+  await syncCurrentAgentDisplayName();
   await refreshMeta();
   await activateAgentStream();
   refreshContextTokens();
@@ -894,6 +928,13 @@ onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("pageshow", onPageShow);
 });
+
+watch(
+  () => agentStore.agentId,
+  () => {
+    void syncCurrentAgentDisplayName();
+  },
+);
 
 onActivated(() => {
   if (agentStore.agentId && !streamHandle.value) {
