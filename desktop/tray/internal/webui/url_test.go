@@ -2,11 +2,19 @@ package webui
 
 import "testing"
 
+func TestAgentURL(t *testing.T) {
+	got := AgentURL("http://127.0.0.1:18765", "agt-abc")
+	want := "http://127.0.0.1:18765/ui/agents/agt-abc"
+	if got != want {
+		t.Fatalf("url = %q want %q", got, want)
+	}
+}
+
 func TestSessionURL(t *testing.T) {
 	got := SessionURL("http://127.0.0.1:18765", "sess-abc")
-	want := "http://127.0.0.1:18765/ui/?session=sess-abc"
+	want := "http://127.0.0.1:18765/ui/agents/sess-abc"
 	if got != want {
-		t.Fatalf("url = %q", got)
+		t.Fatalf("url = %q want %q", got, want)
 	}
 }
 
@@ -20,6 +28,14 @@ func TestConsoleURL(t *testing.T) {
 func TestSettingsAboutURL(t *testing.T) {
 	got := SettingsAboutURL("http://127.0.0.1:18765")
 	want := "http://127.0.0.1:18765/ui/settings/about"
+	if got != want {
+		t.Fatalf("url = %q want %q", got, want)
+	}
+}
+
+func TestAgentURLPathEscape(t *testing.T) {
+	got := AgentURL("http://127.0.0.1:18765", "a/b")
+	want := "http://127.0.0.1:18765/ui/agents/a%2Fb"
 	if got != want {
 		t.Fatalf("url = %q want %q", got, want)
 	}

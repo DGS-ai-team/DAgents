@@ -86,7 +86,7 @@ Linux CI **不**编译/测试本模块（托盘与 Desktop API 仅服务 Windows
 
 ## 通知与深链（v0.6.0 第 ⑥ 步）
 
-- **Windows Toast**（F-N1/N2）：每 session 一条，点击或「打开」按钮 → `?session=<id>` 深链。
+- **Windows Toast**（F-N1/N2）：每 session 一条，点击或「打开」按钮 → `/ui/agents/<id>` 深链。
 - **托盘 icon**（F-N10）：有待办时在 `icon.ico` ↔ `icon_pending.ico` 间 **600ms 闪烁**，并显示 `●` 标题角标；无待办恢复默认 icon。
 - **打开控制台**（F-U1/U2）：ensure Node 后 `rundll32` 调起默认浏览器。
 - Web UI hydrate/SSE 后 **`POST /v1/sessions/{id}/ack`** 清除未读（F-E13）；Shell 打开深链不本地 ack。

@@ -1,5 +1,38 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { transcriptStore, loadTranscriptFromHydrate } from "./transcript.js";
+import { consumeStartupURL } from "./hydrate.js";
+import { agentStore, persistAgentId } from "./agent.js";
+
+describe("consumeStartupURL", () => {
+  afterEach(() => {
+    persistAgentId("");
+    vi.unstubAllGlobals();
+  });
+
+  it("reads ?agent=", () => {
+    vi.stubGlobal("window", {
+      location: { search: "?agent=agt-1" },
+    });
+    consumeStartupURL();
+    expect(agentStore.agentId).toBe("agt-1");
+  });
+
+  it("accepts legacy ?session= as agent id", () => {
+    vi.stubGlobal("window", {
+      location: { search: "?session=sess-legacy" },
+    });
+    consumeStartupURL();
+    expect(agentStore.agentId).toBe("sess-legacy");
+  });
+
+  it("prefers ?agent= over ?session=", () => {
+    vi.stubGlobal("window", {
+      location: { search: "?agent=agt-new&session=sess-old" },
+    });
+    consumeStartupURL();
+    expect(agentStore.agentId).toBe("agt-new");
+  });
+});
 
 describe("loadTranscriptFromHydrate", () => {
   beforeEach(() => {
