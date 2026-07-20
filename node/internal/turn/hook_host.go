@@ -249,8 +249,17 @@ func (o *Orchestrator) applyHookPhaseEffects(sessionID string, history *[]llm.Me
 	if o == nil || hc == nil {
 		return
 	}
-	if history != nil && len(hc.History) > len(*history) {
-		*history = append([]llm.Message(nil), hc.History...)
+	if history != nil && len(hc.History) == len(*history)+1 {
+		if idx, msg, ok := findSingleHistoryInsert(*history, hc.History); ok {
+			o.insertHistory(sessionID, history, idx, msg)
+		} else if historyIsPrefix(*history, hc.History) {
+			o.appendHistory(sessionID, history, hc.History[len(*history)])
+		}
+	} else if history != nil && len(hc.History) > len(*history) && historyIsPrefix(*history, hc.History) {
+		// history_append：仅在 hc.History 为旧 history 前缀扩展时追加，并走 journal。
+		for i := len(*history); i < len(hc.History); i++ {
+			o.appendHistory(sessionID, history, hc.History[i])
+		}
 	}
 	if len(hc.SessionStore) > 0 && o.hookHostState != nil {
 		o.hookHostState.mu.Lock()
@@ -263,7 +272,42 @@ func (o *Orchestrator) applyHookPhaseEffects(sessionID string, history *[]llm.Me
 		o.hookHostState.dirty = true
 		o.hookHostState.mu.Unlock()
 	}
-	_ = sessionID
+}
+
+// historyIsPrefix 判断 prefix 是否为 full 的前缀（按 Role/Content/Name 浅比较）。
+func historyIsPrefix(prefix, full []llm.Message) bool {
+	if len(prefix) > len(full) {
+		return false
+	}
+	for i := range prefix {
+		if !historyMessageEqual(prefix[i], full[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// findSingleHistoryInsert 若 full 相对 old 仅多插入一条消息，返回插入下标与消息。
+func findSingleHistoryInsert(old, full []llm.Message) (int, llm.Message, bool) {
+	if len(full) != len(old)+1 {
+		return 0, llm.Message{}, false
+	}
+	for i := 0; i < len(full); i++ {
+		if i == len(old) {
+			return i, full[i], true
+		}
+		if !historyMessageEqual(old[i], full[i]) {
+			if !historyIsPrefix(old[i:], full[i+1:]) {
+				return 0, llm.Message{}, false
+			}
+			return i, full[i], true
+		}
+	}
+	return 0, llm.Message{}, false
+}
+
+func historyMessageEqual(a, b llm.Message) bool {
+	return a.Role == b.Role && a.Content == b.Content && a.Name == b.Name
 }
 
 func (o *Orchestrator) runPhase(ctx context.Context, phase hooks.Phase, hc *hooks.Context, sessionID string, history *[]llm.Message, finishReason string) (hooks.Context, error) {

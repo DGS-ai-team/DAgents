@@ -321,16 +321,14 @@ func TestHumanMessageImageExpandedForLLM(t *testing.T) {
 
 	var userMsg *llm.Message
 	for i := range capture.lastMessages {
-		if capture.lastMessages[i].Role == "user" {
-			userMsg = &capture.lastMessages[i]
+		m := &capture.lastMessages[i]
+		if m.Role == "user" && llm.MessageHasImages(*m) {
+			userMsg = m
 			break
 		}
 	}
 	if userMsg == nil {
-		t.Fatalf("no user message in llm request: %+v", capture.lastMessages)
-	}
-	if !llm.MessageHasImages(*userMsg) {
-		t.Fatalf("user message has no images: %+v", userMsg)
+		t.Fatalf("no multimodal user message in llm request: %+v", capture.lastMessages)
 	}
 	gotURL := ""
 	for _, part := range userMsg.ContentParts {

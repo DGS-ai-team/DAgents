@@ -14,6 +14,7 @@ const (
 	UserNameAsyncTool          = "async_tool"
 	UserNameCompressionSidecar = "compression_sidecar"
 	UserNameToolVision         = "tool_vision"
+	UserNameDate               = "date"
 )
 
 // UserMessage 构造纯文本 role=user 消息；name 为来源标识，空串则不设置。
