@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { chromeStore } from "../stores/chrome.js";
 import { sessionStore } from "../stores/session.js";
+import { themeStore, toggleTheme } from "../stores/theme.js";
 import brandIcon from "../assets/brand-icon.png";
 
 const router = useRouter();
@@ -21,6 +22,7 @@ const statusLabel = computed(() => {
 });
 const inSettings = computed(() => route.path.startsWith("/settings"));
 const canOpenActivity = computed(() => !inSettings.value && !!sessionStore.sessionId);
+const themeLabel = computed(() => (themeStore.mode === "dark" ? "切换浅色主题" : "切换深色主题"));
 
 function openChat() {
   router.push({ name: "agents" });
@@ -29,6 +31,10 @@ function openChat() {
 function openActivity() {
   if (!sessionStore.sessionId) return;
   chromeStore.panel = "activity";
+}
+
+function onToggleTheme() {
+  toggleTheme();
 }
 </script>
 
@@ -46,6 +52,21 @@ function openActivity() {
         <span class="product-header__dot" :class="statusClass" aria-hidden="true" />
         <span class="product-header__status-text">{{ statusLabel }}</span>
       </span>
+      <button
+        type="button"
+        class="app__icon-btn product-header__icon-btn"
+        :title="themeLabel"
+        :aria-label="themeLabel"
+        @click="onToggleTheme"
+      >
+        <svg v-if="themeStore.mode === 'dark'" class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.2" />
+          <path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.2 3.2l1.1 1.1M11.7 11.7l1.1 1.1M3.2 12.8l1.1-1.1M11.7 4.3l1.1-1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+        </svg>
+        <svg v-else class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M10.9 2.3a5.8 5.8 0 1 0 2.8 10 5.9 5.9 0 0 1-2.8-10Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+        </svg>
+      </button>
       <button
         v-if="canOpenActivity"
         type="button"
