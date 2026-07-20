@@ -127,6 +127,13 @@ jobs:
           cp "${OUT_DIR}/bin/dagents-node${EXE}" "dist/dagents-node${EXE}"
           cp "${OUT_DIR}/bin/dagents-client${EXE}" "dist/dagents-client${EXE}"
 
+      - name: Build dagents-shell (Windows)
+        if: matrix.platform == 'windows-amd64'
+        shell: bash
+        run: |
+          chmod +x scripts/ci/build_dagents_shell.sh
+          bash scripts/ci/build_dagents_shell.sh
+
       - name: Setup Python (Windows)
         if: matrix.py_build == 'native'
         uses: actions/setup-python@v5
