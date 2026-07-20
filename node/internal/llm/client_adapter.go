@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 )
@@ -139,7 +140,7 @@ func (c *envAdapterClient) StreamChat(ctx context.Context, req ChatRequest, hand
 	if mock {
 		return c.mockClient(adapter).StreamChat(ctx, req, handler)
 	}
-	key, err := lookupEnvAPIKey(keyEnv)
+	key, err := c.resolveAPIKey(keyEnv)
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -151,9 +152,18 @@ func (c *envAdapterClient) CompleteText(ctx context.Context, req CompleteRequest
 	if mock {
 		return c.mockClient(adapter).CompleteText(ctx, req)
 	}
-	key, err := lookupEnvAPIKey(keyEnv)
+	key, err := c.resolveAPIKey(keyEnv)
 	if err != nil {
 		return "", err
 	}
 	return c.innerClient(key, baseURL, adapter).CompleteText(ctx, req)
+}
+
+func (c *envAdapterClient) resolveAPIKey(keyEnv string) (string, error) {
+	if c.settings != nil {
+		if key := strings.TrimSpace(c.settings.APIKeyValue()); key != "" {
+			return key, nil
+		}
+	}
+	return lookupEnvAPIKey(keyEnv)
 }

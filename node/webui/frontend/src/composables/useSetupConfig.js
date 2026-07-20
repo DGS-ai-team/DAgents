@@ -3,7 +3,7 @@ import * as api from "../api/node.js";
 
 const emptyForm = () => ({
   node: { listen_host: "", listen_port: 0, local_endpoint: "" },
-  llm: { active: "default", profiles: [], provider: "", base_url: "", model: "", api_key_env: "", mock: false, max_tool_loops: 16 },
+  llm: { active: "", profiles: [], provider: "", base_url: "", model: "", mock: false, max_tool_loops: 16 },
   manage: {},
   features: {},
   compression: {},
@@ -32,11 +32,13 @@ export function useSetupConfig() {
     Object.assign(form.node, data.node || {});
     Object.assign(form.llm, data.llm || {});
     form.llm.profiles = Array.isArray(data.llm?.profiles)
-      ? data.llm.profiles.map((p) => ({ ...p }))
+      ? data.llm.profiles.map((p) => ({
+          ...p,
+          api_key: "",
+          clear_api_key: false,
+          has_api_key: !!p.has_api_key,
+        }))
       : [];
-    if (!form.llm.active && form.llm.profiles.length) {
-      form.llm.active = form.llm.profiles[0].id;
-    }
     Object.assign(form.manage, data.manage || {});
     Object.assign(form.features, data.features || {});
     Object.assign(form.compression, data.compression || {});
@@ -66,7 +68,7 @@ export function useSetupConfig() {
 
   async function save(patch, { successHint } = {}) {
     if (!configWritable.value) {
-      error.value = "当前环境无法写入 config.yaml";
+      error.value = "当前环境无法保存配置";
       return false;
     }
     saving.value = true;
@@ -78,7 +80,7 @@ export function useSetupConfig() {
       statusMessage.value =
         successHint ||
         (data.restart_required
-          ? "已保存到 config.yaml。部分项需重启 Node（或 Shell 重启 Node）后生效。"
+          ? "已保存。LLM 配置写入本地加密库；部分项需重启 Node 后生效。"
           : "已保存。");
       return true;
     } catch (e) {

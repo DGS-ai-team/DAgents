@@ -910,11 +910,152 @@
   gap: 10px;
 }
 
+.setup-config-panel__toggles--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  margin-top: 12px;
+}
+
+.setup-config-panel__toggles--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px 16px;
+}
+
 .setup-config-panel__field-grid,
 .setup-config-panel__readonly-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px 16px;
+}
+
+.llm-config-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.llm-config-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.llm-config-card--active {
+  border-color: color-mix(in srgb, var(--color-primary-strong) 55%, var(--color-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary-strong) 25%, transparent);
+}
+
+.llm-config-card--default {
+  background: color-mix(in srgb, var(--color-primary-strong) 6%, var(--color-surface));
+}
+
+.llm-config-card__hit {
+  all: unset;
+  display: block;
+  padding: 14px 14px 10px;
+  cursor: pointer;
+  flex: 1;
+}
+
+.llm-config-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.llm-config-card__id {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.llm-config-card__badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--color-primary-strong);
+  background: color-mix(in srgb, var(--color-primary-strong) 14%, transparent);
+}
+
+.llm-config-card__badge--muted {
+  color: var(--color-text-muted);
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.llm-config-card__meta {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.llm-config-card__meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-config-card__dot {
+  flex-shrink: 0;
+}
+
+.llm-config-card__key {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.llm-config-card__key--warn {
+  color: #c2410c;
+}
+
+.llm-config-card__actions {
+  display: flex;
+  gap: 4px;
+  padding: 0 10px 10px;
+  border-top: 1px solid transparent;
+}
+
+.btn--compact {
+  padding: 4px 8px;
+  font-size: 12px;
+  min-height: 28px;
+}
+
+.llm-config-add {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.llm-config-add__field {
+  flex: 1;
+  min-width: 180px;
+  margin-top: 0;
+}
+
+.settings-section--llm,
+.settings-section--editor {
+  padding-bottom: 24px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+}
+
+.settings-section + .settings-section {
+  margin-top: 8px;
 }
 
 .setup-config-panel__readonly-grid .command-stat {

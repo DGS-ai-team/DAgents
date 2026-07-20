@@ -34,21 +34,10 @@ expose_to_peers: false
 fs_root: ./.runtime
 
 llm:
-  # 多档案（可选）：profiles + active；顶层 provider/model 等为当前生效快照（兼容旧配置）
-  # active: deepseek-main
-  # profiles:
-  #   deepseek-main:
-  #     provider: deepseek
-  #     base_url: https://api.deepseek.com
-  #     model: deepseek-chat
-  #     api_key_env: OPENAI_API_KEY
-  #     multimodal_enabled: false
-  #   qwen-plus:
-  #     provider: qwen
-  #     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  #     model: qwen-plus
-  #     api_key_env: QWEN_API_KEY
-  #     multimodal_enabled: true   # 多模态跟随档案；切换 active 时同步到 multimodal.enabled
+  # 多配置：推荐在 Web UI「设置 › 连接 › LLM 配置」中以卡片管理；
+  # 配置与 API Key 加密保存在 `<runtime>/llm_configs.db`，列表第一条为默认。
+  # 下方顶层字段为当前生效快照（兼容旧配置 / 无 UI 时的启动默认值）。
+  # profiles / api_key_env 仍可用于首次迁移；迁移后 Key 以 UI 录入为准。
   provider: deepseek   # openai | deepseek | qwen | vllm
   base_url: https://api.deepseek.com   # 留空时按 provider 默认；qwen 业务空间示例：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   model: deepseek-chat   # deepseek 示例：deepseek-reasoner 或 deepseek-chat（Thinking 模式）
@@ -56,9 +45,9 @@ llm:
   # thinking: enabled      # enabled | disabled；默认 enabled
   # reasoning_effort: high  # thinking=enabled 时：high | max；qwen 映射为 thinking_budget
   # openai 使用与 DeepSeek 同形的 thinking / reasoning_effort 顶层字段（兼容多数 OpenAI 兼容网关）
-  # 真实 LLM：设 mock: false，并 export OPENAI_API_KEY（所有 provider 共用；也可改 api_key_env 如 QWEN_API_KEY）
+  # 兼容：首次启动若 SQLite 为空，可从 api_key_env 对应环境变量迁移 Key
   api_key_env: OPENAI_API_KEY
-  # --- 其他 provider 示例（取消注释并改 provider；api_key_env 仍用 OPENAI_API_KEY）---
+  # --- 其他 provider 示例（取消注释并改 provider）---
   # provider: qwen
   # base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   # base_url: https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
