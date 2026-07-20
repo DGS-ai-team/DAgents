@@ -1,0 +1,31 @@
+id: code-reviewer
+display_name: 代码审查助手
+description: 只读代码与仓库，输出审查意见；默认沙箱隔离
+version: 1
+
+defaults:
+  agent:
+    role: reviewer
+    description: 专注代码质量、安全与可维护性审查
+  llm:
+    active: default
+    profiles:
+      default:
+        provider: deepseek
+        model: deepseek-chat
+        api_key_env: OPENAI_API_KEY
+        multimodal_enabled: false
+    max_tool_loops: 16
+  tools:
+    enabled_groups: [fs_read, git]
+  skills:
+    enabled: true
+  child_agents:
+    enabled: false
+
+sandbox:
+  enabled: true
+  workspace_subdir: data
+  fs_root_isolation: true
+  allow_bash: false
+  allow_network_tools: false

@@ -1,0 +1,30 @@
+id: general
+display_name: 通用助手
+description: 默认全能助手，使用 Node 全局工作区，适合日常对话与通用任务
+version: 1
+
+defaults:
+  agent:
+    role: assistant
+    description: 通用 AI 助手
+  llm:
+    active: default
+    profiles:
+      default:
+        provider: deepseek
+        model: deepseek-chat
+        api_key_env: OPENAI_API_KEY
+        multimodal_enabled: false
+    max_tool_loops: 32
+  tools:
+    enabled_groups: [fs, bash, skills]
+  skills:
+    enabled: true
+  child_agents:
+    enabled: true
+
+sandbox:
+  enabled: false
+  fs_root_isolation: false
+  allow_bash: true
+  allow_network_tools: true

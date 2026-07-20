@@ -1,0 +1,31 @@
+id: ops-runner
+display_name: 运维执行助手
+description: 沙箱内执行脚本与文件操作，适合受控运维任务
+version: 1
+
+defaults:
+  agent:
+    role: ops
+    description: 在隔离工作区内执行运维与自动化任务
+  llm:
+    active: default
+    profiles:
+      default:
+        provider: deepseek
+        model: deepseek-chat
+        api_key_env: OPENAI_API_KEY
+        multimodal_enabled: false
+    max_tool_loops: 24
+  tools:
+    enabled_groups: [fs, bash]
+  skills:
+    enabled: true
+  child_agents:
+    enabled: true
+
+sandbox:
+  enabled: true
+  workspace_subdir: data
+  fs_root_isolation: true
+  allow_bash: true
+  allow_network_tools: false

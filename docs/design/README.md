@@ -2,30 +2,41 @@
 
 > **项目手册** → [../handbook/README.md](../handbook/README.md)
 
-本目录保留 **设计实录、专题分析与 Manage 架构** 等长文；概要已收敛至手册：
+## v0.8+ 架构（当前）
 
-| 文件 | 手册章节 |
-|------|----------|
-| `three-component-model.md` | [01-愿景与架构](../handbook/01-愿景与架构.md) §2 |
-| `major-changes.md` | [附录/重大设计变更实录](../handbook/附录/重大设计变更实录.md) |
-| `agent-client-refactor-plan.md` | [01](../handbook/01-愿景与架构.md) §5（已完成，实施记录） |
-| `manage-architecture.md` | [05-Manage与A2A](../handbook/05-Manage与A2A.md) |
-| `manage-phase2-capabilities.md` | Manage Phase 2 规划（制品同步、Workflow 等） |
-| `release-update-hub.md` | Release Hub（Manage 托管 + Node 更新检查） |
-| `agent-hooks.md` | Hook 扩展点（已落地） |
-| `turn-side-effects-refactor.md` | 旁路事件 Produce/Apply 规格 |
-| `context-compression-cache-analysis.md` | 压缩 × Prompt Cache 分析 |
-| `tool-context-cost-analysis.md` | 工具链上下文成本（WS1/3/5/6） |
-| `background-and-motivation.md` | 重构动机 → handbook §1 |
+| 文件 | 说明 |
+|------|------|
+| **[agent-instance-model.md](./agent-instance-model.md)** | **主设计**：单 Node 多 Agent、模板、沙箱、`node_id`、Web UI-only、实施阶段 |
 
-| `browser-tools-and-demonstration.md` | Browser Tools + 演示录制/回放 |
-| `browser-remote-service-mode-a.md` | 模式 A：browser-use 薄服务 |
-| `node-ui-media-display.md` | Node → Web UI 图片 / 截图展示（`show_image` + Session Media Artifact） |
-| `web-ui-redesign-v0.6.1.md` | **v0.6.1** Web UI 产品化重构（布局、设置、工具摘要、Triggers） |
-| `v0.6-v0.7-roadmap.md` | **v0.6.0 – v0.7.0 开发路径总览** |
-| `v0.6.0-smoke-checklist.md` | **v0.6.0** Smoke 验收检查清单 |
-| `v0.6.1-smoke-checklist.md` | **v0.6.1** Smoke 验收检查清单 |
-| `v0.6.2-smoke-checklist.md` | **v0.6.2** Smoke 验收检查清单 |
-| `windows-desktop-shell.md` | Windows Desktop Shell：功能清单与架构决策 |
+内置 Agent 模板样例：`packaging/agent-templates/`。
 
-新正文优先写入 **handbook**；本目录保留需独立维护的深度设计稿。
+## 专题（仍有效）
+
+| 文件 | 说明 |
+|------|------|
+| `manage-architecture.md` | Manage 现状（**Phase 5 将随 A2A 重构**） |
+| `manage-phase2-capabilities.md` | Manage Phase 2 规划 |
+| `release-update-hub.md` | Release Hub |
+| `agent-hooks.md` | Hook 扩展点 |
+| `turn-side-effects-refactor.md` | 旁路事件 Produce/Apply |
+| `context-compression-cache-analysis.md` | 压缩 × Prompt Cache |
+| `tool-context-cost-analysis.md` | 工具链上下文成本 |
+| `tool-before-hook-duplicate-approval.md` | 重复工具调用 Hook |
+| `ux-agent-owned-file-approval.md` | Agent 文件信任审批 |
+| `background-and-motivation.md` | 重构动机 |
+| `major-changes.md` | 重大变更实录 |
+| `browser-tools-and-demonstration.md` | Browser 工具 |
+| `browser-remote-service-mode-a.md` | Browser 远程服务模式 A |
+| `node-ui-media-display.md` | Web UI 媒体展示 |
+| `windows-desktop-shell.md` | Windows Desktop Shell |
+
+## 已移除（v0.8 架构替代）
+
+以下文档已删除，内容被 `agent-instance-model.md` 取代：
+
+- `three-component-model.md` — 三组件 + TUI Client
+- `agent-client-refactor-plan.md` — 已完成归档
+- `web-ui-redesign-v0.6.1.md` — v0.6 session 中心 UI
+- `v0.6-v0.7-roadmap.md` — v0.6–v0.7 路线
+
+新正文优先写入 **handbook** 与 **agent-instance-model.md**。
