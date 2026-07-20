@@ -102,41 +102,24 @@ export function cancelAgentTurn(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/cancel`, { method: "POST", body: {} });
 }
 
-/** @deprecated Phase 3 起优先用 Agent API；过渡期保留 session 路径。 */
-export function createSession(sessionId) {
-  const body = {};
-  if (sessionId) body.session_id = sessionId;
-  return apiFetch("/v1/sessions", { method: "POST", body });
+export function clearContext(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/clear-context`, { method: "POST", body: {} });
 }
 
-/** @deprecated */
-export function listSessions() {
-  return apiFetch("/v1/sessions");
+export function compressContext(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/compress`, { method: "POST", body: {} });
 }
 
-/** @deprecated */
-export function deleteSession(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+export function getSessionContext(agentId, { fullMessages = false } = {}) {
+  return getAgentContext(agentId, { fullMessages });
 }
 
-export function clearContext(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/clear-context`, { method: "POST", body: {} });
+export function getSessionHydrate(agentId) {
+  return getAgentHydrate(agentId);
 }
 
-export function compressContext(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/compress`, { method: "POST", body: {} });
-}
-
-export function getSessionContext(sessionId, { fullMessages = false } = {}) {
-  return getAgentContext(sessionId, { fullMessages });
-}
-
-export function getSessionHydrate(sessionId) {
-  return getAgentHydrate(sessionId);
-}
-
-export function postSessionAck(sessionId, sseSeq) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/ack`, {
+export function postSessionAck(agentId, sseSeq) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/ack`, {
     method: "POST",
     body: { sse_seq: sseSeq },
   });
@@ -161,32 +144,32 @@ export function cancelTurn(agentId) {
   return cancelAgentTurn(agentId);
 }
 
-export function listSkills(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/skills`);
+export function listSkills(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/skills`);
 }
 
-export function loadSkill(sessionId, skillName) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/skills/load`, {
+export function loadSkill(agentId, skillName) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/skills/load`, {
     method: "POST",
     body: { skill_name: skillName },
   });
 }
 
-export function unloadSkill(sessionId, skillName) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/skills/unload`, {
+export function unloadSkill(agentId, skillName) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/skills/unload`, {
     method: "POST",
     body: { skill_name: skillName },
   });
 }
 
-export function listChildAgents(sessionId) {
-  return apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/child-agents`);
+export function listChildAgents(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/child-agents`);
 }
 
-export function cancelChildAgent(sessionId, childSessionId, reason = "") {
+export function cancelChildAgent(agentId, childSessionId, reason = "") {
   const body = reason ? { reason } : {};
   return apiFetch(
-    `/v1/sessions/${encodeURIComponent(sessionId)}/child-agents/${encodeURIComponent(childSessionId)}/cancel`,
+    `/v1/agents/${encodeURIComponent(agentId)}/child-agents/${encodeURIComponent(childSessionId)}/cancel`,
     { method: "POST", body },
   );
 }

@@ -319,11 +319,11 @@ GET /v1/node/info
 
 | 路径 | 说明 |
 |------|------|
-| `client/cmd/dagents-client/` | `tui`、`chat` |
-| `client/internal/tui/` | 全屏 / REPL |
-| `app/cli/` | Python Textual |
-| `packaging/linux/dagents` | `chat` / `tui` 子命令 |
-| Web UI `/chat/:sessionId` | 改为 `/agents/:agentId` |
+| `client/cmd/dagents-client/` | ~~`tui`/`chat`~~ 已移除；保留 `probe`/`update`/`version` |
+| `client/internal/tui/` | ✅ 已删除 |
+| `app/cli/` | ✅ 已删除 |
+| `packaging/linux/dagents` | ✅ 默认启动 Node + Web UI |
+| Web UI `/chat/:sessionId` | ✅ 改为 `/agents/:agentId` |
 
 ### 10.2 配置字段重命名
 
@@ -378,12 +378,15 @@ GET /v1/node/info
 - [x] 路由 `/agents/:agentId`（`/chat` 重定向兼容）
 - [x] `ensureAgentRuntime`：重启 / Release 后按快照恢复沙箱
 - [x] messages / streams / hydrate 走 `agent_id`
-- [ ] 彻底移除 session 相关 UI 文案残留与 `/v1/sessions`（后续清理）
+- [x] Web UI 切至 `/v1/agents/{id}/…`（ack/skills/child-agents 等）
+- [ ] 彻底删除对外 `/v1/sessions` CRUD（tray 仍用 `GET /v1/sessions`；测试夹具可继续用）
 ### Phase 4 — 删除 TUI/CLI + 打包
 
-- [ ] 删除 client TUI、app/cli
-- [ ] 调整 CI / `dagents-local-assistant` 产物（仅 node + webui）
-- [ ] 更新 handbook、README、CHANGELOG
+- [x] 删除 client TUI、app/cli（`dagents-client` 保留 probe/update）
+- [x] 调整 CI / `dagents-local-assistant` 产物（node + webui；无 dagents-cli）
+- [x] Agent 路径别名覆盖 ack/skills/child-agents 等；Web UI 切离 session CRUD
+- [x] 更新 handbook、README、CHANGELOG（要点）
+- [ ] OpenAPI / handbook 全文修订（持续）
 
 ### Phase 5 — Manage / A2A（独立里程碑）
 

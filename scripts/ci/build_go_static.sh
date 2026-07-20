@@ -55,8 +55,9 @@ DAgents Agent Node + Client (Go static build, Windows)
 
 1. copy config.example.yaml to config.yaml and edit llm / agent_id
 2. bin\dagents-node.exe -config config.yaml
-3. bin\dagents-client.exe -config config.yaml tui
-   legacy terminal: add --plain
+3. Open Web UI: http://127.0.0.1:<listen.port>/ui/ (default 18765; ui.enabled defaults to true)
+4. bin\dagents-client.exe -config config.yaml probe
+   bin\dagents-client.exe -config config.yaml update --check
 
 See docs/architecture/go-node-compatibility.md
 EOF
@@ -67,8 +68,8 @@ DAgents Agent Node + Client (Go static build)
 1. cp config.example.yaml config.yaml && 编辑 llm / agent_id
 2. ./bin/dagents-node -config config.yaml
 3. 浏览器打开 http://127.0.0.1:<listen.port>/ui/（默认 18765；ui.enabled 默认 true）
-4. ./bin/dagents-client -config config.yaml tui
-   老终端: ./bin/dagents-client -config config.yaml tui --plain
+4. ./bin/dagents-client -config config.yaml probe
+   ./bin/dagents-client -config config.yaml update --check
 
 文档: docs/architecture/go-node-compatibility.md
 EOF
@@ -78,13 +79,13 @@ else
     cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node (Go static build, Windows)
 
-Use scripts/package_local_assistant.sh to bundle with Textual TUI (dagents-cli).
+Use scripts/package_local_assistant.sh to bundle the full local assistant (Web UI embedded in dagents-node).
 EOF
   else
     cat > "${OUT_DIR}/README.txt" <<'EOF'
 DAgents Agent Node (Go static build)
 
-完整本地助手请使用 scripts/package_local_assistant.sh（含 Textual TUI）。
+完整本地助手请使用 scripts/package_local_assistant.sh（Web UI 内嵌于 dagents-node）。
 EOF
   fi
 fi

@@ -46,35 +46,6 @@
       "webRoot": "${workspaceFolder}/node/webui/frontend/src"
     },
     {
-      "name": "Go Client: tui",
-      "type": "go",
-      "request": "launch",
-      "mode": "auto",
-      "program": "${workspaceFolder}/client/cmd/dagents-client",
-      "args": [
-        "-config",
-        "${workspaceFolder}/packaging/agent-client/config.example.yaml",
-        "tui"
-      ],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal"
-    },
-    {
-      "name": "Go Client: tui --plain",
-      "type": "go",
-      "request": "launch",
-      "mode": "auto",
-      "program": "${workspaceFolder}/client/cmd/dagents-client",
-      "args": [
-        "-config",
-        "${workspaceFolder}/packaging/agent-client/config.example.yaml",
-        "tui",
-        "--plain"
-      ],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal"
-    },
-    {
       "name": "Go Client: probe",
       "type": "go",
       "request": "launch",
@@ -87,23 +58,6 @@
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
-    },
-    {
-      "name": "Python Client: chat",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "app.cli.main",
-      "args": [
-        "chat",
-        "--config",
-        "${workspaceFolder}/packaging/agent-client/config.example.yaml"
-      ],
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}"
-      },
-      "console": "integratedTerminal",
-      "justMyCode": false
     },
     {
       "name": "Manage: run",
@@ -146,38 +100,45 @@
   ],
   "compounds": [
     {
-      "name": "Go: Node + Client TUI",
-      "configurations": ["Go Node", "Go Client: tui"],
-      "stopAll": true
-    },
-    {
-      "name": "Python: Node + Client chat",
-      "configurations": ["Go Node", "Python Client: chat"],
-      "stopAll": true
-    },
-    {
       "name": "Web UI: Node + Vite",
-      "configurations": ["Node: run (terminal)", "Web UI: Vite dev", "Web UI: Chrome (Vite)"],
+      "configurations": [
+        "Node: run (terminal)",
+        "Web UI: Vite dev",
+        "Web UI: Chrome (Vite)"
+      ],
       "stopAll": true
     },
     {
       "name": "Web UI: Node + 内嵌 UI",
-      "configurations": ["Node: run (terminal)", "Web UI: Chrome (Node embed)"],
+      "configurations": [
+        "Node: run (terminal)",
+        "Web UI: Chrome (Node embed)"
+      ],
       "stopAll": true
     },
     {
       "name": "Manage: Server + Console Vite",
-      "configurations": ["Manage: run", "Manage Console: Vite dev", "Manage Console: Chrome (Vite)"],
+      "configurations": [
+        "Manage: run",
+        "Manage Console: Vite dev",
+        "Manage Console: Chrome (Vite)"
+      ],
       "stopAll": true
     },
     {
       "name": "Manage: Server + 内嵌 Console",
-      "configurations": ["Manage: run", "Manage Console: Chrome (embed)"],
+      "configurations": [
+        "Manage: run",
+        "Manage Console: Chrome (embed)"
+      ],
       "stopAll": true
     },
     {
       "name": "Go: Node + Manage",
-      "configurations": ["Go Node", "Manage: run"],
+      "configurations": [
+        "Go Node",
+        "Manage: run"
+      ],
       "stopAll": true
     }
   ]

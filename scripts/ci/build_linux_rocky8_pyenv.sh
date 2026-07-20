@@ -2,7 +2,7 @@
 # 在 **Rocky Linux 8**（glibc **2.28**）容器内用 **gcc-toolset-13** + **pyenv** 源码编译 CPython，再执行 PyInstaller。
 #
 # 目的：
-# 1. Release CI 默认在 **Rocky Linux 8** 容器内构建 `dagents-cli`，在 **glibc 2.28** 上链接，覆盖 **RHEL 8 / Rocky 8 / Alma 8** 等宿主。
+# 1. Release CI 默认在 **Rocky Linux 8** 容器内构建 `dagents-browser`，在 **glibc 2.28** 上链接，覆盖 **RHEL 8 / Rocky 8 / Alma 8** 等宿主。
 # 2. 较新的 **Ubuntu 20.04 (focal)** 链（glibc 2.31）产物可能依赖 **GLIBC_2.30+**；旧环境请用本脚本而非 `build_linux_focal_pyenv.sh`。
 #
 # 硬边界：
@@ -11,7 +11,7 @@
 #
 # 约定（与 **`build_linux_focal_pyenv.sh`** 一致）：
 # - 工作区挂载为 **/src**；
-# - **CLI_PI_ARGS** / **BROWSER_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串。
+# - **BROWSER_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串。
 # - **PYENV_PYTHON_VERSION**：可选，默认 **3.13.2**。
 #
 # 副作用：首次编译 CPython 耗时长；workflow step 需足够 **timeout**。
@@ -67,12 +67,9 @@ fi
 cd /src
 "${PYENV_PYTHON}" -m pip install -r requirements.txt pyinstaller
 
-if [[ -z "${CLI_PI_ARGS:-}" && -z "${BROWSER_PI_ARGS:-}" ]]; then
-  echo "[build_linux_rocky8_pyenv] at least one of CLI_PI_ARGS or BROWSER_PI_ARGS is required" >&2
+if [[ -z "${BROWSER_PI_ARGS:-}" ]]; then
+  echo "[build_linux_rocky8_pyenv] BROWSER_PI_ARGS is required" >&2
   exit 1
-fi
-if [[ -n "${CLI_PI_ARGS:-}" ]]; then
-  eval "${PYENV_PYTHON}" -m PyInstaller ${CLI_PI_ARGS}
 fi
 if [[ -n "${BROWSER_PI_ARGS:-}" ]]; then
   "${PYENV_PYTHON}" -m pip install -r /src/browser-service/requirements.txt

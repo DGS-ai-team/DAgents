@@ -24,11 +24,20 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}", s.handleGetAgent)
 	s.mux.HandleFunc("PATCH /v1/agents/{agent_id}", s.handlePatchAgent)
 	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}", s.handleDeleteAgent)
-	// Phase 2/3：agent 路径别名（内部仍走 session 实现，id 相同）。
+	// Phase 2–4：agent 路径别名（内部仍走 session 实现，id 相同）。
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ensure", s.handleAgentEnsure)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/hydrate", s.handleAgentHydrate)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/cancel", s.handleAgentCancel)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/context", s.handleAgentContext)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ack", s.handleAgentAck)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/clear-context", s.handleAgentClearContext)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/compress", s.handleAgentCompress)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/skills", s.handleAgentListSkills)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/skills/load", s.handleAgentLoadSkill)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/skills/unload", s.handleAgentUnloadSkill)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/child-agents", s.handleAgentListChildAgents)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/child-agents/{child_session_id}", s.handleAgentGetChildAgent)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/child-agents/{child_session_id}/cancel", s.handleAgentCancelChildAgent)
 }
 
 func (s *Server) templateLoader() *agenttemplate.Loader {
@@ -419,4 +428,40 @@ func (s *Server) handleAgentCancel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAgentContext(w http.ResponseWriter, r *http.Request) {
 	s.withAgentAsSession(s.handleSessionContext)(w, r)
+}
+
+func (s *Server) handleAgentAck(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleSessionAck)(w, r)
+}
+
+func (s *Server) handleAgentClearContext(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleClearContext)(w, r)
+}
+
+func (s *Server) handleAgentCompress(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleCompressContext)(w, r)
+}
+
+func (s *Server) handleAgentListSkills(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleListSessionSkills)(w, r)
+}
+
+func (s *Server) handleAgentLoadSkill(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleLoadSessionSkill)(w, r)
+}
+
+func (s *Server) handleAgentUnloadSkill(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleUnloadSessionSkill)(w, r)
+}
+
+func (s *Server) handleAgentListChildAgents(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleListChildAgents)(w, r)
+}
+
+func (s *Server) handleAgentGetChildAgent(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleGetChildAgent)(w, r)
+}
+
+func (s *Server) handleAgentCancelChildAgent(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleCancelChildAgent)(w, r)
 }

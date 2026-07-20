@@ -5,11 +5,11 @@
 <p align="center">
   <h1 align="center">DAgents</h1>
   <p align="center">
-    本地单 Agent 助手运行时 — Go Agent Node + 终端与浏览器 Client
+    本地多 Agent 助手运行时 — Go Agent Node + 内嵌 Web UI
     <br />
     <a href="docs/handbook/README.md"><strong>项目手册 »</strong></a>
     ·
-    <a href="docs/architecture/local-assistant.md"><strong>快速上手 »</strong></a>
+    <a href="docs/design/agent-instance-model.md"><strong>Agent 实例模型 »</strong></a>
     ·
     <a href="CHANGELOG.md">变更记录</a>
     ·
@@ -32,22 +32,18 @@
 
 ## 简介
 
-**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前版本（**v0.7.5**）以 **Go Agent Node** 为唯一运行时：单进程承载 LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite 会话、skills、上下文压缩与 trigger 调度，并内嵌 **Web UI**（`/ui/`）；**Manage 控制面** 提供 Registry、**A2A Task** 与 **Vue Console**（可 Docker 部署）。
+**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前主线（**v0.8 Agent 实例模型**）以 **Go Agent Node** 为唯一运行时：单进程可承载 **多个 Agent 实例**（模板创建、可选沙箱），LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite、skills、上下文压缩与 trigger 调度，并内嵌 **Web UI**（`/ui/`）作为**唯一人机入口**；**Manage 控制面** 提供 Registry、**A2A Task** 与 **Vue Console**（可 Docker 部署）。
 
-终端交互提供 **多种 Client**，共用一份 YAML 配置，按环境任选：
+| 入口 | 适用场景 | 命令 / URL |
+|------|----------|------------|
+| **Node Web UI** | 默认交互（创建 Agent、对话、设置） | `dagents node` → `http://127.0.0.1:<port>/ui/` |
+| **Manage Console** | Registry / A2A / 发布 | 单独部署 Manage |
 
-| Client | 适用场景 | 命令 / 入口 |
-|--------|----------|-------------|
-| **Python Textual TUI** | 现代终端（WSL、新 Linux、Windows Terminal） | `dagents chat` |
-| **Go bubbletea TUI** | SSH 全屏、脚本、无 Python 环境 | `dagents-client tui` |
-| **Go plain REPL** | 极老 SSH / RHEL6 / `TERM=dumb` | `dagents-client tui --plain` |
-| **Node Web UI** | 老 Windows + Chrome/Edge；无需 Python、无需现代终端 | `http://127.0.0.1:<port>/ui/`（`ui.enabled: true`） |
-
-另含 **Manage 控制面**（Python / Docker）：Registry、A2A Task、Console；A2A 协作请用 Manage，不再随本地助手包分发 Register Center。
+精简辅助二进制 **`dagents-client`** 仅用于 `probe` / `update` / `version`（不再提供终端对话）。
 
 > **v0.2.0 说明**：原 Python FastAPI Agent API（`run_agent_api.py`）已从仓库移除。详见 [CHANGELOG.md](CHANGELOG.md)。
 
-> **浏览器 Client**：Go Node 进程内嵌 **Web UI**（`node/webui/`，`go:embed` 挂载 `/ui/`），复用现有 `/v1` HTTP/SSE，与终端 Client 能力对齐。原独立前端仓库 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) 面向已移除的 Python Agent API，**不再作为本仓库浏览器 Client 路径**。
+> **浏览器 Client**：Go Node 进程内嵌 **Web UI**（`node/webui/`，`go:embed` 挂载 `/ui/`）。原独立前端仓库 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) 面向已移除的 Python Agent API，**不再作为本仓库浏览器 Client 路径**。
 
 ---
 
@@ -56,13 +52,13 @@
 - **LLM Turn 编排** — OpenAI 兼容 API；流式 assistant / reasoning / tool 事件；流式 cancel 保留部分 assistant 与合法 tool 序列
 - **LLM 厂商适配** — `llm.provider`（`openai` / `deepseek` / `qwen` / `vllm`）；`MessageAdapter` 统一出站序列化与 `reasoning_content` 处理
 - **内置工具** — `bash_run`（可配置 GBK/UTF-8 解码）、文件读写与替换、skills 加载、trigger 管理、**临时子 Agent**
-- **HITL** — 工具审批、`ask_user_information`；Client 侧非阻塞队列 + resume（**Esc** 取消在途 turn；无 `/cancel` 斜杠命令）
+- **HITL** — 工具审批、`ask_user_information`；Web UI 非阻塞队列 + resume
 - **A2A（Manage M2）** — Node 注册 Manage、**`agent_invoke` / `agent_discover`**；Task inbox long poll；案例见 [`cases/a2a-manage-docker/`](cases/a2a-manage-docker/)
 - **Triggers** — `interval`、`fire_at`、日历 **`schedule`**（含 cmd 门控）
-- **Session** — 多会话、SQLite 持久化、context 压缩（silent / blocking）；TUI **`/compress`** 手动压缩；**`/context`** 含 token 估算与 **system prompt**；**`/switch` / `/new`** 切换 session
+- **Agent 实例** — 模板创建、可改显示名、可选沙箱 FSRoot；1 Agent = 1 主对话；Web UI `/agents/:id`
 - **Policy** — `.runtime/policy/*.approval.txt` 本地审批策略
 - **可观测** — SSE `usage`（prompt/completion、cache hit、`reasoning_tokens`）；结构化 stderr 日志
-- **同包发布** — Release 资产 `dagents-local-assistant-*`（Linux tarball / Windows zip / **Windows 安装包**）；**`dagents chat|tui --withnode`** 自动后台 Node；第三方 CLI 见 **[推荐工具清单](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)**（如 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)，需自行安装）
+- **同包发布** — Release 资产 `dagents-local-assistant-*`（Linux tarball / Windows zip / **Windows 安装包**）；第三方 CLI 见 **[推荐工具清单](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)**（如 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)，需自行安装）
 
 ---
 
@@ -86,29 +82,25 @@
 
 ```mermaid
 flowchart LR
-  subgraph clients [Client]
-    PY["Python Textual<br/>dagents chat"]
-    GO["Go Client<br/>dagents-client tui"]
-    WEB["浏览器<br/>/ui/"]
+  subgraph clients [人机入口]
+    WEB["浏览器 Web UI<br/>/ui/agents"]
   end
 
   subgraph runtime [本机运行时]
-    NODE["Agent Node (Go)<br/>HTTP + SSE · SQLite"]
+    NODE["Agent Node (Go)<br/>HTTP + SSE · 多 Agent"]
   end
 
   subgraph optional [可选控制面]
     MG["Manage<br/>Registry + A2A Task"]
   end
 
-  PY -->|127.0.0.1:18765| NODE
-  GO -->|127.0.0.1:18765| NODE
   WEB -->|127.0.0.1:18765| NODE
   MG -.->|注册 / inbox| NODE
 ```
 
 > **Web UI**：内嵌于 Agent Node（`GET /ui/`），源码见 [`node/webui/`](node/webui/)。不替代 Manage Console 的跨 Agent 运维入口。
 
-配置：`packaging/agent-client/config.yaml`（Node 读 `listen` / `llm`；Client 读 `local.endpoint`）。
+配置：`packaging/agent-client/config.yaml`（Node 读 `listen` / `llm` / `node_id`）。
 
 ---
 
@@ -119,7 +111,7 @@ flowchart LR
 | 组件 | 要求 |
 |------|------|
 | **Go** | 1.25+（见 [`go.work`](go.work)） |
-| **Python**（Textual TUI / Manage） | 3.11+；CI 验证 3.13 |
+| **Python**（Manage / 可选） | 3.11+；CI 验证 3.13 |
 | **LLM** | 默认 `llm.mock: true`，**无需 API Key** 即可联调 |
 
 ### 1. 克隆与配置
@@ -146,27 +138,7 @@ curl -s http://127.0.0.1:18765/health | jq .
 go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml probe
 ```
 
-### 3. 启动 Client（按环境任选）
-
-**Textual TUI（现代终端推荐）**
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m app.cli.main chat --config packaging/agent-client/config.yaml
-```
-
-**Go TUI**
-
-```bash
-# 全屏（默认）
-go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml tui
-
-# 老终端行模式
-go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml tui --plain
-```
-
-**浏览器 Web UI（老 Windows + Chrome/Edge）**
+### 3. 打开 Web UI
 
 Node 启动后在本机浏览器打开：
 
@@ -174,14 +146,7 @@ Node 启动后在本机浏览器打开：
 http://127.0.0.1:18765/ui/
 ```
 
-详见 [node/webui/README.md](node/webui/README.md)。可通过 `ui.enabled: false` 关闭挂载。
-
-恢复已有 session：
-
-```bash
-dagents chat --session sess-xxxxxxxx
-dagents-client tui sess-xxxxxxxx
-```
+在侧栏从模板 **新建 Agent**，即可对话。详见 [node/webui/README.md](node/webui/README.md)。可通过 `ui.enabled: false` 关闭挂载。
 
 ---
 

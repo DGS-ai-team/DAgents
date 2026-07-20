@@ -58,9 +58,6 @@ Name: "{group}\DAgents Shell（系统托盘）"; Filename: "{app}\dagents.cmd"; 
 Name: "{group}\DAgents Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"
 Name: "{group}\Start Agent Node (background)"; Filename: "{app}\dagents.cmd"; Parameters: "node"; WorkingDir: "{app}"
 Name: "{group}\Start Agent Node (foreground)"; Filename: "{app}\dagents.cmd"; Parameters: "node --foreground"; WorkingDir: "{app}"
-Name: "{group}\Chat (Textual TUI)"; Filename: "{app}\dagents.cmd"; Parameters: "chat --withnode"; WorkingDir: "{app}"
-Name: "{group}\TUI (Go full-screen)"; Filename: "{app}\dagents.cmd"; Parameters: "tui --withnode"; WorkingDir: "{app}"
-Name: "{group}\REPL (Go line mode)"; Filename: "{app}\dagents.cmd"; Parameters: "tui --withnode --plain"; WorkingDir: "{app}"
 Name: "{group}\打开 Web UI"; Filename: "http://127.0.0.1:18765/ui/"
 
 [Registry]
@@ -137,7 +134,7 @@ procedure InitializeWizard;
 begin
   WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents 本地助手';
   WizardForm.WelcomeLabel2.Caption :=
-    '本安装包包含 Agent Node、Desktop Shell（系统托盘）、Client 与 CLI。' + #13#10 +
+    '本安装包包含 Agent Node、Desktop Shell（系统托盘）与 Client（probe/update）。' + #13#10 +
     '安装时将复制默认 config.example.yaml；请在 Web UI「设置 › 连接」中完成 LLM 等配置。' + #13#10 +
     '安装完成后 Shell 将随用户登录自启并监护 Node。';
   WizardForm.FinishedLabel.Caption := 'DAgents 已安装完成。';

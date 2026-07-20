@@ -5,4 +5,5 @@ use (
 	./desktop/tray
 	./node
 	./shared/config
+	./shared/update
 )
