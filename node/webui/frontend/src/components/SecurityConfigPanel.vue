@@ -3,30 +3,13 @@ import { onMounted } from "vue";
 import ConfigPanelShell from "./ConfigPanelShell.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
-const TOOL_GROUPS = [
-  { name: "a2a", label: "A2A 协作" },
-  { name: "bash", label: "命令行" },
-  { name: "browser", label: "浏览器", beta: true },
-  { name: "child_agents", label: "子 Agent" },
-  { name: "fs", label: "文件" },
-  { name: "hitl", label: "人工确认" },
-  { name: "skills", label: "技能" },
-  { name: "triggers", label: "定时任务" },
-];
-
 const { loading, saving, error, statusMessage, configPath, configWritable, form, load, save } =
   useSetupConfig();
-
-function toggleGroup(name) {
-  const set = new Set(form.tools.enabled_groups || []);
-  if (set.has(name)) set.delete(name);
-  else set.add(name);
-  form.tools.enabled_groups = [...set].sort();
-}
 
 async function saveSecurity() {
   await save({
     tools: {
+      // 与能力页共用 tools 块；保留 enabled_groups 避免被清空
       enabled_groups: [...(form.tools.enabled_groups || [])],
       bash_output_encoding: form.tools.bash_output_encoding,
       file_encoding: form.tools.file_encoding,
@@ -56,24 +39,6 @@ onMounted(load);
     @refresh="load"
     @save="saveSecurity"
   >
-    <section class="settings-section">
-      <h2 class="settings-section__title">可用工具</h2>
-      <p class="settings-section__desc">不勾选任何项表示全部可用；勾选后仅启用已选工具。</p>
-      <div class="setup-config-panel__toggles">
-        <label v-for="g in TOOL_GROUPS" :key="g.name" class="settings-toggle">
-          <input
-            type="checkbox"
-            :checked="form.tools.enabled_groups?.includes(g.name)"
-            @change="toggleGroup(g.name)"
-          />
-          <span class="settings-toggle__label">
-            {{ g.label }}
-            <span v-if="g.beta" class="badge badge--beta" title="试验功能">Beta</span>
-          </span>
-        </label>
-      </div>
-    </section>
-
     <section class="settings-section">
       <h2 class="settings-section__title">编码</h2>
       <div class="setup-config-panel__field-grid">

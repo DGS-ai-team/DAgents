@@ -56,6 +56,9 @@ func buildToolCallIndex(messages []llm.Message) map[string]llm.ToolCall {
 func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCall, reg *media.Registry) []TranscriptEntry {
 	switch strings.TrimSpace(msg.Role) {
 	case "user":
+		if shouldSkipHydrateUser(msg) {
+			return nil
+		}
 		return []TranscriptEntry{userEntry(msg, reg)}
 	case "assistant":
 		return assistantEntries(msg)
@@ -65,6 +68,15 @@ func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCa
 		}
 	}
 	return nil
+}
+
+// shouldSkipHydrateUser 隐藏注入型 user 消息（日期、异步回灌、压缩摘要等），避免污染对话展示。
+func shouldSkipHydrateUser(msg llm.Message) bool {
+	switch strings.TrimSpace(msg.Name) {
+	case llm.UserNameDate, llm.UserNameAsyncTool, llm.UserNameCompression, llm.UserNameCompressionSidecar, llm.UserNameToolVision:
+		return true
+	}
+	return false
 }
 
 func userEntry(msg llm.Message, reg *media.Registry) TranscriptEntry {

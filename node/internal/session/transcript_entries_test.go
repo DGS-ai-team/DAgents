@@ -66,6 +66,23 @@ func TestMessagesToTranscriptEntries_skipsAskUserInformationToolCall(t *testing.
 	}
 }
 
+func TestMessagesToTranscriptEntries_skipsInjectedUserMessages(t *testing.T) {
+	t.Parallel()
+	messages := []llm.Message{
+		llm.UserMessage("当天日期为：20260720", llm.UserNameDate),
+		llm.UserMessage("异步工具结果回灌", llm.UserNameAsyncTool),
+		llm.UserMessage("压缩摘要", llm.UserNameCompression),
+		{Role: "user", Content: "真实用户问题"},
+	}
+	entries := MessagesToTranscriptEntries(messages)
+	if len(entries) != 1 {
+		t.Fatalf("len = %d, want 1", len(entries))
+	}
+	if entries[0]["kind"] != "user" || entries[0]["text"] != "真实用户问题" {
+		t.Fatalf("entry = %#v", entries[0])
+	}
+}
+
 func TestMessagesToTranscriptEntries_userImages(t *testing.T) {
 	t.Parallel()
 	messages := []llm.Message{

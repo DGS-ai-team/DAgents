@@ -74,4 +74,33 @@ describe("buildStream activity", () => {
     expect(items).toHaveLength(1);
     expect(items[0].resultEntry).toBeTruthy();
   });
+
+  it("merges parallel tool calls when results are interleaved", () => {
+    const items = buildStream(
+      [
+        { id: 1, kind: "tool_call", blockId: "a", data: { tool_name: "glob_files" } },
+        { id: 2, kind: "tool_call", blockId: "b", data: { tool_name: "read_file" } },
+        { id: 3, kind: "tool_result", blockId: "a", data: { tool_name: "glob_files", content: "ok" } },
+        { id: 4, kind: "tool_result", blockId: "b", data: { tool_name: "read_file", content: "ok" } },
+      ],
+      [],
+    );
+    expect(items).toHaveLength(2);
+    expect(items.every((item) => item.kind === "tool_step" && item.resultEntry)).toBe(true);
+    expect(items[0].callEntry.blockId).toBe("a");
+    expect(items[1].callEntry.blockId).toBe("b");
+  });
+
+  it("skips date and async_tool user messages", () => {
+    const items = buildStream(
+      [
+        { id: 1, kind: "user", text: "当天日期为：20260720" },
+        { id: 2, kind: "user", name: "async_tool", text: "后台任务结果" },
+        { id: 3, kind: "user", text: "真实问题" },
+      ],
+      [],
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].entry.text).toBe("真实问题");
+  });
 });

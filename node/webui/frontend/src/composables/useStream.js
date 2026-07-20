@@ -2,6 +2,14 @@ function shouldSkipEntry(entry) {
   if (!entry) return true;
   if (entry.kind === "reasoning" && !entry.text?.trim() && !entry.streaming) return true;
   if ((entry.kind === "assistant" || entry.kind === "user") && !entry.text?.trim() && !entry.streaming) return true;
+  // 兜底：过滤注入型 user（日期 / 异步回灌等），与后端 hydrate 跳过对齐
+  if (entry.kind === "user") {
+    const name = String(entry.name || entry.data?.name || "").trim();
+    if (["date", "async_tool", "compression", "compression_sidecar", "tool_vision"].includes(name)) {
+      return true;
+    }
+    if (String(entry.text || "").startsWith("当天日期为：")) return true;
+  }
   return false;
 }
 
@@ -12,6 +20,9 @@ function entryBlockId(entry) {
 function isSkippableBetweenTools(entry) {
   if (!entry) return true;
   if (entry.kind === "system") return true;
+  // 多工具并行时，hydrate 顺序常为 callA, callB, resultA, resultB；
+  // 扫描匹配 result 时允许越过其它 tool_call。
+  if (entry.kind === "tool_call") return true;
   return shouldSkipEntry(entry);
 }
 
@@ -21,10 +32,13 @@ function findMatchingToolResult(entries, startIdx, blockId) {
   for (let j = startIdx + 1; j < entries.length; j += 1) {
     const next = entries[j];
     if (isSkippableBetweenTools(next)) continue;
-    if (next.kind === "tool_result") {
-      return entryBlockId(next) === bid ? j : -1;
+    if (next.kind === "tool_result" && entryBlockId(next) === bid) {
+      return j;
     }
-    return -1;
+    // 遇到其它非可跳过内容则停止（例如真正的 user/assistant 气泡）
+    if (next.kind !== "tool_result") {
+      return -1;
+    }
   }
   return -1;
 }
