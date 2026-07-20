@@ -16,6 +16,9 @@ export async function runSlashCommand(cmd, ctx) {
     case "/sessions":
     case "/ls":
       return { panel: "agents" };
+    case "/activity":
+    case "/changes":
+      return { panel: "activity" };
     case "/context":
       return { panel: "context" };
     case "/skill":

@@ -92,7 +92,7 @@
 .btn--primary {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  color: var(--color-text-invert);
+  color: #fff;
 }
 
 .btn--primary:hover:not(:disabled) {

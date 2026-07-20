@@ -6,6 +6,7 @@ import { connectStream } from "../sse/stream.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
 import AgentPanel from "../components/AgentPanel.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
+import ActivityPanel from "../components/ActivityPanel.vue";
 import {
   sessionStore,
   persistAgentId,
@@ -188,12 +189,20 @@ function onPageShow(event) {
 
 async function refreshMeta() {
   try {
-    const [health, info, llm] = await Promise.all([api.getHealth(), api.getAgentInfo(), api.getLLMSettings()]);
-    chromeStore.agentInfo = { ...health, ...info };
-    chromeStore.llmSettings = llm;
-    syncReasoningDisplay(llm);
+    const boot = await api.getUIBootstrap();
+    chromeStore.agentInfo = { ...(boot.health || {}), ...(boot.info || {}) };
+    chromeStore.llmSettings = boot.llm || null;
+    syncReasoningDisplay(chromeStore.llmSettings);
   } catch (e) {
-    sessionStore.error = e.message;
+    // 回退到旧的并行请求（兼容旧 Node）
+    try {
+      const [health, info, llm] = await Promise.all([api.getHealth(), api.getAgentInfo(), api.getLLMSettings()]);
+      chromeStore.agentInfo = { ...health, ...info };
+      chromeStore.llmSettings = llm;
+      syncReasoningDisplay(llm);
+    } catch (e2) {
+      sessionStore.error = e2.message || e.message;
+    }
   }
 }
 
@@ -749,6 +758,10 @@ async function openPanel(name, arg) {
     agentPanelRef.value?.refresh?.();
     return;
   }
+  if (name === "activity" || name === "changes" || name === "children") {
+    chromeStore.panel = name === "changes" ? "activity" : name;
+    return;
+  }
   if (!sessionStore.sessionId) {
     sessionStore.error = "请先创建或选择一个 Agent";
     return;
@@ -913,6 +926,7 @@ onUnmounted(() => {
 
       <div v-if="chromeStore.panel" class="panel-overlay" @click.self="closePanel">
         <ChildrenPanel v-if="chromeStore.panel === 'children'" @close="closePanel" />
+        <ActivityPanel v-else-if="chromeStore.panel === 'activity'" @close="closePanel" />
       </div>
     </div>
   </div>

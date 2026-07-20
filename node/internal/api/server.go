@@ -352,6 +352,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
+	s.registerUIAggregateRoutes()
 	s.mux.HandleFunc("POST /v1/sessions", s.handleCreateSession)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleListSessions)
 	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", s.handleDeleteSession)

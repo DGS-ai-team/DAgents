@@ -15,6 +15,7 @@ export const HELP_SECTIONS = [
       { cmd: "/version", desc: "当前版本与更新检查" },
       { cmd: "/update", desc: "查看可用升级（终端执行 dagents update）" },
       { cmd: "/agents", desc: "列出 Agent（/ls 同义）" },
+      { cmd: "/activity", desc: "变更与命令面板（文件 / shell）" },
       { cmd: "/switch <id>", desc: "切换到指定 Agent" },
       { cmd: "/new", desc: "打开新建 Agent 向导" },
       { cmd: "/clear", desc: "清空对话上下文与 transcript" },

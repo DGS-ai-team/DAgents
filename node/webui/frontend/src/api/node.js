@@ -33,6 +33,15 @@ export function getAgentInfo() {
   return apiFetch("/v1/agent/info");
 }
 
+/** 聚合 health + agent/info + llm/settings（Chat 首屏）。 */
+export function getUIBootstrap() {
+  return apiFetch("/v1/ui/bootstrap");
+}
+
+export function getWorkspaceActivity(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/workspace-activity`);
+}
+
 export function getAgentUpdate() {
   return apiFetch("/v1/agent/update");
 }
