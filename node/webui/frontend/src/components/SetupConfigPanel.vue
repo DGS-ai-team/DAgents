@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import ConfigPanelShell from "./ConfigPanelShell.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
@@ -14,14 +14,79 @@ const PROVIDER_PRESETS = {
 const { loading, saving, error, statusMessage, configPath, configWritable, form, load, save } =
   useSetupConfig();
 
+const editingId = ref("");
+const newProfileId = ref("");
+
 const manageFieldsDisabled = computed(() => !form.manage.enabled);
 
+const profiles = computed(() => (Array.isArray(form.llm.profiles) ? form.llm.profiles : []));
+
+const editingProfile = computed(() => profiles.value.find((p) => p.id === editingId.value) || null);
+
+function ensureProfiles() {
+  if (!Array.isArray(form.llm.profiles)) form.llm.profiles = [];
+  if (form.llm.profiles.length === 0) {
+    const id = form.llm.active || "default";
+    form.llm.profiles.push({
+      id,
+      provider: form.llm.provider || "openai",
+      base_url: form.llm.base_url || "",
+      model: form.llm.model || "",
+      api_key_env: form.llm.api_key_env || "OPENAI_API_KEY",
+      mock: !!form.llm.mock,
+    });
+    form.llm.active = id;
+  }
+  if (!editingId.value || !form.llm.profiles.some((p) => p.id === editingId.value)) {
+    editingId.value = form.llm.active || form.llm.profiles[0].id;
+  }
+}
+
 function applyProviderPreset() {
-  const preset = PROVIDER_PRESETS[form.llm.provider];
+  const profile = editingProfile.value;
+  if (!profile) return;
+  const preset = PROVIDER_PRESETS[profile.provider];
   if (!preset) return;
-  form.llm.base_url = preset.base_url;
-  form.llm.model = preset.model;
-  form.llm.mock = form.llm.provider === "mock";
+  profile.base_url = preset.base_url;
+  profile.model = preset.model;
+  profile.mock = profile.provider === "mock";
+}
+
+function addProfile() {
+  ensureProfiles();
+  let id = String(newProfileId.value || "").trim();
+  if (!id) {
+    id = `llm-${form.llm.profiles.length + 1}`;
+  }
+  if (form.llm.profiles.some((p) => p.id === id)) {
+    error.value = `档案 id「${id}」已存在`;
+    return;
+  }
+  form.llm.profiles.push({
+    id,
+    provider: "deepseek",
+    base_url: PROVIDER_PRESETS.deepseek.base_url,
+    model: PROVIDER_PRESETS.deepseek.model,
+    api_key_env: "OPENAI_API_KEY",
+    mock: false,
+  });
+  editingId.value = id;
+  newProfileId.value = "";
+}
+
+function removeProfile(id) {
+  ensureProfiles();
+  if (form.llm.profiles.length <= 1) {
+    error.value = "至少保留一个 LLM 档案";
+    return;
+  }
+  form.llm.profiles = form.llm.profiles.filter((p) => p.id !== id);
+  if (form.llm.active === id) {
+    form.llm.active = form.llm.profiles[0].id;
+  }
+  if (editingId.value === id) {
+    editingId.value = form.llm.active;
+  }
 }
 
 function featuresPayload() {
@@ -29,9 +94,21 @@ function featuresPayload() {
 }
 
 function llmPayload() {
+  ensureProfiles();
+  const active = form.llm.active || form.llm.profiles[0]?.id || "default";
   return {
-    ...form.llm,
-    mock: form.llm.mock || form.llm.provider === "mock",
+    active,
+    max_tool_loops: form.llm.max_tool_loops,
+    profiles: form.llm.profiles.map((p) => ({
+      id: p.id,
+      provider: p.provider,
+      base_url: p.base_url,
+      model: p.model,
+      api_key_env: p.api_key_env,
+      mock: p.mock || p.provider === "mock",
+      thinking: p.thinking || undefined,
+      reasoning_effort: p.reasoning_effort || undefined,
+    })),
   };
 }
 
@@ -49,9 +126,19 @@ async function saveConnection() {
     features: featuresPayload(),
     browser: { ...form.browser },
   });
+  ensureProfiles();
 }
 
-onMounted(load);
+watch(
+  () => form.llm.profiles,
+  () => ensureProfiles(),
+  { deep: true }
+);
+
+onMounted(async () => {
+  await load();
+  ensureProfiles();
+});
 </script>
 
 <template>
@@ -63,18 +150,53 @@ onMounted(load);
     :config-writable="configWritable"
     :error="error"
     :status-message="statusMessage"
-    @refresh="load"
+    @refresh="load().then(ensureProfiles)"
     @save="saveConnection"
   >
     <p class="setup-config-panel__hint">
-      API Key 不写入配置文件，请在系统环境变量中设置（如 <code>OPENAI_API_KEY</code>）。
+      可配置多个 LLM 档案并在对话页切换。API Key 不写入配置文件，请在系统环境变量中设置（如
+      <code>OPENAI_API_KEY</code>）。
     </p>
 
     <section class="settings-section">
-      <h2 class="settings-section__title">LLM</h2>
+      <h2 class="settings-section__title">LLM 档案</h2>
+      <label class="settings-field">
+        <span class="settings-field__label">当前启用</span>
+        <select v-model="form.llm.active" class="settings-field__input">
+          <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.id }} ({{ p.provider }} / {{ p.model }})</option>
+        </select>
+      </label>
+      <label class="settings-field">
+        <span class="settings-field__label">编辑档案</span>
+        <select v-model="editingId" class="settings-field__input">
+          <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.id }}</option>
+        </select>
+      </label>
+      <div class="setup-config-panel__field-grid">
+        <label class="settings-field">
+          <span class="settings-field__label">新建档案 id</span>
+          <input v-model="newProfileId" class="settings-field__input" type="text" placeholder="如 qwen-plus" autocomplete="off" />
+        </label>
+        <div class="settings-field">
+          <span class="settings-field__label">&nbsp;</span>
+          <button type="button" class="btn btn--ghost" @click="addProfile">添加档案</button>
+        </div>
+      </div>
+      <button
+        v-if="editingProfile && profiles.length > 1"
+        type="button"
+        class="btn btn--ghost"
+        @click="removeProfile(editingProfile.id)"
+      >
+        删除当前编辑档案
+      </button>
+    </section>
+
+    <section v-if="editingProfile" class="settings-section">
+      <h2 class="settings-section__title">档案「{{ editingProfile.id }}」</h2>
       <label class="settings-field">
         <span class="settings-field__label">Provider</span>
-        <select v-model="form.llm.provider" class="settings-field__input" @change="applyProviderPreset">
+        <select v-model="editingProfile.provider" class="settings-field__input" @change="applyProviderPreset">
           <option value="deepseek">DeepSeek</option>
           <option value="openai">OpenAI</option>
           <option value="qwen">Qwen</option>
@@ -84,23 +206,23 @@ onMounted(load);
       </label>
       <label class="settings-field">
         <span class="settings-field__label">Base URL</span>
-        <input v-model="form.llm.base_url" class="settings-field__input" type="text" autocomplete="off" />
+        <input v-model="editingProfile.base_url" class="settings-field__input" type="text" autocomplete="off" />
       </label>
       <label class="settings-field">
         <span class="settings-field__label">Model</span>
-        <input v-model="form.llm.model" class="settings-field__input" type="text" autocomplete="off" />
+        <input v-model="editingProfile.model" class="settings-field__input" type="text" autocomplete="off" />
       </label>
       <label class="settings-field">
         <span class="settings-field__label">API Key 环境变量名</span>
-        <input v-model="form.llm.api_key_env" class="settings-field__input" type="text" autocomplete="off" />
-      </label>
-      <label class="settings-field">
-        <span class="settings-field__label">单条消息工具步上限</span>
-        <input v-model.number="form.llm.max_tool_loops" class="settings-field__input" type="number" min="1" />
+        <input v-model="editingProfile.api_key_env" class="settings-field__input" type="text" autocomplete="off" />
       </label>
       <label class="settings-toggle">
-        <input v-model="form.llm.mock" type="checkbox" />
+        <input v-model="editingProfile.mock" type="checkbox" />
         <span>Mock 模式（不调用真实 LLM）</span>
+      </label>
+      <label class="settings-field">
+        <span class="settings-field__label">单条消息工具步上限（全局）</span>
+        <input v-model.number="form.llm.max_tool_loops" class="settings-field__input" type="number" min="1" />
       </label>
     </section>
 

@@ -663,6 +663,19 @@ async function cycleThinkingEffort() {
   }
 }
 
+async function switchLLMProfile(id) {
+  const profileId = String(id || "").trim();
+  if (!profileId) return;
+  if (profileId === chromeStore.llmSettings?.active_profile) return;
+  sessionStore.error = "";
+  try {
+    chromeStore.llmSettings = await api.patchLLMSettings({ active_profile: profileId });
+    syncReasoningDisplay(chromeStore.llmSettings);
+  } catch (e) {
+    sessionStore.error = e.message;
+  }
+}
+
 async function handleThinkingCommand(arg) {
   const parts = String(arg || "").trim().split(/\s+/);
   const patch = {};
@@ -830,6 +843,7 @@ onUnmounted(() => {
         @cancel="cancelTurn"
         @toggle-thinking="toggleThinkingMode"
         @cycle-effort="cycleThinkingEffort"
+        @switch-profile="switchLLMProfile"
         @approve-all="(idx) => submitHitlApproval(true, idx)"
         @reject-all="(idx) => submitHitlApproval(false, idx)"
         @approve-one="(payload) => submitHitlOne(payload, true)"

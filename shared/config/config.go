@@ -272,15 +272,31 @@ type LocalConfig struct {
 }
 
 // LLMConfig 为 turn loop 使用的模型配置。
+//
+// 兼容单配置：顶层 provider/base_url/model 等为「当前生效」快照。
+// 多配置：profiles 存命名档案，active 指向当前档案 id；切换时把档案字段复制到顶层快照。
 type LLMConfig struct {
+	Active          string                     `yaml:"active,omitempty"`
+	Profiles        map[string]LLMProfileConfig `yaml:"profiles,omitempty"`
+	Provider        string                     `yaml:"provider"`
+	BaseURL         string                     `yaml:"base_url"`
+	Model           string                     `yaml:"model"`
+	APIKeyEnv       string                     `yaml:"api_key_env"`
+	Mock            bool                       `yaml:"mock"`
+	MaxToolLoops    int                        `yaml:"max_tool_loops"`
+	Thinking        string                     `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
+	ReasoningEffort string                     `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
+}
+
+// LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_tool_loops）。
+type LLMProfileConfig struct {
 	Provider        string `yaml:"provider"`
 	BaseURL         string `yaml:"base_url"`
 	Model           string `yaml:"model"`
 	APIKeyEnv       string `yaml:"api_key_env"`
 	Mock            bool   `yaml:"mock"`
-	MaxToolLoops    int    `yaml:"max_tool_loops"`
-	Thinking        string `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
-	ReasoningEffort string `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
+	Thinking        string `yaml:"thinking,omitempty"`
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty"`
 }
 
 // ManageConfig 控制是否向 Manage 注册；默认 enabled=false。
@@ -369,6 +385,10 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.LLM.Provider) == "" {
 		c.LLM.Provider = "openai"
 	}
+	if strings.TrimSpace(c.LLM.APIKeyEnv) == "" {
+		c.LLM.APIKeyEnv = "OPENAI_API_KEY"
+	}
+	c.normalizeLLMProfiles()
 	if strings.TrimSpace(c.LLM.APIKeyEnv) == "" {
 		c.LLM.APIKeyEnv = "OPENAI_API_KEY"
 	}

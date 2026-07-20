@@ -7,14 +7,28 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// LLMSettings LLM 连接配置（安装向导原批次 1）。
+// LLMProfileSettings 单个 LLM 档案（Web UI / setup API）。
+type LLMProfileSettings struct {
+	ID              string `json:"id"`
+	Provider        string `json:"provider"`
+	BaseURL         string `json:"base_url"`
+	Model           string `json:"model"`
+	APIKeyEnv       string `json:"api_key_env"`
+	Mock            bool   `json:"mock"`
+	Thinking        string `json:"thinking,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+// LLMSettings LLM 连接配置（支持多档案）。
 type LLMSettings struct {
-	Provider     string `json:"provider"`
-	BaseURL      string `json:"base_url"`
-	Model        string `json:"model"`
-	APIKeyEnv    string `json:"api_key_env"`
-	Mock         bool   `json:"mock"`
-	MaxToolLoops int    `json:"max_tool_loops"`
+	Active       string               `json:"active"`
+	Profiles     []LLMProfileSettings `json:"profiles"`
+	Provider     string               `json:"provider"`
+	BaseURL      string               `json:"base_url"`
+	Model        string               `json:"model"`
+	APIKeyEnv    string               `json:"api_key_env"`
+	Mock         bool                 `json:"mock"`
+	MaxToolLoops int                  `json:"max_tool_loops"`
 }
 
 // ManageSettings Manage 连接配置（安装向导原批次 2）。
@@ -162,6 +176,8 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			LocalEndpoint: cfg.Local.Endpoint,
 		},
 		LLM: LLMSettings{
+			Active:       cfg.LLM.ActiveProfileID(),
+			Profiles:     llmProfilesFromConfig(cfg),
 			Provider:     cfg.LLM.Provider,
 			BaseURL:      cfg.LLM.BaseURL,
 			Model:        cfg.LLM.Model,
@@ -304,34 +320,100 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 }
 
 func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
-	provider := strings.ToLower(strings.TrimSpace(p.Provider))
-	if provider == "" {
-		return fmt.Errorf("llm.provider is required")
-	}
-	switch provider {
-	case "openai", "deepseek", "qwen", "vllm", "mock":
-	default:
-		return fmt.Errorf("unsupported llm.provider %q", p.Provider)
-	}
-	mock := p.Mock || provider == "mock"
-	if provider == "mock" {
-		mock = true
-	}
-	model := strings.TrimSpace(p.Model)
-	if !mock && model == "" {
-		return fmt.Errorf("llm.model is required when mock is false")
-	}
-	cfg.LLM.Provider = provider
-	cfg.LLM.BaseURL = strings.TrimSpace(p.BaseURL)
-	cfg.LLM.Model = model
-	if env := strings.TrimSpace(p.APIKeyEnv); env != "" {
-		cfg.LLM.APIKeyEnv = env
-	}
-	cfg.LLM.Mock = mock
 	if p.MaxToolLoops > 0 {
 		cfg.LLM.MaxToolLoops = p.MaxToolLoops
 	}
+
+	if len(p.Profiles) > 0 {
+		next := make(map[string]config.LLMProfileConfig, len(p.Profiles))
+		for _, item := range p.Profiles {
+			id := strings.TrimSpace(item.ID)
+			if id == "" {
+				return fmt.Errorf("llm profile id is required")
+			}
+			if err := upsertProfileIntoMap(next, id, config.LLMProfileConfig{
+				Provider:        item.Provider,
+				BaseURL:         item.BaseURL,
+				Model:           item.Model,
+				APIKeyEnv:       item.APIKeyEnv,
+				Mock:            item.Mock,
+				Thinking:        item.Thinking,
+				ReasoningEffort: item.ReasoningEffort,
+			}); err != nil {
+				return err
+			}
+		}
+		cfg.LLM.Profiles = next
+	} else if provider := strings.ToLower(strings.TrimSpace(p.Provider)); provider != "" {
+		// 兼容旧客户端：只提交顶层字段时，更新当前 active 档案。
+		mock := p.Mock || provider == "mock"
+		if provider == "mock" {
+			mock = true
+		}
+		model := strings.TrimSpace(p.Model)
+		if !mock && model == "" {
+			return fmt.Errorf("llm.model is required when mock is false")
+		}
+		switch provider {
+		case "openai", "deepseek", "qwen", "vllm", "mock":
+		default:
+			return fmt.Errorf("unsupported llm.provider %q", p.Provider)
+		}
+		cfg.LLM.Provider = provider
+		cfg.LLM.BaseURL = strings.TrimSpace(p.BaseURL)
+		cfg.LLM.Model = model
+		if env := strings.TrimSpace(p.APIKeyEnv); env != "" {
+			cfg.LLM.APIKeyEnv = env
+		}
+		cfg.LLM.Mock = mock
+		cfg.SyncActiveProfileFromFlat()
+	}
+
+	active := strings.TrimSpace(p.Active)
+	if active != "" {
+		if err := cfg.SetActiveLLMProfile(active); err != nil {
+			return err
+		}
+	} else if cfg.LLM.ActiveProfileID() != "" {
+		cfg.LLM.ApplyActiveToFlat()
+	}
+	cfg.ApplyDefaults()
 	return nil
+}
+
+func upsertProfileIntoMap(dst map[string]config.LLMProfileConfig, id string, prof config.LLMProfileConfig) error {
+	tmp := &config.Config{LLM: config.LLMConfig{Profiles: map[string]config.LLMProfileConfig{}}}
+	if err := tmp.UpsertProfile(id, prof, true); err != nil {
+		return err
+	}
+	p, _ := tmp.LLM.GetProfile(id)
+	dst[id] = p
+	return nil
+}
+
+func llmProfilesFromConfig(cfg *config.Config) []LLMProfileSettings {
+	if cfg == nil {
+		return nil
+	}
+	ids := cfg.LLM.ProfileIDs()
+	out := make([]LLMProfileSettings, 0, len(ids))
+	for _, id := range ids {
+		p, ok := cfg.LLM.GetProfile(id)
+		if !ok {
+			continue
+		}
+		out = append(out, LLMProfileSettings{
+			ID:              id,
+			Provider:        p.Provider,
+			BaseURL:         p.BaseURL,
+			Model:           p.Model,
+			APIKeyEnv:       p.APIKeyEnv,
+			Mock:            p.Mock,
+			Thinking:        p.Thinking,
+			ReasoningEffort: p.ReasoningEffort,
+		})
+	}
+	return out
 }
 
 func applyManagePatch(cfg *config.Config, p ManageSettings) error {

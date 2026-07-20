@@ -31,6 +31,30 @@ func TestViewFromConfig(t *testing.T) {
 	}
 }
 
+func TestApplyPatch_llmProfiles(t *testing.T) {
+	cfg := testBaseConfig(t)
+	updated, err := ApplyPatch(cfg, SettingsPatch{
+		LLM: &LLMSettings{
+			Active:       "qwen",
+			MaxToolLoops: 20,
+			Profiles: []LLMProfileSettings{
+				{ID: "default", Provider: "deepseek", Model: "deepseek-chat", APIKeyEnv: "OPENAI_API_KEY"},
+				{ID: "qwen", Provider: "qwen", Model: "qwen-plus", APIKeyEnv: "QWEN_API_KEY"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LLM.Active != "qwen" || updated.LLM.Provider != "qwen" || updated.LLM.Model != "qwen-plus" {
+		t.Fatalf("llm = %+v", updated.LLM)
+	}
+	view := ViewFromConfig(updated)
+	if view.LLM.Active != "qwen" || len(view.LLM.Profiles) != 2 {
+		t.Fatalf("view llm = %+v", view.LLM)
+	}
+}
+
 func TestApplyPatch_llmAndFeatures(t *testing.T) {
 	cfg := testBaseConfig(t)
 	updated, err := ApplyPatch(cfg, SettingsPatch{
@@ -41,8 +65,8 @@ func TestApplyPatch_llmAndFeatures(t *testing.T) {
 			Mock:      true,
 		},
 		Features: &FeatureSettings{
-			SkillsEnabled:   false,
-			BrowserEnabled:  true,
+			SkillsEnabled:     false,
+			BrowserEnabled:    true,
 			MultimodalEnabled: true,
 		},
 	})

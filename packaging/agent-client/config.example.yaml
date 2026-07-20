@@ -33,6 +33,19 @@ expose_to_peers: false
 fs_root: ./.runtime
 
 llm:
+  # 多档案（可选）：profiles + active；顶层 provider/model 等为当前生效快照（兼容旧配置）
+  # active: deepseek-main
+  # profiles:
+  #   deepseek-main:
+  #     provider: deepseek
+  #     base_url: https://api.deepseek.com
+  #     model: deepseek-chat
+  #     api_key_env: OPENAI_API_KEY
+  #   qwen-plus:
+  #     provider: qwen
+  #     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #     model: qwen-plus
+  #     api_key_env: QWEN_API_KEY
   provider: deepseek   # openai | deepseek | qwen | vllm
   base_url: https://api.deepseek.com   # 留空时按 provider 默认；qwen 业务空间示例：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   model: deepseek-chat   # deepseek 示例：deepseek-reasoner 或 deepseek-chat（Thinking 模式）

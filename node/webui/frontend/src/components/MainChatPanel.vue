@@ -41,6 +41,7 @@ const emit = defineEmits([
   "cancel",
   "toggle-thinking",
   "cycle-effort",
+  "switch-profile",
   "approve-all",
   "reject-all",
   "approve-one",
@@ -377,6 +378,7 @@ defineExpose({
               :disabled="disabled || cancelling"
               @toggle-thinking="emit('toggle-thinking')"
               @cycle-effort="emit('cycle-effort')"
+              @switch-profile="(id) => emit('switch-profile', id)"
             />
             <div class="composer-toolbar composer-toolbar--attach">
               <input
