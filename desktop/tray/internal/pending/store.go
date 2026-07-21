@@ -1,4 +1,4 @@
-// Package pending 维护 Shell 侧 session 级待办表（HITL + 未读回复，F-E2/E3/E10/E13）。
+// Package pending 维护 Shell 侧 Agent 级待办表（HITL + 未读回复，F-E2/E3/E10/E13）。
 package pending
 
 import (
@@ -9,16 +9,20 @@ import (
 	"time"
 )
 
-// Entry 为单个 session 的聚合待办态（D17：同 session 一条通知态）。
+// Entry 为单个 Agent 的聚合待办态（同 Agent 一条通知态）。
 type Entry struct {
+	AgentID     string
+	DisplayName string
+	HITLItems   int
+	HasUnread   bool
+	EventType   string
+	UpdatedAt   time.Time
+
+	// SessionID 与 AgentID 同源（历史字段，菜单/焦点键仍可用）。
 	SessionID string
-	HITLItems int
-	HasUnread bool
-	EventType string
-	UpdatedAt time.Time
 }
 
-// Active 该 session 是否仍有待办。
+// Active 该 Agent 是否仍有待办。
 func (e Entry) Active() bool {
 	return e.HITLItems > 0 || e.HasUnread
 }
@@ -34,42 +38,58 @@ func (e Entry) itemCount() int {
 	return n
 }
 
-// SummaryLabel 为单 session 菜单/Toast 摘要。
+func (e Entry) id() string {
+	if id := strings.TrimSpace(e.AgentID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(e.SessionID)
+}
+
+func (e Entry) displayLabel() string {
+	if name := strings.TrimSpace(e.DisplayName); name != "" {
+		return name
+	}
+	return shortAgentID(e.id())
+}
+
+// SummaryLabel 为单 Agent 菜单/Toast 摘要。
 func (e Entry) SummaryLabel() string {
+	label := e.displayLabel()
 	switch {
 	case e.HITLItems > 0 && e.HasUnread:
 		if e.HITLItems > 1 {
-			return fmt.Sprintf("%s · %d 项 HITL + 新回复", shortSessionID(e.SessionID), e.HITLItems)
+			return fmt.Sprintf("%s · %d 项 HITL + 新回复", label, e.HITLItems)
 		}
-		return shortSessionID(e.SessionID) + " · HITL + 新回复"
+		return label + " · HITL + 新回复"
 	case e.HITLItems > 1:
-		return fmt.Sprintf("%s · %d 项待处理", shortSessionID(e.SessionID), e.HITLItems)
+		return fmt.Sprintf("%s · %d 项待处理", label, e.HITLItems)
 	case e.HITLItems == 1:
-		return shortSessionID(e.SessionID) + " · 待处理"
+		return label + " · 待处理"
 	case e.HasUnread:
-		return shortSessionID(e.SessionID) + " · 新回复"
+		return label + " · 新回复"
 	default:
-		return shortSessionID(e.SessionID)
+		return label
 	}
 }
 
 // Summary 为托盘展示的待办聚合。
 type Summary struct {
-	SessionCount int
+	AgentCount   int
+	SessionCount int // 与 AgentCount 同值（历史字段）
 	ItemCount    int
 	Label        string
 }
 
-// Store 为 session_id → 待办条目（由 Node GET /v1/sessions 同步）。
+// Store 为 agent_id → 待办条目（由 Node GET /v1/agents 同步）。
 type Store struct {
-	mu        sync.RWMutex
-	bySession map[string]Entry
+	mu      sync.RWMutex
+	byAgent map[string]Entry
 }
 
 // NewStore 构造空待办表。
 func NewStore() *Store {
 	return &Store{
-		bySession: make(map[string]Entry),
+		byAgent: make(map[string]Entry),
 	}
 }
 
@@ -77,7 +97,7 @@ func NewStore() *Store {
 func (s *Store) ReplaceFromNode(incoming map[string]Entry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if mapsEqual(s.bySession, incoming) {
+	if mapsEqual(s.byAgent, incoming) {
 		return false
 	}
 	next := make(map[string]Entry, len(incoming))
@@ -86,7 +106,7 @@ func (s *Store) ReplaceFromNode(incoming map[string]Entry) bool {
 			next[id] = e
 		}
 	}
-	s.bySession = next
+	s.byAgent = next
 	return true
 }
 
@@ -104,7 +124,8 @@ func mapsEqual(a, b map[string]Entry) bool {
 }
 
 func entriesEqual(a, b Entry) bool {
-	return a.SessionID == b.SessionID &&
+	return a.id() == b.id() &&
+		a.DisplayName == b.DisplayName &&
 		a.HITLItems == b.HITLItems &&
 		a.HasUnread == b.HasUnread &&
 		a.EventType == b.EventType
@@ -114,22 +135,23 @@ func entriesEqual(a, b Entry) bool {
 func (s *Store) Summary() Summary {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if len(s.bySession) == 0 {
+	if len(s.byAgent) == 0 {
 		return Summary{}
 	}
 	items := 0
-	for _, e := range s.bySession {
+	for _, e := range s.byAgent {
 		items += e.itemCount()
 	}
-	n := len(s.bySession)
-	label := fmt.Sprintf("%d 个 session 待处理", n)
+	n := len(s.byAgent)
+	label := fmt.Sprintf("%d 个 Agent 待处理", n)
 	if n == 1 {
 		e := s.activeEntriesLocked()[0]
 		label = e.SummaryLabel()
 	} else if items > n {
-		label = fmt.Sprintf("%d 个 session · %d 项待处理", n, items)
+		label = fmt.Sprintf("%d 个 Agent · %d 项待处理", n, items)
 	}
 	return Summary{
+		AgentCount:   n,
 		SessionCount: n,
 		ItemCount:    items,
 		Label:        label,
@@ -144,22 +166,22 @@ func (s *Store) Entries() []Entry {
 }
 
 func (s *Store) activeEntriesLocked() []Entry {
-	out := make([]Entry, 0, len(s.bySession))
-	for _, e := range s.bySession {
+	out := make([]Entry, 0, len(s.byAgent))
+	for _, e := range s.byAgent {
 		if e.Active() {
 			out = append(out, e)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
-			return out[i].SessionID < out[j].SessionID
+			return out[i].id() < out[j].id()
 		}
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)
 	})
 	return out
 }
 
-func shortSessionID(id string) string {
+func shortAgentID(id string) string {
 	id = trim(id)
 	if len(id) <= 12 {
 		return id

@@ -17,13 +17,14 @@ func TestPollLoopSyncsWithoutSSE(t *testing.T) {
 	var listCalls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/sessions":
+		case "/v1/agents":
 			listCalls.Add(1)
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"sessions": []any{
+				"agents": []any{
 					map[string]any{
-						"session_id":        "sess-1",
-						"has_pending_hitl":  true,
+						"agent_id":           "agt-1",
+						"display_name":       "助手",
+						"has_pending_hitl":   true,
 						"pending_hitl_items": 1,
 					},
 				},
@@ -47,7 +48,7 @@ func TestPollLoopSyncsWithoutSSE(t *testing.T) {
 	if listCalls.Load() < 1 {
 		t.Fatalf("list calls = %d, want >= 1", listCalls.Load())
 	}
-	if store.Summary().SessionCount != 1 {
+	if store.Summary().AgentCount != 1 {
 		t.Fatalf("summary = %+v", store.Summary())
 	}
 }

@@ -14,7 +14,7 @@
 | health 失败 **自动重启**（F-L13 基础） | ✅（用户手动停止后不重启） |
 | 二进制名 **`dagents-shell.exe`**（F-L15） | ✅ |
 | Node **单实例** Mutex（F-L8，在 `dagents-node`） | ✅ |
-| **SSE 订阅 + session 待办表**（F-E1–E4/E10–E12） | ✅ v0.6.0 第 ⑤ 步 |
+| **SSE 订阅 + Agent 待办表**（F-E1–E4/E10–E12） | ✅ v0.6.0 第 ⑤ 步 |
 | **未读 assistant 回复待办**（F-E13） | ✅ IM cursor：`notify_seq`/`ack_seq`；Node `POST /ack`；Shell 同步 `has_unread` |
 | **Toast + 深链 + 打开控制台 + 托盘 icon 态**（F-N1–N3/N10, F-U1–U3） | ✅ v0.6.0 第 ⑥ 步 |
 | **安装发布**（F-I1/I3/I8–I10） | ✅ v0.6.0 第 ⑧ 步 |
@@ -28,7 +28,7 @@
 | 菜单 | 行为 |
 |------|------|
 | 状态 | 只读，运行中 agent_id 或「未运行」 |
-| **待办** | 有待办时显示摘要；子菜单列出各 session，点击深链打开 Web UI |
+| **待办** | 有待办时显示摘要；子菜单列出各 Agent，点击深链打开 Web UI |
 | **更新** | Manage 有新版本时显示版本摘要；点击打开设置 › 关于（F-N9） |
 | **打开控制台** | ensure Node 后打开 `/ui/`（F-U1/U2） |
 | 启动 / 停止 / 重启 Node | 与 `nodectl` 一致 |
@@ -80,17 +80,17 @@ Linux CI **不**编译/测试本模块（托盘与 Desktop API 仅服务 Windows
 ## SSE 与鉴权（v0.6.0 第 ⑤ 步）
 
 - Shell 常驻订阅 `GET /v1/streams?live=1`（全局），断线 5s 重连（F-E1/E4）。
-- 解析 HITL / A2A 事件后 **从 Node 同步**待办表（F-E2/E10/E11/**E13**）；SSE 触发 `GET /v1/sessions`，不本地推断 `done`。
-- 每 60s + 重连时 `GET /v1/sessions` 对齐活跃 session 的 `run_turn_phase`（F-E10）。
+- 解析 HITL / A2A 事件后 **从 Node 同步**待办表（F-E2/E10/E11/**E13**）；SSE 触发 `GET /v1/agents`，不本地推断 `done`。
+- 每 60s + 重连时 `GET /v1/agents` 对齐活跃 Agent 的 `run_turn_phase` / 未读 / HITL（F-E10）。
 - 可选鉴权：`Authorization: Bearer $DAGENTS_CLIENT_TOKEN`（F-E12）。
 
 ## 通知与深链（v0.6.0 第 ⑥ 步）
 
-- **Windows Toast**（F-N1/N2）：每 session 一条，点击或「打开」按钮 → `/ui/agents/<id>` 深链。
+- **Windows Toast**（F-N1/N2）：每 Agent 一条，点击或「打开」按钮 → `/ui/agents/<id>` 深链。
 - **托盘 icon**（F-N10）：有待办时在 `icon.ico` ↔ `icon_pending.ico` 间 **600ms 闪烁**，并显示 `●` 标题角标；无待办恢复默认 icon。
 - **打开控制台**（F-U1/U2）：ensure Node 后 `rundll32` 调起默认浏览器。
-- Web UI hydrate/SSE 后 **`POST /v1/sessions/{id}/ack`** 清除未读（F-E13）；Shell 打开深链不本地 ack。
-- **UI focus 抑制**（F-E9）：Web UI 上报 `POST /v1/desktop/ui/focus` 后，同 session **不再弹新 Toast**（托盘待办仍更新）。
+- Web UI hydrate/SSE 后 **`POST /v1/agents/{id}/ack`** 清除未读（F-E13）；Shell 打开深链不本地 ack。
+- **UI focus 抑制**（F-E9）：Web UI 上报 `POST /v1/desktop/ui/focus`（线协议字段仍为 `session_id`，值为 Agent 实例 UUID）后，同 Agent **不再弹新 Toast**（托盘待办仍更新）。
 
 ## localhost Desktop API（v0.6.2）
 
@@ -102,7 +102,7 @@ Linux CI **不**编译/测试本模块（托盘与 Desktop API 仅服务 Windows
 | GET | `/v1/desktop/update` | 更新状态（F-U5 / F-X8） |
 | POST | `/v1/desktop/update/apply` | 应用升级（F-U6） |
 | GET | `/v1/desktop/clipboard/files` | Windows 剪贴板文件路径（F-P2） |
-| POST | `/v1/desktop/ui/focus` | Web UI 聚焦 session（F-E9 / F-X5） |
+| POST | `/v1/desktop/ui/focus` | Web UI 聚焦 Agent（线协议 `session_id`，F-E9 / F-X5） |
 
 CLI：`dagents-shell.exe update [--check|--force]` 转发上述 API（F-I12）。
 

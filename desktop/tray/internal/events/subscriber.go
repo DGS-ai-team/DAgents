@@ -16,7 +16,7 @@ const (
 	syncInterval   = 60 * time.Second
 )
 
-// Subscriber 在 Node 可用时维持全局 SSE，并维护 session 待办表。
+// Subscriber 在 Node 可用时维持全局 SSE，并维护 Agent 待办表。
 type Subscriber struct {
 	client   *nodeclient.Client
 	store    *pending.Store
@@ -35,7 +35,7 @@ func NewSubscriber(client *nodeclient.Client, store *pending.Store, onChange fun
 	}
 }
 
-// Start 启动后台 SSE 循环与 60s sessions 轮询兜底（F-E5）。
+// Start 启动后台 SSE 循环与 60s agents 轮询兜底（F-E5）。
 func (s *Subscriber) Start(parent context.Context) {
 	if s == nil || s.client == nil || s.store == nil {
 		return
@@ -84,7 +84,7 @@ func (s *Subscriber) loop(ctx context.Context) {
 }
 
 func (s *Subscriber) pollLoop(ctx context.Context) {
-	s.syncSessions(ctx)
+	s.syncAgents(ctx)
 	ticker := time.NewTicker(syncInterval)
 	defer ticker.Stop()
 	for {
@@ -92,33 +92,33 @@ func (s *Subscriber) pollLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.syncSessions(ctx)
+			s.syncAgents(ctx)
 		}
 	}
 }
 
 func (s *Subscriber) connectOnce(ctx context.Context) error {
-	s.syncSessions(ctx)
+	s.syncAgents(ctx)
 	return s.client.StreamEvents(ctx, func(ev nodeclient.StreamEvent) bool {
 		if ctx.Err() != nil {
 			return false
 		}
 		if pending.ShouldSyncOnEvent(ev) {
-			s.syncSessions(ctx)
+			s.syncAgents(ctx)
 		}
 		return true
 	})
 }
 
-func (s *Subscriber) syncSessions(ctx context.Context) {
+func (s *Subscriber) syncAgents(ctx context.Context) {
 	syncCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	sessions, err := s.client.ListSessions(syncCtx)
+	agents, err := s.client.ListAgents(syncCtx)
 	if err != nil {
-		log.Printf("shell sync sessions: %v", err)
+		log.Printf("shell sync agents: %v", err)
 		return
 	}
-	if pending.SyncFromSessions(s.store, sessions) {
+	if pending.SyncFromAgents(s.store, agents) {
 		s.notifyChange()
 	}
 }

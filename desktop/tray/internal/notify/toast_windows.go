@@ -16,7 +16,7 @@ import (
 
 const toastAppID = "DAgents Shell"
 
-// Notifier 按 session 发送/更新 Windows Toast（F-N1/N2）。
+// Notifier 按 Agent 发送/更新 Windows Toast（F-N1/N2）。
 type Notifier struct {
 	endpoint string
 	iconPath string
@@ -68,7 +68,11 @@ func (n *Notifier) Sync(entries []pending.Entry) {
 func (n *Notifier) push(e pending.Entry) error {
 	title := "DAgents 待处理"
 	message := e.SummaryLabel()
-	target := webui.SessionURL(n.endpoint, e.SessionID)
+	id := e.AgentID
+	if id == "" {
+		id = e.SessionID
+	}
+	target := webui.AgentURL(n.endpoint, id)
 
 	notification := toast.Notification{
 		AppID:               toastAppID,
@@ -98,7 +102,7 @@ func writeTempIcon(data []byte) (string, error) {
 	return path, nil
 }
 
-// ToastTitle 返回 session 待办的 Toast 标题（测试用）。
+// ToastTitle 返回 Agent 待办的 Toast 标题（测试用）。
 func ToastTitle(e pending.Entry) string {
 	return fmt.Sprintf("%s: %s", toastAppID, e.SummaryLabel())
 }
