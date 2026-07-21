@@ -46,7 +46,7 @@ onMounted(load);
 
 <template>
   <ConfigPanelShell
-    title="能力设置"
+    title="能力设置（Node 全局）"
     :loading="loading"
     :saving="saving"
     :config-path="configPath"
@@ -60,7 +60,9 @@ onMounted(load);
       <div class="settings-section__head">
         <h2 class="settings-section__title">可用工具</h2>
       </div>
-      <p class="settings-section__desc">不勾选任何项表示全部可用；勾选后仅启用已选工具组（如文件查找/读写属「文件」组）。Agent 模板还可进一步收窄。</p>
+      <p class="settings-section__desc">
+        这是 Node <strong>全局默认</strong>。单个 Agent 的工具组请在「设置 › Agents」中配置；已创建 Agent 以自身快照为准。
+      </p>
       <div class="setup-config-panel__toggles">
         <label v-for="g in TOOL_GROUPS" :key="g.name" class="settings-toggle">
           <input

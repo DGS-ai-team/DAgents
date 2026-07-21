@@ -71,6 +71,8 @@ type runtime struct {
 
 	notifySeq int // F-E13：最后需 Client 关注的 SSE seq
 	ackSeq    int // F-E13：Client 已确认看到的最大 SSE seq
+
+	configRevision int64 // Agent 配置版本（UpdatedAt UnixNano）
 }
 
 // newRuntime 创建新的 session runtime
@@ -145,12 +147,20 @@ func newRuntimeWithPublisher(
 		idleAutoCompressApplied: idleAutoCompressApplied,
 		notifySeq:               initialNotifySeq,
 		ackSeq:                  initialAckSeq,
+		configRevision:          turnOpts.ConfigRevision,
 	}
 	if reg, err := media.NewRegistry(id, turnOpts.FSRoot); err == nil {
 		rt.media = reg
 	} else if logger != nil {
 		logger.Warn("session media registry init failed", "session_id", id, "error", err)
 	}
+	promptReader := promptcontext.NewReader(turnOpts.RuntimeDir)
+	promptReader.SetFilter(promptcontext.Filter{
+		SoulEnabled:     turnOpts.PromptContext.SoulEnabled,
+		UserEnabled:     turnOpts.PromptContext.UserEnabled,
+		CustomEnabled:   turnOpts.PromptContext.CustomEnabled,
+		LongTermEnabled: turnOpts.PromptContext.LongTermEnabled,
+	})
 	// 创建编排器
 	rt.orch = turn.NewOrchestrator(
 		agentID,
@@ -165,7 +175,7 @@ func newRuntimeWithPublisher(
 			Set:     rt.setLoadedSkills,
 		},
 		turnOpts.MaxToolLoops,
-		promptcontext.NewReader(turnOpts.RuntimeDir),
+		promptReader,
 		journal,
 		hooks.RuntimeConfig{
 			Duplicate: hooks.DuplicateConfigOrDefault(turnOpts.DuplicateToolCall),

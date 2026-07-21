@@ -70,11 +70,19 @@ export function getAgentTemplate(templateId) {
   return apiFetch(`/v1/agent-templates/${encodeURIComponent(templateId)}`);
 }
 
-export function createAgent({ templateId, displayName, sandbox, defaults } = {}) {
-  const body = { template_id: templateId };
-  if (displayName) body.display_name = displayName;
-  if (sandbox && typeof sandbox === "object") body.sandbox = sandbox;
-  if (defaults && typeof defaults === "object") body.defaults = defaults;
+export function createAgent(payload = {}) {
+  const body = {};
+  if (payload.template_id != null || payload.templateId != null) {
+    const tid = String(payload.template_id ?? payload.templateId ?? "").trim();
+    if (tid) body.template_id = tid;
+  }
+  if (payload.display_name != null || payload.displayName != null) {
+    const name = String(payload.display_name ?? payload.displayName ?? "").trim();
+    if (name) body.display_name = name;
+  }
+  if (payload.origin) body.origin = payload.origin;
+  if (payload.sandbox && typeof payload.sandbox === "object") body.sandbox = payload.sandbox;
+  if (payload.defaults && typeof payload.defaults === "object") body.defaults = payload.defaults;
   return apiFetch("/v1/agents", { method: "POST", body });
 }
 
@@ -86,14 +94,16 @@ export function getAgent(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`);
 }
 
-export function patchAgent(agentId, patch) {
+export function patchAgent(agentId, patch = {}) {
   const body = {};
-  if (patch?.displayName != null || patch?.display_name != null) {
-    body.display_name = patch.displayName ?? patch.display_name;
+  if (patch.display_name != null || patch.displayName != null) {
+    body.display_name = patch.display_name ?? patch.displayName;
   }
-  if (patch?.llmActive != null || patch?.llm_active != null) {
-    body.llm_active = patch.llmActive ?? patch.llm_active;
+  if (patch.llm_active != null || patch.llmActive != null) {
+    body.llm_active = patch.llm_active ?? patch.llmActive;
   }
+  if (patch.sandbox && typeof patch.sandbox === "object") body.sandbox = patch.sandbox;
+  if (patch.defaults && typeof patch.defaults === "object") body.defaults = patch.defaults;
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body });
 }
 
@@ -103,6 +113,10 @@ export function deleteAgent(agentId) {
 
 export function ensureAgentRuntime(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/ensure`, { method: "POST", body: {} });
+}
+
+export function reloadAgentRuntime(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/reload`, { method: "POST", body: {} });
 }
 
 export function getAgentHydrate(agentId) {
