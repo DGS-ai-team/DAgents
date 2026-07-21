@@ -33,9 +33,10 @@ func flagOrDefault(v *bool, def bool) bool {
 	return *v
 }
 
-// Reader 读取 `.runtime/prompt_context/` 侧车 Markdown 与长期记忆，带 mtime 缓存。
+// Reader 读取侧车 Markdown 与长期记忆；优先使用内存 Content（SQLite），否则回退到 runtime 文件。
 type Reader struct {
 	runtimeDir string
+	content    *Content
 	filter     Filter
 	mu         sync.Mutex
 	cache      map[string]cachedFile
@@ -88,34 +89,46 @@ func (r *Reader) EnsureSidecarFiles() {
 	}
 }
 
-// ReadSoul 读取 soul.md；空白或缺失返回空串。
+// ReadSoul 读取 soul；空白或缺失返回空串。
 func (r *Reader) ReadSoul() string {
 	if !flagOrDefault(r.filter.SoulEnabled, true) {
 		return ""
 	}
+	if r.content != nil {
+		return r.readContentField(soulFile)
+	}
 	return r.readSidecar(soulFile)
 }
 
-// ReadUser 读取 user.md。
+// ReadUser 读取 user。
 func (r *Reader) ReadUser() string {
 	if !flagOrDefault(r.filter.UserEnabled, true) {
 		return ""
 	}
+	if r.content != nil {
+		return r.readContentField(userFile)
+	}
 	return r.readSidecar(userFile)
 }
 
-// ReadCustom 读取 custom.md。
+// ReadCustom 读取 custom。
 func (r *Reader) ReadCustom() string {
 	if !flagOrDefault(r.filter.CustomEnabled, true) {
 		return ""
 	}
+	if r.content != nil {
+		return r.readContentField(customFile)
+	}
 	return r.readSidecar(customFile)
 }
 
-// ReadLongTermMemory 读取 `.runtime/memory/long_term.md`（不存在或空白时不注入）。
+// ReadLongTermMemory 读取长期记忆（不存在或空白时不注入）。
 func (r *Reader) ReadLongTermMemory() string {
 	if !flagOrDefault(r.filter.LongTermEnabled, true) {
 		return ""
+	}
+	if r.content != nil {
+		return r.readContentField("long_term")
 	}
 	if r.runtimeDir == "" {
 		return ""

@@ -20,6 +20,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -54,6 +55,8 @@ type TurnOptions struct {
 	ConfigRevision int64
 	// PromptContext 控制 soul/user/custom/long_term 侧车是否注入（缺省全开）。
 	PromptContext PromptContextOptions
+	// PromptContent 为侧车正文（通常来自 agents.db）；非 nil 时优先于 RuntimeDir 文件。
+	PromptContent *promptcontext.Content
 }
 
 // PromptContextOptions 为侧车 / 长期记忆注入开关。
@@ -171,15 +174,18 @@ func (m *Manager) DefaultTools() *tools.Registry {
 	return m.tools
 }
 
-// CreateWithOptions 用指定 TurnOptions 与工具执行器创建/复用 session（per-agent 沙箱用）。
-// toolExec 为 nil 时回退到 Manager 默认 Registry。
-func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, toolExec tools.Executor) (*Session, bool, error) {
+// CreateWithOptions 用指定 TurnOptions、工具执行器与可选策略引擎创建/复用 session（per-agent 沙箱用）。
+// toolExec 为 nil 时回退到 Manager 默认 Registry；policyEngine 为 nil 时回退到 Manager 默认策略。
+func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, toolExec tools.Executor, policyEngine *policy.Engine) (*Session, bool, error) {
 	id := strings.TrimSpace(requestedID)
 	if id == "" {
 		return nil, false, fmt.Errorf("session id is required for CreateWithOptions")
 	}
 	if toolExec == nil {
 		toolExec = m.tools
+	}
+	if policyEngine == nil {
+		policyEngine = m.policy
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -193,7 +199,7 @@ func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, to
 		return nil, false, err
 	}
 	created := len(msgs) == 0 && !m.sessionExistsInStore(id)
-	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, m.policy, m.store, m.logger,
+	rt := newRuntimeWithPublisher(id, m.agentID, m.hub, m.hub, m.llm, toolExec, policyEngine, m.store, m.logger,
 		msgs, loaded, pending, loopCount, hookStore, idleMarked, notifySeq, ackSeq, turnOpts, m.triggerDelivery)
 	m.sessions[id] = rt
 	m.attachUserChildTools(rt)
@@ -313,7 +319,7 @@ func (m *Manager) ListActive() []*Session {
 	return out
 }
 
-// ReloadPolicy 热更新策略引擎并同步到全部活跃 session orchestrator。
+// ReloadPolicy 热更新 Manager 默认策略引擎；不再广播到全部 session（策略按 Agent 区分）。
 func (m *Manager) ReloadPolicy(engine *policy.Engine) {
 	if engine == nil {
 		return
@@ -321,7 +327,17 @@ func (m *Manager) ReloadPolicy(engine *policy.Engine) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.policy = engine
-	for _, rt := range m.sessions {
+}
+
+// SetSessionPolicy 热更新指定 session 的策略引擎。
+func (m *Manager) SetSessionPolicy(sessionID string, engine *policy.Engine) {
+	if engine == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rt, ok := m.sessions[sessionID]; ok && rt != nil {
 		rt.setPolicy(engine)
 	}
 }

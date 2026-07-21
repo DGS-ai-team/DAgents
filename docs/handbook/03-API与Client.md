@@ -15,33 +15,37 @@
 
 | 原则 | 说明 |
 |------|------|
-| **一进程一 `agent_id` 一端口** | 子 Agent 不单独暴露 HTTP |
+| **用户面 = Agent** | 1 Agent = 1 主对话；优先 `/v1/agents/{agent_id}/...` |
+| **`/v1/sessions*` 过渡** | 仍可用但带 Deprecation；新集成勿依赖 |
+| **Policy / 侧车按 Agent** | SQLite（`agents.db`）；全局 `/v1/policy` 已 410 |
 | **Client 只连 Node** | 默认同机 `127.0.0.1`；**前后端分离**时 Client 在较新机器、`local.endpoint` 指向目标机 Node（见 [01 §1.5](./01-愿景与架构.md)、§4.4） |
 | **思考与工具在 Node 内** | 无 Backend 代执行 |
-| **A2A 经 Manage** | Node 本地 API **不**接收 peer 入站 |
-| **会话态在 Node** | SQLite + 内存队列 |
+| **A2A 经 Manage** | 注册载荷用 `node_id`（`manage.enabled` 默认关） |
 
 ### 1.1 路径前缀
 
 | 前缀 | 调用方 |
 |------|--------|
 | `/health` | 探活 |
-| `/v1/...` | Client（session、messages、SSE、resume） |
-| `/v1/internal/...` | Node 进程内（子 Agent）；**不**对外 HTTP |
+| `/v1/agents/...` | **主契约**（对话、策略、侧车、子 Agent） |
+| `/v1/...` | messages、streams、triggers、setup |
+| `/v1/sessions/...` | 过渡兼容 |
+
+权威契约：[agent-node-api.md](../architecture/agent-node-api.md) · OpenAPI：[openapi-node.yaml](../architecture/openapi-node.yaml)
 
 ### 1.2 通用错误体
 
 ```json
 {
   "error": {
-    "code": "session_not_found",
-    "message": "session sess-xxx 不存在",
-    "details": { "session_id": "sess-xxx" }
+    "code": "agent_not_found",
+    "message": "agent 不存在",
+    "details": { "agent_id": "agt-xxx" }
   }
 }
 ```
 
-常见 `code`：`invalid_session`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`。
+常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`、`policy_moved`。
 
 ---
 

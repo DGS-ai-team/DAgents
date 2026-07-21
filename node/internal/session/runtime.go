@@ -155,6 +155,9 @@ func newRuntimeWithPublisher(
 		logger.Warn("session media registry init failed", "session_id", id, "error", err)
 	}
 	promptReader := promptcontext.NewReader(turnOpts.RuntimeDir)
+	if turnOpts.PromptContent != nil {
+		promptReader.SetContent(*turnOpts.PromptContent)
+	}
 	promptReader.SetFilter(promptcontext.Filter{
 		SoulEnabled:     turnOpts.PromptContext.SoulEnabled,
 		UserEnabled:     turnOpts.PromptContext.UserEnabled,

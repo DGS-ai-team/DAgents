@@ -1,0 +1,171 @@
+openapi: 3.0.3
+info:
+  title: DAgents Agent Node API
+  version: "0.5"
+  description: |
+    Agent Node 本地 HTTP API。对外契约以 **Agent** 为中心（1 Agent = 1 主对话）。
+    `/v1/sessions*` 为过渡兼容路径（响应含 Deprecation 头），新集成请使用 `/v1/agents/{agent_id}/...`。
+servers:
+  - url: http://127.0.0.1:18789
+    description: 默认本机 Node
+paths:
+  /health:
+    get:
+      summary: 探活
+      responses:
+        "200":
+          description: OK
+  /v1/agents:
+    get:
+      summary: 列出 Agent
+      responses:
+        "200":
+          description: agents 列表
+    post:
+      summary: 创建 Agent（完整设置）
+      responses:
+        "200":
+          description: 已创建
+  /v1/agents/{agent_id}:
+    get:
+      summary: 获取 Agent
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: Agent 视图
+    patch:
+      summary: 更新 Agent 快照
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: 已更新
+    delete:
+      summary: 归档 Agent
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: 已归档
+  /v1/agents/{agent_id}/ensure:
+    post:
+      summary: 按快照装入运行时
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: OK
+  /v1/agents/{agent_id}/reload:
+    post:
+      summary: 强制按快照重建运行时
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: OK
+  /v1/agents/{agent_id}/hydrate:
+    get:
+      summary: 灌水对话与 HITL
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: hydrate 视图
+  /v1/agents/{agent_id}/policy:
+    get:
+      summary: 读取该 Agent 的审批策略（SQLite）
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: policy snapshot（source=sqlite）
+  /v1/agents/{agent_id}/policy/tools:
+    put:
+      summary: 更新工具策略
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: OK
+  /v1/agents/{agent_id}/policy/shell/{shell_type}:
+    put:
+      summary: 更新 shell 策略
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: shell_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [bash, cmd, powershell]
+      responses:
+        "200":
+          description: OK
+  /v1/agents/{agent_id}/prompt-context:
+    get:
+      summary: 读取侧车正文（soul/user/custom/long_term，SQLite）
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: prompt context
+    put:
+      summary: 更新侧车正文
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: OK
+  /v1/messages:
+    post:
+      summary: 入队用户消息 / HITL resume（优先 agent_id）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agent_id:
+                  type: string
+                session_id:
+                  type: string
+                  description: 兼容旧字段，与 agent_id 同义
+                content:
+                  type: string
+                request_type:
+                  type: string
+      responses:
+        "200":
+          description: 已入队
+  /v1/streams:
+    get:
+      summary: SSE 事件流
+      parameters:
+        - name: agent_id
+          in: query
+          schema:
+            type: string
+        - name: session_id
+          in: query
+          schema:
+            type: string
+            description: 兼容旧字段
+      responses:
+        "200":
+          description: text/event-stream
+  /v1/policy:
+    get:
+      summary: 已下线（410）— 请用 /v1/agents/{id}/policy
+      responses:
+        "410":
+          description: Gone
+components:
+  parameters:
+    AgentID:
+      name: agent_id
+      in: path
+      required: true
+      schema:
+        type: string

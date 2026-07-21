@@ -16,7 +16,12 @@ func wantsMediaThumbnail(r *http.Request) bool {
 }
 
 func (s *Server) registerMediaRoutes() {
-	s.mux.HandleFunc("GET /v1/sessions/{session_id}/media/{media_id}", s.handleGetSessionMedia)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/media/{media_id}", s.handleGetAgentMedia)
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/media/{media_id}", s.withSessionsDeprecated(s.handleGetSessionMedia))
+}
+
+func (s *Server) handleGetAgentMedia(w http.ResponseWriter, r *http.Request) {
+	s.withAgentAsSession(s.handleGetSessionMedia)(w, r)
 }
 
 func (s *Server) handleGetSessionMedia(w http.ResponseWriter, r *http.Request) {

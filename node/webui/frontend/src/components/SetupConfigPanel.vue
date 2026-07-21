@@ -119,7 +119,6 @@ function moveProfile(id, delta) {
 function llmPayload() {
   ensureProfiles();
   return {
-    max_tool_loops: form.llm.max_tool_loops,
     profiles: form.llm.profiles.map((p) => ({
       id: p.id,
       provider: p.provider,
@@ -227,11 +226,6 @@ onMounted(async () => {
           </div>
         </article>
       </div>
-
-      <label class="settings-field llm-config-loops">
-        <span class="settings-field__label">单条消息工具步上限</span>
-        <input v-model.number="form.llm.max_tool_loops" class="settings-field__input" type="number" min="1" />
-      </label>
     </section>
 
     <section class="settings-section">

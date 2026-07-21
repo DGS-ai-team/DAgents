@@ -162,8 +162,9 @@ async function removeTriggerConfirmed(item) {
 }
 
 function targetHint(item) {
-  let hint = String(item.session_target_mode || "—");
-  if (item.target_session_id) hint += ` · ${shortId(item.target_session_id, 20)}`;
+  let hint = String(item.session_target_mode || item.agent_target_mode || "—");
+  const bound = item.target_bound_agent_id || item.target_session_id;
+  if (bound) hint += ` · ${shortId(bound, 20)}`;
   return hint;
 }
 

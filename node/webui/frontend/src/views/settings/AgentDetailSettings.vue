@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import AgentSettingsForm from "../../components/AgentSettingsForm.vue";
+import PolicyPanel from "../../components/PolicyPanel.vue";
 import {
   buildPatchAgentPayload,
   draftFromAgentView,
@@ -34,17 +35,20 @@ async function load() {
   error.value = "";
   statusMessage.value = "";
   try {
-    const [agent, setup] = await Promise.all([
+    const [agent, setup, promptCtx] = await Promise.all([
       api.getAgent(agentId.value),
       api.getSetupConfig().catch(() => null),
+      api.getAgentPromptContext(agentId.value).catch(() => null),
     ]);
     agentMeta.value = agent;
     llmProfiles.value = Array.isArray(setup?.llm?.profiles)
-      ? setup.llm.profiles.map((p) => ({
-          id: String(p.id || "").trim(),
-          provider: p.provider || "",
-          model: p.model || "",
-        })).filter((p) => p.id)
+      ? setup.llm.profiles
+          .map((p) => ({
+            id: String(p.id || "").trim(),
+            provider: p.provider || "",
+            model: p.model || "",
+          }))
+          .filter((p) => p.id)
       : [];
     Object.assign(
       draft,
@@ -53,6 +57,12 @@ async function load() {
         llmProfiles.value.map((p) => p.id),
       ),
     );
+    if (promptCtx) {
+      draft.promptSoulMd = String(promptCtx.soul_md || "");
+      draft.promptUserMd = String(promptCtx.user_md || "");
+      draft.promptCustomMd = String(promptCtx.custom_md || "");
+      draft.promptLongTermMd = String(promptCtx.long_term_md || "");
+    }
   } catch (e) {
     error.value = e.message || "加载失败";
   } finally {
@@ -75,7 +85,14 @@ async function save() {
   try {
     const updated = await api.patchAgent(agentId.value, buildPatchAgentPayload(draft));
     agentMeta.value = updated;
-    statusMessage.value = "已保存，运行时已按新配置重建。";
+    await api.putAgentPromptContext(agentId.value, {
+      soul_md: draft.promptSoulMd || "",
+      user_md: draft.promptUserMd || "",
+      custom_md: draft.promptCustomMd || "",
+      long_term_md: draft.promptLongTermMd || "",
+    });
+    await api.reloadAgentRuntime(agentId.value);
+    statusMessage.value = "已保存，运行时已按新配置与侧车正文重建。";
   } catch (e) {
     error.value = e.message || "保存失败";
   } finally {
@@ -135,8 +152,13 @@ onMounted(load);
       <p v-if="statusMessage" class="agent-detail__ok">{{ statusMessage }}</p>
       <p v-if="error" class="agent-detail__error">{{ error }}</p>
       <p class="agent-detail__hint">
-        保存后会立即按快照重建该 Agent 的工具表与回合选项；发送消息前也会检测配置版本并自动重载。
+        保存后会立即按快照与 SQLite 侧车正文重建该 Agent；审批策略可在下方单独调整并即时生效。
       </p>
+
+      <section class="agent-detail__policy">
+        <h2 class="agent-detail__policy-title">审批策略</h2>
+        <PolicyPanel embedded :agent-id="agentId" @close="() => {}" />
+      </section>
     </template>
   </div>
 </template>
@@ -189,5 +211,16 @@ onMounted(load);
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--color-text-subtle);
+}
+
+.agent-detail__policy {
+  margin-top: 24px;
+}
+
+.agent-detail__policy-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
 }
 </style>

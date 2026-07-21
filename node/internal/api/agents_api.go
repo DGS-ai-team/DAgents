@@ -13,6 +13,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
@@ -40,6 +41,7 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/child-agents", s.handleAgentListChildAgents)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/child-agents/{child_session_id}", s.handleAgentGetChildAgent)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/child-agents/{child_session_id}/cancel", s.handleAgentCancelChildAgent)
+	s.registerAgentPolicyRoutes()
 }
 
 func (s *Server) templateLoader() *agenttemplate.Loader {
@@ -216,6 +218,12 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.ensureAgentWorkspace(agentID); err != nil {
 		s.logger.Warn("agent workspace create failed", "agent_id", agentID, "error", err)
 	}
+	if _, err := s.agents.EnsureAgentPolicy(r.Context(), agentID, s.runtimeDir()); err != nil {
+		s.logger.Warn("agent policy seed failed", "agent_id", agentID, "error", err)
+	}
+	if _, err := s.agents.EnsureAgentPromptContext(r.Context(), agentID, s.runtimeDir()); err != nil {
+		s.logger.Warn("agent prompt context seed failed", "agent_id", agentID, "error", err)
+	}
 	if s.sessions != nil {
 		if err := s.reloadAgentRuntime(r.Context(), rec); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "agent_runtime_failed", err.Error(), nil)
@@ -355,10 +363,6 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		llmMap["active"] = active
 		snap.Defaults["llm"] = llmMap
 		runtimeDirty = true
-		if err := s.switchActiveLLMProfile(active); err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid_llm_settings", err.Error(), nil)
-			return
-		}
 	}
 	if req.Sandbox != nil {
 		sandbox, err := applySandboxPatch(snap.Sandbox, req.Sandbox)
@@ -414,7 +418,7 @@ func (s *Server) ensureAgentWorkspace(agentID string) error {
 		return nil
 	}
 	root := filepath.Join(s.cfg.AgentsDir(), agentID)
-	for _, sub := range []string{"data", "policy", "history", "memory"} {
+	for _, sub := range []string{"data", "history", "memory"} {
 		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
 			return err
 		}
@@ -457,12 +461,6 @@ func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, for
 	rev := rec.UpdatedAt.UTC().UnixNano()
 	if !forceReload && s.sessions.Get(id) != nil {
 		if s.sessions.ConfigRevision(id) == rev {
-			// 仍同步 LLM 绑定（进程级 active profile）。
-			if snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot); err == nil {
-				if active := agentruntime.LLMActiveFromDefaults(snapParsed); active != "" {
-					_ = s.switchActiveLLMProfile(active)
-				}
-			}
 			return nil
 		}
 		forceReload = true
@@ -485,13 +483,17 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	if err != nil {
 		return fmt.Errorf("parse agent snapshot: %w", err)
 	}
-	if active := agentruntime.LLMActiveFromDefaults(snapParsed); active != "" {
-		if err := s.switchActiveLLMProfile(active); err != nil {
-			s.logger.Warn("apply agent llm profile failed", "agent_id", id, "profile", active, "error", err)
-		}
-	}
 	if err := s.ensureAgentWorkspace(id); err != nil {
 		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
+	}
+	var policyEngine *policy.Engine
+	if s.agents != nil {
+		engine, err := s.agents.LoadAgentPolicyEngine(ctx, id, s.runtimeDir())
+		if err != nil {
+			s.logger.Warn("agent policy load failed", "agent_id", id, "error", err)
+		} else {
+			policyEngine = engine
+		}
 	}
 	if s.sessions.Get(id) != nil {
 		_, _ = s.sessions.Release(id)
@@ -506,7 +508,14 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return fmt.Errorf("build agent runtime: %w", err)
 	}
 	built.TurnOptions.ConfigRevision = rec.UpdatedAt.UTC().UnixNano()
-	if _, _, err := s.sessions.CreateWithOptions(id, built.TurnOptions, built.Registry); err != nil {
+	if s.agents != nil {
+		if pc, err := s.agents.EnsureAgentPromptContext(ctx, id, s.runtimeDir()); err != nil {
+			s.logger.Warn("agent prompt context load failed", "agent_id", id, "error", err)
+		} else {
+			built.TurnOptions.PromptContent = promptContentFromRecord(pc)
+		}
+	}
+	if _, _, err := s.sessions.CreateWithOptions(id, built.TurnOptions, built.Registry, policyEngine); err != nil {
 		return err
 	}
 	s.logger.Info("agent runtime ready", "agent_id", id, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)

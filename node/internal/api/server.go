@@ -158,14 +158,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		o.tools = reg
 	}
 	if o.policyEngine == nil {
-		engine, err := policy.LoadRuntime(cfg.RuntimeDir())
-		if err != nil {
-			logger.Error("policy load failed", "error", err, "dir", cfg.PolicyDir())
-			o.policyEngine, _ = policy.LoadFile("")
-		} else {
-			o.policyEngine = engine
-			logger.Info("policy loaded", "dir", cfg.PolicyDir())
-		}
+		o.policyEngine = policy.NewEngineFromMaps(policy.LoadSeedMaps())
+		logger.Info("policy default engine seeded (per-agent policy stored in agents.db)")
 	}
 	var st *store.SQLiteStore
 	switch {
@@ -381,19 +375,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
 	s.registerUIAggregateRoutes()
-	s.mux.HandleFunc("POST /v1/sessions", s.handleCreateSession)
-	s.mux.HandleFunc("GET /v1/sessions", s.handleListSessions)
-	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", s.handleDeleteSession)
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/clear-context", s.handleClearContext)
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/compress", s.handleCompressContext)
-	s.mux.HandleFunc("GET /v1/sessions/{session_id}/context", s.handleSessionContext)
-	s.mux.HandleFunc("GET /v1/sessions/{session_id}/hydrate", s.handleSessionHydrate)
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/ack", s.handleSessionAck)
+	s.registerSessionRoutes()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/cancel", s.handleCancelSession)
-	s.mux.HandleFunc("GET /v1/sessions/{session_id}/skills", s.handleListSessionSkills)
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/skills/load", s.handleLoadSessionSkill)
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/skills/unload", s.handleUnloadSessionSkill)
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()
 	s.registerChildAgentRoutes()

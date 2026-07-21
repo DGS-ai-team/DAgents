@@ -33,16 +33,23 @@ type PlatformInfo struct {
 	DefaultShell string `json:"default_shell"`
 }
 
-// Snapshot 为 GET /v1/policy 返回的结构化视图。
+// Snapshot 为 GET policy 返回的结构化视图。
 type Snapshot struct {
-	PolicyDir string                        `json:"policy_dir"`
+	PolicyDir string                        `json:"policy_dir,omitempty"`
+	AgentID   string                        `json:"agent_id,omitempty"`
+	Source    string                        `json:"source,omitempty"` // sqlite | file | memory
 	Platform  PlatformInfo                  `json:"platform"`
 	Tools     []ToolPolicyEntry             `json:"tools"`
 	Shell     map[string][]ShellPolicyEntry `json:"shell"`
 }
 
-// LoadSnapshot 从 policy 目录加载结构化快照；toolNames 为 registry 已知工具名。
+// LoadSnapshot 从 Engine 构造结构化快照；toolNames 为 registry 已知工具名。
 func LoadSnapshot(policyDir string, engine *Engine, toolNames []string) (*Snapshot, error) {
+	return LoadSnapshotForAgent("", policyDir, "file", engine, toolNames)
+}
+
+// LoadSnapshotForAgent 带 agent 作用域元数据的快照。
+func LoadSnapshotForAgent(agentID, policyDir, source string, engine *Engine, toolNames []string) (*Snapshot, error) {
 	policyDir = strings.TrimSpace(policyDir)
 	if engine == nil {
 		return nil, fmt.Errorf("policy engine is nil")
@@ -82,6 +89,8 @@ func LoadSnapshot(policyDir string, engine *Engine, toolNames []string) (*Snapsh
 	defaultShell, _ := ResolveShellType(nil)
 	return &Snapshot{
 		PolicyDir: policyDir,
+		AgentID:   strings.TrimSpace(agentID),
+		Source:    strings.TrimSpace(source),
 		Platform: PlatformInfo{
 			GOOS:         defaultShellPlatformGOOS(),
 			DefaultShell: string(defaultShell),
