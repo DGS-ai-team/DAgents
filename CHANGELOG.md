@@ -4,14 +4,41 @@
 
 ## [Unreleased]
 
+---
+
+## [0.8.0] - 2026-07-21
+
+**Agent 实例模型落地**：单 Node 多 Agent；Web UI 为唯一人机入口；Policy / 侧车 / LLM 按 Agent 配置。破坏性变更，不保证旧 session 数据迁移。设计见 [`docs/design/agent-instance-model.md`](docs/design/agent-instance-model.md)。
+
+### 新增
+
+- **Agent 实例模型（Phase 0–4）**：`node_id` 替代进程级 `agent_id`；模板创建 Agent；可选 per-agent 沙箱 Runtime；Web UI 以 Agent 为首实体（`/ui/agents/:id`）。
+- **Agent API**：`/v1/agents/{id}/…`（消息、ack、clear-context、compress、skills、child-agents、policy、prompt-context、workspace-activity 等）。
+- **Policy / 侧车按 Agent 存 SQLite**：`agent_policy`、`agent_prompt_context`；Agents 设置页可配置；全局 `/v1/policy*` → 410 Gone。
+- **多 LLM 档案**：配置卡片化、Key 加密存 SQLite；输入栏切换档案；Agent 可绑定 LLM；思考开关迁至状态栏。
+- **聚合只读 API**：`GET /v1/ui/bootstrap`；`GET /v1/agents/{id}/workspace-activity`。
+- **Activity 侧栏**：Cursor 风格「变更与命令」面板；深色 / 浅色主题切换。
+- **Agent 完整设置**：创建弹窗 + 模板预设；per-agent 配置页与 runtime reload。
+- **托盘**：`GET /v1/agents` 同步待办；Web UI deep link 对齐 Agent 路由。
+- **Hook**：`inject_today_date`（turn.before_step）及设置页启停开关。
+
 ### 变更
 
-- **Agent 实例模型（v0.8 规划落地 Phase 0–4）**：单 Node 多 Agent；`node_id` 替代进程级 `agent_id`；Web UI 以 Agent 为首实体（`/ui/agents/:id`）。
-- **移除终端对话 Client**：删除 Go bubbletea TUI（`client/internal/tui`）与 Python Textual CLI（`app/cli` / `dagents-cli`）；`dagents-client` 仅保留 `probe` / `update` / `version`。
-- **打包收敛**：`dagents-local-assistant` 以 Node + 内嵌 Web UI 为主；`dagents` / `dagents.cmd` 默认启动 Node 并打印 Web UI 地址。
-- **Agent API 别名**：ack / clear-context / compress / skills / child-agents 提供 `/v1/agents/{id}/…` 路径（Web UI 已切换）。
-- **Web UI Cursor 风格工作台**：深色 IDE chrome token；新增「变更与命令」面板（`/activity`）。
-- **聚合只读 API**：`GET /v1/ui/bootstrap`（health+info+llm）；`GET /v1/agents/{id}/workspace-activity`（改过的文件 / 执行过的命令）。
+- **移除终端对话 Client**：删除 Go bubbletea TUI 与 Python Textual CLI；`dagents-client` 仅保留 `probe` / `update` / `version`。
+- **打包收敛**：以 Node + 内嵌 Web UI 为主；`dagents` / `dagents.cmd` 默认启动 Node 并打印 Web UI 地址。
+- **会话语义**：用户可见面统一为 Agent；`/v1/sessions*` 保留但加 Deprecation 头。
+- **Manage 注册**：上报 `node_id`（`agent_id` 兼容同值）。
+- **连接设置**：去掉全局 `max_tool_loops`；去掉进程级 LLM active 抢占。
+- **Web UI**：消息气泡 / 工具标签 / 思考指示器；Composer LLM 自定义下拉；侧栏紧凑列表；origin 本地/远端标识。
+- **Windows 安装器**：向导 UI 与 Web Workbench 深色主题对齐；修复 `OuterNotebook.Color` 编译错误。
+
+### 修复
+
+- 删除最后一个 Agent 后侧栏刷新；历史恢复过滤注入消息与并行工具展示。
+- Child Agent HTTP cancel 与沙箱单测 TempDir 清理竞态。
+- Manual Package 补上 `dagents-shell` 构建。
+
+（Git **tag**：`v0.8.0`。）
 
 ---
 

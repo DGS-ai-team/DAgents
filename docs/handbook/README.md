@@ -1,9 +1,9 @@
 # DAgents 项目手册
 
-**版本**：与代码同步（当前发布 **v0.7.5**；**v0.8 架构重构设计**见 [agent-instance-model.md](../design/agent-instance-model.md)）  
+**版本**：与代码同步（当前发布 **v0.8.0**；架构见 [agent-instance-model.md](../design/agent-instance-model.md)）  
 **定位**：本仓库**唯一**技术文档入口——由核心到外围，写到**能跟读源码**的深度。专题长文见 `docs/architecture/`、`docs/design/`；本手册为导航与正文主干。
 
-> **注意**：v0.8 起将改为「单 Node 多 Agent + 仅 Web UI」；手册中 Session 中心、TUI Client、`agent_id`（进程级）等叙述将在实施阶段逐步修订。
+> **注意**：v0.8 起为「单 Node 多 Agent + 仅 Web UI」。手册中若仍出现 Session 中心、TUI Client、进程级 `agent_id` 等旧叙述，以 [agent-instance-model.md](../design/agent-instance-model.md) 与现网 API 为准。
 
 ---
 
