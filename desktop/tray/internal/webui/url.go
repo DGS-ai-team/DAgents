@@ -6,24 +6,24 @@ import (
 	"strings"
 )
 
-// SessionURL 构造带 session 深链的 Web UI 地址（F-U3）。
-func SessionURL(endpoint, sessionID string) string {
+// AgentURL 构造带 Agent 深链的 Web UI 地址（F-U3）。
+// agentID 为 Agent 实例 UUID（与历史 session_id 同源）。
+func AgentURL(endpoint, agentID string) string {
 	base := strings.TrimRight(strings.TrimSpace(endpoint), "/") + "/ui/"
-	u, err := url.Parse(base)
-	if err != nil {
-		return base
+	if aid := strings.TrimSpace(agentID); aid != "" {
+		return base + "agents/" + url.PathEscape(aid)
 	}
-	if sid := strings.TrimSpace(sessionID); sid != "" {
-		q := u.Query()
-		q.Set("session", sid)
-		u.RawQuery = q.Encode()
-	}
-	return u.String()
+	return base
+}
+
+// SessionURL 为 AgentURL 的历史别名（托盘 pending 键仍称 session_id）。
+func SessionURL(endpoint, sessionID string) string {
+	return AgentURL(endpoint, sessionID)
 }
 
 // ConsoleURL 返回控制台首页 URL。
 func ConsoleURL(endpoint string) string {
-	return SessionURL(endpoint, "")
+	return AgentURL(endpoint, "")
 }
 
 // SettingsAboutURL 返回设置 › 关于页 URL（F-N9 / F-X8）。

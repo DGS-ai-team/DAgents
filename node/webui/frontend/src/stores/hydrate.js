@@ -36,11 +36,11 @@ export async function hydrateAgent() {
   return data;
 }
 
-/** 解析深链 ?agent=。 */
+/** 解析深链 ?agent=；兼容旧托盘 ?session=（实例 UUID 同源）。 */
 export function consumeStartupURL() {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams(window.location.search);
-  const agent = params.get("agent")?.trim();
+  const agent = params.get("agent")?.trim() || params.get("session")?.trim();
   if (agent) {
     persistAgentId(agent);
   }
