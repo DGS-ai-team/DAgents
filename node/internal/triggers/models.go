@@ -2,6 +2,7 @@ package triggers
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,8 +42,8 @@ type Definition struct {
 	Name              string            `json:"name"`
 	Condition         map[string]any    `json:"condition"`
 	TargetAgentID     string            `json:"target_agent_id"`
-	TargetSessionID   *string           `json:"target_session_id"`
-	SessionTargetMode SessionTargetMode `json:"session_target_mode,omitempty"`
+	TargetSessionID   *string           `json:"target_session_id"`             // 兼容：实际为绑定的对话 id（通常即 agent_id）
+	SessionTargetMode SessionTargetMode `json:"session_target_mode,omitempty"` // 兼容旧名；语义为 agent 目标解析策略
 	ClientID          *string           `json:"client_id"`
 	TaskTemplate      string            `json:"task_template"`
 	Enabled           bool              `json:"enabled"`
@@ -55,13 +56,29 @@ type Definition struct {
 
 // CreateInput 创建触发器入参（工具 / HTTP）。
 type CreateInput struct {
-	Name              string            `json:"name"`
-	Condition         map[string]any    `json:"condition"`
-	TargetAgentID     string            `json:"target_agent_id"`
-	TargetSessionID   *string           `json:"target_session_id"`
-	SessionTargetMode SessionTargetMode `json:"session_target_mode,omitempty"`
-	ClientID          *string           `json:"client_id"`
-	TaskTemplate      string            `json:"task_template"`
+	Name               string            `json:"name"`
+	Condition          map[string]any    `json:"condition"`
+	TargetAgentID      string            `json:"target_agent_id"`
+	TargetSessionID    *string           `json:"target_session_id"`               // 兼容旧字段
+	TargetBoundAgentID *string           `json:"target_bound_agent_id,omitempty"` // 对外：绑定到指定 Agent 对话（优先）
+	SessionTargetMode  SessionTargetMode `json:"session_target_mode,omitempty"`   // 兼容旧名
+	AgentTargetMode    SessionTargetMode `json:"agent_target_mode,omitempty"`     // 对外别名，优先
+	ClientID           *string           `json:"client_id"`
+	TaskTemplate       string            `json:"task_template"`
+}
+
+// NormalizeCreateAliases 将对外 Agent 字段折叠到内部 session 字段。
+func (in *CreateInput) NormalizeCreateAliases() {
+	if in == nil {
+		return
+	}
+	if in.TargetBoundAgentID != nil && strings.TrimSpace(*in.TargetBoundAgentID) != "" {
+		v := strings.TrimSpace(*in.TargetBoundAgentID)
+		in.TargetSessionID = &v
+	}
+	if in.AgentTargetMode != "" {
+		in.SessionTargetMode = in.AgentTargetMode
+	}
 }
 
 // UpdatePatch 部分更新；nil 字段表示不修改。

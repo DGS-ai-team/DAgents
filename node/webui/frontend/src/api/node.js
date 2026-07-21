@@ -193,18 +193,34 @@ export function cancelChildAgent(agentId, childSessionId, reason = "") {
   );
 }
 
-export function getPolicy(shellQuery) {
-  return apiFetch("/v1/policy", { params: shellQuery ? { shell: shellQuery } : {} });
+export function getPolicy(agentId, shellQuery) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy`, {
+    params: shellQuery ? { shell: shellQuery } : {},
+  });
 }
 
-export function updateToolPolicy(updates) {
-  return apiFetch("/v1/policy/tools", { method: "PUT", body: { updates } });
+export function updateToolPolicy(agentId, updates) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/tools`, {
+    method: "PUT",
+    body: { updates },
+  });
 }
 
-export function updateShellPolicy(shellType, updates, deletes = []) {
+export function updateShellPolicy(agentId, shellType, updates, deletes = []) {
   const body = { updates: updates || [] };
   if (Array.isArray(deletes) && deletes.length) body.deletes = deletes;
-  return apiFetch(`/v1/policy/shell/${encodeURIComponent(shellType)}`, {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/policy/shell/${encodeURIComponent(shellType)}`, {
+    method: "PUT",
+    body,
+  });
+}
+
+export function getAgentPromptContext(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/prompt-context`);
+}
+
+export function putAgentPromptContext(agentId, body) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/prompt-context`, {
     method: "PUT",
     body,
   });

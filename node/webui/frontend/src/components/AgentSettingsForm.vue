@@ -120,23 +120,39 @@ function toggleGroup(name) {
       <section class="agent-settings-section">
         <h3 class="agent-settings-section__title">侧车与长期记忆</h3>
         <p class="agent-settings-hint">
-          控制是否注入 Node 运行时目录下的 soul.md / user.md / custom.md 与 memory/long_term.md。
+          正文按 Agent 存于 SQLite；开关控制是否注入到 system prompt。
         </p>
         <label class="agent-settings-check">
           <input v-model="draft.promptSoulEnabled" type="checkbox" />
-          <span>接入 soul.md（角色设定）</span>
+          <span>接入 soul（角色设定）</span>
+        </label>
+        <label v-if="draft.promptSoulEnabled" class="agent-settings-field">
+          <span>soul.md 正文</span>
+          <textarea v-model="draft.promptSoulMd" class="agent-settings-input agent-settings-input--area" rows="4" placeholder="角色设定…" />
         </label>
         <label class="agent-settings-check">
           <input v-model="draft.promptUserEnabled" type="checkbox" />
-          <span>接入 user.md（用户偏好）</span>
+          <span>接入 user（用户偏好）</span>
+        </label>
+        <label v-if="draft.promptUserEnabled" class="agent-settings-field">
+          <span>user.md 正文</span>
+          <textarea v-model="draft.promptUserMd" class="agent-settings-input agent-settings-input--area" rows="3" placeholder="用户偏好…" />
         </label>
         <label class="agent-settings-check">
           <input v-model="draft.promptCustomEnabled" type="checkbox" />
-          <span>接入 custom.md（临时指令）</span>
+          <span>接入 custom（临时指令）</span>
+        </label>
+        <label v-if="draft.promptCustomEnabled" class="agent-settings-field">
+          <span>custom.md 正文</span>
+          <textarea v-model="draft.promptCustomMd" class="agent-settings-input agent-settings-input--area" rows="3" placeholder="临时指令…" />
         </label>
         <label class="agent-settings-check">
           <input v-model="draft.promptLongTermEnabled" type="checkbox" />
-          <span>接入 long_term.md（长期记忆）</span>
+          <span>接入 long_term（长期记忆）</span>
+        </label>
+        <label v-if="draft.promptLongTermEnabled" class="agent-settings-field">
+          <span>long_term.md 正文</span>
+          <textarea v-model="draft.promptLongTermMd" class="agent-settings-input agent-settings-input--area" rows="4" placeholder="长期记忆…" />
         </label>
       </section>
     </div>

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import {
   POLICY_MODES,
@@ -17,6 +17,7 @@ import { formatPolicyMode, policyModeClass } from "../utils/panelFormat.js";
 
 const props = defineProps({
   embedded: { type: Boolean, default: false },
+  agentId: { type: String, default: "" },
 });
 
 const emit = defineEmits(["close"]);
@@ -34,6 +35,8 @@ const shellTab = ref("bash");
 const filterText = ref("");
 const newShellCommand = ref("");
 const newShellMode = ref("never");
+
+const resolvedAgentId = computed(() => String(props.agentId || "").trim());
 
 const shellTypes = computed(() => {
   const shell = data.value?.shell;
@@ -60,7 +63,10 @@ async function load() {
   error.value = "";
   statusMessage.value = "";
   try {
-    data.value = await api.getPolicy();
+    if (!resolvedAgentId.value) {
+      throw new Error("缺少 agent_id：策略已按 Agent 存储");
+    }
+    data.value = await api.getPolicy(resolvedAgentId.value);
     const def = data.value?.platform?.default_shell || "bash";
     shellTab.value = shellTypes.value.includes(def) ? def : shellTypes.value[0] || "bash";
   } catch (e) {
@@ -83,7 +89,7 @@ async function updateToolMode(name, mode) {
   error.value = "";
   statusMessage.value = "";
   try {
-    await api.updateToolPolicy([{ name, mode }]);
+    await api.updateToolPolicy(resolvedAgentId.value, [{ name, mode }]);
     applyLocalToolUpdate(data.value, name, mode);
     statusMessage.value = `已更新 ${name} → ${formatPolicyMode(mode)}`;
   } catch (e) {
@@ -101,7 +107,7 @@ async function updateShellMode(command, mode) {
   error.value = "";
   statusMessage.value = "";
   try {
-    await api.updateShellPolicy(shellTab.value, [{ command, mode }]);
+    await api.updateShellPolicy(resolvedAgentId.value, shellTab.value, [{ command, mode }]);
     applyLocalShellUpdate(data.value, shellTab.value, command, mode);
     statusMessage.value = `已更新 ${command} → ${formatPolicyMode(mode)}`;
   } catch (e) {
@@ -118,7 +124,7 @@ async function deleteShellCommand(command) {
   error.value = "";
   statusMessage.value = "";
   try {
-    await api.updateShellPolicy(shellTab.value, [], [cmd]);
+    await api.updateShellPolicy(resolvedAgentId.value, shellTab.value, [], [cmd]);
     removeLocalShellEntry(data.value, shellTab.value, cmd);
     statusMessage.value = `已删除 ${cmd}（未列出命令默认需审批）`;
   } catch (e) {
@@ -135,7 +141,7 @@ async function addShellCommand() {
   error.value = "";
   statusMessage.value = "";
   try {
-    await api.updateShellPolicy(shellTab.value, [{ command: cmd, mode: newShellMode.value }]);
+    await api.updateShellPolicy(resolvedAgentId.value, shellTab.value, [{ command: cmd, mode: newShellMode.value }]);
     applyLocalShellUpdate(data.value, shellTab.value, cmd, newShellMode.value);
     statusMessage.value = `已添加 ${cmd} → ${formatPolicyMode(newShellMode.value)}`;
     newShellCommand.value = "";
@@ -150,6 +156,10 @@ function isProtectedTool(name) {
   return String(name || "") === PROTECTED_POLICY_TOOL;
 }
 
+watch(resolvedAgentId, () => {
+  void load();
+});
+
 onMounted(load);
 </script>
 
@@ -158,7 +168,7 @@ onMounted(load);
     <header class="panel__header command-panel__header">
       <div>
         <div class="panel__title">审批策略</div>
-        <div class="command-panel__subtitle">点击选项即可生效</div>
+        <div class="command-panel__subtitle">按 Agent 存储于 SQLite；点击选项即可生效</div>
       </div>
       <div class="command-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">

@@ -96,7 +96,13 @@ CREATE TABLE IF NOT EXISTS agents (
 	if err != nil {
 		return err
 	}
-	return s.ensureOriginColumn()
+	if err := s.ensureOriginColumn(); err != nil {
+		return err
+	}
+	if err := s.ensurePolicySchema(); err != nil {
+		return err
+	}
+	return s.ensurePromptContextSchema()
 }
 
 // ensureOriginColumn 兼容旧库：补 origin 列。
@@ -232,7 +238,7 @@ ORDER BY updated_at DESC`)
 	return out, rows.Err()
 }
 
-// SoftDelete 归档 Agent。
+// SoftDelete 归档 Agent，并删除其 policy / 侧车正文行。
 func (s *AgentStore) SoftDelete(ctx context.Context, agentID string) error {
 	if s == nil {
 		return fmt.Errorf("agent store unavailable")
@@ -248,6 +254,8 @@ UPDATE agents SET archived = 1, updated_at = ? WHERE agent_id = ? AND archived =
 	if n == 0 {
 		return fmt.Errorf("agent %q not found", agentID)
 	}
+	_ = s.DeleteAgentPolicy(ctx, agentID)
+	_ = s.DeleteAgentPromptContext(ctx, agentID)
 	return nil
 }
 

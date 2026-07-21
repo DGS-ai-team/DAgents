@@ -39,6 +39,10 @@ export function emptyAgentDraft() {
     promptUserEnabled: true,
     promptCustomEnabled: true,
     promptLongTermEnabled: true,
+    promptSoulMd: "",
+    promptUserMd: "",
+    promptCustomMd: "",
+    promptLongTermMd: "",
   };
 }
 

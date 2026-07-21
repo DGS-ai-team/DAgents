@@ -7,12 +7,14 @@ import (
 )
 
 type childAgentListResponse struct {
-	ParentSessionID string                      `json:"parent_session_id"`
+	ParentAgentID   string                      `json:"parent_agent_id"`
+	ParentSessionID string                      `json:"parent_session_id"` // 兼容旧字段
 	Items           []sessionChildAgentViewJSON `json:"items"`
 }
 
 type sessionChildAgentViewJSON struct {
-	ChildSessionID string   `json:"child_session_id"`
+	ChildAgentID   string   `json:"child_agent_id"`
+	ChildSessionID string   `json:"child_session_id"` // 兼容旧字段
 	Status         string   `json:"status"`
 	Purpose        string   `json:"purpose"`
 	AllowedTools   []string `json:"allowed_tools"`
@@ -27,15 +29,24 @@ type childAgentCancelRequest struct {
 }
 
 type childAgentCancelResponse struct {
+	ChildAgentID   string `json:"child_agent_id"`
 	ChildSessionID string `json:"child_session_id"`
 	Status         string `json:"status"`
 	PreviousStatus string `json:"previous_status"`
 }
 
 func (s *Server) registerChildAgentRoutes() {
+	// 兼容过渡：sessions 路径仍可用；对外优先 /v1/agents/.../child-agents。
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/child-agents", s.handleListChildAgents)
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/child-agents/{child_session_id}", s.handleGetChildAgent)
 	s.mux.HandleFunc("POST /v1/sessions/{session_id}/child-agents/{child_session_id}/cancel", s.handleCancelChildAgent)
+}
+
+func resolveChildPathID(r *http.Request) string {
+	if id := strings.TrimSpace(r.PathValue("child_session_id")); id != "" {
+		return id
+	}
+	return strings.TrimSpace(r.PathValue("child_agent_id"))
 }
 
 func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
@@ -45,9 +56,14 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "session_not_found", err.Error(), nil)
 		return
 	}
-	out := childAgentListResponse{ParentSessionID: parentID, Items: make([]sessionChildAgentViewJSON, 0, len(items))}
+	out := childAgentListResponse{
+		ParentAgentID:   parentID,
+		ParentSessionID: parentID,
+		Items:           make([]sessionChildAgentViewJSON, 0, len(items)),
+	}
 	for _, it := range items {
 		out.Items = append(out.Items, sessionChildAgentViewJSON{
+			ChildAgentID:   it.ChildSessionID,
 			ChildSessionID: it.ChildSessionID,
 			Status:         it.Status,
 			Purpose:        it.Purpose,
@@ -63,7 +79,7 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 	parentID := strings.TrimSpace(r.PathValue("session_id"))
-	childID := strings.TrimSpace(r.PathValue("child_session_id"))
+	childID := resolveChildPathID(r)
 	items, err := s.sessions.ListChildAgents(parentID)
 	if err != nil {
 		writeAPIError(w, http.StatusNotFound, "session_not_found", err.Error(), nil)
@@ -72,6 +88,7 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 	for _, it := range items {
 		if it.ChildSessionID == childID {
 			writeJSON(w, http.StatusOK, sessionChildAgentViewJSON{
+				ChildAgentID:   it.ChildSessionID,
 				ChildSessionID: it.ChildSessionID,
 				Status:         it.Status,
 				Purpose:        it.Purpose,
@@ -84,12 +101,15 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeAPIError(w, http.StatusNotFound, "child_agent_not_found", "child agent not found", map[string]any{"child_session_id": childID})
+	writeAPIError(w, http.StatusNotFound, "child_agent_not_found", "child agent not found", map[string]any{
+		"child_agent_id":   childID,
+		"child_session_id": childID,
+	})
 }
 
 func (s *Server) handleCancelChildAgent(w http.ResponseWriter, r *http.Request) {
 	parentID := strings.TrimSpace(r.PathValue("session_id"))
-	childID := strings.TrimSpace(r.PathValue("child_session_id"))
+	childID := resolveChildPathID(r)
 	var body childAgentCancelRequest
 	if r.Body != nil && r.ContentLength != 0 {
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -109,10 +129,14 @@ func (s *Server) handleCancelChildAgent(w http.ResponseWriter, r *http.Request) 
 		if strings.Contains(err.Error(), "disabled") {
 			code = "child_agents_disabled"
 		}
-		writeAPIError(w, http.StatusNotFound, code, err.Error(), map[string]any{"child_session_id": childID})
+		writeAPIError(w, http.StatusNotFound, code, err.Error(), map[string]any{
+			"child_agent_id":   childID,
+			"child_session_id": childID,
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, childAgentCancelResponse{
+		ChildAgentID:   childID,
 		ChildSessionID: childID,
 		Status:         string(res.Status),
 		PreviousStatus: prev,

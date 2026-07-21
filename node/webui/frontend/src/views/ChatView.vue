@@ -774,16 +774,17 @@ async function refreshLLMSettings() {
 async function switchLLMProfile(id) {
   const profileId = String(id || "").trim();
   if (!profileId) return;
+  if (!agentStore.agentId) {
+    agentStore.error = "请先选择 Agent";
+    return;
+  }
   if (profileId === chromeStore.llmSettings?.active_profile) return;
   agentStore.error = "";
   try {
-    if (agentStore.agentId) {
-      // 绑定到当前 Agent，并同步全局运行时
-      await api.patchAgent(agentStore.agentId, { llm_active: profileId });
-      chromeStore.llmSettings = await api.getLLMSettings();
-    } else {
-      chromeStore.llmSettings = await api.patchLLMSettings({ active_profile: profileId });
-    }
+    // 仅绑定到当前 Agent；不再切换进程级 active LLM。
+    await api.patchAgent(agentStore.agentId, { llm_active: profileId });
+    const settings = await api.getLLMSettings();
+    chromeStore.llmSettings = { ...settings, active_profile: profileId };
     syncReasoningDisplay(chromeStore.llmSettings);
     try {
       chromeStore.agentInfo = await api.getAgentInfo();

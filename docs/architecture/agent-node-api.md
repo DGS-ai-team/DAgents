@@ -1,38 +1,52 @@
 # Agent Node HTTP API
 
-本文描述 **Agent Node（Go）** 对外 HTTP/SSE 接口，与 `node/internal/api/` 对齐维护。Manage API 见 [manage-architecture.md](../design/manage-architecture.md)。
+本文描述 **Agent Node（Go）** 对外 HTTP/SSE 接口，与 `node/internal/api/` 对齐维护。
+最小 OpenAPI：[`openapi-node.yaml`](./openapi-node.yaml)。Manage API 见 [manage-architecture.md](../design/manage-architecture.md)。
+
+## 0. 契约迁移（必读）
+
+| 主题 | 现状 |
+|------|------|
+| **用户面主键** | **Agent**（`agent_id`）。1 Agent = 1 主对话；Session 仅为内部实现 |
+| **推荐路径** | `/v1/agents/{agent_id}/...`（ensure / hydrate / context / cancel / skills / child-agents / media / **policy** / **prompt-context**） |
+| **`/v1/sessions*`** | **过渡兼容**：仍可用，响应带 `Deprecation` / `Warning`；新集成勿依赖 |
+| **`/v1/policy*`** | **已下线（410）**；策略按 Agent 存 `agents.db`（`agent_policy` 表） |
+| **侧车 Markdown** | 按 Agent 存 `agents.db`（`agent_prompt_context`）；开关仍在 `config_snapshot_json.defaults.prompt_context` |
+| **Manage 注册** | 载荷主字段为 `node_id`（`agent_id` 仅为兼容旧 Manage，值同 `node_id`）；`manage.enabled` 默认关 |
+| **LLM active** | 不再因切换 Agent 抢占进程级 active；绑定写在该 Agent 快照 `defaults.llm.active` |
 
 ## 1. 设计原则
 
 | 原则 | 说明 |
 |------|------|
-| **一进程一 `agent_id` 一端口** | 监听地址即该 Agent 身份；不在此端口暴露子 Agent |
+| **一进程多 Agent** | Node 进程持有多个 Agent 实例；对外按 `agent_id` 寻址 |
 | **Client 仅本地** | 默认只 bind `127.0.0.1`；Client 与 Node 同包读同一 `local.endpoint` |
 | **思考与工具在 Node 内** | 无「Backend 代执行」路径；tool call 由 turn loop 本地完成 |
 | **A2A 经 Manage** | 非子 Agent 禁止 peer 入站；`expose_to_peers` 仅控制是否可作为 A2A **目标** |
-| **会话态在 Node** | session 上下文、队列、持久化由 Node 负责（SQLite 或等价） |
+| **会话态在 Node** | Agent 对话上下文、队列、持久化由 Node 负责（SQLite） |
 
 ### 1.1 基础路径
 
 | 前缀 | 调用方 | 说明 |
 |------|--------|------|
-| `/v1/...` | Client（本地） | 会话、消息、SSE、HITL resume |
+| `/v1/agents/...` | Client（本地） | **主契约**：对话、策略、侧车、子 Agent |
+| `/v1/...` | Client（本地） | messages、streams、triggers、setup、llm |
+| `/v1/sessions/...` | 过渡兼容 | 已弃用，见 §0 |
 | `/health` | 探活 | 负载均衡 / 运维脚本 |
-| `/v1/internal/...` | Node 进程内 | 子 Agent；**不**对外 HTTP |
 
 ### 1.2 通用错误体
 
 ```json
 {
   "error": {
-    "code": "session_not_found",
-    "message": "session sess-xxx 不存在",
-    "details": { "session_id": "sess-xxx" }
+    "code": "agent_not_found",
+    "message": "agent 不存在",
+    "details": { "agent_id": "agt-xxx" }
   }
 }
 ```
 
-常见 `code`：`invalid_session`、`turn_busy`、`policy_denied`、`approval_required`、`a2a_target_not_exposed`、`llm_error`、`tool_error`。
+常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`a2a_target_not_exposed`、`llm_error`、`tool_error`、`policy_moved`、`sessions_moved`。
 
 ### 1.3 认证（Phase 递进）
 
@@ -56,7 +70,7 @@ GET /health
 { "status": "ok", "agent_id": "ops-win-01", "version": "0.5.1" }
 ```
 
-`version` 字段为全项目唯一语义化版本（源码：`node/internal/version/version.go`）。
+`version` 字段为全项目唯一语义化版本（源码：`node/internal/version/version.go`）。历史字段名 `agent_id` 此处表示 **Node 身份**（同 `node_id`）。
 
 ```http
 GET /v1/agent/info
@@ -71,56 +85,69 @@ GET /v1/agent/info
 }
 ```
 
-### 2.2 Session
+### 2.2 Agents（主契约）
 
 ```http
-POST /v1/sessions
+POST /v1/agents
 Content-Type: application/json
 
-{ "session_id": null }
-```
-
-响应：
-
-```json
 {
-  "session_id": "sess-7f2a...",
-  "agent_id": "ops-win-01",
-  "created": true
+  "display_name": "助手",
+  "defaults": { "llm": { "active": "deepseek", "max_tool_loops": 32 } },
+  "sandbox": { "enabled": false, "backend": "process" }
 }
 ```
 
-- `session_id` 可选；省略则由 Node 生成。
-- Client **不需要** `connection_id`（旧 v2 Backend 模型已废弃）；SSE 按 **单 Client 单连接** 或 `session_id` 分桶（Phase 1 建议：**一个 TUI 一个 SSE 连接，多 session 事件带 `session_id`**）。
+创建时会种子写入该 Agent 的 **policy** 与 **prompt-context**（SQLite）。
 
 ```http
-GET /v1/sessions
-DELETE /v1/sessions/{session_id}
-POST /v1/sessions/{session_id}/cancel
-POST /v1/sessions/{session_id}/clear-context
-GET /v1/sessions/{session_id}/context
+POST /v1/agents/{agent_id}/ensure
+GET  /v1/agents/{agent_id}/hydrate
+POST /v1/messages
+Content-Type: application/json
+
+{ "agent_id": "agt-xxx", "content": "你好" }
 ```
 
-**Cancel / Clear 与旁路缓冲**（详见 §2.4.3）：
-
-- **`cancel`**：中止在途流式 LLM；若 side-effect 缓冲非空且无 pending HITL，会 schedule `side_effect_continue` 被动续跑。
-- **`clear-context`**：清空 messages；**丢弃** side-effect 缓冲（Produce 已发出的 SSE 行可能留在 Client transcript，属预期 orphan）。
-- **`DELETE`**：停止 runtime 并丢弃缓冲（同 clear）。
+### 2.3 Policy（按 Agent / SQLite）
 
 ```http
-GET /v1/sessions/{session_id}/child-agents
-GET /v1/sessions/{session_id}/child-agents/{child_session_id}
-POST /v1/sessions/{session_id}/child-agents/{child_session_id}/cancel
+GET /v1/agents/{agent_id}/policy
+PUT /v1/agents/{agent_id}/policy/tools
+PUT /v1/agents/{agent_id}/policy/shell/{bash|cmd|powershell}
 ```
 
-### 2.3 消息与 resume
+全局 `GET/PUT /v1/policy*` 返回 **410 Gone**。
+
+### 2.4 侧车正文（按 Agent / SQLite）
+
+```http
+GET /v1/agents/{agent_id}/prompt-context
+PUT /v1/agents/{agent_id}/prompt-context
+Content-Type: application/json
+
+{
+  "soul_md": "...",
+  "user_md": "...",
+  "custom_md": "...",
+  "long_term_md": "..."
+}
+```
+
+注入开关仍通过 Agent 快照 `defaults.prompt_context.*_enabled`（设置页「侧车与长期记忆」）。
+
+### 2.5 Session（过渡兼容）
+
+`/v1/sessions*` 仍注册并可用，响应带 Deprecation 头；语义与对应 `/v1/agents/{id}/...` 相同。新集成请直接使用 Agents。
+
+### 2.6 消息与 resume
 
 ```http
 POST /v1/messages
 Content-Type: application/json
 
 {
-  "session_id": "sess-7f2a...",
+  "agent_id": "agt-xxx",
   "request_type": "message",
   "content": "列出当前目录"
 }

@@ -33,7 +33,7 @@ func TestCreateWithOptions_perAgentFSRoot(t *testing.T) {
 	sess, created, err := mgr.CreateWithOptions("agt-sandbox-1", TurnOptions{
 		FSRoot:       agentRoot,
 		MaxToolLoops: 4,
-	}, agentReg)
+	}, agentReg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

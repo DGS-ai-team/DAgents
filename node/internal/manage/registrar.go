@@ -252,7 +252,8 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 	host := hostsnapshot.Get()
 	caps := r.cfg.RegistrationCapabilities()
 	return registerPayload{
-		AgentID:          r.cfg.NodeID,
+		NodeID:           r.cfg.NodeID,
+		AgentID:          r.cfg.NodeID, // 兼容旧 Manage：历史上误用 agent_id 表示 node
 		BaseURL:          r.cfg.ManageRegistryBaseURL(),
 		Capabilities:     caps,
 		CapabilitiesHint: caps,
@@ -265,6 +266,7 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 		ExposeToPeers:    r.cfg.ExposeToPeersEffective(),
 		Card:             RegistrationCard(r.cfg),
 		Metadata: map[string]any{
+			"node_id":      r.cfg.NodeID,
 			"node_version": version.Version,
 			"host_info": map[string]any{
 				"os_kind":          host.OSKind,
@@ -285,7 +287,8 @@ func (r *Registrar) collectTools() []string {
 }
 
 type registerPayload struct {
-	AgentID          string         `json:"agent_id"`
+	NodeID           string         `json:"node_id"`
+	AgentID          string         `json:"agent_id,omitempty"` // deprecated: 兼容旧 Manage，值同 node_id
 	BaseURL          string         `json:"base_url"`
 	CapabilitiesHint []string       `json:"capabilities_hint,omitempty"`
 	Capabilities     []string       `json:"capabilities,omitempty"`
