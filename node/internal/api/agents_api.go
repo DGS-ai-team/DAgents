@@ -26,6 +26,7 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("DELETE /v1/agents/{agent_id}", s.handleDeleteAgent)
 	// Phase 2–4：agent 路径别名（内部仍走 session 实现，id 相同）。
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/ensure", s.handleAgentEnsure)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/reload", s.handleAgentReload)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/hydrate", s.handleAgentHydrate)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/cancel", s.handleAgentCancel)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/context", s.handleAgentContext)
@@ -69,14 +70,12 @@ func (s *Server) handleGetAgentTemplate(w http.ResponseWriter, r *http.Request) 
 }
 
 type createAgentRequest struct {
-	TemplateID  string `json:"template_id"`
-	DisplayName string `json:"display_name"`
-	Origin      string `json:"origin"` // 预留：local | remote；缺省 local
-	Sandbox     *struct {
-		Enabled *bool   `json:"enabled"`
-		Backend *string `json:"backend"`
-	} `json:"sandbox"`
-	Defaults map[string]any `json:"defaults"`
+	// TemplateID 仅作溯源（可选）；配置由前端展开后通过 defaults/sandbox 完整提交。
+	TemplateID  string         `json:"template_id"`
+	DisplayName string         `json:"display_name"`
+	Origin      string         `json:"origin"` // 预留：local | remote；缺省 local
+	Sandbox     *sandboxPatch  `json:"sandbox"`
+	Defaults    map[string]any `json:"defaults"`
 }
 
 type agentView struct {
@@ -115,45 +114,65 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
+
 	tplID := strings.TrimSpace(req.TemplateID)
-	if tplID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "template_id is required", nil)
+	var tpl *agenttemplate.Template
+	// 无完整 defaults 时才需要加载模板做种子；有 defaults 时 template_id 仅溯源，不强制模板存在。
+	if tplID != "" && req.Defaults == nil {
+		loaded, err := s.templateLoader().Get(tplID)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "template_not_found", err.Error(), nil)
+			return
+		}
+		tpl = &loaded
+	} else if tplID != "" {
+		if loaded, err := s.templateLoader().Get(tplID); err == nil {
+			tpl = &loaded
+		}
+	}
+
+	// 完整设置：前端展开模板后提交 defaults；无 defaults 时用模板种子（兼容旧客户端）。
+	fullSettings := req.Defaults != nil
+	if !fullSettings && tpl == nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "defaults or template_id is required", nil)
 		return
 	}
-	tpl, err := s.templateLoader().Get(tplID)
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "template_not_found", err.Error(), nil)
-		return
-	}
+
 	name := strings.TrimSpace(req.DisplayName)
-	if name == "" {
+	if name == "" && tpl != nil {
 		name = strings.TrimSpace(tpl.DisplayName)
+		if name == "" {
+			name = tpl.ID
+		}
 	}
 	if name == "" {
-		name = tpl.ID
-	}
-	sandboxEnabled := tpl.Sandbox.Enabled
-	sandboxBackend := strings.TrimSpace(tpl.Sandbox.Backend)
-	if sandboxBackend == "" {
-		sandboxBackend = "process"
-	}
-	if req.Sandbox != nil {
-		if req.Sandbox.Enabled != nil {
-			sandboxEnabled = *req.Sandbox.Enabled
-		}
-		if req.Sandbox.Backend != nil && strings.TrimSpace(*req.Sandbox.Backend) != "" {
-			sandboxBackend = strings.TrimSpace(*req.Sandbox.Backend)
-		}
-	}
-	switch strings.ToLower(sandboxBackend) {
-	case "process", "docker":
-		sandboxBackend = strings.ToLower(sandboxBackend)
-	default:
-		writeAPIError(w, http.StatusBadRequest, "invalid_sandbox", "sandbox.backend must be process|docker", nil)
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "display_name is required", nil)
 		return
 	}
-	if sandboxBackend == "docker" {
-		// Phase 1：仅持久化配置；Docker 执行器后续实现。
+
+	baseSandbox := agentruntime.SandboxSpec{
+		Backend: "process", WorkspaceSubdir: "data", AllowBash: true, AllowNetworkTools: true,
+	}
+	baseDefaults := map[string]any{}
+	if fullSettings {
+		// 完整入参：不再服务端合并模板；template_id 仅溯源。
+		if req.Defaults != nil {
+			baseDefaults = agentruntime.MergeDefaults(nil, req.Defaults)
+		}
+		if req.Sandbox == nil {
+			// 允许只传 defaults，沙箱用安全默认值。
+		}
+	} else if tpl != nil {
+		baseSandbox = sandboxFromTemplate(tpl)
+		baseDefaults = agentruntime.MergeDefaults(tpl.Defaults, nil)
+	}
+
+	sandbox, err := applySandboxPatch(baseSandbox, req.Sandbox)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_sandbox", err.Error(), nil)
+		return
+	}
+	if sandbox.Backend == "docker" {
 		s.logger.Info("agent sandbox backend=docker reserved for later implementation")
 	}
 
@@ -163,31 +182,19 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot := map[string]any{
-		"template_id": tpl.ID,
-		"defaults":    agentruntime.MergeDefaults(tpl.Defaults, req.Defaults),
-		"sandbox": map[string]any{
-			"enabled":              sandboxEnabled,
-			"backend":              sandboxBackend,
-			"workspace_subdir":     tpl.Sandbox.WorkspaceSubdir,
-			"fs_root_isolation":    tpl.Sandbox.FSRootIsolation,
-			"allow_bash":           tpl.Sandbox.AllowBash,
-			"allow_network_tools":  tpl.Sandbox.AllowNetworkTools,
-			"image":                tpl.Sandbox.Image,
-			"network":              tpl.Sandbox.Network,
-			"memory":               tpl.Sandbox.Memory,
-			"cpus":                 tpl.Sandbox.CPUs,
-		},
+	snapRaw, err := marshalAgentSnapshot(tplID, baseDefaults, sandbox)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
+		return
 	}
-	snapRaw, _ := json.Marshal(snapshot)
 	now := time.Now().UTC()
 	rec := store.AgentRecord{
 		AgentID:        agentID,
 		DisplayName:    name,
-		TemplateID:     tpl.ID,
+		TemplateID:     tplID,
 		Origin:         store.NormalizeAgentOrigin(req.Origin),
-		SandboxEnabled: sandboxEnabled,
-		SandboxBackend: sandboxBackend,
+		SandboxEnabled: sandbox.Enabled,
+		SandboxBackend: sandbox.Backend,
 		ConfigSnapshot: snapRaw,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -199,27 +206,10 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.ensureAgentWorkspace(agentID); err != nil {
 		s.logger.Warn("agent workspace create failed", "agent_id", agentID, "error", err)
 	}
-	// Phase 2：按快照构造 per-agent FSRoot / Registry，并桥接同 id 的内部 session。
 	if s.sessions != nil {
-		snapParsed, err := agentruntime.ParseSnapshot(snapRaw)
-		if err != nil {
-			s.logger.Warn("parse agent snapshot failed", "agent_id", agentID, "error", err)
-		} else {
-			built, err := agentruntime.Build(agentruntime.BuildParams{
-				NodeCFG:   s.cfg,
-				BaseTurn:  s.sessions.DefaultTurnOptions(),
-				AgentID:   agentID,
-				Snapshot:  snapParsed,
-			})
-			if err != nil {
-				writeAPIError(w, http.StatusInternalServerError, "agent_runtime_failed", err.Error(), nil)
-				return
-			}
-			if _, _, err := s.sessions.CreateWithOptions(agentID, built.TurnOptions, built.Registry); err != nil {
-				s.logger.Warn("bridge session create failed", "agent_id", agentID, "error", err)
-			} else {
-				s.logger.Info("agent runtime ready", "agent_id", agentID, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
-			}
+		if err := s.reloadAgentRuntime(r.Context(), rec); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "agent_runtime_failed", err.Error(), nil)
+			return
 		}
 	}
 	writeJSON(w, http.StatusOK, agentViewFromRecord(rec))
@@ -261,8 +251,10 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchAgentRequest struct {
-	DisplayName *string `json:"display_name"`
-	LLMActive   *string `json:"llm_active"`
+	DisplayName *string        `json:"display_name"`
+	LLMActive   *string        `json:"llm_active"` // 兼容快捷字段；等价于 defaults.llm.active
+	Sandbox     *sandboxPatch  `json:"sandbox"`
+	Defaults    map[string]any `json:"defaults"` // 深合并进快照
 }
 
 func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
@@ -285,8 +277,8 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if req.DisplayName == nil && req.LLMActive == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "display_name or llm_active is required", nil)
+	if req.DisplayName == nil && req.LLMActive == nil && req.Sandbox == nil && req.Defaults == nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "no patch fields", nil)
 		return
 	}
 	if req.DisplayName != nil {
@@ -296,6 +288,21 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rec.DisplayName = name
+	}
+
+	snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_invalid", err.Error(), nil)
+		return
+	}
+	if snap.Defaults == nil {
+		snap.Defaults = map[string]any{}
+	}
+	runtimeDirty := false
+
+	if req.Defaults != nil {
+		snap.Defaults = agentruntime.MergeDefaults(snap.Defaults, req.Defaults)
+		runtimeDirty = true
 	}
 	if req.LLMActive != nil {
 		active := strings.TrimSpace(*req.LLMActive)
@@ -309,35 +316,47 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
-		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_invalid", err.Error(), nil)
-			return
-		}
-		if snap.Defaults == nil {
-			snap.Defaults = map[string]any{}
-		}
 		llmMap, _ := snap.Defaults["llm"].(map[string]any)
 		if llmMap == nil {
 			llmMap = map[string]any{}
 		}
 		llmMap["active"] = active
 		snap.Defaults["llm"] = llmMap
-		raw, err := json.Marshal(snap)
-		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
-			return
-		}
-		rec.ConfigSnapshot = raw
+		runtimeDirty = true
 		if err := s.switchActiveLLMProfile(active); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_llm_settings", err.Error(), nil)
 			return
 		}
 	}
+	if req.Sandbox != nil {
+		sandbox, err := applySandboxPatch(snap.Sandbox, req.Sandbox)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_sandbox", err.Error(), nil)
+			return
+		}
+		snap.Sandbox = sandbox
+		rec.SandboxEnabled = sandbox.Enabled
+		rec.SandboxBackend = sandbox.Backend
+		runtimeDirty = true
+	}
+
+	if runtimeDirty {
+		raw, err := marshalAgentSnapshot(snap.TemplateID, snap.Defaults, snap.Sandbox)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
+			return
+		}
+		rec.ConfigSnapshot = raw
+	}
 	rec.UpdatedAt = time.Now().UTC()
 	if err := s.agents.Save(r.Context(), *rec); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
 		return
+	}
+	if runtimeDirty && s.sessions != nil {
+		if err := s.reloadAgentRuntime(r.Context(), *rec); err != nil {
+			s.logger.Warn("agent runtime reload after patch failed", "agent_id", id, "error", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, agentViewFromRecord(*rec))
 }
@@ -380,8 +399,12 @@ func generateAgentInstanceID() (string, error) {
 }
 
 // ensureAgentRuntime 按 agents.db 快照把 Agent 装入内存（CreateWithOptions）。
-// Node 重启或 idle Release 后必须调用，否则会落到默认 TurnOptions / Registry。
+// 若内存已有但配置版本落后（UpdatedAt 变更），会自动 Release 后重建。
 func (s *Server) ensureAgentRuntime(ctx context.Context, agentID string) error {
+	return s.ensureAgentRuntimeOpts(ctx, agentID, false)
+}
+
+func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, forceReload bool) error {
 	id := strings.TrimSpace(agentID)
 	if id == "" {
 		return fmt.Errorf("agent_id is required")
@@ -399,21 +422,47 @@ func (s *Server) ensureAgentRuntime(ctx context.Context, agentID string) error {
 	if rec == nil || rec.Archived {
 		return fmt.Errorf("agent_not_found")
 	}
+	rev := rec.UpdatedAt.UTC().UnixNano()
+	if !forceReload && s.sessions.Get(id) != nil {
+		if s.sessions.ConfigRevision(id) == rev {
+			// 仍同步 LLM 绑定（进程级 active profile）。
+			if snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot); err == nil {
+				if active := agentruntime.LLMActiveFromDefaults(snapParsed); active != "" {
+					_ = s.switchActiveLLMProfile(active)
+				}
+			}
+			return nil
+		}
+		forceReload = true
+	}
+	if forceReload {
+		_, _ = s.sessions.Release(id)
+	}
+	return s.reloadAgentRuntime(ctx, *rec)
+}
+
+func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) error {
+	id := strings.TrimSpace(rec.AgentID)
+	if id == "" {
+		return fmt.Errorf("agent_id is required")
+	}
+	if s.sessions == nil {
+		return fmt.Errorf("sessions manager not configured")
+	}
 	snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
 	if err != nil {
 		return fmt.Errorf("parse agent snapshot: %w", err)
 	}
-	// 切换 / 确保 Agent 时应用其绑定的 LLM 配置。
 	if active := agentruntime.LLMActiveFromDefaults(snapParsed); active != "" {
 		if err := s.switchActiveLLMProfile(active); err != nil {
 			s.logger.Warn("apply agent llm profile failed", "agent_id", id, "profile", active, "error", err)
 		}
 	}
-	if s.sessions.Get(id) != nil {
-		return nil
-	}
 	if err := s.ensureAgentWorkspace(id); err != nil {
 		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
+	}
+	if s.sessions.Get(id) != nil {
+		_, _ = s.sessions.Release(id)
 	}
 	built, err := agentruntime.Build(agentruntime.BuildParams{
 		NodeCFG:  s.cfg,
@@ -424,10 +473,11 @@ func (s *Server) ensureAgentRuntime(ctx context.Context, agentID string) error {
 	if err != nil {
 		return fmt.Errorf("build agent runtime: %w", err)
 	}
+	built.TurnOptions.ConfigRevision = rec.UpdatedAt.UTC().UnixNano()
 	if _, _, err := s.sessions.CreateWithOptions(id, built.TurnOptions, built.Registry); err != nil {
 		return err
 	}
-	s.logger.Info("agent runtime ensured", "agent_id", id, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
+	s.logger.Info("agent runtime ready", "agent_id", id, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
 	return nil
 }
 
@@ -446,6 +496,23 @@ func (s *Server) handleAgentEnsure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
+}
+
+func (s *Server) handleAgentReload(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("agent_id"))
+	if id == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
+		return
+	}
+	if err := s.ensureAgentRuntimeOpts(r.Context(), id, true); err != nil {
+		if err.Error() == "agent_not_found" {
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+			return
+		}
+		writeAPIError(w, http.StatusInternalServerError, "agent_reload_failed", err.Error(), map[string]any{"agent_id": id})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id, "reloaded": true})
 }
 
 // agent 路径别名：把 PathValue agent_id 映射为 session_id 后复用既有 handler。

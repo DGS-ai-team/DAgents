@@ -44,3 +44,24 @@ func TestEnsureSidecarCreatesEmptyFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestReaderFilterDisablesLongTerm(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".runtime")
+	if err := os.MkdirAll(filepath.Join(root, "memory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "memory", "long_term.md"), []byte("remember me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := promptcontext.NewReader(root)
+	off := false
+	r.SetFilter(promptcontext.Filter{LongTermEnabled: &off})
+	if got := r.ReadLongTermMemory(); got != "" {
+		t.Fatalf("expected empty when disabled, got %q", got)
+	}
+	on := true
+	r.SetFilter(promptcontext.Filter{LongTermEnabled: &on})
+	if got := r.ReadLongTermMemory(); got != "remember me" {
+		t.Fatalf("got %q", got)
+	}
+}

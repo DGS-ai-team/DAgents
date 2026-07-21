@@ -20,6 +20,10 @@ type SandboxSpec struct {
 	FSRootIsolation   bool   `json:"fs_root_isolation"`
 	AllowBash         bool   `json:"allow_bash"`
 	AllowNetworkTools bool   `json:"allow_network_tools"`
+	Image             string `json:"image,omitempty"`
+	Network           string `json:"network,omitempty"`
+	Memory            string `json:"memory,omitempty"`
+	CPUs              string `json:"cpus,omitempty"`
 }
 
 // Snapshot 为 agents.config_snapshot_json 的解析视图。
@@ -190,13 +194,16 @@ func MaxToolLoopsFromDefaults(snap Snapshot) int {
 	}
 }
 
-// ApplyDefaultsToTurnOptions 将快照 defaults 中的 llm / hooks 覆盖写入 TurnOptions。
+// ApplyDefaultsToTurnOptions 将快照 defaults 中的 llm / hooks / prompt_context 覆盖写入 TurnOptions。
 func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
 	if turn == nil {
 		return
 	}
 	if n := MaxToolLoopsFromDefaults(snap); n > 0 {
 		turn.MaxToolLoops = n
+	}
+	if pc := PromptContextFromDefaults(snap); pc != nil {
+		turn.PromptContext = *pc
 	}
 	hooksRaw, ok := snap.Defaults["hooks"]
 	if !ok || hooksRaw == nil {
@@ -222,6 +229,32 @@ func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
 		turn.DuplicateToolCall.WindowSeconds = v
 	}
 	_ = hooks.InjectTodayDateConfigOrDefault(turn.InjectTodayDate)
+}
+
+// PromptContextFromDefaults 读取 defaults.prompt_context 开关。
+func PromptContextFromDefaults(snap Snapshot) *session.PromptContextOptions {
+	raw, ok := snap.Defaults["prompt_context"]
+	if !ok || raw == nil {
+		return nil
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := &session.PromptContextOptions{}
+	if v, ok := boolPtrFromAny(m["soul_enabled"]); ok {
+		out.SoulEnabled = v
+	}
+	if v, ok := boolPtrFromAny(m["user_enabled"]); ok {
+		out.UserEnabled = v
+	}
+	if v, ok := boolPtrFromAny(m["custom_enabled"]); ok {
+		out.CustomEnabled = v
+	}
+	if v, ok := boolPtrFromAny(m["long_term_enabled"]); ok {
+		out.LongTermEnabled = v
+	}
+	return out
 }
 
 func boolPtrFromAny(v any) (*bool, bool) {

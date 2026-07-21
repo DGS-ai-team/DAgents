@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
+import AgentSettingsForm from "./AgentSettingsForm.vue";
 import { buildCreateAgentPayload, draftFromTemplate, emptyAgentDraft } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
@@ -13,6 +14,7 @@ const emit = defineEmits(["close", "created"]);
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
+const showAdvanced = ref(false);
 const templates = ref([]);
 const llmProfiles = ref([]);
 const draft = reactive(emptyAgentDraft());
@@ -25,6 +27,7 @@ const llmProfileIds = computed(() => llmProfiles.value.map((p) => p.id).filter(B
 async function loadTemplates() {
   loading.value = true;
   error.value = "";
+  showAdvanced.value = false;
   try {
     const [tplRes, setup] = await Promise.all([
       api.listAgentTemplates(),
@@ -59,8 +62,8 @@ function onPickTemplate(template) {
 }
 
 async function submit() {
-  if (!draft.templateId) {
-    error.value = "请选择一个模板";
+  if (!draft.displayName?.trim()) {
+    error.value = "请填写显示名称";
     return;
   }
   if (!draft.llmProfileId) {
@@ -90,6 +93,7 @@ watch(
     if (visible) void loadTemplates();
     else {
       error.value = "";
+      showAdvanced.value = false;
       Object.assign(draft, emptyAgentDraft());
     }
   },
@@ -103,7 +107,9 @@ watch(
         <header class="agent-create-modal__header">
           <div>
             <h2 id="agent-create-title" class="agent-create-modal__title">新建 Agent</h2>
-            <p class="agent-create-modal__subtitle">选择模板与 LLM；工具 / Hook 等沿用全局设置与模板默认</p>
+            <p class="agent-create-modal__subtitle">
+              选择模板预填参数后可自由修改；创建时提交完整设置
+            </p>
           </div>
           <button type="button" class="agent-create-modal__close" aria-label="关闭" :disabled="saving" @click="emit('close')">
             ×
@@ -140,48 +146,14 @@ watch(
               <p v-if="!templates.length" class="agent-create-modal__empty">暂无可用模板</p>
             </div>
 
-            <div class="agent-create-modal__settings">
-              <div class="agent-create-settings__grid">
-                <section class="agent-create-section">
-                  <h3 class="agent-create-section__title">基本信息</h3>
-                  <label class="agent-create-field">
-                    <span>显示名称</span>
-                    <input v-model="draft.displayName" type="text" class="agent-create-input" placeholder="Agent 名称" />
-                  </label>
-                  <p v-if="selectedTemplate?.description" class="agent-create-hint">{{ selectedTemplate.description }}</p>
-                </section>
-
-                <section class="agent-create-section">
-                  <h3 class="agent-create-section__title">LLM</h3>
-                  <label class="agent-create-field">
-                    <span>使用的 LLM 配置</span>
-                    <select v-model="draft.llmProfileId" class="agent-create-input">
-                      <option disabled value="">请选择</option>
-                      <option v-for="p in llmProfiles" :key="p.id" :value="p.id">
-                        {{ p.id }}{{ p.model ? ` · ${p.model}` : "" }}
-                      </option>
-                    </select>
-                  </label>
-                  <p v-if="!llmProfiles.length" class="agent-create-hint">请先在「设置 › 连接」中添加 LLM 配置</p>
-                  <p v-else class="agent-create-hint">名称与输入栏选择器一致；可在连接设置中改名。</p>
-                </section>
-
-                <section class="agent-create-section agent-create-section--wide">
-                  <h3 class="agent-create-section__title">沙箱</h3>
-                  <label class="agent-create-check">
-                    <input v-model="draft.sandboxEnabled" type="checkbox" />
-                    <span>沙箱运行</span>
-                  </label>
-                  <label class="agent-create-field">
-                    <span>后端</span>
-                    <select v-model="draft.sandboxBackend" class="agent-create-input">
-                      <option value="process">process</option>
-                      <option value="docker">docker（预留）</option>
-                    </select>
-                  </label>
-                </section>
-              </div>
-            </div>
+            <AgentSettingsForm
+              :draft="draft"
+              :llm-profiles="llmProfiles"
+              v-model:show-advanced="showAdvanced"
+            />
+            <p v-if="selectedTemplate" class="agent-create-hint">
+              当前以「{{ selectedTemplate.display_name || selectedTemplate.id }}」为起点；改动仅影响本 Agent。
+            </p>
           </template>
         </div>
 
@@ -192,7 +164,7 @@ watch(
             <button
               type="button"
               class="btn btn--primary"
-              :disabled="saving || loading || !draft.templateId || !draft.llmProfileId"
+              :disabled="saving || loading || !draft.displayName?.trim() || !draft.llmProfileId"
               @click="submit"
             >
               {{ saving ? "创建中…" : "创建 Agent" }}
@@ -367,67 +339,9 @@ watch(
   color: var(--color-text-subtle);
 }
 
-.agent-create-modal__settings {
-  border-top: 1px solid var(--color-border);
-  padding-top: 16px;
-}
-
-.agent-create-settings__grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.agent-create-section {
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-muted);
-}
-
-.agent-create-section--wide {
-  grid-column: 1 / -1;
-}
-
-.agent-create-section__title {
-  margin: 0 0 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  letter-spacing: 0.02em;
-}
-
-.agent-create-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-  font-size: 11.5px;
-  color: var(--color-text-subtle);
-}
-
-.agent-create-input {
-  padding: 7px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: 13px;
-}
-
-.agent-create-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 12.5px;
-  color: var(--color-text);
-}
-
 .agent-create-hint {
   margin: 0;
   font-size: 11.5px;
-  line-height: 1.45;
   color: var(--color-text-subtle);
 }
 
@@ -442,11 +356,5 @@ watch(
   display: flex;
   gap: 8px;
   margin-left: auto;
-}
-
-@media (max-width: 720px) {
-  .agent-create-settings__grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

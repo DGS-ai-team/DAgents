@@ -1,9 +1,11 @@
 <script setup>
 import { ref, onMounted, computed } from "vue";
+import { useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { agentStore } from "../stores/agent.js";
 import { formatRelativeTime, agentDisplayTitle, agentRecordId } from "../utils/format.js";
 
+const router = useRouter();
 const emit = defineEmits(["switch", "created", "delete", "create", "agents-updated"]);
 
 const agents = ref([]);
@@ -59,6 +61,12 @@ function select(id) {
 
 function openCreate() {
   emit("create");
+}
+
+function openAgentSettings(agent) {
+  const id = agentRecordId(agent);
+  if (!id) return;
+  router.push({ name: "settings-agent-detail", params: { agentId: id } });
 }
 
 function onDelete(agent) {
@@ -165,6 +173,14 @@ defineExpose({ refresh, setDeleting, openCreate });
             </div>
           </div>
           <div class="agent-list-item__actions">
+            <button
+              type="button"
+              class="agent-list-item__edit"
+              title="Agent 配置"
+              @click.stop="openAgentSettings(a)"
+            >
+              ⚙
+            </button>
             <button
               type="button"
               class="agent-list-item__edit"

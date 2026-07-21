@@ -50,6 +50,18 @@ type TurnOptions struct {
 	PluginHooks              hooks.PluginsConfig
 	HookHost                 turn.HookHostConfig
 	MultimodalEnabled        bool
+	// ConfigRevision 为装入本 runtime 时 agents.updated_at 的 UnixNano；用于配置变更检测。
+	ConfigRevision int64
+	// PromptContext 控制 soul/user/custom/long_term 侧车是否注入（缺省全开）。
+	PromptContext PromptContextOptions
+}
+
+// PromptContextOptions 为侧车 / 长期记忆注入开关。
+type PromptContextOptions struct {
+	SoulEnabled     *bool
+	UserEnabled     *bool
+	CustomEnabled   *bool
+	LongTermEnabled *bool
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。
@@ -278,6 +290,16 @@ func (m *Manager) Get(sessionID string) *Session {
 		return &rt.session
 	}
 	return nil
+}
+
+// ConfigRevision 返回内存 runtime 装入时的配置版本；不存在返回 0。
+func (m *Manager) ConfigRevision(sessionID string) int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if rt, ok := m.sessions[strings.TrimSpace(sessionID)]; ok {
+		return rt.configRevision
+	}
+	return 0
 }
 
 // ListActive 返回内存中活跃 session。

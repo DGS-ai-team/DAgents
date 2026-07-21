@@ -18,9 +18,25 @@ type cachedFile struct {
 	mtime   int64
 }
 
+// Filter 控制侧车 / 长期记忆是否注入；nil 指针表示默认启用。
+type Filter struct {
+	SoulEnabled     *bool
+	UserEnabled     *bool
+	CustomEnabled   *bool
+	LongTermEnabled *bool
+}
+
+func flagOrDefault(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
 // Reader 读取 `.runtime/prompt_context/` 侧车 Markdown 与长期记忆，带 mtime 缓存。
 type Reader struct {
 	runtimeDir string
+	filter     Filter
 	mu         sync.Mutex
 	cache      map[string]cachedFile
 }
@@ -31,6 +47,14 @@ func NewReader(runtimeDir string) *Reader {
 		runtimeDir: strings.TrimSpace(runtimeDir),
 		cache:      make(map[string]cachedFile),
 	}
+}
+
+// SetFilter 设置侧车注入开关（缺省全开）。
+func (r *Reader) SetFilter(f Filter) {
+	if r == nil {
+		return
+	}
+	r.filter = f
 }
 
 // Dir 返回 prompt_context 绝对路径并确保目录存在。
@@ -66,21 +90,33 @@ func (r *Reader) EnsureSidecarFiles() {
 
 // ReadSoul 读取 soul.md；空白或缺失返回空串。
 func (r *Reader) ReadSoul() string {
+	if !flagOrDefault(r.filter.SoulEnabled, true) {
+		return ""
+	}
 	return r.readSidecar(soulFile)
 }
 
 // ReadUser 读取 user.md。
 func (r *Reader) ReadUser() string {
+	if !flagOrDefault(r.filter.UserEnabled, true) {
+		return ""
+	}
 	return r.readSidecar(userFile)
 }
 
 // ReadCustom 读取 custom.md。
 func (r *Reader) ReadCustom() string {
+	if !flagOrDefault(r.filter.CustomEnabled, true) {
+		return ""
+	}
 	return r.readSidecar(customFile)
 }
 
 // ReadLongTermMemory 读取 `.runtime/memory/long_term.md`（不存在或空白时不注入）。
 func (r *Reader) ReadLongTermMemory() string {
+	if !flagOrDefault(r.filter.LongTermEnabled, true) {
+		return ""
+	}
 	if r.runtimeDir == "" {
 		return ""
 	}

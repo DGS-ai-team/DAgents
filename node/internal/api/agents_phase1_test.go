@@ -90,3 +90,66 @@ func TestCreateAgent_rejectsInvalidBackend(t *testing.T) {
 		t.Fatalf("status=%d want 400 body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	body, _ := json.Marshal(map[string]any{
+		"display_name": "完整助手",
+		"template_id":  "general", // 仅溯源
+		"defaults": map[string]any{
+			"llm":   map[string]any{"active": "default", "max_tool_loops": 8},
+			"tools": map[string]any{"enabled_groups": []any{"fs"}},
+			"prompt_context": map[string]any{
+				"long_term_enabled": false,
+			},
+		},
+		"sandbox": map[string]any{
+			"enabled":             true,
+			"backend":             "process",
+			"fs_root_isolation":   true,
+			"allow_bash":          false,
+			"allow_network_tools": false,
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var created agentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.TemplateID != "general" {
+		t.Fatalf("template_id = %q", created.TemplateID)
+	}
+	var snap map[string]any
+	if err := json.Unmarshal(created.ConfigSnapshot, &snap); err != nil {
+		t.Fatal(err)
+	}
+	defaults, _ := snap["defaults"].(map[string]any)
+	tools, _ := defaults["tools"].(map[string]any)
+	groups, _ := tools["enabled_groups"].([]any)
+	if len(groups) != 1 || groups[0] != "fs" {
+		t.Fatalf("tools = %#v", tools)
+	}
+	pc, _ := defaults["prompt_context"].(map[string]any)
+	if pc["long_term_enabled"] != false {
+		t.Fatalf("prompt_context = %#v", pc)
+	}
+	sandbox, _ := snap["sandbox"].(map[string]any)
+	if sandbox["allow_bash"] != false || sandbox["fs_root_isolation"] != true {
+		t.Fatalf("sandbox = %#v", sandbox)
+	}
+}

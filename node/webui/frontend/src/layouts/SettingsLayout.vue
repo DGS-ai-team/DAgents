@@ -7,6 +7,7 @@ const route = useRoute();
 const nav = [
   { to: "/settings/general", label: "通用" },
   { to: "/settings/connection", label: "连接" },
+  { to: "/settings/agents", label: "Agents", match: "/settings/agents" },
   { to: "/settings/capabilities", label: "能力" },
   { to: "/settings/skills", label: "技能" },
   { to: "/settings/triggers", label: "定时任务" },
@@ -14,6 +15,11 @@ const nav = [
   { to: "/settings/context", label: "上下文" },
   { to: "/settings/about", label: "关于" },
 ];
+
+function isActive(item) {
+  if (item.match) return route.path === item.match || route.path.startsWith(`${item.match}/`);
+  return route.path === item.to;
+}
 </script>
 
 <template>
@@ -26,7 +32,7 @@ const nav = [
           :key="item.to"
           :to="item.to"
           class="settings-layout__link"
-          :class="{ 'settings-layout__link--active': route.path === item.to }"
+          :class="{ 'settings-layout__link--active': isActive(item) }"
         >
           {{ item.label }}
         </router-link>
