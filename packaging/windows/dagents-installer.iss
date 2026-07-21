@@ -130,8 +130,6 @@ begin
     WizardForm.MainPanel.Color := ClrSurface;
   if WizardForm.InnerPage <> nil then
     WizardForm.InnerPage.Color := ClrSurface;
-  if WizardForm.OuterNotebook <> nil then
-    WizardForm.OuterNotebook.Color := ClrSurface;
 
   StyleStaticText(WizardForm.WelcomeLabel1, True);
   StyleStaticText(WizardForm.WelcomeLabel2, False);
