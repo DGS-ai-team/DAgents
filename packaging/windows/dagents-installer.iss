@@ -34,12 +34,26 @@ WizardStyle=modern
 WizardSizePercent=110
 ShowLanguageDialog=no
 SetupIconFile=..\..\desktop\tray\assets\icon.ico
+WizardImageFile=assets\wizard-sidebar.bmp
+WizardSmallImageFile=assets\wizard-small.bmp
+WizardImageStretch=no
+DisableWelcomePage=no
+DisableFinishedPage=no
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
 
 [CustomMessages]
 chinesesimp.WelcomeLabel2=安装完成后请打开 Web UI「设置 › 连接」配置 LLM、Manage 与功能开关；API Key 请写入系统环境变量（如 OPENAI_API_KEY）。
+chinesesimp.WizardSelectDir=选择安装位置
+chinesesimp.WizardSelectDirLabel3=DAgents 将安装到以下文件夹。
+chinesesimp.WizardSelectTasks=附加任务
+chinesesimp.WizardSelectTasksLabel2=选择安装完成后要执行的附加任务。
+chinesesimp.WizardReady=准备安装
+chinesesimp.WizardReadyLabel1=安装程序已准备好将 DAgents 安装到您的计算机。
+chinesesimp.WizardReadyLabel2a=点击「安装」开始，或点击「上一步」检查设置。
+chinesesimp.WizardInstalling=正在安装
+chinesesimp.WizardInstallingLabel=请稍候，正在安装 DAgents 本地助手…
 
 [Files]
 Source: "..\..\bundle\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion
@@ -67,9 +81,69 @@ Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "验证安装�
 Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; Description: "启动 DAgents Shell（托盘监护 Node）"; Flags: postinstall nowait skipifsilent runascurrentuser
 
 [Code]
+const
+  { Web UI tokens.css dark — Inno 颜色为 BGR $00BBGGRR }
+  ClrBg = $00181818;
+  ClrSurface = $001E1E1E;
+  ClrSurfaceMuted = $00262626;
+  ClrBorder = $002B2B2B;
+  ClrText = $00CCCCCC;
+  ClrTextMuted = $009D9D9D;
+  ClrTextSubtle = $006E6E6E;
+  ClrPrimary = $00FF9437;
+
 var
   OverwritePolicy: Boolean;
   OverwritePolicyAnswered: Boolean;
+
+procedure StyleStaticText(L: TNewStaticText; Title: Boolean);
+begin
+  L.Font.Name := 'Segoe UI';
+  if Title then
+  begin
+    L.Font.Size := 12;
+    L.Font.Style := [fsBold];
+    L.Font.Color := ClrText;
+  end
+  else
+  begin
+    L.Font.Size := 9;
+    L.Font.Style := [];
+    L.Font.Color := ClrTextMuted;
+  end;
+end;
+
+procedure StyleButton(B: TNewButton);
+begin
+  B.Font.Name := 'Segoe UI';
+  B.Font.Size := 9;
+end;
+
+procedure ApplyWorkbenchTheme;
+begin
+  WizardForm.Color := ClrSurface;
+  WizardForm.Font.Name := 'Segoe UI';
+  WizardForm.Font.Size := 9;
+  WizardForm.Font.Color := ClrText;
+
+  if WizardForm.MainPanel <> nil then
+    WizardForm.MainPanel.Color := ClrSurface;
+  if WizardForm.InnerPage <> nil then
+    WizardForm.InnerPage.Color := ClrSurface;
+  if WizardForm.OuterNotebook <> nil then
+    WizardForm.OuterNotebook.Color := ClrSurface;
+
+  StyleStaticText(WizardForm.WelcomeLabel1, True);
+  StyleStaticText(WizardForm.WelcomeLabel2, False);
+  StyleStaticText(WizardForm.FinishedHeadingLabel, True);
+  StyleStaticText(WizardForm.FinishedLabel, False);
+  StyleStaticText(WizardForm.PageNameLabel, True);
+  StyleStaticText(WizardForm.PageDescriptionLabel, False);
+
+  StyleButton(WizardForm.NextButton);
+  StyleButton(WizardForm.BackButton);
+  StyleButton(WizardForm.CancelButton);
+end;
 
 function PolicyExistsAt(const AppDir: string): Boolean;
 begin
@@ -132,13 +206,21 @@ end;
 
 procedure InitializeWizard;
 begin
-  WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents 本地助手';
+  ApplyWorkbenchTheme;
+  WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents';
   WizardForm.WelcomeLabel2.Caption :=
-    '本安装包包含 Agent Node、Desktop Shell（系统托盘）与 Client（probe/update）。' + #13#10 +
-    '安装时将复制默认 config.example.yaml；请在 Web UI「设置 › 连接」中完成 LLM 等配置。' + #13#10 +
-    '安装完成后 Shell 将随用户登录自启并监护 Node。';
-  WizardForm.FinishedLabel.Caption := 'DAgents 已安装完成。';
+    '本安装包包含 Agent Node、Desktop Shell（系统托盘）与 Client。' + #13#10 +
+    '视觉与 Web UI Workbench 使用同一套深色主题；安装后可在浏览器打开本机助手。' + #13#10 +
+    'LLM、Manage 与功能开关请在 Web UI「设置 › 连接」中完成配置。';
+  WizardForm.FinishedLabel.Caption :=
+    'DAgents 已就绪。建议立即打开 Web UI 完成连接配置，' + #13#10 +
+    'Shell 将随登录自启并监护 Node（dagents shell status）。';
   WizardForm.FinishedHeadingLabel.Caption := '安装完成';
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  ApplyWorkbenchTheme;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
