@@ -54,7 +54,7 @@ func (r *Registry) execBashRun(ctx context.Context, raw json.RawMessage) (string
 	}
 
 	if isBackgroundExecution(ctx) {
-		out, stats, err := runShellUntilDone(ctx, params)
+		out, stats, err := runShellUntilDoneWithRegistry(r, ctx, params)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v", err), nil
 		}
@@ -96,6 +96,12 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 	if err != nil {
 		return shellRunParams{}, fmt.Sprintf("ERROR: %v", err), nil
 	}
+	if r.dockerSandbox != nil {
+		if args.ShellType != nil && st != shellBash {
+			return shellRunParams{}, "ERROR: docker 沙箱仅支持 shell_type=bash。", nil
+		}
+		st = shellBash
+	}
 	if blocked := blockedNonRootPasswordPromptingShell(cmdText, st); blocked != "" {
 		return shellRunParams{}, blocked, nil
 	}
@@ -113,7 +119,14 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 	}, "", nil
 }
 
-func startShellCommand(params shellRunParams) (*exec.Cmd, error) {
+func (r *Registry) startShellCommand(params shellRunParams) (*exec.Cmd, error) {
+	if r != nil && r.dockerSandbox != nil {
+		cmd, err := r.dockerSandbox.Command(params.cwd, params.command)
+		if err != nil {
+			return nil, err
+		}
+		return cmd, nil
+	}
 	cmd, err := buildShellCommand(params.shellType, params.command)
 	if err != nil {
 		return nil, err
@@ -122,9 +135,9 @@ func startShellCommand(params shellRunParams) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// runShellUntilDone 在 ctx 有效期内等待 shell 结束（用于内部 StartBackground 路径）。
-func runShellUntilDone(ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
-	base, err := startShellCommand(params)
+// runShellUntilDoneWithRegistry 在 ctx 有效期内等待 shell 结束（含 docker 沙箱路径）。
+func runShellUntilDoneWithRegistry(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
+	base, err := r.startShellCommand(params)
 	if err != nil {
 		return "", nil, err
 	}
@@ -143,7 +156,7 @@ func runShellUntilDone(ctx context.Context, params shellRunParams) (string, *Out
 
 // runShellSyncWithAutoDegrade 同步等待 timeout 秒；超时则不杀进程并登记后台 job。
 func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
-	cmd, err := startShellCommand(params)
+	cmd, err := r.startShellCommand(params)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil, nil
 	}

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **Docker 沙箱后端**：`sandbox.backend=docker` 时 `bash_run` 经 `docker run --rm` 执行；工作区挂载 `/workspace`；无 Docker 时创建/启用返回 `docker_unavailable`。镜像见 `packaging/sandbox/`。
+
 ---
 
 ## [0.8.0] - 2026-07-21

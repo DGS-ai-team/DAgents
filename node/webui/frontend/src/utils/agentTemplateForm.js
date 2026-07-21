@@ -31,6 +31,10 @@ export function emptyAgentDraft() {
     childAgentsEnabled: true,
     sandboxEnabled: false,
     sandboxBackend: "process",
+    sandboxImage: "dagents-sandbox:latest",
+    sandboxNetwork: "none",
+    sandboxMemory: "",
+    sandboxCpus: "",
     workspaceSubdir: "data",
     fsRootIsolation: false,
     allowBash: true,
@@ -83,8 +87,12 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = !!sandbox.enabled;
   draft.sandboxBackend = String(sandbox.backend || "process").trim() || "process";
+  draft.sandboxImage = String(sandbox.image || "dagents-sandbox:latest").trim() || "dagents-sandbox:latest";
+  draft.sandboxNetwork = String(sandbox.network || "none").trim() || "none";
+  draft.sandboxMemory = String(sandbox.memory || "").trim();
+  draft.sandboxCpus = String(sandbox.cpus || "").trim();
   draft.workspaceSubdir = String(sandbox.workspace_subdir || "data").trim() || "data";
-  draft.fsRootIsolation = !!sandbox.fs_root_isolation;
+  draft.fsRootIsolation = draft.sandboxBackend === "docker" ? true : !!sandbox.fs_root_isolation;
   draft.allowBash = sandbox.allow_bash !== false;
   draft.allowNetworkTools = sandbox.allow_network_tools !== false;
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
@@ -127,8 +135,12 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = boolOr(sandbox.enabled, !!agent?.sandbox_enabled);
   draft.sandboxBackend = String(sandbox.backend || agent?.sandbox_backend || "process").trim() || "process";
+  draft.sandboxImage = String(sandbox.image || "dagents-sandbox:latest").trim() || "dagents-sandbox:latest";
+  draft.sandboxNetwork = String(sandbox.network || "none").trim() || "none";
+  draft.sandboxMemory = String(sandbox.memory || "").trim();
+  draft.sandboxCpus = String(sandbox.cpus || "").trim();
   draft.workspaceSubdir = String(sandbox.workspace_subdir || "data").trim() || "data";
-  draft.fsRootIsolation = !!sandbox.fs_root_isolation;
+  draft.fsRootIsolation = draft.sandboxBackend === "docker" ? true : !!sandbox.fs_root_isolation;
   draft.allowBash = sandbox.allow_bash !== false;
   draft.allowNetworkTools = sandbox.allow_network_tools !== false;
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
@@ -167,9 +179,17 @@ export function buildCreateAgentPayload(draft) {
       enabled: !!draft.sandboxEnabled,
       backend: draft.sandboxBackend || "process",
       workspace_subdir: draft.workspaceSubdir || "data",
-      fs_root_isolation: !!draft.fsRootIsolation,
+      fs_root_isolation: draft.sandboxBackend === "docker" ? true : !!draft.fsRootIsolation,
       allow_bash: !!draft.allowBash,
       allow_network_tools: !!draft.allowNetworkTools,
+      ...(draft.sandboxBackend === "docker"
+        ? {
+            image: String(draft.sandboxImage || "dagents-sandbox:latest").trim() || "dagents-sandbox:latest",
+            network: String(draft.sandboxNetwork || "none").trim() || "none",
+            ...(String(draft.sandboxMemory || "").trim() ? { memory: String(draft.sandboxMemory).trim() } : {}),
+            ...(String(draft.sandboxCpus || "").trim() ? { cpus: String(draft.sandboxCpus).trim() } : {}),
+          }
+        : {}),
     },
     defaults: {
       agent: {

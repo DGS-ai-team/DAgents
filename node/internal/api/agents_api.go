@@ -14,6 +14,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
@@ -184,8 +185,9 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_sandbox", err.Error(), nil)
 		return
 	}
-	if sandbox.Backend == "docker" {
-		s.logger.Info("agent sandbox backend=docker reserved for later implementation")
+	if err := requireDockerSandboxReady(sandbox); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "docker_unavailable", err.Error(), nil)
+		return
 	}
 
 	agentID, err := generateAgentInstanceID()
@@ -370,6 +372,10 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_sandbox", err.Error(), nil)
 			return
 		}
+		if err := requireDockerSandboxReady(sandbox); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "docker_unavailable", err.Error(), nil)
+			return
+		}
 		snap.Sandbox = sandbox
 		rec.SandboxEnabled = sandbox.Enabled
 		rec.SandboxBackend = sandbox.Backend
@@ -410,6 +416,7 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	if s.sessions != nil {
 		_, _ = s.sessions.Delete(id)
 	}
+	sandbox.ReleaseAgent(id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
 }
 
@@ -482,6 +489,9 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	snapParsed, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
 	if err != nil {
 		return fmt.Errorf("parse agent snapshot: %w", err)
+	}
+	if err := requireDockerSandboxReady(snapParsed.Sandbox); err != nil {
+		return err
 	}
 	if err := s.ensureAgentWorkspace(id); err != nil {
 		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)

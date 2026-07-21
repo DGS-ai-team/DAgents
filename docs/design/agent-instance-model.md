@@ -185,18 +185,18 @@ sandbox:
 | `backend` | 说明 | 阶段 |
 |-----------|------|------|
 | **`process`（默认）** | 应用层：effective FSRoot + 工具组白名单 + policy | Phase 2 必达 |
-| **`docker`（可选）** | 工具执行（尤其 bash）进容器；工作区 bind-mount | **后续独立增强**，非 Phase 2 阻塞 |
+| **`docker`（可选）** | 工具执行（尤其 bash）进容器；工作区 bind-mount | **已实现**（MVP：按次 `docker run --rm`） |
 
-Docker 后端要点（设计预留，暂不实现）：
+Docker 后端要点：
 
-- **不把整个 Node 放进容器**，只隔离危险工具执行路径。
-- Agent 工作区挂载为容器内 `/workspace`；默认 `network: none`、非 root、CPU/内存上限。
-- 无 Docker 时：创建 `backend: docker` 的 Agent 应失败并提示，或显式配置允许降级为 `process`。
-- 生命周期：创建 Agent 时可预热容器；空闲回收；删除 Agent 时 `docker rm`。
+- **不把整个 Node 放进容器**，只隔离危险工具执行路径（`bash_run`）。
+- Agent 工作区挂载为容器内 `/workspace`；默认 `network: none`、非 root（uid 65534）、可选 CPU/内存上限。
+- 无 Docker 时：创建/启用 `backend: docker` 返回 `docker_unavailable`；Windows / 无 Docker 环境继续使用 `process`。
+- 生命周期：MVP 为按次 `docker run --rm`；删除 Agent 时尝试清理命名残留容器。
 - 与 policy 叠层：容器外仍走 HITL 审批；容器内再加资源/网络限制。
-- Windows / 无 Docker 环境必须保留 `process` 兜底，**不得**强制所有 Agent 依赖 Docker。
+- 镜像：`packaging/sandbox/Dockerfile` → `dagents-sandbox:latest`。
 
-模板示例：`ops-runner` 可先 `backend: process`；具备 Docker 后再切 `docker`。
+模板示例：`ops-runner` 默认仍为 `backend: process`；具备 Docker 后可在 UI / 模板中切 `docker`。
 
 ---
 
@@ -370,7 +370,7 @@ GET /v1/node/info
 - [x] `/v1/agents/{id}/hydrate|cancel|context` 路径别名
 - [x] Phase 2 单元测试
 - [ ] Child agent 完全按新 Agent 模型挂接（仍用父 runtime；后续细化）
-- [ ] Docker 沙箱后端（后续增强）
+- [x] Docker 沙箱后端（`bash_run` → `docker run`；见 `node/internal/sandbox`）
 
 ### Phase 3 — Web UI
 

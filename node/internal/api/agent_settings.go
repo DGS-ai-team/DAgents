@@ -6,6 +6,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
+	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 )
 
 // sandboxPatch 为创建/更新请求中的沙箱字段（指针表示是否出现）。
@@ -77,6 +78,16 @@ func normalizeSandbox(s agentruntime.SandboxSpec) (agentruntime.SandboxSpec, err
 	if strings.TrimSpace(s.WorkspaceSubdir) == "" {
 		s.WorkspaceSubdir = "data"
 	}
+	if s.Enabled && s.Backend == "docker" {
+		// Docker 必须隔离工作区，否则容器挂载点语义不清。
+		s.FSRootIsolation = true
+		if strings.TrimSpace(s.Image) == "" {
+			s.Image = "dagents-sandbox:latest"
+		}
+		if strings.TrimSpace(s.Network) == "" {
+			s.Network = "none"
+		}
+	}
 	return s, nil
 }
 
@@ -85,6 +96,17 @@ var errInvalidSandboxBackend = errString("sandbox.backend must be process|docker
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// requireDockerSandboxReady 在启用 docker 沙箱时校验本机 Docker CLI。
+func requireDockerSandboxReady(s agentruntime.SandboxSpec) error {
+	if !s.Enabled {
+		return nil
+	}
+	if strings.ToLower(strings.TrimSpace(s.Backend)) != "docker" {
+		return nil
+	}
+	return sandbox.RequireDocker()
+}
 
 func sandboxFromTemplate(tpl *agenttemplate.Template) agentruntime.SandboxSpec {
 	if tpl == nil {

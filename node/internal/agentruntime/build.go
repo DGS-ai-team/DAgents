@@ -2,7 +2,9 @@ package agentruntime
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -10,10 +12,10 @@ import (
 
 // BuildParams 为构造 per-agent Registry / TurnOptions 的输入。
 type BuildParams struct {
-	NodeCFG    *config.Config
-	BaseTurn   session.TurnOptions
-	AgentID    string
-	Snapshot   Snapshot
+	NodeCFG     *config.Config
+	BaseTurn    session.TurnOptions
+	AgentID     string
+	Snapshot    Snapshot
 	BashTimeout int
 }
 
@@ -26,6 +28,7 @@ type Built struct {
 }
 
 // Build 根据快照构造 effective FSRoot、收紧后的工具组与独立 Registry。
+// backend=docker 且 enabled 时注入 DockerRunner（bash_run 进容器）；调用方应先 RequireDocker。
 func Build(p BuildParams) (Built, error) {
 	if p.NodeCFG == nil {
 		return Built{}, fmt.Errorf("node config required")
@@ -53,9 +56,6 @@ func Build(p BuildParams) (Built, error) {
 	if v := MultimodalEnabledFromDefaults(p.Snapshot); v != nil {
 		mm = *v
 	}
-	if p.Snapshot.Sandbox.Enabled && !p.Snapshot.Sandbox.AllowNetworkTools {
-		// 沙箱默认不开 multimodal 视觉浏览器路径依赖；仍允许显式模板打开。
-	}
 	reg.SetMultimodalEnabled(mm)
 	bc := tools.DefaultBashCompressConfig()
 	if p.NodeCFG.Tools.BashCompress.Enabled != nil {
@@ -69,6 +69,10 @@ func Build(p BuildParams) (Built, error) {
 	}
 	reg.SetBashCompress(bc)
 
+	if err := attachDockerSandbox(reg, fsRoot, p.Snapshot); err != nil {
+		return Built{}, err
+	}
+
 	turnOpts := p.BaseTurn
 	turnOpts.FSRoot = fsRoot
 	turnOpts.ToolResult.FSRoot = fsRoot
@@ -81,4 +85,24 @@ func Build(p BuildParams) (Built, error) {
 		Registry:    reg,
 		ToolGroups:  groups,
 	}, nil
+}
+
+func attachDockerSandbox(reg *tools.Registry, fsRoot string, snap Snapshot) error {
+	if reg == nil || !snap.Sandbox.Enabled {
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(snap.Sandbox.Backend), "docker") {
+		return nil
+	}
+	runner, err := sandbox.NewDockerRunner(fsRoot, sandbox.Spec{
+		Image:   snap.Sandbox.Image,
+		Network: snap.Sandbox.Network,
+		Memory:  snap.Sandbox.Memory,
+		CPUs:    snap.Sandbox.CPUs,
+	})
+	if err != nil {
+		return fmt.Errorf("docker sandbox: %w", err)
+	}
+	reg.SetDockerSandbox(runner)
+	return nil
 }

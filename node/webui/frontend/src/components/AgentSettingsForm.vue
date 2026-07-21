@@ -99,13 +99,34 @@ function toggleGroup(name) {
         <label class="agent-settings-field">
           <span>后端</span>
           <select v-model="draft.sandboxBackend" class="agent-settings-input">
-            <option value="process">process</option>
-            <option value="docker">docker（预留）</option>
+            <option value="process">process（应用层隔离）</option>
+            <option value="docker">docker（bash 进容器）</option>
           </select>
         </label>
+        <template v-if="draft.sandboxBackend === 'docker'">
+          <p class="agent-settings-hint">
+            需本机 Docker；工作区挂载为容器内 /workspace。镜像见 packaging/sandbox。
+          </p>
+          <label class="agent-settings-field">
+            <span>镜像</span>
+            <input v-model="draft.sandboxImage" type="text" class="agent-settings-input" placeholder="dagents-sandbox:latest" />
+          </label>
+          <label class="agent-settings-field">
+            <span>网络</span>
+            <input v-model="draft.sandboxNetwork" type="text" class="agent-settings-input" placeholder="none" />
+          </label>
+          <label class="agent-settings-field">
+            <span>内存上限</span>
+            <input v-model="draft.sandboxMemory" type="text" class="agent-settings-input" placeholder="512m（可选）" />
+          </label>
+          <label class="agent-settings-field">
+            <span>CPU 上限</span>
+            <input v-model="draft.sandboxCpus" type="text" class="agent-settings-input" placeholder="1.0（可选）" />
+          </label>
+        </template>
         <label class="agent-settings-check">
-          <input v-model="draft.fsRootIsolation" type="checkbox" />
-          <span>隔离工作区（agents/&lt;id&gt;/data）</span>
+          <input v-model="draft.fsRootIsolation" type="checkbox" :disabled="draft.sandboxBackend === 'docker'" />
+          <span>隔离工作区（agents/&lt;id&gt;/data）{{ draft.sandboxBackend === 'docker' ? '（docker 强制）' : '' }}</span>
         </label>
         <label class="agent-settings-check">
           <input v-model="draft.allowBash" type="checkbox" />
