@@ -65,7 +65,7 @@ function toggleGroup(name) {
     <div v-if="advancedOpen" class="agent-settings-advanced">
       <section class="agent-settings-section">
         <h3 class="agent-settings-section__title">工具组</h3>
-        <p class="agent-settings-hint">不勾选表示不限制（沿用运行时默认展开）；勾选后仅启用所选组。</p>
+        <p class="agent-settings-hint">本 Agent 可用的内置工具组。不勾选表示不额外收窄（由运行时按沙箱等约束决定）。</p>
         <div class="agent-settings-toggles">
           <label v-for="g in TOOL_GROUPS" :key="g.name" class="agent-settings-check">
             <input
