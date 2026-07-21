@@ -357,7 +357,7 @@ func (a *trayApp) openSession(sessionID string) {
 		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
 		defer cancel()
 		if err := webui.EnsureNodeAndOpen(ctx, a.layout, a.cfg, sessionID); err != nil {
-			log.Printf("open session %s: %v", sessionID, err)
+			log.Printf("open agent %s: %v", sessionID, err)
 			return
 		}
 		a.refreshPendingUI()

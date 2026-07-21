@@ -1,4 +1,5 @@
-// Package uifocus 记录 Web UI 当前聚焦的 session（F-E9），用于抑制同 session 新 Toast。
+// Package uifocus 记录 Web UI 当前聚焦的 Agent（F-E9），用于抑制同 Agent 新 Toast。
+// 线协议字段仍为 session_id，值为 Agent 实例 UUID。
 package uifocus
 
 import (

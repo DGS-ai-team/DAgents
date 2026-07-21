@@ -8,8 +8,7 @@ import (
 
 // ShouldSyncOnEvent SSE 事件是否应触发从 Node 同步待办表（F-E13）。
 func ShouldSyncOnEvent(ev nodeclient.StreamEvent) bool {
-	sessionID := trim(ev.SessionID)
-	if sessionID == "" {
+	if eventAgentID(ev) == "" {
 		return false
 	}
 	switch ev.Type {
@@ -19,32 +18,50 @@ func ShouldSyncOnEvent(ev nodeclient.StreamEvent) bool {
 	return false
 }
 
-// SyncFromSessions 用 GET /v1/sessions 的 Node 真相源重建待办表（F-E10/E13）。
-func SyncFromSessions(store *Store, sessions []nodeclient.SessionSummary) bool {
+func eventAgentID(ev nodeclient.StreamEvent) string {
+	if id := trim(ev.AgentID); id != "" {
+		return id
+	}
+	return trim(ev.SessionID)
+}
+
+// SyncFromAgents 用 GET /v1/agents 的 Node 真相源重建待办表（F-E10/E13）。
+func SyncFromAgents(store *Store, agents []nodeclient.AgentSummary) bool {
 	if store == nil {
 		return false
 	}
 	incoming := make(map[string]Entry)
 	now := time.Now()
-	for _, sess := range sessions {
-		if !sess.HasUnread && !sess.HasPendingHITL {
+	for _, ag := range agents {
+		id := trim(ag.AgentID)
+		if id == "" {
 			continue
 		}
-		items := sess.PendingHITLItems
-		if items <= 0 && sess.HasPendingHITL {
+		if !ag.HasUnread && !ag.HasPendingHITL {
+			continue
+		}
+		items := ag.PendingHITLItems
+		if items <= 0 && ag.HasPendingHITL {
 			items = 1
 		}
 		eventType := ""
-		if sess.HasPendingHITL {
+		if ag.HasPendingHITL {
 			eventType = "hitl_required"
 		}
-		incoming[sess.SessionID] = Entry{
-			SessionID: sess.SessionID,
-			HITLItems: items,
-			HasUnread: sess.HasUnread,
-			EventType: eventType,
-			UpdatedAt: now,
+		incoming[id] = Entry{
+			AgentID:     id,
+			SessionID:   id,
+			DisplayName: trim(ag.DisplayName),
+			HITLItems:   items,
+			HasUnread:   ag.HasUnread,
+			EventType:   eventType,
+			UpdatedAt:   now,
 		}
 	}
 	return store.ReplaceFromNode(incoming)
+}
+
+// SyncFromSessions 为 SyncFromAgents 的历史别名。
+func SyncFromSessions(store *Store, sessions []nodeclient.SessionSummary) bool {
+	return SyncFromAgents(store, sessions)
 }

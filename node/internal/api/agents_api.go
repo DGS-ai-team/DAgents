@@ -14,6 +14,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func (s *Server) registerAgentRoutes() {
@@ -88,6 +89,15 @@ type agentView struct {
 	ConfigSnapshot json.RawMessage `json:"config_snapshot,omitempty"`
 	CreatedAt      string          `json:"created_at"`
 	UpdatedAt      string          `json:"updated_at"`
+	// 以下字段供托盘 / 通知同步（agent_id 与内部 session 1:1）。
+	Active           bool   `json:"active,omitempty"`
+	HasActiveTurn    bool   `json:"has_active_turn,omitempty"`
+	RunTurnPhase     string `json:"run_turn_phase,omitempty"`
+	NotifySeq        int    `json:"notify_seq,omitempty"`
+	AckSeq           int    `json:"ack_seq,omitempty"`
+	HasUnread        bool   `json:"has_unread,omitempty"`
+	HasPendingHITL   bool   `json:"has_pending_hitl,omitempty"`
+	PendingHITLItems int    `json:"pending_hitl_items,omitempty"`
 }
 
 func agentViewFromRecord(rec store.AgentRecord) agentView {
@@ -227,7 +237,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]agentView, 0, len(list))
 	for _, rec := range list {
-		views = append(views, agentViewFromRecord(rec))
+		views = append(views, s.enrichAgentNotify(agentViewFromRecord(rec)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"agents": views})
 }
@@ -247,7 +257,29 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
 		return
 	}
-	writeJSON(w, http.StatusOK, agentViewFromRecord(*rec))
+	writeJSON(w, http.StatusOK, s.enrichAgentNotify(agentViewFromRecord(*rec)))
+}
+
+// enrichAgentNotify 附加未读 / HITL 等通知字段（托盘待办同步用）。
+func (s *Server) enrichAgentNotify(v agentView) agentView {
+	if s.sessions == nil || strings.TrimSpace(v.AgentID) == "" {
+		return v
+	}
+	notify := s.sessions.NotificationState(v.AgentID)
+	v.NotifySeq = notify.NotifySeq
+	v.AckSeq = notify.AckSeq
+	v.HasUnread = notify.HasUnread
+	v.HasPendingHITL = notify.HasPendingHITL
+	v.PendingHITLItems = notify.PendingHITLItems
+	if s.sessions.Get(v.AgentID) != nil {
+		v.Active = true
+		_, hasActiveTurn, turnState, _ := s.sessions.RuntimeInfo(v.AgentID)
+		v.HasActiveTurn = hasActiveTurn
+		v.RunTurnPhase = turn.RunTurnPhase(turnState)
+	} else if notify.HasPendingHITL {
+		v.RunTurnPhase = "waiting_hitl"
+	}
+	return v
 }
 
 type patchAgentRequest struct {
