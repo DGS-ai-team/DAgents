@@ -1223,6 +1223,31 @@
   color: var(--color-primary);
 }
 
+.tool-source-badge--hitl {
+  background: rgba(55, 148, 255, 0.12);
+  color: var(--color-primary);
+}
+
+.tool-source-badge--browser {
+  background: rgba(86, 156, 214, 0.14);
+  color: #569cd6;
+}
+
+.tool-source-badge--triggers {
+  background: rgba(220, 220, 170, 0.14);
+  color: #dcdcaa;
+}
+
+.tool-source-badge--skills {
+  background: rgba(181, 206, 168, 0.14);
+  color: #b5cea8;
+}
+
+.tool-source-badge--tool {
+  background: rgba(55, 148, 255, 0.14);
+  color: var(--color-primary);
+}
+
 .tool-exec-bubble__head {
   display: flex;
   align-items: center;

@@ -135,16 +135,12 @@ export function appendReasoning(delta) {
   if (!delta) return;
   finalizeAssistant();
   transcriptStore.reasoningBuffer += delta;
-  if (!transcriptStore.showReasoning) return;
   if (!hasStreamingKind("reasoning")) upsertStreaming("reasoning", "");
-  markRevealStreaming("reasoning", true);
-  scheduleReveal();
 }
 
 export function resumeReasoningReveal() {
-  if (!transcriptStore.reasoningBuffer || !transcriptStore.showReasoning) return;
-  markRevealStreaming("reasoning", true);
-  scheduleReveal();
+  if (!transcriptStore.reasoningBuffer) return;
+  if (!hasStreamingKind("reasoning")) upsertStreaming("reasoning", "");
 }
 
 export function setShowReasoning(enabled) {
@@ -156,7 +152,6 @@ export function setShowReasoning(enabled) {
   } catch {
     /* ignore storage failures */
   }
-  if (on) resumeReasoningReveal();
 }
 
 export function finalizeAssistant() {
@@ -177,15 +172,8 @@ export function finalizeAssistant() {
 
 export function finalizeReasoning() {
   flushReveal("reasoning");
-  const text = transcriptStore.reasoningBuffer;
   removeStreaming("reasoning");
   transcriptStore.reasoningBuffer = "";
-  if (!text) return;
-  transcriptStore.entries.push({
-    id: ++idSeq,
-    kind: "reasoning",
-    text,
-  });
 }
 
 let pendingUsageSuffix = "";
@@ -358,6 +346,7 @@ export function loadTranscriptFromHydrate(entries) {
     if (!raw || typeof raw !== "object") continue;
     const kind = String(raw.kind || "").trim();
     if (!kind) continue;
+    if (kind === "reasoning") continue;
     const row = {
       ...raw,
       id: ++idSeq,

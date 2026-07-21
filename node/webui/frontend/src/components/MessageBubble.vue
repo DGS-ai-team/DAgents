@@ -3,10 +3,10 @@ import { computed } from "vue";
 import { renderMarkdown } from "../utils/markdown.js";
 import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
+import ThinkingIndicator from "./ThinkingIndicator.vue";
 
 const props = defineProps({
   entry: { type: Object, required: true },
-  showReasoning: { type: Boolean, default: false },
 });
 
 const userImageSrcs = computed(() => {
@@ -83,19 +83,11 @@ function userImageThumb(src) {
   </div>
 
   <div
-    v-else-if="entry.kind === 'reasoning' && showReasoning"
-    class="msg msg--reasoning"
-    :class="{ 'msg--reasoning-streaming': entry.streaming }"
+    v-else-if="entry.kind === 'reasoning' && entry.streaming"
+    class="msg msg--reasoning msg--reasoning-active"
   >
-    <div class="msg__body">
-      <div v-if="entry.streaming && !entry.text" class="msg__body--hint-only">
-        <div class="msg__hint msg__hint--stream-meta msg__hint--dots-only" aria-label="思考中">
-          <span class="msg__meta-dots" aria-hidden="true">
-            <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
-          </span>
-        </div>
-      </div>
-      <div v-if="entry.text" class="msg__bubble msg__bubble--reasoning">{{ entry.text }}</div>
+    <div class="msg__body msg__body--hint-only">
+      <ThinkingIndicator />
     </div>
   </div>
 </template>

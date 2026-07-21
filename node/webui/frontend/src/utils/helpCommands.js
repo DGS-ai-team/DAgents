@@ -1,4 +1,4 @@
-/** Web UI slash 命令帮助（对齐 TUI FormatHelpPanelBody，仅含 Web 已实现的命令）。 */
+/** Web UI slash 命令帮助（仅保留前端暂无直接入口的命令）。 */
 export const COMPOSER_DRAFT_KEY = "dagents.ui.composerDraft";
 
 export const HELP_SHORTCUTS = [
@@ -9,29 +9,15 @@ export const HELP_SHORTCUTS = [
 
 export const HELP_SECTIONS = [
   {
-    title: "Agent",
+    title: "对话控制",
     items: [
-      { cmd: "/status", desc: "Agent、LLM 与当前对话状态" },
-      { cmd: "/version", desc: "当前版本与更新检查" },
-      { cmd: "/update", desc: "查看可用升级（终端执行 dagents update）" },
-      { cmd: "/agents", desc: "列出 Agent（/ls 同义）" },
-      { cmd: "/activity", desc: "右侧变更栏（文件 / 命令 / 上下文）" },
-      { cmd: "/switch <id>", desc: "切换到指定 Agent" },
-      { cmd: "/new", desc: "打开新建 Agent 向导" },
-      { cmd: "/clear", desc: "清空对话上下文与 transcript" },
-      { cmd: "/cancel", desc: "中断在途 turn（或点「取消」）" },
+      { cmd: "/clear", desc: "清空当前 Agent 的对话上下文与 transcript" },
+      { cmd: "/compress", desc: "手动触发一次上下文压缩" },
     ],
   },
   {
-    title: "上下文与 Skills",
-    items: [
-      { cmd: "/context", desc: "设置 › 上下文：完整 LLM 消息列表" },
-      { cmd: "/skill", desc: "已加载 / 可用 skills 列表" },
-      { cmd: "/skill load NAME", desc: "加载 skill 到当前 Agent" },
-      { cmd: "/skill unload NAME", desc: "从当前 Agent 卸载 skill" },
-      { cmd: "/children", desc: "子 Agent 列表（/child 同义）" },
-      { cmd: "/compress", desc: "手动触发阻塞压缩" },
-    ],
+    title: "Thinking",
+    items: [{ cmd: "/thinking on|off", desc: "开启/关闭 thinking 模式（也可用状态栏按钮）" }],
   },
   {
     title: "Manage 上传",
@@ -39,13 +25,6 @@ export const HELP_SECTIONS = [
       { cmd: "/upload skill PATH ID VER [NAME] [--publish]", desc: "上传 skill zip 至 Manage" },
       { cmd: "/upload externaltool PATH ID VER [NAME] [--platform] [--publish]", desc: "上传外置 CLI" },
       { cmd: "/upload plugin PATH ID VER [NAME] [--platform] [--publish]", desc: "上传 Hook plugin (.so)" },
-    ],
-  },
-  {
-    title: "策略与触发器",
-    items: [
-      { cmd: "/policy", desc: "工具 / Shell 策略" },
-      { cmd: "/triggers", desc: "查看已配置触发器" },
     ],
   },
 ];

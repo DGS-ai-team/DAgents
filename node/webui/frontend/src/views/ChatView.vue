@@ -169,15 +169,9 @@ function syncRouteAgent(agentId) {
   router.replace({ name: "agents", params: id ? { agentId: id } : {} });
 }
 
-function syncReasoningDisplay(llm) {
-  // 「显示思考过程」并入思考开关：开启思考时展示 reasoning，关闭时隐藏。
-  if (!llm?.thinking_supported) {
-    setShowReasoning(false);
-    return;
-  }
-  const t = String(llm.thinking || "").trim().toLowerCase();
-  const enable = t && !["disabled", "off", "false", "0"].includes(t);
-  setShowReasoning(enable);
+function syncReasoningDisplay(_llm) {
+  // 思考内容不再在对话区展示；思考开关仅控制 LLM thinking 模式。
+  setShowReasoning(false);
 }
 
 function restartStream() {
@@ -516,17 +510,9 @@ async function onSendMessage(payload) {
 }
 
 async function handleCommand(cmd) {
-  const res = await runSlashCommand(cmd, { toolFoldVerbose: transcriptStore.toolFoldVerbose });
-  if (res.system) {
-    addSystem(res.system);
-    return;
-  }
+  const res = await runSlashCommand(cmd);
   if (res.error) {
     agentStore.error = res.error;
-    return;
-  }
-  if (res.action === "cancel") {
-    await cancelTurn();
     return;
   }
   if (res.action === "clear") {
@@ -546,38 +532,13 @@ async function handleCommand(cmd) {
     refreshContextTokens();
     return;
   }
-  if (res.action === "new") {
-    openCreateWizard();
-    return;
-  }
-  if (res.action === "switch") {
-    if (!res.arg) {
-      agentStore.error = "用法: /switch <agent_id>";
-      return;
-    }
-    await switchAgent(res.arg);
-    return;
-  }
-  if (res.action === "reasoning") {
-    setShowReasoning(["on", "true", "1"].includes(String(res.arg).toLowerCase()));
-    addSystem(`reasoning 显示: ${transcriptStore.showReasoning ? "开启" : "关闭"}`);
-    return;
-  }
   if (res.action === "thinking") {
     await handleThinkingCommand(res.arg);
-    return;
-  }
-  if (res.action === "tools_verbose") {
-    transcriptStore.toolFoldVerbose = !!res.on;
-    addSystem(`tool 输出: ${transcriptStore.toolFoldVerbose ? "详细" : "折叠"}`);
     return;
   }
   if (res.action === "upload") {
     await handleUploadCommand(res.upload);
     return;
-  }
-  if (res.panel) {
-    await openPanel(res.panel, res.arg);
   }
 }
 
@@ -1001,7 +962,6 @@ onUnmounted(() => {
         ref="chatPanelRef"
         :entries="entries"
         :hitl-queue="hitlStore.queue"
-        :show-reasoning="transcriptStore.showReasoning"
         :tool-verbose="transcriptStore.toolFoldVerbose"
         :disabled="!canSend"
         :sending="sending"

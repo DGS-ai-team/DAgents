@@ -27,7 +27,6 @@ import {
 const props = defineProps({
   entries: { type: Array, default: () => [] },
   hitlQueue: { type: Array, default: () => [] },
-  showReasoning: { type: Boolean, default: false },
   toolVerbose: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
@@ -371,7 +370,6 @@ defineExpose({
         <MessageBubble
           v-if="['user', 'assistant', 'reasoning'].includes(item.kind)"
           :entry="item.entry"
-          :show-reasoning="showReasoning"
         />
         <ToolSummaryRow
           v-else-if="item.kind === 'tool_step'"
