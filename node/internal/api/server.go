@@ -270,7 +270,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerSched.SetSessionResolver(mgr)
 		mgr.SetTriggerDeliveryTracker(triggerStore)
 		if o.tools != nil {
-			o.tools.SetTriggerRuntime(triggerStore, triggerSched, cfg.NodeID)
+			attachTriggerRuntime(o.tools, triggerStore, triggerSched, cfg.NodeID)
 		}
 		if cfg.Triggers.Enabled && triggerSched != nil {
 			triggerSched.Start()
@@ -390,6 +390,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
 	}
 	return s
+}
+
+// attachTriggerRuntime 为工具 Registry 注入触发器 store；targetAgentID 为空时用 node_id。
+func attachTriggerRuntime(reg *tools.Registry, store *triggers.Store, sched *triggers.Scheduler, targetAgentID string) {
+	if reg == nil || store == nil {
+		return
+	}
+	agentID := strings.TrimSpace(targetAgentID)
+	reg.SetTriggerRuntime(store, sched, agentID)
 }
 
 // Handler 返回可用于 http.Server 的根 Handler（含 access log 中间件）。

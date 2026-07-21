@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -149,5 +151,52 @@ func TestAgentTemplatesAPI_list(t *testing.T) {
 	}
 	if len(out.Templates) < 1 {
 		t.Fatalf("templates = %+v", out.Templates)
+	}
+}
+
+func TestAttachTriggerRuntime_perAgentRegistry(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{NodeID: "node-triggers", FSRoot: dir}
+	cfg.ApplyDefaults()
+	cfg.Triggers.Enabled = true
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	if srv.triggerStore == nil {
+		t.Fatal("expected trigger store on server")
+	}
+
+	built, err := agentruntime.Build(agentruntime.BuildParams{
+		NodeCFG:  cfg,
+		BaseTurn: srv.sessions.DefaultTurnOptions(),
+		AgentID:  "agt-trigger-test",
+		Snapshot: agentruntime.Snapshot{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := built.Registry.Execute(context.Background(), "trigger_list", `{"call_purpose":"test"}`)
+	if err != nil {
+		t.Fatalf("trigger_list execute: %v", err)
+	}
+	var before map[string]any
+	if err := json.Unmarshal([]byte(out), &before); err != nil {
+		t.Fatalf("parse result: %v body=%s", err, out)
+	}
+	if before["ok"] == true {
+		t.Fatalf("expected uninitialized trigger store before attach, got %s", out)
+	}
+
+	attachTriggerRuntime(built.Registry, srv.triggerStore, srv.triggerSched, "agt-trigger-test")
+	out, err = built.Registry.Execute(context.Background(), "trigger_list", `{"call_purpose":"test"}`)
+	if err != nil {
+		t.Fatalf("trigger_list execute after attach: %v", err)
+	}
+	var after map[string]any
+	if err := json.Unmarshal([]byte(out), &after); err != nil {
+		t.Fatalf("parse result: %v body=%s", err, out)
+	}
+	if after["ok"] != true {
+		t.Fatalf("trigger_list ok=false after attach: %s", out)
 	}
 }
