@@ -1,10 +1,13 @@
 # DAgents Agent 沙箱镜像
-# 仅用于 backend=docker：bash_run 在容器内执行，工作区挂载为 /workspace。
+#
+# 操作系统：Alpine Linux 3.20（musl libc）
+# 用途：backend=docker 时常驻容器；bash_run 经 docker exec 进入；
+#       工作区 bind-mount 为 /workspace。
 #
 # 构建：
 #   docker build -t dagents-sandbox:latest -f packaging/sandbox/Dockerfile packaging/sandbox
 #
-# 默认以非 root（nobody）运行；镜像内提供 bash 与常用基础工具。
+# 运行时由 Node 以宿主机 uid 启动 sleep infinity，保持容器常驻。
 
 FROM alpine:3.20
 
@@ -19,9 +22,9 @@ RUN apk add --no-cache \
       git \
       python3 \
     && mkdir -p /workspace \
-    && chown -R nobody:nobody /workspace
+    && chmod 1777 /workspace
 
 WORKDIR /workspace
-USER nobody
 
-CMD ["bash"]
+# 常驻进程由 docker create ... sleep infinity 覆盖；此处仅作镜像默认。
+CMD ["sleep", "infinity"]

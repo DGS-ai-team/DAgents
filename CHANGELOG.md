@@ -6,7 +6,7 @@
 
 ### 新增
 
-- **Docker 沙箱后端**：`sandbox.backend=docker` 时 `bash_run` 经 `docker run --rm` 执行；工作区挂载 `/workspace`；无 Docker 时创建/启用返回 `docker_unavailable`。镜像见 `packaging/sandbox/`。
+- **Docker 沙箱后端**：`sandbox.backend=docker` 时 Agent 入内存预创建常驻容器（Alpine 3.20），`bash_run` 经 `docker exec`；空闲 15 分钟或卸出内存时回收。镜像见 `packaging/sandbox/`。
 
 ---
 

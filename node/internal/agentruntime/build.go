@@ -69,7 +69,7 @@ func Build(p BuildParams) (Built, error) {
 	}
 	reg.SetBashCompress(bc)
 
-	if err := attachDockerSandbox(reg, fsRoot, p.Snapshot); err != nil {
+	if err := attachDockerSandbox(reg, p.AgentID, fsRoot, p.Snapshot); err != nil {
 		return Built{}, err
 	}
 
@@ -87,14 +87,14 @@ func Build(p BuildParams) (Built, error) {
 	}, nil
 }
 
-func attachDockerSandbox(reg *tools.Registry, fsRoot string, snap Snapshot) error {
+func attachDockerSandbox(reg *tools.Registry, agentID, fsRoot string, snap Snapshot) error {
 	if reg == nil || !snap.Sandbox.Enabled {
 		return nil
 	}
 	if !strings.EqualFold(strings.TrimSpace(snap.Sandbox.Backend), "docker") {
 		return nil
 	}
-	runner, err := sandbox.NewDockerRunner(fsRoot, sandbox.Spec{
+	runner, err := sandbox.NewDockerRunner(agentID, fsRoot, sandbox.Spec{
 		Image:   snap.Sandbox.Image,
 		Network: snap.Sandbox.Network,
 		Memory:  snap.Sandbox.Memory,

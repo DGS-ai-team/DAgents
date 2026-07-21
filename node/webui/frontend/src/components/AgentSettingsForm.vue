@@ -105,7 +105,7 @@ function toggleGroup(name) {
         </label>
         <template v-if="draft.sandboxBackend === 'docker'">
           <p class="agent-settings-hint">
-            需本机 Docker；工作区挂载为容器内 /workspace。镜像见 packaging/sandbox。
+            需本机 Docker。Agent 在内存时预创建常驻容器（Alpine Linux）；bash 经 docker exec；空闲 15 分钟回收。镜像见 packaging/sandbox。
           </p>
           <label class="agent-settings-field">
             <span>镜像</span>

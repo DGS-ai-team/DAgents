@@ -185,16 +185,16 @@ sandbox:
 | `backend` | 说明 | 阶段 |
 |-----------|------|------|
 | **`process`（默认）** | 应用层：effective FSRoot + 工具组白名单 + policy | Phase 2 必达 |
-| **`docker`（可选）** | 工具执行（尤其 bash）进容器；工作区 bind-mount | **已实现**（MVP：按次 `docker run --rm`） |
+| **`docker`（可选）** | 常驻容器 + `docker exec`；工作区 bind-mount；空闲回收 | **已实现** |
 
 Docker 后端要点：
 
 - **不把整个 Node 放进容器**，只隔离危险工具执行路径（`bash_run`）。
-- Agent 工作区挂载为容器内 `/workspace`；默认 `network: none`、非 root（uid 65534）、可选 CPU/内存上限。
-- 无 Docker 时：创建/启用 `backend: docker` 返回 `docker_unavailable`；Windows / 无 Docker 环境继续使用 `process`。
-- 生命周期：MVP 为按次 `docker run --rm`；删除 Agent 时尝试清理命名残留容器。
+- **操作系统**：默认镜像基于 **Alpine Linux 3.20**（`packaging/sandbox/Dockerfile`）。
+- Agent 工作区挂载为容器内 `/workspace`；默认 `network: none`、宿主机 uid、可选 CPU/内存上限。
+- **生命周期**：Agent **装入内存**时预创建常驻容器（`docker create` + `start`，`sleep infinity`）；`bash_run` 用 `docker exec`；**空闲 15 分钟**回收容器；卸出内存 / 删除 Agent 时立即 `docker rm -f`。
+- 无 Docker 时：创建/启用 `backend: docker` 返回 `docker_unavailable`。
 - 与 policy 叠层：容器外仍走 HITL 审批；容器内再加资源/网络限制。
-- 镜像：`packaging/sandbox/Dockerfile` → `dagents-sandbox:latest`。
 
 模板示例：`ops-runner` 默认仍为 `backend: process`；具备 Docker 后可在 UI / 模板中切 `docker`。
 

@@ -415,8 +415,11 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.sessions != nil {
 		_, _ = s.sessions.Delete(id)
+	} else if s.sandboxPool != nil {
+		s.sandboxPool.Release(id)
+	} else {
+		sandbox.ReleaseAgent(id)
 	}
-	sandbox.ReleaseAgent(id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
 }
 
@@ -528,6 +531,18 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	}
 	if _, _, err := s.sessions.CreateWithOptions(id, built.TurnOptions, built.Registry, policyEngine); err != nil {
 		return err
+	}
+	if runner := built.Registry.DockerSandbox(); runner != nil {
+		pool := s.sandboxPool
+		if pool == nil {
+			pool = sandbox.NewPool(sandbox.DefaultIdleTimeout, s.logger)
+			s.sandboxPool = pool
+		}
+		if err := pool.Ensure(ctx, runner); err != nil {
+			_, _ = s.sessions.Release(id)
+			return fmt.Errorf("docker sandbox ensure: %w", err)
+		}
+		s.logger.Info("docker sandbox ready", "agent_id", id, "container", runner.Name, "image", runner.Spec.Image)
 	}
 	s.logger.Info("agent runtime ready", "agent_id", id, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
 	return nil

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -104,8 +105,15 @@ func TestCreateAgent_dockerRequiresCLI(t *testing.T) {
 }
 
 func TestCreateAgent_dockerOKWhenCLIPresent(t *testing.T) {
-	restore := sandbox.SetLookPathForTest(func(string) (string, error) { return "/usr/bin/docker", nil })
-	t.Cleanup(restore)
+	restorePath := sandbox.SetLookPathForTest(func(string) (string, error) { return "/usr/bin/docker", nil })
+	t.Cleanup(restorePath)
+	restoreRun := sandbox.SetRunDockerForTest(func(_ context.Context, _ string, args ...string) (string, string, error) {
+		if len(args) > 0 && args[0] == "inspect" {
+			return "true", "", nil
+		}
+		return "", "", nil
+	})
+	t.Cleanup(restoreRun)
 
 	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
 	cfg.ApplyDefaults()

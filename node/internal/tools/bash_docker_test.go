@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -13,7 +14,12 @@ func TestRegistry_dockerStartShellCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := sandbox.NewDockerRunner(root, sandbox.Spec{Image: "alpine:3.20", Network: "bridge"})
+	restore := sandbox.SetRunDockerForTest(func(_ context.Context, _ string, args ...string) (string, string, error) {
+		return "", "", nil
+	})
+	t.Cleanup(restore)
+
+	runner, err := sandbox.NewDockerRunner("agt-bash", root, sandbox.Spec{Image: "alpine:3.20", Network: "bridge"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,11 +34,11 @@ func TestRegistry_dockerStartShellCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(cmd.Args, " ")
-	if !strings.Contains(joined, "docker run") || !strings.Contains(joined, "alpine:3.20") {
+	if !strings.Contains(joined, "docker exec") || !strings.Contains(joined, "dagents-sbx-agt-bash") {
 		t.Fatalf("args=%v", cmd.Args)
 	}
-	if !strings.Contains(joined, "--network bridge") {
-		t.Fatalf("network missing: %v", cmd.Args)
+	if !strings.Contains(joined, "-w /workspace") {
+		t.Fatalf("workdir missing: %v", cmd.Args)
 	}
 }
 
@@ -42,7 +48,7 @@ func TestPrepareShellRun_dockerForcesBash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := sandbox.NewDockerRunner(root, sandbox.Spec{})
+	runner, err := sandbox.NewDockerRunner("agt-test", root, sandbox.Spec{})
 	if err != nil {
 		t.Fatal(err)
 	}

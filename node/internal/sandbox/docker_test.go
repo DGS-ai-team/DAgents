@@ -1,10 +1,12 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeSpec_defaults(t *testing.T) {
@@ -26,68 +28,130 @@ func TestAvailable_missingDocker(t *testing.T) {
 	}
 }
 
-func TestAvailable_ok(t *testing.T) {
-	old := lookPath
-	lookPath = func(string) (string, error) { return "/usr/bin/docker", nil }
-	t.Cleanup(func() { lookPath = old })
-	if err := Available(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDockerRunner_BuildRunArgs(t *testing.T) {
+func TestDockerRunner_EnsureAndExecArgs(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "src")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r, err := NewDockerRunner(root, Spec{Image: "alpine:3.20", Network: "none", Memory: "256m", CPUs: "0.5"})
+
+	var calls [][]string
+	restore := SetRunDockerForTest(func(_ context.Context, bin string, args ...string) (string, string, error) {
+		calls = append(calls, append([]string{bin}, args...))
+		if len(args) >= 1 && args[0] == "inspect" {
+			// 首次 Ensure 前不存在
+			if len(calls) <= 2 {
+				return "false", "", nil
+			}
+			return "true", "", nil
+		}
+		return "", "", nil
+	})
+	t.Cleanup(restore)
+
+	r, err := NewDockerRunner("agt-1", root, Spec{Image: "alpine:3.20", Network: "none", Memory: "256m", CPUs: "0.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	args, err := r.BuildRunArgs(sub, "echo hi")
-	if err != nil {
+	if err := r.Ensure(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "docker run --rm -i") {
-		t.Fatalf("args=%v", args)
+	joined := ""
+	for _, c := range calls {
+		joined += strings.Join(c, " ") + "\n"
+	}
+	if !strings.Contains(joined, "create --name dagents-sbx-agt-1") {
+		t.Fatalf("create missing: %s", joined)
+	}
+	if !strings.Contains(joined, "start dagents-sbx-agt-1") {
+		t.Fatalf("start missing: %s", joined)
 	}
 	if !strings.Contains(joined, "-v "+root+":/workspace:rw") {
-		t.Fatalf("missing volume: %v", args)
+		t.Fatalf("volume missing: %s", joined)
 	}
-	if !strings.Contains(joined, "-w /workspace/src") {
-		t.Fatalf("missing -w: %v", args)
+	if !strings.Contains(joined, "sleep infinity") {
+		t.Fatalf("keepalive missing: %s", joined)
 	}
-	if !strings.Contains(joined, "--memory 256m") || !strings.Contains(joined, "--cpus 0.5") {
-		t.Fatalf("missing limits: %v", args)
+
+	args, err := r.BuildExecArgs(sub, "echo hi")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if args[len(args)-3] != "bash" || args[len(args)-2] != "-lc" || args[len(args)-1] != "echo hi" {
-		t.Fatalf("tail=%v", args[len(args)-3:])
+	execJoined := strings.Join(args, " ")
+	if !strings.Contains(execJoined, "exec -i") || !strings.Contains(execJoined, "-w /workspace/src") {
+		t.Fatalf("exec args=%v", args)
 	}
-	foundImage := false
-	for _, a := range args {
-		if a == "alpine:3.20" {
-			foundImage = true
-			break
-		}
-	}
-	if !foundImage {
-		t.Fatalf("missing image in %v", args)
+	if args[len(args)-1] != "echo hi" {
+		t.Fatalf("command=%v", args)
 	}
 }
 
 func TestDockerRunner_cwdEscape(t *testing.T) {
 	root := t.TempDir()
-	r, err := NewDockerRunner(root, Spec{})
+	r, err := NewDockerRunner("agt-x", root, Spec{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	outside := filepath.Join(filepath.Dir(root), "outside")
-	_, err = r.BuildRunArgs(outside, "true")
+	_, err = r.BuildExecArgs(outside, "true")
 	if err == nil {
 		t.Fatal("expected escape error")
 	}
+}
+
+func TestDockerRunner_IdleExpired(t *testing.T) {
+	root := t.TempDir()
+	restore := SetRunDockerForTest(func(context.Context, string, ...string) (string, string, error) {
+		return "", "", nil
+	})
+	t.Cleanup(restore)
+	r, err := NewDockerRunner("agt-idle", root, Spec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.IdleTimeout = time.Minute
+	if err := r.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r.IdleExpired(time.Now()) {
+		t.Fatal("should not be idle immediately")
+	}
+	r.mu.Lock()
+	r.lastUsed = time.Now().Add(-2 * time.Minute)
+	r.mu.Unlock()
+	if !r.IdleExpired(time.Now()) {
+		t.Fatal("expected idle")
+	}
+}
+
+func TestPool_ReleaseAndReap(t *testing.T) {
+	root := t.TempDir()
+	var removed []string
+	restore := SetRunDockerForTest(func(_ context.Context, _ string, args ...string) (string, string, error) {
+		if len(args) >= 1 && args[0] == "rm" {
+			removed = append(removed, args[len(args)-1])
+		}
+		return "", "", nil
+	})
+	t.Cleanup(restore)
+
+	p := NewPool(time.Minute, nil)
+	r, err := NewDockerRunner("agt-pool", root, Spec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.IdleTimeout = time.Minute
+	if err := p.Ensure(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	r.lastUsed = time.Now().Add(-2 * time.Minute)
+	r.mu.Unlock()
+	p.reapIdle(time.Now())
+	if len(removed) == 0 {
+		t.Fatal("expected idle rm")
+	}
+	p.Release("agt-pool")
 }
 
 func TestContainerName(t *testing.T) {
