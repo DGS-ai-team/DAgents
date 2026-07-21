@@ -525,13 +525,13 @@
 }
 
 .msg--user {
-  align-self: flex-end;
+  align-self: flex-start;
   max-width: min(640px, 88%);
 }
 
 .msg--user .msg__body {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .msg--approval {
@@ -580,7 +580,7 @@
   display: inline-block;
   max-width: 100%;
   padding: 10px 14px;
-  border-radius: 14px 14px 4px 14px;
+  border-radius: 14px 14px 14px 4px;
   border: 1px solid var(--color-border-strong);
   background: var(--color-surface-muted);
   color: var(--color-text);
