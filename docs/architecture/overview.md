@@ -1,7 +1,7 @@
 # 架构总览
 
 > **项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md)  
-> **v0.8 重构（进行中）** → [../design/agent-instance-model.md](../design/agent-instance-model.md)
+> **v0.8 Agent 实例模型** → [../design/agent-instance-model.md](../design/agent-instance-model.md)
 
 DAgents 本地运行时为 **Go Agent Node**（`node/`）+ 内嵌 **Web UI**（`/ui/`）。Manage 控制面（`manage/`）与 A2A 将在 v0.8 后续 Phase 重构。
 
