@@ -165,6 +165,21 @@ func (s *Store) Entries() []Entry {
 	return s.activeEntriesLocked()
 }
 
+// HasPendingHITL 是否仍有任一 Agent 处于 HITL 待办。
+func (s *Store) HasPendingHITL() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, e := range s.byAgent {
+		if e.HITLItems > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Store) activeEntriesLocked() []Entry {
 	out := make([]Entry, 0, len(s.byAgent))
 	for _, e := range s.byAgent {

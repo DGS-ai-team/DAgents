@@ -52,3 +52,20 @@ func TestPollLoopSyncsWithoutSSE(t *testing.T) {
 		t.Fatalf("summary = %+v", store.Summary())
 	}
 }
+
+func TestShouldSyncWhileHITLPending(t *testing.T) {
+	store := pending.NewStore()
+	_ = pending.SyncFromAgents(store, []nodeclient.AgentSummary{
+		{AgentID: "agt-1", HasPendingHITL: true, PendingHITLItems: 1},
+	})
+	if !shouldSyncWhileHITLPending(store, nodeclient.StreamEvent{Type: "tool_result", AgentID: "agt-1"}) {
+		t.Fatal("tool_result should sync while HITL pending")
+	}
+	if shouldSyncWhileHITLPending(store, nodeclient.StreamEvent{Type: "assistant", AgentID: "agt-1"}) {
+		t.Fatal("assistant should not sync merely due to HITL pending")
+	}
+	_ = pending.SyncFromAgents(store, nil)
+	if shouldSyncWhileHITLPending(store, nodeclient.StreamEvent{Type: "tool_result", AgentID: "agt-1"}) {
+		t.Fatal("no HITL pending should not sync on tool_result")
+	}
+}

@@ -39,30 +39,21 @@ func New(endpoint string, iconBytes []byte) *Notifier {
 }
 
 // Sync 根据待办表发送或更新 Toast。
-func (n *Notifier) Sync(entries []pending.Entry) {
+// retainIDs 为因 UI 焦点被抑制、但仍应保留去重状态的 Agent（避免取消焦点后重复弹窗）。
+func (n *Notifier) Sync(entries []pending.Entry, retainIDs map[string]struct{}) {
 	if n == nil {
 		return
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	current := make(map[string]struct{}, len(entries))
-	for _, e := range entries {
-		current[e.SessionID] = struct{}{}
-		prev := n.last[e.SessionID]
-		if prev.Active() && prev.HITLItems == e.HITLItems && prev.HasUnread == e.HasUnread {
-			continue
-		}
+	plan := PlanSync(n.last, entries, retainIDs)
+	for _, e := range plan.ToPush {
 		if err := n.push(e); err != nil {
 			log.Printf("shell toast: %v", err)
 		}
-		n.last[e.SessionID] = e
 	}
-	for id := range n.last {
-		if _, ok := current[id]; !ok {
-			delete(n.last, id)
-		}
-	}
+	n.last = plan.NextLast
 }
 
 func (n *Notifier) push(e pending.Entry) error {

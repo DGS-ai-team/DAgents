@@ -8,7 +8,7 @@ import (
 
 // ShouldSyncOnEvent SSE 事件是否应触发从 Node 同步待办表（F-E13）。
 func ShouldSyncOnEvent(ev nodeclient.StreamEvent) bool {
-	if eventAgentID(ev) == "" {
+	if !EventHasAgent(ev) {
 		return false
 	}
 	switch ev.Type {
@@ -16,6 +16,11 @@ func ShouldSyncOnEvent(ev nodeclient.StreamEvent) bool {
 		return true
 	}
 	return false
+}
+
+// EventHasAgent 判断 SSE 是否带有可关联的 Agent/session。
+func EventHasAgent(ev nodeclient.StreamEvent) bool {
+	return eventAgentID(ev) != ""
 }
 
 func eventAgentID(ev nodeclient.StreamEvent) string {

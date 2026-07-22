@@ -519,17 +519,16 @@ func (a *trayApp) refreshPendingUI() {
 	}
 
 	if a.notifier != nil {
-		toastEntries := entries
-		if a.uiFocus != nil {
-			filtered := make([]pending.Entry, 0, len(entries))
-			for _, e := range entries {
-				if !a.uiFocus.IsFocused(e.SessionID) {
-					filtered = append(filtered, e)
-				}
+		retainIDs := map[string]struct{}{}
+		toastEntries := make([]pending.Entry, 0, len(entries))
+		for _, e := range entries {
+			if a.uiFocus != nil && a.uiFocus.IsFocused(e.SessionID) {
+				retainIDs[e.SessionID] = struct{}{}
+				continue
 			}
-			toastEntries = filtered
+			toastEntries = append(toastEntries, e)
 		}
-		a.notifier.Sync(toastEntries)
+		a.notifier.Sync(toastEntries, retainIDs)
 	}
 }
 
