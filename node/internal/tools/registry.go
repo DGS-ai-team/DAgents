@@ -18,6 +18,7 @@ import (
 type Registry struct {
 	fsRoot              string
 	bashTimeout         int
+	bashHardLimitSec    int // 未传 timeout_seconds 时的硬上限（超时杀进程，不转后台）
 	shellOutputEncoding string
 	fileEncoding        string
 	bashCompress        BashCompressConfig
@@ -26,6 +27,7 @@ type Registry struct {
 	visionMu            sync.Mutex
 	readImageVision     map[string]*ReadImageVisionPayload
 	bgJobs              *backgroundJobRegistry
+	syncShells          *syncShellTracker
 	triggerStore        *triggers.Store
 	triggerSched        *triggers.Scheduler
 	manageClient  *a2aclient.Client
@@ -65,10 +67,12 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*R
 	r := &Registry{
 		fsRoot:              root,
 		bashTimeout:         bashTimeoutSeconds,
+		bashHardLimitSec:    maxBashTimeoutSec,
 		shellOutputEncoding: shellEnc,
 		fileEncoding:        fileEnc,
 		bashCompress:        DefaultBashCompressConfig(),
 		bgJobs:              newBackgroundJobRegistry(),
+		syncShells:          newSyncShellTracker(),
 		handlers:            make(map[string]handler),
 	}
 	r.registerBuiltins()

@@ -68,6 +68,11 @@ import {
   stopDesktopFocusHeartbeat,
   pulseDesktopFocus,
 } from "../stores/desktopFocus.js";
+import {
+  refreshToolJobs,
+  startToolJobsPolling,
+  stopToolJobsPolling,
+} from "../stores/toolJobs.js";
 import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
 import {
   formatChildLifecycle,
@@ -280,12 +285,14 @@ function handleEvent(ev) {
       finishWaitingStatuses();
       noteToolCallForWorkers(ev.data);
       upsertToolCallFromSSE(ev.data);
+      refreshToolJobs(agentStore.agentId);
       break;
     case "tool_result":
       markTurnContent();
       finishWaitingStatuses();
       noteToolResultForWorkers(ev.data);
       applyToolResult(ev.data);
+      refreshToolJobs(agentStore.agentId);
       break;
     case "usage":
       setUsageFromSSE(ev.data);
@@ -303,6 +310,7 @@ function handleEvent(ev) {
       finalizeReasoning();
       finishWaitingStatuses();
       finalizePartialToolCalls({ interrupted: true });
+      refreshToolJobs(agentStore.agentId);
       if (shouldAcceptDone(ev.seq)) {
         finishTurn();
         resetToolStream();
@@ -914,6 +922,7 @@ onMounted(async () => {
   refreshContextTokens();
   consumeComposerDraft();
   startDesktopFocusHeartbeat(() => agentStore.agentId);
+  startToolJobsPolling(() => agentStore.agentId);
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("pageshow", onPageShow);
 });
@@ -951,6 +960,7 @@ watch(
 
 onUnmounted(() => {
   stopDesktopFocusHeartbeat();
+  stopToolJobsPolling();
   streamHandle.value?.close();
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("pageshow", onPageShow);

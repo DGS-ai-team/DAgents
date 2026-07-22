@@ -457,6 +457,17 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 	return o.tools.Definitions()
 }
 
+// ToolRegistry 在 Executor 为 *tools.Registry 时返回，供 UI 同步控制 bash。
+func (o *Orchestrator) ToolRegistry() *tools.Registry {
+	if o == nil || o.tools == nil {
+		return nil
+	}
+	if reg, ok := o.tools.(*tools.Registry); ok {
+		return reg
+	}
+	return nil
+}
+
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
 	if o.toolHooks == nil {
 		return o.composeSystemPrompt(sessionID)

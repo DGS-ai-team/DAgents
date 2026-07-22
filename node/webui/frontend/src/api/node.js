@@ -141,6 +141,24 @@ export function cancelAgentTurn(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/cancel`, { method: "POST", body: {} });
 }
 
+export function cancelAgentToolCall(agentId, toolCallId) {
+  return apiFetch(
+    `/v1/agents/${encodeURIComponent(agentId)}/tool-calls/${encodeURIComponent(toolCallId)}/cancel`,
+    { method: "POST", body: {} },
+  );
+}
+
+export function backgroundAgentToolCall(agentId, toolCallId) {
+  return apiFetch(
+    `/v1/agents/${encodeURIComponent(agentId)}/tool-calls/${encodeURIComponent(toolCallId)}/background`,
+    { method: "POST", body: {} },
+  );
+}
+
+export function getAgentToolJobs(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/tool-jobs`);
+}
+
 export function clearContext(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/clear-context`, { method: "POST", body: {} });
 }
