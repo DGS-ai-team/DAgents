@@ -89,6 +89,33 @@ ON CONFLICT(agent_id) DO UPDATE SET
 	return err
 }
 
+// UpdateAgentLongTermCAS 在 updated_at 与 expectedUpdatedAt 一致时更新 long_term_md。
+// 返回 updated=true 表示写入成功；版本不匹配时返回 (false, nil)。
+func (s *AgentStore) UpdateAgentLongTermCAS(ctx context.Context, agentID, longTerm string, expectedUpdatedAt time.Time) (bool, error) {
+	if s == nil {
+		return false, fmt.Errorf("agent store unavailable")
+	}
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return false, fmt.Errorf("agent_id is required")
+	}
+	now := time.Now().UTC()
+	expected := expectedUpdatedAt.UTC().Format(time.RFC3339Nano)
+	res, err := s.db.ExecContext(ctx, `
+UPDATE agent_prompt_context
+SET long_term_md = ?, updated_at = ?
+WHERE agent_id = ? AND updated_at = ?`,
+		longTerm, now.Format(time.RFC3339Nano), agentID, expected)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // DeleteAgentPromptContext 删除侧车正文行。
 func (s *AgentStore) DeleteAgentPromptContext(ctx context.Context, agentID string) error {
 	if s == nil {

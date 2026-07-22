@@ -500,7 +500,7 @@ func (o *Orchestrator) ReloadLongTermMemory(ctx context.Context) {
 		return
 	}
 	if o.promptCtx != nil {
-		o.promptCtx.UpdateLongTerm(text)
+		o.promptCtx.UpdateLongTerm(text.Content)
 	}
 }
 

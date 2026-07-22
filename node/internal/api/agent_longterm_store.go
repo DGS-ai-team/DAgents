@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
@@ -13,33 +14,35 @@ type agentLongTermStore struct {
 	runtimeDir string
 }
 
-func (s *agentLongTermStore) ReadLongTerm(ctx context.Context) (string, error) {
+func (s *agentLongTermStore) ReadLongTerm(ctx context.Context) (turn.LongTermSnapshot, error) {
 	if s == nil || s.agents == nil {
-		return "", nil
+		return turn.LongTermSnapshot{}, nil
 	}
 	rec, err := s.agents.EnsureAgentPromptContext(ctx, s.agentID, s.runtimeDir)
 	if err != nil {
-		return "", err
+		return turn.LongTermSnapshot{}, err
 	}
 	if rec == nil {
-		return "", nil
+		return turn.LongTermSnapshot{}, nil
 	}
-	return rec.LongTermMD, nil
+	return turn.LongTermSnapshot{
+		Content: rec.LongTermMD,
+		Version: rec.UpdatedAt,
+	}, nil
 }
 
-func (s *agentLongTermStore) SaveLongTerm(ctx context.Context, content string) error {
+func (s *agentLongTermStore) SaveLongTerm(ctx context.Context, content string, expectedVersion time.Time) error {
 	if s == nil || s.agents == nil {
 		return nil
 	}
-	rec, err := s.agents.EnsureAgentPromptContext(ctx, s.agentID, s.runtimeDir)
+	ok, err := s.agents.UpdateAgentLongTermCAS(ctx, s.agentID, content, expectedVersion)
 	if err != nil {
 		return err
 	}
-	if rec == nil {
-		rec = &store.AgentPromptContextRecord{AgentID: s.agentID}
+	if !ok {
+		return turn.ErrLongTermVersionConflict
 	}
-	rec.LongTermMD = content
-	return s.agents.SaveAgentPromptContext(ctx, *rec)
+	return nil
 }
 
 var _ turn.LongTermStore = (*agentLongTermStore)(nil)

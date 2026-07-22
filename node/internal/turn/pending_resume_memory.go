@@ -2,6 +2,7 @@ package turn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -84,20 +85,41 @@ func (o *Orchestrator) applyMemoryConflictDecision(ctx context.Context, decision
 		return "已保留原有长期记忆，未写入新信息。", nil
 	case hitl.MemoryConflictUseNew:
 		content := strings.TrimSpace(meta.NewInformation)
-		if err := o.persistLongTerm(ctx, content); err != nil {
+		if err := o.persistLongTermWithRetry(ctx, func(_ string) string { return content }); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("已用新信息替换长期记忆（%d 字符）。", len([]rune(content))), nil
 	case hitl.MemoryConflictKeepBoth:
-		content := strings.TrimSpace(meta.MergedBoth)
-		if content == "" {
-			content = mergeRememberNoConflict(meta.ExistingContent, meta.NewInformation)
+		desired := strings.TrimSpace(meta.MergedBoth)
+		if desired == "" {
+			desired = mergeRememberNoConflict(meta.ExistingContent, meta.NewInformation)
 		}
-		if err := o.persistLongTerm(ctx, content); err != nil {
+		if err := o.persistLongTermWithRetry(ctx, func(_ string) string { return desired }); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("已合并写入长期记忆（%d 字符）。", len([]rune(content))), nil
+		return fmt.Sprintf("已合并写入长期记忆（%d 字符）。", len([]rune(desired))), nil
 	default:
 		return "", fmt.Errorf("unsupported memory conflict decision")
 	}
+}
+
+func (o *Orchestrator) persistLongTermWithRetry(ctx context.Context, apply func(existing string) string) error {
+	if o.longTermStore == nil {
+		return fmt.Errorf("long-term memory store unavailable")
+	}
+	for attempt := 0; attempt < rememberMaxCASRetries; attempt++ {
+		snap, err := o.longTermStore.ReadLongTerm(ctx)
+		if err != nil {
+			return err
+		}
+		content := strings.TrimSpace(apply(snap.Content))
+		if err := o.persistLongTermCAS(ctx, content, snap.Version); err != nil {
+			if errors.Is(err, ErrLongTermVersionConflict) {
+				continue
+			}
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("long-term memory write conflict after retries")
 }

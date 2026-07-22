@@ -3,12 +3,16 @@ package turn
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
+
+const rememberMaxCASRetries = 3
 
 type rememberArgs struct {
 	Information string `json:"information"`
@@ -17,9 +21,12 @@ type rememberArgs struct {
 type rememberAnalysis struct {
 	HasConflict         bool   `json:"has_conflict"`
 	ConflictDescription string `json:"conflict_description"`
-	MergedContent       string `json:"merged_content"`
+	Action              string `json:"action"`
+	ActionContent       string `json:"action_content"`
+	ReplaceTarget       string `json:"replace_target"`
 	ExistingExcerpt     string `json:"existing_excerpt"`
 	NewExcerpt          string `json:"new_excerpt"`
+	MergedBoth          string `json:"merged_both"`
 }
 
 // MemoryConflictMeta 为 remember 冲突时 HITL 展示与 resume 决策所需元数据。
@@ -72,55 +79,69 @@ func (o *Orchestrator) executeRememberTool(
 		return nil, nil
 	}
 
-	existing, err := o.longTermStore.ReadLongTerm(ctx)
-	if err != nil {
-		msg := "ERROR: read long-term memory: " + err.Error()
-		o.publishToolResult(sessionID, tc, msg, true, nil)
-		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
-		return nil, nil
-	}
-	existing = strings.TrimSpace(existing)
-
-	analysis, err := o.analyzeRememberConflict(ctx, existing, info)
-	if err != nil {
-		msg := "ERROR: analyze memory conflict: " + err.Error()
-		o.publishToolResult(sessionID, tc, msg, true, nil)
-		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
-		return nil, nil
-	}
-
-	if analysis.HasConflict {
-		meta := MemoryConflictMeta{
-			ExistingContent:     firstNonEmptyString(analysis.ExistingExcerpt, existing),
-			NewInformation:      firstNonEmptyString(analysis.NewExcerpt, info),
-			ConflictDescription: strings.TrimSpace(analysis.ConflictDescription),
-			MergedBoth:          strings.TrimSpace(analysis.MergedContent),
+	for attempt := 0; attempt < rememberMaxCASRetries; attempt++ {
+		snap, err := o.longTermStore.ReadLongTerm(ctx)
+		if err != nil {
+			msg := "ERROR: read long-term memory: " + err.Error()
+			o.publishToolResult(sessionID, tc, msg, true, nil)
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
+			return nil, nil
 		}
-		return &PendingHITLItem{ToolCall: tc, MemoryConflict: &meta}, nil
-	}
+		existing := strings.TrimSpace(snap.Content)
 
-	merged := strings.TrimSpace(analysis.MergedContent)
-	if merged == "" {
-		merged = mergeRememberNoConflict(existing, info)
-	}
-	if err := o.persistLongTerm(ctx, merged); err != nil {
-		msg := "ERROR: save long-term memory: " + err.Error()
-		o.publishToolResult(sessionID, tc, msg, true, nil)
-		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
+		analysis, err := o.analyzeRememberConflict(ctx, existing, info)
+		if err != nil {
+			msg := "ERROR: analyze memory conflict: " + err.Error()
+			o.publishToolResult(sessionID, tc, msg, true, nil)
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
+			return nil, nil
+		}
+
+		if analysis.HasConflict {
+			meta := MemoryConflictMeta{
+				ExistingContent:     firstNonEmptyString(analysis.ExistingExcerpt, existing),
+				NewInformation:      firstNonEmptyString(analysis.NewExcerpt, info),
+				ConflictDescription: strings.TrimSpace(analysis.ConflictDescription),
+				MergedBoth:          strings.TrimSpace(analysis.MergedBoth),
+			}
+			return &PendingHITLItem{ToolCall: tc, MemoryConflict: &meta}, nil
+		}
+
+		merged := applyRememberAction(existing, analysis.Action, analysis.ActionContent, analysis.ReplaceTarget)
+		if merged == "" {
+			merged = mergeRememberNoConflict(existing, info)
+		}
+		if err := o.persistLongTermCAS(ctx, merged, snap.Version); err != nil {
+			if errors.Is(err, ErrLongTermVersionConflict) {
+				continue
+			}
+			msg := "ERROR: save long-term memory: " + err.Error()
+			o.publishToolResult(sessionID, tc, msg, true, nil)
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
+			return nil, nil
+		}
+		output := fmt.Sprintf("已写入长期记忆（%d 字符）。", len([]rune(merged)))
+		o.publishToolResult(sessionID, tc, output, false, nil)
+		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 		return nil, nil
 	}
-	output := fmt.Sprintf("已写入长期记忆（%d 字符）。", len([]rune(merged)))
-	o.publishToolResult(sessionID, tc, output, false, nil)
-	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
+
+	msg := "ERROR: long-term memory write conflict after retries; please retry remember"
+	o.publishToolResult(sessionID, tc, msg, true, nil)
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 	return nil, nil
 }
 
 func (o *Orchestrator) analyzeRememberConflict(ctx context.Context, existing, info string) (rememberAnalysis, error) {
 	if o.llm == nil {
 		if existing != "" && strings.EqualFold(strings.TrimSpace(existing), strings.TrimSpace(info)) {
-			return rememberAnalysis{HasConflict: false, MergedContent: existing}, nil
+			return rememberAnalysis{HasConflict: false, Action: "add", ActionContent: ""}, nil
 		}
-		return rememberAnalysis{HasConflict: false, MergedContent: mergeRememberNoConflict(existing, info)}, nil
+		return rememberAnalysis{
+			HasConflict:   false,
+			Action:        "add",
+			ActionContent: strings.TrimSpace(info),
+		}, nil
 	}
 	userPrompt := fmt.Sprintf(`现有长期记忆：
 %s
@@ -128,7 +149,8 @@ func (o *Orchestrator) analyzeRememberConflict(ctx context.Context, existing, in
 新信息：
 %s
 
-请判断新信息是否与现有记忆冲突（矛盾、重复替换语义等）。若无冲突，给出合并后的完整长期记忆正文。`, existingOrPlaceholder(existing), info)
+请先对双方内容做事实归一化（统一日期/时间格式、数值与单位、称谓与同义词、缩写等），再基于归一化后的事实判断是否冲突。
+无冲突时不要输出完整合并正文，只给出 add 或 replace 及对应片段。`, existingOrPlaceholder(existing), info)
 	text, err := o.llm.CompleteText(ctx, llm.CompleteRequest{
 		SystemPrompt: rememberConflictSystemPrompt,
 		UserPrompt:   userPrompt,
@@ -143,15 +165,36 @@ func (o *Orchestrator) analyzeRememberConflict(ctx context.Context, existing, in
 	return out, nil
 }
 
-func (o *Orchestrator) persistLongTerm(ctx context.Context, content string) error {
+func (o *Orchestrator) persistLongTermCAS(ctx context.Context, content string, expectedVersion time.Time) error {
 	content = strings.TrimSpace(content)
-	if err := o.longTermStore.SaveLongTerm(ctx, content); err != nil {
+	if err := o.longTermStore.SaveLongTerm(ctx, content, expectedVersion); err != nil {
 		return err
 	}
 	if o.promptCtx != nil {
 		o.promptCtx.UpdateLongTerm(content)
 	}
 	return nil
+}
+
+func applyRememberAction(existing, action, actionContent, replaceTarget string) string {
+	existing = strings.TrimSpace(existing)
+	actionContent = strings.TrimSpace(actionContent)
+	replaceTarget = strings.TrimSpace(replaceTarget)
+	if actionContent == "" {
+		return existing
+	}
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "replace":
+		if replaceTarget == "" || existing == "" {
+			return actionContent
+		}
+		if strings.Contains(existing, replaceTarget) {
+			return strings.Replace(existing, replaceTarget, actionContent, 1)
+		}
+		return mergeRememberNoConflict(existing, actionContent)
+	default:
+		return mergeRememberNoConflict(existing, actionContent)
+	}
 }
 
 func mergeRememberNoConflict(existing, info string) string {
@@ -193,13 +236,19 @@ func extractJSONObject(text string) string {
 	return text
 }
 
-const rememberConflictSystemPrompt = `你是长期记忆冲突检测助手。根据「现有长期记忆」与「新信息」判断是否冲突。
+const rememberConflictSystemPrompt = `你是长期记忆冲突检测助手。处理步骤：
+1. 事实归一化：统一日期时间、数值单位、称谓/同义词、缩写后再比较。
+2. 冲突判断：矛盾、互斥替换语义等视为冲突；互补、补充、细化不算冲突。
+
 仅输出 JSON，不要 markdown 代码块，格式：
 {
   "has_conflict": boolean,
   "conflict_description": "冲突说明（has_conflict 为 true 时必填）",
-  "merged_content": "合并后的完整长期记忆正文（无冲突时必填；有冲突时填写若用户选择全部保留的合并结果）",
+  "action": "add 或 replace（无冲突时必填）",
+  "action_content": "要追加或替换写入的片段（无冲突时必填，不要输出完整合并正文）",
+  "replace_target": "replace 时被替换的现有记忆原文片段（action 为 replace 时必填；整篇替换则填空字符串）",
   "existing_excerpt": "与冲突相关的现有记忆摘录（有冲突时）",
-  "new_excerpt": "新信息摘录（有冲突时）"
+  "new_excerpt": "新信息摘录（有冲突时）",
+  "merged_both": "用户选择全部保留时的合并结果（有冲突时必填）"
 }
-无冲突时 has_conflict=false，merged_content 为合并后的完整正文。有冲突时 has_conflict=true，并填写 conflict_description 与摘录。`
+无冲突时 has_conflict=false，用 action/action_content/replace_target 描述增量写入。有冲突时 has_conflict=true，并填写 conflict_description、摘录与 merged_both。`
