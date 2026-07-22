@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   REVEAL_CHARS_PER_SECOND,
   configureStreamReveal,
   flushReveal,
+  resetRevealKind,
   resetStreamReveal,
   revealedLength,
 } from "./streamReveal.js";
@@ -25,5 +26,18 @@ describe("streamReveal", () => {
     expect(flushReveal("assistant")).toBe("hello");
     expect(revealedLength("assistant")).toBe(5);
     expect(seen.at(-1)).toEqual({ kind: "assistant", text: "hello", flushed: true });
+  });
+
+  it("resetRevealKind zeroes the cursor", () => {
+    resetStreamReveal();
+    const sources = { assistant: "abcdef" };
+    configureStreamReveal({
+      getSourceText: (kind) => sources[kind] || "",
+      onRevealText: () => {},
+    });
+    flushReveal("assistant");
+    expect(revealedLength("assistant")).toBe(6);
+    resetRevealKind("assistant");
+    expect(revealedLength("assistant")).toBe(0);
   });
 });
