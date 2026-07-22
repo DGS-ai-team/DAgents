@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  BLANK_TEMPLATE_ID,
   buildCreateAgentPayload,
+  buildCreateTemplatePayload,
   buildPatchAgentPayload,
   draftFromAgentView,
+  draftFromBlank,
   draftFromTemplate,
   llmActiveFromAgentView,
 } from "./agentTemplateForm.js";
@@ -123,6 +126,69 @@ describe("agentTemplateForm", () => {
     expect(draft.toolGroups).toEqual(["bash"]);
     expect(draft.promptLongTermEnabled).toBe(false);
     expect(draft.llmProfileId).toBe("deepseek");
+  });
+
+  it("builds create payload without template_id for blank draft", () => {
+    const payload = buildCreateAgentPayload({
+      templateId: BLANK_TEMPLATE_ID,
+      displayName: "空白",
+      llmProfileId: "default",
+      maxToolLoops: 32,
+      toolGroups: [],
+      skillsEnabled: true,
+      childAgentsEnabled: true,
+      sandboxEnabled: false,
+      sandboxBackend: "process",
+      workspaceSubdir: "data",
+      fsRootIsolation: false,
+      allowBash: true,
+      allowNetworkTools: true,
+      promptSoulEnabled: true,
+      promptUserEnabled: true,
+      promptCustomEnabled: true,
+      promptLongTermEnabled: true,
+      role: "assistant",
+      description: "",
+    });
+    expect(payload.template_id).toBeUndefined();
+    expect(payload.display_name).toBe("空白");
+  });
+
+  it("draftFromBlank picks first llm profile", () => {
+    const draft = draftFromBlank(["qwen", "deepseek"]);
+    expect(draft.templateId).toBe("");
+    expect(draft.llmProfileId).toBe("qwen");
+  });
+
+  it("builds create template payload from draft", () => {
+    const payload = buildCreateTemplatePayload(
+      { id: "my-bot", displayName: "我的 Bot", description: "测试" },
+      {
+        displayName: "ignored",
+        description: "desc",
+        role: "assistant",
+        llmProfileId: "default",
+        maxToolLoops: 20,
+        toolGroups: ["fs"],
+        skillsEnabled: true,
+        childAgentsEnabled: false,
+        sandboxEnabled: true,
+        sandboxBackend: "process",
+        workspaceSubdir: "data",
+        fsRootIsolation: false,
+        allowBash: true,
+        allowNetworkTools: false,
+        promptSoulEnabled: true,
+        promptUserEnabled: true,
+        promptCustomEnabled: true,
+        promptLongTermEnabled: false,
+      },
+    );
+    expect(payload.id).toBe("my-bot");
+    expect(payload.display_name).toBe("我的 Bot");
+    expect(payload.defaults.llm).toEqual({ active: "default", max_tool_loops: 20 });
+    expect(payload.defaults.child_agents.enabled).toBe(false);
+    expect(payload.sandbox.enabled).toBe(true);
   });
 
   it("reads llm active from agent view snapshot", () => {

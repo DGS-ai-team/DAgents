@@ -70,6 +70,14 @@ export function getAgentTemplate(templateId) {
   return apiFetch(`/v1/agent-templates/${encodeURIComponent(templateId)}`);
 }
 
+export function createAgentTemplate(payload = {}) {
+  return apiFetch("/v1/agent-templates", { method: "POST", body: payload });
+}
+
+export function deleteAgentTemplate(templateId) {
+  return apiFetch(`/v1/agent-templates/${encodeURIComponent(templateId)}`, { method: "DELETE" });
+}
+
 export function createAgent(payload = {}) {
   const body = {};
   if (payload.template_id != null || payload.templateId != null) {

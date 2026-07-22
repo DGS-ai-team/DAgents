@@ -154,6 +154,82 @@ func TestAgentTemplatesAPI_list(t *testing.T) {
 	}
 }
 
+func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	body, _ := json.Marshal(map[string]any{
+		"display_name": "空白 Agent",
+		"defaults": map[string]any{
+			"llm": map[string]any{"max_tool_loops": 16},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var created agentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.TemplateID != "" {
+		t.Fatalf("expected empty template_id, got %q", created.TemplateID)
+	}
+	if created.DisplayName != "空白 Agent" {
+		t.Fatalf("created = %+v", created)
+	}
+}
+
+func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+	userDir := cfg.AgentTemplatesDir()
+	_ = os.MkdirAll(userDir, 0o755)
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+
+	body, _ := json.Marshal(map[string]any{
+		"id":           "my-custom",
+		"display_name": "自定义模板",
+		"description":  "测试",
+		"sandbox":      map[string]any{"enabled": false, "backend": "process"},
+		"defaults": map[string]any{
+			"tools": map[string]any{"enabled_groups": []string{"fs"}},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agent-templates", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/v1/agent-templates/my-custom", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/agent-templates/my-custom", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("get after delete status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestAttachTriggerRuntime_perAgentRegistry(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{NodeID: "node-triggers", FSRoot: dir}

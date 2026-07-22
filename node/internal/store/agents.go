@@ -150,9 +150,7 @@ func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 		name = id
 	}
 	tpl := strings.TrimSpace(rec.TemplateID)
-	if tpl == "" {
-		return fmt.Errorf("template_id is required")
-	}
+	// template_id 可选；空表示无模板溯源。
 	origin := NormalizeAgentOrigin(rec.Origin)
 	backend := strings.TrimSpace(rec.SandboxBackend)
 	if backend == "" {

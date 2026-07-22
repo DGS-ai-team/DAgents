@@ -19,8 +19,7 @@ import (
 )
 
 func (s *Server) registerAgentRoutes() {
-	s.mux.HandleFunc("GET /v1/agent-templates", s.handleListAgentTemplates)
-	s.mux.HandleFunc("GET /v1/agent-templates/{id}", s.handleGetAgentTemplate)
+	s.registerAgentTemplateRoutes()
 	s.mux.HandleFunc("POST /v1/agents", s.handleCreateAgent)
 	s.mux.HandleFunc("GET /v1/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}", s.handleGetAgent)
@@ -53,23 +52,31 @@ func (s *Server) templateLoader() *agenttemplate.Loader {
 	return agenttemplate.NewLoader(builtin, userDir)
 }
 
-func (s *Server) handleListAgentTemplates(w http.ResponseWriter, _ *http.Request) {
-	list, err := s.templateLoader().List()
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "template_list_failed", err.Error(), nil)
-		return
+func defaultAgentCreationDefaults() map[string]any {
+	return map[string]any{
+		"agent": map[string]any{
+			"role":        "assistant",
+			"description": "",
+		},
+		"llm": map[string]any{
+			"max_tool_loops": 32,
+		},
+		"tools": map[string]any{
+			"enabled_groups": []any{},
+		},
+		"skills": map[string]any{
+			"enabled": true,
+		},
+		"child_agents": map[string]any{
+			"enabled": true,
+		},
+		"prompt_context": map[string]any{
+			"soul_enabled":      true,
+			"user_enabled":      true,
+			"custom_enabled":    true,
+			"long_term_enabled": true,
+		},
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"templates": list})
-}
-
-func (s *Server) handleGetAgentTemplate(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(r.PathValue("id"))
-	t, err := s.templateLoader().Get(id)
-	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "template_not_found", err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, t)
 }
 
 type createAgentRequest struct {
@@ -143,11 +150,19 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 完整设置：前端展开模板后提交 defaults；无 defaults 时用模板种子（兼容旧客户端）。
+	// 完整设置：前端展开模板后提交 defaults；无 defaults 时用模板种子或内置默认。
+	baseSandbox := agentruntime.SandboxSpec{
+		Backend: "process", WorkspaceSubdir: "data", AllowBash: true, AllowNetworkTools: true,
+	}
+	baseDefaults := map[string]any{}
 	fullSettings := req.Defaults != nil
-	if !fullSettings && tpl == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "defaults or template_id is required", nil)
-		return
+	if fullSettings {
+		baseDefaults = agentruntime.MergeDefaults(nil, req.Defaults)
+	} else if tpl != nil {
+		baseSandbox = sandboxFromTemplate(tpl)
+		baseDefaults = agentruntime.MergeDefaults(tpl.Defaults, nil)
+	} else {
+		baseDefaults = defaultAgentCreationDefaults()
 	}
 
 	name := strings.TrimSpace(req.DisplayName)
@@ -160,23 +175,6 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "display_name is required", nil)
 		return
-	}
-
-	baseSandbox := agentruntime.SandboxSpec{
-		Backend: "process", WorkspaceSubdir: "data", AllowBash: true, AllowNetworkTools: true,
-	}
-	baseDefaults := map[string]any{}
-	if fullSettings {
-		// 完整入参：不再服务端合并模板；template_id 仅溯源。
-		if req.Defaults != nil {
-			baseDefaults = agentruntime.MergeDefaults(nil, req.Defaults)
-		}
-		if req.Sandbox == nil {
-			// 允许只传 defaults，沙箱用安全默认值。
-		}
-	} else if tpl != nil {
-		baseSandbox = sandboxFromTemplate(tpl)
-		baseDefaults = agentruntime.MergeDefaults(tpl.Defaults, nil)
 	}
 
 	sandbox, err := applySandboxPatch(baseSandbox, req.Sandbox)
