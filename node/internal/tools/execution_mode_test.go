@@ -25,6 +25,7 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		"background_job_status":  {CallPurposeKey, "job_id"},
 		"background_job_cancel":  {CallPurposeKey, "job_id"},
 		"ask_user_information":   {CallPurposeKey, "question"},
+		"remember":               {CallPurposeKey, "information"},
 		"load_skills":            {CallPurposeKey, "skill_names"},
 		"unload_skills":          {CallPurposeKey, "skill_names"},
 		"clear_skills":           {CallPurposeKey},
