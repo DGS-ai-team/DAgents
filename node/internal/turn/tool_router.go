@@ -27,6 +27,7 @@ func (o *Orchestrator) processToolCalls(
 	var autoCalls []llm.ToolCall
 	var approvalCalls []pendingApprovalCall
 	var userInfo *llm.ToolCall
+	var memoryConflicts []PendingHITLItem
 
 	for i, tc := range calls {
 		o.publishToolCall(sessionID, tc, false, i)
@@ -68,6 +69,16 @@ func (o *Orchestrator) processToolCalls(
 			}
 			continue
 		}
+		if tools.IsRemember(tc.Function.Name) {
+			conflictItem, err := o.executeRememberTool(ctx, sessionID, history, tc)
+			if err != nil {
+				return nil, "", err
+			}
+			if conflictItem != nil {
+				memoryConflicts = append(memoryConflicts, *conflictItem)
+			}
+			continue
+		}
 		if tools.IsSkillTool(tc.Function.Name) {
 			if err := o.executeSkillTool(sessionID, history, tc); err != nil {
 				return nil, "", err
@@ -100,6 +111,7 @@ func (o *Orchestrator) processToolCalls(
 	if userInfo != nil {
 		pendingItems = append(pendingItems, PendingHITLItem{ToolCall: *userInfo})
 	}
+	pendingItems = append(pendingItems, memoryConflicts...)
 	for _, item := range approvalCalls {
 		pendingItem := PendingHITLItem{ToolCall: item.tc}
 		if item.duplicateMeta != nil {

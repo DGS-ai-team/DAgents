@@ -85,6 +85,7 @@ var knownBuiltinTools = map[string]struct{}{
 	"background_job_status":  {},
 	"background_job_cancel":  {},
 	"ask_user_information":   {},
+	"remember":                 {},
 	"load_skills":            {},
 	"unload_skills":          {},
 	"clear_skills":           {},

@@ -262,9 +262,9 @@ func promptContentFromRecord(rec *store.AgentPromptContextRecord) *promptcontext
 		return nil
 	}
 	return &promptcontext.Content{
-		Soul:     rec.SoulMD,
-		User:     rec.UserMD,
-		Custom:   rec.CustomMD,
-		LongTerm: rec.LongTermMD,
+		Soul:   rec.SoulMD,
+		User:   rec.UserMD,
+		Custom: rec.CustomMD,
+		// LongTerm 由 ReloadLongTermMemory 在清空上下文 / 首条交互 / 压缩完成后加载。
 	}
 }

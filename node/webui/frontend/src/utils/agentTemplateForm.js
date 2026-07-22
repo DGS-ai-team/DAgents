@@ -14,7 +14,7 @@ export const TOOL_GROUPS = [
   { name: "browser", label: "浏览器", beta: true },
   { name: "child_agents", label: "子 Agent" },
   { name: "fs", label: "文件" },
-  { name: "hitl", label: "人工确认" },
+  { name: "hitl", label: "人工确认 / 记忆" },
   { name: "skills", label: "技能" },
   { name: "triggers", label: "定时任务" },
 ];

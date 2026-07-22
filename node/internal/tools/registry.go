@@ -94,6 +94,7 @@ func (r *Registry) Definitions() []ToolDef {
 		backgroundJobStatusToolDef(),
 		backgroundJobCancelToolDef(),
 		askUserInformationToolDef(),
+		rememberToolDef(),
 		loadSkillsToolDef(),
 		unloadSkillsToolDef(),
 		clearSkillsToolDef(),
@@ -137,6 +138,9 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["background_job_cancel"] = r.execBackgroundJobCancel
 	r.handlers["ask_user_information"] = func(context.Context, json.RawMessage) (string, error) {
 		return "", fmt.Errorf("ask_user_information must be handled by orchestrator")
+	}
+	r.handlers["remember"] = func(context.Context, json.RawMessage) (string, error) {
+		return "", fmt.Errorf("remember must be handled by orchestrator")
 	}
 	for _, name := range []string{"load_skills", "unload_skills", "clear_skills"} {
 		n := name

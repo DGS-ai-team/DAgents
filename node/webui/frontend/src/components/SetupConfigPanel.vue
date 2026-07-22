@@ -52,7 +52,7 @@ function closeModal() {
   modalOpen.value = false;
 }
 
-function onModalConfirm(payload) {
+async function onModalConfirm(payload) {
   ensureProfiles();
   if (modalMode.value === "create") {
     form.llm.profiles.push({
@@ -89,6 +89,7 @@ function onModalConfirm(payload) {
     editingId.value = nextId;
   }
   modalOpen.value = false;
+  await saveConnection();
 }
 
 function removeProfile(id) {

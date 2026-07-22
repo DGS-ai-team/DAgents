@@ -97,6 +97,8 @@ func ResumeValueKind(value map[string]any) string {
 		return "approval"
 	case "user_information":
 		return "user_information"
+	case "memory_conflict":
+		return "memory_conflict"
 	case "":
 		if _, ok := value["approved"]; ok {
 			return "approval"
@@ -109,6 +111,9 @@ func ResumeValueKind(value map[string]any) string {
 		}
 		if _, ok := value["selected_options"]; ok {
 			return "user_information"
+		}
+		if _, ok := value["decision"]; ok {
+			return "memory_conflict"
 		}
 		return "unknown"
 	default:
@@ -139,6 +144,42 @@ func ParseUserInformationResume(value map[string]any, toolCallID string) (conten
 		return "", fmt.Errorf("answer is required")
 	}
 	return formatUserInformationResult(answer, selected), nil
+}
+
+// MemoryConflictDecision 为用户对长期记忆冲突的选择。
+type MemoryConflictDecision string
+
+const (
+	MemoryConflictKeepOld   MemoryConflictDecision = "keep_old"
+	MemoryConflictUseNew    MemoryConflictDecision = "use_new"
+	MemoryConflictKeepBoth  MemoryConflictDecision = "keep_both"
+	MemoryConflictCancelled MemoryConflictDecision = "cancelled"
+)
+
+// ParseMemoryConflictResume 解析 remember 冲突确认 resume。
+func ParseMemoryConflictResume(value map[string]any, toolCallID string) (MemoryConflictDecision, error) {
+	if value == nil {
+		return "", fmt.Errorf("empty resume_value")
+	}
+	typ := strings.ToLower(strings.TrimSpace(fmt.Sprint(value["type"])))
+	if typ != "" && typ != "memory_conflict" {
+		return "", fmt.Errorf("unsupported memory_conflict resume type: %q", typ)
+	}
+	if got, ok := value["tool_call_id"].(string); ok {
+		if strings.TrimSpace(got) != "" && strings.TrimSpace(got) != toolCallID {
+			return "", fmt.Errorf("tool_call_id mismatch")
+		}
+	}
+	if cancelled, _ := value["cancelled"].(bool); cancelled {
+		return MemoryConflictCancelled, nil
+	}
+	decision := MemoryConflictDecision(strings.ToLower(strings.TrimSpace(fmt.Sprint(value["decision"]))))
+	switch decision {
+	case MemoryConflictKeepOld, MemoryConflictUseNew, MemoryConflictKeepBoth, MemoryConflictCancelled:
+		return decision, nil
+	default:
+		return "", fmt.Errorf("decision is required (keep_old|use_new|keep_both|cancelled)")
+	}
 }
 
 func formatUserInformationResult(answer string, selected []string) string {

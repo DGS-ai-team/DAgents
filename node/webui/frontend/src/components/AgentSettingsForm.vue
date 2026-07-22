@@ -148,7 +148,7 @@ function toggleGroup(name) {
           <span>接入 soul（角色设定）</span>
         </label>
         <label v-if="draft.promptSoulEnabled" class="agent-settings-field">
-          <span>soul.md 正文</span>
+          <span>soul 正文（数据库）</span>
           <textarea v-model="draft.promptSoulMd" class="agent-settings-input agent-settings-input--area" rows="4" placeholder="角色设定…" />
         </label>
         <label class="agent-settings-check">
@@ -156,7 +156,7 @@ function toggleGroup(name) {
           <span>接入 user（用户偏好）</span>
         </label>
         <label v-if="draft.promptUserEnabled" class="agent-settings-field">
-          <span>user.md 正文</span>
+          <span>user 正文（数据库）</span>
           <textarea v-model="draft.promptUserMd" class="agent-settings-input agent-settings-input--area" rows="3" placeholder="用户偏好…" />
         </label>
         <label class="agent-settings-check">
@@ -164,7 +164,7 @@ function toggleGroup(name) {
           <span>接入 custom（临时指令）</span>
         </label>
         <label v-if="draft.promptCustomEnabled" class="agent-settings-field">
-          <span>custom.md 正文</span>
+          <span>custom 正文（数据库）</span>
           <textarea v-model="draft.promptCustomMd" class="agent-settings-input agent-settings-input--area" rows="3" placeholder="临时指令…" />
         </label>
         <label class="agent-settings-check">
@@ -172,7 +172,7 @@ function toggleGroup(name) {
           <span>接入 long_term（长期记忆）</span>
         </label>
         <label v-if="draft.promptLongTermEnabled" class="agent-settings-field">
-          <span>long_term.md 正文</span>
+          <span>长期记忆正文（数据库；Agent 可用 remember 工具写入）</span>
           <textarea v-model="draft.promptLongTermMd" class="agent-settings-input agent-settings-input--area" rows="4" placeholder="长期记忆…" />
         </label>
       </section>

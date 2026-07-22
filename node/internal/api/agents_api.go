@@ -525,6 +525,11 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 			s.logger.Warn("agent prompt context load failed", "agent_id", id, "error", err)
 		} else {
 			built.TurnOptions.PromptContent = promptContentFromRecord(pc)
+			built.TurnOptions.LongTermStore = &agentLongTermStore{
+				agents:     s.agents,
+				agentID:    id,
+				runtimeDir: s.runtimeDir(),
+			}
 		}
 	}
 	if _, _, err := s.sessions.CreateWithOptions(id, built.TurnOptions, built.Registry, policyEngine); err != nil {

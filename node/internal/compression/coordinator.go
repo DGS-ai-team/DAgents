@@ -115,8 +115,8 @@ func (c *Coordinator) Enabled() bool {
 		(c.silentTriggerTokens > 0 || c.blockingTriggerTokens > 0)
 }
 
-// MaybeHandle 在每条 message 入口处理压缩：应用已就绪摘要、触发 silent/blocking、再次尝试应用。
-
+// MaybeHandle 在每条 message 入口处理压缩；返回本次是否成功写回了一条压缩摘要。
+//
 // 逻辑：
 // 1. 回收已完成的 silent 任务；
 // 2. 尝试写回 readyCompressions（含指纹校验）；
@@ -132,12 +132,15 @@ func (c *Coordinator) MaybeHandle(
 	hub *stream.Hub,
 	messages *[]llm.Message,
 	prefix SidecarPrefix,
-) {
+) bool {
 	if !c.Enabled() || messages == nil {
-		return
+		return false
 	}
+	applied := false
 	c.reapFinishedTask(sessionID)
-	c.applyReadyCompression(sessionID, agentID, hub, messages)
+	if out := c.applyReadyCompression(sessionID, agentID, hub, messages); out.status == "applied" {
+		applied = true
+	}
 
 	decision := evaluateCompression(*messages, c.silentTriggerTokens, c.blockingTriggerTokens)
 	hasRunning := c.hasRunningTask(sessionID)
@@ -160,7 +163,10 @@ func (c *Coordinator) MaybeHandle(
 	}
 
 	c.reapFinishedTask(sessionID)
-	c.applyReadyCompression(sessionID, agentID, hub, messages)
+	if out := c.applyReadyCompression(sessionID, agentID, hub, messages); out.status == "applied" {
+		applied = true
+	}
+	return applied
 }
 
 // ForceBlocking 手动执行一次阻塞压缩：忽略 token 阈值，同步 LLM 摘要并立即应用。

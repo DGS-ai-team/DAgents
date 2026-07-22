@@ -1,22 +1,16 @@
+// Package promptcontext 读取侧车 Markdown 与长期记忆正文（权威来源为 SQLite，经 Content 注入）。
 package promptcontext
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 )
 
 const (
-	soulFile   = "soul.md"
-	userFile   = "user.md"
-	customFile = "custom.md"
+	soulField   = "soul"
+	userField   = "user"
+	customField = "custom"
 )
-
-type cachedFile struct {
-	content string
-	mtime   int64
-}
 
 // Filter 控制侧车 / 长期记忆是否注入；nil 指针表示默认启用。
 type Filter struct {
@@ -33,21 +27,16 @@ func flagOrDefault(v *bool, def bool) bool {
 	return *v
 }
 
-// Reader 读取侧车 Markdown 与长期记忆；优先使用内存 Content（SQLite），否则回退到 runtime 文件。
+// Reader 从内存 Content 读取侧车与长期记忆（由 agents.db 在 runtime 启动时注入）。
 type Reader struct {
-	runtimeDir string
-	content    *Content
-	filter     Filter
-	mu         sync.Mutex
-	cache      map[string]cachedFile
+	content *Content
+	filter  Filter
+	mu      sync.Mutex
 }
 
-// NewReader 绑定 `.runtime` 根目录（非 prompt_context 子目录本身）。
-func NewReader(runtimeDir string) *Reader {
-	return &Reader{
-		runtimeDir: strings.TrimSpace(runtimeDir),
-		cache:      make(map[string]cachedFile),
-	}
+// NewReader 构造 Reader；runtimeDir 参数保留兼容，不再读盘。
+func NewReader(_ string) *Reader {
+	return &Reader{}
 }
 
 // SetFilter 设置侧车注入开关（缺省全开）。
@@ -58,46 +47,12 @@ func (r *Reader) SetFilter(f Filter) {
 	r.filter = f
 }
 
-// Dir 返回 prompt_context 绝对路径并确保目录存在。
-func (r *Reader) Dir() (string, error) {
-	if r.runtimeDir == "" {
-		return "", nil
-	}
-	dir := filepath.Join(r.runtimeDir, "prompt_context")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	return dir, nil
-}
-
-// EnsureSidecarFiles 确保 soul/user/custom 存在；缺失则创建空 UTF-8 文件，不覆盖已有内容。
-func (r *Reader) EnsureSidecarFiles() {
-	dir, err := r.Dir()
-	if err != nil || dir == "" {
-		return
-	}
-	for _, name := range []string{soulFile, userFile, customFile} {
-		path := filepath.Join(dir, name)
-		info, err := os.Stat(path)
-		if err == nil && !info.IsDir() {
-			continue
-		}
-		if err == nil && info.IsDir() {
-			continue
-		}
-		_ = os.WriteFile(path, []byte{}, 0o644)
-	}
-}
-
 // ReadSoul 读取 soul；空白或缺失返回空串。
 func (r *Reader) ReadSoul() string {
 	if !flagOrDefault(r.filter.SoulEnabled, true) {
 		return ""
 	}
-	if r.content != nil {
-		return r.readContentField(soulFile)
-	}
-	return r.readSidecar(soulFile)
+	return r.readContentField(soulField)
 }
 
 // ReadUser 读取 user。
@@ -105,10 +60,7 @@ func (r *Reader) ReadUser() string {
 	if !flagOrDefault(r.filter.UserEnabled, true) {
 		return ""
 	}
-	if r.content != nil {
-		return r.readContentField(userFile)
-	}
-	return r.readSidecar(userFile)
+	return r.readContentField(userField)
 }
 
 // ReadCustom 读取 custom。
@@ -116,10 +68,7 @@ func (r *Reader) ReadCustom() string {
 	if !flagOrDefault(r.filter.CustomEnabled, true) {
 		return ""
 	}
-	if r.content != nil {
-		return r.readContentField(customFile)
-	}
-	return r.readSidecar(customFile)
+	return r.readContentField(customField)
 }
 
 // ReadLongTermMemory 读取长期记忆（不存在或空白时不注入）。
@@ -127,55 +76,20 @@ func (r *Reader) ReadLongTermMemory() string {
 	if !flagOrDefault(r.filter.LongTermEnabled, true) {
 		return ""
 	}
-	if r.content != nil {
-		return r.readContentField("long_term")
-	}
-	if r.runtimeDir == "" {
-		return ""
-	}
-	path := filepath.Join(r.runtimeDir, "memory", "long_term.md")
-	return r.readFileCached(path, false)
+	return r.readContentField("long_term")
 }
 
-func (r *Reader) readSidecar(filename string) string {
-	r.EnsureSidecarFiles()
-	dir, err := r.Dir()
-	if err != nil || dir == "" {
-		return ""
+// UpdateLongTerm 更新内存中的长期记忆正文（remember 写入后同步注入，非 DB 重载）。
+func (r *Reader) UpdateLongTerm(text string) {
+	if r == nil {
+		return
 	}
-	return r.readFileCached(filepath.Join(dir, filename), true)
-}
-
-func (r *Reader) readFileCached(path string, ensureParent bool) string {
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return ""
-	}
-	if ensureParent {
-		_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	}
-	key, err := filepath.Abs(path)
-	if err != nil {
-		key = path
-	}
-	mtime := info.ModTime().UnixNano()
 	r.mu.Lock()
-	if cached, ok := r.cache[key]; ok && cached.mtime == mtime {
-		text := cached.content
-		r.mu.Unlock()
-		return text
+	defer r.mu.Unlock()
+	if r.content == nil {
+		r.content = &Content{}
 	}
-	r.mu.Unlock()
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	text := strings.TrimSpace(string(raw))
-	r.mu.Lock()
-	r.cache[key] = cachedFile{content: text, mtime: mtime}
-	r.mu.Unlock()
-	return text
+	r.content.LongTerm = strings.TrimSpace(text)
 }
 
 // BuildStableContextSections 拼接 soul / user / long_term 段落（较稳定上下文）。
@@ -202,7 +116,7 @@ func (r *Reader) BuildStableContextSections() string {
 	return b.String()
 }
 
-// BuildCustomSection 拼接 custom.md 临时/专项指令段。
+// BuildCustomSection 拼接 custom 临时/专项指令段。
 func (r *Reader) BuildCustomSection() string {
 	if r == nil {
 		return ""
@@ -212,4 +126,25 @@ func (r *Reader) BuildCustomSection() string {
 		return ""
 	}
 	return "\n\n## 以下是用户侧追加的临时/专项指令：\n\n" + custom + "\n"
+}
+
+func (r *Reader) readContentField(kind string) string {
+	if r == nil || r.content == nil {
+		return ""
+	}
+	r.mu.Lock()
+	c := *r.content
+	r.mu.Unlock()
+	var text string
+	switch kind {
+	case soulField:
+		text = c.Soul
+	case userField:
+		text = c.User
+	case customField:
+		text = c.Custom
+	case "long_term":
+		text = c.LongTerm
+	}
+	return strings.TrimSpace(text)
 }

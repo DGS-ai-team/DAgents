@@ -55,8 +55,10 @@ type TurnOptions struct {
 	ConfigRevision int64
 	// PromptContext 控制 soul/user/custom/long_term 侧车是否注入（缺省全开）。
 	PromptContext PromptContextOptions
-	// PromptContent 为侧车正文（通常来自 agents.db）；非 nil 时优先于 RuntimeDir 文件。
+	// PromptContent 为侧车正文（来自 agents.db，经 Content 注入 runtime）。
 	PromptContent *promptcontext.Content
+	// LongTermStore 持久化长期记忆（remember 工具写入 SQLite）。
+	LongTermStore turn.LongTermStore
 }
 
 // PromptContextOptions 为侧车 / 长期记忆注入开关。

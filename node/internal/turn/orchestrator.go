@@ -58,6 +58,7 @@ type Orchestrator struct {
 	hookHostState  *hookHostState
 	maxToolLoops int
 	promptCtx    *promptcontext.Reader
+	longTermStore LongTermStore
 	journal      *historypkg.Journal
 	logger       *slog.Logger
 
@@ -222,6 +223,8 @@ func (o *Orchestrator) ContinueAfterResume(
 	switch hitl.ResumeValueKind(resumeValue) {
 	case "user_information":
 		return o.continueAfterUserInformationResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
+	case "memory_conflict":
+		return o.continueAfterMemoryConflictResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
 	case "approval":
 		return o.continueAfterApprovalResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
 	default:
@@ -476,6 +479,29 @@ func (o *Orchestrator) runTurnDonePhase(sessionID, finishReason string) {
 	}
 	hc := hooks.BuildTurnDoneContext(sessionID, o.agentID, finishReason)
 	_, _ = o.runPhase(context.Background(), hooks.PhaseTurnDone, hc, sessionID, nil, finishReason)
+}
+
+// ReloadLongTermMemory 从持久化存储重新加载长期记忆并注入 prompt（清空上下文 / 首条交互 / 压缩完成后调用）。
+func (o *Orchestrator) ReloadLongTermMemory(ctx context.Context) {
+	if o == nil {
+		return
+	}
+	if o.longTermStore == nil {
+		if o.promptCtx != nil {
+			o.promptCtx.UpdateLongTerm("")
+		}
+		return
+	}
+	text, err := o.longTermStore.ReadLongTerm(ctx)
+	if err != nil {
+		if o.logger != nil {
+			o.logger.Warn("reload long-term memory failed", "agent_id", o.agentID, "error", err)
+		}
+		return
+	}
+	if o.promptCtx != nil {
+		o.promptCtx.UpdateLongTerm(text.Content)
+	}
 }
 
 func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
