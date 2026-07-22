@@ -18,7 +18,7 @@
 - 创建 `.runtime/browser/` 目录
 - **注册 Shell 登录自启**（`HKCU\...\Run` → `dagents shell --background`）并可选立即启动托盘
 - 将安装目录与 `.runtime/externaltools` 追加到用户 `PATH`
-- 完成页提示打开 Web UI **「设置 › 连接」** 完成 LLM、Manage 与功能开关配置
+- 完成页提示打开 Web UI **「设置 › 连接」** 完成 LLM、Manage 与功能开关配置（不再弹出额外 MsgBox）
 
 **API Key** 仍通过系统环境变量提供（如 `OPENAI_API_KEY`），Web UI 只配置环境变量名（`api_key_env`）。
 

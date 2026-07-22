@@ -228,15 +228,6 @@ begin
   ForceDirectories(AppDir + '\.runtime\browser\profiles');
 end;
 
-procedure ShowPostInstallTips;
-begin
-  MsgBox(
-    '安装完成。请打开 Web UI「设置 › 连接」配置 LLM、Manage 与功能开关。' + #13#10 +
-    '真实 LLM 调用请在系统环境变量中设置 API Key（如 OPENAI_API_KEY）。' + #13#10 +
-    'Desktop Shell 将随登录自启并监护 Node（dagents shell status）。',
-    mbInformation, MB_OK);
-end;
-
 procedure InitializeWizard;
 begin
   ApplyWorkbenchTheme;
@@ -342,7 +333,6 @@ begin
     CopyDefaultConfigIfMissing;
     EnsureBrowserRuntimeDir;
     InstallShellAutostart;
-    ShowPostInstallTips;
   end;
   if CurStep <> ssPostInstall then
     Exit;
