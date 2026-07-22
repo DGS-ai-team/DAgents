@@ -21,7 +21,7 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "prompt_context/", "最高优先级规则", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
+	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
@@ -77,22 +77,14 @@ func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 }
 
 func TestBuildSystemPrompt_includesPromptContext(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".runtime")
-	dir := filepath.Join(root, "prompt_context")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "user.md"), []byte("prefer concise"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	hostsnapshot.CaptureAtStartup()
 	prompt := BuildSystemPrompt(SystemPromptInput{
 		AgentID:   "ops-01",
 		FSRoot:    "/data/ws",
 		SessionID: "sess-x",
-		PromptCtx: promptcontext.NewReader(root),
+		PromptCtx: promptcontext.NewContentReader(promptcontext.Content{User: "prefer concise"}),
 	})
-	if !containsAll(prompt, "用户信息与偏好", "prefer concise", "prompt_context") {
+	if !containsAll(prompt, "用户信息与偏好", "prefer concise") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 }

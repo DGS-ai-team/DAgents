@@ -202,6 +202,9 @@ func newRuntimeWithPublisher(
 	}
 	// 设置工具结果入队器
 	rt.orch.SetToolResultEnqueuer(rt.enqueueToolResult)
+	if turnOpts.LongTermStore != nil {
+		rt.orch.SetLongTermStore(turnOpts.LongTermStore)
+	}
 	rt.orch.SyncLoadedSkillHooks(loaded)
 	// 返回 runtime
 	return rt

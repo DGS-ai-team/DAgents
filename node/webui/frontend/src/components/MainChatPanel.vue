@@ -6,6 +6,7 @@ import MessageBubble from "./MessageBubble.vue";
 import StreamStatusBubble from "./StreamStatusBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
 import UserInfoBubble from "./UserInfoBubble.vue";
+import MemoryConflictBubble from "./MemoryConflictBubble.vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
 import { buildStream } from "../composables/useStream.js";
 import { extractToolApprovals } from "../stores/hitl.js";
@@ -50,6 +51,8 @@ const emit = defineEmits([
   "reject-one",
   "user-info-submit",
   "user-info-selected",
+  "memory-conflict-decide",
+  "memory-conflict-cancel",
 ]);
 
 const thinkingEnabled = computed(() => {
@@ -392,6 +395,13 @@ defineExpose({
           :selected="userInfoSelected"
           @update:selected="(v) => { userInfoSelected = v; emit('user-info-selected', v); }"
           @submit="emit('user-info-submit', item.hitlIndex)"
+        />
+        <MemoryConflictBubble
+          v-else-if="item.kind === 'memory_conflict'"
+          :data="item.hitl.data"
+          :busy="hitlBusy && hitlBusyIndex === item.hitlIndex"
+          @decide="(decision) => emit('memory-conflict-decide', { index: item.hitlIndex, decision })"
+          @cancel="emit('memory-conflict-cancel', item.hitlIndex)"
         />
       </template>
       <StreamStatusBubble

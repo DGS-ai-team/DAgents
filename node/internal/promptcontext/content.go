@@ -1,9 +1,5 @@
 package promptcontext
 
-import (
-	"strings"
-)
-
 // Content 为侧车 Markdown 与长期记忆正文（通常来自 SQLite）。
 type Content struct {
 	Soul     string
@@ -12,15 +8,15 @@ type Content struct {
 	LongTerm string
 }
 
-// NewContentReader 从内存正文构造 Reader（不读盘）。
+// NewContentReader 从内存正文构造 Reader。
 func NewContentReader(c Content) *Reader {
-	return &Reader{
-		content: &c,
-		cache:   make(map[string]cachedFile),
-	}
+	r := NewReader("")
+	cp := c
+	r.content = &cp
+	return r
 }
 
-// SetContent 切换为内存正文源（清空文件缓存）。
+// SetContent 切换为内存正文源。
 func (r *Reader) SetContent(c Content) {
 	if r == nil {
 		return
@@ -29,23 +25,4 @@ func (r *Reader) SetContent(c Content) {
 	defer r.mu.Unlock()
 	cp := c
 	r.content = &cp
-	r.cache = make(map[string]cachedFile)
-}
-
-func (r *Reader) readContentField(kind string) string {
-	if r == nil || r.content == nil {
-		return ""
-	}
-	var text string
-	switch kind {
-	case soulFile:
-		text = r.content.Soul
-	case userFile:
-		text = r.content.User
-	case customFile:
-		text = r.content.Custom
-	case "long_term":
-		text = r.content.LongTerm
-	}
-	return strings.TrimSpace(text)
 }

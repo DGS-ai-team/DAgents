@@ -58,6 +58,7 @@ type Orchestrator struct {
 	hookHostState  *hookHostState
 	maxToolLoops int
 	promptCtx    *promptcontext.Reader
+	longTermStore LongTermStore
 	journal      *historypkg.Journal
 	logger       *slog.Logger
 
@@ -222,6 +223,8 @@ func (o *Orchestrator) ContinueAfterResume(
 	switch hitl.ResumeValueKind(resumeValue) {
 	case "user_information":
 		return o.continueAfterUserInformationResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
+	case "memory_conflict":
+		return o.continueAfterMemoryConflictResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
 	case "approval":
 		return o.continueAfterApprovalResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
 	default:

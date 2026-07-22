@@ -58,6 +58,7 @@ import {
   extractUserInfo,
   buildUserInfoResume,
   buildUserInfoResumeFromSelection,
+  buildMemoryConflictResume,
   enqueueHitlRequired,
   shouldSkipChildRuntimeDisplay,
 } from "../stores/hitl.js";
@@ -111,11 +112,13 @@ const chatPanelRef = ref(null);
 let agentNameSyncToken = 0;
 
 const entries = computed(() => transcriptStore.entries);
-const hasUserInfoHitl = computed(() => peekHitl()?.kind === "user_information");
+const hitlKind = computed(() => peekHitl()?.kind || "");
+const hasUserInfoHitl = computed(() => hitlKind.value === "user_information");
 const canSend = computed(() => {
   if (hitlStore.busy) return false;
   if (hasUserInfoHitl.value) return true;
-  return !agentStore.awaitingTurn && !peekHitl()?.kind;
+  if (hitlKind.value) return false;
+  return !agentStore.awaitingTurn;
 });
 const sending = computed(() => agentStore.awaitingTurn);
 const thinkingSupported = computed(() => !!chromeStore.llmSettings?.thinking_supported);
@@ -442,6 +445,26 @@ async function submitHitlOne(payload, approve) {
   }
 }
 
+async function submitHitlMemoryConflict(hitlIndex, decision, { cancelled = false } = {}) {
+  const item = getHitlAt(hitlIndex);
+  if (!item || item.kind !== "memory_conflict") return;
+  hitlStore.busy = true;
+  hitlStore.busyIndex = hitlIndex;
+  const resume = buildMemoryConflictResume(item.data, decision, { cancelled });
+  try {
+    await api.submitResume(agentStore.agentId, resume);
+    dequeueHitlAt(hitlIndex);
+    hitlStore.busy = false;
+    hitlStore.busyIndex = -1;
+    beginSubmit();
+    if (!agentStore.turnContentSeen) startStatus("prefilling");
+  } catch (e) {
+    agentStore.error = e.message;
+    hitlStore.busy = false;
+    hitlStore.busyIndex = -1;
+  }
+}
+
 async function submitHitlUserInfo(hitlIndex, text) {
   const item = getHitlAt(hitlIndex);
   if (!item || item.kind !== "user_information") return;
@@ -487,6 +510,10 @@ async function onSendMessage(payload) {
   const hitl = peekHitl();
   if (hitl?.kind === "user_information") {
     await submitHitlUserInfo(0, text);
+    return;
+  }
+  if (hitl?.kind === "memory_conflict") {
+    agentStore.error = "请先处理长期记忆冲突确认";
     return;
   }
 
@@ -982,6 +1009,8 @@ onUnmounted(() => {
         @reject-one="(payload) => submitHitlOne(payload, false)"
         @user-info-submit="(idx) => submitHitlUserInfo(idx, '')"
         @user-info-selected="(v) => { hitlSelected = v; }"
+        @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
+        @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
       />
 
       <div v-if="chromeStore.panel === 'children'" class="panel-overlay" @click.self="closePanel">

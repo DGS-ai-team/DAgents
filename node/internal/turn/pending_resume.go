@@ -103,7 +103,7 @@ func (o *Orchestrator) continueAfterApprovalResume(
 		}
 	}
 
-	remainingItems := pending.userInformationItems()
+	remainingItems := pending.nonApprovalItems()
 	if len(remainingItems) == 0 {
 		return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
 	}

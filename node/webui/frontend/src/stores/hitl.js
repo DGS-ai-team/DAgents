@@ -193,8 +193,36 @@ export function buildUserInfoResumeFromSelection(data, selectedIds) {
   return buildUserInfoResume(data, labels.join(", "), [...selected].sort());
 }
 
+export function extractMemoryConflict(data) {
+  const meta = data?.memory_conflict_meta && typeof data.memory_conflict_meta === "object"
+    ? data.memory_conflict_meta
+    : {};
+  const args = data?.user_information_args && typeof data.user_information_args === "object"
+    ? data.user_information_args
+    : {};
+  return {
+    toolCallId: String(data?.id || data?.tool_call_id || "").trim(),
+    question: String(args.question || data?.content || meta.conflict_description || "检测到长期记忆冲突，请选择保留方式。").trim(),
+    existing: String(meta.existing || "").trim(),
+    newInformation: String(meta.new_information || "").trim(),
+    mergedBoth: String(meta.merged_both || "").trim(),
+    conflictDescription: String(meta.conflict_description || "").trim(),
+  };
+}
+
+export function buildMemoryConflictResume(data, decision, { cancelled = false } = {}) {
+  const req = extractMemoryConflict(data);
+  return {
+    type: "memory_conflict",
+    tool_call_id: req.toolCallId || data?.id,
+    decision: cancelled ? "cancelled" : String(decision || "").trim(),
+    cancelled: !!cancelled,
+  };
+}
+
 const HITL_TYPE_USER_INFORMATION = "user_information";
 const HITL_TYPE_EXECUTE_TOOL = "execute_tool";
+const HITL_TYPE_MEMORY_CONFLICT = "memory_conflict";
 
 function hitlItemsFromData(raw) {
   if (!Array.isArray(raw)) return [];
@@ -209,6 +237,16 @@ function userInformationDataFromHITLItem(item) {
     data.user_information_args = item.user_information_args;
   }
   return data;
+}
+
+function memoryConflictDataFromHITLItem(item) {
+  return {
+    display_type: "normal_text",
+    id: item?.id,
+    content: item?.content,
+    memory_conflict_meta: item?.memory_conflict_meta,
+    user_information_args: item?.user_information_args,
+  };
 }
 
 function hitlRoutingFieldsFromBatch(batch) {
@@ -249,10 +287,13 @@ function approvalDataFromHITLBatch(batch, executeItems) {
 export function expandHitlRequired(data) {
   const routing = hitlRoutingFieldsFromBatch(data);
   const userInfos = [];
+  const memoryConflicts = [];
   const executeItems = [];
   for (const item of hitlItemsFromData(data?.items)) {
     const hitlType = String(item.hitl_type || "").trim();
-    if (hitlType === HITL_TYPE_USER_INFORMATION) {
+    if (hitlType === HITL_TYPE_MEMORY_CONFLICT) {
+      memoryConflicts.push({ ...memoryConflictDataFromHITLItem(item), ...routing });
+    } else if (hitlType === HITL_TYPE_USER_INFORMATION) {
       userInfos.push({ ...userInformationDataFromHITLItem(item), ...routing });
     } else if (hitlType === HITL_TYPE_EXECUTE_TOOL) {
       executeItems.push(item);
@@ -260,6 +301,7 @@ export function expandHitlRequired(data) {
   }
   return {
     userInfos,
+    memoryConflicts,
     approval: approvalDataFromHITLBatch(data, executeItems),
   };
 }
@@ -285,17 +327,20 @@ export function enqueueA2ARelayPending(relay) {
 /** 将 hitl_required / hydrate pending_hitl 展开并入队。 */
 export function enqueueHitlRequired(data) {
   if (!data?.items?.length) {
-    return { userInfos: [], approval: null };
+    return { userInfos: [], memoryConflicts: [], approval: null };
   }
-  const { userInfos, approval } = expandHitlRequired(data);
+  const { userInfos, memoryConflicts, approval } = expandHitlRequired(data);
   for (const ui of userInfos) {
     enqueueHitl({ kind: "user_information", data: ui });
+  }
+  for (const mc of memoryConflicts) {
+    enqueueHitl({ kind: "memory_conflict", data: mc });
   }
   if (approval) {
     enqueueHitl({ kind: "approval", data: approval });
   }
   hitlStore.busy = false;
-  return { userInfos, approval };
+  return { userInfos, memoryConflicts, approval };
 }
 
 /** 对齐 Go hitl.ShouldSkipChildRuntimeDisplay：隐藏子 Agent turn 的运行时 SSE。 */
