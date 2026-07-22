@@ -2,6 +2,7 @@
 """生成 Inno Setup 向导图（与 Web UI tokens.css 浅色主题对齐）。
 
 依赖：Pillow（仅维护者本地/CI 可选；生成后的 BMP 已提交仓库）。
+副标题含中文，必须使用带 CJK 字形的字体，否则会落成 □□（tofu）。
 """
 from __future__ import annotations
 
@@ -13,50 +14,64 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "assets"
 BRAND = ROOT.parents[1] / "node" / "webui" / "frontend" / "src" / "assets" / "brand-icon.png"
 
-# tokens.css light (:root[data-theme="light"])
+# tokens.css light（与 dagents-installer.iss Workbench 浅色主题一致）
 BG = (245, 246, 248)  # #f5f6f8
 SURFACE = (255, 255, 255)  # #ffffff
 PRIMARY = (37, 99, 235)  # #2563eb
-TEXT = (31, 36, 48)  # #1f2430
-MUTED = (75, 85, 104)  # #4b5568
-BORDER = (217, 222, 234)  # #d9deea
+TEXT = (48, 36, 31)  # #30241f
+MUTED = (104, 85, 75)  # #68554b
+BORDER = (229, 231, 235)  # #e5e7eb
+
+# Prefer CJK-capable fonts first (subtitle is Chinese). Latin-only fonts render as tofu.
+_CJK_FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.otf",
+    "C:/Windows/Fonts/msyh.ttc",  # Microsoft YaHei
+    "C:/Windows/Fonts/msyh.ttf",
+    "C:/Windows/Fonts/simhei.ttf",
+)
+
+_LATIN_BOLD_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "C:/Windows/Fonts/segoeuib.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+)
+
+_LATIN_REGULAR_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "C:/Windows/Fonts/segoeui.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+)
 
 
-def _font_paths() -> list[tuple[str, str]]:
-    return [
-        (
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        ),
-        (
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        ),
-        ("C:/Windows/Fonts/msyhbd.ttc", "C:/Windows/Fonts/msyh.ttc"),
-        ("C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/segoeui.ttf"),
-        (
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ),
-    ]
+def _truetype(path: str, size: int) -> ImageFont.FreeTypeFont | None:
+    try:
+        return ImageFont.truetype(path, size)
+    except OSError:
+        return None
 
 
-def _fonts():
-    for bold, regular in _font_paths():
-        try:
-            return (
-                ImageFont.truetype(bold, 14, index=0),
-                ImageFont.truetype(regular, 10, index=0),
-            )
-        except OSError:
-            continue
-    default = ImageFont.load_default()
-    return default, default
+def _first_font(paths: tuple[str, ...], size: int) -> ImageFont.ImageFont:
+    for path in paths:
+        font = _truetype(path, size)
+        if font is not None:
+            return font
+    return ImageFont.load_default()
+
+
+def _fonts() -> tuple[ImageFont.ImageFont, ImageFont.ImageFont, ImageFont.ImageFont]:
+    """Return (latin_bold, latin_regular, cjk_regular) for title / English / Chinese."""
+    latin_bold = _first_font(_LATIN_BOLD_CANDIDATES, 14)
+    latin_regular = _first_font(_LATIN_REGULAR_CANDIDATES, 10)
+    cjk = _first_font(_CJK_FONT_CANDIDATES, 11)
+    return latin_bold, latin_regular, cjk
 
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    font, font_sm = _fonts()
+    font, font_sm, font_cjk = _fonts()
     icon = Image.open(BRAND).convert("RGBA") if BRAND.is_file() else None
 
     w, h = 164, 314
@@ -72,7 +87,7 @@ def main() -> None:
         draw.text((28, 44), "DA", fill=PRIMARY, font=font)
         ty = 108
     draw.text((20, ty), "DAgents", fill=TEXT, font=font)
-    draw.text((20, ty + 22), "本机智能助手", fill=MUTED, font=font_sm)
+    draw.text((20, ty + 22), "本机智能助手", fill=MUTED, font=font_cjk)
     draw.text((20, h - 56), "Workbench", fill=MUTED, font=font_sm)
     sidebar.save(OUT / "wizard-sidebar.bmp")
 
