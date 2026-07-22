@@ -25,6 +25,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
+	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -57,6 +58,7 @@ type Server struct {
 	packageUploader *manage.PackageUploader
 	a2aCallerHITL   *session.A2ACallerHITLBridge
 	tools           *tools.Registry
+	sandboxPool     *sandbox.Pool
 }
 
 // Option 为 NewServer 可选配置。
@@ -245,6 +247,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		},
 		MultimodalEnabled: cfg.MultimodalEnabled(),
 	}, logger)
+	sandboxPool := sandbox.NewPool(sandbox.DefaultIdleTimeout, logger)
+	sandboxPool.StartIdleReaper(time.Minute)
+	mgr.OnReleased = func(sessionID string) {
+		sandboxPool.Release(sessionID)
+	}
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:                   cfg.ChildAgents.Enabled,
 		DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
@@ -365,6 +372,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		packageUploader: packageUploader,
 		a2aCallerHITL:   a2aBridge,
 		tools:           o.tools,
+		sandboxPool:     sandboxPool,
 	}
 	hub.SetEventListener(func(ev stream.Event) {
 		mgr.OnStreamEvent(ev)

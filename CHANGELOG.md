@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **Docker 沙箱后端**：`sandbox.backend=docker` 时 Agent 入内存预创建常驻容器（Alpine 3.20），`bash_run` 经 `docker exec`；空闲 15 分钟或卸出内存时回收。镜像见 `packaging/sandbox/`。
+
 ---
 
 ## [0.8.0] - 2026-07-21

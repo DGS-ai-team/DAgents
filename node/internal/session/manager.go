@@ -90,6 +90,9 @@ type Manager struct {
 	triggerDelivery triggers.DeliveryTracker
 
 	children *childagent.Manager
+
+	// OnReleased 在 session 成功卸出内存后回调（用于回收 docker 沙箱等）。
+	OnReleased func(sessionID string)
 }
 
 // NewManager 绑定 agent、SSE Hub、LLM、工具、策略与持久化 store。
@@ -520,6 +523,9 @@ func (m *Manager) Delete(sessionID string) (bool, error) {
 	}
 	m.mu.Unlock()
 	m.logger.Info("session deleted from memory", "session_id", sid, "was_active", wasActive)
+	if wasActive && m.OnReleased != nil {
+		m.OnReleased(sid)
+	}
 	if m.store == nil {
 		return wasActive, nil
 	}
