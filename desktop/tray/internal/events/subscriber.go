@@ -103,11 +103,25 @@ func (s *Subscriber) connectOnce(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return false
 		}
-		if pending.ShouldSyncOnEvent(ev) {
+		if pending.ShouldSyncOnEvent(ev) || shouldSyncWhileHITLPending(s.store, ev) {
 			s.syncAgents(ctx)
 		}
 		return true
 	})
+}
+
+// shouldSyncWhileHITLPending：本地仍记着 HITL 时，审批后的 tool_result/tool_call 也立即向 Node 对账，
+// 避免等 done/60s 轮询期间因焦点变化重复弹「待处理」Toast。
+func shouldSyncWhileHITLPending(store *pending.Store, ev nodeclient.StreamEvent) bool {
+	if store == nil || !store.HasPendingHITL() {
+		return false
+	}
+	switch ev.Type {
+	case "tool_result", "tool_call":
+		return pending.EventHasAgent(ev)
+	default:
+		return false
+	}
 }
 
 func (s *Subscriber) syncAgents(ctx context.Context) {

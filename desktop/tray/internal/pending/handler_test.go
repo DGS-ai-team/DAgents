@@ -62,6 +62,28 @@ func TestShouldSyncOnEvent(t *testing.T) {
 	if ShouldSyncOnEvent(nodeclient.StreamEvent{Type: "assistant", SessionID: "s1"}) {
 		t.Fatal("assistant should not trigger sync")
 	}
+	if !EventHasAgent(nodeclient.StreamEvent{Type: "tool_result", AgentID: "agt-1"}) {
+		t.Fatal("tool_result with agent should have agent")
+	}
+}
+
+func TestHasPendingHITL(t *testing.T) {
+	store := NewStore()
+	if store.HasPendingHITL() {
+		t.Fatal("empty store")
+	}
+	_ = SyncFromAgents(store, []nodeclient.AgentSummary{
+		{AgentID: "agt-1", HasPendingHITL: true, PendingHITLItems: 1},
+	})
+	if !store.HasPendingHITL() {
+		t.Fatal("expected HITL pending")
+	}
+	_ = SyncFromAgents(store, []nodeclient.AgentSummary{
+		{AgentID: "agt-1", HasUnread: true},
+	})
+	if store.HasPendingHITL() {
+		t.Fatal("unread-only should not count as HITL pending")
+	}
 }
 
 func TestEntrySummaryLabel(t *testing.T) {
