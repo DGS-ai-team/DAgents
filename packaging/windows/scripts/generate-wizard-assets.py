@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""生成 Inno Setup 向导图（与 Web UI tokens.css 深色主题对齐）。
+"""生成 Inno Setup 向导图（与 Web UI tokens.css 浅色主题对齐）。
 
 依赖：Pillow（仅维护者本地/CI 可选；生成后的 BMP 已提交仓库）。
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -14,24 +13,40 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "assets"
 BRAND = ROOT.parents[1] / "node" / "webui" / "frontend" / "src" / "assets" / "brand-icon.png"
 
-# tokens.css dark
-BG = (24, 24, 24)  # #181818
-SURFACE = (30, 30, 30)  # #1e1e1e
-PRIMARY = (55, 148, 255)  # #3794ff
-TEXT = (204, 204, 204)  # #cccccc
-MUTED = (157, 157, 157)  # #9d9d9d
-BORDER = (43, 43, 43)  # #2b2b2b
+# tokens.css light (:root[data-theme="light"])
+BG = (245, 246, 248)  # #f5f6f8
+SURFACE = (255, 255, 255)  # #ffffff
+PRIMARY = (37, 99, 235)  # #2563eb
+TEXT = (31, 36, 48)  # #1f2430
+MUTED = (75, 85, 104)  # #4b5568
+BORDER = (217, 222, 234)  # #d9deea
+
+
+def _font_paths() -> list[tuple[str, str]]:
+    return [
+        (
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        ),
+        (
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        ),
+        ("C:/Windows/Fonts/msyhbd.ttc", "C:/Windows/Fonts/msyh.ttc"),
+        ("C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/segoeui.ttf"),
+        (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ),
+    ]
 
 
 def _fonts():
-    for bold, regular in (
-        ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-        ("C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/segoeui.ttf"),
-    ):
+    for bold, regular in _font_paths():
         try:
             return (
-                ImageFont.truetype(bold, 14),
-                ImageFont.truetype(regular, 10),
+                ImageFont.truetype(bold, 14, index=0),
+                ImageFont.truetype(regular, 10, index=0),
             )
         except OSError:
             continue

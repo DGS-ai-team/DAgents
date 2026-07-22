@@ -36,6 +36,6 @@ VERSION=0.x.x scripts/ci/build_windows_installer.sh
 ## 界面
 
 - `WizardStyle=modern`、简体中文语言包
-- **Workbench 深色主题**：侧栏/角标 BMP 与 Web UI `tokens.css` 对齐（`#181818` / `#3794ff` 主色、`Segoe UI` 字体）
+- **Workbench 浅色主题**：侧栏/角标 BMP 与 Web UI `tokens.css` 浅色模式对齐（`#f5f6f8` / `#2563eb` 主色、`Segoe UI` 字体）
 - 资源：`assets/wizard-sidebar.bmp`、`assets/wizard-small.bmp`（`scripts/generate-wizard-assets.py` 可从 `brand-icon.png` 重新生成）
 - 自定义欢迎/完成页文案；开始菜单增加「打开 Web UI」快捷方式
