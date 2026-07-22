@@ -492,7 +492,7 @@ func (o *Orchestrator) ReloadLongTermMemory(ctx context.Context) {
 		}
 		return
 	}
-	text, err := o.longTermStore.ReadLongTerm(ctx)
+	snap, err := o.longTermStore.ReadLongTerm(ctx)
 	if err != nil {
 		if o.logger != nil {
 			o.logger.Warn("reload long-term memory failed", "agent_id", o.agentID, "error", err)
@@ -500,7 +500,7 @@ func (o *Orchestrator) ReloadLongTermMemory(ctx context.Context) {
 		return
 	}
 	if o.promptCtx != nil {
-		o.promptCtx.UpdateLongTerm(text.Content)
+		o.promptCtx.UpdateLongTerm(FormatLongTermEntries(snap.Entries))
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -85,25 +86,27 @@ func (o *Orchestrator) applyMemoryConflictDecision(ctx context.Context, decision
 		return "已保留原有长期记忆，未写入新信息。", nil
 	case hitl.MemoryConflictUseNew:
 		content := strings.TrimSpace(meta.NewInformation)
-		if err := o.persistLongTermWithRetry(ctx, func(_ string) string { return content }); err != nil {
+		entries := []LongTermEntry{NewLongTermEntry(content, time.Now().UTC())}
+		if err := o.persistLongTermWithRetry(ctx, func(_ []LongTermEntry) []LongTermEntry { return entries }); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("已用新信息替换长期记忆（%d 字符）。", len([]rune(content))), nil
+		return fmt.Sprintf("已用新信息替换长期记忆（%d 条）。", len(entries)), nil
 	case hitl.MemoryConflictKeepBoth:
 		desired := strings.TrimSpace(meta.MergedBoth)
 		if desired == "" {
-			desired = mergeRememberNoConflict(meta.ExistingContent, meta.NewInformation)
+			desired = meta.ExistingContent + "\n\n" + meta.NewInformation
 		}
-		if err := o.persistLongTermWithRetry(ctx, func(_ string) string { return desired }); err != nil {
+		entries := EntriesFromFormattedConflict(desired)
+		if err := o.persistLongTermWithRetry(ctx, func(_ []LongTermEntry) []LongTermEntry { return entries }); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("已合并写入长期记忆（%d 字符）。", len([]rune(desired))), nil
+		return fmt.Sprintf("已合并写入长期记忆（%d 条）。", countNonEmptyEntries(entries)), nil
 	default:
 		return "", fmt.Errorf("unsupported memory conflict decision")
 	}
 }
 
-func (o *Orchestrator) persistLongTermWithRetry(ctx context.Context, apply func(existing string) string) error {
+func (o *Orchestrator) persistLongTermWithRetry(ctx context.Context, apply func(existing []LongTermEntry) []LongTermEntry) error {
 	if o.longTermStore == nil {
 		return fmt.Errorf("long-term memory store unavailable")
 	}
@@ -112,8 +115,8 @@ func (o *Orchestrator) persistLongTermWithRetry(ctx context.Context, apply func(
 		if err != nil {
 			return err
 		}
-		content := strings.TrimSpace(apply(snap.Content))
-		if err := o.persistLongTermCAS(ctx, content, snap.Version); err != nil {
+		entries := apply(snap.Entries)
+		if err := o.persistLongTermCAS(ctx, entries, snap.Version); err != nil {
 			if errors.Is(err, ErrLongTermVersionConflict) {
 				continue
 			}

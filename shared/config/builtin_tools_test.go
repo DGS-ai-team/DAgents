@@ -44,7 +44,7 @@ tools:
 func TestNormalizedBuiltinEnabledGroupsExpands(t *testing.T) {
 	cfg := &Config{Tools: ToolsConfig{EnabledGroups: []string{" hitl ", "hitl", "bash"}}}
 	got := cfg.Tools.NormalizedBuiltinEnabled()
-	want := []string{"ask_user_information", "background_job_cancel", "background_job_status", "bash_run"}
+	want := []string{"ask_user_information", "background_job_cancel", "background_job_status", "bash_run", "remember"}
 	if len(got) != len(want) {
 		t.Fatalf("got=%v want=%v", got, want)
 	}

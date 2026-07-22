@@ -4,7 +4,7 @@
  * 创建与设置页共用。
  */
 import { computed } from "vue";
-import { TOOL_GROUPS } from "../utils/agentTemplateForm.js";
+import { LONG_TERM_SCOPES, TOOL_GROUPS } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
   draft: { type: Object, required: true },
@@ -25,6 +25,37 @@ function toggleGroup(name) {
   if (set.has(name)) set.delete(name);
   else set.add(name);
   props.draft.toolGroups = [...set].sort();
+}
+
+const longTermScopeLabel = computed(() =>
+  props.draft.promptLongTermScope === "global" ? "全局长期记忆" : "独立长期记忆",
+);
+
+const activeLongTermEntries = computed({
+  get() {
+    return props.draft.promptLongTermScope === "global"
+      ? props.draft.promptGlobalLongTermEntries
+      : props.draft.promptLongTermEntries;
+  },
+  set(v) {
+    if (props.draft.promptLongTermScope === "global") {
+      props.draft.promptGlobalLongTermEntries = v;
+    } else {
+      props.draft.promptLongTermEntries = v;
+    }
+  },
+});
+
+function addLongTermEntry() {
+  const list = Array.isArray(activeLongTermEntries.value) ? [...activeLongTermEntries.value] : [];
+  list.push({ id: "", content: "" });
+  activeLongTermEntries.value = list;
+}
+
+function removeLongTermEntry(index) {
+  const list = Array.isArray(activeLongTermEntries.value) ? [...activeLongTermEntries.value] : [];
+  list.splice(index, 1);
+  activeLongTermEntries.value = list;
 }
 </script>
 
@@ -171,10 +202,43 @@ function toggleGroup(name) {
           <input v-model="draft.promptLongTermEnabled" type="checkbox" />
           <span>接入 long_term（长期记忆）</span>
         </label>
-        <label v-if="draft.promptLongTermEnabled" class="agent-settings-field">
-          <span>长期记忆正文（数据库；Agent 可用 remember 工具写入）</span>
-          <textarea v-model="draft.promptLongTermMd" class="agent-settings-input agent-settings-input--area" rows="4" placeholder="长期记忆…" />
-        </label>
+        <template v-if="draft.promptLongTermEnabled">
+          <label class="agent-settings-field">
+            <span>长期记忆作用域</span>
+            <select v-model="draft.promptLongTermScope" class="agent-settings-input">
+              <option v-for="opt in LONG_TERM_SCOPES" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </label>
+          <div class="agent-settings-field">
+            <div class="agent-settings-field__head">
+              <span>{{ longTermScopeLabel }}（结构化条目；Agent 可用 remember 工具写入）</span>
+              <button type="button" class="btn btn--ghost btn--sm" @click="addLongTermEntry">+ 添加条目</button>
+            </div>
+            <p v-if="!(activeLongTermEntries || []).length" class="agent-settings-hint">
+              暂无记忆条目。可手动添加，或由 Agent 通过 remember 工具写入。
+            </p>
+            <div
+              v-for="(entry, idx) in activeLongTermEntries || []"
+              :key="entry.id || `new-${idx}`"
+              class="agent-settings-longterm-entry"
+            >
+              <input
+                v-model="entry.id"
+                class="agent-settings-input agent-settings-input--mono"
+                placeholder="条目 ID（可留空自动生成）"
+              />
+              <textarea
+                v-model="entry.content"
+                class="agent-settings-input agent-settings-input--area"
+                rows="2"
+                placeholder="记忆内容…"
+              />
+              <button type="button" class="btn btn--ghost btn--sm" @click="removeLongTermEntry(idx)">删除</button>
+            </div>
+          </div>
+        </template>
       </section>
     </div>
   </div>
@@ -238,6 +302,34 @@ function toggleGroup(name) {
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--color-text-subtle);
+}
+
+.agent-settings-field__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.agent-settings-longterm-entry {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.agent-settings-longterm-entry textarea {
+  grid-column: 1 / -1;
+}
+
+.agent-settings-input--mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
 }
 
 .agent-settings-toggles {

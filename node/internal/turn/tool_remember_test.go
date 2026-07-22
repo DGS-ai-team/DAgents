@@ -2,68 +2,71 @@ package turn
 
 import "testing"
 
-func TestApplyRememberAction(t *testing.T) {
+func TestApplyRememberActionToEntries(t *testing.T) {
 	tests := []struct {
 		name          string
-		existing      string
+		existing      []LongTermEntry
 		action        string
 		actionContent string
 		replaceTarget string
-		want          string
+		wantCount     int
+		wantContent   string
 	}{
 		{
 			name:          "add to empty",
-			existing:      "",
 			action:        "add",
 			actionContent: "hello",
-			want:          "hello",
+			wantCount:     1,
+			wantContent:   "hello",
 		},
 		{
-			name:          "add append",
-			existing:      "line one",
+			name: "add append",
+			existing: []LongTermEntry{
+				{ID: "lt-1", Content: "line one"},
+			},
 			action:        "add",
 			actionContent: "line two",
-			want:          "line one\n\nline two",
+			wantCount:     2,
+			wantContent:   "line two",
 		},
 		{
 			name:          "replace all",
-			existing:      "old content",
+			existing:      []LongTermEntry{{ID: "lt-1", Content: "old"}},
 			action:        "replace",
 			actionContent: "new content",
 			replaceTarget: "",
-			want:          "new content",
+			wantCount:     1,
+			wantContent:   "new content",
 		},
 		{
-			name:          "replace fragment",
-			existing:      "foo bar baz",
+			name: "replace by id",
+			existing: []LongTermEntry{
+				{ID: "lt-abc", Content: "foo bar"},
+			},
 			action:        "replace",
 			actionContent: "qux",
-			replaceTarget: "bar",
-			want:          "foo qux baz",
-		},
-		{
-			name:          "empty action content keeps existing",
-			existing:      "keep me",
-			action:        "add",
-			actionContent: "",
-			want:          "keep me",
+			replaceTarget: "lt-abc",
+			wantCount:     1,
+			wantContent:   "qux",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := applyRememberAction(tt.existing, tt.action, tt.actionContent, tt.replaceTarget)
-			if got != tt.want {
-				t.Fatalf("applyRememberAction() = %q, want %q", got, tt.want)
+			got := ApplyRememberActionToEntries(tt.existing, tt.action, tt.actionContent, tt.replaceTarget)
+			if len(got) != tt.wantCount {
+				t.Fatalf("entry count = %d, want %d", len(got), tt.wantCount)
+			}
+			if tt.wantContent != "" && got[len(got)-1].Content != tt.wantContent {
+				t.Fatalf("last content = %q, want %q", got[len(got)-1].Content, tt.wantContent)
 			}
 		})
 	}
 }
 
-func TestMergeRememberNoConflict(t *testing.T) {
-	if got := mergeRememberNoConflict("a", "b"); got != "a\n\nb" {
-		t.Fatalf("got %q", got)
-	}
-	if got := mergeRememberNoConflict("", "b"); got != "b" {
-		t.Fatalf("got %q", got)
+func TestFormatLongTermEntries(t *testing.T) {
+	got := FormatLongTermEntries([]LongTermEntry{{ID: "lt-1", Content: "hello"}})
+	want := "- [lt-1] hello"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
 }

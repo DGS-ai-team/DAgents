@@ -6,7 +6,7 @@ func rememberToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "remember",
-			Description: "将重要信息写入长期记忆（持久化在数据库，非工作区文件）。若与已有记忆冲突，会请用户确认保留方式后再写入。",
+			Description: "将重要信息写入长期记忆（结构化条目，持久化在数据库；作用域由 Agent 配置为全局或独立）。若与已有记忆冲突，会请用户确认保留方式后再写入。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{

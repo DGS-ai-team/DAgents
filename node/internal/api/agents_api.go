@@ -525,10 +525,12 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 			s.logger.Warn("agent prompt context load failed", "agent_id", id, "error", err)
 		} else {
 			built.TurnOptions.PromptContent = promptContentFromRecord(pc)
+			scope := agentruntime.LongTermScopeFromDefaults(snapParsed)
 			built.TurnOptions.LongTermStore = &agentLongTermStore{
 				agents:     s.agents,
 				agentID:    id,
 				runtimeDir: s.runtimeDir(),
+				scope:      scope,
 			}
 		}
 	}
