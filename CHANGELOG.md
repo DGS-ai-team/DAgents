@@ -4,9 +4,28 @@
 
 ## [Unreleased]
 
+---
+
+## [0.8.1] - 2026-07-22
+
+**Docker 沙箱与长期记忆**：可选 Docker 隔离执行 `bash_run`；`remember` 工具与结构化长期记忆；Agent 可无模板创建并管理模板。
+
 ### 新增
 
 - **Docker 沙箱后端**：`sandbox.backend=docker` 时 Agent 入内存预创建常驻容器（Alpine 3.20），`bash_run` 经 `docker exec`；空闲 15 分钟或卸出内存时回收。镜像见 `packaging/sandbox/`。
+- **`remember` 工具**：事实归一化、`add`/`replace` 增量输出与 CAS 乐观锁；结构化长期记忆条目支持**全局 / 独立作用域**。
+- **Agent 创建**：支持不选模板直接创建；Web UI 模板管理（查看 / 编辑用户模板）。
+- **Prompt / LLM**：侧车 prompt context 仅存 SQLite；LLM 档案修改即时保存。
+
+### 变更
+
+- **Windows 安装向导**：改浅色主题，修复乱码与控件重叠。
+
+### 修复
+
+- **长期记忆加载**：仅在清空对话、首条用户消息、上下文压缩后重新加载 longterm，避免每轮重复注入。
+
+（Git **tag**：`v0.8.1`。）
 
 ---
 
