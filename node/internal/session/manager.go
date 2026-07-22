@@ -67,6 +67,7 @@ type PromptContextOptions struct {
 	UserEnabled     *bool
 	CustomEnabled   *bool
 	LongTermEnabled *bool
+	LongTermScope   *string // global | agent
 }
 
 // Manager 维护 session 表；每个 session 独立队列与 consumer goroutine。

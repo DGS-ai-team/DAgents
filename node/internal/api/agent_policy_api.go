@@ -1,13 +1,17 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func (s *Server) registerAgentPolicyRoutes() {
@@ -174,44 +178,52 @@ func (s *Server) handlePutAgentShellPolicy(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
 }
 
+type longTermEntryView struct {
+	ID      string `json:"id"`
+	Content string `json:"content"`
+}
+
 type agentPromptContextView struct {
-	AgentID    string `json:"agent_id"`
-	SoulMD     string `json:"soul_md"`
-	UserMD     string `json:"user_md"`
-	CustomMD   string `json:"custom_md"`
-	LongTermMD string `json:"long_term_md"`
-	Source     string `json:"source"`
+	AgentID               string              `json:"agent_id"`
+	SoulMD                string              `json:"soul_md"`
+	UserMD                string              `json:"user_md"`
+	CustomMD              string              `json:"custom_md"`
+	LongTermMD            string              `json:"long_term_md"`
+	LongTermScope         string              `json:"long_term_scope"`
+	LongTermEntries       []longTermEntryView `json:"long_term_entries"`
+	GlobalLongTermEntries []longTermEntryView `json:"global_long_term_entries"`
+	Source                string              `json:"source"`
 }
 
 type agentPromptContextPutBody struct {
-	SoulMD     *string `json:"soul_md"`
-	UserMD     *string `json:"user_md"`
-	CustomMD   *string `json:"custom_md"`
-	LongTermMD *string `json:"long_term_md"`
+	SoulMD          *string              `json:"soul_md"`
+	UserMD          *string              `json:"user_md"`
+	CustomMD        *string              `json:"custom_md"`
+	LongTermMD      *string              `json:"long_term_md"`
+	LongTermScope   *string              `json:"long_term_scope"`
+	LongTermEntries *[]longTermEntryView `json:"long_term_entries"`
 }
 
 func (s *Server) handleGetAgentPromptContext(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.requireAgentRecord(w, r)
+	id, rec, ok := s.requireAgentRecord(w, r)
 	if !ok {
 		return
 	}
-	rec, err := s.agents.EnsureAgentPromptContext(r.Context(), id, s.runtimeDir())
+	pc, err := s.agents.EnsureAgentPromptContext(r.Context(), id, s.runtimeDir())
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "prompt_context_load_failed", err.Error(), map[string]any{"agent_id": id})
 		return
 	}
-	writeJSON(w, http.StatusOK, agentPromptContextView{
-		AgentID:    id,
-		SoulMD:     rec.SoulMD,
-		UserMD:     rec.UserMD,
-		CustomMD:   rec.CustomMD,
-		LongTermMD: rec.LongTermMD,
-		Source:     "sqlite",
-	})
+	view, err := s.buildAgentPromptContextView(r.Context(), id, rec, pc)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "prompt_context_load_failed", err.Error(), map[string]any{"agent_id": id})
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.requireAgentRecord(w, r)
+	id, rec, ok := s.requireAgentRecord(w, r)
 	if !ok {
 		return
 	}
@@ -220,41 +232,142 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	rec, err := s.agents.EnsureAgentPromptContext(r.Context(), id, s.runtimeDir())
+	pc, err := s.agents.EnsureAgentPromptContext(r.Context(), id, s.runtimeDir())
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "prompt_context_load_failed", err.Error(), nil)
 		return
 	}
 	if body.SoulMD != nil {
-		rec.SoulMD = *body.SoulMD
+		pc.SoulMD = *body.SoulMD
 	}
 	if body.UserMD != nil {
-		rec.UserMD = *body.UserMD
+		pc.UserMD = *body.UserMD
 	}
 	if body.CustomMD != nil {
-		rec.CustomMD = *body.CustomMD
+		pc.CustomMD = *body.CustomMD
 	}
 	if body.LongTermMD != nil {
-		rec.LongTermMD = *body.LongTermMD
+		pc.LongTermMD = *body.LongTermMD
 	}
-	rec.AgentID = id
-	if err := s.agents.SaveAgentPromptContext(r.Context(), *rec); err != nil {
+	pc.AgentID = id
+	if err := s.agents.SaveAgentPromptContext(r.Context(), *pc); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "prompt_context_save_failed", err.Error(), nil)
 		return
 	}
-	// 侧车正文变更需重建 runtime 才能注入；提示客户端可 reload。
+	scope := agentruntime.LongTermScopeFromDefaults(mustParseAgentSnapshot(rec))
+	if body.LongTermScope != nil {
+		scope = normalizePromptLongTermScope(*body.LongTermScope)
+	}
+	if body.LongTermEntries != nil {
+		entries := longTermViewsToEntries(*body.LongTermEntries)
+		ltRec := store.LongTermRecord{
+			Scope:   scope,
+			AgentID: id,
+			Entries: entries,
+			UpdatedAt: time.Now().UTC(),
+		}
+		if err := s.agents.SaveLongTermRecordOverwrite(r.Context(), ltRec); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "longterm_save_failed", err.Error(), nil)
+			return
+		}
+	} else if body.LongTermMD != nil {
+		entries := store.EntriesFromLegacyMarkdown(*body.LongTermMD, time.Now().UTC())
+		ltRec := store.LongTermRecord{
+			Scope:     scope,
+			AgentID:   id,
+			Entries:   entries,
+			UpdatedAt: time.Now().UTC(),
+		}
+		if err := s.agents.SaveLongTermRecordOverwrite(r.Context(), ltRec); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "longterm_save_failed", err.Error(), nil)
+			return
+		}
+	}
+	view, err := s.buildAgentPromptContextView(r.Context(), id, rec, pc)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "prompt_context_load_failed", err.Error(), nil)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":       true,
-		"agent_id": id,
-		"prompt_context": agentPromptContextView{
-			AgentID:    id,
-			SoulMD:     rec.SoulMD,
-			UserMD:     rec.UserMD,
-			CustomMD:   rec.CustomMD,
-			LongTermMD: rec.LongTermMD,
-			Source:     "sqlite",
-		},
+		"ok":             true,
+		"agent_id":       id,
+		"prompt_context": view,
 	})
+}
+
+func (s *Server) buildAgentPromptContextView(ctx context.Context, id string, agentRec *store.AgentRecord, pc *store.AgentPromptContextRecord) (agentPromptContextView, error) {
+	scope := agentruntime.LongTermScopeFromDefaults(mustParseAgentSnapshot(agentRec))
+	agentLT, err := s.agents.EnsureLongTermRecord(ctx, store.LongTermScopeAgent, id, s.runtimeDir(), pc.LongTermMD)
+	if err != nil {
+		return agentPromptContextView{}, err
+	}
+	globalLT, err := s.agents.EnsureLongTermRecord(ctx, store.LongTermScopeGlobal, "", s.runtimeDir(), "")
+	if err != nil {
+		return agentPromptContextView{}, err
+	}
+	active := agentLT
+	if scope == store.LongTermScopeGlobal {
+		active = globalLT
+	}
+	return agentPromptContextView{
+		AgentID:               id,
+		SoulMD:                pc.SoulMD,
+		UserMD:                pc.UserMD,
+		CustomMD:              pc.CustomMD,
+		LongTermMD:            turn.FormatLongTermEntries(storeEntriesToTurn(active.Entries)),
+		LongTermScope:         scope,
+		LongTermEntries:       longTermEntriesToViews(agentLT.Entries),
+		GlobalLongTermEntries: longTermEntriesToViews(globalLT.Entries),
+		Source:                "sqlite",
+	}, nil
+}
+
+func mustParseAgentSnapshot(rec *store.AgentRecord) agentruntime.Snapshot {
+	if rec == nil {
+		return agentruntime.Snapshot{}
+	}
+	snap, err := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+	if err != nil {
+		return agentruntime.Snapshot{}
+	}
+	return snap
+}
+
+func normalizePromptLongTermScope(scope string) string {
+	if strings.TrimSpace(scope) == store.LongTermScopeGlobal {
+		return store.LongTermScopeGlobal
+	}
+	return store.LongTermScopeAgent
+}
+
+func longTermEntriesToViews(entries []store.LongTermEntry) []longTermEntryView {
+	out := make([]longTermEntryView, 0, len(entries))
+	for _, e := range entries {
+		content := strings.TrimSpace(e.Content)
+		if content == "" {
+			continue
+		}
+		out = append(out, longTermEntryView{ID: strings.TrimSpace(e.ID), Content: content})
+	}
+	return out
+}
+
+func longTermViewsToEntries(views []longTermEntryView) []store.LongTermEntry {
+	now := time.Now().UTC()
+	out := make([]store.LongTermEntry, 0, len(views))
+	for _, v := range views {
+		content := strings.TrimSpace(v.Content)
+		if content == "" {
+			continue
+		}
+		id := strings.TrimSpace(v.ID)
+		if id == "" {
+			out = append(out, store.NewLongTermEntry(content, now))
+			continue
+		}
+		out = append(out, store.LongTermEntry{ID: id, Content: content, CreatedAt: now, UpdatedAt: now})
+	}
+	return out
 }
 
 func promptContentFromRecord(rec *store.AgentPromptContextRecord) *promptcontext.Content {

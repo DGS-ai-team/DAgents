@@ -102,7 +102,10 @@ CREATE TABLE IF NOT EXISTS agents (
 	if err := s.ensurePolicySchema(); err != nil {
 		return err
 	}
-	return s.ensurePromptContextSchema()
+	if err := s.ensurePromptContextSchema(); err != nil {
+		return err
+	}
+	return s.ensureLongTermStoreSchema()
 }
 
 // ensureOriginColumn 兼容旧库：补 origin 列。

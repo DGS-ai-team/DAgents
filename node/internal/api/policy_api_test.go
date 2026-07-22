@@ -216,7 +216,10 @@ func TestHandleAgentPromptContextRoundtrip(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
 		t.Fatal(err)
 	}
-	if view.SoulMD != "我是助手" || view.LongTermMD != "记得开会" || view.Source != "sqlite" {
+	if view.SoulMD != "我是助手" || view.Source != "sqlite" {
 		t.Fatalf("view = %+v", view)
+	}
+	if len(view.LongTermEntries) != 1 || view.LongTermEntries[0].Content != "记得开会" {
+		t.Fatalf("long_term entries = %+v md=%q", view.LongTermEntries, view.LongTermMD)
 	}
 }

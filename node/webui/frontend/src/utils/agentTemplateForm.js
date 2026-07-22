@@ -17,6 +17,11 @@ export const TOOL_GROUPS = [
   { name: "triggers", label: "定时任务" },
 ];
 
+export const LONG_TERM_SCOPES = [
+  { value: "agent", label: "独立（仅本 Agent）" },
+  { value: "global", label: "全局（所有 Agent 共享）" },
+];
+
 export function emptyAgentDraft() {
   return {
     // 溯源：创建请求可不传；仅用于 UI 展示来源模板
@@ -39,10 +44,12 @@ export function emptyAgentDraft() {
     promptUserEnabled: true,
     promptCustomEnabled: true,
     promptLongTermEnabled: true,
+    promptLongTermScope: "agent",
     promptSoulMd: "",
     promptUserMd: "",
     promptCustomMd: "",
-    promptLongTermMd: "",
+    promptLongTermEntries: [],
+    promptGlobalLongTermEntries: [],
   };
 }
 
@@ -91,6 +98,7 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   draft.promptUserEnabled = boolOr(prompt.user_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
   draft.promptLongTermEnabled = boolOr(prompt.long_term_enabled, true);
+  draft.promptLongTermScope = String(prompt.long_term_scope || "agent").trim() === "global" ? "global" : "agent";
 
   const fromTpl = String(llm.active || "").trim();
   const ids = Array.isArray(llmProfileIds) ? llmProfileIds.map((x) => String(x || "").trim()).filter(Boolean) : [];
@@ -135,6 +143,7 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   draft.promptUserEnabled = boolOr(prompt.user_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
   draft.promptLongTermEnabled = boolOr(prompt.long_term_enabled, true);
+  draft.promptLongTermScope = String(prompt.long_term_scope || "agent").trim() === "global" ? "global" : "agent";
 
   const fromSnap = String(llm.active || "").trim();
   const ids = Array.isArray(llmProfileIds) ? llmProfileIds.map((x) => String(x || "").trim()).filter(Boolean) : [];
@@ -190,6 +199,7 @@ export function buildCreateAgentPayload(draft) {
         user_enabled: !!draft.promptUserEnabled,
         custom_enabled: !!draft.promptCustomEnabled,
         long_term_enabled: !!draft.promptLongTermEnabled,
+        long_term_scope: draft.promptLongTermScope === "global" ? "global" : "agent",
       },
     },
   };

@@ -254,7 +254,38 @@ func PromptContextFromDefaults(snap Snapshot) *session.PromptContextOptions {
 	if v, ok := boolPtrFromAny(m["long_term_enabled"]); ok {
 		out.LongTermEnabled = v
 	}
+	if v, ok := stringFromAny(m["long_term_scope"]); ok {
+		scope := strings.TrimSpace(v)
+		if scope == LongTermScopeGlobal || scope == LongTermScopeAgent {
+			out.LongTermScope = &scope
+		}
+	}
 	return out
+}
+
+const (
+	LongTermScopeGlobal = "global"
+	LongTermScopeAgent  = "agent"
+)
+
+// LongTermScopeFromDefaults 返回长期记忆作用域，默认 agent（独立）。
+func LongTermScopeFromDefaults(snap Snapshot) string {
+	pc := PromptContextFromDefaults(snap)
+	if pc != nil && pc.LongTermScope != nil {
+		scope := strings.TrimSpace(*pc.LongTermScope)
+		if scope == LongTermScopeGlobal {
+			return LongTermScopeGlobal
+		}
+	}
+	return LongTermScopeAgent
+}
+
+func stringFromAny(v any) (string, bool) {
+	if v == nil {
+		return "", false
+	}
+	s, ok := v.(string)
+	return strings.TrimSpace(s), ok && s != ""
 }
 
 func boolPtrFromAny(v any) (*bool, bool) {
