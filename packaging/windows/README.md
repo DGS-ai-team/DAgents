@@ -37,5 +37,5 @@ VERSION=0.x.x scripts/ci/build_windows_installer.sh
 
 - `WizardStyle=modern`、简体中文语言包
 - **Workbench 浅色主题**：侧栏/角标 BMP 与 Web UI `tokens.css` 浅色模式对齐（`#f5f6f8` / `#2563eb` 主色、`Segoe UI` 字体）
-- 资源：`assets/wizard-sidebar.bmp`、`assets/wizard-small.bmp`（`scripts/generate-wizard-assets.py` 可从 `brand-icon.png` 重新生成）
+- 资源：`assets/wizard-sidebar.bmp`、`assets/wizard-small.bmp`（`scripts/generate-wizard-assets.py` 可从 `brand-icon.png` 重新生成；**须使用带 CJK 字形的字体**，否则副标题「本机智能助手」会显示为 □□）
 - 自定义欢迎/完成页文案；开始菜单增加「打开 Web UI」快捷方式
