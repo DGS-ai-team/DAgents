@@ -31,7 +31,6 @@ PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\bin\dagents-node.exe
 ChangesEnvironment=yes
 WizardStyle=modern
-WizardSizePercent=110
 ShowLanguageDialog=no
 SetupIconFile=..\..\desktop\tray\assets\icon.ico
 WizardImageFile=assets\wizard-sidebar.bmp
@@ -41,7 +40,7 @@ DisableWelcomePage=no
 DisableFinishedPage=no
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
+Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [CustomMessages]
 chinesesimp.WelcomeLabel2=安装完成后请打开 Web UI「设置 › 连接」配置 LLM、Manage 与功能开关；API Key 请写入系统环境变量（如 OPENAI_API_KEY）。
@@ -82,41 +81,80 @@ Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; Description: "�
 
 [Code]
 const
-  { Web UI tokens.css dark — Inno 颜色为 BGR $00BBGGRR }
-  ClrBg = $00181818;
-  ClrSurface = $001E1E1E;
-  ClrSurfaceMuted = $00262626;
-  ClrBorder = $002B2B2B;
-  ClrText = $00CCCCCC;
-  ClrTextMuted = $009D9D9D;
-  ClrTextSubtle = $006E6E6E;
-  ClrPrimary = $00FF9437;
+  { Web UI tokens.css light — Inno 颜色为 BGR $00BBGGRR }
+  ClrBg = $00F8F6F5;
+  ClrSurface = $00FFFFFF;
+  ClrSurfaceMuted = $00FAF8F7;
+  ClrBorder = $00EADED9;
+  ClrText = $0030241F;
+  ClrTextMuted = $0068554B;
+  ClrTextSubtle = $008A776D;
+  ClrPrimary = $00EB6325;
 
 var
   OverwritePolicy: Boolean;
   OverwritePolicyAnswered: Boolean;
 
-procedure StyleStaticText(L: TNewStaticText; Title: Boolean);
-begin
-  L.Font.Name := 'Segoe UI';
-  if Title then
-  begin
-    L.Font.Size := 12;
-    L.Font.Style := [fsBold];
-    L.Font.Color := ClrText;
-  end
-  else
-  begin
-    L.Font.Size := 9;
-    L.Font.Style := [];
-    L.Font.Color := ClrTextMuted;
-  end;
-end;
-
 procedure StyleButton(B: TNewButton);
 begin
   B.Font.Name := 'Segoe UI';
   B.Font.Size := 9;
+end;
+
+procedure StyleWelcomeLabels;
+begin
+  WizardForm.WelcomeLabel1.Font.Name := 'Segoe UI';
+  WizardForm.WelcomeLabel1.Font.Size := 11;
+  WizardForm.WelcomeLabel1.Font.Style := [fsBold];
+  WizardForm.WelcomeLabel1.Font.Color := ClrText;
+  WizardForm.WelcomeLabel1.AutoSize := False;
+
+  WizardForm.WelcomeLabel2.Font.Name := 'Segoe UI';
+  WizardForm.WelcomeLabel2.Font.Size := 9;
+  WizardForm.WelcomeLabel2.Font.Style := [];
+  WizardForm.WelcomeLabel2.Font.Color := ClrTextMuted;
+  WizardForm.WelcomeLabel2.AutoSize := False;
+  WizardForm.WelcomeLabel2.WordWrap := True;
+  WizardForm.WelcomeLabel2.Width := WizardForm.ClientWidth - ScaleX(220);
+end;
+
+procedure StyleFinishedLabels;
+begin
+  WizardForm.FinishedHeadingLabel.Font.Name := 'Segoe UI';
+  WizardForm.FinishedHeadingLabel.Font.Size := 11;
+  WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
+  WizardForm.FinishedHeadingLabel.Font.Color := ClrText;
+
+  WizardForm.FinishedLabel.Font.Name := 'Segoe UI';
+  WizardForm.FinishedLabel.Font.Size := 9;
+  WizardForm.FinishedLabel.Font.Style := [];
+  WizardForm.FinishedLabel.Font.Color := ClrTextMuted;
+  WizardForm.FinishedLabel.AutoSize := False;
+  WizardForm.FinishedLabel.WordWrap := True;
+  WizardForm.FinishedLabel.Width := WizardForm.ClientWidth - ScaleX(220);
+end;
+
+procedure StyleInnerPageLabels;
+var
+  DescTop: Integer;
+begin
+  WizardForm.PageNameLabel.Font.Name := 'Segoe UI';
+  WizardForm.PageNameLabel.Font.Size := 10;
+  WizardForm.PageNameLabel.Font.Style := [fsBold];
+  WizardForm.PageNameLabel.Font.Color := ClrText;
+  WizardForm.PageNameLabel.AutoSize := True;
+
+  WizardForm.PageDescriptionLabel.Font.Name := 'Segoe UI';
+  WizardForm.PageDescriptionLabel.Font.Size := 9;
+  WizardForm.PageDescriptionLabel.Font.Style := [];
+  WizardForm.PageDescriptionLabel.Font.Color := ClrTextMuted;
+  WizardForm.PageDescriptionLabel.AutoSize := False;
+  WizardForm.PageDescriptionLabel.WordWrap := True;
+  WizardForm.PageDescriptionLabel.Left := WizardForm.PageNameLabel.Left;
+  WizardForm.PageDescriptionLabel.Width := WizardForm.ClientWidth - ScaleX(220);
+  DescTop := WizardForm.PageNameLabel.Top + WizardForm.PageNameLabel.Height + ScaleY(6);
+  if DescTop > WizardForm.PageDescriptionLabel.Top then
+    WizardForm.PageDescriptionLabel.Top := DescTop;
 end;
 
 procedure ApplyWorkbenchTheme;
@@ -131,12 +169,9 @@ begin
   if WizardForm.InnerPage <> nil then
     WizardForm.InnerPage.Color := ClrSurface;
 
-  StyleStaticText(WizardForm.WelcomeLabel1, True);
-  StyleStaticText(WizardForm.WelcomeLabel2, False);
-  StyleStaticText(WizardForm.FinishedHeadingLabel, True);
-  StyleStaticText(WizardForm.FinishedLabel, False);
-  StyleStaticText(WizardForm.PageNameLabel, True);
-  StyleStaticText(WizardForm.PageDescriptionLabel, False);
+  StyleWelcomeLabels;
+  StyleFinishedLabels;
+  StyleInnerPageLabels;
 
   StyleButton(WizardForm.NextButton);
   StyleButton(WizardForm.BackButton);
@@ -208,7 +243,7 @@ begin
   WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents';
   WizardForm.WelcomeLabel2.Caption :=
     '本安装包包含 Agent Node、Desktop Shell（系统托盘）与 Client。' + #13#10 +
-    '视觉与 Web UI Workbench 使用同一套深色主题；安装后可在浏览器打开本机助手。' + #13#10 +
+    '界面与 Web UI 浅色主题一致；安装后可在浏览器打开本机助手。' + #13#10 +
     'LLM、Manage 与功能开关请在 Web UI「设置 › 连接」中完成配置。';
   WizardForm.FinishedLabel.Caption :=
     'DAgents 已就绪。建议立即打开 Web UI 完成连接配置，' + #13#10 +
