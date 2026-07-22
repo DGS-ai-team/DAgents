@@ -4,6 +4,14 @@ import { formatToolElapsed } from "../utils/format.js";
 import { toolStepIsInProgress, toolStepStatusText, toolStepUserSummary } from "../utils/toolUserLabel.js";
 import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
+import {
+  backgroundBashToolCall,
+  canControlBashTool,
+  cancelBashToolCall,
+  toolCallIdFromEntry,
+  toolJobsStore,
+} from "../stores/toolJobs.js";
+import { agentStore } from "../stores/agent.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
 
 const props = defineProps({
@@ -14,6 +22,7 @@ const props = defineProps({
 
 const expanded = ref(false);
 const nowTick = ref(Date.now());
+const actionError = ref("");
 let tickTimer = null;
 
 const summary = computed(() => toolStepUserSummary({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
@@ -21,6 +30,9 @@ const inProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEn
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
 const inlineMedia = computed(() => entryMedia(props.resultEntry));
 const visual = computed(() => resolveToolVisual(props.resultEntry || props.callEntry || {}));
+const showBashControls = computed(() => canControlBashTool({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
+const toolCallId = computed(() => toolCallIdFromEntry(props.callEntry));
+const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] || "");
 
 const status = computed(() => {
   void nowTick.value;
@@ -60,6 +72,32 @@ onUnmounted(stopTick);
 function toggle() {
   expanded.value = !expanded.value;
 }
+
+async function onCancel(ev) {
+  ev?.stopPropagation?.();
+  actionError.value = "";
+  const agentId = agentStore.agentId;
+  const callId = toolCallId.value;
+  if (!agentId || !callId || busyAction.value) return;
+  try {
+    await cancelBashToolCall(agentId, callId);
+  } catch (err) {
+    actionError.value = err?.message || "终止失败";
+  }
+}
+
+async function onBackground(ev) {
+  ev?.stopPropagation?.();
+  actionError.value = "";
+  const agentId = agentStore.agentId;
+  const callId = toolCallId.value;
+  if (!agentId || !callId || busyAction.value) return;
+  try {
+    await backgroundBashToolCall(agentId, callId);
+  } catch (err) {
+    actionError.value = err?.message || "转后台失败";
+  }
+}
 </script>
 
 <template>
@@ -94,6 +132,25 @@ function toggle() {
       </span>
       <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
     </button>
+    <div v-if="showBashControls" class="tool-summary-row__actions">
+      <button
+        type="button"
+        class="tool-summary-row__action"
+        :disabled="!!busyAction"
+        @click="onCancel"
+      >
+        {{ busyAction === "cancel" ? "终止中…" : "终止" }}
+      </button>
+      <button
+        type="button"
+        class="tool-summary-row__action tool-summary-row__action--secondary"
+        :disabled="!!busyAction"
+        @click="onBackground"
+      >
+        {{ busyAction === "background" ? "转后台中…" : "转后台" }}
+      </button>
+      <span v-if="actionError" class="tool-summary-row__action-error">{{ actionError }}</span>
+    </div>
     <div v-if="expanded && detailEntry" class="tool-summary-row__detail">
       <ToolExecBubble :entry="detailEntry" :verbose="verbose" embedded />
     </div>
@@ -216,6 +273,45 @@ function toggle() {
   flex: 0 0 auto;
   font-size: 10px;
   color: var(--color-text-subtle);
+}
+
+.tool-summary-row__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 8px 6px 30px;
+}
+
+.tool-summary-row__action {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tool-summary-row__action:hover:not(:disabled) {
+  border-color: var(--color-text-muted);
+}
+
+.tool-summary-row__action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.tool-summary-row__action--secondary {
+  color: var(--color-text-muted);
+}
+
+.tool-summary-row__action-error {
+  font-size: 11px;
+  color: var(--color-danger, #c44);
 }
 
 .tool-summary-row__detail {

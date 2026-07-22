@@ -10,12 +10,14 @@ import {
   persistAgentId,
 } from "./agent.js";
 import { loadTranscriptFromHydrate } from "./transcript.js";
+import { applyToolJobsSnapshot } from "./toolJobs.js";
 
 /** ensureAgent → GET /v1/agents/{id}/hydrate → 灌 transcript + pending HITL + SSE 水位。 */
 export async function hydrateAgent() {
   const agentId = await ensureAgent();
   const data = await api.getAgentHydrate(agentId);
   loadTranscriptFromHydrate(data?.transcript);
+  applyToolJobsSnapshot(data?.tool_jobs);
   clearHitl();
   const { approval } = enqueueHitlRequired(data?.pending_hitl);
   enqueueA2ARelayPending(data?.pending_a2a_relay);
