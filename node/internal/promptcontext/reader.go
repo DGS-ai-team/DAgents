@@ -79,7 +79,7 @@ func (r *Reader) ReadLongTermMemory() string {
 	return r.readContentField("long_term")
 }
 
-// UpdateLongTerm 更新内存中的长期记忆正文（remember 写入后同步注入）。
+// UpdateLongTerm 更新内存中的长期记忆正文（remember 写入后同步注入，非 DB 重载）。
 func (r *Reader) UpdateLongTerm(text string) {
 	if r == nil {
 		return

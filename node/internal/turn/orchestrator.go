@@ -481,6 +481,29 @@ func (o *Orchestrator) runTurnDonePhase(sessionID, finishReason string) {
 	_, _ = o.runPhase(context.Background(), hooks.PhaseTurnDone, hc, sessionID, nil, finishReason)
 }
 
+// ReloadLongTermMemory 从持久化存储重新加载长期记忆并注入 prompt（清空上下文 / 首条交互 / 压缩完成后调用）。
+func (o *Orchestrator) ReloadLongTermMemory(ctx context.Context) {
+	if o == nil {
+		return
+	}
+	if o.longTermStore == nil {
+		if o.promptCtx != nil {
+			o.promptCtx.UpdateLongTerm("")
+		}
+		return
+	}
+	text, err := o.longTermStore.ReadLongTerm(ctx)
+	if err != nil {
+		if o.logger != nil {
+			o.logger.Warn("reload long-term memory failed", "agent_id", o.agentID, "error", err)
+		}
+		return
+	}
+	if o.promptCtx != nil {
+		o.promptCtx.UpdateLongTerm(text)
+	}
+}
+
 func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 	var loaded []skills.LoadedSkill
 	if o.skillAccess.Get != nil {

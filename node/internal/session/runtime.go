@@ -326,7 +326,12 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 		)
 	}
 	r.toolLoopCount = 0
+	firstInteraction := len(r.messages) == 0
 	r.mu.Unlock()
+
+	if firstInteraction && r.orch != nil {
+		r.orch.ReloadLongTermMemory(parent)
+	}
 
 	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
 		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, userMsg, setState)
@@ -460,6 +465,7 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	if r.orch != nil {
 		r.orch.ClearHookStore()
 		r.orch.SyncLoadedSkillHooks(nil)
+		r.orch.ReloadLongTermMemory(ctx)
 	}
 	if r.store != nil {
 		_ = r.store.ClearMessages(ctx, r.session.ID)
@@ -536,6 +542,9 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	r.mu.Lock()
 	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, prefix)
 	r.mu.Unlock()
+	if result.Status == "applied" && r.orch != nil {
+		r.orch.ReloadLongTermMemory(ctx)
+	}
 	if result.Status == "applied" {
 		r.persist(ctx)
 	}

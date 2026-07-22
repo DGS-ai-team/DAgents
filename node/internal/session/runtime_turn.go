@@ -29,7 +29,9 @@ func (r *runtime) runTurnStep(
 	}
 	r.mu.Lock()
 	if compressBeforeStep {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix)
+		if r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix) && r.orch != nil {
+			r.orch.ReloadLongTermMemory(parent)
+		}
 	}
 	turnCtx, cancel := context.WithCancel(parent)
 	r.turnCancel = cancel
