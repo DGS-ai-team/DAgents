@@ -6,6 +6,8 @@ function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+export const BLANK_TEMPLATE_ID = "__blank__";
+
 export const TOOL_GROUPS = [
   { name: "a2a", label: "A2A 协作" },
   { name: "bash", label: "命令行" },
@@ -64,6 +66,14 @@ function numberOr(value, fallback) {
 }
 
 /** 从模板展开为可编辑草稿（创建时由前端持有完整设置）。 */
+/** 空白 Agent 草稿（不依赖模板）。 */
+export function draftFromBlank(llmProfileIds = []) {
+  const draft = emptyAgentDraft();
+  const ids = Array.isArray(llmProfileIds) ? llmProfileIds.map((x) => String(x || "").trim()).filter(Boolean) : [];
+  draft.llmProfileId = ids[0] || "";
+  return draft;
+}
+
 export function draftFromTemplate(template, llmProfileIds = []) {
   const defaults = readTemplateDefaults(template);
   const agent = asObject(defaults.agent);
@@ -214,7 +224,7 @@ export function buildCreateAgentPayload(draft) {
     },
   };
   const tpl = String(draft.templateId || "").trim();
-  if (tpl) payload.template_id = tpl;
+  if (tpl && tpl !== BLANK_TEMPLATE_ID) payload.template_id = tpl;
   return payload;
 }
 
@@ -225,6 +235,49 @@ export function buildPatchAgentPayload(draft) {
     display_name: created.display_name,
     sandbox: created.sandbox,
     defaults: created.defaults,
+  };
+}
+
+/** 从 Agent 草稿构建创建模板 API 入参。 */
+export function buildCreateTemplatePayload(meta, draft) {
+  const id = String(meta?.id || "").trim();
+  const displayName = String(meta?.displayName || meta?.display_name || "").trim();
+  const description = String(meta?.description || "").trim();
+  const llmActive = String(draft?.llmProfileId || "").trim();
+  return {
+    id,
+    display_name: displayName || id,
+    description,
+    version: 1,
+    sandbox: {
+      enabled: !!draft?.sandboxEnabled,
+      backend: draft?.sandboxBackend || "process",
+      workspace_subdir: draft?.workspaceSubdir || "data",
+      fs_root_isolation: !!draft?.fsRootIsolation,
+      allow_bash: draft?.allowBash !== false,
+      allow_network_tools: draft?.allowNetworkTools !== false,
+    },
+    defaults: {
+      agent: {
+        role: String(draft?.role || "assistant").trim() || "assistant",
+        description: String(draft?.description || "").trim(),
+      },
+      llm: {
+        ...(llmActive ? { active: llmActive } : {}),
+        max_tool_loops: numberOr(draft?.maxToolLoops, 32),
+      },
+      tools: {
+        enabled_groups: Array.isArray(draft?.toolGroups) ? [...draft.toolGroups] : [],
+      },
+      skills: { enabled: !!draft?.skillsEnabled },
+      child_agents: { enabled: !!draft?.childAgentsEnabled },
+      prompt_context: {
+        soul_enabled: !!draft?.promptSoulEnabled,
+        user_enabled: !!draft?.promptUserEnabled,
+        custom_enabled: !!draft?.promptCustomEnabled,
+        long_term_enabled: !!draft?.promptLongTermEnabled,
+      },
+    },
   };
 }
 

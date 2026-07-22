@@ -2,7 +2,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import AgentSettingsForm from "./AgentSettingsForm.vue";
-import { buildCreateAgentPayload, draftFromTemplate, emptyAgentDraft } from "../utils/agentTemplateForm.js";
+import { buildCreateAgentPayload, BLANK_TEMPLATE_ID, draftFromBlank, draftFromTemplate, emptyAgentDraft } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -22,6 +22,7 @@ const draft = reactive(emptyAgentDraft());
 const selectedTemplate = computed(
   () => templates.value.find((t) => t.id === draft.templateId) || null,
 );
+const isBlankDraft = computed(() => draft.templateId === BLANK_TEMPLATE_ID || !draft.templateId);
 const llmProfileIds = computed(() => llmProfiles.value.map((p) => p.id).filter(Boolean));
 
 async function loadTemplates() {
@@ -43,8 +44,13 @@ async function loadTemplates() {
       : [];
     const prefer = String(props.initialTemplateId || "").trim();
     const preferred = prefer ? templates.value.find((t) => t.id === prefer) : null;
-    const first = preferred || templates.value[0];
-    if (first) applyTemplate(first);
+    if (preferred) {
+      applyTemplate(preferred);
+    } else if (templates.value.length) {
+      applyTemplate(templates.value[0]);
+    } else {
+      applyBlank();
+    }
   } catch (e) {
     error.value = e.message || "加载模板失败";
     templates.value = [];
@@ -55,6 +61,15 @@ async function loadTemplates() {
 
 function applyTemplate(template) {
   Object.assign(draft, draftFromTemplate(template, llmProfileIds.value));
+}
+
+function applyBlank() {
+  Object.assign(draft, draftFromBlank(llmProfileIds.value));
+  draft.templateId = BLANK_TEMPLATE_ID;
+}
+
+function onPickBlank() {
+  applyBlank();
 }
 
 function onPickTemplate(template) {
@@ -108,7 +123,7 @@ watch(
           <div>
             <h2 id="agent-create-title" class="agent-create-modal__title">新建 Agent</h2>
             <p class="agent-create-modal__subtitle">
-              选择模板预填参数后可自由修改；创建时提交完整设置
+              可从空白配置或模板预填参数，创建时提交完整设置
             </p>
           </div>
           <button type="button" class="agent-create-modal__close" aria-label="关闭" :disabled="saving" @click="emit('close')">
@@ -121,6 +136,18 @@ watch(
 
           <template v-else>
             <div class="agent-create-modal__templates">
+              <button
+                type="button"
+                class="agent-create-card"
+                :class="{ 'agent-create-card--active': isBlankDraft }"
+                @click="onPickBlank"
+              >
+                <div class="agent-create-card__head">
+                  <span class="agent-create-card__name">空白配置</span>
+                  <span class="agent-create-card__id">无模板</span>
+                </div>
+                <p class="agent-create-card__desc">从零开始配置 Agent，不依赖任何模板</p>
+              </button>
               <button
                 v-for="tpl in templates"
                 :key="tpl.id"
@@ -135,6 +162,7 @@ watch(
                 </div>
                 <p class="agent-create-card__desc">{{ tpl.description || "无描述" }}</p>
                 <div class="agent-create-card__tags">
+                  <span v-if="tpl.source === 'user'" class="agent-create-tag agent-create-tag--user">自定义</span>
                   <span v-if="tpl.sandbox?.enabled" class="agent-create-tag">沙箱</span>
                   <span
                     v-for="g in (tpl.defaults?.tools?.enabled_groups || []).slice(0, 3)"
@@ -143,7 +171,6 @@ watch(
                   >{{ g }}</span>
                 </div>
               </button>
-              <p v-if="!templates.length" class="agent-create-modal__empty">暂无可用模板</p>
             </div>
 
             <AgentSettingsForm
@@ -151,7 +178,10 @@ watch(
               :llm-profiles="llmProfiles"
               v-model:show-advanced="showAdvanced"
             />
-            <p v-if="selectedTemplate" class="agent-create-hint">
+            <p v-if="isBlankDraft" class="agent-create-hint">
+              当前为空白配置；可在下方填写完整设置后创建。
+            </p>
+            <p v-else-if="selectedTemplate" class="agent-create-hint">
               当前以「{{ selectedTemplate.display_name || selectedTemplate.id }}」为起点；改动仅影响本 Agent。
             </p>
           </template>
@@ -337,6 +367,11 @@ watch(
 .agent-create-tag--muted {
   background: var(--color-surface-elevated);
   color: var(--color-text-subtle);
+}
+
+.agent-create-tag--user {
+  background: rgba(168, 85, 247, 0.14);
+  color: #c084fc;
 }
 
 .agent-create-hint {
