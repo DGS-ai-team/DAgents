@@ -17,6 +17,7 @@ import {
   configureStreamReveal,
   flushReveal,
   markRevealStreaming,
+  resetRevealKind,
   resetStreamReveal,
   scheduleReveal,
 } from "./streamReveal.js";
@@ -158,22 +159,28 @@ export function finalizeAssistant() {
   flushReveal("assistant");
   const text = transcriptStore.assistantBuffer;
   const usage = pendingUsageSuffix;
-  removeStreaming("assistant");
+  const streamIdx = transcriptStore.entries.findIndex((e) => e.streaming && e.kind === "assistant");
+  if (streamIdx >= 0) transcriptStore.entries.splice(streamIdx, 1);
   transcriptStore.assistantBuffer = "";
   pendingUsageSuffix = "";
+  resetRevealKind("assistant");
   if (!text) return;
-  transcriptStore.entries.push({
+  const row = {
     id: ++idSeq,
     kind: "assistant",
     text,
     usage,
-  });
+  };
+  // 保留 streaming 条目原位，避免 partial tool_call 插在正文后、finalize 却把正文推到工具后面。
+  if (streamIdx >= 0) transcriptStore.entries.splice(streamIdx, 0, row);
+  else transcriptStore.entries.push(row);
 }
 
 export function finalizeReasoning() {
   flushReveal("reasoning");
   removeStreaming("reasoning");
   transcriptStore.reasoningBuffer = "";
+  resetRevealKind("reasoning");
 }
 
 let pendingUsageSuffix = "";
@@ -204,9 +211,14 @@ export function applyRoundUsage(data) {
 }
 
 export function upsertToolCallFromSSE(data) {
-  finalizeAssistant();
-  finalizeReasoning();
   const partial = !!data?.partial;
+  // partial tool_call 到达时正文可能仍在继续（token 边界如 Not|epad）。
+  // 提前 finalize 会把同一条回复拆成两个气泡，看起来像单词中间换行。
+  // 仅在最终 tool_call（或 tool_result / done 等）时封存助手文本。
+  if (!partial) {
+    finalizeAssistant();
+    finalizeReasoning();
+  }
   const toolIndex = toolIndexFromEvent(data);
   if (partial && toolIndex < 0 && !extractToolCallsFromEvent(data).some((c) => c.id)) {
     return;

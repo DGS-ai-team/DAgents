@@ -36,6 +36,13 @@ export function resetStreamReveal() {
   revealState.reasoning = { revealedLen: 0, streaming: false };
 }
 
+/** 清空某一侧的揭示游标（finalize 清空 buffer 后调用，避免下一段从旧 revealedLen 起步）。 */
+export function resetRevealKind(kind) {
+  if (!revealState[kind]) return;
+  revealState[kind] = { revealedLen: 0, streaming: false };
+  stopRevealLoopIfIdle();
+}
+
 export function flushReveal(kind) {
   const source = readSource(kind);
   revealState[kind].revealedLen = source.length;
