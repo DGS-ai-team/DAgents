@@ -180,6 +180,18 @@ func (m *Manager) DefaultTools() *tools.Registry {
 	return m.tools
 }
 
+// SessionTools 返回指定 session 的 *tools.Registry（per-agent 沙箱）；不存在则 nil。
+func (m *Manager) SessionTools(sessionID string) *tools.Registry {
+	if m == nil {
+		return nil
+	}
+	rt := m.getRuntime(sessionID)
+	if rt == nil || rt.orch == nil {
+		return nil
+	}
+	return rt.orch.ToolRegistry()
+}
+
 // CreateWithOptions 用指定 TurnOptions、工具执行器与可选策略引擎创建/复用 session（per-agent 沙箱用）。
 // toolExec 为 nil 时回退到 Manager 默认 Registry；policyEngine 为 nil 时回退到 Manager 默认策略。
 func (m *Manager) CreateWithOptions(requestedID string, turnOpts TurnOptions, toolExec tools.Executor, policyEngine *policy.Engine) (*Session, bool, error) {

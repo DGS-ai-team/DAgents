@@ -20,6 +20,7 @@ type shellRunParams struct {
 	cwd            string
 	shellType      shellType
 	timeoutSec     int
+	userTimeout    bool // 模型显式传入 timeout_seconds 时为 true（超时可降后台）
 	outputEncoding string
 	compress       BashCompressConfig
 }
@@ -74,15 +75,20 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 	if cmdText == "" {
 		return shellRunParams{}, "ERROR: command 不能为空。", nil
 	}
-	timeout := r.bashTimeout
-	if args.TimeoutSeconds != nil && *args.TimeoutSeconds > 0 {
+	userTimeout := args.TimeoutSeconds != nil && *args.TimeoutSeconds > 0
+	timeout := r.hardLimitSec()
+	if userTimeout {
 		timeout = *args.TimeoutSeconds
 	}
 	if timeout > maxBashTimeoutSec {
 		timeout = maxBashTimeoutSec
 	}
 	if timeout < 1 {
-		timeout = defaultBashTimeoutSec
+		if userTimeout {
+			timeout = defaultBashTimeoutSec
+		} else {
+			timeout = maxBashTimeoutSec
+		}
 	}
 	cwdRaw := ""
 	if args.Cwd != nil {
@@ -114,9 +120,17 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 		cwd:            cwd,
 		shellType:      st,
 		timeoutSec:     timeout,
+		userTimeout:    userTimeout,
 		outputEncoding: resolveShellOutputEncoding(st, encConfigured),
 		compress:       r.bashCompress.normalized(),
 	}, "", nil
+}
+
+func (r *Registry) hardLimitSec() int {
+	if r != nil && r.bashHardLimitSec > 0 {
+		return r.bashHardLimitSec
+	}
+	return maxBashTimeoutSec
 }
 
 func (r *Registry) startShellCommand(params shellRunParams) (*exec.Cmd, error) {
@@ -154,7 +168,8 @@ func runShellUntilDoneWithRegistry(r *Registry, ctx context.Context, params shel
 	return out, stats, nil
 }
 
-// runShellSyncWithAutoDegrade 同步等待 timeout 秒；超时则不杀进程并登记后台 job。
+// runShellSyncWithAutoDegrade 同步等待；显式 timeout 到期可降后台，未传 timeout 则硬上限杀进程。
+// 等待期间可通过 syncShellGate 接受 UI 的终止 / 转后台请求。
 func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
 	cmd, err := r.startShellCommand(params)
 	if err != nil {
@@ -175,10 +190,10 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 	sessionID := sessionIDFromContext(ctx)
 	toolCallID := toolCallIDFromContext(ctx)
 	job := &backgroundJob{
-		id:         newJobID(),
-		sessionID:  sessionID,
-		toolName:   "bash_run",
-		toolCallID: toolCallID,
+		id:                 newJobID(),
+		sessionID:          sessionID,
+		toolName:           "bash_run",
+		toolCallID:         toolCallID,
 		status:             "running",
 		startedAt:          nowMs(),
 		done:               make(chan struct{}),
@@ -187,6 +202,16 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		bashTimeout:        params.timeoutSec,
 		bashShellType:      string(params.shellType),
 		bashOutputEncoding: params.outputEncoding,
+	}
+	gate := newSyncShellGate()
+	if r.syncShells != nil && strings.TrimSpace(toolCallID) != "" {
+		r.syncShells.put(&syncShellEntry{
+			sessionID:  sessionID,
+			toolCallID: toolCallID,
+			job:        job,
+			gate:       gate,
+		})
+		defer r.syncShells.remove(toolCallID)
 	}
 
 	collectDone := r.startShellOutputCollector(job, params, stdoutPipe, stderrPipe)
@@ -197,14 +222,51 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 	select {
 	case <-collectDone:
 		job.mu.Lock()
+		status := job.status
+		preset := job.result
 		result, stats := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, cmd.ProcessState, nil)
-		job.compressStats = stats
+		if status != "cancelled" {
+			job.compressStats = stats
+		}
 		job.mu.Unlock()
+		if status == "cancelled" {
+			if strings.Contains(preset, "硬上限") {
+				return formatShellHardTimeoutResult(params.timeoutSec), nil, nil
+			}
+			return formatShellCancelledResult(job, params), nil, nil
+		}
 		return result, stats, nil
-	case <-timer.C:
+	case <-gate.bgCh:
 		job.autoDegraded = true
 		r.bgJobs.put(job)
-		return formatShellRunningResult(job, params), nil, nil
+		r.syncShells.remove(toolCallID)
+		return formatShellRunningResult(job, params, "user"), nil, nil
+	case <-gate.cancelCh:
+		job.mu.Lock()
+		job.status = "cancelled"
+		if job.result == "" {
+			job.result = "任务已取消。"
+		}
+		job.finishedAt = nowMs()
+		job.mu.Unlock()
+		killShellProcess(cmd)
+		<-collectDone
+		return formatShellCancelledResult(job, params), nil, nil
+	case <-timer.C:
+		if params.userTimeout {
+			job.autoDegraded = true
+			r.bgJobs.put(job)
+			r.syncShells.remove(toolCallID)
+			return formatShellRunningResult(job, params, "timeout"), nil, nil
+		}
+		job.mu.Lock()
+		job.status = "cancelled"
+		job.result = formatShellHardTimeoutResult(params.timeoutSec)
+		job.finishedAt = nowMs()
+		job.mu.Unlock()
+		killShellProcess(cmd)
+		<-collectDone
+		return formatShellHardTimeoutResult(params.timeoutSec), nil, nil
 	case <-ctx.Done():
 		killShellProcess(cmd)
 		return "", nil, ctx.Err()

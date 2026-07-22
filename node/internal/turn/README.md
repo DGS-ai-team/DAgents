@@ -96,7 +96,7 @@ skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时�
 
 `processToolCalls` 按 `policy.DecideTool` 将 tool calls 分为：
 
-- **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 超时由 registry 自动降级；历史参数仍可走内部 `StartBackground`）
+- **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 仅在显式 `timeout_seconds` 时超时降级；历史参数仍可走内部 `StartBackground`）
 - **HITL pending**：`ask_user_information` 与 `require_approval` 工具合并为 **`PendingHITL.Items[]`**（不再区分 `HITLKind`）
 - **SSE**：本地 turn 发 **`hitl_required`**（`items[]` 每项 `hitl_type`：`user_information` \| `execute_tool`）；`done` 为 `awaiting_hitl` / `awaiting=hitl`
 

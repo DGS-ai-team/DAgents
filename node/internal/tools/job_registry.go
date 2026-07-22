@@ -78,6 +78,32 @@ func (reg *backgroundJobRegistry) get(id string) (*backgroundJob, bool) {
 	return job, ok
 }
 
+func (reg *backgroundJobRegistry) countRunning(sessionID string) int {
+	if reg == nil {
+		return 0
+	}
+	sid := strings.TrimSpace(sessionID)
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+	n := 0
+	for _, job := range reg.jobs {
+		if job == nil {
+			continue
+		}
+		job.mu.Lock()
+		running := job.status == "running"
+		jobSid := job.sessionID
+		job.mu.Unlock()
+		if !running {
+			continue
+		}
+		if sid == "" || jobSid == sid {
+			n++
+		}
+	}
+	return n
+}
+
 func newBackgroundJobRegistry() *backgroundJobRegistry {
 	return &backgroundJobRegistry{jobs: make(map[string]*backgroundJob)}
 }
@@ -204,17 +230,41 @@ func formatBackgroundJobAck(job *backgroundJob) string {
 	}, "\n")
 }
 
-func formatShellRunningResult(job *backgroundJob, params shellRunParams) string {
+func formatShellRunningResult(job *backgroundJob, params shellRunParams, reason string) string {
 	st := params.shellType
 	if job.bashShellType != "" {
 		st = shellType(job.bashShellType)
 	}
+	reasonLine := "命令超过同步等待时间，已自动降级为后台任务。"
+	if reason == "user" {
+		reasonLine = "已按用户请求转为后台任务。"
+	}
 	return strings.Join([]string{
 		fmt.Sprintf("[BASH_RESULT] status=RUNNING job_id=%s", job.id),
 		fmt.Sprintf("shell_type=%s", st),
-		"命令超过同步等待时间，已自动降级为后台任务。",
+		reasonLine,
 		backgroundJobAutoResultHint,
 		backgroundJobOptionalMgmtHint,
+	}, "\n")
+}
+
+func formatShellCancelledResult(job *backgroundJob, params shellRunParams) string {
+	st := params.shellType
+	if job != nil && job.bashShellType != "" {
+		st = shellType(job.bashShellType)
+	}
+	return strings.Join([]string{
+		"[BASH_RESULT] status=CANCELLED",
+		fmt.Sprintf("shell_type=%s", st),
+		"命令已被用户终止。",
+	}, "\n")
+}
+
+func formatShellHardTimeoutResult(timeoutSec int) string {
+	return strings.Join([]string{
+		"[BASH_RESULT] status=ERROR",
+		fmt.Sprintf("ERROR: 命令超过硬上限 %d 秒仍未结束，已终止（未转为后台）。", timeoutSec),
+		"若需超时后自动转后台，请显式传入 timeout_seconds；也可在执行中通过 UI「转后台」。",
 	}, "\n")
 }
 

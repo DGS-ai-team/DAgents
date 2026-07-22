@@ -14,7 +14,7 @@
 | `Definitions()` | LLM tools 列表 |
 | `Execute(ctx, name, arguments)` | 执行工具 |
 | `execReadFile` / `execWriteFile` / `execSearchReplace` / `execGlobFiles` / `execGrepFile` / `execGrepFiles` / `execSearchFile` | 内置实现（`search_file` 为 `grep_file` 别名） |
-| `runBashSyncWithAutoDegrade` | bash 同步超时自动降级后台 |
+| `runBashSyncWithAutoDegrade` | bash 同步等待；显式 timeout 可降后台，省略则硬上限杀进程；支持 UI 终止/转后台 |
 | `resolveRunCWD` / `resolveShellType` / `blockedNonRootPasswordPromptingShell` | bash_run 参数与安全策略 |
 | `applyShellProcAttr` / `signalKillProcessGroup` | POSIX/Windows 进程组（`shell_platform_*.go`） |
 | `WithBackgroundExecution` | 内部：标记后台 Execute，跳过同步窗口（不对 schema 暴露） |

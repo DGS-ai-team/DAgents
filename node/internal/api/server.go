@@ -382,6 +382,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
+	s.registerToolCallControlRoutes()
 	s.registerUIAggregateRoutes()
 	s.registerSessionRoutes()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
@@ -866,6 +867,7 @@ type sessionHydrateResponse struct {
 	NotifySeq       int                       `json:"notify_seq"`
 	AckSeq          int                       `json:"ack_seq"`
 	HasUnread       bool                      `json:"has_unread"`
+	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
 }
 
 func persistedRunTurnPhase(hasPendingHITL bool) string {
@@ -902,6 +904,16 @@ func (s *Server) handleSessionHydrate(w http.ResponseWriter, r *http.Request) {
 	if pendingA2A != nil && runPhase != string(turn.TaskPhaseAwaitingHITL) {
 		runPhase = string(turn.TaskPhaseAwaitingHITL)
 	}
+	toolJobs := map[string]int{"running": 0, "background": 0}
+	if reg := s.sessions.SessionTools(sessionID); reg != nil {
+		c := reg.SessionToolJobCounts(sessionID)
+		toolJobs["running"] = c.Running
+		toolJobs["background"] = c.Background
+	} else if reg := s.sessions.DefaultTools(); reg != nil {
+		c := reg.SessionToolJobCounts(sessionID)
+		toolJobs["running"] = c.Running
+		toolJobs["background"] = c.Background
+	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
 		SessionID:       view.SessionID,
 		RunTurnPhase:    runPhase,
@@ -914,6 +926,7 @@ func (s *Server) handleSessionHydrate(w http.ResponseWriter, r *http.Request) {
 		NotifySeq:       view.NotifySeq,
 		AckSeq:          view.AckSeq,
 		HasUnread:       view.HasUnread,
+		ToolJobs:        toolJobs,
 	})
 }
 

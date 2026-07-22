@@ -13,6 +13,7 @@ import { extractToolApprovals } from "../stores/hitl.js";
 import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.js";
 import { chromeStore, inputStripRight } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
+import { toolJobsStripText } from "../stores/toolJobs.js";
 import { statusStore, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
@@ -92,6 +93,7 @@ const pendingApprovals = computed(() =>
 );
 
 const workerStrip = computed(() => workerStripText());
+const toolJobsStrip = computed(() => toolJobsStripText());
 
 const inputStripLeftText = computed(() => {
   if (props.cancelling) return "正在取消…";
@@ -531,6 +533,7 @@ defineExpose({
             <span v-if="activityCmdCount" class="chat__activity-pill-cmd">{{ activityCmdCount }} cmd</span>
           </button>
           <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
+          <span v-if="toolJobsStrip" class="chat__worker-strip">{{ toolJobsStrip }}</span>
           <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
         </div>
         <div class="chat__composer-statusline-right">
