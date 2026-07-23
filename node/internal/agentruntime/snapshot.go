@@ -158,6 +158,25 @@ func MultimodalEnabledFromDefaults(snap Snapshot) *bool {
 	return nil
 }
 
+// EffectiveMultimodalEnabled 解析 Agent 生效的多模态开关：
+// 1) snapshot 内嵌 profiles[active].multimodal_enabled
+// 2) 否则按 defaults.llm.active 查 Node LLM 档案
+// 3) 再否则回退 Node 进程当前 multimodal
+func EffectiveMultimodalEnabled(nodeCFG *config.Config, snap Snapshot) bool {
+	if v := MultimodalEnabledFromDefaults(snap); v != nil {
+		return *v
+	}
+	if nodeCFG != nil {
+		if active := LLMActiveFromDefaults(snap); active != "" {
+			if p, ok := nodeCFG.LLM.GetProfile(active); ok {
+				return config.ProfileMultimodalEnabled(p)
+			}
+		}
+		return nodeCFG.MultimodalEnabled()
+	}
+	return false
+}
+
 // LLMActiveFromDefaults 读取 defaults.llm.active（Agent 绑定的 Node LLM 配置 id）。
 func LLMActiveFromDefaults(snap Snapshot) string {
 	llmRaw, ok := snap.Defaults["llm"]
