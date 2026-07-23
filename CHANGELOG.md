@@ -7,6 +7,7 @@
 ### 变更
 
 - **进程日志按日拆分**：`node|shell|browser-YYYY-MM-DD.log` 为完整日志，同日 `*.err.log` 仅错误；Node slog 全量走 stdout、error 额外写 stderr。
+- **工具气泡操作按钮**：bash「终止 / 转后台」与执行状态同一行，置于状态左侧，圆角样式，不换行。
 
 ### 修复
 
