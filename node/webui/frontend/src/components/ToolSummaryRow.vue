@@ -138,7 +138,7 @@ async function onBackground(ev) {
       <div v-if="showBashControls" class="tool-summary-row__actions">
         <button
           type="button"
-          class="tool-summary-row__action"
+          class="approval-action-btn approval-action-btn--reject"
           :disabled="!!busyAction"
           :title="actionError || undefined"
           @click="onCancel"
@@ -148,7 +148,7 @@ async function onBackground(ev) {
         <button
           v-if="showBackgroundAction"
           type="button"
-          class="tool-summary-row__action tool-summary-row__action--secondary"
+          class="approval-action-btn"
           :disabled="!!busyAction"
           :title="actionError || undefined"
           @click="onBackground"
@@ -291,34 +291,14 @@ async function onBackground(ev) {
   align-items: center;
   flex: 0 0 auto;
   flex-wrap: nowrap;
-  gap: 4px;
+  gap: 6px;
 }
 
-.tool-summary-row__action {
-  appearance: none;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-elevated);
-  color: var(--color-text);
-  font: inherit;
+.tool-summary-row__actions :deep(.approval-action-btn) {
   font-size: 11px;
   line-height: 1.2;
-  padding: 2px 9px;
-  border-radius: 8px;
-  cursor: pointer;
+  padding: 2px 8px;
   white-space: nowrap;
-}
-
-.tool-summary-row__action:hover:not(:disabled) {
-  border-color: var(--color-text-muted);
-}
-
-.tool-summary-row__action:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.tool-summary-row__action--secondary {
-  color: var(--color-text-muted);
 }
 
 .tool-summary-row__status {
