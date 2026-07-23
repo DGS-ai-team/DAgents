@@ -2,4 +2,4 @@
 package version
 
 // Version 为对外 /health 与日志使用的语义化版本。
-const Version = "0.8.1"
+const Version = "0.8.2"
