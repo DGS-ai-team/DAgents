@@ -19,7 +19,7 @@ Node 与 Client 共用 YAML 配置；**仓库只提交 `*.example.yaml`**，本�
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 ```
 
-编辑 `config.yaml`（例如 `llm.mock: false`、Manage 场景下 `agent.role`）。工具审批策略在 **Web UI「Agents › 策略」**（SQLite `agent_policy`）；`.runtime/policy/` 仅首次迁移/种子，改文件不会更新已有 Agent。
+编辑 `config.yaml`（例如 Manage 场景下 `agent.role`）。LLM 连接、工具审批策略、侧车 prompt 等请在 **Web UI** 配置（写入 SQLite）；勿再往 YAML 里填 provider/model/key 或策略正文。
 
 `config.yaml` **不会被 Git 跟踪**。
 

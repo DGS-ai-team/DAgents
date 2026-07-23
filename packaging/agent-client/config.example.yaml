@@ -7,8 +7,10 @@
 # 开发联调也可直接引用本文件：
 #   go run ./node/cmd/dagents-node -config packaging/agent-client/config.example.yaml
 #
-# 说明：用户 Agent 实例的策略 / 侧车 / LLM 连接以 SQLite 为准（agents.db、llm_configs.db）；
-# 本文件主要是 Node 进程级默认值与 Manage 连接。
+# 本文件只保留 Node 进程级配置。以下内容请在 Web UI / SQLite 管理，勿写在此：
+#   · LLM 连接档案 → 设置 › 连接 › LLM 配置（llm_configs.db）
+#   · Agent 策略 / 侧车 prompt → Agents › 设置（agents.db：agent_policy、agent_prompt_context）
+#   · 单 Agent 的工具组 / Hook 覆盖 / LLM 绑定 → agents.config_snapshot_json
 
 # node_id：可选；缺省自动生成并写入 <fs_root>/node/node_id
 # （旧键 agent_id 仍可读并合并为 node_id，请勿再新增）
@@ -21,8 +23,8 @@ listen:
 local:
   endpoint: http://127.0.0.1:18765
 
-# Node 对外身份（Manage / A2A）；替代已删除的 agent-card.json
-# role=compliance → 可作为被调方（expose_to_peers 由 role 推导，勿再写独立开关）
+# Node 对外身份（Manage / A2A）
+# role=compliance → 可作为被调方（expose 由 role 推导）
 # role=ops 或留空 → 通常作调用方
 agent:
   name: local-assistant
@@ -33,26 +35,10 @@ agent:
 
 # 工作区根（工具沙箱 + 运行时数据，缺省 ./.runtime）
 # 主要产物：agents.db · llm_configs.db · node/node_id · data/ · skills/ · externaltools/ · history/ · triggers/
-# （policy/、prompt_context/、memory/long_term.md 仅作首次迁移种子，权威数据在 SQLite）
 fs_root: ./.runtime
 
+# 进程级默认；连接档案（provider/base_url/model/key）在 Web UI 管理
 llm:
-  # 推荐在 Web UI「设置 › 连接 › LLM 配置」管理；密钥加密存 llm_configs.db。
-  # 下方为启动默认值 / 首次迁移快照。
-  provider: deepseek   # openai | deepseek | qwen | vllm
-  base_url: https://api.deepseek.com
-  model: deepseek-chat
-  # thinking: enabled      # enabled | disabled；默认 enabled
-  # reasoning_effort: high  # high | max（thinking=enabled 时）
-  api_key_env: OPENAI_API_KEY   # 首次迁移用；迁移后以 UI 录入为准
-  # --- 其他 provider 示例 ---
-  # provider: qwen
-  # base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  # model: qwen-plus
-  # provider: vllm
-  # base_url: http://127.0.0.1:8000/v1
-  # model: your-model-name
-  mock: false
   max_tool_loops: 32
 
 manage:
@@ -71,9 +57,6 @@ manage:
   #   inbox_wait_seconds: 25
   #   inbox_poll_seconds: 30                # 省略时默认 = interval_seconds
   # 发现分组由 Manage Console/API 分配，勿在 Node config 写 groups
-
-# 审批策略请在 Web UI「Agents › 策略」配置（SQLite agent_policy）；
-# .runtime/policy 仅首次迁移/种子，改文件不会更新已有 Agent。
 
 skills:
   enabled: true
@@ -101,8 +84,8 @@ ui:
   enabled: true
 
 tools:
-  # 内置工具组；省略 = 全部（见 handbook/04 · shared/config/README.md）
-  # 单 Agent 可在创建/设置里覆盖 enabled_groups
+  # 内置工具组（Node 默认）；省略 = 全部（见 handbook/04 · shared/config/README.md）
+  # 单 Agent 可在创建/设置里覆盖 enabled_groups（写入 SQLite snapshot）
   # enabled_groups:
   #   - fs
   #   - bash
@@ -163,6 +146,3 @@ hooks:
 #   output_dir: browser
 #   max_sessions: 1
 #   ignore_https_errors: false
-
-# multimodal:
-#   enabled: false

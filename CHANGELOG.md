@@ -6,7 +6,7 @@
 
 ### 变更
 
-- **`config.example.yaml`**：去掉已废弃的 `expose_to_peers` 与「策略文件即生效」说明；补上 `agent:`（name/role）与 SQLite 为策略/侧车/LLM 权威的注释。
+- **`config.example.yaml`**：去掉已废弃的 `expose_to_peers`；移除已迁入 SQLite 的 LLM 连接字段（provider/base_url/model/key 等），仅保留进程级 `llm.max_tool_loops`；补上 `agent:` 与「策略/侧车/LLM 走 Web UI」说明。
 
 ### 修复
 
