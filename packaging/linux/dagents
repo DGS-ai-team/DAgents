@@ -129,7 +129,7 @@ shutdown_node() {
 
   clear_node_pid
   if probe_node; then
-    die "node still responds to probe after shutdown; check .runtime/logs/node.err.log"
+    die "node still responds to probe after shutdown; check .runtime/logs/node-$(date +%Y-%m-%d).err.log"
   fi
   echo "[dagents] node stopped"
 }
@@ -187,7 +187,7 @@ shutdown_browser() {
 
   clear_browser_pid
   if probe_browser; then
-    die "browser service still responds after shutdown; check .runtime/logs/browser.err.log"
+    die "browser service still responds after shutdown; check .runtime/logs/browser-$(date +%Y-%m-%d).err.log"
   fi
   echo "[dagents] browser service stopped"
 }
@@ -195,9 +195,13 @@ shutdown_browser() {
 start_browser_background() {
   require_bin dagents-browser
   mkdir -p "${ROOT}/.runtime/logs"
-  echo "[dagents] starting browser service in background (logs: .runtime/logs/browser.log)"
+  local log_day browser_log browser_err
+  log_day="$(date +%Y-%m-%d)"
+  browser_log="${ROOT}/.runtime/logs/browser-${log_day}.log"
+  browser_err="${ROOT}/.runtime/logs/browser-${log_day}.err.log"
+  echo "[dagents] starting browser service in background (logs: ${browser_log})"
   nohup "${BIN}/dagents-browser" --config "${ROOT}/${CFG}" \
-    >>"${ROOT}/.runtime/logs/browser.log" 2>>"${ROOT}/.runtime/logs/browser.err.log" &
+    >>"${browser_log}" 2>>"${browser_err}" &
   write_browser_pid "$!"
 }
 
@@ -207,7 +211,7 @@ wait_browser_ready() {
     sleep 1
     wait=$((wait + 1))
     if [[ "${wait}" -ge 30 ]]; then
-      die "browser service did not become ready within 30s (see .runtime/logs/browser.err.log)"
+    die "browser service did not become ready within 30s (see .runtime/logs/browser-$(date +%Y-%m-%d).err.log)"
     fi
   done
 }
@@ -225,9 +229,13 @@ start_browser_default() {
 start_node_background() {
   require_bin dagents-node
   mkdir -p "${ROOT}/.runtime/logs"
-  echo "[dagents] starting node in background (logs: .runtime/logs/node.log)"
+  local log_day node_log node_err
+  log_day="$(date +%Y-%m-%d)"
+  node_log="${ROOT}/.runtime/logs/node-${log_day}.log"
+  node_err="${ROOT}/.runtime/logs/node-${log_day}.err.log"
+  echo "[dagents] starting node in background (full: ${node_log}; errors: ${node_err})"
   nohup "${BIN}/dagents-node" -config "${ROOT}/${CFG}" \
-    >>"${ROOT}/.runtime/logs/node.log" 2>>"${ROOT}/.runtime/logs/node.err.log" &
+    >>"${node_log}" 2>>"${node_err}" &
   write_node_pid "$!"
 }
 
@@ -249,7 +257,7 @@ wait_node_ready() {
     sleep 1
     wait=$((wait + 1))
     if [[ "${wait}" -ge 30 ]]; then
-      die "node did not become ready within 30s (see .runtime/logs/node.err.log)"
+      die "node did not become ready within 30s (see .runtime/logs/node-$(date +%Y-%m-%d).err.log)"
     fi
   done
 }

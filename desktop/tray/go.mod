@@ -4,9 +4,11 @@ go 1.25.0
 
 require (
 	github.com/DGS-ai-team/DAgents/shared/config v0.0.0
+	github.com/DGS-ai-team/DAgents/shared/logfiles v0.0.0
 	github.com/DGS-ai-team/DAgents/shared/update v0.0.0
 	github.com/getlantern/systray v1.2.2
 	github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4
+	golang.org/x/sys v0.1.0
 )
 
 require (
@@ -19,10 +21,11 @@ require (
 	github.com/go-stack/stack v1.8.0 // indirect
 	github.com/nu7hatch/gouuid v0.0.0-20131221200532-179d4d0c4d8d // indirect
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
-	golang.org/x/sys v0.1.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 replace github.com/DGS-ai-team/DAgents/shared/config => ../../shared/config
+
+replace github.com/DGS-ai-team/DAgents/shared/logfiles => ../../shared/logfiles
 
 replace github.com/DGS-ai-team/DAgents/shared/update => ../../shared/update

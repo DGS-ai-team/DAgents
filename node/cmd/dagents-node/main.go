@@ -60,7 +60,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: invalid log level %q (use debug, info, warn, error)\n", levelText)
 		os.Exit(1)
 	}
-	logger := logx.NewLogger(os.Stderr, level)
+	logger := logx.NewSplitLogger(os.Stdout, os.Stderr, level)
 	slog.SetDefault(logger)
 
 	// 3) 构造 HTTP 服务（session、turn、tools、SQLite 等由 api.NewServer 内部装配）。

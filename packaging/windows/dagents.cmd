@@ -15,6 +15,7 @@ set "CFG_ABS=%DAGENTS_HOME%\%CFG%"
 set "NODE_PID_FILE=%DAGENTS_HOME%\.runtime\node.pid"
 set "SHELL_PID_FILE=%DAGENTS_HOME%\.runtime\shell.pid"
 set "BROWSER_PID_FILE=%DAGENTS_HOME%\.runtime\browser.pid"
+call :resolve_log_day
 
 if "%~1"=="" goto default_start_node
 if /I "%~1"=="help" goto help
@@ -163,14 +164,20 @@ if errorlevel 1 exit /b 1
 echo [dagents] shell started (system tray)
 exit /b 0
 
+:resolve_log_day
+set "LOG_DAY="
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"`) do set "LOG_DAY=%%i"
+if not defined LOG_DAY set "LOG_DAY=unknown"
+exit /b 0
+
 :start_shell_background
 if not exist "%DAGENTS_HOME%\bin\dagents-shell.exe" exit /b 1
 if not exist "%DAGENTS_HOME%\.runtime\logs" mkdir "%DAGENTS_HOME%\.runtime\logs"
 set "SHELL_EXE=%DAGENTS_HOME%\bin\dagents-shell.exe"
-set "SHELL_LOG=%DAGENTS_HOME%\.runtime\logs\shell.log"
-set "SHELL_ERR=%DAGENTS_HOME%\.runtime\logs\shell.err.log"
+set "SHELL_LOG=%DAGENTS_HOME%\.runtime\logs\shell-%LOG_DAY%.log"
+set "SHELL_ERR=%DAGENTS_HOME%\.runtime\logs\shell-%LOG_DAY%.err.log"
 set "SHELL_START_PS1=%DAGENTS_HOME%\scripts\startup\windows\start-shell-detached.ps1"
-echo [dagents] starting shell in background (logs: %SHELL_LOG%)
+echo [dagents] starting shell in background (full: %SHELL_LOG%; errors: %SHELL_ERR%)
 if not exist "%SHELL_START_PS1%" (
   echo [dagents] missing %SHELL_START_PS1%
   exit /b 1
@@ -206,7 +213,7 @@ if defined SHELL_PID (
 call :clear_shell_pid
 call :probe_shell
 if not errorlevel 1 (
-  echo [dagents] shell still running after shutdown; check .runtime\logs\shell.err.log
+  echo [dagents] shell still running after shutdown; check .runtime\logs\shell-%LOG_DAY%.err.log
   exit /b 1
 )
 echo [dagents] shell stopped
@@ -307,10 +314,10 @@ exit /b 0
 if not exist "%DAGENTS_HOME%\bin\dagents-browser.exe" exit /b 1
 if not exist "%DAGENTS_HOME%\.runtime\logs" mkdir "%DAGENTS_HOME%\.runtime\logs"
 set "BROWSER_EXE=%DAGENTS_HOME%\bin\dagents-browser.exe"
-set "BROWSER_LOG=%DAGENTS_HOME%\.runtime\logs\browser.log"
-set "BROWSER_ERR=%DAGENTS_HOME%\.runtime\logs\browser.err.log"
+set "BROWSER_LOG=%DAGENTS_HOME%\.runtime\logs\browser-%LOG_DAY%.log"
+set "BROWSER_ERR=%DAGENTS_HOME%\.runtime\logs\browser-%LOG_DAY%.err.log"
 set "BROWSER_START_PS1=%DAGENTS_HOME%\scripts\startup\windows\start-browser-detached.ps1"
-echo [dagents] starting browser service in background (logs: %BROWSER_LOG%)
+echo [dagents] starting browser service in background (full: %BROWSER_LOG%; errors: %BROWSER_ERR%)
 if not exist "%BROWSER_START_PS1%" (
   echo [dagents] missing %BROWSER_START_PS1%
   exit /b 1
@@ -346,7 +353,7 @@ if defined BROWSER_PID (
 call :clear_browser_pid
 call :probe_browser
 if not errorlevel 1 (
-  echo [dagents] browser service still responds after shutdown; check .runtime\logs\browser.err.log
+  echo [dagents] browser service still responds after shutdown; check .runtime\logs\browser-%LOG_DAY%.err.log
   exit /b 1
 )
 echo [dagents] browser service stopped
@@ -384,9 +391,9 @@ if errorlevel 1 ping -n 2 127.0.0.1 >nul
 set /a BROWSER_WAIT+=1
 if !BROWSER_WAIT! lss 30 goto wait_browser_ready_loop
 echo [dagents] browser service did not become ready within 30s
-if exist "%DAGENTS_HOME%\.runtime\logs\browser.err.log" (
-  echo [dagents] -------- browser.err.log --------
-  type "%DAGENTS_HOME%\.runtime\logs\browser.err.log"
+if exist "%DAGENTS_HOME%\.runtime\logs\browser-%LOG_DAY%.err.log" (
+  echo [dagents] -------- browser-%LOG_DAY%.err.log --------
+  type "%DAGENTS_HOME%\.runtime\logs\browser-%LOG_DAY%.err.log"
   echo [dagents] ---------------------------
 )
 exit /b 1
@@ -447,10 +454,10 @@ exit /b 0
 if not exist "%DAGENTS_HOME%\bin\dagents-node.exe" exit /b 1
 if not exist "%DAGENTS_HOME%\.runtime\logs" mkdir "%DAGENTS_HOME%\.runtime\logs"
 set "NODE_EXE=%DAGENTS_HOME%\bin\dagents-node.exe"
-set "NODE_LOG=%DAGENTS_HOME%\.runtime\logs\node.log"
-set "NODE_ERR=%DAGENTS_HOME%\.runtime\logs\node.err.log"
+set "NODE_LOG=%DAGENTS_HOME%\.runtime\logs\node-%LOG_DAY%.log"
+set "NODE_ERR=%DAGENTS_HOME%\.runtime\logs\node-%LOG_DAY%.err.log"
 set "NODE_START_PS1=%DAGENTS_HOME%\scripts\startup\windows\start-node-detached.ps1"
-echo [dagents] starting node in background (logs: %NODE_LOG%)
+echo [dagents] starting node in background (full: %NODE_LOG%; errors: %NODE_ERR%)
 if not exist "%NODE_START_PS1%" (
   echo [dagents] missing %NODE_START_PS1%
   exit /b 1
@@ -486,7 +493,7 @@ if defined NODE_PID (
 call :clear_node_pid
 call :probe_node
 if not errorlevel 1 (
-  echo [dagents] node still responds to probe after shutdown; check .runtime\logs\node.err.log
+  echo [dagents] node still responds to probe after shutdown; check .runtime\logs\node-%LOG_DAY%.err.log
   exit /b 1
 )
 echo [dagents] node stopped
@@ -548,13 +555,13 @@ echo [dagents] node did not become ready within 30s
 echo [dagents] install dir: %DAGENTS_HOME%
 echo [dagents] probe detail:
 bin\dagents-client.exe -config "%CFG_ABS%" probe
-if exist "%DAGENTS_HOME%\.runtime\logs\node.err.log" (
-  echo [dagents] -------- node.err.log --------
-  type "%DAGENTS_HOME%\.runtime\logs\node.err.log"
+if exist "%DAGENTS_HOME%\.runtime\logs\node-%LOG_DAY%.err.log" (
+  echo [dagents] -------- node-%LOG_DAY%.err.log --------
+  type "%DAGENTS_HOME%\.runtime\logs\node-%LOG_DAY%.err.log"
   echo [dagents] ---------------------------
 )
-if exist "%DAGENTS_HOME%\.runtime\logs\node.log" (
-  echo [dagents] hint: also check %DAGENTS_HOME%\.runtime\logs\node.log
+if exist "%DAGENTS_HOME%\.runtime\logs\node-%LOG_DAY%.log" (
+  echo [dagents] hint: also check %DAGENTS_HOME%\.runtime\logs\node-%LOG_DAY%.log
 )
 exit /b 1
 

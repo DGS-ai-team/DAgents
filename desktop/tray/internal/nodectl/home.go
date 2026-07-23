@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/DGS-ai-team/DAgents/shared/logfiles"
 )
 
 const EnvHome = "DAGENTS_HOME"
@@ -42,15 +45,17 @@ func ResolveLayout(configPath string) (*Layout, error) {
 	}
 	nodeExe := filepath.Join(home, "bin", "dagents-node.exe")
 	runtimeDir := filepath.Join(home, ".runtime")
+	logDir := filepath.Join(runtimeDir, "logs")
+	now := time.Now()
 	return &Layout{
-		Home:       home,
-		ConfigPath: cfg,
-		NodeExe:    nodeExe,
-		PidFile:    filepath.Join(runtimeDir, "node.pid"),
-		LogOut:     filepath.Join(runtimeDir, "logs", "node.log"),
-		LogErr:     filepath.Join(runtimeDir, "logs", "node.err.log"),
-		ShellLog:   filepath.Join(runtimeDir, "logs", "shell.log"),
-		ShellLogErr: filepath.Join(runtimeDir, "logs", "shell.err.log"),
+		Home:        home,
+		ConfigPath:  cfg,
+		NodeExe:     nodeExe,
+		PidFile:     filepath.Join(runtimeDir, "node.pid"),
+		LogOut:      logfiles.JoinDated(logDir, "node", false, now),
+		LogErr:      logfiles.JoinDated(logDir, "node", true, now),
+		ShellLog:    logfiles.JoinDated(logDir, "shell", false, now),
+		ShellLogErr: logfiles.JoinDated(logDir, "shell", true, now),
 	}, nil
 }
 
