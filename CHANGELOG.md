@@ -8,10 +8,12 @@
 
 - **进程日志按日拆分**：`node|shell|browser-YYYY-MM-DD.log` 为完整日志，同日 `*.err.log` 仅错误；Node slog 全量走 stdout、error 额外写 stderr。
 - **工具气泡操作按钮**：bash「终止 / 转后台」与执行状态同一行，置于状态左侧，圆角样式，不换行。
+- **bash 控制时机**：仅在真正开始执行后展示按钮（参数生成中、审批中不展示）；转后台后气泡保留「终止」；状态栏「执行中 / 后台 / 审批」改为与 Changes 同款 pill。
 
 ### 修复
 
 - **`search_replace` 多行预览**：跨行替换时行号提示由「未知」改为「多行」。
+- **后台 bash 终止**：`POST .../tool-calls/{id}/cancel` 可按 `tool_call_id` 终止已转后台的任务。
 
 ---
 

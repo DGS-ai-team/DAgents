@@ -117,10 +117,32 @@ func (t *syncShellTracker) countSession(sessionID string) int {
 	return n
 }
 
-// ToolJobCounts 为某 session 的同步执行中 / 后台 running 数量。
+func (t *syncShellTracker) callIDsSession(sessionID string) []string {
+	if t == nil {
+		return nil
+	}
+	sid := strings.TrimSpace(sessionID)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]string, 0, len(t.byCall))
+	for id, e := range t.byCall {
+		if e == nil {
+			continue
+		}
+		if sid != "" && e.sessionID != "" && e.sessionID != sid {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// ToolJobCounts 为某 session 的同步执行中 / 后台 running 数量与 tool_call_id 列表。
 type ToolJobCounts struct {
-	Running    int `json:"running"`
-	Background int `json:"background"`
+	Running           int      `json:"running"`
+	Background        int      `json:"background"`
+	RunningCallIDs    []string `json:"running_call_ids"`
+	BackgroundCallIDs []string `json:"background_call_ids"`
 }
 
 // SessionToolJobCounts 返回指定 session 的工具执行计数。
@@ -129,34 +151,59 @@ func (r *Registry) SessionToolJobCounts(sessionID string) ToolJobCounts {
 		return ToolJobCounts{}
 	}
 	return ToolJobCounts{
-		Running:    r.syncShells.countSession(sessionID),
-		Background: r.bgJobs.countRunning(sessionID),
+		Running:           r.syncShells.countSession(sessionID),
+		Background:        r.bgJobs.countRunning(sessionID),
+		RunningCallIDs:    r.syncShells.callIDsSession(sessionID),
+		BackgroundCallIDs: r.bgJobs.runningCallIDs(sessionID),
 	}
 }
 
-// ErrSyncShellNotFound 表示没有可控制的同步 bash。
+// ErrSyncShellNotFound 表示没有可控制的同步/后台 bash。
 var ErrSyncShellNotFound = fmt.Errorf("sync bash tool call not found")
 
 // ErrSyncShellNotBash 预留：非 bash 工具暂不支持。
 var ErrSyncShellNotBash = fmt.Errorf("only bash_run supports cancel/background")
 
-// CancelSyncBash 终止仍在同步等待的 bash_run（按 tool_call_id）。
+// CancelSyncBash 终止仍在同步等待或已转后台的 bash_run（按 tool_call_id）。
 func (r *Registry) CancelSyncBash(sessionID, toolCallID string) error {
-	if r == nil || r.syncShells == nil {
+	if r == nil {
 		return ErrSyncShellNotFound
 	}
-	entry, ok := r.syncShells.get(toolCallID)
-	if !ok || entry == nil || entry.gate == nil {
+	if r.syncShells != nil {
+		entry, ok := r.syncShells.get(toolCallID)
+		if ok && entry != nil && entry.gate != nil {
+			if sid := strings.TrimSpace(sessionID); sid != "" && entry.sessionID != "" && entry.sessionID != sid {
+				return ErrSyncShellNotFound
+			}
+			if entry.job != nil && entry.job.toolName != "" && entry.job.toolName != "bash_run" {
+				return ErrSyncShellNotBash
+			}
+			if entry.gate.RequestCancel() {
+				return nil
+			}
+		}
+	}
+	return r.cancelBackgroundBashByToolCall(sessionID, toolCallID)
+}
+
+func (r *Registry) cancelBackgroundBashByToolCall(sessionID, toolCallID string) error {
+	if r == nil || r.bgJobs == nil {
 		return ErrSyncShellNotFound
 	}
-	if sid := strings.TrimSpace(sessionID); sid != "" && entry.sessionID != "" && entry.sessionID != sid {
+	job, ok := r.bgJobs.findRunningByToolCallID(sessionID, toolCallID)
+	if !ok || job == nil {
 		return ErrSyncShellNotFound
 	}
-	if entry.job != nil && entry.job.toolName != "" && entry.job.toolName != "bash_run" {
+	if job.toolName != "" && job.toolName != "bash_run" {
 		return ErrSyncShellNotBash
 	}
-	if !entry.gate.RequestCancel() {
-		return ErrSyncShellNotFound
+	job.mu.Lock()
+	autoDegraded := job.autoDegraded
+	job.mu.Unlock()
+	_ = job.cancelJob()
+	// 同步超时降级的 collector 在 cancelled 时不会 notifyDone，这里补一次以便 UI 回灌。
+	if autoDegraded {
+		r.bgJobs.notifyDone(job.sessionID, jobDonePayload(job))
 	}
 	return nil
 }

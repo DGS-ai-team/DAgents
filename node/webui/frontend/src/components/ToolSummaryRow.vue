@@ -6,8 +6,10 @@ import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import {
   backgroundBashToolCall,
-  canControlBashTool,
+  bashControlMode,
+  canBackgroundBashTool,
   cancelBashToolCall,
+  isBashBackgroundRunning,
   toolCallIdFromEntry,
   toolJobsStore,
 } from "../stores/toolJobs.js";
@@ -26,16 +28,23 @@ const actionError = ref("");
 let tickTimer = null;
 
 const summary = computed(() => toolStepUserSummary({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const inProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
+const stepInProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
+const backgroundRunning = computed(() => isBashBackgroundRunning(props.resultEntry));
+const controlMode = computed(() => bashControlMode({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
+const inProgress = computed(() => stepInProgress.value || backgroundRunning.value || controlMode.value === "background");
+const showBashControls = computed(() => controlMode.value != null);
+const showBackgroundAction = computed(() => canBackgroundBashTool({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
 const inlineMedia = computed(() => entryMedia(props.resultEntry));
 const visual = computed(() => resolveToolVisual(props.resultEntry || props.callEntry || {}));
-const showBashControls = computed(() => canControlBashTool({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const toolCallId = computed(() => toolCallIdFromEntry(props.callEntry));
+const toolCallId = computed(
+  () => toolCallIdFromEntry(props.callEntry) || toolCallIdFromEntry(props.resultEntry),
+);
 const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] || "");
 
 const status = computed(() => {
   void nowTick.value;
+  if (backgroundRunning.value || controlMode.value === "background") return "后台执行中";
   const base = toolStepStatusText({ callEntry: props.callEntry, resultEntry: props.resultEntry });
   if (!props.callEntry?.partial || !props.callEntry?.startedAt) return base;
   const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);
@@ -137,6 +146,7 @@ async function onBackground(ev) {
           {{ busyAction === "cancel" ? "终止中…" : "终止" }}
         </button>
         <button
+          v-if="showBackgroundAction"
           type="button"
           class="tool-summary-row__action tool-summary-row__action--secondary"
           :disabled="!!busyAction"

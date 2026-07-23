@@ -261,3 +261,46 @@ func TestBashRunBackgroundSyncViaUI(t *testing.T) {
 		t.Fatal("background did not finish in time")
 	}
 }
+
+func TestBashRunCancelAfterBackgroundViaUI(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.bashHardLimitSec = 30
+	ctx := WithToolCallID(WithSession(context.Background(), "sess-bg-cancel"), "call-bg-cancel-1")
+	done := make(chan string, 1)
+	go func() {
+		out, execErr := reg.Execute(ctx, "bash_run", `{"command":"sleep 20","timeout_seconds":2}`)
+		if execErr != nil {
+			done <- execErr.Error()
+			return
+		}
+		done <- out
+	}()
+	select {
+	case out := <-done:
+		if !strings.Contains(out, "status=RUNNING") {
+			t.Fatalf("expected RUNNING degrade, got %q", out)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for degrade")
+	}
+	counts := reg.SessionToolJobCounts("sess-bg-cancel")
+	if counts.Background < 1 || len(counts.BackgroundCallIDs) < 1 {
+		t.Fatalf("expected background job ids, got %+v", counts)
+	}
+	if err := reg.CancelSyncBash("sess-bg-cancel", "call-bg-cancel-1"); err != nil {
+		t.Fatalf("cancel background: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		c := reg.SessionToolJobCounts("sess-bg-cancel")
+		if c.Background == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("background count did not drop after cancel: %+v", reg.SessionToolJobCounts("sess-bg-cancel"))
+}

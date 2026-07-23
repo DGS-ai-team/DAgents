@@ -104,6 +104,70 @@ func (reg *backgroundJobRegistry) countRunning(sessionID string) int {
 	return n
 }
 
+func (reg *backgroundJobRegistry) runningCallIDs(sessionID string) []string {
+	if reg == nil {
+		return nil
+	}
+	sid := strings.TrimSpace(sessionID)
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+	out := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, job := range reg.jobs {
+		if job == nil {
+			continue
+		}
+		job.mu.Lock()
+		running := job.status == "running"
+		jobSid := job.sessionID
+		callID := strings.TrimSpace(job.toolCallID)
+		job.mu.Unlock()
+		if !running || callID == "" {
+			continue
+		}
+		if sid != "" && jobSid != "" && jobSid != sid {
+			continue
+		}
+		if _, ok := seen[callID]; ok {
+			continue
+		}
+		seen[callID] = struct{}{}
+		out = append(out, callID)
+	}
+	return out
+}
+
+func (reg *backgroundJobRegistry) findRunningByToolCallID(sessionID, toolCallID string) (*backgroundJob, bool) {
+	if reg == nil {
+		return nil, false
+	}
+	sid := strings.TrimSpace(sessionID)
+	callID := strings.TrimSpace(toolCallID)
+	if callID == "" {
+		return nil, false
+	}
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+	for _, job := range reg.jobs {
+		if job == nil {
+			continue
+		}
+		job.mu.Lock()
+		running := job.status == "running"
+		jobSid := job.sessionID
+		jobCall := strings.TrimSpace(job.toolCallID)
+		job.mu.Unlock()
+		if !running || jobCall != callID {
+			continue
+		}
+		if sid != "" && jobSid != "" && jobSid != sid {
+			continue
+		}
+		return job, true
+	}
+	return nil, false
+}
+
 func newBackgroundJobRegistry() *backgroundJobRegistry {
 	return &backgroundJobRegistry{jobs: make(map[string]*backgroundJob)}
 }
