@@ -95,6 +95,8 @@ export function toolStepStatusText({ callEntry, resultEntry } = {}) {
   if (resultEntry?.data?.rejected || callEntry?.data?.rejected) return "已拒绝";
   if (resultEntry?.data?.interrupted || callEntry?.data?.interrupted) return "已中断";
   if (callEntry?.partial) return "进行中";
+  const content = String(resultEntry?.data?.content || "");
+  if (/\[BASH_RESULT\]\s+status=RUNNING\b/i.test(content)) return "后台执行中";
   if (resultEntry) return "已完成";
   if (callEntry) return "进行中";
   return "";

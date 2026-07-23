@@ -1,20 +1,36 @@
 import { reactive } from "vue";
 import * as api from "../api/node.js";
-import { toolStepIsInProgress } from "../utils/toolUserLabel.js";
 
 export const toolJobsStore = reactive({
   running: 0,
   background: 0,
+  runningCallIds: /** @type {string[]} */ ([]),
+  backgroundCallIds: /** @type {string[]} */ ([]),
   busyCallIds: /** @type {Record<string, 'cancel' | 'background'>} */ ({}),
 });
 
 let pollTimer = null;
+
+function normalizeIDList(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const id = String(item || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
 
 export function applyToolJobsSnapshot(data) {
   const running = Number(data?.running);
   const background = Number(data?.background);
   toolJobsStore.running = Number.isFinite(running) && running > 0 ? Math.floor(running) : 0;
   toolJobsStore.background = Number.isFinite(background) && background > 0 ? Math.floor(background) : 0;
+  toolJobsStore.runningCallIds = normalizeIDList(data?.running_call_ids);
+  toolJobsStore.backgroundCallIds = normalizeIDList(data?.background_call_ids);
 }
 
 export function toolJobsStripText() {
@@ -34,18 +50,47 @@ export function toolNameFromEntry(entry) {
   return String(data.tool_name || data.name || "").trim();
 }
 
-export function canControlBashTool({ callEntry, resultEntry } = {}) {
-  if (!toolStepIsInProgress({ callEntry, resultEntry })) return false;
-  if (callEntry?.partial) return false;
-  const name = toolNameFromEntry(callEntry);
-  if (name !== "bash_run") return false;
-  return Boolean(toolCallIdFromEntry(callEntry));
+/** 解析 bash_run 结果正文中的 status=… */
+export function parseBashResultStatus(content) {
+  const m = String(content || "").match(/\[BASH_RESULT\]\s+status=([A-Za-z_]+)/);
+  return m ? m[1].toUpperCase() : "";
+}
+
+export function isBashBackgroundRunning(resultEntry) {
+  return parseBashResultStatus(resultEntry?.data?.content) === "RUNNING";
+}
+
+/**
+ * bash 控制模式：
+ * - running：真正同步执行中（可终止 + 转后台）
+ * - background：已转后台仍在跑（仅可终止）
+ * - null：参数生成中 / 审批中 / 已结束 — 不展示按钮
+ *
+ * 仅依据 /tool-jobs 返回的 call id（真正进执行器后才登记），避免审批阶段误显。
+ */
+export function bashControlMode({ callEntry, resultEntry } = {}) {
+  const name = toolNameFromEntry(callEntry) || toolNameFromEntry(resultEntry);
+  if (name !== "bash_run") return null;
+  if (callEntry?.partial) return null;
+  const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
+  if (!id) return null;
+  if (toolJobsStore.runningCallIds.includes(id)) return "running";
+  if (toolJobsStore.backgroundCallIds.includes(id)) return "background";
+  return null;
+}
+
+export function canControlBashTool(args) {
+  return bashControlMode(args) != null;
+}
+
+export function canBackgroundBashTool(args) {
+  return bashControlMode(args) === "running";
 }
 
 export async function refreshToolJobs(agentId) {
   const id = String(agentId || "").trim();
   if (!id) {
-    applyToolJobsSnapshot({ running: 0, background: 0 });
+    applyToolJobsSnapshot({ running: 0, background: 0, running_call_ids: [], background_call_ids: [] });
     return;
   }
   try {
@@ -63,7 +108,7 @@ export function startToolJobsPolling(getAgentId) {
     refreshToolJobs(id);
   };
   tick();
-  pollTimer = setInterval(tick, 2000);
+  pollTimer = setInterval(tick, 1000);
 }
 
 export function stopToolJobsPolling() {

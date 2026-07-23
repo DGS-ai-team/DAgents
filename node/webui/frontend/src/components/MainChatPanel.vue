@@ -13,7 +13,7 @@ import { extractToolApprovals } from "../stores/hitl.js";
 import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.js";
 import { chromeStore, inputStripRight } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
-import { toolJobsStripText } from "../stores/toolJobs.js";
+import { toolJobsStore } from "../stores/toolJobs.js";
 import { statusStore, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
@@ -93,14 +93,12 @@ const pendingApprovals = computed(() =>
 );
 
 const workerStrip = computed(() => workerStripText());
-const toolJobsStrip = computed(() => toolJobsStripText());
+const runningJobCount = computed(() => toolJobsStore.running);
+const backgroundJobCount = computed(() => toolJobsStore.background);
 
 const inputStripLeftText = computed(() => {
   if (props.cancelling) return "正在取消…";
-  if (pendingApprovals.value > 0) {
-    return `${pendingApprovals.value} 个工具待审批`;
-  }
-  if (props.hitlQueue.length > 1) {
+  if (props.hitlQueue.length > 1 && pendingApprovals.value === 0) {
     return `HITL 队列 ${props.hitlQueue.length}`;
   }
   return "";
@@ -532,8 +530,31 @@ defineExpose({
             <span v-if="activityFileCount" class="chat__activity-pill-add">+{{ activityFileCount }}</span>
             <span v-if="activityCmdCount" class="chat__activity-pill-cmd">{{ activityCmdCount }} cmd</span>
           </button>
+          <span
+            v-if="runningJobCount > 0"
+            class="chat__activity-pill chat__activity-pill--static"
+            title="同步执行中的 bash"
+          >
+            <span class="chat__activity-pill-label">执行中</span>
+            <span class="chat__activity-pill-add">{{ runningJobCount }}</span>
+          </span>
+          <span
+            v-if="backgroundJobCount > 0"
+            class="chat__activity-pill chat__activity-pill--static"
+            title="后台执行中的 bash"
+          >
+            <span class="chat__activity-pill-label">后台</span>
+            <span class="chat__activity-pill-cmd">{{ backgroundJobCount }}</span>
+          </span>
+          <span
+            v-if="pendingApprovals > 0"
+            class="chat__activity-pill chat__activity-pill--static"
+            title="待审批工具"
+          >
+            <span class="chat__activity-pill-label">审批</span>
+            <span class="chat__activity-pill-cmd">{{ pendingApprovals }}</span>
+          </span>
           <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
-          <span v-if="toolJobsStrip" class="chat__worker-strip">{{ toolJobsStrip }}</span>
           <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
         </div>
         <div class="chat__composer-statusline-right">

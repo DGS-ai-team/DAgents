@@ -6,8 +6,10 @@ import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import {
   backgroundBashToolCall,
-  canControlBashTool,
+  bashControlMode,
+  canBackgroundBashTool,
   cancelBashToolCall,
+  isBashBackgroundRunning,
   toolCallIdFromEntry,
   toolJobsStore,
 } from "../stores/toolJobs.js";
@@ -26,16 +28,23 @@ const actionError = ref("");
 let tickTimer = null;
 
 const summary = computed(() => toolStepUserSummary({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const inProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
+const stepInProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
+const backgroundRunning = computed(() => isBashBackgroundRunning(props.resultEntry));
+const controlMode = computed(() => bashControlMode({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
+const inProgress = computed(() => stepInProgress.value || backgroundRunning.value || controlMode.value === "background");
+const showBashControls = computed(() => controlMode.value != null);
+const showBackgroundAction = computed(() => canBackgroundBashTool({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
 const inlineMedia = computed(() => entryMedia(props.resultEntry));
 const visual = computed(() => resolveToolVisual(props.resultEntry || props.callEntry || {}));
-const showBashControls = computed(() => canControlBashTool({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const toolCallId = computed(() => toolCallIdFromEntry(props.callEntry));
+const toolCallId = computed(
+  () => toolCallIdFromEntry(props.callEntry) || toolCallIdFromEntry(props.resultEntry),
+);
 const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] || "");
 
 const status = computed(() => {
   void nowTick.value;
+  if (backgroundRunning.value || controlMode.value === "background") return "后台执行中";
   const base = toolStepStatusText({ callEntry: props.callEntry, resultEntry: props.resultEntry });
   if (!props.callEntry?.partial || !props.callEntry?.startedAt) return base;
   const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);
@@ -109,47 +118,59 @@ async function onBackground(ev) {
       [`tool-summary-row--${visual.kind}`]: true,
     }"
   >
-    <button type="button" class="tool-summary-row__head" @click="toggle">
-      <span class="tool-summary-row__glyph" aria-hidden="true">
-        <span v-if="inProgress" class="tool-exec-spinner" />
-        <span v-else class="tool-summary-row__check">✓</span>
-      </span>
-      <span class="tool-summary-row__kind">{{ visual.label }}</span>
-      <span class="tool-summary-row__text">{{ summary }}</span>
-      <span v-if="inlineMedia.length && !expanded" class="tool-summary-row__thumb-wrap">
-        <img
-          class="tool-summary-row__thumb"
-          :src="inlineMedia[0].url"
-          :alt="inlineMedia[0].label || '图片'"
-          loading="lazy"
-        />
-      </span>
+    <div class="tool-summary-row__bar">
+      <button type="button" class="tool-summary-row__head" @click="toggle">
+        <span class="tool-summary-row__glyph" aria-hidden="true">
+          <span v-if="inProgress" class="tool-exec-spinner" />
+          <span v-else class="tool-summary-row__check">✓</span>
+        </span>
+        <span class="tool-summary-row__kind">{{ visual.label }}</span>
+        <span class="tool-summary-row__text">{{ summary }}</span>
+        <span v-if="inlineMedia.length && !expanded" class="tool-summary-row__thumb-wrap">
+          <img
+            class="tool-summary-row__thumb"
+            :src="inlineMedia[0].url"
+            :alt="inlineMedia[0].label || '图片'"
+            loading="lazy"
+          />
+        </span>
+      </button>
+      <div v-if="showBashControls" class="tool-summary-row__actions">
+        <button
+          type="button"
+          class="tool-summary-row__action"
+          :disabled="!!busyAction"
+          :title="actionError || undefined"
+          @click="onCancel"
+        >
+          {{ busyAction === "cancel" ? "终止中…" : "终止" }}
+        </button>
+        <button
+          v-if="showBackgroundAction"
+          type="button"
+          class="tool-summary-row__action tool-summary-row__action--secondary"
+          :disabled="!!busyAction"
+          :title="actionError || undefined"
+          @click="onBackground"
+        >
+          {{ busyAction === "background" ? "转后台中…" : "转后台" }}
+        </button>
+      </div>
       <span v-if="status" class="tool-summary-row__status">
         <span v-if="inProgress" class="msg__meta-dots tool-summary-row__dots" aria-hidden="true">
           <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
         </span>
         {{ status }}
       </span>
-      <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
-    </button>
-    <div v-if="showBashControls" class="tool-summary-row__actions">
       <button
         type="button"
-        class="tool-summary-row__action"
-        :disabled="!!busyAction"
-        @click="onCancel"
+        class="tool-summary-row__chevron-btn"
+        :aria-expanded="expanded"
+        aria-label="展开工具详情"
+        @click="toggle"
       >
-        {{ busyAction === "cancel" ? "终止中…" : "终止" }}
+        <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
       </button>
-      <button
-        type="button"
-        class="tool-summary-row__action tool-summary-row__action--secondary"
-        :disabled="!!busyAction"
-        @click="onBackground"
-      >
-        {{ busyAction === "background" ? "转后台中…" : "转后台" }}
-      </button>
-      <span v-if="actionError" class="tool-summary-row__action-error">{{ actionError }}</span>
     </div>
     <div v-if="expanded && detailEntry" class="tool-summary-row__detail">
       <ToolExecBubble :entry="detailEntry" :verbose="verbose" embedded />
@@ -176,19 +197,29 @@ async function onBackground(ev) {
   border-color: rgba(55, 148, 255, 0.35);
 }
 
+.tool-summary-row__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+}
+
 .tool-summary-row__head {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 5px 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
   border: none;
   background: transparent;
   text-align: left;
   cursor: pointer;
   font: inherit;
   color: var(--color-text-muted);
-  border-radius: 6px;
 }
 
 .tool-summary-row__glyph {
@@ -255,32 +286,12 @@ async function onBackground(ev) {
   background: var(--color-surface);
 }
 
-.tool-summary-row__status {
-  flex: 0 0 auto;
+.tool-summary-row__actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--color-text-subtle);
-}
-
-.tool-summary-row__dots {
-  --stream-meta-dot-size: 4px;
-  --stream-meta-dot-gap: 2px;
-}
-
-.tool-summary-row__chevron {
   flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--color-text-subtle);
-}
-
-.tool-summary-row__actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 8px 6px 30px;
+  flex-wrap: nowrap;
+  gap: 4px;
 }
 
 .tool-summary-row__action {
@@ -291,9 +302,10 @@ async function onBackground(ev) {
   font: inherit;
   font-size: 11px;
   line-height: 1.2;
-  padding: 3px 8px;
-  border-radius: 4px;
+  padding: 2px 9px;
+  border-radius: 8px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .tool-summary-row__action:hover:not(:disabled) {
@@ -309,9 +321,36 @@ async function onBackground(ev) {
   color: var(--color-text-muted);
 }
 
-.tool-summary-row__action-error {
+.tool-summary-row__status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
-  color: var(--color-danger, #c44);
+  color: var(--color-text-subtle);
+  white-space: nowrap;
+}
+
+.tool-summary-row__dots {
+  --stream-meta-dot-size: 4px;
+  --stream-meta-dot-gap: 2px;
+}
+
+.tool-summary-row__chevron-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+}
+
+.tool-summary-row__chevron {
+  font-size: 10px;
+  color: var(--color-text-subtle);
 }
 
 .tool-summary-row__detail {

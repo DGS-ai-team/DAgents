@@ -80,15 +80,17 @@ func (s *Server) handleAgentToolJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	counts := reg.SessionToolJobCounts(agentID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"agent_id":   agentID,
-		"running":    counts.Running,
-		"background": counts.Background,
+		"agent_id":            agentID,
+		"running":             counts.Running,
+		"background":          counts.Background,
+		"running_call_ids":    counts.RunningCallIDs,
+		"background_call_ids": counts.BackgroundCallIDs,
 	})
 }
 
 func writeSyncShellControlError(w http.ResponseWriter, err error, agentID, toolCallID string) {
 	if errors.Is(err, tools.ErrSyncShellNotFound) {
-		writeAPIError(w, http.StatusConflict, "tool_call_not_running", "同步执行中的 bash 工具调用不存在或已结束", map[string]any{
+		writeAPIError(w, http.StatusConflict, "tool_call_not_running", "可控制的 bash 工具调用不存在或已结束", map[string]any{
 			"agent_id":     agentID,
 			"tool_call_id": toolCallID,
 		})
