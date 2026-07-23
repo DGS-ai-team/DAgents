@@ -65,3 +65,9 @@ build/
 bundle/
 deb-root/
 rpm-build/
+
+# Tauri Setup 向导（packaging/bootstrapper）
+packaging/bootstrapper/node_modules/
+packaging/bootstrapper/dist/
+packaging/bootstrapper/src-tauri/target/
+packaging/bootstrapper/src-tauri/resources/*.exe
