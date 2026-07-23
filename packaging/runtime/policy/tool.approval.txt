@@ -49,3 +49,7 @@ browser_press=always
 browser_screenshot=rule
 browser_wait=rule
 browser_snapshot=rule
+
+# --- 企业微信消息推送（webhook markdown_v2 / file）---
+wecom_send_markdown=rule
+wecom_send_file=rule

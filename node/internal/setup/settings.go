@@ -2,6 +2,7 @@ package setup
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -55,6 +56,7 @@ type FeatureSettings struct {
 	ChildAgentsEnabled       bool `json:"child_agents_enabled"`
 	UIEnabled                bool `json:"ui_enabled"`
 	BrowserEnabled           bool `json:"browser_enabled"`
+	WeComEnabled             bool `json:"wecom_enabled"`
 	MultimodalEnabled        bool `json:"multimodal_enabled"`
 	SkillsMaxInPrompt        int  `json:"skills_max_in_prompt"`
 	TriggersPollSeconds      int  `json:"triggers_poll_seconds"`
@@ -113,6 +115,19 @@ type BrowserSettings struct {
 	CDPURL            string `json:"cdp_url"`
 }
 
+// WeComSettings 企业微信消息推送（enabled 见 features）。
+type WeComSettings struct {
+	// WebhookURL 可填完整 webhook 地址，或仅填 key；保存时规范化。
+	WebhookURL string `json:"webhook_url"`
+	// WebhookKey 显式密钥；空则保留原值，除非 ClearWebhookKey。
+	WebhookKey string `json:"webhook_key,omitempty"`
+	// HasWebhookKey GET 时表示是否已配置密钥（不回明文 key）。
+	HasWebhookKey bool `json:"has_webhook_key"`
+	// ClearWebhookKey 为 true 时清空密钥与 URL。
+	ClearWebhookKey bool `json:"clear_webhook_key,omitempty"`
+	APIBase         string `json:"api_base"`
+}
+
 // ToolsSettings 内置工具组与编码。
 type ToolsSettings struct {
 	EnabledGroups              []string `json:"enabled_groups"`
@@ -146,6 +161,7 @@ type SettingsView struct {
 	Agent           AgentSettings       `json:"agent"`
 	ChildAgents     ChildAgentsLimits   `json:"child_agents"`
 	Browser         BrowserSettings     `json:"browser"`
+	WeCom           WeComSettings       `json:"wecom"`
 	Tools           ToolsSettings       `json:"tools"`
 	Hooks           HooksSettings       `json:"hooks"`
 }
@@ -160,6 +176,7 @@ type SettingsPatch struct {
 	Agent       *AgentSettings       `json:"agent,omitempty"`
 	ChildAgents *ChildAgentsLimits   `json:"child_agents,omitempty"`
 	Browser     *BrowserSettings     `json:"browser,omitempty"`
+	WeCom       *WeComSettings       `json:"wecom,omitempty"`
 	Tools       *ToolsSettings       `json:"tools,omitempty"`
 	Hooks       *HooksSettings       `json:"hooks,omitempty"`
 }
@@ -206,6 +223,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			ChildAgentsEnabled:       cfg.ChildAgents.Enabled,
 			UIEnabled:                cfg.UIEnabled(),
 			BrowserEnabled:           cfg.BrowserEnabled(),
+			WeComEnabled:             cfg.WeComEnabled(),
 			MultimodalEnabled:        cfg.MultimodalEnabled(),
 			SkillsMaxInPrompt:        cfg.Skills.MaxInPrompt,
 			TriggersPollSeconds:      cfg.Triggers.PollSeconds,
@@ -246,6 +264,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			ChromePath:        cfg.Browser.ChromePath,
 			CDPURL:            cfg.Browser.CDPURL,
 		},
+		WeCom: weComSettingsFromConfig(cfg),
 		Tools: ToolsSettings{
 			EnabledGroups:              append([]string(nil), cfg.Tools.EnabledGroups...),
 			BashOutputEncoding:         cfg.Tools.BashOutputEncoding,
@@ -305,6 +324,11 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 	}
 	if patch.Browser != nil {
 		if err := applyBrowserPatch(&out, *patch.Browser); err != nil {
+			return nil, err
+		}
+	}
+	if patch.WeCom != nil {
+		if err := applyWeComPatch(&out, *patch.WeCom); err != nil {
 			return nil, err
 		}
 	}
@@ -493,6 +517,7 @@ func applyFeaturesPatch(cfg *config.Config, p FeatureSettings) {
 	cfg.UI.Enabled = boolPtr(p.UIEnabled)
 	cfg.Multimodal.Enabled = boolPtr(p.MultimodalEnabled)
 	cfg.Browser.Enabled = boolPtr(p.BrowserEnabled)
+	cfg.WeCom.Enabled = boolPtr(p.WeComEnabled)
 	if p.SkillsMaxInPrompt > 0 {
 		cfg.Skills.MaxInPrompt = p.SkillsMaxInPrompt
 	}
@@ -596,6 +621,72 @@ func applyBrowserPatch(cfg *config.Config, p BrowserSettings) error {
 	cfg.Browser.IgnoreHTTPSErrors = boolPtr(p.IgnoreHTTPSErrors)
 	cfg.Browser.ChromePath = strings.TrimSpace(p.ChromePath)
 	cfg.Browser.CDPURL = strings.TrimSpace(p.CDPURL)
+	return nil
+}
+
+func weComSettingsFromConfig(cfg *config.Config) WeComSettings {
+	if cfg == nil {
+		return WeComSettings{}
+	}
+	key := cfg.WeComWebhookKey()
+	url := strings.TrimSpace(cfg.WeCom.WebhookURL)
+	// GET 不回明文 key；若仅有 key，用脱敏 URL 提示已配置。
+	if key != "" && url == "" {
+		url = config.DefaultWeComAPIBase + "/cgi-bin/webhook/send?key=***"
+	} else if key != "" && strings.Contains(url, "key=") {
+		url = redactWeComWebhookURL(url)
+	}
+	return WeComSettings{
+		WebhookURL:    url,
+		HasWebhookKey: key != "",
+		APIBase:       cfg.WeComAPIBase(),
+	}
+}
+
+func redactWeComWebhookURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	if q.Get("key") == "" {
+		return raw
+	}
+	q.Set("key", "***")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func applyWeComPatch(cfg *config.Config, p WeComSettings) error {
+	if p.ClearWebhookKey {
+		cfg.WeCom.WebhookKey = ""
+		cfg.WeCom.WebhookURL = ""
+	}
+	if base := strings.TrimSpace(p.APIBase); base != "" {
+		cfg.WeCom.APIBase = base
+	}
+	if key := strings.TrimSpace(p.WebhookKey); key != "" {
+		cfg.WeCom.WebhookKey = config.ExtractWeComWebhookKey(key)
+		if cfg.WeCom.WebhookKey == "" {
+			cfg.WeCom.WebhookKey = key
+		}
+	}
+	if rawURL := strings.TrimSpace(p.WebhookURL); rawURL != "" && !strings.Contains(rawURL, "key=***") {
+		if extracted := config.ExtractWeComWebhookKey(rawURL); extracted != "" {
+			cfg.WeCom.WebhookKey = extracted
+			cfg.WeCom.WebhookURL = rawURL
+		} else if !strings.Contains(rawURL, "://") {
+			// 用户把裸 key 填进 webhook_url 字段。
+			cfg.WeCom.WebhookKey = rawURL
+			cfg.WeCom.WebhookURL = ""
+		} else {
+			cfg.WeCom.WebhookURL = rawURL
+		}
+	}
 	return nil
 }
 

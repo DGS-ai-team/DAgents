@@ -17,6 +17,7 @@ export const TOOL_GROUPS = [
   { name: "hitl", label: "人工确认 / 记忆" },
   { name: "skills", label: "技能" },
   { name: "triggers", label: "定时任务" },
+  { name: "wecom", label: "企业微信" },
 ];
 
 export const LONG_TERM_SCOPES = [

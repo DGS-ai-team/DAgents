@@ -35,6 +35,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"github.com/DGS-ai-team/DAgents/node/internal/version"
 	"github.com/DGS-ai-team/DAgents/node/internal/webui"
+	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -156,6 +157,10 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 				reg.SetBrowserManager(bm)
 				logger.Info("browser tools enabled", "headed", cfg.BrowserHeaded())
 			}
+		}
+		if client := wecom.NewClientFromConfig(cfg); client != nil {
+			reg.SetWeComClient(client)
+			logger.Info("wecom webhook tools enabled")
 		}
 		o.tools = reg
 	}
@@ -408,6 +413,14 @@ func attachTriggerRuntime(reg *tools.Registry, store *triggers.Store, sched *tri
 	}
 	agentID := strings.TrimSpace(targetAgentID)
 	reg.SetTriggerRuntime(store, sched, agentID)
+}
+
+// attachWeComRuntime 按 Node 配置注入企业微信 webhook 客户端。
+func attachWeComRuntime(reg *tools.Registry, cfg *config.Config) {
+	if reg == nil {
+		return
+	}
+	reg.SetWeComClient(wecom.NewClientFromConfig(cfg))
 }
 
 // Handler 返回可用于 http.Server 的根 Handler（含 access log 中间件）。

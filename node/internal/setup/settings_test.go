@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -183,3 +184,41 @@ func TestApplyPatch_injectTodayDateHook(t *testing.T) {
 		t.Fatal("view should show disabled")
 	}
 }
+
+func TestApplyPatch_wecomWebhook(t *testing.T) {
+	cfg := testBaseConfig(t)
+	updated, err := ApplyPatch(cfg, SettingsPatch{
+		Features: &FeatureSettings{WeComEnabled: true},
+		WeCom: &WeComSettings{
+			WebhookURL: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=secret-1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.WeComEnabled() || updated.WeComWebhookKey() != "secret-1" {
+		t.Fatalf("wecom=%+v key=%q", updated.WeCom, updated.WeComWebhookKey())
+	}
+	view := ViewFromConfig(updated)
+	if !view.Features.WeComEnabled || !view.WeCom.HasWebhookKey {
+		t.Fatalf("view=%+v", view.WeCom)
+	}
+	if view.WeCom.WebhookKey != "" {
+		t.Fatal("GET must not return webhook_key plaintext")
+	}
+	if strings.Contains(view.WeCom.WebhookURL, "secret-1") {
+		t.Fatalf("url should redact key: %s", view.WeCom.WebhookURL)
+	}
+
+	cleared, err := ApplyPatch(updated, SettingsPatch{
+		Features: &FeatureSettings{WeComEnabled: false},
+		WeCom:    &WeComSettings{ClearWebhookKey: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.WeComEnabled() || cleared.WeComWebhookKey() != "" {
+		t.Fatal("expected disabled and cleared key")
+	}
+}
+

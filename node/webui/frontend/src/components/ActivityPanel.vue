@@ -71,6 +71,7 @@ const capabilityItems = computed(() => {
       filesystem: { label: "Files", hint: "读写工作区文件" },
       triggers: { label: "Triggers", hint: "定时与事件触发" },
       browser: { label: "Browser", hint: "浏览器工具" },
+      wecom: { label: "WeCom", hint: "企业微信推送" },
     };
     return { id, ...(map[id] || { label: id, hint: "" }) };
   });

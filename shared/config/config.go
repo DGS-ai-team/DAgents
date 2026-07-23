@@ -41,6 +41,7 @@ type Config struct {
 	UI                UIConfig                `yaml:"ui"`
 	Multimodal        MultimodalConfig        `yaml:"multimodal"`
 	Browser           BrowserConfig           `yaml:"browser"`
+	WeCom             WeComConfig             `yaml:"wecom"`
 }
 
 // MultimodalConfig 控制 user 多模态输入（content_parts 图片）与 read_image vision 注入。
@@ -472,6 +473,7 @@ func (c *Config) ApplyDefaults() {
 		c.Compression.IdleAutoCompressPollSeconds = 60
 	}
 	c.applyBrowserDefaults()
+	c.applyWeComDefaults()
 }
 
 // IdleAutoCompressEnabled 是否在 session 无动作超过 idle_auto_compress_seconds 后自动压缩。
@@ -530,7 +532,10 @@ func (c *Config) Validate() error {
 	if err := validateToolsEnabledConfig(&c.Tools); err != nil {
 		return err
 	}
-	return validateBrowserConfig(c)
+	if err := validateBrowserConfig(c); err != nil {
+		return err
+	}
+	return validateWeComConfig(c)
 }
 
 // DiscoveryGroups 返回 YAML groups 字段（**不**用于 Manage 注册；分组由 Manage 分配）。

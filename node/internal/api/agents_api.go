@@ -525,6 +525,7 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return fmt.Errorf("build agent runtime: %w", err)
 	}
 	attachTriggerRuntime(built.Registry, s.triggerStore, s.triggerSched, id)
+	attachWeComRuntime(built.Registry, s.cfg)
 	built.TurnOptions.ConfigRevision = rec.UpdatedAt.UTC().UnixNano()
 	if s.agents != nil {
 		if pc, err := s.agents.EnsureAgentPromptContext(ctx, id, s.runtimeDir()); err != nil {

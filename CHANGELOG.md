@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **企业微信消息推送工具**：`wecom_send_markdown`（markdown_v2）与 `wecom_send_file`（自动 upload_media）；在设置 › 能力 配置 Webhook，工具组 `wecom`。
+
 ---
 
 ## [0.8.3] - 2026-07-23
