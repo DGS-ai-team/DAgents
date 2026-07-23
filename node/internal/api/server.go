@@ -215,7 +215,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
 	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
 		FSRoot:                   cfg.FSRoot,
-		MaxToolLoops:             cfg.LLM.MaxToolLoops,
+		// MaxToolLoops 由各 Agent config_snapshot（defaults.llm.max_tool_loops）在装入 runtime 时写入。
 		SkillsRoot:               cfg.SkillsRoot(),
 		SkillsEnabled:            cfg.Skills.Enabled,
 		SkillsMaxInPrompt:        cfg.Skills.MaxInPrompt,

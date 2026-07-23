@@ -35,8 +35,7 @@ func TestApplyPatch_llmProfiles(t *testing.T) {
 	cfg := testBaseConfig(t)
 	updated, err := ApplyPatch(cfg, SettingsPatch{
 		LLM: &LLMSettings{
-			Active:       "qwen",
-			MaxToolLoops: 20,
+			Active: "qwen",
 			Profiles: []LLMProfileSettings{
 				{ID: "default", Provider: "deepseek", Model: "deepseek-chat", APIKeyEnv: "OPENAI_API_KEY", MultimodalEnabled: false},
 				{ID: "qwen", Provider: "qwen", Model: "qwen-plus", APIKeyEnv: "QWEN_API_KEY", MultimodalEnabled: true},

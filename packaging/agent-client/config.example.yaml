@@ -10,7 +10,7 @@
 # 本文件只保留 Node 进程级配置。以下内容请在 Web UI / SQLite 管理，勿写在此：
 #   · LLM 连接档案 → 设置 › 连接 › LLM 配置（llm_configs.db）
 #   · Agent 策略 / 侧车 prompt → Agents › 设置（agents.db：agent_policy、agent_prompt_context）
-#   · 单 Agent 的工具组 / Hook 覆盖 / LLM 绑定 → agents.config_snapshot_json
+#   · 单 Agent 绑定项（max_tool_loops、工具组、Hook 覆盖、LLM active 等）→ agents.config_snapshot_json
 
 # node_id：可选；缺省自动生成并写入 <fs_root>/node/node_id
 # （旧键 agent_id 仍可读并合并为 node_id，请勿再新增）

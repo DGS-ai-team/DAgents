@@ -23,7 +23,6 @@ fs_root: ../../runtime/node-a
 llm:
   provider: openai
   mock: true
-  max_tool_loops: 8
 
 manage:
   enabled: true

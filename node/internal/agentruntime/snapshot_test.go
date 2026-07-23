@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -68,5 +69,21 @@ func TestParseSnapshot(t *testing.T) {
 	}
 	if !snap.Sandbox.Enabled || snap.Sandbox.Backend != "process" || snap.Sandbox.WorkspaceSubdir != "data" {
 		t.Fatalf("%+v", snap.Sandbox)
+	}
+}
+
+func TestApplyDefaultsToTurnOptions_maxToolLoopsFromSnapshot(t *testing.T) {
+	var turn session.TurnOptions
+	ApplyDefaultsToTurnOptions(&turn, Snapshot{Defaults: map[string]any{
+		"llm": map[string]any{"max_tool_loops": float64(8)},
+	}})
+	if turn.MaxToolLoops != 8 {
+		t.Fatalf("got %d want 8", turn.MaxToolLoops)
+	}
+	var empty session.TurnOptions
+	empty.MaxToolLoops = 99 // BaseTurn 值不得覆盖 Agent 缺省
+	ApplyDefaultsToTurnOptions(&empty, Snapshot{})
+	if empty.MaxToolLoops != DefaultMaxToolLoops {
+		t.Fatalf("got %d want creation default %d", empty.MaxToolLoops, DefaultMaxToolLoops)
 	}
 }

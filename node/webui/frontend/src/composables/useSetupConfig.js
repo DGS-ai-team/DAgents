@@ -3,7 +3,7 @@ import * as api from "../api/node.js";
 
 const emptyForm = () => ({
   node: { listen_host: "", listen_port: 0, local_endpoint: "" },
-  llm: { active: "", profiles: [], provider: "", base_url: "", model: "", mock: false, max_tool_loops: 16 },
+  llm: { active: "", profiles: [], provider: "", base_url: "", model: "", mock: false },
   manage: {},
   features: {},
   compression: {},
