@@ -136,9 +136,18 @@ func (m *Manager) SetMultimodalEnabled(enabled bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.turn.MultimodalEnabled = enabled
+	if m.tools != nil {
+		m.tools.SetMultimodalEnabled(enabled)
+	}
 	for _, rt := range m.sessions {
-		if rt != nil && rt.orch != nil {
+		if rt == nil {
+			continue
+		}
+		if rt.orch != nil {
 			rt.orch.SetMultimodalEnabled(enabled)
+			if reg := rt.orch.ToolRegistry(); reg != nil {
+				reg.SetMultimodalEnabled(enabled)
+			}
 		}
 	}
 }

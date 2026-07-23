@@ -8,6 +8,12 @@
 
 - **企业微信消息推送工具**：`wecom_send_markdown`（markdown_v2）与 `wecom_send_file`（自动 upload_media）；在设置 › 能力 配置 Webhook，工具组 `wecom`。
 
+---
+
+## [0.8.3] - 2026-07-23
+
+**配置收敛与 bash 控制体验**：Agent 级参数离开 Node YAML；工具气泡控制时机收紧；进程日志按日拆分。
+
 ### 变更
 
 - **`config.example.yaml`**：去掉已废弃的 `expose_to_peers`；移除已迁入 SQLite / Agent 绑定的项（LLM 连接档案、`max_tool_loops` 等）；仅保留 Node 进程级配置。
@@ -18,8 +24,11 @@
 
 ### 修复
 
+- **Composer LLM 切换**：切换后写入 Agent 绑定并应用到进程 LLM；刷新/ensure 后恢复为该 Agent 绑定的档案（含多模态开关），不再回退显示默认模型。
 - **`search_replace` 多行预览**：跨行替换时行号提示由「未知」改为「多行」。
 - **后台 bash 终止**：`POST .../tool-calls/{id}/cancel` 可按 `tool_call_id` 终止已转后台的任务。
+
+（Git **tag**：`v0.8.3`。）
 
 ---
 

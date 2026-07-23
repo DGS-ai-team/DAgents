@@ -224,6 +224,7 @@ async function refreshAfterPageRestore() {
   resetUsageStrip();
   resetEventTracking();
   await activateAgentStream();
+  await refreshLLMSettings();
   refreshContextTokens();
   agentPanelRef.value?.refresh?.();
 }
@@ -777,11 +778,9 @@ async function switchLLMProfile(id) {
   if (profileId === chromeStore.llmSettings?.active_profile) return;
   agentStore.error = "";
   try {
-    // 仅绑定到当前 Agent；不再切换进程级 active LLM。
+    // 绑定到当前 Agent；ensure/reload 时会应用到进程 LLM（含多模态）。
     await api.patchAgent(agentStore.agentId, { llm_active: profileId });
-    const settings = await api.getLLMSettings();
-    chromeStore.llmSettings = { ...settings, active_profile: profileId };
-    syncReasoningDisplay(chromeStore.llmSettings);
+    await refreshLLMSettings();
     try {
       chromeStore.agentInfo = await api.getAgentInfo();
     } catch {
@@ -919,6 +918,8 @@ onMounted(async () => {
   await syncCurrentAgentDisplayName();
   await refreshMeta();
   await activateAgentStream();
+  // ensure 会按 Agent 绑定应用 LLM；再拉一次设置，避免刷新后仍显示进程默认档案。
+  await refreshLLMSettings();
   refreshContextTokens();
   consumeComposerDraft();
   startDesktopFocusHeartbeat(() => agentStore.agentId);

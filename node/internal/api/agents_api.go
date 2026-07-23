@@ -494,6 +494,12 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	if err := requireDockerSandboxReady(snapParsed.Sandbox); err != nil {
 		return err
 	}
+	// 装入/聚焦 Agent 时应用其绑定的 LLM 档案（进程级共享 LLM 的过渡方案）。
+	if active := agentruntime.LLMActiveFromDefaults(snapParsed); active != "" {
+		if err := s.switchActiveLLMProfile(active); err != nil {
+			s.logger.Warn("apply agent-bound llm failed", "agent_id", id, "llm_active", active, "error", err)
+		}
+	}
 	if err := s.ensureAgentWorkspace(id); err != nil {
 		s.logger.Warn("agent workspace ensure failed", "agent_id", id, "error", err)
 	}

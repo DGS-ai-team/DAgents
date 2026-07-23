@@ -55,10 +55,7 @@ func Build(p BuildParams) (Built, error) {
 	if err := reg.SetBuiltinEnabled(tc.NormalizedBuiltinEnabled()); err != nil {
 		return Built{}, err
 	}
-	mm := p.NodeCFG.MultimodalEnabled()
-	if v := MultimodalEnabledFromDefaults(p.Snapshot); v != nil {
-		mm = *v
-	}
+	mm := EffectiveMultimodalEnabled(p.NodeCFG, p.Snapshot)
 	reg.SetMultimodalEnabled(mm)
 	bc := tools.DefaultBashCompressConfig()
 	if p.NodeCFG.Tools.BashCompress.Enabled != nil {
