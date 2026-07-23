@@ -58,6 +58,8 @@ var knownBuiltinTools = map[string]struct{}{
 	"browser_upload_file":      {},
 	"browser_dropdown_options": {},
 	"browser_select_dropdown":  {},
+	"wecom_send_markdown":      {},
+	"wecom_send_file":          {},
 }
 
 // builtinToolGroups 为 tools.enabled_groups 可配置的成组工具；组内工具须一并启用或禁用。
@@ -127,6 +129,10 @@ var builtinToolGroups = map[string][]string{
 		"browser_upload_file",
 		"browser_dropdown_options",
 		"browser_select_dropdown",
+	},
+	"wecom": {
+		"wecom_send_markdown",
+		"wecom_send_file",
 	},
 }
 

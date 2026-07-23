@@ -123,6 +123,8 @@ var knownBuiltinTools = map[string]struct{}{
 	"browser_upload_file":      {},
 	"browser_dropdown_options": {},
 	"browser_select_dropdown":  {},
+	"wecom_send_markdown":      {},
+	"wecom_send_file":          {},
 }
 
 func unknownBuiltinToolError(name string) error {

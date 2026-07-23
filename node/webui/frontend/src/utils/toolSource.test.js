@@ -16,6 +16,7 @@ describe("inferToolKind", () => {
   it("maps triggers and browser by prefix", () => {
     expect(inferToolKind("trigger_list")).toBe("triggers");
     expect(inferToolKind("browser_navigate")).toBe("browser");
+    expect(inferToolKind("wecom_send_markdown")).toBe("wecom");
   });
 
   it("falls back to tool instead of agent", () => {

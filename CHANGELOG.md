@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **企业微信消息推送工具**：`wecom_send_markdown`（markdown_v2）与 `wecom_send_file`（自动 upload_media）；在设置 › 能力 配置 Webhook，工具组 `wecom`。
+
 ### 变更
 
 - **`config.example.yaml`**：去掉已废弃的 `expose_to_peers`；移除已迁入 SQLite / Agent 绑定的项（LLM 连接档案、`max_tool_loops` 等）；仅保留 Node 进程级配置。

@@ -91,6 +91,8 @@ tools:
   #   - triggers
   #   - a2a            # 须 manage.enabled
   #   - child_agents
+  #   - browser        # 须 wecom/browser 等进程能力开启
+  #   - wecom          # 须 wecom.enabled + webhook
   bash_output_encoding: utf-8   # 留空则 Windows cmd/powershell=gbk、bash=utf-8
   # file_encoding: gbk          # FS 默认磁盘编码；省略 utf-8
   bash_compress:
@@ -143,3 +145,11 @@ hooks:
 #   output_dir: browser
 #   max_sessions: 1
 #   ignore_https_errors: false
+
+# 企业微信「消息推送」Webhook（群机器人）；启用后暴露 wecom_send_markdown / wecom_send_file
+# wecom:
+#   enabled: false
+#   # 完整 webhook URL，或只填 webhook_key
+#   webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
+#   # webhook_key: "YOUR_KEY"
+#   # api_base: "https://qyapi.weixin.qq.com"

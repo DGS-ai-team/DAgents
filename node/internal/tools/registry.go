@@ -12,6 +12,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
+	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 )
 
 // Registry 注册内置工具并在 FS_ROOT 沙箱内执行。
@@ -37,6 +38,7 @@ type Registry struct {
 	enabledOnly         map[string]struct{}
 	multimodalEnabled   bool
 	browser             *browser.Manager
+	wecom               *wecom.Client
 	handlers            map[string]handler
 	pathEncMu           sync.Mutex
 	pathEncCache        map[string]pathEncodingEntry
@@ -113,6 +115,9 @@ func (r *Registry) Definitions() []ToolDef {
 	}
 	if r.browserToolsEnabled() {
 		base = append(base, r.browserToolDefs()...)
+	}
+	if defs := r.wecomToolDefs(); len(defs) > 0 {
+		base = append(base, defs...)
 	}
 	base = append(base, childAgentToolDefs()...)
 	return r.enrichDefinitions(r.filterToolDefs(base))

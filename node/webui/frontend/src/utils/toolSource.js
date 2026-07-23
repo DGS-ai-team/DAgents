@@ -30,6 +30,7 @@ const KIND_META = {
   shell: { label: "shell", short: "shell", icon: "$" },
   fs: { label: "fs", short: "fs", icon: "F" },
   browser: { label: "browser", short: "browser", icon: "◉" },
+  wecom: { label: "wecom", short: "wecom", icon: "✉" },
   triggers: { label: "triggers", short: "triggers", icon: "⏱" },
   skills: { label: "skills", short: "skills", icon: "S" },
   child: { label: "child", short: "child", icon: "⎇" },
@@ -44,6 +45,7 @@ export function inferToolKind(name, data = {}) {
   if (data?.a2a_relay) return "a2a";
   if (data?.child_session_id || CHILD_AGENT_TOOLS.has(n)) return "child";
   if (n.startsWith("browser_")) return "browser";
+  if (n.startsWith("wecom_")) return "wecom";
   if (n.startsWith("trigger_")) return "triggers";
   if (SKILLS_TOOLS.has(n)) return "skills";
   if (A2A_TOOLS.has(n)) return "a2a";

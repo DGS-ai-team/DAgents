@@ -8,9 +8,18 @@ const { loading, saving, error, statusMessage, configPath, configWritable, form,
 
 async function saveCapabilities() {
   // 仅进程级能力；工具组在「设置 › Agents」按实例配置，此处不改 enabled_groups。
+  const wecom = {
+    webhook_url: form.wecom.webhook_url || "",
+    api_base: form.wecom.api_base || "",
+    clear_webhook_key: !!form.wecom.clear_webhook_key,
+  };
+  if (form.wecom.webhook_key) {
+    wecom.webhook_key = form.wecom.webhook_key;
+  }
   await save({
     features: { ...form.features },
     browser: { ...form.browser },
+    wecom,
     child_agents: { ...form.child_agents },
   });
 }
@@ -52,6 +61,10 @@ onMounted(load);
             浏览器工具
             <span class="badge badge--beta" title="试验功能">Beta</span>
           </span>
+        </label>
+        <label class="settings-toggle">
+          <input v-model="form.features.wecom_enabled" type="checkbox" />
+          <span>企业微信推送</span>
         </label>
         <label class="settings-toggle">
           <input v-model="form.features.raw_message_history_enabled" type="checkbox" />
@@ -114,6 +127,52 @@ onMounted(load);
           <span>忽略 HTTPS 证书错误</span>
         </label>
       </div>
+    </section>
+
+    <section v-if="form.features.wecom_enabled" class="settings-section">
+      <div class="settings-section__head">
+        <h2 class="settings-section__title">企业微信消息推送</h2>
+      </div>
+      <p class="settings-section__desc">
+        使用群「消息推送」Webhook（非应用消息 API）。在企业微信创建消息推送后粘贴 Webhook 地址或 key；
+        各 Agent 仍需在工具组中启用 wecom。保存后通常需重启 Node。
+      </p>
+      <div class="setup-config-panel__field-grid">
+        <label class="settings-field">
+          <span class="settings-field__label">Webhook 地址或 Key</span>
+          <input
+            v-model="form.wecom.webhook_url"
+            class="settings-field__input"
+            type="text"
+            autocomplete="off"
+            placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…"
+          />
+        </label>
+        <label class="settings-field">
+          <span class="settings-field__label">更新 Key（可选）</span>
+          <input
+            v-model="form.wecom.webhook_key"
+            class="settings-field__input"
+            type="password"
+            autocomplete="new-password"
+            :placeholder="form.wecom.has_webhook_key ? '已配置，留空则保留' : '也可只填此项'"
+          />
+        </label>
+        <label class="settings-field">
+          <span class="settings-field__label">API 基址</span>
+          <input
+            v-model="form.wecom.api_base"
+            class="settings-field__input"
+            type="text"
+            autocomplete="off"
+            placeholder="https://qyapi.weixin.qq.com"
+          />
+        </label>
+      </div>
+      <label v-if="form.wecom.has_webhook_key" class="settings-toggle">
+        <input v-model="form.wecom.clear_webhook_key" type="checkbox" />
+        <span>清除已保存的 Webhook Key</span>
+      </label>
     </section>
 
     <section class="settings-section">

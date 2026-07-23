@@ -14,6 +14,8 @@ const TOOL_USER_LABELS = {
   browser_snapshot: "网页截图",
   browser_screenshot: "网页截图",
   browser_navigate: "打开网页",
+  wecom_send_markdown: "企微推送",
+  wecom_send_file: "企微发文件",
   load_skills: "加载技能",
   unload_skills: "卸载技能",
   clear_skills: "清空技能",
