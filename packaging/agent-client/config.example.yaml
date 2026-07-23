@@ -101,7 +101,8 @@ triggers:
 # raw_message_history:
 #   enabled: true
 
-# Node stderr 日志级别：debug | info | warn | error
+# Node 日志级别：debug | info | warn | error
+# 后台启动时完整日志写入 .runtime/logs/node-YYYY-MM-DD.log，错误写入同日 *.err.log
 log:
   level: info
 

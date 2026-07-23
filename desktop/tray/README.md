@@ -42,7 +42,8 @@
   bin/dagents-node.exe
   config.yaml
   .runtime/node.pid
-  .runtime/logs/node.log
+  .runtime/logs/node-YYYY-MM-DD.log
+  .runtime/logs/node-YYYY-MM-DD.err.log
 ```
 
 安装根：`DAGENTS_HOME` → 可执行文件在 `bin/` 时取父目录 → 当前工作目录。
