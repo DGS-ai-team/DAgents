@@ -12,6 +12,9 @@
 | **`dagents-backend-*`**（legacy） | 旧 Python 全栈后端；**Release CI 已不再构建** |
 | **`dagents-cli`** | Textual TUI 单文件二进制（PyInstaller 产物名） |
 
+| **`dagents-local-assistant-*-installer-*.exe`** | Windows Inno 安装包 |
+| **`DAgents Setup`（可选）** | Tauri 现代向导，见 [`bootstrapper/`](./bootstrapper/)；内嵌上述 Inno 包静默安装 |
+
 本地/CI 打包：
 
 ```bash

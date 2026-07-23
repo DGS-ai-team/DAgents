@@ -6,6 +6,7 @@
 
 ### 新增
 
+- **Tauri 安装向导（可选）**：`packaging/bootstrapper` 提供现代多步 Setup UI，嵌入并静默调用现有 Inno 安装包；未嵌入 payload 时支持演示模式预览。
 - **企业微信消息推送工具**：`wecom_send_markdown`（markdown_v2）与 `wecom_send_file`（自动 upload_media）；在设置 › 能力 配置 Webhook，工具组 `wecom`。
 
 ---
