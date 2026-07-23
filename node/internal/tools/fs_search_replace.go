@@ -149,10 +149,16 @@ func formatSearchReplacePreview(oldStr, newStr string, replaced int, lineHint st
 	case replaced > 1:
 		fmt.Fprintf(&b, "@@ 共 %d 处相同替换", replaced)
 		if lineHint != "" {
-			b.WriteString(" · 行 ")
-			b.WriteString(lineHint)
+			if lineHint == "多行" {
+				b.WriteString(" · 多行")
+			} else {
+				b.WriteString(" · 行 ")
+				b.WriteString(lineHint)
+			}
 		}
 		b.WriteString(" @@\n")
+	case lineHint == "多行":
+		b.WriteString("@@ 多行 @@\n")
 	case lineHint != "":
 		fmt.Fprintf(&b, "@@ 行 %s @@\n", lineHint)
 	}
@@ -202,7 +208,11 @@ func formatDiffSnippet(prefix, text string) string {
 
 func formatHitLines(text, needle string) string {
 	if needle == "" {
-		return "未知"
+		return "多行"
+	}
+	// 多行 old_string 无法落在单行 Contains 匹配上，标为「多行」而非「未知」。
+	if strings.Contains(needle, "\n") {
+		return "多行"
 	}
 	lines := strings.Split(text, "\n")
 	var hits []string
@@ -215,7 +225,7 @@ func formatHitLines(text, needle string) string {
 		}
 	}
 	if len(hits) == 0 {
-		return "未知"
+		return "多行"
 	}
 	return strings.Join(hits, "、")
 }
