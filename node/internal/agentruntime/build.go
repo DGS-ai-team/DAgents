@@ -10,6 +10,9 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
+// DefaultMaxToolLoops 为新建 Agent 未指定时的 defaults.llm.max_tool_loops。
+const DefaultMaxToolLoops = 32
+
 // BuildParams 为构造 per-agent Registry / TurnOptions 的输入。
 type BuildParams struct {
 	NodeCFG     *config.Config

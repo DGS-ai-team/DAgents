@@ -194,14 +194,17 @@ func MaxToolLoopsFromDefaults(snap Snapshot) int {
 	}
 }
 
-// ApplyDefaultsToTurnOptions 将快照 defaults 中的 llm / hooks / prompt_context 覆盖写入 TurnOptions。
+// ApplyDefaultsToTurnOptions 将快照 defaults 中的 llm / hooks / prompt_context 写入 TurnOptions。
+// max_tool_loops 仅来自 Agent snapshot（新建时写入）；缺省时用 DefaultMaxToolLoops。
 func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
 	if turn == nil {
 		return
 	}
-	if n := MaxToolLoopsFromDefaults(snap); n > 0 {
-		turn.MaxToolLoops = n
+	n := MaxToolLoopsFromDefaults(snap)
+	if n <= 0 {
+		n = DefaultMaxToolLoops
 	}
+	turn.MaxToolLoops = n
 	if pc := PromptContextFromDefaults(snap); pc != nil {
 		turn.PromptContext = *pc
 	}

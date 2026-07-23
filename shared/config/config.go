@@ -304,9 +304,9 @@ type LLMConfig struct {
 	Model           string                      `yaml:"model"`
 	APIKeyEnv       string                      `yaml:"api_key_env"`
 	Mock            bool                        `yaml:"mock"`
-	MaxToolLoops    int                         `yaml:"max_tool_loops"`
 	Thinking        string                      `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
 	ReasoningEffort string                      `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
+	// max_tool_loops 已迁至 Agent config_snapshot（defaults.llm.max_tool_loops），勿再写入 Node YAML。
 }
 
 // LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_tool_loops）。
@@ -409,9 +409,6 @@ func (c *Config) ApplyDefaults() {
 	}
 	if strings.TrimSpace(c.FSRoot) == "" {
 		c.FSRoot = "./.runtime"
-	}
-	if c.LLM.MaxToolLoops <= 0 {
-		c.LLM.MaxToolLoops = 16
 	}
 	if strings.TrimSpace(c.LLM.Provider) == "" {
 		c.LLM.Provider = "openai"

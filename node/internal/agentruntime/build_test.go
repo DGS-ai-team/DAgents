@@ -30,12 +30,15 @@ func TestBuild_sandboxIsolation(t *testing.T) {
 	}
 	built, err := Build(BuildParams{
 		NodeCFG:  cfg,
-		BaseTurn: session.TurnOptions{FSRoot: root, MaxToolLoops: 8},
+		BaseTurn: session.TurnOptions{FSRoot: root},
 		AgentID:  "agt-abc",
 		Snapshot: snap,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if built.TurnOptions.MaxToolLoops != DefaultMaxToolLoops {
+		t.Fatalf("MaxToolLoops=%d want %d (from agent default, not BaseTurn)", built.TurnOptions.MaxToolLoops, DefaultMaxToolLoops)
 	}
 	wantFS := filepath.Join(root, "agents", "agt-abc", "data")
 	if built.FSRoot != wantFS || built.TurnOptions.FSRoot != wantFS {

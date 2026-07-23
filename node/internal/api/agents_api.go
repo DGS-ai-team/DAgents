@@ -60,7 +60,7 @@ func defaultAgentCreationDefaults() map[string]any {
 			"description": "",
 		},
 		"llm": map[string]any{
-			"max_tool_loops": 32,
+			"max_tool_loops": agentruntime.DefaultMaxToolLoops,
 		},
 		"tools": map[string]any{
 			"enabled_groups": []any{},

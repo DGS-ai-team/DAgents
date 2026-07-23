@@ -204,7 +204,7 @@ consumeLoop 再次出队
 
 - `toolLoopCount`：当前 **一条 user 消息** 触发的链上，`runOneStep` 执行次数。  
 - 新 `handleHumanMessage` 时 **归零**。  
-- 超过 `maxToolLoops`（默认 16，`config llm.max_tool_loops`）→ error SSE + 链结束。
+- 超过 `maxToolLoops`（默认见 Agent `defaults.llm.max_tool_loops`，新建缺省 32）→ error SSE + 链结束。
 
 ### 2.7 源码索引（§2）
 

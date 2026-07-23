@@ -6,6 +6,8 @@
 
 ### 变更
 
+- **`config.example.yaml`**：去掉已废弃的 `expose_to_peers`；移除已迁入 SQLite / Agent 绑定的项（LLM 连接档案、`max_tool_loops` 等）；仅保留 Node 进程级配置。
+- **`max_tool_loops`**：不再从 Node `config.yaml` / setup API 读写；仅由 Agent 新建时写入 `config_snapshot`（缺省 32），运行时从 snapshot 装入。
 - **进程日志按日拆分**：`node|shell|browser-YYYY-MM-DD.log` 为完整日志，同日 `*.err.log` 仅错误；Node slog 全量走 stdout、error 额外写 stderr。
 
 ### 修复

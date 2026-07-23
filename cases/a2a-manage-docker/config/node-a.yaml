@@ -27,7 +27,6 @@ llm:
   model: ${LLM_MODEL}
   api_key_env: LLM_API_KEY
   mock: true
-  max_tool_loops: 8
 
 manage:
   enabled: true

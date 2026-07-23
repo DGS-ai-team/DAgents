@@ -27,12 +27,11 @@ type LLMProfileSettings struct {
 type LLMSettings struct {
 	Active       string               `json:"active,omitempty"` // 运行时当前选用；缺省取 profiles[0]
 	Profiles     []LLMProfileSettings `json:"profiles"`
-	Provider     string               `json:"provider"`
-	BaseURL      string               `json:"base_url"`
-	Model        string               `json:"model"`
-	APIKeyEnv    string               `json:"api_key_env,omitempty"`
-	Mock         bool                 `json:"mock"`
-	MaxToolLoops int                  `json:"max_tool_loops"`
+	Provider  string `json:"provider"`
+	BaseURL   string `json:"base_url"`
+	Model     string `json:"model"`
+	APIKeyEnv string `json:"api_key_env,omitempty"`
+	Mock      bool   `json:"mock"`
 }
 
 // ManageSettings Manage 连接配置（安装向导原批次 2）。
@@ -181,14 +180,13 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			LocalEndpoint: cfg.Local.Endpoint,
 		},
 		LLM: LLMSettings{
-			Active:       cfg.LLM.ActiveProfileID(),
-			Profiles:     llmProfilesFromConfig(cfg),
-			Provider:     cfg.LLM.Provider,
-			BaseURL:      cfg.LLM.BaseURL,
-			Model:        cfg.LLM.Model,
-			APIKeyEnv:    cfg.LLM.APIKeyEnv,
-			Mock:         cfg.LLM.Mock,
-			MaxToolLoops: cfg.LLM.MaxToolLoops,
+			Active:    cfg.LLM.ActiveProfileID(),
+			Profiles:  llmProfilesFromConfig(cfg),
+			Provider:  cfg.LLM.Provider,
+			BaseURL:   cfg.LLM.BaseURL,
+			Model:     cfg.LLM.Model,
+			APIKeyEnv: cfg.LLM.APIKeyEnv,
+			Mock:      cfg.LLM.Mock,
 		},
 		Manage: ManageSettings{
 			Enabled:                     cfg.Manage.Enabled,
@@ -328,10 +326,6 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 }
 
 func applyLLMPatch(cfg *config.Config, p LLMSettings) error {
-	if p.MaxToolLoops > 0 {
-		cfg.LLM.MaxToolLoops = p.MaxToolLoops
-	}
-
 	if len(p.Profiles) > 0 {
 		next := make(map[string]config.LLMProfileConfig, len(p.Profiles))
 		order := make([]string, 0, len(p.Profiles))
