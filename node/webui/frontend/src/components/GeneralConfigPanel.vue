@@ -7,8 +7,9 @@ const { loading, saving, error, statusMessage, configPath, configWritable, form,
   useSetupConfig();
 
 async function saveGeneral() {
+  const { fs_root: _ignored, ...runtime } = form.runtime;
   await save({
-    runtime: { ...form.runtime },
+    runtime,
     agent: { ...form.agent },
   });
 }
@@ -30,7 +31,7 @@ onMounted(load);
   >
     <section class="settings-section">
       <h2 class="settings-section__title">Node 地址</h2>
-      <p class="settings-section__desc">监听地址需修改本地配置文件后重启生效。</p>
+      <p class="settings-section__desc">监听地址需修改本地配置文件后重启生效；工作区根目录固定为 <code>./.runtime</code>。</p>
       <div class="setup-config-panel__readonly-grid">
         <div class="command-stat">
           <span class="command-stat__label">监听</span>
@@ -39,6 +40,10 @@ onMounted(load);
         <div class="command-stat">
           <span class="command-stat__label">连接地址</span>
           <span class="command-stat__value">{{ form.node.local_endpoint || "—" }}</span>
+        </div>
+        <div class="command-stat">
+          <span class="command-stat__label">工作区根目录</span>
+          <span class="command-stat__value">{{ form.runtime.fs_root || "./.runtime" }}</span>
         </div>
       </div>
     </section>
@@ -49,10 +54,6 @@ onMounted(load);
         <label class="settings-field">
           <span class="settings-field__label">Node ID</span>
           <input v-model="form.runtime.node_id" class="settings-field__input" type="text" autocomplete="off" />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">工作区根目录</span>
-          <input v-model="form.runtime.fs_root" class="settings-field__input" type="text" autocomplete="off" />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">日志级别</span>

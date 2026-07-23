@@ -49,6 +49,7 @@ type Server struct {
 	sessions      *session.Manager // per-session 队列与 turn consumer（过渡期与 agent_id 1:1）
 	agents        *store.AgentStore
 	llmConfigs    *store.LLMConfigStore
+	nodeSettings  *store.NodeSettingsStore
 	stream        *stream.Hub // 进程内 SSE 事件总线
 	store         *store.SQLiteStore
 	triggerStore  *triggers.Store
@@ -70,6 +71,7 @@ type serverOptions struct {
 	tools        *tools.Registry
 	policyEngine *policy.Engine
 	sqliteStore  *store.SQLiteStore
+	nodeSettings *store.NodeSettingsStore
 	skipStore    bool
 	configPath   string
 }
@@ -78,6 +80,13 @@ type serverOptions struct {
 func WithConfigPath(path string) Option {
 	return func(o *serverOptions) {
 		o.configPath = strings.TrimSpace(path)
+	}
+}
+
+// WithNodeSettings 注入 Node 设置库（由 main BootstrapNodeSettings 打开）。
+func WithNodeSettings(ns *store.NodeSettingsStore) Option {
+	return func(o *serverOptions) {
+		o.nodeSettings = ns
 	}
 }
 
@@ -133,6 +142,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	o := serverOptions{llmClient: llm.NewFromConfig(cfg, llmRuntime)}
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.nodeSettings == nil && !o.skipStore && cfg != nil {
+		ns, err := store.BootstrapNodeSettings(context.Background(), cfg, o.configPath, logger)
+		if err != nil {
+			logger.Error("node settings bootstrap failed", "error", err, "path", cfg.NodeSettingsDBPath())
+		} else {
+			o.nodeSettings = ns
+			llmRuntime.SyncFromConfig(cfg)
+		}
 	}
 	// 生产路径：按 FSRoot 注册内置工具；失败时回退 "." 以免 API 完全不可用。
 	if o.tools == nil {
@@ -368,6 +386,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		store:         st,
 		agents:        agentsStore,
 		llmConfigs:    llmConfigStore,
+		nodeSettings:  o.nodeSettings,
 		sessions:      mgr,
 		triggerStore:  triggerStore,
 		triggerSched:  triggerSched,
@@ -488,6 +507,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.agents != nil {
 			_ = s.agents.Close()
 		}
+		if s.llmConfigs != nil {
+			_ = s.llmConfigs.Close()
+		}
+		if s.nodeSettings != nil {
+			_ = s.nodeSettings.Close()
+		}
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}
@@ -497,6 +522,34 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			return fmt.Errorf("listen %s: %w", addr, err)
 		}
 		return nil
+	}
+}
+
+// Close 释放 SQLite / 会话等资源。ListenAndServe 退出路径会调用；httptest 测试需显式 Cleanup。
+func (s *Server) Close() {
+	if s == nil {
+		return
+	}
+	if s.triggerSched != nil {
+		s.triggerSched.Stop()
+	}
+	if s.sessions != nil {
+		s.sessions.Stop()
+	}
+	if s.tools != nil {
+		_ = s.tools.CloseBrowser()
+	}
+	if s.store != nil {
+		_ = s.store.Close()
+	}
+	if s.agents != nil {
+		_ = s.agents.Close()
+	}
+	if s.llmConfigs != nil {
+		_ = s.llmConfigs.Close()
+	}
+	if s.nodeSettings != nil {
+		_ = s.nodeSettings.Close()
 	}
 }
 

@@ -341,8 +341,9 @@ func TestSessionPersistenceAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(NewServer(testConfig(t), nil,
-		WithLLM(&llm.MockClient{}), WithTools(reg), WithStore(st)).Handler())
+	srv := NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithStore(st))
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	createResp, err := http.Post(ts.URL+"/v1/sessions", "application/json", bytes.NewReader([]byte(`{}`)))

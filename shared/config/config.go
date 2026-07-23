@@ -16,6 +16,8 @@ import (
 const (
 	DefaultListenHost = "127.0.0.1"
 	DefaultListenPort = 18765
+	// DefaultFSRoot 为 Node 运行时根目录，写死不可配置（YAML / Web UI / setup PATCH 均忽略）。
+	DefaultFSRoot = "./.runtime"
 )
 
 // Config 为 Node 与 Client 共享的配置根结构；Client 仅使用 local 等子集。
@@ -27,7 +29,8 @@ type Config struct {
 	Listen        ListenConfig `yaml:"listen"`
 	Local         LocalConfig  `yaml:"local"`
 	Groups        []string     `yaml:"groups"`
-	FSRoot        string       `yaml:"fs_root"`
+	// FSRoot 固定为 DefaultFSRoot，不从 YAML 读取；测试可在内存中直接赋值。
+	FSRoot        string       `yaml:"-"`
 	LLM           LLMConfig    `yaml:"llm"`
 	Manage        ManageConfig `yaml:"manage"`
 	Skills        SkillsConfig       `yaml:"skills"`
@@ -377,6 +380,7 @@ func LoadFile(path string) (*Config, error) {
 	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
+	cfg.FSRoot = DefaultFSRoot
 	cfg.ApplyDefaults()
 	if err := cfg.ResolveNodeID(); err != nil {
 		return nil, err
@@ -409,7 +413,7 @@ func (c *Config) ApplyDefaults() {
 		c.Local.Endpoint = fmt.Sprintf("http://%s", c.ListenAddr())
 	}
 	if strings.TrimSpace(c.FSRoot) == "" {
-		c.FSRoot = "./.runtime"
+		c.FSRoot = DefaultFSRoot
 	}
 	if strings.TrimSpace(c.LLM.Provider) == "" {
 		c.LLM.Provider = "openai"
@@ -489,11 +493,11 @@ func (c *Config) IdleAutoCompressPollInterval() time.Duration {
 	return time.Duration(c.Compression.IdleAutoCompressPollSeconds) * time.Second
 }
 
-// RuntimeDir 返回运行时根目录（与 `fs_root` 一致；子目录路径均相对此根硬编码）。
+// RuntimeDir 返回运行时根目录（固定 DefaultFSRoot；子目录路径均相对此根硬编码）。
 func (c *Config) RuntimeDir() string {
 	root := strings.TrimRight(strings.TrimSpace(c.FSRoot), "/")
 	if root == "" {
-		return "./.runtime"
+		return DefaultFSRoot
 	}
 	return root
 }
@@ -655,6 +659,11 @@ func (c *Config) AgentsDBPath() string {
 // LLMConfigsDBPath 返回 LLM 配置库路径（`<runtime>/llm_configs.db`）。
 func (c *Config) LLMConfigsDBPath() string {
 	return filepath.Join(c.RuntimeDir(), "llm_configs.db")
+}
+
+// NodeSettingsDBPath 返回 Node 进程设置库路径（`<runtime>/node_settings.db`）。
+func (c *Config) NodeSettingsDBPath() string {
+	return filepath.Join(c.RuntimeDir(), "node_settings.db")
 }
 
 // AgentsDir 返回 Agent 实例目录根（`<runtime>/agents`）。

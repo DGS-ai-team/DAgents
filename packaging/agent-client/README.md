@@ -6,11 +6,9 @@ Node 与 Client 共用 YAML 配置；**仓库只提交 `*.example.yaml`**，本�
 
 | 文件 | 说明 |
 |------|------|
-| `config.example.yaml` | 配置示例（可提交）；含 `agent`、`listen`、`llm`、**fs_root**、**manage/a2a**、**triggers** 等 |
+| `config.example.yaml` | **引导配置**（可提交）：仅 `listen` / `local` |
 
-`config.example.yaml` 中 **`triggers`** 块：`enabled` 开关、`poll_seconds` 轮询间隔；condition 语法见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)。
-
-**`tools.enabled_groups`**：按工具组配置 LLM 可见内置工具（省略=全部）；7 组定义见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1 与 [`shared/config/README.md`](../../shared/config/README.md)。
+其余 Node 设置在首次启动写入 `./.runtime/node_settings.db`（路径固定）；LLM 档案在 `llm_configs.db`；Agent 策略/侧车在 `agents.db`。Triggers 语法见 [`node/internal/triggers/README.md`](../../node/internal/triggers/README.md)；工具组见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md)。
 
 ## 本地配置
 
@@ -19,13 +17,13 @@ Node 与 Client 共用 YAML 配置；**仓库只提交 `*.example.yaml`**，本�
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 ```
 
-编辑 `config.yaml`（例如 Manage 场景下 `agent.role`）。LLM 连接、工具审批策略、侧车 prompt 等请在 **Web UI** 配置（写入 SQLite）；勿再往 YAML 里填 provider/model/key 或策略正文。
+按需改 `listen` / `local`。LLM、压缩、skills/triggers、hooks 等请在 **Web UI「设置」** 修改（写入 SQLite）。旧版胖 YAML 首次启动会自动迁入 `node_settings.db` 并瘦身引导文件。
 
 `config.yaml` **不会被 Git 跟踪**。
 
-### `agent` 块（身份与 A2A 角色）
+### Agent 身份与 A2A 角色
 
-所有 Agent 身份与 A2A 行为均在 **`config.yaml` 的 `agent` 块**配置；Node 注册 Manage 时自动组装 `card` JSON 上报。
+身份与 A2A 行为在 **`node_settings.db`（Web UI）** 中配置；Node 注册 Manage 时自动组装 `card` JSON 上报。字段含义：
 
 | 字段 | 说明 |
 |------|------|

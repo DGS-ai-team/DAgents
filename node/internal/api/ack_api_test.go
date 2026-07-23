@@ -21,7 +21,6 @@ func TestHandleSessionAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
 
 	sessionID := "sess-ack-test"
 	if err := st.Save(context.Background(), store.Record{
@@ -36,6 +35,7 @@ func TestHandleSessionAck(t *testing.T) {
 	}
 
 	srv := NewServer(cfg, nil, WithStore(st))
+	t.Cleanup(srv.Close)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 

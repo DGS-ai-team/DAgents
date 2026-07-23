@@ -1,20 +1,11 @@
-# config.example.yaml — Agent Node 配置模板（可提交仓库）
+# DAgents Node bootstrap（仅 listen / local）
 #
 # 本地使用：
 #   cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
-#   # 编辑 config.yaml；config.yaml 已在 .gitignore 中
 #
-# 开发联调也可直接引用本文件：
-#   go run ./node/cmd/dagents-node -config packaging/agent-client/config.example.yaml
-#
-# 本文件只保留 Node 进程级配置。以下内容请在 Web UI / SQLite 管理，勿写在此：
-#   · LLM 连接档案 → 设置 › 连接 › LLM 配置（llm_configs.db）
-#   · Agent 策略 / 侧车 prompt → Agents › 设置（agents.db：agent_policy、agent_prompt_context）
-#   · 单 Agent 绑定项（max_tool_loops、工具组、Hook 覆盖、LLM active 等）→ agents.config_snapshot_json
-
-# node_id：可选；缺省自动生成并写入 <fs_root>/node/node_id
-# （旧键 agent_id 仍可读并合并为 node_id，请勿再新增）
-node_id:
+# 其余 Node 设置保存在 ./.runtime/node_settings.db（固定路径，不可配置），
+# LLM 连接档案保存在 ./.runtime/llm_configs.db，请用 Web UI「设置」修改。
+# Agent 策略 / 侧车 / 实例配置在 agents.db。
 
 listen:
   host: 127.0.0.1
@@ -22,134 +13,4 @@ listen:
 
 local:
   endpoint: http://127.0.0.1:18765
-
-# Node 对外身份（Manage / A2A）
-# role=compliance → 可作为被调方（expose 由 role 推导）
-# role=ops 或留空 → 通常作调用方
-agent:
-  name: local-assistant
-  description: 本机智能助手
-  role: ops
-  # capabilities: []
-  # metadata: {}
-
-# 工作区根（工具沙箱 + 运行时数据，缺省 ./.runtime）
-# 主要产物：agents.db · llm_configs.db · node/node_id · data/ · skills/ · externaltools/ · history/ · triggers/
-fs_root: ./.runtime
-
-manage:
-  enabled: false
-  # 启用：启动 Manage → manage.enabled: true → 取消下列注释；tools.enabled_groups 含 a2a
-  # （见 docs/handbook/05-Manage与A2A.md、packaging/manage/README.md）
-  # url: http://127.0.0.1:8020
-  # node_token:              # Manage 启用 MANAGE_TOKENS 时填写
-  # registration:
-  #   base_url: http://192.168.1.10:18765   # 上报可达地址；留空则用 local.endpoint
-  #   interval_seconds: 30
-  #   ttl_seconds: 60                       # 应大于 interval_seconds
-  #   team: platform                        # Manage Console 目录标签
-  # a2a:
-  #   enabled: true                         # false = 仅注册、不拉 Inbox
-  #   inbox_wait_seconds: 25
-  #   inbox_poll_seconds: 30                # 省略时默认 = interval_seconds
-  # 发现分组由 Manage Console/API 分配，勿在 Node config 写 groups
-
-skills:
-  enabled: true
-  max_in_prompt: 5
-
-compression:
-  silent_trigger_tokens: 80000
-  blocking_trigger_tokens: 100000
-  # idle_auto_compress_seconds: 3600
-  # idle_auto_compress_poll_seconds: 60
-  # idle_auto_compress_min_tokens: 80000
-
-triggers:
-  enabled: true
-  poll_seconds: 5
-
-# raw_message_history:
-#   enabled: true
-
-# Node 日志级别：debug | info | warn | error
-# 后台启动时完整日志写入 .runtime/logs/node-YYYY-MM-DD.log，错误写入同日 *.err.log
-log:
-  level: info
-
-ui:
-  enabled: true
-
-tools:
-  # 内置工具组（Node 默认）；省略 = 全部（见 handbook/04 · shared/config/README.md）
-  # 单 Agent 可在创建/设置里覆盖 enabled_groups（写入 SQLite snapshot）
-  # enabled_groups:
-  #   - fs
-  #   - bash
-  #   - hitl
-  #   - skills
-  #   - triggers
-  #   - a2a            # 须 manage.enabled
-  #   - child_agents
-  #   - browser        # 须 wecom/browser 等进程能力开启
-  #   - wecom          # 须 wecom.enabled + webhook
-  bash_output_encoding: utf-8   # 留空则 Windows cmd/powershell=gbk、bash=utf-8
-  # file_encoding: gbk          # FS 默认磁盘编码；省略 utf-8
-  bash_compress:
-    enabled: true
-    max_output_chars: 12000
-    max_output_chars_stderr: 16000
-
-child_agents:
-  enabled: true
-  default_ttl_seconds: 1800
-  max_ttl_seconds: 7200
-  default_max_turns: 20
-  max_max_turns: 50
-  max_active_per_parent: 8
-  default_wait_timeout_seconds: 300
-
-hooks:
-  duplicate_tool_call:
-    enabled: true
-    window_seconds: 60
-  tool_result:
-    enabled: true
-    spill_threshold_tokens: 12000
-    tools:
-      - bash_run
-      - read_file
-      - grep_file
-      - grep_files
-      - search_replace
-      - glob_files
-      - agent_invoke
-      - agent_discover
-  # plugins:
-  #   - path: .runtime/plugins/redact.so
-  #     phases: [tool.after_each]
-  #     priority: 100
-  #     on_error: continue
-  # host:
-  #   max_llm_calls: 2
-  #   history_window: 100
-
-# browser:
-#   enabled: false
-#   service_url: http://127.0.0.1:18766
-#   headed: true
-#   chrome_path: ""
-#   cdp_url: ""
-#   debug_port: 9222
-#   default_timeout_ms: 30000
-#   output_dir: browser
-#   max_sessions: 1
-#   ignore_https_errors: false
-
-# 企业微信「消息推送」Webhook（群机器人）；启用后暴露 wecom_send_markdown / wecom_send_file
-# wecom:
-#   enabled: false
-#   # 完整 webhook URL，或只填 webhook_key
-#   webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
-#   # webhook_key: "YOUR_KEY"
-#   # api_base: "https://qyapi.weixin.qq.com"
+  node_id: ""

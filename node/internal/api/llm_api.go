@@ -124,10 +124,13 @@ func (s *Server) persistActiveLLMThinking(ctx context.Context) error {
 		}
 	}
 
-	if s.configPath != "" && configPathWritable(s.configPath) {
-		if err := config.SaveFile(s.configPath, &updated); err != nil {
+	if s.nodeSettings != nil {
+		if err := s.nodeSettings.Save(ctx, &updated); err != nil {
 			return err
 		}
+	}
+	if s.configPath != "" && configPathWritable(s.configPath) {
+		_ = config.SaveBootstrapFile(s.configPath, &updated)
 	}
 	setup.CopyConfig(s.cfg, &updated)
 	return nil
@@ -154,12 +157,13 @@ func (s *Server) switchActiveLLMProfile(id string) error {
 		return err
 	}
 	updated.ApplyDefaults()
-	// 运行时切换不改「默认第一条」顺序，也不强制写回 active 到 yaml 作为 default。
-	// 若 yaml 可写则仍同步当前选用，便于进程重启前的热切换状态落盘。
-	if s.configPath != "" && configPathWritable(s.configPath) {
-		if err := config.SaveFile(s.configPath, &updated); err != nil {
+	if s.nodeSettings != nil {
+		if err := s.nodeSettings.Save(context.Background(), &updated); err != nil {
 			return err
 		}
+	}
+	if s.configPath != "" && configPathWritable(s.configPath) {
+		_ = config.SaveBootstrapFile(s.configPath, &updated)
 	}
 	setup.CopyConfig(s.cfg, &updated)
 	s.syncLLMRuntimeFromStore(context.Background())

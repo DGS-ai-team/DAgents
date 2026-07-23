@@ -53,3 +53,25 @@ func TestSaveFile_rejectsInvalid(t *testing.T) {
 		t.Fatal("expected validation error")
 	}
 }
+
+func TestFileHasMigratableSettings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	thin := filepath.Join(dir, "thin.yaml")
+	if err := SaveBootstrapFile(thin, &Config{
+		Listen: ListenConfig{Host: "127.0.0.1", Port: 18765},
+		Local:  LocalConfig{Endpoint: "http://127.0.0.1:18765"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if FileHasMigratableSettings(thin) {
+		t.Fatal("bootstrap-only yaml should not be migratable")
+	}
+	fat := filepath.Join(dir, "fat.yaml")
+	if err := os.WriteFile(fat, []byte("listen:\n  port: 1\nskills:\n  enabled: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !FileHasMigratableSettings(fat) {
+		t.Fatal("fat yaml should be migratable")
+	}
+}

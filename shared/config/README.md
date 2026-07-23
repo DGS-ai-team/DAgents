@@ -19,7 +19,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 |----|------|
 | `listen` / `local` | Node 监听与 Client 连接 endpoint |
 | `llm` | 模型连接（迁移种子）；工具轮次上限见 Agent snapshot |
-| `fs_root` | 工作区根（缺省 `./.runtime`）；`data/`、`memory/`、`skills/`、`policy/` 等子路径硬编码相对此根 |
+| `fs_root` | **不可配置**；固定 `./.runtime`。`data/`、`memory/`、`skills/`、`policy/` 等子路径硬编码相对此根 |
 | `skills` | 技能开关与 prompt 上限（目录固定为 `{fs_root}/skills`） |
 | `compression` | 上下文压缩 token 阈值 |
 | `triggers` | 触发器调度（见下表） |

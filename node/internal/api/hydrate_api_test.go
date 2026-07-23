@@ -21,9 +21,9 @@ func TestHandleSessionHydrate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
 
 	srv := NewServer(cfg, nil, WithStore(st))
+	t.Cleanup(srv.Close)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 

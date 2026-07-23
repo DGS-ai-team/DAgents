@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,11 +11,10 @@ import (
 func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string) {
 	t.Helper()
 	dir := t.TempDir()
-	runtimeDir = dir
+	t.Chdir(dir)
+	// fs_root 写死为 DefaultFSRoot；chdir 到 TempDir，相对路径落在隔离目录。
+	runtimeDir = DefaultFSRoot
 	path := filepath.Join(dir, "config.yaml")
-	if !strings.Contains(content, "fs_root:") {
-		content = fmt.Sprintf("fs_root: %q\n", runtimeDir) + content
-	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +49,8 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	if cfg.Local.Endpoint != wantEndpoint {
 		t.Fatalf("local.endpoint = %q, want %q", cfg.Local.Endpoint, wantEndpoint)
 	}
-	if cfg.FSRoot != runtimeDir {
-		t.Fatalf("fs_root = %q, want %q", cfg.FSRoot, runtimeDir)
+	if cfg.FSRoot != DefaultFSRoot {
+		t.Fatalf("fs_root = %q, want %q", cfg.FSRoot, DefaultFSRoot)
 	}
 	wantDB := filepath.Join(runtimeDir, "memory", "sessions.db")
 	if cfg.SessionDBPath() != wantDB {
@@ -65,6 +63,17 @@ func TestLoadFile_appliesDefaults(t *testing.T) {
 	wantSkills := filepath.Join(runtimeDir, "skills")
 	if cfg.SkillsRoot() != wantSkills {
 		t.Fatalf("SkillsRoot = %q, want %q", cfg.SkillsRoot(), wantSkills)
+	}
+}
+
+func TestLoadFile_ignoresYAMLFSRoot(t *testing.T) {
+	path, _ := testConfigPath(t, "node_id: fixed-root\nfs_root: /should/be/ignored\n")
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.FSRoot != DefaultFSRoot {
+		t.Fatalf("fs_root = %q, want fixed %q", cfg.FSRoot, DefaultFSRoot)
 	}
 }
 

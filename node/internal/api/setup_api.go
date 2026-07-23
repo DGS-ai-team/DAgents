@@ -16,22 +16,25 @@ func (s *Server) registerSetupRoutes() {
 	s.mux.HandleFunc("PATCH /v1/setup/config", s.handlePatchSetupConfig)
 }
 
+func (s *Server) setupWritable() bool {
+	return s.nodeSettings != nil || s.llmConfigs != nil || (s.configPath != "" && configPathWritable(s.configPath))
+}
+
 func (s *Server) handleGetSetupConfig(w http.ResponseWriter, _ *http.Request) {
 	view := setup.ViewFromConfig(s.cfg)
 	s.enrichLLMSettingsView(&view.LLM)
 	view.ConfigPath = s.configPath
-	view.ConfigWritable = configPathWritable(s.configPath) || s.llmConfigs != nil
+	view.ConfigWritable = s.setupWritable()
 	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) {
-	yamlWritable := s.configPath != "" && configPathWritable(s.configPath)
-	if !yamlWritable && s.llmConfigs == nil {
-		if s.configPath == "" {
-			writeAPIError(w, http.StatusServiceUnavailable, "config_path_unknown", "Node 未记录 config.yaml 路径，无法保存", nil)
+	if !s.setupWritable() {
+		if s.configPath == "" && s.nodeSettings == nil && s.llmConfigs == nil {
+			writeAPIError(w, http.StatusServiceUnavailable, "config_path_unknown", "Node 未记录配置存储，无法保存", nil)
 			return
 		}
-		writeAPIError(w, http.StatusForbidden, "config_not_writable", "config.yaml 不可写", nil)
+		writeAPIError(w, http.StatusForbidden, "config_not_writable", "配置不可写", nil)
 		return
 	}
 	var patch setup.SettingsPatch
@@ -44,12 +47,9 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 非 LLM 块仍需可写 yaml。
-	if patch.LLM == nil || setup.PatchHasNonLLMBlock(patch) {
-		if !yamlWritable {
-			writeAPIError(w, http.StatusForbidden, "config_not_writable", "config.yaml 不可写", nil)
-			return
-		}
+	if setup.PatchHasNonLLMBlock(patch) && s.nodeSettings == nil && !(s.configPath != "" && configPathWritable(s.configPath)) {
+		writeAPIError(w, http.StatusForbidden, "config_not_writable", "node_settings 不可用且 config.yaml 不可写", nil)
+		return
 	}
 
 	updated, err := setup.ApplyPatch(s.cfg, patch)
@@ -68,13 +68,21 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if yamlWritable {
+	if s.nodeSettings != nil {
+		if err := s.nodeSettings.Save(r.Context(), updated); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "node_settings_save_failed", err.Error(), nil)
+			return
+		}
+		if s.configPath != "" && configPathWritable(s.configPath) {
+			_ = config.SaveBootstrapFile(s.configPath, updated)
+		}
+	} else if s.configPath != "" && configPathWritable(s.configPath) {
 		if err := config.SaveFile(s.configPath, updated); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "config_save_failed", err.Error(), nil)
 			return
 		}
 	} else if patch.LLM == nil || setup.PatchHasNonLLMBlock(patch) {
-		writeAPIError(w, http.StatusForbidden, "config_not_writable", "config.yaml 不可写", nil)
+		writeAPIError(w, http.StatusForbidden, "config_not_writable", "无法持久化设置", nil)
 		return
 	}
 
@@ -87,7 +95,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	view := setup.ViewFromConfig(s.cfg)
 	s.enrichLLMSettingsView(&view.LLM)
 	view.ConfigPath = s.configPath
-	view.ConfigWritable = yamlWritable || s.llmConfigs != nil
+	view.ConfigWritable = s.setupWritable()
 	view.RestartRequired = true
 	writeJSON(w, http.StatusOK, view)
 }
@@ -139,7 +147,6 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 			keys[id] = key
 			continue
 		}
-		// 兼容旧客户端：仍可提交 api_key_env，首次保存时从环境变量灌入。
 		if env := strings.TrimSpace(p.APIKeyEnv); env != "" {
 			if v := strings.TrimSpace(os.Getenv(env)); v != "" {
 				keys[id] = v

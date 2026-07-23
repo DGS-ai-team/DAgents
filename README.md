@@ -112,7 +112,7 @@ flowchart LR
 |------|------|
 | **Go** | 1.25+（见 [`go.work`](go.work)） |
 | **Python**（Manage / 可选） | 3.11+；CI 验证 3.13 |
-| **LLM** | 默认 `llm.mock: true`，**无需 API Key** 即可联调 |
+| **LLM** | 首次启动写入产品默认到 `node_settings.db`；Web UI 可开 `llm.mock`，**无需 API Key** 即可联调 |
 
 ### 1. 克隆与配置
 
@@ -121,7 +121,8 @@ git clone https://github.com/DGS-ai-team/DAgents.git
 cd DAgents
 
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
-# 可选：编辑 config.yaml（真实 LLM 时设 llm.mock: false 并 export OPENAI_API_KEY）
+# 可选：只改 listen/local；其余用 Web UI（写入 node_settings.db / llm_configs.db）
+# 真实 LLM：在 Web UI 配置 provider/model，并 export OPENAI_API_KEY
 ```
 
 ### 2. 启动 Agent Node
@@ -146,26 +147,23 @@ Node 启动后在本机浏览器打开：
 http://127.0.0.1:18765/ui/
 ```
 
-在侧栏从模板 **新建 Agent**，即可对话。详见 [node/webui/README.md](node/webui/README.md)。可通过 `ui.enabled: false` 关闭挂载。
+在侧栏从模板 **新建 Agent**，即可对话。详见 [node/webui/README.md](node/webui/README.md)。可通过设置关闭 Web UI 挂载。
 
 ---
 
 ## 配置说明
 
-| 字段 | 说明 |
-|------|------|
-| `listen.host` / `listen.port` | Node 监听地址（默认 `127.0.0.1:18765`） |
-| `local.endpoint` | Client 连接 URL |
-| `llm.provider` | `openai` / `deepseek` / `qwen` / `vllm`（deepseek/qwen 支持 `/thinking` 热更新） |
-| `llm.mock` | `true` 时使用 mock LLM（开发默认） |
-| `llm.api_key_env` | API Key 环境变量名（默认 `OPENAI_API_KEY`，所有 provider 共用） |
-| `tools.bash_output_encoding` | `bash_run` 子进程输出解码（如 `gbk`；Windows cmd 默认 gbk） |
-| `tools.file_encoding` | FS 工具磁盘读写默认编码（`read_file` 等；Windows 默认 gbk，可单次 `encoding` 覆盖） |
-| `fs_root` | 工作区根（默认 `./.runtime`）；`data/`、`memory/`、`skills/` 等子路径均相对此根硬编码 |
-| `triggers.enabled` | 触发器调度开关 |
-| `child_agents.enabled` | 临时子 Agent 开关 |
-| `manage.enabled` | 向 Manage 注册并启用 A2A inbox（见 [manage/README.md](manage/README.md)） |
-| `ui.enabled` | Node 内嵌 Web UI（`/ui/`）；省略时默认 `true` |
+`config.yaml` **仅引导** `listen` / `local`。其余字段保存在 SQLite（Web UI「设置」）：
+
+| 来源 | 字段 | 说明 |
+|------|------|------|
+| YAML | `listen.host` / `listen.port` | Node 监听地址（默认 `127.0.0.1:18765`） |
+| YAML | `local.endpoint` | Client 连接 URL |
+| 固定 | 运行时根 | 始终 `./.runtime`（不可配置） |
+| `node_settings.db` / `llm_configs.db` | `llm.*` | provider / mock / api_key_env 等 |
+| `node_settings.db` | `tools.*` / `triggers` / `child_agents` / `manage` / `ui` | 进程级能力与集成 |
+
+旧版胖 YAML 首次启动会迁入 `node_settings.db` 并自动瘦身。
 
 完整示例：[packaging/agent-client/config.example.yaml](packaging/agent-client/config.example.yaml)
 

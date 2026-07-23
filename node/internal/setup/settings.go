@@ -560,9 +560,7 @@ func applyRuntimePatch(cfg *config.Config, p RuntimeSettings) error {
 	if id := strings.TrimSpace(p.NodeID); id != "" {
 		cfg.NodeID = id
 	}
-	if root := strings.TrimSpace(p.FSRoot); root != "" {
-		cfg.FSRoot = root
-	}
+	// fs_root 写死不可配置，忽略 PATCH 中的值。
 	if level := strings.ToLower(strings.TrimSpace(p.LogLevel)); level != "" {
 		switch level {
 		case "debug", "info", "warn", "error":
