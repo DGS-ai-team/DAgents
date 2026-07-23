@@ -37,10 +37,6 @@ agent:
 # 主要产物：agents.db · llm_configs.db · node/node_id · data/ · skills/ · externaltools/ · history/ · triggers/
 fs_root: ./.runtime
 
-# 进程级默认；连接档案（provider/base_url/model/key）在 Web UI 管理
-llm:
-  max_tool_loops: 32
-
 manage:
   enabled: false
   # 启用：启动 Manage → manage.enabled: true → 取消下列注释；tools.enabled_groups 含 a2a

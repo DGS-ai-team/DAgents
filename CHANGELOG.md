@@ -6,7 +6,7 @@
 
 ### 变更
 
-- **`config.example.yaml`**：去掉已废弃的 `expose_to_peers`；移除已迁入 SQLite 的 LLM 连接字段（provider/base_url/model/key 等），仅保留进程级 `llm.max_tool_loops`；补上 `agent:` 与「策略/侧车/LLM 走 Web UI」说明。
+- **`config.example.yaml`**：去掉已废弃的 `expose_to_peers`；移除已迁入 SQLite 的 LLM / Agent 绑定项（连接档案、`max_tool_loops` 等）；仅保留 Node 进程级配置，并注明策略/侧车/LLM 走 Web UI。
 
 ### 修复
 
