@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "安装 DAgents",
-        "width": 920,
-        "height": 620,
-        "minWidth": 840,
-        "minHeight": 560,
+        "width": 780,
+        "height": 480,
+        "minWidth": 680,
+        "minHeight": 420,
         "resizable": true,
         "center": true,
         "decorations": true

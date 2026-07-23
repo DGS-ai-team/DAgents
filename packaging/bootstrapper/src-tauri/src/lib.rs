@@ -315,6 +315,37 @@ fn open_web_ui(app: AppHandle) -> SetupResult<()> {
     Ok(())
 }
 
+#[tauri::command]
+fn open_tray(install_dir: String) -> SetupResult<()> {
+    let dir = PathBuf::from(install_dir.trim());
+    if dir.as_os_str().is_empty() {
+        return Err(err("安装目录为空"));
+    }
+    let dagents_cmd = dir.join("dagents.cmd");
+    #[cfg(windows)]
+    {
+        if !dagents_cmd.is_file() {
+            return Err(err("未找到 dagents.cmd，无法启动托盘"));
+        }
+        Command::new("cmd")
+            .args([
+                "/C",
+                dagents_cmd.to_str().unwrap_or("dagents.cmd"),
+                "shell",
+                "--background",
+            ])
+            .current_dir(&dir)
+            .spawn()
+            .map_err(|e| err(format!("启动托盘失败: {e}")))?;
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = dagents_cmd;
+        Err(err("托盘程序仅支持 Windows"))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -327,7 +358,8 @@ pub fn run() {
             get_host_info,
             pick_install_dir,
             run_install,
-            open_web_ui
+            open_web_ui,
+            open_tray
         ])
         .run(tauri::generate_context!())
         .expect("error while running DAgents Setup");
