@@ -72,6 +72,35 @@ func TestParseSnapshot(t *testing.T) {
 	}
 }
 
+func TestEffectiveMultimodalEnabled_fromNodeProfile(t *testing.T) {
+	mm := true
+	cfg := &config.Config{}
+	cfg.ApplyDefaults()
+	cfg.LLM.Profiles = map[string]config.LLMProfileConfig{
+		"text": {Provider: "deepseek", Model: "deepseek-chat"},
+		"vision": {
+			Provider:          "openai",
+			Model:             "gpt-4o",
+			MultimodalEnabled: &mm,
+		},
+	}
+	cfg.LLM.Active = "text"
+	cfg.ApplyDefaults()
+
+	snap := Snapshot{Defaults: map[string]any{
+		"llm": map[string]any{"active": "vision"},
+	}}
+	if !EffectiveMultimodalEnabled(cfg, snap) {
+		t.Fatal("expected multimodal from node profile vision")
+	}
+	snapText := Snapshot{Defaults: map[string]any{
+		"llm": map[string]any{"active": "text"},
+	}}
+	if EffectiveMultimodalEnabled(cfg, snapText) {
+		t.Fatal("text profile should not enable multimodal")
+	}
+}
+
 func TestApplyDefaultsToTurnOptions_maxToolLoopsFromSnapshot(t *testing.T) {
 	var turn session.TurnOptions
 	ApplyDefaultsToTurnOptions(&turn, Snapshot{Defaults: map[string]any{
