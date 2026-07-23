@@ -49,7 +49,7 @@ echo "[build] npm ci (desktop/tray-tauri)"
 BUNDLE_ARGS=()
 if [[ "${SKIP_BUNDLE}" == "1" ]]; then
   # 只要 release 可执行文件，跳过 NSIS（CI 更快）
-  BUNDLE_ARGS+=(--bundles none)
+  BUNDLE_ARGS+=(--no-bundle)
 fi
 
 echo "[build] tauri build ${BUNDLE_ARGS[*]:-}"

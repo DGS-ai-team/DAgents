@@ -87,7 +87,7 @@ CI 脚本（Windows runner）：
 
 ```bash
 OUT_DIR=dist bash scripts/ci/build_dagents_shell_tauri.sh
-# → dist/dagents-shell-tauri.exe（--bundles none，不打 NSIS）
+# → dist/dagents-shell-tauri.exe（--no-bundle，不打 NSIS）
 ```
 
 产物也可在 `src-tauri/target/release/dagents-shell.exe`。
