@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+---
+
+## [0.8.3] - 2026-07-23
+
+**配置收敛与 bash 控制体验**：Agent 级参数离开 Node YAML；工具气泡控制时机收紧；进程日志按日拆分。
+
 ### 变更
 
 - **`config.example.yaml`**：去掉已废弃的 `expose_to_peers`；移除已迁入 SQLite / Agent 绑定的项（LLM 连接档案、`max_tool_loops` 等）；仅保留 Node 进程级配置。
@@ -16,6 +22,8 @@
 
 - **`search_replace` 多行预览**：跨行替换时行号提示由「未知」改为「多行」。
 - **后台 bash 终止**：`POST .../tool-calls/{id}/cancel` 可按 `tool_call_id` 终止已转后台的任务。
+
+（Git **tag**：`v0.8.3`。）
 
 ---
 
