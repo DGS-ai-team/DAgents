@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **`config.example.yaml`**：去掉已废弃的 `expose_to_peers` 与「策略文件即生效」说明；补上 `agent:`（name/role）与 SQLite 为策略/侧车/LLM 权威的注释。
+
 ### 修复
 
 - **`search_replace` 多行预览**：跨行替换时行号提示由「未知」改为「多行」。

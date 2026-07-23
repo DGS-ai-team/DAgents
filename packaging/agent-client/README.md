@@ -19,7 +19,7 @@ Node 与 Client 共用 YAML 配置；**仓库只提交 `*.example.yaml`**，本�
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 ```
 
-编辑 `config.yaml`（例如 `llm.mock: false`、Manage 场景下 `agent.role`）。工具审批策略在 **`.runtime/policy/`**（首次启动 Node 时从 `packaging/runtime/policy` 自动复制种子）。
+编辑 `config.yaml`（例如 `llm.mock: false`、Manage 场景下 `agent.role`）。工具审批策略在 **Web UI「Agents › 策略」**（SQLite `agent_policy`）；`.runtime/policy/` 仅首次迁移/种子，改文件不会更新已有 Agent。
 
 `config.yaml` **不会被 Git 跟踪**。
 
