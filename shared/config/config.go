@@ -112,7 +112,7 @@ type ChildAgentsConfig struct {
 	DefaultWaitTimeoutSeconds int  `yaml:"default_wait_timeout_seconds"`
 }
 
-// LogConfig 控制 Node 进程 stderr 结构化日志级别。
+// LogConfig 控制 Node 进程日志级别（完整日志→stdout / *.log，错误→stderr / *.err.log）。
 type LogConfig struct {
 	Level string `yaml:"level"`
 }

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **进程日志按日拆分**：`node|shell|browser-YYYY-MM-DD.log` 为完整日志，同日 `*.err.log` 仅错误；Node slog 全量走 stdout、error 额外写 stderr。
+
 ### 修复
 
 - **`search_replace` 多行预览**：跨行替换时行号提示由「未知」改为「多行」。
