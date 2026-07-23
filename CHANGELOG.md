@@ -14,6 +14,7 @@
 
 ### 修复
 
+- **Composer LLM 切换**：切换后写入 Agent 绑定并应用到进程 LLM；刷新/ensure 后恢复为该 Agent 绑定的档案（含多模态开关），不再回退显示默认模型。
 - **`search_replace` 多行预览**：跨行替换时行号提示由「未知」改为「多行」。
 - **后台 bash 终止**：`POST .../tool-calls/{id}/cancel` 可按 `tool_call_id` 终止已转后台的任务。
 
