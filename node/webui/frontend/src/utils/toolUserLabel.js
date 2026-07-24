@@ -97,7 +97,7 @@ export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
 }
 
 /**
- * 工具步骤相位（多 tool_call 并行时区分排队与真正执行）：
+ * 工具步骤相位（同批免审批 tool_call 后端并行执行）：
  * generating | running | background | pending | completed | cancelled | rejected | interrupted | idle
  *
  * @param {{ callEntry?: object, resultEntry?: object, executionHint?: 'active' | 'pending' | null }} args
@@ -123,10 +123,10 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
   if (resultEntry) return "completed";
 
   if (callEntry && !resultEntry) {
-    if (executionHint === "active") return "running";
+    // HITL 待批：尚未开跑
     if (executionHint === "pending") return "pending";
-    // 无批次提示时：保守显示待执行，避免同批多个都转圈
-    return "pending";
+    // 并行模型：已 final 的 tool_call 默认即在执行（含 /tool-jobs 未登记的 FS 等）
+    return "running";
   }
   return "idle";
 }
@@ -158,13 +158,13 @@ export function toolStepStatusText({ callEntry, resultEntry, executionHint = nul
   }
 }
 
-/** 真正在跑（生成参数 / 执行 / 后台）— 用于转圈与高亮；排队中不算。 */
+/** 真正在跑（生成参数 / 执行 / 后台）— 用于转圈与高亮；待审批不算。 */
 export function toolStepIsInProgress({ callEntry, resultEntry, executionHint = null } = {}) {
   const phase = resolveToolStepPhase({ callEntry, resultEntry, executionHint });
   return phase === "generating" || phase === "running" || phase === "background";
 }
 
-/** 已收到 tool_call、尚未开始执行（多工具批次中排队）。 */
+/** 已收到 tool_call、尚未开跑（如 HITL 待审批）。 */
 export function toolStepIsPending({ callEntry, resultEntry, executionHint = null } = {}) {
   return resolveToolStepPhase({ callEntry, resultEntry, executionHint }) === "pending";
 }

@@ -55,11 +55,24 @@ describe("toolStepStatusText", () => {
     ).toBe("已终止");
   });
 
-  it("shows pending for queued tool_call without result", () => {
+  it("shows running for parallel tool_call without result", () => {
     const call = { kind: "tool_call", data: { tool_name: "read_file", tool_call_id: "c2" } };
-    expect(toolStepStatusText({ callEntry: call, resultEntry: null })).toBe("待执行");
-    expect(toolStepIsPending({ callEntry: call, resultEntry: null })).toBe(true);
-    expect(toolStepIsInProgress({ callEntry: call, resultEntry: null })).toBe(false);
+    expect(toolStepStatusText({ callEntry: call, resultEntry: null })).toBe("执行中");
+    expect(toolStepIsPending({ callEntry: call, resultEntry: null })).toBe(false);
+    expect(toolStepIsInProgress({ callEntry: call, resultEntry: null })).toBe(true);
+  });
+
+  it("shows pending only when executionHint marks HITL-gated call", () => {
+    const call = { kind: "tool_call", data: { tool_name: "bash_run", tool_call_id: "c-hitl" } };
+    expect(toolStepStatusText({ callEntry: call, resultEntry: null, executionHint: "pending" })).toBe(
+      "待执行",
+    );
+    expect(toolStepIsPending({ callEntry: call, resultEntry: null, executionHint: "pending" })).toBe(
+      true,
+    );
+    expect(toolStepIsInProgress({ callEntry: call, resultEntry: null, executionHint: "pending" })).toBe(
+      false,
+    );
   });
 
   it("shows running when executionHint is active or call is in running list", () => {

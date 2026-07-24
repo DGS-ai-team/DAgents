@@ -26,7 +26,7 @@ import ToolExecBubble from "./ToolExecBubble.vue";
 const props = defineProps({
   callEntry: { type: Object, default: null },
   resultEntry: { type: Object, default: null },
-  /** buildStream 标注：active=当前执行，pending=排队 */
+  /** buildStream 标注：active=并行执行中，pending=HITL 待批尚未开跑 */
   executionHint: { type: String, default: null },
   verbose: { type: Boolean, default: false },
 });

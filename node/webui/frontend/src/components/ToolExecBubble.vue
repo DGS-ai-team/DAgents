@@ -104,7 +104,7 @@ const statusText = computed(() => {
   if (isCall.value) {
     if (interrupted.value) return "已中断";
     if (props.entry.partial) return elapsedLive.value ? `生成中${elapsedLive.value}` : "生成中";
-    return "待执行";
+    return "执行中";
   }
   if (rejected.value) return "已拒绝";
   if (interrupted.value) return "已中断";

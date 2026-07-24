@@ -104,11 +104,21 @@ describe("buildStream activity", () => {
     expect(items[0].entry.text).toBe("真实问题");
   });
 
-  it("marks only the active unfinished tool as active, others pending", () => {
+  it("marks parallel unfinished tools as active; HITL-gated as pending", () => {
     const jobs = {
       runningCallIds: ["c-shell"],
       backgroundCallIds: [],
     };
+    const hitlQueue = [
+      {
+        kind: "approval",
+        data: {
+          approval_args: {
+            tool_calls: [{ id: "c-next", function: { name: "bash_run", arguments: "{}" } }],
+          },
+        },
+      },
+    ];
     const items = buildStream(
       [
         {
@@ -142,13 +152,13 @@ describe("buildStream activity", () => {
           data: { tool_call_id: "c-next", tool_name: "bash_run" },
         },
       ],
-      [],
+      hitlQueue,
       jobs,
     );
     const steps = items.filter((i) => i.kind === "tool_step");
     expect(steps).toHaveLength(4);
     expect(steps[0].executionHint).toBeUndefined();
-    expect(steps[1].executionHint).toBe("pending");
+    expect(steps[1].executionHint).toBe("active");
     expect(steps[2].executionHint).toBe("active");
     expect(steps[3].executionHint).toBe("pending");
   });
