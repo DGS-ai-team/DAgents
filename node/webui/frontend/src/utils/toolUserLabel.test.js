@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toolStepUserSummary } from "./toolUserLabel.js";
+import { toolStepStatusText, toolStepUserSummary } from "./toolUserLabel.js";
 
 describe("toolStepUserSummary", () => {
   it("uses purpose for bash_run", () => {
@@ -29,5 +29,29 @@ describe("toolStepUserSummary", () => {
       },
     });
     expect(text).toBe("读取文件：report.txt");
+  });
+});
+
+describe("toolStepStatusText", () => {
+  it("shows terminated for cancelled bash result", () => {
+    expect(
+      toolStepStatusText({
+        resultEntry: {
+          kind: "tool_result",
+          data: { content: "[BASH_RESULT] status=CANCELLED\nshell_type=bash\n命令已被用户终止。" },
+        },
+      }),
+    ).toBe("已终止");
+  });
+
+  it("shows background for running bash result", () => {
+    expect(
+      toolStepStatusText({
+        resultEntry: {
+          kind: "tool_result",
+          data: { content: "[BASH_RESULT] status=RUNNING job_id=j1" },
+        },
+      }),
+    ).toBe("后台执行中");
   });
 });

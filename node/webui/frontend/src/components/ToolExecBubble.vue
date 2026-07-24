@@ -107,6 +107,10 @@ const statusText = computed(() => {
     return "待执行";
   }
   if (rejected.value) return "已拒绝";
+  if (interrupted.value) return "已中断";
+  const bashStatus = String(props.entry.data?.content || "").match(/\[BASH_RESULT\]\s+status=([A-Za-z_]+)/i);
+  if (bashStatus && bashStatus[1].toUpperCase() === "CANCELLED") return "已终止";
+  if (bashStatus && bashStatus[1].toUpperCase() === "RUNNING") return "后台执行中";
   return "已完成";
 });
 

@@ -9,7 +9,8 @@ import {
   bashControlMode,
   canBackgroundBashTool,
   cancelBashToolCall,
-  isBashBackgroundRunning,
+  isBashBackgroundActive,
+  parseBashResultStatus,
   toolCallIdFromEntry,
   toolJobsStore,
 } from "../stores/toolJobs.js";
@@ -29,9 +30,11 @@ let tickTimer = null;
 
 const summary = computed(() => toolStepUserSummary({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const stepInProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const backgroundRunning = computed(() => isBashBackgroundRunning(props.resultEntry));
+const backgroundActive = computed(() =>
+  isBashBackgroundActive({ callEntry: props.callEntry, resultEntry: props.resultEntry }),
+);
 const controlMode = computed(() => bashControlMode({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const inProgress = computed(() => stepInProgress.value || backgroundRunning.value || controlMode.value === "background");
+const inProgress = computed(() => stepInProgress.value || backgroundActive.value || controlMode.value === "background");
 const showBashControls = computed(() => controlMode.value != null);
 const showBackgroundAction = computed(() => canBackgroundBashTool({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
@@ -44,7 +47,10 @@ const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] ||
 
 const status = computed(() => {
   void nowTick.value;
-  if (backgroundRunning.value || controlMode.value === "background") return "后台执行中";
+  if (backgroundActive.value || controlMode.value === "background") return "后台执行中";
+  const bashStatus = parseBashResultStatus(props.resultEntry?.data?.content);
+  if (bashStatus === "CANCELLED") return "已终止";
+  if (bashStatus === "SUCCEEDED") return "已完成";
   const base = toolStepStatusText({ callEntry: props.callEntry, resultEntry: props.resultEntry });
   if (!props.callEntry?.partial || !props.callEntry?.startedAt) return base;
   const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);

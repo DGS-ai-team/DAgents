@@ -344,6 +344,44 @@ export function applyToolResult(data) {
   if (callId) forgetToolBlock(callId);
 }
 
+/**
+ * 将已落库的 bash_run tool_result 中的 [BASH_RESULT] status=… 改写为终态。
+ * 后台任务完成后原气泡仍可能留着 RUNNING；终止/完成时用此更新 UI。
+ */
+export function patchBashResultStatus(toolCallId, status) {
+  const callId = String(toolCallId || "").trim();
+  const next = String(status || "").trim().toUpperCase();
+  if (!callId || !next) return false;
+  const idx = transcriptStore.entries.findIndex(
+    (e) =>
+      e.kind === "tool_result" &&
+      (e.blockId === callId || e.data?.tool_call_id === callId || e.data?.id === callId),
+  );
+  if (idx < 0) return false;
+  const prev = transcriptStore.entries[idx];
+  const content = String(prev.data?.content || "");
+  // 只推进 RUNNING → 终态，避免把 CANCELLED 覆盖成 SUCCEEDED。
+  if (!/\[BASH_RESULT\]\s+status=RUNNING\b/i.test(content)) return false;
+  const updated = content.replace(
+    /\[BASH_RESULT\]\s+status=RUNNING\b/i,
+    `[BASH_RESULT] status=${next}`,
+  );
+  if (updated === content) return false;
+  let nextContent = updated;
+  if (next === "CANCELLED" && !/命令已被用户终止/.test(nextContent)) {
+    nextContent = `${updated}\n命令已被用户终止。`;
+  }
+  transcriptStore.entries[idx] = {
+    ...prev,
+    data: {
+      ...prev.data,
+      content: nextContent,
+      interrupted: next === "CANCELLED" ? true : prev.data?.interrupted,
+    },
+  };
+  return true;
+}
+
 export function clearTranscript() {
   transcriptStore.entries = [];
   abortStreaming();
