@@ -35,6 +35,10 @@ VERSION=0.x.x scripts/ci/build_windows_installer.sh
 
 需安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)，并设置 `ISCC` 指向 `ISCC.exe`。
 
+## Tauri 现代向导（可选）
+
+品牌化多步 UI 见 [`../bootstrapper/`](../bootstrapper/README.md)：Vue + Tauri 壳调用本目录 Inno 包 `/VERYSILENT` 完成落地。
+
 ## 界面
 
 - `WizardStyle=modern`、简体中文语言包
