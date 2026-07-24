@@ -103,4 +103,53 @@ describe("buildStream activity", () => {
     expect(items).toHaveLength(1);
     expect(items[0].entry.text).toBe("真实问题");
   });
+
+  it("marks only the active unfinished tool as active, others pending", () => {
+    const jobs = {
+      runningCallIds: ["c-shell"],
+      backgroundCallIds: [],
+    };
+    const items = buildStream(
+      [
+        {
+          id: 1,
+          kind: "tool_call",
+          blockId: "c-done",
+          data: { tool_call_id: "c-done", tool_name: "read_file" },
+        },
+        {
+          id: 2,
+          kind: "tool_result",
+          blockId: "c-done",
+          data: { tool_call_id: "c-done", tool_name: "read_file", content: "ok" },
+        },
+        {
+          id: 3,
+          kind: "tool_call",
+          blockId: "c-fs",
+          data: { tool_call_id: "c-fs", tool_name: "read_file" },
+        },
+        {
+          id: 4,
+          kind: "tool_call",
+          blockId: "c-shell",
+          data: { tool_call_id: "c-shell", tool_name: "bash_run" },
+        },
+        {
+          id: 5,
+          kind: "tool_call",
+          blockId: "c-next",
+          data: { tool_call_id: "c-next", tool_name: "bash_run" },
+        },
+      ],
+      [],
+      jobs,
+    );
+    const steps = items.filter((i) => i.kind === "tool_step");
+    expect(steps).toHaveLength(4);
+    expect(steps[0].executionHint).toBeUndefined();
+    expect(steps[1].executionHint).toBe("pending");
+    expect(steps[2].executionHint).toBe("active");
+    expect(steps[3].executionHint).toBe("pending");
+  });
 });

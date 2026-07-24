@@ -1,7 +1,13 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from "vue";
 import { formatToolElapsed } from "../utils/format.js";
-import { toolStepIsInProgress, toolStepStatusText, toolStepUserSummary } from "../utils/toolUserLabel.js";
+import {
+  resolveToolStepPhase,
+  toolStepIsInProgress,
+  toolStepIsPending,
+  toolStepStatusText,
+  toolStepUserSummary,
+} from "../utils/toolUserLabel.js";
 import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import {
@@ -20,6 +26,8 @@ import ToolExecBubble from "./ToolExecBubble.vue";
 const props = defineProps({
   callEntry: { type: Object, default: null },
   resultEntry: { type: Object, default: null },
+  /** buildStream 标注：active=当前执行，pending=排队 */
+  executionHint: { type: String, default: null },
   verbose: { type: Boolean, default: false },
 });
 
@@ -28,8 +36,15 @@ const nowTick = ref(Date.now());
 const actionError = ref("");
 let tickTimer = null;
 
-const summary = computed(() => toolStepUserSummary({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
-const stepInProgress = computed(() => toolStepIsInProgress({ callEntry: props.callEntry, resultEntry: props.resultEntry }));
+const stepArgs = computed(() => ({
+  callEntry: props.callEntry,
+  resultEntry: props.resultEntry,
+  executionHint: props.executionHint,
+}));
+const summary = computed(() => toolStepUserSummary(stepArgs.value));
+const phase = computed(() => resolveToolStepPhase(stepArgs.value));
+const stepInProgress = computed(() => toolStepIsInProgress(stepArgs.value));
+const stepPending = computed(() => toolStepIsPending(stepArgs.value));
 const backgroundActive = computed(() =>
   isBashBackgroundActive({ callEntry: props.callEntry, resultEntry: props.resultEntry }),
 );
@@ -48,11 +63,12 @@ const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] ||
 const status = computed(() => {
   void nowTick.value;
   if (backgroundActive.value || controlMode.value === "background") return "后台执行中";
+  if (controlMode.value === "running" || phase.value === "running") return "执行中";
   const bashStatus = parseBashResultStatus(props.resultEntry?.data?.content);
   if (bashStatus === "CANCELLED") return "已终止";
   if (bashStatus === "SUCCEEDED") return "已完成";
-  const base = toolStepStatusText({ callEntry: props.callEntry, resultEntry: props.resultEntry });
-  if (!props.callEntry?.partial || !props.callEntry?.startedAt) return base;
+  const base = toolStepStatusText(stepArgs.value);
+  if (phase.value !== "generating" || !props.callEntry?.startedAt) return base;
   const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);
   if (!elapsed) return base || "生成中";
   return `生成中${elapsed}`;
@@ -128,6 +144,7 @@ async function onBackground(ev) {
       <button type="button" class="tool-summary-row__head" @click="toggle">
         <span class="tool-summary-row__glyph" aria-hidden="true">
           <span v-if="inProgress" class="tool-exec-spinner" />
+          <span v-else-if="stepPending" class="tool-summary-row__pending">○</span>
           <span v-else class="tool-summary-row__check">✓</span>
         </span>
         <span class="tool-summary-row__kind">{{ visual.label }}</span>
@@ -239,6 +256,12 @@ async function onBackground(ev) {
 
 .tool-summary-row__check {
   opacity: 0.9;
+}
+
+.tool-summary-row__pending {
+  opacity: 0.55;
+  font-size: 11px;
+  color: var(--color-text-subtle);
 }
 
 .tool-summary-row__kind {

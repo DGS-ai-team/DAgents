@@ -74,7 +74,12 @@ const userInfoSelected = ref(0);
 const followTail = ref(true);
 const SCROLL_TAIL_THRESHOLD = 48;
 
-const stream = computed(() => buildStream(props.entries, props.hitlQueue));
+const stream = computed(() => {
+  // 依赖 tool-jobs，以便排队/执行中相位随 /tool-jobs 刷新
+  void toolJobsStore.runningCallIds;
+  void toolJobsStore.backgroundCallIds;
+  return buildStream(props.entries, props.hitlQueue, toolJobsStore);
+});
 
 const activeStatusPhases = computed(() => {
   void statusStore.tick;
@@ -378,6 +383,7 @@ defineExpose({
           v-else-if="item.kind === 'tool_step'"
           :call-entry="item.callEntry"
           :result-entry="item.resultEntry"
+          :execution-hint="item.executionHint"
           :verbose="toolVerbose"
         />
         <ApprovalBubble
