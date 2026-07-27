@@ -62,18 +62,6 @@ func (c *Client) EnsureAgent(ctx context.Context, agentID string) error {
 	return nil
 }
 
-// CreateSession 已废弃：请用 EnsureAgent。
-func (c *Client) CreateSession(ctx context.Context, sessionID string) (string, error) {
-	id := strings.TrimSpace(sessionID)
-	if id == "" {
-		return "", fmt.Errorf("agent_id is required")
-	}
-	if err := c.EnsureAgent(ctx, id); err != nil {
-		return "", err
-	}
-	return id, nil
-}
-
 // LLMSettings 为 Node LLM 运行时参数（GET/PATCH /v1/llm/settings 与 agent/info.llm）。
 type LLMSettings struct {
 	Provider          string `json:"provider"`
@@ -111,9 +99,6 @@ type AgentSummary struct {
 	QueuePending  int    `json:"queue_pending,omitempty"`
 }
 
-// SessionSummary 已废弃：请用 AgentSummary。
-type SessionSummary = AgentSummary
-
 // ListAgents 调用 GET /v1/agents。
 func (c *Client) ListAgents(ctx context.Context) ([]AgentSummary, error) {
 	var resp struct {
@@ -141,11 +126,6 @@ func (c *Client) ListAgents(ctx context.Context) ([]AgentSummary, error) {
 		})
 	}
 	return out, nil
-}
-
-// ListSessions 已废弃：请用 ListAgents。
-func (c *Client) ListSessions(ctx context.Context) ([]SessionSummary, error) {
-	return c.ListAgents(ctx)
 }
 
 // SessionContext 为 GET /v1/agents/{id}/context 响应。

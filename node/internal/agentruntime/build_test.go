@@ -90,6 +90,31 @@ func TestBuild_skillsFollowsToolGroup(t *testing.T) {
 	}
 }
 
+func TestBuild_ignoresLegacySkillsEnabledFalse(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{NodeID: "n1", FSRoot: root}
+	cfg.ApplyDefaults()
+	cfg.Skills.Enabled = true
+
+	built, err := Build(BuildParams{
+		NodeCFG:  cfg,
+		BaseTurn: session.TurnOptions{FSRoot: root},
+		AgentID:  "agt-legacy-skills",
+		Snapshot: Snapshot{
+			Defaults: map[string]any{
+				"tools":  map[string]any{"enabled_groups": []any{"fs", "skills"}},
+				"skills": map[string]any{"enabled": false},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !built.TurnOptions.SkillsEnabled {
+		t.Fatal("legacy defaults.skills.enabled=false must not disable skills when tool group present")
+	}
+}
+
 func TestBuild_appliesSkillsVisibleAllowlist(t *testing.T) {
 	root := t.TempDir()
 	skillsRoot := filepath.Join(root, "skills")

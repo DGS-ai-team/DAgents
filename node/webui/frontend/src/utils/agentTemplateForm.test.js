@@ -125,7 +125,7 @@ describe("agentTemplateForm", () => {
     expect(patch.template_id).toBeUndefined();
     expect(patch.display_name).toBe("改名");
     expect(patch.defaults.tools.enabled_groups).toEqual(["fs"]);
-    expect(patch.defaults.skills.enabled).toBe(false);
+    expect(patch.defaults.skills).toEqual({});
   });
 
   it("reads draft from agent view", () => {
@@ -236,7 +236,7 @@ describe("agentTemplateForm", () => {
     expect(payload.display_name).toBe("我的 Bot");
     expect(payload.defaults.llm).toEqual({ active: "default", max_tool_loops: 20 });
     expect(payload.defaults.child_agents.enabled).toBe(false);
-    expect(payload.defaults.skills.enabled).toBe(false);
+    expect(payload.defaults.skills).toEqual({});
     expect(payload.sandbox.enabled).toBe(true);
   });
 

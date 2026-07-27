@@ -213,18 +213,18 @@ func MaxToolLoopsFromDefaults(snap Snapshot) int {
 	}
 }
 
-// SkillsConfig 为 defaults.skills 解析结果。
+// SkillsConfig 为 defaults.skills 解析结果（仅 visible；能力开关见工具组 skills）。
 type SkillsConfig struct {
-	Enabled bool
 	// VisibleRestrict 表示 snapshot 显式写了 visible（含空列表）；false 表示未限制。
 	VisibleRestrict bool
 	Visible         []string
 }
 
-// SkillsFromDefaults 读取 defaults.skills.enabled / visible。
+// SkillsFromDefaults 读取 defaults.skills.visible。
 // visible 缺省：不限制（全部可见）；visible: []：全部不可见；visible: ["a"]：仅 a。
+// 不再读取 defaults.skills.enabled（旧字段忽略；能力由工具组 skills + Node 总闸决定）。
 func SkillsFromDefaults(snap Snapshot) SkillsConfig {
-	out := SkillsConfig{Enabled: true}
+	var out SkillsConfig
 	raw, ok := snap.Defaults["skills"]
 	if !ok || raw == nil {
 		return out
@@ -232,9 +232,6 @@ func SkillsFromDefaults(snap Snapshot) SkillsConfig {
 	m, ok := raw.(map[string]any)
 	if !ok {
 		return out
-	}
-	if v, ok := boolFromAny(m["enabled"]); ok {
-		out.Enabled = v
 	}
 	if _, hasVisible := m["visible"]; hasVisible {
 		out.VisibleRestrict = true

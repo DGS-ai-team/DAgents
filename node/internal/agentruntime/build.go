@@ -70,10 +70,9 @@ func Build(p BuildParams) (Built, error) {
 	}
 	reg.SetBashCompress(bc)
 
+	// 技能能力仅由 Node 总闸 + 工具组 skills 决定；visible 白名单仍读 defaults.skills.visible。
 	skillsOn := p.NodeCFG.Skills.Enabled && toolGroupEnabled(groups, "skills")
 	skillsCfg := SkillsFromDefaults(p.Snapshot)
-	// Agent 级 skills.enabled 与工具组 / Node 总闸取交集（兼容旧 snapshot）。
-	skillsOn = skillsOn && skillsCfg.Enabled
 
 	if err := attachDockerSandbox(reg, p.AgentID, fsRoot, p.Snapshot); err != nil {
 		return Built{}, err

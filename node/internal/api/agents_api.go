@@ -65,9 +65,7 @@ func defaultAgentCreationDefaults() map[string]any {
 		"tools": map[string]any{
 			"enabled_groups": []any{},
 		},
-		"skills": map[string]any{
-			"enabled": true,
-		},
+		"skills": map[string]any{},
 		"child_agents": map[string]any{
 			"enabled": true,
 		},
