@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **异步 bash 回灌丢回调**：同步超时/转后台与 collector 收尾竞态时，若进程已结束才置 `autoDegraded`，会漏掉 `notifyDone`；现对完成回灌做幂等，并在降级登记时若已结束则立即回灌。`background_job_cancel` / UI 终止后台任务一律触发异步回灌。
+
 ### 新增
 
 - **Tauri 安装向导（可选）**：`packaging/bootstrapper` 提供现代多步 Setup UI，嵌入并静默调用现有 Inno 安装包；未嵌入 payload 时支持演示模式预览。

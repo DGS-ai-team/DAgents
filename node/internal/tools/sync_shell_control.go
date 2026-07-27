@@ -197,14 +197,9 @@ func (r *Registry) cancelBackgroundBashByToolCall(sessionID, toolCallID string) 
 	if job.toolName != "" && job.toolName != "bash_run" {
 		return ErrSyncShellNotBash
 	}
-	job.mu.Lock()
-	autoDegraded := job.autoDegraded
-	job.mu.Unlock()
 	_ = job.cancelJob()
-	// 同步超时降级的 collector 在 cancelled 时不会 notifyDone，这里补一次以便 UI 回灌。
-	if autoDegraded {
-		r.bgJobs.notifyDone(job.sessionID, jobDonePayload(job))
-	}
+	// collector 在 status=cancelled 时不会 notifyDone；此处一律回灌（幂等）。
+	r.bgJobs.notifyJobDone(job)
 	return nil
 }
 
