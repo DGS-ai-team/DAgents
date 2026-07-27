@@ -3,11 +3,13 @@ import { approvalItemDisplayName } from "../utils/toolCalls.js";
 import {
   buildApprovalOneResume,
   buildApprovalSelectionResume,
+  buildUserInfoResumeFromSelection,
   approvalQueueKey,
   clearHitl,
   dequeueHitlAt,
   enqueueHitl,
   expandHitlRequired,
+  extractUserInfo,
   extractToolApprovals,
   hitlStore,
 } from "./hitl.js";
@@ -68,6 +70,34 @@ describe("buildApprovalSelectionResume", () => {
     expect(resume.approved).toEqual(["call-a"]);
     expect(resume.rejected).toEqual(["call-b"]);
     expect(resume.approved.length + resume.rejected.length).toBe(2);
+  });
+});
+
+describe("user_information multi-select", () => {
+  const userInfoData = {
+    user_information_args: {
+      tool_call_id: "ask-1",
+      question: "请选择",
+      allow_multiple: true,
+      options: [
+        { id: "a", label: "选项A", value: "A" },
+        { id: "b", label: "选项B", value: "B" },
+      ],
+    },
+  };
+
+  it("extracts allowMultiple from payload", () => {
+    const req = extractUserInfo(userInfoData);
+    expect(req.allowMultiple).toBe(true);
+    expect(req.options).toHaveLength(2);
+  });
+
+  it("builds selected_options with multiple ids", () => {
+    const resume = buildUserInfoResumeFromSelection(userInfoData, ["b", "a"]);
+    expect(resume.type).toBe("user_information");
+    expect(resume.tool_call_id).toBe("ask-1");
+    expect(resume.selected_options).toEqual(["a", "b"]);
+    expect(resume.answer).toBe("选项A, 选项B");
   });
 });
 
