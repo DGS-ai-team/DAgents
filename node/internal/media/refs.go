@@ -32,7 +32,7 @@ func IsRefURL(raw string) bool {
 	return ok
 }
 
-// ParsePublicMediaURL 从 GET API 路径解析 media id（/v1/sessions/{sid}/media/{id}）。
+// ParsePublicMediaURL 从 GET API 路径解析 media id（/v1/agents/{id}/media/{id}）。
 func ParsePublicMediaURL(raw string) (mediaID string, ok bool) {
 	raw = strings.TrimSpace(raw)
 	const needle = "/media/"

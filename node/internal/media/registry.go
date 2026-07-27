@@ -37,7 +37,7 @@ type Artifact struct {
 
 // PublicURL 返回 Client 可用的相对 API 路径。
 func (a Artifact) PublicURL() string {
-	return fmt.Sprintf("/v1/sessions/%s/media/%s", a.SessionID, a.ID)
+	return fmt.Sprintf("/v1/agents/%s/media/%s", a.SessionID, a.ID)
 }
 
 // ThumbnailURL 返回带 thumbnail=1 的相对 API 路径（F-M6）。

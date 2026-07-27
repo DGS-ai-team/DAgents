@@ -9,7 +9,7 @@
 |------|------|
 | **用户面主键** | **Agent**（`agent_id`）。1 Agent = 1 主对话；Session 仅为内部实现 |
 | **推荐路径** | `/v1/agents/{agent_id}/...`（ensure / hydrate / context / cancel / skills / child-agents / media / **policy** / **prompt-context**） |
-| **`/v1/sessions*`** | **过渡兼容**：仍可用，响应带 `Deprecation` / `Warning`；新集成勿依赖 |
+| **`/v1/sessions*`** | **已下线（410）**；错误码 `sessions_moved`；请改用 `/v1/agents/{agent_id}/...` |
 | **`/v1/policy*`** | **已下线（410）**；策略按 Agent 存 `agents.db`（`agent_policy` 表） |
 | **侧车 Markdown** | 按 Agent 存 `agents.db`（`agent_prompt_context`）；开关仍在 `config_snapshot_json.defaults.prompt_context` |
 | **Manage 注册** | 载荷主字段为 `node_id`（`agent_id` 仅为兼容旧 Manage，值同 `node_id`）；`manage.enabled` 默认关 |
@@ -31,7 +31,7 @@
 |------|--------|------|
 | `/v1/agents/...` | Client（本地） | **主契约**：对话、策略、侧车、子 Agent |
 | `/v1/...` | Client（本地） | messages、streams、triggers、setup、llm |
-| `/v1/sessions/...` | 过渡兼容 | 已弃用，见 §0 |
+| `/v1/sessions/...` | 已下线（410） | 见 §0 |
 | `/health` | 探活 | 负载均衡 / 运维脚本 |
 
 ### 1.2 通用错误体
@@ -136,9 +136,9 @@ Content-Type: application/json
 
 注入开关仍通过 Agent 快照 `defaults.prompt_context.*_enabled`（设置页「侧车与长期记忆」）。
 
-### 2.5 Session（过渡兼容）
+### 2.5 Sessions（已下线）
 
-`/v1/sessions*` 仍注册并可用，响应带 Deprecation 头；语义与对应 `/v1/agents/{id}/...` 相同。新集成请直接使用 Agents。
+`/v1/sessions*` 固定返回 **410 Gone**（`sessions_moved`），对齐已下线的 `/v1/policy*`。对话、hydrate、context、cancel、skills、child-agents、media 一律走 `/v1/agents/{agent_id}/...`。
 
 ### 2.6 消息与 resume
 
@@ -279,7 +279,7 @@ async / trigger / a2a inbox 在 **任务未完成**（HITL、open batch、tool l
 
 **`implicit_turn` 语义**：**非**用户 `POST /v1/messages` 驱动的 turn。Client 收到 `side_effect_turn_start` 后应开启与 user submit 相同的 turn 栅栏（Go `TurnGate.BeginImplicitTurn`、Web `beginImplicitTurn`、Python `begin_implicit_turn`），以便接收后续 `assistant` / `done`。
 
-**Cancel 与缓冲**（`POST /v1/sessions/{id}/cancel`）：
+**Cancel 与缓冲**（`POST /v1/agents/{id}/cancel`）：
 
 | 条件 | 行为 |
 |------|------|
@@ -294,9 +294,9 @@ async / trigger / a2a inbox 在 **任务未完成**（HITL、open batch、tool l
 ### 2.5 Skills（可选 HTTP；也可仅 tool）
 
 ```http
-GET /v1/sessions/{session_id}/skills
-POST /v1/sessions/{session_id}/skills/load
-POST /v1/sessions/{session_id}/skills/unload
+GET /v1/agents/{agent_id}/skills
+POST /v1/agents/{agent_id}/skills/load
+POST /v1/agents/{agent_id}/skills/unload
 ```
 
 与工具 `load_skills` 语义一致；HTTP 供 Client 设置页使用。
@@ -325,9 +325,9 @@ Client 入口：`/policy` 全屏界面（Go bubbletea / Python Textual，Esc 返
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/v1/sessions/{parent_session_id}/child-agents` | 列出该父 session 下**未交付**的活跃子 Agent |
-| GET | `/v1/sessions/{parent_session_id}/child-agents/{child_session_id}` | 查询单个子 Agent 状态 |
-| POST | `/v1/sessions/{parent_session_id}/child-agents/{child_session_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
+| GET | `/v1/agents/{parent_agent_id}/child-agents` | 列出该父 Agent 下**未交付**的活跃子 Agent |
+| GET | `/v1/agents/{parent_agent_id}/child-agents/{child_session_id}` | 查询单个子 Agent 状态 |
+| POST | `/v1/agents/{parent_agent_id}/child-agents/{child_session_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
 
 - 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建（非 A2A），**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** session 的 `GET /v1/streams`。
 - 子 Agent **生命周期**在**向父 Agent 交付结果**后结束并回收；交付时发送结束类 SSE。
@@ -453,7 +453,7 @@ local:
 
 | 优先级 | API |
 |--------|-----|
-| P0 | `/health`、`POST /v1/sessions`、`POST /v1/messages`、`GET /v1/streams` |
+| P0 | `/health`、`POST /v1/agents`、`POST /v1/messages`、`GET /v1/streams` |
 | P0 | Manage 注册/心跳/审计（出站） |
 | P1 | HITL resume、skills HTTP、A2A inbox 轮询 + Manage 工具 |
 | P2 | **临时子 Agent**（[child-agent-tools.md](./child-agent-tools.md)）— **已实现**；execution_progress 细粒度事件仍为远期 |

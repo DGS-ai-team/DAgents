@@ -2,29 +2,28 @@ package api
 
 import "net/http"
 
-// registerSessionRoutes 注册过渡期 /v1/sessions*（对外契约以 /v1/agents 为准）。
-// handlers 亦被 agent 路径别名复用。
-func (s *Server) registerSessionRoutes() {
-	s.mux.HandleFunc("POST /v1/sessions", s.withSessionsDeprecated(s.handleCreateSession))
-	s.mux.HandleFunc("GET /v1/sessions", s.withSessionsDeprecated(s.handleListSessions))
-	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", s.withSessionsDeprecated(s.handleDeleteSession))
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/clear-context", s.withSessionsDeprecated(s.handleClearContext))
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/compress", s.withSessionsDeprecated(s.handleCompressContext))
-	s.mux.HandleFunc("GET /v1/sessions/{session_id}/context", s.withSessionsDeprecated(s.handleSessionContext))
-	s.mux.HandleFunc("GET /v1/sessions/{session_id}/hydrate", s.withSessionsDeprecated(s.handleSessionHydrate))
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/ack", s.withSessionsDeprecated(s.handleSessionAck))
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/cancel", s.withSessionsDeprecated(s.handleCancelSession))
-	s.mux.HandleFunc("GET /v1/sessions/{session_id}/skills", s.withSessionsDeprecated(s.handleListSessionSkills))
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/skills/load", s.withSessionsDeprecated(s.handleLoadSessionSkill))
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/skills/unload", s.withSessionsDeprecated(s.handleUnloadSessionSkill))
+// registerSessionsGone 将已下线的 /v1/sessions* 固定返回 410（对齐 /v1/policy）。
+func (s *Server) registerSessionsGone() {
+	gone := s.handleSessionsGone
+	s.mux.HandleFunc("POST /v1/sessions", gone)
+	s.mux.HandleFunc("GET /v1/sessions", gone)
+	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", gone)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/clear-context", gone)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/compress", gone)
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/context", gone)
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/hydrate", gone)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/ack", gone)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/cancel", gone)
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/skills", gone)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/skills/load", gone)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/skills/unload", gone)
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/child-agents", gone)
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/child-agents/{child_session_id}", gone)
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/child-agents/{child_session_id}/cancel", gone)
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/media/{media_id}", gone)
 }
 
-func (s *Server) withSessionsDeprecated(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Deprecation", "true")
-		w.Header().Set("Sunset", "Sat, 01 Aug 2026 00:00:00 GMT")
-		w.Header().Set("Link", `</v1/agents/{agent_id}>; rel="successor-version"`)
-		w.Header().Set("Warning", `299 - "/v1/sessions* is deprecated; use /v1/agents/{agent_id}"`)
-		next(w, r)
-	}
+func (s *Server) handleSessionsGone(w http.ResponseWriter, _ *http.Request) {
+	writeAPIError(w, http.StatusGone, "sessions_moved",
+		"/v1/sessions* 已下线；请改用 /v1/agents/{agent_id}/...", nil)
 }

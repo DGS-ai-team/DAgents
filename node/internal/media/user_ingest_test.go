@@ -78,7 +78,7 @@ func TestUserMediaFromMessage_hydrateRef(t *testing.T) {
 	if len(images) != 1 || len(items) != 1 {
 		t.Fatalf("images=%v items=%v", images, items)
 	}
-	if !strings.HasPrefix(images[0], "/v1/sessions/sess-u2/media/") {
+	if !strings.HasPrefix(images[0], "/v1/agents/sess-u2/media/") {
 		t.Fatalf("url=%q", images[0])
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// HydrateView 为 GET /v1/sessions/{id}/hydrate 的聚合视图。
+// HydrateView 为 GET /v1/agents/{id}/hydrate 的聚合视图。
 type HydrateView struct {
 	SessionID     string
 	Transcript    []TranscriptEntry

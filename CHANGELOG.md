@@ -6,6 +6,7 @@
 
 ### 变更
 
+- **`/v1/sessions*` 下线**：全部返回 **410 Gone**（`sessions_moved`），对齐 `/v1/policy`；对话 hydrate/context/cancel/skills/child-agents/media 仅走 `/v1/agents/{agent_id}/...`；媒体 `PublicURL` 改为 agents 路径。
 - **HITL 旧事件收口**：本机 SSE / WebUI / 托盘 / inbox 等待仅认 `hitl_required`；A2A requires_input 出站强制 `event_type=hitl_required`；对端旧载荷仍在 caller 侧归一转换。
 - **Go Client Agent API**：新增 `ListAgents` / `AgentSummary`；`CreateSession` / `ListSessions` / `SessionSummary` 标为废弃别名。
 - **Skills payload**：新建/更新 Agent 时 `defaults.skills` 仅写 `visible` 白名单（关闭时仍写 `enabled:false` 兼容旧 runtime）。

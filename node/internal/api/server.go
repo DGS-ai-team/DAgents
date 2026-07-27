@@ -133,7 +133,7 @@ func WithSkipStore() Option {
 // 1. 装配 LLM、tools、policy、SQLite（可被 Option 覆盖）；
 // 2. 创建 SSE Hub 与 session.Manager，挂载 turn/skills/compression 选项；
 // 3. 可选初始化 triggers store/scheduler 与 bash 后台任务回灌；
-// 4. 注册 /health、/v1/sessions、/v1/messages、/v1/streams 等路由。
+// 4. 注册 /health、/v1/agents、/v1/messages、/v1/streams 等路由。
 //
 // 关键边界：子系统初始化失败时尽量降级（tools/policy/store/triggers 打日志后继续），避免整进程无法启动。
 func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server {
@@ -386,7 +386,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.registerAgentRoutes()
 	s.registerToolCallControlRoutes()
 	s.registerUIAggregateRoutes()
-	s.registerSessionRoutes()
+	s.registerSessionsGone()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()

@@ -7,7 +7,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// ContextView 为 GET /v1/sessions/{id}/context 的聚合视图。
+// ContextView 为 GET /v1/agents/{id}/context 的聚合视图。
 type ContextView struct {
 	SessionID             string
 	MessagesCount         int

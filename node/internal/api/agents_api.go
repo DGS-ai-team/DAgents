@@ -594,6 +594,7 @@ func (s *Server) handleAgentReload(w http.ResponseWriter, r *http.Request) {
 }
 
 // agent 路径别名：把 PathValue agent_id 映射为 session_id 后复用既有 handler。
+// agents store 未配置时（单测 WithSkipStore）直接放行，由下游按 runtime/DB 处理。
 func (s *Server) withAgentAsSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimSpace(r.PathValue("agent_id"))
@@ -601,13 +602,15 @@ func (s *Server) withAgentAsSession(next http.HandlerFunc) http.HandlerFunc {
 			writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
 			return
 		}
-		if err := s.ensureAgentRuntime(r.Context(), id); err != nil {
-			if err.Error() == "agent_not_found" {
-				writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+		if s.agents != nil {
+			if err := s.ensureAgentRuntime(r.Context(), id); err != nil {
+				if err.Error() == "agent_not_found" {
+					writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+					return
+				}
+				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})
 				return
 			}
-			writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})
-			return
 		}
 		r.SetPathValue("session_id", id)
 		next(w, r)

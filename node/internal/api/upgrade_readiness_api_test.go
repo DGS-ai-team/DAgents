@@ -7,7 +7,7 @@ import (
 )
 
 func TestHandleAgentUpgradeReadiness_idle(t *testing.T) {
-	ts := newTestServer(t)
+	_, ts := newTestServer(t)
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/v1/agent/upgrade-readiness")
