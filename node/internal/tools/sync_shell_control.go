@@ -198,8 +198,8 @@ func (r *Registry) cancelBackgroundBashByToolCall(sessionID, toolCallID string) 
 		return ErrSyncShellNotBash
 	}
 	_ = job.cancelJob()
-	// collector 在 status=cancelled 时不会 notifyDone；此处一律回灌，便于 UI/异步旁路更新。
-	r.bgJobs.notifyDone(job.sessionID, jobDonePayload(job))
+	// collector 在 status=cancelled 时不会 notifyDone；此处一律回灌（幂等）。
+	r.bgJobs.notifyJobDone(job)
 	return nil
 }
 

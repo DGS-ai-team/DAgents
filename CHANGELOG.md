@@ -6,6 +6,7 @@
 
 ### 修复
 
+- **异步 bash 回灌丢回调**：同步超时/转后台与 collector 收尾竞态时，若进程已结束才置 `autoDegraded`，会漏掉 `notifyDone`；现对完成回灌做幂等，并在降级登记时若已结束则立即回灌。`background_job_cancel` / UI 终止后台任务一律触发异步回灌。
 - **后台 bash 终止后气泡状态**：终止已转后台的 `bash_run` 后，工具气泡由「后台执行中」更新为「已终止」（改写 transcript 中的 `status=RUNNING`，并以 `/tool-jobs` 为准判断是否仍在跑）。
 - **多工具并行气泡状态**：同批免审批 `tool_call` 后端并行执行；未出结果的工具一律显示「执行中」。并行批次中工具完成后立刻推送 `tool_result` SSE；仅 HITL 待批尚未开跑的标「待执行」。
 

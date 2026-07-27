@@ -75,7 +75,12 @@ func (r *Registry) execBackgroundJobCancel(_ context.Context, raw json.RawMessag
 	if !ok {
 		return fmt.Sprintf("ERROR: 未找到后台任务：%q", args.JobID), nil
 	}
-	return job.cancelJob(), nil
+	msg := job.cancelJob()
+	// 超时降级的 collector 在 cancelled 时不会 notifyDone；工具取消也必须回灌。
+	if r.bgJobs != nil {
+		r.bgJobs.notifyJobDone(job)
+	}
+	return msg, nil
 }
 
 // IsBackgroundJobTool 判断是否为后台任务管理工具（始终同步执行）。

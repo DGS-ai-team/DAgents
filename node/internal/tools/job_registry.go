@@ -34,6 +34,8 @@ type backgroundJob struct {
 	bashShellType      string
 	bashOutputEncoding string
 	compressStats      *OutputCompressStats
+	// notifyOnce 保证完成/取消只回灌一次（collector、cancel、降级竞态可并发触发）。
+	notifyOnce sync.Once
 }
 
 // BackgroundJobDone 为后台任务完成时的结构化回灌载荷（由 session 转为 async_tool_result 入队）。
@@ -181,6 +183,20 @@ func (reg *backgroundJobRegistry) notifyDone(sessionID string, done BackgroundJo
 	}
 }
 
+// notifyJobDone 幂等回灌后台任务完成/取消结果。
+func (reg *backgroundJobRegistry) notifyJobDone(job *backgroundJob) {
+	if reg == nil || job == nil {
+		return
+	}
+	job.notifyOnce.Do(func() {
+		done := jobDonePayload(job)
+		job.mu.Lock()
+		sessionID := strings.TrimSpace(job.sessionID)
+		job.mu.Unlock()
+		reg.notifyDone(sessionID, done)
+	})
+}
+
 // jobDonePayloadLocked 在已持有 job.mu 时读取完成载荷。
 func jobDonePayloadLocked(job *backgroundJob) BackgroundJobDone {
 	result := job.result
@@ -270,10 +286,8 @@ func (r *Registry) StartBackground(
 			job.compressStats = outputCompressStatsFromSSEFields(stats)
 		}
 		job.finishedAt = nowMs()
-		donePayload := jobDonePayloadLocked(job)
-		session := job.sessionID
 		job.mu.Unlock()
-		r.bgJobs.notifyDone(session, donePayload)
+		r.bgJobs.notifyJobDone(job)
 	}()
 
 	return formatBackgroundJobAck(job), nil

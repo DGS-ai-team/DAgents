@@ -237,8 +237,8 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		}
 		return result, stats, nil
 	case <-gate.bgCh:
-		job.autoDegraded = true
-		r.bgJobs.put(job)
+		// 与 collector 并发：先置 autoDegraded，若进程已结束则立即回灌，避免丢 async 回调。
+		r.markAutoDegradedAndMaybeNotify(job)
 		r.syncShells.remove(toolCallID)
 		return formatShellRunningResult(job, params, "user"), nil, nil
 	case <-gate.cancelCh:
@@ -254,8 +254,7 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		return formatShellCancelledResult(job, params), nil, nil
 	case <-timer.C:
 		if params.userTimeout {
-			job.autoDegraded = true
-			r.bgJobs.put(job)
+			r.markAutoDegradedAndMaybeNotify(job)
 			r.syncShells.remove(toolCallID)
 			return formatShellRunningResult(job, params, "timeout"), nil, nil
 		}
@@ -324,14 +323,30 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 		job.result, job.compressStats = formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, job.bashCmd.ProcessState, waitErr)
 		job.finishedAt = nowMs()
 		autoDegraded := job.autoDegraded
-		session := job.sessionID
 		job.mu.Unlock()
 
 		if autoDegraded && r.bgJobs != nil {
-			r.bgJobs.notifyDone(session, jobDonePayload(job))
+			r.bgJobs.notifyJobDone(job)
 		}
 	}()
 	return done
+}
+
+// markAutoDegradedAndMaybeNotify 标记同步 bash 已转入后台；若 collector 已先完成则立刻回灌。
+func (r *Registry) markAutoDegradedAndMaybeNotify(job *backgroundJob) {
+	if job == nil {
+		return
+	}
+	job.mu.Lock()
+	job.autoDegraded = true
+	finished := job.finishedAt != 0
+	job.mu.Unlock()
+	if r.bgJobs != nil {
+		r.bgJobs.put(job)
+		if finished {
+			r.bgJobs.notifyJobDone(job)
+		}
+	}
 }
 
 func formatShellCompletedOutput(params shellRunParams, stdout, stderr string, state *os.ProcessState, runErr error) (string, *OutputCompressStats) {

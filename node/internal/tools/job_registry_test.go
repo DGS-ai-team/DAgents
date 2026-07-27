@@ -304,3 +304,131 @@ func TestBashRunCancelAfterBackgroundViaUI(t *testing.T) {
 	}
 	t.Fatalf("background count did not drop after cancel: %+v", reg.SessionToolJobCounts("sess-bg-cancel"))
 }
+
+func TestAutoDegradeSuccessNotifiesOnce(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan BackgroundJobDone, 2)
+	reg.SetBackgroundJobNotifier(func(sessionID string, done BackgroundJobDone) {
+		if sessionID != "sess-notify" {
+			t.Errorf("sessionID=%q", sessionID)
+		}
+		got <- done
+	})
+	ctx := WithToolCallID(WithSession(context.Background(), "sess-notify"), "call-notify-1")
+	out, err := reg.Execute(ctx, "bash_run", `{"command":"sleep 3","timeout_seconds":1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "status=RUNNING") {
+		t.Fatalf("expected RUNNING degrade, got %q", out)
+	}
+	select {
+	case done := <-got:
+		if done.Status != "succeeded" && done.Status != "failed" {
+			t.Fatalf("status=%q want succeeded/failed", done.Status)
+		}
+		if done.ToolCallID != "call-notify-1" {
+			t.Fatalf("toolCallID=%q", done.ToolCallID)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("timeout waiting for auto-degrade notifyDone")
+	}
+	select {
+	case extra := <-got:
+		t.Fatalf("unexpected second notify: %+v", extra)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestMarkAutoDegradedNotifiesIfAlreadyFinished(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan BackgroundJobDone, 1)
+	reg.SetBackgroundJobNotifier(func(_ string, done BackgroundJobDone) {
+		got <- done
+	})
+	job := &backgroundJob{
+		id:         "job-race",
+		sessionID:  "sess-race",
+		toolName:   "bash_run",
+		toolCallID: "call-race",
+		status:     "succeeded",
+		result:     "[BASH_RESULT] exit=0",
+		finishedAt: nowMs(),
+		done:       make(chan struct{}),
+	}
+	close(job.done)
+	// 模拟 collector 已完成后才置 autoDegraded（历史竞态会丢回调）。
+	reg.markAutoDegradedAndMaybeNotify(job)
+	select {
+	case done := <-got:
+		if done.JobID != "job-race" || done.Status != "succeeded" {
+			t.Fatalf("done=%+v", done)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected immediate notify when already finished")
+	}
+}
+
+func TestBackgroundJobCancelToolNotifies(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan BackgroundJobDone, 2)
+	reg.SetBackgroundJobNotifier(func(_ string, done BackgroundJobDone) {
+		got <- done
+	})
+	ctx := WithToolCallID(WithSession(context.Background(), "sess-cancel-tool"), "call-cancel-tool")
+	out, err := reg.Execute(ctx, "bash_run", `{"command":"sleep 20","timeout_seconds":1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := extractField(out, "job_id=")
+	if jobID == "" {
+		t.Fatalf("missing job_id in %q", out)
+	}
+	cancelOut, err := reg.Execute(context.Background(), "background_job_cancel", `{"job_id":"`+jobID+`"}`)
+	if err != nil || !strings.Contains(cancelOut, "cancelled") {
+		t.Fatalf("cancel=%q err=%v", cancelOut, err)
+	}
+	select {
+	case done := <-got:
+		if done.Status != "cancelled" {
+			t.Fatalf("status=%q want cancelled", done.Status)
+		}
+		if done.JobID != jobID {
+			t.Fatalf("jobID=%q want %q", done.JobID, jobID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("background_job_cancel did not notifyDone")
+	}
+}
+
+func TestNotifyJobDoneIdempotent(t *testing.T) {
+	reg := &backgroundJobRegistry{jobs: make(map[string]*backgroundJob)}
+	var n int
+	reg.onDone = func(_ string, _ BackgroundJobDone) { n++ }
+	job := &backgroundJob{
+		id:         "j1",
+		sessionID:  "s1",
+		toolName:   "bash_run",
+		status:     "succeeded",
+		result:     "ok",
+		finishedAt: nowMs(),
+	}
+	reg.notifyJobDone(job)
+	reg.notifyJobDone(job)
+	reg.notifyJobDone(job)
+	if n != 1 {
+		t.Fatalf("notify count=%d want 1", n)
+	}
+}
