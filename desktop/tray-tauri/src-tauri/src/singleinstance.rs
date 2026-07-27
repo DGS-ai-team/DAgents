@@ -2,8 +2,10 @@
 
 use crate::layout::Layout;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
 use std::path::PathBuf;
+
+#[cfg(not(windows))]
+use std::io::Write;
 
 pub struct InstanceGuard {
     #[cfg(windows)]
@@ -12,6 +14,25 @@ pub struct InstanceGuard {
     _file: File,
     #[cfg(not(windows))]
     path: PathBuf,
+}
+
+#[cfg(windows)]
+impl Drop for InstanceGuard {
+    fn drop(&mut self) {
+        if !self._mutex.is_null() {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self._mutex);
+            }
+            self._mutex = std::ptr::null_mut();
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl Drop for InstanceGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -45,6 +66,9 @@ pub fn acquire(layout: &Layout) -> Result<InstanceGuard, InstanceError> {
             )));
         }
         if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(handle);
+            }
             return Err(InstanceError::AlreadyRunning);
         }
         Ok(InstanceGuard { _mutex: handle })
@@ -75,13 +99,6 @@ pub fn acquire(layout: &Layout) -> Result<InstanceGuard, InstanceError> {
             _file: file,
             path,
         })
-    }
-}
-
-#[cfg(not(windows))]
-impl Drop for InstanceGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
     }
 }
 

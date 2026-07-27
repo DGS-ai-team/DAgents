@@ -16,7 +16,7 @@ mod singleinstance;
 use config::ShellConfig;
 use layout::Layout;
 use nodectl::Health;
-use singleinstance::{acquire, InstanceError, InstanceGuard};
+use singleinstance::{acquire, InstanceError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -36,7 +36,11 @@ struct Shared {
     recovering: AtomicBool,
     last_err: Mutex<Option<String>>,
     status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
-    _guard: InstanceGuard,
+}
+
+fn _assert_shared_send_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Shared>();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -76,6 +80,9 @@ pub fn run() {
         &format!("shell start endpoint={} config={}", cfg.endpoint, layout.config_path.display()),
     );
 
+    // 单实例锁保留在主线程栈上：Windows Mutex HANDLE 非 Send，不可放入 Arc 跨线程。
+    let _instance_guard = guard;
+
     let shared = Arc::new(Shared {
         layout,
         cfg,
@@ -83,7 +90,6 @@ pub fn run() {
         recovering: AtomicBool::new(false),
         last_err: Mutex::new(None),
         status_item: Mutex::new(None),
-        _guard: guard,
     });
 
     tauri::Builder::default()
