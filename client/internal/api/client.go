@@ -42,19 +42,6 @@ type StreamEvent struct {
 	Data      map[string]any
 }
 
-// CreateSession 为兼容别名：等价于 EnsureAgent，返回同一 agent_id。
-// 计划随 /v1/sessions* 下线一并删除；新代码请直接调用 EnsureAgent。
-func (c *Client) CreateSession(ctx context.Context, sessionID string) (string, error) {
-	id := strings.TrimSpace(sessionID)
-	if id == "" {
-		return "", fmt.Errorf("agent_id is required")
-	}
-	if err := c.EnsureAgent(ctx, id); err != nil {
-		return "", err
-	}
-	return id, nil
-}
-
 // EnsureAgent 调用 POST /v1/agents/{id}/ensure。
 func (c *Client) EnsureAgent(ctx context.Context, agentID string) error {
 	id := strings.TrimSpace(agentID)
@@ -73,6 +60,18 @@ func (c *Client) EnsureAgent(ctx context.Context, agentID string) error {
 		return fmt.Errorf("ensure agent failed")
 	}
 	return nil
+}
+
+// CreateSession 已废弃：请用 EnsureAgent。
+func (c *Client) CreateSession(ctx context.Context, sessionID string) (string, error) {
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return "", fmt.Errorf("agent_id is required")
+	}
+	if err := c.EnsureAgent(ctx, id); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 // LLMSettings 为 Node LLM 运行时参数（GET/PATCH /v1/llm/settings 与 agent/info.llm）。
@@ -100,17 +99,53 @@ type AgentInfo struct {
 	LLM              LLMSettings `json:"llm"`
 }
 
-// SessionSummary 为 Agent 列表项（兼容旧字段名；SessionID == AgentID）。
-type SessionSummary struct {
-	SessionID        string `json:"session_id"`
-	AgentID          string `json:"agent_id"`
-	Active           bool   `json:"active"`
-	MessageCount     int    `json:"message_count"`
-	FirstUserMessage string `json:"first_user_message"`
-	UpdatedAt        string `json:"updated_at"`
-	QueuePending     int    `json:"queue_pending"`
-	HasActiveTurn    bool   `json:"has_active_turn"`
-	RunTurnPhase     string `json:"run_turn_phase"`
+// AgentSummary 为 GET /v1/agents 列表项。
+type AgentSummary struct {
+	AgentID       string `json:"agent_id"`
+	SessionID     string `json:"session_id,omitempty"` // 兼容旧字段；等于 AgentID
+	Active        bool   `json:"active"`
+	HasActiveTurn bool   `json:"has_active_turn"`
+	RunTurnPhase  string `json:"run_turn_phase"`
+	UpdatedAt     string `json:"updated_at"`
+	MessageCount  int    `json:"message_count,omitempty"`
+	QueuePending  int    `json:"queue_pending,omitempty"`
+}
+
+// SessionSummary 已废弃：请用 AgentSummary。
+type SessionSummary = AgentSummary
+
+// ListAgents 调用 GET /v1/agents。
+func (c *Client) ListAgents(ctx context.Context) ([]AgentSummary, error) {
+	var resp struct {
+		Agents []struct {
+			AgentID       string `json:"agent_id"`
+			Active        bool   `json:"active"`
+			HasActiveTurn bool   `json:"has_active_turn"`
+			RunTurnPhase  string `json:"run_turn_phase"`
+			UpdatedAt     string `json:"updated_at"`
+		} `json:"agents"`
+	}
+	if err := c.getJSON(ctx, "/v1/agents", &resp); err != nil {
+		return nil, err
+	}
+	out := make([]AgentSummary, 0, len(resp.Agents))
+	for _, a := range resp.Agents {
+		id := strings.TrimSpace(a.AgentID)
+		out = append(out, AgentSummary{
+			AgentID:       id,
+			SessionID:     id,
+			Active:        a.Active,
+			HasActiveTurn: a.HasActiveTurn,
+			RunTurnPhase:  a.RunTurnPhase,
+			UpdatedAt:     a.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// ListSessions 已废弃：请用 ListAgents。
+func (c *Client) ListSessions(ctx context.Context) ([]SessionSummary, error) {
+	return c.ListAgents(ctx)
 }
 
 // SessionContext 为 GET /v1/agents/{id}/context 响应。
@@ -261,35 +296,6 @@ func (c *Client) PatchLLMSettings(ctx context.Context, patch LLMSettingsPatch) (
 		return nil, err
 	}
 	return &settings, nil
-}
-
-// ListSessions 调用 GET /v1/agents，并映射为兼容的 SessionSummary（SessionID=AgentID）。
-func (c *Client) ListSessions(ctx context.Context) ([]SessionSummary, error) {
-	var resp struct {
-		Agents []struct {
-			AgentID       string `json:"agent_id"`
-			Active        bool   `json:"active"`
-			HasActiveTurn bool   `json:"has_active_turn"`
-			RunTurnPhase  string `json:"run_turn_phase"`
-			UpdatedAt     string `json:"updated_at"`
-		} `json:"agents"`
-	}
-	if err := c.getJSON(ctx, "/v1/agents", &resp); err != nil {
-		return nil, err
-	}
-	out := make([]SessionSummary, 0, len(resp.Agents))
-	for _, a := range resp.Agents {
-		id := strings.TrimSpace(a.AgentID)
-		out = append(out, SessionSummary{
-			SessionID:     id,
-			AgentID:       id,
-			Active:        a.Active,
-			HasActiveTurn: a.HasActiveTurn,
-			RunTurnPhase:  a.RunTurnPhase,
-			UpdatedAt:     a.UpdatedAt,
-		})
-	}
-	return out, nil
 }
 
 // GetSessionContext 调用 GET /v1/agents/{id}/context。

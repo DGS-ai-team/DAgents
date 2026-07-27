@@ -94,19 +94,6 @@ func (m *Manager) waitInboxTurnWithSub(ctx context.Context, sessionID string, su
 					EventType: "hitl_required",
 					Data:      cloneEventData(ev.Data),
 				}
-			case "user_information_required", "approval_required":
-				// TODO(hitl-cutover): 待 A2A 对端不再发旧事件名后删除本分支。
-				awaiting := "hitl"
-				if ev.Type == "user_information_required" {
-					awaiting = "user_information"
-				} else if ev.Type == "approval_required" {
-					awaiting = "tool_approval"
-				}
-				hitl = &InboxHITLPause{
-					Awaiting:  awaiting,
-					EventType: "hitl_required",
-					Data:      normalizeLegacyHITLSSE(ev.Type, cloneEventData(ev.Data)),
-				}
 			case "done":
 				turnComplete, _ := ev.Data["turn_complete"].(bool)
 				awaiting, _ := ev.Data["awaiting"].(string)

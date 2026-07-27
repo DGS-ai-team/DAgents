@@ -108,6 +108,10 @@ func encodeRequiresInputPayload(cfg *config.Config, task InboxTask, calleeSessio
 		return "", fmt.Errorf("hitl payload is nil")
 	}
 	peerID, peerName := calleeAgentMeta(cfg)
+	eventType := strings.TrimSpace(hitl.EventType)
+	if eventType == "" || eventType == "approval_required" || eventType == "user_information_required" {
+		eventType = "hitl_required"
+	}
 	payload := map[string]any{
 		"hitl_kind":         hitl.Awaiting,
 		"task_id":           task.TaskID,
@@ -115,7 +119,7 @@ func encodeRequiresInputPayload(cfg *config.Config, task InboxTask, calleeSessio
 		"caller_session_id": strings.TrimSpace(task.CallerSessionID),
 		"callee_agent_id":   peerID,
 		"callee_agent_name": peerName,
-		"event_type":        hitl.EventType,
+		"event_type":        eventType,
 		"event_data":        hitl.Data,
 	}
 	raw, err := json.Marshal(payload)

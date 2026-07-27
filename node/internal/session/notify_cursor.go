@@ -8,7 +8,7 @@ func ShouldBumpNotifySeq(ev stream.Event) bool {
 		return false
 	}
 	switch ev.Type {
-	case "hitl_required", "approval_required", "user_information_required":
+	case "hitl_required":
 		return true
 	case "done":
 		return shouldBumpNotifyOnDone(ev.Data)

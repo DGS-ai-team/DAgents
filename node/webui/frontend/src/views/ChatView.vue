@@ -330,23 +330,6 @@ function handleEvent(ev) {
       }
       if (isA2ARelay(ev.data) && agentStore.awaitingTurn) finishTurn();
       break;
-    case "approval_required":
-      finalizeAssistant();
-      finalizeReasoning();
-      finishWaitingStatuses();
-      enqueueHitl({ kind: "approval", data: ev.data });
-      if (ev.data?.child_session_id) setChildAwaitingApproval(ev.data.child_session_id, true);
-      if (isA2ARelay(ev.data) && agentStore.awaitingTurn) finishTurn();
-      hitlStore.busy = false;
-      break;
-    case "user_information_required":
-      finalizeAssistant();
-      finalizeReasoning();
-      finishWaitingStatuses();
-      enqueueHitl({ kind: "user_information", data: ev.data });
-      if (isA2ARelay(ev.data) && agentStore.awaitingTurn) finishTurn();
-      hitlStore.busy = false;
-      break;
     case "temporary_agent_created":
       onChildCreated(ev.data);
       addSystem(formatChildLifecycle(ev.type, ev.data));

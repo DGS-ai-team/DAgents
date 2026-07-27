@@ -33,7 +33,7 @@ beforeAll(async () => {
 describe("shouldAckSSEEvent", () => {
   it("acks HITL events", () => {
     expect(shouldAckSSEEvent("hitl_required", {})).toBe(true);
-    expect(shouldAckSSEEvent("approval_required", {})).toBe(true);
+    expect(shouldAckSSEEvent("approval_required", {})).toBe(false);
   });
 
   it("acks done when turn completes", () => {

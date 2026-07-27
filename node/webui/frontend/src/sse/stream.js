@@ -36,8 +36,6 @@ export function connectStream({ getAgentId, onEvent, onStatus }) {
       "error",
       "done",
       "hitl_required",
-      "approval_required",
-      "user_information_required",
       "temporary_agent_created",
       "temporary_agent_completed",
       "temporary_agent_cancelled",

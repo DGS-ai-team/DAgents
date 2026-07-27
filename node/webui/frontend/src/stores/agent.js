@@ -35,8 +35,6 @@ function resetAckScheduler() {
 export function shouldAckSSEEvent(type, data) {
   switch (type) {
     case "hitl_required":
-    case "approval_required":
-    case "user_information_required":
       return true;
     case "done":
       return shouldAckOnDone(data);

@@ -61,13 +61,10 @@ func TestClientCreateMessageStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	sid, err := c.CreateSession(ctx, sessionID)
-	if err != nil {
+	if err := c.EnsureAgent(ctx, sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if sid != sessionID {
-		t.Fatalf("session_id = %q", sid)
-	}
+	sid := sessionID
 
 	doneCh := make(chan struct{})
 	var text strings.Builder
