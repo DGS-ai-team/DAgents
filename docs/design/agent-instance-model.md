@@ -358,7 +358,7 @@ GET /v1/node/info
 - [x] `node_id` 配置与环境变量（`NODE_ID`，兼容读 `AGENT_ID`）
 - [x] 过渡：创建 Agent 时同步内部 session（同 id）
 - [x] Phase 1 单元测试（config / store / template / agents API）
-- [ ] 删除对外 `POST/GET /v1/sessions`（Phase 3 UI 切换后彻底移除；现保留兼容）
+- [x] 删除对外 `POST/GET /v1/sessions`（已 410 Gone / `sessions_moved`）
 - [x] Web UI Agent 列表面板（Phase 3）
 
 ### Phase 2 — 运行时 per-agent
@@ -379,7 +379,7 @@ GET /v1/node/info
 - [x] `ensureAgentRuntime`：重启 / Release 后按快照恢复沙箱
 - [x] messages / streams / hydrate 走 `agent_id`
 - [x] Web UI 切至 `/v1/agents/{id}/…`（ack/skills/child-agents 等）
-- [ ] 彻底删除对外 `/v1/sessions` CRUD（tray 仍用 `GET /v1/sessions`；测试夹具可继续用）
+- [x] 彻底删除对外 `/v1/sessions` CRUD（固定 410；测试改走 agents / `sessions.Create`）
 ### Phase 4 — 删除 TUI/CLI + 打包
 
 - [x] 删除 client TUI、app/cli（`dagents-client` 保留 probe/update）
