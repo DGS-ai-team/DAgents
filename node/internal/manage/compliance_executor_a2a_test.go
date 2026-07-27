@@ -43,12 +43,12 @@ func TestEncodeRequiresInputPayload(t *testing.T) {
 		FromAgentID:     "node-b",
 		CallerSessionID: "sess-caller",
 	}, "a2a-task-enc", &session.InboxHITLPause{
-		Awaiting:  "tool_approval",
-		EventType: "approval_required",
+		Awaiting:  "hitl",
+		EventType: "hitl_required",
 		Data: map[string]any{
-			"approval_id": "appr-enc",
-			"approval_args": map[string]any{
-				"tool_calls": []map[string]any{{"id": "call-1", "name": "bash_run"}},
+			"hitl_id": "appr-enc",
+			"items": []any{
+				map[string]any{"hitl_type": "execute_tool", "id": "call-1", "name": "bash_run"},
 			},
 		},
 	})
@@ -59,7 +59,7 @@ func TestEncodeRequiresInputPayload(t *testing.T) {
 	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if parsed["hitl_kind"] != "tool_approval" {
+	if parsed["hitl_kind"] != "hitl" {
 		t.Fatalf("hitl_kind=%v", parsed["hitl_kind"])
 	}
 	if parsed["callee_agent_id"] != "compliance-a" {
@@ -71,8 +71,11 @@ func TestEncodeRequiresInputPayload(t *testing.T) {
 	if parsed["caller_session_id"] != "sess-caller" {
 		t.Fatalf("caller_session_id=%v", parsed["caller_session_id"])
 	}
+	if parsed["event_type"] != "hitl_required" {
+		t.Fatalf("event_type=%v", parsed["event_type"])
+	}
 	eventData, _ := parsed["event_data"].(map[string]any)
-	if eventData["approval_id"] != "appr-enc" {
+	if eventData["hitl_id"] != "appr-enc" {
 		t.Fatalf("event_data=%v", eventData)
 	}
 }
@@ -80,12 +83,18 @@ func TestEncodeRequiresInputPayload(t *testing.T) {
 func TestEncodeRequiresInputPayload_userInformation(t *testing.T) {
 	cfg := &config.Config{NodeID: "compliance-a"}
 	payload, err := encodeRequiresInputPayload(cfg, InboxTask{TaskID: "task-ui"}, "a2a-task-ui", &session.InboxHITLPause{
-		Awaiting:  "user_information",
-		EventType: "user_information_required",
+		Awaiting:  "hitl",
+		EventType: "hitl_required",
 		Data: map[string]any{
-			"content": "请确认环境",
-			"user_information_args": map[string]any{
-				"tool_call_id": "call-ask-1",
+			"hitl_id": "a2a-user-info",
+			"items": []any{
+				map[string]any{
+					"hitl_type": "user_information",
+					"id":        "call-ask-1",
+					"user_information_args": map[string]any{
+						"tool_call_id": "call-ask-1",
+					},
+				},
 			},
 		},
 	})
@@ -96,10 +105,10 @@ func TestEncodeRequiresInputPayload_userInformation(t *testing.T) {
 	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if parsed["hitl_kind"] != "user_information" {
+	if parsed["hitl_kind"] != "hitl" {
 		t.Fatalf("hitl_kind=%v", parsed["hitl_kind"])
 	}
-	if parsed["event_type"] != "user_information_required" {
+	if parsed["event_type"] != "hitl_required" {
 		t.Fatalf("event_type=%v", parsed["event_type"])
 	}
 }
@@ -198,12 +207,12 @@ func TestComplianceExecutor_requiresInputThenFailedOnSecondTurn(t *testing.T) {
 		steps: []session.InboxTurnResult{
 			{
 				HITL: &session.InboxHITLPause{
-					Awaiting:  "tool_approval",
-					EventType: "approval_required",
+					Awaiting:  "hitl",
+					EventType: "hitl_required",
 					Data: map[string]any{
-						"approval_id": "ap-1",
-						"approval_args": map[string]any{
-							"tool_calls": []map[string]any{{"id": "call-1", "name": "bash_run"}},
+						"hitl_id": "ap-1",
+						"items": []any{
+							map[string]any{"hitl_type": "execute_tool", "id": "call-1", "name": "bash_run"},
 						},
 					},
 				},

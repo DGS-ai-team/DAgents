@@ -6,12 +6,15 @@
 
 ### 变更
 
+- **HITL 旧事件收口**：本机 SSE / WebUI / 托盘 / inbox 等待仅认 `hitl_required`；A2A requires_input 出站强制 `event_type=hitl_required`；对端旧载荷仍在 caller 侧归一转换。
+- **Go Client Agent API**：新增 `ListAgents` / `AgentSummary`；`CreateSession` / `ListSessions` / `SessionSummary` 标为废弃别名。
+- **Skills payload**：新建/更新 Agent 时 `defaults.skills` 仅写 `visible` 白名单（关闭时仍写 `enabled:false` 兼容旧 runtime）。
 - **工具 Registry 装配统一**：默认表与 per-agent Registry 共用 `attachNodeRuntimeDeps`（后台任务回灌、media、browser、manage、wecom、triggers）；去掉 tool-jobs / hydrate 对 `DefaultTools` 的回退。
 - **异步回灌可观测**：`EnqueueAsyncToolResult` / `EnqueueToolResult` 在 session 不存在时返回 `session_not_found` 并打 Warn，不再静默丢弃。
-- **HITL SSE 收口**：A2A caller 中继统一发 `hitl_required`；子 Agent `RelayHub` 对 `hitl_required` 打 scope；旧 `approval_required` / `user_information_required` 仅薄兼容。
+- **HITL SSE 收口**：A2A caller 中继统一发 `hitl_required`；子 Agent `RelayHub` 对 `hitl_required` 打 scope。
 - **Go Client 迁 `/v1/agents`**：session 相关路径改为 agents；`CreateSession` 改为 require id + ensure。
 - **LLM 多模态不再广播**：进程级切换 LLM 档案只更新默认 Registry；已装入 Agent 的多模态在 ensure/reload 时按绑定档案生效。
-- **Skills 开关收敛**：Agent 技能能力与工具组 `skills` 对齐（去掉设置里重复的「技能」勾选）；`defaults.skills.enabled` 由工具组推导写入，可见白名单仍用 `defaults.skills.visible`；Node `skills.enabled` 仍为进程总闸。
+- **Skills 开关收敛**：Agent 技能能力与工具组 `skills` 对齐；可见白名单仍用 `defaults.skills.visible`；Node `skills.enabled` 仍为进程总闸。
 - **setup 热挂载**：配置保存后经 `attachNodeRuntimeDeps` 刷新默认工具表，不再单点只挂 WeCom。
 - **sessions child-agents Deprecation**：`/v1/sessions/.../child-agents*` 补齐 Deprecation/Sunset 头。
 

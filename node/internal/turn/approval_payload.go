@@ -18,7 +18,7 @@ func BuildApprovalToolItem(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) 
 	return buildApprovalToolItem(tc, duplicateMeta)
 }
 
-// buildApprovalToolItem 构造 HITL execute_tool item 的展示字段（用于 hitl_required；A2A 仍走 approval_required）。
+// buildApprovalToolItem 构造 HITL execute_tool item 的展示字段（用于 hitl_required）。
 func buildApprovalToolItem(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) map[string]any {
 	args := parseJSONArgs(tc.Function.Arguments)
 	var reason, risk string

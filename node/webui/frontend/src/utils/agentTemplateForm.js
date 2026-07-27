@@ -98,17 +98,17 @@ function normalizeVisibleSkills(skills) {
   return out;
 }
 
-/** 写入 defaults.skills：enabled 由工具组推导；visible 仅在白名单模式下写出。 */
+/** 写入 defaults.skills：能力由工具组控制；此处仅保留 visible 白名单（及关闭时的 enabled:false 兼容旧 runtime）。 */
 function skillsPayload(draft) {
   const enabled = skillsEnabledFromToolGroups(draft?.toolGroups);
   if (!enabled) return { enabled: false };
   if (draft?.visibleSkills === null || draft?.visibleSkills === undefined) {
-    return { enabled: true };
+    return {};
   }
   const visible = Array.isArray(draft.visibleSkills)
     ? draft.visibleSkills.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
-  return { enabled: true, visible };
+  return { visible };
 }
 
 /** 旧 snapshot 的 skills.enabled=false 迁入工具组（去掉 skills）。 */

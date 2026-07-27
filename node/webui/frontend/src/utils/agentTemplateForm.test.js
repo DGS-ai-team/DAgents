@@ -94,7 +94,6 @@ describe("agentTemplateForm", () => {
     expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_tool_loops: 16 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "skills"]);
     expect(payload.defaults.skills).toEqual({
-      enabled: true,
       visible: ["write-skill", "write-hook"],
     });
     expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
@@ -175,7 +174,7 @@ describe("agentTemplateForm", () => {
       role: "assistant",
       description: "",
     });
-    expect(payload.defaults.skills).toEqual({ enabled: true });
+    expect(payload.defaults.skills).toEqual({});
   });
 
   it("builds create payload without template_id for blank draft", () => {
@@ -201,7 +200,7 @@ describe("agentTemplateForm", () => {
     });
     expect(payload.template_id).toBeUndefined();
     expect(payload.display_name).toBe("空白");
-    expect(payload.defaults.skills).toEqual({ enabled: true });
+    expect(payload.defaults.skills).toEqual({});
   });
 
   it("draftFromBlank picks first llm profile", () => {

@@ -7,18 +7,16 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
-// TestInboxSubscribeAfterSeqSkipsStaleApproval 验证 resume 前 Subscribe(afterSeq) 不回放历史 approval_required。
-func TestInboxSubscribeAfterSeqSkipsStaleApproval(t *testing.T) {
+// TestInboxSubscribeAfterSeqSkipsStaleHITL 验证 resume 前 Subscribe(afterSeq) 不回放历史 hitl_required。
+func TestInboxSubscribeAfterSeqSkipsStaleHITL(t *testing.T) {
 	hub := stream.NewHub(32, nil)
 	sessionID := "a2a-task-stale"
 
-	// 模拟上一轮 turn 已发布的陈旧 approval_required。
-	hub.Publish(sessionID, "agent", "approval_required", map[string]any{
-		"approval_id": "stale-appr",
-		"approval_args": map[string]any{
-			"tool_calls": []any{
-				map[string]any{"id": "call-stale", "name": "bash_run"},
-			},
+	// 模拟上一轮 turn 已发布的陈旧 hitl_required。
+	hub.Publish(sessionID, "agent", "hitl_required", map[string]any{
+		"hitl_id": "stale-appr",
+		"items": []any{
+			map[string]any{"hitl_type": "execute_tool", "id": "call-stale", "name": "bash_run"},
 		},
 	})
 	afterSeq := hub.CurrentSeq()
@@ -38,8 +36,8 @@ func TestInboxSubscribeAfterSeqSkipsStaleApproval(t *testing.T) {
 	for {
 		select {
 		case ev := <-sub:
-			if ev.Type == "approval_required" {
-				t.Fatal("stale approval_required must not be replayed after Subscribe(afterSeq)")
+			if ev.Type == "hitl_required" {
+				t.Fatal("stale hitl_required must not be replayed after Subscribe(afterSeq)")
 			}
 			if ev.Type == "done" {
 				return

@@ -316,13 +316,11 @@ export function enqueueA2ARelayPending(relay) {
     case "hitl_required":
       enqueueHitlRequired(data);
       break;
-    case "approval_required":
-      enqueueHitl({ kind: "approval", data });
-      break;
-    case "user_information_required":
-      enqueueHitl({ kind: "user_information", data });
-      break;
     default:
+      // 历史 hydrate 若仍带旧事件名，归一后再入队。
+      if (data?.items?.length) {
+        enqueueHitlRequired(data);
+      }
       break;
   }
 }
@@ -351,7 +349,6 @@ export function shouldSkipChildRuntimeDisplay(eventType, data) {
   const childId = String(data?.child_session_id || "").trim();
   if (!childId) return false;
   switch (eventType) {
-    case "approval_required":
     case "hitl_required":
     case "temporary_agent_created":
     case "temporary_agent_completed":
