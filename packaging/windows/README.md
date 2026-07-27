@@ -20,6 +20,8 @@
 - 将安装目录与 `.runtime/externaltools` 追加到用户 `PATH`
 - 完成页提示打开 Web UI **「设置 › 连接」** 完成 LLM、Manage 与功能开关配置（不再弹出额外 MsgBox）
 
+当前打包默认仍为 Go 托盘（`desktop/tray` → `bin/dagents-shell.exe`）。Tauri 重写预览见 [`desktop/tray-tauri/`](../../desktop/tray-tauri/)（双击开 Web UI）；CI 产出 `dagents-shell-tauri.exe`，可手动替换二进制验证。
+
 **API Key** 仍通过系统环境变量提供（如 `OPENAI_API_KEY`），Web UI 只配置环境变量名（`api_key_env`）。
 
 升级安装：若已存在 `config.yaml`，不会被覆盖；policy 覆盖仍可选询问。

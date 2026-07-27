@@ -6,6 +6,8 @@
 
 ### 新增
 
+- **Tauri 托盘 Shell（预览）**：`desktop/tray-tauri/` 以 Tauri 2 实现系统托盘；支持双击打开 Web UI、启停/重启 Node、health 轮询与单实例；可与 Go `desktop/tray` 并行验证，打包默认仍为 Go Shell。
+- **CI：Windows Tauri Shell 构建**：`scripts/ci/build_dagents_shell_tauri.sh` + `.github/workflows/tauri-shell.yml`；`build-and-release` / `manual-package` 的 Windows 作业产出 `dagents-shell-tauri.exe` 预览产物（不替换安装包内 Go Shell）。
 - **Tauri 安装向导（可选）**：`packaging/bootstrapper` 提供现代多步 Setup UI，嵌入并静默调用现有 Inno 安装包；未嵌入 payload 时支持演示模式预览。
 - **企业微信消息推送工具**：`wecom_send_markdown`（markdown_v2）与 `wecom_send_file`（自动 upload_media）；在设置 › 能力 配置 Webhook，工具组 `wecom`。
 

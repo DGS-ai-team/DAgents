@@ -103,7 +103,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: node/webui/frontend/package-lock.json
+          cache-dependency-path: |
+            node/webui/frontend/package-lock.json
+            desktop/tray-tauri/package-lock.json
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -133,6 +135,27 @@ jobs:
         run: |
           chmod +x scripts/ci/build_dagents_shell.sh
           bash scripts/ci/build_dagents_shell.sh
+
+      - name: Setup Rust (Windows Tauri shell)
+        if: matrix.platform == 'windows-amd64'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache (Tauri shell)
+        if: matrix.platform == 'windows-amd64'
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/tray-tauri/src-tauri -> target
+          shared-key: manual-tauri-shell
+
+      - name: Build dagents-shell-tauri (Windows, preview)
+        if: matrix.platform == 'windows-amd64'
+        shell: bash
+        run: |
+          chmod +x scripts/ci/build_dagents_shell_tauri.sh
+          OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
+          test -f dist/dagents-shell-tauri.exe
 
       - name: Setup Python (Windows)
         if: matrix.py_build == 'native'
@@ -198,4 +221,12 @@ jobs:
         with:
           name: dagents-windows-installer
           path: dist/dagents-local-assistant-windows-amd64-installer-*.exe
+          if-no-files-found: error
+
+      - name: Upload Tauri shell preview (Windows)
+        if: matrix.platform == 'windows-amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dagents-shell-tauri-windows-amd64
+          path: dist/dagents-shell-tauri.exe
           if-no-files-found: error

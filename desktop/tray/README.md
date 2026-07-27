@@ -2,6 +2,8 @@
 
 **Windows 专用**托盘 Shell：监护 `dagents-node` 生命周期，系统托盘启停与探活。
 
+> **Tauri 重写（进行中）** → [`desktop/tray-tauri/`](../tray-tauri/)（双击开 Web UI；核心启停已对齐，HITL/更新等仍在本目录 Go 实现）。
+
 > **功能清单与路线图** → [`docs/design/windows-desktop-shell.md`](../../docs/design/windows-desktop-shell.md)、[`docs/design/v0.6-v0.7-roadmap.md`](../../docs/design/v0.6-v0.7-roadmap.md)
 
 ## 功能（v0.6.0 第一步已实现部分）
