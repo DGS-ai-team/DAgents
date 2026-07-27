@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **后台 bash 终止后气泡状态**：终止已转后台的 `bash_run` 后，工具气泡由「后台执行中」更新为「已终止」（改写 transcript 中的 `status=RUNNING`，并以 `/tool-jobs` 为准判断是否仍在跑）。
+- **多工具并行气泡状态**：同批免审批 `tool_call` 后端并行执行；未出结果的工具一律显示「执行中」。并行批次中工具完成后立刻推送 `tool_result` SSE；仅 HITL 待批尚未开跑的标「待执行」。
+
 ### 新增
 
 - **Tauri 托盘 Shell（预览）**：`desktop/tray-tauri/` 以 Tauri 2 实现系统托盘；支持双击打开 Web UI、启停/重启 Node、health 轮询与单实例；可与 Go `desktop/tray` 并行验证，打包默认仍为 Go Shell。

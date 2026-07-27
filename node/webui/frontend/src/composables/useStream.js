@@ -1,3 +1,6 @@
+import { extractToolApprovals } from "../stores/hitl.js";
+import { toolCallIdFromEntry, toolJobsStore } from "../stores/toolJobs.js";
+
 function shouldSkipEntry(entry) {
   if (!entry) return true;
   // 思考内容仅流式时展示动态指示器，历史/落盘 reasoning 一律隐藏
@@ -44,8 +47,45 @@ function findMatchingToolResult(entries, startIdx, blockId) {
   return -1;
 }
 
+function awaitingApprovalCallIds(hitlQueue = []) {
+  const ids = new Set();
+  if (!Array.isArray(hitlQueue)) return ids;
+  for (const hitl of hitlQueue) {
+    if (hitl?.kind !== "approval") continue;
+    for (const it of extractToolApprovals(hitl.data)) {
+      const id = String(it?.callId || "").trim();
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * 为同批尚未出结果的 tool_step 标注 executionHint。
+ * 后端同批免审批工具并行执行：未完成的 final tool_call 一律 active（执行中）。
+ * 仅当该 call 已出现在 HITL 审批队列时标 pending（尚未开跑）。
+ */
+export function annotateToolExecutionHints(items, _jobs = toolJobsStore, hitlQueue = []) {
+  if (!Array.isArray(items) || !items.length) return items;
+  const unfinished = items.filter(
+    (item) =>
+      item?.kind === "tool_step" &&
+      item.callEntry &&
+      !item.resultEntry &&
+      !item.callEntry.partial,
+  );
+  if (!unfinished.length) return items;
+
+  const awaiting = awaitingApprovalCallIds(hitlQueue);
+  for (const item of unfinished) {
+    const id = toolCallIdFromEntry(item.callEntry);
+    item.executionHint = id && awaiting.has(id) ? "pending" : "active";
+  }
+  return items;
+}
+
 /** 合并同 blockId 的 tool_call + tool_result 为 tool_step（F-UI6）。 */
-export function buildStream(entries, hitlQueue = []) {
+export function buildStream(entries, hitlQueue = [], jobs = toolJobsStore) {
   const items = [];
   const mergedResultIndices = new Set();
 
@@ -94,5 +134,6 @@ export function buildStream(entries, hitlQueue = []) {
   hitlQueue.forEach((hitl, idx) => {
     items.push({ key: `hitl-${idx}-${hitl.kind}`, kind: hitl.kind, hitl, hitlIndex: idx });
   });
-  return items;
+
+  return annotateToolExecutionHints(items, jobs, hitlQueue);
 }
