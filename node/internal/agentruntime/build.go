@@ -6,6 +6,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
+	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -78,6 +79,21 @@ func Build(p BuildParams) (Built, error) {
 	turnOpts.ToolResult.FSRoot = fsRoot
 	turnOpts.MultimodalEnabled = mm
 	ApplyDefaultsToTurnOptions(&turnOpts, p.Snapshot)
+
+	skillsCfg := SkillsFromDefaults(p.Snapshot)
+	// Agent 级 skills.enabled 与 Node 级取交集：任一关闭则关闭。
+	turnOpts.SkillsEnabled = turnOpts.SkillsEnabled && skillsCfg.Enabled
+	if skillsCfg.VisibleRestrict {
+		turnOpts.SkillsVisibleRestrict = true
+		turnOpts.SkillsVisible = append([]string(nil), skillsCfg.Visible...)
+	}
+	if turnOpts.SkillsEnabled && strings.TrimSpace(turnOpts.SkillsRoot) != "" {
+		catalog := skills.NewCatalog(turnOpts.SkillsRoot, true, turnOpts.SkillsMaxInPrompt)
+		if turnOpts.SkillsVisibleRestrict {
+			catalog.RestrictVisible(turnOpts.SkillsVisible)
+		}
+		reg.SetSkillsCatalog(catalog)
+	}
 
 	return Built{
 		FSRoot:      fsRoot,

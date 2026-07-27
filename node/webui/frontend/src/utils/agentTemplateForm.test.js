@@ -31,6 +31,7 @@ describe("agentTemplateForm", () => {
     expect(draft.llmProfileId).toBe("deepseek");
     expect(draft.toolGroups).toEqual(["fs", "bash"]);
     expect(draft.skillsEnabled).toBe(false);
+    expect(draft.visibleSkills).toBeNull();
     expect(draft.promptLongTermEnabled).toBe(true);
   });
 
@@ -63,6 +64,7 @@ describe("agentTemplateForm", () => {
       maxToolLoops: 16,
       toolGroups: ["fs", "skills"],
       skillsEnabled: true,
+      visibleSkills: ["write-skill", "write-hook"],
       childAgentsEnabled: true,
       promptSoulEnabled: true,
       promptUserEnabled: false,
@@ -73,6 +75,10 @@ describe("agentTemplateForm", () => {
     expect(payload.display_name).toBe("我的助手");
     expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_tool_loops: 16 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "skills"]);
+    expect(payload.defaults.skills).toEqual({
+      enabled: true,
+      visible: ["write-skill", "write-hook"],
+    });
     expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
     expect(payload.defaults.prompt_context.user_enabled).toBe(false);
     expect(payload.sandbox.allow_bash).toBe(true);
@@ -115,6 +121,7 @@ describe("agentTemplateForm", () => {
           defaults: {
             llm: { active: "deepseek", max_tool_loops: 10 },
             tools: { enabled_groups: ["bash"] },
+            skills: { enabled: true, visible: ["write-skill"] },
             prompt_context: { long_term_enabled: false },
           },
           sandbox: { enabled: true, backend: "process", allow_bash: true },
@@ -124,8 +131,34 @@ describe("agentTemplateForm", () => {
     );
     expect(draft.displayName).toBe("已有");
     expect(draft.toolGroups).toEqual(["bash"]);
+    expect(draft.visibleSkills).toEqual(["write-skill"]);
     expect(draft.promptLongTermEnabled).toBe(false);
     expect(draft.llmProfileId).toBe("deepseek");
+  });
+
+  it("omits skills.visible when unrestricted", () => {
+    const payload = buildCreateAgentPayload({
+      displayName: "全技能",
+      llmProfileId: "default",
+      maxToolLoops: 32,
+      toolGroups: ["skills"],
+      skillsEnabled: true,
+      visibleSkills: null,
+      childAgentsEnabled: true,
+      sandboxEnabled: false,
+      sandboxBackend: "process",
+      workspaceSubdir: "data",
+      fsRootIsolation: false,
+      allowBash: true,
+      allowNetworkTools: true,
+      promptSoulEnabled: true,
+      promptUserEnabled: true,
+      promptCustomEnabled: true,
+      promptLongTermEnabled: true,
+      role: "assistant",
+      description: "",
+    });
+    expect(payload.defaults.skills).toEqual({ enabled: true });
   });
 
   it("builds create payload without template_id for blank draft", () => {
