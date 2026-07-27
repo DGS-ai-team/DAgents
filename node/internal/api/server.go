@@ -332,21 +332,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}, nil
 		})
 		// bash 后台任务完成时回灌 session 队列，触发新一轮 turn。
-		o.tools.SetBackgroundJobNotifier(func(sessionID string, done tools.BackgroundJobDone) {
-			if err := mgr.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
-				JobID:                  done.JobID,
-				ToolName:               done.ToolName,
-				ToolCallID:             done.ToolCallID,
-				Status:                 done.Status,
-				ResultText:             done.ResultText,
-				ErrorText:              done.ErrorText,
-				OutputCompressSavedPct: done.OutputCompressSavedPct,
-				OutputCompressRawRunes: done.OutputCompressRawRunes,
-				OutputCompressOutRunes: done.OutputCompressOutRunes,
-			}); err != nil {
-				logger.Warn("background tool completion enqueue failed", "session_id", sessionID, "error", err)
-			}
-		})
+		attachBackgroundJobNotifier(o.tools, mgr, logger)
 	}
 	var registrar *manage.Registrar
 	var inboxPoller *manage.InboxPoller
@@ -440,6 +426,30 @@ func attachWeComRuntime(reg *tools.Registry, cfg *config.Config) {
 		return
 	}
 	reg.SetWeComClient(wecom.NewClientFromConfig(cfg))
+}
+
+// attachBackgroundJobNotifier 将后台 bash 完成回调挂到 Registry（默认工具表与 per-agent Registry 均需挂载）。
+func attachBackgroundJobNotifier(reg *tools.Registry, mgr *session.Manager, logger *slog.Logger) {
+	if reg == nil || mgr == nil {
+		return
+	}
+	reg.SetBackgroundJobNotifier(func(sessionID string, done tools.BackgroundJobDone) {
+		if err := mgr.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
+			JobID:                  done.JobID,
+			ToolName:               done.ToolName,
+			ToolCallID:             done.ToolCallID,
+			Status:                 done.Status,
+			ResultText:             done.ResultText,
+			ErrorText:              done.ErrorText,
+			OutputCompressSavedPct: done.OutputCompressSavedPct,
+			OutputCompressRawRunes: done.OutputCompressRawRunes,
+			OutputCompressOutRunes: done.OutputCompressOutRunes,
+		}); err != nil {
+			if logger != nil {
+				logger.Warn("background tool completion enqueue failed", "session_id", sessionID, "error", err)
+			}
+		}
+	})
 }
 
 // Handler 返回可用于 http.Server 的根 Handler（含 access log 中间件）。
