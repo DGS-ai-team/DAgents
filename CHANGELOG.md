@@ -7,9 +7,13 @@
 ### 修复
 
 - **异步 bash 回灌丢回调**：同步超时/转后台与 collector 收尾竞态时，若进程已结束才置 `autoDegraded`，会漏掉 `notifyDone`；现对完成回灌做幂等，并在降级登记时若已结束则立即回灌。`background_job_cancel` / UI 终止后台任务一律触发异步回灌。
+- **后台 bash 终止后气泡状态**：终止已转后台的 `bash_run` 后，工具气泡由「后台执行中」更新为「已终止」（改写 transcript 中的 `status=RUNNING`，并以 `/tool-jobs` 为准判断是否仍在跑）。
+- **多工具并行气泡状态**：同批免审批 `tool_call` 后端并行执行；未出结果的工具一律显示「执行中」。并行批次中工具完成后立刻推送 `tool_result` SSE；仅 HITL 待批尚未开跑的标「待执行」。
 
 ### 新增
 
+- **Tauri 托盘 Shell（预览）**：`desktop/tray-tauri/` 以 Tauri 2 实现系统托盘；支持双击打开 Web UI、启停/重启 Node、health 轮询与单实例；可与 Go `desktop/tray` 并行验证，打包默认仍为 Go Shell。
+- **CI：Windows Tauri Shell 构建**：`scripts/ci/build_dagents_shell_tauri.sh` + `.github/workflows/tauri-shell.yml`；`build-and-release` / `manual-package` 的 Windows 作业产出 `dagents-shell-tauri.exe` 预览产物（不替换安装包内 Go Shell）。
 - **Tauri 安装向导（可选）**：`packaging/bootstrapper` 提供现代多步 Setup UI，嵌入并静默调用现有 Inno 安装包；未嵌入 payload 时支持演示模式预览。
 - **企业微信消息推送工具**：`wecom_send_markdown`（markdown_v2）与 `wecom_send_file`（自动 upload_media）；在设置 › 能力 配置 Webhook，工具组 `wecom`。
 

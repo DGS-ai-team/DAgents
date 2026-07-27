@@ -104,9 +104,13 @@ const statusText = computed(() => {
   if (isCall.value) {
     if (interrupted.value) return "已中断";
     if (props.entry.partial) return elapsedLive.value ? `生成中${elapsedLive.value}` : "生成中";
-    return "待执行";
+    return "执行中";
   }
   if (rejected.value) return "已拒绝";
+  if (interrupted.value) return "已中断";
+  const bashStatus = String(props.entry.data?.content || "").match(/\[BASH_RESULT\]\s+status=([A-Za-z_]+)/i);
+  if (bashStatus && bashStatus[1].toUpperCase() === "CANCELLED") return "已终止";
+  if (bashStatus && bashStatus[1].toUpperCase() === "RUNNING") return "后台执行中";
   return "已完成";
 });
 

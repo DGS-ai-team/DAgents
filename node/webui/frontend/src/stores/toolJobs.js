@@ -1,5 +1,6 @@
 import { reactive } from "vue";
 import * as api from "../api/node.js";
+import { patchBashResultStatus } from "./transcript.js";
 
 export const toolJobsStore = reactive({
   running: 0,
@@ -25,12 +26,21 @@ function normalizeIDList(raw) {
 }
 
 export function applyToolJobsSnapshot(data) {
+  const prevBackground = new Set(toolJobsStore.backgroundCallIds);
   const running = Number(data?.running);
   const background = Number(data?.background);
   toolJobsStore.running = Number.isFinite(running) && running > 0 ? Math.floor(running) : 0;
   toolJobsStore.background = Number.isFinite(background) && background > 0 ? Math.floor(background) : 0;
   toolJobsStore.runningCallIds = normalizeIDList(data?.running_call_ids);
   toolJobsStore.backgroundCallIds = normalizeIDList(data?.background_call_ids);
+
+  // 后台任务已从队列消失：若气泡仍是 RUNNING，按完成态改写（终止路径会先写成 CANCELLED）。
+  for (const id of prevBackground) {
+    if (toolJobsStore.backgroundCallIds.includes(id)) continue;
+    if (toolJobsStore.busyCallIds[id] === "cancel") continue;
+    // patchBashResultStatus 仅替换仍为 RUNNING 的标记；已是 CANCELLED 则 no-op。
+    patchBashResultStatus(id, "SUCCEEDED");
+  }
 }
 
 export function toolJobsStripText() {
@@ -58,6 +68,14 @@ export function parseBashResultStatus(content) {
 
 export function isBashBackgroundRunning(resultEntry) {
   return parseBashResultStatus(resultEntry?.data?.content) === "RUNNING";
+}
+
+/** 气泡仍显示 RUNNING，且 /tool-jobs 仍登记为后台时，才视为真正在后台跑。 */
+export function isBashBackgroundActive({ callEntry, resultEntry } = {}) {
+  if (!isBashBackgroundRunning(resultEntry)) return false;
+  const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
+  if (!id) return true;
+  return toolJobsStore.backgroundCallIds.includes(id);
 }
 
 /**
@@ -124,6 +142,8 @@ export async function cancelBashToolCall(agentId, toolCallId) {
   toolJobsStore.busyCallIds[id] = "cancel";
   try {
     await api.cancelAgentToolCall(agentId, id);
+    // 先改写气泡终态，再刷新队列，避免短暂仍显示「后台执行中」。
+    patchBashResultStatus(id, "CANCELLED");
     await refreshToolJobs(agentId);
   } finally {
     delete toolJobsStore.busyCallIds[id];

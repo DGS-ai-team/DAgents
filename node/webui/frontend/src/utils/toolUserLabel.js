@@ -1,5 +1,11 @@
 import { truncateGraphemes } from "./textTruncate.js";
-import { parseToolArguments, resolveToolArgumentsFromData, toolCallPurpose } from "./toolCalls.js";
+import { resolveToolArgumentsFromData, toolCallPurpose } from "./toolCalls.js";
+import {
+  isBashBackgroundActive,
+  parseBashResultStatus,
+  toolCallIdFromEntry,
+  toolJobsStore,
+} from "../stores/toolJobs.js";
 
 /** 面向普通用户的工具类别名（非技术 tool id）。 */
 const TOOL_USER_LABELS = {
@@ -90,20 +96,75 @@ export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
   return GENERIC_TOOL_LABEL;
 }
 
-export function toolStepStatusText({ callEntry, resultEntry } = {}) {
+/**
+ * 工具步骤相位（同批免审批 tool_call 后端并行执行）：
+ * generating | running | background | pending | completed | cancelled | rejected | interrupted | idle
+ *
+ * @param {{ callEntry?: object, resultEntry?: object, executionHint?: 'active' | 'pending' | null }} args
+ */
+export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = null } = {}) {
   const entry = resultEntry || callEntry || {};
-  if (entry.sideEffectApplied) return "已入库";
-  if (entry.sideEffectStale) return "已失效";
-  if (resultEntry?.data?.rejected || callEntry?.data?.rejected) return "已拒绝";
-  if (resultEntry?.data?.interrupted || callEntry?.data?.interrupted) return "已中断";
-  if (callEntry?.partial) return "进行中";
-  const content = String(resultEntry?.data?.content || "");
-  if (/\[BASH_RESULT\]\s+status=RUNNING\b/i.test(content)) return "后台执行中";
-  if (resultEntry) return "已完成";
-  if (callEntry) return "进行中";
-  return "";
+  if (entry.sideEffectApplied) return "completed";
+  if (resultEntry?.data?.rejected || callEntry?.data?.rejected) return "rejected";
+  if (resultEntry?.data?.interrupted || callEntry?.data?.interrupted) return "interrupted";
+
+  const bashStatus = parseBashResultStatus(resultEntry?.data?.content);
+  if (bashStatus === "CANCELLED") return "cancelled";
+
+  if (callEntry?.partial) return "generating";
+
+  const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
+  if (id && toolJobsStore.runningCallIds.includes(id)) return "running";
+  if (id && toolJobsStore.backgroundCallIds.includes(id)) return "background";
+  if (isBashBackgroundActive({ callEntry, resultEntry })) return "background";
+
+  // 残留 RUNNING 但已不在后台队列 → 视为结束
+  if (bashStatus === "RUNNING" || bashStatus === "SUCCEEDED") return "completed";
+  if (resultEntry) return "completed";
+
+  if (callEntry && !resultEntry) {
+    // HITL 待批：尚未开跑
+    if (executionHint === "pending") return "pending";
+    // 并行模型：已 final 的 tool_call 默认即在执行（含 /tool-jobs 未登记的 FS 等）
+    return "running";
+  }
+  return "idle";
 }
 
-export function toolStepIsInProgress({ callEntry, resultEntry } = {}) {
-  return Boolean(callEntry?.partial || (callEntry && !resultEntry));
+export function toolStepStatusText({ callEntry, resultEntry, executionHint = null } = {}) {
+  const entry = resultEntry || callEntry || {};
+  if (entry.sideEffectStale) return "已失效";
+  if (entry.sideEffectApplied) return "已入库";
+
+  switch (resolveToolStepPhase({ callEntry, resultEntry, executionHint })) {
+    case "generating":
+      return "生成中";
+    case "running":
+      return "执行中";
+    case "background":
+      return "后台执行中";
+    case "pending":
+      return "待执行";
+    case "cancelled":
+      return "已终止";
+    case "rejected":
+      return "已拒绝";
+    case "interrupted":
+      return "已中断";
+    case "completed":
+      return "已完成";
+    default:
+      return "";
+  }
+}
+
+/** 真正在跑（生成参数 / 执行 / 后台）— 用于转圈与高亮；待审批不算。 */
+export function toolStepIsInProgress({ callEntry, resultEntry, executionHint = null } = {}) {
+  const phase = resolveToolStepPhase({ callEntry, resultEntry, executionHint });
+  return phase === "generating" || phase === "running" || phase === "background";
+}
+
+/** 已收到 tool_call、尚未开跑（如 HITL 待审批）。 */
+export function toolStepIsPending({ callEntry, resultEntry, executionHint = null } = {}) {
+  return resolveToolStepPhase({ callEntry, resultEntry, executionHint }) === "pending";
 }

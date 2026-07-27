@@ -233,7 +233,9 @@ func stringSliceField(payload map[string]any, key string) []string {
 	}
 }
 
-// executeAutoBatch 并行执行一批免审批工具，按原始 tool_calls 顺序写回 history（对齐 Python gather）。
+// executeAutoBatch 并行执行一批免审批工具（对齐 Python gather）。
+// 每个工具完成后立刻推送 tool_result SSE，便于 UI 反映并行进度；
+// Wait 后按原始 tool_calls 顺序写入 history（不重复推送 SSE）。
 func (o *Orchestrator) executeAutoBatch(
 	ctx context.Context,
 	sessionID string,
@@ -251,20 +253,35 @@ func (o *Orchestrator) executeAutoBatch(
 		return o.executeTool(ctx, sessionID, history, autoCalls[0], plan)
 	}
 	type batchItem struct {
-		tc       llm.ToolCall
-		content  string
-		rejected bool
-		extra    map[string]any
+		tc         llm.ToolCall
+		rejected   bool
+		extra      map[string]any
+		forClient  string
+		forHistory string
+		spillPath  string
 	}
 	results := make([]batchItem, len(autoCalls))
 	var wg sync.WaitGroup
+	// split/publish 串行化：AfterEach hook 与 hub seq 需避免并发重入。
+	var publishMu sync.Mutex
 	for i := range autoCalls {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
 			tc := autoCalls[idx]
 			content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
-			results[idx] = batchItem{tc: tc, content: content, rejected: rejected, extra: extra}
+			publishMu.Lock()
+			forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
+			o.publishToolResult(sessionID, tc, forClient, rejected, extra)
+			publishMu.Unlock()
+			results[idx] = batchItem{
+				tc:         tc,
+				rejected:   rejected,
+				extra:      extra,
+				forClient:  forClient,
+				forHistory: forHistory,
+				spillPath:  spillPath,
+			}
 		}(i)
 	}
 	wg.Wait()
@@ -272,7 +289,7 @@ func (o *Orchestrator) executeAutoBatch(
 		return err
 	}
 	for _, item := range results {
-		o.commitToolResult(sessionID, history, item.tc, item.content, item.rejected, item.extra)
+		o.persistToolResult(sessionID, history, item.tc, item.forClient, item.forHistory, item.spillPath, item.rejected)
 	}
 	return nil
 }
@@ -287,6 +304,17 @@ func (o *Orchestrator) commitToolResult(
 ) {
 	forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
 	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
+	o.persistToolResult(sessionID, history, tc, forClient, forHistory, spillPath, rejected)
+}
+
+// persistToolResult 将已推送（或即将仅落盘）的工具结果写入 metrics / history。
+func (o *Orchestrator) persistToolResult(
+	sessionID string,
+	history *[]llm.Message,
+	tc llm.ToolCall,
+	forClient, forHistory, spillPath string,
+	rejected bool,
+) {
 	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, rejected)
 	o.recordToolExecutionSuccess(tc, forClient, rejected)
 	o.appendHistory(sessionID, history, llm.ToolResultMessage(

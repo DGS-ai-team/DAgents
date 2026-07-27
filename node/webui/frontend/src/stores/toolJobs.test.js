@@ -9,6 +9,7 @@ import {
   toolJobsStore,
   parseBashResultStatus,
   isBashBackgroundRunning,
+  isBashBackgroundActive,
 } from "./toolJobs.js";
 
 describe("toolJobs", () => {
@@ -67,6 +68,22 @@ describe("toolJobs", () => {
     applyToolJobsSnapshot({ background: 1, background_call_ids: ["c9"] });
     expect(bashControlMode({ callEntry: call, resultEntry: result })).toBe("background");
     expect(canBackgroundBashTool({ callEntry: call, resultEntry: result })).toBe(false);
+  });
+
+  it("treats RUNNING content as inactive once removed from background list", () => {
+    const call = { data: { tool_name: "bash_run", tool_call_id: "c-bg" } };
+    const result = {
+      data: {
+        tool_name: "bash_run",
+        tool_call_id: "c-bg",
+        content: "[BASH_RESULT] status=RUNNING job_id=j2",
+      },
+    };
+    applyToolJobsSnapshot({ background: 1, background_call_ids: ["c-bg"] });
+    expect(isBashBackgroundActive({ callEntry: call, resultEntry: result })).toBe(true);
+    applyToolJobsSnapshot({ background: 0, background_call_ids: [] });
+    expect(isBashBackgroundActive({ callEntry: call, resultEntry: result })).toBe(false);
+    expect(bashControlMode({ callEntry: call, resultEntry: result })).toBe(null);
   });
 
   it("reads tool call id from entry", () => {
