@@ -16,7 +16,7 @@
 | 原则 | 说明 |
 |------|------|
 | **用户面 = Agent** | 1 Agent = 1 主对话；优先 `/v1/agents/{agent_id}/...` |
-| **`/v1/sessions*` 过渡** | 仍可用但带 Deprecation；新集成勿依赖 |
+| **`/v1/sessions*` 已下线** | 固定 410（`sessions_moved`）；一律用 `/v1/agents/{agent_id}/...` |
 | **Policy / 侧车按 Agent** | SQLite（`agents.db`）；全局 `/v1/policy` 已 410 |
 | **Client 只连 Node** | 默认同机 `127.0.0.1`；**前后端分离**时 Client 在较新机器、`local.endpoint` 指向目标机 Node（见 [01 §1.5](./01-愿景与架构.md)、§4.4） |
 | **思考与工具在 Node 内** | 无 Backend 代执行 |
@@ -29,7 +29,7 @@
 | `/health` | 探活 |
 | `/v1/agents/...` | **主契约**（对话、策略、侧车、子 Agent） |
 | `/v1/...` | messages、streams、triggers、setup |
-| `/v1/sessions/...` | 过渡兼容 |
+| `/v1/sessions/...` | 已下线（410） |
 
 权威契约：[agent-node-api.md](../architecture/agent-node-api.md) · OpenAPI：[openapi-node.yaml](../architecture/openapi-node.yaml)
 
@@ -45,7 +45,7 @@
 }
 ```
 
-常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`、`policy_moved`。
+常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`、`policy_moved`、`sessions_moved`。
 
 ---
 
@@ -65,17 +65,21 @@ GET /v1/agent/info
 → { "agent_id", "expose_to_peers", "capabilities", "manage_registered", "llm": { ... } }
 ```
 
-### 2.2 Session
+### 2.2 Agents（主契约）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/v1/sessions` | 创建；`session_id` 可选 |
-| GET | `/v1/sessions` | 列表 |
-| DELETE | `/v1/sessions/{id}` | 删除 |
-| POST | `/v1/sessions/{id}/cancel` | 取消在途 turn |
-| POST | `/v1/sessions/{id}/clear-context` | 清空上下文 |
-| GET | `/v1/sessions/{id}/context` | token 估算 + system prompt 预览 |
-| GET | `/v1/sessions/{id}/child-agents` | 临时子 Agent 列表 |
+| POST | `/v1/agents` | 创建 Agent |
+| GET | `/v1/agents` | 列表 |
+| DELETE | `/v1/agents/{id}` | 归档 |
+| POST | `/v1/agents/{id}/ensure` | 装入运行时 |
+| GET | `/v1/agents/{id}/hydrate` | transcript + pending HITL |
+| POST | `/v1/agents/{id}/cancel` | 取消在途 turn |
+| POST | `/v1/agents/{id}/clear-context` | 清空上下文 |
+| GET | `/v1/agents/{id}/context` | token 估算 + system prompt 预览 |
+| GET | `/v1/agents/{id}/child-agents` | 临时子 Agent 列表 |
+
+`/v1/sessions*` 已下线（410）。
 
 ### 2.3 消息与 resume
 

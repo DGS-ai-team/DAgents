@@ -16,6 +16,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"github.com/DGS-ai-team/DAgents/node/internal/version"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -37,34 +38,39 @@ func testConfig(t *testing.T) *config.Config {
 	return cfg
 }
 
-// waitSessionIdle 轮询直到 session turn 结束，避免 t.TempDir() 清理时后台仍写 FSRoot。
-func waitSessionIdle(t *testing.T, baseURL, sessionID string) {
+// createTestRuntime 在无 agents store 的单测中直接创建内存 runtime（/v1/sessions 已 410）。
+func createTestRuntime(t *testing.T, srv *Server) string {
 	t.Helper()
-	waitSessionIdleDeadline(t, baseURL, sessionID, 3*time.Second)
+	if srv == nil || srv.sessions == nil {
+		t.Fatal("sessions manager required")
+	}
+	sess, _, err := srv.sessions.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.ID == "" {
+		t.Fatal("empty session_id")
+	}
+	return sess.ID
 }
 
-func waitSessionIdleDeadline(t *testing.T, baseURL, sessionID string, timeout time.Duration) {
+// waitSessionIdle 轮询直到 session turn 结束，避免 t.TempDir() 清理时后台仍写 FSRoot。
+func waitSessionIdle(t *testing.T, srv *Server, sessionID string) {
+	t.Helper()
+	waitSessionIdleDeadline(t, srv, sessionID, 3*time.Second)
+}
+
+func waitSessionIdleDeadline(t *testing.T, srv *Server, sessionID string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
-		resp, err := http.Get(baseURL + "/v1/sessions")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got listSessionsResponse
-		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-			resp.Body.Close()
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-		for _, item := range got.Sessions {
-			if item.SessionID == sessionID && item.RunTurnPhase == "idle" && !item.HasActiveTurn {
-				return
-			}
+		_, hasActive, state, err := srv.sessions.RuntimeInfo(sessionID)
+		if err == nil && !hasActive && state == turn.StateIdle {
+			return
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timeout waiting session %s idle", sessionID)
+			t.Fatalf("timeout waiting session %s idle (err=%v active=%v state=%q)", sessionID, err, hasActive, state)
 		default:
 			time.Sleep(20 * time.Millisecond)
 		}
@@ -121,36 +127,74 @@ func TestHandleAgentInfo(t *testing.T) {
 	}
 }
 
-func newTestServer(t *testing.T) *httptest.Server {
+func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 	reg, err := tools.NewRegistry(t.TempDir(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore()).Handler())
+	srv := NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore())
+	ts := httptest.NewServer(srv.Handler())
 	// 须在 testConfig 的 t.TempDir 清理之前关闭 Server，否则 FSRoot 仍被后台写入。
 	t.Cleanup(func() {
 		ts.Close()
 		time.Sleep(50 * time.Millisecond)
 	})
-	return ts
+	return srv, ts
+}
+
+func TestSessionsGone(t *testing.T) {
+	_, ts := newTestServer(t)
+	defer ts.Close()
+
+	paths := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/v1/sessions"},
+		{http.MethodGet, "/v1/sessions"},
+		{http.MethodDelete, "/v1/sessions/sess-x"},
+		{http.MethodGet, "/v1/sessions/sess-x/hydrate"},
+		{http.MethodGet, "/v1/sessions/sess-x/context"},
+		{http.MethodPost, "/v1/sessions/sess-x/ack"},
+		{http.MethodGet, "/v1/sessions/sess-x/child-agents"},
+		{http.MethodGet, "/v1/sessions/sess-x/media/med-1"},
+	}
+	for _, tc := range paths {
+		req, err := http.NewRequest(tc.method, ts.URL+tc.path, bytes.NewReader([]byte(`{}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusGone {
+			t.Fatalf("%s %s status=%d body=%s", tc.method, tc.path, resp.StatusCode, body)
+		}
+		var errBody struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &errBody); err != nil {
+			t.Fatalf("%s %s decode: %v body=%s", tc.method, tc.path, err, body)
+		}
+		if errBody.Error.Code != "sessions_moved" {
+			t.Fatalf("%s %s code=%q", tc.method, tc.path, errBody.Error.Code)
+		}
+	}
 }
 
 func TestHandleStreamsConnectsImmediately(t *testing.T) {
-	ts := newTestServer(t)
+	srv, ts := newTestServer(t)
 	defer ts.Close()
 
-	createResp, err := http.Post(ts.URL+"/v1/sessions", "application/json", bytes.NewReader([]byte(`{}`)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var created createSessionResponse
-	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
-		t.Fatal(err)
-	}
-	createResp.Body.Close()
+	sessionID := createTestRuntime(t, srv)
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+created.SessionID+"&live=1", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+sessionID+"&live=1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,25 +214,13 @@ func TestHandleStreamsConnectsImmediately(t *testing.T) {
 }
 
 func TestSessionMessageStreamE2E(t *testing.T) {
-	ts := newTestServer(t)
+	srv, ts := newTestServer(t)
 	defer ts.Close()
 
-	// 创建 session
-	createResp, err := http.Post(ts.URL+"/v1/sessions", "application/json", bytes.NewReader([]byte(`{}`)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer createResp.Body.Close()
-	var created createSessionResponse
-	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
-		t.Fatal(err)
-	}
-	if created.SessionID == "" {
-		t.Fatal("empty session_id")
-	}
+	sessionID := createTestRuntime(t, srv)
 
 	// 先订阅 SSE
-	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+created.SessionID, nil)
+	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+sessionID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +234,7 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 	}
 
 	// 发送消息
-	msgBody := `{"session_id":"` + created.SessionID + `","request_type":"message","content":"你好"}`
+	msgBody := `{"session_id":"` + sessionID + `","request_type":"message","content":"你好"}`
 	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +290,7 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 }
 
 func TestPostMessageSessionNotFound(t *testing.T) {
-	ts := newTestServer(t)
+	_, ts := newTestServer(t)
 	defer ts.Close()
 
 	body := `{"session_id":"sess-missing","request_type":"message","content":"x"}`
@@ -273,20 +305,12 @@ func TestPostMessageSessionNotFound(t *testing.T) {
 }
 
 func TestPostMessageAcceptsPythonClientFields(t *testing.T) {
-	ts := newTestServer(t)
+	srv, ts := newTestServer(t)
 	defer ts.Close()
 
-	createResp, err := http.Post(ts.URL+"/v1/sessions", "application/json", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var created createSessionResponse
-	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
-		t.Fatal(err)
-	}
-	createResp.Body.Close()
+	sessionID := createTestRuntime(t, srv)
 
-	body := `{"session_id":"` + created.SessionID + `","request_type":"message","content":"hi","client_id":"ignored","source":"ignored"}`
+	body := `{"session_id":"` + sessionID + `","request_type":"message","content":"hi","client_id":"ignored","source":"ignored"}`
 	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -295,38 +319,25 @@ func TestPostMessageAcceptsPythonClientFields(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	waitSessionIdle(t, ts.URL, created.SessionID)
+	waitSessionIdle(t, srv, sessionID)
 }
 
-func TestListSessionsActiveRuntimeFields(t *testing.T) {
-	ts := newTestServer(t)
+func TestCreateRuntimeActiveFields(t *testing.T) {
+	srv, ts := newTestServer(t)
 	defer ts.Close()
 
-	createResp, err := http.Post(ts.URL+"/v1/sessions", "application/json", strings.NewReader(`{}`))
+	sessionID := createTestRuntime(t, srv)
+	_, hasActive, state, err := srv.sessions.RuntimeInfo(sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var created createSessionResponse
-	_ = json.NewDecoder(createResp.Body).Decode(&created)
-	createResp.Body.Close()
-
-	listResp, err := http.Get(ts.URL + "/v1/sessions")
-	if err != nil {
-		t.Fatal(err)
+	if hasActive {
+		t.Fatal("new runtime should be idle")
 	}
-	defer listResp.Body.Close()
-	var got listSessionsResponse
-	if err := json.NewDecoder(listResp.Body).Decode(&got); err != nil {
-		t.Fatal(err)
+	if state != turn.StateIdle {
+		t.Fatalf("state = %q", state)
 	}
-	if len(got.Sessions) != 1 {
-		t.Fatalf("sessions = %+v", got.Sessions)
-	}
-	item := got.Sessions[0]
-	if !item.Active || item.SessionID != created.SessionID {
-		t.Fatalf("unexpected session: %+v", item)
-	}
-	if item.RunTurnPhase == "" {
+	if turn.RunTurnPhase(state) == "" {
 		t.Fatal("run_turn_phase should be set for active session")
 	}
 }
@@ -341,20 +352,14 @@ func TestSessionPersistenceAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithStore(st))
+	srv := NewServer(testConfig(t), nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithStore(st), WithSkipStore())
 	t.Cleanup(srv.Close)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	createResp, err := http.Post(ts.URL+"/v1/sessions", "application/json", bytes.NewReader([]byte(`{}`)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var created createSessionResponse
-	_ = json.NewDecoder(createResp.Body).Decode(&created)
-	createResp.Body.Close()
+	sessionID := createTestRuntime(t, srv)
 
-	msgBody := `{"session_id":"` + created.SessionID + `","request_type":"message","content":"store-me"}`
+	msgBody := `{"session_id":"` + sessionID + `","request_type":"message","content":"store-me"}`
 	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
@@ -364,7 +369,7 @@ func TestSessionPersistenceAPI(t *testing.T) {
 	deadline := time.After(3 * time.Second)
 	var ctxBody sessionContextResponse
 	for {
-		ctxResp, err := http.Get(ts.URL + "/v1/sessions/" + created.SessionID + "/context")
+		ctxResp, err := http.Get(ts.URL + "/v1/agents/" + sessionID + "/context")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -384,7 +389,7 @@ func TestSessionPersistenceAPI(t *testing.T) {
 		t.Fatal("expected non-empty system_prompt in context view")
 	}
 
-	compressResp, err := http.Post(ts.URL+"/v1/sessions/"+created.SessionID+"/compress", "application/json", nil)
+	compressResp, err := http.Post(ts.URL+"/v1/agents/"+sessionID+"/compress", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,13 +403,11 @@ func TestSessionPersistenceAPI(t *testing.T) {
 		t.Fatalf("unexpected compress status = %q", compressBody.Status)
 	}
 
-	delReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/v1/sessions/"+created.SessionID, nil)
-	delResp, err := http.DefaultClient.Do(delReq)
+	ok, err := srv.sessions.Delete(sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	delResp.Body.Close()
-	if delResp.StatusCode != http.StatusOK {
-		t.Fatalf("delete status = %d", delResp.StatusCode)
+	if !ok {
+		t.Fatal("expected delete ok")
 	}
 }

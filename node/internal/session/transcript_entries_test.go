@@ -177,7 +177,7 @@ func TestEnrichTranscriptMedia(t *testing.T) {
 		},
 	}
 	EnrichTranscriptMedia(entries, map[string][]map[string]any{
-		"call-img": {{"id": "med_1", "url": "/v1/sessions/s/media/med_1"}},
+		"call-img": {{"id": "med_1", "url": "/v1/agents/s/media/med_1"}},
 	})
 	data, _ := entries[0]["data"].(map[string]any)
 	media, _ := data["media"].([]map[string]any)

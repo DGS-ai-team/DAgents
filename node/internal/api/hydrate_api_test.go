@@ -22,7 +22,7 @@ func TestHandleSessionHydrate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := NewServer(cfg, nil, WithStore(st))
+	srv := NewServer(cfg, nil, WithStore(st), WithSkipStore())
 	t.Cleanup(srv.Close)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -50,7 +50,7 @@ func TestHandleSessionHydrate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := http.Get(ts.URL + "/v1/sessions/" + sessionID + "/hydrate")
+	resp, err := http.Get(ts.URL + "/v1/agents/" + sessionID + "/hydrate")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestHandleSessionHydrate_notFound(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	resp, err := http.Get(ts.URL + "/v1/sessions/missing/hydrate")
+	resp, err := http.Get(ts.URL + "/v1/agents/missing/hydrate")
 	if err != nil {
 		t.Fatal(err)
 	}

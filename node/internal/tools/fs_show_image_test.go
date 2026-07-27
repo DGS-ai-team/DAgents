@@ -30,7 +30,7 @@ func TestExecShowImage_registersMedia(t *testing.T) {
 			ID:    "med_demo",
 			Kind:  "image",
 			MIME:  "image/png",
-			URL:   "/v1/sessions/s1/media/med_demo",
+			URL:   "/v1/agents/s1/media/med_demo",
 			Label: label,
 			Caption: caption,
 		}, nil
@@ -70,7 +70,7 @@ func TestExecShowImage_registersMediaOutsideFSRoot(t *testing.T) {
 			ID:   "med_out",
 			Kind: "image",
 			MIME: "image/png",
-			URL:  "/v1/sessions/s1/media/med_out",
+			URL:  "/v1/agents/s1/media/med_out",
 		}, nil
 	})
 	ctx := WithToolCallID(WithSession(context.Background(), "s1"), "call-out")
@@ -106,7 +106,7 @@ func TestExecShowImage_acceptsAbsolutePathUnderFSRoot(t *testing.T) {
 		if relPath != pngPath {
 			t.Fatalf("relPath=%q want %q", relPath, pngPath)
 		}
-		return &MediaArtifactRef{ID: "med_abs", Kind: "image", MIME: "image/png", URL: "/v1/sessions/s1/media/med_abs"}, nil
+		return &MediaArtifactRef{ID: "med_abs", Kind: "image", MIME: "image/png", URL: "/v1/agents/s1/media/med_abs"}, nil
 	})
 	ctx := WithToolCallID(WithSession(context.Background(), "s1"), "call-abs")
 	out, err := reg.Execute(ctx, "show_image", fmt.Sprintf(`{"path":%q,"call_purpose":"x"}`, pngPath))

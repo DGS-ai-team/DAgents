@@ -1,30 +1,18 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"testing"
 )
 
 func TestSessionContextFullMessages(t *testing.T) {
-	ts := newTestServer(t)
+	srv, ts := newTestServer(t)
 	defer ts.Close()
 
-	createResp, err := http.Post(ts.URL+"/v1/sessions", "application/json", bytes.NewReader([]byte(`{}`)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var created createSessionResponse
-	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
-		t.Fatal(err)
-	}
-	createResp.Body.Close()
-	if created.SessionID == "" {
-		t.Fatal("empty session_id")
-	}
+	sessionID := createTestRuntime(t, srv)
 
-	ctxResp, err := http.Get(ts.URL + "/v1/sessions/" + created.SessionID + "/context?full_messages=1")
+	ctxResp, err := http.Get(ts.URL + "/v1/agents/" + sessionID + "/context?full_messages=1")
 	if err != nil {
 		t.Fatal(err)
 	}

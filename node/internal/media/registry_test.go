@@ -27,7 +27,7 @@ func TestRegistryRegisterAndOpen(t *testing.T) {
 	if art.MIME != "image/png" {
 		t.Fatalf("mime = %q", art.MIME)
 	}
-	if art.PublicURL() != "/v1/sessions/sess-abc/media/"+art.ID {
+	if art.PublicURL() != "/v1/agents/sess-abc/media/"+art.ID {
 		t.Fatalf("url = %q", art.PublicURL())
 	}
 	got, abs, err := reg.OpenFile(art.ID)

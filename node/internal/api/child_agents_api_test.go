@@ -43,7 +43,7 @@ func testConfigChildAgentsEnabled(t *testing.T) *config.Config {
 	return cfg
 }
 
-func newChildAgentTestServer(t *testing.T, llmClient llm.Client) *httptest.Server {
+func newChildAgentTestServer(t *testing.T, llmClient llm.Client) (*Server, *httptest.Server) {
 	t.Helper()
 	reg, err := tools.NewRegistry(t.TempDir(), 30)
 	if err != nil {
@@ -60,33 +60,16 @@ func newChildAgentTestServer(t *testing.T, llmClient llm.Client) *httptest.Serve
 		}
 		time.Sleep(50 * time.Millisecond)
 	})
-	return ts
-}
-
-func createSession(t *testing.T, baseURL string) string {
-	t.Helper()
-	resp, err := http.Post(baseURL+"/v1/sessions", "application/json", bytes.NewReader([]byte(`{}`)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	var created createSessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatal(err)
-	}
-	if created.SessionID == "" {
-		t.Fatal("empty session_id")
-	}
-	return created.SessionID
+	return srv, ts
 }
 
 // TestChildAgentMockLLME2E 经 HTTP + mock LLM 走通 create(wait=true) 全链路。
 func TestChildAgentMockLLME2E(t *testing.T) {
 	mock := &llm.ChildAgentFlowMock{FinalReply: "HTTP 联调完成"}
-	ts := newChildAgentTestServer(t, mock)
+	srv, ts := newChildAgentTestServer(t, mock)
 	defer ts.Close()
 
-	parentID := createSession(t, ts.URL)
+	parentID := createTestRuntime(t, srv)
 
 	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+parentID, nil)
 	if err != nil {
@@ -165,7 +148,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	}
 
 	// 完成后列表应为空（记录已回收）
-	listResp, err := http.Get(ts.URL + "/v1/sessions/" + parentID + "/child-agents")
+	listResp, err := http.Get(ts.URL + "/v1/agents/" + parentID + "/child-agents")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,10 +164,10 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 
 // TestChildAgentHTTPCancel 经 HTTP 取消进行中的子 Agent。
 func TestChildAgentHTTPCancel(t *testing.T) {
-	ts := newChildAgentTestServer(t, &sessionDelayedEchoMock{delay: 3 * time.Second})
+	srv, ts := newChildAgentTestServer(t, &sessionDelayedEchoMock{delay: 3 * time.Second})
 	defer ts.Close()
 
-	parentID := createSession(t, ts.URL)
+	parentID := createTestRuntime(t, srv)
 
 	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+parentID, nil)
 	if err != nil {
@@ -231,7 +214,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 
 	cancelBody := bytes.NewReader([]byte(`{"reason":"http test cancel"}`))
 	req, err := http.NewRequest(http.MethodPost,
-		ts.URL+"/v1/sessions/"+parentID+"/child-agents/"+childID+"/cancel",
+		ts.URL+"/v1/agents/"+parentID+"/child-agents/"+childID+"/cancel",
 		cancelBody)
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +238,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 	}
 
 	// 父 turn / 子 cancel 可能仍在收尾写盘；等 idle 后再让 t.TempDir 清理。
-	waitSessionIdleDeadline(t, ts.URL, parentID, 8*time.Second)
+	waitSessionIdleDeadline(t, srv, parentID, 8*time.Second)
 }
 
 // sessionDelayedEchoMock 供 api 包 cancel 测试使用（避免 import cycle）。

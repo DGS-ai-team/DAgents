@@ -21,35 +21,28 @@ func triggersTestConfig(t *testing.T) *config.Config {
 	return cfg
 }
 
-func newTriggersTestServer(t *testing.T) *httptest.Server {
+func newTriggersTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 	cfg := triggersTestConfig(t)
 	reg, err := tools.NewRegistry(cfg.FSRoot, 30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore()).Handler())
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithTools(reg), WithSkipStore())
+	return srv, httptest.NewServer(srv.Handler())
 }
 
 func TestTriggersAPICreateFireHistory(t *testing.T) {
-	ts := newTriggersTestServer(t)
+	srv, ts := newTriggersTestServer(t)
 	defer ts.Close()
 
-	createSess, err := http.Post(ts.URL+"/v1/sessions", "application/json", bytes.NewReader([]byte(`{}`)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sess createSessionResponse
-	if err := json.NewDecoder(createSess.Body).Decode(&sess); err != nil {
-		t.Fatal(err)
-	}
-	createSess.Body.Close()
+	sessionID := createTestRuntime(t, srv)
 
 	createBody := map[string]any{
 		"name":              "smoke",
 		"task_template":     "hello {reason}",
 		"condition":         map[string]any{"interval_seconds": 3600},
-		"target_session_id": sess.SessionID,
+		"target_session_id": sessionID,
 	}
 	raw, _ := json.Marshal(createBody)
 	createResp, err := http.Post(ts.URL+"/v1/triggers", "application/json", bytes.NewReader(raw))
