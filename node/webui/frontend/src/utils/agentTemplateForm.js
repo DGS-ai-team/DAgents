@@ -36,6 +36,8 @@ export function emptyAgentDraft() {
     maxToolLoops: 32,
     toolGroups: [],
     skillsEnabled: true,
+    // null = 不限制（全部可见）；string[] = 显式白名单（可为空）
+    visibleSkills: null,
     childAgentsEnabled: true,
     sandboxEnabled: false,
     sandboxBackend: "process",
@@ -73,6 +75,35 @@ function numberOr(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** null = 未限制；数组 = 显式白名单。 */
+function normalizeVisibleSkills(skills) {
+  if (!skills || typeof skills !== "object" || !Object.prototype.hasOwnProperty.call(skills, "visible")) {
+    return null;
+  }
+  if (!Array.isArray(skills.visible)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of skills.visible) {
+    const name = String(item || "").trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+function skillsPayload(draft) {
+  const enabled = !!draft.skillsEnabled;
+  if (!enabled) return { enabled: false };
+  if (draft.visibleSkills === null || draft.visibleSkills === undefined) {
+    return { enabled: true };
+  }
+  const visible = Array.isArray(draft.visibleSkills)
+    ? draft.visibleSkills.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
+  return { enabled: true, visible };
+}
+
 /** 从模板展开为可编辑草稿（创建时由前端持有完整设置）。 */
 /** 空白 Agent 草稿（不依赖模板）。 */
 export function draftFromBlank(llmProfileIds = []) {
@@ -102,6 +133,7 @@ export function draftFromTemplate(template, llmProfileIds = []) {
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   draft.skillsEnabled = boolOr(skills.enabled, true);
+  draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = !!sandbox.enabled;
   draft.sandboxBackend = String(sandbox.backend || "process").trim() || "process";
@@ -151,6 +183,7 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   draft.skillsEnabled = boolOr(skills.enabled, true);
+  draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = boolOr(sandbox.enabled, !!agent?.sandbox_enabled);
   draft.sandboxBackend = String(sandbox.backend || agent?.sandbox_backend || "process").trim() || "process";
@@ -223,7 +256,7 @@ export function buildCreateAgentPayload(draft) {
       tools: {
         enabled_groups: Array.isArray(draft.toolGroups) ? [...draft.toolGroups] : [],
       },
-      skills: { enabled: !!draft.skillsEnabled },
+      skills: skillsPayload(draft),
       child_agents: { enabled: !!draft.childAgentsEnabled },
       prompt_context: {
         soul_enabled: !!draft.promptSoulEnabled,
@@ -280,7 +313,7 @@ export function buildCreateTemplatePayload(meta, draft) {
       tools: {
         enabled_groups: Array.isArray(draft?.toolGroups) ? [...draft.toolGroups] : [],
       },
-      skills: { enabled: !!draft?.skillsEnabled },
+      skills: skillsPayload(draft),
       child_agents: { enabled: !!draft?.childAgentsEnabled },
       prompt_context: {
         soul_enabled: !!draft?.promptSoulEnabled,

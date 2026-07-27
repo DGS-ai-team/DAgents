@@ -121,6 +121,9 @@ func newRuntimeWithPublisher(
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
 	catalog := skills.NewCatalog(turnOpts.SkillsRoot, turnOpts.SkillsEnabled, turnOpts.SkillsMaxInPrompt)
+	if turnOpts.SkillsVisibleRestrict {
+		catalog.RestrictVisible(turnOpts.SkillsVisible)
+	}
 	journal := history.NewJournal(turnOpts.RawMessageHistoryEnabled, turnOpts.RawMessageHistoryDir, logger)
 	rt := &runtime{
 		session:       Session{ID: id, AgentID: agentID},

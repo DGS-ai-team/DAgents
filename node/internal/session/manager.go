@@ -37,6 +37,9 @@ type TurnOptions struct {
 	SkillsRoot               string
 	SkillsEnabled            bool
 	SkillsMaxInPrompt        int
+	// SkillsVisibleRestrict 为 true 时仅暴露 SkillsVisible 中的 skill（空切片=不可见）。
+	SkillsVisibleRestrict bool
+	SkillsVisible         []string
 	RuntimeDir               string
 	CompressionSilent             int
 	CompressionBlocking           int

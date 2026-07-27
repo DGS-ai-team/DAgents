@@ -213,6 +213,77 @@ func MaxToolLoopsFromDefaults(snap Snapshot) int {
 	}
 }
 
+// SkillsConfig 为 defaults.skills 解析结果。
+type SkillsConfig struct {
+	Enabled bool
+	// VisibleRestrict 表示 snapshot 显式写了 visible（含空列表）；false 表示未限制。
+	VisibleRestrict bool
+	Visible         []string
+}
+
+// SkillsFromDefaults 读取 defaults.skills.enabled / visible。
+// visible 缺省：不限制（全部可见）；visible: []：全部不可见；visible: ["a"]：仅 a。
+func SkillsFromDefaults(snap Snapshot) SkillsConfig {
+	out := SkillsConfig{Enabled: true}
+	raw, ok := snap.Defaults["skills"]
+	if !ok || raw == nil {
+		return out
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return out
+	}
+	if v, ok := boolFromAny(m["enabled"]); ok {
+		out.Enabled = v
+	}
+	if _, hasVisible := m["visible"]; hasVisible {
+		out.VisibleRestrict = true
+		out.Visible = stringSliceFromAny(m["visible"])
+	}
+	return out
+}
+
+func stringSliceFromAny(v any) []string {
+	switch items := v.(type) {
+	case []any:
+		out := make([]string, 0, len(items))
+		seen := map[string]struct{}{}
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok {
+				continue
+			}
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			if _, dup := seen[s]; dup {
+				continue
+			}
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+		return out
+	case []string:
+		out := make([]string, 0, len(items))
+		seen := map[string]struct{}{}
+		for _, s := range items {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			if _, dup := seen[s]; dup {
+				continue
+			}
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 // ApplyDefaultsToTurnOptions 将快照 defaults 中的 llm / hooks / prompt_context 写入 TurnOptions。
 // max_tool_loops 仅来自 Agent snapshot（新建时写入）；缺省时用 DefaultMaxToolLoops。
 func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {

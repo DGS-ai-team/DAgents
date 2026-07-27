@@ -3,7 +3,8 @@
  * Agent 设置表单：基础信息 + 可展开的高级设置（工具 / 沙箱 / 侧车）。
  * 创建与设置页共用。
  */
-import { computed } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import * as api from "../api/node.js";
 import { LONG_TERM_SCOPES, TOOL_GROUPS } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
@@ -20,11 +21,83 @@ const advancedOpen = computed({
   set: (v) => emit("update:showAdvanced", v),
 });
 
+const catalogSkills = ref(/** @type {{ skill_name: string, description: string }[]} */ ([]));
+const catalogLoading = ref(false);
+const catalogError = ref("");
+const catalogEnabled = ref(true);
+
+async function loadCatalog() {
+  catalogLoading.value = true;
+  catalogError.value = "";
+  try {
+    const data = await api.listNodeSkillsCatalog();
+    catalogEnabled.value = data?.enabled !== false;
+    catalogSkills.value = Array.isArray(data?.available_skills)
+      ? data.available_skills
+          .map((s) => ({
+            skill_name: String(s.skill_name || s.name || "").trim(),
+            description: String(s.description || "").trim(),
+          }))
+          .filter((s) => s.skill_name)
+      : [];
+  } catch (e) {
+    catalogError.value = e?.message || "加载 skills 目录失败";
+    catalogSkills.value = [];
+  } finally {
+    catalogLoading.value = false;
+  }
+}
+
+onMounted(() => {
+  loadCatalog();
+});
+
+watch(advancedOpen, (open) => {
+  if (open && !catalogSkills.value.length && !catalogLoading.value) {
+    loadCatalog();
+  }
+});
+
 function toggleGroup(name) {
   const set = new Set(props.draft.toolGroups || []);
   if (set.has(name)) set.delete(name);
   else set.add(name);
   props.draft.toolGroups = [...set].sort();
+}
+
+function isSkillVisible(name) {
+  if (props.draft.visibleSkills === null || props.draft.visibleSkills === undefined) {
+    return true;
+  }
+  return Array.isArray(props.draft.visibleSkills) && props.draft.visibleSkills.includes(name);
+}
+
+function toggleSkillVisible(name) {
+  const allNames = catalogSkills.value.map((s) => s.skill_name);
+  let current =
+    props.draft.visibleSkills === null || props.draft.visibleSkills === undefined
+      ? [...allNames]
+      : [...(props.draft.visibleSkills || [])];
+  if (current.includes(name)) {
+    current = current.filter((x) => x !== name);
+  } else {
+    current.push(name);
+  }
+  current = [...new Set(current.map((x) => String(x || "").trim()).filter(Boolean))];
+  // 全选时回到「不限制」语义，便于日后新增 skill 自动可见。
+  if (allNames.length > 0 && current.length === allNames.length && allNames.every((n) => current.includes(n))) {
+    props.draft.visibleSkills = null;
+  } else {
+    props.draft.visibleSkills = current;
+  }
+}
+
+function selectAllSkills() {
+  props.draft.visibleSkills = null;
+}
+
+function clearAllSkills() {
+  props.draft.visibleSkills = [];
 }
 
 const longTermScopeLabel = computed(() =>
@@ -123,6 +196,40 @@ function removeLongTermEntry(index) {
           <span>单条消息工具步上限</span>
           <input v-model.number="draft.maxToolLoops" type="number" min="1" class="agent-settings-input" />
         </label>
+      </section>
+
+      <section v-if="draft.skillsEnabled" class="agent-settings-section">
+        <h3 class="agent-settings-section__title">可见 Skills</h3>
+        <p class="agent-settings-hint">
+          勾选本 Agent 可发现 / 加载的 skills。全选表示不限制（Node 目录新增 skill 自动可见）；取消勾选则仅白名单内可用。
+        </p>
+        <div class="agent-settings-field__head">
+          <span class="agent-settings-hint" style="margin: 0">
+            <template v-if="draft.visibleSkills === null">当前：不限制（全部）</template>
+            <template v-else>当前：已选 {{ draft.visibleSkills.length }} 项</template>
+          </span>
+          <div class="agent-settings-skill-actions">
+            <button type="button" class="btn btn--ghost btn--sm" :disabled="catalogLoading" @click="selectAllSkills">全选</button>
+            <button type="button" class="btn btn--ghost btn--sm" :disabled="catalogLoading" @click="clearAllSkills">全不选</button>
+          </div>
+        </div>
+        <p v-if="catalogLoading" class="agent-settings-hint">加载目录中…</p>
+        <p v-else-if="catalogError" class="agent-settings-hint">{{ catalogError }}</p>
+        <p v-else-if="!catalogEnabled" class="agent-settings-hint">Node 未启用 skills（settings.skills.enabled）。</p>
+        <p v-else-if="!catalogSkills.length" class="agent-settings-hint">目录为空（.runtime/skills）。</p>
+        <div v-else class="agent-settings-skill-list">
+          <label v-for="s in catalogSkills" :key="s.skill_name" class="agent-settings-check agent-settings-check--skill">
+            <input
+              type="checkbox"
+              :checked="isSkillVisible(s.skill_name)"
+              @change="toggleSkillVisible(s.skill_name)"
+            />
+            <span>
+              <strong>{{ s.skill_name }}</strong>
+              <em v-if="s.description">{{ s.description }}</em>
+            </span>
+          </label>
+        </div>
       </section>
 
       <section class="agent-settings-section">
@@ -297,6 +404,28 @@ function removeLongTermEntry(index) {
   color: var(--color-text);
 }
 
+.agent-settings-check--skill {
+  align-items: flex-start;
+}
+
+.agent-settings-check--skill span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-settings-check--skill strong {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.agent-settings-check--skill em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--color-text-subtle);
+  line-height: 1.35;
+}
+
 .agent-settings-hint {
   margin: 0 0 8px;
   font-size: 11.5px;
@@ -310,6 +439,23 @@ function removeLongTermEntry(index) {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.agent-settings-skill-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.agent-settings-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
 }
 
 .agent-settings-longterm-entry {

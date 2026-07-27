@@ -193,6 +193,11 @@ export function listSkills(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/skills`);
 }
 
+/** Node 级 skills 目录（创建/编辑 Agent 勾选可见技能用，不受 Agent 白名单过滤）。 */
+export function listNodeSkillsCatalog() {
+  return apiFetch("/v1/skills/catalog");
+}
+
 export function loadSkill(agentId, skillName) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/skills/load`, {
     method: "POST",
