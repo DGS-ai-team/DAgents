@@ -28,18 +28,6 @@ type InboxTurnResult struct {
 	HITL     *InboxHITLPause
 }
 
-// RunInboxConsultation 兼容旧接口：首条 message 入队并等待终态（不含 HITL 中继时等同 RunInboxTurn）。
-func (m *Manager) RunInboxConsultation(ctx context.Context, taskID, content string) (string, error) {
-	out, err := m.RunInboxTurn(ctx, taskID, content, nil)
-	if err != nil {
-		return out.Text, err
-	}
-	if out.HITL != nil {
-		return out.Text, fmt.Errorf("inbox turn paused for HITL (%s) without relay", out.HITL.Awaiting)
-	}
-	return out.Text, nil
-}
-
 // RunInboxTurn 执行 inbox turn 一步：content 非空时投递首条 user message；resume 非空时投递 HITL resume。
 func (m *Manager) RunInboxTurn(ctx context.Context, taskID, content string, resume map[string]any) (InboxTurnResult, error) {
 	if m == nil {
@@ -106,24 +94,25 @@ func (m *Manager) waitInboxTurnWithSub(ctx context.Context, sessionID string, su
 					EventType: "hitl_required",
 					Data:      cloneEventData(ev.Data),
 				}
-			case "user_information_required":
-				hitl = &InboxHITLPause{
-					Awaiting:  "user_information",
-					EventType: "user_information_required",
-					Data:      cloneEventData(ev.Data),
+			case "user_information_required", "approval_required":
+				// TODO(hitl-cutover): 待 A2A 对端不再发旧事件名后删除本分支。
+				awaiting := "hitl"
+				if ev.Type == "user_information_required" {
+					awaiting = "user_information"
+				} else if ev.Type == "approval_required" {
+					awaiting = "tool_approval"
 				}
-			case "approval_required":
 				hitl = &InboxHITLPause{
-					Awaiting:  "tool_approval",
-					EventType: "approval_required",
-					Data:      cloneEventData(ev.Data),
+					Awaiting:  awaiting,
+					EventType: "hitl_required",
+					Data:      normalizeLegacyHITLSSE(ev.Type, cloneEventData(ev.Data)),
 				}
 			case "done":
 				turnComplete, _ := ev.Data["turn_complete"].(bool)
 				awaiting, _ := ev.Data["awaiting"].(string)
 				if !turnComplete && strings.TrimSpace(awaiting) != "" {
 					if hitl == nil {
-						// hub 非阻塞投递时 done 可能先于 approval_required；继续等待 HITL 事件。
+						// hub 非阻塞投递时 done 可能先于 hitl_required；继续等待 HITL 事件。
 						continue
 					}
 					return InboxTurnResult{HITL: hitl}, nil

@@ -17,8 +17,8 @@ func TestClientCreateMessageStream(t *testing.T) {
 	seq := 0
 	sessionID := "sess-test"
 
-	mux.HandleFunc("POST /v1/sessions", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"session_id": sessionID})
+	mux.HandleFunc("POST /v1/agents/"+sessionID+"/ensure", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "agent_id": sessionID})
 	})
 	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, _ *http.Request) {
 		go func() {
@@ -61,7 +61,7 @@ func TestClientCreateMessageStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	sid, err := c.CreateSession(ctx, "")
+	sid, err := c.CreateSession(ctx, sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestClientCancelTurn(t *testing.T) {
 	mux := http.NewServeMux()
 	sessionID := "sess-cancel"
 	cancelled := false
-	mux.HandleFunc("POST /v1/sessions/"+sessionID+"/cancel", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /v1/agents/"+sessionID+"/cancel", func(w http.ResponseWriter, _ *http.Request) {
 		cancelled = true
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"session_id": sessionID,

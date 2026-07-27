@@ -42,22 +42,37 @@ type StreamEvent struct {
 	Data      map[string]any
 }
 
-// CreateSession 调用 POST /v1/sessions；sessionID 为空则由 Node 生成。
+// CreateSession 为兼容别名：等价于 EnsureAgent，返回同一 agent_id。
+// 计划随 /v1/sessions* 下线一并删除；新代码请直接调用 EnsureAgent。
 func (c *Client) CreateSession(ctx context.Context, sessionID string) (string, error) {
-	body := map[string]any{}
-	if strings.TrimSpace(sessionID) != "" {
-		body["session_id"] = sessionID
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return "", fmt.Errorf("agent_id is required")
 	}
-	var resp struct {
-		SessionID string `json:"session_id"`
-	}
-	if err := c.postJSON(ctx, "/v1/sessions", body, &resp); err != nil {
+	if err := c.EnsureAgent(ctx, id); err != nil {
 		return "", err
 	}
-	if resp.SessionID == "" {
-		return "", fmt.Errorf("empty session_id in response")
+	return id, nil
+}
+
+// EnsureAgent 调用 POST /v1/agents/{id}/ensure。
+func (c *Client) EnsureAgent(ctx context.Context, agentID string) error {
+	id := strings.TrimSpace(agentID)
+	if id == "" {
+		return fmt.Errorf("agent_id is required")
 	}
-	return resp.SessionID, nil
+	path := "/v1/agents/" + url.PathEscape(id) + "/ensure"
+	var resp struct {
+		OK      bool   `json:"ok"`
+		AgentID string `json:"agent_id"`
+	}
+	if err := c.postJSON(ctx, path, map[string]any{}, &resp); err != nil {
+		return err
+	}
+	if !resp.OK && strings.TrimSpace(resp.AgentID) == "" {
+		return fmt.Errorf("ensure agent failed")
+	}
+	return nil
 }
 
 // LLMSettings 为 Node LLM 运行时参数（GET/PATCH /v1/llm/settings 与 agent/info.llm）。
@@ -85,7 +100,7 @@ type AgentInfo struct {
 	LLM              LLMSettings `json:"llm"`
 }
 
-// SessionSummary 为 GET /v1/sessions 列表项。
+// SessionSummary 为 Agent 列表项（兼容旧字段名；SessionID == AgentID）。
 type SessionSummary struct {
 	SessionID        string `json:"session_id"`
 	AgentID          string `json:"agent_id"`
@@ -98,7 +113,7 @@ type SessionSummary struct {
 	RunTurnPhase     string `json:"run_turn_phase"`
 }
 
-// SessionContext 为 GET /v1/sessions/{id}/context 响应。
+// SessionContext 为 GET /v1/agents/{id}/context 响应。
 type SessionContext struct {
 	SessionID             string `json:"session_id"`
 	MessagesCount         int    `json:"messages_count"`
@@ -118,7 +133,7 @@ type SessionContext struct {
 	RecentMessages        []ContextMessagePreview `json:"recent_messages"`
 }
 
-// CompressContextResult 为 POST /v1/sessions/{id}/compress 响应。
+// CompressContextResult 为 POST /v1/agents/{id}/compress 响应。
 type CompressContextResult struct {
 	Status                 string `json:"status"`
 	TriggerLevel           string `json:"trigger_level"`
@@ -248,21 +263,39 @@ func (c *Client) PatchLLMSettings(ctx context.Context, patch LLMSettingsPatch) (
 	return &settings, nil
 }
 
-// ListSessions 调用 GET /v1/sessions。
+// ListSessions 调用 GET /v1/agents，并映射为兼容的 SessionSummary（SessionID=AgentID）。
 func (c *Client) ListSessions(ctx context.Context) ([]SessionSummary, error) {
 	var resp struct {
-		Sessions []SessionSummary `json:"sessions"`
+		Agents []struct {
+			AgentID       string `json:"agent_id"`
+			Active        bool   `json:"active"`
+			HasActiveTurn bool   `json:"has_active_turn"`
+			RunTurnPhase  string `json:"run_turn_phase"`
+			UpdatedAt     string `json:"updated_at"`
+		} `json:"agents"`
 	}
-	if err := c.getJSON(ctx, "/v1/sessions", &resp); err != nil {
+	if err := c.getJSON(ctx, "/v1/agents", &resp); err != nil {
 		return nil, err
 	}
-	return resp.Sessions, nil
+	out := make([]SessionSummary, 0, len(resp.Agents))
+	for _, a := range resp.Agents {
+		id := strings.TrimSpace(a.AgentID)
+		out = append(out, SessionSummary{
+			SessionID:     id,
+			AgentID:       id,
+			Active:        a.Active,
+			HasActiveTurn: a.HasActiveTurn,
+			RunTurnPhase:  a.RunTurnPhase,
+			UpdatedAt:     a.UpdatedAt,
+		})
+	}
+	return out, nil
 }
 
-// GetSessionContext 调用 GET /v1/sessions/{id}/context。
+// GetSessionContext 调用 GET /v1/agents/{id}/context。
 func (c *Client) GetSessionContext(ctx context.Context, sessionID string) (*SessionContext, error) {
 	var ctxBody SessionContext
-	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/context"
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/context"
 	if err := c.getJSON(ctx, path, &ctxBody); err != nil {
 		return nil, err
 	}
@@ -272,7 +305,7 @@ func (c *Client) GetSessionContext(ctx context.Context, sessionID string) (*Sess
 // TranscriptEntry 为 hydrate transcript 单条（与 Node JSON 对齐）。
 type TranscriptEntry map[string]any
 
-// SessionHydrate 为 GET /v1/sessions/{id}/hydrate 响应（F-H5）。
+// SessionHydrate 为 GET /v1/agents/{id}/hydrate 响应（F-H5）。
 type SessionHydrate struct {
 	SessionID       string            `json:"session_id"`
 	RunTurnPhase    string            `json:"run_turn_phase"`
@@ -287,37 +320,37 @@ type SessionHydrate struct {
 	HasUnread       bool              `json:"has_unread"`
 }
 
-// GetSessionHydrate 调用 GET /v1/sessions/{id}/hydrate。
+// GetSessionHydrate 调用 GET /v1/agents/{id}/hydrate。
 func (c *Client) GetSessionHydrate(ctx context.Context, sessionID string) (*SessionHydrate, error) {
 	sid := strings.TrimSpace(sessionID)
 	if sid == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
 	var out SessionHydrate
-	path := "/v1/sessions/" + url.PathEscape(sid) + "/hydrate"
+	path := "/v1/agents/" + url.PathEscape(sid) + "/hydrate"
 	if err := c.getJSON(ctx, path, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// PostSessionAck 调用 POST /v1/sessions/{id}/ack（IM cursor，F-E13）。
+// PostSessionAck 调用 POST /v1/agents/{id}/ack（IM cursor，F-E13）。
 func (c *Client) PostSessionAck(ctx context.Context, sessionID string, sseSeq int) error {
 	sid := strings.TrimSpace(sessionID)
 	if sid == "" || sseSeq <= 0 {
 		return nil
 	}
-	path := "/v1/sessions/" + url.PathEscape(sid) + "/ack"
+	path := "/v1/agents/" + url.PathEscape(sid) + "/ack"
 	return c.postJSON(ctx, path, map[string]any{"sse_seq": sseSeq}, nil)
 }
 
-// CancelTurn 调用 POST /v1/sessions/{id}/cancel，取消在途 turn。
+// CancelTurn 调用 POST /v1/agents/{id}/cancel，取消在途 turn。
 func (c *Client) CancelTurn(ctx context.Context, sessionID string) (bool, error) {
 	sid := strings.TrimSpace(sessionID)
 	if sid == "" {
 		return false, fmt.Errorf("session_id is required")
 	}
-	path := "/v1/sessions/" + url.PathEscape(sid) + "/cancel"
+	path := "/v1/agents/" + url.PathEscape(sid) + "/cancel"
 	var resp struct {
 		SessionID string `json:"session_id"`
 		Cancelled bool   `json:"cancelled"`
@@ -328,9 +361,9 @@ func (c *Client) CancelTurn(ctx context.Context, sessionID string) (bool, error)
 	return resp.Cancelled, nil
 }
 
-// ClearSessionContext 调用 POST /v1/sessions/{id}/clear-context。
+// ClearSessionContext 调用 POST /v1/agents/{id}/clear-context。
 func (c *Client) ClearSessionContext(ctx context.Context, sessionID string) error {
-	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/clear-context"
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/clear-context"
 	return c.postJSON(ctx, path, map[string]any{}, nil)
 }
 
@@ -388,19 +421,19 @@ func (c *Client) UpdateShellPolicy(ctx context.Context, shellType string, update
 	return c.putJSON(ctx, path, body, nil)
 }
 
-// CompressSessionContext 调用 POST /v1/sessions/{id}/compress，手动触发阻塞压缩。
+// CompressSessionContext 调用 POST /v1/agents/{id}/compress，手动触发阻塞压缩。
 func (c *Client) CompressSessionContext(ctx context.Context, sessionID string) (*CompressContextResult, error) {
 	var out CompressContextResult
-	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/compress"
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/compress"
 	if err := c.postJSON(ctx, path, map[string]any{}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// DeleteSession 调用 DELETE /v1/sessions/{id}。
+// DeleteSession 调用 DELETE /v1/agents/{id}。
 func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
-	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID))
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.base+path, nil)
 	if err != nil {
 		return err
@@ -424,19 +457,19 @@ type SessionSkills struct {
 	AvailableSkills []any  `json:"available_skills"`
 }
 
-// ListSessionSkills 调用 GET /v1/sessions/{id}/skills。
+// ListSessionSkills 调用 GET /v1/agents/{id}/skills。
 func (c *Client) ListSessionSkills(ctx context.Context, sessionID string) (*SessionSkills, error) {
 	var out SessionSkills
-	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/skills"
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/skills"
 	if err := c.getJSON(ctx, path, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// LoadSessionSkill 调用 POST /v1/sessions/{id}/skills/load。
+// LoadSessionSkill 调用 POST /v1/agents/{id}/skills/load。
 func (c *Client) LoadSessionSkill(ctx context.Context, sessionID, skillName string) (*SessionSkills, error) {
-	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/skills/load"
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/skills/load"
 	var out SessionSkills
 	if err := c.postJSON(ctx, path, map[string]any{"skill_name": skillName}, &out); err != nil {
 		return nil, err
@@ -444,9 +477,9 @@ func (c *Client) LoadSessionSkill(ctx context.Context, sessionID, skillName stri
 	return &out, nil
 }
 
-// UnloadSessionSkill 调用 POST /v1/sessions/{id}/skills/unload。
+// UnloadSessionSkill 调用 POST /v1/agents/{id}/skills/unload。
 func (c *Client) UnloadSessionSkill(ctx context.Context, sessionID, skillName string) (*SessionSkills, error) {
-	path := "/v1/sessions/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/skills/unload"
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/skills/unload"
 	var out SessionSkills
 	if err := c.postJSON(ctx, path, map[string]any{"skill_name": skillName}, &out); err != nil {
 		return nil, err
@@ -603,7 +636,7 @@ func (c *Client) ListChildAgents(ctx context.Context, parentSessionID string) ([
 	var resp struct {
 		Items []ChildAgentListItem `json:"items"`
 	}
-	path := "/v1/sessions/" + url.PathEscape(parentSessionID) + "/child-agents"
+	path := "/v1/agents/" + url.PathEscape(parentSessionID) + "/child-agents"
 	if err := c.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
 	}

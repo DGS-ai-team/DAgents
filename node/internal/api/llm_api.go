@@ -172,6 +172,8 @@ func (s *Server) switchActiveLLMProfile(id string) error {
 }
 
 func (s *Server) applyMultimodalRuntime(enabled bool) {
+	// LLM 客户端为进程级共享；多模态工具开关只更新默认 Registry / 默认 TurnOptions，
+	// 已装入 Agent 的开关在 ensure/reload 时按绑定档案重建，避免串改其他 Agent。
 	if s.tools != nil {
 		s.tools.SetMultimodalEnabled(enabled)
 	}

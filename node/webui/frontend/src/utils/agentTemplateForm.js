@@ -35,7 +35,6 @@ export function emptyAgentDraft() {
     llmProfileId: "",
     maxToolLoops: 32,
     toolGroups: [],
-    skillsEnabled: true,
     // null = 不限制（全部可见）；string[] = 显式白名单（可为空）
     visibleSkills: null,
     childAgentsEnabled: true,
@@ -75,6 +74,13 @@ function numberOr(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** 技能能力与工具组 skills 收敛：未收窄（空列表）视为开启；否则看是否勾选 skills。 */
+export function skillsEnabledFromToolGroups(toolGroups) {
+  const groups = Array.isArray(toolGroups) ? toolGroups : [];
+  if (groups.length === 0) return true;
+  return groups.some((g) => String(g || "").trim() === "skills");
+}
+
 /** null = 未限制；数组 = 显式白名单。 */
 function normalizeVisibleSkills(skills) {
   if (!skills || typeof skills !== "object" || !Object.prototype.hasOwnProperty.call(skills, "visible")) {
@@ -92,16 +98,28 @@ function normalizeVisibleSkills(skills) {
   return out;
 }
 
+/** 写入 defaults.skills：enabled 由工具组推导；visible 仅在白名单模式下写出。 */
 function skillsPayload(draft) {
-  const enabled = !!draft.skillsEnabled;
+  const enabled = skillsEnabledFromToolGroups(draft?.toolGroups);
   if (!enabled) return { enabled: false };
-  if (draft.visibleSkills === null || draft.visibleSkills === undefined) {
+  if (draft?.visibleSkills === null || draft?.visibleSkills === undefined) {
     return { enabled: true };
   }
   const visible = Array.isArray(draft.visibleSkills)
     ? draft.visibleSkills.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   return { enabled: true, visible };
+}
+
+/** 旧 snapshot 的 skills.enabled=false 迁入工具组（去掉 skills）。 */
+function migrateSkillsEnabledIntoToolGroups(draft, skills) {
+  if (boolOr(skills?.enabled, true)) return;
+  const groups = Array.isArray(draft.toolGroups) ? draft.toolGroups : [];
+  if (groups.length === 0) {
+    draft.toolGroups = TOOL_GROUPS.map((g) => g.name).filter((n) => n !== "skills");
+    return;
+  }
+  draft.toolGroups = groups.filter((g) => String(g || "").trim() !== "skills");
 }
 
 /** 从模板展开为可编辑草稿（创建时由前端持有完整设置）。 */
@@ -132,8 +150,8 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   draft.toolGroups = Array.isArray(tools.enabled_groups)
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
-  draft.skillsEnabled = boolOr(skills.enabled, true);
   draft.visibleSkills = normalizeVisibleSkills(skills);
+  migrateSkillsEnabledIntoToolGroups(draft, skills);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = !!sandbox.enabled;
   draft.sandboxBackend = String(sandbox.backend || "process").trim() || "process";
@@ -182,8 +200,8 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   draft.toolGroups = Array.isArray(tools.enabled_groups)
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
-  draft.skillsEnabled = boolOr(skills.enabled, true);
   draft.visibleSkills = normalizeVisibleSkills(skills);
+  migrateSkillsEnabledIntoToolGroups(draft, skills);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = boolOr(sandbox.enabled, !!agent?.sandbox_enabled);
   draft.sandboxBackend = String(sandbox.backend || agent?.sandbox_backend || "process").trim() || "process";

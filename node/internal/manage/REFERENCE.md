@@ -25,7 +25,7 @@ HTTP Header：`x-dagents-agent-id`（`agent_id`）；`x-dagents-a2a-token` 可�
 
 | 符号 | 说明 |
 |------|------|
-| `ComplianceExecutor` | 合规 inbox：ack → `session.RunInboxConsultation`（流式 LLM turn）→ reply |
+| `ComplianceExecutor` | 合规 inbox：ack → `session.RunInboxTurn`（流式 LLM turn）→ reply |
 | `ResolveInboxHandler` | 按 `config agent.role` 选择 handler；需 `*session.Manager` |
 
 ## `inbox_poller.go`

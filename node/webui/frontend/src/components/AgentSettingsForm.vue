@@ -5,7 +5,7 @@
  */
 import { computed, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
-import { LONG_TERM_SCOPES, TOOL_GROUPS } from "../utils/agentTemplateForm.js";
+import { LONG_TERM_SCOPES, TOOL_GROUPS, skillsEnabledFromToolGroups } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
   draft: { type: Object, required: true },
@@ -104,6 +104,8 @@ const longTermScopeLabel = computed(() =>
   props.draft.promptLongTermScope === "global" ? "全局长期记忆" : "独立长期记忆",
 );
 
+const skillsToolEnabled = computed(() => skillsEnabledFromToolGroups(props.draft.toolGroups));
+
 const activeLongTermEntries = computed({
   get() {
     return props.draft.promptLongTermScope === "global"
@@ -184,10 +186,7 @@ function removeLongTermEntry(index) {
 
       <section class="agent-settings-section">
         <h3 class="agent-settings-section__title">能力开关</h3>
-        <label class="agent-settings-check">
-          <input v-model="draft.skillsEnabled" type="checkbox" />
-          <span>技能</span>
-        </label>
+        <p class="agent-settings-hint">技能能力由上方工具组「技能」控制；Node 进程总闸仍在设置 › 能力。</p>
         <label class="agent-settings-check">
           <input v-model="draft.childAgentsEnabled" type="checkbox" />
           <span>子 Agent</span>
@@ -198,7 +197,7 @@ function removeLongTermEntry(index) {
         </label>
       </section>
 
-      <section v-if="draft.skillsEnabled" class="agent-settings-section">
+      <section v-if="skillsToolEnabled" class="agent-settings-section">
         <h3 class="agent-settings-section__title">可见 Skills</h3>
         <p class="agent-settings-hint">
           勾选本 Agent 可发现 / 加载的 skills。全选表示不限制（Node 目录新增 skill 自动可见）；取消勾选则仅白名单内可用。

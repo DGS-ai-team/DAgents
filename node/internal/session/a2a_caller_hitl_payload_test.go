@@ -23,11 +23,15 @@ func TestHitlPayloadToSSE_toolApproval(t *testing.T) {
 		},
 	}
 	et, data := hitlPayloadToSSE(payload)
-	if et != "approval_required" {
+	if et != "hitl_required" {
 		t.Fatalf("event type=%q", et)
 	}
-	if data["approval_id"] != "appr-1" {
+	if data["hitl_id"] != "appr-1" {
 		t.Fatalf("data=%v", data)
+	}
+	items := hitlItemsFromAny(data["items"])
+	if len(items) != 1 {
+		t.Fatalf("items=%v", data["items"])
 	}
 }
 
@@ -43,10 +47,15 @@ func TestHitlPayloadToSSE_userInformation(t *testing.T) {
 		},
 	}
 	et, data := hitlPayloadToSSE(payload)
-	if et != "user_information_required" {
+	if et != "hitl_required" {
 		t.Fatalf("event type=%q", et)
 	}
-	args, _ := data["user_information_args"].(map[string]any)
+	items := hitlItemsFromAny(data["items"])
+	if len(items) != 1 {
+		t.Fatalf("items=%v", data["items"])
+	}
+	item, _ := items[0].(map[string]any)
+	args, _ := item["user_information_args"].(map[string]any)
 	if args["tool_call_id"] != "call-ask-1" {
 		t.Fatalf("args=%v", args)
 	}
@@ -143,13 +152,13 @@ func TestWaitCallerHITL_userInformationRelay(t *testing.T) {
 	if len(got) < 2 {
 		t.Fatalf("events=%d", len(got))
 	}
-	if got[0].Type != "user_information_required" {
+	if got[0].Type != "hitl_required" {
 		t.Fatalf("first=%q", got[0].Type)
 	}
 	if got[0].Data["a2a_peer_agent_name"] != "合规助手" {
 		t.Fatalf("peer=%v", got[0].Data["a2a_peer_agent_name"])
 	}
-	if got[1].Data["finish_reason"] != "awaiting_user_information" {
+	if got[1].Data["finish_reason"] != "awaiting_hitl" {
 		t.Fatalf("done finish_reason=%v", got[1].Data["finish_reason"])
 	}
 	if resume["answer"] != "production" {

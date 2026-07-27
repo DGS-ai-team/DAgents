@@ -89,9 +89,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	setup.CopyConfig(s.cfg, updated)
 	s.syncLLMRuntimeFromStore(r.Context())
 	s.applyMultimodalRuntime(s.cfg.MultimodalEnabled())
-	if s.tools != nil {
-		attachWeComRuntime(s.tools, s.cfg)
-	}
+	s.attachNodeRuntimeDeps(s.tools, s.cfg.NodeID)
 	view := setup.ViewFromConfig(s.cfg)
 	s.enrichLLMSettingsView(&view.LLM)
 	view.ConfigPath = s.configPath

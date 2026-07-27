@@ -38,7 +38,7 @@ func TestPendingRelaySnapshotWhileWaiting(t *testing.T) {
 	if snap == nil {
 		t.Fatal("expected relay snapshot")
 	}
-	if snap["event_type"] != "approval_required" {
+	if snap["event_type"] != "hitl_required" {
 		t.Fatalf("event_type=%v", snap["event_type"])
 	}
 	if snap["a2a_task_id"] != "task-1" {

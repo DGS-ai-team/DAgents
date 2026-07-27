@@ -70,6 +70,11 @@ func Build(p BuildParams) (Built, error) {
 	}
 	reg.SetBashCompress(bc)
 
+	skillsOn := p.NodeCFG.Skills.Enabled && toolGroupEnabled(groups, "skills")
+	skillsCfg := SkillsFromDefaults(p.Snapshot)
+	// Agent 级 skills.enabled 与工具组 / Node 总闸取交集（兼容旧 snapshot）。
+	skillsOn = skillsOn && skillsCfg.Enabled
+
 	if err := attachDockerSandbox(reg, p.AgentID, fsRoot, p.Snapshot); err != nil {
 		return Built{}, err
 	}
@@ -78,11 +83,13 @@ func Build(p BuildParams) (Built, error) {
 	turnOpts.FSRoot = fsRoot
 	turnOpts.ToolResult.FSRoot = fsRoot
 	turnOpts.MultimodalEnabled = mm
+	turnOpts.SkillsEnabled = skillsOn
+	if skillsOn {
+		turnOpts.SkillsRoot = p.NodeCFG.SkillsRoot()
+		turnOpts.SkillsMaxInPrompt = p.NodeCFG.Skills.MaxInPrompt
+	}
 	ApplyDefaultsToTurnOptions(&turnOpts, p.Snapshot)
 
-	skillsCfg := SkillsFromDefaults(p.Snapshot)
-	// Agent 级 skills.enabled 与 Node 级取交集：任一关闭则关闭。
-	turnOpts.SkillsEnabled = turnOpts.SkillsEnabled && skillsCfg.Enabled
 	if skillsCfg.VisibleRestrict {
 		turnOpts.SkillsVisibleRestrict = true
 		turnOpts.SkillsVisible = append([]string(nil), skillsCfg.Visible...)
@@ -101,6 +108,22 @@ func Build(p BuildParams) (Built, error) {
 		Registry:    reg,
 		ToolGroups:  groups,
 	}, nil
+}
+
+func toolGroupEnabled(groups []string, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if len(groups) == 0 {
+		return true
+	}
+	for _, g := range groups {
+		if strings.EqualFold(strings.TrimSpace(g), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func attachDockerSandbox(reg *tools.Registry, agentID, fsRoot string, snap Snapshot) error {

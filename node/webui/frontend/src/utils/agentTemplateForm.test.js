@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BLANK_TEMPLATE_ID,
+  TOOL_GROUPS,
   buildCreateAgentPayload,
   buildCreateTemplatePayload,
   buildPatchAgentPayload,
@@ -8,6 +9,7 @@ import {
   draftFromBlank,
   draftFromTemplate,
   llmActiveFromAgentView,
+  skillsEnabledFromToolGroups,
 } from "./agentTemplateForm.js";
 
 describe("agentTemplateForm", () => {
@@ -30,9 +32,26 @@ describe("agentTemplateForm", () => {
     expect(draft.sandboxEnabled).toBe(true);
     expect(draft.llmProfileId).toBe("deepseek");
     expect(draft.toolGroups).toEqual(["fs", "bash"]);
-    expect(draft.skillsEnabled).toBe(false);
     expect(draft.visibleSkills).toBeNull();
+    expect(skillsEnabledFromToolGroups(draft.toolGroups)).toBe(false);
     expect(draft.promptLongTermEnabled).toBe(true);
+  });
+
+  it("migrates legacy skills.enabled=false into tool groups when unrestricted", () => {
+    const draft = draftFromTemplate(
+      {
+        id: "legacy",
+        display_name: "旧",
+        defaults: {
+          tools: { enabled_groups: [] },
+          skills: { enabled: false },
+        },
+        sandbox: { enabled: false },
+      },
+      ["default"],
+    );
+    expect(draft.toolGroups).toEqual(TOOL_GROUPS.map((g) => g.name).filter((n) => n !== "skills"));
+    expect(skillsEnabledFromToolGroups(draft.toolGroups)).toBe(false);
   });
 
   it("falls back to first llm profile when template active missing", () => {
@@ -63,7 +82,6 @@ describe("agentTemplateForm", () => {
       llmProfileId: "qwen-plus",
       maxToolLoops: 16,
       toolGroups: ["fs", "skills"],
-      skillsEnabled: true,
       visibleSkills: ["write-skill", "write-hook"],
       childAgentsEnabled: true,
       promptSoulEnabled: true,
@@ -91,7 +109,6 @@ describe("agentTemplateForm", () => {
       llmProfileId: "a",
       maxToolLoops: 8,
       toolGroups: ["fs"],
-      skillsEnabled: true,
       childAgentsEnabled: false,
       sandboxEnabled: true,
       sandboxBackend: "process",
@@ -109,6 +126,7 @@ describe("agentTemplateForm", () => {
     expect(patch.template_id).toBeUndefined();
     expect(patch.display_name).toBe("改名");
     expect(patch.defaults.tools.enabled_groups).toEqual(["fs"]);
+    expect(patch.defaults.skills.enabled).toBe(false);
   });
 
   it("reads draft from agent view", () => {
@@ -142,7 +160,6 @@ describe("agentTemplateForm", () => {
       llmProfileId: "default",
       maxToolLoops: 32,
       toolGroups: ["skills"],
-      skillsEnabled: true,
       visibleSkills: null,
       childAgentsEnabled: true,
       sandboxEnabled: false,
@@ -168,7 +185,6 @@ describe("agentTemplateForm", () => {
       llmProfileId: "default",
       maxToolLoops: 32,
       toolGroups: [],
-      skillsEnabled: true,
       childAgentsEnabled: true,
       sandboxEnabled: false,
       sandboxBackend: "process",
@@ -185,6 +201,7 @@ describe("agentTemplateForm", () => {
     });
     expect(payload.template_id).toBeUndefined();
     expect(payload.display_name).toBe("空白");
+    expect(payload.defaults.skills).toEqual({ enabled: true });
   });
 
   it("draftFromBlank picks first llm profile", () => {
@@ -203,7 +220,6 @@ describe("agentTemplateForm", () => {
         llmProfileId: "default",
         maxToolLoops: 20,
         toolGroups: ["fs"],
-        skillsEnabled: true,
         childAgentsEnabled: false,
         sandboxEnabled: true,
         sandboxBackend: "process",
@@ -221,6 +237,7 @@ describe("agentTemplateForm", () => {
     expect(payload.display_name).toBe("我的 Bot");
     expect(payload.defaults.llm).toEqual({ active: "default", max_tool_loops: 20 });
     expect(payload.defaults.child_agents.enabled).toBe(false);
+    expect(payload.defaults.skills.enabled).toBe(false);
     expect(payload.sandbox.enabled).toBe(true);
   });
 
