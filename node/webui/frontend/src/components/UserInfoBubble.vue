@@ -1,12 +1,35 @@
 <script setup>
+import { computed } from "vue";
 import { extractUserInfo } from "../stores/hitl.js";
 
-defineProps({
+const props = defineProps({
   data: { type: Object, required: true },
-  selected: { type: Number, default: 0 },
+  selected: { type: [Number, Array], default: 0 },
 });
 
 const emit = defineEmits(["update:selected", "submit"]);
+
+const req = computed(() => extractUserInfo(props.data));
+
+const selectedSet = computed(() => {
+  if (Array.isArray(props.selected)) {
+    return new Set(props.selected.map((id) => String(id || "").trim()).filter(Boolean));
+  }
+  const idx = Number(props.selected);
+  const opt = Number.isInteger(idx) ? req.value.options[idx] : null;
+  return new Set(opt?.id ? [String(opt.id)] : []);
+});
+
+function onSingleSelect(idx) {
+  emit("update:selected", Number(idx));
+}
+
+function onMultiToggle(id, checked) {
+  const next = new Set(selectedSet.value);
+  if (checked) next.add(String(id));
+  else next.delete(String(id));
+  emit("update:selected", [...next]);
+}
 </script>
 
 <template>
@@ -19,10 +42,21 @@ const emit = defineEmits(["update:selected", "submit"]);
             <span class="tool-source-badge__text">Agent 询问</span>
           </span>
         </div>
-        <p class="approval-bubble__intro approval-bubble__intro--question">{{ extractUserInfo(data).question }}</p>
-        <div v-if="extractUserInfo(data).options.length" class="approval-bubble__actions user-info-options">
-          <label v-for="(opt, idx) in extractUserInfo(data).options" :key="opt.id" class="user-info-option">
-            <input type="radio" :checked="selected === idx" @change="emit('update:selected', idx)" />
+        <p class="approval-bubble__intro approval-bubble__intro--question">{{ req.question }}</p>
+        <div v-if="req.options.length" class="approval-bubble__actions user-info-options">
+          <label v-for="(opt, idx) in req.options" :key="opt.id" class="user-info-option">
+            <input
+              v-if="req.allowMultiple"
+              type="checkbox"
+              :checked="selectedSet.has(opt.id)"
+              @change="onMultiToggle(opt.id, $event.target.checked)"
+            />
+            <input
+              v-else
+              type="radio"
+              :checked="selected === idx"
+              @change="onSingleSelect(idx)"
+            />
             <span>{{ opt.label }}</span>
           </label>
           <button type="button" class="btn btn--primary btn--sm" @click="emit('submit', '')">提交选项</button>

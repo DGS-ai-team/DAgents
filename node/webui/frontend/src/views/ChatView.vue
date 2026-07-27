@@ -104,7 +104,7 @@ import { approvalItemDisplayName, agentDisplayTitle, agentRecordId } from "../ut
 const router = useRouter();
 const route = useRoute();
 
-const hitlSelected = ref(0);
+const hitlSelected = ref([]);
 const cancelling = ref(false);
 const streamHandle = ref(null);
 const agentPanelRef = ref(null);
@@ -480,10 +480,20 @@ async function submitHitlUserInfo(hitlIndex, text) {
   const req = extractUserInfo(item.data);
   let resume;
   if (req.options.length) {
-    const opt = req.options[hitlSelected.value] || req.options[0];
-    resume = req.allowMultiple
-      ? buildUserInfoResumeFromSelection(item.data, [opt.id])
-      : buildUserInfoResumeFromSelection(item.data, [opt.id]);
+    let selectedIds = [];
+    if (req.allowMultiple) {
+      selectedIds = Array.isArray(hitlSelected.value)
+        ? hitlSelected.value.map((id) => String(id || "").trim()).filter(Boolean)
+        : [];
+    } else {
+      const idx = Number(hitlSelected.value);
+      const opt = Number.isInteger(idx) ? req.options[idx] : req.options[0];
+      if (opt?.id) selectedIds = [opt.id];
+    }
+    if (!selectedIds.length && req.required && req.options.length) {
+      selectedIds = [req.options[0].id];
+    }
+    resume = buildUserInfoResumeFromSelection(item.data, selectedIds);
   } else {
     resume = buildUserInfoResume(item.data, text);
   }
@@ -495,7 +505,7 @@ async function submitHitlUserInfo(hitlIndex, text) {
     if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
-    hitlSelected.value = 0;
+    hitlSelected.value = [];
     beginSubmit();
     if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
@@ -1019,7 +1029,7 @@ onUnmounted(() => {
         @approve-one="(payload) => submitHitlOne(payload, true)"
         @reject-one="(payload) => submitHitlOne(payload, false)"
         @user-info-submit="(idx) => submitHitlUserInfo(idx, '')"
-        @user-info-selected="(v) => { hitlSelected = v; }"
+        @user-info-selected="(v) => { hitlSelected.value = v; }"
         @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
         @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
       />

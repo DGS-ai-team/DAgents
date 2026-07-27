@@ -70,7 +70,12 @@ const imageInputRef = ref(null);
 const attachInputRef = ref(null);
 const textareaRef = ref(null);
 const streamRef = ref(null);
-const userInfoSelected = ref(0);
+const userInfoSelected = ref([]);
+
+function onUserInfoSelected(next) {
+  userInfoSelected.value = Array.isArray(next) ? [...next] : Number(next);
+  emit("user-info-selected", userInfoSelected.value);
+}
 const followTail = ref(true);
 const SCROLL_TAIL_THRESHOLD = 48;
 
@@ -393,7 +398,7 @@ defineExpose({
           v-else-if="item.kind === 'user_information'"
           :data="item.hitl.data"
           :selected="userInfoSelected"
-          @update:selected="(v) => { userInfoSelected = v; emit('user-info-selected', v); }"
+          @update:selected="onUserInfoSelected"
           @submit="emit('user-info-submit', item.hitlIndex)"
         />
         <MemoryConflictBubble
