@@ -22,8 +22,9 @@ func (s *Server) registerSessionRoutes() {
 func (s *Server) withSessionsDeprecated(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Deprecation", "true")
+		w.Header().Set("Sunset", "Sat, 01 Aug 2026 00:00:00 GMT")
 		w.Header().Set("Link", `</v1/agents/{agent_id}>; rel="successor-version"`)
-		w.Header().Set("Warning", `299 - " /v1/sessions* is deprecated; use /v1/agents/{agent_id} "`)
+		w.Header().Set("Warning", `299 - "/v1/sessions* is deprecated; use /v1/agents/{agent_id}"`)
 		next(w, r)
 	}
 }

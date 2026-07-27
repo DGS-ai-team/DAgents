@@ -20,9 +20,6 @@ func (s *Server) agentToolsRegistry(agentID string) (*tools.Registry, string, bo
 		return nil, id, false
 	}
 	reg := s.sessions.SessionTools(id)
-	if reg == nil {
-		reg = s.sessions.DefaultTools()
-	}
 	return reg, id, reg != nil
 }
 

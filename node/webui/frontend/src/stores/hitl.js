@@ -313,6 +313,9 @@ export function enqueueA2ARelayPending(relay) {
   if (relay.a2a_task_id && !data.a2a_task_id) data.a2a_task_id = relay.a2a_task_id;
   if (relay.a2a_relay && !data.a2a_relay) data.a2a_relay = true;
   switch (String(relay.event_type).trim()) {
+    case "hitl_required":
+      enqueueHitlRequired(data);
+      break;
     case "approval_required":
       enqueueHitl({ kind: "approval", data });
       break;

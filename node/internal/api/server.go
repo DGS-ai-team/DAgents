@@ -60,6 +60,8 @@ type Server struct {
 	packageUploader *manage.PackageUploader
 	a2aCallerHITL   *session.A2ACallerHITLBridge
 	tools           *tools.Registry
+	browserMgr      *browser.Manager
+	mediaRegister   tools.MediaRegisterFunc
 	sandboxPool     *sandbox.Pool
 }
 
@@ -166,19 +168,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
 		if cfg.Skills.Enabled {
 			reg.SetSkillsCatalog(skills.NewCatalog(cfg.SkillsRoot(), true, cfg.Skills.MaxInPrompt))
-		}
-		if cfg.BrowserEnabled() {
-			bm, err := browser.NewManager(cfg, nil)
-			if err != nil {
-				logger.Error("browser manager init failed", "error", err)
-			} else {
-				reg.SetBrowserManager(bm)
-				logger.Info("browser tools enabled", "headed", cfg.BrowserHeaded())
-			}
-		}
-		if client := wecom.NewClientFromConfig(cfg); client != nil {
-			reg.SetWeComClient(client)
-			logger.Info("wecom webhook tools enabled")
 		}
 		o.tools = reg
 	}
@@ -299,40 +288,43 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerSched.SetLogger(logger)
 		triggerSched.SetSessionResolver(mgr)
 		mgr.SetTriggerDeliveryTracker(triggerStore)
-		if o.tools != nil {
-			attachTriggerRuntime(o.tools, triggerStore, triggerSched, cfg.NodeID)
-		}
 		if cfg.Triggers.Enabled && triggerSched != nil {
 			triggerSched.Start()
 		}
 	}
-	if o.tools != nil {
-		o.tools.SetMediaRegister(func(ctx context.Context, toolCallID, relPath, source, label, caption string) (*tools.MediaArtifactRef, error) {
-			sid := tools.SessionIDFromContext(ctx)
-			if sid == "" {
-				return nil, fmt.Errorf("session required for media register")
-			}
-			art, err := mgr.RegisterSessionMedia(sid, media.RegisterOpts{
-				Path:       relPath,
-				Source:     source,
-				ToolCallID: toolCallID,
-				Label:      label,
-				Caption:    caption,
-			})
-			if err != nil {
-				return nil, err
-			}
-			return &tools.MediaArtifactRef{
-				ID:      art.ID,
-				Kind:    art.Kind,
-				MIME:    art.MIME,
-				URL:     art.PublicURL(),
-				Label:   art.Label,
-				Caption: art.Caption,
-			}, nil
+	mediaRegister := tools.MediaRegisterFunc(func(ctx context.Context, toolCallID, relPath, source, label, caption string) (*tools.MediaArtifactRef, error) {
+		sid := tools.SessionIDFromContext(ctx)
+		if sid == "" {
+			return nil, fmt.Errorf("session required for media register")
+		}
+		art, err := mgr.RegisterSessionMedia(sid, media.RegisterOpts{
+			Path:       relPath,
+			Source:     source,
+			ToolCallID: toolCallID,
+			Label:      label,
+			Caption:    caption,
 		})
-		// bash 后台任务完成时回灌 session 队列，触发新一轮 turn。
-		attachBackgroundJobNotifier(o.tools, mgr, logger)
+		if err != nil {
+			return nil, err
+		}
+		return &tools.MediaArtifactRef{
+			ID:      art.ID,
+			Kind:    art.Kind,
+			MIME:    art.MIME,
+			URL:     art.PublicURL(),
+			Label:   art.Label,
+			Caption: art.Caption,
+		}, nil
+	})
+	var browserMgr *browser.Manager
+	if cfg.BrowserEnabled() {
+		bm, err := browser.NewManager(cfg, nil)
+		if err != nil {
+			logger.Error("browser manager init failed", "error", err)
+		} else {
+			browserMgr = bm
+			logger.Info("browser tools enabled", "headed", cfg.BrowserHeaded())
+		}
 	}
 	var registrar *manage.Registrar
 	var inboxPoller *manage.InboxPoller
@@ -348,13 +340,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		}
 		packageUploader = manage.NewPackageUploader(cfg, logger)
 		a2aBridge = session.NewA2ACallerHITLBridge(cfg.NodeID, hub)
-		if o.tools != nil {
-			o.tools.SetManageRuntime(
-				a2aclient.New(cfg),
-				cfg.NodeID,
-				a2aBridge,
-			)
-		}
 		if cfg.ManageA2AEnabled() {
 			inboxPoller = manage.NewInboxPoller(cfg, logger)
 			if handler := manage.ResolveInboxHandler(cfg, mgr, logger); handler != nil {
@@ -382,7 +367,14 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		packageUploader: packageUploader,
 		a2aCallerHITL:   a2aBridge,
 		tools:           o.tools,
+		browserMgr:      browserMgr,
+		mediaRegister:   mediaRegister,
 		sandboxPool:     sandboxPool,
+	}
+	// 默认工具表与后续 per-agent Registry 共用同一套 Node 运行时依赖挂载。
+	s.attachNodeRuntimeDeps(s.tools, cfg.NodeID)
+	if client := wecom.NewClientFromConfig(cfg); client != nil {
+		logger.Info("wecom webhook tools enabled")
 	}
 	hub.SetEventListener(func(ev stream.Event) {
 		mgr.OnStreamEvent(ev)
@@ -409,6 +401,25 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
 	}
 	return s
+}
+
+// attachNodeRuntimeDeps 将 Node 级运行时依赖挂到工具 Registry（默认表与 per-agent 共用）。
+func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string) {
+	if s == nil || reg == nil {
+		return
+	}
+	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
+	attachWeComRuntime(reg, s.cfg)
+	attachBackgroundJobNotifier(reg, s.sessions, s.logger)
+	if s.mediaRegister != nil {
+		reg.SetMediaRegister(s.mediaRegister)
+	}
+	if s.browserMgr != nil {
+		reg.SetBrowserManager(s.browserMgr)
+	}
+	if s.cfg != nil && s.cfg.Manage.Enabled && s.a2aCallerHITL != nil {
+		reg.SetManageRuntime(a2aclient.New(s.cfg), s.cfg.NodeID, s.a2aCallerHITL)
+	}
 }
 
 // attachTriggerRuntime 为工具 Registry 注入触发器 store；targetAgentID 为空时用 node_id。
@@ -982,10 +993,6 @@ func (s *Server) handleSessionHydrate(w http.ResponseWriter, r *http.Request) {
 	}
 	toolJobs := map[string]int{"running": 0, "background": 0}
 	if reg := s.sessions.SessionTools(sessionID); reg != nil {
-		c := reg.SessionToolJobCounts(sessionID)
-		toolJobs["running"] = c.Running
-		toolJobs["background"] = c.Background
-	} else if reg := s.sessions.DefaultTools(); reg != nil {
 		c := reg.SessionToolJobCounts(sessionID)
 		toolJobs["running"] = c.Running
 		toolJobs["background"] = c.Background

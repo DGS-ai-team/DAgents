@@ -12,6 +12,7 @@ func TestBuild_sandboxIsolation(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.Config{NodeID: "n1", FSRoot: root}
 	cfg.ApplyDefaults()
+	cfg.Skills.Enabled = true
 	cfg.Tools.EnabledGroups = []string{"fs", "bash", "browser", "skills"}
 
 	snap := Snapshot{
@@ -57,5 +58,33 @@ func TestBuild_sandboxIsolation(t *testing.T) {
 		if g == "bash" {
 			t.Fatalf("bash still in groups: %v", built.ToolGroups)
 		}
+	}
+	if !built.TurnOptions.SkillsEnabled {
+		t.Fatal("expected SkillsEnabled when skills group present and node skills enabled")
+	}
+}
+
+func TestBuild_skillsFollowsToolGroup(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{NodeID: "n1", FSRoot: root}
+	cfg.ApplyDefaults()
+	cfg.Skills.Enabled = true
+	cfg.Tools.EnabledGroups = []string{"fs", "bash", "skills"}
+
+	built, err := Build(BuildParams{
+		NodeCFG:  cfg,
+		BaseTurn: session.TurnOptions{FSRoot: root, SkillsEnabled: true},
+		AgentID:  "agt-skills",
+		Snapshot: Snapshot{
+			Defaults: map[string]any{
+				"tools": map[string]any{"enabled_groups": []any{"fs", "bash"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built.TurnOptions.SkillsEnabled {
+		t.Fatal("skills group absent: SkillsEnabled should be false")
 	}
 }

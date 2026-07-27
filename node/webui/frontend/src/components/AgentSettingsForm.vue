@@ -111,10 +111,7 @@ function removeLongTermEntry(index) {
 
       <section class="agent-settings-section">
         <h3 class="agent-settings-section__title">能力开关</h3>
-        <label class="agent-settings-check">
-          <input v-model="draft.skillsEnabled" type="checkbox" />
-          <span>技能</span>
-        </label>
+        <p class="agent-settings-hint">技能能力由上方工具组「技能」控制；Node 进程总闸仍在设置 › 能力。</p>
         <label class="agent-settings-check">
           <input v-model="draft.childAgentsEnabled" type="checkbox" />
           <span>子 Agent</span>

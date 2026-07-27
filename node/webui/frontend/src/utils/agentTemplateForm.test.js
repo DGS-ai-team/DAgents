@@ -30,7 +30,6 @@ describe("agentTemplateForm", () => {
     expect(draft.sandboxEnabled).toBe(true);
     expect(draft.llmProfileId).toBe("deepseek");
     expect(draft.toolGroups).toEqual(["fs", "bash"]);
-    expect(draft.skillsEnabled).toBe(false);
     expect(draft.promptLongTermEnabled).toBe(true);
   });
 
@@ -62,7 +61,6 @@ describe("agentTemplateForm", () => {
       llmProfileId: "qwen-plus",
       maxToolLoops: 16,
       toolGroups: ["fs", "skills"],
-      skillsEnabled: true,
       childAgentsEnabled: true,
       promptSoulEnabled: true,
       promptUserEnabled: false,
@@ -73,6 +71,7 @@ describe("agentTemplateForm", () => {
     expect(payload.display_name).toBe("我的助手");
     expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_tool_loops: 16 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "skills"]);
+    expect(payload.defaults.skills.enabled).toBe(true);
     expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
     expect(payload.defaults.prompt_context.user_enabled).toBe(false);
     expect(payload.sandbox.allow_bash).toBe(true);
@@ -85,7 +84,6 @@ describe("agentTemplateForm", () => {
       llmProfileId: "a",
       maxToolLoops: 8,
       toolGroups: ["fs"],
-      skillsEnabled: true,
       childAgentsEnabled: false,
       sandboxEnabled: true,
       sandboxBackend: "process",
@@ -103,6 +101,7 @@ describe("agentTemplateForm", () => {
     expect(patch.template_id).toBeUndefined();
     expect(patch.display_name).toBe("改名");
     expect(patch.defaults.tools.enabled_groups).toEqual(["fs"]);
+    expect(patch.defaults.skills.enabled).toBe(false);
   });
 
   it("reads draft from agent view", () => {
@@ -135,7 +134,6 @@ describe("agentTemplateForm", () => {
       llmProfileId: "default",
       maxToolLoops: 32,
       toolGroups: [],
-      skillsEnabled: true,
       childAgentsEnabled: true,
       sandboxEnabled: false,
       sandboxBackend: "process",
@@ -170,7 +168,6 @@ describe("agentTemplateForm", () => {
         llmProfileId: "default",
         maxToolLoops: 20,
         toolGroups: ["fs"],
-        skillsEnabled: true,
         childAgentsEnabled: false,
         sandboxEnabled: true,
         sandboxBackend: "process",

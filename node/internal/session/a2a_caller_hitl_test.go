@@ -61,7 +61,7 @@ func TestWaitCallerHITLPublishesRelayPauseDone(t *testing.T) {
 	if len(got) < 2 {
 		t.Fatalf("events=%d, want >= 2", len(got))
 	}
-	if got[0].Type != "approval_required" {
+	if got[0].Type != "hitl_required" {
 		t.Fatalf("first event type=%q", got[0].Type)
 	}
 	if got[0].Data["a2a_relay"] != true {
@@ -76,7 +76,7 @@ func TestWaitCallerHITLPublishesRelayPauseDone(t *testing.T) {
 	if got[1].Data["turn_complete"] != false {
 		t.Fatalf("done turn_complete=%v", got[1].Data["turn_complete"])
 	}
-	if got[1].Data["finish_reason"] != "awaiting_tool_approval" {
+	if got[1].Data["finish_reason"] != "awaiting_hitl" {
 		t.Fatalf("finish_reason=%v", got[1].Data["finish_reason"])
 	}
 }
@@ -106,11 +106,11 @@ func TestAttachA2APeerMetaEmpty(t *testing.T) {
 
 func TestRelayHITLFinishReason(t *testing.T) {
 	fr, aw := relayHITLFinishReason(map[string]any{"hitl_kind": "user_information"})
-	if fr != "awaiting_user_information" || aw != "user_information" {
+	if fr != "awaiting_hitl" || aw != "hitl" {
 		t.Fatalf("user_information: fr=%q aw=%q", fr, aw)
 	}
 	fr, aw = relayHITLFinishReason(map[string]any{"hitl_kind": "tool_approval"})
-	if fr != "awaiting_tool_approval" || aw != "tool_approval" {
+	if fr != "awaiting_hitl" || aw != "hitl" {
 		t.Fatalf("tool_approval: fr=%q aw=%q", fr, aw)
 	}
 }

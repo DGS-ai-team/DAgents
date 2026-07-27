@@ -6,6 +6,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
+	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -69,6 +70,11 @@ func Build(p BuildParams) (Built, error) {
 	}
 	reg.SetBashCompress(bc)
 
+	skillsOn := p.NodeCFG.Skills.Enabled && toolGroupEnabled(groups, "skills")
+	if skillsOn {
+		reg.SetSkillsCatalog(skills.NewCatalog(p.NodeCFG.SkillsRoot(), true, p.NodeCFG.Skills.MaxInPrompt))
+	}
+
 	if err := attachDockerSandbox(reg, p.AgentID, fsRoot, p.Snapshot); err != nil {
 		return Built{}, err
 	}
@@ -77,6 +83,11 @@ func Build(p BuildParams) (Built, error) {
 	turnOpts.FSRoot = fsRoot
 	turnOpts.ToolResult.FSRoot = fsRoot
 	turnOpts.MultimodalEnabled = mm
+	turnOpts.SkillsEnabled = skillsOn
+	if skillsOn {
+		turnOpts.SkillsRoot = p.NodeCFG.SkillsRoot()
+		turnOpts.SkillsMaxInPrompt = p.NodeCFG.Skills.MaxInPrompt
+	}
 	ApplyDefaultsToTurnOptions(&turnOpts, p.Snapshot)
 
 	return Built{
@@ -85,6 +96,22 @@ func Build(p BuildParams) (Built, error) {
 		Registry:    reg,
 		ToolGroups:  groups,
 	}, nil
+}
+
+func toolGroupEnabled(groups []string, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if len(groups) == 0 {
+		return true
+	}
+	for _, g := range groups {
+		if strings.EqualFold(strings.TrimSpace(g), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func attachDockerSandbox(reg *tools.Registry, agentID, fsRoot string, snap Snapshot) error {

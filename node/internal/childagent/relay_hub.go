@@ -23,7 +23,7 @@ func (h *RelayHub) Publish(_sessionID, agentID, eventType string, data map[strin
 		data = map[string]any{}
 	}
 	data["child_session_id"] = h.ChildSessionID
-	if eventType == "approval_required" {
+	if eventType == "hitl_required" || eventType == "approval_required" {
 		data["hitl_scope"] = HitlScopeTemporaryAgent
 		data["child_purpose"] = h.ChildPurpose
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
-func TestRunInboxConsultation_streamsAssistant(t *testing.T) {
+func TestRunInboxTurn_streamsAssistant(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	reg, err := tools.NewRegistry(t.TempDir(), 30)
 	if err != nil {
@@ -27,12 +27,15 @@ func TestRunInboxConsultation_streamsAssistant(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	got, err := mgr.RunInboxConsultation(ctx, "task-1", "【合规咨询】脱敏统计 CHG-2026-0142")
+	got, err := mgr.RunInboxTurn(ctx, "task-1", "【合规咨询】脱敏统计 CHG-2026-0142", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "APPROVED") || !strings.Contains(got, "R-ANON-01") {
-		t.Fatalf("result=%q", got)
+	if !got.Complete {
+		t.Fatalf("expected complete turn, hitl=%v", got.HITL)
+	}
+	if !strings.Contains(got.Text, "APPROVED") || !strings.Contains(got.Text, "R-ANON-01") {
+		t.Fatalf("result=%q", got.Text)
 	}
 }
 

@@ -35,7 +35,6 @@ export function emptyAgentDraft() {
     llmProfileId: "",
     maxToolLoops: 32,
     toolGroups: [],
-    skillsEnabled: true,
     childAgentsEnabled: true,
     sandboxEnabled: false,
     sandboxBackend: "process",
@@ -73,6 +72,13 @@ function numberOr(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** 技能开关与工具组 skills 收敛：未收窄（空列表）视为开启；否则看是否勾选 skills。 */
+export function skillsEnabledFromToolGroups(toolGroups) {
+  const groups = Array.isArray(toolGroups) ? toolGroups : [];
+  if (groups.length === 0) return true;
+  return groups.some((g) => String(g || "").trim() === "skills");
+}
+
 /** 从模板展开为可编辑草稿（创建时由前端持有完整设置）。 */
 /** 空白 Agent 草稿（不依赖模板）。 */
 export function draftFromBlank(llmProfileIds = []) {
@@ -87,7 +93,6 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   const agent = asObject(defaults.agent);
   const llm = asObject(defaults.llm);
   const tools = asObject(defaults.tools);
-  const skills = asObject(defaults.skills);
   const childAgents = asObject(defaults.child_agents);
   const prompt = asObject(defaults.prompt_context);
   const sandbox = asObject(template?.sandbox);
@@ -101,7 +106,6 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   draft.toolGroups = Array.isArray(tools.enabled_groups)
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
-  draft.skillsEnabled = boolOr(skills.enabled, true);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = !!sandbox.enabled;
   draft.sandboxBackend = String(sandbox.backend || "process").trim() || "process";
@@ -136,7 +140,6 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   const agentMeta = asObject(defaults.agent);
   const llm = asObject(defaults.llm);
   const tools = asObject(defaults.tools);
-  const skills = asObject(defaults.skills);
   const childAgents = asObject(defaults.child_agents);
   const prompt = asObject(defaults.prompt_context);
   const sandbox = asObject(snap.sandbox);
@@ -150,7 +153,6 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   draft.toolGroups = Array.isArray(tools.enabled_groups)
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
-  draft.skillsEnabled = boolOr(skills.enabled, true);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = boolOr(sandbox.enabled, !!agent?.sandbox_enabled);
   draft.sandboxBackend = String(sandbox.backend || agent?.sandbox_backend || "process").trim() || "process";
@@ -223,7 +225,7 @@ export function buildCreateAgentPayload(draft) {
       tools: {
         enabled_groups: Array.isArray(draft.toolGroups) ? [...draft.toolGroups] : [],
       },
-      skills: { enabled: !!draft.skillsEnabled },
+      skills: { enabled: skillsEnabledFromToolGroups(draft.toolGroups) },
       child_agents: { enabled: !!draft.childAgentsEnabled },
       prompt_context: {
         soul_enabled: !!draft.promptSoulEnabled,
@@ -280,7 +282,7 @@ export function buildCreateTemplatePayload(meta, draft) {
       tools: {
         enabled_groups: Array.isArray(draft?.toolGroups) ? [...draft.toolGroups] : [],
       },
-      skills: { enabled: !!draft?.skillsEnabled },
+      skills: { enabled: skillsEnabledFromToolGroups(draft?.toolGroups) },
       child_agents: { enabled: !!draft?.childAgentsEnabled },
       prompt_context: {
         soul_enabled: !!draft?.promptSoulEnabled,

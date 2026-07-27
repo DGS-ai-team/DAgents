@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **工具 Registry 装配统一**：默认表与 per-agent Registry 共用 `attachNodeRuntimeDeps`（后台任务回灌、media、browser、manage、wecom、triggers）；去掉 tool-jobs / hydrate 对 `DefaultTools` 的回退。
+- **异步回灌可观测**：`EnqueueAsyncToolResult` / `EnqueueToolResult` 在 session 不存在时返回 `session_not_found` 并打 Warn，不再静默丢弃。
+- **HITL SSE 收口**：A2A caller 中继统一发 `hitl_required`；子 Agent `RelayHub` 对 `hitl_required` 打 scope；旧 `approval_required` / `user_information_required` 仅薄兼容。
+- **Go Client 迁 `/v1/agents`**：session 相关路径改为 agents；`CreateSession` 改为 require id + ensure。
+- **LLM 多模态不再广播**：进程级切换 LLM 档案只更新默认 Registry；已装入 Agent 的多模态在 ensure/reload 时按绑定档案生效。
+- **Skills 开关收敛**：Agent 技能能力与工具组 `skills` 对齐（去掉设置里重复的「技能」勾选）；Node `skills.enabled` 仍为进程总闸。
+
 ### 修复
 
 - **异步 bash 回灌丢回调**：同步超时/转后台与 collector 收尾竞态时，若进程已结束才置 `autoDegraded`，会漏掉 `notifyDone`；现对完成回灌做幂等，并在降级登记时若已结束则立即回灌。`background_job_cancel` / UI 终止后台任务一律触发异步回灌。

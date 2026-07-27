@@ -128,7 +128,8 @@ func NewManager(
 	}
 }
 
-// SetMultimodalEnabled 热更新多模态开关（跟随 LLM 档案切换）。
+// SetMultimodalEnabled 仅更新 Manager 默认 TurnOptions 与默认 Registry。
+// 不广播到已装入的 Agent runtime（多模态随 Agent 绑定的 LLM 在 ensure/reload 时生效）。
 func (m *Manager) SetMultimodalEnabled(enabled bool) {
 	if m == nil {
 		return
@@ -139,16 +140,24 @@ func (m *Manager) SetMultimodalEnabled(enabled bool) {
 	if m.tools != nil {
 		m.tools.SetMultimodalEnabled(enabled)
 	}
-	for _, rt := range m.sessions {
-		if rt == nil {
-			continue
-		}
-		if rt.orch != nil {
-			rt.orch.SetMultimodalEnabled(enabled)
-			if reg := rt.orch.ToolRegistry(); reg != nil {
-				reg.SetMultimodalEnabled(enabled)
-			}
-		}
+}
+
+// SetSessionMultimodalEnabled 热更新指定 session 的多模态开关。
+func (m *Manager) SetSessionMultimodalEnabled(sessionID string, enabled bool) {
+	if m == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	rt := m.getRuntime(sessionID)
+	if rt == nil || rt.orch == nil {
+		return
+	}
+	rt.orch.SetMultimodalEnabled(enabled)
+	if reg := rt.orch.ToolRegistry(); reg != nil {
+		reg.SetMultimodalEnabled(enabled)
 	}
 }
 
@@ -346,16 +355,6 @@ func (m *Manager) ListActive() []*Session {
 	return out
 }
 
-// ReloadPolicy 热更新 Manager 默认策略引擎；不再广播到全部 session（策略按 Agent 区分）。
-func (m *Manager) ReloadPolicy(engine *policy.Engine) {
-	if engine == nil {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.policy = engine
-}
-
 // SetSessionPolicy 热更新指定 session 的策略引擎。
 func (m *Manager) SetSessionPolicy(sessionID string, engine *policy.Engine) {
 	if engine == nil {
@@ -367,16 +366,6 @@ func (m *Manager) SetSessionPolicy(sessionID string, engine *policy.Engine) {
 	if rt, ok := m.sessions[sessionID]; ok && rt != nil {
 		rt.setPolicy(engine)
 	}
-}
-
-// ReloadPolicyFromRuntime 从 runtime 目录重新加载策略并热更新。
-func (m *Manager) ReloadPolicyFromRuntime(runtimeDir string) error {
-	engine, err := policy.LoadRuntime(runtimeDir)
-	if err != nil {
-		return err
-	}
-	m.ReloadPolicy(engine)
-	return nil
 }
 
 // ToolNames 返回 registry 已知工具名。
@@ -650,7 +639,8 @@ func (m *Manager) EnqueueMessage(
 func (m *Manager) EnqueueAsyncToolResult(sessionID string, payload queue.AsyncToolResultPayload) error {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return nil
+		m.logger.Warn("async tool result enqueue skipped: session not found", "session_id", sessionID)
+		return fmt.Errorf("session_not_found")
 	}
 	env := queue.Envelope{
 		RequestType:     queue.RequestTypeAsyncToolResult,
@@ -684,22 +674,11 @@ func (m *Manager) EnqueueA2AInboxMessage(_ context.Context, sessionID, content s
 func (m *Manager) EnqueueToolResult(sessionID string) error {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return nil
+		m.logger.Warn("tool result enqueue skipped: session not found", "session_id", sessionID)
+		return fmt.Errorf("session_not_found")
 	}
 	env := queue.Envelope{RequestType: queue.RequestTypeToolResult}
 	return rt.enqueue(env, queue.PriorityToolResult)
-}
-
-// EnqueueBackgroundToolResult 兼容旧接口；已废弃，请使用 EnqueueAsyncToolResult。
-func (m *Manager) EnqueueBackgroundToolResult(sessionID, summary string) error {
-	if strings.TrimSpace(summary) == "" {
-		return nil
-	}
-	return m.EnqueueAsyncToolResult(sessionID, queue.AsyncToolResultPayload{
-		ToolName:   "background_job",
-		Status:     "succeeded",
-		ResultText: summary,
-	})
 }
 
 // CancelTurn 取消 session 当前在途 turn；无在途 turn 时返回 false。
