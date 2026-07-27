@@ -11,7 +11,9 @@
 - **HITL SSE 收口**：A2A caller 中继统一发 `hitl_required`；子 Agent `RelayHub` 对 `hitl_required` 打 scope；旧 `approval_required` / `user_information_required` 仅薄兼容。
 - **Go Client 迁 `/v1/agents`**：session 相关路径改为 agents；`CreateSession` 改为 require id + ensure。
 - **LLM 多模态不再广播**：进程级切换 LLM 档案只更新默认 Registry；已装入 Agent 的多模态在 ensure/reload 时按绑定档案生效。
-- **Skills 开关收敛**：Agent 技能能力与工具组 `skills` 对齐（去掉设置里重复的「技能」勾选）；Node `skills.enabled` 仍为进程总闸。
+- **Skills 开关收敛**：Agent 技能能力与工具组 `skills` 对齐（去掉设置里重复的「技能」勾选）；`defaults.skills.enabled` 由工具组推导写入，可见白名单仍用 `defaults.skills.visible`；Node `skills.enabled` 仍为进程总闸。
+- **setup 热挂载**：配置保存后经 `attachNodeRuntimeDeps` 刷新默认工具表，不再单点只挂 WeCom。
+- **sessions child-agents Deprecation**：`/v1/sessions/.../child-agents*` 补齐 Deprecation/Sunset 头。
 
 ### 修复
 
@@ -21,6 +23,7 @@
 
 ### 新增
 
+- **Agent 可见 Skills 绑定**：创建 / 修改 Agent 时可勾选可见 skills（`defaults.skills.visible`）；运行时 catalog、`load_skills` 与会话可用列表均按白名单过滤。新增 `GET /v1/skills/catalog` 供设置页列举 Node 目录。
 - **Tauri 托盘 Shell（预览）**：`desktop/tray-tauri/` 以 Tauri 2 实现系统托盘；支持双击打开 Web UI、启停/重启 Node、health 轮询与单实例；可与 Go `desktop/tray` 并行验证，打包默认仍为 Go Shell。
 - **CI：Windows Tauri Shell 构建**：`scripts/ci/build_dagents_shell_tauri.sh` + `.github/workflows/tauri-shell.yml`；`build-and-release` / `manual-package` 的 Windows 作业产出 `dagents-shell-tauri.exe` 预览产物（不替换安装包内 Go Shell）。
 - **Tauri 安装向导（可选）**：`packaging/bootstrapper` 提供现代多步 Setup UI，嵌入并静默调用现有 Inno 安装包；未嵌入 payload 时支持演示模式预览。

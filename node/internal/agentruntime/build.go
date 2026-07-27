@@ -71,9 +71,9 @@ func Build(p BuildParams) (Built, error) {
 	reg.SetBashCompress(bc)
 
 	skillsOn := p.NodeCFG.Skills.Enabled && toolGroupEnabled(groups, "skills")
-	if skillsOn {
-		reg.SetSkillsCatalog(skills.NewCatalog(p.NodeCFG.SkillsRoot(), true, p.NodeCFG.Skills.MaxInPrompt))
-	}
+	skillsCfg := SkillsFromDefaults(p.Snapshot)
+	// Agent 级 skills.enabled 与工具组 / Node 总闸取交集（兼容旧 snapshot）。
+	skillsOn = skillsOn && skillsCfg.Enabled
 
 	if err := attachDockerSandbox(reg, p.AgentID, fsRoot, p.Snapshot); err != nil {
 		return Built{}, err
@@ -89,6 +89,18 @@ func Build(p BuildParams) (Built, error) {
 		turnOpts.SkillsMaxInPrompt = p.NodeCFG.Skills.MaxInPrompt
 	}
 	ApplyDefaultsToTurnOptions(&turnOpts, p.Snapshot)
+
+	if skillsCfg.VisibleRestrict {
+		turnOpts.SkillsVisibleRestrict = true
+		turnOpts.SkillsVisible = append([]string(nil), skillsCfg.Visible...)
+	}
+	if turnOpts.SkillsEnabled && strings.TrimSpace(turnOpts.SkillsRoot) != "" {
+		catalog := skills.NewCatalog(turnOpts.SkillsRoot, true, turnOpts.SkillsMaxInPrompt)
+		if turnOpts.SkillsVisibleRestrict {
+			catalog.RestrictVisible(turnOpts.SkillsVisible)
+		}
+		reg.SetSkillsCatalog(catalog)
+	}
 
 	return Built{
 		FSRoot:      fsRoot,

@@ -37,9 +37,9 @@ type childAgentCancelResponse struct {
 
 func (s *Server) registerChildAgentRoutes() {
 	// 兼容过渡：sessions 路径仍可用；对外优先 /v1/agents/.../child-agents。
-	s.mux.HandleFunc("GET /v1/sessions/{session_id}/child-agents", s.handleListChildAgents)
-	s.mux.HandleFunc("GET /v1/sessions/{session_id}/child-agents/{child_session_id}", s.handleGetChildAgent)
-	s.mux.HandleFunc("POST /v1/sessions/{session_id}/child-agents/{child_session_id}/cancel", s.handleCancelChildAgent)
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/child-agents", s.withSessionsDeprecated(s.handleListChildAgents))
+	s.mux.HandleFunc("GET /v1/sessions/{session_id}/child-agents/{child_session_id}", s.withSessionsDeprecated(s.handleGetChildAgent))
+	s.mux.HandleFunc("POST /v1/sessions/{session_id}/child-agents/{child_session_id}/cancel", s.withSessionsDeprecated(s.handleCancelChildAgent))
 }
 
 func resolveChildPathID(r *http.Request) string {

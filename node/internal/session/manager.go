@@ -37,6 +37,9 @@ type TurnOptions struct {
 	SkillsRoot               string
 	SkillsEnabled            bool
 	SkillsMaxInPrompt        int
+	// SkillsVisibleRestrict 为 true 时仅暴露 SkillsVisible 中的 skill（空切片=不可见）。
+	SkillsVisibleRestrict bool
+	SkillsVisible         []string
 	RuntimeDir               string
 	CompressionSilent             int
 	CompressionBlocking           int
@@ -139,25 +142,6 @@ func (m *Manager) SetMultimodalEnabled(enabled bool) {
 	m.turn.MultimodalEnabled = enabled
 	if m.tools != nil {
 		m.tools.SetMultimodalEnabled(enabled)
-	}
-}
-
-// SetSessionMultimodalEnabled 热更新指定 session 的多模态开关。
-func (m *Manager) SetSessionMultimodalEnabled(sessionID string, enabled bool) {
-	if m == nil {
-		return
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return
-	}
-	rt := m.getRuntime(sessionID)
-	if rt == nil || rt.orch == nil {
-		return
-	}
-	rt.orch.SetMultimodalEnabled(enabled)
-	if reg := rt.orch.ToolRegistry(); reg != nil {
-		reg.SetMultimodalEnabled(enabled)
 	}
 }
 

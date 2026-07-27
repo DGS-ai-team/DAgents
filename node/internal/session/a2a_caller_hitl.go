@@ -150,6 +150,7 @@ func relayHITLFinishReason(hitlPayload map[string]any) (finishReason, awaiting s
 }
 
 // hitlPayloadToSSE 将 Manage requires_input 载荷统一为 hitl_required（与本地 turn SSE 同构）。
+// 兼容：仍识别旧 event_type / 旧 approval_args 形状；待对端全量升级后删除 legacy* 转换。
 func hitlPayloadToSSE(payload map[string]any) (eventType string, data map[string]any) {
 	if payload == nil {
 		return "", nil

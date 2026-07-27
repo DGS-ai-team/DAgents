@@ -95,7 +95,7 @@ func (m *Manager) waitInboxTurnWithSub(ctx context.Context, sessionID string, su
 					Data:      cloneEventData(ev.Data),
 				}
 			case "user_information_required", "approval_required":
-				// 薄兼容：历史 A2A 载荷仍可能带旧事件名。
+				// TODO(hitl-cutover): 待 A2A 对端不再发旧事件名后删除本分支。
 				awaiting := "hitl"
 				if ev.Type == "user_information_required" {
 					awaiting = "user_information"

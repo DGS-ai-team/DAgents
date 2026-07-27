@@ -42,8 +42,8 @@ type StreamEvent struct {
 	Data      map[string]any
 }
 
-// CreateSession 确保 Agent runtime 就绪（POST /v1/agents/{id}/ensure）。
-// sessionID 即 agent_id，必填（不再支持 Node 临时生成匿名 session）。
+// CreateSession 为兼容别名：等价于 EnsureAgent，返回同一 agent_id。
+// 计划随 /v1/sessions* 下线一并删除；新代码请直接调用 EnsureAgent。
 func (c *Client) CreateSession(ctx context.Context, sessionID string) (string, error) {
 	id := strings.TrimSpace(sessionID)
 	if id == "" {

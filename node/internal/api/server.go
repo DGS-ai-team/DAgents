@@ -396,6 +396,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.registerLLMRoutes()
 	s.registerSetupRoutes()
 	s.registerManageUploadRoutes()
+	s.mux.HandleFunc("GET /v1/skills/catalog", s.handleNodeSkillsCatalog)
 	if cfg.UIEnabled() {
 		s.mux.Handle("GET /ui/", webui.Handler())
 		s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
@@ -1288,6 +1289,23 @@ func (s *Server) handleListSessionSkills(w http.ResponseWriter, r *http.Request)
 		"session_id":       sessionID,
 		"loaded_skills":    loaded,
 		"available_skills": available,
+	})
+}
+
+// handleNodeSkillsCatalog 返回 Node 级 skills 目录（不受 Agent 可见性白名单过滤），供创建/编辑 Agent 勾选。
+func (s *Server) handleNodeSkillsCatalog(w http.ResponseWriter, r *http.Request) {
+	if s.cfg == nil || !s.cfg.Skills.Enabled {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled":          false,
+			"available_skills": []skills.LoadedSkill{},
+		})
+		return
+	}
+	catalog := skills.NewCatalog(s.cfg.SkillsRoot(), true, s.cfg.Skills.MaxInPrompt)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":          true,
+		"skills_root":      catalog.Root(),
+		"available_skills": catalog.ListMetadata(),
 	})
 }
 
