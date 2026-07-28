@@ -162,6 +162,36 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	}
 }
 
+func TestChildAgentHTTPJSONHardCut(t *testing.T) {
+	listRaw, err := json.Marshal(childAgentListResponse{
+		ParentAgentID: "agt-1",
+		Items: []sessionChildAgentViewJSON{{
+			ChildAgentID: "child-abc",
+			Status:       "active",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelRaw, err := json.Marshal(childAgentCancelResponse{
+		ChildAgentID:   "child-abc",
+		Status:         "cancelled",
+		PreviousStatus: "active",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range [][]byte{listRaw, cancelRaw} {
+		s := string(raw)
+		if strings.Contains(s, "session_id") {
+			t.Fatalf("hard-cut JSON must not include session_id fields: %s", s)
+		}
+		if !strings.Contains(s, "child_agent_id") {
+			t.Fatalf("expected child_agent_id in %s", s)
+		}
+	}
+}
+
 // TestChildAgentHTTPCancel 经 HTTP 取消进行中的子 Agent。
 func TestChildAgentHTTPCancel(t *testing.T) {
 	srv, ts := newChildAgentTestServer(t, &sessionDelayedEchoMock{delay: 3 * time.Second})

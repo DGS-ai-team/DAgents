@@ -40,9 +40,9 @@ export function useChildAgents(agentIdSource) {
     }
   }
 
-  async function cancelChild(childSessionId) {
+  async function cancelChild(childAgentId) {
     const sid = agentId.value;
-    const childId = String(childSessionId || "").trim();
+    const childId = String(childAgentId || "").trim();
     if (!sid || !childId || cancellingId.value === childId) return false;
     if (!window.confirm("确定取消该子 Agent？")) return false;
     cancellingId.value = childId;

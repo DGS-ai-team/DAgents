@@ -51,13 +51,13 @@ const {
           <ul v-if="items.length" class="command-card-list">
             <li
               v-for="(item, index) in items"
-              :key="item.child_session_id"
+              :key="item.child_agent_id"
               class="command-card"
               :class="{ 'command-card--active-child': isChildAgentActive(item.status) }"
             >
               <div class="command-card__main">
                 <div class="command-card__title">
-                  {{ index + 1 }}. {{ item.purpose?.trim() || shortId(item.child_session_id, 24) }}
+                  {{ index + 1 }}. {{ item.purpose?.trim() || shortId(item.child_agent_id, 24) }}
                   <span
                     class="command-card__badge"
                     :class="isChildAgentActive(item.status) ? 'command-card__badge--active' : 'command-card__badge--muted'"
@@ -66,7 +66,7 @@ const {
                   </span>
                 </div>
                 <dl class="command-kv-list command-kv-list--compact">
-                  <div class="command-kv"><dt>ID</dt><dd>{{ shortId(item.child_session_id, 32) }}</dd></div>
+                  <div class="command-kv"><dt>ID</dt><dd>{{ shortId(item.child_agent_id, 32) }}</dd></div>
                   <div class="command-kv"><dt>用途</dt><dd>{{ item.purpose || "—" }}</dd></div>
                   <div class="command-kv">
                     <dt>工具</dt>
@@ -85,10 +85,10 @@ const {
                   <button
                     type="button"
                     class="btn btn--ghost btn--sm"
-                    :disabled="cancellingId === item.child_session_id"
-                    @click="cancelChild(item.child_session_id)"
+                    :disabled="cancellingId === item.child_agent_id"
+                    @click="cancelChild(item.child_agent_id)"
                   >
-                    {{ cancellingId === item.child_session_id ? "取消中…" : "取消" }}
+                    {{ cancellingId === item.child_agent_id ? "取消中…" : "取消" }}
                   </button>
                 </div>
               </div>

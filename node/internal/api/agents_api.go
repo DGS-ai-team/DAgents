@@ -39,8 +39,8 @@ func (s *Server) registerAgentRoutes() {
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/skills/load", s.handleAgentLoadSkill)
 	s.mux.HandleFunc("POST /v1/agents/{agent_id}/skills/unload", s.handleAgentUnloadSkill)
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/child-agents", s.handleAgentListChildAgents)
-	s.mux.HandleFunc("GET /v1/agents/{agent_id}/child-agents/{child_session_id}", s.handleAgentGetChildAgent)
-	s.mux.HandleFunc("POST /v1/agents/{agent_id}/child-agents/{child_session_id}/cancel", s.handleAgentCancelChildAgent)
+	s.mux.HandleFunc("GET /v1/agents/{agent_id}/child-agents/{child_agent_id}", s.handleAgentGetChildAgent)
+	s.mux.HandleFunc("POST /v1/agents/{agent_id}/child-agents/{child_agent_id}/cancel", s.handleAgentCancelChildAgent)
 	s.registerAgentPolicyRoutes()
 }
 

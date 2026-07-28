@@ -326,8 +326,8 @@ Client 入口：`/policy` 全屏界面（Go bubbletea / Python Textual，Esc 返
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/v1/agents/{parent_agent_id}/child-agents` | 列出该父 Agent 下**未交付**的活跃子 Agent |
-| GET | `/v1/agents/{parent_agent_id}/child-agents/{child_session_id}` | 查询单个子 Agent 状态 |
-| POST | `/v1/agents/{parent_agent_id}/child-agents/{child_session_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
+| GET | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}` | 查询单个子 Agent 状态 |
+| POST | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
 
 - 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建（非 A2A），**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** session 的 `GET /v1/streams`。
 - 子 Agent **生命周期**在**向父 Agent 交付结果**后结束并回收；交付时发送结束类 SSE。

@@ -264,11 +264,9 @@ GET /v1/agents/{parent_agent_id}/child-agents
 ```json
 {
   "parent_agent_id": "agt-7f2a...",
-  "parent_session_id": "agt-7f2a...",
   "items": [
     {
       "child_agent_id": "child-a1b2c3d4e5f6",
-      "child_session_id": "child-a1b2c3d4e5f6",
       "status": "active",
       "purpose": "review patch",
       "allowed_tools": ["read_file", "search_file"],
@@ -286,7 +284,7 @@ GET /v1/agents/{parent_agent_id}/child-agents
 ### 10.2 查询单个子 Agent
 
 ```http
-GET /v1/agents/{parent_agent_id}/child-agents/{child_session_id}
+GET /v1/agents/{parent_agent_id}/child-agents/{child_agent_id}
 ```
 
 - 活跃：返回与 list item 相同字段。
@@ -295,7 +293,7 @@ GET /v1/agents/{parent_agent_id}/child-agents/{child_session_id}
 ### 10.3 停止（取消）子 Agent
 
 ```http
-POST /v1/agents/{parent_agent_id}/child-agents/{child_session_id}/cancel
+POST /v1/agents/{parent_agent_id}/child-agents/{child_agent_id}/cancel
 Content-Type: application/json
 
 { "reason": "user requested stop" }
@@ -307,7 +305,7 @@ Content-Type: application/json
 
 ```json
 {
-  "child_session_id": "child-a1b2c3d4e5f6",
+  "child_agent_id": "child-a1b2c3d4e5f6",
   "status": "cancelled",
   "previous_status": "active"
 }

@@ -216,10 +216,10 @@ export function listChildAgents(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/child-agents`);
 }
 
-export function cancelChildAgent(agentId, childSessionId, reason = "") {
+export function cancelChildAgent(agentId, childAgentId, reason = "") {
   const body = reason ? { reason } : {};
   return apiFetch(
-    `/v1/agents/${encodeURIComponent(agentId)}/child-agents/${encodeURIComponent(childSessionId)}/cancel`,
+    `/v1/agents/${encodeURIComponent(agentId)}/child-agents/${encodeURIComponent(childAgentId)}/cancel`,
     { method: "POST", body },
   );
 }

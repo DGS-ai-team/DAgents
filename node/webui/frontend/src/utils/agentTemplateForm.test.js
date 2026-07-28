@@ -37,21 +37,21 @@ describe("agentTemplateForm", () => {
     expect(draft.promptLongTermEnabled).toBe(true);
   });
 
-  it("migrates legacy skills.enabled=false into tool groups when unrestricted", () => {
+  it("ignores legacy skills.enabled and trusts tool groups", () => {
     const draft = draftFromTemplate(
       {
         id: "legacy",
         display_name: "旧",
         defaults: {
-          tools: { enabled_groups: [] },
+          tools: { enabled_groups: ["fs", "skills"] },
           skills: { enabled: false },
         },
         sandbox: { enabled: false },
       },
       ["default"],
     );
-    expect(draft.toolGroups).toEqual(TOOL_GROUPS.map((g) => g.name).filter((n) => n !== "skills"));
-    expect(skillsEnabledFromToolGroups(draft.toolGroups)).toBe(false);
+    expect(draft.toolGroups).toEqual(["fs", "skills"]);
+    expect(skillsEnabledFromToolGroups(draft.toolGroups)).toBe(true);
   });
 
   it("falls back to first llm profile when template active missing", () => {
