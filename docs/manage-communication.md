@@ -96,8 +96,8 @@
 |------|------|--------|------|
 | GET | `/v1/agent/info` | Client | 含 `manage_registered` |
 | GET | `/v1/agent/update` | Client / Shell | Release 检查（需 `manage.enabled`） |
-| GET | `/v1/sessions`、`/v1/sessions/{id}/context` | Client | 本地运维 / TUI（**不经 Manage**） |
-| POST `/v1/sessions/.../messages`、SSE 等 | Client | 本地 turn，**不经 Manage** |
+| GET | `/v1/agents`、`/v1/agents/{id}/context` | Client | 本地运维（**不经 Manage**）；`/v1/sessions*` 已 410 |
+| POST `/v1/messages`、SSE 等 | Client | 本地 turn，**不经 Manage** |
 
 ---
 

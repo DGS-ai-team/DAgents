@@ -4,6 +4,8 @@
 **范围**：**仅 Windows**（不含 Linux/macOS 桌面壳）。  
 **读者**：产品 / 实现 / 安装包；与 [local-assistant.md](../architecture/local-assistant.md)、[client-packaging.md](../architecture/client-packaging.md) 配套。
 
+> **API 注记（2026-07 后）**：文中历史路径 `/v1/sessions*` 已下线（**410** / `sessions_moved`）。现行契约为 `/v1/agents/{agent_id}/...`；托盘待办同步走 `GET /v1/agents`，hydrate/ack 走 agents 路径。
+
 ---
 
 ## 1. 背景与问题

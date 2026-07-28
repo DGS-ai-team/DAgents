@@ -247,25 +247,27 @@ Go/Python Client 在父 session SSE 上识别上述事件，在 TUI 展示「子
 
 ## 10. HTTP API（用户 / Client 停止子 Agent）
 
-子 Agent **无**独立 SSE 连接；用户通过**父 session** 订阅流，并通过以下 API 管理。
+子 Agent **无**独立 SSE 连接；用户通过**父 Agent** 订阅流，并通过以下 API 管理。
 
-前缀：`/v1/sessions/{parent_session_id}/child-agents`
+前缀：`/v1/agents/{parent_agent_id}/child-agents`（旧 `/v1/sessions/.../child-agents` 已 410）。
 
-`parent_session_id` 须为普通用户 session（非 `child-*`）。
+`parent_agent_id` 须为普通用户 Agent（非 `child-*`）。
 
 ### 10.1 列出活跃子 Agent
 
 ```http
-GET /v1/sessions/{parent_session_id}/child-agents
+GET /v1/agents/{parent_agent_id}/child-agents
 ```
 
 响应：
 
 ```json
 {
-  "parent_session_id": "sess-7f2a...",
+  "parent_agent_id": "agt-7f2a...",
+  "parent_session_id": "agt-7f2a...",
   "items": [
     {
+      "child_agent_id": "child-a1b2c3d4e5f6",
       "child_session_id": "child-a1b2c3d4e5f6",
       "status": "active",
       "purpose": "review patch",
@@ -284,7 +286,7 @@ GET /v1/sessions/{parent_session_id}/child-agents
 ### 10.2 查询单个子 Agent
 
 ```http
-GET /v1/sessions/{parent_session_id}/child-agents/{child_session_id}
+GET /v1/agents/{parent_agent_id}/child-agents/{child_session_id}
 ```
 
 - 活跃：返回与 list item 相同字段。
@@ -293,7 +295,7 @@ GET /v1/sessions/{parent_session_id}/child-agents/{child_session_id}
 ### 10.3 停止（取消）子 Agent
 
 ```http
-POST /v1/sessions/{parent_session_id}/child-agents/{child_session_id}/cancel
+POST /v1/agents/{parent_agent_id}/child-agents/{child_session_id}/cancel
 Content-Type: application/json
 
 { "reason": "user requested stop" }
@@ -346,7 +348,7 @@ child_agents:
 ## 12. 标识符
 
 - `child_session_id`：`child-` + 12 位 hex（例 `child-a1b2c3d4e5f6`）
-- 不出现在 `GET /v1/sessions` 默认列表
+- 不出现在 `GET /v1/agents` 默认列表
 
 ---
 
@@ -516,7 +518,7 @@ wait_temporary_agents({"child_session_ids":["child-aaa","child-bbb"],"timeout_se
 **用户 HTTP 停止：**
 
 ```http
-POST /v1/sessions/sess-7f2a/child-agents/child-aaa/cancel
+POST /v1/agents/agt-7f2a/child-agents/child-aaa/cancel
 {"reason":"用户点击停止"}
 ```
 
