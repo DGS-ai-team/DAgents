@@ -7,9 +7,9 @@ import (
 // RelayHub 将子 Agent turn 的 SSE 事件转发到父 session，并附加子任务元数据。
 type RelayHub struct {
 	Inner           *stream.Hub
-	ParentSessionID string
+	ParentAgentID string
 	AgentID         string
-	ChildSessionID  string
+	ChildAgentID  string
 	ChildPurpose    string
 }
 
@@ -22,7 +22,7 @@ func (h *RelayHub) Publish(_sessionID, agentID, eventType string, data map[strin
 	if data == nil {
 		data = map[string]any{}
 	}
-	data["child_session_id"] = h.ChildSessionID
+	data["child_agent_id"] = h.ChildAgentID
 	if eventType == "hitl_required" {
 		data["hitl_scope"] = HitlScopeTemporaryAgent
 		data["child_purpose"] = h.ChildPurpose
@@ -31,5 +31,5 @@ func (h *RelayHub) Publish(_sessionID, agentID, eventType string, data map[strin
 	if aid == "" {
 		aid = h.AgentID
 	}
-	return h.Inner.Publish(h.ParentSessionID, aid, eventType, data)
+	return h.Inner.Publish(h.ParentAgentID, aid, eventType, data)
 }

@@ -34,18 +34,18 @@ export function formatTemporaryAgentToolTitle(name, args = {}) {
     return args.wait ? `创建临时 Agent · ${purpose} (wait)` : `创建临时 Agent · ${purpose}`;
   }
   if (n === "wait_temporary_agents") {
-    const ids = stringList(args.child_session_ids);
+    const ids = stringList(args.child_agent_ids);
     let title = ids.length ? `等待 ${ids.length} 个临时 Agent` : "等待临时 Agent";
     const timeout = intVal(args.timeout_seconds);
     if (timeout > 0) title += ` · ${timeout}s`;
     return title;
   }
   if (n === "temporary_agent_status") {
-    const ids = stringList(args.child_session_ids);
+    const ids = stringList(args.child_agent_ids);
     return ids.length ? `查询 ${ids.length} 个临时 Agent 状态` : "查询临时 Agent 状态";
   }
   if (n === "cancel_temporary_agent") {
-    const short = shortChildId(args.child_session_id);
+    const short = shortChildId(args.child_agent_id);
     return short ? `取消临时 Agent · ${short}` : "取消临时 Agent";
   }
   return `${n}()`;

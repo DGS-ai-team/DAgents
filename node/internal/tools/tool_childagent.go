@@ -61,7 +61,7 @@ func waitTemporaryAgentsToolDef() ToolDef {
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"child_session_ids": map[string]any{
+					"child_agent_ids": map[string]any{
 						"type":        "array",
 						"items":       map[string]any{"type": "string"},
 						"description": "临时 Agent 的 session id 列表（create_temporary_agent 返回）",
@@ -69,7 +69,7 @@ func waitTemporaryAgentsToolDef() ToolDef {
 					"timeout_seconds": map[string]any{"type": "integer", "description": "最长等待秒数，0 表示立即返回当前快照"},
 					"fail_fast":       map[string]any{"type": "boolean", "description": "任一进入失败终态时提前返回"},
 				},
-				"required":             []string{"child_session_ids"},
+				"required":             []string{"child_agent_ids"},
 				"additionalProperties": false,
 			}),
 		},
@@ -85,13 +85,13 @@ func temporaryAgentStatusToolDef() ToolDef {
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"child_session_ids": map[string]any{
+					"child_agent_ids": map[string]any{
 						"type":        "array",
 						"items":       map[string]any{"type": "string"},
 						"description": "临时 Agent 的 session id 列表",
 					},
 				},
-				"required":             []string{"child_session_ids"},
+				"required":             []string{"child_agent_ids"},
 				"additionalProperties": false,
 			}),
 		},
@@ -107,13 +107,13 @@ func cancelTemporaryAgentToolDef() ToolDef {
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"child_session_id": map[string]any{
+					"child_agent_id": map[string]any{
 						"type":        "string",
 						"description": "临时 Agent 的 session id",
 					},
 					"reason": map[string]any{"type": "string", "description": "取消原因（可选）"},
 				},
-				"required":             []string{"child_session_id"},
+				"required":             []string{"child_agent_id"},
 				"additionalProperties": false,
 			}),
 		},

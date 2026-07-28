@@ -65,8 +65,8 @@ type workspaceActivityResponse struct {
 }
 
 func (s *Server) handleAgentWorkspaceActivity(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("session_id")
+	s.withAgentRuntime(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("agent_id")
 		_, msgs, err := s.sessions.ContextSummary(id)
 		if err != nil {
 			if err.Error() == "session_not_found" {

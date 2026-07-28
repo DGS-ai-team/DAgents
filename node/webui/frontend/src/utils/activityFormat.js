@@ -6,7 +6,7 @@ function intVal(v) {
 }
 
 export function formatChildLifecycle(type, data) {
-  const id = String(data?.child_session_id || "").slice(0, 16);
+  const id = String(data?.child_agent_id || "").slice(0, 16);
   const purpose = String(data?.purpose || "").trim();
   if (type === "temporary_agent_created") return `临时 Agent 已创建 · ${purpose || id}`;
   if (type === "temporary_agent_cancelled") return `临时 Agent 已取消 · ${id}`;

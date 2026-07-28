@@ -8,7 +8,7 @@ import {
 
 describe("activityFormat", () => {
   it("formatChildLifecycle uses Chinese", () => {
-    expect(formatChildLifecycle("temporary_agent_created", { purpose: "调研", child_session_id: "abc" })).toContain(
+    expect(formatChildLifecycle("temporary_agent_created", { purpose: "调研", child_agent_id: "abc" })).toContain(
       "临时 Agent 已创建",
     );
   });

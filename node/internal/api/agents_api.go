@@ -591,9 +591,9 @@ func (s *Server) handleAgentReload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id, "reloaded": true})
 }
 
-// agent 路径别名：把 PathValue agent_id 映射为 session_id 后复用既有 handler。
+// withAgentRuntime：校验/装入 Agent runtime 后调用下游（path 使用 agent_id）。
 // agents store 未配置时（单测 WithSkipStore）直接放行，由下游按 runtime/DB 处理。
-func (s *Server) withAgentAsSession(next http.HandlerFunc) http.HandlerFunc {
+func (s *Server) withAgentRuntime(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimSpace(r.PathValue("agent_id"))
 		if id == "" {
@@ -610,55 +610,54 @@ func (s *Server) withAgentAsSession(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		r.SetPathValue("session_id", id)
 		next(w, r)
 	}
 }
 
 func (s *Server) handleAgentHydrate(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleSessionHydrate)(w, r)
+	s.withAgentRuntime(s.handleAgentHydrateImpl)(w, r)
 }
 
 func (s *Server) handleAgentCancel(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleCancelSession)(w, r)
+	s.withAgentRuntime(s.handleAgentCancelImpl)(w, r)
 }
 
 func (s *Server) handleAgentContext(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleSessionContext)(w, r)
+	s.withAgentRuntime(s.handleAgentContextImpl)(w, r)
 }
 
 func (s *Server) handleAgentAck(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleSessionAck)(w, r)
+	s.withAgentRuntime(s.handleAgentAckImpl)(w, r)
 }
 
 func (s *Server) handleAgentClearContext(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleClearContext)(w, r)
+	s.withAgentRuntime(s.handleAgentClearContextImpl)(w, r)
 }
 
 func (s *Server) handleAgentCompress(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleCompressContext)(w, r)
+	s.withAgentRuntime(s.handleAgentCompressImpl)(w, r)
 }
 
 func (s *Server) handleAgentListSkills(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleListSessionSkills)(w, r)
+	s.withAgentRuntime(s.handleAgentListSkillsImpl)(w, r)
 }
 
 func (s *Server) handleAgentLoadSkill(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleLoadSessionSkill)(w, r)
+	s.withAgentRuntime(s.handleAgentLoadSkillImpl)(w, r)
 }
 
 func (s *Server) handleAgentUnloadSkill(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleUnloadSessionSkill)(w, r)
+	s.withAgentRuntime(s.handleAgentUnloadSkillImpl)(w, r)
 }
 
 func (s *Server) handleAgentListChildAgents(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleListChildAgents)(w, r)
+	s.withAgentRuntime(s.handleListChildAgents)(w, r)
 }
 
 func (s *Server) handleAgentGetChildAgent(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleGetChildAgent)(w, r)
+	s.withAgentRuntime(s.handleGetChildAgent)(w, r)
 }
 
 func (s *Server) handleAgentCancelChildAgent(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleCancelChildAgent)(w, r)
+	s.withAgentRuntime(s.handleCancelChildAgent)(w, r)
 }

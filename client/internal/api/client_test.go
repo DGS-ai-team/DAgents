@@ -44,7 +44,7 @@ func TestClientCreateMessageStream(t *testing.T) {
 		// 模拟 echo turn
 		time.Sleep(30 * time.Millisecond)
 		payload := map[string]any{
-			"session_id": sessionID, "agent_id": "a1", "type": "assistant", "seq": 1,
+			"agent_id": sessionID, "type": "assistant", "seq": 1,
 			"ts": "2026-01-01T00:00:00Z", "data": map[string]any{"content": "（echo）hi"},
 		}
 		b, _ := json.Marshal(payload)
@@ -52,7 +52,7 @@ func TestClientCreateMessageStream(t *testing.T) {
 		flusher.Flush()
 
 		donePayload := map[string]any{
-			"session_id": sessionID, "agent_id": "a1", "type": "done", "seq": 2,
+			"agent_id": sessionID, "type": "done", "seq": 2,
 			"ts": "2026-01-01T00:00:00Z", "data": map[string]any{"finish_reason": "stop"},
 		}
 		b2, _ := json.Marshal(donePayload)

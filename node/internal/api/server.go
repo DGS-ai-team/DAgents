@@ -385,7 +385,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.registerAgentRoutes()
 	s.registerToolCallControlRoutes()
 	s.registerUIAggregateRoutes()
-	s.registerSessionsGone()
+	s.registerLegacySessionsGone()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()
@@ -662,11 +662,11 @@ type clearContextResponse struct {
 	CancelledTurn bool   `json:"cancelled_turn"`
 }
 
-func (s *Server) handleClearContext(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAgentClearContextImpl(w http.ResponseWriter, r *http.Request) {
 	// POST clear-context：清空 messages；在途 turn 会先 cancel。
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
 		return
 	}
 	cancelled, err := s.sessions.ClearContext(sessionID)
@@ -734,11 +734,11 @@ func queryBoolParam(r *http.Request, key string) bool {
 	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
 }
 
-func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) {
 	// GET context：只读快照；默认 recent_messages 最多 10 条；full_messages=1 返回完整 messages 列表。
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
 		return
 	}
 	view, err := s.sessions.GetContextView(sessionID)
@@ -803,10 +803,10 @@ type sessionHydrateResponse struct {
 	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
 }
 
-func (s *Server) handleSessionHydrate(w http.ResponseWriter, r *http.Request) {
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
 		return
 	}
 	view, err := s.sessions.GetHydrateView(sessionID)
@@ -863,10 +863,10 @@ type sessionAckResponse struct {
 	HasUnread bool   `json:"has_unread"`
 }
 
-func (s *Server) handleSessionAck(w http.ResponseWriter, r *http.Request) {
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+func (s *Server) handleAgentAckImpl(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
 		return
 	}
 	var req sessionAckRequest
@@ -883,7 +883,7 @@ func (s *Server) handleSessionAck(w http.ResponseWriter, r *http.Request) {
 		switch err.Error() {
 		case "session_not_found":
 			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
-		case "session_id is required", "sse_seq must be positive":
+		case "agent_id is required", "sse_seq must be positive":
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
 		default:
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
@@ -898,11 +898,11 @@ func (s *Server) handleSessionAck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAgentCompressImpl(w http.ResponseWriter, r *http.Request) {
 	// POST compress：手动触发一次阻塞压缩（忽略 token 阈值）。
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
 		return
 	}
 	result, err := s.sessions.CompressContext(r.Context(), sessionID)
@@ -1011,11 +1011,11 @@ type cancelTurnResponse struct {
 	Cancelled bool   `json:"cancelled"`
 }
 
-func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAgentCancelImpl(w http.ResponseWriter, r *http.Request) {
 	// POST cancel：取消在途 turn；无在途任务时 cancelled=false。
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
 		return
 	}
 	if s.sessions.Get(sessionID) == nil {
@@ -1085,7 +1085,7 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if agentFilter != "" && ev.SessionID != agentFilter && ev.AgentID != agentFilter {
+			if agentFilter != "" && ev.AgentID != agentFilter && ev.SessionID != agentFilter {
 				continue // Hub 为全局广播；按 agent 过滤在 handler 内完成
 			}
 			if _, err := w.Write([]byte(ev.FormatSSE())); err != nil {
@@ -1096,9 +1096,9 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleListSessionSkills(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAgentListSkillsImpl(w http.ResponseWriter, r *http.Request) {
 	// GET skills：返回 session 已加载与磁盘可用 skill 元数据。
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	loaded, available, err := s.sessions.ListSessionSkills(sessionID)
 	if err != nil {
 		if err.Error() == "session_not_found" {
@@ -1136,9 +1136,9 @@ type skillNameRequest struct {
 	SkillName string `json:"skill_name"`
 }
 
-func (s *Server) handleLoadSessionSkill(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAgentLoadSkillImpl(w http.ResponseWriter, r *http.Request) {
 	// POST skills/load：与 load_skills 工具语义一致，供 Client 设置页调用。
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	var req skillNameRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
@@ -1159,9 +1159,9 @@ func (s *Server) handleLoadSessionSkill(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (s *Server) handleUnloadSessionSkill(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAgentUnloadSkillImpl(w http.ResponseWriter, r *http.Request) {
 	// POST skills/unload：从 session 移除指定 skill。
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	var req skillNameRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)

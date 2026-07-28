@@ -43,7 +43,7 @@ const KIND_META = {
 export function inferToolKind(name, data = {}) {
   const n = String(name || "").trim();
   if (data?.a2a_relay) return "a2a";
-  if (data?.child_session_id || CHILD_AGENT_TOOLS.has(n)) return "child";
+  if (data?.child_agent_id || CHILD_AGENT_TOOLS.has(n)) return "child";
   if (n.startsWith("browser_")) return "browser";
   if (n.startsWith("wecom_")) return "wecom";
   if (n.startsWith("trigger_")) return "triggers";

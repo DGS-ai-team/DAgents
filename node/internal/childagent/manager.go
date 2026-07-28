@@ -40,8 +40,8 @@ type Host interface {
 
 // SpawnSpec 为创建子 runtime 的参数。
 type SpawnSpec struct {
-	ChildSessionID  string
-	ParentSessionID string
+	ChildAgentID  string
+	ParentAgentID string
 	AllowedTools    []string
 	SkillNames      []string
 	MaxTurns        int
@@ -58,9 +58,9 @@ type Manager struct {
 	host Host
 
 	mu sync.Mutex
-	// activeByID：活跃临时 Agent 账本（child_session_id → ActiveAgent）。
+	// activeByID：活跃临时 Agent 账本（child_agent_id → ActiveAgent）。
 	activeByID map[string]*ActiveAgent
-	// activeIDsByParent：父 session 下仍活跃的 child_session_id 列表。
+	// activeIDsByParent：父 session 下仍活跃的 child_agent_id 列表。
 	activeIDsByParent map[string][]string
 	// childToParent：unregisterActive 后仍保留，供 wait/status 校验归属。
 	childToParent map[string]string
@@ -135,7 +135,7 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 		return "ERROR: " + err.Error(), nil
 	}
 
-	childID, err := generateChildSessionID()
+	childID, err := generateChildAgentID()
 	if err != nil {
 		return "", err
 	}
@@ -152,8 +152,8 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 
 	// 创建子 runtime
 	if err := m.host.SpawnChild(SpawnSpec{
-		ChildSessionID:  childID,
-		ParentSessionID: parentSessionID,
+		ChildAgentID:  childID,
+		ParentAgentID: parentSessionID,
 		AllowedTools:    allowed,
 		SkillNames:      append([]string(nil), input.SkillNames...),
 		MaxTurns:        input.MaxTurns,
@@ -186,7 +186,7 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 		}
 		body, _ := json.Marshal(map[string]any{
 			"kind":             "result",
-			"child_session_id": res.ChildSessionID,
+			"child_agent_id": res.ChildAgentID,
 			"status":           res.Status,
 			"summary":          res.Summary,
 			"turn_count":       res.TurnCount,
@@ -199,7 +199,7 @@ func (m *Manager) HandleCreate(ctx context.Context, parentSessionID, argsJSON st
 	// 返回结果
 	body, _ := json.Marshal(map[string]any{
 		"kind":             "handle",
-		"child_session_id": childID,
+		"child_agent_id": childID,
 		"status":           StatusActive,
 		"purpose":          input.Purpose,
 		"loaded_skills":    append([]string(nil), input.SkillNames...),
@@ -237,7 +237,7 @@ func (m *Manager) Cancel(parentSessionID, childSessionID, reason string) (Result
 		m.mu.Unlock()
 		return Result{}, fmt.Errorf("child_agent_not_found")
 	}
-	if parentSessionID != "" && agent.ParentSessionID != parentSessionID {
+	if parentSessionID != "" && agent.ParentAgentID != parentSessionID {
 		m.mu.Unlock()
 		return Result{}, fmt.Errorf("child_agent_not_found")
 	}
@@ -290,14 +290,14 @@ func (m *Manager) RouteResume(parentSessionID string, resume map[string]any) (ta
 	if m.host == nil {
 		return true, fmt.Errorf("child agent host not configured")
 	}
-	childID, _ := resume["child_session_id"].(string)
+	childID, _ := resume["child_agent_id"].(string)
 	childID = strings.TrimSpace(childID)
 	if childID == "" {
 		return true, m.host.DeliverParentResume(parentSessionID, resume)
 	}
 	m.mu.Lock()
 	agent, ok := m.activeByID[childID]
-	if !ok || agent.ParentSessionID != parentSessionID {
+	if !ok || agent.ParentAgentID != parentSessionID {
 		m.mu.Unlock()
 		return false, fmt.Errorf("hitl_target_mismatch")
 	}
@@ -333,7 +333,7 @@ func (m *Manager) finishWithEvent(childSessionID string, status Status, summary,
 	agent.mu.Lock()
 	agent.Status = status
 	out := Result{
-		ChildSessionID: childSessionID,
+		ChildAgentID: childSessionID,
 		Status:         status,
 		Summary:        summary,
 		TurnCount:      agent.TurnCount,
@@ -347,7 +347,7 @@ func (m *Manager) finishWithEvent(childSessionID string, status Status, summary,
 		close(agent.settledCh)
 	}
 	agent.mu.Unlock()
-	parentID := agent.ParentSessionID
+	parentID := agent.ParentAgentID
 	m.mu.Unlock()
 
 	m.mu.Lock()
@@ -375,7 +375,7 @@ func (m *Manager) unregisterActive(childSessionID string) {
 		return
 	}
 	delete(m.activeByID, childSessionID)
-	ids := m.activeIDsByParent[agent.ParentSessionID]
+	ids := m.activeIDsByParent[agent.ParentAgentID]
 	filtered := ids[:0]
 	for _, id := range ids {
 		if id != childSessionID {
@@ -383,9 +383,9 @@ func (m *Manager) unregisterActive(childSessionID string) {
 		}
 	}
 	if len(filtered) == 0 {
-		delete(m.activeIDsByParent, agent.ParentSessionID)
+		delete(m.activeIDsByParent, agent.ParentAgentID)
 	} else {
-		m.activeIDsByParent[agent.ParentSessionID] = filtered
+		m.activeIDsByParent[agent.ParentAgentID] = filtered
 	}
 }
 
@@ -399,7 +399,7 @@ func (m *Manager) waitUntilSettled(ctx context.Context, agent *ActiveAgent, time
 	case <-agent.settledCh:
 		return agent.resultSnapshot(), nil
 	case <-timer.C:
-		_, _ = m.Cancel(agent.ParentSessionID, agent.ChildSessionID, "wait timeout")
+		_, _ = m.Cancel(agent.ParentAgentID, agent.ChildAgentID, "wait timeout")
 		return Result{}, fmt.Errorf("wait timeout")
 	}
 }
@@ -430,11 +430,11 @@ func (m *Manager) runTTLTimer(childID string, ttl time.Duration) {
 		m.mu.Unlock()
 		return
 	}
-	parentID := agent.ParentSessionID
+	parentID := agent.ParentAgentID
 	prev := string(agent.Status)
 	m.mu.Unlock()
 	m.finishWithEvent(childID, StatusExpired, "", "ttl expired", false, prev)
-	m.logger.Info("child agent expired", "child_session_id", childID, "parent_session_id", parentID)
+	m.logger.Info("child agent expired", "child_agent_id", childID, "parent_agent_id", parentID)
 }
 
 func (m *Manager) publishCreated(parentID string, agent *ActiveAgent, wait bool) {
@@ -442,8 +442,8 @@ func (m *Manager) publishCreated(parentID string, agent *ActiveAgent, wait bool)
 		return
 	}
 	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCreated, map[string]any{
-		"child_session_id":  agent.ChildSessionID,
-		"parent_session_id": parentID,
+		"child_agent_id":  agent.ChildAgentID,
+		"parent_agent_id": parentID,
 		"purpose":           agent.Purpose,
 		"loaded_skills":     append([]string(nil), agent.LoadedSkills...),
 		"status":            StatusActive,
@@ -458,8 +458,8 @@ func (m *Manager) publishCompleted(parentID string, res *Result) {
 		return
 	}
 	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCompleted, map[string]any{
-		"child_session_id":  res.ChildSessionID,
-		"parent_session_id": parentID,
+		"child_agent_id":  res.ChildAgentID,
+		"parent_agent_id": parentID,
 		"status":            res.Status,
 		"summary":           res.Summary,
 		"turn_count":        res.TurnCount,
@@ -473,15 +473,15 @@ func (m *Manager) publishCancelled(parentID, childID, reason, previous string) {
 		return
 	}
 	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCancelled, map[string]any{
-		"child_session_id":  childID,
-		"parent_session_id": parentID,
+		"child_agent_id":  childID,
+		"parent_agent_id": parentID,
 		"status":            StatusCancelled,
 		"reason":            reason,
 		"previous_status":   previous,
 	})
 }
 
-func generateChildSessionID() (string, error) {
+func generateChildAgentID() (string, error) {
 	var b [6]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("generate child session id: %w", err)

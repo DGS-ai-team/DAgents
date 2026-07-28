@@ -326,7 +326,7 @@ function handleEvent(ev) {
       finishWaitingStatuses();
       {
         const { approval } = enqueueHitlRequired(ev.data);
-        if (approval?.child_session_id) setChildAwaitingApproval(approval.child_session_id, true);
+        if (approval?.child_agent_id) setChildAwaitingApproval(approval.child_agent_id, true);
       }
       if (isA2ARelay(ev.data) && agentStore.awaitingTurn) finishTurn();
       break;
@@ -336,7 +336,7 @@ function handleEvent(ev) {
       break;
     case "temporary_agent_completed":
     case "temporary_agent_cancelled":
-      onChildFinished(ev.data?.child_session_id);
+      onChildFinished(ev.data?.child_agent_id);
       addSystem(formatChildLifecycle(ev.type, ev.data));
       break;
     case "context_compression_blocking":
@@ -402,7 +402,7 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
       });
     }
     dequeueHitlAt(hitlIndex);
-    if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
+    if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
@@ -425,7 +425,7 @@ async function submitHitlOne(payload, approve) {
   try {
     await api.submitResume(agentStore.agentId, resume);
     dequeueHitlAt(hitlIndex);
-    if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
+    if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
@@ -485,7 +485,7 @@ async function submitHitlUserInfo(hitlIndex, text) {
   try {
     await api.submitResume(agentStore.agentId, resume);
     dequeueHitlAt(hitlIndex);
-    if (item.data?.child_session_id) setChildAwaitingApproval(item.data.child_session_id, false);
+    if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     hitlSelected.value = [];

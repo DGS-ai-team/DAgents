@@ -2,9 +2,9 @@ package api
 
 import "net/http"
 
-// registerSessionsGone 将已下线的 /v1/sessions* 固定返回 410（对齐 /v1/policy）。
-func (s *Server) registerSessionsGone() {
-	gone := s.handleSessionsGone
+// registerLegacySessionsGone 将已下线的 /v1/sessions* 固定返回 410（对齐 /v1/policy）。
+func (s *Server) registerLegacySessionsGone() {
+	gone := s.handleLegacySessionsGone
 	s.mux.HandleFunc("POST /v1/sessions", gone)
 	s.mux.HandleFunc("GET /v1/sessions", gone)
 	s.mux.HandleFunc("DELETE /v1/sessions/{session_id}", gone)
@@ -23,7 +23,7 @@ func (s *Server) registerSessionsGone() {
 	s.mux.HandleFunc("GET /v1/sessions/{session_id}/media/{media_id}", gone)
 }
 
-func (s *Server) handleSessionsGone(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleLegacySessionsGone(w http.ResponseWriter, _ *http.Request) {
 	writeAPIError(w, http.StatusGone, "sessions_moved",
 		"/v1/sessions* 已下线；请改用 /v1/agents/{agent_id}/...", nil)
 }

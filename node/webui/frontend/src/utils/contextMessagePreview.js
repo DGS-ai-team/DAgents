@@ -12,16 +12,16 @@ function tryFormatJsonToolResult(content) {
   }
   if (!payload || typeof payload !== "object") return null;
 
-  if (payload.kind === "result" && payload.child_session_id) {
+  if (payload.kind === "result" && payload.child_agent_id) {
     return parseTemporaryAgentToolResult("create_temporary_agent", text);
   }
   if (Array.isArray(payload.results)) {
     return parseTemporaryAgentToolResult("wait_temporary_agents", text);
   }
-  if (payload.child_session_id && payload.purpose) {
+  if (payload.child_agent_id && payload.purpose) {
     return parseTemporaryAgentToolResult("create_temporary_agent", text);
   }
-  if (payload.child_session_id && payload.status === "cancelled") {
+  if (payload.child_agent_id && payload.status === "cancelled") {
     return parseTemporaryAgentToolResult("cancel_temporary_agent", text);
   }
   const summary = String(payload.summary || "").trim();

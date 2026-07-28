@@ -25,7 +25,7 @@ func TestHandleWaitAfterActiveUnregistered(t *testing.T) {
 
 	m.finishWithEvent(childID, StatusCompleted, "all done", "", false, "")
 
-	waitOut, err := m.HandleWait(context.Background(), parentID, `{"child_session_ids":["`+childID+`"],"timeout_seconds":0}`)
+	waitOut, err := m.HandleWait(context.Background(), parentID, `{"child_agent_ids":["`+childID+`"],"timeout_seconds":0}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestHandleWaitRejectsWrongParent(t *testing.T) {
 	childID := extractChildID(t, out)
 	m.finishWithEvent(childID, StatusCompleted, "ok", "", false, "")
 
-	waitOut, err := m.HandleWait(context.Background(), "other-parent", `{"child_session_ids":["`+childID+`"],"timeout_seconds":0}`)
+	waitOut, err := m.HandleWait(context.Background(), "other-parent", `{"child_agent_ids":["`+childID+`"],"timeout_seconds":0}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestHandleWaitPollsUntilTerminal(t *testing.T) {
 		m.finishWithEvent(childID, StatusCompleted, "polled", "", false, "")
 	}()
 
-	waitOut, err := m.HandleWait(context.Background(), "p1", `{"child_session_ids":["`+childID+`"],"timeout_seconds":5}`)
+	waitOut, err := m.HandleWait(context.Background(), "p1", `{"child_agent_ids":["`+childID+`"],"timeout_seconds":5}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,11 +116,11 @@ func TestHandleWaitPollsUntilTerminal(t *testing.T) {
 
 func extractChildID(t *testing.T, createOut string) string {
 	t.Helper()
-	// 轻量解析 JSON handle 中的 child_session_id。
-	const key = `"child_session_id":"`
+	// 轻量解析 JSON handle 中的 child_agent_id。
+	const key = `"child_agent_id":"`
 	idx := strings.Index(createOut, key)
 	if idx < 0 {
-		t.Fatalf("missing child_session_id in: %s", createOut)
+		t.Fatalf("missing child_agent_id in: %s", createOut)
 	}
 	rest := createOut[idx+len(key):]
 	end := strings.Index(rest, `"`)

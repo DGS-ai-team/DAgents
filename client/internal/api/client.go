@@ -34,12 +34,11 @@ func New(base string, httpClient *http.Client) *Client {
 
 // StreamEvent 表示一条 SSE 业务事件（已解析 JSON data 行）。
 type StreamEvent struct {
-	ID        string
-	Type      string
-	SessionID string
-	AgentID   string
-	Seq       int
-	Data      map[string]any
+	ID      string
+	Type    string
+	AgentID string
+	Seq     int
+	Data    map[string]any
 }
 
 // EnsureAgent 调用 POST /v1/agents/{id}/ensure。
@@ -824,11 +823,10 @@ func parseSSE(ctx context.Context, r io.Reader, handler func(StreamEvent) bool) 
 
 func decodeStreamEvent(eventType, eventID, dataLine string) (StreamEvent, error) {
 	var envelope struct {
-		SessionID string         `json:"session_id"`
-		AgentID   string         `json:"agent_id"`
-		Type      string         `json:"type"`
-		Seq       int            `json:"seq"`
-		Data      map[string]any `json:"data"`
+		AgentID string         `json:"agent_id"`
+		Type    string         `json:"type"`
+		Seq     int            `json:"seq"`
+		Data    map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(dataLine), &envelope); err != nil {
 		return StreamEvent{}, fmt.Errorf("decode sse data: %w", err)
@@ -842,11 +840,10 @@ func decodeStreamEvent(eventType, eventID, dataLine string) (StreamEvent, error)
 		seq, _ = strconv.Atoi(eventID)
 	}
 	return StreamEvent{
-		ID:        eventID,
-		Type:      typ,
-		SessionID: envelope.SessionID,
-		AgentID:   envelope.AgentID,
-		Seq:       seq,
-		Data:      envelope.Data,
+		ID:      eventID,
+		Type:    typ,
+		AgentID: envelope.AgentID,
+		Seq:     seq,
+		Data:    envelope.Data,
 	}, nil
 }

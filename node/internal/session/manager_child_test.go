@@ -62,7 +62,7 @@ func TestChildAgentParentTurnWaitTrue(t *testing.T) {
 			switch ev.Type {
 			case "temporary_agent_created":
 				gotCreated = true
-				childID, _ = ev.Data["child_session_id"].(string)
+				childID, _ = ev.Data["child_agent_id"].(string)
 			case "temporary_agent_completed":
 				gotCompleted = true
 				if s, ok := ev.Data["summary"].(string); ok && !strings.Contains(s, "README") {
@@ -76,7 +76,7 @@ func TestChildAgentParentTurnWaitTrue(t *testing.T) {
 		}
 	}
 	if childID == "" {
-		t.Fatal("empty child_session_id")
+		t.Fatal("empty child_agent_id")
 	}
 }
 
@@ -100,13 +100,13 @@ func TestChildAgentAsyncCreateAndWait(t *testing.T) {
 	if err := json.Unmarshal([]byte(createOut), &handle); err != nil {
 		t.Fatal(err)
 	}
-	childID, _ := handle["child_session_id"].(string)
+	childID, _ := handle["child_agent_id"].(string)
 	if childID == "" {
 		t.Fatalf("missing child id: %s", createOut)
 	}
 
 	// 子 Agent 在后台完成；wait 轮询直至终态（含记录回收后 rec==nil 视为 terminal）。
-	waitOut, err := cm.HandleWait(ctx, parent.ID, `{"child_session_ids":["`+childID+`"],"timeout_seconds":5}`)
+	waitOut, err := cm.HandleWait(ctx, parent.ID, `{"child_agent_ids":["`+childID+`"],"timeout_seconds":5}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,9 +158,9 @@ func TestChildAgentCancelBeforeComplete(t *testing.T) {
 	}
 	var handle map[string]any
 	_ = json.Unmarshal([]byte(createOut), &handle)
-	childID, _ := handle["child_session_id"].(string)
+	childID, _ := handle["child_agent_id"].(string)
 
-	cancelOut, err := cm.HandleCancelTool(parent.ID, `{"child_session_id":"`+childID+`","reason":"test cancel"}`)
+	cancelOut, err := cm.HandleCancelTool(parent.ID, `{"child_agent_id":"`+childID+`","reason":"test cancel"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,9 +271,9 @@ func TestSpawnChildPreloadsSkills(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
 		t.Fatal(err)
 	}
-	childID, _ := payload["child_session_id"].(string)
+	childID, _ := payload["child_agent_id"].(string)
 	if childID == "" {
-		t.Fatalf("missing child_session_id in %v", payload)
+		t.Fatalf("missing child_agent_id in %v", payload)
 	}
 	childRT := mgr.getRuntime(childID)
 	if childRT == nil {

@@ -6,9 +6,13 @@
 
 ### 变更
 
-- **HTTP 硬切 `agent_id`**：`POST /v1/messages` 与 `GET /v1/streams` 过滤只认 `agent_id`；hydrate/context/ack/cancel/clear-context/skills/messages 成功响应去掉顶层 `session_id`（SSE 事件信封仍可带 `session_id`）。
+- **SSE 信封硬切 `agent_id`**：事件 JSON 去掉顶层 `session_id`；`agent_id` 为对话/Agent 实例 id（不再写 NodeID）。
+- **子 Agent 协议硬切 `child_agent_id`**：工具参数、HITL resume、SSE data、Web UI 由 `child_session_id(s)` 改为 `child_agent_id(s)`（`parent_session_id` → `parent_agent_id`）。
+- **API 内部命名**：`withAgentAsSession` → `withAgentRuntime`；hydrate/context/ack 等实现改为 `handleAgent*Impl`，path 直接读 `agent_id`。
+- **`/v1/sessions*`**：保留 410（`sessions_moved`）；注册函数改名为 `registerLegacySessionsGone`。
+- **HTTP 硬切 `agent_id`**：`POST /v1/messages` 与 `GET /v1/streams` 过滤只认 `agent_id`；hydrate/context/ack/cancel/clear-context/skills/messages 成功响应去掉顶层 `session_id`。
 - **Skills UI 去掉 `enabled` 迁移**：设置页/模板展开不再把旧 `defaults.skills.enabled=false` 改写成工具组；能力只看工具组 `skills`。
-- **child-agents HTTP 硬切 `*_agent_id`**：路径改为 `{child_agent_id}`；响应去掉 `parent_session_id` / `child_session_id` 双写（仅 `parent_agent_id` / `child_agent_id`）。工具参数与 SSE 仍用 `child_session_id`。
+- **child-agents HTTP 硬切 `*_agent_id`**：路径改为 `{child_agent_id}`；响应去掉 `parent_session_id` / `child_session_id` 双写（仅 `parent_agent_id` / `child_agent_id`）。
 - **Go Client 消息/SSE 发 `agent_id`**：`POST /v1/messages` 与 `GET /v1/streams` 过滤参数改用 `agent_id`；child-agents 列表项增加 `child_agent_id`。
 - **Manage Console**：删除未使用的 `sortSessions` 工具函数。
 - **文档对齐 sessions 下线**：handbook/契约外的设计与运维文档改为 `/v1/agents`（manage 通信、child-agents、media、smoke 清单、skills context 等）；历史 Shell 设计文保留路径并加 410 注记。

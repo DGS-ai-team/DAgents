@@ -20,14 +20,14 @@ func (s *Server) registerMediaRoutes() {
 }
 
 func (s *Server) handleGetAgentMedia(w http.ResponseWriter, r *http.Request) {
-	s.withAgentAsSession(s.handleGetSessionMedia)(w, r)
+	s.withAgentRuntime(s.handleAgentGetMediaImpl)(w, r)
 }
 
-func (s *Server) handleGetSessionMedia(w http.ResponseWriter, r *http.Request) {
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+func (s *Server) handleAgentGetMediaImpl(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.PathValue("agent_id"))
 	mediaID := strings.TrimSpace(r.PathValue("media_id"))
 	if sessionID == "" || mediaID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "session_id 与 media_id 必填", nil)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "agent_id 与 media_id 必填", nil)
 		return
 	}
 	art, absPath, err := s.sessions.OpenSessionMedia(sessionID, mediaID)

@@ -17,7 +17,7 @@ type fakeHost struct {
 
 func (f *fakeHost) ParentSessionActive(parentID string) bool { return f.parentOK }
 func (f *fakeHost) SpawnChild(spec SpawnSpec) error {
-	f.spawned = append(f.spawned, spec.ChildSessionID)
+	f.spawned = append(f.spawned, spec.ChildAgentID)
 	return nil
 }
 func (f *fakeHost) StopChild(string) {}

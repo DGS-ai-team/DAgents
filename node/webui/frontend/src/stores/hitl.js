@@ -39,7 +39,7 @@ export function clearHitl() {
 
 /** 队列去重 / resume 路由用的稳定 key。 */
 export function approvalQueueKey(data) {
-  const child = String(data?.child_session_id || "").trim();
+  const child = String(data?.child_agent_id || "").trim();
   if (child) return `child:${child}`;
   const a2aTask = String(data?.a2a_task_id || "").trim();
   if (a2aTask) return `a2a:${a2aTask}`;
@@ -80,7 +80,7 @@ import { normalizeToolCallItem } from "../utils/toolCalls.js";
 
 function attachApprovalRouting(data, resume) {
   const rv = { ...resume };
-  if (data?.child_session_id) rv.child_session_id = data.child_session_id;
+  if (data?.child_agent_id) rv.child_agent_id = data.child_agent_id;
   if (data?.approval_id) rv.approval_id = data.approval_id;
   if (data?.a2a_task_id) rv.a2a_task_id = data.a2a_task_id;
   return rv;
@@ -182,7 +182,7 @@ export function buildUserInfoResume(data, answer, selectedOptions = []) {
     selected_options: [...selectedOptions],
     cancelled: false,
   };
-  if (data?.child_session_id) rv.child_session_id = data.child_session_id;
+  if (data?.child_agent_id) rv.child_agent_id = data.child_agent_id;
   return rv;
 }
 
@@ -252,8 +252,8 @@ function memoryConflictDataFromHITLItem(item) {
 function hitlRoutingFieldsFromBatch(batch) {
   if (!batch || typeof batch !== "object") return {};
   const out = {};
-  const childId = String(batch.child_session_id || "").trim();
-  if (childId) out.child_session_id = childId;
+  const childId = String(batch.child_agent_id || "").trim();
+  if (childId) out.child_agent_id = childId;
   const scope = String(batch.hitl_scope || "").trim();
   if (scope) out.hitl_scope = scope;
   const purpose = String(batch.child_purpose || "").trim();
@@ -346,7 +346,7 @@ export function enqueueHitlRequired(data) {
 
 /** 对齐 Go hitl.ShouldSkipChildRuntimeDisplay：隐藏子 Agent turn 的运行时 SSE。 */
 export function shouldSkipChildRuntimeDisplay(eventType, data) {
-  const childId = String(data?.child_session_id || "").trim();
+  const childId = String(data?.child_agent_id || "").trim();
   if (!childId) return false;
   switch (eventType) {
     case "hitl_required":

@@ -6,7 +6,7 @@ describe("buildContextMessageView", () => {
     const view = buildContextMessageView(
       JSON.stringify({
         artifacts: [],
-        child_session_id: "child-639e3690aa52",
+        child_agent_id: "child-639e3690aa52",
         error: "",
         kind: "result",
         status: "completed",
@@ -31,7 +31,7 @@ describe("buildContextMessageView", () => {
     const view = buildContextMessageView(
       JSON.stringify({
         kind: "result",
-        child_session_id: "child-abc",
+        child_agent_id: "child-abc",
         status: "completed",
         summary: "完成",
       }),
