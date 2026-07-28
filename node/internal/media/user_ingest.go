@@ -191,7 +191,7 @@ func (r *Registry) registerExistingFile(id string, opts RegisterOpts) (*Artifact
 	}
 	art := &Artifact{
 		ID:        id,
-		SessionID: r.sessionID,
+		AgentID:   r.sessionID,
 		Kind:      kindImage,
 		MIME:      mime,
 		Source:    strings.TrimSpace(opts.Source),

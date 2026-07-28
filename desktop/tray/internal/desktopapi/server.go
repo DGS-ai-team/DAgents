@@ -126,11 +126,11 @@ func (s *Server) handleUIFocus(w http.ResponseWriter, r *http.Request) {
 		ttl = time.Duration(req.TTLSeconds) * time.Second
 	}
 	if s.uiFocus != nil {
-		s.uiFocus.Report(req.SessionID, ttl)
+		s.uiFocus.Report(req.AgentID, ttl)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"session_id": req.SessionID,
+		"ok":       true,
+		"agent_id": req.AgentID,
 	})
 }
 
@@ -168,6 +168,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 type uiFocusRequest struct {
-	SessionID  string `json:"session_id"`
+	AgentID    string `json:"agent_id"`
 	TTLSeconds int    `json:"ttl_seconds,omitempty"`
 }

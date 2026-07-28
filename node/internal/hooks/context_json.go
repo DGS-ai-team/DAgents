@@ -9,7 +9,7 @@ type hookContextDTO struct {
 	SessionID       string         `json:"session_id"`
 	AgentID         string         `json:"agent_id"`
 	TurnID          string         `json:"turn_id,omitempty"`
-	ParentSessionID string         `json:"parent_session_id,omitempty"`
+	ParentAgentID string         `json:"parent_agent_id,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 
 	MessageEnqueued    *MessageEnqueuedPayload    `json:"message_enqueued,omitempty"`
@@ -43,7 +43,7 @@ func contextToDTO(hc *Context) hookContextDTO {
 		SessionID:          hc.SessionID,
 		AgentID:            hc.AgentID,
 		TurnID:             hc.TurnID,
-		ParentSessionID:    hc.ParentSessionID,
+		ParentAgentID:    hc.ParentAgentID,
 		Metadata:           hc.Metadata,
 		MessageEnqueued:    hc.MessageEnqueued,
 		TurnBeforeCompress: hc.TurnBeforeCompress,

@@ -23,12 +23,12 @@ func TestWaitInboxTurnWithSub_doneBeforeHITL(t *testing.T) {
 
 	go func() {
 		time.Sleep(10 * time.Millisecond)
-		hub.Publish(sessionID, "agent", "done", map[string]any{
+		hub.Publish(sessionID, "done", map[string]any{
 			"turn_complete": false,
 			"awaiting":      "hitl",
 		})
 		time.Sleep(10 * time.Millisecond)
-		hub.Publish(sessionID, "agent", "hitl_required", map[string]any{
+		hub.Publish(sessionID, "hitl_required", map[string]any{
 			"hitl_id": "appr-race",
 			"message": "检测到工具调用，等待用户确认后继续执行。",
 			"items": []any{
@@ -36,7 +36,7 @@ func TestWaitInboxTurnWithSub_doneBeforeHITL(t *testing.T) {
 			},
 		})
 		time.Sleep(10 * time.Millisecond)
-		hub.Publish(sessionID, "agent", "done", map[string]any{
+		hub.Publish(sessionID, "done", map[string]any{
 			"turn_complete": false,
 			"awaiting":      "hitl",
 		})

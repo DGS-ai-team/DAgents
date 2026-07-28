@@ -70,7 +70,7 @@ func (b *A2ACallerHITLBridge) WaitCallerHITL(
 	attachA2APeerMeta(data, hitlPayload)
 	waiter.eventType = eventType
 	waiter.eventData = cloneEventData(data)
-	b.hub.Publish(callerSessionID, b.agentID, eventType, data)
+	b.hub.Publish(callerSessionID, eventType, data)
 	b.publishRelayTurnPause(callerSessionID, hitlPayload)
 
 	select {
@@ -142,7 +142,7 @@ func (b *A2ACallerHITLBridge) publishRelayTurnPause(callerSessionID string, hitl
 		"awaiting":      awaiting,
 		"a2a_relay":     true,
 	}
-	b.hub.Publish(callerSessionID, b.agentID, "done", payload)
+	b.hub.Publish(callerSessionID, "done", payload)
 }
 
 func relayHITLFinishReason(hitlPayload map[string]any) (finishReason, awaiting string) {

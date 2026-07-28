@@ -322,7 +322,7 @@ Content-Type: application/json
 
 | code | 场景 |
 |------|------|
-| `session_not_found` | 父 session 不存在 |
+| `agent_not_found` | 父 Agent 不存在 |
 | `child_agent_not_found` | id 不存在或不属于该父 session |
 | `child_agent_already_finished` | 已交付（幂等 200 返回终态亦可） |
 
