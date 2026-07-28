@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -390,7 +389,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()
-	s.registerChildAgentRoutes()
 	s.registerMediaRoutes()
 	s.registerPolicyRoutes()
 	s.registerLLMRoutes()
@@ -658,159 +656,6 @@ func (s *Server) handleAgentUpgradeReadiness(w http.ResponseWriter, _ *http.Requ
 	writeJSON(w, http.StatusOK, s.sessions.UpgradeReadiness())
 }
 
-type createSessionRequest struct {
-	SessionID *string `json:"session_id"`
-}
-
-type createSessionResponse struct {
-	SessionID string `json:"session_id"`
-	AgentID   string `json:"agent_id"`
-	Created   bool   `json:"created"`
-}
-
-func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	// POST /v1/sessions：可选 session_id；省略则 Node 生成并启动 consumer。
-	var req createSessionRequest
-	if err := decodeJSON(r, &req); err != nil && r.ContentLength > 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
-		return
-	}
-	requested := ""
-	if req.SessionID != nil {
-		requested = *req.SessionID
-	}
-	sess, created, err := s.sessions.Create(requested)
-	if err != nil {
-		s.logger.Error("create session failed", "requested_id", requested, "error", err)
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		return
-	}
-	s.logger.Debug("create session ok", "session_id", sess.ID, "created", created)
-	writeJSON(w, http.StatusOK, createSessionResponse{
-		SessionID: sess.ID,
-		AgentID:   sess.AgentID,
-		Created:   created,
-	})
-}
-
-type sessionSummary struct {
-	SessionID        string `json:"session_id"`
-	AgentID          string `json:"agent_id"`
-	Active           bool   `json:"active"`
-	MessageCount     int    `json:"message_count,omitempty"`
-	FirstUserMessage string `json:"first_user_message,omitempty"`
-	UpdatedAt        string `json:"updated_at,omitempty"`
-	// 以下字段仅在 active=true（内存活跃 session）时有意义。
-	QueuePending  int    `json:"queue_pending,omitempty"`
-	HasActiveTurn bool   `json:"has_active_turn,omitempty"`
-	RunTurnPhase  string `json:"run_turn_phase,omitempty"`
-	// F-E13 IM cursor（活跃与持久化 session 均可用）。
-	NotifySeq        int  `json:"notify_seq,omitempty"`
-	AckSeq           int  `json:"ack_seq,omitempty"`
-	HasUnread        bool `json:"has_unread,omitempty"`
-	HasPendingHITL   bool `json:"has_pending_hitl,omitempty"`
-	PendingHITLItems int  `json:"pending_hitl_items,omitempty"`
-}
-
-type listSessionsResponse struct {
-	Sessions []sessionSummary `json:"sessions"`
-}
-
-func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	// GET /v1/sessions：合并内存活跃 session 与 SQLite 持久化摘要（去重）。
-	active := s.sessions.ListActiveUser()
-	persisted, err := s.sessions.ListPersisted(r.Context())
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		return
-	}
-
-	seen := make(map[string]struct{}, len(active))
-	items := make([]sessionSummary, 0, len(active)+len(persisted))
-	for _, sess := range active {
-		seen[sess.ID] = struct{}{}
-		queuePending, hasActiveTurn, turnState, _ := s.sessions.RuntimeInfo(sess.ID)
-		count, _, _ := s.sessions.ContextSummary(sess.ID)
-		notify := s.sessions.NotificationState(sess.ID)
-		firstUser, updated := s.sessions.SessionDisplayMeta(sess.ID)
-		items = append(items, sessionSummary{
-			SessionID:        sess.ID,
-			AgentID:          sess.AgentID,
-			Active:           true,
-			MessageCount:     count,
-			FirstUserMessage: firstUser,
-			UpdatedAt:        updated.UTC().Format(time.RFC3339Nano),
-			QueuePending:     queuePending,
-			HasActiveTurn:    hasActiveTurn,
-			RunTurnPhase:     turn.RunTurnPhase(turnState),
-			NotifySeq:        notify.NotifySeq,
-			AckSeq:           notify.AckSeq,
-			HasUnread:        notify.HasUnread,
-			HasPendingHITL:   notify.HasPendingHITL,
-			PendingHITLItems: notify.PendingHITLItems,
-		})
-	}
-	for _, sum := range persisted {
-		if _, ok := seen[sum.SessionID]; ok {
-			continue // 已在内存活跃列表中出现过
-		}
-		notify := s.sessions.NotificationState(sum.SessionID)
-		items = append(items, sessionSummary{
-			SessionID:        sum.SessionID,
-			AgentID:          sum.AgentID,
-			Active:           false,
-			MessageCount:     sum.MessageCount,
-			FirstUserMessage: sum.FirstUserMessage,
-			UpdatedAt:        sum.UpdatedAt.UTC().Format(time.RFC3339Nano),
-			RunTurnPhase:     persistedRunTurnPhase(notify.HasPendingHITL),
-			NotifySeq:        notify.NotifySeq,
-			AckSeq:           notify.AckSeq,
-			HasUnread:        notify.HasUnread,
-			HasPendingHITL:   notify.HasPendingHITL,
-			PendingHITLItems: notify.PendingHITLItems,
-		})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		ti, ei := time.Parse(time.RFC3339Nano, items[i].UpdatedAt)
-		tj, ej := time.Parse(time.RFC3339Nano, items[j].UpdatedAt)
-		if ei != nil {
-			ti = time.Time{}
-		}
-		if ej != nil {
-			tj = time.Time{}
-		}
-		return ti.After(tj)
-	})
-	writeJSON(w, http.StatusOK, listSessionsResponse{Sessions: items})
-}
-
-type deleteSessionResponse struct {
-	SessionID string `json:"session_id"`
-	Released  bool   `json:"released"`
-}
-
-func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
-	// DELETE /v1/sessions/{id}：停止 consumer 并删除 SQLite 行。
-	sessionID := strings.TrimSpace(r.PathValue("session_id"))
-	if sessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", "session_id is required", nil)
-		return
-	}
-	released, err := s.sessions.Delete(sessionID)
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
-		return
-	}
-	if !released {
-		writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
-		return
-	}
-	writeJSON(w, http.StatusOK, deleteSessionResponse{
-		SessionID: sessionID,
-		Released:  true,
-	})
-}
-
 type clearContextResponse struct {
 	SessionID     string `json:"session_id"`
 	Cleared       bool   `json:"cleared"`
@@ -956,13 +801,6 @@ type sessionHydrateResponse struct {
 	AckSeq          int                       `json:"ack_seq"`
 	HasUnread       bool                      `json:"has_unread"`
 	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
-}
-
-func persistedRunTurnPhase(hasPendingHITL bool) string {
-	if hasPendingHITL {
-		return string(turn.TaskPhaseAwaitingHITL)
-	}
-	return string(turn.TaskPhaseComplete)
 }
 
 func (s *Server) handleSessionHydrate(w http.ResponseWriter, r *http.Request) {
