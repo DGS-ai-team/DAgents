@@ -30,6 +30,7 @@ describe("agentTemplateForm", () => {
     );
     expect(draft.templateId).toBe("ops-runner");
     expect(draft.sandboxEnabled).toBe(true);
+    expect(draft.sandboxBackend).toBe("docker");
     expect(draft.llmProfileId).toBe("deepseek");
     expect(draft.toolGroups).toEqual(["fs", "bash"]);
     expect(draft.visibleSkills).toBeNull();
@@ -74,7 +75,7 @@ describe("agentTemplateForm", () => {
       description: "日常助手",
       role: "assistant",
       sandboxEnabled: false,
-      sandboxBackend: "process",
+      sandboxBackend: "docker",
       workspaceSubdir: "data",
       fsRootIsolation: false,
       allowBash: true,
@@ -91,6 +92,8 @@ describe("agentTemplateForm", () => {
     });
     expect(payload.template_id).toBe("general");
     expect(payload.display_name).toBe("我的助手");
+    expect(payload.sandbox.enabled).toBe(false);
+    expect(payload.sandbox.backend).toBe("process");
     expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_tool_loops: 16 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "skills"]);
     expect(payload.defaults.skills).toEqual({
@@ -124,6 +127,8 @@ describe("agentTemplateForm", () => {
     });
     expect(patch.template_id).toBeUndefined();
     expect(patch.display_name).toBe("改名");
+    expect(patch.sandbox.enabled).toBe(true);
+    expect(patch.sandbox.backend).toBe("docker");
     expect(patch.defaults.tools.enabled_groups).toEqual(["fs"]);
     expect(patch.defaults.skills).toEqual({});
   });
@@ -147,6 +152,8 @@ describe("agentTemplateForm", () => {
       ["deepseek"],
     );
     expect(draft.displayName).toBe("已有");
+    expect(draft.sandboxEnabled).toBe(true);
+    expect(draft.sandboxBackend).toBe("docker");
     expect(draft.toolGroups).toEqual(["bash"]);
     expect(draft.visibleSkills).toEqual(["write-skill"]);
     expect(draft.promptLongTermEnabled).toBe(false);
@@ -238,6 +245,41 @@ describe("agentTemplateForm", () => {
     expect(payload.defaults.child_agents.enabled).toBe(false);
     expect(payload.defaults.skills).toEqual({});
     expect(payload.sandbox.enabled).toBe(true);
+    expect(payload.sandbox.backend).toBe("docker");
+  });
+
+  it("builds remote sandbox payload when enabled", () => {
+    const payload = buildCreateAgentPayload({
+      displayName: "远程沙箱",
+      llmProfileId: "default",
+      maxToolLoops: 32,
+      toolGroups: ["fs"],
+      visibleSkills: null,
+      childAgentsEnabled: true,
+      sandboxEnabled: true,
+      sandboxBackend: "remote",
+      sandboxRemoteEndpoint: "https://sbx.example.com",
+      sandboxRemoteAPIKey: "secret",
+      workspaceSubdir: "data",
+      fsRootIsolation: false,
+      allowBash: true,
+      allowNetworkTools: false,
+      promptSoulEnabled: true,
+      promptUserEnabled: true,
+      promptCustomEnabled: true,
+      promptLongTermEnabled: true,
+      role: "assistant",
+      description: "",
+    });
+    expect(payload.sandbox).toMatchObject({
+      enabled: true,
+      backend: "remote",
+      fs_root_isolation: true,
+      remote_endpoint: "https://sbx.example.com",
+      remote_api_key: "secret",
+      allow_network_tools: false,
+    });
+    expect(payload.sandbox.image).toBeUndefined();
   });
 
   it("reads llm active from agent view snapshot", () => {

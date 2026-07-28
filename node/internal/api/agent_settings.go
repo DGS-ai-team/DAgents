@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
@@ -21,6 +22,8 @@ type sandboxPatch struct {
 	Network           *string `json:"network"`
 	Memory            *string `json:"memory"`
 	CPUs              *string `json:"cpus"`
+	RemoteEndpoint    *string `json:"remote_endpoint"`
+	RemoteAPIKey      *string `json:"remote_api_key"`
 }
 
 func applySandboxPatch(base agentruntime.SandboxSpec, patch *sandboxPatch) (agentruntime.SandboxSpec, error) {
@@ -61,6 +64,12 @@ func applySandboxPatch(base agentruntime.SandboxSpec, patch *sandboxPatch) (agen
 	if patch.CPUs != nil {
 		out.CPUs = strings.TrimSpace(*patch.CPUs)
 	}
+	if patch.RemoteEndpoint != nil {
+		out.RemoteEndpoint = strings.TrimSpace(*patch.RemoteEndpoint)
+	}
+	if patch.RemoteAPIKey != nil {
+		out.RemoteAPIKey = strings.TrimSpace(*patch.RemoteAPIKey)
+	}
 	return normalizeSandbox(out)
 }
 
@@ -70,7 +79,7 @@ func normalizeSandbox(s agentruntime.SandboxSpec) (agentruntime.SandboxSpec, err
 		backend = "process"
 	}
 	switch backend {
-	case "process", "docker":
+	case "process", "docker", "remote":
 		s.Backend = backend
 	default:
 		return s, errInvalidSandboxBackend
@@ -78,9 +87,11 @@ func normalizeSandbox(s agentruntime.SandboxSpec) (agentruntime.SandboxSpec, err
 	if strings.TrimSpace(s.WorkspaceSubdir) == "" {
 		s.WorkspaceSubdir = "data"
 	}
-	if s.Enabled && s.Backend == "docker" {
-		// Docker 必须隔离工作区，否则容器挂载点语义不清。
+	// docker / remote 为隔离沙箱；process 表示宿主机（或历史「应用层约束」，仍可读旧快照）。
+	if s.Enabled && (s.Backend == "docker" || s.Backend == "remote") {
 		s.FSRootIsolation = true
+	}
+	if s.Enabled && s.Backend == "docker" {
 		if strings.TrimSpace(s.Image) == "" {
 			s.Image = "dagents-sandbox:latest"
 		}
@@ -88,21 +99,46 @@ func normalizeSandbox(s agentruntime.SandboxSpec) (agentruntime.SandboxSpec, err
 			s.Network = "none"
 		}
 	}
+	if s.Enabled && s.Backend == "remote" {
+		if strings.TrimSpace(s.RemoteEndpoint) == "" {
+			return s, errRemoteEndpointRequired
+		}
+	}
 	return s, nil
 }
 
-var errInvalidSandboxBackend = errString("sandbox.backend must be process|docker")
+var (
+	errInvalidSandboxBackend  = errString("sandbox.backend must be process|docker|remote")
+	errRemoteEndpointRequired = errString("remote 沙箱需要 remote_endpoint")
+	errRemoteNotImplemented   = errString("远程沙箱尚未实现，请改用本机 Docker 或关闭沙箱")
+)
 
 type errString string
 
 func (e errString) Error() string { return string(e) }
 
-// requireDockerSandboxReady 在启用 docker 沙箱时校验本机 Docker CLI。
+func writeSandboxReadyError(w http.ResponseWriter, err error) {
+	code := "docker_unavailable"
+	if err != nil && strings.Contains(err.Error(), "远程沙箱") {
+		code = "remote_unavailable"
+	}
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	writeAPIError(w, http.StatusBadRequest, code, msg, nil)
+}
+
+// requireDockerSandboxReady 在启用 docker 沙箱时校验本机 Docker CLI；remote 暂未实现。
 func requireDockerSandboxReady(s agentruntime.SandboxSpec) error {
 	if !s.Enabled {
 		return nil
 	}
-	if strings.ToLower(strings.TrimSpace(s.Backend)) != "docker" {
+	backend := strings.ToLower(strings.TrimSpace(s.Backend))
+	if backend == "remote" {
+		return errRemoteNotImplemented
+	}
+	if backend != "docker" {
 		return nil
 	}
 	return sandbox.RequireDocker()
@@ -123,22 +159,31 @@ func sandboxFromTemplate(tpl *agenttemplate.Template) agentruntime.SandboxSpec {
 		Network:           tpl.Sandbox.Network,
 		Memory:            tpl.Sandbox.Memory,
 		CPUs:              tpl.Sandbox.CPUs,
+		RemoteEndpoint:    tpl.Sandbox.RemoteEndpoint,
+		RemoteAPIKey:      tpl.Sandbox.RemoteAPIKey,
 	}
 }
 
 func sandboxToMap(s agentruntime.SandboxSpec) map[string]any {
-	return map[string]any{
-		"enabled":              s.Enabled,
-		"backend":              s.Backend,
-		"workspace_subdir":     s.WorkspaceSubdir,
-		"fs_root_isolation":    s.FSRootIsolation,
-		"allow_bash":           s.AllowBash,
-		"allow_network_tools":  s.AllowNetworkTools,
-		"image":                s.Image,
-		"network":              s.Network,
-		"memory":               s.Memory,
-		"cpus":                 s.CPUs,
+	m := map[string]any{
+		"enabled":             s.Enabled,
+		"backend":             s.Backend,
+		"workspace_subdir":    s.WorkspaceSubdir,
+		"fs_root_isolation":   s.FSRootIsolation,
+		"allow_bash":          s.AllowBash,
+		"allow_network_tools": s.AllowNetworkTools,
+		"image":               s.Image,
+		"network":             s.Network,
+		"memory":              s.Memory,
+		"cpus":                s.CPUs,
 	}
+	if strings.TrimSpace(s.RemoteEndpoint) != "" {
+		m["remote_endpoint"] = s.RemoteEndpoint
+	}
+	if strings.TrimSpace(s.RemoteAPIKey) != "" {
+		m["remote_api_key"] = s.RemoteAPIKey
+	}
+	return m
 }
 
 func marshalAgentSnapshot(templateID string, defaults map[string]any, sandbox agentruntime.SandboxSpec) (json.RawMessage, error) {

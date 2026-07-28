@@ -6,6 +6,9 @@
 
 ### 变更
 
+- **沙箱设置 UI**：启用沙箱后选择模式（本机 Docker / 远程预留）并配置对应参数；去掉将 `process` 表述为「沙箱后端」的选项（未启用 = 宿主机 + 工具约束）。
+- **沙箱 API**：`backend` 支持 `remote`（需 `remote_endpoint`）；远程运行时尚未实现，启用时返回 `remote_unavailable`。
+
 - **API 错误码对齐**：对外 `session_not_found` 改为 `agent_not_found`，details 使用 `agent_id`。
 - **托盘 Desktop UI focus**：`POST /v1/desktop/ui/focus` 请求/响应字段改为 `agent_id`。
 - **`stream.Publish` 签名收口**：去掉未使用的 NodeID 第二参，统一 `Publish(agentID, eventType, data)`。
