@@ -186,11 +186,37 @@ export function buildUserInfoResume(data, answer, selectedOptions = []) {
   return rv;
 }
 
+/**
+ * 把 UI 当前选中态解析为 option id 列表。
+ * - 单选：selected 为 options 下标（Number）
+ * - 多选：selected 为 option id 数组
+ * 不在此静默回退到首项；由调用方决定 required 空选如何处理。
+ */
+export function resolveUserInfoSelectionIds(req, selected) {
+  const options = Array.isArray(req?.options) ? req.options : [];
+  if (!options.length) return [];
+  if (req.allowMultiple) {
+    if (!Array.isArray(selected)) return [];
+    const allowed = new Set(options.map((o) => String(o.id)));
+    return selected
+      .map((id) => String(id || "").trim())
+      .filter((id) => id && allowed.has(id));
+  }
+  // 单选只接受数字下标；[] / 对象等不能靠 Number([])===0 误解析成首项
+  if (typeof selected !== "number" || !Number.isInteger(selected)) return [];
+  if (selected < 0 || selected >= options.length) return [];
+  const id = String(options[selected]?.id || "").trim();
+  return id ? [id] : [];
+}
+
 export function buildUserInfoResumeFromSelection(data, selectedIds) {
   const req = extractUserInfo(data);
   const selected = new Set(selectedIds.map((id) => String(id).trim()).filter(Boolean));
-  const labels = req.options.filter((o) => selected.has(o.id)).map((o) => o.label);
-  return buildUserInfoResume(data, labels.join(", "), [...selected].sort());
+  // answer 用 value（提交值），与 option id 区分；缺省时 extractUserInfo 已回落到 label
+  const answers = req.options
+    .filter((o) => selected.has(o.id))
+    .map((o) => o.value || o.label);
+  return buildUserInfoResume(data, answers.join(", "), [...selected].sort());
 }
 
 export function extractMemoryConflict(data) {

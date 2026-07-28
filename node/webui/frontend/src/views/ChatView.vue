@@ -58,6 +58,7 @@ import {
   extractUserInfo,
   buildUserInfoResume,
   buildUserInfoResumeFromSelection,
+  resolveUserInfoSelectionIds,
   buildMemoryConflictResume,
   enqueueHitlRequired,
   shouldSkipChildRuntimeDisplay,
@@ -448,24 +449,25 @@ async function submitHitlMemoryConflict(hitlIndex, decision, { cancelled = false
   }
 }
 
+function onHitlUserInfoSelected(v) {
+  // 必须在 <script> 里写 ref.value；模板中顶层 ref 已自动解包，写 .value 不会更新选中态。
+  hitlSelected.value = Array.isArray(v) ? [...v] : Number(v);
+}
+
 async function submitHitlUserInfo(hitlIndex, text) {
   const item = getHitlAt(hitlIndex);
   if (!item || item.kind !== "user_information") return;
   const req = extractUserInfo(item.data);
   let resume;
   if (req.options.length) {
-    let selectedIds = [];
-    if (req.allowMultiple) {
-      selectedIds = Array.isArray(hitlSelected.value)
-        ? hitlSelected.value.map((id) => String(id || "").trim()).filter(Boolean)
-        : [];
-    } else {
-      const idx = Number(hitlSelected.value);
-      const opt = Number.isInteger(idx) ? req.options[idx] : req.options[0];
-      if (opt?.id) selectedIds = [opt.id];
+    let selectedIds = resolveUserInfoSelectionIds(req, hitlSelected.value);
+    // 单选且用户未点选：气泡默认高亮首项，与 UI 一致回落到 index 0
+    if (!selectedIds.length && !req.allowMultiple) {
+      selectedIds = resolveUserInfoSelectionIds(req, 0);
     }
-    if (!selectedIds.length && req.required && req.options.length) {
-      selectedIds = [req.options[0].id];
+    if (!selectedIds.length && req.required) {
+      agentStore.error = "请先选择选项再提交";
+      return;
     }
     resume = buildUserInfoResumeFromSelection(item.data, selectedIds);
   } else {
@@ -1010,7 +1012,7 @@ onUnmounted(() => {
         @approve-one="(payload) => submitHitlOne(payload, true)"
         @reject-one="(payload) => submitHitlOne(payload, false)"
         @user-info-submit="(idx) => submitHitlUserInfo(idx, '')"
-        @user-info-selected="(v) => { hitlSelected.value = v; }"
+        @user-info-selected="onHitlUserInfoSelected"
         @memory-conflict-decide="(payload) => submitHitlMemoryConflict(payload.index, payload.decision)"
         @memory-conflict-cancel="(idx) => submitHitlMemoryConflict(idx, 'cancelled', { cancelled: true })"
       />

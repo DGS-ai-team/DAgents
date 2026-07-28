@@ -48,13 +48,14 @@ function onMultiToggle(id, checked) {
             <input
               v-if="req.allowMultiple"
               type="checkbox"
-              :checked="selectedSet.has(opt.id)"
+              :checked="selectedSet.has(String(opt.id))"
               @change="onMultiToggle(opt.id, $event.target.checked)"
             />
             <input
               v-else
               type="radio"
-              :checked="selected === idx"
+              name="user-info-option"
+              :checked="Number(selected) === idx"
               @change="onSingleSelect(idx)"
             />
             <span>{{ opt.label }}</span>

@@ -4,6 +4,7 @@ import {
   buildApprovalOneResume,
   buildApprovalSelectionResume,
   buildUserInfoResumeFromSelection,
+  resolveUserInfoSelectionIds,
   approvalQueueKey,
   clearHitl,
   dequeueHitlAt,
@@ -97,7 +98,41 @@ describe("user_information multi-select", () => {
     expect(resume.type).toBe("user_information");
     expect(resume.tool_call_id).toBe("ask-1");
     expect(resume.selected_options).toEqual(["a", "b"]);
-    expect(resume.answer).toBe("选项A, 选项B");
+    expect(resume.answer).toBe("A, B");
+  });
+});
+
+describe("resolveUserInfoSelectionIds", () => {
+  const multiReq = {
+    allowMultiple: true,
+    options: [
+      { id: "go", label: "继续", value: "go" },
+      { id: "stop", label: "停止", value: "stop" },
+      { id: "retry", label: "重试", value: "retry" },
+    ],
+  };
+  const singleReq = {
+    allowMultiple: false,
+    options: multiReq.options,
+  };
+
+  it("maps single-select index to option id (not always first)", () => {
+    expect(resolveUserInfoSelectionIds(singleReq, 0)).toEqual(["go"]);
+    expect(resolveUserInfoSelectionIds(singleReq, 1)).toEqual(["stop"]);
+    expect(resolveUserInfoSelectionIds(singleReq, 2)).toEqual(["retry"]);
+  });
+
+  it("returns empty for invalid single-select index (no silent first fallback)", () => {
+    expect(resolveUserInfoSelectionIds(singleReq, [])).toEqual([]);
+    expect(resolveUserInfoSelectionIds(singleReq, Number.NaN)).toEqual([]);
+    expect(resolveUserInfoSelectionIds(singleReq, 99)).toEqual([]);
+    expect(resolveUserInfoSelectionIds(singleReq, "1")).toEqual([]);
+  });
+
+  it("keeps multi-select ids and drops unknown ids", () => {
+    expect(resolveUserInfoSelectionIds(multiReq, ["retry", "go"])).toEqual(["retry", "go"]);
+    expect(resolveUserInfoSelectionIds(multiReq, ["retry", "nope"])).toEqual(["retry"]);
+    expect(resolveUserInfoSelectionIds(multiReq, [])).toEqual([]);
   });
 });
 

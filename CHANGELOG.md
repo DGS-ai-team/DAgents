@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **HITL 选项回传错位**：ChatView 在模板里写 `hitlSelected.value = v` 因 Vue 自动解包未真正更新选中态，提交时静默落成首项；改为 script 内同步，并按真实选中解析 `selected_options` / `answer`（option `value`）。
 ### 变更
 
 - **Tauri 安装向导改为便携单文件**：去掉 NSIS「先安装向导再装程序」外层；`dagents-setup-*.exe` 双击即开，编译期嵌入 Inno 并静默落地。
