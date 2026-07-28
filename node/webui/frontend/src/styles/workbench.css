@@ -1929,6 +1929,12 @@
   border-color: var(--color-border-strong);
 }
 
+.chat__activity-pill--compress {
+  border-color: rgba(217, 119, 6, 0.35);
+  background: rgba(217, 119, 6, 0.08);
+  color: var(--color-text-muted);
+}
+
 .chat__composer-statusline-right {
   flex: 0 0 auto;
   margin-left: auto;
@@ -2788,6 +2794,11 @@
 .composer-toolbar__pulse--think {
   background: #0891b2;
   box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.18);
+}
+
+.composer-toolbar__pulse--compress {
+  background: #d97706;
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.18);
 }
 
 @keyframes composer-pulse {

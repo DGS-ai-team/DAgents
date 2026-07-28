@@ -3,10 +3,11 @@ import { reactive } from "vue";
 const PHASE_LABELS = {
   prefilling: "准备回复",
   thinking: "思考中",
-  compression_blocking: "压缩上下文",
+  compression: "正在压缩上下文",
 };
 
-export const statusPhaseOrder = ["prefilling", "thinking", "compression_blocking"];
+/** 对话流气泡中展示的相位（不含压缩；压缩只在下方状态栏）。 */
+export const statusPhaseOrder = ["prefilling", "thinking"];
 
 export const statusStore = reactive({
   phases: {},

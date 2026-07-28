@@ -14,7 +14,7 @@ import { hasStreamingKind, hasStreamingTextContent } from "../stores/transcript.
 import { chromeStore, inputStripRight } from "../stores/chrome.js";
 import { workerStripText } from "../stores/remoteWorkers.js";
 import { toolJobsStore } from "../stores/toolJobs.js";
-import { statusStore, statusPhaseOrder, hasStatus } from "../stores/statusLines.js";
+import { statusStore, statusPhaseOrder, hasStatus, formatStatusText } from "../stores/statusLines.js";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 import { getDesktopClipboardFiles } from "../api/desktop.js";
@@ -94,6 +94,13 @@ const activeStatusPhases = computed(() => {
     if (phase === "prefilling" && hasStreamingTextContent()) return false;
     return true;
   });
+});
+
+const compressionStatusText = computed(() => {
+  void statusStore.tick;
+  const state = statusStore.phases.compression;
+  if (!state) return "";
+  return formatStatusText("compression", state);
 });
 
 const pendingApprovals = computed(() =>
@@ -564,6 +571,13 @@ defineExpose({
           >
             <span class="chat__activity-pill-label">审批</span>
             <span class="chat__activity-pill-cmd">{{ pendingApprovals }}</span>
+          </span>
+          <span
+            v-if="compressionStatusText"
+            class="chat__activity-pill chat__activity-pill--static chat__activity-pill--compress"
+            title="上下文压缩进行中"
+          >
+            <span class="chat__activity-pill-label">{{ compressionStatusText }}</span>
           </span>
           <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
           <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>

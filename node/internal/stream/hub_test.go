@@ -10,8 +10,8 @@ func TestHubPublishSubscribe(t *testing.T) {
 	ch := h.Subscribe(0)
 	defer h.Unsubscribe(ch)
 
-	h.Publish("sess-1", "agent-a", "assistant", map[string]any{"content": "hi"})
-	h.Publish("sess-1", "agent-a", "done", map[string]any{"finish_reason": "stop"})
+	h.Publish("sess-1", "assistant", map[string]any{"content": "hi"})
+	h.Publish("sess-1", "done", map[string]any{"finish_reason": "stop"})
 
 	var types []string
 	for i := 0; i < 2; i++ {
@@ -28,8 +28,8 @@ func TestHubPublishSubscribe(t *testing.T) {
 
 func TestHubReplayAfterSeq(t *testing.T) {
 	h := NewHub(16, nil)
-	h.Publish("s", "a", "assistant", map[string]any{"content": "1"})
-	h.Publish("s", "a", "assistant", map[string]any{"content": "2"})
+	h.Publish("s", "assistant", map[string]any{"content": "1"})
+	h.Publish("s", "assistant", map[string]any{"content": "2"})
 
 	ch := h.Subscribe(1)
 	defer h.Unsubscribe(ch)
@@ -45,7 +45,7 @@ func TestHubCurrentSeq(t *testing.T) {
 	if got := h.CurrentSeq(); got != 0 {
 		t.Fatalf("initial seq = %d", got)
 	}
-	h.Publish("s", "a", "assistant", map[string]any{"content": "1"})
+	h.Publish("s", "assistant", map[string]any{"content": "1"})
 	if got := h.CurrentSeq(); got != 1 {
 		t.Fatalf("after publish seq = %d", got)
 	}
@@ -53,10 +53,10 @@ func TestHubCurrentSeq(t *testing.T) {
 
 func TestHubSubscribeLiveSkipsHistory(t *testing.T) {
 	h := NewHub(16, nil)
-	h.Publish("s", "a", "assistant", map[string]any{"content": "old"})
+	h.Publish("s", "assistant", map[string]any{"content": "old"})
 	ch := h.Subscribe(h.CurrentSeq())
 	defer h.Unsubscribe(ch)
-	h.Publish("s", "a", "assistant", map[string]any{"content": "new"})
+	h.Publish("s", "assistant", map[string]any{"content": "new"})
 	select {
 	case ev := <-ch:
 		if ev.Data["content"] != "new" {

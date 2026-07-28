@@ -36,12 +36,21 @@ cp dist/dagents-local-assistant-windows-amd64-installer-*.exe \
 ```bash
 # 从仓库根目录
 bash packaging/bootstrapper/scripts/package-with-inno.sh 0.8.4
+# 或：VERSION=0.8.4 bash scripts/ci/build_windows_setup_bootstrapper.sh
 ```
 
 脚本会：
 
 1. 把 `dist/dagents-local-assistant-windows-amd64-installer-*.exe` 拷入 `src-tauri/resources/`
 2. 执行 `npm run tauri build`（NSIS 外层包，内嵌 Inno payload）
+3. 复制为 `dist/dagents-setup-windows-amd64-{VERSION}.exe`
+
+**Release / manual-package CI** 会同时发布：
+
+| 产物 | 用途 |
+|------|------|
+| `dagents-local-assistant-windows-amd64-installer-*.exe` | 纯 Inno（服务器/精简环境后备） |
+| `dagents-setup-windows-amd64-*.exe` | Tauri 向导（内嵌 Inno） |
 
 ## 与 Inno 的关系
 

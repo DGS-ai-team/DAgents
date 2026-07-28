@@ -465,14 +465,14 @@ func (c *Coordinator) publishCompressionEvent(
 	for k, v := range payload {
 		data[k] = v
 	}
-	hub.Publish(sessionID, agentID, compressionEventType(triggerLevel), data)
+	hub.Publish(sessionID, compressionEventType(triggerLevel), data)
 }
 
 func (c *Coordinator) emitBlockingFailure(sessionID, agentID string, hub *stream.Hub) {
 	if hub == nil {
 		return
 	}
-	hub.Publish(sessionID, agentID, "error", map[string]any{
+	hub.Publish(sessionID, "error", map[string]any{
 		"message":     "上下文阻塞压缩失败，已继续使用原始上下文。",
 		"recoverable": true,
 		"stage":       "summary_compression",

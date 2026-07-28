@@ -37,6 +37,10 @@ const thinkingActive = computed(() => {
   void statusStore.tick;
   return hasStatus("thinking") && !hasStreamingKind("reasoning");
 });
+const compressionActive = computed(() => {
+  void statusStore.tick;
+  return hasStatus("compression");
+});
 
 function closeMenu() {
   open.value = false;
@@ -85,6 +89,7 @@ onBeforeUnmount(() => {
   <div class="composer-toolbar">
     <span v-if="prefillingActive" class="composer-toolbar__pulse composer-toolbar__pulse--prefill" title="prefilling" />
     <span v-if="thinkingActive" class="composer-toolbar__pulse composer-toolbar__pulse--think" title="thinking" />
+    <span v-if="compressionActive" class="composer-toolbar__pulse composer-toolbar__pulse--compress" title="正在压缩上下文" />
 
     <div v-if="showProfileSwitch" ref="rootRef" class="composer-toolbar__profile">
       <button

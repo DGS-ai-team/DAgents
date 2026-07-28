@@ -14,7 +14,7 @@
 
 ```
 turn.Orchestrator / session / childagent
-        → Hub.Publish(sessionID, agentID, type, data)
+        → Hub.Publish(agentID, type, data)
         → GET /v1/streams 长连接推送给 Client
 ```
 

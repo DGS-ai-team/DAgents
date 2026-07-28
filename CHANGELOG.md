@@ -9,6 +9,9 @@
 - **删除 `/v1/sessions*` 410 桩**：不再注册 sessions 路由（404）；错误码 `sessions_moved` 退役。
 - **对话持久化表 `agent_runtimes`**：`sessions(session_id, agent_id)` 迁移为 `agent_runtimes(agent_id, node_id)`；Go `store.Record` 字段同步（`AgentID` / `NodeID`）；启动时自动迁旧表。
 - **内部/API 错误码**：`session_not_found` → `agent_not_found`（details 用 `agent_id`）。
+- **托盘 Desktop UI focus**：`POST /v1/desktop/ui/focus` 请求/响应字段改为 `agent_id`。
+- **`stream.Publish` 签名收口**：去掉未使用的 NodeID 第二参，统一 `Publish(agentID, eventType, data)`。
+- **Media / hooks 字段**：media artifact 改为 `agent_id`；hook JSON `parent_session_id` 改为 `parent_agent_id`。
 - **SSE 信封硬切 `agent_id`**：事件 JSON 去掉顶层 `session_id`；`agent_id` 为对话/Agent 实例 id（不再写 NodeID）。
 - **子 Agent 协议硬切 `child_agent_id`**：工具参数、HITL resume、SSE data、Web UI 由 `child_session_id(s)` 改为 `child_agent_id(s)`（`parent_session_id` → `parent_agent_id`）。
 - **API 内部命名**：`withAgentAsSession` → `withAgentRuntime`；hydrate/context/ack 等实现改为 `handleAgent*Impl`，path 直接读 `agent_id`。

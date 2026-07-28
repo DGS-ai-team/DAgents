@@ -67,7 +67,7 @@ func TestThumbnailFromFileSkipsSmallImage(t *testing.T) {
 }
 
 func TestArtifactThumbnailURL(t *testing.T) {
-	art := Artifact{SessionID: "sess-1", ID: "med_abc"}
+	art := Artifact{AgentID: "sess-1", ID: "med_abc"}
 	want := "/v1/agents/sess-1/media/med_abc?thumbnail=1"
 	if art.ThumbnailURL() != want {
 		t.Fatalf("got %q want %q", art.ThumbnailURL(), want)
