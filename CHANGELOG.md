@@ -6,6 +6,8 @@
 
 ### 变更
 
+- **LLM 配置探测模型**：设置 › 连接中新建/编辑档案支持「测试并拉取模型」；Node 代理 `POST /v1/setup/llm/probe-models` 请求兼容 `/models`，成功后下拉选择模型并建议 provider，失败仍可手动填写。
+
 - **API 错误码对齐**：对外 `session_not_found` 改为 `agent_not_found`，details 使用 `agent_id`。
 - **托盘 Desktop UI focus**：`POST /v1/desktop/ui/focus` 请求/响应字段改为 `agent_id`。
 - **`stream.Publish` 签名收口**：去掉未使用的 NodeID 第二参，统一 `Publish(agentID, eventType, data)`。
