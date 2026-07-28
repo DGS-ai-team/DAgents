@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 将已构建的 Inno 安装包嵌入 Tauri Setup 并打包。
+# 将已构建的 Inno 安装包嵌入便携 Tauri Setup 单文件。
 # 用法（仓库根）：bash packaging/bootstrapper/scripts/package-with-inno.sh [version]
 #
 # 产物（并存发布）：
-#   dist/dagents-setup-windows-amd64-{VERSION}.exe  — Tauri NSIS 外层向导（内嵌 Inno）
+#   dist/dagents-setup-windows-amd64-{VERSION}.exe  — 便携向导（内嵌 Inno；双击即开，无 NSIS 外层）
 # Inno 裸包仍由 scripts/ci/build_windows_installer.sh 产出，二者一并发布。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -22,9 +22,10 @@ if [[ -z "${PAYLOAD}" ]]; then
   exit 1
 fi
 
+# 开发旁路仍可把 Inno 放进 resources/；发版靠 DAGENTS_INNO_PAYLOAD 嵌入二进制。
 rm -f "${RES}"/dagents-local-assistant-windows-amd64-installer-*.exe
 cp -f "${PAYLOAD}" "${RES}/"
-echo "[bootstrapper] embedded payload: $(basename "${PAYLOAD}")"
+echo "[bootstrapper] payload: $(basename "${PAYLOAD}")"
 
 cd "${BOOT}"
 if [[ ! -d node_modules ]]; then
@@ -55,20 +56,40 @@ cargo.write_text(c, encoding="utf-8")
 print(f"[bootstrapper] version -> {ver}")
 PY
 
+export DAGENTS_INNO_PAYLOAD="${PAYLOAD}"
+# 强制重编以带上嵌入 payload（避免沿用无嵌入的缓存产物）。
+touch src-tauri/build.rs
 npm run tauri build
 
-BUNDLE_NSIS="${BOOT}/src-tauri/target/release/bundle/nsis"
-SETUP_SRC="$(ls -1 "${BUNDLE_NSIS}"/*setup.exe 2>/dev/null | sort | tail -n 1 || true)"
+RELEASE_DIR="${BOOT}/src-tauri/target/release"
+SETUP_SRC=""
+for cand in \
+  "${RELEASE_DIR}/dagents-setup.exe" \
+  "${RELEASE_DIR}/dagents-setup" \
+  "${RELEASE_DIR}/DAgents Setup.exe"
+do
+  if [[ -f "${cand}" ]]; then
+    SETUP_SRC="${cand}"
+    break
+  fi
+done
+
+# 兼容旧路径：若仍产出了 NSIS，取其 exe（不应再走此分支）。
 if [[ -z "${SETUP_SRC}" ]]; then
-  SETUP_SRC="$(ls -1 "${BUNDLE_NSIS}"/*.exe 2>/dev/null | sort | tail -n 1 || true)"
+  BUNDLE_NSIS="${BOOT}/src-tauri/target/release/bundle/nsis"
+  SETUP_SRC="$(ls -1 "${BUNDLE_NSIS}"/*setup.exe 2>/dev/null | sort | tail -n 1 || true)"
+  if [[ -z "${SETUP_SRC}" ]]; then
+    SETUP_SRC="$(ls -1 "${BUNDLE_NSIS}"/*.exe 2>/dev/null | sort | tail -n 1 || true)"
+  fi
 fi
+
 if [[ -z "${SETUP_SRC}" || ! -f "${SETUP_SRC}" ]]; then
-  echo "error: Tauri NSIS 产物未找到（${BUNDLE_NSIS}）" >&2
-  ls -la "${BUNDLE_NSIS}" 2>/dev/null || true
+  echo "error: 便携 Setup 产物未找到（${RELEASE_DIR}）" >&2
+  ls -la "${RELEASE_DIR}" 2>/dev/null || true
   ls -laR "${BOOT}/src-tauri/target/release/bundle" 2>/dev/null || true
   exit 1
 fi
 
 cp -f "${SETUP_SRC}" "${OUT_DIR}/${OUT_NAME}"
-echo "[bootstrapper] ${OUT_DIR}/${OUT_NAME}"
+echo "[bootstrapper] portable (no NSIS outer): ${OUT_DIR}/${OUT_NAME}"
 ls -lh "${OUT_DIR}/${OUT_NAME}"
