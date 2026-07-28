@@ -135,7 +135,7 @@ Session
 Web UI
     → tool_result SSE / hydrate entry 见 media[]
     → <img src="{url}?token=…"> 或 Authorization header（见 §4.2）
-    → GET /v1/sessions/{session_id}/media/{media_id}
+    → GET /v1/agents/{agent_id}/media/{media_id}
     → Node 读 rel_path → stream bytes（Content-Type / Cache-Control）
 ```
 
@@ -145,13 +145,13 @@ Web UI
 
 ## 4. API 设计
 
-### 4.1 `GET /v1/sessions/{session_id}/media/{media_id}`
+### 4.1 `GET /v1/agents/{agent_id}/media/{media_id}`
 
 **用途**：UI `<img>` / 新标签打开 / 下载。
 
 | 项 | 说明 |
 |----|------|
-| 鉴权 | 与 Node 其它 API 相同（`Authorization` / 配置 API key）；**须**校验 `media.session_id == path session_id` |
+| 鉴权 | 与 Node 其它 API 相同（`Authorization` / 配置 API key）；**须**校验 `media.session_id == path agent_id`（内部 session 与 agent 同 id） |
 | 响应 | `200` + `Content-Type: image/*`；`404` media 不存在或文件已删 |
 | Query | `thumbnail=1`（P2）：最长边 ≤480px，JPEG/PNG/GIF 服务端缩放；WebP 暂回退原图 |
 | 缓存 | `Cache-Control: private, max-age=3600`；artifact 不可变（id 对应固定文件） |
@@ -163,7 +163,7 @@ Web UI
 **推荐（P0）**：相对 URL + 与 `apiFetch` 相同鉴权头（`fetch` blob → `object URL`，或 cookie-less Bearer）。
 
 ```http
-GET /v1/sessions/sess_abc/media/med_01HXYZ
+GET /v1/agents/sess_abc/media/med_01HXYZ
 Authorization: Bearer <node_api_key>
 ```
 
@@ -183,7 +183,7 @@ Authorization: Bearer <node_api_key>
       "id": "med_01HXYZ",
       "kind": "image",
       "mime": "image/png",
-      "url": "/v1/sessions/sess_abc/media/med_01HXYZ",
+      "url": "/v1/agents/sess_abc/media/med_01HXYZ",
       "label": "browser_snapshot",
       "width": 1280,
       "height": 720
@@ -207,7 +207,7 @@ Authorization: Bearer <node_api_key>
       "id": "med_01HABC",
       "kind": "image",
       "mime": "image/png",
-      "url": "/v1/sessions/sess_abc/media/med_01HABC",
+      "url": "/v1/agents/sess_abc/media/med_01HABC",
       "label": "show_image",
       "caption": "本季度趋势"
     }
@@ -248,7 +248,7 @@ Authorization: Bearer <node_api_key>
 
 **去重（F-H9）**：若 SSE 已展示某 `media.id`，hydrate 合并时按 `id` 跳过重复渲染。
 
-### 4.5 可选：`POST /v1/sessions/{session_id}/media`（P1）
+### 4.5 可选：`POST /v1/agents/{agent_id}/media`（P1）
 
 用户发图前先上传 multipart，返回 `{ id, url }`，`POST /v1/messages` 的 `content_parts` 改为 **引用 URL** 而非巨型 `data:`。  
 P0 可在 **Enqueue 时服务端从 data URL 落盘** 代替独立 upload 端点。

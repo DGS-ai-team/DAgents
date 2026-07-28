@@ -242,7 +242,7 @@ Docker 后端要点：
 
 ### 6.2 移除 / 不实现
 
-- `POST/GET /v1/sessions`（v0.8 直接删除，无兼容期）
+- `POST/GET /v1/sessions`（已完成：固定 **410** / `sessions_moved`）
 - Go `dagents-client tui|chat`
 - Python `dagents chat`
 - `local.agent_id` 客户端校验字段 → 改为可选 `node_id` 校验

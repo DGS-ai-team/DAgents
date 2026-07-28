@@ -6,6 +6,7 @@
 
 ### 变更
 
+- **文档对齐 sessions 下线**：handbook/契约外的设计与运维文档改为 `/v1/agents`（manage 通信、child-agents、media、smoke 清单、skills context 等）；历史 Shell 设计文保留路径并加 410 注记。
 - **Go Client Agent 命名**：`GetSessionContext` / `DeleteSession` / `SessionHydrate` 等改为 `GetAgentContext` / `DeleteAgent` / `AgentHydrate` 等；JSON 字段名不变。
 - **删除 sessions CRUD 死代码**：去掉未挂载的 `handleCreateSession` / `handleListSessions` / `handleDeleteSession` 及相关响应类型；`/v1/sessions*` 仅保留 410 桩。
 - **Go Client / 托盘 Session 别名删除**：移除 `CreateSession` / `ListSessions` / `SessionSummary` / `SyncFromSessions`；统一 `EnsureAgent` / `ListAgents` / `AgentSummary` / `SyncFromAgents`。
