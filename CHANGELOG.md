@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+---
+
+## [0.8.4] - 2026-07-28
+
+**Agent 契约收口与设置体验**：sessions 过渡债清理；沙箱模式选择；LLM 配置可探测模型列表。
+
 ### 变更
 
 - **LLM 配置探测模型**：设置 › 连接中新建/编辑档案支持「测试并拉取模型」；Node 代理 `POST /v1/setup/llm/probe-models` 请求兼容 `/models`，成功后下拉选择模型并建议 provider，失败仍可手动填写。
@@ -55,6 +61,8 @@
 - **CI：Windows Tauri Shell 构建**：`scripts/ci/build_dagents_shell_tauri.sh` + `.github/workflows/tauri-shell.yml`；`build-and-release` / `manual-package` 的 Windows 作业产出 `dagents-shell-tauri.exe` 预览产物（不替换安装包内 Go Shell）。
 - **Tauri 安装向导（可选）**：`packaging/bootstrapper` 提供现代多步 Setup UI，嵌入并静默调用现有 Inno 安装包；未嵌入 payload 时支持演示模式预览。
 - **企业微信消息推送工具**：`wecom_send_markdown`（markdown_v2）与 `wecom_send_file`（自动 upload_media）；在设置 › 能力 配置 Webhook，工具组 `wecom`。
+
+（Git **tag**：`v0.8.4`。）
 
 ---
 
