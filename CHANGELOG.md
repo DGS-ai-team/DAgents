@@ -10,36 +10,36 @@
 - **沙箱 API**：`backend` 支持 `remote`（需 `remote_endpoint`）；远程运行时尚未实现，启用时返回 `remote_unavailable`。
 
 - **API 错误码对齐**：对外 `session_not_found` 改为 `agent_not_found`，details 使用 `agent_id`。
+- **删除 `/v1/sessions*` 410 桩**：不再注册 sessions 路由（404）；错误码 `sessions_moved` 退役。
+- **对话持久化表 `agent_runtimes`**：`sessions(session_id, agent_id)` 迁移为 `agent_runtimes(agent_id, node_id)`；Go `store.Record` 字段同步（`AgentID` / `NodeID`）；启动时自动迁旧表。
+- **内部/API 错误码**：`session_not_found` → `agent_not_found`（details 用 `agent_id`）。
 - **托盘 Desktop UI focus**：`POST /v1/desktop/ui/focus` 请求/响应字段改为 `agent_id`。
 - **`stream.Publish` 签名收口**：去掉未使用的 NodeID 第二参，统一 `Publish(agentID, eventType, data)`。
 - **Media / hooks 字段**：media artifact 改为 `agent_id`；hook JSON `parent_session_id` 改为 `parent_agent_id`。
 - **SSE 信封硬切 `agent_id`**：事件 JSON 去掉顶层 `session_id`；`agent_id` 为对话/Agent 实例 id（不再写 NodeID）。
 - **子 Agent 协议硬切 `child_agent_id`**：工具参数、HITL resume、SSE data、Web UI 由 `child_session_id(s)` 改为 `child_agent_id(s)`（`parent_session_id` → `parent_agent_id`）。
 - **API 内部命名**：`withAgentAsSession` → `withAgentRuntime`；hydrate/context/ack 等实现改为 `handleAgent*Impl`，path 直接读 `agent_id`。
-- **`/v1/sessions*`**：保留 410（`sessions_moved`）；注册函数改名为 `registerLegacySessionsGone`。
 - **HTTP 硬切 `agent_id`**：`POST /v1/messages` 与 `GET /v1/streams` 过滤只认 `agent_id`；hydrate/context/ack/cancel/clear-context/skills/messages 成功响应去掉顶层 `session_id`。
 - **Skills UI 去掉 `enabled` 迁移**：设置页/模板展开不再把旧 `defaults.skills.enabled=false` 改写成工具组；能力只看工具组 `skills`。
 - **child-agents HTTP 硬切 `*_agent_id`**：路径改为 `{child_agent_id}`；响应去掉 `parent_session_id` / `child_session_id` 双写（仅 `parent_agent_id` / `child_agent_id`）。
 - **Go Client 消息/SSE 发 `agent_id`**：`POST /v1/messages` 与 `GET /v1/streams` 过滤参数改用 `agent_id`；child-agents 列表项增加 `child_agent_id`。
 - **Manage Console**：删除未使用的 `sortSessions` 工具函数。
-- **文档对齐 sessions 下线**：handbook/契约外的设计与运维文档改为 `/v1/agents`（manage 通信、child-agents、media、smoke 清单、skills context 等）；历史 Shell 设计文保留路径并加 410 注记。
+- **文档对齐 sessions 下线**：handbook/契约外的设计与运维文档改为 `/v1/agents`（manage 通信、child-agents、media、smoke 清单、skills context 等）；历史 Shell 设计文保留路径并加移除注记。
 - **Go Client Agent 命名**：`GetSessionContext` / `DeleteSession` / `SessionHydrate` 等改为 `GetAgentContext` / `DeleteAgent` / `AgentHydrate` 等；JSON 字段名不变。
-- **删除 sessions CRUD 死代码**：去掉未挂载的 `handleCreateSession` / `handleListSessions` / `handleDeleteSession` 及相关响应类型；`/v1/sessions*` 仅保留 410 桩。
+- **删除 sessions CRUD 死代码**：去掉未挂载的 `handleCreateSession` / `handleListSessions` / `handleDeleteSession` 及相关响应类型。
 - **Go Client / 托盘 Session 别名删除**：移除 `CreateSession` / `ListSessions` / `SessionSummary` / `SyncFromSessions`；统一 `EnsureAgent` / `ListAgents` / `AgentSummary` / `SyncFromAgents`。
 - **A2A HITL legacy 删除**：caller 侧仅接受含 `items[]` 的现代 `hitl_required` 载荷，不再转换旧 `approval_args` / `user_information_args`。
 - **Skills 能力开关**：运行时不再读 `defaults.skills.enabled`；仅由 Node 总闸 + 工具组 `skills` 决定；写入侧也不再写 `enabled:false`。
-- **`/v1/sessions*` 下线**：全部返回 **410 Gone**（`sessions_moved`），对齐 `/v1/policy`；对话 hydrate/context/cancel/skills/child-agents/media 仅走 `/v1/agents/{agent_id}/...`；媒体 `PublicURL` 改为 agents 路径。
 - **HITL 旧事件收口**：本机 SSE / WebUI / 托盘 / inbox 等待仅认 `hitl_required`；A2A requires_input 出站强制 `event_type=hitl_required`。
 - **Go Client Agent API**：新增 `ListAgents` / `AgentSummary`。
 - **Skills payload**：新建/更新 Agent 时 `defaults.skills` 仅写 `visible` 白名单。
 - **工具 Registry 装配统一**：默认表与 per-agent Registry 共用 `attachNodeRuntimeDeps`（后台任务回灌、media、browser、manage、wecom、triggers）；去掉 tool-jobs / hydrate 对 `DefaultTools` 的回退。
-- **异步回灌可观测**：`EnqueueAsyncToolResult` / `EnqueueToolResult` 在 session 不存在时返回 `session_not_found` 并打 Warn，不再静默丢弃。
+- **异步回灌可观测**：`EnqueueAsyncToolResult` / `EnqueueToolResult` 在 Agent 不存在时返回 `agent_not_found` 并打 Warn，不再静默丢弃。
 - **HITL SSE 收口**：A2A caller 中继统一发 `hitl_required`；子 Agent `RelayHub` 对 `hitl_required` 打 scope。
 - **Go Client 迁 `/v1/agents`**：session 相关路径改为 agents；创建/ensure 走 Agent API。
 - **LLM 多模态不再广播**：进程级切换 LLM 档案只更新默认 Registry；已装入 Agent 的多模态在 ensure/reload 时按绑定档案生效。
 - **Skills 开关收敛**：Agent 技能能力与工具组 `skills` 对齐；可见白名单仍用 `defaults.skills.visible`；Node `skills.enabled` 仍为进程总闸。
 - **setup 热挂载**：配置保存后经 `attachNodeRuntimeDeps` 刷新默认工具表，不再单点只挂 WeCom。
-- **sessions child-agents Deprecation**：`/v1/sessions/.../child-agents*` 补齐 Deprecation/Sunset 头。
 
 ### 修复
 

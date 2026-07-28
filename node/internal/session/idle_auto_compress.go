@@ -66,7 +66,7 @@ func (m *Manager) scanIdleSessionMaintenance(ctx context.Context) {
 	}
 	for _, sum := range persisted {
 		m.mu.RLock()
-		_, active := m.sessions[sum.SessionID]
+		_, active := m.sessions[sum.AgentID]
 		m.mu.RUnlock()
 		if active {
 			continue
@@ -81,17 +81,17 @@ func (m *Manager) scanIdleAutoCompress(ctx context.Context) {
 }
 
 func (m *Manager) tryPersistedIdleMaintenance(ctx context.Context, sum store.Summary, threshold time.Duration, minTokens int, now time.Time) {
-	rec, err := m.store.Load(ctx, sum.SessionID)
+	rec, err := m.store.Load(ctx, sum.AgentID)
 	if err != nil || rec == nil || len(rec.Messages) == 0 {
 		return
 	}
 	if now.Sub(rec.UpdatedAt) < threshold {
 		return
 	}
-	rt, err := m.ensureRuntime(sum.SessionID)
+	rt, err := m.ensureRuntime(sum.AgentID)
 	if err != nil || rt == nil {
 		m.logger.Warn("idle session maintenance restore session failed",
-			"session_id", sum.SessionID,
+			"agent_id", sum.AgentID,
 			"error", err,
 		)
 		return

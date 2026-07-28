@@ -69,7 +69,7 @@ func (s *Server) handleAgentWorkspaceActivity(w http.ResponseWriter, r *http.Req
 		id := r.PathValue("agent_id")
 		_, msgs, err := s.sessions.ContextSummary(id)
 		if err != nil {
-			if err.Error() == "session_not_found" {
+			if err.Error() == "agent_not_found" {
 				writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在或尚未激活", map[string]any{"agent_id": id})
 				return
 			}

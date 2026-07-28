@@ -24,7 +24,7 @@ func TestHandleSessionAck(t *testing.T) {
 
 	sessionID := "sess-ack-test"
 	if err := st.Save(context.Background(), store.Record{
-		SessionID: sessionID,
+		AgentID: sessionID,
 		Messages:  []llm.Message{{Role: "user", Content: "hi"}},
 		RuntimeState: store.RuntimeState{
 			NotifySeq: 42,

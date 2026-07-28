@@ -9,7 +9,7 @@
 |------|------|
 | **用户面主键** | **Agent**（`agent_id`）。1 Agent = 1 主对话；Session 仅为内部实现 |
 | **推荐路径** | `/v1/agents/{agent_id}/...`（ensure / hydrate / context / cancel / skills / child-agents / media / **policy** / **prompt-context**） |
-| **`/v1/sessions*`** | **已下线（410）**；错误码 `sessions_moved`；请改用 `/v1/agents/{agent_id}/...` |
+| **`/v1/sessions*`** | **已移除**（未注册路由 → 404）；请改用 `/v1/agents/{agent_id}/...` |
 | **`/v1/policy*`** | **已下线（410）**；策略按 Agent 存 `agents.db`（`agent_policy` 表） |
 | **侧车 Markdown** | 按 Agent 存 `agents.db`（`agent_prompt_context`）；开关仍在 `config_snapshot_json.defaults.prompt_context` |
 | **Manage 注册** | 载荷主字段为 `node_id`（`agent_id` 仅为兼容旧 Manage，值同 `node_id`）；`manage.enabled` 默认关 |
@@ -31,7 +31,7 @@
 |------|--------|------|
 | `/v1/agents/...` | Client（本地） | **主契约**：对话、策略、侧车、子 Agent |
 | `/v1/...` | Client（本地） | messages、streams、triggers、setup、llm |
-| `/v1/sessions/...` | 已下线（410） | 见 §0 |
+| `/v1/sessions/...` | 已移除（404） | 见 §0 |
 | `/health` | 探活 | 负载均衡 / 运维脚本 |
 
 ### 1.2 通用错误体
@@ -46,7 +46,7 @@
 }
 ```
 
-常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`a2a_target_not_exposed`、`llm_error`、`tool_error`、`policy_moved`、`sessions_moved`。
+常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`a2a_target_not_exposed`、`llm_error`、`tool_error`、`policy_moved`。
 
 ### 1.3 认证（Phase 递进）
 
@@ -136,9 +136,9 @@ Content-Type: application/json
 
 注入开关仍通过 Agent 快照 `defaults.prompt_context.*_enabled`（设置页「侧车与长期记忆」）。
 
-### 2.5 Sessions（已下线）
+### 2.5 Sessions（已移除）
 
-`/v1/sessions*` 固定返回 **410 Gone**（`sessions_moved`），对齐已下线的 `/v1/policy*`。对话、hydrate、context、cancel、skills、child-agents、media 一律走 `/v1/agents/{agent_id}/...`。
+`/v1/sessions*` 路由已删除（不再返回 410 `sessions_moved`）。对话、hydrate、context、cancel、skills、child-agents、media 一律走 `/v1/agents/{agent_id}/...`。
 
 ### 2.6 消息与 resume
 

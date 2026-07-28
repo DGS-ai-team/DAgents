@@ -38,7 +38,7 @@ func testConfig(t *testing.T) *config.Config {
 	return cfg
 }
 
-// createTestRuntime 在无 agents store 的单测中直接创建内存 runtime（/v1/sessions 已 410）。
+// createTestRuntime 在无 agents store 的单测中直接创建内存 runtime（/v1/sessions 路由已移除）。
 func createTestRuntime(t *testing.T, srv *Server) string {
 	t.Helper()
 	if srv == nil || srv.sessions == nil {
@@ -143,7 +143,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	return srv, ts
 }
 
-func TestSessionsGone(t *testing.T) {
+func TestSessionsRoutesRemoved(t *testing.T) {
 	_, ts := newTestServer(t)
 	defer ts.Close()
 
@@ -171,19 +171,9 @@ func TestSessionsGone(t *testing.T) {
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if resp.StatusCode != http.StatusGone {
+		// 410 桩已删除：路由不再注册，应为 404（非 Gone / sessions_moved）。
+		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("%s %s status=%d body=%s", tc.method, tc.path, resp.StatusCode, body)
-		}
-		var errBody struct {
-			Error struct {
-				Code string `json:"code"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(body, &errBody); err != nil {
-			t.Fatalf("%s %s decode: %v body=%s", tc.method, tc.path, err, body)
-		}
-		if errBody.Error.Code != "sessions_moved" {
-			t.Fatalf("%s %s code=%q", tc.method, tc.path, errBody.Error.Code)
 		}
 	}
 }

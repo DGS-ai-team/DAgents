@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-// BumpNotifySeq 将 session 的 notify_seq 推进至 max(当前, seq)；无记录时忽略。
-func (s *SQLiteStore) BumpNotifySeq(ctx context.Context, sessionID string, seq int) error {
+// BumpNotifySeq 将 Agent 的 notify_seq 推进至 max(当前, seq)；无记录时忽略。
+func (s *SQLiteStore) BumpNotifySeq(ctx context.Context, agentID string, seq int) error {
 	if s == nil || seq <= 0 {
 		return nil
 	}
-	rec, err := s.Load(ctx, strings.TrimSpace(sessionID))
+	rec, err := s.Load(ctx, strings.TrimSpace(agentID))
 	if err != nil {
 		return err
 	}
@@ -25,19 +25,19 @@ func (s *SQLiteStore) BumpNotifySeq(ctx context.Context, sessionID string, seq i
 	return s.Save(ctx, *rec)
 }
 
-// AckSession 更新 ack_seq 并返回更新后的 RuntimeState；session 不存在时返回 nil, nil。
-func (s *SQLiteStore) AckSession(ctx context.Context, sessionID string, sseSeq int) (*RuntimeState, error) {
+// AckSession 更新 ack_seq 并返回更新后的 RuntimeState；Agent 不存在时返回 nil, nil。
+func (s *SQLiteStore) AckSession(ctx context.Context, agentID string, sseSeq int) (*RuntimeState, error) {
 	if s == nil {
 		return nil, fmt.Errorf("store is nil")
 	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
 	}
 	if sseSeq <= 0 {
 		return nil, fmt.Errorf("sse_seq must be positive")
 	}
-	rec, err := s.Load(ctx, sessionID)
+	rec, err := s.Load(ctx, agentID)
 	if err != nil {
 		return nil, err
 	}
