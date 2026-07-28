@@ -16,11 +16,18 @@ func TestClientCreateMessageStream(t *testing.T) {
 	var mu sync.Mutex
 	seq := 0
 	sessionID := "sess-test"
+	var gotMessageAgentID string
+	var gotStreamAgentID string
 
 	mux.HandleFunc("POST /v1/agents/"+sessionID+"/ensure", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "agent_id": sessionID})
 	})
-	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if v, ok := body["agent_id"].(string); ok {
+			gotMessageAgentID = v
+		}
 		go func() {
 			time.Sleep(20 * time.Millisecond)
 			mu.Lock()
@@ -30,6 +37,7 @@ func TestClientCreateMessageStream(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"accepted": true})
 	})
 	mux.HandleFunc("GET /v1/streams", func(w http.ResponseWriter, r *http.Request) {
+		gotStreamAgentID = r.URL.Query().Get("agent_id")
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
 
@@ -95,6 +103,12 @@ func TestClientCreateMessageStream(t *testing.T) {
 	}
 	if !strings.Contains(text.String(), "hi") {
 		t.Fatalf("text = %q", text.String())
+	}
+	if gotMessageAgentID != sessionID {
+		t.Fatalf("POST /v1/messages agent_id = %q, want %q", gotMessageAgentID, sessionID)
+	}
+	if gotStreamAgentID != sessionID {
+		t.Fatalf("GET /v1/streams agent_id = %q, want %q", gotStreamAgentID, sessionID)
 	}
 }
 

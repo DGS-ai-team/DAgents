@@ -59,16 +59,6 @@ export function riskPillClass(level) {
   return "pill-risk-medium";
 }
 
-export function sortSessions(sessions) {
-  return [...(sessions || [])].sort((a, b) => {
-    if (Boolean(b.active) !== Boolean(a.active)) return Number(b.active) - Number(a.active);
-    if (Boolean(b.has_active_turn) !== Boolean(a.has_active_turn)) {
-      return Number(b.has_active_turn) - Number(a.has_active_turn);
-    }
-    return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
-  });
-}
-
 export function touchLastRefreshedLabel() {
   const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
   return `更新于 ${now}`;
