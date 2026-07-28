@@ -566,7 +566,7 @@ type ImageURLPart struct {
 // SubmitUserMessage 调用 POST /v1/messages；contentParts 非空时发送多模态 user 消息。
 func (c *Client) SubmitUserMessage(ctx context.Context, agentID, content string, contentParts []ContentPart) error {
 	body := map[string]any{
-		"session_id":   agentID,
+		"agent_id":     agentID,
 		"request_type": "message",
 		"content":      content,
 	}
@@ -588,7 +588,7 @@ func (c *Client) SubmitUserMessage(ctx context.Context, agentID, content string,
 // SubmitResume 调用 POST /v1/messages 投递 HITL resume。
 func (c *Client) SubmitResume(ctx context.Context, agentID string, resumeValue map[string]any) error {
 	body := map[string]any{
-		"session_id":   agentID,
+		"agent_id":     agentID,
 		"request_type": "resume",
 		"resume_value": resumeValue,
 	}
@@ -606,14 +606,15 @@ func (c *Client) SubmitResume(ctx context.Context, agentID string, resumeValue m
 
 // ChildAgentListItem 为 GET child-agents 列表项。
 type ChildAgentListItem struct {
-	ChildSessionID string `json:"child_session_id"`
-	Status         string `json:"status"`
-	Purpose        string `json:"purpose"`
+	ChildAgentID   string   `json:"child_agent_id"`
+	ChildSessionID string   `json:"child_session_id"` // 兼容旧字段；等于 ChildAgentID
+	Status         string   `json:"status"`
+	Purpose        string   `json:"purpose"`
 	AllowedTools   []string `json:"allowed_tools"`
-	CreatedAt      string `json:"created_at"`
-	ExpiresAt      string `json:"expires_at"`
-	TurnCount      int    `json:"turn_count"`
-	MaxTurns       int    `json:"max_turns"`
+	CreatedAt      string   `json:"created_at"`
+	ExpiresAt      string   `json:"expires_at"`
+	TurnCount      int      `json:"turn_count"`
+	MaxTurns       int      `json:"max_turns"`
 }
 
 // ListChildAgents 返回父 Agent 下活跃子 Agent 列表。
@@ -626,11 +627,15 @@ func (c *Client) ListChildAgents(ctx context.Context, parentAgentID string) ([]C
 	if err := c.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
 	}
+	for i := range resp.Items {
+		if strings.TrimSpace(resp.Items[i].ChildAgentID) == "" {
+			resp.Items[i].ChildAgentID = resp.Items[i].ChildSessionID
+		}
+	}
 	return resp.Items, nil
 }
 
-// StreamEvents 订阅 GET /v1/streams，按 agent/session_id 过滤（可选），逐条回调 handler。
-
+// StreamEvents 订阅 GET /v1/streams，按 agent_id 过滤（可选），逐条回调 handler。
 // handler 返回 false 时提前结束；ctx 取消时退出。
 // 异常：非 200、读流错误向上返回。
 func (c *Client) StreamEvents(
@@ -641,7 +646,7 @@ func (c *Client) StreamEvents(
 ) error {
 	q := url.Values{}
 	if strings.TrimSpace(agentID) != "" {
-		q.Set("session_id", agentID)
+		q.Set("agent_id", agentID)
 	}
 	q.Set("live", "1")
 	streamURL := c.base + "/v1/streams"

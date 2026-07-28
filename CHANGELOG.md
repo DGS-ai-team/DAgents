@@ -6,6 +6,8 @@
 
 ### 变更
 
+- **Go Client 消息/SSE 发 `agent_id`**：`POST /v1/messages` 与 `GET /v1/streams` 过滤参数改用 `agent_id`（Node 仍接受旧 `session_id`）；child-agents 列表项增加 `child_agent_id`。
+- **Manage Console**：删除未使用的 `sortSessions` 工具函数。
 - **文档对齐 sessions 下线**：handbook/契约外的设计与运维文档改为 `/v1/agents`（manage 通信、child-agents、media、smoke 清单、skills context 等）；历史 Shell 设计文保留路径并加 410 注记。
 - **Go Client Agent 命名**：`GetSessionContext` / `DeleteSession` / `SessionHydrate` 等改为 `GetAgentContext` / `DeleteAgent` / `AgentHydrate` 等；JSON 字段名不变。
 - **删除 sessions CRUD 死代码**：去掉未挂载的 `handleCreateSession` / `handleListSessions` / `handleDeleteSession` 及相关响应类型；`/v1/sessions*` 仅保留 410 桩。
