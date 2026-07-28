@@ -119,8 +119,8 @@ func TestClientCancelTurn(t *testing.T) {
 	mux.HandleFunc("POST /v1/agents/"+sessionID+"/cancel", func(w http.ResponseWriter, _ *http.Request) {
 		cancelled = true
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"session_id": sessionID,
-			"cancelled":  true,
+			"agent_id": sessionID,
+			"cancelled": true,
 		})
 	})
 	ts := httptest.NewServer(mux)

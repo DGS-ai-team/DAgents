@@ -159,7 +159,7 @@ resume 示例（审批，与 `node/internal/hitl/resume.go` 一致）：
 
 ```json
 {
-  "session_id": "sess-7f2a...",
+  "agent_id": "agt-xxx",
   "request_type": "resume",
   "resume_value": {
     "type": "selection",
@@ -173,7 +173,7 @@ resume 示例（审批，与 `node/internal/hitl/resume.go` 一致）：
 
 ```json
 {
-  "session_id": "sess-7f2a...",
+  "agent_id": "agt-xxx",
   "request_type": "resume",
   "resume_value": {
     "type": "user_information",
@@ -189,13 +189,13 @@ resume 示例（审批，与 `node/internal/hitl/resume.go` 一致）：
 响应：
 
 ```json
-{ "accepted": true, "session_id": "sess-7f2a...", "priority": "human" }
+{ "accepted": true, "agent_id": "agt-xxx", "priority": "human" }
 ```
 
 ### 2.4 SSE 事件流
 
 ```http
-GET /v1/streams?session_id=sess-7f2a...
+GET /v1/streams?agent_id=agt-xxx
 Accept: text/event-stream
 Last-Event-ID: 42
 ```

@@ -194,7 +194,7 @@ func TestHandleStreamsConnectsImmediately(t *testing.T) {
 
 	sessionID := createTestRuntime(t, srv)
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+sessionID+"&live=1", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?agent_id="+sessionID+"&live=1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 	sessionID := createTestRuntime(t, srv)
 
 	// 先订阅 SSE
-	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+sessionID, nil)
+	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?agent_id="+sessionID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 	}
 
 	// 发送消息
-	msgBody := `{"session_id":"` + sessionID + `","request_type":"message","content":"你好"}`
+	msgBody := `{"agent_id":"` + sessionID + `","request_type":"message","content":"你好"}`
 	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
@@ -289,11 +289,26 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 	}
 }
 
+func TestPostMessageRejectsSessionIDOnly(t *testing.T) {
+	_, ts := newTestServer(t)
+	defer ts.Close()
+
+	body := `{"session_id":"sess-old","request_type":"message","content":"x"}`
+	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
 func TestPostMessageSessionNotFound(t *testing.T) {
 	_, ts := newTestServer(t)
 	defer ts.Close()
 
-	body := `{"session_id":"sess-missing","request_type":"message","content":"x"}`
+	body := `{"agent_id":"sess-missing","request_type":"message","content":"x"}`
 	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +325,7 @@ func TestPostMessageAcceptsPythonClientFields(t *testing.T) {
 
 	sessionID := createTestRuntime(t, srv)
 
-	body := `{"session_id":"` + sessionID + `","request_type":"message","content":"hi","client_id":"ignored","source":"ignored"}`
+	body := `{"agent_id":"` + sessionID + `","request_type":"message","content":"hi","client_id":"ignored","source":"ignored"}`
 	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -359,7 +374,7 @@ func TestSessionPersistenceAPI(t *testing.T) {
 
 	sessionID := createTestRuntime(t, srv)
 
-	msgBody := `{"session_id":"` + sessionID + `","request_type":"message","content":"store-me"}`
+	msgBody := `{"agent_id":"` + sessionID + `","request_type":"message","content":"store-me"}`
 	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)

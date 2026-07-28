@@ -96,7 +96,7 @@ sandbox:
 	}
 	var msgResp postMessageResponse
 	_ = json.Unmarshal(rr.Body.Bytes(), &msgResp)
-	if msgResp.AgentID != created.AgentID || msgResp.SessionID != created.AgentID {
+	if msgResp.AgentID != created.AgentID {
 		t.Fatalf("msgResp=%+v", msgResp)
 	}
 
@@ -118,7 +118,7 @@ sandbox:
 	if rr.Code != http.StatusOK {
 		t.Fatalf("hydrate status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "session_id") && !strings.Contains(rr.Body.String(), created.AgentID) {
+	if !strings.Contains(rr.Body.String(), "agent_id") && !strings.Contains(rr.Body.String(), created.AgentID) {
 		t.Fatalf("hydrate body unexpected: %s", rr.Body.String())
 	}
 }
@@ -220,19 +220,15 @@ sandbox:
 	}
 }
 
-func TestResolveConversationID(t *testing.T) {
-	id, err := resolveConversationID("", "agt-1")
+func TestResolveAgentID(t *testing.T) {
+	id, err := resolveAgentID("agt-1")
 	if err != nil || id != "agt-1" {
 		t.Fatalf("%q %v", id, err)
 	}
-	id, err = resolveConversationID("agt-1", "agt-1")
-	if err != nil || id != "agt-1" {
-		t.Fatalf("%q %v", id, err)
+	if _, err := resolveAgentID(""); err == nil {
+		t.Fatal("expected required error")
 	}
-	if _, err := resolveConversationID("a", "b"); err == nil {
-		t.Fatal("expected mismatch error")
-	}
-	if _, err := resolveConversationID("", ""); err == nil {
+	if _, err := resolveAgentID("  "); err == nil {
 		t.Fatal("expected required error")
 	}
 }

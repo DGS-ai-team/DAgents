@@ -657,7 +657,7 @@ func (s *Server) handleAgentUpgradeReadiness(w http.ResponseWriter, _ *http.Requ
 }
 
 type clearContextResponse struct {
-	SessionID     string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
 	Cleared       bool   `json:"cleared"`
 	CancelledTurn bool   `json:"cancelled_turn"`
 }
@@ -679,7 +679,7 @@ func (s *Server) handleClearContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, clearContextResponse{
-		SessionID:     sessionID,
+		AgentID:       sessionID,
 		Cleared:       true,
 		CancelledTurn: cancelled,
 	})
@@ -694,7 +694,7 @@ type contextMessagePreview struct {
 }
 
 type sessionContextResponse struct {
-	SessionID             string                  `json:"session_id"`
+	AgentID               string                  `json:"agent_id"`
 	MessagesCount         int                     `json:"messages_count"`
 	PendingToolCallsCount int                     `json:"pending_tool_calls_count"`
 	MessagesTotalTokens   int                     `json:"messages_total_tokens"`
@@ -758,7 +758,7 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 	}
 	recent := buildContextMessagePreviews(view.Messages[start:], contextMessagePreviewRunes)
 	resp := sessionContextResponse{
-		SessionID:             view.SessionID,
+		AgentID:               view.SessionID,
 		MessagesCount:         view.MessagesCount,
 		PendingToolCallsCount: view.PendingToolCallsCount,
 		MessagesTotalTokens:   view.MessagesTotalTokens,
@@ -789,7 +789,7 @@ func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 }
 
 type sessionHydrateResponse struct {
-	SessionID       string                    `json:"session_id"`
+	AgentID         string                    `json:"agent_id"`
 	RunTurnPhase    string                    `json:"run_turn_phase"`
 	HasActiveTurn   bool                      `json:"has_active_turn"`
 	QueuePending    int                       `json:"queue_pending"`
@@ -837,7 +837,7 @@ func (s *Server) handleSessionHydrate(w http.ResponseWriter, r *http.Request) {
 		toolJobs["background"] = c.Background
 	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
-		SessionID:       view.SessionID,
+		AgentID:         view.SessionID,
 		RunTurnPhase:    runPhase,
 		HasActiveTurn:   view.HasActiveTurn,
 		QueuePending:    view.QueuePending,
@@ -857,7 +857,7 @@ type sessionAckRequest struct {
 }
 
 type sessionAckResponse struct {
-	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id"`
 	NotifySeq int    `json:"notify_seq"`
 	AckSeq    int    `json:"ack_seq"`
 	HasUnread bool   `json:"has_unread"`
@@ -891,7 +891,7 @@ func (s *Server) handleSessionAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, sessionAckResponse{
-		SessionID: sessionID,
+		AgentID:   sessionID,
 		NotifySeq: state.NotifySeq,
 		AckSeq:    state.AckSeq,
 		HasUnread: state.HasUnread,
@@ -916,8 +916,8 @@ func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
 	}
 	if result.Status == "busy" {
 		writeAPIError(w, http.StatusConflict, "turn_busy", "当前 turn 进行中，请稍后再试", map[string]any{
-			"session_id": sessionID,
-			"status":     result.Status,
+			"agent_id": sessionID,
+			"status":   result.Status,
 		})
 		return
 	}
@@ -925,7 +925,6 @@ func (s *Server) handleCompressContext(w http.ResponseWriter, r *http.Request) {
 }
 
 type postMessageRequest struct {
-	SessionID       string            `json:"session_id"`
 	AgentID         string            `json:"agent_id"`
 	RequestType     string            `json:"request_type"`
 	Content         string            `json:"content"`
@@ -935,38 +934,29 @@ type postMessageRequest struct {
 }
 
 type postMessageResponse struct {
-	Accepted  bool   `json:"accepted"`
-	SessionID string `json:"session_id"`
-	AgentID   string `json:"agent_id,omitempty"`
-	Priority  string `json:"priority"`
+	Accepted bool   `json:"accepted"`
+	AgentID  string `json:"agent_id"`
+	Priority string `json:"priority"`
 }
 
-func resolveConversationID(sessionID, agentID string) (string, error) {
-	sid := strings.TrimSpace(sessionID)
+func resolveAgentID(agentID string) (string, error) {
 	aid := strings.TrimSpace(agentID)
-	if sid != "" && aid != "" && sid != aid {
-		return "", fmt.Errorf("session_id and agent_id differ")
+	if aid == "" {
+		return "", fmt.Errorf("agent_id is required")
 	}
-	if sid != "" {
-		return sid, nil
-	}
-	if aid != "" {
-		return aid, nil
-	}
-	return "", fmt.Errorf("session_id or agent_id is required")
+	return aid, nil
 }
 
 func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
-	// POST /v1/messages：message 入队 human 优先级；resume 用于 HITL 续跑。
-	// Phase 2：接受 agent_id 作为 session_id 别名（1 Agent = 1 对话）。
+	// POST /v1/messages：message 入队 human 优先级；resume 用于 HITL 续跑。仅接受 agent_id。
 	var req postMessageRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	sessionID, err := resolveConversationID(req.SessionID, req.AgentID)
+	sessionID, err := resolveAgentID(req.AgentID)
 	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_session", err.Error(), nil)
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", err.Error(), nil)
 		return
 	}
 	// 若该 id 是 Agent 实例，先按快照装入 runtime（避免重启后落到默认沙箱配置）。
@@ -984,10 +974,9 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if requestType == "resume" && s.a2aCallerHITL != nil && s.a2aCallerHITL.DeliverA2ACallerResume(sessionID, req.ResumeValue) {
 		writeJSON(w, http.StatusOK, postMessageResponse{
-			Accepted:  true,
-			SessionID: sessionID,
-			AgentID:   sessionID,
-			Priority:  string(queue.PriorityHuman),
+			Accepted: true,
+			AgentID:  sessionID,
+			Priority: string(queue.PriorityHuman),
 		})
 		return
 	}
@@ -996,7 +985,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch err.Error() {
 		case "session_not_found":
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session/agent 不存在", map[string]any{"session_id": sessionID, "agent_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "session_not_found", "session/agent 不存在", map[string]any{"agent_id": sessionID})
 		case "invalid_message":
 			writeAPIError(w, http.StatusBadRequest, "invalid_message", "content 不能为空", nil)
 		case "multimodal_disabled":
@@ -1011,15 +1000,14 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, postMessageResponse{
-		Accepted:  true,
-		SessionID: sessionID,
-		AgentID:   sessionID,
-		Priority:  priority,
+		Accepted: true,
+		AgentID:  sessionID,
+		Priority: priority,
 	})
 }
 
 type cancelTurnResponse struct {
-	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id"`
 	Cancelled bool   `json:"cancelled"`
 }
 
@@ -1036,23 +1024,20 @@ func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) {
 	}
 	cancelled := s.sessions.CancelTurn(sessionID)
 	writeJSON(w, http.StatusOK, cancelTurnResponse{
-		SessionID: sessionID,
+		AgentID:   sessionID,
 		Cancelled: cancelled,
 	})
 }
 
 func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
-	// GET /v1/streams：SSE 长连接；Client 用 session_id 或 agent_id 查询参数过滤事件。
+	// GET /v1/streams：SSE 长连接；Client 用 agent_id 查询参数过滤事件。
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "streaming not supported", nil)
 		return
 	}
 
-	sessionFilter := strings.TrimSpace(r.URL.Query().Get("session_id"))
-	if sessionFilter == "" {
-		sessionFilter = strings.TrimSpace(r.URL.Query().Get("agent_id"))
-	}
+	agentFilter := strings.TrimSpace(r.URL.Query().Get("agent_id"))
 	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
 	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"
 	// live=1：TUI 重连时只收增量，避免 replay 历史 done 干扰 wait_user_turn。
@@ -1060,12 +1045,12 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 		lastSeq = s.stream.CurrentSeq()
 	}
 	s.logger.Info("sse subscribe",
-		"session_id", sessionFilter,
+		"agent_id", agentFilter,
 		"live", live,
 		"after_seq", lastSeq,
 		"remote", r.RemoteAddr,
 	)
-	defer s.logger.Debug("sse unsubscribe", "session_id", sessionFilter, "remote", r.RemoteAddr)
+	defer s.logger.Debug("sse unsubscribe", "agent_id", agentFilter, "remote", r.RemoteAddr)
 
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -1100,8 +1085,8 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if sessionFilter != "" && ev.SessionID != sessionFilter {
-				continue // Hub 为全局广播；按 session 过滤在 handler 内完成
+			if agentFilter != "" && ev.SessionID != agentFilter && ev.AgentID != agentFilter {
+				continue // Hub 为全局广播；按 agent 过滤在 handler 内完成
 			}
 			if _, err := w.Write([]byte(ev.FormatSSE())); err != nil {
 				return
@@ -1124,7 +1109,7 @@ func (s *Server) handleListSessionSkills(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":       sessionID,
+		"agent_id":         sessionID,
 		"loaded_skills":    loaded,
 		"available_skills": available,
 	})
@@ -1169,7 +1154,7 @@ func (s *Server) handleLoadSessionSkill(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":    sessionID,
+		"agent_id":      sessionID,
 		"loaded_skills": loaded,
 	})
 }
@@ -1192,7 +1177,7 @@ func (s *Server) handleUnloadSessionSkill(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":    sessionID,
+		"agent_id":      sessionID,
 		"loaded_skills": loaded,
 	})
 }
