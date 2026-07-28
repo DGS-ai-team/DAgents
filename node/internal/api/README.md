@@ -19,7 +19,8 @@ Agent Node 对本地 Client 暴露的 HTTP/SSE 端点（composition root）。
 | POST | `/v1/messages` | 入队 user / resume |
 | GET | `/v1/streams` | SSE 订阅 `stream.Hub` |
 | CRUD | `/v1/triggers` | `triggers` 调度与 fire |
-| * | `/v1/sessions*` | **410 Gone**（`sessions_moved`） |
+
+> `/v1/sessions*` 路由已删除（404）。
 
 完整契约见 [`docs/architecture/agent-node-api.md`](../../../docs/architecture/agent-node-api.md)。
 

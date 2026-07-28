@@ -645,7 +645,7 @@ func (c *Config) MemoryDir() string {
 	return filepath.Join(c.RuntimeDir(), "memory")
 }
 
-// SessionDBPath 返回旧版 SQLite 会话库路径（`<runtime>/memory/sessions.db`）。
+// SessionDBPath 返回对话运行时 SQLite 路径（`<runtime>/memory/sessions.db`；表为 agent_runtimes）。
 // Phase 2 起对话历史迁入 agents；过渡期消息路径仍可能使用本库。
 func (c *Config) SessionDBPath() string {
 	return filepath.Join(c.MemoryDir(), "sessions.db")

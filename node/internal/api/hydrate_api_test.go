@@ -29,7 +29,7 @@ func TestHandleSessionHydrate(t *testing.T) {
 
 	sessionID := "sess-hydrate-test"
 	if err := st.Save(context.Background(), store.Record{
-		SessionID: sessionID,
+		AgentID: sessionID,
 		Messages: []llm.Message{
 			{Role: "user", Content: "ping"},
 			{Role: "assistant", Content: "pong"},

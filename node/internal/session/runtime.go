@@ -437,8 +437,8 @@ func (r *runtime) persist(ctx context.Context) {
 	ackSeq := r.ackSeq
 	r.mu.Unlock()
 	_ = r.store.Save(ctx, store.Record{
-		SessionID:    r.session.ID,
-		AgentID:      r.session.AgentID,
+		AgentID:      r.session.ID,
+		NodeID:       r.session.AgentID,
 		Messages:     msgs,
 		LoadedSkills: loaded,
 		RuntimeState: store.RuntimeState{

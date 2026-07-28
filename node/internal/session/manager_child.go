@@ -147,7 +147,7 @@ func (m *Manager) DeliverChildResume(childSessionID string, resume map[string]an
 func (m *Manager) DeliverParentResume(parentSessionID string, resume map[string]any) error {
 	rt := m.getRuntime(parentSessionID)
 	if rt == nil {
-		return fmt.Errorf("session_not_found")
+		return fmt.Errorf("agent_not_found")
 	}
 	if !rt.hasPendingHITL() {
 		return fmt.Errorf("no_pending_hitl")
@@ -179,7 +179,7 @@ func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, err
 		return nil, nil
 	}
 	if m.Get(parentSessionID) == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	recs := m.children.ListActive(parentSessionID)
 	out := make([]ChildAgentView, 0, len(recs))

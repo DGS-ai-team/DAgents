@@ -390,7 +390,7 @@ func (m *Manager) SessionDisplayMeta(sessionID string) (firstUser string, update
 func (m *Manager) RuntimeInfo(sessionID string) (queuePending int, hasActiveTurn bool, turnState turn.State, err error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return 0, false, "", fmt.Errorf("session_not_found")
+		return 0, false, "", fmt.Errorf("agent_not_found")
 	}
 	state := rt.turnState()
 	return rt.queueDepth(), state != turn.StateIdle, state, nil
@@ -403,14 +403,14 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 		return rt.contextView(), nil
 	}
 	if m.store == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
 		return nil, err
 	}
 	if rec == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	pending := rec.RuntimeState.Pending
 	view := &ContextView{
@@ -445,14 +445,14 @@ func (m *Manager) ContextSummary(sessionID string) (messageCount int, messages [
 		return rt.messageCount(), rt.messagesSnapshot(), nil
 	}
 	if m.store == nil {
-		return 0, nil, fmt.Errorf("session_not_found")
+		return 0, nil, fmt.Errorf("agent_not_found")
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
 		return 0, nil, err
 	}
 	if rec == nil {
-		return 0, nil, fmt.Errorf("session_not_found")
+		return 0, nil, fmt.Errorf("agent_not_found")
 	}
 	return len(rec.Messages), rec.Messages, nil
 }
@@ -464,14 +464,14 @@ func (m *Manager) LoadedSkills(sessionID string) ([]skills.LoadedSkill, error) {
 		return rt.loadedSkillsSnapshot(), nil
 	}
 	if m.store == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
 		return nil, err
 	}
 	if rec == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	if rec.LoadedSkills == nil {
 		return []skills.LoadedSkill{}, nil
@@ -483,7 +483,7 @@ func (m *Manager) LoadedSkills(sessionID string) ([]skills.LoadedSkill, error) {
 func (m *Manager) CompressContext(ctx context.Context, sessionID string) (compression.ForceResult, error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return compression.ForceResult{}, fmt.Errorf("session_not_found")
+		return compression.ForceResult{}, fmt.Errorf("agent_not_found")
 	}
 	return rt.compressContext(ctx), nil
 }
@@ -497,10 +497,10 @@ func (m *Manager) ClearContext(sessionID string) (cancelled bool, err error) {
 		return cancelled, nil
 	}
 	if m.store == nil {
-		return false, fmt.Errorf("session_not_found")
+		return false, fmt.Errorf("agent_not_found")
 	}
 	if err := m.store.ClearMessages(context.Background(), sessionID); err != nil {
-		return false, fmt.Errorf("session_not_found")
+		return false, fmt.Errorf("agent_not_found")
 	}
 	return false, nil
 }
@@ -546,7 +546,7 @@ func (m *Manager) EnqueueMessage(
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
 		m.logger.Warn("enqueue message session not found", "session_id", sessionID)
-		return "", fmt.Errorf("session_not_found")
+		return "", fmt.Errorf("agent_not_found")
 	}
 	m.logger.Debug("enqueue message",
 		"session_id", sessionID,
@@ -624,7 +624,7 @@ func (m *Manager) EnqueueAsyncToolResult(sessionID string, payload queue.AsyncTo
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
 		m.logger.Warn("async tool result enqueue skipped: session not found", "session_id", sessionID)
-		return fmt.Errorf("session_not_found")
+		return fmt.Errorf("agent_not_found")
 	}
 	env := queue.Envelope{
 		RequestType:     queue.RequestTypeAsyncToolResult,
@@ -637,7 +637,7 @@ func (m *Manager) EnqueueAsyncToolResult(sessionID string, payload queue.AsyncTo
 func (m *Manager) EnqueueA2AInboxMessage(_ context.Context, sessionID, content string) (string, error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return "", fmt.Errorf("session_not_found")
+		return "", fmt.Errorf("agent_not_found")
 	}
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -659,7 +659,7 @@ func (m *Manager) EnqueueToolResult(sessionID string) error {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
 		m.logger.Warn("tool result enqueue skipped: session not found", "session_id", sessionID)
-		return fmt.Errorf("session_not_found")
+		return fmt.Errorf("agent_not_found")
 	}
 	env := queue.Envelope{RequestType: queue.RequestTypeToolResult}
 	return rt.enqueue(env, queue.PriorityToolResult)
@@ -678,7 +678,7 @@ func (m *Manager) CancelTurn(sessionID string) bool {
 func (m *Manager) ListSessionSkills(sessionID string) (loaded, available []skills.LoadedSkill, err error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return nil, nil, fmt.Errorf("session_not_found")
+		return nil, nil, fmt.Errorf("agent_not_found")
 	}
 	loaded = rt.loadedSkillsSnapshot()
 	if rt.skillsCatalog != nil {
@@ -691,7 +691,7 @@ func (m *Manager) ListSessionSkills(sessionID string) (loaded, available []skill
 func (m *Manager) LoadSessionSkill(sessionID, skillName string) ([]skills.LoadedSkill, error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	current := rt.loadedSkillsSnapshot()
 	names := make([]string, 0, len(current)+1)
@@ -706,7 +706,7 @@ func (m *Manager) LoadSessionSkill(sessionID, skillName string) ([]skills.Loaded
 func (m *Manager) UnloadSessionSkill(sessionID, skillName string) ([]skills.LoadedSkill, error) {
 	rt := m.getRuntime(sessionID)
 	if rt == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	return rt.unloadSkillsByName([]string{skillName}), nil
 }
