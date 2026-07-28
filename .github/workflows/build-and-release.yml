@@ -210,7 +210,7 @@ jobs:
           VERSION="${VERSION}" bash scripts/ci/build_windows_installer.sh
           ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
 
-      - name: Build Windows Setup wizard (Tauri bootstrapper, embeds Inno)
+      - name: Build Windows Setup wizard (portable Tauri, embeds Inno)
         if: matrix.platform == 'windows-amd64'
         shell: bash
         run: |

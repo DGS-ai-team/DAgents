@@ -12,7 +12,7 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 | **`build_linux_focal_pyenv.sh`** | Ubuntu 20.04 focal 容器（glibc 2.31；i386 或需较新链时手动用） |
 | **`assemble_local_assistant_bundle.sh`** | 组装 `dagents-local-assistant-*` 目录并 tar.gz/zip |
 | **`build_windows_installer.sh`** | Windows：staging `bundle/` + Inno Setup 生成 `.exe` 安装包 |
-| **`build_windows_setup_bootstrapper.sh`** | Windows：在 Inno 之上打 Tauri Setup 向导（`dagents-setup-windows-amd64-*.exe`，与 Inno 并存） |
+| **`build_windows_setup_bootstrapper.sh`** | Windows：在 Inno 之上打便携 Tauri Setup 向导（`dagents-setup-windows-amd64-*.exe`，内嵌 Inno、无 NSIS 外层，与 Inno 并存） |
 | **`build_manage_docker.sh`** | Manage Docker 镜像构建与 tar.gz 导出（本地/CI 中间产物，不单独进 Release） |
 | **`assemble_manage_bundle.sh`** | 组装 **`dagents-manage-bundle-*`** 离线包（镜像 + compose + 导入/重启脚本；Release 附件） |
 
