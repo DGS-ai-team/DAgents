@@ -49,11 +49,3 @@ func (c *Client) ListAgents(ctx context.Context) ([]AgentSummary, error) {
 	}
 	return out.Agents, nil
 }
-
-// SessionSummary 为历史别名；新代码请用 AgentSummary。
-type SessionSummary = AgentSummary
-
-// ListSessions 已废弃：转发到 ListAgents（兼容旧调用）。
-func (c *Client) ListSessions(ctx context.Context) ([]SessionSummary, error) {
-	return c.ListAgents(ctx)
-}

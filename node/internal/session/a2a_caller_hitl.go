@@ -150,7 +150,7 @@ func relayHITLFinishReason(hitlPayload map[string]any) (finishReason, awaiting s
 }
 
 // hitlPayloadToSSE 将 Manage requires_input 载荷统一为 hitl_required（与本地 turn SSE 同构）。
-// 兼容：仍识别旧 event_type / 旧 approval_args 形状；待对端全量升级后删除 legacy* 转换。
+// 仅接受已含 items[] 的现代载荷；旧 approval_args / user_information_args 形状不再转换。
 func hitlPayloadToSSE(payload map[string]any) (eventType string, data map[string]any) {
 	if payload == nil {
 		return "", nil
@@ -159,30 +159,17 @@ func hitlPayloadToSSE(payload map[string]any) (eventType string, data map[string
 	if len(raw) == 0 {
 		return "", nil
 	}
-	if items := hitlItemsFromAny(raw["items"]); len(items) > 0 {
-		out := cloneEventData(raw)
-		if strings.TrimSpace(fmt.Sprint(out["hitl_id"])) == "" || fmt.Sprint(out["hitl_id"]) == "<nil>" {
-			out["hitl_id"] = "a2a-hitl"
-		}
-		if _, ok := out["display_type"]; !ok {
-			out["display_type"] = "normal_text"
-		}
-		return "hitl_required", out
+	if items := hitlItemsFromAny(raw["items"]); len(items) == 0 {
+		return "", nil
 	}
-	kind, _ := payload["hitl_kind"].(string)
-	et, _ := payload["event_type"].(string)
-	kind = strings.TrimSpace(kind)
-	et = strings.TrimSpace(et)
-	switch {
-	case kind == "user_information" || et == "user_information_required":
-		return "hitl_required", legacyUserInfoToHITLRequired(raw)
-	case kind == "tool_approval" || et == "approval_required" || kind == "hitl":
-		return "hitl_required", legacyApprovalToHITLRequired(raw)
+	out := cloneEventData(raw)
+	if strings.TrimSpace(fmt.Sprint(out["hitl_id"])) == "" || fmt.Sprint(out["hitl_id"]) == "<nil>" {
+		out["hitl_id"] = "a2a-hitl"
 	}
-	if et != "" {
-		return "hitl_required", normalizeLegacyHITLSSE(et, cloneEventData(raw))
+	if _, ok := out["display_type"]; !ok {
+		out["display_type"] = "normal_text"
 	}
-	return "", nil
+	return "hitl_required", out
 }
 
 func hitlItemsFromAny(v any) []any {
@@ -197,100 +184,6 @@ func hitlItemsFromAny(v any) []any {
 		return out
 	default:
 		return nil
-	}
-}
-
-// normalizeLegacyHITLSSE 将旧 approval_required / user_information_required 数据转为 hitl_required 载荷。
-func normalizeLegacyHITLSSE(eventType string, raw map[string]any) map[string]any {
-	switch strings.TrimSpace(eventType) {
-	case "user_information_required":
-		return legacyUserInfoToHITLRequired(raw)
-	case "approval_required":
-		return legacyApprovalToHITLRequired(raw)
-	default:
-		if items := hitlItemsFromAny(raw["items"]); len(items) > 0 {
-			return raw
-		}
-		return legacyApprovalToHITLRequired(raw)
-	}
-}
-
-func legacyApprovalToHITLRequired(raw map[string]any) map[string]any {
-	if raw == nil {
-		raw = map[string]any{}
-	}
-	if items := hitlItemsFromAny(raw["items"]); len(items) > 0 {
-		out := cloneEventData(raw)
-		if strings.TrimSpace(fmt.Sprint(out["hitl_id"])) == "" || fmt.Sprint(out["hitl_id"]) == "<nil>" {
-			out["hitl_id"] = "a2a-approval"
-		}
-		return out
-	}
-	approvalID, _ := raw["approval_id"].(string)
-	var toolCalls []any
-	if args, ok := raw["approval_args"].(map[string]any); ok {
-		toolCalls = hitlItemsFromAny(args["tool_calls"])
-	}
-	items := make([]any, 0, len(toolCalls))
-	for _, tc := range toolCalls {
-		m, ok := tc.(map[string]any)
-		if !ok {
-			continue
-		}
-		item := cloneEventData(m)
-		item["hitl_type"] = "execute_tool"
-		items = append(items, item)
-	}
-	hitlID := strings.TrimSpace(approvalID)
-	if hitlID == "" {
-		hitlID = "a2a-approval"
-	}
-	return map[string]any{
-		"hitl_id":      hitlID,
-		"message":      "检测到工具调用，等待用户确认后继续执行。",
-		"items":        items,
-		"display_type": "normal_text",
-	}
-}
-
-func legacyUserInfoToHITLRequired(raw map[string]any) map[string]any {
-	if raw == nil {
-		raw = map[string]any{}
-	}
-	if items := hitlItemsFromAny(raw["items"]); len(items) > 0 {
-		out := cloneEventData(raw)
-		if strings.TrimSpace(fmt.Sprint(out["hitl_id"])) == "" || fmt.Sprint(out["hitl_id"]) == "<nil>" {
-			out["hitl_id"] = "a2a-user-info"
-		}
-		return out
-	}
-	content, _ := raw["content"].(string)
-	args, _ := raw["user_information_args"].(map[string]any)
-	id := ""
-	question := content
-	if args != nil {
-		if v, _ := args["tool_call_id"].(string); strings.TrimSpace(v) != "" {
-			id = strings.TrimSpace(v)
-		}
-		if v, _ := args["question"].(string); strings.TrimSpace(v) != "" {
-			question = v
-		}
-	}
-	if strings.TrimSpace(content) == "" {
-		content = question
-	}
-	item := map[string]any{
-		"hitl_type":             "user_information",
-		"id":                    id,
-		"name":                  "ask_user_information",
-		"content":               content,
-		"user_information_args": args,
-	}
-	return map[string]any{
-		"hitl_id":      "a2a-user-info",
-		"message":      "Agent 需要补充信息。",
-		"items":        []any{item},
-		"display_type": "normal_text",
 	}
 }
 

@@ -9,16 +9,13 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
-func TestHitlPayloadToSSE_toolApproval(t *testing.T) {
+func TestHitlPayloadToSSE_modernItems(t *testing.T) {
 	payload := map[string]any{
-		"hitl_kind":  "tool_approval",
-		"event_type": "approval_required",
+		"event_type": "hitl_required",
 		"event_data": map[string]any{
-			"approval_id": "appr-1",
-			"approval_args": map[string]any{
-				"tool_calls": []any{
-					map[string]any{"id": "call-1", "name": "bash_run"},
-				},
+			"hitl_id": "appr-1",
+			"items": []any{
+				map[string]any{"id": "call-1", "name": "bash_run", "hitl_type": "execute_tool"},
 			},
 		},
 	}
@@ -35,14 +32,20 @@ func TestHitlPayloadToSSE_toolApproval(t *testing.T) {
 	}
 }
 
-func TestHitlPayloadToSSE_userInformation(t *testing.T) {
+func TestHitlPayloadToSSE_userInformationItems(t *testing.T) {
 	payload := map[string]any{
-		"hitl_kind": "user_information",
 		"event_data": map[string]any{
-			"content": "请确认环境",
-			"user_information_args": map[string]any{
-				"tool_call_id": "call-ask-1",
-				"question":     "请确认环境",
+			"items": []any{
+				map[string]any{
+					"hitl_type": "user_information",
+					"id":        "call-ask-1",
+					"name":      "ask_user_information",
+					"content":   "请确认环境",
+					"user_information_args": map[string]any{
+						"tool_call_id": "call-ask-1",
+						"question":     "请确认环境",
+					},
+				},
 			},
 		},
 	}
@@ -61,12 +64,22 @@ func TestHitlPayloadToSSE_userInformation(t *testing.T) {
 	}
 }
 
-func TestHitlPayloadToSSE_unsupported(t *testing.T) {
+func TestHitlPayloadToSSE_rejectsLegacyShapes(t *testing.T) {
 	if et, data := hitlPayloadToSSE(nil); et != "" || data != nil {
 		t.Fatalf("nil payload: et=%q data=%v", et, data)
 	}
-	if et, _ := hitlPayloadToSSE(map[string]any{"hitl_kind": "unknown"}); et != "" {
-		t.Fatalf("unsupported: et=%q", et)
+	legacy := map[string]any{
+		"hitl_kind":  "tool_approval",
+		"event_type": "approval_required",
+		"event_data": map[string]any{
+			"approval_id": "appr-1",
+			"approval_args": map[string]any{
+				"tool_calls": []any{map[string]any{"id": "call-1", "name": "bash_run"}},
+			},
+		},
+	}
+	if et, _ := hitlPayloadToSSE(legacy); et != "" {
+		t.Fatalf("legacy approval should be rejected, et=%q", et)
 	}
 }
 
@@ -78,10 +91,9 @@ func TestDeliverA2ACallerResume_wrongSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	payload := map[string]any{
-		"hitl_kind": "tool_approval",
 		"event_data": map[string]any{
-			"approval_args": map[string]any{
-				"tool_calls": []any{map[string]any{"id": "call-1", "name": "bash_run"}},
+			"items": []any{
+				map[string]any{"id": "call-1", "name": "bash_run", "hitl_type": "execute_tool"},
 			},
 		},
 	}
@@ -106,13 +118,19 @@ func TestWaitCallerHITL_userInformationRelay(t *testing.T) {
 	defer hub.Unsubscribe(sub)
 
 	payload := map[string]any{
-		"hitl_kind":         "user_information",
 		"callee_agent_name": "合规助手",
 		"event_data": map[string]any{
-			"content": "请确认部署环境",
-			"user_information_args": map[string]any{
-				"tool_call_id": "call-ask-1",
-				"question":     "请确认部署环境",
+			"items": []any{
+				map[string]any{
+					"hitl_type": "user_information",
+					"id":        "call-ask-1",
+					"name":      "ask_user_information",
+					"content":   "请确认部署环境",
+					"user_information_args": map[string]any{
+						"tool_call_id": "call-ask-1",
+						"question":     "请确认部署环境",
+					},
+				},
 			},
 		},
 	}

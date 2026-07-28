@@ -6,14 +6,17 @@
 
 ### 变更
 
+- **Go Client / 托盘 Session 别名删除**：移除 `CreateSession` / `ListSessions` / `SessionSummary` / `SyncFromSessions`；统一 `EnsureAgent` / `ListAgents` / `AgentSummary` / `SyncFromAgents`。
+- **A2A HITL legacy 删除**：caller 侧仅接受含 `items[]` 的现代 `hitl_required` 载荷，不再转换旧 `approval_args` / `user_information_args`。
+- **Skills 能力开关**：运行时不再读 `defaults.skills.enabled`；仅由 Node 总闸 + 工具组 `skills` 决定；写入侧也不再写 `enabled:false`（旧 snapshot 仍可在 Web UI 迁移进工具组）。
 - **`/v1/sessions*` 下线**：全部返回 **410 Gone**（`sessions_moved`），对齐 `/v1/policy`；对话 hydrate/context/cancel/skills/child-agents/media 仅走 `/v1/agents/{agent_id}/...`；媒体 `PublicURL` 改为 agents 路径。
-- **HITL 旧事件收口**：本机 SSE / WebUI / 托盘 / inbox 等待仅认 `hitl_required`；A2A requires_input 出站强制 `event_type=hitl_required`；对端旧载荷仍在 caller 侧归一转换。
-- **Go Client Agent API**：新增 `ListAgents` / `AgentSummary`；`CreateSession` / `ListSessions` / `SessionSummary` 标为废弃别名。
-- **Skills payload**：新建/更新 Agent 时 `defaults.skills` 仅写 `visible` 白名单（关闭时仍写 `enabled:false` 兼容旧 runtime）。
+- **HITL 旧事件收口**：本机 SSE / WebUI / 托盘 / inbox 等待仅认 `hitl_required`；A2A requires_input 出站强制 `event_type=hitl_required`。
+- **Go Client Agent API**：新增 `ListAgents` / `AgentSummary`。
+- **Skills payload**：新建/更新 Agent 时 `defaults.skills` 仅写 `visible` 白名单。
 - **工具 Registry 装配统一**：默认表与 per-agent Registry 共用 `attachNodeRuntimeDeps`（后台任务回灌、media、browser、manage、wecom、triggers）；去掉 tool-jobs / hydrate 对 `DefaultTools` 的回退。
 - **异步回灌可观测**：`EnqueueAsyncToolResult` / `EnqueueToolResult` 在 session 不存在时返回 `session_not_found` 并打 Warn，不再静默丢弃。
 - **HITL SSE 收口**：A2A caller 中继统一发 `hitl_required`；子 Agent `RelayHub` 对 `hitl_required` 打 scope。
-- **Go Client 迁 `/v1/agents`**：session 相关路径改为 agents；`CreateSession` 改为 require id + ensure。
+- **Go Client 迁 `/v1/agents`**：session 相关路径改为 agents；创建/ensure 走 Agent API。
 - **LLM 多模态不再广播**：进程级切换 LLM 档案只更新默认 Registry；已装入 Agent 的多模态在 ensure/reload 时按绑定档案生效。
 - **Skills 开关收敛**：Agent 技能能力与工具组 `skills` 对齐；可见白名单仍用 `defaults.skills.visible`；Node `skills.enabled` 仍为进程总闸。
 - **setup 热挂载**：配置保存后经 `attachNodeRuntimeDeps` 刷新默认工具表，不再单点只挂 WeCom。

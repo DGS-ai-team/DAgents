@@ -65,8 +65,3 @@ func SyncFromAgents(store *Store, agents []nodeclient.AgentSummary) bool {
 	}
 	return store.ReplaceFromNode(incoming)
 }
-
-// SyncFromSessions 为 SyncFromAgents 的历史别名。
-func SyncFromSessions(store *Store, sessions []nodeclient.SessionSummary) bool {
-	return SyncFromAgents(store, sessions)
-}

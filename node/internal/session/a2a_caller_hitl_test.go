@@ -16,15 +16,12 @@ func TestWaitCallerHITLPublishesRelayPauseDone(t *testing.T) {
 	defer hub.Unsubscribe(sub)
 
 	payload := map[string]any{
-		"hitl_kind":         "tool_approval",
-		"event_type":        "approval_required",
+		"event_type":        "hitl_required",
 		"callee_agent_id":   "compliance-a",
 		"callee_agent_name": "合规助手",
 		"event_data": map[string]any{
-			"approval_args": map[string]any{
-				"tool_calls": []any{
-					map[string]any{"id": "call-1", "name": "bash_run"},
-				},
+			"items": []any{
+				map[string]any{"id": "call-1", "name": "bash_run", "hitl_type": "execute_tool"},
 			},
 		},
 	}

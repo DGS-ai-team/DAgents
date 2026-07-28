@@ -3,17 +3,17 @@ package agentruntime
 import "testing"
 
 func TestSkillsFromDefaults(t *testing.T) {
-	t.Run("missing skills block defaults enabled unrestricted", func(t *testing.T) {
+	t.Run("missing skills block unrestricted", func(t *testing.T) {
 		got := SkillsFromDefaults(Snapshot{})
-		if !got.Enabled || got.VisibleRestrict {
+		if got.VisibleRestrict {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("enabled false", func(t *testing.T) {
+	t.Run("enabled false ignored", func(t *testing.T) {
 		got := SkillsFromDefaults(Snapshot{Defaults: map[string]any{
 			"skills": map[string]any{"enabled": false},
 		}})
-		if got.Enabled || got.VisibleRestrict {
+		if got.VisibleRestrict {
 			t.Fatalf("got %+v", got)
 		}
 	})
@@ -21,7 +21,7 @@ func TestSkillsFromDefaults(t *testing.T) {
 		got := SkillsFromDefaults(Snapshot{Defaults: map[string]any{
 			"skills": map[string]any{"enabled": true, "visible": []any{}},
 		}})
-		if !got.Enabled || !got.VisibleRestrict || len(got.Visible) != 0 {
+		if !got.VisibleRestrict || len(got.Visible) != 0 {
 			t.Fatalf("got %+v", got)
 		}
 	})

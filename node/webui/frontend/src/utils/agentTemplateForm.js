@@ -98,10 +98,11 @@ function normalizeVisibleSkills(skills) {
   return out;
 }
 
-/** 写入 defaults.skills：能力由工具组控制；此处仅保留 visible 白名单（及关闭时的 enabled:false 兼容旧 runtime）。 */
+/** 写入 defaults.skills：能力由工具组控制；此处仅保留 visible 白名单。 */
 function skillsPayload(draft) {
-  const enabled = skillsEnabledFromToolGroups(draft?.toolGroups);
-  if (!enabled) return { enabled: false };
+  if (!skillsEnabledFromToolGroups(draft?.toolGroups)) {
+    return {};
+  }
   if (draft?.visibleSkills === null || draft?.visibleSkills === undefined) {
     return {};
   }
