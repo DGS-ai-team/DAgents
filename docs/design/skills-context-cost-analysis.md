@@ -33,7 +33,7 @@ Skills 相关成本分 **两条通道**（见 §2），对 cache 的影响不同
 
 | 信号 | 来源 | 含义 |
 |------|------|------|
-| `skills_catalog_estimated_tokens` | `GET /v1/sessions/{id}/context` | 磁盘 catalog **全文**粗算（含 SKILL.md body） |
+| `skills_catalog_estimated_tokens` | `GET /v1/agents/{id}/context` | 磁盘 catalog **全文**粗算（含 SKILL.md body） |
 | `skills_catalog_bloat_threshold` | 固定 `4000`（`CatalogBloatTokenThreshold`） | 超过则 TUI 提示精简 skills 目录 |
 | `system_prompt_estimated_tokens` | 同上 | 含 loaded 正文后的 system 体积 |
 

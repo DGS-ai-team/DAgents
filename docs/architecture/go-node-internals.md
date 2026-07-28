@@ -283,7 +283,7 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 ## 8. 从 HTTP 到 SSE 的端到端路径
 
 ```text
-POST /v1/sessions/{id}/messages
+POST /v1/messages
   → Manager.EnqueueMessage
   → runtime.enqueue(PriorityHuman)
   → consumeLoop → handleHumanMessage
