@@ -37,7 +37,7 @@ VERSION=0.x.x scripts/ci/build_windows_installer.sh
 
 ## Tauri 现代向导（可选）
 
-品牌化多步 UI 见 [`../bootstrapper/`](../bootstrapper/README.md)：Vue + Tauri 壳调用本目录 Inno 包 `/VERYSILENT` 完成落地。
+品牌化多步 UI 见 [`../bootstrapper/`](../bootstrapper/README.md)：Vue + Tauri 壳调用本目录 Inno 包 `/VERYSILENT` 完成落地。Release 会**并存**发布 Inno 裸包与 Tauri Setup（无 WebView2 的环境可只用 Inno）。
 
 ## 界面
 

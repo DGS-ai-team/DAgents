@@ -106,6 +106,7 @@ jobs:
           cache-dependency-path: |
             node/webui/frontend/package-lock.json
             desktop/tray-tauri/package-lock.json
+            packaging/bootstrapper/package-lock.json
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -142,12 +143,14 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Rust cache (Tauri shell)
+      - name: Rust cache (Tauri shell + Setup)
         if: matrix.platform == 'windows-amd64'
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: desktop/tray-tauri/src-tauri -> target
-          shared-key: manual-tauri-shell
+          workspaces: |
+            desktop/tray-tauri/src-tauri -> target
+            packaging/bootstrapper/src-tauri -> target
+          shared-key: manual-tauri-win
 
       - name: Build dagents-shell-tauri (Windows, preview)
         if: matrix.platform == 'windows-amd64'
@@ -200,13 +203,22 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
-      - name: Build Windows installer
+      - name: Build Windows installer (Inno)
         if: matrix.platform == 'windows-amd64'
         shell: bash
         run: |
           VERSION="${{ inputs.version }}"
           VERSION="${VERSION}" bash scripts/ci/build_windows_installer.sh
           ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
+
+      - name: Build Windows Setup wizard (Tauri bootstrapper, embeds Inno)
+        if: matrix.platform == 'windows-amd64'
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          chmod +x scripts/ci/build_windows_setup_bootstrapper.sh
+          VERSION="${VERSION}" bash scripts/ci/build_windows_setup_bootstrapper.sh
+          ls -la dist/dagents-setup-windows-amd64-*.exe
 
       - name: Upload archive
         uses: actions/upload-artifact@v4
@@ -215,12 +227,20 @@ jobs:
           path: dist/dagents-local-assistant-${{ matrix.platform }}-*.*
           if-no-files-found: error
 
-      - name: Upload Windows installer
+      - name: Upload Windows installer (Inno)
         if: matrix.platform == 'windows-amd64'
         uses: actions/upload-artifact@v4
         with:
           name: dagents-windows-installer
           path: dist/dagents-local-assistant-windows-amd64-installer-*.exe
+          if-no-files-found: error
+
+      - name: Upload Windows Setup wizard (Tauri)
+        if: matrix.platform == 'windows-amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dagents-windows-setup
+          path: dist/dagents-setup-windows-amd64-*.exe
           if-no-files-found: error
 
       - name: Upload Tauri shell preview (Windows)

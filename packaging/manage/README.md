@@ -53,16 +53,14 @@ Windows（Docker Desktop）：解压后执行 `scripts\import-image.bat`，再 `
 
 例如 `dagents-manage-bundle-0.5.1.tar.gz`。
 
-**方式 B — 仅镜像 tar.gz**
-
-Release 亦附 **`dagents-manage-<version>.tar.gz`**（纯镜像，无脚本）。
-
-**方式 C — 本地构建**
+**方式 B — 本地构建**
 
 ```bash
 VERSION=0.5.1 bash scripts/ci/assemble_manage_bundle.sh
-# 或仅镜像：VERSION=0.5.1 bash scripts/ci/build_manage_docker.sh
+# 或仅镜像（不打 Release）：VERSION=0.5.1 bash scripts/ci/build_manage_docker.sh
 ```
+
+镜像 tar 仅作为 bundle 内部产物（`image/`），**不再单独作为 GitHub Release 附件**。
 
 ### 2. 在离线机导入镜像
 

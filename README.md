@@ -261,7 +261,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 ## 预编译包
 
-GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Windows zip、**Windows `.exe` 安装包**）及 **`dagents-manage-*`**（Manage Docker 镜像 tar.gz）：
+GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Windows zip、**Inno 安装包**、**Tauri Setup 向导**）及 **`dagents-manage-bundle-*`**（Manage 离线包，内含 Docker 镜像）：
 
 | 二进制 | 说明 |
 |--------|------|

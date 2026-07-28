@@ -7,13 +7,14 @@
 | 名称 | 含义 |
 |------|------|
 | **`dagents-local-assistant-*.{tar.gz,zip}`** | **Go Node + 双 TUI + 内嵌 Web UI**：`dagents-node`（含 `go:embed` 的 `/ui/` 静态资源）、`dagents-client`、`dagents-cli` + 配置、`.runtime/`、**`scripts/`** |
-| **`dagents-manage-*.tar.gz`** | Manage Docker 镜像导出（Registry + A2A + Console） |
-| **`dagents-manage-bundle-*.tar.gz`** | Manage **离线包**：镜像 + `docker-compose` + 导入/重启脚本 |
+| **`dagents-manage-bundle-*.tar.gz`** | Manage **离线包**（唯一 Manage Release 附件）：内含镜像 + `docker-compose` + 导入/重启脚本 |
+| **`dagents-manage-*.tar.gz`**（本地） | 纯镜像导出；仅 `build_manage_docker.sh` 中间产物，**不再单独发布** |
 | **`dagents-backend-*`**（legacy） | 旧 Python 全栈后端；**Release CI 已不再构建** |
 | **`dagents-cli`** | Textual TUI 单文件二进制（PyInstaller 产物名） |
 
-| **`dagents-local-assistant-*-installer-*.exe`** | Windows Inno 安装包 |
-| **`DAgents Setup`（可选）** | Tauri 现代向导，见 [`bootstrapper/`](./bootstrapper/)；内嵌上述 Inno 包静默安装 |
+| **`dagents-local-assistant-*-installer-*.exe`** | Windows **Inno** 安装包（兼容面广，无 WebView2/Tauri 依赖时的后备） |
+| **`dagents-setup-windows-amd64-*.exe`** | Windows **Tauri Setup 向导**（内嵌上述 Inno，现代 UI；与 Inno 并存发布） |
+| **`DAgents Setup`（源码）** | 见 [`bootstrapper/`](./bootstrapper/) |
 
 本地/CI 打包：
 
@@ -36,7 +37,7 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**
 
 | 工作流 | 触发 | 产物 |
 |--------|------|------|
-| [build-and-release.yml](../.github/workflows/build-and-release.yml) | 推送 **`v*`** 标签 | GitHub Release + `dagents-local-assistant-*` + **Windows `.exe` 安装包** + **`dagents-manage-*.tar.gz`** + **`dagents-manage-bundle-*.tar.gz`** |
+| [build-and-release.yml](../.github/workflows/build-and-release.yml) | 推送 **`v*`** 标签 | GitHub Release + `dagents-local-assistant-*` + **Inno `.exe`** + **Tauri Setup `.exe`** + **`dagents-manage-bundle-*.tar.gz`** |
 | [manual-package.yml](../.github/workflows/manual-package.yml) | 手动 **workflow_dispatch** | Actions Artifact（zip/tar.gz + Windows 安装包） |
 | [go-ac.yml](../.github/workflows/go-ac.yml) | PR / push（Go 路径） | 仅测试与编译冒烟，不打包 |
 
