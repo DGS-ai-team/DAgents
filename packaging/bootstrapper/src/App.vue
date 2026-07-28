@@ -13,7 +13,7 @@ const canInstall = computed(() => Boolean(installDir.value.trim()) && !busy.valu
 
 const lead = computed(() => {
   if (step.value === "install") return "正在将 DAgents 安装到所选目录…";
-  if (step.value === "done") return "可以启动托盘程序，并在浏览器打开本机 Web UI。";
+  if (step.value === "done") return "安装已完成。点击下方按钮启动托盘程序。";
   if (demoMode.value) return "演示模式：将写入标记文件，不执行真实安装包。";
   return "选择安装目录后开始。安装包会直接落地到该目录（无需先安装本向导）。";
 });
@@ -60,7 +60,7 @@ async function startInstall() {
       opts: {
         installDir: installDir.value.trim(),
         overwritePolicy: false,
-        startShell: true,
+        startShell: false,
         openUi: false,
       },
     });
