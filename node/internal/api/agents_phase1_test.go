@@ -104,6 +104,37 @@ func TestCreateAgent_dockerRequiresCLI(t *testing.T) {
 	}
 }
 
+func TestCreateAgent_remoteReservedNotImplemented(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	body, _ := json.Marshal(map[string]any{
+		"display_name": "远程沙箱助手",
+		"sandbox": map[string]any{
+			"enabled":         true,
+			"backend":         "remote",
+			"remote_endpoint": "https://sbx.example.com",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("remote_unavailable")) {
+		t.Fatalf("body=%s", rr.Body.String())
+	}
+}
+
 func TestCreateAgent_dockerOKWhenCLIPresent(t *testing.T) {
 	restorePath := sandbox.SetLookPathForTest(func(string) (string, error) { return "/usr/bin/docker", nil })
 	t.Cleanup(restorePath)

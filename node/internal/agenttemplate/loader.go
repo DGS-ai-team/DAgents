@@ -21,18 +21,20 @@ type Template struct {
 	Sandbox     SandboxConfig  `yaml:"sandbox" json:"sandbox"`
 }
 
-// SandboxConfig 沙箱选项（process | docker）。
+// SandboxConfig 沙箱选项（未启用时 backend=process 表示宿主机；启用时为 docker | remote）。
 type SandboxConfig struct {
-	Enabled            bool   `yaml:"enabled" json:"enabled"`
-	Backend            string `yaml:"backend" json:"backend"`
-	WorkspaceSubdir    string `yaml:"workspace_subdir,omitempty" json:"workspace_subdir,omitempty"`
-	FSRootIsolation    bool   `yaml:"fs_root_isolation" json:"fs_root_isolation"`
-	AllowBash          bool   `yaml:"allow_bash" json:"allow_bash"`
-	AllowNetworkTools  bool   `yaml:"allow_network_tools" json:"allow_network_tools"`
-	Image              string `yaml:"image,omitempty" json:"image,omitempty"`
-	Network            string `yaml:"network,omitempty" json:"network,omitempty"`
-	Memory             string `yaml:"memory,omitempty" json:"memory,omitempty"`
-	CPUs               string `yaml:"cpus,omitempty" json:"cpus,omitempty"`
+	Enabled           bool   `yaml:"enabled" json:"enabled"`
+	Backend           string `yaml:"backend" json:"backend"`
+	WorkspaceSubdir   string `yaml:"workspace_subdir,omitempty" json:"workspace_subdir,omitempty"`
+	FSRootIsolation   bool   `yaml:"fs_root_isolation" json:"fs_root_isolation"`
+	AllowBash         bool   `yaml:"allow_bash" json:"allow_bash"`
+	AllowNetworkTools bool   `yaml:"allow_network_tools" json:"allow_network_tools"`
+	Image             string `yaml:"image,omitempty" json:"image,omitempty"`
+	Network           string `yaml:"network,omitempty" json:"network,omitempty"`
+	Memory            string `yaml:"memory,omitempty" json:"memory,omitempty"`
+	CPUs              string `yaml:"cpus,omitempty" json:"cpus,omitempty"`
+	RemoteEndpoint    string `yaml:"remote_endpoint,omitempty" json:"remote_endpoint,omitempty"`
+	RemoteAPIKey      string `yaml:"remote_api_key,omitempty" json:"remote_api_key,omitempty"`
 }
 
 // Loader 从内置目录与用户覆盖目录加载模板。

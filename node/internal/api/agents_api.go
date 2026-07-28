@@ -182,7 +182,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := requireDockerSandboxReady(sandbox); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "docker_unavailable", err.Error(), nil)
+		writeSandboxReadyError(w, err)
 		return
 	}
 
@@ -369,7 +369,7 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := requireDockerSandboxReady(sandbox); err != nil {
-			writeAPIError(w, http.StatusBadRequest, "docker_unavailable", err.Error(), nil)
+			writeSandboxReadyError(w, err)
 			return
 		}
 		snap.Sandbox = sandbox
