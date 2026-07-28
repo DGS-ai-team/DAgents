@@ -76,8 +76,6 @@ import {
 import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
 import {
   formatChildLifecycle,
-  formatCompressionDetail,
-  formatCompressionStart,
 } from "../utils/activityFormat.js";
 import { chromeStore, setUsageFromSSE, resetUsageStrip } from "../stores/chrome.js";
 import {
@@ -370,19 +368,12 @@ function handleEvent(ev) {
 
 function handleCompressionEvent(type, data) {
   const phase = String(data.phase || "");
-  const mode = type === "context_compression_blocking" ? "blocking" : "silent";
-  if (mode === "blocking") {
-    if (phase === "start") startStatus("compression_blocking");
-    else if (phase === "end") {
-      finishStatus("compression_blocking");
-      addSystem(formatCompressionDetail(mode, data));
-    }
+  if (phase === "start") {
+    startStatus("compression");
     return;
   }
-  if (phase === "start") {
-    addSystem(formatCompressionStart(mode, data));
-  } else if (phase === "end") {
-    addSystem(formatCompressionDetail(mode, data));
+  if (phase === "end") {
+    finishStatus("compression");
   }
 }
 
@@ -556,8 +547,15 @@ async function handleCommand(cmd) {
     return;
   }
   if (res.action === "compress") {
-    const out = await api.compressContext(await ensureAgent());
-    addSystem(`压缩: ${out.status || "done"}`);
+    startStatus("compression");
+    try {
+      const out = await api.compressContext(await ensureAgent());
+      if (out.status && out.status !== "applied" && out.status !== "done") {
+        addSystem(`压缩: ${out.status}`);
+      }
+    } finally {
+      finishStatus("compression");
+    }
     refreshContextTokens();
     return;
   }
