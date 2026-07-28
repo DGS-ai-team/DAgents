@@ -132,6 +132,29 @@ function removeLongTermEntry(index) {
   list.splice(index, 1);
   activeLongTermEntries.value = list;
 }
+
+/** 启用沙箱时若仍是历史 process，改为本机 Docker；关闭时保持 process 语义给 payload。 */
+watch(
+  () => props.draft.sandboxEnabled,
+  (enabled) => {
+    if (!enabled) return;
+    const backend = String(props.draft.sandboxBackend || "").trim();
+    if (!backend || backend === "process") {
+      props.draft.sandboxBackend = "docker";
+      props.draft.fsRootIsolation = true;
+    }
+  },
+);
+
+watch(
+  () => props.draft.sandboxBackend,
+  (backend) => {
+    if (!props.draft.sandboxEnabled) return;
+    if (backend === "docker" || backend === "remote") {
+      props.draft.fsRootIsolation = true;
+    }
+  },
+);
 </script>
 
 <template>
@@ -158,8 +181,74 @@ function removeLongTermEntry(index) {
       <p v-if="!llmProfiles.length" class="agent-settings-hint">请先在「设置 › 连接」中添加 LLM 配置</p>
       <label class="agent-settings-check">
         <input v-model="draft.sandboxEnabled" type="checkbox" />
-        <span>沙箱运行</span>
+        <span>启用沙箱</span>
       </label>
+      <p class="agent-settings-hint">
+        关闭：在宿主机运行，由工具组与策略约束保证安全。开启：在隔离环境中执行，需选择沙箱模式并配置参数。
+      </p>
+      <template v-if="draft.sandboxEnabled">
+        <label class="agent-settings-field">
+          <span>沙箱模式</span>
+          <select v-model="draft.sandboxBackend" class="agent-settings-input">
+            <option value="docker">本机 Docker（Linux 容器）</option>
+            <option value="remote">远程沙箱（预留）</option>
+          </select>
+        </label>
+        <template v-if="draft.sandboxBackend === 'docker'">
+          <p class="agent-settings-hint">
+            需本机安装 Docker。Agent 装入时创建 Linux 容器；命令行在容器内执行。镜像见 packaging/sandbox。
+          </p>
+          <label class="agent-settings-field">
+            <span>镜像</span>
+            <input v-model="draft.sandboxImage" type="text" class="agent-settings-input" placeholder="dagents-sandbox:latest" />
+          </label>
+          <label class="agent-settings-field">
+            <span>网络</span>
+            <input v-model="draft.sandboxNetwork" type="text" class="agent-settings-input" placeholder="none" />
+          </label>
+          <label class="agent-settings-field">
+            <span>内存上限</span>
+            <input v-model="draft.sandboxMemory" type="text" class="agent-settings-input" placeholder="512m（可选）" />
+          </label>
+          <label class="agent-settings-field">
+            <span>CPU 上限</span>
+            <input v-model="draft.sandboxCpus" type="text" class="agent-settings-input" placeholder="1.0（可选）" />
+          </label>
+        </template>
+        <template v-else-if="draft.sandboxBackend === 'remote'">
+          <p class="agent-settings-hint">
+            远程沙箱运行时尚未接入；可先填写接入参数并保存配置，启用时会提示暂不可用。
+          </p>
+          <label class="agent-settings-field">
+            <span>远程 Endpoint</span>
+            <input
+              v-model="draft.sandboxRemoteEndpoint"
+              type="text"
+              class="agent-settings-input"
+              placeholder="https://sandbox.example.com"
+            />
+          </label>
+          <label class="agent-settings-field">
+            <span>API Key（可选）</span>
+            <input
+              v-model="draft.sandboxRemoteAPIKey"
+              type="password"
+              class="agent-settings-input"
+              placeholder="远程沙箱凭证"
+              autocomplete="off"
+            />
+          </label>
+        </template>
+        <label class="agent-settings-check">
+          <input v-model="draft.allowBash" type="checkbox" />
+          <span>允许命令行工具</span>
+        </label>
+        <label class="agent-settings-check">
+          <input v-model="draft.allowNetworkTools" type="checkbox" />
+          <span>允许网络类工具（浏览器 / A2A）</span>
+        </label>
+        <p class="agent-settings-hint">隔离工作区在启用 docker / remote 时强制开启（agents/&lt;id&gt;/data）。</p>
+      </template>
     </section>
 
     <div class="agent-settings-advanced-toggle">
@@ -229,50 +318,6 @@ function removeLongTermEntry(index) {
             </span>
           </label>
         </div>
-      </section>
-
-      <section class="agent-settings-section">
-        <h3 class="agent-settings-section__title">沙箱详情</h3>
-        <label class="agent-settings-field">
-          <span>后端</span>
-          <select v-model="draft.sandboxBackend" class="agent-settings-input">
-            <option value="process">process（应用层隔离）</option>
-            <option value="docker">docker（bash 进容器）</option>
-          </select>
-        </label>
-        <template v-if="draft.sandboxBackend === 'docker'">
-          <p class="agent-settings-hint">
-            需本机 Docker。Agent 在内存时预创建常驻容器（Alpine Linux）；bash 经 docker exec；空闲 15 分钟回收。镜像见 packaging/sandbox。
-          </p>
-          <label class="agent-settings-field">
-            <span>镜像</span>
-            <input v-model="draft.sandboxImage" type="text" class="agent-settings-input" placeholder="dagents-sandbox:latest" />
-          </label>
-          <label class="agent-settings-field">
-            <span>网络</span>
-            <input v-model="draft.sandboxNetwork" type="text" class="agent-settings-input" placeholder="none" />
-          </label>
-          <label class="agent-settings-field">
-            <span>内存上限</span>
-            <input v-model="draft.sandboxMemory" type="text" class="agent-settings-input" placeholder="512m（可选）" />
-          </label>
-          <label class="agent-settings-field">
-            <span>CPU 上限</span>
-            <input v-model="draft.sandboxCpus" type="text" class="agent-settings-input" placeholder="1.0（可选）" />
-          </label>
-        </template>
-        <label class="agent-settings-check">
-          <input v-model="draft.fsRootIsolation" type="checkbox" :disabled="draft.sandboxBackend === 'docker'" />
-          <span>隔离工作区（agents/&lt;id&gt;/data）{{ draft.sandboxBackend === 'docker' ? '（docker 强制）' : '' }}</span>
-        </label>
-        <label class="agent-settings-check">
-          <input v-model="draft.allowBash" type="checkbox" />
-          <span>允许命令行工具</span>
-        </label>
-        <label class="agent-settings-check">
-          <input v-model="draft.allowNetworkTools" type="checkbox" />
-          <span>允许网络类工具（浏览器 / A2A）</span>
-        </label>
       </section>
 
       <section class="agent-settings-section">

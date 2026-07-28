@@ -6,6 +6,10 @@
 
 ### 变更
 
+- **沙箱设置 UI**：启用沙箱后选择模式（本机 Docker / 远程预留）并配置对应参数；去掉将 `process` 表述为「沙箱后端」的选项（未启用 = 宿主机 + 工具约束）。
+- **沙箱 API**：`backend` 支持 `remote`（需 `remote_endpoint`）；远程运行时尚未实现，启用时返回 `remote_unavailable`。
+
+- **API 错误码对齐**：对外 `session_not_found` 改为 `agent_not_found`，details 使用 `agent_id`。
 - **删除 `/v1/sessions*` 410 桩**：不再注册 sessions 路由（404）；错误码 `sessions_moved` 退役。
 - **对话持久化表 `agent_runtimes`**：`sessions(session_id, agent_id)` 迁移为 `agent_runtimes(agent_id, node_id)`；Go `store.Record` 字段同步（`AgentID` / `NodeID`）；启动时自动迁旧表。
 - **内部/API 错误码**：`session_not_found` → `agent_not_found`（details 用 `agent_id`）。
