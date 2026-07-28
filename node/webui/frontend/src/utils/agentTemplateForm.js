@@ -112,17 +112,6 @@ function skillsPayload(draft) {
   return { visible };
 }
 
-/** 旧 snapshot 的 skills.enabled=false 迁入工具组（去掉 skills）。 */
-function migrateSkillsEnabledIntoToolGroups(draft, skills) {
-  if (boolOr(skills?.enabled, true)) return;
-  const groups = Array.isArray(draft.toolGroups) ? draft.toolGroups : [];
-  if (groups.length === 0) {
-    draft.toolGroups = TOOL_GROUPS.map((g) => g.name).filter((n) => n !== "skills");
-    return;
-  }
-  draft.toolGroups = groups.filter((g) => String(g || "").trim() !== "skills");
-}
-
 /** 从模板展开为可编辑草稿（创建时由前端持有完整设置）。 */
 /** 空白 Agent 草稿（不依赖模板）。 */
 export function draftFromBlank(llmProfileIds = []) {
@@ -152,7 +141,6 @@ export function draftFromTemplate(template, llmProfileIds = []) {
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   draft.visibleSkills = normalizeVisibleSkills(skills);
-  migrateSkillsEnabledIntoToolGroups(draft, skills);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = !!sandbox.enabled;
   draft.sandboxBackend = String(sandbox.backend || "process").trim() || "process";
@@ -202,7 +190,6 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   draft.visibleSkills = normalizeVisibleSkills(skills);
-  migrateSkillsEnabledIntoToolGroups(draft, skills);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.sandboxEnabled = boolOr(sandbox.enabled, !!agent?.sandbox_enabled);
   draft.sandboxBackend = String(sandbox.backend || agent?.sandbox_backend || "process").trim() || "process";

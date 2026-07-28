@@ -6,6 +6,8 @@
 
 ### 变更
 
+- **Skills UI 去掉 `enabled` 迁移**：设置页/模板展开不再把旧 `defaults.skills.enabled=false` 改写成工具组；能力只看工具组 `skills`。
+- **child-agents HTTP 硬切 `*_agent_id`**：路径改为 `{child_agent_id}`；响应去掉 `parent_session_id` / `child_session_id` 双写（仅 `parent_agent_id` / `child_agent_id`）。工具参数与 SSE 仍用 `child_session_id`。
 - **Go Client 消息/SSE 发 `agent_id`**：`POST /v1/messages` 与 `GET /v1/streams` 过滤参数改用 `agent_id`（Node 仍接受旧 `session_id`）；child-agents 列表项增加 `child_agent_id`。
 - **Manage Console**：删除未使用的 `sortSessions` 工具函数。
 - **文档对齐 sessions 下线**：handbook/契约外的设计与运维文档改为 `/v1/agents`（manage 通信、child-agents、media、smoke 清单、skills context 等）；历史 Shell 设计文保留路径并加 410 注记。
@@ -13,7 +15,7 @@
 - **删除 sessions CRUD 死代码**：去掉未挂载的 `handleCreateSession` / `handleListSessions` / `handleDeleteSession` 及相关响应类型；`/v1/sessions*` 仅保留 410 桩。
 - **Go Client / 托盘 Session 别名删除**：移除 `CreateSession` / `ListSessions` / `SessionSummary` / `SyncFromSessions`；统一 `EnsureAgent` / `ListAgents` / `AgentSummary` / `SyncFromAgents`。
 - **A2A HITL legacy 删除**：caller 侧仅接受含 `items[]` 的现代 `hitl_required` 载荷，不再转换旧 `approval_args` / `user_information_args`。
-- **Skills 能力开关**：运行时不再读 `defaults.skills.enabled`；仅由 Node 总闸 + 工具组 `skills` 决定；写入侧也不再写 `enabled:false`（旧 snapshot 仍可在 Web UI 迁移进工具组）。
+- **Skills 能力开关**：运行时不再读 `defaults.skills.enabled`；仅由 Node 总闸 + 工具组 `skills` 决定；写入侧也不再写 `enabled:false`。
 - **`/v1/sessions*` 下线**：全部返回 **410 Gone**（`sessions_moved`），对齐 `/v1/policy`；对话 hydrate/context/cancel/skills/child-agents/media 仅走 `/v1/agents/{agent_id}/...`；媒体 `PublicURL` 改为 agents 路径。
 - **HITL 旧事件收口**：本机 SSE / WebUI / 托盘 / inbox 等待仅认 `hitl_required`；A2A requires_input 出站强制 `event_type=hitl_required`。
 - **Go Client Agent API**：新增 `ListAgents` / `AgentSummary`。

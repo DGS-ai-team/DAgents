@@ -21,14 +21,14 @@ describe("childAgent", () => {
 
   it("sortChildAgentItems puts active items first", () => {
     const sorted = sortChildAgentItems([
-      { child_session_id: "a", status: "completed", created_at: "2026-01-02T00:00:00Z" },
-      { child_session_id: "b", status: "active", created_at: "2026-01-01T00:00:00Z" },
+      { child_agent_id: "a", status: "completed", created_at: "2026-01-02T00:00:00Z" },
+      { child_agent_id: "b", status: "active", created_at: "2026-01-01T00:00:00Z" },
     ]);
-    expect(sorted[0].child_session_id).toBe("b");
+    expect(sorted[0].child_agent_id).toBe("b");
   });
 
   it("childAgentItems reads items array", () => {
-    expect(childAgentItems({ items: [{ child_session_id: "x" }] })).toHaveLength(1);
+    expect(childAgentItems({ items: [{ child_agent_id: "x" }] })).toHaveLength(1);
     expect(childAgentItems(null)).toEqual([]);
   });
 });

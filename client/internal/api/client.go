@@ -606,15 +606,14 @@ func (c *Client) SubmitResume(ctx context.Context, agentID string, resumeValue m
 
 // ChildAgentListItem 为 GET child-agents 列表项。
 type ChildAgentListItem struct {
-	ChildAgentID   string   `json:"child_agent_id"`
-	ChildSessionID string   `json:"child_session_id"` // 兼容旧字段；等于 ChildAgentID
-	Status         string   `json:"status"`
-	Purpose        string   `json:"purpose"`
-	AllowedTools   []string `json:"allowed_tools"`
-	CreatedAt      string   `json:"created_at"`
-	ExpiresAt      string   `json:"expires_at"`
-	TurnCount      int      `json:"turn_count"`
-	MaxTurns       int      `json:"max_turns"`
+	ChildAgentID string   `json:"child_agent_id"`
+	Status       string   `json:"status"`
+	Purpose      string   `json:"purpose"`
+	AllowedTools []string `json:"allowed_tools"`
+	CreatedAt    string   `json:"created_at"`
+	ExpiresAt    string   `json:"expires_at"`
+	TurnCount    int      `json:"turn_count"`
+	MaxTurns     int      `json:"max_turns"`
 }
 
 // ListChildAgents 返回父 Agent 下活跃子 Agent 列表。
@@ -626,11 +625,6 @@ func (c *Client) ListChildAgents(ctx context.Context, parentAgentID string) ([]C
 	path := "/v1/agents/" + url.PathEscape(parentAgentID) + "/child-agents"
 	if err := c.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
-	}
-	for i := range resp.Items {
-		if strings.TrimSpace(resp.Items[i].ChildAgentID) == "" {
-			resp.Items[i].ChildAgentID = resp.Items[i].ChildSessionID
-		}
 	}
 	return resp.Items, nil
 }

@@ -7,21 +7,19 @@ import (
 )
 
 type childAgentListResponse struct {
-	ParentAgentID   string                      `json:"parent_agent_id"`
-	ParentSessionID string                      `json:"parent_session_id"` // 兼容旧字段
-	Items           []sessionChildAgentViewJSON `json:"items"`
+	ParentAgentID string                      `json:"parent_agent_id"`
+	Items         []sessionChildAgentViewJSON `json:"items"`
 }
 
 type sessionChildAgentViewJSON struct {
-	ChildAgentID   string   `json:"child_agent_id"`
-	ChildSessionID string   `json:"child_session_id"` // 兼容旧字段
-	Status         string   `json:"status"`
-	Purpose        string   `json:"purpose"`
-	AllowedTools   []string `json:"allowed_tools"`
-	CreatedAt      string   `json:"created_at"`
-	ExpiresAt      string   `json:"expires_at"`
-	TurnCount      int      `json:"turn_count"`
-	MaxTurns       int      `json:"max_turns"`
+	ChildAgentID string   `json:"child_agent_id"`
+	Status       string   `json:"status"`
+	Purpose      string   `json:"purpose"`
+	AllowedTools []string `json:"allowed_tools"`
+	CreatedAt    string   `json:"created_at"`
+	ExpiresAt    string   `json:"expires_at"`
+	TurnCount    int      `json:"turn_count"`
+	MaxTurns     int      `json:"max_turns"`
 }
 
 type childAgentCancelRequest struct {
@@ -30,15 +28,11 @@ type childAgentCancelRequest struct {
 
 type childAgentCancelResponse struct {
 	ChildAgentID   string `json:"child_agent_id"`
-	ChildSessionID string `json:"child_session_id"`
 	Status         string `json:"status"`
 	PreviousStatus string `json:"previous_status"`
 }
 
 func resolveChildPathID(r *http.Request) string {
-	if id := strings.TrimSpace(r.PathValue("child_session_id")); id != "" {
-		return id
-	}
 	return strings.TrimSpace(r.PathValue("child_agent_id"))
 }
 
@@ -50,21 +44,19 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := childAgentListResponse{
-		ParentAgentID:   parentID,
-		ParentSessionID: parentID,
-		Items:           make([]sessionChildAgentViewJSON, 0, len(items)),
+		ParentAgentID: parentID,
+		Items:         make([]sessionChildAgentViewJSON, 0, len(items)),
 	}
 	for _, it := range items {
 		out.Items = append(out.Items, sessionChildAgentViewJSON{
-			ChildAgentID:   it.ChildSessionID,
-			ChildSessionID: it.ChildSessionID,
-			Status:         it.Status,
-			Purpose:        it.Purpose,
-			AllowedTools:   append([]string(nil), it.AllowedTools...),
-			CreatedAt:      it.CreatedAt.Format(timeRFC3339),
-			ExpiresAt:      it.ExpiresAt.Format(timeRFC3339),
-			TurnCount:      it.TurnCount,
-			MaxTurns:       it.MaxTurns,
+			ChildAgentID: it.ChildSessionID,
+			Status:       it.Status,
+			Purpose:      it.Purpose,
+			AllowedTools: append([]string(nil), it.AllowedTools...),
+			CreatedAt:    it.CreatedAt.Format(timeRFC3339),
+			ExpiresAt:    it.ExpiresAt.Format(timeRFC3339),
+			TurnCount:    it.TurnCount,
+			MaxTurns:     it.MaxTurns,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -81,22 +73,20 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 	for _, it := range items {
 		if it.ChildSessionID == childID {
 			writeJSON(w, http.StatusOK, sessionChildAgentViewJSON{
-				ChildAgentID:   it.ChildSessionID,
-				ChildSessionID: it.ChildSessionID,
-				Status:         it.Status,
-				Purpose:        it.Purpose,
-				AllowedTools:   append([]string(nil), it.AllowedTools...),
-				CreatedAt:      it.CreatedAt.Format(timeRFC3339),
-				ExpiresAt:      it.ExpiresAt.Format(timeRFC3339),
-				TurnCount:      it.TurnCount,
-				MaxTurns:       it.MaxTurns,
+				ChildAgentID: it.ChildSessionID,
+				Status:       it.Status,
+				Purpose:      it.Purpose,
+				AllowedTools: append([]string(nil), it.AllowedTools...),
+				CreatedAt:    it.CreatedAt.Format(timeRFC3339),
+				ExpiresAt:    it.ExpiresAt.Format(timeRFC3339),
+				TurnCount:    it.TurnCount,
+				MaxTurns:     it.MaxTurns,
 			})
 			return
 		}
 	}
 	writeAPIError(w, http.StatusNotFound, "child_agent_not_found", "child agent not found", map[string]any{
-		"child_agent_id":   childID,
-		"child_session_id": childID,
+		"child_agent_id": childID,
 	})
 }
 
@@ -123,14 +113,12 @@ func (s *Server) handleCancelChildAgent(w http.ResponseWriter, r *http.Request) 
 			code = "child_agents_disabled"
 		}
 		writeAPIError(w, http.StatusNotFound, code, err.Error(), map[string]any{
-			"child_agent_id":   childID,
-			"child_session_id": childID,
+			"child_agent_id": childID,
 		})
 		return
 	}
 	writeJSON(w, http.StatusOK, childAgentCancelResponse{
 		ChildAgentID:   childID,
-		ChildSessionID: childID,
 		Status:         string(res.Status),
 		PreviousStatus: prev,
 	})
