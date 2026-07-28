@@ -249,7 +249,7 @@ Go/Python Client 在父 session SSE 上识别上述事件，在 TUI 展示「子
 
 子 Agent **无**独立 SSE 连接；用户通过**父 Agent** 订阅流，并通过以下 API 管理。
 
-前缀：`/v1/agents/{parent_agent_id}/child-agents`（旧 `/v1/sessions/.../child-agents` 已 410）。
+前缀：`/v1/agents/{parent_agent_id}/child-agents`（旧 `/v1/sessions/.../child-agents` 已移除）。
 
 `parent_agent_id` 须为普通用户 Agent（非 `child-*`）。
 
@@ -322,8 +322,8 @@ Content-Type: application/json
 
 | code | 场景 |
 |------|------|
-| `session_not_found` | 父 session 不存在 |
-| `child_agent_not_found` | id 不存在或不属于该父 session |
+| `agent_not_found` | 父 Agent 不存在 |
+| `child_agent_not_found` | id 不存在或不属于该父 Agent |
 | `child_agent_already_finished` | 已交付（幂等 200 返回终态亦可） |
 
 ---

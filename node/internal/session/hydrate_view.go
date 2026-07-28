@@ -38,14 +38,14 @@ func (m *Manager) GetHydrateView(sessionID string) (*HydrateView, error) {
 		return m.buildHydrateView(sessionID, messages, pending, state, queuePending, hasActiveTurn, notifySeq, ackSeq), nil
 	}
 	if m.store == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	rec, err := m.store.Load(context.Background(), sessionID)
 	if err != nil {
 		return nil, err
 	}
 	if rec == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	pending := rec.RuntimeState.Pending
 	hasActiveTurn := pending != nil

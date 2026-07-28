@@ -16,7 +16,7 @@
 | 原则 | 说明 |
 |------|------|
 | **用户面 = Agent** | 1 Agent = 1 主对话；优先 `/v1/agents/{agent_id}/...` |
-| **`/v1/sessions*` 已下线** | 固定 410（`sessions_moved`）；一律用 `/v1/agents/{agent_id}/...` |
+| **`/v1/sessions*` 已移除** | 未注册路由（404）；一律用 `/v1/agents/{agent_id}/...` |
 | **Policy / 侧车按 Agent** | SQLite（`agents.db`）；全局 `/v1/policy` 已 410 |
 | **Client 只连 Node** | 默认同机 `127.0.0.1`；**前后端分离**时 Client 在较新机器、`local.endpoint` 指向目标机 Node（见 [01 §1.5](./01-愿景与架构.md)、§4.4） |
 | **思考与工具在 Node 内** | 无 Backend 代执行 |
@@ -29,7 +29,7 @@
 | `/health` | 探活 |
 | `/v1/agents/...` | **主契约**（对话、策略、侧车、子 Agent） |
 | `/v1/...` | messages、streams、triggers、setup |
-| `/v1/sessions/...` | 已下线（410） |
+| `/v1/sessions/...` | 已移除（404） |
 
 权威契约：[agent-node-api.md](../architecture/agent-node-api.md) · OpenAPI：[openapi-node.yaml](../architecture/openapi-node.yaml)
 
@@ -45,7 +45,7 @@
 }
 ```
 
-常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`、`policy_moved`、`sessions_moved`。
+常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`、`policy_moved`。
 
 ---
 
@@ -79,7 +79,7 @@ GET /v1/agent/info
 | GET | `/v1/agents/{id}/context` | token 估算 + system prompt 预览 |
 | GET | `/v1/agents/{id}/child-agents` | 临时子 Agent 列表 |
 
-`/v1/sessions*` 已下线（410）。
+`/v1/sessions*` 已移除（404）。
 
 ### 2.3 消息与 resume
 

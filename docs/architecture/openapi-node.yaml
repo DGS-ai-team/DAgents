@@ -4,7 +4,7 @@ info:
   version: "0.5"
   description: |
     Agent Node 本地 HTTP API。对外契约以 **Agent** 为中心（1 Agent = 1 主对话）。
-    `/v1/sessions*` 已下线（410 Gone，`sessions_moved`）；请使用 `/v1/agents/{agent_id}/...`。
+    `/v1/sessions*` 已移除（未注册 → 404）；请使用 `/v1/agents/{agent_id}/...`。
 servers:
   - url: http://127.0.0.1:18789
     description: 默认本机 Node
@@ -154,17 +154,6 @@ paths:
       responses:
         "410":
           description: Gone
-  /v1/sessions:
-    get:
-      summary: 已下线（410）— 请用 /v1/agents
-      responses:
-        "410":
-          description: Gone（sessions_moved）
-    post:
-      summary: 已下线（410）— 请用 POST /v1/agents
-      responses:
-        "410":
-          description: Gone（sessions_moved）
 components:
   parameters:
     AgentID:

@@ -53,14 +53,14 @@ func (m *Manager) AckSession(ctx context.Context, sessionID string, sseSeq int) 
 		return rt.ackSession(ctx, sseSeq)
 	}
 	if m.store == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	state, err := m.store.AckSession(ctx, sessionID, sseSeq)
 	if err != nil {
 		return nil, err
 	}
 	if state == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	return notificationFromRuntimeState(state.Pending, state.NotifySeq, state.AckSeq), nil
 }

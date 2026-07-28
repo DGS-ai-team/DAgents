@@ -236,7 +236,7 @@ func TestRestoreSessionFromStore(t *testing.T) {
 	}
 	ctx := context.Background()
 	msgs := []llm.Message{{Role: "user", Content: "old"}, {Role: "assistant", Content: "ok"}}
-	if err := st.Save(ctx, store.Record{SessionID: "sess-restore", AgentID: "agent-1", Messages: msgs}); err != nil {
+	if err := st.Save(ctx, store.Record{AgentID: "sess-restore", NodeID: "agent-1", Messages: msgs}); err != nil {
 		t.Fatal(err)
 	}
 	st.Close()
