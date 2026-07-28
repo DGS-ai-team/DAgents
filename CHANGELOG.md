@@ -6,6 +6,7 @@
 
 ### 变更
 
+- **Go Client Agent 命名**：`GetSessionContext` / `DeleteSession` / `SessionHydrate` 等改为 `GetAgentContext` / `DeleteAgent` / `AgentHydrate` 等；JSON 字段名不变。
 - **删除 sessions CRUD 死代码**：去掉未挂载的 `handleCreateSession` / `handleListSessions` / `handleDeleteSession` 及相关响应类型；`/v1/sessions*` 仅保留 410 桩。
 - **Go Client / 托盘 Session 别名删除**：移除 `CreateSession` / `ListSessions` / `SessionSummary` / `SyncFromSessions`；统一 `EnsureAgent` / `ListAgents` / `AgentSummary` / `SyncFromAgents`。
 - **A2A HITL legacy 删除**：caller 侧仅接受含 `items[]` 的现代 `hitl_required` 载荷，不再转换旧 `approval_args` / `user_information_args`。

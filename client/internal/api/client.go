@@ -1,4 +1,4 @@
-// Package api 提供 Agent Node HTTP/SSE 客户端（N1：session、message、stream）。
+// Package api 提供 Agent Node HTTP/SSE 客户端（Agent、message、stream）。
 package api
 
 import (
@@ -128,9 +128,9 @@ func (c *Client) ListAgents(ctx context.Context) ([]AgentSummary, error) {
 	return out, nil
 }
 
-// SessionContext 为 GET /v1/agents/{id}/context 响应。
-type SessionContext struct {
-	SessionID             string `json:"session_id"`
+// AgentContext 为 GET /v1/agents/{id}/context 响应。
+type AgentContext struct {
+	SessionID             string `json:"session_id"` // 与 agent_id 相同（Node 字段名）
 	MessagesCount         int    `json:"messages_count"`
 	PendingToolCallsCount int    `json:"pending_tool_calls_count"`
 	MessagesTotalTokens   int    `json:"messages_total_tokens"`
@@ -278,10 +278,10 @@ func (c *Client) PatchLLMSettings(ctx context.Context, patch LLMSettingsPatch) (
 	return &settings, nil
 }
 
-// GetSessionContext 调用 GET /v1/agents/{id}/context。
-func (c *Client) GetSessionContext(ctx context.Context, sessionID string) (*SessionContext, error) {
-	var ctxBody SessionContext
-	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/context"
+// GetAgentContext 调用 GET /v1/agents/{id}/context。
+func (c *Client) GetAgentContext(ctx context.Context, agentID string) (*AgentContext, error) {
+	var ctxBody AgentContext
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(agentID)) + "/context"
 	if err := c.getJSON(ctx, path, &ctxBody); err != nil {
 		return nil, err
 	}
@@ -291,9 +291,9 @@ func (c *Client) GetSessionContext(ctx context.Context, sessionID string) (*Sess
 // TranscriptEntry 为 hydrate transcript 单条（与 Node JSON 对齐）。
 type TranscriptEntry map[string]any
 
-// SessionHydrate 为 GET /v1/agents/{id}/hydrate 响应（F-H5）。
-type SessionHydrate struct {
-	SessionID       string            `json:"session_id"`
+// AgentHydrate 为 GET /v1/agents/{id}/hydrate 响应。
+type AgentHydrate struct {
+	SessionID       string            `json:"session_id"` // 与 agent_id 相同（Node 字段名）
 	RunTurnPhase    string            `json:"run_turn_phase"`
 	HasActiveTurn   bool              `json:"has_active_turn"`
 	QueuePending    int               `json:"queue_pending"`
@@ -306,37 +306,37 @@ type SessionHydrate struct {
 	HasUnread       bool              `json:"has_unread"`
 }
 
-// GetSessionHydrate 调用 GET /v1/agents/{id}/hydrate。
-func (c *Client) GetSessionHydrate(ctx context.Context, sessionID string) (*SessionHydrate, error) {
-	sid := strings.TrimSpace(sessionID)
-	if sid == "" {
-		return nil, fmt.Errorf("session_id is required")
+// GetAgentHydrate 调用 GET /v1/agents/{id}/hydrate。
+func (c *Client) GetAgentHydrate(ctx context.Context, agentID string) (*AgentHydrate, error) {
+	id := strings.TrimSpace(agentID)
+	if id == "" {
+		return nil, fmt.Errorf("agent_id is required")
 	}
-	var out SessionHydrate
-	path := "/v1/agents/" + url.PathEscape(sid) + "/hydrate"
+	var out AgentHydrate
+	path := "/v1/agents/" + url.PathEscape(id) + "/hydrate"
 	if err := c.getJSON(ctx, path, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// PostSessionAck 调用 POST /v1/agents/{id}/ack（IM cursor，F-E13）。
-func (c *Client) PostSessionAck(ctx context.Context, sessionID string, sseSeq int) error {
-	sid := strings.TrimSpace(sessionID)
-	if sid == "" || sseSeq <= 0 {
+// PostAgentAck 调用 POST /v1/agents/{id}/ack（IM cursor）。
+func (c *Client) PostAgentAck(ctx context.Context, agentID string, sseSeq int) error {
+	id := strings.TrimSpace(agentID)
+	if id == "" || sseSeq <= 0 {
 		return nil
 	}
-	path := "/v1/agents/" + url.PathEscape(sid) + "/ack"
+	path := "/v1/agents/" + url.PathEscape(id) + "/ack"
 	return c.postJSON(ctx, path, map[string]any{"sse_seq": sseSeq}, nil)
 }
 
 // CancelTurn 调用 POST /v1/agents/{id}/cancel，取消在途 turn。
-func (c *Client) CancelTurn(ctx context.Context, sessionID string) (bool, error) {
-	sid := strings.TrimSpace(sessionID)
-	if sid == "" {
-		return false, fmt.Errorf("session_id is required")
+func (c *Client) CancelTurn(ctx context.Context, agentID string) (bool, error) {
+	id := strings.TrimSpace(agentID)
+	if id == "" {
+		return false, fmt.Errorf("agent_id is required")
 	}
-	path := "/v1/agents/" + url.PathEscape(sid) + "/cancel"
+	path := "/v1/agents/" + url.PathEscape(id) + "/cancel"
 	var resp struct {
 		SessionID string `json:"session_id"`
 		Cancelled bool   `json:"cancelled"`
@@ -347,9 +347,9 @@ func (c *Client) CancelTurn(ctx context.Context, sessionID string) (bool, error)
 	return resp.Cancelled, nil
 }
 
-// ClearSessionContext 调用 POST /v1/agents/{id}/clear-context。
-func (c *Client) ClearSessionContext(ctx context.Context, sessionID string) error {
-	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/clear-context"
+// ClearAgentContext 调用 POST /v1/agents/{id}/clear-context。
+func (c *Client) ClearAgentContext(ctx context.Context, agentID string) error {
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(agentID)) + "/clear-context"
 	return c.postJSON(ctx, path, map[string]any{}, nil)
 }
 
@@ -407,19 +407,19 @@ func (c *Client) UpdateShellPolicy(ctx context.Context, shellType string, update
 	return c.putJSON(ctx, path, body, nil)
 }
 
-// CompressSessionContext 调用 POST /v1/agents/{id}/compress，手动触发阻塞压缩。
-func (c *Client) CompressSessionContext(ctx context.Context, sessionID string) (*CompressContextResult, error) {
+// CompressAgentContext 调用 POST /v1/agents/{id}/compress，手动触发阻塞压缩。
+func (c *Client) CompressAgentContext(ctx context.Context, agentID string) (*CompressContextResult, error) {
 	var out CompressContextResult
-	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/compress"
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(agentID)) + "/compress"
 	if err := c.postJSON(ctx, path, map[string]any{}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// DeleteSession 调用 DELETE /v1/agents/{id}。
-func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
-	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID))
+// DeleteAgent 调用 DELETE /v1/agents/{id}。
+func (c *Client) DeleteAgent(ctx context.Context, agentID string) error {
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(agentID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.base+path, nil)
 	if err != nil {
 		return err
@@ -436,37 +436,37 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// SessionSkills 为 skills 查询/变更响应。
-type SessionSkills struct {
-	SessionID       string `json:"session_id"`
+// AgentSkills 为 skills 查询/变更响应。
+type AgentSkills struct {
+	SessionID       string `json:"session_id"` // 与 agent_id 相同（Node 字段名）
 	LoadedSkills    []any  `json:"loaded_skills"`
 	AvailableSkills []any  `json:"available_skills"`
 }
 
-// ListSessionSkills 调用 GET /v1/agents/{id}/skills。
-func (c *Client) ListSessionSkills(ctx context.Context, sessionID string) (*SessionSkills, error) {
-	var out SessionSkills
-	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/skills"
+// ListAgentSkills 调用 GET /v1/agents/{id}/skills。
+func (c *Client) ListAgentSkills(ctx context.Context, agentID string) (*AgentSkills, error) {
+	var out AgentSkills
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(agentID)) + "/skills"
 	if err := c.getJSON(ctx, path, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// LoadSessionSkill 调用 POST /v1/agents/{id}/skills/load。
-func (c *Client) LoadSessionSkill(ctx context.Context, sessionID, skillName string) (*SessionSkills, error) {
-	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/skills/load"
-	var out SessionSkills
+// LoadAgentSkill 调用 POST /v1/agents/{id}/skills/load。
+func (c *Client) LoadAgentSkill(ctx context.Context, agentID, skillName string) (*AgentSkills, error) {
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(agentID)) + "/skills/load"
+	var out AgentSkills
 	if err := c.postJSON(ctx, path, map[string]any{"skill_name": skillName}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// UnloadSessionSkill 调用 POST /v1/agents/{id}/skills/unload。
-func (c *Client) UnloadSessionSkill(ctx context.Context, sessionID, skillName string) (*SessionSkills, error) {
-	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(sessionID)) + "/skills/unload"
-	var out SessionSkills
+// UnloadAgentSkill 调用 POST /v1/agents/{id}/skills/unload。
+func (c *Client) UnloadAgentSkill(ctx context.Context, agentID, skillName string) (*AgentSkills, error) {
+	path := "/v1/agents/" + url.PathEscape(strings.TrimSpace(agentID)) + "/skills/unload"
+	var out AgentSkills
 	if err := c.postJSON(ctx, path, map[string]any{"skill_name": skillName}, &out); err != nil {
 		return nil, err
 	}
@@ -546,8 +546,8 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	return nil
 }
 
-func (c *Client) SubmitMessage(ctx context.Context, sessionID, content string) error {
-	return c.SubmitUserMessage(ctx, sessionID, content, nil)
+func (c *Client) SubmitMessage(ctx context.Context, agentID, content string) error {
+	return c.SubmitUserMessage(ctx, agentID, content, nil)
 }
 
 // ContentPart 为 POST /v1/messages 多模态 content_parts 项。
@@ -564,9 +564,9 @@ type ImageURLPart struct {
 }
 
 // SubmitUserMessage 调用 POST /v1/messages；contentParts 非空时发送多模态 user 消息。
-func (c *Client) SubmitUserMessage(ctx context.Context, sessionID, content string, contentParts []ContentPart) error {
+func (c *Client) SubmitUserMessage(ctx context.Context, agentID, content string, contentParts []ContentPart) error {
 	body := map[string]any{
-		"session_id":   sessionID,
+		"session_id":   agentID,
 		"request_type": "message",
 		"content":      content,
 	}
@@ -586,9 +586,9 @@ func (c *Client) SubmitUserMessage(ctx context.Context, sessionID, content strin
 }
 
 // SubmitResume 调用 POST /v1/messages 投递 HITL resume。
-func (c *Client) SubmitResume(ctx context.Context, sessionID string, resumeValue map[string]any) error {
+func (c *Client) SubmitResume(ctx context.Context, agentID string, resumeValue map[string]any) error {
 	body := map[string]any{
-		"session_id":   sessionID,
+		"session_id":   agentID,
 		"request_type": "resume",
 		"resume_value": resumeValue,
 	}
@@ -616,32 +616,32 @@ type ChildAgentListItem struct {
 	MaxTurns       int    `json:"max_turns"`
 }
 
-// ListChildAgents 返回父 session 下活跃子 Agent 列表。
-func (c *Client) ListChildAgents(ctx context.Context, parentSessionID string) ([]ChildAgentListItem, error) {
-	parentSessionID = strings.TrimSpace(parentSessionID)
+// ListChildAgents 返回父 Agent 下活跃子 Agent 列表。
+func (c *Client) ListChildAgents(ctx context.Context, parentAgentID string) ([]ChildAgentListItem, error) {
+	parentAgentID = strings.TrimSpace(parentAgentID)
 	var resp struct {
 		Items []ChildAgentListItem `json:"items"`
 	}
-	path := "/v1/agents/" + url.PathEscape(parentSessionID) + "/child-agents"
+	path := "/v1/agents/" + url.PathEscape(parentAgentID) + "/child-agents"
 	if err := c.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Items, nil
 }
 
-// StreamEvents 订阅 GET /v1/streams，按 session_id 过滤（可选），逐条回调 handler。
+// StreamEvents 订阅 GET /v1/streams，按 agent/session_id 过滤（可选），逐条回调 handler。
 
 // handler 返回 false 时提前结束；ctx 取消时退出。
 // 异常：非 200、读流错误向上返回。
 func (c *Client) StreamEvents(
 	ctx context.Context,
-	sessionID string,
+	agentID string,
 	lastEventID int,
 	handler func(StreamEvent) bool,
 ) error {
 	q := url.Values{}
-	if strings.TrimSpace(sessionID) != "" {
-		q.Set("session_id", sessionID)
+	if strings.TrimSpace(agentID) != "" {
+		q.Set("session_id", agentID)
 	}
 	q.Set("live", "1")
 	streamURL := c.base + "/v1/streams"
