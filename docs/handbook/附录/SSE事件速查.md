@@ -1,6 +1,6 @@
 # SSE 事件速查
 
-实现：`node/internal/stream/`、`node/internal/turn/orchestrator.go`。Client 订阅：`GET /v1/stream`（或 `/v1/streams?session_id=`，以实现为准）。
+实现：`node/internal/stream/`、`node/internal/turn/orchestrator.go`。Client 订阅：`GET /v1/streams?agent_id=`（以实现为准）。
 
 ---
 

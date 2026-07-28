@@ -88,7 +88,7 @@ POST /v1/messages
 Content-Type: application/json
 
 {
-  "session_id": "sess-...",
+  "agent_id": "agt-...",
   "request_type": "message",
   "content": "列出当前目录"
 }
@@ -100,7 +100,7 @@ Content-Type: application/json
 
 ```json
 {
-  "session_id": "sess-...",
+  "agent_id": "agt-...",
   "request_type": "resume",
   "resume": {
     "kind": "approval",
@@ -115,11 +115,11 @@ Content-Type: application/json
 ### 2.4 SSE 订阅
 
 ```http
-GET /v1/stream?after_seq=0
+GET /v1/streams?agent_id=agt-...
 ```
 
-- 单 TUI 通常 **一个 SSE 连接**；事件带 `session_id` 字段供过滤。  
-- `after_seq`：断点续传；见 [02 §4.6](./02-Agent-Node-核心.md)。  
+- 单 TUI 通常 **一个 SSE 连接**；可用 `agent_id` query 过滤；事件信封仍可能带 `session_id`（与 agent 同 id）。  
+- `Last-Event-ID` / `live=1`：断点与增量；见 [02 §4.6](./02-Agent-Node-核心.md)。  
 - 事件类型速查：[附录/SSE事件速查](./附录/SSE事件速查.md)。
 
 **关键事件**：

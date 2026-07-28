@@ -63,8 +63,8 @@ func TestHandleSessionHydrate(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.SessionID != sessionID {
-		t.Fatalf("session_id = %q", got.SessionID)
+	if got.AgentID != sessionID {
+		t.Fatalf("agent_id = %q", got.AgentID)
 	}
 	if got.RunTurnPhase != "awaiting_hitl" {
 		t.Fatalf("run_turn_phase = %q", got.RunTurnPhase)

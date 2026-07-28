@@ -53,7 +53,7 @@ func TestHandleSessionAck(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.SessionID != sessionID || got.NotifySeq != 42 || got.AckSeq != 42 || got.HasUnread {
+	if got.AgentID != sessionID || got.NotifySeq != 42 || got.AckSeq != 42 || got.HasUnread {
 		t.Fatalf("got = %+v", got)
 	}
 }

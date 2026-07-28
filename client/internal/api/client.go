@@ -130,7 +130,7 @@ func (c *Client) ListAgents(ctx context.Context) ([]AgentSummary, error) {
 
 // AgentContext 为 GET /v1/agents/{id}/context 响应。
 type AgentContext struct {
-	SessionID             string `json:"session_id"` // 与 agent_id 相同（Node 字段名）
+	AgentID               string `json:"agent_id"`
 	MessagesCount         int    `json:"messages_count"`
 	PendingToolCallsCount int    `json:"pending_tool_calls_count"`
 	MessagesTotalTokens   int    `json:"messages_total_tokens"`
@@ -293,7 +293,7 @@ type TranscriptEntry map[string]any
 
 // AgentHydrate 为 GET /v1/agents/{id}/hydrate 响应。
 type AgentHydrate struct {
-	SessionID       string            `json:"session_id"` // 与 agent_id 相同（Node 字段名）
+	AgentID         string            `json:"agent_id"`
 	RunTurnPhase    string            `json:"run_turn_phase"`
 	HasActiveTurn   bool              `json:"has_active_turn"`
 	QueuePending    int               `json:"queue_pending"`
@@ -338,7 +338,7 @@ func (c *Client) CancelTurn(ctx context.Context, agentID string) (bool, error) {
 	}
 	path := "/v1/agents/" + url.PathEscape(id) + "/cancel"
 	var resp struct {
-		SessionID string `json:"session_id"`
+		AgentID   string `json:"agent_id"`
 		Cancelled bool   `json:"cancelled"`
 	}
 	if err := c.postJSON(ctx, path, map[string]any{}, &resp); err != nil {
@@ -438,7 +438,7 @@ func (c *Client) DeleteAgent(ctx context.Context, agentID string) error {
 
 // AgentSkills 为 skills 查询/变更响应。
 type AgentSkills struct {
-	SessionID       string `json:"session_id"` // 与 agent_id 相同（Node 字段名）
+	AgentID         string `json:"agent_id"`
 	LoadedSkills    []any  `json:"loaded_skills"`
 	AvailableSkills []any  `json:"available_skills"`
 }

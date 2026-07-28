@@ -71,7 +71,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 
 	parentID := createTestRuntime(t, srv)
 
-	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+parentID, nil)
+	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?agent_id="+parentID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	}
 	defer streamResp.Body.Close()
 
-	msgBody := `{"session_id":"` + parentID + `","request_type":"message","content":"请委派子 Agent 检查 README"}`
+	msgBody := `{"agent_id":"` + parentID + `","request_type":"message","content":"请委派子 Agent 检查 README"}`
 	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 
 	parentID := createTestRuntime(t, srv)
 
-	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+parentID, nil)
+	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?agent_id="+parentID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 	}
 	defer streamResp.Body.Close()
 
-	msgBody := `{"session_id":"` + parentID + `","request_type":"message","content":"启动异步子任务"}`
+	msgBody := `{"agent_id":"` + parentID + `","request_type":"message","content":"启动异步子任务"}`
 	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)

@@ -119,19 +119,17 @@ paths:
           description: OK
   /v1/messages:
     post:
-      summary: 入队用户消息 / HITL resume（优先 agent_id）
+      summary: 入队用户消息 / HITL resume（仅 agent_id）
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [agent_id]
               properties:
                 agent_id:
                   type: string
-                session_id:
-                  type: string
-                  description: 兼容旧字段，与 agent_id 同义
                 content:
                   type: string
                 request_type:
@@ -147,11 +145,6 @@ paths:
           in: query
           schema:
             type: string
-        - name: session_id
-          in: query
-          schema:
-            type: string
-            description: 兼容旧字段
       responses:
         "200":
           description: text/event-stream
