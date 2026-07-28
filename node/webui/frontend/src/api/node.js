@@ -62,6 +62,11 @@ export function patchSetupConfig(patch) {
   return apiFetch("/v1/setup/config", { method: "PATCH", body: patch });
 }
 
+/** 用 base_url + api_key 探测 OpenAI 兼容 /models 列表。 */
+export function probeLLMModels(payload = {}) {
+  return apiFetch("/v1/setup/llm/probe-models", { method: "POST", body: payload });
+}
+
 export function listAgentTemplates() {
   return apiFetch("/v1/agent-templates");
 }

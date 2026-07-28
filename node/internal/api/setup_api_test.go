@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -133,5 +134,53 @@ func TestConfigPathWritable(t *testing.T) {
 	}
 	if !configPathWritable(existing) {
 		t.Fatal("expected writable existing file")
+	}
+}
+
+func TestProbeLLMModels(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1"},{"id":"m2"}]}`))
+	}))
+	defer upstream.Close()
+
+	srv := NewServer(testConfig(t), nil, WithSkipStore())
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"base_url": upstream.URL + "/v1",
+		"api_key":  "sk-x",
+		"provider": "openai",
+	})
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/setup/llm/probe-models", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
+	}
+	var got struct {
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+		SuggestedProvider string `json:"suggested_provider"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Models) != 2 || got.Models[0].ID != "m1" {
+		t.Fatalf("got=%+v", got)
 	}
 }

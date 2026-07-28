@@ -6,6 +6,7 @@
 
 ### 变更
 
+- **LLM 配置探测模型**：设置 › 连接中新建/编辑档案支持「测试并拉取模型」；Node 代理 `POST /v1/setup/llm/probe-models` 请求兼容 `/models`，成功后下拉选择模型并建议 provider，失败仍可手动填写。
 - **沙箱设置 UI**：启用沙箱后选择模式（本机 Docker / 远程预留）并配置对应参数；去掉将 `process` 表述为「沙箱后端」的选项（未启用 = 宿主机 + 工具约束）。
 - **沙箱 API**：`backend` 支持 `remote`（需 `remote_endpoint`）；远程运行时尚未实现，启用时返回 `remote_unavailable`。
 

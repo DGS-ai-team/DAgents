@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/setup"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -14,6 +15,7 @@ import (
 func (s *Server) registerSetupRoutes() {
 	s.mux.HandleFunc("GET /v1/setup/config", s.handleGetSetupConfig)
 	s.mux.HandleFunc("PATCH /v1/setup/config", s.handlePatchSetupConfig)
+	s.mux.HandleFunc("POST /v1/setup/llm/probe-models", s.handleProbeLLMModels)
 }
 
 func (s *Server) setupWritable() bool {
@@ -203,6 +205,60 @@ func (s *Server) syncLLMRuntimeFromStore(ctx context.Context) {
 		return
 	}
 	s.llmRuntime.SetAPIKey(key)
+}
+
+type probeLLMModelsRequest struct {
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	Provider  string `json:"provider"`
+	ProfileID string `json:"profile_id"`
+}
+
+func (s *Server) handleProbeLLMModels(w http.ResponseWriter, r *http.Request) {
+	var req probeLLMModelsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	baseURL := strings.TrimSpace(req.BaseURL)
+	if baseURL == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "base_url is required", nil)
+		return
+	}
+	providerName := strings.ToLower(strings.TrimSpace(req.Provider))
+	if providerName == "mock" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "Mock 模式无需探测模型列表", nil)
+		return
+	}
+	apiKey := strings.TrimSpace(req.APIKey)
+	profileID := strings.TrimSpace(req.ProfileID)
+	if apiKey == "" && profileID != "" && s.llmConfigs != nil {
+		key, err := s.llmConfigs.ResolveAPIKey(r.Context(), profileID)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "llm_key_unavailable", "无法读取已保存的 API Key: "+err.Error(), nil)
+			return
+		}
+		apiKey = strings.TrimSpace(key)
+	}
+	provider := llm.ProviderName(providerName)
+	switch provider {
+	case llm.ProviderDeepSeek, llm.ProviderQwen, llm.ProviderOpenAI, llm.ProviderVLLM:
+	default:
+		if sug := llm.SuggestProviderFromBaseURL(baseURL); sug != "" {
+			provider = llm.ProviderName(sug)
+		} else {
+			provider = llm.ProviderOpenAI
+		}
+	}
+	result, err := llm.ProbeModels(r.Context(), provider, baseURL, apiKey)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "probe_models_failed", err.Error(), nil)
+		return
+	}
+	if result.SuggestedProvider == "" {
+		result.SuggestedProvider = string(provider)
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func configPathWritable(path string) bool {
