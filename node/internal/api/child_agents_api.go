@@ -40,7 +40,7 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 	parentID := strings.TrimSpace(r.PathValue("agent_id"))
 	items, err := s.sessions.ListChildAgents(parentID)
 	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "session_not_found", err.Error(), nil)
+		writeAPIError(w, http.StatusNotFound, "agent_not_found", err.Error(), nil)
 		return
 	}
 	out := childAgentListResponse{
@@ -67,7 +67,7 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 	childID := resolveChildPathID(r)
 	items, err := s.sessions.ListChildAgents(parentID)
 	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "session_not_found", err.Error(), nil)
+		writeAPIError(w, http.StatusNotFound, "agent_not_found", err.Error(), nil)
 		return
 	}
 	for _, it := range items {

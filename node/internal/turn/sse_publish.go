@@ -8,7 +8,7 @@ import (
 
 // publishAssistant 推送 assistant SSE。
 func (o *Orchestrator) publishAssistant(sessionID, delta string) {
-	o.hub.Publish(sessionID, o.agentID, "assistant", map[string]any{
+	o.hub.Publish(sessionID, "assistant", map[string]any{
 		"content":      delta,
 		"display_type": "delta",
 	})
@@ -16,7 +16,7 @@ func (o *Orchestrator) publishAssistant(sessionID, delta string) {
 
 // publishReasoning 推送 reasoning SSE。
 func (o *Orchestrator) publishReasoning(sessionID, delta string) {
-	o.hub.Publish(sessionID, o.agentID, "reasoning", map[string]any{
+	o.hub.Publish(sessionID, "reasoning", map[string]any{
 		"content":      delta,
 		"display_type": "reasoning",
 	})
@@ -24,7 +24,7 @@ func (o *Orchestrator) publishReasoning(sessionID, delta string) {
 
 // publishError 推送 error SSE。
 func (o *Orchestrator) publishError(sessionID, message string) {
-	o.hub.Publish(sessionID, o.agentID, "error", map[string]any{"message": message})
+	o.hub.Publish(sessionID, "error", map[string]any{"message": message})
 }
 
 // publishHITLRequired 推送统一 HITL SSE；Client 按 item.hitl_type 展示与 resume。
@@ -33,7 +33,7 @@ func (o *Orchestrator) publishHITLRequired(sessionID, hitlID, message string, it
 	for i, item := range items {
 		sseItems[i] = item
 	}
-	o.hub.Publish(sessionID, o.agentID, "hitl_required", map[string]any{
+	o.hub.Publish(sessionID, "hitl_required", map[string]any{
 		"hitl_id":      hitlID,
 		"message":      message,
 		"items":        sseItems,
@@ -43,7 +43,7 @@ func (o *Orchestrator) publishHITLRequired(sessionID, hitlID, message string, it
 
 // publishToolCallPayload 推送 tool call payload SSE。
 func (o *Orchestrator) publishToolCallPayload(sessionID string, payload map[string]any) {
-	o.hub.Publish(sessionID, o.agentID, "tool_call", payload)
+	o.hub.Publish(sessionID, "tool_call", payload)
 }
 
 // publishToolCall 推送 tool call SSE。
@@ -95,7 +95,7 @@ func (o *Orchestrator) publishToolResult(sessionID string, tc llm.ToolCall, cont
 	for k, v := range extra {
 		payload[k] = v
 	}
-	o.hub.Publish(sessionID, o.agentID, "tool_result", payload)
+	o.hub.Publish(sessionID, "tool_result", payload)
 }
 
 // publishDone 推送 done SSE：finish_reason、turn_complete/awaiting、tool_context_metrics。
@@ -114,7 +114,7 @@ func (o *Orchestrator) publishDone(sessionID, finishReason string) {
 		payload["tool_context_metrics"] = m.snapshot()
 	}
 	o.logTurnContextMetrics(sessionID, finishReason)
-	o.hub.Publish(sessionID, o.agentID, "done", payload)
+	o.hub.Publish(sessionID, "done", payload)
 }
 
 // publishUsage 推送 usage SSE。
@@ -131,7 +131,7 @@ func (o *Orchestrator) publishUsage(sessionID string, llmStep int, u llm.Usage) 
 	o.turnUsage[sessionID] = acc
 	payload := llm.UsageSSEEvent(llmStep, u, acc)
 	o.turnUsageMu.Unlock()
-	o.hub.Publish(sessionID, o.agentID, "usage", payload)
+	o.hub.Publish(sessionID, "usage", payload)
 }
 
 // publishUsageIfAccumulated 在 turn 取消时补发已累计 usage，避免客户端 strip 丢失末次快照。
@@ -151,7 +151,7 @@ func (o *Orchestrator) publishUsageIfAccumulated(sessionID string, llmStep int) 
 		return
 	}
 	payload := llm.UsageSSEEvent(llmStep, llm.Usage{}, acc)
-	o.hub.Publish(sessionID, o.agentID, "usage", payload)
+	o.hub.Publish(sessionID, "usage", payload)
 }
 
 // PublishSideEffectCallback Produce 时推送 callback 形态 SSE（async / external tool loop）。
@@ -197,12 +197,12 @@ func (o *Orchestrator) PublishExternalSideEffectDeferred(sessionID, content, use
 	if strings.TrimSpace(triggerID) != "" {
 		payload["trigger_id"] = triggerID
 	}
-	o.hub.Publish(sessionID, o.agentID, "user_message_deferred", payload)
+	o.hub.Publish(sessionID, "user_message_deferred", payload)
 }
 
 // PublishSideEffectTurnStart 被动续跑 LLM 前通知 Client。
 func (o *Orchestrator) PublishSideEffectTurnStart(sessionID, source string, pending int) {
-	o.hub.Publish(sessionID, o.agentID, "side_effect_turn_start", map[string]any{
+	o.hub.Publish(sessionID, "side_effect_turn_start", map[string]any{
 		"source":              source,
 		"side_effect_pending": pending,
 		"implicit_turn":       true,
@@ -218,7 +218,7 @@ func (o *Orchestrator) PublishSideEffectApplied(sessionID string, seqs []uint64)
 	for i, s := range seqs {
 		out[i] = s
 	}
-	o.hub.Publish(sessionID, o.agentID, "side_effect_applied", map[string]any{
+	o.hub.Publish(sessionID, "side_effect_applied", map[string]any{
 		"seqs": out,
 	})
 }
@@ -232,7 +232,7 @@ func (o *Orchestrator) PublishSideEffectsCleared(sessionID string, dropped int, 
 	for i, s := range seqs {
 		out[i] = s
 	}
-	o.hub.Publish(sessionID, o.agentID, "side_effects_cleared", map[string]any{
+	o.hub.Publish(sessionID, "side_effects_cleared", map[string]any{
 		"dropped": dropped,
 		"seqs":    out,
 	})

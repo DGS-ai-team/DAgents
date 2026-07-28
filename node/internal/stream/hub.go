@@ -56,9 +56,8 @@ func (h *Hub) SetEventListener(fn func(Event)) {
 }
 
 // Publish 分配 seq、写入历史并投递给全部订阅者。
-// agentInstanceID 为对话/Agent 实例 id（线协议 agent_id）；legacyNodeID 保留签名兼容，不再写入信封。
-func (h *Hub) Publish(agentInstanceID, legacyNodeID, eventType string, data map[string]any) Event {
-	_ = legacyNodeID
+// agentID 为对话/Agent 实例 id（线协议 agent_id）。
+func (h *Hub) Publish(agentID, eventType string, data map[string]any) Event {
 	if data == nil {
 		data = map[string]any{}
 	}
@@ -66,8 +65,8 @@ func (h *Hub) Publish(agentInstanceID, legacyNodeID, eventType string, data map[
 
 	h.seq++
 	ev := Event{
-		SessionID: agentInstanceID,
-		AgentID:   agentInstanceID,
+		SessionID: agentID,
+		AgentID:   agentID,
 		Type:      eventType,
 		Seq:       h.seq,
 		TS:        time.Now().UTC().Format(time.RFC3339Nano),
@@ -88,7 +87,7 @@ func (h *Hub) Publish(agentInstanceID, legacyNodeID, eventType string, data map[
 	h.mu.Unlock()
 
 	h.logger.Debug("stream publish",
-		"agent_id", agentInstanceID,
+		"agent_id", agentID,
 		"type", eventType,
 		"seq", ev.Seq,
 	)

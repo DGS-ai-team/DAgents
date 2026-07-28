@@ -441,7 +441,7 @@ func (m *Manager) publishCreated(parentID string, agent *ActiveAgent, wait bool)
 	if m.hub == nil {
 		return
 	}
-	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCreated, map[string]any{
+	m.hub.Publish(parentID, EventTemporaryAgentCreated, map[string]any{
 		"child_agent_id":  agent.ChildAgentID,
 		"parent_agent_id": parentID,
 		"purpose":           agent.Purpose,
@@ -457,7 +457,7 @@ func (m *Manager) publishCompleted(parentID string, res *Result) {
 	if m.hub == nil || res == nil {
 		return
 	}
-	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCompleted, map[string]any{
+	m.hub.Publish(parentID, EventTemporaryAgentCompleted, map[string]any{
 		"child_agent_id":  res.ChildAgentID,
 		"parent_agent_id": parentID,
 		"status":            res.Status,
@@ -472,7 +472,7 @@ func (m *Manager) publishCancelled(parentID, childID, reason, previous string) {
 	if m.hub == nil {
 		return
 	}
-	m.hub.Publish(parentID, m.agentID, EventTemporaryAgentCancelled, map[string]any{
+	m.hub.Publish(parentID, EventTemporaryAgentCancelled, map[string]any{
 		"child_agent_id":  childID,
 		"parent_agent_id": parentID,
 		"status":            StatusCancelled,

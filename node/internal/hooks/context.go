@@ -12,7 +12,7 @@ type Context struct {
 	SessionID       string
 	AgentID         string
 	TurnID          string
-	ParentSessionID string
+	ParentAgentID string
 	Metadata        map[string]any
 
 	MessageEnqueued    *MessageEnqueuedPayload

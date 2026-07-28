@@ -19,10 +19,10 @@ var (
 
 const kindImage = "image"
 
-// Artifact 为 Session 内可展示的媒体引用（F-M1）。
+// Artifact 为 Agent 内可展示的媒体引用（F-M1）。
 type Artifact struct {
 	ID         string    `json:"id"`
-	SessionID  string    `json:"session_id"`
+	AgentID    string    `json:"agent_id"`
 	Kind       string    `json:"kind"`
 	MIME       string    `json:"mime"`
 	Source     string    `json:"source"`
@@ -37,7 +37,7 @@ type Artifact struct {
 
 // PublicURL 返回 Client 可用的相对 API 路径。
 func (a Artifact) PublicURL() string {
-	return fmt.Sprintf("/v1/agents/%s/media/%s", a.SessionID, a.ID)
+	return fmt.Sprintf("/v1/agents/%s/media/%s", a.AgentID, a.ID)
 }
 
 // ThumbnailURL 返回带 thumbnail=1 的相对 API 路径（F-M6）。
@@ -117,7 +117,7 @@ func (r *Registry) RegisterFromPath(opts RegisterOpts) (*Artifact, error) {
 	}
 	art := &Artifact{
 		ID:         id,
-		SessionID:  r.sessionID,
+		AgentID:    r.sessionID,
 		Kind:       kindImage,
 		MIME:       mime,
 		Source:     strings.TrimSpace(opts.Source),

@@ -672,7 +672,7 @@ func (s *Server) handleAgentClearContextImpl(w http.ResponseWriter, r *http.Requ
 	cancelled, err := s.sessions.ClearContext(sessionID)
 	if err != nil {
 		if err.Error() == "session_not_found" {
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		} else {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 		}
@@ -744,7 +744,7 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 	view, err := s.sessions.GetContextView(sessionID)
 	if err != nil {
 		if err.Error() == "session_not_found" {
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		} else {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 		}
@@ -812,7 +812,7 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 	view, err := s.sessions.GetHydrateView(sessionID)
 	if err != nil {
 		if err.Error() == "session_not_found" {
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		} else {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 		}
@@ -882,7 +882,7 @@ func (s *Server) handleAgentAckImpl(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch err.Error() {
 		case "session_not_found":
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		case "agent_id is required", "sse_seq must be positive":
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
 		default:
@@ -908,7 +908,7 @@ func (s *Server) handleAgentCompressImpl(w http.ResponseWriter, r *http.Request)
 	result, err := s.sessions.CompressContext(r.Context(), sessionID)
 	if err != nil {
 		if err.Error() == "session_not_found" {
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		} else {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 		}
@@ -985,7 +985,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch err.Error() {
 		case "session_not_found":
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session/agent 不存在", map[string]any{"agent_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		case "invalid_message":
 			writeAPIError(w, http.StatusBadRequest, "invalid_message", "content 不能为空", nil)
 		case "multimodal_disabled":
@@ -1019,7 +1019,7 @@ func (s *Server) handleAgentCancelImpl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.sessions.Get(sessionID) == nil {
-		writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		return
 	}
 	cancelled := s.sessions.CancelTurn(sessionID)
@@ -1102,7 +1102,7 @@ func (s *Server) handleAgentListSkillsImpl(w http.ResponseWriter, r *http.Reques
 	loaded, available, err := s.sessions.ListSessionSkills(sessionID)
 	if err != nil {
 		if err.Error() == "session_not_found" {
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		} else {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 		}
@@ -1147,7 +1147,7 @@ func (s *Server) handleAgentLoadSkillImpl(w http.ResponseWriter, r *http.Request
 	loaded, err := s.sessions.LoadSessionSkill(sessionID, req.SkillName)
 	if err != nil {
 		if err.Error() == "session_not_found" {
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		} else {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 		}
@@ -1170,7 +1170,7 @@ func (s *Server) handleAgentUnloadSkillImpl(w http.ResponseWriter, r *http.Reque
 	loaded, err := s.sessions.UnloadSessionSkill(sessionID, req.SkillName)
 	if err != nil {
 		if err.Error() == "session_not_found" {
-			writeAPIError(w, http.StatusNotFound, "session_not_found", "session 不存在", map[string]any{"session_id": sessionID})
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		} else {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 		}

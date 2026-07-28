@@ -13,7 +13,7 @@ func TestInboxSubscribeAfterSeqSkipsStaleHITL(t *testing.T) {
 	sessionID := "a2a-task-stale"
 
 	// 模拟上一轮 turn 已发布的陈旧 hitl_required。
-	hub.Publish(sessionID, "agent", "hitl_required", map[string]any{
+	hub.Publish(sessionID, "hitl_required", map[string]any{
 		"hitl_id": "stale-appr",
 		"items": []any{
 			map[string]any{"hitl_type": "execute_tool", "id": "call-stale", "name": "bash_run"},
@@ -27,7 +27,7 @@ func TestInboxSubscribeAfterSeqSkipsStaleHITL(t *testing.T) {
 	// resume 后仅应收到新事件。
 	go func() {
 		time.Sleep(10 * time.Millisecond)
-		hub.Publish(sessionID, "agent", "done", map[string]any{
+		hub.Publish(sessionID, "done", map[string]any{
 			"turn_complete": true,
 		})
 	}()
