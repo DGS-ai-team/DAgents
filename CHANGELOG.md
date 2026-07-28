@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **HITL 选项回传错位**：ChatView 在模板里写 `hitlSelected.value = v` 因 Vue 自动解包未真正更新选中态，提交时静默落成首项；改为 script 内同步，并按真实选中解析 `selected_options` / `answer`（option `value`）。
+
 ---
 
 ## [0.8.4] - 2026-07-28
