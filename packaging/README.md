@@ -13,7 +13,7 @@
 | **`dagents-cli`** | Textual TUI 单文件二进制（PyInstaller 产物名） |
 
 | **`dagents-local-assistant-*-installer-*.exe`** | Windows **Inno** 安装包（兼容面广，无 WebView2/Tauri 依赖时的后备） |
-| **`dagents-setup-windows-amd64-*.exe`** | Windows **Tauri Setup 向导**（内嵌上述 Inno，现代 UI；与 Inno 并存发布） |
+| **`dagents-setup-windows-amd64-*.exe`** | Windows **便携 Tauri Setup 向导**（双击即开，内嵌上述 Inno；无 NSIS 外层；与 Inno 并存发布） |
 | **`DAgents Setup`（源码）** | 见 [`bootstrapper/`](./bootstrapper/) |
 
 本地/CI 打包：

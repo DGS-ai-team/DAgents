@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# CI：在已有 Inno 安装包基础上构建 Tauri「DAgents Setup」向导（与 Inno 裸包并存发布）。
+# CI：在已有 Inno 安装包基础上构建便携 Tauri「DAgents Setup」向导（与 Inno 裸包并存发布）。
+# 产物为单文件 exe（无 NSIS 外层）：双击即开向导，Inno 在编译期嵌入。
 # 前置：dist/dagents-local-assistant-windows-amd64-installer-*.exe
 # 用法（仓库根，Windows runner）：
 #   VERSION=0.8.4 bash scripts/ci/build_windows_setup_bootstrapper.sh

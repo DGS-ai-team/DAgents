@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **Tauri 安装向导改为便携单文件**：去掉 NSIS「先安装向导再装程序」外层；`dagents-setup-*.exe` 双击即开，编译期嵌入 Inno 并静默落地。
+- **Tauri 向导 UI 对齐 WebUI 浅色**：Workbench light tokens、品牌 Logo、Segoe UI 字体栈；窗口图标改用项目品牌图标。
+
 ---
 
 ## [0.8.4] - 2026-07-28

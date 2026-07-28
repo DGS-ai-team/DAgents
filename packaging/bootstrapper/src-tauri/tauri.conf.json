@@ -29,18 +29,17 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [],
     "category": "Utility",
     "shortDescription": "DAgents 本地助手安装向导",
-    "longDescription": "现代安装向导：引导选择目录后调用 Inno Setup 静默安装包完成落地。",
+    "longDescription": "便携安装向导：双击打开后选择目录，静默调用内嵌 Inno 安装包完成落地（无需先安装向导本身）。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "resources": ["resources/*"]
+    ]
   },
   "plugins": {}
 }

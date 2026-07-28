@@ -1,11 +1,14 @@
 //! DAgents Setup — Tauri 安装向导后端。
 //!
-//! Windows：定位资源目录中的 Inno 安装包并 `/VERYSILENT` 执行；
-//! 完成后可选 doctor / 启动 shell / 打开 Web UI。
+//! 发版产物为**便携单文件**（无 NSIS 外层）：双击即开向导 UI。
+//! Windows：优先使用编译期嵌入的 Inno 包，其次资源目录旁路；`/VERYSILENT` 落地后
+//! 可选 doctor / 启动 shell / 打开 Web UI。
 //! 非 Windows：提供模拟安装，便于 UI 预览。
 
 use serde::Serialize;
 use std::fs;
+#[cfg(windows)]
+use std::io::Write;
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::process::Command;
@@ -13,6 +16,9 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+
+/// 发版时由 build.rs 写入 Inno 字节；开发态为空。
+const EMBEDDED_INNO: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/embedded_inno.exe"));
 
 #[derive(Debug, thiserror::Error)]
 pub enum SetupError {
@@ -80,8 +86,35 @@ fn resource_dir(app: &AppHandle) -> SetupResult<PathBuf> {
         .map_err(|e| err(format!("无法解析资源目录: {e}")))
 }
 
+fn is_inno_payload_name(name: &str) -> bool {
+    name.contains("dagents-local-assistant") && name.contains("installer")
+}
+
+/// 将编译期嵌入的 Inno 字节落到临时文件（便携单文件发版路径）。
+#[cfg(windows)]
+fn materialize_embedded_payload() -> SetupResult<Option<PathBuf>> {
+    if EMBEDDED_INNO.is_empty() {
+        return Ok(None);
+    }
+    let dir = std::env::temp_dir().join("dagents-setup-payload");
+    fs::create_dir_all(&dir).map_err(|e| err(format!("创建临时目录失败: {e}")))?;
+    let path = dir.join("dagents-local-assistant-windows-amd64-installer-embedded.exe");
+    let need_write = match fs::metadata(&path) {
+        Ok(meta) => meta.len() as usize != EMBEDDED_INNO.len(),
+        Err(_) => true,
+    };
+    if need_write {
+        let mut f = fs::File::create(&path).map_err(|e| err(format!("写入嵌入安装包失败: {e}")))?;
+        f.write_all(EMBEDDED_INNO)
+            .map_err(|e| err(format!("写入嵌入安装包失败: {e}")))?;
+        f.flush()
+            .map_err(|e| err(format!("写入嵌入安装包失败: {e}")))?;
+    }
+    Ok(Some(path))
+}
+
 /// 在资源目录（及常见开发旁路路径）中查找 Inno 安装包。
-fn find_payload(app: &AppHandle) -> Option<PathBuf> {
+fn find_disk_payload(app: &AppHandle) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(dir) = resource_dir(app) {
         candidates.push(dir.join("resources"));
@@ -113,10 +146,7 @@ fn find_payload(app: &AppHandle) -> Option<PathBuf> {
                         .unwrap_or(false)
                         && p.file_name()
                             .and_then(|n| n.to_str())
-                            .map(|n| {
-                                n.contains("dagents-local-assistant")
-                                    && n.contains("installer")
-                            })
+                            .map(is_inno_payload_name)
                             .unwrap_or(false)
                 })
                 .collect();
@@ -129,19 +159,38 @@ fn find_payload(app: &AppHandle) -> Option<PathBuf> {
     None
 }
 
+/// 磁盘旁路优先（便于本地联调），否则使用嵌入 payload。
+#[cfg(windows)]
+fn find_payload(app: &AppHandle) -> Option<PathBuf> {
+    if let Some(disk) = find_disk_payload(app) {
+        return Some(disk);
+    }
+    materialize_embedded_payload().ok().flatten()
+}
+
 #[tauri::command]
 fn get_host_info(app: AppHandle, state: State<'_, AppState>) -> HostInfo {
-    let payload = find_payload(&app);
+    let disk = find_disk_payload(&app);
+    let has_embedded = !EMBEDDED_INNO.is_empty();
+    let has_payload = disk.is_some() || has_embedded;
+    let payload_name = disk
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            if has_embedded {
+                Some("dagents-local-assistant-installer-embedded.exe".into())
+            } else {
+                None
+            }
+        });
     HostInfo {
         os: std::env::consts::OS.to_string(),
         default_install_dir: state.default_dir.clone(),
-        has_payload: payload.is_some(),
-        payload_name: payload
-            .as_ref()
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .map(|s| s.to_string()),
-        demo_mode: !cfg!(windows) || payload.is_none(),
+        has_payload,
+        payload_name,
+        demo_mode: !cfg!(windows) || !has_payload,
     }
 }
 
