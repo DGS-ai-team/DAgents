@@ -70,7 +70,7 @@ func TestHubSubscribeLiveSkipsHistory(t *testing.T) {
 func TestEventFormatSSE(t *testing.T) {
 	ev := Event{
 		SessionID: "sess-x",
-		AgentID:   "a1",
+		AgentID:   "agt-x",
 		Type:      "assistant",
 		Seq:       3,
 		TS:        "2026-05-27T00:00:00Z",
@@ -79,5 +79,11 @@ func TestEventFormatSSE(t *testing.T) {
 	s := ev.FormatSSE()
 	if !strings.Contains(s, "event: assistant") || !strings.Contains(s, "id: 3") {
 		t.Fatalf("bad sse: %q", s)
+	}
+	if strings.Contains(s, "session_id") {
+		t.Fatalf("wire SSE must not include session_id: %q", s)
+	}
+	if !strings.Contains(s, `"agent_id":"agt-x"`) {
+		t.Fatalf("expected agent_id in sse: %q", s)
 	}
 }

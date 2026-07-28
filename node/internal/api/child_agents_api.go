@@ -37,7 +37,7 @@ func resolveChildPathID(r *http.Request) string {
 }
 
 func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
-	parentID := strings.TrimSpace(r.PathValue("session_id"))
+	parentID := strings.TrimSpace(r.PathValue("agent_id"))
 	items, err := s.sessions.ListChildAgents(parentID)
 	if err != nil {
 		writeAPIError(w, http.StatusNotFound, "session_not_found", err.Error(), nil)
@@ -49,7 +49,7 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, it := range items {
 		out.Items = append(out.Items, sessionChildAgentViewJSON{
-			ChildAgentID: it.ChildSessionID,
+			ChildAgentID: it.ChildAgentID,
 			Status:       it.Status,
 			Purpose:      it.Purpose,
 			AllowedTools: append([]string(nil), it.AllowedTools...),
@@ -63,7 +63,7 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
-	parentID := strings.TrimSpace(r.PathValue("session_id"))
+	parentID := strings.TrimSpace(r.PathValue("agent_id"))
 	childID := resolveChildPathID(r)
 	items, err := s.sessions.ListChildAgents(parentID)
 	if err != nil {
@@ -71,9 +71,9 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, it := range items {
-		if it.ChildSessionID == childID {
+		if it.ChildAgentID == childID {
 			writeJSON(w, http.StatusOK, sessionChildAgentViewJSON{
-				ChildAgentID: it.ChildSessionID,
+				ChildAgentID: it.ChildAgentID,
 				Status:       it.Status,
 				Purpose:      it.Purpose,
 				AllowedTools: append([]string(nil), it.AllowedTools...),
@@ -91,7 +91,7 @@ func (s *Server) handleGetChildAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCancelChildAgent(w http.ResponseWriter, r *http.Request) {
-	parentID := strings.TrimSpace(r.PathValue("session_id"))
+	parentID := strings.TrimSpace(r.PathValue("agent_id"))
 	childID := resolveChildPathID(r)
 	var body childAgentCancelRequest
 	if r.Body != nil && r.ContentLength != 0 {
@@ -100,7 +100,7 @@ func (s *Server) handleCancelChildAgent(w http.ResponseWriter, r *http.Request) 
 	prev := ""
 	if items, listErr := s.sessions.ListChildAgents(parentID); listErr == nil {
 		for _, it := range items {
-			if it.ChildSessionID == childID {
+			if it.ChildAgentID == childID {
 				prev = it.Status
 				break
 			}

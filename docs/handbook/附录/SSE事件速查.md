@@ -12,7 +12,7 @@ Accept: text/event-stream
 ```
 
 - `after_seq`：只接收该序号**之后**的事件（Hub `CurrentSeq()`）。  
-- 事件 JSON 通常含 `session_id`、`seq`（或等价字段）。
+- 事件 JSON 含 `agent_id`、`seq`、`type`、`ts`、`data`（无顶层 `session_id`）。
 
 ---
 

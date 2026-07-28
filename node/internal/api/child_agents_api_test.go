@@ -128,7 +128,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 		switch envelope.Type {
 		case "temporary_agent_created":
 			gotCreated = true
-			childID, _ = envelope.Data["child_session_id"].(string)
+			childID, _ = envelope.Data["child_agent_id"].(string)
 		case "temporary_agent_completed":
 			gotCompleted = true
 		case "assistant":
@@ -141,7 +141,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	}
 
 	if childID == "" {
-		t.Fatal("missing child_session_id")
+		t.Fatal("missing child_agent_id")
 	}
 	if !strings.Contains(assistant.String(), "HTTP 联调完成") {
 		t.Fatalf("unexpected assistant: %q", assistant.String())
@@ -238,7 +238,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 			Data map[string]any `json:"data"`
 		}
 		if json.Unmarshal([]byte(payload), &envelope) == nil && envelope.Type == "temporary_agent_created" {
-			childID, _ = envelope.Data["child_session_id"].(string)
+			childID, _ = envelope.Data["child_agent_id"].(string)
 		}
 	}
 

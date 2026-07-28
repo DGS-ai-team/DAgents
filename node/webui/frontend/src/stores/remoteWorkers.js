@@ -29,7 +29,7 @@ export function resetPeerInvokeInflight() {
 }
 
 export function onChildCreated(data) {
-  const id = String(data?.child_session_id || "").trim();
+  const id = String(data?.child_agent_id || "").trim();
   if (!id) return;
   entries.set(id, {
     purpose: String(data?.purpose || "").trim(),
@@ -61,7 +61,7 @@ export function setChildAwaitingApproval(childId, on) {
 export function replaceChildrenFromApi(items) {
   entries.clear();
   for (const item of items || []) {
-    const id = String(item?.child_session_id || "").trim();
+    const id = String(item?.child_agent_id || "").trim();
     if (!id) continue;
     entries.set(id, {
       purpose: String(item?.purpose || "").trim(),

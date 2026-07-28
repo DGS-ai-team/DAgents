@@ -21,8 +21,8 @@ export async function hydrateAgent() {
   clearHitl();
   const { approval } = enqueueHitlRequired(data?.pending_hitl);
   enqueueA2ARelayPending(data?.pending_a2a_relay);
-  if (approval?.child_session_id) {
-    setChildAwaitingApproval(approval.child_session_id, true);
+  if (approval?.child_agent_id) {
+    setChildAwaitingApproval(approval.child_agent_id, true);
   }
   applyHydrateSeqHint(data?.sse_seq_hint);
   ackAgentAfterHydrate();

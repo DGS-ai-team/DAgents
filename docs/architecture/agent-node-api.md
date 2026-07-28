@@ -375,7 +375,7 @@ POST {manage_url}/v1/a2a/tasks/{task_id}/reply
 子 Agent turn 与工具执行共享：
 
 - 同一 FS 根 / shell 环境
-- 同一 LLM 客户端（审计日志带 `parent_session_id`、`child_agent_kind=temporary`）
+- 同一 LLM 客户端（审计日志带 `parent_agent_id`、`child_agent_kind=temporary`）
 
 ---
 

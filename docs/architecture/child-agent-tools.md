@@ -52,7 +52,7 @@
 ```json
 {
   "kind": "handle",
-  "child_session_id": "child-a1b2c3d4e5f6",
+  "child_agent_id": "child-a1b2c3d4e5f6",
   "status": "active",
   "purpose": "review patch",
   "expires_at": "2026-05-30T12:30:00+08:00",
@@ -65,7 +65,7 @@
 ```json
 {
   "kind": "result",
-  "child_session_id": "child-a1b2c3d4e5f6",
+  "child_agent_id": "child-a1b2c3d4e5f6",
   "status": "completed",
   "summary": "……",
   "turn_count": 5,
@@ -83,7 +83,7 @@
 
 | 字段 | 类型 | 必填 | 默认 |
 |------|------|------|------|
-| `child_session_ids` | string[] | **是** | — |
+| `child_agent_ids` | string[] | **是** | — |
 | `timeout_seconds` | integer | 否 | `300` |
 | `fail_fast` | boolean | 否 | `false` |
 
@@ -95,7 +95,7 @@
   "timed_out": false,
   "results": [
     {
-      "child_session_id": "child-a1b2c3d4e5f6",
+      "child_agent_id": "child-a1b2c3d4e5f6",
       "status": "completed",
       "summary": "……",
       "turn_count": 5,
@@ -111,7 +111,7 @@
 
 | 字段 | 类型 | 必填 |
 |------|------|------|
-| `child_session_ids` | string[] | **是**（≥1） |
+| `child_agent_ids` | string[] | **是**（≥1） |
 
 返回 `wait_temporary_agents.results` 同结构的数组（无 `timed_out`）。
 
@@ -121,14 +121,14 @@
 
 | 字段 | 类型 | 必填 |
 |------|------|------|
-| `child_session_id` | string | **是** |
+| `child_agent_id` | string | **是** |
 | `reason` | string | 否 |
 
 返回：
 
 ```json
 {
-  "child_session_id": "child-a1b2c3d4e5f6",
+  "child_agent_id": "child-a1b2c3d4e5f6",
   "status": "cancelled",
   "previous_status": "active"
 }
@@ -198,8 +198,8 @@ creating → active → completed | failed | cancelled | expired
 
 ```json
 {
-  "child_session_id": "child-a1b2c3d4e5f6",
-  "parent_session_id": "sess-7f2a...",
+  "child_agent_id": "child-a1b2c3d4e5f6",
+  "parent_agent_id": "sess-7f2a...",
   "purpose": "review patch",
   "status": "active",
   "expires_at": "2026-05-30T12:30:00+08:00",
@@ -214,8 +214,8 @@ creating → active → completed | failed | cancelled | expired
 
 ```json
 {
-  "child_session_id": "child-a1b2c3d4e5f6",
-  "parent_session_id": "sess-7f2a...",
+  "child_agent_id": "child-a1b2c3d4e5f6",
+  "parent_agent_id": "sess-7f2a...",
   "status": "completed",
   "summary": "……",
   "turn_count": 5,
@@ -229,8 +229,8 @@ creating → active → completed | failed | cancelled | expired
 
 ```json
 {
-  "child_session_id": "child-a1b2c3d4e5f6",
-  "parent_session_id": "sess-7f2a...",
+  "child_agent_id": "child-a1b2c3d4e5f6",
+  "parent_agent_id": "sess-7f2a...",
   "status": "cancelled",
   "reason": "user requested stop",
   "previous_status": "active"
@@ -345,7 +345,7 @@ child_agents:
 
 ## 12. 标识符
 
-- `child_session_id`：`child-` + 12 位 hex（例 `child-a1b2c3d4e5f6`）
+- `child_agent_id`：`child-` + 12 位 hex（例 `child-a1b2c3d4e5f6`）
 - 不出现在 `GET /v1/agents` 默认列表
 
 ---
@@ -371,16 +371,16 @@ child_agents:
 | **策略不弱于父** | 子 Agent 走**同一** `policy.Engine`；父需审批的工具，子调用时**同样**需审批 |
 | **不向子 session 发 SSE** | Client 只订阅**父** `session_id`；子 Agent 的 HITL 事件一律挂在父 SSE 流上 |
 | **不向用户追问** | 子 Agent **无** `ask_user_information`；任务须在 `task` 中写全，审批仅针对**工具执行** |
-| **resume 走父 session** | `POST /v1/messages` 的 `session_id` 始终是**父 session**；Node 按 `child_session_id` 路由到子 runtime |
+| **resume 走父 session** | `POST /v1/messages` 的 `session_id` 始终是**父 session**；Node 按 `child_agent_id` 路由到子 runtime |
 
 ### 14.2 与「创建子 Agent」审批的区别
 
 ```text
-父 turn：create_temporary_agent  →  approval_required（scope=parent，无 child_session_id）
+父 turn：create_temporary_agent  →  approval_required（scope=parent，无 child_agent_id）
                                       ↓ 用户批准
                                创建 temporary agent，SSE temporary_agent_created
 
-子 turn：bash_run 等            →  approval_required（scope=child，带 child_session_id）
+子 turn：bash_run 等            →  approval_required（scope=child，带 child_agent_id）
                                       ↓ 用户批准
                                子 runtime ContinueAfterResume，继续子 turn
 ```
@@ -407,7 +407,7 @@ child_agents:
     ]
   },
   "display_type": "normal_text",
-  "child_session_id": "child-a1b2c3d4e5f6",
+  "child_agent_id": "child-a1b2c3d4e5f6",
   "child_purpose": "review patch",
   "hitl_scope": "temporary_agent"
 }
@@ -416,7 +416,7 @@ child_agents:
 | 字段 | 说明 |
 |------|------|
 | `hitl_scope` | `"temporary_agent"` 表示临时 Agent 工具审批；省略或 `"parent"` 表示父 Agent 自身 turn |
-| `child_session_id` | 子 session，resume 路由用 |
+| `child_agent_id` | 子 session，resume 路由用 |
 | `child_purpose` | 创建时的 purpose，供 TUI 展示上下文 |
 
 **可选**辅助事件 `child_agent_awaiting_approval`（仅 UI 提示「某子任务等待审批」）；**不替代** `approval_required` 作为 resume 触发源。
@@ -434,23 +434,23 @@ Content-Type: application/json
   "request_type": "resume",
   "resume_value": {
     "type": "approve",
-    "child_session_id": "child-a1b2c3d4e5f6",
+    "child_agent_id": "child-a1b2c3d4e5f6",
     "approval_id": "appr-xxx"
   }
 }
 ```
 
-`selection` / `reject` 与父 Agent 相同，**必须**带 `child_session_id`（当 `hitl_scope=temporary_agent` 时）。
+`selection` / `reject` 与父 Agent 相同，**必须**带 `child_agent_id`（当 `hitl_scope=temporary_agent` 时）。
 
 Node 逻辑：
 
-1. `EnqueueMessage(parent_session_id, resume)`；
-2. 若 `resume_value.child_session_id` 非空 → `RouteResume` 投递到**子 runtime** 的 `handleResume`；
+1. `EnqueueMessage(parent_agent_id, resume)`；
+2. 若 `resume_value.child_agent_id` 非空 → `RouteResume` 投递到**子 runtime** 的 `handleResume`；
 3. 否则 → `RouteResume` 经 `DeliverParentResume` 入队父 runtime **一次**（勿重复 enqueue）。
 
 父 session HITL 的 `done` 带 `turn_complete` / `awaiting`，语义见 [agent-node-api.md §2.4.1](./agent-node-api.md)。
 
-Client（Go full / Python Textual）在收到带 `child_session_id` 的 `approval_required` 时，展示时标注「子任务：{purpose}」，**SubmitResume 仍用父 session_id**，并在 `resume_value` 中回传 `child_session_id`。
+Client（Go full / Python Textual）在收到带 `child_agent_id` 的 `approval_required` 时，展示时标注「子任务：{purpose}」，**SubmitResume 仍用父 session_id**，并在 `resume_value` 中回传 `child_agent_id`。
 
 ### 14.5 用户拒绝 / 超时
 
@@ -473,7 +473,7 @@ Client（Go full / Python Textual）在收到带 `child_session_id` 的 `approva
 
 父 Agent 可继续对话；同时一个或多个子 Agent 各自 pending 审批：
 
-- 每个 `approval_required` 带不同 `child_session_id`；
+- 每个 `approval_required` 带不同 `child_agent_id`；
 - 用户按事件顺序或 TUI 列表逐条审批；
 - 同一子 Agent 一批 tool call 仍合并为**一条** `approval_required`（与父 turn 多工具审批一致）。
 
@@ -481,15 +481,15 @@ Client（Go full / Python Textual）在收到带 `child_session_id` 的 `approva
 
 例如父 turn 自身 `bash_run` 待批，且异步子 Agent 也待批：
 
-- 两条 `approval_required`，以 `hitl_scope` + `child_session_id` 区分；
-- resume **必须**带正确 `child_session_id` 或省略（父）；
+- 两条 `approval_required`，以 `hitl_scope` + `child_agent_id` 区分；
+- resume **必须**带正确 `child_agent_id` 或省略（父）；
 - Node **禁止**把 resume 误投到错误 runtime（误投返回 400 `hitl_target_mismatch`）。
 
 ### 14.7 实现要点（Go Node）
 
 - 子 `runtime` 复用 `turn.Orchestrator`；`hub.Publish` 包装为「子 session 事件 → 父 session_id + 子元数据」。
 - `PendingHITL` 持久化在子 session 的 `runtime_state_json`（若启用 SQLite）；恢复时仍从父 SSE 收 approval。
-- 审计日志字段：`parent_session_id`、`child_session_id`、`hitl_scope=temporary_agent`、`approval_id`。
+- 审计日志字段：`parent_agent_id`、`child_agent_id`、`hitl_scope=temporary_agent`、`approval_id`。
 
 ---
 
@@ -510,7 +510,7 @@ create_temporary_agent({
 
 ```json
 create_temporary_agent({"purpose":"查日志","task":"……","wait":false})
-wait_temporary_agents({"child_session_ids":["child-aaa","child-bbb"],"timeout_seconds":600})
+wait_temporary_agents({"child_agent_ids":["child-aaa","child-bbb"],"timeout_seconds":600})
 ```
 
 **用户 HTTP 停止：**

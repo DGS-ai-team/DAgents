@@ -4,7 +4,7 @@ import "github.com/DGS-ai-team/DAgents/node/internal/stream"
 
 // ShouldBumpNotifySeq 判断 SSE 事件是否应推进 session 的 notify_seq（F-E13）。
 func ShouldBumpNotifySeq(ev stream.Event) bool {
-	if ev.SessionID == "" {
+	if ev.SessionID == "" && ev.AgentID == "" {
 		return false
 	}
 	switch ev.Type {

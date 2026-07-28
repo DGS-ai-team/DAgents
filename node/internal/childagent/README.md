@@ -181,7 +181,7 @@ OnChildSettled → finishWithEvent(completed)
 
 父 session 收到 `request_type=resume` 时：
 
-1. `resume_value.child_session_id` 为空 → `DeliverParentResume`（父 HITL）
+1. `resume_value.child_agent_id` 为空 → `DeliverParentResume`（父 HITL）
 2. 非空 → 校验归属 + 子 runtime 是否有 pending HITL → `DeliverChildResume`
 
 误投返回 `hitl_target_mismatch` / `no_pending_hitl`。
@@ -215,11 +215,11 @@ OnChildSettled → finishWithEvent(completed)
 子 runtime 的 `Publisher` 替换为 `RelayHub`：
 
 1. **忽略子 turn 的 `done`** — 避免 Client 误判父 session 回合结束
-2. **所有事件附加 `child_session_id`**
+2. **所有事件附加 `child_agent_id`**
 3. **`approval_required` 附加** `hitl_scope=temporary_agent`、`child_purpose`（子 turn 仍走该事件；父 session 本地 turn 为 **`hitl_required`**）
 4. **统一 `Publish` 到父 `session_id`**
 
-Client 只订阅父 SSE；子 turn 的 `assistant` / `tool_result` 等由 Client 按 `child_session_id` 过滤隐藏，仅展示审批与生命周期行。
+Client 只订阅父 SSE；子 turn 的 `assistant` / `tool_result` 等由 Client 按 `child_agent_id` 过滤隐藏，仅展示审批与生命周期行。
 
 ---
 
@@ -238,10 +238,10 @@ Client 只订阅父 SSE；子 turn 的 `assistant` / `tool_result` 等由 Client
 
 | 层 | 触发 | SSE 特征 |
 |----|------|----------|
-| **创建审批** | 父 turn 调 `create_temporary_agent` | 父 scope，通常无 `child_session_id` |
-| **子工具审批** | 子 turn 调 `bash_run` 等 | `hitl_scope=temporary_agent` + `child_session_id` |
+| **创建审批** | 父 turn 调 `create_temporary_agent` | 父 scope，通常无 `child_agent_id` |
+| **子工具审批** | 子 turn 调 `bash_run` 等 | `hitl_scope=temporary_agent` + `child_agent_id` |
 
-用户 resume 始终用**父** `session_id`；带 `child_session_id` 时由 `RouteResume` 投到子 runtime。
+用户 resume 始终用**父** `session_id`；带 `child_agent_id` 时由 `RouteResume` 投到子 runtime。
 
 详见契约文档 §13（创建策略）、§14（子工具审批）。
 

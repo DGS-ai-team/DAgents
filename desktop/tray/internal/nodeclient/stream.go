@@ -106,11 +106,10 @@ func parseSSE(ctx context.Context, r io.Reader, handler func(StreamEvent) bool) 
 
 func decodeStreamEvent(eventType, eventID, dataLine string) (StreamEvent, error) {
 	var envelope struct {
-		SessionID string         `json:"session_id"`
-		AgentID   string         `json:"agent_id"`
-		Type      string         `json:"type"`
-		Seq       int            `json:"seq"`
-		Data      map[string]any `json:"data"`
+		AgentID string         `json:"agent_id"`
+		Type    string         `json:"type"`
+		Seq     int            `json:"seq"`
+		Data    map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(dataLine), &envelope); err != nil {
 		return StreamEvent{}, fmt.Errorf("decode sse data: %w", err)
@@ -127,10 +126,11 @@ func decodeStreamEvent(eventType, eventID, dataLine string) (StreamEvent, error)
 	if data == nil {
 		data = map[string]any{}
 	}
+	aid := strings.TrimSpace(envelope.AgentID)
 	return StreamEvent{
 		Type:      typ,
-		SessionID: envelope.SessionID,
-		AgentID:   envelope.AgentID,
+		SessionID: aid, // 与 AgentID 同源（待办键历史字段）
+		AgentID:   aid,
 		Seq:       seq,
 		Data:      data,
 	}, nil
