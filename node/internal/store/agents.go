@@ -34,10 +34,12 @@ type AgentRecord struct {
 	AgentID        string
 	DisplayName    string
 	TemplateID     string
-	Origin         string // local | remote（预留远端对等）
+	Origin         string // local | remote
 	SandboxEnabled bool
 	SandboxBackend string
 	ConfigSnapshot json.RawMessage
+	PlacementJSON  json.RawMessage // owner_ref / home placement
+	HostJSON       json.RawMessage // OS / display 快照（远端引用）
 	Archived       bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -88,6 +90,8 @@ CREATE TABLE IF NOT EXISTS agents (
   sandbox_enabled INTEGER NOT NULL DEFAULT 0,
   sandbox_backend TEXT NOT NULL DEFAULT 'process',
   config_snapshot_json TEXT NOT NULL DEFAULT '{}',
+  placement_json TEXT NOT NULL DEFAULT '{}',
+  host_json TEXT NOT NULL DEFAULT '{}',
   archived INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -97,6 +101,9 @@ CREATE TABLE IF NOT EXISTS agents (
 		return err
 	}
 	if err := s.ensureOriginColumn(); err != nil {
+		return err
+	}
+	if err := s.ensurePlacementColumns(); err != nil {
 		return err
 	}
 	if err := s.ensurePolicySchema(); err != nil {
@@ -139,6 +146,45 @@ func (s *AgentStore) ensureOriginColumn() error {
 	return err
 }
 
+// ensurePlacementColumns 兼容旧库：补 placement_json / host_json。
+func (s *AgentStore) ensurePlacementColumns() error {
+	rows, err := s.db.Query(`PRAGMA table_info(agents)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	hasPlacement, hasHost := false, false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		switch name {
+		case "placement_json":
+			hasPlacement = true
+		case "host_json":
+			hasHost = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasPlacement {
+		if _, err := s.db.Exec(`ALTER TABLE agents ADD COLUMN placement_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
+			return err
+		}
+	}
+	if !hasHost {
+		if _, err := s.db.Exec(`ALTER TABLE agents ADD COLUMN host_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Save 写入或更新 Agent 元数据。
 func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 	if s == nil {
@@ -163,6 +209,14 @@ func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 	if len(snap) == 0 {
 		snap = json.RawMessage(`{}`)
 	}
+	placement := rec.PlacementJSON
+	if len(placement) == 0 {
+		placement = json.RawMessage(`{}`)
+	}
+	host := rec.HostJSON
+	if len(host) == 0 {
+		host = json.RawMessage(`{}`)
+	}
 	now := time.Now().UTC()
 	created := rec.CreatedAt
 	if created.IsZero() {
@@ -183,8 +237,8 @@ func (s *AgentStore) Save(ctx context.Context, rec AgentRecord) error {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO agents (
   agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
-  config_snapshot_json, archived, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  config_snapshot_json, placement_json, host_json, archived, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(agent_id) DO UPDATE SET
   display_name=excluded.display_name,
   template_id=excluded.template_id,
@@ -192,9 +246,11 @@ ON CONFLICT(agent_id) DO UPDATE SET
   sandbox_enabled=excluded.sandbox_enabled,
   sandbox_backend=excluded.sandbox_backend,
   config_snapshot_json=excluded.config_snapshot_json,
+  placement_json=excluded.placement_json,
+  host_json=excluded.host_json,
   archived=excluded.archived,
   updated_at=excluded.updated_at
-`, id, name, tpl, origin, sandbox, backend, string(snap), archived,
+`, id, name, tpl, origin, sandbox, backend, string(snap), string(placement), string(host), archived,
 		created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano))
 	return err
 }
@@ -207,7 +263,7 @@ func (s *AgentStore) Get(ctx context.Context, agentID string) (*AgentRecord, err
 	agentID = strings.TrimSpace(agentID)
 	row := s.db.QueryRowContext(ctx, `
 SELECT agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
-       config_snapshot_json, archived, created_at, updated_at
+       config_snapshot_json, placement_json, host_json, archived, created_at, updated_at
 FROM agents WHERE agent_id = ?`, agentID)
 	return scanAgent(row)
 }
@@ -219,7 +275,7 @@ func (s *AgentStore) List(ctx context.Context) ([]AgentRecord, error) {
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT agent_id, display_name, template_id, origin, sandbox_enabled, sandbox_backend,
-       config_snapshot_json, archived, created_at, updated_at
+       config_snapshot_json, placement_json, host_json, archived, created_at, updated_at
 FROM agents WHERE archived = 0
 ORDER BY updated_at DESC`)
 	if err != nil {
@@ -266,10 +322,10 @@ type scannable interface {
 
 func scanAgent(row scannable) (*AgentRecord, error) {
 	var (
-		id, name, tpl, origin, backend, snap, created, updated string
-		sandbox, archived                                      int
+		id, name, tpl, origin, backend, snap, placement, host, created, updated string
+		sandbox, archived                                                       int
 	)
-	if err := row.Scan(&id, &name, &tpl, &origin, &sandbox, &backend, &snap, &archived, &created, &updated); err != nil {
+	if err := row.Scan(&id, &name, &tpl, &origin, &sandbox, &backend, &snap, &placement, &host, &archived, &created, &updated); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -277,6 +333,12 @@ func scanAgent(row scannable) (*AgentRecord, error) {
 	}
 	ct, _ := time.Parse(time.RFC3339Nano, created)
 	ut, _ := time.Parse(time.RFC3339Nano, updated)
+	if strings.TrimSpace(placement) == "" {
+		placement = "{}"
+	}
+	if strings.TrimSpace(host) == "" {
+		host = "{}"
+	}
 	return &AgentRecord{
 		AgentID:        id,
 		DisplayName:    name,
@@ -285,6 +347,8 @@ func scanAgent(row scannable) (*AgentRecord, error) {
 		SandboxEnabled: sandbox != 0,
 		SandboxBackend: backend,
 		ConfigSnapshot: json.RawMessage(snap),
+		PlacementJSON:  json.RawMessage(placement),
+		HostJSON:       json.RawMessage(host),
 		Archived:       archived != 0,
 		CreatedAt:      ct,
 		UpdatedAt:      ut,

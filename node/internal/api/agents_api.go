@@ -82,9 +82,10 @@ type createAgentRequest struct {
 	// TemplateID 仅作溯源（可选）；配置由前端展开后通过 defaults/sandbox 完整提交。
 	TemplateID  string         `json:"template_id"`
 	DisplayName string         `json:"display_name"`
-	Origin      string         `json:"origin"` // 预留：local | remote；缺省 local
+	Origin      string         `json:"origin"` // local | remote；缺省 local
 	Sandbox     *sandboxPatch  `json:"sandbox"`
 	Defaults    map[string]any `json:"defaults"`
+	Placement   *placementSpec `json:"placement"`
 }
 
 type agentView struct {
@@ -95,6 +96,8 @@ type agentView struct {
 	SandboxEnabled bool            `json:"sandbox_enabled"`
 	SandboxBackend string          `json:"sandbox_backend"`
 	ConfigSnapshot json.RawMessage `json:"config_snapshot,omitempty"`
+	Placement      json.RawMessage `json:"placement,omitempty"`
+	Host           json.RawMessage `json:"host,omitempty"`
 	CreatedAt      string          `json:"created_at"`
 	UpdatedAt      string          `json:"updated_at"`
 	// 以下字段供托盘 / 通知同步（agent_id 与内部 session 1:1）。
@@ -109,7 +112,7 @@ type agentView struct {
 }
 
 func agentViewFromRecord(rec store.AgentRecord) agentView {
-	return agentView{
+	v := agentView{
 		AgentID:        rec.AgentID,
 		DisplayName:    rec.DisplayName,
 		TemplateID:     rec.TemplateID,
@@ -120,6 +123,13 @@ func agentViewFromRecord(rec store.AgentRecord) agentView {
 		CreatedAt:      rec.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:      rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
+	if len(rec.PlacementJSON) > 0 && string(rec.PlacementJSON) != "{}" {
+		v.Placement = rec.PlacementJSON
+	}
+	if len(rec.HostJSON) > 0 && string(rec.HostJSON) != "{}" {
+		v.Host = rec.HostJSON
+	}
+	return v
 }
 
 func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +140,15 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	var req createAgentRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+
+	homeNodeID := ""
+	if req.Placement != nil {
+		homeNodeID = strings.TrimSpace(req.Placement.HomeNodeID)
+	}
+	if homeNodeID != "" && homeNodeID != s.cfgNodeID() {
+		s.handleCreateRemoteAgent(w, r, req, homeNodeID)
 		return
 	}
 
@@ -206,6 +225,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		SandboxEnabled: sandbox.Enabled,
 		SandboxBackend: sandbox.Backend,
 		ConfigSnapshot: snapRaw,
+		HostJSON:       encodeJSONRaw(localHostPayload()),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -228,6 +248,73 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	writeJSON(w, http.StatusOK, agentViewFromRecord(rec))
+}
+
+func (s *Server) handleCreateRemoteAgent(w http.ResponseWriter, r *http.Request, req createAgentRequest, homeNodeID string) {
+	if s.control == nil || s.cfg == nil || !s.cfg.Manage.Enabled {
+		writeAPIError(w, http.StatusBadRequest, "manage_required", "远端 Placement 需要启用 Manage", nil)
+		return
+	}
+	name := strings.TrimSpace(req.DisplayName)
+	if name == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "display_name is required", nil)
+		return
+	}
+	body := map[string]any{
+		"owner_node_id": s.cfg.NodeID,
+		"display_name":  name,
+		"template_id":   strings.TrimSpace(req.TemplateID),
+		"defaults":      req.Defaults,
+	}
+	if req.Defaults == nil {
+		body["defaults"] = map[string]any{}
+	}
+	if req.Sandbox != nil {
+		// 将 sandboxPatch 转 map：直接用前端同结构的 JSON 再解
+		raw, _ := json.Marshal(req.Sandbox)
+		var sandboxMap map[string]any
+		_ = json.Unmarshal(raw, &sandboxMap)
+		body["sandbox"] = sandboxMap
+	}
+	created, err := s.control.CreateOnHome(r.Context(), homeNodeID, body)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "peer_create_failed", err.Error(), nil)
+		return
+	}
+	snap := created.ConfigSnapshot
+	if len(snap) == 0 {
+		snap = json.RawMessage(`{}`)
+	}
+	host := created.Host
+	if len(host) == 0 {
+		host = json.RawMessage(`{}`)
+	}
+	placement := encodeJSONRaw(placementPayload{
+		Role:        "owner_ref",
+		OwnerNodeID: s.cfg.NodeID,
+		HomeNodeID:  created.HomeNodeID,
+		Status:      "online",
+	})
+	now := time.Now().UTC()
+	rec := store.AgentRecord{
+		AgentID:        created.AgentID,
+		DisplayName:    firstNonEmpty(created.DisplayName, name),
+		TemplateID:     strings.TrimSpace(req.TemplateID),
+		Origin:         store.AgentOriginRemote,
+		SandboxEnabled: created.SandboxEnabled,
+		SandboxBackend: firstNonEmpty(created.SandboxBackend, "process"),
+		ConfigSnapshot: snap,
+		PlacementJSON:  placement,
+		HostJSON:       host,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := s.agents.Save(r.Context(), rec); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
+		return
+	}
+	// 远端引用不装本地 runtime
 	writeJSON(w, http.StatusOK, agentViewFromRecord(rec))
 }
 
@@ -405,6 +492,26 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("agent_id"))
+	rec, err := s.agents.Get(r.Context(), id)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "agent_get_failed", err.Error(), nil)
+		return
+	}
+	if rec == nil || rec.Archived {
+		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+		return
+	}
+	// 远端引用：先经 Manage 双删 home，再删本地 stub
+	if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
+		p := decodePlacement(rec.PlacementJSON)
+		homeID := strings.TrimSpace(p.HomeNodeID)
+		if homeID != "" && s.control != nil && s.cfg != nil && s.cfg.Manage.Enabled {
+			if err := s.control.DeleteOnHome(r.Context(), homeID, id); err != nil {
+				writeAPIError(w, http.StatusBadGateway, "peer_delete_failed", err.Error(), nil)
+				return
+			}
+		}
+	}
 	if err := s.agents.SoftDelete(r.Context(), id); err != nil {
 		writeAPIError(w, http.StatusNotFound, "agent_not_found", err.Error(), map[string]any{"agent_id": id})
 		return

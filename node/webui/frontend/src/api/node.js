@@ -96,7 +96,16 @@ export function createAgent(payload = {}) {
   if (payload.origin) body.origin = payload.origin;
   if (payload.sandbox && typeof payload.sandbox === "object") body.sandbox = payload.sandbox;
   if (payload.defaults && typeof payload.defaults === "object") body.defaults = payload.defaults;
+  if (payload.placement && typeof payload.placement === "object") {
+    const home = String(payload.placement.home_node_id || payload.placement.homeNodeId || "").trim();
+    if (home) body.placement = { home_node_id: home };
+  }
   return apiFetch("/v1/agents", { method: "POST", body });
+}
+
+/** 同组可放置的 peer Node（需启用 Manage）。 */
+export function listPeerNodes() {
+  return apiFetch("/v1/peers/nodes");
 }
 
 export function listAgents() {

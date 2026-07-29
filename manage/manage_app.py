@@ -18,6 +18,7 @@ from manage.registry.models import AuditListResponse, HealthResponse
 from manage.a2a.routes import build_a2a_router
 from manage.a2a.store import A2ATaskStore
 from manage.admin.routes import build_admin_router
+from manage.control.routes import build_control_router
 from manage.llm.routes import build_llm_router
 from manage.llm.store import LLMConfigStore
 from manage.platform.blob_routes import build_blob_router
@@ -94,6 +95,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     cases_store = CaseExampleStore(db=db if db.enabled else None)
 
     app.include_router(build_registry_router(store, audit))
+    app.include_router(build_control_router(store, audit))
     app.include_router(build_a2a_router(store, a2a_store, audit))
     app.include_router(build_admin_router(store, a2a_store))
     app.include_router(build_llm_router(llm_store, audit))

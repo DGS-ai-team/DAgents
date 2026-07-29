@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import AgentTemplateCreateModal from "../../components/AgentTemplateCreateModal.vue";
+import { agentHostLabel } from "../../utils/agentTemplateForm.js";
 
 const router = useRouter();
 const loading = ref(true);
@@ -52,8 +53,11 @@ function openAgent(agent) {
   router.push({ name: "settings-agent-detail", params: { agentId: id } });
 }
 
-function originLabel(origin) {
-  return origin === "remote" ? "远端" : "本地";
+function originLabel(agent) {
+  const origin = String(agent?.origin || "").trim().toLowerCase();
+  const base = origin === "remote" ? "远端" : "本地";
+  const os = agentHostLabel(agent);
+  return os ? `${base} · ${os}` : base;
 }
 
 function sourceLabel(source) {
@@ -103,7 +107,7 @@ onMounted(load);
             <div class="agents-settings__card-main">
               <span class="agents-settings__name">{{ a.display_name || a.agent_id }}</span>
               <span class="agents-settings__meta">
-                {{ originLabel(a.origin) }}
+                {{ originLabel(a) }}
                 <template v-if="a.sandbox_enabled"> · 沙箱</template>
                 <template v-if="a.template_id"> · 源自 {{ a.template_id }}</template>
               </span>

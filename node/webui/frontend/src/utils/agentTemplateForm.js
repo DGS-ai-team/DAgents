@@ -58,7 +58,24 @@ export function emptyAgentDraft() {
     promptCustomMd: "",
     promptLongTermEntries: [],
     promptGlobalLongTermEntries: [],
+    // 空 = 本机；非空 = 同组 peer 的 home_node_id
+    homeNodeId: "",
   };
+}
+
+/** 从 agent.host JSON 取 OS 展示标签。 */
+export function agentHostLabel(agent) {
+  const host = asObject(typeof agent?.host === "string" ? (() => {
+    try { return JSON.parse(agent.host); } catch { return {}; }
+  })() : agent?.host);
+  const label = String(host.display_label || "").trim();
+  if (label) return label;
+  const kind = String(host.os_kind || host.sys_platform || "").trim().toLowerCase();
+  if (kind === "windows") return "Windows";
+  if (kind === "darwin") return "macOS";
+  if (kind === "linux") return "Linux";
+  if (kind) return kind.charAt(0).toUpperCase() + kind.slice(1);
+  return "";
 }
 
 export function readTemplateDefaults(template) {
@@ -290,6 +307,8 @@ export function buildCreateAgentPayload(draft) {
   };
   const tpl = String(draft.templateId || "").trim();
   if (tpl && tpl !== BLANK_TEMPLATE_ID) payload.template_id = tpl;
+  const home = String(draft.homeNodeId || "").trim();
+  if (home) payload.placement = { home_node_id: home };
   return payload;
 }
 

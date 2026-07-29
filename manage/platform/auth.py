@@ -162,3 +162,25 @@ def audit_actor(request: Request, auth: AuthContext, *, fallback_agent_id: str |
 def require_admin(auth: AuthContext) -> None:
     if not auth.is_admin:
         raise HTTPException(status_code=403, detail="admin role required")
+
+
+def lookup_node_token(node_id: str) -> str:
+    """查找 Manage 调 home Node 时使用的 token（与该 Node 注册时相同）。
+
+    - MANAGE_TOKENS 中 role=node 且 agent_id 匹配 → 用该 token
+    - 否则若配置了 MANAGE_SHARED_TOKEN → 用共享 token
+    - 开放模式 → 空字符串（home Node 侧 NodeToken 为空时放行）
+    """
+    want = (node_id or "").strip()
+    for entry in _load_token_entries():
+        token_value = str(entry.get("token") or entry.get("secret") or "").strip()
+        if not token_value:
+            continue
+        role_raw = str(entry.get("role") or "member").strip().lower()
+        agent_id = str(entry.get("agent_id") or "").strip()
+        if role_raw == "node" and agent_id and agent_id == want:
+            return token_value
+    shared = _shared_token()
+    if shared:
+        return shared
+    return ""

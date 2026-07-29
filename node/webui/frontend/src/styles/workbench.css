@@ -2250,6 +2250,16 @@
   color: var(--color-text-subtle);
 }
 
+.agent-list-item__os {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
 .agent-list-item__glyph--remote {
   color: var(--color-text-muted);
 }

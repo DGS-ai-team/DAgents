@@ -1,6 +1,6 @@
 # 远端 Agent Placement 与观测面（设计）
 
-> **状态**：草案启动（2026-07-29）  
+> **状态**：P1 落地中（2026-07-29）  
 > **分支**：`cursor/remote-agent-placement-7e3e`（大动作独立演进，允许通信面重构）  
 > **范围**：Node + Web UI + Manage 控制面；屏幕旁观 MVP；**不含**键鼠控制、**不含** `sandbox.backend=remote`
 

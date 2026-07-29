@@ -57,6 +57,7 @@ type Server struct {
 	inboxPoller   *manage.InboxPoller
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
+	control         *manage.ControlClient
 	a2aCallerHITL   *session.A2ACallerHITLBridge
 	tools           *tools.Registry
 	browserMgr      *browser.Manager
@@ -360,10 +361,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		sessions:      mgr,
 		triggerStore:  triggerStore,
 		triggerSched:  triggerSched,
-		registrar:     registrar,
-		inboxPoller:   inboxPoller,
+		registrar:       registrar,
+		inboxPoller:     inboxPoller,
 		updateChecker:   updateChecker,
 		packageUploader: packageUploader,
+		control:         manage.NewControlClient(cfg),
 		a2aCallerHITL:   a2aBridge,
 		tools:           o.tools,
 		browserMgr:      browserMgr,
@@ -383,6 +385,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
+	s.registerPlacementRoutes()
 	s.registerToolCallControlRoutes()
 	s.registerUIAggregateRoutes()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)

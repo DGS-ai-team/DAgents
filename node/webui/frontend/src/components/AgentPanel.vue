@@ -8,6 +8,7 @@ import {
   agentDisplayTitle,
   agentRecordId,
 } from "../utils/format.js";
+import { agentHostLabel } from "../utils/agentTemplateForm.js";
 
 const router = useRouter();
 const emit = defineEmits(["switch", "created", "delete", "create", "agents-updated"]);
@@ -30,7 +31,11 @@ function agentOrigin(agent) {
 }
 
 function agentOriginLabel(agent) {
-  return agentOrigin(agent) === "remote" ? "远端 Agent" : "本地 Agent";
+  const os = agentHostLabel(agent);
+  if (agentOrigin(agent) === "remote") {
+    return os ? `远端 · ${os}` : "远端 Agent";
+  }
+  return os ? `本地 · ${os}` : "本地 Agent";
 }
 
 const sortedAgents = computed(() => {
@@ -149,6 +154,11 @@ defineExpose({ refresh, setDeleting, openCreate });
           </div>
 
           <div class="agent-list-item__trail">
+            <span
+              v-if="agentHostLabel(a)"
+              class="agent-list-item__os"
+              :title="agentOriginLabel(a)"
+            >{{ agentHostLabel(a) }}</span>
             <span
               class="agent-list-item__glyph"
               :class="`agent-list-item__glyph--${agentOrigin(a)}`"

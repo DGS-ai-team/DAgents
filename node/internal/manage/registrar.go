@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -275,7 +276,44 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 				"machine":          host.Machine,
 				"login_name":       host.LoginName,
 			},
+			"display":    placementDisplayMeta(),
+			"placement":  placementCapabilityMeta(),
 		},
+	}
+}
+
+func placementDisplayMeta() map[string]any {
+	h := hostsnapshot.Get()
+	osKind := strings.ToLower(strings.TrimSpace(h.OSKind))
+	sys := strings.ToLower(strings.TrimSpace(h.SysPlatform))
+	available := false
+	label := "Unknown"
+	switch {
+	case osKind == "windows" || sys == "windows":
+		available = true
+		label = "Windows"
+	case osKind == "darwin" || sys == "darwin":
+		available = true
+		label = "macOS"
+	default:
+		available = strings.TrimSpace(os.Getenv("DISPLAY")) != "" || strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) != ""
+		switch {
+		case osKind != "":
+			label = strings.ToUpper(osKind[:1]) + osKind[1:]
+		case sys != "":
+			label = strings.ToUpper(sys[:1]) + sys[1:]
+		}
+	}
+	return map[string]any{
+		"available": available,
+		"label":     label,
+	}
+}
+
+func placementCapabilityMeta() map[string]any {
+	return map[string]any{
+		"allow_peer_create": true,
+		"allow_screen_view": true,
 	}
 }
 
