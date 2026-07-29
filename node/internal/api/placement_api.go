@@ -137,7 +137,13 @@ func (s *Server) handleListPeerNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes, err := s.control.ListPeers(r.Context())
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "peers_unavailable", err.Error(), nil)
+		// 降级为空列表，避免创建弹窗因 Manage 短暂不可达而整页失败/长时间卡住。
+		writeJSON(w, http.StatusOK, map[string]any{
+			"nodes":         []any{},
+			"self_node_id":  s.cfgNodeID(),
+			"peers_error":   err.Error(),
+			"peers_degraded": true,
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "self_node_id": s.cfgNodeID()})

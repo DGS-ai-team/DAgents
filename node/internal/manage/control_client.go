@@ -95,6 +95,9 @@ type peersResponse struct {
 }
 
 func (c *ControlClient) ListPeers(ctx context.Context) ([]PeerNode, error) {
+	// 创建弹窗会调 peers；Manage 不可达时不能拖到默认 45s。
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	var resp peersResponse
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/control/peers", nil, &resp); err != nil {
 		return nil, err

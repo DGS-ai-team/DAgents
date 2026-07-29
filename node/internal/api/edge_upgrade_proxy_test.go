@@ -229,3 +229,47 @@ func TestEdgeUpgrade_LocalAgentNotProxied(t *testing.T) {
 		t.Fatalf("view=%+v", view)
 	}
 }
+
+func TestEdgeUpgrade_LocalMessagesRestoresBody(t *testing.T) {
+	// 回归：Manage 开启时 tryEdgeUpgrade 会读 /v1/messages body 判断是否远端；
+	// 本地 Agent 必须还原 Body，否则本地 handler 报 invalid Read on closed Body。
+	cfg := &config.Config{NodeID: "node-local", FSRoot: t.TempDir()}
+	cfg.Manage.Enabled = true
+	cfg.Manage.URL = "http://127.0.0.1:9"
+	cfg.ApplyDefaults()
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+	_ = agentsDB.Save(context.Background(), store.AgentRecord{
+		AgentID:        "agt-local",
+		DisplayName:    "本地",
+		Origin:         store.AgentOriginLocal,
+		SandboxBackend: "process",
+		ConfigSnapshot: json.RawMessage(`{}`),
+	})
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+	srv.edge = manage.NewEdgeClient(cfg)
+
+	body, _ := json.Marshal(map[string]any{
+		"agent_id":     "agt-local",
+		"content":      "hello local",
+		"request_type": "message",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	if srv.tryEdgeUpgrade(rr, req) {
+		t.Fatal("local agent must not edge-upgrade")
+	}
+	var msg postMessageRequest
+	if err := decodeJSON(req, &msg); err != nil {
+		t.Fatalf("body not restored for local handler: %v", err)
+	}
+	if msg.AgentID != "agt-local" || msg.Content != "hello local" {
+		t.Fatalf("decoded=%+v", msg)
+	}
+}
+

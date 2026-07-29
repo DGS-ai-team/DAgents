@@ -16,31 +16,42 @@ import (
 // - 列表 / 创建 Agent
 // - DELETE /v1/agents/{id}（走 Control 双删）
 // - peers / internal placement / health 等
+//
+// 注意：extractEdgeAgentID 对 POST /v1/messages 会读并关闭 Body；凡 fall-through 到本地
+// 处理的路径都必须 restoreBody，否则本地 handler 会报 http: invalid Read on closed Body。
 func (s *Server) tryEdgeUpgrade(w http.ResponseWriter, r *http.Request) bool {
 	if s == nil || s.edge == nil || s.agents == nil || s.cfg == nil || !s.cfg.Manage.Enabled {
 		return false
 	}
 	agentID, rebuiltBody, ok := extractEdgeAgentID(r)
-	if !ok {
-		if rebuiltBody != nil {
-			r.Body = io.NopCloser(bytes.NewReader(rebuiltBody))
-			r.ContentLength = int64(len(rebuiltBody))
-			r.Header.Set("Content-Length", itoaLen(len(rebuiltBody)))
+	restoreBody := func() {
+		if rebuiltBody == nil {
+			return
 		}
+		r.Body = io.NopCloser(bytes.NewReader(rebuiltBody))
+		r.ContentLength = int64(len(rebuiltBody))
+		r.Header.Set("Content-Length", itoaLen(len(rebuiltBody)))
+	}
+	if !ok {
+		restoreBody()
 		return false
 	}
 	if agentID == "" {
+		restoreBody()
 		return false
 	}
 	// DELETE 根资源走本地 Control 双删
 	if r.Method == http.MethodDelete && isExactAgentRootPath(r.URL.Path, agentID) {
+		restoreBody()
 		return false
 	}
 	rec, err := s.agents.Get(r.Context(), agentID)
 	if err != nil || rec == nil || rec.Archived {
+		restoreBody()
 		return false
 	}
 	if store.NormalizeAgentOrigin(rec.Origin) != store.AgentOriginRemote {
+		restoreBody()
 		return false
 	}
 	p := decodePlacement(rec.PlacementJSON)
@@ -51,9 +62,7 @@ func (s *Server) tryEdgeUpgrade(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	if rebuiltBody != nil {
-		r.Body = io.NopCloser(bytes.NewReader(rebuiltBody))
-		r.ContentLength = int64(len(rebuiltBody))
-		r.Header.Set("Content-Length", itoaLen(len(rebuiltBody)))
+		restoreBody()
 	} else if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
 		_ = r.Body.Close()
@@ -62,9 +71,7 @@ func (s *Server) tryEdgeUpgrade(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 		rebuiltBody = raw
-		r.Body = io.NopCloser(bytes.NewReader(rebuiltBody))
-		r.ContentLength = int64(len(rebuiltBody))
-		r.Header.Set("Content-Length", itoaLen(len(rebuiltBody)))
+		restoreBody()
 	}
 
 	sid, err := s.edge.EnsureSession(r.Context(), homeID, agentID, []string{"agent", "messages", "streams", "screen:view"})

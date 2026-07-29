@@ -33,16 +33,25 @@ const creatablePeers = computed(() =>
 async function loadTemplates() {
   loading.value = true;
   peersLoading.value = true;
+  peerNodes.value = [];
   error.value = "";
   showAdvanced.value = false;
+  // peers 不阻塞弹窗：Manage 慢/不可达时仍可先建本机 Agent。
+  const peersPromise = api
+    .listPeerNodes()
+    .catch(() => ({ nodes: [] }))
+    .then((peersRes) => {
+      peerNodes.value = Array.isArray(peersRes?.nodes) ? peersRes.nodes : [];
+    })
+    .finally(() => {
+      peersLoading.value = false;
+    });
   try {
-    const [tplRes, setup, peersRes] = await Promise.all([
+    const [tplRes, setup] = await Promise.all([
       api.listAgentTemplates(),
       api.getSetupConfig().catch(() => null),
-      api.listPeerNodes().catch(() => ({ nodes: [] })),
     ]);
     templates.value = tplRes.templates || [];
-    peerNodes.value = Array.isArray(peersRes?.nodes) ? peersRes.nodes : [];
     llmProfiles.value = Array.isArray(setup?.llm?.profiles)
       ? setup.llm.profiles.map((p) => ({
           id: String(p.id || "").trim(),
@@ -64,8 +73,8 @@ async function loadTemplates() {
     templates.value = [];
   } finally {
     loading.value = false;
-    peersLoading.value = false;
   }
+  await peersPromise;
 }
 
 function peerLabel(node) {

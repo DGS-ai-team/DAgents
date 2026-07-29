@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -29,6 +30,36 @@ func TestPlacementAPI_PeersEmptyWithoutManage(t *testing.T) {
 	}
 	if body["self_node_id"] != "node-owner" {
 		t.Fatalf("self = %#v", body["self_node_id"])
+	}
+	nodes, _ := body["nodes"].([]any)
+	if len(nodes) != 0 {
+		t.Fatalf("nodes = %#v", nodes)
+	}
+}
+
+func TestPlacementAPI_PeersDegradedWhenManageUnreachable(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-owner", FSRoot: t.TempDir()}
+	cfg.Manage.Enabled = true
+	cfg.Manage.URL = "http://127.0.0.1:9"
+	cfg.ApplyDefaults()
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/peers/nodes", nil)
+	rr := httptest.NewRecorder()
+	start := time.Now()
+	srv.Handler().ServeHTTP(rr, req)
+	if elapsed := time.Since(start); elapsed > 6*time.Second {
+		t.Fatalf("peers took too long: %s", elapsed)
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["peers_degraded"] != true {
+		t.Fatalf("expected peers_degraded, body=%#v", body)
 	}
 	nodes, _ := body["nodes"].([]any)
 	if len(nodes) != 0 {
