@@ -96,7 +96,7 @@ def build_control_router(registry: AgentRegistryStore, audit: AuditLog) -> APIRo
                 allow_create, allow_screen = _placement_flags(full.metadata)
                 nodes.append(
                     PeerNodeView(
-                        node_id=full.agent_id,
+                        node_id=full.node_id or full.agent_id,
                         name=full.name or full.agent_id,
                         status=full.status,
                         discovery_group=list(full.discovery_group),

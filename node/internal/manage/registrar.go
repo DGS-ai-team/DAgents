@@ -254,7 +254,7 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 	caps := r.cfg.RegistrationCapabilities()
 	return registerPayload{
 		NodeID:           r.cfg.NodeID,
-		AgentID:          r.cfg.NodeID, // 兼容旧 Manage：历史上误用 agent_id 表示 node
+		AgentID:          r.cfg.NodeID, // 兼容：值同 node_id；Manage 主键仍为 node 级
 		BaseURL:          r.cfg.ManageRegistryBaseURL(),
 		Capabilities:     caps,
 		CapabilitiesHint: caps,
@@ -276,8 +276,8 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 				"machine":          host.Machine,
 				"login_name":       host.LoginName,
 			},
-			"display":    placementDisplayMeta(),
-			"placement":  placementCapabilityMeta(),
+			"display":   placementDisplayMeta(),
+			"placement": placementCapabilityMeta(),
 		},
 	}
 }

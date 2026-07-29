@@ -213,6 +213,16 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
             raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
         return record
 
+    @router.get("/v1/registry/nodes/{node_id}", response_model=AgentRecord)
+    def get_node(node_id: str, request: Request) -> AgentRecord:
+        """P5：按 node_id 读取 Registry 行（当前与 agent_id 同键）。"""
+        authenticate(request)
+        nid = (node_id or "").strip()
+        record = store.get(nid)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"node_id={nid!r} 不存在")
+        return record
+
     @router.delete("/v1/registry/agents/{agent_id}")
     def delete_agent(agent_id: str, request: Request) -> dict[str, bool]:
         auth = authenticate(request)

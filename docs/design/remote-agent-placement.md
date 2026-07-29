@@ -1,6 +1,6 @@
 # 远端 Agent Placement 与观测面（设计）
 
-> **状态**：P4 屏幕旁观 MVP 落地中（2026-07-29）  
+> **状态**：P5 Registry `node_id` 身份落地（窄范围；2026-07-29）  
 > **分支**：`cursor/remote-agent-placement-7e3e`（大动作独立演进；**不合入 dev 直至评审通过**）  
 > **范围**：Node + Web UI + Manage 控制面；屏幕旁观 MVP；**不含**键鼠控制、**不含** `sandbox.backend=remote`
 
@@ -288,10 +288,10 @@ WebUI → owner DELETE /v1/agents/{id}
 | **P1** | Manage Control：peers 列表 + 远端创建/双删；owner 引用；列表 OS | 中（Manage+Node API） |
 | **P2** | Manage Edge Tunnel：远端 Agent 的 `/v1/agents/{id}/**` + messages/streams 统一代理 | **大**（通信面）✅ |
 | **P3** | 聊天/SSE/HITL 走 Edge 闭环（agent 绑定、SSE 冲刷、禁本地 runtime） | 大 ✅ |
-| **P4** | Screen 旁观 SSE（stub 帧 + Activity 入口；无键鼠） | 中 ✅ 本分支 MVP |
-| **P5** | Registry `node_id+agent_id`；A2A 寻址对齐 | 大 |
+| **P4** | Screen 旁观 SSE（stub 帧 + Activity 入口；无键鼠） | 中 ✅ |
+| **P5** | Registry `node_id` 一等字段（双写兼容；A2A 实例寻址另开） | 大 ✅ 窄范围 |
 
-P2–P4：Edge 统一代理含 `screen:view`；home `GET /v1/agents/{id}/screen/stream`（无 GUI → `screen_unavailable`）；Activity 仅在 `origin=remote && display_available` 展示旁观。
+P5 窄范围：Manage 注册/列表/discover 暴露 `node_id`；接受仅 `node_id` 或仅 `agent_id`；主键仍为 node 级；`can_a2a_invoke` 仍按 node 组交集。实例级 A2A inbox 不在本切片。
 
 ---
 

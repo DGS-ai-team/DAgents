@@ -391,9 +391,11 @@ GET /v1/node/info
 
 ### Phase 5 — Manage / A2A（独立里程碑）
 
-- [ ] Manage 注册 `node_id`
-- [ ] A2A 路由与 inbox 模型
+- [x] Manage 注册 `node_id`（与 `agent_id` 双写；主键仍为 node 级；`GET /v1/registry/nodes/{node_id}`）
+- [ ] A2A 路由与 inbox 模型（实例级 `to_agent_id` 另开；当前仍 node↔node）
 - [ ] Triggers `target` 语义
+- [x] Placement Control/Edge 读取 `node_id`（peers 回退 `agent_id`）
+- [x] Heartbeat 可选 `local_agents` 公告（非 A2A 目标）
 
 ---
 
