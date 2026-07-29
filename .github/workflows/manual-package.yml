@@ -1,11 +1,11 @@
 name: Manual Package Binary
 
-# 手动打本地助手包（与 tag Release 同矩阵，不上传 GitHub Release）。
+# 手动打本地助手包 + Manage 离线包（与 tag Release 同矩阵，不上传 GitHub Release）。
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "产物版本号后缀（写入 dagents-local-assistant-*-{version}.tar.gz/.zip）"
+        description: "产物版本号后缀（写入 dagents-local-assistant-* / dagents-manage-bundle-{version}）"
         required: false
         default: "0.0.0-manual"
       skip_tests:
@@ -249,4 +249,35 @@ jobs:
         with:
           name: dagents-shell-tauri-windows-amd64
           path: dist/dagents-shell-tauri.exe
+          if-no-files-found: error
+
+  build-manage-docker:
+    name: Build Manage offline bundle
+    needs: build-local-assistant
+    # 与 Release 一致：依赖 linux-amd64 助手包 artifact 一并打进 Manage 离线包。
+    if: ${{ always() && needs.build-local-assistant.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download linux-amd64 local assistant
+        uses: actions/download-artifact@v4
+        with:
+          name: dagents-local-assistant-linux-amd64
+          path: dist
+
+      - name: Build Manage offline bundle
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          chmod +x scripts/ci/build_manage_docker.sh scripts/ci/assemble_manage_bundle.sh
+          VERSION="${VERSION}" bash scripts/ci/assemble_manage_bundle.sh
+          ls -la dist/dagents-manage-bundle-*
+
+      - name: Upload Manage offline bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dagents-manage-bundle
+          path: dist/dagents-manage-bundle-*.tar.gz
           if-no-files-found: error
