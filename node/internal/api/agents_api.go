@@ -705,6 +705,12 @@ func (s *Server) handleAgentReload(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
 			return
 		}
+		if errors.Is(err, errRemoteAgentNotLocal) {
+			writeAPIError(w, http.StatusBadGateway, "edge_required",
+				"远端 Agent 须经 Manage Edge Tunnel 访问；请启用 Manage 或检查 placement",
+				map[string]any{"agent_id": id})
+			return
+		}
 		writeAPIError(w, http.StatusInternalServerError, "agent_reload_failed", err.Error(), map[string]any{"agent_id": id})
 		return
 	}
