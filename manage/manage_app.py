@@ -19,6 +19,8 @@ from manage.a2a.routes import build_a2a_router
 from manage.a2a.store import A2ATaskStore
 from manage.admin.routes import build_admin_router
 from manage.control.routes import build_control_router
+from manage.edge.routes import build_edge_router
+from manage.edge.store import EdgeSessionStore
 from manage.llm.routes import build_llm_router
 from manage.llm.store import LLMConfigStore
 from manage.platform.blob_routes import build_blob_router
@@ -51,6 +53,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     )
     llm_store = LLMConfigStore(db=db if db.enabled else None)
     audit = AuditLog(max_entries=cfg.audit_max_entries)
+    edge_sessions = EdgeSessionStore()
     blob = BlobStore(BlobStoreConfig.from_settings(cfg))
     releases_store = ReleasePackageStore(db=db if db.enabled else None)
 
@@ -96,6 +99,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
 
     app.include_router(build_registry_router(store, audit))
     app.include_router(build_control_router(store, audit))
+    app.include_router(build_edge_router(store, edge_sessions, audit))
     app.include_router(build_a2a_router(store, a2a_store, audit))
     app.include_router(build_admin_router(store, a2a_store))
     app.include_router(build_llm_router(llm_store, audit))

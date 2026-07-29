@@ -58,6 +58,7 @@ type Server struct {
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
 	control         *manage.ControlClient
+	edge            *manage.EdgeClient
 	a2aCallerHITL   *session.A2ACallerHITLBridge
 	tools           *tools.Registry
 	browserMgr      *browser.Manager
@@ -366,6 +367,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		updateChecker:   updateChecker,
 		packageUploader: packageUploader,
 		control:         manage.NewControlClient(cfg),
+		edge:            manage.NewEdgeClient(cfg),
 		a2aCallerHITL:   a2aBridge,
 		tools:           o.tools,
 		browserMgr:      browserMgr,
@@ -464,9 +466,15 @@ func attachBackgroundJobNotifier(reg *tools.Registry, mgr *session.Manager, logg
 	})
 }
 
-// Handler 返回可用于 http.Server 的根 Handler（含 access log 中间件）。
+// Handler 返回可用于 http.Server 的根 Handler（含 access log + Edge upgrade）。
 func (s *Server) Handler() http.Handler {
-	return accessLogMiddleware(s.logger, s.mux)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.tryEdgeUpgrade(w, r) {
+			return
+		}
+		s.mux.ServeHTTP(w, r)
+	})
+	return accessLogMiddleware(s.logger, inner)
 }
 
 // ListenAndServe 在配置的 listen 地址启动 HTTP 服务；ctx 取消时触发优雅关闭。
