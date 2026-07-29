@@ -110,7 +110,8 @@ func normalizeSandbox(s agentruntime.SandboxSpec) (agentruntime.SandboxSpec, err
 var (
 	errInvalidSandboxBackend  = errString("sandbox.backend must be process|docker|remote")
 	errRemoteEndpointRequired = errString("remote 沙箱需要 remote_endpoint")
-	errRemoteNotImplemented   = errString("远程沙箱尚未实现，请改用本机 Docker 或关闭沙箱")
+	// 与「同组远端 Node Placement」无关；外部沙箱 HTTP 运行时仍未实现。
+	errRemoteNotImplemented = errString("sandbox.backend=remote 未实现（外部沙箱预留）；请改用 docker 或关闭沙箱。同组远端 Node 创建 Agent 见 Placement")
 )
 
 type errString string
@@ -119,7 +120,7 @@ func (e errString) Error() string { return string(e) }
 
 func writeSandboxReadyError(w http.ResponseWriter, err error) {
 	code := "docker_unavailable"
-	if err != nil && strings.Contains(err.Error(), "远程沙箱") {
+	if err == errRemoteNotImplemented || (err != nil && strings.Contains(err.Error(), "backend=remote")) {
 		code = "remote_unavailable"
 	}
 	msg := ""

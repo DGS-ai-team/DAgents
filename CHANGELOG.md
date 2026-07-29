@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **远端 Agent Placement 设计启动**：独立分支推进同组 Node 放置、OS 标注、屏幕旁观；通信面拟引入 Manage Edge Tunnel（见 `docs/design/remote-agent-placement.md`）。
+- **设置页去掉「远程沙箱」选项**：避免与 Placement 混淆；表单将历史 `backend=remote` 升为 docker。`sandbox.backend=remote` API 仍拒绝启用（外部沙箱预留，非本需求）。
+
 ---
 
 ## [0.8.5] - 2026-07-28
@@ -13,6 +18,7 @@
 ### 修复
 
 - **HITL 选项回传错位**：ChatView 在模板里写 `hitlSelected.value = v` 因 Vue 自动解包未真正更新选中态，提交时静默落成首项；改为 script 内同步，并按真实选中解析 `selected_options` / `answer`（option `value`）。
+
 ### 变更
 
 - **Tauri 安装向导改为便携单文件**：去掉 NSIS「先安装向导再装程序」外层；`dagents-setup-*.exe` 双击即开，编译期嵌入 Inno 并静默落地。

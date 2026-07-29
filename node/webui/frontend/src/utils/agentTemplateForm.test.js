@@ -248,9 +248,9 @@ describe("agentTemplateForm", () => {
     expect(payload.sandbox.backend).toBe("docker");
   });
 
-  it("builds remote sandbox payload when enabled", () => {
+  it("coerces legacy remote sandbox backend to docker in UI payload", () => {
     const payload = buildCreateAgentPayload({
-      displayName: "远程沙箱",
+      displayName: "旧远程沙箱配置",
       llmProfileId: "default",
       maxToolLoops: 32,
       toolGroups: ["fs"],
@@ -258,8 +258,6 @@ describe("agentTemplateForm", () => {
       childAgentsEnabled: true,
       sandboxEnabled: true,
       sandboxBackend: "remote",
-      sandboxRemoteEndpoint: "https://sbx.example.com",
-      sandboxRemoteAPIKey: "secret",
       workspaceSubdir: "data",
       fsRootIsolation: false,
       allowBash: true,
@@ -273,13 +271,12 @@ describe("agentTemplateForm", () => {
     });
     expect(payload.sandbox).toMatchObject({
       enabled: true,
-      backend: "remote",
+      backend: "docker",
       fs_root_isolation: true,
-      remote_endpoint: "https://sbx.example.com",
-      remote_api_key: "secret",
       allow_network_tools: false,
+      image: "dagents-sandbox:latest",
     });
-    expect(payload.sandbox.image).toBeUndefined();
+    expect(payload.sandbox.remote_endpoint).toBeUndefined();
   });
 
   it("reads llm active from agent view snapshot", () => {

@@ -150,7 +150,7 @@ watch(
   () => props.draft.sandboxBackend,
   (backend) => {
     if (!props.draft.sandboxEnabled) return;
-    if (backend === "docker" || backend === "remote") {
+    if (backend === "docker") {
       props.draft.fsRootIsolation = true;
     }
   },
@@ -187,58 +187,26 @@ watch(
         关闭：在宿主机运行，由工具组与策略约束保证安全。开启：在隔离环境中执行，需选择沙箱模式并配置参数。
       </p>
       <template v-if="draft.sandboxEnabled">
+        <p class="agent-settings-hint">
+          沙箱模式：本机 Docker（Linux 容器）。需安装 Docker；命令行在容器内执行。镜像见 packaging/sandbox。
+          在同组其他 Node 上创建 Agent 属于 Placement，与沙箱无关（见 docs/design/remote-agent-placement.md）。
+        </p>
         <label class="agent-settings-field">
-          <span>沙箱模式</span>
-          <select v-model="draft.sandboxBackend" class="agent-settings-input">
-            <option value="docker">本机 Docker（Linux 容器）</option>
-            <option value="remote">远程沙箱（预留）</option>
-          </select>
+          <span>镜像</span>
+          <input v-model="draft.sandboxImage" type="text" class="agent-settings-input" placeholder="dagents-sandbox:latest" />
         </label>
-        <template v-if="draft.sandboxBackend === 'docker'">
-          <p class="agent-settings-hint">
-            需本机安装 Docker。Agent 装入时创建 Linux 容器；命令行在容器内执行。镜像见 packaging/sandbox。
-          </p>
-          <label class="agent-settings-field">
-            <span>镜像</span>
-            <input v-model="draft.sandboxImage" type="text" class="agent-settings-input" placeholder="dagents-sandbox:latest" />
-          </label>
-          <label class="agent-settings-field">
-            <span>网络</span>
-            <input v-model="draft.sandboxNetwork" type="text" class="agent-settings-input" placeholder="none" />
-          </label>
-          <label class="agent-settings-field">
-            <span>内存上限</span>
-            <input v-model="draft.sandboxMemory" type="text" class="agent-settings-input" placeholder="512m（可选）" />
-          </label>
-          <label class="agent-settings-field">
-            <span>CPU 上限</span>
-            <input v-model="draft.sandboxCpus" type="text" class="agent-settings-input" placeholder="1.0（可选）" />
-          </label>
-        </template>
-        <template v-else-if="draft.sandboxBackend === 'remote'">
-          <p class="agent-settings-hint">
-            远程沙箱运行时尚未接入；可先填写接入参数并保存配置，启用时会提示暂不可用。
-          </p>
-          <label class="agent-settings-field">
-            <span>远程 Endpoint</span>
-            <input
-              v-model="draft.sandboxRemoteEndpoint"
-              type="text"
-              class="agent-settings-input"
-              placeholder="https://sandbox.example.com"
-            />
-          </label>
-          <label class="agent-settings-field">
-            <span>API Key（可选）</span>
-            <input
-              v-model="draft.sandboxRemoteAPIKey"
-              type="password"
-              class="agent-settings-input"
-              placeholder="远程沙箱凭证"
-              autocomplete="off"
-            />
-          </label>
-        </template>
+        <label class="agent-settings-field">
+          <span>网络</span>
+          <input v-model="draft.sandboxNetwork" type="text" class="agent-settings-input" placeholder="none" />
+        </label>
+        <label class="agent-settings-field">
+          <span>内存上限</span>
+          <input v-model="draft.sandboxMemory" type="text" class="agent-settings-input" placeholder="512m（可选）" />
+        </label>
+        <label class="agent-settings-field">
+          <span>CPU 上限</span>
+          <input v-model="draft.sandboxCpus" type="text" class="agent-settings-input" placeholder="1.0（可选）" />
+        </label>
         <label class="agent-settings-check">
           <input v-model="draft.allowBash" type="checkbox" />
           <span>允许命令行工具</span>
@@ -247,7 +215,7 @@ watch(
           <input v-model="draft.allowNetworkTools" type="checkbox" />
           <span>允许网络类工具（浏览器 / A2A）</span>
         </label>
-        <p class="agent-settings-hint">隔离工作区在启用 docker / remote 时强制开启（agents/&lt;id&gt;/data）。</p>
+        <p class="agent-settings-hint">隔离工作区在启用 Docker 沙箱时强制开启（agents/&lt;id&gt;/data）。</p>
       </template>
     </section>
 
