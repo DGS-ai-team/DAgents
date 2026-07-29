@@ -388,6 +388,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
 	s.registerPlacementRoutes()
+	s.registerScreenRoutes()
 	s.registerToolCallControlRoutes()
 	s.registerUIAggregateRoutes()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)

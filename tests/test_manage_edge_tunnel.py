@@ -44,6 +44,12 @@ class EdgePathAllowedTests(unittest.TestCase):
         self.assertTrue(path_allowed("/v1/messages", agent_id="agt-1", scopes=["messages"]))
         self.assertTrue(path_allowed("/v1/streams", agent_id="agt-1", scopes=["streams"]))
         self.assertFalse(path_allowed("/v1/messages", agent_id="agt-1", scopes=["agent"]))
+        self.assertTrue(
+            path_allowed("/v1/agents/agt-1/screen/stream", agent_id="agt-1", scopes=["screen:view"])
+        )
+        self.assertFalse(
+            path_allowed("/v1/agents/agt-1/screen/stream", agent_id="agt-1", scopes=["agent"])
+        )
 
 
 class ManageEdgeTunnelTests(unittest.TestCase):

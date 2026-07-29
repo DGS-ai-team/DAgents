@@ -36,6 +36,9 @@ def path_allowed(path: str, *, agent_id: str, scopes: Iterable[str]) -> bool:
     p = path if path.startswith("/") else "/" + path
     scope_set = {str(s).strip().lower() for s in scopes}
     agent_prefix = f"/v1/agents/{agent_id}"
+    # screen 路径必须显式 screen 权限（不因 agent 前缀放行）
+    if p.startswith(f"{agent_prefix}/screen") or p.startswith("/v1/screen/"):
+        return "screen" in scope_set or "screen:view" in scope_set
     if "agent" in scope_set or "agent:read" in scope_set or "agent:write" in scope_set:
         if p == agent_prefix or p.startswith(agent_prefix + "/"):
             return True
@@ -43,9 +46,6 @@ def path_allowed(path: str, *, agent_id: str, scopes: Iterable[str]) -> bool:
         return True
     if "streams" in scope_set and (p == "/v1/streams" or p.startswith("/v1/streams?")):
         return True
-    if "screen" in scope_set or "screen:view" in scope_set:
-        if p.startswith(f"/v1/agents/{agent_id}/screen") or p.startswith("/v1/screen/"):
-            return True
     return False
 
 

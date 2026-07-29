@@ -67,7 +67,7 @@ func (s *Server) tryEdgeUpgrade(w http.ResponseWriter, r *http.Request) bool {
 		r.Header.Set("Content-Length", itoaLen(len(rebuiltBody)))
 	}
 
-	sid, err := s.edge.EnsureSession(r.Context(), homeID, agentID, []string{"agent", "messages", "streams"})
+	sid, err := s.edge.EnsureSession(r.Context(), homeID, agentID, []string{"agent", "messages", "streams", "screen:view"})
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "edge_session_failed", err.Error(), map[string]any{
 			"agent_id":     agentID,
@@ -89,7 +89,7 @@ func (s *Server) tryEdgeUpgrade(w http.ResponseWriter, r *http.Request) bool {
 	if err := proxyOnce(sid); err != nil {
 		// 会话可能过期：清缓存后再试一次
 		s.edge.InvalidateSession(homeID, agentID)
-		sid2, err2 := s.edge.EnsureSession(r.Context(), homeID, agentID, []string{"agent", "messages", "streams"})
+		sid2, err2 := s.edge.EnsureSession(r.Context(), homeID, agentID, []string{"agent", "messages", "streams", "screen:view"})
 		if err2 != nil {
 			writeAPIError(w, http.StatusBadGateway, "edge_proxy_failed", err.Error(), map[string]any{"retry": err2.Error()})
 			return true

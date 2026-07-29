@@ -1,6 +1,6 @@
 # 远端 Agent Placement 与观测面（设计）
 
-> **状态**：P3 聊天/SSE/HITL Edge 闭环落地中（2026-07-29）  
+> **状态**：P4 屏幕旁观 MVP 落地中（2026-07-29）  
 > **分支**：`cursor/remote-agent-placement-7e3e`（大动作独立演进；**不合入 dev 直至评审通过**）  
 > **范围**：Node + Web UI + Manage 控制面；屏幕旁观 MVP；**不含**键鼠控制、**不含** `sandbox.backend=remote`
 
@@ -287,11 +287,11 @@ WebUI → owner DELETE /v1/agents/{id}
 | **P0** | 设计冻结文档；UI 去掉远程沙箱误导；术语分离 | 小 |
 | **P1** | Manage Control：peers 列表 + 远端创建/双删；owner 引用；列表 OS | 中（Manage+Node API） |
 | **P2** | Manage Edge Tunnel：远端 Agent 的 `/v1/agents/{id}/**` + messages/streams 统一代理 | **大**（通信面）✅ |
-| **P3** | 聊天/SSE/HITL 走 Edge 闭环（agent 绑定、SSE 冲刷、禁本地 runtime） | 大 ✅ 本分支骨架 |
-| **P4** | Screen 旁观 SSE | 中 |
+| **P3** | 聊天/SSE/HITL 走 Edge 闭环（agent 绑定、SSE 冲刷、禁本地 runtime） | 大 ✅ |
+| **P4** | Screen 旁观 SSE（stub 帧 + Activity 入口；无键鼠） | 中 ✅ 本分支 MVP |
 | **P5** | Registry `node_id+agent_id`；A2A 寻址对齐 | 大 |
 
-P2–P3：Manage `POST /v1/edge/sessions` + `ANY /v1/edge/{session}/proxy/...`；owner Node 对 `origin=remote` 在 Handler 入口统一 upgrade；messages/streams 强制会话 agent 绑定；SSE 逐块 Flush；upgrade 未命中时拒绝本地装载远端 stub。
+P2–P4：Edge 统一代理含 `screen:view`；home `GET /v1/agents/{id}/screen/stream`（无 GUI → `screen_unavailable`）；Activity 仅在 `origin=remote && display_available` 展示旁观。
 
 ---
 

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 class EdgeSessionCreateRequest(BaseModel):
     home_node_id: str = Field(min_length=1, max_length=256)
     agent_id: str = Field(min_length=1, max_length=256)
-    scopes: list[str] = Field(default_factory=lambda: ["agent", "messages", "streams"])
+    scopes: list[str] = Field(default_factory=lambda: ["agent", "messages", "streams", "screen:view"])
     ttl_seconds: int = Field(default=3600, ge=60, le=86400)
 
     @field_validator("home_node_id", "agent_id", mode="before")
@@ -26,7 +26,7 @@ class EdgeSessionCreateRequest(BaseModel):
     @classmethod
     def normalize_scopes(cls, value: Any) -> list[str]:
         if value is None:
-            return ["agent", "messages", "streams"]
+            return ["agent", "messages", "streams", "screen:view"]
         if not isinstance(value, list):
             raise ValueError("scopes 必须是字符串列表")
         out: list[str] = []
@@ -34,7 +34,7 @@ class EdgeSessionCreateRequest(BaseModel):
             s = str(item or "").strip().lower()
             if s and s not in out:
                 out.append(s)
-        return out or ["agent", "messages", "streams"]
+        return out or ["agent", "messages", "streams", "screen:view"]
 
 
 class EdgeSessionResponse(BaseModel):

@@ -287,16 +287,25 @@ func placementDisplayMeta() map[string]any {
 	osKind := strings.ToLower(strings.TrimSpace(h.OSKind))
 	sys := strings.ToLower(strings.TrimSpace(h.SysPlatform))
 	available := false
+	backend := "none"
+	reason := ""
 	label := "Unknown"
 	switch {
 	case osKind == "windows" || sys == "windows":
 		available = true
+		backend = "stub"
 		label = "Windows"
 	case osKind == "darwin" || sys == "darwin":
 		available = true
+		backend = "stub"
 		label = "macOS"
 	default:
 		available = strings.TrimSpace(os.Getenv("DISPLAY")) != "" || strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) != ""
+		if available {
+			backend = "stub"
+		} else {
+			reason = "no_display"
+		}
 		switch {
 		case osKind != "":
 			label = strings.ToUpper(osKind[:1]) + osKind[1:]
@@ -304,10 +313,15 @@ func placementDisplayMeta() map[string]any {
 			label = strings.ToUpper(sys[:1]) + sys[1:]
 		}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"available": available,
 		"label":     label,
+		"backend":   backend,
 	}
+	if reason != "" {
+		out["reason_if_unavailable"] = reason
+	}
+	return out
 }
 
 func placementCapabilityMeta() map[string]any {

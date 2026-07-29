@@ -35,6 +35,8 @@ type hostPayload struct {
 	Machine          string `json:"machine"`
 	DisplayAvailable bool   `json:"display_available"`
 	DisplayLabel     string `json:"display_label"`
+	DisplayBackend   string `json:"display_backend,omitempty"`
+	DisplayReason    string `json:"display_reason,omitempty"`
 }
 
 func localHostPayload() hostPayload {
@@ -42,13 +44,22 @@ func localHostPayload() hostPayload {
 	osKind := strings.ToLower(strings.TrimSpace(h.OSKind))
 	sys := strings.ToLower(strings.TrimSpace(h.SysPlatform))
 	display := false
+	backend := "none"
+	reason := ""
 	switch {
 	case osKind == "windows" || sys == "windows":
 		display = true
+		backend = "stub"
 	case osKind == "darwin" || sys == "darwin":
 		display = true
+		backend = "stub"
 	default:
 		display = strings.TrimSpace(os.Getenv("DISPLAY")) != "" || strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) != ""
+		if display {
+			backend = "stub"
+		} else {
+			reason = "no_display"
+		}
 	}
 	label := "Unknown"
 	switch {
@@ -67,6 +78,8 @@ func localHostPayload() hostPayload {
 		Machine:          h.Machine,
 		DisplayAvailable: display,
 		DisplayLabel:     label,
+		DisplayBackend:   backend,
+		DisplayReason:    reason,
 	}
 }
 
