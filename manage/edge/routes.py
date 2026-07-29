@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -110,13 +111,26 @@ def build_edge_router(
         if not path_allowed(target, agent_id=sess.agent_id, scopes=sess.scopes):
             raise HTTPException(status_code=403, detail="edge_scope_denied")
 
+        body: bytes | None = None
         # messages / streams：强制 agent_id 与会话绑定，防止串会话
         if target == "/v1/messages" or target.startswith("/v1/messages"):
-            # body 校验留给 home；此处仅路径 scope
-            pass
+            body = await request.body()
+            try:
+                payload = json.loads(body.decode("utf-8") or "{}")
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail="invalid_json") from exc
+            if not isinstance(payload, dict):
+                raise HTTPException(status_code=400, detail="invalid_json")
+            msg_agent = str(payload.get("agent_id") or payload.get("agentId") or "").strip()
+            if not msg_agent:
+                raise HTTPException(status_code=400, detail="agent_id required")
+            if msg_agent != sess.agent_id:
+                raise HTTPException(status_code=403, detail="edge_agent_mismatch")
         if target == "/v1/streams" or target.startswith("/v1/streams"):
             q_agent = (request.query_params.get("agent_id") or "").strip()
-            if q_agent and q_agent != sess.agent_id:
+            if not q_agent:
+                raise HTTPException(status_code=400, detail="agent_id required")
+            if q_agent != sess.agent_id:
                 raise HTTPException(status_code=403, detail="edge_agent_mismatch")
 
         home = registry.get(sess.home_node_id)
@@ -132,6 +146,7 @@ def build_edge_router(
             home_node_id=sess.home_node_id,
             owner_node_id=sess.owner_node_id,
             edge_session_id=sess.session_id,
+            body=body,
         )
 
     return router

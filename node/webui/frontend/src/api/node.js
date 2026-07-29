@@ -19,7 +19,12 @@ async function apiFetch(path, { method = "GET", body, params } = {}) {
     data = null;
   }
   if (!resp.ok) {
-    const msg = data?.error?.message || data?.message || `HTTP ${resp.status}`;
+    const code = data?.error?.code || "";
+    const base = data?.error?.message || data?.message || `HTTP ${resp.status}`;
+    const msg =
+      code === "edge_required" || code === "edge_session_failed" || code === "edge_proxy_failed"
+        ? `[Edge] ${base}`
+        : base;
     throw new Error(msg);
   }
   return data;

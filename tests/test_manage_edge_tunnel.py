@@ -95,6 +95,59 @@ class ManageEdgeTunnelTests(unittest.TestCase):
                 self.assertEqual(fwd.await_args.kwargs["home_node_id"], "home-01")
                 self.assertEqual(fwd.await_args.kwargs["target_path"], "/v1/agents/agt-1/hydrate")
 
+    def test_messages_and_streams_agent_binding(self) -> None:
+        with TemporaryDirectory() as tmp:
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
+            app = create_app(settings)
+            with TestClient(app) as client:
+                _register_peer(client, node_id="owner-01", base_url="http://owner.local", groups=["ops"])
+                _register_peer(client, node_id="home-01", base_url="http://home.local", groups=["ops"])
+                created = client.post(
+                    "/v1/edge/sessions",
+                    headers={"x-dagents-agent-id": "owner-01"},
+                    json={
+                        "home_node_id": "home-01",
+                        "agent_id": "agt-1",
+                        "scopes": ["agent", "messages", "streams"],
+                    },
+                )
+                sid = created.json()["edge_session_id"]
+
+                mismatch = client.post(
+                    f"/v1/edge/{sid}/proxy/v1/messages",
+                    headers={"x-dagents-agent-id": "owner-01"},
+                    json={"agent_id": "agt-other", "content": "hi"},
+                )
+                self.assertEqual(mismatch.status_code, 403, mismatch.text)
+
+                missing_stream = client.get(
+                    f"/v1/edge/{sid}/proxy/v1/streams",
+                    headers={"x-dagents-agent-id": "owner-01"},
+                )
+                self.assertEqual(missing_stream.status_code, 400)
+
+                from fastapi.responses import Response
+
+                async def fake_forward(**kwargs):
+                    return Response(content=b'{"accepted":true}', media_type="application/json")
+
+                with patch("manage.edge.routes.forward_to_home", new=AsyncMock(side_effect=fake_forward)) as fwd:
+                    ok_msg = client.post(
+                        f"/v1/edge/{sid}/proxy/v1/messages",
+                        headers={"x-dagents-agent-id": "owner-01"},
+                        json={"agent_id": "agt-1", "content": "hi", "request_type": "message"},
+                    )
+                    ok_stream = client.get(
+                        f"/v1/edge/{sid}/proxy/v1/streams",
+                        headers={"x-dagents-agent-id": "owner-01"},
+                        params={"agent_id": "agt-1"},
+                    )
+                self.assertEqual(ok_msg.status_code, 200, ok_msg.text)
+                self.assertEqual(ok_stream.status_code, 200, ok_stream.text)
+                body = fwd.await_args_list[0].kwargs.get("body") or b""
+                self.assertIn(b"agt-1", body)
+                self.assertIn(b"hi", body)
+
     def test_proxy_requires_owner(self) -> None:
         with TemporaryDirectory() as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")

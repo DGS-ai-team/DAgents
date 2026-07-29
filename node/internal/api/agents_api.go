@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -18,6 +19,9 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
+
+// errRemoteAgentNotLocal 远端 Placement 引用不得在 owner 上装本地 runtime（须经 Edge）。
+var errRemoteAgentNotLocal = errors.New("remote_agent_not_local")
 
 func (s *Server) registerAgentRoutes() {
 	s.registerAgentTemplateRoutes()
@@ -571,6 +575,9 @@ func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, for
 	if rec == nil || rec.Archived {
 		return fmt.Errorf("agent_not_found")
 	}
+	if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
+		return errRemoteAgentNotLocal
+	}
 	rev := rec.UpdatedAt.UTC().UnixNano()
 	if !forceReload && s.sessions.Get(id) != nil {
 		if s.sessions.ConfigRevision(id) == rev {
@@ -675,6 +682,12 @@ func (s *Server) handleAgentEnsure(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
 			return
 		}
+		if errors.Is(err, errRemoteAgentNotLocal) {
+			writeAPIError(w, http.StatusBadGateway, "edge_required",
+				"远端 Agent 须经 Manage Edge Tunnel 访问；请启用 Manage 或检查 placement",
+				map[string]any{"agent_id": id})
+			return
+		}
 		writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})
 		return
 	}
@@ -711,6 +724,12 @@ func (s *Server) withAgentRuntime(next http.HandlerFunc) http.HandlerFunc {
 			if err := s.ensureAgentRuntime(r.Context(), id); err != nil {
 				if err.Error() == "agent_not_found" {
 					writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+					return
+				}
+				if errors.Is(err, errRemoteAgentNotLocal) {
+					writeAPIError(w, http.StatusBadGateway, "edge_required",
+						"远端 Agent 须经 Manage Edge Tunnel 访问；请启用 Manage 或检查 placement",
+						map[string]any{"agent_id": id})
 					return
 				}
 				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})

@@ -972,6 +972,12 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// 若该 id 是 Agent 实例，先按快照装入 runtime（避免重启后落到默认沙箱配置）。
 	if s.agents != nil {
 		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
+			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
+				writeAPIError(w, http.StatusBadGateway, "edge_required",
+					"远端 Agent 消息须经 Manage Edge Tunnel；请启用 Manage 或检查 placement",
+					map[string]any{"agent_id": sessionID})
+				return
+			}
 			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
 				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": sessionID})
 				return
@@ -1048,6 +1054,17 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentFilter := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	// 远端引用若未走 Edge upgrade，禁止订阅本机 hub（否则永远无事件且误导）。
+	if agentFilter != "" && s.agents != nil {
+		if rec, err := s.agents.Get(r.Context(), agentFilter); err == nil && rec != nil && !rec.Archived {
+			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
+				writeAPIError(w, http.StatusBadGateway, "edge_required",
+					"远端 Agent SSE 须经 Manage Edge Tunnel；请启用 Manage 或检查 placement",
+					map[string]any{"agent_id": agentFilter})
+				return
+			}
+		}
+	}
 	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
 	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"
 	// live=1：TUI 重连时只收增量，避免 replay 历史 done 干扰 wait_user_turn。

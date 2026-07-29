@@ -218,9 +218,33 @@ func (c *EdgeClient) Proxy(w http.ResponseWriter, r *http.Request, sessionID, ta
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, copyErr := io.Copy(w, resp.Body)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
+	streamish := strings.HasPrefix(pathOnly, "/v1/streams") ||
+		strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") ||
+		strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream")
+	if !streamish {
+		_, copyErr := io.Copy(w, resp.Body)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		return copyErr
 	}
-	return copyErr
+	// SSE：逐块写出并 Flush，避免缓冲到连接结束才推到浏览器。
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return werr
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		if readErr == io.EOF {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
 }

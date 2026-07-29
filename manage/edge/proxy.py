@@ -57,6 +57,7 @@ async def forward_to_home(
     home_node_id: str,
     owner_node_id: str,
     edge_session_id: str,
+    body: bytes | None = None,
 ) -> Response:
     url = join_url(base_url, target_path)
     if request.url.query:
@@ -76,7 +77,8 @@ async def forward_to_home(
     if ctype:
         headers["Content-Type"] = ctype
 
-    body = await request.body()
+    if body is None:
+        body = await request.body()
     timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
     try:
         client = httpx.AsyncClient(timeout=timeout)
