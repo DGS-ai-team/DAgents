@@ -1,6 +1,6 @@
 # 工作组 D0.5 契约（开工门槛）
 
-> **状态**：**D0.5 已冻结**（§19 Verdict A）— D0.9 已完成；**D1 Manage 基座骨架进行中**（`manage/workgroup/`）；**禁止**跳过契约另开平行协议  
+> **状态**：**D0.5 已冻结**（§19 Verdict A）— D0.9/D1 已完成；**D2 Node WorkgroupWorker 骨架进行中**（`node/internal/workgroup/`）；**禁止**跳过契约另开平行协议  
 > **产品方向**：[`workgroup-and-node-gateway.md`](./workgroup-and-node-gateway.md)（§0–§13）  
 > **本文件职责**：可测试的 schema、状态机、权限矩阵、投影规则、WS/工具恢复协议、威胁模型、旧数据处置、契约测试清单  
 > **JSON Schema 附录**：[`fixtures/workgroup-d05/schemas/`](./fixtures/workgroup-d05/schemas/)  
@@ -861,7 +861,7 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 - [x] 产品正文交叉引用本文件为 **D0.5 已冻结**  
 - [x] **未**合并未门禁的 Manage turn kernel / Worker 大改  
 
-**退出后下一动作**：D0.9 停 Placement 入口（**已完成**）→ D1 Manage 基座骨架（**进行中**：`manage/workgroup/`）。
+**退出后下一动作**：D0.9（**已完成**）→ D1 Manage 基座（**已完成**：`manage/workgroup/`）→ D2 Node Worker（**进行中**：`node/internal/workgroup/`）。
 
 ---
 

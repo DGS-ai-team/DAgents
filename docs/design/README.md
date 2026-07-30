@@ -7,8 +7,8 @@
 | 文件 | 说明 |
 |------|------|
 | **[agent-instance-model.md](./agent-instance-model.md)** | **主设计**：单 Node 多 Agent、模板、沙箱、`node_id`、Web UI-only、实施阶段 |
-| **[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)** | **现行产品规范**：工作组 + Timeline/RunHistory；成员资产绑 Manage；D0.9 完成 / D1 进行中 |
-| **[workgroup-d05-contracts.md](./workgroup-d05-contracts.md)** | **D0.5 已冻结（§19 A）**：schema / 状态机 / fixtures；D0.9→D1 已开 |
+| **[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)** | **现行产品规范**：工作组 + Timeline/RunHistory；D0.9/D1 完成；D2 Worker 进行中 |
+| **[workgroup-d05-contracts.md](./workgroup-d05-contracts.md)** | **D0.5 已冻结（§19 A）**：schema / 状态机 / fixtures |
 | [remote-agent-placement.md](./remote-agent-placement.md) | **SUPERSEDED**：原 Placement/Edge，改走工作组 |
 | [node-centric-architecture-cleanup.md](./node-centric-architecture-cleanup.md) | 过时逻辑清理（含拆 Placement/沙箱） |
 
