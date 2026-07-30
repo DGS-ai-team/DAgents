@@ -14,8 +14,9 @@
 | 跨 Agent | **必须**经工作组 |
 | Leader | 隐式云 Agent；Manage 云 LLM；**仅编排工具**（Supervisor） |
 | `@` | 同步交接；成员**最终产出**写入 Timeline；身份用 provider-safe **`message.name`** |
-| 成员 | **只新建**；一成员一工作组；LLM 在 Manage；工具在 **home Node 真实环境** |
-| 成员资产 | 侧车/记忆/工具权限以 **Manage 权威 `MemberSpec` 快照**为准；禁止继承 home Node 独聊侧车/全局 memory/默认工具组 |
+| 成员 | **只新建**；一成员一工作组；**生命周期随工作组归档而结束**（Manage 权威） |
+| 成员资产绑定 | 侧车 / 记忆 / 工具权限 / LLM 档案 / RunHistory **全部存 Manage，绑定工作组（及成员）**；Node **只做工具调用**（真实 FS/Shell/Browser）+ 本地否决 |
+| 成员资产禁令 | 禁止在 Node 落权威侧车副本当「Agent 配置」；禁止继承 home 独聊侧车/全局 memory/默认工具组 |
 | 沙箱 | **产品废弃**；隔离 = 单独机器部署 Node |
 | 解散 | **归档**（可查不可当活跃用） |
 | 权限主体 | **以 `node_id` 为单位**（不授给 operator 账号） |
@@ -303,8 +304,34 @@ HITL 必须绑定 `actor_run_id` / `turn_id` / `tool_call_id`；获胜答案**�
 ## 9. 成员资产：侧车、记忆、工具权限（MemberSpec）
 
 > 回答：「新建的工作组成员，侧车文件、记忆文件从哪里取？工具权限呢？」  
-> 现网锚点：独聊 Agent 创建见 `handleCreateAgent`；侧车 `EnsureAgentPromptContext`；policy `EnsureAgentPolicy`；工具组 `EnabledToolGroups`。  
-> **结论：工作组成员不得走独聊创建器的隐式继承路径。**
+> 现网锚点：独聊 Agent 创建见 `handleCreateAgent`；侧车 `EnsureAgentPromptContext`；policy `EnsureAgentPolicy`；工具组 `EnabledToolGroups`。
+
+### 9.0 原则（冻结）：资产随工作组，调用经 Node
+
+**对。** 成员生命周期在 Manage 内随工作组结束而结束，则配置态必须同命运：
+
+```text
+Manage（权威，绑定 WorkGroup / Member）
+  ├── MemberSpec：侧车正文、工具白名单、policy 上限、LLM 档案…
+  ├── 记忆 / RunHistory / Timeline 片段
+  └── 归档组时一并归档；无「组没了 Agent 还在 Node 上独活」
+
+Node（无权威人格；仅 Worker）
+  ├── 接受 ExecutionGrant（digest）→ 临时能力租约
+  ├── tool.execute：真实环境副作用
+  └── 本地 policy 可否决；不持有可独立续命的侧车/记忆副本
+```
+
+| 存 Manage（绑组） | 经 Node（仅调用） | 不存成「成员配置」 |
+|------------------|-------------------|-------------------|
+| Soul/User/Custom、工具权限、LLM、记忆、对话史 | `read_file` / `bash` / browser 等真实执行 | Node 上再留一份权威 `soul.md` / 独聊 Agent 行 |
+
+细辨（不推翻原则）：
+
+1. **权限在 Manage，能力在 Node**：白名单说「允许 bash」≠ 该机一定有 bash；实际 = Spec ∩ 本机工具目录 ∩ 本地 policy。  
+2. **工作区文件副作用**（工具写出的代码/日志）落在 home 磁盘——那是执行产物，不是侧车配置；归档时可按策略清理工作区，但**不**把它们当成成员人格的权威存储。  
+3. **本地否决**是防失控的安全阀，不是第二套权限源；收紧可以，放宽不行。  
+4. **组归档后**：Manage 归档 Spec/记忆；Node 回收 WorkerBinding / journal /（可选）工作区；成员不可再被 `@`，也不可变成本地独聊 Agent。
 
 ### 9.1 现网独聊路径（为何不能直接复用）
 
@@ -323,16 +350,18 @@ HITL 必须绑定 `actor_run_id` / `turn_id` / `tool_call_id`；获胜答案**�
 
 ### 9.2 权威归属（冻结）
 
-| 资产 | 权威位置 | home Node 本地 |
-|------|----------|----------------|
-| Soul / User / Custom 等侧车正文 | **Manage `MemberSpec`**（创建时提交的正文或不可变 blob 引用） | **不**从本机 prompt_context 继承；Worker 可不落侧车文件 |
-| 成员长期记忆 / remember | **Manage**（随 Actor；scope 仅该 member） | 不写 Node `longterm_store`；换 home 不丢、不串 |
-| 对话 / RunHistory | **Manage** | Node 无独聊 session |
-| 工具可见性白名单 | **MemberSpec** 展开到**工具名**（非仅 group；fail-closed） | Worker 只挂载交集内真实工具 |
-| 审批 policy 上限 | **MemberSpec** 请求上限 | Node 本地 policy **收紧否决**（只能更严） |
-| 工作区路径契约 | MemberSpec + Grant | 物化目录 + FS root |
-| Skills / hooks / child / media / background | **v1 默认禁用** | 不挂载共享 skills `.so` |
-| Manage 云 LLM 档案 | MemberSpec（v1 可与组共用） | Node 不读本地 llm_configs 驱动成员 |
+全部配置态 **绑定工作组，保存在 Manage**；home Node **只执行工具调用**（外加 Grant 租约与否决）。
+
+| 资产 | 权威位置（Manage，随组归档） | home Node |
+|------|------------------------------|-----------|
+| Soul / User / Custom 等侧车正文 | `MemberSpec` 正文或不可变 blob | **不落权威副本**；不继承本机 prompt_context |
+| 成员长期记忆 / remember | Manage（scope=该 member） | 不写 `longterm_store` |
+| 对话 / RunHistory / Timeline | Manage | 无独聊 session |
+| 工具可见性白名单 | Spec 展开到**工具名**（fail-closed） | 按租约挂载真实工具并执行 |
+| 审批 policy 上限 | Spec | 本地 policy **只可更严** |
+| 工作区路径契约 | Spec + Grant | 物化目录；工具副作用在此，非人格存储 |
+| Skills / hooks / child / media / background | v1 禁用（若未来启用仍归 Manage 清单） | 不挂共享 `.so` |
+| 云 LLM 档案 | Spec（v1 可与组共用） | 不读本地 `llm_configs` 驱动成员 |
 
 ### 9.3 MemberSpec 必须包含（不可变快照 + digest）
 
