@@ -793,6 +793,17 @@ Ack 确认的是 `delivery_seq`。Generation 校验依赖**连接上下文**（�
 | 26 | `empty_allow_names_means_no_tools` | `security/empty_allow_names_means_no_tools.json` |
 | 27 | `node_policy_can_only_tighten` | `security/node_policy_can_only_tighten.json` |
 | 28 | `assign_result_deduped_vs_timeline` | `projection/assign_result_deduped_vs_timeline.json` |
+| 29 | `vertical_two_node_read_file_happy_path` | `vertical/two_node_read_file_happy_path.json` |
+| 30 | `acl_without_grant_denied` | `grant/acl_without_grant_denied.json` |
+| 31 | `digest_generation_fenced` | `grant/digest_generation_fenced.json` |
+| 32 | `tool_cmd_recover_accepted_before_running` | `tool_command/recover_accepted_before_running.json` |
+| 33 | `tool_cmd_result_persisted_reply_lost` | `tool_command/result_persisted_reply_lost.json` |
+| 34 | `open_tool_call_buffers_timeline` | `projection/open_tool_call_buffers_timeline.json` |
+| 35 | `hitl_execution_approval_payload_bound` | `hitl/execution_approval_payload_bound.json` |
+| 36 | `ws_cursor_too_old_resync` | `ws/cursor_too_old_resync.json` |
+| 37 | `member_assets_manage_authoritative` | `member_assets/manage_authoritative.json` |
+
+Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 `or` / `reject_or_*` 二选一。
 
 ---
 
