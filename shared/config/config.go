@@ -26,9 +26,11 @@ type Config struct {
 	// LegacyAgentID 仅用于读取旧 YAML 的 agent_id；加载后合并进 NodeID 并清空。
 	LegacyAgentID string      `yaml:"agent_id,omitempty"`
 	Agent         AgentConfig `yaml:"agent"`
-	Listen        ListenConfig `yaml:"listen"`
-	Local         LocalConfig  `yaml:"local"`
-	Groups        []string     `yaml:"groups"`
+	// Placement 控制是否允许同组 Node 在本机创建 Agent / 旁观屏幕（Node 级开关）。
+	Placement     PlacementConfig `yaml:"placement"`
+	Listen        ListenConfig    `yaml:"listen"`
+	Local         LocalConfig     `yaml:"local"`
+	Groups        []string        `yaml:"groups"`
 	// FSRoot 固定为 DefaultFSRoot，不从 YAML 读取；测试可在内存中直接赋值。
 	FSRoot        string       `yaml:"-"`
 	LLM           LLMConfig    `yaml:"llm"`
@@ -345,7 +347,11 @@ type ManageUpdateConfig struct {
 
 // ManageA2AConfig 控制 Node 对 Manage A2A inbox 的 long poll sidecar。
 type ManageA2AConfig struct {
-	Enabled          *bool `yaml:"enabled"`
+	// Enabled 显式开关 inbox long poll；nil 时跟随 AcceptInbound。
+	Enabled *bool `yaml:"enabled"`
+	// AcceptInbound 是否接受 A2A 入站（Registry expose_to_peers）；nil/false → 不暴露。
+	// 取代旧 agent.role=compliance/ops 推导。
+	AcceptInbound    *bool `yaml:"accept_inbound"`
 	InboxPollSeconds int   `yaml:"inbox_poll_seconds"`
 	InboxWaitSeconds int   `yaml:"inbox_wait_seconds"`
 }

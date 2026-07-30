@@ -138,6 +138,7 @@ function managePayload() {
   return {
     ...form.manage,
     a2a_enabled: form.manage.a2a_enabled ?? false,
+    accept_inbound: form.manage.accept_inbound ?? false,
   };
 }
 
@@ -321,8 +322,12 @@ onMounted(async () => {
         </label>
       </div>
       <label class="settings-toggle">
+        <input v-model="form.manage.accept_inbound" type="checkbox" :disabled="manageFieldsDisabled" />
+        <span>接受 A2A 入站（可被其他 Node 发现并调用）</span>
+      </label>
+      <label class="settings-toggle">
         <input v-model="form.manage.a2a_enabled" type="checkbox" :disabled="manageFieldsDisabled" />
-        <span>启用 A2A Inbox</span>
+        <span>启用 A2A Inbox 轮询</span>
       </label>
     </section>
   </ConfigPanelShell>

@@ -73,12 +73,13 @@ func TestConfigManageA2AInboxWait(t *testing.T) {
 
 func TestConfigManageA2AEnabled(t *testing.T) {
 	disabled := false
+	on := true
 	cfg := &config.Config{
-		Agent: config.AgentConfig{Role: "compliance"},
 		Manage: config.ManageConfig{
 			Enabled: true,
 			A2A: config.ManageA2AConfig{
-				Enabled: &disabled,
+				AcceptInbound: &on,
+				Enabled:       &disabled,
 			},
 		},
 	}
@@ -86,15 +87,18 @@ func TestConfigManageA2AEnabled(t *testing.T) {
 		t.Fatal("expected a2a disabled when explicitly false")
 	}
 	cfg2 := &config.Config{
-		Agent:  config.AgentConfig{Role: "compliance"},
-		Manage: config.ManageConfig{Enabled: true},
+		Manage: config.ManageConfig{
+			Enabled: true,
+			A2A:     config.ManageA2AConfig{AcceptInbound: &on},
+		},
 	}
 	if !cfg2.ManageA2AEnabled() {
-		t.Fatal("expected a2a enabled by default for compliance role")
+		t.Fatal("expected a2a enabled when accept_inbound")
 	}
-	cfg2.Agent.Role = "ops"
+	off := false
+	cfg2.Manage.A2A.AcceptInbound = &off
 	if cfg2.ManageA2AEnabled() {
-		t.Fatal("expected a2a disabled by default for ops role")
+		t.Fatal("expected a2a disabled when accept_inbound=false")
 	}
 	cfg3 := &config.Config{
 		Manage: config.ManageConfig{Enabled: false},

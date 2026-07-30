@@ -10,7 +10,14 @@ async function saveGeneral() {
   const { fs_root: _ignored, ...runtime } = form.runtime;
   await save({
     runtime,
-    agent: { ...form.agent },
+    agent: {
+      name: form.agent.name || "",
+      description: form.agent.description || "",
+    },
+    placement: {
+      allow_peer_create: !!form.placement.allow_peer_create,
+      allow_screen_view: !!form.placement.allow_screen_view,
+    },
   });
 }
 
@@ -68,21 +75,31 @@ onMounted(load);
     </section>
 
     <section class="settings-section">
-      <h2 class="settings-section__title">Agent 信息</h2>
+      <h2 class="settings-section__title">Node 信息</h2>
+      <p class="settings-section__desc">注册到 Manage 后的展示名（peers / Console）；与具体 Agent 实例名称无关。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
-          <span class="settings-field__label">名称</span>
-          <input v-model="form.agent.name" class="settings-field__input" type="text" autocomplete="off" />
+          <span class="settings-field__label">Node 名称</span>
+          <input v-model="form.agent.name" class="settings-field__input" type="text" placeholder="空则显示 Node ID" autocomplete="off" />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">简介</span>
           <input v-model="form.agent.description" class="settings-field__input" type="text" autocomplete="off" />
         </label>
-        <label class="settings-field">
-          <span class="settings-field__label">角色</span>
-          <input v-model="form.agent.role" class="settings-field__input" type="text" placeholder="可选" autocomplete="off" />
-        </label>
       </div>
+    </section>
+
+    <section class="settings-section">
+      <h2 class="settings-section__title">远端 Placement</h2>
+      <p class="settings-section__desc">控制同组其他 Node 能否在本机创建 Agent、以及是否允许屏幕旁观。</p>
+      <label class="settings-toggle">
+        <input v-model="form.placement.allow_peer_create" type="checkbox" />
+        <span>允许被其他 Node 创建 Agent</span>
+      </label>
+      <label class="settings-toggle">
+        <input v-model="form.placement.allow_screen_view" type="checkbox" />
+        <span>允许远程屏幕旁观</span>
+      </label>
     </section>
   </ConfigPanelShell>
 </template>

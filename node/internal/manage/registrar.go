@@ -277,7 +277,7 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 				"login_name":       host.LoginName,
 			},
 			"display":   placementDisplayMeta(),
-			"placement": placementCapabilityMeta(),
+			"placement": placementCapabilityMeta(r.cfg),
 		},
 	}
 }
@@ -324,10 +324,16 @@ func placementDisplayMeta() map[string]any {
 	return out
 }
 
-func placementCapabilityMeta() map[string]any {
+func placementCapabilityMeta(cfg *config.Config) map[string]any {
+	allowCreate := true
+	allowScreen := true
+	if cfg != nil {
+		allowCreate = cfg.AllowPeerCreateEffective()
+		allowScreen = cfg.AllowScreenViewEffective()
+	}
 	return map[string]any{
-		"allow_peer_create": true,
-		"allow_screen_view": true,
+		"allow_peer_create": allowCreate,
+		"allow_screen_view": allowScreen,
 	}
 }
 

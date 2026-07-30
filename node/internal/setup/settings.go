@@ -42,6 +42,7 @@ type ManageSettings struct {
 	Team                        string `json:"team"`
 	RegistrationBaseURL         string `json:"registration_base_url"`
 	A2AEnabled                  bool   `json:"a2a_enabled"`
+	AcceptInbound               bool   `json:"accept_inbound"`
 	NodeToken                   string `json:"node_token"`
 	RegistrationIntervalSeconds int    `json:"registration_interval_seconds"`
 	RegistrationTTLSeconds      int    `json:"registration_ttl_seconds"`
@@ -86,11 +87,17 @@ type RuntimeSettings struct {
 	LogLevel string `json:"log_level"`
 }
 
-// AgentSettings Agent 身份（config agent 块）。
+// AgentSettings Node 展示身份（历史字段名 agent；UI 称 Node 名称）。
 type AgentSettings struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Role        string `json:"role"`
+	Role        string `json:"role,omitempty"` // deprecated，可选元数据
+}
+
+// PlacementSettings Placement 能力（是否允许被远端创建 / 旁观屏幕）。
+type PlacementSettings struct {
+	AllowPeerCreate bool `json:"allow_peer_create"`
+	AllowScreenView bool `json:"allow_screen_view"`
 }
 
 // ChildAgentsLimits 子 Agent 配额（enabled 见 features）。
@@ -159,6 +166,7 @@ type SettingsView struct {
 	Compression     CompressionSettings `json:"compression"`
 	Runtime         RuntimeSettings     `json:"runtime"`
 	Agent           AgentSettings       `json:"agent"`
+	Placement       PlacementSettings   `json:"placement"`
 	ChildAgents     ChildAgentsLimits   `json:"child_agents"`
 	Browser         BrowserSettings     `json:"browser"`
 	WeCom           WeComSettings       `json:"wecom"`
@@ -174,6 +182,7 @@ type SettingsPatch struct {
 	Compression *CompressionSettings `json:"compression,omitempty"`
 	Runtime     *RuntimeSettings     `json:"runtime,omitempty"`
 	Agent       *AgentSettings       `json:"agent,omitempty"`
+	Placement   *PlacementSettings   `json:"placement,omitempty"`
 	ChildAgents *ChildAgentsLimits   `json:"child_agents,omitempty"`
 	Browser     *BrowserSettings     `json:"browser,omitempty"`
 	WeCom       *WeComSettings       `json:"wecom,omitempty"`
@@ -211,6 +220,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			Team:                        cfg.Manage.Registration.Team,
 			RegistrationBaseURL:         cfg.Manage.Registration.BaseURL,
 			A2AEnabled:                  a2aEnabled,
+			AcceptInbound:               cfg.ExposeToPeersEffective(),
 			NodeToken:                   cfg.Manage.NodeToken,
 			RegistrationIntervalSeconds: cfg.Manage.Registration.IntervalSeconds,
 			RegistrationTTLSeconds:      cfg.Manage.Registration.TTLSeconds,
@@ -245,6 +255,10 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			Name:        cfg.Agent.Name,
 			Description: cfg.Agent.Description,
 			Role:        cfg.Agent.Role,
+		},
+		Placement: PlacementSettings{
+			AllowPeerCreate: cfg.AllowPeerCreateEffective(),
+			AllowScreenView: cfg.AllowScreenViewEffective(),
 		},
 		ChildAgents: ChildAgentsLimits{
 			DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
@@ -316,6 +330,9 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 	}
 	if patch.Agent != nil {
 		applyAgentPatch(&out, *patch.Agent)
+	}
+	if patch.Placement != nil {
+		applyPlacementPatch(&out, *patch.Placement)
 	}
 	if patch.ChildAgents != nil {
 		if err := applyChildAgentsPatch(&out, *patch.ChildAgents); err != nil {
@@ -507,6 +524,7 @@ func applyManagePatch(cfg *config.Config, p ManageSettings) error {
 	cfg.Manage.Registration.BaseURL = strings.TrimSpace(p.RegistrationBaseURL)
 	a2a := p.A2AEnabled
 	cfg.Manage.A2A.Enabled = boolPtr(a2a)
+	cfg.Manage.A2A.AcceptInbound = boolPtr(p.AcceptInbound)
 	return nil
 }
 
@@ -575,7 +593,13 @@ func applyRuntimePatch(cfg *config.Config, p RuntimeSettings) error {
 func applyAgentPatch(cfg *config.Config, p AgentSettings) {
 	cfg.Agent.Name = strings.TrimSpace(p.Name)
 	cfg.Agent.Description = strings.TrimSpace(p.Description)
+	// Role 仅作可选元数据；空 PATCH 字段不强制清空已有值以外——与 name/desc 同策略整段覆盖
 	cfg.Agent.Role = strings.TrimSpace(p.Role)
+}
+
+func applyPlacementPatch(cfg *config.Config, p PlacementSettings) {
+	cfg.Placement.AllowPeerCreate = boolPtr(p.AllowPeerCreate)
+	cfg.Placement.AllowScreenView = boolPtr(p.AllowScreenView)
 }
 
 func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {

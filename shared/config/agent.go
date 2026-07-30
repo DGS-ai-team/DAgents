@@ -2,16 +2,17 @@ package config
 
 import "strings"
 
-// AgentConfig 描述 Agent 对外身份与 A2A 角色（原 agent-card.json 内容）。
+// AgentConfig 描述本 Node 在 Manage Registry 上的展示身份（历史字段名 agent，语义已是 Node）。
+// Role 仅为可选元数据，不再驱动 expose / inbox / handler。
 type AgentConfig struct {
-	Name         string         `yaml:"name"`
+	Name         string         `yaml:"name"` // Node 展示名（Manage Console / peers）
 	Description  string         `yaml:"description"`
-	Role         string         `yaml:"role"`
+	Role         string         `yaml:"role"` // deprecated: 勿用于门控；保留写入 card.metadata
 	Capabilities []string       `yaml:"capabilities"`
 	Metadata     map[string]any `yaml:"metadata"`
 }
 
-// AgentRole 返回 A2A 角色（如 compliance、ops）；空串表示非 A2A 专用角色。
+// AgentRole 返回可选元数据角色字符串；空串表示未设。不再表示 A2A 被调/调用档。
 func (c *Config) AgentRole() string {
 	if c == nil {
 		return ""
@@ -19,7 +20,12 @@ func (c *Config) AgentRole() string {
 	return strings.TrimSpace(c.Agent.Role)
 }
 
-// AgentDisplayName 返回 Manage 展示名；空则回退 node_id。
+// NodeDisplayName 返回 Manage / peers 展示名；空则回退 node_id。
+func (c *Config) NodeDisplayName() string {
+	return c.AgentDisplayName()
+}
+
+// AgentDisplayName 同 NodeDisplayName（兼容旧调用点）。
 func (c *Config) AgentDisplayName() string {
 	if c == nil {
 		return ""
@@ -50,12 +56,3 @@ func (c *Config) RegistrationCapabilities() []string {
 	return append([]string(nil), c.Agent.Capabilities...)
 }
 
-// ExposeToPeersEffective 是否可作为 A2A 被调目标（role=compliance）。
-func (c *Config) ExposeToPeersEffective() bool {
-	return ExposeToPeersForRole(c.AgentRole(), nil)
-}
-
-// ManageA2AEnabled 是否启动 inbox long poll（须 manage.enabled；默认随 role=compliance）。
-func (c *Config) ManageA2AEnabled() bool {
-	return c.ManageA2AInboxEnabledForRole(c.AgentRole())
-}
