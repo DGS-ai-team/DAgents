@@ -1,7 +1,7 @@
 # 工作组协作 + Node↔Manage 长连接（设计）
 
 > **分支**：`cursor/remote-agent-placement-7e3e`  
-> **状态**：**产品方向冻结；D0.5 契约已冻结** — 见 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（§19 Verdict A）；下一动作 **D0.9** 停 Placement 入口 → **D1** Manage 基座骨架  
+> **状态**：**产品方向冻结；D0.5 契约已冻结** — 见 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（§19 Verdict A）；**D0.9 已完成**（停 Placement 新产品入口）；**D1 Manage 基座骨架进行中**（`manage/workgroup/`）  
 > **规范优先级**：§0–§13（产品正文）> [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（已冻结）> §15/§16（历史审核）  
 > **推荐方向**：Manage 云 Leader（Supervisor）+ Timeline/RunHistory；成员资产绑组存 Manage；Node 仅工具调用；权限按 `node_id`；**无远程 Agent / Placement**
 
@@ -473,14 +473,14 @@ MemberSpec {
 |-------|------|
 | **D0** | 产品方向冻结（本文 §0） |
 | **D0.5** | 契约：[`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md) + `fixtures/workgroup-d05/` — **已冻结（§19 A）** |
-| **D0.9** | 停写 Placement/sandbox 新产品入口（先不物理删） |
-| **D1** | Manage 基座：组存储、ACL、Grant、MemberSpec、turn kernel 骨架 |
+| **D0.9** | 停写 Placement 新产品入口（Node API/UI 返回 `placement_deprecated`）— **已完成** |
+| **D1** | Manage 基座：组存储、ACL、Grant、MemberSpec、turn kernel 骨架 — **进行中（`manage/workgroup/`）** |
 | **D2** | Node WorkgroupWorker：强身份 WS、幂等 provision、tool manifest、command journal |
 | **D3** | 纵向闭环：单组单成员单工具 + 信息型 HITL + 掉线/`indeterminate` + 重启 |
 | **D4** | 多 Node 订阅与最小 UI 分栏 |
 | **D5** | 拆除 Placement/Edge/remote stub/沙箱产品路径；拆旧 A2A |
 
-**D0.5 未完成前禁止**并行实现 runtime 主路径。
+**D0.5 未完成前禁止**并行实现 runtime 主路径（已满足）。D1 只做 Manage 落库与门禁骨架，**不含** Node WS / 真实工具执行。
 
 契约测试门槛（摘要）：tool-call 投影合法、伪装/保留名、并发 human 全序、provision 冲突、command 各阶段断线、非幂等不双执行、HITL CAS 与错误 Node 批准、fencing、WS replay、成员不可经本地 Agent API、Timeline 不泄 raw tool、旧 Placement 不能驱动成员。
 

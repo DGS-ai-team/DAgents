@@ -38,6 +38,8 @@ from manage.plugins.store import PluginPackageStore
 from manage.skills.routes import build_skills_router
 from manage.skills.store import SkillPackageStore
 from manage.storage.sqlite import SQLiteDatabase
+from manage.workgroup.routes import build_workgroup_router
+from manage.workgroup.store import WorkGroupStore
 
 _CONSOLE_DIR = Path(__file__).resolve().parent / "console" / "static"
 
@@ -96,11 +98,13 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     externaltools_store = ExternalToolPackageStore(db=db if db.enabled else None)
     plugins_store = PluginPackageStore(db=db if db.enabled else None)
     cases_store = CaseExampleStore(db=db if db.enabled else None)
+    workgroup_store = WorkGroupStore(db=db if db.enabled else None)
 
     app.include_router(build_registry_router(store, audit))
     app.include_router(build_control_router(store, audit))
     app.include_router(build_edge_router(store, edge_sessions, audit))
     app.include_router(build_a2a_router(store, a2a_store, audit))
+    app.include_router(build_workgroup_router(workgroup_store, audit))
     app.include_router(build_admin_router(store, a2a_store))
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))
@@ -146,6 +150,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.state.plugins_store = plugins_store
     app.state.cases_store = cases_store
     app.state.releases_store = releases_store
+    app.state.workgroup_store = workgroup_store
     return app
 
 
