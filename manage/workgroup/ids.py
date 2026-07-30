@@ -44,3 +44,7 @@ def event_id() -> str:
 
 def hitl_id() -> str:
     return new_id("ht")
+
+
+def envelope_id() -> str:
+    return new_id("en")

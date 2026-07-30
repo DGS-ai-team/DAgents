@@ -78,3 +78,26 @@ class HITLCreateRequest(BaseModel):
 
 class HITLResolveRequest(BaseModel):
     resolution: dict[str, Any] = Field(default_factory=dict)
+
+
+_EN = r"^en_[0-9a-z]{26}$"
+
+
+class WSEnvelope(BaseModel):
+    envelope_id: str = Field(pattern=_EN)
+    schema_version: Literal["0.5.0"] = "0.5.0"
+    type: str
+    workgroup_id: str | None = None
+    delivery_seq: int = Field(ge=1)
+    connection_generation: int | None = Field(default=None, ge=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    sent_at: str
+
+
+class SessionHello(BaseModel):
+    node_id: str = Field(min_length=1)
+    last_ack_delivery_seq: int = Field(ge=0, default=0)
+
+
+class ResumeOffer(BaseModel):
+    last_ack_delivery_seq: int = Field(ge=0)

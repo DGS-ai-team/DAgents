@@ -658,6 +658,13 @@ class WorkGroupStore:
                 return [f for f in frames if not f.acked]
             return frames
 
+    def frames_after(self, workgroup_id: str, *, after_seq: int) -> list[OutboxFrame]:
+        """resume gap-fill：返回 delivery_seq > after_seq 的帧（含已 ack，按序重放）。"""
+        with self._lock:
+            self._ensure_loaded()
+            frames = list(self._outbox.get(workgroup_id) or [])
+            return [f for f in frames if f.delivery_seq > after_seq]
+
     def ack_outbox(self, workgroup_id: str, delivery_seq: int) -> OutboxFrame:
         with self._lock:
             self._ensure_loaded()

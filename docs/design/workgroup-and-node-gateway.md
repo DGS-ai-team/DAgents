@@ -476,7 +476,7 @@ MemberSpec {
 | **D0.9** | 停写 Placement 新产品入口（Node API/UI 返回 `placement_deprecated`）— **已完成** |
 | **D1** | Manage 基座：组存储、ACL、Grant、MemberSpec、turn kernel 骨架 — **已完成（`manage/workgroup/`）** |
 | **D2** | Node WorkgroupWorker：强身份 WS、幂等 provision、tool manifest、command journal — **已完成（`node/internal/workgroup/`）** |
-| **D3** | 纵向闭环：单组单成员单工具 + 信息型 HITL + 掉线/`indeterminate` + 重启 — **进行中（Manage Timeline/Outbox/HITL + Node `read_file`）** |
+| **D3** | 纵向闭环：单组单成员单工具 + 信息型 HITL + 掉线/`indeterminate` + 重启 — **进行中（Timeline/HITL/`read_file` + WS hub/dispatch 骨架；生产长连接待续）** |
 | **D4** | 多 Node 订阅与最小 UI 分栏 |
 | **D5** | 拆除 Placement/Edge/remote stub/沙箱产品路径；拆旧 A2A |
 

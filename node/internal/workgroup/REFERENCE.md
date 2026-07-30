@@ -23,4 +23,4 @@
 
 - Manage 真实 WS 服务端 + outbox
 - Node WS dial / resume gap-fill
-- 真实 Manage WS 拨号（D3 用可注入 bridge / 单测 FakeNodeBridge）
+- 生产级 Manage WebSocket 长连接 Dial（已有 `ws_hub` + `DispatchEnvelope` / `ClientSession`）

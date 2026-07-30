@@ -34,9 +34,15 @@ class NodeBridge(Protocol):
 class VerticalLoop:
     """Manage 侧 D3 纵向闭环编排器。"""
 
-    def __init__(self, store: WorkGroupStore, bridge: NodeBridge | None = None) -> None:
+    def __init__(
+        self,
+        store: WorkGroupStore,
+        bridge: NodeBridge | None = None,
+        hub: Any | None = None,
+    ) -> None:
         self.store = store
         self.bridge = bridge
+        self.hub = hub  # WorkgroupWSHub；有连接时优先推送 outbox
 
     # --- Timeline / Outbox / HITL 委托 store ---
 
@@ -65,6 +71,8 @@ class VerticalLoop:
                 "tool_allow_names": list(grant.tool_allow_names),
             },
         )
+        if self.hub is not None:
+            self.hub.deliver_outbox_frame(frame, home_node_id=grant.home_node_id)
         if self.bridge is not None:
             result = self.bridge.provision(frame.payload)
             self.complete_provision(
@@ -151,6 +159,8 @@ class VerticalLoop:
         }
         frame = self.store.enqueue_outbox(workgroup_id, type="tool.command", payload=command)
         self.store.set_assign_status(assign.assign_id, "running")
+        if self.hub is not None:
+            self.hub.deliver_outbox_frame(frame, home_node_id=grant.home_node_id)
 
         tool_result: dict[str, Any] | None = None
         if self.bridge is not None:

@@ -17,7 +17,8 @@ Node 侧工作组成员执行器。权威契约见：
 | 会话 `connection_generation` / resume cursor | ✅ 内存骨架 |
 | `read_file` 工作区执行 | ✅ D3 |
 | accepted 重启恢复（不双执行） | ✅ D3 |
-| 真实 Manage WS 拨号 | ⏳ 后续 |
+| Manage WS hub + Node envelope dispatch | ✅ D3 骨架（`ws_hub` / `DispatchEnvelope`） |
+| 生产级 WebSocket 长连接拨号 | ⏳ 后续 |
 
 ## 明确不做
 
