@@ -12,7 +12,7 @@
 |----|------|
 | 跨 Agent | **必须**经工作组 |
 | Leader | 隐式云 Agent；Manage 云 LLM；**仅编排工具**（Supervisor） |
-| `@` | 同步交接；成员产出写入总消息列表并标身份 |
+| `@` | 同步交接；成员产出写入总消息列表；身份用消息 **`name`**（同 date/human） |
 | 成员 | **只新建**；一成员一工作组；工具在 **home Node 真实环境** |
 | 沙箱 | **产品废弃**；隔离 = 单独机器部署 Node |
 | 解散 | **归档**组会话 / Leader / 成员实例（可查不可当活跃用） |
@@ -245,4 +245,78 @@ Manage → `tool.execute` 到 home Node；该 Node 校验 `agent_id.home == self
 | 本文 | **现行** |
 | `remote-agent-placement.md` | **superseded**（远程改走工作组） |
 | `node-centric-architecture-cleanup.md` | 继续：去 ops/compliance、去沙箱、拆旧 A2A |
-| `agent-instance-model.md` | 修订：无远程 origin 主路径；沙箱废弃 |
+---
+
+## 14. 方案审查补丁（2026-07-30）
+
+自检后需 **补充/纠正** 如下（纳入冻结范围）。
+
+### 14.1 纠正：`name` 与 tool 消息冲突
+
+现网 **`role=tool` 的 `name` = 工具函数名**（给 API / UI），不能改成 `member:xxx`。
+
+| 消息 | `name` 用法 |
+|------|-------------|
+| `user` | 说话人身份：`human_name` / `date` / `workgroup_assign` … |
+| `assistant` | 说话人身份：`leader` 或 `member:{display_name}`（见下） |
+| `tool` | **保持工具名**；归属靠前后文 / `assign_id`（UI 侧栏展示成员） |
+
+### 14.2 纠正：部分模型忽略 `assistant.name`
+
+DeepSeek/OpenAI 对 **`user.name`** 支持明确；**`assistant.name` 可能被忽略**。
+
+- 写入总列表时仍带 `name`（UI/审计用）  
+- **拼给另一个模型看时**：若实测丢 `assistant.name`，对该条做投影——例如改为 `user` + 同名 `name`，或 content 前缀 `[member:代码员]`（实现期二选一，优先保 `name` 投影）  
+- **`user`/`date` 路径不变**
+
+### 14.3 补充：成员回合的 LLM 也在 Manage
+
+| 回合 | LLM | 工具 |
+|------|-----|------|
+| Leader | Manage 云 LLM | 仅编排工具（Manage 内） |
+| Member（被 `@`） | **同样在 Manage** 跑 loop | `tool.execute` → **home Node** |
+
+成员 **不是** 在 home Node 上开独聊 turn；Node 只做工具 Worker。成员可用组级云 LLM，或建成员时指定 Manage 清单中的档案（v1 可先共用组绑定档案）。
+
+### 14.4 补充：工作组成员不出现在「本地 Agents」列表
+
+- 成员实例在 home Node 上有运行时/工作区，但 **UI 本地 Agents 分栏不展示**（或标记为系统/不可点）  
+- **禁止**对成员做独聊 `POST /v1/messages`（返回明确错误）  
+- 只通过工作组 `@` 驱动，避免双脑  
+
+### 14.5 补充：无 Placement 后如何「看见」其他 Node
+
+废除 peers 放置后，建 ACL / 选 `home_node_id` 依赖：
+
+- Manage **Registry 在线 Node 目录**（WS announce 维持 online）  
+- Console / 建组 UI：`GET` 在线 `node_id` 列表 → 加入 ACL → 再在其上新建成员  
+
+不靠 `discovery_group` 交集。
+
+### 14.6 补充：Manage → Node 建成员协议
+
+替代旧 Control Placement，WS（或受控 HTTP）例如：
+
+`workgroup.member.provision` → home Node 创建绑定工作组的运行时（模板/工具组/工作区）→ 返回 `agent_id`  
+`workgroup.member.archive` → 解散时归档  
+
+### 14.7 补充：并发与 HITL
+
+- Leader 同步 `@` 进行中：新 human 消息 **入队**，当前交接结束后再喂 Leader（不打断 `@`）  
+- HITL：多订阅 Node 可见；**先 resolve 者生效**，其余得「已处理」  
+- home Node 掉线：进行中的 tool/assign **失败回写总列表**，Leader 可再计划  
+
+### 14.8 补充：`accept_inbound` / 旧 A2A
+
+- Node 级 `agent_invoke` / inbox **废除**  
+- 机器只要连上 Manage WS 且被 ACL/建成员引用即可；不必再保留「A2A 入站」产品开关（实现期可删或忽略）  
+- 本地 **child/临时 Agent** 仍为 Node 内能力，与工作组无关  
+
+### 14.9 仍可实现期再定（非阻塞冻结）
+
+| 项 | 建议默认 |
+|----|----------|
+| 成员 Manage LLM 档案 | v1 与组合用同一云档案 |
+| `assistant.name` 投影策略 | 先写入；测提供方后再定是否改 user 投影 |
+| ACL 外纯执行 Node | v1 不做；home 必须在 ACL 内 |
+| 归档数据保留多久 | 实现期配置，默认不自动物理删 |
