@@ -35,11 +35,12 @@ Web UI：通用设置 → Node 信息 + 远端 Placement；连接设置 → 接�
 
 ### P2 模型演进
 
-8. **A2A 目标仍是 node 级 id**，无法 `node_id + agent_id` 指到实例（见 `agent-instance-model.md` Phase 5）。  
-9. **`expose_to_peers` 可下沉到实例**（Node 总闸 + 实例细闸）；当前保持 Node 级 `accept_inbound` 即可。  
-10. **Inbox turn 未绑定用户 Agent 实例**（仍开临时 inbox session）。  
-11. **案例 `cases/a2a-manage-docker` 的 a=compliance / b=ops** → 改为双方 Node + 显式 `accept_inbound`。  
-12. **`manage.registration.team` vs `discovery_group`** 文档易混；team 非 Placement 分组。
+8. **A2A 目标仍是 node 级 id** → 由 [工作组设计](./workgroup-and-node-gateway.md) 升到实例级成员；旧 `agent_invoke` 废弃。  
+9. **Inbox long poll / task 短 poll / HTTP 心跳** → 由 Node↔Manage **WebSocket** 替代（见同文 §6）。  
+10. **`expose_to_peers` / accept_inbound** → 协作改为「是否在工作组」；入站总闸可保留给 WS 投递。  
+11. **Inbox turn 临时 session** → 改为投递到目标 **主** Agent runtime。  
+12. **案例 `cases/a2a-manage-docker` 的 a=compliance / b=ops** → 改为工作组 + 显式开关。  
+13. **`manage.registration.team` vs `discovery_group`** → discovery_group **仅** Placement；工作组是独立目录。
 
 ### 建议保留
 
