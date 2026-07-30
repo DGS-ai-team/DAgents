@@ -35,11 +35,11 @@ Web UI：通用设置 → Node 信息 + 远端 Placement；连接设置 → 接�
 
 ### P2 模型演进
 
-8. **A2A / 工作组** → 见 [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)（Manage Supervisor + 总列表 + ACL）。  
-9. **产品内沙箱（Docker/remote）** → **废弃**；隔离 = 单独部署 Node。  
-10. **权限** → 统一 Principal + WorkGroup ACL；`discovery_group` 仅 Placement。  
-11. **InboxPoller / 临时 a2a session / Node 级 invoke** → 删除。  
-12. **案例 compliance/ops** → 改为工作组模型。
+8. **跨机器** → **仅工作组**（[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)）；**拆除** Placement / 远程 Agent / Edge。  
+9. **权限** → ACL 以 **`node_id`** 为单位；解散 **归档**。  
+10. **产品内沙箱** → 废弃；隔离 = 独立 Node。  
+11. **InboxPoller / Node 级 invoke / ops·compliance** → 删除。  
+12. **`discovery_group`** → 不再支撑 Placement；可降级或删除产品依赖。
 
 ### 建议保留
 

@@ -7,9 +7,9 @@
 | 文件 | 说明 |
 |------|------|
 | **[agent-instance-model.md](./agent-instance-model.md)** | **主设计**：单 Node 多 Agent、模板、沙箱、`node_id`、Web UI-only、实施阶段 |
-| **[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)** | **工作组 + Node↔Manage WebSocket**：Leader/@ 派任务、browse leader、替代 A2A 轮询 |
-| [remote-agent-placement.md](./remote-agent-placement.md) | 远端 Placement / Edge / 屏幕旁观 |
-| [node-centric-architecture-cleanup.md](./node-centric-architecture-cleanup.md) | ops/compliance 等过时逻辑清理 |
+| **[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)** | **现行**：工作组 + 云 Leader + WS；权限按 node_id；无远程 Agent |
+| [remote-agent-placement.md](./remote-agent-placement.md) | **SUPERSEDED**：原 Placement/Edge，改走工作组 |
+| [node-centric-architecture-cleanup.md](./node-centric-architecture-cleanup.md) | 过时逻辑清理（含拆 Placement/沙箱） |
 
 内置 Agent 模板样例：`packaging/agent-templates/`。
 

@@ -1,5 +1,17 @@
 # 远端 Agent Placement 与观测面（设计）
 
+> **状态**：**SUPERSEDED（2026-07-30）** — 远程协作改为 **仅工作组**，不再做远程 Agent / Placement / Edge 代理聊天。  
+> **现行设计**：[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)  
+> **分支**：`cursor/remote-agent-placement-7e3e`  
+>
+> 下文保留作历史记录，实现时按工作组设计 **拆除** Placement/Edge/remote stub 产品路径。
+
+---
+
+# （以下为历史正文，勿再当作现行需求）
+
+# 远端 Agent Placement 与观测面（设计）
+
 > **状态**：P5 Registry `node_id` 身份落地（窄范围；2026-07-29）  
 > **分支**：`cursor/remote-agent-placement-7e3e`（大动作独立演进；**不合入 dev 直至评审通过**）  
 > **范围**：Node + Web UI + Manage 控制面；屏幕旁观 MVP；**不含**键鼠控制、**不含** `sandbox.backend=remote`

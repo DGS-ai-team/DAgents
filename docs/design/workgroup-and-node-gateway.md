@@ -1,8 +1,8 @@
 # 工作组协作 + Node↔Manage 长连接（设计）
 
 > **分支**：`cursor/remote-agent-placement-7e3e`  
-> **状态**：**主体冻结**（可开工实现）  
-> **推荐方向**：Manage 云 Leader（Supervisor）+ 总消息列表；Node 真实环境执行；权限按 `node_id`；**无远程 Agent / Placement**
+> **状态**：**产品方向冻结；文档未闭环**——第二轮 GPT 审核 **Verdict B**：须先改文档再开 D0.5（见 §16）；**禁止**并行实现 Manage turn kernel / Node Worker / WS 主路径  
+> **推荐方向**：Manage 云 Leader（Supervisor）+ Timeline/RunHistory；Node 真实环境工具 Worker；权限按 `node_id`；**无远程 Agent / Placement**
 
 ---
 
@@ -318,6 +318,172 @@ DeepSeek/OpenAI 对 **`user.name`** 支持明确；**`assistant.name` 可能被�
 | 项 | 建议默认 |
 |----|----------|
 | 成员 Manage LLM 档案 | v1 与组合用同一云档案 |
-| `assistant.name` 投影策略 | 先写入；测提供方后再定是否改 user 投影 |
 | ACL 外纯执行 Node | v1 不做；home 必须在 ACL 内 |
 | 归档数据保留多久 | 实现期配置，默认不自动物理删 |
+
+---
+
+## 15. GPT 架构审核纪要（2026-07-30）
+
+外部评审结论：**可做，但须先补契约（D0.5），不可直接全面开工。** 风险：**高**（非法 LLM 序列、跨 Node 执行授权、掉线重复副作用）。
+
+### 15.1 致命（开工前必须写入契约）
+
+1. **总列表 ≠ 原样 LLM history**  
+   含 `tool_calls` / `tool_call_id` 的回合不能与「进模型只看 role+name+content」混为一谈。  
+   **冻结为双层：**  
+   - `WorkGroupTimeline`：公开总列表（订阅/审计/UI）  
+   - `ActorRunHistory`：Leader/Member **各自**合法连续工具历史  
+   - `ContextProjector`：把 timeline 投影进对方上下文，同时保留本 actor 的 tool 配对  
+
+2. **Manage 必须自备 turn kernel**  
+   现网编排在 Go Node；Manage 仅有 LLM 配置不够。须明确：Manage 负责 LLM/投影/assign/HITL 状态；Node 只报 **完整 tool JSON Schema** + 执行真实工具；伪工具（ask_user、remember、skills、temporary-agent 等）禁用或迁 Manage。  
+
+3. **home Node 须显式 opt-in**  
+   仅「owner 把 node 加进 ACL」不够（等价可在他机跑 Shell）。须：强绑定 `node_id` 凭据、目标 Node **接受成为执行机/邀请**、本地 policy 最终否决、command 带 member/assign/lease。  
+
+4. **掉线 ≠ 可安全重做**  
+   改为 `command_id` 幂等 + 状态 `queued→accepted→running→succeeded|failed|indeterminate`；仅未 accepted 可自动重投；已 accepted 结果未知标 `indeterminate`，禁止自动重做非幂等工具。  
+
+### 15.2 重要补充
+
+- Timeline 条目要有稳定 id/seq/assign_id/turn_id；`name` 只服务模型身份，不是主键  
+- 协议身份用稳定 id（如 `member_<短id>`），展示名另存 `display_name_at_send`；防 `human_name` 伪装保留名（leader/date/…）  
+- provision：Manage 预发 `member_id+provision_id`，Node 幂等 PUT  
+- 归档：Manage 先权威失效，再异步回收离线 Node  
+- 全组 v1 **最多一个 active assign**；HITL first-resolve 用 DB CAS  
+- 成员 Worker **独立 runtime/表**，封锁全部本地 Agent API（不止禁 messages）  
+- Registry 在线 Node 列表也要授权可见，不能默认可枚举全网  
+
+### 15.3 开工顺序（取代原 §12 的直开）
+
+1. **D0.5** 冻结契约：schema、状态机、Timeline/RunHistory/Projector、WS 信封、威胁模型、旧数据处置  
+2. 停写 Placement/sandbox 新产品入口（先不物理删）  
+3. Manage 基座（组存储、ACL、turn kernel）  
+4. Node Worker（强身份 WS、幂等 provision、tool schema、command journal）  
+5. 纵向闭环：单组单成员单工具 + HITL + 掉线/重启测  
+6. 多 Node 订阅与 UI  
+7. D5 拆旧 Placement/Edge/A2A/沙箱  
+
+**契约测试门槛（至少）：** tool-call 投影合法、并发 human 排序、掉线不重复副作用、HITL CAS、Manage 重启恢复 pending assign。
+
+---
+
+## 16. 第二轮 GPT 架构审核（2026-07-30）
+
+外部评审（gpt-5.6-sol-xhigh）对全文（含 §14/§15）再审。
+
+**总评：** 产品方向总体自洽，**不必重新冻结方向**。上一轮四个致命项判断正确，但多数仍停在 §15，未回流 §4–§12；部分正文甚至与 §15 **直接冲突**。另发现身份编码、HITL 授权分层、Timeline 可见性、fencing、现网 Node runtime 拆分等开工级缺口。可继续修订文档，**不可据此并行实现**。
+
+**Verdict：B** —— 先改文档，再开 D0.5；不回到产品方向冻结（C）。
+
+### 16.1 已吸收项
+
+| 项 | 位置 | 说明 |
+|----|------|------|
+| `tool.name` = 工具函数名 | §14.1 | 勿用成员身份覆盖 |
+| 成员 LLM 在 Manage；Node 只做工具 | §14.3 | 与冻结方向一致 |
+| 成员禁独聊 / 不进本地列表 | §14.4；§15.2 要求独立 runtime | 方向对，实现边界仍弱 |
+| Registry + provision | §14.5–§14.6 | 方向对，幂等/opt-in 未闭环 |
+| human 入队 / HITL first-resolve / 掉线 | §14.7 | 有覆盖，语义不完整 |
+| Timeline / RunHistory / Projector / turn kernel / opt-in / journal | §15 | 正确补丁，多数未进正文 |
+
+### 16.2 上一轮致命项：仍未回流正文
+
+1. **Timeline ≠ LLM history**  
+   §4 仍 `Transcript[]`；§6 仍「唯一 Transcript」「进模型只依赖 role+name+content」——与 §15.1 三层模型冲突。须把 `WorkGroupTimeline` + `ActorRunHistory` + `ContextProjector` 提升到 §4，删除「Transcript 原样喂模型」。
+
+2. **Manage turn kernel**  
+   §5 只有 Leader 工具列表；无模型调用、合法序列、HITL 暂停、恢复检查点。§12 D1–D4 仍像可在无 kernel 契约下分阶段开工。须先定义 actor run / turn / tool-call / 恢复状态。
+
+3. **home Node 显式 opt-in**  
+   §8.3 / §14.5 仍是「加 ACL → 建成员」。ACL = 组聊授权 ≠ 允许他机在本机跑 Shell。须：目标 Node 对 `MemberSpec`/工具范围/工作区的 **ExecutionGrant 接受** + 本地 policy 最终否决。
+
+4. **掉线幂等 / indeterminate**  
+   §14.7「掉线即失败」与 §15.1 `indeterminate` 冲突。`accepted` = Node 已持久化 journal；同 `command_id` 可查状态，**禁止**自动重做非幂等；payload hash 不一致拒绝。
+
+§15.2 的稳定 id、幂等 provision、单 active assign、独立 Worker 表、Registry 可见性限制亦未进正文。
+
+### 16.3 新发现致命项
+
+1. **`message.name` 编码不可移植**  
+   `member:{display_name}` / 任意 `human_name`（中文、空格、冒号）不具备 provider 可移植性，且可伪装 `leader`/`date`。冻结「身份用 name」可保留，但须改为 provider-safe 稳定名（如 `member_<id>` / `human_<id>`）；展示名另存 `display_name_at_send`。权限/审计依赖服务端盖章的 `actor_id` / `actor_kind` / `authenticated_node_id`，**不依赖 name**。
+
+2. **HITL 混「答问」与「批本机副作用」**  
+   collaborator 可答 `ask_user`，**不能**默认批准他机 Shell/FS/Browser。须分：  
+   - `information_request`：ACL 内可 first-resolve  
+   - `execution_approval`：仅 home Node（或其显式委托）  
+   - 其他类型单独定义 authority  
+
+3. **Timeline 可见性未定义**  
+   把 Member raw tool args/results 放进总列表会向所有 ACL Node 泄露文件/Shell/凭据。「成员产出进总列表」= 最终产出 + 必要状态事件；原始工具轨迹留在私有 `ActorRunHistory`；审计视图独立、可脱敏。
+
+4. **缺权威状态机与 fencing**  
+   ACL 撤销 / 归档 / 重连 / 重复 WS / 延迟 command 并发时，仅「home=self 且租约有效」不够。须 `lease_epoch` / `member_generation` 等 fencing；归档或撤权后旧 command 一律拒绝；已跑副作用走取消/`indeterminate`，不能伪装未发生。
+
+5. **现网 Node runtime 不能直接降级为 `tool.execute`**  
+   `turn.Orchestrator` 混 LLM/policy/HITL/skills/hooks/media；`tools.Registry` 混真实工具与伪工具。须独立 `WorkgroupWorker` + 存储，不被 `GET /v1/agents` 枚举。D0.5 明确：何物留 Manage、何物在 Node、background/media/skills 在 v1 禁用或另协议。
+
+6. **HITL resolve 未闭合到合法工具历史**  
+   DB CAS 只保证一答案获胜，不保证 actor 恢复正确。须绑定 `actor_run_id` / `turn_id` / `tool_call_id`；获胜答案**恰好一次**写入对应 history 的合法 tool result 再恢复 run。
+
+### 16.4 高风险项（摘要）
+
+- `ContextProjector` 须冻结 actor-relative 规则，非「实测二选一」  
+- Member 最终产出 vs Leader assign tool result 去重 / watermark  
+- 并行 tool_calls：全配齐或拒绝修复  
+- 完整 tool manifest（JSON Schema、revision、side-effect class、policy revision）  
+- WS ≠ 事实存储：单调 `seq`、outbox、`client_message_id`、resume、gap-fill  
+- 同 `node_id` 重复连接需 `connection_generation` fencing  
+- Manage 开放模式 / 共享 token 不得继承到工作组 WS；fail-closed + 独立 Node 凭据  
+- 不可变 `MemberSpec` 快照 digest；Node 接受的是快照，不是笼统「某组」  
+- 末位 owner、撤 home ACL、归档忙碌成员、LLM 档案删除等边界规则  
+- 持久订阅偏好 ≠ 当前 WS；ACL 撤销须立即停增量与历史读  
+
+### 16.5 D0.5 增补清单（开工门槛）
+
+§15.3 一句式清单不够。D0.5 至少冻结：
+
+**A. Schema：** `WorkGroup` / `WorkGroupACL` / `NodeExecutionGrant` / `MemberSpec` / `WorkerBinding` / `ProvisionCommand` / `TimelineEvent` / `ActorRun` / `RunMessage` / `Assign` / `ToolCommand` / `ToolResult` / `HITLRequest` / `HITLResolution` / `Subscription` / `ResumeCursor` / `WSEnvelope` / `CommandAck` / `ArchiveTombstone`；统一定义各 id、`seq`、`lease_epoch`、`connection_generation`、`payload_hash`、`tool_catalog_revision` 等。
+
+**B. 状态机：** WorkGroup `active→archiving→archived`；Grant `invited→accepted→revoked`；Member `requested→provisioning→ready→busy→archived|error`；Assign / ToolCommand / HITL 全状态（含 `indeterminate`）；v1 每组最多一个 active assign；`seq` 在 Manage DB 事务内分配；fencing 顺序。
+
+**C. Turn kernel + 投影：** LLM profile 快照；Manage-native vs Node-executable 白名单；配对/并行/循环上限；watermark、token budget；provider 固定投影；崩溃恢复。
+
+**D. 工具与恢复：** 完整 manifest；`accepted` 仅 journal 持久化后；重复 `command_id` 返回既有状态；hash 冲突拒绝；错误类型表；Manage outbox + Node journal；丢失 → `indeterminate`；归档 tombstone 对账。
+
+**E. 安全：** 每 Node 独立凭据；Registry 授权过滤；Grant 绑 MemberSpec digest；本地 policy 最终否决；reserved name；information HITL vs execution approval 矩阵；Timeline / RunHistory / 审计可见性分层。
+
+**F. 契约测试（在 §15 基础上加）：** golden projection（OpenAI/DeepSeek）；伪装/同名；provision 冲突；command 各阶段断线注入；非幂等 handler 证明不双执行；archive/revoke fencing；HITL 双 resolve / 错误 Node 批准；Manage/Node 各持久化边界重启；WS replay/gap/双连；catalog drift；成员不可经任何本地 Agent API；Timeline 默认不泄 raw tool；旧 Placement/A2A 不能驱动成员。
+
+### 16.6 方向冻结一致性
+
+| 冻结表述 | 是否矛盾 | 前提 |
+|----------|----------|------|
+| 成员不进本地列表 × 工具在 home 执行 | 否 | 独立 WorkerBinding，非普通 Agent + UI 过滤 |
+| Leader 仅编排 × 成员 LLM 在 Manage | 否 | Leader=Manage-native；Member 工具=Node-executable |
+| `message.name` × 工具函数名 | 否 | 按 role 分域；协议身份另有稳定字段 |
+| 无产品沙箱 | 否 | 独立机器 + ExecutionGrant + 本地 policy |
+
+**须限定的冻结表述：**「ACL 内可参与 HITL」≠「可批准他机执行副作用」。
+
+**正文冲突（改文档优先）：** §6 单 Transcript vs §15 双层；§8 ACL 落执行体 vs opt-in；§14.7 掉线即失败 vs `indeterminate`；display name 入 `name` vs 稳定协议身份；§14.4「隐藏」vs 独立表封锁 API；§12 分期 vs §15.3 顺序。
+
+### 16.7 建议改文档章节（D0.5 前）
+
+1. **§0**：规范优先级；把 D0.5、opt-in、双层历史、`indeterminate`、HITL 分层写入决策表  
+2. **§4**：`Timeline + ActorRunHistory + ContextProjector + WorkerBinding` 替换单 Transcript  
+3. **§6**：改名「Timeline、运行历史与身份投影」；稳定 provider-safe `name`  
+4. **§7**：补 WorkGroup / Member / Assign / HITL / 归档状态机  
+5. **§8**：分开 ACL、ExecutionGrant、本地 policy、approval authority、fencing  
+6. **§9–§10**：持久订阅、cursor、WS 信封、outbox/inbox、重复连接  
+7. **§12**：以 §15.3 重写；D0.5 前禁止并行实现 runtime 主路径  
+8. **§14**：已确认补丁回写正文；删「二选一」「WS 或 HTTP」等未冻结表达  
+9. **§15**：保留历史审核；**不再**承担规范定义（本轮后以 §16 + 修订正文为准）  
+10. **附录**：JSON Schema、状态转换表、权限矩阵、故障恢复矩阵、跨 Go/Python golden fixtures  
+
+### 16.8 最短可行纵向闭环
+
+**应包含：** 两 Node（A owner、B home）；A 建组 + B ACL + B 对 MemberSpec **显式 Grant**；幂等 provision（不出现在本地 Agents API）；human → Leader 同步 assign；Member 在 Manage 跑 loop + B 上单一同步工具（建议首工具 `read_file`）；产出进 Timeline + Leader tool result 合法配对；一次 information HITL 双端 CAS；WS/Manage/Node 在 accepted 前后重启测 `indeterminate`；归档 fencing；最小 UI（订阅/Timeline/发言/HITL），ACL 配置可先走 API/Console。
+
+**刻意不包含：** 多成员/并行 assign；background/流式工具/Browser/媒体/远程桌面；skills/remember/child/A2A；已有 Agent 入组；按人 ACL；raw tool 广播；Placement 物理删除；自动重做未知副作用。
