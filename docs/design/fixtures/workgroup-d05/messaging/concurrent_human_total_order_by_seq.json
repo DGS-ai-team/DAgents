@@ -1,0 +1,22 @@
+{
+  "test": "concurrent_human_total_order_by_seq",
+  "scenario": "two nodes post human during idle leader",
+  "inputs": [
+    {
+      "node_id": "node-A",
+      "client_message_id": "cm_a",
+      "text": "A"
+    },
+    {
+      "node_id": "node-C",
+      "client_message_id": "cm_c",
+      "text": "C"
+    }
+  ],
+  "expected": {
+    "distinct_seq": true,
+    "total_order": "by_seq_asc",
+    "both_visible_on_timeline": true
+  },
+  "during_active_assign": "queue_until_assign_terminal_then_feed_leader_in_seq_order"
+}

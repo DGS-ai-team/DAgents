@@ -1,0 +1,13 @@
+{
+  "test": "projection_openai_legal_sequence",
+  "subcase": "parallel_tool_calls",
+  "assistant_tool_calls": [
+    "call_a",
+    "call_b"
+  ],
+  "partial_results": [
+    "call_a"
+  ],
+  "expected": "reject_or_wait_until_both",
+  "forbidden": "continue_llm_with_only_one_tool_result"
+}

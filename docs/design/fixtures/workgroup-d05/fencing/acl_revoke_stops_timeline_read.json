@@ -1,0 +1,13 @@
+{
+  "test": "acl_revoke_stops_timeline_read",
+  "node_id": "node-C",
+  "before": {
+    "can_read_timeline": true,
+    "desired_subscription": true
+  },
+  "after_remove_from_acl": {
+    "incremental_events": "stop",
+    "history_read": "403_or_empty_authorized",
+    "ws_fanout": "unsubscribe"
+  }
+}

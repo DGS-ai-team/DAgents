@@ -1,10 +1,26 @@
 {
-  "name": "reject_display_name_as_protocol_name",
-  "description": "Chinese display names and colon forms must not become message.name",
+  "test": "protocol_name_rejects_unicode_display",
+  "allowed_pattern": "^[a-z][a-z0-9_]{0,63}$",
   "cases": [
-    {"display_name": "代码员", "forbidden_protocol_names": ["代码员", "member:代码员"]},
-    {"display_name": "Bob Smith", "forbidden_protocol_names": ["Bob Smith", "member:Bob Smith"]},
-    {"human_input": "leader", "expected": "must not authenticate as reserved leader; use human_<id>"}
-  ],
-  "allowed_pattern": "^[a-z][a-z0-9_]{0,63}$"
+    {
+      "display_name": "代码员",
+      "expected_protocol_name": "member_mb_01",
+      "forbidden": [
+        "代码员",
+        "member:代码员"
+      ]
+    },
+    {
+      "display_name": "Bob Smith",
+      "expected_protocol_name": "member_mb_02",
+      "forbidden": [
+        "Bob Smith",
+        "member:Bob Smith"
+      ]
+    },
+    {
+      "display_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": "reject_or_truncate_per_impl_but_must_match_pattern"
+    }
+  ]
 }

@@ -1,0 +1,14 @@
+{
+  "test": "archive_fencing_rejects_stale_epoch",
+  "before": {
+    "lease_epoch": 3,
+    "command_id": "cmd_old"
+  },
+  "archive": {
+    "lease_epoch_at_archive": 4
+  },
+  "delayed_command": {
+    "lease_epoch": 3,
+    "expected_code": "fencing_rejected"
+  }
+}

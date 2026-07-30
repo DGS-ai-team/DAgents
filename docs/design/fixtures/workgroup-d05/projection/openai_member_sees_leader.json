@@ -1,8 +1,15 @@
 {
-  "name": "openai_member_sees_leader",
-  "description": "Other actor final text projects as user + provider-safe name; member run history keeps own tool pairs",
+  "test": "projection_openai_legal_sequence",
+  "provider": "openai",
   "actor_id": "mb_01",
-  "timeline_events": [
+  "own_run_history": [],
+  "timeline_others": [
+    {
+      "type": "human_message",
+      "actor_id": "hu_a",
+      "protocol_name": "human_hu_a",
+      "content_text": "开始"
+    },
     {
       "type": "actor_final_text",
       "actor_id": "leader",
@@ -10,12 +17,20 @@
       "content_text": "请读取 README"
     }
   ],
-  "own_run_tail": [],
-  "expected_projection": [
+  "expected_messages": [
+    {
+      "role": "user",
+      "name": "human_hu_a",
+      "content": "开始"
+    },
     {
       "role": "user",
       "name": "leader",
       "content": "请读取 README"
     }
+  ],
+  "invariants": [
+    "no_tool_calls_from_timeline",
+    "provider_safe_names_only"
   ]
 }

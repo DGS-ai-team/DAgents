@@ -1,0 +1,9 @@
+{
+  "test": "tool_cmd_no_reexec_after_accept",
+  "command_id": "cmd_2",
+  "after_accepted": {
+    "resend_same_id": "return_journal_status_only",
+    "new_command_id_same_args": "forbidden_auto_reexec_for_non_idempotent"
+  },
+  "side_effect_class": "fs_write"
+}

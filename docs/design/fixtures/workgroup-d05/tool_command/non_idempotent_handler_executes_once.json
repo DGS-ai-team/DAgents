@@ -1,0 +1,10 @@
+{
+  "test": "non_idempotent_handler_executes_once",
+  "handler": "test_counter_increment",
+  "side_effect_class": "fs_write",
+  "inject": [
+    "ws_drop_after_journal",
+    "manage_retry_same_cmd"
+  ],
+  "assert_counter": 1
+}

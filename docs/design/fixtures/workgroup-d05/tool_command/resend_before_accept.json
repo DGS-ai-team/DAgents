@@ -1,0 +1,21 @@
+{
+  "test": "tool_cmd_resend_before_accept",
+  "command_id": "cmd_1",
+  "payload_hash": "sha256:p1",
+  "steps": [
+    {
+      "action": "manage_send",
+      "status_before_ack": "queued"
+    },
+    {
+      "action": "disconnect"
+    },
+    {
+      "action": "resend_same_command_id_and_hash"
+    },
+    {
+      "action": "node_accepts_once",
+      "expected_executions": 1
+    }
+  ]
+}

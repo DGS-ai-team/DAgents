@@ -1,0 +1,9 @@
+{
+  "test": "member_local_messages_api_rejected",
+  "calls": [
+    "POST /v1/agents/mb_01/messages",
+    "POST /v1/messages with agent_id=mb_01"
+  ],
+  "expected_code": "not_authorized_or_not_found",
+  "message": "workgroup members are not local chat agents"
+}

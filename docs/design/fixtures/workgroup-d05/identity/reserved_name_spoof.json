@@ -1,7 +1,20 @@
 {
-  "name": "reserved_name_spoof",
-  "description": "Clients cannot stamp reserved protocol names",
-  "reserved": ["leader", "date", "workgroup_assign", "human"],
-  "attack": {"claimed_name": "leader", "authenticated_node_id": "node-A"},
-  "expected": "server stamps human_<id> or rejects; actor_kind=human; never actor_kind=leader"
+  "test": "reserved_name_spoof_rejected",
+  "reserved": [
+    "leader",
+    "date",
+    "workgroup_assign",
+    "human"
+  ],
+  "attack": {
+    "client_claimed_name": "leader",
+    "authenticated_node_id": "node-A",
+    "actor_kind_claimed": "leader"
+  },
+  "expected": {
+    "actor_kind": "human",
+    "protocol_name_prefix": "human_",
+    "never_actor_kind": "leader",
+    "http_or_ws": "accept_message_but_restamp_or_reject_400"
+  }
 }

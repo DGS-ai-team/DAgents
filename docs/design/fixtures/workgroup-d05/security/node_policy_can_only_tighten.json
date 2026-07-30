@@ -1,0 +1,18 @@
+{
+  "test": "node_policy_can_only_tighten",
+  "spec_policy_ceiling": {
+    "bash": "ask"
+  },
+  "node_local_policy": {
+    "bash": "deny"
+  },
+  "expected_effective": {
+    "bash": "deny"
+  },
+  "illegal": {
+    "node_local_policy": {
+      "bash": "allow"
+    },
+    "when_ceiling": "ask"
+  }
+}

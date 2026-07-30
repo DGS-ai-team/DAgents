@@ -1,0 +1,16 @@
+{
+  "test": "timeline_excludes_raw_tool_payload",
+  "tool_result_content": "SECRET_KEY=abc\nfile contents…",
+  "timeline_events_after": [
+    {
+      "type": "actor_final_text",
+      "may_contain_secret": false
+    },
+    {
+      "type": "assign_finished",
+      "may_contain_raw_tool": false
+    }
+  ],
+  "run_history_may_contain_tool_body": true,
+  "audit_view": "separate_redactable_optional"
+}

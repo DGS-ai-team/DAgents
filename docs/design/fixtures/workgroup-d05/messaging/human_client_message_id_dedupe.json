@@ -1,0 +1,21 @@
+{
+  "test": "human_client_message_id_dedupe",
+  "first": {
+    "client_message_id": "cm_1",
+    "node_id": "node-A",
+    "text": "hello",
+    "expected_seq": 10
+  },
+  "retry": {
+    "client_message_id": "cm_1",
+    "node_id": "node-A",
+    "text": "hello",
+    "expected": "same_event_id_same_seq_no_dup"
+  },
+  "conflict": {
+    "client_message_id": "cm_1",
+    "node_id": "node-A",
+    "text": "HELLO DIFFERENT",
+    "expected_code": "payload_conflict_or_duplicate_client_message"
+  }
+}

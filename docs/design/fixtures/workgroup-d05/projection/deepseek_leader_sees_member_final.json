@@ -1,0 +1,55 @@
+{
+  "test": "projection_deepseek_assistant_name_fallback",
+  "provider": "deepseek",
+  "actor_id": "leader",
+  "note": "assistant.name may be ignored; projector uses user+name for other actors",
+  "own_run_history": [
+    {
+      "role": "assistant",
+      "name": "leader",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_as1",
+          "type": "function",
+          "function": {
+            "name": "assign_workgroup_task",
+            "arguments": "{\"member_id\":\"mb_01\",\"instruction\":\"读 README\"}"
+          }
+        }
+      ]
+    }
+  ],
+  "pending_tool_results": [],
+  "timeline_member_final": {
+    "type": "actor_final_text",
+    "assign_id": "as_1",
+    "actor_id": "mb_01",
+    "protocol_name": "member_mb_01",
+    "content_text": "README 标题是 X"
+  },
+  "expected_after_assign_completes": [
+    {
+      "role": "assistant",
+      "name": "leader",
+      "tool_calls": [
+        {
+          "id": "call_as1",
+          "function": {
+            "name": "assign_workgroup_task"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_as1",
+      "name": "assign_workgroup_task",
+      "content": "README 标题是 X"
+    }
+  ],
+  "dedupe": {
+    "assign_id": "as_1",
+    "do_not_also_insert_user_from_timeline": true
+  }
+}

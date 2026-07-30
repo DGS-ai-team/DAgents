@@ -1,0 +1,12 @@
+{
+  "test": "empty_allow_names_means_no_tools",
+  "member_spec_tools": {
+    "allow_names": []
+  },
+  "node_default_groups": [
+    "fs",
+    "bash"
+  ],
+  "expected_manifest_for_member": [],
+  "forbidden": "fallback_to_node_enabled_groups"
+}

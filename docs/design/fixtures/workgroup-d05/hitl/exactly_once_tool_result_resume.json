@@ -1,0 +1,13 @@
+{
+  "test": "hitl_exactly_once_tool_result_resume",
+  "binds": [
+    "actor_run_id",
+    "turn_id",
+    "tool_call_id"
+  ],
+  "on_success": [
+    "write_exactly_one_tool_result_into_run_history",
+    "resume_same_run_once"
+  ],
+  "on_duplicate_resolve": "already_resolved_no_second_tool_result"
+}

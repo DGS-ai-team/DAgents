@@ -1,0 +1,14 @@
+{
+  "test": "provision_retry_same_id_ok",
+  "provision_id": "pv_1",
+  "member_spec_digest": "sha256:aaa",
+  "first": {
+    "result": "ready",
+    "worker_binding_created": true
+  },
+  "retry_same": {
+    "result": "ready",
+    "idempotent": true,
+    "no_second_workspace": true
+  }
+}

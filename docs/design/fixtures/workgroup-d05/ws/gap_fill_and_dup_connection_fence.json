@@ -1,0 +1,24 @@
+{
+  "test": "ws_gap_fill_and_dup_connection_fence",
+  "node_id": "node-A",
+  "conn1": {
+    "connection_generation": 5,
+    "last_ack_seq": 40
+  },
+  "disconnect": true,
+  "missed_seqs": [
+    41,
+    42
+  ],
+  "conn2": {
+    "connection_generation": 6,
+    "resume_from": 40,
+    "expect_replay": [
+      41,
+      42
+    ]
+  },
+  "conn1_late_frame": {
+    "expected": "fencing_rejected_or_drop"
+  }
+}

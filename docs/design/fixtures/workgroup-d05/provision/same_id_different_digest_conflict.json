@@ -1,0 +1,8 @@
+{
+  "test": "provision_same_id_different_digest_conflict",
+  "provision_id": "pv_1",
+  "first_digest": "sha256:aaa",
+  "second_digest": "sha256:bbb",
+  "expected_code": "payload_conflict",
+  "worker_unchanged": true
+}

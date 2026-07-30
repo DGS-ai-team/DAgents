@@ -1,0 +1,8 @@
+{
+  "test": "member_not_in_local_agents_api",
+  "after_provision_on_home": true,
+  "GET /v1/agents": {
+    "must_not_contain_member_id": "mb_01"
+  },
+  "storage": "WorkerBinding_not_agents_table"
+}

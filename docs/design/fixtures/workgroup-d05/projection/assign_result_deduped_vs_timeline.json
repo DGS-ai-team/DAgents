@@ -1,0 +1,18 @@
+{
+  "test": "assign_result_deduped_vs_timeline",
+  "leader_context_sources": [
+    {
+      "kind": "tool_result",
+      "assign_id": "as_1",
+      "content": "done"
+    },
+    {
+      "kind": "timeline",
+      "type": "actor_final_text",
+      "assign_id": "as_1",
+      "content_text": "done"
+    }
+  ],
+  "expected_leader_messages_containing_done": 1,
+  "rule": "prefer_tool_result_pairing; skip timeline duplicate for same assign_id"
+}

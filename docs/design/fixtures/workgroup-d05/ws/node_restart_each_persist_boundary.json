@@ -1,0 +1,13 @@
+{
+  "test": "node_restart_each_persist_boundary",
+  "boundaries": [
+    "before_journal",
+    "after_accepted",
+    "after_running_result_persisted"
+  ],
+  "expectations": {
+    "before_journal": "may_accept_same_cmd_once",
+    "after_accepted": "no_reexec_query_status",
+    "after_result": "return_terminal_status"
+  }
+}

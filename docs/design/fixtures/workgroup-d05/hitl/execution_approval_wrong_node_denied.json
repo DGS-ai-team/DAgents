@@ -1,0 +1,7 @@
+{
+  "test": "hitl_execution_approval_wrong_node_denied",
+  "kind": "execution_approval",
+  "home_node_id": "node-B",
+  "attempt_from": "node-A",
+  "expected_code": "not_authorized"
+}

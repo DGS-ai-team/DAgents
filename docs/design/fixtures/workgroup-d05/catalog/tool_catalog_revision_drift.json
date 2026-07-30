@@ -1,0 +1,8 @@
+{
+  "test": "tool_catalog_revision_drift",
+  "command_built_against": "rev_1",
+  "node_current": "rev_2",
+  "schema_changed_for": "read_file",
+  "expected_code": "catalog_drift",
+  "forbidden": "execute_with_stale_schema"
+}

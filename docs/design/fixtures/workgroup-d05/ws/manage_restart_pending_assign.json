@@ -1,0 +1,9 @@
+{
+  "test": "manage_restart_pending_assign",
+  "assign_status_before_crash": "running",
+  "after_restart": {
+    "assign_reloaded": true,
+    "no_duplicate_assign": true,
+    "tool_outbox_reconciled": true
+  }
+}
