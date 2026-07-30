@@ -19,7 +19,7 @@
 | 交互入口 | **仅 Web UI**（`/ui/`）；移除 Go/Python TUI 与 CLI 对话模式 |
 | 创建方式 | **Agent 模板** → 实例化配置 → 新建 Agent |
 | 名称 | **`display_name`** 可在 UI 修改，不影响 `agent_id` |
-| 沙箱 | 每 Agent 可配置 **`sandbox.enabled`**，隔离工作区与工具能力 |
+| 沙箱 | **废弃产品路径**：真实环境执行；隔离用独立 Node/机器（见 [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)） |
 | Manage / A2A | 后续 Phase；本阶段 Node 侧预留字段，不保证与现网 Manage 兼容 |
 | 数据 | **不保证**旧 session 数据迁移；可清空 `sessions.db` 重建 |
 | Placement（进行中） | 同组远端 Node 放置 Agent + 屏幕旁观：见 [remote-agent-placement.md](./remote-agent-placement.md)；将重构 Manage 控制面 / Edge Tunnel，**不等于** `sandbox.backend=remote` |
