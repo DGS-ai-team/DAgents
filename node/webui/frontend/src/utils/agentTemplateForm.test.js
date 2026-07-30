@@ -104,16 +104,15 @@ describe("agentTemplateForm", () => {
     expect(payload.sandbox.allow_bash).toBe(true);
   });
 
-  it("includes placement when homeNodeId set", () => {
+  it("does not include placement fields", () => {
     const payload = buildCreateAgentPayload({
       templateId: "general",
       displayName: "远端",
       llmProfileId: "qwen-plus",
       maxToolLoops: 16,
       toolGroups: ["fs"],
-      homeNodeId: "node-home-01",
     });
-    expect(payload.placement).toEqual({ home_node_id: "node-home-01" });
+    expect(payload.placement).toBeUndefined();
   });
 
   it("builds patch payload without template_id", () => {

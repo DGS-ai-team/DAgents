@@ -191,6 +191,42 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 	}
 }
 
+func TestAgentsAPI_CreateWithPlacementDeprecated(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	body, _ := json.Marshal(map[string]any{
+		"display_name": "远端入口",
+		"defaults":     map[string]any{},
+		"placement": map[string]any{
+			"home_node_id": "node-other",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusGone {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	errObj, _ := out["error"].(map[string]any)
+	if errObj["code"] != "placement_deprecated" {
+		t.Fatalf("error=%#v", errObj)
+	}
+}
+
 func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
 	cfg.ApplyDefaults()

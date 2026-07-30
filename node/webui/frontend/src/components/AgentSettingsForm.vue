@@ -189,7 +189,6 @@ watch(
       <template v-if="draft.sandboxEnabled">
         <p class="agent-settings-hint">
           沙箱模式：本机 Docker（Linux 容器）。需安装 Docker；命令行在容器内执行。镜像见 packaging/sandbox。
-          在同组其他 Node 上创建 Agent 属于 Placement，与沙箱无关（见 docs/design/remote-agent-placement.md）。
         </p>
         <label class="agent-settings-field">
           <span>镜像</span>

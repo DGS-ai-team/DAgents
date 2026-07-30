@@ -58,8 +58,6 @@ export function emptyAgentDraft() {
     promptCustomMd: "",
     promptLongTermEntries: [],
     promptGlobalLongTermEntries: [],
-    // 空 = 本机；非空 = 同组 peer 的 home_node_id
-    homeNodeId: "",
   };
 }
 
@@ -307,8 +305,6 @@ export function buildCreateAgentPayload(draft) {
   };
   const tpl = String(draft.templateId || "").trim();
   if (tpl && tpl !== BLANK_TEMPLATE_ID) payload.template_id = tpl;
-  const home = String(draft.homeNodeId || "").trim();
-  if (home) payload.placement = { home_node_id: home };
   return payload;
 }
 

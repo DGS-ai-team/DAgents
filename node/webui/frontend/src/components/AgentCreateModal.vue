@@ -17,8 +17,6 @@ const error = ref("");
 const showAdvanced = ref(false);
 const templates = ref([]);
 const llmProfiles = ref([]);
-const peerNodes = ref([]);
-const peersLoading = ref(false);
 const draft = reactive(emptyAgentDraft());
 
 const selectedTemplate = computed(
@@ -26,26 +24,10 @@ const selectedTemplate = computed(
 );
 const isBlankDraft = computed(() => draft.templateId === BLANK_TEMPLATE_ID || !draft.templateId);
 const llmProfileIds = computed(() => llmProfiles.value.map((p) => p.id).filter(Boolean));
-const creatablePeers = computed(() =>
-  (peerNodes.value || []).filter((n) => n.allow_peer_create !== false && String(n.status || "") === "online"),
-);
-
 async function loadTemplates() {
   loading.value = true;
-  peersLoading.value = true;
-  peerNodes.value = [];
   error.value = "";
   showAdvanced.value = false;
-  // peers 不阻塞弹窗：Manage 慢/不可达时仍可先建本机 Agent。
-  const peersPromise = api
-    .listPeerNodes()
-    .catch(() => ({ nodes: [] }))
-    .then((peersRes) => {
-      peerNodes.value = Array.isArray(peersRes?.nodes) ? peersRes.nodes : [];
-    })
-    .finally(() => {
-      peersLoading.value = false;
-    });
   try {
     const [tplRes, setup] = await Promise.all([
       api.listAgentTemplates(),
@@ -74,14 +56,6 @@ async function loadTemplates() {
   } finally {
     loading.value = false;
   }
-  await peersPromise;
-}
-
-function peerLabel(node) {
-  const name = String(node?.name || node?.node_id || "").trim();
-  const os = String(node?.host?.display_label || node?.host?.os_kind || "").trim();
-  if (os) return `${name} · ${os}`;
-  return name;
 }
 
 function applyTemplate(template) {
@@ -198,26 +172,9 @@ watch(
               </button>
             </div>
 
-            <div class="agent-create-modal__placement">
-              <label class="agent-create-field">
-                <span class="agent-create-field__label">运行位置</span>
-                <select v-model="draft.homeNodeId" class="agent-create-field__select" :disabled="saving || peersLoading">
-                  <option value="">本机 Node</option>
-                  <option
-                    v-for="n in creatablePeers"
-                    :key="n.node_id"
-                    :value="n.node_id"
-                  >{{ peerLabel(n) }}</option>
-                </select>
-              </label>
-              <p v-if="peersLoading" class="agent-create-hint">正在加载同组 Node…</p>
-              <p v-else-if="draft.homeNodeId" class="agent-create-hint">
-                将在所选 Node 上创建实例，本机仅保留引用；删除时会同步销毁远端实例。
-              </p>
-              <p v-else-if="!creatablePeers.length" class="agent-create-hint">
-                未发现可创建的同组在线 Node（需启用 Manage 并分配 discovery_group）。
-              </p>
-            </div>
+            <p class="agent-create-hint">
+              远程 Placement 入口已下线；新建 Agent 仅在本机 Node 创建。跨机器协作请使用工作组。
+            </p>
 
             <AgentSettingsForm
               :draft="draft"
@@ -439,30 +396,4 @@ watch(
   margin-left: auto;
 }
 
-.agent-create-modal__placement {
-  margin-bottom: 14px;
-}
-
-.agent-create-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.agent-create-field__label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-}
-
-.agent-create-field__select {
-  width: 100%;
-  max-width: 420px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-muted);
-  color: inherit;
-  font-size: 13px;
-}
 </style>

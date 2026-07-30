@@ -152,7 +152,9 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		homeNodeID = strings.TrimSpace(req.Placement.HomeNodeID)
 	}
 	if homeNodeID != "" && homeNodeID != s.cfgNodeID() {
-		s.handleCreateRemoteAgent(w, r, req, homeNodeID)
+		writeAPIError(w, http.StatusGone, "placement_deprecated", "远程 Placement 创建已下线：跨机器协作请使用工作组", map[string]any{
+			"home_node_id": homeNodeID,
+		})
 		return
 	}
 
@@ -256,70 +258,11 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateRemoteAgent(w http.ResponseWriter, r *http.Request, req createAgentRequest, homeNodeID string) {
-	if s.control == nil || s.cfg == nil || !s.cfg.Manage.Enabled {
-		writeAPIError(w, http.StatusBadRequest, "manage_required", "远端 Placement 需要启用 Manage", nil)
-		return
-	}
-	name := strings.TrimSpace(req.DisplayName)
-	if name == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "display_name is required", nil)
-		return
-	}
-	body := map[string]any{
-		"owner_node_id": s.cfg.NodeID,
-		"display_name":  name,
-		"template_id":   strings.TrimSpace(req.TemplateID),
-		"defaults":      req.Defaults,
-	}
-	if req.Defaults == nil {
-		body["defaults"] = map[string]any{}
-	}
-	if req.Sandbox != nil {
-		// 将 sandboxPatch 转 map：直接用前端同结构的 JSON 再解
-		raw, _ := json.Marshal(req.Sandbox)
-		var sandboxMap map[string]any
-		_ = json.Unmarshal(raw, &sandboxMap)
-		body["sandbox"] = sandboxMap
-	}
-	created, err := s.control.CreateOnHome(r.Context(), homeNodeID, body)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "peer_create_failed", err.Error(), nil)
-		return
-	}
-	snap := created.ConfigSnapshot
-	if len(snap) == 0 {
-		snap = json.RawMessage(`{}`)
-	}
-	host := created.Host
-	if len(host) == 0 {
-		host = json.RawMessage(`{}`)
-	}
-	placement := encodeJSONRaw(placementPayload{
-		Role:        "owner_ref",
-		OwnerNodeID: s.cfg.NodeID,
-		HomeNodeID:  created.HomeNodeID,
-		Status:      "online",
+	_ = r
+	_ = req
+	writeAPIError(w, http.StatusGone, "placement_deprecated", "远程 Placement 创建已下线：跨机器协作请使用工作组", map[string]any{
+		"home_node_id": strings.TrimSpace(homeNodeID),
 	})
-	now := time.Now().UTC()
-	rec := store.AgentRecord{
-		AgentID:        created.AgentID,
-		DisplayName:    firstNonEmpty(created.DisplayName, name),
-		TemplateID:     strings.TrimSpace(req.TemplateID),
-		Origin:         store.AgentOriginRemote,
-		SandboxEnabled: created.SandboxEnabled,
-		SandboxBackend: firstNonEmpty(created.SandboxBackend, "process"),
-		ConfigSnapshot: snap,
-		PlacementJSON:  placement,
-		HostJSON:       host,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
-	if err := s.agents.Save(r.Context(), rec); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "agent_save_failed", err.Error(), nil)
-		return
-	}
-	// 远端引用不装本地 runtime
-	writeJSON(w, http.StatusOK, agentViewFromRecord(rec))
 }
 
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
