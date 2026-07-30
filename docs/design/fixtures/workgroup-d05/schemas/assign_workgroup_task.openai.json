@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "assign_workgroup_task",
-    "description": "Synchronously assign work to one workgroup member. Blocks until member assign reaches a terminal status.",
+    "description": "Synchronously assign work to one workgroup member. Blocks until assign reaches a terminal status.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
@@ -22,66 +22,71 @@
         },
         "context_hint": {
           "type": "string",
-          "maxLength": 2000,
-          "description": "Optional short hint; Timeline snapshot still applied by projector"
+          "maxLength": 2000
         }
       }
     }
   },
   "result_schema": {
-    "type": "object",
-    "additionalProperties": false,
-    "required": [
-      "assign_id",
-      "status",
-      "summary",
-      "error_code"
-    ],
-    "properties": {
-      "assign_id": {
-        "type": "string",
-        "pattern": "^as_[0-9a-z]{26}$"
-      },
-      "status": {
-        "enum": [
-          "succeeded",
-          "failed",
-          "canceled",
-          "indeterminate"
-        ]
-      },
-      "summary": {
-        "type": "string",
-        "description": "Member final text on success; error explanation otherwise"
-      },
-      "error_code": {
-        "oneOf": [
-          {
-            "type": "null"
-          },
-          {
+    "oneOf": [
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assign_id",
+          "status",
+          "summary",
+          "error_code"
+        ],
+        "properties": {
+          "assign_id": {
             "type": "string",
-            "enum": [
-              "not_authorized",
-              "fencing_rejected",
-              "digest_mismatch",
-              "catalog_drift",
-              "payload_conflict",
-              "already_resolved",
-              "policy_denied",
-              "schema_mismatch",
-              "result_too_large",
-              "indeterminate",
-              "workgroup_archived",
-              "duplicate_client_message",
-              "cursor_too_old",
-              "not_found",
-              "conflict"
-            ]
+            "pattern": "^as_[0-9a-z]{26}$"
+          },
+          "status": {
+            "const": "succeeded"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "error_code": {
+            "type": "null"
           }
-        ]
+        }
+      },
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assign_id",
+          "status",
+          "summary",
+          "error_code"
+        ],
+        "properties": {
+          "assign_id": {
+            "type": "string",
+            "pattern": "^as_[0-9a-z]{26}$"
+          },
+          "status": {
+            "enum": [
+              "failed",
+              "canceled",
+              "indeterminate"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "error_code": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       }
-    }
+    ]
   },
   "invariants": [
     "exactly_one_active_assign_per_workgroup_v1",

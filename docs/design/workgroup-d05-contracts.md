@@ -44,7 +44,7 @@
 
 | 字段 | 格式 | 说明 |
 |------|------|------|
-| `workgroup_id` | `wg_<ulid/uuid>` | Manage 生成 |
+| `workgroup_id` | `wg_<ulid>`（**仅** 26 位小写 ulid，不用 UUID） | Manage 生成 |
 | `member_id` | `mb_<ulid>` | Manage 预发；≠ 本地 `agt-…` |
 | `actor_id` | `leader` \| `mb_<ulid>` \| `hu_<ulid>` \| 字面 `human` | 服务端盖章；Timeline 说话人 |
 | `human_id` | `hu_<ulid>` | 同 Node 多展示名时稳定 id；未辨识可用字面 `human` 作为 actor_id |
@@ -101,8 +101,8 @@
 
 ## 2. Schema（逻辑 JSON）
 
-> 字段名冻结。未知字段：安全相关键（`*_hash`/`digest`/`lease_*`/`generation`）→ **拒绝**；其余可忽略但不得写入 digest 输入。  
-> `schema_version` 主版本不兼容则拒绝。
+> 字段名冻结。跨进程实体（schemas/*.json）**拒绝全部未知字段**（`additionalProperties: false`）。  
+> Digest 输入另见 §1.4（不含自身 hash 字段）。`schema_version` 主版本不兼容则拒绝。
 
 ### 2.0 WorkGroupMember（Manage 权威）
 
@@ -164,6 +164,7 @@
   "status": "accepted",
   "lease_id": "ls_…",
   "lease_epoch": 1,
+  "member_generation": 1,
   "tool_allow_names": ["read_file"],
   "workspace_contract": {"root_kind": "member_workspace"},
   "policy_ceiling": {},
@@ -212,6 +213,7 @@
 - **禁止**只存 `template_id` 代替正文/工具名  
 - **禁止** Node 从本机 `prompt_context` / 独聊模板继承  
 - v1：`memory.remember_enabled` 必须 `false`；`skills`/`hooks` 必须 `"disabled"`  
+- `memory.initial_entries`：允许显式种子，**最多 32** 条；默认 `[]`（不从 Node 迁移）  
 - `tools.allow_names: []` = **无工具**（禁止回退 Node 默认组）
 
 ### 2.5 WorkerBinding（Node 本地）
@@ -224,6 +226,7 @@
   "provision_id": "pv_…",
   "member_spec_digest": "sha256:…",
   "lease_epoch": 1,
+  "member_generation": 1,
   "workspace_path": "…",
   "status": "ready",
   "not_enumerable_as_local_agent": true
@@ -319,6 +322,38 @@ Turn = 单次模型往返（含其 tool_calls 收集）。`status`：`open` | `c
 
 不变量：**每组最多一个** `status ∈ {queued,running,awaiting_hitl}` 的 assign（v1）。
 
+### 2.8.1 Manage-native 工具：`assign_workgroup_task`
+
+机器可读全文：[`fixtures/workgroup-d05/schemas/assign_workgroup_task.openai.json`](./fixtures/workgroup-d05/schemas/assign_workgroup_task.openai.json)
+
+**参数（LLM function）**
+
+| 字段 | 必填 | 约束 |
+|------|------|------|
+| `member_id` | 是 | `^mb_[0-9a-z]{26}$` |
+| `instruction` | 是 | 1…16000 字符 |
+| `context_hint` | 否 | ≤2000；不替代 Projector 的 ≤10 Timeline 快照 |
+
+**同步语义**：调用阻塞至该 assign 进入终态 `succeeded|failed|canceled|indeterminate`。
+
+**tool result JSON（恰好一条，配对 `tool_call_id`）**
+
+```json
+{
+  "assign_id": "as_…",
+  "status": "succeeded",
+  "summary": "成员最终文本或错误说明",
+  "error_code": null
+}
+```
+
+| status | summary | error_code |
+|--------|---------|------------|
+| `succeeded` | 成员最终产出文本 | `null` |
+| `failed` / `canceled` / `indeterminate` | 人类可读原因 | 稳定 `error_code`（§7.4） |
+
+与 Timeline：可另写 `actor_final_text`；Leader 上下文按 `assign_id` **去重**，只保留本 tool result。
+
 ### 2.9 ToolCommand / ToolResult
 
 ```json
@@ -407,7 +442,7 @@ Grant 字段若存在：必须 ⊆ Spec；否则 `digest_mismatch`/`not_authoriz
 {
   "node_id": "node-A",
   "workgroup_id": "wg_…",
-  "last_ack_seq": 41,
+  "last_ack_delivery_seq": 41,
   "connection_generation": 5
 }
 ```
@@ -420,7 +455,8 @@ Grant 字段若存在：必须 ⊆ Spec；否则 `digest_mismatch`/`not_authoriz
   "schema_version": "0.5.0",
   "type": "timeline.event",
   "workgroup_id": "wg_…",
-  "seq": 42,
+  "delivery_seq": 42,
+  "connection_generation": 5,
   "payload": {},
   "sent_at": "…"
 }
@@ -581,7 +617,8 @@ CAS：仅一个 `resolution` 成功；失败方 `already_resolved`。
 
 ### 5.3 并行 tool_calls（冻结一种）
 
-v1：**等待全部结果**后再续写模型；禁止半配齐续写。超时/失败：未完成的 call 写入错误 tool result，然后可闭 turn 或 aborted（实现须两者择一写清；默认补错误结果并闭 turn）。
+v1：**等待全部结果**后再续写模型；禁止半配齐续写。  
+任一 call 超时/失败：为其补 **错误 tool result**（`is_error=true`），然后 **闭 turn**（不 aborted）；再决定是否开新 turn。
 
 ### 5.4 Golden fixtures（目录约定）
 
@@ -671,7 +708,10 @@ Manage 在发 command 前校验：`tool_name ∈ Spec.allow_names ∩ manifest`�
 | `result_too_large` | |
 | `indeterminate` | 结果未知 |
 | `workgroup_archived` | |
-| `duplicate_client_message` | |
+| `duplicate_client_message` | 同 client_message_id **且** payload 不同以外的重复语义保留；同 payload 重试应幂等返回原事件（用原 event，不报此码） |
+| `cursor_too_old` | WS resume 超出保留窗口 |
+| `not_found` | 资源不存在（含「成员非本地 Agent」） |
+| `conflict` | 通用冲突（非 payload_hash 专用时） |
 
 ---
 
@@ -810,15 +850,15 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 
 ## 13. 完成检查表（退出 D0.5）
 
-- [ ] §2 规范字段表达到跨语言可验证（仍欠 JSON Schema 级附录）  
-- [x] §3 状态转换与 fencing 主路径已去歧义（归档映射/`accepted` 恢复已写清）  
+- [x] §2 + [`schemas/`](./fixtures/workgroup-d05/schemas/) JSON Schema 附录（核心类型 + assign 工具 + WS/HITL/Assign 等）  
+- [x] §2.8.1 `assign_workgroup_task` 参数/结果 schema（含 succeeded⇒error_code null）  
+- [x] §2.11–§2.12 / §8 统一 `delivery_seq`  
+- [x] §3 / §5.3 状态与并行收束无二选一  
 - [x] §4 矩阵与产品正文一致  
-- [x] §5 投影为确定函数；并行策略冻结为 wait-all  
-- [x] §7 错误码 + accepted 恢复语义  
-- [x] §8 Timeline `seq` vs `delivery_seq` 分离；最小消息目录  
+- [x] §7 错误码含 `cursor_too_old` / `not_found`  
 - [x] §9–§10 威胁与旧数据策略已写入  
-- [x] §12 用例映射；二选一 fixture 已改写；P0 缺失场景已补  
-- [ ] GPT 评审 **Verdict A**（当前 §17 = **B**，补丁后待复审）  
+- [x] §12 fixtures：合法 26 位 ulid、given/when/then、INDEX 39 条  
+- [ ] GPT 复审 **Verdict A**（§18 仍为 B；已按 18.5 打补丁，待第三次确认或人工签核）  
 - [ ] 产品正文将本文件标为 **D0.5 已冻结**  
 - [x] **未**合并未门禁的 Manage turn kernel / Worker 大改  
 
@@ -831,12 +871,31 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 | 日期 | 说明 |
 |------|------|
 | 2026-07-30 | 首稿 |
-| 2026-07-30 | 补全 28 用例 fixtures + INDEX |
-| 2026-07-30 | GPT §17 Verdict B；吸收最短补丁：ID/hash、Member/Turn、投影确定化、HITL 分层闭合、WS delivery_seq、fixture v1 与 P0 场景 |
+| 2026-07-30 | fixtures + INDEX；§17 Verdict B 最短补丁 |
+| 2026-07-30 | schemas/、assign 工具、fixtures given/when/then |
+| 2026-07-30 | §18 Verdict B；按 18.5 修 delivery_seq、HITL 条件、补齐 schemas、重写全部 fixture ID |
 
 ---
 
-## 17. D0.5 契约 GPT 评审（2026-07-30）
+## 15. 附录 A：JSON Schema 文件索引
+
+路径：`docs/design/fixtures/workgroup-d05/schemas/`
+
+| 文件 | 实体 |
+|------|------|
+| `defs.json` | ID / hash / error 共享定义 |
+| `WorkGroup.json` / `WorkGroupACL.json` / `WorkGroupMember.json` | 组 |
+| `MemberSpec.json` / `NodeExecutionGrant.json` / `WorkerBinding.json` | 规格与执行 |
+| `TimelineEvent.json` / `ActorRun.json` / `Assign.json` | 运行 |
+| `ToolCommand.json` / `ToolResult.json` | 工具 |
+| `HITLRequest.json` / `HITLResolution.json` | HITL |
+| `ResumeCursor.json` / `WSEnvelope.json` / `CommandAck.json` / `ArchiveTombstone.json` | WS |
+| `assign_workgroup_task.openai.json` | Leader 工具（唯一机器契约） |
+| `FixtureMeta.json` | fixture 信封 |
+
+---
+
+## 17. D0.5 契约 GPT 评审（2026-07-30）〔历史 · Verdict B〕
 
 **Verdict：B — 须修订后再冻结**（本轮已按最短补丁集改契约与 fixtures；**须再审一次**方可改 A）。
 
@@ -867,9 +926,9 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 - 新增 vertical/grant/recover/open-tool/approval-bound/cursor/member_assets  
 - **仍非**最终跨语言 golden：缺统一机器 comparator 与完整 given 状态图；复审聚焦可执行性  
 
-### 17.5 冻结前剩余（复审清单）
+### 17.5 冻结前剩余（首轮）
 
-1. 附录：JSON Schema（或等价字段表）覆盖核心类型  
-2. `assign_workgroup_task` 参数/终态结果 schema  
-3. fixtures 再扫模糊动作；补齐前置 ACL/Grant 状态块  
-4. 复审 GPT → Verdict A 后再勾 §13 冻结项  
+1. ~~附录：JSON Schema~~ → §15 / `schemas/`  
+2. ~~`assign_workgroup_task` schema~~ → §2.8.1  
+3. ~~fixtures 规范化~~ → given/when/then  
+4. 复审 GPT → §18

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/CommandAck.json",
+  "title": "CommandAck",
+  "type": "object",
+  "required": [
+    "command_id",
+    "status",
+    "connection_generation",
+    "journaled_at"
+  ],
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "pattern": "^cmd_[0-9a-z]{26}$"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "running",
+        "succeeded",
+        "failed",
+        "rejected",
+        "canceled",
+        "indeterminate"
+      ]
+    },
+    "connection_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "journaled_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

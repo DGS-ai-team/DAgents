@@ -96,7 +96,39 @@
         "required": [
           "command_id",
           "payload_hash"
+        ],
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "pattern": "^cmd_[0-9a-z]{26}$"
+          },
+          "payload_hash": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "information_request"
+          }
+        },
+        "required": [
+          "kind"
         ]
+      },
+      "then": {
+        "properties": {
+          "command_id": {
+            "type": "null"
+          },
+          "payload_hash": {
+            "type": "null"
+          }
+        }
       }
     }
   ]

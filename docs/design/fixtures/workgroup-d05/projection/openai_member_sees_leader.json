@@ -4,15 +4,15 @@
   "test": "projection_openai_legal_sequence",
   "provider": "openai",
   "given": {
-    "actor_id": "mb_01hmember00000000000000",
+    "actor_id": "mb_01h00000000000000000000002",
     "own_run_history": [],
     "timeline_watermark_seq": 0,
     "timeline_others": [
       {
         "seq": 1,
         "type": "human_message",
-        "actor_id": "hu_01hhuman00000000000000",
-        "protocol_name": "human_hu_01hhuman00000000000000",
+        "actor_id": "hu_01h00000000000000000000003",
+        "protocol_name": "human_hu_01h00000000000000000000003",
         "content_text": "开始"
       },
       {
@@ -31,7 +31,7 @@
     "messages": [
       {
         "role": "user",
-        "name": "human_hu_01hhuman00000000000000",
+        "name": "human_hu_01h00000000000000000000003",
         "content": "开始"
       },
       {

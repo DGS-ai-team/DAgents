@@ -1,15 +1,17 @@
 {
   "fixture_schema": "workgroup-d05-fixture/v1",
   "compare": "exact_json_unless_noted",
-  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "ws_cursor_too_old_resync",
   "given": {
     "last_ack_delivery_seq": 1,
     "outbox_retention_from": 100
   },
-  "when": "resume_from_1",
+  "when": {
+    "op": "resume.offer",
+    "from_delivery_seq": 1
+  },
   "then": {
     "code": "cursor_too_old",
-    "action": "client_must_resync_snapshot_then_resume"
+    "action": "resync_snapshot_then_resume"
   }
 }

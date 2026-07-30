@@ -4,28 +4,28 @@
   "test": "tool_cmd_resend_before_accept",
   "given": {
     "workgroup": {
-      "workgroup_id": "wg_01hworkgroup000000000000",
+      "workgroup_id": "wg_01h00000000000000000000001",
       "status": "active",
       "acl": {
         "owners": [
-          "node_01ha000000000000000000"
+          "node_a"
         ],
         "collaborators": [
-          "node_01hb000000000000000000"
+          "node_b"
         ],
         "revision": 1
       }
     },
     "member": {
-      "member_id": "mb_01hmember00000000000000",
-      "home_node_id": "node_01hb000000000000000000",
+      "member_id": "mb_01h00000000000000000000002",
+      "home_node_id": "node_b",
       "status": "ready",
       "member_generation": 1,
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
     },
     "grant": {
       "status": "accepted",
-      "home_node_id": "node_01hb000000000000000000",
+      "home_node_id": "node_b",
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
       "lease_epoch": 2,
       "member_generation": 1,
@@ -34,7 +34,7 @@
       ]
     },
     "command": {
-      "command_id": "cmd_01hcmd00000000000000000",
+      "command_id": "cmd_01h00000000000000000000008",
       "payload_hash": "sha256:f64551fcd6f07823cb87971cfb91446425da18286b3ab1ef935e0cbd7a69f68a",
       "status": "queued"
     }
@@ -45,15 +45,12 @@
     },
     {
       "op": "tool.command_resend",
-      "command_id": "cmd_01hcmd00000000000000000",
+      "command_id": "cmd_01h00000000000000000000008",
       "payload_hash": "sha256:f64551fcd6f07823cb87971cfb91446425da18286b3ab1ef935e0cbd7a69f68a"
     }
   ],
   "then": {
     "executions": 1,
-    "final_status_in": [
-      "succeeded",
-      "failed"
-    ]
+    "status": "succeeded"
   }
 }

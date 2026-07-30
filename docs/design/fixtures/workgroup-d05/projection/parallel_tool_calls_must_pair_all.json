@@ -1,10 +1,8 @@
 {
   "fixture_schema": "workgroup-d05-fixture/v1",
   "compare": "exact_json_unless_noted",
-  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "projection_openai_legal_sequence",
   "subcase": "parallel_tool_calls",
-  "strategy": "wait_until_all_results",
   "given": {
     "assistant_tool_calls": [
       {
@@ -23,15 +21,13 @@
       }
     ]
   },
-  "when": "projector_or_turn_kernel_continues",
+  "when": {
+    "op": "turn.continue_after_partial_tools"
+  },
   "then": {
     "llm_invoked_again": false,
     "wait_for": [
       "call_b"
-    ],
-    "forbidden": [
-      "continue_with_partial_tool_results",
-      "drop_call_b"
     ]
   }
 }

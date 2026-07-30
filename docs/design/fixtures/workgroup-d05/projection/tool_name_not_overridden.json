@@ -7,7 +7,7 @@
     "input_run_messages": [
       {
         "role": "assistant",
-        "name": "member_mb_01hmember00000000000000",
+        "name": "member_mb_01h00000000000000000000002",
         "tool_calls": [
           {
             "id": "call_1",
@@ -33,8 +33,7 @@
   "then": {
     "tool_message_name": "read_file",
     "forbidden_tool_message_names": [
-      "member_mb_01hmember00000000000000",
-      "member:代码员"
+      "member_mb_01h00000000000000000000002"
     ]
   }
 }

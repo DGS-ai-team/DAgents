@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/ResumeCursor.json",
+  "title": "ResumeCursor",
+  "type": "object",
+  "required": [
+    "node_id",
+    "workgroup_id",
+    "last_ack_delivery_seq",
+    "connection_generation"
+  ],
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "last_ack_delivery_seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "connection_generation": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

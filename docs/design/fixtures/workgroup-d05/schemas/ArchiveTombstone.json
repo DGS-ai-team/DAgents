@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/ArchiveTombstone.json",
+  "title": "ArchiveTombstone",
+  "type": "object",
+  "required": [
+    "workgroup_id",
+    "member_id",
+    "lease_epoch_at_archive",
+    "archived_at"
+  ],
+  "properties": {
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "member_id": {
+      "type": "string",
+      "pattern": "^mb_[0-9a-z]{26}$"
+    },
+    "lease_epoch_at_archive": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "archived_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

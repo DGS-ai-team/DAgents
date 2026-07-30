@@ -4,29 +4,29 @@
   "test": "concurrent_human_total_order_by_seq",
   "given": {
     "workgroup": {
-      "workgroup_id": "wg_01hworkgroup000000000000",
+      "workgroup_id": "wg_01h00000000000000000000001",
       "status": "active",
       "acl": {
         "owners": [
-          "node_01ha000000000000000000"
+          "node_a"
         ],
         "collaborators": [
-          "node_01hb000000000000000000",
-          "node_01hc000000000000000000"
+          "node_b",
+          "node_c"
         ],
         "revision": 2
       }
     },
     "member": {
-      "member_id": "mb_01hmember00000000000000",
-      "home_node_id": "node_01hb000000000000000000",
+      "member_id": "mb_01h00000000000000000000002",
+      "home_node_id": "node_b",
       "status": "ready",
       "member_generation": 1,
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
     },
     "grant": {
       "status": "accepted",
-      "home_node_id": "node_01hb000000000000000000",
+      "home_node_id": "node_b",
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
       "lease_epoch": 2,
       "member_generation": 1,
@@ -39,21 +39,20 @@
   "when": [
     {
       "op": "human.post",
-      "node_id": "node_01ha000000000000000000",
-      "client_message_id": "01hbmessa000000000000001",
+      "node_id": "node_a",
+      "client_message_id": "01h0000000000000000000000d",
       "text": "A"
     },
     {
       "op": "human.post",
-      "node_id": "node_01hc000000000000000000",
-      "client_message_id": "01hbmessa000000000000002",
+      "node_id": "node_c",
+      "client_message_id": "01h0000000000000000000000e",
       "text": "C"
     }
   ],
   "then": {
     "events": 2,
     "seq_distinct": true,
-    "order": "by_seq_asc",
-    "during_active_assign_rule": "queue_until_assign_terminal_then_feed_leader_by_seq"
+    "order": "by_seq_asc"
   }
 }

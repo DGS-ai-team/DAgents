@@ -1,9 +1,38 @@
 {
   "fixture_schema": "workgroup-d05-fixture/v1",
   "compare": "exact_json_unless_noted",
-  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "member_assets_manage_authoritative",
   "given": {
+    "workgroup": {
+      "workgroup_id": "wg_01h00000000000000000000001",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_a"
+        ],
+        "collaborators": [
+          "node_b"
+        ],
+        "revision": 1
+      }
+    },
+    "member": {
+      "member_id": "mb_01h00000000000000000000002",
+      "home_node_id": "node_b",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    },
+    "grant": {
+      "status": "accepted",
+      "home_node_id": "node_b",
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+      "lease_epoch": 2,
+      "member_generation": 1,
+      "tool_allow_names": [
+        "read_file"
+      ]
+    },
     "member_spec_on_manage": {
       "soul_md": "FROM_MANAGE",
       "allow_names": [
@@ -14,14 +43,15 @@
       "prompt_context/soul.md": "FROM_NODE_LOCAL"
     }
   },
-  "when": "provision_and_member_turn",
+  "when": {
+    "op": "member.turn_system_prompt"
+  },
   "then": {
     "system_prompt_contains": "FROM_MANAGE",
     "system_prompt_excludes": "FROM_NODE_LOCAL",
     "node_has_authoritative_soul_file_for_member": false,
     "tools_effective": [
       "read_file"
-    ],
-    "not_fallback_to_node_default_groups": true
+    ]
   }
 }

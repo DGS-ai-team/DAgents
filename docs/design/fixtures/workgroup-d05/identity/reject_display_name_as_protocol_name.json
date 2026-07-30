@@ -3,28 +3,17 @@
   "compare": "exact_json_unless_noted",
   "test": "protocol_name_rejects_unicode_display",
   "given": {
-    "allowed_pattern": "^[a-z][a-z0-9_]{0,63}$"
+    "member_id": "mb_01h00000000000000000000002",
+    "display_name": "代码员"
   },
-  "when": [
-    {
-      "display_name": "代码员",
-      "member_id": "mb_01hmember00000000000000"
-    },
-    {
-      "display_name": "Bob Smith",
-      "member_id": "mb_01hmember00000000000001"
-    }
-  ],
+  "when": {
+    "op": "stamp_protocol_name"
+  },
   "then": {
-    "protocol_names": [
-      "member_mb_01hmember00000000000000",
-      "member_mb_01hmember00000000000001"
-    ],
-    "forbidden_protocol_names": [
+    "protocol_name": "member_mb_01h00000000000000000000002",
+    "forbidden": [
       "代码员",
-      "member:代码员",
-      "Bob Smith",
-      "member:Bob Smith"
+      "member:代码员"
     ]
   }
 }

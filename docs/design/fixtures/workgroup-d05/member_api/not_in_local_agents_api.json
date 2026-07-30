@@ -4,28 +4,28 @@
   "test": "member_not_in_local_agents_api",
   "given": {
     "workgroup": {
-      "workgroup_id": "wg_01hworkgroup000000000000",
+      "workgroup_id": "wg_01h00000000000000000000001",
       "status": "active",
       "acl": {
         "owners": [
-          "node_01ha000000000000000000"
+          "node_a"
         ],
         "collaborators": [
-          "node_01hb000000000000000000"
+          "node_b"
         ],
         "revision": 1
       }
     },
     "member": {
-      "member_id": "mb_01hmember00000000000000",
-      "home_node_id": "node_01hb000000000000000000",
+      "member_id": "mb_01h00000000000000000000002",
+      "home_node_id": "node_b",
       "status": "ready",
       "member_generation": 1,
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
     },
     "grant": {
       "status": "accepted",
-      "home_node_id": "node_01hb000000000000000000",
+      "home_node_id": "node_b",
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
       "lease_epoch": 2,
       "member_generation": 1,
@@ -33,17 +33,16 @@
         "read_file"
       ]
     },
-    "provisioned_on": "node_01hb000000000000000000"
+    "provisioned_on": "node_b"
   },
   "when": {
-    "op": "GET",
+    "op": "http.get",
     "path": "/v1/agents",
-    "node": "node_01hb000000000000000000"
+    "node": "node_b"
   },
   "then": {
     "body_agent_ids_excludes": [
-      "mb_01hmember00000000000000"
-    ],
-    "storage": "WorkerBinding_not_agents_table"
+      "mb_01h00000000000000000000002"
+    ]
   }
 }

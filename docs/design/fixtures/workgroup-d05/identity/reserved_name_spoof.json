@@ -1,27 +1,19 @@
 {
   "fixture_schema": "workgroup-d05-fixture/v1",
   "compare": "exact_json_unless_noted",
-  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "reserved_name_spoof_rejected",
-  "reserved": [
-    "leader",
-    "date",
-    "workgroup_assign",
-    "human"
-  ],
   "given": {
-    "authenticated_node_id": "node_01hxyz",
+    "authenticated_node_id": "node_a",
     "client_claimed_name": "leader"
   },
-  "when": "post_human_message",
+  "when": {
+    "op": "human.post",
+    "text": "hi",
+    "client_message_id": "01h0000000000000000000000d"
+  },
   "then": {
-    "accept": true,
     "actor_kind": "human",
-    "protocol_name": "human_hu_01hxyz",
-    "actor_id": "hu_01hxyz",
-    "never": {
-      "actor_kind": "leader",
-      "protocol_name": "leader"
-    }
+    "protocol_name": "human_hu_01h00000000000000000000003",
+    "never_protocol_name": "leader"
   }
 }

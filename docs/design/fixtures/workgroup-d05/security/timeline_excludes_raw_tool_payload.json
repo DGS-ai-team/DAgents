@@ -1,32 +1,21 @@
 {
   "fixture_schema": "workgroup-d05-fixture/v1",
   "compare": "exact_json_unless_noted",
-  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "timeline_excludes_raw_tool_payload",
-  "note": "Contract guarantees structural exclusion of raw tool args/results from TimelineEvent fields; not content DLP on final text",
+  "note": "Structural exclusion only; not content DLP on final text",
   "given": {
     "tool_result_in_run_history": {
-      "content": "SECRET_KEY=abc\nfile…"
+      "content": "SECRET_KEY=abc"
     }
   },
+  "when": {
+    "op": "emit_timeline_after_tool"
+  },
   "then": {
-    "timeline_events": [
-      {
-        "type": "actor_final_text",
-        "fields_forbidden": [
-          "tool_arguments",
-          "tool_result",
-          "raw_tool_payload"
-        ]
-      },
-      {
-        "type": "assign_finished",
-        "fields_forbidden": [
-          "tool_arguments",
-          "tool_result",
-          "raw_tool_payload"
-        ]
-      }
+    "timeline_fields_forbidden": [
+      "tool_arguments",
+      "tool_result",
+      "raw_tool_payload"
     ],
     "run_history_may_contain_tool_body": true
   }

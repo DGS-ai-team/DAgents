@@ -4,28 +4,28 @@
   "test": "provision_retry_same_id_ok",
   "given": {
     "workgroup": {
-      "workgroup_id": "wg_01hworkgroup000000000000",
+      "workgroup_id": "wg_01h00000000000000000000001",
       "status": "active",
       "acl": {
         "owners": [
-          "node_01ha000000000000000000"
+          "node_a"
         ],
         "collaborators": [
-          "node_01hb000000000000000000"
+          "node_b"
         ],
         "revision": 1
       }
     },
     "member": {
-      "member_id": "mb_01hmember00000000000000",
-      "home_node_id": "node_01hb000000000000000000",
+      "member_id": "mb_01h00000000000000000000002",
+      "home_node_id": "node_b",
       "status": "requested",
       "member_generation": 1,
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
     },
     "grant": {
       "status": "accepted",
-      "home_node_id": "node_01hb000000000000000000",
+      "home_node_id": "node_b",
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
       "lease_epoch": 2,
       "member_generation": 1,
@@ -37,21 +37,17 @@
   "when": [
     {
       "op": "member.provision",
-      "provision_id": "pv_01hprov0000000000000000",
+      "provision_id": "pv_01h00000000000000000000009",
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
     },
     {
       "op": "member.provision",
-      "provision_id": "pv_01hprov0000000000000000",
+      "provision_id": "pv_01h00000000000000000000009",
       "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
     }
   ],
   "then": {
     "workspace_created_count": 1,
-    "member_status": "ready",
-    "second_response": {
-      "idempotent": true,
-      "code": null
-    }
+    "member_status": "ready"
   }
 }

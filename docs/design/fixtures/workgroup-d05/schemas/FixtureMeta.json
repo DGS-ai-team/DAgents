@@ -15,7 +15,8 @@
       "const": "workgroup-d05-fixture/v1"
     },
     "test": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
     },
     "subcase": {
       "type": [
@@ -29,16 +30,40 @@
         "subset"
       ]
     },
-    "given": {
-      "type": "object"
-    },
-    "when": {},
-    "then": {
-      "type": "object"
+    "provider": {
+      "type": "string"
     },
     "note": {
       "type": "string"
+    },
+    "given": {
+      "type": "object"
+    },
+    "when": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "op"
+            ]
+          }
+        }
+      ]
+    },
+    "then": {
+      "type": "object"
+    },
+    "illegal_config": {
+      "type": "object"
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

@@ -1,22 +1,52 @@
 {
   "fixture_schema": "workgroup-d05-fixture/v1",
   "compare": "exact_json_unless_noted",
-  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "hitl_exactly_once_tool_result_resume",
-  "kind": "information_request",
   "given": {
-    "hitl_id": "ht_01hhitl01xxxxxxxx",
-    "actor_run_id": "rn_01hrun01xxxxxxxx",
-    "turn_id": "tn_01hturn01xxxxxxx",
-    "tool_call_id": "call_ask_1",
-    "status": "pending"
+    "workgroup": {
+      "workgroup_id": "wg_01h00000000000000000000001",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_a"
+        ],
+        "collaborators": [
+          "node_b"
+        ],
+        "revision": 1
+      }
+    },
+    "member": {
+      "member_id": "mb_01h00000000000000000000002",
+      "home_node_id": "node_b",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    },
+    "grant": {
+      "status": "accepted",
+      "home_node_id": "node_b",
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+      "lease_epoch": 2,
+      "member_generation": 1,
+      "tool_allow_names": [
+        "read_file"
+      ]
+    },
+    "hitl": {
+      "hitl_id": "ht_01h0000000000000000000000b",
+      "kind": "information_request",
+      "actor_run_id": "rn_01h00000000000000000000005",
+      "turn_id": "tn_01h00000000000000000000006",
+      "tool_call_id": "call_ask_1",
+      "status": "pending"
+    }
   },
   "when": {
-    "resolve": {
-      "node_id": "node_01ha",
-      "answer_text": "42",
-      "client_message_id": "01hr1"
-    }
+    "op": "hitl.resolve",
+    "node": "node_a",
+    "answer_text": "42",
+    "client_message_id": "01h0000000000000000000000d"
   },
   "then": {
     "hitl_status": "resolved",
@@ -28,13 +58,7 @@
         "content": "42"
       }
     ],
-    "resume_enqueued": 1
-  },
-  "when_duplicate": {
-    "then": {
-      "code": "already_resolved",
-      "run_messages_appended": 0,
-      "resume_enqueued": 0
-    }
+    "resume_enqueued": 1,
+    "duplicate_resolve_code": "already_resolved"
   }
 }
