@@ -102,13 +102,35 @@ Node
 
 ---
 
-## 6. 总消息列表
+## 6. 总消息列表与身份（`name` 字段）
 
-唯一 Transcript；human / leader / member / system 均写入；member 回合消息全部拼接并带：
+唯一 Transcript。身份标识 **对齐现网 LLM message 的 `name` 字段**（与当天日期 Hook 同源），**不要**再搞一套平行的 `actor` 信封给模型看。
 
-`actor.type/id/display_name/home_node_id`（human 另带 `human_name`）。
+### 6.1 现网锚点
 
-`@` 附带近 ≤10 条；`browse_leader_context` 读总列表（同组 ACL）。
+- `node/internal/llm/message_names.go`：`user` 消息用 `name` 区分来源（`human` / `trigger` / `date` / `a2a_inbox` …）  
+- `InjectTodayDateHook`：插入 `role=user`、`name=date`、content=`当天日期为：YYYYMMDD`  
+- API：`user_message_name` → 入队时写入 message.`name`（空则 `human`）  
+- 出站：`MessageToAPIPayload` 把 `name` 传给 Chat Completions  
+
+工作组沿用同一机制：多说话人 = 多条消息上的不同 `name`。
+
+### 6.2 约定（组会话）
+
+| 来源 | role | name | 说明 |
+|------|------|------|------|
+| 订阅端人工 | `user` | **`human_name`**（必填语义；空则 `human`） | 同 Node 多人靠不同 name 区分 |
+| 日期等系统注入 | `user` | `date` 等既有常量 | 不变 |
+| Leader 输出 | `assistant` | `leader`（或 Leader 展示名） | Supervisor 发言 |
+| Member 回合拼入总列表 | 原 role 保留；**统一带 name** | `member:{display_name}` 或成员展示名 | 工具结果可 `name`=工具名（现网 tool 消息已如此） |
+| `@` 边界 | `user` 或 `system` | `workgroup_assign` | 可选；标一次交接起止 |
+
+持久化可另存 `home_node_id` / `agent_id` 供 UI/审计；**进模型的上下文只依赖 `role` + `name` + `content`**（与 date 一致）。
+
+### 6.3 UI
+
+时间线按 `name` 着色/徽章（`date` 弱化、`leader` / `member:*` / 人名）。  
+`@` 附带近 ≤10 条、`browse_leader_context` 均读同一总列表。
 
 ---
 
