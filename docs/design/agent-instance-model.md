@@ -22,8 +22,8 @@
 | 沙箱 | **废弃产品路径**：真实环境执行；隔离用独立 Node/机器（见 [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)） |
 | Manage / A2A | 后续 Phase；本阶段 Node 侧预留字段，不保证与现网 Manage 兼容 |
 | 数据 | **不保证**旧 session 数据迁移；可清空 `sessions.db` 重建 |
-| Placement（进行中） | 同组远端 Node 放置 Agent + 屏幕旁观：见 [remote-agent-placement.md](./remote-agent-placement.md)；将重构 Manage 控制面 / Edge Tunnel，**不等于** `sandbox.backend=remote` |
-| 工作组 + 长连接（设计中） | Agent 实例级协作组 + Leader/@ 派任务；Node↔Manage WebSocket：见 [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md) |
+| 工作组（现行） | 跨机器协作 **只经工作组**；见 [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md) |
+| 远程 Agent / Placement | **废弃**（曾见 `remote-agent-placement.md`，已 superseded） |
 
 ---
 
