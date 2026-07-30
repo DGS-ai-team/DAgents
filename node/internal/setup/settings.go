@@ -226,7 +226,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			RegistrationBaseURL:         cfg.Manage.Registration.BaseURL,
 			A2AEnabled:                  a2aEnabled,
 			AcceptInbound:               cfg.ExposeToPeersEffective(),
-			WorkgroupEnabled:            cfg.ManageWorkgroupEnabled(),
+			WorkgroupEnabled:            workgroupEnabled,
 			NodeToken:                   cfg.Manage.NodeToken,
 			RegistrationIntervalSeconds: cfg.Manage.Registration.IntervalSeconds,
 			RegistrationTTLSeconds:      cfg.Manage.Registration.TTLSeconds,
