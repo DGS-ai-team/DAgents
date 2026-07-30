@@ -7,7 +7,7 @@
 | 文件 | 说明 |
 |------|------|
 | **[agent-instance-model.md](./agent-instance-model.md)** | **主设计**：单 Node 多 Agent、模板、沙箱、`node_id`、Web UI-only、实施阶段 |
-| **[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)** | **现行（方向冻结；文档未闭环）**：工作组 + 云 Leader + WS；§16 GPT 再审 Verdict B——先改文档再开 D0.5 |
+| **[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)** | **现行（正文已回流）**：工作组 + Timeline/RunHistory；MemberSpec 侧车/记忆/工具；下一门槛 D0.5 契约 |
 | [remote-agent-placement.md](./remote-agent-placement.md) | **SUPERSEDED**：原 Placement/Edge，改走工作组 |
 | [node-centric-architecture-cleanup.md](./node-centric-architecture-cleanup.md) | 过时逻辑清理（含拆 Placement/沙箱） |
 
