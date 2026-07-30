@@ -27,7 +27,7 @@
 | 远程 | **移除远程 Agent / Placement**；跨机器只走工作组 |
 | UI | `/ui`：本地 Agents ‖ 已订阅工作组 分栏 |
 | 订阅 | 须在工作组 ACL 内（按 node_id） |
-| 开工门槛 | **先 D0.5 契约**，再 Manage 基座 → Node Worker → 纵向闭环 |
+| 开工门槛 | **D0.5 契约**（[`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)）退出检查表通过后，再 Manage 基座 → Node Worker → 纵向闭环 |
 
 ---
 
