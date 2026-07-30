@@ -188,7 +188,7 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/v1/peers/nodes` | 同组可放置 Node 列表（代理 Manage + 过滤） |
+| GET | `/v1/peers/nodes` | 同组可放置 Node 列表（代理 Manage；**不依赖** A2A `expose_to_peers`） |
 | POST | `/v1/agents` | body 增 `placement.home_node_id`；本机则不变 |
 | DELETE | `/v1/agents/{id}` | 若 `origin=remote`：Control 双删 |
 | GET | `/v1/agents` | 合并本地 + 引用 |
