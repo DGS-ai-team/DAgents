@@ -1,0 +1,10 @@
+{
+  "name": "reject_display_name_as_protocol_name",
+  "description": "Chinese display names and colon forms must not become message.name",
+  "cases": [
+    {"display_name": "代码员", "forbidden_protocol_names": ["代码员", "member:代码员"]},
+    {"display_name": "Bob Smith", "forbidden_protocol_names": ["Bob Smith", "member:Bob Smith"]},
+    {"human_input": "leader", "expected": "must not authenticate as reserved leader; use human_<id>"}
+  ],
+  "allowed_pattern": "^[a-z][a-z0-9_]{0,63}$"
+}

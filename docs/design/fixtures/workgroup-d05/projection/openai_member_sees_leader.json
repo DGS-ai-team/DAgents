@@ -1,0 +1,21 @@
+{
+  "name": "openai_member_sees_leader",
+  "description": "Other actor final text projects as user + provider-safe name; member run history keeps own tool pairs",
+  "actor_id": "mb_01",
+  "timeline_events": [
+    {
+      "type": "actor_final_text",
+      "actor_id": "leader",
+      "protocol_name": "leader",
+      "content_text": "请读取 README"
+    }
+  ],
+  "own_run_tail": [],
+  "expected_projection": [
+    {
+      "role": "user",
+      "name": "leader",
+      "content": "请读取 README"
+    }
+  ]
+}

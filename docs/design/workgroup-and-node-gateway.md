@@ -1,9 +1,9 @@
 # 工作组协作 + Node↔Manage 长连接（设计）
 
 > **分支**：`cursor/remote-agent-placement-7e3e`  
-> **状态**：**产品方向冻结；正文已按 §16 回流**——下一步开 **D0.5**（schema / 状态机 / golden fixtures）；**禁止**在 D0.5 完成前并行实现 Manage turn kernel / Node Worker / WS 主路径  
-> **规范优先级**：§0–§12（正文）> §14（吸收说明）> §15/§16（历史审核，不再定义规范）  
-> **推荐方向**：Manage 云 Leader（Supervisor）+ Timeline/RunHistory；Node 真实环境工具 Worker；权限按 `node_id`；**无远程 Agent / Placement**
+> **状态**：**产品方向冻结；正文已回流；D0.5 契约起草中** — 见 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)；**禁止**在 D0.5 退出检查表完成前并行实现 Manage turn kernel / Node Worker / WS 主路径  
+> **规范优先级**：§0–§13（产品正文）> [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md) > §15/§16（历史审核）  
+> **推荐方向**：Manage 云 Leader（Supervisor）+ Timeline/RunHistory；成员资产绑组存 Manage；Node 仅工具调用；权限按 `node_id`；**无远程 Agent / Placement**
 
 ---
 
@@ -33,7 +33,7 @@
 
 ## 1. 一句话
 
-工作组是 Manage 上的 Supervisor 房间：云 Leader 编排；成员在指定 Node 真实环境执行；公开 Timeline 带身份；各 Actor 私有 RunHistory 保工具配对；多 Node 按 ACL 订阅组聊；**不再有「远端放置的 Agent 引用」**。
+工作组是 Manage 上的 Supervisor 房间：云 Leader 编排；**成员配置（侧车/权限/记忆）绑组存在 Manage**；home Node 只做真实工具调用；公开 Timeline + 私有 RunHistory；多 Node 按 ACL 订阅；**无远端放置的 Agent 引用**。
 
 ---
 
@@ -472,7 +472,7 @@ MemberSpec {
 | Phase | 内容 |
 |-------|------|
 | **D0** | 产品方向冻结（本文 §0） |
-| **D0.5** | 契约：schema、状态机、Projector、WS 信封、威胁模型、旧 Placement 数据处置、golden fixtures（**开工门槛**） |
+| **D0.5** | 契约：[`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md) + `fixtures/workgroup-d05/`（**开工门槛**） |
 | **D0.9** | 停写 Placement/sandbox 新产品入口（先不物理删） |
 | **D1** | Manage 基座：组存储、ACL、Grant、MemberSpec、turn kernel 骨架 |
 | **D2** | Node WorkgroupWorker：强身份 WS、幂等 provision、tool manifest、command journal |
@@ -492,7 +492,9 @@ MemberSpec {
 
 | 文档 | 状态 |
 |------|------|
-| 本文 §0–§13 | **现行规范** |
+| 本文 §0–§13 | **现行产品规范** |
+| `workgroup-d05-contracts.md` | **D0.5 契约（起草中 → 退出检查表通过后冻结）** |
+| `fixtures/workgroup-d05/` | 投影/身份 golden stubs |
 | `remote-agent-placement.md` | **superseded** |
 | `node-centric-architecture-cleanup.md` | 继续：去 ops/compliance、去沙箱、拆旧 A2A |
 | 下文 §15 / §16 | **历史审核记录**；冲突以正文为准 |
@@ -534,7 +536,7 @@ MemberSpec {
 
 ### 16.5 D0.5 增补清单
 
-仍为开工检查表（schema / 状态机 / turn+投影 / 工具恢复 / 安全 / 契约测试）——实现前须落成独立附录或 `docs/design/workgroup-d05-contracts.md`。
+仍为开工检查表 — **已落成** [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)；退出条件见该文 §13。
 
 ### 16.6 方向一致性
 
@@ -551,8 +553,9 @@ MemberSpec {
 | §8 ACL/Grant/HITL/fencing | ✅ |
 | §9–§11 UI/WS | ✅（原 §9–10） |
 | §13 分期 | ✅ |
-| 成员侧车/记忆/工具 | ✅ 新增 §9 |
-| D0.5 附录 fixtures | ⏳ 下一步 |
+| 成员侧车/记忆/工具 | ✅ |
+| D0.5 契约文档 | ✅ 起草 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md) |
+| D0.5 fixtures / 退出评审 | ⏳ |
 
 ### 16.8 最短可行纵向闭环
 
