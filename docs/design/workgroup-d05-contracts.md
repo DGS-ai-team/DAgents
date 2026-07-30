@@ -932,3 +932,63 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 2. ~~`assign_workgroup_task` schema~~ → §2.8.1  
 3. ~~fixtures 规范化~~ → given/when/then  
 4. 复审 GPT → §18
+
+---
+
+## 18. D0.5 契约 GPT 复审（2026-07-30）
+
+**Verdict：B** — 产品方向一致，但 WS 序号、HITL/assign 条件约束及 fixtures 可执行性当时未闭环，**不能冻结**。
+
+> **注：** 本 Verdict 针对复审当时快照。其后已按 §18.5 打补丁（见修订记录）；是否升为 A 须 **§19 第三轮确认** 或人工签核。
+
+### 18.1 首轮致命项（复审当时）
+
+| 项 | 当时 | 补丁后（预期） |
+|----|------|----------------|
+| Schema 可独立验证 | 仍开 | schemas 已补 Assign/WS/HITLResolution/WorkerBinding/ActorRun 等 |
+| Member/Turn/Run | 已关闭 | — |
+| Projector | 仍开（§5.3 二选一） | §5.3 仅「补错误结果 + 闭 turn」 |
+| ToolCommand 恢复 | 已关闭 | — |
+| delivery_seq | 仍开（示例用 seq） | §2.11–2.12 已改 `delivery_seq` |
+| 执行批准 TOCTOU | 仍开（schema 允 null） | HITLRequest 条件强制非空 hash |
+| Fixtures 可执行 | 仍开 | 39 条合法 ulid + FixtureMeta 必填字段 |
+
+### 18.2 Schema 与正文冲突（复审当时 → 处置）
+
+1. `last_ack_seq` vs `delivery_seq` → ✅ 已统一  
+2. Grant 缺 `member_generation` 示例 → ✅  
+3. workgroup_id UUID vs ULID → ✅ 仅 ULID  
+4. 未知字段策略 → ✅ 跨进程实体全部拒绝未知字段  
+5. HITL execution null → ✅ schema allOf  
+6. assign result 条件 → ✅ oneOf succeeded/error  
+7. 错误码缺 cursor_too_old/not_found → ✅ §7.4  
+8. initial_entries maxItems 0 → ✅ 最多 32  
+9. 缺核心 schemas → ✅ 已补  
+10. 双 assign 工具文件 → ✅ `.tool.json` 标 deprecated，以 `.openai.json` 为准  
+
+### 18.3 Fixtures（复审当时）
+
+不能直接当跨语言 golden。补丁后：全部含 given/when/then；ID 26 位校验通过；仍缺通用 op 词汇表实现与自动 JSON Schema 校验 CI（可 D1 早期补）。
+
+### 18.4 冻结声明
+
+复审当时：**不适用**。补丁后：**仍勿自行标冻结**，等 §19 或人工签核。
+
+### 18.5 必须补丁清单（已执行）
+
+1. ✅ delivery_seq / ResumeCursor / WSEnvelope  
+2. ✅ Grant `member_generation`  
+3. ✅ HITLRequest 非空 command/hash + HITLResolution.json  
+4. ✅ assign result 条件不变量  
+5. ✅ 补齐核心 schemas  
+6. ✅ ID / 未知字段 / 错误码对齐  
+7. ✅ initial_entries v1 语义  
+8. ✅ §5.3 单一收束  
+9. ✅ FixtureMeta 收紧；fixtures 全量迁移  
+10. ✅ 合法 ID/hash；INDEX 39  
+
+### 18.6 后续阶段（复审当时结论）
+
+- D0.9 / D1：**当时不能开始**  
+- 方向约束「不得新增 Placement 产品能力」持续有效  
+- 补丁后建议：先跑 §19 快审；若 A，则 D0.9 可开、D1 骨架可开  
