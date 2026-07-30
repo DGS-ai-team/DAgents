@@ -101,3 +101,13 @@ class SessionHello(BaseModel):
 
 class ResumeOffer(BaseModel):
     last_ack_delivery_seq: int = Field(ge=0)
+
+
+class Subscription(BaseModel):
+    workgroup_id: str = Field(pattern=_WG)
+    node_id: str = Field(min_length=1, max_length=128)
+    subscribed_at: str
+
+
+class SubscribeRequest(BaseModel):
+    node_id: str = Field(min_length=1, max_length=128)

@@ -35,6 +35,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/version"
 	"github.com/DGS-ai-team/DAgents/node/internal/webui"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
+	"github.com/DGS-ai-team/DAgents/node/internal/workgroup"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -64,6 +65,8 @@ type Server struct {
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
 	sandboxPool     *sandbox.Pool
+	workgroupWorker *workgroup.Worker
+	workgroupDialer *workgroup.Dialer
 }
 
 // Option 为 NewServer 可选配置。
@@ -348,6 +351,25 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 		}
 	}
+	var wgWorker *workgroup.Worker
+	var wgDialer *workgroup.Dialer
+	if cfg.ManageWorkgroupEnabled() {
+		toolNames := []string{}
+		if mgr != nil {
+			toolNames = mgr.ToolNames()
+		}
+		wgWorker = workgroup.NewWorker(workgroup.Config{
+			NodeID:        cfg.NodeID,
+			NodeToolNames: toolNames,
+		})
+		wgDialer = &workgroup.Dialer{
+			ManageURL: cfg.Manage.URL,
+			NodeID:    cfg.NodeID,
+			Token:     cfg.Manage.NodeToken,
+			Worker:    wgWorker,
+		}
+		logger.Info("workgroup dialer enabled", "manage_url", cfg.Manage.URL)
+	}
 	s := &Server{
 		cfg:           cfg,
 		configPath:    o.configPath,
@@ -373,6 +395,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		browserMgr:      browserMgr,
 		mediaRegister:   mediaRegister,
 		sandboxPool:     sandboxPool,
+		workgroupWorker: wgWorker,
+		workgroupDialer: wgDialer,
 	}
 	// 默认工具表与后续 per-agent Registry 共用同一套 Node 运行时依赖挂载。
 	s.attachNodeRuntimeDeps(s.tools, cfg.NodeID)
@@ -388,6 +412,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
 	s.registerPlacementRoutes()
+	s.registerWorkgroupRoutes()
 	s.registerScreenRoutes()
 	s.registerToolCallControlRoutes()
 	s.registerUIAggregateRoutes()
@@ -503,6 +528,13 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if s.inboxPoller != nil {
 		s.inboxPoller.Start(regCtx)
 	}
+	if s.workgroupDialer != nil {
+		go func() {
+			if err := s.workgroupDialer.ConnectAndServe(regCtx); err != nil && regCtx.Err() == nil {
+				s.logger.Warn("workgroup dialer stopped", "error", err)
+			}
+		}()
+	}
 	if s.updateChecker != nil {
 		s.updateChecker.Start(regCtx)
 	}
@@ -521,6 +553,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		regCancel()
+		if s.workgroupDialer != nil {
+			s.workgroupDialer.Close()
+		}
 		if s.registrar != nil {
 			s.registrar.Stop(shutdownCtx)
 		}

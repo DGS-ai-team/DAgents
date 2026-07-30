@@ -336,6 +336,13 @@ type ManageConfig struct {
 	Registration ManageRegistrationConfig `yaml:"registration"`
 	A2A          ManageA2AConfig          `yaml:"a2a"`
 	Update       ManageUpdateConfig       `yaml:"update"`
+	Workgroup    ManageWorkgroupConfig    `yaml:"workgroup"`
+}
+
+// ManageWorkgroupConfig 控制 Node 侧 Workgroup Dialer（Manage WS 工具执行通道）。
+type ManageWorkgroupConfig struct {
+	// Enabled 为 nil 且 manage.enabled 时默认 true（D4）。
+	Enabled *bool `yaml:"enabled"`
 }
 
 // ManageUpdateConfig 控制 Node 向 Manage Release Hub 查询更新。
@@ -613,6 +620,17 @@ func (c *Config) ManageUpdateEnabled() bool {
 	}
 	if c.Manage.Update.Enabled != nil {
 		return *c.Manage.Update.Enabled
+	}
+	return true
+}
+
+// ManageWorkgroupEnabled 是否启动 Workgroup Dialer（须 manage.enabled；nil 默认 true）。
+func (c *Config) ManageWorkgroupEnabled() bool {
+	if c == nil || !c.Manage.Enabled {
+		return false
+	}
+	if c.Manage.Workgroup.Enabled != nil {
+		return *c.Manage.Workgroup.Enabled
 	}
 	return true
 }

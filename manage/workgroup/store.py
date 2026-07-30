@@ -10,7 +10,7 @@ from manage.storage.sqlite import SQLiteDatabase
 from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup import ids
-from manage.workgroup.d3_models import HITLRequest, OutboxFrame, TimelineEvent
+from manage.workgroup.d3_models import HITLRequest, OutboxFrame, Subscription, TimelineEvent
 from manage.workgroup.models import (
     ActorRun,
     ActorRunCreateRequest,
@@ -54,6 +54,8 @@ class WorkGroupStore:
         self._hitl: dict[str, HITLRequest] = {}
         # member_id → {workspace_path, tool_catalog_revision, provision_id}
         self._member_runtime: dict[str, dict[str, str]] = {}
+        # workgroup_id → {node_id: Subscription}
+        self._subscriptions: dict[str, dict[str, Subscription]] = {}
 
     # --- low-level persistence ---
 
@@ -119,6 +121,8 @@ class WorkGroupStore:
             self._outbox[wg] = sorted(frames, key=lambda f: f.delivery_seq)
         for h in self._load_all("workgroup_hitl", HITLRequest):
             self._hitl[h.hitl_id] = h
+        for sub in self._load_all("workgroup_subscriptions", Subscription):
+            self._subscriptions.setdefault(sub.workgroup_id, {})[sub.node_id] = sub
 
     # --- WorkGroup ---
 
@@ -147,12 +151,33 @@ class WorkGroupStore:
             self._acls[wid] = acl
             self._put("workgroups", wid, group.model_dump_json())
             self._put("workgroup_acls", wid, acl.model_dump_json(), workgroup_id=wid)
+            # 创建者自动订阅（§10）
+            sub = Subscription(
+                workgroup_id=wid,
+                node_id=group.created_by_node_id,
+                subscribed_at=now,
+            )
+            self._subscriptions.setdefault(wid, {})[sub.node_id] = sub
+            self._put(
+                "workgroup_subscriptions",
+                f"{wid}:{sub.node_id}",
+                sub.model_dump_json(),
+                workgroup_id=wid,
+            )
             return group, acl
 
-    def list_workgroups(self) -> list[WorkGroup]:
+    def list_workgroups(self, *, subscribed_by: str | None = None) -> list[WorkGroup]:
         with self._lock:
             self._ensure_loaded()
-            return sorted(self._groups.values(), key=lambda g: g.created_at, reverse=True)
+            groups = list(self._groups.values())
+            if subscribed_by:
+                nid = subscribed_by.strip()
+                groups = [
+                    g
+                    for g in groups
+                    if nid in (self._subscriptions.get(g.workgroup_id) or {})
+                ]
+            return sorted(groups, key=lambda g: g.created_at, reverse=True)
 
     def get_workgroup(self, workgroup_id: str) -> WorkGroup | None:
         with self._lock:
@@ -742,6 +767,52 @@ class WorkGroupStore:
                 workgroup_id=workgroup_id,
             )
             return updated
+
+    def subscribe(self, workgroup_id: str, node_id: str) -> Subscription:
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            self.assert_acl_member(workgroup_id, node_id)
+            bucket = self._subscriptions.setdefault(workgroup_id, {})
+            existing = bucket.get(node_id.strip())
+            if existing is not None:
+                return existing
+            sub = Subscription(
+                workgroup_id=workgroup_id,
+                node_id=node_id.strip(),
+                subscribed_at=_now(),
+            )
+            bucket[sub.node_id] = sub
+            self._put(
+                "workgroup_subscriptions",
+                f"{workgroup_id}:{sub.node_id}",
+                sub.model_dump_json(),
+                workgroup_id=workgroup_id,
+            )
+            return sub
+
+    def unsubscribe(self, workgroup_id: str, node_id: str) -> None:
+        with self._lock:
+            self._ensure_loaded()
+            bucket = self._subscriptions.get(workgroup_id) or {}
+            nid = node_id.strip()
+            if nid in bucket:
+                del bucket[nid]
+                self._delete("workgroup_subscriptions", f"{workgroup_id}:{nid}")
+
+    def list_subscribers(self, workgroup_id: str) -> list[Subscription]:
+        with self._lock:
+            self._ensure_loaded()
+            return sorted(
+                (self._subscriptions.get(workgroup_id) or {}).values(),
+                key=lambda s: s.subscribed_at,
+            )
+
+    def is_subscribed(self, workgroup_id: str, node_id: str) -> bool:
+        with self._lock:
+            self._ensure_loaded()
+            return node_id.strip() in (self._subscriptions.get(workgroup_id) or {})
 
     def bump_lease_epochs(self, workgroup_id: str) -> int:
         """归档时抬升组内 grant lease_epoch；返回抬升后的最大 epoch。"""

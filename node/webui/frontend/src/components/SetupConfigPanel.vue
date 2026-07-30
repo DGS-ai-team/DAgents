@@ -139,6 +139,7 @@ function managePayload() {
     ...form.manage,
     a2a_enabled: form.manage.a2a_enabled ?? false,
     accept_inbound: form.manage.accept_inbound ?? false,
+    workgroup_enabled: form.manage.workgroup_enabled ?? true,
   };
 }
 
@@ -328,6 +329,10 @@ onMounted(async () => {
       <label class="settings-toggle">
         <input v-model="form.manage.a2a_enabled" type="checkbox" :disabled="manageFieldsDisabled" />
         <span>启用 A2A Inbox 轮询</span>
+      </label>
+      <label class="settings-toggle">
+        <input v-model="form.manage.workgroup_enabled" type="checkbox" :disabled="manageFieldsDisabled" />
+        <span>启用工作组 Dialer（Manage WS 工具通道）</span>
       </label>
     </section>
   </ConfigPanelShell>

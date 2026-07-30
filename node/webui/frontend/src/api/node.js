@@ -311,3 +311,37 @@ export function uploadPluginToManage({ path, pluginId, version, name, platform =
     body: { path, plugin_id: pluginId, version, name, platform, publish },
   });
 }
+
+/** 本机已订阅工作组列表（经 Node 代理 Manage）。 */
+export function listWorkgroups({ subscribed = true } = {}) {
+  return apiFetch("/v1/workgroups", {
+    params: subscribed ? { subscribed: "1" } : undefined,
+  });
+}
+
+export function subscribeWorkgroup(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/subscribe`, {
+    method: "POST",
+    body: {},
+  });
+}
+
+export function unsubscribeWorkgroup(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/subscribe`, {
+    method: "DELETE",
+  });
+}
+
+export function getWorkgroupTimeline(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/timeline`);
+}
+
+export function postWorkgroupMessage(workgroupId, text, clientMessageId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/messages`, {
+    method: "POST",
+    body: {
+      text,
+      client_message_id: clientMessageId || undefined,
+    },
+  });
+}

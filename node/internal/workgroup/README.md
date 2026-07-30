@@ -19,7 +19,7 @@ Node 侧工作组成员执行器。权威契约见：
 | accepted 重启恢复（不双执行） | ✅ D3 |
 | Manage WS hub + Node envelope dispatch | ✅（`ws_hub` / `DispatchEnvelope`） |
 | Node WebSocket Dialer（hello/resume/分发） | ✅（`dialer.go`，`coder/websocket`） |
-| Node 进程默认自动拨号 | ⏳ 配置开关接入（D4 前可手动 `Dialer.ConnectAndServe`） |
+| Node 进程默认自动拨号 | ✅ D4：`manage.workgroup.enabled`（默认随 manage） |
 
 ## 明确不做
 

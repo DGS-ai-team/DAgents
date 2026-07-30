@@ -131,12 +131,17 @@ class SQLiteDatabase:
                     workgroup_id TEXT NOT NULL,
                     payload_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS workgroup_subscriptions (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
                 -- Blob 元数据随内容寻址文件落在 MANAGE_BLOB_DIR/{sha256}.json sidecar，
                 -- 不入 SQLite；故此处不建 blobs 表。
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','9') "
-                "ON CONFLICT(key) DO UPDATE SET value='9'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','10') "
+                "ON CONFLICT(key) DO UPDATE SET value='10'"
             )
             conn.commit()

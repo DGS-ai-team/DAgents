@@ -15,6 +15,8 @@ from manage.workgroup.d3_models import (
     MemberFinalRequest,
     OutboxFrame,
     ProvisionCompleteRequest,
+    SubscribeRequest,
+    Subscription,
     TimelineEvent,
     ToolResultApplyRequest,
 )
@@ -83,9 +85,11 @@ def build_workgroup_router(store: WorkGroupStore, audit: AuditLog) -> APIRouter:
         return {"workgroup": group, "acl": acl}
 
     @router.get("", response_model=list[WorkGroup])
-    def list_workgroups(request: Request) -> list[WorkGroup]:
+    def list_workgroups(
+        request: Request, subscribed_by: str | None = None
+    ) -> list[WorkGroup]:
         authenticate(request)
-        return store.list_workgroups()
+        return store.list_workgroups(subscribed_by=subscribed_by)
 
     @router.get("/{workgroup_id}", response_model=WorkGroup)
     def get_workgroup(workgroup_id: str, request: Request) -> WorkGroup:
@@ -233,6 +237,55 @@ def build_workgroup_router(store: WorkGroupStore, audit: AuditLog) -> APIRouter:
         if store.get_workgroup(workgroup_id) is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
         return kernel.project(actor_id=actor_id, run_id=run_id, member_id=member_id)
+
+    # --- D4: 持久订阅（与 WS 连接分离）---
+
+    @router.post("/{workgroup_id}/subscribe", response_model=Subscription)
+    def subscribe_workgroup(
+        workgroup_id: str, req: SubscribeRequest, request: Request
+    ) -> Subscription:
+        auth = authenticate(request)
+        ensure_node_identity(request, req.node_id, auth)
+        try:
+            sub = store.subscribe(workgroup_id, req.node_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth, fallback_agent_id=req.node_id),
+            action="workgroup.subscribe",
+            target_agent_id=workgroup_id,
+        )
+        return sub
+
+    @router.delete("/{workgroup_id}/subscribe")
+    def unsubscribe_workgroup(
+        workgroup_id: str, request: Request, node_id: str | None = None
+    ) -> dict:
+        auth = authenticate(request)
+        nid = (node_id or extract_agent_id(request) or "").strip()
+        if not nid:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "schema_mismatch", "message": "node_id required"},
+            )
+        ensure_node_identity(request, nid, auth)
+        try:
+            store.unsubscribe(workgroup_id, nid)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth, fallback_agent_id=nid),
+            action="workgroup.unsubscribe",
+            target_agent_id=workgroup_id,
+        )
+        return {"ok": True, "workgroup_id": workgroup_id, "node_id": nid}
+
+    @router.get("/{workgroup_id}/subscribers", response_model=list[Subscription])
+    def list_subscribers(workgroup_id: str, request: Request) -> list[Subscription]:
+        authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        return store.list_subscribers(workgroup_id)
 
     # --- D3: Timeline / Outbox / HITL / provision complete ---
 

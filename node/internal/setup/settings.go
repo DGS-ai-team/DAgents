@@ -43,6 +43,7 @@ type ManageSettings struct {
 	RegistrationBaseURL         string `json:"registration_base_url"`
 	A2AEnabled                  bool   `json:"a2a_enabled"`
 	AcceptInbound               bool   `json:"accept_inbound"`
+	WorkgroupEnabled            bool   `json:"workgroup_enabled"`
 	NodeToken                   string `json:"node_token"`
 	RegistrationIntervalSeconds int    `json:"registration_interval_seconds"`
 	RegistrationTTLSeconds      int    `json:"registration_ttl_seconds"`
@@ -199,6 +200,10 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 	if cfg.Manage.A2A.Enabled != nil {
 		a2aEnabled = *cfg.Manage.A2A.Enabled
 	}
+	workgroupEnabled := true
+	if cfg.Manage.Workgroup.Enabled != nil {
+		workgroupEnabled = *cfg.Manage.Workgroup.Enabled
+	}
 	return SettingsView{
 		Node: NodeEndpointView{
 			ListenHost:    cfg.Listen.Host,
@@ -221,6 +226,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			RegistrationBaseURL:         cfg.Manage.Registration.BaseURL,
 			A2AEnabled:                  a2aEnabled,
 			AcceptInbound:               cfg.ExposeToPeersEffective(),
+			WorkgroupEnabled:            cfg.ManageWorkgroupEnabled(),
 			NodeToken:                   cfg.Manage.NodeToken,
 			RegistrationIntervalSeconds: cfg.Manage.Registration.IntervalSeconds,
 			RegistrationTTLSeconds:      cfg.Manage.Registration.TTLSeconds,
@@ -500,6 +506,7 @@ func llmProfilesFromConfig(cfg *config.Config) []LLMProfileSettings {
 func applyManagePatch(cfg *config.Config, p ManageSettings) error {
 	cfg.Manage.Enabled = p.Enabled
 	cfg.Manage.NodeToken = strings.TrimSpace(p.NodeToken)
+	cfg.Manage.Workgroup.Enabled = boolPtr(p.WorkgroupEnabled)
 	if p.RegistrationIntervalSeconds > 0 {
 		cfg.Manage.Registration.IntervalSeconds = p.RegistrationIntervalSeconds
 	}
