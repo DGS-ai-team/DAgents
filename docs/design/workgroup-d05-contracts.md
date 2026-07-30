@@ -809,15 +809,16 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 
 ## 13. 完成检查表（退出 D0.5）
 
-- [x] §2 字段无阻塞 TBD（首稿可评审）  
-- [x] §3 状态转换表与 fencing 无歧义（首稿可评审）  
+- [ ] §2 规范字段表达到跨语言可验证（仍欠 JSON Schema 级附录）  
+- [x] §3 状态转换与 fencing 主路径已去歧义（归档映射/`accepted` 恢复已写清）  
 - [x] §4 矩阵与产品正文一致  
-- [x] §5 投影规则 + fixtures 目录（28 用例均有文件；见 `INDEX.json`）  
-- [x] §7 错误码表稳定  
+- [x] §5 投影为确定函数；并行策略冻结为 wait-all  
+- [x] §7 错误码 + accepted 恢复语义  
+- [x] §8 Timeline `seq` vs `delivery_seq` 分离；最小消息目录  
 - [x] §9–§10 威胁与旧数据策略已写入  
-- [x] §12 用例已映射到 fixture 路径  
-- [ ] GPT/人工评审通过并吸收修订  
-- [ ] 产品正文将本文件标为 **D0.5 已冻结**（非起草中）  
+- [x] §12 用例映射；二选一 fixture 已改写；P0 缺失场景已补  
+- [ ] GPT 评审 **Verdict A**（当前 §17 = **B**，补丁后待复审）  
+- [ ] 产品正文将本文件标为 **D0.5 已冻结**  
 - [x] **未**合并未门禁的 Manage turn kernel / Worker 大改  
 
 **退出后下一动作**：D0.9 停 Placement 入口 → D1 Manage 基座。
@@ -828,4 +829,46 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 
 | 日期 | 说明 |
 |------|------|
-| 2026-07-30 | 首稿：承接工作组正文 §0–§13 与 GPT §16.5 清单 |
+| 2026-07-30 | 首稿 |
+| 2026-07-30 | 补全 28 用例 fixtures + INDEX |
+| 2026-07-30 | GPT §17 Verdict B；吸收最短补丁：ID/hash、Member/Turn、投影确定化、HITL 分层闭合、WS delivery_seq、fixture v1 与 P0 场景 |
+
+---
+
+## 17. D0.5 契约 GPT 评审（2026-07-30）
+
+**Verdict：B — 须修订后再冻结**（本轮已按最短补丁集改契约与 fixtures；**须再审一次**方可改 A）。
+
+### 17.1 总评
+
+方向与产品正文一致，无需回到 Placement/Node LLM。阻塞点是：示例 JSON ≠ 可判定契约、投影/WS/HITL/恢复允许多实现并存、fixtures 大量二选一。已开始收紧；尚未宣称冻结。
+
+### 17.2 一致性
+
+一致：工作组唯一跨 Agent 路径；资产绑 Manage；ACL≠Grant；Timeline≠RunHistory；信息型 vs 执行批准；幂等+indeterminate；provider-safe name。
+
+原稿缺口（已修）：`member_generation` 校验链、≤10 快照、`actor_id` 含 `hu_*`、catalog revision 上 command、HITL 按 kind 闭合工具史。
+
+### 17.3 致命项处置
+
+| 项 | 处置 |
+|----|------|
+| Schema 不可独立验证 | 部分：§1.4 hash、未知字段规则；**仍欠**完整 JSON Schema 附录 |
+| 缺 Member/Turn/Run 恢复模型 | ✅ §2.0 / §2.7 |
+| Projector 非确定 | ✅ §5.2–5.3 wait-all + buffer + ≤10 |
+| ToolCommand 安全字段不足 | ✅ generation + catalog revision；恢复语义 §3.5/§7.2 |
+| WS seq 歧义 | ✅ `delivery_seq` 分离 + 消息目录 |
+| 执行批准 TOCTOU | ✅ command/hash 绑定；approved 执行 / denied 合成错误 |
+
+### 17.4 Fixtures
+
+- 原 28 用例已映射；二选一文件已改写为单一期望  
+- 新增 vertical/grant/recover/open-tool/approval-bound/cursor/member_assets  
+- **仍非**最终跨语言 golden：缺统一机器 comparator 与完整 given 状态图；复审聚焦可执行性  
+
+### 17.5 冻结前剩余（复审清单）
+
+1. 附录：JSON Schema（或等价字段表）覆盖核心类型  
+2. `assign_workgroup_task` 参数/终态结果 schema  
+3. fixtures 再扫模糊动作；补齐前置 ACL/Grant 状态块  
+4. 复审 GPT → Verdict A 后再勾 §13 冻结项  
