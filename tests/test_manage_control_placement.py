@@ -75,6 +75,53 @@ class ManageControlPlacementTests(unittest.TestCase):
             self.assertTrue(node["allow_peer_create"])
             self.assertTrue(node["allow_screen_view"])
 
+    def test_peers_list_includes_ops_nodes_without_a2a_expose(self) -> None:
+        """回归：ops 角色注册 expose_to_peers=false，同组仍应出现在 Placement peers。"""
+        with TemporaryDirectory() as tmp:
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
+            app = create_app(settings)
+            with TestClient(app) as client:
+                for nid in ("owner-ops", "home-ops"):
+                    reg = client.post(
+                        "/v1/registry/agents",
+                        json={
+                            "agent_id": nid,
+                            "base_url": f"http://{nid}.local",
+                            "name": nid,
+                            "expose_to_peers": False,
+                            "metadata": {
+                                "host_info": {"os_kind": "linux", "sys_platform": "linux"},
+                                "placement": {"allow_peer_create": True, "allow_screen_view": False},
+                            },
+                        },
+                    )
+                    self.assertEqual(reg.status_code, 200, reg.text)
+                    groups = client.patch(
+                        f"/v1/registry/agents/{nid}/groups",
+                        json={"discovery_group": ["demo"]},
+                    )
+                    self.assertEqual(groups.status_code, 200, groups.text)
+                    hb = client.post(f"/v1/registry/agents/{nid}/heartbeat", json={"ttl_seconds": 300})
+                    self.assertEqual(hb.status_code, 200, hb.text)
+
+                peers = client.get(
+                    "/v1/control/peers",
+                    headers={"x-dagents-agent-id": "owner-ops"},
+                )
+            self.assertEqual(peers.status_code, 200, peers.text)
+            body = peers.json()
+            self.assertEqual(len(body["nodes"]), 1)
+            self.assertEqual(body["nodes"][0]["node_id"], "home-ops")
+            self.assertTrue(body["nodes"][0]["allow_peer_create"])
+
+            # A2A discover 仍应过滤掉未 expose 的节点
+            discover = client.get(
+                "/v1/registry/agents/discover",
+                headers={"x-dagents-agent-id": "owner-ops"},
+            )
+            self.assertEqual(discover.status_code, 200, discover.text)
+            self.assertEqual(discover.json().get("agents") or [], [])
+
     def test_create_and_delete_via_home_mock(self) -> None:
         with TemporaryDirectory() as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")

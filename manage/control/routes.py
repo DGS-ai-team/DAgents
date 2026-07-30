@@ -17,7 +17,7 @@ from manage.control.models import (
 from manage.control.node_client import call_home_create_agent, call_home_delete_agent
 from manage.platform.audit import AuditLog
 from manage.platform.auth import audit_actor, authenticate, ensure_node_identity
-from manage.registry.store import AgentRegistryStore
+from manage.registry.store import AgentListQuery, AgentRegistryStore, record_node_id
 
 
 def _host_from_metadata(metadata: dict[str, Any] | None) -> ControlHostInfo:
@@ -87,16 +87,21 @@ def build_control_router(registry: AgentRegistryStore, audit: AuditLog) -> APIRo
         # 无分组时仍返回空列表（需先在 Console 分配 discovery_group）
         nodes: list[PeerNodeView] = []
         if caller_groups:
-            for item in registry.discover(discovery_group=None, caller_groups=caller_groups):
-                if item.agent_id == caller:
+            # Placement peers ≠ A2A discover：ops 节点默认 expose_to_peers=false，
+            # 但仍可作远端创建的 home；这里只按同组 + online，用 placement.allow_* 标注能力。
+            online, _ = registry.list(
+                AgentListQuery(discovery_group=None, status="online", page=1, page_size=10_000)
+            )
+            for full in online:
+                nid = record_node_id(full) or full.agent_id
+                if full.agent_id == caller or nid == caller:
                     continue
-                full = registry.get(item.agent_id)
-                if full is None or not full.expose_to_peers:
+                if not any(group in full.discovery_group for group in caller_groups):
                     continue
                 allow_create, allow_screen = _placement_flags(full.metadata)
                 nodes.append(
                     PeerNodeView(
-                        node_id=full.node_id or full.agent_id,
+                        node_id=nid,
                         name=full.name or full.agent_id,
                         status=full.status,
                         discovery_group=list(full.discovery_group),
@@ -134,8 +139,7 @@ def build_control_router(registry: AgentRegistryStore, audit: AuditLog) -> APIRo
             raise HTTPException(status_code=404, detail="target_not_found")
         if home.status != "online":
             raise HTTPException(status_code=409, detail="target_offline")
-        if not home.expose_to_peers:
-            raise HTTPException(status_code=403, detail="target_not_exposed")
+        # Placement 创建不要求 A2A expose_to_peers（ops 节点默认为 false）
         allow_create, _ = _placement_flags(home.metadata)
         if not allow_create:
             raise HTTPException(status_code=403, detail="peer_create_disabled")
