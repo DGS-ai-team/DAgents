@@ -2,166 +2,182 @@
 
 > **分支**：`cursor/remote-agent-placement-7e3e`  
 > **状态**：方案讨论中（未开工实现）  
-> **范围**：重构 A2A 协作模型；统一 Node↔Manage 实时信令；清理轮询/进程级角色遗留  
-> **非目标（本设计）**：键鼠远程控制；浏览器直连 home；用 Placement Edge 冒充协作信道
+> **推荐方向**：Manage 编排组会话 + 隐式云 Leader；Node 独聊 + 工具执行 + 组聊订阅  
 
 ---
 
-## 0. 已拍板（2026-07-30）
+## 0. 已拍板
 
 | 项 | 决策 |
 |----|------|
-| Agent ↔ 工作组 | **一对一**：一个 Agent 只属于一个工作组 |
-| `@` 语义 | **同步交接**：当前对话 pause，交给目标 Agent 跑完再回来 |
-| browse Leader | **同组即允许**，记审计即可，不要二次 HITL |
+| Agent ↔ 工作组 | **一对一**（成员 Agent）；一个成员 Agent 只属于一个工作组 |
+| `@` | **同步交接**（pause → 成员跑完 → resume） |
+| browse Leader | **同组即允许**，审计即可 |
+| Leader | **隐式云 Agent**：随工作组/组会话创建而创建，**不是**某 Node 上已有 Agent |
+| Leader / 组会话 LLM | **仅 Manage 云配置**；Manage 维护**独立** LLM 配置清单（与 Node 档案分离） |
+| 成员来源 | **只支持新建**；**不支持**把已有本地/远端 Agent「拉进组」 |
+| 入组历史 | **不存在**迁移问题；组会话随 Leader 从空开始 |
+| 组聊可见性 | 任意 Node 可 **订阅** 组会话：实时看消息、参与 HITL、以不同 `human_name` 发消息 |
+| UI | `/ui` 左侧与本地 Agent 清单 **分栏**：本地 Agents ‖ 已订阅工作组 |
 
 ---
 
-## 0.1 架构分叉：谁跑 LLM loop？
+## 1. 合适性结论（对本版）
 
-### 方案 A — Node 编排（初稿，**不推荐**）
+**合适，且比「本地 Agent 当 Leader / 拉已有 Agent 入组」更干净。**
 
-```text
-用户 ↔ Node(Leader LLM+工具) --@--> Manage 仅路由 --→ Node(Member LLM+工具)
-```
-
-协作状态散落多 Node；同步 `@` 要跨机卡住等结果；与 Placement/本地 turn 缠在一起 → **心智最复杂**。
-
-### 方案 B — Manage 编排（**推荐，采纳讨论结论**）
-
-```text
-独聊（不跨 Agent）
-  用户 ↔ Node：LLM + 工具（保持简单）
-
-工作组 / 跨 Agent（必须建组）
-  用户 ↔ Node UI（建议 Node 作 BFF）
-        → Manage：工作组状态 + Leader/成员 LLM loop + 同步 @
-        → 工具 RPC → 各 agent 的 home Node 执行
-```
-
-| 职责 | Manage | Node |
-|------|--------|------|
-| 工作组 / leader / 成员 | ✅ 真源 | 缓存 |
-| 组会话 + 同步 `@` | ✅ | 不持有组回合状态 |
-| 组内 LLM loop | ✅ | ❌ |
-| 工具执行 | 调度 | ✅ 按 home `agent_id` |
-| 独聊 | ❌ | ✅ |
-| Placement / Edge | 控制面+隧道 | home 实例 |
-| 旧 `agent_invoke` | **废除**；跨 Agent **必须**经工作组 | — |
-
-**一句话：** Node = 本机独聊运行时 + 组协作的工具执行器；Manage = 工作组大脑；**没有工作组就没有跨 Agent A2A。**
-
-### 会不会更复杂？
-
-- **整体分支变少**：禁止 Node 侧第二套跨 Node 编排。  
-- **复杂收拢到 Manage**：同步交接、权限、审计只实现一次。  
-- **Node 变窄**：WS 上主要是 `tool.execute` / HITL / announce。  
-- **代价**：Manage 变重（LLM、组会话、关键路径）；Key/模型来源、HITL、UI BFF 要产品说清（见 §10）。
-
-复杂度从「多 Node 隐性双轨」变成「Manage 显性集中」——更可控。
-
-### 权威上下文（方案 B）
-
-组生命周期内，Leader 主对话真源在 **Manage 组会话**；`@` 近 10 条与 `browse_leader_context` 都读 Manage，不必为切片再跨 Node。
-
----
-
-## 1. 决策摘要（方案 B）
-
-| 项 | 决策 |
-|----|------|
-| 协作单元 | **工作组** ≠ `discovery_group` |
-| 成员 | Agent 实例；一 Agent 一组 |
-| 跨 Agent | 必须经工作组 |
-| `@` | Manage 内同步交接 + 近 ≤10 条 |
-| browse | 同组读 Manage 上 Leader 组会话 |
-| 传输 | 每 Node 一条 WebSocket（信令 + tool RPC） |
-| 独聊 | 仍在 Node |
-| Placement | 独立（住哪台机器 ≠ 谁编排对话） |
-
----
-
-## 2. 背景
-
-现网 A2A：Node 级信箱 + HTTP 轮询，无实例寻址、无组、无同步交接。方案 B 用 Manage 组会话 + WS 工具 RPC 替换。
-
----
-
-## 3. 术语
-
-| 术语 | 含义 |
+| 优点 | 说明 |
 |------|------|
-| **WorkGroup** | Manage 协作组织 |
-| **组会话** | Manage 持有的组内消息真源 |
-| **独聊** | 无跨 Agent 时 Node 本地主对话 |
-| **discovery_group** | Placement 用 Node 分区 |
-| **工具 Worker** | Node 按 `agent_id` 执行工具，不跑组 LLM |
+| 身份不拧巴 | Leader 天生属于 Manage，不再纠结「哪个 Node 上的谁是 Leader」 |
+| 编排与配置同地 | 组 LLM loop + LLM 清单都在 Manage，无跨 Node 抢 Key |
+| 生命周期简单 | 建组 = 建 Leader + 空会话；解散 = 收掉云 Leader 与组会话 |
+| UI 心智清晰 | 本地助手 vs 云协作组，分栏不混 |
+| 多 Node 协作 | 订阅模型天然支持「多人多端看同一组聊 + HITL」 |
+| 砍掉迁移 | 禁止已有 Agent 入组 → 无 transcript 合并、无归属冲突 |
 
-第一版：成员 home Node 须满足 discovery 可见性（或同 Node）。
+**需要自觉接受的代价：**
+
+1. Manage 成为组协作的**强依赖**（LLM、会话、订阅扇出）。  
+2. 成员 Agent 仍要有 **home Node**（工具/沙箱落地处）——创建成员时必须指定跑在哪台 Node（或走 Placement）。  
+3. Leader 作为云 Agent：**默认不应假设有本地 FS**；重活通过 `@` 交给带 home 的成员，或显式绑定「工具执行 Node」（见 §10 开放项）。  
+4. 与旧 A2A / 本地 Agent 目录彻底分家——产品上要讲清「本地助手」和「工作组」是两样东西。
+
+**总评：方向正确，建议按此冻结主体；把「成员创建落点」和「Leader 是否绑工具 Node」两点定掉即可开工。**
 
 ---
 
-## 4. 工作组模型
-
-### 4.1 数据（Manage）
+## 2. 概念模型
 
 ```text
-WorkGroup {
-  group_id, name, leader_agent_id
-  members[]: { agent_id, home_node_id, display_name }
-  session: { messages[], assign_stack[] }   # 组会话
-}
+Manage
+  LLM 配置清单（云）
+  WorkGroup
+    ├── LeaderAgent（隐式，云，随组创建）
+    ├── GroupSession（消息真源，Manage）
+    ├── MemberAgents[]（新建 only，各有 home_node_id）
+    └── Subscribers[]（node_id / 操作者，可多 Node）
+
+Node
+  本地 Agents（独聊，LLM+工具）—— 与工作组无关
+  订阅的工作组（UI 分栏）—— 看组聊 / HITL / 发 human 消息
+  工具 Worker —— 执行「落在本机 home 的成员」的 tool_call
 ```
 
-### 4.2 HTTP 控制面
+### 2.1 三角色
 
-CRUD、加人/移出、选 leader；实例仍先本地或 Placement 创建，再入组。
+| 角色 | 是什么 | 做什么 |
+|------|--------|--------|
+| **Leader（云）** | 组隐式 Agent | Manage 上跑 LLM；`@` 同步交接；持有组会话权威上下文 |
+| **Member（新建）** | 组内工作 Agent | 被 `@`；可 `browse_leader_context`；工具在 **home Node** |
+| **Subscriber（人/端）** | 订阅了该组的 Node 会话 | 实时组聊、HITL、以 `human_name` 发言；**不是**组内 Agent |
 
-### 4.3 同步 `@`
+本地 Agent 清单里的实例 **不会**变成 Leader，也 **不能**直接变成成员。
 
-1. Manage 跑 Leader LLM；工具 → Leader home Node  
-2. 遇 `@`：pause Leader，开 Member 回合（instruction + 近 ≤10 条），Member 工具 → Member home  
-3. Member 结束 → 结果写入组会话 → resume Leader  
+### 2.2 与 discovery_group / Placement
 
-### 4.4 browse
-
-Member 工具读 Manage 组会话；同组鉴权；审计。
-
----
-
-## 5. 工具
-
-| 工具 | 谁 | 哪里执行 |
-|------|----|----------|
-| `assign_workgroup_task` | Leader | Manage 编排器内 |
-| `browse_leader_context` | Member | Manage 读组会话 |
-| FS/Shell/Browser… | 当前回合 Agent | home Node via WS |
-
-旧 `agent_invoke` / `agent_discover`：主路径删除。
+- `discovery_group`：仍只服务 Placement / peers（Agent 能建在哪台 Node）。  
+- 创建 **Member** 时：在 UI 选 home Node（本机或同 discovery_group 可 Placement 的 Node）→ 新建实例 → 写入工作组成员表。  
+- Leader：**不**占用 Placement，不住在某 Node。
 
 ---
 
-## 6. WebSocket
+## 3. 生命周期
 
-`hello` / `ping` / `node.announce` / `tool.execute|result|need_hitl`；可选 `ui.proxy`。  
-删除 inbox long poll、task 短 poll、caller_input wait、HTTP 心跳。
+### 3.1 创建工作组
+
+1. 调用方（某 Node 已登录/已连 Manage）`POST /v1/workgroups`  
+2. Manage：创建 WorkGroup + **隐式 LeaderAgent** + 空 GroupSession  
+3. 选用 Manage LLM 清单中的档案（创建时指定或用默认）  
+4. 创建者所在 Node **自动订阅**该组  
+
+### 3.2 新建成员（唯一加人方式）
+
+1. `POST /v1/workgroups/{id}/members`：`display_name` + `home_node_id` + 模板/默认工具策略等  
+2. Manage 经 Control/Placement 或内部 RPC 在 home Node **新建** Agent 实例  
+3. 记入成员表；该 Agent **不可**再加入其他组；**不可**从「已有 Agent」迁入  
+
+### 3.3 解散
+
+解散组 → 归档/删除组会话与云 Leader；成员实例策略：**默认归档或删除 home 上实例**（实现期二选一，建议默认归档）。
 
 ---
 
-## 7. Placement
+## 4. 组会话与同步 `@`
 
-解决「Agent 住哪」；工作组解决「谁协作、谁跑 LLM」。远端 Agent：工具在 home，组会话在 Manage。
+- 组消息真源在 Manage。  
+- Leader 回合：Manage 用**云 LLM 清单**调用模型。  
+- Leader 若发出工具调用：  
+  - 元工具（`@`、列成员）在 Manage 内完成；  
+  - 若允许 Leader 绑「工具 Node」（可选），再 WS `tool.execute`；**v1 可禁止 Leader 本地工具，只允许 `@`**。  
+- `@`：同步 pause Leader → Member 回合（instruction + 近 ≤10 条组消息）→ Member 工具打到其 home Node → 结果回写 → resume Leader。  
+- `browse_leader_context`：Member 读 Manage 组会话。
 
 ---
 
-## 8. 过时逻辑
+## 5. 订阅、HITL、发消息
 
-| 项 | 动作 |
+### 5.1 订阅
+
+- Node 经 WS / HTTP：`subscribe(group_id)` / `unsubscribe`  
+- 订阅后收：`session.message`、`hitl.request`、`assign.*` 等推送  
+- 多 Node 可同时订阅同一组（扇出）
+
+### 5.2 Human 消息
+
+- `POST` 或 WS：`human_name` + `text`（或多模态后续）  
+- 写入组会话，role=user，带 `human_name` / `from_node_id`  
+- 不同订阅端用不同 human_name，便于区分操作者  
+
+### 5.3 HITL
+
+- 成员（或 Leader 若有工具）在 home Node 触发审批 → Node → Manage → **所有订阅端**可见并可由任一端应答（需幂等：一笔 HITL 只接受一次 resolve）
+
+### 5.4 UI（`/ui`）
+
+```text
+左侧
+  ┌ 本地 Agents ─────┐
+  │ Agent A          │
+  │ Agent B          │
+  ├ 工作组（已订阅）──┤
+  │ WG 「发布评审」   │  ← 点进组聊，不是本地 Agent 页
+  │ WG 「客服值班」   │
+  └──────────────────┘
+```
+
+组聊页：时间线 + HITL + 输入框（选 human_name）+ 成员/Leader 状态；不与单 Agent 独聊页混用同一 store。
+
+---
+
+## 6. Node↔Manage 长连接
+
+每 Node 一条 WebSocket：
+
+| 帧 | 用途 |
 |----|------|
-| Node 级 invoke/discover | 废除 |
-| InboxPoller / 临时 a2a session | 删除 |
-| Node 实现 `@`/browse | 不实现 |
-| 「Manage 不跑 turn」 | **修订**：独聊不跑；**组回合 Manage 跑** |
+| hello / ping / announce | 存活与目录 |
+| workgroup.subscribe fanout | 组事件 |
+| tool.execute / result / need_hitl | 成员（及可选 Leader）工具 |
+| human.message / hitl.resolve | 订阅端输入 |
+
+废除：旧 A2A inbox 轮询、task 短 poll、HTTP 心跳作主路径。
+
+---
+
+## 7. Manage 云 LLM 清单
+
+- Manage 设置/Console：独立 `llm_profiles`（与 Node `llm_configs.db` 分离）  
+- 工作组创建时绑定 `llm_profile_id`；可改绑  
+- Key 只存 Manage 侧；Node 独聊仍用 Node 档案  
+
+---
+
+## 8. 明确不做
+
+- 已有 Agent 加入/移入工作组  
+- 本地 Agent 升为 Leader  
+- 无工作组的跨 Agent `agent_invoke`（主路径）  
+- 把 Node 独聊历史合并进组会话  
 
 ---
 
@@ -169,27 +185,25 @@ Member 工具读 Manage 组会话；同组鉴权；审计。
 
 | Phase | 内容 |
 |-------|------|
-| D0 | 拍板 B（本文） |
-| D1 | WorkGroup HTTP + UI |
-| D2 | Node WS + tool worker |
-| D3 | 组会话 + Leader loop + 同步 `@` |
-| D4 | Member loop + browse |
-| D5 | UI BFF 组聊；拆旧 A2A |
-| D6 | LLM 配置 / HITL / HA |
+| D0 | 本文主体冻结（讨论收口） |
+| D1 | WorkGroup + 隐式 Leader + Manage LLM 清单 + HTTP |
+| D2 | Node WS + 订阅扇出 + UI 分栏只读组聊 |
+| D3 | Human 发言 + HITL 多端 |
+| D4 | 新建 Member（指定 home）+ 同步 `@` + browse |
+| D5 | 拆旧 A2A；文档/案例 |
 
 ---
 
-## 10. 开工前仍待确认
+## 10. 开工前最后开放项
 
-1. 组会话 LLM：Manage 全局模型，还是跟随 Leader 在 Node 的绑定档案（Manage 代调）？  
-2. UI：组聊经 **Node BFF**（建议）还是浏览器直连 Manage？  
-3. 入组后：组会话从空开始，还是迁移原 Node 独聊历史？  
+1. **Leader v1 是否允许任何 Node 侧工具？**  
+   - 建议 **否**：Leader 只编排 + `@`；执行一律 Member。  
+2. **新建 Member 失败（home 离线）时**：组仍建成功、成员挂 pending，还是整笔失败？  
+3. **解散组时成员实例**：归档 vs 删除。  
+4. **订阅ACL**：同 discovery_group 任意 Node 可订，还是要邀请码/白名单？  
 
 ---
 
-## 11. 相关锚点
+## 11. 一句话
 
-- Placement：`remote-agent-placement.md`  
-- 清理清单：`node-centric-architecture-cleanup.md`  
-- 实例模型：`agent-instance-model.md`  
-- 旧「Manage 不跑 turn」：`manage-architecture.md`（将被修订）
+工作组 = Manage 上的云协作房间：隐式云 Leader + 云 LLM + 组会话；成员只能新建并落在某 Node 上跑工具；各 Node 通过订阅参与组聊/HITL；本地 Agent 与工作组分栏、互不掺和。
