@@ -1,0 +1,17 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
+  "test": "tool_cmd_result_persisted_reply_lost",
+  "given": {
+    "command_id": "cmd_01hcmd01xxxxxxxx",
+    "journal_status": "succeeded",
+    "manage_saw_ack": false
+  },
+  "when": "manage_resend_same_command_id",
+  "then": {
+    "status": "succeeded",
+    "executions": 1,
+    "result_replayed": true
+  }
+}

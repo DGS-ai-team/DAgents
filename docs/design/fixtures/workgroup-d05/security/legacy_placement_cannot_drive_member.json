@@ -1,9 +1,29 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "legacy_placement_cannot_drive_member",
+  "given": {
+    "member_id": "mb_01hmember01xxxxxx",
+    "run_status": "ready"
+  },
   "attempts": [
-    "POST /v1/peers/nodes placement create",
-    "A2A agent_invoke targeting mb_01",
-    "Edge tunnel chat as remote agent"
+    {
+      "kind": "placement_create"
+    },
+    {
+      "kind": "a2a_agent_invoke",
+      "target": "mb_01hmember01xxxxxx"
+    },
+    {
+      "kind": "edge_tunnel_chat"
+    }
   ],
-  "expected": "rejected_or_noop_member_run_unchanged"
+  "then": {
+    "each_attempt": {
+      "accepted": false,
+      "code": "not_authorized"
+    },
+    "member_run_unchanged": true
+  }
 }

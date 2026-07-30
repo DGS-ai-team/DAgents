@@ -1,5 +1,6 @@
 {
   "schema_version": "0.5.0",
+  "fixture_schema": "workgroup-d05-fixture/v1",
   "root": "docs/design/fixtures/workgroup-d05",
   "tests": [
     {
@@ -18,6 +19,16 @@
       "subcase": null
     },
     {
+      "file": "grant/acl_without_grant_denied.json",
+      "test": "acl_without_grant_denied",
+      "subcase": null
+    },
+    {
+      "file": "grant/digest_generation_fenced.json",
+      "test": "digest_generation_fenced",
+      "subcase": null
+    },
+    {
       "file": "hitl/double_resolve_cas.json",
       "test": "hitl_double_resolve_cas",
       "subcase": null
@@ -25,6 +36,11 @@
     {
       "file": "hitl/exactly_once_tool_result_resume.json",
       "test": "hitl_exactly_once_tool_result_resume",
+      "subcase": null
+    },
+    {
+      "file": "hitl/execution_approval_payload_bound.json",
+      "test": "hitl_execution_approval_payload_bound",
       "subcase": null
     },
     {
@@ -53,6 +69,11 @@
       "subcase": null
     },
     {
+      "file": "member_assets/manage_authoritative.json",
+      "test": "member_assets_manage_authoritative",
+      "subcase": null
+    },
+    {
       "file": "messaging/concurrent_human_total_order_by_seq.json",
       "test": "concurrent_human_total_order_by_seq",
       "subcase": null
@@ -70,6 +91,11 @@
     {
       "file": "projection/deepseek_leader_sees_member_final.json",
       "test": "projection_deepseek_assistant_name_fallback",
+      "subcase": null
+    },
+    {
+      "file": "projection/open_tool_call_buffers_timeline.json",
+      "test": "open_tool_call_buffers_timeline",
       "subcase": null
     },
     {
@@ -133,8 +159,28 @@
       "subcase": null
     },
     {
+      "file": "tool_command/recover_accepted_before_running.json",
+      "test": "tool_cmd_recover_accepted_before_running",
+      "subcase": null
+    },
+    {
       "file": "tool_command/resend_before_accept.json",
       "test": "tool_cmd_resend_before_accept",
+      "subcase": null
+    },
+    {
+      "file": "tool_command/result_persisted_reply_lost.json",
+      "test": "tool_cmd_result_persisted_reply_lost",
+      "subcase": null
+    },
+    {
+      "file": "vertical/two_node_read_file_happy_path.json",
+      "test": "vertical_two_node_read_file_happy_path",
+      "subcase": null
+    },
+    {
+      "file": "ws/cursor_too_old_resync.json",
+      "test": "ws_cursor_too_old_resync",
       "subcase": null
     },
     {

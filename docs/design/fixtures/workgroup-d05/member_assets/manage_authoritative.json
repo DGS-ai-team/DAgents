@@ -1,0 +1,27 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
+  "test": "member_assets_manage_authoritative",
+  "given": {
+    "member_spec_on_manage": {
+      "soul_md": "FROM_MANAGE",
+      "allow_names": [
+        "read_file"
+      ]
+    },
+    "home_node_legacy_files": {
+      "prompt_context/soul.md": "FROM_NODE_LOCAL"
+    }
+  },
+  "when": "provision_and_member_turn",
+  "then": {
+    "system_prompt_contains": "FROM_MANAGE",
+    "system_prompt_excludes": "FROM_NODE_LOCAL",
+    "node_has_authoritative_soul_file_for_member": false,
+    "tools_effective": [
+      "read_file"
+    ],
+    "not_fallback_to_node_default_groups": true
+  }
+}

@@ -1,11 +1,11 @@
 # 工作组 D0.5 契约（开工门槛）
 
-> **状态**：起草中 → 评审通过后冻结为 D1 实现依据  
+> **状态**：**起草中（GPT Verdict B）** — 已吸收首轮评审补丁；须完成 §13 剩余项后才能冻结  
 > **产品方向**：[`workgroup-and-node-gateway.md`](./workgroup-and-node-gateway.md)（§0–§13）  
 > **本文件职责**：可测试的 schema、状态机、权限矩阵、投影规则、WS/工具恢复协议、威胁模型、旧数据处置、契约测试清单  
 > **规范优先级**：产品正文 §0–§13 > **本文** > 历史审核 §15/§16  
-> **完成定义**：下列各章无「TBD」阻塞项，且 §12 契约测试用例可写成跨语言 fixtures 目录结构
-
+> **完成定义**：§13 检查表全部勾选；fixtures 符合 `workgroup-d05-fixture/v1` 且无二选一期望  
+> **评审**：见 §17
 ---
 
 ## 0. 范围与非目标
@@ -45,45 +45,83 @@
 |------|------|------|
 | `workgroup_id` | `wg_<ulid/uuid>` | Manage 生成 |
 | `member_id` | `mb_<ulid>` | Manage 预发；≠ 本地 `agt-…` |
-| `actor_id` | `leader` 或 `mb_<…>` | 服务端盖章 |
-| `human_id` | `hu_<ulid>` | 同 Node 多展示名时稳定 id；未辨识可用字面 `human` |
-| `run_id` / `turn_id` / `assign_id` | `rn_` / `tn_` / `as_` + ulid | |
+| `actor_id` | `leader` \| `mb_<ulid>` \| `hu_<ulid>` \| 字面 `human` | 服务端盖章；Timeline 说话人 |
+| `human_id` | `hu_<ulid>` | 同 Node 多展示名时稳定 id；未辨识可用字面 `human` 作为 actor_id |
+| `run_id` / `turn_id` / `assign_id` | `rn_` / `tn_` / `as_` + **小写** ulid | `turn_id` = 单次模型往返；属 ActorRun |
 | `event_id` | `ev_<ulid>` | Timeline 主键 |
-| `seq` | uint64 | **每 workgroup 单调**；Manage DB 事务内分配 |
+| `seq` | uint64 | **Timeline 事件**每 workgroup 单调；Manage DB 事务内分配 |
+| `delivery_seq` | uint64 | **WS 投递**单调序号（可跨类型）；与 Timeline `seq` **分离** |
 | `tool_call_id` | provider 风格 id | 与 LLM 返回一致 |
 | `command_id` | `cmd_<ulid>` | Manage 生成；Node journal 键 |
 | `provision_id` | `pv_<ulid>` | 幂等 provision |
 | `lease_id` | `ls_<ulid>` | |
 | `lease_epoch` | uint64 | fencing；Grant/归档递增 |
-| `connection_generation` | uint64 | 同 node_id 新连接递增 |
-| `client_message_id` | 客户端 ulid | human/HITL 去重 |
+| `member_generation` | uint64 | 成员规格世代；Command/Grant 必校验 |
+| `connection_generation` | uint64 | 同 node_id 新连接递增；存在于 session 上下文与 ack |
+| `client_message_id` | 客户端 **小写** ulid | human/HITL 去重 |
 | `schema_version` | semver 字符串 | 信封与快照 |
-| `payload_hash` | `sha256:<hex>` | 命令体规范 JSON 哈希 |
-| `tool_catalog_revision` | 字符串/哈希 | Node 上报工具清单版本 |
-| `member_spec_digest` | `sha256:<hex>` | MemberSpec 规范序列化哈希 |
+| `payload_hash` | `sha256:` + 64 hex | 见 §1.4 |
+| `tool_catalog_revision` | 非空字符串 | Node 上报工具清单版本 |
+| `member_spec_digest` | `sha256:` + 64 hex | 见 §1.4 |
 
+**ID 编码**：前缀后的 ulid **一律小写** `[0-9a-z]`；fixtures 与生产相同。  
 **协议 `message.name`（provider-safe）**：`^[a-z][a-z0-9_]{0,63}$`  
 允许：`leader` / `date` / `human` / `human_<id>` / `member_<id>` / `workgroup_assign`  
+工具函数名亦须匹配同一字符集（现网工具名已满足）。  
 **禁止**：display_name、中文、空格、冒号、任意用户输入直接入 `name`。
 
 ### 1.2 时间与错误
 
-- 时间一律 UTC RFC3339 / 毫秒 epoch（实现二选一，fixtures 用 RFC3339）  
-- 错误类型稳定枚举（见 §7.4）；对客户端给 `code` + `message` + 可选 `retryable`
+- **Wire 时间固定**：UTC RFC3339（例 `2026-07-30T07:00:00.000Z`）；内部存储可另选  
+- 错误：`code`（§7.4）+ `message` + 可选 `retryable:bool`
 
 ### 1.3 权威存储
 
 | 数据 | 权威 |
 |------|------|
-| ACL、Grant、MemberSpec、Timeline、RunHistory、Assign、HITL | **Manage** |
+| ACL、Grant、MemberSpec、WorkGroupMember、Timeline、RunHistory、Assign、HITL | **Manage** |
 | command journal、WorkerBinding、本地 policy 引擎 | **home Node** |
 | WS | 传输；**不是**事实源 |
+
+### 1.4 Canonical JSON 与 digest/hash
+
+跨语言计算 `member_spec_digest` / `payload_hash`：
+
+1. UTF-8 JSON  
+2. 对象键 **字典序** 递归排序  
+3. 无无意义空白（紧凑）  
+4. 数字不改写；字符串按 JSON 标准转义  
+5. 哈希输入 **不含** 自身 `digest`/`payload_hash` 字段  
+6. 输出 `sha256:` + 小写 hex（64）
+
+`ToolCommand.payload_hash` 覆盖：`tool_name`、`arguments_json`（规范后）、`member_id`、`assign_id`、`tool_call_id`、`member_spec_digest`、`member_generation`、`lease_epoch`、`tool_catalog_revision`。
 
 ---
 
 ## 2. Schema（逻辑 JSON）
 
-> 下列为契约形状，非最终 ORM。字段名冻结；可加可选字段但不得改变必填语义。
+> 字段名冻结。未知字段：安全相关键（`*_hash`/`digest`/`lease_*`/`generation`）→ **拒绝**；其余可忽略但不得写入 digest 输入。  
+> `schema_version` 主版本不兼容则拒绝。
+
+### 2.0 WorkGroupMember（Manage 权威）
+
+```json
+{
+  "member_id": "mb_…",
+  "workgroup_id": "wg_…",
+  "home_node_id": "node_…",
+  "display_name": "代码员",
+  "status": "ready",
+  "member_generation": 1,
+  "member_spec_digest": "sha256:…",
+  "active_assign_id": null,
+  "created_at": "…",
+  "archived_at": null
+}
+```
+
+必填：除 `active_assign_id`/`archived_at` 外均必填。  
+`memory.remember_enabled` **v1 必须为 false**；`skills`/`hooks` **必须为** `"disabled"`（见 MemberSpec）。
 
 ### 2.1 WorkGroup
 
@@ -172,6 +210,8 @@
 - 创建时 Manage 计算 `digest`；之后只读  
 - **禁止**只存 `template_id` 代替正文/工具名  
 - **禁止** Node 从本机 `prompt_context` / 独聊模板继承  
+- v1：`memory.remember_enabled` 必须 `false`；`skills`/`hooks` 必须 `"disabled"`  
+- `tools.allow_names: []` = **无工具**（禁止回退 Node 默认组）
 
 ### 2.5 WorkerBinding（Node 本地）
 
@@ -214,7 +254,7 @@
 
 **禁止**默认写入 raw `tool_arguments` / `tool_result` 正文。
 
-### 2.7 ActorRun / RunMessage
+### 2.7 ActorRun / Turn / RunMessage
 
 ```json
 {
@@ -224,14 +264,31 @@
   "assign_id": "as_…",
   "status": "running",
   "llm_profile_revision": "…",
+  "timeline_watermark_seq": 41,
+  "checkpoint_ordinal": 7,
   "created_at": "…"
 }
 ```
+
+`ActorRun.status`：`running` | `awaiting_hitl` | `succeeded` | `failed` | `canceled` | `indeterminate`
+
+```json
+{
+  "turn_id": "tn_…",
+  "run_id": "rn_…",
+  "ordinal": 3,
+  "status": "open",
+  "created_at": "…"
+}
+```
+
+Turn = 单次模型往返（含其 tool_calls 收集）。`status`：`open` | `closed` | `aborted`
 
 ```json
 {
   "run_id": "rn_…",
   "ordinal": 7,
+  "turn_id": "tn_…",
   "role": "assistant",
   "protocol_name": "member_mb_…",
   "content": "…",
@@ -240,7 +297,8 @@
 }
 ```
 
-`role=tool` 时：`tool_call_id` 必填；`protocol_name` / API `name` = **工具函数名**。
+`role=tool` 时：`tool_call_id` 必填；API `name` = **工具函数名**。  
+唯一约束：`(run_id, ordinal)`；`(run_id, tool_call_id)` 对 tool 行唯一。
 
 ### 2.8 Assign
 
@@ -276,11 +334,16 @@
   "payload_hash": "sha256:…",
   "lease_id": "ls_…",
   "lease_epoch": 1,
+  "member_generation": 1,
   "member_spec_digest": "sha256:…",
+  "tool_catalog_revision": "rev_…",
   "status": "queued",
   "side_effect_class": "fs_read"
 }
 ```
+
+有效工具集 = `MemberSpec.allow_names ∩ Grant.tool_allow_names ∩ Node.manifest ∩ 本地更严 policy`。  
+Grant 字段若存在：必须 ⊆ Spec；否则 `digest_mismatch`/`not_authorized`。
 
 ```json
 {
@@ -303,23 +366,30 @@
   "actor_run_id": "rn_…",
   "turn_id": "tn_…",
   "tool_call_id": "call_…",
+  "command_id": null,
+  "payload_hash": null,
   "status": "pending",
   "prompt": "…",
-  "home_node_id": "node-B"
+  "home_node_id": "node_…"
 }
 ```
+
+`kind=execution_approval` 时：`command_id` + `payload_hash` **必填**，绑定不可变命令。
 
 ```json
 {
   "hitl_id": "ht_…",
   "resolution_id": "hr_…",
-  "resolver_node_id": "node-A",
+  "resolver_node_id": "node_…",
   "client_message_id": "…",
+  "decision": "answered",
   "answer_text": "…",
   "cas_version": 1,
   "resolved_at": "…"
 }
 ```
+
+`decision`：信息型用 `answered`（须 `answer_text`）；执行批准用 `approved` | `denied`（无须把批准伪造成工具成功）。
 
 ### 2.11 Subscription / ResumeCursor
 
@@ -422,11 +492,24 @@ queued → running → awaiting_hitl → running → succeeded
 ```text
 queued → accepted → running → succeeded | failed | canceled | indeterminate
 queued → rejected
-accepted → indeterminate（journal 在、结果未知）
+accepted → running          # journal owner 恢复未开始的执行
+accepted → indeterminate    # 仅当副作用可能已开始且结果未知
 ```
 
-**`accepted` 定义**：Node 已将 command **持久化进 journal 之后**才可返回 ack。  
-同 `command_id`：返回既有状态；`payload_hash` 不一致 → `conflict`（不执行）。
+**`accepted`**：Node 已将 command **持久化进 journal 之后**才可返回 ack。  
+
+重复投递同 `command_id`：
+
+- 返回 journal 既有状态；**不得**第二次执行  
+- `payload_hash` 不一致 → `payload_conflict`  
+
+恢复：
+
+- journal=`accepted` 且副作用**未开始**：同一 journal owner **可恢复执行一次**  
+- 副作用**已开始**结果未知 → `indeterminate`；禁止换新 id 自动重做  
+- journal 已终态、ack 丢失：重放终态结果  
+
+归档时：`queued`→`canceled`；`accepted`（未开始）→`canceled`；`running`/可能有副作用→`indeterminate`（不得伪造成无副作用的 canceled）。
 
 ### 3.6 HITL
 
@@ -434,8 +517,16 @@ accepted → indeterminate（journal 在、结果未知）
 pending → resolved | expired | canceled
 ```
 
-CAS：仅一个 `resolution` 成功；失败方得 `already_resolved`。  
-成功后：**恰好一次**写入对应 RunHistory 的 tool result，再恢复 run。
+CAS：仅一个 `resolution` 成功；失败方 `already_resolved`。
+
+按 `kind`：
+
+| kind | 谁可 resolve | 成功后 |
+|------|--------------|--------|
+| `information_request` | ACL 内订阅者 | **恰好一次**写入 RunHistory tool result（答案文本），再 resume run |
+| `execution_approval` | 仅 home | `approved`→执行**已绑定** `command_id`（校验 hash）；工具结果闭合原 `tool_call_id`。`denied`/`expired`→合成错误 tool result，**不执行** |
+
+原子边界：resolution 行提交 + tool result 插入 + resume enqueue 同一 Manage 事务（或等价 exactly-once outbox）。
 
 ### 3.7 Fencing 顺序（归档 / 撤权）
 
@@ -476,36 +567,40 @@ CAS：仅一个 `resolution` 成功；失败方得 `already_resolved`。
 | ActorRunHistory | 该 Actor 的 LLM loop | 是（必须合法配对） |
 | Projector 输出 | 另一 Actor 的 LLM | 他者产出投影为外部输入；本 Actor 历史原样 |
 
-### 5.2 投影规则（冻结）
+### 5.2 投影规则（冻结 · 确定函数）
 
 对 Actor `X` 构造上下文：
 
-1. 取 `X` 的 RunHistory（含未完成 tool 配对）  
-2. 合并 Timeline 中 **其他** actor 的已提交事件，投影为：  
-   - `role=user`  
-   - `name=<protocol_name>`（provider-safe）  
-   - `content` = 文本；可选前缀仅作 fixtures 兜底，须 golden 锁定  
-3. Member 最终产出写入 Timeline **且** 作为 Leader assign 的 tool result 时：Leader 侧用 `assign_id` **去重**，不因 Timeline 再插一条重复 user  
+1. 取 `X` 的 RunHistory 至当前 checkpoint（含未完成 tool 配对）  
+2. Timeline 快照窗口：最近 **≤10** 条、且 `seq > run.timeline_watermark_seq` 的**其他** actor 已提交事件  
+3. 若本 Actor 存在 **open tool_calls**：新 Timeline 事件进入 **buffer**，不得插入 LLM 上下文，直到本轮 tool 全部配对或 turn aborted  
+4. buffer/`≤10` 事件投影为：`role=user`，`name=<protocol_name>`，`content=content_text`（按 `seq` 升序）  
+5. Member 最终产出同时作为 Leader `assign_workgroup_task` 的 tool result：Leader **只保留 tool 配对**；同 `assign_id` 的 Timeline 不再插入 user  
+6. Assign 终态必须给 Leader **恰好一条** tool result：`succeeded`→摘要文本；`failed`/`canceled`/`indeterminate`→`is_error` 合成结果（含 `error_code`）
 
-### 5.3 并行 tool_calls
+### 5.3 并行 tool_calls（冻结一种）
 
-v1：模型返回 N 个 tool_calls → 必须收集 N 个结果再续写 assistant；或整轮拒绝并写入可恢复错误。禁止半配齐。
+v1：**等待全部结果**后再续写模型；禁止半配齐续写。超时/失败：未完成的 call 写入错误 tool result，然后可闭 turn 或 aborted（实现须两者择一写清；默认补错误结果并闭 turn）。
 
 ### 5.4 Golden fixtures（目录约定）
 
 ```text
 docs/design/fixtures/workgroup-d05/
-  projection/
-    openai_member_sees_leader.json
-    deepseek_leader_sees_member_final.json
-    tool_name_not_overridden.json
-  identity/
-    reject_display_name_as_protocol_name.json
-    reserved_name_spoof.json
+  INDEX.json                 # test → file 索引
+  projection/                # LLM 投影与 tool 配对
+  identity/                  # provider-safe name / 保留名
+  messaging/                 # human 去重与全序
+  provision/                 # 幂等 provision
+  tool_command/              # 幂等 / indeterminate
+  hitl/                      # CAS 与审批权威
+  fencing/                   # 归档与 ACL 撤销
+  ws/                        # resume / 双连 / 重启
+  catalog/                   # tool catalog drift
+  security/                  # Timeline 泄露、旧 Placement、fail-closed 工具
+  member_api/                # 不进本地 Agents / 禁独聊
 ```
 
-（D0.5 收尾时补齐文件；本章先冻结规则与路径。）
-
+完整映射见 `INDEX.json` 与下文 §12。
 ---
 
 ## 6. MemberSpec 资产契约
@@ -545,23 +640,20 @@ docs/design/fixtures/workgroup-d05/
 
 Manage 在发 command 前校验：`tool_name ∈ Spec.allow_names ∩ manifest`；revision 漂移 → 拒绝或要求刷新（不得静默用旧 schema）。
 
-### 7.2 幂等
+### 7.2 幂等与恢复
 
-| 阶段 | 断线后行为 |
-|------|------------|
-| 未发出 | 可发新 `command_id` 或重发同一草稿策略由 Manage 定；v1 重用同一 id 直到 accepted |
-| 已发未 ack | **重发同一** `command_id`+hash |
-| 已 accepted | **禁止**新 id 重做；只查询状态 |
-| running 未知 | → `indeterminate`（非幂等类） |
-| succeeded/failed | 返回终态 |
-
-`side_effect_class=fs_read` 等只读类：策略上仍走同一状态机；实现可更快标失败，但 **不得**在 accepted 后换 id 重放写类工具。
+| 阶段 | 行为 |
+|------|------|
+| 未 accepted | 可重发同一 `command_id`+hash |
+| 已 accepted，副作用未开始 | journal owner 恢复执行；Manage 重发只查状态 |
+| 已 running / 结果未知 | → `indeterminate`；禁止新 id 重做非幂等 |
+| 终态 | 返回终态；可重放 result |
 
 ### 7.3 Manage / Node 持久化边界
 
-- Manage：Assign、RunHistory、outbox（待投递 command）  
+- Manage：Assign、RunHistory、outbox（待投递 command / resume）  
 - Node：journal（command_id → 状态/结果）  
-- 任一侧在边界崩溃：按 §7.2 恢复；journal 丢失且可能有副作用 → `indeterminate`
+- journal 丢失且可能有副作用 → `indeterminate`
 
 ### 7.4 错误码（稳定）
 
@@ -586,19 +678,41 @@ Manage 在发 command 前校验：`tool_name ∈ Spec.allow_names ∩ manifest`�
 
 ### 8.1 会话
 
-1. Node 用**独立凭据**连接（fail-closed；不继承 Manage 开放模式）  
-2. `session.hello` → Manage 分配/确认 `connection_generation`  
+1. Node 用**独立凭据**连接（fail-closed）  
+2. `session.hello` → Manage 确认 `connection_generation`  
 3. 同 `node_id` 新连接成功 → 旧 generation **立即 fencing**  
-4. `resume.offer(last_ack_seq…)` → gap-fill 从 outbox 重放  
+4. `resume.offer(last_ack_delivery_seq)` → 从 outbox 按 `delivery_seq` gap-fill  
+5. 若 cursor 早于保留窗口 → `cursor_too_old`（客户端先拉快照再 resume）
 
-### 8.2 背压
+### 8.2 序号
 
-- 超出窗口未 ack：暂停非关键扇出或断开（实现选一种，fixtures 锁定）  
-- human 入队：Leader 同步 `@` 期间不打断；结束后按 `seq` 喂入  
+| 字段 | 含义 |
+|------|------|
+| Timeline `seq` | 仅 TimelineEvent |
+| `delivery_seq` | 所有需可靠投递的 WS 业务帧（timeline/tool/hitl/provision…） |
 
-### 8.3 与事实源
+Ack 确认的是 `delivery_seq`。Generation 校验依赖**连接上下文**（不必每帧重复带齐，但 CommandAck 须带回 generation）。
 
-断线丢的是帧，不是 Timeline；重连靠 `seq` 补洞。
+### 8.3 最小消息目录
+
+| type | 方向 | 说明 |
+|------|------|------|
+| `session.hello` / `session.welcome` | ↔ | 鉴权与 generation |
+| `resume.offer` / `resume.batch` / `resume.complete` | ↔ | gap-fill |
+| `timeline.event` | Manage→Node | payload=TimelineEvent |
+| `tool.command` / `tool.ack` / `tool.result` | ↔ | |
+| `member.provision` / `member.provision_result` | ↔ | |
+| `hitl.request` / `hitl.resolve` | ↔ | |
+| `workgroup.tombstone` | Manage→Node | 归档 fencing |
+
+### 8.4 背压与 human 入队
+
+- 超出窗口未 ack：暂停非关键扇出（实现数值 D1 可调）  
+- Leader 同步 `@` 期间：新 human **入队**，结束后按 Timeline `seq` 喂入  
+
+### 8.5 与事实源
+
+断线丢的是帧；重连靠 `delivery_seq` 补洞。
 
 ---
 
@@ -647,52 +761,53 @@ Manage 在发 command 前校验：`tool_name ∈ Spec.allow_names ∩ manifest`�
 
 ---
 
-## 12. 契约测试清单（用例名）
+## 12. 契约测试清单（用例名 → fixture）
 
-实现前 fixtures / 测试必须覆盖：
-
-1. `projection_openai_legal_sequence`  
-2. `projection_deepseek_assistant_name_fallback`  
-3. `protocol_name_rejects_unicode_display`  
-4. `reserved_name_spoof_rejected`  
-5. `human_client_message_id_dedupe`  
-6. `concurrent_human_total_order_by_seq`  
-7. `provision_retry_same_id_ok`  
-8. `provision_same_id_different_digest_conflict`  
-9. `tool_cmd_resend_before_accept`  
-10. `tool_cmd_no_reexec_after_accept`  
-11. `non_idempotent_handler_executes_once`  
-12. `indeterminate_on_journal_loss_after_accept`  
-13. `archive_fencing_rejects_stale_epoch`  
-14. `acl_revoke_stops_timeline_read`  
-15. `hitl_double_resolve_cas`  
-16. `hitl_execution_approval_wrong_node_denied`  
-17. `hitl_exactly_once_tool_result_resume`  
-18. `manage_restart_pending_assign`  
-19. `node_restart_each_persist_boundary`  
-20. `ws_gap_fill_and_dup_connection_fence`  
-21. `tool_catalog_revision_drift`  
-22. `member_not_in_local_agents_api`  
-23. `member_local_messages_api_rejected`  
-24. `timeline_excludes_raw_tool_payload`  
-25. `legacy_placement_cannot_drive_member`  
-26. `empty_allow_names_means_no_tools`（非回退 Node 默认）  
-27. `node_policy_can_only_tighten`  
-28. `assign_result_deduped_vs_timeline`  
+| # | test | fixture |
+|---|------|---------|
+| 1 | `projection_openai_legal_sequence` | `projection/openai_member_sees_leader.json` + `tool_name_not_overridden.json` + `parallel_tool_calls_must_pair_all.json` |
+| 2 | `projection_deepseek_assistant_name_fallback` | `projection/deepseek_leader_sees_member_final.json` |
+| 3 | `protocol_name_rejects_unicode_display` | `identity/reject_display_name_as_protocol_name.json` |
+| 4 | `reserved_name_spoof_rejected` | `identity/reserved_name_spoof.json` |
+| 5 | `human_client_message_id_dedupe` | `messaging/human_client_message_id_dedupe.json` |
+| 6 | `concurrent_human_total_order_by_seq` | `messaging/concurrent_human_total_order_by_seq.json` |
+| 7 | `provision_retry_same_id_ok` | `provision/retry_same_id_ok.json` |
+| 8 | `provision_same_id_different_digest_conflict` | `provision/same_id_different_digest_conflict.json` |
+| 9 | `tool_cmd_resend_before_accept` | `tool_command/resend_before_accept.json` |
+| 10 | `tool_cmd_no_reexec_after_accept` | `tool_command/no_reexec_after_accept.json` |
+| 11 | `non_idempotent_handler_executes_once` | `tool_command/non_idempotent_handler_executes_once.json` |
+| 12 | `indeterminate_on_journal_loss_after_accept` | `tool_command/indeterminate_on_journal_loss_after_accept.json` |
+| 13 | `archive_fencing_rejects_stale_epoch` | `fencing/archive_rejects_stale_epoch.json` |
+| 14 | `acl_revoke_stops_timeline_read` | `fencing/acl_revoke_stops_timeline_read.json` |
+| 15 | `hitl_double_resolve_cas` | `hitl/double_resolve_cas.json` |
+| 16 | `hitl_execution_approval_wrong_node_denied` | `hitl/execution_approval_wrong_node_denied.json` |
+| 17 | `hitl_exactly_once_tool_result_resume` | `hitl/exactly_once_tool_result_resume.json` |
+| 18 | `manage_restart_pending_assign` | `ws/manage_restart_pending_assign.json` |
+| 19 | `node_restart_each_persist_boundary` | `ws/node_restart_each_persist_boundary.json` |
+| 20 | `ws_gap_fill_and_dup_connection_fence` | `ws/gap_fill_and_dup_connection_fence.json` |
+| 21 | `tool_catalog_revision_drift` | `catalog/tool_catalog_revision_drift.json` |
+| 22 | `member_not_in_local_agents_api` | `member_api/not_in_local_agents_api.json` |
+| 23 | `member_local_messages_api_rejected` | `member_api/local_messages_api_rejected.json` |
+| 24 | `timeline_excludes_raw_tool_payload` | `security/timeline_excludes_raw_tool_payload.json` |
+| 25 | `legacy_placement_cannot_drive_member` | `security/legacy_placement_cannot_drive_member.json` |
+| 26 | `empty_allow_names_means_no_tools` | `security/empty_allow_names_means_no_tools.json` |
+| 27 | `node_policy_can_only_tighten` | `security/node_policy_can_only_tighten.json` |
+| 28 | `assign_result_deduped_vs_timeline` | `projection/assign_result_deduped_vs_timeline.json` |
 
 ---
 
 ## 13. 完成检查表（退出 D0.5）
 
-- [ ] §2 字段无阻塞 TBD  
-- [ ] §3 状态转换表与 fencing 无歧义  
-- [ ] §4 矩阵与产品正文一致  
-- [ ] §5 投影规则 + fixtures 目录至少各 2 个 golden 文件  
-- [ ] §7 错误码表稳定  
-- [ ] §9–§10 威胁与旧数据策略已评审  
-- [ ] §12 用例可分配到 Go/Python 测试名  
-- [ ] 产品正文 §13 将本文件标为 **D0.5 现行契约**  
-- [ ] **未**合并未门禁的 Manage turn kernel / Worker 大改  
+- [x] §2 字段无阻塞 TBD（首稿可评审）  
+- [x] §3 状态转换表与 fencing 无歧义（首稿可评审）  
+- [x] §4 矩阵与产品正文一致  
+- [x] §5 投影规则 + fixtures 目录（28 用例均有文件；见 `INDEX.json`）  
+- [x] §7 错误码表稳定  
+- [x] §9–§10 威胁与旧数据策略已写入  
+- [x] §12 用例已映射到 fixture 路径  
+- [ ] GPT/人工评审通过并吸收修订  
+- [ ] 产品正文将本文件标为 **D0.5 已冻结**（非起草中）  
+- [x] **未**合并未门禁的 Manage turn kernel / Worker 大改  
 
 **退出后下一动作**：D0.9 停 Placement 入口 → D1 Manage 基座。
 

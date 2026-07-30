@@ -1,13 +1,40 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "hitl_exactly_once_tool_result_resume",
-  "binds": [
-    "actor_run_id",
-    "turn_id",
-    "tool_call_id"
-  ],
-  "on_success": [
-    "write_exactly_one_tool_result_into_run_history",
-    "resume_same_run_once"
-  ],
-  "on_duplicate_resolve": "already_resolved_no_second_tool_result"
+  "kind": "information_request",
+  "given": {
+    "hitl_id": "ht_01hhitl01xxxxxxxx",
+    "actor_run_id": "rn_01hrun01xxxxxxxx",
+    "turn_id": "tn_01hturn01xxxxxxx",
+    "tool_call_id": "call_ask_1",
+    "status": "pending"
+  },
+  "when": {
+    "resolve": {
+      "node_id": "node_01ha",
+      "answer_text": "42",
+      "client_message_id": "01hr1"
+    }
+  },
+  "then": {
+    "hitl_status": "resolved",
+    "run_messages_appended": [
+      {
+        "role": "tool",
+        "tool_call_id": "call_ask_1",
+        "name": "ask_user",
+        "content": "42"
+      }
+    ],
+    "resume_enqueued": 1
+  },
+  "when_duplicate": {
+    "then": {
+      "code": "already_resolved",
+      "run_messages_appended": 0,
+      "resume_enqueued": 0
+    }
+  }
 }

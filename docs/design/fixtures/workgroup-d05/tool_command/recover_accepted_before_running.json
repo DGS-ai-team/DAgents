@@ -1,0 +1,17 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
+  "test": "tool_cmd_recover_accepted_before_running",
+  "given": {
+    "command_id": "cmd_01hcmd01xxxxxxxx",
+    "status": "accepted",
+    "side_effect_started": false
+  },
+  "when": "node_restarts_journal_intact",
+  "then": {
+    "journal_owner_resumes_same_command": true,
+    "executions": 1,
+    "manage_resend_same_id": "returns_current_status_no_second_exec"
+  }
+}

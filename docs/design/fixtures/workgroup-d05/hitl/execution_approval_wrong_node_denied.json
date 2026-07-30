@@ -1,7 +1,21 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "hitl_execution_approval_wrong_node_denied",
   "kind": "execution_approval",
-  "home_node_id": "node-B",
-  "attempt_from": "node-A",
-  "expected_code": "not_authorized"
+  "given": {
+    "home_node_id": "node_01hb",
+    "command_id": "cmd_01hcmd01xxxxxxxx",
+    "payload_hash": "sha256:de36aa0804054852d51806b6f1112010af17d8cb6e670f166b0adcdb458f989b",
+    "status": "pending"
+  },
+  "when": {
+    "resolve_from": "node_01ha",
+    "decision": "approved"
+  },
+  "then": {
+    "code": "not_authorized",
+    "hitl_status": "pending"
+  }
 }

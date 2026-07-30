@@ -1,24 +1,37 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "ws_gap_fill_and_dup_connection_fence",
-  "node_id": "node-A",
-  "conn1": {
-    "connection_generation": 5,
-    "last_ack_seq": 40
+  "given": {
+    "node_id": "node_01ha",
+    "conn1": {
+      "connection_generation": 5,
+      "last_ack_delivery_seq": 40
+    }
   },
-  "disconnect": true,
-  "missed_seqs": [
-    41,
-    42
+  "when": [
+    {
+      "disconnect": true,
+      "missed_delivery_seqs": [
+        41,
+        42
+      ]
+    },
+    {
+      "conn2_hello": {
+        "connection_generation": 6
+      },
+      "resume_from_delivery_seq": 40
+    }
   ],
-  "conn2": {
-    "connection_generation": 6,
-    "resume_from": 40,
-    "expect_replay": [
+  "then": {
+    "replay": [
       41,
       42
-    ]
-  },
-  "conn1_late_frame": {
-    "expected": "fencing_rejected_or_drop"
+    ],
+    "conn1_late_frame": {
+      "code": "fencing_rejected"
+    }
   }
 }

@@ -1,0 +1,91 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
+  "test": "vertical_two_node_read_file_happy_path",
+  "given": {
+    "nodes": [
+      "node_01ha",
+      "node_01hb"
+    ],
+    "workgroup": {
+      "owners": [
+        "node_01ha"
+      ],
+      "collaborators": [
+        "node_01hb"
+      ]
+    },
+    "member_spec": {
+      "member_id": "mb_01hmember01xxxxxx",
+      "home_node_id": "node_01hb",
+      "tools": {
+        "allow_names": [
+          "read_file"
+        ]
+      },
+      "prompt": {
+        "soul_md": "you are a reader",
+        "user_md": "",
+        "custom_md": ""
+      },
+      "digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    }
+  },
+  "steps": [
+    {
+      "accept_grant": {
+        "node": "node_01hb",
+        "digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+      }
+    },
+    {
+      "provision": {
+        "provision_id": "pv_01hprov01xxxxxxx",
+        "idempotent": true
+      }
+    },
+    {
+      "assert": {
+        "GET /v1/agents on node_01hb": {
+          "excludes": "mb_01hmember01xxxxxx"
+        }
+      }
+    },
+    {
+      "human": {
+        "node": "node_01ha",
+        "text": "读 README"
+      }
+    },
+    {
+      "leader_assign": {
+        "member_id": "mb_01hmember01xxxxxx"
+      }
+    },
+    {
+      "member_tool": {
+        "name": "read_file",
+        "command_id": "cmd_01hcmd01xxxxxxxx"
+      }
+    },
+    {
+      "member_final": {
+        "text": "标题是 Demo"
+      }
+    },
+    {
+      "leader_tool_result_paired": true
+    },
+    {
+      "timeline_has": [
+        "human_message",
+        "actor_final_text"
+      ],
+      "timeline_forbids_fields": [
+        "tool_arguments",
+        "tool_result"
+      ]
+    }
+  ]
+}

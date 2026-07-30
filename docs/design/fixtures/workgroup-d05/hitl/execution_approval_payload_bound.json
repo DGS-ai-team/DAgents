@@ -1,0 +1,40 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
+  "test": "hitl_execution_approval_payload_bound",
+  "kind": "execution_approval",
+  "given": {
+    "hitl_id": "ht_01hhitl02xxxxxxxx",
+    "command_id": "cmd_01hcmd01xxxxxxxx",
+    "payload_hash": "sha256:c4a6b5465d76a37349d89e0a2f8ac9b740b768bf73c0d15fc5afd7c7f783280b",
+    "home_node_id": "node_01hb",
+    "tool_call_id": "call_bash_1"
+  },
+  "when_approved_by_home": {
+    "decision": "approved",
+    "then": {
+      "execute_bound_command_only": true,
+      "tool_result_closes": "call_bash_1",
+      "forbidden": "swap_arguments_after_approval"
+    }
+  },
+  "when_payload_tampered_after_approve": {
+    "new_payload_hash": "sha256:508f022f8db5cef567bb52db5a535e0f8f134fa1ed2a0778ba317722d4cb52ae",
+    "then": {
+      "code": "payload_conflict",
+      "must_not_execute": true
+    }
+  },
+  "when_denied": {
+    "decision": "denied",
+    "then": {
+      "synthetic_tool_result": {
+        "tool_call_id": "call_bash_1",
+        "is_error": true,
+        "error_code": "policy_denied"
+      },
+      "must_not_execute": true
+    }
+  }
+}

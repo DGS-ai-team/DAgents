@@ -1,22 +1,29 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "hitl_double_resolve_cas",
-  "hitl_id": "ht_1",
   "kind": "information_request",
-  "resolvers": [
+  "given": {
+    "hitl_id": "ht_01hhitl01xxxxxxxx",
+    "status": "pending"
+  },
+  "when_parallel": [
     {
-      "node_id": "node-A",
-      "client_message_id": "r1",
-      "answer": "yes"
+      "node_id": "node_01ha",
+      "client_message_id": "01hr1",
+      "answer_text": "yes"
     },
     {
-      "node_id": "node-C",
-      "client_message_id": "r2",
-      "answer": "no"
+      "node_id": "node_01hc",
+      "client_message_id": "01hr2",
+      "answer_text": "no"
     }
   ],
-  "expected": {
-    "winners": 1,
+  "then": {
+    "resolved_count": 1,
     "loser_code": "already_resolved",
-    "tool_results_written": 1
+    "tool_results_written": 1,
+    "resume_enqueued": 1
   }
 }

@@ -1,21 +1,44 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "human_client_message_id_dedupe",
-  "first": {
-    "client_message_id": "cm_1",
-    "node_id": "node-A",
-    "text": "hello",
-    "expected_seq": 10
+  "given": {
+    "workgroup_id": "wg_01ha",
+    "node_id": "node_01ha"
   },
-  "retry": {
-    "client_message_id": "cm_1",
-    "node_id": "node-A",
-    "text": "hello",
-    "expected": "same_event_id_same_seq_no_dup"
-  },
-  "conflict": {
-    "client_message_id": "cm_1",
-    "node_id": "node-A",
-    "text": "HELLO DIFFERENT",
-    "expected_code": "payload_conflict_or_duplicate_client_message"
-  }
+  "steps": [
+    {
+      "when": {
+        "client_message_id": "01hbm1",
+        "text": "hello"
+      },
+      "then": {
+        "event_id": "ev_01he1",
+        "seq": 10,
+        "code": null
+      }
+    },
+    {
+      "when": {
+        "client_message_id": "01hbm1",
+        "text": "hello"
+      },
+      "then": {
+        "event_id": "ev_01he1",
+        "seq": 10,
+        "idempotent": true
+      }
+    },
+    {
+      "when": {
+        "client_message_id": "01hbm1",
+        "text": "HELLO DIFFERENT"
+      },
+      "then": {
+        "code": "payload_conflict",
+        "no_new_event": true
+      }
+    }
+  ]
 }

@@ -1,13 +1,40 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "node_restart_each_persist_boundary",
-  "boundaries": [
-    "before_journal",
-    "after_accepted",
-    "after_running_result_persisted"
-  ],
-  "expectations": {
-    "before_journal": "may_accept_same_cmd_once",
-    "after_accepted": "no_reexec_query_status",
-    "after_result": "return_terminal_status"
-  }
+  "cases": [
+    {
+      "boundary": "before_journal",
+      "manage_action": "resend_same_command_id",
+      "then": {
+        "executions": 1,
+        "final_ack": "accepted_then_terminal"
+      }
+    },
+    {
+      "boundary": "after_accepted_before_running",
+      "node_action": "journal_owner_resume_same_command",
+      "manage_action": "query_or_resend_same_id_returns_journal",
+      "then": {
+        "executions": 1,
+        "forbidden": "new_command_id_auto_reexec"
+      }
+    },
+    {
+      "boundary": "after_running_result_unknown",
+      "then": {
+        "status": "indeterminate",
+        "forbidden": "auto_reexec"
+      }
+    },
+    {
+      "boundary": "after_result_persisted_reply_lost",
+      "manage_action": "resend_same_command_id",
+      "then": {
+        "status": "succeeded",
+        "executions": 1
+      }
+    }
+  ]
 }

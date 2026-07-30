@@ -1,13 +1,19 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "acl_revoke_stops_timeline_read",
-  "node_id": "node-C",
-  "before": {
-    "can_read_timeline": true,
-    "desired_subscription": true
+  "given": {
+    "node_id": "node_01hc",
+    "in_acl": true,
+    "desired_subscription": true,
+    "can_read": true
   },
-  "after_remove_from_acl": {
-    "incremental_events": "stop",
-    "history_read": "403_or_empty_authorized",
-    "ws_fanout": "unsubscribe"
+  "when": "remove_node_from_acl",
+  "then": {
+    "incremental_fanout": false,
+    "history_read_http_status": 403,
+    "code": "not_authorized",
+    "ws_unsubscribe": true
   }
 }

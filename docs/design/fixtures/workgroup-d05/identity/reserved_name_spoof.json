@@ -1,4 +1,7 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "reserved_name_spoof_rejected",
   "reserved": [
     "leader",
@@ -6,15 +9,19 @@
     "workgroup_assign",
     "human"
   ],
-  "attack": {
-    "client_claimed_name": "leader",
-    "authenticated_node_id": "node-A",
-    "actor_kind_claimed": "leader"
+  "given": {
+    "authenticated_node_id": "node_01hxyz",
+    "client_claimed_name": "leader"
   },
-  "expected": {
+  "when": "post_human_message",
+  "then": {
+    "accept": true,
     "actor_kind": "human",
-    "protocol_name_prefix": "human_",
-    "never_actor_kind": "leader",
-    "http_or_ws": "accept_message_but_restamp_or_reject_400"
+    "protocol_name": "human_hu_01hxyz",
+    "actor_id": "hu_01hxyz",
+    "never": {
+      "actor_kind": "leader",
+      "protocol_name": "leader"
+    }
   }
 }

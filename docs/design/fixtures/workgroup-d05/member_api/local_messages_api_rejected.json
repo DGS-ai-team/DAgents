@@ -1,9 +1,28 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "member_local_messages_api_rejected",
+  "given": {
+    "member_id": "mb_01hmember01xxxxxx",
+    "home_provisioned": true
+  },
   "calls": [
-    "POST /v1/agents/mb_01/messages",
-    "POST /v1/messages with agent_id=mb_01"
+    {
+      "method": "POST",
+      "path": "/v1/agents/mb_01hmember01xxxxxx/messages"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages",
+      "body": {
+        "agent_id": "mb_01hmember01xxxxxx"
+      }
+    }
   ],
-  "expected_code": "not_authorized_or_not_found",
-  "message": "workgroup members are not local chat agents"
+  "then": {
+    "http_status": 404,
+    "code": "not_found",
+    "reason": "workgroup_member_not_local_agent"
+  }
 }

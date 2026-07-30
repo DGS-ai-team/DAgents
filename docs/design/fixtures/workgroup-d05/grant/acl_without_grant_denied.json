@@ -1,0 +1,14 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
+  "test": "acl_without_grant_denied",
+  "given": {
+    "home_in_acl": true,
+    "grant_status": null
+  },
+  "when": "provision_or_tool_command",
+  "then": {
+    "code": "not_authorized"
+  }
+}
