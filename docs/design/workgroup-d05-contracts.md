@@ -997,7 +997,7 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 
 ## 19. D0.5 契约 GPT 第三轮确认（2026-07-30）
 
-**Verdict：A** — §18.5 十项已闭环；唯一阻塞为历史段落残留旧字段名，已改为「旧 ResumeCursor 投递游标字段名」表述，全文检索无现行 `last_ack_seq`。
+**Verdict：A** — §18.5 十项已闭环；唯一阻塞为历史段落残留旧游标字段名，已改为「旧 ResumeCursor 投递游标字段名」表述。
 
 ### 19.1 §18.5 关闭情况
 
