@@ -1,8 +1,8 @@
 # 工作组协作 + Node↔Manage 长连接（设计）
 
 > **分支**：`cursor/remote-agent-placement-7e3e`  
-> **状态**：**产品方向冻结；正文已回流；D0.5 契约起草中** — 见 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)；**禁止**在 D0.5 退出检查表完成前并行实现 Manage turn kernel / Node Worker / WS 主路径  
-> **规范优先级**：§0–§13（产品正文）> [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md) > §15/§16（历史审核）  
+> **状态**：**产品方向冻结；D0.5 契约已冻结** — 见 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（§19 Verdict A）；下一动作 **D0.9** 停 Placement 入口 → **D1** Manage 基座骨架  
+> **规范优先级**：§0–§13（产品正文）> [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（已冻结）> §15/§16（历史审核）  
 > **推荐方向**：Manage 云 Leader（Supervisor）+ Timeline/RunHistory；成员资产绑组存 Manage；Node 仅工具调用；权限按 `node_id`；**无远程 Agent / Placement**
 
 ---
@@ -472,7 +472,7 @@ MemberSpec {
 | Phase | 内容 |
 |-------|------|
 | **D0** | 产品方向冻结（本文 §0） |
-| **D0.5** | 契约：[`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md) + `fixtures/workgroup-d05/`（**开工门槛**） |
+| **D0.5** | 契约：[`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md) + `fixtures/workgroup-d05/` — **已冻结（§19 A）** |
 | **D0.9** | 停写 Placement/sandbox 新产品入口（先不物理删） |
 | **D1** | Manage 基座：组存储、ACL、Grant、MemberSpec、turn kernel 骨架 |
 | **D2** | Node WorkgroupWorker：强身份 WS、幂等 provision、tool manifest、command journal |
@@ -493,8 +493,8 @@ MemberSpec {
 | 文档 | 状态 |
 |------|------|
 | 本文 §0–§13 | **现行产品规范** |
-| `workgroup-d05-contracts.md` | **D0.5 契约（起草中 → 退出检查表通过后冻结）** |
-| `fixtures/workgroup-d05/` | 投影/身份 golden stubs |
+| `workgroup-d05-contracts.md` | **D0.5 已冻结**（§19 Verdict A） |
+| `fixtures/workgroup-d05/` | schemas + golden fixtures |
 | `remote-agent-placement.md` | **superseded** |
 | `node-centric-architecture-cleanup.md` | 继续：去 ops/compliance、去沙箱、拆旧 A2A |
 | 下文 §15 / §16 | **历史审核记录**；冲突以正文为准 |

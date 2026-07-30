@@ -1,12 +1,11 @@
 # 工作组 D0.5 契约（开工门槛）
 
-> **状态**：**起草中（GPT Verdict B → 补 Schema/fixtures 后待复审）**  
+> **状态**：**D0.5 已冻结**（§19 Verdict A）— 可进入 D0.9 / D1 骨架；**禁止**跳过契约另开平行协议  
 > **产品方向**：[`workgroup-and-node-gateway.md`](./workgroup-and-node-gateway.md)（§0–§13）  
 > **本文件职责**：可测试的 schema、状态机、权限矩阵、投影规则、WS/工具恢复协议、威胁模型、旧数据处置、契约测试清单  
 > **JSON Schema 附录**：[`fixtures/workgroup-d05/schemas/`](./fixtures/workgroup-d05/schemas/)  
-> **规范优先级**：产品正文 §0–§13 > **本文** > schemas/*.json > 历史审核  
-> **完成定义**：§13 检查表全部勾选；fixtures 符合 `workgroup-d05-fixture/v1` 且无二选一期望  
-> **评审**：§17（首轮 B）；复审见 §18
+> **规范优先级**：产品正文 §0–§13 > **本文（已冻结）** > schemas/*.json > 历史审核  
+> **评审**：§17 B → §18 B（已补丁）→ **§19 A**
 ---
 
 ## 0. 范围与非目标
@@ -858,11 +857,11 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 - [x] §7 错误码含 `cursor_too_old` / `not_found`  
 - [x] §9–§10 威胁与旧数据策略已写入  
 - [x] §12 fixtures：合法 26 位 ulid、given/when/then、INDEX 39 条  
-- [ ] GPT 复审 **Verdict A**（§18 仍为 B；已按 18.5 打补丁，待第三次确认或人工签核）  
-- [ ] 产品正文将本文件标为 **D0.5 已冻结**  
+- [x] GPT 复审 **Verdict A**（§19）  
+- [x] 产品正文交叉引用本文件为 **D0.5 已冻结**  
 - [x] **未**合并未门禁的 Manage turn kernel / Worker 大改  
 
-**退出后下一动作**：D0.9 停 Placement 入口 → D1 Manage 基座。
+**退出后下一动作**：D0.9 停 Placement 入口 → D1 Manage 基座骨架。
 
 ---
 
@@ -873,7 +872,8 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 | 2026-07-30 | 首稿 |
 | 2026-07-30 | fixtures + INDEX；§17 Verdict B 最短补丁 |
 | 2026-07-30 | schemas/、assign 工具、fixtures given/when/then |
-| 2026-07-30 | §18 Verdict B；按 18.5 修 delivery_seq、HITL 条件、补齐 schemas、重写全部 fixture ID |
+| 2026-07-30 | §18 Verdict B；按 18.5 打补丁 |
+| 2026-07-30 | §19 Verdict A；清残留字段名；**D0.5 冻结** |
 
 ---
 
@@ -955,7 +955,7 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 
 ### 18.2 Schema 与正文冲突（复审当时 → 处置）
 
-1. `last_ack_seq` vs `delivery_seq` → ✅ 已统一  
+1. 旧 ResumeCursor 投递游标字段名 vs `delivery_seq` → ✅ 已统一为 `last_ack_delivery_seq`  
 2. Grant 缺 `member_generation` 示例 → ✅  
 3. workgroup_id UUID vs ULID → ✅ 仅 ULID  
 4. 未知字段策略 → ✅ 跨进程实体全部拒绝未知字段  
@@ -992,3 +992,38 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 - D0.9 / D1：**当时不能开始**  
 - 方向约束「不得新增 Placement 产品能力」持续有效  
 - 补丁后建议：先跑 §19 快审；若 A，则 D0.9 可开、D1 骨架可开  
+
+---
+
+## 19. D0.5 契约 GPT 第三轮确认（2026-07-30）
+
+**Verdict：A** — §18.5 十项已闭环；唯一阻塞为历史段落残留旧字段名，已改为「旧 ResumeCursor 投递游标字段名」表述，全文检索无现行 `last_ack_seq`。
+
+### 19.1 §18.5 关闭情况
+
+1. ✅ `delivery_seq` / `last_ack_delivery_seq` 统一  
+2. ✅ Grant `member_generation`  
+3. ✅ HITL execution 非空 command/hash + HITLResolution  
+4. ✅ assign result oneOf  
+5. ✅ 核心 schemas 齐备  
+6. ✅ ID / 未知字段 / 错误码对齐  
+7. ✅ `initial_entries` ≤32  
+8. ✅ §5.3 单一收束  
+9. ✅ fixtures given/when/then + FixtureMeta  
+10. ✅ 合法 ID/hash；INDEX 39  
+
+### 19.2 阻塞补丁
+
+无（历史表述已清理）。
+
+### 19.3 允许开始 / 延后
+
+| 可开始 | 延后 |
+|--------|------|
+| **D0.9** 停 Placement/sandbox 新产品入口 | Placement 物理删除（D5） |
+| **D1** Manage 组存储 / ACL / Grant / MemberSpec / turn kernel **骨架** | 完整 UI、多成员并行、Browser/skills |
+| 契约测试 harness 雏形（读 fixtures） | 背压数值、保留期等调参 |
+
+### 19.4 冻结声明
+
+**可以将本文档状态标为「D0.5 已冻结」。** 实现须遵守本文 + `schemas/`；变更走修订记录，不得静默分叉协议。
