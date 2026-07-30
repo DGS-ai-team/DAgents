@@ -37,7 +37,11 @@ func (h *CommandHandler) Accept(cmd ToolCommand, binding WorkerBinding) (*Accept
 		if existing.PayloadHash != "" && existing.PayloadHash != cmd.PayloadHash {
 			return nil, errf(CodePayloadConflict, "same command_id with different payload_hash")
 		}
-		// 已 journal：返回状态，不重执行
+		// D3：accepted 且尚未开始副作用 → 重启后可恢复执行一次
+		if existing.Status == "accepted" && existing.Executions == 0 && h.Executor != nil {
+			return h.runExecutor(cmd, *existing)
+		}
+		// 已 journal 且终态/已跑过：返回状态，不重执行
 		return &AcceptResult{
 			Ack: CommandAck{
 				CommandID:            cmd.CommandID,
@@ -101,12 +105,16 @@ func (h *CommandHandler) Accept(cmd ToolCommand, binding WorkerBinding) (*Accept
 	if h.Executor == nil {
 		return &AcceptResult{Ack: ack, Entry: entry, Executed: false}, nil
 	}
+	return h.runExecutor(cmd, entry)
+}
 
-	// D2 可选同步执行：先标 running，执行一次，落终态
+func (h *CommandHandler) runExecutor(cmd ToolCommand, entry JournalEntry) (*AcceptResult, error) {
 	entry.Status = "running"
 	entry.Executions = 1
 	entry.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	_ = h.Journal.Put(entry)
+	if err := h.Journal.Put(entry); err != nil {
+		return nil, err
+	}
 
 	resultJSON, execErr := h.Executor(cmd)
 	if execErr != nil {
@@ -128,8 +136,16 @@ func (h *CommandHandler) Accept(cmd ToolCommand, binding WorkerBinding) (*Accept
 	if err := h.Journal.Put(entry); err != nil {
 		return nil, errf(CodeIndeterminate, "result persist failed after exec: %v", err)
 	}
-	ack.Status = entry.Status
-	return &AcceptResult{Ack: ack, Entry: entry, Executed: true}, nil
+	return &AcceptResult{
+		Ack: CommandAck{
+			CommandID:            cmd.CommandID,
+			Status:               entry.Status,
+			ConnectionGeneration: h.ConnectionGeneration,
+			JournaledAt:          entry.JournaledAt,
+		},
+		Entry:    entry,
+		Executed: true,
+	}, nil
 }
 
 func (h *CommandHandler) reject(cmd ToolCommand, ferr error) (*AcceptResult, error) {

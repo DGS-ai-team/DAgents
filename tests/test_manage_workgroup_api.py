@@ -93,6 +93,50 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 self.assertEqual(proj.json()["actor_id"], "leader")
                 self.assertIn("messages", proj.json())
 
+                # D3：provision-complete → messages → timeline → HITL CAS
+                ready = client.post(
+                    f"/v1/workgroups/{wid}/provision-complete",
+                    json={
+                        "member_id": mid,
+                        "provision_id": "pv_" + "0" * 26,
+                        "workspace_path": str(Path(tmp) / "ws"),
+                        "tool_catalog_revision": "rev_test",
+                        "status": "ready",
+                    },
+                )
+                self.assertEqual(ready.status_code, 200, ready.text)
+                self.assertEqual(ready.json()["member"]["status"], "ready")
+
+                msg = client.post(
+                    f"/v1/workgroups/{wid}/messages",
+                    json={"text": "读 README", "from_node_id": "node-a"},
+                    headers={"x-dagents-agent-id": "node-a"},
+                )
+                self.assertEqual(msg.status_code, 200, msg.text)
+                self.assertEqual(msg.json()["type"], "human_message")
+
+                timeline = client.get(f"/v1/workgroups/{wid}/timeline")
+                self.assertEqual(timeline.status_code, 200, timeline.text)
+                self.assertEqual(len(timeline.json()), 1)
+
+                hitl = client.post(
+                    f"/v1/workgroups/{wid}/hitl",
+                    json={"prompt": "继续？"},
+                )
+                self.assertEqual(hitl.status_code, 200, hitl.text)
+                hid = hitl.json()["hitl_id"]
+                resolved = client.post(
+                    f"/v1/workgroups/{wid}/hitl/{hid}/resolve",
+                    json={"resolution": {"answer": "yes"}},
+                )
+                self.assertEqual(resolved.status_code, 200, resolved.text)
+                conflict = client.post(
+                    f"/v1/workgroups/{wid}/hitl/{hid}/resolve",
+                    json={"resolution": {"answer": "no"}},
+                )
+                self.assertEqual(conflict.status_code, 409, conflict.text)
+                self.assertEqual(conflict.json()["detail"]["code"], "already_resolved")
+
 
 if __name__ == "__main__":
     unittest.main()

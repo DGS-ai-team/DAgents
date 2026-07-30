@@ -23,4 +23,4 @@
 
 - Manage 真实 WS 服务端 + outbox
 - Node WS dial / resume gap-fill
-- 真实 `read_file` 执行与 HITL CAS 闭环
+- 真实 Manage WS 拨号（D3 用可注入 bridge / 单测 FakeNodeBridge）

@@ -1,7 +1,9 @@
 package workgroup
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -329,5 +331,141 @@ func TestSessionDupConnectionFencesOldGeneration(t *testing.T) {
 	}
 	if err := s.FenceFrame(g2); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReadFileExecutorHappyPath(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})
+	w.Connect()
+	prov, err := w.HandleProvision(ProvisionRequest{
+		ProvisionID:      "pv_01h00000000000000000000009",
+		WorkgroupID:      "wg_01h00000000000000000000001",
+		MemberID:         "mb_01h00000000000000000000002",
+		HomeNodeID:       "node_b",
+		MemberSpecDigest: "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+		LeaseEpoch:       2,
+		MemberGeneration: 1,
+		ToolAllowNames:   []string{"read_file"},
+		WorkspaceRoot:    filepath.Join(dir, "ws"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prov.Binding.WorkspacePath, "README"), []byte("# Demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := w.HandleCommand(ToolCommand{
+		CommandID:           "cmd_01h00000000000000000000008",
+		WorkgroupID:         prov.Binding.WorkgroupID,
+		MemberID:            prov.Binding.MemberID,
+		AssignID:            "as_01h00000000000000000000007",
+		RunID:               "rn_01h00000000000000000000006",
+		TurnID:              "tn_01h00000000000000000000005",
+		ToolCallID:          "call_1",
+		ToolName:            "read_file",
+		ArgumentsJSON:       `{"path":"README"}`,
+		PayloadHash:         "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		LeaseID:             "ls_01h00000000000000000000004",
+		LeaseEpoch:          2,
+		MemberGeneration:    1,
+		MemberSpecDigest:    prov.Binding.MemberSpecDigest,
+		ToolCatalogRevision: prov.Binding.ToolCatalogRevision,
+		Status:              "queued",
+		SideEffectClass:     "fs_read",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Executed || r.Entry.Status != "succeeded" {
+		t.Fatalf("result=%+v", r)
+	}
+	if !strings.Contains(r.Entry.ResultJSON, "Demo") {
+		t.Fatalf("content=%s", r.Entry.ResultJSON)
+	}
+}
+
+func TestRecoverAcceptedBeforeRunning(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := NewDirJournal(filepath.Join(dir, "journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := NewWorker(Config{
+		NodeID:        "node_b",
+		NodeToolNames: []string{"read_file"},
+		Journal:       journal,
+	})
+	w.Connect()
+	prov, err := w.HandleProvision(ProvisionRequest{
+		ProvisionID:      "pv_01h00000000000000000000009",
+		WorkgroupID:      "wg_01h00000000000000000000001",
+		MemberID:         "mb_01h00000000000000000000002",
+		HomeNodeID:       "node_b",
+		MemberSpecDigest: "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+		LeaseEpoch:       2,
+		MemberGeneration: 1,
+		ToolAllowNames:   []string{"read_file"},
+		WorkspaceRoot:    filepath.Join(dir, "ws"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prov.Binding.WorkspacePath, "README"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := ToolCommand{
+		CommandID:           "cmd_01h00000000000000000000008",
+		WorkgroupID:         prov.Binding.WorkgroupID,
+		MemberID:            prov.Binding.MemberID,
+		AssignID:            "as_01h00000000000000000000007",
+		RunID:               "rn_01h00000000000000000000006",
+		TurnID:              "tn_01h00000000000000000000005",
+		ToolCallID:          "call_1",
+		ToolName:            "read_file",
+		ArgumentsJSON:       `{"path":"README"}`,
+		PayloadHash:         "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		LeaseID:             "ls_01h00000000000000000000004",
+		LeaseEpoch:          2,
+		MemberGeneration:    1,
+		MemberSpecDigest:    prov.Binding.MemberSpecDigest,
+		ToolCatalogRevision: prov.Binding.ToolCatalogRevision,
+		Status:              "queued",
+		SideEffectClass:     "fs_read",
+	}
+	// 模拟：accept 后崩溃，journal 停留在 accepted
+	now := "2026-07-31T00:00:00Z"
+	if err := journal.Put(JournalEntry{
+		CommandID:       cmd.CommandID,
+		PayloadHash:     cmd.PayloadHash,
+		Status:          "accepted",
+		MemberID:        cmd.MemberID,
+		WorkgroupID:     cmd.WorkgroupID,
+		ToolName:        cmd.ToolName,
+		SideEffectClass: cmd.SideEffectClass,
+		Executions:      0,
+		JournaledAt:     now,
+		UpdatedAt:       now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	execCount := 0
+	w.Commands.Executor = func(c ToolCommand) (string, error) {
+		execCount++
+		return NewReadFileExecutor(w.Bindings)(c)
+	}
+	r1, err := w.HandleCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r1.Executed || r1.Entry.Executions != 1 || r1.Entry.Status != "succeeded" {
+		t.Fatalf("recover=%+v", r1)
+	}
+	r2, err := w.HandleCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Executed || execCount != 1 {
+		t.Fatalf("resend must not reexec: exec=%d r2=%+v", execCount, r2)
 	}
 }

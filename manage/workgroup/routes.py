@@ -1,4 +1,4 @@
-"""Workgroup HTTP API（D1 基座）。"""
+"""Workgroup HTTP API（D1 基座 + D3 Timeline/HITL/outbox）。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,17 @@ from pydantic import BaseModel, Field
 
 from manage.platform.audit import AuditLog
 from manage.platform.auth import audit_actor, authenticate, ensure_node_identity, extract_agent_id
+from manage.workgroup.d3_models import (
+    HITLCreateRequest,
+    HITLRequest,
+    HITLResolveRequest,
+    HumanPostRequest,
+    MemberFinalRequest,
+    OutboxFrame,
+    ProvisionCompleteRequest,
+    TimelineEvent,
+    ToolResultApplyRequest,
+)
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.models import (
     ActorRun,
@@ -25,12 +36,26 @@ from manage.workgroup.models import (
 )
 from manage.workgroup.store import WorkGroupStore
 from manage.workgroup.turn_kernel import TurnKernel
+from manage.workgroup.vertical import VerticalLoop
 
 _SHA = r"^sha256:[0-9a-f]{64}$"
 
 
 class GrantAcceptRequest(BaseModel):
     member_spec_digest: str | None = Field(default=None, pattern=_SHA)
+
+
+class DispatchReadFileRequest(BaseModel):
+    member_id: str
+    instruction: str = Field(min_length=1)
+    path: str = "README"
+
+
+class ReconcileMissingJournalRequest(BaseModel):
+    assign_id: str
+    command_id: str
+    member_id: str
+    side_effect_started: bool = True
 
 
 def _http_error(exc: WorkgroupError) -> HTTPException:
@@ -40,6 +65,7 @@ def _http_error(exc: WorkgroupError) -> HTTPException:
 def build_workgroup_router(store: WorkGroupStore, audit: AuditLog) -> APIRouter:
     router = APIRouter(prefix="/v1/workgroups", tags=["workgroups"])
     kernel = TurnKernel(store)
+    loop = VerticalLoop(store)
 
     @router.post("", response_model=dict)
     def create_workgroup(req: WorkGroupCreateRequest, request: Request) -> dict:
@@ -207,5 +233,176 @@ def build_workgroup_router(store: WorkGroupStore, audit: AuditLog) -> APIRouter:
         if store.get_workgroup(workgroup_id) is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
         return kernel.project(actor_id=actor_id, run_id=run_id, member_id=member_id)
+
+    # --- D3: Timeline / Outbox / HITL / provision complete ---
+
+    @router.post("/{workgroup_id}/messages", response_model=TimelineEvent)
+    def post_human_message(
+        workgroup_id: str, req: HumanPostRequest, request: Request
+    ) -> TimelineEvent:
+        auth = authenticate(request)
+        ensure_node_identity(request, req.from_node_id, auth)
+        try:
+            return loop.post_human(workgroup_id, req)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+
+    @router.get("/{workgroup_id}/timeline", response_model=list[TimelineEvent])
+    def get_timeline(workgroup_id: str, request: Request) -> list[TimelineEvent]:
+        authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        return store.list_timeline(workgroup_id)
+
+    @router.get("/{workgroup_id}/outbox", response_model=list[OutboxFrame])
+    def get_outbox(
+        workgroup_id: str, request: Request, unacked_only: bool = False
+    ) -> list[OutboxFrame]:
+        authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        return store.list_outbox(workgroup_id, unacked_only=unacked_only)
+
+    @router.post("/{workgroup_id}/outbox/{delivery_seq}/ack", response_model=OutboxFrame)
+    def ack_outbox(workgroup_id: str, delivery_seq: int, request: Request) -> OutboxFrame:
+        authenticate(request)
+        try:
+            return store.ack_outbox(workgroup_id, delivery_seq)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+
+    @router.post("/{workgroup_id}/provision-complete")
+    def provision_complete(
+        workgroup_id: str, req: ProvisionCompleteRequest, request: Request
+    ) -> dict:
+        auth = authenticate(request)
+        try:
+            result = loop.complete_provision(workgroup_id, req)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.provision.complete",
+            target_agent_id=req.member_id,
+        )
+        return result
+
+    @router.post("/{workgroup_id}/vertical/dispatch-read-file")
+    def dispatch_read_file(
+        workgroup_id: str, req: DispatchReadFileRequest, request: Request
+    ) -> dict:
+        """D3 测试/骨架入口：assign + 下发 read_file outbox（无 bridge 时仅入队）。"""
+        auth = authenticate(request)
+        try:
+            result = loop.assign_and_dispatch_read_file(
+                workgroup_id,
+                member_id=req.member_id,
+                instruction=req.instruction,
+                path=req.path,
+            )
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.vertical.dispatch_read_file",
+            target_agent_id=req.member_id,
+        )
+        return result
+
+    @router.post("/{workgroup_id}/tool-results")
+    def apply_tool_result(
+        workgroup_id: str, req: ToolResultApplyRequest, request: Request
+    ) -> dict:
+        auth = authenticate(request)
+        try:
+            result = loop.apply_tool_result(workgroup_id, req)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.tool_result.apply",
+            target_agent_id=req.assign_id,
+        )
+        return result
+
+    @router.post("/{workgroup_id}/member-final")
+    def member_final(workgroup_id: str, req: MemberFinalRequest, request: Request) -> dict:
+        auth = authenticate(request)
+        try:
+            result = loop.member_final(workgroup_id, req)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.member.final",
+            target_agent_id=req.member_id,
+        )
+        return result
+
+    @router.post("/{workgroup_id}/hitl", response_model=HITLRequest)
+    def create_hitl(workgroup_id: str, req: HITLCreateRequest, request: Request) -> HITLRequest:
+        auth = authenticate(request)
+        try:
+            hitl = loop.create_info_hitl(workgroup_id, req)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.hitl.create",
+            target_agent_id=hitl.hitl_id,
+        )
+        return hitl
+
+    @router.post("/{workgroup_id}/hitl/{hitl_id}/resolve", response_model=HITLRequest)
+    def resolve_hitl(
+        workgroup_id: str, hitl_id: str, req: HITLResolveRequest, request: Request
+    ) -> HITLRequest:
+        auth = authenticate(request)
+        try:
+            hitl = loop.resolve_info_hitl(workgroup_id, hitl_id, req)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.hitl.resolve",
+            target_agent_id=hitl_id,
+        )
+        return hitl
+
+    @router.post("/{workgroup_id}/archive-tombstone")
+    def archive_tombstone(workgroup_id: str, request: Request) -> dict:
+        auth = authenticate(request)
+        try:
+            result = loop.archive_with_tombstone(workgroup_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.archive_tombstone",
+            target_agent_id=workgroup_id,
+        )
+        return result
+
+    @router.post("/{workgroup_id}/reconcile-missing-journal")
+    def reconcile_missing_journal(
+        workgroup_id: str, req: ReconcileMissingJournalRequest, request: Request
+    ) -> dict:
+        auth = authenticate(request)
+        try:
+            result = loop.reconcile_missing_journal(
+                workgroup_id,
+                assign_id=req.assign_id,
+                command_id=req.command_id,
+                member_id=req.member_id,
+                side_effect_started=req.side_effect_started,
+            )
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.reconcile_missing_journal",
+            target_agent_id=req.command_id,
+        )
+        return result
 
     return router

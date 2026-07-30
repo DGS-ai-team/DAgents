@@ -10,6 +10,7 @@ from manage.storage.sqlite import SQLiteDatabase
 from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup import ids
+from manage.workgroup.d3_models import HITLRequest, OutboxFrame, TimelineEvent
 from manage.workgroup.models import (
     ActorRun,
     ActorRunCreateRequest,
@@ -48,6 +49,11 @@ class WorkGroupStore:
         self._grants: dict[str, NodeExecutionGrant] = {}
         self._assigns: dict[str, Assign] = {}
         self._runs: dict[str, ActorRun] = {}
+        self._timeline: dict[str, list[TimelineEvent]] = {}
+        self._outbox: dict[str, list[OutboxFrame]] = {}
+        self._hitl: dict[str, HITLRequest] = {}
+        # member_id → {workspace_path, tool_catalog_revision, provision_id}
+        self._member_runtime: dict[str, dict[str, str]] = {}
 
     # --- low-level persistence ---
 
@@ -102,6 +108,17 @@ class WorkGroupStore:
             self._assigns[a.assign_id] = a
         for r in self._load_all("actor_runs", ActorRun):
             self._runs[r.run_id] = r
+        for ev in self._load_all("workgroup_timeline", TimelineEvent):
+            self._timeline.setdefault(ev.workgroup_id, []).append(ev)
+        for wg, events in self._timeline.items():
+            self._timeline[wg] = sorted(events, key=lambda e: e.seq)
+        for frame in self._load_all("workgroup_outbox", OutboxFrame):
+            # OutboxFrame.id in SQLite is f"{wg}:{delivery_seq}"
+            self._outbox.setdefault(frame.workgroup_id, []).append(frame)
+        for wg, frames in self._outbox.items():
+            self._outbox[wg] = sorted(frames, key=lambda f: f.delivery_seq)
+        for h in self._load_all("workgroup_hitl", HITLRequest):
+            self._hitl[h.hitl_id] = h
 
     # --- WorkGroup ---
 
@@ -479,3 +496,263 @@ class WorkGroupStore:
         with self._lock:
             self._ensure_loaded()
             return self._runs.get(run_id)
+
+    def active_grant_for_member(self, member_id: str) -> NodeExecutionGrant | None:
+        with self._lock:
+            self._ensure_loaded()
+            for g in self._grants.values():
+                if g.member_id == member_id and g.status == "accepted":
+                    return g
+            return None
+
+    def mark_member_status(
+        self,
+        member_id: str,
+        status: str,
+        *,
+        workgroup_id: str | None = None,
+        workspace_path: str = "",
+        tool_catalog_revision: str = "",
+        provision_id: str = "",
+    ) -> WorkGroupMember:
+        with self._lock:
+            self._ensure_loaded()
+            member = self._members.get(member_id)
+            if member is None:
+                raise WorkgroupError("not_found", "member not found", http_status=404)
+            if workgroup_id and member.workgroup_id != workgroup_id:
+                raise WorkgroupError("not_found", "member not found", http_status=404)
+            updated = member.model_copy(update={"status": status})
+            self._members[member_id] = updated
+            self._put(
+                "workgroup_members",
+                member_id,
+                updated.model_dump_json(),
+                workgroup_id=updated.workgroup_id,
+            )
+            runtime = dict(self._member_runtime.get(member_id) or {})
+            if workspace_path:
+                runtime["workspace_path"] = workspace_path
+            if tool_catalog_revision:
+                runtime["tool_catalog_revision"] = tool_catalog_revision
+            if provision_id:
+                runtime["provision_id"] = provision_id
+            if runtime:
+                self._member_runtime[member_id] = runtime
+            return updated
+
+    def member_runtime(self, member_id: str) -> dict[str, str]:
+        with self._lock:
+            self._ensure_loaded()
+            return dict(self._member_runtime.get(member_id) or {})
+
+    def set_assign_status(
+        self,
+        assign_id: str,
+        status: str,
+        *,
+        result_summary: str | None = None,
+        error_code: str | None = None,
+    ) -> Assign:
+        with self._lock:
+            self._ensure_loaded()
+            assign = self._assigns.get(assign_id)
+            if assign is None:
+                raise WorkgroupError("not_found", "assign not found", http_status=404)
+            update: dict[str, Any] = {"status": status}
+            if result_summary is not None:
+                update["result_summary"] = result_summary
+            if error_code is not None or status in {"succeeded", "failed", "indeterminate", "canceled"}:
+                update["error_code"] = error_code
+            updated = assign.model_copy(update=update)
+            self._assigns[assign_id] = updated
+            self._put(
+                "workgroup_assigns",
+                assign_id,
+                updated.model_dump_json(),
+                workgroup_id=updated.workgroup_id,
+            )
+            return updated
+
+    # --- Timeline / Outbox / HITL (D3) ---
+
+    def append_timeline(
+        self,
+        workgroup_id: str,
+        *,
+        type: str,
+        actor_id: str,
+        text: str = "",
+        client_message_id: str | None = None,
+    ) -> TimelineEvent:
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            events = self._timeline.setdefault(workgroup_id, [])
+            if client_message_id:
+                for ev in events:
+                    if ev.client_message_id == client_message_id:
+                        return ev
+            seq = (events[-1].seq + 1) if events else 1
+            event = TimelineEvent(
+                event_id=ids.event_id(),
+                workgroup_id=workgroup_id,
+                seq=seq,
+                type=type,  # type: ignore[arg-type]
+                actor_id=actor_id,
+                text=text,
+                created_at=_now(),
+                client_message_id=client_message_id,
+            )
+            events.append(event)
+            self._put(
+                "workgroup_timeline",
+                event.event_id,
+                event.model_dump_json(),
+                workgroup_id=workgroup_id,
+            )
+            return event
+
+    def list_timeline(self, workgroup_id: str) -> list[TimelineEvent]:
+        with self._lock:
+            self._ensure_loaded()
+            return list(self._timeline.get(workgroup_id) or [])
+
+    def enqueue_outbox(
+        self,
+        workgroup_id: str,
+        *,
+        type: str,
+        payload: dict[str, Any],
+    ) -> OutboxFrame:
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            frames = self._outbox.setdefault(workgroup_id, [])
+            seq = (frames[-1].delivery_seq + 1) if frames else 1
+            frame = OutboxFrame(
+                delivery_seq=seq,
+                workgroup_id=workgroup_id,
+                type=type,
+                payload=dict(payload),
+                created_at=_now(),
+                acked=False,
+            )
+            frames.append(frame)
+            key = f"{workgroup_id}:{seq}"
+            self._put(
+                "workgroup_outbox",
+                key,
+                frame.model_dump_json(),
+                workgroup_id=workgroup_id,
+            )
+            return frame
+
+    def list_outbox(self, workgroup_id: str, *, unacked_only: bool = False) -> list[OutboxFrame]:
+        with self._lock:
+            self._ensure_loaded()
+            frames = list(self._outbox.get(workgroup_id) or [])
+            if unacked_only:
+                return [f for f in frames if not f.acked]
+            return frames
+
+    def ack_outbox(self, workgroup_id: str, delivery_seq: int) -> OutboxFrame:
+        with self._lock:
+            self._ensure_loaded()
+            frames = self._outbox.get(workgroup_id) or []
+            for i, frame in enumerate(frames):
+                if frame.delivery_seq == delivery_seq:
+                    updated = frame.model_copy(update={"acked": True})
+                    frames[i] = updated
+                    self._put(
+                        "workgroup_outbox",
+                        f"{workgroup_id}:{delivery_seq}",
+                        updated.model_dump_json(),
+                        workgroup_id=workgroup_id,
+                    )
+                    return updated
+            raise WorkgroupError("not_found", "outbox frame not found", http_status=404)
+
+    def create_hitl(self, workgroup_id: str, *, prompt: str) -> HITLRequest:
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            hitl = HITLRequest(
+                hitl_id=ids.hitl_id(),
+                workgroup_id=workgroup_id,
+                kind="information",
+                prompt=prompt,
+                status="pending",
+                created_at=_now(),
+            )
+            self._hitl[hitl.hitl_id] = hitl
+            self._put(
+                "workgroup_hitl",
+                hitl.hitl_id,
+                hitl.model_dump_json(),
+                workgroup_id=workgroup_id,
+            )
+            return hitl
+
+    def get_hitl(self, hitl_id: str) -> HITLRequest | None:
+        with self._lock:
+            self._ensure_loaded()
+            return self._hitl.get(hitl_id)
+
+    def resolve_hitl_cas(
+        self,
+        workgroup_id: str,
+        hitl_id: str,
+        *,
+        resolution: dict[str, Any],
+    ) -> HITLRequest:
+        with self._lock:
+            self._ensure_loaded()
+            hitl = self._hitl.get(hitl_id)
+            if hitl is None or hitl.workgroup_id != workgroup_id:
+                raise WorkgroupError("not_found", "hitl not found", http_status=404)
+            if hitl.status == "resolved":
+                raise WorkgroupError(
+                    "already_resolved",
+                    "hitl already resolved",
+                    http_status=409,
+                )
+            updated = hitl.model_copy(
+                update={
+                    "status": "resolved",
+                    "resolution": dict(resolution),
+                    "resolved_at": _now(),
+                }
+            )
+            self._hitl[hitl_id] = updated
+            self._put(
+                "workgroup_hitl",
+                hitl_id,
+                updated.model_dump_json(),
+                workgroup_id=workgroup_id,
+            )
+            return updated
+
+    def bump_lease_epochs(self, workgroup_id: str) -> int:
+        """归档时抬升组内 grant lease_epoch；返回抬升后的最大 epoch。"""
+        with self._lock:
+            self._ensure_loaded()
+            max_epoch = 1
+            for gid, grant in list(self._grants.items()):
+                if grant.workgroup_id != workgroup_id:
+                    continue
+                new_epoch = grant.lease_epoch + 1
+                updated = grant.model_copy(update={"lease_epoch": new_epoch})
+                self._grants[gid] = updated
+                self._put(
+                    "execution_grants",
+                    gid,
+                    updated.model_dump_json(),
+                    workgroup_id=workgroup_id,
+                )
+                if new_epoch > max_epoch:
+                    max_epoch = new_epoch
+            return max_epoch

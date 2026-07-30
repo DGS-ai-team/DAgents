@@ -115,12 +115,28 @@ class SQLiteDatabase:
                     workgroup_id TEXT NOT NULL,
                     payload_json TEXT NOT NULL
                 );
+                -- Workgroup D3：Timeline / Outbox / HITL
+                CREATE TABLE IF NOT EXISTS workgroup_timeline (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_outbox (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_hitl (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
                 -- Blob 元数据随内容寻址文件落在 MANAGE_BLOB_DIR/{sha256}.json sidecar，
                 -- 不入 SQLite；故此处不建 blobs 表。
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','8') "
-                "ON CONFLICT(key) DO UPDATE SET value='8'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','9') "
+                "ON CONFLICT(key) DO UPDATE SET value='9'"
             )
             conn.commit()

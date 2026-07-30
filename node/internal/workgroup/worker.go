@@ -48,6 +48,7 @@ func NewWorker(cfg Config) *Worker {
 		Journal:              journal,
 		ConnectionGeneration: 0,
 		Tombstones:           w.Tombstones,
+		Executor:             NewReadFileExecutor(bindings),
 	}
 	return w
 }

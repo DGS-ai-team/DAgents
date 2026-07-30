@@ -1,11 +1,11 @@
-# WorkgroupWorker（D2）
+# WorkgroupWorker（D2 + D3 工具执行）
 
-Node 侧工作组成员执行器骨架。权威契约见：
+Node 侧工作组成员执行器。权威契约见：
 
-- `docs/design/workgroup-and-node-gateway.md` §11 / §13 D2
+- `docs/design/workgroup-and-node-gateway.md` §11 / §13 D2–D3
 - `docs/design/workgroup-d05-contracts.md`
 
-## D2 范围
+## 范围
 
 | 能力 | 状态 |
 |------|------|
@@ -15,7 +15,9 @@ Node 侧工作组成员执行器骨架。权威契约见：
 | Fencing（lease_epoch / generation / digest / catalog） | ✅ |
 | Tool manifest ∩ allowlist | ✅ |
 | 会话 `connection_generation` / resume cursor | ✅ 内存骨架 |
-| 真实 Manage WS 拨号 / 工具执行 | ⏳ D3 |
+| `read_file` 工作区执行 | ✅ D3 |
+| accepted 重启恢复（不双执行） | ✅ D3 |
+| 真实 Manage WS 拨号 | ⏳ 后续 |
 
 ## 明确不做
 
