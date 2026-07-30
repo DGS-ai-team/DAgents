@@ -52,7 +52,7 @@ func (c *ClientSession) HandleIncomingJSON(raw []byte) (*DispatchResult, error) 
 			payload, _ := loose["payload"].(map[string]any)
 			c.ApplyWelcome(payload)
 			return &DispatchResult{Handled: true}, nil
-		case "resume.complete", "resume.error", "resume.batch":
+		case "resume.complete", "resume.error", "resume.batch", "delivery.acked", "session.error":
 			return &DispatchResult{Handled: true}, nil
 		default:
 			return nil, errf(CodeSchemaMismatch, "not a WSEnvelope: %v", err)

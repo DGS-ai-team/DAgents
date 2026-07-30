@@ -51,6 +51,7 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 				"payload": map[string]any{
 					"provision_id":          res.Binding.ProvisionID,
 					"member_id":             res.Binding.MemberID,
+					"workgroup_id":          res.Binding.WorkgroupID,
 					"workspace_path":        res.Binding.WorkspacePath,
 					"tool_catalog_revision": res.Binding.ToolCatalogRevision,
 					"status":                res.Binding.Status,
@@ -71,24 +72,26 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 			return dispatchErr(err)
 		}
 		_ = w.Session.AckDelivery(env.DeliverySeq)
-		ack := map[string]any{
-			"type": "tool.ack",
-			"payload": map[string]any{
-				"command_id":            res.Ack.CommandID,
-				"status":                res.Ack.Status,
-				"connection_generation": res.Ack.ConnectionGeneration,
-				"journaled_at":          res.Ack.JournaledAt,
-				"delivery_seq":          env.DeliverySeq,
-			},
+		ackPayload := map[string]any{
+			"command_id":            res.Ack.CommandID,
+			"status":                res.Ack.Status,
+			"connection_generation": res.Ack.ConnectionGeneration,
+			"journaled_at":          res.Ack.JournaledAt,
+			"delivery_seq":          env.DeliverySeq,
+			"workgroup_id":          cmd.WorkgroupID,
+			"member_id":             cmd.MemberID,
+			"assign_id":             cmd.AssignID,
 		}
+		ack := map[string]any{"type": "tool.ack", "payload": ackPayload}
 		out := &DispatchResult{Handled: true, AckEnvelope: ack}
-		if res.Entry.Status == "succeeded" || res.Entry.Status == "failed" || res.Entry.Status == "indeterminate" {
+		if res.Entry.Status == "succeeded" || res.Entry.Status == "failed" || res.Entry.Status == "indeterminate" || res.Entry.Status == "rejected" {
 			out.AckEnvelope = map[string]any{
-				"type":    "tool.result",
-				"payload": mergeMaps(ack["payload"].(map[string]any), map[string]any{
+				"type": "tool.result",
+				"payload": mergeMaps(ackPayload, map[string]any{
 					"result_json": res.Entry.ResultJSON,
 					"error_code":  res.Entry.ErrorCode,
 					"status":      res.Entry.Status,
+					"result_text": extractResultText(res.Entry.ResultJSON),
 				}),
 			}
 		}
@@ -198,4 +201,18 @@ func mergeMaps(a, b map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func extractResultText(resultJSON string) string {
+	if resultJSON == "" {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(resultJSON), &m); err != nil {
+		return resultJSON
+	}
+	if c, ok := m["content"].(string); ok {
+		return c
+	}
+	return resultJSON
 }

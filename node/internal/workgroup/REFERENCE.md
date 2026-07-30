@@ -23,4 +23,4 @@
 
 - Manage 真实 WS 服务端 + outbox
 - Node WS dial / resume gap-fill
-- 生产级 Manage WebSocket 长连接 Dial（已有 `ws_hub` + `DispatchEnvelope` / `ClientSession`）
+- Node 进程默认自动拨号与 Web UI 分栏（D4；Dialer API 已就绪）

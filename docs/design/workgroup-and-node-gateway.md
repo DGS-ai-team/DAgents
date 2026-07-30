@@ -1,7 +1,7 @@
 # 工作组协作 + Node↔Manage 长连接（设计）
 
 > **分支**：`cursor/remote-agent-placement-7e3e`  
-> **状态**：**产品方向冻结；D0.5 契约已冻结** — 见 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（§19 Verdict A）；**D0.9 / D1 / D2 已完成**；**D3 纵向闭环进行中**（Manage `vertical` + Node `read_file` / journal 恢复）  
+> **状态**：**产品方向冻结；D0.5 契约已冻结** — 见 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（§19 Verdict A）；**D0.9 / D1 / D2 / D3 基座已完成**；下一阶段 **D4**（多 Node 订阅 + 最小 UI）  
 > **规范优先级**：§0–§13（产品正文）> [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（已冻结）> §15/§16（历史审核）  
 > **推荐方向**：Manage 云 Leader（Supervisor）+ Timeline/RunHistory；成员资产绑组存 Manage；Node 仅工具调用；权限按 `node_id`；**无远程 Agent / Placement**
 
@@ -476,8 +476,8 @@ MemberSpec {
 | **D0.9** | 停写 Placement 新产品入口（Node API/UI 返回 `placement_deprecated`）— **已完成** |
 | **D1** | Manage 基座：组存储、ACL、Grant、MemberSpec、turn kernel 骨架 — **已完成（`manage/workgroup/`）** |
 | **D2** | Node WorkgroupWorker：强身份 WS、幂等 provision、tool manifest、command journal — **已完成（`node/internal/workgroup/`）** |
-| **D3** | 纵向闭环：单组单成员单工具 + 信息型 HITL + 掉线/`indeterminate` + 重启 — **进行中（Timeline/HITL/`read_file` + WS hub/dispatch 骨架；生产长连接待续）** |
-| **D4** | 多 Node 订阅与最小 UI 分栏 |
+| **D3** | 纵向闭环：单组单成员单工具 + 信息型 HITL + 掉线/`indeterminate` + 重启 — **已完成基座**（Timeline/HITL/`read_file` + WS hub + Node Dialer；进程内默认自动拨号待 D4 配置接入） |
+| **D4** | 多 Node 订阅与最小 UI 分栏；Node 默认挂载 Workgroup Dialer |
 | **D5** | 拆除 Placement/Edge/remote stub/沙箱产品路径；拆旧 A2A |
 
 **D0.5 未完成前禁止**并行实现 runtime 主路径（已满足）。D1/D2 骨架不含完整纵向工具闭环（属 D3）。
