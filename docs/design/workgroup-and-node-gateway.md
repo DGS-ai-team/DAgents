@@ -119,11 +119,12 @@ Node
 
 | 来源 | role | name | 说明 |
 |------|------|------|------|
-| 订阅端人工 | `user` | **`human_name`**（必填语义；空则 `human`） | 同 Node 多人靠不同 name 区分 |
+| 订阅端人工 | `user` | **`human_name`**（空则 `human`） | 同 Node 多人靠不同 name |
 | 日期等系统注入 | `user` | `date` 等既有常量 | 不变 |
-| Leader 输出 | `assistant` | `leader`（或 Leader 展示名） | Supervisor 发言 |
-| Member 回合拼入总列表 | 原 role 保留；**统一带 name** | `member:{display_name}` 或成员展示名 | 工具结果可 `name`=工具名（现网 tool 消息已如此） |
-| `@` 边界 | `user` 或 `system` | `workgroup_assign` | 可选；标一次交接起止 |
+| Leader 输出 | `assistant` | `leader` | UI/审计用；喂模型时注意 §14.2 |
+| Member 的 assistant | `assistant` | `member:{display_name}` | 拼入总列表；喂模型时注意 §14.2 |
+| Member 的 tool 结果 | `tool` | **工具函数名**（不变） | 身份靠 `assign_id` / 前后文，勿覆盖 name |
+| `@` 边界 | `user` | `workgroup_assign` | 可选 |
 
 持久化可另存 `home_node_id` / `agent_id` 供 UI/审计；**进模型的上下文只依赖 `role` + `name` + `content`**（与 date 一致）。
 
