@@ -1,0 +1,91 @@
+{
+  "type": "function",
+  "function": {
+    "name": "assign_workgroup_task",
+    "description": "Synchronously assign work to one workgroup member. Blocks until member assign reaches a terminal status.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "member_id",
+        "instruction"
+      ],
+      "properties": {
+        "member_id": {
+          "type": "string",
+          "pattern": "^mb_[0-9a-z]{26}$"
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16000
+        },
+        "context_hint": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Optional short hint; Timeline snapshot still applied by projector"
+        }
+      }
+    }
+  },
+  "result_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "assign_id",
+      "status",
+      "summary",
+      "error_code"
+    ],
+    "properties": {
+      "assign_id": {
+        "type": "string",
+        "pattern": "^as_[0-9a-z]{26}$"
+      },
+      "status": {
+        "enum": [
+          "succeeded",
+          "failed",
+          "canceled",
+          "indeterminate"
+        ]
+      },
+      "summary": {
+        "type": "string",
+        "description": "Member final text on success; error explanation otherwise"
+      },
+      "error_code": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "string",
+            "enum": [
+              "not_authorized",
+              "fencing_rejected",
+              "digest_mismatch",
+              "catalog_drift",
+              "payload_conflict",
+              "already_resolved",
+              "policy_denied",
+              "schema_mismatch",
+              "result_too_large",
+              "indeterminate",
+              "workgroup_archived",
+              "duplicate_client_message",
+              "cursor_too_old",
+              "not_found",
+              "conflict"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "invariants": [
+    "exactly_one_active_assign_per_workgroup_v1",
+    "tool_result_exactly_one_per_tool_call_id",
+    "timeline_actor_final_text_deduped_by_assign_id_for_leader_context"
+  ]
+}

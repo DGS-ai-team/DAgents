@@ -1,11 +1,12 @@
 # 工作组 D0.5 契约（开工门槛）
 
-> **状态**：**起草中（GPT Verdict B）** — 已吸收首轮评审补丁；须完成 §13 剩余项后才能冻结  
+> **状态**：**起草中（GPT Verdict B → 补 Schema/fixtures 后待复审）**  
 > **产品方向**：[`workgroup-and-node-gateway.md`](./workgroup-and-node-gateway.md)（§0–§13）  
 > **本文件职责**：可测试的 schema、状态机、权限矩阵、投影规则、WS/工具恢复协议、威胁模型、旧数据处置、契约测试清单  
-> **规范优先级**：产品正文 §0–§13 > **本文** > 历史审核 §15/§16  
+> **JSON Schema 附录**：[`fixtures/workgroup-d05/schemas/`](./fixtures/workgroup-d05/schemas/)  
+> **规范优先级**：产品正文 §0–§13 > **本文** > schemas/*.json > 历史审核  
 > **完成定义**：§13 检查表全部勾选；fixtures 符合 `workgroup-d05-fixture/v1` 且无二选一期望  
-> **评审**：见 §17
+> **评审**：§17（首轮 B）；复审见 §18
 ---
 
 ## 0. 范围与非目标

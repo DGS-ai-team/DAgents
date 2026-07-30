@@ -1,26 +1,30 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
   "test": "protocol_name_rejects_unicode_display",
-  "allowed_pattern": "^[a-z][a-z0-9_]{0,63}$",
-  "cases": [
+  "given": {
+    "allowed_pattern": "^[a-z][a-z0-9_]{0,63}$"
+  },
+  "when": [
     {
       "display_name": "代码员",
-      "expected_protocol_name": "member_mb_01",
-      "forbidden": [
-        "代码员",
-        "member:代码员"
-      ]
+      "member_id": "mb_01hmember00000000000000"
     },
     {
       "display_name": "Bob Smith",
-      "expected_protocol_name": "member_mb_02",
-      "forbidden": [
-        "Bob Smith",
-        "member:Bob Smith"
-      ]
-    },
-    {
-      "display_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "expected": "reject_or_truncate_per_impl_but_must_match_pattern"
+      "member_id": "mb_01hmember00000000000001"
     }
-  ]
+  ],
+  "then": {
+    "protocol_names": [
+      "member_mb_01hmember00000000000000",
+      "member_mb_01hmember00000000000001"
+    ],
+    "forbidden_protocol_names": [
+      "代码员",
+      "member:代码员",
+      "Bob Smith",
+      "member:Bob Smith"
+    ]
+  }
 }

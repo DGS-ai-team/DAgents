@@ -1,22 +1,59 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
   "test": "concurrent_human_total_order_by_seq",
-  "scenario": "two nodes post human during idle leader",
-  "inputs": [
+  "given": {
+    "workgroup": {
+      "workgroup_id": "wg_01hworkgroup000000000000",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_01ha000000000000000000"
+        ],
+        "collaborators": [
+          "node_01hb000000000000000000",
+          "node_01hc000000000000000000"
+        ],
+        "revision": 2
+      }
+    },
+    "member": {
+      "member_id": "mb_01hmember00000000000000",
+      "home_node_id": "node_01hb000000000000000000",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    },
+    "grant": {
+      "status": "accepted",
+      "home_node_id": "node_01hb000000000000000000",
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+      "lease_epoch": 2,
+      "member_generation": 1,
+      "tool_allow_names": [
+        "read_file"
+      ]
+    },
+    "leader_assign_active": false
+  },
+  "when": [
     {
-      "node_id": "node-A",
-      "client_message_id": "cm_a",
+      "op": "human.post",
+      "node_id": "node_01ha000000000000000000",
+      "client_message_id": "01hbmessa000000000000001",
       "text": "A"
     },
     {
-      "node_id": "node-C",
-      "client_message_id": "cm_c",
+      "op": "human.post",
+      "node_id": "node_01hc000000000000000000",
+      "client_message_id": "01hbmessa000000000000002",
       "text": "C"
     }
   ],
-  "expected": {
-    "distinct_seq": true,
-    "total_order": "by_seq_asc",
-    "both_visible_on_timeline": true
-  },
-  "during_active_assign": "queue_until_assign_terminal_then_feed_leader_in_seq_order"
+  "then": {
+    "events": 2,
+    "seq_distinct": true,
+    "order": "by_seq_asc",
+    "during_active_assign_rule": "queue_until_assign_terminal_then_feed_leader_by_seq"
+  }
 }

@@ -1,8 +1,48 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
   "test": "provision_same_id_different_digest_conflict",
-  "provision_id": "pv_1",
-  "first_digest": "sha256:aaa",
-  "second_digest": "sha256:bbb",
-  "expected_code": "payload_conflict",
-  "worker_unchanged": true
+  "given": {
+    "workgroup": {
+      "workgroup_id": "wg_01hworkgroup000000000000",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_01ha000000000000000000"
+        ],
+        "collaborators": [
+          "node_01hb000000000000000000"
+        ],
+        "revision": 1
+      }
+    },
+    "member": {
+      "member_id": "mb_01hmember00000000000000",
+      "home_node_id": "node_01hb000000000000000000",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    },
+    "grant": {
+      "status": "accepted",
+      "home_node_id": "node_01hb000000000000000000",
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+      "lease_epoch": 2,
+      "member_generation": 1,
+      "tool_allow_names": [
+        "read_file"
+      ]
+    },
+    "existing_provision_id": "pv_01hprov0000000000000000",
+    "existing_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+  },
+  "when": {
+    "op": "member.provision",
+    "provision_id": "pv_01hprov0000000000000000",
+    "member_spec_digest": "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa"
+  },
+  "then": {
+    "code": "payload_conflict",
+    "member_spec_digest_unchanged": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+  }
 }

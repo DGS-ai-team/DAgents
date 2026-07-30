@@ -1,21 +1,59 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
   "test": "tool_cmd_resend_before_accept",
-  "command_id": "cmd_1",
-  "payload_hash": "sha256:p1",
-  "steps": [
-    {
-      "action": "manage_send",
-      "status_before_ack": "queued"
+  "given": {
+    "workgroup": {
+      "workgroup_id": "wg_01hworkgroup000000000000",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_01ha000000000000000000"
+        ],
+        "collaborators": [
+          "node_01hb000000000000000000"
+        ],
+        "revision": 1
+      }
     },
-    {
-      "action": "disconnect"
+    "member": {
+      "member_id": "mb_01hmember00000000000000",
+      "home_node_id": "node_01hb000000000000000000",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
     },
-    {
-      "action": "resend_same_command_id_and_hash"
+    "grant": {
+      "status": "accepted",
+      "home_node_id": "node_01hb000000000000000000",
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+      "lease_epoch": 2,
+      "member_generation": 1,
+      "tool_allow_names": [
+        "read_file"
+      ]
     },
-    {
-      "action": "node_accepts_once",
-      "expected_executions": 1
+    "command": {
+      "command_id": "cmd_01hcmd00000000000000000",
+      "payload_hash": "sha256:f64551fcd6f07823cb87971cfb91446425da18286b3ab1ef935e0cbd7a69f68a",
+      "status": "queued"
     }
-  ]
+  },
+  "when": [
+    {
+      "op": "ws.disconnect"
+    },
+    {
+      "op": "tool.command_resend",
+      "command_id": "cmd_01hcmd00000000000000000",
+      "payload_hash": "sha256:f64551fcd6f07823cb87971cfb91446425da18286b3ab1ef935e0cbd7a69f68a"
+    }
+  ],
+  "then": {
+    "executions": 1,
+    "final_status_in": [
+      "succeeded",
+      "failed"
+    ]
+  }
 }

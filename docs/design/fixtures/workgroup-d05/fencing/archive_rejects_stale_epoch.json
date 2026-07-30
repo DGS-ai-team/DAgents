@@ -1,14 +1,52 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
   "test": "archive_fencing_rejects_stale_epoch",
-  "before": {
+  "given": {
+    "workgroup": {
+      "workgroup_id": "wg_01hworkgroup000000000000",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_01ha000000000000000000"
+        ],
+        "collaborators": [
+          "node_01hb000000000000000000"
+        ],
+        "revision": 1
+      }
+    },
+    "member": {
+      "member_id": "mb_01hmember00000000000000",
+      "home_node_id": "node_01hb000000000000000000",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    },
+    "grant": {
+      "status": "accepted",
+      "home_node_id": "node_01hb000000000000000000",
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+      "lease_epoch": 2,
+      "member_generation": 1,
+      "tool_allow_names": [
+        "read_file"
+      ]
+    },
     "lease_epoch": 3,
-    "command_id": "cmd_old"
+    "pending_command": {
+      "command_id": "cmd_01hcmd00000000000000000",
+      "lease_epoch": 3
+    }
   },
-  "archive": {
+  "when": {
+    "op": "workgroup.archive",
     "lease_epoch_at_archive": 4
   },
-  "delayed_command": {
-    "lease_epoch": 3,
-    "expected_code": "fencing_rejected"
+  "then": {
+    "delayed_command": {
+      "code": "fencing_rejected",
+      "executed": false
+    }
   }
 }

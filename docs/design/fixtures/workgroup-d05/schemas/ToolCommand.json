@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/ToolCommand.json",
+  "title": "ToolCommand",
+  "type": "object",
+  "required": [
+    "command_id",
+    "workgroup_id",
+    "member_id",
+    "assign_id",
+    "run_id",
+    "turn_id",
+    "tool_call_id",
+    "tool_name",
+    "arguments_json",
+    "payload_hash",
+    "lease_id",
+    "lease_epoch",
+    "member_generation",
+    "member_spec_digest",
+    "tool_catalog_revision",
+    "status",
+    "side_effect_class"
+  ],
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "pattern": "^cmd_[0-9a-z]{26}$"
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "member_id": {
+      "type": "string",
+      "pattern": "^mb_[0-9a-z]{26}$"
+    },
+    "assign_id": {
+      "type": "string",
+      "pattern": "^as_[0-9a-z]{26}$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^rn_[0-9a-z]{26}$"
+    },
+    "turn_id": {
+      "type": "string",
+      "pattern": "^tn_[0-9a-z]{26}$"
+    },
+    "tool_call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tool_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "arguments_json": {
+      "type": "string"
+    },
+    "payload_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "lease_id": {
+      "type": "string",
+      "pattern": "^ls_[0-9a-z]{26}$"
+    },
+    "lease_epoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "member_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "member_spec_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "tool_catalog_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "accepted",
+        "running",
+        "succeeded",
+        "failed",
+        "rejected",
+        "canceled",
+        "indeterminate"
+      ]
+    },
+    "side_effect_class": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

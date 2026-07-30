@@ -2,6 +2,7 @@
   "schema_version": "0.5.0",
   "fixture_schema": "workgroup-d05-fixture/v1",
   "root": "docs/design/fixtures/workgroup-d05",
+  "schemas": "schemas/",
   "tests": [
     {
       "file": "catalog/tool_catalog_revision_drift.json",

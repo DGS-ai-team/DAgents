@@ -1,21 +1,52 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
   "test": "indeterminate_on_journal_loss_after_accept",
-  "steps": [
+  "given": {
+    "workgroup": {
+      "workgroup_id": "wg_01hworkgroup000000000000",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_01ha000000000000000000"
+        ],
+        "collaborators": [
+          "node_01hb000000000000000000"
+        ],
+        "revision": 1
+      }
+    },
+    "member": {
+      "member_id": "mb_01hmember00000000000000",
+      "home_node_id": "node_01hb000000000000000000",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    },
+    "grant": {
+      "status": "accepted",
+      "home_node_id": "node_01hb000000000000000000",
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+      "lease_epoch": 2,
+      "member_generation": 1,
+      "tool_allow_names": [
+        "read_file"
+      ]
+    },
+    "command_id": "cmd_01hcmd00000000000000000",
+    "status": "accepted",
+    "side_effect_started": true
+  },
+  "when": [
     {
-      "node": "persist_accepted"
+      "op": "node.crash_lose_journal_or_result"
     },
     {
-      "node": "begin_running_side_effect"
-    },
-    {
-      "node": "crash_and_lose_journal_or_result"
-    },
-    {
-      "manage": "reconcile"
-    },
-    {
-      "expected_status": "indeterminate",
-      "forbidden": "auto_reexec"
+      "op": "manage.reconcile"
     }
-  ]
+  ],
+  "then": {
+    "status": "indeterminate",
+    "auto_reexec": false
+  }
 }

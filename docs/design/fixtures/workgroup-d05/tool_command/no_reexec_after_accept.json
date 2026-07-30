@@ -1,9 +1,59 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
   "test": "tool_cmd_no_reexec_after_accept",
-  "command_id": "cmd_2",
-  "after_accepted": {
-    "resend_same_id": "return_journal_status_only",
-    "new_command_id_same_args": "forbidden_auto_reexec_for_non_idempotent"
+  "given": {
+    "workgroup": {
+      "workgroup_id": "wg_01hworkgroup000000000000",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_01ha000000000000000000"
+        ],
+        "collaborators": [
+          "node_01hb000000000000000000"
+        ],
+        "revision": 1
+      }
+    },
+    "member": {
+      "member_id": "mb_01hmember00000000000000",
+      "home_node_id": "node_01hb000000000000000000",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    },
+    "grant": {
+      "status": "accepted",
+      "home_node_id": "node_01hb000000000000000000",
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+      "lease_epoch": 2,
+      "member_generation": 1,
+      "tool_allow_names": [
+        "read_file"
+      ]
+    },
+    "command": {
+      "command_id": "cmd_01hcmd00000000000000000",
+      "status": "accepted",
+      "side_effect_class": "fs_write"
+    }
   },
-  "side_effect_class": "fs_write"
+  "when": [
+    {
+      "op": "tool.command_resend",
+      "command_id": "cmd_01hcmd00000000000000000"
+    },
+    {
+      "op": "tool.command_new_id_same_args",
+      "new_command_id": "cmd_01hcmd00000000000000001"
+    }
+  ],
+  "then": {
+    "resend": {
+      "executions_total": 1,
+      "returns_journal_status": true
+    },
+    "auto_reexec_with_new_id": false
+  }
 }

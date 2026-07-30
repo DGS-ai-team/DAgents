@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/FixtureMeta.json",
+  "title": "FixtureMeta",
+  "type": "object",
+  "required": [
+    "fixture_schema",
+    "test",
+    "given",
+    "when",
+    "then"
+  ],
+  "properties": {
+    "fixture_schema": {
+      "const": "workgroup-d05-fixture/v1"
+    },
+    "test": {
+      "type": "string"
+    },
+    "subcase": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "compare": {
+      "enum": [
+        "exact_json_unless_noted",
+        "subset"
+      ]
+    },
+    "given": {
+      "type": "object"
+    },
+    "when": {},
+    "then": {
+      "type": "object"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

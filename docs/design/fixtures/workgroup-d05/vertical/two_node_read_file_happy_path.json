@@ -1,24 +1,28 @@
 {
   "fixture_schema": "workgroup-d05-fixture/v1",
   "compare": "exact_json_unless_noted",
-  "id_note": "fixtures use lowercase ulid-shaped tokens for readability",
   "test": "vertical_two_node_read_file_happy_path",
   "given": {
     "nodes": [
-      "node_01ha",
-      "node_01hb"
+      "node_01ha000000000000000000",
+      "node_01hb000000000000000000"
     ],
     "workgroup": {
-      "owners": [
-        "node_01ha"
-      ],
-      "collaborators": [
-        "node_01hb"
-      ]
+      "workgroup_id": "wg_01hworkgroup000000000000",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_01ha000000000000000000"
+        ],
+        "collaborators": [
+          "node_01hb000000000000000000"
+        ],
+        "revision": 1
+      }
     },
     "member_spec": {
-      "member_id": "mb_01hmember01xxxxxx",
-      "home_node_id": "node_01hb",
+      "member_id": "mb_01hmember00000000000000",
+      "home_node_id": "node_01hb000000000000000000",
       "tools": {
         "allow_names": [
           "read_file"
@@ -32,60 +36,59 @@
       "digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
     }
   },
-  "steps": [
+  "when": [
     {
-      "accept_grant": {
-        "node": "node_01hb",
-        "digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
-      }
+      "op": "grant.accept",
+      "node": "node_01hb000000000000000000",
+      "digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
     },
     {
-      "provision": {
-        "provision_id": "pv_01hprov01xxxxxxx",
-        "idempotent": true
-      }
+      "op": "member.provision",
+      "provision_id": "pv_01hprov0000000000000000"
     },
     {
-      "assert": {
-        "GET /v1/agents on node_01hb": {
-          "excludes": "mb_01hmember01xxxxxx"
-        }
-      }
+      "op": "GET",
+      "path": "/v1/agents",
+      "node": "node_01hb000000000000000000"
     },
     {
-      "human": {
-        "node": "node_01ha",
-        "text": "读 README"
-      }
+      "op": "human.post",
+      "node": "node_01ha000000000000000000",
+      "text": "读 README"
     },
     {
-      "leader_assign": {
-        "member_id": "mb_01hmember01xxxxxx"
-      }
+      "op": "leader.assign_workgroup_task",
+      "member_id": "mb_01hmember00000000000000",
+      "instruction": "读 README"
     },
     {
-      "member_tool": {
-        "name": "read_file",
-        "command_id": "cmd_01hcmd01xxxxxxxx"
-      }
+      "op": "member.tool",
+      "name": "read_file",
+      "command_id": "cmd_01hcmd00000000000000000"
     },
     {
-      "member_final": {
-        "text": "标题是 Demo"
-      }
-    },
-    {
-      "leader_tool_result_paired": true
-    },
-    {
-      "timeline_has": [
-        "human_message",
-        "actor_final_text"
-      ],
-      "timeline_forbids_fields": [
-        "tool_arguments",
-        "tool_result"
-      ]
+      "op": "member.final",
+      "text": "标题是 Demo"
     }
-  ]
+  ],
+  "then": {
+    "agents_api_excludes": [
+      "mb_01hmember00000000000000"
+    ],
+    "assign_result": {
+      "status": "succeeded",
+      "summary": "标题是 Demo",
+      "error_code": null
+    },
+    "timeline_types": [
+      "human_message",
+      "actor_final_text"
+    ],
+    "timeline_event_fields_forbidden": [
+      "tool_arguments",
+      "tool_result",
+      "raw_tool_payload"
+    ],
+    "leader_tool_paired": true
+  }
 }

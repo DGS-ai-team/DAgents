@@ -1,18 +1,24 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
   "test": "assign_result_deduped_vs_timeline",
-  "leader_context_sources": [
-    {
-      "kind": "tool_result",
-      "assign_id": "as_1",
+  "given": {
+    "assign_id": "as_01hassign00000000000000",
+    "leader_tool_result": {
+      "tool_call_id": "call_as1",
       "content": "done"
     },
-    {
-      "kind": "timeline",
+    "timeline_event": {
       "type": "actor_final_text",
-      "assign_id": "as_1",
+      "assign_id": "as_01hassign00000000000000",
       "content_text": "done"
     }
-  ],
-  "expected_leader_messages_containing_done": 1,
-  "rule": "prefer_tool_result_pairing; skip timeline duplicate for same assign_id"
+  },
+  "when": {
+    "op": "project_leader_context"
+  },
+  "then": {
+    "messages_with_content_done": 1,
+    "kept": "tool_result"
+  }
 }

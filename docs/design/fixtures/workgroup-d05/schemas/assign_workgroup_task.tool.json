@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/assign_workgroup_task.tool.json",
+  "title": "assign_workgroup_task.tool",
+  "description": "Leader Manage-native tool: synchronous @ member",
+  "type": "object",
+  "required": [
+    "name",
+    "parameters",
+    "result"
+  ],
+  "properties": {
+    "name": {
+      "const": "assign_workgroup_task"
+    },
+    "parameters": {
+      "type": "object",
+      "required": [
+        "type",
+        "properties",
+        "required",
+        "additionalProperties"
+      ],
+      "properties": {
+        "type": {
+          "const": "object"
+        },
+        "required": {
+          "const": [
+            "member_id",
+            "instruction"
+          ]
+        },
+        "additionalProperties": {
+          "const": false
+        },
+        "properties": {
+          "type": "object",
+          "required": [
+            "member_id",
+            "instruction",
+            "context_hint"
+          ],
+          "properties": {
+            "member_id": {
+              "type": "object"
+            },
+            "instruction": {
+              "type": "object"
+            },
+            "context_hint": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "type",
+        "required",
+        "properties",
+        "additionalProperties"
+      ],
+      "properties": {
+        "type": {
+          "const": "object"
+        },
+        "additionalProperties": {
+          "const": false
+        },
+        "required": {
+          "const": [
+            "assign_id",
+            "status",
+            "summary",
+            "error_code"
+          ]
+        },
+        "properties": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

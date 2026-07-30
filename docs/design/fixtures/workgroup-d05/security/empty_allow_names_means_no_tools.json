@@ -1,12 +1,53 @@
 {
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
   "test": "empty_allow_names_means_no_tools",
-  "member_spec_tools": {
-    "allow_names": []
+  "given": {
+    "workgroup": {
+      "workgroup_id": "wg_01hworkgroup000000000000",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_01ha000000000000000000"
+        ],
+        "collaborators": [
+          "node_01hb000000000000000000"
+        ],
+        "revision": 1
+      }
+    },
+    "member": {
+      "member_id": "mb_01hmember00000000000000",
+      "home_node_id": "node_01hb000000000000000000",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    },
+    "grant": {
+      "status": "accepted",
+      "home_node_id": "node_01hb000000000000000000",
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+      "lease_epoch": 2,
+      "member_generation": 1,
+      "tool_allow_names": [
+        "read_file"
+      ]
+    },
+    "member_spec": {
+      "tools": {
+        "allow_names": []
+      }
+    },
+    "node_default_groups": [
+      "fs",
+      "bash"
+    ]
   },
-  "node_default_groups": [
-    "fs",
-    "bash"
-  ],
-  "expected_manifest_for_member": [],
-  "forbidden": "fallback_to_node_enabled_groups"
+  "when": {
+    "op": "build_worker_tool_registry"
+  },
+  "then": {
+    "effective_tool_names": [],
+    "code_if_model_calls_read_file": "not_authorized"
+  }
 }

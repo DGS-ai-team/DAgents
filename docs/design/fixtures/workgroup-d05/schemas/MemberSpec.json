@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/MemberSpec.json",
+  "title": "MemberSpec",
+  "type": "object",
+  "required": [
+    "member_id",
+    "workgroup_id",
+    "home_node_id",
+    "display_name",
+    "member_generation",
+    "llm_profile_id",
+    "llm_profile_revision",
+    "max_tool_loops",
+    "prompt",
+    "memory",
+    "tools",
+    "policy_ceiling",
+    "workspace",
+    "skills",
+    "hooks",
+    "digest"
+  ],
+  "properties": {
+    "member_id": {
+      "type": "string",
+      "pattern": "^mb_[0-9a-z]{26}$"
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "home_node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "member_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "llm_profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "llm_profile_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "max_tool_loops": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 256
+    },
+    "prompt": {
+      "type": "object",
+      "required": [
+        "soul_md",
+        "user_md",
+        "custom_md"
+      ],
+      "properties": {
+        "soul_md": {
+          "type": "string"
+        },
+        "user_md": {
+          "type": "string"
+        },
+        "custom_md": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "memory": {
+      "type": "object",
+      "required": [
+        "remember_enabled",
+        "initial_entries"
+      ],
+      "properties": {
+        "remember_enabled": {
+          "const": false
+        },
+        "initial_entries": {
+          "type": "array",
+          "maxItems": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "tools": {
+      "type": "object",
+      "required": [
+        "allow_names",
+        "side_effect_classes"
+      ],
+      "properties": {
+        "allow_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "uniqueItems": true
+        },
+        "side_effect_classes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "policy_ceiling": {
+      "type": "object"
+    },
+    "workspace": {
+      "type": "object",
+      "required": [
+        "root_kind"
+      ],
+      "properties": {
+        "root_kind": {
+          "enum": [
+            "member_workspace"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "skills": {
+      "const": "disabled"
+    },
+    "hooks": {
+      "const": "disabled"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "additionalProperties": false
+}
