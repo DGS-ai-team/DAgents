@@ -42,6 +42,12 @@ class WorkgroupSubscribeTests(unittest.TestCase):
             self.assertFalse(store.is_subscribed(wid, "node-b"))
             self.assertEqual(store.list_workgroups(subscribed_by="node-b"), [])
 
+            # ACL 内但未订阅 → acl_member 仍可见
+            acl_list = store.list_workgroups(acl_member="node-b")
+            self.assertEqual(len(acl_list), 1)
+            self.assertEqual(acl_list[0].workgroup_id, wid)
+
 
 if __name__ == "__main__":
     unittest.main()
+

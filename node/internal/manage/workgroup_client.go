@@ -18,17 +18,108 @@ type WorkgroupListItem struct {
 	CreatedAt         string `json:"created_at"`
 }
 
-// ListWorkgroups 列出工作组；subscribedOnly 时带 subscribed_by=本机 node_id。
-func (c *ControlClient) ListWorkgroups(ctx context.Context, subscribedOnly bool) ([]WorkgroupListItem, error) {
+// WorkgroupListMode 控制列表过滤。
+type WorkgroupListMode string
+
+const (
+	WorkgroupListAll        WorkgroupListMode = "all"
+	WorkgroupListSubscribed WorkgroupListMode = "subscribed"
+	WorkgroupListACL        WorkgroupListMode = "acl"
+)
+
+// ListWorkgroups 列出工作组。
+func (c *ControlClient) ListWorkgroups(ctx context.Context, mode WorkgroupListMode) ([]WorkgroupListItem, error) {
 	path := "/v1/workgroups"
-	if subscribedOnly {
-		path += "?subscribed_by=" + url.QueryEscape(c.cfg.NodeID)
+	q := url.Values{}
+	switch mode {
+	case WorkgroupListSubscribed:
+		q.Set("subscribed_by", c.cfg.NodeID)
+	case WorkgroupListACL:
+		q.Set("acl_member", c.cfg.NodeID)
+	}
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
 	}
 	var out []WorkgroupListItem
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// CreateWorkgroup 以本机 node_id 建组（自动订阅）。
+func (c *ControlClient) CreateWorkgroup(ctx context.Context, displayName string) (map[string]any, error) {
+	name := strings.TrimSpace(displayName)
+	if name == "" {
+		return nil, fmt.Errorf("display_name required")
+	}
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/workgroups", map[string]any{
+		"display_name":        name,
+		"created_by_node_id":  c.cfg.NodeID,
+		"llm_profile_id":      "default",
+		"llm_profile_revision": "1",
+	}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetWorkgroupACL 读取 ACL。
+func (c *ControlClient) GetWorkgroupACL(ctx context.Context, workgroupID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/acl"
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PatchWorkgroupACL 更新 ACL（CAS revision）。
+func (c *ControlClient) PatchWorkgroupACL(ctx context.Context, workgroupID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/acl"
+	if err := c.doJSON(ctx, http.MethodPatch, path, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AddWorkgroupCollaborator 将 node 加入 collaborators（读 revision 后 CAS）。
+func (c *ControlClient) AddWorkgroupCollaborator(ctx context.Context, workgroupID, nodeID string) (map[string]any, error) {
+	acl, err := c.GetWorkgroupACL(ctx, workgroupID)
+	if err != nil {
+		return nil, err
+	}
+	rev, _ := acl["revision"].(float64)
+	collab := stringSlice(acl["collaborators"])
+	nid := strings.TrimSpace(nodeID)
+	for _, x := range collab {
+		if x == nid {
+			return acl, nil
+		}
+	}
+	collab = append(collab, nid)
+	return c.PatchWorkgroupACL(ctx, workgroupID, map[string]any{
+		"collaborators":     collab,
+		"expected_revision": int(rev),
+	})
+}
+
+func stringSlice(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		s, _ := item.(string)
+		s = strings.TrimSpace(s)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // SubscribeWorkgroup 持久订阅（须在 ACL 内）。

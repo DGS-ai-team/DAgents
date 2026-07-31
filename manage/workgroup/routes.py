@@ -86,10 +86,12 @@ def build_workgroup_router(store: WorkGroupStore, audit: AuditLog) -> APIRouter:
 
     @router.get("", response_model=list[WorkGroup])
     def list_workgroups(
-        request: Request, subscribed_by: str | None = None
+        request: Request,
+        subscribed_by: str | None = None,
+        acl_member: str | None = None,
     ) -> list[WorkGroup]:
         authenticate(request)
-        return store.list_workgroups(subscribed_by=subscribed_by)
+        return store.list_workgroups(subscribed_by=subscribed_by, acl_member=acl_member)
 
     @router.get("/{workgroup_id}", response_model=WorkGroup)
     def get_workgroup(workgroup_id: str, request: Request) -> WorkGroup:

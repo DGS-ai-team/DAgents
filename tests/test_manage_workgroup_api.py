@@ -137,6 +137,21 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 self.assertEqual(conflict.status_code, 409, conflict.text)
                 self.assertEqual(conflict.json()["detail"]["code"], "already_resolved")
 
+                # 创建者已自动订阅；acl_member / subscribed_by 过滤
+                sub = client.get("/v1/workgroups", params={"subscribed_by": "node-a"})
+                self.assertEqual(sub.status_code, 200, sub.text)
+                self.assertEqual(len(sub.json()), 1)
+                acl_b = client.get("/v1/workgroups", params={"acl_member": "node-b"})
+                self.assertEqual(acl_b.status_code, 200, acl_b.text)
+                self.assertEqual(len(acl_b.json()), 1)
+                join = client.post(
+                    f"/v1/workgroups/{wid}/subscribe",
+                    json={"node_id": "node-b"},
+                    headers={"x-dagents-agent-id": "node-b"},
+                )
+                self.assertEqual(join.status_code, 200, join.text)
+
 
 if __name__ == "__main__":
     unittest.main()
+

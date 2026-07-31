@@ -477,7 +477,7 @@ MemberSpec {
 | **D1** | Manage 基座：组存储、ACL、Grant、MemberSpec、turn kernel 骨架 — **已完成（`manage/workgroup/`）** |
 | **D2** | Node WorkgroupWorker：强身份 WS、幂等 provision、tool manifest、command journal — **已完成（`node/internal/workgroup/`）** |
 | **D3** | 纵向闭环：单组单成员单工具 + 信息型 HITL + 掉线/`indeterminate` + 重启 — **已完成基座**（Timeline/HITL/`read_file` + WS hub + Node Dialer；进程内默认自动拨号待 D4 配置接入） |
-| **D4** | 多 Node 订阅与最小 UI 分栏；Node 默认挂载 Workgroup Dialer — **进行中**（`manage.workgroup` + subscribe API + `/ui/workgroups` + Dialer 随 Manage 启动） |
+| **D4** | 多 Node 订阅与最小 UI 分栏；Node 默认挂载 Workgroup Dialer — **进行中**（订阅/建组/加协作者/可订阅列表 + `/ui/workgroups` + Dialer） |
 | **D5** | 拆除 Placement/Edge/remote stub/沙箱产品路径；拆旧 A2A |
 
 **D0.5 未完成前禁止**并行实现 runtime 主路径（已满足）。D1/D2 骨架不含完整纵向工具闭环（属 D3）。

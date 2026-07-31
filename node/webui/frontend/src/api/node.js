@@ -312,10 +312,26 @@ export function uploadPluginToManage({ path, pluginId, version, name, platform =
   });
 }
 
-/** 本机已订阅工作组列表（经 Node 代理 Manage）。 */
-export function listWorkgroups({ subscribed = true } = {}) {
+/** 工作组列表：scope=subscribed|acl|all */
+export function listWorkgroups({ scope = "subscribed" } = {}) {
+  return apiFetch("/v1/workgroups", { params: { scope } });
+}
+
+export function createWorkgroup(displayName) {
   return apiFetch("/v1/workgroups", {
-    params: subscribed ? { subscribed: "1" } : undefined,
+    method: "POST",
+    body: { display_name: displayName },
+  });
+}
+
+export function getWorkgroupACL(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/acl`);
+}
+
+export function addWorkgroupCollaborator(workgroupId, nodeId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/collaborators`, {
+    method: "POST",
+    body: { node_id: nodeId },
   });
 }
 

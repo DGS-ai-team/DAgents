@@ -166,7 +166,12 @@ class WorkGroupStore:
             )
             return group, acl
 
-    def list_workgroups(self, *, subscribed_by: str | None = None) -> list[WorkGroup]:
+    def list_workgroups(
+        self,
+        *,
+        subscribed_by: str | None = None,
+        acl_member: str | None = None,
+    ) -> list[WorkGroup]:
         with self._lock:
             self._ensure_loaded()
             groups = list(self._groups.values())
@@ -177,6 +182,14 @@ class WorkGroupStore:
                     for g in groups
                     if nid in (self._subscriptions.get(g.workgroup_id) or {})
                 ]
+            if acl_member:
+                nid = acl_member.strip()
+                filtered: list[WorkGroup] = []
+                for g in groups:
+                    acl = self._acls.get(g.workgroup_id)
+                    if acl is not None and _acl_contains(acl, nid):
+                        filtered.append(g)
+                groups = filtered
             return sorted(groups, key=lambda g: g.created_at, reverse=True)
 
     def get_workgroup(self, workgroup_id: str) -> WorkGroup | None:

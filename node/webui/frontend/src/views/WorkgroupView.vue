@@ -6,6 +6,7 @@ import WorkgroupPanel from "../components/WorkgroupPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
+const panelRef = ref(null);
 
 const workgroupId = computed(() => String(route.params.workgroupId || "").trim());
 const events = ref([]);
@@ -13,6 +14,9 @@ const draft = ref("");
 const sending = ref(false);
 const error = ref("");
 const pollTimer = ref(null);
+const acl = ref(null);
+const collabDraft = ref("");
+const collabBusy = ref(false);
 
 async function loadTimeline() {
   if (!workgroupId.value) {
@@ -25,6 +29,18 @@ async function loadTimeline() {
     error.value = "";
   } catch (e) {
     error.value = e?.message || "加载 Timeline 失败";
+  }
+}
+
+async function loadACL() {
+  if (!workgroupId.value) {
+    acl.value = null;
+    return;
+  }
+  try {
+    acl.value = await api.getWorkgroupACL(workgroupId.value);
+  } catch {
+    acl.value = null;
   }
 }
 
@@ -56,17 +72,40 @@ async function send() {
   }
 }
 
+async function addCollaborator() {
+  const nid = collabDraft.value.trim();
+  if (!nid || !workgroupId.value || collabBusy.value) return;
+  collabBusy.value = true;
+  error.value = "";
+  try {
+    acl.value = await api.addWorkgroupCollaborator(workgroupId.value, nid);
+    collabDraft.value = "";
+    panelRef.value?.refresh?.();
+  } catch (e) {
+    error.value = e?.message || "添加协作者失败";
+  } finally {
+    collabBusy.value = false;
+  }
+}
+
 function eventLabel(ev) {
   if (ev.type === "human_message") return ev.actor_id || "human";
   if (ev.type === "actor_final_text") return ev.actor_id || "member";
   return ev.type || "event";
 }
 
+const aclSummary = computed(() => {
+  if (!acl.value) return "";
+  const owners = (acl.value.owners || []).join(", ");
+  const collab = (acl.value.collaborators || []).join(", ") || "—";
+  return `owners: ${owners} · collaborators: ${collab}`;
+});
+
 watch(
   workgroupId,
   async (id) => {
     stopPoll();
-    await loadTimeline();
+    await Promise.all([loadTimeline(), loadACL()]);
     if (id) startPoll();
   },
   { immediate: true },
@@ -78,17 +117,29 @@ onUnmounted(stopPoll);
 <template>
   <div class="app__body app__body--chat-v61">
     <aside class="app__col app__col--agents">
-      <WorkgroupPanel />
+      <WorkgroupPanel ref="panelRef" />
     </aside>
     <div class="app__main-col wg-chat">
       <div v-if="error" class="chat-error-banner">{{ error }}</div>
       <div v-if="!workgroupId" class="chat-empty-agent">
-        <p>选择左侧已订阅工作组查看 Timeline。</p>
+        <p>选择左侧已订阅工作组，或点击 + 新建。</p>
         <button type="button" class="wg-chat__link" @click="router.push({ name: 'agents' })">
           返回 Agents
         </button>
       </div>
       <template v-else>
+        <div class="wg-chat__toolbar">
+          <div class="wg-chat__acl" :title="aclSummary">{{ aclSummary || "加载 ACL…" }}</div>
+          <form class="wg-chat__collab" @submit.prevent="addCollaborator">
+            <input
+              v-model="collabDraft"
+              type="text"
+              placeholder="添加协作者 node_id"
+              :disabled="collabBusy"
+            />
+            <button type="submit" :disabled="collabBusy || !collabDraft.trim()">添加</button>
+          </form>
+        </div>
         <div class="wg-chat__timeline">
           <div v-for="ev in events" :key="ev.event_id || ev.seq" class="wg-chat__event">
             <div class="wg-chat__event-meta">
@@ -121,6 +172,42 @@ onUnmounted(stopPoll);
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+.wg-chat__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
+  font-size: 0.75rem;
+}
+.wg-chat__acl {
+  color: var(--text-muted, #6b7280);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 55%;
+}
+.wg-chat__collab {
+  display: flex;
+  gap: 0.35rem;
+}
+.wg-chat__collab input {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font: inherit;
+  min-width: 10rem;
+}
+.wg-chat__collab button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font: inherit;
 }
 .wg-chat__timeline {
   flex: 1;
