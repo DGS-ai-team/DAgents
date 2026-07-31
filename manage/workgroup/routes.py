@@ -39,6 +39,7 @@ from manage.workgroup.models import (
 from manage.workgroup.store import WorkGroupStore
 from manage.workgroup.turn_kernel import TurnKernel
 from manage.workgroup.vertical import VerticalLoop
+from manage.workgroup.ws_hub import WorkgroupWSHub
 
 _SHA = r"^sha256:[0-9a-f]{64}$"
 
@@ -64,10 +65,15 @@ def _http_error(exc: WorkgroupError) -> HTTPException:
     return HTTPException(status_code=exc.http_status, detail=exc.as_body())
 
 
-def build_workgroup_router(store: WorkGroupStore, audit: AuditLog) -> APIRouter:
+def build_workgroup_router(
+    store: WorkGroupStore,
+    audit: AuditLog,
+    *,
+    hub: WorkgroupWSHub | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/v1/workgroups", tags=["workgroups"])
     kernel = TurnKernel(store)
-    loop = VerticalLoop(store)
+    loop = VerticalLoop(store, hub=hub)
 
     @router.post("", response_model=dict)
     def create_workgroup(req: WorkGroupCreateRequest, request: Request) -> dict:
@@ -192,6 +198,9 @@ def build_workgroup_router(store: WorkGroupStore, audit: AuditLog) -> APIRouter:
         digest = req.member_spec_digest
         try:
             grant = store.accept_grant(grant_id, home_node_id=home, member_spec_digest=digest)
+            # 接受后入队 member.provision（经 hub 推送给已连接 Dialer）
+            if grant.status == "accepted":
+                loop.enqueue_provision(grant)
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
         if grant.workgroup_id != workgroup_id:
@@ -393,6 +402,15 @@ def build_workgroup_router(store: WorkGroupStore, audit: AuditLog) -> APIRouter:
             target_agent_id=req.member_id,
         )
         return result
+
+    @router.get("/{workgroup_id}/hitl", response_model=list[HITLRequest])
+    def list_hitl(
+        workgroup_id: str, request: Request, pending_only: bool = True
+    ) -> list[HITLRequest]:
+        authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        return store.list_hitl(workgroup_id, pending_only=pending_only)
 
     @router.post("/{workgroup_id}/hitl", response_model=HITLRequest)
     def create_hitl(workgroup_id: str, req: HITLCreateRequest, request: Request) -> HITLRequest:

@@ -175,3 +175,97 @@ func (c *ControlClient) PostWorkgroupMessage(ctx context.Context, workgroupID, t
 
 // jsonArray 便于 doJSON 解码任意 JSON 数组。
 type jsonArray []map[string]any
+
+// ListWorkgroupMembers 列出成员。
+func (c *ControlClient) ListWorkgroupMembers(ctx context.Context, workgroupID string) (jsonArray, error) {
+	var out jsonArray
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/members"
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CreateWorkgroupMember 创建成员（home 须在 ACL）。
+func (c *ControlClient) CreateWorkgroupMember(ctx context.Context, workgroupID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/members"
+	if err := c.doJSON(ctx, http.MethodPost, path, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListWorkgroupGrants 列出 Grant。
+func (c *ControlClient) ListWorkgroupGrants(ctx context.Context, workgroupID string) (jsonArray, error) {
+	var out jsonArray
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/grants"
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// InviteWorkgroupGrant 邀请 ExecutionGrant。
+func (c *ControlClient) InviteWorkgroupGrant(ctx context.Context, workgroupID, memberID string, tools []string) (map[string]any, error) {
+	body := map[string]any{"member_id": memberID}
+	if len(tools) > 0 {
+		body["tool_allow_names"] = tools
+	}
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/grants"
+	if err := c.doJSON(ctx, http.MethodPost, path, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AcceptWorkgroupGrant home Node 接受 Grant（触发 Manage provision outbox）。
+func (c *ControlClient) AcceptWorkgroupGrant(ctx context.Context, workgroupID, grantID, digest string) (map[string]any, error) {
+	body := map[string]any{}
+	if strings.TrimSpace(digest) != "" {
+		body["member_spec_digest"] = digest
+	}
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/grants/" + strings.TrimSpace(grantID) + "/accept"
+	if err := c.doJSON(ctx, http.MethodPost, path, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListWorkgroupHITL 列出 HITL（默认仅 pending）。
+func (c *ControlClient) ListWorkgroupHITL(ctx context.Context, workgroupID string, pendingOnly bool) (jsonArray, error) {
+	q := url.Values{}
+	if pendingOnly {
+		q.Set("pending_only", "true")
+	} else {
+		q.Set("pending_only", "false")
+	}
+	var out jsonArray
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/hitl?" + q.Encode()
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CreateWorkgroupHITL 创建信息型 HITL。
+func (c *ControlClient) CreateWorkgroupHITL(ctx context.Context, workgroupID, prompt string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/hitl"
+	if err := c.doJSON(ctx, http.MethodPost, path, map[string]any{"prompt": prompt}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ResolveWorkgroupHITL CAS 决议 HITL。
+func (c *ControlClient) ResolveWorkgroupHITL(ctx context.Context, workgroupID, hitlID string, resolution map[string]any) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/hitl/" + strings.TrimSpace(hitlID) + "/resolve"
+	if err := c.doJSON(ctx, http.MethodPost, path, map[string]any{"resolution": resolution}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

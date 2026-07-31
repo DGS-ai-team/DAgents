@@ -107,7 +107,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.include_router(build_control_router(store, audit))
     app.include_router(build_edge_router(store, edge_sessions, audit))
     app.include_router(build_a2a_router(store, a2a_store, audit))
-    app.include_router(build_workgroup_router(workgroup_store, audit))
+    app.include_router(build_workgroup_router(workgroup_store, audit, hub=workgroup_ws_hub))
     app.include_router(build_workgroup_ws_router(workgroup_ws_hub))
     app.include_router(build_admin_router(store, a2a_store))
     app.include_router(build_llm_router(llm_store, audit))

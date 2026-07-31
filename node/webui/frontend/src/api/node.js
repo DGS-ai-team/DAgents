@@ -361,3 +361,61 @@ export function postWorkgroupMessage(workgroupId, text, clientMessageId) {
     },
   });
 }
+
+export function listWorkgroupMembers(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/members`);
+}
+
+export function createWorkgroupMember(workgroupId, body) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/members`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function listWorkgroupGrants(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/grants`);
+}
+
+export function inviteWorkgroupGrant(workgroupId, memberId, toolAllowNames) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/grants`, {
+    method: "POST",
+    body: {
+      member_id: memberId,
+      tool_allow_names: toolAllowNames,
+    },
+  });
+}
+
+export function acceptWorkgroupGrant(workgroupId, grantId, memberSpecDigest) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/grants/${encodeURIComponent(grantId)}/accept`,
+    {
+      method: "POST",
+      body: memberSpecDigest ? { member_spec_digest: memberSpecDigest } : {},
+    },
+  );
+}
+
+export function listWorkgroupHITL(workgroupId, pendingOnly = true) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl`, {
+    params: { pending_only: pendingOnly ? "true" : "false" },
+  });
+}
+
+export function createWorkgroupHITL(workgroupId, prompt) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl`, {
+    method: "POST",
+    body: { prompt },
+  });
+}
+
+export function resolveWorkgroupHITL(workgroupId, hitlId, answer) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl/${encodeURIComponent(hitlId)}/resolve`,
+    {
+      method: "POST",
+      body: { answer, resolution: { answer } },
+    },
+  );
+}

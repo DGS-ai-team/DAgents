@@ -151,7 +151,44 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 )
                 self.assertEqual(join.status_code, 200, join.text)
 
+                # Grant accept 入队 provision outbox
+                grant_id = grant_resp.json()["grant_id"]
+                # 再建一个成员专测 accept→provision（上面 member 已有 grant）
+                m2 = client.post(
+                    f"/v1/workgroups/{wid}/members",
+                    json={
+                        "home_node_id": "node-b",
+                        "display_name": "reader2",
+                        "allow_tool_names": ["read_file"],
+                    },
+                )
+                self.assertEqual(m2.status_code, 200, m2.text)
+                mid2 = m2.json()["member"]["member_id"]
+                digest2 = m2.json()["spec"]["digest"]
+                g2 = client.post(f"/v1/workgroups/{wid}/grants", json={"member_id": mid2})
+                self.assertEqual(g2.status_code, 200, g2.text)
+                accepted2 = client.post(
+                    f"/v1/workgroups/{wid}/grants/{g2.json()['grant_id']}/accept",
+                    json={"member_spec_digest": digest2},
+                    headers={"x-dagents-agent-id": "node-b"},
+                )
+                self.assertEqual(accepted2.status_code, 200, accepted2.text)
+                outbox = client.get(f"/v1/workgroups/{wid}/outbox", params={"unacked_only": True})
+                self.assertEqual(outbox.status_code, 200, outbox.text)
+                types = [f["type"] for f in outbox.json()]
+                self.assertIn("member.provision", types)
+
+                pending = client.get(f"/v1/workgroups/{wid}/hitl", params={"pending_only": True})
+                self.assertEqual(pending.status_code, 200, pending.text)
+                self.assertEqual(len(pending.json()), 0)  # 已决议
+                all_hitl = client.get(f"/v1/workgroups/{wid}/hitl", params={"pending_only": False})
+                self.assertEqual(all_hitl.status_code, 200, all_hitl.text)
+                self.assertEqual(len(all_hitl.json()), 1)
+
+                _ = grant_id  # keep first grant path exercised above
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

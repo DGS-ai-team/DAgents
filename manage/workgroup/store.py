@@ -747,6 +747,14 @@ class WorkGroupStore:
             self._ensure_loaded()
             return self._hitl.get(hitl_id)
 
+    def list_hitl(self, workgroup_id: str, *, pending_only: bool = False) -> list[HITLRequest]:
+        with self._lock:
+            self._ensure_loaded()
+            items = [h for h in self._hitl.values() if h.workgroup_id == workgroup_id]
+            if pending_only:
+                items = [h for h in items if h.status == "pending"]
+            return sorted(items, key=lambda h: h.created_at, reverse=True)
+
     def resolve_hitl_cas(
         self,
         workgroup_id: str,
