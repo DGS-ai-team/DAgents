@@ -282,7 +282,15 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	views := make([]agentView, 0, len(list))
 	for _, rec := range list {
 		if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-			continue // D5：遗留 remote stub 不再出现在产品列表
+			// D5 Cut6：列表时归档遗留 remote stub（不依赖 Manage Control DELETE）。
+			if err := s.agents.SoftDelete(r.Context(), rec.AgentID); err != nil {
+				if s.logger != nil {
+					s.logger.Warn("remote stub soft-delete failed", "agent_id", rec.AgentID, "error", err)
+				}
+			} else if s.sessions != nil {
+				_, _ = s.sessions.Delete(rec.AgentID)
+			}
+			continue
 		}
 		views = append(views, s.enrichAgentNotify(agentViewFromRecord(rec)))
 	}

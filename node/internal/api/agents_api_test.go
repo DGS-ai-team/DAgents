@@ -292,6 +292,23 @@ func TestAgentsAPI_ListHidesRemoteStubs(t *testing.T) {
 	if len(out.Agents) != 1 || out.Agents[0].AgentID != "agt-local" {
 		t.Fatalf("agents=%+v", out.Agents)
 	}
+	got, err := agentsDB.Get(context.Background(), "agt-remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || !got.Archived {
+		t.Fatalf("expected remote stub archived, got=%+v", got)
+	}
+	// 再次列表不应再命中已归档 stub
+	list2, err := agentsDB.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range list2 {
+		if rec.AgentID == "agt-remote" {
+			t.Fatal("archived remote stub still in store List")
+		}
+	}
 }
 
 func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
