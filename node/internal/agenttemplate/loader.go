@@ -21,7 +21,8 @@ type Template struct {
 	Sandbox     SandboxConfig  `yaml:"sandbox" json:"sandbox"`
 }
 
-// SandboxConfig 沙箱选项（未启用时 backend=process 表示宿主机；启用时为 docker | remote）。
+// SandboxConfig 沙箱选项（未启用时 backend=process；启用时为 docker）。
+// remote_endpoint / remote_api_key 仅兼容旧模板 YAML，创建时会被忽略或升为 docker。
 type SandboxConfig struct {
 	Enabled           bool   `yaml:"enabled" json:"enabled"`
 	Backend           string `yaml:"backend" json:"backend"`

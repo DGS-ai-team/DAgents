@@ -91,7 +91,7 @@ function numberOr(value, fallback) {
 
 /**
  * 启用沙箱时仅支持 docker；未启用用 process 表示宿主机。
- * 历史 backend=remote（外部沙箱预留）与「同组远端 Node Placement」无关，表单一律升为 docker。
+ * 历史 backend=remote 一律升为 docker（D5 Cut5 产品面已拒绝 remote）。
  */
 function normalizeSandboxMode(backend, enabled) {
   if (!enabled) return "process";

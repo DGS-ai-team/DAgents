@@ -104,7 +104,7 @@ func TestCreateAgent_dockerRequiresCLI(t *testing.T) {
 	}
 }
 
-func TestCreateAgent_remoteReservedNotImplemented(t *testing.T) {
+func TestCreateAgent_remoteSandboxRejected(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -130,7 +130,10 @@ func TestCreateAgent_remoteReservedNotImplemented(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !bytes.Contains(rr.Body.Bytes(), []byte("remote_unavailable")) {
+	if !bytes.Contains(rr.Body.Bytes(), []byte("invalid_sandbox")) {
+		t.Fatalf("body=%s", rr.Body.String())
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("process|docker")) {
 		t.Fatalf("body=%s", rr.Body.String())
 	}
 }
