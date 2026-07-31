@@ -1023,9 +1023,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if s.agents != nil {
 		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
 			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-				writeAPIError(w, http.StatusBadGateway, "edge_required",
-					"远端 Agent 消息须经 Manage Edge Tunnel；请启用 Manage 或检查 placement",
-					map[string]any{"agent_id": sessionID})
+				writeRemotePlacementDeprecated(w, sessionID)
 				return
 			}
 			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
@@ -1108,9 +1106,7 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	if agentFilter != "" && s.agents != nil {
 		if rec, err := s.agents.Get(r.Context(), agentFilter); err == nil && rec != nil && !rec.Archived {
 			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-				writeAPIError(w, http.StatusBadGateway, "edge_required",
-					"远端 Agent SSE 须经 Manage Edge Tunnel；请启用 Manage 或检查 placement",
-					map[string]any{"agent_id": agentFilter})
+				writeRemotePlacementDeprecated(w, agentFilter)
 				return
 			}
 		}

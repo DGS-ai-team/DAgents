@@ -20,8 +20,14 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// errRemoteAgentNotLocal 远端 Placement 引用不得在 owner 上装本地 runtime（须经 Edge）。
+// errRemoteAgentNotLocal 远端 Placement 引用不得装本地 runtime（D5：产品面已 410）。
 var errRemoteAgentNotLocal = errors.New("remote_agent_not_local")
+
+func writeRemotePlacementDeprecated(w http.ResponseWriter, agentID string) {
+	writeAPIError(w, http.StatusGone, "placement_deprecated",
+		"远程 Placement Agent 已下线：跨机器协作请使用工作组",
+		map[string]any{"agent_id": strings.TrimSpace(agentID)})
+}
 
 func (s *Server) registerAgentRoutes() {
 	s.registerAgentTemplateRoutes()
@@ -157,6 +163,12 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if store.NormalizeAgentOrigin(req.Origin) == store.AgentOriginRemote {
+		writeAPIError(w, http.StatusGone, "placement_deprecated", "远程 Placement 创建已下线：跨机器协作请使用工作组", map[string]any{
+			"origin": store.AgentOriginRemote,
+		})
+		return
+	}
 
 	tplID := strings.TrimSpace(req.TemplateID)
 	var tpl *agenttemplate.Template
@@ -269,6 +281,9 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]agentView, 0, len(list))
 	for _, rec := range list {
+		if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
+			continue // D5：遗留 remote stub 不再出现在产品列表
+		}
 		views = append(views, s.enrichAgentNotify(agentViewFromRecord(rec)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"agents": views})
@@ -287,6 +302,10 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if rec == nil || rec.Archived {
 		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+		return
+	}
+	if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
+		writeRemotePlacementDeprecated(w, id)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.enrichAgentNotify(agentViewFromRecord(*rec)))
@@ -334,6 +353,10 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if rec == nil || rec.Archived {
 		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+		return
+	}
+	if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
+		writeRemotePlacementDeprecated(w, id)
 		return
 	}
 	var req patchAgentRequest
@@ -618,9 +641,7 @@ func (s *Server) handleAgentEnsure(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, errRemoteAgentNotLocal) {
-			writeAPIError(w, http.StatusBadGateway, "edge_required",
-				"远端 Agent 须经 Manage Edge Tunnel 访问；请启用 Manage 或检查 placement",
-				map[string]any{"agent_id": id})
+			writeRemotePlacementDeprecated(w, id)
 			return
 		}
 		writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})
@@ -641,9 +662,7 @@ func (s *Server) handleAgentReload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, errRemoteAgentNotLocal) {
-			writeAPIError(w, http.StatusBadGateway, "edge_required",
-				"远端 Agent 须经 Manage Edge Tunnel 访问；请启用 Manage 或检查 placement",
-				map[string]any{"agent_id": id})
+			writeRemotePlacementDeprecated(w, id)
 			return
 		}
 		writeAPIError(w, http.StatusInternalServerError, "agent_reload_failed", err.Error(), map[string]any{"agent_id": id})
@@ -668,9 +687,7 @@ func (s *Server) withAgentRuntime(next http.HandlerFunc) http.HandlerFunc {
 					return
 				}
 				if errors.Is(err, errRemoteAgentNotLocal) {
-					writeAPIError(w, http.StatusBadGateway, "edge_required",
-						"远端 Agent 须经 Manage Edge Tunnel 访问；请启用 Manage 或检查 placement",
-						map[string]any{"agent_id": id})
+					writeRemotePlacementDeprecated(w, id)
 					return
 				}
 				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})

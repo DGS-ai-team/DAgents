@@ -98,7 +98,7 @@ func TestScreenAPI_StreamUnavailableOrFrames(t *testing.T) {
 	}
 }
 
-func TestScreenAPI_RemoteStubRequiresEdge(t *testing.T) {
+func TestScreenAPI_RemoteStubDeprecated(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-owner", FSRoot: t.TempDir()}
 	cfg.Manage.Enabled = false
 	cfg.ApplyDefaults()
@@ -121,10 +121,10 @@ func TestScreenAPI_RemoteStubRequiresEdge(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/agents/agt-remote/screen/status", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusBadGateway {
+	if rr.Code != http.StatusGone {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "edge_required") {
+	if !strings.Contains(rr.Body.String(), "placement_deprecated") {
 		t.Fatalf("body=%s", rr.Body.String())
 	}
 }

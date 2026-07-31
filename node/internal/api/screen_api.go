@@ -34,10 +34,9 @@ func (s *Server) handleAgentScreenStatus(w http.ResponseWriter, r *http.Request)
 			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
 			return
 		}
-		// 远端引用不应落到这里（应经 Edge）；若落到本地则拒绝。
+		// 远端引用：D5 已停 Edge；返回 placement_deprecated。
 		if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-			writeAPIError(w, http.StatusBadGateway, "edge_required",
-				"远端屏幕须经 Manage Edge Tunnel", map[string]any{"agent_id": id})
+			writeRemotePlacementDeprecated(w, id)
 			return
 		}
 	}
@@ -65,8 +64,7 @@ func (s *Server) handleAgentScreenStream(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-			writeAPIError(w, http.StatusBadGateway, "edge_required",
-				"远端屏幕须经 Manage Edge Tunnel", map[string]any{"agent_id": id})
+			writeRemotePlacementDeprecated(w, id)
 			return
 		}
 	}

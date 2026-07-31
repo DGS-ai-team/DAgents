@@ -22,8 +22,11 @@ async function apiFetch(path, { method = "GET", body, params } = {}) {
     const code = data?.error?.code || "";
     const base = data?.error?.message || data?.message || `HTTP ${resp.status}`;
     const msg =
-      code === "edge_required" || code === "edge_session_failed" || code === "edge_proxy_failed"
-        ? `[Edge] ${base}`
+      code === "placement_deprecated" ||
+      code === "edge_required" ||
+      code === "edge_session_failed" ||
+      code === "edge_proxy_failed"
+        ? (code === "placement_deprecated" ? base : `[Edge] ${base}`)
         : base;
     throw new Error(msg);
   }
