@@ -88,9 +88,9 @@ onMounted(load);
     <section class="settings-section">
       <h2 class="settings-section__title">跨机器协作</h2>
       <p class="settings-section__desc">
-        远程 Placement 已下线（D5）。请使用
+        跨机器协作请使用
         <router-link to="/workgroups">工作组</router-link>
-        进行跨机器协作；本页不再提供 Placement 开关。
+        （远程 Placement 已下线）。
       </p>
     </section>
   </ConfigPanelShell>

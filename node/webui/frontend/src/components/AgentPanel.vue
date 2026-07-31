@@ -25,17 +25,9 @@ function agentSortTime(agent) {
   return Number.isFinite(ts) ? ts : 0;
 }
 
-function agentOrigin(agent) {
-  const raw = String(agent?.origin || "").trim().toLowerCase();
-  return raw === "remote" ? "remote" : "local";
-}
-
-function agentOriginLabel(agent) {
+function agentHostTitle(agent) {
   const os = agentHostLabel(agent);
-  if (agentOrigin(agent) === "remote") {
-    return os ? `远端 · ${os}` : "远端 Agent";
-  }
-  return os ? `本地 · ${os}` : "本地 Agent";
+  return os ? `本机 · ${os}` : "本机 Agent";
 }
 
 const sortedAgents = computed(() => {
@@ -140,7 +132,6 @@ defineExpose({ refresh, setDeleting, openCreate });
           class="agent-list-item"
           :class="{
             'agent-list-item--active': agentRecordId(a) === agentStore.agentId,
-            'agent-list-item--remote': agentOrigin(a) === 'remote',
           }"
           @click="select(agentRecordId(a))"
         >
@@ -166,16 +157,14 @@ defineExpose({ refresh, setDeleting, openCreate });
             <span
               v-if="agentHostLabel(a)"
               class="agent-list-item__os"
-              :title="agentOriginLabel(a)"
+              :title="agentHostTitle(a)"
             >{{ agentHostLabel(a) }}</span>
             <span
-              class="agent-list-item__glyph"
-              :class="`agent-list-item__glyph--${agentOrigin(a)}`"
-              :title="agentOriginLabel(a)"
-              :aria-label="agentOriginLabel(a)"
+              class="agent-list-item__glyph agent-list-item__glyph--local"
+              :title="agentHostTitle(a)"
+              :aria-label="agentHostTitle(a)"
             >
               <svg
-                v-if="agentOrigin(a) === 'local'"
                 viewBox="0 0 16 16"
                 width="13"
                 height="13"
@@ -185,21 +174,6 @@ defineExpose({ refresh, setDeleting, openCreate });
                 <circle cx="11.5" cy="4.5" r="1.4" fill="currentColor" />
                 <circle cx="11.5" cy="11.5" r="1.4" fill="currentColor" />
                 <path d="M5.7 7.3 10.2 5.1M5.7 8.7l4.5 2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-              </svg>
-              <svg
-                v-else
-                viewBox="0 0 16 16"
-                width="13"
-                height="13"
-                aria-hidden="true"
-              >
-                <path
-                  d="M5.2 12.2h6.1c1.5 0 2.7-1.2 2.7-2.6 0-1.3-1-2.4-2.3-2.6-.2-1.8-1.7-3.2-3.6-3.2-1.5 0-2.8.9-3.3 2.2-.2 0-.3-.1-.5-.1-1.3 0-2.3 1-2.3 2.3 0 1.3 1 2.4 2.2 2.4z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.25"
-                  stroke-linejoin="round"
-                />
               </svg>
             </span>
             <span

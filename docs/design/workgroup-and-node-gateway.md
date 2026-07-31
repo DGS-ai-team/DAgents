@@ -1,7 +1,7 @@
 # 工作组协作 + Node↔Manage 长连接（设计）
 
 > **分支**：`cursor/remote-agent-placement-7e3e`  
-> **状态**：**产品方向冻结；D0.5 契约已冻结** — 见 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（§19 Verdict A）；**D0.9–D4 已完成**；**D5 进行中**（Cut7：Control DELETE / 内部 placement 路由已拆；peers·create·delete 410；旧 A2A 仍保留）  
+> **状态**：**产品方向冻结；D0.5 契约已冻结** — 见 [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（§19 Verdict A）；**D0.9–D4 已完成**；**D5 Placement 产品拆除已完成**（Cut1–8）；旧 A2A 收口另轨；`placement_json` 列仅兼容旧数据  
 > **规范优先级**：§0–§13（产品正文）> [`workgroup-d05-contracts.md`](./workgroup-d05-contracts.md)（已冻结）> §15/§16（历史审核）  
 > **推荐方向**：Manage 云 Leader（Supervisor）+ Timeline/RunHistory；成员资产绑组存 Manage；Node 仅工具调用；权限按 `node_id`；**无远程 Agent / Placement**
 
@@ -478,7 +478,7 @@ MemberSpec {
 | **D2** | Node WorkgroupWorker：强身份 WS、幂等 provision、tool manifest、command journal — **已完成（`node/internal/workgroup/`）** |
 | **D3** | 纵向闭环：单组单成员单工具 + 信息型 HITL + 掉线/`indeterminate` + 重启 — **已完成基座**（Timeline/HITL/`read_file` + WS hub + Node Dialer；进程内默认自动拨号待 D4 配置接入） |
 | **D4** | 多 Node 订阅与最小 UI 分栏；Node 默认挂载 Workgroup Dialer — **已完成**（建组/订阅/Grant·HITL + Dialer 多组 resume；成员资产侧车：Soul/User/Custom、工具白名单、LLM 档案、Spec 只读） |
-| **D5** | 拆除 Placement/Edge/remote stub/沙箱产品路径；拆旧 A2A — **进行中**（Cut1–7：停广告、死路径、remote stub 410+列表归档、Edge 拆除、sandbox remote 拒写、**Control DELETE 与内部 placement 路由已拆**；peers/create/delete 410 stub 与旧 A2A 仍保留） |
+| **D5** | 拆除 Placement/Edge/remote stub/沙箱产品路径；拆旧 A2A — **Placement 产品路径已完成**（Cut1–8：停广告、死路径、remote stub 归档、Edge 拆除、sandbox remote 拒写、Control/内部 placement 路由拆除、UI「远端」收口）；**旧 A2A 另轨保留**；`placement_json` 列兼容旧库 |
 
 **D0.5 未完成前禁止**并行实现 runtime 主路径（已满足）。D1/D2 骨架不含完整纵向工具闭环（属 D3）。
 

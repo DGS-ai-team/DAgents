@@ -53,11 +53,9 @@ function openAgent(agent) {
   router.push({ name: "settings-agent-detail", params: { agentId: id } });
 }
 
-function originLabel(agent) {
-  const origin = String(agent?.origin || "").trim().toLowerCase();
-  const base = origin === "remote" ? "远端" : "本地";
+function hostLabel(agent) {
   const os = agentHostLabel(agent);
-  return os ? `${base} · ${os}` : base;
+  return os ? `本机 · ${os}` : "本机";
 }
 
 function sourceLabel(source) {
@@ -107,7 +105,7 @@ onMounted(load);
             <div class="agents-settings__card-main">
               <span class="agents-settings__name">{{ a.display_name || a.agent_id }}</span>
               <span class="agents-settings__meta">
-                {{ originLabel(a) }}
+                {{ hostLabel(a) }}
                 <template v-if="a.sandbox_enabled"> · 沙箱</template>
                 <template v-if="a.template_id"> · 源自 {{ a.template_id }}</template>
               </span>

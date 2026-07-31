@@ -173,7 +173,8 @@ watch(
             </div>
 
             <p class="agent-create-hint">
-              远程 Placement 入口已下线；新建 Agent 仅在本机 Node 创建。跨机器协作请使用工作组。
+              新建 Agent 仅在本机创建。跨机器协作请使用
+              <router-link to="/workgroups">工作组</router-link>。
             </p>
 
             <AgentSettingsForm

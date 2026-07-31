@@ -2260,10 +2260,6 @@
   white-space: nowrap;
 }
 
-.agent-list-item__glyph--remote {
-  color: var(--color-text-muted);
-}
-
 .agent-list-item__glyph--sandbox {
   color: var(--color-text-subtle);
 }
