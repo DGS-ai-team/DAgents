@@ -20,11 +20,13 @@ const (
 
 // Dialer 连接 Manage `/v1/workgroups/ws`，hello/resume 后分发业务帧。
 type Dialer struct {
-	ManageURL   string // http(s)://host:port
-	NodeID      string
-	Token       string
-	Worker      *Worker
-	WorkgroupID string // 非空则 hello 后自动 resume.offer
+	ManageURL      string // http(s)://host:port
+	NodeID         string
+	Token          string
+	Worker         *Worker
+	WorkgroupID    string   // 兼容：单组；hello 后对该组 resume.offer
+	WorkgroupIDs   []string // 静态多组订阅
+	ListWorkgroups func(ctx context.Context) ([]string, error)
 
 	mu     sync.Mutex
 	conn   *websocket.Conn
@@ -97,18 +99,8 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 		return errf(CodeConflict, "session.welcome not received")
 	}
 
-	if wg := strings.TrimSpace(d.WorkgroupID); wg != "" {
-		cur := d.Worker.Session.OfferResume()
-		offer := map[string]any{
-			"type": "resume.offer",
-			"payload": map[string]any{
-				"workgroup_id":          wg,
-				"last_ack_delivery_seq": cur.LastAckDeliverySeq,
-			},
-		}
-		if err := wsjson.Write(ctx, conn, offer); err != nil {
-			return err
-		}
+	if err := d.sendResumeOffers(ctx, conn); err != nil {
+		return err
 	}
 
 	for {
@@ -140,6 +132,54 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 			})
 		}
 	}
+}
+
+// resolveResumeWorkgroups 合并静态配置与动态订阅列表（去重保序）。
+func (d *Dialer) resolveResumeWorkgroups(ctx context.Context) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 4)
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	add(d.WorkgroupID)
+	for _, id := range d.WorkgroupIDs {
+		add(id)
+	}
+	if d.ListWorkgroups != nil {
+		ids, err := d.ListWorkgroups(ctx)
+		if err == nil {
+			for _, id := range ids {
+				add(id)
+			}
+		}
+		// 列表失败时仍用静态配置继续，避免阻断连线
+	}
+	return out
+}
+
+func (d *Dialer) sendResumeOffers(ctx context.Context, conn *websocket.Conn) error {
+	for _, wg := range d.resolveResumeWorkgroups(ctx) {
+		cur := d.Worker.Session.OfferResumeFor(wg)
+		offer := map[string]any{
+			"type": "resume.offer",
+			"payload": map[string]any{
+				"workgroup_id":          wg,
+				"last_ack_delivery_seq": cur.LastAckDeliverySeq,
+			},
+		}
+		if err := wsjson.Write(ctx, conn, offer); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close 关闭底层连接。

@@ -85,6 +85,9 @@ func TestDispatchProvisionAndReadFile(t *testing.T) {
 	if w.Session.LastAckDeliverySeq != 2 {
 		t.Fatalf("ack seq=%d", w.Session.LastAckDeliverySeq)
 	}
+	if got := w.Session.OfferResumeFor(b.WorkgroupID).LastAckDeliverySeq; got != 2 {
+		t.Fatalf("per-wg ack seq=%d", got)
+	}
 
 	// 旧 generation 帧被拒
 	w.Connect() // gen++

@@ -351,6 +351,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 		}
 	}
+	control := manage.NewControlClient(cfg)
 	var wgWorker *workgroup.Worker
 	var wgDialer *workgroup.Dialer
 	if cfg.ManageWorkgroupEnabled() {
@@ -367,6 +368,19 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			NodeID:    cfg.NodeID,
 			Token:     cfg.Manage.NodeToken,
 			Worker:    wgWorker,
+			ListWorkgroups: func(ctx context.Context) ([]string, error) {
+				items, err := control.ListWorkgroups(ctx, manage.WorkgroupListSubscribed)
+				if err != nil {
+					return nil, err
+				}
+				ids := make([]string, 0, len(items))
+				for _, it := range items {
+					if id := strings.TrimSpace(it.WorkgroupID); id != "" {
+						ids = append(ids, id)
+					}
+				}
+				return ids, nil
+			},
 		}
 		logger.Info("workgroup dialer enabled", "manage_url", cfg.Manage.URL)
 	}
@@ -388,7 +402,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		inboxPoller:     inboxPoller,
 		updateChecker:   updateChecker,
 		packageUploader: packageUploader,
-		control:         manage.NewControlClient(cfg),
+		control:         control,
 		edge:            manage.NewEdgeClient(cfg),
 		a2aCallerHITL:   a2aBridge,
 		tools:           o.tools,

@@ -2,12 +2,13 @@ package workgroup
 
 import "sync"
 
-// Session 跟踪强身份 WS 连接世代与投递游标（D2 内存骨架）。
+// Session 跟踪强身份 WS 连接世代与投递游标（按 workgroup 分离 delivery_seq）。
 type Session struct {
 	mu                   sync.Mutex
 	NodeID               string
 	ConnectionGeneration int64
-	LastAckDeliverySeq   int64
+	LastAckDeliverySeq   int64 // 兼容：最近一次 ack（任意组）
+	LastAckByWG          map[string]int64
 	Active               bool
 }
 
@@ -24,20 +25,41 @@ func (s *Session) Hello(nodeID string) int64 {
 	return s.ConnectionGeneration
 }
 
-// OfferResume 返回当前 resume cursor。
+// OfferResume 返回会话级游标（hello 用；取各组最大 ack）。
 func (s *Session) OfferResume() ResumeCursor {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return ResumeCursor{LastAckDeliverySeq: s.LastAckDeliverySeq}
+	max := s.LastAckDeliverySeq
+	for _, seq := range s.LastAckByWG {
+		if seq > max {
+			max = seq
+		}
+	}
+	return ResumeCursor{LastAckDeliverySeq: max}
 }
 
-// AckDelivery 推进 last_ack_delivery_seq；不允许回退。
-func (s *Session) AckDelivery(seq int64) error {
+// OfferResumeFor 返回指定工作组的 resume cursor。
+func (s *Session) OfferResumeFor(workgroupID string) ResumeCursor {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if seq < s.LastAckDeliverySeq {
-		return errf(CodeConflict, "delivery_seq regress %d < %d", seq, s.LastAckDeliverySeq)
+	if s.LastAckByWG == nil {
+		return ResumeCursor{LastAckDeliverySeq: 0}
 	}
+	return ResumeCursor{LastAckDeliverySeq: s.LastAckByWG[workgroupID]}
+}
+
+// AckDelivery 推进指定工作组的 last_ack_delivery_seq；不允许回退。
+func (s *Session) AckDelivery(workgroupID string, seq int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.LastAckByWG == nil {
+		s.LastAckByWG = map[string]int64{}
+	}
+	prev := s.LastAckByWG[workgroupID]
+	if seq < prev {
+		return errf(CodeConflict, "delivery_seq regress %d < %d for %s", seq, prev, workgroupID)
+	}
+	s.LastAckByWG[workgroupID] = seq
 	s.LastAckDeliverySeq = seq
 	return nil
 }

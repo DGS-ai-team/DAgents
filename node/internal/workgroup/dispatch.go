@@ -3,6 +3,7 @@ package workgroup
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // DispatchResult 为处理一条 Manage→Node 业务帧的结果。
@@ -43,7 +44,7 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		if err != nil {
 			return dispatchErr(err)
 		}
-		_ = w.Session.AckDelivery(env.DeliverySeq)
+		_ = w.Session.AckDelivery(deliveryWorkgroupID(env, res.Binding.WorkgroupID), env.DeliverySeq)
 		return &DispatchResult{
 			Handled: true,
 			AckEnvelope: map[string]any{
@@ -71,7 +72,7 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		if res == nil {
 			return dispatchErr(err)
 		}
-		_ = w.Session.AckDelivery(env.DeliverySeq)
+		_ = w.Session.AckDelivery(deliveryWorkgroupID(env, cmd.WorkgroupID), env.DeliverySeq)
 		ackPayload := map[string]any{
 			"command_id":            res.Ack.CommandID,
 			"status":                res.Ack.Status,
@@ -110,7 +111,7 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		if err := w.HandleArchive(t); err != nil {
 			return dispatchErr(err)
 		}
-		_ = w.Session.AckDelivery(env.DeliverySeq)
+		_ = w.Session.AckDelivery(deliveryWorkgroupID(env, t.WorkgroupID), env.DeliverySeq)
 		return &DispatchResult{
 			Handled: true,
 			AckEnvelope: map[string]any{
@@ -126,6 +127,13 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 	default:
 		return nil, errf(CodeSchemaMismatch, "unsupported envelope type %q", env.Type)
 	}
+}
+
+func deliveryWorkgroupID(env WSEnvelope, fallback string) string {
+	if wg := strings.TrimSpace(env.WorkgroupID); wg != "" {
+		return wg
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func dispatchErr(err error) (*DispatchResult, error) {

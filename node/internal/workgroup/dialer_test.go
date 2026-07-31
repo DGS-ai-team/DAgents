@@ -33,6 +33,107 @@ func TestWSURL(t *testing.T) {
 	}
 }
 
+func TestDialerMultiResumeOffers(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		offers []map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/workgroups/ws" {
+			http.NotFound(w, r)
+			return
+		}
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close(websocket.StatusNormalClosure, "done")
+		ctx := r.Context()
+		var hello map[string]any
+		if err := wsjson.Read(ctx, c, &hello); err != nil {
+			return
+		}
+		_ = wsjson.Write(ctx, c, map[string]any{
+			"type": "session.welcome",
+			"payload": map[string]any{
+				"node_id":               "node_b",
+				"connection_generation": 1,
+				"schema_version":        "0.5.0",
+			},
+		})
+		for i := 0; i < 3; i++ {
+			var frame map[string]any
+			if err := wsjson.Read(ctx, c, &frame); err != nil {
+				return
+			}
+			if frame["type"] != "resume.offer" {
+				continue
+			}
+			mu.Lock()
+			offers = append(offers, frame)
+			mu.Unlock()
+		}
+		time.Sleep(80 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	w := NewWorker(Config{NodeID: "node_b"})
+	_ = w.Session.AckDelivery("wg_01h0000000000000000000000a", 5)
+	_ = w.Session.AckDelivery("wg_01h0000000000000000000000b", 2)
+	d := &Dialer{
+		ManageURL:    srv.URL,
+		NodeID:       "node_b",
+		Worker:       w,
+		WorkgroupIDs: []string{"wg_01h0000000000000000000000a"},
+		ListWorkgroups: func(ctx context.Context) ([]string, error) {
+			return []string{"wg_01h0000000000000000000000b", "wg_01h0000000000000000000000c"}, nil
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.ConnectAndServe(ctx) }()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(offers)
+		mu.Unlock()
+		if n >= 3 {
+			cancel()
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timeout offers=%d", n)
+		case <-time.After(15 * time.Millisecond):
+		}
+	}
+	<-errCh
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(offers) != 3 {
+		t.Fatalf("offers=%d", len(offers))
+	}
+	byWG := map[string]int64{}
+	for _, o := range offers {
+		p, _ := o["payload"].(map[string]any)
+		wg, _ := p["workgroup_id"].(string)
+		seq, _ := p["last_ack_delivery_seq"].(float64)
+		byWG[wg] = int64(seq)
+	}
+	if byWG["wg_01h0000000000000000000000a"] != 5 {
+		t.Fatalf("wg_a seq=%v", byWG)
+	}
+	if byWG["wg_01h0000000000000000000000b"] != 2 {
+		t.Fatalf("wg_b seq=%v", byWG)
+	}
+	if byWG["wg_01h0000000000000000000000c"] != 0 {
+		t.Fatalf("wg_c seq=%v", byWG)
+	}
+}
+
 func TestDialerConnectProvisionCommand(t *testing.T) {
 	dir := t.TempDir()
 	var (
