@@ -58,6 +58,11 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 spec = member_resp.json()["spec"]
                 mid = member["member_id"]
 
+                spec_get = client.get(f"/v1/workgroups/{wid}/members/{mid}/spec")
+                self.assertEqual(spec_get.status_code, 200, spec_get.text)
+                self.assertEqual(spec_get.json()["digest"], spec["digest"])
+                self.assertEqual(spec_get.json()["tools"]["allow_names"], ["read_file"])
+
                 # ACL 不足以派发
                 denied = client.post(
                     f"/v1/workgroups/{wid}/assigns",

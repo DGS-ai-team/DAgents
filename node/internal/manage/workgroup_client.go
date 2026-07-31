@@ -196,6 +196,16 @@ func (c *ControlClient) CreateWorkgroupMember(ctx context.Context, workgroupID s
 	return out, nil
 }
 
+// GetWorkgroupMemberSpec 读取成员 MemberSpec 快照。
+func (c *ControlClient) GetWorkgroupMemberSpec(ctx context.Context, workgroupID, memberID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/members/" + strings.TrimSpace(memberID) + "/spec"
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ListWorkgroupGrants 列出 Grant。
 func (c *ControlClient) ListWorkgroupGrants(ctx context.Context, workgroupID string) (jsonArray, error) {
 	var out jsonArray

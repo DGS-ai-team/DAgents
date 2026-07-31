@@ -373,6 +373,12 @@ export function createWorkgroupMember(workgroupId, body) {
   });
 }
 
+export function getWorkgroupMemberSpec(workgroupId, memberId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/spec`,
+  );
+}
+
 export function listWorkgroupGrants(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/grants`);
 }

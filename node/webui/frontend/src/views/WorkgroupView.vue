@@ -4,6 +4,9 @@ import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import WorkgroupPanel from "../components/WorkgroupPanel.vue";
 
+/** v1 Worker 可执行工具；其余名仅写入 Spec，provision 时与本机能力求交 */
+const TOOL_CHOICES = ["read_file"];
+
 const route = useRoute();
 const router = useRouter();
 const panelRef = ref(null);
@@ -24,7 +27,19 @@ const collabBusy = ref(false);
 
 const memberName = ref("");
 const memberHome = ref("");
+const memberSoul = ref("");
+const memberUser = ref("");
+const memberCustom = ref("");
+const memberLlmProfile = ref("default");
+const memberLlmRevision = ref("1");
+const memberTools = ref(["read_file"]);
 const memberBusy = ref(false);
+const showMemberForm = ref(false);
+
+const selectedMemberId = ref("");
+const memberSpec = ref(null);
+const memberSpecBusy = ref(false);
+
 const hitlPrompt = ref("");
 const hitlBusy = ref(false);
 const hitlAnswers = ref({});
@@ -81,16 +96,51 @@ async function loadMembersGrantsHitl() {
     if (m.node_id) selfNodeId.value = m.node_id;
     grants.value = g.grants || [];
     hitlList.value = h.hitl || [];
+    if (
+      selectedMemberId.value &&
+      !members.value.some((x) => x.member_id === selectedMemberId.value)
+    ) {
+      selectedMemberId.value = "";
+      memberSpec.value = null;
+    }
   } catch (e) {
-    // 非致命：Timeline 仍可用
     if (!error.value) error.value = e?.message || "";
   }
+}
+
+async function loadMemberSpec(memberId) {
+  if (!workgroupId.value || !memberId) {
+    memberSpec.value = null;
+    return;
+  }
+  memberSpecBusy.value = true;
+  try {
+    memberSpec.value = await api.getWorkgroupMemberSpec(workgroupId.value, memberId);
+  } catch (e) {
+    memberSpec.value = null;
+    if (!error.value) error.value = e?.message || "加载 MemberSpec 失败";
+  } finally {
+    memberSpecBusy.value = false;
+  }
+}
+
+async function selectMember(memberId) {
+  if (selectedMemberId.value === memberId) {
+    selectedMemberId.value = "";
+    memberSpec.value = null;
+    return;
+  }
+  selectedMemberId.value = memberId;
+  await loadMemberSpec(memberId);
 }
 
 function startPoll() {
   stopPoll();
   pollTimer.value = window.setInterval(async () => {
     await Promise.all([loadTimeline(), loadMembersGrantsHitl()]);
+    if (selectedMemberId.value) {
+      await loadMemberSpec(selectedMemberId.value);
+    }
   }, 3000);
 }
 
@@ -133,6 +183,24 @@ async function addCollaborator() {
   }
 }
 
+function toggleTool(name) {
+  const set = new Set(memberTools.value);
+  if (set.has(name)) set.delete(name);
+  else set.add(name);
+  memberTools.value = [...set];
+}
+
+function resetMemberForm() {
+  memberName.value = "";
+  memberHome.value = "";
+  memberSoul.value = "";
+  memberUser.value = "";
+  memberCustom.value = "";
+  memberLlmProfile.value = "default";
+  memberLlmRevision.value = "1";
+  memberTools.value = ["read_file"];
+}
+
 async function createMember() {
   const name = memberName.value.trim();
   const home = memberHome.value.trim() || selfNodeId.value;
@@ -140,14 +208,28 @@ async function createMember() {
   memberBusy.value = true;
   error.value = "";
   try {
-    await api.createWorkgroupMember(workgroupId.value, {
+    const tools = memberTools.value.length ? [...memberTools.value] : ["read_file"];
+    const out = await api.createWorkgroupMember(workgroupId.value, {
       display_name: name,
       home_node_id: home,
-      allow_tool_names: ["read_file"],
-      prompt: { soul_md: name },
+      llm_profile_id: memberLlmProfile.value.trim() || "default",
+      llm_profile_revision: memberLlmRevision.value.trim() || "1",
+      allow_tool_names: tools,
+      prompt: {
+        soul_md: memberSoul.value,
+        user_md: memberUser.value,
+        custom_md: memberCustom.value,
+      },
     });
-    memberName.value = "";
+    resetMemberForm();
+    showMemberForm.value = false;
     await loadMembersGrantsHitl();
+    const mid = out?.member?.member_id;
+    if (mid) {
+      selectedMemberId.value = mid;
+      memberSpec.value = out.spec || null;
+      if (!memberSpec.value) await loadMemberSpec(mid);
+    }
   } catch (e) {
     error.value = e?.message || "创建成员失败";
   } finally {
@@ -155,10 +237,20 @@ async function createMember() {
   }
 }
 
+function toolsForGrant(memberId) {
+  if (
+    selectedMemberId.value === memberId &&
+    memberSpec.value?.tools?.allow_names?.length
+  ) {
+    return [...memberSpec.value.tools.allow_names];
+  }
+  return ["read_file"];
+}
+
 async function inviteGrant(memberId) {
   error.value = "";
   try {
-    await api.inviteWorkgroupGrant(workgroupId.value, memberId, ["read_file"]);
+    await api.inviteWorkgroupGrant(workgroupId.value, memberId, toolsForGrant(memberId));
     await loadMembersGrantsHitl();
   } catch (e) {
     error.value = e?.message || "邀请 Grant 失败";
@@ -174,6 +266,9 @@ async function acceptGrant(grant) {
       grant.member_spec_digest,
     );
     await loadMembersGrantsHitl();
+    if (grant.member_id === selectedMemberId.value) {
+      await loadMemberSpec(grant.member_id);
+    }
   } catch (e) {
     error.value = e?.message || "接受 Grant 失败";
   }
@@ -214,6 +309,12 @@ function eventLabel(ev) {
   return ev.type || "event";
 }
 
+function promptExcerpt(text, max = 120) {
+  const s = String(text || "").trim();
+  if (!s) return "（空）";
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
 const pendingGrantsForSelf = computed(() =>
   grants.value.filter(
     (g) => g.status === "invited" && g.home_node_id === selfNodeId.value,
@@ -227,10 +328,18 @@ const aclSummary = computed(() => {
   return `owners: ${owners} · collaborators: ${collab}`;
 });
 
+const selectedMember = computed(() =>
+  members.value.find((m) => m.member_id === selectedMemberId.value) || null,
+);
+
 watch(
   workgroupId,
   async (id) => {
     stopPoll();
+    selectedMemberId.value = "";
+    memberSpec.value = null;
+    showMemberForm.value = false;
+    resetMemberForm();
     await Promise.all([loadTimeline(), loadACL(), loadMembersGrantsHitl()]);
     if (id) startPoll();
   },
@@ -282,11 +391,23 @@ onUnmounted(stopPoll);
 
           <aside class="wg-side">
             <section class="wg-side__sec">
-              <h4>成员</h4>
+              <div class="wg-side__row">
+                <h4>成员</h4>
+                <button type="button" @click="showMemberForm = !showMemberForm">
+                  {{ showMemberForm ? "收起" : "+ 资产" }}
+                </button>
+              </div>
               <ul>
                 <li v-for="m in members" :key="m.member_id">
                   <div class="wg-side__row">
-                    <span>{{ m.display_name }} · {{ m.status }}</span>
+                    <button
+                      type="button"
+                      class="wg-side__name"
+                      :class="{ 'wg-side__name--active': selectedMemberId === m.member_id }"
+                      @click="selectMember(m.member_id)"
+                    >
+                      {{ m.display_name }} · {{ m.status }}
+                    </button>
                     <button
                       v-if="m.status === 'requested'"
                       type="button"
@@ -298,11 +419,70 @@ onUnmounted(stopPoll);
                   <div class="wg-side__meta">{{ m.home_node_id }}</div>
                 </li>
               </ul>
-              <form class="wg-side__form" @submit.prevent="createMember">
-                <input v-model="memberName" placeholder="成员显示名" />
-                <input v-model="memberHome" :placeholder="`home node（默认 ${selfNodeId || '本机'}）`" />
-                <button type="submit" :disabled="memberBusy || !memberName.trim()">创建成员</button>
+
+              <form
+                v-if="showMemberForm"
+                class="wg-side__form"
+                @submit.prevent="createMember"
+              >
+                <label class="wg-side__label">显示名</label>
+                <input v-model="memberName" placeholder="成员显示名" required />
+                <label class="wg-side__label">Home Node</label>
+                <input
+                  v-model="memberHome"
+                  :placeholder="`默认 ${selfNodeId || '本机'}`"
+                />
+                <label class="wg-side__label">Soul</label>
+                <textarea v-model="memberSoul" rows="3" placeholder="soul.md 正文（可空）" />
+                <label class="wg-side__label">User</label>
+                <textarea v-model="memberUser" rows="2" placeholder="user.md 正文（可空）" />
+                <label class="wg-side__label">Custom</label>
+                <textarea v-model="memberCustom" rows="2" placeholder="custom.md 正文（可空）" />
+                <label class="wg-side__label">工具白名单</label>
+                <div class="wg-side__tools">
+                  <label v-for="t in TOOL_CHOICES" :key="t" class="wg-side__check">
+                    <input
+                      type="checkbox"
+                      :checked="memberTools.includes(t)"
+                      @change="toggleTool(t)"
+                    />
+                    {{ t }}
+                  </label>
+                </div>
+                <label class="wg-side__label">LLM 档案</label>
+                <div class="wg-side__llm">
+                  <input v-model="memberLlmProfile" placeholder="profile id" />
+                  <input v-model="memberLlmRevision" placeholder="revision" />
+                </div>
+                <button type="submit" :disabled="memberBusy || !memberName.trim()">
+                  创建成员资产
+                </button>
               </form>
+            </section>
+
+            <section v-if="selectedMemberId" class="wg-side__sec">
+              <h4>成员资产</h4>
+              <p v-if="memberSpecBusy" class="wg-side__meta">加载 Spec…</p>
+              <template v-else-if="memberSpec">
+                <div class="wg-side__meta">
+                  {{ selectedMember?.display_name || memberSpec.display_name }}
+                </div>
+                <div class="wg-side__spec">
+                  <div><span>digest</span>{{ memberSpec.digest?.slice(0, 18) }}…</div>
+                  <div>
+                    <span>llm</span>{{ memberSpec.llm_profile_id }}@{{
+                      memberSpec.llm_profile_revision
+                    }}
+                  </div>
+                  <div>
+                    <span>tools</span>{{ (memberSpec.tools?.allow_names || []).join(", ") || "—" }}
+                  </div>
+                  <div><span>soul</span>{{ promptExcerpt(memberSpec.prompt?.soul_md) }}</div>
+                  <div><span>user</span>{{ promptExcerpt(memberSpec.prompt?.user_md) }}</div>
+                  <div><span>custom</span>{{ promptExcerpt(memberSpec.prompt?.custom_md) }}</div>
+                </div>
+              </template>
+              <p v-else class="wg-side__meta">无法加载 MemberSpec</p>
             </section>
 
             <section v-if="pendingGrantsForSelf.length" class="wg-side__sec">
@@ -381,12 +561,16 @@ onUnmounted(stopPoll);
   gap: 0.35rem;
 }
 .wg-chat__collab input,
-.wg-side__form input {
+.wg-side__form input,
+.wg-side__form textarea {
   padding: 0.3rem 0.5rem;
   border: 1px solid #d1d5db;
   border-radius: 4px;
   font: inherit;
   min-width: 8rem;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
 }
 .wg-chat__collab button,
 .wg-side__form button,
@@ -410,7 +594,7 @@ onUnmounted(stopPoll);
   padding: 1rem 1.25rem;
 }
 .wg-side {
-  width: 260px;
+  width: 300px;
   border-left: 1px solid var(--border-subtle, #e5e7eb);
   overflow: auto;
   padding: 0.75rem;
@@ -441,6 +625,19 @@ onUnmounted(stopPoll);
   gap: 0.35rem;
   align-items: center;
 }
+.wg-side__name {
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.wg-side__name--active {
+  color: var(--accent, #2563eb);
+  font-weight: 600;
+}
 .wg-side__meta {
   font-size: 0.7rem;
   color: #6b7280;
@@ -451,6 +648,42 @@ onUnmounted(stopPoll);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+.wg-side__label {
+  font-size: 0.7rem;
+  color: #6b7280;
+  margin-top: 0.15rem;
+}
+.wg-side__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+.wg-side__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.wg-side__llm {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+.wg-side__spec {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+.wg-side__spec div span {
+  display: inline-block;
+  min-width: 3.2rem;
+  color: #9ca3af;
+  margin-right: 0.35rem;
 }
 .wg-chat__event {
   margin-bottom: 0.9rem;
