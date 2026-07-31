@@ -4,7 +4,7 @@
 **定位**：本仓库**唯一**技术文档入口——由核心到外围，写到**能跟读源码**的深度。专题长文见 `docs/architecture/`、`docs/design/`；本手册为导航与正文主干。
 
 > **注意**：v0.8 起为「单 Node 多 Agent + 仅 Web UI」。手册中若仍出现 Session 中心、TUI Client、进程级 `agent_id` 等旧叙述，以 [agent-instance-model.md](../design/agent-instance-model.md) 与现网 API 为准。  
-> **进行中**：同组远端 Node 上放置 Agent（Placement）与屏幕旁观 —— 见 [remote-agent-placement.md](../design/remote-agent-placement.md)（独立分支大改通信面）。
+> **协作面**：Workgroup Collaboration（Manage = Leader，Node = Worker）见 [workgroup-and-node-gateway.md](../design/workgroup-and-node-gateway.md)。旧 Placement 产品路径已拆除（D5），设计稿见 [remote-agent-placement.md](../design/remote-agent-placement.md)（superseded）。
 
 ---
 

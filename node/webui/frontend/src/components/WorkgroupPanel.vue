@@ -57,6 +57,21 @@ async function subscribe(id) {
   }
 }
 
+async function unsubscribe(id) {
+  const wid = String(id || "").trim();
+  if (!wid) return;
+  error.value = "";
+  try {
+    await api.unsubscribeWorkgroup(wid);
+    await refresh();
+    if (selectedId.value === wid) {
+      router.push({ name: "workgroups" });
+    }
+  } catch (e) {
+    error.value = e?.message || "取消订阅失败";
+  }
+}
+
 function goAgents() {
   router.push({ name: "agents" });
 }
@@ -113,8 +128,20 @@ defineExpose({ refresh });
           :class="{ 'wg-panel__item--active': wg.workgroup_id === selectedId }"
           @click="select(wg.workgroup_id)"
         >
-          <div class="wg-panel__title">{{ wg.display_name || wg.workgroup_id }}</div>
-          <div class="wg-panel__meta">{{ wg.status }}</div>
+          <div class="wg-panel__avail-row">
+            <div>
+              <div class="wg-panel__title">{{ wg.display_name || wg.workgroup_id }}</div>
+              <div class="wg-panel__meta">{{ wg.status }}</div>
+            </div>
+            <button
+              type="button"
+              class="wg-panel__sub-btn"
+              title="取消订阅"
+              @click.stop="unsubscribe(wg.workgroup_id)"
+            >
+              退订
+            </button>
+          </div>
         </li>
       </ul>
       <div v-if="availableOnly.length" class="wg-panel__section-label">可订阅（ACL 内）</div>

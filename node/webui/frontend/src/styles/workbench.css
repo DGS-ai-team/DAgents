@@ -2096,6 +2096,8 @@
 
 .agent-panel__header {
   align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
   min-height: 40px;
   padding-inline: 10px 8px;
 }
@@ -2106,6 +2108,22 @@
   letter-spacing: 0.02em;
   color: var(--color-text-subtle);
   text-transform: none;
+}
+
+.agent-panel__tab {
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.agent-panel__tab--active {
+  color: var(--color-text);
+  font-weight: 600;
+  cursor: default;
 }
 
 .agent-panel__body {
@@ -2119,6 +2137,7 @@
 .agent-panel__icon-btn {
   width: 26px;
   height: 26px;
+  margin-left: auto;
   border: 0;
   border-radius: 6px;
   background: transparent;
