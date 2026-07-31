@@ -276,8 +276,8 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 				"machine":          host.Machine,
 				"login_name":       host.LoginName,
 			},
-			"display":   placementDisplayMeta(),
-			"placement": placementCapabilityMeta(r.cfg),
+			"display": placementDisplayMeta(),
+			// D5：不再广告 placement.allow_*；跨机器协作走工作组。
 		},
 	}
 }
@@ -322,19 +322,6 @@ func placementDisplayMeta() map[string]any {
 		out["reason_if_unavailable"] = reason
 	}
 	return out
-}
-
-func placementCapabilityMeta(cfg *config.Config) map[string]any {
-	allowCreate := true
-	allowScreen := true
-	if cfg != nil {
-		allowCreate = cfg.AllowPeerCreateEffective()
-		allowScreen = cfg.AllowScreenViewEffective()
-	}
-	return map[string]any{
-		"allow_peer_create": allowCreate,
-		"allow_screen_view": allowScreen,
-	}
 }
 
 func (r *Registrar) collectTools() []string {

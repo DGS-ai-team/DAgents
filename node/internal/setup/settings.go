@@ -95,12 +95,6 @@ type AgentSettings struct {
 	Role        string `json:"role,omitempty"` // deprecated，可选元数据
 }
 
-// PlacementSettings Placement 能力（是否允许被远端创建 / 旁观屏幕）。
-type PlacementSettings struct {
-	AllowPeerCreate bool `json:"allow_peer_create"`
-	AllowScreenView bool `json:"allow_screen_view"`
-}
-
 // ChildAgentsLimits 子 Agent 配额（enabled 见 features）。
 type ChildAgentsLimits struct {
 	DefaultTTLSeconds         int `json:"default_ttl_seconds"`
@@ -167,7 +161,6 @@ type SettingsView struct {
 	Compression     CompressionSettings `json:"compression"`
 	Runtime         RuntimeSettings     `json:"runtime"`
 	Agent           AgentSettings       `json:"agent"`
-	Placement       PlacementSettings   `json:"placement"`
 	ChildAgents     ChildAgentsLimits   `json:"child_agents"`
 	Browser         BrowserSettings     `json:"browser"`
 	WeCom           WeComSettings       `json:"wecom"`
@@ -183,7 +176,6 @@ type SettingsPatch struct {
 	Compression *CompressionSettings `json:"compression,omitempty"`
 	Runtime     *RuntimeSettings     `json:"runtime,omitempty"`
 	Agent       *AgentSettings       `json:"agent,omitempty"`
-	Placement   *PlacementSettings   `json:"placement,omitempty"`
 	ChildAgents *ChildAgentsLimits   `json:"child_agents,omitempty"`
 	Browser     *BrowserSettings     `json:"browser,omitempty"`
 	WeCom       *WeComSettings       `json:"wecom,omitempty"`
@@ -262,10 +254,6 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			Description: cfg.Agent.Description,
 			Role:        cfg.Agent.Role,
 		},
-		Placement: PlacementSettings{
-			AllowPeerCreate: cfg.AllowPeerCreateEffective(),
-			AllowScreenView: cfg.AllowScreenViewEffective(),
-		},
 		ChildAgents: ChildAgentsLimits{
 			DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
 			MaxTTLSeconds:             cfg.ChildAgents.MaxTTLSeconds,
@@ -336,9 +324,6 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 	}
 	if patch.Agent != nil {
 		applyAgentPatch(&out, *patch.Agent)
-	}
-	if patch.Placement != nil {
-		applyPlacementPatch(&out, *patch.Placement)
 	}
 	if patch.ChildAgents != nil {
 		if err := applyChildAgentsPatch(&out, *patch.ChildAgents); err != nil {
@@ -602,11 +587,6 @@ func applyAgentPatch(cfg *config.Config, p AgentSettings) {
 	cfg.Agent.Description = strings.TrimSpace(p.Description)
 	// Role 仅作可选元数据；空 PATCH 字段不强制清空已有值以外——与 name/desc 同策略整段覆盖
 	cfg.Agent.Role = strings.TrimSpace(p.Role)
-}
-
-func applyPlacementPatch(cfg *config.Config, p PlacementSettings) {
-	cfg.Placement.AllowPeerCreate = boolPtr(p.AllowPeerCreate)
-	cfg.Placement.AllowScreenView = boolPtr(p.AllowScreenView)
 }
 
 func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {

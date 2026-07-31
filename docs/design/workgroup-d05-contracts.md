@@ -1,6 +1,6 @@
 # 工作组 D0.5 契约（开工门槛）
 
-> **状态**：**D0.5 已冻结**（§19 Verdict A）— D0.9–**D4 已完成**（订阅 / Dialer 多组 resume / 成员资产侧车）；**D5** Placement 拆除待办；**禁止**跳过契约另开平行协议  
+> **状态**：**D0.5 已冻结**（§19 Verdict A）— D0.9–**D4 已完成**；**D5 进行中**（Placement 停广告 + peers/create 410）；**禁止**跳过契约另开平行协议  
 > **产品方向**：[`workgroup-and-node-gateway.md`](./workgroup-and-node-gateway.md)（§0–§13）  
 > **本文件职责**：可测试的 schema、状态机、权限矩阵、投影规则、WS/工具恢复协议、威胁模型、旧数据处置、契约测试清单  
 > **JSON Schema 附录**：[`fixtures/workgroup-d05/schemas/`](./fixtures/workgroup-d05/schemas/)  

@@ -62,14 +62,15 @@ func TestAgentDisplayNameFallback(t *testing.T) {
 	}
 }
 
-func TestPlacementFlagsDefaultTrue(t *testing.T) {
+func TestPlacementFlagsAlwaysFalse(t *testing.T) {
 	cfg := &Config{}
-	if !cfg.AllowPeerCreateEffective() || !cfg.AllowScreenViewEffective() {
-		t.Fatal("placement flags default true")
+	if cfg.AllowPeerCreateEffective() || cfg.AllowScreenViewEffective() {
+		t.Fatal("placement flags must stay false after D5")
 	}
-	off := false
-	cfg.Placement.AllowPeerCreate = &off
-	if cfg.AllowPeerCreateEffective() {
-		t.Fatal("allow_peer_create=false")
+	on := true
+	cfg.Placement.AllowPeerCreate = &on
+	cfg.Placement.AllowScreenView = &on
+	if cfg.AllowPeerCreateEffective() || cfg.AllowScreenViewEffective() {
+		t.Fatal("YAML placement knobs must not re-enable product capability")
 	}
 }

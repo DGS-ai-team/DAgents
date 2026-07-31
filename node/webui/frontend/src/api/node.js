@@ -104,11 +104,6 @@ export function createAgent(payload = {}) {
   return apiFetch("/v1/agents", { method: "POST", body });
 }
 
-/** 同组可放置的 peer Node（需启用 Manage）。 */
-export function listPeerNodes() {
-  return apiFetch("/v1/peers/nodes");
-}
-
 export function listAgents() {
   return apiFetch("/v1/agents");
 }

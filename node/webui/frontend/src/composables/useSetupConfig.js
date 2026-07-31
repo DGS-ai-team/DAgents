@@ -9,7 +9,6 @@ const emptyForm = () => ({
   compression: {},
   runtime: {},
   agent: {},
-  placement: { allow_peer_create: true, allow_screen_view: true },
   child_agents: {},
   browser: {},
   wecom: {},
@@ -46,11 +45,6 @@ export function useSetupConfig() {
     Object.assign(form.compression, data.compression || {});
     Object.assign(form.runtime, data.runtime || {});
     Object.assign(form.agent, data.agent || {});
-    Object.assign(form.placement, {
-      allow_peer_create: true,
-      allow_screen_view: true,
-      ...(data.placement || {}),
-    });
     Object.assign(form.child_agents, data.child_agents || {});
     Object.assign(form.browser, data.browser || {});
     Object.assign(form.wecom, data.wecom || {});
