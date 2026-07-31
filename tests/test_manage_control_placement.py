@@ -98,5 +98,39 @@ class ManageControlPlacementTests(unittest.TestCase):
             self.assertEqual(delete_mock.call_args.kwargs["owner_node_id"], "owner-01")
 
 
+    def test_delete_treats_home_410_as_already_gone(self) -> None:
+        from manage.control.node_client import call_home_delete_agent
+
+        class _Resp:
+            status_code = 410
+
+            def json(self):
+                return {"error": {"code": "placement_deprecated"}}
+
+        class _Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def delete(self, url, headers=None):
+                return _Resp()
+
+        with patch("manage.control.node_client.httpx.Client", _Client):
+            out = call_home_delete_agent(
+                base_url="http://home.local",
+                home_node_id="home-01",
+                agent_id="agt-1",
+                owner_node_id="owner-01",
+            )
+        self.assertTrue(out.get("already_gone"))
+        self.assertFalse(out.get("home_deleted"))
+
+
 if __name__ == "__main__":
     unittest.main()
+

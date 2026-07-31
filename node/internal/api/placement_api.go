@@ -122,13 +122,9 @@ func (s *Server) authorizePlacementControl(r *http.Request) bool {
 }
 
 func (s *Server) registerPlacementRoutes() {
-	s.mux.HandleFunc("GET /v1/peers/nodes", s.handleListPeerNodes)
+	// D5：GET /v1/peers/nodes 已移除；内部 create/delete 仍 410 供 Manage DELETE 探测。
 	s.mux.HandleFunc("POST /v1/internal/placement/agents", s.handleInternalPlacementCreate)
 	s.mux.HandleFunc("DELETE /v1/internal/placement/agents/{agent_id}", s.handleInternalPlacementDelete)
-}
-
-func (s *Server) handleListPeerNodes(w http.ResponseWriter, r *http.Request) {
-	writeAPIError(w, http.StatusGone, "placement_deprecated", "远程 Placement 入口已下线：跨机器协作请使用工作组", nil)
 }
 
 func (s *Server) cfgNodeID() string {

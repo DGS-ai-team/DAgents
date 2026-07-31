@@ -5,7 +5,6 @@ import { chromeStore } from "../stores/chrome.js";
 import { agentStore } from "../stores/agent.js";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
-import RemoteScreenSection from "./RemoteScreenSection.vue";
 
 const props = defineProps({
   /** 当前 Agent 列表行（含 origin / host） */
@@ -22,39 +21,11 @@ const sectionOpen = ref({
   changes: true,
   commands: true,
   context: true,
-  screen: true,
 });
 
 function toggleSection(key) {
   sectionOpen.value = { ...sectionOpen.value, [key]: !sectionOpen.value[key] };
 }
-
-function parseHost(agent) {
-  const raw = agent?.host;
-  if (!raw) return {};
-  if (typeof raw === "string") {
-    try {
-      return JSON.parse(raw) || {};
-    } catch {
-      return {};
-    }
-  }
-  return typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-}
-
-const showRemoteScreen = computed(() => {
-  const a = props.agent;
-  if (!a) return false;
-  const origin = String(a.origin || "").trim().toLowerCase();
-  if (origin !== "remote") return false;
-  const host = parseHost(a);
-  return host.display_available === true || host.display_available === "true";
-});
-
-const screenHostLabel = computed(() => {
-  const host = parseHost(props.agent);
-  return String(host.display_label || host.os_kind || "").trim();
-});
 
 function toggleCmd(key) {
   const k = String(key);
@@ -329,20 +300,6 @@ defineExpose({ refresh });
             </span>
           </li>
         </ul>
-      </section>
-
-      <section v-if="showRemoteScreen" class="activity-section">
-        <button type="button" class="activity-section__head" @click="toggleSection('screen')">
-          <span class="activity-section__chevron" aria-hidden="true">{{ sectionOpen.screen ? "▾" : "▸" }}</span>
-          <span class="activity-section__title">远程桌面</span>
-          <span class="activity-section__badge">旁观</span>
-        </button>
-        <RemoteScreenSection
-          v-if="sectionOpen.screen"
-          :agent-id="agentId"
-          :enabled="showRemoteScreen"
-          :host-label="screenHostLabel"
-        />
       </section>
     </div>
   </aside>

@@ -13,7 +13,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// ControlClient 调用 Manage Placement 控制面。
+// ControlClient 调用 Manage 控制面（D5：Placement create/peers 已下线；仍保留 DELETE）。
 type ControlClient struct {
 	cfg    *config.Config
 	client *http.Client
@@ -75,62 +75,6 @@ func (c *ControlClient) doJSON(ctx context.Context, method, path string, body an
 		return nil
 	}
 	return json.Unmarshal(raw, out)
-}
-
-// PeerNode 为同组可放置 Node。
-type PeerNode struct {
-	NodeID          string         `json:"node_id"`
-	Name            string         `json:"name"`
-	Status          string         `json:"status"`
-	DiscoveryGroup  []string       `json:"discovery_group"`
-	Version         string         `json:"version"`
-	Host            map[string]any `json:"host"`
-	AllowPeerCreate bool           `json:"allow_peer_create"`
-	AllowScreenView bool           `json:"allow_screen_view"`
-}
-
-type peersResponse struct {
-	Nodes      []PeerNode `json:"nodes"`
-	SelfNodeID string     `json:"self_node_id"`
-}
-
-func (c *ControlClient) ListPeers(ctx context.Context) ([]PeerNode, error) {
-	// 创建弹窗会调 peers；Manage 不可达时不能拖到默认 45s。
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	var resp peersResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/control/peers", nil, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Nodes, nil
-}
-
-// ControlCreateResult 远端创建结果。
-type ControlCreateResult struct {
-	AgentID        string          `json:"agent_id"`
-	DisplayName    string          `json:"display_name"`
-	HomeNodeID     string          `json:"home_node_id"`
-	OwnerNodeID    string          `json:"owner_node_id"`
-	Origin         string          `json:"origin"`
-	Host           json.RawMessage `json:"host"`
-	ConfigSnapshot json.RawMessage `json:"config_snapshot"`
-	SandboxEnabled bool            `json:"sandbox_enabled"`
-	SandboxBackend string          `json:"sandbox_backend"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-}
-
-func (c *ControlClient) CreateOnHome(ctx context.Context, homeNodeID string, body map[string]any) (*ControlCreateResult, error) {
-	homeNodeID = strings.TrimSpace(homeNodeID)
-	if homeNodeID == "" {
-		return nil, fmt.Errorf("home_node_id required")
-	}
-	var out ControlCreateResult
-	path := "/v1/control/nodes/" + homeNodeID + "/agents"
-	if err := c.doJSON(ctx, http.MethodPost, path, body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 type controlDeleteResult struct {

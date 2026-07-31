@@ -12,7 +12,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-func TestPlacementAPI_PeersRouteDeprecated(t *testing.T) {
+func TestPlacementAPI_PeersRouteRemoved(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-owner", FSRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
@@ -20,15 +20,8 @@ func TestPlacementAPI_PeersRouteDeprecated(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/peers/nodes", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusGone {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	var body errorBody
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Error.Code != "placement_deprecated" {
-		t.Fatalf("error=%+v", body.Error)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s want 404", rr.Code, rr.Body.String())
 	}
 }
 

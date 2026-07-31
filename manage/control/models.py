@@ -1,4 +1,4 @@
-"""Placement 控制面模型。"""
+"""Placement 控制面模型（D5：create/peers 已下线；保留 DELETE 与 create 请求体校验）。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ControlCreateAgentRequest(BaseModel):
-    """owner Node 请求在 home Node 上创建 Agent。"""
+    """遗留请求体：路由恒返回 410，仍需可解析旧客户端 payload。"""
 
     owner_node_id: str = Field(min_length=1, max_length=256)
     display_name: str = Field(min_length=1, max_length=256)
@@ -27,46 +27,8 @@ class ControlCreateAgentRequest(BaseModel):
         return value.strip()
 
 
-class ControlHostInfo(BaseModel):
-    os_kind: str = ""
-    sys_platform: str = ""
-    machine: str = ""
-    display_available: bool = False
-    display_label: str = ""
-
-
-class ControlCreateAgentResponse(BaseModel):
-    agent_id: str
-    display_name: str
-    home_node_id: str
-    owner_node_id: str
-    origin: str = "remote"
-    host: ControlHostInfo = Field(default_factory=ControlHostInfo)
-    config_snapshot: dict[str, Any] | str | None = None
-    sandbox_enabled: bool = False
-    sandbox_backend: str = "process"
-    created_at: str = ""
-    updated_at: str = ""
-
-
 class ControlDeleteAgentResponse(BaseModel):
     ok: bool = True
     agent_id: str
     home_node_id: str
     home_deleted: bool = False
-
-
-class PeerNodeView(BaseModel):
-    node_id: str
-    name: str = ""
-    status: str = "offline"
-    discovery_group: list[str] = Field(default_factory=list)
-    version: str = ""
-    host: ControlHostInfo = Field(default_factory=ControlHostInfo)
-    allow_peer_create: bool = True
-    allow_screen_view: bool = True
-
-
-class PeerNodesResponse(BaseModel):
-    nodes: list[PeerNodeView]
-    self_node_id: str = ""

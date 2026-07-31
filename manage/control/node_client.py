@@ -1,4 +1,4 @@
-"""Manage → home Node 的 Placement HTTP 客户端。"""
+"""Manage → home Node 的 Placement HTTP 客户端（D5：仅保留 DELETE）。"""
 
 from __future__ import annotations
 
@@ -15,44 +15,6 @@ def _join_url(base_url: str, path: str) -> str:
     if not path.startswith("/"):
         path = "/" + path
     return base + path
-
-
-def call_home_create_agent(
-    *,
-    base_url: str,
-    home_node_id: str,
-    payload: dict[str, Any],
-    timeout_seconds: float = 30.0,
-) -> dict[str, Any]:
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "x-dagents-placement-control": "1",
-        "x-dagents-agent-id": home_node_id,
-    }
-    token = lookup_node_token(home_node_id)
-    if token:
-        headers["x-dagents-a2a-token"] = token
-    url = _join_url(base_url, "/v1/internal/placement/agents")
-    try:
-        with httpx.Client(timeout=timeout_seconds) as client:
-            resp = client.post(url, json=payload, headers=headers)
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"home_unreachable: {exc}") from exc
-    if resp.status_code >= 400:
-        detail: Any
-        try:
-            detail = resp.json()
-        except Exception:
-            detail = resp.text
-        raise HTTPException(status_code=502, detail={"home_status": resp.status_code, "home_body": detail})
-    try:
-        data = resp.json()
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="home_invalid_json") from exc
-    if not isinstance(data, dict):
-        raise HTTPException(status_code=502, detail="home_invalid_payload")
-    return data
 
 
 def call_home_delete_agent(
@@ -78,7 +40,8 @@ def call_home_delete_agent(
             resp = client.delete(url, headers=headers)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"home_unreachable: {exc}") from exc
-    if resp.status_code == 404:
+    # home 已 D0.9/D5 对内部 placement DELETE 返回 410/404：视为远端实例已不存在。
+    if resp.status_code in {404, 410}:
         return {"ok": True, "agent_id": agent_id, "home_deleted": False, "already_gone": True}
     if resp.status_code >= 400:
         detail: Any

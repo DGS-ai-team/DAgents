@@ -2,50 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException, Request
 
-from manage.control.models import (
-    ControlCreateAgentRequest,
-    ControlDeleteAgentResponse,
-    ControlHostInfo,
-)
+from manage.control.models import ControlCreateAgentRequest, ControlDeleteAgentResponse
 from manage.control.node_client import call_home_delete_agent
 from manage.platform.audit import AuditLog
 from manage.platform.auth import audit_actor, authenticate, ensure_node_identity
 from manage.registry.store import AgentRegistryStore
-
-
-def _host_from_metadata(metadata: dict[str, Any] | None) -> ControlHostInfo:
-    """保留供测试/遗留调用；peers 列表已下线。"""
-    meta = metadata if isinstance(metadata, dict) else {}
-    host_info = meta.get("host_info") if isinstance(meta.get("host_info"), dict) else {}
-    display = meta.get("display") if isinstance(meta.get("display"), dict) else {}
-    os_kind = str(host_info.get("os_kind") or "").strip().lower()
-    sys_platform = str(host_info.get("sys_platform") or "").strip().lower()
-    machine = str(host_info.get("machine") or "").strip()
-    if "available" in display:
-        display_available = bool(display.get("available"))
-    else:
-        display_available = os_kind in {"windows", "darwin"} or sys_platform in {"windows", "darwin"}
-    label = str(display.get("label") or "").strip()
-    if not label:
-        if os_kind == "windows" or sys_platform == "windows":
-            label = "Windows"
-        elif os_kind == "darwin" or sys_platform == "darwin":
-            label = "macOS"
-        elif os_kind or sys_platform:
-            label = (os_kind or sys_platform).capitalize()
-        else:
-            label = "Unknown"
-    return ControlHostInfo(
-        os_kind=os_kind or sys_platform or "unknown",
-        sys_platform=sys_platform or os_kind,
-        machine=machine,
-        display_available=display_available,
-        display_label=label,
-    )
 
 
 def build_control_router(registry: AgentRegistryStore, audit: AuditLog) -> APIRouter:
@@ -53,7 +16,6 @@ def build_control_router(registry: AgentRegistryStore, audit: AuditLog) -> APIRo
 
     @router.get("/v1/control/peers")
     def list_peers(request: Request) -> None:
-        # D5：Placement peers 列表已下线；跨机器协作请使用工作组。
         authenticate(request)
         raise HTTPException(
             status_code=410,
@@ -67,7 +29,6 @@ def build_control_router(registry: AgentRegistryStore, audit: AuditLog) -> APIRo
     def create_on_home(
         home_node_id: str, payload: ControlCreateAgentRequest, request: Request
     ) -> None:
-        # D5：远程 Placement 创建已下线；保留 DELETE 供遗留 stub 清理。
         authenticate(request)
         _ = home_node_id, payload
         raise HTTPException(

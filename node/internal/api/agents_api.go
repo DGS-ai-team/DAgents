@@ -257,14 +257,6 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, agentViewFromRecord(rec))
 }
 
-func (s *Server) handleCreateRemoteAgent(w http.ResponseWriter, r *http.Request, req createAgentRequest, homeNodeID string) {
-	_ = r
-	_ = req
-	writeAPIError(w, http.StatusGone, "placement_deprecated", "远程 Placement 创建已下线：跨机器协作请使用工作组", map[string]any{
-		"home_node_id": strings.TrimSpace(homeNodeID),
-	})
-}
-
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	if s.agents == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "agents_unavailable", "agents store not configured", nil)
