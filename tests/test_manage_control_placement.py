@@ -4,7 +4,6 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -22,15 +21,13 @@ def _register_peer(
     node_id: str,
     base_url: str,
     groups: list[str],
-    metadata: dict | None = None,
 ) -> None:
     payload = {
         "agent_id": node_id,
         "base_url": base_url,
         "name": node_id,
         "expose_to_peers": True,
-        "metadata": metadata
-        or {
+        "metadata": {
             "host_info": {"os_kind": "linux", "sys_platform": "linux", "machine": "x86_64"},
             "display": {"available": False, "label": "Linux"},
         },
@@ -55,8 +52,7 @@ class ManageControlPlacementTests(unittest.TestCase):
                     headers={"x-dagents-agent-id": "owner-01"},
                 )
             self.assertEqual(peers.status_code, 410, peers.text)
-            detail = peers.json()["detail"]
-            self.assertEqual(detail["code"], "placement_deprecated")
+            self.assertEqual(peers.json()["detail"]["code"], "placement_deprecated")
 
     def test_create_gone(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -77,60 +73,20 @@ class ManageControlPlacementTests(unittest.TestCase):
             self.assertEqual(resp.status_code, 410, resp.text)
             self.assertEqual(resp.json()["detail"]["code"], "placement_deprecated")
 
-    def test_delete_still_works_via_home_mock(self) -> None:
+    def test_delete_gone(self) -> None:
         with TemporaryDirectory() as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
             app = create_app(settings)
             with TestClient(app) as client:
                 _register_peer(client, node_id="owner-01", base_url="http://owner.local", groups=["ops"])
                 _register_peer(client, node_id="home-01", base_url="http://home.local", groups=["ops"])
-                with patch(
-                    "manage.control.routes.call_home_delete_agent",
-                    return_value={"ok": True, "agent_id": "agt-remote-1", "home_deleted": True},
-                ) as delete_mock:
-                    deleted = client.delete(
-                        "/v1/control/nodes/home-01/agents/agt-remote-1",
-                        headers={"x-dagents-agent-id": "owner-01"},
-                    )
-            self.assertEqual(deleted.status_code, 200, deleted.text)
-            self.assertTrue(deleted.json()["home_deleted"])
-            delete_mock.assert_called_once()
-            self.assertEqual(delete_mock.call_args.kwargs["owner_node_id"], "owner-01")
-
-
-    def test_delete_treats_home_410_as_already_gone(self) -> None:
-        from manage.control.node_client import call_home_delete_agent
-
-        class _Resp:
-            status_code = 410
-
-            def json(self):
-                return {"error": {"code": "placement_deprecated"}}
-
-        class _Client:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def delete(self, url, headers=None):
-                return _Resp()
-
-        with patch("manage.control.node_client.httpx.Client", _Client):
-            out = call_home_delete_agent(
-                base_url="http://home.local",
-                home_node_id="home-01",
-                agent_id="agt-1",
-                owner_node_id="owner-01",
-            )
-        self.assertTrue(out.get("already_gone"))
-        self.assertFalse(out.get("home_deleted"))
+                deleted = client.delete(
+                    "/v1/control/nodes/home-01/agents/agt-remote-1",
+                    headers={"x-dagents-agent-id": "owner-01"},
+                )
+            self.assertEqual(deleted.status_code, 410, deleted.text)
+            self.assertEqual(deleted.json()["detail"]["code"], "placement_deprecated")
 
 
 if __name__ == "__main__":
     unittest.main()
-

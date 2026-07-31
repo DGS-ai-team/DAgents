@@ -25,49 +25,24 @@ func TestPlacementAPI_PeersRouteRemoved(t *testing.T) {
 	}
 }
 
-func TestPlacementAPI_InternalRoutesDeprecated(t *testing.T) {
-	cfg := &config.Config{
-		NodeID: "node-home",
-		FSRoot: t.TempDir(),
-	}
-	cfg.Manage.NodeToken = "tok-home"
+func TestPlacementAPI_InternalRoutesRemoved(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-home", FSRoot: t.TempDir()}
 	cfg.ApplyDefaults()
-
-	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer agentsDB.Close()
-
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
-	srv.agents = agentsDB
 
-	body, _ := json.Marshal(map[string]any{
-		"display_name": "远端实例",
-		"defaults":     map[string]any{},
-		"placement": map[string]any{
-			"role":          "home",
-			"owner_node_id": "node-owner",
-			"home_node_id":  "node-home",
-		},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/internal/placement/agents", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/internal/placement/agents", bytes.NewReader([]byte(`{}`)))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(placementControlHeader, "1")
-	req.Header.Set(tokenHeader, "tok-home")
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusGone {
-		t.Fatalf("create status=%d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("create status=%d body=%s want 404", rr.Code, rr.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/v1/internal/placement/agents/agt-123", nil)
-	req.Header.Set(placementControlHeader, "1")
-	req.Header.Set(tokenHeader, "tok-home")
 	rr = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusGone {
-		t.Fatalf("delete status=%d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("delete status=%d body=%s want 404", rr.Code, rr.Body.String())
 	}
 }
 

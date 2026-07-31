@@ -471,17 +471,6 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
 		return
 	}
-	// 远端引用：先经 Manage 双删 home，再删本地 stub
-	if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-		p := decodePlacement(rec.PlacementJSON)
-		homeID := strings.TrimSpace(p.HomeNodeID)
-		if homeID != "" && s.control != nil && s.cfg != nil && s.cfg.Manage.Enabled {
-			if err := s.control.DeleteOnHome(r.Context(), homeID, id); err != nil {
-				writeAPIError(w, http.StatusBadGateway, "peer_delete_failed", err.Error(), nil)
-				return
-			}
-		}
-	}
 	if err := s.agents.SoftDelete(r.Context(), id); err != nil {
 		writeAPIError(w, http.StatusNotFound, "agent_not_found", err.Error(), map[string]any{"agent_id": id})
 		return

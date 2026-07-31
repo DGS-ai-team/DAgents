@@ -2,19 +2,14 @@ package api
 
 import (
 	"encoding/json"
-	"net/http"
 	"os"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 )
 
-const (
-	placementControlHeader = "x-dagents-placement-control"
-	ownerNodeHeader        = "x-dagents-owner-node-id"
-	tokenHeader            = "x-dagents-a2a-token"
-)
-
+// placementSpec / placementPayload 仅兼容旧请求与 agents.placement_json 反序列化；
+// D5 Cut7：内部 placement HTTP 路由已移除。
 type placementSpec struct {
 	HomeNodeID string `json:"home_node_id"`
 }
@@ -97,55 +92,9 @@ func encodeJSONRaw(v any) json.RawMessage {
 	return raw
 }
 
-func decodePlacement(raw json.RawMessage) placementPayload {
-	var p placementPayload
-	if len(raw) == 0 {
-		return p
-	}
-	_ = json.Unmarshal(raw, &p)
-	return p
-}
-
-func (s *Server) authorizePlacementControl(r *http.Request) bool {
-	if strings.TrimSpace(r.Header.Get(placementControlHeader)) != "1" {
-		return false
-	}
-	want := ""
-	if s.cfg != nil {
-		want = strings.TrimSpace(s.cfg.Manage.NodeToken)
-	}
-	got := strings.TrimSpace(r.Header.Get(tokenHeader))
-	if want == "" {
-		return true
-	}
-	return got != "" && got == want
-}
-
-func (s *Server) registerPlacementRoutes() {
-	// D5：GET /v1/peers/nodes 已移除；内部 create/delete 仍 410 供 Manage DELETE 探测。
-	s.mux.HandleFunc("POST /v1/internal/placement/agents", s.handleInternalPlacementCreate)
-	s.mux.HandleFunc("DELETE /v1/internal/placement/agents/{agent_id}", s.handleInternalPlacementDelete)
-}
-
 func (s *Server) cfgNodeID() string {
 	if s.cfg == nil {
 		return ""
 	}
 	return s.cfg.NodeID
-}
-
-type internalPlacementCreateRequest struct {
-	DisplayName string           `json:"display_name"`
-	TemplateID  string           `json:"template_id"`
-	Defaults    map[string]any   `json:"defaults"`
-	Sandbox     *sandboxPatch    `json:"sandbox"`
-	Placement   placementPayload `json:"placement"`
-}
-
-func (s *Server) handleInternalPlacementCreate(w http.ResponseWriter, r *http.Request) {
-	writeAPIError(w, http.StatusGone, "placement_deprecated", "远程 Placement 入口已下线：跨机器协作请使用工作组", nil)
-}
-
-func (s *Server) handleInternalPlacementDelete(w http.ResponseWriter, r *http.Request) {
-	writeAPIError(w, http.StatusGone, "placement_deprecated", "远程 Placement 入口已下线：跨机器协作请使用工作组", nil)
 }

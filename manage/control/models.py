@@ -1,4 +1,4 @@
-"""Placement 控制面模型（D5：create/peers 已下线；保留 DELETE 与 create 请求体校验）。"""
+"""Placement 控制面模型（D5：create/delete/peers 已 410；保留 create 请求体校验）。"""
 
 from __future__ import annotations
 
@@ -25,10 +25,3 @@ class ControlCreateAgentRequest(BaseModel):
         if not isinstance(value, str):
             raise ValueError("字段必须是字符串")
         return value.strip()
-
-
-class ControlDeleteAgentResponse(BaseModel):
-    ok: bool = True
-    agent_id: str
-    home_node_id: str
-    home_deleted: bool = False

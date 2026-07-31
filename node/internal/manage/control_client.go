@@ -76,21 +76,3 @@ func (c *ControlClient) doJSON(ctx context.Context, method, path string, body an
 	}
 	return json.Unmarshal(raw, out)
 }
-
-type controlDeleteResult struct {
-	OK          bool   `json:"ok"`
-	AgentID     string `json:"agent_id"`
-	HomeNodeID  string `json:"home_node_id"`
-	HomeDeleted bool   `json:"home_deleted"`
-}
-
-func (c *ControlClient) DeleteOnHome(ctx context.Context, homeNodeID, agentID string) error {
-	homeNodeID = strings.TrimSpace(homeNodeID)
-	agentID = strings.TrimSpace(agentID)
-	if homeNodeID == "" || agentID == "" {
-		return fmt.Errorf("home_node_id and agent_id required")
-	}
-	var out controlDeleteResult
-	path := "/v1/control/nodes/" + homeNodeID + "/agents/" + agentID
-	return c.doJSON(ctx, http.MethodDelete, path, nil, &out)
-}
