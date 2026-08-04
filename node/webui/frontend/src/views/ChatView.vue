@@ -4,11 +4,10 @@ import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { connectStream } from "../sse/stream.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
-import AgentPanel from "../components/AgentPanel.vue";
+import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
 import AgentEmptyState from "../components/AgentEmptyState.vue";
 import ChildrenPanel from "../components/ChildrenPanel.vue";
-import ActivityPanel from "../components/ActivityPanel.vue";
 import {
   agentStore,
   persistAgentId,
@@ -790,6 +789,10 @@ async function handleThinkingCommand(arg) {
   addSystem(`thinking: ${chromeStore.llmSettings.thinking || "-"}`);
 }
 
+function openLeftActivity() {
+  agentPanelRef.value?.expandSection?.("activity");
+}
+
 async function openPanel(name, arg) {
   const settingsPath = PANEL_SETTINGS_ROUTES[name];
   if (settingsPath) {
@@ -816,8 +819,12 @@ async function openPanel(name, arg) {
     agentPanelRef.value?.refresh?.();
     return;
   }
-  if (name === "activity" || name === "changes" || name === "children") {
-    chromeStore.panel = name === "changes" ? "activity" : name;
+  if (name === "activity" || name === "changes") {
+    openLeftActivity();
+    return;
+  }
+  if (name === "children") {
+    chromeStore.panel = name;
     return;
   }
   if (!agentStore.agentId) {
@@ -940,6 +947,19 @@ watch(
   },
 );
 
+watch(
+  () => route.query.createAgent,
+  (v) => {
+    if (String(v || "") === "1") {
+      openCreateWizard();
+      const q = { ...route.query };
+      delete q.createAgent;
+      router.replace({ query: q });
+    }
+  },
+  { immediate: true },
+);
+
 onUnmounted(() => {
   stopDesktopFocusHeartbeat();
   stopToolJobsPolling();
@@ -950,16 +970,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div
-    class="app__body app__body--chat-v61"
-    :class="{ 'app__body--with-activity': chromeStore.panel === 'activity' }"
-  >
+  <div class="app__body app__body--chat-v61">
     <aside class="app__col app__col--agents">
-      <AgentPanel
+      <NavRail
         ref="agentPanelRef"
         @switch="switchAgent"
         @create="openCreateWizard()"
-        @created="onAgentCreated"
         @delete="deleteAgentById"
         @agents-updated="onAgentsUpdated"
       />
@@ -995,6 +1011,7 @@ onUnmounted(() => {
         @toggle-thinking="toggleThinkingMode"
         @cycle-effort="cycleThinkingEffort"
         @switch-profile="switchLLMProfile"
+        @open-activity="openLeftActivity"
         @approve-all="(idx) => submitHitlApproval(true, idx)"
         @reject-all="(idx) => submitHitlApproval(false, idx)"
         @approve-one="(payload) => submitHitlOne(payload, true)"
@@ -1009,10 +1026,6 @@ onUnmounted(() => {
         <ChildrenPanel @close="closePanel" />
       </div>
     </div>
-
-    <aside v-if="chromeStore.panel === 'activity'" class="app__col app__col--activity">
-      <ActivityPanel :agent="currentAgentRecord" @close="closePanel" />
-    </aside>
 
     <AgentCreateModal
       :open="showAgentCreateModal"

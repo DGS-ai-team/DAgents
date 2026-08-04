@@ -2,41 +2,54 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Test: Node",
+      "name": "Debug: Node",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/node/cmd/dagents-node",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml"
+      ],
+      "cwd": "${workspaceFolder}/packaging/agent-client",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug: UI",
       "type": "node-terminal",
       "request": "launch",
-      "command": "go test ./... -count=1",
-      "cwd": "${workspaceFolder}/node"
-    },
-    {
-      "name": "Test: UI",
-      "type": "node",
-      "request": "launch",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["test"],
+      "command": "npm run dev",
       "cwd": "${workspaceFolder}/node/webui/frontend",
-      "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen"
+      "env": {
+        "DAGENTS_NODE_URL": "http://127.0.0.1:18765"
+      }
     },
     {
-      "name": "Test: Manage",
+      "name": "Debug: Manage",
       "type": "debugpy",
       "request": "launch",
-      "module": "unittest",
-      "args": ["discover", "-s", "tests", "-p", "test_*.py", "-v"],
+      "program": "${workspaceFolder}/run_manage.py",
       "cwd": "${workspaceFolder}",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}"
+        "PYTHONPATH": "${workspaceFolder}",
+        "MANAGE_HOST": "127.0.0.1",
+        "MANAGE_PORT": "8020",
+        "MANAGE_DB_PATH": "${workspaceFolder}/.runtime/manage.db",
+        "MANAGE_BLOB_DIR": "${workspaceFolder}/.runtime/manage-blobs",
+        "MANAGE_RELEASES_DIR": "${workspaceFolder}/.runtime/releases"
       },
       "console": "integratedTerminal",
       "justMyCode": false
     },
     {
-      "name": "Test: Shell",
+      "name": "Debug: Shell",
       "type": "node-terminal",
       "request": "launch",
-      "command": "cmd /c \"call \"%ProgramFiles(x86)%\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 && set PATH=%USERPROFILE%\\.cargo\\bin;%PATH% && cargo test --locked\"",
-      "cwd": "${workspaceFolder}/desktop/tray-tauri/src-tauri"
+      "command": "cmd /c \"dev.cmd --config config.example.yaml\"",
+      "cwd": "${workspaceFolder}/desktop/tray-tauri",
+      "env": {
+        "DAGENTS_HOME": "${workspaceFolder}/packaging/agent-client"
+      }
     }
   ]
 }

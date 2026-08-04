@@ -53,11 +53,12 @@ pub fn is_running(cfg: &ShellConfig) -> bool {
 }
 
 pub fn start(layout: &Layout, cfg: &ShellConfig, wait_ready: Duration) -> Result<(), String> {
-    if !layout.node_exe.is_file() {
-        return Err(format!("找不到 Node 二进制: {}", layout.node_exe.display()));
-    }
+    // 已有健康 Node（例如 IDE 单独调试）时直接成功，不要求本机 bin 下有可执行文件。
     if is_running(cfg) {
         return Ok(());
+    }
+    if !layout.node_exe.is_file() {
+        return Err(format!("找不到 Node 二进制: {}", layout.node_exe.display()));
     }
 
     if let Some(parent) = layout.log_out.parent() {

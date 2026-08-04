@@ -9,6 +9,8 @@ import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 const props = defineProps({
   /** 当前 Agent 列表行（含 origin / host） */
   agent: { type: Object, default: null },
+  /** 嵌入左侧 NavRail：无关闭钮、紧凑样式 */
+  embedded: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["close"]);
@@ -18,9 +20,8 @@ const error = ref("");
 const remote = ref(null);
 const expandedCmd = ref({});
 const sectionOpen = ref({
-  changes: true,
-  commands: true,
-  context: true,
+  terminal: true,
+  files: true,
 });
 
 function toggleSection(key) {
@@ -46,45 +47,25 @@ const summaryLine = computed(() => {
   return parts.join(" · ") || "暂无活动";
 });
 
-const agentId = computed(() => String(agentStore.agentId || "").trim());
-const agentIdShort = computed(() => {
-  const id = agentId.value;
-  if (!id) return "—";
-  if (id.length <= 18) return id;
-  return `${id.slice(0, 10)}…${id.slice(-4)}`;
-});
+function isTerminalCap(id) {
+  return id === "shell" || id === "terminal";
+}
 
-const modelLabel = computed(() => {
-  const llm = chromeStore.llmSettings;
-  return String(llm?.model || llm?.active_profile || "—").trim() || "—";
-});
+function isFilesCap(id) {
+  return id === "filesystem" || id === "files";
+}
 
-const providerLabel = computed(() => String(chromeStore.llmSettings?.provider || "").trim());
-
-const capabilityItems = computed(() => {
+/** 是否展示 Terminal / Files 行（无 capabilities 时默认都展示） */
+const showTerminal = computed(() => {
   const caps = chromeStore.agentInfo?.capabilities;
-  if (!Array.isArray(caps) || !caps.length) {
-    return [
-      { id: "files", label: "Files", hint: "读写工作区文件" },
-      { id: "terminal", label: "Terminal", hint: "执行 shell 命令" },
-    ];
-  }
-  return caps.map((c) => {
-    const id = String(c || "").trim();
-    const map = {
-      shell: { label: "Terminal", hint: "执行 shell 命令" },
-      filesystem: { label: "Files", hint: "读写工作区文件" },
-      triggers: { label: "Triggers", hint: "定时与事件触发" },
-      browser: { label: "Browser", hint: "浏览器工具" },
-      wecom: { label: "WeCom", hint: "企业微信推送" },
-    };
-    return { id, ...(map[id] || { label: id, hint: "" }) };
-  });
+  if (!Array.isArray(caps) || !caps.length) return true;
+  return caps.some((c) => isTerminalCap(String(c || "").trim()));
 });
 
-const contextTitle = computed(() => {
-  const id = agentIdShort.value;
-  return id && id !== "—" ? `On ${id}` : "On Agent";
+const showFiles = computed(() => {
+  const caps = chromeStore.agentInfo?.capabilities;
+  if (!Array.isArray(caps) || !caps.length) return true;
+  return caps.some((c) => isFilesCap(String(c || "").trim()));
 });
 
 function fileParts(path) {
@@ -149,8 +130,12 @@ defineExpose({ refresh });
 </script>
 
 <template>
-  <aside class="activity-rail" aria-label="变更与上下文">
-    <header class="activity-rail__top">
+  <aside
+    class="activity-rail"
+    :class="{ 'activity-rail--embedded': embedded }"
+    aria-label="变更与上下文"
+  >
+    <header v-if="!embedded" class="activity-rail__top">
       <div class="activity-rail__top-text">
         <div class="activity-rail__kicker">Activity</div>
         <div class="activity-rail__summary">{{ summaryLine }}</div>
@@ -186,121 +171,92 @@ defineExpose({ refresh });
     <div v-if="loading && !files.length && !commands.length" class="activity-rail__empty">加载中…</div>
 
     <div class="activity-rail__scroll">
-      <!-- Changes -->
-      <section class="activity-section">
-        <button type="button" class="activity-section__head" @click="toggleSection('changes')">
-          <span class="activity-section__chevron" aria-hidden="true">{{ sectionOpen.changes ? "▾" : "▸" }}</span>
-          <span class="activity-section__title">Changes</span>
-          <span v-if="fileCount" class="activity-section__badge">
-            <span class="activity-section__plus">+{{ fileCount }}</span>
-          </span>
-        </button>
-        <ul v-if="sectionOpen.changes" class="activity-rows">
-          <li v-if="!files.length" class="activity-rows__empty">尚无文件改动</li>
-          <li v-for="f in files" :key="f.path" class="activity-row" :title="f.path">
-            <span class="activity-op" :class="opClass(f.ops, f.rejected)">{{ primaryOp(f.ops) }}</span>
-            <span class="activity-row__icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" fill="none">
-                <path d="M4.25 2.75h5.1L11.75 5.2v8.05H4.25V2.75Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
-                <path d="M9.2 2.75V5.2h2.55" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
-              </svg>
-            </span>
-            <span class="activity-row__body">
-              <span class="activity-row__name">{{ fileParts(f.path).name }}</span>
-              <span v-if="fileParts(f.path).dir" class="activity-row__meta">{{ fileParts(f.path).dir }}</span>
-              <span v-if="f.rejected" class="activity-row__meta activity-row__meta--danger">已拒绝</span>
-            </span>
-          </li>
-        </ul>
-      </section>
-
-      <!-- Commands -->
-      <section class="activity-section">
-        <button type="button" class="activity-section__head" @click="toggleSection('commands')">
-          <span class="activity-section__chevron" aria-hidden="true">{{ sectionOpen.commands ? "▾" : "▸" }}</span>
-          <span class="activity-section__title">Commands</span>
-          <span v-if="cmdCount" class="activity-section__badge">{{ cmdCount }}</span>
-        </button>
-        <ul v-if="sectionOpen.commands" class="activity-rows">
-          <li v-if="!commands.length" class="activity-rows__empty">尚无命令记录</li>
-          <li v-for="(c, i) in commands" :key="c.tool_call_id || i" class="activity-row activity-row--cmd">
-            <button type="button" class="activity-row__btn" @click="toggleCmd(c.tool_call_id || i)">
-              <span class="activity-status" :class="statusClass(c.status)" aria-hidden="true" />
-              <span class="activity-row__icon" aria-hidden="true">
-                <svg viewBox="0 0 16 16" fill="none">
-                  <path d="M3.5 4.5 6.5 8 3.5 11.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
-                  <path d="M8 11.5h4.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
-                </svg>
-              </span>
-              <span class="activity-row__body">
-                <span class="activity-row__name activity-row__name--mono">{{ truncateCmd(c.command) }}</span>
-                <span class="activity-row__meta">{{ c.status }}</span>
-              </span>
-              <span class="activity-row__chevron" aria-hidden="true">{{ expandedCmd[c.tool_call_id || i] ? "▾" : "▸" }}</span>
-            </button>
-            <pre
-              v-if="expandedCmd[c.tool_call_id || i] && c.content_preview"
-              class="activity-row__preview"
-            >{{ c.content_preview }}</pre>
-          </li>
-        </ul>
-      </section>
-
-      <!-- Extensible context -->
-      <section class="activity-section">
-        <button type="button" class="activity-section__head" @click="toggleSection('context')">
-          <span class="activity-section__chevron" aria-hidden="true">{{ sectionOpen.context ? "▾" : "▸" }}</span>
-          <span class="activity-section__title">{{ contextTitle }}</span>
-        </button>
-        <ul v-if="sectionOpen.context" class="activity-rows">
-          <li class="activity-row" title="当前模型">
-            <span class="activity-row__icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" fill="none">
-                <circle cx="8" cy="8" r="5.25" stroke="currentColor" stroke-width="1.15" />
-                <path d="M8 5.25v3.1l2 1.4" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </span>
-            <span class="activity-row__body">
-              <span class="activity-row__name">{{ modelLabel }}</span>
-              <span v-if="providerLabel" class="activity-row__meta">{{ providerLabel }}</span>
-            </span>
-          </li>
-          <li
-            v-for="item in capabilityItems"
-            :key="item.id"
-            class="activity-row"
-            :title="item.hint || item.label"
+      <ul class="activity-rows">
+        <!-- 执行命令记录 -->
+        <li v-if="showTerminal" class="activity-cap">
+          <button
+            type="button"
+            class="activity-row activity-row--toggle"
+            title="执行命令记录"
+            :aria-expanded="sectionOpen.terminal"
+            @click="toggleSection('terminal')"
           >
             <span class="activity-row__icon" aria-hidden="true">
-              <svg v-if="item.id === 'shell' || item.id === 'terminal'" viewBox="0 0 16 16" fill="none">
+              <svg viewBox="0 0 16 16" fill="none">
                 <path d="M3.5 4.5 6.5 8 3.5 11.5" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
                 <path d="M8 11.5h4.5" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" />
               </svg>
-              <svg v-else-if="item.id === 'filesystem' || item.id === 'files'" viewBox="0 0 16 16" fill="none">
-                <path d="M2.75 4.25h4.1l1.2 1.35h5.2v6.15H2.75V4.25Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
-              </svg>
-              <svg v-else viewBox="0 0 16 16" fill="none">
-                <rect x="3" y="3" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.15" />
-              </svg>
             </span>
             <span class="activity-row__body">
-              <span class="activity-row__name">{{ item.label }}</span>
-              <span v-if="item.hint" class="activity-row__meta">{{ item.hint }}</span>
+              <span class="activity-row__name">执行命令记录</span>
             </span>
-          </li>
-          <li class="activity-row activity-row--muted" title="后续可扩展：PR、浏览器会话等">
+            <span v-if="cmdCount" class="activity-cap__count">{{ cmdCount }}</span>
+            <span class="activity-row__chevron" aria-hidden="true">{{ sectionOpen.terminal ? "▾" : "▸" }}</span>
+          </button>
+          <ul v-if="sectionOpen.terminal" class="activity-rows activity-rows--nested">
+            <li v-if="!commands.length" class="activity-rows__empty">尚无命令记录</li>
+            <li v-for="(c, i) in commands" :key="c.tool_call_id || i" class="activity-row activity-row--cmd">
+              <button type="button" class="activity-row__btn" @click="toggleCmd(c.tool_call_id || i)">
+                <span class="activity-status" :class="statusClass(c.status)" aria-hidden="true" />
+                <span class="activity-row__icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" fill="none">
+                    <path d="M3.5 4.5 6.5 8 3.5 11.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M8 11.5h4.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
+                  </svg>
+                </span>
+                <span class="activity-row__body">
+                  <span class="activity-row__name activity-row__name--mono">{{ truncateCmd(c.command) }}</span>
+                  <span class="activity-row__meta">{{ c.status }}</span>
+                </span>
+                <span class="activity-row__chevron" aria-hidden="true">{{ expandedCmd[c.tool_call_id || i] ? "▾" : "▸" }}</span>
+              </button>
+              <pre
+                v-if="expandedCmd[c.tool_call_id || i] && c.content_preview"
+                class="activity-row__preview"
+              >{{ c.content_preview }}</pre>
+            </li>
+          </ul>
+        </li>
+
+        <!-- 文件变更记录 -->
+        <li v-if="showFiles" class="activity-cap">
+          <button
+            type="button"
+            class="activity-row activity-row--toggle"
+            title="文件变更记录"
+            :aria-expanded="sectionOpen.files"
+            @click="toggleSection('files')"
+          >
             <span class="activity-row__icon" aria-hidden="true">
               <svg viewBox="0 0 16 16" fill="none">
-                <path d="M8 3.25v9.5M3.25 8h9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+                <path d="M2.75 4.25h4.1l1.2 1.35h5.2v6.15H2.75V4.25Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
               </svg>
             </span>
             <span class="activity-row__body">
-              <span class="activity-row__name">More</span>
-              <span class="activity-row__meta">PR / Browser…</span>
+              <span class="activity-row__name">文件变更记录</span>
             </span>
-          </li>
-        </ul>
-      </section>
+            <span v-if="fileCount" class="activity-cap__count activity-cap__count--add">+{{ fileCount }}</span>
+            <span class="activity-row__chevron" aria-hidden="true">{{ sectionOpen.files ? "▾" : "▸" }}</span>
+          </button>
+          <ul v-if="sectionOpen.files" class="activity-rows activity-rows--nested">
+            <li v-if="!files.length" class="activity-rows__empty">尚无文件改动</li>
+            <li v-for="f in files" :key="f.path" class="activity-row" :title="f.path">
+              <span class="activity-op" :class="opClass(f.ops, f.rejected)">{{ primaryOp(f.ops) }}</span>
+              <span class="activity-row__icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" fill="none">
+                  <path d="M4.25 2.75h5.1L11.75 5.2v8.05H4.25V2.75Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
+                  <path d="M9.2 2.75V5.2h2.55" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
+                </svg>
+              </span>
+              <span class="activity-row__body">
+                <span class="activity-row__name">{{ fileParts(f.path).name }}</span>
+                <span v-if="fileParts(f.path).dir" class="activity-row__meta">{{ fileParts(f.path).dir }}</span>
+                <span v-if="f.rejected" class="activity-row__meta activity-row__meta--danger">已拒绝</span>
+              </span>
+            </li>
+          </ul>
+        </li>
+      </ul>
     </div>
   </aside>
 </template>
@@ -314,6 +270,31 @@ defineExpose({ refresh });
   background: var(--color-sidebar);
   border-left: 1px solid var(--color-border);
   color: var(--color-text);
+}
+
+.activity-rail--embedded {
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  flex: 0 0 auto;
+  overflow: visible;
+  border-left: 0;
+  background: transparent;
+}
+
+.activity-rail--embedded .activity-rail__scroll {
+  flex: none;
+  min-height: 0;
+  overflow: visible;
+  padding: 0 4px 8px;
+}
+
+.activity-rail--embedded .activity-section__title {
+  font-size: 11px;
+}
+
+.activity-rail--embedded .activity-row__name {
+  font-size: 12px;
 }
 
 .activity-rail__top {
@@ -458,19 +439,58 @@ defineExpose({ refresh });
   gap: 1px;
 }
 
+.activity-rows--nested {
+  padding: 0 0 4px 12px;
+  margin: 0 0 2px;
+}
+
 .activity-rows__empty {
   padding: 8px 10px 10px 28px;
   font-size: 12px;
   color: var(--color-text-subtle);
 }
 
+.activity-cap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.activity-cap__count {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-subtle);
+}
+
+.activity-cap__count--add {
+  color: var(--color-success);
+}
+
 .activity-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   padding: 6px 8px;
   border-radius: 6px;
   min-width: 0;
+}
+
+.activity-row--toggle {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  align-items: center;
+}
+
+.activity-row--toggle:hover {
+  background: var(--color-surface-hover);
 }
 
 .activity-row:hover {
