@@ -9,7 +9,7 @@ export async function apiFetch(path, params = {}, options = {}) {
   });
   const method = options.method || "GET";
   const headers = { Accept: "application/json" };
-  const init = { method, headers };
+  const init = { method, headers, credentials: "include" };
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(options.body);
@@ -31,9 +31,25 @@ export async function apiFetch(path, params = {}, options = {}) {
   return body;
 }
 
+export async function fetchAuthMe() {
+  return apiFetch("/v1/auth/me");
+}
+
+export async function loginAdmin({ username, password }) {
+  return apiFetch("/v1/auth/login", {}, { method: "POST", body: { username, password } });
+}
+
+export async function loginNode(nodeId) {
+  return apiFetch("/v1/auth/login/node", {}, { method: "POST", body: { node_id: nodeId } });
+}
+
+export async function logoutAuth() {
+  return apiFetch("/v1/auth/logout", {}, { method: "POST", body: {} });
+}
+
 export function parseGroupInput(raw) {
   return String(raw || "")
-    .split(/[,，\s]+/)
+    .split(/[,?\s]+/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -41,7 +57,7 @@ export function parseGroupInput(raw) {
 export async function saveAgentGroups(agentId, raw) {
   const discovery_group = parseGroupInput(raw);
   if (!discovery_group.length) {
-    throw new Error("至少填写一个 discovery_group");
+    throw new Error("???????discovery_group");
   }
   return apiFetch(
     `/v1/registry/agents/${encodeURIComponent(agentId)}/groups`,
@@ -62,7 +78,7 @@ export async function fetchAudit(limit = 100) {
   return apiFetch("/v1/admin/audit", { limit });
 }
 
-// --- LLM 配置注册中心 ---
+// --- LLM ?????? ---
 export async function fetchLLMConfigs() {
   return apiFetch("/v1/llm/configs");
 }
@@ -79,7 +95,7 @@ export async function resolveLLMConfig(id) {
   return apiFetch(`/v1/llm/configs/${encodeURIComponent(id)}/resolve`);
 }
 
-// --- Skills 分发 ---
+// --- Skills ?? ---
 export async function fetchSkillCatalog() {
   return apiFetch("/v1/skills/catalog");
 }
@@ -99,10 +115,7 @@ export async function uploadSkillPackage({ skillId, version, name, riskLevel, fi
   form.set("name", name);
   form.set("risk_level", riskLevel || "low");
   form.set("file", file);
-  const resp = await fetch(new URL("/v1/skills/packages", window.location.origin), {
-    method: "POST",
-    body: form,
-  });
+  const resp = await fetch(new URL("/v1/skills/packages", window.location.origin), { method: "POST", body: form, credentials: "include" });
   let body = null;
   try {
     body = await resp.json();
@@ -118,7 +131,7 @@ export async function uploadSkillPackage({ skillId, version, name, riskLevel, fi
   return body;
 }
 
-// --- External Tools 分发 ---
+// --- External Tools ?? ---
 export async function fetchExternalToolCatalog() {
   return apiFetch("/v1/externaltools/catalog");
 }
@@ -139,10 +152,7 @@ export async function uploadExternalToolPackage({ toolId, version, name, platfor
   form.set("platform", platform || "any");
   form.set("risk_level", riskLevel || "low");
   form.set("file", file);
-  const resp = await fetch(new URL("/v1/externaltools/packages", window.location.origin), {
-    method: "POST",
-    body: form,
-  });
+  const resp = await fetch(new URL("/v1/externaltools/packages", window.location.origin), { method: "POST", body: form, credentials: "include" });
   let body = null;
   try {
     body = await resp.json();
@@ -158,7 +168,7 @@ export async function uploadExternalToolPackage({ toolId, version, name, platfor
   return body;
 }
 
-// --- Plugins 分发 ---
+// --- Plugins ?? ---
 export async function fetchPluginCatalog() {
   return apiFetch("/v1/plugins/catalog");
 }
@@ -179,10 +189,7 @@ export async function uploadPluginPackage({ pluginId, version, name, platform, r
   form.set("platform", platform || "any");
   form.set("risk_level", riskLevel || "low");
   form.set("file", file);
-  const resp = await fetch(new URL("/v1/plugins/packages", window.location.origin), {
-    method: "POST",
-    body: form,
-  });
+  const resp = await fetch(new URL("/v1/plugins/packages", window.location.origin), { method: "POST", body: form, credentials: "include" });
   let body = null;
   try {
     body = await resp.json();
@@ -248,10 +255,7 @@ export async function uploadReleasePackage({
   form.set("publish", publish ? "true" : "false");
   form.set("set_latest", setLatest ? "true" : "false");
   form.set("file", file);
-  const resp = await fetch(new URL("/v1/releases/packages", window.location.origin), {
-    method: "POST",
-    body: form,
-  });
+  const resp = await fetch(new URL("/v1/releases/packages", window.location.origin), { method: "POST", body: form, credentials: "include" });
   let body = null;
   try {
     body = await resp.json();
@@ -267,7 +271,7 @@ export async function uploadReleasePackage({
   return body;
 }
 
-// --- Cases 案例库 ---
+// --- Cases ????---
 export async function fetchCases() {
   return apiFetch("/v1/cases");
 }
@@ -292,10 +296,7 @@ export async function postWorkgroupMessage(workgroupId, body) {
 export async function parseCaseJsonl(file) {
   const form = new FormData();
   form.set("file", file);
-  const resp = await fetch(new URL("/v1/cases/parse-jsonl", window.location.origin), {
-    method: "POST",
-    body: form,
-  });
+  const resp = await fetch(new URL("/v1/cases/parse-jsonl", window.location.origin), { method: "POST", body: form, credentials: "include" });
   let body = null;
   try {
     body = await resp.json();
@@ -332,10 +333,7 @@ export async function createCase({
   form.set("plugin_ids", (pluginIds || []).join(", "));
   form.set("externaltool_ids", (externaltoolIds || []).join(", "));
   if (file) form.set("file", file);
-  const resp = await fetch(new URL("/v1/cases", window.location.origin), {
-    method: "POST",
-    body: form,
-  });
+  const resp = await fetch(new URL("/v1/cases", window.location.origin), { method: "POST", body: form, credentials: "include" });
   let body = null;
   try {
     body = await resp.json();
@@ -363,7 +361,7 @@ export async function importCaseJsonl(caseId, file, { replace = true } = {}) {
   form.set("replace", replace ? "true" : "false");
   const resp = await fetch(
     new URL(`/v1/cases/${encodeURIComponent(caseId)}/import-jsonl`, window.location.origin),
-    { method: "POST", body: form },
+    { method: "POST", body: form, credentials: "include" },
   );
   let body = null;
   try {
@@ -401,6 +399,7 @@ export async function deleteCaseMessage(caseId, messageId) {
 export async function exportCaseJsonl(caseId) {
   const resp = await fetch(
     new URL(`/v1/cases/${encodeURIComponent(caseId)}/export/jsonl`, window.location.origin),
+    { credentials: "include" },
   );
   if (!resp.ok) {
     throw new Error(`HTTP ${resp.status}`);
@@ -419,7 +418,7 @@ export async function uploadCaseAttachment(caseId, file) {
   form.set("file", file);
   const resp = await fetch(
     new URL(`/v1/cases/${encodeURIComponent(caseId)}/attachments`, window.location.origin),
-    { method: "POST", body: form },
+    { method: "POST", body: form, credentials: "include" },
   );
   let body = null;
   try {

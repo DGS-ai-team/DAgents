@@ -29,7 +29,9 @@ python run_manage.py
 **Console（Node 目录 UI）**：浏览器打开 **`http://<host>:<port>/console/`**  
 基于 **Vue 3 + Vite**；源码在 `manage/console/frontend/`，构建产物在 `manage/console/static/`（**不入库**，CI / Docker 多阶段构建；本地运行 Manage 或跑 Python 单测前须先 build）。  
 修改 UI 后执行 `./manage/console/build.sh`（或 `cd manage/console/frontend && npm run build`）。  
-默认 **开放模式**：无需 token，直接查看全部 Node 状态。
+默认 **开放模式**：Node 注册/心跳仍可无 token；**Console 浏览器**需登录：
+- Shell「打开 Manage」会带 `?node_id=`，若该 id 已在 Registry 登记则直接进入首页；
+- 直接打开 `/console/` 需管理员账号密码（默认 `admin` / `admin`，可用 `MANAGE_ADMIN_USERNAME` / `MANAGE_ADMIN_PASSWORD` 覆盖）。
 
 ## Docker 部署（推荐生产 / 联调）
 
@@ -81,8 +83,9 @@ docker stop manage && docker start manage
 
 | 模式 | 条件 | 行为 |
 |------|------|------|
-| **开放模式** | 未设置 `MANAGE_TOKENS` 且未设置 `MANAGE_SHARED_TOKEN` | Console / 列表 API 无需鉴权；Node 注册/心跳只需 **agent_id**（建议 Header `x-dagents-agent-id`） |
+| **开放模式** | 未设置 `MANAGE_TOKENS` 且未设置 `MANAGE_SHARED_TOKEN` | Node 注册/心跳只需 **agent_id**；无会话 cookie 时 API 仍可匿名（兼容自动化）；**Console UI** 强制会话登录 |
 | **Token 模式** | 配置了上述环境变量 | 启用 admin/member/node 角色（后续完善；权限仍保留在 Manage 端） |
+| **Console 会话** | Cookie `dagents_manage_session` | 管理员密码登录，或已注册 `node_id` 免密进入（权限绑定该 Node 的 discovery_group） |
 
 Node 出站 Header：
 
@@ -101,6 +104,8 @@ Node 出站 Header：
 | `MANAGE_OFFLINE_GRACE_SECONDS` | `86400` | TTL 过期后 offline 保留秒数 |
 | `MANAGE_TOKENS` | （空） | **可选**；JSON 角色/token 配置（后续启用 RBAC 时使用） |
 | `MANAGE_SHARED_TOKEN` | （空） | **可选**；单 shared admin token |
+| `MANAGE_ADMIN_USERNAME` | `admin` | Console 管理员账号 |
+| `MANAGE_ADMIN_PASSWORD` | `admin` | Console 管理员密码（生产务必修改） |
 | `MANAGE_AUDIT_PATH` | （空） | 审计 JSONL 追加路径 |
 | `MANAGE_AUDIT_MAX_ENTRIES` | `500` | 内存审计条数 |
 

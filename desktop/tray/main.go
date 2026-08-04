@@ -129,6 +129,7 @@ type trayApp struct {
 	mPending         *systray.MenuItem
 	mPendingSessions [maxPendingMenuSlots]*systray.MenuItem
 	mOpenConsole     *systray.MenuItem
+	mOpenManage      *systray.MenuItem
 	mUpdate          *systray.MenuItem
 	mStart           *systray.MenuItem
 	mStop            *systray.MenuItem
@@ -155,6 +156,7 @@ func (a *trayApp) onReady() {
 	}
 	systray.AddSeparator()
 	a.mOpenConsole = systray.AddMenuItem("打开控制台", "在浏览器中打开 Web UI")
+	a.mOpenManage = systray.AddMenuItem("打开 Manage", "用本机 node_id 打开 Manage Console")
 	a.mUpdate = systray.AddMenuItem("更新：检查中…", "查看版本与升级")
 	a.mUpdate.Disable()
 	systray.AddSeparator()
@@ -239,6 +241,8 @@ func (a *trayApp) clickLoop() {
 		select {
 		case <-a.mOpenConsole.ClickedCh:
 			a.openConsole()
+		case <-a.mOpenManage.ClickedCh:
+			a.openManage()
 		case <-a.mUpdate.ClickedCh:
 			a.openUpdateSettings()
 		case <-a.mStart.ClickedCh:
@@ -294,6 +298,20 @@ func (a *trayApp) openConsole() {
 		defer cancel()
 		if err := webui.OpenConsole(ctx, a.layout, a.cfg); err != nil {
 			log.Printf("open console: %v", err)
+		}
+	}()
+}
+
+func (a *trayApp) openManage() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
+		defer cancel()
+		if err := webui.OpenManage(ctx, a.layout, a.cfg); err != nil {
+			log.Printf("open manage: %v", err)
+			a.mu.Lock()
+			a.lastErr = err
+			a.mu.Unlock()
+			a.refreshStatus()
 		}
 	}()
 }

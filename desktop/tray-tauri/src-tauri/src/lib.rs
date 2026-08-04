@@ -133,6 +133,8 @@ pub fn run() {
                     MenuItem::with_id(app, "status", "状态：检测中…", false, None::<&str>)?;
                 let open =
                     MenuItem::with_id(app, "open_console", "打开控制台", true, None::<&str>)?;
+                let open_manage =
+                    MenuItem::with_id(app, "open_manage", "打开 Manage", true, None::<&str>)?;
                 let start = MenuItem::with_id(app, "start", "启动 Node", true, None::<&str>)?;
                 let stop = MenuItem::with_id(app, "stop", "停止 Node", true, None::<&str>)?;
                 let restart =
@@ -148,7 +150,17 @@ pub fn run() {
 
                 let menu = Menu::with_items(
                     app,
-                    &[&status, &sep1, &open, &sep2, &start, &stop, &restart, &quit],
+                    &[
+                        &status,
+                        &sep1,
+                        &open,
+                        &open_manage,
+                        &sep2,
+                        &start,
+                        &stop,
+                        &restart,
+                        &quit,
+                    ],
                 )?;
 
                 let tray_shared = Arc::clone(&shared);
@@ -268,6 +280,7 @@ fn resolve_layout_from_args() -> Result<Layout, String> {
 fn handle_menu(shared: &Arc<Shared>, app: &AppHandle, id: &str) {
     match id {
         "open_console" => open_console(shared, app),
+        "open_manage" => open_manage(shared),
         "start" => {
             shared.hold_stopped.store(false, Ordering::SeqCst);
             run_action(shared, "启动", |s| nodectl::start(&s.layout, &s.cfg, WAIT_READY));
@@ -332,21 +345,32 @@ fn open_console(shared: &Arc<Shared>, app: &AppHandle) {
                     win.set_skip_taskbar(false)
                         .map_err(|e| format!("显示任务栏失败: {e}"))?;
                     win.show().map_err(|e| format!("显示窗口失败: {e}"))?;
-                    let _ = win.unminimize();
                     win.set_focus().map_err(|e| format!("聚焦失败: {e}"))?;
                     Ok(())
                 })();
                 let _ = tx.send(result);
             }
         });
+        if let Err(e) = schedule {
+            set_err(&shared, Some(format!("调度主线程失败: {e}")));
+            refresh_status(&shared);
+            return;
+        }
+        match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(())) => set_err(&shared, None),
+            Ok(Err(e)) => set_err(&shared, Some(e)),
+            Err(_) => set_err(&shared, Some("打开控制台超时".into())),
+        }
+        refresh_status(&shared);
+    });
+}
 
-        match schedule {
-            Err(e) => set_err(&shared, Some(format!("主线程调度失败: {e}"))),
-            Ok(()) => match rx.recv() {
-                Ok(Ok(())) => set_err(&shared, None),
-                Ok(Err(e)) => set_err(&shared, Some(e)),
-                Err(e) => set_err(&shared, Some(format!("等待窗口操作失败: {e}"))),
-            },
+fn open_manage(shared: &Arc<Shared>) {
+    let shared = Arc::clone(shared);
+    thread::spawn(move || {
+        match nodectl::open_manage(&shared.layout, &shared.cfg, WAIT_READY) {
+            Ok(()) => set_err(&shared, None),
+            Err(e) => set_err(&shared, Some(e)),
         }
         refresh_status(&shared);
     });
