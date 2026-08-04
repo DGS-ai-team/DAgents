@@ -24,8 +24,6 @@ const SHELL_TOOLS = new Set(["bash_run", "bash", "background_job_status", "backg
 
 const SKILLS_TOOLS = new Set(["load_skills", "unload_skills", "clear_skills"]);
 
-const A2A_TOOLS = new Set(["agent_invoke", "agent_discover"]);
-
 const KIND_META = {
   shell: { label: "shell", short: "shell", icon: "$" },
   fs: { label: "fs", short: "fs", icon: "F" },
@@ -34,7 +32,6 @@ const KIND_META = {
   triggers: { label: "triggers", short: "triggers", icon: "⏱" },
   skills: { label: "skills", short: "skills", icon: "S" },
   child: { label: "child", short: "child", icon: "⎇" },
-  a2a: { label: "a2a", short: "a2a", icon: "⇄" },
   hitl: { label: "hitl", short: "hitl", icon: "?" },
   tool: { label: "tool", short: "tool", icon: "◎" },
 };
@@ -42,13 +39,11 @@ const KIND_META = {
 /** 根据 tool 名推断工具组（对齐 Node tools.enabled_groups）。 */
 export function inferToolKind(name, data = {}) {
   const n = String(name || "").trim();
-  if (data?.a2a_relay) return "a2a";
   if (data?.child_agent_id || CHILD_AGENT_TOOLS.has(n)) return "child";
   if (n.startsWith("browser_")) return "browser";
   if (n.startsWith("wecom_")) return "wecom";
   if (n.startsWith("trigger_")) return "triggers";
   if (SKILLS_TOOLS.has(n)) return "skills";
-  if (A2A_TOOLS.has(n)) return "a2a";
   if (SHELL_TOOLS.has(n) || n.startsWith("background_job_")) return "shell";
   if (FS_TOOLS.has(n)) return "fs";
   if (n === USER_INFORMATION_TOOL) return "hitl";

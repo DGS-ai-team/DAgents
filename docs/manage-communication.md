@@ -2,10 +2,11 @@
 
 > **已收敛至项目手册** → [handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md) · [handbook/README.md](./handbook/README.md)
 
-> **设计原则**（[manage-architecture.md](./design/manage-architecture.md)、[a2a-via-manage.md](./future/a2a-via-manage.md)）：  
+> **2026-08**：A2A Task inbox、`agent_invoke` / Console Inbox **已拆除**。下文历史 A2A 端点仅作归档；现网跨机协作见 **工作组**。权威现网叙述以 handbook/05 为准。
+
+> **设计原则**（[manage-architecture.md](./design/manage-architecture.md)、[a2a-via-manage.md](./future/a2a-via-manage.md) 历史稿）：  
 > **Node 仅出站连 Manage**；**禁止 Node-to-Node**；**Client 不连 Manage**。  
-> 文档描述 **v0.7.x 现网实现**；与方案差异见 §7.2。  
-> 扩展域（Skills / LLM / Releases / Cases 等）API 见 [manage/README.md](../manage/README.md)；下文 §2 聚焦 Registry + A2A 核心路径。
+> 扩展域（Skills / LLM / Releases / Cases / Workgroup 等）API 见 [manage/README.md](../manage/README.md)。
 
 ---
 

@@ -67,8 +67,8 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 - **触发器（Go Node）**：**`interval` / `fire_at` / 日历 `schedule`**（含 **`cmd` 门控**）；**`trigger_*`** 工具 + 调度器（**`node/internal/triggers/`**；设计见 [triggers-design.md](./triggers-design.md)）；**v0.2.16** 起 TUI **`/triggers`** 与 trigger 会话目标审批。
 - **Hook 扩展点**：统一 turn 全链路阶段锚点与 `HookRegistry`；**已落地**于 `node/internal/hooks/`（见 [design/agent-hooks.md](./design/agent-hooks.md)）。
-- **临时子 Agent**：同进程 **`create_temporary_agent` → `wait_temporary_agents`**；非跨进程 A2A（[child-agent-tools.md](./architecture/child-agent-tools.md)）。
-- **Manage 统一控制面**：`manage/`（Registry、A2A、Console 等）。Go Node `manage.enabled` 时自动注册并提供 `agent_invoke` / `agent_discover`（[handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md)）。
+- **临时子 Agent**：同进程 **`create_temporary_agent` → `wait_temporary_agents`**（[child-agent-tools.md](./architecture/child-agent-tools.md)）。
+- **Manage 统一控制面**：`manage/`（Registry、工作组、Console 等）。Go Node `manage.enabled` 时自动注册；旧 A2A inbox / `agent_invoke` 已拆除（[handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md)）。
 
 ### 3.5 打包、工程与文档
 
@@ -228,7 +228,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 |----|------|------|
 | **RHEL 6 / Win2012 真机验收** | 静态构建与 SysV init 脚本已就绪；**真机 E2E 记录**仍 open（N7）。 | [rhel6-acceptance-checklist.md](./architecture/rhel6-acceptance-checklist.md)、[agent-client-refactor-plan.md](./design/agent-client-refactor-plan.md) |
 | **长期记忆文件** | **`.runtime/memory/long_term.md`** 在 prompt 中有说明位，产品化读写与治理待 Phase 2+。 | **`node/internal/turn/prompt.go`** |
-| **Manage / A2A** | Registry、A2A Task、HITL 中继、`agent_invoke` 已落地；broadcast、Node 制品同步待做。 | [manage-architecture.md](./design/manage-architecture.md) |
+| **Manage / 工作组** | Registry、工作组、Console 已落地；旧 A2A Task / `agent_invoke` 已拆除；Node 制品同步等仍待做。 | [manage-architecture.md](./design/manage-architecture.md)、[handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md) |
 | **Browser Tools + 操作演示** | Phase 1/1.5 已落地（**模式 A：browser-use 薄服务**）→ 录制 → 回放 | [design/browser-tools-and-demonstration.md](./design/browser-tools-and-demonstration.md) |
 
 ### 5.2 架构级缺口（非小修）

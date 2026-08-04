@@ -270,7 +270,7 @@ func (c *Config) ToolResultSpillThresholdTokens() int {
 func defaultToolResultHookTools() []string {
 	return []string{
 		"bash_run", "read_file", "grep_file", "grep_files",
-		"search_replace", "glob_files", "agent_invoke", "agent_discover",
+		"search_replace", "glob_files",
 	}
 }
 

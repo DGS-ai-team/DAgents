@@ -232,7 +232,6 @@ consumeLoop 再次出队
 | **工具续跑** | Orchestrator 在本步 auto 工具完成后 `enqueue(tool_result)` |
 | **异步工具** | 后台 job 完成 → `async_tool_result` |
 | **Trigger** | 调度器 fire → `trigger_message`（`TriggerID` + `UserName=trigger`） |
-| **A2A inbox** | `a2a_inbox_message` 入队（见 [05](./05-Manage与A2A.md)） |
 
 若全部同步调用 Orchestrator，会难以保证 **tool_result 优先闭合序列**、**resume 与 human 的竞态**、**单 session 串行消费**。  
 因此：**每 session 一个 `MessageQueue` + 单 goroutine `consumeLoop`**，统一出队后再进入 §2。
@@ -260,10 +259,9 @@ Enqueue(Envelope, Priority)  ──►  优先级排序  ──►  Dequeue(ctx)
 | `tool_result` | `RequestTypeToolResult` | Orchestrator 回调 | `handleToolResult` |
 | `async_tool_result` | `RequestTypeAsyncToolResult` | 后台 job | `handleSideEffectProduceAsync`（Produce） |
 | `trigger_message` | `RequestTypeTriggerMessage` | trigger fire | `handleSideEffectProduceExternal` |
-| `a2a_inbox_message` | `RequestTypeA2AInboxMessage` | Manage inbox | `handleSideEffectProduceExternal` |
 | `side_effect_continue` | `RequestTypeSideEffectContinue` | Apply 后被动续跑 | `handleSideEffectContinue` |
 
-`Envelope` 还携带：`Content`、`UserName`（A2A/trigger 可非 human）、`ResumeValue`、`TriggerID`、`AsyncToolResult` 等。
+`Envelope` 还携带：`Content`、`UserName`（trigger 等可非 human）、`ResumeValue`、`TriggerID`、`AsyncToolResult` 等。
 
 ### 3.4 优先级
 
@@ -279,7 +277,7 @@ tool_result > human > resume > async_completion > other
 | `human` | 0 | `message`（CLI/API user） |
 | `resume` | 1 | `resume` |
 | `async_completion` | 2 | `async_tool_result` |
-| `other` | 10 | `trigger_message` / `a2a_inbox_message` |
+| `other` | 10 | `trigger_message` |
 
 **设计意图**（与 `node/internal/queue/queue.go` → `priorityValue` 一致）：
 
@@ -299,12 +297,11 @@ consumeLoop(ctx)
   switch env.RequestType:
     resume              → handleResume
     async_tool_result   → handleSideEffectProduceAsync
-    trigger_message / a2a_inbox_message → handleSideEffectProduceExternal
+    trigger_message     → handleSideEffectProduceExternal
     side_effect_continue → handleSideEffectContinue
     tool_result         → handleToolResult
     message / ""        → handleHumanMessage
 ```
-
 旁路条目 **Produce 时**不改 history；**Apply** 在 `runTurnStep` 步首或 `side_effect_continue` 前写入。Trigger `ClearPendingDelivery` 在 **Apply 成功**时，非 dequeue。详见 [turn-side-effects-refactor.md](../design/turn-side-effects-refactor.md)。
 
 **串行保证**：同一 session 上任意时刻只有一个 handler 在跑；不会出现两个 `runOneStep` 并发写同一 `history`。
@@ -341,12 +338,10 @@ POST /v1/messages
 | 入队 API | `session/manager.go` → `EnqueueMessage`、`EnqueueResume` |
 | HTTP 入口 | `api/messages.go`、`api/resume.go` |
 | Trigger 入队 | `session/triggers.go` → `EnqueueTriggerMessage` |
-| A2A inbox 入队 | `session/a2a_inbox.go` |
 
 ---
 
 ## 4. 会话隔离（Session）
-
 ### 4.1 Session 是什么
 
 **Session** = 一条独立对话上下文 + 其 **runtime**（队列 consumer + 内存状态 + Orchestrator 实例 + 可选 SQLite 行）。
@@ -454,7 +449,7 @@ newRuntimeWithPublisher
 
 - Manager 级 **单例** Hub；Orchestrator 经 `stream.Publisher` 发布。  
 - 每条事件带 **`session_id`**，Client 只展示当前 session。  
-- `Subscribe(afterSeq)`：断点续传；A2A `RunInboxTurn` 须在入队前取 `CurrentSeq()`（v0.3.9 修复，见 `a2a_inbox.go`）。
+- `Subscribe(afterSeq)`：断点续传。
 
 ### 4.7 源码索引（§4）
 

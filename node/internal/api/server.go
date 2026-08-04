@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
@@ -58,7 +57,6 @@ type Server struct {
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
 	control         *manage.ControlClient
-	a2aCallerHITL   *session.A2ACallerHITLBridge
 	tools           *tools.Registry
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
@@ -331,7 +329,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var registrar *manage.Registrar
 	var updateChecker *manage.UpdateChecker
 	var packageUploader *manage.PackageUploader
-	var a2aBridge *session.A2ACallerHITLBridge
 	if cfg.Manage.Enabled {
 		manage.LogA2AProfileWarnings(cfg, logger)
 		registrar = manage.NewRegistrar(cfg, logger)
@@ -340,8 +337,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			updateChecker = manage.NewUpdateChecker(cfg, logger)
 		}
 		packageUploader = manage.NewPackageUploader(cfg, logger)
-		// A2A inbox callee 已退役；caller HITL bridge 仅兼容旧 resume 事件，新建 task 由 Manage 返回 410。
-		a2aBridge = session.NewA2ACallerHITLBridge(cfg.NodeID, hub)
 	}
 	control := manage.NewControlClient(cfg)
 	var wgWorker *workgroup.Worker
@@ -394,7 +389,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		updateChecker:   updateChecker,
 		packageUploader: packageUploader,
 		control:         control,
-		a2aCallerHITL:   a2aBridge,
 		tools:           o.tools,
 		browserMgr:      browserMgr,
 		mediaRegister:   mediaRegister,
@@ -448,9 +442,6 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	}
 	if s.browserMgr != nil {
 		reg.SetBrowserManager(s.browserMgr)
-	}
-	if s.cfg != nil && s.cfg.Manage.Enabled && s.a2aCallerHITL != nil {
-		reg.SetManageRuntime(a2aclient.New(s.cfg), s.cfg.NodeID, s.a2aCallerHITL)
 	}
 }
 
@@ -863,13 +854,6 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		transcript = []session.TranscriptEntry{}
 	}
 	runPhase := view.RunTurnPhase
-	pendingA2A := map[string]any(nil)
-	if s.a2aCallerHITL != nil {
-		pendingA2A = s.a2aCallerHITL.PendingRelaySnapshot(sessionID)
-	}
-	if pendingA2A != nil && runPhase != string(turn.TaskPhaseAwaitingHITL) {
-		runPhase = string(turn.TaskPhaseAwaitingHITL)
-	}
 	toolJobs := map[string]int{"running": 0, "background": 0}
 	if reg := s.sessions.SessionTools(sessionID); reg != nil {
 		c := reg.SessionToolJobCounts(sessionID)
@@ -883,7 +867,7 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		QueuePending:    view.QueuePending,
 		Transcript:      transcript,
 		PendingHITL:     view.PendingHITL,
-		PendingA2ARelay: pendingA2A,
+		PendingA2ARelay: nil,
 		SSESeqHint:      s.stream.CurrentSeq(),
 		NotifySeq:       view.NotifySeq,
 		AckSeq:          view.AckSeq,
@@ -1015,14 +999,6 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	requestType := strings.TrimSpace(req.RequestType)
 	if requestType == "" {
 		requestType = "message"
-	}
-	if requestType == "resume" && s.a2aCallerHITL != nil && s.a2aCallerHITL.DeliverA2ACallerResume(sessionID, req.ResumeValue) {
-		writeJSON(w, http.StatusOK, postMessageResponse{
-			Accepted: true,
-			AgentID:  sessionID,
-			Priority: string(queue.PriorityHuman),
-		})
-		return
 	}
 
 	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.ResumeValue, req.UserMessageName)

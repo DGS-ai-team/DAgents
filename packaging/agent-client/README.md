@@ -21,30 +21,19 @@ cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 
 `config.yaml` **不会被 Git 跟踪**。
 
-### Agent 身份与 A2A 角色
+### Agent 身份与 Manage 注册
 
-身份与 A2A 行为在 **`node_settings.db`（Web UI）** 中配置；Node 注册 Manage 时自动组装 `card` JSON 上报。字段含义：
+身份在 **`node_settings.db`（Web UI）** 中配置；Node 注册 Manage 时自动组装 `card` JSON 上报。字段含义：
 
 | 字段 | 说明 |
 |------|------|
 | `name` | Manage 展示名；空则回退 `agent_id` |
 | `description` | Console 简介 |
-| `role` | **`compliance`** = 被调方（自动 expose + inbox + 合规 handler）；**`ops`** 等 = 调用方 |
+| `role` | 展示用角色标签（历史 `compliance` / `ops` 等） |
 | `capabilities` | 可选；非空时覆盖 config 默认 capabilities（shell/filesystem 等） |
 | `metadata` | 可选自定义键，原样进入 Manage `card.metadata` |
 
-| `agent.role` | Manage expose | Inbox 轮询 | Handler |
-|--------------|---------------|------------|---------|
-| **`compliance`** | 是 | 是 | 合规 turn |
-| **`ops`** 或其它 | 否 | 否 | 无 |
-
-Manage 注册时仍合并 **`manage.registration`**（`base_url`、`team`、心跳参数）与运行时上报的 `tools` 列表。`discovery_group` 由 Manage Console/API 分配，不在 Node 配置。
-
-双 Node Docker 范例见 `cases/a2a-manage-docker/config/node-{a,b}.yaml`。
-
-### A2A HITL 中继（调用方 Client）
-
-当本机 `agent_invoke` 轮询到 callee 的 `requires_input` 时，Node 经 `A2ACallerHITLBridge` 向 **caller session** 推送带 `a2a_relay` 的 HITL SSE。详见 [manage-communication.md](../../docs/manage-communication.md) §4.2。
+Manage 注册时合并 **`manage.registration`**（`base_url`、`team`、心跳参数）与运行时上报的 `tools` 列表。跨机器协作请用 **工作组（Workgroup）**（旧 A2A inbox / `agent_invoke` 已拆除）。
 
 ## 注册为系统服务（Node）
 
@@ -80,4 +69,4 @@ go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml
 ```
 
-Manage + 双 Node A2A 见 [`cases/a2a-manage-docker/README.md`](../../cases/a2a-manage-docker/README.md)。
+Manage 与工作组见 [manage/README.md](../../manage/README.md)、[docs/handbook/05-Manage与A2A.md](../../docs/handbook/05-Manage与A2A.md)。

@@ -336,27 +336,9 @@ Client 入口：`/policy` 全屏界面（Go bubbletea / Python Textual，Esc 返
 
 ---
 
-## 3. A2A（经 Manage，无入站 API）
+## 3. 跨机协作（工作组；旧 A2A 已拆除）
 
-非子 Agent 的 A2A **不**在本 Node 暴露 HTTP 路由；由工具层调用 **Manage**（见 [a2a-via-manage.md](../future/a2a-via-manage.md)、[manage-architecture.md](../design/manage-architecture.md) §3.2）。
-
-| Node 内工具 | Manage API |
-|-------------|------------|
-| `agent_discover` | `GET /v1/registry/agents/discover` |
-| `agent_invoke` | `POST /v1/a2a/tasks` + 轮询 `GET /v1/a2a/tasks/{id}` |
-| `agent_notify` | `POST /v1/a2a/tasks`（`kind=notify`） |
-
-**Inbox long poll**（`node/internal/manage/inbox_poller.go`）：
-
-```http
-GET {manage_url}/v1/a2a/inbox?agent_id={self}&limit=10&wait=25
-```
-
-拉取到的 Task 入本地 **A2A session** 队列，走 turn loop；处理完成后：
-
-```http
-POST {manage_url}/v1/a2a/tasks/{task_id}/reply
-```
+非子 Agent 的跨机协作 **不**在本 Node 暴露 A2A HTTP 路由。旧 `agent_invoke` / Manage `/v1/a2a/*` inbox **已拆除**；现网请用 **工作组（Workgroup）**（见 [workgroup-and-node-gateway.md](../design/workgroup-and-node-gateway.md)、[handbook/05-Manage与A2A.md](../handbook/05-Manage与A2A.md)）。历史 Task 模型见 [a2a-via-manage.md](../future/a2a-via-manage.md)。
 
 ---
 
@@ -401,7 +383,7 @@ Node 内部分层（实现参考，非 HTTP）：
 ```text
 TurnOrchestrator
   → PolicyEngine（本地 + Manage 下发的静态策略文件）
-  → ToolRegistry（bash、fs、skills、triggers、agent_discover、agent_invoke、…）
+  → ToolRegistry（bash、fs、skills、triggers、child_agents、…）
   → Executor（os/exec、fs、sandbox）
   → AuditReporter → Manage
 ```
@@ -413,10 +395,11 @@ TurnOrchestrator
 见 [manage-architecture.md](../design/manage-architecture.md) 与 [manage-communication.md](../manage-communication.md)：
 
 - `POST /v1/registry/agents`、`POST /v1/registry/agents/{id}/heartbeat`
-- **A2A**：`GET /v1/registry/agents/discover`、`POST /v1/a2a/tasks`、`GET /v1/a2a/inbox`、`POST .../tasks/{id}/reply`、`GET /v1/a2a/tasks/{id}`
+- **Registry discover**（目录）：`GET /v1/registry/agents/discover`
+- **工作组**：经 Node 反代 / Dialer（见 handbook/05）；旧 `/v1/a2a/*` 已拆除
 - **Releases**：`GET /v1/releases/check`
 
-**无** WebSocket control channel；**无** peer Node 直连。
+**无** WebSocket control channel 作为 Node↔Node 信令；**无** peer Node 直连。
 
 ---
 

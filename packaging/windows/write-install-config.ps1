@@ -68,9 +68,8 @@ manage:
         } else {
             $manageBlock += "`n    # base_url: http://192.168.1.10:18765"
         }
-        $manageBlock += "`n  a2a:`n    enabled: $(Bool-Yaml ([bool]$mg.a2a_enabled))"
-        $manageBlock += "`n    inbox_wait_seconds: 25"
-        $manageBlock += "`n    inbox_poll_seconds: 30"
+        $manageBlock += "`n  # a2a inbox / agent_invoke 已拆除；保留字段兼容旧 YAML（忽略）"
+        $manageBlock += "`n  # a2a:`n  #   enabled: false"
         $content = [regex]::Replace(
             $content,
             '(?ms)^manage:\r?\n(?:  .*\r?\n|# .*\r?\n)*',
@@ -81,17 +80,13 @@ manage:
         $disabledManage = @"
 manage:
   enabled: false
-  # --- Manage + A2A（见 docs/a2a-and-register-center.md、packaging/manage/README.md）---
+  # --- Manage（见 manage/README.md、docs/handbook/05-Manage与A2A.md）---
   # url: http://127.0.0.1:8020
   # registration:
   #   base_url: http://192.168.1.10:18765
   #   interval_seconds: 30
   #   ttl_seconds: 60
   #   team: platform
-  # a2a:
-  #   enabled: true
-  #   inbox_wait_seconds: 25
-  #   inbox_poll_seconds: 30
 
 "@
         $content = [regex]::Replace($content, '(?ms)^manage:\r?\n(?:  .*\r?\n|# .*\r?\n)*', $disabledManage, 1)
@@ -163,10 +158,9 @@ multimodal:
         1
     )
 
-    # --- tools.enabled_groups ---
+	# --- tools.enabled_groups ---
     $groups = @('fs', 'bash', 'hitl', 'skills', 'triggers', 'child_agents')
     if ([bool]$feat.browser_enabled) { $groups += 'browser' }
-    if ([bool]$mg.enabled -and [bool]$mg.a2a_enabled) { $groups += 'a2a' }
 
     if ([bool]$feat.restrict_tool_groups) {
         $groupsYaml = "  enabled_groups:`n" + (($groups | ForEach-Object { "    - $_" }) -join "`n")

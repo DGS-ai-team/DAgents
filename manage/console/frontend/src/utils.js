@@ -69,10 +69,6 @@ export const VIEW_META = {
     title: "Agent 目录",
     subtitle: "已注册 Agent Node 目录与 discovery 分组",
   },
-  inbox: {
-    title: "A2A Inbox",
-    subtitle: "A2A Task 只读观测（不会 deliver）",
-  },
   nodeadmin: {
     title: "Node 配置",
     subtitle: "LLM 配置、Skills / External Tools 分发与版本发布",

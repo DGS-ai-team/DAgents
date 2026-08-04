@@ -8,7 +8,6 @@ import (
 
 	"sync"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
@@ -31,9 +30,7 @@ type Registry struct {
 	syncShells          *syncShellTracker
 	triggerStore        *triggers.Store
 	triggerSched        *triggers.Scheduler
-	manageClient  *a2aclient.Client
-	a2aCallerHITL a2aclient.A2ACallerHITLHandler
-	agentID       string
+	agentID             string
 	skillsCatalogHolder
 	enabledOnly         map[string]struct{}
 	multimodalEnabled   bool
@@ -110,9 +107,6 @@ func (r *Registry) Definitions() []ToolDef {
 		triggerUpdateToolDef(),
 		triggerDeleteToolDef(),
 	)
-	if r.manageClient != nil {
-		base = append(base, manageA2AToolDefs()...)
-	}
 	if r.browserToolsEnabled() {
 		base = append(base, r.browserToolDefs()...)
 	}

@@ -6,12 +6,13 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 |----|------|------|
 | **Platform** | ✅ | 鉴权、审计、Blob、指标 |
 | **Registry** | ✅ | 注册、心跳、注销、目录、discover |
-| **A2A** | ⚠️ 退役中 | inbox / invoke HTTP 已 `410 a2a_inbox_retired`；跨机协作用工作组；Admin Task 只读仍可用 |
+| **Workgroup** | ✅ | 跨 Node 协作（Leader + Worker Dialer） |
+| **A2A Task/Inbox** | ❌ 已拆除 | 原 inbox / `agent_invoke` 已移除；跨机请用工作组 |
 | **Skills / Plugins / ExternalTools** | ✅（Manage 侧） | 精简分发（draft → publish）；**Node 自动 sync 待 Phase 2** |
 | **LLM** | ✅（Manage 侧） | 集中 CRUD + `/resolve`；**Node 自动消费待做** |
 | **Releases** | ✅ | 安装包托管 + `/v1/releases/check`；Node `UpdateChecker` |
 | **Cases** | ✅ | 案例库（JSONL 演示会话 + 关联资源） |
-| **Console** | ✅ | Agent 目录、A2A Inbox、案例库、Node 配置（LLM/Skills/Plugins/ExternalTools/版本发布） |
+| **Console** | ✅ | Agent 目录、案例库、Node 配置（LLM/Skills/Plugins/ExternalTools/版本发布） |
 
 架构方案：[docs/design/manage-architecture.md](../docs/design/manage-architecture.md)
 
@@ -116,36 +117,14 @@ Node 出站 Header：
 | POST | `/v1/registry/agents/{id}/deregister` | 注销 |
 | PATCH | `/v1/registry/agents/{id}/groups` | **Manage 分配** discovery_group |
 | GET | `/v1/registry/agents` | 列表（分页/筛选） |
-| GET | `/v1/registry/agents/discover` | A2A 发现（**不含 base_url**） |
+| GET | `/v1/registry/agents/discover` | 发现在线 Node（**不含 base_url**） |
 | GET | `/v1/registry/agents/{id}` | 详情 |
 | DELETE | `/v1/registry/agents/{id}` | 管理员删除 |
 
 系统：`GET /health`、`GET /metrics`、`GET /v1/admin/audit`。
 
-### Admin 观测（只读）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/v1/admin/a2a/tasks` | A2A Task 列表（**不会 deliver**） |
-
+> **已拆除**：A2A Task / Inbox API（含 `/v1/admin/a2a/tasks`、Console「A2A Inbox」）与 Node `agent_invoke` 工具组。跨机器协作请用工作组。  
 > **已禁用**：Admin session 代理（`/v1/admin/nodes/.../sessions`）已移除，Manage 不再出站访问 Node session API。
-
-## A2A Task API
-
-创建 Task 时 Manage 校验：
-
-1. target **online** 且 **expose_to_peers=true**
-2. caller 与 target 均至少有一个 **discovery_group**，且**存在交集**（否则 `403 discovery_group_mismatch` / `caller_discovery_group_empty` / `target_discovery_group_empty`）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/v1/a2a/tasks` | 创建 Task（`kind`: invoke \| notify） |
-| GET | `/v1/a2a/inbox` | long poll 拉取 pending（`?wait=25`） |
-| POST | `/v1/a2a/tasks/{id}/ack` | 标记 processing |
-| POST | `/v1/a2a/tasks/{id}/reply` | 提交结果 |
-| GET | `/v1/a2a/tasks/{id}` | 查询状态 |
-
-协议说明：[docs/future/a2a-via-manage.md](../docs/future/a2a-via-manage.md)（**无** `/v1/a2a/messages` 兼容）。
 
 ## Release Hub（安装包托管）
 

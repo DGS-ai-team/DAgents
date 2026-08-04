@@ -5,9 +5,6 @@ import { agentStore } from "./agent.js";
 /** 父 Agent 下活跃临时子 Agent（对齐 Python ChildAgentTracker）。 */
 const entries = reactive(new Map());
 
-/** 进行中的 agent_invoke（对端 Agent 执行任务）。 */
-let peerInvokeInflight = 0;
-
 export const remoteWorkerStore = reactive({
   tick: 0,
 });
@@ -18,15 +15,11 @@ function bump() {
 
 export function resetRemoteWorkers() {
   entries.clear();
-  peerInvokeInflight = 0;
   bump();
 }
 
-export function resetPeerInvokeInflight() {
-  if (peerInvokeInflight === 0) return;
-  peerInvokeInflight = 0;
-  bump();
-}
+/** @deprecated 已退役；保留空实现以免旧调用方报错。 */
+export function resetPeerInvokeInflight() {}
 
 export function onChildCreated(data) {
   const id = String(data?.child_agent_id || "").trim();
@@ -82,37 +75,15 @@ export async function syncChildAgentsFromApi() {
   }
 }
 
-export function noteToolCallForWorkers(data) {
-  if (data?.partial) return;
-  const bumpNames = [];
-  const calls = data?.tool_calls;
-  if (Array.isArray(calls)) {
-    for (const call of calls) {
-      const name = String(call?.name || call?.function?.name || "").trim();
-      if (name === "agent_invoke") bumpNames.push(name);
-    }
-  } else {
-    const name = String(data?.name || data?.tool_name || "").trim();
-    if (name === "agent_invoke") bumpNames.push(name);
-  }
-  if (!bumpNames.length) return;
-  peerInvokeInflight += bumpNames.length;
-  bump();
-}
+/** @deprecated 已退役。 */
+export function noteToolCallForWorkers(_data) {}
 
-export function noteToolResultForWorkers(data) {
-  const name = String(data?.tool_name || data?.name || "").trim();
-  if (name === "agent_invoke" && peerInvokeInflight > 0) {
-    peerInvokeInflight -= 1;
-    bump();
-  }
-}
+/** @deprecated 已退役。 */
+export function noteToolResultForWorkers(_data) {}
 
 export function workerStripText() {
   void remoteWorkerStore.tick;
   const childActive = entries.size;
-  const parts = [];
-  if (childActive > 0) parts.push(`子 Agent ${childActive} 工作中`);
-  if (peerInvokeInflight > 0) parts.push(`对端 Agent ${peerInvokeInflight} 工作中`);
-  return parts.join(" · ");
+  if (childActive > 0) return `子 Agent ${childActive} 工作中`;
+  return "";
 }

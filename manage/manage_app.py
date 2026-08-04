@@ -15,8 +15,6 @@ from manage.platform.auth import authenticate, require_admin
 from manage.platform.blob import BlobStore, BlobStoreConfig
 from manage.platform.metrics import metrics_text
 from manage.registry.models import AuditListResponse, HealthResponse
-from manage.a2a.routes import build_a2a_router
-from manage.a2a.store import A2ATaskStore
 from manage.admin.routes import build_admin_router
 from manage.control.routes import build_control_router
 from manage.llm.routes import build_llm_router
@@ -48,11 +46,6 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     cfg = settings or ManageSettings.from_env()
     db = SQLiteDatabase(cfg.db_path)
     store = AgentRegistryStore(db=db if db.enabled else None)
-    a2a_store = A2ATaskStore(
-        db=db if db.enabled else None,
-        inbox_content_max_chars=cfg.a2a_inbox_content_max_chars,
-        expire_sweep_seconds=cfg.a2a_expire_sweep_seconds,
-    )
     llm_store = LLMConfigStore(db=db if db.enabled else None)
     audit = AuditLog(max_entries=cfg.audit_max_entries)
     blob = BlobStore(BlobStoreConfig.from_settings(cfg))
@@ -71,7 +64,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app = FastAPI(
         title="DAgents Manage",
         version="0.5.4",
-        description="统一控制面：Registry（M1）+ A2A Task Inbox（M2）+ Platform（M0）。",
+        description="统一控制面：Registry + 工作组 + Platform（制品/案例/发布）。",
         lifespan=lifespan,
     )
 
@@ -102,10 +95,9 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
 
     app.include_router(build_registry_router(store, audit))
     app.include_router(build_control_router(store, audit))
-    app.include_router(build_a2a_router(store, a2a_store, audit))
     app.include_router(build_workgroup_router(workgroup_store, audit, hub=workgroup_ws_hub))
     app.include_router(build_workgroup_ws_router(workgroup_ws_hub))
-    app.include_router(build_admin_router(store, a2a_store))
+    app.include_router(build_admin_router(store))
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))
     app.include_router(build_skills_router(skills_store, blob, audit))
@@ -143,7 +135,6 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
 
     app.state.manage_settings = cfg
     app.state.registry_store = store
-    app.state.a2a_store = a2a_store
     app.state.llm_store = llm_store
     app.state.skills_store = skills_store
     app.state.externaltools_store = externaltools_store

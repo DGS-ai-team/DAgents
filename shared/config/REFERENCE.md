@@ -22,7 +22,7 @@
 | `AllBuiltinToolNames` | `func() []string` | 全部内置工具名字典序全集（25 个） |
 | `(t *ToolsConfig) NormalizedBuiltinEnabledGroups` | `method` | 去重规范化 `tools.enabled_groups` |
 | `(t *ToolsConfig) NormalizedBuiltinEnabled` | `method` | 将 `enabled_groups` 展开为工具名；空=未配置允许列表 |
-| `ManageConfig` | `struct` | Manage 开关、URL、node_token、`registration`、`a2a` |
+| `ManageConfig` | `struct` | Manage 开关、URL、node_token、`registration`；历史 `a2a` 字段保留兼容（忽略） |
 | `AgentConfig` | `struct` | `name`、`description`、`role`、`capabilities`、`metadata` |
 | `(c *Config) AgentRole` | `method` | A2A 角色（compliance/ops） |
 | `(c *Config) ExposeToPeersEffective` | `method` | role=compliance 时为 true |

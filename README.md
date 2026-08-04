@@ -53,7 +53,7 @@
 - **LLM 厂商适配** — `llm.provider`（`openai` / `deepseek` / `qwen` / `vllm`）；`MessageAdapter` 统一出站序列化与 `reasoning_content` 处理
 - **内置工具** — `bash_run`（可配置 GBK/UTF-8 解码）、文件读写与替换、skills 加载、trigger 管理、**临时子 Agent**
 - **HITL** — 工具审批、`ask_user_information`；Web UI 非阻塞队列 + resume
-- **A2A（Manage M2）** — Node 注册 Manage、**`agent_invoke` / `agent_discover`**；Task inbox long poll；案例见 [`cases/a2a-manage-docker/`](cases/a2a-manage-docker/)
+- **工作组协作** — Manage Registry + Workgroup；跨机器成员协作（旧 A2A inbox / `agent_invoke` 已拆除）
 - **Triggers** — `interval`、`fire_at`、日历 **`schedule`**（含 cmd 门控）
 - **Agent 实例** — 模板创建、可改显示名、可选沙箱 FSRoot；1 Agent = 1 主对话；Web UI `/agents/:id`
 - **Policy** — `.runtime/policy/*.approval.txt` 本地审批策略
@@ -197,7 +197,7 @@ TUI 内常用：`/help` `/status` `/context` `/sessions` `/switch` `/new` `/skil
 
 ## Manage 控制面（推荐）
 
-**Registry**、**A2A Task inbox** 与 **Console**（Node 目录、A2A Inbox 只读列表、各 Node session 观测）。默认 **`0.0.0.0:8020`**。
+**Registry**、**工作组（Workgroup）** 与 **Console**（Node 目录、各 Node session 观测）。默认 **`0.0.0.0:8020`**。
 
 ```bash
 pip install -r requirements.txt
@@ -205,9 +205,9 @@ python run_manage.py
 # Console: http://127.0.0.1:8020/console/
 ```
 
-Docker 部署与 Release 镜像导出见 [`packaging/manage/README.md`](packaging/manage/README.md)。双 Node 联调案例：[`cases/a2a-manage-docker/`](cases/a2a-manage-docker/README.md)。
+Docker 部署与 Release 镜像导出见 [`packaging/manage/README.md`](packaging/manage/README.md)。
 
-Node 侧在 `config.yaml` 启用 `manage.enabled` 后自动注册与 inbox poll。详见 [manage/README.md](manage/README.md)。
+Node 侧在 `config.yaml` 启用 `manage.enabled` 后自动注册。详见 [manage/README.md](manage/README.md)。
 
 ---
 

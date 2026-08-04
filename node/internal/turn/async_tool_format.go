@@ -111,8 +111,6 @@ func summarizeAsyncToolParams(toolName string, args map[string]any) (purpose, su
 		}
 	case "background_job_status", "background_job_cancel":
 		summary = strings.TrimSpace(fmt.Sprint(args["job_id"]))
-	case "agent_invoke":
-		summary = clipAsyncParam(fmt.Sprint(args["content"]), 120)
 	default:
 		summary = clipAsyncParam(firstNonEmpty(args, "command", "path", "content", "question", "task"), 120)
 	}
