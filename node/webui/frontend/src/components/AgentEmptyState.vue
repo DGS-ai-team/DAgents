@@ -46,15 +46,15 @@ onMounted(loadTemplates);
           />
         </svg>
       </div>
-      <h2 class="agent-empty__title">还没�?Agent</h2>
-      <p class="agent-empty__hint">新建一个开始对话，或从下方模板快速创建�?/p>
+      <h2 class="agent-empty__title">还没有 Agent</h2>
+      <p class="agent-empty__hint">新建一个开始对话，或从下方模板快速创建。</p>
       <button type="button" class="btn btn--primary agent-empty__cta" @click="emit('create')">
         新建 Agent
       </button>
 
       <div class="agent-empty__templates">
         <p class="agent-empty__templates-label">推荐模板</p>
-        <div v-if="loading" class="agent-empty__loading">加载模板�?/div>
+        <div v-if="loading" class="agent-empty__loading">加载模板…</div>
         <div v-else class="agent-empty__grid">
           <button
             v-for="tpl in templates"
@@ -96,7 +96,7 @@ onMounted(loadTemplates);
               </svg>
             </span>
             <span class="agent-empty-tile__name">{{ tpl.display_name || tpl.id }}</span>
-            <span class="agent-empty-tile__desc">{{ tpl.description || "从模板创�? }}</span>
+            <span class="agent-empty-tile__desc">{{ tpl.description || "从模板创建" }}</span>
           </button>
         </div>
       </div>

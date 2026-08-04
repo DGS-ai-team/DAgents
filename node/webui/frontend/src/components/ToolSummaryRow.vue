@@ -26,7 +26,7 @@ import ToolExecBubble from "./ToolExecBubble.vue";
 const props = defineProps({
   callEntry: { type: Object, default: null },
   resultEntry: { type: Object, default: null },
-  /** buildStream 标注：active=并行执行中，pending=HITL 待批尚未开�?*/
+  /** buildStream 标注：active=并行执行中，pending=HITL 待批尚未开跑 */
   executionHint: { type: String, default: null },
   verbose: { type: Boolean, default: false },
 });
@@ -62,16 +62,16 @@ const busyAction = computed(() => toolJobsStore.busyCallIds[toolCallId.value] ||
 
 const status = computed(() => {
   void nowTick.value;
-  if (backgroundActive.value || controlMode.value === "background") return "后台执行�?;
-  if (controlMode.value === "running" || phase.value === "running") return "执行�?;
+  if (backgroundActive.value || controlMode.value === "background") return "后台执行中";
+  if (controlMode.value === "running" || phase.value === "running") return "执行中";
   const bashStatus = parseBashResultStatus(props.resultEntry?.data?.content);
-  if (bashStatus === "CANCELLED") return "已终�?;
-  if (bashStatus === "SUCCEEDED") return "已完�?;
+  if (bashStatus === "CANCELLED") return "已终止";
+  if (bashStatus === "SUCCEEDED") return "已完成";
   const base = toolStepStatusText(stepArgs.value);
   if (phase.value !== "generating" || !props.callEntry?.startedAt) return base;
   const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);
-  if (!elapsed) return base || "生成�?;
-  return `生成�?{elapsed}`;
+  if (!elapsed) return base || "生成中";
+  return `生成中${elapsed}`;
 });
 
 function stopTick() {
@@ -126,7 +126,7 @@ async function onBackground(ev) {
   try {
     await backgroundBashToolCall(agentId, callId);
   } catch (err) {
-    actionError.value = err?.message || "转后台失�?;
+    actionError.value = err?.message || "转后台失败";
   }
 }
 </script>
@@ -144,8 +144,8 @@ async function onBackground(ev) {
       <button type="button" class="tool-summary-row__head" @click="toggle">
         <span class="tool-summary-row__glyph" aria-hidden="true">
           <span v-if="inProgress" class="tool-exec-spinner" />
-          <span v-else-if="stepPending" class="tool-summary-row__pending">�?/span>
-          <span v-else class="tool-summary-row__check">�?/span>
+          <span v-else-if="stepPending" class="tool-summary-row__pending">○</span>
+          <span v-else class="tool-summary-row__check">✓</span>
         </span>
         <span class="tool-summary-row__kind">{{ visual.label }}</span>
         <span class="tool-summary-row__text">{{ summary }}</span>
@@ -166,7 +166,7 @@ async function onBackground(ev) {
           :title="actionError || undefined"
           @click="onCancel"
         >
-          {{ busyAction === "cancel" ? "终止中�? : "终止" }}
+          {{ busyAction === "cancel" ? "终止中…" : "终止" }}
         </button>
         <button
           v-if="showBackgroundAction"
@@ -176,7 +176,7 @@ async function onBackground(ev) {
           :title="actionError || undefined"
           @click="onBackground"
         >
-          {{ busyAction === "background" ? "转后台中�? : "转后�? }}
+          {{ busyAction === "background" ? "转后台中…" : "转后台" }}
         </button>
       </div>
       <span v-if="status" class="tool-summary-row__status">
@@ -192,7 +192,7 @@ async function onBackground(ev) {
         aria-label="展开工具详情"
         @click="toggle"
       >
-        <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "�? : "�? }}</span>
+        <span class="tool-summary-row__chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
       </button>
     </div>
     <div v-if="expanded && detailEntry" class="tool-summary-row__detail">

@@ -59,14 +59,14 @@ function hostLabel(agent) {
 }
 
 function sourceLabel(source) {
-  return source === "user" ? "自定�? : "内置";
+  return source === "user" ? "自定义" : "内置";
 }
 
 async function onDeleteTemplate(tpl) {
   const id = String(tpl?.id || "").trim();
   if (!id || tpl?.source !== "user") return;
   const name = tpl.display_name || id;
-  if (!window.confirm(`确定删除模板�?{name}」？此操作不可恢复。`)) return;
+  if (!window.confirm(`确定删除模板「${name}」？此操作不可恢复。`)) return;
   deletingTemplateId.value = id;
   templatesError.value = "";
   try {
@@ -90,14 +90,14 @@ onMounted(load);
   <div class="settings-page settings-embedded">
     <h1 class="settings-page__title">Agents</h1>
     <p class="settings-page__desc">
-      管理每个 Agent 的独立配置（工具、沙箱、侧车等）。此处不�?Node 全局能力页�?
+      管理每个 Agent 的独立配置（工具、沙箱、侧车等）。此处不是 Node 全局能力页。
     </p>
 
     <section class="agents-settings__section">
       <h2 class="agents-settings__section-title">已创建的 Agent</h2>
-      <p v-if="loading" class="agents-settings__status">加载中�?/p>
+      <p v-if="loading" class="agents-settings__status">加载中…</p>
       <p v-else-if="error" class="agents-settings__error">{{ error }}</p>
-      <p v-else-if="!agents.length" class="agents-settings__status">暂无 Agent，请先在对话页创建�?/p>
+      <p v-else-if="!agents.length" class="agents-settings__status">暂无 Agent，请先在对话页创建。</p>
 
       <ul v-else class="agents-settings__list">
         <li v-for="a in agents" :key="a.agent_id">
@@ -120,16 +120,16 @@ onMounted(load);
       <div class="agents-settings__section-head">
         <div>
           <h2 class="agents-settings__section-title">Agent 模板</h2>
-          <p class="agents-settings__section-desc">创建 Agent 时可从模板预填；自定义模板保存在运行时目录�?/p>
+          <p class="agents-settings__section-desc">创建 Agent 时可从模板预填；自定义模板保存在运行时目录。</p>
         </div>
         <button type="button" class="btn btn--primary btn--sm" @click="showTemplateCreateModal = true">
           新建模板
         </button>
       </div>
 
-      <p v-if="templatesLoading" class="agents-settings__status">加载模板�?/p>
+      <p v-if="templatesLoading" class="agents-settings__status">加载模板…</p>
       <p v-else-if="templatesError" class="agents-settings__error">{{ templatesError }}</p>
-      <p v-else-if="!templates.length" class="agents-settings__status">暂无模板；可新建自定义模板，或在对话页使用空白配置创�?Agent�?/p>
+      <p v-else-if="!templates.length" class="agents-settings__status">暂无模板；可新建自定义模板，或在对话页使用空白配置创建 Agent。</p>
 
       <ul v-else class="agents-settings__template-list">
         <li v-for="tpl in templates" :key="tpl.id" class="agents-settings__template-item">
@@ -138,7 +138,7 @@ onMounted(load);
               <span class="agents-settings__name">{{ tpl.display_name || tpl.id }}</span>
               <span class="agents-settings__badge" :data-source="tpl.source">{{ sourceLabel(tpl.source) }}</span>
             </div>
-            <p class="agents-settings__template-desc">{{ tpl.description || "无描�? }}</p>
+            <p class="agents-settings__template-desc">{{ tpl.description || "无描述" }}</p>
             <span class="agents-settings__id">{{ tpl.id }}</span>
           </div>
           <button
@@ -148,7 +148,7 @@ onMounted(load);
             :disabled="deletingTemplateId === tpl.id"
             @click="onDeleteTemplate(tpl)"
           >
-            {{ deletingTemplateId === tpl.id ? "删除中�? : "删除" }}
+            {{ deletingTemplateId === tpl.id ? "删除中…" : "删除" }}
           </button>
         </li>
       </ul>

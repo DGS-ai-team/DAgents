@@ -63,16 +63,16 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
         title="下载"
         @click="downloadCurrent"
       >
-        �?
+        ↓
       </button>
       <button
         v-if="hasMany"
         type="button"
         class="image-lightbox__nav image-lightbox__nav--prev"
-        aria-label="上一�?
+        aria-label="上一张"
         @click="stepLightbox(-1)"
       >
-        �?
+        ‹
       </button>
       <figure class="image-lightbox__figure">
         <img class="image-lightbox__img" :src="current.src" :alt="current.alt || '图片'" />
@@ -85,10 +85,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
         v-if="hasMany"
         type="button"
         class="image-lightbox__nav image-lightbox__nav--next"
-        aria-label="下一�?
+        aria-label="下一张"
         @click="stepLightbox(1)"
       >
-        �?
+        ›
       </button>
     </div>
   </Teleport>

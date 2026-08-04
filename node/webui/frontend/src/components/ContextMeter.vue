@@ -22,7 +22,7 @@ const limit = computed(() => {
 
 const visible = computed(() => tokens.value >= 0 && limit.value > 0);
 
-/** 压缩阈值内已用占比；超过阈值时�?100% 显示�?*/
+/** 压缩阈值内已用占比；超过阈值时按 100% 显示。 */
 const usedRatio = computed(() => {
   if (!visible.value) return 0;
   return Math.min(1, tokens.value / limit.value);
@@ -42,7 +42,7 @@ const title = computed(() => {
   if (!visible.value) return "";
   const used = tokens.value.toLocaleString("en-US");
   const lim = limit.value.toLocaleString("en-US");
-  return `上下�?${used} / ${lim} tokens · 已用 ${usedPercent.value}%`;
+  return `上下文 ${used} / ${lim} tokens · 已用 ${usedPercent.value}%`;
 });
 </script>
 
