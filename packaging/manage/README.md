@@ -108,7 +108,7 @@ docker compose logs -f
 
 | 路径 | 用途 |
 |------|------|
-| `/data/manage.db` | Registry、A2A、Skills、案例库等 SQLite |
+| `/data/manage.db` | Registry、Skills、案例库等 SQLite |
 | `/data/releases` | 本地助手安装包 |
 | `/data/blobs` | Skills / External Tools / Plugins / 案例附件等内容寻址存储 |
 | `/data/audit.jsonl` | 审计事件追加日志（内存环形缓冲仍保留最近 N 条） |
@@ -121,13 +121,12 @@ docker compose logs -f
 |------|------|------|
 | `MANAGE_HOST` | `0.0.0.0` | 监听地址 |
 | `MANAGE_PORT` | `8020` | 监听端口 |
-| `MANAGE_DB_PATH` | `/data/manage.db` | Registry + A2A SQLite（建议挂载 volume） |
+| `MANAGE_DB_PATH` | `/data/manage.db` | Registry + Skills SQLite（建议挂载 volume） |
 | `MANAGE_RELEASES_DIR` | `/data/releases` | Release Hub 安装包目录 |
 | `MANAGE_BLOB_DIR` | `/data/blobs` | Blob 根目录（Skills / 外置工具 / 案例附件等） |
 | `MANAGE_AUDIT_PATH` | `/data/audit.jsonl` | 审计 JSONL 追加路径 |
 | `MANAGE_BLOB_MAX_BYTES` | （空=不限制） | 单 Blob 上传上限（字节） |
 | `MANAGE_AUDIT_MAX_ENTRIES` | `500` | 内存审计环形缓冲条数 |
-| `MANAGE_A2A_EXPIRE_SWEEP_SECONDS` | `30` | A2A Task TTL 扫描间隔；`0` 关闭后台扫描 |
 
 完整列表见 [manage/README.md](../../manage/README.md)。
 

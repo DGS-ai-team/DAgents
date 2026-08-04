@@ -177,7 +177,7 @@ func (r *Registrar) heartbeat(ctx context.Context) error {
 		TTLSeconds:    r.ttlSeconds,
 		Version:       version.Version,
 		Tools:         r.collectTools(),
-		ExposeToPeers: boolPtr(r.cfg.ExposeToPeersEffective()),
+		ExposeToPeers: boolPtr(false),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -264,7 +264,7 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 		Description:      description,
 		Team:             strings.TrimSpace(r.cfg.Manage.Registration.Team),
 		Version:          version.Version,
-		ExposeToPeers:    r.cfg.ExposeToPeersEffective(),
+		ExposeToPeers:    false,
 		Card:             RegistrationCard(r.cfg),
 		Metadata: map[string]any{
 			"node_id":      r.cfg.NodeID,

@@ -171,11 +171,10 @@ export function applyHydrateSeqHint(seq) {
 }
 
 /** 根据 hydrate 的 turn 状态恢复 awaitingTurn（F-H7）。 */
-export function applyHydrateTurnState({ run_turn_phase, has_active_turn, pending_hitl, pending_a2a_relay }) {
+export function applyHydrateTurnState({ run_turn_phase, has_active_turn, pending_hitl }) {
   const phase = String(run_turn_phase || "").trim();
   const hasPending = pending_hitl && Array.isArray(pending_hitl.items) && pending_hitl.items.length > 0;
-  const hasRelay = pending_a2a_relay && pending_a2a_relay.event_type && pending_a2a_relay.data;
-  if (hasPending || hasRelay || phase === "awaiting_hitl") {
+  if (hasPending || phase === "awaiting_hitl") {
     agentStore.awaitingTurn = false;
     agentStore.turnContentSeen = false;
     agentStore.error = "";

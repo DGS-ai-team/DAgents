@@ -179,7 +179,7 @@ type ToolResultHookConfig struct {
 	MaxHistoryTokens int `yaml:"max_history_tokens,omitempty"`
 	// MaxHistoryRunes 已废弃。
 	MaxHistoryRunes int `yaml:"max_history_runes,omitempty"`
-	// Tools 启用落盘摘要的工具名；省略时默认 bash + fs + a2a（见 defaultToolResultHookTools）。
+	// Tools 启用落盘摘要的工具名；省略时默认 bash + fs（见 defaultToolResultHookTools）。
 	Tools []string `yaml:"tools"`
 }
 
@@ -334,7 +334,6 @@ type ManageConfig struct {
 	URL          string                   `yaml:"url"`
 	NodeToken    string                   `yaml:"node_token"`
 	Registration ManageRegistrationConfig `yaml:"registration"`
-	A2A          ManageA2AConfig          `yaml:"a2a"`
 	Update       ManageUpdateConfig       `yaml:"update"`
 	Workgroup    ManageWorkgroupConfig    `yaml:"workgroup"`
 }
@@ -350,17 +349,6 @@ type ManageUpdateConfig struct {
 	Enabled              *bool  `yaml:"enabled"`
 	CheckIntervalSeconds int    `yaml:"check_interval_seconds"`
 	Channel              string `yaml:"channel"`
-}
-
-// ManageA2AConfig 历史 A2A 开关（inbox callee 已退役；字段保留兼容旧 YAML）。
-type ManageA2AConfig struct {
-	// Enabled 历史 inbox long poll 开关；现已忽略（ManageA2AEnabled 恒 false）。
-	Enabled *bool `yaml:"enabled"`
-	// AcceptInbound 是否在 Registry 上报 expose_to_peers（历史兼容）。
-	// 取代旧 agent.role=compliance/ops 推导。
-	AcceptInbound    *bool `yaml:"accept_inbound"`
-	InboxPollSeconds int   `yaml:"inbox_poll_seconds"`
-	InboxWaitSeconds int   `yaml:"inbox_wait_seconds"`
 }
 
 // ManageRegistrationConfig 控制周期性 upsert/心跳参数。
@@ -470,15 +458,6 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Manage.Registration.TTLSeconds <= 0 {
 		c.Manage.Registration.TTLSeconds = 60
-	}
-	if c.Manage.A2A.InboxPollSeconds <= 0 {
-		c.Manage.A2A.InboxPollSeconds = c.Manage.Registration.IntervalSeconds
-		if c.Manage.A2A.InboxPollSeconds <= 0 {
-			c.Manage.A2A.InboxPollSeconds = 30
-		}
-	}
-	if c.Manage.A2A.InboxWaitSeconds <= 0 {
-		c.Manage.A2A.InboxWaitSeconds = 25
 	}
 	if c.Manage.Update.CheckIntervalSeconds <= 0 {
 		c.Manage.Update.CheckIntervalSeconds = 6 * 3600
@@ -593,7 +572,7 @@ func (c *Config) ManageRegistryBaseURL() string {
 	return strings.TrimRight(strings.TrimSpace(c.Local.Endpoint), "/")
 }
 
-// ManageRegistryBaseURLIsLoopback 判断上报地址是否为 loopback（运维/A2A 可达性提示用）。
+// ManageRegistryBaseURLIsLoopback 判断上报地址是否为 loopback（运维可达性提示用）。
 func (c *Config) ManageRegistryBaseURLIsLoopback() bool {
 	raw := c.ManageRegistryBaseURL()
 	if raw == "" {
@@ -641,22 +620,6 @@ func (c *Config) ManageUpdateCheckInterval() time.Duration {
 		return 6 * time.Hour
 	}
 	return time.Duration(c.Manage.Update.CheckIntervalSeconds) * time.Second
-}
-
-// ManageA2AInboxWait 返回 long poll wait 参数。
-func (c *Config) ManageA2AInboxWait() time.Duration {
-	if c == nil || c.Manage.A2A.InboxWaitSeconds <= 0 {
-		return 25 * time.Second
-	}
-	return time.Duration(c.Manage.A2A.InboxWaitSeconds) * time.Second
-}
-
-// ManageA2AInboxPollInterval 返回断线降级后的短 poll 间隔。
-func (c *Config) ManageA2AInboxPollInterval() time.Duration {
-	if c == nil || c.Manage.A2A.InboxPollSeconds <= 0 {
-		return 30 * time.Second
-	}
-	return time.Duration(c.Manage.A2A.InboxPollSeconds) * time.Second
 }
 
 // ListenAddr 返回 host:port 监听地址字符串。

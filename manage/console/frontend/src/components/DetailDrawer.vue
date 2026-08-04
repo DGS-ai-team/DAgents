@@ -120,14 +120,6 @@ async function onSaveGroups() {
             </div>
           </div>
           <div class="kv">
-            <div class="kv-label">expose_to_peers</div>
-            <div class="kv-value">
-              <span class="pill" :class="agent.expose_to_peers ? 'pill-yes' : 'pill-no'">
-                {{ agent.expose_to_peers ? "是" : "否" }}
-              </span>
-            </div>
-          </div>
-          <div class="kv">
             <div class="kv-label">team / owner</div>
             <div class="kv-value">{{ agent.team || "—" }} / {{ agent.owner || "—" }}</div>
           </div>

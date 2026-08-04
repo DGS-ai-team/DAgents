@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func testConfigPath(t *testing.T, content string) (configPath, runtimeDir string) {
@@ -205,30 +204,6 @@ func TestManageRegistryBaseURL_prefersRegistrationOverride(t *testing.T) {
 	}
 	if !cfg.ManageRegistryBaseURLIsLoopback() {
 		t.Fatal("expected loopback true for local endpoint")
-	}
-}
-
-func TestManageA2AConfigDefaults(t *testing.T) {
-	cfg := &Config{
-		Manage: ManageConfig{
-			Enabled: true,
-			Registration: ManageRegistrationConfig{
-				IntervalSeconds: 40,
-			},
-		},
-	}
-	cfg.ApplyDefaults()
-	on := true
-	cfg.Manage.A2A.AcceptInbound = &on
-	cfg.Manage.A2A.Enabled = &on
-	if cfg.ManageA2AEnabled() {
-		t.Fatal("A2A inbox callee retired: ManageA2AEnabled must stay false")
-	}
-	if cfg.ManageA2AInboxWait() != 25*time.Second {
-		t.Fatalf("wait=%s", cfg.ManageA2AInboxWait())
-	}
-	if cfg.ManageA2AInboxPollInterval() != 40*time.Second {
-		t.Fatalf("poll=%s", cfg.ManageA2AInboxPollInterval())
 	}
 }
 

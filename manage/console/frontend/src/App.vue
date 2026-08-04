@@ -25,7 +25,6 @@ const stats = reactive({
   online: "—",
   offline: "—",
   total: "—",
-  peers: "—",
 });
 
 const registry = reactive({
@@ -188,7 +187,6 @@ onMounted(async () => {
           :online="stats.online"
           :offline="stats.offline"
           :total="stats.total"
-          :peers="stats.peers"
         />
 
         <RegistryView

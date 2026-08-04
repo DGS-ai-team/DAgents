@@ -32,7 +32,7 @@ def _register_agent(client: TestClient, agent_id: str, *, base_url: str | None =
 class ManageAdminTests(unittest.TestCase):
     def test_admin_node_session_proxy_removed(self) -> None:
         with TemporaryDirectory() as tmp:
-            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db", a2a_expire_sweep_seconds=0)
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
             app = create_app(settings)
             with TestClient(app) as client:
                 _register_agent(client, "node-z", base_url="http://node-z.test")
@@ -46,7 +46,7 @@ class ManageAdminTests(unittest.TestCase):
 
     def test_a2a_http_routes_gone(self) -> None:
         with TemporaryDirectory() as tmp:
-            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db", a2a_expire_sweep_seconds=0)
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
             app = create_app(settings)
             with TestClient(app) as client:
                 resp = client.post("/v1/a2a/tasks", json={})

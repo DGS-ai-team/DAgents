@@ -292,17 +292,16 @@ type TranscriptEntry map[string]any
 
 // AgentHydrate 为 GET /v1/agents/{id}/hydrate 响应。
 type AgentHydrate struct {
-	AgentID         string            `json:"agent_id"`
-	RunTurnPhase    string            `json:"run_turn_phase"`
-	HasActiveTurn   bool              `json:"has_active_turn"`
-	QueuePending    int               `json:"queue_pending"`
-	Transcript      []TranscriptEntry `json:"transcript"`
-	PendingHITL     map[string]any    `json:"pending_hitl"`
-	PendingA2ARelay map[string]any    `json:"pending_a2a_relay,omitempty"`
-	SSESeqHint      int               `json:"sse_seq_hint"`
-	NotifySeq       int               `json:"notify_seq"`
-	AckSeq          int               `json:"ack_seq"`
-	HasUnread       bool              `json:"has_unread"`
+	AgentID       string            `json:"agent_id"`
+	RunTurnPhase  string            `json:"run_turn_phase"`
+	HasActiveTurn bool              `json:"has_active_turn"`
+	QueuePending  int               `json:"queue_pending"`
+	Transcript    []TranscriptEntry `json:"transcript"`
+	PendingHITL   map[string]any    `json:"pending_hitl"`
+	SSESeqHint    int               `json:"sse_seq_hint"`
+	NotifySeq     int               `json:"notify_seq"`
+	AckSeq        int               `json:"ack_seq"`
+	HasUnread     bool              `json:"has_unread"`
 }
 
 // GetAgentHydrate 调用 GET /v1/agents/{id}/hydrate。

@@ -1,7 +1,6 @@
 package config
 
 // PlacementConfig 遗留 YAML 字段（D5：产品能力已关闭，仅兼容旧配置反序列化）。
-// 与 A2A expose（manage.a2a.accept_inbound）无关。
 type PlacementConfig struct {
 	// AllowPeerCreate 已废弃；Effective 恒为 false。
 	AllowPeerCreate *bool `yaml:"allow_peer_create"`

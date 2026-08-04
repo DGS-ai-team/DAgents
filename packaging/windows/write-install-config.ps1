@@ -68,8 +68,6 @@ manage:
         } else {
             $manageBlock += "`n    # base_url: http://192.168.1.10:18765"
         }
-        $manageBlock += "`n  # a2a inbox / agent_invoke 已拆除；保留字段兼容旧 YAML（忽略）"
-        $manageBlock += "`n  # a2a:`n  #   enabled: false"
         $content = [regex]::Replace(
             $content,
             '(?ms)^manage:\r?\n(?:  .*\r?\n|# .*\r?\n)*',

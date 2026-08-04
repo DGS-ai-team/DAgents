@@ -12,7 +12,7 @@ type AgentConfig struct {
 	Metadata     map[string]any `yaml:"metadata"`
 }
 
-// AgentRole 返回可选元数据角色字符串；空串表示未设。不再表示 A2A 被调/调用档。
+// AgentRole 返回可选元数据角色字符串；空串表示未设。
 func (c *Config) AgentRole() string {
 	if c == nil {
 		return ""

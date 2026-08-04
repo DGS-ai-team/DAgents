@@ -186,8 +186,7 @@ func (t *ToolsConfig) NormalizedBuiltinEnabledGroups() []string {
 	out := make([]string, 0, len(t.EnabledGroups))
 	for _, raw := range t.EnabledGroups {
 		name := strings.TrimSpace(raw)
-		if name == "" || name == "a2a" {
-			// a2a / agent_invoke 工具组已拆除；旧配置中的组名忽略。
+		if name == "" {
 			continue
 		}
 		if _, ok := seen[name]; ok {

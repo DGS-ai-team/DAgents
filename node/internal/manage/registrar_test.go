@@ -15,7 +15,6 @@ import (
 )
 
 func testManageConfig(serverURL, token string) *config.Config {
-	on := true
 	cfg := &config.Config{
 		NodeID: "ops-01",
 		Agent: config.AgentConfig{
@@ -26,7 +25,6 @@ func testManageConfig(serverURL, token string) *config.Config {
 			Enabled:   true,
 			URL:       serverURL,
 			NodeToken: token,
-			A2A:       config.ManageA2AConfig{AcceptInbound: &on},
 			Registration: config.ManageRegistrationConfig{
 				BaseURL:         "http://10.0.0.5:18765",
 				IntervalSeconds: 1,
@@ -172,24 +170,16 @@ func TestRegistrar_buildRegisterPayload_usesAgentConfig(t *testing.T) {
 	if len(payload.Capabilities) != 1 || payload.Capabilities[0] != "compliance_review" {
 		t.Fatalf("capabilities = %v", payload.Capabilities)
 	}
-	if !payload.ExposeToPeers {
-		t.Fatal("expected expose true when accept_inbound")
+	if payload.ExposeToPeers {
+		t.Fatal("expected expose false (A2A expose retired)")
 	}
 }
 
-func TestRegistrar_buildRegisterPayload_exposeFromAcceptInbound(t *testing.T) {
+func TestRegistrar_buildRegisterPayload_exposeAlwaysFalse(t *testing.T) {
 	cfg := testManageConfig("http://127.0.0.1:8020", "")
-	off := false
-	cfg.Manage.A2A.AcceptInbound = &off
 	reg := NewRegistrar(cfg, nil)
 	payload := reg.buildRegisterPayload()
 	if payload.ExposeToPeers {
-		t.Fatal("expected expose false when accept_inbound=false")
-	}
-	on := true
-	cfg.Manage.A2A.AcceptInbound = &on
-	payload = reg.buildRegisterPayload()
-	if !payload.ExposeToPeers {
-		t.Fatal("expected expose true when accept_inbound=true")
+		t.Fatal("expected expose false")
 	}
 }

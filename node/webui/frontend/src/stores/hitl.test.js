@@ -172,18 +172,12 @@ describe("buildApprovalOneResume", () => {
     expect(resume.approved).toEqual([]);
     expect(resume.rejected).toEqual(["call-a", "call-b"]);
   });
-
-  it("includes a2a_task_id in resume routing", () => {
-    const data = { ...multiToolApprovalData, a2a_task_id: "task-xyz" };
-    const resume = buildApprovalOneResume(data, "call-a", true);
-    expect(resume.a2a_task_id).toBe("task-xyz");
-  });
 });
 
 describe("approvalQueueKey", () => {
-  it("distinguishes concurrent A2A tasks", () => {
-    const a = approvalQueueKey({ a2a_task_id: "task-a", approval_args: { tool_calls: [] } });
-    const b = approvalQueueKey({ a2a_task_id: "task-b", approval_args: { tool_calls: [] } });
+  it("distinguishes child agents", () => {
+    const a = approvalQueueKey({ child_agent_id: "child-a", approval_args: { tool_calls: [] } });
+    const b = approvalQueueKey({ child_agent_id: "child-b", approval_args: { tool_calls: [] } });
     expect(a).not.toBe(b);
   });
 

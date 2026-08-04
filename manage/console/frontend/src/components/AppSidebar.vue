@@ -74,7 +74,7 @@ const emit = defineEmits(["navigate"]);
       >
         {{ healthLabel }}
       </div>
-      <span class="sidebar-meta">Registry · A2A · Console</span>
+      <span class="sidebar-meta">Registry · Workgroup · Console</span>
     </div>
   </aside>
 </template>

@@ -1,8 +1,6 @@
 package manage
 
 import (
-	"log/slog"
-
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -34,20 +32,4 @@ func RegistrationCard(cfg *config.Config) map[string]any {
 		out["metadata"] = meta
 	}
 	return out
-}
-
-// LogA2AProfileWarnings 启动时提示 A2A inbox 已退役。
-func LogA2AProfileWarnings(cfg *config.Config, logger *slog.Logger) {
-	if cfg == nil || !cfg.Manage.Enabled {
-		return
-	}
-	if logger == nil {
-		logger = slog.Default()
-	}
-	if cfg.ExposeToPeersEffective() || (cfg.Manage.A2A.Enabled != nil && *cfg.Manage.A2A.Enabled) {
-		logger.Warn("A2A inbox callee retired; cross-node collaboration uses workgroups",
-			"accept_inbound", cfg.ExposeToPeersEffective(),
-			"hint", "manage.a2a.enabled / accept_inbound no longer start inbox long-poll",
-		)
-	}
 }

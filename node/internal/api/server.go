@@ -330,7 +330,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var updateChecker *manage.UpdateChecker
 	var packageUploader *manage.PackageUploader
 	if cfg.Manage.Enabled {
-		manage.LogA2AProfileWarnings(cfg, logger)
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
 		if !manage.UpdateDelegatedToShell() {
@@ -650,7 +649,7 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
 		NodeID:            s.cfg.NodeID,
-		ExposeToPeers:     s.cfg.ExposeToPeersEffective(),
+		ExposeToPeers:     false,
 		Capabilities:      s.cfg.Capabilities(),
 		MultimodalEnabled: s.cfg.MultimodalEnabled(),
 		ManageRegistered:  registered,
@@ -820,18 +819,17 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 }
 
 type sessionHydrateResponse struct {
-	AgentID         string                    `json:"agent_id"`
-	RunTurnPhase    string                    `json:"run_turn_phase"`
-	HasActiveTurn   bool                      `json:"has_active_turn"`
-	QueuePending    int                       `json:"queue_pending"`
-	Transcript      []session.TranscriptEntry `json:"transcript"`
-	PendingHITL     map[string]any            `json:"pending_hitl"`
-	PendingA2ARelay map[string]any            `json:"pending_a2a_relay,omitempty"`
-	SSESeqHint      int                       `json:"sse_seq_hint"`
-	NotifySeq       int                       `json:"notify_seq"`
-	AckSeq          int                       `json:"ack_seq"`
-	HasUnread       bool                      `json:"has_unread"`
-	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
+	AgentID       string                    `json:"agent_id"`
+	RunTurnPhase  string                    `json:"run_turn_phase"`
+	HasActiveTurn bool                      `json:"has_active_turn"`
+	QueuePending  int                       `json:"queue_pending"`
+	Transcript    []session.TranscriptEntry `json:"transcript"`
+	PendingHITL   map[string]any            `json:"pending_hitl"`
+	SSESeqHint    int                       `json:"sse_seq_hint"`
+	NotifySeq     int                       `json:"notify_seq"`
+	AckSeq        int                       `json:"ack_seq"`
+	HasUnread     bool                      `json:"has_unread"`
+	ToolJobs      map[string]int            `json:"tool_jobs,omitempty"`
 }
 
 func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) {
@@ -861,18 +859,17 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		toolJobs["background"] = c.Background
 	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
-		AgentID:         view.SessionID,
-		RunTurnPhase:    runPhase,
-		HasActiveTurn:   view.HasActiveTurn,
-		QueuePending:    view.QueuePending,
-		Transcript:      transcript,
-		PendingHITL:     view.PendingHITL,
-		PendingA2ARelay: nil,
-		SSESeqHint:      s.stream.CurrentSeq(),
-		NotifySeq:       view.NotifySeq,
-		AckSeq:          view.AckSeq,
-		HasUnread:       view.HasUnread,
-		ToolJobs:        toolJobs,
+		AgentID:       view.SessionID,
+		RunTurnPhase:  runPhase,
+		HasActiveTurn: view.HasActiveTurn,
+		QueuePending:  view.QueuePending,
+		Transcript:    transcript,
+		PendingHITL:   view.PendingHITL,
+		SSESeqHint:    s.stream.CurrentSeq(),
+		NotifySeq:     view.NotifySeq,
+		AckSeq:        view.AckSeq,
+		HasUnread:     view.HasUnread,
+		ToolJobs:      toolJobs,
 	})
 }
 

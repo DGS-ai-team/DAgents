@@ -28,7 +28,6 @@ export function computeStats(agents) {
     online: list.filter((a) => a.status === "online").length,
     offline: list.filter((a) => a.status === "offline").length,
     total: list.length,
-    peers: list.filter((a) => a.expose_to_peers && a.status === "online").length,
   };
 }
 

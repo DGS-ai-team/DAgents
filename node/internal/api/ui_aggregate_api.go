@@ -43,7 +43,7 @@ func (s *Server) handleUIBootstrap(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.cfg != nil {
 		info.NodeID = s.cfg.NodeID
-		info.ExposeToPeers = s.cfg.ExposeToPeersEffective()
+		info.ExposeToPeers = false
 		info.Capabilities = s.cfg.Capabilities()
 		info.MultimodalEnabled = s.cfg.MultimodalEnabled()
 	}
