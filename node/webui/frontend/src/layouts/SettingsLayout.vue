@@ -1,8 +1,10 @@
 <script setup>
-import { useRoute } from "vue-router";
-import ProductHeader from "../components/ProductHeader.vue";
+import { useRoute, useRouter } from "vue-router";
+
+defineOptions({ name: "SettingsLayout" });
 
 const route = useRoute();
+const router = useRouter();
 
 const nav = [
   { to: "/settings/general", label: "通用" },
@@ -20,13 +22,29 @@ function isActive(item) {
   if (item.match) return route.path === item.match || route.path.startsWith(`${item.match}/`);
   return route.path === item.to;
 }
+
+function backToChat() {
+  router.push({ name: "agents" });
+}
 </script>
 
 <template>
   <div class="app">
-    <ProductHeader />
     <div class="settings-layout">
       <nav class="settings-layout__nav">
+        <button type="button" class="settings-layout__back" @click="backToChat">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path
+              d="M10.5 3.5 6 8l4.5 4.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.25"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span>返回对话</span>
+        </button>
         <router-link
           v-for="item in nav"
           :key="item.to"

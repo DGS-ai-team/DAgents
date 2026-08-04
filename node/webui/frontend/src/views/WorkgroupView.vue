@@ -2,7 +2,7 @@
 import { ref, watch, onUnmounted, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
-import WorkgroupPanel from "../components/WorkgroupPanel.vue";
+import NavRail from "../components/NavRail.vue";
 
 /** v1 Worker 可执行工具；其余名仅写入 Spec，provision 时与本机能力求交 */
 const TOOL_CHOICES = ["read_file"];
@@ -128,10 +128,20 @@ async function selectMember(memberId) {
   if (selectedMemberId.value === memberId) {
     selectedMemberId.value = "";
     memberSpec.value = null;
+    if (workgroupId.value) {
+      router.replace({ name: "workgroups", params: { workgroupId: workgroupId.value }, query: {} });
+    }
     return;
   }
   selectedMemberId.value = memberId;
   await loadMemberSpec(memberId);
+  if (workgroupId.value) {
+    router.replace({
+      name: "workgroups",
+      params: { workgroupId: workgroupId.value },
+      query: { member: memberId },
+    });
+  }
 }
 
 function startPoll() {
@@ -229,11 +239,31 @@ async function createMember() {
       selectedMemberId.value = mid;
       memberSpec.value = out.spec || null;
       if (!memberSpec.value) await loadMemberSpec(mid);
+      router.replace({
+        name: "workgroups",
+        params: { workgroupId: workgroupId.value },
+        query: { member: mid },
+      });
     }
+    panelRef.value?.refresh?.();
   } catch (e) {
     error.value = e?.message || "创建成员失败";
   } finally {
     memberBusy.value = false;
+  }
+}
+
+async function onRailDeleteAgent(payload) {
+  const aid = String(typeof payload === "string" ? payload : payload?.id || "").trim();
+  if (!aid) return;
+  const agent = typeof payload === "object" && payload?.agent ? payload.agent : { agent_id: aid };
+  const label = agent.display_name || agent.DisplayName || aid;
+  if (!window.confirm(`确定删除 Agent「${label}」？\n\n将停止该实例并归档记录，不可恢复。`)) return;
+  try {
+    await api.deleteAgent(aid);
+    await panelRef.value?.refresh?.();
+  } catch (e) {
+    error.value = e?.message || "删除失败";
   }
 }
 
@@ -341,9 +371,32 @@ watch(
     showMemberForm.value = false;
     resetMemberForm();
     await Promise.all([loadTimeline(), loadACL(), loadMembersGrantsHitl()]);
+    const memberQ = String(route.query.member || "").trim();
+    if (memberQ) {
+      selectedMemberId.value = memberQ;
+      await loadMemberSpec(memberQ);
+    }
+    if (String(route.query.addMember || "") === "1") {
+      showMemberForm.value = true;
+    }
     if (id) startPoll();
   },
   { immediate: true },
+);
+
+watch(
+  () => [route.query.member, route.query.addMember],
+  async ([member, addMember]) => {
+    if (!workgroupId.value) return;
+    const memberQ = String(member || "").trim();
+    if (memberQ && memberQ !== selectedMemberId.value) {
+      selectedMemberId.value = memberQ;
+      await loadMemberSpec(memberQ);
+    }
+    if (String(addMember || "") === "1") {
+      showMemberForm.value = true;
+    }
+  },
 );
 
 onMounted(loadSelf);
@@ -353,7 +406,12 @@ onUnmounted(stopPoll);
 <template>
   <div class="app__body app__body--chat-v61">
     <aside class="app__col app__col--agents">
-      <WorkgroupPanel ref="panelRef" />
+      <NavRail
+        ref="panelRef"
+        @switch="(id) => router.push({ name: 'agents', params: { agentId: id } })"
+        @create="router.push({ name: 'agents', query: { createAgent: '1' } })"
+        @delete="onRailDeleteAgent"
+      />
     </aside>
     <div class="app__main-col wg-chat">
       <div v-if="error" class="chat-error-banner">{{ error }}</div>

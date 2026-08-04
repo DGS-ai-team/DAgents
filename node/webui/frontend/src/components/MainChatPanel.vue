@@ -54,6 +54,7 @@ const emit = defineEmits([
   "user-info-selected",
   "memory-conflict-decide",
   "memory-conflict-cancel",
+  "open-activity",
 ]);
 
 const thinkingEnabled = computed(() => {
@@ -129,7 +130,7 @@ const activityCmdCount = computed(() => activitySnap.value.command_count || 0);
 const showActivityPill = computed(() => activityFileCount.value > 0 || activityCmdCount.value > 0);
 
 function openActivityRail() {
-  chromeStore.panel = "activity";
+  emit("open-activity");
 }
 
 const showCancel = computed(() => props.sending && !props.hitlBusy);
