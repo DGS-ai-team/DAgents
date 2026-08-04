@@ -200,7 +200,8 @@ fn force_kill_pid(pid: u32) -> Result<(), String> {
     }
 }
 
-/// 打开系统默认浏览器。
+/// 打开系统默认浏览器（保留备用）。
+#[allow(dead_code)]
 pub fn open_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|e| format!("打开浏览器失败: {e}"))
 }

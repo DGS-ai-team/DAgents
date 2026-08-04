@@ -120,10 +120,11 @@ pub fn run() {
                 .on_navigation(move |url| is_navigation_allowed(url, &allowed_endpoint))
                 .build()?;
 
-                window.on_window_event(|window, event| {
+                let win_for_close = window.clone();
+                window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
-                        let _ = window.hide();
-                        let _ = window.set_skip_taskbar(true);
+                        let _ = win_for_close.hide();
+                        let _ = win_for_close.set_skip_taskbar(true);
                         api.prevent_close();
                     }
                 });
