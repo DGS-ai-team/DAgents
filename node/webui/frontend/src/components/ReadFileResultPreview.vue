@@ -15,7 +15,7 @@ const preview = computed(() => buildReadFilePreview(props.path, props.content));
     <div v-if="preview.meta" class="read-file-structured-meta-bar">
       <span class="read-file-structured-meta-bar__item">
         <span class="read-file-structured-meta-bar__label">文件</span>
-        <span class="read-file-structured-meta-bar__value">{{ preview.path || "—" }}</span>
+        <span class="read-file-structured-meta-bar__value">{{ preview.path || "�? }}</span>
       </span>
     </div>
     <div class="write-file-tool__preview read-file-structured__preview-wrap">
@@ -52,7 +52,7 @@ const preview = computed(() => buildReadFilePreview(props.path, props.content));
   min-height: 120px;
   max-height: min(50vh, 360px);
   border: 0;
-  background: #fff;
+  background: var(--color-surface);
 }
 .read-file-csv-wrap {
   overflow: auto;

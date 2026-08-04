@@ -366,7 +366,7 @@ defineExpose({ refresh });
 
 .activity-rail__icon-btn:hover:not(:disabled) {
   color: var(--color-text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-surface-hover);
 }
 
 .activity-rail__icon-btn:disabled {
@@ -474,7 +474,7 @@ defineExpose({ refresh });
 }
 
 .activity-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-surface-hover);
 }
 
 .activity-row--muted {
@@ -503,7 +503,7 @@ defineExpose({ refresh });
 }
 
 .activity-row__btn:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-surface-hover);
 }
 
 .activity-op {
@@ -611,8 +611,8 @@ defineExpose({ refresh });
   overflow: auto;
   border-radius: 6px;
   border: 1px solid var(--color-border-strong);
-  background: #111111;
-  color: #d4d4d4;
+  background: var(--color-code-bg);
+  color: var(--color-code-fg);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.45;

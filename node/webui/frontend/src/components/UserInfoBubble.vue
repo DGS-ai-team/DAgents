@@ -70,8 +70,12 @@ function onMultiToggle(id, checked) {
 
 <style scoped>
 .approval-bubble--user-info {
-  border-left: 3px solid #0284c7;
-  background: linear-gradient(90deg, rgba(2, 132, 199, 0.06), #f8fafc 48px);
+  border-left: 3px solid var(--color-info);
+  background: linear-gradient(
+    90deg,
+    var(--color-info-soft),
+    var(--color-surface) 48px
+  );
 }
 
 .approval-bubble__intro--question {
@@ -104,7 +108,7 @@ function onMultiToggle(id, checked) {
 }
 
 .user-info-option:hover {
-  border-color: rgba(2, 132, 199, 0.35);
-  background: rgba(2, 132, 199, 0.04);
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 </style>

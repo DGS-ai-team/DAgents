@@ -109,7 +109,7 @@ async function runProbe() {
   probeState.message = "";
   probeState.ok = false;
   if (!canProbe.value) {
-    probeState.message = "请先填写 Base URL（Mock 模式无需测试）";
+    probeState.message = "请先填写 Base URL（Mock 模式无需测试�?;
     return;
   }
   probeState.loading = true;
@@ -127,7 +127,7 @@ async function runProbe() {
       ? data.models.map((m) => String(m?.id || m || "").trim()).filter(Boolean)
       : [];
     if (!models.length) {
-      throw new Error("未返回模型列表");
+      throw new Error("未返回模型列�?);
     }
     probedModels.value = models;
     modelManual.value = false;
@@ -140,7 +140,7 @@ async function runProbe() {
       draft.model = models[0];
     }
     probeState.ok = true;
-    probeState.message = `已获取 ${models.length} 个模型，可下拉选择`;
+    probeState.message = `已获�?${models.length} 个模型，可下拉选择`;
   } catch (e) {
     probedModels.value = [];
     modelManual.value = true;
@@ -160,7 +160,7 @@ function submit() {
   }
   const others = (props.existingIds || []).filter((x) => x !== originalId.value);
   if (others.includes(id)) {
-    localError.message = `配置「${id}」已存在`;
+    localError.message = `配置�?{id}」已存在`;
     return;
   }
   if (!String(draft.model || "").trim() && !(draft.mock || draft.provider === "mock")) {
@@ -191,7 +191,7 @@ watch(
 watch(
   () => [draft.base_url, draft.api_key, draft.clear_api_key],
   () => {
-    // URL / Key 变更后清空探测结果，避免选到过期列表。
+    // URL / Key 变更后清空探测结果，避免选到过期列表�?
     if (probedModels.value.length || probeState.message) {
       probedModels.value = [];
       modelManual.value = false;
@@ -214,12 +214,12 @@ watch(
         <div class="llm-profile-modal__body">
           <div class="llm-profile-modal__grid">
             <label class="settings-field llm-profile-modal__span">
-              <span class="settings-field__label">名称（输入栏展示）</span>
+              <span class="settings-field__label">名称（输入栏展示�?/span>
               <input
                 v-model="draft.id"
                 class="settings-field__input"
                 type="text"
-                placeholder="如 DeepSeek / 默认"
+                placeholder="�?DeepSeek / 默认"
                 autocomplete="off"
               />
             </label>
@@ -229,13 +229,13 @@ watch(
               <input v-model="draft.base_url" class="settings-field__input" type="text" autocomplete="off" />
             </label>
             <label class="settings-field llm-profile-modal__span">
-              <span class="settings-field__label">API Key（可留空）</span>
+              <span class="settings-field__label">API Key（可留空�?/span>
               <input
                 v-model="draft.api_key"
                 class="settings-field__input"
                 type="password"
                 autocomplete="new-password"
-                :placeholder="draft.has_api_key ? '已保存，留空则保持不变' : '可选'"
+                :placeholder="draft.has_api_key ? '已保存，留空则保持不�? : '可�?"
               />
             </label>
 
@@ -246,7 +246,7 @@ watch(
                 :disabled="probeState.loading || !canProbe"
                 @click="runProbe"
               >
-                {{ probeState.loading ? "测试中…" : "测试并拉取模型" }}
+                {{ probeState.loading ? "测试中�? : "测试并拉取模�? }}
               </button>
               <p
                 v-if="probeState.message"
@@ -256,7 +256,7 @@ watch(
                 {{ probeState.message }}
               </p>
               <p v-else class="settings-field__hint">
-                先填 URL 与 Key，点击测试将请求兼容接口 <code>/models</code>；失败时可手动填写模型。
+                先填 URL �?Key，点击测试将请求兼容接口 <code>/models</code>；失败时可手动填写模型�?
               </p>
             </div>
 
@@ -306,7 +306,7 @@ watch(
             </label>
             <label class="settings-toggle">
               <input v-model="draft.multimodal_enabled" type="checkbox" />
-              <span>多模态 / Vision</span>
+              <span>多模�?/ Vision</span>
             </label>
           </div>
         </div>
@@ -333,7 +333,7 @@ watch(
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--color-overlay);
   backdrop-filter: blur(2px);
 }
 
@@ -418,12 +418,12 @@ watch(
 .llm-profile-modal__probe-msg {
   margin: 0;
   font-size: 12px;
-  color: #c2410c;
+  color: var(--color-warning);
   line-height: 1.4;
 }
 
 .llm-profile-modal__probe-msg--ok {
-  color: var(--color-text-muted, #64748b);
+  color: var(--color-text-muted);
 }
 
 .llm-profile-modal__model-toggle {
@@ -431,7 +431,7 @@ watch(
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--color-accent, #2563eb);
+  color: var(--color-primary);
   font-size: 12px;
   cursor: pointer;
   text-align: left;
@@ -440,7 +440,7 @@ watch(
 .settings-field__hint {
   margin: 0;
   font-size: 12px;
-  color: var(--color-text-subtle, #94a3b8);
+  color: var(--color-text-subtle);
   line-height: 1.4;
 }
 
@@ -452,7 +452,7 @@ watch(
   margin: 0;
   flex: 1;
   font-size: 12.5px;
-  color: #c2410c;
+  color: var(--color-warning);
 }
 
 .llm-profile-modal__actions {

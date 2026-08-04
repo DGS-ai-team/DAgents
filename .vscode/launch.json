@@ -2,6 +2,43 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Test: Node",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "go test ./... -count=1",
+      "cwd": "${workspaceFolder}/node"
+    },
+    {
+      "name": "Test: UI",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["test"],
+      "cwd": "${workspaceFolder}/node/webui/frontend",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    },
+    {
+      "name": "Test: Manage",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "unittest",
+      "args": ["discover", "-s", "tests", "-p", "test_*.py", "-v"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Test: Shell",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "cmd /c \"call \"%ProgramFiles(x86)%\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 && set PATH=%USERPROFILE%\\.cargo\\bin;%PATH% && cargo test --locked\"",
+      "cwd": "${workspaceFolder}/desktop/tray-tauri/src-tauri"
+    },
+    {
       "name": "Go Node",
       "type": "go",
       "request": "launch",

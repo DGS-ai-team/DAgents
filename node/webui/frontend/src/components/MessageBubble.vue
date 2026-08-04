@@ -58,8 +58,8 @@ function userImageThumb(src) {
     <div class="msg__body">
       <div class="msg__bubble msg__bubble--user msg__bubble--deferred">
         <span v-if="entry.userName" class="msg__deferred-tag">{{ entry.userName }}</span>
-        <span v-if="entry.sideEffectApplied" class="msg__applied-tag">已入库</span>
-        <span v-else-if="entry.sideEffectStale" class="msg__stale-tag">已失效</span>
+        <span v-if="entry.sideEffectApplied" class="msg__applied-tag">已入�?/span>
+        <span v-else-if="entry.sideEffectStale" class="msg__stale-tag">已失�?/span>
         {{ entry.text }}
       </div>
     </div>
@@ -147,7 +147,7 @@ function userImageThumb(src) {
   text-transform: uppercase;
 }
 .msg__applied-tag {
-  color: var(--color-success, #6a9);
+  color: var(--color-success);
 }
 .msg__stale-tag {
   color: var(--color-text-subtle);

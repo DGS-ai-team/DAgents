@@ -46,15 +46,15 @@ onMounted(loadTemplates);
           />
         </svg>
       </div>
-      <h2 class="agent-empty__title">还没有 Agent</h2>
-      <p class="agent-empty__hint">新建一个开始对话，或从下方模板快速创建。</p>
+      <h2 class="agent-empty__title">还没�?Agent</h2>
+      <p class="agent-empty__hint">新建一个开始对话，或从下方模板快速创建�?/p>
       <button type="button" class="btn btn--primary agent-empty__cta" @click="emit('create')">
         新建 Agent
       </button>
 
       <div class="agent-empty__templates">
         <p class="agent-empty__templates-label">推荐模板</p>
-        <div v-if="loading" class="agent-empty__loading">加载模板…</div>
+        <div v-if="loading" class="agent-empty__loading">加载模板�?/div>
         <div v-else class="agent-empty__grid">
           <button
             v-for="tpl in templates"
@@ -96,7 +96,7 @@ onMounted(loadTemplates);
               </svg>
             </span>
             <span class="agent-empty-tile__name">{{ tpl.display_name || tpl.id }}</span>
-            <span class="agent-empty-tile__desc">{{ tpl.description || "从模板创建" }}</span>
+            <span class="agent-empty-tile__desc">{{ tpl.description || "从模板创�? }}</span>
           </button>
         </div>
       </div>
@@ -125,7 +125,7 @@ onMounted(loadTemplates);
 .agent-empty__mark {
   width: 56px;
   height: 56px;
-  color: var(--color-primary-strong, #3b82f6);
+  color: var(--color-primary-strong);
   margin-bottom: 16px;
 }
 
@@ -207,18 +207,18 @@ onMounted(loadTemplates);
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  color: var(--color-primary-strong, #3b82f6);
+  color: var(--color-primary-strong);
   background: color-mix(in srgb, var(--color-primary-strong) 12%, transparent);
 }
 
 .agent-empty-tile__icon[data-kind="code"] {
-  color: #0d9488;
-  background: rgba(13, 148, 136, 0.12);
+  color: var(--color-info);
+  background: var(--color-info-soft);
 }
 
 .agent-empty-tile__icon[data-kind="ops"] {
-  color: #ca8a04;
-  background: rgba(202, 138, 4, 0.14);
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
 }
 
 .agent-empty-tile__icon svg {

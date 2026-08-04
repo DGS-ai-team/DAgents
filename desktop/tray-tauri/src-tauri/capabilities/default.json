@@ -7,6 +7,11 @@
     "core:default",
     "core:tray:default",
     "core:menu:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-skip-taskbar",
+    "core:window:allow-unminimize",
     "opener:default"
   ]
 }

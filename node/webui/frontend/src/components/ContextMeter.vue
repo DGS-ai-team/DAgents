@@ -22,7 +22,7 @@ const limit = computed(() => {
 
 const visible = computed(() => tokens.value >= 0 && limit.value > 0);
 
-/** 压缩阈值内已用占比；超过阈值时按 100% 显示。 */
+/** 压缩阈值内已用占比；超过阈值时�?100% 显示�?*/
 const usedRatio = computed(() => {
   if (!visible.value) return 0;
   return Math.min(1, tokens.value / limit.value);
@@ -42,7 +42,7 @@ const title = computed(() => {
   if (!visible.value) return "";
   const used = tokens.value.toLocaleString("en-US");
   const lim = limit.value.toLocaleString("en-US");
-  return `上下文 ${used} / ${lim} tokens · 已用 ${usedPercent.value}%`;
+  return `上下�?${used} / ${lim} tokens · 已用 ${usedPercent.value}%`;
 });
 </script>
 
@@ -93,11 +93,11 @@ const title = computed(() => {
 }
 
 .context-meter__track {
-  stroke: rgba(148, 163, 184, 0.35);
+  stroke: var(--color-border-strong);
 }
 
 .context-meter__fill {
-  stroke: #64748b;
+  stroke: var(--color-text-subtle);
   transition: stroke-dashoffset 0.35s ease;
 }
 
@@ -110,22 +110,22 @@ const title = computed(() => {
 }
 
 .context-meter--ok .context-meter__fill {
-  stroke: #64748b;
+  stroke: var(--color-text-subtle);
 }
 
 .context-meter--warn {
-  color: #b45309;
+  color: var(--color-warning);
 }
 
 .context-meter--warn .context-meter__fill {
-  stroke: #d97706;
+  stroke: var(--color-warning);
 }
 
 .context-meter--critical {
-  color: #b91c1c;
+  color: var(--color-danger);
 }
 
 .context-meter--critical .context-meter__fill {
-  stroke: #dc2626;
+  stroke: var(--color-danger);
 }
 </style>

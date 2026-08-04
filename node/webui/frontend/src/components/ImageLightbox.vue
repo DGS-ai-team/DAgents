@@ -63,16 +63,16 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
         title="下载"
         @click="downloadCurrent"
       >
-        ↓
+        �?
       </button>
       <button
         v-if="hasMany"
         type="button"
         class="image-lightbox__nav image-lightbox__nav--prev"
-        aria-label="上一张"
+        aria-label="上一�?
         @click="stepLightbox(-1)"
       >
-        ‹
+        �?
       </button>
       <figure class="image-lightbox__figure">
         <img class="image-lightbox__img" :src="current.src" :alt="current.alt || '图片'" />
@@ -85,10 +85,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
         v-if="hasMany"
         type="button"
         class="image-lightbox__nav image-lightbox__nav--next"
-        aria-label="下一张"
+        aria-label="下一�?
         @click="stepLightbox(1)"
       >
-        ›
+        �?
       </button>
     </div>
   </Teleport>
@@ -103,7 +103,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(15, 23, 42, 0.82);
+  background: var(--color-overlay);
   backdrop-filter: blur(4px);
 }
 
@@ -123,14 +123,14 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   object-fit: contain;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  background: #0f172a;
+  background: var(--color-bg);
 }
 
 .image-lightbox__caption {
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #f8fafc;
+  color: var(--color-text);
   font-size: 13px;
 }
 

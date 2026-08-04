@@ -11,18 +11,7 @@
   },
   "app": {
     "withGlobalTauri": false,
-    "windows": [
-      {
-        "label": "main",
-        "title": "DAgents Shell",
-        "width": 360,
-        "height": 200,
-        "visible": false,
-        "skipTaskbar": true,
-        "resizable": false,
-        "decorations": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
@@ -32,7 +21,7 @@
     "targets": ["nsis"],
     "category": "Utility",
     "shortDescription": "DAgents 系统托盘 Shell",
-    "longDescription": "以系统托盘监护 dagents-node：双击打开 Web UI，菜单启停 Node。",
+    "longDescription": "以系统托盘监护 dagents-node：双击在内嵌 WebView 中打开 Web UI，菜单启停 Node。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

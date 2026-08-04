@@ -22,7 +22,9 @@
 
 - **构建**：Windows + MSVC（C++ Build Tools）+ Rust + Node.js；CI 使用 `windows-2022`
 - **运行**：Windows 10/11 + 已安装 WebView2（Win11 与多数 Win10 已预装；否则装 [Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)）
-- 托盘壳主界面默认隐藏，但仍通过 WebView2/Tauri 运行时加载；无 WebView2 时进程可能无法正常启动
+- 托盘壳默认隐藏主窗口；**打开控制台时在内嵌 WebView 中加载** Node 同源 `{endpoint}/ui/`（需 WebView2）
+- 关闭控制台窗口 → **隐藏到托盘**（不停 Node、不退出 Shell）
+- 与 Go Shell 双轨：Go 版仍可走系统浏览器且不依赖 WebView2（见设计文档 D11/D12）
 
 参考：[Tauri Prerequisites](https://v2.tauri.app/start/prerequisites/)、[Drop Windows 7 support](https://github.com/tauri-apps/tauri/issues/12550)。
 
@@ -33,7 +35,9 @@
 | 单实例 | Windows 命名 Mutex；其它平台 `.runtime/shell.lock` |
 | 启动 ensure Node / 退出 stop Node | 对齐 Go `nodectl` 路径约定 |
 | 托盘菜单 | 状态、打开控制台、启动/停止/重启、退出 |
-| **双击托盘图标** | 与「打开控制台」相同：ensure Node → 打开 `{local.endpoint}/ui/` |
+| **双击托盘图标** | ensure Node → 主窗口 `navigate` 到 `{local.endpoint}/ui/` → show/focus（任务栏可见） |
+| 关窗隐藏 | CloseRequested → hide + skip taskbar；`ExitRequested` 无 exit code 时 prevent_exit |
+| 导航白名单 | 仅允许配置的 Node endpoint origin、本地 stub（dev `localhost:1422`）、tauri/asset/about |
 | health 轮询 + 自动恢复 | 用户手动「停止」后不自动拉起 |
 
 ## 尚未迁移（仍用 Go Shell）

@@ -3,7 +3,7 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { chromeStore } from "../stores/chrome.js";
 import { agentStore } from "../stores/agent.js";
-import { themeStore, toggleTheme } from "../stores/theme.js";
+import { cycleTheme, themeStore } from "../stores/theme.js";
 import brandIcon from "../assets/brand-icon.png";
 
 const router = useRouter();
@@ -23,7 +23,11 @@ const statusLabel = computed(() => {
 const inSettings = computed(() => route.path.startsWith("/settings"));
 const canOpenActivity = computed(() => !inSettings.value && !!agentStore.agentId);
 const activityOpen = computed(() => chromeStore.panel === "activity");
-const themeLabel = computed(() => (themeStore.mode === "dark" ? "切换浅色主题" : "切换深色主题"));
+const themeLabel = computed(() => {
+  if (themeStore.mode === "system") return "主题：跟随系统（点击切换）";
+  if (themeStore.mode === "light") return "主题：浅色（点击切换）";
+  return "主题：深色（点击切换）";
+});
 
 function openChat() {
   router.push({ name: "agents" });
@@ -35,7 +39,7 @@ function openActivity() {
 }
 
 function onToggleTheme() {
-  toggleTheme();
+  cycleTheme();
 }
 </script>
 
@@ -60,12 +64,17 @@ function onToggleTheme() {
         :aria-label="themeLabel"
         @click="onToggleTheme"
       >
-        <svg v-if="themeStore.mode === 'dark'" class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.2" />
-          <path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.2 3.2l1.1 1.1M11.7 11.7l1.1 1.1M3.2 12.8l1.1-1.1M11.7 4.3l1.1-1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+        <svg v-if="themeStore.mode === 'system'" class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <rect x="2.5" y="3.5" width="11" height="8" rx="1.2" stroke="currentColor" stroke-width="1.2" />
+          <path d="M5.5 13.5h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+          <path d="M8 11.5v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+        </svg>
+        <svg v-else-if="themeStore.resolved === 'dark'" class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M10.9 2.3a5.8 5.8 0 1 0 2.8 10 5.9 5.9 0 0 1-2.8-10Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
         </svg>
         <svg v-else class="product-header__svg" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M10.9 2.3a5.8 5.8 0 1 0 2.8 10 5.9 5.9 0 0 1-2.8-10Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+          <circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.2" />
+          <path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.2 3.2l1.1 1.1M11.7 11.7l1.1 1.1M3.2 12.8l1.1-1.1M11.7 4.3l1.1-1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
         </svg>
       </button>
       <button

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { initTheme, setTheme, themeStore, toggleTheme } from "./theme.js";
+import { cycleTheme, initTheme, setTheme, themeStore, toggleTheme } from "./theme.js";
 
 const mockGetItem = vi.fn(() => "");
 const mockSetItem = vi.fn();
@@ -22,12 +22,30 @@ vi.stubGlobal("document", {
   },
 });
 
+vi.stubGlobal("window", {
+  matchMedia: vi.fn(() => ({
+    matches: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+  })),
+});
+
 beforeEach(() => {
   document.documentElement.removeAttribute("data-theme");
-  themeStore.mode = "dark";
+  themeStore.mode = "system";
+  themeStore.resolved = "dark";
   mockGetItem.mockReset();
   mockSetItem.mockReset();
   mockGetItem.mockReturnValue("");
+  window.matchMedia.mockReturnValue({
+    matches: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+  });
 });
 
 describe("theme store", () => {
@@ -35,13 +53,32 @@ describe("theme store", () => {
     mockGetItem.mockReturnValue("light");
     initTheme();
     expect(themeStore.mode).toBe("light");
+    expect(themeStore.resolved).toBe("light");
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
   });
 
-  it("toggles and persists", () => {
+  it("defaults to system and resolves via prefers-color-scheme", () => {
+    mockGetItem.mockReturnValue("");
+    initTheme();
+    expect(themeStore.mode).toBe("system");
+    expect(themeStore.resolved).toBe("dark");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  });
+
+  it("toggles and persists binary preference", () => {
     setTheme("dark");
     toggleTheme();
     expect(themeStore.mode).toBe("light");
     expect(mockSetItem).toHaveBeenCalledWith("dagents_webui_theme", "light");
+  });
+
+  it("cycles system → light → dark → system", () => {
+    setTheme("system");
+    cycleTheme();
+    expect(themeStore.mode).toBe("light");
+    cycleTheme();
+    expect(themeStore.mode).toBe("dark");
+    cycleTheme();
+    expect(themeStore.mode).toBe("system");
   });
 });
