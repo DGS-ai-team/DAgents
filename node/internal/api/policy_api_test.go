@@ -62,15 +62,15 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 	return srv, ts, created.AgentID
 }
 
-func TestGlobalPolicyGone(t *testing.T) {
+func TestGlobalPolicyRouteRemoved(t *testing.T) {
 	_, ts, _ := testAgentPolicyServer(t)
 	resp, err := http.Get(ts.URL + "/v1/policy")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusGone {
-		t.Fatalf("GET /v1/policy status = %d want 410", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /v1/policy status = %d want 404", resp.StatusCode)
 	}
 }
 

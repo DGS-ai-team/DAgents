@@ -108,7 +108,7 @@ func EnabledToolGroups(snap Snapshot) []string {
 
 // ApplySandboxToolConstraints 按沙箱约束收紧工具组。
 // - allow_bash=false：去掉 bash
-// - allow_network_tools=false：去掉 browser / a2a
+// - allow_network_tools=false：去掉 browser
 func ApplySandboxToolConstraints(groups []string, snap Snapshot) []string {
 	if !snap.Sandbox.Enabled {
 		return groups
@@ -119,7 +119,6 @@ func ApplySandboxToolConstraints(groups []string, snap Snapshot) []string {
 	}
 	if !snap.Sandbox.AllowNetworkTools {
 		deny["browser"] = struct{}{}
-		deny["a2a"] = struct{}{}
 	}
 	if len(deny) == 0 {
 		return groups

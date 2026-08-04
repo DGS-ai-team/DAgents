@@ -2,7 +2,7 @@ package childagent
 
 import "strings"
 
-// 同进程临时 Agent（temporary agent）协议常量；与外部 A2A 工具/消息区分。
+// 同进程临时 Agent（temporary agent）协议常量。
 const (
 	HitlScopeTemporaryAgent = "temporary_agent"
 
@@ -38,7 +38,7 @@ func ParentDelegatableTools() []string {
 	}
 }
 
-// IsParentOnlyTool 为仅父 Agent 可用的工具（含临时 Agent 管理工具、skills、非 A2A）。
+// IsParentOnlyTool 为仅父 Agent 可用的工具（含临时 Agent 管理工具、skills）。
 func IsParentOnlyTool(name string) bool {
 	switch strings.TrimSpace(name) {
 	case ToolCreateTemporaryAgent, ToolWaitTemporaryAgents, ToolTemporaryAgentStatus, ToolCancelTemporaryAgent,
@@ -49,7 +49,7 @@ func IsParentOnlyTool(name string) bool {
 	}
 }
 
-// IsTemporaryAgentTool 判断是否为临时 Agent 管理工具（由 orchestrator 专用处理，非 A2A）。
+// IsTemporaryAgentTool 判断是否为临时 Agent 管理工具（由 orchestrator 专用处理）。
 func IsTemporaryAgentTool(name string) bool {
 	switch strings.TrimSpace(name) {
 	case ToolCreateTemporaryAgent, ToolWaitTemporaryAgents, ToolTemporaryAgentStatus, ToolCancelTemporaryAgent:

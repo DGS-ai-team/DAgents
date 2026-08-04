@@ -54,7 +54,6 @@ class ManageRegistryTests(unittest.TestCase):
                 "agent_id": "ops-01",
                 "base_url": "http://ops.local",
                 "name": "运维助手",
-                "expose_to_peers": True,
             }
             with TestClient(app) as client:
                 reg = client.post("/v1/registry/agents", json=payload)
@@ -137,17 +136,17 @@ class ManageRegistryTests(unittest.TestCase):
         with TestClient(app) as client:
             client.post(
                 "/v1/registry/agents",
-                json={"agent_id": "caller", "base_url": "http://caller.local", "expose_to_peers": True},
+                json={"agent_id": "caller", "base_url": "http://caller.local"},
                 headers={"x-dagents-agent-id": "caller"},
             )
             client.post(
                 "/v1/registry/agents",
-                json={"agent_id": "peer-ops", "base_url": "http://peer-ops.local", "expose_to_peers": True},
+                json={"agent_id": "peer-ops", "base_url": "http://peer-ops.local"},
                 headers={"x-dagents-agent-id": "peer-ops"},
             )
             client.post(
                 "/v1/registry/agents",
-                json={"agent_id": "peer-lab", "base_url": "http://peer-lab.local", "expose_to_peers": True},
+                json={"agent_id": "peer-lab", "base_url": "http://peer-lab.local"},
                 headers={"x-dagents-agent-id": "peer-lab"},
             )
             client.patch(

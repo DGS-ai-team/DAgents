@@ -14,7 +14,7 @@
 |--------|----------|----------|
 | **新人 / 联调** | [00-导读](./00-导读.md) → [01-愿景与架构](./01-愿景与架构.md) → [03-API与Client](./03-API与Client.md) §3.6 快速上手 | 1–2 小时 |
 | **改 Node 内部** | [02-Agent-Node-核心](./02-Agent-Node-核心.md) §1→§4 → `node/internal/*/REFERENCE.md` | 半天 |
-| **做 A2A / Manage** | [01](./01-愿景与架构.md) §1.2 → [05-Manage与A2A](./05-Manage与A2A.md) → [cases/a2a-manage-docker](../../cases/a2a-manage-docker/README.md) | 2–4 小时 |
+| **做 Manage / 工作组** | [01](./01-愿景与架构.md) §1.2 → [05-Manage与A2A](./05-Manage与A2A.md) → [workgroup-and-node-gateway.md](../design/workgroup-and-node-gateway.md) | 2–4 小时 |
 | **发布 / 运维** | [03](./03-API与Client.md) §3.5 → [06-运维与案例](./06-运维与案例.md) | 1 小时 |
 | **查工具 / 配置 / 事件** | [附录](./附录/) | 按需 |
 

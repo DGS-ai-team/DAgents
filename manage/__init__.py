@@ -1,1 +1,1 @@
-"""DAgents Manage 统一控制面（Registry / A2A / Skills / Platform）。"""
+"""DAgents Manage 统一控制面（Registry / Workgroup / Skills / Platform）。"""

@@ -1,5 +1,5 @@
 import * as api from "../api/node.js";
-import { clearHitl, enqueueA2ARelayPending, enqueueHitlRequired } from "./hitl.js";
+import { clearHitl, enqueueHitlRequired } from "./hitl.js";
 import { setChildAwaitingApproval } from "./remoteWorkers.js";
 import {
   applyHydrateSeqHint,
@@ -20,7 +20,6 @@ export async function hydrateAgent() {
   applyToolJobsSnapshot(data?.tool_jobs);
   clearHitl();
   const { approval } = enqueueHitlRequired(data?.pending_hitl);
-  enqueueA2ARelayPending(data?.pending_a2a_relay);
   if (approval?.child_agent_id) {
     setChildAwaitingApproval(approval.child_agent_id, true);
   }
@@ -30,9 +29,8 @@ export async function hydrateAgent() {
     run_turn_phase: data?.run_turn_phase,
     has_active_turn: !!data?.has_active_turn,
     pending_hitl: data?.pending_hitl,
-    pending_a2a_relay: data?.pending_a2a_relay,
   });
-  if (data?.pending_hitl?.items?.length || data?.pending_a2a_relay?.event_type) {
+  if (data?.pending_hitl?.items?.length) {
     finishTurn();
   }
   return data;

@@ -63,7 +63,7 @@ def _migrate_stored_dict(data: dict[str, object]) -> dict[str, object]:
         migrated["card"] = {}
     migrated.setdefault("auth_method", "shared_token")
     migrated.setdefault("risk_level", "medium")
-    migrated.setdefault("expose_to_peers", True)
+    migrated.pop("expose_to_peers", None)
     migrated.setdefault("last_error_summary", None)
     migrated.setdefault("recent_task_summary", None)
     return migrated
@@ -108,7 +108,6 @@ class AgentRegistryStore:
                 risk_level=payload.risk_level,
                 allowed_scopes=payload.allowed_scopes,
                 version=payload.version,
-                expose_to_peers=payload.expose_to_peers,
                 card=dict(payload.card),
                 metadata=payload.metadata,
                 last_error_summary=payload.last_error_summary,
@@ -136,24 +135,6 @@ class AgentRegistryStore:
             self._persist_locked()
             return stored_to_public(stored, now_unix=now_unix)
 
-    def can_a2a_invoke(self, from_agent_id: str, to_agent_id: str) -> tuple[bool, str | None]:
-        """A2A Task 创建前校验：caller 与 target 须各至少有一个 discovery_group 且存在交集。"""
-        caller = self.get(from_agent_id.strip())
-        if caller is None:
-            return False, "caller_not_found"
-        target = self.get(to_agent_id.strip())
-        if target is None:
-            return False, "target_not_found"
-        caller_groups = {g.strip() for g in caller.discovery_group if g.strip()}
-        target_groups = {g.strip() for g in target.discovery_group if g.strip()}
-        if not caller_groups:
-            return False, "caller_discovery_group_empty"
-        if not target_groups:
-            return False, "target_discovery_group_empty"
-        if not caller_groups & target_groups:
-            return False, "discovery_group_mismatch"
-        return True, None
-
     def heartbeat(self, agent_id: str, payload: AgentHeartbeatRequest) -> AgentRecord | None:
         with self._lock:
             existing = self._records.get(agent_id)
@@ -174,14 +155,7 @@ class AgentRegistryStore:
                 data["last_error_summary"] = payload.last_error_summary
             if payload.recent_task_summary is not None:
                 data["recent_task_summary"] = payload.recent_task_summary
-            if payload.expose_to_peers is not None:
-                data["expose_to_peers"] = payload.expose_to_peers
-            if payload.local_agents:
-                meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-                meta = dict(meta or {})
-                meta["local_agents"] = list(payload.local_agents)
-                meta.setdefault("node_id", data.get("node_id") or agent_id)
-                data["metadata"] = meta
+            data.pop("expose_to_peers", None)
             if not data.get("node_id"):
                 data["node_id"] = agent_id
             stored = AgentStoredRecord.model_validate(data)
@@ -214,8 +188,6 @@ class AgentRegistryStore:
         items, _ = self.list(query)
         out: list[AgentDiscoverRecord] = []
         for item in items:
-            if not item.expose_to_peers:
-                continue
             if caller_groups:
                 if not any(group in item.discovery_group for group in caller_groups):
                     continue

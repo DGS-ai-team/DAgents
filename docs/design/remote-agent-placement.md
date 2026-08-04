@@ -38,7 +38,7 @@
 | 概念 | 含义 | 状态 |
 |------|------|------|
 | **Placement（放置）** | Agent 实例跑在同组其他 Node 上；本地保留引用 | **本设计主线** |
-| **A2A `agent_invoke`** | 请对端 Node/能力帮做**一次任务**；不拥有对端长期 Agent | 已有，继续保留 |
+| **A2A `agent_invoke`** | 请对端 Node/能力帮做**一次任务**；不拥有对端长期 Agent | **已拆除**（改走工作组） |
 | **`sandbox.backend=docker`** | 本机容器隔离执行环境 | 已有 |
 | **`sandbox.backend=remote`** | 外部沙箱 HTTP 运行时（预留） | **从 UI 下线**；API 暂保留读旧快照，不再引导新建 |
 | **`origin=remote` stub** | 本地视图里的远端引用 | 升级为正式 Placement 引用记录 |

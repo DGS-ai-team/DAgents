@@ -17,18 +17,15 @@
 | `EnvRawMessageHistoryEnabled` | `const string` | 环境变量 `AGENT_RAW_MESSAGE_HISTORY_ENABLED` |
 | `LogConfig` | `struct` | Node stderr 日志级别（`level`，默认 `info`） |
 | `ToolsConfig` | `struct` | `enabled_groups` 内置工具组允许列表（空=全部）；`bash_output_encoding`；`file_encoding` |
-| `AllBuiltinToolGroupNames` | `func() []string` | 可配置工具组名字典序全集（7 组） |
+| `AllBuiltinToolGroupNames` | `func() []string` | 可配置工具组名字典序全集 |
 | `BuiltinToolGroupMembers` | `func(group string) ([]string, bool)` | 展开组内工具名 |
-| `AllBuiltinToolNames` | `func() []string` | 全部内置工具名字典序全集（25 个） |
-| `(t *ToolsConfig) NormalizedBuiltinEnabledGroups` | `method` | 去重规范化 `tools.enabled_groups` |
+| `AllBuiltinToolNames` | `func() []string` | 全部内置工具名字典序全集 |
+| `(t *ToolsConfig) NormalizedBuiltinEnabledGroups` | `method` | 去重规范化 `tools.enabled_groups`；空名跳过，未知组由 Validate 拒绝 |
 | `(t *ToolsConfig) NormalizedBuiltinEnabled` | `method` | 将 `enabled_groups` 展开为工具名；空=未配置允许列表 |
-| `ManageConfig` | `struct` | Manage 开关、URL、node_token、`registration`、`a2a` |
-| `AgentConfig` | `struct` | `name`、`description`、`role`、`capabilities`、`metadata` |
-| `(c *Config) AgentRole` | `method` | A2A 角色（compliance/ops） |
-| `(c *Config) ExposeToPeersEffective` | `method` | role=compliance 时为 true |
-| `(c *Config) ManageA2AEnabled` | `method` | 是否启动 inbox poller（默认随 role） |
+| `ManageConfig` | `struct` | Manage 开关、URL、node_token、`registration`、`update`、`workgroup` |
+| `AgentConfig` | `struct` | `name`、`description`、`role`（可选元数据）、`capabilities`、`metadata` |
+| `(c *Config) AgentRole` | `method` | 可选元数据角色字符串；空串表示未设 |
 | `ManageRegistrationConfig` | `struct` | `base_url`、`interval_seconds`（默认 30）、`ttl_seconds`（默认 60）、`team` |
-| `ManageA2AConfig` | `struct` | `enabled`（`*bool`，默认 true）、`inbox_wait_seconds`（默认 25）、`inbox_poll_seconds` |
 | `LoadFile` | `func(path string) (*Config, error)` | 读 YAML、展开 env、默认值、校验 |
 | `(c *Config) ApplyDefaults` | `method` | 填充 listen/local/manage 缺省 |
 | `(c *Config) Validate` | `method` | 校验 agent_id、端口、endpoint；manage.enabled 时要求 url |
@@ -36,9 +33,6 @@
 | `(c *Config) ManageRegistrationInterval` | `method` | 注册/心跳轮询间隔 |
 | `(c *Config) ManageRegistryBaseURL` | `method` | 上报 Manage 的 base_url（优先 registration.base_url） |
 | `(c *Config) ManageRegistryBaseURLIsLoopback` | `method` | 上报地址是否为 loopback |
-| `(c *Config) ManageA2AEnabled` | `method` | 是否启动 inbox poller（默认 true） |
-| `(c *Config) ManageA2AInboxWait` | `method` | long poll wait（默认 25s） |
-| `(c *Config) ManageA2AInboxPollInterval` | `method` | 断线短 poll 间隔 |
 | `(c *Config) ListenAddr` | `method` | 返回 `host:port` |
 | `(c *Config) RuntimeDir` | `method` | 与 `fs_root` 一致（默认 `./.runtime`） |
 | `(c *Config) DataDir` | `method` | 默认 `{fs_root}/data` 临时工作区 |

@@ -230,17 +230,6 @@
   background: #f8fafc;
 }
 
-.approval-bubble--a2a {
-  border-left: 3px solid #0891b2;
-  background: linear-gradient(90deg, rgba(8, 145, 178, 0.06), #f8fafc 48px);
-}
-
-.approval-bubble__relay {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-
 .approval-bubble .tool-exec-bubble__source {
   display: flex;
   align-items: center;
@@ -1151,11 +1140,6 @@
   background: var(--color-surface-muted);
 }
 
-.tool-exec-bubble--a2a {
-  border-left-color: #4ec9b0;
-  background: var(--color-surface-muted);
-}
-
 .tool-exec-bubble--shell {
   border-left-color: #e2a053;
   background: var(--color-surface-muted);
@@ -1201,11 +1185,6 @@
 .tool-source-badge--child {
   background: rgba(197, 134, 192, 0.14);
   color: #c586c0;
-}
-
-.tool-source-badge--a2a {
-  background: rgba(78, 201, 176, 0.14);
-  color: #4ec9b0;
 }
 
 .tool-source-badge--shell {
@@ -2416,11 +2395,6 @@
 .thread-source--local_subagent {
   color: var(--color-info);
   background: var(--color-info-soft);
-}
-
-.thread-source--remote_a2a_agent {
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
 }
 
 .chunk {

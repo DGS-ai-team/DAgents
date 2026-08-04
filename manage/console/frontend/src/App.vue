@@ -1,10 +1,9 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { fetchAgents, fetchHealth, fetchInboxTasks } from "./api.js";
+import { fetchAgents, fetchHealth } from "./api.js";
 import AppSidebar from "./components/AppSidebar.vue";
 import AskAiButton from "./components/AskAiButton.vue";
 import DetailDrawer from "./components/DetailDrawer.vue";
-import InboxView from "./components/InboxView.vue";
 import NodeAdminView from "./components/NodeAdminView.vue";
 import CasesView from "./components/CasesView.vue";
 import PageHeader from "./components/PageHeader.vue";
@@ -26,7 +25,6 @@ const stats = reactive({
   online: "—",
   offline: "—",
   total: "—",
-  peers: "—",
 });
 
 const registry = reactive({
@@ -45,22 +43,6 @@ const registry = reactive({
   },
   roleHint: "",
   listSummary: "—",
-});
-
-const inbox = reactive({
-  page: 1,
-  total: 0,
-  pageSize: 50,
-  tasks: [],
-  loading: false,
-  error: "",
-  filters: {
-    to: "",
-    from: "",
-    status: "",
-    pageSize: 50,
-  },
-  summary: "—",
 });
 
 const { toasts, showToast } = useToast();
@@ -102,7 +84,6 @@ async function loadAgents() {
     page_size: registry.pageSize,
   };
   if (group) params.discovery_group = group;
-
   try {
     const data = await fetchAgents(params);
     registry.agents = data.agents || [];
@@ -120,43 +101,12 @@ async function loadAgents() {
   }
 }
 
-async function loadInbox() {
-  inbox.loading = true;
-  inbox.error = "";
-  inbox.pageSize = inbox.filters.pageSize || 50;
-  const offset = (inbox.page - 1) * inbox.pageSize;
-  const params = {
-    limit: inbox.pageSize,
-    offset,
-    to_agent_id: inbox.filters.to.trim(),
-    from_agent_id: inbox.filters.from.trim(),
-    status: inbox.filters.status,
-  };
-
-  try {
-    const data = await fetchInboxTasks(params);
-    inbox.tasks = data.tasks || [];
-    inbox.total = data.total ?? inbox.tasks.length;
-    inbox.summary = `本页 ${inbox.tasks.length} 条，合计 ${inbox.total} 条`;
-    lastRefreshed.value = touchLastRefreshedLabel();
-  } catch (err) {
-    inbox.error = err.message;
-    showToast(err.message, "error");
-  } finally {
-    inbox.loading = false;
-  }
-}
-
 function navigate(nextView) {
   if (view.value === nextView) return;
   view.value = nextView;
-  if (nextView === "inbox") {
-    inbox.page = 1;
-    loadInbox();
-  } else if (nextView === "registry") {
+  if (nextView === "registry") {
     loadAgents();
   }
-  // llm / skills 视图自加载（见各组件的 active watch）
 }
 
 async function onRefresh() {
@@ -166,9 +116,6 @@ async function onRefresh() {
     if (view.value === "registry") {
       registry.page = 1;
       await loadAgents();
-    } else if (view.value === "inbox") {
-      inbox.page = 1;
-      await loadInbox();
     }
   } finally {
     refreshing.value = false;
@@ -180,13 +127,6 @@ function onRegistryFilterChange(filters) {
   registry.pageSize = filters.pageSize || 50;
   registry.page = 1;
   loadAgents();
-}
-
-function onInboxFilterChange(filters) {
-  inbox.filters = { ...filters };
-  inbox.pageSize = filters.pageSize || 50;
-  inbox.page = 1;
-  loadInbox();
 }
 
 function registryPrevPage() {
@@ -201,21 +141,6 @@ function registryNextPage() {
   if (registry.page < totalPages) {
     registry.page += 1;
     loadAgents();
-  }
-}
-
-function inboxPrevPage() {
-  if (inbox.page > 1) {
-    inbox.page -= 1;
-    loadInbox();
-  }
-}
-
-function inboxNextPage() {
-  const totalPages = Math.max(1, Math.ceil(inbox.total / inbox.pageSize));
-  if (inbox.page < totalPages) {
-    inbox.page += 1;
-    loadInbox();
   }
 }
 
@@ -258,11 +183,10 @@ onMounted(async () => {
 
       <main class="page-content">
         <StatsRow
-          v-show="view === 'registry' || view === 'inbox'"
+          v-show="view === 'registry'"
           :online="stats.online"
           :offline="stats.offline"
           :total="stats.total"
-          :peers="stats.peers"
         />
 
         <RegistryView
@@ -280,21 +204,6 @@ onMounted(async () => {
           @filter-change="onRegistryFilterChange"
           @page-prev="registryPrevPage"
           @page-next="registryNextPage"
-        />
-
-        <InboxView
-          v-show="view === 'inbox'"
-          :tasks="inbox.tasks"
-          :loading="inbox.loading"
-          :error="inbox.error"
-          :page="inbox.page"
-          :total="inbox.total"
-          :page-size="inbox.pageSize"
-          :filters="inbox.filters"
-          :summary="inbox.summary"
-          @filter-change="onInboxFilterChange"
-          @page-prev="inboxPrevPage"
-          @page-next="inboxNextPage"
         />
 
         <NodeAdminView

@@ -94,8 +94,6 @@ var knownBuiltinTools = map[string]struct{}{
 	"trigger_create":         {},
 	"trigger_update":         {},
 	"trigger_delete":         {},
-	"agent_invoke":           {},
-	"agent_discover":         {},
 	"create_temporary_agent": {},
 	"wait_temporary_agents":  {},
 	"temporary_agent_status": {},

@@ -29,8 +29,6 @@ var knownBuiltinTools = map[string]struct{}{
 	"trigger_create":           {},
 	"trigger_update":           {},
 	"trigger_delete":           {},
-	"agent_invoke":             {},
-	"agent_discover":           {},
 	"create_temporary_agent":   {},
 	"wait_temporary_agents":    {},
 	"temporary_agent_status":   {},
@@ -94,10 +92,6 @@ var builtinToolGroups = map[string][]string{
 		"trigger_create",
 		"trigger_update",
 		"trigger_delete",
-	},
-	"a2a": {
-		"agent_invoke",
-		"agent_discover",
 	},
 	"child_agents": {
 		"create_temporary_agent",

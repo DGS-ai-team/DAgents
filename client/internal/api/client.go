@@ -80,7 +80,6 @@ type LLMSettingsPatch struct {
 // AgentInfo 为 GET /v1/agent/info 响应。
 type AgentInfo struct {
 	AgentID          string      `json:"agent_id"`
-	ExposeToPeers    bool        `json:"expose_to_peers"`
 	Capabilities     []string    `json:"capabilities"`
 	ManageRegistered bool        `json:"manage_registered"`
 	LLM              LLMSettings `json:"llm"`
@@ -179,50 +178,6 @@ type ContextMessagePreview struct {
 	HasReasoningContent bool   `json:"has_reasoning_content"`
 }
 
-// PolicyPlatform 为 GET /v1/policy 中的 Node 平台信息。
-type PolicyPlatform struct {
-	GOOS         string `json:"goos"`
-	DefaultShell string `json:"default_shell"`
-}
-
-// PolicyToolEntry 为工具策略条目。
-type PolicyToolEntry struct {
-	Name       string `json:"name"`
-	Mode       string `json:"mode"`
-	Decision   string `json:"decision,omitempty"`
-	Configured bool   `json:"configured"`
-}
-
-// PolicyShellEntry 为 shell 命令策略条目。
-type PolicyShellEntry struct {
-	Command    string `json:"command"`
-	Mode       string `json:"mode"`
-	Decision   string `json:"decision,omitempty"`
-	Configured bool   `json:"configured"`
-}
-
-// PolicySnapshot 为 GET /v1/policy 响应。
-type PolicySnapshot struct {
-	PolicyDir string                       `json:"policy_dir"`
-	Platform  PolicyPlatform               `json:"platform"`
-	Tools     []PolicyToolEntry            `json:"tools"`
-	Shell     map[string][]PolicyShellEntry `json:"shell"`
-}
-
-// PolicyToolUpdate 为 PUT /v1/policy/tools 单项。
-type PolicyToolUpdate struct {
-	Name     string `json:"name"`
-	Mode     string `json:"mode,omitempty"`
-	Decision string `json:"decision,omitempty"`
-}
-
-// PolicyShellUpdate 为 PUT /v1/policy/shell/{type} 单项。
-type PolicyShellUpdate struct {
-	Command  string `json:"command"`
-	Mode     string `json:"mode,omitempty"`
-	Decision string `json:"decision,omitempty"`
-}
-
 // GetAgentInfo 调用 GET /v1/agent/info。
 func (c *Client) GetAgentInfo(ctx context.Context) (*AgentInfo, error) {
 	var info AgentInfo
@@ -292,17 +247,16 @@ type TranscriptEntry map[string]any
 
 // AgentHydrate 为 GET /v1/agents/{id}/hydrate 响应。
 type AgentHydrate struct {
-	AgentID         string            `json:"agent_id"`
-	RunTurnPhase    string            `json:"run_turn_phase"`
-	HasActiveTurn   bool              `json:"has_active_turn"`
-	QueuePending    int               `json:"queue_pending"`
-	Transcript      []TranscriptEntry `json:"transcript"`
-	PendingHITL     map[string]any    `json:"pending_hitl"`
-	PendingA2ARelay map[string]any    `json:"pending_a2a_relay,omitempty"`
-	SSESeqHint      int               `json:"sse_seq_hint"`
-	NotifySeq       int               `json:"notify_seq"`
-	AckSeq          int               `json:"ack_seq"`
-	HasUnread       bool              `json:"has_unread"`
+	AgentID       string            `json:"agent_id"`
+	RunTurnPhase  string            `json:"run_turn_phase"`
+	HasActiveTurn bool              `json:"has_active_turn"`
+	QueuePending  int               `json:"queue_pending"`
+	Transcript    []TranscriptEntry `json:"transcript"`
+	PendingHITL   map[string]any    `json:"pending_hitl"`
+	SSESeqHint    int               `json:"sse_seq_hint"`
+	NotifySeq     int               `json:"notify_seq"`
+	AckSeq        int               `json:"ack_seq"`
+	HasUnread     bool              `json:"has_unread"`
 }
 
 // GetAgentHydrate 调用 GET /v1/agents/{id}/hydrate。
@@ -376,34 +330,6 @@ func (c *Client) ListTriggers(ctx context.Context) ([]TriggerDefinition, error) 
 		return nil, err
 	}
 	return resp.Triggers, nil
-}
-
-// GetPolicy 调用 GET /v1/policy；shellQuery 可为 auto/bash/cmd/powershell。
-func (c *Client) GetPolicy(ctx context.Context, shellQuery string) (*PolicySnapshot, error) {
-	path := "/v1/policy"
-	if q := strings.TrimSpace(shellQuery); q != "" {
-		path += "?shell=" + url.QueryEscape(q)
-	}
-	var snap PolicySnapshot
-	if err := c.getJSON(ctx, path, &snap); err != nil {
-		return nil, err
-	}
-	return &snap, nil
-}
-
-// UpdateToolPolicy 调用 PUT /v1/policy/tools。
-func (c *Client) UpdateToolPolicy(ctx context.Context, updates []PolicyToolUpdate) error {
-	return c.putJSON(ctx, "/v1/policy/tools", map[string]any{"updates": updates}, nil)
-}
-
-// UpdateShellPolicy 调用 PUT /v1/policy/shell/{shellType}；deletes 移除显式条目（未列出命令默认需审批）。
-func (c *Client) UpdateShellPolicy(ctx context.Context, shellType string, updates []PolicyShellUpdate, deletes ...string) error {
-	path := "/v1/policy/shell/" + url.PathEscape(strings.TrimSpace(shellType))
-	body := map[string]any{"updates": updates}
-	if len(deletes) > 0 {
-		body["deletes"] = deletes
-	}
-	return c.putJSON(ctx, path, body, nil)
 }
 
 // CompressAgentContext 调用 POST /v1/agents/{id}/compress，手动触发阻塞压缩。
@@ -709,38 +635,6 @@ func (c *Client) patchJSON(ctx context.Context, path string, body any, out any) 
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.base+path, bytes.NewReader(raw))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respBody)))
-	}
-	if out != nil && len(respBody) > 0 {
-		if err := json.Unmarshal(respBody, out); err != nil {
-			return fmt.Errorf("decode %s: %w", path, err)
-		}
-	}
-	return nil
-}
-
-func (c *Client) putJSON(ctx context.Context, path string, body any, out any) error {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.base+path, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}

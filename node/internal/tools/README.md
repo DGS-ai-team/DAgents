@@ -48,7 +48,7 @@ tools/
 │   job_registry_test.go
 ├── 领域 tool_*
 │   tool_skills.go / tool_hitl.go / tool_triggers.go
-│   tool_a2a.go / tool_childagent.go
+│   tool_childagent.go
 │   tool_*_test.go
 └── README.md / REFERENCE.md
 ```
@@ -59,7 +59,7 @@ tools/
 
 | 在 Registry 执行 | 在 turn 编排器执行 |
 |------------------|-------------------|
-| fs、bash、trigger CRUD、A2A HTTP、后台 job | `load_skills` / `unload_skills` / `clear_skills` |
+| fs、bash、trigger CRUD、后台 job | `load_skills` / `unload_skills` / `clear_skills` |
 | | `ask_user_information` |
 | | 子 Agent 管理类（registry 为 stub） |
 

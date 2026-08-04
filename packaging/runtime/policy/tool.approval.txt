@@ -24,13 +24,11 @@ read_file=rule
 glob_files=rule
 grep_file=rule
 grep_files=rule
-agent_discover=rule
 background_job_status=rule
 
-# --- 上下文治理：写盘/跨 Agent（WS3 spill；rule 时信任链可免重复审批）---
+# --- 上下文治理：写盘（WS3 spill；rule 时信任链可免重复审批）---
 write_file=rule
 search_replace=rule
-agent_invoke=rule
 
 # --- 必须审批：写盘强制全审、会话协调、任务取消 ---
 # write_file=always 可显式关闭信任链绕过

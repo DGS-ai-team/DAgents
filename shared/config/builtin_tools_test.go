@@ -97,3 +97,16 @@ func TestBuiltinToolGroupMembers(t *testing.T) {
 		t.Fatal("expected false for unknown group")
 	}
 }
+
+func TestLoadFile_rejectsRetiredA2AGroup(t *testing.T) {
+	path, _ := testConfigPath(t, `
+node_id: test-agent
+tools:
+  enabled_groups:
+    - a2a
+`)
+	_, err := LoadFile(path)
+	if err == nil || !strings.Contains(err.Error(), "a2a") {
+		t.Fatalf("LoadFile err = %v", err)
+	}
+}

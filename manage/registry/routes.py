@@ -46,8 +46,8 @@ def _resolve_discover_caller_groups(
 ) -> list[str] | None:
     """解析 discover 的 caller 可见分组。
 
-    未传 discovery_group 查询参数时，Node agent_discover 依赖此结果按调用方
-    Manage 已分配的 discovery_group 与对端求交集。
+    未传 discovery_group 查询参数时，按调用方 Manage 已分配的
+    discovery_group 与对端求交集，限制 discover 可见范围。
     """
     if caller_groups:
         return caller_groups

@@ -28,7 +28,6 @@ type Result struct {
 	NodeID           string
 	Status           string
 	Version          string
-	ExposeToPeers    bool
 	ManageRegistered bool
 	Capabilities     []string
 	LLM              LLMInfo
@@ -51,7 +50,6 @@ type llmInfoPayload struct {
 
 type agentInfoPayload struct {
 	NodeID           string         `json:"node_id"`
-	ExposeToPeers    bool           `json:"expose_to_peers"`
 	Capabilities     []string       `json:"capabilities"`
 	ManageRegistered bool           `json:"manage_registered"`
 	LLM              llmInfoPayload `json:"llm"`
@@ -93,7 +91,6 @@ func Node(ctx context.Context, cfg *config.Config, httpClient *http.Client) (*Re
 		NodeID:           health.NodeID,
 		Status:           health.Status,
 		Version:          health.Version,
-		ExposeToPeers:    info.ExposeToPeers,
 		ManageRegistered: info.ManageRegistered,
 		Capabilities:     info.Capabilities,
 		LLM: LLMInfo{

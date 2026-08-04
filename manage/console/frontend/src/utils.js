@@ -28,7 +28,6 @@ export function computeStats(agents) {
     online: list.filter((a) => a.status === "online").length,
     offline: list.filter((a) => a.status === "offline").length,
     total: list.length,
-    peers: list.filter((a) => a.expose_to_peers && a.status === "online").length,
   };
 }
 
@@ -68,10 +67,6 @@ export const VIEW_META = {
   registry: {
     title: "Agent 目录",
     subtitle: "已注册 Agent Node 目录与 discovery 分组",
-  },
-  inbox: {
-    title: "A2A Inbox",
-    subtitle: "A2A Task 只读观测（不会 deliver）",
   },
   nodeadmin: {
     title: "Node 配置",

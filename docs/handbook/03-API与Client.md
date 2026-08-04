@@ -17,10 +17,10 @@
 |------|------|
 | **用户面 = Agent** | 1 Agent = 1 主对话；优先 `/v1/agents/{agent_id}/...` |
 | **`/v1/sessions*` 已移除** | 未注册路由（404）；一律用 `/v1/agents/{agent_id}/...` |
-| **Policy / 侧车按 Agent** | SQLite（`agents.db`）；全局 `/v1/policy` 已 410 |
+| **Policy / 侧车按 Agent** | SQLite（`agents.db`）；全局 `/v1/policy` 已移除（404） |
 | **Client 只连 Node** | 默认同机 `127.0.0.1`；**前后端分离**时 Client 在较新机器、`local.endpoint` 指向目标机 Node（见 [01 §1.5](./01-愿景与架构.md)、§4.4） |
 | **思考与工具在 Node 内** | 无 Backend 代执行 |
-| **A2A 经 Manage** | 注册载荷用 `node_id`（`manage.enabled` 默认关） |
+| **A2A / Placement 已拆除** | 跨 Node 请用工作组；注册载荷用 `node_id`（`manage.enabled` 默认关） |
 
 ### 1.1 路径前缀
 
@@ -45,7 +45,7 @@
 }
 ```
 
-常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`、`policy_moved`。
+常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`。
 
 ---
 

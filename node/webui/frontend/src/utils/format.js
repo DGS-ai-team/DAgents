@@ -4,12 +4,11 @@ import { parseTemporaryAgentToolResult } from "./temporaryAgentResults.js";
 
 export { toolDisplayName, approvalItemDisplayName };
 
-export function formatToolCallLine(entry, { a2a = false, peerSuffix = "" } = {}) {
+export function formatToolCallLine(entry) {
   const data = entry?.data || entry || {};
   const name = entry?.summary || data.summary || toolDisplayName(data.tool_name || data.name, data.arguments || {});
   const partial = entry?.partial || data.partial ? " …" : "";
-  const relay = a2a ? `${peerSuffix} · 待审批` : "";
-  return `▶ ${name}${relay || partial}`;
+  return `▶ ${name}${partial}`;
 }
 
 /** 对齐 Python format_tool_result / parse_temporary_agent_tool_result。 */

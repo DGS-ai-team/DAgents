@@ -41,8 +41,6 @@ export function clearHitl() {
 export function approvalQueueKey(data) {
   const child = String(data?.child_agent_id || "").trim();
   if (child) return `child:${child}`;
-  const a2aTask = String(data?.a2a_task_id || "").trim();
-  if (a2aTask) return `a2a:${a2aTask}`;
   const id = String(data?.approval_id || data?.hitl_id || "").trim();
   if (id) return `parent:${id}`;
   const calls = extractToolApprovals(data);
@@ -55,34 +53,12 @@ export function approvalQueueKey(data) {
   return "parent:anonymous";
 }
 
-export function isA2ARelay(data) {
-  return !!data?.a2a_relay;
-}
-
-export function a2aPeerLabel(data) {
-  const name = String(data?.a2a_peer_agent_name || "").trim();
-  if (name) return name;
-  return String(data?.a2a_peer_agent_id || "").trim();
-}
-
-export function a2aRelaySuffix(data) {
-  const label = a2aPeerLabel(data);
-  return label ? ` from ${label}` : " from 对端 Agent";
-}
-
-export function a2aApprovedSummary(data, approved) {
-  if (!approved) return "已拒绝";
-  const label = a2aPeerLabel(data) || "对端 Agent";
-  return `已审批，由${label}执行`;
-}
-
 import { normalizeToolCallItem } from "../utils/toolCalls.js";
 
 function attachApprovalRouting(data, resume) {
   const rv = { ...resume };
   if (data?.child_agent_id) rv.child_agent_id = data.child_agent_id;
   if (data?.approval_id) rv.approval_id = data.approval_id;
-  if (data?.a2a_task_id) rv.a2a_task_id = data.a2a_task_id;
   return rv;
 }
 
@@ -284,13 +260,6 @@ function hitlRoutingFieldsFromBatch(batch) {
   if (scope) out.hitl_scope = scope;
   const purpose = String(batch.child_purpose || "").trim();
   if (purpose) out.child_purpose = purpose;
-  const a2aTask = String(batch.a2a_task_id || "").trim();
-  if (a2aTask) out.a2a_task_id = a2aTask;
-  if (batch.a2a_relay) out.a2a_relay = true;
-  const peerName = String(batch.a2a_peer_agent_name || "").trim();
-  if (peerName) out.a2a_peer_agent_name = peerName;
-  const peerId = String(batch.a2a_peer_agent_id || "").trim();
-  if (peerId) out.a2a_peer_agent_id = peerId;
   return out;
 }
 
@@ -330,25 +299,6 @@ export function expandHitlRequired(data) {
     memoryConflicts,
     approval: approvalDataFromHITLBatch(data, executeItems),
   };
-}
-
-/** 将 hydrate pending_a2a_relay 展开并入队（F-H4）。 */
-export function enqueueA2ARelayPending(relay) {
-  if (!relay?.event_type || !relay?.data) return;
-  const data = { ...relay.data };
-  if (relay.a2a_task_id && !data.a2a_task_id) data.a2a_task_id = relay.a2a_task_id;
-  if (relay.a2a_relay && !data.a2a_relay) data.a2a_relay = true;
-  switch (String(relay.event_type).trim()) {
-    case "hitl_required":
-      enqueueHitlRequired(data);
-      break;
-    default:
-      // 历史 hydrate 若仍带旧事件名，归一后再入队。
-      if (data?.items?.length) {
-        enqueueHitlRequired(data);
-      }
-      break;
-  }
 }
 
 /** 将 hitl_required / hydrate pending_hitl 展开并入队。 */

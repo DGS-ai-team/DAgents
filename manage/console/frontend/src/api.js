@@ -1,5 +1,4 @@
 const REGISTRY_API = "/v1/registry/agents";
-const INBOX_API = "/v1/admin/a2a/tasks";
 
 export async function apiFetch(path, params = {}, options = {}) {
   const url = new URL(path, window.location.origin);
@@ -57,10 +56,6 @@ export async function fetchHealth() {
 
 export async function fetchAgents(params) {
   return apiFetch(REGISTRY_API, params);
-}
-
-export async function fetchInboxTasks(params) {
-  return apiFetch(INBOX_API, params);
 }
 
 export async function fetchAudit(limit = 100) {

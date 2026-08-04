@@ -9,7 +9,6 @@ function asObject(value) {
 export const BLANK_TEMPLATE_ID = "__blank__";
 
 export const TOOL_GROUPS = [
-  { name: "a2a", label: "A2A 协作" },
   { name: "bash", label: "命令行" },
   { name: "browser", label: "浏览器", beta: true },
   { name: "child_agents", label: "子 Agent" },

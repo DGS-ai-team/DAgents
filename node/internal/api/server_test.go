@@ -23,13 +23,10 @@ import (
 
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
-	accept := true
 	cfg := &config.Config{
 		NodeID: "ops-linux-01",
 		Agent:  config.AgentConfig{Name: "ops-linux"},
-		Manage: config.ManageConfig{
-			A2A: config.ManageA2AConfig{AcceptInbound: &accept},
-		},
+		Manage: config.ManageConfig{},
 		FSRoot: t.TempDir(),
 		Compression: config.CompressionConfig{
 			SilentTriggerTokens:   80000,
@@ -118,7 +115,7 @@ func TestHandleAgentInfo(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.NodeID != "ops-linux-01" || !got.ExposeToPeers {
+	if got.NodeID != "ops-linux-01" {
 		t.Fatalf("unexpected agent info: %+v", got)
 	}
 	if got.ManageRegistered {

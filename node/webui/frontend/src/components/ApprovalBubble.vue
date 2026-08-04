@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { approvalItemDisplayName } from "../utils/format.js";
-import { extractToolApprovals, isA2ARelay, a2aRelaySuffix } from "../stores/hitl.js";
+import { extractToolApprovals } from "../stores/hitl.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 
 const props = defineProps({
@@ -12,21 +12,18 @@ const props = defineProps({
 const emit = defineEmits(["approve-one", "reject-one", "approve-all", "reject-all"]);
 
 const items = () => extractToolApprovals(props.data);
-const a2a = () => isA2ARelay(props.data);
-const suffix = () => a2aRelaySuffix(props.data);
 const visual = computed(() => resolveToolVisual({ data: props.data }));
 </script>
 
 <template>
   <div class="msg msg--approval">
     <div class="msg__body msg__body--wide">
-      <div class="approval-bubble" :class="a2a() ? 'approval-bubble--a2a' : ''">
+      <div class="approval-bubble">
         <div class="tool-exec-bubble__source">
           <span class="tool-source-badge" :class="`tool-source-badge--${visual.kind}`" :title="visual.label">
             <span class="tool-source-badge__icon" aria-hidden="true">{{ visual.icon }}</span>
-            <span class="tool-source-badge__text">{{ a2a() ? 'A2A 待审批' : '待审批' }}</span>
+            <span class="tool-source-badge__text">待审批</span>
           </span>
-          <span v-if="a2a()" class="approval-bubble__relay">{{ suffix() }}</span>
         </div>
         <ul class="approval-tool-list">
           <li v-for="it in items()" :key="it.callId" class="approval-tool-item">

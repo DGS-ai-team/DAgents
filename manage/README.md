@@ -6,12 +6,14 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 |----|------|------|
 | **Platform** | ✅ | 鉴权、审计、Blob、指标 |
 | **Registry** | ✅ | 注册、心跳、注销、目录、discover |
-| **A2A** | ⚠️ 退役中 | inbox / invoke HTTP 已 `410 a2a_inbox_retired`；跨机协作用工作组；Admin Task 只读仍可用 |
+| **Workgroup** | ✅ | 跨 Node 协作（Leader + Worker Dialer） |
+| **A2A Task/Inbox** | ❌ 已拆除 | 原 inbox / `agent_invoke` / Placement control 已移除；跨机请用工作组 |
+
 | **Skills / Plugins / ExternalTools** | ✅（Manage 侧） | 精简分发（draft → publish）；**Node 自动 sync 待 Phase 2** |
 | **LLM** | ✅（Manage 侧） | 集中 CRUD + `/resolve`；**Node 自动消费待做** |
 | **Releases** | ✅ | 安装包托管 + `/v1/releases/check`；Node `UpdateChecker` |
 | **Cases** | ✅ | 案例库（JSONL 演示会话 + 关联资源） |
-| **Console** | ✅ | Agent 目录、A2A Inbox、案例库、Node 配置（LLM/Skills/Plugins/ExternalTools/版本发布） |
+| **Console** | ✅ | Agent 目录、案例库、Node 配置（LLM/Skills/Plugins/ExternalTools/版本发布） |
 
 架构方案：[docs/design/manage-architecture.md](../docs/design/manage-architecture.md)
 
@@ -101,8 +103,6 @@ Node 出站 Header：
 | `MANAGE_SHARED_TOKEN` | （空） | **可选**；单 shared admin token |
 | `MANAGE_AUDIT_PATH` | （空） | 审计 JSONL 追加路径 |
 | `MANAGE_AUDIT_MAX_ENTRIES` | `500` | 内存审计条数 |
-| `MANAGE_A2A_INBOX_CONTENT_MAX_CHARS` | `4096` | inbox 返回 `content` 最大字符；超出截断并设 `content_truncated` |
-| `MANAGE_A2A_EXPIRE_SWEEP_SECONDS` | `30` | 后台 TTL 过期扫描间隔；`0` 关闭（仅按需单条过期） |
 
 鉴权 Header（Token 模式）：`x-dagents-a2a-token` 或 `Authorization: Bearer …`。  
 身份 Header（Node 注册）：`x-dagents-agent-id: <agent_id>`。
@@ -116,36 +116,14 @@ Node 出站 Header：
 | POST | `/v1/registry/agents/{id}/deregister` | 注销 |
 | PATCH | `/v1/registry/agents/{id}/groups` | **Manage 分配** discovery_group |
 | GET | `/v1/registry/agents` | 列表（分页/筛选） |
-| GET | `/v1/registry/agents/discover` | A2A 发现（**不含 base_url**） |
+| GET | `/v1/registry/agents/discover` | 发现在线 Node（**不含 base_url**） |
 | GET | `/v1/registry/agents/{id}` | 详情 |
 | DELETE | `/v1/registry/agents/{id}` | 管理员删除 |
 
 系统：`GET /health`、`GET /metrics`、`GET /v1/admin/audit`。
 
-### Admin 观测（只读）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/v1/admin/a2a/tasks` | A2A Task 列表（**不会 deliver**） |
-
+> **已拆除**：A2A Task / Inbox、Placement `/v1/control/*`、Console Inbox、Node `agent_invoke`；跨机器协作请用工作组。  
 > **已禁用**：Admin session 代理（`/v1/admin/nodes/.../sessions`）已移除，Manage 不再出站访问 Node session API。
-
-## A2A Task API
-
-创建 Task 时 Manage 校验：
-
-1. target **online** 且 **expose_to_peers=true**
-2. caller 与 target 均至少有一个 **discovery_group**，且**存在交集**（否则 `403 discovery_group_mismatch` / `caller_discovery_group_empty` / `target_discovery_group_empty`）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/v1/a2a/tasks` | 创建 Task（`kind`: invoke \| notify） |
-| GET | `/v1/a2a/inbox` | long poll 拉取 pending（`?wait=25`） |
-| POST | `/v1/a2a/tasks/{id}/ack` | 标记 processing |
-| POST | `/v1/a2a/tasks/{id}/reply` | 提交结果 |
-| GET | `/v1/a2a/tasks/{id}` | 查询状态 |
-
-协议说明：[docs/future/a2a-via-manage.md](../docs/future/a2a-via-manage.md)（**无** `/v1/a2a/messages` 兼容）。
 
 ## Release Hub（安装包托管）
 
@@ -189,11 +167,10 @@ JSONL 行格式对齐 Node `history/*.jsonl`：`{"recorded_at":"...","message":{
 manage/
   config.py
   manage_app.py
-  admin/            # Admin 只读 API（A2A 列表）
   platform/         # auth, audit, blob, metrics
   storage/          # sqlite
   registry/         # models, store, routes, status
-  a2a/              # Task store + routes
+  workgroup/        # 跨 Node 协作
   llm/              # LLM 配置注册中心
   skills/           # Skill 包分发
   plugins/          # Hook Plugin 分发
@@ -219,10 +196,6 @@ manage:
     interval_seconds: 30
     ttl_seconds: 60
     team: platform
-  a2a:
-    enabled: true              # 默认随 manage.enabled 开启
-    inbox_wait_seconds: 25     # long poll wait
-    inbox_poll_seconds: 30     # 断线降级短 poll
 ```
 
 **discovery_group** 不由 Node 传入；在 Manage Console 详情抽屉或 API 分配：

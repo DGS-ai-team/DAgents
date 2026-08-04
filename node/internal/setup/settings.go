@@ -41,14 +41,10 @@ type ManageSettings struct {
 	URL                         string `json:"url"`
 	Team                        string `json:"team"`
 	RegistrationBaseURL         string `json:"registration_base_url"`
-	A2AEnabled                  bool   `json:"a2a_enabled"`
-	AcceptInbound               bool   `json:"accept_inbound"`
 	WorkgroupEnabled            bool   `json:"workgroup_enabled"`
 	NodeToken                   string `json:"node_token"`
 	RegistrationIntervalSeconds int    `json:"registration_interval_seconds"`
 	RegistrationTTLSeconds      int    `json:"registration_ttl_seconds"`
-	A2AInboxWaitSeconds         int    `json:"a2a_inbox_wait_seconds"`
-	A2AInboxPollSeconds         int    `json:"a2a_inbox_poll_seconds"`
 }
 
 // FeatureSettings 功能开关（安装向导原批次 3）。
@@ -188,10 +184,6 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 	if cfg == nil {
 		return SettingsView{}
 	}
-	a2aEnabled := cfg.ManageA2AEnabled()
-	if cfg.Manage.A2A.Enabled != nil {
-		a2aEnabled = *cfg.Manage.A2A.Enabled
-	}
 	workgroupEnabled := true
 	if cfg.Manage.Workgroup.Enabled != nil {
 		workgroupEnabled = *cfg.Manage.Workgroup.Enabled
@@ -216,14 +208,10 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			URL:                         cfg.Manage.URL,
 			Team:                        cfg.Manage.Registration.Team,
 			RegistrationBaseURL:         cfg.Manage.Registration.BaseURL,
-			A2AEnabled:                  a2aEnabled,
-			AcceptInbound:               cfg.ExposeToPeersEffective(),
 			WorkgroupEnabled:            workgroupEnabled,
 			NodeToken:                   cfg.Manage.NodeToken,
 			RegistrationIntervalSeconds: cfg.Manage.Registration.IntervalSeconds,
 			RegistrationTTLSeconds:      cfg.Manage.Registration.TTLSeconds,
-			A2AInboxWaitSeconds:         cfg.Manage.A2A.InboxWaitSeconds,
-			A2AInboxPollSeconds:         cfg.Manage.A2A.InboxPollSeconds,
 		},
 		Features: FeatureSettings{
 			SkillsEnabled:            cfg.Skills.Enabled,
@@ -498,12 +486,6 @@ func applyManagePatch(cfg *config.Config, p ManageSettings) error {
 	if p.RegistrationTTLSeconds > 0 {
 		cfg.Manage.Registration.TTLSeconds = p.RegistrationTTLSeconds
 	}
-	if p.A2AInboxWaitSeconds > 0 {
-		cfg.Manage.A2A.InboxWaitSeconds = p.A2AInboxWaitSeconds
-	}
-	if p.A2AInboxPollSeconds > 0 {
-		cfg.Manage.A2A.InboxPollSeconds = p.A2AInboxPollSeconds
-	}
 	if !p.Enabled {
 		return nil
 	}
@@ -514,9 +496,6 @@ func applyManagePatch(cfg *config.Config, p ManageSettings) error {
 	cfg.Manage.URL = url
 	cfg.Manage.Registration.Team = strings.TrimSpace(p.Team)
 	cfg.Manage.Registration.BaseURL = strings.TrimSpace(p.RegistrationBaseURL)
-	a2a := p.A2AEnabled
-	cfg.Manage.A2A.Enabled = boolPtr(a2a)
-	cfg.Manage.A2A.AcceptInbound = boolPtr(p.AcceptInbound)
 	return nil
 }
 

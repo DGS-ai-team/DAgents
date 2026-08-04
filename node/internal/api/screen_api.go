@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/screen"
-	"github.com/DGS-ai-team/DAgents/node/internal/store"
 )
 
 func (s *Server) registerScreenRoutes() {
@@ -31,12 +30,10 @@ func (s *Server) handleAgentScreenStatus(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if rec == nil || rec.Archived {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+			s.writeAgentNotFound(w, id)
 			return
 		}
-		// 远端引用：D5 已停 Edge；返回 placement_deprecated。
-		if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-			writeRemotePlacementDeprecated(w, id)
+		if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 			return
 		}
 	}
@@ -60,11 +57,10 @@ func (s *Server) handleAgentScreenStream(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if rec == nil || rec.Archived {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+			s.writeAgentNotFound(w, id)
 			return
 		}
-		if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-			writeRemotePlacementDeprecated(w, id)
+		if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 			return
 		}
 	}

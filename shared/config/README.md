@@ -42,7 +42,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 - **非空列表**：仅列出组内全部工具对 LLM 可见/可调用；handler 仍注册（便于子 Agent 委托等内部调用）。
 - **校验**：组名须与 `shared/config/builtin_tools.go` 中 `builtinToolGroups` 一致；`tools.enabled` 已废弃。
 
-**可配置工具组（7 组）**
+**可配置工具组（6 组）**
 
 | 组名 | 包含工具 |
 |------|----------|
@@ -51,7 +51,6 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | `hitl` | `ask_user_information` |
 | `skills` | `load_skills`、`unload_skills`、`clear_skills` |
 | `triggers` | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete` |
-| `a2a` | `agent_invoke`、`agent_discover`（须 `manage.enabled`） |
 | `child_agents` | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
 
 各工具作用见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1；示例见 [`packaging/agent-client/config.example.yaml`](../../packaging/agent-client/config.example.yaml)。

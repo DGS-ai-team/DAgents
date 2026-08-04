@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/childagent"
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
@@ -58,7 +57,6 @@ type Server struct {
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
 	control         *manage.ControlClient
-	a2aCallerHITL   *session.A2ACallerHITLBridge
 	tools           *tools.Registry
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
@@ -331,17 +329,13 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	var registrar *manage.Registrar
 	var updateChecker *manage.UpdateChecker
 	var packageUploader *manage.PackageUploader
-	var a2aBridge *session.A2ACallerHITLBridge
 	if cfg.Manage.Enabled {
-		manage.LogA2AProfileWarnings(cfg, logger)
 		registrar = manage.NewRegistrar(cfg, logger)
 		registrar.SetToolNamesProvider(mgr.ToolNames)
 		if !manage.UpdateDelegatedToShell() {
 			updateChecker = manage.NewUpdateChecker(cfg, logger)
 		}
 		packageUploader = manage.NewPackageUploader(cfg, logger)
-		// A2A inbox callee 已退役；caller HITL bridge 仅兼容旧 resume 事件，新建 task 由 Manage 返回 410。
-		a2aBridge = session.NewA2ACallerHITLBridge(cfg.NodeID, hub)
 	}
 	control := manage.NewControlClient(cfg)
 	var wgWorker *workgroup.Worker
@@ -394,7 +388,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		updateChecker:   updateChecker,
 		packageUploader: packageUploader,
 		control:         control,
-		a2aCallerHITL:   a2aBridge,
 		tools:           o.tools,
 		browserMgr:      browserMgr,
 		mediaRegister:   mediaRegister,
@@ -423,7 +416,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()
 	s.registerMediaRoutes()
-	s.registerPolicyRoutes()
 	s.registerLLMRoutes()
 	s.registerSetupRoutes()
 	s.registerManageUploadRoutes()
@@ -448,9 +440,6 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	}
 	if s.browserMgr != nil {
 		reg.SetBrowserManager(s.browserMgr)
-	}
-	if s.cfg != nil && s.cfg.Manage.Enabled && s.a2aCallerHITL != nil {
-		reg.SetManageRuntime(a2aclient.New(s.cfg), s.cfg.NodeID, s.a2aCallerHITL)
 	}
 }
 
@@ -630,7 +619,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 type agentInfoResponse struct {
 	NodeID            string              `json:"node_id"`
-	ExposeToPeers     bool                `json:"expose_to_peers"`
 	Capabilities      []string            `json:"capabilities"`
 	MultimodalEnabled bool                `json:"multimodal_enabled"`
 	ManageRegistered  bool                `json:"manage_registered"`
@@ -659,7 +647,6 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
 		NodeID:            s.cfg.NodeID,
-		ExposeToPeers:     s.cfg.ExposeToPeersEffective(),
 		Capabilities:      s.cfg.Capabilities(),
 		MultimodalEnabled: s.cfg.MultimodalEnabled(),
 		ManageRegistered:  registered,
@@ -829,18 +816,17 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 }
 
 type sessionHydrateResponse struct {
-	AgentID         string                    `json:"agent_id"`
-	RunTurnPhase    string                    `json:"run_turn_phase"`
-	HasActiveTurn   bool                      `json:"has_active_turn"`
-	QueuePending    int                       `json:"queue_pending"`
-	Transcript      []session.TranscriptEntry `json:"transcript"`
-	PendingHITL     map[string]any            `json:"pending_hitl"`
-	PendingA2ARelay map[string]any            `json:"pending_a2a_relay,omitempty"`
-	SSESeqHint      int                       `json:"sse_seq_hint"`
-	NotifySeq       int                       `json:"notify_seq"`
-	AckSeq          int                       `json:"ack_seq"`
-	HasUnread       bool                      `json:"has_unread"`
-	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
+	AgentID       string                    `json:"agent_id"`
+	RunTurnPhase  string                    `json:"run_turn_phase"`
+	HasActiveTurn bool                      `json:"has_active_turn"`
+	QueuePending  int                       `json:"queue_pending"`
+	Transcript    []session.TranscriptEntry `json:"transcript"`
+	PendingHITL   map[string]any            `json:"pending_hitl"`
+	SSESeqHint    int                       `json:"sse_seq_hint"`
+	NotifySeq     int                       `json:"notify_seq"`
+	AckSeq        int                       `json:"ack_seq"`
+	HasUnread     bool                      `json:"has_unread"`
+	ToolJobs      map[string]int            `json:"tool_jobs,omitempty"`
 }
 
 func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) {
@@ -863,13 +849,6 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		transcript = []session.TranscriptEntry{}
 	}
 	runPhase := view.RunTurnPhase
-	pendingA2A := map[string]any(nil)
-	if s.a2aCallerHITL != nil {
-		pendingA2A = s.a2aCallerHITL.PendingRelaySnapshot(sessionID)
-	}
-	if pendingA2A != nil && runPhase != string(turn.TaskPhaseAwaitingHITL) {
-		runPhase = string(turn.TaskPhaseAwaitingHITL)
-	}
 	toolJobs := map[string]int{"running": 0, "background": 0}
 	if reg := s.sessions.SessionTools(sessionID); reg != nil {
 		c := reg.SessionToolJobCounts(sessionID)
@@ -877,18 +856,17 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		toolJobs["background"] = c.Background
 	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
-		AgentID:         view.SessionID,
-		RunTurnPhase:    runPhase,
-		HasActiveTurn:   view.HasActiveTurn,
-		QueuePending:    view.QueuePending,
-		Transcript:      transcript,
-		PendingHITL:     view.PendingHITL,
-		PendingA2ARelay: pendingA2A,
-		SSESeqHint:      s.stream.CurrentSeq(),
-		NotifySeq:       view.NotifySeq,
-		AckSeq:          view.AckSeq,
-		HasUnread:       view.HasUnread,
-		ToolJobs:        toolJobs,
+		AgentID:       view.SessionID,
+		RunTurnPhase:  runPhase,
+		HasActiveTurn: view.HasActiveTurn,
+		QueuePending:  view.QueuePending,
+		Transcript:    transcript,
+		PendingHITL:   view.PendingHITL,
+		SSESeqHint:    s.stream.CurrentSeq(),
+		NotifySeq:     view.NotifySeq,
+		AckSeq:        view.AckSeq,
+		HasUnread:     view.HasUnread,
+		ToolJobs:      toolJobs,
 	})
 }
 
@@ -1002,8 +980,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// 若该 id 是 Agent 实例，先按快照装入 runtime（避免重启后落到默认沙箱配置）。
 	if s.agents != nil {
 		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
-			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-				writeRemotePlacementDeprecated(w, sessionID)
+			if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 				return
 			}
 			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
@@ -1015,14 +992,6 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	requestType := strings.TrimSpace(req.RequestType)
 	if requestType == "" {
 		requestType = "message"
-	}
-	if requestType == "resume" && s.a2aCallerHITL != nil && s.a2aCallerHITL.DeliverA2ACallerResume(sessionID, req.ResumeValue) {
-		writeJSON(w, http.StatusOK, postMessageResponse{
-			Accepted: true,
-			AgentID:  sessionID,
-			Priority: string(queue.PriorityHuman),
-		})
-		return
 	}
 
 	priority, err := s.sessions.EnqueueMessage(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.ResumeValue, req.UserMessageName)
@@ -1085,8 +1054,7 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	// 远端引用若未走 Edge upgrade，禁止订阅本机 hub（否则永远无事件且误导）。
 	if agentFilter != "" && s.agents != nil {
 		if rec, err := s.agents.Get(r.Context(), agentFilter); err == nil && rec != nil && !rec.Archived {
-			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-				writeRemotePlacementDeprecated(w, agentFilter)
+			if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 				return
 			}
 		}

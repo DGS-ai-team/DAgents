@@ -41,11 +41,6 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS a2a_tasks (
-                    task_id TEXT PRIMARY KEY,
-                    payload_json TEXT NOT NULL
-                );
-
                 CREATE TABLE IF NOT EXISTS llm_configs (
                     id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL

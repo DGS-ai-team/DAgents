@@ -23,7 +23,6 @@ const emit = defineEmits(["open"]);
             <th>状态</th>
             <th>版本</th>
             <th>最近心跳</th>
-            <th>A2A</th>
             <th>风险</th>
             <th>工具</th>
             <th>分组</th>
@@ -31,7 +30,7 @@ const emit = defineEmits(["open"]);
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="10" class="empty">
+            <td colspan="9" class="empty">
               <div class="empty-state">
                 <span class="spinner" aria-hidden="true"></span>
                 加载中…
@@ -39,7 +38,7 @@ const emit = defineEmits(["open"]);
             </td>
           </tr>
           <tr v-else-if="!agents.length">
-            <td colspan="10" class="empty">
+            <td colspan="9" class="empty">
               <div class="empty-state">无匹配 Node</div>
             </td>
           </tr>
@@ -74,11 +73,6 @@ const emit = defineEmits(["open"]);
             </td>
             <td>{{ agent.version || "—" }}</td>
             <td class="mono">{{ formatUnix(agent.last_seen_unix) }}</td>
-            <td>
-              <span class="pill" :class="agent.expose_to_peers ? 'pill-yes' : 'pill-no'">
-                {{ agent.expose_to_peers ? "是" : "否" }}
-              </span>
-            </td>
             <td>
               <span class="pill" :class="riskPillClass(agent.risk_level)">
                 {{ agent.risk_level || "medium" }}

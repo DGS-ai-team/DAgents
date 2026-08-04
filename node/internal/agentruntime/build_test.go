@@ -47,7 +47,7 @@ func TestBuild_sandboxIsolation(t *testing.T) {
 		t.Fatalf("fsRoot=%q turn=%q want %q", built.FSRoot, built.TurnOptions.FSRoot, wantFS)
 	}
 	for _, g := range built.ToolGroups {
-		if g == "bash" || g == "browser" || g == "a2a" {
+		if g == "bash" || g == "browser" {
 			t.Fatalf("unexpected group %q in %v", g, built.ToolGroups)
 		}
 	}

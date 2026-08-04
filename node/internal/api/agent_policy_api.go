@@ -14,6 +14,15 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
+type policyToolUpdatesBody struct {
+	Updates []policy.ToolUpdate `json:"updates"`
+}
+
+type policyShellUpdatesBody struct {
+	Updates []policy.ShellUpdate `json:"updates"`
+	Deletes []string             `json:"deletes"`
+}
+
 func (s *Server) registerAgentPolicyRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{agent_id}/policy", s.handleGetAgentPolicy)
 	s.mux.HandleFunc("PUT /v1/agents/{agent_id}/policy/tools", s.handlePutAgentToolPolicy)

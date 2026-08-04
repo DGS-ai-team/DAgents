@@ -41,7 +41,7 @@ func TestApplySandboxToolConstraints_nilMeansAllThenFilter(t *testing.T) {
 	snap := Snapshot{Sandbox: SandboxSpec{Enabled: true, AllowBash: false, AllowNetworkTools: false}}
 	got := ApplySandboxToolConstraints(nil, snap)
 	for _, g := range got {
-		if g == "bash" || g == "browser" || g == "a2a" {
+		if g == "bash" || g == "browser" {
 			t.Fatalf("unexpected group %q in %v", g, got)
 		}
 	}

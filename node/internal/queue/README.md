@@ -25,7 +25,7 @@ side_effect_continue(-1) > tool_result(-1) > human(0) > resume(1) > async_comple
 | `human` | `message` | 用户/子任务 human 抢占 |
 | `resume` | `resume` | HITL 提交 |
 | `async_completion` | `async_tool_result` | 后台 job Produce（缓冲 + SSE，不 inline Apply） |
-| `other` | `trigger_message` / `a2a_inbox_message` | trigger / A2A inbox Produce |
+| `other` | `trigger_message` | trigger Produce |
 
 **边界**：队列不含 consumer；`session.runtime.consumeLoop` 负责 `Dequeue` 并分发 handler。async/trigger/a2a **Produce** 入缓冲；**Apply** 在 `runTurnStep` 步首。pending HITL **不**阻塞出队（Issue #32）。
 

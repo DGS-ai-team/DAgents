@@ -17,8 +17,6 @@ var DefaultToolResultTools = []string{
 	"grep_files",
 	"search_replace",
 	"glob_files",
-	"agent_invoke",
-	"agent_discover",
 }
 
 // Config 控制 tool.after_each 结果摘要与落盘（WS3）。
@@ -31,7 +29,7 @@ type Config struct {
 	FSRoot string // 绝对路径，用于落盘
 }
 
-// DefaultConfig 返回 WS3 默认（bash + fs + a2a）。
+// DefaultConfig 返回 WS3 默认（bash + fs）。
 func DefaultConfig(fsRoot string) Config {
 	return Config{
 		Enabled:              true,

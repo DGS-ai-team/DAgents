@@ -15,7 +15,7 @@
 | `auth.py` | `AuthContext`, `authenticate`, `require_admin`, `TOKEN_HEADER` |
 | `audit.py` | `AuditEvent`, `AuditLog` |
 | `blob.py` | `BlobStore`, `BlobStoreConfig` |
-| `metrics.py` | `record_registry_operation`, `record_a2a_operation`, `metrics_text` |
+| `metrics.py` | `record_registry_operation`, `metrics_text` |
 
 ## storage/
 
@@ -31,14 +31,6 @@
 | `status.py` | `derive_status`, `offline_grace_seconds`, `is_deliverable` |
 | `store.py` | `AgentRegistryStore.register`（保留已有分组）, `update_groups`, `import_rc_json` |
 | `routes.py` | `build_registry_router` |
-
-## a2a/
-
-| 模块 | 符号 |
-|------|------|
-| `models.py` | `TaskCreateRequest`, `TaskRecord`, `InboxResponse`, … |
-| `store.py` | `A2ATaskStore.create`, `poll_inbox`, `ack`, `reply`, `sweep_expired` |
-| `routes.py` | `build_a2a_router` |
 
 ## skills/ · plugins/ · externaltools/
 
@@ -64,7 +56,7 @@
 | `static/` | 构建产物（不入库）：`index.html` + `assets/*`，挂载 `/console/` |
 | `build.sh` | 一键构建到 `static/` |
 
-Console 功能：Node 列表、discovery 分组、A2A Inbox、案例库、Node 配置（LLM/Skills/Plugins/ExternalTools/版本发布）。
+Console 功能：Node 列表、discovery 分组、工作组、案例库、Node 配置（LLM/Skills/Plugins/ExternalTools/版本发布）。
 
 | 路径 | 说明 |
 |------|------|

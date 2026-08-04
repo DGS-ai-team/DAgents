@@ -49,10 +49,6 @@ import {
   dequeueHitlAt,
   peekHitl,
   clearHitl,
-  isA2ARelay,
-  a2aRelaySuffix,
-  a2aApprovedSummary,
-  extractToolApprovals,
   buildApprovalResume,
   buildApprovalOneResume,
   extractUserInfo,
@@ -91,14 +87,11 @@ import {
   onChildCreated,
   onChildFinished,
   resetRemoteWorkers,
-  resetPeerInvokeInflight,
   setChildAwaitingApproval,
-  noteToolCallForWorkers,
-  noteToolResultForWorkers,
   syncChildAgentsFromApi,
 } from "../stores/remoteWorkers.js";
 import { runSlashCommand } from "../utils/commands.js";
-import { approvalItemDisplayName, agentDisplayTitle, agentRecordId } from "../utils/format.js";
+import { agentDisplayTitle, agentRecordId } from "../utils/format.js";
 
 const router = useRouter();
 const route = useRoute();
@@ -289,14 +282,12 @@ function handleEvent(ev) {
     case "tool_call":
       markTurnContent();
       finishWaitingStatuses();
-      noteToolCallForWorkers(ev.data);
       upsertToolCallFromSSE(ev.data);
       refreshToolJobs(agentStore.agentId);
       break;
     case "tool_result":
       markTurnContent();
       finishWaitingStatuses();
-      noteToolResultForWorkers(ev.data);
       applyToolResult(ev.data);
       refreshToolJobs(agentStore.agentId);
       break;
@@ -320,7 +311,6 @@ function handleEvent(ev) {
       if (shouldAcceptDone(ev.seq)) {
         finishTurn();
         resetToolStream();
-        resetPeerInvokeInflight();
         syncChildAgentsFromApi();
       }
       refreshContextTokens();
@@ -333,7 +323,6 @@ function handleEvent(ev) {
         const { approval } = enqueueHitlRequired(ev.data);
         if (approval?.child_agent_id) setChildAwaitingApproval(approval.child_agent_id, true);
       }
-      if (isA2ARelay(ev.data) && agentStore.awaitingTurn) finishTurn();
       break;
     case "temporary_agent_created":
       onChildCreated(ev.data);
@@ -392,13 +381,6 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
   const resume = buildApprovalResume(item.data, { approveAll });
   try {
     await api.submitResume(agentStore.agentId, resume);
-    if (isA2ARelay(item.data)) {
-      const suffix = a2aRelaySuffix(item.data);
-      extractToolApprovals(item.data).forEach((it) => {
-        const approved = approveAll !== false && resume.approved?.includes(it.callId);
-        addSystem(`${approvalItemDisplayName(it)}${suffix} · ${a2aApprovedSummary(item.data, approved)}`);
-      });
-    }
     dequeueHitlAt(hitlIndex);
     if (item.data?.child_agent_id) setChildAwaitingApproval(item.data.child_agent_id, false);
     hitlStore.busy = false;

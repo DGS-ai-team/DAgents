@@ -1,6 +1,7 @@
 # Manage 统一控制面架构
 
 > **状态**：v0.* 现网实现（`manage/`）  
+> **2026-08**：A2A Task inbox / `agent_invoke` / Console Inbox **已拆除**；跨机协作改走 **工作组**。下文含历史 A2A 叙述处请以 handbook/05 为准。  
 > **对齐**：[three-component-model.md](./three-component-model.md)、[roadmap.md](../roadmap.md)  
 > **相关**：通信全量参考 [manage-communication.md](../manage-communication.md) · 运维入口 [manage/README.md](../../manage/README.md) · 后续规划 [manage-phase2-capabilities.md](./manage-phase2-capabilities.md)
 
@@ -12,15 +13,15 @@
 
 | 原则 | 说明 |
 |------|------|
-| **Node 仅出站连 Manage** | 注册、心跳、A2A 收信、制品拉取、版本检查均为 **Node → Manage** |
-| **禁止 Node-to-Node** | 跨 Agent 消息与文件 **经 Manage 中继**；discover API **不返回** peer 路由 URL |
+| **Node 仅出站连 Manage** | 注册、心跳、制品拉取、版本检查、工作组均为 **Node → Manage** |
+| **禁止 Node-to-Node** | 跨 Agent 协作经 Manage（工作组）；discover API **不返回** peer 路由 URL |
 | **Client 不连 Manage** | 运维通过 **Manage Console（Web）** 或 admin API |
 | **Manage 不跑 turn** | 只做存储、目录、调度、中转；推理与工具执行仍在各 Node |
 | **本地优先** | 默认 SQLite + 本地 Blob/Release 目录；生产可演进 PostgreSQL / S3 |
 
 一句话：
 
-> Manage = **Agent 接入目录** + **A2A 协作总线** + **制品与配置分发** + **审计与运维控制台**。
+> Manage = **Agent 接入目录** + **工作组协作** + **制品与配置分发** + **审计与运维控制台**。
 
 ---
 

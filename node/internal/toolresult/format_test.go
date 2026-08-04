@@ -141,32 +141,6 @@ func TestPackage_longGlobFilesSpills(t *testing.T) {
 	}
 }
 
-func TestPackage_longAgentInvokeSpills(t *testing.T) {
-	root := t.TempDir()
-	long := strings.Repeat("o", 50000)
-	cfg := DefaultConfig(root)
-	res, err := Package(cfg, "sess-a2a", "call-ai", "agent_invoke", long)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.Spilled {
-		t.Fatal("agent_invoke should spill when over token budget")
-	}
-}
-
-func TestPackage_longAgentDiscoverSpills(t *testing.T) {
-	root := t.TempDir()
-	long := strings.Repeat("x", 50000)
-	cfg := DefaultConfig(root)
-	res, err := Package(cfg, "sess-ad", "call-ad", "agent_discover", long)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.Spilled {
-		t.Fatal("agent_discover should spill when over token budget")
-	}
-}
-
 func TestPackage_spillByTokenBudget(t *testing.T) {
 	root := t.TempDir()
 	// 25000 汉字 × 0.6 = 15000 tokens > 12000
@@ -187,7 +161,6 @@ func TestDefaultToolResultTools_includesDefaultGroups(t *testing.T) {
 	want := map[string]bool{
 		"bash_run": true, "read_file": true, "grep_file": true, "grep_files": true,
 		"search_replace": true, "glob_files": true,
-		"agent_invoke": true, "agent_discover": true,
 	}
 	for _, name := range cfg.Tools {
 		if !want[name] {

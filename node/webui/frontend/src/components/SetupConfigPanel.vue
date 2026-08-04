@@ -137,8 +137,6 @@ function llmPayload() {
 function managePayload() {
   return {
     ...form.manage,
-    a2a_enabled: false, // inbox callee 已退役
-    accept_inbound: form.manage.accept_inbound ?? false,
     workgroup_enabled: form.manage.workgroup_enabled ?? true,
   };
 }
@@ -235,7 +233,7 @@ onMounted(async () => {
       <div class="settings-section__head">
         <h2 class="settings-section__title">Manage</h2>
       </div>
-      <p class="settings-section__desc">注册到 Manage 以启用团队能力与 A2A。</p>
+      <p class="settings-section__desc">注册到 Manage 以启用团队能力与工作组。</p>
       <label class="settings-toggle">
         <input v-model="form.manage.enabled" type="checkbox" />
         <span>启用 Manage 注册与通信</span>
@@ -302,13 +300,7 @@ onMounted(async () => {
           />
         </label>
       </div>
-      <p class="settings-hint">
-        A2A inbox / invoke 已退役；跨机器协作请使用工作组。下方「接受入站」仅影响 Registry 广告（历史兼容）。
-      </p>
-      <label class="settings-toggle">
-        <input v-model="form.manage.accept_inbound" type="checkbox" :disabled="manageFieldsDisabled" />
-        <span>Registry 暴露（历史兼容，不再启动 inbox 轮询）</span>
-      </label>
+      <p class="settings-hint">跨机器协作请使用工作组。</p>
       <label class="settings-toggle">
         <input v-model="form.manage.workgroup_enabled" type="checkbox" :disabled="manageFieldsDisabled" />
         <span>启用工作组 Dialer（Manage WS 工具通道）</span>
