@@ -620,7 +620,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 type agentInfoResponse struct {
 	NodeID            string              `json:"node_id"`
-	ExposeToPeers     bool                `json:"expose_to_peers"`
 	Capabilities      []string            `json:"capabilities"`
 	MultimodalEnabled bool                `json:"multimodal_enabled"`
 	ManageRegistered  bool                `json:"manage_registered"`
@@ -649,7 +648,6 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
 		NodeID:            s.cfg.NodeID,
-		ExposeToPeers:     false,
 		Capabilities:      s.cfg.Capabilities(),
 		MultimodalEnabled: s.cfg.MultimodalEnabled(),
 		ManageRegistered:  registered,

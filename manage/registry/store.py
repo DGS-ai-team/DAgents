@@ -196,8 +196,6 @@ class AgentRegistryStore:
         items, _ = self.list(query)
         out: list[AgentDiscoverRecord] = []
         for item in items:
-            if not item.expose_to_peers:
-                continue
             if caller_groups:
                 if not any(group in item.discovery_group for group in caller_groups):
                     continue

@@ -174,10 +174,9 @@ func (r *Registrar) register(ctx context.Context) time.Duration {
 
 func (r *Registrar) heartbeat(ctx context.Context) error {
 	payload := heartbeatPayload{
-		TTLSeconds:    r.ttlSeconds,
-		Version:       version.Version,
-		Tools:         r.collectTools(),
-		ExposeToPeers: boolPtr(false),
+		TTLSeconds: r.ttlSeconds,
+		Version:    version.Version,
+		Tools:      r.collectTools(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -264,7 +263,6 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 		Description:      description,
 		Team:             strings.TrimSpace(r.cfg.Manage.Registration.Team),
 		Version:          version.Version,
-		ExposeToPeers:    false,
 		Card:             RegistrationCard(r.cfg),
 		Metadata: map[string]any{
 			"node_id":      r.cfg.NodeID,
@@ -343,16 +341,14 @@ type registerPayload struct {
 	Description      string         `json:"description,omitempty"`
 	Team             string         `json:"team,omitempty"`
 	Version          string         `json:"version,omitempty"`
-	ExposeToPeers    bool           `json:"expose_to_peers"`
 	Card             map[string]any `json:"card,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
 }
 
 type heartbeatPayload struct {
-	TTLSeconds    int      `json:"ttl_seconds"`
-	Version       string   `json:"version,omitempty"`
-	Tools         []string `json:"tools,omitempty"`
-	ExposeToPeers *bool    `json:"expose_to_peers,omitempty"`
+	TTLSeconds int      `json:"ttl_seconds"`
+	Version    string   `json:"version,omitempty"`
+	Tools      []string `json:"tools,omitempty"`
 }
 
 type registerResponse struct {
@@ -366,10 +362,6 @@ var errNotFound = fmt.Errorf("agent not found")
 
 func isNotFound(err error) bool {
 	return err == errNotFound
-}
-
-func boolPtr(v bool) *bool {
-	return &v
 }
 
 func readErrorBody(r io.Reader) string {

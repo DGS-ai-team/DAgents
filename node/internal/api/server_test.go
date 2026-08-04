@@ -115,7 +115,7 @@ func TestHandleAgentInfo(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.NodeID != "ops-linux-01" || got.ExposeToPeers {
+	if got.NodeID != "ops-linux-01" {
 		t.Fatalf("unexpected agent info: %+v", got)
 	}
 	if got.ManageRegistered {

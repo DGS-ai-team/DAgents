@@ -34,7 +34,6 @@ func (s *Server) handleUIBootstrap(w http.ResponseWriter, _ *http.Request) {
 	llmView := s.llmSettingsView()
 	info := agentInfoResponse{
 		NodeID:            "",
-		ExposeToPeers:     false,
 		Capabilities:      nil,
 		MultimodalEnabled: false,
 		ManageRegistered:  registered,
@@ -43,7 +42,6 @@ func (s *Server) handleUIBootstrap(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.cfg != nil {
 		info.NodeID = s.cfg.NodeID
-		info.ExposeToPeers = false
 		info.Capabilities = s.cfg.Capabilities()
 		info.MultimodalEnabled = s.cfg.MultimodalEnabled()
 	}

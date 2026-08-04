@@ -170,16 +170,13 @@ func TestRegistrar_buildRegisterPayload_usesAgentConfig(t *testing.T) {
 	if len(payload.Capabilities) != 1 || payload.Capabilities[0] != "compliance_review" {
 		t.Fatalf("capabilities = %v", payload.Capabilities)
 	}
-	if payload.ExposeToPeers {
-		t.Fatal("expected expose false (A2A expose retired)")
-	}
 }
 
-func TestRegistrar_buildRegisterPayload_exposeAlwaysFalse(t *testing.T) {
+func TestRegistrar_buildRegisterPayload_hasCard(t *testing.T) {
 	cfg := testManageConfig("http://127.0.0.1:8020", "")
 	reg := NewRegistrar(cfg, nil)
 	payload := reg.buildRegisterPayload()
-	if payload.ExposeToPeers {
-		t.Fatal("expected expose false")
+	if payload.Card == nil {
+		t.Fatal("expected registration card")
 	}
 }

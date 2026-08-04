@@ -80,7 +80,6 @@ type LLMSettingsPatch struct {
 // AgentInfo 为 GET /v1/agent/info 响应。
 type AgentInfo struct {
 	AgentID          string      `json:"agent_id"`
-	ExposeToPeers    bool        `json:"expose_to_peers"`
 	Capabilities     []string    `json:"capabilities"`
 	ManageRegistered bool        `json:"manage_registered"`
 	LLM              LLMSettings `json:"llm"`
