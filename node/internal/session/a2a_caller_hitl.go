@@ -201,3 +201,14 @@ func attachA2APeerMeta(data, hitlPayload map[string]any) {
 		data["a2a_peer_agent_name"] = peerID
 	}
 }
+
+func cloneEventData(data map[string]any) map[string]any {
+	if data == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(data))
+	for k, v := range data {
+		out[k] = v
+	}
+	return out
+}

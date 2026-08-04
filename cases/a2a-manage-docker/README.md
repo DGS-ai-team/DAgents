@@ -1,7 +1,9 @@
 # Manage A2A 合规咨询场景（Docker）
 
-三容器栈：**Manage** + **合规助手 node-a** + **运维助手 node-b**。  
-运维侧在 TUI 中与真实 LLM 对话；合规侧 **node-a** 通过 Manage **Inbox** 跑 LLM turn，将 **`result_text` 原样** 回写 Task（`completed`），由调用方自行解读。
+> **状态（2026-08）**：A2A **inbox / invoke 已退役**。本案例描述历史 Inbox 合规咨询路径，**不再作为现网联调入口**。跨机器协作请改用 **工作组（Workgroup）**。
+
+三容器栈（历史）：**Manage** + **合规助手 node-a** + **运维助手 node-b**。  
+运维侧在 TUI 中与真实 LLM 对话；合规侧 **node-a** 曾通过 Manage **Inbox** 跑 LLM turn，将 **`result_text` 原样** 回写 Task（`completed`），由调用方自行解读。
 
 | 容器 | Agent ID | 对外端口 |
 |------|----------|----------|

@@ -137,7 +137,7 @@ function llmPayload() {
 function managePayload() {
   return {
     ...form.manage,
-    a2a_enabled: form.manage.a2a_enabled ?? false,
+    a2a_enabled: false, // inbox callee 已退役
     accept_inbound: form.manage.accept_inbound ?? false,
     workgroup_enabled: form.manage.workgroup_enabled ?? true,
   };
@@ -301,34 +301,13 @@ onMounted(async () => {
             :disabled="manageFieldsDisabled"
           />
         </label>
-        <label class="settings-field">
-          <span class="settings-field__label">Inbox wait（秒）</span>
-          <input
-            v-model.number="form.manage.a2a_inbox_wait_seconds"
-            class="settings-field__input"
-            type="number"
-            min="1"
-            :disabled="manageFieldsDisabled"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">Inbox poll（秒）</span>
-          <input
-            v-model.number="form.manage.a2a_inbox_poll_seconds"
-            class="settings-field__input"
-            type="number"
-            min="1"
-            :disabled="manageFieldsDisabled"
-          />
-        </label>
       </div>
+      <p class="settings-hint">
+        A2A inbox / invoke 已退役；跨机器协作请使用工作组。下方「接受入站」仅影响 Registry 广告（历史兼容）。
+      </p>
       <label class="settings-toggle">
         <input v-model="form.manage.accept_inbound" type="checkbox" :disabled="manageFieldsDisabled" />
-        <span>接受 A2A 入站（可被其他 Node 发现并调用）</span>
-      </label>
-      <label class="settings-toggle">
-        <input v-model="form.manage.a2a_enabled" type="checkbox" :disabled="manageFieldsDisabled" />
-        <span>启用 A2A Inbox 轮询</span>
+        <span>Registry 暴露（历史兼容，不再启动 inbox 轮询）</span>
       </label>
       <label class="settings-toggle">
         <input v-model="form.manage.workgroup_enabled" type="checkbox" :disabled="manageFieldsDisabled" />

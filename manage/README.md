@@ -6,7 +6,7 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 |----|------|------|
 | **Platform** | ✅ | 鉴权、审计、Blob、指标 |
 | **Registry** | ✅ | 注册、心跳、注销、目录、discover |
-| **A2A** | ✅ | Task API + inbox long poll + HITL 中继；Node InboxPoller + `agent_invoke`/`agent_discover` |
+| **A2A** | ⚠️ 退役中 | inbox / invoke HTTP 已 `410 a2a_inbox_retired`；跨机协作用工作组；Admin Task 只读仍可用 |
 | **Skills / Plugins / ExternalTools** | ✅（Manage 侧） | 精简分发（draft → publish）；**Node 自动 sync 待 Phase 2** |
 | **LLM** | ✅（Manage 侧） | 集中 CRUD + `/resolve`；**Node 自动消费待做** |
 | **Releases** | ✅ | 安装包托管 + `/v1/releases/check`；Node `UpdateChecker` |

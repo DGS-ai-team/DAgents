@@ -261,7 +261,7 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		case queue.RequestTypeAsyncToolResult:
 			r.clearIdleAutoCompressMark()
 			r.handleSideEffectProduceAsync(ctx, env.AsyncToolResult)
-		case queue.RequestTypeTriggerMessage, queue.RequestTypeA2AInboxMessage:
+		case queue.RequestTypeTriggerMessage:
 			r.clearIdleAutoCompressMark()
 			r.handleSideEffectProduceExternal(ctx, env)
 		case queue.RequestTypeSideEffectContinue:

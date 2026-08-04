@@ -2,6 +2,9 @@
 
 ## 本章回答什么问题
 
+> **2026-08**：A2A **inbox long poll / invoke callee** 已退役（HTTP `410 a2a_inbox_retired`）。跨机器协作请使用 **工作组**。下文若仍描述 inbox 轮询，视为历史叙述。
+
+
 读完本章，你应能：
 
 - 说明 Manage 与 Node、Client 的连接关系  
