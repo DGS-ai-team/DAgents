@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/NodeExecutionGrant.json",
+  "title": "NodeExecutionGrant",
+  "type": "object",
+  "required": [
+    "grant_id",
+    "workgroup_id",
+    "member_id",
+    "home_node_id",
+    "member_spec_digest",
+    "status",
+    "lease_id",
+    "lease_epoch",
+    "member_generation",
+    "tool_allow_names",
+    "workspace_contract",
+    "policy_ceiling",
+    "invited_at"
+  ],
+  "properties": {
+    "grant_id": {
+      "type": "string",
+      "pattern": "^gr_[0-9a-z]{26}$"
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "member_id": {
+      "type": "string",
+      "pattern": "^mb_[0-9a-z]{26}$"
+    },
+    "home_node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "member_spec_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "status": {
+      "enum": [
+        "invited",
+        "accepted",
+        "revoked"
+      ]
+    },
+    "lease_id": {
+      "type": "string",
+      "pattern": "^ls_[0-9a-z]{26}$"
+    },
+    "lease_epoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "member_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "tool_allow_names": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{0,63}$"
+      }
+    },
+    "workspace_contract": {
+      "type": "object"
+    },
+    "policy_ceiling": {
+      "type": "object"
+    },
+    "invited_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "accepted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

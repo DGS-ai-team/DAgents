@@ -18,6 +18,7 @@ from manage.registry.models import AuditListResponse, HealthResponse
 from manage.a2a.routes import build_a2a_router
 from manage.a2a.store import A2ATaskStore
 from manage.admin.routes import build_admin_router
+from manage.control.routes import build_control_router
 from manage.llm.routes import build_llm_router
 from manage.llm.store import LLMConfigStore
 from manage.platform.blob_routes import build_blob_router
@@ -35,6 +36,10 @@ from manage.plugins.store import PluginPackageStore
 from manage.skills.routes import build_skills_router
 from manage.skills.store import SkillPackageStore
 from manage.storage.sqlite import SQLiteDatabase
+from manage.workgroup.routes import build_workgroup_router
+from manage.workgroup.store import WorkGroupStore
+from manage.workgroup.ws_hub import WorkgroupWSHub
+from manage.workgroup.ws_routes import build_workgroup_ws_router
 
 _CONSOLE_DIR = Path(__file__).resolve().parent / "console" / "static"
 
@@ -92,9 +97,14 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     externaltools_store = ExternalToolPackageStore(db=db if db.enabled else None)
     plugins_store = PluginPackageStore(db=db if db.enabled else None)
     cases_store = CaseExampleStore(db=db if db.enabled else None)
+    workgroup_store = WorkGroupStore(db=db if db.enabled else None)
+    workgroup_ws_hub = WorkgroupWSHub(store=workgroup_store)
 
     app.include_router(build_registry_router(store, audit))
+    app.include_router(build_control_router(store, audit))
     app.include_router(build_a2a_router(store, a2a_store, audit))
+    app.include_router(build_workgroup_router(workgroup_store, audit, hub=workgroup_ws_hub))
+    app.include_router(build_workgroup_ws_router(workgroup_ws_hub))
     app.include_router(build_admin_router(store, a2a_store))
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))
@@ -140,6 +150,8 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.state.plugins_store = plugins_store
     app.state.cases_store = cases_store
     app.state.releases_store = releases_store
+    app.state.workgroup_store = workgroup_store
+    app.state.workgroup_ws_hub = workgroup_ws_hub
     return app
 
 

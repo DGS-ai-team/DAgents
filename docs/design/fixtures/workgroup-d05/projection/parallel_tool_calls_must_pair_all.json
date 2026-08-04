@@ -1,0 +1,33 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "projection_openai_legal_sequence",
+  "subcase": "parallel_tool_calls",
+  "given": {
+    "assistant_tool_calls": [
+      {
+        "id": "call_a",
+        "name": "read_file"
+      },
+      {
+        "id": "call_b",
+        "name": "read_file"
+      }
+    ],
+    "results_so_far": [
+      {
+        "tool_call_id": "call_a",
+        "content": "A"
+      }
+    ]
+  },
+  "when": {
+    "op": "turn.continue_after_partial_tools"
+  },
+  "then": {
+    "llm_invoked_again": false,
+    "wait_for": [
+      "call_b"
+    ]
+  }
+}

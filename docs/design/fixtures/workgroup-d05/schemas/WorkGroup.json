@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/WorkGroup.json",
+  "title": "WorkGroup",
+  "type": "object",
+  "required": [
+    "workgroup_id",
+    "schema_version",
+    "display_name",
+    "status",
+    "created_by_node_id",
+    "llm_profile_id",
+    "llm_profile_revision",
+    "created_at"
+  ],
+  "properties": {
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "schema_version": {
+      "const": "0.5.0"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "status": {
+      "enum": [
+        "active",
+        "archiving",
+        "archived"
+      ]
+    },
+    "created_by_node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "llm_profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "llm_profile_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

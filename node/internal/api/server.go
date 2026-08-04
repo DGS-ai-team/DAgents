@@ -35,6 +35,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/version"
 	"github.com/DGS-ai-team/DAgents/node/internal/webui"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
+	"github.com/DGS-ai-team/DAgents/node/internal/workgroup"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -57,11 +58,14 @@ type Server struct {
 	inboxPoller   *manage.InboxPoller
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
+	control         *manage.ControlClient
 	a2aCallerHITL   *session.A2ACallerHITLBridge
 	tools           *tools.Registry
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
 	sandboxPool     *sandbox.Pool
+	workgroupWorker *workgroup.Worker
+	workgroupDialer *workgroup.Dialer
 }
 
 // Option 为 NewServer 可选配置。
@@ -346,6 +350,39 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			}
 		}
 	}
+	control := manage.NewControlClient(cfg)
+	var wgWorker *workgroup.Worker
+	var wgDialer *workgroup.Dialer
+	if cfg.ManageWorkgroupEnabled() {
+		toolNames := []string{}
+		if mgr != nil {
+			toolNames = mgr.ToolNames()
+		}
+		wgWorker = workgroup.NewWorker(workgroup.Config{
+			NodeID:        cfg.NodeID,
+			NodeToolNames: toolNames,
+		})
+		wgDialer = &workgroup.Dialer{
+			ManageURL: cfg.Manage.URL,
+			NodeID:    cfg.NodeID,
+			Token:     cfg.Manage.NodeToken,
+			Worker:    wgWorker,
+			ListWorkgroups: func(ctx context.Context) ([]string, error) {
+				items, err := control.ListWorkgroups(ctx, manage.WorkgroupListSubscribed)
+				if err != nil {
+					return nil, err
+				}
+				ids := make([]string, 0, len(items))
+				for _, it := range items {
+					if id := strings.TrimSpace(it.WorkgroupID); id != "" {
+						ids = append(ids, id)
+					}
+				}
+				return ids, nil
+			},
+		}
+		logger.Info("workgroup dialer enabled", "manage_url", cfg.Manage.URL)
+	}
 	s := &Server{
 		cfg:           cfg,
 		configPath:    o.configPath,
@@ -360,15 +397,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		sessions:      mgr,
 		triggerStore:  triggerStore,
 		triggerSched:  triggerSched,
-		registrar:     registrar,
-		inboxPoller:   inboxPoller,
+		registrar:       registrar,
+		inboxPoller:     inboxPoller,
 		updateChecker:   updateChecker,
 		packageUploader: packageUploader,
+		control:         control,
 		a2aCallerHITL:   a2aBridge,
 		tools:           o.tools,
 		browserMgr:      browserMgr,
 		mediaRegister:   mediaRegister,
 		sandboxPool:     sandboxPool,
+		workgroupWorker: wgWorker,
+		workgroupDialer: wgDialer,
 	}
 	// 默认工具表与后续 per-agent Registry 共用同一套 Node 运行时依赖挂载。
 	s.attachNodeRuntimeDeps(s.tools, cfg.NodeID)
@@ -383,6 +423,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
+	s.registerWorkgroupRoutes()
+	s.registerScreenRoutes()
 	s.registerToolCallControlRoutes()
 	s.registerUIAggregateRoutes()
 	s.mux.HandleFunc("POST /v1/messages", s.handlePostMessage)
@@ -461,7 +503,7 @@ func attachBackgroundJobNotifier(reg *tools.Registry, mgr *session.Manager, logg
 	})
 }
 
-// Handler 返回可用于 http.Server 的根 Handler（含 access log 中间件）。
+// Handler 返回可用于 http.Server 的根 Handler（含 access log）。
 func (s *Server) Handler() http.Handler {
 	return accessLogMiddleware(s.logger, s.mux)
 }
@@ -491,6 +533,13 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if s.inboxPoller != nil {
 		s.inboxPoller.Start(regCtx)
 	}
+	if s.workgroupDialer != nil {
+		go func() {
+			if err := s.workgroupDialer.ConnectAndServe(regCtx); err != nil && regCtx.Err() == nil {
+				s.logger.Warn("workgroup dialer stopped", "error", err)
+			}
+		}()
+	}
 	if s.updateChecker != nil {
 		s.updateChecker.Start(regCtx)
 	}
@@ -509,6 +558,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		regCancel()
+		if s.workgroupDialer != nil {
+			s.workgroupDialer.Close()
+		}
 		if s.registrar != nil {
 			s.registrar.Stop(shutdownCtx)
 		}
@@ -961,6 +1013,10 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// 若该 id 是 Agent 实例，先按快照装入 runtime（避免重启后落到默认沙箱配置）。
 	if s.agents != nil {
 		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
+			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
+				writeRemotePlacementDeprecated(w, sessionID)
+				return
+			}
 			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
 				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": sessionID})
 				return
@@ -1037,6 +1093,15 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentFilter := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	// 远端引用若未走 Edge upgrade，禁止订阅本机 hub（否则永远无事件且误导）。
+	if agentFilter != "" && s.agents != nil {
+		if rec, err := s.agents.Get(r.Context(), agentFilter); err == nil && rec != nil && !rec.Archived {
+			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
+				writeRemotePlacementDeprecated(w, agentFilter)
+				return
+			}
+		}
+	}
 	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
 	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"
 	// live=1：TUI 重连时只收增量，避免 replay 历史 done 干扰 wait_user_turn。

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import ChatLayout from "../layouts/ChatLayout.vue";
 import SettingsLayout from "../layouts/SettingsLayout.vue";
 import ChatView from "../views/ChatView.vue";
+import WorkgroupView from "../views/WorkgroupView.vue";
 import GeneralSettings from "../views/settings/GeneralSettings.vue";
 import SkillsSettings from "../views/settings/SkillsSettings.vue";
 import TriggersSettings from "../views/settings/TriggersSettings.vue";
@@ -21,6 +22,11 @@ const router = createRouter({
       path: "/agents/:agentId?",
       component: ChatLayout,
       children: [{ path: "", name: "agents", component: ChatView }],
+    },
+    {
+      path: "/workgroups/:workgroupId?",
+      component: ChatLayout,
+      children: [{ path: "", name: "workgroups", component: WorkgroupView }],
     },
     {
       path: "/settings",

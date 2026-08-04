@@ -1,0 +1,44 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "projection_openai_legal_sequence",
+  "provider": "openai",
+  "given": {
+    "actor_id": "mb_01h00000000000000000000002",
+    "own_run_history": [],
+    "timeline_watermark_seq": 0,
+    "timeline_others": [
+      {
+        "seq": 1,
+        "type": "human_message",
+        "actor_id": "hu_01h00000000000000000000003",
+        "protocol_name": "human_hu_01h00000000000000000000003",
+        "content_text": "开始"
+      },
+      {
+        "seq": 2,
+        "type": "actor_final_text",
+        "actor_id": "leader",
+        "protocol_name": "leader",
+        "content_text": "请读取 README"
+      }
+    ]
+  },
+  "when": {
+    "op": "project_member_context"
+  },
+  "then": {
+    "messages": [
+      {
+        "role": "user",
+        "name": "human_hu_01h00000000000000000000003",
+        "content": "开始"
+      },
+      {
+        "role": "user",
+        "name": "leader",
+        "content": "请读取 README"
+      }
+    ]
+  }
+}

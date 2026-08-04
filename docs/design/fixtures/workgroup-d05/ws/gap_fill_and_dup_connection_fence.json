@@ -1,0 +1,29 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "ws_gap_fill_and_dup_connection_fence",
+  "given": {
+    "node_id": "node_a",
+    "conn1": {
+      "connection_generation": 5,
+      "last_ack_delivery_seq": 40
+    }
+  },
+  "when": [
+    {
+      "op": "ws.disconnect"
+    },
+    {
+      "op": "ws.hello",
+      "connection_generation": 6,
+      "resume_from_delivery_seq": 40
+    }
+  ],
+  "then": {
+    "replay_delivery_seqs": [
+      41,
+      42
+    ],
+    "conn1_late_frame_code": "fencing_rejected"
+  }
+}

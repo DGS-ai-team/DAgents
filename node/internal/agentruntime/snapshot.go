@@ -13,7 +13,8 @@ import (
 )
 
 // SandboxSpec 来自模板/实例快照的沙箱字段。
-// Backend：未启用沙箱时为 process（宿主机 + 工具约束）；启用时为 docker（本机）或 remote（远程，预留）。
+// Backend：未启用时为 process（宿主机）；启用时为 docker。
+// RemoteEndpoint/RemoteAPIKey 仅兼容旧快照反序列化，新产品路径不再写入。
 type SandboxSpec struct {
 	Enabled           bool   `json:"enabled"`
 	Backend           string `json:"backend"`

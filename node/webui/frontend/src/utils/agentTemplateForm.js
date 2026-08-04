@@ -44,8 +44,6 @@ export function emptyAgentDraft() {
     sandboxNetwork: "none",
     sandboxMemory: "",
     sandboxCpus: "",
-    sandboxRemoteEndpoint: "",
-    sandboxRemoteAPIKey: "",
     workspaceSubdir: "data",
     fsRootIsolation: false,
     allowBash: true,
@@ -63,6 +61,21 @@ export function emptyAgentDraft() {
   };
 }
 
+/** 从 agent.host JSON 取 OS 展示标签。 */
+export function agentHostLabel(agent) {
+  const host = asObject(typeof agent?.host === "string" ? (() => {
+    try { return JSON.parse(agent.host); } catch { return {}; }
+  })() : agent?.host);
+  const label = String(host.display_label || "").trim();
+  if (label) return label;
+  const kind = String(host.os_kind || host.sys_platform || "").trim().toLowerCase();
+  if (kind === "windows") return "Windows";
+  if (kind === "darwin") return "macOS";
+  if (kind === "linux") return "Linux";
+  if (kind) return kind.charAt(0).toUpperCase() + kind.slice(1);
+  return "";
+}
+
 export function readTemplateDefaults(template) {
   return asObject(template?.defaults);
 }
@@ -76,13 +89,14 @@ function numberOr(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-/** 启用沙箱时的模式：docker | remote；未启用时用 process 表示宿主机。 */
+/**
+ * 启用沙箱时仅支持 docker；未启用用 process 表示宿主机。
+ * 历史 backend=remote 一律升为 docker（D5 Cut5 产品面已拒绝 remote）。
+ */
 function normalizeSandboxMode(backend, enabled) {
-  const b = String(backend || "").trim().toLowerCase();
   if (!enabled) return "process";
-  if (b === "remote") return "remote";
-  if (b === "docker") return "docker";
-  // 历史 process + enabled：在表单中升为 docker（真正的隔离沙箱）。
+  const b = String(backend || "").trim().toLowerCase();
+  if (b === "docker" || b === "remote" || b === "process") return "docker";
   return "docker";
 }
 
@@ -97,13 +111,8 @@ function applySandboxDraftFields(draft, sandbox, agentMeta = {}) {
   draft.sandboxNetwork = String(sandbox.network || "none").trim() || "none";
   draft.sandboxMemory = String(sandbox.memory || "").trim();
   draft.sandboxCpus = String(sandbox.cpus || "").trim();
-  draft.sandboxRemoteEndpoint = String(sandbox.remote_endpoint || "").trim();
-  draft.sandboxRemoteAPIKey = String(sandbox.remote_api_key || "").trim();
   draft.workspaceSubdir = String(sandbox.workspace_subdir || "data").trim() || "data";
-  draft.fsRootIsolation =
-    draft.sandboxBackend === "docker" || draft.sandboxBackend === "remote"
-      ? true
-      : !!sandbox.fs_root_isolation;
+  draft.fsRootIsolation = draft.sandboxBackend === "docker" ? true : !!sandbox.fs_root_isolation;
   draft.allowBash = sandbox.allow_bash !== false;
   draft.allowNetworkTools = sandbox.allow_network_tools !== false;
 }
@@ -115,7 +124,7 @@ function buildSandboxPayload(draft) {
     enabled,
     backend,
     workspace_subdir: draft.workspaceSubdir || "data",
-    fs_root_isolation: backend === "docker" || backend === "remote" ? true : !!draft.fsRootIsolation,
+    fs_root_isolation: backend === "docker" ? true : !!draft.fsRootIsolation,
     allow_bash: !!draft.allowBash,
     allow_network_tools: !!draft.allowNetworkTools,
   };
@@ -124,11 +133,6 @@ function buildSandboxPayload(draft) {
     sandbox.network = String(draft.sandboxNetwork || "none").trim() || "none";
     if (String(draft.sandboxMemory || "").trim()) sandbox.memory = String(draft.sandboxMemory).trim();
     if (String(draft.sandboxCpus || "").trim()) sandbox.cpus = String(draft.sandboxCpus).trim();
-  }
-  if (backend === "remote") {
-    sandbox.remote_endpoint = String(draft.sandboxRemoteEndpoint || "").trim();
-    const key = String(draft.sandboxRemoteAPIKey || "").trim();
-    if (key) sandbox.remote_api_key = key;
   }
   return sandbox;
 }

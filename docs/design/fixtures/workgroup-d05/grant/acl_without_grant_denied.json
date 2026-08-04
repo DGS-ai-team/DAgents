@@ -1,0 +1,36 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "acl_without_grant_denied",
+  "given": {
+    "workgroup": {
+      "workgroup_id": "wg_01h00000000000000000000001",
+      "status": "active",
+      "acl": {
+        "owners": [
+          "node_a"
+        ],
+        "collaborators": [
+          "node_b"
+        ],
+        "revision": 1
+      }
+    },
+    "member": {
+      "member_id": "mb_01h00000000000000000000002",
+      "home_node_id": "node_b",
+      "status": "ready",
+      "member_generation": 1,
+      "member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c"
+    },
+    "grant": null
+  },
+  "when": {
+    "op": "member.provision",
+    "provision_id": "pv_01h00000000000000000000009"
+  },
+  "then": {
+    "code": "not_authorized",
+    "executed": false
+  }
+}

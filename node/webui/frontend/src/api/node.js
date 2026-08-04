@@ -301,3 +301,117 @@ export function uploadPluginToManage({ path, pluginId, version, name, platform =
     body: { path, plugin_id: pluginId, version, name, platform, publish },
   });
 }
+
+/** 工作组列表：scope=subscribed|acl|all */
+export function listWorkgroups({ scope = "subscribed" } = {}) {
+  return apiFetch("/v1/workgroups", { params: { scope } });
+}
+
+export function createWorkgroup(displayName) {
+  return apiFetch("/v1/workgroups", {
+    method: "POST",
+    body: { display_name: displayName },
+  });
+}
+
+export function getWorkgroupACL(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/acl`);
+}
+
+export function addWorkgroupCollaborator(workgroupId, nodeId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/collaborators`, {
+    method: "POST",
+    body: { node_id: nodeId },
+  });
+}
+
+export function subscribeWorkgroup(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/subscribe`, {
+    method: "POST",
+    body: {},
+  });
+}
+
+export function unsubscribeWorkgroup(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/subscribe`, {
+    method: "DELETE",
+  });
+}
+
+export function getWorkgroupTimeline(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/timeline`);
+}
+
+export function postWorkgroupMessage(workgroupId, text, clientMessageId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/messages`, {
+    method: "POST",
+    body: {
+      text,
+      client_message_id: clientMessageId || undefined,
+    },
+  });
+}
+
+export function listWorkgroupMembers(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/members`);
+}
+
+export function createWorkgroupMember(workgroupId, body) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/members`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function getWorkgroupMemberSpec(workgroupId, memberId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/spec`,
+  );
+}
+
+export function listWorkgroupGrants(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/grants`);
+}
+
+export function inviteWorkgroupGrant(workgroupId, memberId, toolAllowNames) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/grants`, {
+    method: "POST",
+    body: {
+      member_id: memberId,
+      tool_allow_names: toolAllowNames,
+    },
+  });
+}
+
+export function acceptWorkgroupGrant(workgroupId, grantId, memberSpecDigest) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/grants/${encodeURIComponent(grantId)}/accept`,
+    {
+      method: "POST",
+      body: memberSpecDigest ? { member_spec_digest: memberSpecDigest } : {},
+    },
+  );
+}
+
+export function listWorkgroupHITL(workgroupId, pendingOnly = true) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl`, {
+    params: { pending_only: pendingOnly ? "true" : "false" },
+  });
+}
+
+export function createWorkgroupHITL(workgroupId, prompt) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl`, {
+    method: "POST",
+    body: { prompt },
+  });
+}
+
+export function resolveWorkgroupHITL(workgroupId, hitlId, answer) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl/${encodeURIComponent(hitlId)}/resolve`,
+    {
+      method: "POST",
+      body: { answer, resolution: { answer } },
+    },
+  );
+}

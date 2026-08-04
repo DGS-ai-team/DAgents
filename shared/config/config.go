@@ -26,9 +26,11 @@ type Config struct {
 	// LegacyAgentID 仅用于读取旧 YAML 的 agent_id；加载后合并进 NodeID 并清空。
 	LegacyAgentID string      `yaml:"agent_id,omitempty"`
 	Agent         AgentConfig `yaml:"agent"`
-	Listen        ListenConfig `yaml:"listen"`
-	Local         LocalConfig  `yaml:"local"`
-	Groups        []string     `yaml:"groups"`
+	// Placement 控制是否允许同组 Node 在本机创建 Agent / 旁观屏幕（Node 级开关）。
+	Placement     PlacementConfig `yaml:"placement"`
+	Listen        ListenConfig    `yaml:"listen"`
+	Local         LocalConfig     `yaml:"local"`
+	Groups        []string        `yaml:"groups"`
 	// FSRoot 固定为 DefaultFSRoot，不从 YAML 读取；测试可在内存中直接赋值。
 	FSRoot        string       `yaml:"-"`
 	LLM           LLMConfig    `yaml:"llm"`
@@ -334,6 +336,13 @@ type ManageConfig struct {
 	Registration ManageRegistrationConfig `yaml:"registration"`
 	A2A          ManageA2AConfig          `yaml:"a2a"`
 	Update       ManageUpdateConfig       `yaml:"update"`
+	Workgroup    ManageWorkgroupConfig    `yaml:"workgroup"`
+}
+
+// ManageWorkgroupConfig 控制 Node 侧 Workgroup Dialer（Manage WS 工具执行通道）。
+type ManageWorkgroupConfig struct {
+	// Enabled 为 nil 且 manage.enabled 时默认 true（D4）。
+	Enabled *bool `yaml:"enabled"`
 }
 
 // ManageUpdateConfig 控制 Node 向 Manage Release Hub 查询更新。
@@ -345,7 +354,11 @@ type ManageUpdateConfig struct {
 
 // ManageA2AConfig 控制 Node 对 Manage A2A inbox 的 long poll sidecar。
 type ManageA2AConfig struct {
-	Enabled          *bool `yaml:"enabled"`
+	// Enabled 显式开关 inbox long poll；nil 时跟随 AcceptInbound。
+	Enabled *bool `yaml:"enabled"`
+	// AcceptInbound 是否接受 A2A 入站（Registry expose_to_peers）；nil/false → 不暴露。
+	// 取代旧 agent.role=compliance/ops 推导。
+	AcceptInbound    *bool `yaml:"accept_inbound"`
 	InboxPollSeconds int   `yaml:"inbox_poll_seconds"`
 	InboxWaitSeconds int   `yaml:"inbox_wait_seconds"`
 }
@@ -607,6 +620,17 @@ func (c *Config) ManageUpdateEnabled() bool {
 	}
 	if c.Manage.Update.Enabled != nil {
 		return *c.Manage.Update.Enabled
+	}
+	return true
+}
+
+// ManageWorkgroupEnabled 是否启动 Workgroup Dialer（须 manage.enabled；nil 默认 true）。
+func (c *Config) ManageWorkgroupEnabled() bool {
+	if c == nil || !c.Manage.Enabled {
+		return false
+	}
+	if c.Manage.Workgroup.Enabled != nil {
+		return *c.Manage.Workgroup.Enabled
 	}
 	return true
 }

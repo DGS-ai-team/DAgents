@@ -24,7 +24,6 @@ const selectedTemplate = computed(
 );
 const isBlankDraft = computed(() => draft.templateId === BLANK_TEMPLATE_ID || !draft.templateId);
 const llmProfileIds = computed(() => llmProfiles.value.map((p) => p.id).filter(Boolean));
-
 async function loadTemplates() {
   loading.value = true;
   error.value = "";
@@ -172,6 +171,11 @@ watch(
                 </div>
               </button>
             </div>
+
+            <p class="agent-create-hint">
+              新建 Agent 仅在本机创建。跨机器协作请使用
+              <router-link to="/workgroups">工作组</router-link>。
+            </p>
 
             <AgentSettingsForm
               :draft="draft"
@@ -392,4 +396,5 @@ watch(
   gap: 8px;
   margin-left: auto;
 }
+
 </style>

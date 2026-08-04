@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/ToolResult.json",
+  "title": "ToolResult",
+  "type": "object",
+  "required": [
+    "command_id",
+    "status",
+    "result_text",
+    "is_error",
+    "finished_at"
+  ],
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "pattern": "^cmd_[0-9a-z]{26}$"
+    },
+    "status": {
+      "enum": [
+        "succeeded",
+        "failed",
+        "rejected",
+        "canceled",
+        "indeterminate"
+      ]
+    },
+    "result_text": {
+      "type": "string"
+    },
+    "is_error": {
+      "type": "boolean"
+    },
+    "error_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

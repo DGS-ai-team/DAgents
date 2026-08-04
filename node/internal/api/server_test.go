@@ -23,10 +23,12 @@ import (
 
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
+	accept := true
 	cfg := &config.Config{
 		NodeID: "ops-linux-01",
-		Agent: config.AgentConfig{
-			Role: "compliance",
+		Agent:  config.AgentConfig{Name: "ops-linux"},
+		Manage: config.ManageConfig{
+			A2A: config.ManageA2AConfig{AcceptInbound: &accept},
 		},
 		FSRoot: t.TempDir(),
 		Compression: config.CompressionConfig{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +57,39 @@ func TestAgentStore_CRUD(t *testing.T) {
 	list, err = st.List(ctx)
 	if err != nil || len(list) != 0 {
 		t.Fatalf("after delete list = %+v", list)
+	}
+}
+
+func TestAgentStore_PlacementAndHostJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents-placement.db")
+	st, err := OpenAgents(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	rec := AgentRecord{
+		AgentID:        "agt-remote",
+		DisplayName:    "远端引用",
+		TemplateID:     "",
+		Origin:         AgentOriginRemote,
+		SandboxBackend: "process",
+		ConfigSnapshot: json.RawMessage(`{}`),
+		PlacementJSON:  json.RawMessage(`{"role":"owner_ref","owner_node_id":"n1","home_node_id":"n2","status":"online"}`),
+		HostJSON:       json.RawMessage(`{"os_kind":"linux","display_label":"Linux","display_available":false}`),
+	}
+	if err := st.Save(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Get(ctx, "agt-remote")
+	if err != nil || got == nil {
+		t.Fatalf("get = %+v err=%v", got, err)
+	}
+	if string(got.PlacementJSON) == "" || !strings.Contains(string(got.PlacementJSON), "owner_ref") {
+		t.Fatalf("placement = %s", got.PlacementJSON)
+	}
+	if string(got.HostJSON) == "" || !strings.Contains(string(got.HostJSON), "Linux") {
+		t.Fatalf("host = %s", got.HostJSON)
 	}
 }

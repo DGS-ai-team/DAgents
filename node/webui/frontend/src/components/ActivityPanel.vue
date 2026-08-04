@@ -6,6 +6,11 @@ import { agentStore } from "../stores/agent.js";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 
+const props = defineProps({
+  /** 当前 Agent 列表行（含 origin / host） */
+  agent: { type: Object, default: null },
+});
+
 const emit = defineEmits(["close"]);
 
 const loading = ref(false);
@@ -283,7 +288,7 @@ defineExpose({ refresh });
               <span v-if="item.hint" class="activity-row__meta">{{ item.hint }}</span>
             </span>
           </li>
-          <li class="activity-row activity-row--muted" title="后续可扩展：PR、浏览器会话、桌面环境等">
+          <li class="activity-row activity-row--muted" title="后续可扩展：PR、浏览器会话等">
             <span class="activity-row__icon" aria-hidden="true">
               <svg viewBox="0 0 16 16" fill="none">
                 <path d="M8 3.25v9.5M3.25 8h9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
@@ -291,7 +296,7 @@ defineExpose({ refresh });
             </span>
             <span class="activity-row__body">
               <span class="activity-row__name">More</span>
-              <span class="activity-row__meta">PR / Browser / Desktop…</span>
+              <span class="activity-row__meta">PR / Browser…</span>
             </span>
           </li>
         </ul>

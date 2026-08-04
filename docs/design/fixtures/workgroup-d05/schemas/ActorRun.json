@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/ActorRun.json",
+  "title": "ActorRun",
+  "type": "object",
+  "required": [
+    "run_id",
+    "workgroup_id",
+    "actor_id",
+    "status",
+    "llm_profile_revision",
+    "timeline_watermark_seq",
+    "checkpoint_ordinal",
+    "created_at"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "pattern": "^rn_[0-9a-z]{26}$"
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "actor_id": {
+      "oneOf": [
+        {
+          "const": "leader"
+        },
+        {
+          "type": "string",
+          "pattern": "^mb_[0-9a-z]{26}$"
+        }
+      ]
+    },
+    "assign_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^as_[0-9a-z]{26}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "running",
+        "awaiting_hitl",
+        "succeeded",
+        "failed",
+        "canceled",
+        "indeterminate"
+      ]
+    },
+    "llm_profile_revision": {
+      "type": "string"
+    },
+    "timeline_watermark_seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "checkpoint_ordinal": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

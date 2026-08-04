@@ -1,0 +1,22 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "timeline_excludes_raw_tool_payload",
+  "note": "Structural exclusion only; not content DLP on final text",
+  "given": {
+    "tool_result_in_run_history": {
+      "content": "SECRET_KEY=abc"
+    }
+  },
+  "when": {
+    "op": "emit_timeline_after_tool"
+  },
+  "then": {
+    "timeline_fields_forbidden": [
+      "tool_arguments",
+      "tool_result",
+      "raw_tool_payload"
+    ],
+    "run_history_may_contain_tool_body": true
+  }
+}

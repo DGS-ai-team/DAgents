@@ -10,7 +10,10 @@ async function saveGeneral() {
   const { fs_root: _ignored, ...runtime } = form.runtime;
   await save({
     runtime,
-    agent: { ...form.agent },
+    agent: {
+      name: form.agent.name || "",
+      description: form.agent.description || "",
+    },
   });
 }
 
@@ -68,21 +71,27 @@ onMounted(load);
     </section>
 
     <section class="settings-section">
-      <h2 class="settings-section__title">Agent 信息</h2>
+      <h2 class="settings-section__title">Node 信息</h2>
+      <p class="settings-section__desc">注册到 Manage 后的展示名（peers / Console）；与具体 Agent 实例名称无关。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
-          <span class="settings-field__label">名称</span>
-          <input v-model="form.agent.name" class="settings-field__input" type="text" autocomplete="off" />
+          <span class="settings-field__label">Node 名称</span>
+          <input v-model="form.agent.name" class="settings-field__input" type="text" placeholder="空则显示 Node ID" autocomplete="off" />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">简介</span>
           <input v-model="form.agent.description" class="settings-field__input" type="text" autocomplete="off" />
         </label>
-        <label class="settings-field">
-          <span class="settings-field__label">角色</span>
-          <input v-model="form.agent.role" class="settings-field__input" type="text" placeholder="可选" autocomplete="off" />
-        </label>
       </div>
+    </section>
+
+    <section class="settings-section">
+      <h2 class="settings-section__title">跨机器协作</h2>
+      <p class="settings-section__desc">
+        跨机器协作请使用
+        <router-link to="/workgroups">工作组</router-link>
+        （远程 Placement 已下线）。
+      </p>
     </section>
   </ConfigPanelShell>
 </template>

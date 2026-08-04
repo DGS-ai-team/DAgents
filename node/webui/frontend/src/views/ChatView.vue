@@ -134,6 +134,12 @@ const currentAgentTitle = computed(() => {
   return String(currentAgentDisplayName.value || "").trim() || "未命名 Agent";
 });
 
+const currentAgentRecord = computed(() => {
+  const id = String(agentStore.agentId || "").trim();
+  if (!id) return null;
+  return agentList.value.find((a) => agentRecordId(a) === id) || null;
+});
+
 async function syncCurrentAgentDisplayName() {
   const id = String(agentStore.agentId || "").trim();
   const token = ++agentNameSyncToken;
@@ -1023,7 +1029,7 @@ onUnmounted(() => {
     </div>
 
     <aside v-if="chromeStore.panel === 'activity'" class="app__col app__col--activity">
-      <ActivityPanel @close="closePanel" />
+      <ActivityPanel :agent="currentAgentRecord" @close="closePanel" />
     </aside>
 
     <AgentCreateModal

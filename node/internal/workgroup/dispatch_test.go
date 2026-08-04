@@ -1,0 +1,106 @@
+package workgroup
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestDispatchProvisionAndReadFile(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})
+	gen := w.Connect()
+	cs := &ClientSession{Worker: w}
+
+	provEnv := WSEnvelope{
+		EnvelopeID:           "en_01h00000000000000000000001",
+		SchemaVersion:        SchemaVersion,
+		Type:                 "member.provision",
+		DeliverySeq:          1,
+		ConnectionGeneration: gen,
+		WorkgroupID:          "wg_01h00000000000000000000001",
+		Payload: map[string]any{
+			"provision_id":       "pv_01h00000000000000000000009",
+			"workgroup_id":       "wg_01h00000000000000000000001",
+			"member_id":          "mb_01h00000000000000000000002",
+			"home_node_id":       "node_b",
+			"member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+			"lease_epoch":        float64(2),
+			"member_generation":  float64(1),
+			"tool_allow_names":   []any{"read_file"},
+			"workspace_root":     filepath.Join(dir, "ws"),
+		},
+		SentAt: "2026-07-31T00:00:00Z",
+	}
+	r1, err := w.DispatchEnvelope(provEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r1.Handled || r1.AckEnvelope["type"] != "member.provision_result" {
+		t.Fatalf("%+v", r1)
+	}
+	b, _ := w.Bindings.Get("mb_01h00000000000000000000002")
+	if b == nil {
+		t.Fatal("binding missing")
+	}
+	if err := os.WriteFile(filepath.Join(b.WorkspacePath, "README"), []byte("# Demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmdEnv := WSEnvelope{
+		EnvelopeID:           "en_01h00000000000000000000002",
+		SchemaVersion:        SchemaVersion,
+		Type:                 "tool.command",
+		DeliverySeq:          2,
+		ConnectionGeneration: gen,
+		WorkgroupID:          b.WorkgroupID,
+		Payload: map[string]any{
+			"command_id":            "cmd_01h00000000000000000000008",
+			"workgroup_id":          b.WorkgroupID,
+			"member_id":             b.MemberID,
+			"assign_id":             "as_01h00000000000000000000007",
+			"run_id":                "rn_01h00000000000000000000006",
+			"turn_id":               "tn_01h00000000000000000000005",
+			"tool_call_id":          "call_1",
+			"tool_name":             "read_file",
+			"arguments_json":        `{"path":"README"}`,
+			"payload_hash":          "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			"lease_id":              "ls_01h00000000000000000000004",
+			"lease_epoch":           float64(2),
+			"member_generation":     float64(1),
+			"member_spec_digest":    b.MemberSpecDigest,
+			"tool_catalog_revision": b.ToolCatalogRevision,
+			"status":                "queued",
+			"side_effect_class":     "fs_read",
+		},
+		SentAt: "2026-07-31T00:00:01Z",
+	}
+	r2, err := w.DispatchEnvelope(cmdEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.AckEnvelope["type"] != "tool.result" {
+		t.Fatalf("%+v", r2)
+	}
+	if w.Session.LastAckDeliverySeq != 2 {
+		t.Fatalf("ack seq=%d", w.Session.LastAckDeliverySeq)
+	}
+	if got := w.Session.OfferResumeFor(b.WorkgroupID).LastAckDeliverySeq; got != 2 {
+		t.Fatalf("per-wg ack seq=%d", got)
+	}
+
+	// 旧 generation 帧被拒
+	w.Connect() // gen++
+	stale := cmdEnv
+	stale.EnvelopeID = "en_01h00000000000000000000003"
+	stale.DeliverySeq = 3
+	stale.ConnectionGeneration = gen
+	stale.Payload["command_id"] = "cmd_01h00000000000000000000009"
+	_, err = cs.Worker.DispatchEnvelope(stale)
+	if err == nil {
+		t.Fatal("expected fencing")
+	}
+	if err.(*Error).Code != CodeFencingRejected {
+		t.Fatalf("code=%v", err)
+	}
+}

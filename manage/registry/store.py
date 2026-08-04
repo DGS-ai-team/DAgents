@@ -43,8 +43,12 @@ def _migrate_stored_dict(data: dict[str, object]) -> dict[str, object]:
     if "last_seen_unix" not in migrated:
         migrated["last_seen_unix"] = registered
     agent_id = str(migrated.get("agent_id") or "")
+    node_id = str(migrated.get("node_id") or "").strip()
+    if not node_id:
+        node_id = agent_id
+    migrated["node_id"] = node_id
     if not migrated.get("name"):
-        migrated["name"] = agent_id
+        migrated["name"] = agent_id or node_id
     for key in ("description", "owner", "team", "version"):
         migrated.setdefault(key, "")
     for key in ("capabilities_hint", "capabilities", "tools", "skills", "allowed_scopes"):
@@ -52,6 +56,9 @@ def _migrate_stored_dict(data: dict[str, object]) -> dict[str, object]:
             migrated[key] = []
     if "metadata" not in migrated or not isinstance(migrated.get("metadata"), dict):
         migrated["metadata"] = {}
+    meta = migrated["metadata"]
+    if isinstance(meta, dict):
+        meta.setdefault("node_id", node_id)
     if "card" not in migrated or not isinstance(migrated.get("card"), dict):
         migrated["card"] = {}
     migrated.setdefault("auth_method", "shared_token")
@@ -60,6 +67,14 @@ def _migrate_stored_dict(data: dict[str, object]) -> dict[str, object]:
     migrated.setdefault("last_error_summary", None)
     migrated.setdefault("recent_task_summary", None)
     return migrated
+
+
+def record_node_id(record: AgentStoredRecord | AgentRecord) -> str:
+    """解析记录的 node 身份（缺省回退 agent_id）。"""
+    node = str(getattr(record, "node_id", "") or "").strip()
+    if node:
+        return node
+    return str(getattr(record, "agent_id", "") or "").strip()
 
 
 class AgentRegistryStore:
@@ -72,11 +87,13 @@ class AgentRegistryStore:
     def register(self, payload: AgentRegisterRequest) -> AgentRecord:
         now_unix = int(time.time())
         with self._lock:
-            existing = self._records.get(payload.agent_id)
+            node_key = (payload.node_id or payload.agent_id).strip()
+            existing = self._records.get(node_key)
             registered_at = existing.registered_at_unix if existing else now_unix
             discovery_group = existing.discovery_group if existing else []
             stored = AgentStoredRecord(
-                agent_id=payload.agent_id,
+                agent_id=node_key,
+                node_id=node_key,
                 base_url=payload.base_url,
                 discovery_group=discovery_group,
                 capabilities_hint=payload.capabilities_hint,
@@ -101,7 +118,7 @@ class AgentRegistryStore:
                 last_seen_unix=now_unix,
                 expires_at_unix=now_unix + int(payload.ttl_seconds),
             )
-            self._records[payload.agent_id] = stored
+            self._records[node_key] = stored
             self._persist_locked()
             return stored_to_public(stored, now_unix=now_unix)
 
@@ -159,6 +176,14 @@ class AgentRegistryStore:
                 data["recent_task_summary"] = payload.recent_task_summary
             if payload.expose_to_peers is not None:
                 data["expose_to_peers"] = payload.expose_to_peers
+            if payload.local_agents:
+                meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+                meta = dict(meta or {})
+                meta["local_agents"] = list(payload.local_agents)
+                meta.setdefault("node_id", data.get("node_id") or agent_id)
+                data["metadata"] = meta
+            if not data.get("node_id"):
+                data["node_id"] = agent_id
             stored = AgentStoredRecord.model_validate(data)
             self._records[agent_id] = stored
             self._persist_locked()
@@ -203,6 +228,7 @@ class AgentRegistryStore:
             out.append(
                 AgentDiscoverRecord(
                     agent_id=item.agent_id,
+                    node_id=record_node_id(item) or item.agent_id,
                     discovery_group=item.discovery_group,
                     capabilities=caps,
                     capabilities_hint=item.capabilities_hint,

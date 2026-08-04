@@ -50,12 +50,11 @@ func writeComplianceFixtures(t *testing.T) (*config.Config, *session.Manager) {
 	}
 	cfg := &config.Config{
 		NodeID: "compliance-a",
-		Agent: config.AgentConfig{
-			Role: "compliance",
-		},
+		Agent:  config.AgentConfig{Name: "compliance-a"},
 		FSRoot: dir,
 		Manage: config.ManageConfig{
 			Enabled: true,
+			A2A:     config.ManageA2AConfig{AcceptInbound: boolPtr(true)},
 		},
 	}
 	oldWD, _ := os.Getwd()
@@ -105,10 +104,15 @@ func TestComplianceExecutor_llmTurnReply(t *testing.T) {
 	}
 }
 
-func TestResolveInboxHandler_complianceRole(t *testing.T) {
+func TestResolveInboxHandler_whenAcceptInbound(t *testing.T) {
 	cfg, mgr := writeComplianceFixtures(t)
 	handler := ResolveInboxHandler(cfg, mgr, nil)
 	if handler == nil {
-		t.Fatal("expected compliance handler")
+		t.Fatal("expected inbox handler when accept_inbound enables a2a")
+	}
+	cfg.Manage.A2A.AcceptInbound = boolPtr(false)
+	cfg.Manage.A2A.Enabled = nil
+	if ResolveInboxHandler(cfg, mgr, nil) != nil {
+		t.Fatal("expected nil handler when inbound off")
 	}
 }

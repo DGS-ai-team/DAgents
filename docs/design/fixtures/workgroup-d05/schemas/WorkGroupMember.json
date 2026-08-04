@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/WorkGroupMember.json",
+  "title": "WorkGroupMember",
+  "type": "object",
+  "required": [
+    "member_id",
+    "workgroup_id",
+    "home_node_id",
+    "display_name",
+    "status",
+    "member_generation",
+    "member_spec_digest",
+    "created_at"
+  ],
+  "properties": {
+    "member_id": {
+      "type": "string",
+      "pattern": "^mb_[0-9a-z]{26}$"
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "home_node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "requested",
+        "provisioning",
+        "ready",
+        "busy",
+        "archived",
+        "error"
+      ]
+    },
+    "member_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "member_spec_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "active_assign_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^as_[0-9a-z]{26}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

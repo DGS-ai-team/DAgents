@@ -80,12 +80,68 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL,
                     PRIMARY KEY (plugin_id, version)
                 );
+                -- Workgroup D1：组 / ACL / 成员 / Spec / Grant / Assign / Run
+                CREATE TABLE IF NOT EXISTS workgroups (
+                    id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_acls (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_members (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS member_specs (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS execution_grants (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_assigns (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS actor_runs (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                -- Workgroup D3：Timeline / Outbox / HITL
+                CREATE TABLE IF NOT EXISTS workgroup_timeline (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_outbox (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_hitl (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_subscriptions (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
                 -- Blob 元数据随内容寻址文件落在 MANAGE_BLOB_DIR/{sha256}.json sidecar，
                 -- 不入 SQLite；故此处不建 blobs 表。
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','7') "
-                "ON CONFLICT(key) DO UPDATE SET value='7'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','10') "
+                "ON CONFLICT(key) DO UPDATE SET value='10'"
             )
             conn.commit()

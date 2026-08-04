@@ -144,15 +144,11 @@ func inboxSessionIDForTask(taskID string) string {
 	return session.InboxSessionID(taskID)
 }
 
-// ResolveInboxHandler 按 config agent.role 选择 inbox 处理器。
+// ResolveInboxHandler 在 A2A inbox 开启时返回入站任务处理器。
+// 不再按 agent.role=compliance 门控（Node 级 accept_inbound / a2a.enabled 已决定是否入站）。
 func ResolveInboxHandler(cfg *config.Config, sessions *session.Manager, logger *slog.Logger) InboxTaskHandler {
-	if cfg == nil {
+	if cfg == nil || !cfg.ManageA2AEnabled() {
 		return nil
 	}
-	switch strings.ToLower(strings.TrimSpace(cfg.AgentRole())) {
-	case "compliance":
-		return NewComplianceExecutor(cfg, sessions, logger).HandleTask
-	default:
-		return nil
-	}
+	return NewComplianceExecutor(cfg, sessions, logger).HandleTask
 }

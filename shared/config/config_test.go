@@ -210,7 +210,6 @@ func TestManageRegistryBaseURL_prefersRegistrationOverride(t *testing.T) {
 
 func TestManageA2AConfigDefaults(t *testing.T) {
 	cfg := &Config{
-		Agent: AgentConfig{Role: "compliance"},
 		Manage: ManageConfig{
 			Enabled: true,
 			Registration: ManageRegistrationConfig{
@@ -219,14 +218,14 @@ func TestManageA2AConfigDefaults(t *testing.T) {
 		},
 	}
 	cfg.ApplyDefaults()
-	if !cfg.ManageA2AEnabled() {
-		t.Fatal("expected default a2a enabled for compliance role")
-	}
-	cfg.Agent.Role = "ops"
 	if cfg.ManageA2AEnabled() {
-		t.Fatal("expected default a2a disabled for ops role")
+		t.Fatal("expected default a2a disabled without accept_inbound")
 	}
-	cfg.Agent.Role = "compliance"
+	on := true
+	cfg.Manage.A2A.AcceptInbound = &on
+	if !cfg.ManageA2AEnabled() {
+		t.Fatal("expected inbox to follow accept_inbound")
+	}
 	if cfg.ManageA2AInboxWait() != 25*time.Second {
 		t.Fatalf("wait=%s", cfg.ManageA2AInboxWait())
 	}

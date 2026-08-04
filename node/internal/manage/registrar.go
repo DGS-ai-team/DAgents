@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -253,7 +254,7 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 	caps := r.cfg.RegistrationCapabilities()
 	return registerPayload{
 		NodeID:           r.cfg.NodeID,
-		AgentID:          r.cfg.NodeID, // 兼容旧 Manage：历史上误用 agent_id 表示 node
+		AgentID:          r.cfg.NodeID, // 兼容：值同 node_id；Manage 主键仍为 node 级
 		BaseURL:          r.cfg.ManageRegistryBaseURL(),
 		Capabilities:     caps,
 		CapabilitiesHint: caps,
@@ -275,8 +276,52 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 				"machine":          host.Machine,
 				"login_name":       host.LoginName,
 			},
+			"display": placementDisplayMeta(),
+			// D5：不再广告 placement.allow_*；跨机器协作走工作组。
 		},
 	}
+}
+
+func placementDisplayMeta() map[string]any {
+	h := hostsnapshot.Get()
+	osKind := strings.ToLower(strings.TrimSpace(h.OSKind))
+	sys := strings.ToLower(strings.TrimSpace(h.SysPlatform))
+	available := false
+	backend := "none"
+	reason := ""
+	label := "Unknown"
+	switch {
+	case osKind == "windows" || sys == "windows":
+		available = true
+		backend = "stub"
+		label = "Windows"
+	case osKind == "darwin" || sys == "darwin":
+		available = true
+		backend = "stub"
+		label = "macOS"
+	default:
+		available = strings.TrimSpace(os.Getenv("DISPLAY")) != "" || strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) != ""
+		if available {
+			backend = "stub"
+		} else {
+			reason = "no_display"
+		}
+		switch {
+		case osKind != "":
+			label = strings.ToUpper(osKind[:1]) + osKind[1:]
+		case sys != "":
+			label = strings.ToUpper(sys[:1]) + sys[1:]
+		}
+	}
+	out := map[string]any{
+		"available": available,
+		"label":     label,
+		"backend":   backend,
+	}
+	if reason != "" {
+		out["reason_if_unavailable"] = reason
+	}
+	return out
 }
 
 func (r *Registrar) collectTools() []string {

@@ -1,0 +1,39 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "projection_openai_legal_sequence",
+  "subcase": "tool_name_not_overridden",
+  "given": {
+    "input_run_messages": [
+      {
+        "role": "assistant",
+        "name": "member_mb_01h00000000000000000000002",
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"README.md\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "name": "read_file",
+        "content": "# title"
+      }
+    ]
+  },
+  "when": {
+    "op": "to_provider_payload"
+  },
+  "then": {
+    "tool_message_name": "read_file",
+    "forbidden_tool_message_names": [
+      "member_mb_01h00000000000000000000002"
+    ]
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/WorkerBinding.json",
+  "title": "WorkerBinding",
+  "type": "object",
+  "required": [
+    "member_id",
+    "workgroup_id",
+    "home_node_id",
+    "provision_id",
+    "member_spec_digest",
+    "lease_epoch",
+    "member_generation",
+    "workspace_path",
+    "status",
+    "not_enumerable_as_local_agent"
+  ],
+  "properties": {
+    "member_id": {
+      "type": "string",
+      "pattern": "^mb_[0-9a-z]{26}$"
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "home_node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "provision_id": {
+      "type": "string",
+      "pattern": "^pv_[0-9a-z]{26}$"
+    },
+    "member_spec_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "lease_epoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "member_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "workspace_path": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "provisioning",
+        "ready",
+        "busy",
+        "archived",
+        "error"
+      ]
+    },
+    "not_enumerable_as_local_agent": {
+      "const": true
+    }
+  },
+  "additionalProperties": false
+}

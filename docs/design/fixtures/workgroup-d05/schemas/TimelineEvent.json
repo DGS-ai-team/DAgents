@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/TimelineEvent.json",
+  "title": "TimelineEvent",
+  "type": "object",
+  "required": [
+    "event_id",
+    "workgroup_id",
+    "seq",
+    "type",
+    "visibility",
+    "actor_id",
+    "actor_kind",
+    "protocol_name",
+    "display_name_at_send",
+    "created_at"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^ev_[0-9a-z]{26}$"
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "type": {
+      "enum": [
+        "human_message",
+        "actor_final_text",
+        "assign_started",
+        "assign_finished",
+        "assign_indeterminate",
+        "system_notice",
+        "hitl_opened",
+        "hitl_resolved_summary"
+      ]
+    },
+    "visibility": {
+      "enum": [
+        "subscribers"
+      ]
+    },
+    "actor_id": {
+      "oneOf": [
+        {
+          "const": "leader"
+        },
+        {
+          "type": "string",
+          "pattern": "^mb_[0-9a-z]{26}$"
+        },
+        {
+          "type": "string",
+          "pattern": "^hu_[0-9a-z]{26}$"
+        },
+        {
+          "const": "human"
+        }
+      ]
+    },
+    "actor_kind": {
+      "enum": [
+        "leader",
+        "member",
+        "human",
+        "system"
+      ]
+    },
+    "authenticated_node_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "protocol_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "display_name_at_send": {
+      "type": "string"
+    },
+    "assign_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^as_[0-9a-z]{26}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "turn_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^tn_[0-9a-z]{26}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "client_message_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-z]{26}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "content_text": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "not": {
+    "required": [
+      "tool_arguments",
+      "tool_result",
+      "raw_tool_payload"
+    ]
+  }
+}

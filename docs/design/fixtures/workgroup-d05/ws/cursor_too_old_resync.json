@@ -1,0 +1,17 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "ws_cursor_too_old_resync",
+  "given": {
+    "last_ack_delivery_seq": 1,
+    "outbox_retention_from": 100
+  },
+  "when": {
+    "op": "resume.offer",
+    "from_delivery_seq": 1
+  },
+  "then": {
+    "code": "cursor_too_old",
+    "action": "resync_snapshot_then_resume"
+  }
+}

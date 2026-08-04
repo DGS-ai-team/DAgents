@@ -42,6 +42,8 @@ type ManageSettings struct {
 	Team                        string `json:"team"`
 	RegistrationBaseURL         string `json:"registration_base_url"`
 	A2AEnabled                  bool   `json:"a2a_enabled"`
+	AcceptInbound               bool   `json:"accept_inbound"`
+	WorkgroupEnabled            bool   `json:"workgroup_enabled"`
 	NodeToken                   string `json:"node_token"`
 	RegistrationIntervalSeconds int    `json:"registration_interval_seconds"`
 	RegistrationTTLSeconds      int    `json:"registration_ttl_seconds"`
@@ -86,11 +88,11 @@ type RuntimeSettings struct {
 	LogLevel string `json:"log_level"`
 }
 
-// AgentSettings Agent 身份（config agent 块）。
+// AgentSettings Node 展示身份（历史字段名 agent；UI 称 Node 名称）。
 type AgentSettings struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Role        string `json:"role"`
+	Role        string `json:"role,omitempty"` // deprecated，可选元数据
 }
 
 // ChildAgentsLimits 子 Agent 配额（enabled 见 features）。
@@ -190,6 +192,10 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 	if cfg.Manage.A2A.Enabled != nil {
 		a2aEnabled = *cfg.Manage.A2A.Enabled
 	}
+	workgroupEnabled := true
+	if cfg.Manage.Workgroup.Enabled != nil {
+		workgroupEnabled = *cfg.Manage.Workgroup.Enabled
+	}
 	return SettingsView{
 		Node: NodeEndpointView{
 			ListenHost:    cfg.Listen.Host,
@@ -211,6 +217,8 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			Team:                        cfg.Manage.Registration.Team,
 			RegistrationBaseURL:         cfg.Manage.Registration.BaseURL,
 			A2AEnabled:                  a2aEnabled,
+			AcceptInbound:               cfg.ExposeToPeersEffective(),
+			WorkgroupEnabled:            workgroupEnabled,
 			NodeToken:                   cfg.Manage.NodeToken,
 			RegistrationIntervalSeconds: cfg.Manage.Registration.IntervalSeconds,
 			RegistrationTTLSeconds:      cfg.Manage.Registration.TTLSeconds,
@@ -483,6 +491,7 @@ func llmProfilesFromConfig(cfg *config.Config) []LLMProfileSettings {
 func applyManagePatch(cfg *config.Config, p ManageSettings) error {
 	cfg.Manage.Enabled = p.Enabled
 	cfg.Manage.NodeToken = strings.TrimSpace(p.NodeToken)
+	cfg.Manage.Workgroup.Enabled = boolPtr(p.WorkgroupEnabled)
 	if p.RegistrationIntervalSeconds > 0 {
 		cfg.Manage.Registration.IntervalSeconds = p.RegistrationIntervalSeconds
 	}
@@ -507,6 +516,7 @@ func applyManagePatch(cfg *config.Config, p ManageSettings) error {
 	cfg.Manage.Registration.BaseURL = strings.TrimSpace(p.RegistrationBaseURL)
 	a2a := p.A2AEnabled
 	cfg.Manage.A2A.Enabled = boolPtr(a2a)
+	cfg.Manage.A2A.AcceptInbound = boolPtr(p.AcceptInbound)
 	return nil
 }
 
@@ -575,6 +585,7 @@ func applyRuntimePatch(cfg *config.Config, p RuntimeSettings) error {
 func applyAgentPatch(cfg *config.Config, p AgentSettings) {
 	cfg.Agent.Name = strings.TrimSpace(p.Name)
 	cfg.Agent.Description = strings.TrimSpace(p.Description)
+	// Role 仅作可选元数据；空 PATCH 字段不强制清空已有值以外——与 name/desc 同策略整段覆盖
 	cfg.Agent.Role = strings.TrimSpace(p.Role)
 }
 

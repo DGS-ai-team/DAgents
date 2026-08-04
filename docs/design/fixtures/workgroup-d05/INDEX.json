@@ -1,0 +1,203 @@
+{
+  "schema_version": "0.5.0",
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "root": "docs/design/fixtures/workgroup-d05",
+  "schemas": "schemas/",
+  "tests": [
+    {
+      "file": "catalog/tool_catalog_revision_drift.json",
+      "test": "tool_catalog_revision_drift",
+      "subcase": null
+    },
+    {
+      "file": "fencing/acl_revoke_stops_timeline_read.json",
+      "test": "acl_revoke_stops_timeline_read",
+      "subcase": null
+    },
+    {
+      "file": "fencing/archive_rejects_stale_epoch.json",
+      "test": "archive_fencing_rejects_stale_epoch",
+      "subcase": null
+    },
+    {
+      "file": "grant/acl_without_grant_denied.json",
+      "test": "acl_without_grant_denied",
+      "subcase": null
+    },
+    {
+      "file": "grant/digest_generation_fenced.json",
+      "test": "digest_generation_fenced",
+      "subcase": null
+    },
+    {
+      "file": "hitl/double_resolve_cas.json",
+      "test": "hitl_double_resolve_cas",
+      "subcase": null
+    },
+    {
+      "file": "hitl/exactly_once_tool_result_resume.json",
+      "test": "hitl_exactly_once_tool_result_resume",
+      "subcase": null
+    },
+    {
+      "file": "hitl/execution_approval_payload_bound.json",
+      "test": "hitl_execution_approval_payload_bound",
+      "subcase": null
+    },
+    {
+      "file": "hitl/execution_approval_wrong_node_denied.json",
+      "test": "hitl_execution_approval_wrong_node_denied",
+      "subcase": null
+    },
+    {
+      "file": "identity/reject_display_name_as_protocol_name.json",
+      "test": "protocol_name_rejects_unicode_display",
+      "subcase": null
+    },
+    {
+      "file": "identity/reserved_name_spoof.json",
+      "test": "reserved_name_spoof_rejected",
+      "subcase": null
+    },
+    {
+      "file": "member_api/local_messages_api_rejected.json",
+      "test": "member_local_messages_api_rejected",
+      "subcase": null
+    },
+    {
+      "file": "member_api/not_in_local_agents_api.json",
+      "test": "member_not_in_local_agents_api",
+      "subcase": null
+    },
+    {
+      "file": "member_assets/manage_authoritative.json",
+      "test": "member_assets_manage_authoritative",
+      "subcase": null
+    },
+    {
+      "file": "messaging/concurrent_human_total_order_by_seq.json",
+      "test": "concurrent_human_total_order_by_seq",
+      "subcase": null
+    },
+    {
+      "file": "messaging/human_client_message_id_dedupe.json",
+      "test": "human_client_message_id_dedupe",
+      "subcase": null
+    },
+    {
+      "file": "projection/assign_result_deduped_vs_timeline.json",
+      "test": "assign_result_deduped_vs_timeline",
+      "subcase": null
+    },
+    {
+      "file": "projection/deepseek_leader_sees_member_final.json",
+      "test": "projection_deepseek_assistant_name_fallback",
+      "subcase": null
+    },
+    {
+      "file": "projection/open_tool_call_buffers_timeline.json",
+      "test": "open_tool_call_buffers_timeline",
+      "subcase": null
+    },
+    {
+      "file": "projection/openai_member_sees_leader.json",
+      "test": "projection_openai_legal_sequence",
+      "subcase": null
+    },
+    {
+      "file": "projection/parallel_tool_calls_must_pair_all.json",
+      "test": "projection_openai_legal_sequence",
+      "subcase": "parallel_tool_calls"
+    },
+    {
+      "file": "projection/tool_name_not_overridden.json",
+      "test": "projection_openai_legal_sequence",
+      "subcase": "tool_name_not_overridden"
+    },
+    {
+      "file": "provision/retry_same_id_ok.json",
+      "test": "provision_retry_same_id_ok",
+      "subcase": null
+    },
+    {
+      "file": "provision/same_id_different_digest_conflict.json",
+      "test": "provision_same_id_different_digest_conflict",
+      "subcase": null
+    },
+    {
+      "file": "security/empty_allow_names_means_no_tools.json",
+      "test": "empty_allow_names_means_no_tools",
+      "subcase": null
+    },
+    {
+      "file": "security/legacy_placement_cannot_drive_member.json",
+      "test": "legacy_placement_cannot_drive_member",
+      "subcase": null
+    },
+    {
+      "file": "security/node_policy_can_only_tighten.json",
+      "test": "node_policy_can_only_tighten",
+      "subcase": null
+    },
+    {
+      "file": "security/timeline_excludes_raw_tool_payload.json",
+      "test": "timeline_excludes_raw_tool_payload",
+      "subcase": null
+    },
+    {
+      "file": "tool_command/indeterminate_on_journal_loss_after_accept.json",
+      "test": "indeterminate_on_journal_loss_after_accept",
+      "subcase": null
+    },
+    {
+      "file": "tool_command/no_reexec_after_accept.json",
+      "test": "tool_cmd_no_reexec_after_accept",
+      "subcase": null
+    },
+    {
+      "file": "tool_command/non_idempotent_handler_executes_once.json",
+      "test": "non_idempotent_handler_executes_once",
+      "subcase": null
+    },
+    {
+      "file": "tool_command/recover_accepted_before_running.json",
+      "test": "tool_cmd_recover_accepted_before_running",
+      "subcase": null
+    },
+    {
+      "file": "tool_command/resend_before_accept.json",
+      "test": "tool_cmd_resend_before_accept",
+      "subcase": null
+    },
+    {
+      "file": "tool_command/result_persisted_reply_lost.json",
+      "test": "tool_cmd_result_persisted_reply_lost",
+      "subcase": null
+    },
+    {
+      "file": "vertical/two_node_read_file_happy_path.json",
+      "test": "vertical_two_node_read_file_happy_path",
+      "subcase": null
+    },
+    {
+      "file": "ws/cursor_too_old_resync.json",
+      "test": "ws_cursor_too_old_resync",
+      "subcase": null
+    },
+    {
+      "file": "ws/gap_fill_and_dup_connection_fence.json",
+      "test": "ws_gap_fill_and_dup_connection_fence",
+      "subcase": null
+    },
+    {
+      "file": "ws/manage_restart_pending_assign.json",
+      "test": "manage_restart_pending_assign",
+      "subcase": null
+    },
+    {
+      "file": "ws/node_restart_each_persist_boundary.json",
+      "test": "node_restart_each_persist_boundary",
+      "subcase": null
+    }
+  ]
+}

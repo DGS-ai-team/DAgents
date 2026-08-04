@@ -39,9 +39,14 @@ def _normalize_string_list(value: Any, *, field_name: str, allow_empty: bool = T
 
 
 class AgentRegisterRequest(BaseModel):
-    """Node 注册或心跳 upsert（discovery_group 由 Manage 分配，Node 不传）。"""
+    """Node 注册或心跳 upsert（discovery_group 由 Manage 分配，Node 不传）。
 
-    agent_id: str = Field(max_length=256)
+    P5：`node_id` 为一等身份；`agent_id` 兼容旧客户端（历史上误用 agent_id 表示 node）。
+    当前 Registry 主键仍为 node 级：`agent_id == node_id`。
+    """
+
+    agent_id: str = Field(default="", max_length=256)
+    node_id: str = Field(default="", max_length=256)
     base_url: str
     capabilities_hint: list[str] = Field(default_factory=list)
     ttl_seconds: int = Field(default=60, ge=5, le=3600)
@@ -62,13 +67,14 @@ class AgentRegisterRequest(BaseModel):
     last_error_summary: str | None = Field(default=None, max_length=1024)
     recent_task_summary: str | None = Field(default=None, max_length=1024)
 
-    @field_validator("agent_id")
+    @field_validator("agent_id", "node_id", mode="before")
     @classmethod
-    def validate_agent_id(cls, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("agent_id 不能为空")
-        return cleaned
+    def validate_ids(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ValueError("id 字段必须是字符串")
+        return value.strip()
 
     @field_validator("base_url")
     @classmethod
@@ -119,8 +125,20 @@ class AgentRegisterRequest(BaseModel):
 
     @model_validator(mode="after")
     def apply_defaults(self) -> "AgentRegisterRequest":
+        node = (self.node_id or "").strip()
+        agent = (self.agent_id or "").strip()
+        if node and agent and node != agent:
+            raise ValueError("node_id 与 agent_id 不一致（当前 Registry 主键仍为 node 级）")
+        resolved = node or agent
+        if not resolved:
+            raise ValueError("node_id 或 agent_id 不能为空")
+        self.node_id = resolved
+        self.agent_id = resolved
         if not self.name:
-            self.name = self.agent_id
+            self.name = resolved
+        meta = dict(self.metadata or {})
+        meta.setdefault("node_id", resolved)
+        self.metadata = meta
         return self
 
 
@@ -132,6 +150,8 @@ class AgentHeartbeatRequest(BaseModel):
     last_error_summary: str | None = None
     recent_task_summary: str | None = None
     expose_to_peers: bool | None = None
+    # 可选：本机 Agent 实例目录（仅公告，非 A2A 目标）
+    local_agents: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AgentDeregisterRequest(BaseModel):
@@ -171,6 +191,7 @@ class AgentGroupsUpdateRequest(BaseModel):
 
 class AgentStoredRecord(BaseModel):
     agent_id: str
+    node_id: str = ""
     base_url: str
     discovery_group: list[str]
     capabilities_hint: list[str] = Field(default_factory=list)
@@ -202,6 +223,7 @@ class AgentRecord(AgentStoredRecord):
 
 class AgentDiscoverRecord(BaseModel):
     agent_id: str
+    node_id: str = ""
     discovery_group: list[str]
     capabilities: list[str] = Field(default_factory=list)
     capabilities_hint: list[str] = Field(default_factory=list)
