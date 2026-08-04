@@ -76,4 +76,8 @@ export const VIEW_META = {
     title: "案例库",
     subtitle: "演示会话 JSONL、关联 Skills / Plugins / External Tools",
   },
+  workgroup: {
+    title: "工作组",
+    subtitle: "查看所有工作组并进入组内与 Supervisor 对话",
+  },
 };

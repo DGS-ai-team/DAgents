@@ -6,6 +6,7 @@ import AskAiButton from "./components/AskAiButton.vue";
 import DetailDrawer from "./components/DetailDrawer.vue";
 import NodeAdminView from "./components/NodeAdminView.vue";
 import CasesView from "./components/CasesView.vue";
+import WorkgroupView from "./components/WorkgroupView.vue";
 import PageHeader from "./components/PageHeader.vue";
 import RegistryView from "./components/RegistryView.vue";
 import StatsRow from "./components/StatsRow.vue";
@@ -215,6 +216,12 @@ onMounted(async () => {
         <CasesView
           v-if="view === 'cases'"
           :active="view === 'cases'"
+          @toast="showToast($event.message, $event.type)"
+        />
+
+        <WorkgroupView
+          v-if="view === 'workgroup'"
+          :active="view === 'workgroup'"
           @toast="showToast($event.message, $event.type)"
         />
       </main>

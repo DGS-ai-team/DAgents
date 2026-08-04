@@ -46,6 +46,17 @@ const emit = defineEmits(["navigate"]);
       <button
         type="button"
         class="nav-tab"
+        :class="{ active: view === 'workgroup' }"
+        @click="emit('navigate', 'workgroup')"
+      >
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path d="M7 9a3 3 0 100-6 3 3 0 000 6zm6 2a3 3 0 100-6 3 3 0 000 6zM2 16a4 4 0 018 0v1H2v-1zm8 1v-1a5.98 5.98 0 00-1.2-3.6A4 4 0 0118 16v1h-8z" />
+        </svg>
+        工作组
+      </button>
+      <button
+        type="button"
+        class="nav-tab"
         :class="{ active: view === 'cases' }"
         @click="emit('navigate', 'cases')"
       >
