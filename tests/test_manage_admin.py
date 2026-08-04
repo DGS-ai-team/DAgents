@@ -45,40 +45,49 @@ def _assign_groups(client: TestClient, agent_id: str, groups: list[str] | None =
 class ManageAdminTests(unittest.TestCase):
     def test_list_a2a_tasks_readonly(self) -> None:
         with TemporaryDirectory() as tmp:
-            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db", a2a_expire_sweep_seconds=0)
+            db_path = Path(tmp) / "manage.db"
+            settings = ManageSettings.for_test(db_path=db_path, a2a_expire_sweep_seconds=0)
+            now = int(time.time())
+            payload = {
+                "task_id": "task-admin-1",
+                "from_agent_id": "caller-x",
+                "to_agent_id": "callee-y",
+                "kind": "invoke",
+                "content": "hello admin",
+                "blob_ids": [],
+                "caller_session_id": "",
+                "idempotency_key": "",
+                "trace_id": "",
+                "status": "queued",
+                "created_at_unix": now,
+                "updated_at_unix": now,
+                "expires_at_unix": now + 3600,
+                "delivered_at_unix": None,
+                "result_text": "",
+                "result_status": None,
+                "callee_session_id": "",
+                "error_detail": "",
+                "pending_caller_resume": {},
+            }
+            SQLiteDatabase(db_path)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "INSERT INTO a2a_tasks(task_id, payload_json) VALUES (?, ?)",
+                    ("task-admin-1", json.dumps(payload)),
+                )
+                conn.commit()
+
             app = create_app(settings)
             with TestClient(app) as client:
-                _register_agent(client, "caller-x")
-                _register_agent(client, "callee-y")
-                _assign_groups(client, "caller-x")
-                _assign_groups(client, "callee-y")
-
-                created = client.post(
-                    "/v1/a2a/tasks",
-                    json={
-                        "from_agent_id": "caller-x",
-                        "to_agent_id": "callee-y",
-                        "content": "hello admin",
-                    },
-                    headers={"x-dagents-agent-id": "caller-x"},
-                )
-                self.assertEqual(created.status_code, 200)
-                task_id = created.json()["task_id"]
-
                 listed = client.get("/v1/admin/a2a/tasks")
                 self.assertEqual(listed.status_code, 200)
                 body = listed.json()
                 self.assertGreaterEqual(body["total"], 1)
                 ids = [t["task_id"] for t in body["tasks"]]
-                self.assertIn(task_id, ids)
-                self.assertEqual(body["tasks"][0]["status"], "queued")
+                self.assertIn("task-admin-1", ids)
 
                 polled = client.get("/v1/a2a/inbox", params={"agent_id": "callee-y"})
-                self.assertEqual(polled.status_code, 200)
-                self.assertEqual(len(polled.json()["tasks"]), 1)
-
-                listed2 = client.get("/v1/admin/a2a/tasks", params={"status": "delivered"})
-                self.assertTrue(any(t["task_id"] == task_id for t in listed2.json()["tasks"]))
+                self.assertEqual(polled.status_code, 410)
 
     def test_list_a2a_tasks_with_surrogate_content(self) -> None:
         with TemporaryDirectory() as tmp:

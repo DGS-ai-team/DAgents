@@ -26,18 +26,11 @@ func TestExposeToPeersEffective_AcceptInbound(t *testing.T) {
 
 func TestManageA2AInboxEnabled(t *testing.T) {
 	cfg := &Config{Manage: ManageConfig{Enabled: true}}
-	if cfg.ManageA2AEnabled() {
-		t.Fatal("default inbox off")
-	}
 	on := true
 	cfg.Manage.A2A.AcceptInbound = &on
-	if !cfg.ManageA2AEnabled() {
-		t.Fatal("inbox should follow accept_inbound")
-	}
-	disabled := false
-	cfg.Manage.A2A.Enabled = &disabled
-	if cfg.ManageA2AEnabled() {
-		t.Fatal("explicit a2a.enabled=false should win")
+	cfg.Manage.A2A.Enabled = &on
+	if cfg.ManageA2AEnabled() || cfg.ManageA2AInboxEnabled() || cfg.ManageA2AInboxEnabledForRole("compliance") {
+		t.Fatal("A2A inbox callee retired: ManageA2AEnabled must stay false")
 	}
 }
 

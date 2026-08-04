@@ -352,11 +352,11 @@ type ManageUpdateConfig struct {
 	Channel              string `yaml:"channel"`
 }
 
-// ManageA2AConfig 控制 Node 对 Manage A2A inbox 的 long poll sidecar。
+// ManageA2AConfig 历史 A2A 开关（inbox callee 已退役；字段保留兼容旧 YAML）。
 type ManageA2AConfig struct {
-	// Enabled 显式开关 inbox long poll；nil 时跟随 AcceptInbound。
+	// Enabled 历史 inbox long poll 开关；现已忽略（ManageA2AEnabled 恒 false）。
 	Enabled *bool `yaml:"enabled"`
-	// AcceptInbound 是否接受 A2A 入站（Registry expose_to_peers）；nil/false → 不暴露。
+	// AcceptInbound 是否在 Registry 上报 expose_to_peers（历史兼容）。
 	// 取代旧 agent.role=compliance/ops 推导。
 	AcceptInbound    *bool `yaml:"accept_inbound"`
 	InboxPollSeconds int   `yaml:"inbox_poll_seconds"`

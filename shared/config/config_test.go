@@ -218,24 +218,17 @@ func TestManageA2AConfigDefaults(t *testing.T) {
 		},
 	}
 	cfg.ApplyDefaults()
-	if cfg.ManageA2AEnabled() {
-		t.Fatal("expected default a2a disabled without accept_inbound")
-	}
 	on := true
 	cfg.Manage.A2A.AcceptInbound = &on
-	if !cfg.ManageA2AEnabled() {
-		t.Fatal("expected inbox to follow accept_inbound")
+	cfg.Manage.A2A.Enabled = &on
+	if cfg.ManageA2AEnabled() {
+		t.Fatal("A2A inbox callee retired: ManageA2AEnabled must stay false")
 	}
 	if cfg.ManageA2AInboxWait() != 25*time.Second {
 		t.Fatalf("wait=%s", cfg.ManageA2AInboxWait())
 	}
 	if cfg.ManageA2AInboxPollInterval() != 40*time.Second {
 		t.Fatalf("poll=%s", cfg.ManageA2AInboxPollInterval())
-	}
-	disabled := false
-	cfg.Manage.A2A.Enabled = &disabled
-	if cfg.ManageA2AEnabled() {
-		t.Fatal("expected explicit disable")
 	}
 }
 

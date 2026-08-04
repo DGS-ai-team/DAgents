@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +63,7 @@ func TestSideEffectContinueAppliesExternalOnEmptyHistory(t *testing.T) {
 	}
 	rt := mgr.getRuntime(sess.ID)
 
-	if _, err := mgr.EnqueueA2AInboxMessage(context.Background(), sess.ID, "inbox hello"); err != nil {
+	if err := mgr.EnqueueTriggerMessage(sess.ID, "trig-bridge", "trigger hello"); err != nil {
 		t.Fatal(err)
 	}
 	waitQueueDrain(t, rt, 5*time.Second)
@@ -74,14 +73,14 @@ func TestSideEffectContinueAppliesExternalOnEmptyHistory(t *testing.T) {
 	if len(rt.messages) < 1 {
 		t.Fatalf("history len = %d, want bridge user after continue", len(rt.messages))
 	}
-	foundInbox := false
+	found := false
 	for _, m := range rt.messages {
-		if m.Role == "user" && strings.Contains(m.Content, "inbox hello") {
-			foundInbox = true
+		if m.Role == "user" && strings.Contains(m.Content, "trigger hello") {
+			found = true
 			break
 		}
 	}
-	if !foundInbox {
+	if !found {
 		t.Fatalf("messages = %+v", rt.messages)
 	}
 }

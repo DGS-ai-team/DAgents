@@ -7,7 +7,6 @@ const (
 	RequestTypeAsyncToolResult    = "async_tool_result"
 	RequestTypeToolResult         = "tool_result"
 	RequestTypeTriggerMessage     = "trigger_message"
-	RequestTypeA2AInboxMessage    = "a2a_inbox_message"
 	RequestTypeSideEffectContinue = "side_effect_continue"
 )
 

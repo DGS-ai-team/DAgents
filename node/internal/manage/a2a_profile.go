@@ -36,7 +36,7 @@ func RegistrationCard(cfg *config.Config) map[string]any {
 	return out
 }
 
-// LogA2AProfileWarnings 启动时校验 A2A 入站开关与 inbox 是否一致。
+// LogA2AProfileWarnings 启动时提示 A2A inbox 已退役。
 func LogA2AProfileWarnings(cfg *config.Config, logger *slog.Logger) {
 	if cfg == nil || !cfg.Manage.Enabled {
 		return
@@ -44,19 +44,10 @@ func LogA2AProfileWarnings(cfg *config.Config, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	expose := cfg.ExposeToPeersEffective()
-	inbox := cfg.ManageA2AEnabled()
-
-	if expose && !inbox {
-		logger.Warn("accept_inbound=true but inbox polling disabled; A2A tasks will not be processed",
-			"accept_inbound", expose,
-			"a2a_enabled", inbox,
-		)
-	}
-	if inbox && !expose {
-		logger.Warn("inbox polling enabled but accept_inbound=false; peers cannot discover/invoke this node",
-			"accept_inbound", expose,
-			"a2a_enabled", inbox,
+	if cfg.ExposeToPeersEffective() || (cfg.Manage.A2A.Enabled != nil && *cfg.Manage.A2A.Enabled) {
+		logger.Warn("A2A inbox callee retired; cross-node collaboration uses workgroups",
+			"accept_inbound", cfg.ExposeToPeersEffective(),
+			"hint", "manage.a2a.enabled / accept_inbound no longer start inbox long-poll",
 		)
 	}
 }

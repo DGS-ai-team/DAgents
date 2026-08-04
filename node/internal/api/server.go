@@ -55,7 +55,6 @@ type Server struct {
 	triggerStore  *triggers.Store
 	triggerSched  *triggers.Scheduler
 	registrar     *manage.Registrar
-	inboxPoller   *manage.InboxPoller
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
 	control         *manage.ControlClient
@@ -330,7 +329,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		}
 	}
 	var registrar *manage.Registrar
-	var inboxPoller *manage.InboxPoller
 	var updateChecker *manage.UpdateChecker
 	var packageUploader *manage.PackageUploader
 	var a2aBridge *session.A2ACallerHITLBridge
@@ -342,13 +340,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			updateChecker = manage.NewUpdateChecker(cfg, logger)
 		}
 		packageUploader = manage.NewPackageUploader(cfg, logger)
+		// A2A inbox callee 已退役；caller HITL bridge 仅兼容旧 resume 事件，新建 task 由 Manage 返回 410。
 		a2aBridge = session.NewA2ACallerHITLBridge(cfg.NodeID, hub)
-		if cfg.ManageA2AEnabled() {
-			inboxPoller = manage.NewInboxPoller(cfg, logger)
-			if handler := manage.ResolveInboxHandler(cfg, mgr, logger); handler != nil {
-				inboxPoller.SetHandler(handler)
-			}
-		}
 	}
 	control := manage.NewControlClient(cfg)
 	var wgWorker *workgroup.Worker
@@ -398,7 +391,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerStore:  triggerStore,
 		triggerSched:  triggerSched,
 		registrar:       registrar,
-		inboxPoller:     inboxPoller,
 		updateChecker:   updateChecker,
 		packageUploader: packageUploader,
 		control:         control,
@@ -529,9 +521,6 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	defer regCancel()
 	if s.registrar != nil {
 		s.registrar.Start(regCtx)
-	}
-	if s.inboxPoller != nil {
-		s.inboxPoller.Start(regCtx)
 	}
 	if s.workgroupDialer != nil {
 		go func() {
