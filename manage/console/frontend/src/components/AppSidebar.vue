@@ -12,15 +12,9 @@ const emit = defineEmits(["navigate"]);
   <aside class="sidebar" aria-label="主导航">
     <div class="sidebar-brand">
       <div class="brand-logo" aria-hidden="true">
-        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="32" height="32" rx="8" fill="url(#brand-grad)" />
-          <path d="M8 22V10h3.2v9.2H20V22H8zm11.2-6.4V10H22v5.6h-2.8z" fill="#fff" />
-          <defs>
-            <linearGradient id="brand-grad" x1="4" y1="4" x2="28" y2="28">
-              <stop stop-color="#6366f1" />
-              <stop offset="1" stop-color="#312e81" />
-            </linearGradient>
-          </defs>
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="24" height="24" rx="6" fill="var(--primary)" />
+          <path d="M6 17V7h2.4v7H15V17H6zm8.4-5V7H17v5h-2.6z" fill="#fff" />
         </svg>
       </div>
       <div class="brand-text">

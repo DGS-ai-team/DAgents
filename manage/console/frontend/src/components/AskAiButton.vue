@@ -70,20 +70,20 @@ async function openConsole() {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 10px 16px;
-  border: none;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #fff;
   cursor: pointer;
-  background: linear-gradient(135deg, #6366f1, #312e81);
-  box-shadow: 0 6px 18px rgba(49, 46, 129, 0.35);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  background: var(--primary);
+  box-shadow: var(--shadow-md);
+  transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
 }
 .askai-fab:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(49, 46, 129, 0.45);
+  background: var(--primary-hover);
 }
 .askai-fab:disabled {
   opacity: 0.7;

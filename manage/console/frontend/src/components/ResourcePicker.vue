@@ -71,8 +71,8 @@ function optionLabel(item) {
   max-height: 200px;
   overflow-y: auto;
   padding: 8px;
-  border: 1px solid var(--border-subtle, #333);
-  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
 }
 .resource-picker__item {
   display: flex;
@@ -80,10 +80,10 @@ function optionLabel(item) {
   gap: 8px;
   cursor: pointer;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .resource-picker__item.is-selected {
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--primary-soft);
 }
 .resource-picker__meta {
   font-size: 0.8125rem;
