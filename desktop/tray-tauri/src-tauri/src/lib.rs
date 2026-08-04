@@ -154,12 +154,14 @@ pub fn run() {
                 let tray_shared = Arc::clone(&shared);
                 let menu_shared = Arc::clone(&shared);
                 let tray_app = app.handle().clone();
-                let icon = app
-                    .default_window_icon()
-                    .cloned()
-                    .ok_or_else(|| "缺少默认窗口图标".to_string())?;
+                // 与 Go Shell（desktop/tray/assets/icon.ico）同源，避免 Tauri 默认/重编码图标不一致。
+                let icon = tauri::image::Image::from_bytes(include_bytes!(
+                    "../../../tray/assets/icon.ico"
+                ))
+                .map_err(|e| format!("加载托盘图标失败: {e}"))?;
 
-                let _tray = TrayIconBuilder::with_id("main")
+                // TrayIcon 在最后一次 drop 时会从系统托盘移除，必须托管到 App 状态以保持存活。
+                let tray = TrayIconBuilder::with_id("main")
                     .icon(icon)
                     .menu(&menu)
                     .tooltip("DAgents")
@@ -178,6 +180,7 @@ pub fn run() {
                         }
                     })
                     .build(app)?;
+                app.manage(tray);
 
                 // 启动 ensure Node + 轮询
                 let boot = Arc::clone(&shared);

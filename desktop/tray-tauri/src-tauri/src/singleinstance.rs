@@ -1,11 +1,13 @@
 //! Shell 单实例：Windows 命名互斥体；其它平台文件锁。
 
 use crate::layout::Layout;
-use std::fs::{self, File, OpenOptions};
-use std::path::PathBuf;
 
 #[cfg(not(windows))]
+use std::fs::{self, File, OpenOptions};
+#[cfg(not(windows))]
 use std::io::Write;
+#[cfg(not(windows))]
+use std::path::PathBuf;
 
 pub struct InstanceGuard {
     #[cfg(windows)]
