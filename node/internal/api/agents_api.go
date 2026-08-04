@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -20,13 +19,32 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
-// errRemoteAgentNotLocal 远端 Placement 引用不得装本地 runtime（D5：产品面已 410）。
-var errRemoteAgentNotLocal = errors.New("remote_agent_not_local")
+// errRemoteAgentNotLocal 已删除：遗留 remote stub 在 ensure 时归档并按 agent_not_found 处理。
 
-func writeRemotePlacementDeprecated(w http.ResponseWriter, agentID string) {
-	writeAPIError(w, http.StatusGone, "placement_deprecated",
-		"远程 Placement Agent 已下线：跨机器协作请使用工作组",
+func (s *Server) archiveRetiredRemoteStub(ctx context.Context, agentID string) {
+	id := strings.TrimSpace(agentID)
+	if s.agents == nil || id == "" {
+		return
+	}
+	_ = s.agents.SoftDelete(ctx, id)
+	if s.sessions != nil {
+		_, _ = s.sessions.Delete(id)
+	}
+}
+
+func (s *Server) writeAgentNotFound(w http.ResponseWriter, agentID string) {
+	writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在",
 		map[string]any{"agent_id": strings.TrimSpace(agentID)})
+}
+
+// retireRemoteStubIfNeeded 归档遗留 Placement remote 引用并写 404；返回 true 表示调用方应停止。
+func (s *Server) retireRemoteStubIfNeeded(ctx context.Context, w http.ResponseWriter, rec *store.AgentRecord) bool {
+	if rec == nil || store.NormalizeAgentOrigin(rec.Origin) != store.AgentOriginRemote {
+		return false
+	}
+	s.archiveRetiredRemoteStub(ctx, rec.AgentID)
+	s.writeAgentNotFound(w, rec.AgentID)
+	return true
 }
 
 func (s *Server) registerAgentRoutes() {
@@ -92,10 +110,13 @@ type createAgentRequest struct {
 	// TemplateID 仅作溯源（可选）；配置由前端展开后通过 defaults/sandbox 完整提交。
 	TemplateID  string         `json:"template_id"`
 	DisplayName string         `json:"display_name"`
-	Origin      string         `json:"origin"` // local | remote；缺省 local
+	Origin      string         `json:"origin"` // 仅允许 local（或缺省）；remote 拒绝
 	Sandbox     *sandboxPatch  `json:"sandbox"`
 	Defaults    map[string]any `json:"defaults"`
-	Placement   *placementSpec `json:"placement"`
+	// Placement 旧 Placement 请求字段；非本机 home_node_id 一律拒绝。
+	Placement *struct {
+		HomeNodeID string `json:"home_node_id"`
+	} `json:"placement"`
 }
 
 type agentView struct {
@@ -158,15 +179,15 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		homeNodeID = strings.TrimSpace(req.Placement.HomeNodeID)
 	}
 	if homeNodeID != "" && homeNodeID != s.cfgNodeID() {
-		writeAPIError(w, http.StatusGone, "placement_deprecated", "远程 Placement 创建已下线：跨机器协作请使用工作组", map[string]any{
-			"home_node_id": homeNodeID,
-		})
+		writeAPIError(w, http.StatusBadRequest, "invalid_request",
+			"远程 Placement 已下线：跨机器协作请使用工作组",
+			map[string]any{"home_node_id": homeNodeID})
 		return
 	}
 	if store.NormalizeAgentOrigin(req.Origin) == store.AgentOriginRemote {
-		writeAPIError(w, http.StatusGone, "placement_deprecated", "远程 Placement 创建已下线：跨机器协作请使用工作组", map[string]any{
-			"origin": store.AgentOriginRemote,
-		})
+		writeAPIError(w, http.StatusBadRequest, "invalid_request",
+			"远程 Placement 已下线：跨机器协作请使用工作组",
+			map[string]any{"origin": store.AgentOriginRemote})
 		return
 	}
 
@@ -309,11 +330,10 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rec == nil || rec.Archived {
-		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+		s.writeAgentNotFound(w, id)
 		return
 	}
-	if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-		writeRemotePlacementDeprecated(w, id)
+	if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.enrichAgentNotify(agentViewFromRecord(*rec)))
@@ -360,11 +380,10 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rec == nil || rec.Archived {
-		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
+		s.writeAgentNotFound(w, id)
 		return
 	}
-	if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-		writeRemotePlacementDeprecated(w, id)
+	if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 		return
 	}
 	var req patchAgentRequest
@@ -531,7 +550,8 @@ func (s *Server) ensureAgentRuntimeOpts(ctx context.Context, agentID string, for
 		return fmt.Errorf("agent_not_found")
 	}
 	if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-		return errRemoteAgentNotLocal
+		s.archiveRetiredRemoteStub(ctx, id)
+		return fmt.Errorf("agent_not_found")
 	}
 	rev := rec.UpdatedAt.UTC().UnixNano()
 	if !forceReload && s.sessions.Get(id) != nil {
@@ -634,11 +654,7 @@ func (s *Server) handleAgentEnsure(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.ensureAgentRuntime(r.Context(), id); err != nil {
 		if err.Error() == "agent_not_found" {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
-			return
-		}
-		if errors.Is(err, errRemoteAgentNotLocal) {
-			writeRemotePlacementDeprecated(w, id)
+			s.writeAgentNotFound(w, id)
 			return
 		}
 		writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})
@@ -655,11 +671,7 @@ func (s *Server) handleAgentReload(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.ensureAgentRuntimeOpts(r.Context(), id, true); err != nil {
 		if err.Error() == "agent_not_found" {
-			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
-			return
-		}
-		if errors.Is(err, errRemoteAgentNotLocal) {
-			writeRemotePlacementDeprecated(w, id)
+			s.writeAgentNotFound(w, id)
 			return
 		}
 		writeAPIError(w, http.StatusInternalServerError, "agent_reload_failed", err.Error(), map[string]any{"agent_id": id})
@@ -680,11 +692,7 @@ func (s *Server) withAgentRuntime(next http.HandlerFunc) http.HandlerFunc {
 		if s.agents != nil {
 			if err := s.ensureAgentRuntime(r.Context(), id); err != nil {
 				if err.Error() == "agent_not_found" {
-					writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
-					return
-				}
-				if errors.Is(err, errRemoteAgentNotLocal) {
-					writeRemotePlacementDeprecated(w, id)
+					s.writeAgentNotFound(w, id)
 					return
 				}
 				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": id})

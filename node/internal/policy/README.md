@@ -29,6 +29,6 @@
 
 **写盘信任链**：`write_file` / `search_replace` 为 **`rule`** 时，`node/internal/hooks` 的 `AgentOwnedFileHook` 可对 session 内 Agent 自建且 mtime 未变的 path 将 `require_approval` 降为 `auto`；**`always` 档位不经过信任链**。种子默认 `write_file=rule`（见 `packaging/runtime/policy/tool.approval.txt`）。设计：[ux-agent-owned-file-approval.md](../../../docs/design/ux-agent-owned-file-approval.md)。
 
-**HTTP**：`GET/PUT /v1/policy`（见 [`docs/architecture/agent-node-api.md`](../../../docs/architecture/agent-node-api.md) §2.6）。写盘前滚动备份 `*.bak`；`ask_user_information` 不可设为 `deny`。
+**HTTP**：`GET/PUT /v1/agents/{agent_id}/policy*`（见 [`docs/architecture/agent-node-api.md`](../../../docs/architecture/agent-node-api.md) §2.3）。全局 `/v1/policy*` 已移除。写盘前滚动备份 `*.bak`；`ask_user_information` 不可设为 `deny`。
 
 种子见 [`packaging/runtime/policy`](../../../packaging/runtime/policy)。

@@ -202,7 +202,7 @@ Node B (caller)                    Manage                         Node A (callee
 | 用户询问中继 | `user_information_required` + `a2a_relay` | 释放 turn 栅栏，在 caller TUI 回答后经 `caller_resume` 回传 |
 | 对端标识来源 | callee `requires_input` JSON | `callee_agent_id` / `callee_agent_name` → caller SSE `a2a_peer_agent_*` |
 
-双 Client（Python Textual / Go bubbletea）行为对齐；联调见 `cases/a2a-manage-docker/` 与 `scripts/verify-bash-hitl.sh`。
+双 Client（Python Textual / Go bubbletea）行为对齐（历史；A2A 联调案例已拆除）。
 
 **单测索引**：`node/internal/session/a2a_*_test.go`、`node/internal/manage/compliance_executor_*_test.go`、`node/internal/a2aclient/client_a2a_test.go`、`client/internal/hitl/a2a_test.go`、`client/internal/tui/full/a2a_relay_tools_test.go`、`tests/test_cli_a2a_relay.py`、`tests/test_manage_a2a_store.py`（caller_resume）。
 
@@ -319,7 +319,7 @@ manage:
 | `node/internal/manage/task_replier.go` | ack / reply / caller_input |
 | `node/internal/a2aclient/client.go` | discover / create / poll / resume |
 | `node/internal/tools/tool_a2a.go` | `agent_discover` / `agent_invoke` |
-| `node/internal/api/server.go` | 启动 registrar / poller |
-| `cases/a2a-manage-docker/` | 双 Node 联调案例 |
+| `node/internal/api/server.go` | 启动 registrar |
+| （案例） | A2A Docker 案例已拆除；跨机见工作组 |
 
 **相关设计文档**：[manage-architecture.md](./design/manage-architecture.md)、[a2a-via-manage.md](./future/a2a-via-manage.md)、[three-component-model.md](./design/three-component-model.md)。

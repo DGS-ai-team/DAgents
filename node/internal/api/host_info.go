@@ -8,19 +8,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 )
 
-// placementSpec / placementPayload 仅兼容旧请求与 agents.placement_json 反序列化；
-// D5 Cut7：内部 placement HTTP 路由已移除。
-type placementSpec struct {
-	HomeNodeID string `json:"home_node_id"`
-}
-
-type placementPayload struct {
-	Role        string `json:"role"` // home | owner_ref
-	OwnerNodeID string `json:"owner_node_id"`
-	HomeNodeID  string `json:"home_node_id"`
-	Status      string `json:"status,omitempty"`
-}
-
+// hostPayload 为本机主机信息快照（创建 Agent 时写入 agents.host_json）。
 type hostPayload struct {
 	OSKind           string `json:"os_kind"`
 	SysPlatform      string `json:"sys_platform"`

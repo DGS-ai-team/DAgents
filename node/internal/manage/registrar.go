@@ -274,13 +274,13 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 				"machine":          host.Machine,
 				"login_name":       host.LoginName,
 			},
-			"display": placementDisplayMeta(),
-			// D5：不再广告 placement.allow_*；跨机器协作走工作组。
+			"display": displayMeta(),
+			// 跨机器协作走工作组；不再广告 placement.allow_*。
 		},
 	}
 }
 
-func placementDisplayMeta() map[string]any {
+func displayMeta() map[string]any {
 	h := hostsnapshot.Get()
 	osKind := strings.ToLower(strings.TrimSpace(h.OSKind))
 	sys := strings.ToLower(strings.TrimSpace(h.SysPlatform))

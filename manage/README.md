@@ -167,11 +167,10 @@ JSONL 行格式对齐 Node `history/*.jsonl`：`{"recorded_at":"...","message":{
 manage/
   config.py
   manage_app.py
-  admin/            # Admin 只读 API（A2A 列表）
   platform/         # auth, audit, blob, metrics
   storage/          # sqlite
   registry/         # models, store, routes, status
-  a2a/              # Task store + routes
+  workgroup/        # 跨 Node 协作
   llm/              # LLM 配置注册中心
   skills/           # Skill 包分发
   plugins/          # Hook Plugin 分发
@@ -197,10 +196,6 @@ manage:
     interval_seconds: 30
     ttl_seconds: 60
     team: platform
-  a2a:
-    enabled: true              # 默认随 manage.enabled 开启
-    inbox_wait_seconds: 25     # long poll wait
-    inbox_poll_seconds: 30     # 断线降级短 poll
 ```
 
 **discovery_group** 不由 Node 传入；在 Manage Console 详情抽屉或 API 分配：

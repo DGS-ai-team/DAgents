@@ -416,7 +416,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/streams", s.handleStreams)
 	s.registerTriggerRoutes()
 	s.registerMediaRoutes()
-	s.registerPolicyRoutes()
 	s.registerLLMRoutes()
 	s.registerSetupRoutes()
 	s.registerManageUploadRoutes()
@@ -981,8 +980,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// 若该 id 是 Agent 实例，先按快照装入 runtime（避免重启后落到默认沙箱配置）。
 	if s.agents != nil {
 		if rec, getErr := s.agents.Get(r.Context(), sessionID); getErr == nil && rec != nil && !rec.Archived {
-			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-				writeRemotePlacementDeprecated(w, sessionID)
+			if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 				return
 			}
 			if err := s.ensureAgentRuntime(r.Context(), sessionID); err != nil {
@@ -1056,8 +1054,7 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	// 远端引用若未走 Edge upgrade，禁止订阅本机 hub（否则永远无事件且误导）。
 	if agentFilter != "" && s.agents != nil {
 		if rec, err := s.agents.Get(r.Context(), agentFilter); err == nil && rec != nil && !rec.Archived {
-			if store.NormalizeAgentOrigin(rec.Origin) == store.AgentOriginRemote {
-				writeRemotePlacementDeprecated(w, agentFilter)
+			if s.retireRemoteStubIfNeeded(r.Context(), w, rec) {
 				return
 			}
 		}

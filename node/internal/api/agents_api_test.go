@@ -191,7 +191,7 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 	}
 }
 
-func TestAgentsAPI_CreateWithPlacementDeprecated(t *testing.T) {
+func TestAgentsAPI_CreateWithPlacementRejected(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 
@@ -214,7 +214,7 @@ func TestAgentsAPI_CreateWithPlacementDeprecated(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusGone {
+	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 	var out map[string]any
@@ -222,12 +222,12 @@ func TestAgentsAPI_CreateWithPlacementDeprecated(t *testing.T) {
 		t.Fatal(err)
 	}
 	errObj, _ := out["error"].(map[string]any)
-	if errObj["code"] != "placement_deprecated" {
+	if errObj["code"] != "invalid_request" {
 		t.Fatalf("error=%#v", errObj)
 	}
 }
 
-func TestAgentsAPI_CreateOriginRemoteDeprecated(t *testing.T) {
+func TestAgentsAPI_CreateOriginRemoteRejected(t *testing.T) {
 	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
 	cfg.ApplyDefaults()
 	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
@@ -246,7 +246,7 @@ func TestAgentsAPI_CreateOriginRemoteDeprecated(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusGone {
+	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

@@ -150,10 +150,10 @@ paths:
           description: text/event-stream
   /v1/policy:
     get:
-      summary: 已下线（410）— 请用 /v1/agents/{id}/policy
+      summary: 已移除 — 请用 /v1/agents/{id}/policy
       responses:
-        "410":
-          description: Gone
+        "404":
+          description: Not Found
 components:
   parameters:
     AgentID:

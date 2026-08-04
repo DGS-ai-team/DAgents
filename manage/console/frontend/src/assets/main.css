@@ -1151,10 +1151,6 @@ code {
   gap: 12px;
 }
 
-.filters-grid-inbox {
-  grid-template-columns: repeat(2, minmax(140px, 1fr)) minmax(120px, 1fr) 88px;
-}
-
 .field {
   display: flex;
   flex-direction: column;
@@ -1990,8 +1986,7 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .filters-grid,
-  .filters-grid-inbox {
+  .filters-grid {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -2051,8 +2046,7 @@ code {
     grid-template-columns: 1fr;
   }
 
-  .filters-grid,
-  .filters-grid-inbox {
+  .filters-grid {
     grid-template-columns: 1fr;
   }
 

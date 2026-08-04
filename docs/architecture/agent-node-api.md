@@ -10,7 +10,7 @@
 | **用户面主键** | **Agent**（`agent_id`）。1 Agent = 1 主对话；Session 仅为内部实现 |
 | **推荐路径** | `/v1/agents/{agent_id}/...`（ensure / hydrate / context / cancel / skills / child-agents / media / **policy** / **prompt-context**） |
 | **`/v1/sessions*`** | **已移除**（未注册路由 → 404）；请改用 `/v1/agents/{agent_id}/...` |
-| **`/v1/policy*`** | **已下线（410）**；策略按 Agent 存 `agents.db`（`agent_policy` 表） |
+| **`/v1/policy*`** | **已移除**（未注册路由 → 404）；策略按 Agent 存 `agents.db`（`agent_policy` 表） |
 | **侧车 Markdown** | 按 Agent 存 `agents.db`（`agent_prompt_context`）；开关仍在 `config_snapshot_json.defaults.prompt_context` |
 | **Manage 注册** | 载荷主字段为 `node_id`（`agent_id` 仅为兼容旧 Manage，值同 `node_id`）；`manage.enabled` 默认关 |
 | **LLM active** | 不再因切换 Agent 抢占进程级 active；绑定写在该 Agent 快照 `defaults.llm.active` |
@@ -22,7 +22,7 @@
 | **一进程多 Agent** | Node 进程持有多个 Agent 实例；对外按 `agent_id` 寻址 |
 | **Client 仅本地** | 默认只 bind `127.0.0.1`；Client 与 Node 同包读同一 `local.endpoint` |
 | **思考与工具在 Node 内** | 无「Backend 代执行」路径；tool call 由 turn loop 本地完成 |
-| **A2A 经 Manage** | 非子 Agent 禁止 peer 入站；`expose_to_peers` 仅控制是否可作为 A2A **目标** |
+| **跨 Node 协作** | 经 Manage 工作组 Dialer；A2A inbox / `agent_invoke` / Placement 已拆除 |
 | **会话态在 Node** | Agent 对话上下文、队列、持久化由 Node 负责（SQLite） |
 
 ### 1.1 基础路径
@@ -46,7 +46,7 @@
 }
 ```
 
-常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`a2a_target_not_exposed`、`llm_error`、`tool_error`、`policy_moved`。
+常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`。
 
 ### 1.3 认证（Phase 递进）
 
@@ -79,7 +79,6 @@ GET /v1/agent/info
 ```json
 {
   "agent_id": "ops-win-01",
-  "expose_to_peers": true,
   "capabilities": ["shell", "filesystem", "skills"],
   "manage_registered": true
 }
@@ -117,7 +116,7 @@ PUT /v1/agents/{agent_id}/policy/tools
 PUT /v1/agents/{agent_id}/policy/shell/{bash|cmd|powershell}
 ```
 
-全局 `GET/PUT /v1/policy*` 返回 **410 Gone**。
+全局 `GET/PUT /v1/policy*` **已移除**（404）；请用上表按 Agent 路径。
 
 ### 2.4 侧车正文（按 Agent / SQLite）
 
@@ -301,21 +300,19 @@ POST /v1/agents/{agent_id}/skills/unload
 
 与工具 `load_skills` 语义一致；HTTP 供 Client 设置页使用。
 
-### 2.6 Policy（工具 / shell 黑白名单）
+### 2.6 Policy（工具 / shell；按 Agent）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/v1/policy` | 返回工具与 shell 策略快照；可选 `?shell=bash\|cmd\|powershell\|auto` |
-| PUT | `/v1/policy/tools` | 更新工具策略：`{"updates":[{"name":"read_file","decision":"allow_auto"}]}` |
-| PUT | `/v1/policy/shell/{bash\|cmd\|powershell}` | 更新 shell 命令策略：`{"updates":[{"command":"rm","decision":"deny"}]}` |
+| GET | `/v1/agents/{agent_id}/policy` | 返回该 Agent 的工具与 shell 策略快照 |
+| PUT | `/v1/agents/{agent_id}/policy/tools` | 更新工具策略：`{"updates":[{"name":"read_file","decision":"allow_auto"}]}` |
+| PUT | `/v1/agents/{agent_id}/policy/shell/{bash\|cmd\|powershell}` | 更新 shell 命令策略 |
 
 **`decision` 枚举**：`allow_auto`（白名单 / txt `never`）· `require_approval`（需审批 / txt `always`）· `deny`（黑名单 / txt `deny`）。
 
-**`platform`**：`goos` 为 Node 进程 OS；`default_shell` 与 `bash_run` 默认 shell 一致（Windows→`powershell`，其余→`bash`）。
+写盘后 Node 热更新该 Agent runtime 的 policy engine；`ask_user_information` 禁止设为 `deny`。全局 `/v1/policy*` 已移除（404）。
 
-写盘后 Node 热更新全部活跃 session 的 policy engine；`ask_user_information` 禁止设为 `deny`。
-
-Client 入口：`/policy` 全屏界面（Go bubbletea / Python Textual，Esc 返回）。
+Web UI：Agents 设置页 Policy 面板。
 
 ---
 
@@ -411,11 +408,11 @@ agent_id: ops-win-01
 listen:
   host: 127.0.0.1
   port: 18765
-expose_to_peers: true
-groups: [ops, windows]
 manage:
+  enabled: true
   url: https://manage.example.com
-  node_token: "${MANAGE_NODE_TOKEN}"
+  registration:
+    base_url: http://192.168.1.10:18765
 fs_root: D:\agent-workspace
 llm:
   provider: openai
