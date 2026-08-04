@@ -2,6 +2,56 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug: Node",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/node/cmd/dagents-node",
+      "args": [
+        "-config",
+        "${workspaceFolder}/packaging/agent-client/config.example.yaml"
+      ],
+      "cwd": "${workspaceFolder}/packaging/agent-client",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug: UI",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/node/webui/frontend",
+      "env": {
+        "DAGENTS_NODE_URL": "http://127.0.0.1:18765"
+      }
+    },
+    {
+      "name": "Debug: Manage",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_manage.py",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "MANAGE_HOST": "127.0.0.1",
+        "MANAGE_PORT": "8020",
+        "MANAGE_DB_PATH": "${workspaceFolder}/.runtime/manage.db",
+        "MANAGE_BLOB_DIR": "${workspaceFolder}/.runtime/manage-blobs",
+        "MANAGE_RELEASES_DIR": "${workspaceFolder}/.runtime/releases"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Debug: Shell",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "cmd /c \"dev.cmd --config config.example.yaml\"",
+      "cwd": "${workspaceFolder}/desktop/tray-tauri",
+      "env": {
+        "DAGENTS_HOME": "${workspaceFolder}/packaging/agent-client"
+      }
+    },
+    {
       "name": "Test: Node",
       "type": "node-terminal",
       "request": "launch",
