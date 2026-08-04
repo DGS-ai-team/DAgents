@@ -1,4 +1,7 @@
 <script setup>
+import { computed } from "vue";
+import { themeStore, toggleTheme } from "../theme.js";
+
 defineProps({
   breadcrumb: { type: String, required: true },
   title: { type: String, required: true },
@@ -8,6 +11,10 @@ defineProps({
 });
 
 const emit = defineEmits(["refresh"]);
+
+const themeLabel = computed(() =>
+  themeStore.resolved === "dark" ? "切换浅色主题" : "切换深色主题",
+);
 </script>
 
 <template>
@@ -19,6 +26,31 @@ const emit = defineEmits(["refresh"]);
     </div>
     <div class="page-header-actions">
       <span class="last-refreshed" aria-live="polite">{{ lastRefreshed }}</span>
+      <button
+        type="button"
+        class="theme-toggle"
+        :title="themeLabel"
+        :aria-label="themeLabel"
+        @click="toggleTheme"
+      >
+        <svg v-if="themeStore.resolved === 'dark'" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.2" />
+          <path
+            d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.2 3.2l1.1 1.1M11.7 11.7l1.1 1.1M3.2 12.8l1.1-1.1M11.7 4.3l1.1-1.1"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linecap="round"
+          />
+        </svg>
+        <svg v-else viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M10.9 2.3a5.8 5.8 0 1 0 2.8 10 5.9 5.9 0 0 1-2.8-10Z"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
       <button
         type="button"
         class="btn btn-primary"
