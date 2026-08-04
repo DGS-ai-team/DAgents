@@ -212,7 +212,7 @@ watch(
         </label>
         <label class="agent-settings-check">
           <input v-model="draft.allowNetworkTools" type="checkbox" />
-          <span>允许网络类工具（浏览器 / A2A）</span>
+          <span>允许网络类工具（浏览器）</span>
         </label>
         <p class="agent-settings-hint">隔离工作区在启用 Docker 沙箱时强制开启（agents/&lt;id&gt;/data）。</p>
       </template>

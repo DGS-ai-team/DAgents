@@ -2,7 +2,7 @@ import { reactive } from "vue";
 import * as api from "../api/node.js";
 import { agentStore } from "./agent.js";
 
-/** 父 Agent 下活跃临时子 Agent（对齐 Python ChildAgentTracker）。 */
+/** 父 Agent 下活跃临时子 Agent。 */
 const entries = reactive(new Map());
 
 export const remoteWorkerStore = reactive({
@@ -17,9 +17,6 @@ export function resetRemoteWorkers() {
   entries.clear();
   bump();
 }
-
-/** @deprecated 已退役；保留空实现以免旧调用方报错。 */
-export function resetPeerInvokeInflight() {}
 
 export function onChildCreated(data) {
   const id = String(data?.child_agent_id || "").trim();
@@ -74,12 +71,6 @@ export async function syncChildAgentsFromApi() {
     /* keep local SSE state */
   }
 }
-
-/** @deprecated 已退役。 */
-export function noteToolCallForWorkers(_data) {}
-
-/** @deprecated 已退役。 */
-export function noteToolResultForWorkers(_data) {}
 
 export function workerStripText() {
   void remoteWorkerStore.tick;

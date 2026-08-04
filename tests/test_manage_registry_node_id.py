@@ -41,7 +41,6 @@ class RegistryNodeIDTests(unittest.TestCase):
                         "node_id": "node-p5",
                         "base_url": "http://p5.local",
                         "name": "P5 Node",
-                        "expose_to_peers": True,
                     },
                 )
                 self.assertEqual(reg.status_code, 200, reg.text)
@@ -54,20 +53,13 @@ class RegistryNodeIDTests(unittest.TestCase):
                 rows = listed.json()["agents"]
                 self.assertTrue(any(r.get("node_id") == "node-p5" for r in rows))
 
-                # heartbeat 可挂 local_agents 公告
+                # heartbeat 刷新 TTL
                 hb = client.post(
                     "/v1/registry/agents/node-p5/heartbeat",
-                    json={
-                        "ttl_seconds": 120,
-                        "local_agents": [
-                            {"agent_id": "agt-1", "display_name": "助手", "origin": "local"},
-                        ],
-                    },
+                    json={"ttl_seconds": 120},
                 )
                 self.assertEqual(hb.status_code, 200, hb.text)
-                meta = hb.json().get("metadata") or {}
-                self.assertEqual(meta.get("node_id"), "node-p5")
-                self.assertEqual(len(meta.get("local_agents") or []), 1)
+                self.assertEqual((hb.json().get("metadata") or {}).get("node_id"), "node-p5")
 
                 # 节点别名
                 by_node = client.get("/v1/registry/nodes/node-p5")

@@ -7,7 +7,8 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 | **Platform** | ✅ | 鉴权、审计、Blob、指标 |
 | **Registry** | ✅ | 注册、心跳、注销、目录、discover |
 | **Workgroup** | ✅ | 跨 Node 协作（Leader + Worker Dialer） |
-| **A2A Task/Inbox** | ❌ 已拆除 | 原 inbox / `agent_invoke` 已移除；跨机请用工作组 |
+| **A2A Task/Inbox** | ❌ 已拆除 | 原 inbox / `agent_invoke` / Placement control 已移除；跨机请用工作组 |
+
 | **Skills / Plugins / ExternalTools** | ✅（Manage 侧） | 精简分发（draft → publish）；**Node 自动 sync 待 Phase 2** |
 | **LLM** | ✅（Manage 侧） | 集中 CRUD + `/resolve`；**Node 自动消费待做** |
 | **Releases** | ✅ | 安装包托管 + `/v1/releases/check`；Node `UpdateChecker` |
@@ -121,7 +122,7 @@ Node 出站 Header：
 
 系统：`GET /health`、`GET /metrics`、`GET /v1/admin/audit`。
 
-> **已拆除**：A2A Task / Inbox API（含 `/v1/admin/a2a/tasks`、Console「A2A Inbox」）与 Node `agent_invoke` 工具组。跨机器协作请用工作组。  
+> **已拆除**：A2A Task / Inbox、Placement `/v1/control/*`、Console Inbox、Node `agent_invoke`；跨机器协作请用工作组。  
 > **已禁用**：Admin session 代理（`/v1/admin/nodes/.../sessions`）已移除，Manage 不再出站访问 Node session API。
 
 ## Release Hub（安装包托管）

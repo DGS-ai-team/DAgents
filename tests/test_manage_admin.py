@@ -19,7 +19,7 @@ def _register_agent(client: TestClient, agent_id: str, *, base_url: str | None =
     url = base_url or f"http://{agent_id}.local"
     client.post(
         "/v1/registry/agents",
-        json={"agent_id": agent_id, "base_url": url, "expose_to_peers": True},
+        json={"agent_id": agent_id, "base_url": url},
         headers={"x-dagents-agent-id": agent_id},
     )
     client.post(

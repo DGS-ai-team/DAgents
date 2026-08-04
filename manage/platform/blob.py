@@ -1,4 +1,4 @@
-"""Manage Blob 存储（M0 占位；M2 A2A / M3 Skills 使用）。"""
+"""Manage Blob 存储（Skills / Releases / Cases 等制品共用）。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class BlobStoreConfig:
 
 
 class BlobStore:
-    """内容寻址 Blob 存储；M2(A2A) / M3(Skills) 使用。"""
+    """内容寻址 Blob 存储（制品包与附件）。"""
 
     def __init__(self, config: BlobStoreConfig) -> None:
         self.config = config
@@ -38,7 +38,7 @@ class BlobStore:
         return {
             "enabled": self.enabled,
             "max_bytes": self.config.max_bytes,
-            "note": "Blob API 在 M2(A2A) / M3(Skills) 实现；单文件上限由 MANAGE_BLOB_MAX_BYTES 配置，未设则不限制。",
+            "note": "单文件上限由 MANAGE_BLOB_MAX_BYTES 配置；未设则不限制。",
         }
 
     def put(self, data: bytes, content_type: str) -> dict:

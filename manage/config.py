@@ -40,7 +40,6 @@ class ManageSettings:
     bundled_releases_dir: Path | None
     offline_grace_seconds: int
     audit_max_entries: int
-    legacy_direct_relay: bool
 
     @classmethod
     def from_env(cls) -> "ManageSettings":
@@ -50,7 +49,6 @@ class ManageSettings:
         blob_raw = os.environ.get("MANAGE_BLOB_DIR", "").strip()
         releases_raw = os.environ.get("MANAGE_RELEASES_DIR", "").strip()
         bundled_raw = os.environ.get("MANAGE_BUNDLED_RELEASES_DIR", "").strip()
-        legacy = os.environ.get("MANAGE_LEGACY_DIRECT_RELAY", "").strip().lower() in {"1", "true", "yes"}
         seed = os.environ.get("MANAGE_SEED_BUNDLED_RELEASES", "1").strip().lower() not in {"0", "false", "no"}
         db_path = Path(db_raw) if db_raw else None
         releases_dir: Path | None
@@ -72,7 +70,6 @@ class ManageSettings:
             bundled_releases_dir=Path(bundled_raw) if bundled_raw else Path("/app/bundled/releases"),
             offline_grace_seconds=_env_int("MANAGE_OFFLINE_GRACE_SECONDS", 86400),
             audit_max_entries=_env_int("MANAGE_AUDIT_MAX_ENTRIES", 500),
-            legacy_direct_relay=legacy,
         )
 
     @classmethod
@@ -90,7 +87,6 @@ class ManageSettings:
         bundled_releases_dir: Path | None = Path("/app/bundled/releases"),
         offline_grace_seconds: int = 86400,
         audit_max_entries: int = 100,
-        legacy_direct_relay: bool = False,
     ) -> "ManageSettings":
         return cls(
             host=host,
@@ -104,5 +100,4 @@ class ManageSettings:
             bundled_releases_dir=bundled_releases_dir,
             offline_grace_seconds=offline_grace_seconds,
             audit_max_entries=audit_max_entries,
-            legacy_direct_relay=legacy_direct_relay,
         )

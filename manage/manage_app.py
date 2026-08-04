@@ -15,8 +15,6 @@ from manage.platform.auth import authenticate, require_admin
 from manage.platform.blob import BlobStore, BlobStoreConfig
 from manage.platform.metrics import metrics_text
 from manage.registry.models import AuditListResponse, HealthResponse
-from manage.admin.routes import build_admin_router
-from manage.control.routes import build_control_router
 from manage.llm.routes import build_llm_router
 from manage.llm.store import LLMConfigStore
 from manage.platform.blob_routes import build_blob_router
@@ -94,10 +92,8 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     workgroup_ws_hub = WorkgroupWSHub(store=workgroup_store)
 
     app.include_router(build_registry_router(store, audit))
-    app.include_router(build_control_router(store, audit))
     app.include_router(build_workgroup_router(workgroup_store, audit, hub=workgroup_ws_hub))
     app.include_router(build_workgroup_ws_router(workgroup_ws_hub))
-    app.include_router(build_admin_router(store))
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))
     app.include_router(build_skills_router(skills_store, blob, audit))

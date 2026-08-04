@@ -2418,11 +2418,6 @@
   background: var(--color-info-soft);
 }
 
-.thread-source--remote_a2a_agent {
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
-}
-
 .chunk {
   padding: 8px 10px;
   border-radius: var(--radius-sm);

@@ -26,8 +26,6 @@ type Config struct {
 	// LegacyAgentID 仅用于读取旧 YAML 的 agent_id；加载后合并进 NodeID 并清空。
 	LegacyAgentID string      `yaml:"agent_id,omitempty"`
 	Agent         AgentConfig `yaml:"agent"`
-	// Placement 控制是否允许同组 Node 在本机创建 Agent / 旁观屏幕（Node 级开关）。
-	Placement     PlacementConfig `yaml:"placement"`
 	Listen        ListenConfig    `yaml:"listen"`
 	Local         LocalConfig     `yaml:"local"`
 	Groups        []string        `yaml:"groups"`

@@ -87,10 +87,7 @@ import {
   onChildCreated,
   onChildFinished,
   resetRemoteWorkers,
-  resetPeerInvokeInflight,
   setChildAwaitingApproval,
-  noteToolCallForWorkers,
-  noteToolResultForWorkers,
   syncChildAgentsFromApi,
 } from "../stores/remoteWorkers.js";
 import { runSlashCommand } from "../utils/commands.js";
@@ -285,14 +282,12 @@ function handleEvent(ev) {
     case "tool_call":
       markTurnContent();
       finishWaitingStatuses();
-      noteToolCallForWorkers(ev.data);
       upsertToolCallFromSSE(ev.data);
       refreshToolJobs(agentStore.agentId);
       break;
     case "tool_result":
       markTurnContent();
       finishWaitingStatuses();
-      noteToolResultForWorkers(ev.data);
       applyToolResult(ev.data);
       refreshToolJobs(agentStore.agentId);
       break;
@@ -316,7 +311,6 @@ function handleEvent(ev) {
       if (shouldAcceptDone(ev.seq)) {
         finishTurn();
         resetToolStream();
-        resetPeerInvokeInflight();
         syncChildAgentsFromApi();
       }
       refreshContextTokens();

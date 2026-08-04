@@ -47,10 +47,6 @@ try {
     $content = Set-ScalarLine $content '(?m)^  api_key_env:\s*.*$' "  api_key_env: $($llm.api_key_env)"
     $content = Set-ScalarLine $content '(?m)^  mock:\s*.*$' "  mock: $(Bool-Yaml ([bool]$llm.mock))"
 
-    # --- expose_to_peers ---
-    $feat = $settings.features
-    $content = Set-ScalarLine $content '(?m)^expose_to_peers:\s*.*$' "expose_to_peers: $(Bool-Yaml ([bool]$feat.expose_to_peers))"
-
     # --- manage ---
     $mg = $settings.manage
     if ([bool]$mg.enabled) {

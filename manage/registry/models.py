@@ -61,8 +61,6 @@ class AgentRegisterRequest(BaseModel):
     risk_level: RiskLevel = Field(default="medium")
     allowed_scopes: list[str] = Field(default_factory=list)
     version: str = Field(default="", max_length=64)
-    # 历史 A2A 字段；现网不再用于 discover 过滤，仅保留读写兼容旧库。
-    expose_to_peers: bool = Field(default=True)
     card: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     last_error_summary: str | None = Field(default=None, max_length=1024)
@@ -150,9 +148,6 @@ class AgentHeartbeatRequest(BaseModel):
     skills: list[str] = Field(default_factory=list)
     last_error_summary: str | None = None
     recent_task_summary: str | None = None
-    expose_to_peers: bool | None = None
-    # 可选：本机 Agent 实例目录（仅公告，非 A2A 目标）
-    local_agents: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AgentDeregisterRequest(BaseModel):
@@ -207,7 +202,6 @@ class AgentStoredRecord(BaseModel):
     risk_level: RiskLevel = "medium"
     allowed_scopes: list[str] = Field(default_factory=list)
     version: str = ""
-    expose_to_peers: bool = True
     card: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     last_error_summary: str | None = None
