@@ -272,6 +272,23 @@ export async function fetchCases() {
   return apiFetch("/v1/cases");
 }
 
+// --- Workgroup ---
+export async function fetchWorkgroups(params = {}) {
+  return apiFetch("/v1/workgroups", params);
+}
+
+export async function fetchWorkgroupTimeline(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/timeline`);
+}
+
+export async function fetchWorkgroupLLMConfigs(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/llm-configs`);
+}
+
+export async function postWorkgroupMessage(workgroupId, body) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/messages`, {}, { method: "POST", body });
+}
+
 export async function parseCaseJsonl(file) {
   const form = new FormData();
   form.set("file", file);

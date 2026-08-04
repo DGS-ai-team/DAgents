@@ -211,6 +211,7 @@ class VerticalLoop:
             type="actor_final_text",
             actor_id=req.member_id,
             text=req.text,
+            assign_id=req.assign_id,
         )
         return {"assign": assign, "timeline_event": event}
 

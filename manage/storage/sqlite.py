@@ -110,6 +110,11 @@ class SQLiteDatabase:
                     workgroup_id TEXT NOT NULL,
                     payload_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS actor_run_histories (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
                 -- Workgroup D3：Timeline / Outbox / HITL
                 CREATE TABLE IF NOT EXISTS workgroup_timeline (
                     id TEXT PRIMARY KEY,
@@ -136,7 +141,7 @@ class SQLiteDatabase:
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','10') "
-                "ON CONFLICT(key) DO UPDATE SET value='10'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','11') "
+                "ON CONFLICT(key) DO UPDATE SET value='11'"
             )
             conn.commit()

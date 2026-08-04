@@ -6,7 +6,7 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 |----|------|------|
 | **Platform** | ✅ | 鉴权、审计、Blob、指标 |
 | **Registry** | ✅ | 注册、心跳、注销、目录、discover |
-| **Workgroup** | ✅ | 跨 Node 协作（Leader + Worker Dialer） |
+| **Workgroup** | ✅ | 跨 Node 协作（Leader + Worker Dialer）；**D6**：Manage Leader LLM loop（Mock/真实）+ `assign_workgroup_task` |
 | **A2A Task/Inbox** | ❌ 已拆除 | 原 inbox / `agent_invoke` / Placement control 已移除；跨机请用工作组 |
 
 | **Skills / Plugins / ExternalTools** | ✅（Manage 侧） | 精简分发（draft → publish）；**Node 自动 sync 待 Phase 2** |

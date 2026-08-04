@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from manage.llm.models import LLMConfigMasked
 from manage.platform.audit import AuditLog
 from manage.platform.auth import audit_actor, authenticate, ensure_node_identity, extract_agent_id
 from manage.workgroup.d3_models import (
@@ -70,9 +73,11 @@ def build_workgroup_router(
     audit: AuditLog,
     *,
     hub: WorkgroupWSHub | None = None,
+    llm_store: Any | None = None,
+    mock_llm: bool = False,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1/workgroups", tags=["workgroups"])
-    kernel = TurnKernel(store)
+    kernel = TurnKernel(store, llm_store=llm_store, mock_llm=mock_llm)
     loop = VerticalLoop(store, hub=hub)
 
     @router.post("", response_model=dict)
@@ -106,6 +111,19 @@ def build_workgroup_router(
         if group is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
         return group
+
+    @router.get("/{workgroup_id}/llm-configs", response_model=list[LLMConfigMasked])
+    def list_workgroup_llm_configs(workgroup_id: str, request: Request) -> list[LLMConfigMasked]:
+        auth = authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        if llm_store is None:
+            return []
+        return [
+            llm_store.mask(c)
+            for c in llm_store.list()
+            if auth.allows_resource_groups(c.allowed_groups)
+        ]
 
     @router.post("/{workgroup_id}/archive", response_model=WorkGroup)
     def archive_workgroup(workgroup_id: str, request: Request) -> WorkGroup:
@@ -300,16 +318,36 @@ def build_workgroup_router(
 
     # --- D3: Timeline / Outbox / HITL / provision complete ---
 
-    @router.post("/{workgroup_id}/messages", response_model=TimelineEvent)
+    @router.post("/{workgroup_id}/messages")
     def post_human_message(
         workgroup_id: str, req: HumanPostRequest, request: Request
-    ) -> TimelineEvent:
+    ) -> dict:
         auth = authenticate(request)
         ensure_node_identity(request, req.from_node_id, auth)
         try:
-            return loop.post_human(workgroup_id, req)
+            result = kernel.handle_human_message(
+                workgroup_id,
+                text=req.text,
+                from_node_id=req.from_node_id,
+                client_message_id=req.client_message_id,
+                disable_tools=req.disable_tools,
+            )
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth, fallback_agent_id=req.from_node_id),
+            action="workgroup.message.human",
+            target_agent_id=workgroup_id,
+        )
+        return {
+            "timeline_event": result["timeline_event"],
+            "leader_run": result["leader_run"],
+            "loop": {
+                "steps": result["loop"].get("steps"),
+                "status": result["loop"].get("status"),
+                "final_text": result["loop"].get("final_text"),
+            },
+        }
 
     @router.get("/{workgroup_id}/timeline", response_model=list[TimelineEvent])
     def get_timeline(workgroup_id: str, request: Request) -> list[TimelineEvent]:

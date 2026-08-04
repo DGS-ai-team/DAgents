@@ -92,7 +92,9 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     workgroup_ws_hub = WorkgroupWSHub(store=workgroup_store)
 
     app.include_router(build_registry_router(store, audit))
-    app.include_router(build_workgroup_router(workgroup_store, audit, hub=workgroup_ws_hub))
+    app.include_router(
+        build_workgroup_router(workgroup_store, audit, hub=workgroup_ws_hub, llm_store=llm_store)
+    )
     app.include_router(build_workgroup_ws_router(workgroup_ws_hub))
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))

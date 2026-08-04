@@ -2091,3 +2091,97 @@ code {
     width: 100%;
   }
 }
+
+/* Workgroup view */
+.workgroup-page .split-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.workgroup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workgroup-list-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.workgroup-list-item.active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+.split-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.subsection {
+  padding: 14px;
+}
+
+.workgroup-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-list {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: #fff;
+  margin-bottom: 12px;
+}
+
+.timeline-item {
+  border-bottom: 1px dashed var(--border);
+  padding: 8px 0;
+}
+
+.timeline-item:last-child {
+  border-bottom: none;
+}
+
+.timeline-item header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.timeline-item p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.workgroup-chat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
