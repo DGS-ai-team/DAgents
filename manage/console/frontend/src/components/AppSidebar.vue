@@ -2,10 +2,11 @@
 defineProps({
   healthLabel: { type: String, default: "连接中…" },
   healthOnline: { type: Boolean, default: false },
+  sessionLabel: { type: String, default: "" },
   view: { type: String, required: true },
 });
 
-const emit = defineEmits(["navigate"]);
+const emit = defineEmits(["navigate", "logout"]);
 </script>
 
 <template>
@@ -79,6 +80,8 @@ const emit = defineEmits(["navigate"]);
       >
         {{ healthLabel }}
       </div>
+      <div v-if="sessionLabel" class="session-pill" :title="sessionLabel">{{ sessionLabel }}</div>
+      <button type="button" class="sidebar-logout" @click="emit('logout')">退出登录</button>
       <span class="sidebar-meta">Registry · Workgroup · Console</span>
     </div>
   </aside>

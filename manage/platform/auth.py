@@ -10,6 +10,8 @@ from typing import Literal
 
 from fastapi import HTTPException, Request
 
+from manage.platform.sessions import SESSION_COOKIE, SessionRecord, SessionStore
+
 TOKEN_HEADER = "x-dagents-a2a-token"
 AGENT_ID_HEADER = "x-dagents-agent-id"
 
@@ -20,6 +22,7 @@ class AuthContext:
     role: Literal["admin", "member", "node"]
     discovery_groups: list[str]
     agent_id: str | None = None
+    session_kind: Literal["admin", "node"] | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -43,7 +46,9 @@ class AuthContext:
         return any(self.allows_discovery_group(group) for group in allowed_groups)
 
     def requires_group_on_list(self) -> bool:
-        return not self.is_admin
+        if self.is_admin or "*" in self.discovery_groups:
+            return False
+        return True
 
 
 def _shared_token() -> str:
@@ -102,7 +107,56 @@ def is_open_mode() -> bool:
     return not _load_token_entries() and not _shared_token()
 
 
+def default_admin_username() -> str:
+    return os.environ.get("MANAGE_ADMIN_USERNAME", "admin").strip() or "admin"
+
+
+def default_admin_password() -> str:
+    return os.environ.get("MANAGE_ADMIN_PASSWORD", "admin").strip() or "admin"
+
+
+def verify_admin_password(username: str, password: str) -> bool:
+    want_user = default_admin_username()
+    want_pass = default_admin_password()
+    user_ok = hmac.compare_digest(str(username or "").strip(), want_user)
+    pass_ok = hmac.compare_digest(str(password or ""), want_pass)
+    return user_ok and pass_ok
+
+
+def resolve_session(request: Request) -> SessionRecord | None:
+    store: SessionStore | None = getattr(request.app.state, "session_store", None)
+    if store is None:
+        return None
+    raw = (request.cookies.get(SESSION_COOKIE) or "").strip()
+    if not raw:
+        return None
+    return store.get(raw)
+
+
+def auth_from_session(rec: SessionRecord) -> AuthContext:
+    if rec.kind == "admin":
+        return AuthContext(
+            token_id=f"session:admin:{rec.subject}",
+            role="admin",
+            discovery_groups=["*"],
+            agent_id=None,
+            session_kind="admin",
+        )
+    groups = list(rec.discovery_groups) if rec.discovery_groups else ["*"]
+    return AuthContext(
+        token_id=f"session:node:{rec.subject}",
+        role="member",
+        discovery_groups=groups,
+        agent_id=rec.subject,
+        session_kind="node",
+    )
+
+
 def authenticate(request: Request) -> AuthContext:
+    session = resolve_session(request)
+    if session is not None:
+        return auth_from_session(session)
+
     entries = _load_token_entries()
     shared = _shared_token()
     if not entries and not shared:
@@ -148,12 +202,16 @@ def ensure_node_identity(request: Request, agent_id: str, auth: AuthContext) -> 
         return
     if auth.is_node and auth.agent_id and auth.agent_id != agent_id:
         raise HTTPException(status_code=403, detail="node token 只能操作自身 agent_id")
+    if auth.session_kind == "node" and auth.agent_id and auth.agent_id != agent_id:
+        raise HTTPException(status_code=403, detail="node 会话只能操作自身 node_id")
 
 
 def audit_actor(request: Request, auth: AuthContext, *, fallback_agent_id: str | None = None) -> str:
     header_id = extract_agent_id(request)
     if header_id:
         return header_id
+    if auth.agent_id:
+        return auth.agent_id
     if fallback_agent_id:
         return fallback_agent_id
     return auth.token_id

@@ -12,8 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from manage.config import ManageSettings
 from manage.platform.audit import AuditLog
 from manage.platform.auth import authenticate, require_admin
+from manage.platform.auth_routes import build_auth_router
 from manage.platform.blob import BlobStore, BlobStoreConfig
 from manage.platform.metrics import metrics_text
+from manage.platform.sessions import SessionStore
 from manage.registry.models import AuditListResponse, HealthResponse
 from manage.llm.routes import build_llm_router
 from manage.llm.store import LLMConfigStore
@@ -48,6 +50,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     audit = AuditLog(max_entries=cfg.audit_max_entries)
     blob = BlobStore(BlobStoreConfig.from_settings(cfg))
     releases_store = ReleasePackageStore(db=db if db.enabled else None)
+    session_store = SessionStore()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -91,6 +94,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     workgroup_store = WorkGroupStore(db=db if db.enabled else None)
     workgroup_ws_hub = WorkgroupWSHub(store=workgroup_store)
 
+    app.include_router(build_auth_router(session_store, store))
     app.include_router(build_registry_router(store, audit))
     app.include_router(
         build_workgroup_router(workgroup_store, audit, hub=workgroup_ws_hub, llm_store=llm_store)
@@ -133,6 +137,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
 
     app.state.manage_settings = cfg
     app.state.registry_store = store
+    app.state.session_store = session_store
     app.state.llm_store = llm_store
     app.state.skills_store = skills_store
     app.state.externaltools_store = externaltools_store
