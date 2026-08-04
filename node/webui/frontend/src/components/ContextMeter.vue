@@ -93,11 +93,11 @@ const title = computed(() => {
 }
 
 .context-meter__track {
-  stroke: rgba(148, 163, 184, 0.35);
+  stroke: var(--color-border-strong);
 }
 
 .context-meter__fill {
-  stroke: #64748b;
+  stroke: var(--color-text-subtle);
   transition: stroke-dashoffset 0.35s ease;
 }
 
@@ -110,22 +110,22 @@ const title = computed(() => {
 }
 
 .context-meter--ok .context-meter__fill {
-  stroke: #64748b;
+  stroke: var(--color-text-subtle);
 }
 
 .context-meter--warn {
-  color: #b45309;
+  color: var(--color-warning);
 }
 
 .context-meter--warn .context-meter__fill {
-  stroke: #d97706;
+  stroke: var(--color-warning);
 }
 
 .context-meter--critical {
-  color: #b91c1c;
+  color: var(--color-danger);
 }
 
 .context-meter--critical .context-meter__fill {
-  stroke: #dc2626;
+  stroke: var(--color-danger);
 }
 </style>

@@ -86,8 +86,9 @@
 |---|------|------|
 | D9 | **Shell 实现语言：Go** | 与 `nodectl`、`shared/config` 同栈。 |
 | D10 | **不用悬浮球作为默认方案** | 托盘 + 通知 + 按需打开 UI。 |
-| D11 | **Shell 核心不依赖 WebView2** | Toast、SSE、托盘用 Go + Win32；Web UI 仍用系统浏览器。 |
-| D12 | **Server 2012 仍纳入支持目标** | 浏览器 + Go Shell；不绑 WebView2。 |
+| D11 | **Go Shell 核心不依赖 WebView2** | Toast、SSE、托盘用 Go + Win32；Web UI 默认用系统浏览器。 |
+| D12 | **Server 2012 仍纳入支持目标（Go Shell）** | 浏览器 + Go Shell；不绑 WebView2。 |
+| D11b | **Tauri Shell 路径接受 WebView2**（2026-08） | `desktop/tray-tauri` 在内嵌 WebView 中加载同源 `/ui/`；与 Go Shell 双轨并存，安装包默认仍为 Go Shell。 |
 | D13 | **HITL 展开逻辑应共享** | Shell / Web / TUI 共用 expand 逻辑（包路径待定）。 |
 
 ### 2.6 数据流（产品确认 + 架构评审 2026-07）

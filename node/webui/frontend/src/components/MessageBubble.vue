@@ -147,7 +147,7 @@ function userImageThumb(src) {
   text-transform: uppercase;
 }
 .msg__applied-tag {
-  color: var(--color-success, #6a9);
+  color: var(--color-success);
 }
 .msg__stale-tag {
   color: var(--color-text-subtle);

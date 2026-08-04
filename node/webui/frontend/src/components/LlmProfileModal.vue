@@ -333,7 +333,7 @@ watch(
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--color-overlay);
   backdrop-filter: blur(2px);
 }
 
@@ -418,12 +418,12 @@ watch(
 .llm-profile-modal__probe-msg {
   margin: 0;
   font-size: 12px;
-  color: #c2410c;
+  color: var(--color-warning);
   line-height: 1.4;
 }
 
 .llm-profile-modal__probe-msg--ok {
-  color: var(--color-text-muted, #64748b);
+  color: var(--color-text-muted);
 }
 
 .llm-profile-modal__model-toggle {
@@ -431,7 +431,7 @@ watch(
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--color-accent, #2563eb);
+  color: var(--color-primary);
   font-size: 12px;
   cursor: pointer;
   text-align: left;
@@ -440,7 +440,7 @@ watch(
 .settings-field__hint {
   margin: 0;
   font-size: 12px;
-  color: var(--color-text-subtle, #94a3b8);
+  color: var(--color-text-subtle);
   line-height: 1.4;
 }
 
@@ -452,7 +452,7 @@ watch(
   margin: 0;
   flex: 1;
   font-size: 12.5px;
-  color: #c2410c;
+  color: var(--color-warning);
 }
 
 .llm-profile-modal__actions {

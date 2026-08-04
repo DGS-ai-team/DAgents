@@ -125,7 +125,7 @@ onMounted(loadTemplates);
 .agent-empty__mark {
   width: 56px;
   height: 56px;
-  color: var(--color-primary-strong, #3b82f6);
+  color: var(--color-primary-strong);
   margin-bottom: 16px;
 }
 
@@ -207,18 +207,18 @@ onMounted(loadTemplates);
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  color: var(--color-primary-strong, #3b82f6);
+  color: var(--color-primary-strong);
   background: color-mix(in srgb, var(--color-primary-strong) 12%, transparent);
 }
 
 .agent-empty-tile__icon[data-kind="code"] {
-  color: #0d9488;
-  background: rgba(13, 148, 136, 0.12);
+  color: var(--color-info);
+  background: var(--color-info-soft);
 }
 
 .agent-empty-tile__icon[data-kind="ops"] {
-  color: #ca8a04;
-  background: rgba(202, 138, 4, 0.14);
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
 }
 
 .agent-empty-tile__icon svg {

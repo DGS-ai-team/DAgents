@@ -217,7 +217,7 @@ async function onBackground(ev) {
 }
 
 .tool-summary-row--progress {
-  border-color: rgba(55, 148, 255, 0.35);
+  border-color: var(--color-primary);
 }
 
 .tool-summary-row__bar {

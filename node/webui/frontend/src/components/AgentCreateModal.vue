@@ -218,7 +218,7 @@ watch(
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--color-overlay);
   backdrop-filter: blur(2px);
 }
 
@@ -324,7 +324,7 @@ watch(
 }
 
 .agent-create-card--active {
-  border-color: rgba(55, 148, 255, 0.55);
+  border-color: var(--color-primary);
   background: var(--color-primary-soft);
 }
 
@@ -374,8 +374,8 @@ watch(
 }
 
 .agent-create-tag--user {
-  background: rgba(168, 85, 247, 0.14);
-  color: #c084fc;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
 }
 
 .agent-create-hint {

@@ -103,7 +103,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(15, 23, 42, 0.82);
+  background: var(--color-overlay);
   backdrop-filter: blur(4px);
 }
 
@@ -123,14 +123,14 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   object-fit: contain;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  background: #0f172a;
+  background: var(--color-bg);
 }
 
 .image-lightbox__caption {
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #f8fafc;
+  color: var(--color-text);
   font-size: 13px;
 }
 

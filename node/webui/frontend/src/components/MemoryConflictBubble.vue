@@ -61,13 +61,17 @@ const meta = computed(() => extractMemoryConflict(props.data));
 
 <style scoped>
 .approval-bubble--memory {
-  border-left: 3px solid #7c3aed;
-  background: linear-gradient(90deg, rgba(124, 58, 237, 0.08), #f8fafc 48px);
+  border-left: 3px solid var(--color-primary);
+  background: linear-gradient(
+    90deg,
+    var(--color-primary-soft),
+    var(--color-surface) 48px
+  );
 }
 
 .tool-source-badge--memory {
-  color: #7c3aed;
-  background: rgba(124, 58, 237, 0.12);
+  color: var(--color-primary-strong);
+  background: var(--color-primary-soft);
 }
 
 .memory-conflict-panels {

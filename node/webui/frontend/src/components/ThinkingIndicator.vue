@@ -15,8 +15,8 @@
   gap: 8px;
   padding: 4px 10px 4px 6px;
   border-radius: 999px;
-  background: rgba(8, 145, 178, 0.08);
-  border: 1px solid rgba(8, 145, 178, 0.22);
+  background: var(--color-info-soft);
+  border: 1px solid var(--color-info);
   color: var(--color-text-subtle);
   font-size: 12px;
   line-height: 1.45;
@@ -27,8 +27,8 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #0891b2;
-  box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.16);
+  background: var(--color-info);
+  box-shadow: 0 0 0 3px var(--color-info-soft);
   animation: thinking-orb-pulse 1.2s ease-in-out infinite;
 }
 
@@ -44,7 +44,7 @@
   width: 3px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(8, 145, 178, 0.45);
+  background: var(--color-info);
   animation: thinking-wave 0.85s ease-in-out infinite;
 }
 

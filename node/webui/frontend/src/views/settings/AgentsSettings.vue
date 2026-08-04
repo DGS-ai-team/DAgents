@@ -295,8 +295,8 @@ onMounted(load);
 }
 
 .agents-settings__badge[data-source="user"] {
-  background: rgba(168, 85, 247, 0.14);
-  color: #c084fc;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
 }
 
 .agents-settings__template-desc {
