@@ -112,6 +112,10 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 self.assertEqual(ready.status_code, 200, ready.text)
                 self.assertEqual(ready.json()["member"]["status"], "ready")
 
+                llm_list = client.get(f"/v1/workgroups/{wid}/llm-configs")
+                self.assertEqual(llm_list.status_code, 200, llm_list.text)
+                self.assertIsInstance(llm_list.json(), list)
+
                 msg = client.post(
                     f"/v1/workgroups/{wid}/messages",
                     json={"text": "读 README", "from_node_id": "node-a"},

@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from manage.llm.models import LLMConfigMasked
 from manage.platform.audit import AuditLog
 from manage.platform.auth import audit_actor, authenticate, ensure_node_identity, extract_agent_id
 from manage.workgroup.d3_models import (
@@ -110,6 +111,19 @@ def build_workgroup_router(
         if group is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
         return group
+
+    @router.get("/{workgroup_id}/llm-configs", response_model=list[LLMConfigMasked])
+    def list_workgroup_llm_configs(workgroup_id: str, request: Request) -> list[LLMConfigMasked]:
+        auth = authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        if llm_store is None:
+            return []
+        return [
+            llm_store.mask(c)
+            for c in llm_store.list()
+            if auth.allows_resource_groups(c.allowed_groups)
+        ]
 
     @router.post("/{workgroup_id}/archive", response_model=WorkGroup)
     def archive_workgroup(workgroup_id: str, request: Request) -> WorkGroup:
@@ -316,6 +330,7 @@ def build_workgroup_router(
                 text=req.text,
                 from_node_id=req.from_node_id,
                 client_message_id=req.client_message_id,
+                disable_tools=req.disable_tools,
             )
         except WorkgroupError as exc:
             raise _http_error(exc) from exc

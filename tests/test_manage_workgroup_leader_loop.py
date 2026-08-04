@@ -27,6 +27,31 @@ from manage.workgroup.turn_kernel import (  # noqa: E402
 
 
 class LeaderLoopTests(unittest.TestCase):
+    def test_supervisor_chat_without_tools_and_member(self) -> None:
+        with TemporaryDirectory() as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="Solo",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            kernel = TurnKernel(store, mock_llm=True)
+            result = kernel.handle_human_message(
+                group.workgroup_id,
+                text="你好，请直接回复，不要调用任何工具",
+                from_node_id="node-a",
+                disable_tools=True,
+            )
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            self.assertTrue(result["loop"]["final_text"])
+            hist = store.get_run_history(result["leader_run"].run_id)
+            assert hist is not None
+            # 无工具路径：不应写入 tool 消息
+            self.assertEqual([m.role for m in hist.messages].count("tool"), 0)
+
     def _ready_group(self, store: WorkGroupStore) -> tuple[str, str]:
         group, _ = store.create_workgroup(
             WorkGroupCreateRequest(

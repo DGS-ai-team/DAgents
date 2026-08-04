@@ -51,6 +51,8 @@ class HumanPostRequest(BaseModel):
     text: str = Field(min_length=1)
     client_message_id: str | None = None
     from_node_id: str = Field(min_length=1)
+    # 调试/实验：可禁用 supervisor 工具，仅验证纯对话路径。
+    disable_tools: bool = False
 
 
 class ProvisionCompleteRequest(BaseModel):

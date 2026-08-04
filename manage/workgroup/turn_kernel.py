@@ -110,6 +110,7 @@ class TurnKernel:
         text: str,
         from_node_id: str,
         client_message_id: str | None = None,
+        disable_tools: bool = False,
     ) -> dict[str, Any]:
         """写入 Timeline 并驱动 Leader loop 至空闲。"""
         self._store.assert_acl_member(workgroup_id, from_node_id)
@@ -123,10 +124,10 @@ class TurnKernel:
         )
         run = self._store.find_running_leader_run(workgroup_id) or self.start_leader_run(workgroup_id)
         self._store.ensure_run_history(run)
-        loop_result = self.run_leader_until_idle(workgroup_id, run.run_id)
+        loop_result = self.run_leader_until_idle(workgroup_id, run.run_id, disable_tools=disable_tools)
         return {"timeline_event": event, "leader_run": loop_result["run"], "loop": loop_result}
 
-    def run_leader_until_idle(self, workgroup_id: str, run_id: str) -> dict[str, Any]:
+    def run_leader_until_idle(self, workgroup_id: str, run_id: str, *, disable_tools: bool = False) -> dict[str, Any]:
         run = self._store.get_actor_run(run_id)
         if run is None or run.workgroup_id != workgroup_id:
             raise WorkgroupError("not_found", "actor run not found", http_status=404)
@@ -146,7 +147,7 @@ class TurnKernel:
             leader_run_id=run_id,
             assign_completer=self._assign_completer,
         )
-        tools = leader_native_tools()
+        tools = [] if disable_tools else leader_native_tools()
         steps = 0
         tool_loops = 0
 
@@ -169,7 +170,7 @@ class TurnKernel:
                 own_run_history=hist.messages,
             )
             messages = [{"role": "system", "content": _LEADER_SYSTEM}] + list(projected["messages"])
-            result = client.chat(messages, tools=tools)
+            result = client.chat(messages, tools=tools or None)
             steps += 1
             tool_loops += 1
             if tool_loops > self._max_tool_loops:
@@ -203,6 +204,12 @@ class TurnKernel:
                     "final_text": final_text,
                 }
 
+            if disable_tools:
+                raise WorkgroupError(
+                    "invalid_request",
+                    "leader tools are disabled for this message, but model returned tool_calls",
+                    http_status=409,
+                )
             # 并行 tool_calls：全部执行完再续写
             tool_msgs: list[RunHistoryMessage] = []
             for tc in result.tool_calls:
