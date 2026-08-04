@@ -118,11 +118,15 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                     headers={"x-dagents-agent-id": "node-a"},
                 )
                 self.assertEqual(msg.status_code, 200, msg.text)
-                self.assertEqual(msg.json()["type"], "human_message")
+                body = msg.json()
+                self.assertEqual(body["timeline_event"]["type"], "human_message")
+                self.assertIn("leader_run", body)
 
                 timeline = client.get(f"/v1/workgroups/{wid}/timeline")
                 self.assertEqual(timeline.status_code, 200, timeline.text)
-                self.assertEqual(len(timeline.json()), 1)
+                # human + Leader mock 终态（至少 1 条 human）
+                self.assertGreaterEqual(len(timeline.json()), 1)
+                self.assertEqual(timeline.json()[0]["type"], "human_message")
 
                 hitl = client.post(
                     f"/v1/workgroups/{wid}/hitl",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -70,9 +72,11 @@ def build_workgroup_router(
     audit: AuditLog,
     *,
     hub: WorkgroupWSHub | None = None,
+    llm_store: Any | None = None,
+    mock_llm: bool = False,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1/workgroups", tags=["workgroups"])
-    kernel = TurnKernel(store)
+    kernel = TurnKernel(store, llm_store=llm_store, mock_llm=mock_llm)
     loop = VerticalLoop(store, hub=hub)
 
     @router.post("", response_model=dict)
@@ -300,16 +304,35 @@ def build_workgroup_router(
 
     # --- D3: Timeline / Outbox / HITL / provision complete ---
 
-    @router.post("/{workgroup_id}/messages", response_model=TimelineEvent)
+    @router.post("/{workgroup_id}/messages")
     def post_human_message(
         workgroup_id: str, req: HumanPostRequest, request: Request
-    ) -> TimelineEvent:
+    ) -> dict:
         auth = authenticate(request)
         ensure_node_identity(request, req.from_node_id, auth)
         try:
-            return loop.post_human(workgroup_id, req)
+            result = kernel.handle_human_message(
+                workgroup_id,
+                text=req.text,
+                from_node_id=req.from_node_id,
+                client_message_id=req.client_message_id,
+            )
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth, fallback_agent_id=req.from_node_id),
+            action="workgroup.message.human",
+            target_agent_id=workgroup_id,
+        )
+        return {
+            "timeline_event": result["timeline_event"],
+            "leader_run": result["leader_run"],
+            "loop": {
+                "steps": result["loop"].get("steps"),
+                "status": result["loop"].get("status"),
+                "final_text": result["loop"].get("final_text"),
+            },
+        }
 
     @router.get("/{workgroup_id}/timeline", response_model=list[TimelineEvent])
     def get_timeline(workgroup_id: str, request: Request) -> list[TimelineEvent]:

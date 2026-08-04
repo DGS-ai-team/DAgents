@@ -11,6 +11,8 @@ from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup import ids
 from manage.workgroup.d3_models import HITLRequest, OutboxFrame, Subscription, TimelineEvent
+from manage.workgroup.history import ActorRunHistory, RunHistoryMessage
+from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.models import (
     ActorRun,
     ActorRunCreateRequest,
@@ -49,6 +51,7 @@ class WorkGroupStore:
         self._grants: dict[str, NodeExecutionGrant] = {}
         self._assigns: dict[str, Assign] = {}
         self._runs: dict[str, ActorRun] = {}
+        self._run_histories: dict[str, ActorRunHistory] = {}
         self._timeline: dict[str, list[TimelineEvent]] = {}
         self._outbox: dict[str, list[OutboxFrame]] = {}
         self._hitl: dict[str, HITLRequest] = {}
@@ -110,6 +113,8 @@ class WorkGroupStore:
             self._assigns[a.assign_id] = a
         for r in self._load_all("actor_runs", ActorRun):
             self._runs[r.run_id] = r
+        for h in self._load_all("actor_run_histories", ActorRunHistory):
+            self._run_histories[h.run_id] = h
         for ev in self._load_all("workgroup_timeline", TimelineEvent):
             self._timeline.setdefault(ev.workgroup_id, []).append(ev)
         for wg, events in self._timeline.items():
@@ -498,6 +503,20 @@ class WorkGroupStore:
                     "assign requires accepted ExecutionGrant (ACL alone is insufficient)",
                     http_status=403,
                 )
+            # v1：全组最多一个 active assign
+            active = [
+                a
+                for a in self._assigns.values()
+                if a.workgroup_id == workgroup_id
+                and a.status in {"queued", "running", "awaiting_hitl"}
+            ]
+            if active:
+                raise WorkgroupError(
+                    "conflict",
+                    "workgroup already has an active assign",
+                    http_status=409,
+                    details={"active_assign_id": active[0].assign_id},
+                )
             leader_run_id = req.leader_run_id or ids.run_id()
             if req.leader_run_id is None:
                 # 骨架：自动创建一个 leader run 占位
@@ -534,6 +553,118 @@ class WorkGroupStore:
         with self._lock:
             self._ensure_loaded()
             return self._runs.get(run_id)
+
+    def update_actor_run(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        timeline_watermark_seq: int | None = None,
+        checkpoint_ordinal: int | None = None,
+    ) -> ActorRun:
+        with self._lock:
+            self._ensure_loaded()
+            run = self._runs.get(run_id)
+            if run is None:
+                raise WorkgroupError("not_found", "actor run not found", http_status=404)
+            update: dict[str, Any] = {}
+            if status is not None:
+                update["status"] = status
+            if timeline_watermark_seq is not None:
+                update["timeline_watermark_seq"] = timeline_watermark_seq
+            if checkpoint_ordinal is not None:
+                update["checkpoint_ordinal"] = checkpoint_ordinal
+            updated = run.model_copy(update=update)
+            self._runs[run_id] = updated
+            self._put("actor_runs", run_id, updated.model_dump_json(), workgroup_id=updated.workgroup_id)
+            return updated
+
+    def find_running_leader_run(self, workgroup_id: str) -> ActorRun | None:
+        with self._lock:
+            self._ensure_loaded()
+            candidates = [
+                r
+                for r in self._runs.values()
+                if r.workgroup_id == workgroup_id
+                and r.actor_id == "leader"
+                and r.status in {"running", "awaiting_hitl"}
+            ]
+            if not candidates:
+                return None
+            return sorted(candidates, key=lambda r: r.created_at)[-1]
+
+    def get_run_history(self, run_id: str) -> ActorRunHistory | None:
+        with self._lock:
+            self._ensure_loaded()
+            return self._run_histories.get(run_id)
+
+    def ensure_run_history(self, run: ActorRun) -> ActorRunHistory:
+        with self._lock:
+            self._ensure_loaded()
+            existing = self._run_histories.get(run.run_id)
+            if existing is not None:
+                return existing
+            hist = ActorRunHistory(
+                run_id=run.run_id,
+                workgroup_id=run.workgroup_id,
+                actor_id=run.actor_id,
+                messages=[],
+                timeline_watermark_seq=run.timeline_watermark_seq,
+            )
+            self._run_histories[run.run_id] = hist
+            self._put(
+                "actor_run_histories",
+                run.run_id,
+                hist.model_dump_json(),
+                workgroup_id=run.workgroup_id,
+            )
+            return hist
+
+    def append_run_history(
+        self,
+        run_id: str,
+        messages: list[RunHistoryMessage] | list[dict[str, Any]],
+        *,
+        timeline_watermark_seq: int | None = None,
+    ) -> ActorRunHistory:
+        with self._lock:
+            self._ensure_loaded()
+            hist = self._run_histories.get(run_id)
+            run = self._runs.get(run_id)
+            if hist is None:
+                if run is None:
+                    raise WorkgroupError("not_found", "actor run not found", http_status=404)
+                hist = ActorRunHistory(
+                    run_id=run.run_id,
+                    workgroup_id=run.workgroup_id,
+                    actor_id=run.actor_id,
+                    messages=[],
+                    timeline_watermark_seq=run.timeline_watermark_seq,
+                )
+            added = [
+                m if isinstance(m, RunHistoryMessage) else RunHistoryMessage.model_validate(m)
+                for m in messages
+            ]
+            new_msgs = list(hist.messages) + added
+            wm = hist.timeline_watermark_seq if timeline_watermark_seq is None else timeline_watermark_seq
+            updated = hist.model_copy(update={"messages": new_msgs, "timeline_watermark_seq": wm})
+            self._run_histories[run_id] = updated
+            self._put(
+                "actor_run_histories",
+                run_id,
+                updated.model_dump_json(),
+                workgroup_id=updated.workgroup_id,
+            )
+            if run is not None and timeline_watermark_seq is not None:
+                run2 = run.model_copy(
+                    update={
+                        "timeline_watermark_seq": timeline_watermark_seq,
+                        "checkpoint_ordinal": run.checkpoint_ordinal + len(added),
+                    }
+                )
+                self._runs[run_id] = run2
+                self._put("actor_runs", run_id, run2.model_dump_json(), workgroup_id=run2.workgroup_id)
+            return updated
 
     def active_grant_for_member(self, member_id: str) -> NodeExecutionGrant | None:
         with self._lock:
@@ -622,6 +753,8 @@ class WorkGroupStore:
         actor_id: str,
         text: str = "",
         client_message_id: str | None = None,
+        protocol_name: str | None = None,
+        assign_id: str | None = None,
     ) -> TimelineEvent:
         with self._lock:
             self._ensure_loaded()
@@ -633,6 +766,7 @@ class WorkGroupStore:
                     if ev.client_message_id == client_message_id:
                         return ev
             seq = (events[-1].seq + 1) if events else 1
+            pname = (protocol_name or "").strip() or protocol_name_for_actor(actor_id)
             event = TimelineEvent(
                 event_id=ids.event_id(),
                 workgroup_id=workgroup_id,
@@ -642,6 +776,8 @@ class WorkGroupStore:
                 text=text,
                 created_at=_now(),
                 client_message_id=client_message_id,
+                protocol_name=pname,
+                assign_id=assign_id,
             )
             events.append(event)
             self._put(

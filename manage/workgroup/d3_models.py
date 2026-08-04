@@ -21,6 +21,10 @@ class TimelineEvent(BaseModel):
     created_at: str
     # 禁止原始工具载荷字段出现在公开 Timeline
     client_message_id: str | None = None
+    # 投影用：provider-safe name；缺省由 actor_id 推导
+    protocol_name: str | None = None
+    # 成员最终产出绑定的 Assign（用于 Leader 去重）
+    assign_id: str | None = None
 
 
 class OutboxFrame(BaseModel):
