@@ -118,7 +118,7 @@ defineExpose({ refresh, setDeleting, openCreate });
       </button>
       <button type="button" class="agent-panel__icon-btn" title="新建 Agent" aria-label="新建 Agent" @click="openCreate">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
         </svg>
       </button>
     </header>
