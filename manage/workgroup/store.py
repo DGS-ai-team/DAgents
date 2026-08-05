@@ -140,7 +140,7 @@ class WorkGroupStore:
             group = WorkGroup(
                 workgroup_id=wid,
                 display_name=req.display_name.strip(),
-                status="active",
+                status="configuring",
                 created_by_node_id=req.created_by_node_id.strip(),
                 llm_profile_id=req.llm_profile_id.strip(),
                 llm_profile_revision=req.llm_profile_revision.strip(),
@@ -183,8 +183,8 @@ class WorkGroupStore:
             self._ensure_loaded()
             groups = list(self._groups.values())
             if not include_archived:
-                # 当前工作组页只展示进行中；归档查询页后续再开 include_archived
-                groups = [g for g in groups if g.status == "active"]
+                # 列表展示配置中 + 进行中；归档查询页后续再开 include_archived
+                groups = [g for g in groups if g.status in {"configuring", "active"}]
             if subscribed_by:
                 nid = subscribed_by.strip()
                 groups = [
@@ -207,17 +207,55 @@ class WorkGroupStore:
             self._ensure_loaded()
             return self._groups.get(workgroup_id)
 
-    def require_active(self, workgroup_id: str) -> WorkGroup:
+    def require_mutable(self, workgroup_id: str) -> WorkGroup:
+        """配置中或已发布：允许改配置 / 成员；已归档不可改。"""
         group = self.get_workgroup(workgroup_id)
         if group is None:
             raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+        if group.status not in {"configuring", "active"}:
+            raise WorkgroupError(
+                "workgroup_archived",
+                f"workgroup status={group.status}",
+                http_status=409,
+            )
+        return group
+
+    def require_active(self, workgroup_id: str) -> WorkGroup:
+        """已发布：允许对话与运行时编排。"""
+        group = self.get_workgroup(workgroup_id)
+        if group is None:
+            raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+        if group.status == "configuring":
+            raise WorkgroupError(
+                "workgroup_not_published",
+                "workgroup must be published before conversation",
+                http_status=409,
+            )
         if group.status != "active":
             raise WorkgroupError("workgroup_archived", f"workgroup status={group.status}", http_status=409)
         return group
 
+    def publish_workgroup(self, workgroup_id: str) -> WorkGroup:
+        with self._lock:
+            group = self.get_workgroup(workgroup_id)
+            if group is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            if group.status == "active":
+                return group
+            if group.status != "configuring":
+                raise WorkgroupError(
+                    "conflict",
+                    f"cannot publish workgroup status={group.status}",
+                    http_status=409,
+                )
+            group = group.model_copy(update={"status": "active"})
+            self._groups[workgroup_id] = group
+            self._put("workgroups", workgroup_id, group.model_dump_json())
+            return group
+
     def patch_workgroup(self, workgroup_id: str, req: WorkGroupPatchRequest) -> WorkGroup:
         with self._lock:
-            group = self.require_active(workgroup_id)
+            group = self.require_mutable(workgroup_id)
             updates: dict[str, Any] = {}
             if req.display_name is not None:
                 updates["display_name"] = req.display_name.strip()
@@ -246,7 +284,7 @@ class WorkGroupStore:
                 raise WorkgroupError("not_found", "workgroup not found", http_status=404)
             if group.status == "archived":
                 return group
-            if group.status == "active":
+            if group.status in {"active", "configuring"}:
                 group = group.model_copy(update={"status": "archiving"})
             elif group.status == "archiving":
                 group = group.model_copy(update={"status": "archived", "archived_at": _now()})
@@ -263,7 +301,7 @@ class WorkGroupStore:
 
     def patch_acl(self, workgroup_id: str, req: ACLPatchRequest) -> WorkGroupACL:
         with self._lock:
-            self.require_active(workgroup_id)
+            self.require_mutable(workgroup_id)
             acl = self._acls.get(workgroup_id)
             if acl is None:
                 raise WorkgroupError("not_found", "acl not found", http_status=404)
@@ -306,9 +344,9 @@ class WorkGroupStore:
 
     def create_member(self, workgroup_id: str, req: MemberCreateRequest) -> tuple[WorkGroupMember, MemberSpec]:
         with self._lock:
-            group = self.require_active(workgroup_id)
+            group = self.require_mutable(workgroup_id)
             home = req.home_node_id.strip()
-            # home 必须在 ACL 内才可挂载成员（订阅权）；执行权仍需 Grant。
+            # home 必须在 ACL 内才可挂载成员
             self.assert_acl_member(workgroup_id, home)
             mid = ids.member_id()
             now = _now()
@@ -340,13 +378,17 @@ class WorkGroupStore:
                 workgroup_id=workgroup_id,
                 home_node_id=home,
                 display_name=spec.display_name,
-                status="requested",
+                status="provisioning",
                 member_generation=1,
                 member_spec_digest=digest,
                 created_at=now,
             )
             self._specs[mid] = spec
             self._members[mid] = member
+            self._member_runtime[mid] = {
+                "lease_id": ids.lease_id(),
+                "lease_epoch": "1",
+            }
             self._put("member_specs", mid, spec.model_dump_json(), workgroup_id=workgroup_id)
             self._put("workgroup_members", mid, member.model_dump_json(), workgroup_id=workgroup_id)
             return member, spec
@@ -373,7 +415,7 @@ class WorkGroupStore:
 
     def invite_grant(self, workgroup_id: str, req: GrantInviteRequest) -> NodeExecutionGrant:
         with self._lock:
-            self.require_active(workgroup_id)
+            self.require_mutable(workgroup_id)
             member = self._members.get(req.member_id)
             if member is None or member.workgroup_id != workgroup_id:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
@@ -428,7 +470,7 @@ class WorkGroupStore:
             grant = self._grants.get(grant_id)
             if grant is None:
                 raise WorkgroupError("not_found", "grant not found", http_status=404)
-            self.require_active(grant.workgroup_id)
+            self.require_mutable(grant.workgroup_id)
             if grant.home_node_id != home_node_id.strip():
                 raise WorkgroupError("not_authorized", "only home_node may accept grant", http_status=403)
             if grant.status == "accepted":
@@ -522,14 +564,11 @@ class WorkGroupStore:
             member = self._members.get(req.member_id)
             if member is None or member.workgroup_id != workgroup_id:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
-            # ACL 不能替代 Grant：无 accepted grant 不可派发执行
-            if not any(
-                g.member_id == member.member_id and g.status == "accepted" for g in self._grants.values()
-            ):
+            if member.status in {"archived", "error"}:
                 raise WorkgroupError(
-                    "not_authorized",
-                    "assign requires accepted ExecutionGrant (ACL alone is insufficient)",
-                    http_status=403,
+                    "conflict",
+                    f"member status={member.status}",
+                    http_status=409,
                 )
             # v1：全组最多一个 active assign
             active = [
@@ -695,12 +734,40 @@ class WorkGroupStore:
             return updated
 
     def active_grant_for_member(self, member_id: str) -> NodeExecutionGrant | None:
+        """兼容旧数据；新产品路径不再依赖 Grant。"""
         with self._lock:
             self._ensure_loaded()
             for g in self._grants.values():
                 if g.member_id == member_id and g.status == "accepted":
                     return g
             return None
+
+    def member_execution_context(self, member_id: str) -> dict[str, Any]:
+        """派活/provision 用的成员执行上下文（替代 ExecutionGrant）。"""
+        with self._lock:
+            self._ensure_loaded()
+            member = self._members.get(member_id)
+            if member is None:
+                raise WorkgroupError("not_found", "member not found", http_status=404)
+            spec = self._specs.get(member_id)
+            runtime = dict(self._member_runtime.get(member_id) or {})
+            lease_id = str(runtime.get("lease_id") or "").strip() or ids.lease_id()
+            try:
+                lease_epoch = int(runtime.get("lease_epoch") or 1)
+            except (TypeError, ValueError):
+                lease_epoch = 1
+            if "lease_id" not in runtime or "lease_epoch" not in runtime:
+                runtime["lease_id"] = lease_id
+                runtime["lease_epoch"] = str(lease_epoch)
+                self._member_runtime[member_id] = runtime
+            return {
+                "home_node_id": member.home_node_id,
+                "member_spec_digest": member.member_spec_digest,
+                "member_generation": member.member_generation,
+                "lease_id": lease_id,
+                "lease_epoch": lease_epoch,
+                "tool_allow_names": list(spec.tools.allow_names) if spec is not None else [],
+            }
 
     def mark_member_status(
         self,
@@ -1000,22 +1067,23 @@ class WorkGroupStore:
             return node_id.strip() in (self._subscriptions.get(workgroup_id) or {})
 
     def bump_lease_epochs(self, workgroup_id: str) -> int:
-        """归档时抬升组内 grant lease_epoch；返回抬升后的最大 epoch。"""
+        """归档时抬升组内成员 lease_epoch；返回抬升后的最大 epoch。"""
         with self._lock:
             self._ensure_loaded()
             max_epoch = 1
-            for gid, grant in list(self._grants.items()):
-                if grant.workgroup_id != workgroup_id:
+            for mid, member in list(self._members.items()):
+                if member.workgroup_id != workgroup_id:
                     continue
-                new_epoch = grant.lease_epoch + 1
-                updated = grant.model_copy(update={"lease_epoch": new_epoch})
-                self._grants[gid] = updated
-                self._put(
-                    "execution_grants",
-                    gid,
-                    updated.model_dump_json(),
-                    workgroup_id=workgroup_id,
-                )
+                runtime = dict(self._member_runtime.get(mid) or {})
+                try:
+                    cur = int(runtime.get("lease_epoch") or 1)
+                except (TypeError, ValueError):
+                    cur = 1
+                new_epoch = cur + 1
+                runtime["lease_epoch"] = str(new_epoch)
+                if not runtime.get("lease_id"):
+                    runtime["lease_id"] = ids.lease_id()
+                self._member_runtime[mid] = runtime
                 if new_epoch > max_epoch:
                     max_epoch = new_epoch
             return max_epoch

@@ -15,7 +15,6 @@ const workgroupId = computed(() => String(route.params.workgroupId || "").trim()
 const selfNodeId = ref("");
 const events = ref([]);
 const members = ref([]);
-const grants = ref([]);
 const hitlList = ref([]);
 const draft = ref("");
 const sending = ref(false);
@@ -79,22 +78,19 @@ async function loadACL() {
   }
 }
 
-async function loadMembersGrantsHitl() {
+async function loadMembersHitl() {
   if (!workgroupId.value) {
     members.value = [];
-    grants.value = [];
     hitlList.value = [];
     return;
   }
   try {
-    const [m, g, h] = await Promise.all([
+    const [m, h] = await Promise.all([
       api.listWorkgroupMembers(workgroupId.value),
-      api.listWorkgroupGrants(workgroupId.value),
       api.listWorkgroupHITL(workgroupId.value, true),
     ]);
     members.value = m.members || [];
     if (m.node_id) selfNodeId.value = m.node_id;
-    grants.value = g.grants || [];
     hitlList.value = h.hitl || [];
     if (
       selectedMemberId.value &&
@@ -147,7 +143,7 @@ async function selectMember(memberId) {
 function startPoll() {
   stopPoll();
   pollTimer.value = window.setInterval(async () => {
-    await Promise.all([loadTimeline(), loadMembersGrantsHitl()]);
+    await Promise.all([loadTimeline(), loadMembersHitl()]);
     if (selectedMemberId.value) {
       await loadMemberSpec(selectedMemberId.value);
     }
@@ -233,7 +229,7 @@ async function createMember() {
     });
     resetMemberForm();
     showMemberForm.value = false;
-    await loadMembersGrantsHitl();
+    await loadMembersHitl();
     const mid = out?.member?.member_id;
     if (mid) {
       selectedMemberId.value = mid;
@@ -267,43 +263,6 @@ async function onRailDeleteAgent(payload) {
   }
 }
 
-function toolsForGrant(memberId) {
-  if (
-    selectedMemberId.value === memberId &&
-    memberSpec.value?.tools?.allow_names?.length
-  ) {
-    return [...memberSpec.value.tools.allow_names];
-  }
-  return ["read_file"];
-}
-
-async function inviteGrant(memberId) {
-  error.value = "";
-  try {
-    await api.inviteWorkgroupGrant(workgroupId.value, memberId, toolsForGrant(memberId));
-    await loadMembersGrantsHitl();
-  } catch (e) {
-    error.value = e?.message || "邀请 Grant 失败";
-  }
-}
-
-async function acceptGrant(grant) {
-  error.value = "";
-  try {
-    await api.acceptWorkgroupGrant(
-      workgroupId.value,
-      grant.grant_id,
-      grant.member_spec_digest,
-    );
-    await loadMembersGrantsHitl();
-    if (grant.member_id === selectedMemberId.value) {
-      await loadMemberSpec(grant.member_id);
-    }
-  } catch (e) {
-    error.value = e?.message || "接受 Grant 失败";
-  }
-}
-
 async function createHitl() {
   const prompt = hitlPrompt.value.trim();
   if (!prompt || hitlBusy.value) return;
@@ -312,7 +271,7 @@ async function createHitl() {
   try {
     await api.createWorkgroupHITL(workgroupId.value, prompt);
     hitlPrompt.value = "";
-    await loadMembersGrantsHitl();
+    await loadMembersHitl();
   } catch (e) {
     error.value = e?.message || "创建 HITL 失败";
   } finally {
@@ -327,7 +286,7 @@ async function resolveHitl(hitlId) {
   try {
     await api.resolveWorkgroupHITL(workgroupId.value, hitlId, answer);
     delete hitlAnswers.value[hitlId];
-    await loadMembersGrantsHitl();
+    await loadMembersHitl();
   } catch (e) {
     error.value = e?.message || "决议 HITL 失败";
   }
@@ -344,12 +303,6 @@ function promptExcerpt(text, max = 120) {
   if (!s) return "（空）";
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
-
-const pendingGrantsForSelf = computed(() =>
-  grants.value.filter(
-    (g) => g.status === "invited" && g.home_node_id === selfNodeId.value,
-  ),
-);
 
 const aclSummary = computed(() => {
   if (!acl.value) return "";
@@ -370,7 +323,7 @@ watch(
     memberSpec.value = null;
     showMemberForm.value = false;
     resetMemberForm();
-    await Promise.all([loadTimeline(), loadACL(), loadMembersGrantsHitl()]);
+    await Promise.all([loadTimeline(), loadACL(), loadMembersHitl()]);
     const memberQ = String(route.query.member || "").trim();
     if (memberQ) {
       selectedMemberId.value = memberQ;
@@ -466,13 +419,6 @@ onUnmounted(stopPoll);
                     >
                       {{ m.display_name }} · {{ m.status }}
                     </button>
-                    <button
-                      v-if="m.status === 'requested'"
-                      type="button"
-                      @click="inviteGrant(m.member_id)"
-                    >
-                      邀请 Grant
-                    </button>
                   </div>
                   <div class="wg-side__meta">{{ m.home_node_id }}</div>
                 </li>
@@ -541,18 +487,6 @@ onUnmounted(stopPoll);
                 </div>
               </template>
               <p v-else class="wg-side__meta">无法加载 MemberSpec</p>
-            </section>
-
-            <section v-if="pendingGrantsForSelf.length" class="wg-side__sec">
-              <h4>待接受 Grant</h4>
-              <ul>
-                <li v-for="g in pendingGrantsForSelf" :key="g.grant_id">
-                  <div class="wg-side__row">
-                    <span>{{ g.member_id.slice(0, 12) }}…</span>
-                    <button type="button" @click="acceptGrant(g)">接受</button>
-                  </div>
-                </li>
-              </ul>
             </section>
 
             <section class="wg-side__sec">

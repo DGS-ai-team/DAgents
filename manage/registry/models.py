@@ -155,13 +155,15 @@ class AgentDeregisterRequest(BaseModel):
 
 
 class AgentGroupsUpdateRequest(BaseModel):
-    """Manage 端为 Node 分配 discovery_group。"""
+    """Manage 端为 Node 分配 discovery_group。允许空列表表示清空分组。"""
 
-    discovery_group: list[str] = Field(min_length=1)
+    discovery_group: list[str] = Field(default_factory=list)
 
     @field_validator("discovery_group", mode="before")
     @classmethod
     def validate_discovery_group(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
         if isinstance(value, str):
             raw_items = [value]
         elif isinstance(value, list):
@@ -180,8 +182,6 @@ class AgentGroupsUpdateRequest(BaseModel):
                 continue
             seen.add(cleaned)
             result.append(cleaned)
-        if not result:
-            raise ValueError("discovery_group 不能为空")
         return result
 
 

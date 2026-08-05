@@ -21,7 +21,7 @@ from manage.workgroup.d3_models import (
 )
 from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
-from manage.workgroup.models import Assign, AssignCreateRequest, NodeExecutionGrant
+from manage.workgroup.models import Assign, AssignCreateRequest
 from manage.workgroup.store import WorkGroupStore, _now
 
 
@@ -48,6 +48,7 @@ class VerticalLoop:
 
     def post_human(self, workgroup_id: str, req: HumanPostRequest) -> TimelineEvent:
         self.store.assert_acl_member(workgroup_id, req.from_node_id)
+        self.store.require_active(workgroup_id)
         return self.store.append_timeline(
             workgroup_id,
             type="human_message",
@@ -56,36 +57,37 @@ class VerticalLoop:
             client_message_id=req.client_message_id,
         )
 
-    def enqueue_provision(self, grant: NodeExecutionGrant) -> OutboxFrame:
+    def enqueue_provision(self, workgroup_id: str, member_id: str) -> OutboxFrame:
+        ctx = self.store.member_execution_context(member_id)
         frame = self.store.enqueue_outbox(
-            grant.workgroup_id,
+            workgroup_id,
             type="member.provision",
             payload={
                 "provision_id": ids.new_id("pv"),
-                "workgroup_id": grant.workgroup_id,
-                "member_id": grant.member_id,
-                "home_node_id": grant.home_node_id,
-                "member_spec_digest": grant.member_spec_digest,
-                "lease_epoch": grant.lease_epoch,
-                "member_generation": grant.member_generation,
-                "tool_allow_names": list(grant.tool_allow_names),
+                "workgroup_id": workgroup_id,
+                "member_id": member_id,
+                "home_node_id": ctx["home_node_id"],
+                "member_spec_digest": ctx["member_spec_digest"],
+                "lease_epoch": ctx["lease_epoch"],
+                "member_generation": ctx["member_generation"],
+                "tool_allow_names": list(ctx["tool_allow_names"]),
             },
         )
         if self.hub is not None:
-            self.hub.deliver_outbox_frame(frame, home_node_id=grant.home_node_id)
+            self.hub.deliver_outbox_frame(frame, home_node_id=ctx["home_node_id"])
         if self.bridge is not None:
             result = self.bridge.provision(frame.payload)
             self.complete_provision(
-                grant.workgroup_id,
+                workgroup_id,
                 ProvisionCompleteRequest(
-                    member_id=grant.member_id,
+                    member_id=member_id,
                     provision_id=frame.payload["provision_id"],
                     workspace_path=str(result.get("workspace_path") or ""),
                     tool_catalog_revision=str(result.get("tool_catalog_revision") or ""),
                     status="ready" if result.get("ok", True) else "error",
                 ),
             )
-            self.store.ack_outbox(grant.workgroup_id, frame.delivery_seq)
+            self.store.ack_outbox(workgroup_id, frame.delivery_seq)
         return frame
 
     def complete_provision(self, workgroup_id: str, req: ProvisionCompleteRequest) -> dict[str, Any]:
@@ -112,12 +114,10 @@ class VerticalLoop:
             workgroup_id,
             AssignCreateRequest(member_id=member_id, instruction=instruction),
         )
-        grant = self.store.active_grant_for_member(member_id)
-        if grant is None:
-            raise WorkgroupError("not_authorized", "accepted grant required", http_status=403)
         member = self.store.get_member(member_id)
         if member is None or member.status != "ready":
             raise WorkgroupError("conflict", "member not ready", http_status=409)
+        ctx = self.store.member_execution_context(member_id)
 
         cmd_id = ids.new_id("cmd")
         args = {"path": path}
@@ -132,9 +132,9 @@ class VerticalLoop:
             "member_id": member_id,
             "assign_id": assign.assign_id,
             "tool_call_id": "call_read_1",
-            "member_spec_digest": grant.member_spec_digest,
-            "member_generation": grant.member_generation,
-            "lease_epoch": grant.lease_epoch,
+            "member_spec_digest": ctx["member_spec_digest"],
+            "member_generation": ctx["member_generation"],
+            "lease_epoch": ctx["lease_epoch"],
             "tool_catalog_revision": catalog_rev,
         }
         payload_hash = sha256_digest(hash_payload)
@@ -149,10 +149,10 @@ class VerticalLoop:
             "tool_name": "read_file",
             "arguments_json": args_json,
             "payload_hash": payload_hash,
-            "lease_id": grant.lease_id,
-            "lease_epoch": grant.lease_epoch,
-            "member_generation": grant.member_generation,
-            "member_spec_digest": grant.member_spec_digest,
+            "lease_id": ctx["lease_id"],
+            "lease_epoch": ctx["lease_epoch"],
+            "member_generation": ctx["member_generation"],
+            "member_spec_digest": ctx["member_spec_digest"],
             "tool_catalog_revision": catalog_rev,
             "status": "queued",
             "side_effect_class": "fs_read",
@@ -160,7 +160,7 @@ class VerticalLoop:
         frame = self.store.enqueue_outbox(workgroup_id, type="tool.command", payload=command)
         self.store.set_assign_status(assign.assign_id, "running")
         if self.hub is not None:
-            self.hub.deliver_outbox_frame(frame, home_node_id=grant.home_node_id)
+            self.hub.deliver_outbox_frame(frame, home_node_id=ctx["home_node_id"])
 
         tool_result: dict[str, Any] | None = None
         if self.bridge is not None:

@@ -23,7 +23,6 @@ from manage.workgroup.d3_models import (  # noqa: E402
 from manage.workgroup.errors import WorkgroupError  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
-    GrantInviteRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
@@ -131,16 +130,9 @@ class WorkgroupVerticalTests(unittest.TestCase):
                 prompt={"soul_md": "reader"},
             ),
         )
-        grant = store.invite_grant(
-            group.workgroup_id,
-            GrantInviteRequest(member_id=member.member_id, tool_allow_names=["read_file"]),
-        )
-        grant = store.accept_grant(
-            grant.grant_id,
-            home_node_id="node-b",
-            member_spec_digest=spec.digest,
-        )
-        loop.enqueue_provision(grant)
+        _ = spec
+        loop.enqueue_provision(group.workgroup_id, member.member_id)
+        store.publish_workgroup(group.workgroup_id)
         return loop, bridge, group.workgroup_id, member.member_id
 
     def test_two_node_read_file_happy_path(self) -> None:

@@ -16,7 +16,6 @@ from manage.workgroup.d3_models import OutboxFrame  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
     AssignCreateRequest,
-    GrantInviteRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
@@ -103,9 +102,9 @@ class WorkgroupWSHubTests(unittest.TestCase):
                     allow_tool_names=["read_file"],
                 ),
             )
-            grant = store.invite_grant(wid, GrantInviteRequest(member_id=member.member_id))
-            store.accept_grant(grant.grant_id, home_node_id="node_b", member_spec_digest=spec.digest)
+            _ = spec
             store.mark_member_status(member.member_id, "ready", workgroup_id=wid)
+            store.publish_workgroup(wid)
             assign = store.create_assign(
                 wid, AssignCreateRequest(member_id=member.member_id, instruction="read")
             )

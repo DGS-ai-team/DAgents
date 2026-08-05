@@ -1,4 +1,4 @@
-"""Workgroup D1 store / digest / ACL≠Grant 单元测试。"""
+"""Workgroup D1 store / digest / ACL 单元测试。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from manage.workgroup.errors import WorkgroupError  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     AssignCreateRequest,
     ACLPatchRequest,
-    GrantInviteRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
@@ -44,7 +43,7 @@ class WorkgroupStoreTests(unittest.TestCase):
         db = SQLiteDatabase(Path(tmp) / "manage.db")
         return WorkGroupStore(db=db)
 
-    def test_create_group_acl_member_grant_assign(self) -> None:
+    def test_create_group_acl_member_assign(self) -> None:
         with TemporaryDirectory() as tmp:
             store = self._store(tmp)
             group, acl = store.create_workgroup(
@@ -55,7 +54,7 @@ class WorkgroupStoreTests(unittest.TestCase):
                     llm_profile_revision="1",
                 )
             )
-            self.assertEqual(group.status, "active")
+            self.assertEqual(group.status, "configuring")
             self.assertEqual(acl.owners, ["node-a"])
             self.assertEqual(acl.revision, 1)
 
@@ -75,66 +74,33 @@ class WorkgroupStoreTests(unittest.TestCase):
                     allow_tool_names=["read_file", "bash"],
                 ),
             )
-            self.assertEqual(member.status, "requested")
+            self.assertEqual(member.status, "provisioning")
             self.assertEqual(spec.digest, member.member_spec_digest)
             self.assertEqual(spec.skills, "disabled")
             self.assertFalse(spec.memory.remember_enabled)
+            ctx = store.member_execution_context(member.member_id)
+            self.assertEqual(ctx["home_node_id"], "node-b")
+            self.assertEqual(ctx["tool_allow_names"], ["read_file", "bash"])
+            self.assertTrue(ctx["lease_id"])
+            self.assertEqual(ctx["lease_epoch"], 1)
 
-            # ACL alone cannot assign
-            with self.assertRaises(WorkgroupError) as ctx:
+            # 未发布不可派发
+            with self.assertRaises(WorkgroupError) as ctx_err:
                 store.create_assign(
                     group.workgroup_id,
                     AssignCreateRequest(member_id=member.member_id, instruction="read x"),
                 )
-            self.assertEqual(ctx.exception.code, "not_authorized")
+            self.assertEqual(ctx_err.exception.code, "workgroup_not_published")
 
-            grant = store.invite_grant(
-                group.workgroup_id,
-                GrantInviteRequest(member_id=member.member_id, tool_allow_names=["read_file"]),
-            )
-            self.assertEqual(grant.status, "invited")
-            self.assertEqual(grant.tool_allow_names, ["read_file"])
+            store.publish_workgroup(group.workgroup_id)
+            self.assertEqual(store.get_workgroup(group.workgroup_id).status, "active")
 
-            accepted = store.accept_grant(
-                grant.grant_id,
-                home_node_id="node-b",
-                member_spec_digest=spec.digest,
-            )
-            self.assertEqual(accepted.status, "accepted")
-            refreshed = store.get_member(member.member_id)
-            assert refreshed is not None
-            self.assertEqual(refreshed.status, "provisioning")
-
+            # 创建成员后即可派发（无需 Grant）
             assign = store.create_assign(
                 group.workgroup_id,
                 AssignCreateRequest(member_id=member.member_id, instruction="read x"),
             )
             self.assertEqual(assign.status, "queued")
-
-    def test_grant_tool_subset_enforced(self) -> None:
-        with TemporaryDirectory() as tmp:
-            store = self._store(tmp)
-            group, _ = store.create_workgroup(
-                WorkGroupCreateRequest(display_name="G", created_by_node_id="node-a")
-            )
-            store.patch_acl(
-                group.workgroup_id,
-                ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
-            )
-            member, _ = store.create_member(
-                group.workgroup_id,
-                MemberCreateRequest(
-                    home_node_id="node-b",
-                    display_name="w",
-                    allow_tool_names=["read_file"],
-                ),
-            )
-            with self.assertRaises(WorkgroupError) as ctx:
-                store.invite_grant(
-                    group.workgroup_id,
-                    GrantInviteRequest(member_id=member.member_id, tool_allow_names=["bash"]),
-                )
-            self.assertEqual(ctx.exception.code, "digest_mismatch")
 
     def test_acl_revision_cas(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -172,6 +138,18 @@ class WorkgroupStoreTests(unittest.TestCase):
             with self.assertRaises(WorkgroupError) as ctx:
                 kernel.resolve_hitl_cas("ht_test", resolution={"ok": False})
             self.assertEqual(ctx.exception.code, "already_resolved")
+
+    def test_projector_empty_run(self) -> None:
+        with TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="G", created_by_node_id="node-a")
+            )
+            store.publish_workgroup(group.workgroup_id)
+            kernel = TurnKernel(store)
+            proj = kernel.project(actor_id="leader")
+            self.assertEqual(proj["actor_id"], "leader")
+            self.assertIn("messages", proj)
 
 
 if __name__ == "__main__":

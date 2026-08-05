@@ -369,30 +369,6 @@ export function getWorkgroupMemberSpec(workgroupId, memberId) {
   );
 }
 
-export function listWorkgroupGrants(workgroupId) {
-  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/grants`);
-}
-
-export function inviteWorkgroupGrant(workgroupId, memberId, toolAllowNames) {
-  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/grants`, {
-    method: "POST",
-    body: {
-      member_id: memberId,
-      tool_allow_names: toolAllowNames,
-    },
-  });
-}
-
-export function acceptWorkgroupGrant(workgroupId, grantId, memberSpecDigest) {
-  return apiFetch(
-    `/v1/workgroups/${encodeURIComponent(workgroupId)}/grants/${encodeURIComponent(grantId)}/accept`,
-    {
-      method: "POST",
-      body: memberSpecDigest ? { member_spec_digest: memberSpecDigest } : {},
-    },
-  );
-}
-
 export function listWorkgroupHITL(workgroupId, pendingOnly = true) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl`, {
     params: { pending_only: pendingOnly ? "true" : "false" },

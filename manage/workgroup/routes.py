@@ -32,10 +32,8 @@ from manage.workgroup.models import (
     Assign,
     AssignCreateRequest,
     ACLPatchRequest,
-    GrantInviteRequest,
     MemberCreateRequest,
     MemberSpec,
-    NodeExecutionGrant,
     WorkGroup,
     WorkGroupACL,
     WorkGroupCreateRequest,
@@ -46,12 +44,6 @@ from manage.workgroup.store import WorkGroupStore
 from manage.workgroup.turn_kernel import TurnKernel
 from manage.workgroup.vertical import VerticalLoop
 from manage.workgroup.ws_hub import WorkgroupWSHub
-
-_SHA = r"^sha256:[0-9a-f]{64}$"
-
-
-class GrantAcceptRequest(BaseModel):
-    member_spec_digest: str | None = Field(default=None, pattern=_SHA)
 
 
 class DispatchReadFileRequest(BaseModel):
@@ -161,6 +153,16 @@ def build_workgroup_router(
         audit.record(actor=audit_actor(request, auth), action="workgroup.archive", target_agent_id=workgroup_id)
         return group
 
+    @router.post("/{workgroup_id}/publish", response_model=WorkGroup)
+    def publish_workgroup(workgroup_id: str, request: Request) -> WorkGroup:
+        auth = authenticate(request)
+        try:
+            group = store.publish_workgroup(workgroup_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(actor=audit_actor(request, auth), action="workgroup.publish", target_agent_id=workgroup_id)
+        return group
+
     @router.get("/{workgroup_id}/acl", response_model=WorkGroupACL)
     def get_acl(workgroup_id: str, request: Request) -> WorkGroupACL:
         authenticate(request)
@@ -182,14 +184,37 @@ def build_workgroup_router(
     @router.post("/{workgroup_id}/members", response_model=dict)
     def create_member(workgroup_id: str, req: MemberCreateRequest, request: Request) -> dict:
         auth = authenticate(request)
+        registry = getattr(request.app.state, "registry_store", None)
+
+        # Node 会话：Home 必须与当前 Node 共享至少一个 discovery_group
+        if auth.session_kind == "node" or (auth.agent_id and not auth.is_admin):
+            caller_id = (auth.agent_id or extract_agent_id(request) or "").strip()
+            if registry is not None and caller_id:
+                caller = registry.get(caller_id)
+                home = registry.get(req.home_node_id.strip())
+                caller_groups = set(caller.discovery_group) if caller else set()
+                home_groups = set(home.discovery_group) if home else set()
+                if not caller_groups or not (caller_groups & home_groups):
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "code": "not_authorized",
+                            "message": "home_node must share a discovery_group with the caller node",
+                        },
+                    )
+
         try:
             member, spec = store.create_member(workgroup_id, req)
+            loop.enqueue_provision(workgroup_id, member.member_id)
+            member = store.get_member(member.member_id) or member
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
+
         audit.record(
             actor=audit_actor(request, auth),
             action="workgroup.member.create",
             target_agent_id=member.member_id,
+            detail={"home_node_id": member.home_node_id},
         )
         return {"member": member, "spec": spec}
 
@@ -208,53 +233,6 @@ def build_workgroup_router(
         if spec is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "spec not found"})
         return spec
-
-    @router.post("/{workgroup_id}/grants", response_model=NodeExecutionGrant)
-    def invite_grant(workgroup_id: str, req: GrantInviteRequest, request: Request) -> NodeExecutionGrant:
-        auth = authenticate(request)
-        try:
-            grant = store.invite_grant(workgroup_id, req)
-        except WorkgroupError as exc:
-            raise _http_error(exc) from exc
-        audit.record(actor=audit_actor(request, auth), action="workgroup.grant.invite", target_agent_id=grant.grant_id)
-        return grant
-
-    @router.get("/{workgroup_id}/grants", response_model=list[NodeExecutionGrant])
-    def list_grants(workgroup_id: str, request: Request) -> list[NodeExecutionGrant]:
-        authenticate(request)
-        return store.list_grants(workgroup_id)
-
-    @router.post("/{workgroup_id}/grants/{grant_id}/accept", response_model=NodeExecutionGrant)
-    def accept_grant(
-        workgroup_id: str,
-        grant_id: str,
-        request: Request,
-        req: GrantAcceptRequest = GrantAcceptRequest(),
-    ) -> NodeExecutionGrant:
-        auth = authenticate(request)
-        home = extract_agent_id(request)
-        if not home:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "schema_mismatch", "message": "x-dagents-agent-id required"},
-            )
-        ensure_node_identity(request, home, auth)
-        digest = req.member_spec_digest
-        try:
-            grant = store.accept_grant(grant_id, home_node_id=home, member_spec_digest=digest)
-            # 接受后入队 member.provision（经 hub 推送给已连接 Dialer）
-            if grant.status == "accepted":
-                loop.enqueue_provision(grant)
-        except WorkgroupError as exc:
-            raise _http_error(exc) from exc
-        if grant.workgroup_id != workgroup_id:
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "grant not found"})
-        audit.record(
-            actor=audit_actor(request, auth, fallback_agent_id=home),
-            action="workgroup.grant.accept",
-            target_agent_id=grant_id,
-        )
-        return grant
 
     @router.post("/{workgroup_id}/assigns", response_model=Assign)
     def create_assign(workgroup_id: str, req: AssignCreateRequest, request: Request) -> Assign:

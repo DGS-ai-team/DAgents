@@ -136,12 +136,17 @@ class SQLiteDatabase:
                     workgroup_id TEXT NOT NULL,
                     payload_json TEXT NOT NULL
                 );
+                -- discovery_group 目录（可空组；节点关联仍写在 registry_agents.payload_json）
+                CREATE TABLE IF NOT EXISTS discovery_group_catalog (
+                    name TEXT PRIMARY KEY,
+                    created_at_unix INTEGER NOT NULL
+                );
                 -- Blob 元数据随内容寻址文件落在 MANAGE_BLOB_DIR/{sha256}.json sidecar，
                 -- 不入 SQLite；故此处不建 blobs 表。
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','11') "
-                "ON CONFLICT(key) DO UPDATE SET value='11'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','12') "
+                "ON CONFLICT(key) DO UPDATE SET value='12'"
             )
             conn.commit()

@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
   fetchAuthMe,
+  fetchWorkgroup,
   fetchWorkgroupACL,
   fetchWorkgroupMembers,
   fetchWorkgroupTimeline,
@@ -22,6 +23,7 @@ const sending = ref(false);
 const timeline = ref([]);
 const members = ref([]);
 const acl = ref(null);
+const workgroupStatus = ref("");
 const fromNodeId = ref("console");
 const input = ref("");
 const textareaRef = ref(null);
@@ -39,8 +41,14 @@ const title = computed(() => {
   return `工作组 · ${name}`;
 });
 
+const canChat = computed(() => String(workgroupStatus.value || "") === "active");
+
 const canSubmit = computed(
-  () => Boolean(input.value.trim()) && !sending.value && Boolean(fromNodeId.value.trim()),
+  () =>
+    canChat.value &&
+    Boolean(input.value.trim()) &&
+    !sending.value &&
+    Boolean(fromNodeId.value.trim()),
 );
 
 const statusLabel = computed(() => {
@@ -238,8 +246,21 @@ async function loadTimeline() {
   }
 }
 
+async function loadWorkgroupMeta() {
+  if (!props.workgroupId) {
+    workgroupStatus.value = "";
+    return;
+  }
+  try {
+    const wg = await fetchWorkgroup(props.workgroupId);
+    workgroupStatus.value = String(wg?.status || "");
+  } catch {
+    workgroupStatus.value = "";
+  }
+}
+
 async function loadAll() {
-  await Promise.all([loadTimeline(), loadMembers()]);
+  await Promise.all([loadWorkgroupMeta(), loadTimeline(), loadMembers()]);
 }
 
 function resizeTextarea() {
@@ -272,7 +293,7 @@ function clearLive() {
 async function sendMessage() {
   const text = input.value.trim();
   const sender = fromNodeId.value.trim();
-  if (!props.workgroupId || !text || !sender || sending.value) return;
+  if (!props.workgroupId || !text || !sender || sending.value || !canChat.value) return;
 
   const clientMessageId = newClientMessageId();
   sending.value = true;
@@ -500,6 +521,9 @@ onMounted(async () => {
       </div>
 
       <footer class="chat__composer">
+        <p v-if="!canChat && workgroupStatus === 'configuring'" class="muted chat__composer-gate">
+          工作组仍在配置中，请先在配置页点击「发布」后再对话。
+        </p>
         <div class="chat__composer-pill">
           <div class="chat__composer-pill-center">
             <textarea
@@ -507,8 +531,8 @@ onMounted(async () => {
               v-model="input"
               class="chat__textarea"
               rows="1"
-              placeholder="输入消息…"
-              :disabled="sending"
+              :placeholder="canChat ? '输入消息…' : '发布后可输入消息…'"
+              :disabled="sending || !canChat"
               @keydown="onKeydown"
               @input="resizeTextarea"
             />

@@ -26,7 +26,7 @@ func CheckCommandFencing(cmd ToolCommand, binding WorkerBinding, catalogRev stri
 	return nil
 }
 
-// EffectiveToolNames = SpecAllow ∩ GrantAllow ∩ NodeAvailable。
+// EffectiveToolNames = SpecAllow ∩ NodeAvailable（第二参数保留兼容，与 SpecAllow 相同即可）。
 // SpecAllow 为空 ⇒ 无工具（fail-closed）。
 func EffectiveToolNames(specAllow, grantAllow, nodeAvailable []string) []string {
 	if len(specAllow) == 0 {

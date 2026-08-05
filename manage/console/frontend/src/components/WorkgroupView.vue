@@ -3,6 +3,8 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import {
   archiveWorkgroup,
   createWorkgroup,
+  createWorkgroupMember,
+  fetchAgents,
   fetchAuthMe,
   fetchLLMConfigs,
   fetchWorkgroupACL,
@@ -11,6 +13,8 @@ import {
   fetchWorkgroupMembers,
   fetchWorkgroups,
   patchWorkgroup,
+  patchWorkgroupACL,
+  publishWorkgroup,
 } from "../api.js";
 
 const props = defineProps({
@@ -22,7 +26,11 @@ const loading = ref(false);
 const loadingDetail = ref(false);
 const creating = ref(false);
 const deletingId = ref("");
+const publishingId = ref("");
 const bindingLlmKey = ref("");
+const addingCollaborator = ref(false);
+const creatingMember = ref(false);
+const memberFormOpen = ref(false);
 const error = ref("");
 
 const workgroups = ref([]);
@@ -32,13 +40,30 @@ const members = ref([]);
 /** @type {import('vue').Ref<Record<string, any>>} */
 const memberSpecs = ref({});
 const acl = ref(null);
+const nodeOptions = ref([]);
 const createOpen = ref(false);
 const ownerId = ref("console");
 const ownerLabel = ref("未登录");
+const authKind = ref(""); // admin | node | ""
+const authGroups = ref([]);
+const collabDraft = ref("");
+
+const MEMBER_TOOL_CHOICES = ["read_file"];
 
 const createForm = reactive({
   displayName: "",
 });
+
+const memberForm = reactive({
+  displayName: "",
+  homeNodeId: "",
+  soulMd: "",
+  userMd: "",
+  customMd: "",
+  tools: ["read_file"],
+});
+
+const isNodeSession = computed(() => authKind.value === "node");
 
 const selectedWorkgroup = computed(
   () => workgroups.value.find((item) => item.workgroup_id === selectedId.value) || null,
@@ -62,7 +87,7 @@ const configMembers = computed(() => {
       key: "leader",
       display_name: "Supervisor",
       member_id: "leader",
-      status: wg.status === "active" ? "ready" : wg.status,
+      status: wg.status === "active" ? "ready" : wg.status === "configuring" ? "provisioning" : wg.status,
       home_node_id: "manage",
       member_generation: null,
       llm_profile_id: wg.llm_profile_id,
@@ -111,11 +136,16 @@ function syncPageMeta() {
 
 function statusLabel(status) {
   const map = {
+    configuring: "配置中",
     active: "进行中",
     archiving: "归档中",
     archived: "已归档",
   };
   return map[status] || status || "—";
+}
+
+function canChat(item) {
+  return String(item?.status || "") === "active";
 }
 
 function formatTime(iso) {
@@ -129,6 +159,10 @@ async function resolveCreatorDefault() {
   try {
     const me = await fetchAuthMe();
     if (me?.authenticated) {
+      authKind.value = String(me.kind || "");
+      authGroups.value = Array.isArray(me.discovery_groups)
+        ? me.discovery_groups.filter((g) => g && g !== "*")
+        : [];
       if (me.kind === "node") {
         const id = String(me.agent_id || me.subject || "").trim() || "console";
         ownerId.value = id;
@@ -145,6 +179,8 @@ async function resolveCreatorDefault() {
   } catch {
     /* ignore */
   }
+  authKind.value = "";
+  authGroups.value = [];
   ownerId.value = "console";
   ownerLabel.value = "console";
 }
@@ -159,6 +195,170 @@ function memberStatusLabel(status) {
     error: "错误",
   };
   return map[status] || status || "—";
+}
+
+function isAclNode(nodeId) {
+  const nid = String(nodeId || "").trim();
+  if (!nid || !acl.value) return false;
+  const owners = Array.isArray(acl.value.owners) ? acl.value.owners : [];
+  const collaborators = Array.isArray(acl.value.collaborators) ? acl.value.collaborators : [];
+  return owners.includes(nid) || collaborators.includes(nid);
+}
+
+function toggleMemberTool(name) {
+  const set = new Set(memberForm.tools);
+  if (set.has(name)) set.delete(name);
+  else set.add(name);
+  memberForm.tools = [...set];
+}
+
+function resetMemberForm() {
+  memberForm.displayName = "";
+  memberForm.homeNodeId = "";
+  memberForm.soulMd = "";
+  memberForm.userMd = "";
+  memberForm.customMd = "";
+  memberForm.tools = ["read_file"];
+}
+
+function openMemberForm() {
+  memberFormOpen.value = true;
+  if (!memberForm.homeNodeId.trim()) {
+    if (isNodeSession.value && nodeOptions.value.length === 1) {
+      memberForm.homeNodeId = nodeOptions.value[0];
+    } else if (isNodeSession.value && ownerId.value) {
+      memberForm.homeNodeId = ownerId.value;
+    }
+  }
+}
+
+function cancelMemberForm() {
+  memberFormOpen.value = false;
+  resetMemberForm();
+}
+
+async function ensureHomeInAcl(workgroupId, homeNodeId) {
+  const home = String(homeNodeId || "").trim();
+  if (!home) throw new Error("Home Node 不能为空");
+  if (isAclNode(home)) return acl.value;
+  const current = acl.value;
+  if (!current?.revision) throw new Error("无法读取工作组 ACL");
+  const collaborators = [...(current.collaborators || [])];
+  if (!collaborators.includes(home) && !(current.owners || []).includes(home)) {
+    collaborators.push(home);
+  }
+  const updated = await patchWorkgroupACL(workgroupId, {
+    collaborators,
+    expected_revision: current.revision,
+  });
+  acl.value = updated;
+  return updated;
+}
+
+async function loadNodeOptions() {
+  try {
+    if (isNodeSession.value) {
+      const groups = authGroups.value.length ? authGroups.value : [];
+      if (!groups.length) {
+        nodeOptions.value = ownerId.value ? [ownerId.value] : [];
+        return;
+      }
+      const pages = await Promise.all(
+        groups.map((g) =>
+          fetchAgents({ page: 1, page_size: 100, status: "online", discovery_group: g }).catch(() => ({
+            agents: [],
+          })),
+        ),
+      );
+      const ids = new Set();
+      for (const data of pages) {
+        const agents = Array.isArray(data?.agents) ? data.agents : [];
+        for (const a of agents) {
+          const id = String(a.agent_id || a.node_id || "").trim();
+          if (id) ids.add(id);
+        }
+      }
+      if (ownerId.value) ids.add(ownerId.value);
+      nodeOptions.value = [...ids].sort((a, b) => a.localeCompare(b));
+      return;
+    }
+    const data = await fetchAgents({ page: 1, page_size: 100, status: "all" });
+    const agents = Array.isArray(data?.agents) ? data.agents : Array.isArray(data) ? data : [];
+    const ids = [
+      ...new Set(
+        agents
+          .map((a) => String(a.agent_id || a.node_id || "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    nodeOptions.value = ids.sort((a, b) => a.localeCompare(b));
+  } catch {
+    nodeOptions.value = [];
+  }
+}
+
+async function addCollaborator() {
+  const nid = collabDraft.value.trim();
+  const wg = selectedWorkgroup.value;
+  if (!nid || !wg?.workgroup_id || addingCollaborator.value) return;
+  if (isAclNode(nid)) {
+    emit("toast", { message: `${nid} 已在 ACL 中`, type: "info" });
+    collabDraft.value = "";
+    return;
+  }
+  addingCollaborator.value = true;
+  try {
+    const current = acl.value;
+    if (!current?.revision) throw new Error("无法读取工作组 ACL");
+    const collaborators = [...(current.collaborators || []), nid];
+    acl.value = await patchWorkgroupACL(wg.workgroup_id, {
+      collaborators,
+      expected_revision: current.revision,
+    });
+    collabDraft.value = "";
+    emit("toast", { message: `已添加协作者 ${nid}`, type: "success" });
+  } catch (err) {
+    emit("toast", { message: err.message || "添加协作者失败", type: "error" });
+  } finally {
+    addingCollaborator.value = false;
+  }
+}
+
+async function submitCreateMember() {
+  const wg = selectedWorkgroup.value;
+  const displayName = memberForm.displayName.trim();
+  const home = memberForm.homeNodeId.trim();
+  if (!wg?.workgroup_id || !displayName || !home || creatingMember.value) return;
+  creatingMember.value = true;
+  try {
+    await ensureHomeInAcl(wg.workgroup_id, home);
+    const tools = memberForm.tools.length ? [...memberForm.tools] : ["read_file"];
+    const body = {
+      display_name: displayName,
+      home_node_id: home,
+      allow_tool_names: tools,
+      prompt: {
+        soul_md: memberForm.soulMd,
+        user_md: memberForm.userMd,
+        custom_md: memberForm.customMd,
+      },
+    };
+    if (wg.llm_profile_id) {
+      body.llm_profile_id = wg.llm_profile_id;
+      body.llm_profile_revision = wg.llm_profile_revision || "1";
+    }
+    await createWorkgroupMember(wg.workgroup_id, body);
+    cancelMemberForm();
+    await loadSettings();
+    emit("toast", {
+      message: `已添加成员「${displayName}」，正在配置到 ${home}`,
+      type: "success",
+    });
+  } catch (err) {
+    emit("toast", { message: err.message || "添加成员失败", type: "error" });
+  } finally {
+    creatingMember.value = false;
+  }
 }
 
 function resolveLlmLabel(profileId, revision) {
@@ -247,6 +447,7 @@ async function loadSettings() {
     llmConfigs.value = Array.isArray(configs) ? configs : [];
     members.value = Array.isArray(memberList) ? memberList : [];
     acl.value = aclData;
+    loadNodeOptions();
     const specs = {};
     await Promise.all(
       members.value.map(async (m) => {
@@ -266,11 +467,32 @@ async function loadSettings() {
 }
 
 function openChat(item) {
+  if (!canChat(item)) {
+    emit("toast", { message: "请先在配置页发布工作组后再对话", type: "error" });
+    return;
+  }
   createOpen.value = false;
   emit("open-chat", {
     workgroupId: item.workgroup_id,
     displayName: item.display_name || item.workgroup_id,
   });
+}
+
+async function onPublish(item) {
+  const id = item?.workgroup_id;
+  if (!id || publishingId.value || item.status !== "configuring") return;
+  publishingId.value = id;
+  try {
+    const updated = await publishWorkgroup(id);
+    workgroups.value = (workgroups.value || []).map((row) =>
+      row.workgroup_id === updated.workgroup_id ? updated : row,
+    );
+    emit("toast", { message: "工作组已发布，可以开始对话", type: "success" });
+  } catch (err) {
+    emit("toast", { message: err.message || "发布失败", type: "error" });
+  } finally {
+    publishingId.value = "";
+  }
 }
 
 function openSettings(id) {
@@ -284,6 +506,9 @@ function backToGrid() {
   members.value = [];
   memberSpecs.value = {};
   acl.value = null;
+  nodeOptions.value = [];
+  collabDraft.value = "";
+  cancelMemberForm();
 }
 
 defineExpose({ backToGrid });
@@ -411,6 +636,7 @@ onMounted(async () => {
               class="wg-card__action"
               title="对话"
               aria-label="对话"
+              :disabled="!canChat(item)"
               @click="openChat(item)"
             >
               <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -504,16 +730,39 @@ onMounted(async () => {
 
     <div v-else class="workgroup-detail">
       <header class="wg-detail-header">
-        <h2 class="wg-detail-header__title">{{ selectedWorkgroup.display_name }}</h2>
-        <p class="wg-detail-header__id" :title="selectedWorkgroup.workgroup_id">
-          {{ selectedWorkgroup.workgroup_id }}
-        </p>
-        <div class="wg-detail-header__meta">
-          <span class="wg-card__status" :data-status="selectedWorkgroup.status">
-            {{ statusLabel(selectedWorkgroup.status) }}
-          </span>
-          <span class="muted">归属人 {{ selectedWorkgroup.created_by_node_id || "—" }}</span>
+        <div class="wg-detail-header__row">
+          <div>
+            <h2 class="wg-detail-header__title">{{ selectedWorkgroup.display_name }}</h2>
+            <div class="wg-detail-header__meta">
+              <span class="wg-card__status" :data-status="selectedWorkgroup.status">
+                {{ statusLabel(selectedWorkgroup.status) }}
+              </span>
+            </div>
+          </div>
+          <div class="wg-detail-header__actions">
+            <button
+              v-if="selectedWorkgroup.status === 'configuring'"
+              type="button"
+              class="btn btn-primary"
+              :disabled="publishingId === selectedWorkgroup.workgroup_id"
+              @click="onPublish(selectedWorkgroup)"
+            >
+              {{ publishingId === selectedWorkgroup.workgroup_id ? "发布中…" : "发布" }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-ghost"
+              :disabled="!canChat(selectedWorkgroup)"
+              :title="canChat(selectedWorkgroup) ? '打开对话' : '发布后可对话'"
+              @click="openChat(selectedWorkgroup)"
+            >
+              对话
+            </button>
+          </div>
         </div>
+        <p v-if="selectedWorkgroup.status === 'configuring'" class="muted wg-detail-header__hint">
+          当前为配置中：请完成 Supervisor / 成员配置后点击「发布」，方可开始对话。
+        </p>
       </header>
 
       <p v-if="loadingDetail" class="state">加载配置中…</p>
@@ -547,16 +796,165 @@ onMounted(async () => {
               <dd>{{ (acl?.collaborators || []).join(", ") || "—" }}</dd>
             </div>
           </dl>
+          <form class="wg-inline-form" @submit.prevent="addCollaborator">
+            <label class="field">
+              <span>添加协作者 Node</span>
+              <input
+                v-model="collabDraft"
+                type="text"
+                list="wg-node-options"
+                placeholder="输入 node_id"
+                :disabled="addingCollaborator"
+              />
+            </label>
+            <button
+              type="submit"
+              class="btn btn-ghost"
+              :disabled="addingCollaborator || !collabDraft.trim()"
+            >
+              {{ addingCollaborator ? "添加中…" : "添加" }}
+            </button>
+          </form>
           <p class="muted wg-detail-section__note">
-            工作组级字段编辑与 ACL 管理将在后续版本接入。新建 Agent 成员时，LLM 默认继承 Supervisor 的配置。
+            Home Node 必须在 ACL（Owners / Collaborators）中。新增成员时若尚未加入，会自动补进 Collaborators。
+            LLM 默认继承 Supervisor。配置完成后请点击右上角「发布」。
           </p>
         </section>
 
         <section class="wg-detail-section" aria-label="成员配置">
           <div class="wg-detail-section__head">
             <h3 class="wg-detail-section__title">成员配置</h3>
-            <span class="muted">{{ configMembers.length }} 人</span>
+            <div class="wg-detail-section__head-actions">
+              <span class="muted">{{ configMembers.length }} 人</span>
+              <button
+                v-if="!memberFormOpen"
+                type="button"
+                class="btn btn-primary btn-sm"
+                @click="openMemberForm"
+              >
+                新增成员
+              </button>
+            </div>
           </div>
+
+          <form
+            v-if="memberFormOpen"
+            class="wg-member-create"
+            @submit.prevent="submitCreateMember"
+          >
+            <div class="wg-member-create__grid">
+              <label class="field">
+                <span>显示名称</span>
+                <input
+                  v-model="memberForm.displayName"
+                  type="text"
+                  placeholder="例如：代码员"
+                  required
+                  autofocus
+                  :disabled="creatingMember"
+                />
+              </label>
+              <label class="field">
+                <span>Home Node</span>
+                <select
+                  v-if="isNodeSession || nodeOptions.length"
+                  v-model="memberForm.homeNodeId"
+                  required
+                  :disabled="creatingMember"
+                >
+                  <option value="" disabled>请选择执行节点</option>
+                  <option v-for="nid in nodeOptions" :key="nid" :value="nid">{{ nid }}</option>
+                </select>
+                <input
+                  v-else
+                  v-model="memberForm.homeNodeId"
+                  type="text"
+                  list="wg-node-options"
+                  placeholder="执行该成员的 Node ID"
+                  required
+                  :disabled="creatingMember"
+                />
+                <span v-if="isNodeSession" class="muted" style="font-size: 12px">
+                  仅可选择与你同 discovery_group 的 Node
+                  <template v-if="authGroups.length">（{{ authGroups.join(", ") }}）</template>
+                </span>
+              </label>
+            </div>
+
+            <fieldset class="wg-member-create__tools">
+              <legend>工具白名单</legend>
+              <label
+                v-for="t in MEMBER_TOOL_CHOICES"
+                :key="t"
+                class="wg-member-create__check"
+              >
+                <input
+                  type="checkbox"
+                  :checked="memberForm.tools.includes(t)"
+                  :disabled="creatingMember"
+                  @change="toggleMemberTool(t)"
+                />
+                {{ t }}
+              </label>
+            </fieldset>
+
+            <details class="wg-member-create__prompt">
+              <summary>高级：Prompt 侧车（可选）</summary>
+              <label class="field">
+                <span>Soul</span>
+                <textarea
+                  v-model="memberForm.soulMd"
+                  rows="3"
+                  placeholder="soul.md 正文（可空）"
+                  :disabled="creatingMember"
+                />
+              </label>
+              <label class="field">
+                <span>User</span>
+                <textarea
+                  v-model="memberForm.userMd"
+                  rows="2"
+                  placeholder="user.md 正文（可空）"
+                  :disabled="creatingMember"
+                />
+              </label>
+              <label class="field">
+                <span>Custom</span>
+                <textarea
+                  v-model="memberForm.customMd"
+                  rows="2"
+                  placeholder="custom.md 正文（可空）"
+                  :disabled="creatingMember"
+                />
+              </label>
+            </details>
+
+            <div class="wg-member-create__actions">
+              <button
+                type="button"
+                class="btn btn-ghost"
+                :disabled="creatingMember"
+                @click="cancelMemberForm"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                class="btn btn-primary"
+                :disabled="
+                  creatingMember ||
+                  !memberForm.displayName.trim() ||
+                  !memberForm.homeNodeId.trim()
+                "
+              >
+                {{ creatingMember ? "创建中…" : "创建成员" }}
+              </button>
+            </div>
+          </form>
+
+          <datalist id="wg-node-options">
+            <option v-for="nid in nodeOptions" :key="nid" :value="nid" />
+          </datalist>
 
           <div class="wg-member-config-list">
             <article
@@ -574,11 +972,12 @@ onMounted(async () => {
                   <p class="wg-member-config__id muted">{{ m.member_id }}</p>
                   <p v-if="m.hint" class="wg-member-config__hint muted">{{ m.hint }}</p>
                 </div>
-                <span class="wg-chat-rail__status" :data-status="m.status">
-                  {{ memberStatusLabel(m.status) }}
-                </span>
+                <div class="wg-member-config__head-right">
+                  <span class="wg-chat-rail__status" :data-status="m.status">
+                    {{ memberStatusLabel(m.status) }}
+                  </span>
+                </div>
               </header>
-
               <dl class="wg-settings-kv">
                 <div>
                   <dt>{{ m.kind === 'supervisor' ? '运行位置' : 'Home Node' }}</dt>
@@ -638,12 +1037,12 @@ onMounted(async () => {
             </article>
           </div>
 
-          <p v-if="sortedMembers.length === 0" class="muted wg-detail-section__empty">
-            除 Supervisor 外暂无 Agent 成员；可从 Agent 模板添加后再配置其私有项。
+          <p v-if="sortedMembers.length === 0 && !memberFormOpen" class="muted wg-detail-section__empty">
+            除 Supervisor 外暂无 Agent 成员；点击「新增成员」创建。
           </p>
 
           <p class="muted wg-detail-section__note">
-            Agent 成员的私有配置在线编辑（切换 LLM、工具白名单等）将在后续版本接入。
+            创建成员后会自动向 Home Node 下发配置；Agent 成员的私有配置在线编辑将在后续版本接入。
           </p>
         </section>
       </template>

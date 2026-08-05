@@ -55,14 +55,27 @@ export function parseGroupInput(raw) {
 }
 
 export async function saveAgentGroups(agentId, raw) {
-  const discovery_group = parseGroupInput(raw);
-  if (!discovery_group.length) {
-    throw new Error("???????discovery_group");
-  }
+  const discovery_group = typeof raw === "string" ? parseGroupInput(raw) : Array.isArray(raw) ? raw : [];
   return apiFetch(
     `/v1/registry/agents/${encodeURIComponent(agentId)}/groups`,
     {},
     { method: "PATCH", body: { discovery_group } },
+  );
+}
+
+export async function fetchDiscoveryGroups() {
+  return apiFetch("/v1/registry/discovery-groups");
+}
+
+export async function createDiscoveryGroup(name) {
+  return apiFetch("/v1/registry/discovery-groups", {}, { method: "POST", body: { name } });
+}
+
+export async function deleteDiscoveryGroup(name, { detachNodes = true } = {}) {
+  return apiFetch(
+    `/v1/registry/discovery-groups/${encodeURIComponent(name)}`,
+    { detach_nodes: detachNodes },
+    { method: "DELETE" },
   );
 }
 
@@ -289,12 +302,24 @@ export async function fetchWorkgroups(params = {}) {
   return apiFetch("/v1/workgroups", params);
 }
 
+export async function fetchWorkgroup(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}`);
+}
+
 export async function createWorkgroup(body) {
   return apiFetch("/v1/workgroups", {}, { method: "POST", body });
 }
 
 export async function patchWorkgroup(workgroupId, body) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}`, {}, { method: "PATCH", body });
+}
+
+export async function publishWorkgroup(workgroupId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/publish`,
+    {},
+    { method: "POST", body: {} },
+  );
 }
 
 export async function archiveWorkgroup(workgroupId) {
@@ -325,6 +350,22 @@ export async function fetchWorkgroupMemberSpec(workgroupId, memberId) {
 
 export async function fetchWorkgroupACL(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/acl`);
+}
+
+export async function patchWorkgroupACL(workgroupId, body) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/acl`,
+    {},
+    { method: "PATCH", body },
+  );
+}
+
+export async function createWorkgroupMember(workgroupId, body) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members`,
+    {},
+    { method: "POST", body },
+  );
 }
 
 export async function postWorkgroupMessage(workgroupId, body) {

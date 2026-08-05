@@ -206,44 +206,6 @@ func (c *ControlClient) GetWorkgroupMemberSpec(ctx context.Context, workgroupID,
 	return out, nil
 }
 
-// ListWorkgroupGrants 列出 Grant。
-func (c *ControlClient) ListWorkgroupGrants(ctx context.Context, workgroupID string) (jsonArray, error) {
-	var out jsonArray
-	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/grants"
-	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// InviteWorkgroupGrant 邀请 ExecutionGrant。
-func (c *ControlClient) InviteWorkgroupGrant(ctx context.Context, workgroupID, memberID string, tools []string) (map[string]any, error) {
-	body := map[string]any{"member_id": memberID}
-	if len(tools) > 0 {
-		body["tool_allow_names"] = tools
-	}
-	var out map[string]any
-	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/grants"
-	if err := c.doJSON(ctx, http.MethodPost, path, body, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// AcceptWorkgroupGrant home Node 接受 Grant（触发 Manage provision outbox）。
-func (c *ControlClient) AcceptWorkgroupGrant(ctx context.Context, workgroupID, grantID, digest string) (map[string]any, error) {
-	body := map[string]any{}
-	if strings.TrimSpace(digest) != "" {
-		body["member_spec_digest"] = digest
-	}
-	var out map[string]any
-	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/grants/" + strings.TrimSpace(grantID) + "/accept"
-	if err := c.doJSON(ctx, http.MethodPost, path, body, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ListWorkgroupHITL 列出 HITL（默认仅 pending）。
 func (c *ControlClient) ListWorkgroupHITL(ctx context.Context, workgroupID string, pendingOnly bool) (jsonArray, error) {
 	q := url.Values{}
