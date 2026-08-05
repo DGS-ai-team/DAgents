@@ -496,6 +496,14 @@ fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
             return;
         }
 
+        // 未完成首配时一律打开 /ui/ 并强制刷新，避免同 URL 仅聚焦导致看不到首配页。
+        let force_onboarding = shared.node_client.node_profile_incomplete();
+        let url_str = if force_onboarding {
+            shared.cfg.console_url()
+        } else {
+            url_str
+        };
+
         let url = match Url::parse(&url_str) {
             Ok(u) => u,
             Err(e) => {
@@ -513,7 +521,6 @@ fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
                     let Some(win) = app.get_webview_window(MAIN_WINDOW) else {
                         return Err("主窗口不存在".to_string());
                     };
-                    // 已在同源 /ui/ 时仅聚焦，避免无谓刷新。
                     let already_target = win
                         .url()
                         .ok()
@@ -524,7 +531,15 @@ fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
                                 && u.path() == url.path()
                         })
                         .unwrap_or(false);
-                    if !already_target {
+                    if force_onboarding {
+                        if already_target {
+                            // 同 URL 时 navigate 可能被忽略；强制 remount 以重新跑 App 首配门闩。
+                            win.eval("window.location.reload()")
+                                .map_err(|e| format!("刷新失败: {e}"))?;
+                        } else {
+                            win.navigate(url.clone()).map_err(|e| format!("导航失败: {e}"))?;
+                        }
+                    } else if !already_target {
                         win.navigate(url.clone()).map_err(|e| format!("导航失败: {e}"))?;
                     }
                     win.set_skip_taskbar(false)

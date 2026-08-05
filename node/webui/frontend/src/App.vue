@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { RouterView } from "vue-router";
 import ImageLightbox from "./components/ImageLightbox.vue";
 import FirstRunNodeProfile from "./views/FirstRunNodeProfile.vue";
@@ -11,14 +11,17 @@ const bootReady = ref(false);
 const needProfile = ref(false);
 const bootError = ref("");
 
-async function refreshOnboarding() {
-  bootError.value = "";
+async function refreshOnboarding({ soft = false } = {}) {
   try {
     const boot = await api.getUIBootstrap();
     needProfile.value = boot?.onboarding?.node_profile_completed === false;
+    bootError.value = "";
   } catch (e) {
-    bootError.value = e.message || "无法连接 Node";
-    needProfile.value = false;
+    // 启动竞态或短暂断连：不要把失败当成「已完成」而放行主界面。
+    // soft 刷新时保留当前 needProfile，仅在尚未就绪时展示错误。
+    if (!soft || !bootReady.value) {
+      bootError.value = e.message || "无法连接 Node";
+    }
   } finally {
     bootReady.value = true;
   }
@@ -26,17 +29,38 @@ async function refreshOnboarding() {
 
 function onProfileCompleted() {
   needProfile.value = false;
-  // 刷新一次，确保后续业务请求在服务端门闩放开后进入主界面
+  bootError.value = "";
   bootReady.value = true;
 }
 
-onMounted(refreshOnboarding);
+function onVisibility() {
+  if (document.visibilityState === "visible") {
+    void refreshOnboarding({ soft: true });
+  }
+}
+
+function onPageShow() {
+  void refreshOnboarding({ soft: true });
+}
+
+onMounted(() => {
+  void refreshOnboarding();
+  document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("pageshow", onPageShow);
+  window.addEventListener("focus", onPageShow);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("visibilitychange", onVisibility);
+  window.removeEventListener("pageshow", onPageShow);
+  window.removeEventListener("focus", onPageShow);
+});
 </script>
 
 <template>
   <div v-if="!bootReady" class="app-boot">加载中…</div>
-  <div v-else-if="bootError" class="app-boot app-boot--error">{{ bootError }}</div>
   <FirstRunNodeProfile v-else-if="needProfile" @completed="onProfileCompleted" />
+  <div v-else-if="bootError" class="app-boot app-boot--error">{{ bootError }}</div>
   <template v-else>
     <RouterView v-slot="{ Component }">
       <KeepAlive include="ChatLayout">
