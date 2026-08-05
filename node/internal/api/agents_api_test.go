@@ -134,7 +134,7 @@ func TestAgentTemplatesAPI_list(t *testing.T) {
 	cfg.ApplyDefaults()
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
-	_ = os.WriteFile(filepath.Join(userDir, "demo.yaml"), []byte("id: demo\ndisplay_name: Demo\nsandbox:\n  enabled: false\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(userDir, "demo.yaml"), []byte("id: demo\ndisplay_name: Demo\n"), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 	req := httptest.NewRequest(http.MethodGet, "/v1/agent-templates", nil)
@@ -323,7 +323,6 @@ func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
 		"id":           "my-custom",
 		"display_name": "自定义模板",
 		"description":  "测试",
-		"sandbox":      map[string]any{"enabled": false, "backend": "process"},
 		"defaults": map[string]any{
 			"tools": map[string]any{"enabled_groups": []string{"fs"}},
 		},

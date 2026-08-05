@@ -27,7 +27,7 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
-	_ = os.WriteFile(filepath.Join(userDir, "general.yaml"), []byte("id: general\ndisplay_name: G\nsandbox:\n  enabled: false\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(userDir, "general.yaml"), []byte("id: general\ndisplay_name: G\n"), 0o644)
 
 	reg, err := tools.NewRegistry(cfg.FSRoot, 30)
 	if err != nil {

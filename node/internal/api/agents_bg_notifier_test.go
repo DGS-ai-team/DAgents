@@ -43,12 +43,6 @@ display_name: Bash
 defaults:
   tools:
     enabled_groups: [fs, bash]
-sandbox:
-  enabled: true
-  backend: process
-  workspace_subdir: data
-  fs_root_isolation: true
-  allow_bash: true
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
