@@ -31,7 +31,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::WebviewWindowBuilder;
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WindowEvent};
@@ -59,7 +59,7 @@ struct Shared {
     blink_running: AtomicBool,
     last_err: Mutex<Option<String>>,
     status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
-    pending_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    pending_submenu: Mutex<Option<Submenu<tauri::Wry>>>,
     pending_slots: Mutex<Vec<MenuItem<tauri::Wry>>>,
     pending_session_ids: Mutex<Vec<String>>,
     update_item: Mutex<Option<MenuItem<tauri::Wry>>>,
@@ -149,7 +149,7 @@ pub fn run() {
         blink_running: AtomicBool::new(false),
         last_err: Mutex::new(None),
         status_item: Mutex::new(None),
-        pending_item: Mutex::new(None),
+        pending_submenu: Mutex::new(None),
         pending_slots: Mutex::new(Vec::new()),
         pending_session_ids: Mutex::new(vec![String::new(); MAX_PENDING_MENU_SLOTS]),
         update_item: Mutex::new(None),
@@ -186,19 +186,19 @@ pub fn run() {
 
                 let status =
                     MenuItem::with_id(app, "status", "状态：检测中…", false, None::<&str>)?;
-                let pending =
-                    MenuItem::with_id(app, "pending", "待办：无", false, None::<&str>)?;
+                // 待办项挂在子菜单下；空闲槽不加入菜单，避免顶层出现空白行（对齐 Go tray Hide）。
                 let mut pending_slots = Vec::with_capacity(MAX_PENDING_MENU_SLOTS);
                 for i in 0..MAX_PENDING_MENU_SLOTS {
                     let item = MenuItem::with_id(
                         app,
                         format!("pending_{i}"),
-                        " ",
+                        "打开…",
                         false,
                         None::<&str>,
                     )?;
                     pending_slots.push(item);
                 }
+                let pending = Submenu::with_id(app, "pending", "待办：无", false)?;
                 let open =
                     MenuItem::with_id(app, "open_console", "打开控制台", true, None::<&str>)?;
                 let open_manage =
@@ -219,7 +219,7 @@ pub fn run() {
                     *slot = Some(status.clone());
                 }
                 {
-                    let mut slot = shared.pending_item.lock().unwrap();
+                    let mut slot = shared.pending_submenu.lock().unwrap();
                     *slot = Some(pending.clone());
                 }
                 {
@@ -231,23 +231,20 @@ pub fn run() {
                     *slot = Some(update.clone());
                 }
 
-                let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
+                let items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
                     &status,
                     &pending,
+                    &sep1,
+                    &open,
+                    &open_manage,
+                    &update,
+                    &sep2,
+                    &start,
+                    &stop,
+                    &restart,
+                    &sep3,
+                    &quit,
                 ];
-                for item in &pending_slots {
-                    items.push(item);
-                }
-                items.push(&sep1);
-                items.push(&open);
-                items.push(&open_manage);
-                items.push(&update);
-                items.push(&sep2);
-                items.push(&start);
-                items.push(&stop);
-                items.push(&restart);
-                items.push(&sep3);
-                items.push(&quit);
                 let menu = Menu::with_items(app, &items)?;
 
                 let tray_shared = Arc::clone(&shared);
@@ -627,9 +624,7 @@ fn refresh_status(shared: &Shared) {
 }
 
 fn format_running(h: &Health) -> String {
-    if !h.node_id.is_empty() {
-        format!("状态：运行中 ({})", h.node_id)
-    } else if !h.version.is_empty() {
+    if !h.version.is_empty() {
         format!("状态：运行中 v{}", h.version)
     } else {
         "状态：运行中".into()
@@ -690,28 +685,28 @@ fn refresh_update_ui(shared: &Shared) {
 fn refresh_pending_ui(shared: &Arc<Shared>, app: &AppHandle) {
     let entries = shared.pending_store.entries();
     let summary = shared.pending_store.summary();
-    if let Ok(guard) = shared.pending_item.lock() {
-        if let Some(item) = guard.as_ref() {
-            if summary.session_count == 0 {
-                let _ = item.set_text("待办：无");
-                let _ = item.set_enabled(false);
-            } else {
-                let _ = item.set_text(format!("待办：{}", summary.label));
-                let _ = item.set_enabled(true);
-            }
-        }
-    }
 
-    if let Ok(slots) = shared.pending_slots.lock() {
+    let submenu = shared.pending_submenu.lock().ok().and_then(|g| g.clone());
+    let slots = shared.pending_slots.lock().ok().map(|g| g.clone());
+    if let (Some(submenu), Some(slots)) = (submenu, slots) {
+        for item in &slots {
+            let _ = submenu.remove(item);
+        }
+
         let mut ids = vec![String::new(); MAX_PENDING_MENU_SLOTS];
-        for (i, item) in slots.iter().enumerate() {
-            if let Some(entry) = entries.get(i) {
+        if summary.session_count == 0 {
+            let _ = submenu.set_text("待办：无");
+            let _ = submenu.set_enabled(false);
+        } else {
+            let _ = submenu.set_text(format!("待办：{}", summary.label));
+            let _ = submenu.set_enabled(true);
+            let limit = entries.len().min(MAX_PENDING_MENU_SLOTS);
+            for i in 0..limit {
+                let entry = &entries[i];
                 ids[i] = entry.session_id.clone();
-                let _ = item.set_text(format!("打开 · {}", entry.summary_label()));
-                let _ = item.set_enabled(true);
-            } else {
-                let _ = item.set_text(" ");
-                let _ = item.set_enabled(false);
+                let _ = slots[i].set_text(format!("打开 · {}", entry.summary_label()));
+                let _ = slots[i].set_enabled(true);
+                let _ = submenu.append(&slots[i]);
             }
         }
         if let Ok(mut guard) = shared.pending_session_ids.lock() {
@@ -751,12 +746,11 @@ fn refresh_tooltip(shared: &Shared, app: &AppHandle) {
     }
     match nodectl::probe(&shared.cfg) {
         Ok(h) if h.ok => {
-            let node = if !h.node_id.is_empty() {
-                h.node_id
+            if h.version.is_empty() {
+                tooltip.push_str("\nNode 运行中");
             } else {
-                "…".into()
-            };
-            tooltip.push_str(&format!("\nNode 运行中 · {node} · {}", h.version));
+                tooltip.push_str(&format!("\nNode 运行中 · v{}", h.version));
+            }
         }
         _ => {
             let err = shared
