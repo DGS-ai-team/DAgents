@@ -29,12 +29,6 @@ func (t *Template) Normalize() {
 	t.ID = strings.TrimSpace(t.ID)
 	t.DisplayName = strings.TrimSpace(t.DisplayName)
 	t.Description = strings.TrimSpace(t.Description)
-	if strings.TrimSpace(t.Sandbox.Backend) == "" {
-		t.Sandbox.Backend = "process"
-	}
-	if strings.TrimSpace(t.Sandbox.WorkspaceSubdir) == "" {
-		t.Sandbox.WorkspaceSubdir = "data"
-	}
 	if t.Version <= 0 {
 		t.Version = 1
 	}

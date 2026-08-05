@@ -18,23 +18,14 @@ func TestLoader_listAndOverride(t *testing.T) {
 	write(builtin, "general.yaml", `
 id: general
 display_name: 通用助手
-sandbox:
-  enabled: false
-  backend: process
 `)
 	write(builtin, "ops.yaml", `
 id: ops-runner
 display_name: 运维
-sandbox:
-  enabled: true
 `)
 	write(user, "ops-runner.yaml", `
 id: ops-runner
 display_name: 运维（覆盖）
-sandbox:
-  enabled: true
-  backend: docker
-  image: dagents-sandbox:latest
 `)
 
 	l := NewLoader(builtin, user)
@@ -49,7 +40,7 @@ sandbox:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ops.DisplayName != "运维（覆盖）" || ops.Sandbox.Backend != "docker" {
+	if ops.DisplayName != "运维（覆盖）" {
 		t.Fatalf("ops = %+v", ops)
 	}
 	if _, err := l.Get("missing"); err == nil {
@@ -75,7 +66,7 @@ func TestLoader_builtinPackagingTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.Sandbox.Enabled {
-		t.Fatal("general should not enable sandbox by default")
+	if g.DisplayName == "" {
+		t.Fatal("general display_name empty")
 	}
 }

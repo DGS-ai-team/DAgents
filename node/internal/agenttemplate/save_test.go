@@ -13,7 +13,6 @@ func TestSaveUser_andDeleteUser(t *testing.T) {
 		DisplayName: "运维",
 		Description: "test",
 		Defaults:    map[string]any{"tools": map[string]any{"enabled_groups": []any{"fs"}}},
-		Sandbox:     SandboxConfig{Backend: "process"},
 	}
 	if err := SaveUser(dir, tpl); err != nil {
 		t.Fatal(err)

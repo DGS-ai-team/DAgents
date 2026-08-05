@@ -4,7 +4,6 @@ package agentruntime
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
@@ -12,29 +11,12 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// SandboxSpec 来自模板/实例快照的沙箱字段。
-// Backend：未启用时为 process（宿主机）；启用时为 docker。
-// RemoteEndpoint/RemoteAPIKey 仅兼容旧快照反序列化，新产品路径不再写入。
-type SandboxSpec struct {
-	Enabled           bool   `json:"enabled"`
-	Backend           string `json:"backend"`
-	WorkspaceSubdir   string `json:"workspace_subdir"`
-	FSRootIsolation   bool   `json:"fs_root_isolation"`
-	AllowBash         bool   `json:"allow_bash"`
-	AllowNetworkTools bool   `json:"allow_network_tools"`
-	Image             string `json:"image,omitempty"`
-	Network           string `json:"network,omitempty"`
-	Memory            string `json:"memory,omitempty"`
-	CPUs              string `json:"cpus,omitempty"`
-	RemoteEndpoint    string `json:"remote_endpoint,omitempty"`
-	RemoteAPIKey      string `json:"remote_api_key,omitempty"`
-}
-
 // Snapshot 为 agents.config_snapshot_json 的解析视图。
+// 历史字段 sandbox 仍可反序列化，但运行时一律忽略。
 type Snapshot struct {
 	TemplateID string         `json:"template_id"`
 	Defaults   map[string]any `json:"defaults"`
-	Sandbox    SandboxSpec    `json:"sandbox"`
+	Sandbox    json.RawMessage `json:"sandbox,omitempty"`
 }
 
 // ParseSnapshot 解析 config_snapshot JSON。
@@ -46,29 +28,12 @@ func ParseSnapshot(raw json.RawMessage) (Snapshot, error) {
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		return Snapshot{}, fmt.Errorf("parse agent config snapshot: %w", err)
 	}
-	if strings.TrimSpace(snap.Sandbox.Backend) == "" {
-		snap.Sandbox.Backend = "process"
-	}
-	if strings.TrimSpace(snap.Sandbox.WorkspaceSubdir) == "" {
-		snap.Sandbox.WorkspaceSubdir = "data"
-	}
 	return snap, nil
 }
 
-// EffectiveFSRoot 返回该 Agent 的工具工作区根。
-// 沙箱且 fs_root_isolation 时：<node_fs_root>/agents/<agent_id>/<workspace_subdir>
-// 否则：Node 全局 fs_root。
-func EffectiveFSRoot(nodeFSRoot, agentID string, snap Snapshot) string {
-	nodeFSRoot = strings.TrimSpace(nodeFSRoot)
-	agentID = strings.TrimSpace(agentID)
-	if !snap.Sandbox.Enabled || !snap.Sandbox.FSRootIsolation || agentID == "" {
-		return nodeFSRoot
-	}
-	sub := strings.TrimSpace(snap.Sandbox.WorkspaceSubdir)
-	if sub == "" {
-		sub = "data"
-	}
-	return filepath.Join(nodeFSRoot, "agents", agentID, sub)
+// EffectiveFSRoot 返回该 Agent 的工具工作区根（始终为 Node 全局 fs_root）。
+func EffectiveFSRoot(nodeFSRoot, _agentID string, _snap Snapshot) string {
+	return strings.TrimSpace(nodeFSRoot)
 }
 
 // EnabledToolGroups 从 defaults.tools.enabled_groups 读取；无则 nil（表示沿用 Node 默认）。
@@ -104,38 +69,6 @@ func EnabledToolGroups(snap Snapshot) []string {
 	default:
 		return nil
 	}
-}
-
-// ApplySandboxToolConstraints 按沙箱约束收紧工具组。
-// - allow_bash=false：去掉 bash
-// - allow_network_tools=false：去掉 browser
-func ApplySandboxToolConstraints(groups []string, snap Snapshot) []string {
-	if !snap.Sandbox.Enabled {
-		return groups
-	}
-	deny := map[string]struct{}{}
-	if !snap.Sandbox.AllowBash {
-		deny["bash"] = struct{}{}
-	}
-	if !snap.Sandbox.AllowNetworkTools {
-		deny["browser"] = struct{}{}
-	}
-	if len(deny) == 0 {
-		return groups
-	}
-	// groups==nil 表示「全部」；需展开为全集再过滤。
-	src := groups
-	if len(src) == 0 {
-		src = config.AllBuiltinToolGroupNames()
-	}
-	out := make([]string, 0, len(src))
-	for _, g := range src {
-		if _, blocked := deny[strings.ToLower(strings.TrimSpace(g))]; blocked {
-			continue
-		}
-		out = append(out, g)
-	}
-	return out
 }
 
 // MultimodalEnabledFromDefaults 读取 defaults.llm.profiles[active].multimodal_enabled 或顶层 multimodal。

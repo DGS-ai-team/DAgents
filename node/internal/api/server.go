@@ -24,7 +24,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
-	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -61,7 +60,6 @@ type Server struct {
 	tools           *tools.Registry
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
-	sandboxPool     *sandbox.Pool
 	workgroupWorker *workgroup.Worker
 	workgroupDialer *workgroup.Dialer
 
@@ -266,11 +264,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		},
 		MultimodalEnabled: cfg.MultimodalEnabled(),
 	}, logger)
-	sandboxPool := sandbox.NewPool(sandbox.DefaultIdleTimeout, logger)
-	sandboxPool.StartIdleReaper(time.Minute)
-	mgr.OnReleased = func(sessionID string) {
-		sandboxPool.Release(sessionID)
-	}
 	childMgr := childagent.NewManager(childagent.Config{
 		Enabled:                   cfg.ChildAgents.Enabled,
 		DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
@@ -398,7 +391,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		tools:           o.tools,
 		browserMgr:      browserMgr,
 		mediaRegister:   mediaRegister,
-		sandboxPool:     sandboxPool,
 		workgroupWorker: wgWorker,
 		workgroupDialer: wgDialer,
 	}
