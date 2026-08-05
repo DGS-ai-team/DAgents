@@ -31,16 +31,7 @@ function agentHostTitle(agent) {
 }
 
 const sortedAgents = computed(() => {
-  const currentId = String(agentStore.agentId || "").trim();
-  return [...agents.value].sort((a, b) => {
-    const aId = agentRecordId(a);
-    const bId = agentRecordId(b);
-    const aCurrent = currentId && aId === currentId;
-    const bCurrent = currentId && bId === currentId;
-    if (aCurrent && !bCurrent) return -1;
-    if (!aCurrent && bCurrent) return 1;
-    return agentSortTime(b) - agentSortTime(a);
-  });
+  return [...agents.value].sort((a, b) => agentSortTime(b) - agentSortTime(a));
 });
 
 async function refresh() {
