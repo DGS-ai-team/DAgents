@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref, onMounted } from "vue";
 import * as api from "../api/node.js";
+import { setTheme, themeStore } from "../stores/theme.js";
 
 const PROVIDER_PRESETS = {
   deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-chat" },
@@ -12,13 +13,19 @@ const PROVIDER_PRESETS = {
 
 const ALLOWED_PROVIDERS = new Set(["deepseek", "openai", "qwen", "vllm", "mock"]);
 
+const THEME_OPTIONS = [
+  { id: "light", title: "浅色" },
+  { id: "dark", title: "深色" },
+  { id: "system", title: "跟随系统" },
+];
+
 const emit = defineEmits(["completed"]);
 
 const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
-/** @type {import('vue').Ref<'identity' | 'llm'>} */
-const step = ref("identity");
+/** @type {import('vue').Ref<'theme' | 'identity' | 'llm'>} */
+const step = ref("theme");
 
 const preferredName = ref("");
 const nodeName = ref("");
@@ -41,6 +48,24 @@ const probeState = reactive({
 });
 const probedModels = ref(/** @type {string[]} */ ([]));
 const modelManual = ref(false);
+
+const stepIndex = computed(() => {
+  if (step.value === "theme") return 1;
+  if (step.value === "identity") return 2;
+  return 3;
+});
+
+const stepTitle = computed(() => {
+  if (step.value === "theme") return "选择主题";
+  if (step.value === "identity") return "Node 身份";
+  return "配置模型";
+});
+
+const stepLead = computed(() => {
+  if (step.value === "theme") return "先选择界面外观，可随时在侧栏再次切换。";
+  if (step.value === "identity") return "告诉我们怎么称呼你，以及这台 Node 的名称。";
+  return "再添加一条 LLM 配置，完成后即可使用本机功能。";
+});
 
 const canNextIdentity = computed(() => {
   return preferredName.value.trim().length > 0 && nodeName.value.trim().length > 0 && !saving.value;
@@ -105,6 +130,10 @@ onMounted(async () => {
   }
 });
 
+function chooseTheme(mode) {
+  setTheme(mode);
+}
+
 function applyProviderPreset() {
   const preset = PROVIDER_PRESETS[llm.provider];
   if (!preset) return;
@@ -132,6 +161,11 @@ function onMockToggle() {
     llm.provider = "deepseek";
     applyProviderPreset();
   }
+}
+
+function goTheme() {
+  error.value = "";
+  step.value = "theme";
 }
 
 function goIdentity() {
@@ -228,24 +262,56 @@ async function submit() {
 
 <template>
   <div class="first-run">
-    <div class="first-run__glow" aria-hidden="true" />
-    <div class="first-run__panel" :class="{ 'first-run__panel--wide': step === 'llm' }">
-      <p class="first-run__brand">DAgents</p>
-      <p class="first-run__step">{{ step === "identity" ? "1 / 2" : "2 / 2" }}</p>
-      <h1 class="first-run__title">{{ step === "identity" ? "开始使用" : "配置模型" }}</h1>
-      <p class="first-run__lead">
-        <template v-if="step === 'identity'">先告诉我们怎么称呼你，以及这台 Node 的名称。</template>
-        <template v-else>再添加一条 LLM 配置，完成后即可使用本机功能。</template>
-      </p>
+    <section class="first-run__card panel" :class="{ 'first-run__card--wide': step === 'llm' }">
+      <header class="first-run__header">
+        <div class="first-run__brand-row">
+          <span class="first-run__brand">DAgents</span>
+          <span class="pill">{{ stepIndex }} / 3</span>
+        </div>
+        <h1 class="first-run__title">{{ stepTitle }}</h1>
+        <p class="first-run__lead">{{ stepLead }}</p>
+      </header>
 
-      <div v-if="loading" class="first-run__hint">加载中…</div>
+      <div v-if="loading" class="first-run__body">
+        <p class="setup-config-panel__hint">加载中…</p>
+      </div>
 
-      <form v-else-if="step === 'identity'" class="first-run__form" @submit.prevent="goLLM">
-        <label class="first-run__field">
-          <span class="first-run__label">怎么称呼你</span>
+      <!-- Step 1: theme -->
+      <div v-else-if="step === 'theme'" class="first-run__body">
+        <div class="first-run__theme-row" role="radiogroup" aria-label="主题">
+          <button
+            v-for="opt in THEME_OPTIONS"
+            :key="opt.id"
+            type="button"
+            class="first-run__theme-item"
+            role="radio"
+            :aria-checked="themeStore.mode === opt.id"
+            :class="{ 'first-run__theme-item--active': themeStore.mode === opt.id }"
+            @click="chooseTheme(opt.id)"
+          >
+            <span
+              class="first-run__theme-dot"
+              :data-theme-dot="opt.id"
+              aria-hidden="true"
+            />
+            <span class="first-run__theme-label">{{ opt.title }}</span>
+          </button>
+        </div>
+        <p v-if="error" class="first-run__error">{{ error }}</p>
+        <div class="first-run__actions">
+          <button type="button" class="btn btn--primary first-run__actions-grow" @click="goIdentity">
+            下一步
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2: identity -->
+      <form v-else-if="step === 'identity'" class="first-run__body" @submit.prevent="goLLM">
+        <label class="settings-field">
+          <span class="settings-field__label">怎么称呼你</span>
           <input
             v-model="preferredName"
-            class="first-run__input"
+            class="settings-field__input"
             type="text"
             maxlength="64"
             placeholder="例如：小明"
@@ -253,11 +319,11 @@ async function submit() {
             autofocus
           />
         </label>
-        <label class="first-run__field">
-          <span class="first-run__label">Node 名称</span>
+        <label class="settings-field">
+          <span class="settings-field__label">Node 名称</span>
           <input
             v-model="nodeName"
-            class="first-run__input"
+            class="settings-field__input"
             type="text"
             maxlength="64"
             placeholder="注册到 Manage 后的展示名"
@@ -265,17 +331,23 @@ async function submit() {
           />
         </label>
         <p v-if="error" class="first-run__error">{{ error }}</p>
-        <button class="first-run__cta" type="submit" :disabled="!canNextIdentity">下一步</button>
+        <div class="first-run__actions">
+          <button type="button" class="btn btn--ghost" @click="goTheme">上一步</button>
+          <button type="submit" class="btn btn--primary first-run__actions-grow" :disabled="!canNextIdentity">
+            下一步
+          </button>
+        </div>
       </form>
 
-      <form v-else class="first-run__form" @submit.prevent="submit">
-        <label class="first-run__field">
-          <span class="first-run__label">配置名称</span>
-          <input v-model="llm.id" class="first-run__input" type="text" placeholder="如 DeepSeek / 默认" autocomplete="off" />
+      <!-- Step 3: LLM -->
+      <form v-else class="first-run__body" @submit.prevent="submit">
+        <label class="settings-field">
+          <span class="settings-field__label">配置名称</span>
+          <input v-model="llm.id" class="settings-field__input" type="text" placeholder="如 DeepSeek / 默认" autocomplete="off" />
         </label>
-        <label class="first-run__field">
-          <span class="first-run__label">Provider</span>
-          <select v-model="llm.provider" class="first-run__input" @change="applyProviderPreset">
+        <label class="settings-field">
+          <span class="settings-field__label">Provider</span>
+          <select v-model="llm.provider" class="settings-field__input" @change="applyProviderPreset">
             <option value="deepseek">DeepSeek</option>
             <option value="openai">OpenAI</option>
             <option value="qwen">Qwen</option>
@@ -283,21 +355,21 @@ async function submit() {
             <option value="mock">Mock（测试）</option>
           </select>
         </label>
-        <label class="first-run__field">
-          <span class="first-run__label">Base URL</span>
+        <label class="settings-field">
+          <span class="settings-field__label">Base URL</span>
           <input
             v-model="llm.base_url"
-            class="first-run__input"
+            class="settings-field__input"
             type="text"
             autocomplete="off"
             :disabled="llm.mock || llm.provider === 'mock'"
           />
         </label>
-        <label class="first-run__field">
-          <span class="first-run__label">API Key（可留空）</span>
+        <label class="settings-field">
+          <span class="settings-field__label">API Key（可留空）</span>
           <input
             v-model="llm.api_key"
-            class="first-run__input"
+            class="settings-field__input"
             type="password"
             autocomplete="new-password"
             placeholder="可选"
@@ -308,7 +380,7 @@ async function submit() {
         <div class="first-run__probe">
           <button
             type="button"
-            class="first-run__secondary"
+            class="btn btn--ghost btn--sm"
             :disabled="probeState.loading || !canProbe"
             @click="runProbe"
           >
@@ -323,15 +395,15 @@ async function submit() {
           </p>
         </div>
 
-        <label class="first-run__field">
-          <span class="first-run__label">Model</span>
-          <select v-if="useModelSelect" v-model="llm.model" class="first-run__input">
+        <label class="settings-field">
+          <span class="settings-field__label">Model</span>
+          <select v-if="useModelSelect" v-model="llm.model" class="settings-field__input">
             <option v-for="m in probedModels" :key="m" :value="m">{{ m }}</option>
           </select>
           <input
             v-else
             v-model="llm.model"
-            class="first-run__input"
+            class="settings-field__input"
             type="text"
             autocomplete="off"
             placeholder="模型名称"
@@ -340,27 +412,27 @@ async function submit() {
           <button
             v-if="probedModels.length"
             type="button"
-            class="first-run__link"
+            class="first-run__text-btn"
             @click="modelManual = !modelManual"
           >
             {{ modelManual ? "改用下拉选择" : "改用手动输入" }}
           </button>
         </label>
 
-        <label class="first-run__toggle">
+        <label class="settings-toggle">
           <input v-model="llm.mock" type="checkbox" @change="onMockToggle" />
           <span>Mock 模式（无 Key 冒烟）</span>
         </label>
 
         <p v-if="error" class="first-run__error">{{ error }}</p>
         <div class="first-run__actions">
-          <button type="button" class="first-run__secondary" :disabled="saving" @click="goIdentity">上一步</button>
-          <button class="first-run__cta first-run__cta--grow" type="submit" :disabled="!canSubmitLLM">
+          <button type="button" class="btn btn--ghost" :disabled="saving" @click="goIdentity">上一步</button>
+          <button type="submit" class="btn btn--primary first-run__actions-grow" :disabled="!canSubmitLLM">
             {{ saving ? "保存中…" : "开始使用" }}
           </button>
         </div>
       </form>
-    </div>
+    </section>
   </div>
 </template>
 
@@ -370,101 +442,124 @@ async function submit() {
   display: grid;
   place-items: center;
   padding: var(--space-6);
-  position: relative;
-  overflow: hidden;
-  background:
-    radial-gradient(1200px 600px at 12% -10%, rgba(0, 120, 212, 0.22), transparent 55%),
-    radial-gradient(900px 500px at 90% 110%, rgba(96, 205, 255, 0.12), transparent 50%),
-    linear-gradient(160deg, #1a1a1a 0%, #202020 45%, #181818 100%);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-ui);
 }
 
-.first-run__glow {
-  position: absolute;
-  inset: auto auto 18% 50%;
-  width: 42rem;
-  height: 42rem;
-  transform: translateX(-50%);
-  background: radial-gradient(circle, rgba(0, 120, 212, 0.14), transparent 65%);
-  pointer-events: none;
-  animation: first-run-pulse 6s ease-in-out infinite;
+.first-run__card {
+  width: min(440px, 100%);
+  padding: 0;
 }
 
-.first-run__panel {
-  width: min(420px, 100%);
-  position: relative;
-  z-index: 1;
-  animation: first-run-rise 0.55s ease-out both;
-}
-
-.first-run__panel--wide {
+.first-run__card--wide {
   width: min(520px, 100%);
 }
 
-.first-run__brand {
-  margin: 0 0 var(--space-2);
-  font-size: 1.75rem;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  color: var(--color-text);
+.first-run__header {
+  padding: 20px 20px 0;
 }
 
-.first-run__step {
-  margin: 0 0 var(--space-2);
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
-  color: var(--color-text-subtle);
+.first-run__brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.first-run__brand {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--color-text);
 }
 
 .first-run__title {
   margin: 0 0 var(--space-2);
-  font-size: 1.125rem;
+  font-size: 16px;
   font-weight: 600;
-  color: var(--color-text-muted);
+  color: var(--color-text);
 }
 
 .first-run__lead {
-  margin: 0 0 var(--space-6);
-  color: var(--color-text-subtle);
-  line-height: 1.55;
-}
-
-.first-run__form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.first-run__field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.first-run__label {
-  font-size: 0.8125rem;
+  margin: 0 0 var(--space-4);
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--color-text-muted);
 }
 
-.first-run__input {
-  height: 40px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-input);
-  color: var(--color-text);
+.first-run__body {
+  padding: 4px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.first-run__theme-row {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 28px;
+  margin: 8px 0 16px;
+  padding: 8px 0;
+}
+
+.first-run__theme-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 72px;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
   font: inherit;
-  outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.first-run__input:focus {
+.first-run__theme-dot {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.first-run__theme-item:hover .first-run__theme-dot {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 1px var(--color-primary-soft);
+  transform: scale(1.06);
 }
 
-.first-run__input:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+.first-run__theme-item--active .first-run__theme-dot {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+.first-run__theme-dot[data-theme-dot="light"] {
+  background: #f3f3f3;
+}
+
+.first-run__theme-dot[data-theme-dot="dark"] {
+  background: #202020;
+}
+
+.first-run__theme-dot[data-theme-dot="system"] {
+  background: linear-gradient(135deg, #f3f3f3 50%, #202020 50%);
+}
+
+.first-run__theme-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  transition: color 0.15s ease;
+}
+
+.first-run__theme-item--active .first-run__theme-label {
+  color: var(--color-text);
+  font-weight: 600;
 }
 
 .first-run__probe {
@@ -472,11 +567,12 @@ async function submit() {
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
+  margin-top: 8px;
 }
 
 .first-run__probe-msg {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: 12px;
   color: var(--color-warning);
   line-height: 1.4;
 }
@@ -485,121 +581,50 @@ async function submit() {
   color: var(--color-text-muted);
 }
 
-.first-run__link {
+.first-run__text-btn {
   align-self: flex-start;
-  margin-top: 2px;
+  margin-top: 4px;
   border: 0;
   padding: 0;
   background: transparent;
   color: var(--color-primary);
-  font-size: 0.75rem;
+  font-size: 12px;
   cursor: pointer;
-}
-
-.first-run__toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 0.875rem;
-  color: var(--color-text-muted);
 }
 
 .first-run__actions {
   display: flex;
-  gap: var(--space-3);
-  margin-top: var(--space-2);
+  gap: 8px;
+  margin-top: 16px;
 }
 
-.first-run__cta {
-  margin-top: var(--space-2);
-  height: 40px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--color-primary);
-  color: #fff;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
-}
-
-.first-run__actions .first-run__cta {
-  margin-top: 0;
-}
-
-.first-run__cta--grow {
+.first-run__actions-grow {
   flex: 1;
 }
 
-.first-run__cta:hover:not(:disabled) {
-  background: var(--color-primary-strong);
-  transform: translateY(-1px);
-}
-
-.first-run__cta:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.first-run__secondary {
-  height: 40px;
-  padding: 0 var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-muted);
-  font: inherit;
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
-}
-
-.first-run__secondary:hover:not(:disabled) {
-  border-color: var(--color-border-strong);
-  color: var(--color-text);
-}
-
-.first-run__secondary:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 .first-run__error {
-  margin: 0;
+  margin: 8px 0 0;
   color: var(--color-danger);
-  font-size: 0.875rem;
+  font-size: 13px;
 }
 
-.first-run__hint {
-  color: var(--color-text-subtle);
+.first-run__body :deep(.settings-field) {
+  margin-top: 10px;
 }
 
-@keyframes first-run-rise {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.first-run__body :deep(.settings-field__input) {
+  max-width: none;
+  background: var(--color-input);
 }
 
-@keyframes first-run-pulse {
-  0%,
-  100% {
-    opacity: 0.7;
-    transform: translateX(-50%) scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: translateX(-50%) scale(1.06);
-  }
+.first-run__body :deep(.settings-toggle) {
+  margin-top: 12px;
 }
 
 @media (max-width: 520px) {
   .first-run {
     place-items: start center;
-    padding-top: 12vh;
+    padding-top: 10vh;
   }
 }
 </style>

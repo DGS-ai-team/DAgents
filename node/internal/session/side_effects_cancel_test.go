@@ -59,8 +59,7 @@ func TestCancelRecoverySchedulesContinueWhenBufferReady(t *testing.T) {
 	if mgr.CancelTurn(sess.ID) {
 		t.Fatal("idle cancel should return false")
 	}
-	waitSideEffectContinueScheduled(t, rt, 2*time.Second)
-	waitQueueDrain(t, rt, 5*time.Second)
+	waitCancelRecoveryContinue(t, rt, "job-1", 5*time.Second)
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
@@ -222,14 +221,26 @@ func TestHumanMessagePreemptAppliesBufferedSideEffects(t *testing.T) {
 	}
 }
 
-func waitSideEffectContinueScheduled(t *testing.T, rt *runtime, timeout time.Duration) {
+// waitCancelRecoveryContinue 等待 cancel 恢复路径：side_effect_continue 入队或旁路已 apply 完成。
+// continue 可能在两次轮询之间被 consumer 立即处理，不能仅靠队列深度观测。
+func waitCancelRecoveryContinue(t *testing.T, rt *runtime, jobID string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
-	for sideEffectContinueDepth(rt) == 0 {
+	for {
+		if sideEffectContinueDepth(rt) > 0 {
+			waitQueueDrain(t, rt, timeout)
+			return
+		}
+		rt.mu.Lock()
+		recovered := !rt.sideEffects.HasReady() && historyContainsJobID(rt.messages, jobID)
+		rt.mu.Unlock()
+		if recovered {
+			return
+		}
 		select {
 		case <-deadline:
-			t.Fatal("timeout waiting for side_effect_continue enqueue")
-		case <-time.After(10 * time.Millisecond):
+			t.Fatal("timeout waiting for cancel recovery continue")
+		case <-time.After(5 * time.Millisecond):
 		}
 	}
 }
