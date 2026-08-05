@@ -1,12 +1,12 @@
 id: ops-runner
 display_name: 运维执行助手
-description: 沙箱内执行脚本与文件操作，适合受控运维任务
+description: 执行脚本与文件操作，适合受控运维任务
 version: 1
 
 defaults:
   agent:
     role: ops
-    description: 在隔离工作区内执行运维与自动化任务
+    description: 执行运维与自动化任务
   llm:
     active: default
     profiles:
@@ -22,17 +22,3 @@ defaults:
     enabled: true
   child_agents:
     enabled: true
-
-sandbox:
-  enabled: true
-  backend: process
-  # 具备 Docker 时可改为：
-  # backend: docker
-  # image: dagents-sandbox:latest
-  # network: none
-  # memory: 512m
-  # cpus: "1.0"
-  workspace_subdir: data
-  fs_root_isolation: true
-  allow_bash: true
-  allow_network_tools: false

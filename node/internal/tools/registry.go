@@ -9,12 +9,11 @@ import (
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
-	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 )
 
-// Registry 注册内置工具并在 FS_ROOT 沙箱内执行。
+// Registry 注册内置工具并在 FS_ROOT 内执行。
 type Registry struct {
 	fsRoot              string
 	bashTimeout         int
@@ -42,7 +41,6 @@ type Registry struct {
 	mediaMu             sync.Mutex
 	mediaRegister       MediaRegisterFunc
 	toolResultMedia     map[string][]map[string]any
-	dockerSandbox       *sandbox.DockerRunner
 }
 
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。

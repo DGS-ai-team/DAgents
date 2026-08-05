@@ -1,6 +1,6 @@
 <script setup>
 /**
- * Agent 设置表单：基础信息 + 可展开的高级设置（工具 / 沙箱 / 侧车）。
+ * Agent 设置表单：基础信息 + 可展开的高级设置（工具 / 侧车）。
  * 创建与设置页共用。
  */
 import { computed, onMounted, ref, watch } from "vue";
@@ -132,29 +132,6 @@ function removeLongTermEntry(index) {
   list.splice(index, 1);
   activeLongTermEntries.value = list;
 }
-
-/** 启用沙箱时若仍是历史 process，改为本机 Docker；关闭时保持 process 语义给 payload。 */
-watch(
-  () => props.draft.sandboxEnabled,
-  (enabled) => {
-    if (!enabled) return;
-    const backend = String(props.draft.sandboxBackend || "").trim();
-    if (!backend || backend === "process") {
-      props.draft.sandboxBackend = "docker";
-      props.draft.fsRootIsolation = true;
-    }
-  },
-);
-
-watch(
-  () => props.draft.sandboxBackend,
-  (backend) => {
-    if (!props.draft.sandboxEnabled) return;
-    if (backend === "docker") {
-      props.draft.fsRootIsolation = true;
-    }
-  },
-);
 </script>
 
 <template>
@@ -179,43 +156,6 @@ watch(
         </select>
       </label>
       <p v-if="!llmProfiles.length" class="agent-settings-hint">请先在「设置 › 连接」中添加 LLM 配置</p>
-      <label class="agent-settings-check">
-        <input v-model="draft.sandboxEnabled" type="checkbox" />
-        <span>启用沙箱</span>
-      </label>
-      <p class="agent-settings-hint">
-        关闭：在宿主机运行，由工具组与策略约束保证安全。开启：在隔离环境中执行，需选择沙箱模式并配置参数。
-      </p>
-      <template v-if="draft.sandboxEnabled">
-        <p class="agent-settings-hint">
-          沙箱模式：本机 Docker（Linux 容器）。需安装 Docker；命令行在容器内执行。镜像见 packaging/sandbox。
-        </p>
-        <label class="agent-settings-field">
-          <span>镜像</span>
-          <input v-model="draft.sandboxImage" type="text" class="agent-settings-input" placeholder="dagents-sandbox:latest" />
-        </label>
-        <label class="agent-settings-field">
-          <span>网络</span>
-          <input v-model="draft.sandboxNetwork" type="text" class="agent-settings-input" placeholder="none" />
-        </label>
-        <label class="agent-settings-field">
-          <span>内存上限</span>
-          <input v-model="draft.sandboxMemory" type="text" class="agent-settings-input" placeholder="512m（可选）" />
-        </label>
-        <label class="agent-settings-field">
-          <span>CPU 上限</span>
-          <input v-model="draft.sandboxCpus" type="text" class="agent-settings-input" placeholder="1.0（可选）" />
-        </label>
-        <label class="agent-settings-check">
-          <input v-model="draft.allowBash" type="checkbox" />
-          <span>允许命令行工具</span>
-        </label>
-        <label class="agent-settings-check">
-          <input v-model="draft.allowNetworkTools" type="checkbox" />
-          <span>允许网络类工具（浏览器）</span>
-        </label>
-        <p class="agent-settings-hint">隔离工作区在启用 Docker 沙箱时强制开启（agents/&lt;id&gt;/data）。</p>
-      </template>
     </section>
 
     <div class="agent-settings-advanced-toggle">
@@ -227,7 +167,7 @@ watch(
     <div v-if="advancedOpen" class="agent-settings-advanced">
       <section class="agent-settings-section">
         <h3 class="agent-settings-section__title">工具组</h3>
-        <p class="agent-settings-hint">本 Agent 可用的内置工具组。不勾选表示不额外收窄（由运行时按沙箱等约束决定）。</p>
+        <p class="agent-settings-hint">本 Agent 可用的内置工具组。不勾选表示不额外收窄。</p>
         <div class="agent-settings-toggles">
           <label v-for="g in TOOL_GROUPS" :key="g.name" class="agent-settings-check">
             <input

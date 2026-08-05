@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
@@ -31,8 +30,7 @@ type Built struct {
 	ToolGroups  []string
 }
 
-// Build 根据快照构造 effective FSRoot、收紧后的工具组与独立 Registry。
-// backend=docker 且 enabled 时注入 DockerRunner（bash_run 进容器）；调用方应先 RequireDocker。
+// Build 根据快照构造 effective FSRoot、工具组与独立 Registry。
 func Build(p BuildParams) (Built, error) {
 	if p.NodeCFG == nil {
 		return Built{}, fmt.Errorf("node config required")
@@ -42,7 +40,6 @@ func Build(p BuildParams) (Built, error) {
 	if len(groups) == 0 {
 		groups = p.NodeCFG.Tools.NormalizedBuiltinEnabledGroups()
 	}
-	groups = ApplySandboxToolConstraints(groups, p.Snapshot)
 
 	timeout := p.BashTimeout
 	if timeout <= 0 {
@@ -73,10 +70,6 @@ func Build(p BuildParams) (Built, error) {
 	// 技能能力仅由 Node 总闸 + 工具组 skills 决定；visible 白名单仍读 defaults.skills.visible。
 	skillsOn := p.NodeCFG.Skills.Enabled && toolGroupEnabled(groups, "skills")
 	skillsCfg := SkillsFromDefaults(p.Snapshot)
-
-	if err := attachDockerSandbox(reg, p.AgentID, fsRoot, p.Snapshot); err != nil {
-		return Built{}, err
-	}
 
 	turnOpts := p.BaseTurn
 	turnOpts.FSRoot = fsRoot
@@ -123,24 +116,4 @@ func toolGroupEnabled(groups []string, name string) bool {
 		}
 	}
 	return false
-}
-
-func attachDockerSandbox(reg *tools.Registry, agentID, fsRoot string, snap Snapshot) error {
-	if reg == nil || !snap.Sandbox.Enabled {
-		return nil
-	}
-	if !strings.EqualFold(strings.TrimSpace(snap.Sandbox.Backend), "docker") {
-		return nil
-	}
-	runner, err := sandbox.NewDockerRunner(agentID, fsRoot, sandbox.Spec{
-		Image:   snap.Sandbox.Image,
-		Network: snap.Sandbox.Network,
-		Memory:  snap.Sandbox.Memory,
-		CPUs:    snap.Sandbox.CPUs,
-	})
-	if err != nil {
-		return fmt.Errorf("docker sandbox: %w", err)
-	}
-	reg.SetDockerSandbox(runner)
-	return nil
 }

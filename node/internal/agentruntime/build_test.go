@@ -9,7 +9,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-func TestBuild_sandboxIsolation(t *testing.T) {
+func TestBuild_usesNodeFSRootAndToolGroups(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.Config{NodeID: "n1", FSRoot: root}
 	cfg.ApplyDefaults()
@@ -19,15 +19,7 @@ func TestBuild_sandboxIsolation(t *testing.T) {
 	snap := Snapshot{
 		TemplateID: "code-reviewer",
 		Defaults: map[string]any{
-			"tools": map[string]any{"enabled_groups": []any{"fs", "bash", "skills"}},
-		},
-		Sandbox: SandboxSpec{
-			Enabled:           true,
-			Backend:           "process",
-			WorkspaceSubdir:   "data",
-			FSRootIsolation:   true,
-			AllowBash:         false,
-			AllowNetworkTools: false,
+			"tools": map[string]any{"enabled_groups": []any{"fs", "skills"}},
 		},
 	}
 	built, err := Build(BuildParams{
@@ -42,23 +34,14 @@ func TestBuild_sandboxIsolation(t *testing.T) {
 	if built.TurnOptions.MaxToolLoops != DefaultMaxToolLoops {
 		t.Fatalf("MaxToolLoops=%d want %d (from agent default, not BaseTurn)", built.TurnOptions.MaxToolLoops, DefaultMaxToolLoops)
 	}
-	wantFS := filepath.Join(root, "agents", "agt-abc", "data")
-	if built.FSRoot != wantFS || built.TurnOptions.FSRoot != wantFS {
-		t.Fatalf("fsRoot=%q turn=%q want %q", built.FSRoot, built.TurnOptions.FSRoot, wantFS)
+	if built.FSRoot != root || built.TurnOptions.FSRoot != root {
+		t.Fatalf("fsRoot=%q turn=%q want %q", built.FSRoot, built.TurnOptions.FSRoot, root)
 	}
-	for _, g := range built.ToolGroups {
-		if g == "bash" || g == "browser" {
-			t.Fatalf("unexpected group %q in %v", g, built.ToolGroups)
-		}
+	if len(built.ToolGroups) != 2 || built.ToolGroups[0] != "fs" || built.ToolGroups[1] != "skills" {
+		t.Fatalf("tool groups=%v", built.ToolGroups)
 	}
 	if built.Registry == nil {
 		t.Fatal("nil registry")
-	}
-	// 校验 bash 组已被沙箱约束去掉。
-	for _, g := range built.ToolGroups {
-		if g == "bash" {
-			t.Fatalf("bash still in groups: %v", built.ToolGroups)
-		}
 	}
 	if !built.TurnOptions.SkillsEnabled {
 		t.Fatal("expected SkillsEnabled when skills group present and node skills enabled")

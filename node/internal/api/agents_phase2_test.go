@@ -16,7 +16,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-func TestPhase2_agentSandboxMessageByAgentID(t *testing.T) {
+func TestPhase2_agentMessageByAgentID(t *testing.T) {
 	// 使用独立目录，避免 session 后台写入导致 testing.TempDir 清理失败。
 	root, err := os.MkdirTemp("", "dagents-phase2-*")
 	if err != nil {
@@ -41,13 +41,6 @@ display_name: 审查
 defaults:
   tools:
     enabled_groups: [fs, skills]
-sandbox:
-  enabled: true
-  backend: process
-  workspace_subdir: data
-  fs_root_isolation: true
-  allow_bash: false
-  allow_network_tools: false
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
@@ -61,7 +54,7 @@ sandbox:
 
 	body, _ := json.Marshal(map[string]any{
 		"template_id":  "code-reviewer",
-		"display_name": "审查沙箱",
+		"display_name": "审查助手",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
@@ -78,9 +71,8 @@ sandbox:
 	if !ok {
 		t.Fatal("runtime missing")
 	}
-	want := filepath.Join(cfg.FSRoot, "agents", created.AgentID, "data")
-	if fsRoot != want {
-		t.Fatalf("fsRoot=%q want %q", fsRoot, want)
+	if fsRoot != cfg.FSRoot {
+		t.Fatalf("fsRoot=%q want shared node fs_root %q", fsRoot, cfg.FSRoot)
 	}
 
 	msgBody, _ := json.Marshal(map[string]any{
@@ -147,13 +139,6 @@ display_name: 审查
 defaults:
   tools:
     enabled_groups: [fs, skills]
-sandbox:
-  enabled: true
-  backend: process
-  workspace_subdir: data
-  fs_root_isolation: true
-  allow_bash: false
-  allow_network_tools: false
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
@@ -167,7 +152,7 @@ sandbox:
 
 	body, _ := json.Marshal(map[string]any{
 		"template_id":  "code-reviewer",
-		"display_name": "审查沙箱",
+		"display_name": "审查助手",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
@@ -179,7 +164,7 @@ sandbox:
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	wantFS := filepath.Join(cfg.FSRoot, "agents", created.AgentID, "data")
+	wantFS := cfg.FSRoot
 	if fs, ok := srv.sessions.SessionFSRoot(created.AgentID); !ok || fs != wantFS {
 		t.Fatalf("initial fsRoot=%q ok=%v want %q", fs, ok, wantFS)
 	}

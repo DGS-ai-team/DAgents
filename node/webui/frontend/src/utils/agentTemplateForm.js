@@ -37,16 +37,6 @@ export function emptyAgentDraft() {
     // null = 不限制（全部可见）；string[] = 显式白名单（可为空）
     visibleSkills: null,
     childAgentsEnabled: true,
-    sandboxEnabled: false,
-    sandboxBackend: "docker",
-    sandboxImage: "dagents-sandbox:latest",
-    sandboxNetwork: "none",
-    sandboxMemory: "",
-    sandboxCpus: "",
-    workspaceSubdir: "data",
-    fsRootIsolation: false,
-    allowBash: true,
-    allowNetworkTools: true,
     promptSoulEnabled: true,
     promptUserEnabled: true,
     promptCustomEnabled: true,
@@ -86,54 +76,6 @@ function boolOr(value, fallback) {
 function numberOr(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
-/**
- * 启用沙箱时仅支持 docker；未启用用 process 表示宿主机。
- * 历史 backend=remote 一律升为 docker（D5 Cut5 产品面已拒绝 remote）。
- */
-function normalizeSandboxMode(backend, enabled) {
-  if (!enabled) return "process";
-  const b = String(backend || "").trim().toLowerCase();
-  if (b === "docker" || b === "remote" || b === "process") return "docker";
-  return "docker";
-}
-
-function applySandboxDraftFields(draft, sandbox, agentMeta = {}) {
-  const enabled = boolOr(sandbox.enabled, !!agentMeta.sandbox_enabled);
-  draft.sandboxEnabled = enabled;
-  draft.sandboxBackend = normalizeSandboxMode(
-    sandbox.backend || agentMeta.sandbox_backend,
-    enabled,
-  );
-  draft.sandboxImage = String(sandbox.image || "dagents-sandbox:latest").trim() || "dagents-sandbox:latest";
-  draft.sandboxNetwork = String(sandbox.network || "none").trim() || "none";
-  draft.sandboxMemory = String(sandbox.memory || "").trim();
-  draft.sandboxCpus = String(sandbox.cpus || "").trim();
-  draft.workspaceSubdir = String(sandbox.workspace_subdir || "data").trim() || "data";
-  draft.fsRootIsolation = draft.sandboxBackend === "docker" ? true : !!sandbox.fs_root_isolation;
-  draft.allowBash = sandbox.allow_bash !== false;
-  draft.allowNetworkTools = sandbox.allow_network_tools !== false;
-}
-
-function buildSandboxPayload(draft) {
-  const enabled = !!draft.sandboxEnabled;
-  const backend = normalizeSandboxMode(draft.sandboxBackend, enabled);
-  const sandbox = {
-    enabled,
-    backend,
-    workspace_subdir: draft.workspaceSubdir || "data",
-    fs_root_isolation: backend === "docker" ? true : !!draft.fsRootIsolation,
-    allow_bash: !!draft.allowBash,
-    allow_network_tools: !!draft.allowNetworkTools,
-  };
-  if (backend === "docker") {
-    sandbox.image = String(draft.sandboxImage || "dagents-sandbox:latest").trim() || "dagents-sandbox:latest";
-    sandbox.network = String(draft.sandboxNetwork || "none").trim() || "none";
-    if (String(draft.sandboxMemory || "").trim()) sandbox.memory = String(draft.sandboxMemory).trim();
-    if (String(draft.sandboxCpus || "").trim()) sandbox.cpus = String(draft.sandboxCpus).trim();
-  }
-  return sandbox;
 }
 
 /** 技能能力与工具组 skills 收敛：未收窄（空列表）视为开启；否则看是否勾选 skills。 */
@@ -191,7 +133,6 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   const skills = asObject(defaults.skills);
   const childAgents = asObject(defaults.child_agents);
   const prompt = asObject(defaults.prompt_context);
-  const sandbox = asObject(template?.sandbox);
 
   const draft = emptyAgentDraft();
   draft.templateId = String(template?.id || "").trim();
@@ -204,7 +145,6 @@ export function draftFromTemplate(template, llmProfileIds = []) {
     : [];
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
-  applySandboxDraftFields(draft, sandbox);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
   draft.promptUserEnabled = boolOr(prompt.user_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
@@ -231,7 +171,6 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   const skills = asObject(defaults.skills);
   const childAgents = asObject(defaults.child_agents);
   const prompt = asObject(defaults.prompt_context);
-  const sandbox = asObject(snap.sandbox);
 
   const draft = emptyAgentDraft();
   draft.templateId = String(agent?.template_id || snap.template_id || "").trim();
@@ -244,7 +183,6 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
     : [];
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
-  applySandboxDraftFields(draft, sandbox, agent);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
   draft.promptUserEnabled = boolOr(prompt.user_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
@@ -278,7 +216,6 @@ export function buildCreateAgentPayload(draft) {
   const llmActive = String(draft.llmProfileId || "").trim();
   const payload = {
     display_name: String(draft.displayName || "").trim() || undefined,
-    sandbox: buildSandboxPayload(draft),
     defaults: {
       agent: {
         role: String(draft.role || "assistant").trim() || "assistant",
@@ -312,7 +249,6 @@ export function buildPatchAgentPayload(draft) {
   const created = buildCreateAgentPayload(draft);
   return {
     display_name: created.display_name,
-    sandbox: created.sandbox,
     defaults: created.defaults,
   };
 }
@@ -328,7 +264,6 @@ export function buildCreateTemplatePayload(meta, draft) {
     display_name: displayName || id,
     description,
     version: 1,
-    sandbox: buildSandboxPayload(draft),
     defaults: {
       agent: {
         role: String(draft?.role || "assistant").trim() || "assistant",

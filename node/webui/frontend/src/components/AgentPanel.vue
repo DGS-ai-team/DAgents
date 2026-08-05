@@ -167,17 +167,6 @@ defineExpose({ refresh, setDeleting, openCreate });
               </svg>
             </span>
             <span
-              v-if="a.sandbox_enabled"
-              class="agent-list-item__glyph agent-list-item__glyph--sandbox"
-              title="沙箱"
-              aria-label="沙箱"
-            >
-              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                <rect x="3" y="4" width="10" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.25" />
-                <path d="M6 4V3.2A2 2 0 0 1 8 1.2 2 2 0 0 1 10 3.2V4" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
-              </svg>
-            </span>
-            <span
               v-if="a.updated_at"
               class="agent-list-item__time"
               :title="a.updated_at"

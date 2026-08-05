@@ -1,6 +1,6 @@
 id: code-reviewer
 display_name: 代码审查助手
-description: 只读代码与仓库，输出审查意见；默认沙箱隔离
+description: 只读代码与仓库，输出审查意见
 version: 1
 
 defaults:
@@ -22,11 +22,3 @@ defaults:
     enabled: true
   child_agents:
     enabled: false
-
-sandbox:
-  enabled: true
-  backend: process   # 后续可改为 docker
-  workspace_subdir: data
-  fs_root_isolation: true
-  allow_bash: false
-  allow_network_tools: false

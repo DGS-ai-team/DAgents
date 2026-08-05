@@ -31,8 +31,6 @@ display_name: 通用
 defaults:
   tools:
     enabled_groups: [fs]
-sandbox:
-  enabled: false
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
@@ -45,7 +43,6 @@ sandbox:
 			"llm":   map[string]any{"active": "default"},
 			"tools": map[string]any{"enabled_groups": []any{"fs"}},
 		},
-		"sandbox": map[string]any{"enabled": false, "backend": "process"},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
 	rr := httptest.NewRecorder()

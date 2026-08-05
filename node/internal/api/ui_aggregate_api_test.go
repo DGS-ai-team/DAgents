@@ -86,9 +86,6 @@ display_name: 通用
 defaults:
   tools:
     enabled_groups: [fs, bash, skills]
-sandbox:
-  enabled: false
-  backend: process
 `), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())

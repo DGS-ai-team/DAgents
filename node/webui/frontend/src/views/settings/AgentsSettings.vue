@@ -106,7 +106,6 @@ onMounted(load);
               <span class="agents-settings__name">{{ a.display_name || a.agent_id }}</span>
               <span class="agents-settings__meta">
                 {{ hostLabel(a) }}
-                <template v-if="a.sandbox_enabled"> · 沙箱</template>
                 <template v-if="a.template_id"> · 源自 {{ a.template_id }}</template>
               </span>
             </div>

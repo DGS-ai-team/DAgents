@@ -14,7 +14,6 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
-	"github.com/DGS-ai-team/DAgents/node/internal/sandbox"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
@@ -107,11 +106,10 @@ func defaultAgentCreationDefaults() map[string]any {
 }
 
 type createAgentRequest struct {
-	// TemplateID 仅作溯源（可选）；配置由前端展开后通过 defaults/sandbox 完整提交。
+	// TemplateID 仅作溯源（可选）；配置由前端展开后通过 defaults 完整提交。
 	TemplateID  string         `json:"template_id"`
 	DisplayName string         `json:"display_name"`
 	Origin      string         `json:"origin"` // 仅允许 local（或缺省）；remote 拒绝
-	Sandbox     *sandboxPatch  `json:"sandbox"`
 	Defaults    map[string]any `json:"defaults"`
 	// Placement 旧 Placement 请求字段；非本机 home_node_id 一律拒绝。
 	Placement *struct {
@@ -124,8 +122,6 @@ type agentView struct {
 	DisplayName    string          `json:"display_name"`
 	TemplateID     string          `json:"template_id"`
 	Origin         string          `json:"origin"`
-	SandboxEnabled bool            `json:"sandbox_enabled"`
-	SandboxBackend string          `json:"sandbox_backend"`
 	ConfigSnapshot json.RawMessage `json:"config_snapshot,omitempty"`
 	Placement      json.RawMessage `json:"placement,omitempty"`
 	Host           json.RawMessage `json:"host,omitempty"`
@@ -148,8 +144,6 @@ func agentViewFromRecord(rec store.AgentRecord) agentView {
 		DisplayName:    rec.DisplayName,
 		TemplateID:     rec.TemplateID,
 		Origin:         store.NormalizeAgentOrigin(rec.Origin),
-		SandboxEnabled: rec.SandboxEnabled,
-		SandboxBackend: rec.SandboxBackend,
 		ConfigSnapshot: rec.ConfigSnapshot,
 		CreatedAt:      rec.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:      rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -208,15 +202,11 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 完整设置：前端展开模板后提交 defaults；无 defaults 时用模板种子或内置默认。
-	baseSandbox := agentruntime.SandboxSpec{
-		Backend: "process", WorkspaceSubdir: "data", AllowBash: true, AllowNetworkTools: true,
-	}
 	baseDefaults := map[string]any{}
 	fullSettings := req.Defaults != nil
 	if fullSettings {
 		baseDefaults = agentruntime.MergeDefaults(nil, req.Defaults)
 	} else if tpl != nil {
-		baseSandbox = sandboxFromTemplate(tpl)
 		baseDefaults = agentruntime.MergeDefaults(tpl.Defaults, nil)
 	} else {
 		baseDefaults = defaultAgentCreationDefaults()
@@ -234,23 +224,13 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sandbox, err := applySandboxPatch(baseSandbox, req.Sandbox)
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_sandbox", err.Error(), nil)
-		return
-	}
-	if err := requireDockerSandboxReady(sandbox); err != nil {
-		writeSandboxReadyError(w, err)
-		return
-	}
-
 	agentID, err := generateAgentInstanceID()
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_id_failed", err.Error(), nil)
 		return
 	}
 
-	snapRaw, err := marshalAgentSnapshot(tplID, baseDefaults, sandbox)
+	snapRaw, err := marshalAgentSnapshot(tplID, baseDefaults)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
 		return
@@ -261,8 +241,8 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		DisplayName:    name,
 		TemplateID:     tplID,
 		Origin:         store.NormalizeAgentOrigin(req.Origin),
-		SandboxEnabled: sandbox.Enabled,
-		SandboxBackend: sandbox.Backend,
+		SandboxEnabled: false,
+		SandboxBackend: "process",
 		ConfigSnapshot: snapRaw,
 		HostJSON:       encodeJSONRaw(localHostPayload()),
 		CreatedAt:      now,
@@ -364,8 +344,7 @@ func (s *Server) enrichAgentNotify(v agentView) agentView {
 type patchAgentRequest struct {
 	DisplayName *string        `json:"display_name"`
 	LLMActive   *string        `json:"llm_active"` // 兼容快捷字段；等价于 defaults.llm.active
-	Sandbox     *sandboxPatch  `json:"sandbox"`
-	Defaults    map[string]any `json:"defaults"` // 深合并进快照
+	Defaults    map[string]any `json:"defaults"`   // 深合并进快照
 }
 
 func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
@@ -391,7 +370,7 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if req.DisplayName == nil && req.LLMActive == nil && req.Sandbox == nil && req.Defaults == nil {
+	if req.DisplayName == nil && req.LLMActive == nil && req.Defaults == nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "no patch fields", nil)
 		return
 	}
@@ -438,29 +417,16 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		snap.Defaults["llm"] = llmMap
 		runtimeDirty = true
 	}
-	if req.Sandbox != nil {
-		sandbox, err := applySandboxPatch(snap.Sandbox, req.Sandbox)
-		if err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid_sandbox", err.Error(), nil)
-			return
-		}
-		if err := requireDockerSandboxReady(sandbox); err != nil {
-			writeSandboxReadyError(w, err)
-			return
-		}
-		snap.Sandbox = sandbox
-		rec.SandboxEnabled = sandbox.Enabled
-		rec.SandboxBackend = sandbox.Backend
-		runtimeDirty = true
-	}
 
 	if runtimeDirty {
-		raw, err := marshalAgentSnapshot(snap.TemplateID, snap.Defaults, snap.Sandbox)
+		raw, err := marshalAgentSnapshot(snap.TemplateID, snap.Defaults)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "agent_snapshot_encode_failed", err.Error(), nil)
 			return
 		}
 		rec.ConfigSnapshot = raw
+		rec.SandboxEnabled = false
+		rec.SandboxBackend = "process"
 	}
 	rec.UpdatedAt = time.Now().UTC()
 	if err := s.agents.Save(r.Context(), *rec); err != nil {
@@ -496,10 +462,6 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.sessions != nil {
 		_, _ = s.sessions.Delete(id)
-	} else if s.sandboxPool != nil {
-		s.sandboxPool.Release(id)
-	} else {
-		sandbox.ReleaseAgent(id)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
 }
@@ -578,9 +540,6 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	if err != nil {
 		return fmt.Errorf("parse agent snapshot: %w", err)
 	}
-	if err := requireDockerSandboxReady(snapParsed.Sandbox); err != nil {
-		return err
-	}
 	// 装入/聚焦 Agent 时应用其绑定的 LLM 档案（进程级共享 LLM 的过渡方案）。
 	if active := agentruntime.LLMActiveFromDefaults(snapParsed); active != "" {
 		if err := s.switchActiveLLMProfile(active); err != nil {
@@ -629,18 +588,6 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	}
 	if _, _, err := s.sessions.CreateWithOptions(id, built.TurnOptions, built.Registry, policyEngine); err != nil {
 		return err
-	}
-	if runner := built.Registry.DockerSandbox(); runner != nil {
-		pool := s.sandboxPool
-		if pool == nil {
-			pool = sandbox.NewPool(sandbox.DefaultIdleTimeout, s.logger)
-			s.sandboxPool = pool
-		}
-		if err := pool.Ensure(ctx, runner); err != nil {
-			_, _ = s.sessions.Release(id)
-			return fmt.Errorf("docker sandbox ensure: %w", err)
-		}
-		s.logger.Info("docker sandbox ready", "agent_id", id, "container", runner.Name, "image", runner.Spec.Image)
 	}
 	s.logger.Info("agent runtime ready", "agent_id", id, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
 	return nil

@@ -162,7 +162,6 @@ watch(
                 <p class="agent-create-card__desc">{{ tpl.description || "无描述" }}</p>
                 <div class="agent-create-card__tags">
                   <span v-if="tpl.source === 'user'" class="agent-create-tag agent-create-tag--user">自定义</span>
-                  <span v-if="tpl.sandbox?.enabled" class="agent-create-tag">沙箱</span>
                   <span
                     v-for="g in (tpl.defaults?.tools?.enabled_groups || []).slice(0, 3)"
                     :key="g"

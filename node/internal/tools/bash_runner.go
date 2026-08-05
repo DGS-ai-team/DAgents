@@ -102,12 +102,6 @@ func (r *Registry) prepareShellRun(args bashRunArgs) (shellRunParams, string, er
 	if err != nil {
 		return shellRunParams{}, fmt.Sprintf("ERROR: %v", err), nil
 	}
-	if r.dockerSandbox != nil {
-		if args.ShellType != nil && st != shellBash {
-			return shellRunParams{}, "ERROR: docker 沙箱仅支持 shell_type=bash。", nil
-		}
-		st = shellBash
-	}
 	if blocked := blockedNonRootPasswordPromptingShell(cmdText, st); blocked != "" {
 		return shellRunParams{}, blocked, nil
 	}
@@ -134,13 +128,6 @@ func (r *Registry) hardLimitSec() int {
 }
 
 func (r *Registry) startShellCommand(params shellRunParams) (*exec.Cmd, error) {
-	if r != nil && r.dockerSandbox != nil {
-		cmd, err := r.dockerSandbox.Command(params.cwd, params.command)
-		if err != nil {
-			return nil, err
-		}
-		return cmd, nil
-	}
 	cmd, err := buildShellCommand(params.shellType, params.command)
 	if err != nil {
 		return nil, err
@@ -149,7 +136,7 @@ func (r *Registry) startShellCommand(params shellRunParams) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// runShellUntilDoneWithRegistry 在 ctx 有效期内等待 shell 结束（含 docker 沙箱路径）。
+// runShellUntilDoneWithRegistry 在 ctx 有效期内等待 shell 结束。
 func runShellUntilDoneWithRegistry(r *Registry, ctx context.Context, params shellRunParams) (string, *OutputCompressStats, error) {
 	base, err := r.startShellCommand(params)
 	if err != nil {
