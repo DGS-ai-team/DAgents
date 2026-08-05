@@ -38,6 +38,10 @@ const showMemberForm = ref(false);
 const selectedMemberId = ref("");
 const memberSpec = ref(null);
 const memberSpecBusy = ref(false);
+let timelineReqSeq = 0;
+let membersReqSeq = 0;
+let memberSpecReqSeq = 0;
+let pollInFlight = false;
 
 const hitlPrompt = ref("");
 const hitlBusy = ref(false);
@@ -53,15 +57,18 @@ async function loadSelf() {
 }
 
 async function loadTimeline() {
+  const reqSeq = ++timelineReqSeq;
   if (!workgroupId.value) {
     events.value = [];
     return;
   }
   try {
     const res = await api.getWorkgroupTimeline(workgroupId.value);
+    if (reqSeq !== timelineReqSeq) return;
     events.value = res.events || [];
     error.value = "";
   } catch (e) {
+    if (reqSeq !== timelineReqSeq) return;
     error.value = e?.message || "加载 Timeline 失败";
   }
 }
@@ -79,6 +86,7 @@ async function loadACL() {
 }
 
 async function loadMembersHitl() {
+  const reqSeq = ++membersReqSeq;
   if (!workgroupId.value) {
     members.value = [];
     hitlList.value = [];
@@ -89,6 +97,7 @@ async function loadMembersHitl() {
       api.listWorkgroupMembers(workgroupId.value),
       api.listWorkgroupHITL(workgroupId.value, true),
     ]);
+    if (reqSeq !== membersReqSeq) return;
     members.value = m.members || [];
     if (m.node_id) selfNodeId.value = m.node_id;
     hitlList.value = h.hitl || [];
@@ -100,23 +109,30 @@ async function loadMembersHitl() {
       memberSpec.value = null;
     }
   } catch (e) {
+    if (reqSeq !== membersReqSeq) return;
     if (!error.value) error.value = e?.message || "";
   }
 }
 
 async function loadMemberSpec(memberId) {
+  const reqSeq = ++memberSpecReqSeq;
   if (!workgroupId.value || !memberId) {
     memberSpec.value = null;
     return;
   }
   memberSpecBusy.value = true;
   try {
-    memberSpec.value = await api.getWorkgroupMemberSpec(workgroupId.value, memberId);
+    const data = await api.getWorkgroupMemberSpec(workgroupId.value, memberId);
+    if (reqSeq !== memberSpecReqSeq) return;
+    memberSpec.value = data;
   } catch (e) {
+    if (reqSeq !== memberSpecReqSeq) return;
     memberSpec.value = null;
     if (!error.value) error.value = e?.message || "加载 MemberSpec 失败";
   } finally {
-    memberSpecBusy.value = false;
+    if (reqSeq === memberSpecReqSeq) {
+      memberSpecBusy.value = false;
+    }
   }
 }
 
@@ -143,9 +159,15 @@ async function selectMember(memberId) {
 function startPoll() {
   stopPoll();
   pollTimer.value = window.setInterval(async () => {
-    await Promise.all([loadTimeline(), loadMembersHitl()]);
-    if (selectedMemberId.value) {
-      await loadMemberSpec(selectedMemberId.value);
+    if (pollInFlight) return;
+    pollInFlight = true;
+    try {
+      await Promise.all([loadTimeline(), loadMembersHitl()]);
+      if (selectedMemberId.value) {
+        await loadMemberSpec(selectedMemberId.value);
+      }
+    } finally {
+      pollInFlight = false;
     }
   }, 3000);
 }
@@ -155,6 +177,7 @@ function stopPoll() {
     clearInterval(pollTimer.value);
     pollTimer.value = null;
   }
+  pollInFlight = false;
 }
 
 async function send() {

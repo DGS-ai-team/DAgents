@@ -34,7 +34,7 @@ class SQLiteDatabase:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
-                INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '2');
+                INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '13');
 
                 CREATE TABLE IF NOT EXISTS registry_agents (
                     agent_id TEXT PRIMARY KEY,
@@ -75,7 +75,7 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL,
                     PRIMARY KEY (plugin_id, version)
                 );
-                -- Workgroup D1：组 / ACL / 成员 / Spec / Grant / Assign / Run
+                -- Workgroup D1：组 / ACL / 成员 / Spec / Assign / Run
                 CREATE TABLE IF NOT EXISTS workgroups (
                     id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL
@@ -91,11 +91,6 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS member_specs (
-                    id TEXT PRIMARY KEY,
-                    workgroup_id TEXT NOT NULL,
-                    payload_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS execution_grants (
                     id TEXT PRIMARY KEY,
                     workgroup_id TEXT NOT NULL,
                     payload_json TEXT NOT NULL
@@ -146,7 +141,7 @@ class SQLiteDatabase:
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','12') "
-                "ON CONFLICT(key) DO UPDATE SET value='12'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','13') "
+                "ON CONFLICT(key) DO UPDATE SET value='13'"
             )
             conn.commit()

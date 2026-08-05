@@ -136,8 +136,7 @@ class AgentRegistryStore:
             self._records[agent_id] = stored
             for name in cleaned:
                 self._group_catalog.add(name)
-            self._persist_locked()
-            self._persist_catalog_locked()
+            self._persist_all_locked()
             return stored_to_public(stored, now_unix=now_unix)
 
     def list_discovery_groups(self) -> list[dict[str, object]]:
@@ -171,7 +170,7 @@ class AgentRegistryStore:
             raise ValueError("group name required")
         with self._lock:
             self._group_catalog.add(cleaned)
-            self._persist_catalog_locked()
+            self._persist_all_locked()
             node_ids = sorted(
                 rec.agent_id for rec in self._records.values() if cleaned in rec.discovery_group
             )
@@ -200,8 +199,7 @@ class AgentRegistryStore:
                     data["discovery_group"] = [g for g in rec.discovery_group if g != cleaned]
                     data["updated_at_unix"] = now_unix
                     self._records[agent_id] = AgentStoredRecord.model_validate(data)
-                self._persist_locked()
-            self._persist_catalog_locked()
+            self._persist_all_locked()
             return existed
 
     def heartbeat(self, agent_id: str, payload: AgentHeartbeatRequest) -> AgentRecord | None:
@@ -360,11 +358,17 @@ class AgentRegistryStore:
                     if str(g).strip():
                         self._group_catalog.add(str(g).strip())
 
-    def _persist_catalog_locked(self) -> None:
+    def _persist_all_locked(self) -> None:
         if self._db is None or not self._db.enabled:
             return
         now_unix = int(time.time())
         with self._db.connect() as conn:
+            conn.execute("DELETE FROM registry_agents")
+            for item in self._records.values():
+                conn.execute(
+                    "INSERT INTO registry_agents(agent_id, payload_json) VALUES (?, ?)",
+                    (item.agent_id, json.dumps(item.model_dump(mode="json"), ensure_ascii=False)),
+                )
             conn.execute("DELETE FROM discovery_group_catalog")
             for name in sorted(self._group_catalog):
                 conn.execute(

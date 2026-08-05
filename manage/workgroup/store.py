@@ -19,12 +19,10 @@ from manage.workgroup.models import (
     Assign,
     AssignCreateRequest,
     ACLPatchRequest,
-    GrantInviteRequest,
     MemberCreateRequest,
     MemberSpec,
     MemberTools,
     MemberWorkspace,
-    NodeExecutionGrant,
     WorkGroup,
     WorkGroupACL,
     WorkGroupCreateRequest,
@@ -49,7 +47,6 @@ class WorkGroupStore:
         self._acls: dict[str, WorkGroupACL] = {}
         self._members: dict[str, WorkGroupMember] = {}
         self._specs: dict[str, MemberSpec] = {}
-        self._grants: dict[str, NodeExecutionGrant] = {}
         self._assigns: dict[str, Assign] = {}
         self._runs: dict[str, ActorRun] = {}
         self._run_histories: dict[str, ActorRunHistory] = {}
@@ -63,31 +60,47 @@ class WorkGroupStore:
 
     # --- low-level persistence ---
 
-    def _put(self, table: str, key: str, payload: str, workgroup_id: str | None = None) -> None:
+    def _put(
+        self,
+        table: str,
+        key: str,
+        payload: str,
+        workgroup_id: str | None = None,
+        conn: Any | None = None,
+    ) -> None:
         if self._db is None:
             return
-        with self._db.connect() as conn:
-            if workgroup_id is None:
-                conn.execute(
-                    f"INSERT INTO {table}(id,payload_json) VALUES(?,?) "
-                    f"ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json",
-                    (key, payload),
-                )
-            else:
-                conn.execute(
-                    f"INSERT INTO {table}(id,workgroup_id,payload_json) VALUES(?,?,?) "
-                    f"ON CONFLICT(id) DO UPDATE SET workgroup_id=excluded.workgroup_id, "
-                    f"payload_json=excluded.payload_json",
-                    (key, workgroup_id, payload),
-                )
-            conn.commit()
+        if conn is not None:
+            self._put_row(conn, table, key, payload, workgroup_id)
+            return
+        with self._db.connect() as tx:
+            self._put_row(tx, table, key, payload, workgroup_id)
+            tx.commit()
 
-    def _delete(self, table: str, key: str) -> None:
+    def _put_row(self, conn: Any, table: str, key: str, payload: str, workgroup_id: str | None = None) -> None:
+        if workgroup_id is None:
+            conn.execute(
+                f"INSERT INTO {table}(id,payload_json) VALUES(?,?) "
+                f"ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json",
+                (key, payload),
+            )
+            return
+        conn.execute(
+            f"INSERT INTO {table}(id,workgroup_id,payload_json) VALUES(?,?,?) "
+            f"ON CONFLICT(id) DO UPDATE SET workgroup_id=excluded.workgroup_id, "
+            f"payload_json=excluded.payload_json",
+            (key, workgroup_id, payload),
+        )
+
+    def _delete(self, table: str, key: str, conn: Any | None = None) -> None:
         if self._db is None:
             return
-        with self._db.connect() as conn:
+        if conn is not None:
             conn.execute(f"DELETE FROM {table} WHERE id=?", (key,))
-            conn.commit()
+            return
+        with self._db.connect() as tx:
+            tx.execute(f"DELETE FROM {table} WHERE id=?", (key,))
+            tx.commit()
 
     def _load_all(self, table: str, model: type) -> list[Any]:
         if self._db is None:
@@ -108,8 +121,6 @@ class WorkGroupStore:
             self._members[m.member_id] = m
         for s in self._load_all("member_specs", MemberSpec):
             self._specs[s.member_id] = s
-        for g in self._load_all("execution_grants", NodeExecutionGrant):
-            self._grants[g.grant_id] = g
         for a in self._load_all("workgroup_assigns", Assign):
             self._assigns[a.assign_id] = a
         for r in self._load_all("actor_runs", ActorRun):
@@ -155,21 +166,33 @@ class WorkGroupStore:
             )
             self._groups[wid] = group
             self._acls[wid] = acl
-            self._put("workgroups", wid, group.model_dump_json())
-            self._put("workgroup_acls", wid, acl.model_dump_json(), workgroup_id=wid)
-            # 创建者自动订阅（§10）
             sub = Subscription(
                 workgroup_id=wid,
                 node_id=group.created_by_node_id,
                 subscribed_at=now,
             )
             self._subscriptions.setdefault(wid, {})[sub.node_id] = sub
-            self._put(
-                "workgroup_subscriptions",
-                f"{wid}:{sub.node_id}",
-                sub.model_dump_json(),
-                workgroup_id=wid,
-            )
+            if self._db is None:
+                self._put("workgroups", wid, group.model_dump_json())
+                self._put("workgroup_acls", wid, acl.model_dump_json(), workgroup_id=wid)
+                self._put(
+                    "workgroup_subscriptions",
+                    f"{wid}:{sub.node_id}",
+                    sub.model_dump_json(),
+                    workgroup_id=wid,
+                )
+                return group, acl
+            with self._db.connect() as tx:
+                self._put("workgroups", wid, group.model_dump_json(), conn=tx)
+                self._put("workgroup_acls", wid, acl.model_dump_json(), workgroup_id=wid, conn=tx)
+                self._put(
+                    "workgroup_subscriptions",
+                    f"{wid}:{sub.node_id}",
+                    sub.model_dump_json(),
+                    workgroup_id=wid,
+                    conn=tx,
+                )
+                tx.commit()
             return group, acl
 
     def list_workgroups(
@@ -389,8 +412,14 @@ class WorkGroupStore:
                 "lease_id": ids.lease_id(),
                 "lease_epoch": "1",
             }
-            self._put("member_specs", mid, spec.model_dump_json(), workgroup_id=workgroup_id)
-            self._put("workgroup_members", mid, member.model_dump_json(), workgroup_id=workgroup_id)
+            if self._db is None:
+                self._put("member_specs", mid, spec.model_dump_json(), workgroup_id=workgroup_id)
+                self._put("workgroup_members", mid, member.model_dump_json(), workgroup_id=workgroup_id)
+                return member, spec
+            with self._db.connect() as tx:
+                self._put("member_specs", mid, spec.model_dump_json(), workgroup_id=workgroup_id, conn=tx)
+                self._put("workgroup_members", mid, member.model_dump_json(), workgroup_id=workgroup_id, conn=tx)
+                tx.commit()
             return member, spec
 
     def get_member(self, member_id: str) -> WorkGroupMember | None:
@@ -409,133 +438,6 @@ class WorkGroupStore:
             return sorted(
                 [m for m in self._members.values() if m.workgroup_id == workgroup_id],
                 key=lambda m: m.created_at,
-            )
-
-    # --- Grant ---
-
-    def invite_grant(self, workgroup_id: str, req: GrantInviteRequest) -> NodeExecutionGrant:
-        with self._lock:
-            self.require_mutable(workgroup_id)
-            member = self._members.get(req.member_id)
-            if member is None or member.workgroup_id != workgroup_id:
-                raise WorkgroupError("not_found", "member not found", http_status=404)
-            spec = self._specs.get(req.member_id)
-            if spec is None:
-                raise WorkgroupError("not_found", "member spec not found", http_status=404)
-            # ACL ≠ Grant：允许邀请前再确认 home 仍在 ACL
-            self.assert_acl_member(workgroup_id, member.home_node_id)
-            allow = list(req.tool_allow_names) if req.tool_allow_names is not None else list(spec.tools.allow_names)
-            spec_allow = set(spec.tools.allow_names)
-            if any(name not in spec_allow for name in allow):
-                raise WorkgroupError(
-                    "digest_mismatch",
-                    "grant tool_allow_names must be subset of MemberSpec.tools.allow_names",
-                )
-            # 同 member 已有 invited/accepted 则冲突
-            for existing in self._grants.values():
-                if (
-                    existing.member_id == member.member_id
-                    and existing.status in {"invited", "accepted"}
-                ):
-                    raise WorkgroupError("conflict", "active grant already exists", http_status=409)
-            now = _now()
-            grant = NodeExecutionGrant(
-                grant_id=ids.grant_id(),
-                workgroup_id=workgroup_id,
-                member_id=member.member_id,
-                home_node_id=member.home_node_id,
-                member_spec_digest=member.member_spec_digest,
-                status="invited",
-                lease_id=ids.lease_id(),
-                lease_epoch=1,
-                member_generation=member.member_generation,
-                tool_allow_names=allow,
-                workspace_contract=dict(spec.workspace.model_dump()),
-                policy_ceiling=dict(spec.policy_ceiling),
-                invited_at=now,
-            )
-            self._grants[grant.grant_id] = grant
-            self._put("execution_grants", grant.grant_id, grant.model_dump_json(), workgroup_id=workgroup_id)
-            return grant
-
-    def accept_grant(
-        self,
-        grant_id: str,
-        *,
-        home_node_id: str,
-        member_spec_digest: str | None = None,
-    ) -> NodeExecutionGrant:
-        with self._lock:
-            self._ensure_loaded()
-            grant = self._grants.get(grant_id)
-            if grant is None:
-                raise WorkgroupError("not_found", "grant not found", http_status=404)
-            self.require_mutable(grant.workgroup_id)
-            if grant.home_node_id != home_node_id.strip():
-                raise WorkgroupError("not_authorized", "only home_node may accept grant", http_status=403)
-            if grant.status == "accepted":
-                return grant
-            if grant.status != "invited":
-                raise WorkgroupError("conflict", f"grant status={grant.status}", http_status=409)
-            if member_spec_digest and member_spec_digest != grant.member_spec_digest:
-                raise WorkgroupError("digest_mismatch", "member_spec_digest mismatch")
-            updated = grant.model_copy(update={"status": "accepted", "accepted_at": _now()})
-            self._grants[grant_id] = updated
-            self._put(
-                "execution_grants",
-                grant_id,
-                updated.model_dump_json(),
-                workgroup_id=updated.workgroup_id,
-            )
-            # 接受后成员进入 provisioning（D2 再真正 provision）
-            member = self._members.get(updated.member_id)
-            if member and member.status == "requested":
-                member = member.model_copy(update={"status": "provisioning"})
-                self._members[member.member_id] = member
-                self._put(
-                    "workgroup_members",
-                    member.member_id,
-                    member.model_dump_json(),
-                    workgroup_id=member.workgroup_id,
-                )
-            return updated
-
-    def revoke_grant(self, grant_id: str) -> NodeExecutionGrant:
-        with self._lock:
-            self._ensure_loaded()
-            grant = self._grants.get(grant_id)
-            if grant is None:
-                raise WorkgroupError("not_found", "grant not found", http_status=404)
-            if grant.status == "revoked":
-                return grant
-            updated = grant.model_copy(update={"status": "revoked", "revoked_at": _now()})
-            self._grants[grant_id] = updated
-            self._put(
-                "execution_grants",
-                grant_id,
-                updated.model_dump_json(),
-                workgroup_id=updated.workgroup_id,
-            )
-            return updated
-
-    def get_grant(self, grant_id: str) -> NodeExecutionGrant | None:
-        with self._lock:
-            self._ensure_loaded()
-            return self._grants.get(grant_id)
-
-    def list_grants(self, workgroup_id: str) -> list[NodeExecutionGrant]:
-        with self._lock:
-            self._ensure_loaded()
-            return sorted(
-                [g for g in self._grants.values() if g.workgroup_id == workgroup_id],
-                key=lambda g: g.invited_at,
-            )
-
-    def has_accepted_grant(self, member_id: str) -> bool:
-        with self._lock:
-            self._ensure_loaded()
-            return any(
-                g.member_id == member_id and g.status == "accepted" for g in self._grants.values()
             )
 
     # --- Turn kernel skeleton ---
@@ -732,15 +634,6 @@ class WorkGroupStore:
                 self._runs[run_id] = run2
                 self._put("actor_runs", run_id, run2.model_dump_json(), workgroup_id=run2.workgroup_id)
             return updated
-
-    def active_grant_for_member(self, member_id: str) -> NodeExecutionGrant | None:
-        """兼容旧数据；新产品路径不再依赖 Grant。"""
-        with self._lock:
-            self._ensure_loaded()
-            for g in self._grants.values():
-                if g.member_id == member_id and g.status == "accepted":
-                    return g
-            return None
 
     def member_execution_context(self, member_id: str) -> dict[str, Any]:
         """派活/provision 用的成员执行上下文（替代 ExecutionGrant）。"""
