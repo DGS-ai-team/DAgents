@@ -222,3 +222,33 @@ func TestApplyPatch_wecomWebhook(t *testing.T) {
 	}
 }
 
+func TestApplyPatch_completeNodeProfile(t *testing.T) {
+	cfg := testBaseConfig(t)
+	done := false
+	cfg.Onboarding.NodeProfileCompleted = &done
+	cfg.Agent.Name = ""
+
+	_, err := ApplyPatch(cfg, SettingsPatch{
+		Onboarding: &OnboardingSettings{NodeProfileCompleted: true},
+	})
+	if err == nil {
+		t.Fatal("expected error when completing without names")
+	}
+
+	updated, err := ApplyPatch(cfg, SettingsPatch{
+		User:       &UserSettings{PreferredName: "小明"},
+		Agent:      &AgentSettings{Name: "desk-node", Description: "desk"},
+		Onboarding: &OnboardingSettings{NodeProfileCompleted: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.NodeProfileCompleted() || updated.PreferredName() != "小明" || updated.Agent.Name != "desk-node" {
+		t.Fatalf("updated=%+v user=%+v onboarding=%+v", updated.Agent, updated.User, updated.Onboarding)
+	}
+	view := ViewFromConfig(updated)
+	if !view.Onboarding.NodeProfileCompleted || view.User.PreferredName != "小明" {
+		t.Fatalf("view=%+v", view)
+	}
+}
+

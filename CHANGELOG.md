@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **首次进入 Web UI 的 Node 身份首配页**：开箱未完成时全屏收集「怎么称呼你」与 Node 名称，写入 `user.preferred_name` / `agent.name` 与 `onboarding.node_profile_completed`；未完成前不启动 Manage Registrar / Workgroup Dialer（升级遗留库视为已完成）。
+
 ### 变更
 
 - **Shell 双轨安装**：推荐轨 Tauri（`desktop/tray-tauri`，内嵌 Web UI，需 WebView2）与兼容轨 Go（`desktop/tray`，低版本 Windows）均由 CI 构建；Inno 附加任务二选一写入 `bin\dagents-shell.exe`；未检测到 WebView2 时默认兼容模式。Tauri 轨补齐 Desktop API / SSE 待办 / Toast / 更新编排。

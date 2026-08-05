@@ -9,6 +9,8 @@ const emptyForm = () => ({
   compression: {},
   runtime: {},
   agent: {},
+  user: {},
+  onboarding: {},
   child_agents: {},
   browser: {},
   wecom: {},
@@ -45,6 +47,8 @@ export function useSetupConfig() {
     Object.assign(form.compression, data.compression || {});
     Object.assign(form.runtime, data.runtime || {});
     Object.assign(form.agent, data.agent || {});
+    Object.assign(form.user, data.user || {});
+    Object.assign(form.onboarding, data.onboarding || {});
     Object.assign(form.child_agents, data.child_agents || {});
     Object.assign(form.browser, data.browser || {});
     Object.assign(form.wecom, data.wecom || {});

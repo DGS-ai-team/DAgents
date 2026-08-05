@@ -14,6 +14,9 @@ async function saveGeneral() {
       name: form.agent.name || "",
       description: form.agent.description || "",
     },
+    user: {
+      preferred_name: form.user.preferred_name || "",
+    },
   });
 }
 
@@ -74,6 +77,16 @@ onMounted(load);
       <h2 class="settings-section__title">Node 信息</h2>
       <p class="settings-section__desc">注册到 Manage 后的展示名（peers / Console）；与具体 Agent 实例名称无关。</p>
       <div class="setup-config-panel__field-grid">
+        <label class="settings-field">
+          <span class="settings-field__label">怎么称呼你</span>
+          <input
+            v-model="form.user.preferred_name"
+            class="settings-field__input"
+            type="text"
+            placeholder="本机使用者称呼"
+            autocomplete="nickname"
+          />
+        </label>
         <label class="settings-field">
           <span class="settings-field__label">Node 名称</span>
           <input v-model="form.agent.name" class="settings-field__input" type="text" placeholder="空则显示 Node ID" autocomplete="off" />

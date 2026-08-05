@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
@@ -63,6 +64,12 @@ type Server struct {
 	sandboxPool     *sandbox.Pool
 	workgroupWorker *workgroup.Worker
 	workgroupDialer *workgroup.Dialer
+
+	// manageCtx 在 ListenAndServe 内创建；首配完成前不启动 registrar / dialer。
+	manageMu      sync.Mutex
+	manageCtx     context.Context
+	manageCancel  context.CancelFunc
+	manageStarted bool
 }
 
 // Option 为 NewServer 可选配置。
@@ -508,16 +515,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	regCtx, regCancel := context.WithCancel(ctx)
 	defer regCancel()
-	if s.registrar != nil {
-		s.registrar.Start(regCtx)
-	}
-	if s.workgroupDialer != nil {
-		go func() {
-			if err := s.workgroupDialer.ConnectAndServe(regCtx); err != nil && regCtx.Err() == nil {
-				s.logger.Warn("workgroup dialer stopped", "error", err)
-			}
-		}()
-	}
+	s.manageMu.Lock()
+	s.manageCtx = regCtx
+	s.manageCancel = regCancel
+	s.manageStarted = false
+	s.manageMu.Unlock()
+	s.maybeStartManageSidecars()
 	if s.updateChecker != nil {
 		s.updateChecker.Start(regCtx)
 	}
@@ -572,6 +575,36 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		}
 		return nil
 	}
+}
+
+// maybeStartManageSidecars 在首配完成且 Manage 已启用时启动 registrar / workgroup dialer（可热启动一次）。
+func (s *Server) maybeStartManageSidecars() {
+	if s == nil {
+		return
+	}
+	s.manageMu.Lock()
+	defer s.manageMu.Unlock()
+	if s.manageStarted || s.manageCtx == nil {
+		return
+	}
+	if s.cfg == nil || !s.cfg.NodeProfileCompleted() {
+		if s.cfg != nil && !s.cfg.NodeProfileCompleted() {
+			s.logger.Info("manage registrar/dialer deferred until node profile onboarding completes")
+		}
+		return
+	}
+	if s.registrar != nil {
+		s.registrar.Start(s.manageCtx)
+	}
+	if s.workgroupDialer != nil {
+		ctx := s.manageCtx
+		go func() {
+			if err := s.workgroupDialer.ConnectAndServe(ctx); err != nil && ctx.Err() == nil {
+				s.logger.Warn("workgroup dialer stopped", "error", err)
+			}
+		}()
+	}
+	s.manageStarted = true
 }
 
 // Close 释放 SQLite / 会话等资源。ListenAndServe 退出路径会调用；httptest 测试需显式 Cleanup。
