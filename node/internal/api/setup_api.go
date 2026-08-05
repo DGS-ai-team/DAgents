@@ -92,6 +92,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	s.syncLLMRuntimeFromStore(r.Context())
 	s.applyMultimodalRuntime(s.cfg.MultimodalEnabled())
 	s.attachNodeRuntimeDeps(s.tools, s.cfg.NodeID)
+	s.maybeStartManageSidecars()
 	view := setup.ViewFromConfig(s.cfg)
 	s.enrichLLMSettingsView(&view.LLM)
 	view.ConfigPath = s.configPath

@@ -44,6 +44,23 @@ func (c *Config) AgentDescription() string {
 	return strings.TrimSpace(c.Agent.Description)
 }
 
+// PreferredName 返回本机使用者称呼；空串表示未设。
+func (c *Config) PreferredName() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.User.PreferredName)
+}
+
+// NodeProfileCompleted 是否已完成首次 Node 身份配置。
+// nil（升级遗留）视为已完成，避免已有安装被门闩拦住。
+func (c *Config) NodeProfileCompleted() bool {
+	if c == nil || c.Onboarding.NodeProfileCompleted == nil {
+		return true
+	}
+	return *c.Onboarding.NodeProfileCompleted
+}
+
 // RegistrationCapabilities 返回注册 Manage 时的 capabilities；agent.capabilities 非空时覆盖 config 默认。
 func (c *Config) RegistrationCapabilities() []string {
 	if c == nil {

@@ -170,11 +170,15 @@ func ProductNodeSettingsSeed() *config.Config {
 	bashCompress := true
 	dup := true
 	toolResult := true
+	profileDone := false
 	cfg := &config.Config{
 		Agent: config.AgentConfig{
 			Name:        "local-assistant",
 			Description: "本机智能助手",
 			Role:        "ops",
+		},
+		Onboarding: config.OnboardingConfig{
+			NodeProfileCompleted: &profileDone,
 		},
 		FSRoot: config.DefaultFSRoot,
 		LLM: config.LLMConfig{

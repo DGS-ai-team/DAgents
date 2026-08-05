@@ -91,6 +91,16 @@ type AgentSettings struct {
 	Role        string `json:"role,omitempty"` // deprecated，可选元数据
 }
 
+// UserSettings 本机使用者称呼。
+type UserSettings struct {
+	PreferredName string `json:"preferred_name"`
+}
+
+// OnboardingSettings 首次 Node 身份配置门闩。
+type OnboardingSettings struct {
+	NodeProfileCompleted bool `json:"node_profile_completed"`
+}
+
 // ChildAgentsLimits 子 Agent 配额（enabled 见 features）。
 type ChildAgentsLimits struct {
 	DefaultTTLSeconds         int `json:"default_ttl_seconds"`
@@ -157,6 +167,8 @@ type SettingsView struct {
 	Compression     CompressionSettings `json:"compression"`
 	Runtime         RuntimeSettings     `json:"runtime"`
 	Agent           AgentSettings       `json:"agent"`
+	User            UserSettings        `json:"user"`
+	Onboarding      OnboardingSettings  `json:"onboarding"`
 	ChildAgents     ChildAgentsLimits   `json:"child_agents"`
 	Browser         BrowserSettings     `json:"browser"`
 	WeCom           WeComSettings       `json:"wecom"`
@@ -172,6 +184,8 @@ type SettingsPatch struct {
 	Compression *CompressionSettings `json:"compression,omitempty"`
 	Runtime     *RuntimeSettings     `json:"runtime,omitempty"`
 	Agent       *AgentSettings       `json:"agent,omitempty"`
+	User        *UserSettings        `json:"user,omitempty"`
+	Onboarding  *OnboardingSettings  `json:"onboarding,omitempty"`
 	ChildAgents *ChildAgentsLimits   `json:"child_agents,omitempty"`
 	Browser     *BrowserSettings     `json:"browser,omitempty"`
 	WeCom       *WeComSettings       `json:"wecom,omitempty"`
@@ -241,6 +255,12 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			Name:        cfg.Agent.Name,
 			Description: cfg.Agent.Description,
 			Role:        cfg.Agent.Role,
+		},
+		User: UserSettings{
+			PreferredName: cfg.PreferredName(),
+		},
+		Onboarding: OnboardingSettings{
+			NodeProfileCompleted: cfg.NodeProfileCompleted(),
 		},
 		ChildAgents: ChildAgentsLimits{
 			DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
@@ -312,6 +332,16 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 	}
 	if patch.Agent != nil {
 		applyAgentPatch(&out, *patch.Agent)
+	}
+	if patch.User != nil {
+		if err := applyUserPatch(&out, *patch.User); err != nil {
+			return nil, err
+		}
+	}
+	if patch.Onboarding != nil {
+		if err := applyOnboardingPatch(&out, *patch.Onboarding); err != nil {
+			return nil, err
+		}
 	}
 	if patch.ChildAgents != nil {
 		if err := applyChildAgentsPatch(&out, *patch.ChildAgents); err != nil {
@@ -566,6 +596,24 @@ func applyAgentPatch(cfg *config.Config, p AgentSettings) {
 	cfg.Agent.Description = strings.TrimSpace(p.Description)
 	// Role 仅作可选元数据；空 PATCH 字段不强制清空已有值以外——与 name/desc 同策略整段覆盖
 	cfg.Agent.Role = strings.TrimSpace(p.Role)
+}
+
+func applyUserPatch(cfg *config.Config, p UserSettings) error {
+	cfg.User.PreferredName = strings.TrimSpace(p.PreferredName)
+	return nil
+}
+
+func applyOnboardingPatch(cfg *config.Config, p OnboardingSettings) error {
+	if p.NodeProfileCompleted {
+		if strings.TrimSpace(cfg.Agent.Name) == "" {
+			return fmt.Errorf("agent.name is required to complete node profile")
+		}
+		if strings.TrimSpace(cfg.User.PreferredName) == "" {
+			return fmt.Errorf("user.preferred_name is required to complete node profile")
+		}
+	}
+	cfg.Onboarding.NodeProfileCompleted = boolPtr(p.NodeProfileCompleted)
+	return nil
 }
 
 func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {

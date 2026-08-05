@@ -26,6 +26,8 @@ type Config struct {
 	// LegacyAgentID 仅用于读取旧 YAML 的 agent_id；加载后合并进 NodeID 并清空。
 	LegacyAgentID string      `yaml:"agent_id,omitempty"`
 	Agent         AgentConfig `yaml:"agent"`
+	User          UserConfig  `yaml:"user"`
+	Onboarding    OnboardingConfig `yaml:"onboarding"`
 	Listen        ListenConfig    `yaml:"listen"`
 	Local         LocalConfig     `yaml:"local"`
 	Groups        []string        `yaml:"groups"`
@@ -45,6 +47,19 @@ type Config struct {
 	Multimodal        MultimodalConfig        `yaml:"multimodal"`
 	Browser           BrowserConfig           `yaml:"browser"`
 	WeCom             WeComConfig             `yaml:"wecom"`
+}
+
+// UserConfig 描述本机使用者身份（与 Node 展示名 agent.name 分开）。
+type UserConfig struct {
+	// PreferredName 为「怎么称呼你」；首配页与设置可写。
+	PreferredName string `yaml:"preferred_name"`
+}
+
+// OnboardingConfig 控制首次进入 Web UI 的门闩状态。
+type OnboardingConfig struct {
+	// NodeProfileCompleted 为 nil 时视为已完成（兼容升级前已有 node_settings 的安装）；
+	// 产品种子显式写 false，未完成前不启动 Manage Registrar / Workgroup Dialer。
+	NodeProfileCompleted *bool `yaml:"node_profile_completed"`
 }
 
 // MultimodalConfig 控制 user 多模态输入（content_parts 图片）与 read_image vision 注入。

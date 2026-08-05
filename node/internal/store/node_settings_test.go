@@ -65,4 +65,7 @@ func TestBootstrapNodeSettings_seedsProductDefaults(t *testing.T) {
 	if !cfg.Triggers.Enabled || !cfg.ChildAgents.Enabled {
 		t.Fatal("expected triggers/child_agents enabled")
 	}
+	if cfg.NodeProfileCompleted() {
+		t.Fatal("product seed should require first-run node profile")
+	}
 }
