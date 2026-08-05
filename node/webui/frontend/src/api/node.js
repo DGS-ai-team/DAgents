@@ -94,7 +94,6 @@ export function createAgent(payload = {}) {
     if (name) body.display_name = name;
   }
   if (payload.origin) body.origin = payload.origin;
-  if (payload.sandbox && typeof payload.sandbox === "object") body.sandbox = payload.sandbox;
   if (payload.defaults && typeof payload.defaults === "object") body.defaults = payload.defaults;
   return apiFetch("/v1/agents", { method: "POST", body });
 }
@@ -115,7 +114,6 @@ export function patchAgent(agentId, patch = {}) {
   if (patch.llm_active != null || patch.llmActive != null) {
     body.llm_active = patch.llm_active ?? patch.llmActive;
   }
-  if (patch.sandbox && typeof patch.sandbox === "object") body.sandbox = patch.sandbox;
   if (patch.defaults && typeof patch.defaults === "object") body.defaults = patch.defaults;
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body });
 }

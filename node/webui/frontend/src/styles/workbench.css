@@ -2805,10 +2805,6 @@
   white-space: nowrap;
 }
 
-.agent-list-item__glyph--sandbox {
-  color: var(--color-text-subtle);
-}
-
 .agent-list-item__time {
   min-width: 1.6em;
   text-align: right;
