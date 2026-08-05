@@ -39,6 +39,14 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 self.assertTrue(wid.startswith("wg_"))
                 self.assertEqual(body["acl"]["owners"], ["node-a"])
 
+                patched = client.patch(
+                    f"/v1/workgroups/{wid}",
+                    json={"llm_profile_id": "deepseek-v4-flash"},
+                )
+                self.assertEqual(patched.status_code, 200, patched.text)
+                self.assertEqual(patched.json()["llm_profile_id"], "deepseek-v4-flash")
+                self.assertEqual(patched.json()["llm_profile_revision"], "2")
+
                 acl = client.patch(
                     f"/v1/workgroups/{wid}/acl",
                     json={"collaborators": ["node-b"], "expected_revision": 1},

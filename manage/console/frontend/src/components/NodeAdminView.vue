@@ -6,20 +6,12 @@ import ExternalToolsView from "./ExternalToolsView.vue";
 import PluginsView from "./PluginsView.vue";
 import ReleasesView from "./ReleasesView.vue";
 
-const props = defineProps({
+defineProps({
   active: { type: Boolean, default: false },
 });
 const emit = defineEmits(["toast"]);
 
 const tab = ref("llm");
-
-const TAB_HINTS = {
-  llm: "多 Node 共用的 LLM 端点与模型配置",
-  skills: "Skill 包上传、草稿发布与目录分发",
-  externaltools: "外置 CLI / 二进制上传、发布与目录分发（`.runtime/externaltools/`）",
-  plugins: "Hook Plugin（.so）上传、发布与目录分发",
-  releases: "本地助手安装包版本发布与 latest 标记",
-};
 </script>
 
 <template>
@@ -33,7 +25,7 @@ const TAB_HINTS = {
         :aria-selected="tab === 'llm'"
         @click="tab = 'llm'"
       >
-        LLM 配置
+        LLM
       </button>
       <button
         type="button"
@@ -76,7 +68,6 @@ const TAB_HINTS = {
         版本发布
       </button>
     </nav>
-    <p class="node-admin-hint muted">{{ TAB_HINTS[tab] }}</p>
 
     <LLMView
       v-if="tab === 'llm'"
@@ -107,8 +98,13 @@ const TAB_HINTS = {
 </template>
 
 <style scoped>
-.node-admin-hint {
-  margin: -8px 0 16px;
-  font-size: 0.875rem;
+.node-admin {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.node-admin :deep(.subtabs) {
+  margin-bottom: 0;
 }
 </style>

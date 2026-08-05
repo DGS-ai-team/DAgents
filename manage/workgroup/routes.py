@@ -38,6 +38,7 @@ from manage.workgroup.models import (
     WorkGroupACL,
     WorkGroupCreateRequest,
     WorkGroupMember,
+    WorkGroupPatchRequest,
 )
 from manage.workgroup.store import WorkGroupStore
 from manage.workgroup.turn_kernel import TurnKernel
@@ -100,9 +101,14 @@ def build_workgroup_router(
         request: Request,
         subscribed_by: str | None = None,
         acl_member: str | None = None,
+        include_archived: bool = False,
     ) -> list[WorkGroup]:
         authenticate(request)
-        return store.list_workgroups(subscribed_by=subscribed_by, acl_member=acl_member)
+        return store.list_workgroups(
+            subscribed_by=subscribed_by,
+            acl_member=acl_member,
+            include_archived=include_archived,
+        )
 
     @router.get("/{workgroup_id}", response_model=WorkGroup)
     def get_workgroup(workgroup_id: str, request: Request) -> WorkGroup:
@@ -110,6 +116,16 @@ def build_workgroup_router(
         group = store.get_workgroup(workgroup_id)
         if group is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        return group
+
+    @router.patch("/{workgroup_id}", response_model=WorkGroup)
+    def patch_workgroup(workgroup_id: str, req: WorkGroupPatchRequest, request: Request) -> WorkGroup:
+        auth = authenticate(request)
+        try:
+            group = store.patch_workgroup(workgroup_id, req)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(actor=audit_actor(request, auth), action="workgroup.patch", target_agent_id=workgroup_id)
         return group
 
     @router.get("/{workgroup_id}/llm-configs", response_model=list[LLMConfigMasked])

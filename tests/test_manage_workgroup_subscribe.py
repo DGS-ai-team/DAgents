@@ -19,7 +19,7 @@ from manage.workgroup.store import WorkGroupStore  # noqa: E402
 
 class WorkgroupSubscribeTests(unittest.TestCase):
     def test_creator_auto_subscribe_and_acl_gate(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
             group, _ = store.create_workgroup(
                 WorkGroupCreateRequest(display_name="Demo", created_by_node_id="node-a")
@@ -46,6 +46,27 @@ class WorkgroupSubscribeTests(unittest.TestCase):
             acl_list = store.list_workgroups(acl_member="node-b")
             self.assertEqual(len(acl_list), 1)
             self.assertEqual(acl_list[0].workgroup_id, wid)
+
+    def test_list_excludes_archived_by_default(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            active, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="Live", created_by_node_id="node-a")
+            )
+            gone, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="Gone", created_by_node_id="node-a")
+            )
+            store.begin_archive(gone.workgroup_id)
+            if store.get_workgroup(gone.workgroup_id).status != "archived":
+                store.begin_archive(gone.workgroup_id)
+
+            listed = store.list_workgroups()
+            self.assertEqual([g.workgroup_id for g in listed], [active.workgroup_id])
+
+            all_groups = store.list_workgroups(include_archived=True)
+            ids = {g.workgroup_id for g in all_groups}
+            self.assertIn(active.workgroup_id, ids)
+            self.assertIn(gone.workgroup_id, ids)
 
 
 if __name__ == "__main__":

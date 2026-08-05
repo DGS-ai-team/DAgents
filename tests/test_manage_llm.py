@@ -120,3 +120,93 @@ class LLMAllowedGroupsTest(unittest.TestCase):
         self._create("sec-default", ["sec"], is_default=True)
         self.assertEqual(self.c.get("/v1/llm/configs/default/resolve", headers=self._h(self.MEMBER)).status_code, 404)
         self.assertEqual(self.c.get("/v1/llm/configs/default/resolve", headers=self._h(self.ADMIN)).status_code, 200)
+
+
+class LLMUpdatePreserveKeyTest(unittest.TestCase):
+    def test_put_empty_key_keeps_existing(self):
+        c = _client()
+        body = dict(
+            name="keep-key",
+            provider="openai",
+            base_url="http://127.0.0.1:8318/v1",
+            model="m1",
+            api_key="sk-abcd1234",
+            is_default=True,
+        )
+        cid = c.post("/v1/llm/configs", json=body).json()["id"]
+        upd = dict(
+            name="keep-key",
+            provider="openai",
+            base_url="http://127.0.0.1:8318/v1",
+            model="m2",
+            api_key="",
+            is_default=True,
+        )
+        r = c.put(f"/v1/llm/configs/{cid}", json=upd)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json().get("has_api_key"))
+        self.assertEqual(r.json()["model"], "m2")
+        self.assertEqual(
+            c.get(f"/v1/llm/configs/{cid}/resolve").json()["apiKey"],
+            "sk-abcd1234",
+        )
+
+    def test_put_clear_api_key(self):
+        c = _client()
+        body = dict(
+            name="clear-key",
+            provider="openai",
+            base_url="http://h/v1",
+            model="m",
+            api_key="sk-abcd1234",
+        )
+        cid = c.post("/v1/llm/configs", json=body).json()["id"]
+        upd = dict(
+            name="clear-key",
+            provider="openai",
+            base_url="http://h/v1",
+            model="m",
+            api_key="",
+            clear_api_key=True,
+        )
+        r = c.put(f"/v1/llm/configs/{cid}", json=upd)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json().get("has_api_key"))
+        self.assertEqual(c.get(f"/v1/llm/configs/{cid}/resolve").json()["apiKey"], "")
+
+
+class LLMProbeHelpersTest(unittest.TestCase):
+    def test_suggest_provider(self):
+        from manage.llm.probe import suggest_provider_from_base_url
+
+        self.assertEqual(suggest_provider_from_base_url("https://api.deepseek.com"), "deepseek")
+        self.assertEqual(
+            suggest_provider_from_base_url("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            "qwen",
+        )
+        self.assertEqual(suggest_provider_from_base_url("http://127.0.0.1:8000/v1"), "vllm")
+
+    def test_probe_models_parses_list(self):
+        from manage.llm import probe as probe_mod
+
+        class _Resp:
+            status = 200
+
+            def read(self, _n):
+                return b'{"data":[{"id":"a"},{"id":"b"},{"id":"a"}]}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        prev = probe_mod.urllib.request.urlopen
+        probe_mod.urllib.request.urlopen = lambda *a, **k: _Resp()
+        try:
+            out = probe_mod.probe_models("http://127.0.0.1:8000/v1", "sk-x")
+            self.assertEqual([m["id"] for m in out["models"]], ["a", "b"])
+            self.assertEqual(out["suggested_provider"], "vllm")
+        finally:
+            probe_mod.urllib.request.urlopen = prev
+

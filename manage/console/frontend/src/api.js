@@ -78,7 +78,7 @@ export async function fetchAudit(limit = 100) {
   return apiFetch("/v1/admin/audit", { limit });
 }
 
-// --- LLM ?????? ---
+// --- LLM ?? ---
 export async function fetchLLMConfigs() {
   return apiFetch("/v1/llm/configs");
 }
@@ -87,12 +87,20 @@ export async function createLLMConfig(body) {
   return apiFetch("/v1/llm/configs", {}, { method: "POST", body });
 }
 
+export async function updateLLMConfig(id, body) {
+  return apiFetch(`/v1/llm/configs/${encodeURIComponent(id)}`, {}, { method: "PUT", body });
+}
+
 export async function deleteLLMConfig(id) {
   return apiFetch(`/v1/llm/configs/${encodeURIComponent(id)}`, {}, { method: "DELETE" });
 }
 
 export async function resolveLLMConfig(id) {
   return apiFetch(`/v1/llm/configs/${encodeURIComponent(id)}/resolve`);
+}
+
+export async function probeLLMModels(body) {
+  return apiFetch("/v1/llm/probe-models", {}, { method: "POST", body });
 }
 
 // --- Skills ?? ---
@@ -285,6 +293,10 @@ export async function createWorkgroup(body) {
   return apiFetch("/v1/workgroups", {}, { method: "POST", body });
 }
 
+export async function patchWorkgroup(workgroupId, body) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}`, {}, { method: "PATCH", body });
+}
+
 export async function archiveWorkgroup(workgroupId) {
   return apiFetch(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/archive`,
@@ -299,6 +311,20 @@ export async function fetchWorkgroupTimeline(workgroupId) {
 
 export async function fetchWorkgroupLLMConfigs(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/llm-configs`);
+}
+
+export async function fetchWorkgroupMembers(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/members`);
+}
+
+export async function fetchWorkgroupMemberSpec(workgroupId, memberId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/spec`,
+  );
+}
+
+export async function fetchWorkgroupACL(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/acl`);
 }
 
 export async function postWorkgroupMessage(workgroupId, body) {

@@ -9,12 +9,13 @@ const props = defineProps({
   healthOnline: { type: Boolean, default: false },
   sessionLabel: { type: String, default: "" },
   lastRefreshed: { type: String, default: "—" },
-  refreshing: { type: Boolean, default: false },
+  /** 对话独立浏览器页：隐藏模块导航 */
+  hideModules: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["navigate", "logout", "refresh"]);
+const emit = defineEmits(["navigate", "logout"]);
 
-const showModuleNav = computed(() => props.variant === "app");
+const showModuleNav = computed(() => props.variant === "app" && !props.hideModules);
 const adminOpen = ref(false);
 const adminWrap = ref(null);
 
@@ -98,7 +99,7 @@ onBeforeUnmount(() => {
     </nav>
     <div v-else class="topnav-spacer" aria-hidden="true" />
 
-    <div class="topnav-meta">
+    <div v-if="!hideModules" class="topnav-meta">
       <span
         class="topnav-health"
         :class="{ 'is-online': healthOnline }"
@@ -109,7 +110,6 @@ onBeforeUnmount(() => {
       <span v-if="sessionLabel" class="topnav-session" :title="sessionLabel">
         {{ sessionLabel }}
       </span>
-      <span class="last-refreshed" aria-live="polite">{{ lastRefreshed }}</span>
       <button
         type="button"
         class="theme-toggle"
@@ -135,17 +135,8 @@ onBeforeUnmount(() => {
           />
         </svg>
       </button>
-      <button
-        type="button"
-        class="btn btn-ghost"
-        :class="{ 'is-loading': refreshing }"
-        :disabled="refreshing"
-        @click="emit('refresh')"
-      >
-        刷新
-      </button>
 
-      <div ref="adminWrap" class="topnav-admin">
+      <div v-if="!hideModules" ref="adminWrap" class="topnav-admin">
         <button
           type="button"
           class="topnav-admin-btn"

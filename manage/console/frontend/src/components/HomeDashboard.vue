@@ -32,7 +32,7 @@ const modules = [
   {
     id: "workgroup",
     label: "工作组",
-    hint: "创建、修改协作组，或进入与 Supervisor 对话",
+    hint: "创建、修改协作组，或进入与协作组协同工作",
     tone: "workgroup",
   },
   {

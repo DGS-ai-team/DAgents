@@ -70,7 +70,11 @@ export const VIEW_META = {
   },
   workgroup: {
     title: "工作组",
-    subtitle: "创建与管理协作组，修改设置或与 Supervisor 对话",
+    subtitle: "创建与管理协作组及配置",
+  },
+  chat: {
+    title: "对话",
+    subtitle: "与工作组 Supervisor 对话",
   },
   templates: {
     title: "Agent 模板",
@@ -90,7 +94,7 @@ export const VIEW_META = {
   },
   settings: {
     title: "配置",
-    subtitle: "LLM 配置、版本发布与系统偏好",
+    subtitle: "控制面共享的 LLM、版本发布与案例库",
   },
   cases: {
     title: "案例库",

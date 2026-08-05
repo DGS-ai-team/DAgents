@@ -1,7 +1,15 @@
 from __future__ import annotations
 import time
 from fastapi import APIRouter, HTTPException, Request
-from manage.llm.models import LLMConfig, LLMConfigCreate, LLMConfigMasked, LLMResolved
+from manage.llm.models import (
+    LLMConfig,
+    LLMConfigCreate,
+    LLMConfigMasked,
+    LLMProbeRequest,
+    LLMProbeResponse,
+    LLMResolved,
+)
+from manage.llm.probe import probe_models
 from manage.llm.store import LLMConfigStore
 from manage.platform.audit import AuditLog
 from manage.platform.auth import authenticate, require_admin
@@ -33,6 +41,23 @@ def build_llm_router(store: LLMConfigStore, audit: AuditLog) -> APIRouter:
         if not cfg or not auth.allows_resource_groups(cfg.allowed_groups):
             raise HTTPException(status_code=404, detail="no default llm config")
         return store.resolve(cfg)
+
+    @router.post("/probe-models", response_model=LLMProbeResponse)
+    def probe_llm_models(payload: LLMProbeRequest, request: Request) -> LLMProbeResponse:
+        auth = authenticate(request)
+        require_admin(auth)
+        api_key = (payload.api_key or "").strip()
+        config_id = (payload.config_id or "").strip()
+        if not api_key and config_id:
+            cfg = store.get(config_id)
+            if not cfg:
+                raise HTTPException(status_code=404, detail="config not found")
+            api_key = cfg.api_key or ""
+        try:
+            result = probe_models(payload.base_url, api_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return LLMProbeResponse(**result)
 
     @router.get("/configs/{cfg_id}", response_model=LLMConfigMasked)
     def get_config(cfg_id: str, request: Request) -> LLMConfigMasked:
