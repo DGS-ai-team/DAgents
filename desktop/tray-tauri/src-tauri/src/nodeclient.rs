@@ -79,6 +79,19 @@ pub struct UpgradeReadiness {
     pub active_session_ids: Vec<String>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct BootstrapOnboarding {
+    #[serde(default)]
+    onboarding: BootstrapOnboardingFlags,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct BootstrapOnboardingFlags {
+    /// 缺省视为已完成（与 Node 侧 nil=completed 对齐）；仅显式 false 触发首配。
+    #[serde(default)]
+    node_profile_completed: Option<bool>,
+}
+
 impl Client {
     pub fn new(base: &str) -> Self {
         Self {
@@ -128,6 +141,24 @@ impl Client {
         }
         resp.into_json()
             .map_err(|e| format!("upgrade-readiness JSON: {e}"))
+    }
+
+    /// 查询 Node 是否尚未完成 Web UI 首配。失败时返回 false（不强制改写目标 URL）。
+    pub fn node_profile_incomplete(&self) -> bool {
+        if self.base.is_empty() {
+            return false;
+        }
+        let req = self.authorize(ureq::get(&format!("{}/v1/ui/bootstrap", self.base)));
+        let Ok(resp) = req.timeout(Duration::from_secs(5)).call() else {
+            return false;
+        };
+        if resp.status() != 200 {
+            return false;
+        }
+        let Ok(body) = resp.into_json::<BootstrapOnboarding>() else {
+            return false;
+        };
+        body.onboarding.node_profile_completed == Some(false)
     }
 
     pub fn stream_events<F>(&self, stop: &AtomicBool, mut handler: F) -> Result<(), String>
