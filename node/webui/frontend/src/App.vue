@@ -81,17 +81,23 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="!bootReady" class="app-boot">加载中…</div>
-  <FirstRunNodeProfile v-else-if="needProfile" @completed="onProfileCompleted" />
-  <div v-else-if="bootError" class="app-boot app-boot--error">{{ bootError }}</div>
-  <template v-else>
-    <RouterView v-slot="{ Component }">
-      <KeepAlive include="ChatLayout">
-        <component :is="Component" />
-      </KeepAlive>
-    </RouterView>
-    <ImageLightbox />
-  </template>
+  <Transition name="app-shell" mode="out-in">
+    <div v-if="!bootReady" key="boot" class="app-boot">加载中…</div>
+    <FirstRunNodeProfile
+      v-else-if="needProfile"
+      key="onboarding"
+      @completed="onProfileCompleted"
+    />
+    <div v-else-if="bootError" key="error" class="app-boot app-boot--error">{{ bootError }}</div>
+    <div v-else key="app">
+      <RouterView v-slot="{ Component }">
+        <KeepAlive include="ChatLayout">
+          <component :is="Component" />
+        </KeepAlive>
+      </RouterView>
+      <ImageLightbox />
+    </div>
+  </Transition>
 </template>
 
 <style scoped>
@@ -106,5 +112,21 @@ onUnmounted(() => {
   color: var(--color-danger);
   padding: var(--space-6);
   text-align: center;
+}
+
+.app-shell-enter-active,
+.app-shell-leave-active {
+  transition: opacity 0.35s ease;
+}
+.app-shell-enter-from,
+.app-shell-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell-enter-active,
+  .app-shell-leave-active {
+    transition: none;
+  }
 }
 </style>

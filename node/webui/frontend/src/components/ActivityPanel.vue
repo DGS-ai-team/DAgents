@@ -101,10 +101,20 @@ function truncateCmd(cmd, max = 64) {
   return `${s.slice(0, max)}…`;
 }
 
+function isAgentMissingError(err) {
+  const msg = String(err?.message || err || "");
+  return (
+    msg.includes("agent 不存在") ||
+    msg.includes("尚未激活") ||
+    msg.includes("agent_not_found")
+  );
+}
+
 async function refresh() {
   const id = agentStore.agentId?.trim();
   if (!id) {
     remote.value = null;
+    error.value = "";
     return;
   }
   loading.value = true;
@@ -112,7 +122,11 @@ async function refresh() {
   try {
     remote.value = await api.getWorkspaceActivity(id);
   } catch (e) {
-    error.value = e.message || "加载失败";
+    remote.value = null;
+    // 首配/尚未激活等：按空活动处理，避免吓人的错误条
+    if (!isAgentMissingError(e)) {
+      error.value = e.message || "加载失败";
+    }
   } finally {
     loading.value = false;
   }
