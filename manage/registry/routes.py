@@ -8,7 +8,14 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from manage.platform.audit import AuditLog
-from manage.platform.auth import AuthContext, audit_actor, authenticate, ensure_node_identity, extract_agent_id
+from manage.platform.auth import (
+    AuthContext,
+    audit_actor,
+    authenticate,
+    ensure_node_identity,
+    extract_agent_id,
+    require_admin,
+)
 from manage.platform.metrics import record_registry_operation
 from manage.registry.models import (
     AgentDeregisterRequest,
@@ -159,6 +166,40 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
         )
         record_registry_operation(operation="update_groups", status="ok")
         return record
+
+    @router.get("/v1/registry/discovery-groups")
+    def list_discovery_groups(request: Request) -> list[dict]:
+        auth = authenticate(request)
+        require_admin(auth)
+        return store.list_discovery_groups()
+
+    @router.post("/v1/registry/discovery-groups")
+    def create_discovery_group(request: Request, body: dict) -> dict:
+        auth = authenticate(request)
+        require_admin(auth)
+        name = str((body or {}).get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="name required")
+        try:
+            group = store.create_discovery_group(name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        audit.record(actor=audit_actor(request, auth), action="registry.discovery_group.create", detail={"name": name})
+        return group
+
+    @router.delete("/v1/registry/discovery-groups/{name}")
+    def delete_discovery_group(name: str, request: Request, detach_nodes: bool = True) -> dict:
+        auth = authenticate(request)
+        require_admin(auth)
+        ok = store.delete_discovery_group(name, detach_nodes=detach_nodes)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"group={name!r} 不存在")
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="registry.discovery_group.delete",
+            detail={"name": name, "detach_nodes": detach_nodes},
+        )
+        return {"deleted": True, "name": name}
 
     @router.get("/v1/registry/agents", response_model=AgentListResponse)
     def list_agents(

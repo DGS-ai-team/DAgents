@@ -37,6 +37,7 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 body = created.json()
                 wid = body["workgroup"]["workgroup_id"]
                 self.assertTrue(wid.startswith("wg_"))
+                self.assertEqual(body["workgroup"]["status"], "configuring")
                 self.assertEqual(body["acl"]["owners"], ["node-a"])
 
                 patched = client.patch(
@@ -71,29 +72,27 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 self.assertEqual(spec_get.json()["digest"], spec["digest"])
                 self.assertEqual(spec_get.json()["tools"]["allow_names"], ["read_file"])
 
-                # ACL 不足以派发
-                denied = client.post(
+                # 未发布不可派发 / 对话
+                denied_assign = client.post(
                     f"/v1/workgroups/{wid}/assigns",
                     json={"member_id": mid, "instruction": "read README"},
                 )
-                self.assertEqual(denied.status_code, 403, denied.text)
-                self.assertEqual(denied.json()["detail"]["code"], "not_authorized")
+                self.assertEqual(denied_assign.status_code, 409, denied_assign.text)
+                self.assertEqual(denied_assign.json()["detail"]["code"], "workgroup_not_published")
 
-                grant_resp = client.post(
-                    f"/v1/workgroups/{wid}/grants",
-                    json={"member_id": mid},
+                denied_msg = client.post(
+                    f"/v1/workgroups/{wid}/messages",
+                    json={"text": "读 README", "from_node_id": "node-a"},
+                    headers={"x-dagents-agent-id": "node-a"},
                 )
-                self.assertEqual(grant_resp.status_code, 200, grant_resp.text)
-                grant_id = grant_resp.json()["grant_id"]
+                self.assertEqual(denied_msg.status_code, 409, denied_msg.text)
+                self.assertEqual(denied_msg.json()["detail"]["code"], "workgroup_not_published")
 
-                accepted = client.post(
-                    f"/v1/workgroups/{wid}/grants/{grant_id}/accept",
-                    json={"member_spec_digest": spec["digest"]},
-                    headers={"x-dagents-agent-id": "node-b"},
-                )
-                self.assertEqual(accepted.status_code, 200, accepted.text)
-                self.assertEqual(accepted.json()["status"], "accepted")
+                published = client.post(f"/v1/workgroups/{wid}/publish")
+                self.assertEqual(published.status_code, 200, published.text)
+                self.assertEqual(published.json()["status"], "active")
 
+                # 创建成员后即可派发（无需 Grant）
                 assign = client.post(
                     f"/v1/workgroups/{wid}/assigns",
                     json={"member_id": mid, "instruction": "read README"},
@@ -172,9 +171,7 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 )
                 self.assertEqual(join.status_code, 200, join.text)
 
-                # Grant accept 入队 provision outbox
-                grant_id = grant_resp.json()["grant_id"]
-                # 再建一个成员专测 accept→provision（上面 member 已有 grant）
+                # 创建成员即入队 provision outbox
                 m2 = client.post(
                     f"/v1/workgroups/{wid}/members",
                     json={
@@ -184,16 +181,7 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(m2.status_code, 200, m2.text)
-                mid2 = m2.json()["member"]["member_id"]
-                digest2 = m2.json()["spec"]["digest"]
-                g2 = client.post(f"/v1/workgroups/{wid}/grants", json={"member_id": mid2})
-                self.assertEqual(g2.status_code, 200, g2.text)
-                accepted2 = client.post(
-                    f"/v1/workgroups/{wid}/grants/{g2.json()['grant_id']}/accept",
-                    json={"member_spec_digest": digest2},
-                    headers={"x-dagents-agent-id": "node-b"},
-                )
-                self.assertEqual(accepted2.status_code, 200, accepted2.text)
+                self.assertEqual(m2.json()["member"]["status"], "provisioning")
                 outbox = client.get(f"/v1/workgroups/{wid}/outbox", params={"unacked_only": True})
                 self.assertEqual(outbox.status_code, 200, outbox.text)
                 types = [f["type"] for f in outbox.json()]
@@ -205,8 +193,6 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 all_hitl = client.get(f"/v1/workgroups/{wid}/hitl", params={"pending_only": False})
                 self.assertEqual(all_hitl.status_code, 200, all_hitl.text)
                 self.assertEqual(len(all_hitl.json()), 1)
-
-                _ = grant_id  # keep first grant path exercised above
 
 
 if __name__ == "__main__":

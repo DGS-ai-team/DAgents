@@ -16,9 +16,6 @@ func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/members", s.handleListWorkgroupMembers)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/members", s.handleCreateWorkgroupMember)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/members/{memberId}/spec", s.handleGetWorkgroupMemberSpec)
-	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/grants", s.handleListWorkgroupGrants)
-	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/grants", s.handleInviteWorkgroupGrant)
-	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/grants/{grantId}/accept", s.handleAcceptWorkgroupGrant)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/hitl", s.handleListWorkgroupHITL)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/hitl", s.handleCreateWorkgroupHITL)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/hitl/{hitlId}/resolve", s.handleResolveWorkgroupHITL)
@@ -169,62 +166,6 @@ func (s *Server) handleGetWorkgroupMemberSpec(w http.ResponseWriter, r *http.Req
 	wid := strings.TrimSpace(r.PathValue("workgroupId"))
 	mid := strings.TrimSpace(r.PathValue("memberId"))
 	out, err := s.control.GetWorkgroupMemberSpec(r.Context(), wid, mid)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) handleListWorkgroupGrants(w http.ResponseWriter, r *http.Request) {
-	if !s.workgroupProxyReady(w) {
-		return
-	}
-	wid := strings.TrimSpace(r.PathValue("workgroupId"))
-	items, err := s.control.ListWorkgroupGrants(r.Context(), wid)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"grants": items, "node_id": s.cfg.NodeID})
-}
-
-func (s *Server) handleInviteWorkgroupGrant(w http.ResponseWriter, r *http.Request) {
-	if !s.workgroupProxyReady(w) {
-		return
-	}
-	wid := strings.TrimSpace(r.PathValue("workgroupId"))
-	var body struct {
-		MemberID       string   `json:"member_id"`
-		ToolAllowNames []string `json:"tool_allow_names"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "invalid json", nil)
-		return
-	}
-	if strings.TrimSpace(body.MemberID) == "" {
-		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "member_id required", nil)
-		return
-	}
-	out, err := s.control.InviteWorkgroupGrant(r.Context(), wid, body.MemberID, body.ToolAllowNames)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) handleAcceptWorkgroupGrant(w http.ResponseWriter, r *http.Request) {
-	if !s.workgroupProxyReady(w) {
-		return
-	}
-	wid := strings.TrimSpace(r.PathValue("workgroupId"))
-	gid := strings.TrimSpace(r.PathValue("grantId"))
-	var body struct {
-		MemberSpecDigest string `json:"member_spec_digest"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	out, err := s.control.AcceptWorkgroupGrant(r.Context(), wid, gid, body.MemberSpecDigest)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
 		return

@@ -15,7 +15,6 @@ from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
 from manage.workgroup.llm_chat import ChatResult, MockLLMClient  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
-    GrantInviteRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
@@ -38,6 +37,7 @@ class LeaderLoopTests(unittest.TestCase):
                     llm_profile_revision="1",
                 )
             )
+            store.publish_workgroup(group.workgroup_id)
             kernel = TurnKernel(store, mock_llm=True)
             result = kernel.handle_human_message(
                 group.workgroup_id,
@@ -73,12 +73,9 @@ class LeaderLoopTests(unittest.TestCase):
                 allow_tool_names=["read_file"],
             ),
         )
-        grant = store.invite_grant(
-            group.workgroup_id,
-            GrantInviteRequest(member_id=member.member_id, tool_allow_names=["read_file"]),
-        )
-        store.accept_grant(grant.grant_id, home_node_id="node-b", member_spec_digest=spec.digest)
+        _ = spec
         store.mark_member_status(member.member_id, "ready", workgroup_id=group.workgroup_id)
+        store.publish_workgroup(group.workgroup_id)
         return group.workgroup_id, member.member_id
 
     def test_human_message_drives_assign_then_final(self) -> None:
@@ -129,6 +126,7 @@ class LeaderLoopTests(unittest.TestCase):
                     llm_profile_revision="1",
                 )
             )
+            store.publish_workgroup(group.workgroup_id)
             script = [ChatResult(content="你好世界，这是流式回复", finish_reason="stop")]
             kernel = TurnKernel(store, chat_client=MockLLMClient(script), mock_llm=True)
             events = list(

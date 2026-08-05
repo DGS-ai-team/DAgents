@@ -138,6 +138,7 @@ class TurnKernel:
     ):
         """写入 Timeline 并驱动 Leader loop，产出 SSE 友好事件。"""
         self._store.assert_acl_member(workgroup_id, from_node_id)
+        self._store.require_active(workgroup_id)
         event = self._store.append_timeline(
             workgroup_id,
             type="human_message",

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **首配未完成时托盘打开强制进首配页**：Tauri 检测到 `node_profile_completed=false` 时一律导航/刷新到 `/ui/`（不再同 URL 仅聚焦）；Go 托盘深链同样回落控制台首页。Web UI 在窗口重新可见时会再次检查 bootstrap，避免启动竞态误判为已完成。
+
 ### 新增
 
 - **首次进入 Web UI 的 Node 身份首配页**：开箱未完成时全屏三步收集主题、「怎么称呼你 / Node 名称」与一条 LLM 配置，写入 `user.preferred_name` / `agent.name` / `llm.profiles` 与 `onboarding.node_profile_completed`；未完成前拦截本机业务 API（仅放行 bootstrap / setup / LLM 探测 / `/ui` 静态资源与探活），且不启动 Manage Registrar / Workgroup Dialer（升级遗留库视为已完成）。

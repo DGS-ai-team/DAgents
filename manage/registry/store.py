@@ -81,6 +81,7 @@ class AgentRegistryStore:
     def __init__(self, db: SQLiteDatabase | None = None) -> None:
         self._lock = threading.RLock()
         self._records: dict[str, AgentStoredRecord] = {}
+        self._group_catalog: set[str] = set()
         self._db = db
         self._load_from_db()
 
@@ -128,12 +129,80 @@ class AgentRegistryStore:
                 return None
             now_unix = int(time.time())
             data = existing.model_dump(mode="python")
-            data["discovery_group"] = discovery_group
+            cleaned = [g.strip() for g in discovery_group if str(g).strip()]
+            data["discovery_group"] = cleaned
             data["updated_at_unix"] = now_unix
             stored = AgentStoredRecord.model_validate(data)
             self._records[agent_id] = stored
+            for name in cleaned:
+                self._group_catalog.add(name)
             self._persist_locked()
+            self._persist_catalog_locked()
             return stored_to_public(stored, now_unix=now_unix)
+
+    def list_discovery_groups(self) -> list[dict[str, object]]:
+        """聚合目录 + 节点上已出现的 discovery_group。"""
+        with self._lock:
+            names = set(self._group_catalog)
+            members: dict[str, list[str]] = {n: [] for n in names}
+            for rec in self._records.values():
+                for g in rec.discovery_group:
+                    name = str(g).strip()
+                    if not name:
+                        continue
+                    names.add(name)
+                    members.setdefault(name, []).append(rec.agent_id)
+            rows: list[dict[str, object]] = []
+            for name in sorted(names):
+                node_ids = sorted(set(members.get(name, [])))
+                rows.append(
+                    {
+                        "name": name,
+                        "node_count": len(node_ids),
+                        "node_ids": node_ids,
+                        "in_catalog": name in self._group_catalog,
+                    }
+                )
+            return rows
+
+    def create_discovery_group(self, name: str) -> dict[str, object]:
+        cleaned = name.strip()
+        if not cleaned:
+            raise ValueError("group name required")
+        with self._lock:
+            self._group_catalog.add(cleaned)
+            self._persist_catalog_locked()
+            node_ids = sorted(
+                rec.agent_id for rec in self._records.values() if cleaned in rec.discovery_group
+            )
+            return {
+                "name": cleaned,
+                "node_count": len(node_ids),
+                "node_ids": node_ids,
+                "in_catalog": True,
+            }
+
+    def delete_discovery_group(self, name: str, *, detach_nodes: bool = True) -> bool:
+        cleaned = name.strip()
+        if not cleaned:
+            return False
+        with self._lock:
+            existed = cleaned in self._group_catalog or any(
+                cleaned in rec.discovery_group for rec in self._records.values()
+            )
+            self._group_catalog.discard(cleaned)
+            if detach_nodes:
+                now_unix = int(time.time())
+                for agent_id, rec in list(self._records.items()):
+                    if cleaned not in rec.discovery_group:
+                        continue
+                    data = rec.model_dump(mode="python")
+                    data["discovery_group"] = [g for g in rec.discovery_group if g != cleaned]
+                    data["updated_at_unix"] = now_unix
+                    self._records[agent_id] = AgentStoredRecord.model_validate(data)
+                self._persist_locked()
+            self._persist_catalog_locked()
+            return existed
 
     def heartbeat(self, agent_id: str, payload: AgentHeartbeatRequest) -> AgentRecord | None:
         with self._lock:
@@ -267,6 +336,10 @@ class AgentRegistryStore:
             return
         with self._lock, self._db.connect() as conn:
             rows = conn.execute("SELECT agent_id, payload_json FROM registry_agents").fetchall()
+            try:
+                catalog_rows = conn.execute("SELECT name FROM discovery_group_catalog").fetchall()
+            except Exception:
+                catalog_rows = []
         loaded: dict[str, AgentStoredRecord] = {}
         for row in rows:
             try:
@@ -278,8 +351,27 @@ class AgentRegistryStore:
             migrated = _migrate_stored_dict(raw)
             record = AgentStoredRecord.model_validate(migrated)
             loaded[record.agent_id] = record
+        catalog = {str(row["name"]).strip() for row in catalog_rows if str(row["name"]).strip()}
         with self._lock:
             self._records = loaded
+            self._group_catalog = catalog
+            for rec in loaded.values():
+                for g in rec.discovery_group:
+                    if str(g).strip():
+                        self._group_catalog.add(str(g).strip())
+
+    def _persist_catalog_locked(self) -> None:
+        if self._db is None or not self._db.enabled:
+            return
+        now_unix = int(time.time())
+        with self._db.connect() as conn:
+            conn.execute("DELETE FROM discovery_group_catalog")
+            for name in sorted(self._group_catalog):
+                conn.execute(
+                    "INSERT INTO discovery_group_catalog(name, created_at_unix) VALUES (?, ?)",
+                    (name, now_unix),
+                )
+            conn.commit()
 
     def _persist_locked(self) -> None:
         if self._db is None or not self._db.enabled:

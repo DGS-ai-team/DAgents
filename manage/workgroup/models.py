@@ -22,7 +22,7 @@ class WorkGroup(BaseModel):
     workgroup_id: str = Field(pattern=_WG)
     schema_version: Literal["0.5.0"] = SCHEMA_VERSION
     display_name: str = Field(min_length=1, max_length=128)
-    status: Literal["active", "archiving", "archived"]
+    status: Literal["configuring", "active", "archiving", "archived"]
     created_by_node_id: str = Field(min_length=1, max_length=128)
     llm_profile_id: str = Field(min_length=1)
     llm_profile_revision: str = Field(min_length=1)
