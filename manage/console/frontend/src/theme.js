@@ -1,13 +1,13 @@
 import { reactive } from "vue";
 
-const THEME_KEY = "dagents_webui_theme";
+const THEME_KEY = "dagents_manage_theme";
 const THEMES = new Set(["dark", "light", "system"]);
 
 export const themeStore = reactive({
   /** User preference: dark | light | system */
-  mode: "system",
+  mode: "light",
   /** Resolved appearance applied to document */
-  resolved: "dark",
+  resolved: "light",
 });
 
 let mediaQuery = null;
@@ -15,14 +15,14 @@ let mediaListener = null;
 
 function sanitizeTheme(mode) {
   const m = String(mode || "").toLowerCase();
-  return THEMES.has(m) ? m : "system";
+  return THEMES.has(m) ? m : "light";
 }
 
 function systemPrefersDark() {
   if (typeof window !== "undefined" && window.matchMedia) {
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   }
-  return true;
+  return false;
 }
 
 function resolveAppearance(mode) {
@@ -40,7 +40,7 @@ function readPersistedTheme() {
   } catch {
     // ignore
   }
-  return "system";
+  return "light";
 }
 
 function detachSystemListener() {
@@ -72,7 +72,7 @@ function attachSystemListener() {
 }
 
 function applyResolved(appearance) {
-  const next = appearance === "light" ? "light" : "dark";
+  const next = appearance === "dark" ? "dark" : "light";
   themeStore.resolved = next;
   if (typeof document !== "undefined") {
     document.documentElement.setAttribute("data-theme", next);

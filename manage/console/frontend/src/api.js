@@ -281,6 +281,18 @@ export async function fetchWorkgroups(params = {}) {
   return apiFetch("/v1/workgroups", params);
 }
 
+export async function createWorkgroup(body) {
+  return apiFetch("/v1/workgroups", {}, { method: "POST", body });
+}
+
+export async function archiveWorkgroup(workgroupId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/archive`,
+    {},
+    { method: "POST", body: {} },
+  );
+}
+
 export async function fetchWorkgroupTimeline(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/timeline`);
 }

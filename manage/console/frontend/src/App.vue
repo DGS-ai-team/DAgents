@@ -8,12 +8,15 @@ import {
   loginNode,
   logoutAuth,
 } from "./api.js";
-import AppSidebar from "./components/AppSidebar.vue";
+import AppTopNav from "./components/AppTopNav.vue";
 import AskAiButton from "./components/AskAiButton.vue";
 import DetailDrawer from "./components/DetailDrawer.vue";
 import LoginView from "./components/LoginView.vue";
-import NodeAdminView from "./components/NodeAdminView.vue";
-import CasesView from "./components/CasesView.vue";
+import HomeDashboard from "./components/HomeDashboard.vue";
+import MarketplaceView from "./components/MarketplaceView.vue";
+import TemplatesView from "./components/TemplatesView.vue";
+import PermissionsView from "./components/PermissionsView.vue";
+import SettingsView from "./components/SettingsView.vue";
 import WorkgroupView from "./components/WorkgroupView.vue";
 import PageHeader from "./components/PageHeader.vue";
 import RegistryView from "./components/RegistryView.vue";
@@ -32,7 +35,8 @@ const loginBusy = ref(false);
 const loginError = ref("");
 const loginHint = ref("");
 
-const view = ref("registry");
+const view = ref("home");
+const homeRef = ref(null);
 const refreshing = ref(false);
 const lastRefreshed = ref("—");
 const drawerAgent = ref(null);
@@ -66,7 +70,9 @@ const registry = reactive({
 
 const { toasts, showToast } = useToast();
 
-const viewMeta = computed(() => VIEW_META[view.value] || VIEW_META.registry);
+const viewMeta = computed(() => VIEW_META[view.value] || VIEW_META.home);
+const isHome = computed(() => view.value === "home");
+const shellVariant = computed(() => (isHome.value ? "home" : "app"));
 
 const sessionLabel = computed(() => {
   if (authKind.value === "admin") return `管理员 · ${authSubject.value || "admin"}`;
@@ -113,7 +119,8 @@ function applyAuth(me) {
 
 async function enterHome() {
   await refreshHealth();
-  await loadAgents();
+  view.value = "home";
+  lastRefreshed.value = touchLastRefreshedLabel();
 }
 
 async function bootstrapAuth() {
@@ -182,8 +189,7 @@ async function refreshHealth() {
   try {
     const data = await fetchHealth();
     healthOnline.value = true;
-    const who = sessionLabel.value ? ` · ${sessionLabel.value}` : "";
-    healthLabel.value = `Manage · ${data.agents} nodes${who}`;
+    healthLabel.value = `${data.agents} nodes`;
   } catch {
     healthOnline.value = false;
     healthLabel.value = "Manage 不可达";
@@ -231,10 +237,17 @@ async function loadAgents() {
   }
 }
 
+function normalizeView(nextView) {
+  if (nextView === "registry") return "nodes";
+  if (nextView === "nodeadmin") return "settings";
+  return nextView;
+}
+
 function navigate(nextView) {
-  if (view.value === nextView) return;
-  view.value = nextView;
-  if (nextView === "registry") {
+  const target = normalizeView(nextView);
+  if (view.value === target) return;
+  view.value = target;
+  if (target === "nodes") {
     loadAgents();
   }
 }
@@ -243,7 +256,9 @@ async function onRefresh() {
   refreshing.value = true;
   await refreshHealth();
   try {
-    if (view.value === "registry") {
+    if (view.value === "home") {
+      await homeRef.value?.refresh?.();
+    } else if (view.value === "nodes") {
       registry.page = 1;
       await loadAgents();
     }
@@ -304,66 +319,85 @@ onMounted(() => {
   />
 
   <template v-else>
-    <div class="app-shell">
-      <AppSidebar
+    <div class="app-shell" :class="isHome ? 'app-shell--home' : 'app-shell--app'">
+      <AppTopNav
         :view="view"
+        :variant="shellVariant"
         :health-label="healthLabel"
         :health-online="healthOnline"
         :session-label="sessionLabel"
+        :last-refreshed="lastRefreshed"
+        :refreshing="refreshing"
         @navigate="navigate"
         @logout="onLogout"
+        @refresh="onRefresh"
       />
 
       <div class="main-area">
         <PageHeader
-          :breadcrumb="viewMeta.title"
+          v-if="!isHome"
           :title="viewMeta.title"
           :subtitle="viewMeta.subtitle"
-          :last-refreshed="lastRefreshed"
-          :refreshing="refreshing"
-          @refresh="onRefresh"
         />
 
-        <main class="page-content">
-          <StatsRow
-            v-show="view === 'registry'"
-            :online="stats.online"
-            :offline="stats.offline"
-            :total="stats.total"
-          />
-
-          <RegistryView
-            v-show="view === 'registry'"
-            :agents="registry.agents"
-            :loading="registry.loading"
-            :error="registry.error"
-            :page="registry.page"
-            :total="registry.total"
-            :page-size="registry.pageSize"
-            :filters="registry.filters"
-            :role-hint="registry.roleHint"
-            :list-summary="registry.listSummary"
-            @open="drawerAgent = $event"
-            @filter-change="onRegistryFilterChange"
-            @page-prev="registryPrevPage"
-            @page-next="registryNextPage"
-          />
-
-          <NodeAdminView
-            v-if="view === 'nodeadmin'"
-            :active="view === 'nodeadmin'"
+        <main class="page-content" :class="{ 'page-content--home': isHome }">
+          <HomeDashboard
+            v-if="view === 'home'"
+            ref="homeRef"
+            :active="view === 'home'"
+            @navigate="navigate"
             @toast="showToast($event.message, $event.type)"
-          />
-
-          <CasesView
-            v-if="view === 'cases'"
-            :active="view === 'cases'"
-            @toast="showToast($event.message, $event.type)"
+            @refreshed="lastRefreshed = $event"
           />
 
           <WorkgroupView
             v-if="view === 'workgroup'"
             :active="view === 'workgroup'"
+            @toast="showToast($event.message, $event.type)"
+          />
+
+          <TemplatesView
+            v-if="view === 'templates'"
+            :active="view === 'templates'"
+          />
+
+          <MarketplaceView
+            v-if="view === 'marketplace'"
+            :active="view === 'marketplace'"
+            @toast="showToast($event.message, $event.type)"
+          />
+
+          <template v-if="view === 'nodes'">
+            <StatsRow
+              :online="stats.online"
+              :offline="stats.offline"
+              :total="stats.total"
+            />
+            <RegistryView
+              :agents="registry.agents"
+              :loading="registry.loading"
+              :error="registry.error"
+              :page="registry.page"
+              :total="registry.total"
+              :page-size="registry.pageSize"
+              :filters="registry.filters"
+              :role-hint="registry.roleHint"
+              :list-summary="registry.listSummary"
+              @open="drawerAgent = $event"
+              @filter-change="onRegistryFilterChange"
+              @page-prev="registryPrevPage"
+              @page-next="registryNextPage"
+            />
+          </template>
+
+          <PermissionsView
+            v-if="view === 'permissions'"
+            :active="view === 'permissions'"
+          />
+
+          <SettingsView
+            v-if="view === 'settings'"
+            :active="view === 'settings'"
             @toast="showToast($event.message, $event.type)"
           />
         </main>
