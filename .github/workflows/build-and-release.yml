@@ -144,12 +144,15 @@ jobs:
             packaging/bootstrapper/src-tauri -> target
           shared-key: release-tauri-win
 
-      - name: Build dagents-shell (Windows, Tauri)
+      - name: Build dagents-shell (Windows, Tauri + Go legacy)
         if: matrix.platform == 'windows-amd64'
         shell: bash
         run: |
-          chmod +x scripts/ci/build_dagents_shell_tauri.sh
+          chmod +x scripts/ci/build_dagents_shell_tauri.sh scripts/ci/build_dagents_shell.sh
           OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
+          OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell.sh
+          test -f dist/dagents-shell-tauri.exe
+          test -f dist/dagents-shell-legacy.exe
           test -f dist/dagents-shell.exe
 
       - name: Setup Python (Windows)

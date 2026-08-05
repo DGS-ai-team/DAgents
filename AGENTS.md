@@ -11,7 +11,7 @@ This is a polyglot monorepo (Go Agent Node + Go/Python clients + Vue Web UI + op
 | **Agent Node** (`go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml`) | **Required** | `127.0.0.1:18765`; embeds Web UI at `/ui/` |
 | **Manage** (`python3 run_manage.py`) | Optional | `0.0.0.0:8020` + Console `/console/` |
 | **browser-service** | Optional | Only if testing browser tools |
-| Desktop tray (`desktop/tray-tauri`) | Skip on Linux | Windows-only Tauri Shell；Go `desktop/tray` 已退役 |
+| Desktop tray | Skip on Linux | 推荐 `desktop/tray-tauri`（WebView2）；兼容 `desktop/tray`（Go） |
 
 ### Non-obvious startup caveats
 

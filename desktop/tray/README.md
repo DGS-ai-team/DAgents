@@ -1,6 +1,9 @@
-# `desktop/tray/` — **已退役**（历史 Go Shell）
+# `desktop/tray/` — Windows Desktop Shell（Go 兼容轨）
 
-> **安装包与 CI 已切换为 Tauri Shell**：[`desktop/tray-tauri/`](../tray-tauri/) → `bin/dagents-shell.exe`。  
-> 本目录仅保留源码作对照，**不再参与构建/发布**。`scripts/ci/build_dagents_shell.sh` 已委托 Tauri 构建脚本。
+**Windows 专用**托盘 Shell（Go + 系统浏览器），供安装包「**兼容模式**」使用。
 
-原功能清单与设计见 [`docs/design/windows-desktop-shell.md`](../../docs/design/windows-desktop-shell.md)。
+> **推荐轨** → [`desktop/tray-tauri/`](../tray-tauri/)（Win10/11 + WebView2，内嵌 Web UI）  
+> CI 产物：`dist/dagents-shell-legacy.exe`（`scripts/ci/build_dagents_shell.sh`）  
+> 安装时写入 `bin\dagents-shell.exe`（与 Tauri 轨互斥二选一）
+
+功能与菜单说明见历史实现与 [`docs/design/windows-desktop-shell.md`](../../docs/design/windows-desktop-shell.md)。

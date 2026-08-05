@@ -86,10 +86,13 @@ jobs:
           chmod +x scripts/ci/build_dagents_shell_tauri.sh
           OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
           test -f dist/dagents-shell.exe
+          test -f dist/dagents-shell-tauri.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dagents-shell-windows-amd64
-          path: dist/dagents-shell.exe
+          name: dagents-shell-tauri-windows-amd64
+          path: |
+            dist/dagents-shell.exe
+            dist/dagents-shell-tauri.exe
           if-no-files-found: error

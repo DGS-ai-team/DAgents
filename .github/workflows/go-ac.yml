@@ -5,6 +5,7 @@ on:
     paths:
       - "node/**"
       - "client/**"
+      - "desktop/tray/**"
       - "shared/**"
       - "go.work"
       - "go.work.sum"
@@ -16,6 +17,7 @@ on:
     paths:
       - "node/**"
       - "client/**"
+      - "desktop/tray/**"
       - "shared/**"
       - "go.work"
       - "go.work.sum"

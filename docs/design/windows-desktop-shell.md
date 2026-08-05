@@ -1,6 +1,6 @@
 # Windows Desktop Shell — 功能清单与架构决策
 
-**状态（2026-08）**：安装包 `dagents-shell.exe` 由 **`desktop/tray-tauri/`（Tauri）** 提供（SSE/HITL/Toast/Desktop API/更新编排 + 内嵌 WebView）；Go `desktop/tray/` 已退役。  
+**状态（2026-08）**：安装包 **双轨 Shell**——推荐轨 `desktop/tray-tauri/`（Win10/11 + WebView2，内嵌 Web UI），兼容轨 `desktop/tray/`（Go，低版本 Windows）；落地均为 `bin\dagents-shell.exe`。  
 **范围**：**仅 Windows**（不含 Linux/macOS 桌面壳）。  
 **读者**：产品 / 实现 / 安装包；与 [local-assistant.md](../architecture/local-assistant.md)、[client-packaging.md](../architecture/client-packaging.md) 配套。
 
@@ -87,8 +87,8 @@
 | D9 | **Shell 实现语言：Go** | 与 `nodectl`、`shared/config` 同栈。 |
 | D10 | **不用悬浮球作为默认方案** | 托盘 + 通知 + 按需打开 UI。 |
 | D11 | **Go Shell 核心不依赖 WebView2** | Toast、SSE、托盘用 Go + Win32；Web UI 默认用系统浏览器。 |
-| D12 | **Server 2012（历史）** | 原 Go Shell 目标；Tauri cutover 后产品基线为 **Win10/11 + WebView2**。 |
-| D11b | **Tauri Shell 路径接受 WebView2**（2026-08） | `desktop/tray-tauri` 在内嵌 WebView 中加载同源 `/ui/`；双轨验证后已 cutover，**安装包唯一 Shell 为 Tauri**（Go `desktop/tray` 退役）。 |
+| D12 | **低版本 Windows** | 经安装包「兼容模式」使用 Go Shell；推荐轨基线为 **Win10/11 + WebView2**。 |
+| D11b | **Tauri Shell + 兼容轨**（2026-08） | 推荐：`tray-tauri` 内嵌 `/ui/`（需 WebView2）；兼容：Go `desktop/tray` 系统浏览器。Inno 附加任务二选一。 |
 | D13 | **HITL 展开逻辑应共享** | Shell / Web / TUI 共用 expand 逻辑（包路径待定）。 |
 
 ### 2.6 数据流（产品确认 + 架构评审 2026-07）

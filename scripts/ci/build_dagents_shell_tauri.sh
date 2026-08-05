@@ -66,7 +66,11 @@ if [[ ! -f "${SRC}" ]]; then
   exit 1
 fi
 
-DEST="${OUT_DIR}/dagents-shell.exe"
-cp "${SRC}" "${DEST}"
-echo "[done] ${DEST}"
-ls -la "${DEST}"
+# 安装包组件名与 zip 默认壳均使用 tauri 后缀；assemble 会再复制为 dagents-shell.exe。
+DEST_TAURI="${OUT_DIR}/dagents-shell-tauri.exe"
+DEST_DEFAULT="${OUT_DIR}/dagents-shell.exe"
+cp "${SRC}" "${DEST_TAURI}"
+cp "${SRC}" "${DEST_DEFAULT}"
+echo "[done] ${DEST_TAURI}"
+echo "[done] ${DEST_DEFAULT} (default / zip)"
+ls -la "${DEST_TAURI}" "${DEST_DEFAULT}"

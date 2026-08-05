@@ -55,12 +55,31 @@ if [[ -f "${BROWSER_BIN}" ]]; then
   install -m 0755 "${BROWSER_BIN}" "${BUNDLE_DIR}/bin/dagents-browser${EXE}"
 fi
 
-SHELL_BIN="${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}"
-if [[ -f "${SHELL_BIN}" ]]; then
-  install -m 0755 "${SHELL_BIN}" "${BUNDLE_DIR}/bin/dagents-shell${EXE}"
-elif [[ "${PLATFORM}" == windows-* && "${SKIP_SHELL:-}" != "1" ]]; then
-  echo "[assemble] missing dagents-shell${EXE} (run build_dagents_shell_tauri.sh / build_dagents_shell.sh or set SKIP_SHELL=1)" >&2
-  exit 1
+# Windows：同时打入 Tauri（推荐）与 Go legacy（兼容）两套 Shell；默认 dagents-shell.exe = Tauri。
+if [[ "${PLATFORM}" == windows-* ]]; then
+  SHELL_TAURI="${SHELL_TAURI_BIN:-${REPO_ROOT}/dist/dagents-shell-tauri${EXE}}"
+  SHELL_LEGACY="${SHELL_LEGACY_BIN:-${REPO_ROOT}/dist/dagents-shell-legacy${EXE}}"
+  SHELL_DEFAULT="${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}"
+  if [[ "${SKIP_SHELL:-}" == "1" ]]; then
+    echo "[assemble] SKIP_SHELL=1: omitting dagents-shell*"
+  else
+    if [[ ! -f "${SHELL_TAURI}" && -f "${SHELL_DEFAULT}" ]]; then
+      SHELL_TAURI="${SHELL_DEFAULT}"
+    fi
+    if [[ ! -f "${SHELL_TAURI}" ]]; then
+      echo "[assemble] missing dagents-shell-tauri${EXE} (run build_dagents_shell_tauri.sh)" >&2
+      exit 1
+    fi
+    if [[ ! -f "${SHELL_LEGACY}" ]]; then
+      echo "[assemble] missing dagents-shell-legacy${EXE} (run build_dagents_shell.sh)" >&2
+      exit 1
+    fi
+    install -m 0755 "${SHELL_TAURI}" "${BUNDLE_DIR}/bin/dagents-shell-tauri${EXE}"
+    install -m 0755 "${SHELL_LEGACY}" "${BUNDLE_DIR}/bin/dagents-shell-legacy${EXE}"
+    install -m 0755 "${SHELL_TAURI}" "${BUNDLE_DIR}/bin/dagents-shell${EXE}"
+  fi
+elif [[ -f "${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}" ]]; then
+  install -m 0755 "${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}" "${BUNDLE_DIR}/bin/dagents-shell${EXE}"
 fi
 
 if [[ -f "${REPO_ROOT}/packaging/agent-client/config.example.yaml" ]]; then
