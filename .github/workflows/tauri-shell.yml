@@ -1,10 +1,11 @@
 name: Tauri Shell (Windows)
 
-# 构建 desktop/tray-tauri → dist/dagents-shell-tauri.exe（预览产物，不替换 Go Shell）。
+# 构建 desktop/tray-tauri → dist/dagents-shell.exe（安装包唯一 Shell）。
 on:
   pull_request:
     paths:
       - "desktop/tray-tauri/**"
+      - "scripts/ci/build_dagents_shell.sh"
       - "scripts/ci/build_dagents_shell_tauri.sh"
       - ".github/workflows/tauri-shell.yml"
   push:
@@ -13,6 +14,7 @@ on:
       - main
     paths:
       - "desktop/tray-tauri/**"
+      - "scripts/ci/build_dagents_shell.sh"
       - "scripts/ci/build_dagents_shell_tauri.sh"
       - ".github/workflows/tauri-shell.yml"
   workflow_dispatch:
@@ -55,7 +57,7 @@ jobs:
         run: cargo test --locked
 
   build-windows:
-    name: Build dagents-shell-tauri (windows-amd64)
+    name: Build dagents-shell (windows-amd64)
     runs-on: windows-2022
     steps:
       - name: Checkout
@@ -83,11 +85,14 @@ jobs:
         run: |
           chmod +x scripts/ci/build_dagents_shell_tauri.sh
           OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
+          test -f dist/dagents-shell.exe
           test -f dist/dagents-shell-tauri.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dagents-shell-tauri-windows-amd64
-          path: dist/dagents-shell-tauri.exe
+          path: |
+            dist/dagents-shell.exe
+            dist/dagents-shell-tauri.exe
           if-no-files-found: error

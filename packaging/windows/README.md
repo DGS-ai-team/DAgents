@@ -20,7 +20,14 @@
 - 将安装目录与 `.runtime/externaltools` 追加到用户 `PATH`
 - 完成页提示打开 Web UI **「设置 › 连接」** 完成 LLM、Manage 与功能开关配置（不再弹出额外 MsgBox）
 
-当前打包默认仍为 Go 托盘（`desktop/tray` → `bin/dagents-shell.exe`）。Tauri 重写预览见 [`desktop/tray-tauri/`](../../desktop/tray-tauri/)（双击开 Web UI）；CI 产出 `dagents-shell-tauri.exe`，可手动替换二进制验证。
+安装包提供 **双轨 Shell**（附加任务二选一，落地均为 `bin\dagents-shell.exe`）：
+
+| 选项 | 产物 | 说明 |
+|------|------|------|
+| **推荐**（默认，有 WebView2 时） | `dagents-shell-tauri.exe` | [`desktop/tray-tauri/`](../../desktop/tray-tauri/)，内嵌 Web UI |
+| **兼容模式** | `dagents-shell-legacy.exe` | [`desktop/tray/`](../../desktop/tray/) Go Shell，系统浏览器 |
+
+静默：`/TASKS=shellmodern` 或 `/TASKS=shelllegacy`。zip 包默认 `dagents-shell.exe` 为 Tauri，并附带两套命名产物。
 
 **API Key** 仍通过系统环境变量提供（如 `OPENAI_API_KEY`），Web UI 只配置环境变量名（`api_key_env`）。
 

@@ -53,9 +53,19 @@ chinesesimp.WizardReadyLabel1=安装程序已准备好将 DAgents 安装到您�
 chinesesimp.WizardReadyLabel2a=点击「安装」开始，或点击「上一步」检查设置。
 chinesesimp.WizardInstalling=正在安装
 chinesesimp.WizardInstallingLabel=请稍候，正在安装 DAgents 本地助手…
+chinesesimp.ShellGroup=Desktop Shell（二选一）
+chinesesimp.ShellModernTask=推荐：Win10/11 + WebView2（Tauri，内嵌 Web UI）
+chinesesimp.ShellLegacyTask=兼容模式：低版本 Windows（Go Shell，系统浏览器打开 Web UI）
+
+[Tasks]
+Name: "shellmodern"; Description: "{cm:ShellModernTask}"; GroupDescription: "{cm:ShellGroup}"; Flags: exclusive
+Name: "shelllegacy"; Description: "{cm:ShellLegacyTask}"; GroupDescription: "{cm:ShellGroup}"; Flags: exclusive unchecked
 
 [Files]
-Source: "..\..\bundle\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion
+; 核心二进制：排除两套 Shell，按 Tasks 二选一写成 bin\dagents-shell.exe
+Source: "..\..\bundle\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion; Excludes: "dagents-shell.exe;dagents-shell-tauri.exe;dagents-shell-legacy.exe"
+Source: "..\..\bundle\bin\dagents-shell-tauri.exe"; DestDir: "{app}\bin"; DestName: "dagents-shell.exe"; Flags: ignoreversion; Tasks: shellmodern
+Source: "..\..\bundle\bin\dagents-shell-legacy.exe"; DestDir: "{app}\bin"; DestName: "dagents-shell.exe"; Flags: ignoreversion; Tasks: shelllegacy
 Source: "dagents.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\bundle\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "write-install-config.ps1"; DestDir: "{app}\scripts\windows"; Flags: ignoreversion
@@ -94,6 +104,7 @@ const
 var
   OverwritePolicy: Boolean;
   OverwritePolicyAnswered: Boolean;
+  ShellTaskDefaultsApplied: Boolean;
 
 procedure StyleButton(B: TNewButton);
 begin
@@ -228,13 +239,23 @@ begin
   ForceDirectories(AppDir + '\.runtime\browser\profiles');
 end;
 
+function IsWebView2Installed: Boolean;
+begin
+  { Evergreen WebView2 Runtime client id }
+  Result :=
+    RegKeyExists(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') or
+    RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') or
+    RegKeyExists(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}');
+end;
+
 procedure InitializeWizard;
 begin
+  ShellTaskDefaultsApplied := False;
   ApplyWorkbenchTheme;
   WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents';
   WizardForm.WelcomeLabel2.Caption :=
     '本安装包包含 Agent Node、Desktop Shell（系统托盘）与 Client。' + #13#10 +
-    '界面与 Web UI 浅色主题一致；安装后可在浏览器打开本机助手。' + #13#10 +
+    '附加任务中可选择 Shell：推荐（Win10/11 内嵌 Web UI）或兼容模式（低版本 Windows）。' + #13#10 +
     'LLM、Manage 与功能开关请在 Web UI「设置 › 连接」中完成配置。';
   WizardForm.FinishedLabel.Caption :=
     'DAgents 已就绪。建议立即打开 Web UI 完成连接配置，' + #13#10 +
@@ -245,6 +266,14 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   ApplyWorkbenchTheme;
+  if (CurPageID = wpSelectTasks) and (not ShellTaskDefaultsApplied) then
+  begin
+    ShellTaskDefaultsApplied := True;
+    if IsWebView2Installed then
+      WizardSelectTasks('shellmodern')
+    else
+      WizardSelectTasks('shelllegacy');
+  end;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

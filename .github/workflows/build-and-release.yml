@@ -129,13 +129,6 @@ jobs:
           cp "${OUT_DIR}/bin/dagents-node${EXE}" "dist/dagents-node${EXE}"
           cp "${OUT_DIR}/bin/dagents-client${EXE}" "dist/dagents-client${EXE}"
 
-      - name: Build dagents-shell (Windows)
-        if: matrix.platform == 'windows-amd64'
-        shell: bash
-        run: |
-          chmod +x scripts/ci/build_dagents_shell.sh
-          bash scripts/ci/build_dagents_shell.sh
-
       - name: Setup Rust (Windows Tauri shell)
         if: matrix.platform == 'windows-amd64'
         uses: dtolnay/rust-toolchain@stable
@@ -151,13 +144,16 @@ jobs:
             packaging/bootstrapper/src-tauri -> target
           shared-key: release-tauri-win
 
-      - name: Build dagents-shell-tauri (Windows, preview)
+      - name: Build dagents-shell (Windows, Tauri + Go legacy)
         if: matrix.platform == 'windows-amd64'
         shell: bash
         run: |
-          chmod +x scripts/ci/build_dagents_shell_tauri.sh
+          chmod +x scripts/ci/build_dagents_shell_tauri.sh scripts/ci/build_dagents_shell.sh
           OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
+          OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell.sh
           test -f dist/dagents-shell-tauri.exe
+          test -f dist/dagents-shell-legacy.exe
+          test -f dist/dagents-shell.exe
 
       - name: Setup Python (Windows)
         if: matrix.py_build == 'native'
@@ -242,14 +238,6 @@ jobs:
           path: dist/dagents-setup-windows-amd64-*.exe
           if-no-files-found: error
 
-      - name: Upload Tauri shell preview (Windows)
-        if: matrix.platform == 'windows-amd64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: dagents-shell-tauri-windows-amd64
-          path: dist/dagents-shell-tauri.exe
-          if-no-files-found: error
-
   build-manage-docker:
     name: Build Manage offline bundle
     if: startsWith(github.ref, 'refs/tags/v')
@@ -309,6 +297,5 @@ jobs:
             dist/dagents-local-assistant-*.zip
             dist/dagents-local-assistant-windows-amd64-installer-*.exe
             dist/dagents-setup-windows-amd64-*.exe
-            dist/dagents-shell-tauri.exe
             dist/dagents-manage-bundle-*.tar.gz
           generate_release_notes: true
