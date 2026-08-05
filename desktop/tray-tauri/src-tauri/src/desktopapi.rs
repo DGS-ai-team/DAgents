@@ -87,7 +87,24 @@ impl Server {
 
     fn handle_update_apply(&self, req: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         let body = read_body(req);
-        let parsed: ApplyRequest = serde_json::from_str(&body).unwrap_or_default();
+        let parsed = if body.trim().is_empty() {
+            ApplyRequest::default()
+        } else {
+            match serde_json::from_str::<ApplyRequest>(&body) {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    return json_response(
+                        StatusCode(400),
+                        &ApplyResponse {
+                            ok: false,
+                            message: format!("invalid json: {err}"),
+                            code: 0,
+                            status: Status::default(),
+                        },
+                    );
+                }
+            }
+        };
         let (result, code) = self.applier.run(ApplyOptions {
             force: parsed.force,
             skip_confirm: true,
@@ -106,7 +123,19 @@ impl Server {
 
     fn handle_ui_focus(&self, req: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         let body = read_body(req);
-        let parsed: UIFocusRequest = serde_json::from_str(&body).unwrap_or_default();
+        let parsed = if body.trim().is_empty() {
+            UIFocusRequest::default()
+        } else {
+            match serde_json::from_str::<UIFocusRequest>(&body) {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    return json_response(
+                        StatusCode(400),
+                        &json!({ "ok": false, "message": format!("invalid json: {err}") }),
+                    );
+                }
+            }
+        };
         let ttl = if parsed.ttl_seconds > 0 {
             Duration::from_secs(parsed.ttl_seconds as u64)
         } else {

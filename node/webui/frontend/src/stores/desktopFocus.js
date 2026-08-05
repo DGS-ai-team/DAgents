@@ -8,9 +8,15 @@ let heartbeatId = null;
 let getAgentIdFn = () => "";
 let lastSentAgentId = null;
 let lastSentAt = 0;
+let paused = false;
+let visibilityListener = null;
 
 /** 合并 mount/hydrate/switch 的瞬时重复上报；心跳 30s 间隔不受影响。 */
 const MIN_REPORT_INTERVAL_MS = 1_000;
+
+function isDocumentVisible() {
+  return typeof document === "undefined" || document.visibilityState === "visible";
+}
 
 async function sendFocus(agentId, { force = false } = {}) {
   const id = String(agentId || "").trim();
@@ -23,8 +29,19 @@ async function sendFocus(agentId, { force = false } = {}) {
   await reportDesktopUIFocus(id, { ttlSeconds: FOCUS_TTL_SECONDS });
 }
 
+function onVisibilityChange() {
+  if (isDocumentVisible()) {
+    paused = false;
+    void sendFocus(getAgentIdFn(), { force: true });
+  } else {
+    paused = true;
+    void sendFocus("", { force: true });
+  }
+}
+
 /** 立即上报当前 Agent（切换时调用）。 */
 export function pulseDesktopFocus() {
+  if (paused) return;
   void sendFocus(getAgentIdFn(), { force: true });
 }
 
@@ -32,11 +49,21 @@ export function pulseDesktopFocus() {
 export function startDesktopFocusHeartbeat(getAgentId) {
   stopDesktopFocusHeartbeat({ clearRemote: false });
   getAgentIdFn = getAgentId ?? (() => "");
+  paused = !isDocumentVisible();
   const tick = () => {
+    if (paused) return;
     void sendFocus(getAgentIdFn());
   };
-  tick();
+  if (!paused) {
+    tick();
+  } else {
+    void sendFocus("", { force: true });
+  }
   heartbeatId = window.setInterval(tick, DESKTOP_FOCUS_HEARTBEAT_MS);
+  if (!visibilityListener) {
+    visibilityListener = onVisibilityChange;
+    document.addEventListener("visibilitychange", visibilityListener);
+  }
 }
 
 /** 离开聊天页时停止心跳并清除 Shell focus。 */
@@ -45,6 +72,11 @@ export function stopDesktopFocusHeartbeat({ clearRemote = true } = {}) {
     clearInterval(heartbeatId);
     heartbeatId = null;
   }
+  if (visibilityListener) {
+    document.removeEventListener("visibilitychange", visibilityListener);
+    visibilityListener = null;
+  }
+  paused = false;
   getAgentIdFn = () => "";
   if (clearRemote) {
     lastSentAgentId = null;

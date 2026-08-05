@@ -28,6 +28,9 @@ async function refreshOnboarding({ soft = false } = {}) {
     if (soft) {
       if (incomplete) {
         needProfile.value = true;
+      } else if (needProfile.value) {
+        // 已在首配页时允许退出（例如在其它窗口/标签页完成首配）。
+        needProfile.value = false;
       }
     } else {
       needProfile.value = incomplete;

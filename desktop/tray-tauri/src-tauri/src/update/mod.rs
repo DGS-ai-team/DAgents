@@ -257,7 +257,12 @@ impl Applier {
     fn ensure_upgrade_ready(&self) -> Option<(i32, String)> {
         let readiness = match self.node_client.upgrade_readiness() {
             Ok(r) => r,
-            Err(_) => return None,
+            Err(e) => {
+                return Some((
+                    EXIT_NODE_BUSY,
+                    format!("无法确认 Node 升级就绪: {e}"),
+                ));
+            }
         };
         if readiness.ready {
             return None;

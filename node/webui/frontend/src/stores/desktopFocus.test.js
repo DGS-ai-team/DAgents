@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.stubGlobal("document", {
+  visibilityState: "visible",
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+});
+
 vi.stubGlobal("window", {
   setInterval: (...args) => setInterval(...args),
   clearInterval: (...args) => clearInterval(...args),
@@ -68,5 +74,28 @@ describe("desktopFocus", () => {
     stopDesktopFocusHeartbeat();
     await Promise.resolve();
     expect(reportDesktopUIFocus).toHaveBeenCalledWith("", { ttlSeconds: 90 });
+  });
+
+  it("pauses heartbeat and clears focus when document hidden", async () => {
+    startDesktopFocusHeartbeat(() => "agt-a");
+    await Promise.resolve();
+    vi.mocked(reportDesktopUIFocus).mockClear();
+
+    document.visibilityState = "hidden";
+    document.addEventListener.mock.calls
+      .find(([event]) => event === "visibilitychange")?.[1]();
+    await Promise.resolve();
+    expect(reportDesktopUIFocus).toHaveBeenCalledWith("", { ttlSeconds: 90 });
+
+    vi.mocked(reportDesktopUIFocus).mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reportDesktopUIFocus).not.toHaveBeenCalled();
+
+    document.visibilityState = "visible";
+    document.addEventListener.mock.calls
+      .find(([event]) => event === "visibilitychange")?.[1]();
+    await Promise.resolve();
+    expect(reportDesktopUIFocus).toHaveBeenCalledWith("agt-a", { ttlSeconds: 90 });
+    document.visibilityState = "visible";
   });
 });

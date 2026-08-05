@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/desktopapi"
@@ -138,6 +139,8 @@ type trayApp struct {
 
 	iconBlinkMu   sync.Mutex
 	iconBlinkStop chan struct{}
+
+	webuiOpenInFlight atomic.Bool
 }
 
 func (a *trayApp) onReady() {
@@ -293,13 +296,9 @@ func (a *trayApp) pendingClickLoop() {
 }
 
 func (a *trayApp) openConsole() {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
-		defer cancel()
-		if err := webui.OpenConsole(ctx, a.layout, a.cfg); err != nil {
-			log.Printf("open console: %v", err)
-		}
-	}()
+	a.openWebUI(func(ctx context.Context) error {
+		return webui.OpenConsole(ctx, a.layout, a.cfg)
+	}, "open console")
 }
 
 func (a *trayApp) openManage() {
@@ -317,13 +316,9 @@ func (a *trayApp) openManage() {
 }
 
 func (a *trayApp) openUpdateSettings() {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
-		defer cancel()
-		if err := webui.EnsureNodeAndOpenURL(ctx, a.layout, a.cfg, webui.SettingsAboutURL(a.cfg.Local.Endpoint)); err != nil {
-			log.Printf("open update settings: %v", err)
-		}
-	}()
+	a.openWebUI(func(ctx context.Context) error {
+		return webui.EnsureNodeAndOpenURL(ctx, a.layout, a.cfg, webui.SettingsAboutURL(a.cfg.Local.Endpoint))
+	}, "open update settings")
 }
 
 func (a *trayApp) refreshUpdateUI() {
@@ -371,14 +366,26 @@ func (a *trayApp) openPendingSession(slot int) {
 }
 
 func (a *trayApp) openSession(sessionID string) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
-		defer cancel()
+	a.openWebUI(func(ctx context.Context) error {
 		if err := webui.EnsureNodeAndOpen(ctx, a.layout, a.cfg, sessionID); err != nil {
-			log.Printf("open agent %s: %v", sessionID, err)
-			return
+			return err
 		}
 		a.refreshPendingUI()
+		return nil
+	}, fmt.Sprintf("open agent %s", sessionID))
+}
+
+func (a *trayApp) openWebUI(fn func(context.Context) error, label string) {
+	if !a.webuiOpenInFlight.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer a.webuiOpenInFlight.Store(false)
+		ctx, cancel := context.WithTimeout(context.Background(), ensureNodeTimeout)
+		defer cancel()
+		if err := fn(ctx); err != nil {
+			log.Printf("%s: %v", label, err)
+		}
 	}()
 }
 

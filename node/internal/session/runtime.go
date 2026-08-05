@@ -351,7 +351,13 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
 	if outcome.ScheduleToolResult {
-		_ = r.scheduleToolResult()
+		if err := r.scheduleToolResult(); err != nil {
+			r.logger.Warn("schedule tool result failed",
+				"session_id", r.session.ID,
+				"error", err,
+			)
+			r.finishTurnIdle(outcome)
+		}
 	} else {
 		r.finishTurnIdle(outcome)
 	}
@@ -360,7 +366,13 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 
 func (r *runtime) afterToolStep(outcome turn.StepOutcome) {
 	if outcome.ScheduleToolResult {
-		_ = r.scheduleToolResult()
+		if err := r.scheduleToolResult(); err != nil {
+			r.logger.Warn("schedule tool result failed",
+				"session_id", r.session.ID,
+				"error", err,
+			)
+			r.finishTurnIdle(outcome)
+		}
 	} else {
 		r.finishTurnIdle(outcome)
 	}

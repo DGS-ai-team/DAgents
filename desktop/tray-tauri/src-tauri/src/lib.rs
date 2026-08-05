@@ -57,6 +57,7 @@ struct Shared {
     hold_stopped: AtomicBool,
     recovering: AtomicBool,
     blink_running: AtomicBool,
+    webui_open_in_flight: AtomicBool,
     last_err: Mutex<Option<String>>,
     status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
     pending_submenu: Mutex<Option<Submenu<tauri::Wry>>>,
@@ -147,6 +148,7 @@ pub fn run() {
         hold_stopped: AtomicBool::new(false),
         recovering: AtomicBool::new(false),
         blink_running: AtomicBool::new(false),
+        webui_open_in_flight: AtomicBool::new(false),
         last_err: Mutex::new(None),
         status_item: Mutex::new(None),
         pending_submenu: Mutex::new(None),
@@ -487,9 +489,23 @@ fn open_agent(shared: &Arc<Shared>, app: &AppHandle, agent_id: &str) {
 }
 
 fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
+    if shared
+        .webui_open_in_flight
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
     let shared = Arc::clone(shared);
     let app = app.clone();
     thread::spawn(move || {
+        struct InFlightGuard(Arc<Shared>);
+        impl Drop for InFlightGuard {
+            fn drop(&mut self) {
+                self.0.webui_open_in_flight.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = InFlightGuard(Arc::clone(&shared));
         if let Err(e) = nodectl::start(&shared.layout, &shared.cfg, WAIT_READY) {
             set_err(&shared, Some(e));
             refresh_status(&shared);
