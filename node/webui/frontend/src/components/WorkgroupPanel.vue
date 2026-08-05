@@ -186,100 +186,130 @@ defineExpose({ refresh });
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  border-top: 1px solid var(--border-subtle, #e5e7eb);
   position: relative;
+  background: transparent;
 }
 .wg-panel__head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.8rem;
+  gap: 10px;
+  min-height: 32px;
+  padding: 4px 12px 10px;
+  font-size: 12px;
 }
 .wg-panel__tab {
   background: none;
   border: none;
-  color: var(--text-muted, #6b7280);
+  color: var(--color-text-subtle);
   cursor: pointer;
-  padding: 0.15rem 0;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+}
+.wg-panel__tab:hover {
+  color: var(--color-text);
 }
 .wg-panel__tab--active {
-  color: var(--text, #111);
+  color: var(--color-text-muted);
   font-weight: 600;
   cursor: default;
 }
 .wg-panel__icon {
   margin-left: 0.15rem;
+  width: 24px;
+  height: 24px;
   border: none;
+  border-radius: var(--radius-md);
   background: none;
   cursor: pointer;
-  color: var(--text-muted, #6b7280);
-  font-size: 1rem;
+  color: var(--color-text-subtle);
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wg-panel__icon:hover {
+  color: var(--color-text);
+  background: var(--color-sidebar-hover);
 }
 .wg-panel__icon:first-of-type {
   margin-left: auto;
 }
 .wg-panel__section-label {
-  padding: 0.5rem 0.75rem 0.25rem;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted, #9ca3af);
+  padding: 10px 14px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--color-text-subtle);
+  text-transform: none;
 }
 .wg-panel__hint {
-  padding: 0.75rem;
-  font-size: 0.8rem;
-  color: var(--text-muted, #6b7280);
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--color-text-subtle);
 }
 .wg-panel__hint--err {
-  color: #b91c1c;
+  color: var(--color-danger);
 }
 .wg-panel__list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 8px 8px;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .wg-panel__item {
-  padding: 0.6rem 0.75rem;
+  padding: 8px 10px;
   cursor: pointer;
-  border-left: 2px solid transparent;
+  border: 0;
+  border-radius: var(--radius-sidebar-item);
+  background: transparent;
+  transition: background 0.12s ease;
 }
 .wg-panel__item:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+  background: var(--color-sidebar-hover);
 }
 .wg-panel__item--active {
-  border-left-color: var(--accent, #2563eb);
-  background: var(--surface-active, rgba(37, 99, 235, 0.06));
+  background: var(--color-sidebar-active);
 }
 .wg-panel__title {
-  font-size: 0.875rem;
+  font-size: 13px;
   font-weight: 500;
+  color: var(--color-text);
 }
 .wg-panel__meta {
-  font-size: 0.75rem;
-  color: var(--text-muted, #6b7280);
-  margin-top: 0.15rem;
+  font-size: 11px;
+  color: var(--color-text-subtle);
+  margin-top: 2px;
 }
 .wg-panel__avail-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 8px;
 }
 .wg-panel__sub-btn {
   flex-shrink: 0;
-  border: 1px solid var(--border-subtle, #d1d5db);
-  background: #fff;
-  border-radius: 4px;
-  padding: 0.2rem 0.5rem;
-  font-size: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-md);
+  padding: 3px 8px;
+  font-size: 11px;
   cursor: pointer;
+}
+.wg-panel__sub-btn:hover {
+  color: var(--color-text);
+  background: var(--color-sidebar-hover);
 }
 .wg-panel__modal {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--color-overlay);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -287,11 +317,13 @@ defineExpose({ refresh });
   z-index: 5;
 }
 .wg-panel__modal-card {
-  background: #fff;
-  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
   padding: 1rem;
   width: min(280px, 90%);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -302,8 +334,10 @@ defineExpose({ refresh });
 }
 .wg-panel__input {
   padding: 0.45rem 0.6rem;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+  color: var(--color-text);
   font: inherit;
 }
 .wg-panel__modal-actions {
@@ -312,17 +346,18 @@ defineExpose({ refresh });
   gap: 0.5rem;
 }
 .wg-panel__modal-actions button {
-  border: 1px solid #d1d5db;
-  background: #fff;
-  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: var(--radius-md);
   padding: 0.35rem 0.7rem;
   cursor: pointer;
   font: inherit;
 }
 .wg-panel__modal-actions button[type="submit"] {
-  background: var(--accent, #2563eb);
-  border-color: var(--accent, #2563eb);
-  color: #fff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-invert);
 }
 .wg-panel__modal-actions button:disabled {
   opacity: 0.5;

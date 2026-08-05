@@ -53,11 +53,12 @@ pub fn is_running(cfg: &ShellConfig) -> bool {
 }
 
 pub fn start(layout: &Layout, cfg: &ShellConfig, wait_ready: Duration) -> Result<(), String> {
-    if !layout.node_exe.is_file() {
-        return Err(format!("找不到 Node 二进制: {}", layout.node_exe.display()));
-    }
+    // 已有健康 Node（例如 IDE 单独调试）时直接成功，不要求本机 bin 下有可执行文件。
     if is_running(cfg) {
         return Ok(());
+    }
+    if !layout.node_exe.is_file() {
+        return Err(format!("找不到 Node 二进制: {}", layout.node_exe.display()));
     }
 
     if let Some(parent) = layout.log_out.parent() {
@@ -200,10 +201,71 @@ fn force_kill_pid(pid: u32) -> Result<(), String> {
     }
 }
 
-/// 打开系统默认浏览器（保留备用）。
-#[allow(dead_code)]
+/// 打开系统默认浏览器。
 pub fn open_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|e| format!("打开浏览器失败: {e}"))
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentInfoPayload {
+    #[serde(default)]
+    node_id: String,
+    #[serde(default)]
+    manage_enabled: bool,
+    #[serde(default)]
+    manage_url: String,
+    #[serde(default)]
+    manage_registered: bool,
+}
+
+/// 从 Node `/v1/agent/info` 解析 Manage Console URL（附带 node_id）。
+pub fn manage_console_url(cfg: &ShellConfig) -> Result<String, String> {
+    let info_url = format!("{}/v1/agent/info", cfg.endpoint.trim_end_matches('/'));
+    let resp = ureq::get(&info_url)
+        .timeout(Duration::from_secs(3))
+        .call()
+        .map_err(|e| format!("读取 agent/info 失败: {e}"))?;
+    if resp.status() != 200 {
+        return Err(format!("agent/info status {}", resp.status()));
+    }
+    let info: AgentInfoPayload = resp
+        .into_json()
+        .map_err(|e| format!("agent/info JSON: {e}"))?;
+    if !info.manage_enabled {
+        return Err("本机 Node 未启用 Manage（设置 › 连接 Manage）".into());
+    }
+    let base = info.manage_url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("Manage URL 为空".into());
+    }
+    let node_id = info.node_id.trim();
+    if node_id.is_empty() {
+        return Err("Node ID 为空".into());
+    }
+    if !info.manage_registered {
+        // 仍可打开；Console 会提示未注册。
+    }
+    Ok(format!("{base}/console/?node_id={}", urlencoding_node_id(node_id)))
+}
+
+fn urlencoding_node_id(node_id: &str) -> String {
+    let mut out = String::with_capacity(node_id.len());
+    for b in node_id.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// ensure Node 后用系统浏览器打开 Manage Console（带 node_id）。
+pub fn open_manage(layout: &Layout, cfg: &ShellConfig, wait_ready: Duration) -> Result<(), String> {
+    start(layout, cfg, wait_ready)?;
+    let url = manage_console_url(cfg)?;
+    open_url(&url)
 }
 
 /// 确保日志目录存在（启动 shell 时）。

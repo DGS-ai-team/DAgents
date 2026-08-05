@@ -4,71 +4,8 @@
 .app {
   height: 100vh;
   display: grid;
-  grid-template-rows: auto 1fr;
-}
-
-.app__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: var(--header-height);
-  padding: 0 var(--space-4);
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-  box-shadow: var(--shadow-sm);
-}
-
-.app__brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.app__brand-mark {
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  display: block;
-  object-fit: contain;
-}
-
-.app__title {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0;
-  line-height: 1.2;
-}
-
-.app__subtitle {
-  font-size: 12px;
-  color: var(--color-text-subtle);
-}
-
-.app__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.app__icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--control-height);
-  height: var(--control-height);
-  padding: 0;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-}
-
-.app__icon-btn:hover {
-  color: var(--color-text);
-  border-color: var(--color-border);
-  background: var(--color-surface-hover);
+  grid-template-rows: 1fr;
+  min-height: 0;
 }
 
 .app__body {
@@ -101,14 +38,12 @@
 /* ---------- v0.6.1 product layout ---------- */
 
 .app__body--chat-v61 {
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   align-items: stretch;
   gap: 0;
   padding: 0;
-}
-
-.app__body--chat-v61.app__body--with-activity {
-  grid-template-columns: 240px minmax(0, 1fr) minmax(260px, 300px);
+  height: 100%;
+  min-height: 0;
 }
 
 .app__col--agents {
@@ -116,84 +51,38 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--color-border);
+  border-right: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
   background: var(--color-sidebar);
-  padding: var(--space-2) 0;
+  padding: var(--space-3) 0 0;
 }
 
-.app__col--agents .agent-panel {
+.app__col--agents .agent-panel,
+.app__col--agents .wg-panel,
+.app__col--agents .nav-rail {
   flex: 1;
   min-height: 0;
 }
 
-.app__col--activity {
-  min-width: 0;
-  min-height: 0;
+/* 侧栏内去掉 card 壳，贴近 Cursor 扁平 rail */
+.app__col--agents .agent-panel.panel {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.app__col--agents .agent-panel .panel__header {
+  border-bottom: 0;
+  background: transparent;
+  padding: 4px 12px 10px;
+}
+
+.app__col--agents .agent-panel .panel__body {
+  padding: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--color-sidebar);
-}
-
-.app__col--activity .activity-rail {
-  flex: 1;
-  min-height: 0;
-}
-
-.product-header__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.product-header__status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin-right: 4px;
-}
-
-.product-header__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-text-subtle);
-}
-
-.product-header__dot--online {
-  background: var(--color-success);
-  box-shadow: 0 0 0 3px var(--color-success-soft);
-}
-
-.product-header__dot--connecting {
-  background: var(--color-warning);
-}
-
-.product-header__dot--offline {
-  background: var(--color-danger);
-}
-
-.product-header__icon-btn {
-  text-decoration: none;
-  color: var(--color-text-muted);
-}
-
-.product-header__icon-btn--active {
-  color: var(--color-primary-strong);
-  border-color: transparent;
-  background: var(--color-primary-soft);
-}
-
-.product-header__svg {
-  display: block;
-  width: 16px;
-  height: 16px;
-}
-
-.product-header__icon-btn[aria-label="设置"] .product-header__svg {
-  width: 17px;
-  height: 17px;
 }
 
 .agent-list-item__badge--unread {
@@ -231,7 +120,7 @@
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: var(--space-4);
-  padding: 0 var(--space-5) var(--space-5);
+  padding: var(--space-4) var(--space-5) var(--space-5);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -242,7 +131,30 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: var(--space-3) var(--space-2) 0;
+  padding: var(--space-1) var(--space-2) 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.settings-layout__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-layout__back:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
 }
 
 .settings-layout__link {

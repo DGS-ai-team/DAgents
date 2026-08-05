@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/activity"
@@ -36,6 +37,8 @@ func (s *Server) handleUIBootstrap(w http.ResponseWriter, _ *http.Request) {
 		NodeID:            "",
 		Capabilities:      nil,
 		MultimodalEnabled: false,
+		ManageEnabled:     false,
+		ManageURL:         "",
 		ManageRegistered:  registered,
 		LLM:               llmView,
 		Compression:       comp,
@@ -44,6 +47,8 @@ func (s *Server) handleUIBootstrap(w http.ResponseWriter, _ *http.Request) {
 		info.NodeID = s.cfg.NodeID
 		info.Capabilities = s.cfg.Capabilities()
 		info.MultimodalEnabled = s.cfg.MultimodalEnabled()
+		info.ManageEnabled = s.cfg.Manage.Enabled
+		info.ManageURL = strings.TrimSpace(s.cfg.Manage.URL)
 	}
 	writeJSON(w, http.StatusOK, uiBootstrapResponse{
 		Health: healthResponse{
