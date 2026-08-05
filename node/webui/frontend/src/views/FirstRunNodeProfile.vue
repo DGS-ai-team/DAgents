@@ -14,9 +14,9 @@ const PROVIDER_PRESETS = {
 const ALLOWED_PROVIDERS = new Set(["deepseek", "openai", "qwen", "vllm", "mock"]);
 
 const THEME_OPTIONS = [
-  { id: "light", title: "浅色", desc: "明亮界面，适合日间使用" },
-  { id: "dark", title: "深色", desc: "低眩光，适合长时间使用" },
-  { id: "system", title: "跟随系统", desc: "自动匹配操作系统外观" },
+  { id: "light", title: "浅色" },
+  { id: "dark", title: "深色" },
+  { id: "system", title: "跟随系统" },
 ];
 
 const emit = defineEmits(["completed"]);
@@ -278,25 +278,23 @@ async function submit() {
 
       <!-- Step 1: theme -->
       <div v-else-if="step === 'theme'" class="first-run__body">
-        <div class="first-run__theme-grid" role="radiogroup" aria-label="主题">
+        <div class="first-run__theme-row" role="radiogroup" aria-label="主题">
           <button
             v-for="opt in THEME_OPTIONS"
             :key="opt.id"
             type="button"
-            class="first-run__theme-option"
+            class="first-run__theme-item"
             role="radio"
             :aria-checked="themeStore.mode === opt.id"
-            :class="{ 'first-run__theme-option--active': themeStore.mode === opt.id }"
+            :class="{ 'first-run__theme-item--active': themeStore.mode === opt.id }"
             @click="chooseTheme(opt.id)"
           >
-            <span class="first-run__theme-preview" :data-preview="opt.id" aria-hidden="true">
-              <span class="first-run__theme-preview-bar" />
-              <span class="first-run__theme-preview-block" />
-            </span>
-            <span class="first-run__theme-copy">
-              <span class="first-run__theme-title">{{ opt.title }}</span>
-              <span class="first-run__theme-desc">{{ opt.desc }}</span>
-            </span>
+            <span
+              class="first-run__theme-dot"
+              :data-theme-dot="opt.id"
+              aria-hidden="true"
+            />
+            <span class="first-run__theme-label">{{ opt.title }}</span>
           </button>
         </div>
         <p v-if="error" class="first-run__error">{{ error }}</p>
@@ -498,95 +496,70 @@ async function submit() {
   gap: 4px;
 }
 
-.first-run__theme-grid {
+.first-run__theme-row {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 8px;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 28px;
+  margin: 8px 0 16px;
+  padding: 8px 0;
 }
 
-.first-run__theme-option {
+.first-run__theme-item {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-muted);
+  gap: 10px;
+  min-width: 72px;
+  padding: 4px;
+  border: none;
+  background: transparent;
   color: inherit;
-  text-align: left;
   cursor: pointer;
   font: inherit;
-  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.first-run__theme-option:hover {
-  background: var(--color-surface-hover);
-  border-color: var(--color-border-strong);
+.first-run__theme-dot {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.first-run__theme-option--active {
+.first-run__theme-item:hover .first-run__theme-dot {
   border-color: var(--color-primary);
-  background: var(--color-primary-soft);
-  box-shadow: inset 0 0 0 1px var(--color-primary);
+  transform: scale(1.06);
 }
 
-.first-run__theme-preview {
-  flex: 0 0 auto;
-  width: 56px;
-  height: 40px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow: hidden;
+.first-run__theme-item--active .first-run__theme-dot {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
-.first-run__theme-preview[data-preview="light"] {
+.first-run__theme-dot[data-theme-dot="light"] {
   background: #f3f3f3;
 }
 
-.first-run__theme-preview[data-preview="dark"] {
+.first-run__theme-dot[data-theme-dot="dark"] {
   background: #202020;
 }
 
-.first-run__theme-preview[data-preview="system"] {
-  background: linear-gradient(90deg, #f3f3f3 50%, #202020 50%);
+.first-run__theme-dot[data-theme-dot="system"] {
+  background: linear-gradient(135deg, #f3f3f3 50%, #202020 50%);
 }
 
-.first-run__theme-preview-bar {
-  height: 4px;
-  width: 70%;
-  border-radius: 2px;
-  background: #0078d4;
+.first-run__theme-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  transition: color 0.15s ease;
 }
 
-.first-run__theme-preview-block {
-  flex: 1;
-  border-radius: 2px;
-  background: rgba(128, 128, 128, 0.28);
-}
-
-.first-run__theme-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.first-run__theme-title {
-  font-size: 13.5px;
-  font-weight: 600;
+.first-run__theme-item--active .first-run__theme-label {
   color: var(--color-text);
-}
-
-.first-run__theme-desc {
-  font-size: 12px;
-  color: var(--color-text-subtle);
-  line-height: 1.4;
+  font-weight: 600;
 }
 
 .first-run__probe {
