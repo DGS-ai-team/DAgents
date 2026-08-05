@@ -1,23 +1,31 @@
 //! DAgents Shell — Tauri 系统托盘（替代 / 并行于 Go `desktop/tray`）。
 //!
-//! 核心能力（本版）：
+//! 核心能力：
 //! - 启动 ensure Node、退出 stop Node
-//! - 托盘菜单：状态 / 打开控制台 / 启停重启 / 退出
-//! - **双击托盘图标**在内嵌 WebView 中打开 Web UI（同源 `/ui/`）
+//! - 托盘菜单：状态 / 待办 / 更新 / 打开控制台 / 启停重启 / 退出
+//! - Desktop API、SSE 待办同步、Toast、Manage 更新检查
+//! - 双击托盘图标在内嵌 WebView 中打开 Web UI（同源 `/ui/`）
 //! - 关闭窗口隐藏到托盘（不停 Node）
 //! - health 轮询 + 基础自动恢复
-//!
-//! 待办 HITL、更新检查、Desktop API、Toast 等仍由 Go Shell 提供；迁移中可并存。
 
+mod clipboard;
 mod config;
+mod desktopapi;
+mod events;
 mod layout;
+mod nodeclient;
 mod nodectl;
+mod notify;
+mod pending;
 mod singleinstance;
+mod uifocus;
+mod update;
 
 use config::ShellConfig;
 use layout::Layout;
 use nodectl::Health;
 use singleinstance::{acquire, InstanceError};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -32,14 +40,29 @@ const ENSURE_TIMEOUT: Duration = Duration::from_secs(45);
 const PROBE_INTERVAL: Duration = Duration::from_secs(3);
 const WAIT_READY: Duration = Duration::from_secs(30);
 const MAIN_WINDOW: &str = "main";
+const MAX_PENDING_MENU_SLOTS: usize = 8;
+const ICON_BLINK_INTERVAL: Duration = Duration::from_millis(600);
 
 struct Shared {
     layout: Layout,
-    cfg: ShellConfig,
+    cfg: Arc<ShellConfig>,
+    node_client: Arc<nodeclient::Client>,
+    pending_store: Arc<pending::Store>,
+    notifier: Arc<notify::Notifier>,
+    update_checker: Arc<update::Checker>,
+    update_applier: Arc<update::Applier>,
+    desktop_api_stop: Arc<AtomicBool>,
+    ui_focus: Arc<uifocus::Store>,
+    sse_subscriber: Mutex<Option<events::Subscriber>>,
     hold_stopped: AtomicBool,
     recovering: AtomicBool,
+    blink_running: AtomicBool,
     last_err: Mutex<Option<String>>,
     status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    pending_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    pending_slots: Mutex<Vec<MenuItem<tauri::Wry>>>,
+    pending_session_ids: Mutex<Vec<String>>,
+    update_item: Mutex<Option<MenuItem<tauri::Wry>>>,
 }
 
 fn _assert_shared_send_sync() {
@@ -59,6 +82,20 @@ pub fn run() {
 
     let _ = nodectl::ensure_runtime_dirs(&layout);
 
+    let cfg = match ShellConfig::load(&layout.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("dagents-shell: {e}");
+            std::process::exit(1);
+        }
+    };
+    let cfg = Arc::new(cfg);
+
+    if let Some(update_args) = update_args_from_args() {
+        let code = desktopapi::run_update_command(&update_args, layout, Arc::clone(&cfg));
+        std::process::exit(code);
+    }
+
     let guard = match acquire(&layout) {
         Ok(g) => g,
         Err(InstanceError::AlreadyRunning) => {
@@ -67,14 +104,6 @@ pub fn run() {
         }
         Err(InstanceError::Other(e)) => {
             eprintln!("dagents-shell: single instance: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    let cfg = match ShellConfig::load(&layout.config_path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("dagents-shell: {e}");
             std::process::exit(1);
         }
     };
@@ -91,13 +120,39 @@ pub fn run() {
     // 单实例锁保留在主线程栈上：Windows Mutex HANDLE 非 Send，不可放入 Arc 跨线程。
     let _instance_guard = guard;
 
+    let node_client = Arc::new(nodeclient::Client::new(&cfg.endpoint));
+    let pending_store = Arc::new(pending::Store::new());
+    let notifier = Arc::new(notify::Notifier::new(cfg.endpoint.clone()));
+    let update_checker = Arc::new(update::Checker::new(Arc::clone(&cfg), layout.home.clone()));
+    let update_applier = Arc::new(update::Applier::new(
+        Arc::clone(&cfg),
+        layout.clone(),
+        Arc::clone(&update_checker),
+        Arc::clone(&node_client),
+    ));
+    let ui_focus = Arc::new(uifocus::Store::new());
+    let desktop_api_stop = Arc::new(AtomicBool::new(false));
+
     let shared = Arc::new(Shared {
         layout,
         cfg,
+        node_client,
+        pending_store,
+        notifier,
+        update_checker,
+        update_applier,
+        desktop_api_stop,
+        ui_focus,
+        sse_subscriber: Mutex::new(None),
         hold_stopped: AtomicBool::new(false),
         recovering: AtomicBool::new(false),
+        blink_running: AtomicBool::new(false),
         last_err: Mutex::new(None),
         status_item: Mutex::new(None),
+        pending_item: Mutex::new(None),
+        pending_slots: Mutex::new(Vec::new()),
+        pending_session_ids: Mutex::new(vec![String::new(); MAX_PENDING_MENU_SLOTS]),
+        update_item: Mutex::new(None),
     });
 
     tauri::Builder::default()
@@ -131,10 +186,25 @@ pub fn run() {
 
                 let status =
                     MenuItem::with_id(app, "status", "状态：检测中…", false, None::<&str>)?;
+                let pending =
+                    MenuItem::with_id(app, "pending", "待办：无", false, None::<&str>)?;
+                let mut pending_slots = Vec::with_capacity(MAX_PENDING_MENU_SLOTS);
+                for i in 0..MAX_PENDING_MENU_SLOTS {
+                    let item = MenuItem::with_id(
+                        app,
+                        format!("pending_{i}"),
+                        " ",
+                        false,
+                        None::<&str>,
+                    )?;
+                    pending_slots.push(item);
+                }
                 let open =
                     MenuItem::with_id(app, "open_console", "打开控制台", true, None::<&str>)?;
                 let open_manage =
                     MenuItem::with_id(app, "open_manage", "打开 Manage", true, None::<&str>)?;
+                let update =
+                    MenuItem::with_id(app, "update", "更新：检查中…", false, None::<&str>)?;
                 let start = MenuItem::with_id(app, "start", "启动 Node", true, None::<&str>)?;
                 let stop = MenuItem::with_id(app, "stop", "停止 Node", true, None::<&str>)?;
                 let restart =
@@ -142,26 +212,43 @@ pub fn run() {
                 let quit = MenuItem::with_id(app, "quit", "退出 Shell", true, None::<&str>)?;
                 let sep1 = PredefinedMenuItem::separator(app)?;
                 let sep2 = PredefinedMenuItem::separator(app)?;
+                let sep3 = PredefinedMenuItem::separator(app)?;
 
                 {
                     let mut slot = shared.status_item.lock().unwrap();
                     *slot = Some(status.clone());
                 }
+                {
+                    let mut slot = shared.pending_item.lock().unwrap();
+                    *slot = Some(pending.clone());
+                }
+                {
+                    let mut slot = shared.pending_slots.lock().unwrap();
+                    *slot = pending_slots.clone();
+                }
+                {
+                    let mut slot = shared.update_item.lock().unwrap();
+                    *slot = Some(update.clone());
+                }
 
-                let menu = Menu::with_items(
-                    app,
-                    &[
-                        &status,
-                        &sep1,
-                        &open,
-                        &open_manage,
-                        &sep2,
-                        &start,
-                        &stop,
-                        &restart,
-                        &quit,
-                    ],
-                )?;
+                let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
+                    &status,
+                    &pending,
+                ];
+                for item in &pending_slots {
+                    items.push(item);
+                }
+                items.push(&sep1);
+                items.push(&open);
+                items.push(&open_manage);
+                items.push(&update);
+                items.push(&sep2);
+                items.push(&start);
+                items.push(&stop);
+                items.push(&restart);
+                items.push(&sep3);
+                items.push(&quit);
+                let menu = Menu::with_items(app, &items)?;
 
                 let tray_shared = Arc::clone(&shared);
                 let menu_shared = Arc::clone(&shared);
@@ -200,13 +287,46 @@ pub fn run() {
                 thread::spawn(move || {
                     ensure_node(&boot);
                     refresh_status(&boot);
+                    refresh_update_ui(&boot);
+                    refresh_pending_ui(&boot, &app_handle);
                     loop {
                         thread::sleep(PROBE_INTERVAL);
                         refresh_status(&boot);
+                        refresh_update_ui(&boot);
+                        refresh_pending_ui(&boot, &app_handle);
                         maybe_recover(&boot);
-                        let _ = &app_handle;
                     }
                 });
+
+                let bg_stop = Arc::clone(&shared.desktop_api_stop);
+                shared.update_checker.set_upgrade_callback({
+                    let shared = Arc::clone(&shared);
+                    move |status| {
+                        let _ = shared.notifier.push_update_available(&status.latest_version);
+                        refresh_update_ui(&shared);
+                    }
+                });
+                shared.update_checker.start(Arc::clone(&bg_stop));
+                let api = Arc::new(desktopapi::Server::new(
+                    Arc::clone(&shared.update_checker),
+                    Arc::clone(&shared.update_applier),
+                    Arc::clone(&shared.ui_focus),
+                ));
+                api.start(Arc::clone(&bg_stop));
+
+                let sub = events::Subscriber::new(
+                    Arc::clone(&shared.node_client),
+                    Arc::clone(&shared.pending_store),
+                    {
+                        let shared = Arc::clone(&shared);
+                        let app = app.handle().clone();
+                        move || refresh_pending_ui(&shared, &app)
+                    },
+                );
+                sub.start();
+                if let Ok(mut guard) = shared.sse_subscriber.lock() {
+                    *guard = Some(sub);
+                }
 
                 Ok(())
             }
@@ -223,6 +343,12 @@ pub fn run() {
                     }
                 }
                 RunEvent::Exit => {
+                    shared.desktop_api_stop.store(true, Ordering::SeqCst);
+                    if let Ok(mut sub) = shared.sse_subscriber.lock() {
+                        if let Some(sub) = sub.take() {
+                            sub.stop();
+                        }
+                    }
                     let _ = nodectl::stop(&shared.layout, &shared.cfg);
                 }
                 _ => {}
@@ -277,10 +403,33 @@ fn resolve_layout_from_args() -> Result<Layout, String> {
     Layout::resolve(config_flag.as_deref())
 }
 
+fn update_args_from_args() -> Option<Vec<String>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "--config" || a == "-config" {
+            i += 2;
+            continue;
+        }
+        if a.starts_with("--config=") {
+            i += 1;
+            continue;
+        }
+        if a == "update" {
+            return Some(args[i + 1..].to_vec());
+        }
+        i += 1;
+    }
+    None
+}
+
 fn handle_menu(shared: &Arc<Shared>, app: &AppHandle, id: &str) {
     match id {
+        "pending" => open_first_pending(shared, app),
         "open_console" => open_console(shared, app),
         "open_manage" => open_manage(shared),
+        "update" => open_update_settings(shared, app),
         "start" => {
             shared.hold_stopped.store(false, Ordering::SeqCst);
             run_action(shared, "启动", |s| nodectl::start(&s.layout, &s.cfg, WAIT_READY));
@@ -298,11 +447,49 @@ fn handle_menu(shared: &Arc<Shared>, app: &AppHandle, id: &str) {
         "quit" => {
             app.exit(0);
         }
+        _ if id.starts_with("pending_") => {
+            if let Ok(slot) = id.trim_start_matches("pending_").parse::<usize>() {
+                open_pending_slot(shared, app, slot);
+            }
+        }
         _ => {}
     }
 }
 
 fn open_console(shared: &Arc<Shared>, app: &AppHandle) {
+    open_webui_url(shared, app, shared.cfg.console_url());
+}
+
+fn open_update_settings(shared: &Arc<Shared>, app: &AppHandle) {
+    open_webui_url(shared, app, shared.cfg.settings_about_url());
+}
+
+fn open_first_pending(shared: &Arc<Shared>, app: &AppHandle) {
+    let entries = shared.pending_store.entries();
+    if let Some(entry) = entries.first() {
+        open_agent(shared, app, &entry.session_id);
+    } else {
+        open_console(shared, app);
+    }
+}
+
+fn open_pending_slot(shared: &Arc<Shared>, app: &AppHandle, slot: usize) {
+    let session_id = shared
+        .pending_session_ids
+        .lock()
+        .ok()
+        .and_then(|ids| ids.get(slot).cloned())
+        .unwrap_or_default();
+    if !session_id.trim().is_empty() {
+        open_agent(shared, app, &session_id);
+    }
+}
+
+fn open_agent(shared: &Arc<Shared>, app: &AppHandle, agent_id: &str) {
+    open_webui_url(shared, app, shared.cfg.agent_url(agent_id));
+}
+
+fn open_webui_url(shared: &Arc<Shared>, app: &AppHandle, url_str: String) {
     let shared = Arc::clone(shared);
     let app = app.clone();
     thread::spawn(move || {
@@ -312,11 +499,10 @@ fn open_console(shared: &Arc<Shared>, app: &AppHandle) {
             return;
         }
 
-        let url_str = shared.cfg.console_url();
         let url = match Url::parse(&url_str) {
             Ok(u) => u,
             Err(e) => {
-                set_err(&shared, Some(format!("无效控制台 URL {url_str}: {e}")));
+                set_err(&shared, Some(format!("无效 Web UI URL {url_str}: {e}")));
                 refresh_status(&shared);
                 return;
             }
@@ -331,16 +517,18 @@ fn open_console(shared: &Arc<Shared>, app: &AppHandle) {
                         return Err("主窗口不存在".to_string());
                     };
                     // 已在同源 /ui/ 时仅聚焦，避免无谓刷新。
-                    let already_console = win
+                    let already_target = win
                         .url()
                         .ok()
                         .map(|u| {
-                            let path = u.path();
-                            path == "/ui" || path.starts_with("/ui/")
+                            u.scheme() == url.scheme()
+                                && u.host() == url.host()
+                                && u.port_or_known_default() == url.port_or_known_default()
+                                && u.path() == url.path()
                         })
                         .unwrap_or(false);
-                    if !already_console {
-                        win.navigate(url).map_err(|e| format!("导航失败: {e}"))?;
+                    if !already_target {
+                        win.navigate(url.clone()).map_err(|e| format!("导航失败: {e}"))?;
                     }
                     win.set_skip_taskbar(false)
                         .map_err(|e| format!("显示任务栏失败: {e}"))?;
@@ -359,7 +547,7 @@ fn open_console(shared: &Arc<Shared>, app: &AppHandle) {
         match rx.recv_timeout(Duration::from_secs(10)) {
             Ok(Ok(())) => set_err(&shared, None),
             Ok(Err(e)) => set_err(&shared, Some(e)),
-            Err(_) => set_err(&shared, Some("打开控制台超时".into())),
+            Err(_) => set_err(&shared, Some("打开 Web UI 超时".into())),
         }
         refresh_status(&shared);
     });
@@ -476,6 +664,152 @@ fn maybe_recover(shared: &Arc<Shared>) {
         refresh_status(&shared);
     });
     let _ = ENSURE_TIMEOUT;
+}
+
+fn refresh_update_ui(shared: &Shared) {
+    let text_enabled = if !shared.cfg.manage_update_enabled() {
+        ("更新：未启用".to_string(), false)
+    } else {
+        let status = shared.update_checker.snapshot();
+        if !status.manage_reachable {
+            ("更新：Manage 不可达".to_string(), false)
+        } else if status.upgrade_available {
+            (format!("更新：新版本 {} 可用", status.latest_version), true)
+        } else {
+            ("更新：已是最新".to_string(), false)
+        }
+    };
+    if let Ok(guard) = shared.update_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_text(text_enabled.0);
+            let _ = item.set_enabled(text_enabled.1);
+        }
+    }
+}
+
+fn refresh_pending_ui(shared: &Arc<Shared>, app: &AppHandle) {
+    let entries = shared.pending_store.entries();
+    let summary = shared.pending_store.summary();
+    if let Ok(guard) = shared.pending_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            if summary.session_count == 0 {
+                let _ = item.set_text("待办：无");
+                let _ = item.set_enabled(false);
+            } else {
+                let _ = item.set_text(format!("待办：{}", summary.label));
+                let _ = item.set_enabled(true);
+            }
+        }
+    }
+
+    if let Ok(slots) = shared.pending_slots.lock() {
+        let mut ids = vec![String::new(); MAX_PENDING_MENU_SLOTS];
+        for (i, item) in slots.iter().enumerate() {
+            if let Some(entry) = entries.get(i) {
+                ids[i] = entry.session_id.clone();
+                let _ = item.set_text(format!("打开 · {}", entry.summary_label()));
+                let _ = item.set_enabled(true);
+            } else {
+                let _ = item.set_text(" ");
+                let _ = item.set_enabled(false);
+            }
+        }
+        if let Ok(mut guard) = shared.pending_session_ids.lock() {
+            *guard = ids;
+        }
+    }
+
+    sync_notifier(shared, &entries);
+    refresh_tooltip(shared, app);
+    if summary.session_count > 0 {
+        start_icon_blink(shared, app);
+    } else {
+        shared.blink_running.store(false, Ordering::SeqCst);
+        set_tray_icon(app, false);
+    }
+}
+
+fn sync_notifier(shared: &Shared, entries: &[pending::Entry]) {
+    let mut retain = HashSet::new();
+    let mut toast_entries = Vec::new();
+    for entry in entries {
+        if shared.ui_focus.is_focused(&entry.session_id) {
+            retain.insert(entry.session_id.clone());
+        } else {
+            toast_entries.push(entry.clone());
+        }
+    }
+    shared.notifier.sync(&toast_entries, &retain);
+}
+
+fn refresh_tooltip(shared: &Shared, app: &AppHandle) {
+    let mut tooltip = format!("DAgents Shell @ {}", shared.layout.home.display());
+    let summary = shared.pending_store.summary();
+    if summary.session_count > 0 {
+        tooltip.push('\n');
+        tooltip.push_str(&summary.label);
+    }
+    match nodectl::probe(&shared.cfg) {
+        Ok(h) if h.ok => {
+            let node = if !h.node_id.is_empty() {
+                h.node_id
+            } else {
+                "…".into()
+            };
+            tooltip.push_str(&format!("\nNode 运行中 · {node} · {}", h.version));
+        }
+        _ => {
+            let err = shared
+                .last_err
+                .lock()
+                .ok()
+                .and_then(|g| g.clone())
+                .unwrap_or_else(|| "未运行".into());
+            tooltip.push_str(&format!("\nNode 未运行 · {err}"));
+        }
+    }
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(&tooltip));
+    }
+}
+
+fn start_icon_blink(shared: &Arc<Shared>, app: &AppHandle) {
+    if shared
+        .blink_running
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    let shared = Arc::clone(shared);
+    let app = app.clone();
+    thread::spawn(move || {
+        let mut pending_frame = true;
+        while shared.blink_running.load(Ordering::SeqCst)
+            && shared.pending_store.summary().session_count > 0
+            && !shared.desktop_api_stop.load(Ordering::SeqCst)
+        {
+            set_tray_icon(&app, pending_frame);
+            pending_frame = !pending_frame;
+            thread::sleep(ICON_BLINK_INTERVAL);
+        }
+        set_tray_icon(&app, false);
+        shared.blink_running.store(false, Ordering::SeqCst);
+    });
+}
+
+fn set_tray_icon(app: &AppHandle, pending: bool) {
+    let bytes = if pending {
+        include_bytes!("../../../tray/assets/icon_pending.ico").as_slice()
+    } else {
+        include_bytes!("../../../tray/assets/icon.ico").as_slice()
+    };
+    let Ok(icon) = tauri::image::Image::from_bytes(bytes) else {
+        return;
+    };
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_icon(Some(icon));
+    }
 }
 
 #[cfg(test)]

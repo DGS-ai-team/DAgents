@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 编译 Tauri 版 Windows Desktop Shell（dagents-shell-tauri.exe）。
+# 编译 Tauri 版 Windows Desktop Shell → dist/dagents-shell.exe
 #
 # 须在 Windows 上运行（MSVC + WebView2；GitHub windows-2022 即可）。
 #
@@ -23,7 +23,7 @@ case "${uname_s}" in
     if [[ "${OS:-}" == "Windows_NT" ]]; then
       :
     else
-      echo "[build] dagents-shell-tauri is Windows-native; skipping (uname=${uname_s})" >&2
+      echo "[build] dagents-shell is Windows-native; skipping (uname=${uname_s})" >&2
       exit 0
     fi
     ;;
@@ -66,8 +66,7 @@ if [[ ! -f "${SRC}" ]]; then
   exit 1
 fi
 
-DEST="${OUT_DIR}/dagents-shell-tauri.exe"
+DEST="${OUT_DIR}/dagents-shell.exe"
 cp "${SRC}" "${DEST}"
 echo "[done] ${DEST}"
-# 体积提示
 ls -la "${DEST}"

@@ -130,13 +130,6 @@ jobs:
           cp "${OUT_DIR}/bin/dagents-node${EXE}" "dist/dagents-node${EXE}"
           cp "${OUT_DIR}/bin/dagents-client${EXE}" "dist/dagents-client${EXE}"
 
-      - name: Build dagents-shell (Windows)
-        if: matrix.platform == 'windows-amd64'
-        shell: bash
-        run: |
-          chmod +x scripts/ci/build_dagents_shell.sh
-          bash scripts/ci/build_dagents_shell.sh
-
       - name: Setup Rust (Windows Tauri shell)
         if: matrix.platform == 'windows-amd64'
         uses: dtolnay/rust-toolchain@stable
@@ -152,13 +145,13 @@ jobs:
             packaging/bootstrapper/src-tauri -> target
           shared-key: manual-tauri-win
 
-      - name: Build dagents-shell-tauri (Windows, preview)
+      - name: Build dagents-shell (Windows, Tauri)
         if: matrix.platform == 'windows-amd64'
         shell: bash
         run: |
           chmod +x scripts/ci/build_dagents_shell_tauri.sh
           OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
-          test -f dist/dagents-shell-tauri.exe
+          test -f dist/dagents-shell.exe
 
       - name: Setup Python (Windows)
         if: matrix.py_build == 'native'
@@ -241,14 +234,6 @@ jobs:
         with:
           name: dagents-windows-setup
           path: dist/dagents-setup-windows-amd64-*.exe
-          if-no-files-found: error
-
-      - name: Upload Tauri shell preview (Windows)
-        if: matrix.platform == 'windows-amd64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: dagents-shell-tauri-windows-amd64
-          path: dist/dagents-shell-tauri.exe
           if-no-files-found: error
 
   build-manage-docker:

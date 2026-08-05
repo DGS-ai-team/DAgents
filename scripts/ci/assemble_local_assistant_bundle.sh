@@ -59,7 +59,7 @@ SHELL_BIN="${SHELL_BIN:-${REPO_ROOT}/dist/dagents-shell${EXE}}"
 if [[ -f "${SHELL_BIN}" ]]; then
   install -m 0755 "${SHELL_BIN}" "${BUNDLE_DIR}/bin/dagents-shell${EXE}"
 elif [[ "${PLATFORM}" == windows-* && "${SKIP_SHELL:-}" != "1" ]]; then
-  echo "[assemble] missing dagents-shell${EXE} (run build_dagents_shell.sh or set SKIP_SHELL=1)" >&2
+  echo "[assemble] missing dagents-shell${EXE} (run build_dagents_shell_tauri.sh / build_dagents_shell.sh or set SKIP_SHELL=1)" >&2
   exit 1
 fi
 

@@ -6,6 +6,7 @@
 
 ### 变更
 
+- **Tauri Shell cutover**：安装包与 CI 仅产出 Tauri `dagents-shell.exe`（`desktop/tray-tauri`）；补齐 Desktop API / SSE 待办 / Toast / 更新编排 / `update` CLI；Go `desktop/tray` 退役不再构建。需 Windows 10/11 + WebView2。
 - **远端 Agent Placement 设计启动**：独立分支推进同组 Node 放置、OS 标注、屏幕旁观；通信面拟引入 Manage Edge Tunnel（见 `docs/design/remote-agent-placement.md`）。
 - **设置页去掉「远程沙箱」选项**：避免与 Placement 混淆；表单将历史 `backend=remote` 升为 docker。`sandbox.backend=remote` API 仍拒绝启用（外部沙箱预留，非本需求）。
 
