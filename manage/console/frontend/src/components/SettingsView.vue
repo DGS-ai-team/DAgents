@@ -10,12 +10,6 @@ defineProps({
 const emit = defineEmits(["toast"]);
 
 const tab = ref("llm");
-
-const TAB_HINTS = {
-  llm: "多 Node 共用的 LLM 端点与模型配置",
-  releases: "本地助手安装包版本发布与 latest 标记",
-  cases: "演示会话与案例资源（次级入口）",
-};
 </script>
 
 <template>
@@ -29,7 +23,7 @@ const TAB_HINTS = {
         :aria-selected="tab === 'llm'"
         @click="tab = 'llm'"
       >
-        LLM 配置
+        LLM
       </button>
       <button
         type="button"
@@ -52,7 +46,6 @@ const TAB_HINTS = {
         案例库
       </button>
     </nav>
-    <p class="settings-hint muted">{{ TAB_HINTS[tab] }}</p>
 
     <LLMView
       v-if="tab === 'llm'"
@@ -73,8 +66,13 @@ const TAB_HINTS = {
 </template>
 
 <style scoped>
-.settings-hint {
-  margin: -8px 0 16px;
-  font-size: 0.875rem;
+.settings-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-view :deep(.subtabs) {
+  margin-bottom: 0;
 }
 </style>

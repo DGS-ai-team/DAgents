@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 pub struct Health {
     pub ok: bool,
     pub status: String,
+    /// 仍从 `/health` 解析，菜单/tooltip 不再展示。
+    #[allow(dead_code)]
     pub node_id: String,
     pub version: String,
 }

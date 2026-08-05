@@ -54,6 +54,7 @@ class LLMConfigStore:
             if self.get(cfg_id):
                 cfg_id = f"{cfg_id}-{uuid.uuid4().hex[:6]}"
             data = payload.model_dump()
+            data.pop("clear_api_key", None)
             data["provider"] = payload.normalized_provider()
             cfg = LLMConfig(id=cfg_id, created_at=now, updated_at=now, **data)
             self._save(cfg)
@@ -78,7 +79,12 @@ class LLMConfigStore:
             if payload.is_default:
                 self._clear_defaults(now)
             data = payload.model_dump()
+            data.pop("clear_api_key", None)
             data["provider"] = payload.normalized_provider()
+            if payload.clear_api_key:
+                data["api_key"] = ""
+            elif not str(payload.api_key or "").strip():
+                data["api_key"] = existing.api_key
             cfg = LLMConfig(id=cfg_id, created_at=existing.created_at, updated_at=now, **data)
             self._save(cfg)
             return cfg
@@ -96,9 +102,12 @@ class LLMConfigStore:
         return next((c for c in self._all() if c.is_default), None)
 
     def mask(self, cfg: LLMConfig) -> LLMConfigMasked:
-        m = cfg.model_copy()
-        m.api_key = _mask_key(cfg.api_key)
-        return LLMConfigMasked(**m.model_dump())
+        data = cfg.model_dump()
+        has_key = bool(str(cfg.api_key or "").strip())
+        data["api_key"] = _mask_key(cfg.api_key)
+        data["has_api_key"] = has_key
+        data["clear_api_key"] = False
+        return LLMConfigMasked(**data)
 
     def resolve(self, cfg: LLMConfig) -> LLMResolved:
         return LLMResolved(model=cfg.model, baseURL=cfg.base_url, apiKey=cfg.api_key)

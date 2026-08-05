@@ -29,6 +29,7 @@ from manage.workgroup.models import (
     WorkGroupACL,
     WorkGroupCreateRequest,
     WorkGroupMember,
+    WorkGroupPatchRequest,
 )
 
 
@@ -176,10 +177,14 @@ class WorkGroupStore:
         *,
         subscribed_by: str | None = None,
         acl_member: str | None = None,
+        include_archived: bool = False,
     ) -> list[WorkGroup]:
         with self._lock:
             self._ensure_loaded()
             groups = list(self._groups.values())
+            if not include_archived:
+                # 当前工作组页只展示进行中；归档查询页后续再开 include_archived
+                groups = [g for g in groups if g.status == "active"]
             if subscribed_by:
                 nid = subscribed_by.strip()
                 groups = [
@@ -209,6 +214,29 @@ class WorkGroupStore:
         if group.status != "active":
             raise WorkgroupError("workgroup_archived", f"workgroup status={group.status}", http_status=409)
         return group
+
+    def patch_workgroup(self, workgroup_id: str, req: WorkGroupPatchRequest) -> WorkGroup:
+        with self._lock:
+            group = self.require_active(workgroup_id)
+            updates: dict[str, Any] = {}
+            if req.display_name is not None:
+                updates["display_name"] = req.display_name.strip()
+            if req.llm_profile_id is not None:
+                updates["llm_profile_id"] = req.llm_profile_id.strip()
+            if req.llm_profile_revision is not None:
+                updates["llm_profile_revision"] = req.llm_profile_revision.strip()
+            elif req.llm_profile_id is not None:
+                # 换 LLM 时若未显式传 revision，自增数字 revision（非数字则重置为 1）
+                try:
+                    updates["llm_profile_revision"] = str(int(group.llm_profile_revision) + 1)
+                except ValueError:
+                    updates["llm_profile_revision"] = "1"
+            if not updates:
+                return group
+            group = group.model_copy(update=updates)
+            self._groups[workgroup_id] = group
+            self._put("workgroups", workgroup_id, group.model_dump_json())
+            return group
 
     def begin_archive(self, workgroup_id: str) -> WorkGroup:
         with self._lock:

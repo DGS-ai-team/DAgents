@@ -9,6 +9,7 @@ class LLMConfigCreate(BaseModel):
     base_url: str = Field(min_length=1)
     model: str = Field(min_length=1)
     api_key: str = ""
+    clear_api_key: bool = False
     reasoning_effort: str | None = None
     thinking: str | None = None
     is_default: bool = False
@@ -24,9 +25,19 @@ class LLMConfig(LLMConfigCreate):
     updated_at: int
 
 class LLMConfigMasked(LLMConfig):
-    pass  # api_key replaced with masked value by store.mask()
+    has_api_key: bool = False
 
 class LLMResolved(BaseModel):
     model: str
     baseURL: str
     apiKey: str
+
+class LLMProbeRequest(BaseModel):
+    base_url: str = Field(min_length=1)
+    api_key: str = ""
+    provider: str = ""
+    config_id: str | None = None
+
+class LLMProbeResponse(BaseModel):
+    models: list[dict[str, str]]
+    suggested_provider: str = ""

@@ -12,7 +12,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
-from manage.workgroup.llm_chat import MockLLMClient  # noqa: E402
+from manage.workgroup.llm_chat import ChatResult, MockLLMClient  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
     GrantInviteRequest,
@@ -117,6 +117,36 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertEqual(tool.name, "assign_workgroup_task")
             self.assertIn("[scripted] 读 README", tool.content or "")
             self.assertIn("\"status\": \"succeeded\"", tool.content or "")
+
+    def test_human_message_events_stream_deltas(self) -> None:
+        with TemporaryDirectory() as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="Stream",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            script = [ChatResult(content="你好世界，这是流式回复", finish_reason="stop")]
+            kernel = TurnKernel(store, chat_client=MockLLMClient(script), mock_llm=True)
+            events = list(
+                kernel.handle_human_message_events(
+                    group.workgroup_id,
+                    text="hi",
+                    from_node_id="node-a",
+                    disable_tools=True,
+                )
+            )
+            names = [e["event"] for e in events]
+            self.assertEqual(names[0], "human")
+            self.assertIn("status", names)
+            self.assertIn("delta", names)
+            self.assertIn("assistant_final", names)
+            self.assertEqual(names[-1], "final")
+            deltas = "".join(e["data"]["text"] for e in events if e["event"] == "delta")
+            self.assertEqual(deltas, "你好世界，这是流式回复")
 
     def test_single_active_assign_enforced(self) -> None:
         with TemporaryDirectory() as tmp:

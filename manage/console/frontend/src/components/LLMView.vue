@@ -1,6 +1,12 @@
 <script setup>
-import { onMounted, reactive, ref, watch } from "vue";
-import { createLLMConfig, deleteLLMConfig, fetchLLMConfigs } from "../api.js";
+import { computed, onMounted, ref, watch } from "vue";
+import {
+  createLLMConfig,
+  deleteLLMConfig,
+  fetchLLMConfigs,
+  updateLLMConfig,
+} from "../api.js";
+import LlmConfigModal from "./LlmConfigModal.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -12,13 +18,17 @@ const loading = ref(false);
 const error = ref("");
 const saving = ref(false);
 
-const form = reactive({
-  name: "",
-  provider: "openai",
-  base_url: "",
-  model: "",
-  api_key: "",
-  is_default: false,
+const modalOpen = ref(false);
+const modalMode = ref("create");
+const editing = ref(null);
+
+const sortedConfigs = computed(() => {
+  const list = [...(configs.value || [])];
+  list.sort((a, b) => {
+    if (a.is_default !== b.is_default) return a.is_default ? -1 : 1;
+    return String(a.name || "").localeCompare(String(b.name || ""), "zh");
+  });
+  return list;
 });
 
 async function load() {
@@ -34,32 +44,34 @@ async function load() {
   }
 }
 
-function resetForm() {
-  form.name = "";
-  form.provider = "openai";
-  form.base_url = "";
-  form.model = "";
-  form.api_key = "";
-  form.is_default = false;
+function openCreate() {
+  modalMode.value = "create";
+  editing.value = null;
+  modalOpen.value = true;
 }
 
-async function onCreate() {
-  if (!form.name.trim() || !form.base_url.trim() || !form.model.trim()) {
-    emit("toast", { message: "name / base_url / model 必填", type: "error" });
-    return;
-  }
+function openEdit(cfg) {
+  modalMode.value = "edit";
+  editing.value = cfg;
+  modalOpen.value = true;
+}
+
+function closeModal() {
+  modalOpen.value = false;
+  editing.value = null;
+}
+
+async function onConfirm(payload) {
   saving.value = true;
   try {
-    await createLLMConfig({
-      name: form.name.trim(),
-      provider: form.provider,
-      base_url: form.base_url.trim(),
-      model: form.model.trim(),
-      api_key: form.api_key,
-      is_default: form.is_default,
-    });
-    emit("toast", { message: `已创建配置 ${form.name.trim()}`, type: "success" });
-    resetForm();
+    if (modalMode.value === "create") {
+      await createLLMConfig(payload);
+      emit("toast", { message: `已创建配置 ${payload.name}`, type: "success" });
+    } else if (editing.value?.id) {
+      await updateLLMConfig(editing.value.id, payload);
+      emit("toast", { message: `已更新 ${payload.name}`, type: "success" });
+    }
+    closeModal();
     await load();
   } catch (err) {
     emit("toast", { message: err.message, type: "error" });
@@ -68,11 +80,30 @@ async function onCreate() {
   }
 }
 
+async function onSetDefault(cfg) {
+  if (!cfg?.id || cfg.is_default) return;
+  try {
+    await updateLLMConfig(cfg.id, {
+      name: cfg.name,
+      provider: cfg.provider,
+      base_url: cfg.base_url,
+      model: cfg.model,
+      api_key: "",
+      is_default: true,
+      allowed_groups: Array.isArray(cfg.allowed_groups) ? cfg.allowed_groups : [],
+    });
+    emit("toast", { message: `已将 ${cfg.name} 设为默认`, type: "success" });
+    await load();
+  } catch (err) {
+    emit("toast", { message: err.message, type: "error" });
+  }
+}
+
 async function onDelete(cfg) {
-  if (!window.confirm(`删除配置 ${cfg.id}？`)) return;
+  if (!window.confirm(`删除配置「${cfg.name}」？`)) return;
   try {
     await deleteLLMConfig(cfg.id);
-    emit("toast", { message: `已删除 ${cfg.id}`, type: "success" });
+    emit("toast", { message: `已删除 ${cfg.name}`, type: "success" });
     await load();
   } catch (err) {
     emit("toast", { message: err.message, type: "error" });
@@ -92,91 +123,68 @@ defineExpose({ load });
 </script>
 
 <template>
-  <section class="panel-card">
-    <div class="form-block">
-      <h3 class="form-block__title">新建 LLM 配置</h3>
-      <p class="muted filters-note">key 仅在创建时填写；列表只显示掩码</p>
-      <div class="form-grid">
-        <label>
-          <span>名称</span>
-          <input v-model="form.name" placeholder="如 cliproxy-claude" />
-        </label>
-        <label>
-          <span>provider</span>
-          <select v-model="form.provider">
-            <option value="openai">openai</option>
-            <option value="deepseek">deepseek</option>
-            <option value="qwen">qwen</option>
-            <option value="vllm">vllm</option>
-          </select>
-        </label>
-        <label>
-          <span>model</span>
-          <input v-model="form.model" placeholder="claude-sonnet-4-6" />
-        </label>
-        <label class="form-grid__wide">
-          <span>base_url（含 /v1）</span>
-          <input v-model="form.base_url" placeholder="http://host:port/v1" />
-        </label>
-        <label class="form-grid__wide">
-          <span>api_key</span>
-          <input v-model="form.api_key" type="password" placeholder="sk-..." />
-        </label>
-      </div>
-      <div class="panel-actions form-footer">
-        <label class="checkbox-row">
-          <input v-model="form.is_default" type="checkbox" />
-          <span>设为默认</span>
-        </label>
-        <button class="btn btn-primary" :disabled="saving" @click="onCreate">
-          {{ saving ? "创建中…" : "创建" }}
-        </button>
-      </div>
+  <section class="llm-view">
+    <p v-if="error" class="banner banner-error" role="alert">{{ error }}</p>
+    <p v-else-if="loading && !sortedConfigs.length" class="state">加载中…</p>
+
+    <div v-else class="llm-card-grid">
+      <article v-for="c in sortedConfigs" :key="c.id" class="llm-card">
+        <div class="llm-card__top">
+          <strong class="llm-card__name">{{ c.name }}</strong>
+          <span v-if="c.is_default" class="pill pill-online">默认</span>
+        </div>
+        <p class="llm-card__id muted">{{ c.id }}</p>
+        <dl class="llm-card__meta">
+          <div>
+            <dt>Provider</dt>
+            <dd>{{ c.provider }}</dd>
+          </div>
+          <div>
+            <dt>Model</dt>
+            <dd>{{ c.model }}</dd>
+          </div>
+          <div class="llm-card__wide">
+            <dt>Base URL</dt>
+            <dd class="cell-wrap">{{ c.base_url }}</dd>
+          </div>
+          <div>
+            <dt>API Key</dt>
+            <dd><code>{{ c.api_key || "—" }}</code></dd>
+          </div>
+        </dl>
+        <div class="llm-card__actions">
+          <button type="button" class="btn btn-ghost btn-sm" @click="openEdit(c)">编辑</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="c.is_default"
+            @click="onSetDefault(c)"
+          >
+            设为默认
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" @click="onDelete(c)">删除</button>
+        </div>
+      </article>
+
+      <button type="button" class="llm-card llm-card--add" @click="openCreate">
+        <span class="wg-card__plus" aria-hidden="true">+</span>
+        <strong>{{ sortedConfigs.length ? "新建配置" : "新建第一条配置" }}</strong>
+        <span class="muted llm-card--add-hint">
+          {{
+            sortedConfigs.length
+              ? "Key 仅在创建或更新时提交"
+              : "填写 URL、Key，测试并拉取模型"
+          }}
+        </span>
+      </button>
     </div>
 
-    <div class="table-block">
-      <div class="panel-head">
-        <h3 class="table-block__title">已注册配置</h3>
-        <span class="panel-meta">{{ loading ? "加载中…" : `${configs.length} 条` }}</span>
-      </div>
-      <p v-if="error" class="banner banner-error" role="alert">{{ error }}</p>
-      <div class="table-scroll">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>名称 / ID</th>
-              <th>provider</th>
-              <th>model</th>
-              <th>base_url</th>
-              <th>api_key</th>
-              <th>默认</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="c in configs" :key="c.id">
-              <td>
-                <strong>{{ c.name }}</strong>
-                <div class="muted">{{ c.id }}</div>
-              </td>
-              <td>{{ c.provider }}</td>
-              <td>{{ c.model }}</td>
-              <td class="cell-wrap">{{ c.base_url }}</td>
-              <td><code>{{ c.api_key }}</code></td>
-              <td>
-                <span v-if="c.is_default" class="pill pill-online">默认</span>
-                <span v-else class="pill pill-muted">—</span>
-              </td>
-              <td>
-                <button class="btn btn-ghost btn-sm" @click="onDelete(c)">删除</button>
-              </td>
-            </tr>
-            <tr v-if="!loading && configs.length === 0">
-              <td colspan="7" class="empty">暂无 LLM 配置</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <LlmConfigModal
+      :open="modalOpen"
+      :mode="modalMode"
+      :config="editing"
+      @close="closeModal"
+      @confirm="onConfirm"
+    />
   </section>
 </template>

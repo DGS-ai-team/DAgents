@@ -113,6 +113,30 @@ class TurnKernel:
         disable_tools: bool = False,
     ) -> dict[str, Any]:
         """写入 Timeline 并驱动 Leader loop 至空闲。"""
+        final: dict[str, Any] | None = None
+        for ev in self.handle_human_message_events(
+            workgroup_id,
+            text=text,
+            from_node_id=from_node_id,
+            client_message_id=client_message_id,
+            disable_tools=disable_tools,
+        ):
+            if ev.get("event") == "final":
+                final = ev.get("data") or {}
+        if final is None:
+            raise WorkgroupError("conflict", "leader loop produced no final event", http_status=500)
+        return final
+
+    def handle_human_message_events(
+        self,
+        workgroup_id: str,
+        *,
+        text: str,
+        from_node_id: str,
+        client_message_id: str | None = None,
+        disable_tools: bool = False,
+    ):
+        """写入 Timeline 并驱动 Leader loop，产出 SSE 友好事件。"""
         self._store.assert_acl_member(workgroup_id, from_node_id)
         event = self._store.append_timeline(
             workgroup_id,
@@ -122,19 +146,51 @@ class TurnKernel:
             client_message_id=client_message_id,
             protocol_name=protocol_name_for_actor(from_node_id),
         )
+        yield {
+            "event": "human",
+            "data": {"timeline_event": event.model_dump(mode="json")},
+        }
         run = self._store.find_running_leader_run(workgroup_id) or self.start_leader_run(workgroup_id)
         self._store.ensure_run_history(run)
-        loop_result = self.run_leader_until_idle(workgroup_id, run.run_id, disable_tools=disable_tools)
-        return {"timeline_event": event, "leader_run": loop_result["run"], "loop": loop_result}
+        loop_result: dict[str, Any] | None = None
+        for ev in self.run_leader_until_idle_events(workgroup_id, run.run_id, disable_tools=disable_tools):
+            if ev.get("event") == "loop_final":
+                loop_result = ev.get("data") or {}
+                continue
+            yield ev
+        if loop_result is None:
+            raise WorkgroupError("conflict", "leader loop produced no result", http_status=500)
+        yield {
+            "event": "final",
+            "data": {
+                "timeline_event": event,
+                "leader_run": loop_result["run"],
+                "loop": {
+                    "steps": loop_result.get("steps"),
+                    "status": loop_result.get("status"),
+                    "final_text": loop_result.get("final_text"),
+                },
+            },
+        }
 
     def run_leader_until_idle(self, workgroup_id: str, run_id: str, *, disable_tools: bool = False) -> dict[str, Any]:
+        for ev in self.run_leader_until_idle_events(workgroup_id, run_id, disable_tools=disable_tools):
+            if ev.get("event") == "loop_final":
+                return ev["data"]
+        raise WorkgroupError("conflict", "leader loop produced no result", http_status=500)
+
+    def run_leader_until_idle_events(self, workgroup_id: str, run_id: str, *, disable_tools: bool = False):
         run = self._store.get_actor_run(run_id)
         if run is None or run.workgroup_id != workgroup_id:
             raise WorkgroupError("not_found", "actor run not found", http_status=404)
         if run.actor_id != "leader":
             raise WorkgroupError("invalid_request", "run is not a leader run")
         if run.status not in {"running", "awaiting_hitl"}:
-            return {"run": run, "steps": 0, "status": run.status}
+            yield {
+                "event": "loop_final",
+                "data": {"run": run, "steps": 0, "status": run.status},
+            }
+            return
 
         group = self._store.require_active(workgroup_id)
         client = self._chat_client or resolve_chat_client(
@@ -153,7 +209,6 @@ class TurnKernel:
 
         while True:
             hist = self._store.ensure_run_history(run)
-            # 仍有未配齐 tool_calls：禁止半配齐续写
             open_ids = open_tool_call_ids(hist.messages)
             if open_ids:
                 raise WorkgroupError(
@@ -170,7 +225,20 @@ class TurnKernel:
                 own_run_history=hist.messages,
             )
             messages = [{"role": "system", "content": _LEADER_SYSTEM}] + list(projected["messages"])
-            result = client.chat(messages, tools=tools or None)
+            yield {"event": "status", "data": {"phase": "thinking"}}
+            result = None
+            stream = getattr(client, "stream_chat", None)
+            if callable(stream):
+                for piece in stream(messages, tools=tools or None):
+                    if piece.delta:
+                        yield {"event": "delta", "data": {"text": piece.delta}}
+                    if piece.result is not None:
+                        result = piece.result
+            else:
+                result = client.chat(messages, tools=tools or None)
+            if result is None:
+                raise WorkgroupError("conflict", "llm stream produced no result", http_status=502)
+
             steps += 1
             tool_loops += 1
             if tool_loops > self._max_tool_loops:
@@ -189,7 +257,7 @@ class TurnKernel:
 
             if not result.tool_calls:
                 final_text = (result.content or "").strip() or "(empty)"
-                self._store.append_timeline(
+                final_event = self._store.append_timeline(
                     workgroup_id,
                     type="actor_final_text",
                     actor_id="leader",
@@ -197,12 +265,23 @@ class TurnKernel:
                     protocol_name="leader",
                 )
                 run = self._store.update_actor_run(run_id, status="succeeded", timeline_watermark_seq=wm)
-                return {
-                    "run": run,
-                    "steps": steps,
-                    "status": "succeeded",
-                    "final_text": final_text,
+                yield {
+                    "event": "assistant_final",
+                    "data": {
+                        "text": final_text,
+                        "timeline_event": final_event.model_dump(mode="json"),
+                    },
                 }
+                yield {
+                    "event": "loop_final",
+                    "data": {
+                        "run": run,
+                        "steps": steps,
+                        "status": "succeeded",
+                        "final_text": final_text,
+                    },
+                }
+                return
 
             if disable_tools:
                 raise WorkgroupError(
@@ -210,9 +289,12 @@ class TurnKernel:
                     "leader tools are disabled for this message, but model returned tool_calls",
                     http_status=409,
                 )
-            # 并行 tool_calls：全部执行完再续写
             tool_msgs: list[RunHistoryMessage] = []
             for tc in result.tool_calls:
+                yield {
+                    "event": "status",
+                    "data": {"phase": "tool", "tool": tc.name, "tool_call_id": tc.id},
+                }
                 content = dispatcher.dispatch(
                     workgroup_id=workgroup_id,
                     tool_name=tc.name,

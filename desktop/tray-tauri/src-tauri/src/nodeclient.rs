@@ -140,8 +140,9 @@ impl Client {
         let req = self
             .authorize(ureq::get(&format!("{}/v1/streams?live=1", self.base)))
             .set("Accept", "text/event-stream");
+        // 勿设 timeout(0)：ureq/Windows 会当成零读超时，空闲 SSE 立刻失败并重连刷屏。
+        // 不设 overall timeout，与 Go tray `http.Client{Timeout: 0}`（无限）对齐。
         let resp = req
-            .timeout(Duration::from_secs(0))
             .call()
             .map_err(|e| format!("GET /v1/streams: {e}"))?;
         if resp.status() != 200 {

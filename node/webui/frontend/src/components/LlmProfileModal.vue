@@ -100,6 +100,16 @@ function applyProviderPreset() {
   resetProbeUI();
 }
 
+/** 探测/下拉选中模型后，用模型名填「名称」，免去手工输入。 */
+function syncNameFromModel(model) {
+  const m = String(model || "").trim();
+  if (m) draft.id = m;
+}
+
+function onModelSelect() {
+  syncNameFromModel(draft.model);
+}
+
 function onBackdropClick(event) {
   if (event.target === event.currentTarget) emit("close");
 }
@@ -139,6 +149,7 @@ async function runProbe() {
     if (!models.includes(draft.model)) {
       draft.model = models[0];
     }
+    syncNameFromModel(draft.model);
     probeState.ok = true;
     probeState.message = `已获取 ${models.length} 个模型，可下拉选择`;
   } catch (e) {
@@ -272,7 +283,12 @@ watch(
             </label>
             <label class="settings-field">
               <span class="settings-field__label">Model</span>
-              <select v-if="useModelSelect" v-model="draft.model" class="settings-field__input">
+              <select
+                v-if="useModelSelect"
+                v-model="draft.model"
+                class="settings-field__input"
+                @change="onModelSelect"
+              >
                 <option v-for="m in probedModels" :key="m" :value="m">{{ m }}</option>
               </select>
               <input

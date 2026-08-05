@@ -174,6 +174,12 @@ class WorkGroupCreateRequest(BaseModel):
     llm_profile_revision: str = Field(min_length=1, default="1")
 
 
+class WorkGroupPatchRequest(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=128)
+    llm_profile_id: str | None = Field(default=None, min_length=1)
+    llm_profile_revision: str | None = Field(default=None, min_length=1)
+
+
 class ACLPatchRequest(BaseModel):
     owners: list[str] | None = None
     collaborators: list[str] | None = None
