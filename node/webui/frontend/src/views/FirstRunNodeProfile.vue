@@ -105,6 +105,18 @@ onMounted(async () => {
   }
 });
 
+function applyProviderPreset() {
+  const preset = PROVIDER_PRESETS[llm.provider];
+  if (!preset) return;
+  llm.base_url = preset.base_url;
+  llm.model = preset.model;
+  llm.mock = llm.provider === "mock";
+  probedModels.value = [];
+  modelManual.value = false;
+  probeState.message = "";
+  probeState.ok = false;
+}
+
 function onMockToggle() {
   if (llm.mock) {
     llm.provider = "mock";
