@@ -331,6 +331,97 @@ export async function postWorkgroupMessage(workgroupId, body) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/messages`, {}, { method: "POST", body });
 }
 
+/**
+ * ????? SSE?onEvent(eventName, data) ?????
+ * @returns {Promise<{ finalText?: string }>}
+ */
+export async function postWorkgroupMessageStream(workgroupId, body, { onEvent } = {}) {
+  const url = new URL(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/messages/stream`,
+    window.location.origin,
+  );
+  const resp = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    let message = `HTTP ${resp.status}`;
+    try {
+      const errBody = await resp.json();
+      const detail = errBody?.detail;
+      if (typeof detail === "string") message = detail;
+      else if (detail?.message) message = detail.message;
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(message);
+    err.status = resp.status;
+    throw err;
+  }
+  if (!resp.body) {
+    throw new Error("??????????");
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let finalText = "";
+  let sawError = null;
+
+  const flushBlock = (block) => {
+    const lines = block.split(/\r?\n/);
+    let eventName = "message";
+    const dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim() || "message";
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    if (!dataLines.length && eventName === "message") return;
+    let data = {};
+    const raw = dataLines.join("\n");
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = { raw };
+      }
+    }
+    if (eventName === "error") {
+      sawError = data;
+    }
+    if (eventName === "final" || eventName === "assistant_final") {
+      finalText = data?.loop?.final_text || data?.text || finalText;
+    }
+    if (typeof onEvent === "function") onEvent(eventName, data);
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    buffer = buffer.replace(/\r\n/g, "\n");
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      if (block.trim()) flushBlock(block);
+    }
+  }
+  if (buffer.trim()) flushBlock(buffer);
+
+  if (sawError) {
+    const err = new Error(sawError.message || sawError.code || "??????");
+    err.detail = sawError;
+    throw err;
+  }
+  return { finalText };
+}
+
 export async function parseCaseJsonl(file) {
   const form = new FormData();
   form.set("file", file);

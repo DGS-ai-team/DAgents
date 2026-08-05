@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+import json
 
 from manage.llm.models import LLMConfigMasked
 from manage.platform.audit import AuditLog
@@ -67,6 +69,14 @@ class ReconcileMissingJournalRequest(BaseModel):
 
 def _http_error(exc: WorkgroupError) -> HTTPException:
     return HTTPException(status_code=exc.http_status, detail=exc.as_body())
+
+
+def _sse_json(obj: Any) -> str:
+    return json.dumps(obj, ensure_ascii=False, default=str)
+
+
+def _sse_pack(event: str, data: Any) -> str:
+    return f"event: {event}\ndata: {_sse_json(data)}\n\n"
 
 
 def build_workgroup_router(
@@ -364,6 +374,55 @@ def build_workgroup_router(
                 "final_text": result["loop"].get("final_text"),
             },
         }
+
+    @router.post("/{workgroup_id}/messages/stream")
+    def post_human_message_stream(
+        workgroup_id: str, req: HumanPostRequest, request: Request
+    ) -> StreamingResponse:
+        auth = authenticate(request)
+        ensure_node_identity(request, req.from_node_id, auth)
+
+        def event_gen():
+            try:
+                for item in kernel.handle_human_message_events(
+                    workgroup_id,
+                    text=req.text,
+                    from_node_id=req.from_node_id,
+                    client_message_id=req.client_message_id,
+                    disable_tools=req.disable_tools,
+                ):
+                    ev = str(item.get("event") or "message")
+                    raw = item.get("data")
+                    if hasattr(raw, "model_dump"):
+                        data = raw.model_dump(mode="json")
+                    elif isinstance(raw, dict):
+                        data = {
+                            k: (v.model_dump(mode="json") if hasattr(v, "model_dump") else v)
+                            for k, v in raw.items()
+                        }
+                    else:
+                        data = raw
+                    yield _sse_pack(ev, data)
+                yield _sse_pack("done", {})
+            except WorkgroupError as exc:
+                yield _sse_pack("error", exc.as_body())
+            except Exception as exc:  # noqa: BLE001 — 流式通道需收口
+                yield _sse_pack("error", {"code": "internal", "message": str(exc)})
+
+        audit.record(
+            actor=audit_actor(request, auth, fallback_agent_id=req.from_node_id),
+            action="workgroup.message.human.stream",
+            target_agent_id=workgroup_id,
+        )
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @router.get("/{workgroup_id}/timeline", response_model=list[TimelineEvent])
     def get_timeline(workgroup_id: str, request: Request) -> list[TimelineEvent]:

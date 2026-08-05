@@ -5,7 +5,7 @@ import {
   fetchWorkgroupACL,
   fetchWorkgroupMembers,
   fetchWorkgroupTimeline,
-  postWorkgroupMessage,
+  postWorkgroupMessageStream,
 } from "../api.js";
 
 const props = defineProps({
@@ -28,6 +28,12 @@ const textareaRef = ref(null);
 const streamRef = ref(null);
 const followTail = ref(true);
 
+/** 发送中的本地气泡：user 乐观消息 + assistant 流式占位 */
+const liveUser = ref(null);
+const liveAssistant = ref(null);
+const streamPhase = ref(""); // thinking | streaming | tool
+const streamToolName = ref("");
+
 const title = computed(() => {
   const name = String(props.displayName || "").trim() || props.workgroupId || "未命名";
   return `工作组 · ${name}`;
@@ -37,6 +43,15 @@ const canSubmit = computed(
   () => Boolean(input.value.trim()) && !sending.value && Boolean(fromNodeId.value.trim()),
 );
 
+const statusLabel = computed(() => {
+  if (!sending.value) return "";
+  if (streamPhase.value === "tool") {
+    return streamToolName.value ? `执行工具 ${streamToolName.value}…` : "执行工具…";
+  }
+  if (streamPhase.value === "streaming" && liveAssistant.value?.text) return "生成中…";
+  return "思考中…";
+});
+
 const visibleEvents = computed(() =>
   (timeline.value || []).filter((event) => {
     const text = String(event?.text || "").trim();
@@ -44,20 +59,54 @@ const visibleEvents = computed(() =>
   }),
 );
 
+const displayRows = computed(() => {
+  const rows = visibleEvents.value.map((event) => ({
+    key: event.event_id || `seq-${event.seq}`,
+    role: eventRole(event),
+    text: event.text || "",
+    actor: eventActorLabel(event),
+    streaming: false,
+    phase: "",
+    tool: "",
+  }));
+  if (liveUser.value) {
+    rows.push({
+      key: liveUser.value.id,
+      role: "user",
+      text: liveUser.value.text,
+      actor: "",
+      streaming: false,
+      phase: "",
+      tool: "",
+    });
+  }
+  if (liveAssistant.value) {
+    rows.push({
+      key: liveAssistant.value.id,
+      role: "assistant",
+      text: liveAssistant.value.text || "",
+      actor: "Supervisor",
+      streaming: true,
+      phase: streamPhase.value,
+      tool: streamToolName.value,
+    });
+  }
+  return rows;
+});
+
 const sortedMembers = computed(() => {
   const list = [...(members.value || [])];
   list.sort((a, b) => String(a.display_name || "").localeCompare(String(b.display_name || ""), "zh"));
   return list;
 });
 
-/** Supervisor（leader）始终作为成员列表第一项。 */
 const railMembers = computed(() => {
   const rows = [
     {
       member_id: "leader",
       display_name: "Supervisor",
       home_node_id: "manage",
-      status: "ready",
+      status: sending.value ? "busy" : "ready",
       kind: "supervisor",
     },
   ];
@@ -102,6 +151,33 @@ function memberStatusLabel(status) {
 function initialOf(name) {
   const s = String(name || "").trim();
   return s ? s.slice(0, 1).toUpperCase() : "?";
+}
+
+function eventRole(event) {
+  const type = String(event?.type || "").toLowerCase();
+  const actor = String(event?.actor_id || "").toLowerCase();
+  if (type === "human_message") return "user";
+  if (
+    type === "actor_final_text" ||
+    type.includes("assistant") ||
+    type.includes("agent") ||
+    type.includes("supervisor") ||
+    actor === "leader" ||
+    actor === "supervisor"
+  ) {
+    return "assistant";
+  }
+  return "user";
+}
+
+function eventActorLabel(event) {
+  const actor = String(event?.actor_id || "").trim();
+  if (!actor || actor === "leader") return "Supervisor";
+  return actor;
+}
+
+function newClientMessageId() {
+  return `cmsg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 async function resolveSender() {
@@ -166,29 +242,6 @@ async function loadAll() {
   await Promise.all([loadTimeline(), loadMembers()]);
 }
 
-function eventRole(event) {
-  const type = String(event?.type || "").toLowerCase();
-  const actor = String(event?.actor_id || "").toLowerCase();
-  if (type === "human_message") return "user";
-  if (
-    type === "actor_final_text" ||
-    type.includes("assistant") ||
-    type.includes("agent") ||
-    type.includes("supervisor") ||
-    actor === "leader" ||
-    actor === "supervisor"
-  ) {
-    return "assistant";
-  }
-  return "user";
-}
-
-function eventActorLabel(event) {
-  const actor = String(event?.actor_id || "").trim();
-  if (!actor || actor === "leader") return "Supervisor";
-  return actor;
-}
-
 function resizeTextarea() {
   const el = textareaRef.value;
   if (!el) return;
@@ -209,25 +262,82 @@ function scrollToBottom(force = false) {
   el.scrollTop = el.scrollHeight;
 }
 
+function clearLive() {
+  liveUser.value = null;
+  liveAssistant.value = null;
+  streamPhase.value = "";
+  streamToolName.value = "";
+}
+
 async function sendMessage() {
   const text = input.value.trim();
   const sender = fromNodeId.value.trim();
   if (!props.workgroupId || !text || !sender || sending.value) return;
+
+  const clientMessageId = newClientMessageId();
   sending.value = true;
+  followTail.value = true;
+  input.value = "";
+  await nextTick();
+  resizeTextarea();
+
+  liveUser.value = { id: `live-user-${clientMessageId}`, text };
+  liveAssistant.value = { id: `live-asst-${clientMessageId}`, text: "" };
+  streamPhase.value = "thinking";
+  streamToolName.value = "";
+  await nextTick();
+  scrollToBottom(true);
+
   try {
-    await postWorkgroupMessage(props.workgroupId, {
-      text,
-      from_node_id: sender,
-    });
-    input.value = "";
-    await nextTick();
-    resizeTextarea();
-    followTail.value = true;
+    await postWorkgroupMessageStream(
+      props.workgroupId,
+      {
+        text,
+        from_node_id: sender,
+        client_message_id: clientMessageId,
+      },
+      {
+        onEvent: async (eventName, data) => {
+          if (eventName === "status") {
+            const phase = String(data?.phase || "thinking");
+            streamPhase.value = phase === "tool" ? "tool" : phase === "streaming" ? "streaming" : "thinking";
+            streamToolName.value = String(data?.tool || "");
+            if (phase === "tool" && liveAssistant.value) {
+              // 工具轮次：清空上一轮可能误流的正文，回到等待态
+              liveAssistant.value = { ...liveAssistant.value, text: "" };
+            }
+          } else if (eventName === "delta") {
+            const piece = String(data?.text || "");
+            if (!piece || !liveAssistant.value) return;
+            streamPhase.value = "streaming";
+            liveAssistant.value = {
+              ...liveAssistant.value,
+              text: `${liveAssistant.value.text || ""}${piece}`,
+            };
+          } else if (eventName === "assistant_final") {
+            const finalText = String(data?.text || "").trim();
+            if (liveAssistant.value && finalText) {
+              liveAssistant.value = { ...liveAssistant.value, text: finalText };
+            }
+            streamPhase.value = "streaming";
+          } else if (eventName === "final" || eventName === "done") {
+            /* sealed after await */
+          }
+          await nextTick();
+          scrollToBottom();
+        },
+      },
+    );
+    clearLive();
     await loadTimeline();
   } catch (err) {
+    clearLive();
     emit("toast", { message: err.message || "发送失败", type: "error" });
+    await loadTimeline().catch(() => {});
   } finally {
     sending.value = false;
+    streamPhase.value = "";
+    streamToolName.value = "";
   }
 }
 
@@ -241,7 +351,10 @@ function onKeydown(event) {
 watch(
   () => [props.active, props.workgroupId],
   ([active, id]) => {
-    if (active && id) loadAll();
+    if (active && id) {
+      clearLive();
+      loadAll();
+    }
   },
 );
 
@@ -317,12 +430,12 @@ onMounted(async () => {
       </header>
 
       <div ref="streamRef" class="chat__stream" @scroll="onStreamScroll">
-        <div v-if="loading" class="chat__empty">
+        <div v-if="loading && !displayRows.length" class="chat__empty">
           <div class="chat__empty-inner">
             <div class="chat__empty-hint">加载对话中…</div>
           </div>
         </div>
-        <div v-else-if="!visibleEvents.length" class="chat__empty">
+        <div v-else-if="!displayRows.length" class="chat__empty">
           <div class="chat__empty-inner">
             <div class="chat__empty-title">开始对话</div>
             <div class="chat__empty-hint">输入消息与工作组协作</div>
@@ -330,20 +443,56 @@ onMounted(async () => {
         </div>
         <template v-else>
           <article
-            v-for="event in visibleEvents"
-            :key="event.event_id"
+            v-for="row in displayRows"
+            :key="row.key"
             class="msg"
-            :class="eventRole(event) === 'user' ? 'msg--user' : 'msg--assistant'"
+            :class="[
+              row.role === 'user' ? 'msg--user' : 'msg--assistant',
+              row.streaming ? 'msg--generating' : '',
+            ]"
           >
             <div class="msg__body">
-              <div
-                class="msg__bubble"
-                :class="eventRole(event) === 'user' ? 'msg__bubble--user' : 'msg__bubble--assistant'"
-              >
-                <div v-if="eventRole(event) === 'assistant'" class="msg__hint">
-                  {{ eventActorLabel(event) }}
+              <template v-if="row.role === 'assistant' && row.streaming && !row.text">
+                <div class="msg__body--hint-only">
+                  <div
+                    v-if="row.phase === 'tool'"
+                    class="thinking-indicator"
+                    role="status"
+                    :aria-label="`执行工具 ${row.tool || ''}`"
+                  >
+                    <span class="thinking-indicator__orb" aria-hidden="true" />
+                    <span class="thinking-indicator__waves" aria-hidden="true">
+                      <span /><span /><span /><span />
+                    </span>
+                    <span class="thinking-indicator__label">
+                      {{ row.tool ? `工具 · ${row.tool}` : "执行工具" }}
+                    </span>
+                  </div>
+                  <div v-else class="thinking-indicator" role="status" aria-label="思考中">
+                    <span class="thinking-indicator__orb" aria-hidden="true" />
+                    <span class="thinking-indicator__waves" aria-hidden="true">
+                      <span /><span /><span /><span />
+                    </span>
+                    <span class="thinking-indicator__label">思考中</span>
+                  </div>
                 </div>
-                <div class="msg__text">{{ event.text || "（空）" }}</div>
+              </template>
+              <div
+                v-else
+                class="msg__bubble"
+                :class="row.role === 'user' ? 'msg__bubble--user' : 'msg__bubble--assistant'"
+              >
+                <div v-if="row.role === 'assistant'" class="msg__hint">
+                  {{ row.actor || "Supervisor" }}
+                  <span v-if="row.streaming" class="msg__meta-dots" aria-hidden="true">
+                    <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
+                  </span>
+                </div>
+                <pre
+                  v-if="row.streaming"
+                  class="assistant-msg__stream-plain"
+                >{{ row.text }}</pre>
+                <div v-else class="msg__text">{{ row.text || "（空）" }}</div>
               </div>
             </div>
           </article>
@@ -390,7 +539,9 @@ onMounted(async () => {
             <span class="chat__input-strip-left">Enter 发送 · Shift+Enter 换行</span>
           </div>
           <div class="chat__composer-statusline-right">
-            <span v-if="sending" class="chat__input-strip-right">发送中…</span>
+            <span v-if="sending" class="chat__input-strip-right chat__input-strip-right--live">
+              {{ statusLabel }}
+            </span>
           </div>
         </div>
       </footer>
