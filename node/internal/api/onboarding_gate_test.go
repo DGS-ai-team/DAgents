@@ -16,13 +16,20 @@ func TestOnboardingGate_blocksBusinessAPIs(t *testing.T) {
 	cfg.Onboarding.NodeProfileCompleted = &done
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 
-	// 放行：bootstrap / setup / health
-	for _, path := range []string{"/health", "/v1/ui/bootstrap", "/v1/setup/config"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+	// 放行：bootstrap / setup / health / probe-models
+	for _, tc := range []struct {
+		method, path string
+	}{
+		{http.MethodGet, "/health"},
+		{http.MethodGet, "/v1/ui/bootstrap"},
+		{http.MethodGet, "/v1/setup/config"},
+		{http.MethodPost, "/v1/setup/llm/probe-models"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
 		rr := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rr, req)
 		if rr.Code == http.StatusForbidden {
-			t.Fatalf("%s should be allowed before onboarding, got %d body=%s", path, rr.Code, rr.Body.String())
+			t.Fatalf("%s %s should be allowed before onboarding, got %d body=%s", tc.method, tc.path, rr.Code, rr.Body.String())
 		}
 	}
 
@@ -35,7 +42,6 @@ func TestOnboardingGate_blocksBusinessAPIs(t *testing.T) {
 		{http.MethodGet, "/v1/llm/settings"},
 		{http.MethodPost, "/v1/messages"},
 		{http.MethodGet, "/v1/streams"},
-		{http.MethodPost, "/v1/setup/llm/probe-models"},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		rr := httptest.NewRecorder()
@@ -68,6 +74,9 @@ func TestOnboardingGate_allowsAfterComplete(t *testing.T) {
 func TestOnboardingPathAllowed(t *testing.T) {
 	if !onboardingPathAllowed(http.MethodGet, "/ui/assets/app.js") {
 		t.Fatal("ui assets should be allowed")
+	}
+	if !onboardingPathAllowed(http.MethodPost, "/v1/setup/llm/probe-models") {
+		t.Fatal("probe-models should be allowed during onboarding")
 	}
 	if onboardingPathAllowed(http.MethodGet, "/v1/agents") {
 		t.Fatal("agents should be blocked")
