@@ -11,6 +11,10 @@ type DispatchResult struct {
 	AckEnvelope map[string]any
 	Handled     bool
 	ErrorCode   ErrorCode
+	// PendingAck：业务已处理，需在 ACK 帧写出成功后再推进本地 delivery 游标。
+	PendingAck         bool
+	AckWorkgroupID     string
+	AckDeliverySeq     int64
 }
 
 // DispatchEnvelope 处理 Manage 下发的 WSEnvelope（不含 session/resume 控制面）。
@@ -44,11 +48,12 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		if err != nil {
 			return dispatchErr(err)
 		}
-		if err := w.Session.AckDelivery(deliveryWorkgroupID(env, res.Binding.WorkgroupID), env.DeliverySeq); err != nil {
-			return dispatchErr(err)
-		}
+		wgID := deliveryWorkgroupID(env, res.Binding.WorkgroupID)
 		return &DispatchResult{
-			Handled: true,
+			Handled:            true,
+			PendingAck:         true,
+			AckWorkgroupID:     wgID,
+			AckDeliverySeq:     env.DeliverySeq,
 			AckEnvelope: map[string]any{
 				"type": "member.provision_result",
 				"payload": map[string]any{
@@ -74,9 +79,7 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		if res == nil {
 			return dispatchErr(err)
 		}
-		if err := w.Session.AckDelivery(deliveryWorkgroupID(env, cmd.WorkgroupID), env.DeliverySeq); err != nil {
-			return dispatchErr(err)
-		}
+		wgID := deliveryWorkgroupID(env, cmd.WorkgroupID)
 		ackPayload := map[string]any{
 			"command_id":            res.Ack.CommandID,
 			"status":                res.Ack.Status,
@@ -88,7 +91,13 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 			"assign_id":             cmd.AssignID,
 		}
 		ack := map[string]any{"type": "tool.ack", "payload": ackPayload}
-		out := &DispatchResult{Handled: true, AckEnvelope: ack}
+		out := &DispatchResult{
+			Handled:            true,
+			PendingAck:         true,
+			AckWorkgroupID:     wgID,
+			AckDeliverySeq:     env.DeliverySeq,
+			AckEnvelope:        ack,
+		}
 		if res.Entry.Status == "succeeded" || res.Entry.Status == "failed" || res.Entry.Status == "indeterminate" || res.Entry.Status == "rejected" {
 			out.AckEnvelope = map[string]any{
 				"type": "tool.result",
@@ -115,11 +124,12 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		if err := w.HandleArchive(t); err != nil {
 			return dispatchErr(err)
 		}
-		if err := w.Session.AckDelivery(deliveryWorkgroupID(env, t.WorkgroupID), env.DeliverySeq); err != nil {
-			return dispatchErr(err)
-		}
+		wgID := deliveryWorkgroupID(env, t.WorkgroupID)
 		return &DispatchResult{
-			Handled: true,
+			Handled:            true,
+			PendingAck:         true,
+			AckWorkgroupID:     wgID,
+			AckDeliverySeq:     env.DeliverySeq,
 			AckEnvelope: map[string]any{
 				"type": "workgroup.tombstone_ack",
 				"payload": map[string]any{
@@ -133,6 +143,18 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 	default:
 		return nil, errf(CodeSchemaMismatch, "unsupported envelope type %q", env.Type)
 	}
+}
+
+// CommitPendingAck 在 ACK 帧成功写出后推进本地 delivery 游标。
+func (w *Worker) CommitPendingAck(res *DispatchResult) error {
+	if w == nil || res == nil || !res.PendingAck {
+		return nil
+	}
+	if err := w.Session.AckDelivery(res.AckWorkgroupID, res.AckDeliverySeq); err != nil {
+		return err
+	}
+	res.PendingAck = false
+	return nil
 }
 
 func deliveryWorkgroupID(env WSEnvelope, fallback string) string {

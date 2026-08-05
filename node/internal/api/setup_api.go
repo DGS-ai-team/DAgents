@@ -90,12 +90,14 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if s.configPath != "" && configPathWritable(s.configPath) {
-			_ = config.SaveBootstrapFile(s.configPath, updated)
+			if err := config.SaveBootstrapFile(s.configPath, updated); err != nil && s.logger != nil {
+				s.logger.Warn("save bootstrap config failed", "path", s.configPath, "error", err)
+			}
 		}
 	}
 
 	if needsLLMPersist {
-		if err := s.persistLLMConfigs(r.Context(), patch.LLM.Profiles, updated.LLM.ActiveProfileID()); err != nil {
+		if err := s.persistLLMConfigs(r.Context(), patch.LLM.Profiles); err != nil {
 			if s.nodeSettings != nil && settingsSnapshot != nil {
 				_ = s.nodeSettings.Save(r.Context(), settingsSnapshot)
 			}
@@ -135,7 +137,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, view)
 }
 
-func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProfileSettings, activeID string) error {
+func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProfileSettings) error {
 	if s.llmConfigs == nil {
 		return nil
 	}
@@ -188,7 +190,6 @@ func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProf
 			}
 		}
 	}
-	_ = activeID
 	return s.llmConfigs.ReplaceAll(ctx, records, keys, clearIDs)
 }
 

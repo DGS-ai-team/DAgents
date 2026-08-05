@@ -39,6 +39,9 @@ func TestDispatchProvisionAndReadFile(t *testing.T) {
 	if !r1.Handled || r1.AckEnvelope["type"] != "member.provision_result" {
 		t.Fatalf("%+v", r1)
 	}
+	if err := w.CommitPendingAck(r1); err != nil {
+		t.Fatal(err)
+	}
 	b, _ := w.Bindings.Get("mb_01h00000000000000000000002")
 	if b == nil {
 		t.Fatal("binding missing")
@@ -81,6 +84,9 @@ func TestDispatchProvisionAndReadFile(t *testing.T) {
 	}
 	if r2.AckEnvelope["type"] != "tool.result" {
 		t.Fatalf("%+v", r2)
+	}
+	if err := w.CommitPendingAck(r2); err != nil {
+		t.Fatal(err)
 	}
 	if w.Session.LastAckDeliverySeq != 2 {
 		t.Fatalf("ack seq=%d", w.Session.LastAckDeliverySeq)

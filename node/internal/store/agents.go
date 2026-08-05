@@ -301,7 +301,13 @@ func (s *AgentStore) SoftDelete(ctx context.Context, agentID string) error {
 		return fmt.Errorf("agent store unavailable")
 	}
 	agentID = strings.TrimSpace(agentID)
-	res, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
 UPDATE agents SET archived = 1, updated_at = ? WHERE agent_id = ? AND archived = 0`,
 		time.Now().UTC().Format(time.RFC3339Nano), agentID)
 	if err != nil {
@@ -311,9 +317,13 @@ UPDATE agents SET archived = 1, updated_at = ? WHERE agent_id = ? AND archived =
 	if n == 0 {
 		return fmt.Errorf("agent %q not found", agentID)
 	}
-	_ = s.DeleteAgentPolicy(ctx, agentID)
-	_ = s.DeleteAgentPromptContext(ctx, agentID)
-	return nil
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_policy WHERE agent_id = ?`, agentID); err != nil {
+		return fmt.Errorf("delete agent policy: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_prompt_context WHERE agent_id = ?`, agentID); err != nil {
+		return fmt.Errorf("delete agent prompt context: %w", err)
+	}
+	return tx.Commit()
 }
 
 type scannable interface {

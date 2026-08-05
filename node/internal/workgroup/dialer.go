@@ -115,7 +115,12 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 		}
 		res, err := cs.HandleIncomingJSON(data)
 		if res != nil && res.AckEnvelope != nil {
-			_ = wsjson.Write(ctx, conn, res.AckEnvelope)
+			if werr := wsjson.Write(ctx, conn, res.AckEnvelope); werr != nil {
+				return fmt.Errorf("write ack envelope: %w", werr)
+			}
+			if cerr := d.Worker.CommitPendingAck(res); cerr != nil {
+				return fmt.Errorf("commit delivery ack: %w", cerr)
+			}
 		}
 		if err != nil && res != nil && res.ErrorCode == CodeFencingRejected {
 			// 旧帧：已回 session.error，继续读
@@ -123,13 +128,15 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 		}
 		if err != nil {
 			// 非 fencing 业务错误：回 error 帧后继续（保持连接）
-			_ = wsjson.Write(ctx, conn, map[string]any{
+			if werr := wsjson.Write(ctx, conn, map[string]any{
 				"type": "session.error",
 				"payload": map[string]any{
 					"code":    string(CodeConflict),
 					"message": err.Error(),
 				},
-			})
+			}); werr != nil {
+				return fmt.Errorf("write session.error: %w", werr)
+			}
 		}
 	}
 }

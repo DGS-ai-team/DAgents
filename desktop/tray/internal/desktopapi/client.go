@@ -109,9 +109,18 @@ func postUpdateApply(ctx context.Context, force bool) int {
 		return 1
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "update apply read: %v\n", err)
+		return 1
+	}
 	var out applyResponse
-	_ = json.Unmarshal(raw, &out)
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &out); err != nil {
+			fmt.Fprintf(os.Stderr, "update apply decode: %v\n", err)
+			return 1
+		}
+	}
 	if out.Message != "" {
 		if out.OK {
 			fmt.Fprintln(os.Stdout, out.Message)

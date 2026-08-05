@@ -103,6 +103,20 @@ func (s *Server) persistActiveLLMThinking(ctx context.Context) error {
 	updated.SyncActiveProfileFromFlat()
 	updated.ApplyDefaults()
 
+	var settingsSnapshot *config.Config
+	if s.nodeSettings != nil {
+		prev, err := s.nodeSettings.Load(ctx)
+		if err != nil {
+			return err
+		}
+		if prev != nil {
+			snap := *prev
+			settingsSnapshot = &snap
+		}
+	}
+
+	needsLLMPersist := false
+	var llmRecords []store.LLMConfigRecord
 	if s.llmConfigs != nil {
 		id = updated.LLM.ActiveProfileID()
 		records, err := s.llmConfigs.List(ctx)
@@ -117,20 +131,30 @@ func (s *Server) persistActiveLLMThinking(ctx context.Context) error {
 				records[i].Thinking = thinking
 				records[i].ReasoningEffort = effort
 			}
-			if err := s.llmConfigs.ReplaceAll(ctx, records, nil, nil); err != nil {
-				return err
-			}
+			needsLLMPersist = true
+			llmRecords = records
 			store.ApplyLLMConfigsToConfig(&updated, records, id)
 		}
 	}
 
+	// 与 setup PATCH 一致：node_settings 先写；llm_configs 失败时回滚 settings。
 	if s.nodeSettings != nil {
 		if err := s.nodeSettings.Save(ctx, &updated); err != nil {
 			return err
 		}
 	}
+	if needsLLMPersist {
+		if err := s.llmConfigs.ReplaceAll(ctx, llmRecords, nil, nil); err != nil {
+			if s.nodeSettings != nil && settingsSnapshot != nil {
+				_ = s.nodeSettings.Save(ctx, settingsSnapshot)
+			}
+			return err
+		}
+	}
 	if s.configPath != "" && configPathWritable(s.configPath) {
-		_ = config.SaveBootstrapFile(s.configPath, &updated)
+		if err := config.SaveBootstrapFile(s.configPath, &updated); err != nil && s.logger != nil {
+			s.logger.Warn("save bootstrap config failed", "path", s.configPath, "error", err)
+		}
 	}
 	setup.CopyConfig(s.cfg, &updated)
 	return nil
@@ -163,7 +187,9 @@ func (s *Server) switchActiveLLMProfile(id string) error {
 		}
 	}
 	if s.configPath != "" && configPathWritable(s.configPath) {
-		_ = config.SaveBootstrapFile(s.configPath, &updated)
+		if err := config.SaveBootstrapFile(s.configPath, &updated); err != nil && s.logger != nil {
+			s.logger.Warn("save bootstrap config failed", "path", s.configPath, "error", err)
+		}
 	}
 	setup.CopyConfig(s.cfg, &updated)
 	s.syncLLMRuntimeFromStore(context.Background())

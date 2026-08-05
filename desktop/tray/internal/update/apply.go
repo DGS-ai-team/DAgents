@@ -153,7 +153,7 @@ func (a *Applier) ensureUpgradeReady(ctx context.Context) (ready bool, exitCode 
 	defer cancel()
 	readiness, err := a.nodeClient.UpgradeReadiness(checkCtx)
 	if err != nil {
-		return true, 0, ""
+		return false, exitNodeBusy, fmt.Sprintf("无法确认 Node 升级就绪: %v", err)
 	}
 	if readiness.Ready {
 		return true, 0, ""

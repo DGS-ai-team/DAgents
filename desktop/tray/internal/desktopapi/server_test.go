@@ -101,3 +101,14 @@ func TestUIFocusEndpointInvalidJSON(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestUpdateApplyEndpointInvalidJSON(t *testing.T) {
+	srv := New(nil, nil, uifocus.NewStore())
+	req := httptest.NewRequest(http.MethodPost, "/v1/desktop/update/apply", strings.NewReader(`{bad`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	// applier 为 nil 时原先返回 503；无效 JSON 应优先 400
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
