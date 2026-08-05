@@ -64,20 +64,36 @@ export function touchLastRefreshedLabel() {
 }
 
 export const VIEW_META = {
-  registry: {
-    title: "Agent 目录",
-    subtitle: "已注册 Agent Node 目录与 discovery 分组",
+  home: {
+    title: "首页",
+    subtitle: "运行概览与模块入口",
   },
-  nodeadmin: {
-    title: "Node 配置",
-    subtitle: "LLM 配置、Skills / External Tools 分发与版本发布",
+  workgroup: {
+    title: "工作组",
+    subtitle: "创建与管理协作组，修改设置或与 Supervisor 对话",
+  },
+  templates: {
+    title: "Agent 模板",
+    subtitle: "可复用的 Agent 蓝图；工作组新增成员时可快速选用",
+  },
+  marketplace: {
+    title: "能力市场",
+    subtitle: "上传与分发 Skills、Hooks、External Tools 等 Node 扩展能力",
+  },
+  nodes: {
+    title: "Node 列表",
+    subtitle: "已注册 Agent Node、在线状态与 discovery 分组",
+  },
+  permissions: {
+    title: "权限管理",
+    subtitle: "管理员会话、工作组 ACL 与发现组可见性（建设中）",
+  },
+  settings: {
+    title: "配置",
+    subtitle: "LLM 配置、版本发布与系统偏好",
   },
   cases: {
     title: "案例库",
     subtitle: "演示会话 JSONL、关联 Skills / Plugins / External Tools",
-  },
-  workgroup: {
-    title: "工作组",
-    subtitle: "查看所有工作组并进入组内与 Supervisor 对话",
   },
 };

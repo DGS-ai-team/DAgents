@@ -28,38 +28,51 @@ function onSubmit() {
 
 <template>
   <div class="login-page">
-    <form class="login-card" @submit.prevent="onSubmit">
-      <div class="login-brand">
-        <div class="login-logo" aria-hidden="true">
+    <aside class="login-aside" aria-hidden="true">
+      <div class="login-aside-brand">
+        <span class="brand-logo">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="24" height="24" rx="6" fill="var(--primary)" />
+            <rect width="24" height="24" rx="7" fill="var(--primary)" />
             <path d="M6 17V7h2.4v7H15V17H6zm8.4-5V7H17v5h-2.6z" fill="#fff" />
           </svg>
-        </div>
-        <h1>DAgents Manage</h1>
-        <p>管理员登录</p>
+        </span>
+        <strong>DAgents Manage</strong>
       </div>
+      <div class="login-aside-copy">
+        <h1>统一控制面</h1>
+        <p>查看活跃 Node 与工作组，分发配置与案例，让多节点协作保持一致。</p>
+      </div>
+      <div class="login-aside-meta">Registry · Workgroup · Console</div>
+    </aside>
 
-      <p v-if="hint" class="login-hint">{{ hint }}</p>
-      <p v-if="error" class="login-error" role="alert">{{ error }}</p>
+    <div class="login-panel">
+      <form class="login-card" @submit.prevent="onSubmit">
+        <div class="login-brand">
+          <h1>管理员登录</h1>
+          <p>使用管理员账号进入控制面</p>
+        </div>
 
-      <label class="login-field">
-        <span>账号</span>
-        <input v-model="username" type="text" name="username" autocomplete="username" autofocus />
-      </label>
-      <label class="login-field">
-        <span>密码</span>
-        <input
-          v-model="password"
-          type="password"
-          name="password"
-          autocomplete="current-password"
-        />
-      </label>
+        <p v-if="hint" class="login-hint">{{ hint }}</p>
+        <p v-if="error" class="login-error" role="alert">{{ error }}</p>
 
-      <button type="submit" class="login-submit" :disabled="!canSubmit">
-        {{ busy ? "登录中…" : "登录" }}
-      </button>
-    </form>
+        <label class="login-field">
+          <span>账号</span>
+          <input v-model="username" type="text" name="username" autocomplete="username" autofocus />
+        </label>
+        <label class="login-field">
+          <span>密码</span>
+          <input
+            v-model="password"
+            type="password"
+            name="password"
+            autocomplete="current-password"
+          />
+        </label>
+
+        <button type="submit" class="login-submit" :disabled="!canSubmit">
+          {{ busy ? "登录中…" : "登录" }}
+        </button>
+      </form>
+    </div>
   </div>
 </template>
