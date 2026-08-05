@@ -26,6 +26,8 @@ async function refreshOnboarding() {
 
 function onProfileCompleted() {
   needProfile.value = false;
+  // 刷新一次，确保后续业务请求在服务端门闩放开后进入主界面
+  bootReady.value = true;
 }
 
 onMounted(refreshOnboarding);

@@ -6,7 +6,7 @@
 
 ### 新增
 
-- **首次进入 Web UI 的 Node 身份首配页**：开箱未完成时全屏收集「怎么称呼你」与 Node 名称，写入 `user.preferred_name` / `agent.name` 与 `onboarding.node_profile_completed`；未完成前不启动 Manage Registrar / Workgroup Dialer（升级遗留库视为已完成）。
+- **首次进入 Web UI 的 Node 身份首配页**：开箱未完成时全屏收集「怎么称呼你」与 Node 名称，写入 `user.preferred_name` / `agent.name` 与 `onboarding.node_profile_completed`；未完成前拦截本机业务 API（仅放行 bootstrap / setup / `/ui` 静态资源与探活），且不启动 Manage Registrar / Workgroup Dialer（升级遗留库视为已完成）。
 
 ### 变更
 

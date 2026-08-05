@@ -493,7 +493,7 @@ func attachBackgroundJobNotifier(reg *tools.Registry, mgr *session.Manager, logg
 
 // Handler 返回可用于 http.Server 的根 Handler（含 access log）。
 func (s *Server) Handler() http.Handler {
-	return accessLogMiddleware(s.logger, s.mux)
+	return accessLogMiddleware(s.logger, s.onboardingGateMiddleware(s.mux))
 }
 
 // ListenAndServe 在配置的 listen 地址启动 HTTP 服务；ctx 取消时触发优雅关闭。
