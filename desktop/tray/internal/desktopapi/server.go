@@ -4,6 +4,8 @@ package desktopapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	"net/http"
 	"sync"
@@ -119,7 +121,14 @@ func (s *Server) handleClipboardFiles(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleUIFocus(w http.ResponseWriter, r *http.Request) {
 	var req uiFocusRequest
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		dec := json.NewDecoder(r.Body)
+		if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":      false,
+				"message": "invalid json: " + err.Error(),
+			})
+			return
+		}
 	}
 	ttl := uifocus.DefaultTTL
 	if req.TTLSeconds > 0 {

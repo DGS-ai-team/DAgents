@@ -69,11 +69,17 @@ func (r *runtime) scheduleSideEffectContinue(source string) {
 	if !r.sideEffects.markContinuePending() {
 		return
 	}
-	_ = source
-	_ = r.enqueue(queue.Envelope{
+	if err := r.enqueue(queue.Envelope{
 		RequestType:              queue.RequestTypeSideEffectContinue,
 		SideEffectContinueSource: source,
-	}, queue.PriorityToolResult)
+	}, queue.PriorityToolResult); err != nil {
+		r.sideEffects.clearContinuePending()
+		r.logger.Warn("side_effect_continue enqueue failed",
+			"session_id", r.session.ID,
+			"source", source,
+			"error", err,
+		)
+	}
 }
 
 func (r *runtime) maybeScheduleContinueAfterCancel() {

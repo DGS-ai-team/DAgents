@@ -106,7 +106,19 @@ impl Server {
 
     fn handle_ui_focus(&self, req: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
         let body = read_body(req);
-        let parsed: UIFocusRequest = serde_json::from_str(&body).unwrap_or_default();
+        let parsed = if body.trim().is_empty() {
+            UIFocusRequest::default()
+        } else {
+            match serde_json::from_str::<UIFocusRequest>(&body) {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    return json_response(
+                        StatusCode(400),
+                        &json!({ "ok": false, "message": format!("invalid json: {err}") }),
+                    );
+                }
+            }
+        };
         let ttl = if parsed.ttl_seconds > 0 {
             Duration::from_secs(parsed.ttl_seconds as u64)
         } else {

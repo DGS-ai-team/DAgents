@@ -60,8 +60,45 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if patch.LLM != nil && len(patch.LLM.Profiles) > 0 {
+	needsLLMPersist := patch.LLM != nil && len(patch.LLM.Profiles) > 0 && s.llmConfigs != nil
+	var llmSnapshot []store.LLMConfigRecord
+	var settingsSnapshot *config.Config
+	if needsLLMPersist {
+		records, err := s.llmConfigs.List(r.Context())
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "llm_config_load_failed", err.Error(), nil)
+			return
+		}
+		llmSnapshot = records
+	}
+	if s.nodeSettings != nil {
+		prev, err := s.nodeSettings.Load(r.Context())
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "node_settings_load_failed", err.Error(), nil)
+			return
+		}
+		if prev != nil {
+			snap := *prev
+			settingsSnapshot = &snap
+		}
+	}
+
+	// node_settings 先于 llm_configs 写入；LLM 失败时回滚 settings，避免部分成功。
+	if s.nodeSettings != nil {
+		if err := s.nodeSettings.Save(r.Context(), updated); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "node_settings_save_failed", err.Error(), nil)
+			return
+		}
+		if s.configPath != "" && configPathWritable(s.configPath) {
+			_ = config.SaveBootstrapFile(s.configPath, updated)
+		}
+	}
+
+	if needsLLMPersist {
 		if err := s.persistLLMConfigs(r.Context(), patch.LLM.Profiles, updated.LLM.ActiveProfileID()); err != nil {
+			if s.nodeSettings != nil && settingsSnapshot != nil {
+				_ = s.nodeSettings.Save(r.Context(), settingsSnapshot)
+			}
 			writeAPIError(w, http.StatusInternalServerError, "llm_config_save_failed", err.Error(), nil)
 			return
 		}
@@ -71,15 +108,12 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if s.nodeSettings != nil {
-		if err := s.nodeSettings.Save(r.Context(), updated); err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "node_settings_save_failed", err.Error(), nil)
-			return
-		}
-		if s.configPath != "" && configPathWritable(s.configPath) {
-			_ = config.SaveBootstrapFile(s.configPath, updated)
-		}
+		// settings 已在上方持久化
 	} else if s.configPath != "" && configPathWritable(s.configPath) {
 		if err := config.SaveFile(s.configPath, updated); err != nil {
+			if needsLLMPersist && len(llmSnapshot) > 0 {
+				_ = s.llmConfigs.ReplaceAll(r.Context(), llmSnapshot, nil, nil)
+			}
 			writeAPIError(w, http.StatusInternalServerError, "config_save_failed", err.Error(), nil)
 			return
 		}

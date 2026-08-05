@@ -91,3 +91,13 @@ func TestUIFocusEndpoint(t *testing.T) {
 		t.Fatal("expected session focused")
 	}
 }
+
+func TestUIFocusEndpointInvalidJSON(t *testing.T) {
+	srv := New(nil, nil, uifocus.NewStore())
+	req := httptest.NewRequest(http.MethodPost, "/v1/desktop/ui/focus", strings.NewReader(`{bad`))
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}

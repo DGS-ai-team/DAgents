@@ -44,7 +44,9 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		if err != nil {
 			return dispatchErr(err)
 		}
-		_ = w.Session.AckDelivery(deliveryWorkgroupID(env, res.Binding.WorkgroupID), env.DeliverySeq)
+		if err := w.Session.AckDelivery(deliveryWorkgroupID(env, res.Binding.WorkgroupID), env.DeliverySeq); err != nil {
+			return dispatchErr(err)
+		}
 		return &DispatchResult{
 			Handled: true,
 			AckEnvelope: map[string]any{
@@ -72,7 +74,9 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		if res == nil {
 			return dispatchErr(err)
 		}
-		_ = w.Session.AckDelivery(deliveryWorkgroupID(env, cmd.WorkgroupID), env.DeliverySeq)
+		if err := w.Session.AckDelivery(deliveryWorkgroupID(env, cmd.WorkgroupID), env.DeliverySeq); err != nil {
+			return dispatchErr(err)
+		}
 		ackPayload := map[string]any{
 			"command_id":            res.Ack.CommandID,
 			"status":                res.Ack.Status,
@@ -111,7 +115,9 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		if err := w.HandleArchive(t); err != nil {
 			return dispatchErr(err)
 		}
-		_ = w.Session.AckDelivery(deliveryWorkgroupID(env, t.WorkgroupID), env.DeliverySeq)
+		if err := w.Session.AckDelivery(deliveryWorkgroupID(env, t.WorkgroupID), env.DeliverySeq); err != nil {
+			return dispatchErr(err)
+		}
 		return &DispatchResult{
 			Handled: true,
 			AckEnvelope: map[string]any{
