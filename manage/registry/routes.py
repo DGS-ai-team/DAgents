@@ -96,6 +96,26 @@ def _resolve_list_query(
 def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRouter:
     router = APIRouter(tags=["registry"])
 
+    def _delete_agent_common(
+        *,
+        agent_id: str,
+        auth: AuthContext,
+        actor: str,
+        action: str,
+        detail: dict | None = None,
+    ) -> dict[str, bool]:
+        existing = store.get(agent_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
+        if not auth.is_admin:
+            _ensure_member_groups(auth, existing.discovery_group)
+        ok = store.delete(agent_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
+        audit.record(actor=actor, action=action, target_agent_id=agent_id, detail=detail)
+        record_registry_operation(operation="delete", status="ok")
+        return {"deleted": True}
+
     @router.post("/v1/registry/agents", response_model=AgentRegisterResponse)
     def register_agent(payload: AgentRegisterRequest, request: Request) -> AgentRegisterResponse:
         auth = authenticate(request)
@@ -132,22 +152,13 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
     def deregister_agent(agent_id: str, payload: AgentDeregisterRequest, request: Request) -> dict[str, bool]:
         auth = authenticate(request)
         _ensure_node_agent_request(request, agent_id, auth)
-        existing = store.get(agent_id)
-        if existing is None:
-            raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
-        if not auth.is_admin:
-            _ensure_member_groups(auth, existing.discovery_group)
-        ok = store.delete(agent_id)
-        if not ok:
-            raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
-        audit.record(
+        return _delete_agent_common(
+            agent_id=agent_id,
+            auth=auth,
             actor=audit_actor(request, auth, fallback_agent_id=agent_id),
             action="registry.deregister",
-            target_agent_id=agent_id,
             detail={"reason": payload.reason},
         )
-        record_registry_operation(operation="deregister", status="ok")
-        return {"deleted": True}
 
     @router.patch("/v1/registry/agents/{agent_id}/groups", response_model=AgentRecord)
     def update_agent_groups(agent_id: str, payload: AgentGroupsUpdateRequest, request: Request) -> AgentRecord:
@@ -267,16 +278,11 @@ def build_registry_router(store: AgentRegistryStore, audit: AuditLog) -> APIRout
     @router.delete("/v1/registry/agents/{agent_id}")
     def delete_agent(agent_id: str, request: Request) -> dict[str, bool]:
         auth = authenticate(request)
-        existing = store.get(agent_id)
-        if existing is None:
-            raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
-        if not auth.is_admin:
-            _ensure_member_groups(auth, existing.discovery_group)
-        ok = store.delete(agent_id)
-        if not ok:
-            raise HTTPException(status_code=404, detail=f"agent_id={agent_id!r} 不存在")
-        audit.record(actor=auth.token_id, action="registry.delete", target_agent_id=agent_id)
-        record_registry_operation(operation="delete", status="ok")
-        return {"deleted": True}
+        return _delete_agent_common(
+            agent_id=agent_id,
+            auth=auth,
+            actor=auth.token_id,
+            action="registry.delete",
+        )
 
     return router

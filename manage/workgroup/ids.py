@@ -22,10 +22,6 @@ def member_id() -> str:
     return new_id("mb")
 
 
-def grant_id() -> str:
-    return new_id("gr")
-
-
 def lease_id() -> str:
     return new_id("ls")
 

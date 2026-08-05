@@ -15,6 +15,16 @@ import ActivityPanel from "./ActivityPanel.vue";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 
+const RAIL_CACHE_TTL_MS = 5_000;
+const railCache = {
+  agents: [],
+  workgroups: [],
+  agentsFetchedAt: 0,
+  workgroupsFetchedAt: 0,
+  agentsInFlight: null,
+  workgroupsInFlight: null,
+};
+
 const emit = defineEmits([
   "switch",
   "create",
@@ -108,11 +118,27 @@ const sortedAgents = computed(() => {
   return [...agents.value].sort((a, b) => agentSortTime(b) - agentSortTime(a));
 });
 
-async function refreshAgents() {
+async function refreshAgents({ force = false } = {}) {
   loadingAgents.value = true;
   try {
-    const res = await api.listAgents();
-    agents.value = res.agents || [];
+    const now = Date.now();
+    if (!force && railCache.agentsFetchedAt && now - railCache.agentsFetchedAt < RAIL_CACHE_TTL_MS) {
+      agents.value = [...railCache.agents];
+      return;
+    }
+    if (!railCache.agentsInFlight) {
+      railCache.agentsInFlight = api
+        .listAgents()
+        .then((res) => {
+          railCache.agents = res.agents || [];
+          railCache.agentsFetchedAt = Date.now();
+        })
+        .finally(() => {
+          railCache.agentsInFlight = null;
+        });
+    }
+    await railCache.agentsInFlight;
+    agents.value = [...railCache.agents];
   } catch {
     agents.value = [];
   } finally {
@@ -121,11 +147,31 @@ async function refreshAgents() {
   }
 }
 
-async function refreshWorkgroups() {
+async function refreshWorkgroups({ force = false } = {}) {
   loadingWgs.value = true;
   try {
-    const res = await api.listWorkgroups({ scope: "subscribed" });
-    workgroups.value = res.workgroups || [];
+    const now = Date.now();
+    if (
+      !force &&
+      railCache.workgroupsFetchedAt &&
+      now - railCache.workgroupsFetchedAt < RAIL_CACHE_TTL_MS
+    ) {
+      workgroups.value = [...railCache.workgroups];
+      return;
+    }
+    if (!railCache.workgroupsInFlight) {
+      railCache.workgroupsInFlight = api
+        .listWorkgroups({ scope: "subscribed" })
+        .then((res) => {
+          railCache.workgroups = res.workgroups || [];
+          railCache.workgroupsFetchedAt = Date.now();
+        })
+        .finally(() => {
+          railCache.workgroupsInFlight = null;
+        });
+    }
+    await railCache.workgroupsInFlight;
+    workgroups.value = [...railCache.workgroups];
   } catch {
     workgroups.value = [];
   } finally {
@@ -133,8 +179,8 @@ async function refreshWorkgroups() {
   }
 }
 
-async function refresh() {
-  await Promise.all([refreshAgents(), refreshWorkgroups()]);
+async function refresh({ force = true } = {}) {
+  await Promise.all([refreshAgents({ force }), refreshWorkgroups({ force })]);
   // 已展开的工作组刷新成员
   await Promise.all(
     [...expanded.value].map((id) => loadMembers(id, true)),
@@ -231,7 +277,7 @@ async function commitRename(agent) {
   if (!id || !name || name === agentDisplayTitle(agent)) return;
   try {
     await api.patchAgent(id, { display_name: name });
-    await refreshAgents();
+    await refreshAgents({ force: true });
   } catch (e) {
     agentStore.error = e.message;
   }
@@ -294,7 +340,9 @@ watch(
   { immediate: true },
 );
 
-onMounted(refresh);
+onMounted(() => {
+  void refresh({ force: false });
+});
 
 defineExpose({
   refresh,

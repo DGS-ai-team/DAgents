@@ -10,12 +10,9 @@ SCHEMA_VERSION = "0.5.0"
 
 _WG = r"^wg_[0-9a-z]{26}$"
 _MB = r"^mb_[0-9a-z]{26}$"
-_GR = r"^gr_[0-9a-z]{26}$"
-_LS = r"^ls_[0-9a-z]{26}$"
 _AS = r"^as_[0-9a-z]{26}$"
 _RN = r"^rn_[0-9a-z]{26}$"
 _SHA = r"^sha256:[0-9a-f]{64}$"
-_TOOL = r"^[a-z][a-z0-9_]{0,63}$"
 
 
 class WorkGroup(BaseModel):
@@ -121,24 +118,6 @@ class WorkGroupMember(BaseModel):
     archived_at: str | None = None
 
 
-class NodeExecutionGrant(BaseModel):
-    grant_id: str = Field(pattern=_GR)
-    workgroup_id: str = Field(pattern=_WG)
-    member_id: str = Field(pattern=_MB)
-    home_node_id: str = Field(min_length=1, max_length=128)
-    member_spec_digest: str = Field(pattern=_SHA)
-    status: Literal["invited", "accepted", "revoked"]
-    lease_id: str = Field(pattern=_LS)
-    lease_epoch: int = Field(ge=1)
-    member_generation: int = Field(ge=1)
-    tool_allow_names: list[str] = Field(default_factory=list)
-    workspace_contract: dict[str, Any] = Field(default_factory=dict)
-    policy_ceiling: dict[str, Any] = Field(default_factory=dict)
-    invited_at: str
-    accepted_at: str | None = None
-    revoked_at: str | None = None
-
-
 class ActorRun(BaseModel):
     run_id: str = Field(pattern=_RN)
     workgroup_id: str = Field(pattern=_WG)
@@ -197,11 +176,6 @@ class MemberCreateRequest(BaseModel):
     allow_tool_names: list[str] = Field(default_factory=list)
     side_effect_classes: list[str] = Field(default_factory=list)
     policy_ceiling: dict[str, Any] = Field(default_factory=dict)
-
-
-class GrantInviteRequest(BaseModel):
-    member_id: str = Field(pattern=_MB)
-    tool_allow_names: list[str] | None = None
 
 
 class AssignCreateRequest(BaseModel):

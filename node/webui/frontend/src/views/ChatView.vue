@@ -158,16 +158,6 @@ async function syncCurrentAgentDisplayName() {
   }
 }
 
-const PANEL_SETTINGS_ROUTES = {
-  help: "/settings/about",
-  context: "/settings/context",
-  skills: "/settings/skills",
-  triggers: "/settings/triggers",
-  policy: "/settings/security",
-  update: "/settings/about",
-  status: "/settings/general",
-};
-
 function syncRouteAgent(agentId) {
   const id = String(agentId || "").trim();
   if (route.params.agentId === id) return;
@@ -791,53 +781,6 @@ async function handleThinkingCommand(arg) {
 
 function openLeftActivity() {
   agentPanelRef.value?.expandSection?.("activity");
-}
-
-async function openPanel(name, arg) {
-  const settingsPath = PANEL_SETTINGS_ROUTES[name];
-  if (settingsPath) {
-    if (!agentStore.agentId) {
-      agentStore.error = "请先创建或选择一个 Agent";
-      return;
-    }
-    try {
-      await ensureAgent();
-      if (name === "skills") {
-        if (arg?.startsWith("load ")) {
-          await api.loadSkill(agentStore.agentId, arg.slice(5).trim());
-        } else if (arg?.startsWith("unload ")) {
-          await api.unloadSkill(agentStore.agentId, arg.slice(7).trim());
-        }
-      }
-      await router.push(settingsPath);
-    } catch (e) {
-      agentStore.error = e.message;
-    }
-    return;
-  }
-  if (name === "agents") {
-    agentPanelRef.value?.refresh?.();
-    return;
-  }
-  if (name === "activity" || name === "changes") {
-    openLeftActivity();
-    return;
-  }
-  if (name === "children") {
-    chromeStore.panel = name;
-    return;
-  }
-  if (!agentStore.agentId) {
-    agentStore.error = "请先创建或选择一个 Agent";
-    return;
-  }
-  try {
-    await ensureAgent();
-    chromeStore.panel = name;
-  } catch (e) {
-    agentStore.error = e.message;
-    chromeStore.panel = null;
-  }
 }
 
 function closePanel() {
