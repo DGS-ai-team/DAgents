@@ -6,10 +6,11 @@
 
 ### 新增
 
-- **首次进入 Web UI 的 Node 身份首配页**：开箱未完成时全屏两步收集「怎么称呼你 / Node 名称」与一条 LLM 配置，写入 `user.preferred_name` / `agent.name` / `llm.profiles` 与 `onboarding.node_profile_completed`；未完成前拦截本机业务 API（仅放行 bootstrap / setup / LLM 探测 / `/ui` 静态资源与探活），且不启动 Manage Registrar / Workgroup Dialer（升级遗留库视为已完成）。
+- **首次进入 Web UI 的 Node 身份首配页**：开箱未完成时全屏三步收集主题、「怎么称呼你 / Node 名称」与一条 LLM 配置，写入 `user.preferred_name` / `agent.name` / `llm.profiles` 与 `onboarding.node_profile_completed`；未完成前拦截本机业务 API（仅放行 bootstrap / setup / LLM 探测 / `/ui` 静态资源与探活），且不启动 Manage Registrar / Workgroup Dialer（升级遗留库视为已完成）。
 
 ### 变更
 
+- **首配页对齐 Workbench 风格并增加主题步骤**：第一步选择浅色 / 深色 / 跟随系统（写入既有 `dagents_webui_theme`）；整体改用 panel、settings-field、btn 等现有控件样式，去掉独立渐变装饰。
 - **侧栏 Agent 列表选中不再置顶**：切换当前 Agent 时保持按 `updated_at` 排序的原有位置，仅用高亮表示选中。
 - **Shell 双轨安装**：推荐轨 Tauri（`desktop/tray-tauri`，内嵌 Web UI，需 WebView2）与兼容轨 Go（`desktop/tray`，低版本 Windows）均由 CI 构建；Inno 附加任务二选一写入 `bin\dagents-shell.exe`；未检测到 WebView2 时默认兼容模式。Tauri 轨补齐 Desktop API / SSE 待办 / Toast / 更新编排。
 - **远端 Agent Placement 设计启动**：独立分支推进同组 Node 放置、OS 标注、屏幕旁观；通信面拟引入 Manage Edge Tunnel（见 `docs/design/remote-agent-placement.md`）。
