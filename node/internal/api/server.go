@@ -194,6 +194,17 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			logger.Error("agents store init failed", "error", err, "path", cfg.AgentsDBPath())
 		} else {
 			agentsStore = opened
+			if n, err := policy.MergeMissingSeedIntoRuntimePolicy(cfg.RuntimeDir()); err != nil {
+				logger.Error("runtime policy seed merge failed", "error", err, "runtime", cfg.RuntimeDir())
+			} else if n > 0 {
+				logger.Info("runtime policy seed merge applied", "tools_added", n, "runtime", cfg.RuntimeDir())
+			}
+			if result, err := agentsStore.MigrateAgentPoliciesMergeSeed(context.Background()); err != nil {
+				logger.Error("agent policy seed merge failed", "error", err)
+			} else if result.AgentsTouched > 0 {
+				logger.Info("agent policy seed merge applied",
+					"agents", result.AgentsTouched, "tools_added", result.ToolsAdded)
+			}
 		}
 	}
 	var llmConfigStore *store.LLMConfigStore

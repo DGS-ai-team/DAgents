@@ -5,7 +5,7 @@
 | `engine.go` | `DecideTool`：工具 + bash shell 细粒度审批（含 `deny` 硬拒绝） |
 | `store.go` | 策略快照、`ApplyToolUpdates` / `ApplyShellUpdates` 原子写盘 |
 | `decision.go` | API 三档 `allow_auto` / `require_approval` / `deny` 与内部 mode 映射 |
-| `bootstrap.go` | 确保 `.runtime/policy` 存在并从 `packaging/runtime/policy` 种子复制 |
+| `bootstrap.go` | 确保 `.runtime/policy` 存在、从种子复制缺失文件，并合并种子缺项 |
 | `entry_file.go` | 解析 `key=mode` txt 策略（always / never / rule / deny） |
 | `shell_parse.go` | bash/cmd/powershell 命令拆分与 root command 提取 |
 | `mode.go` | 审批模式常量 |
