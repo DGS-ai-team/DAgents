@@ -94,7 +94,7 @@ export const VIEW_META = {
   },
   settings: {
     title: "配置",
-    subtitle: "控制面共享的 LLM、版本发布与案例库",
+    subtitle: "管理台共享的 LLM、版本发布与案例库",
   },
   cases: {
     title: "案例库",
