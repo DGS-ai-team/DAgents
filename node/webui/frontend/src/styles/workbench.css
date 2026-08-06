@@ -94,13 +94,14 @@
 .btn--primary {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  color: var(--color-text-invert);
+  color: #ffffff;
   box-shadow: none;
 }
 
 .btn--primary:hover:not(:disabled) {
   background: var(--color-primary-strong);
   border-color: var(--color-primary-strong);
+  color: #ffffff;
 }
 
 .btn--danger {
@@ -4116,8 +4117,25 @@ select.settings-field__input {
 }
 
 .decision-pill--rule {
-  background: var(--color-primary-soft);
-  color: var(--color-primary-strong);
+  background: rgba(0, 120, 212, 0.12);
+  color: #005a9e;
+}
+
+:root:not([data-theme="light"]) .decision-pill--rule {
+  background: rgba(96, 205, 255, 0.16);
+  color: #99ebff;
+}
+
+:root:not([data-theme="light"]) .decision-pill--allow {
+  color: #6ccb5f;
+}
+
+:root:not([data-theme="light"]) .decision-pill--approval {
+  color: #fce100;
+}
+
+:root:not([data-theme="light"]) .decision-pill--deny {
+  color: #ff99a4;
 }
 
 .policy-panel__toolbar {

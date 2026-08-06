@@ -54,6 +54,7 @@ class WorkGroupStore:
         self._timeline: dict[str, list[TimelineEvent]] = {}
         self._outbox: dict[str, list[OutboxFrame]] = {}
         self._hitl: dict[str, HITLRequest] = {}
+        self._hitl_waiters: dict[str, threading.Event] = {}
         # member_id → {workspace_path, tool_catalog_revision, provision_id}
         self._member_runtime: dict[str, dict[str, str]] = {}
         # workgroup_id → {node_id: Subscription}
@@ -674,6 +675,23 @@ class WorkGroupStore:
             self._ensure_loaded()
             return self._runs.get(run_id)
 
+    def list_actor_runs(
+        self,
+        workgroup_id: str,
+        *,
+        actor_id: str | None = None,
+        limit: int = 20,
+    ) -> list[ActorRun]:
+        with self._lock:
+            self._ensure_loaded()
+            rows = [r for r in self._runs.values() if r.workgroup_id == workgroup_id]
+            aid = str(actor_id or "").strip()
+            if aid:
+                rows = [r for r in rows if r.actor_id == aid]
+            rows.sort(key=lambda r: r.created_at, reverse=True)
+            lim = max(1, min(int(limit or 20), 100))
+            return rows[:lim]
+
     def update_actor_run(
         self,
         run_id: str,
@@ -882,6 +900,53 @@ class WorkGroupStore:
             )
             return updated
 
+    def fail_active_assigns(
+        self,
+        workgroup_id: str,
+        *,
+        reason: str = "assign interrupted",
+        error_code: str = "canceled",
+        leader_tool_call_ids: set[str] | None = None,
+    ) -> list[str]:
+        """将组内仍 active 的 Assign 置为 failed；可按 leader_tool_call_id 过滤。"""
+        with self._lock:
+            self._ensure_loaded()
+            failed: list[str] = []
+            for assign in list(self._assigns.values()):
+                if assign.workgroup_id != workgroup_id:
+                    continue
+                if assign.status not in {"queued", "running", "awaiting_hitl"}:
+                    continue
+                if leader_tool_call_ids is not None:
+                    if (assign.leader_tool_call_id or "") not in leader_tool_call_ids:
+                        continue
+                updated = assign.model_copy(
+                    update={
+                        "status": "failed",
+                        "result_summary": reason,
+                        "error_code": error_code,
+                    }
+                )
+                self._assigns[assign.assign_id] = updated
+                self._put(
+                    "workgroup_assigns",
+                    assign.assign_id,
+                    updated.model_dump_json(),
+                    workgroup_id=workgroup_id,
+                )
+                member = self._members.get(assign.member_id)
+                if member is not None and member.active_assign_id == assign.assign_id:
+                    mem = member.model_copy(update={"active_assign_id": None, "status": "ready"})
+                    self._members[member.member_id] = mem
+                    self._put(
+                        "workgroup_members",
+                        member.member_id,
+                        mem.model_dump_json(),
+                        workgroup_id=workgroup_id,
+                    )
+                failed.append(assign.assign_id)
+            return failed
+
     # --- Timeline / Outbox / HITL (D3) ---
 
     def append_timeline(
@@ -1015,6 +1080,7 @@ class WorkGroupStore:
                 hitl.model_dump_json(),
                 workgroup_id=workgroup_id,
             )
+            self._hitl_waiters.setdefault(hitl.hitl_id, threading.Event())
             return hitl
 
     def get_hitl(self, hitl_id: str) -> HITLRequest | None:
@@ -1029,6 +1095,39 @@ class WorkGroupStore:
             if pending_only:
                 items = [h for h in items if h.status == "pending"]
             return sorted(items, key=lambda h: h.created_at, reverse=True)
+
+    def wait_hitl_resolved(self, hitl_id: str, *, timeout_s: float = 300.0) -> HITLRequest:
+        """阻塞直到 HITL 被 resolve（或超时）。供 Leader ask_workgroup_user 使用。"""
+        hid = (hitl_id or "").strip()
+        timeout = max(0.1, float(timeout_s))
+        with self._lock:
+            self._ensure_loaded()
+            hitl = self._hitl.get(hid)
+            if hitl is None:
+                raise WorkgroupError("not_found", "hitl not found", http_status=404)
+            if hitl.status == "resolved":
+                return hitl
+            ev = self._hitl_waiters.setdefault(hid, threading.Event())
+        if not ev.wait(timeout):
+            raise WorkgroupError(
+                "conflict",
+                f"hitl timed out after {timeout:g}s",
+                http_status=409,
+                retryable=True,
+                details={"hitl_id": hid},
+            )
+        with self._lock:
+            hitl = self._hitl.get(hid)
+            if hitl is None:
+                raise WorkgroupError("not_found", "hitl not found", http_status=404)
+            if hitl.status != "resolved":
+                raise WorkgroupError(
+                    "conflict",
+                    "hitl waiter woke but status is not resolved",
+                    http_status=409,
+                    details={"hitl_id": hid, "status": hitl.status},
+                )
+            return hitl
 
     def resolve_hitl_cas(
         self,
@@ -1062,7 +1161,32 @@ class WorkGroupStore:
                 updated.model_dump_json(),
                 workgroup_id=workgroup_id,
             )
+            waiter = self._hitl_waiters.pop(hitl_id, None)
+            if waiter is not None:
+                waiter.set()
             return updated
+
+    def cancel_pending_hitls(self, workgroup_id: str) -> list[str]:
+        """取消组内 pending HITL（turn cancel 时唤醒 ask_workgroup_user 等待）。"""
+        canceled: list[str] = []
+        with self._lock:
+            self._ensure_loaded()
+            pending = [
+                h
+                for h in self._hitl.values()
+                if h.workgroup_id == workgroup_id and h.status == "pending"
+            ]
+        for hitl in pending:
+            try:
+                self.resolve_hitl_cas(
+                    workgroup_id,
+                    hitl.hitl_id,
+                    resolution={"canceled": True, "answer": ""},
+                )
+                canceled.append(hitl.hitl_id)
+            except WorkgroupError:
+                continue
+        return canceled
 
     def subscribe(self, workgroup_id: str, node_id: str) -> Subscription:
         with self._lock:

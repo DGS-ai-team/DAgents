@@ -1,11 +1,17 @@
 <script setup>
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 
-const TOOL_OPTIONS = [
+// catalog 失败时的离线兜底：与 shared catalog default=true（仅 fs）对齐；不含 bash。
+const FALLBACK_TOOLS = [
   { id: "read_file", label: "读文件", hint: "read_file" },
-  { id: "glob_files", label: "列目录", hint: "glob_files" },
+  { id: "show_image", label: "展示图片", hint: "show_image" },
+  { id: "read_image", label: "读图片", hint: "read_image（需多模态）" },
   { id: "write_file", label: "写文件", hint: "write_file" },
+  { id: "glob_files", label: "列目录", hint: "glob_files" },
+  { id: "grep_file", label: "单文件搜索", hint: "grep_file" },
+  { id: "grep_files", label: "多文件搜索", hint: "grep_files" },
+  { id: "search_replace", label: "替换内容", hint: "search_replace" },
 ];
 
 const props = defineProps({
@@ -18,6 +24,8 @@ const props = defineProps({
 
 const emit = defineEmits(["close", "saved"]);
 
+const toolOptions = ref([...FALLBACK_TOOLS]);
+const defaultTools = ref(FALLBACK_TOOLS.map((t) => t.id));
 const draft = reactive(emptyDraft());
 const busy = ref(false);
 const loadingSpec = ref(false);
@@ -39,7 +47,7 @@ function emptyDraft() {
   return {
     displayName: "",
     homeNodeId: "",
-    tools: ["read_file", "glob_files", "write_file"],
+    tools: [...defaultTools.value],
     soulMd: "",
     customMd: "",
     llmProfileId: "",
@@ -56,6 +64,27 @@ function toggleTool(id) {
 function onBackdropClick(event) {
   if (busy.value) return;
   if (event.target === event.currentTarget) emit("close");
+}
+
+async function loadToolCatalog() {
+  try {
+    const catalog = await api.getMemberToolCatalog();
+    const tools = Array.isArray(catalog?.tools) ? catalog.tools : [];
+    const mapped = tools
+      .map((t) => ({
+        id: String(t.id || "").trim(),
+        label: String(t.label || t.id || "").trim(),
+        hint: String(t.hint || t.id || "").trim(),
+      }))
+      .filter((t) => t.id);
+    if (mapped.length) toolOptions.value = mapped;
+    const defaults = Array.isArray(catalog?.default_allow_names)
+      ? catalog.default_allow_names.map(String).filter(Boolean)
+      : mapped.map((t) => t.id);
+    if (defaults.length) defaultTools.value = defaults;
+  } catch {
+    /* 保留 FALLBACK */
+  }
 }
 
 async function resetFromProps() {
@@ -77,7 +106,7 @@ async function resetFromProps() {
     draft.displayName = String(spec?.display_name || "").trim();
     draft.homeNodeId = String(spec?.home_node_id || props.defaultHomeNodeId || "").trim();
     const allow = Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [];
-    draft.tools = allow.length ? allow.map(String) : ["read_file"];
+    draft.tools = allow.length ? allow.map(String) : [...defaultTools.value];
     draft.soulMd = String(spec?.prompt?.soul_md || "");
     draft.customMd = String(spec?.prompt?.custom_md || "");
     draft.llmProfileId = String(spec?.llm_profile_id || "").trim();
@@ -97,7 +126,7 @@ async function submit() {
   error.value = "";
   const name = String(draft.displayName || "").trim();
   if (!name || !props.workgroupId || busy.value) return;
-  const tools = draft.tools.length ? [...draft.tools] : ["read_file"];
+  const tools = draft.tools.length ? [...draft.tools] : [...defaultTools.value];
   const body = {
     display_name: name,
     allow_tool_names: tools,
@@ -142,6 +171,10 @@ watch(
     if (visible) void resetFromProps();
   },
 );
+
+onMounted(() => {
+  void loadToolCatalog();
+});
 </script>
 
 <template>
@@ -195,10 +228,10 @@ watch(
 
             <fieldset class="wg-member-modal__tools">
               <legend class="settings-field__label">能力</legend>
-              <p class="settings-field__hint">仅限该成员工作区内的文件操作</p>
+              <p class="settings-field__hint">默认文件系统；Shell 无额外沙箱，需显式勾选</p>
               <div class="wg-member-modal__tool-row">
                 <button
-                  v-for="opt in TOOL_OPTIONS"
+                  v-for="opt in toolOptions"
                   :key="opt.id"
                   type="button"
                   class="wg-member-modal__chip"

@@ -78,7 +78,12 @@ const createWgName = ref("");
 const createWgBusy = ref(false);
 const createWgError = ref("");
 
-const activitySnap = computed(() => deriveActivityFromTranscript(transcriptStore.entries));
+const activitySnap = computed(() => {
+  if (route.name === "workgroups") {
+    return { files: [], commands: [], file_count: 0, command_count: 0 };
+  }
+  return deriveActivityFromTranscript(transcriptStore.entries);
+});
 const activityBadge = computed(() => {
   const n = (activitySnap.value.file_count || 0) + (activitySnap.value.command_count || 0);
   return n > 0 ? n : 0;

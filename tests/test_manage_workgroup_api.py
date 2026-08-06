@@ -194,6 +194,22 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 self.assertEqual(all_hitl.status_code, 200, all_hitl.text)
                 self.assertEqual(len(all_hitl.json()), 1)
 
+    def test_member_tool_catalog(self) -> None:
+        with TemporaryDirectory() as tmp:
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
+            app = create_app(settings)
+            with TestClient(app) as client:
+                res = client.get("/v1/workgroups/meta/member-tools")
+                self.assertEqual(res.status_code, 200, res.text)
+                body = res.json()
+                ids = [t["id"] for t in body["tools"]]
+                self.assertIn("read_file", ids)
+                self.assertIn("bash_run", ids)
+                self.assertIn("search_replace", ids)
+                self.assertIn("read_file", body["default_allow_names"])
+                self.assertNotIn("bash_run", body["default_allow_names"])
+                self.assertTrue(set(body["default_allow_names"]).issubset(set(ids)))
+
 
 if __name__ == "__main__":
     unittest.main()

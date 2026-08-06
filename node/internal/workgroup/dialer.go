@@ -2,7 +2,6 @@ package workgroup
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -231,10 +230,4 @@ func (d *Dialer) Ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return conn.Ping(ctx)
-}
-
-// EncodeJSON 便于测试构造帧。
-func EncodeJSON(v any) []byte {
-	raw, _ := json.Marshal(v)
-	return raw
 }

@@ -2,15 +2,19 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
+	"github.com/DGS-ai-team/DAgents/node/internal/workgroup"
 )
 
 func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("GET /v1/workgroups", s.handleListWorkgroups)
 	s.mux.HandleFunc("POST /v1/workgroups", s.handleCreateWorkgroup)
+	s.mux.HandleFunc("GET /v1/workgroups/meta/member-tools", s.handleGetMemberToolCatalog)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/acl", s.handleGetWorkgroupACL)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/collaborators", s.handleAddWorkgroupCollaborator)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/members", s.handleListWorkgroupMembers)
@@ -25,6 +29,10 @@ func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("DELETE /v1/workgroups/{workgroupId}/subscribe", s.handleUnsubscribeWorkgroup)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/timeline", s.handleWorkgroupTimeline)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/messages", s.handlePostWorkgroupMessage)
+	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/messages/stream", s.handlePostWorkgroupMessageStream)
+	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/turn/cancel", s.handleCancelWorkgroupTurn)
+	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/runs", s.handleListWorkgroupRuns)
+	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/runs/{runId}/history", s.handleGetWorkgroupRunHistory)
 }
 
 func (s *Server) workgroupProxyReady(w http.ResponseWriter) bool {
@@ -85,6 +93,12 @@ func (s *Server) handleCreateWorkgroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleGetMemberToolCatalog(w http.ResponseWriter, r *http.Request) {
+	// 目录来自仓库嵌入 JSON；Node 单机不连 Manage 也可读。不经 Manage HTTP。
+	_ = r
+	writeJSON(w, http.StatusOK, workgroup.MemberToolCatalogAPI())
 }
 
 func (s *Server) handleGetWorkgroupACL(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +165,7 @@ func (s *Server) handleCreateWorkgroupMember(w http.ResponseWriter, r *http.Requ
 		body["home_node_id"] = s.cfg.NodeID
 	}
 	if tools, ok := body["allow_tool_names"].([]any); !ok || len(tools) == 0 {
-		body["allow_tool_names"] = []string{"read_file", "glob_files", "write_file"}
+		body["allow_tool_names"] = workgroup.WorkspaceDefaultAllowToolNames()
 	}
 	out, err := s.control.CreateWorkgroupMember(r.Context(), wid, body)
 	if err != nil {
@@ -325,6 +339,7 @@ func (s *Server) handlePostWorkgroupMessage(w http.ResponseWriter, r *http.Reque
 	var body struct {
 		Text            string `json:"text"`
 		ClientMessageID string `json:"client_message_id"`
+		DirectMemberID  string `json:"direct_member_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "invalid json", nil)
@@ -334,10 +349,120 @@ func (s *Server) handlePostWorkgroupMessage(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "text required", nil)
 		return
 	}
-	ev, err := s.control.PostWorkgroupMessage(r.Context(), wid, body.Text, body.ClientMessageID)
+	ev, err := s.control.PostWorkgroupMessage(r.Context(), wid, body.Text, body.ClientMessageID, body.DirectMemberID)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, ev)
+}
+
+func (s *Server) handlePostWorkgroupMessageStream(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	var body struct {
+		Text            string `json:"text"`
+		ClientMessageID string `json:"client_message_id"`
+		DirectMemberID  string `json:"direct_member_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "invalid json", nil)
+		return
+	}
+	if strings.TrimSpace(body.Text) == "" {
+		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "text required", nil)
+		return
+	}
+
+	upstream, err := s.control.OpenWorkgroupMessageStream(
+		r.Context(),
+		wid,
+		body.Text,
+		body.ClientMessageID,
+		body.DirectMemberID,
+	)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	defer upstream.Body.Close()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeAPIError(w, http.StatusInternalServerError, "stream_unsupported", "streaming unsupported", nil)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	buf := make([]byte, 4096)
+	for {
+		n, readErr := upstream.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return
+			}
+			flusher.Flush()
+		}
+		if readErr != nil {
+			if readErr != io.EOF {
+				// 客户端断开或上游中断：静默结束
+			}
+			return
+		}
+	}
+}
+
+func (s *Server) handleCancelWorkgroupTurn(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	out, err := s.control.CancelWorkgroupTurn(r.Context(), wid)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleListWorkgroupRuns(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	actorID := strings.TrimSpace(r.URL.Query().Get("actor_id"))
+	limit := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	out, err := s.control.ListWorkgroupRuns(r.Context(), wid, actorID, limit)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleGetWorkgroupRunHistory(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	runID := strings.TrimSpace(r.PathValue("runId"))
+	out, err := s.control.GetWorkgroupRunHistory(r.Context(), wid, runID)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import * as api from "../api/node.js";
 import { chromeStore } from "../stores/chrome.js";
 import { agentStore } from "../stores/agent.js";
@@ -14,6 +15,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close"]);
+const route = useRoute();
 
 const loading = ref(false);
 const error = ref("");
@@ -24,6 +26,12 @@ const sectionOpen = ref({
   files: true,
 });
 
+/** 工作组主栏：不展示上一智能体的活动残留 */
+const inWorkgroupContext = computed(() => route.name === "workgroups");
+const workgroupContextKey = computed(() =>
+  inWorkgroupContext.value ? String(route.params.workgroupId || "").trim() : "",
+);
+
 function toggleSection(key) {
   sectionOpen.value = { ...sectionOpen.value, [key]: !sectionOpen.value[key] };
 }
@@ -33,7 +41,12 @@ function toggleCmd(key) {
   expandedCmd.value = { ...expandedCmd.value, [k]: !expandedCmd.value[k] };
 }
 
-const live = computed(() => deriveActivityFromTranscript(transcriptStore.entries));
+const live = computed(() => {
+  if (inWorkgroupContext.value) {
+    return { files: [], commands: [], file_count: 0, command_count: 0 };
+  }
+  return deriveActivityFromTranscript(transcriptStore.entries);
+});
 
 const files = computed(() => (remote.value?.files?.length ? remote.value.files : live.value.files) || []);
 const commands = computed(() => (remote.value?.commands?.length ? remote.value.commands : live.value.commands) || []);
@@ -41,6 +54,9 @@ const fileCount = computed(() => files.value.length);
 const cmdCount = computed(() => commands.value.length);
 
 const summaryLine = computed(() => {
+  if (inWorkgroupContext.value && !fileCount.value && !cmdCount.value) {
+    return workgroupContextKey.value ? "工作组暂无本地活动" : "选择工作组查看活动";
+  }
   const parts = [];
   if (fileCount.value) parts.push(`改动 ${fileCount.value} 个文件`);
   if (cmdCount.value) parts.push(`执行 ${cmdCount.value} 条命令`);
@@ -111,6 +127,14 @@ function isAgentMissingError(err) {
 }
 
 async function refresh() {
+  if (inWorkgroupContext.value) {
+    // 工作组会话与智能体 transcript / workspace-activity 解耦；切换工作组时清空残留
+    remote.value = null;
+    error.value = "";
+    loading.value = false;
+    expandedCmd.value = {};
+    return;
+  }
   const id = agentStore.agentId?.trim();
   if (!id) {
     remote.value = null;
@@ -133,7 +157,7 @@ async function refresh() {
 }
 
 watch(
-  () => agentStore.agentId,
+  () => [agentStore.agentId, route.name, workgroupContextKey.value],
   () => {
     void refresh();
   },

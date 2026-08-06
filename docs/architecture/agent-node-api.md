@@ -20,19 +20,21 @@
 | 原则 | 说明 |
 |------|------|
 | **一进程多 Agent** | Node 进程持有多个 Agent 实例；对外按 `agent_id` 寻址 |
-| **Client 仅本地** | 默认只 bind `127.0.0.1`；Client 与 Node 同包读同一 `local.endpoint` |
+| **默认本机绑定** | 默认 `127.0.0.1`；人机为 Web UI `/ui/` |
 | **思考与工具在 Node 内** | 无「Backend 代执行」路径；tool call 由 turn loop 本地完成 |
-| **跨 Node 协作** | 经 Manage 工作组 Dialer；A2A inbox / `agent_invoke` / Placement 已拆除 |
+| **跨 Node 协作** | 经 Manage **Workgroup** Dialer；A2A inbox / `agent_invoke` / Placement 已拆除 |
+| **无沙箱后端** | 工具边界 = 工具组 + policy + `fs_root`；`sandbox` 请求字段忽略 |
 | **会话态在 Node** | Agent 对话上下文、队列、持久化由 Node 负责（SQLite） |
 
 ### 1.1 基础路径
 
 | 前缀 | 调用方 | 说明 |
 |------|--------|------|
-| `/v1/agents/...` | Client（本地） | **主契约**：对话、策略、侧车、子 Agent |
-| `/v1/...` | Client（本地） | messages、streams、triggers、setup、llm |
-| `/v1/sessions/...` | 已移除（404） | 见 §0 |
-| `/health` | 探活 | 负载均衡 / 运维脚本 |
+| `/ui/` | 浏览器 | 内嵌 Web UI |
+| `/v1/agents/...` | Web UI / 本机客户端 | **主契约**：对话、策略、侧车、子 Agent |
+| `/v1/workgroups/...` | Web UI（反代 Manage） | 工作组 |
+| `/v1/...` | 本机 | messages、streams、triggers、setup、llm |
+| `/health` | 探活 | 运维脚本 |
 
 ### 1.2 通用错误体
 
@@ -92,8 +94,7 @@ Content-Type: application/json
 
 {
   "display_name": "助手",
-  "defaults": { "llm": { "active": "deepseek", "max_tool_loops": 32 } },
-  "sandbox": { "enabled": false, "backend": "process" }
+  "defaults": { "llm": { "active": "deepseek", "max_tool_loops": 32 } }
 }
 ```
 
@@ -381,7 +382,7 @@ Node 内部分层（实现参考，非 HTTP）：
 TurnOrchestrator
   → PolicyEngine（本地 + Manage 下发的静态策略文件）
   → ToolRegistry（bash、fs、skills、triggers、child_agents、…）
-  → Executor（os/exec、fs、sandbox）
+  → Executor（os/exec、fs；无 sandbox 后端）
   → AuditReporter → Manage
 ```
 

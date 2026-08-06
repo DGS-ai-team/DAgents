@@ -98,7 +98,7 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 			AckDeliverySeq:     env.DeliverySeq,
 			AckEnvelope:        ack,
 		}
-		if res.Entry.Status == "succeeded" || res.Entry.Status == "failed" || res.Entry.Status == "indeterminate" || res.Entry.Status == "rejected" {
+		if res.Entry.Status == "succeeded" || res.Entry.Status == "failed" || res.Entry.Status == "indeterminate" || res.Entry.Status == "rejected" || res.Entry.Status == "canceled" {
 			out.AckEnvelope = map[string]any{
 				"type": "tool.result",
 				"payload": mergeMaps(ackPayload, map[string]any{
@@ -114,6 +114,43 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 			return out, err
 		}
 		return out, nil
+
+	case "tool.cancel":
+		commandID, workgroupID, assignID, memberID := cancelFromPayload(env.Payload)
+		if commandID == "" {
+			return nil, errf(CodeSchemaMismatch, "tool.cancel requires command_id")
+		}
+		wgFallback := workgroupID
+		if wgFallback == "" {
+			wgFallback = deliveryWorkgroupID(env, "")
+		}
+		res, err := w.HandleCancel(commandID, wgFallback)
+		if err != nil {
+			return dispatchErr(err)
+		}
+		wgID := deliveryWorkgroupID(env, wgFallback)
+		payload := map[string]any{
+			"command_id":            res.Ack.CommandID,
+			"status":                res.Entry.Status,
+			"error_code":            res.Entry.ErrorCode,
+			"result_text":           "",
+			"connection_generation": res.Ack.ConnectionGeneration,
+			"journaled_at":          res.Ack.JournaledAt,
+			"delivery_seq":          env.DeliverySeq,
+			"workgroup_id":          wgFallback,
+			"member_id":             memberID,
+			"assign_id":             assignID,
+		}
+		return &DispatchResult{
+			Handled:            true,
+			PendingAck:         true,
+			AckWorkgroupID:     wgID,
+			AckDeliverySeq:     env.DeliverySeq,
+			AckEnvelope: map[string]any{
+				"type":    "tool.result",
+				"payload": payload,
+			},
+		}, nil
 
 	case "workgroup.tombstone":
 		var t ArchiveTombstone
@@ -226,6 +263,22 @@ func toolCommandFromPayload(p map[string]any) (ToolCommand, error) {
 		return ToolCommand{}, errf(CodeSchemaMismatch, "%v", err)
 	}
 	return cmd, nil
+}
+
+func cancelFromPayload(p map[string]any) (commandID, workgroupID, assignID, memberID string) {
+	if p == nil {
+		return "", "", "", ""
+	}
+	return strFromAny(p["command_id"]), strFromAny(p["workgroup_id"]), strFromAny(p["assign_id"]), strFromAny(p["member_id"])
+}
+
+func strFromAny(v any) string {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	default:
+		return ""
+	}
 }
 
 func mergeMaps(a, b map[string]any) map[string]any {

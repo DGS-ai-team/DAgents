@@ -4,7 +4,6 @@ import { fetchAudit, saveAgentGroups } from "../api.js";
 import {
   agentInitials,
   formatUnix,
-  riskPillClass,
   statusPillClass,
 } from "../utils.js";
 
@@ -92,7 +91,7 @@ async function onSaveGroups() {
           </div>
           <div>
             <h2 id="drawer-title">{{ agent.name || agent.agent_id }}</h2>
-            <p class="muted mono">{{ agent.agent_id }}</p>
+            <p class="muted mono">node_id · {{ agent.agent_id }}</p>
           </div>
         </div>
         <button
@@ -138,14 +137,6 @@ async function onSaveGroups() {
             <div class="kv-value">{{ agent.version || "—" }}</div>
           </div>
           <div class="kv">
-            <div class="kv-label">risk_level</div>
-            <div class="kv-value">
-              <span class="pill" :class="riskPillClass(agent.risk_level)">
-                {{ agent.risk_level || "medium" }}
-              </span>
-            </div>
-          </div>
-          <div class="kv">
             <div class="kv-label">registered_at</div>
             <div class="kv-value">{{ formatUnix(agent.registered_at_unix) }}</div>
           </div>
@@ -156,15 +147,6 @@ async function onSaveGroups() {
           <div class="kv">
             <div class="kv-label">expires_at</div>
             <div class="kv-value">{{ formatUnix(agent.expires_at_unix) }}</div>
-          </div>
-          <div class="kv">
-            <div class="kv-label">tools</div>
-            <div class="kv-value">
-              <span v-if="!agent.tools?.length" class="muted">—</span>
-              <span v-else class="chips">
-                <span v-for="t in agent.tools" :key="t" class="chip">{{ t }}</span>
-              </span>
-            </div>
           </div>
           <div class="kv">
             <div class="kv-label">skills</div>

@@ -110,3 +110,123 @@ func TestDispatchProvisionAndReadFile(t *testing.T) {
 		t.Fatalf("code=%v", err)
 	}
 }
+
+func TestDispatchToolCancelPreventsExecution(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})
+	gen := w.Connect()
+
+	provEnv := WSEnvelope{
+		EnvelopeID:           "en_01h00000000000000000000011",
+		SchemaVersion:        SchemaVersion,
+		Type:                 "member.provision",
+		DeliverySeq:          1,
+		ConnectionGeneration: gen,
+		WorkgroupID:          "wg_01h00000000000000000000011",
+		Payload: map[string]any{
+			"provision_id":       "pv_01h00000000000000000000011",
+			"workgroup_id":       "wg_01h00000000000000000000011",
+			"member_id":          "mb_01h00000000000000000000011",
+			"home_node_id":       "node_b",
+			"member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+			"lease_epoch":        float64(2),
+			"member_generation":  float64(1),
+			"tool_allow_names":   []any{"read_file"},
+			"workspace_root":     filepath.Join(dir, "ws"),
+		},
+		SentAt: "2026-07-31T00:00:00Z",
+	}
+	r1, err := w.DispatchEnvelope(provEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.CommitPendingAck(r1); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := w.Bindings.Get("mb_01h00000000000000000000011")
+	if b == nil {
+		t.Fatal("binding missing")
+	}
+	if err := os.WriteFile(filepath.Join(b.WorkspacePath, "README"), []byte("# Demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cancelEnv := WSEnvelope{
+		EnvelopeID:           "en_01h00000000000000000000012",
+		SchemaVersion:        SchemaVersion,
+		Type:                 "tool.cancel",
+		DeliverySeq:          2,
+		ConnectionGeneration: gen,
+		WorkgroupID:          b.WorkgroupID,
+		Payload: map[string]any{
+			"command_id":   "cmd_01h00000000000000000000012",
+			"workgroup_id": b.WorkgroupID,
+			"assign_id":    "as_01h00000000000000000000012",
+			"member_id":    b.MemberID,
+			"status":       "canceled",
+		},
+		SentAt: "2026-07-31T00:00:01Z",
+	}
+	rCancel, err := w.DispatchEnvelope(cancelEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rCancel.AckEnvelope["type"] != "tool.result" {
+		t.Fatalf("%+v", rCancel)
+	}
+	pl := rCancel.AckEnvelope["payload"].(map[string]any)
+	if pl["status"] != "canceled" {
+		t.Fatalf("status=%v", pl["status"])
+	}
+	if err := w.CommitPendingAck(rCancel); err != nil {
+		t.Fatal(err)
+	}
+
+	cmdEnv := WSEnvelope{
+		EnvelopeID:           "en_01h00000000000000000000013",
+		SchemaVersion:        SchemaVersion,
+		Type:                 "tool.command",
+		DeliverySeq:          3,
+		ConnectionGeneration: gen,
+		WorkgroupID:          b.WorkgroupID,
+		Payload: map[string]any{
+			"command_id":            "cmd_01h00000000000000000000012",
+			"workgroup_id":          b.WorkgroupID,
+			"member_id":             b.MemberID,
+			"assign_id":             "as_01h00000000000000000000012",
+			"run_id":                "rn_01h00000000000000000000012",
+			"turn_id":               "tn_01h00000000000000000000012",
+			"tool_call_id":          "call_1",
+			"tool_name":             "read_file",
+			"arguments_json":        `{"path":"README"}`,
+			"payload_hash":          "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			"lease_id":              "ls_01h00000000000000000000012",
+			"lease_epoch":           float64(2),
+			"member_generation":     float64(1),
+			"member_spec_digest":    b.MemberSpecDigest,
+			"tool_catalog_revision": b.ToolCatalogRevision,
+			"status":                "queued",
+			"side_effect_class":     "fs_read",
+		},
+		SentAt: "2026-07-31T00:00:02Z",
+	}
+	rCmd, err := w.DispatchEnvelope(cmdEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rCmd.AckEnvelope["type"] != "tool.result" {
+		t.Fatalf("%+v", rCmd)
+	}
+	pl2 := rCmd.AckEnvelope["payload"].(map[string]any)
+	if pl2["status"] != "canceled" {
+		t.Fatalf("expected canceled after pre-cancel, got %v", pl2["status"])
+	}
+	entry, err := w.Commands.Journal.Get("cmd_01h00000000000000000000012")
+	if err != nil || entry == nil {
+		t.Fatalf("journal: %v %#v", err, entry)
+	}
+	if entry.Status != "canceled" || entry.Executions != 0 {
+		t.Fatalf("entry=%+v", entry)
+	}
+}
+

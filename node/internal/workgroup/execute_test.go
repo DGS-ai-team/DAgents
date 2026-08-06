@@ -1,6 +1,7 @@
 package workgroup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,7 @@ func TestWorkspaceExecutorReadGlobWrite(t *testing.T) {
 		WorkgroupID:     "wg_01h00000000000000000000001",
 		HomeNodeID:      "node_b",
 		WorkspacePath:   ws,
-		ToolAllowNames:  []string{"read_file", "glob_files", "write_file"},
+		ToolAllowNames:  WorkspaceExecutableToolNames(),
 		LeaseEpoch:      1,
 		MemberGeneration: 1,
 	}
@@ -32,7 +33,7 @@ func TestWorkspaceExecutorReadGlobWrite(t *testing.T) {
 	}
 	exec := NewWorkspaceToolExecutor(bindings)
 
-	readOut, err := exec(ToolCommand{
+	readOut, err := exec(context.Background(), ToolCommand{
 		MemberID:      b.MemberID,
 		ToolName:      "read_file",
 		ArgumentsJSON: `{"path":"README"}`,
@@ -44,7 +45,7 @@ func TestWorkspaceExecutorReadGlobWrite(t *testing.T) {
 		t.Fatalf("read_file out=%s", readOut)
 	}
 
-	globOut, err := exec(ToolCommand{
+	globOut, err := exec(context.Background(), ToolCommand{
 		MemberID:      b.MemberID,
 		ToolName:      "glob_files",
 		ArgumentsJSON: `{"directory":".","glob_pattern":"*"}`,
@@ -56,7 +57,7 @@ func TestWorkspaceExecutorReadGlobWrite(t *testing.T) {
 		t.Fatalf("glob_files out=%s", globOut)
 	}
 
-	writeOut, err := exec(ToolCommand{
+	writeOut, err := exec(context.Background(), ToolCommand{
 		MemberID:      b.MemberID,
 		ToolName:      "write_file",
 		ArgumentsJSON: `{"path":"notes/a.txt","content":"hello"}`,
@@ -73,6 +74,35 @@ func TestWorkspaceExecutorReadGlobWrite(t *testing.T) {
 	}
 	if string(raw) != "hello" {
 		t.Fatalf("wrote %q", raw)
+	}
+
+	grepOut, err := exec(context.Background(), ToolCommand{
+		MemberID:      b.MemberID,
+		ToolName:      "grep_file",
+		ArgumentsJSON: `{"path":"notes/a.txt","pattern":"hel"}`,
+	})
+	if err != nil {
+		t.Fatalf("grep_file: %v", err)
+	}
+	if !strings.Contains(grepOut, "hel") {
+		t.Fatalf("grep_file out=%s", grepOut)
+	}
+
+	srOut, err := exec(context.Background(), ToolCommand{
+		MemberID:      b.MemberID,
+		ToolName:      "search_replace",
+		ArgumentsJSON: `{"path":"notes/a.txt","old_string":"hello","new_string":"hi"}`,
+	})
+	if err != nil {
+		t.Fatalf("search_replace: %v", err)
+	}
+	_ = srOut
+	raw2, err := os.ReadFile(filepath.Join(ws, "notes", "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw2) != "hi" {
+		t.Fatalf("after replace %q", raw2)
 	}
 }
 
@@ -94,7 +124,7 @@ func TestWorkspaceExecutorRejectsEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := NewWorkspaceToolExecutor(bindings)
-	_, err := exec(ToolCommand{
+	_, err := exec(context.Background(), ToolCommand{
 		MemberID:      b.MemberID,
 		ToolName:      "read_file",
 		ArgumentsJSON: `{"path":"../outside"}`,
@@ -107,10 +137,10 @@ func TestWorkspaceExecutorRejectsEscape(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 
-	_, err = exec(ToolCommand{
+	_, err = exec(context.Background(), ToolCommand{
 		MemberID:      b.MemberID,
-		ToolName:      "bash_run",
-		ArgumentsJSON: `{"command":"echo hi"}`,
+		ToolName:      "ask_user_information",
+		ArgumentsJSON: `{"prompt":"hi"}`,
 	})
 	if err == nil {
 		t.Fatal("expected unsupported tool")

@@ -205,19 +205,21 @@ async function onBackground(ev) {
 .tool-summary-row {
   margin: 2px 0;
   border-radius: 6px;
-  background: transparent;
-  border: 1px solid transparent;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   max-width: 100%;
 }
 
 .tool-summary-row:hover,
 .tool-summary-row--expanded {
-  background: var(--color-surface-muted);
+  background: var(--color-surface);
   border-color: var(--color-border);
 }
 
 .tool-summary-row--progress {
-  border-color: var(--color-primary);
+  /* 白底 + 浅灰边框，不用主色深描边 */
+  background: var(--color-surface);
+  border-color: var(--color-border);
 }
 
 .tool-summary-row__bar {

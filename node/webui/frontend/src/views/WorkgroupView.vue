@@ -1,10 +1,11 @@
 <script setup>
-import { ref, watch, onUnmounted, computed, onMounted } from "vue";
+import { ref, watch, onUnmounted, computed, onMounted, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import NavRail from "../components/NavRail.vue";
 import WorkgroupMemberModal from "../components/WorkgroupMemberModal.vue";
 import { renderMarkdown } from "../utils/markdown.js";
+import { inferToolKind } from "../utils/toolSource.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -14,26 +15,225 @@ const workgroupId = computed(() => String(route.params.workgroupId || "").trim()
 const events = ref([]);
 const draft = ref("");
 const sending = ref(false);
+const cancelling = ref(false);
 const error = ref("");
 const notice = ref("");
+const mentionOpen = ref(false);
+const mentionQuery = ref("");
+/** @type {import('vue').Ref<null | { member_id: string, display_name: string }>} */
+const directMember = ref(null);
 const pollTimer = ref(null);
+const workPollTimer = ref(null);
 const workgroupMeta = ref(null);
 const selfNodeId = ref("");
+const selfNodeName = ref("");
+const members = ref([]);
+const timelineEl = ref(null);
+/** 本轮发送开始前的 Timeline 水位 */
+const statusWatermarkSeq = ref(0);
+const followTail = ref(true);
+const SCROLL_TAIL_THRESHOLD = 80;
+/** 编排态：成员回报折叠展开态（key = assign_id / event_id） */
+const expandedMemberReports = ref({});
 
 const memberModalOpen = ref(false);
 const memberModalMode = ref("create");
 const memberModalWgId = ref("");
 const memberModalMemberId = ref("");
 
+/** 流式：乐观用户气泡 / Supervisor 打字机 / 相位 */
+const liveUser = ref(null);
+const liveAssistant = ref(null);
+const streamPhase = ref(""); // thinking | tool | streaming
+const streamToolName = ref("");
+const streamMode = ref(""); // leader | direct
+/** @type {AbortController | null} */
+let streamAbort = null;
+/** @type {import('vue').Ref<any[]>} */
+const pendingHitl = ref([]);
+const hitlBusy = ref(false);
+const hitlDraft = ref("");
+
+/** RunHistory 调试面板（mock / LLM 可观测） */
+const debugOpen = ref(false);
+const debugLoading = ref(false);
+const debugRuns = ref([]);
+const debugLlm = ref(null);
+const debugSelectedRunId = ref("");
+const debugHistory = ref(null);
+const debugError = ref("");
+
 let timelineReqSeq = 0;
 let pollInFlight = false;
 
+const activeHitl = computed(() => (pendingHitl.value || [])[0] || null);
+const hitlMode = computed(() => Boolean(activeHitl.value));
+const debugLlmBadge = computed(() => {
+  const mode = String(debugLlm.value?.mode || "").trim();
+  if (mode === "mock") return "Mock · 回声/脚本";
+  if (mode === "live") {
+    const model = String(debugLlm.value?.model || "").trim();
+    return model ? `Live · ${model}` : "Live";
+  }
+  return "";
+});
+
+async function loadDebugRuns() {
+  if (!workgroupId.value) {
+    debugRuns.value = [];
+    debugLlm.value = null;
+    return;
+  }
+  debugLoading.value = true;
+  debugError.value = "";
+  try {
+    const res = await api.listWorkgroupRuns(workgroupId.value, { limit: 12 });
+    debugRuns.value = Array.isArray(res?.runs) ? res.runs : [];
+    debugLlm.value = res?.llm || null;
+    if (!debugSelectedRunId.value && debugRuns.value.length) {
+      await selectDebugRun(debugRuns.value[0].run_id);
+    } else if (debugSelectedRunId.value) {
+      const still = debugRuns.value.some((r) => r.run_id === debugSelectedRunId.value);
+      if (still) await selectDebugRun(debugSelectedRunId.value);
+      else if (debugRuns.value.length) await selectDebugRun(debugRuns.value[0].run_id);
+      else {
+        debugHistory.value = null;
+        debugSelectedRunId.value = "";
+      }
+    }
+  } catch (e) {
+    debugError.value = e?.message || "加载 Run 失败";
+    debugRuns.value = [];
+  } finally {
+    debugLoading.value = false;
+  }
+}
+
+async function selectDebugRun(runId) {
+  const id = String(runId || "").trim();
+  if (!id || !workgroupId.value) return;
+  debugSelectedRunId.value = id;
+  debugLoading.value = true;
+  debugError.value = "";
+  try {
+    const res = await api.getWorkgroupRunHistory(workgroupId.value, id);
+    debugHistory.value = res?.history || null;
+    if (res?.llm) debugLlm.value = res.llm;
+  } catch (e) {
+    debugError.value = e?.message || "加载 History 失败";
+    debugHistory.value = null;
+  } finally {
+    debugLoading.value = false;
+  }
+}
+
+async function toggleDebugPanel() {
+  debugOpen.value = !debugOpen.value;
+  if (debugOpen.value) await loadDebugRuns();
+}
+
+function formatDebugMsg(m) {
+  const role = String(m?.role || "");
+  if (role === "assistant" && Array.isArray(m?.tool_calls) && m.tool_calls.length) {
+    const names = m.tool_calls.map((tc) => tc?.function?.name || tc?.name || "?").join(", ");
+    return `tool_calls: ${names}`;
+  }
+  if (role === "tool") {
+    const body = String(m?.content || "").trim();
+    return body.length > 180 ? `${body.slice(0, 180)}…` : body || "(empty)";
+  }
+  const body = String(m?.content || "").trim();
+  return body.length > 220 ? `${body.slice(0, 220)}…` : body || "(empty)";
+}
+
+async function loadPendingHitl() {
+  if (!workgroupId.value) {
+    pendingHitl.value = [];
+    return;
+  }
+  try {
+    const res = await api.listWorkgroupHITL(workgroupId.value, true);
+    const list = Array.isArray(res) ? res : res?.hitl || [];
+    pendingHitl.value = Array.isArray(list) ? list : [];
+  } catch {
+    /* 轮询期忽略 */
+  }
+}
+
+async function submitHitlAnswer() {
+  const hitl = activeHitl.value;
+  const answer = hitlDraft.value.trim();
+  if (!hitl || !workgroupId.value || !answer || hitlBusy.value) return;
+  hitlBusy.value = true;
+  error.value = "";
+  try {
+    await api.resolveWorkgroupHITL(workgroupId.value, hitl.hitl_id, answer);
+    hitlDraft.value = "";
+    await loadPendingHitl();
+    await loadTimeline();
+  } catch (e) {
+    if (/already_resolved|409/.test(String(e?.message || ""))) {
+      await loadPendingHitl();
+    } else {
+      error.value = e?.message || "提交回答失败";
+    }
+  } finally {
+    hitlBusy.value = false;
+  }
+}
+
+function newClientMessageId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `cm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function clearLive() {
+  liveUser.value = null;
+  liveAssistant.value = null;
+  streamPhase.value = "";
+  streamToolName.value = "";
+  streamMode.value = "";
+}
+
+const memberNameById = computed(() => {
+  const map = {};
+  for (const m of members.value || []) {
+    const id = String(m?.member_id || "").trim();
+    if (!id) continue;
+    map[id] = String(m?.display_name || "").trim() || id;
+  }
+  return map;
+});
+
 async function loadSelf() {
   try {
-    const info = await api.getAgentInfo();
-    selfNodeId.value = info.node_id || info.NodeID || "";
+    const boot = await api.getUIBootstrap();
+    selfNodeId.value = String(
+      boot?.info?.node_id || boot?.health?.node_id || boot?.info?.NodeID || "",
+    ).trim();
+    selfNodeName.value = String(boot?.agent?.name || "").trim();
   } catch {
-    selfNodeId.value = "";
+    try {
+      const info = await api.getAgentInfo();
+      selfNodeId.value = info.node_id || info.NodeID || "";
+      selfNodeName.value = String(info.name || info.Name || "").trim();
+    } catch {
+      selfNodeId.value = "";
+      selfNodeName.value = "";
+    }
+  }
+}
+
+async function loadMembers() {
+  if (!workgroupId.value) {
+    members.value = [];
+    return;
+  }
+  try {
+    const res = await api.listWorkgroupMembers(workgroupId.value);
+    members.value = Array.isArray(res) ? res : res?.members || [];
+  } catch {
+    members.value = [];
   }
 }
 
@@ -52,6 +252,26 @@ async function loadTimeline() {
     if (reqSeq !== timelineReqSeq) return;
     error.value = e?.message || "加载 Timeline 失败";
   }
+}
+
+function onTimelineScroll() {
+  const el = timelineEl.value;
+  if (!el) return;
+  followTail.value =
+    el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_TAIL_THRESHOLD;
+}
+
+function maybeScrollTimelineTail() {
+  if (!followTail.value) return;
+  nextTick(() => {
+    const el = timelineEl.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
+
+function scrollTimelineTail() {
+  followTail.value = true;
+  maybeScrollTimelineTail();
 }
 
 async function loadWorkgroupMeta() {
@@ -79,6 +299,7 @@ function startPoll() {
     pollInFlight = true;
     try {
       await loadTimeline();
+      await loadPendingHitl();
     } finally {
       pollInFlight = false;
     }
@@ -93,19 +314,209 @@ function stopPoll() {
   pollInFlight = false;
 }
 
+function stopWorkPoll() {
+  if (workPollTimer.value) {
+    clearInterval(workPollTimer.value);
+    workPollTimer.value = null;
+  }
+}
+
+function startWorkPoll() {
+  stopWorkPoll();
+  workPollTimer.value = window.setInterval(() => {
+    loadTimeline();
+    loadPendingHitl();
+  }, 900);
+}
+
 async function send() {
-  const text = draft.value.trim();
+  let text = draft.value.trim();
   if (!text || !workgroupId.value || sending.value) return;
+  let directId = "";
+  if (directMember.value) {
+    directId = directMember.value.member_id;
+    const token = `@${directMember.value.display_name}`;
+    if (!text.includes(token)) {
+      text = `${token} ${text}`;
+    }
+  }
+
+  const clientMessageId = newClientMessageId();
   sending.value = true;
+  cancelling.value = false;
   error.value = "";
+  draft.value = "";
+  const sentDirect = directMember.value;
+  directMember.value = null;
+  statusWatermarkSeq.value = (events.value || []).reduce(
+    (m, ev) => Math.max(m, Number(ev?.seq || 0)),
+    0,
+  );
+
+  liveUser.value = { id: `live-user-${clientMessageId}`, text };
+  liveAssistant.value = { id: `live-asst-${clientMessageId}`, text: "" };
+  streamPhase.value = "thinking";
+  streamToolName.value = "";
+  streamMode.value = directId ? "direct" : "leader";
+  streamAbort = new AbortController();
+  scrollTimelineTail();
+  startWorkPoll();
+
   try {
-    await api.postWorkgroupMessage(workgroupId.value, text);
-    draft.value = "";
+    await api.postWorkgroupMessageStream(
+      workgroupId.value,
+      {
+        text,
+        clientMessageId,
+        directMemberId: directId || undefined,
+      },
+      {
+        signal: streamAbort.signal,
+        onEvent: async (eventName, data) => {
+          if (eventName === "status") {
+            const phase = String(data?.phase || "thinking");
+            streamPhase.value =
+              phase === "tool" ? "tool" : phase === "streaming" ? "streaming" : "thinking";
+            streamToolName.value = String(data?.tool || "");
+            if (data?.mode) streamMode.value = String(data.mode);
+            // 进入工具阶段时清空 Supervisor 打字机，避免旧片段残留
+            if (phase === "tool" && liveAssistant.value) {
+              liveAssistant.value = { ...liveAssistant.value, text: "" };
+            }
+            if (phase === "tool") {
+              await loadTimeline().catch(() => {});
+              await loadPendingHitl();
+            }
+          } else if (eventName === "delta") {
+            if (streamMode.value === "direct") return;
+            const piece = String(data?.text || "");
+            if (!piece || !liveAssistant.value) return;
+            streamPhase.value = "streaming";
+            liveAssistant.value = {
+              ...liveAssistant.value,
+              text: `${liveAssistant.value.text || ""}${piece}`,
+            };
+          } else if (eventName === "assistant_final") {
+            const finalText = String(data?.text || "").trim();
+            if (data?.mode) streamMode.value = String(data.mode);
+            if (streamMode.value !== "direct" && liveAssistant.value && finalText) {
+              liveAssistant.value = { ...liveAssistant.value, text: finalText };
+            }
+            streamPhase.value = "streaming";
+          }
+          await nextTick();
+          maybeScrollTimelineTail();
+        },
+      },
+    );
+    clearLive();
+    await loadTimeline();
+    await loadPendingHitl();
+    if (debugOpen.value) await loadDebugRuns();
+    scrollTimelineTail();
+  } catch (e) {
+    const aborted = e?.name === "AbortError" || /abort/i.test(String(e?.message || ""));
+    clearLive();
+    if (!aborted) {
+      error.value = e?.message || "发送失败";
+      draft.value = stripLeadingMention(text, sentDirect?.display_name);
+      directMember.value = sentDirect;
+    }
+    await loadTimeline().catch(() => {});
+    await loadPendingHitl();
+    if (debugOpen.value) await loadDebugRuns().catch(() => {});
+  } finally {
+    streamAbort = null;
+    stopWorkPoll();
+    sending.value = false;
+    cancelling.value = false;
+    statusWatermarkSeq.value = 0;
+  }
+}
+
+function stripLeadingMention(text, displayName) {
+  const name = String(displayName || "").trim();
+  let out = String(text || "").trim();
+  if (!name) return out;
+  const token = `@${name}`;
+  if (out === token) return "";
+  if (out.startsWith(`${token} `)) return out.slice(token.length + 1).trimStart();
+  return out.replace(/(^|[\s])@([^\s@]*)$/, "$1").trim();
+}
+
+function clearDirectMention() {
+  directMember.value = null;
+}
+
+function onComposerBackspace(e) {
+  if (!directMember.value) return;
+  const el = e?.target;
+  const start = el?.selectionStart ?? 0;
+  const end = el?.selectionEnd ?? 0;
+  if (start === 0 && end === 0 && !String(draft.value || "")) {
+    e.preventDefault();
+    clearDirectMention();
+  }
+}
+
+function pickMention(member) {
+  const name = String(member?.display_name || "").trim();
+  const mid = String(member?.member_id || "").trim();
+  if (!name || !mid) return;
+  const val = draft.value;
+  // 选中后从输入框移除 @query，改由芯片展示
+  const replaced = val.replace(/(^|[\s])@([^\s@]*)$/, "$1");
+  draft.value = replaced.replace(/[ \t]+$/g, " ").trimStart();
+  directMember.value = { member_id: mid, display_name: name };
+  mentionOpen.value = false;
+  mentionQuery.value = "";
+}
+
+async function cancelTurn() {
+  if (!workgroupId.value || !sending.value || cancelling.value) return;
+  cancelling.value = true;
+  try {
+    await api.cancelWorkgroupTurn(workgroupId.value);
+    if (streamAbort) {
+      try {
+        streamAbort.abort();
+      } catch {
+        /* ignore */
+      }
+    }
     await loadTimeline();
   } catch (e) {
-    error.value = e?.message || "发送失败";
+    error.value = e?.message || "取消失败";
   } finally {
-    sending.value = false;
+    cancelling.value = false;
+  }
+}
+
+const mentionCandidates = computed(() => {
+  const q = mentionQuery.value.trim().toLowerCase();
+  const list = (members.value || []).filter((m) => String(m?.status || "") === "ready");
+  if (!q) return list.slice(0, 8);
+  return list
+    .filter((m) => {
+      const name = String(m?.display_name || "").toLowerCase();
+      const id = String(m?.member_id || "").toLowerCase();
+      return name.includes(q) || id.includes(q);
+    })
+    .slice(0, 8);
+});
+
+function onDraftInput(e) {
+  const val = String(e?.target?.value ?? draft.value);
+  draft.value = val;
+  const cursor = e?.target?.selectionStart ?? val.length;
+  const before = val.slice(0, cursor);
+  const m = before.match(/(^|[\s])@([^\s@]*)$/);
+  if (m) {
+    mentionOpen.value = true;
+    mentionQuery.value = m[2] || "";
+  } else {
+    mentionOpen.value = false;
+    mentionQuery.value = "";
   }
 }
 
@@ -176,31 +587,524 @@ async function onMemberSaved(payload) {
   await panelRef.value?.refreshWorkgroups?.({ force: true });
   const wid = String(payload?.workgroupId || memberModalWgId.value || "").trim();
   if (wid) await panelRef.value?.loadMembers?.(wid, true);
+  await loadMembers();
 }
 
 function eventLabel(ev) {
-  if (ev.type === "human_message") return ev.actor_id || "human";
-  if (ev.type === "actor_final_text") {
-    if (ev.actor_id === "leader") return "Supervisor";
-    return ev.actor_id || "member";
+  const actor = String(ev?.actor_id || "").trim();
+  const type = String(ev?.type || "");
+  if (type === "human_message") {
+    if (actor && selfNodeId.value && actor === selfNodeId.value) {
+      return selfNodeName.value || actor;
+    }
+    return actor || "human";
   }
-  return ev.type || "event";
+  if (type === "actor_final_text") {
+    if (actor === "leader") return "Supervisor";
+    if (actor && memberNameById.value[actor]) return memberNameById.value[actor];
+    return actor || "member";
+  }
+  if (type === "assign_started" || type === "assign_finished" || type === "system_notice") {
+    if (actor === "leader") return "Supervisor";
+    if (actor && memberNameById.value[actor]) return memberNameById.value[actor];
+    return actor || "工作组";
+  }
+  return type || "event";
 }
 
 function isHumanEvent(ev) {
   return String(ev?.type || "") === "human_message";
 }
 
+/** 用户气泡内 @提及 拆段，便于着色 */
+function splitUserMentionParts(text) {
+  const raw = String(text || "");
+  if (!raw) return [{ type: "text", text: "" }];
+  const parts = [];
+  const re = /@[^\s@]+/g;
+  let last = 0;
+  let m = re.exec(raw);
+  while (m) {
+    if (m.index > last) {
+      parts.push({ type: "text", text: raw.slice(last, m.index) });
+    }
+    parts.push({ type: "mention", text: m[0] });
+    last = m.index + m[0].length;
+    m = re.exec(raw);
+  }
+  if (last < raw.length) parts.push({ type: "text", text: raw.slice(last) });
+  if (!parts.length) parts.push({ type: "text", text: raw });
+  return parts;
+}
+
+function isDirectAssignEvent(ev) {
+  const actor = String(ev?.actor_id || "").trim();
+  const text = String(ev?.text || "").trim();
+  // 新路径：挂在成员下；旧路径：leader +「直达」前缀
+  return (actor && actor !== "leader") || text.startsWith("直达");
+}
+
+function previewMemberReport(text) {
+  const raw = String(text || "").trim().replace(/\s+/g, " ");
+  if (!raw) return "成员结论";
+  return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw;
+}
+
+/** 解析编排态 assign_started：新格式 `@名\\n任务`；兼容旧 `→ 名 · 摘要` */
+function parseAssignStartedText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return { mention: "", taskText: "分派任务" };
+
+  const atMatch = raw.match(/^@([^\n\r]+)\r?\n([\s\S]*)$/);
+  if (atMatch) {
+    return {
+      mention: String(atMatch[1] || "").trim(),
+      taskText: String(atMatch[2] || "").trim() || "分派任务",
+    };
+  }
+
+  const arrow = raw.match(/^→\s*(.+?)\s*·\s*([\s\S]*)$/);
+  if (arrow) {
+    return {
+      mention: String(arrow[1] || "").trim(),
+      taskText: String(arrow[2] || "").trim() || "分派任务",
+    };
+  }
+
+  if (raw.startsWith("@")) {
+    const name = raw.slice(1).trim();
+    return { mention: name, taskText: "分派任务" };
+  }
+
+  return { mention: "", taskText: raw };
+}
+
+function buildAssignIndex(list) {
+  const directAssignIds = new Set();
+  const noticeByAssign = {};
+  const noticesByAssign = {};
+  const finishedByAssign = {};
+  const startedByAssign = {};
+  const memberFinalByAssign = {};
+  for (const ev of list || []) {
+    const t = String(ev?.type || "");
+    const aid = String(ev?.assign_id || "").trim();
+    if (!aid) continue;
+    if (t === "assign_started") {
+      startedByAssign[aid] = ev;
+      if (isDirectAssignEvent(ev)) directAssignIds.add(aid);
+    } else if (t === "assign_finished") {
+      finishedByAssign[aid] = ev;
+      if (isDirectAssignEvent(ev)) directAssignIds.add(aid);
+    } else if (t === "system_notice") {
+      noticeByAssign[aid] = ev;
+      if (!noticesByAssign[aid]) noticesByAssign[aid] = [];
+      noticesByAssign[aid].push(ev);
+    } else if (t === "actor_final_text") {
+      const actor = String(ev?.actor_id || "").trim();
+      if (actor && actor !== "leader") memberFinalByAssign[aid] = ev;
+    }
+  }
+  return {
+    directAssignIds,
+    noticeByAssign,
+    noticesByAssign,
+    finishedByAssign,
+    startedByAssign,
+    memberFinalByAssign,
+  };
+}
+
+function isMemberReportExpanded(key) {
+  return Boolean(expandedMemberReports.value[key]);
+}
+
+function toggleMemberReport(key) {
+  if (!key) return;
+  expandedMemberReports.value = {
+    ...expandedMemberReports.value,
+    [key]: !expandedMemberReports.value[key],
+  };
+}
+
+function parseNoticeTool(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return { toolName: "tool", summary: "工具调用" };
+  const parts = raw.split(/\s*·\s*/);
+  const toolName = String(parts[0] || "tool").trim() || "tool";
+  const detail = parts.slice(1).join(" · ").trim();
+  return {
+    toolName,
+    summary: detail ? `${toolName} ${detail}` : toolName,
+  };
+}
+
+function toolKindLabel(toolName) {
+  const kind = inferToolKind(toolName);
+  if (kind === "fs") return "fs";
+  if (kind === "shell") return "shell";
+  if (kind === "browser") return "browser";
+  return "tool";
+}
+
+function makeAssignItem(started, finished, notices, isDirect, memberFinal) {
+  const noticeList = Array.isArray(notices) ? notices : notices ? [notices] : [];
+  const lastNotice = noticeList.length ? noticeList[noticeList.length - 1] : null;
+  const noticeText = lastNotice ? String(lastNotice.text || "").trim() : "";
+  const parsed = parseAssignStartedText(started?.text || "");
+  const fallbackSummary = String(started?.text || finished?.text || "").trim() || "分派任务";
+  const taskText = parsed.taskText || fallbackSummary;
+  const statusText = finished
+    ? String(finished.text || "").trim() || "已完成"
+    : noticeText || "执行中";
+  const reportText = memberFinal ? String(memberFinal.text || "").trim() : "";
+  const assignId =
+    String(started?.assign_id || finished?.assign_id || memberFinal?.assign_id || "").trim();
+  const reporter = memberFinal ? String(memberFinal.actor_id || "").trim() : "";
+  const reportActorLabel = reporter
+    ? memberNameById.value[reporter] || reporter
+    : "";
+  const mention =
+    parsed.mention ||
+    reportActorLabel ||
+    "";
+  const failed = finished ? /失败|中断/.test(String(finished.text || "")) : false;
+  const steps = noticeList.map((ev, idx) => {
+    const p = parseNoticeTool(ev?.text);
+    const isLast = idx === noticeList.length - 1;
+    const done = Boolean(finished) || !isLast;
+    return {
+      key: ev.event_id || `step-${ev.seq || idx}`,
+      toolName: p.toolName,
+      toolKind: toolKindLabel(p.toolName),
+      summary: p.summary,
+      statusText: !done ? "执行中" : failed && isLast ? "已中断" : "已完成",
+      done,
+      failed: Boolean(failed && done && isLast),
+      inProgress: !done,
+    };
+  });
+  return {
+    key: (started || finished)?.event_id || `assign-${(started || finished)?.seq}`,
+    kind: "assign",
+    assignId,
+    started: started || null,
+    finished: finished || null,
+    mention,
+    taskText,
+    summary: taskText,
+    liveProgress: "",
+    statusText,
+    done: Boolean(finished),
+    failed,
+    direct: isDirect,
+    steps,
+    hasReport: Boolean(reportText),
+    reportText,
+    reportPreview: previewMemberReport(reportText),
+    reportActorLabel,
+    reportToggleKey: assignId || (started || finished)?.event_id || "",
+  };
+}
+
+function makeDirectToolItem(ev, { assignFinished, isLast, failed }) {
+  const parsed = parseNoticeTool(ev?.text);
+  const done = Boolean(assignFinished) || !isLast;
+  return {
+    key: ev.event_id || `tool-${ev.seq}`,
+    kind: "tool",
+    toolName: parsed.toolName,
+    toolKind: toolKindLabel(parsed.toolName),
+    summary: parsed.summary,
+    statusText: !done ? "执行中" : failed ? "已中断" : "已完成",
+    done,
+    failed: Boolean(failed && done && isLast),
+    inProgress: !done,
+  };
+}
+
+/** 先按 assign_id 全局收口，再按 actor 分组；直连不展示分派壳，改为工具行 */
+const eventGroups = computed(() => {
+  const list = events.value || [];
+  const {
+    directAssignIds,
+    noticesByAssign,
+    finishedByAssign,
+    startedByAssign,
+    memberFinalByAssign,
+  } = buildAssignIndex(list);
+  const consumedFinished = new Set();
+
+  const flat = [];
+  for (const ev of list) {
+    const t = String(ev?.type || "");
+    const aid = String(ev?.assign_id || "").trim();
+
+    if (t === "assign_started") {
+      const finished = aid ? finishedByAssign[aid] || null : null;
+      if (aid && finished) consumedFinished.add(aid);
+      const isDirect = Boolean(aid && directAssignIds.has(aid));
+      // 直连：跳过分派气泡，工具过程由 notice 转成工具行
+      if (isDirect) continue;
+      const notices = aid ? noticesByAssign[aid] || [] : [];
+      const memberFinal = aid ? memberFinalByAssign[aid] || null : null;
+      const actorId = String(ev?.actor_id || "leader").trim() || "leader";
+      flat.push({
+        role: "assistant",
+        actorId,
+        label: eventLabel({ ...ev, actor_id: actorId, type: "assign_started" }),
+        item: makeAssignItem(ev, finished, notices, false, memberFinal),
+      });
+      continue;
+    }
+
+    if (t === "assign_finished") {
+      if (aid && startedByAssign[aid]) continue;
+      if (aid && consumedFinished.has(aid)) continue;
+      const isDirect = Boolean(aid && directAssignIds.has(aid));
+      if (isDirect) continue;
+      const actorId = String(ev?.actor_id || "leader").trim() || "leader";
+      const notices = aid ? noticesByAssign[aid] || [] : [];
+      const memberFinal = aid ? memberFinalByAssign[aid] || null : null;
+      flat.push({
+        role: "assistant",
+        actorId,
+        label: eventLabel({ ...ev, actor_id: actorId, type: "assign_finished" }),
+        item: makeAssignItem(null, ev, notices, false, memberFinal),
+      });
+      continue;
+    }
+
+    // 编排态成员回报并入分派气泡折叠展示；直连仍走普通消息
+    if (t === "actor_final_text") {
+      const actor = String(ev?.actor_id || "").trim();
+      if (actor && actor !== "leader" && aid && !directAssignIds.has(aid)) {
+        continue;
+      }
+      // 流式打字机进行中：Supervisor 终稿由 live 气泡展示，避免双份
+      if (
+        actor === "leader" &&
+        sending.value &&
+        liveAssistant.value &&
+        streamMode.value !== "direct"
+      ) {
+        continue;
+      }
+    }
+
+    if (t === "system_notice") {
+      // 编排态：notice 只滚进分派气泡
+      if (aid && !directAssignIds.has(aid)) continue;
+      // 旧「已直达」提示不展示
+      if (String(ev?.text || "").startsWith("已直达")) continue;
+      const actorId = String(ev?.actor_id || "").trim();
+      if (aid && directAssignIds.has(aid)) {
+        const chain = noticesByAssign[aid] || [];
+        const idx = chain.findIndex((n) => n === ev || n.event_id === ev.event_id);
+        const isLast = idx < 0 || idx === chain.length - 1;
+        const finished = finishedByAssign[aid] || null;
+        const failed = finished ? /失败|中断/.test(String(finished.text || "")) : false;
+        flat.push({
+          role: "assistant",
+          actorId,
+          label: eventLabel(ev),
+          item: makeDirectToolItem(ev, {
+            assignFinished: Boolean(finished),
+            isLast,
+            failed,
+          }),
+        });
+        continue;
+      }
+      flat.push({
+        role: "assistant",
+        actorId,
+        label: eventLabel(ev),
+        item: {
+          key: ev.event_id || `notice-${ev.seq}`,
+          kind: "progress",
+          ev,
+          text: String(ev?.text || ""),
+        },
+      });
+      continue;
+    }
+
+    const role = isHumanEvent(ev) ? "user" : "assistant";
+    const actorId = String(ev?.actor_id || "").trim();
+    flat.push({
+      role,
+      actorId,
+      label: eventLabel(ev),
+      item: {
+        key: ev.event_id || `msg-${ev.seq}`,
+        kind: "message",
+        ev,
+      },
+    });
+  }
+
+  if (liveUser.value) {
+    const already = (list || []).some(
+      (ev) =>
+        String(ev?.type || "") === "human_message" &&
+        String(ev?.text || "") === liveUser.value.text,
+    );
+    if (!already) {
+      const actorId = selfNodeId.value || "node";
+      flat.push({
+        role: "user",
+        actorId,
+        label: selfNodeName.value || actorId,
+        item: {
+          key: liveUser.value.id,
+          kind: "live_user",
+          text: liveUser.value.text,
+        },
+      });
+    }
+  }
+
+  if (liveAssistant.value && streamMode.value !== "direct") {
+    flat.push({
+      role: "assistant",
+      actorId: "leader",
+      label: "Supervisor",
+      item: {
+        key: liveAssistant.value.id,
+        kind: "live_assistant",
+        text: liveAssistant.value.text || "",
+        streaming: true,
+        phase: streamPhase.value,
+        tool: streamToolName.value,
+      },
+    });
+  }
+
+  const groups = [];
+  for (const row of flat) {
+    const bucket = `${row.role}:${row.actorId || "_"}`;
+    const last = groups[groups.length - 1];
+    if (last && last.bucket === bucket) {
+      last.items.push(row.item);
+      continue;
+    }
+    groups.push({
+      key: `${bucket}-${row.item.key}`,
+      bucket,
+      role: row.role,
+      label: row.label,
+      items: [row.item],
+    });
+  }
+  return groups;
+});
+
+const liveStatusLabel = computed(() => {
+  if (!sending.value) return "";
+  if (streamPhase.value === "streaming" && liveAssistant.value?.text) {
+    return "Supervisor 回复中…";
+  }
+  if (streamPhase.value === "tool") {
+    const tool = String(streamToolName.value || "").trim();
+    if (tool === "成员执行任务" || tool === "assign_workgroup_task") return "成员执行任务…";
+    if (tool === "询问用户" || tool === "ask_workgroup_user") return "等待你的回答…";
+    if (tool.startsWith("直达") || streamMode.value === "direct") return "直连成员工作中…";
+    return tool ? `${tool}…` : "工具执行中…";
+  }
+  if (hitlMode.value) return "Supervisor 正在询问…";
+  const watermark = statusWatermarkSeq.value || 0;
+  const list = events.value || [];
+  let sawDirect = streamMode.value === "direct";
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const ev = list[i];
+    const seq = Number(ev?.seq || 0);
+    if (seq && seq <= watermark) break;
+    const t = String(ev?.type || "");
+    if (t === "assign_started" && isDirectAssignEvent(ev)) sawDirect = true;
+    if (t === "system_notice") {
+      return String(ev?.text || "").trim() || "成员工作中…";
+    }
+    if (t === "assign_started") {
+      const txt = String(ev?.text || "").trim();
+      if (isDirectAssignEvent(ev)) return txt || "直连执行中…";
+      return "成员执行任务…";
+    }
+    if (t === "assign_finished") {
+      const txt = String(ev?.text || "").trim();
+      if (txt && txt !== "已完成") return txt;
+      return sawDirect || isDirectAssignEvent(ev) ? "成员已完成" : "成员已完成，Supervisor 汇总中…";
+    }
+    if (t === "actor_final_text" && String(ev?.actor_id || "") !== "leader") {
+      return sawDirect ? "成员已完成" : "Supervisor 汇总中…";
+    }
+    if (t === "human_message") break;
+  }
+  if (streamMode.value === "direct" || sawDirect) return "直连成员工作中…";
+  return "Supervisor 思考中…";
+});
+
 const toolbarTitle = computed(() => {
   const name = String(workgroupMeta.value?.display_name || "").trim();
   return name ? `工作组 · ${name}` : "工作组";
+});
+
+/** 内容变化时跟随滚底（含进度文案变化，不只看条数） */
+const timelineTailKey = computed(() => {
+  const list = events.value || [];
+  const parts = [
+    list.length,
+    sending.value ? 1 : 0,
+    liveAssistant.value?.text?.length || 0,
+    streamPhase.value,
+  ];
+  if (list.length) {
+    const last = list[list.length - 1];
+    parts.push(last?.event_id || last?.seq || "", last?.type || "", (last?.text || "").length);
+  }
+  return parts.join("\0");
+});
+
+watch(timelineTailKey, () => {
+  maybeScrollTimelineTail();
 });
 
 watch(
   workgroupId,
   async (id) => {
     stopPoll();
-    await Promise.all([loadTimeline(), loadWorkgroupMeta()]);
+    stopWorkPoll();
+    followTail.value = true;
+    // 切换工作组时复位输入/直连/发送态，避免底部状态条残留
+    draft.value = "";
+    directMember.value = null;
+    mentionOpen.value = false;
+    mentionQuery.value = "";
+    sending.value = false;
+    cancelling.value = false;
+    statusWatermarkSeq.value = 0;
+    expandedMemberReports.value = {};
+    clearLive();
+    if (streamAbort) {
+      try {
+        streamAbort.abort();
+      } catch {
+        /* ignore */
+      }
+      streamAbort = null;
+    }
+    pendingHitl.value = [];
+    hitlDraft.value = "";
+    hitlBusy.value = false;
+    debugOpen.value = false;
+    debugRuns.value = [];
+    debugLlm.value = null;
+    debugSelectedRunId.value = "";
+    debugHistory.value = null;
+    debugError.value = "";
+    error.value = "";
+    await Promise.all([loadTimeline(), loadWorkgroupMeta(), loadMembers(), loadPendingHitl()]);
+    scrollTimelineTail();
     if (id) startPoll();
   },
   { immediate: true },
@@ -229,7 +1133,10 @@ watch(
 );
 
 onMounted(loadSelf);
-onUnmounted(stopPoll);
+onUnmounted(() => {
+  stopPoll();
+  stopWorkPoll();
+});
 </script>
 
 <template>
@@ -259,6 +1166,15 @@ onUnmounted(stopPoll);
           <button
             type="button"
             class="wg-chat__toolbar-btn"
+            :class="{ 'wg-chat__toolbar-btn--active': debugOpen }"
+            title="RunHistory / LLM 调试"
+            @click="toggleDebugPanel"
+          >
+            调试
+          </button>
+          <button
+            type="button"
+            class="wg-chat__toolbar-btn"
             title="添加成员"
             @click="openMemberCreate(workgroupId)"
           >
@@ -266,33 +1182,249 @@ onUnmounted(stopPoll);
           </button>
         </div>
 
-        <div class="wg-chat__body">
-          <div class="wg-chat__timeline chat__stream">
+        <div class="wg-chat__body" :class="{ 'wg-chat__body--debug': debugOpen }">
+          <div
+            ref="timelineEl"
+            class="wg-chat__timeline chat__stream"
+            @scroll="onTimelineScroll"
+          >
             <article
-              v-for="ev in events"
-              :key="ev.event_id || ev.seq"
+              v-for="group in eventGroups"
+              :key="group.key"
               class="msg"
-              :class="isHumanEvent(ev) ? 'msg--user' : 'msg--assistant'"
+              :class="[
+                group.role === 'user' ? 'msg--user' : 'msg--assistant',
+                group.items.every((it) => it.kind === 'progress') ? 'msg--progress' : '',
+              ]"
             >
-              <div class="msg__body">
-                <div class="msg__hint">
-                  {{ eventLabel(ev) }}
-                  <span v-if="ev.seq"> · #{{ ev.seq }}</span>
-                </div>
-                <div
-                  class="msg__bubble"
-                  :class="isHumanEvent(ev) ? 'msg__bubble--user' : 'msg__bubble--assistant-md'"
-                >
-                  <template v-if="isHumanEvent(ev)">{{ ev.text }}</template>
+              <div
+                class="msg__body"
+                :class="{
+                  'msg__body--hint-only': group.items.every((it) => it.kind === 'progress'),
+                  'msg__body--grouped': true,
+                }"
+              >
+                <div class="msg__hint">{{ group.label }}</div>
+                <template v-for="item in group.items" :key="item.key">
+                  <div
+                    v-if="item.kind === 'assign'"
+                    class="wg-task"
+                    :class="{
+                      'wg-task--done': item.done && !item.failed,
+                      'wg-task--failed': item.failed,
+                      'wg-task--running': !item.done,
+                    }"
+                  >
+                    <div v-if="item.mention" class="wg-task__mention">
+                      <span class="wg-task__at">@{{ item.mention }}</span>
+                    </div>
+                    <div class="wg-task__card">
+                      <div class="wg-task__head">
+                        <span class="wg-task__label">任务</span>
+                        <span class="wg-task__status">
+                          <span
+                            v-if="!item.done"
+                            class="msg__meta-dots wg-task__dots"
+                            aria-hidden="true"
+                          >
+                            <span class="msg__meta-dot" />
+                            <span class="msg__meta-dot" />
+                            <span class="msg__meta-dot" />
+                          </span>
+                          <span v-if="item.done && !item.failed" class="wg-task__check" aria-hidden="true">✓</span>
+                          <span v-else-if="item.failed" class="wg-task__mark" aria-hidden="true">−</span>
+                          {{ item.statusText }}
+                        </span>
+                      </div>
+                      <div class="wg-task__body">{{ item.taskText }}</div>
+                      <div v-if="item.steps?.length" class="wg-task__steps">
+                        <div
+                          v-for="step in item.steps"
+                          :key="step.key"
+                          class="wg-tool-row"
+                          :class="{
+                            'wg-tool-row--progress': step.inProgress,
+                            [`wg-tool-row--${step.toolKind || 'tool'}`]: true,
+                          }"
+                        >
+                          <div class="wg-tool-row__bar">
+                            <span class="wg-tool-row__glyph" aria-hidden="true">
+                              <span v-if="step.inProgress" class="tool-exec-spinner" />
+                              <span v-else-if="step.failed" class="wg-tool-row__mark">−</span>
+                              <span v-else class="wg-tool-row__check">✓</span>
+                            </span>
+                            <span class="wg-tool-row__kind">{{ step.toolKind || "tool" }}</span>
+                            <span class="wg-tool-row__text">{{ step.summary }}</span>
+                            <span class="wg-tool-row__status">
+                              <span
+                                v-if="step.inProgress"
+                                class="msg__meta-dots wg-tool-row__dots"
+                                aria-hidden="true"
+                              >
+                                <span class="msg__meta-dot" />
+                                <span class="msg__meta-dot" />
+                                <span class="msg__meta-dot" />
+                              </span>
+                              {{ step.statusText }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div v-if="item.hasReport" class="wg-task__report">
+                        <button
+                          type="button"
+                          class="wg-task__report-bar"
+                          :aria-expanded="isMemberReportExpanded(item.reportToggleKey)"
+                          :aria-label="
+                            isMemberReportExpanded(item.reportToggleKey)
+                              ? '收起成员结论'
+                              : '展开成员结论'
+                          "
+                          @click="toggleMemberReport(item.reportToggleKey)"
+                        >
+                          <span class="wg-task__report-kind">成员结论</span>
+                          <span
+                            v-if="!isMemberReportExpanded(item.reportToggleKey)"
+                            class="wg-task__report-preview"
+                          >
+                            {{ item.reportPreview }}
+                          </span>
+                          <span class="wg-task__report-chevron" aria-hidden="true">
+                            {{ isMemberReportExpanded(item.reportToggleKey) ? "▾" : "▸" }}
+                          </span>
+                        </button>
+                        <div
+                          v-if="isMemberReportExpanded(item.reportToggleKey)"
+                          class="wg-task__report-body tool-exec-bubble__markdown assistant-msg__md"
+                          v-html="renderMarkdown(item.reportText)"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    v-else-if="item.kind === 'tool'"
+                    class="wg-tool-row"
+                    :class="{
+                      'wg-tool-row--progress': item.inProgress,
+                      [`wg-tool-row--${item.toolKind || 'tool'}`]: true,
+                    }"
+                  >
+                    <div class="wg-tool-row__bar">
+                      <span class="wg-tool-row__glyph" aria-hidden="true">
+                        <span v-if="item.inProgress" class="tool-exec-spinner" />
+                        <span v-else-if="item.failed" class="wg-tool-row__mark">−</span>
+                        <span v-else class="wg-tool-row__check">✓</span>
+                      </span>
+                      <span class="wg-tool-row__kind">{{ item.toolKind || "tool" }}</span>
+                      <span class="wg-tool-row__text">{{ item.summary }}</span>
+                      <span class="wg-tool-row__status">
+                        <span
+                          v-if="item.inProgress"
+                          class="msg__meta-dots wg-tool-row__dots"
+                          aria-hidden="true"
+                        >
+                          <span class="msg__meta-dot" />
+                          <span class="msg__meta-dot" />
+                          <span class="msg__meta-dot" />
+                        </span>
+                        {{ item.statusText }}
+                      </span>
+                    </div>
+                  </div>
+                  <div
+                    v-else-if="item.kind === 'progress'"
+                    class="msg__hint msg__hint--stream-meta"
+                  >
+                    {{ item.text }}
+                  </div>
+                  <div
+                    v-else-if="item.kind === 'live_user'"
+                    class="msg__bubble msg__bubble--user"
+                  >
+                    <template
+                      v-for="(part, pi) in splitUserMentionParts(item.text)"
+                      :key="pi"
+                    >
+                      <span v-if="part.type === 'mention'" class="wg-msg-at">{{ part.text }}</span>
+                      <template v-else>{{ part.text }}</template>
+                    </template>
+                  </div>
+                  <div
+                    v-else-if="item.kind === 'live_assistant'"
+                    class="msg__bubble msg__bubble--assistant-md"
+                  >
+                    <div
+                      v-if="!item.text"
+                      class="msg__hint msg__hint--stream-meta"
+                      role="status"
+                    >
+                      <span class="msg__meta-label">{{ liveStatusLabel || "Supervisor 思考中…" }}</span>
+                      <span class="msg__meta-dots" aria-hidden="true">
+                        <span class="msg__meta-dot" />
+                        <span class="msg__meta-dot" />
+                        <span class="msg__meta-dot" />
+                      </span>
+                    </div>
+                    <pre v-else class="assistant-msg__stream-plain">{{ item.text }}</pre>
+                  </div>
                   <div
                     v-else
-                    class="tool-exec-bubble__markdown assistant-msg__md"
-                    v-html="renderMarkdown(ev.text || '')"
-                  />
+                    class="msg__bubble"
+                    :class="
+                      isHumanEvent(item.ev)
+                        ? 'msg__bubble--user'
+                        : 'msg__bubble--assistant-md'
+                    "
+                  >
+                    <template v-if="isHumanEvent(item.ev)">
+                      <template
+                        v-for="(part, pi) in splitUserMentionParts(item.ev.text)"
+                        :key="pi"
+                      >
+                        <span v-if="part.type === 'mention'" class="wg-msg-at">{{ part.text }}</span>
+                        <template v-else>{{ part.text }}</template>
+                      </template>
+                    </template>
+                    <div
+                      v-else
+                      class="tool-exec-bubble__markdown assistant-msg__md"
+                      v-html="renderMarkdown(item.ev.text || '')"
+                    />
+                  </div>
+                </template>
+              </div>
+            </article>
+            <article
+              v-if="activeHitl"
+              class="msg msg--assistant"
+            >
+              <div class="msg__body msg__body--grouped">
+                <div class="msg__hint">Supervisor</div>
+                <div class="wg-hitl-bubble">
+                  <div class="wg-hitl-bubble__badge">询问</div>
+                  <p class="wg-hitl-bubble__prompt">{{ activeHitl.prompt }}</p>
+                  <p class="wg-hitl-bubble__hint">在下方输入框回答后 Enter 提交</p>
                 </div>
               </div>
             </article>
-            <div v-if="!events.length" class="chat__empty">
+            <article
+              v-if="sending && !(liveAssistant?.text && streamPhase === 'streaming') && !activeHitl"
+              class="msg msg--assistant msg--progress"
+            >
+              <div class="msg__body msg__body--hint-only">
+                <div
+                  class="msg__hint msg__hint--stream-meta"
+                  role="status"
+                  :aria-label="liveStatusLabel || '协作进行中'"
+                >
+                  <span class="msg__meta-label">{{ liveStatusLabel || "协作进行中" }}</span>
+                  <span class="msg__meta-dots" aria-hidden="true">
+                    <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
+                  </span>
+                </div>
+              </div>
+            </article>
+            <div v-if="!events.length && !sending" class="chat__empty">
               <div class="chat__empty-inner">
                 <div class="chat__empty-title">开始对话</div>
                 <div class="chat__empty-hint">向工作组发言，Leader 会编排成员协作</div>
@@ -306,27 +1438,152 @@ onUnmounted(stopPoll);
               </div>
             </div>
           </div>
+          <aside v-if="debugOpen" class="wg-debug" aria-label="RunHistory 调试">
+            <header class="wg-debug__head">
+              <strong>RunHistory</strong>
+              <span v-if="debugLlmBadge" class="wg-debug__badge" :data-mode="debugLlm?.mode">
+                {{ debugLlmBadge }}
+              </span>
+              <button type="button" class="wg-debug__refresh" :disabled="debugLoading" @click="loadDebugRuns">
+                刷新
+              </button>
+            </header>
+            <p v-if="debugError" class="wg-debug__error">{{ debugError }}</p>
+            <p v-else-if="debugLoading && !debugRuns.length" class="wg-debug__muted">加载中…</p>
+            <p v-else-if="!debugRuns.length" class="wg-debug__muted">暂无 ActorRun（发一条消息后会出现）</p>
+            <ul v-else class="wg-debug__runs">
+              <li v-for="r in debugRuns" :key="r.run_id">
+                <button
+                  type="button"
+                  class="wg-debug__run"
+                  :class="{ 'wg-debug__run--active': r.run_id === debugSelectedRunId }"
+                  @click="selectDebugRun(r.run_id)"
+                >
+                  <span class="wg-debug__run-actor">{{ r.actor_id === 'leader' ? 'Supervisor' : r.actor_id }}</span>
+                  <span class="wg-debug__run-status">{{ r.status }}</span>
+                  <span class="wg-debug__run-id" :title="r.run_id">{{ r.run_id.slice(-8) }}</span>
+                </button>
+              </li>
+            </ul>
+            <div v-if="debugHistory" class="wg-debug__msgs">
+              <div
+                v-for="(m, i) in debugHistory.messages || []"
+                :key="i"
+                class="wg-debug__msg"
+                :data-role="m.role"
+              >
+                <div class="wg-debug__msg-role">{{ m.role }}</div>
+                <pre class="wg-debug__msg-body">{{ formatDebugMsg(m) }}</pre>
+                <details
+                  v-if="m.role === 'assistant' && m.tool_calls?.length"
+                  class="wg-debug__details"
+                >
+                  <summary>工具参数</summary>
+                  <pre
+                    v-for="(tc, ti) in m.tool_calls"
+                    :key="ti"
+                    class="wg-debug__msg-body"
+                  >{{ tc.function?.name || '?' }}
+{{ tc.function?.arguments || '{}' }}</pre>
+                </details>
+              </div>
+            </div>
+          </aside>
         </div>
 
         <footer class="chat__composer">
-          <div class="chat__composer-pill">
-            <div class="chat__composer-pill-center">
+          <div class="chat__composer-pill" style="position: relative">
+            <div
+              v-if="mentionOpen && mentionCandidates.length && !hitlMode"
+              class="wg-mention-menu"
+              role="listbox"
+            >
+              <button
+                v-for="m in mentionCandidates"
+                :key="m.member_id"
+                type="button"
+                class="wg-mention-menu__item"
+                @mousedown.prevent="pickMention(m)"
+              >
+                <strong>{{ m.display_name }}</strong>
+                <span class="muted">{{ m.member_id }}</span>
+              </button>
+            </div>
+            <div class="chat__composer-pill-center wg-composer-field">
+              <button
+                v-if="directMember && !hitlMode"
+                type="button"
+                class="wg-task__at wg-composer-at"
+                :title="`取消 @${directMember.display_name}`"
+                :aria-label="`取消 @${directMember.display_name}`"
+                @click="clearDirectMention"
+              >
+                @{{ directMember.display_name }}
+              </button>
               <input
+                v-if="hitlMode"
+                v-model="hitlDraft"
+                class="chat__textarea"
+                type="text"
+                placeholder="回答 Supervisor 的问题…"
+                :disabled="hitlBusy"
+                @keydown.enter.prevent="submitHitlAnswer"
+              />
+              <input
+                v-else
                 v-model="draft"
                 class="chat__textarea"
                 type="text"
-                placeholder="向工作组发言…"
+                :placeholder="
+                  directMember
+                    ? '输入直达成员的任务…'
+                    : '向工作组发言，输入 @ 直达成员…'
+                "
                 :disabled="sending"
+                @input="onDraftInput"
                 @keydown.enter.prevent="send"
+                @keydown.esc="mentionOpen = false"
+                @keydown.backspace="onComposerBackspace"
               />
             </div>
             <div class="chat__composer-pill-right">
               <button
+                v-if="sending && !hitlMode"
+                type="button"
+                class="chat__composer-send chat__composer-send--cancel"
+                title="取消"
+                aria-label="取消"
+                :disabled="cancelling"
+                @click="cancelTurn"
+              >
+                {{ cancelling ? "…" : "□" }}
+              </button>
+              <button
+                v-else-if="hitlMode"
+                type="button"
+                class="chat__composer-send"
+                title="提交回答"
+                aria-label="提交回答"
+                :disabled="!hitlDraft.trim() || hitlBusy"
+                @click="submitHitlAnswer"
+              >
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path
+                    d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+              <button
+                v-else
                 type="button"
                 class="chat__composer-send"
                 title="发送"
                 aria-label="发送"
-                :disabled="sending || !draft.trim()"
+                :disabled="!draft.trim()"
                 @click="send"
               >
                 <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -343,7 +1600,19 @@ onUnmounted(stopPoll);
           </div>
           <div class="chat__composer-statusline">
             <div class="chat__composer-statusline-left">
-              <span class="chat__input-strip-left">Enter 发送</span>
+              <span class="chat__input-strip-left">{{
+                hitlMode
+                  ? hitlBusy
+                    ? "提交回答中…"
+                    : "回答询问 · Enter 提交"
+                  : sending
+                    ? cancelling
+                      ? "正在取消…"
+                      : liveStatusLabel || "协作进行中…"
+                    : directMember
+                      ? "直达成员 · Enter 发送 · 点击 @ 取消"
+                      : "Enter 发送 · @ 直达成员"
+              }}</span>
             </div>
           </div>
         </footer>
@@ -401,21 +1670,517 @@ onUnmounted(stopPoll);
   border-color: var(--color-primary, #0078d4);
   color: var(--color-primary-strong, var(--color-primary, #0078d4));
 }
+.wg-chat__toolbar-btn--active {
+  border-color: var(--color-primary, #0078d4);
+  color: var(--color-primary, #0078d4);
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 8%, transparent);
+}
 .wg-chat__body {
   flex: 1;
   display: flex;
   min-height: 0;
   background: var(--color-editor, #fff);
 }
+.wg-chat__body--debug .wg-chat__timeline {
+  flex: 1 1 58%;
+}
+.wg-debug {
+  flex: 0 0 320px;
+  max-width: 38%;
+  min-width: 260px;
+  border-left: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-surface, #fafafa);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.wg-debug__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  font-size: 13px;
+}
+.wg-debug__badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 12%, transparent);
+  color: var(--color-primary, #0078d4);
+}
+.wg-debug__badge[data-mode="mock"] {
+  background: color-mix(in srgb, #c50f1f 12%, transparent);
+  color: #c50f1f;
+}
+.wg-debug__refresh {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted, #6b7280);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wg-debug__error {
+  margin: 8px 12px;
+  color: #c50f1f;
+  font-size: 12px;
+}
+.wg-debug__muted {
+  margin: 12px;
+  color: var(--color-text-muted, #6b7280);
+  font-size: 12px;
+}
+.wg-debug__runs {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  max-height: 28%;
+  overflow: auto;
+}
+.wg-debug__run {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text, #111827);
+}
+.wg-debug__run:hover,
+.wg-debug__run--active {
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 10%, transparent);
+}
+.wg-debug__run-status {
+  color: var(--color-text-muted, #6b7280);
+}
+.wg-debug__run-id {
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--color-text-muted, #6b7280);
+}
+.wg-debug__msgs {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wg-debug__msg {
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--color-editor, #fff);
+}
+.wg-debug__msg-role {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted, #6b7280);
+  margin-bottom: 4px;
+}
+.wg-debug__msg-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.wg-debug__details {
+  margin-top: 4px;
+  font-size: 12px;
+}
+.wg-debug__details summary {
+  cursor: pointer;
+  color: var(--color-primary, #0078d4);
+}
 .wg-chat__timeline.chat__stream {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 .wg-chat__timeline .msg__body {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+}
+.msg__body--grouped {
+  gap: 6px;
+}
+.msg--progress .msg__hint {
+  opacity: 0.85;
+}
+.msg--progress .msg__hint--stream-meta,
+.msg__body--grouped .msg__hint--stream-meta {
+  margin-top: 0;
+  opacity: 0.8;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted, #6b7280);
+}
+.wg-msg-at {
+  color: var(--color-primary, #0078d4);
+  font-weight: 600;
+}
+.wg-hitl-bubble {
+  width: 100%;
+  max-width: 100%;
+  margin: 4px 0 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-left: 3px solid var(--color-primary, #0078d4);
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 5%, var(--color-surface, #fff));
+}
+.wg-hitl-bubble__badge {
+  display: inline-flex;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-primary, #0078d4);
+  margin-bottom: 6px;
+}
+.wg-hitl-bubble__prompt {
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--color-text, #111827);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wg-hitl-bubble__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted, #6b7280);
+}
+.assistant-msg__stream-plain {
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+}
+.wg-composer-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.wg-composer-at {
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.wg-composer-at:hover {
+  filter: brightness(0.97);
+}
+.wg-composer-field .chat__textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wg-task {
+  width: 100%;
+  max-width: 100%;
+  margin: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wg-task__mention {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.wg-task__at {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-primary, #0078d4);
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 10%, var(--color-surface, #fff));
+  border: 1px solid color-mix(in srgb, var(--color-primary, #0078d4) 22%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wg-task__card {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-surface, #fff);
+  overflow: hidden;
+}
+.wg-task--running .wg-task__card {
+  border-color: var(--color-border, #d1d5db);
+}
+.wg-task--failed .wg-task__card {
+  border-color: color-mix(in srgb, #dc2626 28%, var(--color-border, #d1d5db));
+}
+.wg-task__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px 0;
+}
+.wg-task__label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle, #9ca3af);
+}
+.wg-task__status {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--color-text-subtle, #9ca3af);
+  white-space: nowrap;
+}
+.wg-task__dots {
+  --stream-meta-dot-size: 4px;
+  --stream-meta-dot-gap: 2px;
+}
+.wg-task__check {
+  color: var(--color-success, #0f7b0f);
+  opacity: 0.9;
+}
+.wg-task__mark {
+  color: var(--color-text-subtle, #9ca3af);
+  opacity: 0.75;
+}
+.wg-task__body {
+  padding: 6px 12px 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--color-text, #111827);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wg-task__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 8px 8px;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+  padding-top: 8px;
+}
+.wg-task__steps .wg-tool-row {
+  margin: 0;
+  background: color-mix(in srgb, var(--color-text, #111827) 1.5%, var(--color-surface, #fff));
+}
+.wg-task__report {
+  border-top: 1px solid var(--color-border, #e5e7eb);
+}
+.wg-task__report-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wg-task__report-bar:hover {
+  background: color-mix(in srgb, var(--color-text, #111827) 2.5%, transparent);
+}
+.wg-task__report-bar:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary, #0078d4) 45%, transparent);
+  outline-offset: -2px;
+}
+.wg-task__report-kind {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--color-text-subtle, #9ca3af);
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-surface-elevated, #f8fafc);
+}
+.wg-task__report-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--color-text-muted, #6b7280);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wg-task__report-chevron {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--color-text-subtle, #9ca3af);
+}
+.wg-task__report-body {
+  padding: 0 12px 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text, #111827);
+}
+.wg-task__report-body :deep(p:first-child) {
+  margin-top: 0;
+}
+.wg-task__report-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.wg-tool-row {
+  width: 100%;
+  max-width: 100%;
+  margin: 2px 0;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #111827);
+}
+.wg-tool-row:hover,
+.wg-tool-row--progress {
+  border-color: var(--color-border, #d1d5db);
+  background: var(--color-surface, #fff);
+}
+.wg-tool-row__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+}
+.wg-tool-row__glyph {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--color-success, #0f7b0f);
+  font-size: 12px;
+}
+.wg-tool-row__check {
+  opacity: 0.9;
+}
+.wg-tool-row__mark {
+  opacity: 0.75;
+  color: var(--color-text-subtle, #9ca3af);
+}
+.wg-tool-row__kind {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--color-text-subtle, #9ca3af);
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-surface-elevated, #f8fafc);
+}
+.wg-tool-row--fs .wg-tool-row__kind {
+  color: var(--color-success, #0f7b0f);
+  border-color: rgba(137, 209, 133, 0.25);
+  background: var(--color-success-soft, rgba(15, 123, 15, 0.12));
+}
+.wg-tool-row--shell .wg-tool-row__kind {
+  color: #e2a053;
+  border-color: rgba(226, 160, 83, 0.25);
+  background: rgba(226, 160, 83, 0.08);
+}
+.wg-tool-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  color: var(--color-text, #111827);
+}
+.wg-tool-row__status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-text-subtle, #9ca3af);
+  white-space: nowrap;
+}
+.wg-tool-row__dots {
+  --stream-meta-dot-size: 4px;
+  --stream-meta-dot-gap: 2px;
+}
+.wg-mention-menu {
+  position: absolute;
+  left: 12px;
+  right: 48px;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 10px;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  padding: 4px;
+}
+.wg-mention-menu__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+.wg-mention-menu__item:hover {
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 10%, transparent);
+}
+.wg-mention-menu__item .muted {
+  font-size: 11px;
+  color: var(--color-text-muted, #6b7280);
+}
+.chat__composer-send--cancel {
+  background: color-mix(in srgb, #dc2626 12%, var(--color-surface, #fff));
+  color: #b91c1c;
 }
 .wg-chat__link {
   margin-top: 0.5rem;

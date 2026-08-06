@@ -18,6 +18,7 @@ const (
 	CodeWorkgroupArchived ErrorCode = "workgroup_archived"
 	CodeNotFound          ErrorCode = "not_found"
 	CodeConflict          ErrorCode = "conflict"
+	CodeCanceled          ErrorCode = "canceled"
 )
 
 // Error 为可映射到契约错误码的 Worker 错误。

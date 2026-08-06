@@ -1,93 +1,114 @@
-"""Member Node-executable 工具定义（Manage 侧 LLM tools + side_effect）。"""
+"""Member 工作区可执行工具：共享 JSON 目录 + LLM schemas + side_effect。
+
+权威源：仓库根 `shared/workgroup/member_tool_catalog.json`（与 Node go:embed 同一文件）。
+Node 单机不连 Manage 时读嵌入副本；Manage/Console 读磁盘同一文件——禁止运行时互相 HTTP 拉目录。
+仅包含能在 member workspace（Registry fs_root）内独立执行的工具（fs + bash）。
+"""
 
 from __future__ import annotations
 
+import json
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
-# 与 Node workgroup Executor 对齐的 v1 工具集
-MEMBER_TOOL_SIDE_EFFECT: dict[str, str] = {
-    "read_file": "fs_read",
-    "glob_files": "fs_read",
-    "write_file": "fs_write",
-}
 
-_READ_FILE = {
-    "type": "function",
-    "function": {
-        "name": "read_file",
-        "description": (
-            "Read a text file from the member workspace. "
-            "path must be relative to the workspace root (e.g. README); "
-            "absolute host paths are denied."
-        ),
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Relative path inside the member workspace",
-                },
-            },
-            "required": ["path"],
+def _catalog_path() -> Path:
+    # manage/workgroup/member_tools.py → repo root
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parents[2] / "shared" / "workgroup" / "member_tool_catalog.json",
+        Path.cwd() / "shared" / "workgroup" / "member_tool_catalog.json",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    raise FileNotFoundError(
+        "member_tool_catalog.json not found; expected at shared/workgroup/ "
+        f"(tried: {', '.join(str(c) for c in candidates)})"
+    )
+
+
+@lru_cache(maxsize=1)
+def _load_catalog() -> dict[str, Any]:
+    raw = json.loads(_catalog_path().read_text(encoding="utf-8"))
+    tools = raw.get("tools") or []
+    if not tools:
+        raise ValueError("member_tool_catalog.json: empty tools")
+    return raw
+
+
+def _catalog_entries() -> list[dict[str, Any]]:
+    return list(_load_catalog()["tools"])
+
+
+MEMBER_TOOL_SIDE_EFFECT: dict[str, str] = {}
+MEMBER_EXECUTABLE_TOOL_NAMES: list[str] = []
+
+
+def _refresh_module_exports() -> None:
+    global MEMBER_TOOL_SIDE_EFFECT, MEMBER_EXECUTABLE_TOOL_NAMES
+    entries = _catalog_entries()
+    MEMBER_TOOL_SIDE_EFFECT = {e["id"]: e["side_effect"] for e in entries}
+    MEMBER_EXECUTABLE_TOOL_NAMES = [e["id"] for e in entries]
+
+
+_refresh_module_exports()
+
+
+def default_allow_tool_names() -> list[str]:
+    return [e["id"] for e in _catalog_entries() if e.get("default")]
+
+
+def member_tool_catalog() -> dict[str, Any]:
+    """GET catalog 响应体。"""
+    data = _load_catalog()
+    tools = [
+        {
+            "id": e["id"],
+            "label": e["label"],
+            "group": e["group"],
+            "group_label": e["group_label"],
+            "hint": e["hint"],
+            "default": bool(e.get("default")),
+            "side_effect": e["side_effect"],
+        }
+        for e in data["tools"]
+    ]
+    groups = data.get("groups") or [
+        {"id": "fs", "label": "文件系统"},
+        {"id": "bash", "label": "Shell"},
+    ]
+    return {
+        "tools": tools,
+        "default_allow_names": default_allow_tool_names(),
+        "groups": groups,
+    }
+
+
+def _openai_from_entry(e: dict[str, Any]) -> dict[str, Any]:
+    params = e.get("parameters") or {"type": "object", "properties": {}}
+    # 确保 OpenAI function.parameters 形状
+    parameters = {
+        "type": params.get("type", "object"),
+        "additionalProperties": params.get("additionalProperties", False),
+        "properties": params.get("properties") or {},
+    }
+    if "required" in params:
+        parameters["required"] = params["required"]
+    return {
+        "type": "function",
+        "function": {
+            "name": e["id"],
+            "description": e.get("description") or e["id"],
+            "parameters": parameters,
         },
-    },
-}
+    }
 
-_GLOB_FILES = {
-    "type": "function",
-    "function": {
-        "name": "glob_files",
-        "description": (
-            "List paths under the member workspace matching a glob. "
-            "Does not read file contents. directory is relative (use . for workspace root)."
-        ),
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "directory": {
-                    "type": "string",
-                    "description": "Start directory relative to workspace (required; use . for root)",
-                },
-                "glob_pattern": {
-                    "type": "string",
-                    "description": "Glob relative to directory, e.g. *.md or **/*.txt",
-                },
-                "offset": {"type": "integer", "minimum": 0},
-                "max_results": {"type": "integer", "minimum": 1},
-                "include_dirs": {"type": "boolean"},
-            },
-            "required": ["directory", "glob_pattern"],
-        },
-    },
-}
 
-_WRITE_FILE = {
-    "type": "function",
-    "function": {
-        "name": "write_file",
-        "description": (
-            "Write (overwrite) a text file inside the member workspace. "
-            "path must be relative; prefer read_file first when editing existing files."
-        ),
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "path": {"type": "string", "description": "Relative path inside the member workspace"},
-                "content": {"type": "string", "description": "Full file contents to write"},
-            },
-            "required": ["path", "content"],
-        },
-    },
-}
-
-_BY_NAME: dict[str, dict[str, Any]] = {
-    "read_file": _READ_FILE,
-    "glob_files": _GLOB_FILES,
-    "write_file": _WRITE_FILE,
-}
+@lru_cache(maxsize=1)
+def _by_name() -> dict[str, dict[str, Any]]:
+    return {e["id"]: _openai_from_entry(e) for e in _catalog_entries()}
 
 
 def member_openai_tools(allow_names: list[str] | None) -> list[dict[str, Any]]:
@@ -95,10 +116,11 @@ def member_openai_tools(allow_names: list[str] | None) -> list[dict[str, Any]]:
     names = [str(n).strip() for n in (allow_names or []) if str(n).strip()]
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
+    catalog = _by_name()
     for name in names:
         if name in seen:
             continue
-        tool = _BY_NAME.get(name)
+        tool = catalog.get(name)
         if tool is None:
             continue
         seen.add(name)
@@ -114,6 +136,7 @@ def build_member_system_prompt(*, soul_md: str = "", user_md: str = "", custom_m
     parts = [
         "You are a Workgroup Member agent. Complete the assigned instruction using only the tools provided.",
         "All file paths are relative to your member workspace (never host absolute paths).",
+        "Shell commands (if available) also run with the member workspace as the default cwd.",
         "When the task is done, reply with a concise final answer and do not call tools.",
     ]
     soul = (soul_md or "").strip()

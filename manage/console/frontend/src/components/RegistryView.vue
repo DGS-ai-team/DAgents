@@ -87,7 +87,7 @@ function emitFilters(immediate = false) {
           <input
             v-model="localFilters.q"
             type="search"
-            placeholder="名称 / agent_id / 描述"
+            placeholder="名称 / node_id / 描述"
             autocomplete="off"
             @input="emitFilters()"
           />

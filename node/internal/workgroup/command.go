@@ -1,8 +1,15 @@
 package workgroup
 
 import (
+	"context"
+	"errors"
+	"sync"
+	"strings"
 	"time"
 )
+
+// CommandExecutor 执行已 accept 的 tool.command；ctx 可被 tool.cancel 取消。
+type CommandExecutor func(ctx context.Context, cmd ToolCommand) (resultJSON string, err error)
 
 // CommandHandler 接受 tool.command：先 journal 再返回 ack；不重复执行。
 type CommandHandler struct {
@@ -12,7 +19,10 @@ type CommandHandler struct {
 	CatalogRevision      string // 当前 Node manifest revision；空则跳过 catalog 检查
 	Tombstones           map[string]ArchiveTombstone
 	// Executor 可选；nil 时 D2 仅 accept 不执行（仍计 executions=0→1 在 MarkRunning）
-	Executor func(cmd ToolCommand) (resultJSON string, err error)
+	Executor CommandExecutor
+
+	mu       sync.Mutex
+	running  map[string]context.CancelFunc // command_id → cancel（运行中可打断）
 }
 
 // AcceptResult 为 accept 结果。
@@ -36,6 +46,19 @@ func (h *CommandHandler) Accept(cmd ToolCommand, binding WorkerBinding) (*Accept
 	if existing != nil {
 		if existing.PayloadHash != "" && existing.PayloadHash != cmd.PayloadHash {
 			return nil, errf(CodePayloadConflict, "same command_id with different payload_hash")
+		}
+		// 已被 tool.cancel 标记：禁止执行/恢复执行
+		if existing.Status == "canceled" {
+			return &AcceptResult{
+				Ack: CommandAck{
+					CommandID:            cmd.CommandID,
+					Status:               existing.Status,
+					ConnectionGeneration: h.ConnectionGeneration,
+					JournaledAt:          existing.JournaledAt,
+				},
+				Entry:    *existing,
+				Executed: false,
+			}, nil
 		}
 		// D3：accepted 且尚未开始副作用 → 重启后可恢复执行一次
 		if existing.Status == "accepted" && existing.Executions == 0 && h.Executor != nil {
@@ -109,6 +132,20 @@ func (h *CommandHandler) Accept(cmd ToolCommand, binding WorkerBinding) (*Accept
 }
 
 func (h *CommandHandler) runExecutor(cmd ToolCommand, entry JournalEntry) (*AcceptResult, error) {
+	// 执行前再查一次：挡 tool.cancel 与 Accept 的竞态
+	if cur, err := h.Journal.Get(cmd.CommandID); err == nil && cur != nil && cur.Status == "canceled" {
+		return &AcceptResult{
+			Ack: CommandAck{
+				CommandID:            cmd.CommandID,
+				Status:               cur.Status,
+				ConnectionGeneration: h.ConnectionGeneration,
+				JournaledAt:          cur.JournaledAt,
+			},
+			Entry:    *cur,
+			Executed: false,
+		}, nil
+	}
+
 	entry.Status = "running"
 	entry.Executions = 1
 	entry.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
@@ -116,9 +153,32 @@ func (h *CommandHandler) runExecutor(cmd ToolCommand, entry JournalEntry) (*Acce
 		return nil, err
 	}
 
-	resultJSON, execErr := h.Executor(cmd)
+	ctx, cancel := context.WithCancel(context.Background())
+	h.trackRunning(cmd.CommandID, cancel)
+	defer h.untrackRunning(cmd.CommandID)
+
+	resultJSON, execErr := h.Executor(ctx, cmd)
+	// 执行中被 cancel：保留 canceled，不覆盖为 succeeded/failed
+	if cur, err := h.Journal.Get(cmd.CommandID); err == nil && cur != nil && cur.Status == "canceled" {
+		return &AcceptResult{
+			Ack: CommandAck{
+				CommandID:            cmd.CommandID,
+				Status:               cur.Status,
+				ConnectionGeneration: h.ConnectionGeneration,
+				JournaledAt:          cur.JournaledAt,
+			},
+			Entry:    *cur,
+			Executed: true,
+		}, nil
+	}
 	if execErr != nil {
-		if we, ok := execErr.(*Error); ok && we.Code == CodeIndeterminate {
+		if errors.Is(execErr, context.Canceled) || errors.Is(execErr, context.DeadlineExceeded) {
+			entry.Status = "canceled"
+			entry.ErrorCode = string(CodeCanceled)
+		} else if we, ok := execErr.(*Error); ok && we.Code == CodeCanceled {
+			entry.Status = "canceled"
+			entry.ErrorCode = string(CodeCanceled)
+		} else if we, ok := execErr.(*Error); ok && we.Code == CodeIndeterminate {
 			entry.Status = "indeterminate"
 			entry.ErrorCode = string(CodeIndeterminate)
 		} else {
@@ -146,6 +206,101 @@ func (h *CommandHandler) runExecutor(cmd ToolCommand, entry JournalEntry) (*Acce
 		Entry:    entry,
 		Executed: true,
 	}, nil
+}
+
+// Cancel 处理 Manage 下发的 tool.cancel：journal 标记 + 取消运行中 ctx。
+func (h *CommandHandler) Cancel(commandID, workgroupID string) (*AcceptResult, error) {
+	commandID = strings.TrimSpace(commandID)
+	if commandID == "" {
+		return nil, errf(CodeSchemaMismatch, "command_id required")
+	}
+	existing, err := h.Journal.Get(commandID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if existing == nil {
+		entry := JournalEntry{
+			CommandID:   commandID,
+			WorkgroupID: workgroupID,
+			Status:      "canceled",
+			ErrorCode:   string(CodeCanceled),
+			JournaledAt: now,
+			UpdatedAt:   now,
+		}
+		if err := h.Journal.Put(entry); err != nil {
+			return nil, err
+		}
+		h.invokeRunningCancel(commandID)
+		return &AcceptResult{
+			Ack: CommandAck{
+				CommandID:            commandID,
+				Status:               "canceled",
+				ConnectionGeneration: h.ConnectionGeneration,
+				JournaledAt:          now,
+			},
+			Entry: entry,
+		}, nil
+	}
+	switch existing.Status {
+	case "succeeded", "failed", "indeterminate", "rejected", "canceled":
+		h.invokeRunningCancel(commandID)
+		return &AcceptResult{
+			Ack: CommandAck{
+				CommandID:            existing.CommandID,
+				Status:               existing.Status,
+				ConnectionGeneration: h.ConnectionGeneration,
+				JournaledAt:          existing.JournaledAt,
+			},
+			Entry: *existing,
+		}, nil
+	}
+	existing.Status = "canceled"
+	existing.ErrorCode = string(CodeCanceled)
+	existing.UpdatedAt = now
+	if workgroupID != "" && existing.WorkgroupID == "" {
+		existing.WorkgroupID = workgroupID
+	}
+	if err := h.Journal.Put(*existing); err != nil {
+		return nil, err
+	}
+	h.invokeRunningCancel(commandID)
+	return &AcceptResult{
+		Ack: CommandAck{
+			CommandID:            existing.CommandID,
+			Status:               existing.Status,
+			ConnectionGeneration: h.ConnectionGeneration,
+			JournaledAt:          existing.JournaledAt,
+		},
+		Entry: *existing,
+	}, nil
+}
+
+func (h *CommandHandler) trackRunning(commandID string, cancel context.CancelFunc) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.running == nil {
+		h.running = map[string]context.CancelFunc{}
+	}
+	h.running[commandID] = cancel
+}
+
+func (h *CommandHandler) untrackRunning(commandID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.running == nil {
+		return
+	}
+	delete(h.running, commandID)
+}
+
+func (h *CommandHandler) invokeRunningCancel(commandID string) {
+	h.mu.Lock()
+	cancel := h.running[commandID]
+	h.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (h *CommandHandler) reject(cmd ToolCommand, ferr error) (*AcceptResult, error) {

@@ -1,6 +1,7 @@
 package workgroup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,6 +66,56 @@ func TestProvisionRetrySameIDOK(t *testing.T) {
 	}
 }
 
+func TestProvisionNewIDHigherGenerationReplaces(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})
+	req := ProvisionRequest{
+		ProvisionID:      "pv_01h00000000000000000000009",
+		WorkgroupID:      "wg_01h00000000000000000000001",
+		MemberID:         "mb_01h00000000000000000000002",
+		HomeNodeID:       "node_b",
+		MemberSpecDigest: "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+		LeaseEpoch:       2,
+		MemberGeneration: 1,
+		ToolAllowNames:   []string{"read_file"},
+		WorkspaceRoot:    filepath.Join(dir, "ws"),
+	}
+	if _, err := w.HandleProvision(req); err != nil {
+		t.Fatal(err)
+	}
+	req.ProvisionID = "pv_01h0000000000000000000000a"
+	req.MemberSpecDigest = "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa"
+	req.MemberGeneration = 2
+	req.ToolAllowNames = []string{"read_file", "glob_files"}
+	r2, err := w.HandleProvision(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Binding.ProvisionID != req.ProvisionID {
+		t.Fatalf("provision_id=%s", r2.Binding.ProvisionID)
+	}
+	if r2.Binding.MemberGeneration != 2 {
+		t.Fatalf("generation=%d", r2.Binding.MemberGeneration)
+	}
+	if r2.Binding.Status != "ready" {
+		t.Fatalf("status=%s", r2.Binding.Status)
+	}
+	got := map[string]struct{}{}
+	for _, n := range r2.Binding.ToolAllowNames {
+		got[n] = struct{}{}
+	}
+	if _, ok := got["glob_files"]; !ok {
+		t.Fatalf("tools=%v", r2.Binding.ToolAllowNames)
+	}
+	old, err := w.Bindings.GetByProvisionID("pv_01h00000000000000000000009")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old != nil {
+		t.Fatalf("old provision_id should be unbound: %+v", old)
+	}
+}
+
 func TestProvisionSameIDDifferentDigestConflict(t *testing.T) {
 	dir := t.TempDir()
 	w := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})
@@ -112,7 +163,7 @@ func TestCommandNoReexecAfterAccept(t *testing.T) {
 		t.Fatal(err)
 	}
 	execCount := 0
-	w.Commands.Executor = func(cmd ToolCommand) (string, error) {
+	w.Commands.Executor = func(ctx context.Context, cmd ToolCommand) (string, error) {
 		execCount++
 		return `{"ok":true}`, nil
 	}
@@ -233,7 +284,7 @@ func TestArchiveRejectsStaleEpoch(t *testing.T) {
 		t.Fatal(err)
 	}
 	executed := false
-	w.Commands.Executor = func(cmd ToolCommand) (string, error) {
+	w.Commands.Executor = func(ctx context.Context, cmd ToolCommand) (string, error) {
 		executed = true
 		return `{}`, nil
 	}
@@ -450,9 +501,9 @@ func TestRecoverAcceptedBeforeRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	execCount := 0
-	w.Commands.Executor = func(c ToolCommand) (string, error) {
+	w.Commands.Executor = func(ctx context.Context, c ToolCommand) (string, error) {
 		execCount++
-		return NewReadFileExecutor(w.Bindings)(c)
+		return NewWorkspaceToolExecutor(w.Bindings)(ctx, c)
 	}
 	r1, err := w.HandleCommand(cmd)
 	if err != nil {

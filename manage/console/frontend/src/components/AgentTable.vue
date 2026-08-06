@@ -1,5 +1,5 @@
 <script setup>
-import { agentInitials, formatUnix, riskPillClass, statusPillClass, truncate } from "../utils.js";
+import { agentInitials, formatUnix, statusPillClass, truncate } from "../utils.js";
 
 defineProps({
   agents: { type: Array, default: () => [] },
@@ -17,20 +17,18 @@ const emit = defineEmits(["open"]);
       <table class="data-table">
         <thead>
           <tr>
-            <th>Agent</th>
-            <th>agent_id</th>
+            <th>Node</th>
+            <th>node_id</th>
             <th>team</th>
             <th>状态</th>
             <th>版本</th>
             <th>最近心跳</th>
-            <th>风险</th>
-            <th>工具</th>
             <th>分组</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="9" class="empty">
+            <td colspan="7" class="empty">
               <div class="empty-state">
                 <span class="spinner" aria-hidden="true"></span>
                 加载中…
@@ -38,7 +36,7 @@ const emit = defineEmits(["open"]);
             </td>
           </tr>
           <tr v-else-if="!agents.length">
-            <td colspan="9" class="empty">
+            <td colspan="7" class="empty">
               <div class="empty-state">无匹配 Node</div>
             </td>
           </tr>
@@ -73,18 +71,6 @@ const emit = defineEmits(["open"]);
             </td>
             <td>{{ agent.version || "—" }}</td>
             <td class="mono">{{ formatUnix(agent.last_seen_unix) }}</td>
-            <td>
-              <span class="pill" :class="riskPillClass(agent.risk_level)">
-                {{ agent.risk_level || "medium" }}
-              </span>
-            </td>
-            <td>
-              <span v-if="!agent.tools?.length" class="muted">—</span>
-              <span v-else class="chips">
-                <span v-for="tool in agent.tools.slice(0, 3)" :key="tool" class="chip">{{ tool }}</span>
-                <span v-if="agent.tools.length > 3" class="chip">+{{ agent.tools.length - 3 }}</span>
-              </span>
-            </td>
             <td>
               <span v-if="!agent.discovery_group?.length" class="pill pill-task-awaiting">未分配</span>
               <span v-else class="chips">

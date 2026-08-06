@@ -1,8 +1,19 @@
 # Agent 实例模型与 Node 重构（v0.8+）
 
-> **状态**：设计冻结（2026-07）  
-> **范围**：Node + Web UI 先行；Manage / A2A 后续大改  
+> **状态**：设计冻结（2026-07）；**v0.9.1 勘误**见文首「现行修正」  
+> **范围**：Node + Web UI 先行；Manage / Workgroup 已接入预览  
 > **破坏性**：v0.* 允许不保留 session / agent_id 旧语义与数据迁移
+
+## 现行修正（v0.9.1，请先读）
+
+| 项 | 现行 | 下文过时处 |
+|----|------|------------|
+| **沙箱** | **已移除**产品与运行时（无 `node/internal/sandbox`）；Agent 共用 Node `fs_root`，边界靠工具组 + policy | §3 图、§4.2–4.4、Phase 2/3 勾选、§12 模板「沙箱」列 |
+| **人机入口** | **Web UI**（`/ui/`）为主；`dagents-client` 仅 probe/update/version | 若仍写 TUI 对话为默认，以根 README 为准 |
+| **跨机协作** | **Workgroup**（Manage Leader + Node Worker） | §1「Manage / A2A 后续」→ 已见 [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md) · [handbook/07](../handbook/07-Workgroup协作.md) |
+| **Placement** | 产品路径拆除 | 仍正确标为废弃 |
+
+本文其余章节保留 v0.8 设计过程与阶段勾选，**实现以 CHANGELOG / 代码为准**。
 
 本文替代已移除的「三组件 + Session 中心 + 多 Client」设计（`three-component-model.md`、`local-assistant.md`、`client-packaging.md` 等）。
 
@@ -16,12 +27,12 @@
 | 对话模型 | **1 Agent = 1 主对话**（不再有用户可见的多 session） |
 | 进程身份 | 原 `agent_id` → **`node_id`**（标记不同服务器上的 Node） |
 | 用户 Agent | 新 **`agent_id`**（实例 UUID，Node 内唯一） |
-| 交互入口 | **仅 Web UI**（`/ui/`）；移除 Go/Python TUI 与 CLI 对话模式 |
+| 交互入口 | **仅 Web UI**（`/ui/`）；对话型 TUI/CLI 已移除 |
 | 创建方式 | **Agent 模板** → 实例化配置 → 新建 Agent |
 | 名称 | **`display_name`** 可在 UI 修改，不影响 `agent_id` |
-| 沙箱 | **废弃产品路径**：真实环境执行；隔离用独立 Node/机器（见 [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)） |
-| Manage / A2A | 后续 Phase；本阶段 Node 侧预留字段，不保证与现网 Manage 兼容 |
-| 数据 | **不保证**旧 session 数据迁移；可清空 `sessions.db` 重建 |
+| 沙箱 | **已移除**（见文首现行修正）；隔离靠独立 Node / Workgroup 成员工作区 |
+| Manage | Registry + **Workgroup**；旧 A2A inbox 另轨 |
+| 数据 | **不保证**旧 session 数据迁移；可清空重建 |
 | 工作组（现行） | 跨机器协作 **只经工作组**；见 [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md) |
 | 远程 Agent / Placement | **废弃**（曾见 `remote-agent-placement.md`，已 superseded） |
 
@@ -53,16 +64,18 @@
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐           │
 │  │ Agent A     │  │ Agent B     │  │ Agent C     │  ...      │
 │  │ 通用助手     │  │ 代码审查     │  │ 运维执行     │           │
-│  │ sandbox:off │  │ sandbox:on  │  │ sandbox:on  │           │
+│  │ 工具组约束   │  │ 工具组约束   │  │ 工具组约束   │           │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘           │
 │         │ 1 主对话        │                │                  │
 │  AgentManager + per-agent AgentRuntime（TurnOptions / Registry）│
 └───────────────────────────────┬─────────────────────────────┘
-                                │ 后续 Phase
+                                │ manage.enabled
                     ┌───────────▼───────────┐
-                    │  Manage / A2A（重构）   │
+                    │  Manage · Workgroup    │
                     └───────────────────────┘
 ```
+
+> **勘误**：上图原「sandbox:on/off」已删除；现行无沙箱后端。
 
 ---
 
@@ -80,7 +93,7 @@ Agent 模板 defaults（packaging/agent-templates/<id>.yaml）
   llm（profiles + active）
   tools.enabled_groups
   skills, hooks, compression, child_agents
-  sandbox（enabled + 约束）
+  # sandbox：已移除；勿再写入模板 defaults
         │
         ▼
 Agent 实例（agents 表 + agents/<agent_id>/）
@@ -132,12 +145,7 @@ defaults:
   child_agents:
     enabled: false
 
-sandbox:
-  enabled: true          # 默认对该模板开启沙箱
-  workspace_subdir: data # 相对 agents/<agent_id>/
-  allow_bash: false
-  allow_network_tools: false   # browser、a2a 等
-  fs_root_isolation: true      # 工具仅能访问本 Agent 工作区
+# 勿再写 sandbox.*（产品已移除）
 ```
 
 ### 4.3 Agent 实例字段
@@ -147,58 +155,41 @@ sandbox:
 | `agent_id` | UUID，`agents` 表主键 |
 | `display_name` | UI 展示名，`PATCH` 可改 |
 | `template_id` | 创建时模板 id |
-| `sandbox.enabled` | 是否沙箱（可由模板默认，创建时可选覆盖） |
+| `sandbox_*` 列 | **遗留 DB 列**；读写固定关闭，勿依赖 |
 | `config_snapshot` | 实例化后的完整有效配置 |
 | `created_at` / `updated_at` | |
 | `archived` | 软删除 |
 
-### 4.4 沙箱语义
+### 4.4 沙箱语义（历史 · 已移除）
+
+> **v0.9.1**：沙箱运行时与配置面已删除。下列 YAML / 表格仅保留设计史；**勿再实现或对外承诺**。  
+> 现行边界：Node 全局 `fs_root` + 工具组 + policy；跨机隔离用 **独立 Node** 或 **Workgroup 成员工作区**。
+
+<details>
+<summary>展开历史沙箱设计（已废弃）</summary>
 
 ```yaml
 sandbox:
   enabled: true
-  backend: process   # process | docker（默认 process；docker 为后续增强）
+  backend: process   # process | docker（历史）
   workspace_subdir: data
   allow_bash: false
   allow_network_tools: false
   fs_root_isolation: true
-  # docker 专用（backend=docker 时）：
-  # image: dagents-sandbox:latest
-  # network: none          # none | bridge | …
-  # memory: 512m
-  # cpus: "1.0"
 ```
 
-`sandbox.enabled: true` 时：
+`sandbox.enabled: true` 时（历史行为）：
 
 | 能力 | 行为 |
 |------|------|
-| **工作区** | `fs_root` 解析为 `<node_fs_root>/agents/<agent_id>/`（非 Node 全局 `.runtime`） |
-| **文件工具** | 仅能读写该 Agent 工作区；禁止逃逸到兄弟 Agent 目录 |
-| **Bash** | 默认 `allow_bash: false`；模板可显式开启并配合 policy |
-| **Browser / A2A** | 默认关闭（`allow_network_tools: false`） |
-| **Policy** | 每 Agent 独立 `agents/<agent_id>/policy/`（可从模板种子复制） |
-| **非沙箱** | `sandbox.enabled: false` 时共享 Node `fs_root`（兼容「全权限助手」） |
+| **工作区** | `fs_root` 解析为 `<node_fs_root>/agents/<agent_id>/` |
+| **文件工具** | 仅能读写该 Agent 工作区 |
+| **Bash** | 默认 `allow_bash: false` |
+| **非沙箱** | 共享 Node `fs_root` |
 
-实现上：`AgentRuntime` 构造 `tools.Registry` 时注入 **effective FSRoot** 与 **enabled_groups 过滤**。
+Docker 后端（历史）：`packaging/sandbox/Dockerfile`、常驻容器 + `docker exec` 等 — **代码已删除**。
 
-#### 4.4.1 沙箱后端（可插拔，Docker 后续）
-
-| `backend` | 说明 | 阶段 |
-|-----------|------|------|
-| **`process`（默认）** | 应用层：effective FSRoot + 工具组白名单 + policy | Phase 2 必达 |
-| **`docker`（可选）** | 常驻容器 + `docker exec`；工作区 bind-mount；空闲回收 | **已实现** |
-
-Docker 后端要点：
-
-- **不把整个 Node 放进容器**，只隔离危险工具执行路径（`bash_run`）。
-- **操作系统**：默认镜像基于 **Alpine Linux 3.20**（`packaging/sandbox/Dockerfile`）。
-- Agent 工作区挂载为容器内 `/workspace`；默认 `network: none`、宿主机 uid、可选 CPU/内存上限。
-- **生命周期**：Agent **装入内存**时预创建常驻容器（`docker create` + `start`，`sleep infinity`）；`bash_run` 用 `docker exec`；**空闲 15 分钟**回收容器；卸出内存 / 删除 Agent 时立即 `docker rm -f`。
-- 无 Docker 时：创建/启用 `backend: docker` 返回 `docker_unavailable`。
-- 与 policy 叠层：容器外仍走 HITL 审批；容器内再加资源/网络限制。
-
-模板示例：`ops-runner` 默认仍为 `backend: process`；具备 Docker 后可在 UI / 模板中切 `docker`。
+</details>
 
 ---
 
@@ -231,7 +222,7 @@ Docker 后端要点：
 |------|------|------|
 | GET | `/v1/agent-templates` | 列出内置 + 用户模板 |
 | GET | `/v1/agent-templates/{id}` | 模板详情 |
-| POST | `/v1/agents` | `{ template_id, display_name?, sandbox? }` 创建 |
+| POST | `/v1/agents` | `{ template_id, display_name? }` 创建（忽略历史 `sandbox` 字段） |
 | GET | `/v1/agents` | 列表 |
 | GET | `/v1/agents/{agent_id}` | 元数据 + 配置摘要 |
 | PATCH | `/v1/agents/{agent_id}` | `{ display_name }` |
@@ -366,49 +357,48 @@ GET /v1/node/info
 ### Phase 2 — 运行时 per-agent
 
 - [x] `CreateWithOptions` + per-agent TurnOptions / Registry（挂在 session.Manager）
-- [x] `agentruntime`：EffectiveFSRoot、工具组沙箱约束、Build
-- [x] **沙箱 FSRoot 隔离**（`process` 后端）
-- [x] messages / streams 接受 `agent_id` 别名
-- [x] `/v1/agents/{id}/hydrate|cancel|context` 路径别名
+- [x] `agentruntime`：工具组约束、Build（**沙箱 FSRoot / Docker 后端已删除**，见文首）
+- [x] messages / streams 接受 `agent_id`
+- [x] `/v1/agents/{id}/hydrate|cancel|context` 路径
 - [x] Phase 2 单元测试
 - [ ] Child agent 完全按新 Agent 模型挂接（仍用父 runtime；后续细化）
-- [x] Docker 沙箱后端（`bash_run` → `docker run`；见 `node/internal/sandbox`）
+- ~~Docker 沙箱后端~~ → **已移除（v0.8.x→0.9）**
 
 ### Phase 3 — Web UI
 
 - [x] Agent 列表、模板向导、重命名
 - [x] 路由 `/agents/:agentId`（`/chat` 重定向兼容）
-- [x] `ensureAgentRuntime`：重启 / Release 后按快照恢复沙箱
+- [x] `ensureAgentRuntime`：重启 / Release 后按快照恢复
 - [x] messages / streams / hydrate 走 `agent_id`
 - [x] Web UI 切至 `/v1/agents/{id}/…`（ack/skills/child-agents 等）
-- [x] 彻底删除对外 `/v1/sessions` CRUD（路由已移除；测试改走 agents / `sessions.Create`）
+- [x] 彻底删除对外 `/v1/sessions` CRUD（路由已移除）
 ### Phase 4 — 删除 TUI/CLI + 打包
 
 - [x] 删除 client TUI、app/cli（`dagents-client` 保留 probe/update）
 - [x] 调整 CI / `dagents-local-assistant` 产物（node + webui；无 dagents-cli）
 - [x] Agent 路径别名覆盖 ack/skills/child-agents 等；Web UI 切离 session CRUD
 - [x] 更新 handbook、README、CHANGELOG（要点）
-- [ ] OpenAPI / handbook 全文修订（持续）
+- [ ] OpenAPI / handbook 全文修订（持续；v0.9.1 已重写入口）
 
-### Phase 5 — Manage / A2A（独立里程碑）
+### Phase 5 — Manage / Workgroup（独立里程碑）
 
-- [x] Manage 注册 `node_id`（与 `agent_id` 双写；主键仍为 node 级；`GET /v1/registry/nodes/{node_id}`）
-- [ ] A2A 路由与 inbox 模型（实例级 `to_agent_id` 另开；当前仍 node↔node）
-- [ ] Triggers `target` 语义
-- [x] Placement Control/Edge 读取 `node_id`（peers 回退 `agent_id`）
-- [x] Heartbeat 可选 `local_agents` 公告（非 A2A 目标）
+- [x] Manage 注册 `node_id`
+- [x] **Workgroup** D0.5–D4 基座与预览闭环（见 workgroup 设计文）
+- [ ] 旧 A2A 可观测 / Task 模型收口（另轨）
+- [x] Placement 产品路径拆除
+- [x] Heartbeat 可选 `local_agents` 公告
 
 ---
 
 ## 12. 内置模板（首批）
 
-| id | 名称 | 沙箱 | 要点 |
-|----|------|------|------|
-| `general` | 通用助手 | 关 | 默认工具组、多模态可选 |
-| `code-reviewer` | 代码审查 | 开 | 只读 FS、无 bash |
-| `ops-runner` | 运维执行 | 开 | bash + 有限 FS，无 browser |
+| id | 名称 | 要点 |
+|----|------|------|
+| `general` | 通用助手 | 默认工具组、多模态可选 |
+| `code-reviewer` | 代码审查 | 只读向工具组 |
+| `ops-runner` | 运维执行 | bash + 有限 FS |
 
-样例文件目录：`packaging/agent-templates/`（Phase 1 添加）。
+样例文件目录：`packaging/agent-templates/`。
 
 ---
 
@@ -417,9 +407,9 @@ GET /v1/node/info
 | 风险 | 缓解 |
 |------|------|
 | TurnOptions 共享假设遍布代码 | Phase 2 专 PR；先列 `grep TurnOptions` 调用链 |
-| 沙箱路径逃逸 | 统一 `EffectiveFSRoot(agent)`；工具层强制 `StatRelPath` |
-| Manage 现网断裂 | Phase 1–4 默认 `manage.enabled: false` |
-| 文档大面积失效 | handbook 按 Phase 同步改；本目录旧文已删 |
+| 路径逃逸 | 工具层相对 `fs_root` 校验；Workgroup 成员另有工作区消毒 |
+| Manage 现网断裂 | 默认可关 `manage.enabled` |
+| 文档滞后 | handbook / README 按预览清单同步；沙箱叙事见文首勘误 |
 
 ---
 
@@ -427,8 +417,10 @@ GET /v1/node/info
 
 | 文档 | 说明 |
 |------|------|
-| [go-node-internals.md](../architecture/go-node-internals.md) | 实现时需同步改 Manager 章节 |
-| [agent-node-api.md](../architecture/agent-node-api.md) | Phase 1 起按新 API 重写 |
-| [child-agent-tools.md](../architecture/child-agent-tools.md) | 子 Agent 语义保留 |
-| [agent-hooks.md](./agent-hooks.md) | Hook 机制仍适用（作用域改为 per-agent） |
-| [manage-architecture.md](./manage-architecture.md) | **待 Phase 5 重写** |
+| [go-node-internals.md](../architecture/go-node-internals.md) | Node 内部 |
+| [agent-node-api.md](../architecture/agent-node-api.md) | HTTP/SSE |
+| [child-agent-tools.md](../architecture/child-agent-tools.md) | 子 Agent |
+| [agent-hooks.md](./agent-hooks.md) | Hook |
+| [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md) | **跨机协作现行规范** |
+| [../handbook/07-Workgroup协作.md](../handbook/07-Workgroup协作.md) | 工作组用户向 |
+| [manage-architecture.md](./manage-architecture.md) | Manage 架构 |
