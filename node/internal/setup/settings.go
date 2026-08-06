@@ -136,14 +136,13 @@ type WeComSettings struct {
 	APIBase         string `json:"api_base"`
 }
 
-// ToolsSettings 内置工具组与编码。
+// ToolsSettings 内置工具编码与 bash 压缩。
 type ToolsSettings struct {
-	EnabledGroups              []string `json:"enabled_groups"`
-	BashOutputEncoding         string   `json:"bash_output_encoding"`
-	FileEncoding               string   `json:"file_encoding"`
-	BashCompressEnabled        bool     `json:"bash_compress_enabled"`
-	BashCompressMaxOutputChars int      `json:"bash_compress_max_output_chars"`
-	BashCompressMaxStderrChars int      `json:"bash_compress_max_stderr_chars"`
+	BashOutputEncoding         string `json:"bash_output_encoding"`
+	FileEncoding               string `json:"file_encoding"`
+	BashCompressEnabled        bool   `json:"bash_compress_enabled"`
+	BashCompressMaxOutputChars int    `json:"bash_compress_max_output_chars"`
+	BashCompressMaxStderrChars int    `json:"bash_compress_max_stderr_chars"`
 }
 
 // HooksSettings 常用 Hook 开关（不含 plugin 列表）。
@@ -282,7 +281,6 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 		},
 		WeCom: weComSettingsFromConfig(cfg),
 		Tools: ToolsSettings{
-			EnabledGroups:              append([]string(nil), cfg.Tools.EnabledGroups...),
 			BashOutputEncoding:         cfg.Tools.BashOutputEncoding,
 			FileEncoding:               cfg.Tools.FileEncoding,
 			BashCompressEnabled:        cfg.Tools.BashCompress.Enabled == nil || *cfg.Tools.BashCompress.Enabled,
@@ -727,9 +725,6 @@ func applyWeComPatch(cfg *config.Config, p WeComSettings) error {
 }
 
 func applyToolsPatch(cfg *config.Config, p ToolsSettings) error {
-	if p.EnabledGroups != nil {
-		cfg.Tools.EnabledGroups = append([]string(nil), p.EnabledGroups...)
-	}
 	cfg.Tools.BashOutputEncoding = strings.TrimSpace(p.BashOutputEncoding)
 	cfg.Tools.FileEncoding = strings.TrimSpace(p.FileEncoding)
 	cfg.Tools.BashCompress.Enabled = boolPtr(p.BashCompressEnabled)

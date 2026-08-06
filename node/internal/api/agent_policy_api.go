@@ -385,8 +385,8 @@ func promptContentFromRecord(rec *store.AgentPromptContextRecord) *promptcontext
 	}
 	return &promptcontext.Content{
 		Soul:   rec.SoulMD,
-		User:   rec.UserMD,
 		Custom: rec.CustomMD,
+		// User 侧车已废弃：用户称呼来自 Node PreferredName。
 		// LongTerm 由 ReloadLongTermMemory 在清空上下文 / 首条交互 / 压缩完成后加载。
 	}
 }

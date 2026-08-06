@@ -152,20 +152,6 @@ multimodal:
         1
     )
 
-	# --- tools.enabled_groups ---
-    $groups = @('fs', 'bash', 'hitl', 'skills', 'triggers', 'child_agents')
-    if ([bool]$feat.browser_enabled) { $groups += 'browser' }
-
-    if ([bool]$feat.restrict_tool_groups) {
-        $groupsYaml = "  enabled_groups:`n" + (($groups | ForEach-Object { "    - $_" }) -join "`n")
-        $content = [regex]::Replace(
-            $content,
-            '(?ms)^  # enabled_groups:\r?\n(?:  #   - .*\r?\n)*',
-            ($groupsYaml + "`n"),
-            1
-        )
-    }
-
     $outDir = Split-Path -Parent $OutputPath
     if ($outDir -and -not (Test-Path -LiteralPath $outDir)) {
         New-Item -ItemType Directory -Path $outDir -Force | Out-Null

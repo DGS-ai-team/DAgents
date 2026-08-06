@@ -12,14 +12,28 @@ func TestReaderSidecarAndCustom(t *testing.T) {
 		Soul:   "agent soul",
 		Custom: "do X",
 	})
+	r.SetPreferredName("阿强")
 
 	stable := r.BuildStableContextSections()
 	if !strings.Contains(stable, "以下是你的设定") || !strings.Contains(stable, "agent soul") {
 		t.Fatalf("stable = %q", stable)
 	}
+	if !strings.Contains(stable, "请称呼用户为：阿强") {
+		t.Fatalf("expected preferred name, got %q", stable)
+	}
 	custom := r.BuildCustomSection()
 	if !strings.Contains(custom, "临时/专项指令") || !strings.Contains(custom, "do X") {
 		t.Fatalf("custom = %q", custom)
+	}
+}
+
+func TestReaderIgnoresUserSidecarContent(t *testing.T) {
+	r := promptcontext.NewContentReader(promptcontext.Content{
+		User: "should ignore",
+	})
+	stable := r.BuildStableContextSections()
+	if strings.Contains(stable, "should ignore") || strings.Contains(stable, "用户信息") {
+		t.Fatalf("user.md must not inject without preferred name, got %q", stable)
 	}
 }
 

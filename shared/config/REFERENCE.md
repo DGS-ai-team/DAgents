@@ -16,12 +16,13 @@
 | `RawMessageHistoryConfig` | `struct` | 原始消息 JSONL 开关（`enabled` 指针，缺省 true） |
 | `EnvRawMessageHistoryEnabled` | `const string` | 环境变量 `AGENT_RAW_MESSAGE_HISTORY_ENABLED` |
 | `LogConfig` | `struct` | Node stderr 日志级别（`level`，默认 `info`） |
-| `ToolsConfig` | `struct` | `enabled_groups` 内置工具组允许列表（空=全部）；`bash_output_encoding`；`file_encoding` |
+| `ToolsConfig` | `struct` | `bash_output_encoding`；`file_encoding`；`bash_compress`（工具组由 Agent 快照配置） |
 | `AllBuiltinToolGroupNames` | `func() []string` | 可配置工具组名字典序全集 |
 | `BuiltinToolGroupMembers` | `func(group string) ([]string, bool)` | 展开组内工具名 |
 | `AllBuiltinToolNames` | `func() []string` | 全部内置工具名字典序全集 |
-| `(t *ToolsConfig) NormalizedBuiltinEnabledGroups` | `method` | 去重规范化 `tools.enabled_groups`；空名跳过，未知组由 Validate 拒绝 |
-| `(t *ToolsConfig) NormalizedBuiltinEnabled` | `method` | 将 `enabled_groups` 展开为工具名；空=未配置允许列表 |
+| `NormalizeBuiltinToolGroups` | `func([]string) []string` | 去重规范化工具组名 |
+| `ExpandBuiltinToolGroups` | `func([]string) []string` | 将工具组展开为工具名 |
+| `ValidateBuiltinToolGroups` | `func([]string) error` | 校验工具组名与展开结果 |
 | `ManageConfig` | `struct` | Manage 开关、URL、node_token、`registration`、`update`、`workgroup` |
 | `AgentConfig` | `struct` | `name`、`description`、`role`（可选元数据）、`capabilities`、`metadata` |
 | `(c *Config) AgentRole` | `method` | 可选元数据角色字符串；空串表示未设 |

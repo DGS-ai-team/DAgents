@@ -37,9 +37,6 @@ func Build(p BuildParams) (Built, error) {
 	}
 	fsRoot := EffectiveFSRoot(p.NodeCFG.FSRoot, p.AgentID, p.Snapshot)
 	groups := EnabledToolGroups(p.Snapshot)
-	if len(groups) == 0 {
-		groups = p.NodeCFG.Tools.NormalizedBuiltinEnabledGroups()
-	}
 
 	timeout := p.BashTimeout
 	if timeout <= 0 {
@@ -49,9 +46,15 @@ func Build(p BuildParams) (Built, error) {
 	if err != nil {
 		return Built{}, err
 	}
-	tc := config.ToolsConfig{EnabledGroups: groups}
-	if err := reg.SetBuiltinEnabled(tc.NormalizedBuiltinEnabled()); err != nil {
-		return Built{}, err
+	if len(groups) == 0 {
+		reg.SetBuiltinEnabledNone()
+	} else {
+		if err := config.ValidateBuiltinToolGroups(groups); err != nil {
+			return Built{}, err
+		}
+		if err := reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups(groups)); err != nil {
+			return Built{}, err
+		}
 	}
 	mm := EffectiveMultimodalEnabled(p.NodeCFG, p.Snapshot)
 	reg.SetMultimodalEnabled(mm)
@@ -67,8 +70,8 @@ func Build(p BuildParams) (Built, error) {
 	}
 	reg.SetBashCompress(bc)
 
-	// 技能能力仅由 Node 总闸 + 工具组 skills 决定；visible 白名单仍读 defaults.skills.visible。
-	skillsOn := p.NodeCFG.Skills.Enabled && toolGroupEnabled(groups, "skills")
+	// 技能能力仅由 Agent 快照中的工具组 skills 决定；未配置或空列表表示未启用。
+	skillsOn := toolGroupSelected(groups, "skills")
 	skillsCfg := SkillsFromDefaults(p.Snapshot)
 
 	turnOpts := p.BaseTurn
@@ -102,13 +105,10 @@ func Build(p BuildParams) (Built, error) {
 	}, nil
 }
 
-func toolGroupEnabled(groups []string, name string) bool {
+func toolGroupSelected(groups []string, name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return false
-	}
-	if len(groups) == 0 {
-		return true
 	}
 	for _, g := range groups {
 		if strings.EqualFold(strings.TrimSpace(g), name) {

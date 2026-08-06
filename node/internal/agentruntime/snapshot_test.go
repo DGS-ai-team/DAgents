@@ -23,6 +23,20 @@ func TestEnabledToolGroups(t *testing.T) {
 	if len(got) != 2 || got[0] != "fs" {
 		t.Fatalf("got %v", got)
 	}
+
+	empty := Snapshot{Defaults: map[string]any{
+		"tools": map[string]any{"enabled_groups": []any{}},
+	}}
+	got = EnabledToolGroups(empty)
+	if len(got) != 0 {
+		t.Fatalf("empty: got %v", got)
+	}
+
+	missing := Snapshot{Defaults: map[string]any{}}
+	got = EnabledToolGroups(missing)
+	if got != nil {
+		t.Fatalf("missing: got %v", got)
+	}
 }
 
 func TestParseSnapshot_ignoresLegacySandbox(t *testing.T) {

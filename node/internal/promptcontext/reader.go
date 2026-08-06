@@ -8,11 +8,11 @@ import (
 
 const (
 	soulField   = "soul"
-	userField   = "user"
 	customField = "custom"
 )
 
 // Filter 控制侧车 / 长期记忆是否注入；nil 指针表示默认启用。
+// UserEnabled 已废弃（用户称呼改走 PreferredName），保留字段兼容旧调用方。
 type Filter struct {
 	SoulEnabled     *bool
 	UserEnabled     *bool
@@ -28,10 +28,12 @@ func flagOrDefault(v *bool, def bool) bool {
 }
 
 // Reader 从内存 Content 读取侧车与长期记忆（由 agents.db 在 runtime 启动时注入）。
+// 用户称呼来自 Node 配置 PreferredName，不再使用 user.md 侧车正文。
 type Reader struct {
-	content *Content
-	filter  Filter
-	mu      sync.Mutex
+	content        *Content
+	filter         Filter
+	preferredName  string
+	mu             sync.Mutex
 }
 
 // NewReader 构造 Reader；runtimeDir 参数保留兼容，不再读盘。
@@ -39,12 +41,22 @@ func NewReader(_ string) *Reader {
 	return &Reader{}
 }
 
-// SetFilter 设置侧车注入开关（缺省全开）。
+// SetFilter 设置侧车注入开关（缺省全开）。UserEnabled 已忽略（用户信息改走 PreferredName）。
 func (r *Reader) SetFilter(f Filter) {
 	if r == nil {
 		return
 	}
 	r.filter = f
+}
+
+// SetPreferredName 设置本机使用者称呼（Node 首配 / 通用设置）。
+func (r *Reader) SetPreferredName(name string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.preferredName = strings.TrimSpace(name)
+	r.mu.Unlock()
 }
 
 // ReadSoul 读取 soul；空白或缺失返回空串。
@@ -55,12 +67,19 @@ func (r *Reader) ReadSoul() string {
 	return r.readContentField(soulField)
 }
 
-// ReadUser 读取 user。
+// ReadUser 已废弃：用户信息改由 PreferredName 注入；保留空实现以免旧调用方崩溃。
 func (r *Reader) ReadUser() string {
-	if !flagOrDefault(r.filter.UserEnabled, true) {
+	return ""
+}
+
+// PreferredName 返回本机使用者称呼。
+func (r *Reader) PreferredName() string {
+	if r == nil {
 		return ""
 	}
-	return r.readContentField(userField)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.preferredName
 }
 
 // ReadCustom 读取 custom。
@@ -92,7 +111,7 @@ func (r *Reader) UpdateLongTerm(text string) {
 	r.content.LongTerm = strings.TrimSpace(text)
 }
 
-// BuildStableContextSections 拼接 soul / user / long_term 段落（较稳定上下文）。
+// BuildStableContextSections 拼接 soul / 用户称呼 / long_term 段落（较稳定上下文）。
 func (r *Reader) BuildStableContextSections() string {
 	if r == nil {
 		return ""
@@ -103,9 +122,10 @@ func (r *Reader) BuildStableContextSections() string {
 		b.WriteString(soul)
 		b.WriteByte('\n')
 	}
-	if user := r.ReadUser(); user != "" {
-		b.WriteString("\n\n## 以下是用户信息与偏好：\n\n")
-		b.WriteString(user)
+	if name := r.PreferredName(); name != "" {
+		b.WriteString("\n\n## 以下是用户信息：\n\n")
+		b.WriteString("请称呼用户为：")
+		b.WriteString(name)
 		b.WriteByte('\n')
 	}
 	if mem := r.ReadLongTermMemory(); mem != "" {
@@ -139,8 +159,6 @@ func (r *Reader) readContentField(kind string) string {
 	switch kind {
 	case soulField:
 		text = c.Soul
-	case userField:
-		text = c.User
 	case customField:
 		text = c.Custom
 	case "long_term":

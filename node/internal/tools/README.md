@@ -9,7 +9,7 @@ N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步�
 
 内部仍保留 `StartBackground` / `job_registry` 供降级、UI 转后台与测试使用。
 
-**配置**：`tools.enabled_groups`（7 组）见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../shared/config/README.md)。  
+**配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
 
 ---

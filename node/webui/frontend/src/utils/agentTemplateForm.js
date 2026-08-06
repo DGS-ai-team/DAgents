@@ -11,9 +11,10 @@ export const BLANK_TEMPLATE_ID = "__blank__";
 export const TOOL_GROUPS = [
   { name: "bash", label: "命令行" },
   { name: "browser", label: "浏览器", beta: true },
-  { name: "child_agents", label: "子 Agent" },
+  { name: "child_agents", label: "子智能体" },
   { name: "fs", label: "文件" },
-  { name: "hitl", label: "人工确认 / 记忆" },
+  { name: "hitl", label: "用户询问" },
+  { name: "memory", label: "记忆" },
   { name: "skills", label: "技能" },
   { name: "triggers", label: "定时任务" },
   { name: "wecom", label: "企业微信" },
@@ -36,17 +37,12 @@ export function emptyAgentDraft() {
     toolGroups: [],
     // null = 不限制（全部可见）；string[] = 显式白名单（可为空）
     visibleSkills: null,
-    childAgentsEnabled: true,
     promptSoulEnabled: true,
-    promptUserEnabled: true,
     promptCustomEnabled: true,
     promptLongTermEnabled: true,
     promptLongTermScope: "agent",
     promptSoulMd: "",
-    promptUserMd: "",
     promptCustomMd: "",
-    promptLongTermEntries: [],
-    promptGlobalLongTermEntries: [],
   };
 }
 
@@ -131,7 +127,6 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   const llm = asObject(defaults.llm);
   const tools = asObject(defaults.tools);
   const skills = asObject(defaults.skills);
-  const childAgents = asObject(defaults.child_agents);
   const prompt = asObject(defaults.prompt_context);
 
   const draft = emptyAgentDraft();
@@ -144,9 +139,7 @@ export function draftFromTemplate(template, llmProfileIds = []) {
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   draft.visibleSkills = normalizeVisibleSkills(skills);
-  draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
-  draft.promptUserEnabled = boolOr(prompt.user_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
   draft.promptLongTermEnabled = boolOr(prompt.long_term_enabled, true);
   draft.promptLongTermScope = String(prompt.long_term_scope || "agent").trim() === "global" ? "global" : "agent";
@@ -169,7 +162,6 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   const llm = asObject(defaults.llm);
   const tools = asObject(defaults.tools);
   const skills = asObject(defaults.skills);
-  const childAgents = asObject(defaults.child_agents);
   const prompt = asObject(defaults.prompt_context);
 
   const draft = emptyAgentDraft();
@@ -182,9 +174,7 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
     ? tools.enabled_groups.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   draft.visibleSkills = normalizeVisibleSkills(skills);
-  draft.childAgentsEnabled = boolOr(childAgents.enabled, true);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
-  draft.promptUserEnabled = boolOr(prompt.user_enabled, true);
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
   draft.promptLongTermEnabled = boolOr(prompt.long_term_enabled, true);
   draft.promptLongTermScope = String(prompt.long_term_scope || "agent").trim() === "global" ? "global" : "agent";
@@ -229,10 +219,8 @@ export function buildCreateAgentPayload(draft) {
         enabled_groups: Array.isArray(draft.toolGroups) ? [...draft.toolGroups] : [],
       },
       skills: skillsPayload(draft),
-      child_agents: { enabled: !!draft.childAgentsEnabled },
       prompt_context: {
         soul_enabled: !!draft.promptSoulEnabled,
-        user_enabled: !!draft.promptUserEnabled,
         custom_enabled: !!draft.promptCustomEnabled,
         long_term_enabled: !!draft.promptLongTermEnabled,
         long_term_scope: draft.promptLongTermScope === "global" ? "global" : "agent",
@@ -277,10 +265,8 @@ export function buildCreateTemplatePayload(meta, draft) {
         enabled_groups: Array.isArray(draft?.toolGroups) ? [...draft.toolGroups] : [],
       },
       skills: skillsPayload(draft),
-      child_agents: { enabled: !!draft?.childAgentsEnabled },
       prompt_context: {
         soul_enabled: !!draft?.promptSoulEnabled,
-        user_enabled: !!draft?.promptUserEnabled,
         custom_enabled: !!draft?.promptCustomEnabled,
         long_term_enabled: !!draft?.promptLongTermEnabled,
       },

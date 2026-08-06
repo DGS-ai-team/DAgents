@@ -37,7 +37,7 @@ onMounted(load);
   >
     <section class="settings-section">
       <h2 class="settings-section__title">Node 地址</h2>
-      <p class="settings-section__desc">监听地址需修改本地配置文件后重启生效；工作区根目录固定为 <code>./.runtime</code>。</p>
+      <p class="settings-section__desc">监听地址需修改本地配置文件后重启生效。</p>
       <div class="setup-config-panel__readonly-grid">
         <div class="command-stat">
           <span class="command-stat__label">监听</span>
@@ -46,10 +46,6 @@ onMounted(load);
         <div class="command-stat">
           <span class="command-stat__label">连接地址</span>
           <span class="command-stat__value">{{ form.node.local_endpoint || "—" }}</span>
-        </div>
-        <div class="command-stat">
-          <span class="command-stat__label">工作区根目录</span>
-          <span class="command-stat__value">{{ form.runtime.fs_root || "./.runtime" }}</span>
         </div>
       </div>
     </section>

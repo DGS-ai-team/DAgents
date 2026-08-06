@@ -44,6 +44,14 @@ func (r *Registry) SetBuiltinEnabled(names []string) error {
 	return nil
 }
 
+// SetBuiltinEnabledNone 禁用全部内置工具（显式空允许列表）。
+func (r *Registry) SetBuiltinEnabledNone() {
+	if r == nil {
+		return
+	}
+	r.enabledOnly = map[string]struct{}{}
+}
+
 // IsKnownBuiltinTool 判断是否为可配置的内置工具名。
 func IsKnownBuiltinTool(name string) bool {
 	_, ok := knownBuiltinTools[name]

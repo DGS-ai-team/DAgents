@@ -650,7 +650,7 @@ onUnmounted(stopPoll);
   font: inherit;
 }
 .wg-side__name--active {
-  color: var(--accent, #2563eb);
+  color: var(--color-primary-strong, var(--accent, #242424));
   font-weight: 600;
 }
 .wg-side__meta {
@@ -736,8 +736,8 @@ onUnmounted(stopPoll);
   padding: 0.5rem 1rem;
   border: none;
   border-radius: 6px;
-  background: var(--accent, #2563eb);
-  color: #fff;
+  background: var(--color-primary, var(--accent, #242424));
+  color: var(--color-text-invert, #fff);
   cursor: pointer;
 }
 .wg-chat__send:disabled {
@@ -745,11 +745,13 @@ onUnmounted(stopPoll);
   cursor: not-allowed;
 }
 .wg-chat__link {
-  margin-top: 0.75rem;
+  margin-top: 0.5rem;
   border: none;
   background: none;
-  color: var(--accent, #2563eb);
+  color: var(--color-primary-strong, var(--accent, #242424));
   cursor: pointer;
+  font-size: inherit;
+  padding: 0;
 }
 @media (max-width: 900px) {
   .wg-side {

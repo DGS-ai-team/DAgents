@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import * as api from "../api/node.js";
 
 const emit = defineEmits(["create", "pick-template"]);
@@ -12,6 +12,14 @@ const ICON_BY_ID = {
   "code-reviewer": "code",
   "ops-runner": "ops",
 };
+
+const hint = computed(() =>
+  !loading.value && templates.value.length === 0
+    ? "点击加号创建你的智能体吧"
+    : "点一下加号或者下面的模板，让智能体为你工作"
+);
+
+const showTemplates = computed(() => loading.value || templates.value.length > 0);
 
 function iconKind(id) {
   return ICON_BY_ID[String(id || "").trim()] || "general";
@@ -35,8 +43,16 @@ onMounted(loadTemplates);
 <template>
   <div class="agent-empty">
     <div class="agent-empty__inner">
-      <div class="agent-empty__mark" aria-hidden="true">
-        <svg viewBox="0 0 48 48" fill="none">
+      <h2 class="agent-empty__title">还没有创建智能体呢</h2>
+      <p class="agent-empty__hint">{{ hint }}</p>
+      <button
+        type="button"
+        class="agent-empty__cta"
+        title="新建智能体"
+        aria-label="新建智能体"
+        @click="emit('create')"
+      >
+        <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
           <circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="1.5" opacity="0.35" />
           <path
             d="M24 16v16M16 24h16"
@@ -45,14 +61,9 @@ onMounted(loadTemplates);
             stroke-linecap="round"
           />
         </svg>
-      </div>
-      <h2 class="agent-empty__title">还没有 Agent</h2>
-      <p class="agent-empty__hint">新建一个开始对话，或从下方模板快速创建。</p>
-      <button type="button" class="btn btn--primary agent-empty__cta" @click="emit('create')">
-        新建 Agent
       </button>
 
-      <div class="agent-empty__templates">
+      <div v-if="showTemplates" class="agent-empty__templates">
         <p class="agent-empty__templates-label">推荐模板</p>
         <div v-if="loading" class="agent-empty__loading">加载模板…</div>
         <div v-else class="agent-empty__grid">
@@ -122,18 +133,6 @@ onMounted(loadTemplates);
   text-align: center;
 }
 
-.agent-empty__mark {
-  width: 56px;
-  height: 56px;
-  color: var(--color-primary-strong);
-  margin-bottom: 16px;
-}
-
-.agent-empty__mark svg {
-  width: 100%;
-  height: 100%;
-}
-
 .agent-empty__title {
   margin: 0;
   font-size: 22px;
@@ -151,8 +150,34 @@ onMounted(loadTemplates);
 }
 
 .agent-empty__cta {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
   margin-top: 20px;
-  min-width: 140px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-primary-strong);
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.agent-empty__cta svg {
+  width: 100%;
+  height: 100%;
+}
+
+.agent-empty__cta:hover {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary-strong) 10%, transparent);
+  transform: scale(1.04);
+}
+
+.agent-empty__cta:focus-visible {
+  outline: 2px solid var(--color-primary-strong);
+  outline-offset: 3px;
 }
 
 .agent-empty__templates {

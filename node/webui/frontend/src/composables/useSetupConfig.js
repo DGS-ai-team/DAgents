@@ -14,7 +14,7 @@ const emptyForm = () => ({
   child_agents: {},
   browser: {},
   wecom: {},
-  tools: { enabled_groups: [] },
+  tools: {},
   hooks: {},
 });
 
@@ -54,9 +54,6 @@ export function useSetupConfig() {
     Object.assign(form.wecom, data.wecom || {});
     form.wecom.webhook_key = "";
     form.wecom.clear_webhook_key = false;
-    form.tools.enabled_groups = Array.isArray(data.tools?.enabled_groups)
-      ? [...data.tools.enabled_groups]
-      : [];
     Object.assign(form.tools, data.tools || {});
     Object.assign(form.hooks, data.hooks || {});
   }

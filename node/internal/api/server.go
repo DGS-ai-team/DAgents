@@ -166,14 +166,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			logger.Error("tools registry init failed", "error", err)
 			reg, _ = tools.NewRegistry(".", 30, cfg.Tools.BashOutputEncoding, cfg.Tools.FileEncoding)
 		}
-		if err := reg.SetBuiltinEnabled(cfg.Tools.NormalizedBuiltinEnabled()); err != nil {
-			logger.Error("tools.enabled_groups invalid", "error", err)
-		}
 		reg.SetMultimodalEnabled(cfg.MultimodalEnabled())
 		reg.SetBashCompress(toolsBashCompressFromConfig(cfg.Tools))
-		if cfg.Skills.Enabled {
-			reg.SetSkillsCatalog(skills.NewCatalog(cfg.SkillsRoot(), true, cfg.Skills.MaxInPrompt))
-		}
+		reg.SetSkillsCatalog(skills.NewCatalog(cfg.SkillsRoot(), true, cfg.Skills.MaxInPrompt))
 		o.tools = reg
 	}
 	if o.policyEngine == nil {
@@ -265,7 +260,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		MultimodalEnabled: cfg.MultimodalEnabled(),
 	}, logger)
 	childMgr := childagent.NewManager(childagent.Config{
-		Enabled:                   cfg.ChildAgents.Enabled,
+		Enabled:                   true,
 		DefaultTTLSeconds:         cfg.ChildAgents.DefaultTTLSeconds,
 		MaxTTLSeconds:             cfg.ChildAgents.MaxTTLSeconds,
 		DefaultMaxTurns:           cfg.ChildAgents.DefaultMaxTurns,
@@ -288,7 +283,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		triggerSched.SetLogger(logger)
 		triggerSched.SetSessionResolver(mgr)
 		mgr.SetTriggerDeliveryTracker(triggerStore)
-		if cfg.Triggers.Enabled && triggerSched != nil {
+		if triggerSched != nil {
 			triggerSched.Start()
 		}
 	}
@@ -1167,9 +1162,9 @@ func (s *Server) handleAgentListSkillsImpl(w http.ResponseWriter, r *http.Reques
 
 // handleNodeSkillsCatalog 返回 Node 级 skills 目录（不受 Agent 可见性白名单过滤），供创建/编辑 Agent 勾选。
 func (s *Server) handleNodeSkillsCatalog(w http.ResponseWriter, r *http.Request) {
-	if s.cfg == nil || !s.cfg.Skills.Enabled {
+	if s.cfg == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"enabled":          false,
+			"enabled":          true,
 			"available_skills": []skills.LoadedSkill{},
 		})
 		return
