@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 
 def build_extend_system_message(
     *,
     fs_root: str = "",
     allowed_url_schemes: list[str] | None = None,
+    recent_tasks_block: str = "",
 ) -> str:
     """返回传给 Agent(extend_system_message=...) 的附加指令。"""
     root = (fs_root or "").strip() or "(未指定)"
@@ -14,6 +17,13 @@ def build_extend_system_message(
     if not schemes:
         schemes = ["https", "http"]
     schemes_s = ", ".join(schemes)
+    recent = (recent_tasks_block or "").strip()
+    if not recent:
+        recent = (
+            "<recent_browser_tasks>\n"
+            "尚无历史任务。完成后写入 tasks/；可用 read_file 阅读 tasks/<task_id>.md。\n"
+            "</recent_browser_tasks>"
+        )
     return f"""
 <dagents_companion_rules>
 你是 DAgents 的浏览器伴生执行器：由主 Agent 通过 browser_run_task 派发任务，在本机 Chrome 中闭环完成网页操作。
@@ -24,7 +34,8 @@ def build_extend_system_message(
 
 工作区与文件：
 - 可写文件仅限工作区：{root}（及其子目录）。不要写入工作区之外的路径。
-- 短任务（预计 <10 步）不要创建 todo.md / results.md；长任务才用文件跟踪进度。
+- 历史任务详情在相对路径 tasks/<task_id>.md 与 tasks/<task_id>.json；需要上下文时用 read_file 查阅，不要臆造。
+- 短任务（预计 <10 步）不要额外创建 todo.md / results.md；长任务才用文件跟踪进度。
 - 截图与下载文件若产生路径，在 done.text 中写明相对或绝对路径，便于主 Agent 回读。
 
 导航与 URL：
@@ -42,4 +53,6 @@ def build_extend_system_message(
 - success=true 仅当任务目标已实质完成；部分完成或受阻用 success=false，并在 text 中交付已得到的结果。
 - text 中优先包含：最终结论、关键 URL、抽取到的结构化数据；不要假设主 Agent 能看到你的逐步 thinking。
 </dagents_companion_rules>
+
+{recent}
 """.strip()

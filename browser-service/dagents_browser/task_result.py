@@ -30,6 +30,36 @@ def _clean_str_list(values: Any, *, limit: int = 30) -> list[str]:
     return out
 
 
+
+def _build_step_trace(history: Any, action_names: list[str]) -> list[dict[str, Any]]:
+    """尽量从 history 抽出逐步过程；失败则用 action_names 退化。"""
+    trace: list[dict[str, Any]] = []
+    thoughts = _safe_call(history, "model_thoughts", []) or []
+    try:
+        for i, thought in enumerate(thoughts[:40], 1):
+            item: dict[str, Any] = {"step": i}
+            # AgentBrain-like objects
+            for attr, key in (
+                ("evaluation_previous_goal", "evaluation"),
+                ("memory", "memory"),
+                ("next_goal", "next_goal"),
+            ):
+                val = getattr(thought, attr, None)
+                if val is None and isinstance(thought, dict):
+                    val = thought.get(attr)
+                if val:
+                    item[key] = str(val).strip()[:500]
+            if len(item) > 1:
+                trace.append(item)
+    except Exception:
+        trace = []
+    if not trace and action_names:
+        # 按动作粗粒度回放
+        for i, name in enumerate(action_names[:40], 1):
+            trace.append({"step": i, "actions": [name]})
+    return trace
+
+
 def summarize_agent_history(history: Any) -> dict[str, Any]:
     """从 AgentHistoryList（或兼容 mock）提取稳定字段。"""
     if history is None:
@@ -85,6 +115,8 @@ def summarize_agent_history(history: Any) -> dict[str, Any]:
         if pieces:
             summary = "\n".join(pieces)
 
+    step_trace = _build_step_trace(history, actions)
+
     return {
         "summary": summary,
         "final_result": final,
@@ -99,6 +131,7 @@ def summarize_agent_history(history: Any) -> dict[str, Any]:
         "errors": errors,
         "has_errors": has_errors,
         "duration_seconds": duration,
+        "step_trace": step_trace,
     }
 
 
@@ -132,6 +165,10 @@ def task_status_response(entry: dict[str, Any]) -> dict[str, Any]:
             "errors",
             "has_errors",
             "duration_seconds",
+            "step_trace",
+            "detail_md",
+            "detail_json",
+            "cite_label",
         ):
             if key in result:
                 detail[key] = result[key]

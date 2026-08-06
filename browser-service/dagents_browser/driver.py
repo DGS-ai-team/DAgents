@@ -16,6 +16,11 @@ from dagents_browser.config import BrowserServiceSettings
 from dagents_browser.agent_prompt import build_extend_system_message
 from dagents_browser.llm import create_extraction_llm
 from dagents_browser.ports import allocate_debug_port
+from dagents_browser.task_archive import (
+    archive_task,
+    format_recent_tasks_for_prompt,
+    load_recent_tasks,
+)
 from dagents_browser.task_result import summarize_agent_history, task_status_response
 
 DEFAULT_SNAPSHOT_MAX = 150
@@ -292,6 +297,7 @@ class BrowserUseDriver:
                         Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
                     )
                     Path(task_fs).mkdir(parents=True, exist_ok=True)
+                    recent = load_recent_tasks(task_fs)
                     agent = Agent(
                         task=task_text,
                         llm=llm,
@@ -299,12 +305,28 @@ class BrowserUseDriver:
                         extend_system_message=build_extend_system_message(
                             fs_root=self.settings.fs_root,
                             allowed_url_schemes=self.settings.allowed_url_schemes,
+                            recent_tasks_block=format_recent_tasks_for_prompt(recent),
                         ),
                         file_system_path=task_fs,
                     )
                     history = await agent.run(max_steps=max_steps)
                     summarized = summarize_agent_history(history)
                     entry["status"] = "completed"
+                    try:
+                        archived = archive_task(
+                            agent_fs=task_fs,
+                            task_id=task_id,
+                            task=task_text,
+                            status="completed",
+                            result=summarized,
+                            session_key=session_key,
+                            max_steps=max_steps,
+                        )
+                        summarized["detail_md"] = archived.get("detail_md")
+                        summarized["detail_json"] = archived.get("detail_json")
+                        summarized["cite_label"] = (summarized.get("summary") or task_text or task_id)[:80]
+                    except Exception:
+                        pass
                     entry["result"] = summarized
             except asyncio.CancelledError:
                 entry["status"] = "cancelled"
@@ -313,6 +335,28 @@ class BrowserUseDriver:
             except Exception as exc:
                 entry["status"] = "failed"
                 entry["error"] = str(exc)
+                try:
+                    task_fs = str(
+                        Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+                    )
+                    archived = archive_task(
+                        agent_fs=task_fs,
+                        task_id=task_id,
+                        task=task_text,
+                        status="failed",
+                        result=entry.get("result") or {},
+                        error=str(exc),
+                        session_key=session_key,
+                        max_steps=max_steps,
+                    )
+                    entry["result"] = {
+                        **(entry.get("result") or {}),
+                        "detail_md": archived.get("detail_md"),
+                        "detail_json": archived.get("detail_json"),
+                        "cite_label": (task_text or task_id)[:80],
+                    }
+                except Exception:
+                    pass
             finally:
                 entry["updated_at"] = time.time()
                 entry["asyncio_task"] = None

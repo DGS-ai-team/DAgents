@@ -106,3 +106,38 @@ def test_task_status_response_flattens_result():
     assert detail["extracted_content"] == "页面标题是 Example Domain"
     assert detail["success"] is True
     assert "result" not in detail
+
+
+def test_archive_and_recent(tmp_path):
+    from dagents_browser.task_archive import (
+        archive_task,
+        format_recent_tasks_for_prompt,
+        load_recent_tasks,
+    )
+    agent_fs = tmp_path / "fs"
+    meta = archive_task(
+        agent_fs=agent_fs,
+        task_id="btask-a",
+        task="打开 example.com",
+        status="completed",
+        result={"summary": "标题 Example", "success": True, "steps": 2, "action_names": ["navigate", "done"], "urls": ["https://example.com"]},
+        session_key="agt-1-browser",
+    )
+    assert meta["detail_md"].endswith("btask-a.md")
+    assert (agent_fs / "tasks" / "btask-a.md").is_file()
+    recent = load_recent_tasks(agent_fs)
+    assert len(recent) == 1
+    block = format_recent_tasks_for_prompt(recent)
+    assert "btask-a" in block
+    assert "read_file" in block or "详情" in block
+    assert "标题 Example" in block
+
+
+def test_extend_includes_recent_block():
+    from dagents_browser.agent_prompt import build_extend_system_message
+    msg = build_extend_system_message(
+        fs_root="/tmp/r",
+        recent_tasks_block="<recent_browser_tasks>\n1. [btask-x]\n</recent_browser_tasks>",
+    )
+    assert "btask-x" in msg
+    assert "tasks/<task_id>.md" in msg
