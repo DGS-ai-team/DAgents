@@ -38,10 +38,12 @@ func NewWorker(cfg Config) *Worker {
 		Journal:    journal,
 		Tombstones: map[string]ArchiveTombstone{},
 	}
+	// 工作区工具由 Worker Executor 提供，不依赖本地 Agent Registry 枚举名。
+	nodeTools := mergeToolNames(cfg.NodeToolNames, []string{"read_file", "glob_files", "write_file"})
 	w.Provision = &Provisioner{
 		NodeID:        cfg.NodeID,
 		Bindings:      bindings,
-		NodeToolNames: append([]string(nil), cfg.NodeToolNames...),
+		NodeToolNames: nodeTools,
 	}
 	w.Commands = &CommandHandler{
 		Bindings:             bindings,

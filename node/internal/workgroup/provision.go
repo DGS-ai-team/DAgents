@@ -44,13 +44,18 @@ func (p *Provisioner) Provision(req ProvisionRequest) (*ProvisionResult, error) 
 		return &ProvisionResult{Binding: *existing, Created: false, Manifest: manifest}, nil
 	}
 
-	// 同 member 已有不同 provision？允许更新为新 provision（D2 简化：冲突若 digest 不同）
+	// 同 member 新 provision_id：member_generation 前进时替换绑定（PATCH 重配）；
+	// 同代且 digest 变化视为冲突；更旧 generation 拒绝。
 	byMember, err := p.Bindings.Get(req.MemberID)
 	if err != nil {
 		return nil, err
 	}
 	if byMember != nil && byMember.ProvisionID != "" && byMember.ProvisionID != req.ProvisionID {
-		if byMember.MemberSpecDigest != req.MemberSpecDigest {
+		if req.MemberGeneration < byMember.MemberGeneration {
+			return nil, errf(CodePayloadConflict, "stale member_generation")
+		}
+		if req.MemberGeneration == byMember.MemberGeneration &&
+			byMember.MemberSpecDigest != req.MemberSpecDigest {
 			return nil, errf(CodePayloadConflict, "member already provisioned with different digest")
 		}
 	}

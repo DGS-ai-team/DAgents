@@ -67,3 +67,21 @@ func toSet(items []string) map[string]struct{} {
 	}
 	return out
 }
+
+func mergeToolNames(parts ...[]string) []string {
+	out := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		for _, name := range part {
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
+	}
+	return out
+}

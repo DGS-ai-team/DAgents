@@ -59,6 +59,9 @@ func (s *MemoryBindingStore) GetByProvisionID(provisionID string) (*WorkerBindin
 func (s *MemoryBindingStore) Put(b WorkerBinding) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if old, ok := s.byMember[b.MemberID]; ok && old.ProvisionID != "" && old.ProvisionID != b.ProvisionID {
+		delete(s.byProvision, old.ProvisionID)
+	}
 	s.byMember[b.MemberID] = b
 	if b.ProvisionID != "" {
 		s.byProvision[b.ProvisionID] = b.MemberID
