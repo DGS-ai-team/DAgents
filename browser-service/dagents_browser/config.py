@@ -24,6 +24,7 @@ class BrowserServiceSettings:
     default_timeout_ms: int = 30000
     output_dir: str = "browser"
     max_sessions: int = 8
+    allowed_url_schemes: list[str] | None = None
     llm: LLMSettings | None = None
 
 
@@ -49,6 +50,10 @@ def load_settings(config_path: str | None) -> BrowserServiceSettings:
         default_timeout_ms=int(browser.get("default_timeout_ms") or 30000),
         output_dir=str(browser.get("output_dir") or "browser").strip("/") or "browser",
         max_sessions=int(browser.get("max_sessions") or 8),
+        allowed_url_schemes=[
+            str(s).strip() for s in (browser.get("allowed_url_schemes") or ["https", "http"])
+            if str(s).strip()
+        ] or ["https", "http"],
         llm=llm_settings_from_config(raw),
     )
 

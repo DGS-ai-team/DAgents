@@ -103,6 +103,12 @@ func toolResultFromResponse(resp Response) ToolResult {
 				}
 				continue
 			}
+			if k == "summary" {
+				if s, ok := v.(string); ok && s != "" && out.ExtractedContent == "" {
+					out.ExtractedContent = s
+				}
+				// summary 仍保留在 detail，供主 Agent 读取
+			}
 			detail[k] = v
 		}
 		if len(detail) > 0 {

@@ -4,11 +4,17 @@ import { renderMarkdown } from "../utils/markdown.js";
 import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
 import ThinkingIndicator from "./ThinkingIndicator.vue";
+import BrowserCitationBlock from "./BrowserCitationBlock.vue";
 
 const props = defineProps({
   entry: { type: Object, required: true },
 });
 
+const browserRefs = computed(() =>
+  props.entry?.kind === "assistant" && Array.isArray(props.entry.browser_refs)
+    ? props.entry.browser_refs
+    : [],
+);
 const userImageSrcs = computed(() => {
   if (props.entry.kind !== "user") return [];
   const images = Array.isArray(props.entry.images) ? props.entry.images.filter(Boolean) : [];
@@ -77,6 +83,7 @@ function userImageThumb(src) {
       <div v-else class="msg__bubble msg__bubble--assistant-md">
         <pre v-if="entry.streaming" class="assistant-msg__stream-plain">{{ entry.text }}</pre>
         <div v-else class="tool-exec-bubble__markdown assistant-msg__md" v-html="renderMarkdown(entry.text)" />
+        <BrowserCitationBlock v-if="!entry.streaming && browserRefs.length" :refs="browserRefs" />
         <div v-if="entry.usage" class="msg__usage">{{ entry.usage }}</div>
       </div>
     </div>

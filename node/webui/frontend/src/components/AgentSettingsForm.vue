@@ -238,6 +238,7 @@ const longTermScopeOptions = computed(() =>
             class="agent-settings-tile"
             :class="{ 'agent-settings-tile--active': draft.toolGroups?.includes(g.name) }"
             :aria-pressed="draft.toolGroups?.includes(g.name) ? 'true' : 'false'"
+            :title="g.hint || undefined"
             @click="toggleGroup(g.name)"
           >
             <span class="agent-settings-tile__icon" aria-hidden="true">
@@ -263,7 +264,7 @@ const longTermScopeOptions = computed(() =>
           <h3 class="agent-settings-section__title">工具组</h3>
           <p class="agent-settings-hint">勾选启用对应能力；都不勾选则不启用任何工具组。</p>
           <div class="agent-settings-toggles">
-            <label v-for="g in TOOL_GROUPS" :key="g.name" class="agent-settings-check">
+            <label v-for="g in TOOL_GROUPS" :key="g.name" class="agent-settings-check" :title="g.hint || undefined">
               <input
                 type="checkbox"
                 :checked="draft.toolGroups?.includes(g.name)"

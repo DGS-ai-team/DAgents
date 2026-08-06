@@ -10,7 +10,7 @@ export const BLANK_TEMPLATE_ID = "__blank__";
 
 export const TOOL_GROUPS = [
   { name: "bash", label: "命令行" },
-  { name: "browser", label: "浏览器", beta: true },
+  { name: "browser", label: "浏览器", beta: true, hint: "任务级派发至伴生（需真实 LLM）" },
   { name: "child_agents", label: "子智能体" },
   { name: "fs", label: "文件" },
   { name: "hitl", label: "用户询问" },

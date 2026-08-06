@@ -13,8 +13,15 @@ from browser_use.browser.events import ClickCoordinateEvent, ClickElementEvent, 
 
 from dagents_browser.action_runner import ActionRunner
 from dagents_browser.config import BrowserServiceSettings
+from dagents_browser.agent_prompt import build_extend_system_message
 from dagents_browser.llm import create_extraction_llm
 from dagents_browser.ports import allocate_debug_port
+from dagents_browser.task_archive import (
+    archive_task,
+    format_recent_tasks_for_prompt,
+    load_recent_tasks,
+)
+from dagents_browser.task_result import summarize_agent_history, task_status_response
 
 DEFAULT_SNAPSHOT_MAX = 150
 MAX_SNAPSHOT_MAX = 500
@@ -244,7 +251,10 @@ class BrowserUseDriver:
         if self.settings.llm is None:
             return {
                 "ok": False,
-                "error": "browser run_task requires a non-mock llm in node config (browser-use Agent)",
+                "error": (
+                    "浏览器任务需要真实 LLM：当前 Node 配置为 mock 或未设置 llm.model。"
+                    "请在设置中切换非 mock 模型档案后重试（browser-use.Agent 无法在 mock 下闭环）。"
+                ),
             }
         try:
             llm = create_extraction_llm(self.settings.llm)
@@ -283,33 +293,41 @@ class BrowserUseDriver:
                         raise RuntimeError("browser session not started")
                     from browser_use import Agent
 
+                    task_fs = str(
+                        Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+                    )
+                    Path(task_fs).mkdir(parents=True, exist_ok=True)
+                    recent = load_recent_tasks(task_fs)
                     agent = Agent(
                         task=task_text,
                         llm=llm,
                         browser_session=session,
+                        extend_system_message=build_extend_system_message(
+                            fs_root=self.settings.fs_root,
+                            allowed_url_schemes=self.settings.allowed_url_schemes,
+                            recent_tasks_block=format_recent_tasks_for_prompt(recent),
+                        ),
+                        file_system_path=task_fs,
                     )
                     history = await agent.run(max_steps=max_steps)
-                    final = None
-                    success = None
-                    steps = None
-                    try:
-                        final = history.final_result() if history is not None else None
-                    except Exception:
-                        final = str(history) if history is not None else None
-                    try:
-                        success = history.is_successful() if history is not None else None
-                    except Exception:
-                        success = None
-                    try:
-                        steps = history.number_of_steps() if history is not None else None
-                    except Exception:
-                        steps = None
+                    summarized = summarize_agent_history(history)
                     entry["status"] = "completed"
-                    entry["result"] = {
-                        "final_result": final,
-                        "success": success,
-                        "steps": steps,
-                    }
+                    try:
+                        archived = archive_task(
+                            agent_fs=task_fs,
+                            task_id=task_id,
+                            task=task_text,
+                            status="completed",
+                            result=summarized,
+                            session_key=session_key,
+                            max_steps=max_steps,
+                        )
+                        summarized["detail_md"] = archived.get("detail_md")
+                        summarized["detail_json"] = archived.get("detail_json")
+                        summarized["cite_label"] = (summarized.get("summary") or task_text or task_id)[:80]
+                    except Exception:
+                        pass
+                    entry["result"] = summarized
             except asyncio.CancelledError:
                 entry["status"] = "cancelled"
                 entry["error"] = "cancelled"
@@ -317,6 +335,28 @@ class BrowserUseDriver:
             except Exception as exc:
                 entry["status"] = "failed"
                 entry["error"] = str(exc)
+                try:
+                    task_fs = str(
+                        Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+                    )
+                    archived = archive_task(
+                        agent_fs=task_fs,
+                        task_id=task_id,
+                        task=task_text,
+                        status="failed",
+                        result=entry.get("result") or {},
+                        error=str(exc),
+                        session_key=session_key,
+                        max_steps=max_steps,
+                    )
+                    entry["result"] = {
+                        **(entry.get("result") or {}),
+                        "detail_md": archived.get("detail_md"),
+                        "detail_json": archived.get("detail_json"),
+                        "cite_label": (task_text or task_id)[:80],
+                    }
+                except Exception:
+                    pass
             finally:
                 entry["updated_at"] = time.time()
                 entry["asyncio_task"] = None
@@ -334,17 +374,8 @@ class BrowserUseDriver:
         }
 
     def _task_public(self, entry: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "task_id": entry.get("task_id"),
-            "session_key": entry.get("session_key"),
-            "task": entry.get("task"),
-            "status": entry.get("status"),
-            "max_steps": entry.get("max_steps"),
-            "created_at": entry.get("created_at"),
-            "updated_at": entry.get("updated_at"),
-            "result": entry.get("result"),
-            "error": entry.get("error"),
-        }
+        # 兼容取消等仍返回扁平 detail 的调用方
+        return task_status_response(entry).get("detail") or {}
 
     async def _task_status(self, req: dict[str, Any]) -> dict[str, Any]:
         session_key = str(req.get("session_key") or "").strip()
@@ -358,7 +389,7 @@ class BrowserUseDriver:
         entry = self._tasks.get(task_id)
         if entry is None or entry.get("session_key") != session_key:
             return {"ok": False, "error": f"task not found: {task_id}"}
-        return {"ok": True, "detail": self._task_public(entry)}
+        return task_status_response(entry)
 
     async def _task_cancel(self, req: dict[str, Any]) -> dict[str, Any]:
         session_key = str(req.get("session_key") or "").strip()
@@ -385,7 +416,7 @@ class BrowserUseDriver:
             entry["status"] = "cancelled"
             entry["error"] = "cancelled"
             entry["updated_at"] = time.time()
-        return {"ok": True, "detail": self._task_public(entry)}
+        return task_status_response(entry)
 
     async def _cancel_session_tasks(self, session_key: str) -> None:
         for entry in list(self._tasks.values()):

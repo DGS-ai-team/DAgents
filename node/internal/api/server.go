@@ -435,6 +435,16 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	if s.browserMgr != nil {
 		reg.SetBrowserManager(s.browserMgr)
 	}
+	if s.agents != nil {
+		agents := s.agents
+		reg.SetBrowserCompanionExists(func(ctx context.Context, companionAgentID string) (bool, error) {
+			rec, err := agents.Get(ctx, companionAgentID)
+			if err != nil {
+				return false, err
+			}
+			return rec != nil && !rec.Archived, nil
+		})
+	}
 }
 
 // attachTriggerRuntime 为工具 Registry 注入触发器 store；targetAgentID 为空时用 node_id。

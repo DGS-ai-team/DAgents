@@ -22,6 +22,10 @@ import {
   scheduleReveal,
 } from "./streamReveal.js";
 import { formatInlineUsage, parseUsageRound } from "../utils/usage.js";
+import {
+  attachBrowserRefsToAssistants,
+  collectBrowserRefsFromEntries,
+} from "../utils/browserRefs.js";
 
 let idSeq = 0;
 
@@ -165,12 +169,15 @@ export function finalizeAssistant() {
   pendingUsageSuffix = "";
   resetRevealKind("assistant");
   if (!text) return;
+  const insertAt = streamIdx >= 0 ? streamIdx : transcriptStore.entries.length;
+  const browser_refs = collectBrowserRefsFromEntries(transcriptStore.entries, insertAt);
   const row = {
     id: ++idSeq,
     kind: "assistant",
     text,
     usage,
   };
+  if (browser_refs.length) row.browser_refs = browser_refs;
   // 保留 streaming 条目原位，避免 partial tool_call 插在正文后、finalize 却把正文推到工具后面。
   if (streamIdx >= 0) transcriptStore.entries.splice(streamIdx, 0, row);
   else transcriptStore.entries.push(row);
@@ -416,6 +423,7 @@ export function loadTranscriptFromHydrate(entries) {
       markToolBlockActive(row.blockId);
     }
   }
+  attachBrowserRefsToAssistants(transcriptStore.entries);
 }
 
 function upsertStreaming(kind, text) {
