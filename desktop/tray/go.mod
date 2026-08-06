@@ -8,7 +8,7 @@ require (
 	github.com/DGS-ai-team/DAgents/shared/update v0.0.0
 	github.com/getlantern/systray v1.2.2
 	github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4
-	golang.org/x/sys v0.1.0
+	golang.org/x/sys v0.47.0
 )
 
 require (
