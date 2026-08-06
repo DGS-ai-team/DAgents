@@ -15,7 +15,9 @@
 
 | 符号 | 说明 |
 |------|------|
-| `EnsureRuntimePolicy` | 创建目录并从 `packaging/runtime/policy` 种子复制 |
+| `EnsureRuntimePolicy` | 创建目录、从种子复制缺失文件，并合并种子缺项到已有 `tool.approval.txt` |
+| `MergeMissingSeedIntoRuntimePolicy` | 同上并返回新增工具条目数 |
+| `MergeMissingToolModes` / `MergeMissingSeedToolsIntoFile` | 仅追加缺失工具模式（不覆盖） |
 | `loadFromDir` | 读取 tool + shell txt 文件 |
 
 ## `entry_file.go`

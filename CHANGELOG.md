@@ -22,6 +22,7 @@
 
 ### 变更
 
+- **存量 Agent 策略种子缺项合并**：Node 启动时对 `.runtime/policy/tool.approval.txt` 与 `agents.db` 中全部 `agent_policy` 仅追加 packaging 种子中缺失的工具模式（如 `browser_run_task`），不覆盖用户已改档位；`EnsureAgentPolicy` 读存量行时同样补齐。
 - **移除 Node Agent 沙箱**：删除 Docker / process 沙箱运行时（`node/internal/sandbox`、bash docker 路径、模板与 Web UI 沙箱配置）；Agent 一律使用 Node 全局 `fs_root`，工具边界改由工具组与策略控制。`agents` 表 `sandbox_*` 列保留但读写固定为关闭。
 - **首配页对齐 Workbench 风格并增加主题步骤**：第一步以三个圆点选择浅色 / 深色 / 跟随系统（写入既有 `dagents_webui_theme`）；整体改用 panel、settings-field、btn 等现有控件样式。
 - **首配页不再被 soft 刷新闪进对话页**：窗口 `focus` / `pageshow` 重检 bootstrap 时只允许进入首配，退出仅在用户点「开始使用」完成配置后。
