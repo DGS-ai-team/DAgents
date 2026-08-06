@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -13,10 +14,12 @@ from browser_use.browser.events import ClickCoordinateEvent, ClickElementEvent, 
 from dagents_browser.action_runner import ActionRunner
 from dagents_browser.config import BrowserServiceSettings
 from dagents_browser.llm import create_extraction_llm
+from dagents_browser.ports import allocate_debug_port
 
 DEFAULT_SNAPSHOT_MAX = 150
 MAX_SNAPSHOT_MAX = 500
 DEFAULT_LLM_REPRESENTATION_MAX = 40000
+DEFAULT_TASK_MAX_STEPS = 50
 
 
 def normalize_max_elements(n: int) -> int:
@@ -47,12 +50,16 @@ def element_from_node(index: int, node: Any, max_text: int = 120) -> dict[str, A
 
 
 class BrowserUseDriver:
-    """browser-use 非视觉对齐：llm_representation + index 驱动 click/fill。"""
+    """browser-use 驱动：细粒度 op + 任务级 run_task（Agent 闭环）。"""
 
     def __init__(self, settings: BrowserServiceSettings) -> None:
         self.settings = settings
         self._sessions: dict[str, BrowserSession] = {}
+        self._session_ports: dict[str, int] = {}
+        self._session_locks: dict[str, asyncio.Lock] = {}
         self._lock = asyncio.Lock()
+        self._tasks: dict[str, dict[str, Any]] = {}
+        self._session_latest_task: dict[str, str] = {}
         extraction_llm = None
         if settings.llm is not None:
             try:
@@ -61,7 +68,27 @@ class BrowserUseDriver:
                 extraction_llm = None
         self._actions = ActionRunner(settings.fs_root, extraction_llm)
 
+    def _session_lock(self, session_key: str) -> asyncio.Lock:
+        lock = self._session_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_key] = lock
+        return lock
+
+    def _allocate_debug_port(self, session_key: str) -> int:
+        """每 session 独立 remote-debugging-port；attach(cdp_url) 模式沿用配置端口。"""
+        return allocate_debug_port(
+            session_key,
+            base_port=int(self.settings.debug_port or 9222),
+            used_ports=set(self._session_ports.values()),
+            cdp_url=self.settings.cdp_url or "",
+        )
+
     async def close(self) -> None:
+        for task in list(self._tasks.values()):
+            at = task.get("asyncio_task")
+            if at is not None and not at.done():
+                at.cancel()
         keys = list(self._sessions.keys())
         for key in keys:
             await self._stop_session(key)
@@ -74,54 +101,62 @@ class BrowserUseDriver:
             return await self._start(req)
         if op == "stop":
             return await self._stop(req)
+        if op == "run_task":
+            return await self._run_task(req)
+        if op == "task_status":
+            return await self._task_status(req)
+        if op == "task_cancel":
+            return await self._task_cancel(req)
         session_key = str(req.get("session_key") or "").strip()
         if not session_key:
             return {"ok": False, "error": "session_key is required"}
         session = self._sessions.get(session_key)
         if session is None:
             return {"ok": False, "error": "browser session not started"}
-        if op == "navigate":
-            return await self._navigate(session, req)
-        if op == "click":
-            return await self._click(session, req)
-        if op == "click_coordinate":
-            return await self._click_coordinate(session, req)
-        if op == "fill":
-            return await self._fill(session, req)
-        if op == "press":
-            return await self._press(session, req)
-        if op == "screenshot":
-            return await self._screenshot(session, req)
-        if op == "wait":
-            return await self._wait(session, req)
-        if op == "snapshot":
-            return await self._snapshot(session, req)
-        if op == "search":
-            return await self._search(session, req)
-        if op == "go_back":
-            return await self._go_back(session)
-        if op == "scroll":
-            return await self._scroll(session, req)
-        if op == "find_text":
-            return await self._find_text(session, req)
-        if op == "switch_tab":
-            return await self._switch_tab(session, req)
-        if op == "close_tab":
-            return await self._close_tab(session, req)
-        if op == "extract":
-            return await self._extract(session, req)
-        if op == "evaluate":
-            return await self._evaluate(session, req)
-        if op == "find_elements":
-            return await self._find_elements(session, req)
-        if op == "search_page":
-            return await self._search_page(session, req)
-        if op == "upload_file":
-            return await self._upload_file(session, req)
-        if op == "dropdown_options":
-            return await self._dropdown_options(session, req)
-        if op == "select_dropdown":
-            return await self._select_dropdown(session, req)
+        lock = self._session_lock(session_key)
+        async with lock:
+            if op == "navigate":
+                return await self._navigate(session, req)
+            if op == "click":
+                return await self._click(session, req)
+            if op == "click_coordinate":
+                return await self._click_coordinate(session, req)
+            if op == "fill":
+                return await self._fill(session, req)
+            if op == "press":
+                return await self._press(session, req)
+            if op == "screenshot":
+                return await self._screenshot(session, req)
+            if op == "wait":
+                return await self._wait(session, req)
+            if op == "snapshot":
+                return await self._snapshot(session, req)
+            if op == "search":
+                return await self._search(session, req)
+            if op == "go_back":
+                return await self._go_back(session)
+            if op == "scroll":
+                return await self._scroll(session, req)
+            if op == "find_text":
+                return await self._find_text(session, req)
+            if op == "switch_tab":
+                return await self._switch_tab(session, req)
+            if op == "close_tab":
+                return await self._close_tab(session, req)
+            if op == "extract":
+                return await self._extract(session, req)
+            if op == "evaluate":
+                return await self._evaluate(session, req)
+            if op == "find_elements":
+                return await self._find_elements(session, req)
+            if op == "search_page":
+                return await self._search_page(session, req)
+            if op == "upload_file":
+                return await self._upload_file(session, req)
+            if op == "dropdown_options":
+                return await self._dropdown_options(session, req)
+            if op == "select_dropdown":
+                return await self._select_dropdown(session, req)
         return {"ok": False, "error": f"unknown op: {op}"}
 
     async def _start(self, req: dict[str, Any]) -> dict[str, Any]:
@@ -136,6 +171,10 @@ class BrowserUseDriver:
                     "ok": False,
                     "error": f"browser session limit reached (max {self.settings.max_sessions})",
                 }
+            try:
+                debug_port = self._allocate_debug_port(session_key)
+            except RuntimeError as exc:
+                return {"ok": False, "error": str(exc)}
         headed = self.settings.headed
         if req.get("headed") is not None:
             headed = bool(req["headed"])
@@ -145,8 +184,8 @@ class BrowserUseDriver:
         profile_dir.mkdir(parents=True, exist_ok=True)
         args = [
             "--remote-allow-origins=*",
-            f"--remote-debugging-address=127.0.0.1",
-            f"--remote-debugging-port={self.settings.debug_port}",
+            "--remote-debugging-address=127.0.0.1",
+            f"--remote-debugging-port={debug_port}",
         ]
         if self.settings.ignore_https_errors:
             args.append("--ignore-certificate-errors")
@@ -162,30 +201,203 @@ class BrowserUseDriver:
         await session.start()
         async with self._lock:
             self._sessions[session_key] = session
+            self._session_ports[session_key] = debug_port
         detail = {
             "mode": {
                 "attach": bool(self.settings.cdp_url),
                 "headed": headed,
                 "engine": "browser-use",
                 "interaction": "index",
+                "debug_port": debug_port,
             }
         }
         return await self._page_info(session, detail)
 
     async def _stop(self, req: dict[str, Any]) -> dict[str, Any]:
         session_key = str(req.get("session_key") or "").strip()
+        await self._cancel_session_tasks(session_key)
         await self._stop_session(session_key)
         return {"ok": True}
 
     async def _stop_session(self, session_key: str) -> None:
         async with self._lock:
             session = self._sessions.pop(session_key, None)
+            self._session_ports.pop(session_key, None)
         if session is None:
             return
         if self.settings.cdp_url:
             await session.stop()
         else:
             await session.kill()
+
+    async def _run_task(self, req: dict[str, Any]) -> dict[str, Any]:
+        session_key = str(req.get("session_key") or "").strip()
+        task_text = str(req.get("task") or "").strip()
+        if not session_key:
+            return {"ok": False, "error": "session_key is required"}
+        if not task_text:
+            return {"ok": False, "error": "task is required"}
+        if session_key not in self._sessions:
+            started = await self._start({"session_key": session_key, "headed": req.get("headed")})
+            if not started.get("ok"):
+                return started
+        if self.settings.llm is None:
+            return {
+                "ok": False,
+                "error": "browser run_task requires a non-mock llm in node config (browser-use Agent)",
+            }
+        try:
+            llm = create_extraction_llm(self.settings.llm)
+        except Exception as exc:
+            return {"ok": False, "error": f"browser llm init failed: {exc}"}
+
+        max_steps = int(req.get("max_steps") or 0)
+        if max_steps <= 0:
+            max_steps = DEFAULT_TASK_MAX_STEPS
+        max_steps = min(max_steps, 200)
+
+        task_id = f"btask-{uuid.uuid4().hex[:12]}"
+        entry: dict[str, Any] = {
+            "task_id": task_id,
+            "session_key": session_key,
+            "task": task_text,
+            "status": "queued",
+            "max_steps": max_steps,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "result": None,
+            "error": None,
+            "asyncio_task": None,
+        }
+        self._tasks[task_id] = entry
+        self._session_latest_task[session_key] = task_id
+
+        async def _worker() -> None:
+            lock = self._session_lock(session_key)
+            entry["status"] = "running"
+            entry["updated_at"] = time.time()
+            try:
+                async with lock:
+                    session = self._sessions.get(session_key)
+                    if session is None:
+                        raise RuntimeError("browser session not started")
+                    from browser_use import Agent
+
+                    agent = Agent(
+                        task=task_text,
+                        llm=llm,
+                        browser_session=session,
+                    )
+                    history = await agent.run(max_steps=max_steps)
+                    final = None
+                    success = None
+                    steps = None
+                    try:
+                        final = history.final_result() if history is not None else None
+                    except Exception:
+                        final = str(history) if history is not None else None
+                    try:
+                        success = history.is_successful() if history is not None else None
+                    except Exception:
+                        success = None
+                    try:
+                        steps = history.number_of_steps() if history is not None else None
+                    except Exception:
+                        steps = None
+                    entry["status"] = "completed"
+                    entry["result"] = {
+                        "final_result": final,
+                        "success": success,
+                        "steps": steps,
+                    }
+            except asyncio.CancelledError:
+                entry["status"] = "cancelled"
+                entry["error"] = "cancelled"
+                raise
+            except Exception as exc:
+                entry["status"] = "failed"
+                entry["error"] = str(exc)
+            finally:
+                entry["updated_at"] = time.time()
+                entry["asyncio_task"] = None
+
+        at = asyncio.create_task(_worker())
+        entry["asyncio_task"] = at
+        return {
+            "ok": True,
+            "detail": {
+                "task_id": task_id,
+                "status": "queued",
+                "session_key": session_key,
+                "max_steps": max_steps,
+            },
+        }
+
+    def _task_public(self, entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task_id": entry.get("task_id"),
+            "session_key": entry.get("session_key"),
+            "task": entry.get("task"),
+            "status": entry.get("status"),
+            "max_steps": entry.get("max_steps"),
+            "created_at": entry.get("created_at"),
+            "updated_at": entry.get("updated_at"),
+            "result": entry.get("result"),
+            "error": entry.get("error"),
+        }
+
+    async def _task_status(self, req: dict[str, Any]) -> dict[str, Any]:
+        session_key = str(req.get("session_key") or "").strip()
+        task_id = str(req.get("task_id") or "").strip()
+        if not session_key:
+            return {"ok": False, "error": "session_key is required"}
+        if not task_id:
+            task_id = self._session_latest_task.get(session_key, "")
+        if not task_id:
+            return {"ok": False, "error": "no task for session"}
+        entry = self._tasks.get(task_id)
+        if entry is None or entry.get("session_key") != session_key:
+            return {"ok": False, "error": f"task not found: {task_id}"}
+        return {"ok": True, "detail": self._task_public(entry)}
+
+    async def _task_cancel(self, req: dict[str, Any]) -> dict[str, Any]:
+        session_key = str(req.get("session_key") or "").strip()
+        task_id = str(req.get("task_id") or "").strip()
+        if not session_key:
+            return {"ok": False, "error": "session_key is required"}
+        if not task_id:
+            task_id = self._session_latest_task.get(session_key, "")
+        if not task_id:
+            return {"ok": False, "error": "no task for session"}
+        entry = self._tasks.get(task_id)
+        if entry is None or entry.get("session_key") != session_key:
+            return {"ok": False, "error": f"task not found: {task_id}"}
+        at = entry.get("asyncio_task")
+        if at is not None and not at.done():
+            at.cancel()
+            try:
+                await at
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        elif entry.get("status") in ("queued", "running"):
+            entry["status"] = "cancelled"
+            entry["error"] = "cancelled"
+            entry["updated_at"] = time.time()
+        return {"ok": True, "detail": self._task_public(entry)}
+
+    async def _cancel_session_tasks(self, session_key: str) -> None:
+        for entry in list(self._tasks.values()):
+            if entry.get("session_key") != session_key:
+                continue
+            at = entry.get("asyncio_task")
+            if at is not None and not at.done():
+                at.cancel()
+                try:
+                    await at
+                except Exception:
+                    pass
 
     async def _navigate(self, session: BrowserSession, req: dict[str, Any]) -> dict[str, Any]:
         url = str(req.get("url") or "").strip()

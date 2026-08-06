@@ -42,6 +42,10 @@ type Request struct {
 	ExtractImages     bool     `json:"extract_images,omitempty"`
 	StartFromChar     int      `json:"start_from_char,omitempty"`
 	AlreadyCollected  []string `json:"already_collected,omitempty"`
+	// 任务级伴生派发（op=run_task / task_status / task_cancel）
+	Task     string `json:"task,omitempty"`
+	TaskID   string `json:"task_id,omitempty"`
+	MaxSteps int    `json:"max_steps,omitempty"`
 }
 
 // Response 为 dagents-browser → BrowserManager 的内部响应。

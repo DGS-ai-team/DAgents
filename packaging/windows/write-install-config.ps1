@@ -105,7 +105,7 @@ browser:
   debug_port: 9222
   default_timeout_ms: 30000
   output_dir: browser
-  max_sessions: 1
+  max_sessions: 8
   ignore_https_errors: false
 "@
     if (-not [bool]$feat.browser_enabled) {
@@ -120,7 +120,7 @@ browser:
 #   debug_port: 9222
 #   default_timeout_ms: 30000
 #   output_dir: browser
-#   max_sessions: 1
+#   max_sessions: 8
 #   ignore_https_errors: false
 "@
     }

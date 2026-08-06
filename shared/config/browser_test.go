@@ -17,6 +17,9 @@ func TestBrowserDefaults(t *testing.T) {
 	if cfg.Browser.ServiceURL != "http://127.0.0.1:18766" {
 		t.Fatalf("service_url = %q", cfg.Browser.ServiceURL)
 	}
+	if cfg.Browser.MaxSessions != 8 {
+		t.Fatalf("max_sessions = %d", cfg.Browser.MaxSessions)
+	}
 }
 
 func TestBrowserEnabled(t *testing.T) {
