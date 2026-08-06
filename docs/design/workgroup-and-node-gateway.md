@@ -66,7 +66,7 @@ Node-A / Node-C 若在 ACL 中且已订阅
 
 ### 2.3 与本分支已写 Placement 代码的关系
 
-本分支 Placement/Edge/屏幕旁观实现视为 **实验路径，按本设计回退/拆除**（先停产品入口，再删代码）。`docs/design/remote-agent-placement.md` 标记为 **superseded**。
+本分支 Placement/Edge/屏幕旁观实现视为 **实验路径，按本设计回退/拆除**（先停产品入口，再删代码）。旧 Placement 设计稿已归档：[`docs/archive/design/remote-agent-placement.md`](../archive/design/remote-agent-placement.md)。
 
 ---
 
@@ -495,8 +495,8 @@ MemberSpec {
 | 本文 §0–§13 | **现行产品规范** |
 | `workgroup-d05-contracts.md` | **D0.5 已冻结**（§19 Verdict A） |
 | `fixtures/workgroup-d05/` | schemas + golden fixtures |
-| `remote-agent-placement.md` | **superseded** |
-| `node-centric-architecture-cleanup.md` | 继续：去 ops/compliance、去沙箱、拆旧 A2A |
+| `remote-agent-placement.md` | **已归档** → `docs/archive/design/` |
+| （清理清单） | **已归档** → `docs/archive/design/node-centric-architecture-cleanup.md` |
 | 下文 §15 / §16 | **历史审核记录**；冲突以正文为准 |
 
 原 §14 自检补丁已吸收进正文：`tool.name` 分域、成员 LLM 在 Manage、独立 Worker、Registry、provision、HITL 分层、`indeterminate`、废除 Node 级 `agent_invoke`。本地 child/临时 Agent 仍为 Node 内能力，与工作组无关。

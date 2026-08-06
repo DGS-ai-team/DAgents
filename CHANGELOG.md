@@ -28,7 +28,7 @@
 - **首配页不再被 soft 刷新闪进对话页**：窗口 `focus` / `pageshow` 重检 bootstrap 时只允许进入首配，退出仅在用户点「开始使用」完成配置后。
 - **侧栏 Agent 列表选中不再置顶**：切换当前 Agent 时保持按 `updated_at` 排序的原有位置，仅用高亮表示选中。
 - **Shell 双轨安装**：推荐轨 Tauri（`desktop/tray-tauri`，内嵌 Web UI，需 WebView2）与兼容轨 Go（`desktop/tray`，低版本 Windows）均由 CI 构建；Inno 附加任务二选一写入 `bin\dagents-shell.exe`；未检测到 WebView2 时默认兼容模式。Tauri 轨补齐 Desktop API / SSE 待办 / Toast / 更新编排。
-- **远端 Agent Placement 产品路径拆除**（D5）；设计稿见 `docs/design/remote-agent-placement.md`（superseded）。通信面改走 Workgroup。
+- **远端 Agent Placement 产品路径拆除**（D5）；通信面改走 Workgroup（旧设计稿见 `docs/archive/design/remote-agent-placement.md`）。
 
 ### 预览边界（Known limitations）
 
@@ -313,7 +313,7 @@
 
 ## [0.7.0] - 2026-07-09
 
-**跨端与体验收尾**：TUI hydrate、媒体缩略图/lightbox、Windows 更新迁移、A2A relay hydrate、Shell 运维兜底。Smoke 清单：[`docs/design/v0.7.0-smoke-checklist.md`](docs/design/v0.7.0-smoke-checklist.md)。
+**跨端与体验收尾**：TUI hydrate、媒体缩略图/lightbox、Windows 更新迁移、A2A relay hydrate、Shell 运维兜底。Smoke 清单（归档）：[`docs/archive/design/v0.7.0-smoke-checklist.md`](docs/archive/design/v0.7.0-smoke-checklist.md)。
 
 ### 新增
 
@@ -333,7 +333,7 @@
 
 ## [0.6.2] - 2026-07-08
 
-**桌面体验 + Shell 自更新**：路径粘贴、Shell 检查/应用更新、UI focus 抑制 HITL Toast。Smoke 清单：[`docs/design/v0.6.2-smoke-checklist.md`](docs/design/v0.6.2-smoke-checklist.md)。
+**桌面体验 + Shell 自更新**：路径粘贴、Shell 检查/应用更新、UI focus 抑制 HITL Toast。Smoke 清单（归档）：[`docs/archive/design/v0.6.2-smoke-checklist.md`](docs/archive/design/v0.6.2-smoke-checklist.md)。
 
 ### 新增
 
@@ -360,7 +360,7 @@
 
 ## [0.6.1] - 2026-07-08
 
-**产品化 Web UI 1.0** + `show_image` + Session Media API。Smoke 清单：[`docs/design/v0.6.1-smoke-checklist.md`](docs/design/v0.6.1-smoke-checklist.md)。
+**产品化 Web UI 1.0** + `show_image` + Session Media API。Smoke 清单（归档）：[`docs/archive/design/v0.6.1-smoke-checklist.md`](docs/archive/design/v0.6.1-smoke-checklist.md)。
 
 ### 新增
 
@@ -396,7 +396,7 @@
 
 ## [0.6.0] - 2026-07-08
 
-**Windows Desktop Shell 闭环**：自启 Shell 监护 Node、HITL Toast、Hydrate、IM cursor 未读、idle 卸内存、Windows 安装包含 Shell 登录自启。Smoke 清单：[`docs/design/v0.6.0-smoke-checklist.md`](docs/design/v0.6.0-smoke-checklist.md)。
+**Windows Desktop Shell 闭环**：自启 Shell 监护 Node、HITL Toast、Hydrate、IM cursor 未读、idle 卸内存、Windows 安装包含 Shell 登录自启。Smoke 清单（归档）：[`docs/archive/design/v0.6.0-smoke-checklist.md`](docs/archive/design/v0.6.0-smoke-checklist.md)。
 
 ### 新增
 
@@ -632,7 +632,7 @@
 - **Manage 离线 bundle**：`scripts/ci/assemble_manage_bundle.sh` 产出 `dagents-manage-bundle-*.tar.gz`（镜像 + `import-image` / `restart` 脚本 + `docker-compose.offline.yml`）；Release CI 自动附加。
 - **安装 policy 交互**：Linux `install.sh`（`--overwrite-policy` / `--keep-policy` + TTY 询问）；Windows Inno Setup 安装时可选覆盖 `_seed/policy`。
 - **Agent Card 示例**：`packaging/agent-client/agent-card.example.json`；Node 工作目录固定 `./agent-card.json`（`manage.AgentCardFileName`）。
-- **文档**：[built-in-tools-reference.md](docs/built-in-tools-reference.md)（25 个内置工具全量参考）；[manage-communication.md](docs/manage-communication.md)（Manage / Node / Client 通信与数据面）。
+- **文档**：内置工具参考迁入 handbook 附录；Manage 通信叙述见 handbook/05（历史长文已归档）。
 
 ### 变更
 
@@ -691,7 +691,7 @@
 
 ### 文档
 
-- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增 [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) 与 [major-changes.md §2](docs/design/major-changes.md#2-工具链上下文成本优化已落地)。
+- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增 [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) 与 handbook [重大设计变更实录](docs/handbook/附录/重大设计变更实录.md) §2。
 
 （Git **tag**：`v0.3.6`。）
 
@@ -712,7 +712,7 @@
 
 ### 新增
 
-- **上下文压缩 × Prompt Cache**：侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；M3 **silent 冷却**抑制重复侧车；`/last_compression` 与压缩 usage 展示；设计实录见 [major-changes.md](docs/design/major-changes.md)。
+- **上下文压缩 × Prompt Cache**：侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；M3 **silent 冷却**抑制重复侧车；`/last_compression` 与压缩 usage 展示；设计实录见 [重大设计变更实录](docs/handbook/附录/重大设计变更实录.md)。
 - **User 消息 `name` 字段**：human / trigger / a2a_inbox / child_task / compression / async_tool / compression_sidecar，便于模型区分上下文来源（DeepSeek Chat API）。
 - **Tool call 流式展示**：LLM delta 阶段即推送 `partial: true` 的 tool_call SSE；Go / Python TUI 在工具名出现后展示 pending 块，arguments 边流边更新代码预览。
 - **LLM `user_id`**：每次 Chat Completions 请求附带 `user_id=agent_id`（DeepSeek 文档推荐，便于服务端观测与限流）。

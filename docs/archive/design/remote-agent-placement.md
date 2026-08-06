@@ -1,11 +1,9 @@
-# 远端 Agent Placement 与观测面（设计）
+# 远端 Agent Placement 与观测面（归档）
 
-> **状态**：**SUPERSEDED（2026-07-30）** — 远程协作改为 **仅工作组**，不再做远程 Agent / Placement / Edge 代理聊天。  
-> **D5 Placement 产品拆除**：已在 `cursor/remote-agent-placement-7e3e` 完成（Cut1–8）；详见 [`workgroup-and-node-gateway.md`](./workgroup-and-node-gateway.md) §13。  
-> **现行设计**：[workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md)  
-> **分支**：`cursor/remote-agent-placement-7e3e`  
+> **状态**：**SUPERSEDED** — 已归档至 `docs/archive/design/`。远程协作仅 **Workgroup**。  
+> **现行设计**：[../../design/workgroup-and-node-gateway.md](../../design/workgroup-and-node-gateway.md)  
 >
-> 下文保留作历史记录，实现时按工作组设计 **拆除** Placement/Edge/remote stub 产品路径。
+> 下文为历史正文，勿再当作现行需求。
 
 ---
 

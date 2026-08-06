@@ -34,7 +34,7 @@
 | Manage | Registry + **Workgroup**；旧 A2A inbox 另轨 |
 | 数据 | **不保证**旧 session 数据迁移；可清空重建 |
 | 工作组（现行） | 跨机器协作 **只经工作组**；见 [workgroup-and-node-gateway.md](./workgroup-and-node-gateway.md) |
-| 远程 Agent / Placement | **废弃**（曾见 `remote-agent-placement.md`，已 superseded） |
+| 远程 Agent / Placement | **不做**（跨机走 Workgroup） |
 
 ---
 

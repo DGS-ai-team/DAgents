@@ -1,4 +1,6 @@
-# Node 中心架构：过时设计清理清单
+# Node 中心架构：过时设计清理清单（归档）
+
+> 已归档。一次性清理清单；多数项已完成。现行架构见 handbook 与 [workgroup-and-node-gateway.md](../../design/workgroup-and-node-gateway.md)。
 
 > 分支：`cursor/remote-agent-placement-7e3e`  
 > 背景：Registry / Placement / 多 Agent 实例已按 **Node** 运作；进程级 `ops`/`compliance` 角色模型不再适合。

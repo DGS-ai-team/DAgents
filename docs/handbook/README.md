@@ -1,10 +1,9 @@
 # DAgents 项目手册
 
 **版本**：与代码同步（预览 **v0.9.1**）  
-**定位**：本仓库**唯一**技术文档入口——由核心到外围，写到能跟读源码的深度。专题长文见 `docs/architecture/`、`docs/design/`。
+**定位**：本仓库**唯一**技术文档入口——架构、接口、配置、联调与源码导航。根目录 [README](../../README.md) 面向「能做什么」的产品介绍；具体怎么配、怎么测、契约是什么，以本手册为准。
 
-> **现行架构**：单 Node 多 Agent + 内嵌 Web UI；Manage 可选；协作面为 **Workgroup**（非 Placement）。沙箱运行时已移除。  
-> 实现章节（如 [02](./02-Agent-Node-核心.md)）仍可能使用内部词 *session/runtime*；**产品介绍**以根 [README](../../README.md)、本章目录与 [CHANGELOG](../../CHANGELOG.md) 为准。
+> **架构要点**：人机入口为 Node 内嵌 **Web UI**（`/ui/`）；跨机协作走 **Workgroup**；工具边界靠工具组、审批策略与工作区路径（无独立沙箱进程）。产品概览见根 [README](../../README.md)，工作组见 [07-Workgroup协作](./07-Workgroup协作.md)。
 
 ---
 
@@ -12,7 +11,8 @@
 
 | 你是谁 | 推荐路径 | 预计时间 |
 |--------|----------|----------|
-| **新人 / 联调** | [00-导读](./00-导读.md) → [01-愿景与架构](./01-愿景与架构.md) → 根 [README](../../README.md) 快速开始 | 1–2 小时 |
+| **先看产品再动手** | 根 [README](../../README.md) → [00-导读](./00-导读.md) → [07-Workgroup协作](./07-Workgroup协作.md)（若要用协作） | 30–60 分钟 |
+| **新人 / 联调** | [00-导读](./00-导读.md) → [01-愿景与架构](./01-愿景与架构.md) → [附录/配置项参考](./附录/配置项参考.md) | 1–2 小时 |
 | **用工作组** | [07-Workgroup协作](./07-Workgroup协作.md) → [workgroup 产品规范](../design/workgroup-and-node-gateway.md) | 1–2 小时 |
 | **改 Node 内部** | [02-Agent-Node-核心](./02-Agent-Node-核心.md) → `node/internal/*/REFERENCE.md` | 半天 |
 | **做 Manage / 契约** | [05-Manage与A2A](./05-Manage与A2A.md) → [workgroup-d05-contracts](../design/workgroup-d05-contracts.md) | 2–4 小时 |
@@ -74,7 +74,7 @@
 | [附录/内置工具参考.md](./附录/内置工具参考.md) | 内置工具 |
 | [附录/SSE事件速查.md](./附录/SSE事件速查.md) | SSE |
 | [附录/配置项参考.md](./附录/配置项参考.md) | 配置 |
-| [附录/重大设计变更实录.md](./附录/重大设计变更实录.md) | 架构级变更 |
+| [附录/Prometheus观测.md](./附录/Prometheus观测.md) | Manage `/metrics` |
 | [附录/路线图与远期方案.md](./附录/路线图与远期方案.md) | 远期索引 |
 
 ---
@@ -84,7 +84,6 @@
 | 文档 | 说明 |
 |------|------|
 | [../README.md](../README.md)（docs 地图） | handbook / design / architecture 索引 |
-| [../archive/README.md](../archive/README.md) | 历史与 superseded 策略 |
 | [../design/v0.9.1-smoke-checklist.md](../design/v0.9.1-smoke-checklist.md) | v0.9.1 预览验收 |
 | [AGENTS.md](../../AGENTS.md) | Cloud / 代理环境启动注意 |
 | [CHANGELOG.md](../../CHANGELOG.md) | 版本记录 |

@@ -2,7 +2,7 @@
 
 ## 本章回答什么问题
 
-> **现行**：跨机器协作主路径是 **Workgroup**。A2A **inbox / `agent_invoke` / Console Inbox** 已拆除；旧叙述见 [docs/future/a2a-via-manage.md](../future/a2a-via-manage.md)（历史）。
+跨机器协作主路径是 **Workgroup**。用户向操作说明：[07-Workgroup协作](./07-Workgroup协作.md)。产品规范：[workgroup-and-node-gateway.md](../design/workgroup-and-node-gateway.md)。
 
 读完本章，你应能：
 
@@ -34,7 +34,7 @@
 | **Manage Console** | Manage | Registry、工作组管理、制品、案例 |
 | **Node Dialer** | Manage WS | 拉 outbox、回传 tool.result / provision |
 
-- **禁止** Node↔Node 直连驱动成员（无 Placement）。  
+- **禁止** Node↔Node 直连驱动成员（工作组命令经 Manage）。  
 - **禁止** 把工作组成员当成 `/v1/agents` 本地会话打开。
 
 ---

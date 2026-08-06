@@ -1,6 +1,6 @@
-# A2A 经 Manage 中继（Task 模型）
+# A2A 经 Manage 中继（Task 模型）（归档）
 
-> **历史文档（已退役，2026-08）**：A2A Task inbox、`agent_invoke` / `agent_discover`、Console「Inbox」均已拆除。跨机器协作请使用 **工作组（Workgroup）**。下文仅作归档参考，勿按此实现。
+> **已归档（退役）**。跨机器协作请使用 **工作组（Workgroup）**：[../handbook/07-Workgroup协作.md](../handbook/07-Workgroup协作.md)。下文仅作溯源，勿按此实现。
 
 本文曾定义 **主 Agent 之间** 的 A2A 协作规则：**一律经 Manage**，**禁止 Agent Node 直连其他 Agent Node**。
 

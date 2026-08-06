@@ -9,7 +9,7 @@
 - 使用 **Web UI**（默认）并联调 Node  
 - 配置 `packaging/agent-client/config.yaml`  
 
-> **v0.9.1**：人机默认入口是 **内嵌 Web UI**（`/ui/`）。`dagents-client` 仅保留 probe / update / version；对话型 TUI/CLI 已移除。下文若出现历史 TUI 命令，仅作归档说明。
+> 人机入口是 **内嵌 Web UI**（`/ui/`）。`dagents-client` 提供 probe / update / version 等运维命令。
 
 ---
 
@@ -18,10 +18,9 @@
 | 原则 | 说明 |
 |------|------|
 | **用户面 = Agent** | 1 Agent = 1 主对话；主路径 `/v1/agents/{agent_id}/...` |
-| **`/v1/sessions*` 已移除** | 未注册路由（404） |
-| **Policy / 侧车按 Agent** | SQLite（`agents.db`）；全局 `/v1/policy` 已移除（404） |
+| **Policy / 侧车按 Agent** | SQLite（`agents.db`） |
 | **UI / 工具只连 Node** | 浏览器打开本机 `/ui/`；工具在 Node 内执行 |
-| **跨 Node = Workgroup** | Placement / A2A inbox 已拆除；注册用 `node_id` |
+| **跨 Node = Workgroup** | 注册与 ACL 使用 `node_id` |
 
 ### 1.1 路径前缀
 
@@ -71,7 +70,7 @@ GET /v1/agent/info
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/v1/agents` | 创建 Agent（勿再传 `sandbox`） |
+| POST | `/v1/agents` | 创建 Agent |
 | GET | `/v1/agents` | 列表 |
 | DELETE | `/v1/agents/{id}` | 归档 |
 | POST | `/v1/agents/{id}/ensure` | 装入运行时 |
@@ -161,7 +160,7 @@ GET /v1/streams?agent_id=agt-...
 
 ### 3.3 辅助二进制
 
-`dagents-client`：**probe / update / version** 等运维命令；**不再**提供 `tui` / `chat` 对话模式。
+`dagents-client`：**probe / update / version** 等运维命令。
 
 ---
 

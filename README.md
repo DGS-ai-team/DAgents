@@ -5,186 +5,150 @@
 <p align="center">
   <h1 align="center">DAgents</h1>
   <p align="center">
-    本地优先的企业 Agent 控制台 — Go Agent Node · 内嵌 Web UI · Manage 工作组协作
+    跑在你自己机器上的 AI 助手控制台
+    <br />
+    本机对话 · 工具与审批 · 多机工作组协作
+    <br />
     <br />
     <a href="docs/handbook/README.md"><strong>项目手册 »</strong></a>
     ·
-    <a href="docs/handbook/07-Workgroup协作.md"><strong>工作组协作 »</strong></a>
+    <a href="docs/handbook/07-Workgroup协作.md"><strong>工作组怎么用 »</strong></a>
     ·
     <a href="CHANGELOG.md">变更记录</a>
-    ·
-    <a href="docs/design/v0.9.1-smoke-checklist.md">v0.9.1 预览清单</a>
   </p>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.9.1--preview-orange" alt="v0.9.1 preview"></a>
-  <a href="go.work"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
-  <a href="requirements.txt"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
 </p>
 
 ---
 
-## 一句话
+## DAgents 是什么
 
-**DAgents** 让你在内网机器上跑本地 Agent（工具调用、HITL、持久化），并用 **Manage 工作组** 把多台 Node 上的成员编排在一起——不是通用工作流搭建器，而是可治理的企业本地助手控制台。
+**DAgents** 把大模型助手装进你的内网或个人电脑：数据与工具默认落在本机，浏览器打开就能用。需要多人、多台电脑一起干活时，再用工作组把几台机器上的助手编在一起。
 
-当前预览主线：**v0.9.1**（正式版前最后一个大预览）。验收与边界见 [v0.9.1-smoke-checklist.md](docs/design/v0.9.1-smoke-checklist.md)。
+它不是拖拽式「万能工作流」平台，而是面向企业与团队的 **本地优先助手控制台**——能管工具权限、能等人确认、能把对话与文件留在自己这边。
+
+当前版本为 **v0.9.1 预览**（正式版前最后一个大预览）。能力边界与验收步骤见手册中的 [预览清单](docs/design/v0.9.1-smoke-checklist.md)。
 
 ---
 
-## 三个组件
+## 你能做什么
 
-| 组件 | 做什么 | 默认入口 |
-|------|--------|----------|
-| **Agent Node**（Go） | 多 Agent 运行时、内置工具、SSE、内嵌 Web UI | `http://127.0.0.1:18765/ui/` |
-| **Manage**（Python） | Registry、工作组 Leader、Console | `http://127.0.0.1:8020/console/` |
-| **Desktop Shell**（可选） | Windows 托盘启停 Node（Tauri / Go 双轨） | 安装包附带 |
+### 本机助手
+
+- **多助手并行**：按场景创建多个助手，各自对话、各自工具开关。
+- **读写本机文件、跑命令**：在设定好的工作目录内读改文件、搜索、执行终端命令（可按策略要求先审批）。
+- **技能与定时**：加载技能包扩展能力；按时间或条件触发任务。
+- **浏览器任务**：把「打开网页、填表、摘信息」交给伴生浏览器助手，主对话里能看到任务结论与引用。
+- **临时帮手**：复杂任务可再开短期子助手，做完回收。
+- **需要你拍板时会停住**：危险操作可审批；也可以主动问你一句再继续。
+
+### 工作组协作（可选）
+
+适合几台电脑、几个角色一起完成一件事：
+
+- **建组与成员**：指定哪台机器托管哪个成员，成员只在自己的工作区里动手。
+- **主管编排**：主管助手把任务分给成员；也可以在对话里 **@某成员** 直接交代。
+- **成员工具**：默认可读写工作区文件与搜索；需要时再单独打开 Shell（默认不开，更安全）。
+- **进度可见**：时间线、任务卡片、流式输出；跑偏了可以取消本轮。
+- **问人确认**：成员或主管可以把问题抛给你，你回答后再继续。
+
+> 工作组怎么开、默认能勾哪些工具：见 [工作组协作](docs/handbook/07-Workgroup协作.md)。
+
+### 安装与更新
+
+- Windows / Linux 安装包；可选桌面托盘一键启停。
+- 可选集中控制台做节点登记与工作组管理。
+- 可选通过发布中心做客户端自更新。
+
+---
+
+## 怎么组成
+
+用起来只需要记住三块（后两块都是可选的）：
+
+| 你看到的 | 作用 |
+|----------|------|
+| **本机控制台**（浏览器） | 日常对话、建助手、改设置；和本机服务绑在一起 |
+| **集中控制台**（可选） | 多机登记、建工作组、看协作过程 |
+| **桌面托盘**（可选） | Windows 上启停本机服务，少碰命令行 |
 
 ```mermaid
 flowchart LR
-  UI["Node Web UI /ui/"] --> NODE["Agent Node"]
-  CON["Manage Console"] --> MG["Manage"]
-  NODE <-->|注册 / Workgroup WS| MG
-  NODE2["其他 Node"] <-->|Worker Dialer| MG
+  A["本机浏览器"] --> B["本机服务"]
+  C["集中控制台"] --> D["集中服务"]
+  B <-->|可选：登记与协作| D
+  E["其他机器上的本机服务"] <-->|可选：协作| D
 ```
 
-- **本地对话**：只开 Node + Web UI 即可（可用 `llm.mock` 免 Key）。
-- **跨机协作**：开 Manage，Node 开启 `manage` + workgroup，建组后 Supervisor 编排或 `@成员` 直达。
+- **只想本机聊天**：开本机服务 → 打开本机控制台即可（可先用演示模式，不用填 API Key）。
+- **要跨机协作**：再开集中服务，并在本机设置里打开协作相关选项。
+
+架构、接口、配置项等技术说明写在 [项目手册](docs/handbook/README.md)，不在本页展开。
 
 ---
 
-## 功能概览
+## 五分钟上手
 
-- **Agent 实例** — 模板创建、工具组、skills、triggers、临时子 Agent、浏览器伴生任务
-- **HITL** — 工具审批、`ask_user_information`；Web UI 队列 + resume
-- **工作组** — 建组 / ACL / 成员 provision；`assign_workgroup_task`；`@member`；信息型 HITL；取消 turn；成员工作区 **fs**（默认）+ 可选 **bash**
-- **策略与审计** — 本地 approval 策略、JSONL / SQLite 会话、RunHistory 调试
-- **分发** — Windows / Linux 安装包；Manage Docker；Release Hub 自更新（可选）
+### 需要准备
 
-### 预览边界（请先读）
+- Go **1.25+**（跑本机服务）
+- 第一次从源码跑时：用 Node.js 构建一次前端静态资源
+- 若要用工作组：再准备 Python **3.11+**
 
-| 不做 / 限制 | 说明 |
-|-------------|------|
-| 成员无 browser / skills / triggers | 仅工作区可执行工具（fs + 可选 bash） |
-| 无进程级沙箱 | Agent 与成员 bash 均约束在 `fs_root` / 成员目录 + 工具组 |
-| Placement / 远端旁观 | 产品入口已拆除 |
-| D05 全量契约执行器 | 部分 golden + INDEX harness，非全量 |
-
----
-
-## 快速开始
-
-### 前置
-
-| 组件 | 要求 |
-|------|------|
-| Go | 1.25+（[`go.work`](go.work)） |
-| Python | 3.11+（仅 Manage / 测试） |
-| Web UI 静态资源 | 开发机需先构建：`npm run build --prefix node/webui/frontend`（`go:embed`） |
-
-### 1. 配置
+### 启动本机服务
 
 ```bash
 git clone https://github.com/DGS-ai-team/DAgents.git
 cd DAgents
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
-```
 
-YAML 只引导 `listen` / `local`；LLM 与能力在 Web UI / SQLite。联调可开 **mock LLM**（无需 API Key）。
-
-### 2. 启动 Node
-
-```bash
-# 若 static/ 为空，先构建 Web UI
 npm run build --prefix node/webui/frontend
-
 go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 ```
 
-打开 `http://127.0.0.1:18765/ui/` → 完成首配 → 新建 Agent 对话。
+浏览器打开 **http://127.0.0.1:18765/ui/** → 完成首次设置 → 新建助手开始对话。
 
-### 3. （可选）Manage + 工作组
+### 可选：集中控制台 + 工作组
 
 ```bash
 pip install -r requirements.txt
-npm run build --prefix manage/console/frontend   # 首次
-python run_manage.py
-# Console: http://127.0.0.1:8020/console/
-```
-
-Node 设置中启用 Manage / workgroup 后自动注册与 Dialer。工作组用法：[07-Workgroup协作.md](docs/handbook/07-Workgroup协作.md)。
-
-探活：`curl -s http://127.0.0.1:18765/health`
-
----
-
-## 配置要点
-
-| 来源 | 内容 |
-|------|------|
-| `config.yaml` | `listen` / `local`；`manage.*` 开关 |
-| `./.runtime` | 固定运行时根（不可配置） |
-| `node_settings.db` / `llm_configs.db` | LLM、工具、UI、Manage 等 |
-
-进程锁：`packaging/agent-client/.dagents-node-*.lock`；重启报「已在运行」时先确认无存活进程再删锁。
-
----
-
-## 开发与测试
-
-```bash
-npm run build --prefix node/webui/frontend
-go test ./node/... ./client/... ./shared/config/...
-
 npm run build --prefix manage/console/frontend
-python -m unittest discover -s tests -p "test_*.py" -v
-
-npm test --prefix node/webui/frontend
+python run_manage.py
 ```
 
-Cloud / 代理环境注意见 [AGENTS.md](AGENTS.md)。
+浏览器打开 **http://127.0.0.1:8020/console/**。本机设置里启用集中服务与工作组后即可建组协作。
+
+更细的配置、进程锁、联调注意项：[手册 · 导读与快速路径](docs/handbook/00-导读.md)、[配置项参考](docs/handbook/附录/配置项参考.md)、[AGENTS.md](AGENTS.md)。
 
 ---
 
-## 仓库结构
+## 当前预览还不能做什么
 
-```text
-node/                 # Go Agent Node + 内嵌 Web UI
-client/               # 精简 Go client（probe / update / version 等）
-manage/               # Manage API + Console + workgroup
-shared/config/        # 共用配置
-desktop/              # Windows Shell（tray / tray-tauri）
-packaging/            # 安装包、模板、config.example
-docs/handbook/        # 技术文档主干
-docs/design/          # 设计与验收清单（含 workgroup 契约）
-tests/                # Python 单测
-```
+说人话的边界（细节仍以手册清单为准）：
+
+- 工作组成员 **没有** 浏览器任务、技能包、定时触发等本机助手那一套完整能力，主要在自己的工作区里读写文件（Shell 需额外打开）。
+- **没有** 额外的进程隔离沙箱；安全主要靠工作目录边界、工具开关和审批策略。
+- 旧的「远端旁观 / 远程放置」产品入口已去掉，跨机请走工作组。
 
 ---
 
-## 文档地图
+## 文档往哪找
 
-| 文档 | 内容 |
-|------|------|
-| [docs/handbook/README.md](docs/handbook/README.md) | **唯一正文入口** |
-| [docs/handbook/07-Workgroup协作.md](docs/handbook/07-Workgroup协作.md) | 工作组用户向说明 |
-| [docs/design/workgroup-and-node-gateway.md](docs/design/workgroup-and-node-gateway.md) | 工作组产品规范 |
-| [docs/design/v0.9.1-smoke-checklist.md](docs/design/v0.9.1-smoke-checklist.md) | 预览验收清单 |
-| [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md) | HTTP / SSE |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更 |
-| [docs/roadmap.md](docs/roadmap.md) | 产品路线图 |
-| [docs/archive/README.md](docs/archive/README.md) | 历史 / superseded 文档策略 |
+| 想了解… | 去这里 |
+|---------|--------|
+| 特性之后的技术全貌 | [项目手册](docs/handbook/README.md) |
+| 工作组逐步操作 | [07 · 工作组协作](docs/handbook/07-Workgroup协作.md) |
+| 预览验收勾选 | [v0.9.1 清单](docs/design/v0.9.1-smoke-checklist.md) |
+| 版本改了什么 | [CHANGELOG](CHANGELOG.md) |
+| 安装包与离线安装 | [packaging 说明](packaging/agent-client/README.md) · [离线安装](packaging/OFFLINE_INSTALL.md) |
+| 产品路线 | [roadmap](docs/roadmap.md) |
 
----
-
-## 预编译包
-
-GitHub Releases：`dagents-local-assistant-*`（Linux / Windows）、Manage bundle。安装与离线说明见 [packaging/agent-client/README.md](packaging/agent-client/README.md)、[packaging/OFFLINE_INSTALL.md](packaging/OFFLINE_INSTALL.md)。
-
-推荐第三方 CLI：[packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)。
+开发自测、仓库目录、HTTP/事件契约等均以手册与 `docs/architecture/` 为准。
 
 ---
 

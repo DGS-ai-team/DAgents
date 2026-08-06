@@ -2,8 +2,8 @@
 
 > **状态**：v0.* 现网实现（`manage/`）  
 > **2026-08**：A2A Task inbox / `agent_invoke` / Console Inbox **已拆除**；跨机协作改走 **工作组**。下文含历史 A2A 叙述处请以 handbook/05 为准。  
-> **对齐**：[three-component-model.md](./three-component-model.md)、[roadmap.md](../roadmap.md)  
-> **相关**：通信全量参考 [manage-communication.md](../manage-communication.md) · 运维入口 [manage/README.md](../../manage/README.md) · 后续规划 [manage-phase2-capabilities.md](./manage-phase2-capabilities.md)
+> **对齐**：[roadmap.md](../roadmap.md) · [handbook/05](../handbook/05-Manage与A2A.md)  
+> **相关**：运维入口 [manage/README.md](../../manage/README.md) · 后续规划 [manage-phase2-capabilities.md](./manage-phase2-capabilities.md) · 通信叙述 [handbook/05](../handbook/05-Manage与A2A.md)
 
 ---
 
@@ -137,7 +137,7 @@ queued → delivered → processing → completed | failed | expired
         awaiting_caller → caller_notified → caller_responded → processing → completed
 ```
 
-**Node 侧**：InboxPoller（`inbox_poller.go`）long poll + 断线短 poll；`role=compliance` 由 `compliance_executor.go` 跑本地 turn；工具 `agent_invoke` / `agent_discover`（`node/internal/tools/tool_a2a.go`）。HITL 中继细节见 [manage-communication.md](../manage-communication.md) §4.2。
+**Node 侧**：注册 / 心跳 / Workgroup Dialer 出站连 Manage。跨机协作见 [handbook/05](../handbook/05-Manage与A2A.md)、[07](../handbook/07-Workgroup协作.md)。
 
 **待做**：`POST /v1/a2a/broadcast`（按 groups 扇出）。
 

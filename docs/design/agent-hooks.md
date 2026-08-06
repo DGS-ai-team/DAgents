@@ -6,7 +6,7 @@
 
 **首版落地候选**：[tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md)（`tool.before_each` + policy 三档收敛；**duplicate 仅 `rule`+auto** + 三选项审批）。
 
-**相关索引**：[three-component-model.md](./three-component-model.md)（Node / Client / Manage 边界）、[triggers-design.md](../triggers-design.md)（外部触发 turn）、[architecture/go-node-internals.md](../architecture/go-node-internals.md)（runtime 与 Orchestrator）、[security-rollout.md](../security-rollout.md)（审批与策略）。
+**相关索引**：[architecture/go-node-internals.md](../architecture/go-node-internals.md)（runtime 与 Orchestrator）、[node/internal/triggers/README.md](../../node/internal/triggers/README.md)（外部触发 turn）、[handbook/04](../handbook/04-能力与策略.md)（审批与策略）。
 
 ---
 
