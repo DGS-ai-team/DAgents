@@ -10,7 +10,7 @@
 
 ### 新增
 
-- **浏览器伴生 Agent**：创建主 Agent 且 `enabled_groups` 含 `browser` 时自动创建持久伴生（`{agent_id}-browser`）；主 Agent 仅暴露 `browser_run_task` / `browser_task_status` / `browser_task_cancel`，由 sidecar `browser_use.Agent` 闭环执行；Chrome `session_key` 为伴生 id，独立 profile/debug port，同伴生任务排队。细粒度 `browser_*` 迁入内部组 `browser_ops`。列表隐藏伴生，删除主 Agent 级联归档伴生。默认 `browser.max_sessions` 提升为 8。sidecar 对 Agent 追加 DAgents `extend_system_message`（中文/安全/回传约定）；`browser_task_status` 扁平回灌 `summary` / `success` / `urls` / `screenshot_paths` 等字段。列表时为存量 Agent 补齐伴生；mock LLM 返回中文说明；Web UI 工具摘要展示任务目标与结论。
+- **浏览器伴生 Agent**：创建主 Agent 且 `enabled_groups` 含 `browser` 时自动创建持久伴生（`{agent_id}-browser`）；主 Agent 仅暴露 `browser_run_task` / `browser_task_status` / `browser_task_cancel`，由 sidecar `browser_use.Agent` 闭环执行；Chrome `session_key` 为伴生 id，独立 profile/debug port，同伴生任务排队。细粒度 `browser_*` 迁入内部组 `browser_ops`。列表隐藏伴生，删除主 Agent 级联归档伴生。默认 `browser.max_sessions` 提升为 8。sidecar 对 Agent 追加 DAgents `extend_system_message`（中文/安全/回传约定）；`browser_task_status` 扁平回灌 `summary` / `success` / `urls` / `screenshot_paths` 等字段。列表时为存量 Agent 补齐伴生；mock LLM 返回中文说明；Web UI 工具摘要展示任务目标与结论。`browser_run_task` 默认 wait=true 同步等待完成并返回 summary；派发前校验伴生记录存在。
 - **首次进入 Web UI 的 Node 身份首配页**：开箱未完成时全屏三步收集主题、「怎么称呼你 / Node 名称」与一条 LLM 配置，写入 `user.preferred_name` / `agent.name` / `llm.profiles` 与 `onboarding.node_profile_completed`；未完成前拦截本机业务 API（仅放行 bootstrap / setup / LLM 探测 / `/ui` 静态资源与探活），且不启动 Manage Registrar / Workgroup Dialer（升级遗留库视为已完成）。
 
 ### 变更
