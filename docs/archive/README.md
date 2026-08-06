@@ -1,29 +1,34 @@
-# 文档归档策略
+# 文档归档
 
-本目录（及文首标明 **历史 / SUPERSEDED** 的设计文）存放**不再作为现行产品说明**的材料，避免新人把过期叙事当现状。
+本目录存放**不再作为现行产品说明**的材料，避免新人把过期叙事当现状。
 
 ## 原则
 
 | 类别 | 处理 |
 |------|------|
-| **现行** | `docs/handbook/`、现行 design（workgroup 契约、agent-instance-model 中与代码一致的部分）、architecture API |
-| **冻结契约** | `docs/design/workgroup-d05-contracts.md` + `fixtures/workgroup-d05/` — 仍有效，但是契约不是教程 |
-| **SUPERSEDED** | 文首大字标注；保留链接供溯源（如 Placement） |
-| **历史审核 / 一次性纪要** | 保留在原 design 文末「历史」节，或迁入本 archive；**不**链到 README 主路径 |
-| **临时草稿** | 合并进正式文后删除；禁止长期放在仓库根目录 |
+| **现行** | `docs/handbook/`、现行 `docs/design/`、`docs/architecture/` API |
+| **冻结契约** | `docs/design/workgroup-d05-contracts.md` + fixtures — 仍有效，但是契约不是教程 |
+| **归档** | 本目录；**不**链到根 README / handbook 主路径 |
+| **远期未落地** | `docs/future/`（非承诺） |
 
-## 已知 superseded / 历史入口
+## `design/` 归档索引
 
-| 文档 | 状态 |
+| 文档 | 说明 |
 |------|------|
-| [`../design/remote-agent-placement.md`](../design/remote-agent-placement.md) | SUPERSEDED → Workgroup |
+| [design/remote-agent-placement.md](./design/remote-agent-placement.md) | SUPERSEDED → Workgroup |
+| [design/node-centric-architecture-cleanup.md](./design/node-centric-architecture-cleanup.md) | 一次性清理清单（已完成项为主） |
+| [design/v0.6.0-smoke-checklist.md](./design/v0.6.0-smoke-checklist.md) | 旧发版 smoke（tag v0.6.0） |
+| [design/v0.6.1-smoke-checklist.md](./design/v0.6.1-smoke-checklist.md) | 旧发版 smoke（tag v0.6.1） |
+| [design/v0.6.2-smoke-checklist.md](./design/v0.6.2-smoke-checklist.md) | 旧发版 smoke（tag v0.6.2） |
+| [design/v0.7.0-smoke-checklist.md](./design/v0.7.0-smoke-checklist.md) | 旧发版 smoke（tag v0.7.0） |
+
+已删除的纯重定向 stub：`design/major-changes.md`（→ handbook 附录）、`design/background-and-motivation.md`（→ handbook/01）。
+
+## 其它
+
+| 入口 | 说明 |
+|------|------|
 | [`../design/workgroup-and-node-gateway.md`](../design/workgroup-and-node-gateway.md) §15–§16 | 历史审核纪要（正文以 §0–§13 为准） |
-| [`../future/`](../future/) | 未落地远期方案，非现行承诺 |
+| [`../future/`](../future/) | 未落地远期方案 |
 
-## 清理检查（发版前）
-
-- [ ] 根 README / handbook 入口不把「可选沙箱」「Placement」「`/v1/sessions*` CRUD」写成现行能力
-- [ ] design/README 表格状态与分期（D0.5–D5）一致
-- [ ] 死链：从 handbook README 点开的链接均可访问
-
-现行验收清单：[v0.9.1-smoke-checklist.md](../design/v0.9.1-smoke-checklist.md) §10。
+现行验收清单：[v0.9.1-smoke-checklist.md](../design/v0.9.1-smoke-checklist.md)。

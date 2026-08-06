@@ -29,7 +29,7 @@
 | [handbook/](./handbook/) | **现行正文** |
 | [architecture/](./architecture/) | Node 内部与 API 契约深文 |
 | [design/](./design/) | 设计规范、验收清单、专题分析 |
-| [archive/](./archive/) | 过期文归档（非现行阅读路径） |
+| [archive/](./archive/) | 过期设计与旧 smoke（见 [archive/README](./archive/README.md)） |
 | [future/](./future/) | 未落地远期方案（非承诺） |
 | [roadmap.md](./roadmap.md) | 产品路线图 |
 | [cases/](./cases/) | 案例索引 |
