@@ -34,14 +34,15 @@ func browserRunTaskToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "browser_run_task",
-			Description: "向本 Agent 的浏览器伴生派发一个网页任务（由 sidecar browser-use.Agent 闭环执行）。" +
-				"立即返回 task_id；用 browser_task_status 轮询，browser_task_cancel 取消。",
+			Description: "向本 Agent 的浏览器伴生派发一个网页任务（sidecar browser-use.Agent 闭环执行）。" +
+				"立即返回 task_id；用 browser_task_status 轮询直至 status=completed|failed|cancelled。" +
+				"任务描述请写清目标、约束与期望输出格式。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"task": map[string]any{
 						"type":        "string",
-						"description": "自然语言目标，例如「打开 example.com 并提取标题」",
+						"description": "自然语言目标，例如「打开 example.com 并提取标题；用中文回报」",
 					},
 					"max_steps": map[string]any{
 						"type":        "integer",
@@ -61,14 +62,16 @@ func browserTaskStatusToolDef() ToolDef {
 	return ToolDef{
 		Type: "function",
 		Function: FunctionDef{
-			Name:        "browser_task_status",
-			Description: "查询浏览器伴生任务状态；省略 task_id 时返回该伴生最近一次任务。",
+			Name: "browser_task_status",
+			Description: "查询浏览器伴生任务状态。completed 时 detail 含：" +
+				"summary（给主 Agent 的结论，同 extracted_content）、success、steps、urls、" +
+				"screenshot_paths、errors、duration_seconds；可直接引用 summary 回复用户。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"task_id": map[string]any{
 						"type":        "string",
-						"description": "browser_run_task 返回的 task_id",
+						"description": "browser_run_task 返回的 task_id；省略则查最近一次任务",
 					},
 				},
 				"additionalProperties": false,

@@ -13,8 +13,10 @@ from browser_use.browser.events import ClickCoordinateEvent, ClickElementEvent, 
 
 from dagents_browser.action_runner import ActionRunner
 from dagents_browser.config import BrowserServiceSettings
+from dagents_browser.agent_prompt import build_extend_system_message
 from dagents_browser.llm import create_extraction_llm
 from dagents_browser.ports import allocate_debug_port
+from dagents_browser.task_result import summarize_agent_history, task_status_response
 
 DEFAULT_SNAPSHOT_MAX = 150
 MAX_SNAPSHOT_MAX = 500
@@ -283,33 +285,23 @@ class BrowserUseDriver:
                         raise RuntimeError("browser session not started")
                     from browser_use import Agent
 
+                    task_fs = str(
+                        Path(self.settings.fs_root) / "browser" / "agent_fs" / sanitize_segment(session_key)
+                    )
+                    Path(task_fs).mkdir(parents=True, exist_ok=True)
                     agent = Agent(
                         task=task_text,
                         llm=llm,
                         browser_session=session,
+                        extend_system_message=build_extend_system_message(
+                            fs_root=self.settings.fs_root
+                        ),
+                        file_system_path=task_fs,
                     )
                     history = await agent.run(max_steps=max_steps)
-                    final = None
-                    success = None
-                    steps = None
-                    try:
-                        final = history.final_result() if history is not None else None
-                    except Exception:
-                        final = str(history) if history is not None else None
-                    try:
-                        success = history.is_successful() if history is not None else None
-                    except Exception:
-                        success = None
-                    try:
-                        steps = history.number_of_steps() if history is not None else None
-                    except Exception:
-                        steps = None
+                    summarized = summarize_agent_history(history)
                     entry["status"] = "completed"
-                    entry["result"] = {
-                        "final_result": final,
-                        "success": success,
-                        "steps": steps,
-                    }
+                    entry["result"] = summarized
             except asyncio.CancelledError:
                 entry["status"] = "cancelled"
                 entry["error"] = "cancelled"
@@ -334,17 +326,8 @@ class BrowserUseDriver:
         }
 
     def _task_public(self, entry: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "task_id": entry.get("task_id"),
-            "session_key": entry.get("session_key"),
-            "task": entry.get("task"),
-            "status": entry.get("status"),
-            "max_steps": entry.get("max_steps"),
-            "created_at": entry.get("created_at"),
-            "updated_at": entry.get("updated_at"),
-            "result": entry.get("result"),
-            "error": entry.get("error"),
-        }
+        # 兼容取消等仍返回扁平 detail 的调用方
+        return task_status_response(entry).get("detail") or {}
 
     async def _task_status(self, req: dict[str, Any]) -> dict[str, Any]:
         session_key = str(req.get("session_key") or "").strip()
@@ -358,7 +341,7 @@ class BrowserUseDriver:
         entry = self._tasks.get(task_id)
         if entry is None or entry.get("session_key") != session_key:
             return {"ok": False, "error": f"task not found: {task_id}"}
-        return {"ok": True, "detail": self._task_public(entry)}
+        return task_status_response(entry)
 
     async def _task_cancel(self, req: dict[str, Any]) -> dict[str, Any]:
         session_key = str(req.get("session_key") or "").strip()
@@ -385,7 +368,7 @@ class BrowserUseDriver:
             entry["status"] = "cancelled"
             entry["error"] = "cancelled"
             entry["updated_at"] = time.time()
-        return {"ok": True, "detail": self._task_public(entry)}
+        return task_status_response(entry)
 
     async def _cancel_session_tasks(self, session_key: str) -> None:
         for entry in list(self._tasks.values()):
