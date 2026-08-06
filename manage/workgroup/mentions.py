@@ -7,9 +7,6 @@ from typing import Any
 
 from manage.workgroup.errors import WorkgroupError
 
-# 匹配行首或空白后的 @DisplayName（至下一空白）
-_MENTION_RE = re.compile(r"(?:^|\s)@([^\s@]+)")
-
 
 def strip_member_mention(text: str, *, display_name: str) -> str:
     """从用户可见文案中去掉 @{display_name}，供 Member instruction 使用。"""

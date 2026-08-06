@@ -11,7 +11,6 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
 from manage.workgroup.llm_chat import ChatResult, MockLLMClient, describe_llm_resolution  # noqa: E402
 from manage.workgroup.models import WorkGroupCreateRequest  # noqa: E402
 from manage.workgroup.store import WorkGroupStore  # noqa: E402

@@ -471,7 +471,6 @@ class TurnKernel:
             if exc.code != "canceled":
                 raise
         except Exception as exc:  # noqa: BLE001
-            status = "failed"
             msg = str(exc) or exc.__class__.__name__
             self._store.set_assign_status(
                 assign.assign_id,
