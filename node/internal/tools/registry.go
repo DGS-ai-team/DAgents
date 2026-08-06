@@ -34,6 +34,7 @@ type Registry struct {
 	enabledOnly         map[string]struct{}
 	multimodalEnabled   bool
 	browser             *browser.Manager
+	browserCompanionExists BrowserCompanionExistsFunc
 	wecom               *wecom.Client
 	handlers            map[string]handler
 	pathEncMu           sync.Mutex

@@ -149,7 +149,7 @@ func TestBrowserToolsWithMockManager(t *testing.T) {
 		}
 		return browser.Response{OK: true}, nil
 	}
-	out, err = reg.Execute(ctx, "browser_run_task", `{"task":"open https://example.com"}`)
+	out, err = reg.Execute(ctx, "browser_run_task", `{"task":"open https://example.com","wait":false}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,4 +254,36 @@ func testBrowserConfigWithRoot(t *testing.T, fsRoot string) *config.Config {
 	}
 	cfg.ApplyDefaults()
 	return cfg
+}
+
+func TestBrowserRunTaskCompanionMissing(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := &browser.MockDriver{
+		Handler: func(_ context.Context, req browser.Request) (browser.Response, error) {
+			return browser.Response{OK: true}, nil
+		},
+	}
+	mgr, err := browser.NewManager(testBrowserConfig(t), mock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetBrowserManager(mgr)
+	reg.SetBrowserCompanionExists(func(_ context.Context, id string) (bool, error) {
+		if id != "sess-main-browser" {
+			t.Fatalf("id=%q", id)
+		}
+		return false, nil
+	})
+	ctx := WithSession(context.Background(), "sess-main")
+	out, err := reg.Execute(ctx, "browser_run_task", `{"task":"x","wait":false}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "伴生不存在") {
+		t.Fatalf("out=%s", out)
+	}
 }
