@@ -117,6 +117,12 @@ def build_workgroup_ws_router(
                             or 0
                         )
                         wid = payload.get("workgroup_id") or msg.get("workgroup_id")
+                        # 先落业务状态，避免 ack 校验失败时丢掉 provision/tool 结果
+                        if on_inbound is not None and mtype in {
+                            "tool.result",
+                            "member.provision_result",
+                        }:
+                            on_inbound(node_id, mtype, dict(payload))
                         if seq > 0 and gen > 0:
                             hub.ack_delivery(
                                 node_id,
@@ -124,8 +130,6 @@ def build_workgroup_ws_router(
                                 connection_generation=gen,
                                 workgroup_id=str(wid) if wid else None,
                             )
-                        if on_inbound is not None:
-                            on_inbound(node_id, mtype, dict(payload))
                         await outbound.put(
                             {"type": "delivery.acked", "payload": {"delivery_seq": seq, "type": mtype}}
                         )

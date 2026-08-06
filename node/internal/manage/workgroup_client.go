@@ -196,11 +196,31 @@ func (c *ControlClient) CreateWorkgroupMember(ctx context.Context, workgroupID s
 	return out, nil
 }
 
+// PatchWorkgroupMember 更新成员 Spec（会 re-provision）。
+func (c *ControlClient) PatchWorkgroupMember(ctx context.Context, workgroupID, memberID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/members/" + strings.TrimSpace(memberID)
+	if err := c.doJSON(ctx, http.MethodPatch, path, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GetWorkgroupMemberSpec 读取成员 MemberSpec 快照。
 func (c *ControlClient) GetWorkgroupMemberSpec(ctx context.Context, workgroupID, memberID string) (map[string]any, error) {
 	var out map[string]any
 	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/members/" + strings.TrimSpace(memberID) + "/spec"
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ArchiveWorkgroupMember 归档成员（侧栏删除）。
+func (c *ControlClient) ArchiveWorkgroupMember(ctx context.Context, workgroupID, memberID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/members/" + strings.TrimSpace(memberID) + "/archive"
+	if err := c.doJSON(ctx, http.MethodPost, path, map[string]any{}, &out); err != nil {
 		return nil, err
 	}
 	return out, nil

@@ -15,7 +15,9 @@ Node 侧工作组成员执行器。权威契约见：
 | Fencing（lease_epoch / generation / digest / catalog） | ✅ |
 | Tool manifest ∩ allowlist | ✅ |
 | 会话 `connection_generation` / resume cursor | ✅ 内存骨架 |
-| `read_file` 工作区执行 | ✅ D3 |
+| `read_file` 工作区执行 | ✅ |
+| `glob_files` / `write_file` 工作区执行 | ✅ |
+| Manage Member LLM loop（assign 内） | ✅ |
 | accepted 重启恢复（不双执行） | ✅ D3 |
 | Manage WS hub + Node envelope dispatch | ✅（`ws_hub` / `DispatchEnvelope`） |
 | Node WebSocket Dialer（hello/resume/分发） | ✅（`dialer.go`，`coder/websocket`） |

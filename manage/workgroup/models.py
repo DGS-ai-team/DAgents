@@ -178,6 +178,19 @@ class MemberCreateRequest(BaseModel):
     policy_ceiling: dict[str, Any] = Field(default_factory=dict)
 
 
+class MemberPatchRequest(BaseModel):
+    """更新成员展示名 / Spec（会 bump generation 并触发 re-provision）。"""
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=64)
+    llm_profile_id: str | None = Field(default=None, min_length=1)
+    llm_profile_revision: str | None = Field(default=None, min_length=1)
+    max_tool_loops: int | None = Field(default=None, ge=1, le=256)
+    prompt: MemberPrompt | None = None
+    allow_tool_names: list[str] | None = None
+    side_effect_classes: list[str] | None = None
+    policy_ceiling: dict[str, Any] | None = None
+
+
 class AssignCreateRequest(BaseModel):
     member_id: str = Field(pattern=_MB)
     leader_run_id: str | None = Field(default=None, pattern=_RN)

@@ -36,6 +36,7 @@ from manage.skills.store import SkillPackageStore
 from manage.storage.sqlite import SQLiteDatabase
 from manage.workgroup.routes import build_workgroup_router
 from manage.workgroup.store import WorkGroupStore
+from manage.workgroup.vertical import VerticalLoop
 from manage.workgroup.ws_hub import WorkgroupWSHub
 from manage.workgroup.ws_routes import build_workgroup_ws_router
 
@@ -93,13 +94,22 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     cases_store = CaseExampleStore(db=db if db.enabled else None)
     workgroup_store = WorkGroupStore(db=db if db.enabled else None)
     workgroup_ws_hub = WorkgroupWSHub(store=workgroup_store)
+    workgroup_loop = VerticalLoop(workgroup_store, hub=workgroup_ws_hub)
 
     app.include_router(build_auth_router(session_store, store))
     app.include_router(build_registry_router(store, audit))
     app.include_router(
-        build_workgroup_router(workgroup_store, audit, hub=workgroup_ws_hub, llm_store=llm_store)
+        build_workgroup_router(
+            workgroup_store,
+            audit,
+            hub=workgroup_ws_hub,
+            llm_store=llm_store,
+            loop=workgroup_loop,
+        )
     )
-    app.include_router(build_workgroup_ws_router(workgroup_ws_hub))
+    app.include_router(
+        build_workgroup_ws_router(workgroup_ws_hub, on_inbound=workgroup_loop.handle_inbound)
+    )
     app.include_router(build_llm_router(llm_store, audit))
     app.include_router(build_blob_router(blob))
     app.include_router(build_skills_router(skills_store, blob, audit))
@@ -146,6 +156,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     app.state.releases_store = releases_store
     app.state.workgroup_store = workgroup_store
     app.state.workgroup_ws_hub = workgroup_ws_hub
+    app.state.workgroup_loop = workgroup_loop
     return app
 
 

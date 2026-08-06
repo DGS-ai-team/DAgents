@@ -203,6 +203,21 @@ class WorkgroupWSHub:
     ) -> WSEnvelope | None:
         return self.push_to_node(home_node_id, frame)
 
+    def request_resume(self, node_id: str, workgroup_id: str) -> dict[str, Any] | None:
+        """若 Node 已在线，按其连接游标对本组补发 resume（幂等 gap-fill）。"""
+        nid = (node_id or "").strip()
+        wid = (workgroup_id or "").strip()
+        if not nid or not wid:
+            return None
+        conn = self.get_connection(nid)
+        if conn is None or not conn.active:
+            return None
+        return self.resume_offer(
+            nid,
+            workgroup_id=wid,
+            last_ack_delivery_seq=int(conn.last_ack_delivery_seq or 0),
+        )
+
     def reconcile_unacked(self, workgroup_id: str) -> list[OutboxFrame]:
         """Manage 重启后：列出未 ack outbox（不断言重复 assign）。"""
         return self.store.list_outbox(workgroup_id, unacked_only=True)

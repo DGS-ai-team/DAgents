@@ -20,6 +20,7 @@ from manage.workgroup.models import (
     AssignCreateRequest,
     ACLPatchRequest,
     MemberCreateRequest,
+    MemberPatchRequest,
     MemberSpec,
     MemberTools,
     MemberWorkspace,
@@ -353,6 +354,9 @@ class WorkGroupStore:
             )
             self._acls[workgroup_id] = updated
             self._put("workgroup_acls", workgroup_id, updated.model_dump_json(), workgroup_id=workgroup_id)
+            # 新进 ACL 的节点自动订阅，便于后续作为 Home 收 provision / Dialer resume
+            for nid in owners + collaborators:
+                self._subscribe_unlocked(workgroup_id, nid)
             return updated
 
     def assert_acl_member(self, workgroup_id: str, node_id: str) -> WorkGroupACL:
@@ -415,12 +419,147 @@ class WorkGroupStore:
             if self._db is None:
                 self._put("member_specs", mid, spec.model_dump_json(), workgroup_id=workgroup_id)
                 self._put("workgroup_members", mid, member.model_dump_json(), workgroup_id=workgroup_id)
+                self._subscribe_unlocked(workgroup_id, home)
                 return member, spec
             with self._db.connect() as tx:
                 self._put("member_specs", mid, spec.model_dump_json(), workgroup_id=workgroup_id, conn=tx)
                 self._put("workgroup_members", mid, member.model_dump_json(), workgroup_id=workgroup_id, conn=tx)
                 tx.commit()
+            # Home Node 自动订阅：Dialer resume 才能拉到 pending member.provision
+            self._subscribe_unlocked(workgroup_id, home)
             return member, spec
+
+    def update_member(
+        self, workgroup_id: str, member_id: str, req: MemberPatchRequest
+    ) -> tuple[WorkGroupMember, MemberSpec]:
+        """更新 MemberSpec：bump generation、重算 digest，状态回到 provisioning。"""
+        with self._lock:
+            self.require_mutable(workgroup_id)
+            member = self._members.get(member_id)
+            if member is None or member.workgroup_id != workgroup_id:
+                raise WorkgroupError("not_found", "member not found", http_status=404)
+            if member.status == "archived":
+                raise WorkgroupError("conflict", "member is archived", http_status=409)
+            spec = self._specs.get(member_id)
+            if spec is None:
+                raise WorkgroupError("not_found", "member spec not found", http_status=404)
+
+            display_name = (
+                req.display_name.strip() if req.display_name is not None else spec.display_name
+            )
+            llm_profile_id = (
+                req.llm_profile_id.strip() if req.llm_profile_id is not None else spec.llm_profile_id
+            )
+            llm_profile_revision = (
+                req.llm_profile_revision.strip()
+                if req.llm_profile_revision is not None
+                else spec.llm_profile_revision
+            )
+            max_tool_loops = (
+                int(req.max_tool_loops) if req.max_tool_loops is not None else spec.max_tool_loops
+            )
+            prompt = req.prompt if req.prompt is not None else spec.prompt
+            allow_names = (
+                list(req.allow_tool_names)
+                if req.allow_tool_names is not None
+                else list(spec.tools.allow_names)
+            )
+            side_effect_classes = (
+                list(req.side_effect_classes)
+                if req.side_effect_classes is not None
+                else list(spec.tools.side_effect_classes)
+            )
+            policy_ceiling = (
+                dict(req.policy_ceiling)
+                if req.policy_ceiling is not None
+                else dict(spec.policy_ceiling)
+            )
+            new_gen = int(member.member_generation) + 1
+            tools = MemberTools(allow_names=allow_names, side_effect_classes=side_effect_classes)
+            draft = {
+                "member_id": member_id,
+                "workgroup_id": workgroup_id,
+                "home_node_id": member.home_node_id,
+                "display_name": display_name,
+                "member_generation": new_gen,
+                "llm_profile_id": llm_profile_id,
+                "llm_profile_revision": llm_profile_revision,
+                "max_tool_loops": max_tool_loops,
+                "prompt": prompt.model_dump(),
+                "memory": spec.memory.model_dump(),
+                "tools": tools.model_dump(),
+                "policy_ceiling": policy_ceiling,
+                "workspace": MemberWorkspace().model_dump(),
+                "skills": "disabled",
+                "hooks": "disabled",
+            }
+            digest = sha256_digest(draft)
+            new_spec = MemberSpec.model_validate({**draft, "digest": digest})
+            updated = member.model_copy(
+                update={
+                    "display_name": display_name,
+                    "member_generation": new_gen,
+                    "member_spec_digest": digest,
+                    "status": "provisioning",
+                }
+            )
+            self._specs[member_id] = new_spec
+            self._members[member_id] = updated
+            self._put("member_specs", member_id, new_spec.model_dump_json(), workgroup_id=workgroup_id)
+            self._put(
+                "workgroup_members", member_id, updated.model_dump_json(), workgroup_id=workgroup_id
+            )
+            return updated, new_spec
+
+    def _subscribe_unlocked(self, workgroup_id: str, node_id: str) -> Subscription | None:
+        """调用方须已持有 self._lock；node 须已在 ACL 内。"""
+        nid = (node_id or "").strip()
+        if not nid:
+            return None
+        if self.get_workgroup(workgroup_id) is None:
+            return None
+        try:
+            self.assert_acl_member(workgroup_id, nid)
+        except WorkgroupError:
+            return None
+        bucket = self._subscriptions.setdefault(workgroup_id, {})
+        existing = bucket.get(nid)
+        if existing is not None:
+            return existing
+        sub = Subscription(
+            workgroup_id=workgroup_id,
+            node_id=nid,
+            subscribed_at=_now(),
+        )
+        bucket[nid] = sub
+        self._put(
+            "workgroup_subscriptions",
+            f"{workgroup_id}:{nid}",
+            sub.model_dump_json(),
+            workgroup_id=workgroup_id,
+        )
+        return sub
+
+    def ensure_member_homes_subscribed(self, workgroup_id: str) -> list[str]:
+        """确保各成员 Home Node 已订阅（Dialer resume 依赖订阅列表）。"""
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            added: list[str] = []
+            for m in self._members.values():
+                if m.workgroup_id != workgroup_id:
+                    continue
+                if m.status in {"archived"}:
+                    continue
+                home = (m.home_node_id or "").strip()
+                if not home:
+                    continue
+                before = home in (self._subscriptions.get(workgroup_id) or {})
+                self._subscribe_unlocked(workgroup_id, home)
+                if not before and home in (self._subscriptions.get(workgroup_id) or {}):
+                    added.append(home)
+            return added
 
     def get_member(self, member_id: str) -> WorkGroupMember | None:
         with self._lock:
@@ -432,13 +571,25 @@ class WorkGroupStore:
             self._ensure_loaded()
             return self._specs.get(member_id)
 
-    def list_members(self, workgroup_id: str) -> list[WorkGroupMember]:
+    def list_members(self, workgroup_id: str, *, include_archived: bool = False) -> list[WorkGroupMember]:
         with self._lock:
             self._ensure_loaded()
-            return sorted(
-                [m for m in self._members.values() if m.workgroup_id == workgroup_id],
-                key=lambda m: m.created_at,
-            )
+            items = [m for m in self._members.values() if m.workgroup_id == workgroup_id]
+            if not include_archived:
+                items = [m for m in items if m.status != "archived"]
+            return sorted(items, key=lambda m: m.created_at)
+
+    def archive_member(self, workgroup_id: str, member_id: str) -> WorkGroupMember:
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            member = self._members.get(member_id)
+            if member is None or member.workgroup_id != workgroup_id:
+                raise WorkgroupError("not_found", "member not found", http_status=404)
+            if member.status == "archived":
+                return member
+        return self.mark_member_status(member_id, "archived", workgroup_id=workgroup_id)
 
     # --- Turn kernel skeleton ---
 
@@ -919,22 +1070,9 @@ class WorkGroupStore:
             if self.get_workgroup(workgroup_id) is None:
                 raise WorkgroupError("not_found", "workgroup not found", http_status=404)
             self.assert_acl_member(workgroup_id, node_id)
-            bucket = self._subscriptions.setdefault(workgroup_id, {})
-            existing = bucket.get(node_id.strip())
-            if existing is not None:
-                return existing
-            sub = Subscription(
-                workgroup_id=workgroup_id,
-                node_id=node_id.strip(),
-                subscribed_at=_now(),
-            )
-            bucket[sub.node_id] = sub
-            self._put(
-                "workgroup_subscriptions",
-                f"{workgroup_id}:{sub.node_id}",
-                sub.model_dump_json(),
-                workgroup_id=workgroup_id,
-            )
+            sub = self._subscribe_unlocked(workgroup_id, node_id)
+            if sub is None:
+                raise WorkgroupError("not_authorized", "cannot subscribe", http_status=403)
             return sub
 
     def unsubscribe(self, workgroup_id: str, node_id: str) -> None:

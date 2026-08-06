@@ -3,6 +3,7 @@ package workgroup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -36,8 +37,9 @@ func (p *Provisioner) Provision(req ProvisionRequest) (*ProvisionResult, error) 
 		if existing.MemberSpecDigest != req.MemberSpecDigest {
 			return nil, errf(CodePayloadConflict, "same provision_id with different member_spec_digest")
 		}
-		// 幂等重试：不重建 workspace
-		manifest := BuildManifest(p.NodeID, EffectiveToolNames(req.ToolAllowNames, req.ToolAllowNames, p.NodeToolNames), nil, nil)
+		// 幂等重试：不重建 workspace；补默认 README 供连通性探测
+		_ = ensureDefaultREADME(existing.WorkspacePath)
+		manifest := BuildManifest(p.NodeID, EffectiveToolNames(req.ToolAllowNames, req.ToolAllowNames, p.NodeToolNames), WorkspaceToolSchemas(), nil)
 		existing.ToolCatalogRevision = manifest.ToolCatalogRevision
 		return &ProvisionResult{Binding: *existing, Created: false, Manifest: manifest}, nil
 	}
@@ -68,9 +70,12 @@ func (p *Provisioner) Provision(req ProvisionRequest) (*ProvisionResult, error) 
 	} else if err != nil {
 		return nil, err
 	}
+	if err := ensureDefaultREADME(wsPath); err != nil {
+		return nil, err
+	}
 
 	effective := EffectiveToolNames(req.ToolAllowNames, req.ToolAllowNames, p.NodeToolNames)
-	manifest := BuildManifest(p.NodeID, effective, nil, nil)
+	manifest := BuildManifest(p.NodeID, effective, WorkspaceToolSchemas(), nil)
 	now := time.Now().UTC()
 	binding := WorkerBinding{
 		MemberID:                  req.MemberID,
@@ -104,4 +109,18 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func ensureDefaultREADME(wsPath string) error {
+	if strings.TrimSpace(wsPath) == "" {
+		return nil
+	}
+	readme := filepath.Join(wsPath, "README")
+	if _, err := os.Stat(readme); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	content := "# Member workspace\n\nread_file paths are relative to this directory.\n"
+	return os.WriteFile(readme, []byte(content), 0o644)
 }

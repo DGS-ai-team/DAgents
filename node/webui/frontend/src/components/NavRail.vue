@@ -30,6 +30,8 @@ const emit = defineEmits([
   "create",
   "delete",
   "agents-updated",
+  "create-member",
+  "configure-member",
 ]);
 
 const route = useRoute();
@@ -82,12 +84,17 @@ const activityBadge = computed(() => {
   return n > 0 ? n : 0;
 });
 
-const activeAgentId = computed(() => String(agentStore.agentId || "").trim());
+const activeAgentId = computed(() => {
+  // 在工作组等其它主栏时不应保留智能体选中高亮
+  if (route.name !== "agents") return "";
+  return String(agentStore.agentId || "").trim();
+});
 const activeWorkgroupId = computed(() =>
   route.name === "workgroups" ? String(route.params.workgroupId || "").trim() : "",
 );
-const activeMemberId = computed(() => String(route.query.member || "").trim());
-
+const activeMemberId = computed(() =>
+  route.name === "workgroups" ? String(route.query.member || "").trim() : "",
+);
 const online = computed(() => chromeStore.sseStatus === "connected");
 const statusClass = computed(() => {
   if (online.value) return "nav-rail__dot--online";
@@ -315,12 +322,52 @@ async function submitCreateWg() {
   }
 }
 
-function addMember(wgId) {
-  openWorkgroup(wgId, { addMember: "1" });
+async function removeWorkgroup(wg) {
+  const wid = String(wg?.workgroup_id || "").trim();
+  if (!wid) return;
+  const label = String(wg?.display_name || wid).trim();
+  if (!window.confirm(`确定删除工作组「${label}」？\n将取消本机订阅，工作组数据仍保留在 Manage。`)) {
+    return;
+  }
+  try {
+    await api.unsubscribeWorkgroup(wid);
+    const next = new Set(expanded.value);
+    next.delete(wid);
+    expanded.value = next;
+    await refreshWorkgroups({ force: true });
+    if (activeWorkgroupId.value === wid) {
+      router.push({ name: "workgroups" });
+    }
+  } catch (e) {
+    agentStore.error = e?.message || "删除工作组失败";
+  }
 }
 
-function editMember(wgId, memberId) {
-  openWorkgroup(wgId, { member: memberId });
+function openCreateMember(wgId) {
+  const wid = String(wgId || "").trim();
+  if (!wid) return;
+  emit("create-member", wid);
+}
+
+function openConfigureMember(wgId, memberId) {
+  const wid = String(wgId || "").trim();
+  const mid = String(memberId || "").trim();
+  if (!wid || !mid) return;
+  emit("configure-member", { workgroupId: wid, memberId: mid });
+}
+
+async function removeMember(wgId, member) {
+  const wid = String(wgId || "").trim();
+  const mid = String(member?.member_id || "").trim();
+  if (!wid || !mid) return;
+  const label = memberLabel(member);
+  if (!window.confirm(`确定删除成员「${label}」？`)) return;
+  try {
+    await api.archiveWorkgroupMember(wid, mid);
+    await loadMembers(wid, true);
+  } catch (e) {
+    agentStore.error = e?.message || "删除成员失败";
+  }
 }
 
 function memberLabel(m) {
@@ -350,6 +397,7 @@ defineExpose({
   openCreate,
   refreshAgents,
   refreshWorkgroups,
+  loadMembers,
   expandSection,
   toggleSection,
 });
@@ -570,52 +618,45 @@ defineExpose({
             :class="{ 'nav-rail__folder-row--active': wg.workgroup_id === activeWorkgroupId }"
             @click="onWorkgroupRowClick(wg.workgroup_id)"
           >
-            <button
-              type="button"
-              class="nav-rail__fold-toggle"
-              :title="isExpanded(wg.workgroup_id) ? '折叠成员' : '展开成员'"
-              :aria-expanded="isExpanded(wg.workgroup_id)"
-              @click.stop="toggleWorkgroup(wg.workgroup_id)"
-            >
-              <svg
-                v-if="isExpanded(wg.workgroup_id)"
-                viewBox="0 0 16 16"
-                width="14"
-                height="14"
-                aria-hidden="true"
-              >
-                <path
-                  d="M2.5 5.2h4.2l1.2 1.4H13.5a.9.9 0 0 1 .9.9v4.4a.9.9 0 0 1-.9.9H2.5a.9.9 0 0 1-.9-.9V6.1a.9.9 0 0 1 .9-.9Z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.2"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              <svg v-else viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                <path
-                  d="M2.5 4.5h4l1.3 1.5H13.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1Z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.2"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
             <span class="nav-rail__item-title" :title="wg.display_name || wg.workgroup_id">
               {{ wg.display_name || wg.workgroup_id }}
             </span>
-            <button
-              type="button"
-              class="nav-rail__icon-btn nav-rail__icon-btn--sm nav-rail__folder-add"
-              title="新增成员 Agent"
-              aria-label="新增成员 Agent"
-              @click.stop="addMember(wg.workgroup_id)"
-            >
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-                <path d="M8 3.2v9.6M3.2 8h9.6" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
-              </svg>
-            </button>
+            <div class="nav-rail__item-actions" @click.stop>
+              <button
+                type="button"
+                class="nav-rail__icon-btn nav-rail__icon-btn--sm"
+                title="添加成员"
+                aria-label="添加成员"
+                @click="openCreateMember(wg.workgroup_id)"
+              >
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                  <path
+                    d="M8 3.2v9.6M3.2 8h9.6"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.25"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="nav-rail__icon-btn nav-rail__icon-btn--sm nav-rail__icon-btn--danger"
+                title="删除工作组"
+                aria-label="删除工作组"
+                @click="removeWorkgroup(wg)"
+              >
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                  <path
+                    d="M4.5 4.5l7 7M11.5 4.5l-7 7"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
 
           <ul v-if="isExpanded(wg.workgroup_id)" class="nav-rail__children">
@@ -630,16 +671,63 @@ defineExpose({
                     wg.workgroup_id === activeWorkgroupId && m.member_id === activeMemberId,
                 }"
                 :title="`${memberLabel(m)} · ${m.status || ''}`"
-                @click="editMember(wg.workgroup_id, m.member_id)"
+                @click="openWorkgroup(wg.workgroup_id)"
               >
                 <span class="nav-rail__item-title">{{ memberLabel(m) }}</span>
                 <span class="nav-rail__meta">{{ m.status }}</span>
+                <div class="nav-rail__item-actions" @click.stop>
+                  <button
+                    type="button"
+                    class="nav-rail__icon-btn nav-rail__icon-btn--sm"
+                    title="配置成员"
+                    aria-label="配置成员"
+                    @click="openConfigureMember(wg.workgroup_id, m.member_id)"
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
+                      <path
+                        d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
+                        stroke="currentColor"
+                        stroke-width="1.75"
+                      />
+                      <path
+                        d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V20a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H4a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V4a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.91 1 1.51 1H20a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+                        stroke="currentColor"
+                        stroke-width="1.75"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="nav-rail__icon-btn nav-rail__icon-btn--sm nav-rail__icon-btn--danger"
+                    title="删除成员"
+                    aria-label="删除成员"
+                    @click="removeMember(wg.workgroup_id, m)"
+                  >
+                    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                      <path
+                        d="M4.5 4.5l7 7M11.5 4.5l-7 7"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.3"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </li>
               <li
                 v-if="!(membersByWg[wg.workgroup_id] || []).length"
-                class="nav-rail__empty"
+                class="nav-rail__empty nav-rail__empty--action"
               >
-                暂无成员
+                <button
+                  type="button"
+                  class="nav-rail__text-btn"
+                  @click.stop="openCreateMember(wg.workgroup_id)"
+                >
+                  添加成员
+                </button>
               </li>
             </template>
           </ul>

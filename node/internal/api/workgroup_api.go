@@ -15,7 +15,9 @@ func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/collaborators", s.handleAddWorkgroupCollaborator)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/members", s.handleListWorkgroupMembers)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/members", s.handleCreateWorkgroupMember)
+	s.mux.HandleFunc("PATCH /v1/workgroups/{workgroupId}/members/{memberId}", s.handlePatchWorkgroupMember)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/members/{memberId}/spec", s.handleGetWorkgroupMemberSpec)
+	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/members/{memberId}/archive", s.handleArchiveWorkgroupMember)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/hitl", s.handleListWorkgroupHITL)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/hitl", s.handleCreateWorkgroupHITL)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/hitl/{hitlId}/resolve", s.handleResolveWorkgroupHITL)
@@ -149,9 +151,28 @@ func (s *Server) handleCreateWorkgroupMember(w http.ResponseWriter, r *http.Requ
 		body["home_node_id"] = s.cfg.NodeID
 	}
 	if tools, ok := body["allow_tool_names"].([]any); !ok || len(tools) == 0 {
-		body["allow_tool_names"] = []string{"read_file"}
+		body["allow_tool_names"] = []string{"read_file", "glob_files", "write_file"}
 	}
 	out, err := s.control.CreateWorkgroupMember(r.Context(), wid, body)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handlePatchWorkgroupMember(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	mid := strings.TrimSpace(r.PathValue("memberId"))
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "invalid json", nil)
+		return
+	}
+	out, err := s.control.PatchWorkgroupMember(r.Context(), wid, mid, body)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
 		return
@@ -166,6 +187,20 @@ func (s *Server) handleGetWorkgroupMemberSpec(w http.ResponseWriter, r *http.Req
 	wid := strings.TrimSpace(r.PathValue("workgroupId"))
 	mid := strings.TrimSpace(r.PathValue("memberId"))
 	out, err := s.control.GetWorkgroupMemberSpec(r.Context(), wid, mid)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleArchiveWorkgroupMember(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	mid := strings.TrimSpace(r.PathValue("memberId"))
+	out, err := s.control.ArchiveWorkgroupMember(r.Context(), wid, mid)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
 		return

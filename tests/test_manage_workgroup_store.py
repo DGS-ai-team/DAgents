@@ -18,6 +18,7 @@ from manage.workgroup.models import (  # noqa: E402
     AssignCreateRequest,
     ACLPatchRequest,
     MemberCreateRequest,
+    MemberPatchRequest,
     WorkGroupCreateRequest,
 )
 from manage.workgroup.store import WorkGroupStore  # noqa: E402
@@ -150,6 +151,39 @@ class WorkgroupStoreTests(unittest.TestCase):
             proj = kernel.project(actor_id="leader")
             self.assertEqual(proj["actor_id"], "leader")
             self.assertIn("messages", proj)
+
+    def test_update_member_bumps_generation(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = self._store(tmp)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="U", created_by_node_id="node-a")
+            )
+            store.patch_acl(
+                group.workgroup_id,
+                ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
+            )
+            member, spec = store.create_member(
+                group.workgroup_id,
+                MemberCreateRequest(
+                    home_node_id="node-b",
+                    display_name="reader",
+                    allow_tool_names=["read_file"],
+                ),
+            )
+            self.assertEqual(member.member_generation, 1)
+            updated, new_spec = store.update_member(
+                group.workgroup_id,
+                member.member_id,
+                MemberPatchRequest(
+                    display_name="writer",
+                    allow_tool_names=["read_file", "write_file"],
+                ),
+            )
+            self.assertEqual(updated.display_name, "writer")
+            self.assertEqual(updated.member_generation, 2)
+            self.assertEqual(updated.status, "provisioning")
+            self.assertNotEqual(new_spec.digest, spec.digest)
+            self.assertEqual(new_spec.tools.allow_names, ["read_file", "write_file"])
 
 
 if __name__ == "__main__":

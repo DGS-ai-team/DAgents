@@ -58,12 +58,43 @@ func guessSideEffect(name string) string {
 	switch {
 	case strings.HasPrefix(name, "read_"):
 		return "fs_read"
+	case name == "glob_files":
+		return "fs_read"
 	case strings.Contains(name, "write") || strings.Contains(name, "edit") || strings.Contains(name, "delete"):
 		return "fs_write"
 	case name == "bash" || strings.HasPrefix(name, "shell"):
 		return "shell"
 	default:
 		return "other"
+	}
+}
+
+// WorkspaceToolSchemas 为 workgroup Executor 支持的工具提供 JSON Schema。
+func WorkspaceToolSchemas() map[string]map[string]any {
+	return map[string]map[string]any{
+		"read_file": {
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"},
+			},
+			"required": []any{"path"},
+		},
+		"glob_files": {
+			"type": "object",
+			"properties": map[string]any{
+				"directory":    map[string]any{"type": "string"},
+				"glob_pattern": map[string]any{"type": "string"},
+			},
+			"required": []any{"directory", "glob_pattern"},
+		},
+		"write_file": {
+			"type": "object",
+			"properties": map[string]any{
+				"path":    map[string]any{"type": "string"},
+				"content": map[string]any{"type": "string"},
+			},
+			"required": []any{"path", "content"},
+		},
 	}
 }
 

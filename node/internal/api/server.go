@@ -347,18 +347,33 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		wgDialer = &workgroup.Dialer{
 			ManageURL: cfg.Manage.URL,
 			NodeID:    cfg.NodeID,
-			Token:     cfg.Manage.NodeToken,
 			Worker:    wgWorker,
 			ListWorkgroups: func(ctx context.Context) ([]string, error) {
-				items, err := control.ListWorkgroups(ctx, manage.WorkgroupListSubscribed)
-				if err != nil {
-					return nil, err
-				}
-				ids := make([]string, 0, len(items))
-				for _, it := range items {
-					if id := strings.TrimSpace(it.WorkgroupID); id != "" {
+				seen := map[string]struct{}{}
+				ids := make([]string, 0)
+				add := func(items []manage.WorkgroupListItem) {
+					for _, it := range items {
+						id := strings.TrimSpace(it.WorkgroupID)
+						if id == "" {
+							continue
+						}
+						if _, ok := seen[id]; ok {
+							continue
+						}
+						seen[id] = struct{}{}
 						ids = append(ids, id)
 					}
+				}
+				sub, err1 := control.ListWorkgroups(ctx, manage.WorkgroupListSubscribed)
+				if err1 == nil {
+					add(sub)
+				}
+				acl, err2 := control.ListWorkgroups(ctx, manage.WorkgroupListACL)
+				if err2 == nil {
+					add(acl)
+				}
+				if err1 != nil && err2 != nil {
+					return nil, err1
 				}
 				return ids, nil
 			},

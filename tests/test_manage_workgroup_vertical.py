@@ -84,13 +84,44 @@ class FakeNodeBridge:
         binding = self.bindings.get(mid)
         if binding is None:
             return {"status": "failed", "error_code": "not_found", "result_text": ""}
-        if payload.get("tool_name") != "read_file":
-            return {"status": "failed", "error_code": "conflict", "result_text": ""}
+        allow = {str(n) for n in (binding.get("tool_allow_names") or [])}
+        tool_name = str(payload.get("tool_name") or "")
+        if allow and tool_name not in allow:
+            return {"status": "failed", "error_code": "not_authorized", "result_text": ""}
         args = json.loads(payload["arguments_json"])
-        path = Path(binding["workspace_path"]) / args["path"]
-        text = path.read_text(encoding="utf-8")
+        ws = Path(binding["workspace_path"])
         self.executions[cmd_id] = self.executions.get(cmd_id, 0) + 1
-        result = {"status": "succeeded", "result_text": text, "error_code": None}
+        try:
+            if tool_name == "read_file":
+                path = ws / str(args["path"])
+                text = path.read_text(encoding="utf-8")
+                result = {"status": "succeeded", "result_text": text, "error_code": None}
+            elif tool_name == "write_file":
+                path = ws / str(args["path"])
+                path.parent.mkdir(parents=True, exist_ok=True)
+                content = str(args.get("content") or "")
+                path.write_text(content, encoding="utf-8")
+                result = {
+                    "status": "succeeded",
+                    "result_text": f"wrote {len(content.encode('utf-8'))} bytes to {args['path']}",
+                    "error_code": None,
+                }
+            elif tool_name == "glob_files":
+                directory = str(args.get("directory") or ".")
+                pattern = str(args.get("glob_pattern") or "*")
+                base = ws if directory in {".", "./"} else ws / directory
+                matches = sorted(str(p.relative_to(ws)).replace("\\", "/") for p in base.glob(pattern) if p.is_file())
+                result = {
+                    "status": "succeeded",
+                    "result_text": json.dumps({"paths": matches}, ensure_ascii=False),
+                    "error_code": None,
+                }
+            else:
+                result = {"status": "failed", "error_code": "conflict", "result_text": f"unsupported {tool_name}"}
+        except FileNotFoundError:
+            result = {"status": "failed", "error_code": "not_found", "result_text": ""}
+        except OSError as exc:
+            result = {"status": "failed", "error_code": "conflict", "result_text": str(exc)}
         self.journal[cmd_id] = result
         return result
 
@@ -136,7 +167,7 @@ class WorkgroupVerticalTests(unittest.TestCase):
         return loop, bridge, group.workgroup_id, member.member_id
 
     def test_two_node_read_file_happy_path(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             loop, bridge, wid, mid = self._setup(tmp)
             self.assertNotIn(mid, bridge.local_agent_ids())
 
@@ -189,7 +220,7 @@ class WorkgroupVerticalTests(unittest.TestCase):
             self.assertEqual(bridge.executions[dispatched["command"]["command_id"]], 1)
 
     def test_info_hitl_cas_once(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             loop, _, wid, _ = self._setup(tmp)
             hitl = loop.create_info_hitl(wid, HITLCreateRequest(prompt="确认继续？"))
             ok = loop.resolve_info_hitl(
@@ -203,7 +234,7 @@ class WorkgroupVerticalTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, "already_resolved")
 
     def test_archive_fencing_and_indeterminate_reconcile(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             loop, bridge, wid, mid = self._setup(tmp)
             dispatched = loop.assign_and_dispatch_read_file(
                 wid, member_id=mid, instruction="读 README", path="README"

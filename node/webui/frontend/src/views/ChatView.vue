@@ -921,6 +921,22 @@ onUnmounted(() => {
         @create="openCreateWizard()"
         @delete="deleteAgentById"
         @agents-updated="onAgentsUpdated"
+        @create-member="
+          (id) =>
+            router.push({
+              name: 'workgroups',
+              params: { workgroupId: id },
+              query: { createMember: '1' },
+            })
+        "
+        @configure-member="
+          (p) =>
+            router.push({
+              name: 'workgroups',
+              params: { workgroupId: p.workgroupId },
+              query: { member: p.memberId, editMember: '1' },
+            })
+        "
       />
     </aside>
 

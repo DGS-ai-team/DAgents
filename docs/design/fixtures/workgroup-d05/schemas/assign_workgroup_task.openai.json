@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "assign_workgroup_task",
-    "description": "Synchronously assign work to one workgroup member. Blocks until assign reaches a terminal status.",
+    "description": "Synchronously assign work to one workgroup member. Blocks until assign reaches a terminal status. v1 member tools are limited to read_file on workspace-relative paths (e.g. README); do not ask members to open host absolute paths.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
@@ -18,7 +18,8 @@
         "instruction": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 16000
+          "maxLength": 16000,
+          "description": "Task for the member. For file reads, prefer relative paths under the member workspace."
         },
         "context_hint": {
           "type": "string",

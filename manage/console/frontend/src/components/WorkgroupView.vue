@@ -58,7 +58,6 @@ const memberForm = reactive({
   displayName: "",
   homeNodeId: "",
   soulMd: "",
-  userMd: "",
   customMd: "",
   tools: ["read_file"],
 });
@@ -216,7 +215,6 @@ function resetMemberForm() {
   memberForm.displayName = "";
   memberForm.homeNodeId = "";
   memberForm.soulMd = "";
-  memberForm.userMd = "";
   memberForm.customMd = "";
   memberForm.tools = ["read_file"];
 }
@@ -225,7 +223,7 @@ function openMemberForm() {
   memberFormOpen.value = true;
   if (!memberForm.homeNodeId.trim()) {
     if (isNodeSession.value && nodeOptions.value.length === 1) {
-      memberForm.homeNodeId = nodeOptions.value[0];
+      memberForm.homeNodeId = nodeOptions.value[0].id;
     } else if (isNodeSession.value && ownerId.value) {
       memberForm.homeNodeId = ownerId.value;
     }
@@ -257,10 +255,25 @@ async function ensureHomeInAcl(workgroupId, homeNodeId) {
 
 async function loadNodeOptions() {
   try {
+    const byId = new Map();
+    const addAgent = (a) => {
+      const id = String(a?.agent_id || a?.node_id || "").trim();
+      if (!id) return;
+      const name = String(a?.name || "").trim();
+      const label = name && name !== id ? `${name} (${id})` : name || id;
+      const prev = byId.get(id);
+      if (!prev || (name && (!prev.name || prev.name === id))) {
+        byId.set(id, { id, name: name || id, label });
+      }
+    };
+
     if (isNodeSession.value) {
       const groups = authGroups.value.length ? authGroups.value : [];
       if (!groups.length) {
-        nodeOptions.value = ownerId.value ? [ownerId.value] : [];
+        const id = String(ownerId.value || "").trim();
+        nodeOptions.value = id
+          ? [{ id, name: ownerLabel.value || id, label: ownerLabel.value && ownerLabel.value !== id ? `${ownerLabel.value} (${id})` : id }]
+          : [];
         return;
       }
       const pages = await Promise.all(
@@ -270,28 +283,22 @@ async function loadNodeOptions() {
           })),
         ),
       );
-      const ids = new Set();
       for (const data of pages) {
         const agents = Array.isArray(data?.agents) ? data.agents : [];
-        for (const a of agents) {
-          const id = String(a.agent_id || a.node_id || "").trim();
-          if (id) ids.add(id);
-        }
+        for (const a of agents) addAgent(a);
       }
-      if (ownerId.value) ids.add(ownerId.value);
-      nodeOptions.value = [...ids].sort((a, b) => a.localeCompare(b));
-      return;
+      if (ownerId.value && !byId.has(ownerId.value)) {
+        addAgent({ agent_id: ownerId.value, name: ownerLabel.value });
+      }
+    } else {
+      const data = await fetchAgents({ page: 1, page_size: 100, status: "all" });
+      const agents = Array.isArray(data?.agents) ? data.agents : Array.isArray(data) ? data : [];
+      for (const a of agents) addAgent(a);
     }
-    const data = await fetchAgents({ page: 1, page_size: 100, status: "all" });
-    const agents = Array.isArray(data?.agents) ? data.agents : Array.isArray(data) ? data : [];
-    const ids = [
-      ...new Set(
-        agents
-          .map((a) => String(a.agent_id || a.node_id || "").trim())
-          .filter(Boolean),
-      ),
-    ];
-    nodeOptions.value = ids.sort((a, b) => a.localeCompare(b));
+
+    nodeOptions.value = [...byId.values()].sort((a, b) =>
+      String(a.label).localeCompare(String(b.label), "zh"),
+    );
   } catch {
     nodeOptions.value = [];
   }
@@ -339,7 +346,7 @@ async function submitCreateMember() {
       allow_tool_names: tools,
       prompt: {
         soul_md: memberForm.soulMd,
-        user_md: memberForm.userMd,
+        user_md: "",
         custom_md: memberForm.customMd,
       },
     };
@@ -863,7 +870,9 @@ onMounted(async () => {
                   :disabled="creatingMember"
                 >
                   <option value="" disabled>请选择执行节点</option>
-                  <option v-for="nid in nodeOptions" :key="nid" :value="nid">{{ nid }}</option>
+                  <option v-for="n in nodeOptions" :key="n.id" :value="n.id" :title="n.id">
+                    {{ n.label }}
+                  </option>
                 </select>
                 <input
                   v-else
@@ -910,15 +919,6 @@ onMounted(async () => {
                 />
               </label>
               <label class="field">
-                <span>User</span>
-                <textarea
-                  v-model="memberForm.userMd"
-                  rows="2"
-                  placeholder="user.md 正文（可空）"
-                  :disabled="creatingMember"
-                />
-              </label>
-              <label class="field">
                 <span>Custom</span>
                 <textarea
                   v-model="memberForm.customMd"
@@ -953,7 +953,7 @@ onMounted(async () => {
           </form>
 
           <datalist id="wg-node-options">
-            <option v-for="nid in nodeOptions" :key="nid" :value="nid" />
+            <option v-for="n in nodeOptions" :key="n.id" :value="n.id">{{ n.label }}</option>
           </datalist>
 
           <div class="wg-member-config-list">

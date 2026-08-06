@@ -33,6 +33,7 @@ from manage.workgroup.models import (
     AssignCreateRequest,
     ACLPatchRequest,
     MemberCreateRequest,
+    MemberPatchRequest,
     MemberSpec,
     WorkGroup,
     WorkGroupACL,
@@ -78,10 +79,16 @@ def build_workgroup_router(
     hub: WorkgroupWSHub | None = None,
     llm_store: Any | None = None,
     mock_llm: bool = False,
+    loop: VerticalLoop | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1/workgroups", tags=["workgroups"])
-    kernel = TurnKernel(store, llm_store=llm_store, mock_llm=mock_llm)
-    loop = VerticalLoop(store, hub=hub)
+    loop = loop or VerticalLoop(store, hub=hub)
+    kernel = TurnKernel(
+        store,
+        llm_store=llm_store,
+        mock_llm=mock_llm,
+    )
+    kernel.set_assign_completer(loop.make_assign_completer(kernel))
 
     @router.post("", response_model=dict)
     def create_workgroup(req: WorkGroupCreateRequest, request: Request) -> dict:
@@ -218,10 +225,50 @@ def build_workgroup_router(
         )
         return {"member": member, "spec": spec}
 
+    @router.patch("/{workgroup_id}/members/{member_id}", response_model=dict)
+    def patch_member(
+        workgroup_id: str, member_id: str, req: MemberPatchRequest, request: Request
+    ) -> dict:
+        auth = authenticate(request)
+        try:
+            member, spec = store.update_member(workgroup_id, member_id, req)
+            loop.enqueue_provision(workgroup_id, member.member_id)
+            member = store.get_member(member.member_id) or member
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.member.patch",
+            target_agent_id=member.member_id,
+        )
+        return {"member": member, "spec": spec}
+
     @router.get("/{workgroup_id}/members", response_model=list[WorkGroupMember])
     def list_members(workgroup_id: str, request: Request) -> list[WorkGroupMember]:
         authenticate(request)
+        # 修复历史缺口：创建成员时未自动订阅 Home 的工作组
+        try:
+            added = store.ensure_member_homes_subscribed(workgroup_id)
+        except WorkgroupError:
+            added = []
+        if added and hub is not None:
+            for nid in added:
+                hub.request_resume(nid, workgroup_id)
         return store.list_members(workgroup_id)
+
+    @router.post("/{workgroup_id}/members/{member_id}/archive", response_model=WorkGroupMember)
+    def archive_member(workgroup_id: str, member_id: str, request: Request) -> WorkGroupMember:
+        auth = authenticate(request)
+        try:
+            member = store.archive_member(workgroup_id, member_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.member.archive",
+            target_agent_id=member_id,
+        )
+        return member
 
     @router.get("/{workgroup_id}/members/{member_id}/spec", response_model=MemberSpec)
     def get_member_spec(workgroup_id: str, member_id: str, request: Request) -> MemberSpec:

@@ -36,7 +36,7 @@ def leader_native_tools() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "list_workgroup_members",
-                "description": "List members in the current workgroup with status.",
+                "description": "List members with status, home node, and tool allowlist (read_file/glob_files/write_file when enabled; use this to answer capability questions; do not assign a fake probe task).",
                 "parameters": {
                     "type": "object",
                     "additionalProperties": False,
@@ -47,8 +47,8 @@ def leader_native_tools() -> list[dict[str, Any]]:
     ]
 
 
-AssignCompleter = Callable[[str, str, str, str], str]
-"""(workgroup_id, assign_id, member_id, instruction) -> summary text."""
+AssignCompleter = Callable[..., str]
+"""(workgroup_id, assign_id, member_id, instruction, tool_call_id='') -> summary text."""
 
 
 def scripted_assign_completer(
@@ -56,8 +56,10 @@ def scripted_assign_completer(
     assign_id: str,
     member_id: str,
     instruction: str,
+    tool_call_id: str = "",
 ) -> str:
-    """无 Member LLM 时的同步占位：立刻成功并写 Timeline。"""
+    """无真实 Node 工具时的同步占位：立刻成功并写 Timeline。"""
+    _ = (workgroup_id, assign_id, member_id, tool_call_id)
     return f"[scripted] {instruction.strip()[:500]}"
 
 
@@ -77,15 +79,20 @@ class NativeToolDispatcher:
         name = (tool_name or "").strip()
         if name == "list_workgroup_members":
             members = self.store.list_members(workgroup_id)
-            payload = [
-                {
-                    "member_id": m.member_id,
-                    "display_name": m.display_name,
-                    "status": m.status,
-                    "home_node_id": m.home_node_id,
-                }
-                for m in members
-            ]
+            payload = []
+            for m in members:
+                ctx = self.store.member_execution_context(m.member_id)
+                payload.append(
+                    {
+                        "member_id": m.member_id,
+                        "display_name": m.display_name,
+                        "status": m.status,
+                        "home_node_id": m.home_node_id,
+                        "tool_allow_names": list(ctx.get("tool_allow_names") or []),
+                        "workspace_root_kind": "member_workspace",
+                        "read_file_path_rule": "relative_to_member_workspace_only",
+                    }
+                )
             return json.dumps({"members": payload}, ensure_ascii=False)
         if name == "assign_workgroup_task":
             return self._assign(workgroup_id, tool_call_id, arguments_json)
@@ -112,18 +119,32 @@ class NativeToolDispatcher:
         )
         self.store.set_assign_status(assign.assign_id, "running")
         try:
-            summary = self.assign_completer(workgroup_id, assign.assign_id, member_id, instruction)
+            summary = self.assign_completer(
+                workgroup_id,
+                assign.assign_id,
+                member_id,
+                instruction,
+                tool_call_id,
+            )
             assign = self.store.set_assign_status(
                 assign.assign_id, "succeeded", result_summary=summary, error_code=None
             )
-            self.store.append_timeline(
-                workgroup_id,
-                type="actor_final_text",
-                actor_id=member_id,
-                text=summary,
-                protocol_name=protocol_name_for_actor(member_id),
-                assign_id=assign.assign_id,
+            # Member LLM loop 已写 Timeline final；scripted completer 未写时在此补一条
+            already = any(
+                e.type == "actor_final_text"
+                and e.actor_id == member_id
+                and e.assign_id == assign.assign_id
+                for e in self.store.list_timeline(workgroup_id)
             )
+            if not already:
+                self.store.append_timeline(
+                    workgroup_id,
+                    type="actor_final_text",
+                    actor_id=member_id,
+                    text=summary,
+                    protocol_name=protocol_name_for_actor(member_id),
+                    assign_id=assign.assign_id,
+                )
             return build_assign_tool_result_content(
                 assign_id=assign.assign_id,
                 status="succeeded",
