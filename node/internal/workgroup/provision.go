@@ -39,7 +39,7 @@ func (p *Provisioner) Provision(req ProvisionRequest) (*ProvisionResult, error) 
 		}
 		// 幂等重试：不重建 workspace；补默认 README 供连通性探测
 		_ = ensureDefaultREADME(existing.WorkspacePath)
-		manifest := BuildManifest(p.NodeID, EffectiveToolNames(req.ToolAllowNames, req.ToolAllowNames, p.NodeToolNames), WorkspaceToolSchemas(), nil)
+		manifest := BuildManifest(p.NodeID, EffectiveToolNames(req.ToolAllowNames, req.ToolAllowNames, p.NodeToolNames), WorkspaceToolSchemas(), WorkspaceSideEffectClasses())
 		existing.ToolCatalogRevision = manifest.ToolCatalogRevision
 		return &ProvisionResult{Binding: *existing, Created: false, Manifest: manifest}, nil
 	}
@@ -80,7 +80,7 @@ func (p *Provisioner) Provision(req ProvisionRequest) (*ProvisionResult, error) 
 	}
 
 	effective := EffectiveToolNames(req.ToolAllowNames, req.ToolAllowNames, p.NodeToolNames)
-	manifest := BuildManifest(p.NodeID, effective, WorkspaceToolSchemas(), nil)
+	manifest := BuildManifest(p.NodeID, effective, WorkspaceToolSchemas(), WorkspaceSideEffectClasses())
 	now := time.Now().UTC()
 	binding := WorkerBinding{
 		MemberID:                  req.MemberID,

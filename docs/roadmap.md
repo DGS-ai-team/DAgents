@@ -27,6 +27,8 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
+| **0.9.1** | **预览准备中** | Workgroup 协作可演示；验收见 [design/v0.9.1-smoke-checklist.md](./design/v0.9.1-smoke-checklist.md)；正式版前最后一个大预览。 |
+| **0.8.5** | **已发布** | 安装向导与 HITL 选中修复等（见 CHANGELOG）。 |
 | **0.2.17** | **已发布** | async 回灌保留 pending HITL（[#25](https://github.com/DGS-ai-team/DAgents/issues/25)）；`tools.file_encoding` + FS 工具 `encoding` 参数（见 **CHANGELOG**）。 |
 | **0.2.16** | **已发布** | Policy Read/Write API + TUI `/policy`；trigger 会话目标审批；TUI `/triggers`；Windows `--withnode` 等修复（见 **CHANGELOG**）。 |
 | **0.2.3** | **已发布** | Windows 安装包、Linux `install.sh`；`tools.bash_output_encoding`（GBK 解码）；子 Agent prompt 与双 TUI 展示（见 **CHANGELOG**）。 |

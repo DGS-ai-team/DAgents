@@ -235,9 +235,11 @@ onMounted(() => {
                   :disabled="saving"
                   @change="toggleNode(agent.agent_id)"
                 />
-                <span class="permissions-node-id">{{ agent.agent_id }}</span>
+                <span class="permissions-node-id">{{ agent.name || agent.agent_id }}</span>
               </label>
               <span class="muted permissions-node-meta">
+                {{ agent.agent_id }}
+                ·
                 {{ agent.status || "—" }}
                 ·
                 {{ (agent.discovery_group || []).join(", ") || "未分组" }}

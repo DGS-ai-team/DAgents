@@ -302,6 +302,10 @@ export async function fetchWorkgroups(params = {}) {
   return apiFetch("/v1/workgroups", params);
 }
 
+export async function fetchMemberToolCatalog() {
+  return apiFetch("/v1/workgroups/meta/member-tools");
+}
+
 export async function fetchWorkgroup(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}`);
 }
@@ -332,6 +336,32 @@ export async function archiveWorkgroup(workgroupId) {
 
 export async function fetchWorkgroupTimeline(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/timeline`);
+}
+
+export async function listWorkgroupHITL(workgroupId, pendingOnly = true) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl`, {
+    pending_only: pendingOnly ? "true" : "false",
+  });
+}
+
+export async function resolveWorkgroupHITL(workgroupId, hitlId, answer) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/hitl/${encodeURIComponent(hitlId)}/resolve`,
+    {},
+    { method: "POST", body: { answer, resolution: { answer } } },
+  );
+}
+
+export async function listWorkgroupRuns(workgroupId, { actorId, limit = 20 } = {}) {
+  const params = { limit };
+  if (actorId) params.actor_id = actorId;
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/runs`, params);
+}
+
+export async function getWorkgroupRunHistory(workgroupId, runId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/runs/${encodeURIComponent(runId)}/history`,
+  );
 }
 
 export async function fetchWorkgroupLLMConfigs(workgroupId) {
@@ -368,15 +398,31 @@ export async function createWorkgroupMember(workgroupId, body) {
   );
 }
 
+export async function patchWorkgroupMember(workgroupId, memberId, body) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}`,
+    {},
+    { method: "PATCH", body },
+  );
+}
+
 export async function postWorkgroupMessage(workgroupId, body) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/messages`, {}, { method: "POST", body });
 }
 
+export async function cancelWorkgroupTurn(workgroupId, body = {}) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/turn/cancel`,
+    {},
+    { method: "POST", body },
+  );
+}
+
 /**
- * ????? SSE?onEvent(eventName, data) ?????
+ * 工作组消息 SSE；onEvent(eventName, data)。可传 signal 以中断读取。
  * @returns {Promise<{ finalText?: string }>}
  */
-export async function postWorkgroupMessageStream(workgroupId, body, { onEvent } = {}) {
+export async function postWorkgroupMessageStream(workgroupId, body, { onEvent, signal } = {}) {
   const url = new URL(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/messages/stream`,
     window.location.origin,
@@ -389,6 +435,7 @@ export async function postWorkgroupMessageStream(workgroupId, body, { onEvent } 
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
+    signal,
   });
   if (!resp.ok) {
     let message = `HTTP ${resp.status}`;

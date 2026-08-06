@@ -13,16 +13,19 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// ControlClient 调用 Manage 控制面（D5：Placement create/peers 已下线；仍保留 DELETE）。
+// ControlClient 调用 Manage 控制面（Registry / Workgroup 等；Placement API 已拆除）。
 type ControlClient struct {
-	cfg    *config.Config
-	client *http.Client
+	cfg          *config.Config
+	client       *http.Client
+	streamClient *http.Client
 }
 
 func NewControlClient(cfg *config.Config) *ControlClient {
 	return &ControlClient{
 		cfg:    cfg,
 		client: &http.Client{Timeout: 45 * time.Second},
+		// SSE 长连接：禁用整体 Timeout，由调用方 context 取消
+		streamClient: &http.Client{Timeout: 0},
 	}
 }
 

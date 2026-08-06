@@ -7,6 +7,7 @@ import {
   fetchAgents,
   fetchAuthMe,
   fetchLLMConfigs,
+  fetchMemberToolCatalog,
   fetchWorkgroupACL,
   fetchWorkgroupLLMConfigs,
   fetchWorkgroupMemberSpec,
@@ -14,6 +15,7 @@ import {
   fetchWorkgroups,
   patchWorkgroup,
   patchWorkgroupACL,
+  patchWorkgroupMember,
   publishWorkgroup,
 } from "../api.js";
 
@@ -48,7 +50,9 @@ const authKind = ref(""); // admin | node | ""
 const authGroups = ref([]);
 const collabDraft = ref("");
 
-const MEMBER_TOOL_CHOICES = ["read_file"];
+/** @type {import('vue').Ref<Array<{id:string,label:string,hint?:string,group?:string}>>} */
+const memberToolChoices = ref([]);
+const memberToolDefaults = ref(["read_file", "glob_files", "write_file"]);
 
 const createForm = reactive({
   displayName: "",
@@ -59,7 +63,7 @@ const memberForm = reactive({
   homeNodeId: "",
   soulMd: "",
   customMd: "",
-  tools: ["read_file"],
+  tools: ["read_file", "glob_files", "write_file"],
 });
 
 const isNodeSession = computed(() => authKind.value === "node");
@@ -216,7 +220,37 @@ function resetMemberForm() {
   memberForm.homeNodeId = "";
   memberForm.soulMd = "";
   memberForm.customMd = "";
-  memberForm.tools = ["read_file"];
+  memberForm.tools = [...(memberToolDefaults.value || [])];
+}
+
+async function loadMemberToolCatalog() {
+  try {
+    const catalog = await fetchMemberToolCatalog();
+    const tools = Array.isArray(catalog?.tools) ? catalog.tools : [];
+    memberToolChoices.value = tools.map((t) => ({
+      id: String(t.id || "").trim(),
+      label: String(t.label || t.id || "").trim(),
+      hint: String(t.hint || t.id || "").trim(),
+      group: String(t.group || "").trim(),
+    })).filter((t) => t.id);
+    const defaults = Array.isArray(catalog?.default_allow_names)
+      ? catalog.default_allow_names.map(String)
+      : memberToolChoices.value.filter((t) => t).map((t) => t.id);
+    memberToolDefaults.value = defaults.length
+      ? defaults
+      : ["read_file", "glob_files", "write_file"];
+    if (!memberFormOpen.value) {
+      memberForm.tools = [...memberToolDefaults.value];
+    }
+  } catch {
+    if (!memberToolChoices.value.length) {
+      memberToolChoices.value = [
+        { id: "read_file", label: "读文件", hint: "read_file", group: "fs" },
+        { id: "glob_files", label: "列目录", hint: "glob_files", group: "fs" },
+        { id: "write_file", label: "写文件", hint: "write_file", group: "fs" },
+      ];
+    }
+  }
 }
 
 function openMemberForm() {
@@ -339,7 +373,9 @@ async function submitCreateMember() {
   creatingMember.value = true;
   try {
     await ensureHomeInAcl(wg.workgroup_id, home);
-    const tools = memberForm.tools.length ? [...memberForm.tools] : ["read_file"];
+    const tools = memberForm.tools.length
+      ? [...memberForm.tools]
+      : [...(memberToolDefaults.value || [])];
     const body = {
       display_name: displayName,
       home_node_id: home,
@@ -414,6 +450,49 @@ async function bindSupervisorLlm(cfg) {
   } finally {
     bindingLlmKey.value = "";
   }
+}
+
+async function bindMemberLlm(member, cfg) {
+  const wg = selectedWorkgroup.value;
+  const mid = String(member?.member_id || "").trim();
+  if (!wg?.workgroup_id || !mid || !cfg?.id || bindingLlmKey.value) return;
+  if (member?.kind === "supervisor") {
+    await bindSupervisorLlm(cfg);
+    return;
+  }
+  if (isLlmActive(member.llm_profile_id, cfg)) return;
+  bindingLlmKey.value = `${mid}:${cfg.id}`;
+  try {
+    const out = await patchWorkgroupMember(wg.workgroup_id, mid, {
+      llm_profile_id: cfg.id,
+      llm_profile_revision: "1",
+    });
+    if (out?.spec) {
+      memberSpecs.value = { ...memberSpecs.value, [mid]: out.spec };
+    }
+    if (out?.member) {
+      members.value = (members.value || []).map((item) =>
+        item.member_id === out.member.member_id ? out.member : item,
+      );
+    }
+    emit("toast", {
+      message: `${member.display_name || mid} 已绑定 ${cfg.name}`,
+      type: "success",
+    });
+  } catch (err) {
+    emit("toast", { message: err.message || "绑定成员 LLM 失败", type: "error" });
+  } finally {
+    bindingLlmKey.value = "";
+  }
+}
+
+function onLlmItemClick(member, cfg) {
+  if (!member || !cfg) return;
+  if (member.kind === "supervisor") {
+    void bindSupervisorLlm(cfg);
+    return;
+  }
+  void bindMemberLlm(member, cfg);
 }
 
 async function loadWorkgroups() {
@@ -590,7 +669,9 @@ watch(
   () => props.active,
   (active) => {
     if (active) {
-      resolveCreatorDefault().then(() => loadWorkgroups());
+      resolveCreatorDefault().then(() =>
+        Promise.all([loadWorkgroups(), loadMemberToolCatalog()]),
+      );
       syncPageMeta();
     } else {
       emit("page-meta", null);
@@ -605,7 +686,7 @@ watch(showSettings, () => {
 onMounted(async () => {
   if (props.active) {
     await resolveCreatorDefault();
-    await loadWorkgroups();
+    await Promise.all([loadWorkgroups(), loadMemberToolCatalog()]);
     syncPageMeta();
   }
 });
@@ -893,17 +974,18 @@ onMounted(async () => {
             <fieldset class="wg-member-create__tools">
               <legend>工具白名单</legend>
               <label
-                v-for="t in MEMBER_TOOL_CHOICES"
-                :key="t"
+                v-for="t in memberToolChoices"
+                :key="t.id"
                 class="wg-member-create__check"
+                :title="t.hint || t.id"
               >
                 <input
                   type="checkbox"
-                  :checked="memberForm.tools.includes(t)"
+                  :checked="memberForm.tools.includes(t.id)"
                   :disabled="creatingMember"
-                  @change="toggleMemberTool(t)"
+                  @change="toggleMemberTool(t.id)"
                 />
-                {{ t }}
+                {{ t.label || t.id }}
               </label>
             </fieldset>
 
@@ -1007,31 +1089,32 @@ onMounted(async () => {
                   <li
                     v-for="cfg in llmConfigs"
                     :key="`${m.key}-${cfg.id}`"
-                    class="wg-llm-item"
+                    class="wg-llm-item wg-llm-item--action"
                     :class="{
                       'wg-llm-item--active': isLlmActive(m.llm_profile_id, cfg),
-                      'wg-llm-item--action': m.kind === 'supervisor',
-                      'wg-llm-item--busy': bindingLlmKey === `leader:${cfg.id}`,
+                      'wg-llm-item--busy': bindingLlmKey === `${m.key}:${cfg.id}`,
                     }"
-                    :role="m.kind === 'supervisor' ? 'button' : undefined"
-                    :tabindex="m.kind === 'supervisor' ? 0 : undefined"
-                    :aria-pressed="
-                      m.kind === 'supervisor' ? isLlmActive(m.llm_profile_id, cfg) : undefined
-                    "
-                    @click="m.kind === 'supervisor' && bindSupervisorLlm(cfg)"
-                    @keydown.enter.prevent="m.kind === 'supervisor' && bindSupervisorLlm(cfg)"
+                    role="button"
+                    tabindex="0"
+                    :aria-pressed="isLlmActive(m.llm_profile_id, cfg)"
+                    @click="onLlmItemClick(m, cfg)"
+                    @keydown.enter.prevent="onLlmItemClick(m, cfg)"
                   >
                     <strong class="wg-llm-item__name">{{ cfg.name }}</strong>
                     <span class="wg-llm-item__meta muted">{{ cfg.provider }} / {{ cfg.model }}</span>
                     <span
-                      v-if="m.kind === 'supervisor' && isLlmActive(m.llm_profile_id, cfg)"
+                      v-if="isLlmActive(m.llm_profile_id, cfg)"
                       class="wg-llm-item__tag"
                     >当前</span>
                   </li>
                 </ul>
                 <p v-else class="muted">暂无可见 LLM 配置，请先在「管理 › 配置 › LLM」中创建。</p>
-                <p v-if="m.kind === 'supervisor'" class="muted wg-member-config__hint">
-                  点击上方条目可为 Supervisor 绑定 LLM；未绑定真实配置时对话会回退到 mock 回声。
+                <p class="muted wg-member-config__hint">
+                  {{
+                    m.kind === "supervisor"
+                      ? "点击上方条目可为 Supervisor 绑定 LLM；未绑定真实配置时对话会回退到 mock 回声。"
+                      : "点击上方条目可为该成员绑定 LLM；变更后会 bump generation 并重新下发配置。"
+                  }}
                 </p>
               </div>
             </article>
@@ -1042,7 +1125,7 @@ onMounted(async () => {
           </p>
 
           <p class="muted wg-detail-section__note">
-            创建成员后会自动向 Home Node 下发配置；Agent 成员的私有配置在线编辑将在后续版本接入。
+            创建或修改成员后会自动向 Home Node 下发配置（含 LLM 与工具白名单）。
           </p>
         </section>
       </template>

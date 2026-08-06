@@ -24,6 +24,8 @@ from manage.workgroup.d3_models import (
     Subscription,
     TimelineEvent,
     ToolResultApplyRequest,
+    TurnCancelRequest,
+    TurnCancelResponse,
 )
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.models import (
@@ -41,6 +43,7 @@ from manage.workgroup.models import (
     WorkGroupMember,
     WorkGroupPatchRequest,
 )
+from manage.workgroup.llm_chat import describe_llm_resolution
 from manage.workgroup.store import WorkGroupStore
 from manage.workgroup.turn_kernel import TurnKernel
 from manage.workgroup.vertical import VerticalLoop
@@ -89,6 +92,7 @@ def build_workgroup_router(
         mock_llm=mock_llm,
     )
     kernel.set_assign_completer(loop.make_assign_completer(kernel))
+    kernel.set_command_cancel_hook(loop.cancel_pending_commands)
 
     @router.post("", response_model=dict)
     def create_workgroup(req: WorkGroupCreateRequest, request: Request) -> dict:
@@ -118,6 +122,14 @@ def build_workgroup_router(
             acl_member=acl_member,
             include_archived=include_archived,
         )
+
+    @router.get("/meta/member-tools", response_model=dict)
+    def get_member_tool_catalog(request: Request) -> dict:
+        """Member 可勾选/可执行工具权威目录（Manage 为 source of truth）。"""
+        authenticate(request)
+        from manage.workgroup.member_tools import member_tool_catalog
+
+        return member_tool_catalog()
 
     @router.get("/{workgroup_id}", response_model=WorkGroup)
     def get_workgroup(workgroup_id: str, request: Request) -> WorkGroup:
@@ -211,6 +223,10 @@ def build_workgroup_router(
                     )
 
         try:
+            if not req.allow_tool_names:
+                from manage.workgroup.member_tools import default_allow_tool_names
+
+                req = req.model_copy(update={"allow_tool_names": default_allow_tool_names()})
             member, spec = store.create_member(workgroup_id, req)
             loop.enqueue_provision(workgroup_id, member.member_id)
             member = store.get_member(member.member_id) or member
@@ -295,6 +311,27 @@ def build_workgroup_router(
         )
         return assign
 
+    @router.post("/{workgroup_id}/assigns/fail-active")
+    def fail_active_assigns(workgroup_id: str, request: Request) -> dict:
+        """运维/自愈：释放组内卡住的 active assign。"""
+        auth = authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        try:
+            failed = store.fail_active_assigns(
+                workgroup_id,
+                reason="manual fail-active",
+                error_code="canceled",
+            )
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.assign.fail_active",
+            target_agent_id=workgroup_id,
+        )
+        return {"failed_assign_ids": failed, "count": len(failed)}
+
     @router.post("/{workgroup_id}/runs", response_model=ActorRun)
     def create_run(workgroup_id: str, req: ActorRunCreateRequest, request: Request) -> ActorRun:
         auth = authenticate(request)
@@ -304,6 +341,54 @@ def build_workgroup_router(
             raise _http_error(exc) from exc
         audit.record(actor=audit_actor(request, auth), action="workgroup.run.create", target_agent_id=run.run_id)
         return run
+
+    def _profile_id_for_actor(workgroup_id: str, actor_id: str) -> str:
+        group = store.get_workgroup(workgroup_id)
+        profile_id = str(group.llm_profile_id if group else "default") or "default"
+        aid = str(actor_id or "").strip()
+        if aid and aid != "leader":
+            spec = store.get_spec(aid)
+            if spec is not None and str(getattr(spec, "llm_profile_id", "") or "").strip():
+                profile_id = str(spec.llm_profile_id).strip()
+        return profile_id
+
+    def _llm_meta(workgroup_id: str, actor_id: str = "leader") -> dict:
+        return describe_llm_resolution(
+            llm_store,
+            profile_id=_profile_id_for_actor(workgroup_id, actor_id),
+            mock=bool(getattr(kernel, "_mock_llm", False)),
+        )
+
+    @router.get("/{workgroup_id}/runs")
+    def list_runs(
+        workgroup_id: str,
+        request: Request,
+        actor_id: str | None = None,
+        limit: int = 20,
+    ) -> dict:
+        authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        runs = store.list_actor_runs(workgroup_id, actor_id=actor_id, limit=limit)
+        return {
+            "runs": runs,
+            "llm": _llm_meta(workgroup_id, actor_id or "leader"),
+        }
+
+    @router.get("/{workgroup_id}/runs/{run_id}/history")
+    def get_run_history(workgroup_id: str, run_id: str, request: Request) -> dict:
+        authenticate(request)
+        if store.get_workgroup(workgroup_id) is None:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
+        run = store.get_actor_run(run_id)
+        if run is None or run.workgroup_id != workgroup_id:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "actor run not found"})
+        hist = store.get_run_history(run_id)
+        return {
+            "run": run,
+            "history": hist,
+            "llm": _llm_meta(workgroup_id, run.actor_id),
+        }
 
     @router.get("/{workgroup_id}/projector")
     def projector(
@@ -382,6 +467,7 @@ def build_workgroup_router(
                 from_node_id=req.from_node_id,
                 client_message_id=req.client_message_id,
                 disable_tools=req.disable_tools,
+                direct_member_id=req.direct_member_id,
             )
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
@@ -398,7 +484,25 @@ def build_workgroup_router(
                 "status": result["loop"].get("status"),
                 "final_text": result["loop"].get("final_text"),
             },
+            "mode": result.get("mode") or "leader",
         }
+
+    @router.post("/{workgroup_id}/turn/cancel", response_model=TurnCancelResponse)
+    def cancel_workgroup_turn(
+        workgroup_id: str, request: Request, req: TurnCancelRequest | None = None
+    ) -> TurnCancelResponse:
+        _ = req
+        auth = authenticate(request)
+        try:
+            out = kernel.cancel_turn(workgroup_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.turn.cancel",
+            target_agent_id=workgroup_id,
+        )
+        return TurnCancelResponse.model_validate(out)
 
     @router.post("/{workgroup_id}/messages/stream")
     def post_human_message_stream(
@@ -415,6 +519,7 @@ def build_workgroup_router(
                     from_node_id=req.from_node_id,
                     client_message_id=req.client_message_id,
                     disable_tools=req.disable_tools,
+                    direct_member_id=req.direct_member_id,
                 ):
                     ev = str(item.get("event") or "message")
                     raw = item.get("data")
@@ -454,7 +559,7 @@ def build_workgroup_router(
         authenticate(request)
         if store.get_workgroup(workgroup_id) is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
-        return store.list_timeline(workgroup_id)
+        return _timeline_for_ui(store, store.list_timeline(workgroup_id))
 
     @router.get("/{workgroup_id}/outbox", response_model=list[OutboxFrame])
     def get_outbox(
@@ -617,3 +722,23 @@ def build_workgroup_router(
         return result
 
     return router
+
+
+def _timeline_for_ui(store: Any, events: list[TimelineEvent]) -> list[TimelineEvent]:
+    """编排态 assign_started：用 Assign.instruction 展开完整任务正文（兼容历史截断摘要）。"""
+    out: list[TimelineEvent] = []
+    for ev in events:
+        if (
+            ev.type == "assign_started"
+            and ev.assign_id
+            and str(ev.actor_id or "").strip() == "leader"
+        ):
+            assign = store.get_assign(ev.assign_id)
+            instruction = (assign.instruction if assign else "") or ""
+            instruction = instruction.strip()
+            if assign and instruction:
+                member = store.get_member(assign.member_id)
+                display = ((member.display_name if member else "") or assign.member_id).strip()
+                ev = ev.model_copy(update={"text": f"@{display}\n{instruction}"})
+        out.append(ev)
+    return out

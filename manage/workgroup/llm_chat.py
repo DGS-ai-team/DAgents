@@ -300,3 +300,37 @@ def resolve_chat_client(
     if cfg.provider == "mock" or (cfg.model or "").lower() == "mock":
         return MockLLMClient(mock_script)
     return OpenAICompatibleChatClient(llm_store.resolve(cfg))
+
+
+def describe_llm_resolution(
+    llm_store: LLMConfigStore | None,
+    *,
+    profile_id: str,
+    mock: bool = False,
+) -> dict[str, Any]:
+    """供调试 API：说明当前会解析成 mock 还是 live（不发真实请求）。"""
+    pid = str(profile_id or "").strip() or "default"
+    if mock:
+        return {"mode": "mock", "profile_id": pid, "reason": "forced_mock"}
+    if llm_store is None:
+        return {"mode": "mock", "profile_id": pid, "reason": "no_llm_store"}
+    cfg = llm_store.get(pid) or llm_store.get_default()
+    if cfg is None:
+        return {"mode": "mock", "profile_id": pid, "reason": "profile_not_found"}
+    provider = str(cfg.provider or "").strip().lower()
+    model = str(cfg.model or "").strip()
+    if provider == "mock" or model.lower() == "mock":
+        return {
+            "mode": "mock",
+            "profile_id": cfg.id,
+            "provider": provider,
+            "model": model,
+            "reason": "provider_mock",
+        }
+    return {
+        "mode": "live",
+        "profile_id": cfg.id,
+        "provider": provider,
+        "model": model,
+        "reason": "ok",
+    }

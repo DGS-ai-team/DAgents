@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	membertools "github.com/DGS-ai-team/DAgents/shared/workgroup"
 )
 
 // ReadFileArgs 为 read_file 参数。
@@ -15,15 +17,33 @@ type ReadFileArgs struct {
 	Path string `json:"path"`
 }
 
-var workspaceExecutableTools = map[string]struct{}{
-	"read_file":  {},
-	"glob_files": {},
-	"write_file": {},
+// WorkspaceExecutableToolNames 成员工作区可执行全集（嵌入 shared/workgroup 目录；不依赖 Manage）。
+func WorkspaceExecutableToolNames() []string {
+	return membertools.ExecutableToolNames()
 }
 
-// NewWorkspaceToolExecutor 在 binding workspace 下执行 allowlist 内的 FS 工具。
-func NewWorkspaceToolExecutor(bindings BindingStore) func(cmd ToolCommand) (string, error) {
-	return func(cmd ToolCommand) (string, error) {
+// WorkspaceDefaultAllowToolNames 新建成员默认白名单（嵌入目录 default=true；通常仅 fs）。
+func WorkspaceDefaultAllowToolNames() []string {
+	return membertools.DefaultAllowToolNames()
+}
+
+var workspaceExecutableTools = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(WorkspaceExecutableToolNames()))
+	for _, n := range WorkspaceExecutableToolNames() {
+		m[n] = struct{}{}
+	}
+	return m
+}()
+
+// 按 workspace 缓存 Registry，使 bash 后台 job 可跨 command 查询/取消。
+var workspaceRegistries sync.Map // string -> *tools.Registry
+
+// NewWorkspaceToolExecutor 在 binding workspace 下执行 allowlist 内的 FS/bash 工具；尊重 ctx 取消。
+func NewWorkspaceToolExecutor(bindings BindingStore) CommandExecutor {
+	return func(ctx context.Context, cmd ToolCommand) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		name := strings.TrimSpace(cmd.ToolName)
 		if _, ok := workspaceExecutableTools[name]; !ok {
 			return "", errf(CodeConflict, "unsupported tool %q", name)
@@ -37,21 +57,17 @@ func NewWorkspaceToolExecutor(bindings BindingStore) func(cmd ToolCommand) (stri
 		}
 		switch name {
 		case "read_file":
-			return execReadFile(binding.WorkspacePath, cmd.ArgumentsJSON)
-		case "glob_files", "write_file":
-			return execViaRegistry(binding.WorkspacePath, name, cmd.ArgumentsJSON)
+			return execReadFile(ctx, binding.WorkspacePath, cmd.ArgumentsJSON)
 		default:
-			return "", errf(CodeConflict, "unsupported tool %q", name)
+			return execViaRegistry(ctx, binding.WorkspacePath, name, cmd.ArgumentsJSON)
 		}
 	}
 }
 
-// NewReadFileExecutor 兼容旧名。
-func NewReadFileExecutor(bindings BindingStore) func(cmd ToolCommand) (string, error) {
-	return NewWorkspaceToolExecutor(bindings)
-}
-
-func execReadFile(workspaceRoot, argumentsJSON string) (string, error) {
+func execReadFile(ctx context.Context, workspaceRoot, argumentsJSON string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	var args ReadFileArgs
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", errf(CodeSchemaMismatch, "invalid arguments_json: %v", err)
@@ -72,6 +88,9 @@ func execReadFile(workspaceRoot, argumentsJSON string) (string, error) {
 		}
 		return "", errf(CodeConflict, "read failed: %v", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	out, err := json.Marshal(map[string]any{
 		"path":    rel,
 		"content": string(raw),
@@ -82,18 +101,35 @@ func execReadFile(workspaceRoot, argumentsJSON string) (string, error) {
 	return string(out), nil
 }
 
-func execViaRegistry(workspaceRoot, toolName, argumentsJSON string) (string, error) {
-	// 预校验 path / directory，避免 Registry 细节差异
+func registryForWorkspace(workspaceRoot string) (*tools.Registry, error) {
+	key := filepath.Clean(workspaceRoot)
+	if v, ok := workspaceRegistries.Load(key); ok {
+		return v.(*tools.Registry), nil
+	}
+	reg, err := tools.NewRegistry(workspaceRoot, 30)
+	if err != nil {
+		return nil, err
+	}
+	reg.SetMultimodalEnabled(true)
+	actual, _ := workspaceRegistries.LoadOrStore(key, reg)
+	return actual.(*tools.Registry), nil
+}
+
+func execViaRegistry(ctx context.Context, workspaceRoot, toolName, argumentsJSON string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	// 预校验 path / directory / cwd，避免 Registry 细节差异
 	var probe map[string]any
 	if err := json.Unmarshal([]byte(argumentsJSON), &probe); err != nil {
 		return "", errf(CodeSchemaMismatch, "invalid arguments_json: %v", err)
 	}
 	switch toolName {
-	case "write_file":
+	case "write_file", "grep_file", "search_replace", "show_image", "read_image":
 		if _, err := sanitizeWorkspaceRelPath(strArg(probe, "path")); err != nil {
 			return "", err
 		}
-	case "glob_files":
+	case "glob_files", "grep_files":
 		dir := strings.TrimSpace(strArg(probe, "directory"))
 		if dir == "" {
 			dir = "."
@@ -103,12 +139,19 @@ func execViaRegistry(workspaceRoot, toolName, argumentsJSON string) (string, err
 				return "", err
 			}
 		}
+	case "bash_run":
+		cwd := strings.TrimSpace(strArg(probe, "cwd"))
+		if cwd != "" && cwd != "." && cwd != "./" {
+			if _, err := sanitizeWorkspaceRelPath(cwd); err != nil {
+				return "", err
+			}
+		}
 	}
-	reg, err := tools.NewRegistry(workspaceRoot, 30)
+	reg, err := registryForWorkspace(workspaceRoot)
 	if err != nil {
 		return "", errf(CodeConflict, "workspace tools: %v", err)
 	}
-	out, err := reg.Execute(context.Background(), toolName, argumentsJSON)
+	out, err := reg.Execute(ctx, toolName, argumentsJSON)
 	if err != nil {
 		return "", errf(CodeConflict, "%s failed: %v", toolName, err)
 	}

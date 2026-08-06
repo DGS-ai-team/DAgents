@@ -15,7 +15,13 @@ class TimelineEvent(BaseModel):
     event_id: str = Field(pattern=_EV)
     workgroup_id: str = Field(pattern=_WG)
     seq: int = Field(ge=1)
-    type: Literal["human_message", "actor_final_text", "system_notice"]
+    type: Literal[
+        "human_message",
+        "actor_final_text",
+        "system_notice",
+        "assign_started",
+        "assign_finished",
+    ]
     actor_id: str
     text: str = ""
     created_at: str
@@ -53,6 +59,20 @@ class HumanPostRequest(BaseModel):
     from_node_id: str = Field(min_length=1)
     # 调试/实验：可禁用 supervisor 工具，仅验证纯对话路径。
     disable_tools: bool = False
+    # @直连：选择器写入的 member_id；有则跳过 Leader LLM，直接 Assign 该成员
+    direct_member_id: str | None = None
+
+
+class TurnCancelRequest(BaseModel):
+    client_message_id: str | None = None
+
+
+class TurnCancelResponse(BaseModel):
+    cancelled: bool
+    mode: str = ""  # leader | direct | idle
+    failed_assign_ids: list[str] = Field(default_factory=list)
+    leader_run_id: str | None = None
+    member_run_id: str | None = None
 
 
 class ProvisionCompleteRequest(BaseModel):
@@ -67,7 +87,7 @@ class ToolResultApplyRequest(BaseModel):
     command_id: str
     assign_id: str
     member_id: str
-    status: Literal["succeeded", "failed", "indeterminate", "rejected"]
+    status: Literal["succeeded", "failed", "indeterminate", "rejected", "canceled"]
     result_text: str = ""
     error_code: str | None = None
 

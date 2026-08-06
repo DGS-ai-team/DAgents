@@ -654,15 +654,15 @@ async function submit() {
 }
 
 .first-run__footer :deep(.btn--primary) {
-  background: var(--color-text);
-  border-color: var(--color-text);
-  color: var(--color-text-invert);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #ffffff;
 }
 
 .first-run__footer :deep(.btn--primary:hover:not(:disabled)) {
-  background: var(--color-text-muted);
-  border-color: var(--color-text-muted);
-  color: var(--color-text-invert);
+  background: var(--color-primary-strong);
+  border-color: var(--color-primary-strong);
+  color: #ffffff;
 }
 
 .first-run__footer :deep(.btn--ghost) {

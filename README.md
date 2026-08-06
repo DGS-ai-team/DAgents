@@ -5,332 +5,189 @@
 <p align="center">
   <h1 align="center">DAgents</h1>
   <p align="center">
-    本地多 Agent 助手运行时 — Go Agent Node + 内嵌 Web UI
+    本地优先的企业 Agent 控制台 — Go Agent Node · 内嵌 Web UI · Manage 工作组协作
     <br />
     <a href="docs/handbook/README.md"><strong>项目手册 »</strong></a>
     ·
-    <a href="docs/design/agent-instance-model.md"><strong>Agent 实例模型 »</strong></a>
+    <a href="docs/handbook/07-Workgroup协作.md"><strong>工作组协作 »</strong></a>
     ·
     <a href="CHANGELOG.md">变更记录</a>
     ·
-    <a href="docs/architecture/agent-node-api.md">HTTP/SSE API</a>
-    ·
-    <a href="node/webui/README.md">Web UI（Node 内嵌 /ui/）</a>
+    <a href="docs/design/v0.9.1-smoke-checklist.md">v0.9.1 预览清单</a>
   </p>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.8.5-green" alt="v0.8.5"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.9.1--preview-orange" alt="v0.9.1 preview"></a>
   <a href="go.work"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
   <a href="requirements.txt"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
-  <a href="node/webui/README.md"><img src="https://img.shields.io/badge/Web%20UI-Node%20内嵌%20%2Fui%2F-brightgreen" alt="Node Web UI"></a>
 </p>
 
 ---
 
-## 简介
+## 一句话
 
-**DAgents** 面向需要 **工具调用、人工审批（HITL）、会话持久化** 的 Agent 场景。当前主线（**v0.8 Agent 实例模型**）以 **Go Agent Node** 为唯一运行时：单进程可承载 **多个 Agent 实例**（模板创建、可选沙箱），LLM turn loop（**OpenAI 兼容 / DeepSeek** 等）、内置工具、SQLite、skills、上下文压缩与 trigger 调度，并内嵌 **Web UI**（`/ui/`）作为**唯一人机入口**；**Manage 控制面** 提供 Registry、**A2A Task** 与 **Vue Console**（可 Docker 部署）。
+**DAgents** 让你在内网机器上跑本地 Agent（工具调用、HITL、持久化），并用 **Manage 工作组** 把多台 Node 上的成员编排在一起——不是通用工作流搭建器，而是可治理的企业本地助手控制台。
 
-| 入口 | 适用场景 | 命令 / URL |
-|------|----------|------------|
-| **Node Web UI** | 默认交互（创建 Agent、对话、设置） | `dagents node` → `http://127.0.0.1:<port>/ui/` |
-| **Manage Console** | Registry / A2A / 发布 | 单独部署 Manage |
-
-精简辅助二进制 **`dagents-client`** 仅用于 `probe` / `update` / `version`（不再提供终端对话）。
-
-> **v0.2.0 说明**：原 Python FastAPI Agent API（`run_agent_api.py`）已从仓库移除。详见 [CHANGELOG.md](CHANGELOG.md)。
-
-> **浏览器 Client**：Go Node 进程内嵌 **Web UI**（`node/webui/`，`go:embed` 挂载 `/ui/`）。原独立前端仓库 [DAgentsUI](https://github.com/DGS-ai-team/DAgentsUI) 面向已移除的 Python Agent API，**不再作为本仓库浏览器 Client 路径**。
+当前预览主线：**v0.9.1**（正式版前最后一个大预览）。验收与边界见 [v0.9.1-smoke-checklist.md](docs/design/v0.9.1-smoke-checklist.md)。
 
 ---
 
-## 功能特性
+## 三个组件
 
-- **LLM Turn 编排** — OpenAI 兼容 API；流式 assistant / reasoning / tool 事件；流式 cancel 保留部分 assistant 与合法 tool 序列
-- **LLM 厂商适配** — `llm.provider`（`openai` / `deepseek` / `qwen` / `vllm`）；`MessageAdapter` 统一出站序列化与 `reasoning_content` 处理
-- **内置工具** — `bash_run`（可配置 GBK/UTF-8 解码）、文件读写与替换、skills 加载、trigger 管理、**临时子 Agent**
-- **HITL** — 工具审批、`ask_user_information`；Web UI 非阻塞队列 + resume
-- **工作组协作** — Manage Registry + Workgroup；跨机器成员协作（旧 A2A inbox / `agent_invoke` 已拆除）
-- **Triggers** — `interval`、`fire_at`、日历 **`schedule`**（含 cmd 门控）
-- **Agent 实例** — 模板创建、可改显示名、可选沙箱 FSRoot；1 Agent = 1 主对话；Web UI `/agents/:id`
-- **Policy** — `.runtime/policy/*.approval.txt` 本地审批策略
-- **可观测** — SSE `usage`（prompt/completion、cache hit、`reasoning_tokens`）；结构化 stderr 日志
-- **同包发布** — Release 资产 `dagents-local-assistant-*`（Linux tarball / Windows zip / **Windows 安装包**）；第三方 CLI 见 **[推荐工具清单](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)**（如 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)，需自行安装）
-
----
-
-## 设计优化与重大变更
-
-除 [CHANGELOG.md](CHANGELOG.md) 中的版本记录外，仓库维护 **[设计优化实录](docs/handbook/附录/重大设计变更实录.md)**，用「背景 → 思路 → 落地」说明架构级改进，便于回顾取舍与 onboarding。
-
-| 主题 | 摘要 | 文档 |
-|------|------|------|
-| **上下文压缩 × Prompt Cache** | 侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；改 `CompleteText` 二次序列化；M3 silent 冷却抑制重复侧车 | [实录 §1](docs/handbook/附录/重大设计变更实录.md#1-上下文压缩与-prompt-cache-对齐m2--m3) · [完整分析](docs/design/context-compression-cache-analysis.md) |
-| **工具链上下文成本** | WS1/3/5/6 已落地；WS4 skills 搁置 | [实录 §2](docs/handbook/附录/重大设计变更实录.md#2-工具链上下文成本优化已落地) · [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) |
-| **Tool Before Hook** | 执行前 Hook + 重复调用 60s 内三选项审批 | [tool-before-hook-duplicate-approval.md](docs/design/tool-before-hook-duplicate-approval.md) |
-
-新的大项优化请按 [实录条目模板](docs/handbook/附录/重大设计变更实录.md#条目模板复制使用) 追加；大型专题宜用 **四段结构**（见 [docs/README.md](docs/README.md)）。
-
----
-
-## 架构
-
-> 完整技术说明见 **[项目手册（docs/handbook/）](docs/handbook/README.md)**。
+| 组件 | 做什么 | 默认入口 |
+|------|--------|----------|
+| **Agent Node**（Go） | 多 Agent 运行时、内置工具、SSE、内嵌 Web UI | `http://127.0.0.1:18765/ui/` |
+| **Manage**（Python） | Registry、工作组 Leader、Console | `http://127.0.0.1:8020/console/` |
+| **Desktop Shell**（可选） | Windows 托盘启停 Node（Tauri / Go 双轨） | 安装包附带 |
 
 ```mermaid
 flowchart LR
-  subgraph clients [人机入口]
-    WEB["浏览器 Web UI<br/>/ui/agents"]
-  end
-
-  subgraph runtime [本机运行时]
-    NODE["Agent Node (Go)<br/>HTTP + SSE · 多 Agent"]
-  end
-
-  subgraph optional [可选控制面]
-    MG["Manage<br/>Registry + A2A Task"]
-  end
-
-  WEB -->|127.0.0.1:18765| NODE
-  MG -.->|注册 / inbox| NODE
+  UI["Node Web UI /ui/"] --> NODE["Agent Node"]
+  CON["Manage Console"] --> MG["Manage"]
+  NODE <-->|注册 / Workgroup WS| MG
+  NODE2["其他 Node"] <-->|Worker Dialer| MG
 ```
 
-> **Web UI**：内嵌于 Agent Node（`GET /ui/`），源码见 [`node/webui/`](node/webui/)。不替代 Manage Console 的跨 Agent 运维入口。
+- **本地对话**：只开 Node + Web UI 即可（可用 `llm.mock` 免 Key）。
+- **跨机协作**：开 Manage，Node 开启 `manage` + workgroup，建组后 Supervisor 编排或 `@成员` 直达。
 
-配置：`packaging/agent-client/config.yaml`（Node 读 `listen` / `llm` / `node_id`）。
+---
+
+## 功能概览
+
+- **Agent 实例** — 模板创建、工具组、skills、triggers、临时子 Agent、浏览器伴生任务
+- **HITL** — 工具审批、`ask_user_information`；Web UI 队列 + resume
+- **工作组** — 建组 / ACL / 成员 provision；`assign_workgroup_task`；`@member`；信息型 HITL；取消 turn；成员工作区 **fs**（默认）+ 可选 **bash**
+- **策略与审计** — 本地 approval 策略、JSONL / SQLite 会话、RunHistory 调试
+- **分发** — Windows / Linux 安装包；Manage Docker；Release Hub 自更新（可选）
+
+### 预览边界（请先读）
+
+| 不做 / 限制 | 说明 |
+|-------------|------|
+| 成员无 browser / skills / triggers | 仅工作区可执行工具（fs + 可选 bash） |
+| 无进程级沙箱 | Agent 与成员 bash 均约束在 `fs_root` / 成员目录 + 工具组 |
+| Placement / 远端旁观 | 产品入口已拆除 |
+| D05 全量契约执行器 | 部分 golden + INDEX harness，非全量 |
 
 ---
 
 ## 快速开始
 
-### 前置条件
+### 前置
 
 | 组件 | 要求 |
 |------|------|
-| **Go** | 1.25+（见 [`go.work`](go.work)） |
-| **Python**（Manage / 可选） | 3.11+；CI 验证 3.13 |
-| **LLM** | 首次启动写入产品默认到 `node_settings.db`；Web UI 可开 `llm.mock`，**无需 API Key** 即可联调 |
+| Go | 1.25+（[`go.work`](go.work)） |
+| Python | 3.11+（仅 Manage / 测试） |
+| Web UI 静态资源 | 开发机需先构建：`npm run build --prefix node/webui/frontend`（`go:embed`） |
 
-### 1. 克隆与配置
+### 1. 配置
 
 ```bash
 git clone https://github.com/DGS-ai-team/DAgents.git
 cd DAgents
-
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
-# 可选：只改 listen/local；其余用 Web UI（写入 node_settings.db / llm_configs.db）
-# 真实 LLM：在 Web UI 配置 provider/model，并 export OPENAI_API_KEY
 ```
 
-### 2. 启动 Agent Node
+YAML 只引导 `listen` / `local`；LLM 与能力在 Web UI / SQLite。联调可开 **mock LLM**（无需 API Key）。
+
+### 2. 启动 Node
 
 ```bash
+# 若 static/ 为空，先构建 Web UI
+npm run build --prefix node/webui/frontend
+
 go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
 ```
 
-探活：
+打开 `http://127.0.0.1:18765/ui/` → 完成首配 → 新建 Agent 对话。
 
-```bash
-curl -s http://127.0.0.1:18765/health | jq .
-# 或
-go run ./client/cmd/dagents-client -config packaging/agent-client/config.yaml probe
-```
-
-### 3. 打开 Web UI
-
-Node 启动后在本机浏览器打开：
-
-```text
-http://127.0.0.1:18765/ui/
-```
-
-在侧栏从模板 **新建 Agent**，即可对话。详见 [node/webui/README.md](node/webui/README.md)。可通过设置关闭 Web UI 挂载。
-
----
-
-## 配置说明
-
-`config.yaml` **仅引导** `listen` / `local`。其余字段保存在 SQLite（Web UI「设置」）：
-
-| 来源 | 字段 | 说明 |
-|------|------|------|
-| YAML | `listen.host` / `listen.port` | Node 监听地址（默认 `127.0.0.1:18765`） |
-| YAML | `local.endpoint` | Client 连接 URL |
-| 固定 | 运行时根 | 始终 `./.runtime`（不可配置） |
-| `node_settings.db` / `llm_configs.db` | `llm.*` | provider / mock / api_key_env 等 |
-| `node_settings.db` | `tools.*` / `triggers` / `child_agents` / `manage` / `ui` | 进程级能力与集成 |
-
-旧版胖 YAML 首次启动会迁入 `node_settings.db` 并自动瘦身。
-
-完整示例：[packaging/agent-client/config.example.yaml](packaging/agent-client/config.example.yaml)
-
-查找顺序：`--config` / `-config` → 环境变量 `DAGENTS_CONFIG` → 默认路径。
-
----
-
-## Client 命令速查
-
-### Python `dagents`
-
-```bash
-dagents chat [--config PATH] [--session ID] [--show-reasoning]
-dagents show session [--config PATH]
-dagents delete session SESSION_ID [--config PATH]
-```
-
-TUI 内常用：`/help` `/status` `/context` `/sessions` `/switch` `/new` `/skill` `/children` `/reasoning on|off` `/clear` `/exit`（**Esc** 取消在途 turn）
-
-### Go `dagents-client`
-
-```bash
-dagents-client probe
-dagents-client tui [--plain] [--show-reasoning] [session_id]
-dagents-client chat "你好"        # 一次性非交互
-```
-
-TUI 内常用：`/help` `/status` `/context` `/sessions` `/switch` `/new` `/skill` `/children` `/tools expand|collapse` `/reasoning on|off` `/clear` `/quit`（**Esc** 取消在途 turn）
-
----
-
-## Manage 控制面（推荐）
-
-**Registry**、**工作组（Workgroup）** 与 **Console**（Node 目录、各 Node session 观测）。默认 **`0.0.0.0:8020`**。
+### 3. （可选）Manage + 工作组
 
 ```bash
 pip install -r requirements.txt
+npm run build --prefix manage/console/frontend   # 首次
 python run_manage.py
 # Console: http://127.0.0.1:8020/console/
 ```
 
-Docker 部署与 Release 镜像导出见 [`packaging/manage/README.md`](packaging/manage/README.md)。
+Node 设置中启用 Manage / workgroup 后自动注册与 Dialer。工作组用法：[07-Workgroup协作.md](docs/handbook/07-Workgroup协作.md)。
 
-Node 侧在 `config.yaml` 启用 `manage.enabled` 后自动注册。详见 [manage/README.md](manage/README.md)。
+探活：`curl -s http://127.0.0.1:18765/health`
 
 ---
 
-## 项目结构
+## 配置要点
 
-```text
-DAgents/
-├── node/                    # Go Agent Node（运行时；含 internal/llm、turn、session 等）
-├── client/                  # Go TUI Client（full + plain REPL）
-├── shared/config/           # Node / Client 共用 YAML 解析
-├── app/cli/                 # Python Textual TUI
-├── manage/                  # Manage 控制面（Registry + A2A + Console）
-├── cases/                   # 落地案例（CentOS7 导览、A2A Manage Docker 等）
-├── packaging/
-│   ├── agent-client/        # config.example.yaml、启动脚本
-│   ├── manage/              # Manage Docker / compose
-│   ├── linux/               # install.sh、分发脚本
-│   └── windows/             # Inno Setup 安装包模板
-├── docs/                    # 架构与 API 文档
-├── tests/                   # Python CLI / Manage 单测
-├── go.work
-├── requirements.txt
-├── run_manage.py
-└── run_dev_stack.py         # 开发：仅启动 Manage
-```
+| 来源 | 内容 |
+|------|------|
+| `config.yaml` | `listen` / `local`；`manage.*` 开关 |
+| `./.runtime` | 固定运行时根（不可配置） |
+| `node_settings.db` / `llm_configs.db` | LLM、工具、UI、Manage 等 |
 
-各目录 [`README.md`](node/README.md) / [`REFERENCE.md`](node/REFERENCE.md) 随源码维护。
+进程锁：`packaging/agent-client/.dagents-node-*.lock`；重启报「已在运行」时先确认无存活进程再删锁。
 
 ---
 
 ## 开发与测试
 
 ```bash
-# Go 全量单测（与 CI go-ac 一致）
+npm run build --prefix node/webui/frontend
 go test ./node/... ./client/... ./shared/config/...
 
-# Python CLI / Manage
-pip install -r requirements.txt
+npm run build --prefix manage/console/frontend
 python -m unittest discover -s tests -p "test_*.py" -v
+
+npm test --prefix node/webui/frontend
 ```
 
-| 工作流 | 说明 |
-|--------|------|
-| [pr-tests.yml](.github/workflows/pr-tests.yml) | PR：Go + Python unittest |
-| [go-ac.yml](.github/workflows/go-ac.yml) | Go Node / Client 持续集成 |
-| [build-and-release.yml](.github/workflows/build-and-release.yml) | Release 构建与发布 |
+Cloud / 代理环境注意见 [AGENTS.md](AGENTS.md)。
 
-详见 [tests/README.md](tests/README.md)。
+---
+
+## 仓库结构
+
+```text
+node/                 # Go Agent Node + 内嵌 Web UI
+client/               # 精简 Go client（probe / update / version 等）
+manage/               # Manage API + Console + workgroup
+shared/config/        # 共用配置
+desktop/              # Windows Shell（tray / tray-tauri）
+packaging/            # 安装包、模板、config.example
+docs/handbook/        # 技术文档主干
+docs/design/          # 设计与验收清单（含 workgroup 契约）
+tests/                # Python 单测
+```
+
+---
+
+## 文档地图
+
+| 文档 | 内容 |
+|------|------|
+| [docs/handbook/README.md](docs/handbook/README.md) | **唯一正文入口** |
+| [docs/handbook/07-Workgroup协作.md](docs/handbook/07-Workgroup协作.md) | 工作组用户向说明 |
+| [docs/design/workgroup-and-node-gateway.md](docs/design/workgroup-and-node-gateway.md) | 工作组产品规范 |
+| [docs/design/v0.9.1-smoke-checklist.md](docs/design/v0.9.1-smoke-checklist.md) | 预览验收清单 |
+| [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md) | HTTP / SSE |
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更 |
+| [docs/roadmap.md](docs/roadmap.md) | 产品路线图 |
+| [docs/archive/README.md](docs/archive/README.md) | 历史 / superseded 文档策略 |
 
 ---
 
 ## 预编译包
 
-GitHub **Releases** 提供 **`dagents-local-assistant-*`**（Linux tarball、Windows zip、**Inno 安装包**、**Tauri Setup 向导**）及 **`dagents-manage-bundle-*`**（Manage 离线包，内含 Docker 镜像）：
+GitHub Releases：`dagents-local-assistant-*`（Linux / Windows）、Manage bundle。安装与离线说明见 [packaging/agent-client/README.md](packaging/agent-client/README.md)、[packaging/OFFLINE_INSTALL.md](packaging/OFFLINE_INSTALL.md)。
 
-| 二进制 | 说明 |
-|--------|------|
-| `dagents-node` | Agent Node |
-| `dagents-client` | Go TUI（`tui` / `tui --plain`） |
-| `dagents-cli` / `dagents` | Python Textual TUI |
-
-解压后：
-
-```bash
-# 终端 1
-./bin/dagents-node -config config.yaml
-
-# 终端 2（任选）
-./bin/dagents-cli chat -config config.yaml
-./bin/dagents-client -config config.yaml tui
-```
-
-打包与离线安装：[packaging/agent-client/README.md](packaging/agent-client/README.md)、[packaging/OFFLINE_INSTALL.md](packaging/OFFLINE_INSTALL.md)
-
-### 推荐 CLI 工具（需自行安装）
-
-发布包**不内置** OfficeCLI 等第三方 CLI。推荐清单与安装步骤见 **[packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)**；Office 文档处理可安装 **[iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)**（AGPL-3.0），拷贝 skills 后 `/skill load officecli`。详情见 [packaging/runtime/externaltools/OFFICECLI.md](packaging/runtime/externaltools/OFFICECLI.md)。
-
-安装 **`install.sh`** 或 Windows 安装包会将 **`.runtime/externaltools`** 加入 `PATH`，便于放置自行下载的工具。
+推荐第三方 CLI：[packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md)。
 
 ---
 
-## 文档
+## 许可证
 
-| 文档 | 内容 |
-|------|------|
-| [docs/README.md](docs/README.md) | 文档索引 |
-| [docs/architecture/overview.md](docs/architecture/overview.md) | 架构总览（Manage 控制面） |
-| [docs/architecture/go-node-internals.md](docs/architecture/go-node-internals.md) | Go Node 内部结构（runtime / queue / turn / llm） |
-| [manage/README.md](manage/README.md) | Manage 控制面 API 与 Console |
-| [docs/architecture/local-assistant.md](docs/architecture/local-assistant.md) | 本地助手联调 |
-| [docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md) | Go Node HTTP/SSE 契约 |
-| [docs/architecture/child-agent-tools.md](docs/architecture/child-agent-tools.md) | 子 Agent 工具 |
-| [docs/architecture/go-node-compatibility.md](docs/architecture/go-node-compatibility.md) | 老旧 OS / 静态构建 |
-| [packaging/manage/README.md](packaging/manage/README.md) | Manage Docker 部署 |
-| [packaging/runtime/RECOMMENDED_CLI_TOOLS.md](packaging/runtime/RECOMMENDED_CLI_TOOLS.md) | 推荐 CLI 工具（如 OfficeCLI，需自行安装） |
-| [cases/README.md](cases/README.md) | 落地案例（CentOS 7 特性导览 + A2A Manage Docker） |
-| [node/webui/README.md](node/webui/README.md) | Node 内嵌 Web UI（`/ui/`） |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更（**v0.5.4**） |
-
----
-
-## 版本与兼容性
-
-| 项 | 说明 |
-|----|------|
-| **当前版本** | **v0.5.4**（2026-06-30，0.x 预览；tag `v0.5.4`） |
-| **Go** | 1.25+（`node` / `client` / `shared/config`） |
-| **Python** | 3.11+ 可运行；CI 验证 3.13 |
-| **破坏性变更** | 1.0 前仍可能出现；见 [CHANGELOG.md](CHANGELOG.md) |
-| **浏览器 Client** | Node 内嵌 Web UI（`/ui/`）；`ui.enabled` 默认 `true` |
-
-OS 与 glibc 说明：[docs/os-compatibility.md](docs/os-compatibility.md)
-
----
-
-## 反馈与安全
-
-- **Bug / 功能请求**：[GitHub Issues](https://github.com/DGS-ai-team/DAgents/issues) — 请注明版本、OS、Client 类型与复现步骤
-- **安全漏洞**：[SECURITY.md](SECURITY.md)（请勿在公开 Issue 中提交 exploit）
-
----
-
-## License
-
-[MIT License](LICENSE)
+[MIT](LICENSE)

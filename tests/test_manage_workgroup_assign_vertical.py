@@ -353,6 +353,119 @@ class AssignVerticalLoopTests(unittest.TestCase):
             assert member2 is not None
             self.assertEqual(member2.status, "ready")
 
+    def test_cancel_wakes_wait_command_result(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, _, wid, mid = self._ready(tmp, with_bridge=False)
+            from manage.workgroup.models import AssignCreateRequest
+
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="读 README"),
+            )
+            store.set_assign_status(assign.assign_id, "running")
+            dispatched = loop.dispatch_read_file_for_assign(
+                wid,
+                assign_id=assign.assign_id,
+                member_id=mid,
+                tool_call_id="call_cancel_wait",
+                path="README",
+            )
+            cmd_id = dispatched["command"]["command_id"]
+            box: dict = {}
+
+            def waiter() -> None:
+                box["r"] = loop.wait_command_result(cmd_id, timeout_s=3.0)
+
+            t = threading.Thread(target=waiter, daemon=True)
+            t.start()
+            time.sleep(0.05)
+            woke = loop.cancel_pending_commands(wid)
+            self.assertIn(cmd_id, woke)
+            t.join(timeout=2)
+            self.assertFalse(t.is_alive())
+            self.assertEqual(box["r"]["status"], "canceled")
+            self.assertEqual(box["r"]["error_code"], "canceled")
+            cancel_frames = [
+                f for f in store.list_outbox(wid) if f.type == "tool.cancel"
+            ]
+            self.assertTrue(cancel_frames)
+            self.assertEqual(cancel_frames[-1].payload.get("command_id"), cmd_id)
+
+    def test_late_tool_result_does_not_revive_failed_assign(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, _, wid, mid = self._ready(tmp, with_bridge=False)
+            from manage.workgroup.d3_models import ToolResultApplyRequest
+            from manage.workgroup.models import AssignCreateRequest
+
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="读 README"),
+            )
+            store.set_assign_status(assign.assign_id, "running")
+            dispatched = loop.dispatch_read_file_for_assign(
+                wid,
+                assign_id=assign.assign_id,
+                member_id=mid,
+                tool_call_id="call_late",
+                path="README",
+            )
+            cmd_id = dispatched["command"]["command_id"]
+            store.fail_active_assigns(wid, reason="cancelled by user", error_code="canceled")
+            failed = store.get_assign(assign.assign_id)
+            assert failed is not None
+            self.assertEqual(failed.status, "failed")
+
+            out = loop.apply_tool_result(
+                wid,
+                ToolResultApplyRequest(
+                    command_id=cmd_id,
+                    assign_id=assign.assign_id,
+                    member_id=mid,
+                    status="succeeded",
+                    result_text="too late",
+                ),
+            )
+            self.assertTrue(out.get("ignored_assign_update"))
+            again = store.get_assign(assign.assign_id)
+            assert again is not None
+            self.assertEqual(again.status, "failed")
+
+    def test_cancel_turn_hook_wakes_pending_command(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, _, wid, mid = self._ready(tmp, with_bridge=False)
+            from manage.workgroup.models import AssignCreateRequest
+
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="慢工具"),
+            )
+            store.set_assign_status(assign.assign_id, "running")
+            dispatched = loop.dispatch_read_file_for_assign(
+                wid,
+                assign_id=assign.assign_id,
+                member_id=mid,
+                tool_call_id="call_hook",
+                path="README",
+            )
+            cmd_id = dispatched["command"]["command_id"]
+            kernel = TurnKernel(store, mock_llm=True)
+            kernel.set_command_cancel_hook(loop.cancel_pending_commands)
+            kernel._begin_turn(wid, mode="leader", leader_run_id="lr1")
+            box: dict = {}
+
+            def waiter() -> None:
+                box["r"] = loop.wait_command_result(cmd_id, timeout_s=3.0)
+
+            t = threading.Thread(target=waiter, daemon=True)
+            t.start()
+            time.sleep(0.05)
+            out = kernel.cancel_turn(wid)
+            self.assertTrue(out["cancelled"])
+            t.join(timeout=2)
+            self.assertFalse(t.is_alive())
+            self.assertEqual(box["r"]["status"], "canceled")
+            self.assertEqual(store.get_assign(assign.assign_id).status, "failed")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -205,6 +205,90 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertEqual(roles.count("tool"), 1)
             self.assertGreaterEqual(roles.count("assistant"), 2)
 
+    def test_heals_interrupted_open_tool_calls(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="Heal",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            store.publish_workgroup(group.workgroup_id)
+            from manage.workgroup.history import RunHistoryMessage, ToolCall, ToolCallFunction
+            from manage.workgroup.models import ActorRunCreateRequest
+
+            run = store.create_actor_run(
+                group.workgroup_id,
+                ActorRunCreateRequest(actor_id="leader"),
+            )
+            store.ensure_run_history(run)
+            store.append_run_history(
+                run.run_id,
+                [
+                    RunHistoryMessage(
+                        role="assistant",
+                        name="leader",
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_orphan",
+                                function=ToolCallFunction(
+                                    name="list_workgroup_members",
+                                    arguments="{}",
+                                ),
+                            )
+                        ],
+                    )
+                ],
+            )
+            kernel = TurnKernel(
+                store,
+                chat_client=MockLLMClient(
+                    [ChatResult(content="已恢复并继续", finish_reason="stop")]
+                ),
+                mock_llm=True,
+            )
+            result = kernel.handle_human_message(
+                group.workgroup_id,
+                text="继续",
+                from_node_id="node-a",
+                disable_tools=True,
+            )
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            self.assertEqual(result["loop"]["final_text"], "已恢复并继续")
+            hist = store.get_run_history(run.run_id)
+            assert hist is not None
+            tool = next(m for m in hist.messages if m.role == "tool")
+            self.assertEqual(tool.tool_call_id, "call_orphan")
+            self.assertIn("interrupted", tool.content or "")
+
+    def test_new_human_message_releases_stuck_active_assign(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.models import AssignCreateRequest
+
+            stuck = store.create_assign(wid, AssignCreateRequest(member_id=mid, instruction="stuck"))
+            store.set_assign_status(stuck.assign_id, "running")
+            kernel = TurnKernel(
+                store,
+                chat_client=MockLLMClient(
+                    [ChatResult(content="锁已释放，可以继续", finish_reason="stop")]
+                ),
+                mock_llm=True,
+            )
+            result = kernel.handle_human_message(
+                wid,
+                text="继续",
+                from_node_id="node-a",
+                disable_tools=True,
+            )
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            self.assertEqual(store.get_assign(stuck.assign_id).status, "failed")
+
     def test_single_active_assign_enforced(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))

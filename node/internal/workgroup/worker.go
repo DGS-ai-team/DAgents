@@ -39,7 +39,7 @@ func NewWorker(cfg Config) *Worker {
 		Tombstones: map[string]ArchiveTombstone{},
 	}
 	// 工作区工具由 Worker Executor 提供，不依赖本地 Agent Registry 枚举名。
-	nodeTools := mergeToolNames(cfg.NodeToolNames, []string{"read_file", "glob_files", "write_file"})
+	nodeTools := mergeToolNames(cfg.NodeToolNames, WorkspaceExecutableToolNames())
 	w.Provision = &Provisioner{
 		NodeID:        cfg.NodeID,
 		Bindings:      bindings,
@@ -83,6 +83,14 @@ func (w *Worker) HandleCommand(cmd ToolCommand) (*AcceptResult, error) {
 	w.Commands.ConnectionGeneration = w.Session.Generation()
 	w.mu.Unlock()
 	return w.Commands.Accept(cmd, *binding)
+}
+
+// HandleCancel 处理 tool.cancel。
+func (w *Worker) HandleCancel(commandID, workgroupID string) (*AcceptResult, error) {
+	w.mu.Lock()
+	w.Commands.ConnectionGeneration = w.Session.Generation()
+	w.mu.Unlock()
+	return w.Commands.Cancel(commandID, workgroupID)
 }
 
 // HandleArchive 应用 tombstone。

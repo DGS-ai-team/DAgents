@@ -1,16 +1,8 @@
-# DAgents Node bootstrap（仅 listen / local）
-#
-# 本地使用：
-#   cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
-#
-# 其余 Node 设置保存在 ./.runtime/node_settings.db（固定路径，不可配置），
-# LLM 连接档案保存在 ./.runtime/llm_configs.db，请用 Web UI「设置」修改。
-# Agent 策略 / 侧车 / 实例配置在 agents.db。
-
+# DAgents Node bootstrap（仅 listen/local）
+# 其余设置保存在 ./.runtime/node_settings.db 与 llm_configs.db，请用 Web UI 修改。
 listen:
-  host: 127.0.0.1
-  port: 18765
-
+    host: 127.0.0.1
+    port: 18765
 local:
-  endpoint: http://127.0.0.1:18765
-  node_id: ""
+    endpoint: http://127.0.0.1:18765
+    node_id: ""

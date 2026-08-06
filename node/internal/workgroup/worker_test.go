@@ -1,6 +1,7 @@
 package workgroup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,7 +163,7 @@ func TestCommandNoReexecAfterAccept(t *testing.T) {
 		t.Fatal(err)
 	}
 	execCount := 0
-	w.Commands.Executor = func(cmd ToolCommand) (string, error) {
+	w.Commands.Executor = func(ctx context.Context, cmd ToolCommand) (string, error) {
 		execCount++
 		return `{"ok":true}`, nil
 	}
@@ -283,7 +284,7 @@ func TestArchiveRejectsStaleEpoch(t *testing.T) {
 		t.Fatal(err)
 	}
 	executed := false
-	w.Commands.Executor = func(cmd ToolCommand) (string, error) {
+	w.Commands.Executor = func(ctx context.Context, cmd ToolCommand) (string, error) {
 		executed = true
 		return `{}`, nil
 	}
@@ -500,9 +501,9 @@ func TestRecoverAcceptedBeforeRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	execCount := 0
-	w.Commands.Executor = func(c ToolCommand) (string, error) {
+	w.Commands.Executor = func(ctx context.Context, c ToolCommand) (string, error) {
 		execCount++
-		return NewReadFileExecutor(w.Bindings)(c)
+		return NewWorkspaceToolExecutor(w.Bindings)(ctx, c)
 	}
 	r1, err := w.HandleCommand(cmd)
 	if err != nil {

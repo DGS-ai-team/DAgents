@@ -86,7 +86,7 @@ export const VIEW_META = {
   },
   nodes: {
     title: "Node 列表",
-    subtitle: "已注册 Agent Node、在线状态与 discovery 分组",
+    subtitle: "已注册 Node、在线状态与 discovery 分组",
   },
   permissions: {
     title: "权限管理",

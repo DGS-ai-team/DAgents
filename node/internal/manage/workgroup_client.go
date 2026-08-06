@@ -1,8 +1,11 @@
 package manage
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -60,6 +63,15 @@ func (c *ControlClient) CreateWorkgroup(ctx context.Context, displayName string)
 		"llm_profile_id":      "default",
 		"llm_profile_revision": "1",
 	}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetMemberToolCatalog 拉取 Manage 侧成员工具目录（与仓库 JSON 同源；Node WebUI 优先用本地嵌入，不必经此调用）。
+func (c *ControlClient) GetMemberToolCatalog(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/workgroups/meta/member-tools", nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -155,22 +167,86 @@ func (c *ControlClient) GetWorkgroupTimeline(ctx context.Context, workgroupID st
 }
 
 // PostWorkgroupMessage 以本机 node_id 发言。
-func (c *ControlClient) PostWorkgroupMessage(ctx context.Context, workgroupID, text, clientMessageID string) (map[string]any, error) {
+// directMemberID 非空时 Manage 走 @直连（跳过 Leader LLM）。
+func (c *ControlClient) PostWorkgroupMessage(ctx context.Context, workgroupID, text, clientMessageID, directMemberID string) (map[string]any, error) {
 	body := map[string]any{
-		"text":          text,
-		"from_node_id":  c.cfg.NodeID,
+		"text":         text,
+		"from_node_id": c.cfg.NodeID,
 	}
 	if strings.TrimSpace(clientMessageID) != "" {
 		body["client_message_id"] = clientMessageID
 	}
+	if strings.TrimSpace(directMemberID) != "" {
+		body["direct_member_id"] = strings.TrimSpace(directMemberID)
+	}
 	var out map[string]any
 	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/messages"
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// Leader assign + Member LLM/tool 可能远超默认 HTTP 超时；过短会导致 Manage 侧留下未配对 tool_call。
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	if err := c.doJSON(ctx, http.MethodPost, path, body, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// CancelWorkgroupTurn 取消当前工作组活跃 turn（Leader / 直连 Member）。
+func (c *ControlClient) CancelWorkgroupTurn(ctx context.Context, workgroupID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/turn/cancel"
+	if err := c.doJSON(ctx, http.MethodPost, path, map[string]any{}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// OpenWorkgroupMessageStream 打开 Manage messages/stream SSE；调用方必须 Close 返回的 Body。
+func (c *ControlClient) OpenWorkgroupMessageStream(
+	ctx context.Context,
+	workgroupID, text, clientMessageID, directMemberID string,
+) (*http.Response, error) {
+	if !c.enabled() {
+		return nil, fmt.Errorf("manage is not enabled")
+	}
+	body := map[string]any{
+		"text":         text,
+		"from_node_id": c.cfg.NodeID,
+	}
+	if strings.TrimSpace(clientMessageID) != "" {
+		body["client_message_id"] = clientMessageID
+	}
+	if strings.TrimSpace(directMemberID) != "" {
+		body["direct_member_id"] = strings.TrimSpace(directMemberID)
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/messages/stream"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.manageURL(path), bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(agentIDHeader, c.cfg.NodeID)
+	if token := strings.TrimSpace(c.cfg.Manage.NodeToken); token != "" {
+		req.Header.Set(tokenHeader, token)
+	}
+	cli := c.streamClient
+	if cli == nil {
+		cli = &http.Client{Timeout: 0}
+	}
+	resp, err := cli.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("manage stream status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return resp, nil
 }
 
 // jsonArray 便于 doJSON 解码任意 JSON 数组。
@@ -257,6 +333,36 @@ func (c *ControlClient) ResolveWorkgroupHITL(ctx context.Context, workgroupID, h
 	var out map[string]any
 	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/hitl/" + strings.TrimSpace(hitlID) + "/resolve"
 	if err := c.doJSON(ctx, http.MethodPost, path, map[string]any{"resolution": resolution}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListWorkgroupRuns 列出工作组 ActorRun（含 Supervisor LLM 解析摘要）。
+func (c *ControlClient) ListWorkgroupRuns(ctx context.Context, workgroupID, actorID string, limit int) (map[string]any, error) {
+	q := url.Values{}
+	if strings.TrimSpace(actorID) != "" {
+		q.Set("actor_id", strings.TrimSpace(actorID))
+	}
+	if limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/runs"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetWorkgroupRunHistory 取 ActorRunHistory（调试 / mock 可观测）。
+func (c *ControlClient) GetWorkgroupRunHistory(ctx context.Context, workgroupID, runID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/runs/" + strings.TrimSpace(runID) + "/history"
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil

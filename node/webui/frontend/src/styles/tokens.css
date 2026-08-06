@@ -18,10 +18,10 @@
   --color-text-subtle: #9a9a9a;
   --color-text-invert: #1a1a1a;
 
-  /* Neutral accent (no brand blue) */
-  --color-primary: #e5e5e5;
-  --color-primary-soft: rgba(255, 255, 255, 0.12);
-  --color-primary-strong: #ffffff;
+  /* Fluent accent — 表面保持中性，交互控件用系统蓝 */
+  --color-primary: #0078d4;
+  --color-primary-soft: rgba(96, 205, 255, 0.16);
+  --color-primary-strong: #1b8adb;
   --color-accent: var(--color-primary);
 
   --color-success: #6ccb5f;
@@ -30,15 +30,15 @@
   --color-warning-soft: rgba(252, 225, 0, 0.14);
   --color-danger: #ff99a4;
   --color-danger-soft: rgba(255, 153, 164, 0.16);
-  --color-info: #c8c8c8;
-  --color-info-soft: rgba(255, 255, 255, 0.1);
+  --color-info: #60cdff;
+  --color-info-soft: rgba(96, 205, 255, 0.14);
 
   --color-sidebar: #181818;
   --color-sidebar-hover: rgba(255, 255, 255, 0.06);
   --color-sidebar-active: #2a2a2a;
   --color-editor: #202020;
   --color-input: #2c2c2c;
-  --color-selection: rgba(255, 255, 255, 0.18);
+  --color-selection: rgba(96, 205, 255, 0.28);
   --color-code-bg: #1a1a1a;
   --color-code-fg: #e6e6e6;
   --color-overlay: rgba(0, 0, 0, 0.48);
@@ -90,9 +90,9 @@
   --color-text-subtle: #8a8a8a;
   --color-text-invert: #ffffff;
 
-  --color-primary: #242424;
-  --color-primary-soft: rgba(0, 0, 0, 0.08);
-  --color-primary-strong: #111111;
+  --color-primary: #0078d4;
+  --color-primary-soft: rgba(0, 120, 212, 0.12);
+  --color-primary-strong: #005a9e;
   --color-accent: var(--color-primary);
 
   --color-success: #0f7b0f;
@@ -101,15 +101,15 @@
   --color-warning-soft: rgba(157, 93, 0, 0.12);
   --color-danger: #c42b1c;
   --color-danger-soft: rgba(196, 43, 28, 0.12);
-  --color-info: #5d5d5d;
-  --color-info-soft: rgba(0, 0, 0, 0.08);
+  --color-info: #0078d4;
+  --color-info-soft: rgba(0, 120, 212, 0.1);
 
   --color-sidebar: #f7f7f7;
   --color-sidebar-hover: rgba(0, 0, 0, 0.04);
   --color-sidebar-active: #ebebeb;
   --color-editor: #ffffff;
   --color-input: #ffffff;
-  --color-selection: rgba(0, 0, 0, 0.12);
+  --color-selection: rgba(0, 120, 212, 0.22);
   --color-code-bg: #f3f3f3;
   --color-code-fg: #1a1a1a;
   --color-overlay: rgba(0, 0, 0, 0.36);

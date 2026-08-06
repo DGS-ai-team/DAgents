@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import threading
 from collections.abc import Callable
 from typing import Any
 
 from manage.llm.store import LLMConfigStore
+from manage.workgroup.builtin_hooks import (
+    TODAY_DATE_MESSAGE_NAME,
+    ensure_today_date_in_messages,
+    package_tool_result,
+)
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.history import (
     RunHistoryMessage,
@@ -16,6 +23,7 @@ from manage.workgroup.history import (
 )
 from manage.workgroup.llm_chat import ChatResult, ChatToolCall, LLMChatClient, resolve_chat_client
 from manage.workgroup.member_tools import build_member_system_prompt, member_openai_tools
+from manage.workgroup.mentions import resolve_direct_member
 from manage.workgroup.models import (
     ActorRun,
     ActorRunCreateRequest,
@@ -26,6 +34,7 @@ from manage.workgroup.native_tools import AssignCompleter, NativeToolDispatcher,
 from manage.workgroup.projector import project_actor_context
 from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.store import WorkGroupStore
+
 
 _DEFAULT_MAX_TOOL_LOOPS = 16
 _LEADER_SYSTEM = (
@@ -72,9 +81,132 @@ class TurnKernel:
         self._max_tool_loops = max(1, max_tool_loops)
         self._mock_llm = mock_llm
         self._hitl_resolutions: dict[str, dict[str, Any]] = {}
+        # workgroup_id -> cancel flag（用户中断当前 turn）
+        self._cancel_flags: dict[str, threading.Event] = {}
+        self._active_turn: dict[str, dict[str, Any]] = {}
+        self._turn_lock = threading.Lock()
+        self._command_cancel_hook: Callable[[str], None] | None = None
 
     def set_assign_completer(self, completer: AssignCompleter | None) -> None:
         self._assign_completer = completer
+
+    def set_command_cancel_hook(self, hook: Callable[[str], None] | None) -> None:
+        """cancel_turn 时唤醒 VerticalLoop.wait_command_result（合成 canceled）。"""
+        self._command_cancel_hook = hook
+
+    def _cancel_event(self, workgroup_id: str) -> threading.Event:
+        with self._turn_lock:
+            ev = self._cancel_flags.get(workgroup_id)
+            if ev is None:
+                ev = threading.Event()
+                self._cancel_flags[workgroup_id] = ev
+            return ev
+
+    def _begin_turn(self, workgroup_id: str, *, mode: str, **meta: Any) -> threading.Event:
+        flag = self._cancel_event(workgroup_id)
+        flag.clear()
+        with self._turn_lock:
+            self._active_turn[workgroup_id] = {"mode": mode, **meta}
+        return flag
+
+    def _end_turn(self, workgroup_id: str) -> None:
+        with self._turn_lock:
+            self._active_turn.pop(workgroup_id, None)
+        self._cancel_event(workgroup_id).clear()
+
+    def _update_turn(self, workgroup_id: str, **meta: Any) -> None:
+        with self._turn_lock:
+            cur = self._active_turn.get(workgroup_id)
+            if cur is not None:
+                cur.update(meta)
+
+    def _is_cancelled(self, workgroup_id: str) -> bool:
+        return self._cancel_event(workgroup_id).is_set()
+
+    def _raise_if_cancelled(self, workgroup_id: str) -> None:
+        if self._is_cancelled(workgroup_id):
+            raise WorkgroupError("canceled", "workgroup turn cancelled", http_status=409)
+
+    def cancel_turn(self, workgroup_id: str) -> dict[str, Any]:
+        """取消当前工作组活跃 turn：置位 cancel flag + fail active assigns + heal open tools。"""
+        if self._store.get_workgroup(workgroup_id) is None:
+            raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+        with self._turn_lock:
+            meta = dict(self._active_turn.get(workgroup_id) or {})
+        mode = str(meta.get("mode") or "")
+        if not mode:
+            # 无内存 turn 时仍尝试释放卡住的 assign / 工具等待
+            failed_ids = self._store.fail_active_assigns(
+                workgroup_id,
+                reason="cancelled by user",
+                error_code="canceled",
+            )
+            try:
+                self._store.cancel_pending_hitls(workgroup_id)
+            except Exception:  # noqa: BLE001
+                pass
+            if self._command_cancel_hook is not None:
+                try:
+                    self._command_cancel_hook(workgroup_id)
+                except Exception:  # noqa: BLE001
+                    pass
+            return {
+                "cancelled": bool(failed_ids),
+                "mode": "idle" if not failed_ids else "orphan_assign",
+                "failed_assign_ids": list(failed_ids),
+                "leader_run_id": None,
+                "member_run_id": None,
+            }
+
+        self._cancel_event(workgroup_id).set()
+        failed_ids = self._store.fail_active_assigns(
+            workgroup_id,
+            reason="cancelled by user",
+            error_code="canceled",
+        )
+        try:
+            self._store.cancel_pending_hitls(workgroup_id)
+        except Exception:  # noqa: BLE001
+            pass
+        if self._command_cancel_hook is not None:
+            try:
+                self._command_cancel_hook(workgroup_id)
+            except Exception:  # noqa: BLE001
+                pass
+        leader_run_id = meta.get("leader_run_id")
+        member_run_id = meta.get("member_run_id")
+        for rid in (leader_run_id, member_run_id):
+            if not rid:
+                continue
+            try:
+                self._heal_open_tool_calls(str(rid), reason="turn cancelled by user")
+                run = self._store.get_actor_run(str(rid))
+                if run and run.status in {"running", "awaiting_hitl"}:
+                    self._store.update_actor_run(str(rid), status="canceled")
+            except Exception:  # noqa: BLE001
+                pass
+        for assign_id in failed_ids:
+            try:
+                assign = self._store.get_assign(assign_id)
+                actor = (assign.member_id if assign else None) or "leader"
+                self._store.append_timeline(
+                    workgroup_id,
+                    type="assign_finished",
+                    actor_id=actor,
+                    text="已中断",
+                    protocol_name=protocol_name_for_actor(actor),
+                    assign_id=assign_id,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return {
+            "cancelled": True,
+            "mode": mode,
+            "failed_assign_ids": list(failed_ids),
+            "leader_run_id": leader_run_id,
+            "member_run_id": member_run_id,
+        }
+
     def start_leader_run(self, workgroup_id: str, *, llm_profile_revision: str | None = None) -> ActorRun:
         return self._store.create_actor_run(
             workgroup_id,
@@ -127,8 +259,9 @@ class TurnKernel:
         from_node_id: str,
         client_message_id: str | None = None,
         disable_tools: bool = False,
+        direct_member_id: str | None = None,
     ) -> dict[str, Any]:
-        """写入 Timeline 并驱动 Leader loop 至空闲。"""
+        """写入 Timeline 并驱动 Leader loop 或 @直连至空闲。"""
         final: dict[str, Any] | None = None
         for ev in self.handle_human_message_events(
             workgroup_id,
@@ -136,6 +269,7 @@ class TurnKernel:
             from_node_id=from_node_id,
             client_message_id=client_message_id,
             disable_tools=disable_tools,
+            direct_member_id=direct_member_id,
         ):
             if ev.get("event") == "final":
                 final = ev.get("data") or {}
@@ -151,10 +285,27 @@ class TurnKernel:
         from_node_id: str,
         client_message_id: str | None = None,
         disable_tools: bool = False,
+        direct_member_id: str | None = None,
     ):
-        """写入 Timeline 并驱动 Leader loop，产出 SSE 友好事件。"""
+        """写入 Timeline 并驱动 Leader / 直连 Member，产出 SSE 友好事件。"""
         self._store.assert_acl_member(workgroup_id, from_node_id)
         self._store.require_active(workgroup_id)
+        try:
+            self._store.fail_active_assigns(
+                workgroup_id,
+                reason="previous assign superseded by new human message",
+                error_code="canceled",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        member, instruction = resolve_direct_member(
+            self._store,
+            workgroup_id,
+            direct_member_id=direct_member_id,
+            timeline_text=text,
+        )
+
         event = self._store.append_timeline(
             workgroup_id,
             type="human_message",
@@ -167,26 +318,206 @@ class TurnKernel:
             "event": "human",
             "data": {"timeline_event": event.model_dump(mode="json")},
         }
-        run = self._store.find_running_leader_run(workgroup_id) or self.start_leader_run(workgroup_id)
-        self._store.ensure_run_history(run)
-        loop_result: dict[str, Any] | None = None
-        for ev in self.run_leader_until_idle_events(workgroup_id, run.run_id, disable_tools=disable_tools):
-            if ev.get("event") == "loop_final":
-                loop_result = ev.get("data") or {}
-                continue
-            yield ev
-        if loop_result is None:
-            raise WorkgroupError("conflict", "leader loop produced no result", http_status=500)
+
+        if member is not None:
+            try:
+                yield from self._run_direct_member_events(
+                    workgroup_id,
+                    member=member,
+                    instruction=instruction,
+                    human_event=event,
+                )
+            finally:
+                self._end_turn(workgroup_id)
+            return
+
+        self._begin_turn(workgroup_id, mode="leader")
+        try:
+            run = self._store.find_running_leader_run(workgroup_id) or self.start_leader_run(workgroup_id)
+            self._update_turn(workgroup_id, leader_run_id=run.run_id)
+            self._store.ensure_run_history(run)
+            loop_result: dict[str, Any] | None = None
+            for ev in self.run_leader_until_idle_events(
+                workgroup_id, run.run_id, disable_tools=disable_tools
+            ):
+                if ev.get("event") == "loop_final":
+                    loop_result = ev.get("data") or {}
+                    continue
+                yield ev
+            if loop_result is None:
+                raise WorkgroupError("conflict", "leader loop produced no result", http_status=500)
+            yield {
+                "event": "final",
+                "data": {
+                    "timeline_event": event,
+                    "leader_run": loop_result["run"],
+                    "loop": {
+                        "steps": loop_result.get("steps"),
+                        "status": loop_result.get("status"),
+                        "final_text": loop_result.get("final_text"),
+                    },
+                    "mode": "leader",
+                },
+            }
+        except WorkgroupError as exc:
+            if exc.code == "canceled":
+                yield {
+                    "event": "final",
+                    "data": {
+                        "timeline_event": event,
+                        "leader_run": self._store.find_running_leader_run(workgroup_id),
+                        "loop": {"steps": 0, "status": "canceled", "final_text": ""},
+                        "mode": "leader",
+                    },
+                }
+                return
+            raise
+        finally:
+            self._end_turn(workgroup_id)
+
+    def _run_direct_member_events(
+        self,
+        workgroup_id: str,
+        *,
+        member: Any,
+        instruction: str,
+        human_event: Any,
+    ):
+        """@直连：跳过 Leader LLM，创建 Assign + Member run。"""
+        mid = member.member_id
+        brief = instruction.replace("\n", " ").strip()
+        if len(brief) > 96:
+            brief = brief[:93] + "…"
+
+        self._begin_turn(workgroup_id, mode="direct", member_id=mid)
+        yield {"event": "status", "data": {"phase": "tool", "tool": "直达成员", "mode": "direct"}}
+
+        tool_call_id = "call_direct_1"
+        assign = self._store.create_assign(
+            workgroup_id,
+            AssignCreateRequest(
+                member_id=mid,
+                instruction=instruction,
+                leader_tool_call_id=tool_call_id,
+            ),
+        )
+        self._store.set_assign_status(assign.assign_id, "running")
+        self._update_turn(workgroup_id, assign_id=assign.assign_id, leader_run_id=assign.leader_run_id)
+
+        # Timeline 挂在成员下，不经 Supervisor 展示
+        self._store.append_timeline(
+            workgroup_id,
+            type="assign_started",
+            actor_id=mid,
+            text=f"直达 · {brief}",
+            protocol_name=protocol_name_for_actor(mid),
+            assign_id=assign.assign_id,
+        )
+
+        completer = self._assign_completer
+        if completer is None:
+            raise WorkgroupError("conflict", "assign completer not configured", http_status=500)
+
+        final_text = ""
+        status = "succeeded"
+        try:
+            self._raise_if_cancelled(workgroup_id)
+            # completer 内部会 create member ActorRun；尽量在之后更新 turn meta
+            final_text = completer(
+                workgroup_id,
+                assign.assign_id,
+                mid,
+                instruction,
+                tool_call_id,
+            )
+            self._raise_if_cancelled(workgroup_id)
+            assign = self._store.set_assign_status(
+                assign.assign_id, "succeeded", result_summary=final_text, error_code=None
+            )
+            self._store.append_timeline(
+                workgroup_id,
+                type="assign_finished",
+                actor_id=mid,
+                text="已完成",
+                protocol_name=protocol_name_for_actor(mid),
+                assign_id=assign.assign_id,
+            )
+        except WorkgroupError as exc:
+            status = "canceled" if exc.code == "canceled" else "failed"
+            msg = exc.message
+            cur = self._store.get_assign(assign.assign_id)
+            already_closed = cur is not None and cur.status not in {
+                "queued",
+                "pending",
+                "running",
+                "awaiting_hitl",
+            }
+            if not already_closed:
+                assign = self._store.set_assign_status(
+                    assign.assign_id,
+                    "failed",
+                    result_summary=msg,
+                    error_code=exc.code,
+                )
+                self._store.append_timeline(
+                    workgroup_id,
+                    type="assign_finished",
+                    actor_id=mid,
+                    text="已中断" if status == "canceled" else f"失败：{msg}",
+                    protocol_name=protocol_name_for_actor(mid),
+                    assign_id=assign.assign_id,
+                )
+            final_text = msg
+            if exc.code != "canceled":
+                raise
+        except Exception as exc:  # noqa: BLE001
+            status = "failed"
+            msg = str(exc) or exc.__class__.__name__
+            self._store.set_assign_status(
+                assign.assign_id,
+                "failed",
+                result_summary=msg,
+                error_code="conflict",
+            )
+            self._store.append_timeline(
+                workgroup_id,
+                type="assign_finished",
+                actor_id=mid,
+                text=f"失败：{msg}",
+                protocol_name=protocol_name_for_actor(mid),
+                assign_id=assign.assign_id,
+            )
+            raise WorkgroupError("conflict", msg, http_status=500) from exc
+
+        # 占位 leader run 仅内部收口，不写入 Timeline
+        try:
+            leader = self._store.get_actor_run(assign.leader_run_id)
+            if leader and leader.status == "running":
+                self._store.update_actor_run(
+                    assign.leader_run_id,
+                    status="canceled" if status == "canceled" else "succeeded",
+                )
+                leader = self._store.get_actor_run(assign.leader_run_id)
+        except Exception:  # noqa: BLE001
+            leader = self._store.get_actor_run(assign.leader_run_id)
+
+        yield {
+            "event": "assistant_final",
+            "data": {"text": final_text, "mode": "direct", "member_id": mid},
+        }
         yield {
             "event": "final",
             "data": {
-                "timeline_event": event,
-                "leader_run": loop_result["run"],
+                "timeline_event": human_event,
+                "leader_run": leader,
                 "loop": {
-                    "steps": loop_result.get("steps"),
-                    "status": loop_result.get("status"),
-                    "final_text": loop_result.get("final_text"),
+                    "steps": 1,
+                    "status": status,
+                    "final_text": final_text,
                 },
+                "mode": "direct",
+                "member_id": mid,
+                "assign_id": assign.assign_id,
             },
         }
 
@@ -225,15 +556,14 @@ class TurnKernel:
         tool_loops = 0
 
         while True:
+            self._raise_if_cancelled(workgroup_id)
             hist = self._store.ensure_run_history(run)
-            open_ids = open_tool_call_ids(hist.messages)
-            if open_ids:
-                raise WorkgroupError(
-                    "conflict",
-                    "open tool_calls must be paired before continuing",
-                    http_status=409,
-                    details={"open_tool_calls": open_ids},
-                )
+            healed = self._heal_open_tool_calls(
+                run_id,
+                reason="previous tool turn interrupted; synthetic error result",
+            )
+            if healed:
+                hist = self._store.ensure_run_history(run)
 
             projected = project_actor_context(
                 actor_id="leader",
@@ -242,6 +572,7 @@ class TurnKernel:
                 own_run_history=hist.messages,
             )
             messages = [{"role": "system", "content": _LEADER_SYSTEM}] + list(projected["messages"])
+            messages = self._apply_today_date_hook(run_id, messages)
             yield {"event": "status", "data": {"phase": "thinking"}}
             result = None
             stream = getattr(client, "stream_chat", None)
@@ -308,15 +639,42 @@ class TurnKernel:
                 )
             tool_msgs: list[RunHistoryMessage] = []
             for tc in result.tool_calls:
+                tool_label = tc.name
+                if tc.name == "assign_workgroup_task":
+                    tool_label = "成员执行任务"
+                elif tc.name == "ask_workgroup_user":
+                    tool_label = "询问用户"
                 yield {
                     "event": "status",
-                    "data": {"phase": "tool", "tool": tc.name, "tool_call_id": tc.id},
+                    "data": {
+                        "phase": "tool",
+                        "tool": tool_label,
+                        "tool_name": tc.name,
+                        "tool_call_id": tc.id,
+                    },
                 }
-                content = dispatcher.dispatch(
-                    workgroup_id=workgroup_id,
+                try:
+                    content = dispatcher.dispatch(
+                        workgroup_id=workgroup_id,
+                        tool_name=tc.name,
+                        tool_call_id=tc.id,
+                        arguments_json=tc.arguments,
+                    )
+                except WorkgroupError as exc:
+                    content = json.dumps(
+                        {"status": "failed", "code": exc.code, "error": exc.message},
+                        ensure_ascii=False,
+                    )
+                except Exception as exc:  # noqa: BLE001 — 必须配对 tool result，避免卡死后续 human turn
+                    content = json.dumps(
+                        {"status": "failed", "error": str(exc) or exc.__class__.__name__},
+                        ensure_ascii=False,
+                    )
+                content = self._package_tool_content(
+                    content,
                     tool_name=tc.name,
+                    run_id=run_id,
                     tool_call_id=tc.id,
-                    arguments_json=tc.arguments,
                 )
                 tool_msgs.append(
                     RunHistoryMessage(
@@ -359,6 +717,8 @@ class TurnKernel:
         if run.status not in {"running", "awaiting_hitl"}:
             return {"run": run, "steps": 0, "status": run.status, "final_text": ""}
 
+        self._update_turn(workgroup_id, member_run_id=run_id)
+
         member = self._store.get_member(member_id)
         if member is None or member.workgroup_id != workgroup_id:
             raise WorkgroupError("not_found", "member not found", http_status=404)
@@ -383,15 +743,14 @@ class TurnKernel:
         tool_loops = 0
 
         while True:
+            self._raise_if_cancelled(workgroup_id)
             hist = self._store.ensure_run_history(run)
-            open_ids = open_tool_call_ids(hist.messages)
-            if open_ids:
-                raise WorkgroupError(
-                    "conflict",
-                    "open tool_calls must be paired before continuing",
-                    http_status=409,
-                    details={"open_tool_calls": open_ids},
-                )
+            healed = self._heal_open_tool_calls(
+                run_id,
+                reason="previous member tool turn interrupted; synthetic error result",
+            )
+            if healed:
+                hist = self._store.ensure_run_history(run)
 
             projected = project_actor_context(
                 actor_id=member_id,
@@ -401,6 +760,7 @@ class TurnKernel:
                 own_run_history=hist.messages,
             )
             messages = [{"role": "system", "content": system}] + list(projected["messages"])
+            messages = self._apply_today_date_hook(run_id, messages)
             result = client.chat(messages, tools=tools or None)
             steps += 1
             tool_loops += 1
@@ -446,17 +806,67 @@ class TurnKernel:
             tool_msgs: list[RunHistoryMessage] = []
             for tc in result.tool_calls:
                 name = (tc.name or "").strip()
-                if name not in allow:
-                    content = f"ERROR: tool {name!r} is not in member allowlist"
-                else:
-                    content = tool_runner(
+                # 轻量进度：公开 Timeline 只写工具名，不含参数/结果；名字由 UI 按 actor 聚合展示
+                try:
+                    hint = name
+                    if name in {
+                        "read_file",
+                        "write_file",
+                        "glob_files",
+                        "grep_file",
+                        "grep_files",
+                        "search_replace",
+                        "show_image",
+                        "read_image",
+                        "bash_run",
+                    }:
+                        try:
+                            args = json.loads(tc.arguments or "{}")
+                        except (TypeError, json.JSONDecodeError):
+                            args = {}
+                        path = str(
+                            args.get("path")
+                            or args.get("directory")
+                            or args.get("command")
+                            or args.get("pattern")
+                            or ""
+                        ).strip()
+                        if path:
+                            if len(path) > 48:
+                                path = path[:45] + "…"
+                            hint = f"{name} · {path}"
+                    self._store.append_timeline(
                         workgroup_id,
-                        run.assign_id or "",
-                        member_id,
-                        name,
-                        tc.id,
-                        tc.arguments or "{}",
+                        type="system_notice",
+                        actor_id=member_id,
+                        text=hint,
+                        protocol_name=protocol_name_for_actor(member_id),
+                        assign_id=run.assign_id,
                     )
+                except Exception:  # noqa: BLE001 — 进度事件失败不阻断执行
+                    pass
+                try:
+                    if name not in allow:
+                        content = f"ERROR: tool {name!r} is not in member allowlist"
+                    else:
+                        content = tool_runner(
+                            workgroup_id,
+                            run.assign_id or "",
+                            member_id,
+                            name,
+                            tc.id,
+                            tc.arguments or "{}",
+                        )
+                except WorkgroupError as exc:
+                    content = f"ERROR ({exc.code}): {exc.message}"
+                except Exception as exc:  # noqa: BLE001
+                    content = f"ERROR: {exc or exc.__class__.__name__}"
+                content = self._package_tool_content(
+                    content,
+                    tool_name=name,
+                    run_id=run_id,
+                    tool_call_id=tc.id,
+                )
                 tool_msgs.append(
                     RunHistoryMessage(
                         role="tool",
@@ -478,6 +888,77 @@ class TurnKernel:
             wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=wm)
             self._store.append_run_history(run_id, tool_msgs, timeline_watermark_seq=wm)
             run = self._store.get_actor_run(run_id) or run
+
+    def _apply_today_date_hook(
+        self, run_id: str, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """步进前注入当天日期；若新插入则持久化到 RunHistory 以免每步重复。"""
+        messages, inserted = ensure_today_date_in_messages(messages)
+        if inserted is None:
+            return messages
+        self._store.append_run_history(
+            run_id,
+            [
+                RunHistoryMessage(
+                    role="user",
+                    name=TODAY_DATE_MESSAGE_NAME,
+                    content=str(inserted.get("content") or ""),
+                )
+            ],
+        )
+        return messages
+
+    @staticmethod
+    def _package_tool_content(
+        content: str,
+        *,
+        tool_name: str,
+        run_id: str,
+        tool_call_id: str,
+    ) -> str:
+        packed = package_tool_result(
+            content or "",
+            tool_name=tool_name,
+            run_id=run_id,
+            tool_call_id=tool_call_id,
+        )
+        return packed.for_history
+
+    def _heal_open_tool_calls(self, run_id: str, *, reason: str) -> list[str]:
+        """为中断留下的未配对 tool_call 补失败 result，并释放对应 active assign。"""
+        run = self._store.get_actor_run(run_id)
+        if run is None:
+            return []
+        hist = self._store.ensure_run_history(run)
+        open_ids = open_tool_call_ids(hist.messages)
+        if not open_ids:
+            return []
+        names: dict[str, str] = {}
+        for m in hist.messages:
+            if m.role != "assistant" or not m.tool_calls:
+                continue
+            for tc in m.tool_calls:
+                names[tc.id] = (tc.function.name if tc.function else "") or "unknown"
+        # 中断的 Leader 工具轮常伴随卡住的 active assign；一并释放以免永久 conflict
+        try:
+            self._store.fail_active_assigns(
+                run.workgroup_id,
+                reason=reason,
+                error_code="canceled",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        msgs = [
+            RunHistoryMessage(
+                role="tool",
+                tool_call_id=cid,
+                name=names.get(cid) or "unknown",
+                content=json.dumps({"status": "failed", "error": reason}, ensure_ascii=False),
+            )
+            for cid in open_ids
+        ]
+        self._store.append_run_history(run_id, msgs)
+        return list(open_ids)
 
     @staticmethod
     def _assistant_message(result: ChatResult, *, name: str = "leader") -> RunHistoryMessage:

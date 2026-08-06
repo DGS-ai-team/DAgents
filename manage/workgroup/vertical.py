@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from typing import TYPE_CHECKING, Any, Protocol
 
 from manage.workgroup import ids
@@ -100,6 +101,37 @@ def validate_member_read_path(path: str) -> str:
     return validate_member_workspace_path(path, tool_name="read_file")
 
 
+_PATH_ARG_TOOLS = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "grep_file",
+        "search_replace",
+        "show_image",
+        "read_image",
+    }
+)
+_DIR_ARG_TOOLS = frozenset({"glob_files", "grep_files"})
+
+
+def sanitize_member_tool_arguments(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """对 path / directory / cwd 做成员工作区相对路径校验。"""
+    out = dict(args)
+    name = (tool_name or "").strip()
+    if name in _PATH_ARG_TOOLS and "path" in out:
+        out["path"] = validate_member_workspace_path(str(out.get("path") or ""), tool_name=name)
+    if name in _DIR_ARG_TOOLS:
+        directory = str(out.get("directory") or "").strip() or "."
+        if directory not in {".", "./"}:
+            validate_member_workspace_path(directory, tool_name=name)
+        out["directory"] = directory
+    if name == "bash_run" and "cwd" in out and out.get("cwd") is not None:
+        cwd = str(out.get("cwd") or "").strip()
+        if cwd and cwd not in {".", "./"}:
+            out["cwd"] = validate_member_workspace_path(cwd, tool_name=name)
+    return out
+
+
 class VerticalLoop:
     """Manage 侧 D3 纵向闭环编排器。"""
 
@@ -118,6 +150,8 @@ class VerticalLoop:
         self._lock = threading.Lock()
         self._command_waiters: dict[str, threading.Event] = {}
         self._command_results: dict[str, dict[str, Any]] = {}
+        # workgroup_id -> command_id -> {assign_id, member_id, home_node_id}
+        self._wg_pending_commands: dict[str, dict[str, dict[str, str]]] = {}
 
     # --- Timeline / Outbox / HITL 委托 store ---
 
@@ -212,17 +246,7 @@ class VerticalLoop:
             )
 
         if arguments_json is None:
-            args = dict(arguments or {})
-            if tool_name in {"read_file", "write_file"} and "path" in args:
-                args["path"] = validate_member_workspace_path(
-                    str(args.get("path") or ""),
-                    tool_name=tool_name,
-                )
-            if tool_name == "glob_files" and "directory" in args:
-                directory = str(args.get("directory") or "").strip() or "."
-                if directory not in {".", "./"}:
-                    validate_member_workspace_path(directory, tool_name=tool_name)
-                args["directory"] = directory
+            args = sanitize_member_tool_arguments(tool_name, dict(arguments or {}))
             arguments_json = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
         else:
             # 仍校验 path 类参数（Member LLM 传入）
@@ -232,18 +256,8 @@ class VerticalLoop:
                 raise WorkgroupError("invalid_json", f"arguments_json: {exc}", http_status=400) from exc
             if not isinstance(parsed, dict):
                 raise WorkgroupError("schema_mismatch", "arguments must be object", http_status=400)
-            if tool_name in {"read_file", "write_file"} and "path" in parsed:
-                parsed["path"] = validate_member_workspace_path(
-                    str(parsed.get("path") or ""),
-                    tool_name=tool_name,
-                )
-                arguments_json = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
-            elif tool_name == "glob_files":
-                directory = str(parsed.get("directory") or "").strip() or "."
-                if directory not in {".", "./"}:
-                    validate_member_workspace_path(directory, tool_name=tool_name)
-                parsed["directory"] = directory
-                arguments_json = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+            parsed = sanitize_member_tool_arguments(tool_name, parsed)
+            arguments_json = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
 
         cmd_id = ids.new_id("cmd")
         runtime = self.store.member_runtime(member_id)
@@ -279,7 +293,13 @@ class VerticalLoop:
             "status": "queued",
             "side_effect_class": side_effect_for_tool(tool_name),
         }
-        self._register_command_waiter(cmd_id)
+        self._register_command_waiter(
+            cmd_id,
+            workgroup_id=workgroup_id,
+            assign_id=assign.assign_id,
+            member_id=member_id,
+            home_node_id=str(ctx.get("home_node_id") or ""),
+        )
         frame = self.store.enqueue_outbox(workgroup_id, type="tool.command", payload=command)
         self.store.set_assign_status(assign.assign_id, "running")
         if self.hub is not None:
@@ -357,10 +377,17 @@ class VerticalLoop:
         assign = self.store.get_assign(req.assign_id)
         if assign is None or assign.workgroup_id != workgroup_id:
             raise WorkgroupError("not_found", "assign not found", http_status=404)
-        if req.status == "indeterminate":
+        ignored_assign_update = False
+        if assign.status in {"succeeded", "failed", "indeterminate", "canceled"}:
+            # 迟到 result：仍唤醒 waiter，禁止把已终态 assign 拉回 running
+            ignored_assign_update = True
+        elif req.status == "indeterminate":
             assign = self.store.set_assign_status(
                 req.assign_id, "indeterminate", error_code=req.error_code or "indeterminate"
             )
+        elif req.status == "canceled":
+            # Node 侧 cancel 回执：assign 终态由 cancel_turn / completer 写入
+            ignored_assign_update = True
         else:
             # 中间工具成败保持 running；终态由 Member loop / completer 写入
             assign = self.store.set_assign_status(req.assign_id, "running")
@@ -375,28 +402,102 @@ class VerticalLoop:
                 "command_id": req.command_id,
             },
         )
-        return {"assign": assign, "leader_tool_paired": True, "raw_tool_on_timeline": False}
-    def wait_command_result(self, command_id: str, *, timeout_s: float | None = None) -> dict[str, Any]:
-        """阻塞等待 Node/HTTP 回传的 tool.result（由 apply_tool_result 唤醒）。"""
+        self._forget_pending_command(workgroup_id, req.command_id)
+        return {
+            "assign": assign,
+            "leader_tool_paired": True,
+            "raw_tool_on_timeline": False,
+            "ignored_assign_update": ignored_assign_update,
+        }
+
+    def wait_command_result(
+        self,
+        command_id: str,
+        *,
+        timeout_s: float | None = None,
+        cancel_check: Any | None = None,
+    ) -> dict[str, Any]:
+        """阻塞等待 Node/HTTP 回传的 tool.result（由 apply_tool_result / cancel 唤醒）。"""
         timeout = self.command_timeout_s if timeout_s is None else max(0.1, float(timeout_s))
         with self._lock:
             cached = self._command_results.get(command_id)
             if cached is not None:
                 return dict(cached)
             ev = self._command_waiters.setdefault(command_id, threading.Event())
-        if not ev.wait(timeout):
-            raise WorkgroupError(
-                "conflict",
-                f"tool command timed out after {timeout:g}s",
-                http_status=409,
-                retryable=True,
-                details={"command_id": command_id},
-            )
+        deadline = time.monotonic() + timeout
+        while True:
+            if cancel_check is not None and callable(cancel_check) and cancel_check():
+                self._signal_command_result(
+                    command_id,
+                    {
+                        "status": "canceled",
+                        "result_text": "",
+                        "error_code": "canceled",
+                        "command_id": command_id,
+                    },
+                )
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise WorkgroupError(
+                    "conflict",
+                    f"tool command timed out after {timeout:g}s",
+                    http_status=409,
+                    retryable=True,
+                    details={"command_id": command_id},
+                )
+            slice_s = min(0.2, remaining)
+            if ev.wait(slice_s):
+                break
         with self._lock:
             result = self._command_results.get(command_id)
         if result is None:
             raise WorkgroupError("conflict", "tool command result missing after wait", http_status=500)
         return dict(result)
+
+    def cancel_pending_commands(self, workgroup_id: str) -> list[str]:
+        """下发 tool.cancel（若可）+ 合成 canceled result，唤醒 wait_command_result。"""
+        with self._lock:
+            pending = dict(self._wg_pending_commands.get(workgroup_id) or {})
+        woke: list[str] = []
+        for command_id, meta in pending.items():
+            with self._lock:
+                if command_id in self._command_results:
+                    continue
+            assign_id = str((meta or {}).get("assign_id") or "")
+            member_id = str((meta or {}).get("member_id") or "")
+            home_node_id = str((meta or {}).get("home_node_id") or "")
+            cancel_payload = {
+                "command_id": command_id,
+                "workgroup_id": workgroup_id,
+                "assign_id": assign_id,
+                "member_id": member_id,
+                "status": "canceled",
+                "error_code": "canceled",
+            }
+            try:
+                frame = self.store.enqueue_outbox(
+                    workgroup_id, type="tool.cancel", payload=cancel_payload
+                )
+                if self.hub is not None and home_node_id:
+                    self.hub.deliver_outbox_frame(frame, home_node_id=home_node_id)
+            except Exception:  # noqa: BLE001 — 仍要唤醒本地 waiter
+                pass
+            self._signal_command_result(
+                command_id,
+                {
+                    "status": "canceled",
+                    "result_text": "",
+                    "error_code": "canceled",
+                    "command_id": command_id,
+                    "assign_id": assign_id,
+                    "member_id": member_id,
+                },
+            )
+            woke.append(command_id)
+        with self._lock:
+            self._wg_pending_commands.pop(workgroup_id, None)
+        return woke
 
     def handle_inbound(self, node_id: str, mtype: str, payload: dict[str, Any]) -> None:
         """WS 入站业务：provision_result / tool.result → 状态机 + 唤醒 waiters。"""
@@ -428,7 +529,7 @@ class VerticalLoop:
             if not workgroup_id or not command_id or not assign_id or not member_id:
                 return
             status_raw = str(payload.get("status") or "failed").strip().lower()
-            if status_raw not in {"succeeded", "failed", "indeterminate", "rejected"}:
+            if status_raw not in {"succeeded", "failed", "indeterminate", "rejected", "canceled"}:
                 status_raw = "failed"
             self.apply_tool_result(
                 workgroup_id,
@@ -464,13 +565,21 @@ class VerticalLoop:
             tool_result = dispatched.get("tool_result")
             if tool_result is None:
                 cmd_id = str(dispatched["command"]["command_id"])
-                tool_result = self.wait_command_result(cmd_id, timeout_s=timeout_s)
+                tool_result = self.wait_command_result(
+                    cmd_id,
+                    timeout_s=timeout_s,
+                    cancel_check=lambda: kernel._is_cancelled(workgroup_id),
+                )
             status = str(tool_result.get("status") or "failed")
+            err_code = str(tool_result.get("error_code") or "")
+            if status == "canceled" or err_code == "canceled" or kernel._is_cancelled(workgroup_id):
+                raise WorkgroupError("canceled", "workgroup turn cancelled", http_status=409)
             text = str(tool_result.get("result_text") or "").strip()
             if status != "succeeded":
-                err = str(tool_result.get("error_code") or status)
-                return f"ERROR ({status}): {err}: {text}"[:8000]
-            return (text or f"({tool_name}: empty)")[:8000]
+                err = err_code or status
+                # 错误路径保留上限，避免异常爆炸；成功路径交给 kernel package_tool_result
+                return f"ERROR ({status}): {err}: {text}"[:16000]
+            return text or f"({tool_name}: empty)"
 
         def completer(
             workgroup_id: str,
@@ -480,9 +589,16 @@ class VerticalLoop:
             tool_call_id: str = "",
         ) -> str:
             _ = tool_call_id
+            kernel._raise_if_cancelled(workgroup_id)
             assign = self.store.get_assign(assign_id)
             if assign is None or assign.workgroup_id != workgroup_id:
                 raise WorkgroupError("not_found", "assign not found", http_status=404)
+            if assign.status in {"failed", "canceled", "succeeded", "indeterminate"}:
+                raise WorkgroupError(
+                    assign.error_code or "canceled",
+                    assign.result_summary or "assign already finished",
+                    http_status=409,
+                )
             member = self.store.get_member(member_id)
             if member is None or member.workgroup_id != workgroup_id:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
@@ -500,6 +616,10 @@ class VerticalLoop:
                     llm_profile_revision=spec.llm_profile_revision,
                 ),
             )
+            try:
+                kernel._update_turn(workgroup_id, member_run_id=run.run_id)
+            except Exception:  # noqa: BLE001
+                pass
             self.store.ensure_run_history(run)
             self.store.append_run_history(
                 run.run_id,
@@ -510,6 +630,14 @@ class VerticalLoop:
                 run.run_id,
                 tool_runner=tool_runner,
             )
+            kernel._raise_if_cancelled(workgroup_id)
+            current = self.store.get_assign(assign_id)
+            if current is not None and current.status in {"failed", "canceled"}:
+                raise WorkgroupError(
+                    current.error_code or "canceled",
+                    current.result_summary or "assign cancelled",
+                    http_status=409,
+                )
             text = str(out.get("final_text") or "").strip() or "(empty)"
             return text[:8000]
 
@@ -577,9 +705,33 @@ class VerticalLoop:
         )
         return {**apply, "auto_reexec": False, "status": "indeterminate"}
 
-    def _register_command_waiter(self, command_id: str) -> None:
+    def _register_command_waiter(
+        self,
+        command_id: str,
+        *,
+        workgroup_id: str = "",
+        assign_id: str = "",
+        member_id: str = "",
+        home_node_id: str = "",
+    ) -> None:
         with self._lock:
             self._command_waiters.setdefault(command_id, threading.Event())
+            wg = str(workgroup_id or "").strip()
+            if wg:
+                self._wg_pending_commands.setdefault(wg, {})[command_id] = {
+                    "assign_id": str(assign_id or ""),
+                    "member_id": str(member_id or ""),
+                    "home_node_id": str(home_node_id or ""),
+                }
+
+    def _forget_pending_command(self, workgroup_id: str, command_id: str) -> None:
+        with self._lock:
+            pending = self._wg_pending_commands.get(workgroup_id)
+            if not pending:
+                return
+            pending.pop(command_id, None)
+            if not pending:
+                self._wg_pending_commands.pop(workgroup_id, None)
 
     def _signal_command_result(self, command_id: str, result: dict[str, Any]) -> None:
         with self._lock:

@@ -664,6 +664,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 type agentInfoResponse struct {
 	NodeID            string              `json:"node_id"`
+	Name              string              `json:"name,omitempty"`
 	Capabilities      []string            `json:"capabilities"`
 	MultimodalEnabled bool                `json:"multimodal_enabled"`
 	ManageEnabled     bool                `json:"manage_enabled"`
@@ -694,6 +695,7 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, agentInfoResponse{
 		NodeID:            s.cfg.NodeID,
+		Name:              strings.TrimSpace(s.cfg.Agent.Name),
 		Capabilities:      s.cfg.Capabilities(),
 		MultimodalEnabled: s.cfg.MultimodalEnabled(),
 		ManageEnabled:     s.cfg != nil && s.cfg.Manage.Enabled,
