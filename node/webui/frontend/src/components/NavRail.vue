@@ -385,23 +385,10 @@ defineExpose({
         >
           <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
             <path
-              d="M3.2 4.2h7.2a1.2 1.2 0 0 1 1.2 1.2v6.2a1.2 1.2 0 0 1-1.2 1.2H3.2A1.2 1.2 0 0 1 2 11.6V5.4a1.2 1.2 0 0 1 1.2-1.2Z"
+              d="M8 3.2v9.6M3.2 8h9.6"
               fill="none"
               stroke="currentColor"
-              stroke-width="1.2"
-            />
-            <path
-              d="M5 4.2V3.4A1.4 1.4 0 0 1 6.4 2h1.8A1.4 1.4 0 0 1 9.6 3.4v.8"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.2"
-              stroke-linecap="round"
-            />
-            <path
-              d="M12.6 9.2v3.2M11 10.8h3.2"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.25"
+              stroke-width="1.5"
               stroke-linecap="round"
             />
           </svg>
@@ -529,23 +516,10 @@ defineExpose({
         >
           <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
             <path
-              d="M3.2 4.2h7.2a1.2 1.2 0 0 1 1.2 1.2v6.2a1.2 1.2 0 0 1-1.2 1.2H3.2A1.2 1.2 0 0 1 2 11.6V5.4a1.2 1.2 0 0 1 1.2-1.2Z"
+              d="M8 3.2v9.6M3.2 8h9.6"
               fill="none"
               stroke="currentColor"
-              stroke-width="1.2"
-            />
-            <path
-              d="M5 4.2V3.4A1.4 1.4 0 0 1 6.4 2h1.8A1.4 1.4 0 0 1 9.6 3.4v.8"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.2"
-              stroke-linecap="round"
-            />
-            <path
-              d="M12.6 9.2v3.2M11 10.8h3.2"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.25"
+              stroke-width="1.5"
               stroke-linecap="round"
             />
           </svg>

@@ -59,14 +59,11 @@ async function load() {
     );
     if (promptCtx) {
       draft.promptSoulMd = String(promptCtx.soul_md || "");
-      draft.promptUserMd = String(promptCtx.user_md || "");
       draft.promptCustomMd = String(promptCtx.custom_md || "");
       draft.promptLongTermScope =
         String(promptCtx.long_term_scope || draft.promptLongTermScope || "agent").trim() === "global"
           ? "global"
           : "agent";
-      draft.promptLongTermEntries = mapLongTermEntries(promptCtx.long_term_entries);
-      draft.promptGlobalLongTermEntries = mapLongTermEntries(promptCtx.global_long_term_entries);
     }
   } catch (e) {
     error.value = e.message || "加载失败";
@@ -92,10 +89,8 @@ async function save() {
     agentMeta.value = updated;
     await api.putAgentPromptContext(agentId.value, {
       soul_md: draft.promptSoulMd || "",
-      user_md: draft.promptUserMd || "",
       custom_md: draft.promptCustomMd || "",
       long_term_scope: draft.promptLongTermScope === "global" ? "global" : "agent",
-      long_term_entries: activeLongTermPayload(draft),
     });
     await api.reloadAgentRuntime(agentId.value);
     statusMessage.value = "已保存，运行时已按新配置与侧车正文重建。";
@@ -122,28 +117,6 @@ async function reloadRuntime() {
 
 function backToList() {
   router.push({ name: "settings-agents" });
-}
-
-function mapLongTermEntries(entries) {
-  return Array.isArray(entries)
-    ? entries.map((e) => ({
-        id: String(e.id || "").trim(),
-        content: String(e.content || "").trim(),
-      }))
-    : [];
-}
-
-function activeLongTermPayload(draft) {
-  const entries =
-    draft.promptLongTermScope === "global"
-      ? draft.promptGlobalLongTermEntries
-      : draft.promptLongTermEntries;
-  return (entries || [])
-    .map((e) => ({
-      id: String(e.id || "").trim(),
-      content: String(e.content || "").trim(),
-    }))
-    .filter((e) => e.content);
 }
 
 watch(agentId, () => {

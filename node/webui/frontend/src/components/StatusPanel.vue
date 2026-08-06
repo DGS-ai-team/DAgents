@@ -47,7 +47,7 @@ onMounted(load);
     <header class="panel__header command-panel__header">
       <div>
         <div class="panel__title">运行状态</div>
-        <div v-if="!embedded" class="command-panel__subtitle">当前 Agent 与模型状态</div>
+        <div v-if="!embedded" class="command-panel__subtitle">当前 Node 与 Agent 状态</div>
       </div>
       <div class="command-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
@@ -81,15 +81,6 @@ onMounted(load);
             <span class="command-stat__value">{{ data.health?.status || "ok" }}</span>
           </div>
         </div>
-
-        <section class="command-section">
-          <h3 class="command-section__title">LLM</h3>
-          <dl class="command-kv-list">
-            <div class="command-kv"><dt>配置</dt><dd>{{ data.llm?.active_profile || "—" }}</dd></div>
-            <div class="command-kv"><dt>Model</dt><dd>{{ data.llm?.model || "—" }}</dd></div>
-            <div class="command-kv"><dt>Provider</dt><dd>{{ data.llm?.provider || "—" }}</dd></div>
-          </dl>
-        </section>
       </template>
     </div>
   </section>

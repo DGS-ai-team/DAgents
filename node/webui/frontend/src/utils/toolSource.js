@@ -33,10 +33,11 @@ const KIND_META = {
   skills: { label: "skills", short: "skills", icon: "S" },
   child: { label: "child", short: "child", icon: "⎇" },
   hitl: { label: "hitl", short: "hitl", icon: "?" },
+  memory: { label: "memory", short: "memory", icon: "✎" },
   tool: { label: "tool", short: "tool", icon: "◎" },
 };
 
-/** 根据 tool 名推断工具组（对齐 Node tools.enabled_groups）。 */
+/** 根据 tool 名推断工具组（对齐 Agent defaults.tools.enabled_groups）。 */
 export function inferToolKind(name, data = {}) {
   const n = String(name || "").trim();
   if (data?.child_agent_id || CHILD_AGENT_TOOLS.has(n)) return "child";
@@ -47,6 +48,7 @@ export function inferToolKind(name, data = {}) {
   if (SHELL_TOOLS.has(n) || n.startsWith("background_job_")) return "shell";
   if (FS_TOOLS.has(n)) return "fs";
   if (n === USER_INFORMATION_TOOL) return "hitl";
+  if (n === "remember") return "memory";
   if (/^(glob|grep|read|write|show)_/.test(n) || n.includes("file") || n.includes("image")) return "fs";
   return "tool";
 }

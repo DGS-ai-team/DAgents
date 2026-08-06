@@ -72,9 +72,7 @@ describe("agentTemplateForm", () => {
       maxToolLoops: 16,
       toolGroups: ["fs", "skills"],
       visibleSkills: ["write-skill", "write-hook"],
-      childAgentsEnabled: true,
       promptSoulEnabled: true,
-      promptUserEnabled: false,
       promptCustomEnabled: true,
       promptLongTermEnabled: false,
     });
@@ -87,7 +85,7 @@ describe("agentTemplateForm", () => {
       visible: ["write-skill", "write-hook"],
     });
     expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
-    expect(payload.defaults.prompt_context.user_enabled).toBe(false);
+    expect(payload.defaults.prompt_context.user_enabled).toBeUndefined();
   });
 
   it("does not include placement fields", () => {
@@ -108,9 +106,7 @@ describe("agentTemplateForm", () => {
       llmProfileId: "a",
       maxToolLoops: 8,
       toolGroups: ["fs"],
-      childAgentsEnabled: false,
       promptSoulEnabled: true,
-      promptUserEnabled: true,
       promptCustomEnabled: true,
       promptLongTermEnabled: true,
       role: "assistant",
@@ -153,9 +149,7 @@ describe("agentTemplateForm", () => {
       maxToolLoops: 32,
       toolGroups: ["skills"],
       visibleSkills: null,
-      childAgentsEnabled: true,
       promptSoulEnabled: true,
-      promptUserEnabled: true,
       promptCustomEnabled: true,
       promptLongTermEnabled: true,
       role: "assistant",
@@ -171,9 +165,7 @@ describe("agentTemplateForm", () => {
       llmProfileId: "default",
       maxToolLoops: 32,
       toolGroups: [],
-      childAgentsEnabled: true,
       promptSoulEnabled: true,
-      promptUserEnabled: true,
       promptCustomEnabled: true,
       promptLongTermEnabled: true,
       role: "assistant",
@@ -200,9 +192,7 @@ describe("agentTemplateForm", () => {
         llmProfileId: "default",
         maxToolLoops: 20,
         toolGroups: ["fs"],
-        childAgentsEnabled: false,
         promptSoulEnabled: true,
-        promptUserEnabled: true,
         promptCustomEnabled: true,
         promptLongTermEnabled: false,
       },
@@ -210,7 +200,8 @@ describe("agentTemplateForm", () => {
     expect(payload.id).toBe("my-bot");
     expect(payload.display_name).toBe("我的 Bot");
     expect(payload.defaults.llm).toEqual({ active: "default", max_tool_loops: 20 });
-    expect(payload.defaults.child_agents.enabled).toBe(false);
+    expect(payload.defaults.tools.enabled_groups).toEqual(["fs"]);
+    expect(payload.defaults.child_agents).toBeUndefined();
     expect(payload.defaults.skills).toEqual({});
     expect(payload.sandbox).toBeUndefined();
   });

@@ -60,7 +60,7 @@ var knownBuiltinTools = map[string]struct{}{
 	"wecom_send_file":          {},
 }
 
-// builtinToolGroups 为 tools.enabled_groups 可配置的成组工具；组内工具须一并启用或禁用。
+// builtinToolGroups 为 Agent defaults.tools.enabled_groups 可配置的成组工具；组内工具须一并启用或禁用。
 var builtinToolGroups = map[string][]string{
 	"fs": {
 		"read_file",
@@ -79,6 +79,8 @@ var builtinToolGroups = map[string][]string{
 	},
 	"hitl": {
 		"ask_user_information",
+	},
+	"memory": {
 		"remember",
 	},
 	"skills": {
@@ -177,14 +179,14 @@ func BuiltinToolGroupMembers(group string) ([]string, bool) {
 	return out, true
 }
 
-// NormalizedBuiltinEnabledGroups 去重并规范化 tools.enabled_groups；空切片表示「未配置允许列表」。
-func (t *ToolsConfig) NormalizedBuiltinEnabledGroups() []string {
-	if t == nil || len(t.EnabledGroups) == 0 {
+// NormalizeBuiltinToolGroups 去重并规范化工具组名；空切片表示未选任何组。
+func NormalizeBuiltinToolGroups(groups []string) []string {
+	if len(groups) == 0 {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(t.EnabledGroups))
-	out := make([]string, 0, len(t.EnabledGroups))
-	for _, raw := range t.EnabledGroups {
+	seen := make(map[string]struct{}, len(groups))
+	out := make([]string, 0, len(groups))
+	for _, raw := range groups {
 		name := strings.TrimSpace(raw)
 		if name == "" {
 			continue
@@ -201,15 +203,15 @@ func (t *ToolsConfig) NormalizedBuiltinEnabledGroups() []string {
 	return out
 }
 
-// NormalizedBuiltinEnabled 将 tools.enabled_groups 展开为工具名列表；空切片表示「未配置允许列表」。
-func (t *ToolsConfig) NormalizedBuiltinEnabled() []string {
-	groups := t.NormalizedBuiltinEnabledGroups()
-	if len(groups) == 0 {
+// ExpandBuiltinToolGroups 将工具组展开为工具名列表；空切片表示未选任何组。
+func ExpandBuiltinToolGroups(groups []string) []string {
+	normalized := NormalizeBuiltinToolGroups(groups)
+	if len(normalized) == 0 {
 		return nil
 	}
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(knownBuiltinTools))
-	for _, group := range groups {
+	for _, group := range normalized {
 		for _, tool := range builtinToolGroups[group] {
 			if _, ok := seen[tool]; ok {
 				continue
@@ -225,25 +227,30 @@ func (t *ToolsConfig) NormalizedBuiltinEnabled() []string {
 	return out
 }
 
+// ValidateBuiltinToolGroups 校验工具组名已知且可展开为已知工具。
+func ValidateBuiltinToolGroups(groups []string) error {
+	for _, group := range NormalizeBuiltinToolGroups(groups) {
+		if _, ok := builtinToolGroups[group]; !ok {
+			return fmt.Errorf("unknown tool group %q", group)
+		}
+	}
+	return validateBuiltinToolNames(ExpandBuiltinToolGroups(groups))
+}
+
 func validateToolsEnabledConfig(t *ToolsConfig) error {
 	if t == nil {
 		return nil
 	}
 	if len(t.Enabled) > 0 {
-		return fmt.Errorf("tools.enabled is deprecated; use tools.enabled_groups (groups: %s)", strings.Join(AllBuiltinToolGroupNames(), ", "))
+		return fmt.Errorf("tools.enabled is deprecated and removed; configure Agent defaults.tools.enabled_groups instead (groups: %s)", strings.Join(AllBuiltinToolGroupNames(), ", "))
 	}
-	for _, group := range t.NormalizedBuiltinEnabledGroups() {
-		if _, ok := builtinToolGroups[group]; !ok {
-			return fmt.Errorf("tools.enabled_groups contains unknown group %q", group)
-		}
-	}
-	return validateBuiltinToolNames(t.NormalizedBuiltinEnabled())
+	return nil
 }
 
 func validateBuiltinToolNames(names []string) error {
 	for _, name := range names {
 		if _, ok := knownBuiltinTools[name]; !ok {
-			return fmt.Errorf("tools.enabled_groups expands to unknown tool %q", name)
+			return fmt.Errorf("unknown builtin tool %q", name)
 		}
 	}
 	return nil

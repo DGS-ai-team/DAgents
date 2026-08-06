@@ -7,7 +7,7 @@ const { loading, saving, error, statusMessage, configPath, configWritable, form,
   useSetupConfig();
 
 async function saveCapabilities() {
-  // 仅进程级能力；工具组在「设置 › Agents」按实例配置，此处不改 enabled_groups。
+  // 工具组能力由各 Agent 决定；此处只保存进程级服务与配额。技能/子 Agent/定时任务总闸固定为开启。
   const wecom = {
     webhook_url: form.wecom.webhook_url || "",
     api_base: form.wecom.api_base || "",
@@ -17,7 +17,12 @@ async function saveCapabilities() {
     wecom.webhook_key = form.wecom.webhook_key;
   }
   await save({
-    features: { ...form.features },
+    features: {
+      ...form.features,
+      skills_enabled: true,
+      triggers_enabled: true,
+      child_agents_enabled: true,
+    },
     browser: { ...form.browser },
     wecom,
     child_agents: { ...form.child_agents },
@@ -40,25 +45,23 @@ onMounted(load);
     @save="saveCapabilities"
   >
     <p class="capabilities-intro">
-      此处控制本机 Node 进程总闸与共享服务参数。单个 Agent 的工具组、沙箱、侧车等请到
+      Agent 是否具备技能、子 Agent、定时任务等能力，由各 Agent 的工具组决定。此处配置进程级共享参数与服务（浏览器、企业微信等）。
+      单个 Agent 请到
       <router-link class="capabilities-intro__link" to="/settings/agents">设置 › Agents</router-link>
-      配置。
+      配置工具组。
     </p>
 
     <section class="settings-section">
       <div class="settings-section__head">
-        <h2 class="settings-section__title">功能开关</h2>
+        <h2 class="settings-section__title">进程选项</h2>
       </div>
-      <p class="settings-section__desc">关闭后整个 Node 不再提供对应能力；技能与定时任务的具体管理仍在各自页面。</p>
+      <p class="settings-section__desc">与工具组无关的 Node 进程开关与配额参数。</p>
       <div class="setup-config-panel__toggles setup-config-panel__toggles--grid">
-        <label class="settings-toggle"><input v-model="form.features.skills_enabled" type="checkbox" /><span>技能</span></label>
-        <label class="settings-toggle"><input v-model="form.features.triggers_enabled" type="checkbox" /><span>定时任务</span></label>
-        <label class="settings-toggle"><input v-model="form.features.child_agents_enabled" type="checkbox" /><span>子 Agent</span></label>
         <label class="settings-toggle"><input v-model="form.features.ui_enabled" type="checkbox" /><span>Web 界面</span></label>
         <label class="settings-toggle">
           <input v-model="form.features.browser_enabled" type="checkbox" />
           <span class="settings-toggle__label">
-            浏览器工具
+            浏览器服务
             <span class="badge badge--beta" title="试验功能">Beta</span>
           </span>
         </label>
@@ -179,11 +182,7 @@ onMounted(load);
       <div class="settings-section__head">
         <h2 class="settings-section__title">子 Agent 配额</h2>
       </div>
-      <p class="settings-section__desc">进程级并发与存活上限；单个 Agent 还可在自身配置中关闭子 Agent 能力。</p>
-      <label class="settings-toggle">
-        <input v-model="form.features.child_agents_enabled" type="checkbox" />
-        <span>启用子 Agent</span>
-      </label>
+      <p class="settings-section__desc">进程级并发与存活上限；是否启用由各 Agent 工具组「子 Agent」决定。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
           <span class="settings-field__label">默认存活时间（秒）</span>
@@ -223,7 +222,7 @@ onMounted(load);
 }
 
 .capabilities-intro__link {
-  color: var(--color-primary-strong, #5b9cff);
+  color: var(--color-primary-strong, #5d5d5d);
   text-decoration: none;
 }
 

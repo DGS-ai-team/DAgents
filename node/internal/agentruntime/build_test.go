@@ -14,7 +14,6 @@ func TestBuild_usesNodeFSRootAndToolGroups(t *testing.T) {
 	cfg := &config.Config{NodeID: "n1", FSRoot: root}
 	cfg.ApplyDefaults()
 	cfg.Skills.Enabled = true
-	cfg.Tools.EnabledGroups = []string{"fs", "bash", "browser", "skills"}
 
 	snap := Snapshot{
 		TemplateID: "code-reviewer",
@@ -53,7 +52,6 @@ func TestBuild_skillsFollowsToolGroup(t *testing.T) {
 	cfg := &config.Config{NodeID: "n1", FSRoot: root}
 	cfg.ApplyDefaults()
 	cfg.Skills.Enabled = true
-	cfg.Tools.EnabledGroups = []string{"fs", "bash", "skills"}
 
 	built, err := Build(BuildParams{
 		NodeCFG:  cfg,
@@ -70,6 +68,52 @@ func TestBuild_skillsFollowsToolGroup(t *testing.T) {
 	}
 	if built.TurnOptions.SkillsEnabled {
 		t.Fatal("skills group absent: SkillsEnabled should be false")
+	}
+}
+
+func TestBuild_emptyOrMissingToolGroupsMeansNone(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{NodeID: "n1", FSRoot: root}
+	cfg.ApplyDefaults()
+
+	for _, tc := range []struct {
+		name string
+		snap Snapshot
+	}{
+		{
+			name: "explicit empty",
+			snap: Snapshot{Defaults: map[string]any{
+				"tools": map[string]any{"enabled_groups": []any{}},
+			}},
+		},
+		{
+			name: "missing field ignores node defaults",
+			snap: Snapshot{Defaults: map[string]any{}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			built, err := Build(BuildParams{
+				NodeCFG:  cfg,
+				BaseTurn: session.TurnOptions{FSRoot: root},
+				AgentID:  "agt-none",
+				Snapshot: tc.snap,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(built.ToolGroups) != 0 {
+				t.Fatalf("tool groups=%v want empty", built.ToolGroups)
+			}
+			if built.TurnOptions.SkillsEnabled {
+				t.Fatal("empty/missing groups must not enable skills")
+			}
+			for _, d := range built.Registry.Definitions() {
+				name := d.Function.Name
+				if name == "read_file" || name == "bash" {
+					t.Fatalf("must disable builtins, still have %q", name)
+				}
+			}
+		})
 	}
 }
 
@@ -129,6 +173,7 @@ func TestBuild_appliesSkillsVisibleAllowlist(t *testing.T) {
 		AgentID: "agt-skills",
 		Snapshot: Snapshot{
 			Defaults: map[string]any{
+				"tools": map[string]any{"enabled_groups": []any{"skills"}},
 				"skills": map[string]any{
 					"enabled": true,
 					"visible": []any{"keep-me"},

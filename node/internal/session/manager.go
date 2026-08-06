@@ -56,10 +56,12 @@ type TurnOptions struct {
 	MultimodalEnabled        bool
 	// ConfigRevision 为装入本 runtime 时 agents.updated_at 的 UnixNano；用于配置变更检测。
 	ConfigRevision int64
-	// PromptContext 控制 soul/user/custom/long_term 侧车是否注入（缺省全开）。
+	// PromptContext 控制 soul/custom/long_term 侧车是否注入（缺省全开）。
 	PromptContext PromptContextOptions
 	// PromptContent 为侧车正文（来自 agents.db，经 Content 注入 runtime）。
 	PromptContent *promptcontext.Content
+	// PreferredName 为本机使用者称呼（Node 首配）；注入 system prompt，替代 user.md。
+	PreferredName string
 	// LongTermStore 持久化长期记忆（remember 工具写入 SQLite）。
 	LongTermStore turn.LongTermStore
 }
@@ -67,7 +69,7 @@ type TurnOptions struct {
 // PromptContextOptions 为侧车 / 长期记忆注入开关。
 type PromptContextOptions struct {
 	SoulEnabled     *bool
-	UserEnabled     *bool
+	UserEnabled     *bool // deprecated：用户信息改走 PreferredName，保留字段兼容旧快照
 	CustomEnabled   *bool
 	LongTermEnabled *bool
 	LongTermScope   *string // global | agent

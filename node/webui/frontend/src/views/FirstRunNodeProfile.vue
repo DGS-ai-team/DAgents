@@ -2,6 +2,7 @@
 import { computed, reactive, ref, onMounted } from "vue";
 import * as api from "../api/node.js";
 import { setTheme, themeStore } from "../stores/theme.js";
+import UiSelect from "../components/UiSelect.vue";
 
 const PROVIDER_PRESETS = {
   deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-chat" },
@@ -9,6 +10,13 @@ const PROVIDER_PRESETS = {
   qwen: { base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
   vllm: { base_url: "http://127.0.0.1:8000/v1", model: "your-model-name" },
 };
+
+const PROVIDER_OPTIONS = [
+  { value: "deepseek", label: "DeepSeek" },
+  { value: "openai", label: "OpenAI" },
+  { value: "qwen", label: "Qwen" },
+  { value: "vllm", label: "vLLM" },
+];
 
 const ALLOWED_PROVIDERS = new Set(["deepseek", "openai", "qwen", "vllm"]);
 
@@ -82,6 +90,9 @@ const canSubmitLLM = computed(() => {
 
 const useModelSelect = computed(() => probedModels.value.length > 0 && !modelManual.value);
 const canProbe = computed(() => String(llm.base_url || "").trim().length > 0);
+const modelOptions = computed(() =>
+  probedModels.value.map((m) => ({ value: m, label: m })),
+);
 
 onMounted(async () => {
   loading.value = true;
@@ -313,12 +324,11 @@ async function submit() {
       <form v-else id="first-run-llm" class="first-run__body first-run__body--form" @submit.prevent="submit">
         <label class="settings-field">
           <span class="settings-field__label">用哪家模型？</span>
-          <select v-model="llm.provider" class="settings-field__input" @change="applyProviderPreset">
-            <option value="deepseek">DeepSeek</option>
-            <option value="openai">OpenAI</option>
-            <option value="qwen">Qwen</option>
-            <option value="vllm">vLLM</option>
-          </select>
+          <UiSelect
+            v-model="llm.provider"
+            :options="PROVIDER_OPTIONS"
+            @change="applyProviderPreset"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">接口地址</span>
@@ -351,13 +361,12 @@ async function submit() {
         </label>
         <label class="settings-field">
           <span class="settings-field__label">具体用哪个模型？</span>
-          <select
+          <UiSelect
             v-if="useModelSelect"
             v-model="llm.model"
-            class="settings-field__input first-run__control"
-          >
-            <option v-for="m in probedModels" :key="m" :value="m">{{ m }}</option>
-          </select>
+            class="first-run__control"
+            :options="modelOptions"
+          />
           <input
             v-else
             v-model="llm.model"
@@ -718,6 +727,14 @@ async function submit() {
 
 .first-run__body :deep(.settings-field__input) {
   max-width: none;
+  background-color: var(--color-input);
+}
+
+.first-run__body :deep(.ui-select) {
+  max-width: none;
+}
+
+.first-run__body :deep(.ui-select__trigger) {
   background: var(--color-input);
 }
 

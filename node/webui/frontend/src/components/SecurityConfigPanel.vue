@@ -9,8 +9,6 @@ const { loading, saving, error, statusMessage, configPath, configWritable, form,
 async function saveSecurity() {
   await save({
     tools: {
-      // 保留 config.yaml 中的 enabled_groups（已无 UI 编辑入口，避免安全页保存时被清空）
-      enabled_groups: [...(form.tools.enabled_groups || [])],
       bash_output_encoding: form.tools.bash_output_encoding,
       file_encoding: form.tools.file_encoding,
       bash_compress_enabled: form.tools.bash_compress_enabled,

@@ -93,12 +93,8 @@ func defaultAgentCreationDefaults() map[string]any {
 			"enabled_groups": []any{},
 		},
 		"skills": map[string]any{},
-		"child_agents": map[string]any{
-			"enabled": true,
-		},
 		"prompt_context": map[string]any{
 			"soul_enabled":      true,
-			"user_enabled":      true,
 			"custom_enabled":    true,
 			"long_term_enabled": true,
 		},
@@ -572,6 +568,9 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 	}
 	s.attachNodeRuntimeDeps(built.Registry, id)
 	built.TurnOptions.ConfigRevision = rec.UpdatedAt.UTC().UnixNano()
+	if s.cfg != nil {
+		built.TurnOptions.PreferredName = s.cfg.PreferredName()
+	}
 	if s.agents != nil {
 		if pc, err := s.agents.EnsureAgentPromptContext(ctx, id, s.runtimeDir()); err != nil {
 			s.logger.Warn("agent prompt context load failed", "agent_id", id, "error", err)

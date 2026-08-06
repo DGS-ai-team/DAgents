@@ -91,14 +91,13 @@ func (c *Config) UIEnabled() bool {
 }
 
 // ToolsConfig 控制内置工具行为（如 bash_run 输出解码与压缩）。
+// 工具组允许列表由各 Agent 快照 defaults.tools.enabled_groups 决定，不再使用 Node 级配置。
 type ToolsConfig struct {
-	// EnabledGroups 为内置工具组允许列表（见 shared/config AllBuiltinToolGroupNames）；省略或为空表示启用全部。
-	EnabledGroups []string `yaml:"enabled_groups"`
-	// Enabled 已废弃；请改用 enabled_groups。
+	// Enabled 已废弃；出现时 Validate 失败。
 	Enabled []string `yaml:"enabled,omitempty"`
 	// BashOutputEncoding 为 bash_run 捕获的子进程 stdout/stderr 字节编码（解码为 UTF-8 后交给 LLM）。
 	// 留空时默认 utf-8；单次 bash_run 可用 output_encoding 覆盖。
-	BashOutputEncoding string             `yaml:"bash_output_encoding"`
+	BashOutputEncoding string `yaml:"bash_output_encoding"`
 	// FileEncoding 为 read_file/write_file/search_replace/grep_* 读写磁盘文件的默认字节编码。
 	// 留空时默认 utf-8；GBK 遗留文件仍可通过字节检测或 encoding 参数读取。
 	FileEncoding string             `yaml:"file_encoding"`

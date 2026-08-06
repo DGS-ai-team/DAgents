@@ -76,16 +76,21 @@ func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPrompt_includesPromptContext(t *testing.T) {
+func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
 	hostsnapshot.CaptureAtStartup()
+	r := promptcontext.NewContentReader(promptcontext.Content{User: "legacy user.md ignored"})
+	r.SetPreferredName("小明")
 	prompt := BuildSystemPrompt(SystemPromptInput{
 		AgentID:   "ops-01",
 		FSRoot:    "/data/ws",
 		SessionID: "sess-x",
-		PromptCtx: promptcontext.NewContentReader(promptcontext.Content{User: "prefer concise"}),
+		PromptCtx: r,
 	})
-	if !containsAll(prompt, "用户信息与偏好", "prefer concise") {
+	if !containsAll(prompt, "以下是用户信息", "请称呼用户为：小明") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "legacy user.md") || contains(prompt, "用户信息与偏好") {
+		t.Fatalf("should not inject user.md sidecar, got %q", prompt)
 	}
 }
 
@@ -103,7 +108,7 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
 		t.Fatalf("child prompt should not expose fs_root path, got %q", prompt)
 	}
-	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "用户信息与偏好") {
+	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "以下是用户信息") {
 		t.Fatalf("child prompt should omit parent sections, got %q", prompt)
 	}
 }

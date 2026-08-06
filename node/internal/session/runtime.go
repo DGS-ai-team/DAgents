@@ -161,9 +161,9 @@ func newRuntimeWithPublisher(
 	if turnOpts.PromptContent != nil {
 		promptReader.SetContent(*turnOpts.PromptContent)
 	}
+	promptReader.SetPreferredName(turnOpts.PreferredName)
 	promptReader.SetFilter(promptcontext.Filter{
 		SoulEnabled:     turnOpts.PromptContext.SoulEnabled,
-		UserEnabled:     turnOpts.PromptContext.UserEnabled,
 		CustomEnabled:   turnOpts.PromptContext.CustomEnabled,
 		LongTermEnabled: turnOpts.PromptContext.LongTermEnabled,
 	})

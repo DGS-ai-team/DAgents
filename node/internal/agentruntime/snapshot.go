@@ -36,7 +36,8 @@ func EffectiveFSRoot(nodeFSRoot, _agentID string, _snap Snapshot) string {
 	return strings.TrimSpace(nodeFSRoot)
 }
 
-// EnabledToolGroups 从 defaults.tools.enabled_groups 读取；无则 nil（表示沿用 Node 默认）。
+// EnabledToolGroups 从 defaults.tools.enabled_groups 读取。
+// 未配置或空列表表示不启用任何工具组（不再回退 Node tools.enabled_groups）。
 func EnabledToolGroups(snap Snapshot) []string {
 	toolsRaw, ok := snap.Defaults["tools"]
 	if !ok || toolsRaw == nil {
@@ -158,7 +159,7 @@ type SkillsConfig struct {
 
 // SkillsFromDefaults 读取 defaults.skills.visible。
 // visible 缺省：不限制（全部可见）；visible: []：全部不可见；visible: ["a"]：仅 a。
-// 不再读取 defaults.skills.enabled（旧字段忽略；能力由工具组 skills + Node 总闸决定）。
+// 不再读取 defaults.skills.enabled（旧字段忽略；能力由工具组 skills 决定）。
 func SkillsFromDefaults(snap Snapshot) SkillsConfig {
 	var out SkillsConfig
 	raw, ok := snap.Defaults["skills"]

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import { probeLLMModels } from "../api/node.js";
+import UiSelect from "./UiSelect.vue";
 
 const PROVIDER_PRESETS = {
   deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-chat" },
@@ -9,6 +10,14 @@ const PROVIDER_PRESETS = {
   vllm: { base_url: "http://127.0.0.1:8000/v1", model: "your-model-name" },
   mock: { base_url: "", model: "mock" },
 };
+
+const PROVIDER_OPTIONS = [
+  { value: "deepseek", label: "DeepSeek" },
+  { value: "openai", label: "OpenAI" },
+  { value: "qwen", label: "Qwen" },
+  { value: "vllm", label: "vLLM" },
+  { value: "mock", label: "Mock（测试）" },
+];
 
 const ALLOWED_PROVIDERS = new Set(["deepseek", "openai", "qwen", "vllm", "mock"]);
 
@@ -38,6 +47,9 @@ const canProbe = computed(() => {
   return String(draft.base_url || "").trim().length > 0;
 });
 const useModelSelect = computed(() => probedModels.value.length > 0 && !modelManual.value);
+const modelOptions = computed(() =>
+  probedModels.value.map((m) => ({ value: m, label: m })),
+);
 
 function emptyDraft() {
   return {
@@ -273,24 +285,20 @@ watch(
 
             <label class="settings-field">
               <span class="settings-field__label">Provider</span>
-              <select v-model="draft.provider" class="settings-field__input" @change="applyProviderPreset">
-                <option value="deepseek">DeepSeek</option>
-                <option value="openai">OpenAI</option>
-                <option value="qwen">Qwen</option>
-                <option value="vllm">vLLM</option>
-                <option value="mock">Mock（测试）</option>
-              </select>
+              <UiSelect
+                v-model="draft.provider"
+                :options="PROVIDER_OPTIONS"
+                @change="applyProviderPreset"
+              />
             </label>
             <label class="settings-field">
               <span class="settings-field__label">Model</span>
-              <select
+              <UiSelect
                 v-if="useModelSelect"
                 v-model="draft.model"
-                class="settings-field__input"
+                :options="modelOptions"
                 @change="onModelSelect"
-              >
-                <option v-for="m in probedModels" :key="m" :value="m">{{ m }}</option>
-              </select>
+              />
               <input
                 v-else
                 v-model="draft.model"
@@ -412,6 +420,14 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.llm-profile-modal__body :deep(.ui-select) {
+  max-width: none;
+}
+
+.llm-profile-modal__body :deep(.ui-select__trigger) {
+  background: var(--color-surface);
 }
 
 .llm-profile-modal__grid {

@@ -2,7 +2,13 @@
 import { computed, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import AgentSettingsForm from "./AgentSettingsForm.vue";
-import { buildCreateAgentPayload, BLANK_TEMPLATE_ID, draftFromBlank, draftFromTemplate, emptyAgentDraft } from "../utils/agentTemplateForm.js";
+import {
+  buildCreateAgentPayload,
+  BLANK_TEMPLATE_ID,
+  draftFromBlank,
+  draftFromTemplate,
+  emptyAgentDraft,
+} from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -11,23 +17,112 @@ const props = defineProps({
 
 const emit = defineEmits(["close", "created"]);
 
+/** @type {import('vue').Ref<'start' | 'details' | 'capabilities'>} */
+const step = ref("details");
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
-const showAdvanced = ref(false);
+/** 字段级校验（替换标签，不进页脚） */
+const fieldErrors = reactive({ name: "", llm: "" });
 const templates = ref([]);
 const llmProfiles = ref([]);
 const draft = reactive(emptyAgentDraft());
+/** 是否从「选起点」进来；无模板或从空态模板直达时为 false */
+const canGoBackToStart = ref(false);
 
 const selectedTemplate = computed(
   () => templates.value.find((t) => t.id === draft.templateId) || null,
 );
 const isBlankDraft = computed(() => draft.templateId === BLANK_TEMPLATE_ID || !draft.templateId);
+const hasTemplates = computed(() => templates.value.length > 0);
 const llmProfileIds = computed(() => llmProfiles.value.map((p) => p.id).filter(Boolean));
+const selectedToolCount = computed(() => (draft.toolGroups || []).length);
+
+const startPointLabel = computed(() => {
+  if (isBlankDraft.value) return "空白开始";
+  const tpl = selectedTemplate.value;
+  return tpl ? String(tpl.display_name || tpl.id) : "已选模板";
+});
+
+const stepTitle = computed(() => {
+  if (loading.value) return "创建智能体";
+  if (step.value === "start") return "想从哪里开始？";
+  if (step.value === "capabilities") return "它能做什么？";
+  return "给它起个名字";
+});
+
+const stepLead = computed(() => {
+  if (loading.value) return "稍等，正在准备…";
+  if (step.value === "start") return "选择一个模板？还是你想从空白开始配置。";
+  if (step.value === "capabilities") {
+    return "选择智能体可以使用的工具";
+  }
+  if (isBlankDraft.value) return "填好名字和模型就可以创建。想先选它能做什么的话，点「选功能」。";
+  return `以「${startPointLabel.value}」为起点。改个名字、确认模型就好。`;
+});
+
+const stepTotal = computed(() => {
+  // 含「选起点」时固定 3 步：起点 → 命名 → 功能；否则 2 步：命名 → 功能。
+  // 进度条不因是否进入「选功能」而变长，避免突兀。
+  if (canGoBackToStart.value || step.value === "start") return 3;
+  return 2;
+});
+const stepIndex = computed(() => {
+  if (step.value === "start") return 1;
+  if (step.value === "details") return stepTotal.value === 3 ? 2 : 1;
+  return stepTotal.value;
+});
+
+const canContinueStart = computed(() => !loading.value && (!!draft.templateId || isBlankDraft.value));
+const canSubmit = computed(
+  () =>
+    !saving.value &&
+    !loading.value &&
+    !!draft.displayName?.trim() &&
+    !!draft.llmProfileId,
+);
+
+const showProgress = computed(() => !loading.value);
+const backLabel = computed(() => {
+  if (step.value === "start") return "取消";
+  if (step.value === "details") return canGoBackToStart.value ? "上一步" : "取消";
+  return "上一步";
+});
+const primaryLabel = computed(() => {
+  if (saving.value) return "创建中…";
+  if (step.value === "start") return "继续";
+  return "创建";
+});
+const primaryDisabled = computed(() => {
+  if (step.value === "start") return !canContinueStart.value;
+  return !canSubmit.value;
+});
+
+function onBack() {
+  if (step.value === "start") {
+    emit("close");
+    return;
+  }
+  if (step.value === "details") {
+    goBackFromDetails();
+    return;
+  }
+  goBackFromCapabilities();
+}
+
+function onPrimary() {
+  if (step.value === "start") {
+    goDetails();
+    return;
+  }
+  void submit();
+}
+
 async function loadTemplates() {
   loading.value = true;
   error.value = "";
-  showAdvanced.value = false;
+  clearFieldErrors();
+  canGoBackToStart.value = false;
   try {
     const [tplRes, setup] = await Promise.all([
       api.listAgentTemplates(),
@@ -35,24 +130,37 @@ async function loadTemplates() {
     ]);
     templates.value = tplRes.templates || [];
     llmProfiles.value = Array.isArray(setup?.llm?.profiles)
-      ? setup.llm.profiles.map((p) => ({
-          id: String(p.id || "").trim(),
-          provider: p.provider || "",
-          model: p.model || "",
-        })).filter((p) => p.id)
+      ? setup.llm.profiles
+          .map((p) => ({
+            id: String(p.id || "").trim(),
+            provider: p.provider || "",
+            model: p.model || "",
+          }))
+          .filter((p) => p.id)
       : [];
+
     const prefer = String(props.initialTemplateId || "").trim();
     const preferred = prefer ? templates.value.find((t) => t.id === prefer) : null;
+
     if (preferred) {
       applyTemplate(preferred);
+      step.value = "details";
+      canGoBackToStart.value = templates.value.length > 0;
     } else if (templates.value.length) {
       applyTemplate(templates.value[0]);
+      step.value = "start";
+      canGoBackToStart.value = true;
     } else {
       applyBlank();
+      step.value = "details";
+      canGoBackToStart.value = false;
     }
   } catch (e) {
     error.value = e.message || "加载模板失败";
     templates.value = [];
+    applyBlank();
+    step.value = "details";
+    canGoBackToStart.value = false;
   } finally {
     loading.value = false;
   }
@@ -67,21 +175,75 @@ function applyBlank() {
   draft.templateId = BLANK_TEMPLATE_ID;
 }
 
-function onPickBlank() {
+function pickBlank() {
   applyBlank();
 }
 
-function onPickTemplate(template) {
+function pickTemplate(template) {
   applyTemplate(template);
 }
 
-async function submit() {
+function clearFieldErrors() {
+  fieldErrors.name = "";
+  fieldErrors.llm = "";
+}
+
+function clearFieldError(key) {
+  if (key === "name") fieldErrors.name = "";
+  if (key === "llm") fieldErrors.llm = "";
+}
+
+/** @returns {boolean} */
+function validateBasics() {
+  clearFieldErrors();
   if (!draft.displayName?.trim()) {
-    error.value = "请填写显示名称";
-    return;
+    fieldErrors.name = "先给智能体起个名字吧";
+    return false;
   }
   if (!draft.llmProfileId) {
-    error.value = "请选择 LLM 配置";
+    fieldErrors.llm = "选一个模型配置吧";
+    return false;
+  }
+  return true;
+}
+
+function goDetails() {
+  error.value = "";
+  clearFieldErrors();
+  step.value = "details";
+}
+
+function goCapabilities() {
+  if (!validateBasics()) {
+    step.value = "details";
+    return;
+  }
+  error.value = "";
+  step.value = "capabilities";
+}
+
+function goStart() {
+  if (!hasTemplates.value) return;
+  error.value = "";
+  clearFieldErrors();
+  step.value = "start";
+  canGoBackToStart.value = true;
+}
+
+function goBackFromDetails() {
+  if (canGoBackToStart.value) goStart();
+  else emit("close");
+}
+
+function goBackFromCapabilities() {
+  error.value = "";
+  clearFieldErrors();
+  step.value = "details";
+}
+
+async function submit() {
+  if (!validateBasics()) {
+    step.value = "details";
     return;
   }
   saving.value = true;
@@ -107,9 +269,25 @@ watch(
     if (visible) void loadTemplates();
     else {
       error.value = "";
-      showAdvanced.value = false;
+      clearFieldErrors();
+      step.value = "details";
+      canGoBackToStart.value = false;
       Object.assign(draft, emptyAgentDraft());
     }
+  },
+);
+
+watch(
+  () => draft.displayName,
+  () => {
+    if (fieldErrors.name) fieldErrors.name = "";
+  },
+);
+
+watch(
+  () => draft.llmProfileId,
+  () => {
+    if (fieldErrors.llm) fieldErrors.llm = "";
   },
 );
 </script>
@@ -120,87 +298,104 @@ watch(
       <section class="agent-create-modal" role="dialog" aria-modal="true" aria-labelledby="agent-create-title">
         <header class="agent-create-modal__header">
           <div>
-            <h2 id="agent-create-title" class="agent-create-modal__title">新建 Agent</h2>
-            <p class="agent-create-modal__subtitle">
-              可从空白配置或模板预填参数，创建时提交完整设置
-            </p>
+            <h2 id="agent-create-title" class="agent-create-modal__title">{{ stepTitle }}</h2>
+            <p class="agent-create-modal__subtitle">{{ stepLead }}</p>
           </div>
-          <button type="button" class="agent-create-modal__close" aria-label="关闭" :disabled="saving" @click="emit('close')">
+          <button
+            type="button"
+            class="agent-create-modal__close"
+            aria-label="关闭"
+            :disabled="saving"
+            @click="emit('close')"
+          >
             ×
           </button>
         </header>
 
         <div class="agent-create-modal__body">
-          <div v-if="loading" class="agent-create-modal__loading">加载模板…</div>
+          <div v-if="loading" class="agent-create-modal__loading">稍等，正在准备…</div>
 
-          <template v-else>
-            <div class="agent-create-modal__templates">
-              <button
-                type="button"
-                class="agent-create-card"
-                :class="{ 'agent-create-card--active': isBlankDraft }"
-                @click="onPickBlank"
-              >
-                <div class="agent-create-card__head">
-                  <span class="agent-create-card__name">空白配置</span>
-                  <span class="agent-create-card__id">无模板</span>
-                </div>
-                <p class="agent-create-card__desc">从零开始配置 Agent，不依赖任何模板</p>
-              </button>
-              <button
-                v-for="tpl in templates"
-                :key="tpl.id"
-                type="button"
-                class="agent-create-card"
-                :class="{ 'agent-create-card--active': draft.templateId === tpl.id }"
-                @click="onPickTemplate(tpl)"
-              >
-                <div class="agent-create-card__head">
-                  <span class="agent-create-card__name">{{ tpl.display_name || tpl.id }}</span>
-                  <span class="agent-create-card__id">{{ tpl.id }}</span>
-                </div>
-                <p class="agent-create-card__desc">{{ tpl.description || "无描述" }}</p>
-                <div class="agent-create-card__tags">
-                  <span v-if="tpl.source === 'user'" class="agent-create-tag agent-create-tag--user">自定义</span>
-                  <span
-                    v-for="g in (tpl.defaults?.tools?.enabled_groups || []).slice(0, 3)"
-                    :key="g"
-                    class="agent-create-tag agent-create-tag--muted"
-                  >{{ g }}</span>
-                </div>
-              </button>
-            </div>
+          <div v-else-if="step === 'start'" class="agent-create-start">
+            <button
+              type="button"
+              class="agent-create-choice"
+              :class="{ 'agent-create-choice--active': isBlankDraft }"
+              @click="pickBlank"
+            >
+              <span class="agent-create-choice__name">空白开始</span>
+              <span class="agent-create-choice__desc">自己填写设置，不依赖模板</span>
+            </button>
+            <button
+              v-for="tpl in templates"
+              :key="tpl.id"
+              type="button"
+              class="agent-create-choice"
+              :class="{ 'agent-create-choice--active': draft.templateId === tpl.id }"
+              @click="pickTemplate(tpl)"
+            >
+              <span class="agent-create-choice__name">{{ tpl.display_name || tpl.id }}</span>
+              <span class="agent-create-choice__desc">{{ tpl.description || "从模板快速创建" }}</span>
+            </button>
+          </div>
 
-            <p class="agent-create-hint">
-              新建 Agent 仅在本机创建。跨机器协作请使用
-              <router-link to="/workgroups">工作组</router-link>。
-            </p>
+          <AgentSettingsForm
+            v-else-if="step === 'details'"
+            :draft="draft"
+            :llm-profiles="llmProfiles"
+            :field-errors="fieldErrors"
+            mode="create-basics"
+            @clear-field-error="clearFieldError"
+          />
 
-            <AgentSettingsForm
-              :draft="draft"
-              :llm-profiles="llmProfiles"
-              v-model:show-advanced="showAdvanced"
-            />
-            <p v-if="isBlankDraft" class="agent-create-hint">
-              当前为空白配置；可在下方填写完整设置后创建。
-            </p>
-            <p v-else-if="selectedTemplate" class="agent-create-hint">
-              当前以「{{ selectedTemplate.display_name || selectedTemplate.id }}」为起点；改动仅影响本 Agent。
-            </p>
-          </template>
+          <AgentSettingsForm
+            v-else
+            :draft="draft"
+            :llm-profiles="llmProfiles"
+            mode="create-capabilities"
+          />
         </div>
 
         <footer class="agent-create-modal__footer">
-          <p v-if="error" class="agent-create-modal__error">{{ error }}</p>
-          <div class="agent-create-modal__actions">
-            <button type="button" class="btn btn--ghost" :disabled="saving" @click="emit('close')">取消</button>
+          <div class="agent-create-modal__footer-left">
+            <button
+              type="button"
+              class="agent-create-modal__back"
+              :disabled="saving"
+              @click="onBack"
+            >
+              {{ backLabel }}
+            </button>
+            <div
+              v-if="showProgress"
+              class="agent-create-modal__dots"
+              :aria-label="`第 ${stepIndex} 步，共 ${stepTotal} 步`"
+            >
+              <span
+                v-for="i in stepTotal"
+                :key="i"
+                class="agent-create-modal__dot"
+                :class="{ 'agent-create-modal__dot--active': i === stepIndex }"
+              />
+            </div>
+            <p v-if="error" class="agent-create-modal__error">{{ error }}</p>
+          </div>
+          <div class="agent-create-modal__footer-right">
+            <button
+              v-if="step === 'details'"
+              type="button"
+              class="agent-create-modal__link"
+              :disabled="saving || loading"
+              @click="goCapabilities"
+            >
+              选功能{{ selectedToolCount ? ` · ${selectedToolCount}` : "" }}
+            </button>
             <button
               type="button"
               class="btn btn--primary"
-              :disabled="saving || loading || !draft.displayName?.trim() || !draft.llmProfileId"
-              @click="submit"
+              :disabled="primaryDisabled || saving"
+              @click="onPrimary"
             >
-              {{ saving ? "创建中…" : "创建 Agent" }}
+              {{ primaryLabel }}
             </button>
           </div>
         </footer>
@@ -222,11 +417,11 @@ watch(
 }
 
 .agent-create-modal {
-  width: min(920px, 96vw);
-  max-height: min(88vh, 900px);
+  width: min(520px, 96vw);
+  height: min(480px, 84vh);
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid var(--color-border-strong);
   background: var(--color-surface);
   box-shadow: var(--shadow-lg);
@@ -248,18 +443,112 @@ watch(
   border-bottom: 0;
   border-top: 1px solid var(--color-border);
   align-items: center;
+  padding: 12px 20px;
+  gap: 16px;
+}
+
+.agent-create-modal__footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.agent-create-modal__back {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.agent-create-modal__back:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.agent-create-modal__back:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-create-modal__dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.agent-create-modal__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text) 16%, transparent);
+  transition: background 0.15s ease, width 0.15s ease;
+}
+
+.agent-create-modal__dot--active {
+  width: 16px;
+  background: var(--color-text-muted);
+}
+
+.agent-create-modal__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-danger);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-create-modal__footer-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.agent-create-modal__link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.agent-create-modal__link:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.agent-create-modal__link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .agent-create-modal__title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
 }
 
 .agent-create-modal__subtitle {
   margin: 4px 0 0;
-  font-size: 12px;
-  color: var(--color-text-subtle);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  max-width: 36em;
 }
 
 .agent-create-modal__close {
@@ -275,125 +564,85 @@ watch(
 }
 
 .agent-create-modal__close:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
   color: var(--color-text);
 }
 
 .agent-create-modal__body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  padding: 16px 20px 20px;
+  overflow: hidden;
+  padding: 14px 20px 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
-.agent-create-modal__loading,
-.agent-create-modal__empty {
-  padding: 32px 12px;
-  text-align: center;
+.agent-create-modal__body > :deep(.agent-settings-form) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.agent-create-modal__loading {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
   color: var(--color-text-subtle);
   font-size: 13px;
 }
 
-.agent-create-modal__templates {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 10px;
-}
-
-.agent-create-card {
+.agent-create-start {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  text-align: left;
-  padding: 14px 14px 12px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.agent-create-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  flex: 1 1 0;
+  min-height: 64px;
+  width: 100%;
+  padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid var(--color-border);
-  background: var(--color-surface-muted);
+  background: var(--color-surface);
   color: inherit;
+  text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
-.agent-create-card:hover {
-  border-color: var(--color-border-strong);
-  background: var(--color-surface-hover);
+.agent-create-choice:hover {
+  border-color: color-mix(in srgb, var(--color-primary-strong, var(--color-primary)) 40%, var(--color-border));
 }
 
-.agent-create-card--active {
-  border-color: var(--color-primary);
-  background: var(--color-primary-soft);
+.agent-create-choice--active {
+  border-color: color-mix(in srgb, var(--color-primary-strong, var(--color-primary)) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary-strong, var(--color-primary)) 8%, var(--color-surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary-strong, var(--color-primary)) 18%, transparent);
 }
 
-.agent-create-card__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.agent-create-card__name {
+.agent-create-choice__name {
   font-size: 14px;
   font-weight: 600;
+  color: var(--color-text);
 }
 
-.agent-create-card__id {
-  font-size: 11px;
-  color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-}
-
-.agent-create-card__desc {
-  margin: 0;
+.agent-create-choice__desc {
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--color-text-muted);
-  min-height: 2.8em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-
-.agent-create-card__tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.agent-create-tag {
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--color-primary-soft);
-  color: var(--color-primary-strong);
-}
-
-.agent-create-tag--muted {
-  background: var(--color-surface-elevated);
-  color: var(--color-text-subtle);
-}
-
-.agent-create-tag--user {
-  background: var(--color-primary-soft);
-  color: var(--color-primary-strong);
-}
-
-.agent-create-hint {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--color-text-subtle);
-}
-
-.agent-create-modal__error {
-  flex: 1 1 auto;
-  margin: 0;
-  font-size: 12px;
-  color: var(--color-danger);
-}
-
-.agent-create-modal__actions {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-}
-
 </style>
