@@ -11,7 +11,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 )
 
-// EnsureAgentPolicy 确保 Agent 有策略行：已有则返回；否则从旧文件迁移或种子写入 SQLite。
+// EnsureAgentPolicy 确保 Agent 有策略行：已有则返回（并补齐种子缺项）；否则从旧文件迁移或种子写入 SQLite。
 func (s *AgentStore) EnsureAgentPolicy(ctx context.Context, agentID, runtimeDir string) (*AgentPolicyRecord, error) {
 	if s == nil {
 		return nil, fmt.Errorf("agent store unavailable")
@@ -25,6 +25,11 @@ func (s *AgentStore) EnsureAgentPolicy(ctx context.Context, agentID, runtimeDir 
 		return nil, err
 	}
 	if existing != nil {
+		if mergeSeedToolsIntoRecord(existing) {
+			if err := s.SaveAgentPolicy(ctx, *existing); err != nil {
+				return nil, err
+			}
+		}
 		return existing, nil
 	}
 
@@ -36,6 +41,8 @@ func (s *AgentStore) EnsureAgentPolicy(ctx context.Context, agentID, runtimeDir 
 		}
 	}
 	tools, shell := policy.MapsToStringMaps(maps)
+	// 即便从 runtime 旧文件加载，也补齐 packaging 种子中的新工具项（如 browser_run_task）。
+	tools, _ = policy.MergeMissingToolModes(tools, policy.LoadSeedMaps().Tools)
 	rec := AgentPolicyRecord{
 		AgentID:   agentID,
 		Tools:     tools,
