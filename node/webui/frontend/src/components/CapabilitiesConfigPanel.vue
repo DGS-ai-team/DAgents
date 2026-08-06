@@ -93,7 +93,10 @@ onMounted(load);
           <span class="badge badge--beta" title="试验功能">Beta</span>
         </h2>
       </div>
-      <p class="settings-section__desc">需另行启动浏览器服务后使用；各 Agent 仍需在自身工具组中启用 browser。</p>
+      <p class="settings-section__desc">
+        需另行启动浏览器服务（dagents-browser）。Agent 启用「浏览器」工具组后会自动创建伴生，
+        主 Agent 通过「浏览器任务」派发；闭环执行需要<strong>非 mock</strong> 的 LLM 档案。
+      </p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
           <span class="settings-field__label">服务地址</span>

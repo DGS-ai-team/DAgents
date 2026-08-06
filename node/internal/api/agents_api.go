@@ -299,6 +299,14 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		if isHiddenCompanionAgent(rec) {
 			continue
 		}
+		// 存量：已启用 browser 组但尚未创建伴生时，列表时尽力补齐。
+		if err := s.syncBrowserCompanion(r.Context(), rec); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("browser companion sync on list failed", "agent_id", rec.AgentID, "error", err)
+			}
+		} else if updated, err := s.agents.Get(r.Context(), rec.AgentID); err == nil && updated != nil {
+			rec = *updated
+		}
 		views = append(views, s.enrichAgentNotify(agentViewFromRecord(rec)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"agents": views})

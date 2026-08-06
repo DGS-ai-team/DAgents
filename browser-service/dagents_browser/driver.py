@@ -246,7 +246,10 @@ class BrowserUseDriver:
         if self.settings.llm is None:
             return {
                 "ok": False,
-                "error": "browser run_task requires a non-mock llm in node config (browser-use Agent)",
+                "error": (
+                    "浏览器任务需要真实 LLM：当前 Node 配置为 mock 或未设置 llm.model。"
+                    "请在设置中切换非 mock 模型档案后重试（browser-use.Agent 无法在 mock 下闭环）。"
+                ),
             }
         try:
             llm = create_extraction_llm(self.settings.llm)
@@ -294,7 +297,8 @@ class BrowserUseDriver:
                         llm=llm,
                         browser_session=session,
                         extend_system_message=build_extend_system_message(
-                            fs_root=self.settings.fs_root
+                            fs_root=self.settings.fs_root,
+                            allowed_url_schemes=self.settings.allowed_url_schemes,
                         ),
                         file_system_path=task_fs,
                     )

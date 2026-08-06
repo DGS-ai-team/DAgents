@@ -28,12 +28,14 @@ def test_allocate_debug_port_attach_mode():
 
 
 def test_extend_system_message_contains_dagents_rules():
-    msg = build_extend_system_message(fs_root="/tmp/runtime")
+    msg = build_extend_system_message(fs_root="/tmp/runtime", allowed_url_schemes=["https", "http"])
     assert "dagents_companion_rules" in msg
     assert "简体中文" in msg
     assert "/tmp/runtime" in msg
     assert "不要尝试登录" in msg
     assert "done" in msg
+    assert "https" in msg
+    assert "file://" in msg
 
 
 class _FakeHistory:

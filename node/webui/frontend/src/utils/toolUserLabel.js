@@ -43,6 +43,33 @@ function sanitizeInline(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
 
+/** 从 browser_task_* 工具结果 JSON 提取一行用户可读提示。 */
+function browserTaskResultHint(resultEntry) {
+  const raw = resultEntry?.data?.content;
+  if (raw == null) return "";
+  let obj = raw;
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s.startsWith("{")) return "";
+    try {
+      obj = JSON.parse(s);
+    } catch {
+      return "";
+    }
+  }
+  if (!obj || typeof obj !== "object") return "";
+  const detail = obj.detail && typeof obj.detail === "object" ? obj.detail : obj;
+  const summary = sanitizeInline(detail.summary || obj.extracted_content || detail.extracted_content);
+  if (summary) return summary.length > 48 ? truncateGraphemes(summary, 48) : summary;
+  const status = sanitizeInline(detail.status);
+  if (status === "completed" && detail.success === false) return "未完全完成";
+  if (status === "completed") return "已完成";
+  if (status === "failed") return sanitizeInline(detail.error || obj.error) || "失败";
+  if (status === "cancelled") return "已取消";
+  if (status === "running" || status === "queued") return status === "queued" ? "排队中" : "执行中";
+  return status;
+}
+
 function userLabelForTool(name) {
   const n = String(name || "").trim();
   if (!n || n === "tool" || n === "unknown" || n === "unknown_tool") {
@@ -84,6 +111,16 @@ export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
   if (["read_file", "write_file", "search_replace", "show_image", "read_image"].includes(name)) {
     const path = sanitizeInline(args.path || args.file_path);
     if (path) return `${label}：${path.length > 56 ? truncateGraphemes(path, 56) : path}`;
+  }
+  if (name === "browser_run_task") {
+    const task = sanitizeInline(args.task);
+    if (task) return `${label}：${task.length > 48 ? truncateGraphemes(task, 48) : task}`;
+  }
+  if (name === "browser_task_status" || name === "browser_task_cancel") {
+    const fromResult = browserTaskResultHint(resultEntry);
+    if (fromResult) return `${label}：${fromResult}`;
+    const tid = sanitizeInline(args.task_id);
+    if (tid) return `${label}：${tid}`;
   }
   if (name.startsWith("browser_")) {
     const url = sanitizeInline(args.url);

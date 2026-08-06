@@ -28,14 +28,34 @@ describe("toolStepUserSummary", () => {
     expect(text).toBe("助手执行了一步操作");
   });
 
-  it("backfills from result tool_name", () => {
+  it("shows browser_run_task goal", () => {
     const text = toolStepUserSummary({
-      resultEntry: {
-        kind: "tool_result",
-        data: { tool_name: "read_file", arguments: { path: "report.txt" }, content: "..." },
+      callEntry: {
+        kind: "tool_call",
+        data: { tool_name: "browser_run_task", arguments: { task: "打开 example.com 提取标题" } },
       },
     });
-    expect(text).toBe("读取文件：report.txt");
+    expect(text).toBe("浏览器任务：打开 example.com 提取标题");
+  });
+
+  it("shows browser_task_status summary from result JSON", () => {
+    const text = toolStepUserSummary({
+      callEntry: {
+        kind: "tool_call",
+        data: { tool_name: "browser_task_status", arguments: { task_id: "btask-1" } },
+      },
+      resultEntry: {
+        kind: "tool_result",
+        data: {
+          tool_name: "browser_task_status",
+          content: JSON.stringify({
+            ok: true,
+            detail: { status: "completed", summary: "标题是 Example Domain", success: true },
+          }),
+        },
+      },
+    });
+    expect(text).toBe("查询浏览器任务：标题是 Example Domain");
   });
 });
 

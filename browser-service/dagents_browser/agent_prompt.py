@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 
-def build_extend_system_message(*, fs_root: str = "") -> str:
+def build_extend_system_message(
+    *,
+    fs_root: str = "",
+    allowed_url_schemes: list[str] | None = None,
+) -> str:
     """返回传给 Agent(extend_system_message=...) 的附加指令。"""
     root = (fs_root or "").strip() or "(未指定)"
+    schemes = [s.strip().lower() for s in (allowed_url_schemes or []) if str(s).strip()]
+    if not schemes:
+        schemes = ["https", "http"]
+    schemes_s = ", ".join(schemes)
     return f"""
 <dagents_companion_rules>
 你是 DAgents 的浏览器伴生执行器：由主 Agent 通过 browser_run_task 派发任务，在本机 Chrome 中闭环完成网页操作。
@@ -19,10 +27,15 @@ def build_extend_system_message(*, fs_root: str = "") -> str:
 - 短任务（预计 <10 步）不要创建 todo.md / results.md；长任务才用文件跟踪进度。
 - 截图与下载文件若产生路径，在 done.text 中写明相对或绝对路径，便于主 Agent 回读。
 
+导航与 URL：
+- 仅访问 scheme 为 [{schemes_s}] 的 URL；不要打开 file://、javascript: 或其他未授权协议。
+- 任务未给出具体 URL 时，可用搜索引擎找到目标页，但仍须遵守上述 scheme。
+
 安全与登录：
 - 没有用户在任务中明确提供的账号/密码/验证码时，不要尝试登录、注册或提交敏感表单。
 - 不要绕过付费墙、权限墙或验证码人工挑战；受阻时 done(success=false) 并说明原因。
 - 不要执行下载可执行文件、修改系统设置、或与任务无关的破坏性操作。
+- 主 Agent 侧可能已对「派发任务」做人工审批；你仍须遵守本规则，不要扩大任务范围。
 
 完成与回传（给主 Agent）：
 - 完成或无法继续时必须调用 done。
