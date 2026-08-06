@@ -83,7 +83,6 @@ HTTP：`GET /v1/workgroups/meta/member-tools`（Node 本地提供，**不依赖*
 ## 8. 明确不做（预览）
 
 - 成员侧 browser / skills / triggers / wecom / 临时子 Agent
-- Placement / 屏幕旁观
 - 把成员当作本地 Agent 列表项去「打开对话」
 
 更多产品决策见工作组设计正文 §0–§13。
