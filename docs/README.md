@@ -19,7 +19,6 @@
 | 工具 / policy | [handbook/04-能力与策略](./handbook/04-能力与策略.md) · [附录/内置工具](./handbook/附录/内置工具参考.md) |
 | Manage | [handbook/05-Manage与A2A](./handbook/05-Manage与A2A.md) · [manage/README.md](../manage/README.md) |
 | 打包 / 案例 | [handbook/06-运维与案例](./handbook/06-运维与案例.md) |
-| 历史 / 过期文 | [archive/README.md](./archive/README.md) |
 
 ---
 
@@ -30,7 +29,7 @@
 | [handbook/](./handbook/) | **现行正文** |
 | [architecture/](./architecture/) | Node 内部与 API 契约深文 |
 | [design/](./design/) | 设计规范、验收清单、专题分析 |
-| [archive/](./archive/) | 归档策略；superseded 索引 |
+| [archive/](./archive/) | 过期文归档（非现行阅读路径） |
 | [future/](./future/) | 未落地远期方案（非承诺） |
 | [roadmap.md](./roadmap.md) | 产品路线图 |
 | [cases/](./cases/) | 案例索引 |

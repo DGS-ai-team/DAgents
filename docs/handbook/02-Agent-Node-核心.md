@@ -244,7 +244,7 @@ consumeLoop 再次出队
 Enqueue(Envelope, Priority)  ──►  优先级排序  ──►  Dequeue(ctx)  ──►  consumeLoop
 ```
 
-- **无内嵌 consumer**（与旧 Python 约定一致）：队列只负责存与取；**谁消费** 是 runtime 的 `consumeLoop`。  
+- **无内嵌 consumer**：队列只负责存与取；**谁消费** 是 runtime 的 `consumeLoop`。  
 - **FIFO 同优先级**；`seq` 单调递增。  
 - `Dequeue` 阻塞直到有项或 ctx 取消。
 
@@ -282,9 +282,9 @@ tool_result > human > resume > async_completion > other
 **设计意图**（与 `node/internal/queue/queue.go` → `priorityValue` 一致）：
 
 1. **`tool_result` 最高**：同步工具批闭合后尽快续跑，避免 `assistant(tool_calls)` 长期缺 `tool`。
-2. **`human` 高于 `resume`**：排队中的新 user message 可先出队；`handleHumanMessage` 会 `InterruptPending`，未消费的 stale `resume` 在 `pending==nil` 时被忽略（对齐旧 Python 语义）。
+2. **`human` 高于 `resume`**：排队中的新 user message 可先出队；`handleHumanMessage` 会 `InterruptPending`，未消费的 stale `resume` 在 `pending==nil` 时被忽略。
 3. **`resume` 高于 `async_completion` / `other`**：HITL 提交优先于后台 job 回灌与 trigger。
-4. **`async_completion` 低于 human/resume**：Go 有意与旧 Python「async 升格为 `tool_result`」区分，审批等待期优先处理用户交互；与 open batch 交错时的风险见 [Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32) 与 [`turn-side-effects-refactor.md`](../design/turn-side-effects-refactor.md)。
+4. **`async_completion` 低于 human/resume**：审批等待期优先处理用户交互；与 open batch 交错时的风险见 [Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32) 与 [`turn-side-effects-refactor.md`](../design/turn-side-effects-refactor.md)。
 5. **`other` 最低**：trigger 不抢 human / resume / tool 闭环。
 
 ### 3.5 `consumeLoop` 分流
@@ -436,19 +436,18 @@ newRuntimeWithPublisher
 
 | 步骤 | 对象 | 与 session 关系 |
 |------|------|-----------------|
-| `stream.NewHub()` | SSE 总线 | 所有 session 共用，按 id 区分 |
-| `store.OpenSQLite` | 持久化 | 按 `session_id` 存 messages |
-| `session.NewManager(...)` | 会话表 | 创建 §4 中 runtime |
-| `manage.NewInboxPoller` | A2A | 向 **inbox 专用 session** 入队 |
+| `stream.NewHub()` | SSE 总线 | 所有 Agent 共用，按 id 区分 |
+| `store.OpenSQLite` | 持久化 | 按 Agent 存 messages |
+| `session.NewManager(...)` | Agent 运行时表 | 创建 §4 中 runtime |
 
-完整装配表见旧版 §1.2；路由：`api/server.go` → `registerRoutes`。
+路由：`api/server.go` → `registerRoutes`。
 
-### 4.6 SSE Hub 与 session_id
+### 4.6 SSE Hub 与 agent 维度
 
 **文件**：`stream/hub.go`
 
 - Manager 级 **单例** Hub；Orchestrator 经 `stream.Publisher` 发布。  
-- 每条事件带 **`session_id`**，Client 只展示当前 session。  
+- 每条事件带 Agent 维度 id，Web UI 只展示当前 Agent。  
 - `Subscribe(afterSeq)`：断点续传。
 
 ### 4.7 源码索引（§4）

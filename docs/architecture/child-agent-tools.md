@@ -241,7 +241,7 @@ creating → active → completed | failed | cancelled | expired
 
 ### 9.3 Client 适配（后续 PR）
 
-Go/Python Client 在父 session SSE 上识别上述事件，在 TUI 展示「子任务已创建 / 已完成 / 已取消」。Phase 1 可先打 `[system]` 行。
+Go/Web UI 在父 Agent SSE 上识别上述事件，展示「子任务已创建 / 已完成 / 已取消」。
 
 ---
 
@@ -249,7 +249,7 @@ Go/Python Client 在父 session SSE 上识别上述事件，在 TUI 展示「子
 
 子 Agent **无**独立 SSE 连接；用户通过**父 Agent** 订阅流，并通过以下 API 管理。
 
-前缀：`/v1/agents/{parent_agent_id}/child-agents`（旧 `/v1/sessions/.../child-agents` 已移除）。
+前缀：`/v1/agents/{parent_agent_id}/child-agents`。
 
 `parent_agent_id` 须为普通用户 Agent（非 `child-*`）。
 
@@ -417,7 +417,7 @@ child_agents:
 |------|------|
 | `hitl_scope` | `"temporary_agent"` 表示临时 Agent 工具审批；省略或 `"parent"` 表示父 Agent 自身 turn |
 | `child_agent_id` | 子 session，resume 路由用 |
-| `child_purpose` | 创建时的 purpose，供 TUI 展示上下文 |
+| `child_purpose` | 创建时的 purpose，供 UI 展示上下文 |
 
 **可选**辅助事件 `child_agent_awaiting_approval`（仅 UI 提示「某子任务等待审批」）；**不替代** `approval_required` 作为 resume 触发源。
 
@@ -474,7 +474,7 @@ Client（Go full / Python Textual）在收到带 `child_agent_id` 的 `approval_
 父 Agent 可继续对话；同时一个或多个子 Agent 各自 pending 审批：
 
 - 每个 `approval_required` 带不同 `child_agent_id`；
-- 用户按事件顺序或 TUI 列表逐条审批；
+- 用户按事件顺序或 UI 列表逐条审批；
 - 同一子 Agent 一批 tool call 仍合并为**一条** `approval_required`（与父 turn 多工具审批一致）。
 
 **场景 C — 父与子同时 pending（少见）**

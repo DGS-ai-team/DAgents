@@ -1,7 +1,7 @@
 # 架构总览
 
 > **项目手册** → [../handbook/01-愿景与架构.md](../handbook/01-愿景与架构.md)  
-> **Agent 实例模型** → [../design/agent-instance-model.md](../design/agent-instance-model.md)（文首含 v0.9.1 勘误）  
+> **Agent 实例模型** → [../design/agent-instance-model.md](../design/agent-instance-model.md)  
 > **工作组** → [../handbook/07-Workgroup协作.md](../handbook/07-Workgroup协作.md)
 
 DAgents 本地运行时为 **Go Agent Node**（`node/`）+ 内嵌 **Web UI**（`/ui/`）。可选 **Manage**（Registry + **Workgroup** + Console）。
@@ -33,8 +33,8 @@ DAgents 本地运行时为 **Go Agent Node**（`node/`）+ 内嵌 **Web UI**（`
 | **控制面** | `manage/`（Registry · Workgroup · Console） |
 | **配置** | `config.yaml`（引导）+ SQLite + Agent 模板 |
 | **持久化** | `agents.db` + `.runtime/` |
-| **沙箱** | **已移除** |
-| **Placement** | **已拆除** |
+| **工具边界** | 工具组 + 审批策略 + `fs_root` / 成员工作区 |
+| **跨机协作** | Manage Workgroup |
 
 ## 文档索引
 
