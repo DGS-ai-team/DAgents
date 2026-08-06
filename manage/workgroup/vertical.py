@@ -341,7 +341,7 @@ class VerticalLoop:
         tool_call_id: str,
         path: str = "README",
     ) -> dict[str, Any]:
-        """兼容：为已有 Assign 下发 read_file tool.command。"""
+        """测试/兼容：为已有 Assign 下发 read_file tool.command（无产品 HTTP）。"""
         return self.dispatch_tool_command_for_assign(
             workgroup_id,
             assign_id=assign_id,
@@ -359,7 +359,7 @@ class VerticalLoop:
         instruction: str,
         path: str = "README",
     ) -> dict[str, Any]:
-        """测试辅助：创建 Assign → 下发 read_file command（不经 Member LLM）。"""
+        """测试辅助：创建 Assign → 下发 read_file command（不经 Member LLM；无产品 HTTP）。"""
         assign = self.store.create_assign(
             workgroup_id,
             AssignCreateRequest(member_id=member_id, instruction=instruction),

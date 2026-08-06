@@ -57,6 +57,7 @@ func NewWorkspaceToolExecutor(bindings BindingStore) CommandExecutor {
 		}
 		switch name {
 		case "read_file":
+			// 工作区 read_file：整文件 {path,content}；与 Agent Registry 行窗口版 schema/返回值不同，勿混用。
 			return execReadFile(ctx, binding.WorkspacePath, cmd.ArgumentsJSON)
 		default:
 			return execViaRegistry(ctx, binding.WorkspacePath, name, cmd.ArgumentsJSON)

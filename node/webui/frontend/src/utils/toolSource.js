@@ -16,8 +16,6 @@ const FS_TOOLS = new Set([
   "search_replace",
   "show_image",
   "read_image",
-  "list_dir",
-  "delete_file",
 ]);
 
 const SHELL_TOOLS = new Set(["bash_run", "bash", "background_job_status", "background_job_cancel"]);

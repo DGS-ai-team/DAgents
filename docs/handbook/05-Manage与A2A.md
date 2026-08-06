@@ -60,7 +60,7 @@ Node 在 `manage.enabled` 时向 Manage Registry 登记：
 | Supervisor 编排 | `assign_workgroup_task` |
 | `@member` 直达 | 跳过编排 |
 | HITL / 取消 | 信息型询问；turn cancel + `tool.cancel` |
-| 工具目录 | `GET /v1/workgroups/meta/member-tools`（默认仅 fs） |
+| 工具目录 | `GET /v1/workgroups/meta/member-tools`（同源 `shared/workgroup/member_tool_catalog.json`；默认仅 fs） |
 
 契约与 fixtures：`docs/design/workgroup-d05-contracts.md`。  
 预览验收：`docs/design/v0.9.1-smoke-checklist.md`。

@@ -2,10 +2,16 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 
+// catalog 失败时的离线兜底：与 shared catalog default=true（仅 fs）对齐；不含 bash。
 const FALLBACK_TOOLS = [
   { id: "read_file", label: "读文件", hint: "read_file" },
-  { id: "glob_files", label: "列目录", hint: "glob_files" },
+  { id: "show_image", label: "展示图片", hint: "show_image" },
+  { id: "read_image", label: "读图片", hint: "read_image（需多模态）" },
   { id: "write_file", label: "写文件", hint: "write_file" },
+  { id: "glob_files", label: "列目录", hint: "glob_files" },
+  { id: "grep_file", label: "单文件搜索", hint: "grep_file" },
+  { id: "grep_files", label: "多文件搜索", hint: "grep_files" },
+  { id: "search_replace", label: "替换内容", hint: "search_replace" },
 ];
 
 const props = defineProps({

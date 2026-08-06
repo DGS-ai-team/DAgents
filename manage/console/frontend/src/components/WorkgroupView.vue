@@ -50,9 +50,21 @@ const authKind = ref(""); // admin | node | ""
 const authGroups = ref([]);
 const collabDraft = ref("");
 
+/** catalog 失败时的离线兜底：与 shared catalog default=true（仅 fs）对齐；不含 bash。 */
+const FALLBACK_MEMBER_TOOLS = [
+  { id: "read_file", label: "读文件", hint: "read_file", group: "fs" },
+  { id: "show_image", label: "展示图片", hint: "show_image", group: "fs" },
+  { id: "read_image", label: "读图片", hint: "read_image（需多模态）", group: "fs" },
+  { id: "write_file", label: "写文件", hint: "write_file", group: "fs" },
+  { id: "glob_files", label: "列目录", hint: "glob_files", group: "fs" },
+  { id: "grep_file", label: "单文件搜索", hint: "grep_file", group: "fs" },
+  { id: "grep_files", label: "多文件搜索", hint: "grep_files", group: "fs" },
+  { id: "search_replace", label: "替换内容", hint: "search_replace", group: "fs" },
+];
+
 /** @type {import('vue').Ref<Array<{id:string,label:string,hint?:string,group?:string}>>} */
-const memberToolChoices = ref([]);
-const memberToolDefaults = ref(["read_file", "glob_files", "write_file"]);
+const memberToolChoices = ref([...FALLBACK_MEMBER_TOOLS]);
+const memberToolDefaults = ref(FALLBACK_MEMBER_TOOLS.map((t) => t.id));
 
 const createForm = reactive({
   displayName: "",
@@ -63,7 +75,7 @@ const memberForm = reactive({
   homeNodeId: "",
   soulMd: "",
   customMd: "",
-  tools: ["read_file", "glob_files", "write_file"],
+  tools: FALLBACK_MEMBER_TOOLS.map((t) => t.id),
 });
 
 const isNodeSession = computed(() => authKind.value === "node");
@@ -238,17 +250,14 @@ async function loadMemberToolCatalog() {
       : memberToolChoices.value.filter((t) => t).map((t) => t.id);
     memberToolDefaults.value = defaults.length
       ? defaults
-      : ["read_file", "glob_files", "write_file"];
+      : FALLBACK_MEMBER_TOOLS.map((t) => t.id);
     if (!memberFormOpen.value) {
       memberForm.tools = [...memberToolDefaults.value];
     }
   } catch {
     if (!memberToolChoices.value.length) {
-      memberToolChoices.value = [
-        { id: "read_file", label: "读文件", hint: "read_file", group: "fs" },
-        { id: "glob_files", label: "列目录", hint: "glob_files", group: "fs" },
-        { id: "write_file", label: "写文件", hint: "write_file", group: "fs" },
-      ];
+      memberToolChoices.value = [...FALLBACK_MEMBER_TOOLS];
+      memberToolDefaults.value = FALLBACK_MEMBER_TOOLS.map((t) => t.id);
     }
   }
 }

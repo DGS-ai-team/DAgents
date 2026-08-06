@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 import json
 
 from manage.llm.models import LLMConfigMasked
@@ -48,12 +48,6 @@ from manage.workgroup.store import WorkGroupStore
 from manage.workgroup.turn_kernel import TurnKernel
 from manage.workgroup.vertical import VerticalLoop
 from manage.workgroup.ws_hub import WorkgroupWSHub
-
-
-class DispatchReadFileRequest(BaseModel):
-    member_id: str
-    instruction: str = Field(min_length=1)
-    path: str = "README"
 
 
 class ReconcileMissingJournalRequest(BaseModel):
@@ -125,7 +119,7 @@ def build_workgroup_router(
 
     @router.get("/meta/member-tools", response_model=dict)
     def get_member_tool_catalog(request: Request) -> dict:
-        """Member 可勾选/可执行工具权威目录（Manage 为 source of truth）。"""
+        """Member 可勾选/可执行工具目录（与 shared/workgroup/member_tool_catalog.json 同源）。"""
         authenticate(request)
         from manage.workgroup.member_tools import member_tool_catalog
 
@@ -590,28 +584,6 @@ def build_workgroup_router(
         audit.record(
             actor=audit_actor(request, auth),
             action="workgroup.provision.complete",
-            target_agent_id=req.member_id,
-        )
-        return result
-
-    @router.post("/{workgroup_id}/vertical/dispatch-read-file")
-    def dispatch_read_file(
-        workgroup_id: str, req: DispatchReadFileRequest, request: Request
-    ) -> dict:
-        """D3 测试/骨架入口：assign + 下发 read_file outbox（无 bridge 时仅入队）。"""
-        auth = authenticate(request)
-        try:
-            result = loop.assign_and_dispatch_read_file(
-                workgroup_id,
-                member_id=req.member_id,
-                instruction=req.instruction,
-                path=req.path,
-            )
-        except WorkgroupError as exc:
-            raise _http_error(exc) from exc
-        audit.record(
-            actor=audit_actor(request, auth),
-            action="workgroup.vertical.dispatch_read_file",
             target_agent_id=req.member_id,
         )
         return result

@@ -11,7 +11,7 @@
 ### 新增
 
 - **工作组（Workgroup）纵向闭环（预览）**：Manage Leader turn + Node Worker；成员 provision / tool.command / journal；Supervisor `assign_workgroup_task`；`@member` 直达；信息型 HITL；取消 turn（含 `tool.cancel`）；Timeline 流式与任务卡片；RunHistory 调试 API / UI。
-- **成员工作区工具目录**：Manage `GET /v1/workgroups/meta/member-tools` 为权威源；可执行集为 **fs + bash**；**默认白名单仅 fs**（bash 需显式勾选，无额外沙箱）。Console / Node WebUI 从 catalog 勾选。
+- **成员工作区工具目录**：权威源为仓库 `shared/workgroup/member_tool_catalog.json`（Node `go:embed`；Manage/Console 读同一文件）。HTTP `GET /v1/workgroups/meta/member-tools` 由 Node 本地提供（**不依赖** Manage 连接）。可执行集为 **fs + bash**；**默认白名单仅 fs**（bash 需显式勾选，无额外沙箱）。
 - **浏览器伴生 Agent**：创建主 Agent 且 `enabled_groups` 含 `browser` 时自动创建持久伴生（`{agent_id}-browser`）；主 Agent 仅暴露 `browser_run_task` / `browser_task_status` / `browser_task_cancel`，由 sidecar `browser_use.Agent` 闭环执行；Chrome `session_key` 为伴生 id，独立 profile/debug port，同伴生任务排队。细粒度 `browser_*` 迁入内部组 `browser_ops`。列表隐藏伴生，删除主 Agent 级联归档伴生。默认 `browser.max_sessions` 提升为 8。sidecar 对 Agent 追加 DAgents `extend_system_message`（中文/安全/回传约定）；`browser_task_status` 扁平回灌 `summary` / `success` / `urls` / `screenshot_paths` 等字段。列表时为存量 Agent 补齐伴生；mock LLM 返回中文说明；Web UI 工具摘要展示任务目标与结论。`browser_run_task` 默认 wait=true 同步等待完成并返回 summary；派发前校验伴生记录存在。任务过程归档至 `tasks/<id>.md|json`，伴生提示词注入最近 3 次引用；主对话助手回复下展示可折叠「浏览器引用」。
 - **首次进入 Web UI 的 Node 身份首配页**：开箱未完成时全屏三步收集主题、「怎么称呼你 / Node 名称」与一条 LLM 配置，写入 `user.preferred_name` / `agent.name` / `llm.profiles` 与 `onboarding.node_profile_completed`；未完成前拦截本机业务 API（仅放行 bootstrap / setup / LLM 探测 / `/ui` 静态资源与探活），且不启动 Manage Registrar / Workgroup Dialer（升级遗留库视为已完成）。
 

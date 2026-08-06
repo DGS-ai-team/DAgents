@@ -305,7 +305,7 @@ export function listWorkgroups({ scope = "subscribed" } = {}) {
   return apiFetch("/v1/workgroups", { params: { scope } });
 }
 
-/** Manage 权威：成员可勾选工具目录 */
+/** 成员可勾选工具目录（Node 本地嵌入 shared catalog；不依赖 Manage） */
 export function getMemberToolCatalog() {
   return apiFetch("/v1/workgroups/meta/member-tools");
 }

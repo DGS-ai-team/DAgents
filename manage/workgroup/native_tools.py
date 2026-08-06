@@ -36,7 +36,7 @@ def leader_native_tools() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "list_workgroup_members",
-                "description": "List members with status, home node, and tool allowlist (read_file/glob_files/write_file when enabled; use this to answer capability questions; do not assign a fake probe task).",
+                "description": "List members with status, home node, and tool allowlist (workspace fs/bash tools when enabled; use this to answer capability questions; do not assign a fake probe task).",
                 "parameters": {
                     "type": "object",
                     "additionalProperties": False,

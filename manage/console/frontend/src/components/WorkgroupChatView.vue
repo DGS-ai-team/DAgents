@@ -331,7 +331,7 @@ function parseNoticeTool(text) {
 function toolKindLabel(toolName) {
   const n = String(toolName || "");
   if (
-    /^(read_file|write_file|glob_files|grep_files|list_dir|delete_file|show_image)/.test(n) ||
+    /^(read_file|write_file|glob_files|grep_file|grep_files|search_replace|show_image|read_image)/.test(n) ||
     n.includes("file")
   ) {
     return "fs";
