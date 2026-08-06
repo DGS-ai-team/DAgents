@@ -1,4 +1,6 @@
-# 操作系统与运行环境兼容清单
+# 操作系统与运行环境兼容清单（归档）
+
+> **已归档**。本文面向早期 **CPython / PyInstaller Agent** 交付；现行 Go Node + Manage 部署见手册 [06-运维与案例](../handbook/06-运维与案例.md) 与根 README。
 
 本文说明 **CPython 3.11** 在官方文档中的支持边界，以及 **DAgents** 以「源码运行」与「PyInstaller 单文件包」交付时的**实际**兼容差异。结论先行：
 

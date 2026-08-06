@@ -1,7 +1,7 @@
 # Release Hub：版本检查、安装包托管与 Client 升级
 
 > **状态**：**v0.5.1+ 已落地**（Manage Release Hub + Node `update_checker`）；Windows Shell 见 [windows-desktop-shell.md](./windows-desktop-shell.md) §10（**v0.6.0+**）。
-> **对齐**：[manage-phase2-capabilities.md](./manage-phase2-capabilities.md) §2、[three-component-model.md](./three-component-model.md)、[windows-desktop-shell.md](./windows-desktop-shell.md) §3.11（Windows Shell 更新路径）
+> **对齐**：[manage-phase2-capabilities.md](./manage-phase2-capabilities.md) §2、[windows-desktop-shell.md](./windows-desktop-shell.md) §3.11（Windows Shell 更新路径）
 
 ## 1. 目标
 

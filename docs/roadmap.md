@@ -67,7 +67,7 @@ DAgents 的主线不是成为通用可视化 AI 应用搭建平台，也不是�
 
 ### 3.4 触发器、子 Agent 与 Manage
 
-- **触发器（Go Node）**：**`interval` / `fire_at` / 日历 `schedule`**（含 **`cmd` 门控**）；**`trigger_*`** 工具 + 调度器（**`node/internal/triggers/`**；设计见 [triggers-design.md](./triggers-design.md)）；**v0.2.16** 起 TUI **`/triggers`** 与 trigger 会话目标审批。
+- **触发器（Go Node）**：**`interval` / `fire_at` / 日历 `schedule`**（含 **`cmd` 门控**）；**`trigger_*`** 工具 + 调度器（**`node/internal/triggers/`**；见该包 README）；Web UI / API 可管理规则。
 - **Hook 扩展点**：统一 turn 全链路阶段锚点与 `HookRegistry`；**已落地**于 `node/internal/hooks/`（见 [design/agent-hooks.md](./design/agent-hooks.md)）。
 - **临时子 Agent**：同进程 **`create_temporary_agent` → `wait_temporary_agents`**（[child-agent-tools.md](./architecture/child-agent-tools.md)）。
 - **Manage 统一控制面**：`manage/`（Registry、工作组、Console 等）。Go Node `manage.enabled` 时自动注册；旧 A2A inbox / `agent_invoke` 已拆除（[handbook/05-Manage与A2A.md](./handbook/05-Manage与A2A.md)）。

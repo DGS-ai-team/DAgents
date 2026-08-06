@@ -121,7 +121,7 @@ hooks:
 |------|------|
 | [tool-context-cost-analysis.md](./tool-context-cost-analysis.md) | 正交：管 history token，不管 HITL 次数 |
 | [tool-before-hook-duplicate-approval.md](./tool-before-hook-duplicate-approval.md) | 同 `tool.before_each` 链；duplicate 仅 `rule`+auto，且跳过写工具 |
-| [security-rollout.md](../../security-rollout.md) | 写盘与工具安全验收 |
+| [handbook/04-能力与策略.md](../handbook/04-能力与策略.md) | 写盘与工具策略 |
 
 ---
 

@@ -64,4 +64,4 @@
 
 - 根目录 **[README.md](README.md)**：配置与安全、**`SECURITY.md`** 引用  
 - **[docs/architecture/agent-node-api.md](docs/architecture/agent-node-api.md)**：Go Node HTTP / SSE 契约（部署时需结合网络与鉴权策略）
-- **[docs/prometheus-metrics.md](docs/prometheus-metrics.md)**：**`/metrics`** 与 Prometheus 落地说明
+- **[docs/handbook/附录/Prometheus观测.md](docs/handbook/附录/Prometheus观测.md)**：Manage **`/metrics`** 与 Prometheus 说明

@@ -205,7 +205,7 @@ manage:
 
 **discovery_group** 不由 Node 传入；在 Manage Console 详情抽屉或 API 分配：
 
-通信逻辑全量说明见 [docs/manage-communication.md](../docs/manage-communication.md)。
+通信与协作见 [handbook/05-Manage与A2A.md](../docs/handbook/05-Manage与A2A.md)、[handbook/07-Workgroup协作.md](../docs/handbook/07-Workgroup协作.md)。
 
 ```bash
 curl -X PATCH http://127.0.0.1:8020/v1/registry/agents/ops-linux-01/groups \

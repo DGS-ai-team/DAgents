@@ -632,7 +632,7 @@
 - **Manage 离线 bundle**：`scripts/ci/assemble_manage_bundle.sh` 产出 `dagents-manage-bundle-*.tar.gz`（镜像 + `import-image` / `restart` 脚本 + `docker-compose.offline.yml`）；Release CI 自动附加。
 - **安装 policy 交互**：Linux `install.sh`（`--overwrite-policy` / `--keep-policy` + TTY 询问）；Windows Inno Setup 安装时可选覆盖 `_seed/policy`。
 - **Agent Card 示例**：`packaging/agent-client/agent-card.example.json`；Node 工作目录固定 `./agent-card.json`（`manage.AgentCardFileName`）。
-- **文档**：[built-in-tools-reference.md](docs/built-in-tools-reference.md)（25 个内置工具全量参考）；[manage-communication.md](docs/manage-communication.md)（Manage / Node / Client 通信与数据面）。
+- **文档**：内置工具参考迁入 handbook 附录；Manage 通信叙述见 handbook/05（历史长文已归档）。
 
 ### 变更
 

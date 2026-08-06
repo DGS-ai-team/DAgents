@@ -384,7 +384,7 @@ TurnOrchestrator
 
 ## 6. 与 Manage 的出站调用（Node 作为客户端）
 
-见 [manage-architecture.md](../design/manage-architecture.md) 与 [manage-communication.md](../manage-communication.md)：
+见 [manage-architecture.md](../design/manage-architecture.md) 与 [handbook/05](../handbook/05-Manage与A2A.md)：
 
 - `POST /v1/registry/agents`、`POST /v1/registry/agents/{id}/heartbeat`
 - **Registry discover**（目录）：`GET /v1/registry/agents/discover`
