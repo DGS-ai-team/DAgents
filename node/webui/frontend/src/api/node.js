@@ -316,13 +316,6 @@ export function getWorkgroupACL(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/acl`);
 }
 
-export function addWorkgroupCollaborator(workgroupId, nodeId) {
-  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/collaborators`, {
-    method: "POST",
-    body: { node_id: nodeId },
-  });
-}
-
 export function subscribeWorkgroup(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/subscribe`, {
     method: "POST",
@@ -361,9 +354,23 @@ export function createWorkgroupMember(workgroupId, body) {
   });
 }
 
+export function patchWorkgroupMember(workgroupId, memberId, body) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}`,
+    { method: "PATCH", body },
+  );
+}
+
 export function getWorkgroupMemberSpec(workgroupId, memberId) {
   return apiFetch(
     `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/spec`,
+  );
+}
+
+export function archiveWorkgroupMember(workgroupId, memberId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/archive`,
+    { method: "POST", body: {} },
   );
 }
 

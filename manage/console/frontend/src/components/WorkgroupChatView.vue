@@ -8,6 +8,7 @@ import {
   fetchWorkgroupTimeline,
   postWorkgroupMessageStream,
 } from "../api.js";
+import { renderMarkdown } from "../utils/markdown.js";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -513,6 +514,11 @@ onMounted(async () => {
                   v-if="row.streaming"
                   class="assistant-msg__stream-plain"
                 >{{ row.text }}</pre>
+                <div
+                  v-else-if="row.role === 'assistant'"
+                  class="msg__md"
+                  v-html="renderMarkdown(row.text || '（空）')"
+                />
                 <div v-else class="msg__text">{{ row.text || "（空）" }}</div>
               </div>
             </div>

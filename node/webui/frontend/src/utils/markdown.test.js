@@ -45,4 +45,27 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<pre><code>| not | table |\n---</code></pre>");
     expect(html).not.toContain("<table>");
   });
+
+  it("renders unordered lists with inline formatting", () => {
+    const html = renderMarkdown("- **成员 ID**：`mb_abc`\n- 显示名称：reader");
+    expect(html).toContain("<ul>");
+    expect(html).toContain("<li><strong>成员 ID</strong>：<code>mb_abc</code></li>");
+    expect(html).toContain("<li>显示名称：reader</li>");
+  });
+
+  it("normalizes CRLF so headings and tables still render", () => {
+    const md = [
+      "Intro line.",
+      "",
+      "## Summary",
+      "",
+      "| Name | Value |",
+      "| --- | --- |",
+      "| foo | 1 |",
+    ].join("\r\n");
+    const html = renderMarkdown(md);
+    expect(html).toContain("<h2>Summary</h2>");
+    expect(html).toContain("<table>");
+    expect(html).toContain("<td>foo</td>");
+  });
 });

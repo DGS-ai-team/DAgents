@@ -34,6 +34,8 @@ class WorkgroupSubscribeTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, "not_authorized")
 
             store.patch_acl(wid, ACLPatchRequest(collaborators=["node-b"], expected_revision=1))
+            # 进 ACL 即自动订阅
+            self.assertTrue(store.is_subscribed(wid, "node-b"))
             sub = store.subscribe(wid, "node-b")
             self.assertEqual(sub.node_id, "node-b")
             self.assertEqual(len(store.list_subscribers(wid)), 2)
@@ -46,6 +48,30 @@ class WorkgroupSubscribeTests(unittest.TestCase):
             acl_list = store.list_workgroups(acl_member="node-b")
             self.assertEqual(len(acl_list), 1)
             self.assertEqual(acl_list[0].workgroup_id, wid)
+
+    def test_create_member_auto_subscribes_home(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="Demo", created_by_node_id="node-a")
+            )
+            wid = group.workgroup_id
+            store.patch_acl(wid, ACLPatchRequest(collaborators=["node-b"], expected_revision=1))
+            from manage.workgroup.models import MemberCreateRequest
+
+            member, _ = store.create_member(
+                wid,
+                MemberCreateRequest(
+                    home_node_id="node-b",
+                    display_name="reader",
+                    allow_tool_names=["read_file"],
+                ),
+            )
+            self.assertEqual(member.status, "provisioning")
+            self.assertTrue(store.is_subscribed(wid, "node-b"))
+            # 幂等修复
+            added = store.ensure_member_homes_subscribed(wid)
+            self.assertEqual(added, [])
 
     def test_list_excludes_archived_by_default(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

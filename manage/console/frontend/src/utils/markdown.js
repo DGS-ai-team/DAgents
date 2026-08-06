@@ -1,4 +1,4 @@
-/** 简易 Markdown（assistant 消息 / read_file 预览 / 工作组 Timeline） */
+/** 简易 Markdown（工作组对话 assistant 消息） */
 export function renderMarkdown(text) {
   const normalized = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const blocks = splitMarkdownBlocks(normalized);
@@ -189,10 +189,4 @@ function isUnorderedListItem(line) {
 
 function isOrderedListItem(line) {
   return /^\s*\d+[.)]\s+\S/.test(String(line || ""));
-}
-
-export function formatNumber(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v) || v < 0) return "—";
-  return v.toLocaleString("en-US");
 }

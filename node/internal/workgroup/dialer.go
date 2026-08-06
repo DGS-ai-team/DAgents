@@ -15,14 +15,12 @@ import (
 
 const (
 	agentIDHeader = "x-dagents-agent-id"
-	tokenHeader   = "x-dagents-a2a-token"
 )
 
 // Dialer 连接 Manage `/v1/workgroups/ws`，hello/resume 后分发业务帧。
 type Dialer struct {
 	ManageURL      string // http(s)://host:port
 	NodeID         string
-	Token          string
 	Worker         *Worker
 	WorkgroupID    string   // 兼容：单组；hello 后对该组 resume.offer
 	WorkgroupIDs   []string // 静态多组订阅
@@ -63,9 +61,6 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 	}
 	hdr := http.Header{}
 	hdr.Set(agentIDHeader, d.NodeID)
-	if tok := strings.TrimSpace(d.Token); tok != "" {
-		hdr.Set(tokenHeader, tok)
-	}
 	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: hdr})
 	if err != nil {
 		return fmt.Errorf("workgroup ws dial: %w", err)
@@ -103,6 +98,23 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 		return err
 	}
 
+	var writeMu sync.Mutex
+	go func() {
+		// 定期刷新订阅列表并 resume，避免「Manage 侧新建成员后 Node 已在线却不拉 pending」
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				writeMu.Lock()
+				_ = d.sendResumeOffers(ctx, conn)
+				writeMu.Unlock()
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -115,7 +127,10 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 		}
 		res, err := cs.HandleIncomingJSON(data)
 		if res != nil && res.AckEnvelope != nil {
-			if werr := wsjson.Write(ctx, conn, res.AckEnvelope); werr != nil {
+			writeMu.Lock()
+			werr := wsjson.Write(ctx, conn, res.AckEnvelope)
+			writeMu.Unlock()
+			if werr != nil {
 				return fmt.Errorf("write ack envelope: %w", werr)
 			}
 			if cerr := d.Worker.CommitPendingAck(res); cerr != nil {
@@ -127,14 +142,16 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 			continue
 		}
 		if err != nil {
-			// 非 fencing 业务错误：回 error 帧后继续（保持连接）
-			if werr := wsjson.Write(ctx, conn, map[string]any{
+			writeMu.Lock()
+			werr := wsjson.Write(ctx, conn, map[string]any{
 				"type": "session.error",
 				"payload": map[string]any{
 					"code":    string(CodeConflict),
 					"message": err.Error(),
 				},
-			}); werr != nil {
+			})
+			writeMu.Unlock()
+			if werr != nil {
 				return fmt.Errorf("write session.error: %w", werr)
 			}
 		}

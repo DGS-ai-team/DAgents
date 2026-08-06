@@ -22,12 +22,13 @@ from manage.workgroup.store import WorkGroupStore  # noqa: E402
 from manage.workgroup.turn_kernel import (  # noqa: E402
     TurnKernel,
     mock_leader_script_assign_then_answer,
+    mock_member_script_read_file_then_answer,
 )
 
 
 class LeaderLoopTests(unittest.TestCase):
     def test_supervisor_chat_without_tools_and_member(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
             group, _ = store.create_workgroup(
                 WorkGroupCreateRequest(
@@ -79,7 +80,7 @@ class LeaderLoopTests(unittest.TestCase):
         return group.workgroup_id, member.member_id
 
     def test_human_message_drives_assign_then_final(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
             wid, mid = self._ready_group(store)
             script = mock_leader_script_assign_then_answer(
@@ -116,7 +117,7 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertIn("\"status\": \"succeeded\"", tool.content or "")
 
     def test_human_message_events_stream_deltas(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
             group, _ = store.create_workgroup(
                 WorkGroupCreateRequest(
@@ -146,8 +147,66 @@ class LeaderLoopTests(unittest.TestCase):
             deltas = "".join(e["data"]["text"] for e in events if e["event"] == "delta")
             self.assertEqual(deltas, "你好世界，这是流式回复")
 
+    def test_member_llm_loop_read_file_then_final(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            import importlib.util
+
+            from manage.workgroup.llm_chat import MockLLMClient
+            from manage.workgroup.vertical import VerticalLoop
+
+            path = Path(__file__).resolve().parent / "test_manage_workgroup_vertical.py"
+            spec = importlib.util.spec_from_file_location("test_manage_workgroup_vertical", path)
+            assert spec and spec.loader
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            FakeNodeBridge = mod.FakeNodeBridge
+
+            bridge = FakeNodeBridge(Path(tmp) / "node", node_id="node-b")
+            loop = VerticalLoop(store, bridge=bridge, command_timeout_s=2.0)
+            loop.enqueue_provision(wid, mid)
+
+            leader_script = mock_leader_script_assign_then_answer(
+                member_id=mid,
+                instruction="读 README 并摘要",
+                final_text="组长已汇总",
+            )
+            member_script = mock_member_script_read_file_then_answer(
+                path="README",
+                final_text="标题是 Demo",
+            )
+            kernel = TurnKernel(
+                store,
+                chat_client=MockLLMClient(leader_script),
+                member_chat_client=MockLLMClient(member_script),
+            )
+            kernel.set_assign_completer(loop.make_assign_completer(kernel))
+            result = kernel.handle_human_message(
+                wid,
+                text="请成员读 README",
+                from_node_id="node-a",
+            )
+            self.assertEqual(result["loop"]["final_text"], "组长已汇总")
+            timeline = store.list_timeline(wid)
+            member_finals = [
+                e for e in timeline if e.type == "actor_final_text" and e.actor_id == mid
+            ]
+            self.assertEqual(len(member_finals), 1)
+            self.assertEqual(member_finals[0].text, "标题是 Demo")
+            self.assertEqual(sum(bridge.executions.values()), 1)
+
+            runs = [r for r in store._runs.values() if r.actor_id == mid]  # noqa: SLF001
+            self.assertEqual(len(runs), 1)
+            mhist = store.get_run_history(runs[0].run_id)
+            assert mhist is not None
+            roles = [m.role for m in mhist.messages]
+            self.assertIn("user", roles)
+            self.assertEqual(roles.count("tool"), 1)
+            self.assertGreaterEqual(roles.count("assistant"), 2)
+
     def test_single_active_assign_enforced(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
             wid, mid = self._ready_group(store)
             from manage.workgroup.models import AssignCreateRequest

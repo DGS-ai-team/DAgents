@@ -1,7 +1,8 @@
-"""Manage Turn Kernel：Leader LLM loop + Assign / Projector / HITL 门禁。"""
+"""Manage Turn Kernel：Leader / Member LLM loop + Assign / Projector / HITL 门禁。"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from manage.llm.store import LLMConfigStore
@@ -14,6 +15,7 @@ from manage.workgroup.history import (
     open_tool_call_ids,
 )
 from manage.workgroup.llm_chat import ChatResult, ChatToolCall, LLMChatClient, resolve_chat_client
+from manage.workgroup.member_tools import build_member_system_prompt, member_openai_tools
 from manage.workgroup.models import (
     ActorRun,
     ActorRunCreateRequest,
@@ -29,16 +31,26 @@ _DEFAULT_MAX_TOOL_LOOPS = 16
 _LEADER_SYSTEM = (
     "You are the Workgroup Leader (Supervisor). "
     "You only orchestrate via manage-native tools; you never execute shell/fs/browser yourself. "
-    "Use assign_workgroup_task to delegate work to a member. "
+    "Use list_workgroup_members to inspect member status and tool allowlists. "
+    "Use assign_workgroup_task to delegate real work to a ready member; "
+    "the member runs its own LLM loop and may call workspace tools "
+    "(read_file / glob_files / write_file) according to its allowlist. "
+    "Write a clear instruction; do not invent host absolute paths — "
+    "member sandboxes only allow workspace-relative paths "
+    "(error not_authorized means path/policy denial, not that you lack supervisor ACL). "
     "When the task is done, reply with a concise final answer for the group."
 )
+
+# (workgroup_id, assign_id, member_id, tool_name, tool_call_id, arguments_json) -> tool result content
+MemberToolRunner = Callable[[str, str, str, str, str, str], str]
 
 
 class TurnKernel:
     """Manage 侧 turn 编排。
 
-    D6：Leader LLM loop（Mock/真实 LLM）+ Manage-native 工具；
-    Assign 默认同步 scripted completer（Member LLM 后续接入）。
+    Leader LLM loop（Manage-native 工具）+ Member LLM loop（Node-executable 经 tool.command）。
+    Assign 默认同步 scripted completer；生产路径由 VerticalLoop.make_assign_completer
+    创建 Member ActorRun 并跑 run_member_until_idle。
     """
 
     def __init__(
@@ -47,6 +59,7 @@ class TurnKernel:
         *,
         llm_store: LLMConfigStore | None = None,
         chat_client: LLMChatClient | None = None,
+        member_chat_client: LLMChatClient | None = None,
         assign_completer: AssignCompleter | None = None,
         max_tool_loops: int = _DEFAULT_MAX_TOOL_LOOPS,
         mock_llm: bool = False,
@@ -54,11 +67,14 @@ class TurnKernel:
         self._store = store
         self._llm_store = llm_store
         self._chat_client = chat_client
+        self._member_chat_client = member_chat_client
         self._assign_completer = assign_completer
         self._max_tool_loops = max(1, max_tool_loops)
         self._mock_llm = mock_llm
         self._hitl_resolutions: dict[str, dict[str, Any]] = {}
 
+    def set_assign_completer(self, completer: AssignCompleter | None) -> None:
+        self._assign_completer = completer
     def start_leader_run(self, workgroup_id: str, *, llm_profile_revision: str | None = None) -> ActorRun:
         return self._store.create_actor_run(
             workgroup_id,
@@ -251,7 +267,7 @@ class TurnKernel:
                     details={"max_tool_loops": self._max_tool_loops},
                 )
 
-            assistant = self._assistant_message(result)
+            assistant = self._assistant_message(result, name="leader")
             wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=0)
             self._store.append_run_history(run_id, [assistant], timeline_watermark_seq=wm)
             run = self._store.get_actor_run(run_id) or run
@@ -324,8 +340,147 @@ class TurnKernel:
             self._store.append_run_history(run_id, tool_msgs, timeline_watermark_seq=wm)
             run = self._store.get_actor_run(run_id) or run
 
+    def run_member_until_idle(
+        self,
+        workgroup_id: str,
+        run_id: str,
+        *,
+        tool_runner: MemberToolRunner,
+    ) -> dict[str, Any]:
+        """跑 Member ActorRun 至无 tool_calls；工具经 tool_runner → Node tool.command。"""
+        run = self._store.get_actor_run(run_id)
+        if run is None or run.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "actor run not found", http_status=404)
+        member_id = (run.actor_id or "").strip()
+        if not member_id or member_id == "leader":
+            raise WorkgroupError("invalid_request", "run is not a member run")
+        if not run.assign_id:
+            raise WorkgroupError("invalid_request", "member run requires assign_id")
+        if run.status not in {"running", "awaiting_hitl"}:
+            return {"run": run, "steps": 0, "status": run.status, "final_text": ""}
+
+        member = self._store.get_member(member_id)
+        if member is None or member.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "member not found", http_status=404)
+        spec = self._store.get_spec(member_id)
+        if spec is None:
+            raise WorkgroupError("not_found", "member spec not found", http_status=404)
+
+        client = self._member_chat_client or resolve_chat_client(
+            self._llm_store,
+            profile_id=spec.llm_profile_id,
+            mock=self._mock_llm,
+        )
+        tools = member_openai_tools(list(spec.tools.allow_names or []))
+        allow = {str(n).strip() for n in (spec.tools.allow_names or []) if str(n).strip()}
+        system = build_member_system_prompt(
+            soul_md=spec.prompt.soul_md,
+            user_md=spec.prompt.user_md,
+            custom_md=spec.prompt.custom_md,
+        )
+        max_loops = max(1, int(spec.max_tool_loops or self._max_tool_loops))
+        steps = 0
+        tool_loops = 0
+
+        while True:
+            hist = self._store.ensure_run_history(run)
+            open_ids = open_tool_call_ids(hist.messages)
+            if open_ids:
+                raise WorkgroupError(
+                    "conflict",
+                    "open tool_calls must be paired before continuing",
+                    http_status=409,
+                    details={"open_tool_calls": open_ids},
+                )
+
+            projected = project_actor_context(
+                actor_id=member_id,
+                run=run,
+                member=member,
+                timeline_events=self._store.list_timeline(workgroup_id),
+                own_run_history=hist.messages,
+            )
+            messages = [{"role": "system", "content": system}] + list(projected["messages"])
+            result = client.chat(messages, tools=tools or None)
+            steps += 1
+            tool_loops += 1
+            if tool_loops > max_loops:
+                run = self._store.update_actor_run(run_id, status="failed")
+                raise WorkgroupError(
+                    "conflict",
+                    "member max_tool_loops exceeded",
+                    http_status=409,
+                    details={"max_tool_loops": max_loops},
+                )
+
+            assistant = self._assistant_message(result, name=member_id)
+            wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=0)
+            self._store.append_run_history(run_id, [assistant], timeline_watermark_seq=wm)
+            run = self._store.get_actor_run(run_id) or run
+
+            if not result.tool_calls:
+                final_text = (result.content or "").strip() or "(empty)"
+                self._store.append_timeline(
+                    workgroup_id,
+                    type="actor_final_text",
+                    actor_id=member_id,
+                    text=final_text,
+                    protocol_name=protocol_name_for_actor(member_id),
+                    assign_id=run.assign_id,
+                )
+                run = self._store.update_actor_run(run_id, status="succeeded", timeline_watermark_seq=wm)
+                return {
+                    "run": run,
+                    "steps": steps,
+                    "status": "succeeded",
+                    "final_text": final_text,
+                }
+
+            if not tools:
+                raise WorkgroupError(
+                    "invalid_request",
+                    "member has no tools but model returned tool_calls",
+                    http_status=409,
+                )
+
+            tool_msgs: list[RunHistoryMessage] = []
+            for tc in result.tool_calls:
+                name = (tc.name or "").strip()
+                if name not in allow:
+                    content = f"ERROR: tool {name!r} is not in member allowlist"
+                else:
+                    content = tool_runner(
+                        workgroup_id,
+                        run.assign_id or "",
+                        member_id,
+                        name,
+                        tc.id,
+                        tc.arguments or "{}",
+                    )
+                tool_msgs.append(
+                    RunHistoryMessage(
+                        role="tool",
+                        tool_call_id=tc.id,
+                        name=name,
+                        content=content,
+                    )
+                )
+            ok, wait = can_invoke_llm_after_tools(
+                [{"id": tc.id, "name": tc.name} for tc in result.tool_calls],
+                [{"tool_call_id": m.tool_call_id} for m in tool_msgs],
+            )
+            if not ok:
+                raise WorkgroupError(
+                    "conflict",
+                    "parallel tool_calls incompletely paired",
+                    details={"wait_for": wait},
+                )
+            wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=wm)
+            self._store.append_run_history(run_id, tool_msgs, timeline_watermark_seq=wm)
+            run = self._store.get_actor_run(run_id) or run
+
     @staticmethod
-    def _assistant_message(result: ChatResult) -> RunHistoryMessage:
+    def _assistant_message(result: ChatResult, *, name: str = "leader") -> RunHistoryMessage:
         tool_calls = None
         if result.tool_calls:
             tool_calls = [
@@ -337,7 +492,7 @@ class TurnKernel:
             ]
         return RunHistoryMessage(
             role="assistant",
-            name="leader",
+            name=name,
             content=result.content or ("" if tool_calls else ""),
             tool_calls=tool_calls,
         )
@@ -360,6 +515,31 @@ def mock_leader_script_assign_then_answer(
                 ChatToolCall(
                     id="call_as1",
                     name="assign_workgroup_task",
+                    arguments=args,
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        ChatResult(content=final_text, finish_reason="stop"),
+    ]
+
+
+def mock_member_script_read_file_then_answer(
+    *,
+    path: str = "README",
+    final_text: str = "已读完",
+) -> list[ChatResult]:
+    """测试用：Member 先 read_file，再终态文本。"""
+    import json
+
+    args = json.dumps({"path": path}, ensure_ascii=False)
+    return [
+        ChatResult(
+            content="",
+            tool_calls=[
+                ChatToolCall(
+                    id="call_rf1",
+                    name="read_file",
                     arguments=args,
                 )
             ],

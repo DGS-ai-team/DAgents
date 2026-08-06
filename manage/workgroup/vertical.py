@@ -1,11 +1,14 @@
 """D3 纵向编排：human → assign → tool.command outbox → result → Timeline。
 
-真实 Node WS 拨号仍可延后；通过可注入的 NodeBridge 完成闭环。
+真实 Node 经 WS Dialer 回传；测试可注入 NodeBridge 同步闭环。
 """
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+import json
+import re
+import threading
+from typing import TYPE_CHECKING, Any, Protocol
 
 from manage.workgroup import ids
 from manage.workgroup.d3_models import (
@@ -21,14 +24,80 @@ from manage.workgroup.d3_models import (
 )
 from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
-from manage.workgroup.models import Assign, AssignCreateRequest
-from manage.workgroup.store import WorkGroupStore, _now
+from manage.workgroup.history import RunHistoryMessage
+from manage.workgroup.member_tools import side_effect_for_tool
+from manage.workgroup.models import ActorRunCreateRequest, AssignCreateRequest
+from manage.workgroup.store import WorkGroupStore
+
+if TYPE_CHECKING:
+    from manage.workgroup.turn_kernel import TurnKernel
+
+_DEFAULT_COMMAND_TIMEOUT_S = 60.0
+_READ_FILE_TOOL = "read_file"
 
 
 class NodeBridge(Protocol):
     def provision(self, payload: dict[str, Any]) -> dict[str, Any]: ...
     def execute_command(self, payload: dict[str, Any]) -> dict[str, Any]: ...
     def apply_tombstone(self, payload: dict[str, Any]) -> None: ...
+
+
+def path_from_instruction(instruction: str, *, default: str = "README") -> str:
+    """从 assign instruction 里启发式抽出 read_file 路径。"""
+    text = (instruction or "").strip()
+    if not text:
+        return default
+    quoted = re.search(r"[\"'`]([^\"'`]+)[\"'`]", text)
+    if quoted:
+        candidate = quoted.group(1).strip()
+        if candidate:
+            return candidate
+    token = re.search(
+        r"(?:^|\s)((?:[\w./\\-]+/)*README(?:\.\w+)?|[\w./\\-]+\.\w{1,8})(?:\s|$|[，。,.])",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if token:
+        return token.group(1)
+    return default
+
+
+def validate_member_workspace_path(path: str, *, tool_name: str = "read_file") -> str:
+    """校验成员工作区相对路径：禁止绝对主机路径与 '..'。"""
+    rel = (path or "").strip()
+    if not rel:
+        raise WorkgroupError("schema_mismatch", f"{tool_name} path required", http_status=400)
+    normalized = rel.replace("\\", "/")
+    parts = [p for p in normalized.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        raise WorkgroupError(
+            "not_authorized",
+            f"{tool_name} path must stay inside the member workspace (no '..')",
+            http_status=403,
+            details={"path": rel},
+        )
+    if re.match(r"^[A-Za-z]:/", normalized) or normalized.startswith("//"):
+        raise WorkgroupError(
+            "not_authorized",
+            f"member {tool_name} cannot open host absolute paths; "
+            "use a path relative to the member workspace (e.g. README)",
+            http_status=403,
+            details={"path": rel},
+        )
+    if normalized.startswith("/"):
+        raise WorkgroupError(
+            "not_authorized",
+            f"member {tool_name} cannot open absolute paths; "
+            "use a path relative to the member workspace (e.g. README)",
+            http_status=403,
+            details={"path": rel},
+        )
+    return rel
+
+
+def validate_member_read_path(path: str) -> str:
+    """兼容旧名：校验 read_file 相对路径。"""
+    return validate_member_workspace_path(path, tool_name="read_file")
 
 
 class VerticalLoop:
@@ -39,10 +108,16 @@ class VerticalLoop:
         store: WorkGroupStore,
         bridge: NodeBridge | None = None,
         hub: Any | None = None,
+        *,
+        command_timeout_s: float = _DEFAULT_COMMAND_TIMEOUT_S,
     ) -> None:
         self.store = store
         self.bridge = bridge
         self.hub = hub  # WorkgroupWSHub；有连接时优先推送 outbox
+        self.command_timeout_s = max(0.1, float(command_timeout_s))
+        self._lock = threading.Lock()
+        self._command_waiters: dict[str, threading.Event] = {}
+        self._command_results: dict[str, dict[str, Any]] = {}
 
     # --- Timeline / Outbox / HITL 委托 store ---
 
@@ -75,6 +150,8 @@ class VerticalLoop:
         )
         if self.hub is not None:
             self.hub.deliver_outbox_frame(frame, home_node_id=ctx["home_node_id"])
+            # 已连接的 Home 可能尚未对本组 resume：补发 gap-fill 拉 pending
+            self.hub.request_resume(ctx["home_node_id"], workgroup_id)
         if self.bridge is not None:
             result = self.bridge.provision(frame.payload)
             self.complete_provision(
@@ -101,37 +178,82 @@ class VerticalLoop:
         )
         return {"member": member, "provision_id": req.provision_id}
 
-    def assign_and_dispatch_read_file(
+    def dispatch_tool_command_for_assign(
         self,
         workgroup_id: str,
         *,
+        assign_id: str,
         member_id: str,
-        instruction: str,
-        path: str = "README",
+        tool_call_id: str,
+        tool_name: str,
+        arguments: dict[str, Any] | None = None,
+        arguments_json: str | None = None,
     ) -> dict[str, Any]:
-        """脚本化 Member 循环：创建 Assign → 下发 read_file command →（可选）经 bridge 执行。"""
-        assign = self.store.create_assign(
-            workgroup_id,
-            AssignCreateRequest(member_id=member_id, instruction=instruction),
-        )
+        """为已有 Assign 下发通用 tool.command；有 bridge 时同步执行。"""
+        tool_name = (tool_name or "").strip()
+        if not tool_name:
+            raise WorkgroupError("schema_mismatch", "tool_name required", http_status=400)
+
+        assign = self.store.get_assign(assign_id)
+        if assign is None or assign.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "assign not found", http_status=404)
         member = self.store.get_member(member_id)
-        if member is None or member.status != "ready":
+        if member is None or member.workgroup_id != workgroup_id:
+            raise WorkgroupError("not_found", "member not found", http_status=404)
+        if member.status != "ready":
             raise WorkgroupError("conflict", "member not ready", http_status=409)
         ctx = self.store.member_execution_context(member_id)
+        allow = {str(n) for n in (ctx.get("tool_allow_names") or [])}
+        if tool_name not in allow:
+            raise WorkgroupError(
+                "conflict",
+                f"member allowlist has no {tool_name}",
+                http_status=409,
+            )
+
+        if arguments_json is None:
+            args = dict(arguments or {})
+            if tool_name in {"read_file", "write_file"} and "path" in args:
+                args["path"] = validate_member_workspace_path(
+                    str(args.get("path") or ""),
+                    tool_name=tool_name,
+                )
+            if tool_name == "glob_files" and "directory" in args:
+                directory = str(args.get("directory") or "").strip() or "."
+                if directory not in {".", "./"}:
+                    validate_member_workspace_path(directory, tool_name=tool_name)
+                args["directory"] = directory
+            arguments_json = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+        else:
+            # 仍校验 path 类参数（Member LLM 传入）
+            try:
+                parsed = json.loads(arguments_json or "{}")
+            except json.JSONDecodeError as exc:
+                raise WorkgroupError("invalid_json", f"arguments_json: {exc}", http_status=400) from exc
+            if not isinstance(parsed, dict):
+                raise WorkgroupError("schema_mismatch", "arguments must be object", http_status=400)
+            if tool_name in {"read_file", "write_file"} and "path" in parsed:
+                parsed["path"] = validate_member_workspace_path(
+                    str(parsed.get("path") or ""),
+                    tool_name=tool_name,
+                )
+                arguments_json = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+            elif tool_name == "glob_files":
+                directory = str(parsed.get("directory") or "").strip() or "."
+                if directory not in {".", "./"}:
+                    validate_member_workspace_path(directory, tool_name=tool_name)
+                parsed["directory"] = directory
+                arguments_json = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
 
         cmd_id = ids.new_id("cmd")
-        args = {"path": path}
-        import json
-
         runtime = self.store.member_runtime(member_id)
         catalog_rev = runtime.get("tool_catalog_revision") or "rev_unknown"
-        args_json = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
         hash_payload = {
-            "tool_name": "read_file",
-            "arguments_json": args_json,
+            "tool_name": tool_name,
+            "arguments_json": arguments_json,
             "member_id": member_id,
             "assign_id": assign.assign_id,
-            "tool_call_id": "call_read_1",
+            "tool_call_id": tool_call_id,
             "member_spec_digest": ctx["member_spec_digest"],
             "member_generation": ctx["member_generation"],
             "lease_epoch": ctx["lease_epoch"],
@@ -145,9 +267,9 @@ class VerticalLoop:
             "assign_id": assign.assign_id,
             "run_id": assign.leader_run_id,
             "turn_id": ids.new_id("tn"),
-            "tool_call_id": "call_read_1",
-            "tool_name": "read_file",
-            "arguments_json": args_json,
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "arguments_json": arguments_json,
             "payload_hash": payload_hash,
             "lease_id": ctx["lease_id"],
             "lease_epoch": ctx["lease_epoch"],
@@ -155,8 +277,9 @@ class VerticalLoop:
             "member_spec_digest": ctx["member_spec_digest"],
             "tool_catalog_revision": catalog_rev,
             "status": "queued",
-            "side_effect_class": "fs_read",
+            "side_effect_class": side_effect_for_tool(tool_name),
         }
+        self._register_command_waiter(cmd_id)
         frame = self.store.enqueue_outbox(workgroup_id, type="tool.command", payload=command)
         self.store.set_assign_status(assign.assign_id, "running")
         if self.hub is not None:
@@ -165,7 +288,7 @@ class VerticalLoop:
         tool_result: dict[str, Any] | None = None
         if self.bridge is not None:
             tool_result = self.bridge.execute_command(command)
-            apply = self.apply_tool_result(
+            self.apply_tool_result(
                 workgroup_id,
                 ToolResultApplyRequest(
                     command_id=cmd_id,
@@ -178,12 +301,56 @@ class VerticalLoop:
             )
             self.store.ack_outbox(workgroup_id, frame.delivery_seq)
             return {
-                "assign": apply["assign"],
+                "assign": self.store.get_assign(assign.assign_id) or assign,
                 "command": command,
                 "tool_result": tool_result,
                 "outbox_seq": frame.delivery_seq,
             }
-        return {"assign": assign, "command": command, "outbox_seq": frame.delivery_seq}
+        return {
+            "assign": self.store.get_assign(assign.assign_id) or assign,
+            "command": command,
+            "outbox_seq": frame.delivery_seq,
+        }
+
+    def dispatch_read_file_for_assign(
+        self,
+        workgroup_id: str,
+        *,
+        assign_id: str,
+        member_id: str,
+        tool_call_id: str,
+        path: str = "README",
+    ) -> dict[str, Any]:
+        """兼容：为已有 Assign 下发 read_file tool.command。"""
+        return self.dispatch_tool_command_for_assign(
+            workgroup_id,
+            assign_id=assign_id,
+            member_id=member_id,
+            tool_call_id=tool_call_id,
+            tool_name=_READ_FILE_TOOL,
+            arguments={"path": path},
+        )
+
+    def assign_and_dispatch_read_file(
+        self,
+        workgroup_id: str,
+        *,
+        member_id: str,
+        instruction: str,
+        path: str = "README",
+    ) -> dict[str, Any]:
+        """测试辅助：创建 Assign → 下发 read_file command（不经 Member LLM）。"""
+        assign = self.store.create_assign(
+            workgroup_id,
+            AssignCreateRequest(member_id=member_id, instruction=instruction),
+        )
+        return self.dispatch_read_file_for_assign(
+            workgroup_id,
+            assign_id=assign.assign_id,
+            member_id=member_id,
+            tool_call_id="call_read_1",
+            path=path,
+        )
 
     def apply_tool_result(self, workgroup_id: str, req: ToolResultApplyRequest) -> dict[str, Any]:
         # 工具结果只进 RunHistory/assign，不进公开 Timeline 原文
@@ -194,13 +361,159 @@ class VerticalLoop:
             assign = self.store.set_assign_status(
                 req.assign_id, "indeterminate", error_code=req.error_code or "indeterminate"
             )
-        elif req.status == "succeeded":
-            assign = self.store.set_assign_status(req.assign_id, "running")
         else:
-            assign = self.store.set_assign_status(
-                req.assign_id, "failed", error_code=req.error_code or "conflict"
-            )
+            # 中间工具成败保持 running；终态由 Member loop / completer 写入
+            assign = self.store.set_assign_status(req.assign_id, "running")
+        self._signal_command_result(
+            req.command_id,
+            {
+                "status": req.status,
+                "result_text": req.result_text or "",
+                "error_code": req.error_code,
+                "assign_id": req.assign_id,
+                "member_id": req.member_id,
+                "command_id": req.command_id,
+            },
+        )
         return {"assign": assign, "leader_tool_paired": True, "raw_tool_on_timeline": False}
+    def wait_command_result(self, command_id: str, *, timeout_s: float | None = None) -> dict[str, Any]:
+        """阻塞等待 Node/HTTP 回传的 tool.result（由 apply_tool_result 唤醒）。"""
+        timeout = self.command_timeout_s if timeout_s is None else max(0.1, float(timeout_s))
+        with self._lock:
+            cached = self._command_results.get(command_id)
+            if cached is not None:
+                return dict(cached)
+            ev = self._command_waiters.setdefault(command_id, threading.Event())
+        if not ev.wait(timeout):
+            raise WorkgroupError(
+                "conflict",
+                f"tool command timed out after {timeout:g}s",
+                http_status=409,
+                retryable=True,
+                details={"command_id": command_id},
+            )
+        with self._lock:
+            result = self._command_results.get(command_id)
+        if result is None:
+            raise WorkgroupError("conflict", "tool command result missing after wait", http_status=500)
+        return dict(result)
+
+    def handle_inbound(self, node_id: str, mtype: str, payload: dict[str, Any]) -> None:
+        """WS 入站业务：provision_result / tool.result → 状态机 + 唤醒 waiters。"""
+        _ = node_id
+        if mtype == "member.provision_result":
+            workgroup_id = str(payload.get("workgroup_id") or "").strip()
+            member_id = str(payload.get("member_id") or "").strip()
+            provision_id = str(payload.get("provision_id") or "").strip()
+            if not workgroup_id or not member_id or not provision_id:
+                return
+            status_raw = str(payload.get("status") or "ready").strip().lower()
+            status = "ready" if status_raw in {"ready", "ok", "succeeded"} else "error"
+            self.complete_provision(
+                workgroup_id,
+                ProvisionCompleteRequest(
+                    member_id=member_id,
+                    provision_id=provision_id,
+                    workspace_path=str(payload.get("workspace_path") or ""),
+                    tool_catalog_revision=str(payload.get("tool_catalog_revision") or ""),
+                    status=status,
+                ),
+            )
+            return
+        if mtype == "tool.result":
+            workgroup_id = str(payload.get("workgroup_id") or "").strip()
+            command_id = str(payload.get("command_id") or "").strip()
+            assign_id = str(payload.get("assign_id") or "").strip()
+            member_id = str(payload.get("member_id") or "").strip()
+            if not workgroup_id or not command_id or not assign_id or not member_id:
+                return
+            status_raw = str(payload.get("status") or "failed").strip().lower()
+            if status_raw not in {"succeeded", "failed", "indeterminate", "rejected"}:
+                status_raw = "failed"
+            self.apply_tool_result(
+                workgroup_id,
+                ToolResultApplyRequest(
+                    command_id=command_id,
+                    assign_id=assign_id,
+                    member_id=member_id,
+                    status=status_raw,  # type: ignore[arg-type]
+                    result_text=str(payload.get("result_text") or ""),
+                    error_code=payload.get("error_code"),
+                ),
+            )
+
+    def make_assign_completer(self, kernel: TurnKernel, *, timeout_s: float | None = None):
+        """供 Leader `assign_workgroup_task`：创建 Member ActorRun 并跑 LLM loop。"""
+
+        def tool_runner(
+            workgroup_id: str,
+            assign_id: str,
+            member_id: str,
+            tool_name: str,
+            tool_call_id: str,
+            arguments_json: str,
+        ) -> str:
+            dispatched = self.dispatch_tool_command_for_assign(
+                workgroup_id,
+                assign_id=assign_id,
+                member_id=member_id,
+                tool_call_id=tool_call_id or "call_member_tool",
+                tool_name=tool_name,
+                arguments_json=arguments_json,
+            )
+            tool_result = dispatched.get("tool_result")
+            if tool_result is None:
+                cmd_id = str(dispatched["command"]["command_id"])
+                tool_result = self.wait_command_result(cmd_id, timeout_s=timeout_s)
+            status = str(tool_result.get("status") or "failed")
+            text = str(tool_result.get("result_text") or "").strip()
+            if status != "succeeded":
+                err = str(tool_result.get("error_code") or status)
+                return f"ERROR ({status}): {err}: {text}"[:8000]
+            return (text or f"({tool_name}: empty)")[:8000]
+
+        def completer(
+            workgroup_id: str,
+            assign_id: str,
+            member_id: str,
+            instruction: str,
+            tool_call_id: str = "",
+        ) -> str:
+            _ = tool_call_id
+            assign = self.store.get_assign(assign_id)
+            if assign is None or assign.workgroup_id != workgroup_id:
+                raise WorkgroupError("not_found", "assign not found", http_status=404)
+            member = self.store.get_member(member_id)
+            if member is None or member.workgroup_id != workgroup_id:
+                raise WorkgroupError("not_found", "member not found", http_status=404)
+            if member.status != "ready":
+                raise WorkgroupError("conflict", "member not ready", http_status=409)
+            spec = self.store.get_spec(member_id)
+            if spec is None:
+                raise WorkgroupError("not_found", "member spec not found", http_status=404)
+
+            run = self.store.create_actor_run(
+                workgroup_id,
+                ActorRunCreateRequest(
+                    actor_id=member_id,
+                    assign_id=assign_id,
+                    llm_profile_revision=spec.llm_profile_revision,
+                ),
+            )
+            self.store.ensure_run_history(run)
+            self.store.append_run_history(
+                run.run_id,
+                [RunHistoryMessage(role="user", content=(instruction or "").strip() or "(empty)")],
+            )
+            out = kernel.run_member_until_idle(
+                workgroup_id,
+                run.run_id,
+                tool_runner=tool_runner,
+            )
+            text = str(out.get("final_text") or "").strip() or "(empty)"
+            return text[:8000]
+
+        return completer
 
     def member_final(self, workgroup_id: str, req: MemberFinalRequest) -> dict[str, Any]:
         assign = self.store.set_assign_status(
@@ -263,3 +576,16 @@ class VerticalLoop:
             ),
         )
         return {**apply, "auto_reexec": False, "status": "indeterminate"}
+
+    def _register_command_waiter(self, command_id: str) -> None:
+        with self._lock:
+            self._command_waiters.setdefault(command_id, threading.Event())
+
+    def _signal_command_result(self, command_id: str, result: dict[str, Any]) -> None:
+        with self._lock:
+            self._command_results[command_id] = dict(result)
+            ev = self._command_waiters.get(command_id)
+            if ev is None:
+                ev = threading.Event()
+                self._command_waiters[command_id] = ev
+            ev.set()

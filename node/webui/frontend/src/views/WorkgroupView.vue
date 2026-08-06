@@ -3,49 +3,30 @@ import { ref, watch, onUnmounted, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import NavRail from "../components/NavRail.vue";
-
-/** v1 Worker 可执行工具；其余名仅写入 Spec，provision 时与本机能力求交 */
-const TOOL_CHOICES = ["read_file"];
+import WorkgroupMemberModal from "../components/WorkgroupMemberModal.vue";
+import { renderMarkdown } from "../utils/markdown.js";
 
 const route = useRoute();
 const router = useRouter();
 const panelRef = ref(null);
 
 const workgroupId = computed(() => String(route.params.workgroupId || "").trim());
-const selfNodeId = ref("");
 const events = ref([]);
-const members = ref([]);
-const hitlList = ref([]);
 const draft = ref("");
 const sending = ref(false);
 const error = ref("");
+const notice = ref("");
 const pollTimer = ref(null);
-const acl = ref(null);
-const collabDraft = ref("");
-const collabBusy = ref(false);
+const workgroupMeta = ref(null);
+const selfNodeId = ref("");
 
-const memberName = ref("");
-const memberHome = ref("");
-const memberSoul = ref("");
-const memberUser = ref("");
-const memberCustom = ref("");
-const memberLlmProfile = ref("default");
-const memberLlmRevision = ref("1");
-const memberTools = ref(["read_file"]);
-const memberBusy = ref(false);
-const showMemberForm = ref(false);
+const memberModalOpen = ref(false);
+const memberModalMode = ref("create");
+const memberModalWgId = ref("");
+const memberModalMemberId = ref("");
 
-const selectedMemberId = ref("");
-const memberSpec = ref(null);
-const memberSpecBusy = ref(false);
 let timelineReqSeq = 0;
-let membersReqSeq = 0;
-let memberSpecReqSeq = 0;
 let pollInFlight = false;
-
-const hitlPrompt = ref("");
-const hitlBusy = ref(false);
-const hitlAnswers = ref({});
 
 async function loadSelf() {
   try {
@@ -73,86 +54,21 @@ async function loadTimeline() {
   }
 }
 
-async function loadACL() {
+async function loadWorkgroupMeta() {
   if (!workgroupId.value) {
-    acl.value = null;
+    workgroupMeta.value = null;
     return;
   }
   try {
-    acl.value = await api.getWorkgroupACL(workgroupId.value);
-  } catch {
-    acl.value = null;
-  }
-}
-
-async function loadMembersHitl() {
-  const reqSeq = ++membersReqSeq;
-  if (!workgroupId.value) {
-    members.value = [];
-    hitlList.value = [];
-    return;
-  }
-  try {
-    const [m, h] = await Promise.all([
-      api.listWorkgroupMembers(workgroupId.value),
-      api.listWorkgroupHITL(workgroupId.value, true),
+    const [sub, aclList] = await Promise.all([
+      api.listWorkgroups({ scope: "subscribed" }),
+      api.listWorkgroups({ scope: "acl" }),
     ]);
-    if (reqSeq !== membersReqSeq) return;
-    members.value = m.members || [];
-    if (m.node_id) selfNodeId.value = m.node_id;
-    hitlList.value = h.hitl || [];
-    if (
-      selectedMemberId.value &&
-      !members.value.some((x) => x.member_id === selectedMemberId.value)
-    ) {
-      selectedMemberId.value = "";
-      memberSpec.value = null;
-    }
-  } catch (e) {
-    if (reqSeq !== membersReqSeq) return;
-    if (!error.value) error.value = e?.message || "";
-  }
-}
-
-async function loadMemberSpec(memberId) {
-  const reqSeq = ++memberSpecReqSeq;
-  if (!workgroupId.value || !memberId) {
-    memberSpec.value = null;
-    return;
-  }
-  memberSpecBusy.value = true;
-  try {
-    const data = await api.getWorkgroupMemberSpec(workgroupId.value, memberId);
-    if (reqSeq !== memberSpecReqSeq) return;
-    memberSpec.value = data;
-  } catch (e) {
-    if (reqSeq !== memberSpecReqSeq) return;
-    memberSpec.value = null;
-    if (!error.value) error.value = e?.message || "加载 MemberSpec 失败";
-  } finally {
-    if (reqSeq === memberSpecReqSeq) {
-      memberSpecBusy.value = false;
-    }
-  }
-}
-
-async function selectMember(memberId) {
-  if (selectedMemberId.value === memberId) {
-    selectedMemberId.value = "";
-    memberSpec.value = null;
-    if (workgroupId.value) {
-      router.replace({ name: "workgroups", params: { workgroupId: workgroupId.value }, query: {} });
-    }
-    return;
-  }
-  selectedMemberId.value = memberId;
-  await loadMemberSpec(memberId);
-  if (workgroupId.value) {
-    router.replace({
-      name: "workgroups",
-      params: { workgroupId: workgroupId.value },
-      query: { member: memberId },
-    });
+    const all = [...(sub.workgroups || []), ...(aclList.workgroups || [])];
+    workgroupMeta.value =
+      all.find((w) => String(w.workgroup_id || "").trim() === workgroupId.value) || null;
+  } catch {
+    workgroupMeta.value = null;
   }
 }
 
@@ -162,10 +78,7 @@ function startPoll() {
     if (pollInFlight) return;
     pollInFlight = true;
     try {
-      await Promise.all([loadTimeline(), loadMembersHitl()]);
-      if (selectedMemberId.value) {
-        await loadMemberSpec(selectedMemberId.value);
-      }
+      await loadTimeline();
     } finally {
       pollInFlight = false;
     }
@@ -196,82 +109,6 @@ async function send() {
   }
 }
 
-async function addCollaborator() {
-  const nid = collabDraft.value.trim();
-  if (!nid || !workgroupId.value || collabBusy.value) return;
-  collabBusy.value = true;
-  error.value = "";
-  try {
-    acl.value = await api.addWorkgroupCollaborator(workgroupId.value, nid);
-    collabDraft.value = "";
-    panelRef.value?.refresh?.();
-  } catch (e) {
-    error.value = e?.message || "添加协作者失败";
-  } finally {
-    collabBusy.value = false;
-  }
-}
-
-function toggleTool(name) {
-  const set = new Set(memberTools.value);
-  if (set.has(name)) set.delete(name);
-  else set.add(name);
-  memberTools.value = [...set];
-}
-
-function resetMemberForm() {
-  memberName.value = "";
-  memberHome.value = "";
-  memberSoul.value = "";
-  memberUser.value = "";
-  memberCustom.value = "";
-  memberLlmProfile.value = "default";
-  memberLlmRevision.value = "1";
-  memberTools.value = ["read_file"];
-}
-
-async function createMember() {
-  const name = memberName.value.trim();
-  const home = memberHome.value.trim() || selfNodeId.value;
-  if (!name || !home || memberBusy.value) return;
-  memberBusy.value = true;
-  error.value = "";
-  try {
-    const tools = memberTools.value.length ? [...memberTools.value] : ["read_file"];
-    const out = await api.createWorkgroupMember(workgroupId.value, {
-      display_name: name,
-      home_node_id: home,
-      llm_profile_id: memberLlmProfile.value.trim() || "default",
-      llm_profile_revision: memberLlmRevision.value.trim() || "1",
-      allow_tool_names: tools,
-      prompt: {
-        soul_md: memberSoul.value,
-        user_md: memberUser.value,
-        custom_md: memberCustom.value,
-      },
-    });
-    resetMemberForm();
-    showMemberForm.value = false;
-    await loadMembersHitl();
-    const mid = out?.member?.member_id;
-    if (mid) {
-      selectedMemberId.value = mid;
-      memberSpec.value = out.spec || null;
-      if (!memberSpec.value) await loadMemberSpec(mid);
-      router.replace({
-        name: "workgroups",
-        params: { workgroupId: workgroupId.value },
-        query: { member: mid },
-      });
-    }
-    panelRef.value?.refresh?.();
-  } catch (e) {
-    error.value = e?.message || "创建成员失败";
-  } finally {
-    memberBusy.value = false;
-  }
-}
-
 async function onRailDeleteAgent(payload) {
   const aid = String(typeof payload === "string" ? payload : payload?.id || "").trim();
   if (!aid) return;
@@ -286,93 +123,109 @@ async function onRailDeleteAgent(payload) {
   }
 }
 
-async function createHitl() {
-  const prompt = hitlPrompt.value.trim();
-  if (!prompt || hitlBusy.value) return;
-  hitlBusy.value = true;
-  error.value = "";
-  try {
-    await api.createWorkgroupHITL(workgroupId.value, prompt);
-    hitlPrompt.value = "";
-    await loadMembersHitl();
-  } catch (e) {
-    error.value = e?.message || "创建 HITL 失败";
-  } finally {
-    hitlBusy.value = false;
-  }
+function openMemberCreate(wgId) {
+  const wid = String(wgId || workgroupId.value || "").trim();
+  if (!wid) return;
+  memberModalMode.value = "create";
+  memberModalWgId.value = wid;
+  memberModalMemberId.value = "";
+  memberModalOpen.value = true;
+  const target = {
+    name: "workgroups",
+    params: { workgroupId: wid },
+    query: { createMember: "1" },
+  };
+  if (workgroupId.value !== wid) router.push(target);
+  else router.replace(target);
 }
 
-async function resolveHitl(hitlId) {
-  const answer = String(hitlAnswers.value[hitlId] || "").trim();
-  if (!answer) return;
-  error.value = "";
-  try {
-    await api.resolveWorkgroupHITL(workgroupId.value, hitlId, answer);
-    delete hitlAnswers.value[hitlId];
-    await loadMembersHitl();
-  } catch (e) {
-    error.value = e?.message || "决议 HITL 失败";
-  }
+function openMemberEdit(payload) {
+  const wid = String(payload?.workgroupId || workgroupId.value || "").trim();
+  const mid = String(payload?.memberId || "").trim();
+  if (!wid || !mid) return;
+  memberModalMode.value = "edit";
+  memberModalWgId.value = wid;
+  memberModalMemberId.value = mid;
+  memberModalOpen.value = true;
+  router.push({
+    name: "workgroups",
+    params: { workgroupId: wid },
+    query: { member: mid, editMember: "1" },
+  });
+}
+
+function closeMemberModal() {
+  memberModalOpen.value = false;
+  const wid = memberModalWgId.value || workgroupId.value;
+  const q = { ...route.query };
+  delete q.createMember;
+  delete q.editMember;
+  router.replace({
+    name: "workgroups",
+    params: wid ? { workgroupId: wid } : {},
+    query: q,
+  });
+}
+
+async function onMemberSaved(payload) {
+  const name = payload?.displayName || "成员";
+  notice.value = payload?.mode === "create" ? `已添加成员「${name}」` : `已更新成员「${name}」`;
+  window.setTimeout(() => {
+    if (notice.value.includes(name)) notice.value = "";
+  }, 3200);
+  await panelRef.value?.refreshWorkgroups?.({ force: true });
+  const wid = String(payload?.workgroupId || memberModalWgId.value || "").trim();
+  if (wid) await panelRef.value?.loadMembers?.(wid, true);
 }
 
 function eventLabel(ev) {
   if (ev.type === "human_message") return ev.actor_id || "human";
-  if (ev.type === "actor_final_text") return ev.actor_id || "member";
+  if (ev.type === "actor_final_text") {
+    if (ev.actor_id === "leader") return "Supervisor";
+    return ev.actor_id || "member";
+  }
   return ev.type || "event";
 }
 
-function promptExcerpt(text, max = 120) {
-  const s = String(text || "").trim();
-  if (!s) return "（空）";
-  return s.length > max ? `${s.slice(0, max)}…` : s;
+function isHumanEvent(ev) {
+  return String(ev?.type || "") === "human_message";
 }
 
-const aclSummary = computed(() => {
-  if (!acl.value) return "";
-  const owners = (acl.value.owners || []).join(", ");
-  const collab = (acl.value.collaborators || []).join(", ") || "—";
-  return `owners: ${owners} · collaborators: ${collab}`;
+const toolbarTitle = computed(() => {
+  const name = String(workgroupMeta.value?.display_name || "").trim();
+  return name ? `工作组 · ${name}` : "工作组";
 });
-
-const selectedMember = computed(() =>
-  members.value.find((m) => m.member_id === selectedMemberId.value) || null,
-);
 
 watch(
   workgroupId,
   async (id) => {
     stopPoll();
-    selectedMemberId.value = "";
-    memberSpec.value = null;
-    showMemberForm.value = false;
-    resetMemberForm();
-    await Promise.all([loadTimeline(), loadACL(), loadMembersHitl()]);
-    const memberQ = String(route.query.member || "").trim();
-    if (memberQ) {
-      selectedMemberId.value = memberQ;
-      await loadMemberSpec(memberQ);
-    }
-    if (String(route.query.addMember || "") === "1") {
-      showMemberForm.value = true;
-    }
+    await Promise.all([loadTimeline(), loadWorkgroupMeta()]);
     if (id) startPoll();
   },
   { immediate: true },
 );
 
 watch(
-  () => [route.query.member, route.query.addMember],
-  async ([member, addMember]) => {
-    if (!workgroupId.value) return;
-    const memberQ = String(member || "").trim();
-    if (memberQ && memberQ !== selectedMemberId.value) {
-      selectedMemberId.value = memberQ;
-      await loadMemberSpec(memberQ);
+  () => [route.query.createMember, route.query.editMember, route.query.member, workgroupId.value],
+  ([createMember, editMember, member, wid]) => {
+    if (!wid) return;
+    if (String(createMember || "") === "1") {
+      memberModalMode.value = "create";
+      memberModalWgId.value = wid;
+      memberModalMemberId.value = "";
+      memberModalOpen.value = true;
+      return;
     }
-    if (String(addMember || "") === "1") {
-      showMemberForm.value = true;
+    const mid = String(member || "").trim();
+    if (String(editMember || "") === "1" && mid) {
+      memberModalMode.value = "edit";
+      memberModalWgId.value = wid;
+      memberModalMemberId.value = mid;
+      memberModalOpen.value = true;
     }
   },
+  { immediate: true },
 );
 
 onMounted(loadSelf);
@@ -387,10 +240,13 @@ onUnmounted(stopPoll);
         @switch="(id) => router.push({ name: 'agents', params: { agentId: id } })"
         @create="router.push({ name: 'agents', query: { createAgent: '1' } })"
         @delete="onRailDeleteAgent"
+        @create-member="openMemberCreate"
+        @configure-member="openMemberEdit"
       />
     </aside>
     <div class="app__main-col wg-chat">
       <div v-if="error" class="chat-error-banner">{{ error }}</div>
+      <div v-else-if="notice" class="chat-notice-banner">{{ notice }}</div>
       <div v-if="!workgroupId" class="chat-empty-agent">
         <p>选择左侧已订阅工作组，或点击 + 新建。</p>
         <button type="button" class="wg-chat__link" @click="router.push({ name: 'agents' })">
@@ -399,152 +255,110 @@ onUnmounted(stopPoll);
       </div>
       <template v-else>
         <div class="wg-chat__toolbar">
-          <div class="wg-chat__acl" :title="aclSummary">{{ aclSummary || "加载 ACL…" }}</div>
-          <form class="wg-chat__collab" @submit.prevent="addCollaborator">
-            <input
-              v-model="collabDraft"
-              type="text"
-              placeholder="添加协作者 node_id"
-              :disabled="collabBusy"
-            />
-            <button type="submit" :disabled="collabBusy || !collabDraft.trim()">添加</button>
-          </form>
+          <div class="wg-chat__title" :title="toolbarTitle">{{ toolbarTitle }}</div>
+          <button
+            type="button"
+            class="wg-chat__toolbar-btn"
+            title="添加成员"
+            @click="openMemberCreate(workgroupId)"
+          >
+            添加成员
+          </button>
         </div>
 
         <div class="wg-chat__body">
-          <div class="wg-chat__timeline">
-            <div v-for="ev in events" :key="ev.event_id || ev.seq" class="wg-chat__event">
-              <div class="wg-chat__event-meta">
-                <span>{{ eventLabel(ev) }}</span>
-                <span v-if="ev.seq">#{{ ev.seq }}</span>
+          <div class="wg-chat__timeline chat__stream">
+            <article
+              v-for="ev in events"
+              :key="ev.event_id || ev.seq"
+              class="msg"
+              :class="isHumanEvent(ev) ? 'msg--user' : 'msg--assistant'"
+            >
+              <div class="msg__body">
+                <div class="msg__hint">
+                  {{ eventLabel(ev) }}
+                  <span v-if="ev.seq"> · #{{ ev.seq }}</span>
+                </div>
+                <div
+                  class="msg__bubble"
+                  :class="isHumanEvent(ev) ? 'msg__bubble--user' : 'msg__bubble--assistant-md'"
+                >
+                  <template v-if="isHumanEvent(ev)">{{ ev.text }}</template>
+                  <div
+                    v-else
+                    class="tool-exec-bubble__markdown assistant-msg__md"
+                    v-html="renderMarkdown(ev.text || '')"
+                  />
+                </div>
               </div>
-              <div class="wg-chat__event-text">{{ ev.text }}</div>
+            </article>
+            <div v-if="!events.length" class="chat__empty">
+              <div class="chat__empty-inner">
+                <div class="chat__empty-title">开始对话</div>
+                <div class="chat__empty-hint">向工作组发言，Leader 会编排成员协作</div>
+                <button
+                  type="button"
+                  class="btn btn--ghost chat__empty-action"
+                  @click="openMemberCreate(workgroupId)"
+                >
+                  先添加一个成员
+                </button>
+              </div>
             </div>
-            <p v-if="!events.length" class="wg-chat__empty">暂无消息</p>
           </div>
-
-          <aside class="wg-side">
-            <section class="wg-side__sec">
-              <div class="wg-side__row">
-                <h4>成员</h4>
-                <button type="button" @click="showMemberForm = !showMemberForm">
-                  {{ showMemberForm ? "收起" : "+ 资产" }}
-                </button>
-              </div>
-              <ul>
-                <li v-for="m in members" :key="m.member_id">
-                  <div class="wg-side__row">
-                    <button
-                      type="button"
-                      class="wg-side__name"
-                      :class="{ 'wg-side__name--active': selectedMemberId === m.member_id }"
-                      @click="selectMember(m.member_id)"
-                    >
-                      {{ m.display_name }} · {{ m.status }}
-                    </button>
-                  </div>
-                  <div class="wg-side__meta">{{ m.home_node_id }}</div>
-                </li>
-              </ul>
-
-              <form
-                v-if="showMemberForm"
-                class="wg-side__form"
-                @submit.prevent="createMember"
-              >
-                <label class="wg-side__label">显示名</label>
-                <input v-model="memberName" placeholder="成员显示名" required />
-                <label class="wg-side__label">Home Node</label>
-                <input
-                  v-model="memberHome"
-                  :placeholder="`默认 ${selfNodeId || '本机'}`"
-                />
-                <label class="wg-side__label">Soul</label>
-                <textarea v-model="memberSoul" rows="3" placeholder="soul.md 正文（可空）" />
-                <label class="wg-side__label">User</label>
-                <textarea v-model="memberUser" rows="2" placeholder="user.md 正文（可空）" />
-                <label class="wg-side__label">Custom</label>
-                <textarea v-model="memberCustom" rows="2" placeholder="custom.md 正文（可空）" />
-                <label class="wg-side__label">工具白名单</label>
-                <div class="wg-side__tools">
-                  <label v-for="t in TOOL_CHOICES" :key="t" class="wg-side__check">
-                    <input
-                      type="checkbox"
-                      :checked="memberTools.includes(t)"
-                      @change="toggleTool(t)"
-                    />
-                    {{ t }}
-                  </label>
-                </div>
-                <label class="wg-side__label">LLM 档案</label>
-                <div class="wg-side__llm">
-                  <input v-model="memberLlmProfile" placeholder="profile id" />
-                  <input v-model="memberLlmRevision" placeholder="revision" />
-                </div>
-                <button type="submit" :disabled="memberBusy || !memberName.trim()">
-                  创建成员资产
-                </button>
-              </form>
-            </section>
-
-            <section v-if="selectedMemberId" class="wg-side__sec">
-              <h4>成员资产</h4>
-              <p v-if="memberSpecBusy" class="wg-side__meta">加载 Spec…</p>
-              <template v-else-if="memberSpec">
-                <div class="wg-side__meta">
-                  {{ selectedMember?.display_name || memberSpec.display_name }}
-                </div>
-                <div class="wg-side__spec">
-                  <div><span>digest</span>{{ memberSpec.digest?.slice(0, 18) }}…</div>
-                  <div>
-                    <span>llm</span>{{ memberSpec.llm_profile_id }}@{{
-                      memberSpec.llm_profile_revision
-                    }}
-                  </div>
-                  <div>
-                    <span>tools</span>{{ (memberSpec.tools?.allow_names || []).join(", ") || "—" }}
-                  </div>
-                  <div><span>soul</span>{{ promptExcerpt(memberSpec.prompt?.soul_md) }}</div>
-                  <div><span>user</span>{{ promptExcerpt(memberSpec.prompt?.user_md) }}</div>
-                  <div><span>custom</span>{{ promptExcerpt(memberSpec.prompt?.custom_md) }}</div>
-                </div>
-              </template>
-              <p v-else class="wg-side__meta">无法加载 MemberSpec</p>
-            </section>
-
-            <section class="wg-side__sec">
-              <h4>信息型 HITL</h4>
-              <ul>
-                <li v-for="h in hitlList" :key="h.hitl_id">
-                  <div class="wg-side__meta">{{ h.prompt }}</div>
-                  <form class="wg-side__form" @submit.prevent="resolveHitl(h.hitl_id)">
-                    <input v-model="hitlAnswers[h.hitl_id]" placeholder="回答" />
-                    <button type="submit">提交</button>
-                  </form>
-                </li>
-              </ul>
-              <form class="wg-side__form" @submit.prevent="createHitl">
-                <input v-model="hitlPrompt" placeholder="发起信息请求…" />
-                <button type="submit" :disabled="hitlBusy || !hitlPrompt.trim()">发起</button>
-              </form>
-            </section>
-          </aside>
         </div>
 
-        <form class="wg-chat__composer" @submit.prevent="send">
-          <input
-            v-model="draft"
-            class="wg-chat__input"
-            type="text"
-            placeholder="向工作组发言…"
-            :disabled="sending"
-          />
-          <button type="submit" class="wg-chat__send" :disabled="sending || !draft.trim()">
-            发送
-          </button>
-        </form>
+        <footer class="chat__composer">
+          <div class="chat__composer-pill">
+            <div class="chat__composer-pill-center">
+              <input
+                v-model="draft"
+                class="chat__textarea"
+                type="text"
+                placeholder="向工作组发言…"
+                :disabled="sending"
+                @keydown.enter.prevent="send"
+              />
+            </div>
+            <div class="chat__composer-pill-right">
+              <button
+                type="button"
+                class="chat__composer-send"
+                title="发送"
+                aria-label="发送"
+                :disabled="sending || !draft.trim()"
+                @click="send"
+              >
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path
+                    d="M8 12.25V3.75M8 3.75L4.5 7.25M8 3.75l3.5 3.5"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="chat__composer-statusline">
+            <div class="chat__composer-statusline-left">
+              <span class="chat__input-strip-left">Enter 发送</span>
+            </div>
+          </div>
+        </footer>
       </template>
     </div>
+
+    <WorkgroupMemberModal
+      :open="memberModalOpen"
+      :mode="memberModalMode"
+      :workgroup-id="memberModalWgId"
+      :member-id="memberModalMemberId"
+      :default-home-node-id="selfNodeId"
+      @close="closeMemberModal"
+      @saved="onMemberSaved"
+    />
   </div>
 </template>
 
@@ -564,185 +378,44 @@ onUnmounted(stopPoll);
   border-bottom: 1px solid var(--border-subtle, #e5e7eb);
   font-size: 0.75rem;
 }
-.wg-chat__acl {
-  color: var(--text-muted, #6b7280);
+.wg-chat__title {
+  color: var(--color-text, #111827);
+  font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 55%;
+  max-width: 100%;
 }
-.wg-chat__collab {
-  display: flex;
-  gap: 0.35rem;
-}
-.wg-chat__collab input,
-.wg-side__form input,
-.wg-side__form textarea {
-  padding: 0.3rem 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
+.wg-chat__toolbar-btn {
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #111827);
+  border-radius: 6px;
+  padding: 4px 10px;
   font: inherit;
-  min-width: 8rem;
-  width: 100%;
-  box-sizing: border-box;
-  resize: vertical;
-}
-.wg-chat__collab button,
-.wg-side__form button,
-.wg-side__row button {
-  border: 1px solid #d1d5db;
-  background: #fff;
-  border-radius: 4px;
-  padding: 0.3rem 0.6rem;
+  font-size: 12px;
   cursor: pointer;
-  font: inherit;
-  font-size: 0.75rem;
+}
+.wg-chat__toolbar-btn:hover {
+  border-color: var(--color-primary, #0078d4);
+  color: var(--color-primary-strong, var(--color-primary, #0078d4));
 }
 .wg-chat__body {
   flex: 1;
   display: flex;
   min-height: 0;
+  background: var(--color-editor, #fff);
 }
-.wg-chat__timeline {
+.wg-chat__timeline.chat__stream {
   flex: 1;
-  overflow: auto;
-  padding: 1rem 1.25rem;
+  min-width: 0;
 }
-.wg-side {
-  width: 300px;
-  border-left: 1px solid var(--border-subtle, #e5e7eb);
-  overflow: auto;
-  padding: 0.75rem;
-  font-size: 0.8rem;
-  background: var(--surface-muted, #fafafa);
-}
-.wg-side__sec {
-  margin-bottom: 1rem;
-}
-.wg-side__sec h4 {
-  margin: 0 0 0.4rem;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #9ca3af;
-}
-.wg-side__sec ul {
-  list-style: none;
-  margin: 0 0 0.5rem;
-  padding: 0;
-}
-.wg-side__sec li {
-  margin-bottom: 0.45rem;
-}
-.wg-side__row {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.35rem;
-  align-items: center;
-}
-.wg-side__name {
-  border: none;
-  background: none;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-}
-.wg-side__name--active {
-  color: var(--color-primary-strong, var(--accent, #242424));
-  font-weight: 600;
-}
-.wg-side__meta {
-  font-size: 0.7rem;
-  color: #6b7280;
-  margin-top: 0.1rem;
-  word-break: break-all;
-}
-.wg-side__form {
+.wg-chat__timeline .msg__body {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-}
-.wg-side__label {
-  font-size: 0.7rem;
-  color: #6b7280;
-  margin-top: 0.15rem;
-}
-.wg-side__tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.75rem;
-}
-.wg-side__check {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-.wg-side__llm {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.35rem;
-}
-.wg-side__spec {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin-top: 0.35rem;
-  font-size: 0.72rem;
-  line-height: 1.35;
-}
-.wg-side__spec div span {
-  display: inline-block;
-  min-width: 3.2rem;
-  color: #9ca3af;
-  margin-right: 0.35rem;
-}
-.wg-chat__event {
-  margin-bottom: 0.9rem;
-}
-.wg-chat__event-meta {
-  display: flex;
-  gap: 0.75rem;
-  font-size: 0.75rem;
-  color: var(--text-muted, #6b7280);
-  margin-bottom: 0.2rem;
-}
-.wg-chat__event-text {
-  white-space: pre-wrap;
-  font-size: 0.9rem;
-  line-height: 1.45;
-}
-.wg-chat__empty {
-  color: var(--text-muted, #6b7280);
-  font-size: 0.875rem;
-}
-.wg-chat__composer {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--border-subtle, #e5e7eb);
-}
-.wg-chat__input {
-  flex: 1;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border-subtle, #d1d5db);
-  border-radius: 6px;
-  font: inherit;
-}
-.wg-chat__send {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 6px;
-  background: var(--color-primary, var(--accent, #242424));
-  color: var(--color-text-invert, #fff);
-  cursor: pointer;
-}
-.wg-chat__send:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  align-items: flex-start;
+  gap: 4px;
 }
 .wg-chat__link {
   margin-top: 0.5rem;
@@ -752,10 +425,26 @@ onUnmounted(stopPoll);
   cursor: pointer;
   font-size: inherit;
   padding: 0;
+  text-decoration: underline;
 }
-@media (max-width: 900px) {
-  .wg-side {
-    display: none;
-  }
+.chat-empty-agent {
+  padding: 2rem;
+  color: var(--color-text-muted, #6b7280);
+}
+.chat-notice-banner {
+  padding: 0.5rem 1rem;
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 12%, transparent);
+  color: var(--color-text, #111827);
+  font-size: 12px;
+}
+.chat__empty-action {
+  margin-top: 12px;
+}
+.wg-chat :deep(.chat__composer-pill) {
+  padding-left: 16px;
+}
+.wg-chat :deep(.chat__textarea) {
+  padding-left: 6px;
+  padding-right: 8px;
 }
 </style>

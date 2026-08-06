@@ -637,7 +637,8 @@
   display: inline-block;
   max-width: 100%;
   padding: 10px 16px;
-  border-radius: 20px;
+  /* 左下角略尖，更像从左侧发出的对话气泡 */
+  border-radius: 20px 20px 20px 6px;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);
@@ -2349,6 +2350,25 @@ select.settings-field__input {
   list-style: none;
 }
 
+.nav-rail__empty--action {
+  padding-top: 2px;
+  padding-bottom: 6px;
+}
+
+.nav-rail__text-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-primary-strong, var(--color-primary, #0078d4));
+  cursor: pointer;
+}
+
+.nav-rail__text-btn:hover {
+  text-decoration: underline;
+}
+
 .nav-rail__list {
   display: flex;
   flex-direction: column;
@@ -2465,9 +2485,9 @@ select.settings-field__input {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-height: 30px;
-  padding: 6px 8px 6px 4px;
+  padding: 6px 10px;
   border-radius: var(--radius-sidebar-item);
   cursor: pointer;
   transition: background 0.12s ease;
@@ -2484,42 +2504,18 @@ select.settings-field__input {
 .nav-rail__folder-row .nav-rail__item-title {
   flex: 1 1 auto;
   min-width: 0;
+  padding-right: 4px;
 }
 
-.nav-rail__fold-toggle {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-subtle);
+.nav-rail__folder-row:hover .nav-rail__item-actions,
+.nav-rail__folder-row:focus-within .nav-rail__item-actions {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  cursor: pointer;
-}
-
-.nav-rail__fold-toggle:hover {
-  color: var(--color-text);
-  background: var(--color-sidebar-hover);
-}
-
-.nav-rail__folder-add {
-  opacity: 0;
-  margin-left: 0;
-}
-
-.nav-rail__folder-row:hover .nav-rail__folder-add,
-.nav-rail__folder-row:focus-within .nav-rail__folder-add {
-  opacity: 1;
 }
 
 .nav-rail__children {
   list-style: none;
   margin: 0;
-  padding: 1px 0 4px 22px;
+  padding: 1px 0 4px 18px;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -2527,11 +2523,24 @@ select.settings-field__input {
 
 .nav-rail__item--child {
   min-height: 28px;
-  padding: 5px 10px;
+  padding: 5px 10px 5px 12px;
+  color: var(--color-text-muted);
+}
+
+.nav-rail__item--child .nav-rail__item-title {
+  font-weight: 450;
+  font-size: 13px;
 }
 
 .nav-rail__item--child .nav-rail__meta {
   margin-left: auto;
+  font-size: 11px;
+}
+
+.nav-rail__item--child:hover .nav-rail__meta,
+.nav-rail__item--child:focus-within .nav-rail__meta {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .nav-rail__popover {
