@@ -70,7 +70,7 @@ GET /v1/agent/info
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/v1/agents` | 创建 Agent（勿再传 `sandbox`） |
+| POST | `/v1/agents` | 创建 Agent |
 | GET | `/v1/agents` | 列表 |
 | DELETE | `/v1/agents/{id}` | 归档 |
 | POST | `/v1/agents/{id}/ensure` | 装入运行时 |
