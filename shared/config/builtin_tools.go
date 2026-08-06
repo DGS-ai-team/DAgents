@@ -33,6 +33,9 @@ var knownBuiltinTools = map[string]struct{}{
 	"wait_temporary_agents":    {},
 	"temporary_agent_status":   {},
 	"cancel_temporary_agent":   {},
+	"browser_run_task":         {},
+	"browser_task_status":      {},
+	"browser_task_cancel":      {},
 	"browser_start":            {},
 	"browser_stop":             {},
 	"browser_navigate":         {},
@@ -101,7 +104,14 @@ var builtinToolGroups = map[string][]string{
 		"temporary_agent_status",
 		"cancel_temporary_agent",
 	},
+	// browser：主 Agent 面向任务级派发（伴生 Chrome + sidecar browser_use.Agent）。
 	"browser": {
+		"browser_run_task",
+		"browser_task_status",
+		"browser_task_cancel",
+	},
+	// browser_ops：细粒度 CDP/DOM 工具（伴生/调试用；Web UI 工具组不展示）。
+	"browser_ops": {
 		"browser_start",
 		"browser_stop",
 		"browser_navigate",
@@ -162,6 +172,19 @@ func AllBuiltinToolNames() []string {
 func AllBuiltinToolGroupNames() []string {
 	out := make([]string, 0, len(builtinToolGroups))
 	for name := range builtinToolGroups {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// PublicBuiltinToolGroupNames 返回面向用户配置的工具组（排除内部组如 browser_ops）。
+func PublicBuiltinToolGroupNames() []string {
+	out := make([]string, 0, len(builtinToolGroups))
+	for name := range builtinToolGroups {
+		if name == "browser_ops" {
+			continue
+		}
 		out = append(out, name)
 	}
 	sort.Strings(out)

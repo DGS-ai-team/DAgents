@@ -263,6 +263,13 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := s.syncBrowserCompanion(r.Context(), rec); err != nil {
+		s.logger.Warn("browser companion sync failed", "agent_id", agentID, "error", err)
+	}
+	// 重新读取以带上 companion meta。
+	if updated, err := s.agents.Get(r.Context(), agentID); err == nil && updated != nil {
+		rec = *updated
+	}
 	writeJSON(w, http.StatusOK, agentViewFromRecord(rec))
 }
 
@@ -287,6 +294,9 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			} else if s.sessions != nil {
 				_, _ = s.sessions.Delete(rec.AgentID)
 			}
+			continue
+		}
+		if isHiddenCompanionAgent(rec) {
 			continue
 		}
 		views = append(views, s.enrichAgentNotify(agentViewFromRecord(rec)))
@@ -434,6 +444,14 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("agent runtime reload after patch failed", "agent_id", id, "error", err)
 		}
 	}
+	if runtimeDirty {
+		if err := s.syncBrowserCompanion(r.Context(), *rec); err != nil {
+			s.logger.Warn("browser companion sync after patch failed", "agent_id", id, "error", err)
+		}
+		if updated, err := s.agents.Get(r.Context(), id); err == nil && updated != nil {
+			rec = updated
+		}
+	}
 	writeJSON(w, http.StatusOK, agentViewFromRecord(*rec))
 }
 
@@ -452,12 +470,14 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": id})
 		return
 	}
-	if err := s.agents.SoftDelete(r.Context(), id); err != nil {
-		writeAPIError(w, http.StatusNotFound, "agent_not_found", err.Error(), map[string]any{"agent_id": id})
+	if err := s.softDeleteAgentCascade(r.Context(), id); err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "cannot be deleted directly") {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", msg, map[string]any{"agent_id": id})
+			return
+		}
+		writeAPIError(w, http.StatusNotFound, "agent_not_found", msg, map[string]any{"agent_id": id})
 		return
-	}
-	if s.sessions != nil {
-		_, _ = s.sessions.Delete(id)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agent_id": id})
 }
@@ -589,6 +609,11 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		return err
 	}
 	s.logger.Info("agent runtime ready", "agent_id", id, "fs_root", built.FSRoot, "tool_groups", built.ToolGroups)
+	if !agentruntime.IsBrowserCompanionRecord(rec.ConfigSnapshot) && !agentruntime.IsCompanionBrowserAgentID(id) {
+		if err := s.syncBrowserCompanion(ctx, rec); err != nil {
+			s.logger.Warn("browser companion sync on reload failed", "agent_id", id, "error", err)
+		}
+	}
 	return nil
 }
 

@@ -9,10 +9,12 @@ import (
 )
 
 func (r *Registry) browserToolDefs() []ToolDef {
+	// 任务级工具始终暴露（由 enabled_groups=browser 过滤到主 Agent）。
+	defs := browserTaskToolDefs()
 	if r != nil && r.multimodalEnabled {
-		return browserVisualToolDefs()
+		return append(defs, browserVisualToolDefs()...)
 	}
-	return browserNonVisualToolDefs()
+	return append(defs, browserNonVisualToolDefs()...)
 }
 
 func browserNonVisualToolDefs() []ToolDef {
@@ -335,18 +337,19 @@ func browserSnapshotToolDef(visual bool) ToolDef {
 
 func (r *Registry) registerBrowserTools() {
 	if r.browser == nil || !r.browser.Enabled() {
-		delete(r.handlers, "browser_start")
-		delete(r.handlers, "browser_stop")
-		delete(r.handlers, "browser_navigate")
-		delete(r.handlers, "browser_click")
-		delete(r.handlers, "browser_click_coordinate")
-		delete(r.handlers, "browser_fill")
-		delete(r.handlers, "browser_press")
-		delete(r.handlers, "browser_screenshot")
-		delete(r.handlers, "browser_wait")
-		delete(r.handlers, "browser_snapshot")
+		for _, name := range []string{
+			"browser_run_task", "browser_task_status", "browser_task_cancel",
+			"browser_start", "browser_stop", "browser_navigate", "browser_click",
+			"browser_click_coordinate", "browser_fill", "browser_press",
+			"browser_screenshot", "browser_wait", "browser_snapshot",
+		} {
+			delete(r.handlers, name)
+		}
 		return
 	}
+	r.handlers["browser_run_task"] = r.execBrowserRunTask
+	r.handlers["browser_task_status"] = r.execBrowserTaskStatus
+	r.handlers["browser_task_cancel"] = r.execBrowserTaskCancel
 	r.handlers["browser_start"] = r.execBrowserStart
 	r.handlers["browser_stop"] = r.execBrowserStop
 	r.handlers["browser_navigate"] = r.execBrowserNavigate

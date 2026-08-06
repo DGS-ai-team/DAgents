@@ -66,7 +66,7 @@ func (c *Config) BrowserDefaultTimeoutMS() int {
 // BrowserMaxSessions 返回并发 browser session 上限。
 func (c *Config) BrowserMaxSessions() int {
 	if c == nil || c.Browser.MaxSessions <= 0 {
-		return 1
+		return 8
 	}
 	return c.Browser.MaxSessions
 }
@@ -108,7 +108,8 @@ func (c *Config) applyBrowserDefaults() {
 		c.Browser.OutputDir = "browser"
 	}
 	if c.Browser.MaxSessions <= 0 {
-		c.Browser.MaxSessions = 1
+		// 伴生方案：每主 Agent 一个 Chrome；默认允许多会话并发。
+		c.Browser.MaxSessions = 8
 	}
 	if c.Browser.DebugPort <= 0 {
 		c.Browser.DebugPort = 9222

@@ -71,7 +71,7 @@ func (m *Manager) maxSessions() int {
 	}
 	n := m.cfg.MaxSessions
 	if n <= 0 {
-		n = 1
+		n = 8
 	}
 	return n
 }

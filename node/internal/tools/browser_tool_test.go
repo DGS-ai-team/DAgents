@@ -81,6 +81,7 @@ func TestBrowserToolsWithMockManager(t *testing.T) {
 		names[def.Function.Name] = true
 	}
 	for _, want := range []string{
+		"browser_run_task", "browser_task_status", "browser_task_cancel",
 		"browser_start", "browser_stop", "browser_navigate", "browser_click",
 		"browser_fill", "browser_press", "browser_screenshot", "browser_wait",
 		"browser_snapshot",
@@ -93,7 +94,7 @@ func TestBrowserToolsWithMockManager(t *testing.T) {
 		t.Fatal("browser_click_coordinate should be hidden when multimodal disabled")
 	}
 
-	ctx := WithSession(context.Background(), "sess-browser")
+	ctx := WithSession(context.Background(), "sess-main")
 	out, err := reg.Execute(ctx, "browser_start", `{}`)
 	if err != nil {
 		t.Fatal(err)
@@ -133,6 +134,27 @@ func TestBrowserToolsWithMockManager(t *testing.T) {
 	}
 	if !strings.Contains(out, `"clicked_index":7`) {
 		t.Fatalf("click out = %s", out)
+	}
+
+	// 任务级派发：session → companion session_key
+	mock.Handler = func(_ context.Context, req browser.Request) (browser.Response, error) {
+		if req.Op == "start" {
+			return browser.Response{OK: true}, nil
+		}
+		if req.Op == "run_task" {
+			if req.SessionKey != "sess-main-browser" {
+				return browser.Response{OK: false, Error: "bad session " + req.SessionKey}, nil
+			}
+			return browser.Response{OK: true, Detail: map[string]any{"task_id": "btask-1", "status": "queued"}}, nil
+		}
+		return browser.Response{OK: true}, nil
+	}
+	out, err = reg.Execute(ctx, "browser_run_task", `{"task":"open https://example.com"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"task_id":"btask-1"`) {
+		t.Fatalf("run_task out = %s", out)
 	}
 }
 

@@ -23,7 +23,7 @@ class BrowserServiceSettings:
     ignore_https_errors: bool = False
     default_timeout_ms: int = 30000
     output_dir: str = "browser"
-    max_sessions: int = 1
+    max_sessions: int = 8
     llm: LLMSettings | None = None
 
 
@@ -48,7 +48,7 @@ def load_settings(config_path: str | None) -> BrowserServiceSettings:
         ignore_https_errors=bool(browser.get("ignore_https_errors") or False),
         default_timeout_ms=int(browser.get("default_timeout_ms") or 30000),
         output_dir=str(browser.get("output_dir") or "browser").strip("/") or "browser",
-        max_sessions=int(browser.get("max_sessions") or 1),
+        max_sessions=int(browser.get("max_sessions") or 8),
         llm=llm_settings_from_config(raw),
     )
 

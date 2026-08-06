@@ -57,6 +57,28 @@ func TestExpandBuiltinToolGroups(t *testing.T) {
 	}
 }
 
+func TestExpandBuiltinToolGroupsBrowser(t *testing.T) {
+	got := ExpandBuiltinToolGroups([]string{"browser"})
+	want := []string{"browser_run_task", "browser_task_cancel", "browser_task_status"}
+	if len(got) != len(want) {
+		t.Fatalf("got=%v want=%v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got=%v want=%v", got, want)
+		}
+	}
+	ops := ExpandBuiltinToolGroups([]string{"browser_ops"})
+	if len(ops) < 10 {
+		t.Fatalf("browser_ops too small: %v", ops)
+	}
+	for _, name := range ops {
+		if name == "browser_run_task" {
+			t.Fatal("browser_ops should not include task tools")
+		}
+	}
+}
+
 func TestExpandBuiltinToolGroupsEmpty(t *testing.T) {
 	if got := ExpandBuiltinToolGroups(nil); got != nil {
 		t.Fatalf("got=%v want nil", got)
