@@ -209,7 +209,6 @@ async function submit() {
     allow_tool_names: tools,
     prompt: {
       soul_md: draft.soulMd,
-      user_md: "",
       custom_md: draft.customMd,
     },
   };

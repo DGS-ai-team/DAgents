@@ -24,7 +24,11 @@ from manage.workgroup.history import (
     open_tool_call_ids,
 )
 from manage.workgroup.llm_chat import ChatResult, ChatToolCall, LLMChatClient, resolve_chat_client
-from manage.workgroup.member_tools import build_member_system_prompt, member_openai_tools
+from manage.workgroup.member_tools import (
+    build_member_system_prompt,
+    host_env_from_registry,
+    member_openai_tools,
+)
 from manage.workgroup.mentions import resolve_direct_member
 from manage.workgroup.models import (
     ActorRun,
@@ -51,10 +55,14 @@ _LEADER_SYSTEM_RULES = (
     "你只通过 Manage 侧编排工具进行协调，绝不亲自执行 shell / 文件系统 / 浏览器操作。"
     "用 list_workgroup_members 查看成员状态与工具白名单。"
     "用 assign_workgroup_task 把实际工作委派给就绪成员；"
-    "成员会跑自己的 LLM 循环，并调用自己的工具完成你发布的任务"
+    "成员会跑自己的 LLM 循环，并调用自己的工具完成你发布的任务。"
     "指令写清楚；不要编造宿主机绝对路径——"
-    "发布任务时，请写清楚任务内容，注意事项，以及结论的结构要求，如果你有任务的路径要求，也一并写清楚，特别是成员过去没有成功执行的任务。"
-    "成员沙箱只允许工作区相对路径"
+    "发布任务时，请写清楚任务内容、注意事项，以及结论的结构要求；"
+    "如果你有任务的路径要求，也一并写清楚，特别是成员过去没有成功执行的任务。"
+    "成员沙箱只允许工作区相对路径。"
+    "重要：工作组内各成员所在的运行环境（操作系统、工作区、可达路径等）不一定一致；"
+    "对待路径、文件位置、本机命令等与所属环境相关联的信息，必须按成员各自的 Home Node / 工作区区分其正确性，"
+    "不要把某一成员环境下的路径或假设套用到其他成员或全局。"
     "任务完成后，向组内给出简洁的最终答复。"
 )
 
@@ -1006,10 +1014,19 @@ class TurnKernel:
         )
         tools = member_openai_tools(list(spec.tools.allow_names or []))
         allow = {str(n).strip() for n in (spec.tools.allow_names or []) if str(n).strip()}
+        group = self._store.get_workgroup(workgroup_id)
+        runtime = self._store.member_runtime(member_id)
+        host_env = host_env_from_registry(self._registry_store, member.home_node_id)
         system = build_member_system_prompt(
             soul_md=spec.prompt.soul_md,
-            user_md=spec.prompt.user_md,
             custom_md=spec.prompt.custom_md,
+            host_env=host_env,
+            member_id=member_id,
+            display_name=member.display_name,
+            workgroup_id=workgroup_id,
+            workgroup_name=(group.display_name if group is not None else ""),
+            created_by_node_id=(group.created_by_node_id if group is not None else ""),
+            workspace_path=str(runtime.get("workspace_path") or ""),
         )
         max_loops = max(1, int(spec.max_tool_loops or self._max_tool_loops))
         steps = 0
