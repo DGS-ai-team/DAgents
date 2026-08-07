@@ -29,9 +29,9 @@ const error = ref("");
 const remote = ref(null);
 const expandedCmd = ref({});
 const sectionOpen = ref({
-  terminal: true,
-  files: true,
-  children: true,
+  terminal: false,
+  files: false,
+  children: false,
 });
 
 /** 工作组主栏：不展示上一智能体的活动残留 */
