@@ -128,5 +128,24 @@ class MemberSystemPromptTests(unittest.TestCase):
         self.assertEqual(missing.get("os_kind", ""), "")
 
 
+class LeaderSystemPromptTests(unittest.TestCase):
+    def test_mentions_heterogeneous_member_environments(self) -> None:
+        prompt = build_leader_system_prompt(
+            workgroup=WorkGroup(
+                workgroup_id="wg_01h00000000000000000000001",
+                display_name="调研组",
+                status="active",
+                created_by_node_id="node-a",
+                llm_profile_id="default",
+                llm_profile_revision="1",
+                workspace=WorkgroupWorkspace(),
+                created_at="2026-01-01T00:00:00Z",
+            )
+        )
+        self.assertIn("工作组内各成员所在的运行环境", prompt)
+        self.assertIn("按成员各自的 Home Node", prompt)
+        self.assertIn("调研组", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
