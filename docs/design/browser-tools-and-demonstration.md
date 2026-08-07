@@ -2,18 +2,19 @@
 
 本文记录 **Go Agent Node** 侧「录制人在任意网站的操作 → LLM 模仿复现」的产品与技术方案。
 
-**状态（2026-07）**：
+**状态（2026-08）**：
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
-| **Phase 1 / 1.5** | **已落地** | `browser_*` + **模式 A**（Go RemoteDriver + Python **browser-use** 薄服务） |
-| Phase 2–4 | 规划中 | 录制 / 回放 / WebUI |
+| **Phase 1 / 1.5** | **已落地** | **伴生 Agent** + 任务级工具 + **模式 A**（RemoteDriver → `dagents-browser` / browser-use） |
+| Phase 2–4 | 规划中 | 录制 / 回放 / WebUI（仍可能复用 CDP；产品回放不再依赖已退役的细粒度 `browser_*`） |
 
-**架构决策（2026-07，已认可）**：
+**架构决策（2026-07，已认可；2026-08 产品面收窄）**：
 
 1. 内网机器 **均已安装 Chrome**（含 Server 2012/2016/2019）；**不**使用 Playwright 自带 Chromium。
 2. **模式 A（已定稿）**：Go `BrowserManager` → `RemoteDriver` → 本机 **`dagents-browser`**（Python **browser-use** + CDP）；Go 内不嵌入 rod/CDP。
-3. 演示轨迹 **`demonstration/v1`** 与引擎无关；步骤可来自 CDP 录制或 Chrome 扩展导出。
+3. **主 Agent 仅任务级工具**（`browser_run_task` / `browser_task_status` / `browser_task_cancel`）；细粒度 DOM 动作在 sidecar `browser_use.Agent` 内闭环。
+4. 演示轨迹 **`demonstration/v1`** 与引擎无关；步骤可来自 CDP 录制或 Chrome 扩展导出（Phase 2+）。
 
 **相关索引**：[go-node-compatibility.md](../architecture/go-node-compatibility.md)、[go-node-internals.md](../architecture/go-node-internals.md)、[04-能力与策略.md](../handbook/04-能力与策略.md)。
 
@@ -23,9 +24,10 @@
 
 ### 1.1 用户目标
 
-1. **录制**：人在 **本机 Chrome** 中操作任意网站，生成结构化 **操作轨迹**。
-2. **模仿**：LLM 读取轨迹，在 **同一台机器** 上分步复现（经 `browser_*`，非 `bash_run` 黑盒脚本）。
-3. **对齐**：失败时用 **截图 + vision**（`read_image` / `multimodal.enabled`）修正 selector。
+1. **录制**（Phase 2）：人在 **本机 Chrome** 中操作任意网站，生成结构化 **操作轨迹**。
+2. **日常自动化（已落地）**：主 Agent 用自然语言任务派发给伴生 sidecar（`browser_run_task`）。
+3. **模仿回放**（Phase 3）：LLM / Skill 读取轨迹，在 **同一台机器** 上复现（优先任务级或内部 CDP；非 `bash_run` 黑盒脚本）。
+4. **对齐**：失败时用任务归档截图 + vision（`read_image` / `multimodal.enabled`）辅助修正。
 
 ### 1.2 已确认约束
 
@@ -52,11 +54,11 @@
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                        Go Agent Node                              │
-│  browser_* tools ──► BrowserManager ──► RemoteDriver (HTTP)      │
+│  browser_run_task* ──► BrowserManager ──► RemoteDriver (HTTP)    │
 │       │                      │              │                     │
-│  demonstration_*             │              ▼                     │
+│  demonstration_*（规划）      │              ▼                     │
 │       │                      │     dagents-browser (Python)       │
-│       └──────────────────────┘     browser-use + 本机 Chrome CDP  │
+│       └──────────────────────┘     browser_use.Agent + Chrome CDP │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -64,10 +66,10 @@
 
 | 层 | 职责 |
 |----|------|
-| **`browser_*`（Go）** | Agent 执行面、Policy/HITL、URL 校验 |
-| **`dagents-browser`（Python）** | browser-use DOM 序列化 + CDP 动作 |
+| **任务级 `browser_*`（Go）** | 主 Agent 执行面、伴生会话、Policy/HITL |
+| **`dagents-browser`（Python）** | session + `browser_use.Agent` 闭环（内部 DOM/CDP） |
 | **录制（Phase 2）** | CDP 监听或扩展；写 `demonstration/v1` |
-| **`demonstration_*`** | 读 manifest → 映射 `browser_*` 分步回放 |
+| **`demonstration_*`（规划）** | 读 manifest → 回放（不再依赖已退役细粒度 LLM 工具） |
 
 详见 [browser-remote-service-mode-a.md](./browser-remote-service-mode-a.md)。
 
@@ -106,9 +108,9 @@
 
 | 阶段 | 内容 | 交付物 |
 |------|------|--------|
-| **Phase 1 / 1.5** | Browser Tools + 模式 A | ✅ `browser_*`、RemoteDriver、`browser-service`（browser-use） |
+| **Phase 1 / 1.5** | 伴生任务 + 模式 A | ✅ `browser_run_task*`、RemoteDriver、`browser-service`（browser-use Agent） |
 | **Phase 2** | 录制 | Go CDP 事件 → `demonstration/v1`；可选 Chrome 扩展导出 |
-| **Phase 3** | 回放 | `demonstration_*` + `browser_*` + Skill |
+| **Phase 3** | 回放 | `demonstration_*` + 任务/内部 CDP + Skill |
 | **Phase 4** | WebUI + HTTP API | record start/stop、demo 列表 |
 
 ---
@@ -120,8 +122,8 @@
 | 路径 | 说明 |
 |------|------|
 | `node/internal/browser/remote_driver.go` | Go → HTTP |
-| `node/internal/browser/manager.go` | session 管理、URL 校验 |
-| `browser-service/dagents_browser/` | browser-use 驱动 Chrome |
+| `node/internal/browser/manager.go` / `manager_task.go` | session + 任务派发 |
+| `browser-service/dagents_browser/` | browser-use Agent 驱动 Chrome |
 | `shared/config/browser.go` | `service_url`、`chrome_path`、`cdp_url` 等 |
 
 ### 6.2 配置
@@ -136,7 +138,7 @@ browser:
   debug_port: 9222
   default_timeout_ms: 30000
   output_dir: browser
-  max_sessions: 1
+  max_sessions: 8
   allowed_url_schemes: [https, http]
   ignore_https_errors: false
 ```
@@ -149,57 +151,28 @@ browser:
 
 ---
 
-## 7. 工具清单
+## 7. 工具清单（主 Agent）
 
-`browser_start` / `browser_stop` / `browser_navigate` / `browser_click` / `browser_fill` / `browser_press` / `browser_screenshot` / `browser_wait` / `browser_snapshot`。
+| 工具 | 说明 |
+|------|------|
+| `browser_run_task` | 向伴生 session 派发自然语言任务（默认 wait=true，返回 summary） |
+| `browser_task_status` | 查询任务状态 / 扁平结果（summary、urls、screenshot_paths 等） |
+| `browser_task_cancel` | 取消运行中任务 |
 
-### 7.1 交互模式（随 `multimodal.enabled` 自动切换）
-
-| `multimodal.enabled` | 模式 | 主路径 |
-|----------------------|------|--------|
-| `false`（默认） | **非视觉** | `browser_snapshot` → `llm_representation` + **index** → `browser_click` / `browser_fill` |
-| `true` | **视觉** | `browser_snapshot`（**自动截图 + 注入 vision**）→ `browser_click_coordinate(x,y)`；index/selector 作 fallback |
+启用 `tools.enabled_groups: [browser]` 且 `browser.enabled: true` 时，Node 为每个主 Agent 创建持久伴生 `{agent_id}-browser`；Chrome `session_key` 为伴生 id。
 
 ```text
-# 非视觉（multimodal.enabled: false）
-browser_start → browser_navigate → browser_snapshot → browser_click(index=N)
-
-# 视觉（multimodal.enabled: true，须 vision 模型）
-browser_start → browser_navigate → browser_snapshot  # 截图自动注入 LLM
-  → browser_click_coordinate(x, y) / browser_fill(index=…)
-browser_screenshot  # 亦自动注入，无需 read_image
+主 Agent: browser_run_task(task="打开 example.com 并提取标题")
+        → Manager.RunTask* → sidecar op=run_task
+        → browser_use.Agent 内部 navigate/click/extract…
+        → browser_task_status / 同步 wait 回灌 summary + 截图引用
 ```
 
-| 工具 | 非视觉 | 视觉 |
-|------|--------|------|
-| `browser_snapshot` | `llm_representation` + index 列表 | 同上 + **PNG 截图自动 vision 注入** |
-| `browser_click` | **index** 主路径 | fallback |
-| `browser_click_coordinate` | 不可用 | **坐标主路径** |
-| `browser_screenshot` | 返回路径，需 `read_image` | **自动 vision 注入** |
-
-**扩展工具（对齐 browser-use 原生 action）**：
-
-| 工具 | browser-use | 说明 |
-|------|-------------|------|
-| `browser_search` | `search` | 搜索引擎查询 |
-| `browser_go_back` | `go_back` | 后退 |
-| `browser_scroll` | `scroll` | 滚动页面/元素 |
-| `browser_find_text` | `find_text` | 滚动到文本 |
-| `browser_switch_tab` | `switch` | 切换标签（`tab_id` 见 snapshot `detail.tabs`） |
-| `browser_close_tab` | `close` | 关闭标签 |
-| `browser_extract` | `extract` | 页面 LLM 提取（需 config `llm.model`） |
-| `browser_evaluate` | `evaluate` | 执行 JS |
-| `browser_find_elements` | `find_elements` | CSS 查元素 |
-| `browser_search_page` | `search_page` | 页面内 grep |
-| `browser_upload_file` | `upload_file` | 上传 FS_ROOT 内文件 |
-| `browser_dropdown_options` | `dropdown_options` | 下拉选项列表 |
-| `browser_select_dropdown` | `select_dropdown` | 选择下拉项 |
+细粒度 `browser_navigate` / `browser_click` / `browser_snapshot` 等 **已从 LLM 工具面与 Go Manager / HTTP op 面退役**；仅存于历史文档与 Phase 2+ 规划语境。
 
 配置示例：
 
 ```yaml
-multimodal:
-  enabled: true   # 开启后 browser_* 自动切视觉模式
 browser:
   enabled: true
   service_url: http://127.0.0.1:18766
@@ -207,7 +180,7 @@ tools:
   enabled_groups: [browser]
 ```
 
-详见 `node/internal/tools/browser_tool.go` 与 `node/internal/browser/README.md`。
+详见 `node/internal/tools/browser_tool.go`、`browser_tool_task.go` 与 `node/internal/browser/README.md`。
 
 ---
 
@@ -252,7 +225,7 @@ tools:
 
 ## 9. Phase 3：模仿回放
 
-`demonstration_load` → `browser_start`（attach 同 profile）→ `demonstration_replay_step` / 直接 `browser_*` → 失败 vision 对齐。
+`demonstration_load` → attach 同 profile → `demonstration_replay_step` / 任务级复述 → 失败 vision 对齐。
 
 Skill 禁止默认 `bash_run` Playwright 脚本。
 
@@ -277,7 +250,7 @@ Skill 禁止默认 `bash_run` Playwright 脚本。
 ## 12. 安全与合规
 
 - CDP 端口 **127.0.0.1**；禁止暴露到内网网卡。  
-- `browser_start` / `browser_navigate` 默认 HITL。  
+- `browser_run_task` 默认 HITL（种子 `always`，可按 Agent 策略调整）。  
 - 内网 URL 可选 host 白名单（P2）。  
 - manifest 密码字段 `redacted: true`。  
 - 演示数据默认不出 `fs_root`。
@@ -286,12 +259,12 @@ Skill 禁止默认 `bash_run` Playwright 脚本。
 
 ## 13. 验收标准
 
-**Phase 1 / 1.5（CDP）**
+**Phase 1 / 1.5（伴生 + CDP）**
 
-1. Win Server **2016/2019** 内网 Chrome 上：`browser_start` → `navigate` → `click` → `screenshot` 成功。  
+1. Win Server **2016/2019** 内网 Chrome 上：`browser_run_task` 可完成或失败可读；归档 / 截图引用可见。  
 2. **2012 R2** 在内网 Chrome 验收矩阵内通过同等 smoke。  
-3. 无 Node.js 进程；`go test` 绿。  
-4. SSO 场景：attach 已登录 Chrome 可回放登录后路径（POC）。
+3. 无 Node.js 进程；`go test` 绿；sidecar 仅接受任务级 `op`。  
+4. SSO 场景：attach 已登录 Chrome（`cdp_url`）可执行登录后任务（POC）。
 
 **Phase 2–3**：同初稿，engine=`cdp-chrome`。
 
@@ -300,7 +273,7 @@ Skill 禁止默认 `bash_run` Playwright 脚本。
 ## 14. 后续扩展
 
 - `browser_connect`：显式 attach 用户已打开的 Chrome（仅 CDP URL）。  
-- `browser_snapshot`：DOM / a11y 摘要。  
+- Demonstration 录制 / 回放（Phase 2–4）。  
 - 远程 browser 执行器（老 Node 无 Chrome 时的 A2A 跳板，非 MVP）。  
 - UIA 兜底（无 Chrome / 纯 IE 控件，极少数）。
 
@@ -314,3 +287,4 @@ Skill 禁止默认 `bash_run` Playwright 脚本。
 | 2026-07-01 | Phase 1 过渡 sidecar（已废弃） |
 | 2026-07-01 | **架构修订**：CDP attach + Go 为主路径 |
 | 2026-07-01 | **模式 A**：RemoteDriver + `browser-service`（browser-use）；删除 Go rod/CDP 与 interim Go 薄服务 |
+| 2026-08 | **伴生任务模型**：主 Agent 仅 `browser_run_task*`；退役细粒度 LLM 工具与 Manager/HTTP op |

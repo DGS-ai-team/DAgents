@@ -25,6 +25,7 @@
 - **能力页：Web UI 固定挂载**：移除「Web 界面」开关；`/ui/` 始终挂载，setup PATCH 忽略 `ui_enabled=false`。
 - **工具组随进程能力显隐**：未启用浏览器服务 / 企业微信推送时，Agent 创建与设置页不再展示对应工具组；`GET /v1/setup/config` 增加 `available_tool_groups`。
 - **工作组成员按 Node 工具组配置**：新建/编辑成员时从本 Node `GET /v1/workgroups/meta/member-tools` 拉取工具组清单（fs/bash），勾选组后展开为 `allow_tool_names`。
+- **收窄 browser Manager / sidecar HTTP op**：Go `BrowserManager` 与 `dagents-browser` 仅保留 session 生命周期与任务级 `run_task` / `task_status` / `task_cancel`；删除细粒度 navigate/click 等 Manager API、`manager_extended`、sidecar `action_runner` 与对应 `op` 分发。文档对齐伴生模型。
 - **浏览器引用 UX**：任务截图注册为 media 并在可折叠「浏览器引用」中展示；HITL 审批突出 `browser_run_task` 自然语言目标；工具气泡结果改为「目标 · 短状态」，完整结论留给引用卡片。
 - **退役细粒度 `browser_*` LLM 工具**：删除 `browser_ops` 组与 `browser_navigate` / `browser_click` 等 Agent 工具定义与 handler；`browser` 组仅保留 `browser_run_task` / `browser_task_status` / `browser_task_cancel`。sidecar 任务路径与 Manager Start/Stop 保留（后续可再收窄 HTTP op 面）。
 - **存量 Agent 策略种子缺项合并**：Node 启动时对 `.runtime/policy/tool.approval.txt` 与 `agents.db` 中全部 `agent_policy` 仅追加 packaging 种子中缺失的工具模式（如 `browser_run_task`），不覆盖用户已改档位；`EnsureAgentPolicy` 读存量行时同样补齐。

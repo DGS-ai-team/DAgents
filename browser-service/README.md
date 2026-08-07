@@ -1,6 +1,8 @@
 # browser-service（dagents-browser）
 
-模式 A 薄服务：**browser-use** 驱动本机 Chrome（CDP），HTTP 契约与 Go `browser.Request/Response` 对齐。
+模式 A 薄服务：**browser-use Agent** 驱动本机 Chrome（CDP），HTTP 契约与 Go `browser.Request/Response` 对齐。
+
+对外 `op` 仅：`ping` / `start` / `stop` / `run_task` / `task_status` / `task_cancel`。
 
 ## 启动
 
