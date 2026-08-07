@@ -162,10 +162,18 @@ async function removeTriggerConfirmed(item) {
 }
 
 function targetHint(item) {
-  let hint = String(item.session_target_mode || item.agent_target_mode || "—");
+  const mode = String(item.session_target_mode || item.agent_target_mode || "").trim();
+  const modeLabel =
+    {
+      latest_active_user: "最近活跃对话",
+      bound_agent: "绑定智能体",
+      bound_session: "绑定会话",
+      fixed_agent: "指定智能体",
+      fixed_session: "指定会话",
+    }[mode] || (mode || "未指定");
   const bound = item.target_bound_agent_id || item.target_session_id;
-  if (bound) hint += ` · ${shortId(bound, 20)}`;
-  return hint;
+  if (bound) return `${modeLabel} · ${shortId(bound, 12)}`;
+  return modeLabel;
 }
 
 onMounted(load);
@@ -175,14 +183,14 @@ onMounted(load);
   <section class="panel panel-overlay__card command-panel triggers-panel" :class="{ 'settings-embedded-panel': embedded }">
     <header class="panel__header command-panel__header">
       <div>
-        <div class="panel__title">定时任务</div>
+        <div v-if="!embedded" class="panel__title">定时任务</div>
       </div>
       <div class="command-panel__header-actions">
         <button type="button" class="btn btn--primary btn--sm" :disabled="loading || editingId === 'new'" @click="startCreate">
           新建
         </button>
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "摘要" : "详情" }}
+          {{ showRaw ? "列表" : "JSON" }}
         </button>
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
         <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
@@ -233,7 +241,7 @@ onMounted(load);
                       {{ item.enabled ? "已启用" : "已禁用" }}
                     </span>
                   </div>
-                  <div class="command-card__meta command-card__meta--mono">{{ shortId(item.trigger_id, 36) }}</div>
+                  <div class="command-card__meta command-card__meta--mono">{{ shortId(item.trigger_id, 12) }}</div>
                   <dl class="command-kv-list command-kv-list--compact">
                     <div class="command-kv">
                       <dt>调度</dt>

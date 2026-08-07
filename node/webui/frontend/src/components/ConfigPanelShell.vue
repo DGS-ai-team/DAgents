@@ -20,6 +20,7 @@ const emit = defineEmits(["refresh", "save"]);
         <div class="panel__title">{{ title }}</div>
         <div v-if="subtitle || !configWritable" class="setup-config-panel__subtitle">
           <template v-if="subtitle">{{ subtitle }}</template>
+          <template v-if="subtitle && !configWritable"> · </template>
           <span v-if="!configWritable">只读</span>
         </div>
       </div>

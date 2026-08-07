@@ -580,7 +580,15 @@ defineExpose({
           >
             <span class="chat__activity-pill-label">{{ compressionStatusText }}</span>
           </span>
-          <span v-if="workerStrip" class="chat__worker-strip">{{ workerStrip }}</span>
+          <button
+            v-if="workerStrip"
+            type="button"
+            class="chat__worker-strip chat__worker-strip--btn"
+            title="在侧栏活动中查看并取消子 Agent"
+            @click="openActivityRail"
+          >
+            {{ workerStrip }}
+          </button>
           <span v-if="inputStripLeftText" class="chat__input-strip-left">{{ inputStripLeftText }}</span>
         </div>
         <div class="chat__composer-statusline-right">

@@ -72,9 +72,13 @@ export async function syncChildAgentsFromApi() {
   }
 }
 
-export function workerStripText() {
+export function activeChildCount() {
   void remoteWorkerStore.tick;
-  const childActive = entries.size;
+  return entries.size;
+}
+
+export function workerStripText() {
+  const childActive = activeChildCount();
   if (childActive > 0) return `子 Agent ${childActive} 工作中`;
   return "";
 }

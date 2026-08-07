@@ -14,6 +14,7 @@ import brandIcon from "../assets/brand-icon.png";
 import ActivityPanel from "./ActivityPanel.vue";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
+import { activeChildCount, remoteWorkerStore } from "../stores/remoteWorkers.js";
 
 const RAIL_CACHE_TTL_MS = 5_000;
 const railCache = {
@@ -85,7 +86,11 @@ const activitySnap = computed(() => {
   return deriveActivityFromTranscript(transcriptStore.entries);
 });
 const activityBadge = computed(() => {
-  const n = (activitySnap.value.file_count || 0) + (activitySnap.value.command_count || 0);
+  void remoteWorkerStore.tick;
+  const n =
+    (activitySnap.value.file_count || 0) +
+    (activitySnap.value.command_count || 0) +
+    (route.name === "workgroups" ? 0 : activeChildCount());
   return n > 0 ? n : 0;
 });
 

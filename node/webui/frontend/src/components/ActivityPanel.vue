@@ -5,7 +5,14 @@ import * as api from "../api/node.js";
 import { chromeStore } from "../stores/chrome.js";
 import { agentStore } from "../stores/agent.js";
 import { transcriptStore } from "../stores/transcript.js";
+import { remoteWorkerStore } from "../stores/remoteWorkers.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
+import {
+  useChildAgents,
+  formatChildAgentStatus,
+  isChildAgentActive,
+} from "../composables/useChildAgents.js";
+import { shortId } from "../utils/panelFormat.js";
 
 const props = defineProps({
   /** 当前 Agent 列表行（含 origin / host） */
@@ -24,6 +31,7 @@ const expandedCmd = ref({});
 const sectionOpen = ref({
   terminal: true,
   files: true,
+  children: true,
 });
 
 /** 工作组主栏：不展示上一智能体的活动残留 */
@@ -53,6 +61,21 @@ const commands = computed(() => (remote.value?.commands?.length ? remote.value.c
 const fileCount = computed(() => files.value.length);
 const cmdCount = computed(() => commands.value.length);
 
+const agentId = computed(() => String(agentStore.agentId || "").trim());
+const {
+  loading: childrenLoading,
+  error: childrenError,
+  items: childItems,
+  cancellingId,
+  load: loadChildren,
+  cancelChild,
+} = useChildAgents(agentId);
+
+const activeChildCount = computed(() => {
+  void remoteWorkerStore.tick;
+  return childItems.value.filter((item) => isChildAgentActive(item.status)).length;
+});
+
 const summaryLine = computed(() => {
   if (inWorkgroupContext.value && !fileCount.value && !cmdCount.value) {
     return workgroupContextKey.value ? "工作组暂无本地活动" : "选择工作组查看活动";
@@ -60,6 +83,9 @@ const summaryLine = computed(() => {
   const parts = [];
   if (fileCount.value) parts.push(`改动 ${fileCount.value} 个文件`);
   if (cmdCount.value) parts.push(`执行 ${cmdCount.value} 条命令`);
+  if (!inWorkgroupContext.value && activeChildCount.value) {
+    parts.push(`子 Agent ${activeChildCount.value}`);
+  }
   return parts.join(" · ") || "暂无活动";
 });
 
@@ -154,6 +180,7 @@ async function refresh() {
   } finally {
     loading.value = false;
   }
+  void loadChildren();
 }
 
 watch(
@@ -162,6 +189,13 @@ watch(
     void refresh();
   },
   { immediate: true },
+);
+
+watch(
+  () => remoteWorkerStore.tick,
+  () => {
+    if (!inWorkgroupContext.value && agentId.value) void loadChildren();
+  },
 );
 
 defineExpose({ refresh });
@@ -291,6 +325,69 @@ defineExpose({ refresh });
                 <span v-if="fileParts(f.path).dir" class="activity-row__meta">{{ fileParts(f.path).dir }}</span>
                 <span v-if="f.rejected" class="activity-row__meta activity-row__meta--danger">已拒绝</span>
               </span>
+            </li>
+          </ul>
+        </li>
+
+        <!-- 临时子 Agent -->
+        <li v-if="!inWorkgroupContext" class="activity-cap">
+          <button
+            type="button"
+            class="activity-row activity-row--toggle"
+            title="临时子 Agent"
+            :aria-expanded="sectionOpen.children"
+            @click="toggleSection('children')"
+          >
+            <span class="activity-row__icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="5.5" r="2" stroke="currentColor" stroke-width="1.15" />
+                <path
+                  d="M3.5 12.5c.6-2 2.2-3 4.5-3s3.9 1 4.5 3"
+                  stroke="currentColor"
+                  stroke-width="1.15"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </span>
+            <span class="activity-row__body">
+              <span class="activity-row__name">临时子 Agent</span>
+            </span>
+            <span v-if="activeChildCount" class="activity-cap__count">{{ activeChildCount }}</span>
+            <span class="activity-row__chevron" aria-hidden="true">{{ sectionOpen.children ? "▾" : "▸" }}</span>
+          </button>
+          <ul v-if="sectionOpen.children" class="activity-rows activity-rows--nested">
+            <li v-if="!agentId" class="activity-rows__empty">先打开一个智能体</li>
+            <li v-else-if="childrenLoading && !childItems.length" class="activity-rows__empty">加载中…</li>
+            <li v-else-if="childrenError" class="activity-rows__empty">{{ childrenError }}</li>
+            <li v-else-if="!childItems.length" class="activity-rows__empty">暂无运行中的子 Agent</li>
+            <li
+              v-for="item in childItems"
+              :key="item.child_agent_id"
+              class="activity-row activity-row--child"
+            >
+              <span
+                class="activity-status"
+                :class="isChildAgentActive(item.status) ? 'activity-status--ok' : 'activity-status--muted'"
+                aria-hidden="true"
+              />
+              <span class="activity-row__body">
+                <span class="activity-row__name">{{
+                  item.purpose?.trim() || shortId(item.child_agent_id, 20)
+                }}</span>
+                <span class="activity-row__meta">
+                  {{ formatChildAgentStatus(item.status) }}
+                  · {{ item.turn_count ?? 0 }}/{{ item.max_turns ?? "—" }}
+                </span>
+              </span>
+              <button
+                v-if="isChildAgentActive(item.status)"
+                type="button"
+                class="activity-row__action"
+                :disabled="cancellingId === item.child_agent_id"
+                @click.stop="cancelChild(item.child_agent_id)"
+              >
+                {{ cancellingId === item.child_agent_id ? "…" : "取消" }}
+              </button>
             </li>
           </ul>
         </li>
@@ -543,6 +640,32 @@ defineExpose({ refresh });
   flex-direction: column;
   gap: 0;
   padding: 2px 4px;
+}
+
+.activity-row--child {
+  align-items: center;
+}
+
+.activity-row__action {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.activity-row__action:hover:not(:disabled) {
+  color: var(--color-danger, #b42318);
+  background: var(--color-surface-hover);
+}
+
+.activity-row__action:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .activity-row__btn {

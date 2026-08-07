@@ -76,8 +76,14 @@ const emit = defineEmits(["submit", "cancel"]);
       </label>
 
       <label class="settings-field">
-        <span class="settings-field__label">门控脚本（可选，仅日历调度；exit 0 才投递任务）</span>
-        <input v-model="form.cmd" class="settings-field__input" type="text" placeholder="例如 test -f /tmp/ready" />
+        <span class="settings-field__label">投递前检查（可选）</span>
+        <input
+          v-model="form.cmd"
+          class="settings-field__input"
+          type="text"
+          placeholder="日历调度：命令成功才投递，例如 test -f /tmp/ready"
+          autocomplete="off"
+        />
       </label>
     </template>
 

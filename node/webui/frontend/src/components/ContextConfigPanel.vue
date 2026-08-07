@@ -35,6 +35,7 @@ onMounted(load);
 <template>
   <ConfigPanelShell
     title="上下文设置"
+    subtitle="进程级压缩阈值与钩子"
     :loading="loading"
     :saving="saving"
     :config-path="configPath"

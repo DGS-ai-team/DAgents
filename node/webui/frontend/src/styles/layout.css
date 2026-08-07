@@ -229,6 +229,15 @@
   line-height: 1.5;
 }
 
+.settings-page__hint a {
+  color: var(--color-primary-strong, #5d5d5d);
+  text-decoration: none;
+}
+
+.settings-page__hint a:hover {
+  text-decoration: underline;
+}
+
 .settings-embedded .panel {
   box-shadow: none;
   border: none;
