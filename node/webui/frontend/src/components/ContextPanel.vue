@@ -16,7 +16,6 @@ const emit = defineEmits(["close"]);
 const loading = ref(false);
 const error = ref("");
 const ctx = ref(null);
-const showRaw = ref(false);
 const expandedRows = ref(new Set());
 
 const agentId = computed(() => agentStore.agentId || "");
@@ -87,26 +86,14 @@ watch(agentId, load);
         <div class="context-panel__subtitle">{{ agentId || "—" }}</div>
       </div>
       <div class="context-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "友好视图" : "JSON" }}
-        </button>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="!agentId || loading" @click="load">刷新</button>
         <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
-
-    <div v-else class="context-panel__toolbar">
-      <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-        {{ showRaw ? "友好视图" : "JSON" }}
-      </button>
-      <button type="button" class="btn btn--ghost btn--sm" :disabled="!agentId || loading" @click="load">刷新</button>
-    </div>
 
     <div class="panel__body context-panel__body">
       <div v-if="!agentId" class="context-panel__empty">请先在对话页选择或创建一个 Agent。</div>
       <div v-else-if="loading" class="context-panel__loading">加载中…</div>
       <div v-else-if="error" class="context-panel__error">{{ error }}</div>
-      <pre v-else-if="showRaw && ctx" class="context-panel__raw">{{ JSON.stringify(ctx, null, 2) }}</pre>
       <template v-else-if="ctx">
         <div class="context-panel__agent-meta">
           当前 Agent <code class="context-panel__agent-id">{{ shortId(agentId, 40) }}</code>

@@ -12,7 +12,6 @@ const emit = defineEmits(["close"]);
 
 const loading = ref(false);
 const error = ref("");
-const showRaw = ref(false);
 const data = ref(null);
 
 async function load() {
@@ -49,19 +48,14 @@ onMounted(load);
         <div class="panel__title">运行状态</div>
         <div v-if="!embedded" class="command-panel__subtitle">当前 Node 与 Agent 状态</div>
       </div>
-      <div class="command-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "摘要" : "详情" }}
-        </button>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
-        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+      <div v-if="!embedded" class="command-panel__header-actions">
+        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
 
     <div class="panel__body command-panel__body">
       <div v-if="loading && !data" class="command-panel__loading">加载中…</div>
       <div v-else-if="error" class="command-panel__error">{{ error }}</div>
-      <pre v-else-if="showRaw && data" class="command-panel__raw">{{ JSON.stringify(data, null, 2) }}</pre>
       <template v-else-if="data">
         <div class="command-panel__stats">
           <div class="command-stat">

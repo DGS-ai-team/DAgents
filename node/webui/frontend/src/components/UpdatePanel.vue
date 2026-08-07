@@ -75,9 +75,8 @@ onMounted(load);
         <div v-if="!embedded" class="panel__title">版本与更新</div>
         <div v-if="!embedded" class="command-panel__subtitle">检查可用更新</div>
       </div>
-      <div class="command-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || applying" @click="load">刷新</button>
-        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+      <div v-if="!embedded" class="command-panel__header-actions">
+        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
 

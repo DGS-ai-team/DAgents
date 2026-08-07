@@ -14,7 +14,6 @@ const loading = ref(false);
 const busySkill = ref("");
 const error = ref("");
 const data = ref(null);
-const showRaw = ref(false);
 
 const resolvedAgentId = computed(() => String(props.agentId || agentStore.agentId || "").trim());
 
@@ -105,19 +104,13 @@ watch(() => props.agentId || agentStore.agentId, load);
 
 <template>
   <section class="panel panel-overlay__card skills-panel" :class="{ 'settings-embedded-panel': embedded }">
-    <header class="panel__header skills-panel__header">
+    <header v-if="!embedded" class="panel__header skills-panel__header">
       <div>
-        <div v-if="!embedded" class="panel__title">技能</div>
-        <div v-if="!embedded" class="skills-panel__subtitle">{{ resolvedAgentId || "—" }}</div>
+        <div class="panel__title">技能</div>
+        <div class="skills-panel__subtitle">{{ resolvedAgentId || "—" }}</div>
       </div>
       <div class="skills-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "列表" : "JSON" }}
-        </button>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || !!busySkill" @click="load">
-          刷新
-        </button>
-        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
 
@@ -125,7 +118,6 @@ watch(() => props.agentId || agentStore.agentId, load);
       <div v-if="!resolvedAgentId" class="skills-panel__empty">请先在对话中打开一个智能体。</div>
       <div v-else-if="loading && !data" class="skills-panel__loading">加载中…</div>
       <div v-else-if="error" class="skills-panel__error">{{ error }}</div>
-      <pre v-else-if="showRaw && data" class="skills-panel__raw">{{ JSON.stringify(data, null, 2) }}</pre>
       <template v-else-if="data">
         <section class="skills-section">
           <h3 class="skills-section__title">已加载 ({{ loadedSkills.length }})</h3>

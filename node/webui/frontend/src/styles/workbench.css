@@ -3467,15 +3467,8 @@ select.settings-field__input {
   color: var(--color-danger);
 }
 
-.context-panel__raw {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  background: var(--color-surface-muted);
-  padding: 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
+.context-panel--embedded {
+  max-height: none;
 }
 
 .context-panel__stats {
@@ -3483,6 +3476,12 @@ select.settings-field__input {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 16px;
+}
+
+.context-panel__agent-meta {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--color-text-muted);
 }
 
 .context-stat {
@@ -3559,18 +3558,6 @@ select.settings-field__input {
 
 .context-panel--embedded {
   max-height: none;
-}
-
-.context-panel__toolbar {
-  display: flex;
-  gap: 8px;
-  padding: 0 0 8px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.settings-embedded .context-panel__toolbar {
-  padding-left: 0;
-  padding-right: 0;
 }
 
 .context-panel__agent-meta {
@@ -3689,17 +3676,6 @@ select.settings-field__input {
 
 .skills-panel__error {
   color: var(--color-danger);
-}
-
-.skills-panel__raw {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  background: var(--color-surface-muted);
-  padding: 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
 }
 
 .skills-section + .skills-section {

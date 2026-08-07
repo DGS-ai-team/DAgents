@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { agentStore } from "../stores/agent.js";
 import { useChildAgents, formatChildAgentStatus, isChildAgentActive } from "../composables/useChildAgents.js";
 import { formatRelativeTime } from "../utils/format.js";
@@ -12,7 +12,6 @@ const props = defineProps({
 const emit = defineEmits(["close"]);
 
 const agentId = computed(() => props.agentId || agentStore.agentId);
-const showRaw = ref(false);
 
 const {
   loading,
@@ -20,7 +19,6 @@ const {
   data,
   items,
   cancellingId,
-  load,
   cancelChild,
 } = useChildAgents(agentId);
 </script>
@@ -33,10 +31,6 @@ const {
         <div class="command-panel__subtitle">{{ agentId || "—" }}</div>
       </div>
       <div class="command-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "友好视图" : "JSON" }}
-        </button>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
         <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
@@ -44,7 +38,6 @@ const {
     <div class="panel__body command-panel__body">
       <div v-if="loading && !data" class="command-panel__loading">加载中…</div>
       <div v-else-if="error" class="command-panel__error">{{ error }}</div>
-      <pre v-else-if="showRaw && data" class="command-panel__raw">{{ JSON.stringify(data, null, 2) }}</pre>
       <template v-else-if="data">
         <section class="command-section">
           <h3 class="command-section__title">临时 Agent ({{ items.length }})</h3>
