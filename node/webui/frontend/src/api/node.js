@@ -310,15 +310,47 @@ export function getMemberToolCatalog() {
   return apiFetch("/v1/workgroups/meta/member-tools");
 }
 
-export function createWorkgroup(displayName) {
+export function createWorkgroup(displayName, { llmProfileId, llmProfileRevision } = {}) {
+  const body = { display_name: displayName };
+  if (llmProfileId) body.llm_profile_id = llmProfileId;
+  if (llmProfileRevision) body.llm_profile_revision = llmProfileRevision;
   return apiFetch("/v1/workgroups", {
     method: "POST",
-    body: { display_name: displayName },
+    body,
   });
+}
+
+export function getWorkgroup(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}`);
+}
+
+export function patchWorkgroup(workgroupId, body) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export function publishWorkgroup(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/publish`, {
+    method: "POST",
+    body: {},
+  });
+}
+
+export function listWorkgroupLLMConfigs(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/llm-configs`);
 }
 
 export function getWorkgroupACL(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/acl`);
+}
+
+export function addWorkgroupCollaborator(workgroupId, nodeId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/collaborators`, {
+    method: "POST",
+    body: { node_id: nodeId },
+  });
 }
 
 export function subscribeWorkgroup(workgroupId) {

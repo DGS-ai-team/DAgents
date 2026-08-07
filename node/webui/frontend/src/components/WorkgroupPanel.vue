@@ -131,7 +131,9 @@ defineExpose({ refresh });
           <div class="wg-panel__avail-row">
             <div>
               <div class="wg-panel__title">{{ wg.display_name || wg.workgroup_id }}</div>
-              <div class="wg-panel__meta">{{ wg.status }}</div>
+              <div class="wg-panel__meta">{{
+                wg.status === "configuring" ? "配置中" : wg.status === "active" ? "已发布" : wg.status
+              }}</div>
             </div>
             <button
               type="button"
@@ -150,7 +152,9 @@ defineExpose({ refresh });
           <div class="wg-panel__avail-row">
             <div>
               <div class="wg-panel__title">{{ wg.display_name || wg.workgroup_id }}</div>
-              <div class="wg-panel__meta">{{ wg.status }}</div>
+              <div class="wg-panel__meta">{{
+                wg.status === "configuring" ? "配置中" : wg.status === "active" ? "已发布" : wg.status
+              }}</div>
             </div>
             <button type="button" class="wg-panel__sub-btn" @click.stop="subscribe(wg.workgroup_id)">
               订阅

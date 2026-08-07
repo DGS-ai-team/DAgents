@@ -321,7 +321,8 @@ async function submitCreateWg() {
   createWgError.value = "";
   try {
     const out = await api.createWorkgroup(name);
-    const id = out?.workgroup_id || out?.id || "";
+    const wg = out?.workgroup || out;
+    const id = String(wg?.workgroup_id || out?.workgroup_id || out?.id || "").trim();
     createWgOpen.value = false;
     await refreshWorkgroups();
     if (id) await openWorkgroup(id);
@@ -631,6 +632,11 @@ defineExpose({
             <span class="nav-rail__item-title" :title="wg.display_name || wg.workgroup_id">
               {{ wg.display_name || wg.workgroup_id }}
             </span>
+            <span
+              v-if="wg.status && wg.status !== 'active'"
+              class="nav-rail__meta"
+              :title="wg.status"
+            >{{ wg.status === "configuring" ? "配置中" : wg.status }}</span>
             <div class="nav-rail__item-actions" @click.stop>
               <button
                 type="button"
