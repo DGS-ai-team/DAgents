@@ -69,13 +69,11 @@ func TestExpandBuiltinToolGroupsBrowser(t *testing.T) {
 		}
 	}
 	ops := ExpandBuiltinToolGroups([]string{"browser_ops"})
-	if len(ops) < 10 {
-		t.Fatalf("browser_ops too small: %v", ops)
+	if ops != nil {
+		t.Fatalf("retired browser_ops should expand to nil, got %v", ops)
 	}
-	for _, name := range ops {
-		if name == "browser_run_task" {
-			t.Fatal("browser_ops should not include task tools")
-		}
+	if err := ValidateBuiltinToolGroups([]string{"browser_ops"}); err == nil {
+		t.Fatal("expected error for retired browser_ops")
 	}
 }
 
