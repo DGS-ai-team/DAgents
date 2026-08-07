@@ -35,7 +35,8 @@ onMounted(load);
 
 <template>
   <ConfigPanelShell
-    title="Node 能力（进程级）"
+    title="能力设置"
+    subtitle="进程级服务与配额；各 Agent 的工具组在 Agents 中配置"
     :loading="loading"
     :saving="saving"
     :config-path="configPath"
@@ -45,20 +46,12 @@ onMounted(load);
     @refresh="load"
     @save="saveCapabilities"
   >
-    <p class="capabilities-intro">
-      Agent 是否具备技能、子 Agent、定时任务等能力，由各 Agent 的工具组决定。此处配置进程级共享参数与服务（浏览器、企业微信等）。
-      未启用「浏览器服务 / 企业微信推送」时，对应工具组不会出现在 Agent 与创建流程中。Web UI 固定挂载，无需开关。
-      单个 Agent 请到
-      <router-link class="capabilities-intro__link" to="/settings/agents">设置 › Agents</router-link>
-      配置工具组。
-    </p>
-
     <section class="settings-section">
-      <div class="settings-section__head">
-        <h2 class="settings-section__title">进程选项</h2>
-      </div>
-      <p class="settings-section__desc">与工具组无关的 Node 进程开关与配额参数。</p>
-      <div class="setup-config-panel__toggles setup-config-panel__toggles--grid">
+      <h2 class="settings-section__title">共享服务</h2>
+      <p class="settings-section__desc">
+        关闭后，对应工具组不会出现在 Agent 创建与设置中。详情随开关展开。
+      </p>
+      <div class="setup-config-panel__toggles">
         <label class="settings-toggle">
           <input v-model="form.features.browser_enabled" type="checkbox" />
           <span class="settings-toggle__label">
@@ -75,53 +68,75 @@ onMounted(load);
           <span>原始消息记录</span>
         </label>
       </div>
-      <div class="setup-config-panel__field-grid">
-        <label class="settings-field">
-          <span class="settings-field__label">技能注入上限</span>
-          <input v-model.number="form.features.skills_max_in_prompt" class="settings-field__input" type="number" min="1" />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">定时任务轮询（秒）</span>
-          <input v-model.number="form.features.triggers_poll_seconds" class="settings-field__input" type="number" min="1" />
-        </label>
-      </div>
     </section>
 
     <section v-if="form.features.browser_enabled" class="settings-section">
-      <div class="settings-section__head">
-        <h2 class="settings-section__title">
-          浏览器服务
-          <span class="badge badge--beta" title="试验功能">Beta</span>
-        </h2>
-      </div>
+      <h2 class="settings-section__title">
+        浏览器服务
+        <span class="badge badge--beta" title="试验功能">Beta</span>
+      </h2>
       <p class="settings-section__desc">
-        需另行启动浏览器服务（dagents-browser）。Agent 启用「浏览器」工具组后会自动创建伴生，
-        主 Agent 通过「浏览器任务」派发；闭环执行需要<strong>非 mock</strong> 的 LLM 档案。
+        需同机运行 dagents-browser。Agent 勾选「浏览器」工具组后自动创建伴生；任务闭环需要非 mock 模型。
       </p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
           <span class="settings-field__label">服务地址</span>
-          <input v-model="form.browser.service_url" class="settings-field__input" type="text" autocomplete="off" />
+          <input
+            v-model="form.browser.service_url"
+            class="settings-field__input"
+            type="text"
+            autocomplete="off"
+            placeholder="http://127.0.0.1:18766"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">默认超时（ms）</span>
-          <input v-model.number="form.browser.default_timeout_ms" class="settings-field__input" type="number" min="1000" />
+          <input
+            v-model.number="form.browser.default_timeout_ms"
+            class="settings-field__input"
+            type="number"
+            min="1000"
+            step="1000"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">最大并发会话</span>
-          <input v-model.number="form.browser.max_sessions" class="settings-field__input" type="number" min="1" />
+          <input
+            v-model.number="form.browser.max_sessions"
+            class="settings-field__input"
+            type="number"
+            min="1"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">截图目录</span>
-          <input v-model="form.browser.output_dir" class="settings-field__input" type="text" autocomplete="off" />
+          <input
+            v-model="form.browser.output_dir"
+            class="settings-field__input"
+            type="text"
+            autocomplete="off"
+            placeholder="browser"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">Chrome 路径（可选）</span>
-          <input v-model="form.browser.chrome_path" class="settings-field__input" type="text" autocomplete="off" />
+          <input
+            v-model="form.browser.chrome_path"
+            class="settings-field__input"
+            type="text"
+            autocomplete="off"
+            placeholder="留空则自动查找"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">CDP 地址（可选）</span>
-          <input v-model="form.browser.cdp_url" class="settings-field__input" type="text" autocomplete="off" />
+          <input
+            v-model="form.browser.cdp_url"
+            class="settings-field__input"
+            type="text"
+            autocomplete="off"
+            placeholder="attach 已打开的 Chrome"
+          />
         </label>
       </div>
       <div class="setup-config-panel__toggles setup-config-panel__toggles--row">
@@ -137,12 +152,9 @@ onMounted(load);
     </section>
 
     <section v-if="form.features.wecom_enabled" class="settings-section">
-      <div class="settings-section__head">
-        <h2 class="settings-section__title">企业微信消息推送</h2>
-      </div>
+      <h2 class="settings-section__title">企业微信推送</h2>
       <p class="settings-section__desc">
-        使用群「消息推送」Webhook（非应用消息 API）。在企业微信创建消息推送后粘贴 Webhook 地址或 key；
-        各 Agent 仍需在工具组中启用 wecom。保存后通常需重启 Node。
+        使用群「消息推送」Webhook。Agent 仍需勾选「企业微信」工具组；保存后通常需重启 Node。
       </p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
@@ -176,61 +188,100 @@ onMounted(load);
           />
         </label>
       </div>
-      <label v-if="form.wecom.has_webhook_key" class="settings-toggle">
-        <input v-model="form.wecom.clear_webhook_key" type="checkbox" />
-        <span>清除已保存的 Webhook Key</span>
-      </label>
+      <div v-if="form.wecom.has_webhook_key" class="setup-config-panel__toggles setup-config-panel__toggles--row">
+        <label class="settings-toggle">
+          <input v-model="form.wecom.clear_webhook_key" type="checkbox" />
+          <span>清除已保存的 Webhook Key</span>
+        </label>
+      </div>
     </section>
 
     <section class="settings-section">
-      <div class="settings-section__head">
-        <h2 class="settings-section__title">子 Agent 配额</h2>
+      <h2 class="settings-section__title">运行配额</h2>
+      <p class="settings-section__desc">技能注入条数与定时任务轮询间隔（进程级）。</p>
+      <div class="setup-config-panel__field-grid">
+        <label class="settings-field">
+          <span class="settings-field__label">技能注入上限</span>
+          <input
+            v-model.number="form.features.skills_max_in_prompt"
+            class="settings-field__input"
+            type="number"
+            min="1"
+          />
+        </label>
+        <label class="settings-field">
+          <span class="settings-field__label">定时任务轮询（秒）</span>
+          <input
+            v-model.number="form.features.triggers_poll_seconds"
+            class="settings-field__input"
+            type="number"
+            min="1"
+          />
+        </label>
       </div>
-      <p class="settings-section__desc">进程级并发与存活上限；是否启用由各 Agent 工具组「子 Agent」决定。</p>
+    </section>
+
+    <section class="settings-section">
+      <h2 class="settings-section__title">子 Agent 配额</h2>
+      <p class="settings-section__desc">
+        进程级并发与存活上限。是否启用由各 Agent 的「子智能体」工具组决定。
+      </p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
           <span class="settings-field__label">默认存活时间（秒）</span>
-          <input v-model.number="form.child_agents.default_ttl_seconds" class="settings-field__input" type="number" min="1" />
+          <input
+            v-model.number="form.child_agents.default_ttl_seconds"
+            class="settings-field__input"
+            type="number"
+            min="1"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">最大存活时间（秒）</span>
-          <input v-model.number="form.child_agents.max_ttl_seconds" class="settings-field__input" type="number" min="1" />
+          <input
+            v-model.number="form.child_agents.max_ttl_seconds"
+            class="settings-field__input"
+            type="number"
+            min="1"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">默认轮次上限</span>
-          <input v-model.number="form.child_agents.default_max_turns" class="settings-field__input" type="number" min="1" />
+          <input
+            v-model.number="form.child_agents.default_max_turns"
+            class="settings-field__input"
+            type="number"
+            min="1"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">最大轮次上限</span>
-          <input v-model.number="form.child_agents.max_max_turns" class="settings-field__input" type="number" min="1" />
+          <input
+            v-model.number="form.child_agents.max_max_turns"
+            class="settings-field__input"
+            type="number"
+            min="1"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">每会话并发上限</span>
-          <input v-model.number="form.child_agents.max_active_per_parent" class="settings-field__input" type="number" min="1" />
+          <input
+            v-model.number="form.child_agents.max_active_per_parent"
+            class="settings-field__input"
+            type="number"
+            min="1"
+          />
         </label>
         <label class="settings-field">
           <span class="settings-field__label">默认等待超时（秒）</span>
-          <input v-model.number="form.child_agents.default_wait_timeout_seconds" class="settings-field__input" type="number" min="1" />
+          <input
+            v-model.number="form.child_agents.default_wait_timeout_seconds"
+            class="settings-field__input"
+            type="number"
+            min="1"
+          />
         </label>
       </div>
     </section>
   </ConfigPanelShell>
 </template>
-
-<style scoped>
-.capabilities-intro {
-  margin: 0 0 14px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--color-text-muted);
-}
-
-.capabilities-intro__link {
-  color: var(--color-primary-strong, #5d5d5d);
-  text-decoration: none;
-}
-
-.capabilities-intro__link:hover {
-  text-decoration: underline;
-}
-</style>
