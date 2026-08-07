@@ -55,6 +55,7 @@ HTTP：`GET /v1/workgroups/meta/member-tools`（Node 本地提供，**不依赖*
 
 - 路径必须是 **成员工作区相对路径**（禁止 `..` / 主机绝对路径）。
 - bash **无额外沙箱**，cwd 默认工作区根；预览环境请谨慎勾选。
+- Console / Node UI 均按 **工具组**（fs / bash）勾选；提交时展开为 `allow_tool_names`。
 
 ---
 

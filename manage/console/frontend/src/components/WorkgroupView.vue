@@ -18,6 +18,14 @@ import {
   patchWorkgroupMember,
   publishWorkgroup,
 } from "../api.js";
+import {
+  FALLBACK_MEMBER_TOOL_GROUPS,
+  defaultMemberGroupIds,
+  expandMemberGroupsToTools,
+  formatMemberGroupLabels,
+  memberGroupsFromAllowNames,
+  memberToolGroupsFromCatalog,
+} from "../utils/memberToolGroups.js";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -32,6 +40,7 @@ const publishingId = ref("");
 const bindingLlmKey = ref("");
 const addingCollaborator = ref(false);
 const creatingMember = ref(false);
+const savingToolsId = ref("");
 const memberFormOpen = ref(false);
 const error = ref("");
 
@@ -50,21 +59,12 @@ const authKind = ref(""); // admin | node | ""
 const authGroups = ref([]);
 const collabDraft = ref("");
 
-/** catalog 失败时的离线兜底：与 shared catalog default=true（仅 fs）对齐；不含 bash。 */
-const FALLBACK_MEMBER_TOOLS = [
-  { id: "read_file", label: "读文件", hint: "read_file", group: "fs" },
-  { id: "show_image", label: "展示图片", hint: "show_image", group: "fs" },
-  { id: "read_image", label: "读图片", hint: "read_image（需多模态）", group: "fs" },
-  { id: "write_file", label: "写文件", hint: "write_file", group: "fs" },
-  { id: "glob_files", label: "列目录", hint: "glob_files", group: "fs" },
-  { id: "grep_file", label: "单文件搜索", hint: "grep_file", group: "fs" },
-  { id: "grep_files", label: "多文件搜索", hint: "grep_files", group: "fs" },
-  { id: "search_replace", label: "替换内容", hint: "search_replace", group: "fs" },
-];
-
-/** @type {import('vue').Ref<Array<{id:string,label:string,hint?:string,group?:string}>>} */
-const memberToolChoices = ref([...FALLBACK_MEMBER_TOOLS]);
-const memberToolDefaults = ref(FALLBACK_MEMBER_TOOLS.map((t) => t.id));
+/** @type {import('vue').Ref<import('../utils/memberToolGroups.js').MemberToolGroup[]>} */
+const memberGroupOptions = ref(
+  FALLBACK_MEMBER_TOOL_GROUPS.map((g) => ({ ...g, toolIds: [...g.toolIds] })),
+);
+/** member_id → 选中的工具组 id[]（编辑草稿） */
+const memberToolDrafts = ref(/** @type {Record<string, string[]>} */ ({}));
 
 const createForm = reactive({
   displayName: "",
@@ -76,7 +76,7 @@ const memberForm = reactive({
   homeNodeId: "",
   soulMd: "",
   customMd: "",
-  tools: FALLBACK_MEMBER_TOOLS.map((t) => t.id),
+  groups: defaultMemberGroupIds(),
 });
 
 const isNodeSession = computed(() => authKind.value === "node");
@@ -110,11 +110,17 @@ const configMembers = computed(() => {
       llm_profile_revision: wg.llm_profile_revision,
       max_tool_loops: null,
       allow_tool_names: ["assign_workgroup_task"],
+      tool_group_ids: [],
+      tool_group_labels: "编排工具",
       hint: "工作组编排者；对话与分派由 Manage 侧 leader 执行",
     });
   }
   for (const m of sortedMembers.value) {
     const spec = memberSpecs.value[m.member_id] || null;
+    const allow = Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [];
+    const groupIds = allow.length
+      ? memberGroupsFromAllowNames(allow, memberGroupOptions.value)
+      : defaultMemberGroupIds(memberGroupOptions.value);
     rows.push({
       kind: "member",
       key: m.member_id,
@@ -126,7 +132,9 @@ const configMembers = computed(() => {
       llm_profile_id: spec?.llm_profile_id || "",
       llm_profile_revision: spec?.llm_profile_revision || "",
       max_tool_loops: spec?.max_tool_loops ?? null,
-      allow_tool_names: Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [],
+      allow_tool_names: allow,
+      tool_group_ids: groupIds,
+      tool_group_labels: formatMemberGroupLabels(groupIds, memberGroupOptions.value),
       hint: String(spec?.description || "").trim(),
     });
   }
@@ -221,11 +229,11 @@ function isAclNode(nodeId) {
   return owners.includes(nid) || collaborators.includes(nid);
 }
 
-function toggleMemberTool(name) {
-  const set = new Set(memberForm.tools);
-  if (set.has(name)) set.delete(name);
-  else set.add(name);
-  memberForm.tools = [...set];
+function toggleMemberFormGroup(id) {
+  const set = new Set(memberForm.groups);
+  if (set.has(id)) set.delete(id);
+  else set.add(id);
+  memberForm.groups = [...set];
 }
 
 function resetMemberForm() {
@@ -234,33 +242,99 @@ function resetMemberForm() {
   memberForm.homeNodeId = "";
   memberForm.soulMd = "";
   memberForm.customMd = "";
-  memberForm.tools = [...(memberToolDefaults.value || [])];
+  memberForm.groups = defaultMemberGroupIds(memberGroupOptions.value);
 }
 
 async function loadMemberToolCatalog() {
   try {
     const catalog = await fetchMemberToolCatalog();
-    const tools = Array.isArray(catalog?.tools) ? catalog.tools : [];
-    memberToolChoices.value = tools.map((t) => ({
-      id: String(t.id || "").trim(),
-      label: String(t.label || t.id || "").trim(),
-      hint: String(t.hint || t.id || "").trim(),
-      group: String(t.group || "").trim(),
-    })).filter((t) => t.id);
-    const defaults = Array.isArray(catalog?.default_allow_names)
-      ? catalog.default_allow_names.map(String)
-      : memberToolChoices.value.filter((t) => t).map((t) => t.id);
-    memberToolDefaults.value = defaults.length
-      ? defaults
-      : FALLBACK_MEMBER_TOOLS.map((t) => t.id);
+    const ordered = memberToolGroupsFromCatalog(catalog);
+    memberGroupOptions.value = ordered;
     if (!memberFormOpen.value) {
-      memberForm.tools = [...memberToolDefaults.value];
+      memberForm.groups = defaultMemberGroupIds(ordered);
     }
+    syncMemberToolDrafts();
   } catch {
-    if (!memberToolChoices.value.length) {
-      memberToolChoices.value = [...FALLBACK_MEMBER_TOOLS];
-      memberToolDefaults.value = FALLBACK_MEMBER_TOOLS.map((t) => t.id);
+    if (!memberGroupOptions.value.length) {
+      memberGroupOptions.value = FALLBACK_MEMBER_TOOL_GROUPS.map((g) => ({
+        ...g,
+        toolIds: [...g.toolIds],
+      }));
     }
+  }
+}
+
+function syncMemberToolDrafts() {
+  /** @type {Record<string, string[]>} */
+  const next = {};
+  for (const m of members.value || []) {
+    const mid = String(m.member_id || "").trim();
+    if (!mid) continue;
+    const spec = memberSpecs.value[mid];
+    const allow = Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [];
+    next[mid] = allow.length
+      ? memberGroupsFromAllowNames(allow, memberGroupOptions.value)
+      : defaultMemberGroupIds(memberGroupOptions.value);
+  }
+  memberToolDrafts.value = next;
+}
+
+function memberDraftGroups(memberId) {
+  const mid = String(memberId || "").trim();
+  return Array.isArray(memberToolDrafts.value[mid]) ? memberToolDrafts.value[mid] : [];
+}
+
+function toggleMemberDraftGroup(memberId, groupId) {
+  const mid = String(memberId || "").trim();
+  const gid = String(groupId || "").trim();
+  if (!mid || !gid) return;
+  const set = new Set(memberDraftGroups(mid));
+  if (set.has(gid)) set.delete(gid);
+  else set.add(gid);
+  memberToolDrafts.value = { ...memberToolDrafts.value, [mid]: [...set] };
+}
+
+function isMemberToolsDirty(member) {
+  if (!member || member.kind !== "member") return false;
+  const mid = String(member.member_id || "").trim();
+  const draft = [...memberDraftGroups(mid)].sort();
+  const current = [...(member.tool_group_ids || [])].sort();
+  if (draft.length !== current.length) return true;
+  return draft.some((id, i) => id !== current[i]);
+}
+
+async function saveMemberTools(member) {
+  const wg = selectedWorkgroup.value;
+  const mid = String(member?.member_id || "").trim();
+  if (!wg?.workgroup_id || !mid || member?.kind !== "member" || savingToolsId.value) return;
+  if (!isMemberToolsDirty(member)) return;
+  const selected = memberDraftGroups(mid);
+  const groups = selected.length
+    ? selected
+    : defaultMemberGroupIds(memberGroupOptions.value);
+  const tools = expandMemberGroupsToTools(groups, memberGroupOptions.value);
+  savingToolsId.value = mid;
+  try {
+    const out = await patchWorkgroupMember(wg.workgroup_id, mid, {
+      allow_tool_names: tools,
+    });
+    if (out?.spec) {
+      memberSpecs.value = { ...memberSpecs.value, [mid]: out.spec };
+    }
+    if (out?.member) {
+      members.value = (members.value || []).map((item) =>
+        item.member_id === out.member.member_id ? out.member : item,
+      );
+    }
+    syncMemberToolDrafts();
+    emit("toast", {
+      message: `${member.display_name || mid} 工具组已更新`,
+      type: "success",
+    });
+  } catch (err) {
+    emit("toast", { message: err.message || "更新工具组失败", type: "error" });
+  } finally {
+    savingToolsId.value = "";
   }
 }
 
@@ -384,9 +458,10 @@ async function submitCreateMember() {
   creatingMember.value = true;
   try {
     await ensureHomeInAcl(wg.workgroup_id, home);
-    const tools = memberForm.tools.length
-      ? [...memberForm.tools]
-      : [...(memberToolDefaults.value || [])];
+    const selected = memberForm.groups.length
+      ? [...memberForm.groups]
+      : defaultMemberGroupIds(memberGroupOptions.value);
+    const tools = expandMemberGroupsToTools(selected, memberGroupOptions.value);
     const body = {
       display_name: displayName,
       description: memberForm.description.trim(),
@@ -557,6 +632,7 @@ async function loadSettings() {
       }),
     );
     memberSpecs.value = specs;
+    syncMemberToolDrafts();
   } catch (err) {
     emit("toast", { message: err.message || "加载配置失败", type: "error" });
   } finally {
@@ -994,21 +1070,24 @@ onMounted(async () => {
             </div>
 
             <fieldset class="wg-member-create__tools">
-              <legend>工具白名单</legend>
-              <label
-                v-for="t in memberToolChoices"
-                :key="t.id"
-                class="wg-member-create__check"
-                :title="t.hint || t.id"
-              >
-                <input
-                  type="checkbox"
-                  :checked="memberForm.tools.includes(t.id)"
+              <legend>工具组</legend>
+              <p class="muted wg-member-create__tools-hint">
+                默认文件系统；Shell 需显式勾选。提交时展开为工具白名单。
+              </p>
+              <div class="wg-member-tool-row">
+                <button
+                  v-for="opt in memberGroupOptions"
+                  :key="opt.id"
+                  type="button"
+                  class="wg-member-tool-chip"
+                  :class="{ 'wg-member-tool-chip--on': memberForm.groups.includes(opt.id) }"
                   :disabled="creatingMember"
-                  @change="toggleMemberTool(t.id)"
-                />
-                {{ t.label || t.id }}
-              </label>
+                  :title="opt.hint || opt.id"
+                  @click="toggleMemberFormGroup(opt.id)"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
             </fieldset>
 
             <details class="wg-member-create__prompt">
@@ -1100,10 +1179,43 @@ onMounted(async () => {
                   <dd>{{ m.max_tool_loops ?? "—" }}</dd>
                 </div>
                 <div>
-                  <dt>允许工具</dt>
-                  <dd>{{ (m.allow_tool_names || []).join(", ") || "—" }}</dd>
+                  <dt>工具组</dt>
+                  <dd>{{ m.tool_group_labels || "—" }}</dd>
                 </div>
               </dl>
+
+              <div v-if="m.kind === 'member'" class="wg-member-config__tools">
+                <h5 class="wg-member-config__subtitle">工具组</h5>
+                <div class="wg-member-tool-row">
+                  <button
+                    v-for="opt in memberGroupOptions"
+                    :key="`${m.key}-${opt.id}`"
+                    type="button"
+                    class="wg-member-tool-chip"
+                    :class="{
+                      'wg-member-tool-chip--on': memberDraftGroups(m.member_id).includes(opt.id),
+                    }"
+                    :disabled="savingToolsId === m.member_id"
+                    :title="opt.hint || opt.id"
+                    @click="toggleMemberDraftGroup(m.member_id, opt.id)"
+                  >
+                    {{ opt.label }}
+                  </button>
+                </div>
+                <div class="wg-member-config__tools-actions">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    :disabled="savingToolsId === m.member_id || !isMemberToolsDirty(m)"
+                    @click="saveMemberTools(m)"
+                  >
+                    {{ savingToolsId === m.member_id ? "保存中…" : "保存工具组" }}
+                  </button>
+                  <span class="muted" style="font-size: 12px">
+                    变更后会 bump generation 并重新下发配置。
+                  </span>
+                </div>
+              </div>
 
               <div class="wg-member-config__llm">
                 <h5 class="wg-member-config__subtitle">可选 LLM</h5>
@@ -1147,7 +1259,7 @@ onMounted(async () => {
           </p>
 
           <p class="muted wg-detail-section__note">
-            创建或修改成员后会自动向 Home Node 下发配置（含 LLM 与工具白名单）。
+            创建或修改成员后会自动向 Home Node 下发配置（含 LLM 与工具组）。
           </p>
         </section>
       </template>
