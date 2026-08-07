@@ -3691,17 +3691,6 @@ select.settings-field__input {
   color: var(--color-danger);
 }
 
-.skills-panel__raw {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  background: var(--color-surface-muted);
-  padding: 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-}
-
 .skills-section + .skills-section {
   margin-top: 18px;
 }
