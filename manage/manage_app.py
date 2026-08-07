@@ -92,7 +92,10 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
     externaltools_store = ExternalToolPackageStore(db=db if db.enabled else None)
     plugins_store = PluginPackageStore(db=db if db.enabled else None)
     cases_store = CaseExampleStore(db=db if db.enabled else None)
-    workgroup_store = WorkGroupStore(db=db if db.enabled else None)
+    workgroup_store = WorkGroupStore(
+        db=db if db.enabled else None,
+        workspaces_dir=cfg.workgroup_workspaces_dir,
+    )
     workgroup_ws_hub = WorkgroupWSHub(store=workgroup_store)
     workgroup_loop = VerticalLoop(workgroup_store, hub=workgroup_ws_hub)
 

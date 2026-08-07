@@ -41,8 +41,27 @@ class WorkgroupDigestTests(unittest.TestCase):
 
 class WorkgroupStoreTests(unittest.TestCase):
     def _store(self, tmp: str) -> WorkGroupStore:
-        db = SQLiteDatabase(Path(tmp) / "manage.db")
-        return WorkGroupStore(db=db)
+        root = Path(tmp)
+        db = SQLiteDatabase(root / "manage.db")
+        return WorkGroupStore(db=db, workspaces_dir=root / "workgroup-workspaces")
+
+    def test_create_group_materializes_workspace(self) -> None:
+        with TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="WS",
+                    created_by_node_id="node-a",
+                )
+            )
+            self.assertEqual(group.workspace.root_kind, "workgroup_workspace")
+            self.assertTrue(group.workspace.path)
+            ws = Path(group.workspace.path)
+            self.assertTrue(ws.is_dir())
+            self.assertTrue((ws / "data").is_dir())
+            self.assertTrue((ws / "README.md").is_file())
+            runtime = store.workgroup_runtime(group.workgroup_id)
+            self.assertEqual(runtime.get("workspace_path"), group.workspace.path)
 
     def test_create_group_acl_member_assign(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -118,17 +137,26 @@ class WorkgroupStoreTests(unittest.TestCase):
 
     def test_persist_reload(self) -> None:
         with TemporaryDirectory() as tmp:
-            path = Path(tmp) / "manage.db"
-            store = WorkGroupStore(db=SQLiteDatabase(path))
+            root = Path(tmp)
+            path = root / "manage.db"
+            ws_dir = root / "workgroup-workspaces"
+            store = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
             group, _ = store.create_workgroup(
                 WorkGroupCreateRequest(display_name="Persist", created_by_node_id="node-a")
             )
             wid = group.workgroup_id
-            store2 = WorkGroupStore(db=SQLiteDatabase(path))
+            ws_path = group.workspace.path
+            self.assertTrue(ws_path)
+            store2 = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
             loaded = store2.get_workgroup(wid)
             self.assertIsNotNone(loaded)
             assert loaded is not None
             self.assertEqual(loaded.display_name, "Persist")
+            self.assertEqual(loaded.workspace.path, ws_path)
+            self.assertEqual(
+                store2.workgroup_runtime(wid).get("workspace_path"),
+                ws_path,
+            )
 
     def test_hitl_cas_skeleton(self) -> None:
         with TemporaryDirectory() as tmp:

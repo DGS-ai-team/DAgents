@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from manage.storage.sqlite import SQLiteDatabase
@@ -29,7 +30,9 @@ from manage.workgroup.models import (
     WorkGroupCreateRequest,
     WorkGroupMember,
     WorkGroupPatchRequest,
+    WorkgroupWorkspace,
 )
+from manage.workgroup.workspace import materialize_workgroup_workspace
 
 
 def _now() -> str:
@@ -41,8 +44,14 @@ def _acl_contains(acl: WorkGroupACL, node_id: str) -> bool:
 
 
 class WorkGroupStore:
-    def __init__(self, db: SQLiteDatabase | None = None) -> None:
+    def __init__(
+        self,
+        db: SQLiteDatabase | None = None,
+        *,
+        workspaces_dir: Path | None = None,
+    ) -> None:
         self._db = db if (db and db.enabled) else None
+        self._workspaces_dir = workspaces_dir
         self._lock = threading.RLock()
         self._groups: dict[str, WorkGroup] = {}
         self._acls: dict[str, WorkGroupACL] = {}
@@ -57,6 +66,8 @@ class WorkGroupStore:
         self._hitl_waiters: dict[str, threading.Event] = {}
         # member_id → {workspace_path, tool_catalog_revision, provision_id}
         self._member_runtime: dict[str, dict[str, str]] = {}
+        # workgroup_id → {workspace_path} 组共享工作区（与 WorkGroup.workspace.path 同步）
+        self._workgroup_runtime: dict[str, dict[str, str]] = {}
         # workgroup_id → {node_id: Subscription}
         self._subscriptions: dict[str, dict[str, Subscription]] = {}
 
@@ -117,6 +128,9 @@ class WorkGroupStore:
         # Lazy hydrate once from SQLite into memory maps (process-local cache).
         for g in self._load_all("workgroups", WorkGroup):
             self._groups[g.workgroup_id] = g
+            path = (g.workspace.path or "").strip()
+            if path:
+                self._workgroup_runtime[g.workgroup_id] = {"workspace_path": path}
         for a in self._load_all("workgroup_acls", WorkGroupACL):
             self._acls[a.workgroup_id] = a
         for m in self._load_all("workgroup_members", WorkGroupMember):
@@ -150,6 +164,10 @@ class WorkGroupStore:
             self._ensure_loaded()
             wid = ids.workgroup_id()
             now = _now()
+            workspace = WorkgroupWorkspace()
+            if self._workspaces_dir is not None:
+                ws_path = materialize_workgroup_workspace(self._workspaces_dir, wid)
+                workspace = WorkgroupWorkspace(path=str(ws_path))
             group = WorkGroup(
                 workgroup_id=wid,
                 display_name=req.display_name.strip(),
@@ -157,6 +175,7 @@ class WorkGroupStore:
                 created_by_node_id=req.created_by_node_id.strip(),
                 llm_profile_id=req.llm_profile_id.strip(),
                 llm_profile_revision=req.llm_profile_revision.strip(),
+                workspace=workspace,
                 created_at=now,
             )
             acl = WorkGroupACL(
@@ -168,6 +187,8 @@ class WorkGroupStore:
             )
             self._groups[wid] = group
             self._acls[wid] = acl
+            if workspace.path:
+                self._workgroup_runtime[wid] = {"workspace_path": workspace.path}
             sub = Subscription(
                 workgroup_id=wid,
                 node_id=group.created_by_node_id,
@@ -871,6 +892,14 @@ class WorkGroupStore:
             if runtime:
                 self._member_runtime[member_id] = runtime
             return updated
+
+    def workgroup_runtime(self, workgroup_id: str) -> dict[str, str]:
+        with self._lock:
+            self._ensure_loaded()
+            group = self._groups.get(workgroup_id)
+            if group is not None and (group.workspace.path or "").strip():
+                return {"workspace_path": group.workspace.path.strip()}
+            return dict(self._workgroup_runtime.get(workgroup_id) or {})
 
     def member_runtime(self, member_id: str) -> dict[str, str]:
         with self._lock:

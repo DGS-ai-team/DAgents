@@ -28,6 +28,7 @@
     },
     "status": {
       "enum": [
+        "configuring",
         "active",
         "archiving",
         "archived"
@@ -45,6 +46,20 @@
     "llm_profile_revision": {
       "type": "string",
       "minLength": 1
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["root_kind"],
+      "properties": {
+        "root_kind": {
+          "const": "workgroup_workspace"
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path on Manage host; empty when workspaces root is unset."
+        }
+      },
+      "additionalProperties": false
     },
     "created_at": {
       "type": "string",

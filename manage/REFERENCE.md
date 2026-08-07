@@ -62,7 +62,8 @@ Console 功能：Node 列表、discovery 分组、工作组、案例库、Node �
 
 | 模块 | 符号 |
 |------|------|
-| `store.py` | `WorkGroupStore`（组/ACL/Grant/Assign/Timeline/ActorRunHistory） |
+| `store.py` | `WorkGroupStore`（组/ACL/Grant/Assign/Timeline/ActorRunHistory；建组时 Manage 侧物化组工作区） |
+| `workspace.py` | `materialize_workgroup_workspace`（`workgroup-workspaces/{id}/`） |
 | `turn_kernel.py` | `TurnKernel`（Leader LLM loop、`handle_human_message`） |
 | `projector.py` | `project_actor_context`（Timeline + RunHistory 投影） |
 | `history.py` | `ActorRunHistory` / `RunHistoryMessage` |
