@@ -217,6 +217,17 @@ export function approvalItemHint(item) {
   return "";
 }
 
+/** reason 已含命令/路径等细节时不再重复渲染 hint。 */
+export function approvalItemHintVisible(item) {
+  const hint = approvalItemHint(item);
+  if (!hint) return false;
+  const reason = String(item?.reason || "").trim();
+  if (!reason) return true;
+  const core = hint.replace(/^(命令|路径|目标)：/, "").trim();
+  if (core && reason.includes(core)) return false;
+  return true;
+}
+
 function extractPartialJsonString(raw, key) {
   const marker = `"${key}"`;
   const start = raw.indexOf(marker);

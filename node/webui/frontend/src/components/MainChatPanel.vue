@@ -412,6 +412,7 @@ defineExpose({
           v-else-if="item.kind === 'user_information'"
           :data="item.hitl.data"
           :selected="userInfoSelected"
+          :busy="hitlBusy && hitlBusyIndex === item.hitlIndex"
           @update:selected="onUserInfoSelected"
           @submit="emit('user-info-submit', item.hitlIndex)"
         />

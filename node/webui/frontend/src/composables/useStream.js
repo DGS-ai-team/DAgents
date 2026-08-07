@@ -135,5 +135,9 @@ export function buildStream(entries, hitlQueue = [], jobs = toolJobsStore) {
     items.push({ key: `hitl-${idx}-${hitl.kind}`, kind: hitl.kind, hitl, hitlIndex: idx });
   });
 
-  return annotateToolExecutionHints(items, jobs, hitlQueue);
+  const annotated = annotateToolExecutionHints(items, jobs, hitlQueue);
+  // 待批工具由 ApprovalBubble 独占展示，避免 ToolSummaryRow「待执行」与审批卡双份。
+  return annotated.filter(
+    (item) => !(item?.kind === "tool_step" && item.executionHint === "pending"),
+  );
 }

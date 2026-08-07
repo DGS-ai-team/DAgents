@@ -11,6 +11,9 @@ const emit = defineEmits(["decide", "cancel"]);
 
 const selected = ref("keep_both");
 const meta = computed(() => extractMemoryConflict(props.data));
+const showMergePreview = computed(
+  () => selected.value === "keep_both" && Boolean(meta.value.mergedBoth),
+);
 </script>
 
 <template>
@@ -33,6 +36,10 @@ const meta = computed(() => extractMemoryConflict(props.data));
             <h4 class="memory-conflict-panel__title">新信息</h4>
             <pre class="memory-conflict-panel__body">{{ meta.newInformation || "（空）" }}</pre>
           </section>
+        </div>
+        <div v-if="showMergePreview" class="memory-conflict-merge">
+          <h4 class="memory-conflict-panel__title">合并预览</h4>
+          <pre class="memory-conflict-panel__body">{{ meta.mergedBoth }}</pre>
         </div>
         <div class="approval-bubble__actions memory-conflict-actions">
           <label class="memory-conflict-option">
@@ -69,48 +76,41 @@ const meta = computed(() => extractMemoryConflict(props.data));
   );
 }
 
-.tool-source-badge--memory {
-  color: var(--color-primary-strong);
-  background: var(--color-primary-soft);
-}
-
 .memory-conflict-panels {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin: 12px 0;
 }
 
-.memory-conflict-panel {
+.memory-conflict-panel,
+.memory-conflict-merge {
   min-width: 0;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
   border-radius: 8px;
-  background: var(--color-surface);
-  overflow: hidden;
+  padding: 8px 10px;
+  background: var(--color-surface, #fff);
+}
+
+.memory-conflict-merge {
+  margin-top: 2px;
 }
 
 .memory-conflict-panel__title {
-  margin: 0;
-  padding: 8px 10px;
-  font-size: 11px;
+  margin: 0 0 6px;
+  font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-subtle);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface-muted);
+  color: var(--color-text-muted, #6b7280);
 }
 
 .memory-conflict-panel__body {
   margin: 0;
-  padding: 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
   max-height: 160px;
   overflow: auto;
-  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: inherit;
 }
 
 .memory-conflict-actions {
@@ -129,8 +129,8 @@ const meta = computed(() => extractMemoryConflict(props.data));
 
 .memory-conflict-buttons {
   display: flex;
-  gap: 8px;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 4px;
 }
 
