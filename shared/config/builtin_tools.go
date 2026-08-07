@@ -8,59 +8,36 @@ import (
 
 // knownBuiltinTools 为 Node 可配置启用的内置工具名全集（与 node/internal/tools/registry.go 对齐）。
 var knownBuiltinTools = map[string]struct{}{
-	"read_file":                {},
-	"show_image":               {},
-	"read_image":               {},
-	"write_file":               {},
-	"glob_files":               {},
-	"grep_file":                {},
-	"grep_files":               {},
-	"search_replace":           {},
-	"bash_run":                 {},
-	"background_job_status":    {},
-	"background_job_cancel":    {},
-	"ask_user_information":     {},
-	"remember":                 {},
-	"load_skills":              {},
-	"unload_skills":            {},
-	"clear_skills":             {},
-	"trigger_list":             {},
-	"trigger_get":              {},
-	"trigger_create":           {},
-	"trigger_update":           {},
-	"trigger_delete":           {},
-	"create_temporary_agent":   {},
-	"wait_temporary_agents":    {},
-	"temporary_agent_status":   {},
-	"cancel_temporary_agent":   {},
-	"browser_run_task":         {},
-	"browser_task_status":      {},
-	"browser_task_cancel":      {},
-	"browser_start":            {},
-	"browser_stop":             {},
-	"browser_navigate":         {},
-	"browser_click":            {},
-	"browser_click_coordinate": {},
-	"browser_fill":             {},
-	"browser_press":            {},
-	"browser_screenshot":       {},
-	"browser_wait":             {},
-	"browser_snapshot":         {},
-	"browser_search":           {},
-	"browser_go_back":          {},
-	"browser_scroll":           {},
-	"browser_find_text":        {},
-	"browser_switch_tab":       {},
-	"browser_close_tab":        {},
-	"browser_extract":          {},
-	"browser_evaluate":         {},
-	"browser_find_elements":    {},
-	"browser_search_page":      {},
-	"browser_upload_file":      {},
-	"browser_dropdown_options": {},
-	"browser_select_dropdown":  {},
-	"wecom_send_markdown":      {},
-	"wecom_send_file":          {},
+	"read_file":              {},
+	"show_image":             {},
+	"read_image":             {},
+	"write_file":             {},
+	"glob_files":             {},
+	"grep_file":              {},
+	"grep_files":             {},
+	"search_replace":         {},
+	"bash_run":               {},
+	"background_job_status":  {},
+	"background_job_cancel":  {},
+	"ask_user_information":   {},
+	"remember":               {},
+	"load_skills":            {},
+	"unload_skills":          {},
+	"clear_skills":           {},
+	"trigger_list":           {},
+	"trigger_get":            {},
+	"trigger_create":         {},
+	"trigger_update":         {},
+	"trigger_delete":         {},
+	"create_temporary_agent": {},
+	"wait_temporary_agents":  {},
+	"temporary_agent_status": {},
+	"cancel_temporary_agent": {},
+	"browser_run_task":       {},
+	"browser_task_status":    {},
+	"browser_task_cancel":    {},
+	"wecom_send_markdown":    {},
+	"wecom_send_file":        {},
 }
 
 // builtinToolGroups 为 Agent defaults.tools.enabled_groups 可配置的成组工具；组内工具须一并启用或禁用。
@@ -104,37 +81,12 @@ var builtinToolGroups = map[string][]string{
 		"temporary_agent_status",
 		"cancel_temporary_agent",
 	},
-	// browser：主 Agent 面向任务级派发（伴生 Chrome + sidecar browser_use.Agent）。
+	// browser：主 Agent 任务级派发（伴生 Chrome + sidecar browser_use.Agent）。
+	// 细粒度 CDP/DOM 工具已退役，不再作为 LLM 工具暴露。
 	"browser": {
 		"browser_run_task",
 		"browser_task_status",
 		"browser_task_cancel",
-	},
-	// browser_ops：细粒度 CDP/DOM 工具（伴生/调试用；Web UI 工具组不展示）。
-	"browser_ops": {
-		"browser_start",
-		"browser_stop",
-		"browser_navigate",
-		"browser_click",
-		"browser_click_coordinate",
-		"browser_fill",
-		"browser_press",
-		"browser_screenshot",
-		"browser_wait",
-		"browser_snapshot",
-		"browser_search",
-		"browser_go_back",
-		"browser_scroll",
-		"browser_find_text",
-		"browser_switch_tab",
-		"browser_close_tab",
-		"browser_extract",
-		"browser_evaluate",
-		"browser_find_elements",
-		"browser_search_page",
-		"browser_upload_file",
-		"browser_dropdown_options",
-		"browser_select_dropdown",
 	},
 	"wecom": {
 		"wecom_send_markdown",
@@ -178,17 +130,9 @@ func AllBuiltinToolGroupNames() []string {
 	return out
 }
 
-// PublicBuiltinToolGroupNames 返回面向用户配置的工具组（排除内部组如 browser_ops）。
+// PublicBuiltinToolGroupNames 返回面向用户配置的工具组。
 func PublicBuiltinToolGroupNames() []string {
-	out := make([]string, 0, len(builtinToolGroups))
-	for name := range builtinToolGroups {
-		if name == "browser_ops" {
-			continue
-		}
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
+	return AllBuiltinToolGroupNames()
 }
 
 // BuiltinToolGroupMembers 返回组内工具名（副本）；未知组返回 false。
