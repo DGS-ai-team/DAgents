@@ -1293,6 +1293,7 @@ watch(timelineTailKey, () => {
 watch(
   workgroupId,
   async (id) => {
+    closeModelMenu();
     stopPoll();
     stopWorkPoll();
     followTail.value = true;
