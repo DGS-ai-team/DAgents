@@ -36,6 +36,8 @@ const members = ref([]);
 const llmConfigs = ref([]);
 const publishing = ref(false);
 const bindingLlm = ref(false);
+const modelMenuOpen = ref(false);
+const modelMenuRoot = ref(null);
 const timelineEl = ref(null);
 /** 本轮发送开始前的 Timeline 水位 */
 const statusWatermarkSeq = ref(0);
@@ -312,16 +314,6 @@ async function loadWorkgroupMeta() {
   }
 }
 
-function workgroupStatusLabel(status) {
-  const map = {
-    configuring: "配置中",
-    active: "已发布",
-    archiving: "归档中",
-    archived: "已归档",
-  };
-  return map[status] || status || "—";
-}
-
 const canChat = computed(() => String(workgroupMeta.value?.status || "") === "active");
 const isConfiguring = computed(() => String(workgroupMeta.value?.status || "") === "configuring");
 
@@ -332,7 +324,6 @@ async function publishCurrent() {
   notice.value = "";
   try {
     workgroupMeta.value = await api.publishWorkgroup(workgroupId.value);
-    notice.value = "工作组已发布，可以开始对话。";
     panelRef.value?.refreshWorkgroups?.({ force: true });
   } catch (e) {
     error.value = e?.message || "发布失败";
@@ -341,27 +332,63 @@ async function publishCurrent() {
   }
 }
 
+const selectedSupervisorLabel = computed(() => {
+  const id = String(workgroupMeta.value?.llm_profile_id || "").trim();
+  if (!id) return "选择模型";
+  const cfg = (llmConfigs.value || []).find((c) => String(c.id) === id);
+  if (!cfg) return id;
+  const name = String(cfg.name || cfg.id || "").trim() || id;
+  return cfg.is_default ? `${name}（默认）` : name;
+});
+
+const canSwitchSupervisorModel = computed(
+  () => !bindingLlm.value && !!workgroupMeta.value && (llmConfigs.value || []).length > 0,
+);
+
+function closeModelMenu() {
+  modelMenuOpen.value = false;
+}
+
+function toggleModelMenu() {
+  if (!canSwitchSupervisorModel.value) return;
+  modelMenuOpen.value = !modelMenuOpen.value;
+}
+
 async function bindSupervisorLlm(cfgId) {
   const id = String(cfgId || "").trim();
   if (!workgroupId.value || !id || bindingLlm.value) return;
   if (String(workgroupMeta.value?.llm_profile_id || "") === id) return;
   bindingLlm.value = true;
   error.value = "";
+  closeModelMenu();
   try {
     workgroupMeta.value = await api.patchWorkgroup(workgroupId.value, {
       llm_profile_id: id,
       llm_profile_revision: "1",
     });
-    notice.value = "Supervisor LLM 已更新";
   } catch (e) {
-    error.value = e?.message || "绑定 LLM 失败";
+    error.value = e?.message || "绑定模型失败";
   } finally {
     bindingLlm.value = false;
   }
 }
 
-function onSupervisorLlmChange(ev) {
-  void bindSupervisorLlm(ev?.target?.value);
+function pickSupervisorModel(cfgId) {
+  void bindSupervisorLlm(cfgId);
+}
+
+function onModelMenuPointerDown(event) {
+  if (!modelMenuOpen.value) return;
+  const root = modelMenuRoot.value;
+  if (root && !root.contains(event.target)) closeModelMenu();
+}
+
+function onModelMenuKeydown(event) {
+  if (!modelMenuOpen.value) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeModelMenu();
+  }
 }
 
 function startPoll() {
@@ -764,6 +791,7 @@ function closeMemberModal() {
   const q = { ...route.query };
   delete q.createMember;
   delete q.editMember;
+  delete q.member;
   router.replace({
     name: "workgroups",
     params: wid ? { workgroupId: wid } : {},
@@ -1239,8 +1267,7 @@ const liveStatusLabel = computed(() => {
 
 const toolbarTitle = computed(() => {
   const name = String(workgroupMeta.value?.display_name || "").trim();
-  const status = workgroupStatusLabel(workgroupMeta.value?.status);
-  if (name) return `工作组 · ${name} · ${status}`;
+  if (name) return name;
   return "工作组";
 });
 
@@ -1267,6 +1294,7 @@ watch(timelineTailKey, () => {
 watch(
   workgroupId,
   async (id) => {
+    closeModelMenu();
     stopPoll();
     stopWorkPoll();
     followTail.value = true;
@@ -1327,11 +1355,17 @@ watch(
   { immediate: true },
 );
 
-onMounted(loadSelf);
+onMounted(() => {
+  loadSelf();
+  document.addEventListener("pointerdown", onModelMenuPointerDown, true);
+  document.addEventListener("keydown", onModelMenuKeydown, true);
+});
 onUnmounted(() => {
   stopPoll();
   stopWorkPoll();
   stopQueuePoll();
+  document.removeEventListener("pointerdown", onModelMenuPointerDown, true);
+  document.removeEventListener("keydown", onModelMenuKeydown, true);
 });
 </script>
 
@@ -1362,35 +1396,98 @@ onUnmounted(() => {
             <span class="chat__title-main" :title="toolbarTitle">{{ toolbarTitle }}</span>
           </div>
           <div class="chat__header-meta">
-            <label v-if="llmConfigs.length" class="wg-chat__llm">
-              <span class="wg-chat__llm-label">Supervisor LLM</span>
-              <select
-                class="wg-chat__llm-select"
-                :disabled="bindingLlm || !workgroupMeta"
-                :value="workgroupMeta?.llm_profile_id || ''"
-                @change="onSupervisorLlmChange"
+            <div v-if="llmConfigs.length" ref="modelMenuRoot" class="wg-chat__model">
+              <span class="wg-chat__model-label">model</span>
+              <button
+                type="button"
+                class="wg-chat__model-trigger"
+                :class="{ 'wg-chat__model-trigger--open': modelMenuOpen }"
+                :disabled="!canSwitchSupervisorModel"
+                :aria-expanded="modelMenuOpen"
+                aria-haspopup="listbox"
+                :title="selectedSupervisorLabel"
+                @click="toggleModelMenu"
               >
-                <option v-if="!workgroupMeta?.llm_profile_id" value="" disabled>选择档案</option>
-                <option v-for="cfg in llmConfigs" :key="cfg.id" :value="cfg.id">
-                  {{ cfg.name || cfg.id }}{{ cfg.is_default ? "（默认）" : "" }}
-                </option>
-              </select>
-            </label>
+                <span class="wg-chat__model-trigger-label">{{ selectedSupervisorLabel }}</span>
+                <svg
+                  class="wg-chat__model-chevron"
+                  viewBox="0 0 12 12"
+                  width="12"
+                  height="12"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3 4.5L6 7.5L9 4.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+              <div
+                v-if="modelMenuOpen"
+                class="wg-chat__model-menu"
+                role="listbox"
+                aria-label="选择模型"
+              >
+                <button
+                  v-for="cfg in llmConfigs"
+                  :key="cfg.id"
+                  type="button"
+                  class="wg-chat__model-option"
+                  role="option"
+                  :aria-selected="String(cfg.id) === String(workgroupMeta?.llm_profile_id || '')"
+                  :class="{
+                    'wg-chat__model-option--active':
+                      String(cfg.id) === String(workgroupMeta?.llm_profile_id || ''),
+                  }"
+                  @click="pickSupervisorModel(cfg.id)"
+                >
+                  <span class="wg-chat__model-option-label">
+                    {{ cfg.name || cfg.id }}{{ cfg.is_default ? "（默认）" : "" }}
+                  </span>
+                  <span
+                    v-if="String(cfg.id) === String(workgroupMeta?.llm_profile_id || '')"
+                    class="wg-chat__model-option-check"
+                    aria-hidden="true"
+                  >✓</span>
+                </button>
+              </div>
+            </div>
             <button
               type="button"
-              class="wg-chat__debug-btn"
-              :class="{ 'wg-chat__debug-btn--active': debugOpen }"
+              class="chat__header-btn"
+              :class="{ 'chat__header-btn--active': debugOpen }"
               title="RunHistory / LLM 调试"
+              aria-label="调试"
               @click="toggleDebugPanel"
             >
-              调试
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                <path
+                  d="M6.2 2.5h3.6M8 2.5v2.2M4.4 6.2h7.2v5.6a1.6 1.6 0 0 1-1.6 1.6H6a1.6 1.6 0 0 1-1.6-1.6V6.2z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M4.4 8.2H2.8M13.2 8.2h-1.6M4.4 10.6H2.8M13.2 10.6h-1.6M6.4 12.2v1.3M9.6 12.2v1.3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                />
+              </svg>
             </button>
           </div>
         </header>
 
         <div v-if="isConfiguring" class="wg-chat__setup-banner" role="status">
           <p>
-            当前为<strong>配置中</strong>：请确认 Supervisor LLM 与成员后点击「发布」，方可对话。
+            当前为<strong>配置中</strong>：请确认 model 与成员后点击「发布」，方可对话。
           </p>
           <button type="button" class="btn btn--primary btn--sm" :disabled="publishing" @click="publishCurrent">
             {{ publishing ? "发布中…" : "发布工作组" }}
@@ -1623,7 +1720,11 @@ onUnmounted(() => {
               </div>
             </article>
             <article
-              v-if="sending && !(liveAssistant?.text && streamPhase === 'streaming') && !activeHitl"
+              v-if="
+                sending &&
+                !activeHitl &&
+                !(liveAssistant && streamMode !== 'direct')
+              "
               class="msg msg--assistant msg--progress"
             >
               <div class="msg__body msg__body--hint-only">
@@ -1882,47 +1983,128 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 与 .app__main-col > .chat.panel 一致：标题栏与对话区同色 */
+  background: var(--color-editor);
+  color: var(--color-text);
 }
 .wg-chat__header {
   flex: 0 0 auto;
+  background: var(--color-editor);
 }
-.wg-chat__llm {
+.wg-chat :deep(.chat__title-main) {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-text);
+}
+.wg-chat__model {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 12px;
   color: var(--color-text-muted, #6b7280);
 }
-.wg-chat__llm-label {
+.wg-chat__model-label {
+  flex: 0 0 auto;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
+}
+.wg-chat__model-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 200px;
+  min-height: 28px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-md, 6px);
+  background: transparent;
+  color: var(--color-text, #111827);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.wg-chat__model-trigger:hover:not(:disabled),
+.wg-chat__model-trigger:focus-visible,
+.wg-chat__model-trigger--open {
+  background: var(--color-surface-hover, rgba(0, 0, 0, 0.04));
+  outline: none;
+}
+.wg-chat__model-trigger:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.wg-chat__model-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.wg-chat__llm-select {
-  max-width: 180px;
-  font: inherit;
-  font-size: 12px;
-  padding: 3px 6px;
-  border-radius: 6px;
+.wg-chat__model-chevron {
+  flex: 0 0 auto;
+  opacity: 0.55;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.wg-chat__model-trigger--open .wg-chat__model-chevron {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+.wg-chat__model-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 180px;
+  max-width: min(280px, 70vw);
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 10px;
   border: 1px solid var(--color-border, #d1d5db);
   background: var(--color-surface, #fff);
-  color: var(--color-text, #111827);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.12));
 }
-.wg-chat__debug-btn {
+.wg-chat__model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
   border: 0;
+  border-radius: 7px;
   background: transparent;
-  color: var(--color-text-muted, #6b7280);
+  color: var(--color-text, #111827);
   font: inherit;
   font-size: 12px;
-  padding: 4px 8px;
-  border-radius: var(--radius-md, 6px);
+  text-align: left;
   cursor: pointer;
 }
-.wg-chat__debug-btn:hover {
-  color: var(--color-text, #111827);
+.wg-chat__model-option:hover,
+.wg-chat__model-option:focus-visible {
   background: var(--color-surface-hover, rgba(0, 0, 0, 0.04));
+  outline: none;
 }
-.wg-chat__debug-btn--active {
-  color: var(--color-primary-strong, var(--color-primary, #0078d4));
+.wg-chat__model-option--active {
   background: var(--color-primary-soft, color-mix(in srgb, var(--color-primary, #0078d4) 12%, transparent));
+  color: var(--color-primary-strong, var(--color-primary, #0078d4));
+}
+.wg-chat__model-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wg-chat__model-option-check {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.9;
 }
 .wg-chat__setup-banner {
   display: flex;

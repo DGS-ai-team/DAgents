@@ -102,9 +102,6 @@ const activeAgentId = computed(() => {
 const activeWorkgroupId = computed(() =>
   route.name === "workgroups" ? String(route.params.workgroupId || "").trim() : "",
 );
-const activeMemberId = computed(() =>
-  route.name === "workgroups" ? String(route.query.member || "").trim() : "",
-);
 const online = computed(() => chromeStore.sseStatus === "connected");
 const statusClass = computed(() => {
   if (online.value) return "nav-rail__dot--online";
@@ -682,10 +679,6 @@ defineExpose({
                 v-for="m in membersByWg[wg.workgroup_id] || []"
                 :key="m.member_id"
                 class="nav-rail__item nav-rail__item--child"
-                :class="{
-                  'nav-rail__item--active':
-                    wg.workgroup_id === activeWorkgroupId && m.member_id === activeMemberId,
-                }"
                 :title="`${memberLabel(m)} · ${m.status || ''}`"
                 @click="openWorkgroup(wg.workgroup_id)"
               >
