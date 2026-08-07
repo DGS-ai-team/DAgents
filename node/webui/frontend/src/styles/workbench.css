@@ -2422,25 +2422,6 @@ select.settings-field__input {
   list-style: none;
 }
 
-.nav-rail__empty--action {
-  padding-top: 2px;
-  padding-bottom: 6px;
-}
-
-.nav-rail__text-btn {
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-  font-size: 12px;
-  color: var(--color-primary-strong, var(--color-primary, #0078d4));
-  cursor: pointer;
-}
-
-.nav-rail__text-btn:hover {
-  text-decoration: underline;
-}
-
 .nav-rail__list {
   display: flex;
   flex-direction: column;

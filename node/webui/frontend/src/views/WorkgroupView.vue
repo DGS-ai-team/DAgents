@@ -2468,9 +2468,6 @@ onUnmounted(() => {
   color: var(--color-text, #111827);
   font-size: 12px;
 }
-.chat__empty-action {
-  margin-top: 12px;
-}
 .chat__queue {
   display: flex;
   flex-direction: column;
