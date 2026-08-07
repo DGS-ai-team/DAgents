@@ -13,6 +13,10 @@ const ToolUserInterruptedMessage = "用户需要补充信息，打断了工具�
 // ToolStreamInterruptedMessage 为流式 assistant 输出或工具执行被 cancel 时的 tool 结果文案。
 const ToolStreamInterruptedMessage = "流式输出被用户中断。"
 
+// ToolLoopLimitExceededMessage 为单轮工具调用次数用尽时写入的 tool 结果文案。
+// 模型应据此给出结论并询问用户是否继续；下一条 user 消息会重置累计次数。
+const ToolLoopLimitExceededMessage = "已超过单轮工具调用次数，请先给出当前结论以及进度，询问用户是否要继续后续的推进，下一轮开始时工具累计次数会重置。"
+
 const (
 	hitlTypeUserInformation = "user_information"
 	hitlTypeExecuteTool     = "execute_tool"

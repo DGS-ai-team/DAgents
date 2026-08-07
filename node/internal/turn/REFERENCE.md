@@ -84,6 +84,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 | 符号 | 说明 |
 |------|------|
 | `ToolUserInterruptedMessage` | 用户打断工具时的 tool 结果文案 |
+| `ToolLoopLimitExceededMessage` | 单轮工具次数用尽时的 soft tool 结果文案 |
 | `PendingHITLItem` | 单条待 HITL tool call（含可选 `DuplicateMeta`） |
 | `PendingHITL` | 暂停时的待处理批次（`Items[]`）；JSON 兼容旧 `kind`/`tool_calls` |
 | `PendingHITL.AllToolCalls` | 用于 `InterruptPending` 的 call 列表 |

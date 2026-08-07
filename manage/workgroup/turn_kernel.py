@@ -39,6 +39,11 @@ from manage.workgroup.store import WorkGroupStore
 
 _DEFAULT_MAX_TOOL_LOOPS = 16
 
+_TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE = (
+    "已超过单轮工具调用次数，请先给出当前结论以及进度，"
+    "询问用户是否要继续后续的推进，下一轮开始时工具累计次数会重置。"
+)
+
 _LEADER_SYSTEM_RULES = (
     "你是工作组 Leader（Supervisor）。"
     "你只通过 Manage 侧编排工具进行协调，绝不亲自执行 shell / 文件系统 / 浏览器操作。"
@@ -607,29 +612,24 @@ class TurnKernel:
             messages = [{"role": "system", "content": system}] + list(projected["messages"])
             messages = self._apply_today_date_hook(run_id, messages)
             yield {"event": "status", "data": {"phase": "thinking"}}
+            # 超额后禁用 tools，迫使给出结论；若模型仍发起 tool_calls 则写入 soft tool_result。
+            over_budget = tool_loops >= self._max_tool_loops
+            step_tools: list[dict[str, Any]] = [] if (disable_tools or over_budget) else list(tools)
             result = None
             stream = getattr(client, "stream_chat", None)
             if callable(stream):
-                for piece in stream(messages, tools=tools or None):
+                for piece in stream(messages, tools=step_tools or None):
                     if piece.delta:
                         yield {"event": "delta", "data": {"text": piece.delta}}
                     if piece.result is not None:
                         result = piece.result
             else:
-                result = client.chat(messages, tools=tools or None)
+                result = client.chat(messages, tools=step_tools or None)
             if result is None:
                 raise WorkgroupError("conflict", "llm stream produced no result", http_status=502)
 
             steps += 1
             tool_loops += 1
-            if tool_loops > self._max_tool_loops:
-                run = self._store.update_actor_run(run_id, status="failed")
-                raise WorkgroupError(
-                    "conflict",
-                    "max_tool_loops exceeded",
-                    http_status=409,
-                    details={"max_tool_loops": self._max_tool_loops},
-                )
 
             assistant = self._assistant_message(result, name="leader")
             wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=0)
@@ -670,6 +670,54 @@ class TurnKernel:
                     "leader tools are disabled for this message, but model returned tool_calls",
                     http_status=409,
                 )
+
+            if tool_loops > self._max_tool_loops:
+                soft = _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE
+                tool_msgs = [
+                    RunHistoryMessage(
+                        role="tool",
+                        tool_call_id=tc.id,
+                        name=tc.name,
+                        content=soft,
+                    )
+                    for tc in result.tool_calls
+                ]
+                wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=wm)
+                self._store.append_run_history(run_id, tool_msgs, timeline_watermark_seq=wm)
+                run = self._store.get_actor_run(run_id) or run
+                # 超额一步后仍反复 tool_calls 则收束，避免 soft-reject 死循环。
+                if tool_loops > self._max_tool_loops + 1:
+                    final_text = (result.content or "").strip() or soft
+                    final_event = self._store.append_timeline(
+                        workgroup_id,
+                        type="actor_final_text",
+                        actor_id="leader",
+                        text=final_text,
+                        protocol_name="leader",
+                    )
+                    run = self._store.update_actor_run(
+                        run_id, status="succeeded", timeline_watermark_seq=wm
+                    )
+                    yield {
+                        "event": "assistant_final",
+                        "data": {
+                            "text": final_text,
+                            "timeline_event": final_event.model_dump(mode="json"),
+                        },
+                    }
+                    yield {
+                        "event": "loop_final",
+                        "data": {
+                            "run": run,
+                            "steps": steps,
+                            "status": "succeeded",
+                            "final_text": final_text,
+                            "tool_loop_limit_exceeded": True,
+                        },
+                    }
+                    return
+                continue
+
             tool_msgs: list[RunHistoryMessage] = []
             for tc in result.tool_calls:
                 tool_label = tc.name
@@ -794,17 +842,11 @@ class TurnKernel:
             )
             messages = [{"role": "system", "content": system}] + list(projected["messages"])
             messages = self._apply_today_date_hook(run_id, messages)
-            result = client.chat(messages, tools=tools or None)
+            over_budget = tool_loops >= max_loops
+            step_tools: list[dict[str, Any]] = [] if over_budget else list(tools)
+            result = client.chat(messages, tools=step_tools or None)
             steps += 1
             tool_loops += 1
-            if tool_loops > max_loops:
-                run = self._store.update_actor_run(run_id, status="failed")
-                raise WorkgroupError(
-                    "conflict",
-                    "member max_tool_loops exceeded",
-                    http_status=409,
-                    details={"max_tool_loops": max_loops},
-                )
 
             assistant = self._assistant_message(result, name=member_id)
             wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=0)
@@ -835,6 +877,42 @@ class TurnKernel:
                     "member has no tools but model returned tool_calls",
                     http_status=409,
                 )
+
+            if tool_loops > max_loops:
+                soft = _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE
+                tool_msgs = [
+                    RunHistoryMessage(
+                        role="tool",
+                        tool_call_id=tc.id,
+                        name=tc.name,
+                        content=soft,
+                    )
+                    for tc in result.tool_calls
+                ]
+                wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=wm)
+                self._store.append_run_history(run_id, tool_msgs, timeline_watermark_seq=wm)
+                run = self._store.get_actor_run(run_id) or run
+                if tool_loops > max_loops + 1:
+                    final_text = (result.content or "").strip() or soft
+                    self._store.append_timeline(
+                        workgroup_id,
+                        type="actor_final_text",
+                        actor_id=member_id,
+                        text=final_text,
+                        protocol_name=protocol_name_for_actor(member_id),
+                        assign_id=run.assign_id,
+                    )
+                    run = self._store.update_actor_run(
+                        run_id, status="succeeded", timeline_watermark_seq=wm
+                    )
+                    return {
+                        "run": run,
+                        "steps": steps,
+                        "status": "succeeded",
+                        "final_text": final_text,
+                        "tool_loop_limit_exceeded": True,
+                    }
+                continue
 
             tool_msgs: list[RunHistoryMessage] = []
             for tc in result.tool_calls:
