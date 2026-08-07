@@ -72,12 +72,13 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 	case "tool.command":
 		cmd, err := toolCommandFromPayload(env.Payload)
 		if err != nil {
-			return nil, err
+			return toolCommandFailureResult(env, cmd, err)
 		}
 		res, err := w.HandleCommand(cmd)
 		// rejected 时 HandleCommand 仍返回 AcceptResult + error
 		if res == nil {
-			return dispatchErr(err)
+			// 绑定缺失等：必须回 tool.result，否则 Manage wait_command_result 空等至 60s 超时
+			return toolCommandFailureResult(env, cmd, err)
 		}
 		wgID := deliveryWorkgroupID(env, cmd.WorkgroupID)
 		ackPayload := map[string]any{
@@ -92,13 +93,13 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		}
 		ack := map[string]any{"type": "tool.ack", "payload": ackPayload}
 		out := &DispatchResult{
-			Handled:            true,
-			PendingAck:         true,
-			AckWorkgroupID:     wgID,
-			AckDeliverySeq:     env.DeliverySeq,
-			AckEnvelope:        ack,
+			Handled:        true,
+			PendingAck:     true,
+			AckWorkgroupID: wgID,
+			AckDeliverySeq: env.DeliverySeq,
+			AckEnvelope:    ack,
 		}
-		if res.Entry.Status == "succeeded" || res.Entry.Status == "failed" || res.Entry.Status == "indeterminate" || res.Entry.Status == "rejected" || res.Entry.Status == "canceled" {
+		if isTerminalCommandStatus(res.Entry.Status) {
 			out.AckEnvelope = map[string]any{
 				"type": "tool.result",
 				"payload": mergeMaps(ackPayload, map[string]any{
@@ -106,6 +107,19 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 					"error_code":  res.Entry.ErrorCode,
 					"status":      res.Entry.Status,
 					"result_text": extractResultText(res.Entry.ResultJSON),
+				}),
+			}
+		} else if res.Entry.Status == "accepted" || res.Entry.Status == "running" {
+			// 非终态却已从 Accept 返回：本路径不会再异步回传，强制 tool.result 避免 Manage 空等
+			status := "indeterminate"
+			code := string(CodeIndeterminate)
+			out.AckEnvelope = map[string]any{
+				"type": "tool.result",
+				"payload": mergeMaps(ackPayload, map[string]any{
+					"status":      status,
+					"error_code":  code,
+					"result_text": "command left non-terminal without result callback",
+					"result_json": "",
 				}),
 			}
 		}
@@ -217,6 +231,56 @@ func dispatchErr(err error) (*DispatchResult, error) {
 				"code":    string(code),
 				"message": msg,
 			},
+		},
+	}, err
+}
+
+func isTerminalCommandStatus(status string) bool {
+	switch status {
+	case "succeeded", "failed", "indeterminate", "rejected", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+// toolCommandFailureResult 将 tool.command 处理失败转为 tool.result，唤醒 Manage waiter。
+func toolCommandFailureResult(env WSEnvelope, cmd ToolCommand, err error) (*DispatchResult, error) {
+	code := CodeConflict
+	msg := fmt.Sprint(err)
+	if we, ok := err.(*Error); ok {
+		code = we.Code
+		msg = we.Message
+	}
+	if err == nil {
+		msg = "tool command failed"
+	}
+	wgID := deliveryWorkgroupID(env, cmd.WorkgroupID)
+	status := "failed"
+	if code == CodeIndeterminate {
+		status = "indeterminate"
+	}
+	payload := map[string]any{
+		"command_id":            cmd.CommandID,
+		"status":                status,
+		"error_code":            string(code),
+		"result_text":           msg,
+		"result_json":           "",
+		"delivery_seq":          env.DeliverySeq,
+		"workgroup_id":          firstNonEmpty(cmd.WorkgroupID, wgID),
+		"member_id":             cmd.MemberID,
+		"assign_id":             cmd.AssignID,
+		"connection_generation": env.ConnectionGeneration,
+	}
+	return &DispatchResult{
+		Handled:        true,
+		PendingAck:     env.DeliverySeq > 0,
+		AckWorkgroupID: wgID,
+		AckDeliverySeq: env.DeliverySeq,
+		ErrorCode:      code,
+		AckEnvelope: map[string]any{
+			"type":    "tool.result",
+			"payload": payload,
 		},
 	}, err
 }

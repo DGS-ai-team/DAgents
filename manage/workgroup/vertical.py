@@ -303,7 +303,10 @@ class VerticalLoop:
         frame = self.store.enqueue_outbox(workgroup_id, type="tool.command", payload=command)
         self.store.set_assign_status(assign.assign_id, "running")
         if self.hub is not None:
-            self.hub.deliver_outbox_frame(frame, home_node_id=ctx["home_node_id"])
+            delivered = self.hub.deliver_outbox_frame(frame, home_node_id=ctx["home_node_id"])
+            # 与 provision 对齐：未在线时落库，在线但游标落后时补 resume gap-fill
+            if delivered is None:
+                self.hub.request_resume(ctx["home_node_id"], workgroup_id)
 
         tool_result: dict[str, Any] | None = None
         if self.bridge is not None:
@@ -439,12 +442,34 @@ class VerticalLoop:
                 break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                hint = ""
+                home_node_id = ""
+                with self._lock:
+                    for meta in (self._wg_pending_commands or {}).values():
+                        for cid, m in (meta or {}).items():
+                            if cid == command_id:
+                                home_node_id = str((m or {}).get("home_node_id") or "")
+                                break
+                if self.hub is not None and home_node_id:
+                    conn = self.hub.get_connection(home_node_id)
+                    if conn is None or not getattr(conn, "active", False):
+                        hint = (
+                            f"; home node {home_node_id!r} workgroup dialer not connected "
+                            "(enable manage.url on that Node; not tool-approval/HITL)"
+                        )
+                    else:
+                        hint = (
+                            "; dialer connected but no tool.result "
+                            "(Node may have returned session.error, or command stuck)"
+                        )
+                elif not home_node_id:
+                    hint = "; no home_node recorded for command"
                 raise WorkgroupError(
                     "conflict",
-                    f"tool command timed out after {timeout:g}s",
+                    f"tool command timed out after {timeout:g}s{hint}",
                     http_status=409,
                     retryable=True,
-                    details={"command_id": command_id},
+                    details={"command_id": command_id, "home_node_id": home_node_id or None},
                 )
             slice_s = min(0.2, remaining)
             if ev.wait(slice_s):

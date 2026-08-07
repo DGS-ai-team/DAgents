@@ -1,16 +1,19 @@
 package workgroup
 
-import "sync"
+import (
+	"path/filepath"
+	"sync"
+)
 
 // Worker 聚合 D2 骨架能力：provision / journal / fencing / manifest / session。
 type Worker struct {
-	mu        sync.Mutex
-	NodeID    string
-	Bindings  BindingStore
-	Journal   CommandJournal
-	Session   Session
-	Provision *Provisioner
-	Commands  *CommandHandler
+	mu         sync.Mutex
+	NodeID     string
+	Bindings   BindingStore
+	Journal    CommandJournal
+	Session    Session
+	Provision  *Provisioner
+	Commands   *CommandHandler
 	Tombstones map[string]ArchiveTombstone
 }
 
@@ -20,15 +23,38 @@ type Config struct {
 	Bindings      BindingStore
 	Journal       CommandJournal
 	NodeToolNames []string
+	// DataDir 非空时默认使用目录持久化 Binding + CommandJournal（重启后可继续执行）。
+	// 显式 Bindings/Journal 优先。
+	DataDir string
 }
 
-// NewWorker 创建内存默认存储的 Worker。
+// NewWorker 创建 Worker；未指定存储时：有 DataDir 则落盘，否则纯内存（测试默认）。
 func NewWorker(cfg Config) *Worker {
 	bindings := cfg.Bindings
+	journal := cfg.Journal
+	if bindings == nil || journal == nil {
+		if dir := filepath.Clean(cfg.DataDir); dir != "" && dir != "." {
+			if bindings == nil {
+				b, err := NewDirBindingStore(filepath.Join(dir, "bindings"))
+				if err != nil {
+					bindings = NewMemoryBindingStore()
+				} else {
+					bindings = b
+				}
+			}
+			if journal == nil {
+				j, err := NewDirJournal(filepath.Join(dir, "journal"))
+				if err != nil {
+					journal = NewMemoryJournal()
+				} else {
+					journal = j
+				}
+			}
+		}
+	}
 	if bindings == nil {
 		bindings = NewMemoryBindingStore()
 	}
-	journal := cfg.Journal
 	if journal == nil {
 		journal = NewMemoryJournal()
 	}

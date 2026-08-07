@@ -466,6 +466,63 @@ class AssignVerticalLoopTests(unittest.TestCase):
             self.assertEqual(box["r"]["status"], "canceled")
             self.assertEqual(store.get_assign(assign.assign_id).status, "failed")
 
+    def test_wait_timeout_mentions_dialer_offline(self) -> None:
+        from manage.workgroup.errors import WorkgroupError
+        from manage.workgroup.ws_hub import WorkgroupWSHub
+
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "manage.db"))
+            hub = WorkgroupWSHub(store)
+            loop = VerticalLoop(store, hub=hub, command_timeout_s=0.3)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="TimeoutHint",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            wid = group.workgroup_id
+            store.patch_acl(
+                wid,
+                ACLPatchRequest(collaborators=["node-b"], expected_revision=1),
+            )
+            member, _ = store.create_member(
+                wid,
+                MemberCreateRequest(
+                    home_node_id="node-b",
+                    display_name="m",
+                    allow_tool_names=["read_file"],
+                ),
+            )
+            mid = member.member_id
+            store.mark_member_status(
+                mid,
+                "ready",
+                workgroup_id=wid,
+                workspace_path=str(Path(tmp) / "ws"),
+                tool_catalog_revision="rev_to",
+            )
+            store.publish_workgroup(wid)
+            from manage.workgroup.models import AssignCreateRequest
+
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="读 README"),
+            )
+            dispatched = loop.dispatch_read_file_for_assign(
+                wid,
+                assign_id=assign.assign_id,
+                member_id=mid,
+                tool_call_id="call_timeout_hint",
+                path="README",
+            )
+            cmd_id = dispatched["command"]["command_id"]
+            with self.assertRaises(WorkgroupError) as ctx:
+                loop.wait_command_result(cmd_id, timeout_s=0.3)
+            self.assertIn("dialer not connected", ctx.exception.message)
+            self.assertIn("not tool-approval", ctx.exception.message)
+
 
 if __name__ == "__main__":
     unittest.main()

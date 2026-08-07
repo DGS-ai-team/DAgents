@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -354,6 +355,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		wgWorker = workgroup.NewWorker(workgroup.Config{
 			NodeID:        cfg.NodeID,
 			NodeToolNames: toolNames,
+			DataDir:       filepath.Join(cfg.RuntimeDir(), "workgroup-workers", "state"),
 		})
 		wgDialer = &workgroup.Dialer{
 			ManageURL: cfg.Manage.URL,

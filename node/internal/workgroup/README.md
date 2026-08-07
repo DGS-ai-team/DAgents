@@ -9,7 +9,7 @@ Node 侧工作组成员执行器。权威契约见：
 
 | 能力 | 状态 |
 |------|------|
-| WorkerBinding 持久化（非 local agents） | ✅ |
+| WorkerBinding 持久化（DirBindingStore；非 local agents） | ✅ |
 | 幂等 `member.provision` | ✅ |
 | Command journal（accept 先落盘再 ack） | ✅ |
 | Fencing（lease_epoch / generation / digest / catalog） | ✅ |
