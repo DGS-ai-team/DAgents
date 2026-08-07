@@ -23,6 +23,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY manage/ ./manage/
+# 与 Node go:embed 同源；member_tools 在 import 时读取（缺则 Manage 无法启动）
+COPY shared/workgroup/member_tool_catalog.json ./shared/workgroup/member_tool_catalog.json
 COPY --from=frontend /src/manage/console/static /app/manage/console/static
 COPY packaging/manage/bundled-releases/ /app/bundled/releases/
 COPY run_manage.py .
