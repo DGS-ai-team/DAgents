@@ -23,17 +23,14 @@ func TestRemoteDriverCall(t *testing.T) {
 		switch req.Op {
 		case "ping":
 			_ = json.NewEncoder(w).Encode(Response{OK: true, Detail: map[string]any{"driver": "browser-use-cdp-v1"}})
-		case "navigate":
-			_ = json.NewEncoder(w).Encode(Response{OK: true, URL: req.URL, Title: "Example"})
-		case "snapshot":
+		case "start":
+			_ = json.NewEncoder(w).Encode(Response{OK: true, URL: "about:blank", Title: ""})
+		case "run_task":
 			_ = json.NewEncoder(w).Encode(Response{
-				OK:    true,
-				URL:   "https://example.com",
-				Title: "Example",
+				OK: true,
 				Detail: map[string]any{
-					"elements": []any{
-						map[string]any{"index": 1, "selector": "#login", "engine": "browser-use"},
-					},
+					"task_id": "btask-1",
+					"status":  "queued",
 				},
 			})
 		default:
@@ -53,12 +50,15 @@ func TestRemoteDriverCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := d.Call(context.Background(), Request{Op: "navigate", SessionKey: "s1", URL: "https://example.com"})
+	resp, err := d.Call(context.Background(), Request{Op: "run_task", SessionKey: "s1", Task: "open https://example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !resp.OK || resp.URL != "https://example.com" {
+	if !resp.OK {
 		t.Fatalf("resp = %+v", resp)
+	}
+	if resp.Detail["task_id"] != "btask-1" {
+		t.Fatalf("detail = %+v", resp.Detail)
 	}
 }
 

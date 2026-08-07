@@ -1,16 +1,19 @@
 # node/internal/browser
 
-browser_* 工具的 session 管理；经 **RemoteDriver** 调用本机 **dagents-browser**（Python + browser-use）。
+伴生浏览器 session 管理；经 **RemoteDriver** 调用本机 **dagents-browser**（Python + browser-use Agent）。
 
 ## 架构
 
 | 文件 | 说明 |
 |------|------|
-| `manager.go` | `BrowserManager`、URL 校验、session 上限 |
+| `manager.go` | `BrowserManager` Start/Stop、session 上限 |
+| `manager_task.go` | `RunTask*` / `TaskStatus` / `TaskCancel` |
 | `remote_driver.go` | HTTP → dagents-browser |
 | `mock_driver.go` | 单测 mock |
 
-薄服务：`browser-service/`（browser-use + CDP attach 本机 Chrome）。
+薄服务：`browser-service/`（browser-use Agent + CDP attach 本机 Chrome）。
+
+产品路径：主 Agent 仅 `browser_run_task` / `browser_task_status` / `browser_task_cancel`。
 
 设计：[browser-remote-service-mode-a.md](../../../docs/design/browser-remote-service-mode-a.md)
 

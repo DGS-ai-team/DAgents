@@ -22,7 +22,7 @@
 
 ### 1.2 目标场景
 
-1. **Browser 自动化**：`browser_snapshot` / `browser_screenshot` / 带截图的 `browser_navigate` 后在聊天区看到页面截图。  
+1. **Browser 自动化**：`browser_run_task` / `browser_task_status` 返回的 `screenshot_paths` 在聊天区以「浏览器引用」展示。  
 2. **读图工具**：`read_image` 成功后展示缩略图 + 路径，而非仅 `[READ_IMAGE] path=…`。  
 3. **用户上传**：刷新 / Hydrate 后仍能显示用户曾发送的图片（不依赖浏览器内存里的 `data:` URL）。  
 4. **Hydrate 一致**：`MessagesToTranscriptEntries` / `/hydrate` 的 transcript 含 **可渲染 media 引用**，与 SSE 增量去重（F-H9）。
