@@ -30,6 +30,18 @@ class MemberToolCatalogTests(unittest.TestCase):
         self.assertIn("read_file", default_allow_tool_names())
         self.assertIn("search_replace", default_allow_tool_names())
 
+    def test_manage_dockerfile_copies_shared_catalog(self) -> None:
+        """Docker 镜像 WORKDIR=/app，须拷贝 shared catalog，否则 import member_tools 即 FileNotFoundError。"""
+        from pathlib import Path
+
+        dockerfile = Path(__file__).resolve().parents[1] / "packaging" / "manage" / "Dockerfile"
+        text = dockerfile.read_text(encoding="utf-8")
+        self.assertIn(
+            "shared/workgroup/member_tool_catalog.json",
+            text,
+            msg="packaging/manage/Dockerfile must COPY member_tool_catalog.json into the image",
+        )
+
     def test_openai_tools_for_all_names(self) -> None:
         tools = member_openai_tools(MEMBER_EXECUTABLE_TOOL_NAMES)
         self.assertEqual(len(tools), len(MEMBER_EXECUTABLE_TOOL_NAMES))

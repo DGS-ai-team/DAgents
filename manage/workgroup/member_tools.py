@@ -14,11 +14,13 @@ from typing import Any
 
 
 def _catalog_path() -> Path:
-    # manage/workgroup/member_tools.py → repo root
+    # manage/workgroup/member_tools.py → repo root（本地）或 /app（Docker WORKDIR）
     here = Path(__file__).resolve()
     candidates = [
         here.parents[2] / "shared" / "workgroup" / "member_tool_catalog.json",
         Path.cwd() / "shared" / "workgroup" / "member_tool_catalog.json",
+        # Docker 镜像：WORKDIR=/app，catalog 落在 /app/shared/workgroup/
+        Path("/app/shared/workgroup/member_tool_catalog.json"),
     ]
     for p in candidates:
         if p.is_file():
