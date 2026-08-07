@@ -14,6 +14,8 @@ from manage.workgroup.builtin_hooks import (
     package_tool_result,
 )
 from manage.workgroup.errors import WorkgroupError
+from manage.workgroup.human_queue import QueuedHuman
+from manage.workgroup import ids as wg_ids
 from manage.workgroup.history import (
     RunHistoryMessage,
     ToolCall,
@@ -121,6 +123,8 @@ class TurnKernel:
         self._cancel_flags: dict[str, threading.Event] = {}
         self._active_turn: dict[str, dict[str, Any]] = {}
         self._turn_lock = threading.Lock()
+        # workgroup_id -> FIFO human 队列（进程内；对齐 Node MessageQueue 单飞）
+        self._human_queues: dict[str, list[QueuedHuman]] = {}
         self._command_cancel_hook: Callable[[str], None] | None = None
 
     def set_assign_completer(self, completer: AssignCompleter | None) -> None:
@@ -141,20 +145,168 @@ class TurnKernel:
     def _begin_turn(self, workgroup_id: str, *, mode: str, **meta: Any) -> threading.Event:
         flag = self._cancel_event(workgroup_id)
         flag.clear()
+        token = str(meta.get("turn_token") or wg_ids.new_ulid())
         with self._turn_lock:
-            self._active_turn[workgroup_id] = {"mode": mode, **meta}
+            self._active_turn[workgroup_id] = {"mode": mode, "turn_token": token, **meta}
         return flag
 
-    def _end_turn(self, workgroup_id: str) -> None:
+    def _end_turn(self, workgroup_id: str, *, turn_token: str | None = None) -> QueuedHuman | None:
+        """结束当前 turn；若队列非空则在同一把锁内认领下一条并返回。"""
         with self._turn_lock:
-            self._active_turn.pop(workgroup_id, None)
-        self._cancel_event(workgroup_id).clear()
+            cur = self._active_turn.get(workgroup_id)
+            if cur is not None:
+                if turn_token and str(cur.get("turn_token") or "") != str(turn_token):
+                    return None
+                self._active_turn.pop(workgroup_id, None)
+            flag = self._cancel_flags.get(workgroup_id)
+            if flag is not None:
+                flag.clear()
+            bucket = self._human_queues.get(workgroup_id) or []
+            if not bucket:
+                self._human_queues.pop(workgroup_id, None)
+                return None
+            item = bucket.pop(0)
+            if bucket:
+                self._human_queues[workgroup_id] = bucket
+            else:
+                self._human_queues.pop(workgroup_id, None)
+            token = wg_ids.new_ulid()
+            self._active_turn[workgroup_id] = {
+                "mode": "claiming",
+                "turn_token": token,
+                "queue_id": item.queue_id,
+            }
+            item._claim_token = token  # type: ignore[attr-defined]
+            return item
+
+    def _schedule_queued_human(self, item: QueuedHuman) -> None:
+        token = str(getattr(item, "_claim_token", "") or "")
+
+        def _worker() -> None:
+            try:
+                for _ in self._execute_human_turn_events(item, turn_token=token):
+                    pass
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(
+            target=_worker,
+            name=f"wg-human-queue-{item.workgroup_id[-8:]}",
+            daemon=True,
+        ).start()
+
+    def _finish_human_turn(self, workgroup_id: str, *, turn_token: str) -> None:
+        nxt = self._end_turn(workgroup_id, turn_token=turn_token)
+        if nxt is not None:
+            self._schedule_queued_human(nxt)
 
     def _update_turn(self, workgroup_id: str, **meta: Any) -> None:
         with self._turn_lock:
             cur = self._active_turn.get(workgroup_id)
             if cur is not None:
                 cur.update(meta)
+
+    def _is_turn_busy(self, workgroup_id: str) -> bool:
+        with self._turn_lock:
+            return workgroup_id in self._active_turn
+
+    def _queue_snapshot(self, workgroup_id: str) -> list[dict[str, Any]]:
+        with self._turn_lock:
+            items = list(self._human_queues.get(workgroup_id) or [])
+        return [item.to_public(i + 1) for i, item in enumerate(items)]
+
+    def list_human_queue(self, workgroup_id: str) -> dict[str, Any]:
+        if self._store.get_workgroup(workgroup_id) is None:
+            raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+        busy = self._is_turn_busy(workgroup_id)
+        items = self._queue_snapshot(workgroup_id)
+        with self._turn_lock:
+            meta = dict(self._active_turn.get(workgroup_id) or {})
+        return {
+            "busy": busy,
+            "active_mode": str(meta.get("mode") or "") or None,
+            "items": items,
+            "depth": len(items),
+        }
+
+    def patch_human_queue_item(self, workgroup_id: str, queue_id: str, *, text: str) -> dict[str, Any]:
+        from manage.workgroup.human_queue import _now
+
+        body = (text or "").strip()
+        if not body:
+            raise WorkgroupError("invalid_argument", "text required", http_status=400)
+        qid = (queue_id or "").strip()
+        with self._turn_lock:
+            items = self._human_queues.get(workgroup_id) or []
+            for idx, item in enumerate(items):
+                if item.queue_id != qid:
+                    continue
+                item.text = body
+                item.updated_at = _now()
+                return item.to_public(idx + 1)
+        raise WorkgroupError("not_found", "queued message not found", http_status=404)
+
+    def cancel_human_queue_item(self, workgroup_id: str, queue_id: str) -> dict[str, Any]:
+        qid = (queue_id or "").strip()
+        with self._turn_lock:
+            items = self._human_queues.get(workgroup_id) or []
+            for idx, item in enumerate(items):
+                if item.queue_id != qid:
+                    continue
+                items.pop(idx)
+                if items:
+                    self._human_queues[workgroup_id] = items
+                else:
+                    self._human_queues.pop(workgroup_id, None)
+                return {"cancelled": True, "queue_id": qid, "depth": len(items)}
+        raise WorkgroupError("not_found", "queued message not found", http_status=404)
+
+    def _enqueue_human_unlocked(self, item: QueuedHuman) -> int:
+        """调用方须持有 _turn_lock。返回 1-based position。"""
+        cid = (item.client_message_id or "").strip()
+        if cid:
+            for idx, existing in enumerate(self._human_queues.get(item.workgroup_id) or []):
+                if (existing.client_message_id or "").strip() == cid:
+                    return idx + 1
+        bucket = self._human_queues.setdefault(item.workgroup_id, [])
+        bucket.append(item)
+        return len(bucket)
+
+    def _claim_or_enqueue(
+        self,
+        workgroup_id: str,
+        *,
+        text: str,
+        from_node_id: str,
+        client_message_id: str | None,
+        disable_tools: bool,
+        direct_member_id: str | None,
+    ) -> tuple[str, QueuedHuman, int]:
+        """返回 (\"run\"|\"queued\", item, position)。"""
+        item = QueuedHuman(
+            queue_id=wg_ids.queue_human_id(),
+            workgroup_id=workgroup_id,
+            text=text,
+            from_node_id=from_node_id,
+            client_message_id=client_message_id,
+            direct_member_id=direct_member_id,
+            disable_tools=disable_tools,
+        )
+        with self._turn_lock:
+            busy = workgroup_id in self._active_turn
+            pending = list(self._human_queues.get(workgroup_id) or [])
+            if busy or pending:
+                pos = self._enqueue_human_unlocked(item)
+                return "queued", item, pos
+            token = wg_ids.new_ulid()
+            self._active_turn[workgroup_id] = {
+                "mode": "claiming",
+                "turn_token": token,
+                "queue_id": item.queue_id,
+            }
+            item_meta = item
+            # stash token on item via active_turn only
+            return "run", item_meta, 0
 
     def _is_cancelled(self, workgroup_id: str) -> bool:
         return self._cancel_event(workgroup_id).is_set()
@@ -297,8 +449,9 @@ class TurnKernel:
         disable_tools: bool = False,
         direct_member_id: str | None = None,
     ) -> dict[str, Any]:
-        """写入 Timeline 并驱动 Leader loop 或 @直连至空闲。"""
+        """入队或驱动 Leader / @直连至空闲。忙碌时返回 queued，不并行开 loop。"""
         final: dict[str, Any] | None = None
+        queued: dict[str, Any] | None = None
         for ev in self.handle_human_message_events(
             workgroup_id,
             text=text,
@@ -309,6 +462,10 @@ class TurnKernel:
         ):
             if ev.get("event") == "final":
                 final = ev.get("data") or {}
+            elif ev.get("event") == "queued":
+                queued = ev.get("data") or {}
+        if queued is not None:
+            return {"queued": True, **queued}
         if final is None:
             raise WorkgroupError("conflict", "leader loop produced no final event", http_status=500)
         return final
@@ -323,65 +480,109 @@ class TurnKernel:
         disable_tools: bool = False,
         direct_member_id: str | None = None,
     ):
-        """写入 Timeline 并驱动 Leader / 直连 Member，产出 SSE 友好事件。"""
+        """空闲则立即消费；忙碌则 FIFO 入队（对齐 Node MessageQueue 单飞）。"""
         self._store.assert_acl_member(workgroup_id, from_node_id)
         self._store.require_active(workgroup_id)
-        try:
-            self._store.fail_active_assigns(
-                workgroup_id,
-                reason="previous assign superseded by new human message",
-                error_code="canceled",
-            )
-        except Exception:  # noqa: BLE001
-            pass
 
-        member, instruction = resolve_direct_member(
-            self._store,
+        action, item, position = self._claim_or_enqueue(
             workgroup_id,
-            direct_member_id=direct_member_id,
-            timeline_text=text,
-        )
-
-        event = self._store.append_timeline(
-            workgroup_id,
-            type="human_message",
-            actor_id=from_node_id,
             text=text,
+            from_node_id=from_node_id,
             client_message_id=client_message_id,
-            protocol_name=protocol_name_for_actor(from_node_id),
+            disable_tools=disable_tools,
+            direct_member_id=direct_member_id,
         )
-        yield {
-            "event": "human",
-            "data": {"timeline_event": event.model_dump(mode="json")},
-        }
+        if action == "queued":
+            yield {
+                "event": "queued",
+                "data": {
+                    **item.to_public(position),
+                    "queue": self.list_human_queue(workgroup_id),
+                },
+            }
+            return
 
-        if member is not None:
+        with self._turn_lock:
+            token = str((self._active_turn.get(workgroup_id) or {}).get("turn_token") or "")
+        yield from self._execute_human_turn_events(item, turn_token=token)
+
+    def _execute_human_turn_events(self, item: QueuedHuman, *, turn_token: str):
+        """真正执行一轮 human：写 Timeline + Leader / 直连；结束后泵队列。"""
+        workgroup_id = item.workgroup_id
+        try:
             try:
+                self._store.fail_active_assigns(
+                    workgroup_id,
+                    reason="previous assign superseded by new human message",
+                    error_code="canceled",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+            member, instruction = resolve_direct_member(
+                self._store,
+                workgroup_id,
+                direct_member_id=item.direct_member_id,
+                timeline_text=item.text,
+            )
+
+            event = self._store.append_timeline(
+                workgroup_id,
+                type="human_message",
+                actor_id=item.from_node_id,
+                text=item.text,
+                client_message_id=item.client_message_id,
+                protocol_name=protocol_name_for_actor(item.from_node_id),
+            )
+            yield {
+                "event": "human",
+                "data": {"timeline_event": event.model_dump(mode="json")},
+            }
+
+            if member is not None:
                 yield from self._run_direct_member_events(
                     workgroup_id,
                     member=member,
                     instruction=instruction,
                     human_event=event,
+                    turn_token=turn_token,
                 )
-            finally:
-                self._end_turn(workgroup_id)
-            return
+                return
 
-        self._begin_turn(workgroup_id, mode="leader")
-        try:
-            run = self._store.find_running_leader_run(workgroup_id) or self.start_leader_run(workgroup_id)
+            self._begin_turn(
+                workgroup_id, mode="leader", turn_token=turn_token, queue_id=item.queue_id
+            )
+            run = self._store.find_running_leader_run(workgroup_id) or self.start_leader_run(
+                workgroup_id
+            )
             self._update_turn(workgroup_id, leader_run_id=run.run_id)
             self._store.ensure_run_history(run)
             loop_result: dict[str, Any] | None = None
-            for ev in self.run_leader_until_idle_events(
-                workgroup_id, run.run_id, disable_tools=disable_tools
-            ):
-                if ev.get("event") == "loop_final":
-                    loop_result = ev.get("data") or {}
-                    continue
-                yield ev
+            try:
+                for ev in self.run_leader_until_idle_events(
+                    workgroup_id, run.run_id, disable_tools=item.disable_tools
+                ):
+                    if ev.get("event") == "loop_final":
+                        loop_result = ev.get("data") or {}
+                        continue
+                    yield ev
+            except WorkgroupError as exc:
+                if exc.code == "canceled":
+                    yield {
+                        "event": "final",
+                        "data": {
+                            "timeline_event": event,
+                            "leader_run": self._store.find_running_leader_run(workgroup_id),
+                            "loop": {"steps": 0, "status": "canceled", "final_text": ""},
+                            "mode": "leader",
+                        },
+                    }
+                    return
+                raise
             if loop_result is None:
-                raise WorkgroupError("conflict", "leader loop produced no result", http_status=500)
+                raise WorkgroupError(
+                    "conflict", "leader loop produced no result", http_status=500
+                )
             yield {
                 "event": "final",
                 "data": {
@@ -395,21 +596,8 @@ class TurnKernel:
                     "mode": "leader",
                 },
             }
-        except WorkgroupError as exc:
-            if exc.code == "canceled":
-                yield {
-                    "event": "final",
-                    "data": {
-                        "timeline_event": event,
-                        "leader_run": self._store.find_running_leader_run(workgroup_id),
-                        "loop": {"steps": 0, "status": "canceled", "final_text": ""},
-                        "mode": "leader",
-                    },
-                }
-                return
-            raise
         finally:
-            self._end_turn(workgroup_id)
+            self._finish_human_turn(workgroup_id, turn_token=turn_token)
 
     def _run_direct_member_events(
         self,
@@ -418,6 +606,7 @@ class TurnKernel:
         member: Any,
         instruction: str,
         human_event: Any,
+        turn_token: str | None = None,
     ):
         """@直连：跳过 Leader LLM，创建 Assign + Member run。"""
         mid = member.member_id
@@ -425,7 +614,10 @@ class TurnKernel:
         if len(brief) > 96:
             brief = brief[:93] + "…"
 
-        self._begin_turn(workgroup_id, mode="direct", member_id=mid)
+        begin_kwargs: dict[str, Any] = {"member_id": mid}
+        if turn_token:
+            begin_kwargs["turn_token"] = turn_token
+        self._begin_turn(workgroup_id, mode="direct", **begin_kwargs)
         yield {"event": "status", "data": {"phase": "tool", "tool": "直达成员", "mode": "direct"}}
 
         tool_call_id = "call_direct_1"

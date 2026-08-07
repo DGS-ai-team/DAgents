@@ -63,6 +63,10 @@ class HumanPostRequest(BaseModel):
     direct_member_id: str | None = None
 
 
+class QueuedHumanPatchRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
 class TurnCancelRequest(BaseModel):
     client_message_id: str | None = None
 

@@ -34,6 +34,9 @@ func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/timeline", s.handleWorkgroupTimeline)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/messages", s.handlePostWorkgroupMessage)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/messages/stream", s.handlePostWorkgroupMessageStream)
+	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/human-queue", s.handleWorkgroupHumanQueue)
+	s.mux.HandleFunc("PATCH /v1/workgroups/{workgroupId}/human-queue/{queueId}", s.handlePatchWorkgroupHumanQueue)
+	s.mux.HandleFunc("DELETE /v1/workgroups/{workgroupId}/human-queue/{queueId}", s.handleDeleteWorkgroupHumanQueue)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/turn/cancel", s.handleCancelWorkgroupTurn)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/runs", s.handleListWorkgroupRuns)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/runs/{runId}/history", s.handleGetWorkgroupRunHistory)
@@ -534,6 +537,54 @@ func (s *Server) handleGetWorkgroupRunHistory(w http.ResponseWriter, r *http.Req
 	wid := strings.TrimSpace(r.PathValue("workgroupId"))
 	runID := strings.TrimSpace(r.PathValue("runId"))
 	out, err := s.control.GetWorkgroupRunHistory(r.Context(), wid, runID)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleWorkgroupHumanQueue(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	out, err := s.control.ListWorkgroupHumanQueue(r.Context(), wid)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handlePatchWorkgroupHumanQueue(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	qid := strings.TrimSpace(r.PathValue("queueId"))
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "invalid json", nil)
+		return
+	}
+	out, err := s.control.PatchWorkgroupHumanQueueItem(r.Context(), wid, qid, body.Text)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleDeleteWorkgroupHumanQueue(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	qid := strings.TrimSpace(r.PathValue("queueId"))
+	out, err := s.control.CancelWorkgroupHumanQueueItem(r.Context(), wid, qid)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
 		return
