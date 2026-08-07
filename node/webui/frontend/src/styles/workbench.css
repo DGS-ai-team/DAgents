@@ -2065,6 +2065,22 @@ select.settings-field__input {
   font-weight: 500;
 }
 
+.chat__worker-strip--btn {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat__worker-strip--btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .chat__input-strip-right {
   flex: 0 0 auto;
   white-space: nowrap;

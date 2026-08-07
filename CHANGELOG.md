@@ -22,7 +22,7 @@
 
 ### 变更
 
-- **能力页布局整理**：对齐其它设置页（去掉重复 intro、按「共享服务 / 运行配额 / 子 Agent 配额」分段、条件区块间距与 placeholder）；字段网格随视口 `auto-fill` 自适应列数；子 Agent 运行列表用 standalone 分隔。
+- **能力页布局整理**：对齐其它设置页（去掉重复 intro、按「共享服务 / 运行配额 / 子 Agent 配额」分段、条件区块间距与 placeholder）；字段网格随视口 `auto-fill` 自适应列数。运行中的子 Agent 从能力页移除，改在侧栏「活动」查看/取消。
 - **能力页：Web UI 固定挂载**：移除「Web 界面」开关；`/ui/` 始终挂载，setup PATCH 忽略 `ui_enabled=false`。
 - **工具组随进程能力显隐**：未启用浏览器服务 / 企业微信推送时，Agent 创建与设置页不再展示对应工具组；`GET /v1/setup/config` 增加 `available_tool_groups`。
 - **工作组成员按 Node 工具组配置**：新建/编辑成员时从本 Node `GET /v1/workgroups/meta/member-tools` 拉取工具组清单（fs/bash），勾选组后展开为 `allow_tool_names`。
