@@ -22,6 +22,7 @@
 
 ### 变更
 
+- **浏览器引用 UX**：任务截图注册为 media 并在可折叠「浏览器引用」中展示；HITL 审批突出 `browser_run_task` 自然语言目标；工具气泡结果改为「目标 · 短状态」，完整结论留给引用卡片。
 - **退役细粒度 `browser_*` LLM 工具**：删除 `browser_ops` 组与 `browser_navigate` / `browser_click` 等 Agent 工具定义与 handler；`browser` 组仅保留 `browser_run_task` / `browser_task_status` / `browser_task_cancel`。sidecar 任务路径与 Manager Start/Stop 保留（后续可再收窄 HTTP op 面）。
 - **存量 Agent 策略种子缺项合并**：Node 启动时对 `.runtime/policy/tool.approval.txt` 与 `agents.db` 中全部 `agent_policy` 仅追加 packaging 种子中缺失的工具模式（如 `browser_run_task`），不覆盖用户已改档位；`EnsureAgentPolicy` 读存量行时同样补齐。
 - **移除 Node Agent 沙箱**：删除 Docker / process 沙箱运行时（`node/internal/sandbox`、bash docker 路径、模板与 Web UI 沙箱配置）；Agent 一律使用 Node 全局 `fs_root`，工具边界改由工具组与策略控制。`agents` 表 `sandbox_*` 列保留但读写固定为关闭。

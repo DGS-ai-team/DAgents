@@ -14,26 +14,50 @@ type ToolMediaPath struct {
 	Caption string
 }
 
-// ExtractToolMediaPaths 从 tool 结果解析可展示图片路径。
+// ExtractToolMediaPaths 从 tool 结果解析可展示图片路径（取第一条）。
 func ExtractToolMediaPaths(toolName, content string, args map[string]any) (ToolMediaPath, bool) {
+	all := ExtractAllToolMediaPaths(toolName, content, args)
+	if len(all) == 0 {
+		return ToolMediaPath{}, false
+	}
+	return all[0], true
+}
+
+// ExtractAllToolMediaPaths 解析工具结果中全部可展示图片路径。
+func ExtractAllToolMediaPaths(toolName, content string, args map[string]any) []ToolMediaPath {
 	name := strings.TrimSpace(toolName)
 	switch name {
 	case "show_image":
-		return extractPathToolMedia("show_image", "show_image", args, content, captionFromArgs(args))
+		if got, ok := extractPathToolMedia("show_image", "show_image", args, content, captionFromArgs(args)); ok {
+			return []ToolMediaPath{got}
+		}
+		return nil
 	case "read_image":
-		return extractPathToolMedia("read_image", "read_image", args, content, "")
+		if got, ok := extractPathToolMedia("read_image", "read_image", args, content, ""); ok {
+			return []ToolMediaPath{got}
+		}
+		return nil
 	default:
 		if !strings.HasPrefix(name, "browser_") {
-			return ToolMediaPath{}, false
+			return nil
 		}
-		if path := screenshotPathFromContent(content); path != "" {
-			return ToolMediaPath{
+		paths := screenshotPathsFromContent(content)
+		if len(paths) == 0 {
+			return nil
+		}
+		out := make([]ToolMediaPath, 0, len(paths))
+		for i, path := range paths {
+			label := name
+			if i > 0 {
+				label = fmt.Sprintf("%s#%d", name, i+1)
+			}
+			out = append(out, ToolMediaPath{
 				RelPath: path,
 				Source:  "browser",
-				Label:   name,
-			}, true
+				Label:   label,
+			})
 		}
-		return ToolMediaPath{}, false
+		return out
 	}
 }
 
@@ -89,20 +113,63 @@ func pathFromPrefixedContent(content string) string {
 	return ""
 }
 
-func screenshotPathFromContent(content string) string {
+func screenshotPathsFromContent(content string) []string {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return ""
+		return nil
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(content), &payload); err != nil {
-		return ""
+		return nil
 	}
-	raw, ok := payload["screenshot_path"]
-	if !ok || raw == nil {
-		return ""
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(raw any) {
+		path := strings.TrimSpace(fmt.Sprint(raw))
+		if path == "" || path == "<nil>" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
 	}
-	return strings.TrimSpace(fmt.Sprint(raw))
+	detail, _ := payload["detail"].(map[string]any)
+	if detail != nil {
+		appendPathList(&out, seen, detail["screenshot_paths"])
+	}
+	appendPathList(&out, seen, payload["screenshot_paths"])
+	if detail != nil {
+		if raw, ok := detail["last_screenshot_path"]; ok && raw != nil {
+			add(raw)
+		}
+		if raw, ok := detail["screenshot_path"]; ok && raw != nil {
+			add(raw)
+		}
+	}
+	if raw, ok := payload["screenshot_path"]; ok && raw != nil {
+		add(raw)
+	}
+	return out
+}
+
+func appendPathList(out *[]string, seen map[string]struct{}, raw any) {
+	arr, ok := raw.([]any)
+	if !ok {
+		return
+	}
+	for _, item := range arr {
+		path := strings.TrimSpace(fmt.Sprint(item))
+		if path == "" || path == "<nil>" {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		*out = append(*out, path)
+	}
 }
 
 // ParseToolArgumentsMap 解析 tool call arguments JSON。

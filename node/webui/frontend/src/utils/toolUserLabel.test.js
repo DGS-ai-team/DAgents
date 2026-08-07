@@ -38,6 +38,26 @@ describe("toolStepUserSummary", () => {
     expect(text).toBe("浏览器任务：打开 example.com 提取标题");
   });
 
+  it("keeps browser_run_task goal and short status on result (summary left to citation)", () => {
+    const text = toolStepUserSummary({
+      callEntry: {
+        kind: "tool_call",
+        data: { tool_name: "browser_run_task", arguments: { task: "打开 example.com 提取标题" } },
+      },
+      resultEntry: {
+        kind: "tool_result",
+        data: {
+          tool_name: "browser_run_task",
+          content: JSON.stringify({
+            ok: true,
+            detail: { status: "completed", summary: "标题很长很长很长很长", success: true, steps: 4 },
+          }),
+        },
+      },
+    });
+    expect(text).toBe("浏览器任务：打开 example.com 提取标题 · 已完成 · 4 步");
+  });
+
   it("shows browser_task_status summary from result JSON", () => {
     const text = toolStepUserSummary({
       callEntry: {

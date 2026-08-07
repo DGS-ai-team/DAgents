@@ -168,6 +168,11 @@ export function toolDisplayName(name, args = {}) {
     if (!cmd) return "bash(—)";
     return `bash(${cmd.length > 48 ? truncateGraphemes(cmd, 48) : cmd})`;
   }
+  if (n === "browser_run_task") {
+    const task = sanitizeInline(args.task);
+    if (!task) return "浏览器任务";
+    return `浏览器任务：${task.length > 56 ? truncateGraphemes(task, 56) : task}`;
+  }
   if (n === "trigger_create") {
     return `trigger_create(${sanitizeInline(args.name) || "—"})`;
   }
@@ -188,6 +193,28 @@ export function approvalItemDisplayName(item) {
       ? item.arguments
       : parseToolArguments(item?.rawArgs || item?.raw_arguments || item?.arguments);
   return toolDisplayName(name, args);
+}
+
+/** HITL 卡片副文案：突出自然语言目标，避免只看 raw JSON。 */
+export function approvalItemHint(item) {
+  const name = String(item?.name || "").trim();
+  const args =
+    item?.arguments && typeof item.arguments === "object"
+      ? item.arguments
+      : parseToolArguments(item?.rawArgs || item?.raw_arguments || item?.arguments);
+  if (name === "browser_run_task") {
+    const task = sanitizeInline(args.task);
+    return task ? `目标：${task}` : "";
+  }
+  if (name === "bash_run") {
+    const cmd = sanitizeInline(args.command);
+    return cmd ? `命令：${cmd}` : "";
+  }
+  if (["write_file", "read_file", "search_replace"].includes(name)) {
+    const path = sanitizeInline(args.path || args.file_path);
+    return path ? `路径：${path}` : "";
+  }
+  return "";
 }
 
 function extractPartialJsonString(raw, key) {
