@@ -35,7 +35,6 @@ onMounted(load);
     :config-writable="configWritable"
     :error="error"
     :status-message="statusMessage"
-    @refresh="load"
     @save="saveSecurity"
   >
     <section class="settings-section">

@@ -104,12 +104,12 @@ watch(() => props.agentId || agentStore.agentId, load);
 
 <template>
   <section class="panel panel-overlay__card skills-panel" :class="{ 'settings-embedded-panel': embedded }">
-    <header class="panel__header skills-panel__header">
+    <header v-if="!embedded" class="panel__header skills-panel__header">
       <div>
-        <div v-if="!embedded" class="panel__title">技能</div>
-        <div v-if="!embedded" class="skills-panel__subtitle">{{ resolvedAgentId || "—" }}</div>
+        <div class="panel__title">技能</div>
+        <div class="skills-panel__subtitle">{{ resolvedAgentId || "—" }}</div>
       </div>
-      <div v-if="!embedded" class="skills-panel__header-actions">
+      <div class="skills-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>

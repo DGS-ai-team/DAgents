@@ -10,7 +10,7 @@ defineProps({
   statusMessage: { type: String, default: "" },
 });
 
-const emit = defineEmits(["refresh", "save"]);
+const emit = defineEmits(["save"]);
 </script>
 
 <template>
@@ -25,9 +25,6 @@ const emit = defineEmits(["refresh", "save"]);
         </div>
       </div>
       <div class="setup-config-panel__actions">
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || saving" @click="emit('refresh')">
-          刷新
-        </button>
         <button
           type="button"
           class="btn btn--primary btn--sm"

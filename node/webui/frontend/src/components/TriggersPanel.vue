@@ -21,7 +21,6 @@ const loading = ref(false);
 const busyKey = ref("");
 const error = ref("");
 const statusMessage = ref("");
-const showRaw = ref(false);
 const data = ref(null);
 const editingId = ref(null);
 const form = reactive(defaultTriggerForm());
@@ -189,10 +188,6 @@ onMounted(load);
         <button type="button" class="btn btn--primary btn--sm" :disabled="loading || editingId === 'new'" @click="startCreate">
           新建
         </button>
-        <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "列表" : "JSON" }}
-        </button>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">刷新</button>
         <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
@@ -201,8 +196,7 @@ onMounted(load);
       <div v-if="loading && !data" class="command-panel__loading">加载中…</div>
       <div v-else-if="error" class="command-panel__error">{{ error }}</div>
       <p v-if="statusMessage" class="command-panel__status">{{ statusMessage }}</p>
-      <pre v-else-if="showRaw && data" class="command-panel__raw">{{ JSON.stringify(data, null, 2) }}</pre>
-      <template v-else-if="data">
+      <template v-if="data">
         <section v-if="editingId === 'new'" class="command-section trigger-editor-section">
           <h3 class="command-section__title">新建定时任务</h3>
           <TriggerEditor

@@ -42,7 +42,6 @@ onMounted(load);
     :config-writable="configWritable"
     :error="error"
     :status-message="statusMessage"
-    @refresh="load"
     @save="saveContext"
   >
     <section class="settings-section">

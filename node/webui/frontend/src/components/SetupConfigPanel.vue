@@ -174,7 +174,6 @@ onMounted(async () => {
     :config-writable="configWritable"
     :error="error"
     :status-message="statusMessage"
-    @refresh="load().then(ensureProfiles)"
     @save="saveConnection"
   >
     <section class="settings-section settings-section--llm">
