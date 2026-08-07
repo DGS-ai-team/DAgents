@@ -7,6 +7,24 @@ import (
 	"testing"
 )
 
+func TestPruneRetiredToolModes(t *testing.T) {
+	dst := map[string]string{
+		"read_file":       "rule",
+		"agent_broadcast": "always",
+		"agent_invoke":    "always",
+	}
+	out, n := PruneRetiredToolModes(dst)
+	if n != 2 {
+		t.Fatalf("removed = %d, want 2", n)
+	}
+	if _, ok := out["agent_broadcast"]; ok {
+		t.Fatal("agent_broadcast should be pruned")
+	}
+	if out["read_file"] != "rule" {
+		t.Fatalf("read_file = %q", out["read_file"])
+	}
+}
+
 func TestMergeMissingToolModes(t *testing.T) {
 	dst := map[string]string{
 		"write_file": "deny",

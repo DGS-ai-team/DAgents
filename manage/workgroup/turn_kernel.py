@@ -29,6 +29,7 @@ from manage.workgroup.models import (
     ActorRunCreateRequest,
     Assign,
     AssignCreateRequest,
+    WorkGroup,
 )
 from manage.workgroup.native_tools import AssignCompleter, NativeToolDispatcher, leader_native_tools
 from manage.workgroup.projector import project_actor_context
@@ -37,18 +38,46 @@ from manage.workgroup.store import WorkGroupStore
 
 
 _DEFAULT_MAX_TOOL_LOOPS = 16
-_LEADER_SYSTEM = (
-    "You are the Workgroup Leader (Supervisor). "
-    "You only orchestrate via manage-native tools; you never execute shell/fs/browser yourself. "
-    "Use list_workgroup_members to inspect member status and tool allowlists. "
-    "Use assign_workgroup_task to delegate real work to a ready member; "
-    "the member runs its own LLM loop and may call workspace tools "
-    "(read_file / glob_files / write_file) according to its allowlist. "
-    "Write a clear instruction; do not invent host absolute paths — "
-    "member sandboxes only allow workspace-relative paths "
-    "(error not_authorized means path/policy denial, not that you lack supervisor ACL). "
-    "When the task is done, reply with a concise final answer for the group."
+
+_LEADER_SYSTEM_RULES = (
+    "你是工作组 Leader（Supervisor）。"
+    "你只通过 Manage 侧编排工具进行协调，绝不亲自执行 shell / 文件系统 / 浏览器操作。"
+    "用 list_workgroup_members 查看成员状态与工具白名单。"
+    "用 assign_workgroup_task 把实际工作委派给就绪成员；"
+    "成员会跑自己的 LLM 循环，并调用自己的工具完成你发布的任务"
+    "指令写清楚；不要编造宿主机绝对路径——"
+    "发布任务时，请写清楚任务内容，注意事项，以及结论的结构要求，如果你有任务的路径要求，也一并写清楚，特别是成员过去没有成功执行的任务。"
+    "成员沙箱只允许工作区相对路径"
+    "任务完成后，向组内给出简洁的最终答复。"
 )
+
+_WG_STATUS_ZH = {
+    "configuring": "配置中",
+    "active": "活跃",
+    "archiving": "归档中",
+    "archived": "已归档",
+}
+
+
+def build_leader_system_prompt(*, workgroup: WorkGroup) -> str:
+    """组装 Supervisor system：固定编排规则 + 当前工作组基本信息。"""
+    status = _WG_STATUS_ZH.get(workgroup.status, workgroup.status)
+    return "\n".join(
+        [
+            _LEADER_SYSTEM_RULES,
+            "",
+            "## 当前工作组",
+            f"- 名称：{workgroup.display_name}",
+            f"- ID：{workgroup.workgroup_id}",
+            f"- 状态：{status}",
+            f"- 创建者 Node：{workgroup.created_by_node_id}",
+            f"- LLM 配置：{workgroup.llm_profile_id}",
+        ]
+    )
+
+
+# 兼容旧引用名（测试 / 外部若仍导入）
+_LEADER_SYSTEM = _LEADER_SYSTEM_RULES
 
 # (workgroup_id, assign_id, member_id, tool_name, tool_call_id, arguments_json) -> tool result content
 MemberToolRunner = Callable[[str, str, str, str, str, str], str]
@@ -70,6 +99,7 @@ class TurnKernel:
         chat_client: LLMChatClient | None = None,
         member_chat_client: LLMChatClient | None = None,
         assign_completer: AssignCompleter | None = None,
+        registry_store: Any | None = None,
         max_tool_loops: int = _DEFAULT_MAX_TOOL_LOOPS,
         mock_llm: bool = False,
     ) -> None:
@@ -78,6 +108,7 @@ class TurnKernel:
         self._chat_client = chat_client
         self._member_chat_client = member_chat_client
         self._assign_completer = assign_completer
+        self._registry_store = registry_store
         self._max_tool_loops = max(1, max_tool_loops)
         self._mock_llm = mock_llm
         self._hitl_resolutions: dict[str, dict[str, Any]] = {}
@@ -549,6 +580,7 @@ class TurnKernel:
             self._store,
             leader_run_id=run_id,
             assign_completer=self._assign_completer,
+            registry_store=self._registry_store,
         )
         tools = [] if disable_tools else leader_native_tools()
         steps = 0
@@ -570,7 +602,9 @@ class TurnKernel:
                 timeline_events=self._store.list_timeline(workgroup_id),
                 own_run_history=hist.messages,
             )
-            messages = [{"role": "system", "content": _LEADER_SYSTEM}] + list(projected["messages"])
+            group = self._store.require_active(workgroup_id)
+            system = build_leader_system_prompt(workgroup=group)
+            messages = [{"role": "system", "content": system}] + list(projected["messages"])
             messages = self._apply_today_date_hook(run_id, messages)
             yield {"event": "status", "data": {"phase": "thinking"}}
             result = None

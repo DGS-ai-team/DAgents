@@ -75,6 +75,7 @@ def build_workgroup_router(
     *,
     hub: WorkgroupWSHub | None = None,
     llm_store: Any | None = None,
+    registry_store: Any | None = None,
     mock_llm: bool = False,
     loop: VerticalLoop | None = None,
 ) -> APIRouter:
@@ -83,6 +84,7 @@ def build_workgroup_router(
     kernel = TurnKernel(
         store,
         llm_store=llm_store,
+        registry_store=registry_store,
         mock_llm=mock_llm,
     )
     kernel.set_assign_completer(loop.make_assign_completer(kernel))

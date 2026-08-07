@@ -12,6 +12,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
+	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 type policyToolUpdatesBody struct {
@@ -61,7 +62,7 @@ func (s *Server) runtimeDir() string {
 }
 
 func (s *Server) handleGetAgentPolicy(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.requireAgentRecord(w, r)
+	id, rec, ok := s.requireAgentRecord(w, r)
 	if !ok {
 		return
 	}
@@ -70,15 +71,43 @@ func (s *Server) handleGetAgentPolicy(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "policy_load_failed", err.Error(), map[string]any{"agent_id": id})
 		return
 	}
-	toolNames := []string{}
-	if s.sessions != nil {
-		toolNames = s.sessions.ToolNames()
+
+	// 仅展示该 Agent 已启用工具组内的工具（未启用的组不出现在策略 UI）。
+	parsed, _ := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
+	groups := agentruntime.EnabledToolGroups(parsed)
+	enabledNames := config.ExpandBuiltinToolGroups(groups)
+	enabledSet := make(map[string]struct{}, len(enabledNames))
+	for _, name := range enabledNames {
+		enabledSet[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
 	}
-	snap, err := policy.LoadSnapshotForAgent(id, "", "sqlite", engine, toolNames)
+
+	snap, err := policy.LoadSnapshotForAgent(id, "", "sqlite", engine, enabledNames)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "policy_snapshot_failed", err.Error(), nil)
 		return
 	}
+	if len(enabledSet) == 0 {
+		snap.Tools = []policy.ToolPolicyEntry{}
+	} else {
+		filtered := make([]policy.ToolPolicyEntry, 0, len(snap.Tools))
+		for _, entry := range snap.Tools {
+			if _, ok := enabledSet[strings.ToLower(strings.TrimSpace(entry.Name))]; ok {
+				filtered = append(filtered, entry)
+			}
+		}
+		snap.Tools = filtered
+	}
+	hasBash := false
+	for _, g := range groups {
+		if strings.TrimSpace(g) == "bash" {
+			hasBash = true
+			break
+		}
+	}
+	if !hasBash {
+		snap.Shell = map[string][]policy.ShellPolicyEntry{}
+	}
+
 	snap.Platform.GOOS = runtime.GOOS
 	defaultShell, _ := policy.ResolveShellType(nil)
 	snap.Platform.DefaultShell = string(defaultShell)

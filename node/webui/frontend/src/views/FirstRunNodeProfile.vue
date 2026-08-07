@@ -41,7 +41,7 @@ const description = ref("");
 const greetedName = ref("");
 
 const llm = reactive({
-  id: "default",
+  id: PROVIDER_PRESETS.deepseek.model,
   provider: "deepseek",
   base_url: PROVIDER_PRESETS.deepseek.base_url,
   model: PROVIDER_PRESETS.deepseek.model,
@@ -114,7 +114,6 @@ onMounted(async () => {
     const profiles = Array.isArray(setup?.llm?.profiles) ? setup.llm.profiles : [];
     const first = profiles.find((p) => !p?.mock && String(p?.provider || "") !== "mock") || profiles[0];
     if (first && !first.mock && String(first.provider || "") !== "mock") {
-      llm.id = String(first.id || "default").trim() || "default";
       const provider = String(first.provider || "deepseek").trim() || "deepseek";
       llm.provider = ALLOWED_PROVIDERS.has(provider) ? provider : "deepseek";
       llm.base_url = String(first.base_url || "").trim();
@@ -126,6 +125,11 @@ onMounted(async () => {
       if (!llm.model && PROVIDER_PRESETS[llm.provider]) {
         llm.model = PROVIDER_PRESETS[llm.provider].model;
       }
+      // 首配默认用模型名作配置名；旧的 default 占位不保留
+      const prevId = String(first.id || "").trim();
+      llm.id =
+        (llm.model && (prevId === "default" || !prevId) ? llm.model : prevId || llm.model) ||
+        PROVIDER_PRESETS.deepseek.model;
     }
   } catch (e) {
     error.value = e.message || "没加载上来，请稍后再试";
@@ -143,11 +147,18 @@ function onPreferredNameBlur() {
   greetedName.value = name;
 }
 
+/** 首配：配置名默认跟模型名（与连接页卡片展示一致）。 */
+function syncIdFromModel() {
+  const m = String(llm.model || "").trim();
+  if (m) llm.id = m;
+}
+
 function applyProviderPreset() {
   const preset = PROVIDER_PRESETS[llm.provider];
   if (!preset) return;
   llm.base_url = preset.base_url;
   llm.model = preset.model;
+  syncIdFromModel();
   probedModels.value = [];
   modelManual.value = false;
   probeState.message = "";
@@ -200,6 +211,7 @@ async function runProbe() {
     if (!models.includes(llm.model)) {
       llm.model = models[0];
     }
+    syncIdFromModel();
     probeState.ok = true;
     probeState.message = `连上了，找到 ${models.length} 个模型。`;
   } catch (e) {
@@ -218,7 +230,8 @@ async function submit() {
   saving.value = true;
   error.value = "";
   try {
-    const profileId = String(llm.id || "").trim() || "default";
+    const model = String(llm.model || "").trim();
+    const profileId = model || String(llm.id || "").trim() || "default";
     await api.patchSetupConfig({
       user: { preferred_name: preferredName.value.trim() },
       agent: {
@@ -232,7 +245,7 @@ async function submit() {
             id: profileId,
             provider: llm.provider,
             base_url: String(llm.base_url || "").trim(),
-            model: String(llm.model || "").trim(),
+            model,
             api_key: String(llm.api_key || "").trim() || undefined,
             mock: false,
             multimodal_enabled: !!llm.multimodal_enabled,
@@ -366,6 +379,7 @@ async function submit() {
             v-model="llm.model"
             class="first-run__control"
             :options="modelOptions"
+            @change="syncIdFromModel"
           />
           <input
             v-else
@@ -374,6 +388,7 @@ async function submit() {
             type="text"
             autocomplete="off"
             placeholder="例如：deepseek-chat"
+            @change="syncIdFromModel"
           />
           <div class="first-run__text-btn-slot">
             <button

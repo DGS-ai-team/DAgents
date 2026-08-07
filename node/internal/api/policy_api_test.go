@@ -44,7 +44,8 @@ func testAgentPolicyServer(t *testing.T) (*Server, *httptest.Server, string) {
 		"template_id":  "general",
 		"display_name": "策略测试",
 		"defaults": map[string]any{
-			"llm": map[string]any{"active": "mock"},
+			"llm":   map[string]any{"active": "mock"},
+			"tools": map[string]any{"enabled_groups": []string{"fs", "bash"}},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
