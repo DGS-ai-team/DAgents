@@ -4,9 +4,17 @@
 
 ## [Unreleased]
 
-### 预览目标（拟定 **v0.9.1**）
+---
 
-正式版前最后一个大预览：以 **Workgroup 协作可演示** 为主叙事。验收清单见 [`docs/design/v0.9.1-smoke-checklist.md`](docs/design/v0.9.1-smoke-checklist.md)。
+## [0.9.1] - 2026-08-07
+
+**Workgroup 协作预览**：正式版前最后一个大预览。以工作组可演示为主叙事；开箱首配与本地助手收口。验收清单见 [`docs/design/v0.9.1-smoke-checklist.md`](docs/design/v0.9.1-smoke-checklist.md)。
+
+### 升级说明（自 0.8.x）
+
+- 运行时目录仍为 `./.runtime`；遗留库视为 **Node 首配已完成**，不会强制重新走身份向导。
+- 工作组需启用 Manage（`manage.enabled` + URL）并完成首配后，Workgroup Dialer 才会连接；仅 HTTP 注册 online **不等于**成员工具通道已就绪。
+- 成员工具默认仅 **fs**；bash 需在成员配置中显式勾选（无进程级沙箱）。
 
 ### 新增
 
@@ -19,6 +27,8 @@
 
 - **首配未完成时托盘打开强制进首配页**：Tauri 检测到 `node_profile_completed=false` 时一律导航/刷新到 `/ui/`（不再同 URL 仅聚焦）；Go 托盘深链同样回落控制台首页。Web UI 在窗口重新可见时会再次检查 bootstrap，避免启动竞态误判为已完成。
 - **工作组成员 generation 前进时可重新 provision**。
+- **成员工具全部 60s 超时（非 HITL）**：Manage 只等 `tool.result`；Home Node Dialer 未连、binding 仅内存丢失、或失败回 `session.error` 会导致空等满默认 60s。现持久化 WorkerBinding/journal，失败与孤儿 `running` 一律回 `tool.result`；超时报错标明 dialer 未连接。
+- **工作组思考提示**：去掉「Supervisor」前缀，进度条与 live assistant 不再双份渲染。
 
 ### 变更
 
@@ -27,6 +37,8 @@
 - **能力页：Web UI 固定挂载**：移除「Web 界面」开关；`/ui/` 始终挂载，setup PATCH 忽略 `ui_enabled=false`。
 - **工具组随进程能力显隐**：未启用浏览器服务 / 企业微信推送时，Agent 创建与设置页不再展示对应工具组；`GET /v1/setup/config` 增加 `available_tool_groups`。
 - **工作组成员按 Node 工具组配置**：新建/编辑成员时从本 Node `GET /v1/workgroups/meta/member-tools` 拉取工具组清单（fs/bash），勾选组后展开为 `allow_tool_names`。
+- **成员 system prompt**：对齐静态规则 → 运行环境 → 工作区 → Soul → 用户信息 → Custom；环境取自 Home Node Registry；强调多成员路径可能不一致。
+- **工作组对话 chrome**：顶栏对齐智能体对话；成员弹窗与侧栏交互打磨。
 - **收窄 browser Manager / sidecar HTTP op**：Go `BrowserManager` 与 `dagents-browser` 仅保留 session 生命周期与任务级 `run_task` / `task_status` / `task_cancel`；删除细粒度 navigate/click 等 Manager API、`manager_extended`、sidecar `action_runner` 与对应 `op` 分发。文档对齐伴生模型。
 - **浏览器引用 UX**：任务截图注册为 media 并在可折叠「浏览器引用」中展示；HITL 审批突出 `browser_run_task` 自然语言目标；工具气泡结果改为「目标 · 短状态」，完整结论留给引用卡片。
 - **退役细粒度 `browser_*` LLM 工具**：删除 `browser_ops` 组与 `browser_navigate` / `browser_click` 等 Agent 工具定义与 handler；`browser` 组仅保留 `browser_run_task` / `browser_task_status` / `browser_task_cancel`。sidecar 任务路径与 Manager Start/Stop 保留（后续可再收窄 HTTP op 面）。
@@ -44,6 +56,8 @@
 - 成员 `bash_run` 无进程级沙箱；默认不勾选。
 - D05 全量 fixture 执行器未完成（INDEX harness + 部分 golden）。
 - Placement / 远端旁观不作为产品能力。
+
+（Git **tag**：`v0.9.1`。）
 
 ---
 
