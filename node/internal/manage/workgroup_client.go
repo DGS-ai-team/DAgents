@@ -12,13 +12,22 @@ import (
 	"time"
 )
 
-// WorkgroupListResponse 对齐 Manage GET /v1/workgroups。
+// WorkgroupListItem 对齐 Manage GET /v1/workgroups 列表项（字段子集，供侧栏/元信息）。
 type WorkgroupListItem struct {
-	WorkgroupID       string `json:"workgroup_id"`
-	DisplayName       string `json:"display_name"`
-	Status            string `json:"status"`
-	CreatedByNodeID   string `json:"created_by_node_id"`
-	CreatedAt         string `json:"created_at"`
+	WorkgroupID        string `json:"workgroup_id"`
+	DisplayName        string `json:"display_name"`
+	Status             string `json:"status"`
+	CreatedByNodeID    string `json:"created_by_node_id"`
+	CreatedAt          string `json:"created_at"`
+	LLMProfileID       string `json:"llm_profile_id,omitempty"`
+	LLMProfileRevision string `json:"llm_profile_revision,omitempty"`
+}
+
+// CreateWorkgroupInput 为本机建组入参。
+type CreateWorkgroupInput struct {
+	DisplayName        string
+	LLMProfileID       string
+	LLMProfileRevision string
 }
 
 // WorkgroupListMode 控制列表过滤。
@@ -50,19 +59,95 @@ func (c *ControlClient) ListWorkgroups(ctx context.Context, mode WorkgroupListMo
 	return out, nil
 }
 
-// CreateWorkgroup 以本机 node_id 建组（自动订阅）。
-func (c *ControlClient) CreateWorkgroup(ctx context.Context, displayName string) (map[string]any, error) {
-	name := strings.TrimSpace(displayName)
+// pickDefaultManageLLMProfile 从 Manage /v1/llm/configs 选默认档案；失败回退 default@1。
+func (c *ControlClient) pickDefaultManageLLMProfile(ctx context.Context) (id, rev string) {
+	var configs []map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/llm/configs", nil, &configs); err != nil || len(configs) == 0 {
+		return "default", "1"
+	}
+	var preferred map[string]any
+	for _, cfg := range configs {
+		if b, _ := cfg["is_default"].(bool); b {
+			preferred = cfg
+			break
+		}
+	}
+	if preferred == nil {
+		preferred = configs[0]
+	}
+	id, _ = preferred["id"].(string)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		id, _ = preferred["name"].(string)
+		id = strings.TrimSpace(id)
+	}
+	if id == "" {
+		return "default", "1"
+	}
+	return id, "1"
+}
+
+// CreateWorkgroup 以本机 node_id 建组（自动订阅）。未指定 LLM 时尝试取 Manage 默认档案。
+func (c *ControlClient) CreateWorkgroup(ctx context.Context, in CreateWorkgroupInput) (map[string]any, error) {
+	name := strings.TrimSpace(in.DisplayName)
 	if name == "" {
 		return nil, fmt.Errorf("display_name required")
 	}
+	llmID := strings.TrimSpace(in.LLMProfileID)
+	llmRev := strings.TrimSpace(in.LLMProfileRevision)
+	if llmID == "" {
+		llmID, llmRev = c.pickDefaultManageLLMProfile(ctx)
+	}
+	if llmRev == "" {
+		llmRev = "1"
+	}
 	var out map[string]any
 	if err := c.doJSON(ctx, http.MethodPost, "/v1/workgroups", map[string]any{
-		"display_name":        name,
-		"created_by_node_id":  c.cfg.NodeID,
-		"llm_profile_id":      "default",
-		"llm_profile_revision": "1",
+		"display_name":         name,
+		"created_by_node_id":   c.cfg.NodeID,
+		"llm_profile_id":       llmID,
+		"llm_profile_revision": llmRev,
 	}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetWorkgroup 读取单个工作组。
+func (c *ControlClient) GetWorkgroup(ctx context.Context, workgroupID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID)
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PatchWorkgroup 更新展示名 / Supervisor LLM。
+func (c *ControlClient) PatchWorkgroup(ctx context.Context, workgroupID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID)
+	if err := c.doJSON(ctx, http.MethodPatch, path, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PublishWorkgroup configuring → active。
+func (c *ControlClient) PublishWorkgroup(ctx context.Context, workgroupID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/publish"
+	if err := c.doJSON(ctx, http.MethodPost, path, map[string]any{}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListWorkgroupLLMConfigs 列出可绑到该工作组的 Manage LLM 档案（已脱敏）。
+func (c *ControlClient) ListWorkgroupLLMConfigs(ctx context.Context, workgroupID string) (jsonArray, error) {
+	var out jsonArray
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/llm-configs"
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -104,8 +189,13 @@ func (c *ControlClient) AddWorkgroupCollaborator(ctx context.Context, workgroupI
 		return nil, err
 	}
 	rev, _ := acl["revision"].(float64)
-	collab := stringSlice(acl["collaborators"])
 	nid := strings.TrimSpace(nodeID)
+	for _, x := range stringSlice(acl["owners"]) {
+		if x == nid {
+			return acl, nil
+		}
+	}
+	collab := stringSlice(acl["collaborators"])
 	for _, x := range collab {
 		if x == nid {
 			return acl, nil

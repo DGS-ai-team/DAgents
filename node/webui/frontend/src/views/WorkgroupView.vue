@@ -28,6 +28,9 @@ const workgroupMeta = ref(null);
 const selfNodeId = ref("");
 const selfNodeName = ref("");
 const members = ref([]);
+const llmConfigs = ref([]);
+const publishing = ref(false);
+const bindingLlm = ref(false);
 const timelineEl = ref(null);
 /** 本轮发送开始前的 Timeline 水位 */
 const statusWatermarkSeq = ref(0);
@@ -277,19 +280,83 @@ function scrollTimelineTail() {
 async function loadWorkgroupMeta() {
   if (!workgroupId.value) {
     workgroupMeta.value = null;
+    llmConfigs.value = [];
     return;
   }
   try {
-    const [sub, aclList] = await Promise.all([
-      api.listWorkgroups({ scope: "subscribed" }),
-      api.listWorkgroups({ scope: "acl" }),
-    ]);
-    const all = [...(sub.workgroups || []), ...(aclList.workgroups || [])];
-    workgroupMeta.value =
-      all.find((w) => String(w.workgroup_id || "").trim() === workgroupId.value) || null;
+    workgroupMeta.value = await api.getWorkgroup(workgroupId.value);
   } catch {
-    workgroupMeta.value = null;
+    // 回退列表查找（旧 Manage / 权限边界）
+    try {
+      const [sub, aclList] = await Promise.all([
+        api.listWorkgroups({ scope: "subscribed" }),
+        api.listWorkgroups({ scope: "acl" }),
+      ]);
+      const all = [...(sub.workgroups || []), ...(aclList.workgroups || [])];
+      workgroupMeta.value =
+        all.find((w) => String(w.workgroup_id || "").trim() === workgroupId.value) || null;
+    } catch {
+      workgroupMeta.value = null;
+    }
   }
+  try {
+    const res = await api.listWorkgroupLLMConfigs(workgroupId.value);
+    llmConfigs.value = Array.isArray(res?.configs) ? res.configs : Array.isArray(res) ? res : [];
+  } catch {
+    llmConfigs.value = [];
+  }
+}
+
+function workgroupStatusLabel(status) {
+  const map = {
+    configuring: "配置中",
+    active: "已发布",
+    archiving: "归档中",
+    archived: "已归档",
+  };
+  return map[status] || status || "—";
+}
+
+const canChat = computed(() => String(workgroupMeta.value?.status || "") === "active");
+const isConfiguring = computed(() => String(workgroupMeta.value?.status || "") === "configuring");
+
+async function publishCurrent() {
+  if (!workgroupId.value || publishing.value || !isConfiguring.value) return;
+  publishing.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    workgroupMeta.value = await api.publishWorkgroup(workgroupId.value);
+    notice.value = "工作组已发布，可以开始对话。";
+    panelRef.value?.refreshWorkgroups?.({ force: true });
+  } catch (e) {
+    error.value = e?.message || "发布失败";
+  } finally {
+    publishing.value = false;
+  }
+}
+
+async function bindSupervisorLlm(cfgId) {
+  const id = String(cfgId || "").trim();
+  if (!workgroupId.value || !id || bindingLlm.value) return;
+  if (String(workgroupMeta.value?.llm_profile_id || "") === id) return;
+  bindingLlm.value = true;
+  error.value = "";
+  try {
+    workgroupMeta.value = await api.patchWorkgroup(workgroupId.value, {
+      llm_profile_id: id,
+      llm_profile_revision: "1",
+    });
+    notice.value = "Supervisor LLM 已更新";
+  } catch (e) {
+    error.value = e?.message || "绑定 LLM 失败";
+  } finally {
+    bindingLlm.value = false;
+  }
+}
+
+function onSupervisorLlmChange(ev) {
+  void bindSupervisorLlm(ev?.target?.value);
 }
 
 function startPoll() {
@@ -332,6 +399,12 @@ function startWorkPoll() {
 async function send() {
   let text = draft.value.trim();
   if (!text || !workgroupId.value || sending.value) return;
+  if (!canChat.value) {
+    error.value = isConfiguring.value
+      ? "工作组尚未发布，请先完成配置并点击「发布」。"
+      : "当前工作组状态不允许对话。";
+    return;
+  }
   let directId = "";
   if (directMember.value) {
     directId = directMember.value.member_id;
@@ -1046,7 +1119,9 @@ const liveStatusLabel = computed(() => {
 
 const toolbarTitle = computed(() => {
   const name = String(workgroupMeta.value?.display_name || "").trim();
-  return name ? `工作组 · ${name}` : "工作组";
+  const status = workgroupStatusLabel(workgroupMeta.value?.status);
+  if (name) return `工作组 · ${name} · ${status}`;
+  return "工作组";
 });
 
 /** 内容变化时跟随滚底（含进度文案变化，不只看条数） */
@@ -1163,6 +1238,29 @@ onUnmounted(() => {
       <template v-else>
         <div class="wg-chat__toolbar">
           <div class="wg-chat__title" :title="toolbarTitle">{{ toolbarTitle }}</div>
+          <label v-if="llmConfigs.length" class="wg-chat__llm">
+            <span class="wg-chat__llm-label">Supervisor LLM</span>
+            <select
+              class="wg-chat__llm-select"
+              :disabled="bindingLlm || !workgroupMeta"
+              :value="workgroupMeta?.llm_profile_id || ''"
+              @change="onSupervisorLlmChange"
+            >
+              <option v-if="!workgroupMeta?.llm_profile_id" value="" disabled>选择档案</option>
+              <option v-for="cfg in llmConfigs" :key="cfg.id" :value="cfg.id">
+                {{ cfg.name || cfg.id }}{{ cfg.is_default ? "（默认）" : "" }}
+              </option>
+            </select>
+          </label>
+          <button
+            v-if="isConfiguring"
+            type="button"
+            class="wg-chat__toolbar-btn wg-chat__toolbar-btn--primary"
+            :disabled="publishing"
+            @click="publishCurrent"
+          >
+            {{ publishing ? "发布中…" : "发布" }}
+          </button>
           <button
             type="button"
             class="wg-chat__toolbar-btn"
@@ -1179,6 +1277,15 @@ onUnmounted(() => {
             @click="openMemberCreate(workgroupId)"
           >
             添加成员
+          </button>
+        </div>
+
+        <div v-if="isConfiguring" class="wg-chat__setup-banner" role="status">
+          <p>
+            当前为<strong>配置中</strong>：请确认 Supervisor LLM 与成员后点击「发布」，方可对话。
+          </p>
+          <button type="button" class="btn btn--primary btn--sm" :disabled="publishing" @click="publishCurrent">
+            {{ publishing ? "发布中…" : "发布工作组" }}
           </button>
         </div>
 
@@ -1535,11 +1642,15 @@ onUnmounted(() => {
                 class="chat__textarea"
                 type="text"
                 :placeholder="
-                  directMember
-                    ? '输入直达成员的任务…'
-                    : '向工作组发言，输入 @ 直达成员…'
+                  !canChat
+                    ? isConfiguring
+                      ? '请先发布工作组后再发言…'
+                      : '当前状态不可对话…'
+                    : directMember
+                      ? '输入直达成员的任务…'
+                      : '向工作组发言，输入 @ 直达成员…'
                 "
-                :disabled="sending"
+                :disabled="sending || !canChat"
                 @input="onDraftInput"
                 @keydown.enter.prevent="send"
                 @keydown.esc="mentionOpen = false"
@@ -1583,7 +1694,7 @@ onUnmounted(() => {
                 class="chat__composer-send"
                 title="发送"
                 aria-label="发送"
-                :disabled="!draft.trim()"
+                :disabled="!draft.trim() || !canChat"
                 @click="send"
               >
                 <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1640,9 +1751,8 @@ onUnmounted(() => {
 .wg-chat__toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.5rem 0.75rem;
   align-items: center;
-  justify-content: space-between;
   padding: 0.6rem 1rem;
   border-bottom: 1px solid var(--border-subtle, #e5e7eb);
   font-size: 0.75rem;
@@ -1654,7 +1764,28 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 100%;
+  max-width: min(42vw, 360px);
+  margin-right: auto;
+}
+.wg-chat__llm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted, #6b7280);
+}
+.wg-chat__llm-label {
+  white-space: nowrap;
+}
+.wg-chat__llm-select {
+  max-width: 180px;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #111827);
 }
 .wg-chat__toolbar-btn {
   border: 1px solid var(--color-border, #d1d5db);
@@ -1674,6 +1805,36 @@ onUnmounted(() => {
   border-color: var(--color-primary, #0078d4);
   color: var(--color-primary, #0078d4);
   background: color-mix(in srgb, var(--color-primary, #0078d4) 8%, transparent);
+}
+.wg-chat__toolbar-btn--primary {
+  border-color: var(--color-primary, #0078d4);
+  background: var(--color-primary, #0078d4);
+  color: #fff;
+}
+.wg-chat__toolbar-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+  color: #fff;
+}
+.wg-chat__toolbar-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.wg-chat__setup-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-border, #d1d5db);
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 8%, var(--color-surface, #fff));
+  font-size: 13px;
+  color: var(--color-text, #111827);
+}
+.wg-chat__setup-banner p {
+  margin: 0;
+  flex: 1 1 220px;
 }
 .wg-chat__body {
   flex: 1;

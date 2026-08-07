@@ -15,6 +15,10 @@ func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("GET /v1/workgroups", s.handleListWorkgroups)
 	s.mux.HandleFunc("POST /v1/workgroups", s.handleCreateWorkgroup)
 	s.mux.HandleFunc("GET /v1/workgroups/meta/member-tools", s.handleGetMemberToolCatalog)
+	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}", s.handleGetWorkgroup)
+	s.mux.HandleFunc("PATCH /v1/workgroups/{workgroupId}", s.handlePatchWorkgroup)
+	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/publish", s.handlePublishWorkgroup)
+	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/llm-configs", s.handleListWorkgroupLLMConfigs)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/acl", s.handleGetWorkgroupACL)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/collaborators", s.handleAddWorkgroupCollaborator)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/members", s.handleListWorkgroupMembers)
@@ -81,18 +85,81 @@ func (s *Server) handleCreateWorkgroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		DisplayName string `json:"display_name"`
+		DisplayName        string `json:"display_name"`
+		LLMProfileID       string `json:"llm_profile_id"`
+		LLMProfileRevision string `json:"llm_profile_revision"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "invalid json", nil)
 		return
 	}
-	out, err := s.control.CreateWorkgroup(r.Context(), body.DisplayName)
+	out, err := s.control.CreateWorkgroup(r.Context(), manage.CreateWorkgroupInput{
+		DisplayName:        body.DisplayName,
+		LLMProfileID:       body.LLMProfileID,
+		LLMProfileRevision: body.LLMProfileRevision,
+	})
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleGetWorkgroup(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	out, err := s.control.GetWorkgroup(r.Context(), wid)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handlePatchWorkgroup(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "invalid json", nil)
+		return
+	}
+	out, err := s.control.PatchWorkgroup(r.Context(), wid, body)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handlePublishWorkgroup(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	out, err := s.control.PublishWorkgroup(r.Context(), wid)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleListWorkgroupLLMConfigs(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	items, err := s.control.ListWorkgroupLLMConfigs(r.Context(), wid)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"configs": items})
 }
 
 func (s *Server) handleGetMemberToolCatalog(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +233,13 @@ func (s *Server) handleCreateWorkgroupMember(w http.ResponseWriter, r *http.Requ
 	}
 	if tools, ok := body["allow_tool_names"].([]any); !ok || len(tools) == 0 {
 		body["allow_tool_names"] = workgroup.WorkspaceDefaultAllowToolNames()
+	}
+	home := strings.TrimSpace(strAny(body["home_node_id"]))
+	if home != "" {
+		if _, err := s.control.AddWorkgroupCollaborator(r.Context(), wid, home); err != nil {
+			writeAPIError(w, http.StatusBadGateway, "manage_error", "ensure home in ACL: "+err.Error(), nil)
+			return
+		}
 	}
 	out, err := s.control.CreateWorkgroupMember(r.Context(), wid, body)
 	if err != nil {
