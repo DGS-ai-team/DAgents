@@ -25,6 +25,39 @@ export const TOOL_GROUPS = [
   { name: "wecom", label: "企业微信" },
 ];
 
+/**
+ * 按 Node 能力过滤可展示的工具组。
+ * 优先使用 setup.available_tool_groups；否则按 features.browser_enabled / wecom_enabled 回退。
+ */
+export function toolGroupsFromSetup(setup, all = TOOL_GROUPS) {
+  const names = Array.isArray(setup?.available_tool_groups)
+    ? setup.available_tool_groups.map((x) => String(x || "").trim()).filter(Boolean)
+    : null;
+  if (names && names.length) {
+    const allow = new Set(names);
+    return all.filter((g) => allow.has(g.name));
+  }
+  const features = setup?.features && typeof setup.features === "object" ? setup.features : {};
+  return all.filter((g) => {
+    if (g.name === "browser") return !!features.browser_enabled;
+    if (g.name === "wecom") return !!features.wecom_enabled;
+    return true;
+  });
+}
+
+/** 将 draft.toolGroups 限制在 available 清单内（就地修改）。 */
+export function pruneDraftToolGroups(draft, availableGroups) {
+  if (!draft || typeof draft !== "object") return;
+  const allow = new Set(
+    (Array.isArray(availableGroups) ? availableGroups : [])
+      .map((g) => (typeof g === "string" ? g : g?.name))
+      .map((x) => String(x || "").trim())
+      .filter(Boolean),
+  );
+  const cur = Array.isArray(draft.toolGroups) ? draft.toolGroups : [];
+  draft.toolGroups = cur.map((x) => String(x || "").trim()).filter((n) => n && allow.has(n));
+}
+
 export const LONG_TERM_SCOPES = [
   { value: "agent", label: "仅本智能体" },
   { value: "global", label: "本机所有智能体共享" },

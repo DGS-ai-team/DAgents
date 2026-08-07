@@ -8,6 +8,8 @@ import {
   buildPatchAgentPayload,
   draftFromAgentView,
   emptyAgentDraft,
+  pruneDraftToolGroups,
+  toolGroupsFromSetup,
 } from "../../utils/agentTemplateForm.js";
 
 const route = useRoute();
@@ -21,6 +23,7 @@ const statusMessage = ref("");
 const showAdvanced = ref(false);
 const showPolicy = ref(false);
 const llmProfiles = ref([]);
+const availableToolGroups = ref([]);
 const agentMeta = ref(null);
 const draft = reactive(emptyAgentDraft());
 
@@ -51,6 +54,7 @@ async function load() {
           }))
           .filter((p) => p.id)
       : [];
+    availableToolGroups.value = toolGroupsFromSetup(setup);
     Object.assign(
       draft,
       draftFromAgentView(
@@ -58,6 +62,7 @@ async function load() {
         llmProfiles.value.map((p) => p.id),
       ),
     );
+    pruneDraftToolGroups(draft, availableToolGroups.value);
     if (promptCtx) {
       draft.promptSoulMd = String(promptCtx.soul_md || "");
       draft.promptCustomMd = String(promptCtx.custom_md || "");
@@ -144,6 +149,7 @@ onMounted(load);
       <AgentSettingsForm
         :draft="draft"
         :llm-profiles="llmProfiles"
+        :available-tool-groups="availableToolGroups"
         v-model:show-advanced="showAdvanced"
       />
 

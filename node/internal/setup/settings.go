@@ -52,7 +52,7 @@ type FeatureSettings struct {
 	SkillsEnabled            bool `json:"skills_enabled"`
 	TriggersEnabled          bool `json:"triggers_enabled"`
 	ChildAgentsEnabled       bool `json:"child_agents_enabled"`
-	UIEnabled                bool `json:"ui_enabled"`
+	UIEnabled                bool `json:"ui_enabled"` // 只读回显；PATCH 忽略，Web UI 固定挂载
 	BrowserEnabled           bool `json:"browser_enabled"`
 	WeComEnabled             bool `json:"wecom_enabled"`
 	MultimodalEnabled        bool `json:"multimodal_enabled"`
@@ -173,6 +173,8 @@ type SettingsView struct {
 	WeCom           WeComSettings       `json:"wecom"`
 	Tools           ToolsSettings       `json:"tools"`
 	Hooks           HooksSettings       `json:"hooks"`
+	// AvailableToolGroups 本 Node 当前可供 Agent 勾选的工具组（已按 browser/wecom 进程开关过滤）。
+	AvailableToolGroups []string `json:"available_tool_groups"`
 }
 
 // SettingsPatch PATCH /v1/setup/config 请求体（字段均可选）。
@@ -230,7 +232,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			SkillsEnabled:            cfg.Skills.Enabled,
 			TriggersEnabled:          cfg.Triggers.Enabled,
 			ChildAgentsEnabled:       cfg.ChildAgents.Enabled,
-			UIEnabled:                cfg.UIEnabled(),
+			UIEnabled:                true, // Web UI 固定挂载
 			BrowserEnabled:           cfg.BrowserEnabled(),
 			WeComEnabled:             cfg.WeComEnabled(),
 			MultimodalEnabled:        cfg.MultimodalEnabled(),
@@ -294,6 +296,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			ToolResultSpillThresholdTokens: cfg.ToolResultSpillThresholdTokens(),
 			InjectTodayDateEnabled:         cfg.InjectTodayDateHookEnabled(),
 		},
+		AvailableToolGroups: cfg.AvailableAgentToolGroups(),
 	}
 }
 
@@ -531,7 +534,8 @@ func applyFeaturesPatch(cfg *config.Config, p FeatureSettings) {
 	cfg.Skills.Enabled = p.SkillsEnabled
 	cfg.Triggers.Enabled = p.TriggersEnabled
 	cfg.ChildAgents.Enabled = p.ChildAgentsEnabled
-	cfg.UI.Enabled = boolPtr(p.UIEnabled)
+	// Web UI 固定挂载：忽略客户端传入的 ui_enabled。
+	cfg.UI.Enabled = boolPtr(true)
 	cfg.Multimodal.Enabled = boolPtr(p.MultimodalEnabled)
 	cfg.Browser.Enabled = boolPtr(p.BrowserEnabled)
 	cfg.WeCom.Enabled = boolPtr(p.WeComEnabled)

@@ -440,10 +440,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.registerSetupRoutes()
 	s.registerManageUploadRoutes()
 	s.mux.HandleFunc("GET /v1/skills/catalog", s.handleNodeSkillsCatalog)
-	if cfg.UIEnabled() {
-		s.mux.Handle("GET /ui/", webui.Handler())
-		s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
-	}
+	// Web UI 固定挂载（不再受 ui.enabled 开关控制）。
+	s.mux.Handle("GET /ui/", webui.Handler())
+	s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
 	return s
 }
 

@@ -9,7 +9,9 @@ import {
   draftFromTemplate,
   llmActiveFromAgentView,
   memoryEnabledFromToolGroups,
+  pruneDraftToolGroups,
   skillsEnabledFromToolGroups,
+  toolGroupsFromSetup,
 } from "./agentTemplateForm.js";
 
 describe("agentTemplateForm", () => {
@@ -229,5 +231,29 @@ describe("agentTemplateForm", () => {
         config_snapshot: { defaults: { llm: { active: "deepseek" } } },
       }),
     ).toBe("deepseek");
+  });
+
+  it("filters tool groups from setup available_tool_groups", () => {
+    const groups = toolGroupsFromSetup({
+      available_tool_groups: ["fs", "bash", "browser"],
+      features: { browser_enabled: false, wecom_enabled: true },
+    });
+    expect(groups.map((g) => g.name)).toEqual(["bash", "browser", "fs"]);
+  });
+
+  it("falls back to features when available_tool_groups missing", () => {
+    const groups = toolGroupsFromSetup({
+      features: { browser_enabled: false, wecom_enabled: true },
+    });
+    const names = groups.map((g) => g.name);
+    expect(names).toContain("wecom");
+    expect(names).not.toContain("browser");
+    expect(names).toContain("fs");
+  });
+
+  it("prunes draft tool groups to available list", () => {
+    const draft = { toolGroups: ["fs", "browser", "wecom"] };
+    pruneDraftToolGroups(draft, [{ name: "fs" }, { name: "bash" }]);
+    expect(draft.toolGroups).toEqual(["fs"]);
   });
 });

@@ -82,12 +82,62 @@ type UIConfig struct {
 	Enabled *bool `yaml:"enabled"`
 }
 
-// UIEnabled 是否挂载浏览器 Web UI。
+// UIEnabled 是否挂载 Web UI。Web UI 为固定挂载：始终返回 true（忽略 yaml 中的 ui.enabled）。
 func (c *Config) UIEnabled() bool {
-	if c == nil || c.UI.Enabled == nil {
-		return true
+	return true
+}
+
+// AvailableAgentToolGroups 返回本 Node 进程当前可供 Agent 勾选的工具组。
+// browser / wecom 依赖进程级服务开关；未启用时不出现在清单中。
+func (c *Config) AvailableAgentToolGroups() []string {
+	all := PublicBuiltinToolGroupNames()
+	if c == nil {
+		return all
 	}
-	return *c.UI.Enabled
+	out := make([]string, 0, len(all))
+	for _, g := range all {
+		switch g {
+		case "browser":
+			if !c.BrowserEnabled() {
+				continue
+			}
+		case "wecom":
+			if !c.WeComEnabled() {
+				continue
+			}
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+// FilterAgentToolGroups 将候选工具组限制在 AvailableAgentToolGroups 内（保持候选顺序）。
+func (c *Config) FilterAgentToolGroups(groups []string) []string {
+	available := c.AvailableAgentToolGroups()
+	allow := make(map[string]struct{}, len(available))
+	for _, g := range available {
+		allow[g] = struct{}{}
+	}
+	out := make([]string, 0, len(groups))
+	seen := make(map[string]struct{}, len(groups))
+	for _, raw := range groups {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, ok := allow[name]; !ok {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // ToolsConfig 控制内置工具行为（如 bash_run 输出解码与压缩）。

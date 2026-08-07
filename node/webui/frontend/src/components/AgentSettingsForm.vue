@@ -37,6 +37,11 @@ const props = defineProps({
     type: Object,
     default: () => ({ name: "", llm: "" }),
   },
+  /** Node 当前可勾选工具组（已按 browser/wecom 进程开关过滤）；缺省用全量 TOOL_GROUPS */
+  availableToolGroups: {
+    type: Array,
+    default: null,
+  },
 });
 
 const emit = defineEmits(["update:showAdvanced", "clear-field-error"]);
@@ -49,6 +54,13 @@ const isCreateBasics = computed(() => resolvedMode.value === "create-basics");
 const isCreateCapabilities = computed(() => resolvedMode.value === "create-capabilities");
 const isFull = computed(() => resolvedMode.value === "full");
 const useConversationalLabels = computed(() => isCreateBasics.value || isCreateCapabilities.value);
+const visibleToolGroups = computed(() => {
+  const list = Array.isArray(props.availableToolGroups) ? props.availableToolGroups : null;
+  if (list && list.length) {
+    return list.filter((g) => g && g.name);
+  }
+  return TOOL_GROUPS;
+});
 
 const nameLabel = computed(() => {
   if (props.fieldErrors?.name) return props.fieldErrors.name;
@@ -244,7 +256,7 @@ const longTermScopeOptions = computed(() =>
       <section class="agent-settings-section">
         <div class="agent-settings-toggles agent-settings-toggles--fill">
           <button
-            v-for="g in TOOL_GROUPS"
+            v-for="g in visibleToolGroups"
             :key="g.name"
             type="button"
             class="agent-settings-tile"
@@ -285,7 +297,7 @@ const longTermScopeOptions = computed(() =>
             <p class="agent-settings-hint">点选启用；都不选则不开放任何工具。</p>
             <div class="agent-settings-toggles agent-settings-toggles--tiles">
               <button
-                v-for="g in TOOL_GROUPS"
+                v-for="g in visibleToolGroups"
                 :key="g.name"
                 type="button"
                 class="agent-settings-tile agent-settings-tile--compact"
