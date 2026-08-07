@@ -1720,7 +1720,11 @@ onUnmounted(() => {
               </div>
             </article>
             <article
-              v-if="sending && !(liveAssistant?.text && streamPhase === 'streaming') && !activeHitl"
+              v-if="
+                sending &&
+                !activeHitl &&
+                !(liveAssistant && streamMode !== 'direct')
+              "
               class="msg msg--assistant msg--progress"
             >
               <div class="msg__body msg__body--hint-only">
