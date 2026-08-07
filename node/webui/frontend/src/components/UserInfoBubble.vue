@@ -5,6 +5,7 @@ import { extractUserInfo } from "../stores/hitl.js";
 const props = defineProps({
   data: { type: Object, required: true },
   selected: { type: [Number, Array], default: 0 },
+  busy: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["update:selected", "submit"]);
@@ -49,6 +50,7 @@ function onMultiToggle(id, checked) {
               v-if="req.allowMultiple"
               type="checkbox"
               :checked="selectedSet.has(String(opt.id))"
+              :disabled="busy"
               @change="onMultiToggle(opt.id, $event.target.checked)"
             />
             <input
@@ -56,13 +58,23 @@ function onMultiToggle(id, checked) {
               type="radio"
               name="user-info-option"
               :checked="Number(selected) === idx"
+              :disabled="busy"
               @change="onSingleSelect(idx)"
             />
             <span>{{ opt.label }}</span>
           </label>
-          <button type="button" class="btn btn--primary btn--sm" @click="emit('submit', '')">提交选项</button>
+          <button
+            type="button"
+            class="btn btn--primary btn--sm"
+            :disabled="busy"
+            @click="emit('submit', '')"
+          >
+            {{ busy ? "提交中…" : "提交选项" }}
+          </button>
         </div>
-        <p v-else class="approval-bubble__hint">在下方输入框回答后 Enter 发送</p>
+        <p v-else class="approval-bubble__hint">
+          {{ req.placeholder || "在下方输入框回答后 Enter 发送" }}
+        </p>
       </div>
     </div>
   </div>

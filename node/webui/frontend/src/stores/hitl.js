@@ -68,13 +68,16 @@ export function extractToolApprovals(data) {
   return calls
     .map((m) => {
       const norm = normalizeToolCallItem(m);
+      const dup = m?.duplicate_meta && typeof m.duplicate_meta === "object" ? m.duplicate_meta : null;
       return {
         callId: norm.id,
         name: norm.name,
         rawArgs: norm.rawArguments,
         arguments: norm.arguments,
         reason: String(m?.approval_reason || ""),
-        risk: String(m?.risk_level || ""),
+        risk: String(m?.risk_level || "").toLowerCase(),
+        duplicateWindowSec: dup ? Number(dup.window_seconds || dup.window_sec || 0) || 0 : 0,
+        duplicatePreview: dup ? String(dup.result_preview || "").trim() : "",
       };
     })
     .filter((it) => it.callId);

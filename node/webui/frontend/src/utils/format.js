@@ -1,8 +1,8 @@
-import { toolDisplayName, approvalItemDisplayName, approvalItemHint, parseToolArguments } from "./toolCalls.js";
+import { toolDisplayName, approvalItemDisplayName, approvalItemHint, approvalItemHintVisible, parseToolArguments } from "./toolCalls.js";
 import { truncateGraphemes } from "./textTruncate.js";
 import { parseTemporaryAgentToolResult } from "./temporaryAgentResults.js";
 
-export { toolDisplayName, approvalItemDisplayName, approvalItemHint };
+export { toolDisplayName, approvalItemDisplayName, approvalItemHint, approvalItemHintVisible };
 
 export function formatToolCallLine(entry) {
   const data = entry?.data || entry || {};

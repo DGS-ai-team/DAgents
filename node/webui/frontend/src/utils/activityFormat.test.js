@@ -156,10 +156,11 @@ describe("buildStream activity", () => {
       jobs,
     );
     const steps = items.filter((i) => i.kind === "tool_step");
-    expect(steps).toHaveLength(4);
+    // HITL 待批的 c-next 由 ApprovalBubble 独占，不再占一条 tool_step。
+    expect(steps).toHaveLength(3);
     expect(steps[0].executionHint).toBeUndefined();
     expect(steps[1].executionHint).toBe("active");
     expect(steps[2].executionHint).toBe("active");
-    expect(steps[3].executionHint).toBe("pending");
+    expect(items.some((i) => i.kind === "approval")).toBe(true);
   });
 });

@@ -235,6 +235,28 @@
   box-shadow: var(--shadow-sm);
 }
 
+.approval-bubble--needs-action {
+  border-left: 3px solid var(--color-warning, #d97706);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-warning, #d97706) 12%, var(--color-surface)),
+    var(--color-surface) 48px
+  );
+}
+
+.approval-bubble--needs-action.approval-bubble--risk-high {
+  border-left-color: #dc2626;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, #dc2626 12%, var(--color-surface)),
+    var(--color-surface) 48px
+  );
+}
+
+.approval-bubble--needs-action.approval-bubble--risk-medium {
+  border-left-color: #d97706;
+}
+
 .approval-bubble--a2a {
   border-left: 3px solid var(--color-info);
   background: linear-gradient(
