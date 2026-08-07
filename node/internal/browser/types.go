@@ -2,46 +2,14 @@ package browser
 
 import "encoding/json"
 
-// Request 为 BrowserManager → dagents-browser 的内部请求。
+// Request 为 BrowserManager → dagents-browser 的内部请求（任务级 + session 生命周期）。
 type Request struct {
-	Op          string   `json:"op"`
-	SessionKey  string   `json:"session_key,omitempty"`
-	Headed      *bool    `json:"headed,omitempty"`
-	ViewportW   int      `json:"viewport_width,omitempty"`
-	ViewportH   int      `json:"viewport_height,omitempty"`
-	URL         string   `json:"url,omitempty"`
-	Index       int      `json:"index,omitempty"`
-	Selector    string   `json:"selector,omitempty"`
-	Fallbacks   []string `json:"selector_fallbacks,omitempty"`
-	Text        string   `json:"text,omitempty"`
-	Key         string   `json:"key,omitempty"`
-	Path        string   `json:"path,omitempty"`
-	WaitUntil   string   `json:"wait_until,omitempty"`
-	LoadState       string   `json:"load_state,omitempty"`
-	TimeoutMS       int      `json:"timeout_ms,omitempty"`
-	MaxElements       int    `json:"max_elements,omitempty"`
-	IncludeScreenshot bool   `json:"include_screenshot,omitempty"`
-	CoordX            int    `json:"coordinate_x,omitempty"`
-	CoordY            int    `json:"coordinate_y,omitempty"`
-	Button            string   `json:"button,omitempty"`
-	Query             string   `json:"query,omitempty"`
-	Engine            string   `json:"engine,omitempty"`
-	Down              *bool    `json:"down,omitempty"`
-	Pages             float64  `json:"pages,omitempty"`
-	TabID             string   `json:"tab_id,omitempty"`
-	Pattern           string   `json:"pattern,omitempty"`
-	Regex             bool     `json:"regex,omitempty"`
-	CaseSensitive     bool     `json:"case_sensitive,omitempty"`
-	ContextChars      int      `json:"context_chars,omitempty"`
-	CSSScope          string   `json:"css_scope,omitempty"`
-	MaxResults        int      `json:"max_results,omitempty"`
-	Attributes        []string `json:"attributes,omitempty"`
-	IncludeText       *bool    `json:"include_text,omitempty"`
-	Code              string   `json:"code,omitempty"`
-	ExtractLinks      bool     `json:"extract_links,omitempty"`
-	ExtractImages     bool     `json:"extract_images,omitempty"`
-	StartFromChar     int      `json:"start_from_char,omitempty"`
-	AlreadyCollected  []string `json:"already_collected,omitempty"`
+	Op         string `json:"op"`
+	SessionKey string `json:"session_key,omitempty"`
+	Headed     *bool  `json:"headed,omitempty"`
+	ViewportW  int    `json:"viewport_width,omitempty"`
+	ViewportH  int    `json:"viewport_height,omitempty"`
+	TimeoutMS  int    `json:"timeout_ms,omitempty"`
 	// 任务级伴生派发（op=run_task / task_status / task_cancel）
 	Task     string `json:"task,omitempty"`
 	TaskID   string `json:"task_id,omitempty"`
@@ -60,14 +28,14 @@ type Response struct {
 
 // ToolResult 为 browser_* 工具返回给 LLM 的统一 JSON 形状。
 type ToolResult struct {
-	OK                  bool           `json:"ok"`
-	URL                 string         `json:"url,omitempty"`
-	Title               string         `json:"title,omitempty"`
-	ScreenshotPath      string         `json:"screenshot_path,omitempty"`
-	LLMRepresentation   string         `json:"llm_representation,omitempty"`
-	ExtractedContent    string         `json:"extracted_content,omitempty"`
-	Error               string         `json:"error,omitempty"`
-	Detail              map[string]any `json:"detail,omitempty"`
+	OK                bool           `json:"ok"`
+	URL               string         `json:"url,omitempty"`
+	Title             string         `json:"title,omitempty"`
+	ScreenshotPath    string         `json:"screenshot_path,omitempty"`
+	LLMRepresentation string         `json:"llm_representation,omitempty"`
+	ExtractedContent  string         `json:"extracted_content,omitempty"`
+	Error             string         `json:"error,omitempty"`
+	Detail            map[string]any `json:"detail,omitempty"`
 }
 
 // FormatToolResult 序列化 tool 返回文本。
@@ -107,7 +75,6 @@ func toolResultFromResponse(resp Response) ToolResult {
 				if s, ok := v.(string); ok && s != "" && out.ExtractedContent == "" {
 					out.ExtractedContent = s
 				}
-				// summary 仍保留在 detail，供主 Agent 读取
 			}
 			detail[k] = v
 		}

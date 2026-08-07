@@ -43,21 +43,9 @@ func TestManagerStartStopWithMockDriver(t *testing.T) {
 	if !out.OK {
 		t.Fatalf("stop = %+v", out)
 	}
-	if !mock.Closed {
-		_ = m.Close()
-	}
+	_ = m.Close()
 	if !mock.Closed {
 		t.Fatal("expected mock driver closed")
-	}
-}
-
-func TestValidateNavigateURL(t *testing.T) {
-	m := &Manager{cfg: testBrowserConfig(true)}
-	if err := m.ValidateNavigateURL("https://example.com/path"); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.ValidateNavigateURL("file:///etc/passwd"); err == nil {
-		t.Fatal("expected scheme error")
 	}
 }
 

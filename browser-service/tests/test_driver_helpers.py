@@ -3,18 +3,6 @@ from dagents_browser.ports import allocate_debug_port
 from dagents_browser.task_result import summarize_agent_history, task_status_response
 
 
-def normalize_max_elements(n: int) -> int:
-    if n <= 0:
-        return 150
-    return min(n, 500)
-
-
-def test_normalize_max_elements():
-    assert normalize_max_elements(0) == 150
-    assert normalize_max_elements(200) == 200
-    assert normalize_max_elements(999) == 500
-
-
 def test_allocate_debug_port_unique():
     p1 = allocate_debug_port("agt-a-browser", base_port=9222)
     p2 = allocate_debug_port("agt-b-browser", base_port=9222, used_ports={p1})

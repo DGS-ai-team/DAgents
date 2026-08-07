@@ -3,18 +3,16 @@ package browser
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
 // Manager 管理 browser session 与 remote 驱动（dagents-browser）。
+// 产品路径仅暴露任务级派发：Start / Stop / RunTask* / TaskStatus / TaskCancel。
 type Manager struct {
 	cfg    config.BrowserConfig
-	fsRoot string
 	driver Driver
 
 	mu       sync.Mutex
@@ -26,10 +24,8 @@ func NewManager(cfg *config.Config, driver Driver) (*Manager, error) {
 	if cfg == nil || !cfg.BrowserEnabled() {
 		return &Manager{cfg: config.BrowserConfig{}}, nil
 	}
-	fsRoot := cfg.RuntimeDir()
 	m := &Manager{
 		cfg:      cfg.Browser,
-		fsRoot:   fsRoot,
 		driver:   driver,
 		sessions: make(map[string]struct{}),
 	}
@@ -88,58 +84,6 @@ func (m *Manager) headedDefault() bool {
 		return true
 	}
 	return *m.cfg.Headed
-}
-
-func (m *Manager) outputDir() string {
-	dir := strings.TrimSpace(m.cfg.OutputDir)
-	if dir == "" {
-		return "browser"
-	}
-	return strings.Trim(dir, "/")
-}
-
-func (m *Manager) allowedSchemes() []string {
-	if m == nil || len(m.cfg.AllowedURLSchemes) == 0 {
-		return []string{"https", "http"}
-	}
-	out := make([]string, 0, len(m.cfg.AllowedURLSchemes))
-	for _, s := range m.cfg.AllowedURLSchemes {
-		s = strings.ToLower(strings.TrimSpace(s))
-		if s != "" {
-			out = append(out, s)
-		}
-	}
-	if len(out) == 0 {
-		return []string{"https", "http"}
-	}
-	return out
-}
-
-// ValidateNavigateURL 校验 navigate 目标 URL。
-func (m *Manager) ValidateNavigateURL(raw string) error {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return fmt.Errorf("url is required")
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("invalid url: %w", err)
-	}
-	scheme := strings.ToLower(u.Scheme)
-	allowed := false
-	for _, s := range m.allowedSchemes() {
-		if scheme == s {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		return fmt.Errorf("url scheme %q not allowed", scheme)
-	}
-	if u.Host == "" {
-		return fmt.Errorf("url missing host")
-	}
-	return nil
 }
 
 func (m *Manager) call(ctx context.Context, req Request) (ToolResult, error) {
@@ -207,164 +151,4 @@ func (m *Manager) Stop(ctx context.Context, sessionKey string) (ToolResult, erro
 	delete(m.sessions, sessionKey)
 	m.mu.Unlock()
 	return out, err
-}
-
-// Navigate 打开 URL。
-func (m *Manager) Navigate(ctx context.Context, sessionKey, targetURL, waitUntil string) (ToolResult, error) {
-	if err := m.ValidateNavigateURL(targetURL); err != nil {
-		return ToolResult{OK: false, Error: err.Error()}, nil
-	}
-	if waitUntil == "" {
-		waitUntil = "load"
-	}
-	return m.call(ctx, Request{
-		Op:         "navigate",
-		SessionKey: sessionKey,
-		URL:        targetURL,
-		WaitUntil:  waitUntil,
-	})
-}
-
-// Click 点击元素；index 优先（来自 browser_snapshot），selector 为 fallback。
-func (m *Manager) Click(ctx context.Context, sessionKey string, index int, selector string, fallbacks []string) (ToolResult, error) {
-	selector = strings.TrimSpace(selector)
-	if index <= 0 && selector == "" {
-		return ToolResult{OK: false, Error: "index or selector is required (prefer index from browser_snapshot)"}, nil
-	}
-	return m.call(ctx, Request{
-		Op:         "click",
-		SessionKey: sessionKey,
-		Index:      index,
-		Selector:   selector,
-		Fallbacks:  fallbacks,
-	})
-}
-
-// Fill 填写输入框；index 优先，selector 为 fallback。
-func (m *Manager) Fill(ctx context.Context, sessionKey string, index int, selector, text string) (ToolResult, error) {
-	selector = strings.TrimSpace(selector)
-	if index <= 0 && selector == "" {
-		return ToolResult{OK: false, Error: "index or selector is required (prefer index from browser_snapshot)"}, nil
-	}
-	return m.call(ctx, Request{
-		Op:         "fill",
-		SessionKey: sessionKey,
-		Index:      index,
-		Selector:   selector,
-		Text:       text,
-	})
-}
-
-// Press 按键。
-func (m *Manager) Press(ctx context.Context, sessionKey, key string) (ToolResult, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return ToolResult{OK: false, Error: "key is required"}, nil
-	}
-	return m.call(ctx, Request{
-		Op:         "press",
-		SessionKey: sessionKey,
-		Key:        key,
-	})
-}
-
-// Screenshot 保存当前页截图到 fs_root。
-func (m *Manager) Screenshot(ctx context.Context, sessionKey, name string) (ToolResult, error) {
-	abs, rel, err := SessionScreenshotPath(m.fsRoot, m.outputDir(), sessionKey, name)
-	if err != nil {
-		return ToolResult{OK: false, Error: err.Error()}, nil
-	}
-	out, err := m.call(ctx, Request{
-		Op:         "screenshot",
-		SessionKey: sessionKey,
-		Path:       abs,
-	})
-	if err != nil {
-		return out, err
-	}
-	if out.OK {
-		out.ScreenshotPath = rel
-	}
-	return out, nil
-}
-
-// Wait 等待 index 对应元素、selector 或 load state。
-func (m *Manager) Wait(ctx context.Context, sessionKey string, index int, selector, loadState string, timeoutMS int) (ToolResult, error) {
-	if timeoutMS <= 0 {
-		timeoutMS = m.defaultTimeoutMS()
-	}
-	if index <= 0 && strings.TrimSpace(selector) == "" && strings.TrimSpace(loadState) == "" {
-		return ToolResult{OK: false, Error: "index, selector, or load_state is required"}, nil
-	}
-	return m.call(ctx, Request{
-		Op:         "wait",
-		SessionKey: sessionKey,
-		Index:      index,
-		Selector:   selector,
-		LoadState:  loadState,
-		TimeoutMS:  timeoutMS,
-	})
-}
-
-// Snapshot 返回 browser-use 页面状态；includeScreenshot 为 true 时一并保存 PNG。
-func (m *Manager) Snapshot(ctx context.Context, sessionKey string, maxElements int, includeScreenshot bool, screenshotName string) (ToolResult, error) {
-	req := Request{
-		Op:          "snapshot",
-		SessionKey:  sessionKey,
-		MaxElements: maxElements,
-	}
-	var screenshotRel string
-	if includeScreenshot {
-		name := strings.TrimSpace(screenshotName)
-		if name == "" {
-			name = ScreenshotName("snap")
-		}
-		abs, rel, err := SessionScreenshotPath(m.fsRoot, m.outputDir(), sessionKey, name)
-		if err != nil {
-			return ToolResult{OK: false, Error: err.Error()}, nil
-		}
-		req.IncludeScreenshot = true
-		req.Path = abs
-		screenshotRel = rel
-	}
-	out, err := m.call(ctx, req)
-	if err != nil {
-		return out, err
-	}
-	if out.OK && screenshotRel != "" {
-		out.ScreenshotPath = screenshotRel
-	}
-	return out, err
-}
-
-// ClickCoordinate 在视口坐标 (x,y) 点击（视觉模式主路径）。
-func (m *Manager) ClickCoordinate(ctx context.Context, sessionKey string, x, y int, button string) (ToolResult, error) {
-	if x < 0 || y < 0 {
-		return ToolResult{OK: false, Error: "coordinate_x and coordinate_y must be non-negative"}, nil
-	}
-	button = strings.TrimSpace(button)
-	if button == "" {
-		button = "left"
-	}
-	switch button {
-	case "left", "right", "middle":
-	default:
-		return ToolResult{OK: false, Error: `button must be "left", "right", or "middle"`}, nil
-	}
-	return m.call(ctx, Request{
-		Op:         "click_coordinate",
-		SessionKey: sessionKey,
-		CoordX:     x,
-		CoordY:     y,
-		Button:     button,
-	})
-}
-
-// ScreenshotName 生成带时间戳的默认截图名。
-func ScreenshotName(prefix string) string {
-	p := strings.TrimSpace(prefix)
-	if p == "" {
-		p = "shot"
-	}
-	return fmt.Sprintf("%s-%d", p, time.Now().UnixMilli())
 }
