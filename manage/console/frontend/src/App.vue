@@ -21,7 +21,6 @@ import WorkgroupView from "./components/WorkgroupView.vue";
 import WorkgroupChatView from "./components/WorkgroupChatView.vue";
 import PageHeader from "./components/PageHeader.vue";
 import RegistryView from "./components/RegistryView.vue";
-import StatsRow from "./components/StatsRow.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { useToast } from "./composables/useToast.js";
 import { computeStats, touchLastRefreshedLabel, VIEW_META } from "./utils.js";
@@ -64,13 +63,10 @@ const registry = reactive({
   error: "",
   filters: {
     group: "",
-    team: "",
     status: "all",
     q: "",
     pageSize: 50,
   },
-  roleHint: "",
-  listSummary: "—",
 });
 
 const { toasts, showToast } = useToast();
@@ -271,7 +267,6 @@ async function loadAgents() {
   registry.pageSize = registry.filters.pageSize || 50;
   const group = registry.filters.group.trim();
   const params = {
-    team: registry.filters.team.trim(),
     status: registry.filters.status,
     q: registry.filters.q.trim(),
     page: registry.page,
@@ -283,8 +278,6 @@ async function loadAgents() {
     registry.agents = data.agents || [];
     registry.total = data.total ?? registry.agents.length;
     registry.page = data.page || registry.page;
-    registry.roleHint = group ? `分组：${group}` : "全部 Node";
-    registry.listSummary = `本页 ${registry.agents.length} 条，合计 ${registry.total} 条`;
     await loadStatsSnapshot(group);
     lastRefreshed.value = touchLastRefreshedLabel();
   } catch (err) {
@@ -393,18 +386,6 @@ function registryNextPage() {
   }
 }
 
-function onDrawerGroupsSaved({ agentId, updated }) {
-  showToast(`${agentId} 分组已更新`, "success");
-  const idx = registry.agents.findIndex((a) => a.agent_id === agentId);
-  if (idx >= 0) {
-    registry.agents[idx] = { ...registry.agents[idx], ...updated };
-  }
-  if (drawerAgent.value?.agent_id === agentId) {
-    drawerAgent.value = { ...drawerAgent.value, ...updated };
-  }
-  loadAgents();
-}
-
 onMounted(() => {
   void bootstrapAuth();
 });
@@ -423,7 +404,7 @@ onMounted(() => {
   />
 
   <template v-else>
-    <div class="app-shell" :class="[isHome ? 'app-shell--home' : 'app-shell--app', isChatPage ? 'app-shell--chat' : '']">
+    <div class="app-shell" :class="{ 'app-shell--chat': isChatPage }">
       <AppTopNav
         v-if="!isChatPage"
         :view="view"
@@ -490,11 +471,6 @@ onMounted(() => {
           />
 
           <template v-if="view === 'nodes'">
-            <StatsRow
-              :online="stats.online"
-              :offline="stats.offline"
-              :total="stats.total"
-            />
             <RegistryView
               :agents="registry.agents"
               :loading="registry.loading"
@@ -503,8 +479,9 @@ onMounted(() => {
               :total="registry.total"
               :page-size="registry.pageSize"
               :filters="registry.filters"
-              :role-hint="registry.roleHint"
-              :list-summary="registry.listSummary"
+              :online="stats.online"
+              :offline="stats.offline"
+              :registered="stats.total"
               @open="drawerAgent = $event"
               @filter-change="onRegistryFilterChange"
               @page-prev="registryPrevPage"
@@ -529,7 +506,6 @@ onMounted(() => {
     <DetailDrawer
       :agent="drawerAgent"
       @close="drawerAgent = null"
-      @groups-saved="onDrawerGroupsSaved"
     />
 
     <AskAiButton v-if="!isChatPage" @toast="showToast($event.message, $event.type)" />

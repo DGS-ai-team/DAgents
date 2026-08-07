@@ -9,7 +9,7 @@ const router = useRouter();
 const nav = [
   { to: "/settings/general", label: "通用" },
   { to: "/settings/connection", label: "连接" },
-  { to: "/settings/agents", label: "Agents", match: "/settings/agents" },
+  { to: "/settings/agents", label: "智能体", match: "/settings/agents" },
   { to: "/settings/capabilities", label: "能力" },
   { to: "/settings/skills", label: "技能" },
   { to: "/settings/triggers", label: "定时任务" },

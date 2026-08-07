@@ -59,9 +59,11 @@ func TestRegistrar_registerAndHeartbeat(t *testing.T) {
 			if payload.AgentID != "ops-01" {
 				t.Fatalf("unexpected register payload: %+v", payload)
 			}
-			if payload.BaseURL != "http://10.0.0.5:18765" {
-				t.Fatalf("base_url = %q", payload.BaseURL)
+			if payload.BaseURL != "http://127.0.0.1:18765" {
+				t.Fatalf("base_url = %q (want local.endpoint)", payload.BaseURL)
 			}
+			// host_ips 由本机网卡自动采集；测试环境可能为空，但字段应存在于 payload
+			_ = payload.HostIPs
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"heartbeat_interval_seconds": 2,
 				"agent":                      map[string]string{"status": "online"},

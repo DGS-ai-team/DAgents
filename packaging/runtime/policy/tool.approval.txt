@@ -30,11 +30,9 @@ background_job_status=rule
 write_file=rule
 search_replace=rule
 
-# --- 必须审批：写盘强制全审、会话协调、任务取消 ---
+# --- 必须审批：任务取消等 ---
 # write_file=always 可显式关闭信任链绕过
-agent_send_message=always
-agent_broadcast=always
-agent_peer_approve_tools=always
+# 旧 A2A 工具（agent_invoke / agent_broadcast / agent_send_message 等）已拆除，勿再写入种子。
 background_job_cancel=always
 
 # --- Browser：主 Agent 任务级伴生派发（sidecar browser_use.Agent）---

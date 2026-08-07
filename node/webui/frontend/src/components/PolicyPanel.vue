@@ -28,7 +28,6 @@ const loading = ref(false);
 const busyKey = ref("");
 const error = ref("");
 const statusMessage = ref("");
-const showRaw = ref(false);
 const data = ref(null);
 const tab = ref("tools");
 const shellTab = ref("bash");
@@ -52,6 +51,12 @@ const shellEntries = computed(() => {
   if (!shell || typeof shell !== "object") return [];
   const rows = shell[shellTab.value];
   return filterPolicyShellEntries(rows, filterText.value);
+});
+
+const shellEnabled = computed(() => shellTypes.value.length > 0);
+
+watch(shellEnabled, (ok) => {
+  if (!ok && tab.value === "shell") tab.value = "tools";
 });
 
 function rowBusy(kind, key) {
@@ -168,23 +173,15 @@ onMounted(load);
     <header class="panel__header command-panel__header">
       <div>
         <div class="panel__title">审批策略</div>
-        <div class="command-panel__subtitle">按 Agent 存储于 SQLite；点击选项即可生效</div>
       </div>
-      <div class="command-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "摘要" : "详情" }}
-        </button>
-        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || !!busyKey" @click="load">
-          刷新
-        </button>
-        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+      <div v-if="!embedded" class="command-panel__header-actions">
+        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
       </div>
     </header>
 
     <div class="panel__body command-panel__body">
       <div v-if="loading && !data" class="command-panel__loading">加载中…</div>
       <div v-else-if="error" class="command-panel__error">{{ error }}</div>
-      <pre v-else-if="showRaw && data" class="command-panel__raw">{{ JSON.stringify(data, null, 2) }}</pre>
       <template v-else-if="data">
         <div class="policy-panel__toolbar">
           <div class="command-tabs policy-panel__tabs">
@@ -197,6 +194,7 @@ onMounted(load);
               工具
             </button>
             <button
+              v-if="shellEnabled"
               type="button"
               class="command-tab"
               :class="{ 'command-tab--active': tab === 'shell' }"
@@ -267,7 +265,13 @@ onMounted(load);
               </tbody>
             </table>
           </div>
-          <p v-else class="command-panel__empty">无匹配工具</p>
+          <p v-else class="command-panel__empty">
+            {{
+              Array.isArray(data?.tools) && data.tools.length === 0
+                ? "当前未启用任何工具，可在上方「能力与角色」中开启工具组后再配置策略。"
+                : "无匹配工具"
+            }}
+          </p>
         </section>
 
         <section v-else class="command-section">

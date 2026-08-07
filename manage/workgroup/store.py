@@ -387,6 +387,7 @@ class WorkGroupStore:
                 "workgroup_id": workgroup_id,
                 "home_node_id": home,
                 "display_name": req.display_name.strip(),
+                "description": (req.description or "").strip(),
                 "member_generation": 1,
                 "llm_profile_id": (req.llm_profile_id or group.llm_profile_id).strip(),
                 "llm_profile_revision": (req.llm_profile_revision or group.llm_profile_revision).strip(),
@@ -448,6 +449,9 @@ class WorkGroupStore:
             display_name = (
                 req.display_name.strip() if req.display_name is not None else spec.display_name
             )
+            description = (
+                req.description.strip() if req.description is not None else spec.description
+            )
             llm_profile_id = (
                 req.llm_profile_id.strip() if req.llm_profile_id is not None else spec.llm_profile_id
             )
@@ -482,6 +486,7 @@ class WorkGroupStore:
                 "workgroup_id": workgroup_id,
                 "home_node_id": member.home_node_id,
                 "display_name": display_name,
+                "description": description,
                 "member_generation": new_gen,
                 "llm_profile_id": llm_profile_id,
                 "llm_profile_revision": llm_profile_revision,

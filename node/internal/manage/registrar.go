@@ -127,13 +127,10 @@ func (r *Registrar) resetInterval(d time.Duration) {
 }
 
 func (r *Registrar) register(ctx context.Context) time.Duration {
-	if r.cfg.ManageRegistryBaseURLIsLoopback() {
-		r.logger.Warn(
-			"manage registration base_url is loopback; set manage.registration.base_url to a reachable LAN address",
-			"base_url", r.cfg.ManageRegistryBaseURL(),
-		)
-	}
 	payload := r.buildRegisterPayload()
+	if strings.TrimSpace(payload.HostIPs) == "" {
+		r.logger.Warn("manage registration host_ips is empty; no non-loopback interface address found")
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		r.logger.Error("manage register marshal failed", "error", err)
@@ -251,10 +248,12 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 	description := r.cfg.AgentDescription()
 	host := hostsnapshot.Get()
 	caps := r.cfg.RegistrationCapabilities()
+	hostIPs := hostsnapshot.LocalHostIPs()
 	return registerPayload{
 		NodeID:           r.cfg.NodeID,
 		AgentID:          r.cfg.NodeID, // 兼容：值同 node_id；Manage 主键仍为 node 级
-		BaseURL:          r.cfg.ManageRegistryBaseURL(),
+		BaseURL:          strings.TrimRight(strings.TrimSpace(r.cfg.Local.Endpoint), "/"),
+		HostIPs:          hostIPs,
 		Capabilities:     caps,
 		CapabilitiesHint: caps,
 		Tools:            r.collectTools(),
@@ -267,6 +266,7 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 		Metadata: map[string]any{
 			"node_id":      r.cfg.NodeID,
 			"node_version": version.Version,
+			"host_ips":     hostIPs,
 			"host_info": map[string]any{
 				"os_kind":          host.OSKind,
 				"sys_platform":     host.SysPlatform,
@@ -333,6 +333,7 @@ type registerPayload struct {
 	NodeID           string         `json:"node_id"`
 	AgentID          string         `json:"agent_id,omitempty"` // deprecated: 兼容旧 Manage，值同 node_id
 	BaseURL          string         `json:"base_url"`
+	HostIPs          string         `json:"host_ips,omitempty"`
 	CapabilitiesHint []string       `json:"capabilities_hint,omitempty"`
 	Capabilities     []string       `json:"capabilities,omitempty"`
 	Tools            []string       `json:"tools,omitempty"`

@@ -25,7 +25,7 @@
       }
     },
     {
-      "name": "Debug: Manage",
+      "name": "Debug: Manage API",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/run_manage.py",
@@ -42,6 +42,17 @@
       "justMyCode": false
     },
     {
+      "name": "Debug: Manage Console",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/manage/console/frontend",
+      "env": {
+        "DAGENTS_MANAGE_URL": "http://127.0.0.1:8020",
+        "CONSOLE_DEV_PORT": "5174"
+      }
+    },
+    {
       "name": "Debug: Shell",
       "type": "node-terminal",
       "request": "launch",
@@ -49,6 +60,18 @@
       "cwd": "${workspaceFolder}/desktop/tray-tauri",
       "env": {
         "DAGENTS_HOME": "${workspaceFolder}/packaging/agent-client"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug: Manage",
+      "configurations": ["Debug: Manage API", "Debug: Manage Console"],
+      "stopAll": true,
+      "presentation": {
+        "order": 3,
+        "group": "manage",
+        "hidden": false
       }
     }
   ]

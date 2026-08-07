@@ -31,7 +31,7 @@ const primaryModules = [
 
 const adminModules = [
   { id: "nodes", label: "Node 列表", hint: "注册与在线状态" },
-  { id: "permissions", label: "权限管理", hint: "会话与 ACL" },
+  { id: "permissions", label: "发现组", hint: "Node 可见性分组" },
   { id: "settings", label: "配置", hint: "LLM 与发布" },
 ];
 

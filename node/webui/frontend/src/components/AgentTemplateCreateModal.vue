@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from "vue";
+import { reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import AgentSettingsForm from "./AgentSettingsForm.vue";
 import { buildCreateTemplatePayload, draftFromBlank, emptyAgentDraft } from "../utils/agentTemplateForm.js";
@@ -15,14 +15,26 @@ const error = ref("");
 const showAdvanced = ref(false);
 const llmProfiles = ref([]);
 const meta = reactive({
-  id: "",
   displayName: "",
   description: "",
 });
 const draft = reactive(emptyAgentDraft());
 
-const idPattern = /^[a-z][a-z0-9_-]{0,63}$/;
-const idValid = computed(() => idPattern.test(String(meta.id || "").trim()));
+/** 生成符合后端 ValidateID 的唯一模板 id（用户无需填写）。 */
+function generateTemplateId(displayName) {
+  const slug = String(displayName || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/^[^a-z]+/, "")
+    .slice(0, 40);
+  const stem = slug || "tpl";
+  const suffix = Math.random().toString(36).slice(2, 10);
+  return `${stem}-${suffix}`.slice(0, 64);
+}
 
 async function loadProfiles() {
   try {
@@ -41,7 +53,6 @@ async function loadProfiles() {
 }
 
 function resetForm() {
-  meta.id = "";
   meta.displayName = "";
   meta.description = "";
   showAdvanced.value = false;
@@ -50,16 +61,12 @@ function resetForm() {
 }
 
 async function submit() {
-  const id = String(meta.id || "").trim();
   const displayName = String(meta.displayName || "").trim();
-  if (!idValid.value) {
-    error.value = "模板 ID 须为小写字母开头，仅含 a-z、0-9、_、-";
-    return;
-  }
   if (!displayName) {
     error.value = "请填写显示名称";
     return;
   }
+  const id = generateTemplateId(displayName);
   saving.value = true;
   error.value = "";
   try {
@@ -99,9 +106,9 @@ watch(
       <section class="agent-create-modal" role="dialog" aria-modal="true" aria-labelledby="agent-template-create-title">
         <header class="agent-create-modal__header">
           <div>
-            <h2 id="agent-template-create-title" class="agent-create-modal__title">新建 Agent 模板</h2>
+            <h2 id="agent-template-create-title" class="agent-create-modal__title">新建智能体模板</h2>
             <p class="agent-create-modal__subtitle">
-              保存为可复用蓝图，创建 Agent 时可一键预填
+              保存为可复用蓝图，创建智能体时可一键预填
             </p>
           </div>
           <button type="button" class="agent-create-modal__close" aria-label="关闭" :disabled="saving" @click="emit('close')">
@@ -111,28 +118,25 @@ watch(
 
         <div class="agent-create-modal__body">
           <section class="agent-template-meta">
-            <label class="agent-template-meta__field">
-              <span>模板 ID</span>
+            <label class="agent-template-meta__field agent-template-meta__field--wide">
+              <span>显示名称</span>
               <input
-                v-model="meta.id"
+                v-model="meta.displayName"
                 type="text"
                 class="agent-template-meta__input"
-                placeholder="my-assistant"
-                spellcheck="false"
-                autocomplete="off"
+                placeholder="例如：代码助手模板"
+                autofocus
               />
-            </label>
-            <label class="agent-template-meta__field">
-              <span>显示名称</span>
-              <input v-model="meta.displayName" type="text" class="agent-template-meta__input" placeholder="我的助手模板" />
             </label>
             <label class="agent-template-meta__field agent-template-meta__field--wide">
               <span>描述</span>
-              <textarea v-model="meta.description" class="agent-template-meta__input agent-template-meta__input--area" rows="2" placeholder="可选说明" />
+              <textarea
+                v-model="meta.description"
+                class="agent-template-meta__input agent-template-meta__input--area"
+                rows="2"
+                placeholder="可选，说明这个模板适合做什么"
+              />
             </label>
-            <p v-if="meta.id && !idValid" class="agent-template-meta__hint agent-template-meta__hint--warn">
-              ID 格式：小写字母开头，仅 a-z、0-9、_、-
-            </p>
           </section>
 
           <AgentSettingsForm
@@ -149,7 +153,7 @@ watch(
             <button
               type="button"
               class="btn btn--primary"
-              :disabled="saving || !idValid || !meta.displayName?.trim()"
+              :disabled="saving || !meta.displayName?.trim()"
               @click="submit"
             >
               {{ saving ? "保存中…" : "保存模板" }}
@@ -243,7 +247,7 @@ watch(
 
 .agent-template-meta {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 

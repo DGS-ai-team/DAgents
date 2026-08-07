@@ -40,6 +40,11 @@
       "minLength": 1,
       "maxLength": 64
     },
+    "description": {
+      "type": "string",
+      "maxLength": 256,
+      "default": ""
+    },
     "member_generation": {
       "type": "integer",
       "minimum": 1
