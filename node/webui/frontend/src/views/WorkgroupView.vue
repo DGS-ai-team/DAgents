@@ -1262,7 +1262,7 @@ const liveStatusLabel = computed(() => {
     if (t === "human_message") break;
   }
   if (streamMode.value === "direct" || sawDirect) return "直连成员工作中…";
-  return "Supervisor 思考中…";
+  return "思考中…";
 });
 
 const toolbarTitle = computed(() => {
@@ -1670,7 +1670,7 @@ onUnmounted(() => {
                       class="msg__hint msg__hint--stream-meta"
                       role="status"
                     >
-                      <span class="msg__meta-label">{{ liveStatusLabel || "Supervisor 思考中…" }}</span>
+                      <span class="msg__meta-label">{{ liveStatusLabel || "思考中…" }}</span>
                       <span class="msg__meta-dots" aria-hidden="true">
                         <span class="msg__meta-dot" />
                         <span class="msg__meta-dot" />
