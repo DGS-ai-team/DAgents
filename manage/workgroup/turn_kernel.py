@@ -24,7 +24,11 @@ from manage.workgroup.history import (
     open_tool_call_ids,
 )
 from manage.workgroup.llm_chat import ChatResult, ChatToolCall, LLMChatClient, resolve_chat_client
-from manage.workgroup.member_tools import build_member_system_prompt, member_openai_tools
+from manage.workgroup.member_tools import (
+    build_member_system_prompt,
+    host_env_from_registry,
+    member_openai_tools,
+)
 from manage.workgroup.mentions import resolve_direct_member
 from manage.workgroup.models import (
     ActorRun,
@@ -1006,10 +1010,19 @@ class TurnKernel:
         )
         tools = member_openai_tools(list(spec.tools.allow_names or []))
         allow = {str(n).strip() for n in (spec.tools.allow_names or []) if str(n).strip()}
+        group = self._store.get_workgroup(workgroup_id)
+        runtime = self._store.member_runtime(member_id)
+        host_env = host_env_from_registry(self._registry_store, member.home_node_id)
         system = build_member_system_prompt(
             soul_md=spec.prompt.soul_md,
             user_md=spec.prompt.user_md,
             custom_md=spec.prompt.custom_md,
+            host_env=host_env,
+            member_id=member_id,
+            display_name=member.display_name,
+            workgroup_id=workgroup_id,
+            workgroup_name=(group.display_name if group is not None else ""),
+            workspace_path=str(runtime.get("workspace_path") or ""),
         )
         max_loops = max(1, int(spec.max_tool_loops or self._max_tool_loops))
         steps = 0

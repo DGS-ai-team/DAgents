@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from manage.workgroup.member_tools import (
     MEMBER_EXECUTABLE_TOOL_NAMES,
+    build_member_system_prompt,
     default_allow_tool_names,
+    host_env_from_registry,
     member_openai_tools,
     member_tool_catalog,
     side_effect_for_tool,
@@ -40,6 +43,67 @@ class MemberToolCatalogTests(unittest.TestCase):
     def test_unknown_names_skipped(self) -> None:
         tools = member_openai_tools(["read_file", "not_a_tool", "bash_run"])
         self.assertEqual([t["function"]["name"] for t in tools], ["read_file", "bash_run"])
+
+
+class MemberSystemPromptTests(unittest.TestCase):
+    def test_includes_static_env_workspace_and_soul(self) -> None:
+        prompt = build_member_system_prompt(
+            soul_md="资料员",
+            host_env={
+                "home_node_id": "node-a",
+                "os_kind": "linux",
+                "sys_platform": "linux",
+                "platform_release": "6.1.0",
+                "machine": "x86_64",
+                "login_name": "dagents",
+                "host_ips": "10.0.0.8",
+                "node_version": "0.8.5",
+            },
+            member_id="mb_01h00000000000000000000001",
+            display_name="资料员",
+            workgroup_id="wg_01h00000000000000000000001",
+            workgroup_name="调研组",
+            workspace_path="/tmp/member-ws",
+        )
+        self.assertIn("## 最高优先级规则", prompt)
+        self.assertIn("## 运行环境", prompt)
+        self.assertIn("操作系统类别：`linux`", prompt)
+        self.assertIn("Home Node ID：`node-a`", prompt)
+        self.assertIn("本机可达 IP：`10.0.0.8`", prompt)
+        self.assertIn("## 工作区目录", prompt)
+        self.assertIn("相对路径均基于成员工作区根目录", prompt)
+        self.assertIn("`/tmp/member-ws`", prompt)
+        self.assertIn("## Soul", prompt)
+        self.assertIn("资料员", prompt)
+        self.assertNotIn("You are a Workgroup Member agent", prompt)
+
+    def test_host_env_from_registry(self) -> None:
+        store = SimpleNamespace(
+            get=lambda node_id: SimpleNamespace(
+                host_ips="127.0.0.1",
+                version="0.9.0",
+                name="desk",
+                metadata={
+                    "host_info": {
+                        "os_kind": "windows",
+                        "sys_platform": "windows",
+                        "platform_release": "10",
+                        "machine": "AMD64",
+                        "login_name": "Alice",
+                    }
+                },
+            )
+            if node_id == "node-win"
+            else None
+        )
+        env = host_env_from_registry(store, "node-win")
+        self.assertEqual(env["os_kind"], "windows")
+        self.assertEqual(env["login_name"], "Alice")
+        self.assertEqual(env["host_ips"], "127.0.0.1")
+        self.assertEqual(env["node_version"], "0.9.0")
+        missing = host_env_from_registry(store, "missing")
+        self.assertEqual(missing["home_node_id"], "missing")
+        self.assertEqual(missing.get("os_kind", ""), "")
 
 
 if __name__ == "__main__":
