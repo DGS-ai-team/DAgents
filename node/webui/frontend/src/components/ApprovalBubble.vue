@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { approvalItemDisplayName } from "../utils/format.js";
+import { approvalItemDisplayName, approvalItemHint } from "../utils/format.js";
 import { extractToolApprovals } from "../stores/hitl.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 
@@ -42,7 +42,11 @@ const visual = computed(() => resolveToolVisual({ data: props.data }));
             <div v-if="it.reason" class="approval-tool-item__policy">
               <div class="approval-tool-item__reason">{{ it.reason }}</div>
             </div>
-            <pre class="tool-card__args tool-card__args--compact">{{ it.rawArgs }}</pre>
+            <p v-if="approvalItemHint(it)" class="approval-tool-item__hint">{{ approvalItemHint(it) }}</p>
+            <details v-if="it.rawArgs" class="approval-tool-item__raw">
+              <summary>参数详情</summary>
+              <pre class="tool-card__args tool-card__args--compact">{{ it.rawArgs }}</pre>
+            </details>
           </li>
         </ul>
         <div v-if="items().length > 1" class="approval-bubble__bulk-actions approval-bubble__bulk-actions--footer">
@@ -56,3 +60,26 @@ const visual = computed(() => resolveToolVisual({ data: props.data }));
     </div>
   </div>
 </template>
+
+<style scoped>
+.approval-tool-item__hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-primary, inherit);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.approval-tool-item__raw {
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-muted, #6b7280);
+}
+.approval-tool-item__raw summary {
+  cursor: pointer;
+  user-select: none;
+}
+.approval-tool-item__raw pre {
+  margin-top: 0.25rem;
+}
+</style>

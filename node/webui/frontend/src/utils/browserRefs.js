@@ -67,6 +67,17 @@ export function collectBrowserRefsFromEntries(entries, beforeIndex = entries?.le
       String(d.summary || parsed.extracted_content || d.cite_label || "").trim() ||
       String(d.task || "").trim() ||
       "浏览器任务";
+    const media = Array.isArray(e.data?.media)
+      ? e.data.media
+          .filter((m) => m && (m.url || m.id))
+          .map((m) => ({
+            id: m.id || null,
+            url: String(m.url || "").trim(),
+            label: m.label || null,
+            caption: m.caption || null,
+          }))
+          .filter((m) => m.url)
+      : [];
     refs.push({
       key,
       task_id: taskId || null,
@@ -83,6 +94,7 @@ export function collectBrowserRefsFromEntries(entries, beforeIndex = entries?.le
       errors: Array.isArray(d.errors) ? d.errors : [],
       error: d.error || parsed.error || null,
       screenshot_paths: Array.isArray(d.screenshot_paths) ? d.screenshot_paths : [],
+      screenshots: media,
       detail_md: d.detail_md || null,
       detail_json: d.detail_json || null,
       duration_seconds: d.duration_seconds ?? null,

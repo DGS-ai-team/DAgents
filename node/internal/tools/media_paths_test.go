@@ -20,6 +20,17 @@ func TestExtractToolMediaPaths_browserSnapshot(t *testing.T) {
 	}
 }
 
+func TestExtractAllToolMediaPaths_browserRunTaskScreenshots(t *testing.T) {
+	content := `{"ok":true,"detail":{"status":"completed","screenshot_paths":["/tmp/a.png","/tmp/b.png"],"last_screenshot_path":"/tmp/b.png"}}`
+	got := ExtractAllToolMediaPaths("browser_run_task", content, nil)
+	if len(got) != 2 {
+		t.Fatalf("len=%d got=%+v", len(got), got)
+	}
+	if got[0].RelPath != "/tmp/a.png" || got[1].RelPath != "/tmp/b.png" {
+		t.Fatalf("paths=%+v", got)
+	}
+}
+
 func TestExtractToolMediaPaths_readImageFromContent(t *testing.T) {
 	got, ok := ExtractToolMediaPaths("read_image", "[READ_IMAGE]\npath=pic.png\nstatus=ok", nil)
 	if !ok || got.RelPath != "pic.png" {

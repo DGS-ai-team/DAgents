@@ -43,6 +43,35 @@ function sanitizeInline(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
 
+/** 从 browser_task_* 工具结果 JSON 提取短状态（不含长摘要，留给引用卡片）。 */
+function browserTaskShortStatus(resultEntry) {
+  const raw = resultEntry?.data?.content;
+  if (raw == null) return "";
+  let obj = raw;
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s.startsWith("{")) return "";
+    try {
+      obj = JSON.parse(s);
+    } catch {
+      return "";
+    }
+  }
+  if (!obj || typeof obj !== "object") return "";
+  const detail = obj.detail && typeof obj.detail === "object" ? obj.detail : obj;
+  const status = sanitizeInline(detail.status);
+  if (status === "completed" && detail.success === false) return "未完全完成";
+  if (status === "completed") {
+    const steps = detail.steps;
+    return steps != null ? `已完成 · ${steps} 步` : "已完成";
+  }
+  if (status === "failed") return "失败";
+  if (status === "cancelled") return "已取消";
+  if (status === "running") return "执行中";
+  if (status === "queued") return "排队中";
+  return status;
+}
+
 /** 从 browser_task_* 工具结果 JSON 提取一行用户可读提示。 */
 function browserTaskResultHint(resultEntry) {
   const raw = resultEntry?.data?.content;
@@ -61,13 +90,7 @@ function browserTaskResultHint(resultEntry) {
   const detail = obj.detail && typeof obj.detail === "object" ? obj.detail : obj;
   const summary = sanitizeInline(detail.summary || obj.extracted_content || detail.extracted_content);
   if (summary) return summary.length > 48 ? truncateGraphemes(summary, 48) : summary;
-  const status = sanitizeInline(detail.status);
-  if (status === "completed" && detail.success === false) return "未完全完成";
-  if (status === "completed") return "已完成";
-  if (status === "failed") return sanitizeInline(detail.error || obj.error) || "失败";
-  if (status === "cancelled") return "已取消";
-  if (status === "running" || status === "queued") return status === "queued" ? "排队中" : "执行中";
-  return status;
+  return browserTaskShortStatus(resultEntry);
 }
 
 function userLabelForTool(name) {
@@ -114,7 +137,13 @@ export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
   }
   if (name === "browser_run_task") {
     const task = sanitizeInline(args.task);
+    const short = resultEntry ? browserTaskShortStatus(resultEntry) : "";
+    if (task && short) {
+      const goal = task.length > 40 ? truncateGraphemes(task, 40) : task;
+      return `${label}：${goal} · ${short}`;
+    }
     if (task) return `${label}：${task.length > 48 ? truncateGraphemes(task, 48) : task}`;
+    if (short) return `${label}：${short}`;
   }
   if (name === "browser_task_status" || name === "browser_task_cancel") {
     const fromResult = browserTaskResultHint(resultEntry);
