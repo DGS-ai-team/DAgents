@@ -49,6 +49,11 @@ const advancedOpen = ref(false);
 const nameInput = ref(null);
 
 const title = computed(() => (props.mode === "create" ? "添加成员" : "配置成员"));
+const lead = computed(() =>
+  props.mode === "create"
+    ? "成员在独立工作区协作，由 Supervisor 编排调用。"
+    : "修改后会重新同步到 Home Node。",
+);
 const primaryLabel = computed(() => {
   if (busy.value) return props.mode === "create" ? "添加中…" : "保存中…";
   return props.mode === "create" ? "添加" : "保存";
@@ -266,13 +271,7 @@ onMounted(() => {
         <header class="wg-member-modal__header">
           <div class="wg-member-modal__heading">
             <h2 id="wg-member-title" class="wg-member-modal__title">{{ title }}</h2>
-            <p class="wg-member-modal__lead">
-              {{
-                mode === "create"
-                  ? "成员在独立工作区里协作；Supervisor 通过任务编排调用它。"
-                  : "修改后会重新同步到 Home Node。"
-              }}
-            </p>
+            <p class="wg-member-modal__lead">{{ lead }}</p>
           </div>
           <button
             type="button"
@@ -281,19 +280,27 @@ onMounted(() => {
             :disabled="busy"
             @click="emit('close')"
           >
-            ×
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path
+                d="M4 4l8 8M12 4l-8 8"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
           </button>
         </header>
 
         <div class="wg-member-modal__body">
           <p v-if="loadingSpec" class="wg-member-modal__hint">加载配置…</p>
           <template v-else>
-            <label class="settings-field">
-              <span class="settings-field__label">显示名</span>
+            <label class="wg-member-modal__field">
+              <span class="wg-member-modal__label">显示名</span>
               <input
                 ref="nameInput"
                 v-model="draft.displayName"
-                class="settings-field__input"
+                class="wg-member-modal__input"
                 type="text"
                 maxlength="64"
                 placeholder="例如：资料员、审稿助手"
@@ -304,23 +311,41 @@ onMounted(() => {
             </label>
 
             <fieldset class="wg-member-modal__tools">
-              <legend class="settings-field__label">工具组</legend>
-              <p class="settings-field__hint">
-                可选工具组由本 Node 提供；默认文件系统，Shell 需显式勾选。
+              <legend class="wg-member-modal__label">工具组</legend>
+              <p class="wg-member-modal__hint-text">
+                由本 Node 提供；默认文件系统，Shell 需显式开启。
               </p>
-              <p v-if="catalogError" class="settings-field__hint">{{ catalogError }}</p>
-              <div class="wg-member-modal__tool-row">
+              <p v-if="catalogError" class="wg-member-modal__hint-text wg-member-modal__hint-text--warn">
+                {{ catalogError }}
+              </p>
+              <div class="wg-member-modal__tool-list">
                 <button
                   v-for="opt in groupOptions"
                   :key="opt.id"
                   type="button"
-                  class="wg-member-modal__chip"
-                  :class="{ 'wg-member-modal__chip--on': draft.groups.includes(opt.id) }"
+                  class="wg-member-modal__tool"
+                  :class="{ 'wg-member-modal__tool--on': draft.groups.includes(opt.id) }"
                   :disabled="busy"
                   :title="opt.hint || opt.id"
+                  :aria-pressed="draft.groups.includes(opt.id)"
                   @click="toggleGroup(opt.id)"
                 >
-                  {{ opt.label }}
+                  <span class="wg-member-modal__tool-check" aria-hidden="true">
+                    <svg v-if="draft.groups.includes(opt.id)" viewBox="0 0 12 12" width="11" height="11">
+                      <path
+                        d="M2.5 6.2L4.8 8.5 9.5 3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span class="wg-member-modal__tool-text">
+                    <span class="wg-member-modal__tool-name">{{ opt.label }}</span>
+                    <span v-if="opt.hint" class="wg-member-modal__tool-hint">{{ opt.hint }}</span>
+                  </span>
                 </button>
               </div>
             </fieldset>
@@ -332,37 +357,54 @@ onMounted(() => {
               :disabled="busy"
               @click="advancedOpen = !advancedOpen"
             >
-              {{ advancedOpen ? "收起高级选项" : "高级选项" }}
+              <span>{{ advancedOpen ? "收起高级选项" : "高级选项" }}</span>
+              <svg
+                class="wg-member-modal__advanced-chevron"
+                :class="{ 'wg-member-modal__advanced-chevron--open': advancedOpen }"
+                viewBox="0 0 12 12"
+                width="12"
+                height="12"
+                aria-hidden="true"
+              >
+                <path
+                  d="M3 4.5L6 7.5L9 4.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
             </button>
 
             <div v-if="advancedOpen" class="wg-member-modal__advanced">
-              <label v-if="mode === 'create'" class="settings-field">
-                <span class="settings-field__label">Home Node</span>
+              <label v-if="mode === 'create'" class="wg-member-modal__field">
+                <span class="wg-member-modal__label">Home Node</span>
                 <input
                   v-model="draft.homeNodeId"
-                  class="settings-field__input"
+                  class="wg-member-modal__input"
                   type="text"
                   placeholder="默认本机"
                   autocomplete="off"
                   :disabled="busy"
                 />
-                <span class="settings-field__hint">成员工具在该 Node 上执行</span>
+                <span class="wg-member-modal__hint-text">成员工具在该 Node 上执行</span>
               </label>
-              <label v-else class="settings-field">
-                <span class="settings-field__label">Home Node</span>
+              <label v-else class="wg-member-modal__field">
+                <span class="wg-member-modal__label">Home Node</span>
                 <input
-                  class="settings-field__input"
+                  class="wg-member-modal__input"
                   type="text"
                   :value="draft.homeNodeId"
                   disabled
                 />
               </label>
 
-              <label class="settings-field">
-                <span class="settings-field__label">LLM 档案 id</span>
+              <label class="wg-member-modal__field">
+                <span class="wg-member-modal__label">LLM 档案 id</span>
                 <input
                   v-model="draft.llmProfileId"
-                  class="settings-field__input"
+                  class="wg-member-modal__input"
                   type="text"
                   placeholder="留空则跟随工作组"
                   autocomplete="off"
@@ -370,22 +412,22 @@ onMounted(() => {
                 />
               </label>
 
-              <label class="settings-field">
-                <span class="settings-field__label">Soul</span>
+              <label class="wg-member-modal__field">
+                <span class="wg-member-modal__label">Soul</span>
                 <textarea
                   v-model="draft.soulMd"
-                  class="settings-field__input wg-member-modal__textarea"
+                  class="wg-member-modal__input wg-member-modal__textarea"
                   rows="3"
                   placeholder="角色与行为准则（可选）"
                   :disabled="busy"
                 />
               </label>
 
-              <label class="settings-field">
-                <span class="settings-field__label">Custom</span>
+              <label class="wg-member-modal__field">
+                <span class="wg-member-modal__label">Custom</span>
                 <textarea
                   v-model="draft.customMd"
-                  class="settings-field__input wg-member-modal__textarea"
+                  class="wg-member-modal__input wg-member-modal__textarea"
                   rows="2"
                   placeholder="额外说明（可选）"
                   :disabled="busy"
@@ -429,32 +471,34 @@ onMounted(() => {
 }
 
 .wg-member-modal {
-  width: min(440px, 96vw);
-  max-height: min(88vh, 680px);
+  width: min(460px, 96vw);
+  max-height: min(88vh, 720px);
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid var(--color-border-strong, var(--color-border));
   background: var(--color-surface);
   box-shadow: var(--shadow-lg, 0 16px 48px rgba(0, 0, 0, 0.28));
   overflow: hidden;
 }
 
-.wg-member-modal__header,
-.wg-member-modal__footer {
+.wg-member-modal__header {
   flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 18px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--color-border);
 }
 
 .wg-member-modal__footer {
+  flex: 0 0 auto;
+  display: flex;
   flex-direction: column;
   align-items: stretch;
-  border-bottom: 0;
+  gap: 10px;
+  padding: 12px 20px;
   border-top: 1px solid var(--color-border);
 }
 
@@ -466,37 +510,50 @@ onMounted(() => {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+  line-height: 1.3;
   color: var(--color-text);
 }
 
 .wg-member-modal__lead {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.4;
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
   color: var(--color-text-muted);
 }
 
 .wg-member-modal__close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: -4px -6px 0 0;
   border: none;
+  border-radius: var(--radius-md, 6px);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 22px;
-  line-height: 1;
   cursor: pointer;
-  padding: 0 4px;
+  transition: color 0.12s ease, background 0.12s ease;
 }
 
-.wg-member-modal__close:hover {
+.wg-member-modal__close:hover:not(:disabled) {
   color: var(--color-text);
+  background: var(--color-surface-hover, rgba(0, 0, 0, 0.04));
+}
+
+.wg-member-modal__close:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .wg-member-modal__body {
   flex: 1 1 auto;
   overflow: auto;
-  padding: 16px 18px 8px;
+  padding: 18px 20px 12px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .wg-member-modal__hint {
@@ -505,65 +562,185 @@ onMounted(() => {
   font-size: 13px;
 }
 
+.wg-member-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wg-member-modal__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.01em;
+}
+
+.wg-member-modal__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border-strong, var(--color-border));
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.wg-member-modal__input:focus {
+  outline: none;
+  border-color: var(--color-primary, #0078d4);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #0078d4) 18%, transparent);
+}
+
+.wg-member-modal__input:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.wg-member-modal__hint-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-subtle, var(--color-text-muted));
+}
+
+.wg-member-modal__hint-text--warn {
+  color: var(--color-warning, #b45309);
+}
+
 .wg-member-modal__tools {
   margin: 0;
   padding: 0;
   border: none;
-}
-
-.wg-member-modal__tool-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
-  margin-top: 8px;
+  min-width: 0;
 }
 
-.wg-member-modal__chip {
+.wg-member-modal__tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wg-member-modal__tool {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
   border: 1px solid var(--color-border-strong, var(--color-border));
+  border-radius: 10px;
   background: var(--color-surface);
   color: var(--color-text);
-  border-radius: 999px;
-  padding: 6px 12px;
   font: inherit;
-  font-size: 12px;
+  text-align: left;
   cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
 
-.wg-member-modal__chip--on {
-  border-color: var(--color-primary, #0078d4);
-  background: color-mix(in srgb, var(--color-primary, #0078d4) 14%, transparent);
-  color: var(--color-primary-strong, var(--color-primary, #0078d4));
-  font-weight: 600;
+.wg-member-modal__tool:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-primary, #0078d4) 45%, var(--color-border));
+  background: var(--color-surface-hover, rgba(0, 0, 0, 0.02));
 }
 
-.wg-member-modal__chip:disabled {
+.wg-member-modal__tool--on {
+  border-color: color-mix(in srgb, var(--color-primary, #0078d4) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 8%, var(--color-surface));
+}
+
+.wg-member-modal__tool:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
+.wg-member-modal__tool-check {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  border: 1px solid var(--color-border-strong, var(--color-border));
+  background: var(--color-surface);
+  color: var(--color-primary-strong, var(--color-primary, #0078d4));
+}
+
+.wg-member-modal__tool--on .wg-member-modal__tool-check {
+  border-color: var(--color-primary, #0078d4);
+  background: color-mix(in srgb, var(--color-primary, #0078d4) 14%, transparent);
+}
+
+.wg-member-modal__tool-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wg-member-modal__tool-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.wg-member-modal__tool-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
 .wg-member-modal__advanced-toggle {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: none;
   background: none;
-  padding: 0;
-  color: var(--color-primary-strong, var(--color-primary, #0078d4));
+  padding: 2px 0;
+  color: var(--color-text-muted);
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+}
+
+.wg-member-modal__advanced-toggle:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.wg-member-modal__advanced-toggle:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.wg-member-modal__advanced-chevron {
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+}
+
+.wg-member-modal__advanced-chevron--open {
+  transform: rotate(180deg);
 }
 
 .wg-member-modal__advanced {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   padding-top: 2px;
 }
 
 .wg-member-modal__textarea {
   resize: vertical;
-  min-height: 64px;
+  min-height: 72px;
   font-family: inherit;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .wg-member-modal__error {
