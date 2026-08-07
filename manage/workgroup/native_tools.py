@@ -36,7 +36,12 @@ def leader_native_tools() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "list_workgroup_members",
-                "description": "List members with status, home node, and tool allowlist (workspace fs/bash tools when enabled; use this to answer capability questions; do not assign a fake probe task).",
+                "description": (
+                    "List members with short description, status, home node host_ips "
+                    "(semicolon-separated LAN IPs, no port), and tool allowlist "
+                    "(workspace fs/bash tools when enabled; use this to answer capability questions; "
+                    "do not assign a fake probe task)."
+                ),
                 "parameters": {
                     "type": "object",
                     "additionalProperties": False,
@@ -91,10 +96,24 @@ class NativeToolDispatcher:
         *,
         leader_run_id: str,
         assign_completer: AssignCompleter | None = None,
+        registry_store: Any | None = None,
     ) -> None:
         self.store = store
         self.leader_run_id = leader_run_id
         self.assign_completer = assign_completer or scripted_assign_completer
+        self.registry_store = registry_store
+
+    def _host_ips_for_node(self, home_node_id: str) -> str:
+        node_id = (home_node_id or "").strip()
+        if not node_id or self.registry_store is None:
+            return ""
+        getter = getattr(self.registry_store, "get", None)
+        if not callable(getter):
+            return ""
+        rec = getter(node_id)
+        if rec is None:
+            return ""
+        return str(getattr(rec, "host_ips", "") or "").strip()
 
     def dispatch(self, *, workgroup_id: str, tool_name: str, tool_call_id: str, arguments_json: str) -> str:
         name = (tool_name or "").strip()
@@ -103,12 +122,16 @@ class NativeToolDispatcher:
             payload = []
             for m in members:
                 ctx = self.store.member_execution_context(m.member_id)
+                spec = self.store.get_spec(m.member_id)
+                description = (spec.description if spec is not None else "") or ""
                 payload.append(
                     {
                         "member_id": m.member_id,
                         "display_name": m.display_name,
+                        "description": description.strip(),
                         "status": m.status,
                         "home_node_id": m.home_node_id,
+                        "host_ips": self._host_ips_for_node(m.home_node_id),
                         "tool_allow_names": list(ctx.get("tool_allow_names") or []),
                         "workspace_root_kind": "member_workspace",
                         "read_file_path_rule": "relative_to_member_workspace_only",

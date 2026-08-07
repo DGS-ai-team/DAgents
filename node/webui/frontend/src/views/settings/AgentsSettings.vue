@@ -59,7 +59,7 @@ function hostLabel(agent) {
 }
 
 function sourceLabel(source) {
-  return source === "user" ? "自定义" : "内置";
+  return source === "user" ? "自定义" : "内置 · 只读";
 }
 
 async function onDeleteTemplate(tpl) {
@@ -88,16 +88,16 @@ onMounted(load);
 
 <template>
   <div class="settings-page settings-embedded">
-    <h1 class="settings-page__title">Agents</h1>
-    <p class="settings-page__desc">
-      管理每个 Agent 的独立配置（工具、沙箱、侧车等）。此处不是 Node 全局能力页。
-    </p>
+    <h1 class="settings-page__title">智能体</h1>
+    <p class="settings-page__desc">管理本机智能体的名称、模型与能力；创建请在对话页进行。</p>
 
     <section class="agents-settings__section">
-      <h2 class="agents-settings__section-title">已创建的 Agent</h2>
+      <h2 class="agents-settings__section-title">已创建</h2>
       <p v-if="loading" class="agents-settings__status">加载中…</p>
       <p v-else-if="error" class="agents-settings__error">{{ error }}</p>
-      <p v-else-if="!agents.length" class="agents-settings__status">暂无 Agent，请先在对话页创建。</p>
+      <p v-else-if="!agents.length" class="agents-settings__status">
+        还没有智能体，请先回到对话页创建。
+      </p>
 
       <ul v-else class="agents-settings__list">
         <li v-for="a in agents" :key="a.agent_id">
@@ -106,10 +106,10 @@ onMounted(load);
               <span class="agents-settings__name">{{ a.display_name || a.agent_id }}</span>
               <span class="agents-settings__meta">
                 {{ hostLabel(a) }}
-                <template v-if="a.template_id"> · 源自 {{ a.template_id }}</template>
+                <template v-if="a.template_id"> · 模板 {{ a.template_id }}</template>
               </span>
             </div>
-            <span class="agents-settings__id">{{ a.agent_id }}</span>
+            <span class="agents-settings__chevron" aria-hidden="true">›</span>
           </button>
         </li>
       </ul>
@@ -118,17 +118,21 @@ onMounted(load);
     <section class="agents-settings__section">
       <div class="agents-settings__section-head">
         <div>
-          <h2 class="agents-settings__section-title">Agent 模板</h2>
-          <p class="agents-settings__section-desc">创建 Agent 时可从模板预填；自定义模板保存在运行时目录。</p>
+          <h2 class="agents-settings__section-title">模板</h2>
+          <p class="agents-settings__section-desc">
+            创建智能体时可选用模板预填。内置模板只读；自定义模板可删除后重建。
+          </p>
         </div>
         <button type="button" class="btn btn--primary btn--sm" @click="showTemplateCreateModal = true">
           新建模板
         </button>
       </div>
 
-      <p v-if="templatesLoading" class="agents-settings__status">加载模板…</p>
+      <p v-if="templatesLoading" class="agents-settings__status">加载中…</p>
       <p v-else-if="templatesError" class="agents-settings__error">{{ templatesError }}</p>
-      <p v-else-if="!templates.length" class="agents-settings__status">暂无模板；可新建自定义模板，或在对话页使用空白配置创建 Agent。</p>
+      <p v-else-if="!templates.length" class="agents-settings__status">
+        暂无模板；可新建自定义模板，或在对话页用空白配置创建。
+      </p>
 
       <ul v-else class="agents-settings__template-list">
         <li v-for="tpl in templates" :key="tpl.id" class="agents-settings__template-item">
@@ -137,8 +141,7 @@ onMounted(load);
               <span class="agents-settings__name">{{ tpl.display_name || tpl.id }}</span>
               <span class="agents-settings__badge" :data-source="tpl.source">{{ sourceLabel(tpl.source) }}</span>
             </div>
-            <p class="agents-settings__template-desc">{{ tpl.description || "无描述" }}</p>
-            <span class="agents-settings__id">{{ tpl.id }}</span>
+            <p v-if="tpl.description" class="agents-settings__template-desc">{{ tpl.description }}</p>
           </div>
           <button
             v-if="tpl.source === 'user'"
@@ -163,14 +166,14 @@ onMounted(load);
 
 <style scoped>
 .settings-page__desc {
-  margin: 0 0 16px;
+  margin: 0 0 12px;
   font-size: 13px;
   color: var(--color-text-muted);
   line-height: 1.5;
 }
 
 .agents-settings__section {
-  margin-top: 28px;
+  margin-top: 20px;
 }
 
 .agents-settings__section-head {
@@ -182,23 +185,27 @@ onMounted(load);
 }
 
 .agents-settings__section-title {
-  margin: 0 0 4px;
+  margin: 0 0 12px;
   font-size: 15px;
   font-weight: 600;
 }
 
+.agents-settings__section-head .agents-settings__section-title {
+  margin-bottom: 4px;
+}
+
 .agents-settings__section-desc {
   margin: 0;
-  font-size: 12px;
-  color: var(--color-text-subtle);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
   line-height: 1.5;
 }
 
 .agents-settings__status,
 .agents-settings__error {
-  margin: 12px 0;
+  margin: 10px 0;
   font-size: 13px;
-  color: var(--color-text-subtle);
+  color: var(--color-text-muted);
 }
 
 .agents-settings__error {
@@ -253,11 +260,11 @@ onMounted(load);
   color: var(--color-text-muted);
 }
 
-.agents-settings__id {
+.agents-settings__chevron {
   flex: 0 0 auto;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--color-text-subtle);
+  font-size: 18px;
+  line-height: 1;
+  color: var(--color-text-muted);
 }
 
 .agents-settings__template-item {
@@ -290,7 +297,7 @@ onMounted(load);
   padding: 2px 7px;
   border-radius: 999px;
   background: var(--color-surface-elevated);
-  color: var(--color-text-subtle);
+  color: var(--color-text-muted);
 }
 
 .agents-settings__badge[data-source="user"] {

@@ -91,6 +91,7 @@ class MemberSpec(BaseModel):
     workgroup_id: str = Field(pattern=_WG)
     home_node_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
+    description: str = Field(default="", max_length=256)
     member_generation: int = Field(ge=1)
     llm_profile_id: str = Field(min_length=1)
     llm_profile_revision: str = Field(min_length=1)
@@ -168,6 +169,7 @@ class ACLPatchRequest(BaseModel):
 class MemberCreateRequest(BaseModel):
     home_node_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
+    description: str = Field(default="", max_length=256)
     llm_profile_id: str | None = None
     llm_profile_revision: str | None = None
     max_tool_loops: int = Field(ge=1, le=256, default=32)
@@ -182,6 +184,7 @@ class MemberPatchRequest(BaseModel):
     """更新成员展示名 / Spec（会 bump generation 并触发 re-provision）。"""
 
     display_name: str | None = Field(default=None, min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=256)
     llm_profile_id: str | None = Field(default=None, min_length=1)
     llm_profile_revision: str | None = Field(default=None, min_length=1)
     max_tool_loops: int | None = Field(default=None, ge=1, le=256)

@@ -52,31 +52,34 @@ func (s *AgentStore) ListAgentPolicies(ctx context.Context) ([]AgentPolicyRecord
 	return out, nil
 }
 
-// AgentPolicySeedMergeResult 为存量策略种子缺项合并结果。
+// AgentPolicySeedMergeResult 为存量策略种子缺项合并 / 退役清理结果。
 type AgentPolicySeedMergeResult struct {
 	AgentsTouched int
 	ToolsAdded    int
+	ToolsRemoved  int
 }
 
-// MigrateAgentPoliciesMergeSeed 将 packaging 种子中缺失的工具模式合并进全部存量 agent_policy。
-// 不覆盖用户已配置的模式；幂等，可在每次 Node 启动时调用。
+// MigrateAgentPoliciesMergeSeed 将 packaging 种子中缺失的工具模式合并进全部存量 agent_policy，
+// 并剔除已退役工具（旧 A2A 等）。不覆盖用户已配置的模式；幂等，可在每次 Node 启动时调用。
 func (s *AgentStore) MigrateAgentPoliciesMergeSeed(ctx context.Context) (AgentPolicySeedMergeResult, error) {
 	var result AgentPolicySeedMergeResult
 	if s == nil {
 		return result, fmt.Errorf("agent store unavailable")
 	}
 	seed := policy.LoadSeedMaps()
-	if len(seed.Tools) == 0 {
-		return result, nil
-	}
 	rows, err := s.ListAgentPolicies(ctx)
 	if err != nil {
 		return result, err
 	}
 	now := time.Now().UTC()
 	for _, rec := range rows {
-		tools, added := policy.MergeMissingToolModes(rec.Tools, seed.Tools)
-		if added == 0 {
+		tools := rec.Tools
+		added := 0
+		if len(seed.Tools) > 0 {
+			tools, added = policy.MergeMissingToolModes(tools, seed.Tools)
+		}
+		tools, removed := policy.PruneRetiredToolModes(tools)
+		if added == 0 && removed == 0 {
 			continue
 		}
 		rec.Tools = tools
@@ -86,6 +89,7 @@ func (s *AgentStore) MigrateAgentPoliciesMergeSeed(ctx context.Context) (AgentPo
 		}
 		result.AgentsTouched++
 		result.ToolsAdded += added
+		result.ToolsRemoved += removed
 	}
 	return result, nil
 }

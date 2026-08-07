@@ -6,6 +6,11 @@ function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+/** 有正文才开启注入；开关由内容推导，UI 不再单独暴露。 */
+function promptFieldEnabled(text) {
+  return String(text || "").trim().length > 0;
+}
+
 export const BLANK_TEMPLATE_ID = "__blank__";
 
 export const TOOL_GROUPS = [
@@ -21,8 +26,8 @@ export const TOOL_GROUPS = [
 ];
 
 export const LONG_TERM_SCOPES = [
-  { value: "agent", label: "独立（仅本 Agent）" },
-  { value: "global", label: "全局（所有 Agent 共享）" },
+  { value: "agent", label: "仅本智能体" },
+  { value: "global", label: "本机所有智能体共享" },
 ];
 
 export function emptyAgentDraft() {
@@ -79,6 +84,12 @@ export function skillsEnabledFromToolGroups(toolGroups) {
   const groups = Array.isArray(toolGroups) ? toolGroups : [];
   if (groups.length === 0) return true;
   return groups.some((g) => String(g || "").trim() === "skills");
+}
+
+/** 启用「记忆」工具组即视为开启长期记忆注入。 */
+export function memoryEnabledFromToolGroups(toolGroups) {
+  const groups = Array.isArray(toolGroups) ? toolGroups : [];
+  return groups.some((g) => String(g || "").trim() === "memory");
 }
 
 /** null = 未限制；数组 = 显式白名单。 */
@@ -220,9 +231,9 @@ export function buildCreateAgentPayload(draft) {
       },
       skills: skillsPayload(draft),
       prompt_context: {
-        soul_enabled: !!draft.promptSoulEnabled,
-        custom_enabled: !!draft.promptCustomEnabled,
-        long_term_enabled: !!draft.promptLongTermEnabled,
+        soul_enabled: promptFieldEnabled(draft.promptSoulMd),
+        custom_enabled: promptFieldEnabled(draft.promptCustomMd),
+        long_term_enabled: memoryEnabledFromToolGroups(draft.toolGroups),
         long_term_scope: draft.promptLongTermScope === "global" ? "global" : "agent",
       },
     },
@@ -266,9 +277,9 @@ export function buildCreateTemplatePayload(meta, draft) {
       },
       skills: skillsPayload(draft),
       prompt_context: {
-        soul_enabled: !!draft?.promptSoulEnabled,
-        custom_enabled: !!draft?.promptCustomEnabled,
-        long_term_enabled: !!draft?.promptLongTermEnabled,
+        soul_enabled: promptFieldEnabled(draft?.promptSoulMd),
+        custom_enabled: promptFieldEnabled(draft?.promptCustomMd),
+        long_term_enabled: memoryEnabledFromToolGroups(draft?.toolGroups),
       },
     },
   };

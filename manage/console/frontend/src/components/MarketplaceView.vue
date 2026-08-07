@@ -10,12 +10,6 @@ defineProps({
 const emit = defineEmits(["toast"]);
 
 const tab = ref("skills");
-
-const TAB_HINTS = {
-  skills: "Skill 包上传、草稿发布与目录分发；Node 可同步安装",
-  hooks: "Hook Plugin（.so）上传、发布与目录分发",
-  tools: "外置 CLI / 二进制上传、发布与目录分发（.runtime/externaltools/）",
-};
 </script>
 
 <template>
@@ -29,7 +23,7 @@ const TAB_HINTS = {
         :aria-selected="tab === 'skills'"
         @click="tab = 'skills'"
       >
-        Skills
+        Skill
       </button>
       <button
         type="button"
@@ -39,7 +33,7 @@ const TAB_HINTS = {
         :aria-selected="tab === 'hooks'"
         @click="tab = 'hooks'"
       >
-        Hooks
+        Hook
       </button>
       <button
         type="button"
@@ -49,10 +43,9 @@ const TAB_HINTS = {
         :aria-selected="tab === 'tools'"
         @click="tab = 'tools'"
       >
-        External Tools
+        外置工具
       </button>
     </nav>
-    <p class="marketplace-hint muted">{{ TAB_HINTS[tab] }}</p>
 
     <SkillsView
       v-if="tab === 'skills'"
@@ -73,8 +66,5 @@ const TAB_HINTS = {
 </template>
 
 <style scoped>
-.marketplace-hint {
-  margin: -8px 0 16px;
-  font-size: 0.875rem;
-}
+/* layout 由 main.css .marketplace-view 负责 */
 </style>

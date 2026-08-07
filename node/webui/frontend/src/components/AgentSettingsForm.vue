@@ -5,7 +5,12 @@
  */
 import { computed, onMounted, ref, watch } from "vue";
 import * as api from "../api/node.js";
-import { LONG_TERM_SCOPES, TOOL_GROUPS, skillsEnabledFromToolGroups } from "../utils/agentTemplateForm.js";
+import {
+  LONG_TERM_SCOPES,
+  TOOL_GROUPS,
+  memoryEnabledFromToolGroups,
+  skillsEnabledFromToolGroups,
+} from "../utils/agentTemplateForm.js";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiSelect from "./UiSelect.vue";
 
@@ -53,7 +58,7 @@ const nameLabel = computed(() => {
 const llmLabel = computed(() => {
   if (props.fieldErrors?.llm) return props.fieldErrors.llm;
   if (useConversationalLabels.value) return "需要以哪个模型来运行呢";
-  return "使用的 LLM 配置";
+  return "模型配置";
 });
 
 function onNameInput() {
@@ -145,6 +150,7 @@ function clearAllSkills() {
 }
 
 const skillsToolEnabled = computed(() => skillsEnabledFromToolGroups(props.draft.toolGroups));
+const memoryToolEnabled = computed(() => memoryEnabledFromToolGroups(props.draft.toolGroups));
 
 const llmProfileOptions = computed(() =>
   (props.llmProfiles || []).map((p) => ({
@@ -168,64 +174,70 @@ const longTermScopeOptions = computed(() =>
       'agent-settings-form--create-capabilities': isCreateCapabilities,
     }"
   >
-    <section v-if="!isCreateCapabilities" class="agent-settings-section">
+    <section
+      v-if="!isCreateCapabilities"
+      class="agent-settings-section"
+      :class="{ 'agent-settings-section--flat': isFull }"
+    >
       <h3 v-if="isFull" class="agent-settings-section__title">基础信息</h3>
-      <label class="agent-settings-field">
-        <span
-          :class="{
-            'agent-settings-field__label': useConversationalLabels,
-            'agent-settings-field__label--error': !!fieldErrors?.name,
-          }"
-        >
-          {{ nameLabel }}
-        </span>
-        <input
-          v-model="draft.displayName"
-          type="text"
-          class="agent-settings-input"
-          :class="{ 'agent-settings-input--error': !!fieldErrors?.name }"
-          :placeholder="useConversationalLabels ? '' : 'Agent 名称'"
-          @input="onNameInput"
-        />
-      </label>
-      <label class="agent-settings-field" :class="{ 'agent-settings-field--grow': isCreateBasics }">
-        <span :class="useConversationalLabels ? 'agent-settings-field__label' : undefined">
-          {{ useConversationalLabels ? "介绍一下你的智能体吧，如果你愿意的话" : "简介" }}
-        </span>
-        <textarea
-          v-model="draft.description"
-          class="agent-settings-input agent-settings-input--area"
-          :rows="isCreateBasics ? 4 : 2"
-          :placeholder="useConversationalLabels ? '' : '可选描述'"
-        />
-      </label>
-      <label class="agent-settings-field">
-        <span
-          :class="{
-            'agent-settings-field__label': useConversationalLabels,
-            'agent-settings-field__label--error': !!fieldErrors?.llm,
-          }"
-        >
-          {{ llmLabel }}
-        </span>
-        <UiSelect
-          v-model="draft.llmProfileId"
-          :options="llmProfileOptions"
-          placeholder="请选择"
-          :disabled="!llmProfileOptions.length"
-          @update:model-value="onLlmChange"
-        />
-      </label>
-      <p v-if="!llmProfiles.length" class="agent-settings-hint">
-        {{
-          useConversationalLabels
-            ? "还没有模型配置，先去「设置 › 连接」加一条吧。"
-            : "请先在「设置 › 连接」中添加 LLM 配置"
-        }}
-      </p>
-      <p v-if="isCreateBasics" class="agent-settings-hint agent-settings-hint--later">
-        角色设定、技能白名单等，创建后可在智能体设置里慢慢调。
-      </p>
+      <div :class="{ 'agent-settings-section__body': isFull }">
+        <label class="agent-settings-field">
+          <span
+            :class="{
+              'agent-settings-field__label': true,
+              'agent-settings-field__label--error': !!fieldErrors?.name,
+            }"
+          >
+            {{ nameLabel }}
+          </span>
+          <input
+            v-model="draft.displayName"
+            type="text"
+            class="agent-settings-input"
+            :class="{ 'agent-settings-input--error': !!fieldErrors?.name }"
+            :placeholder="useConversationalLabels ? '' : '智能体名称'"
+            @input="onNameInput"
+          />
+        </label>
+        <label class="agent-settings-field" :class="{ 'agent-settings-field--grow': isCreateBasics }">
+          <span class="agent-settings-field__label">
+            {{ useConversationalLabels ? "介绍一下你的智能体吧，如果你愿意的话" : "简介" }}
+          </span>
+          <textarea
+            v-model="draft.description"
+            class="agent-settings-input agent-settings-input--area"
+            :rows="isCreateBasics ? 4 : 2"
+            :placeholder="useConversationalLabels ? '' : '可选，简短说明它擅长什么'"
+          />
+        </label>
+        <label class="agent-settings-field">
+          <span
+            :class="{
+              'agent-settings-field__label': true,
+              'agent-settings-field__label--error': !!fieldErrors?.llm,
+            }"
+          >
+            {{ llmLabel }}
+          </span>
+          <UiSelect
+            v-model="draft.llmProfileId"
+            :options="llmProfileOptions"
+            placeholder="请选择"
+            :disabled="!llmProfileOptions.length"
+            @update:model-value="onLlmChange"
+          />
+        </label>
+        <p v-if="!llmProfiles.length" class="agent-settings-hint">
+          {{
+            useConversationalLabels
+              ? "还没有模型配置，先去「设置 › 连接」加一条吧。"
+              : "请先在「设置 › 连接」中添加模型配置"
+          }}
+        </p>
+        <p v-if="isCreateBasics" class="agent-settings-hint agent-settings-hint--later">
+          角色设定、技能白名单等，创建后可在智能体设置里慢慢调。
+        </p>
+      </div>
     </section>
 
     <template v-if="isCreateCapabilities">
@@ -253,110 +265,116 @@ const longTermScopeOptions = computed(() =>
     </template>
 
     <template v-if="isFull">
-      <div class="agent-settings-advanced-toggle">
-        <button type="button" class="btn btn--ghost btn--sm" @click="advancedOpen = !advancedOpen">
-          {{ advancedOpen ? "收起高级设置" : "高级设置" }}
+      <section class="agent-settings-section agent-settings-section--flat">
+        <button
+          type="button"
+          class="agent-settings-disclosure"
+          :aria-expanded="advancedOpen ? 'true' : 'false'"
+          @click="advancedOpen = !advancedOpen"
+        >
+          <span class="agent-settings-section__title agent-settings-section__title--inline">能力与角色</span>
+          <span class="agent-settings-disclosure__chevron">{{ advancedOpen ? "▴" : "▾" }}</span>
         </button>
-      </div>
+        <p v-if="!advancedOpen" class="agent-settings-hint agent-settings-hint--inline">
+          工具、技能、角色设定与长期记忆
+        </p>
 
-      <div v-if="advancedOpen" class="agent-settings-advanced">
-        <section class="agent-settings-section">
-          <h3 class="agent-settings-section__title">工具组</h3>
-          <p class="agent-settings-hint">勾选启用对应能力；都不勾选则不启用任何工具组。</p>
-          <div class="agent-settings-toggles">
-            <label v-for="g in TOOL_GROUPS" :key="g.name" class="agent-settings-check" :title="g.hint || undefined">
-              <input
-                type="checkbox"
-                :checked="draft.toolGroups?.includes(g.name)"
-                @change="toggleGroup(g.name)"
-              />
-              <span>{{ g.label }}{{ g.beta ? "（Beta）" : "" }}</span>
-            </label>
-          </div>
-        </section>
-
-        <section v-if="skillsToolEnabled" class="agent-settings-section">
-          <h3 class="agent-settings-section__title">可见 Skills</h3>
-          <p class="agent-settings-hint">
-            勾选本 Agent 可发现 / 加载的 skills。全选表示不限制（目录新增 skill 自动可见）；取消勾选则仅白名单内可用。
-          </p>
-          <div class="agent-settings-field__head">
-            <span class="agent-settings-hint" style="margin: 0">
-              <template v-if="draft.visibleSkills === null">当前：不限制（全部）</template>
-              <template v-else>当前：已选 {{ draft.visibleSkills.length }} 项</template>
-            </span>
-            <div class="agent-settings-skill-actions">
-              <button type="button" class="btn btn--ghost btn--sm" :disabled="catalogLoading" @click="selectAllSkills">
-                全选
-              </button>
-              <button type="button" class="btn btn--ghost btn--sm" :disabled="catalogLoading" @click="clearAllSkills">
-                全不选
+        <div v-if="advancedOpen" class="agent-settings-advanced agent-settings-section__body">
+          <div class="agent-settings-advanced__block">
+            <h4 class="agent-settings-subsection__title">工具能力</h4>
+            <p class="agent-settings-hint">点选启用；都不选则不开放任何工具。</p>
+            <div class="agent-settings-toggles agent-settings-toggles--tiles">
+              <button
+                v-for="g in TOOL_GROUPS"
+                :key="g.name"
+                type="button"
+                class="agent-settings-tile agent-settings-tile--compact"
+                :class="{ 'agent-settings-tile--active': draft.toolGroups?.includes(g.name) }"
+                :aria-pressed="draft.toolGroups?.includes(g.name) ? 'true' : 'false'"
+                :title="g.hint || undefined"
+                @click="toggleGroup(g.name)"
+              >
+                <span class="agent-settings-tile__icon" aria-hidden="true">
+                  <ToolGroupIcon :name="g.name" />
+                </span>
+                <span class="agent-settings-tile__label">
+                  {{ g.label }}{{ g.beta ? "（Beta）" : "" }}
+                </span>
               </button>
             </div>
           </div>
-          <p v-if="catalogLoading" class="agent-settings-hint">加载目录中…</p>
-          <p v-else-if="catalogError" class="agent-settings-hint">{{ catalogError }}</p>
-          <p v-else-if="!catalogSkills.length" class="agent-settings-hint">目录为空（.runtime/skills）。</p>
-          <div v-else class="agent-settings-skill-list">
-            <label
-              v-for="s in catalogSkills"
-              :key="s.skill_name"
-              class="agent-settings-check agent-settings-check--skill"
-            >
-              <input
-                type="checkbox"
-                :checked="isSkillVisible(s.skill_name)"
-                @change="toggleSkillVisible(s.skill_name)"
-              />
-              <span>
-                <strong>{{ s.skill_name }}</strong>
-                <em v-if="s.description">{{ s.description }}</em>
+
+          <div v-if="skillsToolEnabled" class="agent-settings-advanced__block">
+            <h4 class="agent-settings-subsection__title">可见技能</h4>
+            <p class="agent-settings-hint">
+              选择该智能体可用的技能。全选表示不限制（新技能会自动出现）；否则仅白名单内可用。
+            </p>
+            <div class="agent-settings-field__head">
+              <span class="agent-settings-hint" style="margin: 0">
+                <template v-if="draft.visibleSkills === null">当前：不限制（全部）</template>
+                <template v-else>当前：已选 {{ draft.visibleSkills.length }} 项</template>
               </span>
+              <div class="agent-settings-skill-actions">
+                <button type="button" class="btn btn--ghost btn--sm" :disabled="catalogLoading" @click="selectAllSkills">
+                  全选
+                </button>
+                <button type="button" class="btn btn--ghost btn--sm" :disabled="catalogLoading" @click="clearAllSkills">
+                  全不选
+                </button>
+              </div>
+            </div>
+            <p v-if="catalogLoading" class="agent-settings-hint">加载目录中…</p>
+            <p v-else-if="catalogError" class="agent-settings-hint">{{ catalogError }}</p>
+            <p v-else-if="!catalogSkills.length" class="agent-settings-hint">暂无可用技能。</p>
+            <div v-else class="agent-settings-skill-list">
+              <label
+                v-for="s in catalogSkills"
+                :key="s.skill_name"
+                class="agent-settings-check agent-settings-check--skill"
+              >
+                <input
+                  type="checkbox"
+                  :checked="isSkillVisible(s.skill_name)"
+                  @change="toggleSkillVisible(s.skill_name)"
+                />
+                <span>
+                  <strong>{{ s.skill_name }}</strong>
+                  <em v-if="s.description">{{ s.description }}</em>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="agent-settings-advanced__block">
+            <h4 class="agent-settings-subsection__title">角色与记忆</h4>
+            <p class="agent-settings-hint">
+              填写后会注入到系统提示；留空则不注入。开启「记忆」工具后可选择记忆范围。
+            </p>
+            <label class="agent-settings-field">
+              <span class="agent-settings-field__label">角色设定</span>
+              <textarea
+                v-model="draft.promptSoulMd"
+                class="agent-settings-input agent-settings-input--area"
+                rows="4"
+                placeholder="它应该是怎样的角色、语气与边界…"
+              />
+            </label>
+            <label class="agent-settings-field">
+              <span class="agent-settings-field__label">临时指令</span>
+              <textarea
+                v-model="draft.promptCustomMd"
+                class="agent-settings-input agent-settings-input--area"
+                rows="3"
+                placeholder="仅对当前智能体生效的补充说明…"
+              />
+            </label>
+            <label v-if="memoryToolEnabled" class="agent-settings-field">
+              <span class="agent-settings-field__label">记忆范围</span>
+              <UiSelect v-model="draft.promptLongTermScope" :options="longTermScopeOptions" />
             </label>
           </div>
-        </section>
-
-        <section class="agent-settings-section">
-          <h3 class="agent-settings-section__title">侧车与长期记忆</h3>
-          <p class="agent-settings-hint">
-            角色设定与临时指令按 Agent 存于数据库；用户称呼取自 Node 首配页。长期记忆由运行时（remember）写入，此处仅开关与作用域。
-          </p>
-          <label class="agent-settings-check">
-            <input v-model="draft.promptSoulEnabled" type="checkbox" />
-            <span>接入 soul（角色设定）</span>
-          </label>
-          <label v-if="draft.promptSoulEnabled" class="agent-settings-field">
-            <span>soul 正文（数据库）</span>
-            <textarea
-              v-model="draft.promptSoulMd"
-              class="agent-settings-input agent-settings-input--area"
-              rows="4"
-              placeholder="角色设定…"
-            />
-          </label>
-          <label class="agent-settings-check">
-            <input v-model="draft.promptCustomEnabled" type="checkbox" />
-            <span>接入 custom（临时指令）</span>
-          </label>
-          <label v-if="draft.promptCustomEnabled" class="agent-settings-field">
-            <span>custom 正文（数据库）</span>
-            <textarea
-              v-model="draft.promptCustomMd"
-              class="agent-settings-input agent-settings-input--area"
-              rows="3"
-              placeholder="临时指令…"
-            />
-          </label>
-          <label class="agent-settings-check">
-            <input v-model="draft.promptLongTermEnabled" type="checkbox" />
-            <span>接入 long_term（长期记忆）</span>
-          </label>
-          <label v-if="draft.promptLongTermEnabled" class="agent-settings-field">
-            <span>长期记忆作用域</span>
-            <UiSelect v-model="draft.promptLongTermScope" :options="longTermScopeOptions" />
-          </label>
-        </section>
-      </div>
+        </div>
+      </section>
     </template>
   </div>
 </template>
@@ -373,6 +391,54 @@ const longTermScopeOptions = computed(() =>
   border-radius: 10px;
   border: 1px solid var(--color-border);
   background: var(--color-surface-muted);
+}
+
+.agent-settings-section--flat {
+  padding: 0 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* 区块标题顶格；字段内容缩进一级，避免与标题同级 */
+.agent-settings-section__body {
+  padding-left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-settings-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-settings-disclosure__chevron {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.agent-settings-subsection__title {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.agent-settings-advanced__block + .agent-settings-advanced__block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
 }
 
 .agent-settings-form--lite {
@@ -504,10 +570,14 @@ const longTermScopeOptions = computed(() =>
 }
 
 .agent-settings-section__title {
-  margin: 0 0 10px;
-  font-size: 12px;
+  margin: 0 0 12px;
+  font-size: 15px;
   font-weight: 600;
-  color: var(--color-text-muted);
+  color: var(--color-text);
+}
+
+.agent-settings-section__title--inline {
+  margin: 0;
 }
 
 .agent-settings-field {
@@ -587,6 +657,10 @@ const longTermScopeOptions = computed(() =>
   margin-bottom: 0;
 }
 
+.agent-settings-hint--inline {
+  margin: 0;
+}
+
 .agent-settings-field__head {
   display: flex;
   align-items: center;
@@ -618,16 +692,23 @@ const longTermScopeOptions = computed(() =>
   gap: 4px 10px;
 }
 
-.agent-settings-advanced-toggle {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+.agent-settings-toggles--tiles {
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px;
+}
+
+.agent-settings-tile--compact {
+  flex-direction: row;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 12px;
+  gap: 10px;
 }
 
 .agent-settings-advanced {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
+  margin-top: 8px;
 }
 </style>

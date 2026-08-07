@@ -890,10 +890,14 @@
 }
 
 .settings-section__desc {
-  margin: 8px 0 0;
+  margin: 0 0 12px;
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--color-text-muted);
+}
+
+.settings-section__head + .settings-section__desc {
+  margin-top: 0;
 }
 
 .settings-toggle {
@@ -903,6 +907,11 @@
   font-size: 13.5px;
   cursor: pointer;
   user-select: none;
+}
+
+.settings-toggle--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .settings-toggle input {
@@ -1148,6 +1157,25 @@ select.settings-field__input {
   padding-bottom: 24px;
   margin-bottom: 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+}
+
+.settings-section--manage {
+  padding-bottom: 8px;
+}
+
+.setup-manage-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 420px;
+}
+
+.setup-manage-stack .settings-field--stack {
+  margin-top: 0;
+}
+
+.setup-manage-stack .settings-field__input {
+  max-width: none;
 }
 
 .settings-section + .settings-section {

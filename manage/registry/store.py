@@ -96,6 +96,7 @@ class AgentRegistryStore:
                 agent_id=node_key,
                 node_id=node_key,
                 base_url=payload.base_url,
+                host_ips=(payload.host_ips or "").strip(),
                 discovery_group=discovery_group,
                 capabilities_hint=payload.capabilities_hint,
                 name=payload.name,

@@ -58,6 +58,13 @@ export function riskPillClass(level) {
   return "pill-risk-medium";
 }
 
+export function riskLabel(level) {
+  if (level === "high") return "高";
+  if (level === "medium") return "中";
+  if (level === "low") return "低";
+  return level || "—";
+}
+
 export function touchLastRefreshedLabel() {
   const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
   return `更新于 ${now}`;
@@ -82,19 +89,19 @@ export const VIEW_META = {
   },
   marketplace: {
     title: "能力市场",
-    subtitle: "上传与分发 Skills、Hooks、External Tools 等 Node 扩展能力",
+    subtitle: "浏览、上传与发布 Node 扩展能力包",
   },
   nodes: {
     title: "Node 列表",
-    subtitle: "已注册 Node、在线状态与 discovery 分组",
+    subtitle: "已注册 Node、在线状态与发现组",
   },
   permissions: {
-    title: "权限管理",
-    subtitle: "管理员会话、工作组 ACL 与发现组可见性（建设中）",
+    title: "发现组",
+    subtitle: "创建组并关联 Node，控制登录后的可见范围",
   },
   settings: {
     title: "配置",
-    subtitle: "控制面共享的 LLM、版本发布与案例库",
+    subtitle: "管理台共享的 LLM、版本发布与案例库",
   },
   cases: {
     title: "案例库",

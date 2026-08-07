@@ -18,7 +18,8 @@ const saving = ref(false);
 const reloading = ref(false);
 const error = ref("");
 const statusMessage = ref("");
-const showAdvanced = ref(true);
+const showAdvanced = ref(false);
+const showPolicy = ref(false);
 const llmProfiles = ref([]);
 const agentMeta = ref(null);
 const draft = reactive(emptyAgentDraft());
@@ -93,7 +94,7 @@ async function save() {
       long_term_scope: draft.promptLongTermScope === "global" ? "global" : "agent",
     });
     await api.reloadAgentRuntime(agentId.value);
-    statusMessage.value = "已保存，运行时已按新配置与侧车正文重建。";
+    statusMessage.value = "已保存并应用到该智能体。";
   } catch (e) {
     error.value = e.message || "保存失败";
   } finally {
@@ -107,7 +108,7 @@ async function reloadRuntime() {
   statusMessage.value = "";
   try {
     await api.reloadAgentRuntime(agentId.value);
-    statusMessage.value = "已刷新运行时配置。";
+    statusMessage.value = "已重新加载运行中的配置。";
   } catch (e) {
     error.value = e.message || "刷新失败";
   } finally {
@@ -129,9 +130,13 @@ onMounted(load);
 <template>
   <div class="settings-page settings-embedded">
     <div class="agent-detail__head">
-      <button type="button" class="btn btn--ghost btn--sm" @click="backToList">← Agents 列表</button>
-      <h1 class="settings-page__title">Agent 配置</h1>
-      <p v-if="agentMeta" class="agent-detail__id">{{ agentMeta.agent_id }}</p>
+      <button type="button" class="btn btn--ghost btn--sm" @click="backToList">← 返回列表</button>
+      <h1 class="settings-page__title">
+        {{ agentMeta?.display_name || "智能体配置" }}
+      </h1>
+      <p v-if="agentMeta" class="agent-detail__id" :title="agentMeta.agent_id">
+        {{ agentMeta.agent_id }}
+      </p>
     </div>
 
     <p v-if="loading" class="agent-detail__status">加载中…</p>
@@ -146,19 +151,33 @@ onMounted(load);
         <button type="button" class="btn btn--primary" :disabled="saving" @click="save">
           {{ saving ? "保存中…" : "保存并应用" }}
         </button>
-        <button type="button" class="btn btn--ghost" :disabled="reloading || saving" @click="reloadRuntime">
-          {{ reloading ? "刷新中…" : "刷新运行时" }}
+        <button
+          type="button"
+          class="btn btn--ghost"
+          :disabled="reloading || saving"
+          title="不改配置，仅重新加载当前已保存的设置"
+          @click="reloadRuntime"
+        >
+          {{ reloading ? "加载中…" : "重新加载" }}
         </button>
       </div>
       <p v-if="statusMessage" class="agent-detail__ok">{{ statusMessage }}</p>
       <p v-if="error" class="agent-detail__error">{{ error }}</p>
-      <p class="agent-detail__hint">
-        保存后会立即按快照与 SQLite 侧车正文重建该 Agent；审批策略可在下方单独调整并即时生效。
-      </p>
+      <p class="agent-detail__hint">保存后立即生效。工具审批可在下方单独调整。</p>
 
       <section class="agent-detail__policy">
-        <h2 class="agent-detail__policy-title">审批策略</h2>
-        <PolicyPanel embedded :agent-id="agentId" @close="() => {}" />
+        <button
+          type="button"
+          class="agent-detail__policy-toggle"
+          :aria-expanded="showPolicy ? 'true' : 'false'"
+          @click="showPolicy = !showPolicy"
+        >
+          <span class="agent-detail__policy-title">工具审批</span>
+          <span class="agent-detail__policy-chevron">{{ showPolicy ? "▴" : "▾" }}</span>
+        </button>
+        <div v-if="showPolicy" class="agent-detail__policy-body">
+          <PolicyPanel embedded :agent-id="agentId" @close="() => {}" />
+        </div>
       </section>
     </template>
   </div>
@@ -215,13 +234,38 @@ onMounted(load);
 }
 
 .agent-detail__policy {
-  margin-top: 24px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+}
+
+.agent-detail__policy-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .agent-detail__policy-title {
-  margin: 0 0 10px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--color-text);
+}
+
+.agent-detail__policy-chevron {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.agent-detail__policy-body {
+  padding-left: 12px;
 }
 </style>
