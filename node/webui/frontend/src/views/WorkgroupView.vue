@@ -1978,9 +1978,20 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 与 .app__main-col > .chat.panel 一致：标题栏与对话区同色 */
+  background: var(--color-editor);
+  color: var(--color-text);
 }
 .wg-chat__header {
   flex: 0 0 auto;
+  background: var(--color-editor);
+}
+.wg-chat :deep(.chat__title-main) {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-text);
 }
 .wg-chat__model {
   position: relative;
