@@ -52,7 +52,7 @@ sequenceDiagram
 - `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
 - `SetChildSession(true)`：子 session 禁止管理类工具与 `ask_user`
 
-`policy == nil` 时加载默认策略文件；`maxToolLoops <= 0` 时用默认 **16**。
+`policy == nil` 时加载默认策略文件；`maxToolLoops <= 0` 时用默认 **16**。超过上限时对后续 tool_calls 写入 soft `tool` 结果（见 `ToolLoopLimitExceededMessage`），不硬失败。
 
 ---
 

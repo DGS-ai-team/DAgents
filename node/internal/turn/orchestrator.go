@@ -311,15 +311,14 @@ func (o *Orchestrator) runOneStep(
 	var streamErr error
 	toolLoopCount++
 	o.recordToolLoop(sessionID, toolLoopCount)
-	if toolLoopCount > o.maxToolLoops {
-		limitErr := fmt.Errorf("tool loop limit exceeded")
-		o.runTurnErrorPhase(ctx, sessionID, history, limitErr)
-		o.publishError(sessionID, fmt.Sprintf("工具调用轮次超过上限：%d", o.maxToolLoops))
-		o.publishDone(sessionID, "error")
-		return StepOutcome{LoopCount: toolLoopCount, Err: limitErr}
-	}
+	// 超过 maxToolLoops 后不再硬失败：本步禁用 tools，若模型仍发起 tool_calls 则写入 soft tool_result，
+	// 让模型给出结论并询问用户；下一条 user 消息会重置 toolLoopCount。
+	overToolBudget := toolLoopCount > o.maxToolLoops
 
 	toolDefs := o.ToolDefinitions()
+	if overToolBudget {
+		toolDefs = nil
+	}
 	systemPrompt := o.buildSystemPrompt(sessionID)
 	msgs, systemPrompt, hookErr := o.runLLMBeforeCallPhase(ctx, sessionID, history, systemPrompt)
 	if hookErr != nil {
@@ -402,6 +401,35 @@ func (o *Orchestrator) runOneStep(
 		o.publishDone(sessionID, finishReason)
 		o.logger.Info("turn done", "session_id", sessionID, "finish_reason", finishReason, "loop", toolLoopCount)
 		return StepOutcome{LoopCount: toolLoopCount}
+	}
+
+	if toolLoopCount > o.maxToolLoops {
+		o.appendMissingToolResponses(
+			sessionID,
+			history,
+			result.ToolCalls,
+			ToolLoopLimitExceededMessage,
+			map[string]any{"tool_loop_limit_exceeded": true, "max_tool_loops": o.maxToolLoops},
+		)
+		o.logger.Info(
+			"tool loop soft limit",
+			"session_id", sessionID,
+			"loop", toolLoopCount,
+			"max_tool_loops", o.maxToolLoops,
+			"tool_calls", len(result.ToolCalls),
+		)
+		// 已超额一步仍反复 tool_calls 时收束，避免 soft-reject 死循环。
+		if toolLoopCount > o.maxToolLoops+1 {
+			o.publishDone(sessionID, finishReason)
+			return StepOutcome{LoopCount: toolLoopCount}
+		}
+		if o.enqueueToolResult != nil {
+			if err := o.enqueueToolResult(sessionID); err != nil {
+				return StepOutcome{LoopCount: toolLoopCount, Err: err}
+			}
+			return StepOutcome{LoopCount: toolLoopCount}
+		}
+		return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
 	}
 
 	setState(StateAwaitingTool)

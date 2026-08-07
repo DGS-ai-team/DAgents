@@ -265,6 +265,63 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertEqual(tool.tool_call_id, "call_orphan")
             self.assertIn("interrupted", tool.content or "")
 
+    def test_leader_tool_loop_soft_limit_returns_tool_result(self) -> None:
+        """超限后若模型仍发起 tool_calls，写入 soft tool_result 并允许收尾结论。"""
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.llm_chat import ChatToolCall
+
+            # 第 1 步：预算内执行工具；第 2 步：超额仍 tool_calls → soft；第 3 步：终态文本
+            # 注意：每步必须用独立 ChatResult，避免脚本条目共享同一对象被复用污染。
+            script = [
+                ChatResult(
+                    content="",
+                    tool_calls=[
+                        ChatToolCall(
+                            id="call_loop_1",
+                            name="list_workgroup_members",
+                            arguments="{}",
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ChatResult(
+                    content="",
+                    tool_calls=[
+                        ChatToolCall(
+                            id="call_loop_2",
+                            name="list_workgroup_members",
+                            arguments="{}",
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ChatResult(content="已达上限，当前进度：已列出成员。是否继续？", finish_reason="stop"),
+            ]
+            kernel = TurnKernel(
+                store,
+                chat_client=MockLLMClient(script),
+                mock_llm=True,
+                max_tool_loops=1,
+            )
+            result = kernel.handle_human_message(
+                wid,
+                text="列出成员并继续工具",
+                from_node_id="node-a",
+            )
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            self.assertIn("是否继续", result["loop"]["final_text"])
+            hist = store.get_run_history(result["leader_run"].run_id)
+            assert hist is not None
+            soft = [
+                m
+                for m in hist.messages
+                if m.role == "tool" and "已超过单轮工具调用次数" in (m.content or "")
+            ]
+            self.assertEqual(len(soft), 1, hist.messages)
+            _ = mid
+
     def test_new_human_message_releases_stuck_active_assign(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
