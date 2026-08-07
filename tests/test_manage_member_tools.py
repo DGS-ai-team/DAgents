@@ -14,6 +14,8 @@ from manage.workgroup.member_tools import (
     member_tool_catalog,
     side_effect_for_tool,
 )
+from manage.workgroup.models import WorkGroup, WorkgroupWorkspace
+from manage.workgroup.turn_kernel import build_leader_system_prompt
 
 
 class MemberToolCatalogTests(unittest.TestCase):
@@ -72,6 +74,7 @@ class MemberSystemPromptTests(unittest.TestCase):
             workspace_path="/tmp/member-ws",
         )
         self.assertIn("## 最高优先级规则", prompt)
+        self.assertIn("工作组内各成员所在的运行环境", prompt)
         self.assertIn("## 运行环境", prompt)
         self.assertIn("操作系统类别：`linux`", prompt)
         self.assertIn("## 工作区目录", prompt)
