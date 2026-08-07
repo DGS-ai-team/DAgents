@@ -1015,13 +1015,13 @@ class TurnKernel:
         host_env = host_env_from_registry(self._registry_store, member.home_node_id)
         system = build_member_system_prompt(
             soul_md=spec.prompt.soul_md,
-            user_md=spec.prompt.user_md,
             custom_md=spec.prompt.custom_md,
             host_env=host_env,
             member_id=member_id,
             display_name=member.display_name,
             workgroup_id=workgroup_id,
             workgroup_name=(group.display_name if group is not None else ""),
+            created_by_node_id=(group.created_by_node_id if group is not None else ""),
             workspace_path=str(runtime.get("workspace_path") or ""),
         )
         max_loops = max(1, int(spec.max_tool_loops or self._max_tool_loops))

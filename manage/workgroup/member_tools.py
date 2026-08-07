@@ -151,7 +151,7 @@ _MEMBER_STATIC_RULES = """## 最高优先级规则（必须遵守）
 
 
 def host_env_from_registry(registry_store: Any, home_node_id: str) -> dict[str, str]:
-    """从 Registry 记录提取 Home Node 环境要素（Node 注册 metadata.host_info）。"""
+    """从 Registry 记录提取 Home Node 环境与归属要素（Node 注册 metadata.host_info）。"""
     node_id = (home_node_id or "").strip()
     out: dict[str, str] = {"home_node_id": node_id, "host_ips": ""}
     if not node_id or registry_store is None:
@@ -179,22 +179,29 @@ def host_env_from_registry(registry_store: Any, home_node_id: str) -> dict[str, 
     name = str(getattr(rec, "name", "") or "").strip()
     if name:
         out["node_name"] = name
+    owner = str(getattr(rec, "owner", "") or "").strip()
+    if owner:
+        out["owner"] = owner
+    team = str(getattr(rec, "team", "") or "").strip()
+    if team:
+        out["team"] = team
+    groups = getattr(rec, "discovery_group", None) or []
+    if isinstance(groups, list):
+        cleaned = [str(g).strip() for g in groups if str(g).strip()]
+        if cleaned:
+            out["discovery_group"] = ", ".join(cleaned)
     return out
 
 
 def _format_member_environment_section(
     *,
     host_env: dict[str, str] | None,
-    member_id: str = "",
-    display_name: str = "",
-    workgroup_id: str = "",
-    workgroup_name: str = "",
 ) -> str:
     env = dict(host_env or {})
     lines = [
         "## 运行环境",
         "",
-        "工具在成员的 Home Node 上执行。以下为该 Node 登记的环境要素（若缺失表示尚未登记或未上报）。",
+        "工具在成员的 Home Node 上执行。以下为该 Node 登记的运行环境要素（若缺失表示尚未登记或未上报）。",
         "",
     ]
     os_kind = (env.get("os_kind") or "").strip() or "未知"
@@ -218,30 +225,12 @@ def _format_member_environment_section(
     home = (env.get("home_node_id") or "").strip()
     if home:
         lines.append(f"- Home Node ID：`{home}`")
-    node_name = (env.get("node_name") or "").strip()
-    if node_name and node_name != home:
-        lines.append(f"- Home Node 名称：{node_name}")
     host_ips = (env.get("host_ips") or "").strip()
     if host_ips:
         lines.append(f"- 本机可达 IP：`{host_ips}`")
     node_version = (env.get("node_version") or "").strip()
     if node_version:
         lines.append(f"- Node 版本：`{node_version}`")
-    mid = (member_id or "").strip()
-    if mid:
-        lines.append(f"- 成员 ID：`{mid}`")
-    mname = (display_name or "").strip()
-    if mname:
-        lines.append(f"- 成员显示名：{mname}")
-    wg_name = (workgroup_name or "").strip()
-    wid = (workgroup_id or "").strip()
-    if wg_name or wid:
-        if wg_name and wid:
-            lines.append(f"- 工作组：{wg_name}（`{wid}`）")
-        elif wid:
-            lines.append(f"- 工作组 ID：`{wid}`")
-        else:
-            lines.append(f"- 工作组：{wg_name}")
     return "\n".join(lines)
 
 
@@ -262,41 +251,98 @@ def _format_member_workspace_section(*, workspace_path: str = "") -> str:
     return "\n".join(lines)
 
 
+def _format_member_user_info_section(
+    *,
+    host_env: dict[str, str] | None,
+    member_id: str = "",
+    display_name: str = "",
+    workgroup_id: str = "",
+    workgroup_name: str = "",
+    created_by_node_id: str = "",
+) -> str:
+    """工作组协作语境下的用户/归属说明（替代已废弃的 user.md / ## User）。"""
+    env = dict(host_env or {})
+    lines = [
+        "## 以下是用户信息：",
+        "",
+        "你当前处于**工作组**协作上下文中执行任务，不是该 Home Node 上的本地一对一对话。",
+        "向你下发任务、阅读你答复的交互方，可能是工作组内任意协作节点上的用户，"
+        "**不一定**是下方 Home Node 的所属者或其日常使用者；请按工作组任务本身回应，"
+        "不要默认对方就是 Node 所属人。",
+        "",
+    ]
+    home = (env.get("home_node_id") or "").strip()
+    if home:
+        lines.append(f"- 所属 Home Node ID：`{home}`")
+    node_name = (env.get("node_name") or "").strip()
+    if node_name and node_name != home:
+        lines.append(f"- Home Node 名称：{node_name}")
+    owner = (env.get("owner") or "").strip()
+    lines.append(f"- Node 所属者（owner）：{owner or '未登记'}")
+    team = (env.get("team") or "").strip()
+    lines.append(f"- Node 所属团队（team）：{team or '未登记'}")
+    groups = (env.get("discovery_group") or "").strip()
+    if groups:
+        lines.append(f"- discovery_group：{groups}")
+    mid = (member_id or "").strip()
+    if mid:
+        lines.append(f"- 成员 ID：`{mid}`")
+    mname = (display_name or "").strip()
+    if mname:
+        lines.append(f"- 成员显示名：{mname}")
+    wg_name = (workgroup_name or "").strip()
+    wid = (workgroup_id or "").strip()
+    if wg_name or wid:
+        if wg_name and wid:
+            lines.append(f"- 当前工作组：{wg_name}（`{wid}`）")
+        elif wid:
+            lines.append(f"- 当前工作组 ID：`{wid}`")
+        else:
+            lines.append(f"- 当前工作组：{wg_name}")
+    creator = (created_by_node_id or "").strip()
+    if creator:
+        lines.append(f"- 工作组创建者 Node：`{creator}`")
+    return "\n".join(lines)
+
+
 def build_member_system_prompt(
     *,
     soul_md: str = "",
-    user_md: str = "",
     custom_md: str = "",
     host_env: dict[str, str] | None = None,
     member_id: str = "",
     display_name: str = "",
     workgroup_id: str = "",
     workgroup_name: str = "",
+    created_by_node_id: str = "",
     workspace_path: str = "",
+    user_md: str = "",  # deprecated：不再注入；保留参数兼容旧调用
 ) -> str:
     """组装成员 system prompt。
 
-    顺序对齐 Node Agent：静态规则 → 运行环境 → 工作区 → Soul/User/Custom。
-    环境信息应来自 Home Node 的 Registry 登记（工具实际执行处），而非 Manage 本机。
+    顺序对齐 Node Agent：静态规则 → 运行环境 → 工作区 → Soul → 用户信息 → Custom。
+    环境取自 Home Node Registry；用户信息说明工作组协作语境与 Node 归属（不再使用 user.md）。
     """
+    _ = user_md  # 显式忽略废弃字段
     parts = [
         _MEMBER_STATIC_RULES.strip(),
-        _format_member_environment_section(
+        _format_member_environment_section(host_env=host_env),
+        _format_member_workspace_section(workspace_path=workspace_path),
+    ]
+    soul = (soul_md or "").strip()
+    custom = (custom_md or "").strip()
+    if soul:
+        parts.append("## 以下是你的设定：\n\n" + soul)
+    parts.append(
+        _format_member_user_info_section(
             host_env=host_env,
             member_id=member_id,
             display_name=display_name,
             workgroup_id=workgroup_id,
             workgroup_name=workgroup_name,
-        ),
-        _format_member_workspace_section(workspace_path=workspace_path),
-    ]
-    soul = (soul_md or "").strip()
-    user = (user_md or "").strip()
-    custom = (custom_md or "").strip()
-    if soul:
-        parts.append("## Soul\n\n" + soul)
-    if user:
-        parts.append("## User\n\n" + user)
+            created_by_node_id=created_by_node_id,
+        )
+    )
     if custom:
-        parts.append("## Custom\n\n" + custom)
+        parts.append("## 以下是用户侧追加的临时/专项指令：\n\n" + custom)
     return "\n\n".join(parts).strip()

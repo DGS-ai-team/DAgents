@@ -46,9 +46,10 @@ class MemberToolCatalogTests(unittest.TestCase):
 
 
 class MemberSystemPromptTests(unittest.TestCase):
-    def test_includes_static_env_workspace_and_soul(self) -> None:
+    def test_includes_static_env_workspace_user_info_and_soul(self) -> None:
         prompt = build_member_system_prompt(
             soul_md="资料员",
+            user_md="这段旧 user.md 不应再出现",
             host_env={
                 "home_node_id": "node-a",
                 "os_kind": "linux",
@@ -58,23 +59,35 @@ class MemberSystemPromptTests(unittest.TestCase):
                 "login_name": "dagents",
                 "host_ips": "10.0.0.8",
                 "node_version": "0.8.5",
+                "node_name": "desk-a",
+                "owner": "alice@example.com",
+                "team": "research",
+                "discovery_group": "lab-1",
             },
             member_id="mb_01h00000000000000000000001",
             display_name="资料员",
             workgroup_id="wg_01h00000000000000000000001",
             workgroup_name="调研组",
+            created_by_node_id="node-b",
             workspace_path="/tmp/member-ws",
         )
         self.assertIn("## 最高优先级规则", prompt)
         self.assertIn("## 运行环境", prompt)
         self.assertIn("操作系统类别：`linux`", prompt)
-        self.assertIn("Home Node ID：`node-a`", prompt)
-        self.assertIn("本机可达 IP：`10.0.0.8`", prompt)
         self.assertIn("## 工作区目录", prompt)
-        self.assertIn("相对路径均基于成员工作区根目录", prompt)
         self.assertIn("`/tmp/member-ws`", prompt)
-        self.assertIn("## Soul", prompt)
+        self.assertIn("## 以下是你的设定：", prompt)
         self.assertIn("资料员", prompt)
+        self.assertIn("## 以下是用户信息：", prompt)
+        self.assertIn("工作组", prompt)
+        self.assertIn("不一定", prompt)
+        self.assertIn("所属 Home Node ID：`node-a`", prompt)
+        self.assertIn("Node 所属者（owner）：alice@example.com", prompt)
+        self.assertIn("Node 所属团队（team）：research", prompt)
+        self.assertIn("当前工作组：调研组", prompt)
+        self.assertIn("工作组创建者 Node：`node-b`", prompt)
+        self.assertNotIn("## User", prompt)
+        self.assertNotIn("这段旧 user.md 不应再出现", prompt)
         self.assertNotIn("You are a Workgroup Member agent", prompt)
 
     def test_host_env_from_registry(self) -> None:
@@ -83,6 +96,9 @@ class MemberSystemPromptTests(unittest.TestCase):
                 host_ips="127.0.0.1",
                 version="0.9.0",
                 name="desk",
+                owner="bob",
+                team="ops",
+                discovery_group=["g1", "g2"],
                 metadata={
                     "host_info": {
                         "os_kind": "windows",
@@ -101,6 +117,9 @@ class MemberSystemPromptTests(unittest.TestCase):
         self.assertEqual(env["login_name"], "Alice")
         self.assertEqual(env["host_ips"], "127.0.0.1")
         self.assertEqual(env["node_version"], "0.9.0")
+        self.assertEqual(env["owner"], "bob")
+        self.assertEqual(env["team"], "ops")
+        self.assertEqual(env["discovery_group"], "g1, g2")
         missing = host_env_from_registry(store, "missing")
         self.assertEqual(missing["home_node_id"], "missing")
         self.assertEqual(missing.get("os_kind", ""), "")
