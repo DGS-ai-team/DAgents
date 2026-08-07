@@ -23,7 +23,6 @@ function onPick(cmd) {
 
     <section class="settings-section settings-section--standalone">
       <h2 class="settings-section__title">帮助</h2>
-      <p class="settings-section__desc">点击命令可回到对话并填入输入框。</p>
       <HelpPanel embedded @close="() => {}" @pick="onPick" />
     </section>
   </div>

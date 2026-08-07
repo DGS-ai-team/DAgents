@@ -72,7 +72,7 @@ onMounted(load);
   <section class="panel panel-overlay__card command-panel status-panel" :class="{ 'settings-embedded-panel': embedded }">
     <header class="panel__header command-panel__header">
       <div>
-        <div class="panel__title">版本与更新</div>
+        <div v-if="!embedded" class="panel__title">版本与更新</div>
         <div v-if="!embedded" class="command-panel__subtitle">检查可用更新</div>
       </div>
       <div class="command-panel__header-actions">
@@ -107,7 +107,7 @@ onMounted(load);
         <p v-if="data.message" class="command-panel__hint">{{ data.message }}</p>
 
         <section v-if="data.release_notes" class="command-section">
-          <h3 class="command-section__title">Release notes</h3>
+          <h3 class="command-section__title">更新说明</h3>
           <pre class="command-panel__raw command-panel__raw--compact">{{ data.release_notes }}</pre>
         </section>
 

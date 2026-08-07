@@ -16,6 +16,8 @@ const error = ref("");
 const data = ref(null);
 const showRaw = ref(false);
 
+const resolvedAgentId = computed(() => String(props.agentId || agentStore.agentId || "").trim());
+
 const loadedSkills = computed(() => {
   const rows = data.value?.loaded_skills;
   return Array.isArray(rows) ? rows : [];
@@ -49,7 +51,12 @@ function isLoaded(name) {
 
 async function load() {
   const sid = props.agentId || agentStore.agentId;
-  if (!sid) return;
+  if (!sid) {
+    data.value = null;
+    error.value = "";
+    loading.value = false;
+    return;
+  }
   loading.value = true;
   error.value = "";
   try {
@@ -100,12 +107,12 @@ watch(() => props.agentId || agentStore.agentId, load);
   <section class="panel panel-overlay__card skills-panel" :class="{ 'settings-embedded-panel': embedded }">
     <header class="panel__header skills-panel__header">
       <div>
-        <div class="panel__title">技能</div>
-        <div v-if="!embedded" class="skills-panel__subtitle">{{ agentId || agentStore.agentId || "—" }}</div>
+        <div v-if="!embedded" class="panel__title">技能</div>
+        <div v-if="!embedded" class="skills-panel__subtitle">{{ resolvedAgentId || "—" }}</div>
       </div>
       <div class="skills-panel__header-actions">
         <button type="button" class="btn btn--ghost btn--sm" @click="showRaw = !showRaw">
-          {{ showRaw ? "摘要" : "详情" }}
+          {{ showRaw ? "列表" : "JSON" }}
         </button>
         <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || !!busySkill" @click="load">
           刷新
@@ -115,7 +122,8 @@ watch(() => props.agentId || agentStore.agentId, load);
     </header>
 
     <div class="panel__body skills-panel__body">
-      <div v-if="loading && !data" class="skills-panel__loading">加载中…</div>
+      <div v-if="!resolvedAgentId" class="skills-panel__empty">请先在对话中打开一个智能体。</div>
+      <div v-else-if="loading && !data" class="skills-panel__loading">加载中…</div>
       <div v-else-if="error" class="skills-panel__error">{{ error }}</div>
       <pre v-else-if="showRaw && data" class="skills-panel__raw">{{ JSON.stringify(data, null, 2) }}</pre>
       <template v-else-if="data">
@@ -137,7 +145,7 @@ watch(() => props.agentId || agentStore.agentId, load);
               </button>
             </li>
           </ul>
-          <p v-else class="skills-panel__empty">当前 Agent 未加载任何 skill</p>
+          <p v-else class="skills-panel__empty">当前智能体未加载任何技能</p>
         </section>
 
         <section class="skills-section">
@@ -167,7 +175,7 @@ watch(() => props.agentId || agentStore.agentId, load);
               </button>
             </li>
           </ul>
-          <p v-else class="skills-panel__empty">磁盘上未发现可用 skill</p>
+          <p v-else class="skills-panel__empty">目录中暂无可用技能</p>
         </section>
       </template>
     </div>

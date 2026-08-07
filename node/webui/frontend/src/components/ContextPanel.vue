@@ -118,7 +118,7 @@ watch(agentId, load);
             <span class="context-stat__value">{{ ctx.messages_count ?? displayMessages.length }}</span>
           </div>
           <div class="context-stat">
-            <span class="context-stat__label">Tokens</span>
+            <span class="context-stat__label">Token</span>
             <span class="context-stat__value">{{ formatNumber(ctx.messages_total_tokens ?? 0) }}</span>
           </div>
           <div class="context-stat">
@@ -126,13 +126,13 @@ watch(agentId, load);
             <span class="context-stat__value">{{ ctx.tool_loop_count ?? 0 }}</span>
           </div>
           <div class="context-stat">
-            <span class="context-stat__label">Turn</span>
-            <span class="context-stat__value">{{ ctx.run_turn_phase || ctx.turn_state || "idle" }}</span>
+            <span class="context-stat__label">回合状态</span>
+            <span class="context-stat__value">{{ ctx.run_turn_phase || ctx.turn_state || "空闲" }}</span>
           </div>
         </div>
 
         <section v-if="ctx.loaded_skills?.length" class="context-section">
-          <h3 class="context-section__title">已加载 Skills</h3>
+          <h3 class="context-section__title">已加载技能</h3>
           <ul class="context-skill-list">
             <li v-for="sk in ctx.loaded_skills" :key="sk.name || sk.skill_name">{{ sk.name || sk.skill_name }}</li>
           </ul>
@@ -148,9 +148,13 @@ watch(agentId, load);
               <div class="context-message-item__head">
                 <span class="context-message-item__index">#{{ i + 1 }}</span>
                 <span class="context-message-item__role">{{ roleLabel(m.role) }}</span>
-                <span v-if="m.tool_calls_count" class="context-message-item__meta">tool_calls × {{ m.tool_calls_count }}</span>
-                <span v-if="m.tool_call_id" class="context-message-item__meta">id {{ shortId(m.tool_call_id, 12) }}</span>
-                <span v-if="m.has_reasoning_content" class="context-message-item__meta">含 reasoning</span>
+                <span v-if="m.tool_calls_count" class="context-message-item__meta"
+                  >工具调用 × {{ m.tool_calls_count }}</span
+                >
+                <span v-if="m.tool_call_id" class="context-message-item__meta"
+                  >id {{ shortId(m.tool_call_id, 12) }}</span
+                >
+                <span v-if="m.has_reasoning_content" class="context-message-item__meta">含思考内容</span>
               </div>
               <div class="context-message-item__body">
                 <button

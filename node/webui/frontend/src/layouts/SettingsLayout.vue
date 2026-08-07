@@ -13,7 +13,7 @@ const nav = [
   { to: "/settings/capabilities", label: "能力" },
   { to: "/settings/skills", label: "技能" },
   { to: "/settings/triggers", label: "定时任务" },
-  { to: "/settings/security", label: "安全" },
+  { to: "/settings/security", label: "输出防护" },
   { to: "/settings/context", label: "上下文" },
   { to: "/settings/about", label: "关于" },
 ];
