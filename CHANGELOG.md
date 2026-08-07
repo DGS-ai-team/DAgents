@@ -6,6 +6,18 @@
 
 ---
 
+## [0.9.2] - 2026-08-07
+
+**Manage Docker 补丁**：镜像打包成员工具权威目录，修复容器启动 `FileNotFoundError`。
+
+### 修复
+
+- **Manage Docker 缺少 `member_tool_catalog.json`**：`packaging/manage/Dockerfile` 仅 `COPY manage/`，容器内 import `member_tools` 即失败；现拷贝 `shared/workgroup/member_tool_catalog.json` 至 `/app/shared/workgroup/`。
+
+（Git **tag**：`v0.9.2`。）
+
+---
+
 ## [0.9.1] - 2026-08-07
 
 **Workgroup 协作预览**：正式版前最后一个大预览。以工作组可演示为主叙事；开箱首配与本地助手收口。验收清单见 [`docs/design/v0.9.1-smoke-checklist.md`](docs/design/v0.9.1-smoke-checklist.md)。
