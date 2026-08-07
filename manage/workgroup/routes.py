@@ -20,6 +20,7 @@ from manage.workgroup.d3_models import (
     MemberFinalRequest,
     OutboxFrame,
     ProvisionCompleteRequest,
+    QueuedHumanPatchRequest,
     SubscribeRequest,
     Subscription,
     TimelineEvent,
@@ -472,6 +473,17 @@ def build_workgroup_router(
             action="workgroup.message.human",
             target_agent_id=workgroup_id,
         )
+        if result.get("queued"):
+            return {
+                "queued": True,
+                "queue_id": result.get("queue_id"),
+                "position": result.get("position"),
+                "text": result.get("text"),
+                "from_node_id": result.get("from_node_id"),
+                "client_message_id": result.get("client_message_id"),
+                "direct_member_id": result.get("direct_member_id"),
+                "queue": result.get("queue") or kernel.list_human_queue(workgroup_id),
+            }
         return {
             "timeline_event": result["timeline_event"],
             "leader_run": result["leader_run"],
@@ -482,6 +494,44 @@ def build_workgroup_router(
             },
             "mode": result.get("mode") or "leader",
         }
+
+    @router.get("/{workgroup_id}/human-queue")
+    def get_human_queue(workgroup_id: str, request: Request) -> dict:
+        authenticate(request)
+        try:
+            return kernel.list_human_queue(workgroup_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+
+    @router.patch("/{workgroup_id}/human-queue/{queue_id}")
+    def patch_human_queue_item(
+        workgroup_id: str, queue_id: str, req: QueuedHumanPatchRequest, request: Request
+    ) -> dict:
+        auth = authenticate(request)
+        try:
+            item = kernel.patch_human_queue_item(workgroup_id, queue_id, text=req.text)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.human_queue.patch",
+            target_agent_id=workgroup_id,
+        )
+        return item
+
+    @router.delete("/{workgroup_id}/human-queue/{queue_id}")
+    def delete_human_queue_item(workgroup_id: str, queue_id: str, request: Request) -> dict:
+        auth = authenticate(request)
+        try:
+            out = kernel.cancel_human_queue_item(workgroup_id, queue_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.human_queue.cancel",
+            target_agent_id=workgroup_id,
+        )
+        return out
 
     @router.post("/{workgroup_id}/turn/cancel", response_model=TurnCancelResponse)
     def cancel_workgroup_turn(

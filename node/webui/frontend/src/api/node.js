@@ -485,6 +485,24 @@ export function cancelWorkgroupTurn(workgroupId) {
   });
 }
 
+export function fetchWorkgroupHumanQueue(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/human-queue`);
+}
+
+export function patchWorkgroupHumanQueueItem(workgroupId, queueId, text) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/human-queue/${encodeURIComponent(queueId)}`,
+    { method: "PATCH", body: { text } },
+  );
+}
+
+export function cancelWorkgroupHumanQueueItem(workgroupId, queueId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/human-queue/${encodeURIComponent(queueId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function listWorkgroupMembers(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/members`);
 }

@@ -16,6 +16,11 @@ const events = ref([]);
 const draft = ref("");
 const sending = ref(false);
 const cancelling = ref(false);
+/** @type {import('vue').Ref<Array<Record<string, any>>>} */
+const humanQueueItems = ref([]);
+const editingQueueId = ref("");
+const editQueueDraft = ref("");
+let queuePollTimer = null;
 const error = ref("");
 const notice = ref("");
 const mentionOpen = ref(false);
@@ -396,9 +401,91 @@ function startWorkPoll() {
   }, 900);
 }
 
+async function refreshHumanQueue() {
+  if (!workgroupId.value) {
+    humanQueueItems.value = [];
+    return;
+  }
+  try {
+    const out = await api.fetchWorkgroupHumanQueue(workgroupId.value);
+    humanQueueItems.value = Array.isArray(out?.items) ? out.items : [];
+  } catch {
+    /* ignore */
+  }
+}
+
+function applyQueuePayload(data) {
+  const q = data?.queue;
+  if (q && Array.isArray(q.items)) {
+    humanQueueItems.value = q.items;
+    return;
+  }
+  if (data?.queue_id) {
+    const rest = (humanQueueItems.value || []).filter((x) => x.queue_id !== data.queue_id);
+    humanQueueItems.value = [...rest, data].sort(
+      (a, b) => Number(a.position || 0) - Number(b.position || 0),
+    );
+  }
+}
+
+function startQueuePoll() {
+  stopQueuePoll();
+  queuePollTimer = setInterval(() => {
+    if (!workgroupId.value) return;
+    if (!sending.value && !(humanQueueItems.value || []).length) return;
+    void refreshHumanQueue();
+    if (sending.value || (humanQueueItems.value || []).length) {
+      void loadTimeline().catch(() => {});
+    }
+  }, 1500);
+}
+
+function stopQueuePoll() {
+  if (queuePollTimer) {
+    clearInterval(queuePollTimer);
+    queuePollTimer = null;
+  }
+}
+
+function beginEditQueued(item) {
+  editingQueueId.value = String(item?.queue_id || "");
+  editQueueDraft.value = String(item?.text || "");
+}
+
+function cancelEditQueued() {
+  editingQueueId.value = "";
+  editQueueDraft.value = "";
+}
+
+async function saveQueuedEdit(item) {
+  const qid = String(item?.queue_id || "").trim();
+  const text = editQueueDraft.value.trim();
+  if (!workgroupId.value || !qid || !text) return;
+  try {
+    const out = await api.patchWorkgroupHumanQueueItem(workgroupId.value, qid, text);
+    applyQueuePayload(out);
+    await refreshHumanQueue();
+    cancelEditQueued();
+  } catch (e) {
+    error.value = e?.message || "修改排队消息失败";
+  }
+}
+
+async function removeQueued(item) {
+  const qid = String(item?.queue_id || "").trim();
+  if (!workgroupId.value || !qid) return;
+  try {
+    await api.cancelWorkgroupHumanQueueItem(workgroupId.value, qid);
+    await refreshHumanQueue();
+    if (editingQueueId.value === qid) cancelEditQueued();
+  } catch (e) {
+    error.value = e?.message || "取消排队失败";
+  }
+}
+
 async function send() {
   let text = draft.value.trim();
-  if (!text || !workgroupId.value || sending.value) return;
+  if (!text || !workgroupId.value) return;
   if (!canChat.value) {
     error.value = isConfiguring.value
       ? "工作组尚未发布，请先完成配置并点击「发布」。"
@@ -415,12 +502,35 @@ async function send() {
   }
 
   const clientMessageId = newClientMessageId();
-  sending.value = true;
-  cancelling.value = false;
+  const enqueueOnly = sending.value;
   error.value = "";
   draft.value = "";
   const sentDirect = directMember.value;
   directMember.value = null;
+
+  if (enqueueOnly) {
+    try {
+      await api.postWorkgroupMessageStream(
+        workgroupId.value,
+        { text, clientMessageId, directMemberId: directId || undefined },
+        {
+          onEvent: (eventName, data) => {
+            if (eventName === "queued") applyQueuePayload(data);
+          },
+        },
+      );
+      await refreshHumanQueue();
+      startQueuePoll();
+    } catch (e) {
+      error.value = e?.message || "入队失败";
+      draft.value = stripLeadingMention(text, sentDirect?.display_name);
+      directMember.value = sentDirect;
+    }
+    return;
+  }
+
+  sending.value = true;
+  cancelling.value = false;
   statusWatermarkSeq.value = (events.value || []).reduce(
     (m, ev) => Math.max(m, Number(ev?.seq || 0)),
     0,
@@ -434,8 +544,10 @@ async function send() {
   streamAbort = new AbortController();
   scrollTimelineTail();
   startWorkPoll();
+  startQueuePoll();
 
   try {
+    let becameQueued = false;
     await api.postWorkgroupMessageStream(
       workgroupId.value,
       {
@@ -446,13 +558,18 @@ async function send() {
       {
         signal: streamAbort.signal,
         onEvent: async (eventName, data) => {
+          if (eventName === "queued") {
+            becameQueued = true;
+            applyQueuePayload(data);
+            clearLive();
+            return;
+          }
           if (eventName === "status") {
             const phase = String(data?.phase || "thinking");
             streamPhase.value =
               phase === "tool" ? "tool" : phase === "streaming" ? "streaming" : "thinking";
             streamToolName.value = String(data?.tool || "");
             if (data?.mode) streamMode.value = String(data.mode);
-            // 进入工具阶段时清空 Supervisor 打字机，避免旧片段残留
             if (phase === "tool" && liveAssistant.value) {
               liveAssistant.value = { ...liveAssistant.value, text: "" };
             }
@@ -485,8 +602,10 @@ async function send() {
     clearLive();
     await loadTimeline();
     await loadPendingHitl();
+    await refreshHumanQueue();
     if (debugOpen.value) await loadDebugRuns();
     scrollTimelineTail();
+    if (becameQueued) startQueuePoll();
   } catch (e) {
     const aborted = e?.name === "AbortError" || /abort/i.test(String(e?.message || ""));
     clearLive();
@@ -504,6 +623,7 @@ async function send() {
     sending.value = false;
     cancelling.value = false;
     statusWatermarkSeq.value = 0;
+    void refreshHumanQueue();
   }
 }
 
@@ -1211,6 +1331,7 @@ onMounted(loadSelf);
 onUnmounted(() => {
   stopPoll();
   stopWorkPoll();
+  stopQueuePoll();
 });
 </script>
 
@@ -1599,6 +1720,40 @@ onUnmounted(() => {
         </div>
 
         <footer class="chat__composer">
+          <div v-if="humanQueueItems.length" class="chat__queue" aria-label="排队中的消息">
+            <div
+              v-for="item in humanQueueItems"
+              :key="item.queue_id"
+              class="chat__queue-item"
+            >
+              <span class="chat__queue-pos">#{{ item.position }}</span>
+              <template v-if="editingQueueId === item.queue_id">
+                <input
+                  v-model="editQueueDraft"
+                  class="chat__queue-edit"
+                  type="text"
+                  @keydown.enter.prevent="saveQueuedEdit(item)"
+                  @keydown.escape.prevent="cancelEditQueued"
+                />
+                <button type="button" class="chat__queue-btn" @click="saveQueuedEdit(item)">保存</button>
+                <button type="button" class="chat__queue-btn chat__queue-btn--ghost" @click="cancelEditQueued">
+                  取消
+                </button>
+              </template>
+              <template v-else>
+                <span class="chat__queue-text" :title="item.text">{{ item.text }}</span>
+                <button type="button" class="chat__queue-btn" @click="beginEditQueued(item)">修改</button>
+                <button
+                  type="button"
+                  class="chat__queue-btn chat__queue-btn--ghost"
+                  title="取消排队"
+                  @click="removeQueued(item)"
+                >
+                  ×
+                </button>
+              </template>
+            </div>
+          </div>
           <div class="chat__composer-pill" style="position: relative">
             <div
               v-if="mentionOpen && mentionCandidates.length && !hitlMode"
@@ -1650,7 +1805,7 @@ onUnmounted(() => {
                       ? '输入直达成员的任务…'
                       : '向工作组发言，输入 @ 直达成员…'
                 "
-                :disabled="sending || !canChat"
+                :disabled="!canChat"
                 @input="onDraftInput"
                 @keydown.enter.prevent="send"
                 @keydown.esc="mentionOpen = false"
@@ -2365,6 +2520,56 @@ onUnmounted(() => {
 }
 .chat__empty-action {
   margin-top: 12px;
+}
+.chat__queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.chat__queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--color-border, rgba(0, 0, 0, 0.14));
+  background: var(--color-surface, #fff);
+  font-size: 13px;
+}
+.chat__queue-pos {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: var(--color-text-muted, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+.chat__queue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat__queue-edit {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+}
+.chat__queue-btn {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--color-primary, #0078d4);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.chat__queue-btn--ghost {
+  color: var(--color-text-muted, #6b7280);
 }
 .wg-chat :deep(.chat__composer-pill) {
   padding-left: 16px;

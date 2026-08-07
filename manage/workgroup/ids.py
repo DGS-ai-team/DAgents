@@ -44,3 +44,7 @@ def hitl_id() -> str:
 
 def envelope_id() -> str:
     return new_id("en")
+
+
+def queue_human_id() -> str:
+    return new_id("qh")

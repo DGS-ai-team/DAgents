@@ -414,6 +414,26 @@ export async function cancelWorkgroupTurn(workgroupId, body = {}) {
   );
 }
 
+export async function fetchWorkgroupHumanQueue(workgroupId) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/human-queue`);
+}
+
+export async function patchWorkgroupHumanQueueItem(workgroupId, queueId, text) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/human-queue/${encodeURIComponent(queueId)}`,
+    {},
+    { method: "PATCH", body: { text } },
+  );
+}
+
+export async function cancelWorkgroupHumanQueueItem(workgroupId, queueId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/human-queue/${encodeURIComponent(queueId)}`,
+    {},
+    { method: "DELETE" },
+  );
+}
+
 /**
  * 工作组消息 SSE；onEvent(eventName, data)。可传 signal 以中断读取。
  * @returns {Promise<{ finalText?: string }>}

@@ -4688,6 +4688,66 @@ code {
   font-size: 0.875rem;
 }
 
+.chat__queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.chat__queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--chat-border, rgba(0, 0, 0, 0.14));
+  background: color-mix(in srgb, var(--chat-surface, #fff) 88%, var(--chat-editor, #f5f5f5));
+  font-size: 13px;
+}
+
+.chat__queue-pos {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: var(--chat-text-muted, #667);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat__queue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--chat-text, #222);
+}
+
+.chat__queue-edit {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--chat-border, rgba(0, 0, 0, 0.14));
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  background: var(--chat-surface, #fff);
+  color: var(--chat-text, #222);
+}
+
+.chat__queue-btn {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--accent, #2563eb);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.chat__queue-btn--ghost {
+  color: var(--chat-text-muted, #667);
+}
+
 .chat__composer-pill {
   display: flex;
   align-items: flex-end;

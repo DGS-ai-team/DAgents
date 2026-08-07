@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   fetchAuthMe,
   fetchAgents,
@@ -7,6 +7,9 @@ import {
   fetchWorkgroupACL,
   fetchWorkgroupMembers,
   fetchWorkgroupTimeline,
+  fetchWorkgroupHumanQueue,
+  patchWorkgroupHumanQueueItem,
+  cancelWorkgroupHumanQueueItem,
   postWorkgroupMessageStream,
   cancelWorkgroupTurn,
   listWorkgroupHITL,
@@ -28,6 +31,11 @@ const loading = ref(false);
 const loadingMembers = ref(false);
 const sending = ref(false);
 const cancelling = ref(false);
+/** @type {import('vue').Ref<Array<Record<string, any>>>} */
+const humanQueueItems = ref([]);
+const editingQueueId = ref("");
+const editQueueDraft = ref("");
+let queuePollTimer = null;
 const timeline = ref([]);
 const members = ref([]);
 const nodeDirectory = ref([]);
@@ -88,12 +96,8 @@ const canSubmit = computed(() => {
   if (hitlMode.value) {
     return canChat.value && Boolean(hitlDraft.value.trim()) && !hitlBusy.value;
   }
-  return (
-    canChat.value &&
-    Boolean(input.value.trim()) &&
-    !sending.value &&
-    Boolean(fromNodeId.value.trim())
-  );
+  // 忙碌时仍可发送：进入 Manage human 队列（Cursor 风）
+  return canChat.value && Boolean(input.value.trim()) && Boolean(fromNodeId.value.trim());
 });
 
 const composerModel = computed({
@@ -952,7 +956,9 @@ async function loadAll() {
     loadMembers(),
     loadNodeDirectory(),
     loadPendingHitl(),
+    refreshHumanQueue(),
   ]);
+  startQueuePoll();
 }
 
 function resizeTextarea() {
@@ -1004,6 +1010,88 @@ async function cancelTurn() {
   }
 }
 
+async function refreshHumanQueue() {
+  if (!props.workgroupId) {
+    humanQueueItems.value = [];
+    return;
+  }
+  try {
+    const out = await fetchWorkgroupHumanQueue(props.workgroupId);
+    humanQueueItems.value = Array.isArray(out?.items) ? out.items : [];
+  } catch {
+    /* ignore poll errors */
+  }
+}
+
+function applyQueuePayload(data) {
+  const q = data?.queue;
+  if (q && Array.isArray(q.items)) {
+    humanQueueItems.value = q.items;
+    return;
+  }
+  if (data?.queue_id) {
+    const rest = (humanQueueItems.value || []).filter((x) => x.queue_id !== data.queue_id);
+    humanQueueItems.value = [...rest, data].sort(
+      (a, b) => Number(a.position || 0) - Number(b.position || 0),
+    );
+  }
+}
+
+function startQueuePoll() {
+  stopQueuePoll();
+  queuePollTimer = setInterval(() => {
+    if (!props.active || !props.workgroupId) return;
+    if (!sending.value && !(humanQueueItems.value || []).length) return;
+    void refreshHumanQueue();
+    if (sending.value || (humanQueueItems.value || []).length) {
+      void loadTimeline().catch(() => {});
+    }
+  }, 1500);
+}
+
+function stopQueuePoll() {
+  if (queuePollTimer) {
+    clearInterval(queuePollTimer);
+    queuePollTimer = null;
+  }
+}
+
+function beginEditQueued(item) {
+  editingQueueId.value = String(item?.queue_id || "");
+  editQueueDraft.value = String(item?.text || "");
+}
+
+function cancelEditQueued() {
+  editingQueueId.value = "";
+  editQueueDraft.value = "";
+}
+
+async function saveQueuedEdit(item) {
+  const qid = String(item?.queue_id || "").trim();
+  const text = editQueueDraft.value.trim();
+  if (!props.workgroupId || !qid || !text) return;
+  try {
+    const out = await patchWorkgroupHumanQueueItem(props.workgroupId, qid, text);
+    applyQueuePayload(out);
+    await refreshHumanQueue();
+    cancelEditQueued();
+  } catch (err) {
+    emit("toast", { message: err.message || "修改排队消息失败", type: "error" });
+  }
+}
+
+async function removeQueued(item) {
+  const qid = String(item?.queue_id || "").trim();
+  if (!props.workgroupId || !qid) return;
+  try {
+    await cancelWorkgroupHumanQueueItem(props.workgroupId, qid);
+    await refreshHumanQueue();
+    if (editingQueueId.value === qid) cancelEditQueued();
+  } catch (err) {
+    emit("toast", { message: err.message || "取消排队失败", type: "error" });
+  }
+}
+
 async function sendMessage() {
   if (hitlMode.value) {
     await submitHitlAnswer();
@@ -1011,7 +1099,7 @@ async function sendMessage() {
   }
   let text = input.value.trim();
   const sender = fromNodeId.value.trim();
-  if (!props.workgroupId || !text || !sender || sending.value || !canChat.value) return;
+  if (!props.workgroupId || !text || !sender || !canChat.value) return;
 
   let directId = "";
   if (directMember.value) {
@@ -1023,8 +1111,7 @@ async function sendMessage() {
   }
 
   const clientMessageId = newClientMessageId();
-  sending.value = true;
-  cancelling.value = false;
+  const enqueueOnly = sending.value;
   followTail.value = true;
   input.value = "";
   const sentDirect = directMember.value;
@@ -1032,6 +1119,35 @@ async function sendMessage() {
   mentionOpen.value = false;
   await nextTick();
   resizeTextarea();
+
+  if (enqueueOnly) {
+    try {
+      await postWorkgroupMessageStream(
+        props.workgroupId,
+        {
+          text,
+          from_node_id: sender,
+          client_message_id: clientMessageId,
+          direct_member_id: directId || undefined,
+        },
+        {
+          onEvent: (eventName, data) => {
+            if (eventName === "queued") applyQueuePayload(data);
+          },
+        },
+      );
+      await refreshHumanQueue();
+      startQueuePoll();
+    } catch (err) {
+      emit("toast", { message: err.message || "入队失败", type: "error" });
+      input.value = stripLeadingMention(text, sentDirect?.display_name);
+      directMember.value = sentDirect;
+    }
+    return;
+  }
+
+  sending.value = true;
+  cancelling.value = false;
 
   const maxSeq = (timeline.value || []).reduce(
     (m, ev) => Math.max(m, Number(ev?.seq || 0)),
@@ -1046,10 +1162,12 @@ async function sendMessage() {
   streamMode.value = directId ? "direct" : "leader";
   streamAbort = new AbortController();
   startWorkPoll();
+  startQueuePoll();
   await nextTick();
   scrollToBottom(true);
 
   try {
+    let becameQueued = false;
     await postWorkgroupMessageStream(
       props.workgroupId,
       {
@@ -1061,6 +1179,12 @@ async function sendMessage() {
       {
         signal: streamAbort.signal,
         onEvent: async (eventName, data) => {
+          if (eventName === "queued") {
+            becameQueued = true;
+            applyQueuePayload(data);
+            clearLive();
+            return;
+          }
           if (eventName === "status") {
             const phase = String(data?.phase || "thinking");
             streamPhase.value = phase === "tool" ? "tool" : phase === "streaming" ? "streaming" : "thinking";
@@ -1070,7 +1194,7 @@ async function sendMessage() {
               liveAssistant.value = { ...liveAssistant.value, text: "" };
             }
             if (phase === "tool") {
-              await refreshTimelineQuiet();
+              await loadTimeline().catch(() => {});
             }
           } else if (eventName === "delta") {
             const piece = String(data?.text || "");
@@ -1099,7 +1223,9 @@ async function sendMessage() {
     clearLive();
     await loadTimeline();
     await loadPendingHitl();
+    await refreshHumanQueue();
     if (debugOpen.value) await loadDebugRuns();
+    if (becameQueued) startQueuePoll();
   } catch (err) {
     const aborted = err?.name === "AbortError" || /abort/i.test(String(err?.message || ""));
     clearLive();
@@ -1121,6 +1247,7 @@ async function sendMessage() {
     streamPhase.value = "";
     streamToolName.value = "";
     streamMode.value = "";
+    void refreshHumanQueue();
   }
 }
 
@@ -1173,6 +1300,10 @@ onMounted(async () => {
   await resolveSender();
   if (props.active && props.workgroupId) await loadAll();
   nextTick(resizeTextarea);
+});
+
+onUnmounted(() => {
+  stopQueuePoll();
 });
 </script>
 
@@ -1528,9 +1659,43 @@ onMounted(async () => {
         <p v-if="!canChat && workgroupStatus === 'configuring'" class="muted chat__composer-gate">
           工作组仍在配置中，请先在配置页点击「发布」后再对话。
         </p>
+        <div v-if="humanQueueItems.length" class="chat__queue" aria-label="排队中的消息">
+          <div
+            v-for="item in humanQueueItems"
+            :key="item.queue_id"
+            class="chat__queue-item"
+          >
+            <span class="chat__queue-pos">#{{ item.position }}</span>
+            <template v-if="editingQueueId === item.queue_id">
+              <input
+                v-model="editQueueDraft"
+                class="chat__queue-edit"
+                type="text"
+                @keydown.enter.prevent="saveQueuedEdit(item)"
+                @keydown.escape.prevent="cancelEditQueued"
+              />
+              <button type="button" class="chat__queue-btn" @click="saveQueuedEdit(item)">保存</button>
+              <button type="button" class="chat__queue-btn chat__queue-btn--ghost" @click="cancelEditQueued">
+                取消
+              </button>
+            </template>
+            <template v-else>
+              <span class="chat__queue-text" :title="item.text">{{ item.text }}</span>
+              <button type="button" class="chat__queue-btn" @click="beginEditQueued(item)">修改</button>
+              <button
+                type="button"
+                class="chat__queue-btn chat__queue-btn--ghost"
+                title="取消排队"
+                @click="removeQueued(item)"
+              >
+                ×
+              </button>
+            </template>
+          </div>
+        </div>
         <div class="chat__composer-pill" style="position: relative">
           <div
-            v-if="mentionOpen && mentionCandidates.length && canChat && !sending && !hitlMode"
+            v-if="mentionOpen && mentionCandidates.length && canChat && !hitlMode"
             class="wg-mention-menu"
             role="listbox"
           >
@@ -1570,7 +1735,7 @@ onMounted(async () => {
                       ? '输入直达成员的任务…'
                       : '输入消息，@ 直达成员…'
               "
-              :disabled="hitlMode ? hitlBusy || !canChat : sending || !canChat"
+              :disabled="hitlMode ? hitlBusy || !canChat : !canChat"
               @keydown="onKeydown"
               @keydown.backspace="onComposerBackspace"
               @input="onDraftInput"

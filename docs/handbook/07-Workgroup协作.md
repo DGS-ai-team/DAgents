@@ -63,6 +63,7 @@ HTTP：`GET /v1/workgroups/meta/member-tools`（Node 本地提供，**不依赖*
 
 - Supervisor / 成员可触发 **询问用户**（信息型 HITL）；在 Console 或 Node 工作组 UI 回答。
 - **取消当前 turn**：停止进行中的编排/成员循环；进行中的 `tool.command` 会尝试 `tool.cancel`，迟到结果不脏写。
+- **多人同时发言**：后到的消息在 Manage 侧 **排队**（不并行开 Leader）；上一轮 assistant 收尾后按 FIFO 自动消费。Composer 上方显示排队位次，可修改或取消排队项。
 
 ---
 

@@ -754,7 +754,10 @@ Ack 确认的是 `delivery_seq`。Generation 校验依赖**连接上下文**（�
 ### 8.4 背压与 human 入队
 
 - 超出窗口未 ack：暂停非关键扇出（实现数值 D1 可调）  
-- Leader 同步 `@` 期间：新 human **入队**，结束后按 Timeline `seq` 喂入  
+- **Leader / 直连 turn 进行中**：新 human **FIFO 入队**（Manage 进程内队列，对齐 Node session `MessageQueue` 单飞语义），**不**并行开第二轮 Leader  
+- 当前轮产出最终 assistant（`actor_final_text` / loop final）后，自动出队消费下一条  
+- `GET/PATCH/DELETE /v1/workgroups/{id}/human-queue`：查询位次、修改正文、取消排队  
+- UI（Console / Node）展示排队位次，支持修改与取消（Cursor 风）
 
 ### 8.5 与事实源
 

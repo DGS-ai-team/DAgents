@@ -457,3 +457,33 @@ func (c *ControlClient) GetWorkgroupRunHistory(ctx context.Context, workgroupID,
 	}
 	return out, nil
 }
+
+// ListWorkgroupHumanQueue 列出工作组排队中的 human 消息。
+func (c *ControlClient) ListWorkgroupHumanQueue(ctx context.Context, workgroupID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/human-queue"
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PatchWorkgroupHumanQueueItem 修改排队消息正文。
+func (c *ControlClient) PatchWorkgroupHumanQueueItem(ctx context.Context, workgroupID, queueID, text string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/human-queue/" + strings.TrimSpace(queueID)
+	if err := c.doJSON(ctx, http.MethodPatch, path, map[string]any{"text": text}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CancelWorkgroupHumanQueueItem 取消排队消息。
+func (c *ControlClient) CancelWorkgroupHumanQueueItem(ctx context.Context, workgroupID, queueID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/human-queue/" + strings.TrimSpace(queueID)
+	if err := c.doJSON(ctx, http.MethodDelete, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
