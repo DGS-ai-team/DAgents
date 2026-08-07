@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.9.1--preview-orange" alt="v0.9.1 preview"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.9.1-green" alt="v0.9.1"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
 </p>
 
