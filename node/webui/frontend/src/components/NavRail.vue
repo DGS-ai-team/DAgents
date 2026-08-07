@@ -735,15 +735,9 @@ defineExpose({
               </li>
               <li
                 v-if="!(membersByWg[wg.workgroup_id] || []).length"
-                class="nav-rail__empty nav-rail__empty--action"
+                class="nav-rail__empty"
               >
-                <button
-                  type="button"
-                  class="nav-rail__text-btn"
-                  @click.stop="openCreateMember(wg.workgroup_id)"
-                >
-                  添加成员
-                </button>
+                暂无成员
               </li>
             </template>
           </ul>

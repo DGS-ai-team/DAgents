@@ -1357,49 +1357,36 @@ onUnmounted(() => {
         </button>
       </div>
       <template v-else>
-        <div class="wg-chat__toolbar">
-          <div class="wg-chat__title" :title="toolbarTitle">{{ toolbarTitle }}</div>
-          <label v-if="llmConfigs.length" class="wg-chat__llm">
-            <span class="wg-chat__llm-label">Supervisor LLM</span>
-            <select
-              class="wg-chat__llm-select"
-              :disabled="bindingLlm || !workgroupMeta"
-              :value="workgroupMeta?.llm_profile_id || ''"
-              @change="onSupervisorLlmChange"
+        <header class="chat__header wg-chat__header">
+          <div class="chat__title">
+            <span class="chat__title-main" :title="toolbarTitle">{{ toolbarTitle }}</span>
+          </div>
+          <div class="chat__header-meta">
+            <label v-if="llmConfigs.length" class="wg-chat__llm">
+              <span class="wg-chat__llm-label">Supervisor LLM</span>
+              <select
+                class="wg-chat__llm-select"
+                :disabled="bindingLlm || !workgroupMeta"
+                :value="workgroupMeta?.llm_profile_id || ''"
+                @change="onSupervisorLlmChange"
+              >
+                <option v-if="!workgroupMeta?.llm_profile_id" value="" disabled>选择档案</option>
+                <option v-for="cfg in llmConfigs" :key="cfg.id" :value="cfg.id">
+                  {{ cfg.name || cfg.id }}{{ cfg.is_default ? "（默认）" : "" }}
+                </option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="wg-chat__debug-btn"
+              :class="{ 'wg-chat__debug-btn--active': debugOpen }"
+              title="RunHistory / LLM 调试"
+              @click="toggleDebugPanel"
             >
-              <option v-if="!workgroupMeta?.llm_profile_id" value="" disabled>选择档案</option>
-              <option v-for="cfg in llmConfigs" :key="cfg.id" :value="cfg.id">
-                {{ cfg.name || cfg.id }}{{ cfg.is_default ? "（默认）" : "" }}
-              </option>
-            </select>
-          </label>
-          <button
-            v-if="isConfiguring"
-            type="button"
-            class="wg-chat__toolbar-btn wg-chat__toolbar-btn--primary"
-            :disabled="publishing"
-            @click="publishCurrent"
-          >
-            {{ publishing ? "发布中…" : "发布" }}
-          </button>
-          <button
-            type="button"
-            class="wg-chat__toolbar-btn"
-            :class="{ 'wg-chat__toolbar-btn--active': debugOpen }"
-            title="RunHistory / LLM 调试"
-            @click="toggleDebugPanel"
-          >
-            调试
-          </button>
-          <button
-            type="button"
-            class="wg-chat__toolbar-btn"
-            title="添加成员"
-            @click="openMemberCreate(workgroupId)"
-          >
-            添加成员
-          </button>
-        </div>
+              调试
+            </button>
+          </div>
+        </header>
 
         <div v-if="isConfiguring" class="wg-chat__setup-banner" role="status">
           <p>
@@ -1656,13 +1643,6 @@ onUnmounted(() => {
               <div class="chat__empty-inner">
                 <div class="chat__empty-title">开始对话</div>
                 <div class="chat__empty-hint">向工作组发言，Leader 会编排成员协作</div>
-                <button
-                  type="button"
-                  class="btn btn--ghost chat__empty-action"
-                  @click="openMemberCreate(workgroupId)"
-                >
-                  先添加一个成员
-                </button>
               </div>
             </div>
           </div>
@@ -1903,24 +1883,8 @@ onUnmounted(() => {
   flex-direction: column;
   min-height: 0;
 }
-.wg-chat__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  align-items: center;
-  padding: 0.6rem 1rem;
-  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
-  font-size: 0.75rem;
-}
-.wg-chat__title {
-  color: var(--color-text, #111827);
-  font-size: 13px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: min(42vw, 360px);
-  margin-right: auto;
+.wg-chat__header {
+  flex: 0 0 auto;
 }
 .wg-chat__llm {
   display: inline-flex;
@@ -1942,37 +1906,23 @@ onUnmounted(() => {
   background: var(--color-surface, #fff);
   color: var(--color-text, #111827);
 }
-.wg-chat__toolbar-btn {
-  border: 1px solid var(--color-border, #d1d5db);
-  background: var(--color-surface, #fff);
-  color: var(--color-text, #111827);
-  border-radius: 6px;
-  padding: 4px 10px;
+.wg-chat__debug-btn {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted, #6b7280);
   font: inherit;
   font-size: 12px;
+  padding: 4px 8px;
+  border-radius: var(--radius-md, 6px);
   cursor: pointer;
 }
-.wg-chat__toolbar-btn:hover {
-  border-color: var(--color-primary, #0078d4);
+.wg-chat__debug-btn:hover {
+  color: var(--color-text, #111827);
+  background: var(--color-surface-hover, rgba(0, 0, 0, 0.04));
+}
+.wg-chat__debug-btn--active {
   color: var(--color-primary-strong, var(--color-primary, #0078d4));
-}
-.wg-chat__toolbar-btn--active {
-  border-color: var(--color-primary, #0078d4);
-  color: var(--color-primary, #0078d4);
-  background: color-mix(in srgb, var(--color-primary, #0078d4) 8%, transparent);
-}
-.wg-chat__toolbar-btn--primary {
-  border-color: var(--color-primary, #0078d4);
-  background: var(--color-primary, #0078d4);
-  color: #fff;
-}
-.wg-chat__toolbar-btn--primary:hover:not(:disabled) {
-  filter: brightness(1.05);
-  color: #fff;
-}
-.wg-chat__toolbar-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+  background: var(--color-primary-soft, color-mix(in srgb, var(--color-primary, #0078d4) 12%, transparent));
 }
 .wg-chat__setup-banner {
   display: flex;
