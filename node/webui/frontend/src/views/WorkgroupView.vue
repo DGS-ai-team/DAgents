@@ -791,6 +791,7 @@ function closeMemberModal() {
   const q = { ...route.query };
   delete q.createMember;
   delete q.editMember;
+  delete q.member;
   router.replace({
     name: "workgroups",
     params: wid ? { workgroupId: wid } : {},
