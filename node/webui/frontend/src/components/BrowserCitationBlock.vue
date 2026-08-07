@@ -1,5 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
+import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
+import { openLightbox } from "../stores/lightbox.js";
 
 const props = defineProps({
   refs: { type: Array, default: () => [] },
@@ -27,6 +29,24 @@ function truncate(text, n = 72) {
   if (s.length <= n) return s;
   return s.slice(0, n - 1) + "…";
 }
+
+function shotList(ref) {
+  return Array.isArray(ref?.screenshots) ? ref.screenshots.filter((s) => s?.url) : [];
+}
+
+function openShots(ref, index) {
+  const shots = shotList(ref);
+  if (!shots.length) return;
+  openLightbox(
+    shots.map((s) => ({
+      src: mediaFullUrl(s.url),
+      alt: s.label || s.caption || "浏览器截图",
+      label: s.label,
+      caption: s.caption,
+    })),
+    index,
+  );
+}
 </script>
 
 <template>
@@ -46,6 +66,7 @@ function truncate(text, n = 72) {
       >
         <span class="browser-cite__badge">{{ outcomeLabel(ref) }}</span>
         <span class="browser-cite__summary">{{ truncate(ref.summary) }}</span>
+        <span v-if="shotList(ref).length" class="browser-cite__shots-n">{{ shotList(ref).length }} 图</span>
         <span class="browser-cite__chev" aria-hidden="true">{{ openKey === (ref.key || idx) ? "▾" : "▸" }}</span>
       </button>
       <div v-if="openKey === (ref.key || idx)" class="browser-cite__body">
@@ -62,6 +83,25 @@ function truncate(text, n = 72) {
           <code>{{ ref.task_id }}</code>
           <span v-if="ref.steps != null" class="browser-cite__muted"> · {{ ref.steps }} 步</span>
         </p>
+        <div v-if="shotList(ref).length" class="browser-cite__block">
+          <div class="browser-cite__label">截图</div>
+          <div class="browser-cite__shots">
+            <button
+              v-for="(shot, si) in shotList(ref).slice(0, 8)"
+              :key="shot.id || shot.url || si"
+              type="button"
+              class="browser-cite__shot-btn"
+              @click="openShots(ref, si)"
+            >
+              <img
+                class="browser-cite__shot"
+                :src="mediaThumbnailUrl(shot.url)"
+                :alt="shot.label || '浏览器截图'"
+                loading="lazy"
+              />
+            </button>
+          </div>
+        </div>
         <div v-if="ref.urls?.length" class="browser-cite__block">
           <div class="browser-cite__label">URL</div>
           <ul class="browser-cite__list">
@@ -156,6 +196,11 @@ function truncate(text, n = 72) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.browser-cite__shots-n {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--text-muted, #6b7280);
+}
 .browser-cite__chev {
   flex: 0 0 auto;
   opacity: 0.55;
@@ -199,5 +244,29 @@ function truncate(text, n = 72) {
 }
 .browser-cite code {
   font-size: 0.78rem;
+}
+.browser-cite__shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+}
+.browser-cite__shot-btn {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  line-height: 0;
+  cursor: zoom-in;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.browser-cite__shot {
+  display: block;
+  max-width: 120px;
+  max-height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
 }
 </style>

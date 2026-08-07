@@ -146,6 +146,16 @@ func (r *Registry) browserCompanionSessionKey(ctx context.Context) (string, stri
 	return companionID, ""
 }
 
+func (r *Registry) registerBrowserTaskScreenshots(ctx context.Context, toolName string, out browser.ToolResult) {
+	if r == nil || !out.OK {
+		return
+	}
+	payload := browser.FormatToolResult(out)
+	for _, spec := range ExtractAllToolMediaPaths(toolName, payload, nil) {
+		r.registerToolMedia(ctx, toolCallIDFromContext(ctx), spec.RelPath, spec.Source, spec.Label, spec.Caption)
+	}
+}
+
 func (r *Registry) execBrowserRunTask(ctx context.Context, raw json.RawMessage) (string, error) {
 	sid, errText := r.browserCompanionSessionKey(ctx)
 	if errText != "" {
@@ -172,6 +182,7 @@ func (r *Registry) execBrowserRunTask(ctx context.Context, raw json.RawMessage) 
 	if err != nil {
 		return "", err
 	}
+	r.registerBrowserTaskScreenshots(ctx, "browser_run_task", out)
 	return browser.FormatToolResult(out), nil
 }
 
@@ -192,6 +203,7 @@ func (r *Registry) execBrowserTaskStatus(ctx context.Context, raw json.RawMessag
 	if err != nil {
 		return "", err
 	}
+	r.registerBrowserTaskScreenshots(ctx, "browser_task_status", out)
 	return browser.FormatToolResult(out), nil
 }
 

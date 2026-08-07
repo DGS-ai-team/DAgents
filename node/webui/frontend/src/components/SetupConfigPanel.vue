@@ -5,7 +5,7 @@ import LlmProfileModal from "./LlmProfileModal.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
 const DEEPSEEK_DEFAULT = {
-  id: "default",
+  id: "deepseek-chat",
   provider: "deepseek",
   base_url: "https://api.deepseek.com",
   model: "deepseek-chat",
@@ -142,6 +142,10 @@ function managePayload() {
 }
 
 async function saveConnection() {
+  if (form.manage.enabled && !String(form.manage.url || "").trim()) {
+    error.value = "已启用管理平台时，请填写服务地址";
+    return;
+  }
   await save({
     llm: llmPayload(),
     manage: managePayload(),
@@ -175,10 +179,12 @@ onMounted(async () => {
   >
     <section class="settings-section settings-section--llm">
       <div class="settings-section__head">
-        <h2 class="settings-section__title">LLM 配置</h2>
+        <h2 class="settings-section__title">模型</h2>
         <button type="button" class="btn btn--ghost btn--sm" @click="openCreateModal">新增</button>
       </div>
-      <p class="settings-section__desc">列表第一条为默认；点击卡片可编辑名称（输入栏展示）。Key 可留空。</p>
+      <p class="settings-section__desc">
+        第一条为默认配置；点击卡片可编辑。API Key 可留空（本机环境变量亦可）。
+      </p>
 
       <div class="llm-config-cards">
         <article
@@ -199,9 +205,9 @@ onMounted(async () => {
               <span>{{ p.model || "未设模型" }}</span>
             </div>
             <div class="llm-config-card__key">
-              <span v-if="p.has_api_key || (p.api_key && p.api_key.length)">Key 已配置</span>
-              <span v-else-if="p.mock">无需 Key</span>
-              <span v-else>Key 未填写</span>
+              <span v-if="p.has_api_key || (p.api_key && p.api_key.length)">密钥已配置</span>
+              <span v-else-if="p.mock">无需密钥</span>
+              <span v-else>密钥未填写</span>
             </div>
           </button>
           <div class="llm-config-card__actions">
@@ -229,82 +235,39 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section class="settings-section">
+    <section class="settings-section settings-section--manage">
       <div class="settings-section__head">
-        <h2 class="settings-section__title">Manage</h2>
+        <h2 class="settings-section__title">管理平台</h2>
       </div>
-      <p class="settings-section__desc">注册到 Manage 以启用团队能力与工作组。</p>
-      <label class="settings-toggle">
-        <input v-model="form.manage.enabled" type="checkbox" />
-        <span>启用 Manage 注册与通信</span>
-      </label>
-      <div class="setup-config-panel__field-grid">
-        <label class="settings-field">
-          <span class="settings-field__label">Manage URL</span>
+      <p class="settings-section__desc">
+        连接到 Manage 后可注册本机 Node，并参与工作组协作。
+      </p>
+      <div class="setup-manage-stack">
+        <label class="settings-toggle">
+          <input v-model="form.manage.enabled" type="checkbox" />
+          <span>启用连接</span>
+        </label>
+        <label class="settings-field settings-field--stack">
+          <span class="settings-field__label">服务地址</span>
           <input
             v-model="form.manage.url"
             class="settings-field__input"
-            type="text"
+            type="url"
+            inputmode="url"
+            placeholder="http://192.168.1.10:8020"
             :disabled="manageFieldsDisabled"
             autocomplete="off"
           />
         </label>
-        <label class="settings-field">
-          <span class="settings-field__label">node_token（可选）</span>
+        <label class="settings-toggle" :class="{ 'settings-toggle--disabled': manageFieldsDisabled }">
           <input
-            v-model="form.manage.node_token"
-            class="settings-field__input"
-            type="password"
-            :disabled="manageFieldsDisabled"
-            autocomplete="new-password"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">Console 分组 (team)</span>
-          <input
-            v-model="form.manage.team"
-            class="settings-field__input"
-            type="text"
-            :disabled="manageFieldsDisabled"
-            autocomplete="off"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">Registration base_url</span>
-          <input
-            v-model="form.manage.registration_base_url"
-            class="settings-field__input"
-            type="text"
-            :disabled="manageFieldsDisabled"
-            autocomplete="off"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">心跳间隔（秒）</span>
-          <input
-            v-model.number="form.manage.registration_interval_seconds"
-            class="settings-field__input"
-            type="number"
-            min="1"
+            v-model="form.manage.workgroup_enabled"
+            type="checkbox"
             :disabled="manageFieldsDisabled"
           />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">TTL（秒）</span>
-          <input
-            v-model.number="form.manage.registration_ttl_seconds"
-            class="settings-field__input"
-            type="number"
-            min="1"
-            :disabled="manageFieldsDisabled"
-          />
+          <span>启用工作组通道</span>
         </label>
       </div>
-      <p class="settings-hint">跨机器协作请使用工作组。</p>
-      <label class="settings-toggle">
-        <input v-model="form.manage.workgroup_enabled" type="checkbox" :disabled="manageFieldsDisabled" />
-        <span>启用工作组 Dialer（Manage WS 工具通道）</span>
-      </label>
     </section>
   </ConfigPanelShell>
 

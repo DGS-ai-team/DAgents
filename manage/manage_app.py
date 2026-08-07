@@ -104,6 +104,7 @@ def create_app(settings: ManageSettings | None = None) -> FastAPI:
             audit,
             hub=workgroup_ws_hub,
             llm_store=llm_store,
+            registry_store=store,
             loop=workgroup_loop,
         )
     )

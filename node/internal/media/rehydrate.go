@@ -54,21 +54,27 @@ func RehydrateFromMessages(reg *Registry, messages []llm.Message, callIndex map[
 			}
 			args = tools.ParseToolArgumentsMap(tc.Function.Arguments)
 		}
-		spec, ok := tools.ExtractToolMediaPaths(toolName, msg.Content, args)
-		if !ok {
+		specs := tools.ExtractAllToolMediaPaths(toolName, msg.Content, args)
+		if len(specs) == 0 {
 			continue
 		}
-		art, err := reg.RegisterFromPath(RegisterOpts{
-			RelPath:    spec.RelPath,
-			Source:     spec.Source,
-			ToolCallID: callID,
-			Label:      spec.Label,
-			Caption:    spec.Caption,
-		})
-		if err != nil {
-			continue
+		items := make([]map[string]any, 0, len(specs))
+		for _, spec := range specs {
+			art, err := reg.RegisterFromPath(RegisterOpts{
+				RelPath:    spec.RelPath,
+				Source:     spec.Source,
+				ToolCallID: callID,
+				Label:      spec.Label,
+				Caption:    spec.Caption,
+			})
+			if err != nil || art == nil {
+				continue
+			}
+			items = append(items, ArtifactSSEMap(art))
 		}
-		out[callID] = []map[string]any{ArtifactSSEMap(art)}
+		if len(items) > 0 {
+			out[callID] = items
+		}
 	}
 	return out
 }

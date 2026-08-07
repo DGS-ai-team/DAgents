@@ -1,11 +1,12 @@
 <script setup>
-import { onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
   fetchExternalToolCatalog,
   publishExternalTool,
   uploadExternalToolPackage,
 } from "../api.js";
-import { riskPillClass } from "../utils.js";
+import { riskLabel, riskPillClass } from "../utils.js";
+import PackageUploadModal from "./PackageUploadModal.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -17,15 +18,26 @@ const drafts = ref([]);
 const loading = ref(false);
 const error = ref("");
 const uploading = ref(false);
-const fileInput = ref(null);
+const modalOpen = ref(false);
+const query = ref("");
 
-const form = reactive({
-  tool_id: "",
-  version: "",
-  name: "",
-  platform: "any",
-  risk_level: "low",
-  file: null,
+const filteredCatalog = computed(() => {
+  const q = query.value.trim().toLowerCase();
+  const list = [...(catalog.value || [])];
+  if (!q) return list;
+  return list.filter((p) => {
+    const hay = [p.tool_id, p.version, p.name, p.platform, p.risk_level]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return hay.includes(q);
+  });
+});
+
+const catalogMeta = computed(() => {
+  if (loading.value) return "加载中…";
+  if (query.value.trim()) return `显示 ${filteredCatalog.value.length}/${catalog.value.length}`;
+  return `${catalog.value.length} 条`;
 });
 
 async function load() {
@@ -41,34 +53,23 @@ async function load() {
   }
 }
 
-function onFile(e) {
-  form.file = e.target.files?.[0] || null;
-}
-
-async function onUpload() {
-  if (!form.tool_id.trim() || !form.version.trim() || !form.name.trim() || !form.file) {
-    emit("toast", { message: "tool_id / version / name / 文件 必填", type: "error" });
-    return;
-  }
+async function onUploadSubmit(payload) {
   uploading.value = true;
   try {
     const pkg = await uploadExternalToolPackage({
-      toolId: form.tool_id.trim(),
-      version: form.version.trim(),
-      name: form.name.trim(),
-      platform: form.platform,
-      riskLevel: form.risk_level,
-      file: form.file,
+      toolId: payload.packageId,
+      version: payload.version,
+      name: payload.name,
+      platform: payload.platform,
+      riskLevel: payload.riskLevel,
+      file: payload.file,
     });
-    drafts.value = [pkg, ...drafts.value.filter(
-      (d) => !(d.tool_id === pkg.tool_id && d.version === pkg.version),
-    )];
+    drafts.value = [
+      pkg,
+      ...drafts.value.filter((d) => !(d.tool_id === pkg.tool_id && d.version === pkg.version)),
+    ];
     emit("toast", { message: `已上传 ${pkg.tool_id}@${pkg.version}（草稿）`, type: "success" });
-    form.tool_id = "";
-    form.version = "";
-    form.name = "";
-    form.file = null;
-    if (fileInput.value) fileInput.value.value = "";
+    modalOpen.value = false;
   } catch (err) {
     emit("toast", { message: err.message, type: "error" });
   } finally {
@@ -106,63 +107,36 @@ defineExpose({ load });
 </script>
 
 <template>
-  <section class="panel-card">
-    <div class="form-block">
-      <h3 class="form-block__title">上传外置 CLI / 二进制</h3>
-      <p class="muted filters-note">
-        上传为 draft，发布后进入目录；Node 侧安装至 <code>.runtime/externaltools/</code>
-      </p>
-      <div class="form-grid">
-        <label>
-          <span>tool_id</span>
-          <input v-model="form.tool_id" placeholder="officecli" />
-        </label>
-        <label>
-          <span>version</span>
-          <input v-model="form.version" placeholder="1.0.0" />
-        </label>
-        <label>
-          <span>平台</span>
-          <select v-model="form.platform">
-            <option value="any">any</option>
-            <option value="linux-amd64">linux-amd64</option>
-            <option value="windows-amd64">windows-amd64</option>
-            <option value="darwin-arm64">darwin-arm64</option>
-          </select>
-        </label>
-        <label>
-          <span>风险等级</span>
-          <select v-model="form.risk_level">
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-          </select>
-        </label>
-        <label class="form-grid__wide">
-          <span>名称</span>
-          <input v-model="form.name" placeholder="OfficeCLI" />
-        </label>
-        <label class="form-grid__wide">
-          <span>可执行文件 / zip</span>
-          <input ref="fileInput" type="file" @change="onFile" />
-        </label>
-      </div>
-      <div class="panel-actions">
-        <button class="btn btn-primary" :disabled="uploading" @click="onUpload">
-          {{ uploading ? "上传中…" : "上传" }}
-        </button>
-      </div>
+  <section class="mkt-page">
+    <div class="mkt-toolbar">
+      <input
+        v-model="query"
+        type="search"
+        class="mkt-search"
+        placeholder="搜索已发布外置工具…"
+        autocomplete="off"
+      />
+      <button type="button" class="btn btn-primary btn-sm" @click="modalOpen = true">
+        新建
+      </button>
     </div>
 
-    <div v-if="drafts.length" class="table-block">
+    <div v-if="drafts.length" class="panel mkt-panel">
       <div class="panel-head">
-        <h3 class="table-block__title">草稿（待发布）</h3>
-        <span class="panel-meta">{{ drafts.length }} 条</span>
+        <h3 class="table-block__title">待发布草稿</h3>
+        <span class="panel-meta">{{ drafts.length }} 条 · 刷新页面后本地草稿会清空</span>
       </div>
       <div class="table-scroll">
         <table class="data-table">
           <thead>
-            <tr><th>tool_id</th><th>version</th><th>名称</th><th>平台</th><th>风险</th><th>操作</th></tr>
+            <tr>
+              <th>包 ID</th>
+              <th>版本</th>
+              <th>名称</th>
+              <th>平台</th>
+              <th>风险</th>
+              <th>操作</th>
+            </tr>
           </thead>
           <tbody>
             <tr v-for="d in drafts" :key="d.tool_id + '@' + d.version">
@@ -170,41 +144,67 @@ defineExpose({ load });
               <td>{{ d.version }}</td>
               <td>{{ d.name }}</td>
               <td>{{ d.platform || "any" }}</td>
-              <td><span class="pill" :class="riskPillClass(d.risk_level)">{{ d.risk_level }}</span></td>
-              <td><button class="btn btn-primary btn-sm" @click="onPublish(d)">发布</button></td>
+              <td>
+                <span class="pill" :class="riskPillClass(d.risk_level)">{{ riskLabel(d.risk_level) }}</span>
+              </td>
+              <td>
+                <button type="button" class="btn btn-primary btn-sm" @click="onPublish(d)">发布</button>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <div class="table-block">
+    <div class="panel mkt-panel mkt-panel--catalog">
       <div class="panel-head">
         <h3 class="table-block__title">已发布目录</h3>
-        <span class="panel-meta">{{ loading ? "加载中…" : `${catalog.length} 条` }}</span>
+        <span class="panel-meta">{{ catalogMeta }}</span>
       </div>
       <p v-if="error" class="banner banner-error" role="alert">{{ error }}</p>
       <div class="table-scroll">
         <table class="data-table">
           <thead>
-            <tr><th>tool_id</th><th>version</th><th>名称</th><th>平台</th><th>风险</th><th>owner/team</th><th>下载</th></tr>
+            <tr>
+              <th>包 ID</th>
+              <th>版本</th>
+              <th>名称</th>
+              <th>平台</th>
+              <th>风险</th>
+              <th>操作</th>
+            </tr>
           </thead>
           <tbody>
-            <tr v-for="p in catalog" :key="p.tool_id + '@' + p.version">
+            <tr v-for="p in filteredCatalog" :key="p.tool_id + '@' + p.version">
               <td><strong>{{ p.tool_id }}</strong></td>
               <td>{{ p.version }}</td>
               <td>{{ p.name }}</td>
               <td>{{ p.platform || "any" }}</td>
-              <td><span class="pill" :class="riskPillClass(p.risk_level)">{{ p.risk_level }}</span></td>
-              <td class="muted">{{ p.owner || "—" }} / {{ p.team || "—" }}</td>
-              <td><a class="btn btn-ghost btn-sm" :href="downloadUrl(p)">下载</a></td>
+              <td>
+                <span class="pill" :class="riskPillClass(p.risk_level)">{{ riskLabel(p.risk_level) }}</span>
+              </td>
+              <td>
+                <a class="btn btn-ghost btn-sm" :href="downloadUrl(p)">下载</a>
+              </td>
             </tr>
-            <tr v-if="!loading && catalog.length === 0">
-              <td colspan="7" class="empty">暂无已发布外置工具</td>
+            <tr v-if="!loading && !filteredCatalog.length">
+              <td colspan="6" class="empty">
+                <div class="empty-state">
+                  {{ catalog.length ? "无匹配项" : "暂无已发布外置工具，点击右上角「新建」上传" }}
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+
+    <PackageUploadModal
+      :open="modalOpen"
+      kind="tool"
+      :uploading="uploading"
+      @close="modalOpen = false"
+      @submit="onUploadSubmit"
+    />
   </section>
 </template>

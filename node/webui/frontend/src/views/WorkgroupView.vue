@@ -1157,7 +1157,7 @@ onUnmounted(() => {
       <div v-if="!workgroupId" class="chat-empty-agent">
         <p>选择左侧已订阅工作组，或点击 + 新建。</p>
         <button type="button" class="wg-chat__link" @click="router.push({ name: 'agents' })">
-          返回 Agents
+          返回智能体
         </button>
       </div>
       <template v-else>

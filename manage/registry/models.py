@@ -48,6 +48,7 @@ class AgentRegisterRequest(BaseModel):
     agent_id: str = Field(default="", max_length=256)
     node_id: str = Field(default="", max_length=256)
     base_url: str
+    host_ips: str = Field(default="", max_length=1024)
     capabilities_hint: list[str] = Field(default_factory=list)
     ttl_seconds: int = Field(default=60, ge=5, le=3600)
     name: str = Field(default="", max_length=128)
@@ -94,7 +95,7 @@ class AgentRegisterRequest(BaseModel):
     def validate_string_lists(cls, value: Any) -> list[str]:
         return _normalize_string_list(value, field_name="capabilities")
 
-    @field_validator("name", "owner", "team", "version", mode="before")
+    @field_validator("name", "owner", "team", "version", "host_ips", mode="before")
     @classmethod
     def validate_trimmed_text(cls, value: Any) -> str:
         if value is None:
@@ -189,6 +190,7 @@ class AgentStoredRecord(BaseModel):
     agent_id: str
     node_id: str = ""
     base_url: str
+    host_ips: str = ""
     discovery_group: list[str]
     capabilities_hint: list[str] = Field(default_factory=list)
     name: str

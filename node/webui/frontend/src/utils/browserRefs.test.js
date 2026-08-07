@@ -26,6 +26,7 @@ describe("browserRefs", () => {
         id: 2,
         data: {
           tool_name: "browser_run_task",
+          media: [{ id: "m1", url: "/v1/agents/a/media/m1", label: "browser_run_task" }],
           content: JSON.stringify({
             ok: true,
             detail: {
@@ -35,6 +36,7 @@ describe("browserRefs", () => {
               success: true,
               action_names: ["navigate", "done"],
               urls: ["https://example.com"],
+              screenshot_paths: ["/tmp/shot.png"],
               detail_md: "tasks/btask-9.md",
             },
           }),
@@ -47,6 +49,9 @@ describe("browserRefs", () => {
     expect(refs[0].task_id).toBe("btask-9");
     expect(refs[0].summary).toBe("找到了标题");
     expect(refs[0].detail_md).toBe("tasks/btask-9.md");
+    expect(refs[0].screenshots).toEqual([
+      { id: "m1", url: "/v1/agents/a/media/m1", label: "browser_run_task", caption: null },
+    ]);
   });
 
   it("attaches refs on hydrate assistants", () => {

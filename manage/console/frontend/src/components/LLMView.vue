@@ -154,15 +154,17 @@ defineExpose({ load });
         </dl>
         <div class="llm-card__actions">
           <button type="button" class="btn btn-ghost btn-sm" @click="openEdit(c)">编辑</button>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm"
-            :disabled="c.is_default"
-            @click="onSetDefault(c)"
-          >
-            设为默认
-          </button>
-          <button type="button" class="btn btn-ghost btn-sm" @click="onDelete(c)">删除</button>
+          <div class="llm-card__actions-end">
+            <button
+              v-if="!c.is_default"
+              type="button"
+              class="btn btn-ghost btn-sm"
+              @click="onSetDefault(c)"
+            >
+              设为默认
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" @click="onDelete(c)">删除</button>
+          </div>
         </div>
       </article>
 

@@ -72,6 +72,7 @@ const createForm = reactive({
 
 const memberForm = reactive({
   displayName: "",
+  description: "",
   homeNodeId: "",
   soulMd: "",
   customMd: "",
@@ -126,7 +127,7 @@ const configMembers = computed(() => {
       llm_profile_revision: spec?.llm_profile_revision || "",
       max_tool_loops: spec?.max_tool_loops ?? null,
       allow_tool_names: Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [],
-      hint: "",
+      hint: String(spec?.description || "").trim(),
     });
   }
   return rows;
@@ -229,6 +230,7 @@ function toggleMemberTool(name) {
 
 function resetMemberForm() {
   memberForm.displayName = "";
+  memberForm.description = "";
   memberForm.homeNodeId = "";
   memberForm.soulMd = "";
   memberForm.customMd = "";
@@ -387,6 +389,7 @@ async function submitCreateMember() {
       : [...(memberToolDefaults.value || [])];
     const body = {
       display_name: displayName,
+      description: memberForm.description.trim(),
       home_node_id: home,
       allow_tool_names: tools,
       prompt: {
@@ -948,6 +951,16 @@ onMounted(async () => {
                   placeholder="例如：代码员"
                   required
                   autofocus
+                  :disabled="creatingMember"
+                />
+              </label>
+              <label class="field wg-member-create__desc">
+                <span>简短描述</span>
+                <input
+                  v-model="memberForm.description"
+                  type="text"
+                  maxlength="256"
+                  placeholder="例如：负责读写代码与排查报错"
                   :disabled="creatingMember"
                 />
               </label>

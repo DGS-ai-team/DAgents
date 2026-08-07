@@ -39,7 +39,7 @@ function onSubmit() {
         <strong>DAgents Manage</strong>
       </div>
       <div class="login-aside-copy">
-        <h1>统一控制面</h1>
+        <h1>集中管理台</h1>
         <p>查看活跃 Node 与工作组，分发配置与案例，让多节点协作保持一致。</p>
       </div>
       <div class="login-aside-meta">Registry · Workgroup · Console</div>
@@ -49,7 +49,7 @@ function onSubmit() {
       <form class="login-card" @submit.prevent="onSubmit">
         <div class="login-brand">
           <h1>管理员登录</h1>
-          <p>使用管理员账号进入控制面</p>
+          <p>使用管理员账号进入管理台</p>
         </div>
 
         <p v-if="hint" class="login-hint">{{ hint }}</p>

@@ -8,6 +8,7 @@ import {
   draftFromBlank,
   draftFromTemplate,
   llmActiveFromAgentView,
+  memoryEnabledFromToolGroups,
   skillsEnabledFromToolGroups,
 } from "./agentTemplateForm.js";
 
@@ -31,7 +32,7 @@ describe("agentTemplateForm", () => {
     expect(draft.toolGroups).toEqual(["fs", "bash"]);
     expect(draft.visibleSkills).toBeNull();
     expect(skillsEnabledFromToolGroups(draft.toolGroups)).toBe(false);
-    expect(draft.promptLongTermEnabled).toBe(true);
+    expect(memoryEnabledFromToolGroups(draft.toolGroups)).toBe(false);
   });
 
   it("ignores legacy skills.enabled and trusts tool groups", () => {
@@ -72,9 +73,8 @@ describe("agentTemplateForm", () => {
       maxToolLoops: 16,
       toolGroups: ["fs", "skills"],
       visibleSkills: ["write-skill", "write-hook"],
-      promptSoulEnabled: true,
-      promptCustomEnabled: true,
-      promptLongTermEnabled: false,
+      promptSoulMd: "你是助手",
+      promptCustomMd: "",
     });
     expect(payload.template_id).toBe("general");
     expect(payload.display_name).toBe("我的助手");
@@ -84,8 +84,24 @@ describe("agentTemplateForm", () => {
     expect(payload.defaults.skills).toEqual({
       visible: ["write-skill", "write-hook"],
     });
+    expect(payload.defaults.prompt_context.soul_enabled).toBe(true);
+    expect(payload.defaults.prompt_context.custom_enabled).toBe(false);
     expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
     expect(payload.defaults.prompt_context.user_enabled).toBeUndefined();
+  });
+
+  it("enables long-term memory when memory tool group is selected", () => {
+    const payload = buildCreateAgentPayload({
+      displayName: "有记忆",
+      llmProfileId: "default",
+      maxToolLoops: 8,
+      toolGroups: ["memory", "fs"],
+      promptLongTermScope: "global",
+      role: "assistant",
+      description: "",
+    });
+    expect(payload.defaults.prompt_context.long_term_enabled).toBe(true);
+    expect(payload.defaults.prompt_context.long_term_scope).toBe("global");
   });
 
   it("does not include placement fields", () => {
@@ -106,9 +122,8 @@ describe("agentTemplateForm", () => {
       llmProfileId: "a",
       maxToolLoops: 8,
       toolGroups: ["fs"],
-      promptSoulEnabled: true,
-      promptCustomEnabled: true,
-      promptLongTermEnabled: true,
+      promptSoulMd: "角色",
+      promptCustomMd: "临时",
       role: "assistant",
       description: "",
     });
@@ -117,6 +132,9 @@ describe("agentTemplateForm", () => {
     expect(patch.sandbox).toBeUndefined();
     expect(patch.defaults.tools.enabled_groups).toEqual(["fs"]);
     expect(patch.defaults.skills).toEqual({});
+    expect(patch.defaults.prompt_context.soul_enabled).toBe(true);
+    expect(patch.defaults.prompt_context.custom_enabled).toBe(true);
+    expect(patch.defaults.prompt_context.long_term_enabled).toBe(false);
   });
 
   it("reads draft from agent view", () => {
@@ -138,7 +156,6 @@ describe("agentTemplateForm", () => {
     expect(draft.displayName).toBe("已有");
     expect(draft.toolGroups).toEqual(["bash"]);
     expect(draft.visibleSkills).toEqual(["write-skill"]);
-    expect(draft.promptLongTermEnabled).toBe(false);
     expect(draft.llmProfileId).toBe("deepseek");
   });
 
@@ -149,13 +166,13 @@ describe("agentTemplateForm", () => {
       maxToolLoops: 32,
       toolGroups: ["skills"],
       visibleSkills: null,
-      promptSoulEnabled: true,
-      promptCustomEnabled: true,
-      promptLongTermEnabled: true,
       role: "assistant",
       description: "",
     });
     expect(payload.defaults.skills).toEqual({});
+    expect(payload.defaults.prompt_context.soul_enabled).toBe(false);
+    expect(payload.defaults.prompt_context.custom_enabled).toBe(false);
+    expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
   });
 
   it("builds create payload without template_id for blank draft", () => {
@@ -165,15 +182,13 @@ describe("agentTemplateForm", () => {
       llmProfileId: "default",
       maxToolLoops: 32,
       toolGroups: [],
-      promptSoulEnabled: true,
-      promptCustomEnabled: true,
-      promptLongTermEnabled: true,
       role: "assistant",
       description: "",
     });
     expect(payload.template_id).toBeUndefined();
     expect(payload.display_name).toBe("空白");
     expect(payload.defaults.skills).toEqual({});
+    expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
   });
 
   it("draftFromBlank picks first llm profile", () => {
@@ -191,19 +206,21 @@ describe("agentTemplateForm", () => {
         role: "assistant",
         llmProfileId: "default",
         maxToolLoops: 20,
-        toolGroups: ["fs"],
-        promptSoulEnabled: true,
-        promptCustomEnabled: true,
-        promptLongTermEnabled: false,
+        toolGroups: ["fs", "memory"],
+        promptSoulMd: "  ",
+        promptCustomMd: "补充",
       },
     );
     expect(payload.id).toBe("my-bot");
     expect(payload.display_name).toBe("我的 Bot");
     expect(payload.defaults.llm).toEqual({ active: "default", max_tool_loops: 20 });
-    expect(payload.defaults.tools.enabled_groups).toEqual(["fs"]);
+    expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "memory"]);
     expect(payload.defaults.child_agents).toBeUndefined();
     expect(payload.defaults.skills).toEqual({});
     expect(payload.sandbox).toBeUndefined();
+    expect(payload.defaults.prompt_context.soul_enabled).toBe(false);
+    expect(payload.defaults.prompt_context.custom_enabled).toBe(true);
+    expect(payload.defaults.prompt_context.long_term_enabled).toBe(true);
   });
 
   it("reads llm active from agent view snapshot", () => {

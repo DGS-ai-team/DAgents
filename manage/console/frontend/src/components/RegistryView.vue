@@ -13,8 +13,9 @@ const props = defineProps({
     type: Object,
     required: true,
   },
-  roleHint: { type: String, default: "" },
-  listSummary: { type: String, default: "—" },
+  online: { type: [Number, String], default: "—" },
+  offline: { type: [Number, String], default: "—" },
+  registered: { type: [Number, String], default: "—" },
 });
 
 const emit = defineEmits(["open", "filter-change", "page-prev", "page-next"]);
@@ -51,11 +52,15 @@ function emitFilters(immediate = false) {
     <section class="panel filters-panel">
       <div class="panel-head">
         <h2 class="panel-title">筛选与搜索</h2>
-        <span class="panel-meta">{{ listSummary }}</span>
+        <div class="panel-meta nodes-status-meta" aria-label="注册概览">
+          <span class="nodes-status-chip nodes-status-chip--online">在线 {{ online }}</span>
+          <span class="nodes-status-chip">离线 {{ offline }}</span>
+          <span class="nodes-status-chip">合计 {{ registered }}</span>
+        </div>
       </div>
       <div class="filters-grid">
         <label class="field">
-          <span>discovery_group</span>
+          <span>发现组</span>
           <input
             v-model="localFilters.group"
             type="text"
@@ -64,22 +69,12 @@ function emitFilters(immediate = false) {
             @input="emitFilters()"
           />
         </label>
-        <label class="field">
-          <span>team</span>
-          <input
-            v-model="localFilters.team"
-            type="text"
-            placeholder="精确匹配"
-            autocomplete="off"
-            @input="emitFilters()"
-          />
-        </label>
-        <label class="field">
-          <span>status</span>
+        <label class="field field-status">
+          <span>状态</span>
           <select v-model="localFilters.status" @change="emitFilters(true)">
             <option value="all">全部</option>
-            <option value="online">online</option>
-            <option value="offline">offline</option>
+            <option value="online">在线</option>
+            <option value="offline">离线</option>
           </select>
         </label>
         <label class="field field-grow">
@@ -103,9 +98,6 @@ function emitFilters(immediate = false) {
             <option :value="100">100</option>
           </select>
         </label>
-      </div>
-      <div class="filters-meta">
-        <span class="muted">{{ roleHint }}</span>
       </div>
     </section>
 

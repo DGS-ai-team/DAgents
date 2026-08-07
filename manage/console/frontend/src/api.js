@@ -87,10 +87,6 @@ export async function fetchAgents(params) {
   return apiFetch(REGISTRY_API, params);
 }
 
-export async function fetchAudit(limit = 100) {
-  return apiFetch("/v1/admin/audit", { limit });
-}
-
 // --- LLM ?? ---
 export async function fetchLLMConfigs() {
   return apiFetch("/v1/llm/configs");
