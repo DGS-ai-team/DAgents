@@ -15,6 +15,19 @@ _RN = r"^rn_[0-9a-z]{26}$"
 _SHA = r"^sha256:[0-9a-f]{64}$"
 
 
+class WorkgroupWorkspace(BaseModel):
+    """工作组共享工作区（Supervisor / 组级资产预留）。
+
+    由 Manage 在 create_workgroup 时落盘到
+    `{MANAGE_WORKGROUP_WORKSPACES_DIR}/{workgroup_id}/`
+    （默认与 Manage DB 同级的 `workgroup-workspaces/`）。
+    当前不挂 Supervisor FS 工具；成员工作区仍在 Home Node。
+    """
+
+    root_kind: Literal["workgroup_workspace"] = "workgroup_workspace"
+    path: str = ""
+
+
 class WorkGroup(BaseModel):
     workgroup_id: str = Field(pattern=_WG)
     schema_version: Literal["0.5.0"] = SCHEMA_VERSION
@@ -23,6 +36,7 @@ class WorkGroup(BaseModel):
     created_by_node_id: str = Field(min_length=1, max_length=128)
     llm_profile_id: str = Field(min_length=1)
     llm_profile_revision: str = Field(min_length=1)
+    workspace: WorkgroupWorkspace = Field(default_factory=WorkgroupWorkspace)
     created_at: str
     archived_at: str | None = None
 

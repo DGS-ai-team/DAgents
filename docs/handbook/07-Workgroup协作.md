@@ -14,6 +14,7 @@
 - 人类在 Console 或 Node Web UI 里对话。
 - Supervisor 用工具 `assign_workgroup_task` **编排**成员，或用户用 **`@成员显示名`** **直达**成员。
 - 成员在各自 **工作区目录** 内执行工具（默认文件系统；可选 Shell），结果经 Timeline / RunHistory 回灌。
+- **组级工作区**（Supervisor / 组资产预留）由 **Manage** 在创建工作组时落盘：默认 `{MANAGE_DB_PATH 同级}/workgroup-workspaces/{workgroup_id}/`（可用 `MANAGE_WORKGROUP_WORKSPACES_DIR` 覆盖）。当前**不**挂 Supervisor FS 工具；成员工作区仍在 Home Node 的 `.runtime/workgroup-workers/…`。
 
 成员 **不是** 侧栏里的本地 Agent：不能走 `/v1/agents` 本地消息 API，也不继承本机 Agent 的 skills / browser 会话。
 

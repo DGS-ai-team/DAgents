@@ -134,10 +134,16 @@
   "created_by_node_id": "node-A",
   "llm_profile_id": "…",
   "llm_profile_revision": "…",
+  "workspace": {
+    "root_kind": "workgroup_workspace",
+    "path": "/var/lib/dagents/workgroup-workspaces/wg_…"
+  },
   "created_at": "…",
   "archived_at": null
 }
 ```
+
+`workspace`：Manage 在 `create_workgroup` 时物化的组级目录（默认 DB 旁 `workgroup-workspaces/`）；`path` 可为空（未配置落盘根目录时）。v1 **不**给 Supervisor 挂 FS 工具。
 
 ### 2.2 WorkGroupACL
 
