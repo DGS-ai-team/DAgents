@@ -41,16 +41,6 @@ background_job_cancel=always
 browser_run_task=always
 browser_task_status=never
 browser_task_cancel=always
-# 细粒度 browser_ops（伴生/调试；主 Agent 默认不再启用）
-browser_start=always
-browser_stop=rule
-browser_navigate=always
-browser_click=always
-browser_fill=always
-browser_press=always
-browser_screenshot=rule
-browser_wait=rule
-browser_snapshot=rule
 
 # --- 企业微信消息推送（webhook markdown_v2 / file）---
 wecom_send_markdown=rule
