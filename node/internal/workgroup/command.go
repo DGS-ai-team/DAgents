@@ -64,6 +64,27 @@ func (h *CommandHandler) Accept(cmd ToolCommand, binding WorkerBinding) (*Accept
 		if existing.Status == "accepted" && existing.Executions == 0 && h.Executor != nil {
 			return h.runExecutor(cmd, *existing)
 		}
+		// 进程重启后 journal 残留 running、但本进程已无执行上下文：升格 indeterminate，
+		// 避免只回 tool.ack 导致 Manage 空等 60s。
+		if existing.Status == "running" && !h.isTrackedRunning(cmd.CommandID) {
+			now := time.Now().UTC().Format(time.RFC3339)
+			existing.Status = "indeterminate"
+			existing.ErrorCode = string(CodeIndeterminate)
+			existing.UpdatedAt = now
+			if err := h.Journal.Put(*existing); err != nil {
+				return nil, err
+			}
+			return &AcceptResult{
+				Ack: CommandAck{
+					CommandID:            cmd.CommandID,
+					Status:               existing.Status,
+					ConnectionGeneration: h.ConnectionGeneration,
+					JournaledAt:          existing.JournaledAt,
+				},
+				Entry:    *existing,
+				Executed: false,
+			}, nil
+		}
 		// 已 journal 且终态/已跑过：返回状态，不重执行
 		return &AcceptResult{
 			Ack: CommandAck{
@@ -301,6 +322,16 @@ func (h *CommandHandler) invokeRunningCancel(commandID string) {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (h *CommandHandler) isTrackedRunning(commandID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.running == nil {
+		return false
+	}
+	_, ok := h.running[commandID]
+	return ok
 }
 
 func (h *CommandHandler) reject(cmd ToolCommand, ferr error) (*AcceptResult, error) {

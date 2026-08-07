@@ -7,7 +7,7 @@
 | `types.go` | D0.5 实体（Binding / Command / Ack / Envelope） |
 | `digest.go` | Canonical JSON + `sha256:` |
 | `fencing.go` | lease_epoch / generation / digest / catalog |
-| `binding.go` | WorkerBinding 存储（memory / dir） |
+| `binding.go` | WorkerBinding 存储（Memory / DirBindingStore） |
 | `journal.go` | command journal（accept 先落盘） |
 | `provision.go` | 幂等 `member.provision` |
 | `manifest.go` | tool catalog ∩ allowlist |
