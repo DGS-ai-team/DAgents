@@ -19,6 +19,7 @@ async function saveCapabilities() {
   await save({
     features: {
       ...form.features,
+      ui_enabled: true,
       skills_enabled: true,
       triggers_enabled: true,
       child_agents_enabled: true,
@@ -46,6 +47,7 @@ onMounted(load);
   >
     <p class="capabilities-intro">
       Agent 是否具备技能、子 Agent、定时任务等能力，由各 Agent 的工具组决定。此处配置进程级共享参数与服务（浏览器、企业微信等）。
+      未启用「浏览器服务 / 企业微信推送」时，对应工具组不会出现在 Agent 与创建流程中。Web UI 固定挂载，无需开关。
       单个 Agent 请到
       <router-link class="capabilities-intro__link" to="/settings/agents">设置 › Agents</router-link>
       配置工具组。
@@ -57,7 +59,6 @@ onMounted(load);
       </div>
       <p class="settings-section__desc">与工具组无关的 Node 进程开关与配额参数。</p>
       <div class="setup-config-panel__toggles setup-config-panel__toggles--grid">
-        <label class="settings-toggle"><input v-model="form.features.ui_enabled" type="checkbox" /><span>Web 界面</span></label>
         <label class="settings-toggle">
           <input v-model="form.features.browser_enabled" type="checkbox" />
           <span class="settings-toggle__label">

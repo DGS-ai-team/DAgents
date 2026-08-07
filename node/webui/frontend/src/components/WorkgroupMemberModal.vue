@@ -2,16 +2,31 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 
-// catalog 失败时的离线兜底：与 shared catalog default=true（仅 fs）对齐；不含 bash。
-const FALLBACK_TOOLS = [
-  { id: "read_file", label: "读文件", hint: "read_file" },
-  { id: "show_image", label: "展示图片", hint: "show_image" },
-  { id: "read_image", label: "读图片", hint: "read_image（需多模态）" },
-  { id: "write_file", label: "写文件", hint: "write_file" },
-  { id: "glob_files", label: "列目录", hint: "glob_files" },
-  { id: "grep_file", label: "单文件搜索", hint: "grep_file" },
-  { id: "grep_files", label: "多文件搜索", hint: "grep_files" },
-  { id: "search_replace", label: "替换内容", hint: "search_replace" },
+// catalog 失败时的离线兜底：与 shared catalog groups（fs 默认开、bash 默认关）对齐。
+const FALLBACK_GROUPS = [
+  {
+    id: "fs",
+    label: "文件系统",
+    hint: "读/写/搜索等工作区文件工具",
+    defaultOn: true,
+    toolIds: [
+      "read_file",
+      "show_image",
+      "read_image",
+      "write_file",
+      "glob_files",
+      "grep_file",
+      "grep_files",
+      "search_replace",
+    ],
+  },
+  {
+    id: "bash",
+    label: "Shell",
+    hint: "bash_run 等（无额外沙箱，默认不勾选）",
+    defaultOn: false,
+    toolIds: ["bash_run", "background_job_status", "background_job_cancel"],
+  },
 ];
 
 const props = defineProps({
@@ -24,11 +39,11 @@ const props = defineProps({
 
 const emit = defineEmits(["close", "saved"]);
 
-const toolOptions = ref([...FALLBACK_TOOLS]);
-const defaultTools = ref(FALLBACK_TOOLS.map((t) => t.id));
+const groupOptions = ref(FALLBACK_GROUPS.map((g) => ({ ...g, toolIds: [...g.toolIds] })));
 const draft = reactive(emptyDraft());
 const busy = ref(false);
 const loadingSpec = ref(false);
+const catalogError = ref("");
 const error = ref("");
 const advancedOpen = ref(false);
 const nameInput = ref(null);
@@ -43,22 +58,48 @@ const canSubmit = computed(() => {
   return String(draft.displayName || "").trim().length > 0;
 });
 
+function defaultGroupIds(groups = groupOptions.value) {
+  return (groups || []).filter((g) => g.defaultOn).map((g) => g.id);
+}
+
+function expandGroupsToTools(groupIds, groups = groupOptions.value) {
+  const want = new Set((groupIds || []).map(String));
+  const out = [];
+  const seen = new Set();
+  for (const g of groups || []) {
+    if (!want.has(g.id)) continue;
+    for (const id of g.toolIds || []) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+function groupsFromAllowNames(allowNames, groups = groupOptions.value) {
+  const allow = new Set((allowNames || []).map(String));
+  return (groups || [])
+    .filter((g) => (g.toolIds || []).some((id) => allow.has(id)))
+    .map((g) => g.id);
+}
+
 function emptyDraft() {
   return {
     displayName: "",
     homeNodeId: "",
-    tools: [...defaultTools.value],
+    groups: defaultGroupIds(),
     soulMd: "",
     customMd: "",
     llmProfileId: "",
   };
 }
 
-function toggleTool(id) {
-  const set = new Set(draft.tools);
+function toggleGroup(id) {
+  const set = new Set(draft.groups);
   if (set.has(id)) set.delete(id);
   else set.add(id);
-  draft.tools = [...set];
+  draft.groups = [...set];
 }
 
 function onBackdropClick(event) {
@@ -67,23 +108,51 @@ function onBackdropClick(event) {
 }
 
 async function loadToolCatalog() {
+  catalogError.value = "";
   try {
+    // 始终从本 Node 拉取成员可用工具组（嵌入 catalog，不经 Manage）。
     const catalog = await api.getMemberToolCatalog();
     const tools = Array.isArray(catalog?.tools) ? catalog.tools : [];
-    const mapped = tools
-      .map((t) => ({
-        id: String(t.id || "").trim(),
-        label: String(t.label || t.id || "").trim(),
-        hint: String(t.hint || t.id || "").trim(),
-      }))
-      .filter((t) => t.id);
-    if (mapped.length) toolOptions.value = mapped;
-    const defaults = Array.isArray(catalog?.default_allow_names)
-      ? catalog.default_allow_names.map(String).filter(Boolean)
-      : mapped.map((t) => t.id);
-    if (defaults.length) defaultTools.value = defaults;
-  } catch {
-    /* 保留 FALLBACK */
+    const groups = Array.isArray(catalog?.groups) ? catalog.groups : [];
+    const byGroup = new Map();
+    for (const t of tools) {
+      const gid = String(t.group || "").trim() || "other";
+      if (!byGroup.has(gid)) {
+        byGroup.set(gid, {
+          id: gid,
+          label: String(t.group_label || gid).trim() || gid,
+          hint: "",
+          defaultOn: false,
+          toolIds: [],
+        });
+      }
+      const entry = byGroup.get(gid);
+      const tid = String(t.id || "").trim();
+      if (tid) entry.toolIds.push(tid);
+      if (t.default) entry.defaultOn = true;
+      if (!entry.hint && t.hint) entry.hint = String(t.hint);
+    }
+    const ordered = [];
+    const seen = new Set();
+    for (const g of groups) {
+      const id = String(g.id || "").trim();
+      if (!id || !byGroup.has(id)) continue;
+      const entry = byGroup.get(id);
+      if (g.label) entry.label = String(g.label);
+      ordered.push(entry);
+      seen.add(id);
+    }
+    for (const [id, entry] of byGroup) {
+      if (!seen.has(id)) ordered.push(entry);
+    }
+    if (ordered.length) {
+      groupOptions.value = ordered;
+      if (props.mode === "create" && !props.open) {
+        draft.groups = defaultGroupIds(ordered);
+      }
+    }
+  } catch (e) {
+    catalogError.value = e?.message || "加载 Node 工具组失败，已用离线兜底";
   }
 }
 
@@ -106,7 +175,9 @@ async function resetFromProps() {
     draft.displayName = String(spec?.display_name || "").trim();
     draft.homeNodeId = String(spec?.home_node_id || props.defaultHomeNodeId || "").trim();
     const allow = Array.isArray(spec?.tools?.allow_names) ? spec.tools.allow_names : [];
-    draft.tools = allow.length ? allow.map(String) : [...defaultTools.value];
+    draft.groups = allow.length
+      ? groupsFromAllowNames(allow.map(String))
+      : defaultGroupIds();
     draft.soulMd = String(spec?.prompt?.soul_md || "");
     draft.customMd = String(spec?.prompt?.custom_md || "");
     draft.llmProfileId = String(spec?.llm_profile_id || "").trim();
@@ -126,7 +197,8 @@ async function submit() {
   error.value = "";
   const name = String(draft.displayName || "").trim();
   if (!name || !props.workgroupId || busy.value) return;
-  const tools = draft.tools.length ? [...draft.tools] : [...defaultTools.value];
+  const selected = draft.groups.length ? [...draft.groups] : defaultGroupIds();
+  const tools = expandGroupsToTools(selected);
   const body = {
     display_name: name,
     allow_tool_names: tools,
@@ -168,7 +240,12 @@ async function submit() {
 watch(
   () => props.open,
   (visible) => {
-    if (visible) void resetFromProps();
+    if (visible) {
+      void (async () => {
+        await loadToolCatalog();
+        await resetFromProps();
+      })();
+    }
   },
 );
 
@@ -227,18 +304,21 @@ onMounted(() => {
             </label>
 
             <fieldset class="wg-member-modal__tools">
-              <legend class="settings-field__label">能力</legend>
-              <p class="settings-field__hint">默认文件系统；Shell 无额外沙箱，需显式勾选</p>
+              <legend class="settings-field__label">工具组</legend>
+              <p class="settings-field__hint">
+                可选工具组由本 Node 提供；默认文件系统，Shell 需显式勾选。
+              </p>
+              <p v-if="catalogError" class="settings-field__hint">{{ catalogError }}</p>
               <div class="wg-member-modal__tool-row">
                 <button
-                  v-for="opt in toolOptions"
+                  v-for="opt in groupOptions"
                   :key="opt.id"
                   type="button"
                   class="wg-member-modal__chip"
-                  :class="{ 'wg-member-modal__chip--on': draft.tools.includes(opt.id) }"
+                  :class="{ 'wg-member-modal__chip--on': draft.groups.includes(opt.id) }"
                   :disabled="busy"
-                  :title="opt.hint"
-                  @click="toggleTool(opt.id)"
+                  :title="opt.hint || opt.id"
+                  @click="toggleGroup(opt.id)"
                 >
                   {{ opt.label }}
                 </button>

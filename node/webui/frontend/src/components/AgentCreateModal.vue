@@ -8,6 +8,8 @@ import {
   draftFromBlank,
   draftFromTemplate,
   emptyAgentDraft,
+  pruneDraftToolGroups,
+  toolGroupsFromSetup,
 } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
@@ -26,6 +28,7 @@ const error = ref("");
 const fieldErrors = reactive({ name: "", llm: "" });
 const templates = ref([]);
 const llmProfiles = ref([]);
+const availableToolGroups = ref([]);
 const draft = reactive(emptyAgentDraft());
 /** 是否从「选起点」进来；无模板或从空态模板直达时为 false */
 const canGoBackToStart = ref(false);
@@ -138,6 +141,8 @@ async function loadTemplates() {
           }))
           .filter((p) => p.id)
       : [];
+    availableToolGroups.value = toolGroupsFromSetup(setup);
+    pruneDraftToolGroups(draft, availableToolGroups.value);
 
     const prefer = String(props.initialTemplateId || "").trim();
     const preferred = prefer ? templates.value.find((t) => t.id === prefer) : null;
@@ -168,11 +173,13 @@ async function loadTemplates() {
 
 function applyTemplate(template) {
   Object.assign(draft, draftFromTemplate(template, llmProfileIds.value));
+  pruneDraftToolGroups(draft, availableToolGroups.value);
 }
 
 function applyBlank() {
   Object.assign(draft, draftFromBlank(llmProfileIds.value));
   draft.templateId = BLANK_TEMPLATE_ID;
+  pruneDraftToolGroups(draft, availableToolGroups.value);
 }
 
 function pickBlank() {
@@ -351,6 +358,7 @@ watch(
             v-else
             :draft="draft"
             :llm-profiles="llmProfiles"
+            :available-tool-groups="availableToolGroups"
             mode="create-capabilities"
           />
         </div>
