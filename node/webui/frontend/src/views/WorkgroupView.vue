@@ -6,6 +6,7 @@ import NavRail from "../components/NavRail.vue";
 import WorkgroupMemberModal from "../components/WorkgroupMemberModal.vue";
 import { renderMarkdown } from "../utils/markdown.js";
 import { inferToolKind } from "../utils/toolSource.js";
+import { createFollowTailController } from "../utils/scrollTail.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -41,8 +42,8 @@ const modelMenuRoot = ref(null);
 const timelineEl = ref(null);
 /** 本轮发送开始前的 Timeline 水位 */
 const statusWatermarkSeq = ref(0);
-const followTail = ref(true);
-const SCROLL_TAIL_THRESHOLD = 80;
+const scrollTail = createFollowTailController({ threshold: 80 });
+let timelineResizeObserver = null;
 /** 编排态：成员回报折叠展开态（key = assign_id / event_id） */
 const expandedMemberReports = ref({});
 
@@ -265,23 +266,31 @@ async function loadTimeline() {
 }
 
 function onTimelineScroll() {
-  const el = timelineEl.value;
-  if (!el) return;
-  followTail.value =
-    el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_TAIL_THRESHOLD;
+  scrollTail.onScroll(timelineEl.value);
 }
 
 function maybeScrollTimelineTail() {
-  if (!followTail.value) return;
   nextTick(() => {
-    const el = timelineEl.value;
-    if (el) el.scrollTop = el.scrollHeight;
+    scrollTail.pinIfFollowing(timelineEl.value);
   });
 }
 
 function scrollTimelineTail() {
-  followTail.value = true;
-  maybeScrollTimelineTail();
+  nextTick(() => {
+    scrollTail.forcePin(timelineEl.value);
+  });
+}
+
+function bindTimelineResizeObserver() {
+  const el = timelineEl.value;
+  if (!el || typeof ResizeObserver === "undefined") return;
+  timelineResizeObserver?.disconnect();
+  timelineResizeObserver = new ResizeObserver(() => {
+    if (scrollTail.follow) scrollTail.pinIfFollowing(el);
+  });
+  const inner = el.firstElementChild || el;
+  timelineResizeObserver.observe(inner);
+  timelineResizeObserver.observe(el);
 }
 
 async function loadWorkgroupMeta() {
@@ -1297,7 +1306,7 @@ watch(
     closeModelMenu();
     stopPoll();
     stopWorkPoll();
-    followTail.value = true;
+    scrollTail.setFollow(true);
     // 切换工作组时复位输入/直连/发送态，避免底部状态条残留
     draft.value = "";
     directMember.value = null;
@@ -1357,13 +1366,19 @@ watch(
 
 onMounted(() => {
   loadSelf();
+  bindTimelineResizeObserver();
   document.addEventListener("pointerdown", onModelMenuPointerDown, true);
   document.addEventListener("keydown", onModelMenuKeydown, true);
+});
+watch(timelineEl, (el) => {
+  if (el) bindTimelineResizeObserver();
 });
 onUnmounted(() => {
   stopPoll();
   stopWorkPoll();
   stopQueuePoll();
+  timelineResizeObserver?.disconnect();
+  timelineResizeObserver = null;
   document.removeEventListener("pointerdown", onModelMenuPointerDown, true);
   document.removeEventListener("keydown", onModelMenuKeydown, true);
 });
