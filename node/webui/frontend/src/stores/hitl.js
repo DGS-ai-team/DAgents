@@ -198,6 +198,36 @@ export function buildUserInfoResumeFromSelection(data, selectedIds) {
   return buildUserInfoResume(data, answers.join(", "), [...selected].sort());
 }
 
+/**
+ * 组装 user_information resume。
+ * - 底部输入框有非空文本：以自由文本为准（忽略气泡已选选项），避免「发消息打断」却落成默认选项。
+ * - 无文本且有选项：走选中态；单选空选可回落首项（与气泡默认高亮一致）。
+ * - 无文本且无选项：自由文本路径（可能为空）。
+ *
+ * @returns {{ ok: true, resume: object } | { ok: false, error: string }}
+ */
+export function buildUserInfoSubmitResume(data, { text = "", selected = [] } = {}) {
+  const req = extractUserInfo(data);
+  const typed = String(text || "").trim();
+  if (typed) {
+    return { ok: true, resume: buildUserInfoResume(data, typed) };
+  }
+  if (req.options.length) {
+    let selectedIds = resolveUserInfoSelectionIds(req, selected);
+    if (!selectedIds.length && !req.allowMultiple) {
+      selectedIds = resolveUserInfoSelectionIds(req, 0);
+    }
+    if (!selectedIds.length && req.required) {
+      return { ok: false, error: "请先选择选项再提交" };
+    }
+    return { ok: true, resume: buildUserInfoResumeFromSelection(data, selectedIds) };
+  }
+  if (req.required) {
+    return { ok: false, error: "请先输入回答再提交" };
+  }
+  return { ok: true, resume: buildUserInfoResume(data, "") };
+}
+
 export function extractMemoryConflict(data) {
   const meta = data?.memory_conflict_meta && typeof data.memory_conflict_meta === "object"
     ? data.memory_conflict_meta

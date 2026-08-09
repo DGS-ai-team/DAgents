@@ -71,6 +71,9 @@ function onMultiToggle(id, checked) {
           >
             {{ busy ? "提交中…" : "提交选项" }}
           </button>
+          <p class="approval-bubble__hint approval-bubble__hint--inline">
+            或在下方输入自定义回答后发送
+          </p>
         </div>
         <p v-else class="approval-bubble__hint">
           {{ req.placeholder || "在下方输入框回答后 Enter 发送" }}
@@ -100,6 +103,10 @@ function onMultiToggle(id, checked) {
   margin: 0;
   font-size: 12.5px;
   color: var(--color-text-muted);
+}
+
+.approval-bubble__hint--inline {
+  margin-top: 4px;
 }
 
 .user-info-options {

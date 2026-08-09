@@ -50,10 +50,7 @@ import {
   clearHitl,
   buildApprovalResume,
   buildApprovalOneResume,
-  extractUserInfo,
-  buildUserInfoResume,
-  buildUserInfoResumeFromSelection,
-  resolveUserInfoSelectionIds,
+  buildUserInfoSubmitResume,
   buildMemoryConflictResume,
   enqueueHitlRequired,
   shouldSkipChildRuntimeDisplay,
@@ -434,22 +431,15 @@ function onHitlUserInfoSelected(v) {
 async function submitHitlUserInfo(hitlIndex, text) {
   const item = getHitlAt(hitlIndex);
   if (!item || item.kind !== "user_information") return;
-  const req = extractUserInfo(item.data);
-  let resume;
-  if (req.options.length) {
-    let selectedIds = resolveUserInfoSelectionIds(req, hitlSelected.value);
-    // 单选且用户未点选：气泡默认高亮首项，与 UI 一致回落到 index 0
-    if (!selectedIds.length && !req.allowMultiple) {
-      selectedIds = resolveUserInfoSelectionIds(req, 0);
-    }
-    if (!selectedIds.length && req.required) {
-      agentStore.error = "请先选择选项再提交";
-      return;
-    }
-    resume = buildUserInfoResumeFromSelection(item.data, selectedIds);
-  } else {
-    resume = buildUserInfoResume(item.data, text);
+  const built = buildUserInfoSubmitResume(item.data, {
+    text,
+    selected: hitlSelected.value,
+  });
+  if (!built.ok) {
+    agentStore.error = built.error;
+    return;
   }
+  const resume = built.resume;
   hitlStore.busy = true;
   hitlStore.busyIndex = hitlIndex;
   try {
