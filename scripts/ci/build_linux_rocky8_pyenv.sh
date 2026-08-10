@@ -45,7 +45,9 @@ export PYENV_ROOT="${PYENV_ROOT:-/opt/pyenv}"
 export PATH="${PYENV_ROOT}/bin:${PATH}"
 
 if [ ! -x "${PYENV_ROOT}/bin/pyenv" ]; then
-  rm -rf "${PYENV_ROOT}"
+  # /opt/pyenv 常为 Docker 卷挂载点：不可 rm -rf 挂载根（Device or resource busy）。
+  mkdir -p "${PYENV_ROOT}"
+  find "${PYENV_ROOT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   git clone --depth 1 https://github.com/pyenv/pyenv.git "${PYENV_ROOT}"
 fi
 
