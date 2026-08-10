@@ -38,7 +38,7 @@ export async function hydrateAgent() {
     setChildAwaitingApproval(approval.child_agent_id, true);
   }
   applyHydrateSeqHint(data?.sse_seq_hint);
-  ackAgentAfterHydrate();
+  ackAgentAfterHydrate(data?.notify_seq);
   applyHydrateTurnState({
     run_turn_phase: data?.run_turn_phase,
     has_active_turn: !!data?.has_active_turn,

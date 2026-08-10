@@ -153,8 +153,14 @@ export function markEventApplied(seq, { ack = false } = {}) {
   if (ack) requestAck(seq);
 }
 
-export function ackAgentAfterHydrate() {
-  pendingAckSeq = transcriptStore.lastSeq;
+export function ackAgentAfterHydrate(notifySeq) {
+  // 用本 Agent 的 notify_seq 对齐未读游标，避免 sse_seq_hint（全局 CurrentSeq）把他 Agent 流量算进 ack。
+  const n = Number(notifySeq);
+  if (Number.isFinite(n) && n > 0) {
+    pendingAckSeq = n;
+  } else {
+    pendingAckSeq = transcriptStore.lastSeq;
+  }
   void flushAck();
 }
 
@@ -180,7 +186,7 @@ export function applyHydrateTurnState({ run_turn_phase, has_active_turn, pending
     agentStore.error = "";
     return;
   }
-  const activePhases = new Set(["model_streaming", "awaiting_tool_execution", "tool_loop", "open_batch", "other"]);
+  const activePhases = new Set(["model_streaming", "awaiting_tool_execution"]);
   if (has_active_turn && activePhases.has(phase)) {
     agentStore.awaitingTurn = true;
     agentStore.turnContentSeen = true;

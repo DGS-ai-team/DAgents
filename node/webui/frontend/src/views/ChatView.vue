@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, onActivated, ref, watch, nextTick } from "vue";
+import { computed, onMounted, onUnmounted, onActivated, onDeactivated, ref, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { connectStream, shouldIgnoreSSEForAgent } from "../sse/stream.js";
@@ -230,6 +230,19 @@ async function activateAgentStream() {
   await syncChildAgentsFromApi();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
+}
+
+/** 发消息时：流已在则只 ensure runtime，避免每次全量 hydrate。 */
+async function ensureStreamReady() {
+  if (!agentStore.agentId) {
+    await activateAgentStream();
+    return;
+  }
+  if (!streamHandle.value) {
+    await activateAgentStream();
+    return;
+  }
+  await ensureAgent();
 }
 
 async function refreshAfterPageRestore() {
@@ -526,7 +539,7 @@ async function onSendMessage(payload) {
     return;
   }
 
-  await activateAgentStream();
+  await ensureStreamReady();
   clearHitl();
   addUser(text, images);
   beginSubmit();
@@ -916,11 +929,23 @@ watch(
 );
 
 onActivated(() => {
-  if (agentStore.agentId && !streamHandle.value) {
+  turnWatchdog.start();
+  startToolJobsPolling(() => agentStore.agentId);
+  if (agentStore.agentId) {
     void activateAgentStream();
   }
   consumeComposerDraft();
   startDesktopFocusHeartbeat(() => agentStore.agentId);
+});
+
+onDeactivated(() => {
+  // KeepAlive 切到设置页时：停心跳/轮询/看门狗，并断开 SSE，避免焦点与状态串台
+  turnWatchdog.stop();
+  stopDesktopFocusHeartbeat();
+  stopToolJobsPolling();
+  streamHandle.value?.close();
+  streamHandle.value = null;
+  chromeStore.sseStatus = "idle";
 });
 
 watch(

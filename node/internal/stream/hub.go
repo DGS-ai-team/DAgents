@@ -3,6 +3,7 @@ package stream
 import (
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 )
 
 const defaultHistorySize = 256
+const defaultSubscriberBuffer = 256
 
 // Event 为写入 SSE 的标准事件结构。
 // 线协议仅暴露 agent_id（对话/Agent 实例 id）；SessionID 仅供进程内路由（notify/filter）。
@@ -22,13 +24,18 @@ type Event struct {
 	Data      map[string]any `json:"data"`
 }
 
+type subscriber struct {
+	ch          chan Event
+	agentFilter string // 空 = 接收全部（Shell 全局订阅）
+}
+
 // Hub 维护全局递增 seq、历史缓冲与订阅者 fan-out。
 type Hub struct {
 	mu        sync.RWMutex
 	seq       int
 	history   []Event
 	historyN  int
-	subs      map[chan Event]struct{}
+	subs      map[chan Event]*subscriber
 	logger    *slog.Logger
 	onPublish func(Event)
 }
@@ -40,7 +47,7 @@ func NewHub(historyN int, logger *slog.Logger) *Hub {
 	}
 	return &Hub{
 		historyN: historyN,
-		subs:     make(map[chan Event]struct{}),
+		subs:     make(map[chan Event]*subscriber),
 		logger:   logx.OrDefault(logger),
 	}
 }
@@ -55,7 +62,7 @@ func (h *Hub) SetEventListener(fn func(Event)) {
 	h.mu.Unlock()
 }
 
-// Publish 分配 seq、写入历史并投递给全部订阅者。
+// Publish 分配 seq、写入历史并投递给匹配的订阅者。
 // agentID 为对话/Agent 实例 id（线协议 agent_id）。
 func (h *Hub) Publish(agentID, eventType string, data map[string]any) Event {
 	if data == nil {
@@ -77,13 +84,16 @@ func (h *Hub) Publish(agentID, eventType string, data map[string]any) Event {
 		h.history = h.history[len(h.history)-h.historyN:]
 	}
 	var deferredCritical []chan Event
-	for ch := range h.subs {
+	for _, sub := range h.subs {
+		if !subscriberMatches(sub, agentID) {
+			continue
+		}
 		select {
-		case ch <- ev:
+		case sub.ch <- ev:
 		default:
 			if isCriticalSSEType(eventType) {
 				// 锁外再投一次；避免在持锁时阻塞，也避免 done/error/hitl 被静默丢掉
-				deferredCritical = append(deferredCritical, ch)
+				deferredCritical = append(deferredCritical, sub.ch)
 			}
 			// 非关键事件：慢消费者丢弃，避免阻塞 turn
 		}
@@ -121,6 +131,18 @@ func isCriticalSSEType(eventType string) bool {
 	}
 }
 
+func subscriberMatches(sub *subscriber, agentID string) bool {
+	if sub == nil {
+		return false
+	}
+	filter := strings.TrimSpace(sub.agentFilter)
+	if filter == "" {
+		return true
+	}
+	id := strings.TrimSpace(agentID)
+	return id != "" && (filter == id)
+}
+
 func deliverCriticalSSE(ch chan Event, ev Event, logger *slog.Logger) {
 	defer func() {
 		// Unsubscribe 可能已 close channel
@@ -147,16 +169,28 @@ func deliverCriticalSSE(ch chan Event, ev Event, logger *slog.Logger) {
 	}
 }
 
-// Subscribe 注册订阅者并回放 seq > afterSeq 的历史事件。
+// Subscribe 注册全局订阅者并回放 seq > afterSeq 的历史事件。
 func (h *Hub) Subscribe(afterSeq int) chan Event {
-	ch := make(chan Event, 256)
+	return h.SubscribeAgent(afterSeq, "")
+}
+
+// SubscribeAgent 注册订阅者；agentFilter 非空时仅接收该 Agent 的事件（含历史回放），
+// 避免多 Agent 流量占满缓冲导致本 Agent 的 done/hitl 被挤掉。
+func (h *Hub) SubscribeAgent(afterSeq int, agentFilter string) chan Event {
+	filter := strings.TrimSpace(agentFilter)
+	ch := make(chan Event, defaultSubscriberBuffer)
+	sub := &subscriber{ch: ch, agentFilter: filter}
 	h.mu.Lock()
 	for _, ev := range h.history {
-		if ev.Seq > afterSeq {
-			ch <- ev
+		if ev.Seq <= afterSeq {
+			continue
 		}
+		if filter != "" && !subscriberMatches(sub, ev.AgentID) {
+			continue
+		}
+		ch <- ev
 	}
-	h.subs[ch] = struct{}{}
+	h.subs[ch] = sub
 	h.mu.Unlock()
 	return ch
 }

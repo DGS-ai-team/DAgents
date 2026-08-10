@@ -15,6 +15,9 @@ export const statusStore = reactive({
 });
 
 let tickTimer = null;
+let compressionWatchdog = null;
+
+const COMPRESSION_STUCK_MS = 120_000;
 
 function ensureTick() {
   if (tickTimer) return;
@@ -30,14 +33,29 @@ function stopTickIfIdle() {
   }
 }
 
+function clearCompressionWatchdog() {
+  if (compressionWatchdog) {
+    clearTimeout(compressionWatchdog);
+    compressionWatchdog = null;
+  }
+}
+
 export function startStatus(phase) {
   if (hasStatus(phase)) return;
   statusStore.phases[phase] = { startedAt: Date.now() };
   statusStore.tick = Date.now();
   ensureTick();
+  if (phase === "compression") {
+    clearCompressionWatchdog();
+    compressionWatchdog = setTimeout(() => {
+      compressionWatchdog = null;
+      finishStatus("compression");
+    }, COMPRESSION_STUCK_MS);
+  }
 }
 
 export function finishStatus(phase) {
+  if (phase === "compression") clearCompressionWatchdog();
   if (!statusStore.phases[phase]) return;
   delete statusStore.phases[phase];
   statusStore.tick = Date.now();
@@ -54,6 +72,7 @@ export function hasStatus(phase) {
 }
 
 export function resetStatusLines() {
+  clearCompressionWatchdog();
   statusStore.phases = {};
   stopTickIfIdle();
 }

@@ -117,3 +117,57 @@ func TestHubCriticalDoneDeliveredWhenBufferFull(t *testing.T) {
 		t.Fatal("critical done was dropped while subscriber buffer was full")
 	}
 }
+
+func TestHubSubscribeAgentFiltersOtherAgents(t *testing.T) {
+	h := NewHub(64, nil)
+	chA := h.SubscribeAgent(0, "agt-a")
+	defer h.Unsubscribe(chA)
+
+	h.Publish("agt-b", "assistant", map[string]any{"content": "noise"})
+	h.Publish("agt-b", "done", map[string]any{"finish_reason": "stop"})
+	h.Publish("agt-a", "assistant", map[string]any{"content": "mine"})
+	h.Publish("agt-a", "done", map[string]any{"finish_reason": "stop", "turn_complete": true})
+
+	var types []string
+	for i := 0; i < 2; i++ {
+		select {
+		case ev := <-chA:
+			if ev.AgentID != "agt-a" {
+				t.Fatalf("got other agent event: %+v", ev)
+			}
+			types = append(types, ev.Type)
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for agt-a event %d", i)
+		}
+	}
+	if types[0] != "assistant" || types[1] != "done" {
+		t.Fatalf("types = %v", types)
+	}
+	select {
+	case ev := <-chA:
+		t.Fatalf("unexpected extra event: %+v", ev)
+	default:
+	}
+}
+
+func TestHubSubscribeAgentIgnoresForeignFlood(t *testing.T) {
+	h := NewHub(64, nil)
+	chA := h.SubscribeAgent(0, "agt-a")
+	defer h.Unsubscribe(chA)
+
+	// 他 Agent 洪峰不应占满 A 的缓冲
+	for i := 0; i < 500; i++ {
+		h.Publish("agt-b", "assistant", map[string]any{"content": "x"})
+	}
+	h.Publish("agt-a", "done", map[string]any{"finish_reason": "stop", "turn_complete": true})
+
+	select {
+	case ev := <-chA:
+		if ev.Type != "done" || ev.AgentID != "agt-a" {
+			t.Fatalf("expected agt-a done, got %+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("agt-a done blocked/dropped by foreign agent flood")
+	}
+}
+
