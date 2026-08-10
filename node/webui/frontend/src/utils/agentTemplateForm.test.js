@@ -25,6 +25,10 @@ describe("agentTemplateForm", () => {
           llm: { active: "deepseek", max_tool_loops: 24 },
           tools: { enabled_groups: ["fs", "bash"] },
           skills: { enabled: false },
+          prompt_context: {
+            soul_md: "你是运维助手",
+            custom_md: "先确认再执行",
+          },
         },
       },
       ["default", "deepseek"],
@@ -33,6 +37,8 @@ describe("agentTemplateForm", () => {
     expect(draft.llmProfileId).toBe("deepseek");
     expect(draft.toolGroups).toEqual(["fs", "bash"]);
     expect(draft.visibleSkills).toBeNull();
+    expect(draft.promptSoulMd).toBe("你是运维助手");
+    expect(draft.promptCustomMd).toBe("先确认再执行");
     expect(skillsEnabledFromToolGroups(draft.toolGroups)).toBe(false);
     expect(memoryEnabledFromToolGroups(draft.toolGroups)).toBe(false);
   });
@@ -90,6 +96,8 @@ describe("agentTemplateForm", () => {
     expect(payload.defaults.prompt_context.custom_enabled).toBe(false);
     expect(payload.defaults.prompt_context.long_term_enabled).toBe(false);
     expect(payload.defaults.prompt_context.user_enabled).toBeUndefined();
+    expect(payload.defaults.prompt_context.soul_md).toBe("你是助手");
+    expect(payload.defaults.prompt_context.custom_md).toBeUndefined();
   });
 
   it("enables long-term memory when memory tool group is selected", () => {
@@ -223,6 +231,8 @@ describe("agentTemplateForm", () => {
     expect(payload.defaults.prompt_context.soul_enabled).toBe(false);
     expect(payload.defaults.prompt_context.custom_enabled).toBe(true);
     expect(payload.defaults.prompt_context.long_term_enabled).toBe(true);
+    expect(payload.defaults.prompt_context.custom_md).toBe("补充");
+    expect(payload.defaults.prompt_context.soul_md).toBeUndefined();
   });
 
   it("reads llm active from agent view snapshot", () => {

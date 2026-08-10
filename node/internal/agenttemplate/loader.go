@@ -3,6 +3,7 @@ package agenttemplate
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,7 +21,7 @@ type Template struct {
 	Defaults    map[string]any `yaml:"defaults" json:"defaults,omitempty"`
 }
 
-// Loader 从内置目录与用户覆盖目录加载模板。
+// Loader 从嵌入内置、可选磁盘内置目录与用户覆盖目录加载模板。
 type Loader struct {
 	builtinDir string
 	userDir    string
@@ -34,9 +35,12 @@ func NewLoader(builtinDir, userDir string) *Loader {
 	}
 }
 
-// List 返回合并后的模板（用户覆盖同 id 的内置）。
+// List 返回合并后的模板（优先级：用户目录 > 磁盘内置目录 > 嵌入内置）。
 func (l *Loader) List() ([]Template, error) {
 	byID := map[string]Template{}
+	if err := loadFSInto(builtinTemplatesFS, "builtin", byID); err != nil {
+		return nil, err
+	}
 	if l.builtinDir != "" {
 		if err := loadDirInto(l.builtinDir, byID); err != nil {
 			return nil, err
@@ -90,7 +94,7 @@ func loadDirInto(dir string, dst map[string]Template) error {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasSuffix(strings.ToLower(name), ".yaml") && !strings.HasSuffix(strings.ToLower(name), ".yml") {
+		if !isYAMLName(name) {
 			continue
 		}
 		path := filepath.Join(dir, name)
@@ -98,18 +102,61 @@ func loadDirInto(dir string, dst map[string]Template) error {
 		if err != nil {
 			return fmt.Errorf("read template %q: %w", path, err)
 		}
-		var t Template
-		if err := yaml.Unmarshal(raw, &t); err != nil {
-			return fmt.Errorf("parse template %q: %w", path, err)
-		}
-		t.ID = strings.TrimSpace(t.ID)
-		if t.ID == "" {
-			t.ID = strings.TrimSuffix(strings.TrimSuffix(name, ".yaml"), ".yml")
-		}
-		if t.Version <= 0 {
-			t.Version = 1
+		t, err := parseTemplateYAML(name, raw)
+		if err != nil {
+			return err
 		}
 		dst[t.ID] = t
 	}
 	return nil
+}
+
+func loadFSInto(fsys fs.FS, root string, dst map[string]Template) error {
+	entries, err := fs.ReadDir(fsys, root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read embedded templates %q: %w", root, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !isYAMLName(name) {
+			continue
+		}
+		path := root + "/" + name
+		raw, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return fmt.Errorf("read embedded template %q: %w", path, err)
+		}
+		t, err := parseTemplateYAML(name, raw)
+		if err != nil {
+			return err
+		}
+		dst[t.ID] = t
+	}
+	return nil
+}
+
+func isYAMLName(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
+}
+
+func parseTemplateYAML(name string, raw []byte) (Template, error) {
+	var t Template
+	if err := yaml.Unmarshal(raw, &t); err != nil {
+		return Template{}, fmt.Errorf("parse template %q: %w", name, err)
+	}
+	t.ID = strings.TrimSpace(t.ID)
+	if t.ID == "" {
+		t.ID = strings.TrimSuffix(strings.TrimSuffix(name, ".yaml"), ".yml")
+	}
+	if t.Version <= 0 {
+		t.Version = 1
+	}
+	return t, nil
 }
