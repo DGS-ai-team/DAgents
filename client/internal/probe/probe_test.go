@@ -45,7 +45,7 @@ func TestNode_profilePendingStillOK(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status": "ok", "node_id": "a1", "version": "0.9.3",
+			"status": "ok", "node_id": "a1", "version": "0.9.4",
 		})
 	})
 	mux.HandleFunc("GET /v1/agent/info", func(w http.ResponseWriter, _ *http.Request) {
