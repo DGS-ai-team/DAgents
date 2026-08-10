@@ -284,16 +284,20 @@ restart_node() {
 
 cmd_doctor() {
   echo "DAgents installation: ${DAGENTS_HOME}"
-  local ok=1 name
+  # bash：0=成功；发现硬性缺失时置 1
+  local status=0 name
   for name in dagents-node dagents-client dagents-browser; do
     if [[ -x "${BIN}/${name}" ]]; then
       echo "[ok] bin/${name}"
     else
-      if [[ "${name}" == "dagents-browser" || "${name}" == "dagents-client" ]]; then
+      if [[ "${name}" == "dagents-browser" ]]; then
         echo "[optional missing] bin/${name}"
+      elif [[ "${name}" == "dagents-client" ]]; then
+        # client 用于 probe/update；缺失不影响日常 Web UI，但 doctor 标为警告
+        echo "[optional missing] bin/${name} (probe/update unavailable)"
       else
         echo "[missing] bin/${name}"
-        ok=0
+        status=1
       fi
     fi
   done
@@ -306,9 +310,14 @@ cmd_doctor() {
     echo "[ok] .runtime"
   else
     echo "[missing] .runtime"
-    ok=0
+    status=1
   fi
-  return "${ok}"
+  if [[ -d "${ROOT}/packaging/agent-templates" ]]; then
+    echo "[ok] packaging/agent-templates"
+  else
+    echo "[info] packaging/agent-templates absent (Node may still embed builtins)"
+  fi
+  return "${status}"
 }
 
 read_app_version() {
@@ -392,7 +401,8 @@ cmd_update() {
   fi
 
   echo "[dagents] applying update from ${bundle##*/}"
-  (cd "${bundle}" && ./install.sh --prefix "${ROOT}" --overwrite-policy --keep-policy)
+  # 升级默认保留已有 .runtime/policy（勿同时传 overwrite+keep，后者会覆盖前者）
+  (cd "${bundle}" && ./install.sh --prefix "${ROOT}" --keep-policy)
 
   rm -rf "${staging}" "${tmp_pkg}"
   restart_node

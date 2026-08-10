@@ -115,9 +115,14 @@ default_paths() {
 
 validate_source() {
   local name
-  for name in bin/dagents-node bin/dagents-client bin/dagents-cli dagents; do
+  # Phase 4 起人机入口为 Web UI；发布包不再含 dagents-cli（Textual TUI）。
+  for name in bin/dagents-node bin/dagents-client dagents; do
     [[ -e "${SOURCE}/${name}" ]] || die "missing ${SOURCE}/${name}; run install.sh from extracted bundle root"
   done
+  # browser 为可选组件（assemble 可用 SKIP_BROWSER=1）
+  if [[ ! -e "${SOURCE}/bin/dagents-browser" ]]; then
+    info "optional missing: bin/dagents-browser (browser tools unavailable until installed)"
+  fi
 }
 
 copy_tree() {
@@ -126,8 +131,9 @@ copy_tree() {
   cp -a "${src}/." "${dst}/"
 }
 
-# 用户运行时数据目录：安装包不含内容，仅确保存在，不从 bundle 覆盖。
-RUNTIME_USER_DATA_DIRS=(memory history logs agent)
+# 用户运行时数据目录：安装包可不含内容，仅确保存在，不从 bundle 覆盖。
+# agents/agents.db 等由 Node 创建；此处保证常用空目录与升级兼容路径存在。
+RUNTIME_USER_DATA_DIRS=(memory history logs agent agents agent-templates data node workgroup-workers)
 
 ensure_runtime_user_dirs() {
   local d
@@ -136,13 +142,18 @@ ensure_runtime_user_dirs() {
   done
 }
 
-# .runtime 种子：默认仅拷贝目标尚不存在的路径（GNU cp -n）；可选覆盖 policy。
+# .runtime 种子：默认仅拷贝目标尚不存在的路径；可选覆盖 policy。
 copy_runtime_seed() {
   local src="${SOURCE}/.runtime" dst="${PREFIX}/.runtime"
   ensure_runtime_user_dirs
   [[ -d "${src}" ]] || return 0
   mkdir -p "${dst}"
-  cp -a -n "${src}/." "${dst}/"
+  # GNU cp：旧版 -n / 新版 --update=none；均表示不覆盖已有文件
+  if cp --help 2>&1 | grep -q -- '--update=none'; then
+    cp -a --update=none "${src}/." "${dst}/"
+  else
+    cp -a -n "${src}/." "${dst}/"
+  fi
   if [[ "${OVERWRITE_POLICY}" -eq 1 && -d "${src}/policy" ]]; then
     info "overwriting ${dst}/policy from bundle"
     mkdir -p "${dst}/policy"
@@ -190,13 +201,17 @@ install_files() {
   if [[ -f "${SOURCE}/VERSION" ]]; then
     install -m 0644 "${SOURCE}/VERSION" "${PREFIX}/VERSION"
   fi
+<<<<<<< HEAD
+=======
+  # 内置模板磁盘副本（Node 亦可 go:embed；有则拷贝便于覆盖/排查）
+>>>>>>> 0e49b9d (fix(linux): 对齐安装脚本与当前发布包现状)
   if [[ -d "${SOURCE}/packaging/agent-templates" ]]; then
     mkdir -p "${PREFIX}/packaging"
     copy_tree "${SOURCE}/packaging/agent-templates" "${PREFIX}/packaging/agent-templates"
   fi
   if [[ ! -f "${PREFIX}/config.yaml" && -f "${PREFIX}/config.example.yaml" ]]; then
     cp "${PREFIX}/config.example.yaml" "${PREFIX}/config.yaml"
-    info "created ${PREFIX}/config.yaml from config.example.yaml"
+    info "created ${PREFIX}/config.yaml from config.example.yaml (bootstrap listen/local; LLM 等请用 Web UI)"
   fi
   chmod +x "${PREFIX}/bin/"* "${PREFIX}/dagents" 2>/dev/null || true
   find "${PREFIX}/scripts" -type f -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
