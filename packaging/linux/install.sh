@@ -142,13 +142,18 @@ ensure_runtime_user_dirs() {
   done
 }
 
-# .runtime 种子：默认仅拷贝目标尚不存在的路径（GNU cp -n）；可选覆盖 policy。
+# .runtime 种子：默认仅拷贝目标尚不存在的路径；可选覆盖 policy。
 copy_runtime_seed() {
   local src="${SOURCE}/.runtime" dst="${PREFIX}/.runtime"
   ensure_runtime_user_dirs
   [[ -d "${src}" ]] || return 0
   mkdir -p "${dst}"
-  cp -a -n "${src}/." "${dst}/"
+  # GNU cp：旧版 -n / 新版 --update=none；均表示不覆盖已有文件
+  if cp --help 2>&1 | grep -q -- '--update=none'; then
+    cp -a --update=none "${src}/." "${dst}/"
+  else
+    cp -a -n "${src}/." "${dst}/"
+  fi
   if [[ "${OVERWRITE_POLICY}" -eq 1 && -d "${src}/policy" ]]; then
     info "overwriting ${dst}/policy from bundle"
     mkdir -p "${dst}/policy"
