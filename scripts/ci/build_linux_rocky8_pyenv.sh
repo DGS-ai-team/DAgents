@@ -15,6 +15,9 @@
 # - **PYENV_PYTHON_VERSION**：可选，默认 **3.13.2**。
 #
 # 副作用：首次编译 CPython 耗时长；workflow step 需足够 **timeout**。
+# 优化：
+# - SKIP_DNF=1：镜像已预装依赖（packaging/ci/Dockerfile.rocky8-browser）时跳过 dnf。
+# - 将 PYENV_ROOT（默认 /opt/pyenv）挂到宿主机缓存目录，可跨 CI 复用已编译的 CPython。
 
 set -euxo pipefail
 
@@ -22,13 +25,17 @@ PYENV_PYTHON_VERSION="${PYENV_PYTHON_VERSION:-3.13.2}"
 export PIP_ROOT_USER_ACTION=ignore
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
-dnf -y install \
-  ca-certificates curl git \
-  findutils tar gzip \
-  make patch pkg-config which \
-  gcc zlib-devel bzip2-devel readline-devel sqlite-devel openssl-devel xz xz-devel \
-  libffi-devel gdbm-devel \
-  gcc-toolset-13 gcc-toolset-13-gcc gcc-toolset-13-gcc-c++
+if [[ "${SKIP_DNF:-0}" != "1" ]]; then
+  dnf -y install \
+    ca-certificates curl git \
+    findutils tar gzip \
+    make patch pkg-config which \
+    gcc zlib-devel bzip2-devel readline-devel sqlite-devel openssl-devel xz xz-devel \
+    libffi-devel gdbm-devel \
+    gcc-toolset-13 gcc-toolset-13-gcc gcc-toolset-13-gcc-c++
+else
+  echo "[build_linux_rocky8_pyenv] SKIP_DNF=1 (using prebuilt builder image)"
+fi
 
 # Rocky 8 上启用较新 GCC，满足 CPython 3.13 源码构建要求；运行时仍只依赖系统 glibc 2.28。
 # shellcheck source=/dev/null

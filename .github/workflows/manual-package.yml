@@ -1,6 +1,6 @@
 name: Manual Package Binary
 
-# 手动打本地助手包 + Manage 离线包（与 tag Release 同矩阵，不上传 GitHub Release）。
+# 手动打本地助手包 + Manage 离线包（与 tag Release 同矩阵拆分，不上传 GitHub Release）。
 on:
   workflow_dispatch:
     inputs:
@@ -13,8 +13,13 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+  actions: write  # docker/build-push-action cache-to type=gha
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PYENV_PYTHON_VERSION: "3.13.2"
   BROWSER_PYINSTALLER_ARGS: --onefile --name dagents-browser --paths browser-service --collect-submodules browser_use --collect-submodules uvicorn --collect-submodules fastapi --collect-submodules pydantic --hidden-import=dagents_browser --hidden-import=dagents_browser.main --hidden-import=dagents_browser.server --hidden-import=dagents_browser.driver --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=uvicorn.lifespan --hidden-import=uvicorn.lifespan.on browser-service/run_dagents_browser.py
 
 jobs:
@@ -73,27 +78,11 @@ jobs:
           pip install -r requirements.txt
           python -m unittest discover -s tests -p "test_*.py" -v
 
-  build-local-assistant:
-    name: Build local assistant (${{ matrix.platform }})
+  build-linux-assistant:
+    name: Build local assistant (linux-amd64)
     needs: test
     if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux-amd64
-            os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            py_build: docker-rocky8
-          - platform: windows-amd64
-            os: windows-2022
-            goos: windows
-            goarch: amd64
-            py_build: native
-
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -103,9 +92,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: |
-            node/webui/frontend/package-lock.json
-            desktop/tray-tauri/package-lock.json
+          cache-dependency-path: node/webui/frontend/package-lock.json
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -120,31 +107,149 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          OUT_DIR="${{ github.workspace }}/dist/go-build-${{ matrix.platform }}"
-          BUILD_CLIENT=1 OUT_DIR="${OUT_DIR}" GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
+          OUT_DIR="${{ github.workspace }}/dist/go-build-linux-amd64"
+          BUILD_CLIENT=1 OUT_DIR="${OUT_DIR}" GOOS=linux GOARCH=amd64 \
             bash scripts/ci/build_go_static.sh
-          EXE=""
-          if [[ "${{ matrix.goos }}" == "windows" ]]; then EXE=".exe"; fi
           mkdir -p dist
-          cp "${OUT_DIR}/bin/dagents-node${EXE}" "dist/dagents-node${EXE}"
-          cp "${OUT_DIR}/bin/dagents-client${EXE}" "dist/dagents-client${EXE}"
+          cp "${OUT_DIR}/bin/dagents-node" dist/dagents-node
+          cp "${OUT_DIR}/bin/dagents-client" dist/dagents-client
 
-      - name: Setup Rust (Windows Tauri shell)
-        if: matrix.platform == 'windows-amd64'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Rocky8 browser builder image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/ci/Dockerfile.rocky8-browser
+          load: true
+          tags: dagents-rocky8-browser:ci
+          cache-from: type=gha,scope=rocky8-browser-builder
+          cache-to: type=gha,mode=max,scope=rocky8-browser-builder
+
+      - name: Cache Rocky8 pyenv (CPython)
+        uses: actions/cache@v4
+        with:
+          path: .cache/rocky8-pyenv
+          key: rocky8-pyenv-${{ env.PYENV_PYTHON_VERSION }}-${{ hashFiles('browser-service/requirements.txt', 'requirements.txt') }}
+          restore-keys: |
+            rocky8-pyenv-${{ env.PYENV_PYTHON_VERSION }}-
+
+      - name: Build dagents-browser (Rocky8 + cached pyenv)
+        timeout-minutes: 120
+        shell: bash
+        env:
+          BROWSER_PI_ARGS: ${{ env.BROWSER_PYINSTALLER_ARGS }}
+        run: |
+          set -euxo pipefail
+          mkdir -p .cache/rocky8-pyenv
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/src" -w /src \
+            -v "${GITHUB_WORKSPACE}/.cache/rocky8-pyenv:/opt/pyenv" \
+            -e BROWSER_PI_ARGS \
+            -e PYENV_PYTHON_VERSION \
+            -e SKIP_DNF=1 \
+            dagents-rocky8-browser:ci \
+            bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
+
+      - name: Assemble release archive
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          PLATFORM=linux-amd64 VERSION="${VERSION}" \
+            bash scripts/ci/assemble_local_assistant_bundle.sh
+          ls -la dist/dagents-local-assistant-*
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: dagents-local-assistant-linux-amd64
+          path: dist/dagents-local-assistant-linux-amd64-*.*
+          if-no-files-found: error
+
+  build-windows-go:
+    name: Build Windows Go binaries
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: node/webui/frontend/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            node/go.sum
+            client/go.sum
+            shared/config/go.sum
+
+      - name: Build Go binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT_DIR="${GITHUB_WORKSPACE}/dist/go-build-windows-amd64"
+          BUILD_CLIENT=1 OUT_DIR="${OUT_DIR}" GOOS=windows GOARCH=amd64 \
+            bash scripts/ci/build_go_static.sh
+          mkdir -p dist
+          cp "${OUT_DIR}/bin/dagents-node.exe" dist/dagents-node.exe
+          cp "${OUT_DIR}/bin/dagents-client.exe" dist/dagents-client.exe
+
+      - name: Upload Go binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-win-go
+          path: |
+            dist/dagents-node.exe
+            dist/dagents-client.exe
+          if-no-files-found: error
+
+  build-windows-shell:
+    name: Build Windows shell (Tauri + legacy)
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/tray-tauri/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            node/go.sum
+            client/go.sum
+            shared/config/go.sum
+
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
       - name: Rust cache (Tauri tray shell)
-        if: matrix.platform == 'windows-amd64'
         uses: swatinem/rust-cache@v2
         with:
           workspaces: |
             desktop/tray-tauri/src-tauri -> target
           shared-key: manual-tauri-win
 
-      - name: Build dagents-shell (Windows, Tauri + Go legacy)
-        if: matrix.platform == 'windows-amd64'
+      - name: Build dagents-shell (Tauri + Go legacy)
         shell: bash
         run: |
           chmod +x scripts/ci/build_dagents_shell_tauri.sh scripts/ci/build_dagents_shell.sh
@@ -154,51 +259,87 @@ jobs:
           test -f dist/dagents-shell-legacy.exe
           test -f dist/dagents-shell.exe
 
-      - name: Setup Python (Windows)
-        if: matrix.py_build == 'native'
+      - name: Upload shell binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-win-shell
+          path: |
+            dist/dagents-shell.exe
+            dist/dagents-shell-tauri.exe
+            dist/dagents-shell-legacy.exe
+          if-no-files-found: error
+
+  build-windows-browser:
+    name: Build Windows browser (PyInstaller)
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
 
-      - name: Build dagents-browser (Windows native PyInstaller)
-        if: matrix.py_build == 'native'
+      - name: Build dagents-browser
         shell: bash
         env:
           BROWSER_PI_ARGS: ${{ env.BROWSER_PYINSTALLER_ARGS }}
-        run: |
-          bash scripts/ci/build_dagents_browser.sh
+        run: bash scripts/ci/build_dagents_browser.sh
 
-      - name: Build dagents-browser (Linux Rocky 8 Docker + pyenv, glibc 2.28)
-        if: matrix.py_build == 'docker-rocky8'
-        timeout-minutes: 120
-        shell: bash
-        env:
-          BROWSER_PI_ARGS: ${{ env.BROWSER_PYINSTALLER_ARGS }}
-          PYENV_PYTHON_VERSION: "3.13.2"
-        run: |
-          set -euxo pipefail
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}:/src" -w /src \
-            -e BROWSER_PI_ARGS -e PYENV_PYTHON_VERSION \
-            rockylinux:8 \
-            bash /src/scripts/ci/build_linux_rocky8_pyenv.sh
+      - name: Upload browser binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-win-browser
+          path: dist/dagents-browser.exe
+          if-no-files-found: error
+
+  build-windows-assistant:
+    name: Assemble Windows assistant + installer
+    needs:
+      - build-windows-go
+      - build-windows-shell
+      - build-windows-browser
+    if: ${{ always() && needs.build-windows-go.result == 'success' && needs.build-windows-shell.result == 'success' && needs.build-windows-browser.result == 'success' }}
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Go binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-win-go
+          path: dist
+
+      - name: Download shell binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-win-shell
+          path: dist
+
+      - name: Download browser binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-win-browser
+          path: dist
 
       - name: Assemble release archive
         shell: bash
         run: |
           VERSION="${{ inputs.version }}"
-          PLATFORM="${{ matrix.platform }}" VERSION="${VERSION}" \
+          PLATFORM=windows-amd64 VERSION="${VERSION}" \
             bash scripts/ci/assemble_local_assistant_bundle.sh
           ls -la dist/dagents-local-assistant-*
 
-      - name: Install Inno Setup (Windows installer)
-        if: matrix.platform == 'windows-amd64'
+      - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
       - name: Build Windows installer (Inno)
-        if: matrix.platform == 'windows-amd64'
         shell: bash
         run: |
           VERSION="${{ inputs.version }}"
@@ -208,12 +349,11 @@ jobs:
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: dagents-local-assistant-${{ matrix.platform }}
-          path: dist/dagents-local-assistant-${{ matrix.platform }}-*.*
+          name: dagents-local-assistant-windows-amd64
+          path: dist/dagents-local-assistant-windows-amd64-*.*
           if-no-files-found: error
 
       - name: Upload Windows installer (Inno)
-        if: matrix.platform == 'windows-amd64'
         uses: actions/upload-artifact@v4
         with:
           name: dagents-windows-installer
@@ -222,9 +362,8 @@ jobs:
 
   build-manage-docker:
     name: Build Manage offline bundle
-    needs: build-local-assistant
-    # 与 Release 一致：依赖 linux-amd64 助手包 artifact 一并打进 Manage 离线包。
-    if: ${{ always() && needs.build-local-assistant.result == 'success' }}
+    needs: build-linux-assistant
+    if: ${{ always() && needs.build-linux-assistant.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
