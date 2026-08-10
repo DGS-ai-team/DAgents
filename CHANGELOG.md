@@ -6,6 +6,28 @@
 
 ---
 
+## [0.9.3] - 2026-08-10
+
+**WebUI 稳定性与安装对齐**：对话 SSE/切 Agent 不再卡三点跳动；Linux 安装脚本对齐现网包；内置模板补全 soul/custom；移除已过时的 Tauri Setup 向导。
+
+### 修复
+
+- **WebUI 三点跳动卡住**：切 Agent 时旧 SSE 污染全局 status；`hitl_required` 即结束 awaiting；Hub critical 事件补送；SSE 重连 `after_seq` + hydrate 对账；卡住看门狗；Hub 按 Agent 过滤入队。
+- **对话自动滚动失效**：去掉 smooth scroll 与高频 pin 的竞态，stick-to-bottom 恢复。
+- **HITL 有选项时误用默认项**：Composer 非空文本优先于选中选项。
+- **并行工具空 id 分片**：不再留下僵死「生成中」气泡。
+- **Linux 安装脚本**：去掉已移除的 `dagents-cli` 硬依赖；doctor 退出码；update/`--keep-policy`；拷贝 agent-templates。
+- **`/clear`**：取消子 Agent 与会话内工具任务，并刷新 Activity。
+
+### 变更
+
+- **内置 Agent 模板**：补 `soul_md` / `custom_md`；创建写入侧车；assemble/install/Inno 打入模板副本。
+- **移除 Tauri Setup 向导**（`packaging/bootstrapper`）；保留托盘 Shell（`desktop/tray-tauri`）与 Inno 安装。
+
+（Git **tag**：`v0.9.3`。）
+
+---
+
 ## [0.9.2] - 2026-08-07
 
 **Manage Docker 补丁**：镜像打包成员工具权威目录，修复容器启动 `FileNotFoundError`。
