@@ -44,6 +44,7 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**
 | 路径 | 说明 |
 |------|------|
 | **`agent-client/`** | Go Node + Client **共用 YAML** 示例（`config.example.yaml`、`agent-card.example.json`） |
+| **`agent-templates/`** | 内置 Agent 模板（含 soul/custom 预设；打入发布包，并 `go:embed` 进 Node） |
 | **`runtime/`** | 预编译包内 **`.runtime/`** 占位（policy、skills、prompt_context 等；**`RECOMMENDED_CLI_TOOLS.md`** 推荐第三方 CLI） |
 | **`linux/`** | Linux **`dagents`** 启动脚本 + **`install.sh`**（打入 tar.gz 根目录） |
 | **`windows/`** | Inno Setup 安装包（`dagents-installer.iss` + 分步配置向导 + `write-install-config.ps1`） |
