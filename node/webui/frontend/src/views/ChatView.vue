@@ -86,6 +86,7 @@ import {
   setChildAwaitingApproval,
   syncChildAgentsFromApi,
 } from "../stores/remoteWorkers.js";
+import { bumpActivityRefresh } from "../stores/activity.js";
 import { runSlashCommand } from "../utils/commands.js";
 import { agentDisplayTitle, agentRecordId } from "../utils/format.js";
 
@@ -512,7 +513,10 @@ async function handleCommand(cmd) {
     resetToolStream();
     resetUsageStrip();
     chromeStore.contextTokens = 0;
-    addSystem("已清空对话上下文");
+    resetRemoteWorkers();
+    await refreshToolJobs(agentStore.agentId);
+    bumpActivityRefresh();
+    addSystem("已清空对话上下文，并终止未完成命令与临时子 Agent");
     return;
   }
   if (res.action === "compress") {

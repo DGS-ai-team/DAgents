@@ -13,8 +13,7 @@
 | **`dagents-cli`** | Textual TUI 单文件二进制（PyInstaller 产物名） |
 
 | **`dagents-local-assistant-*-installer-*.exe`** | Windows **Inno** 安装包（附加任务可选 Tauri 推荐轨 / Go 兼容轨 Shell） |
-| **`dagents-setup-windows-amd64-*.exe`** | Windows **便携 Tauri Setup 向导**（双击即开，内嵌上述 Inno；无 NSIS 外层；与 Inno 并存发布） |
-| **`DAgents Setup`（源码）** | 见 [`bootstrapper/`](./bootstrapper/) |
+| **`DAgents Setup`（removed）** | 原便携 Tauri Setup 向导已移除；请直接使用 Inno 安装包 |
 
 本地/CI 打包：
 
@@ -37,7 +36,7 @@ Linux Release CI：Runner **ubuntu-latest**；`dagents-cli` 在 **rockylinux:8**
 
 | 工作流 | 触发 | 产物 |
 |--------|------|------|
-| [build-and-release.yml](../.github/workflows/build-and-release.yml) | 推送 **`v*`** 标签 | GitHub Release + `dagents-local-assistant-*` + **Inno `.exe`** + **Tauri Setup `.exe`** + **`dagents-manage-bundle-*.tar.gz`** |
+| [build-and-release.yml](../.github/workflows/build-and-release.yml) | 推送 **`v*`** 标签 | GitHub Release + `dagents-local-assistant-*` + **Inno `.exe`** + **`dagents-manage-bundle-*.tar.gz`** |
 | [manual-package.yml](../.github/workflows/manual-package.yml) | 手动 **workflow_dispatch** | Actions Artifact（zip/tar.gz + Windows 安装包） |
 | [go-ac.yml](../.github/workflows/go-ac.yml) | PR / push（Go 路径） | 仅测试与编译冒烟，不打包 |
 

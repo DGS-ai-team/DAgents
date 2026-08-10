@@ -6,6 +6,7 @@ import { chromeStore } from "../stores/chrome.js";
 import { agentStore } from "../stores/agent.js";
 import { transcriptStore } from "../stores/transcript.js";
 import { remoteWorkerStore } from "../stores/remoteWorkers.js";
+import { activityStore } from "../stores/activity.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 import {
   useChildAgents,
@@ -167,6 +168,9 @@ async function refresh() {
     error.value = "";
     return;
   }
+  // /clear 后先丢掉缓存，避免空 transcript 时仍显示旧 remote 命令/文件
+  remote.value = null;
+  expandedCmd.value = {};
   loading.value = true;
   error.value = "";
   try {
@@ -195,6 +199,13 @@ watch(
   () => remoteWorkerStore.tick,
   () => {
     if (!inWorkgroupContext.value && agentId.value) void loadChildren();
+  },
+);
+
+watch(
+  () => activityStore.tick,
+  () => {
+    void refresh();
   },
 );
 
