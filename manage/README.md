@@ -24,6 +24,8 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 python run_manage.py
 ```
 
+依赖见根目录 `requirements.txt`（含 **`websockets`**：工作组 Dialer WS 必需；缺库时握手 404，成员会一直停在「配置中」）。
+
 默认 **`0.0.0.0:8020`**（`MANAGE_HOST` / `MANAGE_PORT` 可配置）。
 
 **Console（Node 目录 UI）**：浏览器打开 **`http://<host>:<port>/console/`**  

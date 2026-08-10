@@ -230,3 +230,41 @@ func TestDispatchToolCancelPreventsExecution(t *testing.T) {
 	}
 }
 
+
+func TestDispatchProvisionWrongHomeReturnsProvisionResult(t *testing.T) {
+	w := NewWorker(Config{NodeID: "node_b", NodeToolNames: []string{"read_file"}})
+	gen := w.Connect()
+	env := WSEnvelope{
+		EnvelopeID:           "en_01h00000000000000000000021",
+		SchemaVersion:        SchemaVersion,
+		Type:                 "member.provision",
+		DeliverySeq:          1,
+		ConnectionGeneration: gen,
+		WorkgroupID:          "wg_01h00000000000000000000021",
+		Payload: map[string]any{
+			"provision_id":       "pv_01h00000000000000000000021",
+			"workgroup_id":       "wg_01h00000000000000000000021",
+			"member_id":          "mb_01h00000000000000000000021",
+			"home_node_id":       "node_other",
+			"member_spec_digest": "sha256:5045f5acc432f3f9fc64c14c1275d4c808f26b02b69acc1cdc60674ef1de238c",
+			"lease_epoch":        float64(1),
+			"member_generation":  float64(1),
+			"tool_allow_names":   []any{"read_file"},
+		},
+		SentAt: "2026-07-31T00:00:00Z",
+	}
+	r, err := w.DispatchEnvelope(env)
+	if err == nil {
+		t.Fatal("expected home mismatch error")
+	}
+	if r == nil || r.AckEnvelope == nil || r.AckEnvelope["type"] != "member.provision_result" {
+		t.Fatalf("want provision_result on failure, got %+v", r)
+	}
+	payload, _ := r.AckEnvelope["payload"].(map[string]any)
+	if payload["status"] != "error" {
+		t.Fatalf("status=%v", payload["status"])
+	}
+	if payload["member_id"] != "mb_01h00000000000000000000021" {
+		t.Fatalf("member_id=%v", payload["member_id"])
+	}
+}

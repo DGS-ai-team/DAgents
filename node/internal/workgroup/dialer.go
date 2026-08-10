@@ -49,7 +49,41 @@ func WSURL(manageURL string) (string, error) {
 	return base + "/v1/workgroups/ws", nil
 }
 
+// Run 在 ctx 有效期内反复 ConnectAndServe：Manage 晚于 Node 启动、重启或短暂断线时
+// 能自动重连并 resume outbox，避免成员永久停在 provisioning（UI「配置中」）。
+// onDisconnect 在每次会话结束后、退避等待前调用（可为 nil）。
+func (d *Dialer) Run(ctx context.Context, onDisconnect func(err error, backoff time.Duration)) error {
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := d.ConnectAndServe(ctx)
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		if onDisconnect != nil {
+			onDisconnect(err, backoff)
+		}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
 // ConnectAndServe 拨号、hello、可选 resume，然后阻塞读循环直至 ctx 取消或连接关闭。
+// 单次会话；生产路径请用 Run 以获得断线重连。
 func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 	if d.Worker == nil || d.NodeID == "" {
 		return errf(CodeSchemaMismatch, "worker/node_id required")

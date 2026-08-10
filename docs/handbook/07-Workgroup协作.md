@@ -78,6 +78,8 @@ HTTP：`GET /v1/workgroups/meta/member-tools`（Node 本地提供，**不依赖*
 
 ## 7. 调试
 
+- **成员一直「配置中」（`provisioning`）**：先看 Manage 是否支持 WebSocket（`pip install websockets`，或 `uvicorn[standard]`）。缺库时 WS 握手会 404，Node 日志出现 `workgroup dialer stopped`；本版起 Dialer 会自动重连，但仍须 Manage 具备 WS。再查 `GET /v1/workgroups/{id}/outbox?unacked_only=true` 是否积压 `member.provision`。
+
 - Timeline：公开进度（工具名级，不含 raw 参数）。
 - **RunHistory**：`GET /v1/workgroups/{id}/runs` 与 `.../runs/{run_id}/history`（含 `llm.mode`）；UI「调试」侧栏可查看。
 

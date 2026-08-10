@@ -42,11 +42,11 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 	case "member.provision":
 		req, err := provisionFromPayload(env.Payload)
 		if err != nil {
-			return nil, err
+			return provisionFailureResult(env, req, err)
 		}
 		res, err := w.HandleProvision(req)
 		if err != nil {
-			return dispatchErr(err)
+			return provisionFailureResult(env, req, err)
 		}
 		wgID := deliveryWorkgroupID(env, res.Binding.WorkgroupID)
 		return &DispatchResult{
@@ -230,6 +230,57 @@ func dispatchErr(err error) (*DispatchResult, error) {
 			"payload": map[string]any{
 				"code":    string(code),
 				"message": msg,
+			},
+		},
+	}, err
+}
+
+// provisionFailureResult 将 member.provision 失败转为 provision_result(status=error)，
+// 让 Manage complete_provision 推进成员状态，避免永久停在 provisioning（UI「配置中」）。
+func provisionFailureResult(env WSEnvelope, req ProvisionRequest, err error) (*DispatchResult, error) {
+	code := CodeConflict
+	msg := fmt.Sprint(err)
+	if we, ok := err.(*Error); ok {
+		code = we.Code
+		msg = we.Message
+	}
+	if err == nil {
+		msg = "member provision failed"
+	}
+	provisionID := strings.TrimSpace(req.ProvisionID)
+	memberID := strings.TrimSpace(req.MemberID)
+	workgroupID := strings.TrimSpace(req.WorkgroupID)
+	if env.Payload != nil {
+		if provisionID == "" {
+			provisionID, _ = env.Payload["provision_id"].(string)
+		}
+		if memberID == "" {
+			memberID, _ = env.Payload["member_id"].(string)
+		}
+		if workgroupID == "" {
+			workgroupID, _ = env.Payload["workgroup_id"].(string)
+		}
+	}
+	wgID := deliveryWorkgroupID(env, workgroupID)
+	return &DispatchResult{
+		Handled:        true,
+		PendingAck:     env.DeliverySeq > 0 && strings.TrimSpace(wgID) != "",
+		AckWorkgroupID: wgID,
+		AckDeliverySeq: env.DeliverySeq,
+		ErrorCode:      code,
+		AckEnvelope: map[string]any{
+			"type": "member.provision_result",
+			"payload": map[string]any{
+				"provision_id":          provisionID,
+				"member_id":             memberID,
+				"workgroup_id":          firstNonEmpty(workgroupID, wgID),
+				"workspace_path":        "",
+				"tool_catalog_revision": "",
+				"status":                "error",
+				"error_code":            string(code),
+				"message":               msg,
+				"delivery_seq":          env.DeliverySeq,
+				"connection_generation": env.ConnectionGeneration,
 			},
 		},
 	}, err

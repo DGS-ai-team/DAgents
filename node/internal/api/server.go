@@ -623,9 +623,10 @@ func (s *Server) maybeStartManageSidecars() {
 	if s.workgroupDialer != nil {
 		ctx := s.manageCtx
 		go func() {
-			if err := s.workgroupDialer.ConnectAndServe(ctx); err != nil && ctx.Err() == nil {
-				s.logger.Warn("workgroup dialer stopped", "error", err)
-			}
+			_ = s.workgroupDialer.Run(ctx, func(err error, backoff time.Duration) {
+				s.logger.Warn("workgroup dialer disconnected; retrying",
+					"error", err, "backoff", backoff.String())
+			})
 		}()
 	}
 	s.manageStarted = true
