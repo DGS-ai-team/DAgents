@@ -90,11 +90,7 @@ if [[ -f "${REPO_ROOT}/.env.example" ]]; then
 fi
 cp -a "${REPO_ROOT}/packaging/runtime/." "${BUNDLE_DIR}/.runtime/"
 
-<<<<<<< HEAD
 # 内置 Agent 模板（Node 亦 go:embed；打包保留磁盘副本便于覆盖/排查）
-=======
-# 内置 Agent 模板（磁盘副本；Node 亦可 embed）
->>>>>>> 0e49b9d (fix(linux): 对齐安装脚本与当前发布包现状)
 if [[ -d "${REPO_ROOT}/packaging/agent-templates" ]]; then
   mkdir -p "${BUNDLE_DIR}/packaging"
   cp -a "${REPO_ROOT}/packaging/agent-templates" "${BUNDLE_DIR}/packaging/agent-templates"

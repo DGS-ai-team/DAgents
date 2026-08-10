@@ -201,10 +201,7 @@ install_files() {
   if [[ -f "${SOURCE}/VERSION" ]]; then
     install -m 0644 "${SOURCE}/VERSION" "${PREFIX}/VERSION"
   fi
-<<<<<<< HEAD
-=======
   # 内置模板磁盘副本（Node 亦可 go:embed；有则拷贝便于覆盖/排查）
->>>>>>> 0e49b9d (fix(linux): 对齐安装脚本与当前发布包现状)
   if [[ -d "${SOURCE}/packaging/agent-templates" ]]; then
     mkdir -p "${PREFIX}/packaging"
     copy_tree "${SOURCE}/packaging/agent-templates" "${PREFIX}/packaging/agent-templates"
