@@ -534,8 +534,8 @@ call :ensure_node_failed
 exit /b 1
 
 :probe_node
-if not exist "bin\dagents-client.exe" exit /b 1
-bin\dagents-client.exe -config "%CFG_ABS%" probe >nul 2>&1
+REM 就绪以 /health 为准（首配未完成时 agent/info 为 403，旧 client probe 会误判）
+powershell -NoProfile -Command "try { $p=18765; if (Test-Path -LiteralPath '%CFG_ABS%') { $m=Select-String -Path '%CFG_ABS%' -Pattern '^\s*port:\s*(\d+)' -SimpleMatch:$false | Select-Object -First 1; if ($m) { $p=[int]$m.Matches[0].Groups[1].Value } }; (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 (\"http://127.0.0.1:$p/health\")).StatusCode | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 exit /b %ERRORLEVEL%
 
 :ensure_node
