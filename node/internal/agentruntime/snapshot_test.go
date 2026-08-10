@@ -39,6 +39,24 @@ func TestEnabledToolGroups(t *testing.T) {
 	}
 }
 
+func TestToolsetShrinks(t *testing.T) {
+	if !ToolsetShrinks([]string{"fs", "bash"}, []string{"fs"}) {
+		t.Fatal("removing bash should shrink")
+	}
+	if ToolsetShrinks([]string{"fs"}, []string{"fs", "bash"}) {
+		t.Fatal("adding bash is not shrink")
+	}
+	if ToolsetShrinks([]string{"fs"}, []string{"fs"}) {
+		t.Fatal("same groups should not shrink")
+	}
+	if !ToolsetShrinks([]string{"fs", "bash"}, nil) {
+		t.Fatal("clearing groups should shrink")
+	}
+	if ToolsetShrinks(nil, []string{"fs"}) {
+		t.Fatal("empty old should not shrink")
+	}
+}
+
 func TestParseSnapshot_ignoresLegacySandbox(t *testing.T) {
 	raw := []byte(`{"template_id":"x","sandbox":{"enabled":true,"fs_root_isolation":true},"defaults":{"tools":{"enabled_groups":["fs"]}}}`)
 	snap, err := ParseSnapshot(raw)

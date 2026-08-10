@@ -286,15 +286,39 @@ func NewOrchestrator(
 
 // InterruptPending 在用户插入新 message 时打断 pending tool calls。
 func (o *Orchestrator) InterruptPending(sessionID string, history *[]llm.Message, pending *PendingHITL) {
+	o.InterruptPendingWithReason(
+		sessionID,
+		history,
+		pending,
+		ToolUserInterruptedMessage,
+		map[string]any{"interrupted_by_user_message": true},
+	)
+}
+
+// InterruptPendingWithReason 以自定义文案/元数据打断 pending tool calls。
+func (o *Orchestrator) InterruptPendingWithReason(
+	sessionID string,
+	history *[]llm.Message,
+	pending *PendingHITL,
+	message string,
+	meta map[string]any,
+) {
 	if pending == nil {
 		return
+	}
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		msg = ToolUserInterruptedMessage
+	}
+	if meta == nil {
+		meta = map[string]any{"interrupted_by_user_message": true}
 	}
 	o.insertMissingToolResponsesAfterAssistant(
 		sessionID,
 		history,
 		pending.AllToolCalls(),
-		ToolUserInterruptedMessage,
-		map[string]any{"interrupted_by_user_message": true},
+		msg,
+		meta,
 	)
 }
 

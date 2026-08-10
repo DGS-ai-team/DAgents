@@ -239,12 +239,16 @@ func newJobID() string {
 }
 
 // StartBackground 在后台 goroutine 执行工具，并立即返回受理 ACK。
+// 未启用工具在受理前 soft reject，避免假后台任务。
 func (r *Registry) StartBackground(
 	parent context.Context,
 	sessionID, toolName, toolCallID, cleanedArgs string,
 ) (string, error) {
 	if r.bgJobs == nil {
 		return "", fmt.Errorf("background jobs not initialized")
+	}
+	if err := r.rejectIfDisabled(parent, toolName); err != nil {
+		return "", err
 	}
 	jobCtx, cancel := context.WithCancel(WithBackgroundExecution(WithToolCallID(WithSession(parent, sessionID), toolCallID)))
 	job := &backgroundJob{

@@ -364,7 +364,11 @@ func TestAttachTriggerRuntime_perAgentRegistry(t *testing.T) {
 		NodeCFG:  cfg,
 		BaseTurn: srv.sessions.DefaultTurnOptions(),
 		AgentID:  "agt-trigger-test",
-		Snapshot: agentruntime.Snapshot{},
+		Snapshot: agentruntime.Snapshot{
+			Defaults: map[string]any{
+				"tools": map[string]any{"enabled_groups": []any{"triggers"}},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

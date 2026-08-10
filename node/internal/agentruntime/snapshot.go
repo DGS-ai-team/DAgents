@@ -72,6 +72,24 @@ func EnabledToolGroups(snap Snapshot) []string {
 	}
 }
 
+// ToolsetShrinks 判断工具组缩水：旧组展开后的任一工具名不在新组展开结果中。
+func ToolsetShrinks(oldGroups, newGroups []string) bool {
+	oldNames := config.ExpandBuiltinToolGroups(oldGroups)
+	if len(oldNames) == 0 {
+		return false
+	}
+	newSet := make(map[string]struct{}, len(newGroups)*4)
+	for _, name := range config.ExpandBuiltinToolGroups(newGroups) {
+		newSet[name] = struct{}{}
+	}
+	for _, name := range oldNames {
+		if _, ok := newSet[name]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
 // MultimodalEnabledFromDefaults 读取 defaults.llm.profiles[active].multimodal_enabled 或顶层 multimodal。
 func MultimodalEnabledFromDefaults(snap Snapshot) *bool {
 	llmRaw, ok := snap.Defaults["llm"]

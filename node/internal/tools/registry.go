@@ -116,8 +116,13 @@ func (r *Registry) Definitions() []ToolDef {
 	return r.enrichDefinitions(r.filterToolDefs(base))
 }
 
-// Execute 按名称 dispatch 工具；未知工具返回 error 文本。
+// Execute 按名称 dispatch 工具；未知工具或未启用工具返回 error 文本。
+// 子 Agent RestrictedRegistry 在通过自身 allowlist 后应使用 WithEnabledBypass，
+// 以免父 Agent 的 enabledOnly 误拦子会话允许的工具。
 func (r *Registry) Execute(ctx context.Context, name, arguments string) (string, error) {
+	if err := r.rejectIfDisabled(ctx, name); err != nil {
+		return "", err
+	}
 	h, ok := r.handlers[name]
 	if !ok {
 		return "", fmt.Errorf("unknown tool: %s", name)
