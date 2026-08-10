@@ -80,6 +80,27 @@ func (s *Server) templateLoader() *agenttemplate.Loader {
 	return agenttemplate.NewLoader(builtin, userDir)
 }
 
+// applyPromptContextBodies 在 Ensure 之后写入模板/请求带来的 soul/custom 预设。
+func (s *Server) applyPromptContextBodies(ctx context.Context, agentID, soulMD, customMD string) error {
+	if s.agents == nil {
+		return fmt.Errorf("agents store unavailable")
+	}
+	pc, err := s.agents.GetAgentPromptContext(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	if pc == nil {
+		pc = &store.AgentPromptContextRecord{AgentID: agentID}
+	}
+	if strings.TrimSpace(soulMD) != "" {
+		pc.SoulMD = strings.TrimSpace(soulMD)
+	}
+	if strings.TrimSpace(customMD) != "" {
+		pc.CustomMD = strings.TrimSpace(customMD)
+	}
+	return s.agents.SaveAgentPromptContext(ctx, *pc)
+}
+
 func defaultAgentCreationDefaults() map[string]any {
 	return map[string]any{
 		"agent": map[string]any{
@@ -208,6 +229,13 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		baseDefaults = defaultAgentCreationDefaults()
 	}
 
+	// soul/custom 正文：优先请求 defaults，其次模板预设；写入侧车表，不进 snapshot。
+	soulMD, customMD := agenttemplate.PromptBodiesFromDefaults(baseDefaults)
+	if soulMD == "" && customMD == "" && tpl != nil {
+		soulMD, customMD = agenttemplate.PromptBodiesFromDefaults(tpl.Defaults)
+	}
+	agenttemplate.StripPromptBodiesFromDefaults(baseDefaults)
+
 	name := strings.TrimSpace(req.DisplayName)
 	if name == "" && tpl != nil {
 		name = strings.TrimSpace(tpl.DisplayName)
@@ -256,6 +284,10 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := s.agents.EnsureAgentPromptContext(r.Context(), agentID, s.runtimeDir()); err != nil {
 		s.logger.Warn("agent prompt context seed failed", "agent_id", agentID, "error", err)
+	} else if soulMD != "" || customMD != "" {
+		if err := s.applyPromptContextBodies(r.Context(), agentID, soulMD, customMD); err != nil {
+			s.logger.Warn("agent prompt context preset apply failed", "agent_id", agentID, "error", err)
+		}
 	}
 	if s.sessions != nil {
 		if err := s.reloadAgentRuntime(r.Context(), rec); err != nil {

@@ -187,6 +187,8 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   draft.promptCustomEnabled = boolOr(prompt.custom_enabled, true);
   draft.promptLongTermEnabled = boolOr(prompt.long_term_enabled, true);
   draft.promptLongTermScope = String(prompt.long_term_scope || "agent").trim() === "global" ? "global" : "agent";
+  draft.promptSoulMd = String(prompt.soul_md || "").trim();
+  draft.promptCustomMd = String(prompt.custom_md || "").trim();
 
   const fromTpl = String(llm.active || "").trim();
   const ids = Array.isArray(llmProfileIds) ? llmProfileIds.map((x) => String(x || "").trim()).filter(Boolean) : [];
@@ -268,6 +270,12 @@ export function buildCreateAgentPayload(draft) {
         custom_enabled: promptFieldEnabled(draft.promptCustomMd),
         long_term_enabled: memoryEnabledFromToolGroups(draft.toolGroups),
         long_term_scope: draft.promptLongTermScope === "global" ? "global" : "agent",
+        ...(String(draft.promptSoulMd || "").trim()
+          ? { soul_md: String(draft.promptSoulMd).trim() }
+          : {}),
+        ...(String(draft.promptCustomMd || "").trim()
+          ? { custom_md: String(draft.promptCustomMd).trim() }
+          : {}),
       },
     },
   };
@@ -313,6 +321,12 @@ export function buildCreateTemplatePayload(meta, draft) {
         soul_enabled: promptFieldEnabled(draft?.promptSoulMd),
         custom_enabled: promptFieldEnabled(draft?.promptCustomMd),
         long_term_enabled: memoryEnabledFromToolGroups(draft?.toolGroups),
+        ...(String(draft?.promptSoulMd || "").trim()
+          ? { soul_md: String(draft.promptSoulMd).trim() }
+          : {}),
+        ...(String(draft?.promptCustomMd || "").trim()
+          ? { custom_md: String(draft.promptCustomMd).trim() }
+          : {}),
       },
     },
   };

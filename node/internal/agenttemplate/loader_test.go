@@ -33,7 +33,8 @@ display_name: 运维（覆盖）
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 2 {
+	// 嵌入内置至少含 general / code-reviewer / ops-runner；磁盘可覆盖同 id。
+	if len(list) < 3 {
 		t.Fatalf("len=%d", len(list))
 	}
 	ops, err := l.Get("ops-runner")
@@ -42,6 +43,13 @@ display_name: 运维（覆盖）
 	}
 	if ops.DisplayName != "运维（覆盖）" {
 		t.Fatalf("ops = %+v", ops)
+	}
+	general, err := l.Get("general")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if general.DisplayName != "通用助手" {
+		t.Fatalf("general from disk builtin = %+v", general)
 	}
 	if _, err := l.Get("missing"); err == nil {
 		t.Fatal("expected not found")
@@ -68,5 +76,56 @@ func TestLoader_builtinPackagingTemplates(t *testing.T) {
 	}
 	if g.DisplayName == "" {
 		t.Fatal("general display_name empty")
+	}
+	soul, custom := PromptBodiesFromDefaults(g.Defaults)
+	if soul == "" {
+		t.Fatal("general soul_md preset empty")
+	}
+	if custom == "" {
+		t.Fatal("general custom_md preset empty")
+	}
+}
+
+func TestLoader_embeddedBuiltinsAlwaysAvailable(t *testing.T) {
+	// 无磁盘目录时仍应能列出嵌入模板（安装包场景）。
+	l := NewLoader("", "")
+	list, err := l.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) < 3 {
+		t.Fatalf("embedded builtins: got %d", len(list))
+	}
+	for _, id := range []string{"general", "code-reviewer", "ops-runner"} {
+		tpl, err := l.Get(id)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		soul, custom := PromptBodiesFromDefaults(tpl.Defaults)
+		if soul == "" || custom == "" {
+			t.Fatalf("%s missing soul/custom presets", id)
+		}
+	}
+}
+
+func TestPromptBodiesStrip(t *testing.T) {
+	defaults := map[string]any{
+		"prompt_context": map[string]any{
+			"soul_enabled": true,
+			"soul_md":      "角色",
+			"custom_md":    "补充",
+		},
+	}
+	soul, custom := PromptBodiesFromDefaults(defaults)
+	if soul != "角色" || custom != "补充" {
+		t.Fatalf("bodies=%q %q", soul, custom)
+	}
+	StripPromptBodiesFromDefaults(defaults)
+	pc := defaults["prompt_context"].(map[string]any)
+	if _, ok := pc["soul_md"]; ok {
+		t.Fatal("soul_md should be stripped")
+	}
+	if pc["soul_enabled"] != true {
+		t.Fatal("enabled flag must remain")
 	}
 }

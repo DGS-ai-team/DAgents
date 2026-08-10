@@ -190,6 +190,10 @@ install_files() {
   if [[ -f "${SOURCE}/VERSION" ]]; then
     install -m 0644 "${SOURCE}/VERSION" "${PREFIX}/VERSION"
   fi
+  if [[ -d "${SOURCE}/packaging/agent-templates" ]]; then
+    mkdir -p "${PREFIX}/packaging"
+    copy_tree "${SOURCE}/packaging/agent-templates" "${PREFIX}/packaging/agent-templates"
+  fi
   if [[ ! -f "${PREFIX}/config.yaml" && -f "${PREFIX}/config.example.yaml" ]]; then
     cp "${PREFIX}/config.example.yaml" "${PREFIX}/config.yaml"
     info "created ${PREFIX}/config.yaml from config.example.yaml"

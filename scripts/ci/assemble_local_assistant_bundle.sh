@@ -90,6 +90,12 @@ if [[ -f "${REPO_ROOT}/.env.example" ]]; then
 fi
 cp -a "${REPO_ROOT}/packaging/runtime/." "${BUNDLE_DIR}/.runtime/"
 
+# 内置 Agent 模板（Node 亦 go:embed；打包保留磁盘副本便于覆盖/排查）
+if [[ -d "${REPO_ROOT}/packaging/agent-templates" ]]; then
+  mkdir -p "${BUNDLE_DIR}/packaging"
+  cp -a "${REPO_ROOT}/packaging/agent-templates" "${BUNDLE_DIR}/packaging/agent-templates"
+fi
+
 # 启动脚本与 Node 系统服务注册脚本
 mkdir -p "${BUNDLE_DIR}/scripts"
 cp -a "${REPO_ROOT}/packaging/agent-client/scripts/startup" "${BUNDLE_DIR}/scripts/"
