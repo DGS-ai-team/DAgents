@@ -11,6 +11,7 @@ import {
   clearPartialToolIndex,
   forgetToolBlock,
   markToolBlockActive,
+  placeholderBlockIdForIndex,
   resolveToolBlockId,
 } from "./toolStream.js";
 import {
@@ -255,7 +256,15 @@ export function upsertToolCallFromSSE(data) {
       codePreview: parts.codePreview,
       call,
     });
-    if (!partial) markToolBlockActive(blockId);
+    if (!partial) {
+      markToolBlockActive(blockId);
+      // 防御：index 映射曾被 reset 时，仍可能残留 partial-N
+      const placeholder = placeholderBlockIdForIndex(toolIndex);
+      if (placeholder && placeholder !== blockId) {
+        removeToolCallByBlockId(placeholder);
+        forgetToolBlock(placeholder);
+      }
+    }
   }
 }
 
@@ -303,6 +312,12 @@ export function applyToolResult(data) {
   finalizeAssistant();
   finalizeReasoning();
   const callId = String(data?.tool_call_id || data?.id || "").trim();
+  const toolIndex = toolIndexFromEvent(data);
+  const placeholder = placeholderBlockIdForIndex(toolIndex);
+  if (placeholder && placeholder !== callId) {
+    removeToolCallByBlockId(placeholder);
+    forgetToolBlock(placeholder);
+  }
   const idx = transcriptStore.entries.findIndex(
     (e) =>
       (e.kind === "tool_call" || e.kind === "tool_result") &&

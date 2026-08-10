@@ -7,14 +7,26 @@ export function resetToolStream() {
   activeBlocks.clear();
 }
 
+/**
+ * 解析 tool_call 气泡 blockId。
+ *
+ * OpenAI 兼容流常先发带 id 的 delta，随后 args 分片 id 为空。
+ * 必须在 partial 期间保持 toolIndex→真实 id 的映射，否则空 id 分片会另建
+ * `partial-N` 气泡，tool_result 只结束真实 id，留下僵死「生成中」。
+ */
 export function resolveToolBlockId(callId, toolIndex, partial) {
   const id = String(callId || "").trim();
   let migrateFrom = "";
   if (id) {
     if (toolIndex >= 0 && partialIndexIds.has(toolIndex)) {
       const old = partialIndexIds.get(toolIndex);
-      partialIndexIds.delete(toolIndex);
       if (old && old !== id) migrateFrom = old;
+    }
+    if (partial && toolIndex >= 0) {
+      // 流式期间记住真实 id，供后续空 id args 分片复用
+      partialIndexIds.set(toolIndex, id);
+    } else if (toolIndex >= 0) {
+      partialIndexIds.delete(toolIndex);
     }
     return { blockId: id, migrateFrom };
   }
@@ -31,6 +43,12 @@ export function resolveToolBlockId(callId, toolIndex, partial) {
 
 export function clearPartialToolIndex(toolIndex, partial) {
   if (!partial && toolIndex >= 0) partialIndexIds.delete(toolIndex);
+}
+
+/** 终态 tool_call / tool_result 时清理同 index 的占位气泡。 */
+export function placeholderBlockIdForIndex(toolIndex) {
+  if (toolIndex < 0) return "";
+  return `partial-${toolIndex}`;
 }
 
 export function markToolBlockActive(blockId) {
