@@ -319,6 +319,21 @@ EOF
   echo "[dagents] 下一步：dagents node（若未在跑）然后打开 Web UI 开始对话"
 }
 
+# 首配未完成时提示打开 Web UI（不阻塞启动）。
+hint_node_onboarding_if_needed() {
+  local port="18765"
+  if [[ -f "${ROOT}/${CFG}" ]]; then
+    local p
+    p="$(grep -A10 '^listen:' "${ROOT}/${CFG}" 2>/dev/null | grep -E '^[[:space:]]+port:' | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
+    [[ -n "${p}" ]] && port="${p}"
+  fi
+  local boot=""
+  boot="$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/v1/ui/bootstrap" 2>/dev/null || true)"
+  if [[ -n "${boot}" ]] && grep -q '"node_profile_completed"[[:space:]]*:[[:space:]]*false' <<<"${boot}"; then
+    echo "[dagents] 首次使用：请打开 Web UI 完成身份与 LLM 配置后再使用对话等功能"
+  fi
+}
+
 write_node_pid() {
   local pid="$1"
   mkdir -p "${ROOT}/.runtime"
