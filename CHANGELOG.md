@@ -6,6 +6,22 @@
 
 ---
 
+## [0.9.4] - 2026-08-10
+
+**Linux 命令行首配**：无图形环境可用 `dagents init` 完成与 Web 同源的 onboarding；首配门闸下 Node 就绪探测不再误超时。
+
+### 新增
+
+- **`dagents init` / `setup`**：经 `PATCH /v1/setup/config` 写入身份与 LLM（交互式或 `--yes` 非交互）；`doctor` / help / install 提示对齐。
+
+### 修复
+
+- **首配前 `dagents node` 等待 30s 失败**：就绪改认 `/health`（首配未完成时 `/v1/agent/info` 为 403）；client probe 对 `node_profile_required` 视为已就绪并提示补全首配。
+
+（Git **tag**：`v0.9.4`。）
+
+---
+
 ## [0.9.3] - 2026-08-10
 
 **WebUI 稳定性与安装对齐**：对话 SSE/切 Agent 不再卡三点跳动；Linux 安装脚本对齐现网包；内置模板补全 soul/custom；移除已过时的 Tauri Setup 向导。
