@@ -23,6 +23,7 @@
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
+| **0.9.3** | **已发布** | WebUI SSE/切 Agent 稳定性、Linux 安装对齐、模板 soul/custom、移除 Tauri Setup（tag `v0.9.3`）。 |
 | **0.9.2** | **已发布** | Manage Docker 补丁：镜像内打包 `member_tool_catalog.json`（tag `v0.9.2`）。 |
 | **0.9.1** | **已发布（预览）** | Workgroup 可演示；验收见 [v0.9.1-smoke-checklist.md](./design/v0.9.1-smoke-checklist.md)。正式版前最后一个大预览（tag `v0.9.1`）。 |
 | **0.9.x** | **进行中** | 开箱体验、本地助手、Manage + 工作组收口。 |
@@ -136,4 +137,4 @@
 - 安全见 [SECURITY.md](../SECURITY.md)。
 - **以实现 / CHANGELOG 为准**；本文冲突时欢迎 PR 修正。
 
-**最后更新**：2026-08-07 — 发布 v0.9.2（Manage Docker catalog 补丁）；v0.9.1 为 Workgroup 预览主叙事。
+**最后更新**：2026-08-10 — 发布 v0.9.3（WebUI/安装稳定性补丁）；v0.9.1 为 Workgroup 预览主叙事。

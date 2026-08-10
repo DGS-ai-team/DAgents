@@ -121,17 +121,20 @@ export async function refreshToolJobs(agentId) {
 
 export function startToolJobsPolling(getAgentId) {
   stopToolJobsPolling();
-  const tick = () => {
+  const ACTIVE_MS = 1000;
+  const IDLE_MS = 5000;
+  const tick = async () => {
     const id = typeof getAgentId === "function" ? getAgentId() : getAgentId;
-    refreshToolJobs(id);
+    await refreshToolJobs(id);
+    const busy = toolJobsStore.running + toolJobsStore.background > 0;
+    pollTimer = setTimeout(tick, busy ? ACTIVE_MS : IDLE_MS);
   };
-  tick();
-  pollTimer = setInterval(tick, 1000);
+  void tick();
 }
 
 export function stopToolJobsPolling() {
   if (pollTimer) {
-    clearInterval(pollTimer);
+    clearTimeout(pollTimer);
     pollTimer = null;
   }
 }

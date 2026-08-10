@@ -82,4 +82,11 @@ describe("agent ack", () => {
     await Promise.resolve();
     expect(api.postAgentAck).toHaveBeenCalledWith("agt-test", 12);
   });
+
+  it("ackAgentAfterHydrate prefers notify_seq over lastSeq", async () => {
+    transcriptStore.lastSeq = 99;
+    ackAgentAfterHydrate(42);
+    await Promise.resolve();
+    expect(api.postAgentAck).toHaveBeenCalledWith("agt-test", 42);
+  });
 });

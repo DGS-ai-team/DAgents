@@ -1144,7 +1144,7 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	events := s.stream.Subscribe(lastSeq)
+	events := s.stream.SubscribeAgent(lastSeq, agentFilter)
 	defer s.stream.Unsubscribe(events)
 
 	// 首包注释行立即 flush，使 Client 立刻收到 HTTP 200；否则 idle 连接要等 15s heartbeat。
@@ -1172,9 +1172,7 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if agentFilter != "" && ev.AgentID != agentFilter && ev.SessionID != agentFilter {
-				continue // Hub 为全局广播；按 agent 过滤在 handler 内完成
-			}
+			// Hub 已按 agentFilter 投递；此处不再二次过滤。
 			if _, err := w.Write([]byte(ev.FormatSSE())); err != nil {
 				return
 			}
