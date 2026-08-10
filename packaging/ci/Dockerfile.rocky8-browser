@@ -1,0 +1,16 @@
+# Rocky Linux 8 + gcc-toolset-13：供 CI 构建 glibc 2.28 的 dagents-browser。
+# 预装编译依赖，避免每次 `docker run rockylinux:8` 都 dnf 一轮。
+# pyenv / CPython 仍通过卷挂载缓存（见 build-and-release.yml）。
+FROM rockylinux:8
+
+RUN dnf -y install \
+      ca-certificates curl git \
+      findutils tar gzip \
+      make patch pkg-config which \
+      gcc zlib-devel bzip2-devel readline-devel sqlite-devel openssl-devel xz xz-devel \
+      libffi-devel gdbm-devel \
+      gcc-toolset-13 gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ \
+    && dnf clean all
+
+ENV PYENV_ROOT=/opt/pyenv
+WORKDIR /src
