@@ -90,7 +90,11 @@ if [[ -f "${REPO_ROOT}/.env.example" ]]; then
 fi
 cp -a "${REPO_ROOT}/packaging/runtime/." "${BUNDLE_DIR}/.runtime/"
 
+<<<<<<< HEAD
 # 内置 Agent 模板（Node 亦 go:embed；打包保留磁盘副本便于覆盖/排查）
+=======
+# 内置 Agent 模板（磁盘副本；Node 亦可 embed）
+>>>>>>> 0e49b9d (fix(linux): 对齐安装脚本与当前发布包现状)
 if [[ -d "${REPO_ROOT}/packaging/agent-templates" ]]; then
   mkdir -p "${BUNDLE_DIR}/packaging"
   cp -a "${REPO_ROOT}/packaging/agent-templates" "${BUNDLE_DIR}/packaging/agent-templates"
@@ -129,21 +133,23 @@ if [[ "${PLATFORM}" == windows-* ]]; then
   cat > "${BUNDLE_DIR}/README.txt" <<'EOF'
 DAgents Local Assistant (Go Node + Desktop Shell + Web UI)
 
-1. copy config.example.yaml to config.yaml and edit llm / agent_id / agent.role (Manage A2A)
+1. copy config.example.yaml to config.yaml (bootstrap: listen/local; configure LLM via Web UI)
 2. Start Desktop Shell (recommended; tray supervises Node + HITL toasts):
-     dagents shell --background          (logs in .runtime\logs\shell.log)
+     dagents shell --background          (logs in .runtime\logs\shell-YYYY-MM-DD.log)
      dagents shell status / shell stop
 3. Or start Node only (legacy / debug):
      dagents                    (default: start Node in background)
-     dagents node --background  (logs in .runtime\logs\node.log)
-     dagents node               (foreground)
+     dagents node               (same: background + wait until ready)
+     dagents node --foreground  (blocks terminal)
+     dagents node --background  (background without wait)
      bin\dagents-node.exe -config config.yaml
      scripts\startup\windows\start-node.bat
+   Logs: .runtime\logs\node-YYYY-MM-DD.log / .err.log
 4. Open Web UI (embedded in dagents-node; no separate UI installer):
      http://127.0.0.1:<listen.port>/ui/   (default 18765; ui.enabled defaults to true)
      Printed after `dagents` or `dagents node` when the node is ready.
 5. Browser tool (when browser.enabled: true in config):
-     dagents browser --background          (recommended; logs .runtime\logs\browser.log)
+     dagents browser --background          (recommended; logs .runtime\logs\browser-YYYY-MM-DD.log)
      dagents browser stop
      bin\dagents-browser.exe --config config.yaml
 
@@ -168,17 +174,19 @@ else
 DAgents Local Assistant（Go Node + Web UI）
 
 便携使用：
-1. cp config.example.yaml config.yaml && 编辑 llm / agent_id / agent.role（Manage A2A）
+1. cp config.example.yaml config.yaml   # bootstrap：listen/local；LLM 等用 Web UI 配置
 2. 启动 Node：
-     ./dagents                    （默认：后台启动 Node）
-     ./dagents node --background  （推荐；日志 .runtime/logs/node.log）
-     ./dagents node               （前台）
+     ./dagents                    （默认：后台启动 Node 并打印 Web UI）
+     ./dagents node               （同上：后台 + 等待就绪）
+     ./dagents node --foreground  （前台阻塞）
+     ./dagents node --background  （后台且不等待 probe）
      ./scripts/startup/linux/start-node.sh
+   日志：.runtime/logs/node-YYYY-MM-DD.log / .err.log
 3. 浏览器 Web UI（内嵌于 dagents-node，无需单独安装）：
      http://127.0.0.1:<listen.port>/ui/   （默认 18765；config 中 ui.enabled 默认 true）
      `dagents` 或 `dagents node` 就绪后会打印地址。
-4. Browser 工具（config 中 browser.enabled: true 时）：
-     ./dagents browser --background    （推荐；日志 .runtime/logs/browser.log）
+4. Browser 工具（config / Web UI 中启用 browser 能力时）：
+     ./dagents browser --background    （推荐；日志 .runtime/logs/browser-YYYY-MM-DD.log）
      ./dagents browser stop
      ./bin/dagents-browser --config config.yaml
 
