@@ -324,7 +324,7 @@ do_install() {
     write_env_file
     link_launcher
   fi
-  info "done. Try: dagents doctor"
+  info "done. Try: dagents init && dagents doctor"
 }
 
 while [[ $# -gt 0 ]]; do
