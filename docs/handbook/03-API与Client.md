@@ -76,7 +76,7 @@ GET /v1/agent/info
 | POST | `/v1/agents/{id}/ensure` | 装入运行时 |
 | GET | `/v1/agents/{id}/hydrate` | transcript + pending HITL |
 | POST | `/v1/agents/{id}/cancel` | 取消在途 turn |
-| POST | `/v1/agents/{id}/clear-context` | 清空上下文 |
+| POST | `/v1/agents/{id}/clear-context` | 清空对话上下文；同步取消未完成 bash/临时子 Agent（Activity 随之清空） |
 | GET | `/v1/agents/{id}/context` | token 估算 + system prompt 预览 |
 | GET | `/v1/agents/{id}/child-agents` | 临时子 Agent 列表 |
 

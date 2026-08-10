@@ -305,6 +305,49 @@ func TestBashRunCancelAfterBackgroundViaUI(t *testing.T) {
 	t.Fatalf("background count did not drop after cancel: %+v", reg.SessionToolJobCounts("sess-bg-cancel"))
 }
 
+func TestCancelAllSessionJobs(t *testing.T) {
+	dir := t.TempDir()
+	reg, err := NewRegistry(dir, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.bashHardLimitSec = 30
+	start := func(sid, callID string) {
+		ctx := WithToolCallID(WithSession(context.Background(), sid), callID)
+		go func() {
+			_, _ = reg.Execute(ctx, "bash_run", `{"command":"sleep 30","timeout_seconds":2}`)
+		}()
+	}
+	start("sess-all", "call-a")
+	start("sess-all", "call-b")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c := reg.SessionToolJobCounts("sess-all")
+		if c.Running+c.Background >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("jobs not registered: %+v", c)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	n := reg.CancelAllSessionJobs("sess-all")
+	if n < 1 {
+		t.Fatalf("CancelAllSessionJobs cancelled %d", n)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		c := reg.SessionToolJobCounts("sess-all")
+		if c.Running == 0 && c.Background == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("jobs still active after CancelAll: %+v", c)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestAutoDegradeSuccessNotifiesOnce(t *testing.T) {
 	dir := t.TempDir()
 	reg, err := NewRegistry(dir, 30)

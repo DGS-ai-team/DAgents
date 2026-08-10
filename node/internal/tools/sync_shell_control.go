@@ -186,6 +186,33 @@ func (r *Registry) CancelSyncBash(sessionID, toolCallID string) error {
 	return r.cancelBackgroundBashByToolCall(sessionID, toolCallID)
 }
 
+// CancelAllSessionJobs 取消该 session 下全部同步/后台 bash 任务，返回成功取消数。
+func (r *Registry) CancelAllSessionJobs(sessionID string) int {
+	if r == nil {
+		return 0
+	}
+	counts := r.SessionToolJobCounts(sessionID)
+	ids := make([]string, 0, len(counts.RunningCallIDs)+len(counts.BackgroundCallIDs))
+	ids = append(ids, counts.RunningCallIDs...)
+	ids = append(ids, counts.BackgroundCallIDs...)
+	n := 0
+	seen := map[string]struct{}{}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		if err := r.CancelSyncBash(sessionID, id); err == nil {
+			n++
+		}
+	}
+	return n
+}
+
 func (r *Registry) cancelBackgroundBashByToolCall(sessionID, toolCallID string) error {
 	if r == nil || r.bgJobs == nil {
 		return ErrSyncShellNotFound

@@ -308,13 +308,16 @@ func (m *Manager) RouteResume(parentSessionID string, resume map[string]any) (ta
 	return false, m.host.DeliverChildResume(childID, resume)
 }
 
-// CancelAllForParent 父 session 删除时取消其下所有活跃子 Agent。
-func (m *Manager) CancelAllForParent(parentSessionID string) {
+// CancelAllForParent 父 session 释放/清空时取消其下所有活跃子 Agent。
+func (m *Manager) CancelAllForParent(parentSessionID, reason string) {
+	if strings.TrimSpace(reason) == "" {
+		reason = "parent session released"
+	}
 	m.mu.Lock()
 	ids := append([]string(nil), m.activeIDsByParent[parentSessionID]...)
 	m.mu.Unlock()
 	for _, id := range ids {
-		_, _ = m.Cancel(parentSessionID, id, "parent session released")
+		_, _ = m.Cancel(parentSessionID, id, reason)
 	}
 }
 

@@ -1,3 +1,0 @@
-# Place the Inno installer exe here before `tauri build`, e.g.
-#   dagents-local-assistant-windows-amd64-installer-0.x.x.exe
-# Files in this directory are bundled as Tauri resources (not committed).

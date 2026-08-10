@@ -490,9 +490,16 @@ func (m *Manager) CompressContext(ctx context.Context, sessionID string) (compre
 	return rt.compressContext(ctx), nil
 }
 
-// ClearContext 清空对话历史；若 turn 在途则先 cancel。
+// ClearContext 清空对话历史；取消在途 turn、未完成命令与临时子 Agent。
 func (m *Manager) ClearContext(sessionID string) (cancelled bool, err error) {
-	rt := m.getRuntime(sessionID)
+	sid := strings.TrimSpace(sessionID)
+	if m.children != nil {
+		m.children.CancelAllForParent(sid, "context cleared")
+	}
+	if reg := m.SessionTools(sid); reg != nil {
+		_ = reg.CancelAllSessionJobs(sid)
+	}
+	rt := m.getRuntime(sid)
 	if rt != nil {
 		cancelled = rt.cancelTurn()
 		rt.clearMessages(context.Background())
@@ -501,7 +508,7 @@ func (m *Manager) ClearContext(sessionID string) (cancelled bool, err error) {
 	if m.store == nil {
 		return false, fmt.Errorf("agent_not_found")
 	}
-	if err := m.store.ClearMessages(context.Background(), sessionID); err != nil {
+	if err := m.store.ClearMessages(context.Background(), sid); err != nil {
 		return false, fmt.Errorf("agent_not_found")
 	}
 	return false, nil
@@ -511,7 +518,7 @@ func (m *Manager) ClearContext(sessionID string) (cancelled bool, err error) {
 func (m *Manager) Delete(sessionID string) (bool, error) {
 	sid := strings.TrimSpace(sessionID)
 	if m.children != nil {
-		m.children.CancelAllForParent(sid)
+		m.children.CancelAllForParent(sid, "parent session released")
 	}
 	wasActive := false
 	m.mu.Lock()
