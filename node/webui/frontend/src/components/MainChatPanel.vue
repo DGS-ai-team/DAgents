@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, nextTick } from "vue";
+import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import ComposerToolbar from "./ComposerToolbar.vue";
 import ContextMeter from "./ContextMeter.vue";
 import MessageBubble from "./MessageBubble.vue";
@@ -25,7 +25,7 @@ import {
   pathsFromUriList,
   shouldResolvePathsViaShell,
 } from "../utils/filePathPaste.js";
-
+import { createFollowTailController } from "../utils/scrollTail.js";
 const props = defineProps({
   entries: { type: Array, default: () => [] },
   hitlQueue: { type: Array, default: () => [] },
@@ -77,8 +77,9 @@ function onUserInfoSelected(next) {
   userInfoSelected.value = Array.isArray(next) ? [...next] : Number(next);
   emit("user-info-selected", userInfoSelected.value);
 }
-const followTail = ref(true);
-const SCROLL_TAIL_THRESHOLD = 48;
+
+const scrollTail = createFollowTailController();
+let streamResizeObserver = null;
 
 const stream = computed(() => {
   // 依赖 tool-jobs，以便排队/执行中相位随 /tool-jobs 刷新
@@ -231,6 +232,14 @@ const tailContentKey = computed(() => {
   const parts = [stream.value.length, props.hitlQueue.length, activeStatusPhases.value.length];
   for (const entry of props.entries) {
     parts.push(entry.id, entry.kind, (entry.text || "").length, entry.streaming ? 1 : 0);
+    // 工具气泡内容在 data 上，text 常为空；纳入 summary / content 长度以免漏钉尾
+    if (entry.kind === "tool_call" || entry.kind === "tool_result") {
+      parts.push(
+        String(entry.summary || "").length,
+        String(entry.data?.content || "").length,
+        entry.partial ? 1 : 0,
+      );
+    }
   }
   for (const hitl of props.hitlQueue) {
     parts.push(hitl.kind, hitl.data?.request_id || hitl.data?.approval_id || "");
@@ -239,10 +248,8 @@ const tailContentKey = computed(() => {
 });
 
 function maybeScrollToTail() {
-  if (!followTail.value) return;
   nextTick(() => {
-    const el = streamRef.value;
-    if (el) el.scrollTop = el.scrollHeight;
+    scrollTail.pinIfFollowing(streamRef.value);
   });
 }
 
@@ -251,15 +258,39 @@ watch(tailContentKey, () => {
 });
 
 function onStreamScroll() {
-  const el = streamRef.value;
-  if (!el) return;
-  followTail.value = el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_TAIL_THRESHOLD;
+  scrollTail.onScroll(streamRef.value);
 }
 
 function scrollToTail() {
-  followTail.value = true;
-  maybeScrollToTail();
+  nextTick(() => {
+    scrollTail.forcePin(streamRef.value);
+  });
 }
+
+function bindStreamResizeObserver() {
+  const el = streamRef.value;
+  if (!el || typeof ResizeObserver === "undefined") return;
+  streamResizeObserver?.disconnect();
+  streamResizeObserver = new ResizeObserver(() => {
+    if (scrollTail.follow) scrollTail.pinIfFollowing(el);
+  });
+  const inner = el.firstElementChild || el;
+  streamResizeObserver.observe(inner);
+  streamResizeObserver.observe(el);
+}
+
+onMounted(() => {
+  bindStreamResizeObserver();
+});
+
+onBeforeUnmount(() => {
+  streamResizeObserver?.disconnect();
+  streamResizeObserver = null;
+});
+
+watch(streamRef, (el) => {
+  if (el) bindStreamResizeObserver();
+});
 
 async function submit() {
   const text = input.value.trim();
