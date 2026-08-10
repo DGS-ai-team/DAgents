@@ -4,7 +4,7 @@ Linux 分发辅助（随 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入�
 
 | 文件 | 说明 |
 |------|------|
-| **`dagents`** | 命令行入口：默认后台启动 Node 并打印 Web UI；`node` / `node shutdown` / `node restart` / `browser` / `doctor` / `update` / `version`。启动后 `cd` 到安装根（与 Windows `pushd` 一致，`./.runtime` 可从任意目录执行） |
+| **`dagents`** | 命令行入口：`init`/`setup` 首配；默认后台启动 Node 并打印 Web UI；`node` / `browser` / `doctor` / `update` / `version`。启动后 `cd` 到安装根（与 Windows `pushd` 一致，`./.runtime` 可从任意目录执行） |
 | **`install.sh`** | 安装脚本：若目标目录已有 `.runtime/node.pid` 则先 `node shutdown` 停旧进程；**升级时**更新 `bin/`、`scripts/`、`dagents`，`.runtime/` **默认仅补缺失文件**；若已有 `policy/` 会**交互询问是否覆盖**（`--overwrite-policy` / `--keep-policy`） |
 
 人机界面为 **Web UI**（嵌入 `dagents-node`）。`chat` / `tui` / `dagents-cli` 已移除。
@@ -14,7 +14,9 @@ Linux 分发辅助（随 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入�
 ```bash
 tar -xzf dagents-local-assistant-linux-amd64-*.tar.gz
 cd dagents-local-assistant-linux-amd64
-cp config.example.yaml config.yaml   # bootstrap：listen/local；LLM 等用 Web UI
+cp config.example.yaml config.yaml   # bootstrap：listen/local
+./dagents init                       # 命令行首配（身份 + LLM；也可用 Web UI）
+# 或：./dagents init --yes --preferred-name you --node-name lab --provider mock
 ./dagents                            # 默认后台启动 Node 并打印 Web UI
 ./dagents node                       # 同上（后台 + 等待就绪）
 ./dagents node --foreground          # 前台阻塞（调试）
