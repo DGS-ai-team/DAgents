@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, onActivated, ref, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
-import { connectStream } from "../sse/stream.js";
+import { connectStream, shouldIgnoreSSEForAgent } from "../sse/stream.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
 import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
@@ -66,6 +66,7 @@ import {
   startToolJobsPolling,
   stopToolJobsPolling,
 } from "../stores/toolJobs.js";
+import { createTurnWatchdog } from "../stores/turnWatchdog.js";
 import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
 import {
   formatChildLifecycle,
@@ -104,6 +105,13 @@ const agentList = ref([]);
 const currentAgentDisplayName = ref("");
 const chatPanelRef = ref(null);
 let agentNameSyncToken = 0;
+let sseResyncToken = 0;
+
+const turnWatchdog = createTurnWatchdog({
+  isAwaiting: () => agentStore.awaitingTurn,
+  hasStuckStatus: () => hasStatus("prefilling") || hasStatus("thinking"),
+  onStuck: () => resyncAfterSSEGap("watchdog"),
+});
 
 const entries = computed(() => transcriptStore.entries);
 const hitlKind = computed(() => peekHitl()?.kind || "");
@@ -175,11 +183,33 @@ function restartStream() {
   }
   streamHandle.value = connectStream({
     getAgentId: () => agentStore.agentId,
+    getAfterSeq: () => transcriptStore.lastSeq,
     onStatus: (s) => {
       chromeStore.sseStatus = s;
     },
     onEvent: handleEvent,
+    onReconnect: () => {
+      void resyncAfterSSEGap("reconnect");
+    },
   });
+}
+
+/** SSE 断线重连或状态卡住时：hydrate 对账 turn/status/HITL（不重启已恢复的流）。 */
+async function resyncAfterSSEGap(_reason) {
+  if (!agentStore.agentId) return;
+  const token = ++sseResyncToken;
+  const agentId = agentStore.agentId;
+  turnWatchdog.noteActivity();
+  try {
+    await hydrateAgent();
+    if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
+    turnWatchdog.noteActivity();
+    bumpActivityRefresh();
+    await refreshToolJobs(agentStore.agentId);
+  } catch (e) {
+    if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
+    agentStore.error = e.message || String(e);
+  }
 }
 
 async function activateAgentStream() {
@@ -250,7 +280,11 @@ async function refreshContextTokens() {
 }
 
 function handleEvent(ev) {
+  // 防御：忽略非当前 Agent 的事件（切 Agent 时旧 EventSource 可能仍投递）
+  if (shouldIgnoreSSEForAgent(ev?.agentId, agentStore.agentId)) return;
+
   if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
+  turnWatchdog.noteActivity();
   const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
 
   if (!skipRender) {
@@ -306,6 +340,8 @@ function handleEvent(ev) {
       finalizeAssistant();
       finalizeReasoning();
       finishWaitingStatuses();
+      // HITL 暂停即结束本段 awaitingTurn；勿依赖随后的 done（可能被慢消费者丢弃）
+      if (agentStore.awaitingTurn) finishTurn();
       {
         const { approval } = enqueueHitlRequired(ev.data);
         if (approval?.child_agent_id) setChildAwaitingApproval(approval.child_agent_id, true);
@@ -327,6 +363,7 @@ function handleEvent(ev) {
       break;
     case "side_effect_turn_start":
       beginImplicitTurn();
+    turnWatchdog.noteActivity();
       break;
     case "user_message_deferred":
       addDeferredUser(
@@ -373,6 +410,7 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
+    turnWatchdog.noteActivity();
     if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     agentStore.error = e.message;
@@ -396,6 +434,7 @@ async function submitHitlOne(payload, approve) {
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
+    turnWatchdog.noteActivity();
     if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     agentStore.error = e.message;
@@ -416,6 +455,7 @@ async function submitHitlMemoryConflict(hitlIndex, decision, { cancelled = false
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
+    turnWatchdog.noteActivity();
     if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     agentStore.error = e.message;
@@ -451,6 +491,7 @@ async function submitHitlUserInfo(hitlIndex, text) {
     hitlStore.busyIndex = -1;
     hitlSelected.value = [];
     beginSubmit();
+    turnWatchdog.noteActivity();
     if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     agentStore.error = e.message;
@@ -489,6 +530,7 @@ async function onSendMessage(payload) {
   clearHitl();
   addUser(text, images);
   beginSubmit();
+  turnWatchdog.noteActivity();
   try {
     await api.submitMessage(agentStore.agentId, text, contentParts);
     if (!agentStore.turnContentSeen) startStatus("prefilling");
@@ -507,13 +549,15 @@ async function handleCommand(cmd) {
   }
   if (res.action === "clear") {
     await api.clearContext(await ensureAgent());
-    await hydrateAgent();
-    restartStream();
+    finishTurn();
+    resetEventTracking();
     resetStatusLines();
     resetToolStream();
     resetUsageStrip();
-    chromeStore.contextTokens = 0;
     resetRemoteWorkers();
+    chromeStore.contextTokens = 0;
+    await hydrateAgent();
+    restartStream();
     await refreshToolJobs(agentStore.agentId);
     bumpActivityRefresh();
     addSystem("已清空对话上下文，并终止未完成命令与临时子 Agent");
@@ -613,12 +657,20 @@ async function onAgentCreated(created) {
 }
 
 async function switchAgent(id) {
-  persistAgentId(id);
+  // 先断开旧 SSE，避免切 Agent 间隙里旧连接继续改全局 status/transcript
+  sseResyncToken += 1;
+  streamHandle.value?.close();
+  streamHandle.value = null;
+  finishTurn();
   resetStatusLines();
   resetToolStream();
   resetRemoteWorkers();
   resetUsageStrip();
+  resetEventTracking();
+  clearHitl();
+  persistAgentId(id);
   void syncCurrentAgentDisplayName();
+  turnWatchdog.noteActivity();
   try {
     await hydrateAgent();
     await refreshLLMSettings();
@@ -628,6 +680,7 @@ async function switchAgent(id) {
     clearHitl();
     resetEventTracking();
     finishTurn();
+    resetStatusLines();
     return;
   }
   restartStream();
@@ -636,6 +689,7 @@ async function switchAgent(id) {
   syncRouteAgent(id);
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
+  bumpActivityRefresh();
   await syncCurrentAgentDisplayName();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();
@@ -849,6 +903,7 @@ onMounted(async () => {
   consumeComposerDraft();
   startDesktopFocusHeartbeat(() => agentStore.agentId);
   startToolJobsPolling(() => agentStore.agentId);
+  turnWatchdog.start();
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("pageshow", onPageShow);
 });
@@ -898,6 +953,7 @@ watch(
 );
 
 onUnmounted(() => {
+  turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
   stopToolJobsPolling();
   streamHandle.value?.close();

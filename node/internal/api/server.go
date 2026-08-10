@@ -1124,9 +1124,12 @@ func (s *Server) handleStreams(w http.ResponseWriter, r *http.Request) {
 	}
 	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
 	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"
-	// live=1：TUI 重连时只收增量，避免 replay 历史 done 干扰 wait_user_turn。
+	// live=1：TUI/WebUI 首连只收增量，避免 replay 历史 done 干扰 wait_user_turn。
+	// after_seq：WebUI EventSource 重连无法带 Last-Event-ID header，用 query 续传 hub 历史。
 	if live {
 		lastSeq = s.stream.CurrentSeq()
+	} else if afterRaw := strings.TrimSpace(r.URL.Query().Get("after_seq")); afterRaw != "" {
+		lastSeq = parseLastEventID(afterRaw)
 	}
 	s.logger.Info("sse subscribe",
 		"agent_id", agentFilter,

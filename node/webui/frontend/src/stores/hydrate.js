@@ -5,12 +5,26 @@ import {
   applyHydrateSeqHint,
   applyHydrateTurnState,
   ackAgentAfterHydrate,
+  agentStore,
   ensureAgent,
   finishTurn,
   persistAgentId,
 } from "./agent.js";
 import { loadTranscriptFromHydrate } from "./transcript.js";
 import { applyToolJobsSnapshot } from "./toolJobs.js";
+import { resetStatusLines, startStatus } from "./statusLines.js";
+
+/**
+ * hydrate 后复位 UI 状态相位。
+ * model_streaming 时给 thinking 指示；工具执行中只锁 composer，不挂三点跳动。
+ */
+export function syncStatusAfterHydrate(runTurnPhase = "") {
+  resetStatusLines();
+  if (!agentStore.awaitingTurn) return;
+  const phase = String(runTurnPhase || "").trim();
+  if (phase === "awaiting_tool_execution") return;
+  startStatus("thinking");
+}
 
 /** ensureAgent → GET /v1/agents/{id}/hydrate → 灌 transcript + pending HITL + SSE 水位。 */
 export async function hydrateAgent() {
@@ -33,6 +47,7 @@ export async function hydrateAgent() {
   if (data?.pending_hitl?.items?.length) {
     finishTurn();
   }
+  syncStatusAfterHydrate(data?.run_turn_phase);
   return data;
 }
 
