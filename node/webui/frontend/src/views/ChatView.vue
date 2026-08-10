@@ -66,6 +66,7 @@ import {
   startToolJobsPolling,
   stopToolJobsPolling,
 } from "../stores/toolJobs.js";
+import { createTurnWatchdog } from "../stores/turnWatchdog.js";
 import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
 import {
   formatChildLifecycle,
@@ -104,6 +105,13 @@ const agentList = ref([]);
 const currentAgentDisplayName = ref("");
 const chatPanelRef = ref(null);
 let agentNameSyncToken = 0;
+let sseResyncToken = 0;
+
+const turnWatchdog = createTurnWatchdog({
+  isAwaiting: () => agentStore.awaitingTurn,
+  hasStuckStatus: () => hasStatus("prefilling") || hasStatus("thinking"),
+  onStuck: () => resyncAfterSSEGap("watchdog"),
+});
 
 const entries = computed(() => transcriptStore.entries);
 const hitlKind = computed(() => peekHitl()?.kind || "");
@@ -175,11 +183,33 @@ function restartStream() {
   }
   streamHandle.value = connectStream({
     getAgentId: () => agentStore.agentId,
+    getAfterSeq: () => transcriptStore.lastSeq,
     onStatus: (s) => {
       chromeStore.sseStatus = s;
     },
     onEvent: handleEvent,
+    onReconnect: () => {
+      void resyncAfterSSEGap("reconnect");
+    },
   });
+}
+
+/** SSE 断线重连或状态卡住时：hydrate 对账 turn/status/HITL（不重启已恢复的流）。 */
+async function resyncAfterSSEGap(_reason) {
+  if (!agentStore.agentId) return;
+  const token = ++sseResyncToken;
+  const agentId = agentStore.agentId;
+  turnWatchdog.noteActivity();
+  try {
+    await hydrateAgent();
+    if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
+    turnWatchdog.noteActivity();
+    bumpActivityRefresh();
+    await refreshToolJobs(agentStore.agentId);
+  } catch (e) {
+    if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
+    agentStore.error = e.message || String(e);
+  }
 }
 
 async function activateAgentStream() {
@@ -254,6 +284,7 @@ function handleEvent(ev) {
   if (shouldIgnoreSSEForAgent(ev?.agentId, agentStore.agentId)) return;
 
   if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
+  turnWatchdog.noteActivity();
   const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
 
   if (!skipRender) {
@@ -332,6 +363,7 @@ function handleEvent(ev) {
       break;
     case "side_effect_turn_start":
       beginImplicitTurn();
+    turnWatchdog.noteActivity();
       break;
     case "user_message_deferred":
       addDeferredUser(
@@ -378,6 +410,7 @@ async function submitHitlApproval(approveAll, hitlIndex = 0) {
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
+    turnWatchdog.noteActivity();
     if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     agentStore.error = e.message;
@@ -401,6 +434,7 @@ async function submitHitlOne(payload, approve) {
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
+    turnWatchdog.noteActivity();
     if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     agentStore.error = e.message;
@@ -421,6 +455,7 @@ async function submitHitlMemoryConflict(hitlIndex, decision, { cancelled = false
     hitlStore.busy = false;
     hitlStore.busyIndex = -1;
     beginSubmit();
+    turnWatchdog.noteActivity();
     if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     agentStore.error = e.message;
@@ -456,6 +491,7 @@ async function submitHitlUserInfo(hitlIndex, text) {
     hitlStore.busyIndex = -1;
     hitlSelected.value = [];
     beginSubmit();
+    turnWatchdog.noteActivity();
     if (!agentStore.turnContentSeen) startStatus("prefilling");
   } catch (e) {
     agentStore.error = e.message;
@@ -494,6 +530,7 @@ async function onSendMessage(payload) {
   clearHitl();
   addUser(text, images);
   beginSubmit();
+  turnWatchdog.noteActivity();
   try {
     await api.submitMessage(agentStore.agentId, text, contentParts);
     if (!agentStore.turnContentSeen) startStatus("prefilling");
@@ -621,6 +658,7 @@ async function onAgentCreated(created) {
 
 async function switchAgent(id) {
   // 先断开旧 SSE，避免切 Agent 间隙里旧连接继续改全局 status/transcript
+  sseResyncToken += 1;
   streamHandle.value?.close();
   streamHandle.value = null;
   finishTurn();
@@ -632,6 +670,7 @@ async function switchAgent(id) {
   clearHitl();
   persistAgentId(id);
   void syncCurrentAgentDisplayName();
+  turnWatchdog.noteActivity();
   try {
     await hydrateAgent();
     await refreshLLMSettings();
@@ -864,6 +903,7 @@ onMounted(async () => {
   consumeComposerDraft();
   startDesktopFocusHeartbeat(() => agentStore.agentId);
   startToolJobsPolling(() => agentStore.agentId);
+  turnWatchdog.start();
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("pageshow", onPageShow);
 });
@@ -913,6 +953,7 @@ watch(
 );
 
 onUnmounted(() => {
+  turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
   stopToolJobsPolling();
   streamHandle.value?.close();

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -199,6 +200,50 @@ func TestHandleStreamsConnectsImmediately(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("stream headers took too long: %v (expected immediate flush)", elapsed)
+	}
+}
+
+func TestHandleStreamsAfterSeqReplaysHistory(t *testing.T) {
+	srv, ts := newTestServer(t)
+	defer ts.Close()
+
+	sessionID := createTestRuntime(t, srv)
+	first := srv.stream.Publish(sessionID, "assistant", map[string]any{"content": "hi"})
+	_ = srv.stream.Publish(sessionID, "done", map[string]any{"finish_reason": "stop", "turn_complete": true})
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		ts.URL+"/v1/streams?agent_id="+sessionID+"&after_seq="+strconv.Itoa(first.Seq),
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d", resp.StatusCode)
+	}
+
+	deadline := time.After(2 * time.Second)
+	reader := bufio.NewReader(resp.Body)
+	sawDone := false
+	for !sawDone {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for replayed done")
+		default:
+		}
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read sse: %v", err)
+		}
+		if strings.HasPrefix(line, "event: done") {
+			sawDone = true
+		}
 	}
 }
 
