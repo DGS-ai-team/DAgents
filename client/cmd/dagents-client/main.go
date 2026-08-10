@@ -119,5 +119,8 @@ func cmdProbe(configPath string) int {
 
 	fmt.Printf("ok endpoint=%s agent_id=%s version=%s capabilities=%v manage_registered=%v\n",
 		res.Endpoint, res.NodeID, res.Version, res.Capabilities, res.ManageRegistered)
+	if res.ProfilePending {
+		fmt.Printf("note: node profile onboarding pending (open Web UI to finish LLM setup)\n")
+	}
 	return 0
 }
