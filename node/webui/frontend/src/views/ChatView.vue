@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, onActivated, ref, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
-import { connectStream } from "../sse/stream.js";
+import { connectStream, shouldIgnoreSSEForAgent } from "../sse/stream.js";
 import MainChatPanel from "../components/MainChatPanel.vue";
 import NavRail from "../components/NavRail.vue";
 import AgentCreateModal from "../components/AgentCreateModal.vue";
@@ -250,6 +250,9 @@ async function refreshContextTokens() {
 }
 
 function handleEvent(ev) {
+  // 防御：忽略非当前 Agent 的事件（切 Agent 时旧 EventSource 可能仍投递）
+  if (shouldIgnoreSSEForAgent(ev?.agentId, agentStore.agentId)) return;
+
   if (isStaleEvent(ev.seq) || isDuplicateEvent(ev.seq)) return;
   const skipRender = shouldSkipChildRuntimeDisplay(ev.type, ev.data);
 
@@ -306,6 +309,8 @@ function handleEvent(ev) {
       finalizeAssistant();
       finalizeReasoning();
       finishWaitingStatuses();
+      // HITL 暂停即结束本段 awaitingTurn；勿依赖随后的 done（可能被慢消费者丢弃）
+      if (agentStore.awaitingTurn) finishTurn();
       {
         const { approval } = enqueueHitlRequired(ev.data);
         if (approval?.child_agent_id) setChildAwaitingApproval(approval.child_agent_id, true);
@@ -507,13 +512,15 @@ async function handleCommand(cmd) {
   }
   if (res.action === "clear") {
     await api.clearContext(await ensureAgent());
-    await hydrateAgent();
-    restartStream();
+    finishTurn();
+    resetEventTracking();
     resetStatusLines();
     resetToolStream();
     resetUsageStrip();
-    chromeStore.contextTokens = 0;
     resetRemoteWorkers();
+    chromeStore.contextTokens = 0;
+    await hydrateAgent();
+    restartStream();
     await refreshToolJobs(agentStore.agentId);
     bumpActivityRefresh();
     addSystem("已清空对话上下文，并终止未完成命令与临时子 Agent");
@@ -613,11 +620,17 @@ async function onAgentCreated(created) {
 }
 
 async function switchAgent(id) {
-  persistAgentId(id);
+  // 先断开旧 SSE，避免切 Agent 间隙里旧连接继续改全局 status/transcript
+  streamHandle.value?.close();
+  streamHandle.value = null;
+  finishTurn();
   resetStatusLines();
   resetToolStream();
   resetRemoteWorkers();
   resetUsageStrip();
+  resetEventTracking();
+  clearHitl();
+  persistAgentId(id);
   void syncCurrentAgentDisplayName();
   try {
     await hydrateAgent();
@@ -628,6 +641,7 @@ async function switchAgent(id) {
     clearHitl();
     resetEventTracking();
     finishTurn();
+    resetStatusLines();
     return;
   }
   restartStream();
@@ -636,6 +650,7 @@ async function switchAgent(id) {
   syncRouteAgent(id);
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
+  bumpActivityRefresh();
   await syncCurrentAgentDisplayName();
   await nextTick();
   chatPanelRef.value?.scrollToTail?.();

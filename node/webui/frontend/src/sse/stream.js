@@ -1,5 +1,12 @@
 const RECONNECT_MS = 5000;
 
+/** 切 Agent 后旧连接事件应丢弃：双方 id 都非空且不一致时忽略。 */
+export function shouldIgnoreSSEForAgent(eventAgentId, currentAgentId) {
+  const ev = String(eventAgentId || "").trim();
+  const cur = String(currentAgentId || "").trim();
+  return Boolean(ev && cur && ev !== cur);
+}
+
 export function connectStream({ getAgentId, onEvent, onStatus }) {
   let es = null;
   let stopped = false;
@@ -56,7 +63,8 @@ export function connectStream({ getAgentId, onEvent, onStatus }) {
         }
         const data = envelope.data && typeof envelope.data === "object" ? envelope.data : envelope;
         const seq = Number(ev.lastEventId || envelope.seq || data.seq || 0);
-        onEvent({ type, data, seq });
+        const agentId = String(envelope.agent_id || data.agent_id || "").trim();
+        onEvent({ type, data, seq, agentId });
       });
     });
   }

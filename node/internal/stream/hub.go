@@ -76,16 +76,24 @@ func (h *Hub) Publish(agentID, eventType string, data map[string]any) Event {
 	if len(h.history) > h.historyN {
 		h.history = h.history[len(h.history)-h.historyN:]
 	}
+	var deferredCritical []chan Event
 	for ch := range h.subs {
 		select {
 		case ch <- ev:
 		default:
-			// 慢消费者丢弃，避免阻塞 turn。
+			if isCriticalSSEType(eventType) {
+				// 锁外再投一次；避免在持锁时阻塞，也避免 done/error/hitl 被静默丢掉
+				deferredCritical = append(deferredCritical, ch)
+			}
+			// 非关键事件：慢消费者丢弃，避免阻塞 turn
 		}
 	}
 	listener := h.onPublish
 	h.mu.Unlock()
 
+	for _, ch := range deferredCritical {
+		deliverCriticalSSE(ch, ev, h.logger)
+	}
 	h.logger.Debug("stream publish",
 		"agent_id", agentID,
 		"type", eventType,
@@ -104,9 +112,44 @@ func (h *Hub) CurrentSeq() int {
 	return h.seq
 }
 
+func isCriticalSSEType(eventType string) bool {
+	switch eventType {
+	case "done", "error", "hitl_required":
+		return true
+	default:
+		return false
+	}
+}
+
+func deliverCriticalSSE(ch chan Event, ev Event, logger *slog.Logger) {
+	defer func() {
+		// Unsubscribe 可能已 close channel
+		_ = recover()
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		select {
+		case ch <- ev:
+			return
+		default:
+			if time.Now().After(deadline) {
+				if logger != nil {
+					logger.Warn("stream drop critical event after wait",
+						"agent_id", ev.AgentID,
+						"type", ev.Type,
+						"seq", ev.Seq,
+					)
+				}
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
 // Subscribe 注册订阅者并回放 seq > afterSeq 的历史事件。
 func (h *Hub) Subscribe(afterSeq int) chan Event {
-	ch := make(chan Event, 64)
+	ch := make(chan Event, 256)
 	h.mu.Lock()
 	for _, ev := range h.history {
 		if ev.Seq > afterSeq {

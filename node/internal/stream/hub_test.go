@@ -3,6 +3,7 @@ package stream
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHubPublishSubscribe(t *testing.T) {
@@ -85,5 +86,34 @@ func TestEventFormatSSE(t *testing.T) {
 	}
 	if !strings.Contains(s, `"agent_id":"agt-x"`) {
 		t.Fatalf("expected agent_id in sse: %q", s)
+	}
+}
+
+func TestHubCriticalDoneDeliveredWhenBufferFull(t *testing.T) {
+	h := NewHub(16, nil)
+	ch := h.Subscribe(0)
+	defer h.Unsubscribe(ch)
+
+	gotDone := make(chan struct{})
+	go func() {
+		for ev := range ch {
+			if ev.Type == "done" {
+				close(gotDone)
+				return
+			}
+			// 模拟慢消费者：慢慢排空缓冲，给锁外补送 done 让路
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	for i := 0; i < 400; i++ {
+		h.Publish("agt-1", "assistant", map[string]any{"content": "x"})
+	}
+	h.Publish("agt-1", "done", map[string]any{"finish_reason": "stop", "turn_complete": true})
+
+	select {
+	case <-gotDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("critical done was dropped while subscriber buffer was full")
 	}
 }
