@@ -4,6 +4,7 @@ import {
   buildApprovalOneResume,
   buildApprovalSelectionResume,
   buildUserInfoResumeFromSelection,
+  buildUserInfoSubmitResume,
   resolveUserInfoSelectionIds,
   approvalQueueKey,
   clearHitl,
@@ -99,6 +100,64 @@ describe("user_information multi-select", () => {
     expect(resume.tool_call_id).toBe("ask-1");
     expect(resume.selected_options).toEqual(["a", "b"]);
     expect(resume.answer).toBe("A, B");
+  });
+});
+
+describe("buildUserInfoSubmitResume — typed text vs options", () => {
+  const optionHitl = {
+    user_information_args: {
+      tool_call_id: "ask-opt",
+      question: "选一个",
+      options: [
+        { id: "yes", label: "同意", value: "yes" },
+        { id: "no", label: "拒绝", value: "no" },
+      ],
+    },
+  };
+  const freeTextHitl = {
+    user_information_args: {
+      tool_call_id: "ask-text",
+      question: "请说明",
+      options: [],
+      required: true,
+    },
+  };
+
+  it("repro: composer text must win over default/selected option", () => {
+    // 旧逻辑：有 options 时忽略 text，落到 index 0「同意」
+    const built = buildUserInfoSubmitResume(optionHitl, {
+      text: "我想补充别的信息",
+      selected: 0,
+    });
+    expect(built.ok).toBe(true);
+    expect(built.resume.answer).toBe("我想补充别的信息");
+    expect(built.resume.selected_options).toEqual([]);
+  });
+
+  it("bubble submit with empty text uses selection (default first)", () => {
+    const built = buildUserInfoSubmitResume(optionHitl, { text: "", selected: [] });
+    expect(built.ok).toBe(true);
+    expect(built.resume.answer).toBe("yes");
+    expect(built.resume.selected_options).toEqual(["yes"]);
+  });
+
+  it("bubble submit uses explicit single-select index", () => {
+    const built = buildUserInfoSubmitResume(optionHitl, { text: "  ", selected: 1 });
+    expect(built.ok).toBe(true);
+    expect(built.resume.answer).toBe("no");
+    expect(built.resume.selected_options).toEqual(["no"]);
+  });
+
+  it("free-text HITL uses composer answer", () => {
+    const built = buildUserInfoSubmitResume(freeTextHitl, { text: "自由回答" });
+    expect(built.ok).toBe(true);
+    expect(built.resume.answer).toBe("自由回答");
+  });
+
+  it("free-text HITL rejects empty when required", () => {
+    const built = buildUserInfoSubmitResume(freeTextHitl, { text: "" });
+    expect(built.ok).toBe(false);
+    expect(built.error).toMatch(/输入/);
   });
 });
 
