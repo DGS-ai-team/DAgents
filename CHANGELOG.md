@@ -6,6 +6,23 @@
 
 ---
 
+## [0.9.5] - 2026-08-10
+
+**工作组成员配置与发版 CI**：修复成员一直「配置中」；发版构建并行拆分与 Rocky8 browser 缓存。
+
+### 修复
+
+- **工作组成员一直「配置中」（`provisioning`）**：Manage 补 `websockets` 依赖（缺库时 WS 握手 404）；Node Dialer 断线自动重连；provision 失败回写 `member.provision_result(status=error)`。
+- **Rocky8 browser CI**：pyenv 缓存卷不可 `rm` 挂载根（`Device or resource busy`）。
+
+### 变更
+
+- **发版 / Manual Package CI**：Windows Go / Tauri Shell / browser 三路并行后再组装；Manage 离线包只等 linux-amd64；Rocky8 预装依赖镜像 + pyenv `actions/cache`。
+
+（Git **tag**：`v0.9.5`。）
+
+---
+
 ## [0.9.4] - 2026-08-10
 
 **Linux 命令行首配**：无图形环境可用 `dagents init` 完成与 Web 同源的 onboarding；首配门闸下 Node 就绪探测不再误超时。
