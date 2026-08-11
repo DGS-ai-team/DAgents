@@ -2414,6 +2414,16 @@ select.settings-field__input {
   cursor: default;
 }
 
+.nav-rail__icon-btn--spinning svg {
+  animation: nav-rail-refresh-spin 0.9s linear infinite;
+}
+
+@keyframes nav-rail-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .nav-rail__hint,
 .nav-rail__empty {
   padding: 6px 14px 8px;

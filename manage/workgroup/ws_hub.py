@@ -123,6 +123,16 @@ class WorkgroupWSHub:
             sent_at=_now(),
         )
 
+    def _frame_belongs_to_node(self, frame: OutboxFrame, node_id: str) -> bool:
+        """Only replay frames addressed to this node; legacy control frames remain broadcast."""
+        home_node_id = str(frame.payload.get("home_node_id") or "").strip()
+        if not home_node_id:
+            member_id = str(frame.payload.get("member_id") or "").strip()
+            if member_id:
+                member = self.store.get_member(member_id)
+                home_node_id = str(member.home_node_id if member is not None else "").strip()
+        return not home_node_id or home_node_id == node_id
+
     def resume_offer(
         self,
         node_id: str,
@@ -149,7 +159,11 @@ class WorkgroupWSHub:
                 conn.send(err)
             return err
 
-        frames = self.store.frames_after(workgroup_id, after_seq=last_ack_delivery_seq)
+        frames = [
+            frame
+            for frame in self.store.frames_after(workgroup_id, after_seq=last_ack_delivery_seq)
+            if self._frame_belongs_to_node(frame, node_id)
+        ]
         batch: list[dict[str, Any]] = []
         for frame in frames:
             env = self.wrap_outbox(frame, connection_generation=conn.connection_generation)

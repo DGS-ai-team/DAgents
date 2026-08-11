@@ -329,7 +329,7 @@ Turn = 单次模型往返（含其 tool_calls 收集）。`status`：`open` | `c
 
 ### 2.8.1 Manage-native 工具：`assign_workgroup_task`
 
-机器可读全文：[`fixtures/workgroup-d05/schemas/assign_workgroup_task.openai.json`](./fixtures/workgroup-d05/schemas/assign_workgroup_task.openai.json)
+机器可读全文：[`manage/workgroup/schemas/assign_workgroup_task.openai.json`](../../manage/workgroup/schemas/assign_workgroup_task.openai.json)
 
 **参数（LLM function）**
 
@@ -899,7 +899,7 @@ Fixture 元格式：`fixture_schema=workgroup-d05-fixture/v1`；期望值禁止 
 | `ToolCommand.json` / `ToolResult.json` | 工具 |
 | `HITLRequest.json` / `HITLResolution.json` | HITL |
 | `ResumeCursor.json` / `WSEnvelope.json` / `CommandAck.json` / `ArchiveTombstone.json` | WS |
-| `assign_workgroup_task.openai.json` | Leader 工具（唯一机器契约） |
+| `manage/workgroup/schemas/assign_workgroup_task.openai.json` | Leader 工具（唯一机器契约，随 Manage 运行时发布） |
 | `FixtureMeta.json` | fixture 信封 |
 
 ---

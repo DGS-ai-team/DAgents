@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import {
   archiveWorkgroup,
+  archiveWorkgroupMember,
   createWorkgroup,
   createWorkgroupMember,
   fetchAgents,
@@ -41,6 +42,8 @@ const bindingLlmKey = ref("");
 const addingCollaborator = ref(false);
 const creatingMember = ref(false);
 const savingToolsId = ref("");
+const refreshingMemberId = ref("");
+const deletingMemberId = ref("");
 const memberFormOpen = ref(false);
 const error = ref("");
 
@@ -336,6 +339,51 @@ async function saveMemberTools(member) {
     emit("toast", { message: err.message || "更新工具组失败", type: "error" });
   } finally {
     savingToolsId.value = "";
+  }
+}
+
+async function refreshMember(member) {
+  const wg = selectedWorkgroup.value;
+  const mid = String(member?.member_id || "").trim();
+  if (!wg?.workgroup_id || !mid || member?.kind !== "member" || refreshingMemberId.value) return;
+  refreshingMemberId.value = mid;
+  try {
+    const [memberList, spec] = await Promise.all([
+      fetchWorkgroupMembers(wg.workgroup_id),
+      fetchWorkgroupMemberSpec(wg.workgroup_id, mid).catch(() => null),
+    ]);
+    members.value = Array.isArray(memberList) ? memberList : [];
+    if (spec) {
+      memberSpecs.value = { ...memberSpecs.value, [mid]: spec };
+    }
+    syncMemberToolDrafts();
+    emit("toast", { message: `${member.display_name || mid} 配置已刷新`, type: "success" });
+  } catch (err) {
+    emit("toast", { message: err.message || "刷新成员配置失败", type: "error" });
+  } finally {
+    refreshingMemberId.value = "";
+  }
+}
+
+async function deleteMember(member) {
+  const wg = selectedWorkgroup.value;
+  const mid = String(member?.member_id || "").trim();
+  if (!wg?.workgroup_id || !mid || member?.kind !== "member" || deletingMemberId.value) return;
+  const label = String(member.display_name || mid).trim();
+  if (!window.confirm(`确定删除成员「${label}」？\n\n成员将被归档，后续不会再出现在工作组配置中。`)) return;
+  deletingMemberId.value = mid;
+  try {
+    await archiveWorkgroupMember(wg.workgroup_id, mid);
+    members.value = (members.value || []).filter((item) => item.member_id !== mid);
+    const nextSpecs = { ...memberSpecs.value };
+    delete nextSpecs[mid];
+    memberSpecs.value = nextSpecs;
+    syncMemberToolDrafts();
+    emit("toast", { message: `成员「${label}」已删除`, type: "success" });
+  } catch (err) {
+    emit("toast", { message: err.message || "删除成员失败", type: "error" });
+  } finally {
+    deletingMemberId.value = "";
   }
 }
 
@@ -1160,6 +1208,44 @@ onMounted(async () => {
                   <span class="wg-chat-rail__status" :data-status="m.status">
                     {{ memberStatusLabel(m.status) }}
                   </span>
+                  <div v-if="m.kind === 'member'" class="wg-member-config__actions">
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm btn-icon"
+                      title="刷新成员配置"
+                      aria-label="刷新成员配置"
+                      :disabled="refreshingMemberId === m.member_id || deletingMemberId === m.member_id"
+                      @click="refreshMember(m)"
+                    >
+                      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path
+                          d="M16.2 7.7A6.5 6.5 0 105.1 15.4M16.2 7.7V3.6m0 4.1h-4.1"
+                          stroke="currentColor"
+                          stroke-width="1.45"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-danger btn-sm btn-icon"
+                      title="删除成员"
+                      aria-label="删除成员"
+                      :disabled="refreshingMemberId === m.member_id || deletingMemberId === m.member_id"
+                      @click="deleteMember(m)"
+                    >
+                      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path
+                          d="M4.5 6h11M8 6V4.5h4V6M6.5 6l.6 9h6l.6-9"
+                          stroke="currentColor"
+                          stroke-width="1.4"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                   <p v-if="m.error_summary" class="wg-member-config__error">
                     {{ m.error_summary }}
                   </p>

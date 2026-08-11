@@ -20,6 +20,30 @@ from manage.workgroup.models import WorkGroupCreateRequest  # noqa: E402
 
 
 class WorkgroupWSRouteTests(unittest.TestCase):
+    def test_hello_rejects_node_id_mismatch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
+            app = create_app(settings)
+
+            with TestClient(app) as client:
+                with client.websocket_connect(
+                    "/v1/workgroups/ws",
+                    headers={"x-dagents-agent-id": "node_a"},
+                ) as ws:
+                    ws.send_json(
+                        {
+                            "type": "session.hello",
+                            "payload": {
+                                "node_id": "node_b",
+                                "last_ack_delivery_seq": 0,
+                            },
+                        }
+                    )
+                    error = ws.receive_json()
+
+                    self.assertEqual(error["type"], "session.error")
+                    self.assertEqual(error["payload"]["code"], "not_authorized")
+
     def test_hello_resume_and_live_push(self) -> None:
         with TemporaryDirectory() as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")

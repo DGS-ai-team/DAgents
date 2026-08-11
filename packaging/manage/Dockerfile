@@ -22,6 +22,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Runtime workgroup schemas live under manage/ so they ship with the Python app.
 COPY manage/ ./manage/
 # 与 Node go:embed 同源；member_tools 在 import 时读取（缺则 Manage 无法启动）
 COPY shared/workgroup/member_tool_catalog.json ./shared/workgroup/member_tool_catalog.json

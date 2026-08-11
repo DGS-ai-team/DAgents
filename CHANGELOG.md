@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+- **工作组配置体验**：Manage 成员卡片支持刷新与删除；Node 侧栏新增工作组刷新入口，并增加绿/蓝渐变背景。
+
+- **Manage 工作组多 Node 投递**：resume gap-fill 仅向成员的 `home_node_id` 重放消息，并拒绝 WebSocket header 与 `session.hello` 中不一致的 `node_id`。
+
+- **Manage 工作组运行时 schema**：将 `assign_workgroup_task` 的 OpenAI 工具 schema 移入 Manage 包，避免部署后依赖未打包的 `docs/` 文件。
+
 ---
 
 ## [0.9.6] - 2026-08-11

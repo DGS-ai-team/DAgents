@@ -1,5 +1,5 @@
 {
   "deprecated": true,
-  "use": "assign_workgroup_task.openai.json",
-  "note": "Single machine contract is assign_workgroup_task.openai.json"
+  "use": "../../../../../manage/workgroup/schemas/assign_workgroup_task.openai.json",
+  "note": "Single machine contract is owned by the Manage runtime package"
 }
