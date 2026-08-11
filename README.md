@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.9.5-green" alt="v0.9.5"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v0.9.6-green" alt="v0.9.6"></a>
   <a href="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml"><img src="https://github.com/DGS-ai-team/DAgents/actions/workflows/pr-tests.yml/badge.svg" alt="PR Tests"></a>
 </p>
 
@@ -32,7 +32,7 @@
 
 它不是拖拽式「万能工作流」平台，而是面向企业与团队的 **本地优先助手控制台**——能管工具权限、能等人确认、能把对话与文件留在自己这边。
 
-当前版本为 **v0.9.5**（基于 **v0.9.1** 预览线的稳定性补丁；含 Linux 命令行首配与工作组 Dialer 修复）。能力边界与验收步骤见手册中的 [预览清单](docs/design/v0.9.1-smoke-checklist.md)。
+当前版本为 **v0.9.6**（基于 **v0.9.1** 预览线的稳定性补丁；含工作组成员 provision 错误详情、工具集变更处理与 Windows 安装器修复）。能力边界与验收步骤见手册中的 [预览清单](docs/design/v0.9.1-smoke-checklist.md)。
 
 ---
 
