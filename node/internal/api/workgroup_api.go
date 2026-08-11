@@ -425,6 +425,22 @@ func (s *Server) handleWorkgroupEvents(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "workgroup_id required", nil)
 		return
 	}
+	subscribed, err := s.control.ListWorkgroups(r.Context(), manage.WorkgroupListSubscribed)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	allowed := false
+	for _, item := range subscribed {
+		if strings.TrimSpace(item.WorkgroupID) == wid {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		writeAPIError(w, http.StatusForbidden, "not_subscribed", "workgroup is not subscribed by this node", nil)
+		return
+	}
 	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
 	if afterRaw := strings.TrimSpace(r.URL.Query().Get("after_seq")); afterRaw != "" {
 		lastSeq = parseLastEventID(afterRaw)

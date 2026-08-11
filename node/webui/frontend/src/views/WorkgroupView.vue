@@ -419,6 +419,7 @@ function startWorkgroupEventStream() {
   source.onerror = () => {
     if (workgroupEventSource !== source) return;
     source.close();
+    void loadTimeline().catch(() => {});
     window.setTimeout(() => {
       if (workgroupEventSource === source && workgroupId.value) startWorkgroupEventStream();
     }, 1200);
@@ -592,9 +593,9 @@ function stopWorkPoll() {
 function startWorkPoll() {
   stopWorkPoll();
   workPollTimer.value = window.setInterval(() => {
-    loadTimeline();
-    loadPendingHitl();
-  }, 900);
+    if (!sending.value && !remoteSending.value) return;
+    void loadPendingHitl();
+  }, 1500);
 }
 
 async function refreshHumanQueue() {
@@ -630,9 +631,6 @@ function startQueuePoll() {
     if (!workgroupId.value) return;
     if (!sending.value && !(humanQueueItems.value || []).length) return;
     void refreshHumanQueue();
-    if (sending.value || (humanQueueItems.value || []).length) {
-      void loadTimeline().catch(() => {});
-    }
   }, 1500);
 }
 

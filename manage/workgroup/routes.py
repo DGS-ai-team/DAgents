@@ -89,6 +89,7 @@ def build_workgroup_router(
         mock_llm=mock_llm,
     )
     if hub is not None:
+        store.reconcile_timeline_outbox()
         store.set_timeline_listener(hub.publish_timeline_event)
         kernel.set_realtime_event_listener(
             lambda workgroup_id, event_type, data, client_message_id=None: hub.publish_realtime_event(

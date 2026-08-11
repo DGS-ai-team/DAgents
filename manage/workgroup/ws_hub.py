@@ -207,8 +207,12 @@ class WorkgroupWSHub:
             if conn is None or not conn.active or conn.send is None:
                 return None
             env = self.wrap_outbox(frame, connection_generation=conn.connection_generation)
-            conn.send(env.model_dump())
-            return env
+            send = conn.send
+        try:
+            send(env.model_dump())
+        except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
+            return None
+        return env
 
     def push_json_to_node(self, node_id: str, message: dict[str, Any]) -> bool:
         """Push an ephemeral JSON message to an active node session."""
@@ -216,8 +220,12 @@ class WorkgroupWSHub:
             conn = self._conns.get(node_id)
             if conn is None or not conn.active or conn.send is None:
                 return False
-            conn.send(dict(message))
-            return True
+            send = conn.send
+        try:
+            send(dict(message))
+        except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
+            return False
+        return True
 
     def publish_timeline_event(self, event: Any) -> OutboxFrame:
         """Persist a reliable Timeline frame and fan it out to current subscribers."""
@@ -225,11 +233,14 @@ class WorkgroupWSHub:
         if not workgroup_id:
             raise WorkgroupError("schema_mismatch", "timeline event workgroup_id required")
         payload = _jsonable(event.model_dump(mode="json") if hasattr(event, "model_dump") else event)
-        frame = self.store.enqueue_outbox(
-            workgroup_id,
-            type="timeline.event",
-            payload=payload,
-        )
+        frame = self.store.get_timeline_outbox(workgroup_id, str(payload.get("event_id") or ""))
+        if frame is None:
+            # Compatibility for Timeline rows created by older Store instances.
+            frame = self.store.enqueue_outbox(
+                workgroup_id,
+                type="timeline.event",
+                payload=payload,
+            )
         for sub in self.store.list_subscribers(workgroup_id):
             self.push_to_node(sub.node_id, frame)
         return frame

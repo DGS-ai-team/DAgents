@@ -74,7 +74,7 @@ class WorkGroupStore:
         self._timeline_listener: Callable[[TimelineEvent], None] | None = None
 
     def set_timeline_listener(self, listener: Callable[[TimelineEvent], None] | None) -> None:
-        """Register a best-effort listener for newly committed public Timeline events."""
+        """Register a best-effort listener after Timeline + outbox commit."""
         with self._lock:
             self._timeline_listener = listener
 
@@ -1035,12 +1035,45 @@ class WorkGroupStore:
                 assign_id=assign_id,
             )
             events.append(event)
-            self._put(
-                "workgroup_timeline",
-                event.event_id,
-                event.model_dump_json(),
-                workgroup_id=workgroup_id,
-            )
+            frame = self._new_timeline_outbox_frame_unlocked(event)
+            try:
+                if self._db is None:
+                    self._put(
+                        "workgroup_timeline",
+                        event.event_id,
+                        event.model_dump_json(),
+                        workgroup_id=workgroup_id,
+                    )
+                    self._put(
+                        "workgroup_outbox",
+                        f"{workgroup_id}:{frame.delivery_seq}",
+                        frame.model_dump_json(),
+                        workgroup_id=workgroup_id,
+                    )
+                else:
+                    with self._db.connect() as tx:
+                        self._put(
+                            "workgroup_timeline",
+                            event.event_id,
+                            event.model_dump_json(),
+                            workgroup_id=workgroup_id,
+                            conn=tx,
+                        )
+                        self._put(
+                            "workgroup_outbox",
+                            f"{workgroup_id}:{frame.delivery_seq}",
+                            frame.model_dump_json(),
+                            workgroup_id=workgroup_id,
+                            conn=tx,
+                        )
+                        tx.commit()
+            except Exception:
+                if events and events[-1] is event:
+                    events.pop()
+                frames = self._outbox.get(workgroup_id) or []
+                if frames and frames[-1] is frame:
+                    frames.pop()
+                raise
             listener = self._timeline_listener
         if listener is not None:
             try:
@@ -1051,6 +1084,83 @@ class WorkGroupStore:
                     extra={"workgroup_id": event.workgroup_id, "event_id": event.event_id},
                 )
         return event
+
+    def _new_timeline_outbox_frame_unlocked(self, event: TimelineEvent) -> OutboxFrame:
+        frames = self._outbox.setdefault(event.workgroup_id, [])
+        seq = (frames[-1].delivery_seq + 1) if frames else 1
+        frame = OutboxFrame(
+            delivery_seq=seq,
+            workgroup_id=event.workgroup_id,
+            type="timeline.event",
+            payload=event.model_dump(mode="json"),
+            created_at=event.created_at,
+            acked=False,
+        )
+        frames.append(frame)
+        return frame
+
+    def get_timeline_outbox(self, workgroup_id: str, event_id: str) -> OutboxFrame | None:
+        with self._lock:
+            self._ensure_loaded()
+            wid = str(workgroup_id or "").strip()
+            target = str(event_id or "").strip()
+            if not wid or not target:
+                return None
+            for frame in self._outbox.get(wid) or []:
+                if frame.type == "timeline.event" and str(frame.payload.get("event_id") or "") == target:
+                    return frame
+            return None
+
+    def reconcile_timeline_outbox(self, workgroup_id: str | None = None) -> int:
+        """Backfill Timeline outbox rows created before atomic Timeline/outbox writes."""
+        with self._lock:
+            self._ensure_loaded()
+            workgroups = [str(workgroup_id or "").strip()] if workgroup_id else list(self._timeline)
+            missing: list[TimelineEvent] = []
+            for wid in workgroups:
+                if not wid:
+                    continue
+                existing = {
+                    str(frame.payload.get("event_id") or "")
+                    for frame in self._outbox.get(wid) or []
+                    if frame.type == "timeline.event"
+                }
+                missing.extend(
+                    event
+                    for event in self._timeline.get(wid) or []
+                    if event.event_id not in existing
+                )
+            if not missing:
+                return 0
+
+            frames = [self._new_timeline_outbox_frame_unlocked(event) for event in missing]
+            try:
+                if self._db is None:
+                    for frame in frames:
+                        self._put(
+                            "workgroup_outbox",
+                            f"{frame.workgroup_id}:{frame.delivery_seq}",
+                            frame.model_dump_json(),
+                            workgroup_id=frame.workgroup_id,
+                        )
+                else:
+                    with self._db.connect() as tx:
+                        for frame in frames:
+                            self._put(
+                                "workgroup_outbox",
+                                f"{frame.workgroup_id}:{frame.delivery_seq}",
+                                frame.model_dump_json(),
+                                workgroup_id=frame.workgroup_id,
+                                conn=tx,
+                            )
+                        tx.commit()
+            except Exception:
+                for frame in reversed(frames):
+                    stored = self._outbox.get(frame.workgroup_id) or []
+                    if stored and stored[-1] is frame:
+                        stored.pop()
+                raise
+            return len(frames)
 
     def list_timeline(self, workgroup_id: str) -> list[TimelineEvent]:
         with self._lock:

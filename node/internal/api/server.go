@@ -444,7 +444,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			if wid == "" {
 				return
 			}
-			workgroupStream.Publish(wid, "workgroup.realtime", payload)
+			workgroupStream.PublishEphemeral(wid, "workgroup.realtime", payload)
 		}
 	}
 	// 默认工具表与后续 per-agent Registry 共用同一套 Node 运行时依赖挂载。

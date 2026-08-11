@@ -65,6 +65,17 @@ func (h *Hub) SetEventListener(fn func(Event)) {
 // Publish 分配 seq、写入历史并投递给匹配的订阅者。
 // agentID 为对话/Agent 实例 id（线协议 agent_id）。
 func (h *Hub) Publish(agentID, eventType string, data map[string]any) Event {
+	return h.publish(agentID, eventType, data, true)
+}
+
+// PublishEphemeral publishes to current subscribers without retaining the event
+// for after_seq replay. It is intended for high-frequency transient state such
+// as typing/tool deltas whose durable result is represented elsewhere.
+func (h *Hub) PublishEphemeral(agentID, eventType string, data map[string]any) Event {
+	return h.publish(agentID, eventType, data, false)
+}
+
+func (h *Hub) publish(agentID, eventType string, data map[string]any, replayable bool) Event {
 	if data == nil {
 		data = map[string]any{}
 	}
@@ -79,9 +90,11 @@ func (h *Hub) Publish(agentID, eventType string, data map[string]any) Event {
 		TS:        time.Now().UTC().Format(time.RFC3339Nano),
 		Data:      data,
 	}
-	h.history = append(h.history, ev)
-	if len(h.history) > h.historyN {
-		h.history = h.history[len(h.history)-h.historyN:]
+	if replayable {
+		h.history = append(h.history, ev)
+		if len(h.history) > h.historyN {
+			h.history = h.history[len(h.history)-h.historyN:]
+		}
 	}
 	var deferredCritical []chan Event
 	for _, sub := range h.subs {

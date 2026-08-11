@@ -41,6 +41,28 @@ func TestHubReplayAfterSeq(t *testing.T) {
 	}
 }
 
+func TestHubEphemeralIsNotReplayed(t *testing.T) {
+	h := NewHub(16, nil)
+	h.PublishEphemeral("s", "typing", map[string]any{"content": "old"})
+	ch := h.Subscribe(0)
+	defer h.Unsubscribe(ch)
+
+	select {
+	case ev := <-ch:
+		t.Fatalf("unexpected ephemeral replay: %+v", ev)
+	default:
+	}
+	h.PublishEphemeral("s", "typing", map[string]any{"content": "new"})
+	select {
+	case ev := <-ch:
+		if ev.Type != "typing" || ev.Data["content"] != "new" {
+			t.Fatalf("unexpected live event: %+v", ev)
+		}
+	default:
+		t.Fatal("expected live ephemeral event")
+	}
+}
+
 func TestHubCurrentSeq(t *testing.T) {
 	h := NewHub(16, nil)
 	if got := h.CurrentSeq(); got != 0 {
@@ -170,4 +192,3 @@ func TestHubSubscribeAgentIgnoresForeignFlood(t *testing.T) {
 		t.Fatal("agt-a done blocked/dropped by foreign agent flood")
 	}
 }
-
