@@ -4,6 +4,7 @@ import { renderMarkdown } from "../utils/markdown.js";
 import { mediaFullUrl, mediaThumbnailUrl } from "../utils/media.js";
 import { openLightbox } from "../stores/lightbox.js";
 import ThinkingIndicator from "./ThinkingIndicator.vue";
+import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 import BrowserCitationBlock from "./BrowserCitationBlock.vue";
 
 const props = defineProps({
@@ -74,11 +75,7 @@ function userImageThumb(src) {
   <div v-else-if="entry.kind === 'assistant'" class="msg msg--assistant" data-kind="assistant" :class="{ 'msg--generating': entry.streaming }">
     <div class="msg__body">
       <div v-if="entry.streaming && !entry.text" class="msg__body--hint-only">
-        <div class="msg__hint msg__hint--stream-meta msg__hint--dots-only" aria-label="正在生成">
-          <span class="msg__meta-dots" aria-hidden="true">
-            <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
-          </span>
-        </div>
+        <BrandActivityIndicator label="正在生成" mode="generating" :show-label="false" />
       </div>
       <div v-else class="msg__bubble msg__bubble--assistant-md">
         <pre v-if="entry.streaming" class="assistant-msg__stream-plain">{{ entry.text }}</pre>

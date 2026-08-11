@@ -22,6 +22,7 @@ import {
 } from "../stores/toolJobs.js";
 import { agentStore } from "../stores/agent.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
+import BrandActivityIndicator from "./BrandActivityIndicator.vue";
 
 const props = defineProps({
   callEntry: { type: Object, default: null },
@@ -180,9 +181,14 @@ async function onBackground(ev) {
         </button>
       </div>
       <span v-if="status" class="tool-summary-row__status">
-        <span v-if="inProgress" class="msg__meta-dots tool-summary-row__dots" aria-hidden="true">
-          <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
-        </span>
+        <BrandActivityIndicator
+          v-if="inProgress"
+          class="tool-summary-row__dots"
+          label="工具执行中"
+          mode="tool"
+          :show-label="false"
+          compact
+        />
         {{ status }}
       </span>
       <button

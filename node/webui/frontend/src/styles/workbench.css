@@ -801,41 +801,6 @@
   font-weight: 500;
 }
 
-.msg__meta-dots {
-  display: inline-flex;
-  align-items: center;
-  column-gap: var(--stream-meta-dot-gap, 3px);
-}
-
-.msg__meta-dot {
-  width: var(--stream-meta-dot-size, 5px);
-  height: var(--stream-meta-dot-size, 5px);
-  border-radius: 50%;
-  background: var(--color-text-muted);
-  opacity: 0.35;
-  animation: msg-meta-dot-pulse 1s ease-in-out infinite;
-}
-
-.msg__meta-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.msg__meta-dot:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes msg-meta-dot-pulse {
-  0%,
-  100% {
-    opacity: 0.25;
-    transform: translateY(0);
-  }
-  50% {
-    opacity: 1;
-    transform: translateY(-2px);
-  }
-}
-
 /* ---------- app shell???????????????????---------- */
 
 /* ---------- settings page ---------- */

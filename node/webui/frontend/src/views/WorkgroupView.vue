@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import NavRail from "../components/NavRail.vue";
 import WorkgroupMemberModal from "../components/WorkgroupMemberModal.vue";
+import BrandActivityIndicator from "../components/BrandActivityIndicator.vue";
 import { renderMarkdown } from "../utils/markdown.js";
 import { inferToolKind } from "../utils/toolSource.js";
 import { createFollowTailController } from "../utils/scrollTail.js";
@@ -1555,15 +1556,13 @@ onUnmounted(() => {
                       <div class="wg-task__head">
                         <span class="wg-task__label">任务</span>
                         <span class="wg-task__status">
-                          <span
+                          <BrandActivityIndicator
                             v-if="!item.done"
-                            class="msg__meta-dots wg-task__dots"
-                            aria-hidden="true"
-                          >
-                            <span class="msg__meta-dot" />
-                            <span class="msg__meta-dot" />
-                            <span class="msg__meta-dot" />
-                          </span>
+                            class="wg-task__dots"
+                            mode="tool"
+                            :show-label="false"
+                            compact
+                          />
                           <span v-if="item.done && !item.failed" class="wg-task__check" aria-hidden="true">✓</span>
                           <span v-else-if="item.failed" class="wg-task__mark" aria-hidden="true">−</span>
                           {{ item.statusText }}
@@ -1589,15 +1588,13 @@ onUnmounted(() => {
                             <span class="wg-tool-row__kind">{{ step.toolKind || "tool" }}</span>
                             <span class="wg-tool-row__text">{{ step.summary }}</span>
                             <span class="wg-tool-row__status">
-                              <span
+                              <BrandActivityIndicator
                                 v-if="step.inProgress"
-                                class="msg__meta-dots wg-tool-row__dots"
-                                aria-hidden="true"
-                              >
-                                <span class="msg__meta-dot" />
-                                <span class="msg__meta-dot" />
-                                <span class="msg__meta-dot" />
-                              </span>
+                                class="wg-tool-row__dots"
+                                mode="tool"
+                                :show-label="false"
+                                compact
+                              />
                               {{ step.statusText }}
                             </span>
                           </div>
@@ -1651,15 +1648,13 @@ onUnmounted(() => {
                       <span class="wg-tool-row__kind">{{ item.toolKind || "tool" }}</span>
                       <span class="wg-tool-row__text">{{ item.summary }}</span>
                       <span class="wg-tool-row__status">
-                        <span
+                        <BrandActivityIndicator
                           v-if="item.inProgress"
-                          class="msg__meta-dots wg-tool-row__dots"
-                          aria-hidden="true"
-                        >
-                          <span class="msg__meta-dot" />
-                          <span class="msg__meta-dot" />
-                          <span class="msg__meta-dot" />
-                        </span>
+                          class="wg-tool-row__dots"
+                          mode="tool"
+                          :show-label="false"
+                          compact
+                        />
                         {{ item.statusText }}
                       </span>
                     </div>
@@ -1692,11 +1687,12 @@ onUnmounted(() => {
                       role="status"
                     >
                       <span class="msg__meta-label">{{ liveStatusLabel || "思考中…" }}</span>
-                      <span class="msg__meta-dots" aria-hidden="true">
-                        <span class="msg__meta-dot" />
-                        <span class="msg__meta-dot" />
-                        <span class="msg__meta-dot" />
-                      </span>
+                      <BrandActivityIndicator
+                        :label="liveStatusLabel || '思考中…'"
+                        mode="generating"
+                        :show-label="false"
+                        compact
+                      />
                     </div>
                     <pre v-else class="assistant-msg__stream-plain">{{ item.text }}</pre>
                   </div>
@@ -1760,9 +1756,12 @@ onUnmounted(() => {
                   :aria-label="liveStatusLabel || '协作进行中'"
                 >
                   <span class="msg__meta-label">{{ liveStatusLabel || "协作进行中" }}</span>
-                  <span class="msg__meta-dots" aria-hidden="true">
-                    <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
-                  </span>
+                  <BrandActivityIndicator
+                    :label="liveStatusLabel || '协作进行中'"
+                    mode="generating"
+                    :show-label="false"
+                    compact
+                  />
                 </div>
               </div>
             </article>

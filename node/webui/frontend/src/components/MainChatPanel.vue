@@ -88,10 +88,15 @@ const stream = computed(() => {
   return buildStream(props.entries, props.hitlQueue, toolJobsStore);
 });
 
+const hasActiveToolStep = computed(() =>
+  stream.value.some((item) => item?.kind === "tool_step" && item.executionHint === "active"),
+);
+
 const activeStatusPhases = computed(() => {
   void statusStore.tick;
   return statusPhaseOrder.filter((phase) => {
     if (!hasStatus(phase)) return false;
+    if (hasActiveToolStep.value) return false;
     if (phase === "thinking" && hasStreamingKind("reasoning")) return false;
     if (phase === "prefilling" && hasStreamingTextContent()) return false;
     return true;

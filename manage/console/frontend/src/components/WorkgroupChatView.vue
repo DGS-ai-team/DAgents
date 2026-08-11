@@ -19,6 +19,7 @@ import {
 } from "../api.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import brandIcon from "../../../../../node/webui/frontend/src/assets/brand-icon.png";
+import BrandActivityIndicator from "../../../../../node/webui/frontend/src/components/BrandActivityIndicator.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -1417,9 +1418,13 @@ onUnmounted(() => {
                   <img :src="brandIcon" alt="" />
                 </span>
                 {{ group.label || (group.role === 'assistant' ? 'Supervisor' : '') }}
-                <span v-if="group.hasStreaming" class="msg__meta-dots" aria-hidden="true">
-                  <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
-                </span>
+                <BrandActivityIndicator
+                  v-if="group.hasStreaming"
+                  :label="group.label || '生成中'"
+                  mode="generating"
+                  :show-label="false"
+                  compact
+                />
               </div>
               <template v-for="row in group.items" :key="row.key">
                 <div
@@ -1438,15 +1443,13 @@ onUnmounted(() => {
                     <div class="wg-task__head">
                       <span class="wg-task__label">任务</span>
                       <span class="wg-task__status">
-                        <span
+                        <BrandActivityIndicator
                           v-if="!row.done"
-                          class="msg__meta-dots wg-task__dots"
-                          aria-hidden="true"
-                        >
-                          <span class="msg__meta-dot" />
-                          <span class="msg__meta-dot" />
-                          <span class="msg__meta-dot" />
-                        </span>
+                          class="wg-task__dots"
+                          mode="tool"
+                          :show-label="false"
+                          compact
+                        />
                         <span v-if="row.done && !row.failed" class="wg-task__check" aria-hidden="true">✓</span>
                         <span v-else-if="row.failed" class="wg-task__mark" aria-hidden="true">−</span>
                         {{ row.statusText }}
@@ -1472,15 +1475,13 @@ onUnmounted(() => {
                           <span class="wg-tool-row__kind">{{ step.toolKind || "tool" }}</span>
                           <span class="wg-tool-row__text">{{ step.summary }}</span>
                           <span class="wg-tool-row__status">
-                            <span
+                            <BrandActivityIndicator
                               v-if="step.inProgress"
-                              class="msg__meta-dots wg-tool-row__dots"
-                              aria-hidden="true"
-                            >
-                              <span class="msg__meta-dot" />
-                              <span class="msg__meta-dot" />
-                              <span class="msg__meta-dot" />
-                            </span>
+                              class="wg-tool-row__dots"
+                              mode="tool"
+                              :show-label="false"
+                              compact
+                            />
                             {{ step.statusText }}
                           </span>
                         </div>
@@ -1534,15 +1535,13 @@ onUnmounted(() => {
                     <span class="wg-tool-row__kind">{{ row.toolKind || "tool" }}</span>
                     <span class="wg-tool-row__text">{{ row.summary }}</span>
                     <span class="wg-tool-row__status">
-                      <span
+                      <BrandActivityIndicator
                         v-if="row.inProgress"
-                        class="msg__meta-dots wg-tool-row__dots"
-                        aria-hidden="true"
-                      >
-                        <span class="msg__meta-dot" />
-                        <span class="msg__meta-dot" />
-                        <span class="msg__meta-dot" />
-                      </span>
+                        class="wg-tool-row__dots"
+                        mode="tool"
+                        :show-label="false"
+                        compact
+                      />
                       {{ row.statusText }}
                     </span>
                   </div>
@@ -1563,9 +1562,12 @@ onUnmounted(() => {
                     :aria-label="statusLabel || '协作进行中'"
                   >
                     <span class="msg__meta-label">{{ statusLabel || "协作进行中" }}</span>
-                    <span class="msg__meta-dots" aria-hidden="true">
-                      <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
-                    </span>
+                    <BrandActivityIndicator
+                      :label="statusLabel || '协作进行中'"
+                      mode="generating"
+                      :show-label="false"
+                      compact
+                    />
                   </div>
                 </div>
                 <div
