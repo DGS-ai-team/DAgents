@@ -15,12 +15,15 @@ OUT = ROOT / "assets"
 BRAND = ROOT.parents[1] / "node" / "webui" / "frontend" / "src" / "assets" / "brand-icon.png"
 
 # tokens.css light（与 dagents-installer.iss Workbench 浅色主题一致）
-BG = (245, 246, 248)  # #f5f6f8
+BG_TOP = (243, 243, 243)  # #f3f3f3 --color-bg
+BG_BOTTOM = (249, 249, 249)  # #f9f9f9 --color-bg-soft
 SURFACE = (255, 255, 255)  # #ffffff
-PRIMARY = (37, 99, 235)  # #2563eb
-TEXT = (48, 36, 31)  # #30241f
-MUTED = (104, 85, 75)  # #68554b
-BORDER = (229, 231, 235)  # #e5e7eb
+PRIMARY = (0, 120, 212)  # #0078d4
+PRIMARY_SOFT = (230, 242, 251)  # soft tint of primary
+TEXT = (26, 26, 26)  # #1a1a1a
+MUTED = (93, 93, 93)  # #5d5d5d
+SUBTLE = (138, 138, 138)  # #8a8a8a
+BORDER = (228, 228, 228)  # soft neutral
 
 # Prefer CJK-capable fonts first (subtitle is Chinese). Latin-only fonts render as tofu.
 _CJK_FONT_CANDIDATES = (
@@ -61,45 +64,85 @@ def _first_font(paths: tuple[str, ...], size: int) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def _fonts() -> tuple[ImageFont.ImageFont, ImageFont.ImageFont, ImageFont.ImageFont]:
-    """Return (latin_bold, latin_regular, cjk_regular) for title / English / Chinese."""
-    latin_bold = _first_font(_LATIN_BOLD_CANDIDATES, 14)
+def _fonts() -> tuple[ImageFont.ImageFont, ImageFont.ImageFont, ImageFont.ImageFont, ImageFont.ImageFont]:
+    """Return (title_bold, latin_regular, cjk_regular, cjk_small)."""
+    title = _first_font(_LATIN_BOLD_CANDIDATES, 18)
     latin_regular = _first_font(_LATIN_REGULAR_CANDIDATES, 10)
-    cjk = _first_font(_CJK_FONT_CANDIDATES, 11)
-    return latin_bold, latin_regular, cjk
+    cjk = _first_font(_CJK_FONT_CANDIDATES, 12)
+    cjk_sm = _first_font(_CJK_FONT_CANDIDATES, 10)
+    return title, latin_regular, cjk, cjk_sm
+
+
+def _vertical_gradient(size: tuple[int, int], top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
+    w, h = size
+    img = Image.new("RGB", size, top)
+    px = img.load()
+    for y in range(h):
+        t = y / max(h - 1, 1)
+        r = int(top[0] + (bottom[0] - top[0]) * t)
+        g = int(top[1] + (bottom[1] - top[1]) * t)
+        b = int(top[2] + (bottom[2] - top[2]) * t)
+        for x in range(w):
+            px[x, y] = (r, g, b)
+    return img
 
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    font, font_sm, font_cjk = _fonts()
+    font_title, font_sm, font_cjk, font_cjk_sm = _fonts()
     icon = Image.open(BRAND).convert("RGBA") if BRAND.is_file() else None
 
     w, h = 164, 314
-    sidebar = Image.new("RGB", (w, h), BG)
+    sidebar = _vertical_gradient((w, h), BG_TOP, BG_BOTTOM)
     draw = ImageDraw.Draw(sidebar)
+
+    # Left brand accent
     draw.rectangle([0, 0, 3, h], fill=PRIMARY)
+    # Soft top wash (atmosphere without competing with brand)
+    for i in range(72):
+        t = 1 - (i / 71)
+        t = t * t
+        wash = (
+            int(PRIMARY_SOFT[0] * t + BG_TOP[0] * (1 - t)),
+            int(PRIMARY_SOFT[1] * t + BG_TOP[1] * (1 - t)),
+            int(PRIMARY_SOFT[2] * t + BG_TOP[2] * (1 - t)),
+        )
+        draw.line([(4, i), (w - 1, i)], fill=wash)
+
+    # Brand mark plate (soft disk, not a card)
+    cx, cy, r = 52, 54, 34
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=PRIMARY_SOFT)
+    draw.ellipse([cx - r + 2, cy - r + 2, cx + r - 2, cy + r - 2], outline=(210, 228, 242))
+
     if icon:
-        icon40 = icon.resize((40, 40), Image.Resampling.LANCZOS)
-        sidebar.paste(icon40, (20, 28), icon40)
-        ty = 78
+        icon48 = icon.resize((48, 48), Image.Resampling.LANCZOS)
+        sidebar.paste(icon48, (cx - 24, cy - 24), icon48)
     else:
-        draw.rounded_rectangle([20, 28, 84, 92], radius=8, fill=SURFACE, outline=BORDER)
-        draw.text((28, 44), "DA", fill=PRIMARY, font=font)
-        ty = 108
-    draw.text((20, ty), "DAgents", fill=TEXT, font=font)
-    draw.text((20, ty + 22), "本机智能助手", fill=MUTED, font=font_cjk)
-    draw.text((20, h - 56), "Workbench", fill=MUTED, font=font_sm)
+        draw.rounded_rectangle([cx - 24, cy - 24, cx + 24, cy + 24], radius=10, fill=SURFACE, outline=BORDER)
+        draw.text((cx - 14, cy - 10), "DA", fill=PRIMARY, font=font_title)
+
+    # Brand wordmark — hero of the sidebar
+    ty = 104
+    draw.text((18, ty), "DAgents", fill=TEXT, font=font_title)
+    draw.text((18, ty + 28), "本机智能助手", fill=MUTED, font=font_cjk)
+
+    # Divider + secondary label (mid-lower, not stranded at bottom edge)
+    div_y = h - 88
+    draw.line([(18, div_y), (w - 18, div_y)], fill=BORDER)
+    draw.text((18, div_y + 16), "Workbench", fill=SUBTLE, font=font_sm)
+    draw.text((18, div_y + 36), "安装向导", fill=SUBTLE, font=font_cjk_sm)
+
     sidebar.save(OUT / "wizard-sidebar.bmp")
 
     sw, sh = 55, 58
     small = Image.new("RGB", (sw, sh), SURFACE)
+    sd = ImageDraw.Draw(small)
+    sd.ellipse([4, 6, sw - 5, sh - 5], fill=PRIMARY_SOFT, outline=(210, 228, 242))
     if icon:
-        icon32 = icon.resize((32, 32), Image.Resampling.LANCZOS)
-        small.paste(icon32, (11, 12), icon32)
+        icon28 = icon.resize((28, 28), Image.Resampling.LANCZOS)
+        small.paste(icon28, ((sw - 28) // 2, (sh - 28) // 2), icon28)
     else:
-        sd = ImageDraw.Draw(small)
-        sd.rounded_rectangle([6, 8, sw - 6, sh - 8], radius=6, fill=BG, outline=BORDER)
-        sd.text((14, 18), "DA", fill=PRIMARY, font=font)
+        sd.text((16, 18), "DA", fill=PRIMARY, font=font_sm)
     small.save(OUT / "wizard-small.bmp")
     print(f"wrote {OUT}/wizard-sidebar.bmp, wizard-small.bmp")
 
