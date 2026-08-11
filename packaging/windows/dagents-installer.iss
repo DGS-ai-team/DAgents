@@ -317,7 +317,7 @@ begin
     'DAgents 安装包包含：' + #13#10 + #13#10 +
     '  ·  Agent Node（本地运行时）' + #13#10 +
     '  ·  Desktop Shell（系统托盘）' + #13#10 +
-    #13#10 +
+    '' + #13#10 +
     '下一步可选择 Shell 类型。' + #13#10 +
     '安装完成后，请在 Web UI「设置 › 连接」配置 LLM 与 Manage。';
   WizardForm.FinishedHeadingLabel.Caption := '安装完成';

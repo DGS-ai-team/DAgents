@@ -5,6 +5,9 @@ WORKDIR /src/manage/console/frontend
 COPY manage/console/frontend/package.json manage/console/frontend/package-lock.json ./
 RUN npm ci
 COPY manage/console/frontend/ ./
+# The Manage Vite app imports the canonical product mark through the
+# repository-level @dagents-brand alias.
+COPY shared/branding/ /src/shared/branding/
 RUN npm run build
 
 FROM python:3.12-slim-bookworm
