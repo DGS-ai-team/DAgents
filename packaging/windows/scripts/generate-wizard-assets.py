@@ -64,12 +64,13 @@ def _first_font(paths: tuple[str, ...], size: int) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def _fonts() -> tuple[ImageFont.ImageFont, ImageFont.ImageFont, ImageFont.ImageFont, ImageFont.ImageFont]:
+def _fonts(scale: float = 1.0) -> tuple[ImageFont.ImageFont, ImageFont.ImageFont, ImageFont.ImageFont, ImageFont.ImageFont]:
     """Return (title_bold, latin_regular, cjk_regular, cjk_small)."""
-    title = _first_font(_LATIN_BOLD_CANDIDATES, 18)
-    latin_regular = _first_font(_LATIN_REGULAR_CANDIDATES, 10)
-    cjk = _first_font(_CJK_FONT_CANDIDATES, 12)
-    cjk_sm = _first_font(_CJK_FONT_CANDIDATES, 10)
+    size = lambda value: max(1, round(value * scale))
+    title = _first_font(_LATIN_BOLD_CANDIDATES, size(18))
+    latin_regular = _first_font(_LATIN_REGULAR_CANDIDATES, size(10))
+    cjk = _first_font(_CJK_FONT_CANDIDATES, size(12))
+    cjk_sm = _first_font(_CJK_FONT_CANDIDATES, size(10))
     return title, latin_regular, cjk, cjk_sm
 
 
@@ -89,55 +90,55 @@ def _vertical_gradient(size: tuple[int, int], top: tuple[int, int, int], bottom:
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    font_title, font_sm, font_cjk, font_cjk_sm = _fonts()
+    scale = 240 / 164
+    size = lambda value: max(1, round(value * scale))
+    font_title, font_sm, font_cjk, font_cjk_sm = _fonts(scale)
     icon = Image.open(BRAND).convert("RGBA") if BRAND.is_file() else None
 
-    w, h = 164, 314
+    w, h = 240, 459
     sidebar = _vertical_gradient((w, h), BG_TOP, BG_BOTTOM)
     draw = ImageDraw.Draw(sidebar)
 
     # Left brand accent
-    draw.rectangle([0, 0, 3, h], fill=PRIMARY)
+    draw.rectangle([0, 0, size(3), h], fill=PRIMARY)
     # Soft top wash (atmosphere without competing with brand)
-    for i in range(72):
-        t = 1 - (i / 71)
+    wash_height = size(72)
+    for i in range(wash_height):
+        t = 1 - (i / max(wash_height - 1, 1))
         t = t * t
         wash = (
             int(PRIMARY_SOFT[0] * t + BG_TOP[0] * (1 - t)),
             int(PRIMARY_SOFT[1] * t + BG_TOP[1] * (1 - t)),
             int(PRIMARY_SOFT[2] * t + BG_TOP[2] * (1 - t)),
         )
-        draw.line([(4, i), (w - 1, i)], fill=wash)
+        draw.line([(size(4), i), (w - 1, i)], fill=wash)
 
-    # Brand mark plate (soft disk, not a card)
-    cx, cy, r = 52, 54, 34
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=PRIMARY_SOFT)
-    draw.ellipse([cx - r + 2, cy - r + 2, cx + r - 2, cy + r - 2], outline=(210, 228, 242))
+    # Brand mark without a separate badge background.
+    cx, cy = size(52), size(54)
 
     if icon:
-        icon48 = icon.resize((48, 48), Image.Resampling.LANCZOS)
-        sidebar.paste(icon48, (cx - 24, cy - 24), icon48)
+        icon48 = icon.resize((size(48), size(48)), Image.Resampling.LANCZOS)
+        icon_offset = size(24)
+        sidebar.paste(icon48, (cx - icon_offset, cy - icon_offset), icon48)
     else:
-        draw.rounded_rectangle([cx - 24, cy - 24, cx + 24, cy + 24], radius=10, fill=SURFACE, outline=BORDER)
-        draw.text((cx - 14, cy - 10), "DA", fill=PRIMARY, font=font_title)
+        draw.text((cx - size(14), cy - size(10)), "DA", fill=PRIMARY, font=font_title)
 
     # Brand wordmark — hero of the sidebar
-    ty = 104
-    draw.text((18, ty), "DAgents", fill=TEXT, font=font_title)
-    draw.text((18, ty + 28), "本机智能助手", fill=MUTED, font=font_cjk)
+    ty = size(104)
+    draw.text((size(18), ty), "DAgents", fill=TEXT, font=font_title)
+    draw.text((size(18), ty + size(28)), "本机智能助手", fill=MUTED, font=font_cjk)
 
     # Divider + secondary label (mid-lower, not stranded at bottom edge)
-    div_y = h - 88
-    draw.line([(18, div_y), (w - 18, div_y)], fill=BORDER)
-    draw.text((18, div_y + 16), "Workbench", fill=SUBTLE, font=font_sm)
-    draw.text((18, div_y + 36), "安装向导", fill=SUBTLE, font=font_cjk_sm)
+    div_y = h - size(88)
+    draw.line([(size(18), div_y), (w - size(18), div_y)], fill=BORDER)
+    draw.text((size(18), div_y + size(16)), "Workbench", fill=SUBTLE, font=font_sm)
+    draw.text((size(18), div_y + size(36)), "安装向导", fill=SUBTLE, font=font_cjk_sm)
 
     sidebar.save(OUT / "wizard-sidebar.bmp")
 
     sw, sh = 55, 58
     small = Image.new("RGB", (sw, sh), SURFACE)
     sd = ImageDraw.Draw(small)
-    sd.ellipse([4, 6, sw - 5, sh - 5], fill=PRIMARY_SOFT, outline=(210, 228, 242))
     if icon:
         icon28 = icon.resize((28, 28), Image.Resampling.LANCZOS)
         small.paste(icon28, ((sw - 28) // 2, (sh - 28) // 2), icon28)
