@@ -19,7 +19,7 @@ from manage.manage_app import create_app  # noqa: E402
 
 class ManageWorkgroupAPITests(unittest.TestCase):
     def test_vertical_skeleton_happy_path(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
             app = create_app(settings)
             with TestClient(app) as client:
@@ -187,6 +187,21 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 types = [f["type"] for f in outbox.json()]
                 self.assertIn("member.provision", types)
 
+                failed = client.post(
+                    f"/v1/workgroups/{wid}/provision-complete",
+                    json={
+                        "member_id": m2.json()["member"]["member_id"],
+                        "provision_id": "pv_" + "1" * 26,
+                        "status": "error",
+                        "error_code": "not_authorized",
+                        "message": "home_node_id must be this node",
+                    },
+                )
+                self.assertEqual(failed.status_code, 200, failed.text)
+                self.assertEqual(failed.json()["member"]["status"], "error")
+                self.assertEqual(failed.json()["member"]["error_code"], "not_authorized")
+                self.assertIn("home_node_id", failed.json()["member"]["error_message"])
+
                 pending = client.get(f"/v1/workgroups/{wid}/hitl", params={"pending_only": True})
                 self.assertEqual(pending.status_code, 200, pending.text)
                 self.assertEqual(len(pending.json()), 0)  # 已决议
@@ -195,7 +210,7 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 self.assertEqual(len(all_hitl.json()), 1)
 
     def test_member_tool_catalog(self) -> None:
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
             app = create_app(settings)
             with TestClient(app) as client:

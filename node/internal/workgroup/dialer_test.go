@@ -3,6 +3,7 @@ package workgroup
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,6 +133,107 @@ func TestDialerMultiResumeOffers(t *testing.T) {
 	}
 	if byWG["wg_01h0000000000000000000000c"] != 0 {
 		t.Fatalf("wg_c seq=%v", byWG)
+	}
+}
+
+func TestDialerHandlesMultipleProvisionFrames(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		results []map[string]any
+	)
+	provisionPayload := func(seq int64, memberID string) map[string]any {
+		return map[string]any{
+			"provision_id":       fmt.Sprintf("pv_01h0000000000000000000000%d", seq),
+			"workgroup_id":       "wg_01h00000000000000000000001",
+			"member_id":          memberID,
+			"home_node_id":       "node_b",
+			"member_spec_digest": strings.Repeat("a", 64),
+			"lease_epoch":        1,
+			"member_generation":  1,
+			"tool_allow_names":   []string{"read_file"},
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/workgroups/ws" {
+			http.NotFound(w, r)
+			return
+		}
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close(websocket.StatusNormalClosure, "done")
+		ctx := r.Context()
+		var hello map[string]any
+		if err := wsjson.Read(ctx, c, &hello); err != nil {
+			return
+		}
+		_ = wsjson.Write(ctx, c, map[string]any{
+			"type": "session.welcome",
+			"payload": map[string]any{
+				"node_id":               "node_b",
+				"connection_generation": 1,
+				"schema_version":        "0.5.0",
+			},
+		})
+		for i, memberID := range []string{"mb_01h00000000000000000000001", "mb_01h00000000000000000000002"} {
+			seq := int64(i + 1)
+			_ = wsjson.Write(ctx, c, map[string]any{
+				"type":                  "member.provision",
+				"workgroup_id":          "wg_01h00000000000000000000001",
+				"delivery_seq":          seq,
+				"connection_generation": 1,
+				"payload":               provisionPayload(seq, memberID),
+			})
+			var res map[string]any
+			if err := wsjson.Read(ctx, c, &res); err != nil {
+				return
+			}
+			mu.Lock()
+			results = append(results, res)
+			mu.Unlock()
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	w := NewWorker(Config{NodeID: "node_b", DataDir: dir, NodeToolNames: []string{"read_file"}})
+	d := &Dialer{ManageURL: srv.URL, NodeID: "node_b", Worker: w}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.ConnectAndServe(ctx) }()
+
+	deadline := time.After(4 * time.Second)
+	for {
+		mu.Lock()
+		n := len(results)
+		mu.Unlock()
+		if n >= 2 {
+			cancel()
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for provision results")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	<-errCh
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(results) != 2 {
+		t.Fatalf("results=%d", len(results))
+	}
+	for i, res := range results {
+		if res["type"] != "member.provision_result" {
+			t.Fatalf("result %d type=%v", i, res["type"])
+		}
+		payload, _ := res["payload"].(map[string]any)
+		if payload["status"] != "ready" {
+			t.Fatalf("result %d status=%v payload=%+v", i, payload["status"], payload)
+		}
 	}
 }
 

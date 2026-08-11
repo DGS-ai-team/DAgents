@@ -85,6 +85,8 @@ class ProvisionCompleteRequest(BaseModel):
     workspace_path: str = ""
     tool_catalog_revision: str = ""
     status: Literal["ready", "error"] = "ready"
+    error_code: str | None = None
+    message: str | None = None
 
 
 class ToolResultApplyRequest(BaseModel):

@@ -127,6 +127,7 @@ const configMembers = computed(() => {
       display_name: m.display_name,
       member_id: m.member_id,
       status: m.status,
+      error_summary: [m.error_code, m.error_message].filter(Boolean).join(": "),
       home_node_id: m.home_node_id,
       member_generation: m.member_generation,
       llm_profile_id: spec?.llm_profile_id || "",
@@ -1159,6 +1160,9 @@ onMounted(async () => {
                   <span class="wg-chat-rail__status" :data-status="m.status">
                     {{ memberStatusLabel(m.status) }}
                   </span>
+                  <p v-if="m.error_summary" class="wg-member-config__error">
+                    {{ m.error_summary }}
+                  </p>
                 </div>
               </header>
               <dl class="wg-settings-kv">

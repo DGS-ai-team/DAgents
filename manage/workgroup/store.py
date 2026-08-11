@@ -866,6 +866,8 @@ class WorkGroupStore:
         workspace_path: str = "",
         tool_catalog_revision: str = "",
         provision_id: str = "",
+        error_code: str | None = None,
+        error_message: str | None = None,
     ) -> WorkGroupMember:
         with self._lock:
             self._ensure_loaded()
@@ -874,7 +876,14 @@ class WorkGroupStore:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
             if workgroup_id and member.workgroup_id != workgroup_id:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
-            updated = member.model_copy(update={"status": status})
+            update: dict[str, Any] = {"status": status}
+            if status == "error":
+                update["error_code"] = (error_code or "").strip() or None
+                update["error_message"] = (error_message or "").strip() or None
+            elif status == "ready":
+                update["error_code"] = None
+                update["error_message"] = None
+            updated = member.model_copy(update=update)
             self._members[member_id] = updated
             self._put(
                 "workgroup_members",
