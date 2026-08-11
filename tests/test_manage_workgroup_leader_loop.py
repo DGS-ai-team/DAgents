@@ -181,6 +181,12 @@ class LeaderLoopTests(unittest.TestCase):
                 chat_client=MockLLMClient(leader_script),
                 member_chat_client=MockLLMClient(member_script),
             )
+            live_events = []
+            kernel.set_realtime_event_listener(
+                lambda _wid, event_type, data, client_id: live_events.append(
+                    (event_type, data, client_id)
+                )
+            )
             kernel.set_assign_completer(loop.make_assign_completer(kernel))
             result = kernel.handle_human_message(
                 wid,
@@ -195,6 +201,13 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertEqual(len(member_finals), 1)
             self.assertEqual(member_finals[0].text, "标题是 Demo")
             self.assertEqual(sum(bridge.executions.values()), 1)
+            member_live = [
+                (event_type, data)
+                for event_type, data, _client_id in live_events
+                if data.get("member_id") == mid
+            ]
+            self.assertTrue(any(event_type == "status" for event_type, _data in member_live))
+            self.assertTrue(any(event_type == "delta" for event_type, _data in member_live))
 
             runs = [r for r in store._runs.values() if r.actor_id == mid]  # noqa: SLF001
             self.assertEqual(len(runs), 1)

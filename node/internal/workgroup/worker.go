@@ -15,6 +15,8 @@ type Worker struct {
 	Provision  *Provisioner
 	Commands   *CommandHandler
 	Tombstones map[string]ArchiveTombstone
+	// OnTimelineEvent forwards public Manage Timeline frames to the local Web UI.
+	OnTimelineEvent func(WSEnvelope)
 }
 
 // Config 构造 Worker。

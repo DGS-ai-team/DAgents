@@ -51,6 +51,7 @@ type Server struct {
 	llmConfigs    *store.LLMConfigStore
 	nodeSettings  *store.NodeSettingsStore
 	stream        *stream.Hub // 进程内 SSE 事件总线
+	workgroupStream *stream.Hub // Manage 工作组 Timeline + 实时协作事件
 	store         *store.SQLiteStore
 	triggerStore  *triggers.Store
 	triggerSched  *triggers.Scheduler
@@ -234,6 +235,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	}
 
 	hub := stream.NewHub(256, logger)
+	workgroupStream := stream.NewHub(1024, logger)
 	hostsnapshot.CaptureAtStartup()
 	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
@@ -400,6 +402,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		logger:        logger,
 		mux:           http.NewServeMux(),
 		stream:        hub,
+		workgroupStream: workgroupStream,
 		store:         st,
 		agents:        agentsStore,
 		llmConfigs:    llmConfigStore,
@@ -416,6 +419,33 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		mediaRegister:   mediaRegister,
 		workgroupWorker: wgWorker,
 		workgroupDialer: wgDialer,
+	}
+	if wgWorker != nil {
+		wgWorker.OnTimelineEvent = func(env workgroup.WSEnvelope) {
+			wid := strings.TrimSpace(env.WorkgroupID)
+			if wid == "" {
+				wid, _ = env.Payload["workgroup_id"].(string)
+			}
+			if wid == "" {
+				return
+			}
+			workgroupStream.Publish(wid, "workgroup.timeline", map[string]any{
+				"kind":         "timeline",
+				"workgroup_id": wid,
+				"delivery_seq": env.DeliverySeq,
+				"event":        env.Payload,
+			})
+		}
+	}
+	if wgDialer != nil {
+		wgDialer.OnRealtime = func(payload map[string]any) {
+			wid, _ := payload["workgroup_id"].(string)
+			wid = strings.TrimSpace(wid)
+			if wid == "" {
+				return
+			}
+			workgroupStream.Publish(wid, "workgroup.realtime", payload)
+		}
 	}
 	// 默认工具表与后续 per-agent Registry 共用同一套 Node 运行时依赖挂载。
 	s.attachNodeRuntimeDeps(s.tools, cfg.NodeID)

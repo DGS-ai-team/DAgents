@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from manage.storage.sqlite import SQLiteDatabase
 from manage.workgroup.digest import sha256_digest
@@ -70,6 +71,12 @@ class WorkGroupStore:
         self._workgroup_runtime: dict[str, dict[str, str]] = {}
         # workgroup_id → {node_id: Subscription}
         self._subscriptions: dict[str, dict[str, Subscription]] = {}
+        self._timeline_listener: Callable[[TimelineEvent], None] | None = None
+
+    def set_timeline_listener(self, listener: Callable[[TimelineEvent], None] | None) -> None:
+        """Register a best-effort listener for newly committed public Timeline events."""
+        with self._lock:
+            self._timeline_listener = listener
 
     # --- low-level persistence ---
 
@@ -1003,6 +1010,7 @@ class WorkGroupStore:
         protocol_name: str | None = None,
         assign_id: str | None = None,
     ) -> TimelineEvent:
+        listener: Callable[[TimelineEvent], None] | None = None
         with self._lock:
             self._ensure_loaded()
             if self.get_workgroup(workgroup_id) is None:
@@ -1033,7 +1041,16 @@ class WorkGroupStore:
                 event.model_dump_json(),
                 workgroup_id=workgroup_id,
             )
-            return event
+            listener = self._timeline_listener
+        if listener is not None:
+            try:
+                listener(event)
+            except Exception:  # noqa: BLE001 - Timeline persistence must not be rolled back by fan-out
+                logging.getLogger(__name__).exception(
+                    "workgroup timeline listener failed",
+                    extra={"workgroup_id": event.workgroup_id, "event_id": event.event_id},
+                )
+        return event
 
     def list_timeline(self, workgroup_id: str) -> list[TimelineEvent]:
         with self._lock:

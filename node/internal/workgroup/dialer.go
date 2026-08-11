@@ -24,6 +24,7 @@ type Dialer struct {
 	WorkgroupID    string   // 兼容：单组；hello 后对该组 resume.offer
 	WorkgroupIDs   []string // 静态多组订阅
 	ListWorkgroups func(ctx context.Context) ([]string, error)
+	OnRealtime     func(map[string]any)
 
 	mu     sync.Mutex
 	conn   *websocket.Conn
@@ -103,8 +104,17 @@ func (d *Dialer) ConnectAndServe(ctx context.Context) error {
 	d.closed = false
 	d.mu.Unlock()
 	defer d.Close()
+	stopCloseOnCancel := make(chan struct{})
+	defer close(stopCloseOnCancel)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.CloseNow()
+		case <-stopCloseOnCancel:
+		}
+	}()
 
-	cs := &ClientSession{Worker: d.Worker}
+	cs := &ClientSession{Worker: d.Worker, OnRealtime: d.OnRealtime}
 	hello := cs.BuildHello()
 	if err := wsjson.Write(ctx, conn, hello); err != nil {
 		return err

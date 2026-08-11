@@ -57,9 +57,13 @@ const memberModalMemberId = ref("");
 /** 流式：乐观用户气泡 / Supervisor 打字机 / 相位 */
 const liveUser = ref(null);
 const liveAssistant = ref(null);
+const remoteSending = ref(false);
+const remoteClientMessageId = ref("");
+const localClientMessageId = ref("");
 const streamPhase = ref(""); // thinking | tool | streaming
 const streamToolName = ref("");
-const streamMode = ref(""); // leader | direct
+const streamMode = ref(""); // leader | direct | member
+const streamActorId = ref("");
 /** @type {AbortController | null} */
 let streamAbort = null;
 /** @type {import('vue').Ref<any[]>} */
@@ -78,6 +82,8 @@ const debugError = ref("");
 
 let timelineReqSeq = 0;
 let pollInFlight = false;
+let workgroupEventSource = null;
+let workgroupEventSeq = 0;
 
 const activeHitl = computed(() => (pendingHitl.value || [])[0] || null);
 const hitlMode = computed(() => Boolean(activeHitl.value));
@@ -203,9 +209,13 @@ function newClientMessageId() {
 function clearLive() {
   liveUser.value = null;
   liveAssistant.value = null;
+  remoteSending.value = false;
+  remoteClientMessageId.value = "";
+  localClientMessageId.value = "";
   streamPhase.value = "";
   streamToolName.value = "";
   streamMode.value = "";
+  streamActorId.value = "";
 }
 
 const memberNameById = computed(() => {
@@ -259,12 +269,160 @@ async function loadTimeline() {
   try {
     const res = await api.getWorkgroupTimeline(workgroupId.value);
     if (reqSeq !== timelineReqSeq) return;
-    events.value = res.events || [];
+    events.value = mergeTimelineEvents(res.events || []);
     error.value = "";
   } catch (e) {
     if (reqSeq !== timelineReqSeq) return;
     error.value = e?.message || "加载 Timeline 失败";
   }
+}
+
+function mergeTimelineEvents(incoming) {
+  const map = new Map();
+  for (const event of events.value || []) {
+    if (String(event?.workgroup_id || "").trim() !== workgroupId.value) continue;
+    const key = String(event?.event_id || event?.seq || "").trim();
+    if (key) map.set(key, event);
+  }
+  for (const event of Array.isArray(incoming) ? incoming : []) {
+    const key = String(event?.event_id || event?.seq || "").trim();
+    if (key) map.set(key, event);
+  }
+  return [...map.values()].sort((a, b) => Number(a?.seq || 0) - Number(b?.seq || 0));
+}
+
+function applyTimelineEvent(event) {
+  if (!event || String(event?.workgroup_id || "").trim() !== workgroupId.value) return;
+  events.value = mergeTimelineEvents([event]);
+  if (
+    !sending.value &&
+    remoteSending.value &&
+    String(event?.type || "") === "actor_final_text"
+  ) {
+    clearLive();
+  }
+  void nextTick().then(maybeScrollTimelineTail);
+}
+
+function applyRemoteRealtime(payload) {
+  if (!payload || String(payload.workgroup_id || "").trim() !== workgroupId.value) return;
+  const clientMessageId = String(payload.client_message_id || "").trim();
+  const liveMessageId =
+    clientMessageId || remoteClientMessageId.value || `remote-${workgroupId.value}`;
+  const eventType = String(payload.event_type || "");
+  const data = payload.data && typeof payload.data === "object" ? payload.data : {};
+  // The originating Node already receives leader/direct frames through POST
+  // streaming. Member frames are emitted from the nested member run, so keep
+  // those SSE frames to make the local view identical to other subscribers.
+  if (
+    clientMessageId &&
+    clientMessageId === localClientMessageId.value &&
+    String(data.mode || "") !== "member"
+  ) {
+    return;
+  }
+  const isNewRemoteTurn = remoteClientMessageId.value !== liveMessageId;
+  if (eventType === "queued") {
+    applyQueuePayload(data);
+    return;
+  }
+  if (eventType === "status") {
+    remoteSending.value = true;
+    remoteClientMessageId.value = liveMessageId;
+    if (isNewRemoteTurn) liveAssistant.value = null;
+    streamPhase.value = String(data.phase || "thinking");
+    streamToolName.value = String(data.tool || "");
+    streamMode.value = String(data.mode || "leader");
+    streamActorId.value = String(
+      data.member_id || (streamMode.value === "leader" ? "leader" : streamActorId.value),
+    );
+    if (streamPhase.value === "tool" && liveAssistant.value) {
+      liveAssistant.value = { ...liveAssistant.value, text: "" };
+    }
+  } else if (eventType === "delta") {
+    remoteSending.value = true;
+    remoteClientMessageId.value = liveMessageId;
+    if (isNewRemoteTurn) liveAssistant.value = null;
+    streamPhase.value = "streaming";
+    streamMode.value = String(data.mode || streamMode.value || "leader");
+    streamActorId.value = String(
+      data.member_id || (streamMode.value === "leader" ? "leader" : streamActorId.value),
+    );
+    liveAssistant.value = liveAssistant.value || {
+      id: `live-asst-${liveMessageId}`,
+      text: "",
+    };
+    liveAssistant.value = {
+      ...liveAssistant.value,
+      text: `${liveAssistant.value.text || ""}${String(data.text || "")}`,
+    };
+  } else if (eventType === "assistant_final") {
+    if (data.timeline_event?.event_id) {
+      const already = (events.value || []).some(
+        (event) => event?.event_id === data.timeline_event.event_id,
+      );
+      if (already) return;
+    }
+    remoteSending.value = true;
+    remoteClientMessageId.value = liveMessageId;
+    streamPhase.value = "streaming";
+    streamMode.value = String(data.mode || "leader");
+    streamActorId.value = String(
+      data.member_id || (streamMode.value === "leader" ? "leader" : streamActorId.value),
+    );
+    liveAssistant.value = {
+      id: `live-asst-${liveMessageId}`,
+      text: String(data.text || ""),
+    };
+  } else if (eventType === "final") {
+    remoteSending.value = false;
+    remoteClientMessageId.value = "";
+    liveAssistant.value = null;
+    streamPhase.value = "";
+    streamToolName.value = "";
+    streamActorId.value = "";
+  }
+  void nextTick().then(maybeScrollTimelineTail);
+}
+
+function handleWorkgroupEventMessage(raw) {
+  try {
+    const message = JSON.parse(raw?.data || "{}");
+    const seq = Number(message?.seq || 0);
+    if (seq > workgroupEventSeq) workgroupEventSeq = seq;
+    const payload = message?.data || {};
+    if (message?.type === "workgroup.timeline" || payload.kind === "timeline") {
+      applyTimelineEvent(payload.event);
+    } else if (message?.type === "workgroup.realtime") {
+      applyRemoteRealtime(payload);
+    }
+  } catch {
+    /* reconnect/resync polling handles malformed or partial frames */
+  }
+}
+
+function stopWorkgroupEventStream() {
+  if (workgroupEventSource) {
+    workgroupEventSource.close();
+    workgroupEventSource = null;
+  }
+}
+
+function startWorkgroupEventStream() {
+  stopWorkgroupEventStream();
+  if (!workgroupId.value || typeof EventSource === "undefined") return;
+  const url = api.getWorkgroupEventsURL(workgroupId.value, workgroupEventSeq);
+  const source = new EventSource(url);
+  workgroupEventSource = source;
+  source.addEventListener("workgroup.timeline", handleWorkgroupEventMessage);
+  source.addEventListener("workgroup.realtime", handleWorkgroupEventMessage);
+  source.onerror = () => {
+    if (workgroupEventSource !== source) return;
+    source.close();
+    window.setTimeout(() => {
+      if (workgroupEventSource === source && workgroupId.value) startWorkgroupEventStream();
+    }, 1200);
+  };
 }
 
 function onTimelineScroll() {
@@ -540,7 +698,8 @@ async function send() {
   }
 
   const clientMessageId = newClientMessageId();
-  const enqueueOnly = sending.value;
+  localClientMessageId.value = clientMessageId;
+  const enqueueOnly = sending.value || remoteSending.value;
   error.value = "";
   draft.value = "";
   const sentDirect = directMember.value;
@@ -564,6 +723,7 @@ async function send() {
       draft.value = stripLeadingMention(text, sentDirect?.display_name);
       directMember.value = sentDirect;
     }
+    localClientMessageId.value = "";
     return;
   }
 
@@ -579,6 +739,7 @@ async function send() {
   streamPhase.value = "thinking";
   streamToolName.value = "";
   streamMode.value = directId ? "direct" : "leader";
+  streamActorId.value = directId || "leader";
   streamAbort = new AbortController();
   scrollTimelineTail();
   startWorkPoll();
@@ -608,6 +769,8 @@ async function send() {
               phase === "tool" ? "tool" : phase === "streaming" ? "streaming" : "thinking";
             streamToolName.value = String(data?.tool || "");
             if (data?.mode) streamMode.value = String(data.mode);
+            if (data?.member_id) streamActorId.value = String(data.member_id);
+            else if (streamMode.value === "leader") streamActorId.value = "leader";
             if (phase === "tool" && liveAssistant.value) {
               liveAssistant.value = { ...liveAssistant.value, text: "" };
             }
@@ -616,10 +779,12 @@ async function send() {
               await loadPendingHitl();
             }
           } else if (eventName === "delta") {
-            if (streamMode.value === "direct") return;
             const piece = String(data?.text || "");
             if (!piece || !liveAssistant.value) return;
             streamPhase.value = "streaming";
+            if (data?.mode) streamMode.value = String(data.mode);
+            if (data?.member_id) streamActorId.value = String(data.member_id);
+            else if (streamMode.value === "leader") streamActorId.value = "leader";
             liveAssistant.value = {
               ...liveAssistant.value,
               text: `${liveAssistant.value.text || ""}${piece}`,
@@ -627,7 +792,8 @@ async function send() {
           } else if (eventName === "assistant_final") {
             const finalText = String(data?.text || "").trim();
             if (data?.mode) streamMode.value = String(data.mode);
-            if (streamMode.value !== "direct" && liveAssistant.value && finalText) {
+            if (data?.member_id) streamActorId.value = String(data.member_id);
+            if (liveAssistant.value && finalText) {
               liveAssistant.value = { ...liveAssistant.value, text: finalText };
             }
             streamPhase.value = "streaming";
@@ -1122,6 +1288,14 @@ const eventGroups = computed(() => {
       ) {
         continue;
       }
+      if (
+        (sending.value || remoteSending.value) &&
+        liveAssistant.value &&
+        actor &&
+        actor === streamActorId.value
+      ) {
+        continue;
+      }
     }
 
     if (t === "system_notice") {
@@ -1197,11 +1371,12 @@ const eventGroups = computed(() => {
     }
   }
 
-  if (liveAssistant.value && streamMode.value !== "direct") {
+  if (liveAssistant.value) {
+    const actorId = streamActorId.value || (streamMode.value === "leader" ? "leader" : "member");
     flat.push({
       role: "assistant",
-      actorId: "leader",
-      label: "Supervisor",
+      actorId,
+      label: actorId === "leader" ? "Supervisor" : memberNameById.value[actorId] || actorId,
       item: {
         key: liveAssistant.value.id,
         kind: "live_assistant",
@@ -1233,9 +1408,12 @@ const eventGroups = computed(() => {
 });
 
 const liveStatusLabel = computed(() => {
-  if (!sending.value) return "";
+  if (!sending.value && !remoteSending.value) return "";
+  const actorId = streamActorId.value || (streamMode.value === "leader" ? "leader" : "");
+  const actorLabel =
+    actorId === "leader" ? "Supervisor" : memberNameById.value[actorId] || actorId || "成员";
   if (streamPhase.value === "streaming" && liveAssistant.value?.text) {
-    return "Supervisor 回复中…";
+    return `${actorLabel} 回复中…`;
   }
   if (streamPhase.value === "tool") {
     const tool = String(streamToolName.value || "").trim();
@@ -1287,7 +1465,7 @@ const timelineTailKey = computed(() => {
   const list = events.value || [];
   const parts = [
     list.length,
-    sending.value ? 1 : 0,
+    sending.value || remoteSending.value ? 1 : 0,
     liveAssistant.value?.text?.length || 0,
     streamPhase.value,
   ];
@@ -1306,6 +1484,8 @@ watch(
   workgroupId,
   async (id) => {
     closeModelMenu();
+    stopWorkgroupEventStream();
+    workgroupEventSeq = 0;
     stopPoll();
     stopWorkPoll();
     scrollTail.setFollow(true);
@@ -1339,7 +1519,10 @@ watch(
     error.value = "";
     await Promise.all([loadTimeline(), loadWorkgroupMeta(), loadMembers(), loadPendingHitl()]);
     scrollTimelineTail();
-    if (id) startPoll();
+    if (id) {
+      startPoll();
+      startWorkgroupEventStream();
+    }
   },
   { immediate: true },
 );
@@ -1376,6 +1559,7 @@ watch(timelineEl, (el) => {
   if (el) bindTimelineResizeObserver();
 });
 onUnmounted(() => {
+  stopWorkgroupEventStream();
   stopPoll();
   stopWorkPoll();
   stopQueuePoll();
@@ -1743,9 +1927,9 @@ onUnmounted(() => {
             </article>
             <article
               v-if="
-                sending &&
+                (sending || remoteSending) &&
                 !activeHitl &&
-                !(liveAssistant && streamMode !== 'direct')
+                !liveAssistant
               "
               class="msg msg--assistant msg--progress"
             >
@@ -1765,7 +1949,7 @@ onUnmounted(() => {
                 </div>
               </div>
             </article>
-            <div v-if="!events.length && !sending" class="chat__empty">
+            <div v-if="!events.length && !sending && !remoteSending" class="chat__empty">
               <div class="chat__empty-inner">
                 <img class="wg-chat__empty-mark" :src="brandIcon" alt="" aria-hidden="true" />
                 <div class="chat__empty-title">开始对话</div>
@@ -1989,6 +2173,8 @@ onUnmounted(() => {
                     ? cancelling
                       ? "正在取消…"
                       : liveStatusLabel || "协作进行中…"
+                    : remoteSending
+                      ? liveStatusLabel || "其他 Node 协作中…"
                     : directMember
                       ? "直达成员 · Enter 发送 · 点击 @ 取消"
                       : "Enter 发送 · @ 直达成员"

@@ -24,6 +24,42 @@ from manage.workgroup.ws_hub import WorkgroupWSHub  # noqa: E402
 
 
 class WorkgroupWSHubTests(unittest.TestCase):
+    def test_timeline_and_realtime_fanout_to_subscribers(self) -> None:
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        group, _ = store.create_workgroup(
+            WorkGroupCreateRequest(display_name="room", created_by_node_id="node_a")
+        )
+        wid = group.workgroup_id
+        store.patch_acl(wid, ACLPatchRequest(collaborators=["node_b"], expected_revision=1))
+
+        sent_a: list[dict] = []
+        sent_b: list[dict] = []
+        hub.hello("node_a", send=sent_a.append)
+        hub.hello("node_b", send=sent_b.append)
+
+        event = store.append_timeline(
+            wid,
+            type="human_message",
+            actor_id="node_a",
+            text="hello",
+        )
+        frame = hub.publish_timeline_event(event)
+        self.assertEqual(frame.type, "timeline.event")
+        self.assertEqual(sent_a[-1]["type"], "timeline.event")
+        self.assertEqual(sent_b[-1]["type"], "timeline.event")
+        self.assertEqual(sent_a[-1]["payload"]["text"], "hello")
+
+        live = hub.publish_realtime_event(
+            wid,
+            "status",
+            {"phase": "thinking"},
+            client_message_id="cm_1",
+        )
+        self.assertEqual(live["event_type"], "status")
+        self.assertEqual(sent_a[-1]["type"], "workgroup.realtime")
+        self.assertEqual(sent_b[-1]["payload"]["client_message_id"], "cm_1")
+
     def test_gap_fill_and_dup_connection_fence(self) -> None:
         """对齐 fixtures/workgroup-d05/ws/gap_fill_and_dup_connection_fence.json"""
         with TemporaryDirectory() as tmp:

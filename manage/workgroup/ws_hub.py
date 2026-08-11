@@ -38,6 +38,7 @@ class WorkgroupWSHub:
     _conns: dict[str, NodeConnection] = field(default_factory=dict)
     # node_id → 曾用过的最大 generation（含已 fenced）
     _max_generation: dict[str, int] = field(default_factory=dict)
+    _live_seq: dict[str, int] = field(default_factory=dict)
 
     def hello(
         self,
@@ -209,6 +210,59 @@ class WorkgroupWSHub:
             conn.send(env.model_dump())
             return env
 
+    def push_json_to_node(self, node_id: str, message: dict[str, Any]) -> bool:
+        """Push an ephemeral JSON message to an active node session."""
+        with self._lock:
+            conn = self._conns.get(node_id)
+            if conn is None or not conn.active or conn.send is None:
+                return False
+            conn.send(dict(message))
+            return True
+
+    def publish_timeline_event(self, event: Any) -> OutboxFrame:
+        """Persist a reliable Timeline frame and fan it out to current subscribers."""
+        workgroup_id = str(getattr(event, "workgroup_id", "") or "").strip()
+        if not workgroup_id:
+            raise WorkgroupError("schema_mismatch", "timeline event workgroup_id required")
+        payload = _jsonable(event.model_dump(mode="json") if hasattr(event, "model_dump") else event)
+        frame = self.store.enqueue_outbox(
+            workgroup_id,
+            type="timeline.event",
+            payload=payload,
+        )
+        for sub in self.store.list_subscribers(workgroup_id):
+            self.push_to_node(sub.node_id, frame)
+        return frame
+
+    def publish_realtime_event(
+        self,
+        workgroup_id: str,
+        event_type: str,
+        data: dict[str, Any] | None = None,
+        *,
+        client_message_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Fan out transient turn state/deltas; durable messages use Timeline/outbox."""
+        wid = str(workgroup_id or "").strip()
+        if not wid:
+            raise WorkgroupError("schema_mismatch", "workgroup_id required")
+        with self._lock:
+            seq = int(self._live_seq.get(wid, 0)) + 1
+            self._live_seq[wid] = seq
+        payload = {
+            "workgroup_id": wid,
+            "event_id": ids.new_id("rt"),
+            "event_type": str(event_type or "realtime"),
+            "stream_seq": seq,
+            "client_message_id": str(client_message_id or "").strip() or None,
+            "data": _jsonable(data or {}),
+            "sent_at": _now(),
+        }
+        message = {"type": "workgroup.realtime", "payload": payload}
+        for sub in self.store.list_subscribers(wid):
+            self.push_json_to_node(sub.node_id, message)
+        return payload
+
     def deliver_outbox_frame(
         self,
         frame: OutboxFrame,
@@ -235,3 +289,13 @@ class WorkgroupWSHub:
     def reconcile_unacked(self, workgroup_id: str) -> list[OutboxFrame]:
         """Manage 重启后：列出未 ack outbox（不断言重复 assign）。"""
         return self.store.list_outbox(workgroup_id, unacked_only=True)
+
+
+def _jsonable(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return _jsonable(value.model_dump(mode="json"))
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return value

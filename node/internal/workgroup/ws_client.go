@@ -7,7 +7,8 @@ import (
 // ClientSession 将本地 Session 与 Manage 侧 hello/resume 载荷对齐（无真实拨号）。
 // 真实 net.Conn/WebSocket 拨号可在后续挂到 Dialer；D3 先固化帧处理契约。
 type ClientSession struct {
-	Worker *Worker
+	Worker     *Worker
+	OnRealtime func(map[string]any)
 }
 
 // BuildHello 构造 session.hello 载荷。
@@ -17,9 +18,9 @@ func (c *ClientSession) BuildHello() map[string]any {
 	return map[string]any{
 		"type": "session.hello",
 		"payload": map[string]any{
-			"node_id":                c.Worker.NodeID,
-			"last_ack_delivery_seq":  cur.LastAckDeliverySeq,
-			"connection_generation":  gen,
+			"node_id":               c.Worker.NodeID,
+			"last_ack_delivery_seq": cur.LastAckDeliverySeq,
+			"connection_generation": gen,
 		},
 	}
 }
@@ -39,10 +40,21 @@ func (c *ClientSession) ApplyWelcome(payload map[string]any) {
 
 // HandleIncomingJSON 解析并分发一条下行 JSON 帧。
 func (c *ClientSession) HandleIncomingJSON(raw []byte) (*DispatchResult, error) {
+	var loose map[string]any
+	if err := json.Unmarshal(raw, &loose); err == nil {
+		if t, _ := loose["type"].(string); t == "workgroup.realtime" {
+			if c.OnRealtime != nil {
+				if payload, ok := loose["payload"].(map[string]any); ok {
+					c.OnRealtime(payload)
+				}
+			}
+			return &DispatchResult{Handled: true}, nil
+		}
+	}
 	var env WSEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		// 控制面消息（welcome/resume）不是完整 WSEnvelope
-		var loose map[string]any
+		loose = nil
 		if err2 := json.Unmarshal(raw, &loose); err2 != nil {
 			return nil, errf(CodeSchemaMismatch, "invalid json: %v", err)
 		}
