@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { themeStore, toggleTheme } from "../theme.js";
+import brandIcon from "../../../../../node/webui/frontend/src/assets/brand-icon.png";
 
 const props = defineProps({
   view: { type: String, required: true },
@@ -77,10 +78,7 @@ onBeforeUnmount(() => {
   <header class="topnav" :class="`topnav--${variant}`" aria-label="主导航">
     <button type="button" class="topnav-brand" @click="emit('navigate', 'home')">
       <span class="brand-logo" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="24" height="24" rx="7" fill="var(--primary)" />
-          <path d="M6 17V7h2.4v7H15V17H6zm8.4-5V7H17v5h-2.6z" fill="#fff" />
-        </svg>
+        <img :src="brandIcon" alt="" />
       </span>
       <span class="topnav-brand-name">Manage</span>
     </button>

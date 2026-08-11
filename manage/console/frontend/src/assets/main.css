@@ -209,10 +209,20 @@ code {
   color: var(--primary);
 }
 
-.brand-logo svg {
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.brand-logo img {
   width: 22px;
   height: 22px;
   display: block;
+  object-fit: contain;
 }
 
 .topnav-brand-name {
@@ -2911,7 +2921,25 @@ code {
 
 .wg-card__top {
   display: flex;
-  justify-content: flex-start;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wg-card__brand {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  overflow: hidden;
+}
+
+.wg-card__brand img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .wg-card__status {
@@ -3259,6 +3287,48 @@ code {
   gap: 8px;
 }
 
+.wg-member-config__identity {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.wg-member-config__avatar {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 32%, transparent);
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  overflow: hidden;
+}
+
+.wg-member-config__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.wg-member-config__avatar[data-status="ready"],
+.wg-member-config__avatar[data-status="active"] {
+  border-color: color-mix(in srgb, var(--success) 70%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.wg-member-config__avatar[data-status="busy"],
+.wg-member-config__avatar[data-status="provisioning"] {
+  border-color: color-mix(in srgb, var(--warning) 70%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.wg-member-config__avatar[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 70%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 .wg-member-config__actions {
   display: inline-flex;
   align-items: center;
@@ -3566,6 +3636,30 @@ code {
   color: var(--primary);
   font-size: 13px;
   font-weight: 650;
+  overflow: hidden;
+}
+
+.wg-chat-rail__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.wg-chat-rail__avatar[data-status="ready"],
+.wg-chat-rail__avatar[data-status="active"] {
+  border: 1px solid color-mix(in srgb, var(--success) 70%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.wg-chat-rail__avatar[data-status="busy"],
+.wg-chat-rail__avatar[data-status="provisioning"] {
+  border: 1px solid color-mix(in srgb, var(--warning) 70%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.wg-chat-rail__avatar[data-status="error"] {
+  border: 1px solid color-mix(in srgb, var(--danger) 70%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .wg-chat-rail__avatar--node {
@@ -3828,6 +3922,23 @@ code {
   align-items: center;
   gap: 8px;
   text-transform: none;
+}
+
+.wg-chat__message-mark {
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 16px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  overflow: hidden;
+}
+
+.wg-chat__message-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .msg__text {
@@ -4710,6 +4821,15 @@ code {
   padding: 24px;
 }
 
+.wg-chat__empty-mark {
+  width: 76px;
+  height: 76px;
+  display: block;
+  margin: 0 auto 14px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 18px color-mix(in srgb, var(--primary) 18%, transparent));
+}
+
 .chat__empty-title {
   font-size: 15px;
   font-weight: 600;
@@ -4956,6 +5076,14 @@ code {
   max-width: 720px;
 }
 
+.home-hero-mark {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 2px;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 20px color-mix(in srgb, var(--primary) 18%, transparent));
+}
+
 .home-hero-kicker {
   margin: 0;
   font-size: 12px;
@@ -5099,6 +5227,12 @@ code {
 .home-module-icon svg {
   width: 30px;
   height: 30px;
+}
+
+.home-module-icon__brand {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
 }
 
 .home-module-title {
