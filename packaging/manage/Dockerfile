@@ -8,6 +8,8 @@ COPY manage/console/frontend/ ./
 # The Manage Vite app imports the canonical product mark through the
 # repository-level @dagents-brand alias.
 COPY shared/branding/ /src/shared/branding/
+# WorkgroupChatView reuses the Node-side branded activity indicator.
+COPY node/webui/frontend/src/components/BrandActivityIndicator.vue /src/node/webui/frontend/src/components/BrandActivityIndicator.vue
 RUN npm run build
 
 FROM python:3.12-slim-bookworm
