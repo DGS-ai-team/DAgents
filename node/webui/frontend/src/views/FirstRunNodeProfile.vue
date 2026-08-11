@@ -475,7 +475,7 @@ async function submit() {
   display: grid;
   place-items: center;
   padding: var(--space-6);
-  background: var(--color-bg);
+  background: var(--app-background);
   color: var(--color-text);
   font-family: var(--font-ui);
 }

@@ -4,8 +4,21 @@
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-08-11
+
+**工作组实时协作与 Node Web UI 体验优化**：补齐实时消息可靠性，并统一浅色界面的品牌视觉。
+
+### 新增
+
+- 工作组与普通 Agent 对话支持在上滑后显示“直达底部消息”按钮。
+- 工作组 Timeline/outbox 原子写入、断线恢复与多 Node 实时广播隔离。
+
+### 变更
+
+- Node Web UI 浅色主题改为左上角淡蓝色渐变，移除侧边栏绿色渐变。
+
 - **完整 Markdown 消息渲染**：Node 与 Manage 工作组消息改用 GFM 解析，支持任务列表、引用、删除线、图片、代码语言标记与代码高亮，并对 HTML 输出做安全清洗。
-- **工作组配置体验**：Manage 成员卡片支持刷新与删除；Node 侧栏新增工作组刷新入口，并增加绿/蓝渐变背景。
+- **工作组配置体验**：Manage 成员卡片支持刷新与删除；Node 侧栏新增工作组刷新入口。
 
 - **Manage 工作组多 Node 投递**：resume gap-fill 仅向成员的 `home_node_id` 重放消息，并拒绝 WebSocket header 与 `session.hello` 中不一致的 `node_id`。
 

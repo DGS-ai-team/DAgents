@@ -6,6 +6,7 @@
   /* Fluent dark (Win11-like surfaces) */
   --color-bg: #202020;
   --color-bg-soft: #1c1c1c;
+  --app-background: var(--color-bg);
   --color-surface: #2c2c2c;
   --color-surface-muted: #262626;
   --color-surface-hover: #323232;
@@ -78,6 +79,9 @@
 :root[data-theme="light"] {
   --color-bg: #f3f3f3;
   --color-bg-soft: #f9f9f9;
+  --app-background:
+    radial-gradient(ellipse 680px 420px at 0% 0%, rgba(181, 224, 255, 0.3), transparent 72%),
+    #ffffff;
   --color-surface: #ffffff;
   --color-surface-muted: #f6f6f6;
   --color-surface-hover: #f0f0f0;

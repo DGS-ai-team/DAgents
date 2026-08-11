@@ -511,7 +511,7 @@
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  background: var(--color-editor);
+  background: transparent;
 }
 
 .chat__header {
@@ -597,6 +597,53 @@
   gap: 20px;
   background: var(--color-editor);
   /* 勿用 smooth：流式高频 pin 时动画未到新底部会触发 @scroll，误关 stick-to-bottom */
+}
+
+:root[data-theme="light"] .chat__stream,
+:root[data-theme="light"] .chat__composer,
+:root[data-theme="light"] .wg-chat__body {
+  background: transparent;
+}
+
+.chat__stream-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.chat__scroll-tail {
+  position: absolute;
+  right: 24px;
+  bottom: 18px;
+  z-index: 2;
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  color: var(--color-text-muted);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.chat__scroll-tail:hover,
+.chat__scroll-tail:focus-visible {
+  background: var(--color-surface);
+  color: var(--color-text);
+  transform: translateY(-1px);
+}
+
+.chat__scroll-tail:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.chat__scroll-tail svg {
+  display: block;
 }
 
 .msg {
