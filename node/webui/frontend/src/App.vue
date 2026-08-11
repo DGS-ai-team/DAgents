@@ -109,7 +109,7 @@ onUnmounted(() => {
   display: grid;
   place-items: center;
   color: var(--color-text-subtle);
-  background: var(--color-bg);
+  background: var(--app-background);
 }
 .app-boot--error {
   color: var(--color-danger);

@@ -7,6 +7,7 @@ import StreamStatusBubble from "./StreamStatusBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
 import UserInfoBubble from "./UserInfoBubble.vue";
 import MemoryConflictBubble from "./MemoryConflictBubble.vue";
+import ScrollToTailButton from "./ScrollToTailButton.vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
 import { buildStream } from "../composables/useStream.js";
 import { extractToolApprovals } from "../stores/hitl.js";
@@ -25,7 +26,7 @@ import {
   pathsFromUriList,
   shouldResolvePathsViaShell,
 } from "../utils/filePathPaste.js";
-import { createFollowTailController } from "../utils/scrollTail.js";
+import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
 const props = defineProps({
   entries: { type: Array, default: () => [] },
   hitlQueue: { type: Array, default: () => [] },
@@ -79,6 +80,7 @@ function onUserInfoSelected(next) {
 }
 
 const scrollTail = createFollowTailController();
+const showScrollToTail = ref(false);
 let streamResizeObserver = null;
 
 const stream = computed(() => {
@@ -255,6 +257,7 @@ const tailContentKey = computed(() => {
 function maybeScrollToTail() {
   nextTick(() => {
     scrollTail.pinIfFollowing(streamRef.value);
+    updateScrollToTailVisibility();
   });
 }
 
@@ -264,11 +267,18 @@ watch(tailContentKey, () => {
 
 function onStreamScroll() {
   scrollTail.onScroll(streamRef.value);
+  updateScrollToTailVisibility();
+}
+
+function updateScrollToTailVisibility() {
+  const el = streamRef.value;
+  showScrollToTail.value = Boolean(el && !scrollTail.follow && distanceFromTail(el) > 48);
 }
 
 function scrollToTail() {
   nextTick(() => {
     scrollTail.forcePin(streamRef.value);
+    updateScrollToTailVisibility();
   });
 }
 
@@ -278,6 +288,7 @@ function bindStreamResizeObserver() {
   streamResizeObserver?.disconnect();
   streamResizeObserver = new ResizeObserver(() => {
     if (scrollTail.follow) scrollTail.pinIfFollowing(el);
+    updateScrollToTailVisibility();
   });
   const inner = el.firstElementChild || el;
   streamResizeObserver.observe(inner);
@@ -416,7 +427,8 @@ defineExpose({
       </div>
     </header>
 
-    <div ref="streamRef" class="chat__stream" @scroll="onStreamScroll">
+    <div class="chat__stream-wrap">
+      <div ref="streamRef" class="chat__stream" @scroll="onStreamScroll">
       <div v-if="!stream.length" class="chat__empty">
         <div class="chat__empty-inner">
           <div class="chat__empty-title">开始对话</div>
@@ -465,6 +477,8 @@ defineExpose({
         :key="`status-${phase}`"
         :phase="phase"
       />
+      </div>
+      <ScrollToTailButton :visible="showScrollToTail" @click="scrollToTail" />
     </div>
 
     <footer class="chat__composer">

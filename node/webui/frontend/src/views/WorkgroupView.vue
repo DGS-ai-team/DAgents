@@ -5,9 +5,10 @@ import * as api from "../api/node.js";
 import NavRail from "../components/NavRail.vue";
 import WorkgroupMemberModal from "../components/WorkgroupMemberModal.vue";
 import BrandActivityIndicator from "../components/BrandActivityIndicator.vue";
+import ScrollToTailButton from "../components/ScrollToTailButton.vue";
 import { renderMarkdown } from "../utils/markdown.js";
 import { inferToolKind } from "../utils/toolSource.js";
-import { createFollowTailController } from "../utils/scrollTail.js";
+import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
 
 const route = useRoute();
@@ -42,6 +43,7 @@ const bindingLlm = ref(false);
 const modelMenuOpen = ref(false);
 const modelMenuRoot = ref(null);
 const timelineEl = ref(null);
+const showScrollToTail = ref(false);
 /** 本轮发送开始前的 Timeline 水位 */
 const statusWatermarkSeq = ref(0);
 const scrollTail = createFollowTailController({ threshold: 80 });
@@ -428,17 +430,25 @@ function startWorkgroupEventStream() {
 
 function onTimelineScroll() {
   scrollTail.onScroll(timelineEl.value);
+  updateScrollToTailVisibility();
+}
+
+function updateScrollToTailVisibility() {
+  const el = timelineEl.value;
+  showScrollToTail.value = Boolean(el && !scrollTail.follow && distanceFromTail(el) > 48);
 }
 
 function maybeScrollTimelineTail() {
   nextTick(() => {
     scrollTail.pinIfFollowing(timelineEl.value);
+    updateScrollToTailVisibility();
   });
 }
 
 function scrollTimelineTail() {
   nextTick(() => {
     scrollTail.forcePin(timelineEl.value);
+    updateScrollToTailVisibility();
   });
 }
 
@@ -448,6 +458,7 @@ function bindTimelineResizeObserver() {
   timelineResizeObserver?.disconnect();
   timelineResizeObserver = new ResizeObserver(() => {
     if (scrollTail.follow) scrollTail.pinIfFollowing(el);
+    updateScrollToTailVisibility();
   });
   const inner = el.firstElementChild || el;
   timelineResizeObserver.observe(inner);
@@ -1694,6 +1705,7 @@ onUnmounted(() => {
         </div>
 
         <div class="wg-chat__body" :class="{ 'wg-chat__body--debug': debugOpen }">
+          <ScrollToTailButton :visible="showScrollToTail" @click="scrollTimelineTail" />
           <div
             ref="timelineEl"
             class="wg-chat__timeline chat__stream"
@@ -2341,6 +2353,7 @@ onUnmounted(() => {
   flex: 1 1 220px;
 }
 .wg-chat__body {
+  position: relative;
   flex: 1;
   display: flex;
   min-height: 0;
@@ -2348,6 +2361,9 @@ onUnmounted(() => {
 }
 .wg-chat__body--debug .wg-chat__timeline {
   flex: 1 1 58%;
+}
+.wg-chat__body--debug :deep(.chat__scroll-tail) {
+  right: calc(38% + 24px);
 }
 .wg-debug {
   flex: 0 0 320px;
