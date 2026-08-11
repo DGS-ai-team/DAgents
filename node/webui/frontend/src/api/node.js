@@ -370,6 +370,15 @@ export function getWorkgroupTimeline(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/timeline`);
 }
 
+export function getWorkgroupEventsURL(workgroupId, afterSeq = 0) {
+  const url = new URL(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/events`,
+    window.location.origin,
+  );
+  if (Number(afterSeq) > 0) url.searchParams.set("after_seq", String(Number(afterSeq)));
+  return url.toString();
+}
+
 export function postWorkgroupMessage(workgroupId, text, clientMessageId, directMemberId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/messages`, {
     method: "POST",

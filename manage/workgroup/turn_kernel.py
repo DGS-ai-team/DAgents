@@ -134,6 +134,9 @@ class TurnKernel:
         # workgroup_id -> FIFO human 队列（进程内；对齐 Node MessageQueue 单飞）
         self._human_queues: dict[str, list[QueuedHuman]] = {}
         self._command_cancel_hook: Callable[[str], None] | None = None
+        self._realtime_event_listener: Callable[
+            [str, str, dict[str, Any], str | None], None
+        ] | None = None
 
     def set_assign_completer(self, completer: AssignCompleter | None) -> None:
         self._assign_completer = completer
@@ -141,6 +144,31 @@ class TurnKernel:
     def set_command_cancel_hook(self, hook: Callable[[str], None] | None) -> None:
         """cancel_turn 时唤醒 VerticalLoop.wait_command_result（合成 canceled）。"""
         self._command_cancel_hook = hook
+
+    def set_realtime_event_listener(
+        self,
+        listener: Callable[[str, str, dict[str, Any], str | None], None] | None,
+    ) -> None:
+        self._realtime_event_listener = listener
+
+    def _publish_realtime(
+        self,
+        workgroup_id: str,
+        event_type: str,
+        data: Any,
+        *,
+        client_message_id: str | None,
+    ) -> None:
+        listener = self._realtime_event_listener
+        if listener is None:
+            return
+        public = _public_realtime_data(event_type, data)
+        if public is None:
+            return
+        try:
+            listener(workgroup_id, event_type, public, client_message_id)
+        except Exception:  # noqa: BLE001 - realtime fan-out must not break a turn
+            return
 
     def _cancel_event(self, workgroup_id: str) -> threading.Event:
         with self._turn_lock:
@@ -183,6 +211,7 @@ class TurnKernel:
                 "mode": "claiming",
                 "turn_token": token,
                 "queue_id": item.queue_id,
+                "client_message_id": item.client_message_id,
             }
             item._claim_token = token  # type: ignore[attr-defined]
             return item
@@ -213,6 +242,12 @@ class TurnKernel:
             cur = self._active_turn.get(workgroup_id)
             if cur is not None:
                 cur.update(meta)
+
+    def _active_client_message_id(self, workgroup_id: str) -> str | None:
+        with self._turn_lock:
+            value = (self._active_turn.get(workgroup_id) or {}).get("client_message_id")
+        value = str(value or "").strip()
+        return value or None
 
     def _is_turn_busy(self, workgroup_id: str) -> bool:
         with self._turn_lock:
@@ -311,6 +346,7 @@ class TurnKernel:
                 "mode": "claiming",
                 "turn_token": token,
                 "queue_id": item.queue_id,
+                "client_message_id": item.client_message_id,
             }
             item_meta = item
             # stash token on item via active_turn only
@@ -501,18 +537,32 @@ class TurnKernel:
             direct_member_id=direct_member_id,
         )
         if action == "queued":
-            yield {
+            queued_event = {
                 "event": "queued",
                 "data": {
                     **item.to_public(position),
                     "queue": self.list_human_queue(workgroup_id),
                 },
             }
+            self._publish_realtime(
+                workgroup_id,
+                queued_event["event"],
+                queued_event["data"],
+                client_message_id=client_message_id,
+            )
+            yield queued_event
             return
 
         with self._turn_lock:
             token = str((self._active_turn.get(workgroup_id) or {}).get("turn_token") or "")
-        yield from self._execute_human_turn_events(item, turn_token=token)
+        for event in self._execute_human_turn_events(item, turn_token=token):
+            self._publish_realtime(
+                workgroup_id,
+                str(event.get("event") or "message"),
+                event.get("data") or {},
+                client_message_id=item.client_message_id,
+            )
+            yield event
 
     def _execute_human_turn_events(self, item: QueuedHuman, *, turn_token: str):
         """真正执行一轮 human：写 Timeline + Leader / 直连；结束后泵队列。"""
@@ -554,11 +604,16 @@ class TurnKernel:
                     instruction=instruction,
                     human_event=event,
                     turn_token=turn_token,
+                    client_message_id=item.client_message_id,
                 )
                 return
 
             self._begin_turn(
-                workgroup_id, mode="leader", turn_token=turn_token, queue_id=item.queue_id
+                workgroup_id,
+                mode="leader",
+                turn_token=turn_token,
+                queue_id=item.queue_id,
+                client_message_id=item.client_message_id,
             )
             run = self._store.find_running_leader_run(workgroup_id) or self.start_leader_run(
                 workgroup_id
@@ -615,6 +670,7 @@ class TurnKernel:
         instruction: str,
         human_event: Any,
         turn_token: str | None = None,
+        client_message_id: str | None = None,
     ):
         """@直连：跳过 Leader LLM，创建 Assign + Member run。"""
         mid = member.member_id
@@ -622,7 +678,10 @@ class TurnKernel:
         if len(brief) > 96:
             brief = brief[:93] + "…"
 
-        begin_kwargs: dict[str, Any] = {"member_id": mid}
+        begin_kwargs: dict[str, Any] = {
+            "member_id": mid,
+            "client_message_id": client_message_id,
+        }
         if turn_token:
             begin_kwargs["turn_token"] = turn_token
         self._begin_turn(workgroup_id, mode="direct", **begin_kwargs)
@@ -1053,7 +1112,34 @@ class TurnKernel:
             messages = self._apply_today_date_hook(run_id, messages)
             over_budget = tool_loops >= max_loops
             step_tools: list[dict[str, Any]] = [] if over_budget else list(tools)
-            result = client.chat(messages, tools=step_tools or None)
+            client_message_id = self._active_client_message_id(workgroup_id)
+            self._publish_realtime(
+                workgroup_id,
+                "status",
+                {"phase": "thinking", "mode": "member", "member_id": member_id},
+                client_message_id=client_message_id,
+            )
+            result = None
+            stream = getattr(client, "stream_chat", None)
+            if callable(stream):
+                for piece in stream(messages, tools=step_tools or None):
+                    if piece.delta:
+                        self._publish_realtime(
+                            workgroup_id,
+                            "delta",
+                            {
+                                "text": piece.delta,
+                                "mode": "member",
+                                "member_id": member_id,
+                            },
+                            client_message_id=client_message_id,
+                        )
+                    if piece.result is not None:
+                        result = piece.result
+            else:
+                result = client.chat(messages, tools=step_tools or None)
+            if result is None:
+                raise WorkgroupError("conflict", "member llm stream produced no result", http_status=502)
             steps += 1
             tool_loops += 1
 
@@ -1126,6 +1212,17 @@ class TurnKernel:
             tool_msgs: list[RunHistoryMessage] = []
             for tc in result.tool_calls:
                 name = (tc.name or "").strip()
+                self._publish_realtime(
+                    workgroup_id,
+                    "status",
+                    {
+                        "phase": "tool",
+                        "tool": name,
+                        "mode": "member",
+                        "member_id": member_id,
+                    },
+                    client_message_id=client_message_id,
+                )
                 # 轻量进度：公开 Timeline 只写工具名，不含参数/结果；名字由 UI 按 actor 聚合展示
                 try:
                     hint = name
@@ -1297,6 +1394,46 @@ class TurnKernel:
             content=result.content or ("" if tool_calls else ""),
             tool_calls=tool_calls,
         )
+
+
+def _public_realtime_data(event_type: str, data: Any) -> dict[str, Any] | None:
+    """Keep the live room useful without exposing private RunHistory/tool payloads."""
+    raw = data if isinstance(data, dict) else {}
+    if event_type == "human":
+        return None
+    if event_type == "queued":
+        return {
+            key: raw[key]
+            for key in ("queue_id", "position", "text", "from_node_id", "client_message_id", "queue")
+            if key in raw
+        }
+    if event_type == "status":
+        return {
+            key: raw[key]
+            for key in ("phase", "tool", "tool_name", "mode", "member_id")
+            if key in raw
+        }
+    if event_type == "delta":
+        return {
+            key: raw[key]
+            for key in ("text", "mode", "member_id")
+            if key in raw
+        }
+    if event_type == "assistant_final":
+        # The final text is committed to Timeline immediately before this event;
+        # subscribers receive it through the reliable timeline channel.
+        return None
+    if event_type == "final":
+        loop = raw.get("loop") if isinstance(raw.get("loop"), dict) else {}
+        return {
+            "mode": raw.get("mode"),
+            "member_id": raw.get("member_id"),
+            "assign_id": raw.get("assign_id"),
+            "status": loop.get("status"),
+            "steps": loop.get("steps"),
+            "final_text": loop.get("final_text"),
+        }
+    return None
 
 
 def mock_leader_script_assign_then_answer(

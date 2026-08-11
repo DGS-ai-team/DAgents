@@ -23,6 +23,12 @@ Node 侧工作组成员执行器。权威契约见：
 | Node WebSocket Dialer（hello/resume/分发） | ✅（`dialer.go`，`coder/websocket`） |
 | Node 进程默认自动拨号 | ✅ D4：`manage.workgroup.enabled`（默认随 manage） |
 
+## 协作聊天室事件
+
+- `timeline.event`：Manage 写入公开 Timeline 后进入 outbox，按订阅 Node 可靠投递，支持 resume。
+- `workgroup.realtime`：思考状态、工具状态和文本增量的临时广播，不写入 RunHistory；断线后由 Timeline 快照对账。
+- Node 将两类事件汇入工作组本地 SSE：`GET /v1/workgroups/{workgroup_id}/events`。
+
 ## 明确不做
 
 - 不进入 `GET /v1/agents`

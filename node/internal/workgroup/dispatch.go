@@ -12,9 +12,9 @@ type DispatchResult struct {
 	Handled     bool
 	ErrorCode   ErrorCode
 	// PendingAck：业务已处理，需在 ACK 帧写出成功后再推进本地 delivery 游标。
-	PendingAck         bool
-	AckWorkgroupID     string
-	AckDeliverySeq     int64
+	PendingAck     bool
+	AckWorkgroupID string
+	AckDeliverySeq int64
 }
 
 // DispatchEnvelope 处理 Manage 下发的 WSEnvelope（不含 session/resume 控制面）。
@@ -50,10 +50,10 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		}
 		wgID := deliveryWorkgroupID(env, res.Binding.WorkgroupID)
 		return &DispatchResult{
-			Handled:            true,
-			PendingAck:         true,
-			AckWorkgroupID:     wgID,
-			AckDeliverySeq:     env.DeliverySeq,
+			Handled:        true,
+			PendingAck:     true,
+			AckWorkgroupID: wgID,
+			AckDeliverySeq: env.DeliverySeq,
 			AckEnvelope: map[string]any{
 				"type": "member.provision_result",
 				"payload": map[string]any{
@@ -156,13 +156,34 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 			"assign_id":             assignID,
 		}
 		return &DispatchResult{
-			Handled:            true,
-			PendingAck:         true,
-			AckWorkgroupID:     wgID,
-			AckDeliverySeq:     env.DeliverySeq,
+			Handled:        true,
+			PendingAck:     true,
+			AckWorkgroupID: wgID,
+			AckDeliverySeq: env.DeliverySeq,
 			AckEnvelope: map[string]any{
 				"type":    "tool.result",
 				"payload": payload,
+			},
+		}, nil
+
+	case "timeline.event":
+		if w.OnTimelineEvent != nil {
+			w.OnTimelineEvent(env)
+		}
+		wgID := deliveryWorkgroupID(env, "")
+		return &DispatchResult{
+			Handled:        true,
+			PendingAck:     true,
+			AckWorkgroupID: wgID,
+			AckDeliverySeq: env.DeliverySeq,
+			AckEnvelope: map[string]any{
+				"type": "delivery.ack",
+				"payload": map[string]any{
+					"workgroup_id":          wgID,
+					"delivery_seq":          env.DeliverySeq,
+					"connection_generation": w.Session.Generation(),
+					"type":                  env.Type,
+				},
 			},
 		}, nil
 
@@ -177,10 +198,10 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 		}
 		wgID := deliveryWorkgroupID(env, t.WorkgroupID)
 		return &DispatchResult{
-			Handled:            true,
-			PendingAck:         true,
-			AckWorkgroupID:     wgID,
-			AckDeliverySeq:     env.DeliverySeq,
+			Handled:        true,
+			PendingAck:     true,
+			AckWorkgroupID: wgID,
+			AckDeliverySeq: env.DeliverySeq,
 			AckEnvelope: map[string]any{
 				"type": "workgroup.tombstone_ack",
 				"payload": map[string]any{

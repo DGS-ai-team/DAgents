@@ -88,6 +88,17 @@ def build_workgroup_router(
         registry_store=registry_store,
         mock_llm=mock_llm,
     )
+    if hub is not None:
+        store.reconcile_timeline_outbox()
+        store.set_timeline_listener(hub.publish_timeline_event)
+        kernel.set_realtime_event_listener(
+            lambda workgroup_id, event_type, data, client_message_id=None: hub.publish_realtime_event(
+                workgroup_id,
+                event_type,
+                data,
+                client_message_id=client_message_id,
+            )
+        )
     kernel.set_assign_completer(loop.make_assign_completer(kernel))
     kernel.set_command_cancel_hook(loop.cancel_pending_commands)
 

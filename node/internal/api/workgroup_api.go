@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 	"github.com/DGS-ai-team/DAgents/node/internal/workgroup"
@@ -31,6 +33,7 @@ func (s *Server) registerWorkgroupRoutes() {
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/hitl/{hitlId}/resolve", s.handleResolveWorkgroupHITL)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/subscribe", s.handleSubscribeWorkgroup)
 	s.mux.HandleFunc("DELETE /v1/workgroups/{workgroupId}/subscribe", s.handleUnsubscribeWorkgroup)
+	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/events", s.handleWorkgroupEvents)
 	s.mux.HandleFunc("GET /v1/workgroups/{workgroupId}/timeline", s.handleWorkgroupTimeline)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/messages", s.handlePostWorkgroupMessage)
 	s.mux.HandleFunc("POST /v1/workgroups/{workgroupId}/messages/stream", s.handlePostWorkgroupMessageStream)
@@ -406,6 +409,75 @@ func (s *Server) handleWorkgroupTimeline(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+func (s *Server) handleWorkgroupEvents(w http.ResponseWriter, r *http.Request) {
+	if !s.workgroupProxyReady(w) {
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok || s.workgroupStream == nil {
+		writeAPIError(w, http.StatusInternalServerError, "stream_unsupported", "streaming unsupported", nil)
+		return
+	}
+	wid := strings.TrimSpace(r.PathValue("workgroupId"))
+	if wid == "" {
+		writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "workgroup_id required", nil)
+		return
+	}
+	subscribed, err := s.control.ListWorkgroups(r.Context(), manage.WorkgroupListSubscribed)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
+		return
+	}
+	allowed := false
+	for _, item := range subscribed {
+		if strings.TrimSpace(item.WorkgroupID) == wid {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		writeAPIError(w, http.StatusForbidden, "not_subscribed", "workgroup is not subscribed by this node", nil)
+		return
+	}
+	lastSeq := parseLastEventID(r.Header.Get("Last-Event-ID"))
+	if afterRaw := strings.TrimSpace(r.URL.Query().Get("after_seq")); afterRaw != "" {
+		lastSeq = parseLastEventID(afterRaw)
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	events := s.workgroupStream.SubscribeAgent(lastSeq, wid)
+	defer s.workgroupStream.Unsubscribe(events)
+	if _, err := fmt.Fprintf(w, ": connected\n\n"); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			if _, err := fmt.Fprintf(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if _, err := w.Write([]byte(ev.FormatSSE())); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 func (s *Server) handlePostWorkgroupMessage(w http.ResponseWriter, r *http.Request) {

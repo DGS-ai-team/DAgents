@@ -24,6 +24,85 @@ from manage.workgroup.ws_hub import WorkgroupWSHub  # noqa: E402
 
 
 class WorkgroupWSHubTests(unittest.TestCase):
+    def test_timeline_and_realtime_fanout_to_subscribers(self) -> None:
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        group, _ = store.create_workgroup(
+            WorkGroupCreateRequest(display_name="room", created_by_node_id="node_a")
+        )
+        wid = group.workgroup_id
+        store.patch_acl(wid, ACLPatchRequest(collaborators=["node_b"], expected_revision=1))
+
+        sent_a: list[dict] = []
+        sent_b: list[dict] = []
+        hub.hello("node_a", send=sent_a.append)
+        hub.hello("node_b", send=sent_b.append)
+
+        event = store.append_timeline(
+            wid,
+            type="human_message",
+            actor_id="node_a",
+            text="hello",
+        )
+        frame = hub.publish_timeline_event(event)
+        self.assertEqual(frame.type, "timeline.event")
+        self.assertEqual(len(store.list_outbox(wid)), 1)
+        self.assertEqual(sent_a[-1]["type"], "timeline.event")
+        self.assertEqual(sent_b[-1]["type"], "timeline.event")
+        self.assertEqual(sent_a[-1]["payload"]["text"], "hello")
+
+        live = hub.publish_realtime_event(
+            wid,
+            "status",
+            {"phase": "thinking"},
+            client_message_id="cm_1",
+        )
+        self.assertEqual(live["event_type"], "status")
+        self.assertEqual(sent_a[-1]["type"], "workgroup.realtime")
+        self.assertEqual(sent_b[-1]["payload"]["client_message_id"], "cm_1")
+
+    def test_failed_node_send_does_not_block_other_subscribers(self) -> None:
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        group, _ = store.create_workgroup(
+            WorkGroupCreateRequest(display_name="room", created_by_node_id="node_a")
+        )
+        wid = group.workgroup_id
+        store.patch_acl(wid, ACLPatchRequest(collaborators=["node_b"], expected_revision=1))
+
+        def fail_after_welcome(message: dict) -> None:
+            if message.get("type") != "session.welcome":
+                raise ConnectionError("gone")
+
+        hub.hello("node_a", send=fail_after_welcome)
+        sent_b: list[dict] = []
+        hub.hello("node_b", send=sent_b.append)
+
+        event = store.append_timeline(wid, type="system_notice", actor_id="leader", text="progress")
+        hub.publish_timeline_event(event)
+
+        self.assertEqual(sent_b[-1]["type"], "timeline.event")
+
+    def test_timeline_outbox_is_recovered_with_the_same_sqlite_commit(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            db_path = Path(tmp) / "m.db"
+            store = WorkGroupStore(db=SQLiteDatabase(db_path))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="room", created_by_node_id="node_a")
+            )
+            event = store.append_timeline(
+                group.workgroup_id,
+                type="human_message",
+                actor_id="node_a",
+                text="persisted",
+            )
+
+            reloaded = WorkGroupStore(db=SQLiteDatabase(db_path))
+            self.assertIsNotNone(
+                reloaded.get_timeline_outbox(group.workgroup_id, event.event_id)
+            )
+            self.assertEqual(len(reloaded.list_outbox(group.workgroup_id)), 1)
+
     def test_gap_fill_and_dup_connection_fence(self) -> None:
         """对齐 fixtures/workgroup-d05/ws/gap_fill_and_dup_connection_fence.json"""
         with TemporaryDirectory() as tmp:

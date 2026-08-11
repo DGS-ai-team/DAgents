@@ -4,6 +4,14 @@ from pathlib import Path
 from manage.storage.sqlite import SQLiteDatabase
 
 class SchemaTest(unittest.TestCase):
+    def test_connection_context_closes_connection(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+            db = SQLiteDatabase(Path(d) / "m.db")
+            with db.connect() as conn:
+                conn.execute("SELECT 1")
+            with self.assertRaisesRegex(Exception, "closed"):
+                conn.execute("SELECT 1")
+
     def test_new_tables_exist(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
             db = SQLiteDatabase(Path(d) / "m.db")

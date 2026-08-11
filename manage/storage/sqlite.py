@@ -7,6 +7,16 @@ import threading
 from pathlib import Path
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Close SQLite connections when their transaction context exits."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class SQLiteDatabase:
     def __init__(self, path: Path | None) -> None:
         self._path = path
@@ -22,7 +32,11 @@ class SQLiteDatabase:
     def connect(self) -> sqlite3.Connection:
         if self._path is None:
             raise RuntimeError("MANAGE_DB_PATH 未配置")
-        conn = sqlite3.connect(self._path, check_same_thread=False)
+        conn = sqlite3.connect(
+            self._path,
+            check_same_thread=False,
+            factory=_ClosingConnection,
+        )
         conn.row_factory = sqlite3.Row
         return conn
 
