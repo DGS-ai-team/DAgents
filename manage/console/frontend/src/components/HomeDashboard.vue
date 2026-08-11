@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { fetchAgents, fetchHealth, fetchWorkgroups } from "../api.js";
 import { computeStats, touchLastRefreshedLabel } from "../utils.js";
+import brandIcon from "@dagents-brand/brand-icon.png";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -90,6 +91,7 @@ defineExpose({ refresh: loadDashboard });
 <template>
   <section class="home-dashboard">
     <header class="home-hero">
+      <img class="home-hero-mark" :src="brandIcon" alt="" aria-hidden="true" />
       <p class="home-hero-kicker">Overview</p>
       <h1 class="home-hero-status">{{ statusLine }}</h1>
       <p class="home-hero-note">从工作组开始协作，用模板快速构建成员，在能力市场扩展 Node。</p>

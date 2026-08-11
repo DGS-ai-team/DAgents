@@ -801,41 +801,6 @@
   font-weight: 500;
 }
 
-.msg__meta-dots {
-  display: inline-flex;
-  align-items: center;
-  column-gap: var(--stream-meta-dot-gap, 3px);
-}
-
-.msg__meta-dot {
-  width: var(--stream-meta-dot-size, 5px);
-  height: var(--stream-meta-dot-size, 5px);
-  border-radius: 50%;
-  background: var(--color-text-muted);
-  opacity: 0.35;
-  animation: msg-meta-dot-pulse 1s ease-in-out infinite;
-}
-
-.msg__meta-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.msg__meta-dot:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes msg-meta-dot-pulse {
-  0%,
-  100% {
-    opacity: 0.25;
-    transform: translateY(0);
-  }
-  50% {
-    opacity: 1;
-    transform: translateY(-2px);
-  }
-}
-
 /* ---------- app shell???????????????????---------- */
 
 /* ---------- settings page ---------- */
@@ -1875,6 +1840,37 @@ select.settings-field__input {
   padding: 24px;
 }
 
+.wg-chat__empty-mark {
+  width: 76px;
+  height: 76px;
+  display: block;
+  margin: 0 auto 14px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 18px color-mix(in srgb, var(--color-primary) 18%, transparent));
+}
+
+.wg-chat__message-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wg-chat__message-mark {
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  overflow: hidden;
+}
+
+.wg-chat__message-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .chat__empty-title {
   font-size: 15px;
   font-weight: 600;
@@ -2549,6 +2545,40 @@ select.settings-field__input {
   font-weight: 500;
   line-height: 1.3;
   color: var(--color-text);
+}
+
+.nav-rail__member-mark {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--color-text-subtle) 35%, transparent);
+  background: color-mix(in srgb, var(--color-text-subtle) 8%, transparent);
+  overflow: hidden;
+}
+
+.nav-rail__member-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.nav-rail__member-mark[data-status="ready"] {
+  border-color: color-mix(in srgb, var(--color-success) 65%, transparent);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+
+.nav-rail__member-mark[data-status="busy"],
+.nav-rail__member-mark[data-status="provisioning"] {
+  border-color: color-mix(in srgb, var(--color-warning) 70%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+}
+
+.nav-rail__member-mark[data-status="error"] {
+  border-color: color-mix(in srgb, var(--color-danger) 70%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 }
 
 .nav-rail__item-trail {

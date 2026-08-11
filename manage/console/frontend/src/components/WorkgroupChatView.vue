@@ -18,6 +18,8 @@ import {
   getWorkgroupRunHistory,
 } from "../api.js";
 import { renderMarkdown } from "../utils/markdown.js";
+import brandIcon from "@dagents-brand/brand-icon.png";
+import BrandActivityIndicator from "../../../../../node/webui/frontend/src/components/BrandActivityIndicator.vue";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -1323,7 +1325,7 @@ onUnmounted(() => {
           class="wg-chat-rail__item"
           :class="{ 'wg-chat-rail__item--supervisor': m.kind === 'supervisor' }"
         >
-          <span class="wg-chat-rail__avatar" aria-hidden="true">{{ initialOf(m.display_name) }}</span>
+          <span class="wg-chat-rail__avatar" :data-status="m.status" aria-hidden="true">{{ initialOf(m.display_name) }}</span>
           <div class="wg-chat-rail__meta">
             <strong class="wg-chat-rail__name" :title="m.display_name">
               {{ m.display_name }}
@@ -1342,9 +1344,7 @@ onUnmounted(() => {
         </div>
         <ul v-if="aclPeople.length" class="wg-chat-rail__list">
           <li v-for="p in aclPeople" :key="p.id" class="wg-chat-rail__item">
-            <span class="wg-chat-rail__avatar wg-chat-rail__avatar--node" aria-hidden="true">
-              {{ initialOf(p.id) }}
-            </span>
+            <span class="wg-chat-rail__avatar wg-chat-rail__avatar--node" aria-hidden="true">{{ initialOf(p.id) }}</span>
             <div class="wg-chat-rail__meta">
               <strong class="wg-chat-rail__name" :title="p.id">{{ p.id }}</strong>
               <span class="wg-chat-rail__sub muted">
@@ -1385,6 +1385,7 @@ onUnmounted(() => {
         </div>
         <div v-else-if="!displayGroups.length && !activeHitl && !sending" class="chat__empty">
           <div class="chat__empty-inner">
+            <img class="wg-chat__empty-mark" :src="brandIcon" alt="" aria-hidden="true" />
             <div class="chat__empty-title">开始对话</div>
             <div class="chat__empty-hint">输入消息与工作组协作</div>
           </div>
@@ -1409,10 +1410,17 @@ onUnmounted(() => {
               }"
             >
               <div v-if="group.role === 'assistant' || group.label" class="msg__hint">
-                {{ group.label || (group.role === 'assistant' ? 'Supervisor' : '') }}
-                <span v-if="group.hasStreaming" class="msg__meta-dots" aria-hidden="true">
-                  <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
+                <span v-if="group.role === 'assistant'" class="wg-chat__message-mark" aria-hidden="true">
+                  <img :src="brandIcon" alt="" />
                 </span>
+                {{ group.label || (group.role === 'assistant' ? 'Supervisor' : '') }}
+                <BrandActivityIndicator
+                  v-if="group.hasStreaming"
+                  :label="group.label || '生成中'"
+                  mode="generating"
+                  :show-label="false"
+                  compact
+                />
               </div>
               <template v-for="row in group.items" :key="row.key">
                 <div
@@ -1431,15 +1439,13 @@ onUnmounted(() => {
                     <div class="wg-task__head">
                       <span class="wg-task__label">任务</span>
                       <span class="wg-task__status">
-                        <span
+                        <BrandActivityIndicator
                           v-if="!row.done"
-                          class="msg__meta-dots wg-task__dots"
-                          aria-hidden="true"
-                        >
-                          <span class="msg__meta-dot" />
-                          <span class="msg__meta-dot" />
-                          <span class="msg__meta-dot" />
-                        </span>
+                          class="wg-task__dots"
+                          mode="tool"
+                          :show-label="false"
+                          compact
+                        />
                         <span v-if="row.done && !row.failed" class="wg-task__check" aria-hidden="true">✓</span>
                         <span v-else-if="row.failed" class="wg-task__mark" aria-hidden="true">−</span>
                         {{ row.statusText }}
@@ -1465,15 +1471,13 @@ onUnmounted(() => {
                           <span class="wg-tool-row__kind">{{ step.toolKind || "tool" }}</span>
                           <span class="wg-tool-row__text">{{ step.summary }}</span>
                           <span class="wg-tool-row__status">
-                            <span
+                            <BrandActivityIndicator
                               v-if="step.inProgress"
-                              class="msg__meta-dots wg-tool-row__dots"
-                              aria-hidden="true"
-                            >
-                              <span class="msg__meta-dot" />
-                              <span class="msg__meta-dot" />
-                              <span class="msg__meta-dot" />
-                            </span>
+                              class="wg-tool-row__dots"
+                              mode="tool"
+                              :show-label="false"
+                              compact
+                            />
                             {{ step.statusText }}
                           </span>
                         </div>
@@ -1527,15 +1531,13 @@ onUnmounted(() => {
                     <span class="wg-tool-row__kind">{{ row.toolKind || "tool" }}</span>
                     <span class="wg-tool-row__text">{{ row.summary }}</span>
                     <span class="wg-tool-row__status">
-                      <span
+                      <BrandActivityIndicator
                         v-if="row.inProgress"
-                        class="msg__meta-dots wg-tool-row__dots"
-                        aria-hidden="true"
-                      >
-                        <span class="msg__meta-dot" />
-                        <span class="msg__meta-dot" />
-                        <span class="msg__meta-dot" />
-                      </span>
+                        class="wg-tool-row__dots"
+                        mode="tool"
+                        :show-label="false"
+                        compact
+                      />
                       {{ row.statusText }}
                     </span>
                   </div>
@@ -1556,9 +1558,12 @@ onUnmounted(() => {
                     :aria-label="statusLabel || '协作进行中'"
                   >
                     <span class="msg__meta-label">{{ statusLabel || "协作进行中" }}</span>
-                    <span class="msg__meta-dots" aria-hidden="true">
-                      <span class="msg__meta-dot" /><span class="msg__meta-dot" /><span class="msg__meta-dot" />
-                    </span>
+                    <BrandActivityIndicator
+                      :label="statusLabel || '协作进行中'"
+                      mode="generating"
+                      :show-label="false"
+                      compact
+                    />
                   </div>
                 </div>
                 <div
@@ -1593,7 +1598,12 @@ onUnmounted(() => {
         </template>
         <article v-if="activeHitl" class="msg msg--assistant">
           <div class="msg__body msg__body--grouped">
-            <div class="msg__hint">Supervisor</div>
+            <div class="msg__hint">
+              <span class="wg-chat__message-mark" aria-hidden="true">
+                <img :src="brandIcon" alt="" />
+              </span>
+              Supervisor
+            </div>
             <div class="wg-hitl-bubble">
               <div class="wg-hitl-bubble__badge">询问</div>
               <p class="wg-hitl-bubble__prompt">{{ activeHitl.prompt }}</p>

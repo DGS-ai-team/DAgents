@@ -28,14 +28,14 @@ ArchitecturesAllowed={#MyAppArch}
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-UninstallDisplayIcon={app}\bin\dagents-node.exe
+UninstallDisplayIcon={app}\assets\dagents.ico
 ChangesEnvironment=yes
 WizardStyle=modern
 ShowLanguageDialog=no
 SetupIconFile=..\..\desktop\tray\assets\icon.ico
 WizardImageFile=assets\wizard-sidebar.bmp
 WizardSmallImageFile=assets\wizard-small.bmp
-WizardImageStretch=no
+WizardImageStretch=yes
 DisableWelcomePage=no
 DisableFinishedPage=no
 
@@ -67,6 +67,7 @@ Source: "..\..\bundle\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion; Exclud
 Source: "..\..\bundle\bin\dagents-shell-tauri.exe"; DestDir: "{app}\bin"; DestName: "dagents-shell.exe"; Flags: ignoreversion; Tasks: shellmodern
 Source: "..\..\bundle\bin\dagents-shell-legacy.exe"; DestDir: "{app}\bin"; DestName: "dagents-shell.exe"; Flags: ignoreversion; Tasks: shelllegacy
 Source: "dagents.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\desktop\tray\assets\icon.ico"; DestDir: "{app}\assets"; DestName: "dagents.ico"; Flags: ignoreversion
 Source: "..\..\bundle\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "write-install-config.ps1"; DestDir: "{app}\scripts\windows"; Flags: ignoreversion
 Source: "..\..\bundle\config.example.yaml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
@@ -78,17 +79,20 @@ Source: "..\..\bundle\.runtime\policy\*"; DestDir: "{app}\.runtime\_seed\policy"
 Source: "..\..\bundle\packaging\agent-templates\*"; DestDir: "{app}\packaging\agent-templates"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
-Name: "{group}\DAgents Shell（系统托盘）"; Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; WorkingDir: "{app}"
-Name: "{group}\DAgents Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"
-Name: "{group}\Start Agent Node (background)"; Filename: "{app}\dagents.cmd"; Parameters: "node"; WorkingDir: "{app}"
-Name: "{group}\Start Agent Node (foreground)"; Filename: "{app}\dagents.cmd"; Parameters: "node --foreground"; WorkingDir: "{app}"
-Name: "{group}\打开 Web UI"; Filename: "http://127.0.0.1:18765/ui/"
+Name: "{group}\DAgents Shell（系统托盘）"; Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
+Name: "{group}\DAgents Shell"; Filename: "{cmd}"; Parameters: "/K cd /d ""{app}"" && dagents help"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
+Name: "{group}\Start Agent Node (background)"; Filename: "{app}\dagents.cmd"; Parameters: "node"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
+Name: "{group}\Start Agent Node (foreground)"; Filename: "{app}\dagents.cmd"; Parameters: "node --foreground"; WorkingDir: "{app}"; IconFilename: "{app}\assets\dagents.ico"
+Name: "{group}\打开 Web UI"; Filename: "http://127.0.0.1:18765/ui/"; IconFilename: "{app}\assets\dagents.ico"
 
 [Registry]
 
 [Run]
 Filename: "{app}\dagents.cmd"; Parameters: "doctor"; Description: "验证安装文件 (dagents doctor)"; Flags: postinstall skipifsilent runascurrentuser
 Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; Description: "启动 DAgents Shell（托盘监护 Node）"; Flags: postinstall nowait skipifsilent runascurrentuser
+
+[UninstallDelete]
+Type: files; Name: "{userdesktop}\DAgents Shell（系统托盘）.lnk"
 
 [Code]
 const
@@ -106,6 +110,8 @@ var
   OverwritePolicy: Boolean;
   OverwritePolicyAnswered: Boolean;
   ShellTaskDefaultsApplied: Boolean;
+  DesktopShortcutCheck: TNewCheckBox;
+  DesktopShortcutCreated: Boolean;
 
 procedure StyleButton(B: TNewButton);
 begin
@@ -144,7 +150,7 @@ end;
 
 procedure StyleFinishedLabels;
 var
-  ContentLeft, ContentWidth, BodyTop: Integer;
+  ContentLeft, ContentWidth, BodyTop, FinishedHeight, CheckTop: Integer;
 begin
   ContentLeft := WizardForm.FinishedHeadingLabel.Left;
   ContentWidth := WizardForm.ClientWidth - ContentLeft - ScaleX(28);
@@ -167,7 +173,31 @@ begin
   WizardForm.FinishedLabel.Left := ContentLeft;
   WizardForm.FinishedLabel.Top := BodyTop;
   WizardForm.FinishedLabel.Width := ContentWidth;
-  WizardForm.FinishedLabel.Height := ScaleY(120);
+  FinishedHeight := ScaleY(100);
+  if WizardForm.RunList.Visible and (WizardForm.RunList.Top > BodyTop) then
+  begin
+    FinishedHeight := WizardForm.RunList.Top - BodyTop - ScaleY(38);
+    if FinishedHeight > ScaleY(100) then
+      FinishedHeight := ScaleY(100);
+  end;
+  if FinishedHeight < ScaleY(70) then
+    FinishedHeight := ScaleY(70);
+  WizardForm.FinishedLabel.Height := FinishedHeight;
+
+  if DesktopShortcutCheck <> nil then
+  begin
+    DesktopShortcutCheck.Font.Name := 'Segoe UI';
+    DesktopShortcutCheck.Font.Size := 9;
+    DesktopShortcutCheck.Font.Color := ClrText;
+    DesktopShortcutCheck.Left := ContentLeft;
+    DesktopShortcutCheck.Width := ContentWidth;
+    DesktopShortcutCheck.Height := ScaleY(22);
+    CheckTop := BodyTop + FinishedHeight + ScaleY(8);
+    if WizardForm.RunList.Visible and
+      ((CheckTop + DesktopShortcutCheck.Height) > WizardForm.RunList.Top) then
+      CheckTop := WizardForm.RunList.Top - DesktopShortcutCheck.Height - ScaleY(8);
+    DesktopShortcutCheck.Top := CheckTop;
+  end;
 end;
 
 procedure StyleInnerPageLabels;
@@ -276,13 +306,18 @@ end;
 procedure InitializeWizard;
 begin
   ShellTaskDefaultsApplied := False;
+  DesktopShortcutCreated := False;
+  DesktopShortcutCheck := TNewCheckBox.Create(WizardForm);
+  DesktopShortcutCheck.Parent := WizardForm.FinishedPage;
+  DesktopShortcutCheck.Caption := '创建桌面快捷方式（DAgents Shell 托盘程序）';
+  DesktopShortcutCheck.Checked := False;
   ApplyWorkbenchTheme;
   WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents';
   WizardForm.WelcomeLabel2.Caption :=
-    '本机智能助手安装包包含：' + #13#10 + #13#10 +
+    'DAgents 安装包包含：' + #13#10 + #13#10 +
     '  ·  Agent Node（本地运行时）' + #13#10 +
     '  ·  Desktop Shell（系统托盘）' + #13#10 +
-    '  ·  Client' + #13#10 + #13#10 +
+    #13#10 +
     '下一步可选择 Shell 类型。' + #13#10 +
     '安装完成后，请在 Web UI「设置 › 连接」配置 LLM 与 Manage。';
   WizardForm.FinishedHeadingLabel.Caption := '安装完成';
@@ -291,6 +326,7 @@ begin
     '  ·  打开 Web UI 完成「设置 › 连接」' + #13#10 +
     '  ·  Shell 将随登录自启并监护 Node' + #13#10 + #13#10 +
     '可用 dagents shell status 查看托盘状态。';
+  StyleFinishedLabels;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -308,9 +344,32 @@ end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  AppDir: string;
+  AppDir, ShortcutPath, CreatedLink: string;
 begin
   Result := True;
+  if CurPageID = wpFinished then
+  begin
+    if (DesktopShortcutCheck <> nil) and DesktopShortcutCheck.Checked and
+      (not DesktopShortcutCreated) then
+    begin
+      ShortcutPath := ExpandConstant('{userdesktop}\DAgents Shell（系统托盘）.lnk');
+      try
+        CreatedLink := CreateShellLink(
+          ShortcutPath,
+          'DAgents Shell（系统托盘）',
+          ExpandConstant('{app}\dagents.cmd'),
+          'shell --background',
+          ExpandConstant('{app}'),
+          ExpandConstant('{app}\assets\dagents.ico'),
+          0,
+          SW_SHOWNORMAL);
+        DesktopShortcutCreated := CreatedLink <> '';
+      except
+        MsgBox('无法创建桌面快捷方式，请稍后手动创建。', mbError, MB_OK);
+      end;
+    end;
+    Exit;
+  end;
   if CurPageID <> wpSelectDir then
     Exit;
   if OverwritePolicyAnswered then

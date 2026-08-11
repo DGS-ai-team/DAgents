@@ -10,7 +10,7 @@ import {
   agentDisplayTitle,
   agentRecordId,
 } from "../utils/format.js";
-import brandIcon from "../assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 import ActivityPanel from "./ActivityPanel.vue";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
@@ -701,6 +701,9 @@ defineExpose({
                 :title="`${memberLabel(m)} · ${m.status || ''}`"
                 @click="openWorkgroup(wg.workgroup_id)"
               >
+                <span class="nav-rail__member-mark" :data-status="m.status" aria-hidden="true">
+                  <img :src="brandIcon" alt="" />
+                </span>
                 <span class="nav-rail__item-title">{{ memberLabel(m) }}</span>
                 <span class="nav-rail__meta">{{ m.status }}</span>
                 <div class="nav-rail__item-actions" @click.stop>

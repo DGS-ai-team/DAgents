@@ -6,6 +6,11 @@ const manageTarget = process.env.DAGENTS_MANAGE_URL || "http://127.0.0.1:8020";
 
 export default defineConfig({
   plugins: [vue()],
+  resolve: {
+    alias: {
+      "@dagents-brand": fileURLToPath(new URL("../../../shared/branding", import.meta.url)),
+    },
+  },
   base: "/console/",
   build: {
     outDir: fileURLToPath(new URL("../static", import.meta.url)),

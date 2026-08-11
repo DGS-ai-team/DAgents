@@ -209,10 +209,20 @@ code {
   color: var(--primary);
 }
 
-.brand-logo svg {
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.brand-logo img {
   width: 22px;
   height: 22px;
   display: block;
+  object-fit: contain;
 }
 
 .topnav-brand-name {
@@ -2911,7 +2921,7 @@ code {
 
 .wg-card__top {
   display: flex;
-  justify-content: flex-start;
+  align-items: center;
 }
 
 .wg-card__status {
@@ -3566,6 +3576,24 @@ code {
   color: var(--primary);
   font-size: 13px;
   font-weight: 650;
+  overflow: hidden;
+}
+
+.wg-chat-rail__avatar[data-status="ready"],
+.wg-chat-rail__avatar[data-status="active"] {
+  border: 1px solid color-mix(in srgb, var(--success) 70%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.wg-chat-rail__avatar[data-status="busy"],
+.wg-chat-rail__avatar[data-status="provisioning"] {
+  border: 1px solid color-mix(in srgb, var(--warning) 70%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.wg-chat-rail__avatar[data-status="error"] {
+  border: 1px solid color-mix(in srgb, var(--danger) 70%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .wg-chat-rail__avatar--node {
@@ -3828,6 +3856,23 @@ code {
   align-items: center;
   gap: 8px;
   text-transform: none;
+}
+
+.wg-chat__message-mark {
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 16px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  overflow: hidden;
+}
+
+.wg-chat__message-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .msg__text {
@@ -4645,28 +4690,6 @@ code {
   animation: stream-caret 0.9s steps(1) infinite;
 }
 
-.msg__meta-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.msg__meta-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--chat-text-muted);
-  animation: meta-dot 1.1s ease-in-out infinite;
-}
-
-.msg__meta-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.msg__meta-dot:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
 .chat__input-strip-right--live {
   color: var(--primary);
 }
@@ -4679,18 +4702,6 @@ code {
   50%,
   100% {
     opacity: 0;
-  }
-}
-
-@keyframes meta-dot {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: translateY(0);
-  }
-  50% {
-    opacity: 1;
-    transform: translateY(-2px);
   }
 }
 
@@ -4708,6 +4719,15 @@ code {
   text-align: center;
   max-width: 320px;
   padding: 24px;
+}
+
+.wg-chat__empty-mark {
+  width: 76px;
+  height: 76px;
+  display: block;
+  margin: 0 auto 14px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 18px color-mix(in srgb, var(--primary) 18%, transparent));
 }
 
 .chat__empty-title {
@@ -4954,6 +4974,14 @@ code {
   flex-direction: column;
   gap: 10px;
   max-width: 720px;
+}
+
+.home-hero-mark {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 2px;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 20px color-mix(in srgb, var(--primary) 18%, transparent));
 }
 
 .home-hero-kicker {

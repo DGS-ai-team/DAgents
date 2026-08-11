@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import * as api from "../api/node.js";
+import brandIcon from "@dagents-brand/brand-icon.png";
 
 const emit = defineEmits(["create", "pick-template"]);
 
@@ -43,6 +44,7 @@ onMounted(loadTemplates);
 <template>
   <div class="agent-empty">
     <div class="agent-empty__inner">
+      <img class="agent-empty__brand" :src="brandIcon" alt="" aria-hidden="true" />
       <h2 class="agent-empty__title">还没有创建智能体呢</h2>
       <p class="agent-empty__hint">{{ hint }}</p>
       <button
@@ -131,6 +133,14 @@ onMounted(loadTemplates);
   flex-direction: column;
   align-items: center;
   text-align: center;
+}
+
+.agent-empty__brand {
+  width: 84px;
+  height: 84px;
+  margin-bottom: 12px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 18px color-mix(in srgb, var(--color-primary) 16%, transparent));
 }
 
 .agent-empty__title {

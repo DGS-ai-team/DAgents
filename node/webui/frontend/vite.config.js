@@ -6,6 +6,11 @@ const nodeTarget = process.env.DAGENTS_NODE_URL || "http://127.0.0.1:18765";
 
 export default defineConfig({
   plugins: [vue()],
+  resolve: {
+    alias: {
+      "@dagents-brand": fileURLToPath(new URL("../../../shared/branding", import.meta.url)),
+    },
+  },
   test: {
     environment: "node",
     include: ["src/**/*.test.js"],
