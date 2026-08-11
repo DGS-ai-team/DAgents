@@ -44,11 +44,12 @@ func (r *RestrictedRegistry) Definitions() []tools.ToolDef {
 }
 
 // Execute 执行允许的工具；否则返回 error 文本。
+// 通过后带 WithEnabledBypass，避免父 Agent enabledOnly 误拦子会话允许的工具。
 func (r *RestrictedRegistry) Execute(ctx context.Context, name, arguments string) (string, error) {
 	if err := r.check(name); err != nil {
 		return "", err
 	}
-	return r.inner.Execute(ctx, name, arguments)
+	return r.inner.Execute(tools.WithEnabledBypass(ctx), name, arguments)
 }
 
 // StartBackground 委托底层 registry 的后台执行。
@@ -56,7 +57,7 @@ func (r *RestrictedRegistry) StartBackground(ctx context.Context, sessionID, too
 	if err := r.check(toolName); err != nil {
 		return "", err
 	}
-	return r.inner.StartBackground(ctx, sessionID, toolName, toolCallID, cleanedArgs)
+	return r.inner.StartBackground(tools.WithEnabledBypass(ctx), sessionID, toolName, toolCallID, cleanedArgs)
 }
 
 // TakeBashCompressStatsForCall 委托底层 registry 取出 bash 压缩 SSE 字段。

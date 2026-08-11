@@ -1,6 +1,10 @@
 package tools
 
-import "strings"
+import (
+	"context"
+	"fmt"
+	"strings"
+)
 
 // SetMultimodalEnabled 控制 read_image、browser 视觉模式与 vision 载荷暂存；默认 false。
 func (r *Registry) SetMultimodalEnabled(enabled bool) {
@@ -16,7 +20,8 @@ func (r *Registry) MultimodalEnabled() bool {
 	return r != nil && r.multimodalEnabled
 }
 
-// SetBuiltinEnabled 设置 LLM 可见/可调用的内置工具允许列表；names 为空表示全部启用。
+// SetBuiltinEnabled 设置 LLM 可见/可执行的内置工具允许列表；names 为空表示全部启用。
+// 未列入的工具仍保留 handler（供子 Agent bypass 委托），但 Execute/StartBackground 会 soft reject。
 func (r *Registry) SetBuiltinEnabled(names []string) error {
 	if r == nil {
 		return nil
@@ -42,6 +47,21 @@ func (r *Registry) SetBuiltinEnabled(names []string) error {
 	}
 	r.enabledOnly = set
 	return nil
+}
+
+// ErrToolNotEnabled 返回未启用工具的 soft-reject 文案（对齐 Workgroup allowlist 风格）。
+func ErrToolNotEnabled(name string) error {
+	return fmt.Errorf("ERROR: tool %q is not enabled", strings.TrimSpace(name))
+}
+
+func (r *Registry) rejectIfDisabled(ctx context.Context, name string) error {
+	if EnabledBypassFromContext(ctx) {
+		return nil
+	}
+	if r.toolEnabled(name) {
+		return nil
+	}
+	return ErrToolNotEnabled(name)
 }
 
 // SetBuiltinEnabledNone 禁用全部内置工具（显式空允许列表）。

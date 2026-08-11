@@ -30,14 +30,22 @@ func TestSetBuiltinEnabledFiltersDefinitions(t *testing.T) {
 			t.Fatalf("unexpected tool %q", d.Function.Name)
 		}
 	}
-	// handlers remain for child delegation
-	if _, err := reg.Execute(context.Background(), "read_file", `{"path":"x"}`); err == nil {
-		// path missing is ok - not "unknown tool"
+	// P0：未启用工具 Execute soft reject（handler 仍保留，供子 Agent bypass）
+	if _, err := reg.Execute(context.Background(), "write_file", `{"path":"a","content":"b"}`); err == nil {
+		t.Fatal("expected write_file soft reject when disabled")
+	} else if !strings.Contains(err.Error(), "is not enabled") {
+		t.Fatalf("want not-enabled error, got %v", err)
 	}
-	if _, err := reg.Execute(context.Background(), "write_file", `{"path":"a","content":"b"}`); err != nil {
+	// bypass 后仍可执行（子 Agent 路径）
+	if _, err := reg.Execute(WithEnabledBypass(context.Background()), "write_file", `{"path":"a","content":"b"}`); err != nil {
 		if err.Error() == "unknown tool: write_file" {
 			t.Fatal("write_file handler should still exist")
 		}
+	}
+	if _, err := reg.StartBackground(context.Background(), "sess", "write_file", "call-1", `{"path":"a","content":"b"}`); err == nil {
+		t.Fatal("expected StartBackground soft reject when disabled")
+	} else if !strings.Contains(err.Error(), "is not enabled") {
+		t.Fatalf("want not-enabled error, got %v", err)
 	}
 }
 

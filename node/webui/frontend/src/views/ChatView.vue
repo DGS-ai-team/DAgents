@@ -336,6 +336,9 @@ function handleEvent(ev) {
       addSystem(`error: ${ev.data.message || "unknown"}`);
       if (agentStore.awaitingTurn) finishTurn();
       break;
+    case "system_notice":
+      addSystem(String(ev.data?.message || "工具集已变更"));
+      break;
     case "done":
       finalizeAssistant();
       finalizeReasoning();

@@ -437,6 +437,7 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 	if snap.Defaults == nil {
 		snap.Defaults = map[string]any{}
 	}
+	oldToolGroups := agentruntime.EnabledToolGroups(snap)
 	runtimeDirty := false
 
 	if req.Defaults != nil {
@@ -480,6 +481,10 @@ func (s *Server) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if runtimeDirty && s.sessions != nil {
+		newToolGroups := agentruntime.EnabledToolGroups(snap)
+		if agentruntime.ToolsetShrinks(oldToolGroups, newToolGroups) {
+			s.sessions.NotifyToolsetChanged(id)
+		}
 		if err := s.reloadAgentRuntime(r.Context(), *rec); err != nil {
 			s.logger.Warn("agent runtime reload after patch failed", "agent_id", id, "error", err)
 		}

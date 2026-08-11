@@ -97,6 +97,10 @@ function userImageThumb(src) {
       <ThinkingIndicator />
     </div>
   </div>
+
+  <div v-else-if="entry.kind === 'system'" class="msg msg--system" role="status">
+    <div class="msg__bubble msg__bubble--system">{{ entry.text }}</div>
+  </div>
 </template>
 
 <style scoped>

@@ -126,8 +126,6 @@ export function buildStream(entries, hitlQueue = [], jobs = toolJobsStore) {
       continue;
     }
 
-    if (entry.kind === "system") continue;
-
     items.push({ key: `e-${entry.id}`, kind: entry.kind, entry });
   }
 
