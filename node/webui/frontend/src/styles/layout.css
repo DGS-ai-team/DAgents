@@ -70,7 +70,18 @@
   display: flex;
   flex-direction: column;
   border-right: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
-  background: var(--color-sidebar);
+  background:
+    radial-gradient(
+      ellipse 125% 42% at 0% -8%,
+      color-mix(in srgb, var(--color-success) 18%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 110% 38% at 100% 4%,
+      color-mix(in srgb, var(--color-primary) 18%, transparent),
+      transparent 64%
+    ),
+    var(--color-sidebar);
   padding: var(--space-3) 0 0;
 }
 

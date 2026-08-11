@@ -12,19 +12,15 @@ from manage.workgroup.models import AssignCreateRequest
 from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.store import WorkGroupStore
 
-_FIXTURE_SCHEMA = (
-    Path(__file__).resolve().parents[2]
-    / "docs"
-    / "design"
-    / "fixtures"
-    / "workgroup-d05"
+_ASSIGN_TOOL_SCHEMA = (
+    Path(__file__).resolve().parent
     / "schemas"
     / "assign_workgroup_task.openai.json"
 )
 
 
 def load_assign_workgroup_task_tool() -> dict[str, Any]:
-    raw = json.loads(_FIXTURE_SCHEMA.read_text(encoding="utf-8"))
+    raw = json.loads(_ASSIGN_TOOL_SCHEMA.read_text(encoding="utf-8"))
     # OpenAI tools 项不含 result_schema
     return {"type": raw["type"], "function": raw["function"]}
 

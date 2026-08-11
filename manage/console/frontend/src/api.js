@@ -402,6 +402,14 @@ export async function patchWorkgroupMember(workgroupId, memberId, body) {
   );
 }
 
+export async function archiveWorkgroupMember(workgroupId, memberId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/members/${encodeURIComponent(memberId)}/archive`,
+    {},
+    { method: "POST", body: {} },
+  );
+}
+
 export async function postWorkgroupMessage(workgroupId, body) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/messages`, {}, { method: "POST", body });
 }

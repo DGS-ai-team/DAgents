@@ -96,7 +96,14 @@ def build_workgroup_ws_router(
 
                 try:
                     if mtype == "session.hello" or (not mtype and "node_id" in payload):
-                        nid = str(payload.get("node_id") or node_id).strip()
+                        hello_node_id = str(payload.get("node_id") or "").strip()
+                        if hello_node_id and hello_node_id != node_id:
+                            raise WorkgroupError(
+                                "not_authorized",
+                                "session.hello node_id must match x-dagents-agent-id",
+                                http_status=403,
+                            )
+                        nid = hello_node_id or node_id
                         last_ack = int(payload.get("last_ack_delivery_seq") or 0)
                         hub.hello(nid, last_ack_delivery_seq=last_ack, send=sync_send)
                     elif mtype == "resume.offer":

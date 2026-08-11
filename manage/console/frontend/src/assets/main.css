@@ -3259,6 +3259,12 @@ code {
   gap: 8px;
 }
 
+.wg-member-config__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .wg-detail-section__title {
   margin: 0;
   font-size: 0.95rem;

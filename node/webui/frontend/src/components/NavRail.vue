@@ -580,6 +580,25 @@ defineExpose({
             />
           </svg>
         </button>
+        <button
+          type="button"
+          class="nav-rail__icon-btn"
+          :class="{ 'nav-rail__icon-btn--spinning': loadingWgs }"
+          title="刷新工作组"
+          aria-label="刷新工作组"
+          :disabled="loadingWgs"
+          @click.stop="refreshWorkgroups({ force: true })"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+            <path
+              d="M13 5.6A5.5 5.5 0 104.1 12M13 5.6V2.4m0 3.2H9.8"
+              stroke="currentColor"
+              stroke-width="1.35"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
       </header>
 
       <div v-if="sectionOpen.workgroups">

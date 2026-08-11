@@ -1918,7 +1918,14 @@ onUnmounted(() => {
                 :disabled="cancelling"
                 @click="cancelTurn"
               >
-                {{ cancelling ? "…" : "□" }}
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path
+                    d="M4.5 4.5l7 7M11.5 4.5l-7 7"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                  />
+                </svg>
               </button>
               <button
                 v-else-if="hitlMode"
@@ -2640,10 +2647,6 @@ onUnmounted(() => {
 .wg-mention-menu__item .muted {
   font-size: 11px;
   color: var(--color-text-muted, #6b7280);
-}
-.chat__composer-send--cancel {
-  background: color-mix(in srgb, #dc2626 12%, var(--color-surface, #fff));
-  color: #b91c1c;
 }
 .wg-chat__link {
   margin-top: 0.5rem;

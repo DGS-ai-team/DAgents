@@ -85,6 +85,59 @@ class WorkgroupWSHubTests(unittest.TestCase):
         self.assertEqual(err["payload"]["code"], "cursor_too_old")
         self.assertEqual(err["payload"]["action"], "resync_snapshot_then_resume")
 
+    def test_resume_only_replays_frames_for_current_home_node(self) -> None:
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        group, _ = store.create_workgroup(
+            WorkGroupCreateRequest(display_name="ws", created_by_node_id="node_a")
+        )
+        wid = group.workgroup_id
+        store.patch_acl(wid, ACLPatchRequest(collaborators=["node_b"], expected_revision=1))
+        member_b, _ = store.create_member(
+            wid,
+            MemberCreateRequest(
+                home_node_id="node_b",
+                display_name="member_b",
+                allow_tool_names=["read_file"],
+            ),
+        )
+        store._outbox[wid] = [  # noqa: SLF001
+            OutboxFrame(
+                delivery_seq=1,
+                workgroup_id=wid,
+                type="member.provision",
+                payload={"home_node_id": "node_a", "member_id": "member_a"},
+                created_at="2026-07-31T00:00:00Z",
+            ),
+            OutboxFrame(
+                delivery_seq=2,
+                workgroup_id=wid,
+                type="tool.command",
+                payload={"member_id": member_b.member_id, "command_id": "command_b"},
+                created_at="2026-07-31T00:00:01Z",
+            ),
+            OutboxFrame(
+                delivery_seq=3,
+                workgroup_id=wid,
+                type="workgroup.tombstone",
+                payload={"workgroup_id": wid},
+                created_at="2026-07-31T00:00:02Z",
+            ),
+        ]
+
+        hub.hello("node_a")
+        result = hub.resume_offer("node_a", workgroup_id=wid, last_ack_delivery_seq=0)
+
+        self.assertEqual(result["complete"]["payload"]["replayed"], [1, 3])
+        self.assertEqual(
+            [envelope["delivery_seq"] for envelope in result["envelopes"]],
+            [1, 3],
+        )
+
+        hub.hello("node_b")
+        result_b = hub.resume_offer("node_b", workgroup_id=wid, last_ack_delivery_seq=0)
+        self.assertEqual(result_b["complete"]["payload"]["replayed"], [2, 3])
+
     def test_manage_restart_pending_assign(self) -> None:
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "m.db"
