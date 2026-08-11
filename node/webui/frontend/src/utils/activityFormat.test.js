@@ -25,16 +25,17 @@ describe("activityFormat", () => {
 });
 
 describe("buildStream activity", () => {
-  it("excludes system entries from main stream", () => {
+  it("keeps system entries in main stream", () => {
     const items = buildStream(
       [
         { id: 1, kind: "user", text: "hi" },
-        { id: 2, kind: "system", text: "上下文已压缩" },
+        { id: 2, kind: "system", text: "工具集已变更：部分工具已禁用，进行中的工具调用已中断。" },
       ],
       [],
     );
-    expect(items.some((item) => item.kind === "system")).toBe(false);
-    expect(items).toHaveLength(1);
+    expect(items.some((item) => item.kind === "system")).toBe(true);
+    expect(items).toHaveLength(2);
+    expect(items[1].entry.text).toContain("工具集已变更");
   });
 
   it("merges tool_call and tool_result across skippable entries", () => {
@@ -57,10 +58,12 @@ describe("buildStream activity", () => {
       ],
       [],
     );
-    expect(items).toHaveLength(1);
+    // system 仍可穿插在 tool_call/result 之间完成合并，同时自身也会出现在主流程
+    expect(items).toHaveLength(2);
     expect(items[0].kind).toBe("tool_step");
     expect(items[0].callEntry?.blockId).toBe("call-1");
     expect(items[0].resultEntry?.blockId).toBe("call-1");
+    expect(items[1].kind).toBe("system");
   });
 
   it("merges when blockId only exists on data.tool_call_id", () => {
