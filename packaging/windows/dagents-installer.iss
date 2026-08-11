@@ -43,19 +43,19 @@ DisableFinishedPage=no
 Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [CustomMessages]
-chinesesimp.WelcomeLabel2=安装完成后请打开 Web UI「设置 › 连接」配置 LLM、Manage 与功能开关；API Key 请写入系统环境变量（如 OPENAI_API_KEY）。
+chinesesimp.WelcomeLabel2=安装完成后请打开 Web UI「设置 › 连接」完成配置。
 chinesesimp.WizardSelectDir=选择安装位置
 chinesesimp.WizardSelectDirLabel3=DAgents 将安装到以下文件夹。
-chinesesimp.WizardSelectTasks=附加任务
-chinesesimp.WizardSelectTasksLabel2=选择安装完成后要执行的附加任务。
+chinesesimp.WizardSelectTasks=选择 Shell
+chinesesimp.WizardSelectTasksLabel2=Desktop Shell 二选一；有 WebView2 时推荐内嵌 Web UI。
 chinesesimp.WizardReady=准备安装
-chinesesimp.WizardReadyLabel1=安装程序已准备好将 DAgents 安装到您的计算机。
-chinesesimp.WizardReadyLabel2a=点击「安装」开始，或点击「上一步」检查设置。
+chinesesimp.WizardReadyLabel1=已准备好安装 DAgents 本地助手。
+chinesesimp.WizardReadyLabel2a=点击「安装」开始，或返回上一步检查设置。
 chinesesimp.WizardInstalling=正在安装
-chinesesimp.WizardInstallingLabel=请稍候，正在安装 DAgents 本地助手…
-chinesesimp.ShellGroup=Desktop Shell（二选一）
-chinesesimp.ShellModernTask=推荐：Win10/11 + WebView2（Tauri，内嵌 Web UI）
-chinesesimp.ShellLegacyTask=兼容模式：低版本 Windows（Go Shell，系统浏览器打开 Web UI）
+chinesesimp.WizardInstallingLabel=请稍候，正在安装 DAgents…
+chinesesimp.ShellGroup=Desktop Shell
+chinesesimp.ShellModernTask=推荐 · Win10/11 + WebView2（内嵌 Web UI）
+chinesesimp.ShellLegacyTask=兼容 · 低版本 Windows（系统浏览器打开 Web UI）
 
 [Tasks]
 Name: "shellmodern"; Description: "{cm:ShellModernTask}"; GroupDescription: "{cm:ShellGroup}"; Flags: exclusive
@@ -93,14 +93,14 @@ Filename: "{app}\dagents.cmd"; Parameters: "shell --background"; Description: "�
 [Code]
 const
   { Web UI tokens.css light — Inno 颜色为 BGR $00BBGGRR }
-  ClrBg = $00F8F6F5;
+  ClrBg = $00F3F3F3;
   ClrSurface = $00FFFFFF;
-  ClrSurfaceMuted = $00FAF8F7;
-  ClrBorder = $00EADED9;
-  ClrText = $0030241F;
-  ClrTextMuted = $0068554B;
-  ClrTextSubtle = $008A776D;
-  ClrPrimary = $00EB6325;
+  ClrSurfaceMuted = $00F6F6F6;
+  ClrBorder = $00E4E4E4;
+  ClrText = $001A1A1A;
+  ClrTextMuted = $005D5D5D;
+  ClrTextSubtle = $008A8A8A;
+  ClrPrimary = $00D47800;
 
 var
   OverwritePolicy: Boolean;
@@ -111,39 +111,63 @@ procedure StyleButton(B: TNewButton);
 begin
   B.Font.Name := 'Segoe UI';
   B.Font.Size := 9;
+  B.Font.Color := ClrText;
 end;
 
 procedure StyleWelcomeLabels;
+var
+  ContentLeft, ContentWidth, BodyTop: Integer;
 begin
+  ContentLeft := WizardForm.WelcomeLabel1.Left;
+  ContentWidth := WizardForm.ClientWidth - ContentLeft - ScaleX(28);
+
   WizardForm.WelcomeLabel1.Font.Name := 'Segoe UI';
-  WizardForm.WelcomeLabel1.Font.Size := 11;
+  WizardForm.WelcomeLabel1.Font.Size := 14;
   WizardForm.WelcomeLabel1.Font.Style := [fsBold];
   WizardForm.WelcomeLabel1.Font.Color := ClrText;
   WizardForm.WelcomeLabel1.AutoSize := False;
+  WizardForm.WelcomeLabel1.Width := ContentWidth;
+  WizardForm.WelcomeLabel1.Height := ScaleY(28);
 
+  BodyTop := WizardForm.WelcomeLabel1.Top + WizardForm.WelcomeLabel1.Height + ScaleY(14);
   WizardForm.WelcomeLabel2.Font.Name := 'Segoe UI';
   WizardForm.WelcomeLabel2.Font.Size := 9;
   WizardForm.WelcomeLabel2.Font.Style := [];
   WizardForm.WelcomeLabel2.Font.Color := ClrTextMuted;
   WizardForm.WelcomeLabel2.AutoSize := False;
   WizardForm.WelcomeLabel2.WordWrap := True;
-  WizardForm.WelcomeLabel2.Width := WizardForm.ClientWidth - ScaleX(220);
+  WizardForm.WelcomeLabel2.Left := ContentLeft;
+  WizardForm.WelcomeLabel2.Top := BodyTop;
+  WizardForm.WelcomeLabel2.Width := ContentWidth;
+  WizardForm.WelcomeLabel2.Height := ScaleY(170);
 end;
 
 procedure StyleFinishedLabels;
+var
+  ContentLeft, ContentWidth, BodyTop: Integer;
 begin
+  ContentLeft := WizardForm.FinishedHeadingLabel.Left;
+  ContentWidth := WizardForm.ClientWidth - ContentLeft - ScaleX(28);
+
   WizardForm.FinishedHeadingLabel.Font.Name := 'Segoe UI';
-  WizardForm.FinishedHeadingLabel.Font.Size := 11;
+  WizardForm.FinishedHeadingLabel.Font.Size := 14;
   WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
   WizardForm.FinishedHeadingLabel.Font.Color := ClrText;
+  WizardForm.FinishedHeadingLabel.AutoSize := False;
+  WizardForm.FinishedHeadingLabel.Width := ContentWidth;
+  WizardForm.FinishedHeadingLabel.Height := ScaleY(28);
 
+  BodyTop := WizardForm.FinishedHeadingLabel.Top + WizardForm.FinishedHeadingLabel.Height + ScaleY(14);
   WizardForm.FinishedLabel.Font.Name := 'Segoe UI';
   WizardForm.FinishedLabel.Font.Size := 9;
   WizardForm.FinishedLabel.Font.Style := [];
   WizardForm.FinishedLabel.Font.Color := ClrTextMuted;
   WizardForm.FinishedLabel.AutoSize := False;
   WizardForm.FinishedLabel.WordWrap := True;
-  WizardForm.FinishedLabel.Width := WizardForm.ClientWidth - ScaleX(220);
+  WizardForm.FinishedLabel.Left := ContentLeft;
+  WizardForm.FinishedLabel.Top := BodyTop;
+  WizardForm.FinishedLabel.Width := ContentWidth;
+  WizardForm.FinishedLabel.Height := ScaleY(120);
 end;
 
 procedure StyleInnerPageLabels;
@@ -151,7 +175,7 @@ var
   DescTop: Integer;
 begin
   WizardForm.PageNameLabel.Font.Name := 'Segoe UI';
-  WizardForm.PageNameLabel.Font.Size := 10;
+  WizardForm.PageNameLabel.Font.Size := 11;
   WizardForm.PageNameLabel.Font.Style := [fsBold];
   WizardForm.PageNameLabel.Font.Color := ClrText;
   WizardForm.PageNameLabel.AutoSize := True;
@@ -164,7 +188,7 @@ begin
   WizardForm.PageDescriptionLabel.WordWrap := True;
   WizardForm.PageDescriptionLabel.Left := WizardForm.PageNameLabel.Left;
   WizardForm.PageDescriptionLabel.Width := WizardForm.ClientWidth - ScaleX(220);
-  DescTop := WizardForm.PageNameLabel.Top + WizardForm.PageNameLabel.Height + ScaleY(6);
+  DescTop := WizardForm.PageNameLabel.Top + WizardForm.PageNameLabel.Height + ScaleY(8);
   if DescTop > WizardForm.PageDescriptionLabel.Top then
     WizardForm.PageDescriptionLabel.Top := DescTop;
 end;
@@ -255,13 +279,22 @@ begin
   ApplyWorkbenchTheme;
   WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents';
   WizardForm.WelcomeLabel2.Caption :=
-    '本安装包包含 Agent Node、Desktop Shell（系统托盘）与 Client。' + #13#10 +
-    '附加任务中可选择 Shell：推荐（Win10/11 内嵌 Web UI）或兼容模式（低版本 Windows）。' + #13#10 +
-    'LLM、Manage 与功能开关请在 Web UI「设置 › 连接」中完成配置。';
-  WizardForm.FinishedLabel.Caption :=
-    'DAgents 已就绪。建议立即打开 Web UI 完成连接配置，' + #13#10 +
-    'Shell 将随登录自启并监护 Node（dagents shell status）。';
+    '本机智能助手安装包包含：' + #13#10 +
+    #13#10 +
+    '  ·  Agent Node（本地运行时）' + #13#10 +
+    '  ·  Desktop Shell（系统托盘）' + #13#10 +
+    '  ·  Client' + #13#10 +
+    #13#10 +
+    '下一步可选择 Shell 类型。' + #13#10 +
+    '安装完成后，请在 Web UI「设置 › 连接」配置 LLM 与 Manage。';
   WizardForm.FinishedHeadingLabel.Caption := '安装完成';
+  WizardForm.FinishedLabel.Caption :=
+    'DAgents 已就绪。' + #13#10 +
+    #13#10 +
+    '  ·  打开 Web UI 完成「设置 › 连接」' + #13#10 +
+    '  ·  Shell 将随登录自启并监护 Node' + #13#10 +
+    #13#10 +
+    '可用 dagents shell status 查看托盘状态。';
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
