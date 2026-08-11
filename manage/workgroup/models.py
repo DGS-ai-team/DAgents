@@ -129,6 +129,8 @@ class WorkGroupMember(BaseModel):
     member_generation: int = Field(ge=1)
     member_spec_digest: str = Field(pattern=_SHA)
     active_assign_id: str | None = Field(default=None, pattern=_AS)
+    error_code: str | None = None
+    error_message: str | None = None
     created_at: str
     archived_at: str | None = None
 

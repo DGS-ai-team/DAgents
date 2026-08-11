@@ -209,6 +209,8 @@ class VerticalLoop:
             workspace_path=req.workspace_path,
             tool_catalog_revision=req.tool_catalog_revision,
             provision_id=req.provision_id,
+            error_code=req.error_code,
+            error_message=req.message,
         )
         return {"member": member, "provision_id": req.provision_id}
 
@@ -543,6 +545,8 @@ class VerticalLoop:
                     workspace_path=str(payload.get("workspace_path") or ""),
                     tool_catalog_revision=str(payload.get("tool_catalog_revision") or ""),
                     status=status,
+                    error_code=str(payload.get("error_code") or "") or None,
+                    message=str(payload.get("message") or "") or None,
                 ),
             )
             return
