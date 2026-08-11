@@ -42,8 +42,35 @@ describe("renderMarkdown", () => {
 
   it("preserves fenced code blocks", () => {
     const html = renderMarkdown("```\n| not | table |\n---\n```");
-    expect(html).toContain("<pre><code>| not | table |\n---</code></pre>");
+    expect(html).toContain('<pre><code class="hljs">| not | table |\n---</code></pre>');
     expect(html).not.toContain("<table>");
+  });
+
+  it("renders GFM features and highlights named code fences", () => {
+    const md = [
+      "> a quote",
+      "",
+      "- [x] done",
+      "- [ ] next",
+      "",
+      "~~removed~~",
+      "",
+      "```bash",
+      "echo hello",
+      "```",
+    ].join("\n");
+    const html = renderMarkdown(md);
+    expect(html).toContain("<blockquote>");
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain("<del>removed</del>");
+    expect(html).toContain('class="hljs language-bash"');
+    expect(html).toContain("hello");
+  });
+
+  it("escapes raw HTML", () => {
+    const html = renderMarkdown('<script>alert("xss")</script>');
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
   });
 
   it("renders unordered lists with inline formatting", () => {

@@ -4583,6 +4583,46 @@ code {
   line-height: 1.5;
 }
 
+.tool-exec-bubble__markdown .hljs-comment,
+.tool-exec-bubble__markdown .hljs-quote {
+  color: #587a48;
+}
+
+.tool-exec-bubble__markdown .hljs-keyword,
+.tool-exec-bubble__markdown .hljs-selector-tag,
+.tool-exec-bubble__markdown .hljs-literal {
+  color: #005a9e;
+}
+
+.tool-exec-bubble__markdown .hljs-string,
+.tool-exec-bubble__markdown .hljs-attr,
+.tool-exec-bubble__markdown .hljs-template-tag {
+  color: #a31515;
+}
+
+.tool-exec-bubble__markdown .hljs-number,
+.tool-exec-bubble__markdown .hljs-variable,
+.tool-exec-bubble__markdown .hljs-built_in {
+  color: #795e26;
+}
+
+.tool-exec-bubble__markdown .hljs-title,
+.tool-exec-bubble__markdown .hljs-title.function_,
+.tool-exec-bubble__markdown .hljs-type {
+  color: #267f99;
+}
+
+.tool-exec-bubble__markdown li input[type="checkbox"] {
+  margin: 0 0.45em 0 0;
+  vertical-align: middle;
+}
+
+.tool-exec-bubble__markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
 .assistant-msg__stream-plain {
   margin: 0;
   padding: 0;
