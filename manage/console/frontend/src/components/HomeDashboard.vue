@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { fetchAgents, fetchHealth, fetchWorkgroups } from "../api.js";
 import { computeStats, touchLastRefreshedLabel } from "../utils.js";
-import brandIcon from "../../../../../node/webui/frontend/src/assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -126,7 +126,12 @@ defineExpose({ refresh: loadDashboard });
         @click="emit('navigate', item.id)"
       >
         <span class="home-module-icon" aria-hidden="true">
-          <img v-if="item.tone === 'workgroup'" class="home-module-icon__brand" :src="brandIcon" alt="" />
+          <svg v-if="item.tone === 'workgroup'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="9" cy="8" r="3" />
+            <circle cx="16.5" cy="9.5" r="2.5" />
+            <path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5" />
+            <path d="M14 14.2c1.4-.7 3.2-.6 4.8.5 1.1.8 1.8 2 2 3.3" />
+          </svg>
           <svg v-else-if="item.tone === 'templates'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="4" y="3" width="16" height="18" rx="2" />
             <path d="M8 8h8M8 12h8M8 16h5" />

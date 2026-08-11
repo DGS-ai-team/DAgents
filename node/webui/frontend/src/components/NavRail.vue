@@ -10,7 +10,7 @@ import {
   agentDisplayTitle,
   agentRecordId,
 } from "../utils/format.js";
-import brandIcon from "../assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 import ActivityPanel from "./ActivityPanel.vue";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";

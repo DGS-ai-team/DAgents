@@ -27,7 +27,6 @@ import {
   memberGroupsFromAllowNames,
   memberToolGroupsFromCatalog,
 } from "../utils/memberToolGroups.js";
-import brandIcon from "../../../../../node/webui/frontend/src/assets/brand-icon.png";
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -847,9 +846,6 @@ onMounted(async () => {
           class="wg-card"
         >
           <div class="wg-card__top">
-            <span class="wg-card__brand" aria-hidden="true">
-              <img :src="brandIcon" alt="" />
-            </span>
             <span class="wg-card__status" :data-status="item.status">{{ statusLabel(item.status) }}</span>
           </div>
           <h3 class="wg-card__title" :title="item.display_name">{{ item.display_name }}</h3>
@@ -1200,18 +1196,13 @@ onMounted(async () => {
               :class="{ 'wg-member-config--supervisor': m.kind === 'supervisor' }"
             >
               <header class="wg-member-config__head">
-                <div class="wg-member-config__identity">
-                  <span class="wg-member-config__avatar" :data-status="m.status" aria-hidden="true">
-                    <img :src="brandIcon" alt="" />
-                  </span>
-                  <div>
-                    <h4 class="wg-member-config__title">
-                      {{ m.display_name }}
-                      <span v-if="m.kind === 'supervisor'" class="wg-member-config__badge">编排</span>
-                    </h4>
-                    <p class="wg-member-config__id muted">{{ m.member_id }}</p>
-                    <p v-if="m.hint" class="wg-member-config__hint muted">{{ m.hint }}</p>
-                  </div>
+                <div>
+                  <h4 class="wg-member-config__title">
+                    {{ m.display_name }}
+                    <span v-if="m.kind === 'supervisor'" class="wg-member-config__badge">编排</span>
+                  </h4>
+                  <p class="wg-member-config__id muted">{{ m.member_id }}</p>
+                  <p v-if="m.hint" class="wg-member-config__hint muted">{{ m.hint }}</p>
                 </div>
                 <div class="wg-member-config__head-right">
                   <span class="wg-chat-rail__status" :data-status="m.status">

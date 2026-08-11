@@ -1,5 +1,5 @@
 <script setup>
-import brandIcon from "../assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 
 defineProps({
   label: { type: String, default: "思考中" },

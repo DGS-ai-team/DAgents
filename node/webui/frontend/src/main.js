@@ -2,7 +2,7 @@ import { createApp } from "vue";
 import App from "./App.vue";
 import router from "./router/index.js";
 import { initTheme } from "./stores/theme.js";
-import brandIcon from "./assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 import "./styles/workbench.css";
 import "./styles/overrides.css";
 

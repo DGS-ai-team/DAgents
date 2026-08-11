@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { themeStore, toggleTheme } from "../theme.js";
-import brandIcon from "../../../../../node/webui/frontend/src/assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 
 const props = defineProps({
   view: { type: String, required: true },

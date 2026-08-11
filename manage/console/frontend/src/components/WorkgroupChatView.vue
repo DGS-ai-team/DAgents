@@ -18,7 +18,7 @@ import {
   getWorkgroupRunHistory,
 } from "../api.js";
 import { renderMarkdown } from "../utils/markdown.js";
-import brandIcon from "../../../../../node/webui/frontend/src/assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 import BrandActivityIndicator from "../../../../../node/webui/frontend/src/components/BrandActivityIndicator.vue";
 
 const props = defineProps({
@@ -1325,9 +1325,7 @@ onUnmounted(() => {
           class="wg-chat-rail__item"
           :class="{ 'wg-chat-rail__item--supervisor': m.kind === 'supervisor' }"
         >
-          <span class="wg-chat-rail__avatar" :data-status="m.status" aria-hidden="true">
-            <img :src="brandIcon" alt="" />
-          </span>
+          <span class="wg-chat-rail__avatar" :data-status="m.status" aria-hidden="true">{{ initialOf(m.display_name) }}</span>
           <div class="wg-chat-rail__meta">
             <strong class="wg-chat-rail__name" :title="m.display_name">
               {{ m.display_name }}
@@ -1346,9 +1344,7 @@ onUnmounted(() => {
         </div>
         <ul v-if="aclPeople.length" class="wg-chat-rail__list">
           <li v-for="p in aclPeople" :key="p.id" class="wg-chat-rail__item">
-            <span class="wg-chat-rail__avatar wg-chat-rail__avatar--node" aria-hidden="true">
-              <img :src="brandIcon" alt="" />
-            </span>
+            <span class="wg-chat-rail__avatar wg-chat-rail__avatar--node" aria-hidden="true">{{ initialOf(p.id) }}</span>
             <div class="wg-chat-rail__meta">
               <strong class="wg-chat-rail__name" :title="p.id">{{ p.id }}</strong>
               <span class="wg-chat-rail__sub muted">

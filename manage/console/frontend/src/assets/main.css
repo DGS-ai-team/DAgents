@@ -2922,24 +2922,6 @@ code {
 .wg-card__top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.wg-card__brand {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
-  overflow: hidden;
-}
-
-.wg-card__brand img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
 }
 
 .wg-card__status {
@@ -3287,48 +3269,6 @@ code {
   gap: 8px;
 }
 
-.wg-member-config__identity {
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.wg-member-config__avatar {
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--text-muted) 32%, transparent);
-  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
-  overflow: hidden;
-}
-
-.wg-member-config__avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.wg-member-config__avatar[data-status="ready"],
-.wg-member-config__avatar[data-status="active"] {
-  border-color: color-mix(in srgb, var(--success) 70%, transparent);
-  background: color-mix(in srgb, var(--success) 10%, transparent);
-}
-
-.wg-member-config__avatar[data-status="busy"],
-.wg-member-config__avatar[data-status="provisioning"] {
-  border-color: color-mix(in srgb, var(--warning) 70%, transparent);
-  background: color-mix(in srgb, var(--warning) 10%, transparent);
-}
-
-.wg-member-config__avatar[data-status="error"] {
-  border-color: color-mix(in srgb, var(--danger) 70%, transparent);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-}
-
 .wg-member-config__actions {
   display: inline-flex;
   align-items: center;
@@ -3637,12 +3577,6 @@ code {
   font-size: 13px;
   font-weight: 650;
   overflow: hidden;
-}
-
-.wg-chat-rail__avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
 }
 
 .wg-chat-rail__avatar[data-status="ready"],
@@ -5193,12 +5127,6 @@ code {
 .home-module-icon svg {
   width: 30px;
   height: 30px;
-}
-
-.home-module-icon__brand {
-  width: 48px;
-  height: 48px;
-  object-fit: contain;
 }
 
 .home-module-title {

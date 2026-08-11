@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "assets"
-BRAND = ROOT.parents[1] / "node" / "webui" / "frontend" / "src" / "assets" / "brand-icon.png"
+BRAND = ROOT.parents[1] / "shared" / "branding" / "brand-icon.png"
 
 # tokens.css light（与 dagents-installer.iss Workbench 浅色主题一致）
 BG_TOP = (243, 243, 243)  # #f3f3f3 --color-bg

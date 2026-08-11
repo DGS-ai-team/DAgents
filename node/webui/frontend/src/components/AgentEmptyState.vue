@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import * as api from "../api/node.js";
-import brandIcon from "../assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 
 const emit = defineEmits(["create", "pick-template"]);
 

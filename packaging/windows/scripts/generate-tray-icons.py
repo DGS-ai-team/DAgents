@@ -10,7 +10,7 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parents[1]
-BRAND = REPO / "node" / "webui" / "frontend" / "src" / "assets" / "brand-icon.png"
+BRAND = REPO / "shared" / "branding" / "brand-icon.png"
 OUT_DIRS = (
     REPO / "desktop" / "tray" / "assets",
     REPO / "desktop" / "tray-tauri" / "src-tauri" / "icons",

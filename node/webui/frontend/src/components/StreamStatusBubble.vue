@@ -25,7 +25,6 @@ const label = computed(() => statusPhaseLabel(props.phase));
         :label="label"
         mode="generating"
         :show-label="false"
-        compact
       />
     </div>
   </div>

@@ -8,7 +8,7 @@ import BrandActivityIndicator from "../components/BrandActivityIndicator.vue";
 import { renderMarkdown } from "../utils/markdown.js";
 import { inferToolKind } from "../utils/toolSource.js";
 import { createFollowTailController } from "../utils/scrollTail.js";
-import brandIcon from "../assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 
 const route = useRoute();
 const router = useRouter();

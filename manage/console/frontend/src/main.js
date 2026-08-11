@@ -1,7 +1,7 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import { initTheme } from "./theme.js";
-import brandIcon from "../../../../node/webui/frontend/src/assets/brand-icon.png";
+import brandIcon from "@dagents-brand/brand-icon.png";
 import "./assets/main.css";
 
 initTheme();
