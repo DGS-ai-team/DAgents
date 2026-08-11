@@ -279,21 +279,17 @@ begin
   ApplyWorkbenchTheme;
   WizardForm.WelcomeLabel1.Caption := '欢迎安装 DAgents';
   WizardForm.WelcomeLabel2.Caption :=
-    '本机智能助手安装包包含：' + #13#10 +
-    #13#10 +
+    '本机智能助手安装包包含：' + #13#10 + #13#10 +
     '  ·  Agent Node（本地运行时）' + #13#10 +
     '  ·  Desktop Shell（系统托盘）' + #13#10 +
-    '  ·  Client' + #13#10 +
-    #13#10 +
+    '  ·  Client' + #13#10 + #13#10 +
     '下一步可选择 Shell 类型。' + #13#10 +
     '安装完成后，请在 Web UI「设置 › 连接」配置 LLM 与 Manage。';
   WizardForm.FinishedHeadingLabel.Caption := '安装完成';
   WizardForm.FinishedLabel.Caption :=
-    'DAgents 已就绪。' + #13#10 +
-    #13#10 +
+    'DAgents 已就绪。' + #13#10 + #13#10 +
     '  ·  打开 Web UI 完成「设置 › 连接」' + #13#10 +
-    '  ·  Shell 将随登录自启并监护 Node' + #13#10 +
-    #13#10 +
+    '  ·  Shell 将随登录自启并监护 Node' + #13#10 + #13#10 +
     '可用 dagents shell status 查看托盘状态。';
 end;
 
