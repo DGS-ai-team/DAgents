@@ -1702,6 +1702,75 @@ select.settings-field__input {
   color: inherit;
 }
 
+.tool-exec-bubble__markdown .hljs-comment,
+.tool-exec-bubble__markdown .hljs-quote {
+  color: #6a9955;
+}
+
+.tool-exec-bubble__markdown .hljs-keyword,
+.tool-exec-bubble__markdown .hljs-selector-tag,
+.tool-exec-bubble__markdown .hljs-literal {
+  color: #569cd6;
+}
+
+.tool-exec-bubble__markdown .hljs-string,
+.tool-exec-bubble__markdown .hljs-attr,
+.tool-exec-bubble__markdown .hljs-template-tag {
+  color: #ce9178;
+}
+
+.tool-exec-bubble__markdown .hljs-number,
+.tool-exec-bubble__markdown .hljs-variable,
+.tool-exec-bubble__markdown .hljs-built_in {
+  color: #b5cea8;
+}
+
+.tool-exec-bubble__markdown .hljs-title,
+.tool-exec-bubble__markdown .hljs-title.function_,
+.tool-exec-bubble__markdown .hljs-type {
+  color: #4ec9b0;
+}
+
+.tool-exec-bubble__markdown li input[type="checkbox"] {
+  margin: 0 0.45em 0 0;
+  vertical-align: middle;
+}
+
+.tool-exec-bubble__markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-comment,
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-quote {
+  color: #587a48;
+}
+
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-keyword,
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-selector-tag,
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-literal {
+  color: #005a9e;
+}
+
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-string,
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-attr,
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-template-tag {
+  color: #a31515;
+}
+
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-number,
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-variable,
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-built_in {
+  color: #795e26;
+}
+
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-title,
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-title.function_,
+:root[data-theme="light"] .tool-exec-bubble__markdown .hljs-type {
+  color: #267f99;
+}
+
 .tool-exec-bubble__md-img {
   max-width: 100%;
   height: auto;
