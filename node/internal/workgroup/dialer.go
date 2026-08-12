@@ -252,14 +252,20 @@ func (d *Dialer) sendResumeOffers(ctx context.Context, conn *websocket.Conn) err
 // Close 关闭底层连接。
 func (d *Dialer) Close() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if d.closed {
+		d.mu.Unlock()
 		return
 	}
 	d.closed = true
-	if d.conn != nil {
-		_ = d.conn.Close(websocket.StatusNormalClosure, "bye")
-		d.conn = nil
+	conn := d.conn
+	d.conn = nil
+	d.mu.Unlock()
+	if conn != nil {
+		// Dialer shutdown is an internal lifecycle operation. A graceful
+		// close handshake can block when Manage disappears or the peer does
+		// not answer, which in turn delays Run(ctx) cancellation. Tear down
+		// the socket immediately; reconnects will establish a fresh session.
+		_ = conn.CloseNow()
 	}
 }
 

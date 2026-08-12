@@ -23,8 +23,46 @@ env:
   BROWSER_PYINSTALLER_ARGS: --onefile --name dagents-browser --paths browser-service --collect-submodules browser_use --collect-submodules uvicorn --collect-submodules fastapi --collect-submodules pydantic --hidden-import=dagents_browser --hidden-import=dagents_browser.main --hidden-import=dagents_browser.server --hidden-import=dagents_browser.driver --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=uvicorn.lifespan --hidden-import=uvicorn.lifespan.on browser-service/run_dagents_browser.py
 
 jobs:
+  validate-release:
+    name: Validate release tag
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag source and version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: ${GITHUB_REF_NAME}; expected vX.Y.Z or a SemVer prerelease" >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin dev --depth=1
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
+            echo "Release tag ${GITHUB_REF_NAME} must point to the current origin/dev commit" >&2
+            echo "tag=$(git rev-parse HEAD) dev=$(git rev-parse FETCH_HEAD)" >&2
+            exit 1
+          fi
+
+          grep -Fq "## [${version}]" CHANGELOG.md || {
+            echo "CHANGELOG.md has no section for ${version}" >&2
+            exit 1
+          }
+          grep -Fq "const Version = \"${version}\"" node/internal/version/version.go || {
+            echo "node/internal/version/version.go is not ${version}" >&2
+            exit 1
+          }
+
   unit-tests:
     name: Unit tests (Go + Python + Web UI)
+    needs: validate-release
+    if: ${{ always() && (needs.validate-release.result == 'success' || needs.validate-release.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

@@ -1,27 +1,7 @@
 name: Go Agent+Client (AC)
 
 on:
-  pull_request:
-    paths:
-      - "node/**"
-      - "client/**"
-      - "desktop/tray/**"
-      - "shared/**"
-      - "go.work"
-      - "go.work.sum"
-      - ".github/workflows/go-ac.yml"
-  push:
-    branches:
-      - dev
-      - main
-    paths:
-      - "node/**"
-      - "client/**"
-      - "desktop/tray/**"
-      - "shared/**"
-      - "go.work"
-      - "go.work.sum"
-      - ".github/workflows/go-ac.yml"
+  workflow_call:
 
 permissions:
   contents: read
