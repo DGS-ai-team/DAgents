@@ -574,7 +574,8 @@ async function handleCommand(cmd) {
     resetUsageStrip();
     resetRemoteWorkers();
     chromeStore.contextTokens = 0;
-    await hydrateAgent();
+    const data = await hydrateAgent();
+    if (data === null) return;
     restartStream();
     await refreshToolJobs(agentStore.agentId);
     bumpActivityRefresh();
@@ -664,7 +665,8 @@ async function onAgentCreated(created) {
   pulseDesktopFocus();
   agentPanelRef.value?.refresh?.();
   try {
-    await hydrateAgent();
+    const data = await hydrateAgent();
+    if (data === null) return;
     await refreshLLMSettings();
   } catch (e) {
     agentStore.error = e.message;
@@ -691,7 +693,8 @@ async function switchAgent(id) {
   void syncCurrentAgentDisplayName();
   turnWatchdog.noteActivity();
   try {
-    await hydrateAgent();
+    const data = await hydrateAgent();
+    if (data === null) return;
     await refreshLLMSettings();
   } catch (e) {
     agentStore.error = e.message;
