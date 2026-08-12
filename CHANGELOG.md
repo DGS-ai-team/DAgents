@@ -10,6 +10,7 @@
 
 ### 修复
 
+- Prevent stale hydrate responses from re-enqueuing an already submitted tool approval after navigating to Agent settings.
 - 修复 Session runtime 停止与 SQLite 持久化存储关闭之间的竞态，确保 runtime 完成退出后再关闭数据库，降低 `SQLITE_BUSY` 与数据未持久化风险。
 - 修复子 Agent 运行时回收与父会话停止过程中的生命周期等待问题，避免自等待死锁。
 
