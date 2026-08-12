@@ -36,3 +36,32 @@ func (c DuplicateConfig) windowDuration() time.Duration {
 	}
 	return time.Duration(sec) * time.Second
 }
+
+// InjectTodayDateConfig 控制 turn.before_step 当天日期注入。
+type InjectTodayDateConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled *bool
+}
+
+// DefaultInjectTodayDateConfig 返回默认配置（启用）。
+func DefaultInjectTodayDateConfig() InjectTodayDateConfig {
+	enabled := true
+	return InjectTodayDateConfig{Enabled: &enabled}
+}
+
+// InjectTodayDateConfigOrDefault 合并默认值。
+func InjectTodayDateConfigOrDefault(c InjectTodayDateConfig) InjectTodayDateConfig {
+	if c.Enabled == nil {
+		return DefaultInjectTodayDateConfig()
+	}
+	enabled := *c.Enabled
+	return InjectTodayDateConfig{Enabled: &enabled}
+}
+
+// IsEnabled 返回是否启用（nil 视为 true）。
+func (c InjectTodayDateConfig) IsEnabled() bool {
+	if c.Enabled == nil {
+		return true
+	}
+	return *c.Enabled
+}

@@ -283,7 +283,7 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 ## 8. 从 HTTP 到 SSE 的端到端路径
 
 ```text
-POST /v1/sessions/{id}/messages
+POST /v1/messages
   → Manager.EnqueueMessage
   → runtime.enqueue(PriorityHuman)
   → consumeLoop → handleHumanMessage
@@ -297,21 +297,7 @@ Resume、异步工具、trigger 入队路径见 `runtime.consumeLoop` 的 `switc
 
 ---
 
-## 9. 与已归档 Python 文档的对应
-
-| Python（已移除） | Go Node |
-|------------------|---------|
-| `AgentService` + 消费协程 | `Manager` + `runtime.consumeLoop` |
-| `MessageQueue`（`app/harness/queue`） | `node/internal/queue` |
-| `MainAgentTurnOrchestrator` | `turn.Orchestrator` |
-| `OpenAIImplicitReActRuntime.run_turn` | `runOneStep` / `RunHumanMessageTurn` |
-| `InMemoryEventBus` | `stream.Hub` |
-
-历史说明见 [archive/python-agent-runtime/README.md](../archive/python-agent-runtime/README.md)。
-
----
-
-## 10. 相关文档
+## 9. 相关文档
 
 | 文档 | 内容 |
 |------|------|
@@ -319,4 +305,4 @@ Resume、异步工具、trigger 入队路径见 `runtime.consumeLoop` 的 `switc
 | [child-agent-tools.md](./child-agent-tools.md) | 临时子 Agent 工具与生命周期 |
 | [local-assistant.md](./local-assistant.md) | Node + Client 联调 |
 | [context-compression-cache-analysis.md](../design/context-compression-cache-analysis.md) | 压缩与 prompt 侧车（Go：`compression` 包） |
-| [design/agent-hooks.md](../design/agent-hooks.md) | **Hook 扩展点**（设计稿）：Registry、phase 锚点、与 runtime/Orchestrator 映射 |
+| [design/agent-hooks.md](../design/agent-hooks.md) | **Hook 扩展点**（已落地）：Registry、phase 锚点、与 runtime/Orchestrator 映射 |

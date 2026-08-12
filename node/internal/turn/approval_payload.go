@@ -13,7 +13,12 @@ type pendingApprovalCall struct {
 	duplicateMeta *hooks.DuplicateMeta
 }
 
-// buildApprovalToolItem 构造 HITL execute_tool item 的展示字段（用于 hitl_required；A2A 仍走 approval_required）。
+// BuildApprovalToolItem 构造 HITL execute_tool item 的展示字段（用于 hitl_required / hydrate transcript）。
+func BuildApprovalToolItem(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) map[string]any {
+	return buildApprovalToolItem(tc, duplicateMeta)
+}
+
+// buildApprovalToolItem 构造 HITL execute_tool item 的展示字段（用于 hitl_required）。
 func buildApprovalToolItem(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) map[string]any {
 	args := parseJSONArgs(tc.Function.Arguments)
 	var reason, risk string
@@ -69,10 +74,7 @@ func describeApprovalMeta(toolName string, args map[string]any) (reason, risk st
 		if cmd == "" {
 			return "将执行 Shell 命令（参数未提供 command）", risk
 		}
-		if len(cmd) > 160 {
-			cmd = cmd[:160] + "..."
-		}
-		return "将执行 Shell 命令: " + cmd, risk
+		return "将执行 Shell 命令: " + truncateRunes(cmd, 160), risk
 	case "write_file", "search_replace":
 		risk = "medium"
 		path := firstNonEmpty(args, "path", "file_path")
@@ -121,4 +123,18 @@ func firstNonEmpty(args map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max == 1 {
+		return "…"
+	}
+	return string(r[:max-1]) + "…"
 }

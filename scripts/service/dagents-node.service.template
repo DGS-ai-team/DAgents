@@ -11,7 +11,7 @@ ExecStart=@BINARY@ -config @CONFIG@
 Restart=on-failure
 RestartSec=5
 Environment=DAGENTS_CONFIG=@CONFIG@
-Environment=PATH=@WORKING_DIR@/.runtime/scripts:@WORKING_DIR@/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=@WORKING_DIR@/.runtime/externaltools:@WORKING_DIR@/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 @ENV_FILE_LINE@
 
 [Install]

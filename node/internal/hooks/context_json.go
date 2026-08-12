@@ -9,7 +9,7 @@ type hookContextDTO struct {
 	SessionID       string         `json:"session_id"`
 	AgentID         string         `json:"agent_id"`
 	TurnID          string         `json:"turn_id,omitempty"`
-	ParentSessionID string         `json:"parent_session_id,omitempty"`
+	ParentAgentID string         `json:"parent_agent_id,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 
 	MessageEnqueued    *MessageEnqueuedPayload    `json:"message_enqueued,omitempty"`
@@ -34,12 +34,6 @@ type turnErrorDTO struct {
 	Message string `json:"message,omitempty"`
 }
 
-type externalResultDTO struct {
-	Action    Action         `json:"action"`
-	Mutations map[string]any `json:"mutations,omitempty"`
-	Error     string         `json:"error,omitempty"`
-}
-
 func contextToDTO(hc *Context) hookContextDTO {
 	if hc == nil {
 		return hookContextDTO{}
@@ -49,7 +43,7 @@ func contextToDTO(hc *Context) hookContextDTO {
 		SessionID:          hc.SessionID,
 		AgentID:            hc.AgentID,
 		TurnID:             hc.TurnID,
-		ParentSessionID:    hc.ParentSessionID,
+		ParentAgentID:    hc.ParentAgentID,
 		Metadata:           hc.Metadata,
 		MessageEnqueued:    hc.MessageEnqueued,
 		TurnBeforeCompress: hc.TurnBeforeCompress,
@@ -75,25 +69,3 @@ func contextToDTO(hc *Context) hookContextDTO {
 func marshalHookContext(hc *Context) ([]byte, error) {
 	return json.Marshal(contextToDTO(hc))
 }
-
-func parseExternalResult(raw []byte) (Result, error) {
-	if len(raw) == 0 {
-		return Result{Action: ActionContinue}, nil
-	}
-	var dto externalResultDTO
-	if err := json.Unmarshal(raw, &dto); err != nil {
-		return Result{}, err
-	}
-	out := Result{
-		Action:    normalizeAction(dto.Action),
-		Mutations: dto.Mutations,
-	}
-	if dto.Error != "" {
-		out.Err = errString(dto.Error)
-	}
-	return out, nil
-}
-
-type errString string
-
-func (e errString) Error() string { return string(e) }

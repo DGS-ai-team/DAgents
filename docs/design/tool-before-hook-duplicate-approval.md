@@ -3,7 +3,7 @@
 > 状态：**已落地**（WS6，`feat/tool-context-cost-optimization`）  
 > 配置：`hooks.duplicate_tool_call`（`enabled`、`window_seconds`，默认 60）  
 > 前置：[agent-hooks.md](./agent-hooks.md) · [tool-context-cost-analysis.md](./tool-context-cost-analysis.md)  
-> 实录：[major-changes.md](./major-changes.md#3-tool-before-hook-与重复调用审批已落地-ws6)
+> 实录：[handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md#3-tool-before-hook-与重复调用审批已落地-ws6)
 
 ---
 
@@ -123,7 +123,7 @@ processToolCalls
 |--------|------|------|
 | 10 | **`PolicyToolHook`** | 解析 `toolMode`（always/never/rule）+ `DecideTool` → `ResolvedAction`（deny / require_approval / auto） |
 | 20 | **`DuplicateToolCallHook`** | **仅 `toolMode==rule` 且 `ResolvedAction==auto`** 时做 fingerprint；窗口内重复 → `RequireApproval`（subtype=`duplicate_tool_call`） |
-| 30+ | （预留）YAML / HTTP 观测 hook | 只读 journal |
+| 30+ | （预留）in-process plugin | 只读 journal / 观测 |
 
 **决策矩阵**（Hook 链出口）：
 

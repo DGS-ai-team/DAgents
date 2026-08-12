@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/defs.json",
+  "title": "Workgroup D0.5 shared definitions",
+  "$defs": {
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-9a-z]{26}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "rfc3339": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "protocol_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "member_id": {
+      "type": "string",
+      "pattern": "^mb_[0-9a-z]{26}$"
+    },
+    "human_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^hu_[0-9a-z]{26}$"
+        },
+        {
+          "const": "human"
+        }
+      ]
+    },
+    "actor_id": {
+      "oneOf": [
+        {
+          "const": "leader"
+        },
+        {
+          "type": "string",
+          "pattern": "^mb_[0-9a-z]{26}$"
+        },
+        {
+          "type": "string",
+          "pattern": "^hu_[0-9a-z]{26}$"
+        },
+        {
+          "const": "human"
+        }
+      ]
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^rn_[0-9a-z]{26}$"
+    },
+    "turn_id": {
+      "type": "string",
+      "pattern": "^tn_[0-9a-z]{26}$"
+    },
+    "assign_id": {
+      "type": "string",
+      "pattern": "^as_[0-9a-z]{26}$"
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^ev_[0-9a-z]{26}$"
+    },
+    "command_id": {
+      "type": "string",
+      "pattern": "^cmd_[0-9a-z]{26}$"
+    },
+    "provision_id": {
+      "type": "string",
+      "pattern": "^pv_[0-9a-z]{26}$"
+    },
+    "lease_id": {
+      "type": "string",
+      "pattern": "^ls_[0-9a-z]{26}$"
+    },
+    "hitl_id": {
+      "type": "string",
+      "pattern": "^ht_[0-9a-z]{26}$"
+    },
+    "grant_id": {
+      "type": "string",
+      "pattern": "^gr_[0-9a-z]{26}$"
+    },
+    "error_code": {
+      "type": "string",
+      "enum": [
+        "not_authorized",
+        "fencing_rejected",
+        "digest_mismatch",
+        "catalog_drift",
+        "payload_conflict",
+        "already_resolved",
+        "policy_denied",
+        "schema_mismatch",
+        "result_too_large",
+        "indeterminate",
+        "workgroup_archived",
+        "duplicate_client_message",
+        "cursor_too_old",
+        "not_found",
+        "conflict"
+      ]
+    },
+    "error_body": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/error_code"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

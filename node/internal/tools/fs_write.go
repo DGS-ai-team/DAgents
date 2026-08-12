@@ -52,11 +52,11 @@ func (r *Registry) execWriteFile(_ context.Context, raw json.RawMessage) (string
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	enc, encSrc, err := r.resolveWriteEncoding(args.Path, path, args.Encoding)
+	choice, err := r.resolveWriteEncodingChoice(args.Path, path, args.Encoding)
 	if err != nil {
 		return fmt.Sprintf("ERROR: write_file 失败: %v", err), nil
 	}
-	payload, err := encodeFileContent(args.Content, enc)
+	payload, err := encodeFileContentWithBOM(args.Content, choice.Encoding, choice.UTF8BOM)
 	if err != nil {
 		return fmt.Sprintf("ERROR: write_file 失败: %v", err), nil
 	}
@@ -64,11 +64,11 @@ func (r *Registry) execWriteFile(_ context.Context, raw json.RawMessage) (string
 		return "", err
 	}
 	if info, err := os.Stat(path); err == nil {
-		src := encSrc
+		src := choice.Source
 		if args.Encoding != nil {
 			src = encSourceArgument
 		}
-		r.rememberPathEncoding(args.Path, enc, info.ModTime(), src)
+		r.rememberPathEncoding(args.Path, choice.Encoding, info.ModTime(), src)
 	}
-	return fmt.Sprintf("wrote %d bytes to %s (encoding=%s)", len(payload), args.Path, enc), nil
+	return fmt.Sprintf("wrote %d bytes to %s (encoding=%s)", len(payload), args.Path, choice.Encoding), nil
 }

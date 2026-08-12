@@ -48,24 +48,12 @@ class ManageRegistryTests(unittest.TestCase):
     def test_register_discover_and_sqlite_persist(self) -> None:
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "manage.db"
-            settings = ManageSettings(
-                host="127.0.0.1",
-                port=8020,
-                db_path=db_path,
-                blob_dir=None,
-                blob_max_bytes=None,
-                offline_grace_seconds=86400,
-                audit_max_entries=100,
-                legacy_direct_relay=False,
-                a2a_inbox_content_max_chars=4096,
-                a2a_expire_sweep_seconds=30,
-            )
+            settings = ManageSettings.for_test(db_path=db_path)
             app = create_app(settings)
             payload = {
                 "agent_id": "ops-01",
                 "base_url": "http://ops.local",
                 "name": "运维助手",
-                "expose_to_peers": True,
             }
             with TestClient(app) as client:
                 reg = client.post("/v1/registry/agents", json=payload)
@@ -148,17 +136,17 @@ class ManageRegistryTests(unittest.TestCase):
         with TestClient(app) as client:
             client.post(
                 "/v1/registry/agents",
-                json={"agent_id": "caller", "base_url": "http://caller.local", "expose_to_peers": True},
+                json={"agent_id": "caller", "base_url": "http://caller.local"},
                 headers={"x-dagents-agent-id": "caller"},
             )
             client.post(
                 "/v1/registry/agents",
-                json={"agent_id": "peer-ops", "base_url": "http://peer-ops.local", "expose_to_peers": True},
+                json={"agent_id": "peer-ops", "base_url": "http://peer-ops.local"},
                 headers={"x-dagents-agent-id": "peer-ops"},
             )
             client.post(
                 "/v1/registry/agents",
-                json={"agent_id": "peer-lab", "base_url": "http://peer-lab.local", "expose_to_peers": True},
+                json={"agent_id": "peer-lab", "base_url": "http://peer-lab.local"},
                 headers={"x-dagents-agent-id": "peer-lab"},
             )
             client.patch(

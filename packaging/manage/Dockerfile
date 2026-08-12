@@ -5,6 +5,11 @@ WORKDIR /src/manage/console/frontend
 COPY manage/console/frontend/package.json manage/console/frontend/package-lock.json ./
 RUN npm ci
 COPY manage/console/frontend/ ./
+# The Manage Vite app imports the canonical product mark through the
+# repository-level @dagents-brand alias.
+COPY shared/branding/ /src/shared/branding/
+# WorkgroupChatView reuses the Node-side branded activity indicator.
+COPY node/webui/frontend/src/components/BrandActivityIndicator.vue /src/node/webui/frontend/src/components/BrandActivityIndicator.vue
 RUN npm run build
 
 FROM python:3.12-slim-bookworm
@@ -22,13 +27,22 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Runtime workgroup schemas live under manage/ so they ship with the Python app.
 COPY manage/ ./manage/
+# 与 Node go:embed 同源；member_tools 在 import 时读取（缺则 Manage 无法启动）
+COPY shared/workgroup/member_tool_catalog.json ./shared/workgroup/member_tool_catalog.json
 COPY --from=frontend /src/manage/console/static /app/manage/console/static
+COPY packaging/manage/bundled-releases/ /app/bundled/releases/
 COPY run_manage.py .
 
 ENV MANAGE_HOST=0.0.0.0 \
     MANAGE_PORT=8020 \
-    MANAGE_DB_PATH=/data/manage.db
+    MANAGE_DB_PATH=/data/manage.db \
+    MANAGE_RELEASES_DIR=/data/releases \
+    MANAGE_BLOB_DIR=/data/blobs \
+    MANAGE_AUDIT_PATH=/data/audit.jsonl \
+    MANAGE_SEED_BUNDLED_RELEASES=1 \
+    MANAGE_BUNDLED_RELEASES_DIR=/app/bundled/releases
 
 EXPOSE 8020
 

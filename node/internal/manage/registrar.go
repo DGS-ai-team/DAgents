@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -126,13 +127,10 @@ func (r *Registrar) resetInterval(d time.Duration) {
 }
 
 func (r *Registrar) register(ctx context.Context) time.Duration {
-	if r.cfg.ManageRegistryBaseURLIsLoopback() {
-		r.logger.Warn(
-			"manage registration base_url is loopback; set manage.registration.base_url to a reachable LAN address",
-			"base_url", r.cfg.ManageRegistryBaseURL(),
-		)
-	}
 	payload := r.buildRegisterPayload()
+	if strings.TrimSpace(payload.HostIPs) == "" {
+		r.logger.Warn("manage registration host_ips is empty; no non-loopback interface address found")
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		r.logger.Error("manage register marshal failed", "error", err)
@@ -164,7 +162,7 @@ func (r *Registrar) register(ctx context.Context) time.Duration {
 	}
 
 	r.setRegistered(true)
-	r.logger.Info("manage registered", "agent_id", r.cfg.AgentID, "status", out.Agent.Status)
+	r.logger.Info("manage registered", "agent_id", r.cfg.NodeID, "status", out.Agent.Status)
 	if out.HeartbeatIntervalSeconds > 0 {
 		return time.Duration(out.HeartbeatIntervalSeconds) * time.Second
 	}
@@ -173,10 +171,9 @@ func (r *Registrar) register(ctx context.Context) time.Duration {
 
 func (r *Registrar) heartbeat(ctx context.Context) error {
 	payload := heartbeatPayload{
-		TTLSeconds:    r.ttlSeconds,
-		Version:       version.Version,
-		Tools:         r.collectTools(),
-		ExposeToPeers: boolPtr(r.cfg.ExposeToPeers),
+		TTLSeconds: r.ttlSeconds,
+		Version:    version.Version,
+		Tools:      r.collectTools(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -184,7 +181,7 @@ func (r *Registrar) heartbeat(ctx context.Context) error {
 		return fmt.Errorf("marshal heartbeat: %w", err)
 	}
 
-	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.AgentID) + "/heartbeat")
+	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.NodeID) + "/heartbeat")
 	resp, err := r.doRequest(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		r.setRegistered(false)
@@ -210,7 +207,7 @@ func (r *Registrar) deregister(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.AgentID) + "/deregister")
+	endpoint := r.registryURL("/v1/registry/agents/" + url.PathEscape(r.cfg.NodeID) + "/deregister")
 	resp, err := r.doRequest(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return err
@@ -231,7 +228,7 @@ func (r *Registrar) doRequest(ctx context.Context, method, endpoint string, body
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(agentIDHeader, r.cfg.AgentID)
+	req.Header.Set(agentIDHeader, r.cfg.NodeID)
 	if token := strings.TrimSpace(r.cfg.Manage.NodeToken); token != "" {
 		req.Header.Set(tokenHeader, token)
 	}
@@ -247,23 +244,16 @@ func (r *Registrar) registryURL(path string) string {
 }
 
 func (r *Registrar) buildRegisterPayload() registerPayload {
-	card, _ := LoadDefaultAgentCard()
-	name := r.cfg.AgentID
-	description := ""
-	if card != nil {
-		if n := strings.TrimSpace(card.Name); n != "" {
-			name = n
-		}
-		description = strings.TrimSpace(card.Description)
-	}
+	name := r.cfg.AgentDisplayName()
+	description := r.cfg.AgentDescription()
 	host := hostsnapshot.Get()
-	caps := r.cfg.Capabilities()
-	if card != nil && len(card.Capabilities) > 0 {
-		caps = append([]string(nil), card.Capabilities...)
-	}
+	caps := r.cfg.RegistrationCapabilities()
+	hostIPs := hostsnapshot.LocalHostIPs()
 	return registerPayload{
-		AgentID:          r.cfg.AgentID,
-		BaseURL:          r.cfg.ManageRegistryBaseURL(),
+		NodeID:           r.cfg.NodeID,
+		AgentID:          r.cfg.NodeID, // 兼容：值同 node_id；Manage 主键仍为 node 级
+		BaseURL:          strings.TrimRight(strings.TrimSpace(r.cfg.Local.Endpoint), "/"),
+		HostIPs:          hostIPs,
 		Capabilities:     caps,
 		CapabilitiesHint: caps,
 		Tools:            r.collectTools(),
@@ -272,10 +262,11 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 		Description:      description,
 		Team:             strings.TrimSpace(r.cfg.Manage.Registration.Team),
 		Version:          version.Version,
-		ExposeToPeers:    r.cfg.ExposeToPeers,
-		Card:             card.asMap(),
+		Card:             RegistrationCard(r.cfg),
 		Metadata: map[string]any{
+			"node_id":      r.cfg.NodeID,
 			"node_version": version.Version,
+			"host_ips":     hostIPs,
 			"host_info": map[string]any{
 				"os_kind":          host.OSKind,
 				"sys_platform":     host.SysPlatform,
@@ -283,8 +274,52 @@ func (r *Registrar) buildRegisterPayload() registerPayload {
 				"machine":          host.Machine,
 				"login_name":       host.LoginName,
 			},
+			"display": displayMeta(),
+			// 跨机器协作走工作组；不再广告 placement.allow_*。
 		},
 	}
+}
+
+func displayMeta() map[string]any {
+	h := hostsnapshot.Get()
+	osKind := strings.ToLower(strings.TrimSpace(h.OSKind))
+	sys := strings.ToLower(strings.TrimSpace(h.SysPlatform))
+	available := false
+	backend := "none"
+	reason := ""
+	label := "Unknown"
+	switch {
+	case osKind == "windows" || sys == "windows":
+		available = true
+		backend = "stub"
+		label = "Windows"
+	case osKind == "darwin" || sys == "darwin":
+		available = true
+		backend = "stub"
+		label = "macOS"
+	default:
+		available = strings.TrimSpace(os.Getenv("DISPLAY")) != "" || strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) != ""
+		if available {
+			backend = "stub"
+		} else {
+			reason = "no_display"
+		}
+		switch {
+		case osKind != "":
+			label = strings.ToUpper(osKind[:1]) + osKind[1:]
+		case sys != "":
+			label = strings.ToUpper(sys[:1]) + sys[1:]
+		}
+	}
+	out := map[string]any{
+		"available": available,
+		"label":     label,
+		"backend":   backend,
+	}
+	if reason != "" {
+		out["reason_if_unavailable"] = reason
+	}
+	return out
 }
 
 func (r *Registrar) collectTools() []string {
@@ -295,8 +330,10 @@ func (r *Registrar) collectTools() []string {
 }
 
 type registerPayload struct {
-	AgentID          string         `json:"agent_id"`
+	NodeID           string         `json:"node_id"`
+	AgentID          string         `json:"agent_id,omitempty"` // deprecated: 兼容旧 Manage，值同 node_id
 	BaseURL          string         `json:"base_url"`
+	HostIPs          string         `json:"host_ips,omitempty"`
 	CapabilitiesHint []string       `json:"capabilities_hint,omitempty"`
 	Capabilities     []string       `json:"capabilities,omitempty"`
 	Tools            []string       `json:"tools,omitempty"`
@@ -305,16 +342,14 @@ type registerPayload struct {
 	Description      string         `json:"description,omitempty"`
 	Team             string         `json:"team,omitempty"`
 	Version          string         `json:"version,omitempty"`
-	ExposeToPeers    bool           `json:"expose_to_peers"`
 	Card             map[string]any `json:"card,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
 }
 
 type heartbeatPayload struct {
-	TTLSeconds    int      `json:"ttl_seconds"`
-	Version       string   `json:"version,omitempty"`
-	Tools         []string `json:"tools,omitempty"`
-	ExposeToPeers *bool    `json:"expose_to_peers,omitempty"`
+	TTLSeconds int      `json:"ttl_seconds"`
+	Version    string   `json:"version,omitempty"`
+	Tools      []string `json:"tools,omitempty"`
 }
 
 type registerResponse struct {
@@ -328,10 +363,6 @@ var errNotFound = fmt.Errorf("agent not found")
 
 func isNotFound(err error) bool {
 	return err == errNotFound
-}
-
-func boolPtr(v bool) *bool {
-	return &v
 }
 
 func readErrorBody(r io.Reader) string {

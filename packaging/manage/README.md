@@ -1,12 +1,14 @@
 # Manage Docker 镜像
 
-将 **Manage 统一控制面**（Registry + A2A Task + **Vue Console**）打包为可发布镜像，供生产部署与 [A2A 联调案例](../../cases/a2a-manage-docker/) 复用。镜像构建含 **Console 前端 `npm run build`** 多阶段步骤。
+将 **Manage 统一控制面**（Registry + 工作组 + **Vue Console**）打包为可发布镜像，供生产部署。镜像构建含 **Console 前端 `npm run build`** 多阶段步骤。
+
+构建上下文为**仓库根**；除 `manage/` 外须带上 `shared/workgroup/member_tool_catalog.json`（工作组成员工具权威目录，与 Node 同源）。
 
 ## 快速开始（联网环境）
 
 ```bash
 # 仓库根目录
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.8 .
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.5.1 .
 
 # 或使用 compose（在 packaging/manage/ 下）
 cp .env.example .env
@@ -34,12 +36,12 @@ docker compose up -d --build
 
 ```bash
 # 联网机构建 bundle
-VERSION=0.3.8 bash scripts/ci/assemble_manage_bundle.sh
-# 产物：dist/dagents-manage-bundle-0.3.8.tar.gz
+VERSION=0.5.1 bash scripts/ci/assemble_manage_bundle.sh
+# 产物：dist/dagents-manage-bundle-0.5.1.tar.gz
 
 # 离线机
-tar -xzf dagents-manage-bundle-0.3.8.tar.gz
-cd dagents-manage-bundle-0.3.8
+tar -xzf dagents-manage-bundle-0.5.1.tar.gz
+cd dagents-manage-bundle-0.5.1
 cp .env.example .env
 bash scripts/import-image.sh
 bash scripts/restart.sh
@@ -51,18 +53,16 @@ Windows（Docker Desktop）：解压后执行 `scripts\import-image.bat`，再 `
 
 **方式 A — 从 GitHub Release 下载 bundle（推荐）**
 
-例如 `dagents-manage-bundle-0.3.8.tar.gz`。
+例如 `dagents-manage-bundle-0.5.1.tar.gz`。
 
-**方式 B — 仅镜像 tar.gz**
-
-Release 亦附 **`dagents-manage-<version>.tar.gz`**（纯镜像，无脚本）。
-
-**方式 C — 本地构建**
+**方式 B — 本地构建**
 
 ```bash
-VERSION=0.3.8 bash scripts/ci/assemble_manage_bundle.sh
-# 或仅镜像：VERSION=0.3.8 bash scripts/ci/build_manage_docker.sh
+VERSION=0.5.1 bash scripts/ci/assemble_manage_bundle.sh
+# 或仅镜像（不打 Release）：VERSION=0.5.1 bash scripts/ci/build_manage_docker.sh
 ```
+
+镜像 tar 仅作为 bundle 内部产物（`image/`），**不再单独作为 GitHub Release 附件**。
 
 ### 2. 在离线机导入镜像
 
@@ -75,7 +75,7 @@ bash scripts/import-image.sh
 或手动：
 
 ```bash
-docker load -i image/dagents-manage-0.3.8.tar.gz
+docker load -i image/dagents-manage-0.5.1.tar.gz
 docker image ls dagents-manage
 ```
 
@@ -106,7 +106,16 @@ docker compose start
 docker compose logs -f
 ```
 
-数据持久化在 Docker volume **`manage-data`**（Registry + A2A SQLite：`/data/manage.db`）。升级镜像时保留 volume 即可，无需迁移数据库。
+数据持久化在 Docker volume **`dagents-manage-data`**（容器内挂载 `/data`；Compose 内别名 `manage-data`）。升级 bundle 版本**不会**再新建 volume。
+
+| 路径 | 用途 |
+|------|------|
+| `/data/manage.db` | Registry、Skills、案例库等 SQLite |
+| `/data/releases` | 本地助手安装包 |
+| `/data/blobs` | Skills / External Tools / Plugins / 案例附件等内容寻址存储 |
+| `/data/audit.jsonl` | 审计事件追加日志（内存环形缓冲仍保留最近 N 条） |
+
+升级镜像时保留 volume 即可，**不要用** `docker compose down -v`。
 
 ## 环境变量
 
@@ -114,8 +123,12 @@ docker compose logs -f
 |------|------|------|
 | `MANAGE_HOST` | `0.0.0.0` | 监听地址 |
 | `MANAGE_PORT` | `8020` | 监听端口 |
-| `MANAGE_DB_PATH` | `/data/manage.db` | Registry + A2A SQLite（建议挂载 volume） |
-| `MANAGE_A2A_EXPIRE_SWEEP_SECONDS` | `30` | A2A Task TTL 扫描间隔；`0` 关闭后台扫描 |
+| `MANAGE_DB_PATH` | `/data/manage.db` | Registry + Skills SQLite（建议挂载 volume） |
+| `MANAGE_RELEASES_DIR` | `/data/releases` | Release Hub 安装包目录 |
+| `MANAGE_BLOB_DIR` | `/data/blobs` | Blob 根目录（Skills / 外置工具 / 案例附件等） |
+| `MANAGE_AUDIT_PATH` | `/data/audit.jsonl` | 审计 JSONL 追加路径 |
+| `MANAGE_BLOB_MAX_BYTES` | （空=不限制） | 单 Blob 上传上限（字节） |
+| `MANAGE_AUDIT_MAX_ENTRIES` | `500` | 内存审计环形缓冲条数 |
 
 完整列表见 [manage/README.md](../../manage/README.md)。
 
@@ -139,8 +152,6 @@ manage:
     base_url: http://<node-可达地址>:18765
     interval_seconds: 30
     ttl_seconds: 60
-  a2a:
-    enabled: true
 ```
 
-双 Node A2A 场景见 [cases/a2a-manage-docker/README.md](../../cases/a2a-manage-docker/README.md)。
+跨机器协作见工作组文档与 [manage/README.md](../../manage/README.md)。

@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,9 +16,11 @@ import (
 
 func testManageConfig(serverURL, token string) *config.Config {
 	cfg := &config.Config{
-		AgentID:       "ops-01",
-		ExposeToPeers: true,
-		Local:         config.LocalConfig{Endpoint: "http://127.0.0.1:18765"},
+		NodeID: "ops-01",
+		Agent: config.AgentConfig{
+			Name: "展示名",
+		},
+		Local: config.LocalConfig{Endpoint: "http://127.0.0.1:18765"},
 		Manage: config.ManageConfig{
 			Enabled:   true,
 			URL:       serverURL,
@@ -59,9 +59,11 @@ func TestRegistrar_registerAndHeartbeat(t *testing.T) {
 			if payload.AgentID != "ops-01" {
 				t.Fatalf("unexpected register payload: %+v", payload)
 			}
-			if payload.BaseURL != "http://10.0.0.5:18765" {
-				t.Fatalf("base_url = %q", payload.BaseURL)
+			if payload.BaseURL != "http://127.0.0.1:18765" {
+				t.Fatalf("base_url = %q (want local.endpoint)", payload.BaseURL)
 			}
+			// host_ips 由本机网卡自动采集；测试环境可能为空，但字段应存在于 payload
+			_ = payload.HostIPs
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"heartbeat_interval_seconds": 2,
 				"agent":                      map[string]string{"status": "online"},
@@ -151,23 +153,14 @@ func TestRegistrar_reregistersOnHeartbeat404(t *testing.T) {
 	cancel()
 }
 
-func TestRegistrar_buildRegisterPayload_usesAgentCardName(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, AgentCardFileName), []byte(`{
-		"name": "展示名",
-		"description": "Card 描述",
-		"capabilities": ["compliance_review"]
-	}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	oldWD, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWD) })
-
+func TestRegistrar_buildRegisterPayload_usesAgentConfig(t *testing.T) {
 	cfg := testManageConfig("http://127.0.0.1:8020", "")
-	cfg.AgentID = "ops-01"
+	cfg.NodeID = "ops-01"
+	cfg.Agent = config.AgentConfig{
+		Name:         "展示名",
+		Description:  "Card 描述",
+		Capabilities: []string{"compliance_review"},
+	}
 	reg := NewRegistrar(cfg, nil)
 	payload := reg.buildRegisterPayload()
 	if payload.Name != "展示名" {
@@ -178,5 +171,14 @@ func TestRegistrar_buildRegisterPayload_usesAgentCardName(t *testing.T) {
 	}
 	if len(payload.Capabilities) != 1 || payload.Capabilities[0] != "compliance_review" {
 		t.Fatalf("capabilities = %v", payload.Capabilities)
+	}
+}
+
+func TestRegistrar_buildRegisterPayload_hasCard(t *testing.T) {
+	cfg := testManageConfig("http://127.0.0.1:8020", "")
+	reg := NewRegistrar(cfg, nil)
+	payload := reg.buildRegisterPayload()
+	if payload.Card == nil {
+		t.Fatal("expected registration card")
 	}
 }

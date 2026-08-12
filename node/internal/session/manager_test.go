@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func testManager(t *testing.T) *Manager {
 		t.Fatal(err)
 	}
 	pol, _ := policy.LoadFile("")
-	return NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{SkillsEnabled: false, CompressionBlocking: 0}, logx.Discard())
+	return NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{SkillsEnabled: false, CompressionBlocking: 0, MultimodalEnabled: true}, logx.Discard())
 }
 
 func TestCreateAndList(t *testing.T) {
@@ -59,7 +60,7 @@ func TestEnqueueMessageTurn(t *testing.T) {
 	ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 
-	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "hello", nil, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "hello", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,8 +90,44 @@ func TestEnqueueMessageTurn(t *testing.T) {
 func TestEnqueueMessageSessionNotFound(t *testing.T) {
 	mgr := testManager(t)
 	defer mgr.Stop()
-	if _, err := mgr.EnqueueMessage(context.Background(), "missing", "message", "x", nil, ""); err == nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), "missing", "message", "x", nil, nil, ""); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestEnqueueMessageMultimodal(t *testing.T) {
+	mgr := testManager(t)
+	defer mgr.Stop()
+	s, _, _ := mgr.Create("")
+	parts := []llm.ContentPart{{
+		Type:     "image_url",
+		ImageURL: &llm.ImageURLPart{URL: "https://example.com/a.png"},
+	}}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "describe this", parts, nil, ""); err != nil {
+		t.Fatalf("enqueue multimodal: %v", err)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "", nil, nil, ""); err == nil {
+		t.Fatal("expected invalid empty message")
+	}
+}
+
+func TestEnqueueMessageMultimodalDisabled(t *testing.T) {
+	reg, err := tools.NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := policy.LoadFile("")
+	mgr := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, pol, nil, TurnOptions{MultimodalEnabled: false}, logx.Discard())
+	defer mgr.Stop()
+	s, _, _ := mgr.Create("")
+	parts := []llm.ContentPart{{
+		Type:     "image_url",
+		ImageURL: &llm.ImageURLPart{URL: "https://example.com/a.png"},
+	}}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "describe this", parts, nil, ""); err == nil {
+		t.Fatal("expected multimodal_disabled")
+	} else if err.Error() != "multimodal_disabled" {
+		t.Fatalf("err = %q, want multimodal_disabled", err)
 	}
 }
 
@@ -102,7 +139,7 @@ func TestCancelTurn(t *testing.T) {
 	defer mgr.Stop()
 
 	s, _, _ := mgr.Create("")
-	_, _ = mgr.EnqueueMessage(context.Background(), s.ID, "message", "long", nil, "")
+	_, _ = mgr.EnqueueMessage(context.Background(), s.ID, "message", "long", nil, nil, "")
 
 	time.Sleep(30 * time.Millisecond)
 	if !mgr.CancelTurn(s.ID) {
@@ -151,7 +188,7 @@ func TestPersistAfterTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "persist-me", nil, ""); err != nil {
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "persist-me", nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.After(2 * time.Second)
@@ -169,7 +206,6 @@ func TestPersistAfterTurn(t *testing.T) {
 	}
 
 	mgr.Stop()
-	time.Sleep(50 * time.Millisecond)
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +235,7 @@ func TestRestoreSessionFromStore(t *testing.T) {
 	}
 	ctx := context.Background()
 	msgs := []llm.Message{{Role: "user", Content: "old"}, {Role: "assistant", Content: "ok"}}
-	if err := st.Save(ctx, store.Record{SessionID: "sess-restore", AgentID: "agent-1", Messages: msgs}); err != nil {
+	if err := st.Save(ctx, store.Record{AgentID: "sess-restore", NodeID: "agent-1", Messages: msgs}); err != nil {
 		t.Fatal(err)
 	}
 	st.Close()
@@ -220,4 +256,87 @@ func TestRestoreSessionFromStore(t *testing.T) {
 		t.Fatalf("count=%d msgs=%d err=%v", count, len(messages), err)
 	}
 	_ = s
+}
+
+type captureMultimodalLLM struct {
+	lastMessages []llm.Message
+}
+
+func (c *captureMultimodalLLM) StreamChat(_ context.Context, req llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	c.lastMessages = append([]llm.Message(nil), req.Messages...)
+	if handler.OnDelta != nil {
+		handler.OnDelta("ok")
+	}
+	return llm.ChatResult{Content: "ok", FinishReason: "stop"}, nil
+}
+
+func (c *captureMultimodalLLM) CompleteText(_ context.Context, _ llm.CompleteRequest) (string, error) {
+	return "mock summary", nil
+}
+
+func (c *captureMultimodalLLM) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
+}
+
+func TestHumanMessageImageExpandedForLLM(t *testing.T) {
+	fsRoot := t.TempDir()
+	hub := stream.NewHub(32, logx.Discard())
+	reg, err := tools.NewRegistry(fsRoot, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := policy.LoadFile("")
+	capture := &captureMultimodalLLM{}
+	mgr := NewManager("agent-1", hub, capture, reg, pol, nil, TurnOptions{
+		FSRoot:            fsRoot,
+		SkillsEnabled:     false,
+		MultimodalEnabled: true,
+	}, logx.Discard())
+	defer mgr.Stop()
+
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dataURL := "data:image/png;base64,iVBORw0KGgo="
+	parts := []llm.ContentPart{{
+		Type:     "image_url",
+		ImageURL: &llm.ImageURLPart{URL: dataURL},
+	}}
+	if _, err := mgr.EnqueueMessage(context.Background(), s.ID, "message", "这个是什么图片", parts, nil, ""); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	deadline := time.After(3 * time.Second)
+	for capture.lastMessages == nil {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for llm call")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	var userMsg *llm.Message
+	for i := range capture.lastMessages {
+		m := &capture.lastMessages[i]
+		if m.Role == "user" && llm.MessageHasImages(*m) {
+			userMsg = m
+			break
+		}
+	}
+	if userMsg == nil {
+		t.Fatalf("no multimodal user message in llm request: %+v", capture.lastMessages)
+	}
+	gotURL := ""
+	for _, part := range userMsg.ContentParts {
+		if part.Type == "image_url" && part.ImageURL != nil {
+			gotURL = part.ImageURL.URL
+			break
+		}
+	}
+	if !strings.HasPrefix(gotURL, "data:image/png;base64,") {
+		t.Fatalf("expected expanded data url, got %q parts=%+v", gotURL, userMsg.ContentParts)
+	}
 }

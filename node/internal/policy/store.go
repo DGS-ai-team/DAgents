@@ -14,14 +14,16 @@ const protectedToolDeny = "ask_user_information"
 // ToolPolicyEntry 为工具策略条目（API/快照视图）。
 type ToolPolicyEntry struct {
 	Name       string   `json:"name"`
-	Decision   Decision `json:"decision"`
+	Mode       string   `json:"mode"`
+	Decision   Decision `json:"decision,omitempty"`
 	Configured bool     `json:"configured"`
 }
 
 // ShellPolicyEntry 为 shell 命令策略条目。
 type ShellPolicyEntry struct {
 	Command    string   `json:"command"`
-	Decision   Decision `json:"decision"`
+	Mode       string   `json:"mode"`
+	Decision   Decision `json:"decision,omitempty"`
 	Configured bool     `json:"configured"`
 }
 
@@ -31,16 +33,23 @@ type PlatformInfo struct {
 	DefaultShell string `json:"default_shell"`
 }
 
-// Snapshot 为 GET /v1/policy 返回的结构化视图。
+// Snapshot 为 GET policy 返回的结构化视图。
 type Snapshot struct {
-	PolicyDir string                        `json:"policy_dir"`
+	PolicyDir string                        `json:"policy_dir,omitempty"`
+	AgentID   string                        `json:"agent_id,omitempty"`
+	Source    string                        `json:"source,omitempty"` // sqlite | file | memory
 	Platform  PlatformInfo                  `json:"platform"`
 	Tools     []ToolPolicyEntry             `json:"tools"`
 	Shell     map[string][]ShellPolicyEntry `json:"shell"`
 }
 
-// LoadSnapshot 从 policy 目录加载结构化快照；toolNames 为 registry 已知工具名。
+// LoadSnapshot 从 Engine 构造结构化快照；toolNames 为 registry 已知工具名。
 func LoadSnapshot(policyDir string, engine *Engine, toolNames []string) (*Snapshot, error) {
+	return LoadSnapshotForAgent("", policyDir, "file", engine, toolNames)
+}
+
+// LoadSnapshotForAgent 带 agent 作用域元数据的快照。
+func LoadSnapshotForAgent(agentID, policyDir, source string, engine *Engine, toolNames []string) (*Snapshot, error) {
 	policyDir = strings.TrimSpace(policyDir)
 	if engine == nil {
 		return nil, fmt.Errorf("policy engine is nil")
@@ -63,9 +72,11 @@ func LoadSnapshot(policyDir string, engine *Engine, toolNames []string) (*Snapsh
 
 	tools := make([]ToolPolicyEntry, 0, len(names))
 	for _, name := range names {
+		mode := engine.toolMode(name)
 		tools = append(tools, ToolPolicyEntry{
 			Name:       name,
-			Decision:   engine.EffectiveToolDecision(name),
+			Mode:       string(mode),
+			Decision:   ModeToDecision(mode),
 			Configured: engine.ToolConfigured(name),
 		})
 	}
@@ -78,6 +89,8 @@ func LoadSnapshot(policyDir string, engine *Engine, toolNames []string) (*Snapsh
 	defaultShell, _ := ResolveShellType(nil)
 	return &Snapshot{
 		PolicyDir: policyDir,
+		AgentID:   strings.TrimSpace(agentID),
+		Source:    strings.TrimSpace(source),
 		Platform: PlatformInfo{
 			GOOS:         defaultShellPlatformGOOS(),
 			DefaultShell: string(defaultShell),
@@ -103,9 +116,11 @@ func shellEntriesFor(engine *Engine, shellType ShellType) []ShellPolicyEntry {
 	sort.Strings(commands)
 	out := make([]ShellPolicyEntry, 0, len(commands))
 	for _, cmd := range commands {
+		mode := mapping[cmd]
 		out = append(out, ShellPolicyEntry{
 			Command:    cmd,
-			Decision:   engine.EffectiveShellDecision(shellType, cmd),
+			Mode:       string(mode),
+			Decision:   ModeToDecision(mode),
 			Configured: true,
 		})
 	}
@@ -114,14 +129,30 @@ func shellEntriesFor(engine *Engine, shellType ShellType) []ShellPolicyEntry {
 
 // ToolUpdate 为 PUT /v1/policy/tools 的单项更新。
 type ToolUpdate struct {
-	Name     string   `json:"name"`
-	Decision Decision `json:"decision"`
+	Name     string       `json:"name"`
+	Mode     ApprovalMode `json:"mode,omitempty"`
+	Decision Decision     `json:"decision,omitempty"`
 }
 
 // ShellUpdate 为 PUT /v1/policy/shell/{type} 的单项更新。
 type ShellUpdate struct {
-	Command  string   `json:"command"`
-	Decision Decision `json:"decision"`
+	Command  string       `json:"command"`
+	Mode     ApprovalMode `json:"mode,omitempty"`
+	Decision Decision     `json:"decision,omitempty"`
+}
+
+func resolveApprovalMode(mode ApprovalMode, decision Decision) (ApprovalMode, error) {
+	if strings.TrimSpace(string(mode)) != "" {
+		parsed, err := ParseApprovalMode(string(mode))
+		if err != nil {
+			return "", err
+		}
+		return parsed, nil
+	}
+	if strings.TrimSpace(string(decision)) != "" {
+		return DecisionToMode(decision)
+	}
+	return "", fmt.Errorf("mode or decision is required")
 }
 
 // ApplyToolUpdates 合并工具策略并原子写盘。
@@ -136,7 +167,7 @@ func ApplyToolUpdates(policyDir string, updates []ToolUpdate) error {
 		if name == "" {
 			return fmt.Errorf("tool name is required")
 		}
-		mode, err := DecisionToMode(upd.Decision)
+		mode, err := resolveApprovalMode(upd.Mode, upd.Decision)
 		if err != nil {
 			return err
 		}
@@ -153,6 +184,11 @@ func ApplyToolUpdates(policyDir string, updates []ToolUpdate) error {
 
 // ApplyShellUpdates 合并 shell 命令策略并原子写盘。
 func ApplyShellUpdates(policyDir string, shellType ShellType, updates []ShellUpdate) error {
+	return ApplyShellPolicyChanges(policyDir, shellType, updates, nil)
+}
+
+// ApplyShellPolicyChanges 更新或删除 shell 命令策略条目；未列出的命令运行时默认需审批。
+func ApplyShellPolicyChanges(policyDir string, shellType ShellType, updates []ShellUpdate, deletes []string) error {
 	shellFile, err := shellPolicyPath(policyDir, shellType)
 	if err != nil {
 		return err
@@ -166,11 +202,21 @@ func ApplyShellUpdates(policyDir string, shellType ShellType, updates []ShellUpd
 		if cmd == "" {
 			return fmt.Errorf("command is required")
 		}
-		mode, err := DecisionToMode(upd.Decision)
+		mode, err := resolveApprovalMode(upd.Mode, upd.Decision)
 		if err != nil {
 			return err
 		}
 		mapping[cmd] = mode
+	}
+	for _, raw := range deletes {
+		cmd := normalizeShellCommand(raw)
+		if cmd == "" {
+			return fmt.Errorf("command is required")
+		}
+		delete(mapping, cmd)
+	}
+	if len(updates) == 0 && len(deletes) == 0 {
+		return fmt.Errorf("updates or deletes is required")
 	}
 	if err := backupPolicyFile(shellFile); err != nil {
 		return err

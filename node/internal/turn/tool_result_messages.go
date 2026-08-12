@@ -94,7 +94,7 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, history []llm.Me
 			ToolName:   toolName,
 			RawResult:  resultBody,
 		})
-		out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhaseToolAfterEach, hc)
+		out, err := o.runPhase(context.Background(), hooks.PhaseToolAfterEach, hc, sessionID, &history, "")
 		if err == nil {
 			split := hooks.ToolAfterEachOutputFrom(out)
 			fullForClient = split.ForClient
@@ -119,11 +119,7 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, history []llm.Me
 				},
 			}},
 		},
-		ToolMessage: llm.Message{
-			Role:       "tool",
-			ToolCallID: toolCallID,
-			Content:    toolText,
-		},
+		ToolMessage: llm.ToolResultMessage(toolCallID, toolName, toolText),
 		ForClientContent:       fullForClient,
 		ToolName:               toolName,
 		ToolCallID:             toolCallID,
@@ -163,7 +159,7 @@ func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw st
 		RawArguments: tc.Function.Arguments,
 		RawResult:    raw,
 	})
-	out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhaseToolAfterEach, hc)
+	out, err := o.runPhase(context.Background(), hooks.PhaseToolAfterEach, hc, sessionID, nil, "")
 	if err != nil {
 		return raw, raw, ""
 	}

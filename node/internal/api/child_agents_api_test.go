@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,47 +21,57 @@ import (
 
 func testConfigChildAgentsEnabled(t *testing.T) *config.Config {
 	t.Helper()
-	cfg := testConfig(t)
+	// 独立目录：session 后台写盘时，避免 testing.TempDir RemoveAll 竞态失败。
+	root, err := os.MkdirTemp("", "dagents-child-api-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	cfg := &config.Config{
+		NodeID: "ops-linux-01",
+		Agent: config.AgentConfig{
+			Role: "compliance",
+		},
+		FSRoot: filepath.Join(root, "runtime"),
+		Compression: config.CompressionConfig{
+			SilentTriggerTokens:   80000,
+			BlockingTriggerTokens: 100000,
+		},
+	}
+	cfg.ApplyDefaults()
 	cfg.ChildAgents.Enabled = true
 	return cfg
 }
 
-func newChildAgentTestServer(t *testing.T, llmClient llm.Client) *httptest.Server {
+func newChildAgentTestServer(t *testing.T, llmClient llm.Client) (*Server, *httptest.Server) {
 	t.Helper()
 	reg, err := tools.NewRegistry(t.TempDir(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(NewServer(testConfigChildAgentsEnabled(t), nil,
-		WithLLM(llmClient), WithTools(reg), WithSkipStore()).Handler())
-}
-
-func createSession(t *testing.T, baseURL string) string {
-	t.Helper()
-	resp, err := http.Post(baseURL+"/v1/sessions", "application/json", bytes.NewReader([]byte(`{}`)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	var created createSessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatal(err)
-	}
-	if created.SessionID == "" {
-		t.Fatal("empty session_id")
-	}
-	return created.SessionID
+	srv := NewServer(testConfigChildAgentsEnabled(t), nil,
+		WithLLM(llmClient), WithTools(reg), WithSkipStore())
+	ts := httptest.NewServer(srv.Handler())
+	// 须在 t.TempDir 清理前停止 session，避免后台仍写 prompt_context 导致 RemoveAll 失败。
+	t.Cleanup(func() {
+		ts.Close()
+		if srv.sessions != nil {
+			srv.sessions.Stop()
+		}
+		time.Sleep(50 * time.Millisecond)
+	})
+	return srv, ts
 }
 
 // TestChildAgentMockLLME2E 经 HTTP + mock LLM 走通 create(wait=true) 全链路。
 func TestChildAgentMockLLME2E(t *testing.T) {
 	mock := &llm.ChildAgentFlowMock{FinalReply: "HTTP 联调完成"}
-	ts := newChildAgentTestServer(t, mock)
+	srv, ts := newChildAgentTestServer(t, mock)
 	defer ts.Close()
 
-	parentID := createSession(t, ts.URL)
+	parentID := createTestRuntime(t, srv)
 
-	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+parentID, nil)
+	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?agent_id="+parentID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +81,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	}
 	defer streamResp.Body.Close()
 
-	msgBody := `{"session_id":"` + parentID + `","request_type":"message","content":"请委派子 Agent 检查 README"}`
+	msgBody := `{"agent_id":"` + parentID + `","request_type":"message","content":"请委派子 Agent 检查 README"}`
 	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +128,7 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 		switch envelope.Type {
 		case "temporary_agent_created":
 			gotCreated = true
-			childID, _ = envelope.Data["child_session_id"].(string)
+			childID, _ = envelope.Data["child_agent_id"].(string)
 		case "temporary_agent_completed":
 			gotCompleted = true
 		case "assistant":
@@ -129,14 +141,14 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	}
 
 	if childID == "" {
-		t.Fatal("missing child_session_id")
+		t.Fatal("missing child_agent_id")
 	}
 	if !strings.Contains(assistant.String(), "HTTP 联调完成") {
 		t.Fatalf("unexpected assistant: %q", assistant.String())
 	}
 
 	// 完成后列表应为空（记录已回收）
-	listResp, err := http.Get(ts.URL + "/v1/sessions/" + parentID + "/child-agents")
+	listResp, err := http.Get(ts.URL + "/v1/agents/" + parentID + "/child-agents")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,14 +162,44 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	}
 }
 
+func TestChildAgentHTTPJSONHardCut(t *testing.T) {
+	listRaw, err := json.Marshal(childAgentListResponse{
+		ParentAgentID: "agt-1",
+		Items: []sessionChildAgentViewJSON{{
+			ChildAgentID: "child-abc",
+			Status:       "active",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelRaw, err := json.Marshal(childAgentCancelResponse{
+		ChildAgentID:   "child-abc",
+		Status:         "cancelled",
+		PreviousStatus: "active",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range [][]byte{listRaw, cancelRaw} {
+		s := string(raw)
+		if strings.Contains(s, "session_id") {
+			t.Fatalf("hard-cut JSON must not include session_id fields: %s", s)
+		}
+		if !strings.Contains(s, "child_agent_id") {
+			t.Fatalf("expected child_agent_id in %s", s)
+		}
+	}
+}
+
 // TestChildAgentHTTPCancel 经 HTTP 取消进行中的子 Agent。
 func TestChildAgentHTTPCancel(t *testing.T) {
-	ts := newChildAgentTestServer(t, &sessionDelayedEchoMock{delay: 3 * time.Second})
+	srv, ts := newChildAgentTestServer(t, &sessionDelayedEchoMock{delay: 3 * time.Second})
 	defer ts.Close()
 
-	parentID := createSession(t, ts.URL)
+	parentID := createTestRuntime(t, srv)
 
-	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?session_id="+parentID, nil)
+	streamReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/streams?agent_id="+parentID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +209,7 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 	}
 	defer streamResp.Body.Close()
 
-	msgBody := `{"session_id":"` + parentID + `","request_type":"message","content":"启动异步子任务"}`
+	msgBody := `{"agent_id":"` + parentID + `","request_type":"message","content":"启动异步子任务"}`
 	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
@@ -196,13 +238,13 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 			Data map[string]any `json:"data"`
 		}
 		if json.Unmarshal([]byte(payload), &envelope) == nil && envelope.Type == "temporary_agent_created" {
-			childID, _ = envelope.Data["child_session_id"].(string)
+			childID, _ = envelope.Data["child_agent_id"].(string)
 		}
 	}
 
 	cancelBody := bytes.NewReader([]byte(`{"reason":"http test cancel"}`))
 	req, err := http.NewRequest(http.MethodPost,
-		ts.URL+"/v1/sessions/"+parentID+"/child-agents/"+childID+"/cancel",
+		ts.URL+"/v1/agents/"+parentID+"/child-agents/"+childID+"/cancel",
 		cancelBody)
 	if err != nil {
 		t.Fatal(err)
@@ -224,6 +266,9 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 	if cancelled.Status != "cancelled" {
 		t.Fatalf("unexpected status: %+v", cancelled)
 	}
+
+	// 父 turn / 子 cancel 可能仍在收尾写盘；等 idle 后再让 t.TempDir 清理。
+	waitSessionIdleDeadline(t, srv, parentID, 8*time.Second)
 }
 
 // sessionDelayedEchoMock 供 api 包 cancel 测试使用（避免 import cycle）。

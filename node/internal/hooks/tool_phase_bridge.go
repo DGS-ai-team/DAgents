@@ -170,6 +170,30 @@ func SystemPromptFrom(hc Context, fallback string) string {
 	return fallback
 }
 
+// BuildLLMBeforeCallContext 构造 llm.before_call 的 RunPhase 上下文。
+func BuildLLMBeforeCallContext(sessionID, agentID string, messages []llm.Message, systemPrompt string) *Context {
+	return &Context{
+		Phase:        PhaseLLMBeforeCall,
+		SessionID:    sessionID,
+		AgentID:      agentID,
+		SystemPrompt: systemPrompt,
+		LLMBeforeCall: &LLMCallPayload{
+			Messages: append([]llm.Message(nil), messages...),
+		},
+		PromptBuild: &PromptBuildPayload{
+			SystemPrompt: systemPrompt,
+		},
+	}
+}
+
+// MessagesFromLLMBeforeCall 从 RunPhase 返回的 Context 读取 messages；空则回退 fallback。
+func MessagesFromLLMBeforeCall(hc Context, fallback []llm.Message) []llm.Message {
+	if hc.LLMBeforeCall != nil && len(hc.LLMBeforeCall.Messages) > 0 {
+		return append([]llm.Message(nil), hc.LLMBeforeCall.Messages...)
+	}
+	return append([]llm.Message(nil), fallback...)
+}
+
 // BuildTurnDoneContext 构造 turn.done 的 RunPhase 上下文。
 func BuildTurnDoneContext(sessionID, agentID, finishReason string) *Context {
 	return &Context{
@@ -219,6 +243,7 @@ func ApplyLLMAfterCallToResult(hc Context, result LLMAfterCallInput) LLMAfterCal
 func runToolBeforeEachHook(
 	ctx context.Context,
 	hc *Context,
+	host Host,
 	name string,
 	fn func(context.Context, ToolBeforeEachInput, *ToolBeforeEachResult) error,
 ) (Result, error) {
@@ -236,6 +261,7 @@ func runToolBeforeEachHook(
 func runToolAfterEachHook(
 	ctx context.Context,
 	hc *Context,
+	host Host,
 	name string,
 	fn func(context.Context, ToolAfterEachInput, *ToolAfterEachOutput) error,
 ) (Result, error) {
@@ -270,6 +296,12 @@ func registerBuiltinToolBeforeEachHooks(r *Registry, ph *PolicyToolHook, ah *Age
 		o.Priority = toolBeforeEachPriorityDuplicate
 		r.RegisterPhaseHook(dh, o)
 	}
+	guard := NewLoadedSkillFileGuardHook()
+	if guard != nil {
+		o := opts
+		o.Priority = loadedSkillFileGuardPriority
+		r.RegisterPhaseHook(guard, o)
+	}
 }
 
 func registerBuiltinToolAfterEachHooks(r *Registry, rh *ToolResultPackageHook, aah *AgentOwnedFileAfterHook) {
@@ -287,4 +319,17 @@ func registerBuiltinToolAfterEachHooks(r *Registry, rh *ToolResultPackageHook, a
 		o.Priority = toolAfterEachPriorityAgentOwned
 		r.RegisterPhaseHook(aah, o)
 	}
+}
+
+const injectTodayDatePriority = 50
+
+func registerBuiltinInjectTodayDateHook(r *Registry, cfg InjectTodayDateConfig) {
+	if r == nil {
+		return
+	}
+	r.RegisterPhaseHook(NewInjectTodayDateHook(cfg), RegisterOpts{
+		Priority: injectTodayDatePriority,
+		Timeout:  DefaultInlineHookTimeout,
+		OnError:  OnErrorContinue,
+	})
 }

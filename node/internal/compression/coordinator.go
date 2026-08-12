@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
@@ -87,6 +88,7 @@ type Coordinator struct {
 	client                llm.Client
 	silentTriggerTokens   int
 	blockingTriggerTokens int
+	rawMessageHistoryEnabled bool
 
 	mu                sync.Mutex
 	sessionTasks      map[string]*compressionTask
@@ -113,8 +115,8 @@ func (c *Coordinator) Enabled() bool {
 		(c.silentTriggerTokens > 0 || c.blockingTriggerTokens > 0)
 }
 
-// MaybeHandle 在每条 message 入口处理压缩：应用已就绪摘要、触发 silent/blocking、再次尝试应用。
-
+// MaybeHandle 在每条 message 入口处理压缩；返回本次是否成功写回了一条压缩摘要。
+//
 // 逻辑：
 // 1. 回收已完成的 silent 任务；
 // 2. 尝试写回 readyCompressions（含指纹校验）；
@@ -130,12 +132,15 @@ func (c *Coordinator) MaybeHandle(
 	hub *stream.Hub,
 	messages *[]llm.Message,
 	prefix SidecarPrefix,
-) {
+) bool {
 	if !c.Enabled() || messages == nil {
-		return
+		return false
 	}
+	applied := false
 	c.reapFinishedTask(sessionID)
-	c.applyReadyCompression(sessionID, agentID, hub, messages)
+	if out := c.applyReadyCompression(sessionID, agentID, hub, messages); out.status == "applied" {
+		applied = true
+	}
 
 	decision := evaluateCompression(*messages, c.silentTriggerTokens, c.blockingTriggerTokens)
 	hasRunning := c.hasRunningTask(sessionID)
@@ -158,7 +163,10 @@ func (c *Coordinator) MaybeHandle(
 	}
 
 	c.reapFinishedTask(sessionID)
-	c.applyReadyCompression(sessionID, agentID, hub, messages)
+	if out := c.applyReadyCompression(sessionID, agentID, hub, messages); out.status == "applied" {
+		applied = true
+	}
+	return applied
 }
 
 // ForceBlocking 手动执行一次阻塞压缩：忽略 token 阈值，同步 LLM 摘要并立即应用。
@@ -364,6 +372,7 @@ func (c *Coordinator) runCompressionFlow(
 		})
 		return false
 	}
+	summary = FinalizeCompressionSummary(summary, sessionID, c.rawMessageHistoryEnabled, time.Now())
 	c.mu.Lock()
 	c.readyCompressions[sessionID] = readyCompression{
 		End:                    plan.End,
@@ -456,14 +465,14 @@ func (c *Coordinator) publishCompressionEvent(
 	for k, v := range payload {
 		data[k] = v
 	}
-	hub.Publish(sessionID, agentID, compressionEventType(triggerLevel), data)
+	hub.Publish(sessionID, compressionEventType(triggerLevel), data)
 }
 
 func (c *Coordinator) emitBlockingFailure(sessionID, agentID string, hub *stream.Hub) {
 	if hub == nil {
 		return
 	}
-	hub.Publish(sessionID, agentID, "error", map[string]any{
+	hub.Publish(sessionID, "error", map[string]any{
 		"message":     "上下文阻塞压缩失败，已继续使用原始上下文。",
 		"recoverable": true,
 		"stage":       "summary_compression",

@@ -1,7 +1,9 @@
 # DAgents 项目手册
 
-**版本**：与代码同步（当前发布 **v0.5.0**）  
-**定位**：本仓库**唯一**技术文档入口——由核心到外围，写到**能跟读源码**的深度。原 `docs/architecture/`、`docs/design/` 等分散文档已**收敛**至本手册；旧路径保留跳转桩，正文以本目录为准。
+**版本**：与代码同步（当前发布 **v0.9.8**）
+**定位**：本仓库**唯一**技术文档入口——架构、接口、配置、联调与源码导航。根目录 [README](../../README.md) 面向「能做什么」的产品介绍；具体怎么配、怎么测、契约是什么，以本手册为准。
+
+> **架构要点**：人机入口为 Node 内嵌 **Web UI**（`/ui/`）；跨机协作走 **Workgroup**；工具边界靠工具组、审批策略与工作区路径（无独立沙箱进程）。产品概览见根 [README](../../README.md)，工作组见 [07-Workgroup协作](./07-Workgroup协作.md)。
 
 ---
 
@@ -9,10 +11,12 @@
 
 | 你是谁 | 推荐路径 | 预计时间 |
 |--------|----------|----------|
-| **新人 / 联调** | [00-导读](./00-导读.md) → [01-愿景与架构](./01-愿景与架构.md) → [03-API与Client](./03-API与Client.md) §3.6 快速上手 | 1–2 小时 |
-| **改 Node 内部** | [02-Agent-Node-核心](./02-Agent-Node-核心.md) §1→§4 → `node/internal/*/REFERENCE.md` | 半天 |
-| **做 A2A / Manage** | [01](./01-愿景与架构.md) §1.2 → [05-Manage与A2A](./05-Manage与A2A.md) → [cases/a2a-manage-docker](../../cases/a2a-manage-docker/README.md) | 2–4 小时 |
-| **发布 / 运维** | [03](./03-API与Client.md) §3.5 → [06-运维与案例](./06-运维与案例.md) | 1 小时 |
+| **先看产品再动手** | 根 [README](../../README.md) → [00-导读](./00-导读.md) → [07-Workgroup协作](./07-Workgroup协作.md)（若要用协作） | 30–60 分钟 |
+| **新人 / 联调** | [00-导读](./00-导读.md) → [01-愿景与架构](./01-愿景与架构.md) → [附录/配置项参考](./附录/配置项参考.md) | 1–2 小时 |
+| **用工作组** | [07-Workgroup协作](./07-Workgroup协作.md) → [workgroup 产品规范](../design/workgroup-and-node-gateway.md) | 1–2 小时 |
+| **改 Node 内部** | [02-Agent-Node-核心](./02-Agent-Node-核心.md) → `node/internal/*/REFERENCE.md` | 半天 |
+| **做 Manage / 契约** | [05-Manage与A2A](./05-Manage与A2A.md) → [workgroup-d05-contracts](../design/workgroup-d05-contracts.md) | 2–4 小时 |
+| **发布 / 运维** | [06-运维与案例](./06-运维与案例.md) → [v0.9.1 清单](../design/v0.9.1-smoke-checklist.md) | 1 小时 |
 | **查工具 / 配置 / 事件** | [附录](./附录/) | 按需 |
 
 ---
@@ -23,91 +27,63 @@
 
 | 章 | 文件 | 内容 |
 |----|------|------|
-| 0 | [00-导读.md](./00-导读.md) | 手册约定、术语速览、四条读者路径、与源码目录对照 |
+| 0 | [00-导读.md](./00-导读.md) | 手册约定、术语速览、读者路径 |
 
 ### Part I · 愿景与架构
 
 | 章 | 文件 | 内容 |
 |----|------|------|
-| 1 | [01-愿景与架构.md](./01-愿景与架构.md) | 项目定位、三组件模型、仓库拓扑、演进与 ADR、实施状态 |
+| 1 | [01-愿景与架构.md](./01-愿景与架构.md) | 产品定位、仓库拓扑、架构决策 |
 
 ### Part II · Agent Node 核心
 
 | 章 | 文件 | 内容 |
 |----|------|------|
-| 2 | [02-Agent-Node-核心.md](./02-Agent-Node-核心.md) | 单次 LLM → LLM loop → 队列与消息来源 → session 隔离 |
+| 2 | [02-Agent-Node-核心.md](./02-Agent-Node-核心.md) | LLM loop、队列、Agent 隔离 |
 
 ### Part III · API 与 Client
 
 | 章 | 文件 | 内容 |
 |----|------|------|
-| 3 | [03-API与Client.md](./03-API与Client.md) | HTTP/SSE 契约、HITL resume、多 Client（终端 + `/ui/`）、转录展示、配置与同包发布 |
+| 3 | [03-API与Client.md](./03-API与Client.md) | HTTP/SSE、HITL、Web UI、配置 |
 
 ### Part IV · 能力与策略
 
 | 章 | 文件 | 内容 |
 |----|------|------|
-| 4 | [04-能力与策略.md](./04-能力与策略.md) | 工具 registry、policy、skills、triggers、子 Agent、压缩、LLM 适配 |
+| 4 | [04-能力与策略.md](./04-能力与策略.md) | 工具、policy、skills、triggers、压缩 |
 
-### Part V · Manage 与 A2A
+### Part V · Manage 与协作
 
 | 章 | 文件 | 内容 |
 |----|------|------|
-| 5 | [05-Manage与A2A.md](./05-Manage与A2A.md) | 注册、Agent Card、A2A Task/inbox、ComplianceExecutor、Caller HITL 中继 |
+| 5 | [05-Manage与A2A.md](./05-Manage与A2A.md) | Registry、控制面 |
+| 7 | [07-Workgroup协作.md](./07-Workgroup协作.md) | **工作组用户向说明（预览）** |
 
 ### Part VI · 运维与案例
 
 | 章 | 文件 | 内容 |
 |----|------|------|
-| 6 | [06-运维与案例.md](./06-运维与案例.md) | 开发栈、打包安装、OS 兼容、案例索引、安全与观测 |
+| 6 | [06-运维与案例.md](./06-运维与案例.md) | 开发栈、打包、案例、安全 |
 
 ### 附录
 
 | 文件 | 内容 |
 |------|------|
-| [附录/术语表.md](./附录/术语表.md) | 全书术语定义 |
-| [附录/旧文档迁移对照表.md](./附录/旧文档迁移对照表.md) | 原 `docs/**` 路径 → 本手册章节 |
-| [附录/内置工具参考.md](./附录/内置工具参考.md) | 内置工具全量参考（自原 `built-in-tools-reference.md` 迁入） |
-| [附录/SSE事件速查.md](./附录/SSE事件速查.md) | SSE 事件类型与字段 |
-| [附录/配置项参考.md](./附录/配置项参考.md) | YAML / 环境变量 |
-| [附录/重大设计变更实录.md](./附录/重大设计变更实录.md) | 架构级优化背景与落地 |
-| [附录/路线图与远期方案.md](./附录/路线图与远期方案.md) | 未完全落地设计索引 |
-
----
-
-## 章节结构约定
-
-每一章（除附录）统一四段：
-
-1. **本章回答什么问题** — 读完后应能做什么  
-2. **核心概念** — 架构图 / 表格 / 时序  
-3. **源码与配置索引** — 概念 → 目录 / 文件 / 配置键  
-4. **延伸阅读** — 模块 `REFERENCE.md`、案例、测试
-
----
-
-## 维护约定
-
-| 变更类型 | 更新位置 |
-|----------|----------|
-| 架构边界 / ADR | [01-愿景与架构](./01-愿景与架构.md) §1.4 |
-| Node 内部协作 | [02-Agent-Node-核心](./02-Agent-Node-核心.md) + `node/internal/*/README.md` |
-| HTTP/SSE 契约 | [03-API与Client](./03-API与Client.md) + `node/internal/api/` |
-| 新内置工具 | [附录/内置工具参考](./附录/内置工具参考.md) + `node/internal/tools/` |
-| Manage / A2A | [05-Manage与A2A](./05-Manage与A2A.md) |
-| 版本发布 | 根 [CHANGELOG.md](../../CHANGELOG.md)；手册首页版本号 |
-
-**不要**在 `docs/architecture/`、`docs/design/` 新增正文；仅保留跳转桩。模块级 API 细节仍与代码同目录维护 `REFERENCE.md`。
+| [附录/术语表.md](./附录/术语表.md) | 术语 |
+| [附录/内置工具参考.md](./附录/内置工具参考.md) | 内置工具 |
+| [附录/SSE事件速查.md](./附录/SSE事件速查.md) | SSE |
+| [附录/配置项参考.md](./附录/配置项参考.md) | 配置 |
+| [附录/Prometheus观测.md](./附录/Prometheus观测.md) | Manage `/metrics` |
+| [附录/路线图与远期方案.md](./附录/路线图与远期方案.md) | 远期索引 |
 
 ---
 
 ## 相关入口
 
-| 路径 | 说明 |
+| 文档 | 说明 |
 |------|------|
-| [../../README.md](../../README.md) | 项目概览、快速开始、徽章 |
-| [../../node/README.md](../../node/README.md) | Go Agent Node 模块索引 |
-| [../../client/README.md](../../client/README.md) | Go Client |
-| [../../app/cli/README.md](../../app/cli/README.md) | Python Textual TUI |
-| [../../manage/README.md](../../manage/README.md) | Manage 控制面 |
-| [../../cases/README.md](../../cases/README.md) | 集成案例 |
+| [../README.md](../README.md)（docs 地图） | handbook / design / architecture 索引 |
+| [../design/v0.9.1-smoke-checklist.md](../design/v0.9.1-smoke-checklist.md) | v0.9.1 预览验收 |
+| [AGENTS.md](../../AGENTS.md) | Cloud / 代理环境启动注意 |
+| [CHANGELOG.md](../../CHANGELOG.md) | 版本记录 |

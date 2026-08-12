@@ -62,7 +62,7 @@ flowchart TB
 | `message` / 空 | `handleHumanMessage` | 新 user 消息；若有 pending HITL 先 `InterruptPending`；步首 Apply 缓冲 |
 | `tool_result` | `handleToolResult` | 工具批执行后的续跑（`RunToolMessageTurn`） |
 | `async_tool_result` | `handleSideEffectProduceAsync` | 后台 job **Produce**（SSE + 缓冲，不 inline 改 history） |
-| `trigger_message` / `a2a_inbox_message` | `handleSideEffectProduceExternal` | trigger / A2A inbox **Produce** |
+| `trigger_message` | `handleSideEffectProduceExternal` | trigger **Produce** |
 | `side_effect_continue` | `handleSideEffectContinue` | 步首 Apply 缓冲 + `ContinueAfterSideEffects` |
 | `resume` | `handleResume` | HITL 审批 / `ask_user_information` 恢复 |
 
@@ -85,6 +85,7 @@ flowchart TB
 | `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与 prompt 元数据 |
 | `RuntimeDir` | `promptcontext.Reader` 根目录 |
 | `CompressionSilent` / `CompressionBlocking` | 压缩阈值 |
+| `IdleAutoCompressSeconds` / `IdleAutoCompressPollSeconds` / `IdleAutoCompressMinTokens` | idle 维护：无动作自动压缩 + **卸内存**（见 `idle_auto_compress.go`、`release.go`） |
 | `RawMessageHistoryEnabled` / `RawMessageHistoryDir` | 原始 message journal |
 
 ---
@@ -94,6 +95,8 @@ flowchart TB
 | 文件 | 说明 |
 |------|------|
 | `manager.go` | `Manager`、`TurnOptions`、会话 CRUD、入队、skills、上下文 API |
+| `idle_auto_compress.go` | idle 维护扫描：可选压缩 + `Release` 卸内存（F-NM2–NM5） |
+| `release.go` | `Manager.Release`：persist → stop → 移出 map，保留 SQLite（F-NM1） |
 | `runtime.go` | `runtime` 结构体、构造、`consumeLoop`、human/tool/resume 处理、持久化 |
 | `runtime_turn.go` | `runTurnStep` 单步 turn 脚手架 |
 | `runtime_child.go` | `newChildRuntime`、子 session 元数据、`tryCompleteChildIfIdle` |

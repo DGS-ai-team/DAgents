@@ -38,11 +38,50 @@ func TestBuildMergedCallbackBatch_asyncAndTrigger(t *testing.T) {
 	if plan.Mode != "merged_get_callback" {
 		t.Fatalf("mode = %q", plan.Mode)
 	}
-	if len(plan.Messages) != 3 {
-		t.Fatalf("bridge merge len = %d, want user+assistant+tool", len(plan.Messages))
+	if len(plan.Messages) != 1 {
+		t.Fatalf("bridge merge len = %d, want single bridge user", len(plan.Messages))
 	}
 	if plan.Messages[0].Role != "user" {
-		t.Fatalf("first role = %q", plan.Messages[0].Role)
+		t.Fatalf("bridge merge role = %q", plan.Messages[0].Role)
+	}
+	if !strings.Contains(plan.Messages[0].Content, "callbacks") {
+		t.Fatalf("bridge merge content = %q", plan.Messages[0].Content)
+	}
+	var payload struct {
+		Callbacks []map[string]any `json:"callbacks"`
+	}
+	if err := json.Unmarshal([]byte(plan.Messages[0].Content[strings.Index(plan.Messages[0].Content, "{"):]), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Callbacks) != 2 {
+		t.Fatalf("callbacks = %d, want 2", len(payload.Callbacks))
+	}
+	if payload.Callbacks[0]["kind"] != "async" || payload.Callbacks[1]["kind"] != "external_message" {
+		t.Fatalf("kinds = %v", []any{payload.Callbacks[0]["kind"], payload.Callbacks[1]["kind"]})
+	}
+	if payload.Callbacks[1]["trigger_id"] != "trig-1" {
+		t.Fatalf("trigger_id = %v", payload.Callbacks[1]["trigger_id"])
+	}
+}
+
+func TestBuildMergedCallbackBatch_toolLoopStillAssistantTool(t *testing.T) {
+	hub := stream.NewHub(4, logx.Discard())
+	orch := testOrchestrator(t, hub, &llm.MockClient{})
+
+	history := []llm.Message{
+		{Role: "user", Content: "run bg"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.ToolCallFunction{Name: "bash"}}}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+	async1 := queue.AsyncToolResultPayload{JobID: "job-1", ToolName: "bash_run", Status: "succeeded", ResultText: "done"}
+	async2 := queue.AsyncToolResultPayload{JobID: "job-2", ToolName: "bash_run", Status: "failed", ErrorText: "exit 1"}
+	entries := []SideEffectBatchEntry{
+		{Kind: SideEffectAsync, Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", history, async1, "", ""), Async: async1},
+		{Kind: SideEffectAsync, Built: orch.BuildSideEffectMessages(SideEffectAsync, "s", history, async2, "", ""), Async: async2},
+	}
+	plan := BuildMergedCallbackBatch(entries, history)
+	if len(plan.Messages) != 2 {
+		t.Fatalf("merged messages = %d, want assistant+tool", len(plan.Messages))
 	}
 	toolMsg := plan.Messages[len(plan.Messages)-1]
 	if toolMsg.Role != "tool" {
@@ -55,13 +94,7 @@ func TestBuildMergedCallbackBatch_asyncAndTrigger(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(payload.Callbacks) != 2 {
-		t.Fatalf("callbacks = %d, want 2", len(payload.Callbacks))
-	}
-	if payload.Callbacks[0]["kind"] != "async" || payload.Callbacks[1]["kind"] != "external_message" {
-		t.Fatalf("kinds = %v", []any{payload.Callbacks[0]["kind"], payload.Callbacks[1]["kind"]})
-	}
-	if payload.Callbacks[1]["trigger_id"] != "trig-1" {
-		t.Fatalf("trigger_id = %v", payload.Callbacks[1]["trigger_id"])
+		t.Fatalf("callbacks = %d", len(payload.Callbacks))
 	}
 }
 

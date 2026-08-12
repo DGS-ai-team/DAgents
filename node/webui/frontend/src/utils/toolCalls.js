@@ -1,3 +1,5 @@
+import { truncateGraphemes } from "./textTruncate.js";
+
 export const USER_INFORMATION_TOOL = "ask_user_information";
 
 const TEMPORARY_AGENT_TOOLS = new Set([
@@ -10,7 +12,7 @@ const TEMPORARY_AGENT_TOOLS = new Set([
 function shortChildId(id) {
   const s = String(id || "").trim();
   if (!s) return "";
-  return s.length <= 16 ? s : `${s.slice(0, 16)}…`;
+  return s.length <= 16 ? s : truncateGraphemes(s, 16);
 }
 
 function stringList(value) {
@@ -32,18 +34,18 @@ export function formatTemporaryAgentToolTitle(name, args = {}) {
     return args.wait ? `创建临时 Agent · ${purpose} (wait)` : `创建临时 Agent · ${purpose}`;
   }
   if (n === "wait_temporary_agents") {
-    const ids = stringList(args.child_session_ids);
+    const ids = stringList(args.child_agent_ids);
     let title = ids.length ? `等待 ${ids.length} 个临时 Agent` : "等待临时 Agent";
     const timeout = intVal(args.timeout_seconds);
     if (timeout > 0) title += ` · ${timeout}s`;
     return title;
   }
   if (n === "temporary_agent_status") {
-    const ids = stringList(args.child_session_ids);
+    const ids = stringList(args.child_agent_ids);
     return ids.length ? `查询 ${ids.length} 个临时 Agent 状态` : "查询临时 Agent 状态";
   }
   if (n === "cancel_temporary_agent") {
-    const short = shortChildId(args.child_session_id);
+    const short = shortChildId(args.child_agent_id);
     return short ? `取消临时 Agent · ${short}` : "取消临时 Agent";
   }
   return `${n}()`;
@@ -71,7 +73,7 @@ function formatToolArgValue(value) {
 export function resolveToolArgumentsFromData(data) {
   if (!data || typeof data !== "object") return {};
   if (data.arguments && typeof data.arguments === "object" && !Array.isArray(data.arguments)) {
-    return data.arguments;
+    if (Object.keys(data.arguments).length > 0) return data.arguments;
   }
   const fn = data.function;
   if (fn && typeof fn === "object") {
@@ -108,11 +110,22 @@ export function normalizeToolCallItem(item) {
       argsRaw = fn.arguments;
     }
   }
-  const rawArguments = typeof argsRaw === "string" ? argsRaw : argsRaw ? JSON.stringify(argsRaw) : "";
+  const rawArguments =
+    typeof argsRaw === "string" && argsRaw.trim()
+      ? argsRaw
+      : item.raw_arguments && typeof item.raw_arguments === "string" && item.raw_arguments.trim()
+        ? item.raw_arguments
+        : argsRaw
+          ? JSON.stringify(argsRaw)
+          : "";
+  let parsedArgs = parseToolArguments(argsRaw);
+  if (!Object.keys(parsedArgs).length && rawArguments.trim()) {
+    parsedArgs = parseToolArguments(rawArguments);
+  }
   return {
     id: callId,
     name: name || "unknown",
-    arguments: parseToolArguments(argsRaw),
+    arguments: parsedArgs,
     rawArguments,
   };
 }
@@ -137,7 +150,7 @@ export function toolIndexFromEvent(data) {
 export function toolCallPurpose(args) {
   const value = String(args?.call_purpose || "").trim();
   if (!value) return "";
-  return value.length > 48 ? `${value.slice(0, 47)}…` : value;
+  return value.length > 48 ? truncateGraphemes(value, 48) : value;
 }
 
 function sanitizeInline(text) {
@@ -153,7 +166,12 @@ export function toolDisplayName(name, args = {}) {
   if (n === "bash_run") {
     const cmd = sanitizeInline(args.command);
     if (!cmd) return "bash(—)";
-    return `bash(${cmd.length > 48 ? `${cmd.slice(0, 47)}…` : cmd})`;
+    return `bash(${cmd.length > 48 ? truncateGraphemes(cmd, 48) : cmd})`;
+  }
+  if (n === "browser_run_task") {
+    const task = sanitizeInline(args.task);
+    if (!task) return "浏览器任务";
+    return `浏览器任务：${task.length > 56 ? truncateGraphemes(task, 56) : task}`;
   }
   if (n === "trigger_create") {
     return `trigger_create(${sanitizeInline(args.name) || "—"})`;
@@ -175,6 +193,39 @@ export function approvalItemDisplayName(item) {
       ? item.arguments
       : parseToolArguments(item?.rawArgs || item?.raw_arguments || item?.arguments);
   return toolDisplayName(name, args);
+}
+
+/** HITL 卡片副文案：突出自然语言目标，避免只看 raw JSON。 */
+export function approvalItemHint(item) {
+  const name = String(item?.name || "").trim();
+  const args =
+    item?.arguments && typeof item.arguments === "object"
+      ? item.arguments
+      : parseToolArguments(item?.rawArgs || item?.raw_arguments || item?.arguments);
+  if (name === "browser_run_task") {
+    const task = sanitizeInline(args.task);
+    return task ? `目标：${task}` : "";
+  }
+  if (name === "bash_run") {
+    const cmd = sanitizeInline(args.command);
+    return cmd ? `命令：${cmd}` : "";
+  }
+  if (["write_file", "read_file", "search_replace"].includes(name)) {
+    const path = sanitizeInline(args.path || args.file_path);
+    return path ? `路径：${path}` : "";
+  }
+  return "";
+}
+
+/** reason 已含命令/路径等细节时不再重复渲染 hint。 */
+export function approvalItemHintVisible(item) {
+  const hint = approvalItemHint(item);
+  if (!hint) return false;
+  const reason = String(item?.reason || "").trim();
+  if (!reason) return true;
+  const core = hint.replace(/^(命令|路径|目标)：/, "").trim();
+  if (core && reason.includes(core)) return false;
+  return true;
 }
 
 function extractPartialJsonString(raw, key) {

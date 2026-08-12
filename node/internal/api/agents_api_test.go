@@ -1,0 +1,401 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/store"
+	"github.com/DGS-ai-team/DAgents/shared/config"
+)
+
+func TestAgentsAPI_CRUD(t *testing.T) {
+	cfg := &config.Config{
+		NodeID: "node-test",
+		FSRoot: t.TempDir(),
+	}
+	cfg.ApplyDefaults()
+
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	// 用户模板目录放入 general，避免依赖 cwd 下 packaging 路径。
+	userDir := cfg.AgentTemplatesDir()
+	if err := os.MkdirAll(userDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join("..", "..", "..", "packaging", "agent-templates", "general.yaml")
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userDir, "general.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"template_id":  "general",
+		"display_name": "我的助手",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var created agentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.AgentID == "" || created.DisplayName != "我的助手" || created.TemplateID != "general" {
+		t.Fatalf("created = %+v", created)
+	}
+
+	body, _ = json.Marshal(map[string]any{
+		"template_id":  "general",
+		"display_name": "自定义工具",
+		"defaults": map[string]any{
+			"tools": map[string]any{
+				"enabled_groups": []string{"fs", "bash"},
+			},
+			"hooks": map[string]any{
+				"inject_today_date_enabled": false,
+			},
+		},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create with defaults status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var custom agentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &custom); err != nil {
+		t.Fatal(err)
+	}
+	var snap map[string]any
+	if err := json.Unmarshal(custom.ConfigSnapshot, &snap); err != nil {
+		t.Fatal(err)
+	}
+	def, _ := snap["defaults"].(map[string]any)
+	tools, _ := def["tools"].(map[string]any)
+	groups, _ := tools["enabled_groups"].([]any)
+	if len(groups) != 2 {
+		t.Fatalf("enabled_groups = %#v", tools["enabled_groups"])
+	}
+	hooks, _ := def["hooks"].(map[string]any)
+	if hooks["inject_today_date_enabled"] != false {
+		t.Fatalf("hooks = %#v", hooks)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	patch, _ := json.Marshal(map[string]any{"display_name": "新名字"})
+	req = httptest.NewRequest(http.MethodPatch, "/v1/agents/"+created.AgentID, bytes.NewReader(patch))
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var patched agentView
+	_ = json.Unmarshal(rr.Body.Bytes(), &patched)
+	if patched.DisplayName != "新名字" {
+		t.Fatalf("patched = %+v", patched)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/v1/agents/"+created.AgentID, nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAgentTemplatesAPI_list(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+	userDir := cfg.AgentTemplatesDir()
+	_ = os.MkdirAll(userDir, 0o755)
+	_ = os.WriteFile(filepath.Join(userDir, "demo.yaml"), []byte("id: demo\ndisplay_name: Demo\n"), 0o644)
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	req := httptest.NewRequest(http.MethodGet, "/v1/agent-templates", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		Templates []map[string]any `json:"templates"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Templates) < 1 {
+		t.Fatalf("templates = %+v", out.Templates)
+	}
+}
+
+func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	body, _ := json.Marshal(map[string]any{
+		"display_name": "空白 Agent",
+		"defaults": map[string]any{
+			"llm": map[string]any{"max_tool_loops": 16},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var created agentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.TemplateID != "" {
+		t.Fatalf("expected empty template_id, got %q", created.TemplateID)
+	}
+	if created.DisplayName != "空白 Agent" {
+		t.Fatalf("created = %+v", created)
+	}
+}
+
+func TestAgentsAPI_CreateWithPlacementRejected(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	body, _ := json.Marshal(map[string]any{
+		"display_name": "远端入口",
+		"defaults":     map[string]any{},
+		"placement": map[string]any{
+			"home_node_id": "node-other",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	errObj, _ := out["error"].(map[string]any)
+	if errObj["code"] != "invalid_request" {
+		t.Fatalf("error=%#v", errObj)
+	}
+}
+
+func TestAgentsAPI_CreateOriginRemoteRejected(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	body, _ := json.Marshal(map[string]any{
+		"display_name": "伪装远端",
+		"origin":       "remote",
+		"defaults":     map[string]any{},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAgentsAPI_ListHidesRemoteStubs(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+	agentsDB, err := store.OpenAgents(cfg.AgentsDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentsDB.Close()
+	_ = agentsDB.Save(context.Background(), store.AgentRecord{
+		AgentID:        "agt-local",
+		DisplayName:    "本地",
+		Origin:         store.AgentOriginLocal,
+		SandboxBackend: "process",
+		ConfigSnapshot: json.RawMessage(`{}`),
+	})
+	_ = agentsDB.Save(context.Background(), store.AgentRecord{
+		AgentID:        "agt-remote",
+		DisplayName:    "远端",
+		Origin:         store.AgentOriginRemote,
+		SandboxBackend: "process",
+		ConfigSnapshot: json.RawMessage(`{}`),
+		PlacementJSON:  json.RawMessage(`{"role":"owner_ref","home_node_id":"node-home"}`),
+	})
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	srv.agents = agentsDB
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		Agents []agentView `json:"agents"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Agents) != 1 || out.Agents[0].AgentID != "agt-local" {
+		t.Fatalf("agents=%+v", out.Agents)
+	}
+	got, err := agentsDB.Get(context.Background(), "agt-remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || !got.Archived {
+		t.Fatalf("expected remote stub archived, got=%+v", got)
+	}
+	// 再次列表不应再命中已归档 stub
+	list2, err := agentsDB.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range list2 {
+		if rec.AgentID == "agt-remote" {
+			t.Fatal("archived remote stub still in store List")
+		}
+	}
+}
+
+func TestAgentTemplatesAPI_createAndDelete(t *testing.T) {
+	cfg := &config.Config{NodeID: "node-test", FSRoot: t.TempDir()}
+	cfg.ApplyDefaults()
+	userDir := cfg.AgentTemplatesDir()
+	_ = os.MkdirAll(userDir, 0o755)
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+
+	body, _ := json.Marshal(map[string]any{
+		"id":           "my-custom",
+		"display_name": "自定义模板",
+		"description":  "测试",
+		"defaults": map[string]any{
+			"tools": map[string]any{"enabled_groups": []string{"fs"}},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/agent-templates", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/v1/agent-templates/my-custom", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/agent-templates/my-custom", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("get after delete status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAttachTriggerRuntime_perAgentRegistry(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{NodeID: "node-triggers", FSRoot: dir}
+	cfg.ApplyDefaults()
+	cfg.Triggers.Enabled = true
+
+	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
+	if srv.triggerStore == nil {
+		t.Fatal("expected trigger store on server")
+	}
+
+	built, err := agentruntime.Build(agentruntime.BuildParams{
+		NodeCFG:  cfg,
+		BaseTurn: srv.sessions.DefaultTurnOptions(),
+		AgentID:  "agt-trigger-test",
+		Snapshot: agentruntime.Snapshot{
+			Defaults: map[string]any{
+				"tools": map[string]any{"enabled_groups": []any{"triggers"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := built.Registry.Execute(context.Background(), "trigger_list", `{"call_purpose":"test"}`)
+	if err != nil {
+		t.Fatalf("trigger_list execute: %v", err)
+	}
+	var before map[string]any
+	if err := json.Unmarshal([]byte(out), &before); err != nil {
+		t.Fatalf("parse result: %v body=%s", err, out)
+	}
+	if before["ok"] == true {
+		t.Fatalf("expected uninitialized trigger store before attach, got %s", out)
+	}
+
+	attachTriggerRuntime(built.Registry, srv.triggerStore, srv.triggerSched, "agt-trigger-test")
+	out, err = built.Registry.Execute(context.Background(), "trigger_list", `{"call_purpose":"test"}`)
+	if err != nil {
+		t.Fatalf("trigger_list execute after attach: %v", err)
+	}
+	var after map[string]any
+	if err := json.Unmarshal([]byte(out), &after); err != nil {
+		t.Fatalf("parse result: %v body=%s", err, out)
+	}
+	if after["ok"] != true {
+		t.Fatalf("trigger_list ok=false after attach: %s", out)
+	}
+}

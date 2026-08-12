@@ -2,7 +2,7 @@
 
 > **状态**：**搁置** — 不改动 skills 现网机制（成本评估见本文 §4、§9）。  
 > 分支：`feat/tool-context-cost-optimization`  
-> 总览：[tool-context-cost-analysis.md](./tool-context-cost-analysis.md) · 实录：[major-changes.md](./major-changes.md)
+> 总览：[tool-context-cost-analysis.md](./tool-context-cost-analysis.md) · 实录：[handbook/附录/重大设计变更实录.md](../handbook/附录/重大设计变更实录.md)
 
 ---
 
@@ -33,7 +33,7 @@ Skills 相关成本分 **两条通道**（见 §2），对 cache 的影响不同
 
 | 信号 | 来源 | 含义 |
 |------|------|------|
-| `skills_catalog_estimated_tokens` | `GET /v1/sessions/{id}/context` | 磁盘 catalog **全文**粗算（含 SKILL.md body） |
+| `skills_catalog_estimated_tokens` | `GET /v1/agents/{id}/context` | 磁盘 catalog **全文**粗算（含 SKILL.md body） |
 | `skills_catalog_bloat_threshold` | 固定 `4000`（`CatalogBloatTokenThreshold`） | 超过则 TUI 提示精简 skills 目录 |
 | `system_prompt_estimated_tokens` | 同上 | 含 loaded 正文后的 system 体积 |
 

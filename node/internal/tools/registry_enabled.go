@@ -1,8 +1,27 @@
 package tools
 
-import "strings"
+import (
+	"context"
+	"fmt"
+	"strings"
+)
 
-// SetBuiltinEnabled 设置 LLM 可见/可调用的内置工具允许列表；names 为空表示全部启用。
+// SetMultimodalEnabled 控制 read_image、browser 视觉模式与 vision 载荷暂存；默认 false。
+func (r *Registry) SetMultimodalEnabled(enabled bool) {
+	if r == nil {
+		return
+	}
+	r.multimodalEnabled = enabled
+	r.registerBrowserTools()
+}
+
+// MultimodalEnabled 是否已启用多模态工具能力。
+func (r *Registry) MultimodalEnabled() bool {
+	return r != nil && r.multimodalEnabled
+}
+
+// SetBuiltinEnabled 设置 LLM 可见/可执行的内置工具允许列表；names 为空表示全部启用。
+// 未列入的工具仍保留 handler（供子 Agent bypass 委托），但 Execute/StartBackground 会 soft reject。
 func (r *Registry) SetBuiltinEnabled(names []string) error {
 	if r == nil {
 		return nil
@@ -28,6 +47,29 @@ func (r *Registry) SetBuiltinEnabled(names []string) error {
 	}
 	r.enabledOnly = set
 	return nil
+}
+
+// ErrToolNotEnabled 返回未启用工具的 soft-reject 文案（对齐 Workgroup allowlist 风格）。
+func ErrToolNotEnabled(name string) error {
+	return fmt.Errorf("ERROR: tool %q is not enabled", strings.TrimSpace(name))
+}
+
+func (r *Registry) rejectIfDisabled(ctx context.Context, name string) error {
+	if EnabledBypassFromContext(ctx) {
+		return nil
+	}
+	if r.toolEnabled(name) {
+		return nil
+	}
+	return ErrToolNotEnabled(name)
+}
+
+// SetBuiltinEnabledNone 禁用全部内置工具（显式空允许列表）。
+func (r *Registry) SetBuiltinEnabledNone() {
+	if r == nil {
+		return
+	}
+	r.enabledOnly = map[string]struct{}{}
 }
 
 // IsKnownBuiltinTool 判断是否为可配置的内置工具名。
@@ -60,6 +102,8 @@ func (r *Registry) filterToolDefs(defs []ToolDef) []ToolDef {
 // knownBuiltinTools 与 shared/config/builtin_tools.go 保持一致。
 var knownBuiltinTools = map[string]struct{}{
 	"read_file":              {},
+	"show_image":             {},
+	"read_image":             {},
 	"write_file":             {},
 	"glob_files":             {},
 	"grep_file":              {},
@@ -69,6 +113,7 @@ var knownBuiltinTools = map[string]struct{}{
 	"background_job_status":  {},
 	"background_job_cancel":  {},
 	"ask_user_information":   {},
+	"remember":                 {},
 	"load_skills":            {},
 	"unload_skills":          {},
 	"clear_skills":           {},
@@ -77,12 +122,15 @@ var knownBuiltinTools = map[string]struct{}{
 	"trigger_create":         {},
 	"trigger_update":         {},
 	"trigger_delete":         {},
-	"agent_invoke":           {},
-	"agent_discover":         {},
 	"create_temporary_agent": {},
 	"wait_temporary_agents":  {},
 	"temporary_agent_status": {},
 	"cancel_temporary_agent": {},
+	"browser_run_task":       {},
+	"browser_task_status":    {},
+	"browser_task_cancel":    {},
+	"wecom_send_markdown":    {},
+	"wecom_send_file":        {},
 }
 
 func unknownBuiltinToolError(name string) error {

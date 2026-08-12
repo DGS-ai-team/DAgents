@@ -14,7 +14,7 @@ body,
 .panel-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -26,15 +26,18 @@ body,
   width: min(900px, 100%);
   max-height: 85vh;
   overflow: auto;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
 }
 
 .panel-overlay__card pre {
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
-  background: #f8fafc;
+  background: var(--color-code-bg);
+  color: var(--color-code-fg);
   padding: 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
 }

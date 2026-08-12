@@ -39,10 +39,16 @@ def _normalize_string_list(value: Any, *, field_name: str, allow_empty: bool = T
 
 
 class AgentRegisterRequest(BaseModel):
-    """Node 注册或心跳 upsert（discovery_group 由 Manage 分配，Node 不传）。"""
+    """Node 注册或心跳 upsert（discovery_group 由 Manage 分配，Node 不传）。
 
-    agent_id: str = Field(max_length=256)
+    P5：`node_id` 为一等身份；`agent_id` 兼容旧客户端（历史上误用 agent_id 表示 node）。
+    当前 Registry 主键仍为 node 级：`agent_id == node_id`。
+    """
+
+    agent_id: str = Field(default="", max_length=256)
+    node_id: str = Field(default="", max_length=256)
     base_url: str
+    host_ips: str = Field(default="", max_length=1024)
     capabilities_hint: list[str] = Field(default_factory=list)
     ttl_seconds: int = Field(default=60, ge=5, le=3600)
     name: str = Field(default="", max_length=128)
@@ -56,19 +62,19 @@ class AgentRegisterRequest(BaseModel):
     risk_level: RiskLevel = Field(default="medium")
     allowed_scopes: list[str] = Field(default_factory=list)
     version: str = Field(default="", max_length=64)
-    expose_to_peers: bool = Field(default=True)
     card: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     last_error_summary: str | None = Field(default=None, max_length=1024)
     recent_task_summary: str | None = Field(default=None, max_length=1024)
 
-    @field_validator("agent_id")
+    @field_validator("agent_id", "node_id", mode="before")
     @classmethod
-    def validate_agent_id(cls, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("agent_id 不能为空")
-        return cleaned
+    def validate_ids(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ValueError("id 字段必须是字符串")
+        return value.strip()
 
     @field_validator("base_url")
     @classmethod
@@ -89,7 +95,7 @@ class AgentRegisterRequest(BaseModel):
     def validate_string_lists(cls, value: Any) -> list[str]:
         return _normalize_string_list(value, field_name="capabilities")
 
-    @field_validator("name", "owner", "team", "version", mode="before")
+    @field_validator("name", "owner", "team", "version", "host_ips", mode="before")
     @classmethod
     def validate_trimmed_text(cls, value: Any) -> str:
         if value is None:
@@ -119,8 +125,20 @@ class AgentRegisterRequest(BaseModel):
 
     @model_validator(mode="after")
     def apply_defaults(self) -> "AgentRegisterRequest":
+        node = (self.node_id or "").strip()
+        agent = (self.agent_id or "").strip()
+        if node and agent and node != agent:
+            raise ValueError("node_id 与 agent_id 不一致（当前 Registry 主键仍为 node 级）")
+        resolved = node or agent
+        if not resolved:
+            raise ValueError("node_id 或 agent_id 不能为空")
+        self.node_id = resolved
+        self.agent_id = resolved
         if not self.name:
-            self.name = self.agent_id
+            self.name = resolved
+        meta = dict(self.metadata or {})
+        meta.setdefault("node_id", resolved)
+        self.metadata = meta
         return self
 
 
@@ -131,7 +149,6 @@ class AgentHeartbeatRequest(BaseModel):
     skills: list[str] = Field(default_factory=list)
     last_error_summary: str | None = None
     recent_task_summary: str | None = None
-    expose_to_peers: bool | None = None
 
 
 class AgentDeregisterRequest(BaseModel):
@@ -139,13 +156,15 @@ class AgentDeregisterRequest(BaseModel):
 
 
 class AgentGroupsUpdateRequest(BaseModel):
-    """Manage 端为 Node 分配 discovery_group。"""
+    """Manage 端为 Node 分配 discovery_group。允许空列表表示清空分组。"""
 
-    discovery_group: list[str] = Field(min_length=1)
+    discovery_group: list[str] = Field(default_factory=list)
 
     @field_validator("discovery_group", mode="before")
     @classmethod
     def validate_discovery_group(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
         if isinstance(value, str):
             raw_items = [value]
         elif isinstance(value, list):
@@ -164,14 +183,14 @@ class AgentGroupsUpdateRequest(BaseModel):
                 continue
             seen.add(cleaned)
             result.append(cleaned)
-        if not result:
-            raise ValueError("discovery_group 不能为空")
         return result
 
 
 class AgentStoredRecord(BaseModel):
     agent_id: str
+    node_id: str = ""
     base_url: str
+    host_ips: str = ""
     discovery_group: list[str]
     capabilities_hint: list[str] = Field(default_factory=list)
     name: str
@@ -185,7 +204,6 @@ class AgentStoredRecord(BaseModel):
     risk_level: RiskLevel = "medium"
     allowed_scopes: list[str] = Field(default_factory=list)
     version: str = ""
-    expose_to_peers: bool = True
     card: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     last_error_summary: str | None = None
@@ -202,6 +220,7 @@ class AgentRecord(AgentStoredRecord):
 
 class AgentDiscoverRecord(BaseModel):
     agent_id: str
+    node_id: str = ""
     discovery_group: list[str]
     capabilities: list[str] = Field(default_factory=list)
     capabilities_hint: list[str] = Field(default_factory=list)

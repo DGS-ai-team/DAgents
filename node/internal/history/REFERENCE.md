@@ -10,13 +10,9 @@
 | `(j *Journal) RecordAppend` | `method` | 低层追加一行 JSONL；失败仅 warning |
 | `(j *Journal) AppendMessage` | `method` | append 已规范化 history → JSONL |
 | `(j *Journal) InsertMessage` | `method` | insert 已规范化 history → JSONL |
-
-## `normalize.go`
-
-| 符号 | 类型 | 说明 |
-|------|------|------|
-| `messageToJournalPayload` | `func(message llm.Message) map[string]any` | JSONL 行内 message 对象 |
+| `journalFilePath` | `func(baseDir, sessionID string) string` | `<baseDir>/YYYYMMDD/<session>.jsonl` |
+| `JournalRelativePath` | `func(sessionID string, at time.Time) string` | 工作区相对路径 `history/YYYYMMDD/<session>.jsonl` |
 
 ## 相关
 
-`reasoning_content` 写入前规范化见 **`node/internal/llm/provider*.go`** 与 **`Client.NormalizeAssistant`**。
+`reasoning_content` 写入前规范化见 **`node/internal/llm/provider*.go`** 与 **`Client.NormalizeAssistant`**；JSONL message 对象由 **`llm.MessageToJournalPayload`** 生成。

@@ -52,7 +52,7 @@ const preview = computed(() => buildReadFilePreview(props.path, props.content));
   min-height: 120px;
   max-height: min(50vh, 360px);
   border: 0;
-  background: #fff;
+  background: var(--color-surface);
 }
 .read-file-csv-wrap {
   overflow: auto;

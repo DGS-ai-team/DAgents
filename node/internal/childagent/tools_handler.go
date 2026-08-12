@@ -15,7 +15,7 @@ func (m *Manager) HandleWait(ctx context.Context, parentSessionID, argsJSON stri
 		return "ERROR: " + err.Error(), nil
 	}
 	if len(ids) == 0 {
-		return "ERROR: child_session_ids is required", nil
+		return "ERROR: child_agent_ids is required", nil
 	}
 	for _, id := range ids {
 		if err := m.validateOwnership(parentSessionID, id); err != nil {
@@ -49,7 +49,7 @@ func (m *Manager) HandleStatus(parentSessionID, argsJSON string) (string, error)
 		return "ERROR: " + err.Error(), nil
 	}
 	if len(ids) == 0 {
-		return "ERROR: child_session_ids is required", nil
+		return "ERROR: child_agent_ids is required", nil
 	}
 	results := make([]Result, 0, len(ids))
 	for _, id := range ids {
@@ -72,17 +72,17 @@ func (m *Manager) HandleCancelTool(parentSessionID, argsJSON string) (string, er
 	if err := json.Unmarshal([]byte(argsJSON), &raw); err != nil {
 		return "ERROR: invalid json", nil
 	}
-	childID := strings.TrimSpace(fmt.Sprint(raw["child_session_id"]))
+	childID := strings.TrimSpace(fmt.Sprint(raw["child_agent_id"]))
 	reason := strings.TrimSpace(fmt.Sprint(raw["reason"]))
 	if childID == "" || childID == "<nil>" {
-		return "ERROR: child_session_id is required", nil
+		return "ERROR: child_agent_id is required", nil
 	}
 	prev, err := m.cancelInternal(parentSessionID, childID, reason)
 	if err != nil {
 		return "ERROR: " + err.Error(), nil
 	}
 	body, _ := json.Marshal(map[string]any{
-		"child_session_id": childID,
+		"child_agent_id": childID,
 		"status":           StatusCancelled,
 		"previous_status":  prev,
 	})
@@ -94,11 +94,11 @@ func (m *Manager) cancelInternal(parentSessionID, childID, reason string) (previ
 	agent, ok := m.activeByID[childID]
 	if !ok {
 		m.mu.Unlock()
-		return "", fmt.Errorf("child_session_id not found or not owned by parent")
+		return "", fmt.Errorf("child_agent_id not found or not owned by parent")
 	}
-	if agent.ParentSessionID != parentSessionID {
+	if agent.ParentAgentID != parentSessionID {
 		m.mu.Unlock()
-		return "", fmt.Errorf("child_session_id not found or not owned by parent")
+		return "", fmt.Errorf("child_agent_id not found or not owned by parent")
 	}
 	if agent.isTerminal() {
 		prev := string(agent.Status)
@@ -115,18 +115,18 @@ func (m *Manager) validateOwnership(parentSessionID, childID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if agent, ok := m.activeByID[childID]; ok {
-		if agent.ParentSessionID != parentSessionID {
-			return fmt.Errorf("child_session_id not found or not owned by parent")
+		if agent.ParentAgentID != parentSessionID {
+			return fmt.Errorf("child_agent_id not found or not owned by parent")
 		}
 		return nil
 	}
 	if owner, ok := m.childToParent[childID]; ok {
 		if owner != parentSessionID {
-			return fmt.Errorf("child_session_id not found or not owned by parent")
+			return fmt.Errorf("child_agent_id not found or not owned by parent")
 		}
 		return nil
 	}
-	return fmt.Errorf("child_session_id not found or not owned by parent")
+	return fmt.Errorf("child_agent_id not found or not owned by parent")
 }
 
 func (m *Manager) allTerminalOrFailFast(ids []string, failFast bool) (done bool, timedOut bool) {
@@ -155,7 +155,7 @@ func (m *Manager) formatWaitResults(ids []string, timedOut bool) (string, error)
 	for _, id := range ids {
 		res, err := m.GetResult(id)
 		if err != nil {
-			results = append(results, Result{ChildSessionID: id, Status: StatusCompleted})
+			results = append(results, Result{ChildAgentID: id, Status: StatusCompleted})
 			continue
 		}
 		results = append(results, res)
@@ -193,9 +193,9 @@ func parseIDList(argsJSON string) ([]string, error) {
 }
 
 func parseIDListFromMap(raw map[string]any) ([]string, error) {
-	arr, ok := raw["child_session_ids"].([]any)
+	arr, ok := raw["child_agent_ids"].([]any)
 	if !ok {
-		return nil, fmt.Errorf("child_session_ids must be array")
+		return nil, fmt.Errorf("child_agent_ids must be array")
 	}
 	out := make([]string, 0, len(arr))
 	for _, item := range arr {

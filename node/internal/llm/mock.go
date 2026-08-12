@@ -52,7 +52,7 @@ func (m *MockClient) StreamChat(ctx context.Context, req ChatRequest, handler St
 		var lastUser string
 		for i := len(req.Messages) - 1; i >= 0; i-- {
 			if req.Messages[i].Role == "user" {
-				lastUser = req.Messages[i].Content
+				lastUser = MessageTextSummary(req.Messages[i])
 				break
 			}
 		}

@@ -20,7 +20,7 @@ describe("formatToolResultDisplay", () => {
     const display = formatToolResultDisplay({
       data: {
         name: "create_temporary_agent",
-        content: JSON.stringify({ child_session_id: "x", purpose: "test" }),
+        content: JSON.stringify({ child_agent_id: "x", purpose: "test" }),
         duration_seconds: 1.2,
       },
     });

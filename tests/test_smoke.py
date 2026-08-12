@@ -1,16 +1,14 @@
-"""占位冒烟：保证 `unittest discover` 能解析核心 Python 包。"""
-
-from __future__ import annotations
+"""Workspace import smoke — Manage / config packages still resolve."""
 
 import unittest
 
 
 class WorkspaceImportSmokeTest(unittest.TestCase):
-    def test_import_cli_main(self) -> None:
-        from app.cli.main import build_parser
+    def test_app_config_import(self):
+        from app.config import env  # noqa: F401
 
-        parser = build_parser()
-        self.assertEqual(parser.prog, "dagents")
+    def test_manage_package_import(self):
+        import manage  # noqa: F401
 
 
 if __name__ == "__main__":

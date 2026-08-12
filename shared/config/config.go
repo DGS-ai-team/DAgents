@@ -16,16 +16,23 @@ import (
 const (
 	DefaultListenHost = "127.0.0.1"
 	DefaultListenPort = 18765
+	// DefaultFSRoot 为 Node 运行时根目录，写死不可配置（YAML / Web UI / setup PATCH 均忽略）。
+	DefaultFSRoot = "./.runtime"
 )
 
 // Config 为 Node 与 Client 共享的配置根结构；Client 仅使用 local 等子集。
 type Config struct {
-	AgentID       string       `yaml:"agent_id"`
-	Listen        ListenConfig `yaml:"listen"`
-	Local         LocalConfig  `yaml:"local"`
-	ExposeToPeers bool         `yaml:"expose_to_peers"`
-	Groups        []string     `yaml:"groups"`
-	FSRoot        string       `yaml:"fs_root"`
+	NodeID string `yaml:"node_id"`
+	// LegacyAgentID 仅用于读取旧 YAML 的 agent_id；加载后合并进 NodeID 并清空。
+	LegacyAgentID string      `yaml:"agent_id,omitempty"`
+	Agent         AgentConfig `yaml:"agent"`
+	User          UserConfig  `yaml:"user"`
+	Onboarding    OnboardingConfig `yaml:"onboarding"`
+	Listen        ListenConfig    `yaml:"listen"`
+	Local         LocalConfig     `yaml:"local"`
+	Groups        []string        `yaml:"groups"`
+	// FSRoot 固定为 DefaultFSRoot，不从 YAML 读取；测试可在内存中直接赋值。
+	FSRoot        string       `yaml:"-"`
 	LLM           LLMConfig    `yaml:"llm"`
 	Manage        ManageConfig `yaml:"manage"`
 	Skills        SkillsConfig       `yaml:"skills"`
@@ -37,6 +44,36 @@ type Config struct {
 	Tools             ToolsConfig             `yaml:"tools"`
 	Hooks             HooksConfig             `yaml:"hooks"`
 	UI                UIConfig                `yaml:"ui"`
+	Multimodal        MultimodalConfig        `yaml:"multimodal"`
+	Browser           BrowserConfig           `yaml:"browser"`
+	WeCom             WeComConfig             `yaml:"wecom"`
+}
+
+// UserConfig 描述本机使用者身份（与 Node 展示名 agent.name 分开）。
+type UserConfig struct {
+	// PreferredName 为「怎么称呼你」；首配页与设置可写。
+	PreferredName string `yaml:"preferred_name"`
+}
+
+// OnboardingConfig 控制首次进入 Web UI 的门闩状态。
+type OnboardingConfig struct {
+	// NodeProfileCompleted 为 nil 时视为已完成（兼容升级前已有 node_settings 的安装）；
+	// 产品种子显式写 false，未完成前不启动 Manage Registrar / Workgroup Dialer。
+	NodeProfileCompleted *bool `yaml:"node_profile_completed"`
+}
+
+// MultimodalConfig 控制 user 多模态输入（content_parts 图片）与 read_image vision 注入。
+type MultimodalConfig struct {
+	// Enabled 为 nil 时默认 false（须显式启用并配合 vision 模型）。
+	Enabled *bool `yaml:"enabled"`
+}
+
+// MultimodalEnabled 是否启用多模态 user 消息与 read_image 工具。
+func (c *Config) MultimodalEnabled() bool {
+	if c == nil || c.Multimodal.Enabled == nil {
+		return false
+	}
+	return *c.Multimodal.Enabled
 }
 
 // UIConfig 控制 Node 内嵌 Web UI（/ui/）是否挂载。
@@ -45,25 +82,74 @@ type UIConfig struct {
 	Enabled *bool `yaml:"enabled"`
 }
 
-// UIEnabled 是否挂载浏览器 Web UI。
+// UIEnabled 是否挂载 Web UI。Web UI 为固定挂载：始终返回 true（忽略 yaml 中的 ui.enabled）。
 func (c *Config) UIEnabled() bool {
-	if c == nil || c.UI.Enabled == nil {
-		return true
+	return true
+}
+
+// AvailableAgentToolGroups 返回本 Node 进程当前可供 Agent 勾选的工具组。
+// browser / wecom 依赖进程级服务开关；未启用时不出现在清单中。
+func (c *Config) AvailableAgentToolGroups() []string {
+	all := PublicBuiltinToolGroupNames()
+	if c == nil {
+		return all
 	}
-	return *c.UI.Enabled
+	out := make([]string, 0, len(all))
+	for _, g := range all {
+		switch g {
+		case "browser":
+			if !c.BrowserEnabled() {
+				continue
+			}
+		case "wecom":
+			if !c.WeComEnabled() {
+				continue
+			}
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+// FilterAgentToolGroups 将候选工具组限制在 AvailableAgentToolGroups 内（保持候选顺序）。
+func (c *Config) FilterAgentToolGroups(groups []string) []string {
+	available := c.AvailableAgentToolGroups()
+	allow := make(map[string]struct{}, len(available))
+	for _, g := range available {
+		allow[g] = struct{}{}
+	}
+	out := make([]string, 0, len(groups))
+	seen := make(map[string]struct{}, len(groups))
+	for _, raw := range groups {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, ok := allow[name]; !ok {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // ToolsConfig 控制内置工具行为（如 bash_run 输出解码与压缩）。
+// 工具组允许列表由各 Agent 快照 defaults.tools.enabled_groups 决定，不再使用 Node 级配置。
 type ToolsConfig struct {
-	// EnabledGroups 为内置工具组允许列表（见 shared/config AllBuiltinToolGroupNames）；省略或为空表示启用全部。
-	EnabledGroups []string `yaml:"enabled_groups"`
-	// Enabled 已废弃；请改用 enabled_groups。
+	// Enabled 已废弃；出现时 Validate 失败。
 	Enabled []string `yaml:"enabled,omitempty"`
 	// BashOutputEncoding 为 bash_run 捕获的子进程 stdout/stderr 字节编码（解码为 UTF-8 后交给 LLM）。
-	// 留空时由 Node 按 OS/shell 类型自动选择（Windows cmd/powershell→gbk，bash→utf-8）。
-	BashOutputEncoding string             `yaml:"bash_output_encoding"`
+	// 留空时默认 utf-8；单次 bash_run 可用 output_encoding 覆盖。
+	BashOutputEncoding string `yaml:"bash_output_encoding"`
 	// FileEncoding 为 read_file/write_file/search_replace/grep_* 读写磁盘文件的默认字节编码。
-	// 留空时 Windows→gbk，其它→utf-8；单次调用可用 encoding 参数覆盖。
+	// 留空时默认 utf-8；GBK 遗留文件仍可通过字节检测或 encoding 参数读取。
 	FileEncoding string             `yaml:"file_encoding"`
 	BashCompress BashCompressConfig `yaml:"bash_compress"`
 }
@@ -94,7 +180,7 @@ type ChildAgentsConfig struct {
 	DefaultWaitTimeoutSeconds int  `yaml:"default_wait_timeout_seconds"`
 }
 
-// LogConfig 控制 Node 进程 stderr 结构化日志级别。
+// LogConfig 控制 Node 进程日志级别（完整日志→stdout / *.log，错误→stderr / *.err.log）。
 type LogConfig struct {
 	Level string `yaml:"level"`
 }
@@ -113,31 +199,35 @@ type SkillsConfig struct {
 
 // CompressionConfig 控制上下文压缩阈值。
 type CompressionConfig struct {
-	SilentTriggerTokens   int `yaml:"silent_trigger_tokens"`
-	BlockingTriggerTokens int `yaml:"blocking_trigger_tokens"`
+	SilentTriggerTokens          int `yaml:"silent_trigger_tokens"`
+	BlockingTriggerTokens        int `yaml:"blocking_trigger_tokens"`
+	IdleAutoCompressSeconds      int `yaml:"idle_auto_compress_seconds"`
+	IdleAutoCompressPollSeconds  int `yaml:"idle_auto_compress_poll_seconds"`
+	IdleAutoCompressMinTokens    int `yaml:"idle_auto_compress_min_tokens"`
 }
 
 // HooksConfig 控制 Node turn Hook 行为。
 type HooksConfig struct {
-	// Enabled 为 true 时才允许注册 type=http / command 的外部 hook；journal 不受此限制。
-	Enabled           *bool             `yaml:"enabled"`
-	Entries           []HookEntryConfig `yaml:"entries"`
+	Plugins           []HookPluginConfig          `yaml:"plugins"`
+	Host              HookHostConfig              `yaml:"host"`
 	DuplicateToolCall DuplicateToolCallHookConfig `yaml:"duplicate_tool_call"`
 	ToolResult        ToolResultHookConfig        `yaml:"tool_result"`
+	InjectTodayDate   InjectTodayDateHookConfig   `yaml:"inject_today_date"`
 }
 
-// HookEntryConfig 为 YAML 配置的外部 Hook 条目（journal / http / command）。
-type HookEntryConfig struct {
-	Name         string   `yaml:"name"`
-	Type         string   `yaml:"type"`
-	Phases       []string `yaml:"phases"`
-	Priority     int      `yaml:"priority"`
-	OnError      string   `yaml:"on_error"`
-	TimeoutMS    int      `yaml:"timeout_ms"`
-	URL          string   `yaml:"url"`
-	Command      []string `yaml:"command"`
-	AllowedPaths []string `yaml:"allowed_paths"`
-	JournalPath  string   `yaml:"journal_path"`
+// HookPluginConfig 为 in-process Go plugin（.so）配置。
+type HookPluginConfig struct {
+	Path      string   `yaml:"path"`
+	Phases    []string `yaml:"phases"`
+	Priority  int      `yaml:"priority"`
+	OnError   string   `yaml:"on_error"`
+	TimeoutMS int      `yaml:"timeout_ms"`
+}
+
+// HookHostConfig 控制 Hook Host 配额与可选 history 截断。
+type HookHostConfig struct {
+	MaxLLMCalls   int `yaml:"max_llm_calls"`
+	HistoryWindow int `yaml:"history_window"` // ≤0 或不设：不截断 Context history
 }
 
 // ToolResultHookConfig 控制 tool.after_each 对列出的工具做落盘 + history 摘要（WS3）。
@@ -151,7 +241,7 @@ type ToolResultHookConfig struct {
 	MaxHistoryTokens int `yaml:"max_history_tokens,omitempty"`
 	// MaxHistoryRunes 已废弃。
 	MaxHistoryRunes int `yaml:"max_history_runes,omitempty"`
-	// Tools 启用落盘摘要的工具名；省略时默认 bash + fs + a2a（见 defaultToolResultHookTools）。
+	// Tools 启用落盘摘要的工具名；省略时默认 bash + fs（见 defaultToolResultHookTools）。
 	Tools []string `yaml:"tools"`
 }
 
@@ -163,14 +253,28 @@ type DuplicateToolCallHookConfig struct {
 	WindowSeconds int `yaml:"window_seconds"`
 }
 
+// InjectTodayDateHookConfig 控制 turn.before_step 注入「当天日期为：YYYYMMDD」human message。
+type InjectTodayDateHookConfig struct {
+	// Enabled 为 nil 时默认 true。
+	Enabled *bool `yaml:"enabled"`
+}
+
 const defaultDuplicateToolCallWindowSeconds = 60
 
-// HooksExternalEnabled 是否启用 http/command 类外部 hook（默认 false）。
-func (c *Config) HooksExternalEnabled() bool {
-	if c == nil || c.Hooks.Enabled == nil {
-		return false
+// HooksHostMaxLLMCalls 返回 turn 内 Hook LLM 调用配额（默认 2）。
+func (c *Config) HooksHostMaxLLMCalls() int {
+	if c == nil || c.Hooks.Host.MaxLLMCalls <= 0 {
+		return 2
 	}
-	return *c.Hooks.Enabled
+	return c.Hooks.Host.MaxLLMCalls
+}
+
+// HooksHostHistoryWindow 返回 Hook Context history 窗口；≤0 表示不截断。
+func (c *Config) HooksHostHistoryWindow() int {
+	if c == nil {
+		return 0
+	}
+	return c.Hooks.Host.HistoryWindow
 }
 
 // DuplicateToolCallHookEnabled 是否启用重复 tool call 检测。
@@ -187,6 +291,14 @@ func (c *Config) DuplicateToolCallWindowSeconds() int {
 		return defaultDuplicateToolCallWindowSeconds
 	}
 	return c.Hooks.DuplicateToolCall.WindowSeconds
+}
+
+// InjectTodayDateHookEnabled 是否启用当天日期注入 Hook。
+func (c *Config) InjectTodayDateHookEnabled() bool {
+	if c == nil || c.Hooks.InjectTodayDate.Enabled == nil {
+		return true
+	}
+	return *c.Hooks.InjectTodayDate.Enabled
 }
 
 const defaultToolResultSpillThresholdTokens = 12000
@@ -220,7 +332,7 @@ func (c *Config) ToolResultSpillThresholdTokens() int {
 func defaultToolResultHookTools() []string {
 	return []string{
 		"bash_run", "read_file", "grep_file", "grep_files",
-		"search_replace", "glob_files", "agent_invoke", "agent_discover",
+		"search_replace", "glob_files",
 	}
 }
 
@@ -238,22 +350,44 @@ type ListenConfig struct {
 	Port int    `yaml:"port"`
 }
 
-// LocalConfig 描述 Client 连接本地 Node 的 endpoint；agent_id 可选，用于与 Node 响应交叉校验。
+// LocalConfig 描述 Client 连接本地 Node 的 endpoint；node_id 可选，用于与 Node 响应交叉校验。
 type LocalConfig struct {
 	Endpoint string `yaml:"endpoint"`
-	AgentID  string `yaml:"agent_id"`
+	NodeID   string `yaml:"node_id"`
+	// AgentID 为旧字段；加载时若 NodeID 为空则合并。
+	AgentID string `yaml:"agent_id,omitempty"`
 }
 
 // LLMConfig 为 turn loop 使用的模型配置。
+//
+// 兼容单配置：顶层 provider/base_url/model 等为「当前生效」快照。
+// 多配置：profiles 存命名配置，ProfileOrder 决定顺序（第一条为默认）；
+// active 为运行时当前选用（可热切换），缺省时取第一条。
 type LLMConfig struct {
-	Provider        string `yaml:"provider"`
-	BaseURL         string `yaml:"base_url"`
-	Model           string `yaml:"model"`
-	APIKeyEnv       string `yaml:"api_key_env"`
-	Mock            bool   `yaml:"mock"`
-	MaxToolLoops    int    `yaml:"max_tool_loops"`
-	Thinking        string `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
-	ReasoningEffort string `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
+	Active          string                      `yaml:"active,omitempty"`
+	Profiles        map[string]LLMProfileConfig `yaml:"profiles,omitempty"`
+	ProfileOrder    []string                    `yaml:"profile_order,omitempty"`
+	Provider        string                      `yaml:"provider"`
+	BaseURL         string                      `yaml:"base_url"`
+	Model           string                      `yaml:"model"`
+	APIKeyEnv       string                      `yaml:"api_key_env"`
+	Mock            bool                        `yaml:"mock"`
+	Thinking        string                      `yaml:"thinking"`         // deepseek/qwen：enabled | disabled
+	ReasoningEffort string                      `yaml:"reasoning_effort"` // thinking=enabled：high | max（qwen 映射为 thinking_budget）
+	// max_tool_loops 已迁至 Agent config_snapshot（defaults.llm.max_tool_loops），勿再写入 Node YAML。
+}
+
+// LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_tool_loops）。
+type LLMProfileConfig struct {
+	Provider           string `yaml:"provider"`
+	BaseURL            string `yaml:"base_url"`
+	Model              string `yaml:"model"`
+	APIKeyEnv          string `yaml:"api_key_env"`
+	Mock               bool   `yaml:"mock"`
+	Thinking           string `yaml:"thinking,omitempty"`
+	ReasoningEffort    string `yaml:"reasoning_effort,omitempty"`
+	// MultimodalEnabled 为 nil 时视为 false；切换档案时同步到顶层 multimodal.enabled。
+	MultimodalEnabled *bool `yaml:"multimodal_enabled,omitempty"`
 }
 
 // ManageConfig 控制是否向 Manage 注册；默认 enabled=false。
@@ -262,18 +396,25 @@ type ManageConfig struct {
 	URL          string                   `yaml:"url"`
 	NodeToken    string                   `yaml:"node_token"`
 	Registration ManageRegistrationConfig `yaml:"registration"`
-	A2A          ManageA2AConfig          `yaml:"a2a"`
+	Update       ManageUpdateConfig       `yaml:"update"`
+	Workgroup    ManageWorkgroupConfig    `yaml:"workgroup"`
 }
 
-// ManageA2AConfig 控制 Node 对 Manage A2A inbox 的 long poll sidecar。
-type ManageA2AConfig struct {
-	Enabled          *bool `yaml:"enabled"`
-	InboxPollSeconds int   `yaml:"inbox_poll_seconds"`
-	InboxWaitSeconds int   `yaml:"inbox_wait_seconds"`
+// ManageWorkgroupConfig 控制 Node 侧 Workgroup Dialer（Manage WS 工具执行通道）。
+type ManageWorkgroupConfig struct {
+	// Enabled 为 nil 且 manage.enabled 时默认 true（D4）。
+	Enabled *bool `yaml:"enabled"`
+}
+
+// ManageUpdateConfig 控制 Node 向 Manage Release Hub 查询更新。
+type ManageUpdateConfig struct {
+	Enabled              *bool  `yaml:"enabled"`
+	CheckIntervalSeconds int    `yaml:"check_interval_seconds"`
+	Channel              string `yaml:"channel"`
 }
 
 // ManageRegistrationConfig 控制周期性 upsert/心跳参数。
-// Agent Card（name/description/capabilities/metadata）固定从工作目录 ./agent-card.json 读取，不在此重复配置。
+// Agent 身份（name/description/role/capabilities）在 config.yaml 的 agent 块配置。
 type ManageRegistrationConfig struct {
 	BaseURL         string `yaml:"base_url"`
 	IntervalSeconds int    `yaml:"interval_seconds"`
@@ -286,8 +427,8 @@ type ManageRegistrationConfig struct {
 // 逻辑：
 // 1. 读文件并 os.ExpandEnv；
 // 2. yaml.Unmarshal 到 Config；
-// 3. ApplyDefaults；
-// 4. ResolveAgentID（`.runtime/agent/agent_id` 持久化）；
+// 3. ApplyDefaults（合并遗留 agent_id → node_id）；
+// 4. ResolveNodeID（`.runtime/node/node_id` 持久化）；
 // 5. Validate 后返回。
 //
 // 异常：文件不存在、YAML 语法错误、校验失败均向上返回 error。
@@ -302,8 +443,9 @@ func LoadFile(path string) (*Config, error) {
 	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
+	cfg.FSRoot = DefaultFSRoot
 	cfg.ApplyDefaults()
-	if err := cfg.ResolveAgentID(); err != nil {
+	if err := cfg.ResolveNodeID(); err != nil {
 		return nil, err
 	}
 	if err := cfg.Validate(); err != nil {
@@ -316,6 +458,14 @@ func LoadFile(path string) (*Config, error) {
 //
 // 副作用：修改接收者字段。
 func (c *Config) ApplyDefaults() {
+	if strings.TrimSpace(c.NodeID) == "" {
+		c.NodeID = strings.TrimSpace(c.LegacyAgentID)
+	}
+	c.LegacyAgentID = ""
+	if strings.TrimSpace(c.Local.NodeID) == "" {
+		c.Local.NodeID = strings.TrimSpace(c.Local.AgentID)
+	}
+	c.Local.AgentID = ""
 	if strings.TrimSpace(c.Listen.Host) == "" {
 		c.Listen.Host = DefaultListenHost
 	}
@@ -326,14 +476,15 @@ func (c *Config) ApplyDefaults() {
 		c.Local.Endpoint = fmt.Sprintf("http://%s", c.ListenAddr())
 	}
 	if strings.TrimSpace(c.FSRoot) == "" {
-		c.FSRoot = "./.runtime"
-	}
-	if c.LLM.MaxToolLoops <= 0 {
-		c.LLM.MaxToolLoops = 16
+		c.FSRoot = DefaultFSRoot
 	}
 	if strings.TrimSpace(c.LLM.Provider) == "" {
 		c.LLM.Provider = "openai"
 	}
+	if strings.TrimSpace(c.LLM.APIKeyEnv) == "" {
+		c.LLM.APIKeyEnv = "OPENAI_API_KEY"
+	}
+	c.normalizeLLMProfiles()
 	if strings.TrimSpace(c.LLM.APIKeyEnv) == "" {
 		c.LLM.APIKeyEnv = "OPENAI_API_KEY"
 	}
@@ -370,22 +521,37 @@ func (c *Config) ApplyDefaults() {
 	if c.Manage.Registration.TTLSeconds <= 0 {
 		c.Manage.Registration.TTLSeconds = 60
 	}
-	if c.Manage.A2A.InboxPollSeconds <= 0 {
-		c.Manage.A2A.InboxPollSeconds = c.Manage.Registration.IntervalSeconds
-		if c.Manage.A2A.InboxPollSeconds <= 0 {
-			c.Manage.A2A.InboxPollSeconds = 30
-		}
+	if c.Manage.Update.CheckIntervalSeconds <= 0 {
+		c.Manage.Update.CheckIntervalSeconds = 6 * 3600
 	}
-	if c.Manage.A2A.InboxWaitSeconds <= 0 {
-		c.Manage.A2A.InboxWaitSeconds = 25
+	if strings.TrimSpace(c.Manage.Update.Channel) == "" {
+		c.Manage.Update.Channel = "stable"
 	}
+	if c.Compression.IdleAutoCompressPollSeconds <= 0 {
+		c.Compression.IdleAutoCompressPollSeconds = 60
+	}
+	c.applyBrowserDefaults()
+	c.applyWeComDefaults()
 }
 
-// RuntimeDir 返回运行时根目录（与 `fs_root` 一致；子目录路径均相对此根硬编码）。
+// IdleAutoCompressEnabled 是否在 session 无动作超过 idle_auto_compress_seconds 后自动压缩。
+func (c *Config) IdleAutoCompressEnabled() bool {
+	return c != nil && c.Compression.IdleAutoCompressSeconds > 0
+}
+
+// IdleAutoCompressPollInterval 返回 idle 自动压缩扫描间隔（默认 60s）。
+func (c *Config) IdleAutoCompressPollInterval() time.Duration {
+	if c == nil || c.Compression.IdleAutoCompressPollSeconds <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(c.Compression.IdleAutoCompressPollSeconds) * time.Second
+}
+
+// RuntimeDir 返回运行时根目录（固定 DefaultFSRoot；子目录路径均相对此根硬编码）。
 func (c *Config) RuntimeDir() string {
 	root := strings.TrimRight(strings.TrimSpace(c.FSRoot), "/")
 	if root == "" {
-		return "./.runtime"
+		return DefaultFSRoot
 	}
 	return root
 }
@@ -402,8 +568,8 @@ func (c *Config) SkillsRoot() string {
 
 // Validate 校验 Node 启动所需的最小字段集。
 func (c *Config) Validate() error {
-	if strings.TrimSpace(c.AgentID) == "" {
-		return fmt.Errorf("agent_id is required")
+	if strings.TrimSpace(c.NodeID) == "" {
+		return fmt.Errorf("node_id is required")
 	}
 	if c.Listen.Port < 1 || c.Listen.Port > 65535 {
 		return fmt.Errorf("listen.port must be 1-65535, got %d", c.Listen.Port)
@@ -424,7 +590,10 @@ func (c *Config) Validate() error {
 	if err := validateToolsEnabledConfig(&c.Tools); err != nil {
 		return err
 	}
-	return nil
+	if err := validateBrowserConfig(c); err != nil {
+		return err
+	}
+	return validateWeComConfig(c)
 }
 
 // DiscoveryGroups 返回 YAML groups 字段（**不**用于 Manage 注册；分组由 Manage 分配）。
@@ -465,7 +634,7 @@ func (c *Config) ManageRegistryBaseURL() string {
 	return strings.TrimRight(strings.TrimSpace(c.Local.Endpoint), "/")
 }
 
-// ManageRegistryBaseURLIsLoopback 判断上报地址是否为 loopback（运维/A2A 可达性提示用）。
+// ManageRegistryBaseURLIsLoopback 判断上报地址是否为 loopback（运维可达性提示用）。
 func (c *Config) ManageRegistryBaseURLIsLoopback() bool {
 	raw := c.ManageRegistryBaseURL()
 	if raw == "" {
@@ -485,31 +654,34 @@ func (c *Config) ManageRegistryBaseURLIsLoopback() bool {
 	return false
 }
 
-// ManageA2AEnabled 是否启动 A2A inbox long poll sidecar（须 manage.enabled=true；默认 true）。
-func (c *Config) ManageA2AEnabled() bool {
+// ManageUpdateEnabled 是否向 Manage Release Hub 查询更新（须 manage.enabled=true；默认 true）。
+func (c *Config) ManageUpdateEnabled() bool {
 	if c == nil || !c.Manage.Enabled {
 		return false
 	}
-	if c.Manage.A2A.Enabled != nil {
-		return *c.Manage.A2A.Enabled
+	if c.Manage.Update.Enabled != nil {
+		return *c.Manage.Update.Enabled
 	}
 	return true
 }
 
-// ManageA2AInboxWait 返回 long poll wait 参数。
-func (c *Config) ManageA2AInboxWait() time.Duration {
-	if c == nil || c.Manage.A2A.InboxWaitSeconds <= 0 {
-		return 25 * time.Second
+// ManageWorkgroupEnabled 是否启动 Workgroup Dialer（须 manage.enabled；nil 默认 true）。
+func (c *Config) ManageWorkgroupEnabled() bool {
+	if c == nil || !c.Manage.Enabled {
+		return false
 	}
-	return time.Duration(c.Manage.A2A.InboxWaitSeconds) * time.Second
+	if c.Manage.Workgroup.Enabled != nil {
+		return *c.Manage.Workgroup.Enabled
+	}
+	return true
 }
 
-// ManageA2AInboxPollInterval 返回断线降级后的短 poll 间隔。
-func (c *Config) ManageA2AInboxPollInterval() time.Duration {
-	if c == nil || c.Manage.A2A.InboxPollSeconds <= 0 {
-		return 30 * time.Second
+// ManageUpdateCheckInterval 返回版本检查间隔（默认 6h）。
+func (c *Config) ManageUpdateCheckInterval() time.Duration {
+	if c == nil || c.Manage.Update.CheckIntervalSeconds <= 0 {
+		return 6 * time.Hour
 	}
-	return time.Duration(c.Manage.A2A.InboxPollSeconds) * time.Second
+	return time.Duration(c.Manage.Update.CheckIntervalSeconds) * time.Second
 }
 
 // ListenAddr 返回 host:port 监听地址字符串。
@@ -522,9 +694,35 @@ func (c *Config) MemoryDir() string {
 	return filepath.Join(c.RuntimeDir(), "memory")
 }
 
-// SessionDBPath 返回 SQLite 会话库路径（`<runtime>/memory/sessions.db`）。
+// SessionDBPath 返回对话运行时 SQLite 路径（`<runtime>/memory/sessions.db`；表为 agent_runtimes）。
+// Phase 2 起对话历史迁入 agents；过渡期消息路径仍可能使用本库。
 func (c *Config) SessionDBPath() string {
 	return filepath.Join(c.MemoryDir(), "sessions.db")
+}
+
+// AgentsDBPath 返回 Agent 实例元数据库路径（`<runtime>/agents.db`）。
+func (c *Config) AgentsDBPath() string {
+	return filepath.Join(c.RuntimeDir(), "agents.db")
+}
+
+// LLMConfigsDBPath 返回 LLM 配置库路径（`<runtime>/llm_configs.db`）。
+func (c *Config) LLMConfigsDBPath() string {
+	return filepath.Join(c.RuntimeDir(), "llm_configs.db")
+}
+
+// NodeSettingsDBPath 返回 Node 进程设置库路径（`<runtime>/node_settings.db`）。
+func (c *Config) NodeSettingsDBPath() string {
+	return filepath.Join(c.RuntimeDir(), "node_settings.db")
+}
+
+// AgentsDir 返回 Agent 实例目录根（`<runtime>/agents`）。
+func (c *Config) AgentsDir() string {
+	return filepath.Join(c.RuntimeDir(), "agents")
+}
+
+// AgentTemplatesDir 返回用户自定义模板目录（`<runtime>/agent-templates`）。
+func (c *Config) AgentTemplatesDir() string {
+	return filepath.Join(c.RuntimeDir(), "agent-templates")
 }
 
 // RawMessageHistoryEnabled 返回是否写入原始消息 JSONL；环境变量优先于 YAML，默认 true。
@@ -574,9 +772,17 @@ func (c *Config) ShellPolicyDir() string {
 	return filepath.Join(c.PolicyDir(), "shell")
 }
 
+// ExternalToolsDir 返回外置 CLI/工具目录（`<fs_root>/externaltools`）。
+func (c *Config) ExternalToolsDir() string {
+	return filepath.Join(c.RuntimeDir(), "externaltools")
+}
+
 // Capabilities 返回对外声明的能力列表。
 func (c *Config) Capabilities() []string {
 	caps := []string{"shell", "filesystem"}
+	if c.MultimodalEnabled() {
+		caps = append(caps, "multimodal")
+	}
 	if c.Triggers.Enabled {
 		caps = append(caps, "triggers")
 	}

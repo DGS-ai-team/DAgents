@@ -27,7 +27,7 @@
 | `Client` | LLM 接口（支持 tools） |
 | `ChatRequest` / `ChatResult` | 含 messages 与 tool_calls |
 | `MockClient` | mock；`EnableTools` 驱动工具环测 |
-| `EnvOpenAIClient` | OpenAI 兼容流式 HTTP |
+| `envAdapterClient` | 环境变量 API Key + MessageAdapter 出站 |
 
 ## `internal/turn/`
 
@@ -64,7 +64,6 @@
 | 符号 | 说明 |
 |------|------|
 | `NewServer` | 注册路由；`WithLLM` / `WithTools` / `WithPolicy` / `WithStore` |
-| `handleDeleteSession` | `DELETE /v1/sessions/{id}` |
-| `handleClearContext` | `POST /v1/sessions/{id}/clear-context` |
-| `handleSessionContext` | `GET /v1/sessions/{id}/context`（含 queue_pending） |
-| `handleCancelSession` | `POST /v1/sessions/{id}/cancel` |
+| `handleClearContext` | `POST /v1/agents/{id}/clear-context`（经 withAgentAsSession） |
+| `handleSessionContext` | `GET /v1/agents/{id}/context`（含 queue_pending） |
+| `handleCancelSession` | `POST /v1/agents/{id}/cancel` |

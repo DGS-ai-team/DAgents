@@ -4,6 +4,694 @@
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-08-12
+
+**发布与运行时稳定性修复**：完善 Session 生命周期管理、打包校验与正式发布流程。
+
+### 修复
+
+- Prevent stale hydrate responses from re-enqueuing an already submitted tool approval after navigating to Agent settings.
+- 修复 Session runtime 停止与 SQLite 持久化存储关闭之间的竞态，确保 runtime 完成退出后再关闭数据库，降低 `SQLITE_BUSY` 与数据未持久化风险。
+- 修复子 Agent 运行时回收与父会话停止过程中的生命周期等待问题，避免自等待死锁。
+
+### 变更
+
+- 增加 required CI、打包冒烟测试和发布 tag/版本一致性校验。
+- 完善本地助手、Windows 安装器与 Manage 离线包的发布构建流程。
+- 增加正式发布、分支同步和 hotfix 操作规范。
+
+## [0.9.7] - 2026-08-11
+
+**工作组实时协作与 Node Web UI 体验优化**：补齐实时消息可靠性，并统一浅色界面的品牌视觉。
+
+### 新增
+
+- 工作组与普通 Agent 对话支持在上滑后显示“直达底部消息”按钮。
+- 工作组 Timeline/outbox 原子写入、断线恢复与多 Node 实时广播隔离。
+
+### 变更
+
+- Node Web UI 浅色主题改为左上角淡蓝色渐变，移除侧边栏绿色渐变。
+
+- **完整 Markdown 消息渲染**：Node 与 Manage 工作组消息改用 GFM 解析，支持任务列表、引用、删除线、图片、代码语言标记与代码高亮，并对 HTML 输出做安全清洗。
+- **工作组配置体验**：Manage 成员卡片支持刷新与删除；Node 侧栏新增工作组刷新入口。
+
+- **Manage 工作组多 Node 投递**：resume gap-fill 仅向成员的 `home_node_id` 重放消息，并拒绝 WebSocket header 与 `session.hello` 中不一致的 `node_id`。
+
+- **Manage 工作组运行时 schema**：将 `assign_workgroup_task` 的 OpenAI 工具 schema 移入 Manage 包，避免部署后依赖未打包的 `docs/` 文件。
+
+---
+
+## [0.9.6] - 2026-08-11
+
+**工作组与 Windows 发版稳定性修复**：完善成员 provision 失败反馈、工具集收缩处理和安装器构建流程。
+
+### 修复
+
+- **工作组成员 provision 错误详情**：Manage 保存并展示 `error_code` / `error_message`，Node Dialer 的失败结果可以回写到成员状态。
+- **工具集禁用处理**：工具组被收缩时通知当前会话并软拒绝已禁用工具调用。
+- **Windows 安装器 CI**：修复 Inno Setup 文本预处理冲突，手动打包与安装器构建恢复成功。
+
+### 变更
+
+- 优化 Windows 安装向导界面，并补充相关工作组与工具集回归测试。
+
+（Git **tag**：`v0.9.6`。）
+
+---
+
+## [0.9.5] - 2026-08-10
+
+**工作组成员配置与发版 CI**：修复成员一直「配置中」；发版构建并行拆分与 Rocky8 browser 缓存。
+
+### 修复
+
+- **工作组成员一直「配置中」（`provisioning`）**：Manage 补 `websockets` 依赖（缺库时 WS 握手 404）；Node Dialer 断线自动重连；provision 失败回写 `member.provision_result(status=error)`。
+- **Rocky8 browser CI**：pyenv 缓存卷不可 `rm` 挂载根（`Device or resource busy`）。
+
+### 变更
+
+- **发版 / Manual Package CI**：Windows Go / Tauri Shell / browser 三路并行后再组装；Manage 离线包只等 linux-amd64；Rocky8 预装依赖镜像 + pyenv `actions/cache`。
+
+（Git **tag**：`v0.9.5`。）
+
+---
+
+## [0.9.4] - 2026-08-10
+
+**Linux 命令行首配**：无图形环境可用 `dagents init` 完成与 Web 同源的 onboarding；首配门闸下 Node 就绪探测不再误超时。
+
+### 新增
+
+- **`dagents init` / `setup`**：经 `PATCH /v1/setup/config` 写入身份与 LLM（交互式或 `--yes` 非交互）；`doctor` / help / install 提示对齐。
+
+### 修复
+
+- **首配前 `dagents node` 等待 30s 失败**：就绪改认 `/health`（首配未完成时 `/v1/agent/info` 为 403）；client probe 对 `node_profile_required` 视为已就绪并提示补全首配。
+
+（Git **tag**：`v0.9.4`。）
+
+---
+
+## [0.9.3] - 2026-08-10
+
+**WebUI 稳定性与安装对齐**：对话 SSE/切 Agent 不再卡三点跳动；Linux 安装脚本对齐现网包；内置模板补全 soul/custom；移除已过时的 Tauri Setup 向导。
+
+### 修复
+
+- **WebUI 三点跳动卡住**：切 Agent 时旧 SSE 污染全局 status；`hitl_required` 即结束 awaiting；Hub critical 事件补送；SSE 重连 `after_seq` + hydrate 对账；卡住看门狗；Hub 按 Agent 过滤入队。
+- **对话自动滚动失效**：去掉 smooth scroll 与高频 pin 的竞态，stick-to-bottom 恢复。
+- **HITL 有选项时误用默认项**：Composer 非空文本优先于选中选项。
+- **并行工具空 id 分片**：不再留下僵死「生成中」气泡。
+- **Linux 安装脚本**：去掉已移除的 `dagents-cli` 硬依赖；doctor 退出码；update/`--keep-policy`；拷贝 agent-templates。
+- **`/clear`**：取消子 Agent 与会话内工具任务，并刷新 Activity。
+
+### 变更
+
+- **内置 Agent 模板**：补 `soul_md` / `custom_md`；创建写入侧车；assemble/install/Inno 打入模板副本。
+- **移除 Tauri Setup 向导**（`packaging/bootstrapper`）；保留托盘 Shell（`desktop/tray-tauri`）与 Inno 安装。
+
+（Git **tag**：`v0.9.3`。）
+
+---
+
+## [0.9.2] - 2026-08-07
+
+**Manage Docker 补丁**：镜像打包成员工具权威目录，修复容器启动 `FileNotFoundError`。
+
+### 修复
+
+- **Manage Docker 缺少 `member_tool_catalog.json`**：`packaging/manage/Dockerfile` 仅 `COPY manage/`，容器内 import `member_tools` 即失败；现拷贝 `shared/workgroup/member_tool_catalog.json` 至 `/app/shared/workgroup/`。
+
+（Git **tag**：`v0.9.2`。）
+
+---
+
+## [0.9.1] - 2026-08-07
+
+**Workgroup 协作预览**：正式版前最后一个大预览。以工作组可演示为主叙事；开箱首配与本地助手收口。验收清单见 [`docs/design/v0.9.1-smoke-checklist.md`](docs/design/v0.9.1-smoke-checklist.md)。
+
+### 升级说明（自 0.8.x）
+
+- 运行时目录仍为 `./.runtime`；遗留库视为 **Node 首配已完成**，不会强制重新走身份向导。
+- 工作组需启用 Manage（`manage.enabled` + URL）并完成首配后，Workgroup Dialer 才会连接；仅 HTTP 注册 online **不等于**成员工具通道已就绪。
+- 成员工具默认仅 **fs**；bash 需在成员配置中显式勾选（无进程级沙箱）。
+
+### 新增
+
+- **工作组（Workgroup）纵向闭环（预览）**：Manage Leader turn + Node Worker；成员 provision / tool.command / journal；Supervisor `assign_workgroup_task`；`@member` 直达；信息型 HITL；取消 turn（含 `tool.cancel`）；Timeline 流式与任务卡片；RunHistory 调试 API / UI。
+- **成员工作区工具目录**：权威源为仓库 `shared/workgroup/member_tool_catalog.json`（Node `go:embed`；Manage/Console 读同一文件）。HTTP `GET /v1/workgroups/meta/member-tools` 由 Node 本地提供（**不依赖** Manage 连接）。可执行集为 **fs + bash**；**默认白名单仅 fs**（bash 需显式勾选，无额外沙箱）。
+- **浏览器伴生 Agent**：创建主 Agent 且 `enabled_groups` 含 `browser` 时自动创建持久伴生（`{agent_id}-browser`）；主 Agent 仅暴露 `browser_run_task` / `browser_task_status` / `browser_task_cancel`，由 sidecar `browser_use.Agent` 闭环执行；Chrome `session_key` 为伴生 id，独立 profile/debug port，同伴生任务排队。列表隐藏伴生，删除主 Agent 级联归档伴生。默认 `browser.max_sessions` 提升为 8。sidecar 对 Agent 追加 DAgents `extend_system_message`（中文/安全/回传约定）；`browser_task_status` 扁平回灌 `summary` / `success` / `urls` / `screenshot_paths` 等字段。列表时为存量 Agent 补齐伴生；mock LLM 返回中文说明；Web UI 工具摘要展示任务目标与结论。`browser_run_task` 默认 wait=true 同步等待完成并返回 summary；派发前校验伴生记录存在。任务过程归档至 `tasks/<id>.md|json`，伴生提示词注入最近 3 次引用；主对话助手回复下展示可折叠「浏览器引用」。
+- **首次进入 Web UI 的 Node 身份首配页**：开箱未完成时全屏三步收集主题、「怎么称呼你 / Node 名称」与一条 LLM 配置，写入 `user.preferred_name` / `agent.name` / `llm.profiles` 与 `onboarding.node_profile_completed`；未完成前拦截本机业务 API（仅放行 bootstrap / setup / LLM 探测 / `/ui` 静态资源与探活），且不启动 Manage Registrar / Workgroup Dialer（升级遗留库视为已完成）。
+
+### 修复
+
+- **首配未完成时托盘打开强制进首配页**：Tauri 检测到 `node_profile_completed=false` 时一律导航/刷新到 `/ui/`（不再同 URL 仅聚焦）；Go 托盘深链同样回落控制台首页。Web UI 在窗口重新可见时会再次检查 bootstrap，避免启动竞态误判为已完成。
+- **工作组成员 generation 前进时可重新 provision**。
+- **成员工具全部 60s 超时（非 HITL）**：Manage 只等 `tool.result`；Home Node Dialer 未连、binding 仅内存丢失、或失败回 `session.error` 会导致空等满默认 60s。现持久化 WorkerBinding/journal，失败与孤儿 `running` 一律回 `tool.result`；超时报错标明 dialer 未连接。
+- **工作组思考提示**：去掉「Supervisor」前缀，进度条与 live assistant 不再双份渲染。
+
+### 变更
+
+- **设置页文案与结构打磨**：技能补无智能体空态并去掉英文 skill；导航「安全」改为「输出防护」并补齐说明；定时任务目标模式中文化并链到能力页轮询；上下文调试标签中文化；关于页帮助去重、「Release notes」改为「更新说明」。
+- **能力页布局整理**：对齐其它设置页（去掉重复 intro、按「共享服务 / 运行配额 / 子 Agent 配额」分段、条件区块间距与 placeholder）；字段网格随视口 `auto-fill` 自适应列数。运行中的子 Agent 从能力页移除，改在侧栏「活动」查看/取消。
+- **能力页：Web UI 固定挂载**：移除「Web 界面」开关；`/ui/` 始终挂载，setup PATCH 忽略 `ui_enabled=false`。
+- **工具组随进程能力显隐**：未启用浏览器服务 / 企业微信推送时，Agent 创建与设置页不再展示对应工具组；`GET /v1/setup/config` 增加 `available_tool_groups`。
+- **工作组成员按 Node 工具组配置**：新建/编辑成员时从本 Node `GET /v1/workgroups/meta/member-tools` 拉取工具组清单（fs/bash），勾选组后展开为 `allow_tool_names`。
+- **成员 system prompt**：对齐静态规则 → 运行环境 → 工作区 → Soul → 用户信息 → Custom；环境取自 Home Node Registry；强调多成员路径可能不一致。
+- **工作组对话 chrome**：顶栏对齐智能体对话；成员弹窗与侧栏交互打磨。
+- **收窄 browser Manager / sidecar HTTP op**：Go `BrowserManager` 与 `dagents-browser` 仅保留 session 生命周期与任务级 `run_task` / `task_status` / `task_cancel`；删除细粒度 navigate/click 等 Manager API、`manager_extended`、sidecar `action_runner` 与对应 `op` 分发。文档对齐伴生模型。
+- **浏览器引用 UX**：任务截图注册为 media 并在可折叠「浏览器引用」中展示；HITL 审批突出 `browser_run_task` 自然语言目标；工具气泡结果改为「目标 · 短状态」，完整结论留给引用卡片。
+- **退役细粒度 `browser_*` LLM 工具**：删除 `browser_ops` 组与 `browser_navigate` / `browser_click` 等 Agent 工具定义与 handler；`browser` 组仅保留 `browser_run_task` / `browser_task_status` / `browser_task_cancel`。sidecar 任务路径与 Manager Start/Stop 保留（后续可再收窄 HTTP op 面）。
+- **存量 Agent 策略种子缺项合并**：Node 启动时对 `.runtime/policy/tool.approval.txt` 与 `agents.db` 中全部 `agent_policy` 仅追加 packaging 种子中缺失的工具模式（如 `browser_run_task`），不覆盖用户已改档位；`EnsureAgentPolicy` 读存量行时同样补齐。
+- **移除 Node Agent 沙箱**：删除 Docker / process 沙箱运行时（`node/internal/sandbox`、bash docker 路径、模板与 Web UI 沙箱配置）；Agent 一律使用 Node 全局 `fs_root`，工具边界改由工具组与策略控制。`agents` 表 `sandbox_*` 列保留但读写固定为关闭。
+- **首配页对齐 Workbench 风格并增加主题步骤**：第一步以三个圆点选择浅色 / 深色 / 跟随系统（写入既有 `dagents_webui_theme`）；整体改用 panel、settings-field、btn 等现有控件样式。
+- **首配页不再被 soft 刷新闪进对话页**：窗口 `focus` / `pageshow` 重检 bootstrap 时只允许进入首配，退出仅在用户点「开始使用」完成配置后。
+- **侧栏 Agent 列表选中不再置顶**：切换当前 Agent 时保持按 `updated_at` 排序的原有位置，仅用高亮表示选中。
+- **Shell 双轨安装**：推荐轨 Tauri（`desktop/tray-tauri`，内嵌 Web UI，需 WebView2）与兼容轨 Go（`desktop/tray`，低版本 Windows）均由 CI 构建；Inno 附加任务二选一写入 `bin\dagents-shell.exe`；未检测到 WebView2 时默认兼容模式。Tauri 轨补齐 Desktop API / SSE 待办 / Toast / 更新编排。
+- **远端 Agent Placement 产品路径拆除**（D5）；通信面改走 Workgroup（旧设计稿见 `docs/archive/design/remote-agent-placement.md`）。
+
+### 预览边界（Known limitations）
+
+- 成员侧不提供 browser / skills / triggers / wecom / child_agents。
+- 成员 `bash_run` 无进程级沙箱；默认不勾选。
+- D05 全量 fixture 执行器未完成（INDEX harness + 部分 golden）。
+- Placement / 远端旁观不作为产品能力。
+
+（Git **tag**：`v0.9.1`。）
+
+---
+
+## [0.8.5] - 2026-07-28
+
+**安装向导体验与 HITL 选中修复**：便携 Tauri Setup；HITL 选项回传与 UI 一致。
+
+### 修复
+
+- **HITL 选项回传错位**：ChatView 在模板里写 `hitlSelected.value = v` 因 Vue 自动解包未真正更新选中态，提交时静默落成首项；改为 script 内同步，并按真实选中解析 `selected_options` / `answer`（option `value`）。
+
+### 变更
+
+- **Tauri 安装向导改为便携单文件**：去掉 NSIS「先安装向导再装程序」外层；`dagents-setup-*.exe` 双击即开，编译期嵌入 Inno 并静默落地。
+- **Tauri 向导 UI 对齐 WebUI 浅色**：Workbench light tokens、品牌 Logo、Segoe UI 字体栈；窗口图标改用项目品牌图标。
+
+（Git **tag**：`v0.8.5`。）
+
+---
+
+## [0.8.4] - 2026-07-28
+
+**Agent 契约收口与设置体验**：sessions 过渡债清理；沙箱模式选择；LLM 配置可探测模型列表。
+
+### 变更
+
+- **LLM 配置探测模型**：设置 › 连接中新建/编辑档案支持「测试并拉取模型」；Node 代理 `POST /v1/setup/llm/probe-models` 请求兼容 `/models`，成功后下拉选择模型并建议 provider，失败仍可手动填写。
+- **沙箱设置 UI**：启用沙箱后选择模式（本机 Docker / 远程预留）并配置对应参数；去掉将 `process` 表述为「沙箱后端」的选项（未启用 = 宿主机 + 工具约束）。
+- **沙箱 API**：`backend` 支持 `remote`（需 `remote_endpoint`）；远程运行时尚未实现，启用时返回 `remote_unavailable`。
+
+- **API 错误码对齐**：对外 `session_not_found` 改为 `agent_not_found`，details 使用 `agent_id`。
+- **删除 `/v1/sessions*` 410 桩**：不再注册 sessions 路由（404）；错误码 `sessions_moved` 退役。
+- **对话持久化表 `agent_runtimes`**：`sessions(session_id, agent_id)` 迁移为 `agent_runtimes(agent_id, node_id)`；Go `store.Record` 字段同步（`AgentID` / `NodeID`）；启动时自动迁旧表。
+- **内部/API 错误码**：`session_not_found` → `agent_not_found`（details 用 `agent_id`）。
+- **托盘 Desktop UI focus**：`POST /v1/desktop/ui/focus` 请求/响应字段改为 `agent_id`。
+- **`stream.Publish` 签名收口**：去掉未使用的 NodeID 第二参，统一 `Publish(agentID, eventType, data)`。
+- **Media / hooks 字段**：media artifact 改为 `agent_id`；hook JSON `parent_session_id` 改为 `parent_agent_id`。
+- **SSE 信封硬切 `agent_id`**：事件 JSON 去掉顶层 `session_id`；`agent_id` 为对话/Agent 实例 id（不再写 NodeID）。
+- **子 Agent 协议硬切 `child_agent_id`**：工具参数、HITL resume、SSE data、Web UI 由 `child_session_id(s)` 改为 `child_agent_id(s)`（`parent_session_id` → `parent_agent_id`）。
+- **API 内部命名**：`withAgentAsSession` → `withAgentRuntime`；hydrate/context/ack 等实现改为 `handleAgent*Impl`，path 直接读 `agent_id`。
+- **HTTP 硬切 `agent_id`**：`POST /v1/messages` 与 `GET /v1/streams` 过滤只认 `agent_id`；hydrate/context/ack/cancel/clear-context/skills/messages 成功响应去掉顶层 `session_id`。
+- **Skills UI 去掉 `enabled` 迁移**：设置页/模板展开不再把旧 `defaults.skills.enabled=false` 改写成工具组；能力只看工具组 `skills`。
+- **child-agents HTTP 硬切 `*_agent_id`**：路径改为 `{child_agent_id}`；响应去掉 `parent_session_id` / `child_session_id` 双写（仅 `parent_agent_id` / `child_agent_id`）。
+- **Go Client 消息/SSE 发 `agent_id`**：`POST /v1/messages` 与 `GET /v1/streams` 过滤参数改用 `agent_id`；child-agents 列表项增加 `child_agent_id`。
+- **Manage Console**：删除未使用的 `sortSessions` 工具函数。
+- **文档对齐 sessions 下线**：handbook/契约外的设计与运维文档改为 `/v1/agents`（manage 通信、child-agents、media、smoke 清单、skills context 等）；历史 Shell 设计文保留路径并加移除注记。
+- **Go Client Agent 命名**：`GetSessionContext` / `DeleteSession` / `SessionHydrate` 等改为 `GetAgentContext` / `DeleteAgent` / `AgentHydrate` 等；JSON 字段名不变。
+- **删除 sessions CRUD 死代码**：去掉未挂载的 `handleCreateSession` / `handleListSessions` / `handleDeleteSession` 及相关响应类型。
+- **Go Client / 托盘 Session 别名删除**：移除 `CreateSession` / `ListSessions` / `SessionSummary` / `SyncFromSessions`；统一 `EnsureAgent` / `ListAgents` / `AgentSummary` / `SyncFromAgents`。
+- **A2A HITL legacy 删除**：caller 侧仅接受含 `items[]` 的现代 `hitl_required` 载荷，不再转换旧 `approval_args` / `user_information_args`。
+- **Skills 能力开关**：运行时不再读 `defaults.skills.enabled`；仅由 Node 总闸 + 工具组 `skills` 决定；写入侧也不再写 `enabled:false`。
+- **HITL 旧事件收口**：本机 SSE / WebUI / 托盘 / inbox 等待仅认 `hitl_required`；A2A requires_input 出站强制 `event_type=hitl_required`。
+- **Go Client Agent API**：新增 `ListAgents` / `AgentSummary`。
+- **Skills payload**：新建/更新 Agent 时 `defaults.skills` 仅写 `visible` 白名单。
+- **工具 Registry 装配统一**：默认表与 per-agent Registry 共用 `attachNodeRuntimeDeps`（后台任务回灌、media、browser、manage、wecom、triggers）；去掉 tool-jobs / hydrate 对 `DefaultTools` 的回退。
+- **异步回灌可观测**：`EnqueueAsyncToolResult` / `EnqueueToolResult` 在 Agent 不存在时返回 `agent_not_found` 并打 Warn，不再静默丢弃。
+- **HITL SSE 收口**：A2A caller 中继统一发 `hitl_required`；子 Agent `RelayHub` 对 `hitl_required` 打 scope。
+- **Go Client 迁 `/v1/agents`**：session 相关路径改为 agents；创建/ensure 走 Agent API。
+- **LLM 多模态不再广播**：进程级切换 LLM 档案只更新默认 Registry；已装入 Agent 的多模态在 ensure/reload 时按绑定档案生效。
+- **Skills 开关收敛**：Agent 技能能力与工具组 `skills` 对齐；可见白名单仍用 `defaults.skills.visible`；Node `skills.enabled` 仍为进程总闸。
+- **setup 热挂载**：配置保存后经 `attachNodeRuntimeDeps` 刷新默认工具表，不再单点只挂 WeCom。
+
+### 修复
+
+- **异步 bash 回灌丢回调**：同步超时/转后台与 collector 收尾竞态时，若进程已结束才置 `autoDegraded`，会漏掉 `notifyDone`；现对完成回灌做幂等，并在降级登记时若已结束则立即回灌。`background_job_cancel` / UI 终止后台任务一律触发异步回灌。
+- **后台 bash 终止后气泡状态**：终止已转后台的 `bash_run` 后，工具气泡由「后台执行中」更新为「已终止」（改写 transcript 中的 `status=RUNNING`，并以 `/tool-jobs` 为准判断是否仍在跑）。
+- **多工具并行气泡状态**：同批免审批 `tool_call` 后端并行执行；未出结果的工具一律显示「执行中」。并行批次中工具完成后立刻推送 `tool_result` SSE；仅 HITL 待批尚未开跑的标「待执行」。
+
+### 新增
+
+- **Agent 可见 Skills 绑定**：创建 / 修改 Agent 时可勾选可见 skills（`defaults.skills.visible`）；运行时 catalog、`load_skills` 与会话可用列表均按白名单过滤。新增 `GET /v1/skills/catalog` 供设置页列举 Node 目录。
+- **Tauri 托盘 Shell（预览）**：`desktop/tray-tauri/` 以 Tauri 2 实现系统托盘；支持双击打开 Web UI、启停/重启 Node、health 轮询与单实例；可与 Go `desktop/tray` 并行验证，打包默认仍为 Go Shell。
+- **CI：Windows Tauri Shell 构建**：`scripts/ci/build_dagents_shell_tauri.sh` + `.github/workflows/tauri-shell.yml`；`build-and-release` / `manual-package` 的 Windows 作业产出 `dagents-shell-tauri.exe` 预览产物（不替换安装包内 Go Shell）。
+- **Tauri 安装向导（可选）**：`packaging/bootstrapper` 提供现代多步 Setup UI，嵌入并静默调用现有 Inno 安装包；未嵌入 payload 时支持演示模式预览。
+- **企业微信消息推送工具**：`wecom_send_markdown`（markdown_v2）与 `wecom_send_file`（自动 upload_media）；在设置 › 能力 配置 Webhook，工具组 `wecom`。
+
+（Git **tag**：`v0.8.4`。）
+
+---
+
+## [0.8.3] - 2026-07-23
+
+**配置收敛与 bash 控制体验**：Agent 级参数离开 Node YAML；工具气泡控制时机收紧；进程日志按日拆分。
+
+### 变更
+
+- **`config.example.yaml`**：去掉已废弃的 `expose_to_peers`；移除已迁入 SQLite / Agent 绑定的项（LLM 连接档案、`max_tool_loops` 等）；仅保留 Node 进程级配置。
+- **`max_tool_loops`**：不再从 Node `config.yaml` / setup API 读写；仅由 Agent 新建时写入 `config_snapshot`（缺省 32），运行时从 snapshot 装入。
+- **进程日志按日拆分**：`node|shell|browser-YYYY-MM-DD.log` 为完整日志，同日 `*.err.log` 仅错误；Node slog 全量走 stdout、error 额外写 stderr。
+- **工具气泡操作按钮**：bash「终止 / 转后台」与执行状态同一行，置于状态左侧，圆角样式，不换行。
+- **bash 控制时机**：仅在真正开始执行后展示按钮（参数生成中、审批中不展示）；转后台后气泡保留「终止」；状态栏「执行中 / 后台 / 审批」改为与 Changes 同款 pill。
+
+### 修复
+
+- **Composer LLM 切换**：切换后写入 Agent 绑定并应用到进程 LLM；刷新/ensure 后恢复为该 Agent 绑定的档案（含多模态开关），不再回退显示默认模型。
+- **`search_replace` 多行预览**：跨行替换时行号提示由「未知」改为「多行」。
+- **后台 bash 终止**：`POST .../tool-calls/{id}/cancel` 可按 `tool_call_id` 终止已转后台的任务。
+
+（Git **tag**：`v0.8.3`。）
+
+---
+
+## [0.8.2] - 2026-07-23
+
+**bash 可控执行与体验修复**：同步 shell 可终止/转后台；托盘与安装器若干体验问题。
+
+### 新增
+
+- **`bash_run` 运行中控制**：同步执行登记 in-flight；`POST /v1/agents/{id}/tool-calls/{id}/cancel|background`；Web UI 工具行提供「终止 / 转后台」，状态栏展示执行中与后台任务数量。
+
+### 变更
+
+- **`bash_run` 超时语义**：仅当模型显式传入 `timeout_seconds` 时超时才自动转后台；省略时走硬上限（默认 600s）终止报错。
+- **Windows 安装器**：去掉安装结束后的收尾提示弹窗；说明保留在完成页。
+
+### 修复
+
+- **Web UI**：partial `tool_call` 不再过早封存 assistant，避免同一条流式回复被拆成两个气泡。
+- **托盘**：审批后避免因焦点过滤导致待办 Toast 重复弹出。
+- **Windows 安装向导**：侧栏中文副标题乱码（改用含 CJK 字形字体生成侧栏图）。
+
+（Git **tag**：`v0.8.2`。）
+
+---
+
+## [0.8.1] - 2026-07-22
+
+**Docker 沙箱与长期记忆**：可选 Docker 隔离执行 `bash_run`；`remember` 工具与结构化长期记忆；Agent 可无模板创建并管理模板。
+
+### 新增
+
+- **Docker 沙箱后端**：`sandbox.backend=docker` 时 Agent 入内存预创建常驻容器（Alpine 3.20），`bash_run` 经 `docker exec`；空闲 15 分钟或卸出内存时回收。镜像见 `packaging/sandbox/`。
+- **`remember` 工具**：事实归一化、`add`/`replace` 增量输出与 CAS 乐观锁；结构化长期记忆条目支持**全局 / 独立作用域**。
+- **Agent 创建**：支持不选模板直接创建；Web UI 模板管理（查看 / 编辑用户模板）。
+- **Prompt / LLM**：侧车 prompt context 仅存 SQLite；LLM 档案修改即时保存。
+
+### 变更
+
+- **Windows 安装向导**：改浅色主题，修复乱码与控件重叠。
+
+### 修复
+
+- **长期记忆加载**：仅在清空对话、首条用户消息、上下文压缩后重新加载 longterm，避免每轮重复注入。
+
+（Git **tag**：`v0.8.1`。）
+
+---
+
+## [0.8.0] - 2026-07-21
+
+**Agent 实例模型落地**：单 Node 多 Agent；Web UI 为唯一人机入口；Policy / 侧车 / LLM 按 Agent 配置。破坏性变更，不保证旧 session 数据迁移。设计见 [`docs/design/agent-instance-model.md`](docs/design/agent-instance-model.md)。
+
+### 新增
+
+- **Agent 实例模型（Phase 0–4）**：`node_id` 替代进程级 `agent_id`；模板创建 Agent；可选 per-agent 沙箱 Runtime；Web UI 以 Agent 为首实体（`/ui/agents/:id`）。
+- **Agent API**：`/v1/agents/{id}/…`（消息、ack、clear-context、compress、skills、child-agents、policy、prompt-context、workspace-activity 等）。
+- **Policy / 侧车按 Agent 存 SQLite**：`agent_policy`、`agent_prompt_context`；Agents 设置页可配置；全局 `/v1/policy*` → 410 Gone。
+- **多 LLM 档案**：配置卡片化、Key 加密存 SQLite；输入栏切换档案；Agent 可绑定 LLM；思考开关迁至状态栏。
+- **聚合只读 API**：`GET /v1/ui/bootstrap`；`GET /v1/agents/{id}/workspace-activity`。
+- **Activity 侧栏**：Cursor 风格「变更与命令」面板；深色 / 浅色主题切换。
+- **Agent 完整设置**：创建弹窗 + 模板预设；per-agent 配置页与 runtime reload。
+- **托盘**：`GET /v1/agents` 同步待办；Web UI deep link 对齐 Agent 路由。
+- **Hook**：`inject_today_date`（turn.before_step）及设置页启停开关。
+
+### 变更
+
+- **移除终端对话 Client**：删除 Go bubbletea TUI 与 Python Textual CLI；`dagents-client` 仅保留 `probe` / `update` / `version`。
+- **打包收敛**：以 Node + 内嵌 Web UI 为主；`dagents` / `dagents.cmd` 默认启动 Node 并打印 Web UI 地址。
+- **会话语义**：用户可见面统一为 Agent；`/v1/sessions*` 保留但加 Deprecation 头。
+- **Manage 注册**：上报 `node_id`（`agent_id` 兼容同值）。
+- **连接设置**：去掉全局 `max_tool_loops`；去掉进程级 LLM active 抢占。
+- **Web UI**：消息气泡 / 工具标签 / 思考指示器；Composer LLM 自定义下拉；侧栏紧凑列表；origin 本地/远端标识。
+- **Windows 安装器**：向导 UI 与 Web Workbench 深色主题对齐；修复 `OuterNotebook.Color` 编译错误。
+
+### 修复
+
+- 删除最后一个 Agent 后侧栏刷新；历史恢复过滤注入消息与并行工具展示。
+- Child Agent HTTP cancel 与沙箱单测 TempDir 清理竞态。
+- Manual Package 补上 `dagents-shell` 构建。
+
+（Git **tag**：`v0.8.0`。）
+
+---
+
+## [0.7.5] - 2026-07-10
+
+**Web UI 体验**：Composer 附件入口与设置页布局优化。
+
+### 变更
+
+- **Composer 附件**：图片/文件 icon 按钮移至输入框上方工具栏（与「思考」同排）；SVG 线型图标；图片与附件分路处理（预览 vs 路径插入）。
+- **设置页布局**：右侧主区域统一滚动，去掉子 panel 嵌套滚动条；Embedded 分区改为分隔线样式，减少「盒中盒」层级。
+
+（Git **tag**：`v0.7.5`。）
+
+---
+
+## [0.7.4] - 2026-07-09
+
+**Web UI 稳定性 + 设置扩展**：修复 SSE ack 洪泛与运行时 JS 错误；除 Node 监听地址外其余配置迁入设置菜单。
+
+### 新增
+
+- **设置页全量配置（除 Node 地址）**：`GET/PATCH /v1/setup/config` 扩展 `runtime`、`agent`、`child_agents`、`browser`、`tools`、`hooks` 与 `features` 高级项；Web UI 分区面板（通用 / 连接 / 上下文 / 安全）+ `useSetupConfig` 共享 load/save。
+- **单测**：`session.test.js`（ack/seq 水位）、`desktopFocus.test.js`（Shell focus 心跳）。
+
+### 修复
+
+- **`clearPartialToolIndex is not defined`**：`transcript.js` 补全从 `toolStream.js` 的 import。
+- **`POST /ack` → `ERR_INSUFFICIENT_RESOURCES`**：流式 SSE 不再每条事件 ack；与 Node `notify_seq` 对齐，仅在 `done`（回合完成）与 HITL 事件 ack；hydrate 仍立即 ack `sse_seq_hint`。
+- **SSE seq 水位**：合并 `lastAppliedSeq` 与 `transcriptStore.lastSeq`；仅在事件实际处理后推进 seq；子 Agent 跳过渲染的事件仍计入去重水位。
+- **Shell UI focus 重复上报**：`desktopFocus.js` 统一管理心跳与 1s 去重；从 `hydrateSession` 与 `sessionId` watch 移除重复 POST。
+
+（Git **tag**：`v0.7.4`。）
+
+---
+
+## [0.7.3] - 2026-07-09
+
+**Web UI 设置化 + 上下文体验**：安装向导不再配参；连接/压缩阈值写入 config.yaml；OpenAI thinking 与上下文占比环。
+
+### 新增
+
+- **设置 › 连接**：`GET/PATCH /v1/setup/config`，Web UI 配置 LLM、Manage、功能开关；`shared/config.SaveFile` 原子写 YAML；保存后 `llm.SyncFromConfig` 热同步 provider/model/mock。
+- **设置 › 上下文 › 压缩阈值**：配置 `compression.silent_trigger_tokens` / `blocking_trigger_tokens` 及 idle 自动压缩参数。
+- **ContextMeter**：Composer 状态栏右侧上下文 **已用占比** 进度环（相对 blocking/silent 阈值）；恢复 token usage 与缓存命中率展示。
+- **OpenAI thinking**：`provider=openai` 支持 `thinking` / `reasoning_effort` 出站与运行时热更新（与 DeepSeek 同形）。
+- **ToolSummaryRow**：长参数 `tool_call` 进行中显示 spinner、本地计时与边框呼吸动画（不流式展示参数正文）。
+
+### 变更
+
+- **Windows 安装器**：Inno 向导不再配置 LLM / Manage / 功能开关；首次安装复制 `config.example.yaml`；完成页引导 **设置 › 连接**。
+- **Web UI 清理**：移除 `AppHeader`、`SessionsPanel`、`ChildAgentsPanel`、`RuntimeStatusPanel`、`StatusLineBubble` 等孤立组件与死 store/API；统一 `utils/usage.js` 解析 usage。
+- **Node 清理**：移除 `EnvOpenAIClient`、journal `normalize` 包装、未使用的 HITL 导出等；history 直接使用 `llm.MessageToJournalPayload`。
+- **设置页 overlay**：关闭按钮加 `data-panel-close`，嵌入设置页时隐藏以免误点。
+
+### 修复
+
+- **usage 条截断**：移除 `.chat__input-strip-right` 的 `max-width: 55%` 限制。
+- **OpenAI adapter**：tool_calls 对齐时保留 `reasoning_content`。
+
+（Git **tag**：`v0.7.3`。）
+
+---
+
+## [0.7.2] - 2026-07-09
+
+**Shell 待办提醒 + 安装包 CI 修复**。
+
+### 新增
+
+- **F-N10 托盘图标闪烁**：有待办 HITL / 未读时，`icon.ico` ↔ `icon_pending.ico` 每 600ms 交替闪烁，并保留 `●` 角标；待办清零后恢复默认 icon。
+
+### 修复
+
+- **Windows 安装包 CI**：Inno Setup `[Code]` 中 `CurUninstallStepChanged` 参数类型 `TSetupUninstallStep` → `TUninstallStep`，修复 Release 构建在编译安装脚本时失败。
+
+（Git **tag**：`v0.7.2`。）
+
+---
+
+## [0.7.1] - 2026-07-09
+
+**品牌图标统一**：程序与文档视觉资源对齐 `desktop/tray/assets/icon.ico`。
+
+### 变更
+
+- **README**：顶部增加品牌图标（引用 `desktop/tray/assets/icon.ico`）。
+- **Web UI**：`favicon.ico` / `favicon.png` 与顶栏 `brand-icon.png` 统一为托盘同源图标；`index.html` 优先使用 `.ico`。
+- **Windows 安装包**：Inno Setup 向导图标改为 `desktop/tray/assets/icon.ico`（替换默认 Classic 图标）。
+
+（Git **tag**：`v0.7.1`。）
+
+---
+
+## [0.7.0] - 2026-07-09
+
+**跨端与体验收尾**：TUI hydrate、媒体缩略图/lightbox、Windows 更新迁移、A2A relay hydrate、Shell 运维兜底。Smoke 清单（归档）：[`docs/archive/design/v0.7.0-smoke-checklist.md`](docs/archive/design/v0.7.0-smoke-checklist.md)。
+
+### 新增
+
+- **F-H5 Go TUI hydrate**：切换/启动 session 后 `GET /v1/sessions/{id}/hydrate` 恢复 transcript 与 pending HITL。
+- **F-H6 Python TUI hydrate**：Textual TUI 同上，复用 Node hydrate API。
+- **F-M6 媒体缩略图**：`GET …/media/{id}?thumbnail=1` 服务端缩放（最长边 ≤480px；JPEG/PNG/GIF；WebP 回退原图）。
+- **F-M7 Lightbox 下载**：Web UI 列表/气泡用缩略图 URL，lightbox 全屏原图 + 下载按钮。
+- **F-M8 TUI 媒体提示**：Go/Python TUI 在 tool_result / hydrate 中打印 media URL 或 path（不渲染像素）。
+- **F-ND2 Windows 下线 Node update**：Windows 上 Node 不再 poll Manage；`GET /v1/agent/update` 返回 `delegate=shell`；Client/TUI 自动改读 Shell Desktop API。
+- **F-H4 A2A relay hydrate**：`GET /hydrate` 返回 `pending_a2a_relay`；Web/Go/Python TUI 恢复中继 HITL 队列。
+- **F-E5 Shell sessions 轮询兜底**：SSE 断线期间仍每 60s `GET /v1/sessions` 同步待办表。
+- **F-I5 shell.log**：Shell 进程内 `log` 追加写入 `.runtime/logs/shell.log`。
+
+（Git **tag**：`v0.7.0`。）
+
+---
+
+## [0.6.2] - 2026-07-08
+
+**桌面体验 + Shell 自更新**：路径粘贴、Shell 检查/应用更新、UI focus 抑制 HITL Toast。Smoke 清单（归档）：[`docs/archive/design/v0.6.2-smoke-checklist.md`](docs/archive/design/v0.6.2-smoke-checklist.md)。
+
+### 新增
+
+- **F-ND1 `GET /v1/agent/upgrade-readiness`**：返回 `ready` / `has_active_turn` / 活跃 session 列表；Shell apply 升级前查询 Node 是否空闲。
+- **F-I11 `shared/update`**：Manage check URL、manifest 解析、`download_url` 补全、安装包下载与 sha256 校验；Node `UpdateChecker` 改调共享库。
+- **F-U5 Shell UpdateChecker**：Shell 后台 poll Manage（`manage.update` 配置），读安装根 `VERSION` 缓存 `UpdateStatus`；**不依赖 Node 在跑**。
+- **F-X8 Shell localhost Desktop API**：默认 `127.0.0.1:18767`（update、clipboard、ui focus）；Web UI 跨端口 CORS。
+- **F-U6 Shell apply orchestration**：`POST /v1/desktop/update/apply`；查 `upgrade-readiness` → 下载 → stop Node → 覆盖 `bin/*`/`VERSION` → start Node。
+- **F-I12 `dagents.cmd update` → Shell**：Shell 在跑时委托 `dagents-shell.exe update`（localhost API）；API 不可达时回退 `dagents-client update`。
+- **F-N9 新版本 Toast / 托盘菜单**：Manage 有新版本时 Toast 通知 + 托盘「更新：新版本 x 可用」入口（打开设置 › 关于）。
+- **F-X8 Web UI Update 面板**：设置 › 关于优先读 Shell `GET /v1/desktop/update`；Shell 可用时支持页面内一键升级。
+- **F-P2 Shell clipboard API**：`GET /v1/desktop/clipboard/files` 读取 Windows `CF_HDROP` 完整路径。
+- **F-P1 / F-P3 / F-X4 路径粘贴**：Composer paste/drop 插入绝对路径；浏览器无路径时调 Shell API；多文件换行分隔。
+- **F-E9 / F-X5 / F-H13 UI focus 抑制 Toast**：Web UI hydrate/切换 session 时 `POST /v1/desktop/ui/focus`；Shell 抑制同 session 新 HITL Toast（托盘待办仍更新）。
+
+### 修复
+
+- **图片路径**：`show_image` / `read_image` 支持 FS_ROOT 外绝对路径；`MediaRegistry` 注册绝对路径；UI 无 media 时提示。
+- **Hydrate 工具行**：按 `blockId` 合并 tool_call + tool_result，避免历史还原成双行。
+
+（Git **tag**：`v0.6.2`。）
+
+---
+
+## [0.6.1] - 2026-07-08
+
+**产品化 Web UI 1.0** + `show_image` + Session Media API。Smoke 清单（归档）：[`docs/archive/design/v0.6.1-smoke-checklist.md`](docs/archive/design/v0.6.1-smoke-checklist.md)。
+
+### 新增
+
+- **v0.6.1 Web UI 产品化（F-UI1–UI6, F-UI8–UI11）**：`vue-router` 聊天/设置路由；两栏聊天布局与产品化顶栏；工具 **一行摘要 + 展开详情**（`ToolSummaryRow`）；Composer 简化（Enter 发送）；HITL sticky 与会话未读/待审批 badge；**设置** 导航（通用 / 技能 / 定时任务 / 安全 / 关于 / 帮助 / 上下文）。
+- **F-UI10 定时任务管理**：设置 › 定时任务 — 列表、新建、编辑、启用/禁用、删除（无手动 fire / history）。
+- **F-UI11 子 Agent 取消（Web UI）**：设置 › 通用 › 子 Agent 列表；运行中项可 **取消**（`POST …/child-agents/{id}/cancel`）；`/children` overlay 同步支持。
+- **F-UI7 system 消息降级**：压缩、子 Agent 生命周期等 system 消息不再插入主消息流（聊天区不展示）。
+- **F-UI9 图片 lightbox**：工具结果与用户消息缩略图点击全屏预览（Esc / 遮罩关闭，多图可切换）。
+- **设置 › 通用 › 显示思考过程**：控制对话区是否展示 reasoning / thinking 流（`localStorage` 持久化；`/reasoning on|off` 仍可用）。
+- **设置 › 上下文**：完整会话消息浏览（`GET …/context?full_messages=1`）；自 Composer 移除「上下文」按钮。
+- **Media 轨道（F-M0–M5, F-H10）**：`show_image` 工具；`MediaRegistry` + `GET …/media/{id}`；工具结果与 hydrate 含 `media[]`；`ImageResultPreview` 内联缩略图；F5 hydrate 回放。
+- **品牌与顶栏**：雪花 favicon / 顶栏图标；帮助迁入 **设置 › 帮助**；顶栏「设置」改为齿轮图标。
+
+### 变更
+
+- **聊天滚动**：统一滚到底部 + `followTail`；手动上滚暂停跟随，发消息或回到底部恢复。
+- **会话侧栏**：按 `updated_at` 降序；当前会话置顶；删除当前会话后自动切换或新建；切换/新建不再插入 system 切换提示；移除副标题「点击切换，+ 新建」。
+- **布局**：移除右侧常驻诊断栏；连接状态保留顶栏指示；帮助页与设置页取消 640px 宽度限制。
+- **Node**：tool 消息持久化 `Name`；hydrate 回溯 `tool_name`；列表 API 补活跃 session 的 `updated_at` / `first_user_message`。
+- **主路径文案中文化（F-UI12）**：流式状态（准备回复 / 思考中 / 压缩上下文）、压缩活动记录等改为中文。
+- **流式状态展示（方案 A）**：有正文流式输出后不再单独显示「准备回复」；状态行完成后立即移除；「准备回复」「正在生成」与思考过程流式均为纯三点动画（无文字标签），完成后只保留正文。
+- **CSS 拆分（F-UI13）**：`styles/tokens.css`、`styles/layout.css`；`workbench.css` 保留组件样式并通过 `@import` 引用。
+
+### 修复
+
+- **Web UI**：UserInfo 选项提交、`user_message_deferred` 等旁路 SSE 可见；删除会话后仍停留原 session 的问题。
+- **工具展示**：`toolUserLabel` 与 tool 占位符；禁止空白 `tool()` 摘要。
+- **Hydrate 工具行**：`buildStream` 按 `blockId` 合并 tool_call + tool_result，避免历史还原成「进行中 + 已完成」两行。
+
+（Git **tag**：`v0.6.1`。）
+
+---
+
+## [0.6.0] - 2026-07-08
+
+**Windows Desktop Shell 闭环**：自启 Shell 监护 Node、HITL Toast、Hydrate、IM cursor 未读、idle 卸内存、Windows 安装包含 Shell 登录自启。Smoke 清单（归档）：[`docs/archive/design/v0.6.0-smoke-checklist.md`](docs/archive/design/v0.6.0-smoke-checklist.md)。
+
+### 新增
+
+- **v0.6.0 安装发布（F-I1/I3/I8–I10）**：Windows 包必含 `dagents-shell.exe`；Inno 安装后注册 Shell 登录自启并可选立即启动；`dagents.cmd shell`（start/status/stop）；卸载/升级清理 Run 键并 stop Shell。
+- **F-NM1–NM5 idle session 维护（Node）**：`Manager.Release`；idle 扫描内压缩后卸内存；pending HITL 可 evict。
+- **F-E13 IM cursor（Node + Web UI + Shell）**：`runtime_state_json` 持久化 `notify_seq`/`ack_seq`；Hub 发布时 bump notify；`POST /v1/sessions/{id}/ack`；hydrate/list 返回 `has_unread`；Web UI SSE/hydrate 后 ack；Shell 待办表改从 `GET /v1/sessions` 同步。
+- **v0.6.0 Shell 通知与深链（F-N1–N3/N10, F-U1–U3, F-E13）**：Windows Toast + 点击打开 `?session=<id>`；托盘待办子菜单与 `icon_pending` 态；未读 assistant 待办（IM cursor）；「打开控制台」菜单。
+- **v0.6.0 Shell SSE 待办（F-E1–E4/E10–E12）**：`dagents-shell` 常驻订阅 `GET /v1/streams?live=1`；按 session 聚合 HITL/A2A 事件；`GET /v1/sessions` 轮询兜底；可选 `DAGENTS_CLIENT_TOKEN` Bearer 鉴权。
+- **v0.6.0 Hydrate API（F-H1/H2/H14/H7–H9/H17）**：`GET /v1/sessions/{id}/hydrate`；Web UI hydrate 管线；evicted session 可恢复。
+- **v0.6.0 Shell 基础（F-L8–L10/L12–L13/L15）**：`dagents-shell.exe`；启动 ensure Node、退出 stop Node；Shell/Node 单实例 Mutex；Node crash 自动重启；`scripts/ci/build_dagents_shell.sh` + Release CI。
+
+### 修复
+
+- **Shell Node 启动**：修复 `nodectl.Start` 使用 `CommandContext` 导致 `ctx` cancel 后误杀后台 Node 的问题。
+
+（Git **tag**：`v0.6.0`。）
+
+---
+
+## [0.5.5] - 2026-07-01
+
+**Browser 模式 A 与发布打包**：browser-use 薄服务 `dagents-browser`、Go `browser_*` 工具组、多模态视觉；Agent 身份迁入 `config.yaml`；Windows 安装向导与 PyInstaller CI。
+
+### 新增
+
+- **Browser 模式 A（browser-use 薄服务）**：Python `browser-service/`（`dagents_browser`）驱动本机 Chrome；Go `BrowserManager` + 23 个 `browser_*` 工具（navigate/click/fill/snapshot/extract 等）；设计见 `docs/design/browser-remote-service-mode-a.md`。
+- **PyInstaller `dagents-browser`**：CI / 本地打包脚本 `scripts/ci/build_dagents_browser.sh`；Release workflow 与 `dagents-cli` 并列构建；组装进 `bin/dagents-browser[.exe]`。
+- **多模态 / Vision**：`multimodal.enabled` + `read_image`；开启后 `browser_*` 自动切视觉模式（`browser_snapshot` 截图注入、`browser_click_coordinate`）。
+- **Agent 配置化**：`agent.name` / `description` / `role` / `capabilities` / `metadata` 写入 `config.yaml`，替代工作目录 `agent-card.json`；Manage 注册与 A2A 行为由 `shared/config` 推导。
+- **Windows 安装向导**：Inno Setup 三批向导（LLM / Manage / 功能开关）、简体中文 UI；`write-install-config.ps1` 按选项生成 `config.yaml`；启用 Browser 时创建 `.runtime/browser/`。
+- **CLI `dagents browser`**：Windows `dagents.cmd` / Linux `dagents` 支持 `browser` / `browser stop` / `--background` 后台启动薄服务。
+- **Web UI**：消息气泡支持 tool 参数/结果折叠展示；工作台样式微调。
+
+### 变更
+
+- **A2A 案例与打包**：`cases/a2a-manage-docker` 改用 `agent:` 块；删除 `agent-card.example*.json` 与 `packaging/agent-client/agent-card.*`；`config.example.yaml` 补充 `browser` / `multimodal` / `ui` / `hooks` 注释块。
+- **Manage 离线包**：`docker-compose` 补充环境变量示例；assemble 脚本路径对齐。
+- **LLM 消息模型**：`ContentPart` 多模态片段；OpenAI provider 透传 image URL / base64。
+
+### 移除
+
+- **`node/internal/manage/agentcard.go`** 及独立 Agent Card 文件路径逻辑；注册 Card 由 config 合成。
+
+（Git **tag**：`v0.5.5`。）
+
+## [0.5.4] - 2026-06-30
+
+**Manage 案例库与制品分发**：案例关联已发布 Skills/Plugins/External Tools、支持附件；Plugins 包 API；Node `/upload` 斜杠命令；Console 列表页与 A2A 修复。
+
+### 新增
+
+- **案例库资源选择器**：Skills / Plugins / External Tools 从已发布目录多选（`ResourcePicker`），保存时校验 catalog 引用。
+- **案例附件**：`POST/DELETE /v1/cases/{id}/attachments`；编辑页上传、详情页下载。
+- **Manage Plugins 分发**：`POST/GET /v1/plugins/*`；Console **Node 配置 → Plugins** 管理页。
+- **Node → Manage 上传**：`POST /v1/manage/upload/{skill|externaltool|plugin}`；TUI / WebUI **`/upload`** 斜杠命令（`manage.enabled` 时）。
+- **案例 tool 消息过滤**：导入 JSONL 与 Console 展示时过滤无法解析工具名的 orphan `role=tool` 消息。
+
+### 变更
+
+- **Manage Console 案例库**：卡片列表 + 搜索分页；详情顶栏紧凑化；Registry / Inbox 表格纵向填满视口；移除批量 discovery_group 面板。
+- **A2A Task 序列化**：入库/出库前清理非法 UTF-16 surrogate，修复 Admin 任务列表 500。
+
+### 修复
+
+- **页头刷新按钮**：SVG 误用 `btn-icon` 导致文字前空白。
+
+（Git **tag**：`v0.5.4`。）
+
+## [0.5.3] - 2026-06-30
+
+**外置工具目录与 Manage 分发**：`.runtime/externaltools/` 替代 `scripts/`；Manage External Tools API 与 Console 管理页；案例库 `externaltool_ids`；文档收敛至 handbook。
+
+### 新增
+
+- **外置工具目录**：`.runtime/externaltools/`（索引 **`externaltools_menu.md`**）；`externaltools` 包、`bash_run` 描述与 system prompt 同步更新；安装脚本 PATH 加入 `externaltools/`。
+- **Manage External Tools 分发**：`POST/GET /v1/externaltools/*`；Console **Node 配置 → External Tools** 管理页。
+- **案例库资源**：`resources.externaltool_ids` 与 Skills、Plugins 分列。
+
+### 变更
+
+- **文档清理**：删除 `docs/archive/`、Python 运行时跳转桩与重复的内置工具参考；**handbook** 为唯一正文入口。
+
+（Git **tag**：`v0.5.3`。）
+
+## [0.5.2] - 2026-06-29
+
+**Manage Console 案例库体验**：JSONL 先解析再填元数据；消息列表按 role 分模式展示，tool 消息展示工具名/参数/结果。
+
+### 新增
+
+- **案例新建两步流**：先上传 JSONL 解析，再进入编辑页填写 case 元数据并调整消息列表；`POST /v1/cases/parse-jsonl` 仅解析不落库。
+- **CaseMessageList 组件**：默认只读卡片展示；点击「编辑」进入表格模式（前插/改/删）；tool 消息展示工具名、参数（关联 assistant `tool_calls`）、结果。
+
+### 变更
+
+- **Manage Console 表单布局**：LLM / Skills / Releases / Node 管理页统一 `form-block` + `form-grid` 样式。
+- **Console 字体**：移除 Google Fonts 外链，改用系统字体栈（代理/离线环境不再报错）。
+
+### 修复
+
+- **VS Code 调试**：补充 Manage 与 Console Vite dev 的 `launch.json` 配置项。
+
+（Git **tag**：`v0.5.2`。）
+
+## [0.5.1] - 2026-06-25
+
+**0.x 预览**：Hook **in-process 插件栈**、**Manage Console**（LLM 配置 / Skills 分发 / PageAgent）、**idle 自动压缩**、Python TUI **上次 session 记忆**等。
+
+### 新增
+
+- **loaded skill 文件保护 Hook**：`builtin.loaded_skill_file_guard`（`tool.before_each`）阻止 `write_file` / `search_replace` / 会改文件的 `bash_run` 修改已加载 skill 目录；`write-skill` 可选 `hooks/protect-loaded-skill/` plugin（见 `node/plugins/`）。
+- **无动作自动压缩**：`compression.idle_auto_compress_seconds` / `idle_auto_compress_poll_seconds` / `idle_auto_compress_min_tokens`；后台扫描 idle session，超时且 token 达阈值时 `ForceBlocking` 压缩；压缩后 `runtime_state.idle_auto_compress_applied` 打标跳过重复扫描，用户新对话等入队时清标。
+- **压缩摘要 JSONL 脚注**：启用 `raw_message_history` 时，压缩写回前在摘要末尾追加 `history/YYYYMMDD/<session>.jsonl` 指引（`FinalizeCompressionSummary`）。
+- **protect-loaded-skill plugin 构建**：源码迁至 `node/plugins/protect-loaded-skill/`（node 模块内 build）；`go test ./node/plugins/...` 与 CI 构建 smoke；packaging `hooks/build.sh` 委托 node 路径。
+- **Turn Hook phase 接线**：`turn.error` / `turn.cancel` 在 LLM 失败、流式 cancel、tool 处理 cancel 等路径触发。
+- **HITL 大参数诊断**：`scripts/test_python_hitl_large_args.py` 与 `tests/test_cli_hitl_large_args.py`（SSE / HITL 展开 / 入队分层验证）。
+- **Open Issue**：[#39](https://github.com/DGS-ai-team/DAgents/issues/39) / [#40](https://github.com/DGS-ai-team/DAgents/issues/40)（同一根因：终端 TUI partial 与 HITL UI 竞态；Web UI 正常）。
+- **Python TUI 上次 session 记忆**：退出时写入 `<runtime>/client/last_session.json`；下次 `dagents chat` 未指定 `--session` 时默认复用（按 `api_base` 匹配）；`/switch` 同步更新。
+- **Manage LLM 配置注册中心**：`/v1/llm/configs` CRUD + `/resolve` 端点；list/detail `api_key` 掩码（`sk-***last4`），`/resolve` 返回明文 `{model,baseURL,apiKey}`（PageAgent 兼容形）；`is_default` 全局唯一；`allowed_groups` 按 `discovery_group` 命名空间**强制可见性**（非 admin：list 过滤、get/resolve/default-resolve 不可见返回 404）；仅适用于本地/局域网信任部署。多 Node / 外部可按 id 复用；Node 自动消费（热更/同步）延后到 Phase 2，Console 管理页见下。
+- **Manage Platform Blob API**：`POST /v1/blobs`（multipart 上传）、`GET/HEAD/DELETE /v1/blobs/{id}`；内容寻址（`blob_id = sha256`），字节落盘 `MANAGE_BLOB_DIR/{sha256}` + 元数据 `{sha256}.json` sidecar（不入 SQLite）；blob_id 严格 64 位十六进制校验防路径穿越；`blob store disabled` 返回 503；供 A2A 文件传输与 Skills 分发共用。
+- **Manage Skills 分发（精简版）**：`POST /v1/skills/packages`（multipart，draft；`skill_id`/`version` 限 URL 安全 slug，非法返回 422）+ `POST /v1/skills/packages/{id}/versions/{v}/publish`（单步发布，**幂等**：重复发布不再 bump `catalog_version`）+ `GET /v1/skills/catalog`/`{id}`/`{id}/versions/{v}/download`（仅 published）+ `GET /v1/skills/sync/manifest?since=N`（返回 `{catalog_version, items}` 信封）；多级审批工作流、Node 自动同步（心跳 `skills_catalog_version`→拉取→解压）延后到 Phase 2，Console 管理页见下。
+- **Manage Console 集成（Vue SPA）**：新增 **Node 管理** 菜单（含 **LLM 配置** / **Skills** 两个子标签：LLM 配置 CRUD/掩码、Skill 上传/发布/下载），以及全局 **PageAgent 命令栏**——选定一个 LLM 配置后经 `/resolve` 取 `{model,baseURL,apiKey}`、`new PageAgent(...)` 用自然语言操作控制台；`page-agent` 经 npm 依赖 + 动态 import 懒加载分包（不依赖运行期外网 CDN）。
+- **Hook in-process 插件栈**：内置 Hook、全局 `hooks.plugins`（`.so` + `Register`）、skill 级 `skills/<name>/hooks/*.so` 统一 `Hook.Run(ctx, *Context, Host)`；`Host` 提供 `SessionStore*` / `LLMComplete` / 只读快照；session 级 `hook_store` 持久化于 SQLite；`llm.before_call` 及多数 lifecycle phase 已接线。
+- **write-hook skill**：随包发布 `packaging/runtime/skills/write-hook/`，指导编写 Go Hook plugin（phase、mutation、编译与 config）。
+- **`packaging/runtime/plugins/`**：全局 Hook plugin 占位目录说明。
+
+### 变更
+
+- **原始消息 JSONL 目录**：由 `history/<session>_YYYYMMDD.jsonl` 改为 **`history/YYYYMMDD/<session>.jsonl`**（按自然日分子目录）；启用 `raw_message_history` 时 system prompt 工作区说明与 `read_file` 描述补充该路径及 `grep_file`/`read_file` 复盘用法。废弃 command / http / YAML 外部 Hook 与 `packaging/runtime/hooks/` shell 示例；`load_skills` / `unload_skills` / clear-context 同步 skill plugin Registry。
+- **压缩侧车 prompt**：已完成/进行中任务三行式说明微调；摘要末尾可保留少量关键指令（≤三行）。
+- **protect-loaded-skill 布局**：删除 packaging 下独立 `go.mod`（无法 import `internal/hooks`）；canonical 源码在 `node/plugins/`。
+- **Hook Host**：`hooks.host.history_window` 省略或 ≤0 时不截断 Context history（移除默认 50 条上限）。
+- **write-skill**：Hook 编写说明拆至 **write-hook** skill。
+- **tool.before_each deny**：Hook mutation 支持 `approval_reason`；`ActionDeny` 的 tool 结果文案走 `ToolDenyMessage`（不再固定 `policy_denied`）。
+- **前端静态资源不入库**：`node/internal/webui/static/`、`manage/console/static/` 改 CI / `build.sh` 构建；PR 与 Release 工作流补 Manage Console build。
+- **全项目唯一版本号**：canonical 仅 `node/internal/version/`；Client/TUI 欢迎区与 `dagents version` / `dagents-client version` 均读 Node `GET /health`（移除 `client/internal/version`、`CLI_VERSION`）。
+
+### 移除
+
+- **`node/internal/hooks/external_*`**（command/http/journal 外部栈）及 `packaging/runtime/hooks/redaction.sh`。
+- **Turn 层 dead SSE helper**：`publishUserInformationRequired` / `publishApprovalRequired`（本地 turn 已统一 `hitl_required`；A2A 仍在 session 层发旧事件）。
+- **`client/internal/version/`**、Python **`CLI_VERSION`**；已落地的 **`docs/superpowers/plans/`** 实施 plan（设计见 `docs/design/manage-llm-skills-pageagent.md`）。
+
+### 修复
+
+- **Hook Host LLM 配额**：`RunHumanMessageTurn` 开始时重置 `hookHostState.llmCalls`，避免同一 session 后续 user turn 误触 `ErrLLMQuotaExceeded`。
+- **Plugin YAML phases**：全局 plugin 注册时用配置 phases 与插件声明 phases **取交集** 约束注册阶段（skill 目录 `.so` 仍用插件自身 phases）。
+- **Python TUI HITL（待现场回归）**：审批 UI 在 UI 线程同步弹出（避免 `call_later` 排在大量 `tool_call` partial 之后）；timeout/abort 时 cancel 在途 `_hitl_task`；`search_replace` 流式 partial 不再展示 growing raw JSON。详见 [#39](https://github.com/DGS-ai-team/DAgents/issues/39) / [#40](https://github.com/DGS-ai-team/DAgents/issues/40)。
+- **Windows `bash_run` 中文乱码（pipe 模式）**：PowerShell 交互窗口走 `[Console]::OutputEncoding`，stdout 被 pipe 捕获时默认走 `$OutputEncoding`（常为 US-ASCII），中文在 Go 解码前已损坏；`bash_run` 执行前自动注入 `$OutputEncoding = [Console]::OutputEncoding`，与交互式行为对齐。
+
+（Git **tag**：`v0.5.1`。）
+
 ## [0.5.0] - 2026-06-21
 
 **0.x 预览**：Turn **旁路侧效应**（Produce / Apply / Continue）落地；**Hooks RunPhase** 框架；异步工具回灌消息对模型更友好；Web UI 流式状态与 deferred 旁路展示对齐 Client。
@@ -87,7 +775,7 @@
 - **Manage 离线 bundle**：`scripts/ci/assemble_manage_bundle.sh` 产出 `dagents-manage-bundle-*.tar.gz`（镜像 + `import-image` / `restart` 脚本 + `docker-compose.offline.yml`）；Release CI 自动附加。
 - **安装 policy 交互**：Linux `install.sh`（`--overwrite-policy` / `--keep-policy` + TTY 询问）；Windows Inno Setup 安装时可选覆盖 `_seed/policy`。
 - **Agent Card 示例**：`packaging/agent-client/agent-card.example.json`；Node 工作目录固定 `./agent-card.json`（`manage.AgentCardFileName`）。
-- **文档**：[built-in-tools-reference.md](docs/built-in-tools-reference.md)（25 个内置工具全量参考）；[manage-communication.md](docs/manage-communication.md)（Manage / Node / Client 通信与数据面）。
+- **文档**：内置工具参考迁入 handbook 附录；Manage 通信叙述见 handbook/05（历史长文已归档）。
 
 ### 变更
 
@@ -146,7 +834,7 @@
 
 ### 文档
 
-- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增 [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) 与 [major-changes.md §2](docs/design/major-changes.md#2-工具链上下文成本优化已落地)。
+- 重组 `docs/` 四层索引；`context-compression-and-state` 迁入 `archive/python-agent-runtime/`；新增 [tool-context-cost-analysis.md](docs/design/tool-context-cost-analysis.md) 与 handbook [重大设计变更实录](docs/handbook/附录/重大设计变更实录.md) §2。
 
 （Git **tag**：`v0.3.6`。）
 
@@ -167,7 +855,7 @@
 
 ### 新增
 
-- **上下文压缩 × Prompt Cache**：侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；M3 **silent 冷却**抑制重复侧车；`/last_compression` 与压缩 usage 展示；设计实录见 [major-changes.md](docs/design/major-changes.md)。
+- **上下文压缩 × Prompt Cache**：侧车 `StreamChat` 与主 turn 前缀对齐（system + tools + messages）；M3 **silent 冷却**抑制重复侧车；`/last_compression` 与压缩 usage 展示；设计实录见 [重大设计变更实录](docs/handbook/附录/重大设计变更实录.md)。
 - **User 消息 `name` 字段**：human / trigger / a2a_inbox / child_task / compression / async_tool / compression_sidecar，便于模型区分上下文来源（DeepSeek Chat API）。
 - **Tool call 流式展示**：LLM delta 阶段即推送 `partial: true` 的 tool_call SSE；Go / Python TUI 在工具名出现后展示 pending 块，arguments 边流边更新代码预览。
 - **LLM `user_id`**：每次 Chat Completions 请求附带 `user_id=agent_id`（DeepSeek 文档推荐，便于服务端观测与限流）。

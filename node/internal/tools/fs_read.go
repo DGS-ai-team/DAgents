@@ -21,7 +21,8 @@ func readFileToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "read_file",
-			Description: "prompt_context/ 下 soul/user/custom 侧车 Markdown 已注入 system prompt，通常无需 read_file。" +
+			Description: "侧车 soul/user/custom 与长期记忆已注入 system prompt（存于数据库），通常无需 read_file 读取。" +
+				" history/ 下 JSONL 为原始对话审计（`history/YYYYMMDD/<session_id>.jsonl`），需复盘历史 utterance 时可分页读取。" +
 				" 按行窗口读取文本文件，大文件用 line_offset/line_limit 分页。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",

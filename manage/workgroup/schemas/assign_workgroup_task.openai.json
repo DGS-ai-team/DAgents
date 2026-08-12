@@ -1,0 +1,97 @@
+{
+  "type": "function",
+  "function": {
+    "name": "assign_workgroup_task",
+    "description": "Synchronously assign work to one workgroup member. Blocks until assign reaches a terminal status. v1 member tools are limited to read_file on workspace-relative paths (e.g. README); do not ask members to open host absolute paths.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "member_id",
+        "instruction"
+      ],
+      "properties": {
+        "member_id": {
+          "type": "string",
+          "pattern": "^mb_[0-9a-z]{26}$"
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16000,
+          "description": "Task for the member. For file reads, prefer relative paths under the member workspace."
+        },
+        "context_hint": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    }
+  },
+  "result_schema": {
+    "oneOf": [
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assign_id",
+          "status",
+          "summary",
+          "error_code"
+        ],
+        "properties": {
+          "assign_id": {
+            "type": "string",
+            "pattern": "^as_[0-9a-z]{26}$"
+          },
+          "status": {
+            "const": "succeeded"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "error_code": {
+            "type": "null"
+          }
+        }
+      },
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assign_id",
+          "status",
+          "summary",
+          "error_code"
+        ],
+        "properties": {
+          "assign_id": {
+            "type": "string",
+            "pattern": "^as_[0-9a-z]{26}$"
+          },
+          "status": {
+            "enum": [
+              "failed",
+              "canceled",
+              "indeterminate"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "error_code": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    ]
+  },
+  "invariants": [
+    "exactly_one_active_assign_per_workgroup_v1",
+    "tool_result_exactly_one_per_tool_call_id",
+    "timeline_actor_final_text_deduped_by_assign_id_for_leader_context"
+  ]
+}

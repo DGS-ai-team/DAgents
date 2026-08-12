@@ -36,7 +36,8 @@ func (s *Server) handleCreateTrigger(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	def, err := triggers.NewDefinitionFromCreate(body, s.cfg.AgentID, time.Now())
+	body.NormalizeCreateAliases()
+	def, err := triggers.NewDefinitionFromCreate(body, s.cfg.NodeID, time.Now())
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_trigger", err.Error(), nil)
 		return

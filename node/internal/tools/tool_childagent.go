@@ -20,7 +20,7 @@ func createTemporaryAgentToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name: "create_temporary_agent",
-			Description: "创建同进程临时 Agent（temporary agent）执行自包含子任务，非外部 A2A 对等调用。" +
+			Description: "创建同进程临时 Agent（temporary agent）执行自包含子任务。" +
 				"wait=true 时阻塞至完成。须在 task 中提供完整上下文，并通过 allowed_tools 指定其可用工具（仅限你当前拥有的工具子集）。" +
 				"可通过 skill_names 在创建时预加载 skills（与 load_skills 同名语义，子 Agent 运行期不可再加载 skills）。",
 			Parameters: injectCallPurposeParam(map[string]any{
@@ -57,11 +57,11 @@ func waitTemporaryAgentsToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "wait_temporary_agents",
-			Description: "等待一个或多个临时 Agent（temporary agent）到达终态并汇总；非 A2A 消息轮询。",
+			Description: "等待一个或多个临时 Agent（temporary agent）到达终态并汇总。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"child_session_ids": map[string]any{
+					"child_agent_ids": map[string]any{
 						"type":        "array",
 						"items":       map[string]any{"type": "string"},
 						"description": "临时 Agent 的 session id 列表（create_temporary_agent 返回）",
@@ -69,7 +69,7 @@ func waitTemporaryAgentsToolDef() ToolDef {
 					"timeout_seconds": map[string]any{"type": "integer", "description": "最长等待秒数，0 表示立即返回当前快照"},
 					"fail_fast":       map[string]any{"type": "boolean", "description": "任一进入失败终态时提前返回"},
 				},
-				"required":             []string{"child_session_ids"},
+				"required":             []string{"child_agent_ids"},
 				"additionalProperties": false,
 			}),
 		},
@@ -81,17 +81,17 @@ func temporaryAgentStatusToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "temporary_agent_status",
-			Description: "非阻塞查询临时 Agent（temporary agent）状态；非 A2A。",
+			Description: "非阻塞查询临时 Agent（temporary agent）状态。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"child_session_ids": map[string]any{
+					"child_agent_ids": map[string]any{
 						"type":        "array",
 						"items":       map[string]any{"type": "string"},
 						"description": "临时 Agent 的 session id 列表",
 					},
 				},
-				"required":             []string{"child_session_ids"},
+				"required":             []string{"child_agent_ids"},
 				"additionalProperties": false,
 			}),
 		},
@@ -103,24 +103,24 @@ func cancelTemporaryAgentToolDef() ToolDef {
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "cancel_temporary_agent",
-			Description: "取消仍在运行的临时 Agent（temporary agent）；非 A2A。",
+			Description: "取消仍在运行的临时 Agent（temporary agent）。",
 			Parameters: injectCallPurposeParam(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"child_session_id": map[string]any{
+					"child_agent_id": map[string]any{
 						"type":        "string",
 						"description": "临时 Agent 的 session id",
 					},
 					"reason": map[string]any{"type": "string", "description": "取消原因（可选）"},
 				},
-				"required":             []string{"child_session_id"},
+				"required":             []string{"child_agent_id"},
 				"additionalProperties": false,
 			}),
 		},
 	}
 }
 
-// RegisterChildAgentToolStubs 注册临时 Agent 工具占位（执行由 orchestrator 处理，非 A2A）。
+// RegisterChildAgentToolStubs 注册临时 Agent 工具占位（执行由 orchestrator 处理）。
 func (r *Registry) RegisterChildAgentToolStubs() {
 	for _, name := range []string{
 		"create_temporary_agent", "wait_temporary_agents", "temporary_agent_status", "cancel_temporary_agent",

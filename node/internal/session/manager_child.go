@@ -29,10 +29,10 @@ func (m *Manager) ParentSessionActive(parentID string) bool {
 func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.sessions[spec.ChildSessionID]; ok {
+	if _, ok := m.sessions[spec.ChildAgentID]; ok {
 		return fmt.Errorf("child session already exists")
 	}
-	if parent, ok := m.sessions[spec.ParentSessionID]; !ok || parent.isChildSession() {
+	if parent, ok := m.sessions[spec.ParentAgentID]; !ok || parent.isChildSession() {
 		return fmt.Errorf("parent session not found")
 	}
 	loadedSkills, err := m.resolveChildLoadedSkills(spec.SkillNames)
@@ -42,8 +42,8 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 	childOpts := m.turn
 	childOpts.MaxToolLoops = spec.MaxTurns
 	rt := newChildRuntime(
-		spec.ChildSessionID,
-		spec.ParentSessionID,
+		spec.ChildAgentID,
+		spec.ParentAgentID,
 		m.agentID,
 		m.hub,
 		m.llm,
@@ -56,7 +56,7 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 		loadedSkills,
 		m.children,
 	)
-	m.sessions[spec.ChildSessionID] = rt
+	m.sessions[spec.ChildAgentID] = rt
 	rt.start(m.ctx)
 	return nil
 }
@@ -94,10 +94,14 @@ func (m *Manager) StopChild(childSessionID string) {
 	m.mu.Lock()
 	rt, ok := m.sessions[childSessionID]
 	if ok {
-		rt.stop()
 		delete(m.sessions, childSessionID)
 	}
 	m.mu.Unlock()
+	if ok {
+		// StopChild may be called by the child consumeLoop itself after it
+		// reports completion; do not wait for that goroutine from itself.
+		rt.requestStop()
+	}
 }
 
 // EnqueueChildTask 向子 session 投递首条 task。
@@ -137,7 +141,7 @@ func (m *Manager) DeliverChildResume(childSessionID string, resume map[string]an
 		return fmt.Errorf("no_pending_hitl")
 	}
 	m.logger.Info("resume deliver child",
-		"child_session_id", childSessionID,
+		"child_agent_id", childSessionID,
 		"resume_value", resume,
 	)
 	return rt.enqueue(queue.Envelope{RequestType: "resume", ResumeValue: resume}, queue.PriorityResume)
@@ -147,7 +151,7 @@ func (m *Manager) DeliverChildResume(childSessionID string, resume map[string]an
 func (m *Manager) DeliverParentResume(parentSessionID string, resume map[string]any) error {
 	rt := m.getRuntime(parentSessionID)
 	if rt == nil {
-		return fmt.Errorf("session_not_found")
+		return fmt.Errorf("agent_not_found")
 	}
 	if !rt.hasPendingHITL() {
 		return fmt.Errorf("no_pending_hitl")
@@ -179,7 +183,7 @@ func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, err
 		return nil, nil
 	}
 	if m.Get(parentSessionID) == nil {
-		return nil, fmt.Errorf("session_not_found")
+		return nil, fmt.Errorf("agent_not_found")
 	}
 	recs := m.children.ListActive(parentSessionID)
 	out := make([]ChildAgentView, 0, len(recs))
@@ -188,19 +192,19 @@ func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, err
 			continue
 		}
 		turnCount := rec.TurnCount
-		rt := m.getRuntime(rec.ChildSessionID)
+		rt := m.getRuntime(rec.ChildAgentID)
 		if rt != nil {
 			turnCount = rt.toolLoopCountSnapshot()
 		}
 		out = append(out, ChildAgentView{
-			ChildSessionID: rec.ChildSessionID,
-			Status:         string(rec.Status),
-			Purpose:        rec.Purpose,
-			AllowedTools:   append([]string(nil), rec.AllowedTools...),
-			CreatedAt:      rec.CreatedAt,
-			ExpiresAt:      rec.ExpiresAt,
-			TurnCount:      turnCount,
-			MaxTurns:       rec.MaxTurns,
+			ChildAgentID: rec.ChildAgentID,
+			Status:       string(rec.Status),
+			Purpose:      rec.Purpose,
+			AllowedTools: append([]string(nil), rec.AllowedTools...),
+			CreatedAt:    rec.CreatedAt,
+			ExpiresAt:    rec.ExpiresAt,
+			TurnCount:    turnCount,
+			MaxTurns:     rec.MaxTurns,
 		})
 	}
 	return out, nil
@@ -216,14 +220,14 @@ func (m *Manager) CancelChildAgent(parentSessionID, childSessionID, reason strin
 
 // ChildAgentView 为 HTTP 列表项。
 type ChildAgentView struct {
-	ChildSessionID string    `json:"child_session_id"`
-	Status         string    `json:"status"`
-	Purpose        string    `json:"purpose"`
-	AllowedTools   []string  `json:"allowed_tools"`
-	CreatedAt      time.Time `json:"created_at"`
-	ExpiresAt      time.Time `json:"expires_at"`
-	TurnCount      int       `json:"turn_count"`
-	MaxTurns       int       `json:"max_turns"`
+	ChildAgentID string    `json:"child_agent_id"`
+	Status       string    `json:"status"`
+	Purpose      string    `json:"purpose"`
+	AllowedTools []string  `json:"allowed_tools"`
+	CreatedAt    time.Time `json:"created_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	TurnCount    int       `json:"turn_count"`
+	MaxTurns     int       `json:"max_turns"`
 }
 
 func lastAssistantSummary(msgs []llm.Message) string {

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/HITLResolution.json",
+  "title": "HITLResolution",
+  "type": "object",
+  "required": [
+    "hitl_id",
+    "resolution_id",
+    "resolver_node_id",
+    "client_message_id",
+    "decision",
+    "cas_version",
+    "resolved_at"
+  ],
+  "properties": {
+    "hitl_id": {
+      "type": "string",
+      "pattern": "^ht_[0-9a-z]{26}$"
+    },
+    "resolution_id": {
+      "type": "string",
+      "pattern": "^hr_[0-9a-z]{26}$"
+    },
+    "resolver_node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "client_message_id": {
+      "type": "string",
+      "pattern": "^[0-9a-z]{26}$"
+    },
+    "decision": {
+      "enum": [
+        "answered",
+        "approved",
+        "denied"
+      ]
+    },
+    "answer_text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cas_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "resolved_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

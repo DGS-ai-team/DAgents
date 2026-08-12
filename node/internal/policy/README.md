@@ -5,7 +5,7 @@
 | `engine.go` | `DecideTool`：工具 + bash shell 细粒度审批（含 `deny` 硬拒绝） |
 | `store.go` | 策略快照、`ApplyToolUpdates` / `ApplyShellUpdates` 原子写盘 |
 | `decision.go` | API 三档 `allow_auto` / `require_approval` / `deny` 与内部 mode 映射 |
-| `bootstrap.go` | 确保 `.runtime/policy` 存在并从 `packaging/runtime/policy` 种子复制 |
+| `bootstrap.go` | 确保 `.runtime/policy` 存在、从种子复制缺失文件，并合并种子缺项 |
 | `entry_file.go` | 解析 `key=mode` txt 策略（always / never / rule / deny） |
 | `shell_parse.go` | bash/cmd/powershell 命令拆分与 root command 提取 |
 | `mode.go` | 审批模式常量 |
@@ -29,6 +29,6 @@
 
 **写盘信任链**：`write_file` / `search_replace` 为 **`rule`** 时，`node/internal/hooks` 的 `AgentOwnedFileHook` 可对 session 内 Agent 自建且 mtime 未变的 path 将 `require_approval` 降为 `auto`；**`always` 档位不经过信任链**。种子默认 `write_file=rule`（见 `packaging/runtime/policy/tool.approval.txt`）。设计：[ux-agent-owned-file-approval.md](../../../docs/design/ux-agent-owned-file-approval.md)。
 
-**HTTP**：`GET/PUT /v1/policy`（见 [`docs/architecture/agent-node-api.md`](../../../docs/architecture/agent-node-api.md) §2.6）。写盘前滚动备份 `*.bak`；`ask_user_information` 不可设为 `deny`。
+**HTTP**：`GET/PUT /v1/agents/{agent_id}/policy*`（见 [`docs/architecture/agent-node-api.md`](../../../docs/architecture/agent-node-api.md) §2.3）。全局 `/v1/policy*` 已移除。写盘前滚动备份 `*.bak`；`ask_user_information` 不可设为 `deny`。
 
 种子见 [`packaging/runtime/policy`](../../../packaging/runtime/policy)。

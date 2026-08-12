@@ -27,6 +27,23 @@ func TestPriorityOrder(t *testing.T) {
 	}
 }
 
+func TestTotalEnqueued(t *testing.T) {
+	q := NewMessageQueue()
+	if q.TotalEnqueued() != 0 {
+		t.Fatalf("initial = %d", q.TotalEnqueued())
+	}
+	_ = q.Enqueue(Envelope{RequestType: "resume"}, PriorityResume)
+	if q.TotalEnqueued() != 1 {
+		t.Fatalf("after enqueue = %d", q.TotalEnqueued())
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = q.Dequeue(ctx)
+	if q.TotalEnqueued() != 1 {
+		t.Fatalf("after dequeue = %d", q.TotalEnqueued())
+	}
+}
+
 func TestDequeueContextCancel(t *testing.T) {
 	q := NewMessageQueue()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

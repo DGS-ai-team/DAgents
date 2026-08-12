@@ -1,0 +1,71 @@
+package events
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/nodeclient"
+	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/pending"
+)
+
+func TestPollLoopSyncsWithoutSSE(t *testing.T) {
+	var listCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agents":
+			listCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"agents": []any{
+					map[string]any{
+						"agent_id":           "agt-1",
+						"display_name":       "助手",
+						"has_pending_hitl":   true,
+						"pending_hitl_items": 1,
+					},
+				},
+			})
+		case "/v1/streams":
+			http.Error(w, "sse unavailable", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	store := pending.NewStore()
+	sub := NewSubscriber(nodeclient.New(srv.URL), store, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub.Start(ctx)
+	time.Sleep(150 * time.Millisecond)
+	sub.Stop()
+
+	if listCalls.Load() < 1 {
+		t.Fatalf("list calls = %d, want >= 1", listCalls.Load())
+	}
+	if store.Summary().AgentCount != 1 {
+		t.Fatalf("summary = %+v", store.Summary())
+	}
+}
+
+func TestShouldSyncWhileHITLPending(t *testing.T) {
+	store := pending.NewStore()
+	_ = pending.SyncFromAgents(store, []nodeclient.AgentSummary{
+		{AgentID: "agt-1", HasPendingHITL: true, PendingHITLItems: 1},
+	})
+	if !shouldSyncWhileHITLPending(store, nodeclient.StreamEvent{Type: "tool_result", AgentID: "agt-1"}) {
+		t.Fatal("tool_result should sync while HITL pending")
+	}
+	if shouldSyncWhileHITLPending(store, nodeclient.StreamEvent{Type: "assistant", AgentID: "agt-1"}) {
+		t.Fatal("assistant should not sync merely due to HITL pending")
+	}
+	_ = pending.SyncFromAgents(store, nil)
+	if shouldSyncWhileHITLPending(store, nodeclient.StreamEvent{Type: "tool_result", AgentID: "agt-1"}) {
+		t.Fatal("no HITL pending should not sync on tool_result")
+	}
+}

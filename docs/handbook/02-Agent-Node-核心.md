@@ -204,7 +204,7 @@ consumeLoop 再次出队
 
 - `toolLoopCount`：当前 **一条 user 消息** 触发的链上，`runOneStep` 执行次数。  
 - 新 `handleHumanMessage` 时 **归零**。  
-- 超过 `maxToolLoops`（默认 16，`config llm.max_tool_loops`）→ error SSE + 链结束。
+- 超过 `maxToolLoops`（默认见 Agent `defaults.llm.max_tool_loops`，新建缺省 32）→ 对后续 tool_calls 写入 soft `tool` 结果（提示给出结论并询问是否继续），链以正常 `done` 结束；下一条 user 消息会重置计数。
 
 ### 2.7 源码索引（§2）
 
@@ -232,7 +232,6 @@ consumeLoop 再次出队
 | **工具续跑** | Orchestrator 在本步 auto 工具完成后 `enqueue(tool_result)` |
 | **异步工具** | 后台 job 完成 → `async_tool_result` |
 | **Trigger** | 调度器 fire → `trigger_message`（`TriggerID` + `UserName=trigger`） |
-| **A2A inbox** | `a2a_inbox_message` 入队（见 [05](./05-Manage与A2A.md)） |
 
 若全部同步调用 Orchestrator，会难以保证 **tool_result 优先闭合序列**、**resume 与 human 的竞态**、**单 session 串行消费**。  
 因此：**每 session 一个 `MessageQueue` + 单 goroutine `consumeLoop`**，统一出队后再进入 §2。
@@ -245,7 +244,7 @@ consumeLoop 再次出队
 Enqueue(Envelope, Priority)  ──►  优先级排序  ──►  Dequeue(ctx)  ──►  consumeLoop
 ```
 
-- **无内嵌 consumer**（与旧 Python 约定一致）：队列只负责存与取；**谁消费** 是 runtime 的 `consumeLoop`。  
+- **无内嵌 consumer**：队列只负责存与取；**谁消费** 是 runtime 的 `consumeLoop`。  
 - **FIFO 同优先级**；`seq` 单调递增。  
 - `Dequeue` 阻塞直到有项或 ctx 取消。
 
@@ -260,10 +259,9 @@ Enqueue(Envelope, Priority)  ──►  优先级排序  ──►  Dequeue(ctx)
 | `tool_result` | `RequestTypeToolResult` | Orchestrator 回调 | `handleToolResult` |
 | `async_tool_result` | `RequestTypeAsyncToolResult` | 后台 job | `handleSideEffectProduceAsync`（Produce） |
 | `trigger_message` | `RequestTypeTriggerMessage` | trigger fire | `handleSideEffectProduceExternal` |
-| `a2a_inbox_message` | `RequestTypeA2AInboxMessage` | Manage inbox | `handleSideEffectProduceExternal` |
 | `side_effect_continue` | `RequestTypeSideEffectContinue` | Apply 后被动续跑 | `handleSideEffectContinue` |
 
-`Envelope` 还携带：`Content`、`UserName`（A2A/trigger 可非 human）、`ResumeValue`、`TriggerID`、`AsyncToolResult` 等。
+`Envelope` 还携带：`Content`、`UserName`（trigger 等可非 human）、`ResumeValue`、`TriggerID`、`AsyncToolResult` 等。
 
 ### 3.4 优先级
 
@@ -279,14 +277,14 @@ tool_result > human > resume > async_completion > other
 | `human` | 0 | `message`（CLI/API user） |
 | `resume` | 1 | `resume` |
 | `async_completion` | 2 | `async_tool_result` |
-| `other` | 10 | `trigger_message` / `a2a_inbox_message` |
+| `other` | 10 | `trigger_message` |
 
 **设计意图**（与 `node/internal/queue/queue.go` → `priorityValue` 一致）：
 
 1. **`tool_result` 最高**：同步工具批闭合后尽快续跑，避免 `assistant(tool_calls)` 长期缺 `tool`。
-2. **`human` 高于 `resume`**：排队中的新 user message 可先出队；`handleHumanMessage` 会 `InterruptPending`，未消费的 stale `resume` 在 `pending==nil` 时被忽略（对齐旧 Python 语义）。
+2. **`human` 高于 `resume`**：排队中的新 user message 可先出队；`handleHumanMessage` 会 `InterruptPending`，未消费的 stale `resume` 在 `pending==nil` 时被忽略。
 3. **`resume` 高于 `async_completion` / `other`**：HITL 提交优先于后台 job 回灌与 trigger。
-4. **`async_completion` 低于 human/resume**：Go 有意与旧 Python「async 升格为 `tool_result`」区分，审批等待期优先处理用户交互；与 open batch 交错时的风险见 [Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32) 与 [`turn-side-effects-refactor.md`](../design/turn-side-effects-refactor.md)。
+4. **`async_completion` 低于 human/resume**：审批等待期优先处理用户交互；与 open batch 交错时的风险见 [Issue #32](https://github.com/DGS-ai-team/DAgents/issues/32) 与 [`turn-side-effects-refactor.md`](../design/turn-side-effects-refactor.md)。
 5. **`other` 最低**：trigger 不抢 human / resume / tool 闭环。
 
 ### 3.5 `consumeLoop` 分流
@@ -299,12 +297,11 @@ consumeLoop(ctx)
   switch env.RequestType:
     resume              → handleResume
     async_tool_result   → handleSideEffectProduceAsync
-    trigger_message / a2a_inbox_message → handleSideEffectProduceExternal
+    trigger_message     → handleSideEffectProduceExternal
     side_effect_continue → handleSideEffectContinue
     tool_result         → handleToolResult
     message / ""        → handleHumanMessage
 ```
-
 旁路条目 **Produce 时**不改 history；**Apply** 在 `runTurnStep` 步首或 `side_effect_continue` 前写入。Trigger `ClearPendingDelivery` 在 **Apply 成功**时，非 dequeue。详见 [turn-side-effects-refactor.md](../design/turn-side-effects-refactor.md)。
 
 **串行保证**：同一 session 上任意时刻只有一个 handler 在跑；不会出现两个 `runOneStep` 并发写同一 `history`。
@@ -341,12 +338,10 @@ POST /v1/messages
 | 入队 API | `session/manager.go` → `EnqueueMessage`、`EnqueueResume` |
 | HTTP 入口 | `api/messages.go`、`api/resume.go` |
 | Trigger 入队 | `session/triggers.go` → `EnqueueTriggerMessage` |
-| A2A inbox 入队 | `session/a2a_inbox.go` |
 
 ---
 
 ## 4. 会话隔离（Session）
-
 ### 4.1 Session 是什么
 
 **Session** = 一条独立对话上下文 + 其 **runtime**（队列 consumer + 内存状态 + Orchestrator 实例 + 可选 SQLite 行）。
@@ -441,20 +436,19 @@ newRuntimeWithPublisher
 
 | 步骤 | 对象 | 与 session 关系 |
 |------|------|-----------------|
-| `stream.NewHub()` | SSE 总线 | 所有 session 共用，按 id 区分 |
-| `store.OpenSQLite` | 持久化 | 按 `session_id` 存 messages |
-| `session.NewManager(...)` | 会话表 | 创建 §4 中 runtime |
-| `manage.NewInboxPoller` | A2A | 向 **inbox 专用 session** 入队 |
+| `stream.NewHub()` | SSE 总线 | 所有 Agent 共用，按 id 区分 |
+| `store.OpenSQLite` | 持久化 | 按 Agent 存 messages |
+| `session.NewManager(...)` | Agent 运行时表 | 创建 §4 中 runtime |
 
-完整装配表见旧版 §1.2；路由：`api/server.go` → `registerRoutes`。
+路由：`api/server.go` → `registerRoutes`。
 
-### 4.6 SSE Hub 与 session_id
+### 4.6 SSE Hub 与 agent 维度
 
 **文件**：`stream/hub.go`
 
 - Manager 级 **单例** Hub；Orchestrator 经 `stream.Publisher` 发布。  
-- 每条事件带 **`session_id`**，Client 只展示当前 session。  
-- `Subscribe(afterSeq)`：断点续传；A2A `RunInboxTurn` 须在入队前取 `CurrentSeq()`（v0.3.9 修复，见 `a2a_inbox.go`）。
+- 每条事件带 Agent 维度 id，Web UI 只展示当前 Agent。  
+- `Subscribe(afterSeq)`：断点续传。
 
 ### 4.7 源码索引（§4）
 

@@ -37,6 +37,22 @@ func TestResolveShellOutputEncodingOverride(t *testing.T) {
 	}
 }
 
+func TestResolveShellOutputEncodingDefaultsUTF8(t *testing.T) {
+	for _, st := range []shellType{shellCmd, shellBash, shellPowerShell} {
+		if got := resolveShellOutputEncoding(st, ""); got != "utf-8" {
+			t.Fatalf("%s default = %q, want utf-8", st, got)
+		}
+	}
+}
+
+func TestDecodeShellOutputGBKPrefersValidUTF8(t *testing.T) {
+	src := "网页标题：测试"
+	got := decodeShellOutput([]byte(src), "gbk")
+	if got != src {
+		t.Fatalf("valid utf-8 under gbk config = %q, want %q", got, src)
+	}
+}
+
 func TestNormalizeOutputEncoding(t *testing.T) {
 	cases := map[string]string{
 		"UTF-8":   "utf-8",

@@ -1,6 +1,6 @@
 # Manage Console（Vue 3 + Vite）
 
-浏览器 UI 源码；构建产物输出到 **`../static/`**，由 FastAPI `StaticFiles` 挂载在 `/console/`。
+浏览器 UI 源码；构建产物输出到 **`../static/`**（**不入库**），由 FastAPI `StaticFiles` 挂载在 `/console/`。
 
 ## 开发
 

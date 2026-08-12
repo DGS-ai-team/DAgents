@@ -1,0 +1,24 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "assign_result_deduped_vs_timeline",
+  "given": {
+    "assign_id": "as_01h00000000000000000000004",
+    "leader_tool_result": {
+      "tool_call_id": "call_as1",
+      "content": "{\"assign_id\": \"as_01h00000000000000000000004\", \"status\": \"succeeded\", \"summary\": \"README \\u6807\\u9898\\u662f X\", \"error_code\": null}"
+    },
+    "timeline_event": {
+      "type": "actor_final_text",
+      "assign_id": "as_01h00000000000000000000004",
+      "content_text": "README 标题是 X"
+    }
+  },
+  "when": {
+    "op": "project_leader_context"
+  },
+  "then": {
+    "messages_with_assign_summary": 1,
+    "kept": "tool_result"
+  }
+}

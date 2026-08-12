@@ -11,3 +11,13 @@ func TestDuplicateConfigOrDefault(t *testing.T) {
 		t.Fatalf("override = %+v", got)
 	}
 }
+
+func TestInjectTodayDateConfigOrDefault(t *testing.T) {
+	if !InjectTodayDateConfigOrDefault(InjectTodayDateConfig{}).IsEnabled() {
+		t.Fatal("nil enabled should default true")
+	}
+	off := false
+	if InjectTodayDateConfigOrDefault(InjectTodayDateConfig{Enabled: &off}).IsEnabled() {
+		t.Fatal("expected disabled")
+	}
+}

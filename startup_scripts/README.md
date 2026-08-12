@@ -4,4 +4,4 @@
 
 | 脚本 | 说明 |
 |------|------|
-| （已移除） | 原 Register Center 启动脚本；请改用 **`python run_manage.py`** 或 Docker Manage |
+| — | 本地助手请用 **`packaging/agent-client/scripts/`** 或 **`python run_manage.py`**（Manage） |

@@ -98,11 +98,7 @@ func (o *Orchestrator) insertMissingToolResponsesAfterAssistant(
 			continue
 		}
 		o.publishToolResult(sessionID, tc, content, false, extra)
-		o.insertHistory(sessionID, history, insertAt, llm.Message{
-			Role:       "tool",
-			ToolCallID: tc.ID,
-			Content:    content,
-		})
+		o.insertHistory(sessionID, history, insertAt, llm.ToolResultMessage(tc.ID, tc.Function.Name, content))
 		insertAt++
 		answered[tc.ID] = struct{}{}
 		added = true
@@ -141,11 +137,7 @@ func (o *Orchestrator) appendMissingToolResponses(
 			continue
 		}
 		o.publishToolResult(sessionID, tc, content, false, extra)
-		o.appendHistory(sessionID, history, llm.Message{
-			Role:       "tool",
-			ToolCallID: tc.ID,
-			Content:    content,
-		})
+		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, content))
 		answered[tc.ID] = struct{}{}
 	}
 }

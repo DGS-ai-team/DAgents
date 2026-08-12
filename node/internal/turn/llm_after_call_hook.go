@@ -30,7 +30,7 @@ func (o *Orchestrator) runLLMAfterCallPhase(ctx context.Context, sessionID strin
 	}
 	in := llmAfterCallInputFromResult(result)
 	hc := hooks.BuildLLMAfterCallContext(sessionID, o.agentID, in)
-	out, err := o.toolHooks.RunPhase(ctx, hooks.PhaseLLMAfterCall, hc)
+	out, err := o.runPhase(ctx, hooks.PhaseLLMAfterCall, hc, sessionID, nil, in.FinishReason)
 	if err != nil {
 		return result, err
 	}

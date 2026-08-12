@@ -1,12 +1,36 @@
 <script setup>
+import { computed } from "vue";
 import { extractUserInfo } from "../stores/hitl.js";
 
-defineProps({
+const props = defineProps({
   data: { type: Object, required: true },
-  selected: { type: Number, default: 0 },
+  selected: { type: [Number, Array], default: 0 },
+  busy: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["update:selected", "submit"]);
+
+const req = computed(() => extractUserInfo(props.data));
+
+const selectedSet = computed(() => {
+  if (Array.isArray(props.selected)) {
+    return new Set(props.selected.map((id) => String(id || "").trim()).filter(Boolean));
+  }
+  const idx = Number(props.selected);
+  const opt = Number.isInteger(idx) ? req.value.options[idx] : null;
+  return new Set(opt?.id ? [String(opt.id)] : []);
+});
+
+function onSingleSelect(idx) {
+  emit("update:selected", Number(idx));
+}
+
+function onMultiToggle(id, checked) {
+  const next = new Set(selectedSet.value);
+  if (checked) next.add(String(id));
+  else next.delete(String(id));
+  emit("update:selected", [...next]);
+}
 </script>
 
 <template>
@@ -19,15 +43,41 @@ const emit = defineEmits(["update:selected", "submit"]);
             <span class="tool-source-badge__text">Agent 询问</span>
           </span>
         </div>
-        <p class="approval-bubble__intro approval-bubble__intro--question">{{ extractUserInfo(data).question }}</p>
-        <div v-if="extractUserInfo(data).options.length" class="approval-bubble__actions user-info-options">
-          <label v-for="(opt, idx) in extractUserInfo(data).options" :key="opt.id" class="user-info-option">
-            <input type="radio" :checked="selected === idx" @change="emit('update:selected', idx)" />
+        <p class="approval-bubble__intro approval-bubble__intro--question">{{ req.question }}</p>
+        <div v-if="req.options.length" class="approval-bubble__actions user-info-options">
+          <label v-for="(opt, idx) in req.options" :key="opt.id" class="user-info-option">
+            <input
+              v-if="req.allowMultiple"
+              type="checkbox"
+              :checked="selectedSet.has(String(opt.id))"
+              :disabled="busy"
+              @change="onMultiToggle(opt.id, $event.target.checked)"
+            />
+            <input
+              v-else
+              type="radio"
+              name="user-info-option"
+              :checked="Number(selected) === idx"
+              :disabled="busy"
+              @change="onSingleSelect(idx)"
+            />
             <span>{{ opt.label }}</span>
           </label>
-          <button type="button" class="btn btn--primary btn--sm" @click="emit('submit', '')">提交选项</button>
+          <button
+            type="button"
+            class="btn btn--primary btn--sm"
+            :disabled="busy"
+            @click="emit('submit', '')"
+          >
+            {{ busy ? "提交中…" : "提交选项" }}
+          </button>
+          <p class="approval-bubble__hint approval-bubble__hint--inline">
+            或在下方输入自定义回答后发送
+          </p>
         </div>
-        <p v-else class="approval-bubble__hint">在下方输入框回答后 Enter 发送</p>
+        <p v-else class="approval-bubble__hint">
+          {{ req.placeholder || "在下方输入框回答后 Enter 发送" }}
+        </p>
       </div>
     </div>
   </div>
@@ -35,8 +85,12 @@ const emit = defineEmits(["update:selected", "submit"]);
 
 <style scoped>
 .approval-bubble--user-info {
-  border-left: 3px solid #0284c7;
-  background: linear-gradient(90deg, rgba(2, 132, 199, 0.06), #f8fafc 48px);
+  border-left: 3px solid var(--color-info);
+  background: linear-gradient(
+    90deg,
+    var(--color-info-soft),
+    var(--color-surface) 48px
+  );
 }
 
 .approval-bubble__intro--question {
@@ -49,6 +103,10 @@ const emit = defineEmits(["update:selected", "submit"]);
   margin: 0;
   font-size: 12.5px;
   color: var(--color-text-muted);
+}
+
+.approval-bubble__hint--inline {
+  margin-top: 4px;
 }
 
 .user-info-options {
@@ -69,7 +127,7 @@ const emit = defineEmits(["update:selected", "submit"]);
 }
 
 .user-info-option:hover {
-  border-color: rgba(2, 132, 199, 0.35);
-  background: rgba(2, 132, 199, 0.04);
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 </style>

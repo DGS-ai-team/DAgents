@@ -4,11 +4,16 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 
 | 域 | 状态 | 说明 |
 |----|------|------|
-| **Platform** | M0 | 鉴权、审计、Blob 占位、指标 |
-| **Registry** | M1 | 注册、心跳、注销、目录、discover |
-| **A2A** | **M2 部分** | Task API + inbox long poll；Node inbox poller 骨架 |
-| **Skills** | M3 待做 | 一 zip 一 skill，审批后分发 |
-| **Console** | **部分** | **`GET /console/`** — Node 目录、**A2A Inbox 只读列表**、Node 抽屉内 **session 列表 / context 摘要** |
+| **Platform** | ✅ | 鉴权、审计、Blob、指标 |
+| **Registry** | ✅ | 注册、心跳、注销、目录、discover |
+| **Workgroup** | ✅ | 跨 Node 协作（Leader + Worker Dialer）；**D6**：Manage Leader LLM loop（Mock/真实）+ `assign_workgroup_task` |
+| **A2A Task/Inbox** | ❌ 已拆除 | 原 inbox / `agent_invoke` / Placement control 已移除；跨机请用工作组 |
+
+| **Skills / Plugins / ExternalTools** | ✅（Manage 侧） | 精简分发（draft → publish）；**Node 自动 sync 待 Phase 2** |
+| **LLM** | ✅（Manage 侧） | 集中 CRUD + `/resolve`；**Node 自动消费待做** |
+| **Releases** | ✅ | 安装包托管 + `/v1/releases/check`；Node `UpdateChecker` |
+| **Cases** | ✅ | 案例库（JSONL 演示会话 + 关联资源） |
+| **Console** | ✅ | Agent 目录、案例库、Node 配置（LLM/Skills/Plugins/ExternalTools/版本发布） |
 
 架构方案：[docs/design/manage-architecture.md](../docs/design/manage-architecture.md)
 
@@ -19,12 +24,16 @@ Manage 是 DAgents 的 **Python 控制面服务**，管理所有注册的 Agent 
 python run_manage.py
 ```
 
+依赖见根目录 `requirements.txt`（含 **`websockets`**：工作组 Dialer WS 必需；缺库时握手 404，成员会一直停在「配置中」）。
+
 默认 **`0.0.0.0:8020`**（`MANAGE_HOST` / `MANAGE_PORT` 可配置）。
 
 **Console（Node 目录 UI）**：浏览器打开 **`http://<host>:<port>/console/`**  
-基于 **Vue 3 + Vite**；源码在 `manage/console/frontend/`，构建产物在 `manage/console/static/`。  
+基于 **Vue 3 + Vite**；源码在 `manage/console/frontend/`，构建产物在 `manage/console/static/`（**不入库**，CI / Docker 多阶段构建；本地运行 Manage 或跑 Python 单测前须先 build）。  
 修改 UI 后执行 `./manage/console/build.sh`（或 `cd manage/console/frontend && npm run build`）。  
-默认 **开放模式**：无需 token，直接查看全部 Node 状态。
+默认 **开放模式**：Node 注册/心跳仍可无 token；**Console 浏览器**需登录：
+- Shell「打开 Manage」会带 `?node_id=`，若该 id 已在 Registry 登记则直接进入首页；
+- 直接打开 `/console/` 需管理员账号密码（默认 `admin` / `admin`，可用 `MANAGE_ADMIN_USERNAME` / `MANAGE_ADMIN_PASSWORD` 覆盖）。
 
 ## Docker 部署（推荐生产 / 联调）
 
@@ -33,7 +42,7 @@ python run_manage.py
 ### 联网快速启动
 
 ```bash
-docker build -f packaging/manage/Dockerfile -t dagents-manage:0.3.8 .
+docker build -f packaging/manage/Dockerfile -t dagents-manage:0.5.1 .
 # 或
 cd packaging/manage && cp .env.example .env && docker compose up -d --build
 ```
@@ -50,8 +59,8 @@ cd packaging/manage && cp .env.example .env && docker compose up -d --build
 |------|-------------|
 | Release bundle（推荐） | `dagents-manage-bundle-<version>.tar.gz`（镜像 + compose + `import-image` / `restart` 脚本） |
 | Release 仅镜像 | `dagents-manage-<version>.tar.gz` |
-| 本地构建 bundle | `VERSION=0.3.8 bash scripts/ci/assemble_manage_bundle.sh` |
-| 本地仅镜像 | `VERSION=0.3.8 bash scripts/ci/build_manage_docker.sh` |
+| 本地构建 bundle | `VERSION=0.5.1 bash scripts/ci/assemble_manage_bundle.sh` |
+| 本地仅镜像 | `VERSION=0.5.1 bash scripts/ci/build_manage_docker.sh` |
 
 离线机解压 bundle 后：`bash scripts/import-image.sh && bash scripts/restart.sh`（详见 [`packaging/manage/README.md`](../packaging/manage/README.md)）。
 
@@ -76,8 +85,9 @@ docker stop manage && docker start manage
 
 | 模式 | 条件 | 行为 |
 |------|------|------|
-| **开放模式** | 未设置 `MANAGE_TOKENS` 且未设置 `MANAGE_SHARED_TOKEN` | Console / 列表 API 无需鉴权；Node 注册/心跳只需 **agent_id**（建议 Header `x-dagents-agent-id`） |
+| **开放模式** | 未设置 `MANAGE_TOKENS` 且未设置 `MANAGE_SHARED_TOKEN` | Node 注册/心跳只需 **agent_id**；无会话 cookie 时 API 仍可匿名（兼容自动化）；**Console UI** 强制会话登录 |
 | **Token 模式** | 配置了上述环境变量 | 启用 admin/member/node 角色（后续完善；权限仍保留在 Manage 端） |
+| **Console 会话** | Cookie `dagents_manage_session` | 管理员密码登录，或已注册 `node_id` 免密进入（权限绑定该 Node 的 discovery_group） |
 
 Node 出站 Header：
 
@@ -96,16 +106,15 @@ Node 出站 Header：
 | `MANAGE_OFFLINE_GRACE_SECONDS` | `86400` | TTL 过期后 offline 保留秒数 |
 | `MANAGE_TOKENS` | （空） | **可选**；JSON 角色/token 配置（后续启用 RBAC 时使用） |
 | `MANAGE_SHARED_TOKEN` | （空） | **可选**；单 shared admin token |
+| `MANAGE_ADMIN_USERNAME` | `admin` | Console 管理员账号 |
+| `MANAGE_ADMIN_PASSWORD` | `admin` | Console 管理员密码（生产务必修改） |
 | `MANAGE_AUDIT_PATH` | （空） | 审计 JSONL 追加路径 |
 | `MANAGE_AUDIT_MAX_ENTRIES` | `500` | 内存审计条数 |
-| `MANAGE_LEGACY_DIRECT_RELAY` | `0` | M2 前无效；启用 RC 式直连 relay 适配（默认关） |
-| `MANAGE_A2A_INBOX_CONTENT_MAX_CHARS` | `4096` | inbox 返回 `content` 最大字符；超出截断并设 `content_truncated` |
-| `MANAGE_A2A_EXPIRE_SWEEP_SECONDS` | `30` | 后台 TTL 过期扫描间隔；`0` 关闭（仅按需单条过期） |
 
 鉴权 Header（Token 模式）：`x-dagents-a2a-token` 或 `Authorization: Bearer …`。  
 身份 Header（Node 注册）：`x-dagents-agent-id: <agent_id>`。
 
-## Registry API（M1）
+## Registry API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -114,36 +123,50 @@ Node 出站 Header：
 | POST | `/v1/registry/agents/{id}/deregister` | 注销 |
 | PATCH | `/v1/registry/agents/{id}/groups` | **Manage 分配** discovery_group |
 | GET | `/v1/registry/agents` | 列表（分页/筛选） |
-| GET | `/v1/registry/agents/discover` | A2A 发现（**不含 base_url**） |
+| GET | `/v1/registry/agents/discover` | 发现在线 Node（**不含 base_url**） |
 | GET | `/v1/registry/agents/{id}` | 详情 |
 | DELETE | `/v1/registry/agents/{id}` | 管理员删除 |
 
 系统：`GET /health`、`GET /metrics`、`GET /v1/admin/audit`。
 
-### Admin 观测（只读）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/v1/admin/a2a/tasks` | A2A Task 列表（**不会 deliver**） |
-
+> **已拆除**：A2A Task / Inbox、Placement `/v1/control/*`、Console Inbox、Node `agent_invoke`；跨机器协作请用工作组。  
 > **已禁用**：Admin session 代理（`/v1/admin/nodes/.../sessions`）已移除，Manage 不再出站访问 Node session API。
 
-## A2A Task API（M2）
+## Release Hub（安装包托管）
 
-创建 Task 时 Manage 校验：
-
-1. target **online** 且 **expose_to_peers=true**
-2. caller 与 target 均至少有一个 **discovery_group**，且**存在交集**（否则 `403 discovery_group_mismatch` / `caller_discovery_group_empty` / `target_discovery_group_empty`）
+Manage 在 `MANAGE_RELEASES_DIR`（默认 `/data/releases`）托管 `dagents-local-assistant` 安装包。Console → **管理 → 版本发布** 可上传草稿、发布、设为 latest。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/v1/a2a/tasks` | 创建 Task（`kind`: invoke \| notify） |
-| GET | `/v1/a2a/inbox` | long poll 拉取 pending（`?wait=25`） |
-| POST | `/v1/a2a/tasks/{id}/ack` | 标记 processing |
-| POST | `/v1/a2a/tasks/{id}/reply` | 提交结果 |
-| GET | `/v1/a2a/tasks/{id}` | 查询状态 |
+| POST | `/v1/releases/packages` | Admin 上传（默认 draft） |
+| GET | `/v1/releases/packages` | 列表 |
+| POST | `/v1/releases/packages/{artifact}/{channel}/{platform}/{version}/publish` | 发布 |
+| POST | `/v1/releases/packages/{artifact}/{channel}/{platform}/{version}/promote` | 设为 latest |
+| GET | `/v1/releases/check` | Node 版本检查 |
+| GET | `/v1/releases/packages/.../latest/download` | 下载 latest |
 
-协议说明：[docs/future/a2a-via-manage.md](../docs/future/a2a-via-manage.md)（**无** `/v1/a2a/messages` 兼容）。
+发版时 CI 将同版本 `dagents-local-assistant-linux-amd64-*.tar.gz` 打入 Manage Docker 镜像与 offline bundle（`/app/bundled/releases` seed）。详见 [docs/design/release-update-hub.md](../docs/design/release-update-hub.md)。
+
+Node：`GET /v1/agent/update`（需 `manage.enabled`）。
+
+### 案例库（Cases）
+
+Console → **案例库**：上传 Node history JSONL 创建演示案例，可编辑消息（插入 / 修改 / 删除），并关联 Skills、Plugins。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/v1/cases` | 案例列表 |
+| POST | `/v1/cases` | 创建（multipart：`name` + 可选描述/资源/JSONL；**`case_id` 为服务端 `uuid4().hex`**） |
+| GET | `/v1/cases/{case_id}` | 详情（含消息列表） |
+| PATCH | `/v1/cases/{case_id}` | 更新名称、描述、关联资源 |
+| DELETE | `/v1/cases/{case_id}` | 删除 |
+| POST | `/v1/cases/{case_id}/import-jsonl` | 导入 JSONL（replace 或追加） |
+| POST | `/v1/cases/{case_id}/messages` | 插入消息 |
+| PATCH | `/v1/cases/{case_id}/messages/{id}` | 修改消息 |
+| DELETE | `/v1/cases/{case_id}/messages/{id}` | 删除消息 |
+| GET | `/v1/cases/{case_id}/export/jsonl` | 导出 JSONL |
+
+JSONL 行格式对齐 Node `history/*.jsonl`：`{"recorded_at":"...","message":{"role":"user","content":"..."}}`。
 
 ## 目录结构
 
@@ -151,26 +174,20 @@ Node 出站 Header：
 manage/
   config.py
   manage_app.py
-  admin/        # Admin 只读 API（A2A 列表）
-  platform/     # auth, audit, blob, metrics
-  storage/      # sqlite
-  registry/     # models, store, routes, status
+  platform/         # auth, audit, blob, metrics
+  storage/          # sqlite
+  registry/         # models, store, routes, status
+  workgroup/        # 跨 Node 协作
+  llm/              # LLM 配置注册中心
+  skills/           # Skill 包分发
+  plugins/          # Hook Plugin 分发
+  externaltools/    # 外置工具分发
+  releases/         # Release Hub
+  cases/            # 案例库
   console/
-    frontend/   # Vue 3 源码（Vite）
-    static/     # 构建产物，挂载 /console/
-    build.sh    # npm run build 封装
-  a2a/          # M2 Task store + routes
-  skills/       # M3 占位
-```
-
-## 历史 Register Center 数据迁移
-
-旧版 **`register_center/`** 已移除；新功能请落在 **Manage**。若仍有 RC JSON 导出，可导入 Registry：
-
-```python
-from manage.registry.store import AgentRegistryStore
-from manage.storage.sqlite import SQLiteDatabase
-# AgentRegistryStore.import_rc_json(db, json.load(...))
+    frontend/       # Vue 3 源码（Vite）
+    static/         # 构建产物，挂载 /console/
+    build.sh
 ```
 
 ## Go Node 自动注册
@@ -186,15 +203,11 @@ manage:
     interval_seconds: 30
     ttl_seconds: 60
     team: platform
-  a2a:
-    enabled: true              # 默认随 manage.enabled 开启
-    inbox_wait_seconds: 25     # long poll wait
-    inbox_poll_seconds: 30     # 断线降级短 poll
 ```
 
 **discovery_group** 不由 Node 传入；在 Manage Console 详情抽屉或 API 分配：
 
-通信逻辑全量说明见 [docs/manage-communication.md](../docs/manage-communication.md)。
+通信与协作见 [handbook/05-Manage与A2A.md](../docs/handbook/05-Manage与A2A.md)、[handbook/07-Workgroup协作.md](../docs/handbook/07-Workgroup协作.md)。
 
 ```bash
 curl -X PATCH http://127.0.0.1:8020/v1/registry/agents/ops-linux-01/groups \

@@ -12,6 +12,8 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/api"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/processlock"
+	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/version"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -32,10 +34,26 @@ func main() {
 		os.Exit(2)
 	}
 
-	// 2) 加载并校验 YAML；失败时区分路径错误(2)与内容错误(1)。
+	release, err := processlock.AcquireNode(resolved)
+	if err != nil {
+		if err == processlock.ErrAlreadyRunning {
+			fmt.Fprintf(os.Stderr, "dagents-node: another instance is already running for this config\n")
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "dagents-node: process lock: %v\n", err)
+		os.Exit(1)
+	}
+	defer release()
+
+	// 2) 加载引导 YAML，再 overlay node_settings.db（空库时迁移/种子）。
 	cfg, err := config.LoadFile(resolved)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+	nodeSettings, err := store.BootstrapNodeSettings(context.Background(), cfg, resolved, slog.Default())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "node settings: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -48,12 +66,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: invalid log level %q (use debug, info, warn, error)\n", levelText)
 		os.Exit(1)
 	}
-	logger := logx.NewLogger(os.Stderr, level)
+	logger := logx.NewSplitLogger(os.Stdout, os.Stderr, level)
 	slog.SetDefault(logger)
 
 	// 3) 构造 HTTP 服务（session、turn、tools、SQLite 等由 api.NewServer 内部装配）。
-	logger.Info("config loaded", "path", resolved, "log_level", level.String(), "agent_id", cfg.AgentID)
-	srv := api.NewServer(cfg, logger)
+	logger.Info("config loaded", "path", resolved, "log_level", level.String(), "agent_id", cfg.NodeID)
+	srv := api.NewServer(cfg, logger, api.WithConfigPath(resolved), api.WithNodeSettings(nodeSettings))
 
 	// 4) SIGINT/SIGTERM 触发 ctx 取消，ListenAndServe 优雅关闭。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

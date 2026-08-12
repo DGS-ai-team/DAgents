@@ -19,7 +19,7 @@ const maxSessionFilenamePartLen = 200
 
 var sessionIDSanitizePattern = regexp.MustCompile(`[^\w.\-]+`)
 
-// Journal 按 session + 自然日追加 JSONL 原始消息记录。
+// Journal 按 session + 自然日追加 JSONL 原始消息记录（`<baseDir>/YYYYMMDD/<session>.jsonl`）。
 type Journal struct {
 	enabled bool
 	baseDir string
@@ -59,15 +59,15 @@ func (j *Journal) RecordAppend(sessionID string, message llm.Message) {
 	path := journalFilePath(j.baseDir, sid)
 	record := map[string]any{
 		"recorded_at": formatRecordedAt(time.Now()),
-		"message":     messageToJournalPayload(message),
+		"message":     llm.MessageToJournalPayload(message),
 	}
 	raw, err := json.Marshal(record)
 	if err != nil {
-		j.logger.Warn("raw message journal serialize failed", "error", err, "path", path)
+		j.safeLogger().Warn("raw message journal serialize failed", "error", err, "path", path)
 		return
 	}
 	if err := appendJournalLine(path, string(raw)+"\n"); err != nil {
-		j.logger.Warn("raw message journal write failed", "error", err, "path", path)
+		j.safeLogger().Warn("raw message journal write failed", "error", err, "path", path)
 	}
 }
 
@@ -130,9 +130,17 @@ func sanitizeSessionIDForFilename(sessionID string) string {
 }
 
 func journalFilePath(baseDir, sessionID string) string {
-	day := time.Now().Format("20060102")
+	at := time.Now()
+	day := at.Format("20060102")
 	safeSID := sanitizeSessionIDForFilename(sessionID)
-	return filepath.Join(baseDir, fmt.Sprintf("%s_%s.jsonl", safeSID, day))
+	return filepath.Join(baseDir, day, safeSID+".jsonl")
+}
+
+// JournalRelativePath 返回相对工作区根的 JSONL 审计路径（history/YYYYMMDD/<session>.jsonl）。
+func JournalRelativePath(sessionID string, at time.Time) string {
+	day := at.Format("20060102")
+	safeSID := sanitizeSessionIDForFilename(sessionID)
+	return fmt.Sprintf("history/%s/%s.jsonl", day, safeSID)
 }
 
 func formatRecordedAt(t time.Time) string {

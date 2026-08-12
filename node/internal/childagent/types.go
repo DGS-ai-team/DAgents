@@ -31,7 +31,7 @@ type CreateInput struct {
 
 // Result 为交付给父 Agent 的终态结果。
 type Result struct {
-	ChildSessionID string   `json:"child_session_id"`
+	ChildAgentID string   `json:"child_agent_id"`
 	Status         Status   `json:"status"`
 	Summary        string   `json:"summary"`
 	TurnCount      int      `json:"turn_count"`
@@ -41,8 +41,8 @@ type Result struct {
 
 // ActiveAgent 跟踪单个活跃临时 Agent 的元数据与同步等待（Manager 内存账本，非 session runtime）。
 type ActiveAgent struct {
-	ChildSessionID  string
-	ParentSessionID string
+	ChildAgentID  string
+	ParentAgentID string
 	Purpose         string
 	AllowedTools    []string
 	LoadedSkills    []string
@@ -60,8 +60,8 @@ type ActiveAgent struct {
 
 func newActiveAgent(parentID string, input CreateInput, childID string, expiresAt time.Time) *ActiveAgent {
 	return &ActiveAgent{
-		ChildSessionID:  childID,
-		ParentSessionID: parentID,
+		ChildAgentID:  childID,
+		ParentAgentID: parentID,
 		Purpose:         input.Purpose,
 		AllowedTools:    append([]string(nil), input.AllowedTools...),
 		LoadedSkills:    append([]string(nil), input.SkillNames...),
@@ -91,7 +91,7 @@ func (a *ActiveAgent) resultSnapshot() Result {
 		return out
 	}
 	return Result{
-		ChildSessionID: a.ChildSessionID,
+		ChildAgentID: a.ChildAgentID,
 		Status:         a.Status,
 		TurnCount:      a.TurnCount,
 		Artifacts:      []string{},

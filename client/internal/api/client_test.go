@@ -16,11 +16,18 @@ func TestClientCreateMessageStream(t *testing.T) {
 	var mu sync.Mutex
 	seq := 0
 	sessionID := "sess-test"
+	var gotMessageAgentID string
+	var gotStreamAgentID string
 
-	mux.HandleFunc("POST /v1/sessions", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"session_id": sessionID})
+	mux.HandleFunc("POST /v1/agents/"+sessionID+"/ensure", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "agent_id": sessionID})
 	})
-	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if v, ok := body["agent_id"].(string); ok {
+			gotMessageAgentID = v
+		}
 		go func() {
 			time.Sleep(20 * time.Millisecond)
 			mu.Lock()
@@ -30,13 +37,14 @@ func TestClientCreateMessageStream(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"accepted": true})
 	})
 	mux.HandleFunc("GET /v1/streams", func(w http.ResponseWriter, r *http.Request) {
+		gotStreamAgentID = r.URL.Query().Get("agent_id")
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
 
 		// 模拟 echo turn
 		time.Sleep(30 * time.Millisecond)
 		payload := map[string]any{
-			"session_id": sessionID, "agent_id": "a1", "type": "assistant", "seq": 1,
+			"agent_id": sessionID, "type": "assistant", "seq": 1,
 			"ts": "2026-01-01T00:00:00Z", "data": map[string]any{"content": "（echo）hi"},
 		}
 		b, _ := json.Marshal(payload)
@@ -44,7 +52,7 @@ func TestClientCreateMessageStream(t *testing.T) {
 		flusher.Flush()
 
 		donePayload := map[string]any{
-			"session_id": sessionID, "agent_id": "a1", "type": "done", "seq": 2,
+			"agent_id": sessionID, "type": "done", "seq": 2,
 			"ts": "2026-01-01T00:00:00Z", "data": map[string]any{"finish_reason": "stop"},
 		}
 		b2, _ := json.Marshal(donePayload)
@@ -61,13 +69,10 @@ func TestClientCreateMessageStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	sid, err := c.CreateSession(ctx, "")
-	if err != nil {
+	if err := c.EnsureAgent(ctx, sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if sid != sessionID {
-		t.Fatalf("session_id = %q", sid)
-	}
+	sid := sessionID
 
 	doneCh := make(chan struct{})
 	var text strings.Builder
@@ -99,17 +104,23 @@ func TestClientCreateMessageStream(t *testing.T) {
 	if !strings.Contains(text.String(), "hi") {
 		t.Fatalf("text = %q", text.String())
 	}
+	if gotMessageAgentID != sessionID {
+		t.Fatalf("POST /v1/messages agent_id = %q, want %q", gotMessageAgentID, sessionID)
+	}
+	if gotStreamAgentID != sessionID {
+		t.Fatalf("GET /v1/streams agent_id = %q, want %q", gotStreamAgentID, sessionID)
+	}
 }
 
 func TestClientCancelTurn(t *testing.T) {
 	mux := http.NewServeMux()
 	sessionID := "sess-cancel"
 	cancelled := false
-	mux.HandleFunc("POST /v1/sessions/"+sessionID+"/cancel", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /v1/agents/"+sessionID+"/cancel", func(w http.ResponseWriter, _ *http.Request) {
 		cancelled = true
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"session_id": sessionID,
-			"cancelled":  true,
+			"agent_id": sessionID,
+			"cancelled": true,
 		})
 	})
 	ts := httptest.NewServer(mux)

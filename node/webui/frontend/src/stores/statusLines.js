@@ -1,12 +1,13 @@
 import { reactive } from "vue";
 
 const PHASE_LABELS = {
-  prefilling: "准备上下文",
+  prefilling: "准备回复",
   thinking: "思考中",
-  compression_blocking: "压缩上下文",
+  compression: "正在压缩上下文",
 };
 
-export const statusPhaseOrder = ["prefilling", "thinking", "compression_blocking"];
+/** 对话流气泡中展示的相位（不含压缩；压缩只在下方状态栏）。 */
+export const statusPhaseOrder = ["prefilling", "thinking"];
 
 export const statusStore = reactive({
   phases: {},
@@ -14,6 +15,9 @@ export const statusStore = reactive({
 });
 
 let tickTimer = null;
+let compressionWatchdog = null;
+
+const COMPRESSION_STUCK_MS = 120_000;
 
 function ensureTick() {
   if (tickTimer) return;
@@ -29,24 +33,33 @@ function stopTickIfIdle() {
   }
 }
 
+function clearCompressionWatchdog() {
+  if (compressionWatchdog) {
+    clearTimeout(compressionWatchdog);
+    compressionWatchdog = null;
+  }
+}
+
 export function startStatus(phase) {
   if (hasStatus(phase)) return;
-  statusStore.phases[phase] = { startedAt: Date.now(), done: false };
+  statusStore.phases[phase] = { startedAt: Date.now() };
   statusStore.tick = Date.now();
   ensureTick();
+  if (phase === "compression") {
+    clearCompressionWatchdog();
+    compressionWatchdog = setTimeout(() => {
+      compressionWatchdog = null;
+      finishStatus("compression");
+    }, COMPRESSION_STUCK_MS);
+  }
 }
 
 export function finishStatus(phase) {
-  const state = statusStore.phases[phase];
-  if (!state || state.done) return;
-  state.done = true;
+  if (phase === "compression") clearCompressionWatchdog();
+  if (!statusStore.phases[phase]) return;
+  delete statusStore.phases[phase];
   statusStore.tick = Date.now();
-  setTimeout(() => {
-    if (statusStore.phases[phase]?.done) {
-      delete statusStore.phases[phase];
-      stopTickIfIdle();
-    }
-  }, 600);
+  stopTickIfIdle();
 }
 
 export function finishWaitingStatuses({ beforeReasoning = false } = {}) {
@@ -55,23 +68,21 @@ export function finishWaitingStatuses({ beforeReasoning = false } = {}) {
 }
 
 export function hasStatus(phase) {
-  return !!statusStore.phases[phase] && !statusStore.phases[phase].done;
+  return !!statusStore.phases[phase];
 }
 
 export function resetStatusLines() {
+  clearCompressionWatchdog();
   statusStore.phases = {};
   stopTickIfIdle();
 }
 
 export function statusPhaseLabel(phase) {
-  return PHASE_LABELS[phase] || phase;
+  return PHASE_LABELS[phase] || String(phase || "").trim() || "状态";
 }
 
 export function formatStatusText(phase, state, now = statusStore.tick) {
   const label = statusPhaseLabel(phase);
   const elapsed = Math.max(0, Math.floor((now - state.startedAt) / 1000));
-  if (state.done) return `${label}... ${elapsed}s done`;
-  const frame = Math.floor((now - state.startedAt) / 500) % 3;
-  const dots = ".".repeat(frame + 1).padEnd(3, " ");
-  return `${label}${dots} ${elapsed}s`;
+  return `${label} · ${elapsed}s`;
 }

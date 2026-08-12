@@ -14,6 +14,8 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 
 	want := map[string][]string{
 		"read_file":              {CallPurposeKey, "path"},
+		"show_image":             {CallPurposeKey, "path"},
+		"read_image":             {CallPurposeKey, "path"},
 		"write_file":             {CallPurposeKey, "path", "content"},
 		"search_replace":         {CallPurposeKey, "path", "old_string", "new_string"},
 		"glob_files":             {CallPurposeKey, "directory", "glob_pattern"},
@@ -23,6 +25,7 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		"background_job_status":  {CallPurposeKey, "job_id"},
 		"background_job_cancel":  {CallPurposeKey, "job_id"},
 		"ask_user_information":   {CallPurposeKey, "question"},
+		"remember":               {CallPurposeKey, "information"},
 		"load_skills":            {CallPurposeKey, "skill_names"},
 		"unload_skills":          {CallPurposeKey, "skill_names"},
 		"clear_skills":           {CallPurposeKey},
@@ -32,9 +35,9 @@ func TestToolDefinitionsRequiredAfterInject(t *testing.T) {
 		"trigger_update":         {CallPurposeKey, "trigger_id"},
 		"trigger_delete":         {CallPurposeKey, "trigger_id"},
 		"create_temporary_agent": {CallPurposeKey, "task", "purpose"},
-		"wait_temporary_agents":  {CallPurposeKey, "child_session_ids"},
-		"temporary_agent_status": {CallPurposeKey, "child_session_ids"},
-		"cancel_temporary_agent": {CallPurposeKey, "child_session_id"},
+		"wait_temporary_agents":  {CallPurposeKey, "child_agent_ids"},
+		"temporary_agent_status": {CallPurposeKey, "child_agent_ids"},
+		"cancel_temporary_agent": {CallPurposeKey, "child_agent_id"},
 	}
 
 	for _, def := range reg.Definitions() {

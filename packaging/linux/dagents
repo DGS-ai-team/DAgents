@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # DAgents Local Assistant 命令行入口（对齐 packaging/windows/dagents.cmd）。
+# Phase 4：人机入口仅为 Web UI；本脚本负责 Node/browser 启停与更新。
 set -euo pipefail
 
 # install.sh 会在 BIN_DIR（如 /usr/local/bin）创建指向 PREFIX/dagents 的符号链接；
@@ -37,18 +38,300 @@ fi
 
 BIN="${ROOT}/bin"
 NODE_PID_FILE="${ROOT}/.runtime/node.pid"
+BROWSER_PID_FILE="${ROOT}/.runtime/browser.pid"
 NODE_STOP_TIMEOUT_SEC=15
-# set -u 下空数组 "${PARSED_ARGS[@]}" 会 unbound；须预先声明并在无额外参数时分支 exec。
-WITHNODE=0
-PARSED_ARGS=()
 
 require_bin() {
   local name="$1"
   [[ -x "${BIN}/${name}" ]] || die "${BIN}/${name} was not found in ${DAGENTS_HOME}"
 }
 
+node_listen_port() {
+  local port="18765"
+  if [[ -f "${ROOT}/${CFG}" ]]; then
+    local p
+    p="$(grep -A10 '^listen:' "${ROOT}/${CFG}" 2>/dev/null | grep -E '^[[:space:]]+port:' | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
+    [[ -n "${p}" ]] && port="${p}"
+  fi
+  echo "${port}"
+}
+
+node_base_url() {
+  echo "http://127.0.0.1:$(node_listen_port)"
+}
+
 probe_node() {
-  "${BIN}/dagents-client" -config "${ROOT}/${CFG}" probe >/dev/null 2>&1
+  # 就绪以 /health 为准。首配未完成时 /v1/agent/info 会 403，
+  # dagents-client probe 会误判「未就绪」导致 wait 30s 失败。
+  curl -fsS --max-time 2 "$(node_base_url)/health" >/dev/null 2>&1
+}
+
+# 首配未完成时提示（不阻塞启动）。
+hint_node_onboarding_if_needed() {
+  local boot=""
+  boot="$(curl -fsS --max-time 2 "$(node_base_url)/v1/ui/bootstrap" 2>/dev/null || true)"
+  if [[ -n "${boot}" ]] && grep -q '"node_profile_completed"[[:space:]]*:[[:space:]]*false' <<<"${boot}"; then
+    echo "[dagents] 首次使用：运行 dagents init 完成命令行首配，或打开 Web UI 配置身份与 LLM"
+  fi
+}
+
+node_profile_completed() {
+  local boot=""
+  boot="$(curl -fsS --max-time 2 "$(node_base_url)/v1/ui/bootstrap" 2>/dev/null || true)"
+  [[ -n "${boot}" ]] || return 1
+  grep -q '"node_profile_completed"[[:space:]]*:[[:space:]]*true' <<<"${boot}"
+}
+
+ensure_node_running_for_setup() {
+  if probe_node; then
+    return 0
+  fi
+  echo "[dagents] starting Node for setup…"
+  require_bin dagents-node
+  start_node_background
+  wait_node_ready
+}
+
+prompt_with_default() {
+  local prompt="$1"
+  local default="$2"
+  local reply=""
+  if [[ -n "${default}" ]]; then
+    read -r -p "${prompt} [${default}]: " reply || true
+    echo "${reply:-${default}}"
+  else
+    read -r -p "${prompt}: " reply || true
+    echo "${reply}"
+  fi
+}
+
+build_init_setup_json() {
+  # 通过环境变量传入，避免 shell 转义问题。
+  PREFERRED_NAME="${1}" NODE_NAME="${2}" PROVIDER="${3}" MODEL="${4}" BASE_URL="${5}" API_KEY="${6}" MOCK="${7}" \
+    python3 - <<'PY'
+import json, os
+
+preferred = (os.environ.get("PREFERRED_NAME") or "").strip()
+node_name = (os.environ.get("NODE_NAME") or "").strip()
+provider = (os.environ.get("PROVIDER") or "").strip().lower()
+model = (os.environ.get("MODEL") or "").strip()
+base_url = (os.environ.get("BASE_URL") or "").strip()
+api_key = (os.environ.get("API_KEY") or "").strip()
+mock = (os.environ.get("MOCK") or "").strip() in ("1", "true", "yes", "on")
+
+if not preferred:
+    raise SystemExit("preferred_name is required")
+if not node_name:
+    raise SystemExit("node name is required")
+if not provider:
+    raise SystemExit("provider is required")
+
+if mock or provider == "mock":
+    provider = "mock"
+    mock = True
+    if not model:
+        model = "mock"
+
+if not model:
+    raise SystemExit("model is required (non-mock providers)")
+
+profile_id = model if model else ("mock" if mock else "default")
+prof = {
+    "id": profile_id,
+    "provider": provider,
+    "model": model,
+    "mock": mock,
+    "multimodal_enabled": False,
+}
+if base_url:
+    prof["base_url"] = base_url
+if api_key:
+    prof["api_key"] = api_key
+
+body = {
+    "user": {"preferred_name": preferred},
+    "agent": {"name": node_name, "description": ""},
+    "llm": {"active": profile_id, "profiles": [prof]},
+    "onboarding": {"node_profile_completed": True},
+}
+print(json.dumps(body, ensure_ascii=False))
+PY
+}
+
+cmd_init() {
+  command -v curl >/dev/null 2>&1 || die "curl is required for dagents init"
+  command -v python3 >/dev/null 2>&1 || die "python3 is required for dagents init"
+
+  local force=0 yes=0 interactive=1
+  local preferred_name="" node_name="" provider="" model="" base_url="" api_key=""
+  local mock=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  dagents init                 Interactive first-time Node setup (identity + LLM)
+  dagents setup                Alias of init
+  dagents init --yes ...       Non-interactive (requires flags below)
+
+Options:
+  --yes / -y                   Non-interactive; do not prompt
+  --force                      Re-run even if onboarding already completed
+  --preferred-name NAME        How the agent should address you
+  --node-name NAME             This Node display name
+  --provider PROVIDER          mock|deepseek|openai|qwen|vllm
+  --model MODEL                Model id (default mock for --provider mock)
+  --base-url URL               Optional API base URL
+  --api-key KEY                LLM API key (or env OPENAI_API_KEY / DAGENTS_API_KEY)
+  --mock                       Shortcut for --provider mock
+
+Examples:
+  dagents init
+  dagents init --yes --preferred-name ops --node-name lab-1 --provider mock
+  dagents init --yes --preferred-name ops --node-name lab-1 \
+    --provider deepseek --model deepseek-chat --api-key "$OPENAI_API_KEY"
+EOF
+        return 0
+        ;;
+      --force) force=1 ;;
+      --yes|-y) yes=1; interactive=0 ;;
+      --preferred-name) shift; preferred_name="${1:-}" ;;
+      --node-name) shift; node_name="${1:-}" ;;
+      --provider) shift; provider="${1:-}" ;;
+      --model) shift; model="${1:-}" ;;
+      --base-url) shift; base_url="${1:-}" ;;
+      --api-key) shift; api_key="${1:-}" ;;
+      --mock) provider="mock"; mock=1 ;;
+      *)
+        die "unknown init option: $1 (try: dagents init --help)"
+        ;;
+    esac
+    shift || true
+  done
+
+  # 确保 bootstrap 配置存在（与脚本开头逻辑一致）
+  if [[ ! -f "${ROOT}/${CFG}" && -f "${ROOT}/config.example.yaml" ]]; then
+    cp "${ROOT}/config.example.yaml" "${ROOT}/config.yaml"
+    CFG="config.yaml"
+  fi
+  [[ -f "${ROOT}/${CFG}" ]] || die "missing ${ROOT}/${CFG}"
+
+  ensure_node_running_for_setup
+
+  if node_profile_completed && [[ "${force}" -ne 1 ]]; then
+    echo "[dagents] Node 首配已完成。如需重配请加 --force"
+    print_webui_url
+    return 0
+  fi
+
+  local default_node
+  default_node="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo local-assistant)"
+  default_node="${default_node// /-}"; default_node="${default_node:0:64}"
+
+  if [[ "${interactive}" -eq 1 ]]; then
+    echo "[dagents] Linux 命令行首配（与 Web UI 写入同一套 node_settings / llm_configs）"
+    [[ -n "${preferred_name}" ]] || preferred_name="$(prompt_with_default "我该怎么称呼你" "")"
+    [[ -n "${node_name}" ]] || node_name="$(prompt_with_default "这台 Node 叫什么" "${default_node}")"
+    if [[ -z "${provider}" ]]; then
+      echo "选择模型提供商:"
+      echo "  1) mock      （本地回声，无需 API Key，适合先跑通）"
+      echo "  2) deepseek"
+      echo "  3) openai"
+      echo "  4) qwen"
+      echo "  5) vllm"
+      local choice
+      choice="$(prompt_with_default "编号" "1")"
+      case "${choice}" in
+        1|mock) provider="mock"; mock=1 ;;
+        2|deepseek) provider="deepseek" ;;
+        3|openai) provider="openai" ;;
+        4|qwen) provider="qwen" ;;
+        5|vllm) provider="vllm" ;;
+        *) die "invalid provider choice: ${choice}" ;;
+      esac
+    fi
+    if [[ "${provider}" == "mock" || "${mock}" -eq 1 ]]; then
+      provider="mock"
+      mock=1
+      [[ -n "${model}" ]] || model="mock"
+    else
+      [[ -n "${model}" ]] || model="$(prompt_with_default "模型名" "")"
+      [[ -n "${base_url}" ]] || base_url="$(prompt_with_default "Base URL（可留空）" "")"
+      if [[ -z "${api_key}" ]]; then
+        api_key="${DAGENTS_API_KEY:-${OPENAI_API_KEY:-}}"
+      fi
+      if [[ -z "${api_key}" ]]; then
+        read -r -s -p "API Key（输入隐藏，可留空若已用环境变量）: " api_key || true
+        echo
+      fi
+    fi
+  else
+    # non-interactive
+    [[ "${yes}" -eq 1 ]] || die "non-interactive init requires --yes"
+    [[ -n "${preferred_name}" ]] || die "--preferred-name is required with --yes"
+    [[ -n "${node_name}" ]] || die "--node-name is required with --yes"
+    [[ -n "${provider}" ]] || die "--provider is required with --yes"
+    if [[ "${provider}" == "mock" || "${mock}" -eq 1 ]]; then
+      provider="mock"
+      mock=1
+      model="${model:-mock}"
+    else
+      [[ -n "${model}" ]] || die "--model is required for provider ${provider}"
+      if [[ -z "${api_key}" ]]; then
+        api_key="${DAGENTS_API_KEY:-${OPENAI_API_KEY:-}}"
+      fi
+    fi
+  fi
+
+  preferred_name="$(echo "${preferred_name}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  node_name="$(echo "${node_name}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  [[ -n "${preferred_name}" ]] || die "preferred name is empty"
+  [[ -n "${node_name}" ]] || die "node name is empty"
+
+  local body
+  if ! body="$(build_init_setup_json "${preferred_name}" "${node_name}" "${provider}" "${model}" "${base_url}" "${api_key}" "${mock}")"; then
+    die "failed to build setup payload"
+  fi
+
+  local tmp_body tmp_resp http_code
+  tmp_body="$(mktemp)"
+  tmp_resp="$(mktemp)"
+  printf '%s' "${body}" >"${tmp_body}"
+  http_code="$(
+    curl -sS -o "${tmp_resp}" -w '%{http_code}' --max-time 30 \
+      -X PATCH "$(node_base_url)/v1/setup/config" \
+      -H 'content-type: application/json' \
+      --data-binary @"${tmp_body}"
+  )" || true
+  rm -f "${tmp_body}"
+  if [[ "${http_code}" != "200" ]]; then
+    echo "[dagents] setup PATCH failed (HTTP ${http_code})" >&2
+    cat "${tmp_resp}" >&2 || true
+    echo >&2
+    rm -f "${tmp_resp}"
+    die "init failed"
+  fi
+  rm -f "${tmp_resp}"
+
+  echo "[dagents] 首配完成：user=${preferred_name} node=${node_name} provider=${provider} model=${model}"
+  print_webui_url
+  echo "[dagents] 下一步：dagents node（若未在跑）然后打开 Web UI 开始对话"
+}
+
+# 首配未完成时提示打开 Web UI（不阻塞启动）。
+hint_node_onboarding_if_needed() {
+  local port="18765"
+  if [[ -f "${ROOT}/${CFG}" ]]; then
+    local p
+    p="$(grep -A10 '^listen:' "${ROOT}/${CFG}" 2>/dev/null | grep -E '^[[:space:]]+port:' | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
+    [[ -n "${p}" ]] && port="${p}"
+  fi
+  local boot=""
+  boot="$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/v1/ui/bootstrap" 2>/dev/null || true)"
+  if [[ -n "${boot}" ]] && grep -q '"node_profile_completed"[[:space:]]*:[[:space:]]*false' <<<"${boot}"; then
+    echo "[dagents] 首次使用：请打开 Web UI 完成身份与 LLM 配置后再使用对话等功能"
+  fi
 }
 
 write_node_pid() {
@@ -94,7 +377,6 @@ stop_node_process() {
 }
 
 shutdown_node() {
-  require_bin dagents-client
   if ! probe_node; then
     clear_node_pid
     echo "[dagents] node is not running"
@@ -121,17 +403,113 @@ shutdown_node() {
 
   clear_node_pid
   if probe_node; then
-    die "node still responds to probe after shutdown; check .runtime/logs/node.err.log"
+    die "node still responds to probe after shutdown; check .runtime/logs/node-$(date +%Y-%m-%d).err.log"
   fi
   echo "[dagents] node stopped"
+}
+
+probe_browser() {
+  curl -fsS --max-time 2 http://127.0.0.1:18766/health >/dev/null 2>&1
+}
+
+write_browser_pid() {
+  local pid="$1"
+  mkdir -p "${ROOT}/.runtime"
+  echo "${pid}" >"${BROWSER_PID_FILE}"
+}
+
+clear_browser_pid() {
+  rm -f "${BROWSER_PID_FILE}"
+}
+
+find_browser_pids() {
+  local cfg_abs="${ROOT}/${CFG}"
+  local pattern="${BIN}/dagents-browser"
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f "${pattern}.*--config[[:space:]]+${cfg_abs}" 2>/dev/null || true
+  fi
+}
+
+stop_browser_process() {
+  stop_node_process "$1"
+}
+
+shutdown_browser() {
+  if ! probe_browser; then
+    clear_browser_pid
+    echo "[dagents] browser service is not running"
+    return 0
+  fi
+
+  local pid=""
+  if [[ -f "${BROWSER_PID_FILE}" ]]; then
+    pid="$(tr -d '[:space:]' <"${BROWSER_PID_FILE}")"
+  fi
+  if pid_alive "${pid}"; then
+    echo "[dagents] stopping browser service (pid=${pid})"
+    stop_browser_process "${pid}"
+  else
+    local pids
+    pids="$(find_browser_pids)"
+    if [[ -n "${pids}" ]]; then
+      echo "[dagents] stopping browser service (pids=${pids//$'\n'/, })"
+      while IFS= read -r p; do
+        [[ -n "${p}" ]] && stop_browser_process "${p}"
+      done <<<"${pids}"
+    fi
+  fi
+
+  clear_browser_pid
+  if probe_browser; then
+    die "browser service still responds after shutdown; check .runtime/logs/browser-$(date +%Y-%m-%d).err.log"
+  fi
+  echo "[dagents] browser service stopped"
+}
+
+start_browser_background() {
+  require_bin dagents-browser
+  mkdir -p "${ROOT}/.runtime/logs"
+  local log_day browser_log browser_err
+  log_day="$(date +%Y-%m-%d)"
+  browser_log="${ROOT}/.runtime/logs/browser-${log_day}.log"
+  browser_err="${ROOT}/.runtime/logs/browser-${log_day}.err.log"
+  echo "[dagents] starting browser service in background (logs: ${browser_log})"
+  nohup "${BIN}/dagents-browser" --config "${ROOT}/${CFG}" \
+    >>"${browser_log}" 2>>"${browser_err}" &
+  write_browser_pid "$!"
+}
+
+wait_browser_ready() {
+  local wait=0
+  while ! probe_browser; do
+    sleep 1
+    wait=$((wait + 1))
+    if [[ "${wait}" -ge 30 ]]; then
+    die "browser service did not become ready within 30s (see .runtime/logs/browser-$(date +%Y-%m-%d).err.log)"
+    fi
+  done
+}
+
+start_browser_default() {
+  if probe_browser; then
+    echo "[dagents] browser service already running"
+    return 0
+  fi
+  start_browser_background
+  wait_browser_ready
+  echo "[dagents] browser service is ready"
 }
 
 start_node_background() {
   require_bin dagents-node
   mkdir -p "${ROOT}/.runtime/logs"
-  echo "[dagents] starting node in background (logs: .runtime/logs/node.log)"
+  local log_day node_log node_err
+  log_day="$(date +%Y-%m-%d)"
+  node_log="${ROOT}/.runtime/logs/node-${log_day}.log"
+  node_err="${ROOT}/.runtime/logs/node-${log_day}.err.log"
+  echo "[dagents] starting node in background (full: ${node_log}; errors: ${node_err})"
   nohup "${BIN}/dagents-node" -config "${ROOT}/${CFG}" \
-    >>"${ROOT}/.runtime/logs/node.log" 2>>"${ROOT}/.runtime/logs/node.err.log" &
+    >>"${node_log}" 2>>"${node_err}" &
   write_node_pid "$!"
 }
 
@@ -148,28 +526,28 @@ print_webui_url() {
 }
 
 wait_node_ready() {
-  require_bin dagents-client
   local wait=0
   while ! probe_node; do
     sleep 1
     wait=$((wait + 1))
     if [[ "${wait}" -ge 30 ]]; then
-      die "node did not become ready within 30s (see .runtime/logs/node.err.log)"
+      die "node did not become ready within 30s (see .runtime/logs/node-$(date +%Y-%m-%d).err.log)"
     fi
   done
 }
 
 start_node_default() {
-  require_bin dagents-client
   if probe_node; then
     echo "[dagents] node already running"
     print_webui_url
+    hint_node_onboarding_if_needed
     return 0
   fi
   start_node_background
   wait_node_ready
   echo "[dagents] node is ready"
   print_webui_url
+  hint_node_onboarding_if_needed
 }
 
 restart_node() {
@@ -178,38 +556,26 @@ restart_node() {
   wait_node_ready
   echo "[dagents] node restarted"
   print_webui_url
-}
-
-ensure_node() {
-  require_bin dagents-client
-  if probe_node; then
-    return 0
-  fi
-  start_node_background
-  wait_node_ready
-}
-
-parse_withnode() {
-  WITHNODE=0
-  PARSED_ARGS=()
-  for arg in "$@"; do
-    if [[ "${arg}" == "--withnode" ]]; then
-      WITHNODE=1
-    else
-      PARSED_ARGS+=("${arg}")
-    fi
-  done
+  hint_node_onboarding_if_needed
 }
 
 cmd_doctor() {
   echo "DAgents installation: ${DAGENTS_HOME}"
-  local ok=1 name
-  for name in dagents-node dagents-client dagents-cli; do
+  # bash：0=成功；发现硬性缺失时置 1
+  local status=0 name
+  for name in dagents-node dagents-client dagents-browser; do
     if [[ -x "${BIN}/${name}" ]]; then
       echo "[ok] bin/${name}"
     else
-      echo "[missing] bin/${name}"
-      ok=0
+      if [[ "${name}" == "dagents-browser" ]]; then
+        echo "[optional missing] bin/${name}"
+      elif [[ "${name}" == "dagents-client" ]]; then
+        # client 用于 probe/update；缺失不影响日常 Web UI，但 doctor 标为警告
+        echo "[optional missing] bin/${name} (probe/update unavailable)"
+      else
+        echo "[missing] bin/${name}"
+        status=1
+      fi
     fi
   done
   if [[ -f "${ROOT}/config.yaml" ]]; then
@@ -221,9 +587,24 @@ cmd_doctor() {
     echo "[ok] .runtime"
   else
     echo "[missing] .runtime"
-    ok=0
+    status=1
   fi
-  return "${ok}"
+  if [[ -d "${ROOT}/packaging/agent-templates" ]]; then
+    echo "[ok] packaging/agent-templates"
+  else
+    echo "[info] packaging/agent-templates absent (Node may still embed builtins)"
+  fi
+  if probe_node; then
+    echo "[ok] node responds on $(node_base_url)/health"
+    if node_profile_completed; then
+      echo "[ok] node profile onboarding completed"
+    else
+      echo "[info] node profile pending — run: dagents init"
+    fi
+  else
+    echo "[info] node not running — start with: dagents node"
+  fi
+  return "${status}"
 }
 
 read_app_version() {
@@ -231,17 +612,8 @@ read_app_version() {
   if [[ -f "${ROOT}/VERSION" ]]; then
     v="$(tr -d '[:space:]' < "${ROOT}/VERSION")"
   fi
-  if [[ -z "${v}" ]] && [[ -x "${BIN}/dagents-cli" ]]; then
-    v="$("${BIN}/dagents-cli" version 2>/dev/null | awk '{print $NF}' || true)"
-  fi
-  if [[ -z "${v}" ]] && command -v python3 >/dev/null 2>&1; then
-    local repo_root="${ROOT}"
-    while [[ ! -f "${repo_root}/app/cli/version_info.py" && "${repo_root}" != "/" ]]; do
-      repo_root="$(dirname "${repo_root}")"
-    done
-    if [[ -f "${repo_root}/app/cli/version_info.py" ]]; then
-      v="$(python3 -c "import sys; sys.path.insert(0,'${repo_root}'); from app.cli.version_info import get_cli_version; print(get_cli_version())" 2>/dev/null || true)"
-    fi
+  if [[ -z "${v}" ]] && [[ -x "${BIN}/dagents-node" ]]; then
+    v="$("${BIN}/dagents-node" version 2>/dev/null | awk '{print $NF}' || true)"
   fi
   if [[ -z "${v}" ]]; then
     v="unknown"
@@ -249,95 +621,134 @@ read_app_version() {
   printf '%s\n' "${v}"
 }
 
-bin_version() {
-  local name="$1"
-  local bin_path="${BIN}/${name}"
-  [[ -x "${bin_path}" ]] || return 0
-  local out
-  out="$("${bin_path}" version 2>/dev/null || "${bin_path}" -version 2>/dev/null || true)"
-  if [[ -n "${out}" ]]; then
-    echo "  ${name}: ${out}"
-  fi
-}
-
 cmd_version() {
   local ver
   ver="$(read_app_version)"
-  echo "DAgents Local Assistant ${ver}"
-  bin_version dagents-node
-  bin_version dagents-client
-  if [[ -x "${BIN}/dagents-cli" ]]; then
-    local cli_out
-    cli_out="$("${BIN}/dagents-cli" version 2>/dev/null || true)"
-    if [[ -n "${cli_out}" ]]; then
-      echo "  ${cli_out/DAgents /dagents-cli: }"
-    fi
+  echo "DAgents ${ver}"
+}
+
+cmd_update() {
+  local force=0 check=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force|-f) force=1 ;;
+      --check) check=1 ;;
+      --from-client) ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+    shift
+  done
+
+  require_bin dagents-client
+  if ! probe_node; then
+    die "node is not running; start with: dagents node"
   fi
+
+  if [[ "${check}" -eq 1 ]]; then
+    "${BIN}/dagents-client" -config "${ROOT}/${CFG}" update --check
+    return $?
+  fi
+
+  local tmp_pkg
+  tmp_pkg="$(mktemp "${ROOT}/.runtime/dagents-update.XXXXXX.tar.gz")"
+  local extra=()
+  [[ "${force}" -eq 1 ]] && extra+=(--force)
+
+  set +e
+  "${BIN}/dagents-client" -config "${ROOT}/${CFG}" update --output "${tmp_pkg}" "${extra[@]}"
+  local rc=$?
+  set -e
+
+  if [[ "${rc}" -eq 3 ]]; then
+    rm -f "${tmp_pkg}"
+    echo "[dagents] already up to date"
+    return 0
+  fi
+  if [[ "${rc}" -ne 0 ]]; then
+    rm -f "${tmp_pkg}"
+    return "${rc}"
+  fi
+  if [[ ! -s "${tmp_pkg}" ]]; then
+    rm -f "${tmp_pkg}"
+    die "update download produced an empty file"
+  fi
+
+  shutdown_node
+
+  local staging
+  staging="$(mktemp -d "${ROOT}/.runtime/dagents-update-staging.XXXXXX")"
+  tar -xzf "${tmp_pkg}" -C "${staging}"
+  local bundle=""
+  bundle="$(find "${staging}" -mindepth 1 -maxdepth 1 -type d | head -1)"
+  if [[ -z "${bundle}" || ! -f "${bundle}/install.sh" ]]; then
+    rm -rf "${staging}" "${tmp_pkg}"
+    die "invalid update package (missing install.sh)"
+  fi
+
+  echo "[dagents] applying update from ${bundle##*/}"
+  # 升级默认保留已有 .runtime/policy（勿同时传 overwrite+keep，后者会覆盖前者）
+  (cd "${bundle}" && ./install.sh --prefix "${ROOT}" --keep-policy)
+
+  rm -rf "${staging}" "${tmp_pkg}"
+  restart_node
+  echo "[dagents] update complete"
 }
 
 cmd_help() {
   cat <<'EOF'
 Usage:
-  dagents chat [--withnode]       Textual TUI (Python; rich UI)
-  dagents tui [--withnode] [--plain]  Go bubbletea TUI (default full-screen; --plain for line REPL)
-  dagents node                    Start Agent Node in background (default; waits until ready)
-  dagents node shutdown           Stop background Node
-  dagents node restart            Stop then start Node in background
-  dagents node --foreground       Start Node in foreground (blocks terminal)
-  dagents node --no-wait          Background start without waiting for probe
-  dagents doctor                  Check installed files
-  dagents version                 Print version information
+  dagents                     Start Node in background and print Web UI URL
+  dagents init                First-time setup via CLI (identity + LLM; alias: setup)
+  dagents node                Start Agent Node in background (default; waits until ready)
+  dagents node shutdown       Stop background Node
+  dagents node restart        Stop then start Node in background
+  dagents node --foreground   Start Node in foreground (blocks terminal)
+  dagents node --no-wait      Background start without waiting for probe
+  dagents browser             Start browser-use service in background (browser.enabled)
+  dagents browser stop        Stop browser-use service
+  dagents browser --foreground    Run browser service in foreground
+  dagents doctor              Check installed files
+  dagents version             Print version information
+  dagents version --check     Check for updates (via Manage Release Hub)
+  dagents update [--check]    Download and apply latest release
+  dagents update --force      Apply without confirmation prompt
 
-Web UI (browser Client, embedded in dagents-node):
-  After `dagents node`, open http://127.0.0.1:<listen.port>/ui/ (default port 18765).
-  Disable with ui.enabled: false in config.yaml. No separate UI package required.
+First-time setup (Linux):
+  dagents init                Interactive; writes the same onboarding as Web UI
+  dagents init --yes --preferred-name YOU --node-name NODE --provider mock
+  Or open Web UI and complete the onboarding wizard.
 
-Options:
-  --withnode     Probe Node first; start it in background if not running, then launch client
-  --foreground   Run Node in foreground (blocks terminal)
-  --no-wait      Background start without waiting for probe (--background alias)
+Web UI (embedded in dagents-node):
+  After `dagents` / `dagents node`, open http://127.0.0.1:<listen.port>/ui/ (default port 18765).
+
+Removed:
+  dagents chat / dagents tui  — use Web UI instead
 
 Config:
-  Edit config.yaml (LLM, listen, agent_id). Created from config.example.yaml on first run.
+  Bootstrap: config.yaml (listen/local). Runtime settings & LLM profiles: .runtime/*.db via init or Web UI.
   A2A / Registry: deploy Manage separately (packaging/manage/README.md).
   CLI override: DAGENTS_CONFIG or DAGENTS_NODE_ENDPOINT
 EOF
 }
 
 if [[ $# -eq 0 ]]; then
-  require_bin dagents-cli
-  exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}"
+  start_node_default
+  exit 0
 fi
 
 case "$1" in
   help|-h|--help)
     cmd_help
     ;;
-  chat)
+  init|setup)
     shift
-    parse_withnode "$@"
-    if [[ "${WITHNODE}" -eq 1 ]]; then
-      ensure_node
-    fi
-    require_bin dagents-cli
-    if ((${#PARSED_ARGS[@]} > 0)); then
-      exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}" "${PARSED_ARGS[@]}"
-    else
-      exec "${BIN}/dagents-cli" chat --config "${ROOT}/${CFG}"
-    fi
+    cmd_init "$@"
+    exit $?
     ;;
-  tui)
-    shift
-    parse_withnode "$@"
-    if [[ "${WITHNODE}" -eq 1 ]]; then
-      ensure_node
-    fi
-    require_bin dagents-client
-    if ((${#PARSED_ARGS[@]} > 0)); then
-      exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui "${PARSED_ARGS[@]}"
-    else
-      exec "${BIN}/dagents-client" -config "${ROOT}/${CFG}" tui
-    fi
+  chat|tui)
+    die "command '$1' removed; use Web UI: run 'dagents node' then open http://127.0.0.1:18765/ui/"
     ;;
   node)
     shift
@@ -373,16 +784,59 @@ case "$1" in
       ;;
     esac
     ;;
+  browser)
+    shift
+    case "${1:-}" in
+      shutdown|stop)
+        shutdown_browser
+        exit 0
+      ;;
+      --foreground|-f)
+        shift
+        require_bin dagents-browser
+        exec "${BIN}/dagents-browser" --config "${ROOT}/${CFG}" "$@"
+      ;;
+      --no-wait|--background)
+        if probe_browser; then
+          echo "[dagents] browser service already running"
+          exit 0
+        fi
+        start_browser_background
+        exit 0
+      ;;
+      "")
+        start_browser_default
+        exit 0
+      ;;
+      *)
+        require_bin dagents-browser
+        exec "${BIN}/dagents-browser" --config "${ROOT}/${CFG}" "$@"
+      ;;
+    esac
+    ;;
   doctor)
     cmd_doctor
     exit $?
     ;;
+  update)
+    shift
+    cmd_update "$@"
+    exit $?
+    ;;
   version)
+    shift
+    if [[ "${1:-}" == "--check" ]]; then
+      require_bin dagents-client
+      if ! probe_node; then
+        die "node is not running; start with: dagents node"
+      fi
+      "${BIN}/dagents-client" -config "${ROOT}/${CFG}" update --check
+      exit $?
+    fi
     cmd_version
     exit 0
     ;;
   *)
-    require_bin dagents-cli
-    exec "${BIN}/dagents-cli" "$@"
+    die "unknown command: $1 (try: dagents help)"
     ;;
 esac

@@ -44,7 +44,7 @@ func (m *Manager) EnqueueTriggerMessage(sessionID, triggerID, content string) er
 	}
 	rt := m.getRuntime(sess.ID)
 	if rt == nil {
-		return fmt.Errorf("session_not_found")
+		return fmt.Errorf("agent_not_found")
 	}
 	env := queue.Envelope{RequestType: queue.RequestTypeTriggerMessage, Content: content, TriggerID: strings.TrimSpace(triggerID), UserName: llm.UserNameTrigger}
 	return rt.enqueue(env, queue.PriorityOther)

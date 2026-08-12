@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/WSEnvelope.json",
+  "title": "WSEnvelope",
+  "type": "object",
+  "required": [
+    "envelope_id",
+    "schema_version",
+    "type",
+    "delivery_seq",
+    "payload",
+    "sent_at"
+  ],
+  "properties": {
+    "envelope_id": {
+      "type": "string",
+      "pattern": "^en_[0-9a-z]{26}$"
+    },
+    "schema_version": {
+      "const": "0.5.0"
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^(session|workgroup|member|tool|hitl|timeline|resume)\\.[a-z0-9_]+$"
+    },
+    "workgroup_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^wg_[0-9a-z]{26}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "delivery_seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "connection_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "payload": {
+      "type": "object"
+    },
+    "sent_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

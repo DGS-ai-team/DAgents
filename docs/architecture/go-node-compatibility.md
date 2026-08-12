@@ -1,6 +1,8 @@
-# Go Agent Node / Client 兼容性与构建矩阵（N7）
+# Go Agent Node 构建矩阵（归档）
 
-本文定义 **Phase AC** 发布物的目标平台、构建方式与验收方法。Python PyInstaller 矩阵见 [os-compatibility.md](./os-compatibility.md)。
+> **现行人机入口是 Web UI**，构建与部署请以手册 [06-运维与案例](../handbook/06-运维与案例.md) 与根 README 为准。下文保留早期 Client/TUI 构建矩阵，仅供查历史脚本，不作为产品说明。
+
+本文原定义 Phase AC 发布物的目标平台、构建方式与验收方法。
 
 ---
 

@@ -1,8 +1,15 @@
 # node/internal/tools
 
-N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。**`bash_run`** 在 `timeout_seconds` 内未完成时由 Node **自动降级**为后台 job；内部仍保留 `StartBackground` / `job_registry` 供降级与测试使用。
+N3 在 Node 进程内本地执行；面向模型的 tool schema **均为同步调用**（仅 `call_purpose` 通用参数）。
 
-**配置**：`tools.enabled_groups`（7 组）见 [`docs/built-in-tools.md`](../../docs/built-in-tools.md) §0、[`docs/built-in-tools-reference.md`](../../docs/built-in-tools-reference.md)（全量 description / 参数）、[`shared/config/README.md`](../../shared/config/README.md)。  
+**`bash_run` 超时语义**：
+- **显式传入 `timeout_seconds`**：同步等待该秒数，超时**自动降级**为后台 job（返回 `job_id`），完成后 `async_tool_result` 回灌。
+- **省略 `timeout_seconds`**：最长等待硬上限（默认 600 秒），超时**终止并报错**（不转后台）。
+- **UI 控制**（仅 bash）：执行中可「终止」或「转后台」；HTTP `POST /v1/agents/{id}/tool-calls/{tool_call_id}/cancel|background`。
+
+内部仍保留 `StartBackground` / `job_registry` 供降级、UI 转后台与测试使用。
+
+**配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
 
 ---
@@ -41,7 +48,7 @@ tools/
 │   job_registry_test.go
 ├── 领域 tool_*
 │   tool_skills.go / tool_hitl.go / tool_triggers.go
-│   tool_a2a.go / tool_childagent.go
+│   tool_childagent.go
 │   tool_*_test.go
 └── README.md / REFERENCE.md
 ```
@@ -52,7 +59,7 @@ tools/
 
 | 在 Registry 执行 | 在 turn 编排器执行 |
 |------------------|-------------------|
-| fs、bash、trigger CRUD、A2A HTTP、后台 job | `load_skills` / `unload_skills` / `clear_skills` |
+| fs、bash、trigger CRUD、后台 job | `load_skills` / `unload_skills` / `clear_skills` |
 | | `ask_user_information` |
 | | 子 Agent 管理类（registry 为 stub） |
 
@@ -60,14 +67,15 @@ tools/
 
 ## 阶段 B（未做）
 
-子 package + `Register(r *Registry)`，见上文「阶段 B」历史说明；待阶段 A 稳定后再开。
+子 package + `Register(r *Registry)`；待阶段 A 稳定后再开。
 
 ---
 
 ## 执行模式
 
 - **同步（默认）**：orchestrator 调用 `Execute`；`read_file` / `write_file` / `trigger_create` 等始终同步完成。
-- **`bash_run` 超时降级**：同步等待 `timeout_seconds`（默认 30）；超时后登记后台 job、返回 `RUNNING job_id=...`；完成后 **`async_tool_result` 自动回灌**。
+- **`bash_run` 显式 timeout**：同步等待 `timeout_seconds`；超时后登记后台 job、返回 `RUNNING job_id=...`；完成后 **`async_tool_result` 自动回灌**。
+- **`bash_run` 省略 timeout**：硬上限（默认 600s）到期杀进程并返回 ERROR（不转后台）；UI 可提前终止或转后台。
 - **写盘信任链**：`write_file` / `search_replace` 为 `rule` 时，同 session Agent 自建文件在 mtime 未变前提下后续写操作可免 HITL（`node/internal/hooks`，见 [ux-agent-owned-file-approval.md](../../docs/design/ux-agent-owned-file-approval.md)）。
 - **内部 `StartBackground`**：不在 tool schema 暴露；`ParseToolCallArguments` 仍兼容剥离历史 `run_in_background` 字段。
 

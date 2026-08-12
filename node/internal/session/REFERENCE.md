@@ -15,10 +15,10 @@
 | `RuntimeInfo` | 队列深度、是否有活跃 turn、turn 状态 |
 | `GetContextView` / `ContextSummary` | 上下文聚合视图 |
 | `LoadedSkills` / `ListSessionSkills` / `LoadSessionSkill` / `UnloadSessionSkill` | skills 读写 |
-| `ClearContext` / `Delete` | 清空消息或删除 session |
+| `ClearContext` / `Delete` / `Release` | 清空消息、删除 session，或卸内存保留 DB（F-NM1） |
 | `EnqueueMessage` | user / resume / 高优先级消息入队 |
-| `RunInboxConsultation` | A2A inbox：单 Task 跑完整 turn（订阅 SSE 聚合 assistant） |
-| `EnqueueAsyncToolResult` / `EnqueueToolResult` / `EnqueueBackgroundToolResult` | 工具续跑与后台回灌 |
+| `RunInboxTurn` | A2A inbox：单步 turn（首条 message 或 HITL resume） |
+| `EnqueueAsyncToolResult` / `EnqueueToolResult` | 工具续跑与异步回灌 |
 | `CancelTurn` | 取消当前 turn 上下文 |
 | `attachUserChildTools` | 父 runtime 上 `SetChildAgentManager(mgr)` |
 
@@ -74,6 +74,14 @@
 | `ContextView` | GET context 响应结构 |
 | `estimateMessageTokens` | messages token 粗算 |
 | `pendingToolCallsCount` | 从 `PendingHITL` 统计待处理 tool call 数 |
+
+## release.go / idle_auto_compress.go
+
+| 符号 | 说明 |
+|------|------|
+| `Release` | persist → stop consumer → 移出 `m.sessions`；不删 SQLite（F-NM1） |
+| `scanIdleSessionMaintenance` | idle 扫描：可选压缩 → Release（F-NM2–NM5） |
+| `StartIdleAutoCompressScanner` | 启动 idle 维护后台循环 |
 
 ## triggers.go
 

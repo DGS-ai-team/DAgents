@@ -31,8 +31,8 @@ func (h *PolicyToolHook) Name() string { return "builtin.policy" }
 func (h *PolicyToolHook) Phases() []Phase { return []Phase{PhaseToolBeforeEach} }
 
 // Run 实现通用 Hook，委托 RunToolBeforeEach。
-func (h *PolicyToolHook) Run(ctx context.Context, hc *Context) (Result, error) {
-	return runToolBeforeEachHook(ctx, hc, h.Name(), h.RunToolBeforeEach)
+func (h *PolicyToolHook) Run(ctx context.Context, hc *Context, host Host) (Result, error) {
+	return runToolBeforeEachHook(ctx, hc, host, h.Name(), h.RunToolBeforeEach)
 }
 
 // RunToolBeforeEach 解析 toolMode 与 ResolvedAction。

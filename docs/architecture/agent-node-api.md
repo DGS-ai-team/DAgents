@@ -1,38 +1,52 @@
 # Agent Node HTTP API
 
-本文描述 **Agent Node（Go）** 对外 HTTP/SSE 接口，与 `node/internal/api/` 对齐维护。Manage 远期 API 见 [manage-api-sketch.md](../future/manage-api-sketch.md)。
+本文描述 **Agent Node（Go）** 对外 HTTP/SSE 接口，与 `node/internal/api/` 对齐维护。
+最小 OpenAPI：[`openapi-node.yaml`](./openapi-node.yaml)。Manage API 见 [manage-architecture.md](../design/manage-architecture.md)。
+
+## 0. 契约要点
+
+| 主题 | 说明 |
+|------|------|
+| **用户面主键** | **Agent**（`agent_id`）。1 Agent = 1 主对话；实现里的 session 仅内部结构 |
+| **主路径** | `/v1/agents/{agent_id}/...`（ensure / hydrate / context / cancel / skills / child-agents / media / **policy** / **prompt-context**） |
+| **策略与侧车** | 按 Agent 存 `agents.db`（`agent_policy` / `agent_prompt_context`）；侧车开关在 `config_snapshot_json.defaults.prompt_context` |
+| **Manage 注册** | 载荷主字段为 `node_id`（若仍带 `agent_id`，值同 `node_id`）；`manage.enabled` 默认关 |
+| **LLM 绑定** | 写在该 Agent 快照 `defaults.llm.active`，按 Agent 隔离 |
 
 ## 1. 设计原则
 
 | 原则 | 说明 |
 |------|------|
-| **一进程一 `agent_id` 一端口** | 监听地址即该 Agent 身份；不在此端口暴露子 Agent |
-| **Client 仅本地** | 默认只 bind `127.0.0.1`；Client 与 Node 同包读同一 `local.endpoint` |
+| **一进程多 Agent** | Node 进程持有多个 Agent 实例；对外按 `agent_id` 寻址 |
+| **默认本机绑定** | 默认 `127.0.0.1`；人机为 Web UI `/ui/` |
 | **思考与工具在 Node 内** | 无「Backend 代执行」路径；tool call 由 turn loop 本地完成 |
-| **A2A 经 Manage** | 非子 Agent 禁止 peer 入站；`expose_to_peers` 仅控制是否可作为 A2A **目标** |
-| **会话态在 Node** | session 上下文、队列、持久化由 Node 负责（SQLite 或等价） |
+| **跨 Node 协作** | 经 Manage **Workgroup**（Dialer / 反代） |
+| **工具边界** | 工具组 + policy + `fs_root`；无独立沙箱进程 |
+| **会话态在 Node** | Agent 对话上下文、队列、持久化由 Node 负责（SQLite） |
 
 ### 1.1 基础路径
 
 | 前缀 | 调用方 | 说明 |
 |------|--------|------|
-| `/v1/...` | Client（本地） | 会话、消息、SSE、HITL resume |
-| `/health` | 探活 | 负载均衡 / 运维脚本 |
-| `/v1/internal/...` | Node 进程内 | 子 Agent；**不**对外 HTTP |
+| `/ui/` | 浏览器 | 内嵌 Web UI |
+| `/v1/agents/...` | Web UI / 本机客户端 | **主契约**：对话、策略、侧车、子 Agent |
+| `/v1/workgroups/...` | Web UI（反代 Manage） | 工作组 |
+| `/v1/...` | 本机 | messages、streams、triggers、setup、llm |
+| `/health` | 探活 | 运维脚本 |
 
 ### 1.2 通用错误体
 
 ```json
 {
   "error": {
-    "code": "session_not_found",
-    "message": "session sess-xxx 不存在",
-    "details": { "session_id": "sess-xxx" }
+    "code": "agent_not_found",
+    "message": "agent 不存在",
+    "details": { "agent_id": "agt-xxx" }
   }
 }
 ```
 
-常见 `code`：`invalid_session`、`turn_busy`、`policy_denied`、`approval_required`、`a2a_target_not_exposed`、`llm_error`、`tool_error`。
+常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`。
 
 ### 1.3 认证（Phase 递进）
 
@@ -53,8 +67,10 @@ GET /health
 ```
 
 ```json
-{ "status": "ok", "agent_id": "ops-win-01", "version": "0.2.2" }
+{ "status": "ok", "agent_id": "ops-win-01", "version": "0.5.1" }
 ```
+
+`version` 字段为全项目唯一语义化版本（源码：`node/internal/version/version.go`）。探活中的身份字段以 **`node_id`** 为准。
 
 ```http
 GET /v1/agent/info
@@ -63,62 +79,69 @@ GET /v1/agent/info
 ```json
 {
   "agent_id": "ops-win-01",
-  "expose_to_peers": true,
   "capabilities": ["shell", "filesystem", "skills"],
   "manage_registered": true
 }
 ```
 
-### 2.2 Session
+### 2.2 Agents（主契约）
 
 ```http
-POST /v1/sessions
+POST /v1/agents
 Content-Type: application/json
 
-{ "session_id": null }
-```
-
-响应：
-
-```json
 {
-  "session_id": "sess-7f2a...",
-  "agent_id": "ops-win-01",
-  "created": true
+  "display_name": "助手",
+  "defaults": { "llm": { "active": "deepseek", "max_tool_loops": 32 } }
 }
 ```
 
-- `session_id` 可选；省略则由 Node 生成。
-- Client **不需要** `connection_id`（旧 v2 Backend 模型已废弃）；SSE 按 **单 Client 单连接** 或 `session_id` 分桶（Phase 1 建议：**一个 TUI 一个 SSE 连接，多 session 事件带 `session_id`**）。
+创建时会种子写入该 Agent 的 **policy** 与 **prompt-context**（SQLite）。
 
 ```http
-GET /v1/sessions
-DELETE /v1/sessions/{session_id}
-POST /v1/sessions/{session_id}/cancel
-POST /v1/sessions/{session_id}/clear-context
-GET /v1/sessions/{session_id}/context
+POST /v1/agents/{agent_id}/ensure
+GET  /v1/agents/{agent_id}/hydrate
+POST /v1/messages
+Content-Type: application/json
+
+{ "agent_id": "agt-xxx", "content": "你好" }
 ```
 
-**Cancel / Clear 与旁路缓冲**（详见 §2.4.3）：
-
-- **`cancel`**：中止在途流式 LLM；若 side-effect 缓冲非空且无 pending HITL，会 schedule `side_effect_continue` 被动续跑。
-- **`clear-context`**：清空 messages；**丢弃** side-effect 缓冲（Produce 已发出的 SSE 行可能留在 Client transcript，属预期 orphan）。
-- **`DELETE`**：停止 runtime 并丢弃缓冲（同 clear）。
+### 2.3 Policy（按 Agent / SQLite）
 
 ```http
-GET /v1/sessions/{session_id}/child-agents
-GET /v1/sessions/{session_id}/child-agents/{child_session_id}
-POST /v1/sessions/{session_id}/child-agents/{child_session_id}/cancel
+GET /v1/agents/{agent_id}/policy
+PUT /v1/agents/{agent_id}/policy/tools
+PUT /v1/agents/{agent_id}/policy/shell/{bash|cmd|powershell}
 ```
 
-### 2.3 消息与 resume
+全局 `GET/PUT /v1/policy*` **已移除**（404）；请用上表按 Agent 路径。
+
+### 2.4 侧车正文（按 Agent / SQLite）
+
+```http
+GET /v1/agents/{agent_id}/prompt-context
+PUT /v1/agents/{agent_id}/prompt-context
+Content-Type: application/json
+
+{
+  "soul_md": "...",
+  "user_md": "...",
+  "custom_md": "...",
+  "long_term_md": "..."
+}
+```
+
+注入开关仍通过 Agent 快照 `defaults.prompt_context.*_enabled`（设置页「侧车与长期记忆」）。
+
+### 2.5 消息与 resume
 
 ```http
 POST /v1/messages
 Content-Type: application/json
 
 {
-  "session_id": "sess-7f2a...",
+  "agent_id": "agt-xxx",
   "request_type": "message",
   "content": "列出当前目录"
 }
@@ -130,7 +153,7 @@ resume 示例（审批，与 `node/internal/hitl/resume.go` 一致）：
 
 ```json
 {
-  "session_id": "sess-7f2a...",
+  "agent_id": "agt-xxx",
   "request_type": "resume",
   "resume_value": {
     "type": "selection",
@@ -144,7 +167,7 @@ resume 示例（审批，与 `node/internal/hitl/resume.go` 一致）：
 
 ```json
 {
-  "session_id": "sess-7f2a...",
+  "agent_id": "agt-xxx",
   "request_type": "resume",
   "resume_value": {
     "type": "user_information",
@@ -160,23 +183,23 @@ resume 示例（审批，与 `node/internal/hitl/resume.go` 一致）：
 响应：
 
 ```json
-{ "accepted": true, "session_id": "sess-7f2a...", "priority": "human" }
+{ "accepted": true, "agent_id": "agt-xxx", "priority": "human" }
 ```
 
 ### 2.4 SSE 事件流
 
 ```http
-GET /v1/streams?session_id=sess-7f2a...
+GET /v1/streams?agent_id=agt-xxx
 Accept: text/event-stream
 Last-Event-ID: 42
 ```
 
 - Phase 1 可简化为 **全局单流**（一个 Client 一个 Node 实例通常一个活跃 session）。
-- 帧格式见 [client-events-and-hitl.md](./client-events-and-hitl.md)（修订版：去掉 `connection_id` 必填，保留 `session_id` / `execution_id`）。
+- 帧格式见 [附录/SSE事件速查.md](../handbook/附录/SSE事件速查.md)。
 
 核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`hitl_required`、`user_message_deferred`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`done`。
 
-**兼容 / 中继**：A2A caller 中继与子 Agent 审批仍可能发送 `approval_required` / `user_information_required`（见 §3、 [manage-communication.md](../manage-communication.md)）。**本地 turn** 统一为 `hitl_required`。
+**本地 turn** 统一使用 `hitl_required`。子 Agent 相关路径仍可能出现 `approval_required` / `user_information_required`，UI 按同类 HITL 处理即可。
 
 #### 2.4.1 `done` 事件（语义 B：轮到用户）
 
@@ -188,9 +211,9 @@ Last-Event-ID: 42
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `finish_reason` | string | `stop` \| `awaiting_hitl` \| `error` \| `cancelled`（历史兼容：`awaiting_user_information` / `awaiting_tool_approval` 仍映射为 HITL 暂停） |
+| `finish_reason` | string | `stop` \| `awaiting_hitl` \| `error` \| `cancelled` |
 | `turn_complete` | bool | `true`：本条用户 `message` 驱动的链已结束，可自由输入；`false`：HITL 暂停，链未结束 |
-| `awaiting` | string \| null | HITL 暂停时：`hitl`；链结束时为 `null`（历史：`user_information` / `tool_approval`） |
+| `awaiting` | string \| null | HITL 暂停时：`hitl`；链结束时为 `null` |
 
 **何时发送 `done`**
 
@@ -206,8 +229,8 @@ Last-Event-ID: 42
 
 **与其它事件分工**
 
-- **`hitl_required`**：本地 turn 统一 HITL 事件；`items[]` 每项含 `hitl_type`：`user_information`（`ask_user_information`）或 `execute_tool`（需审批工具）。Client 按 item 类型展示并分别 `POST resume`；同批可混合 ask + approval，Node 侧为单一 `PendingHITL.Items`。
-- **`approval_required` / `user_information_required`**：A2A caller 中继、子 Agent 审批等路径仍使用；Client 兼容处理。
+- **`hitl_required`**：本地 turn 统一 HITL 事件；`items[]` 每项含 `hitl_type`：`user_information`（`ask_user_information`）或 `execute_tool`（需审批工具）。UI 按 item 类型展示并分别 `POST resume`；同批可混合 ask + approval，Node 侧为单一 `PendingHITL.Items`。
+- **`approval_required` / `user_information_required`**：子 Agent 等路径仍可能使用；UI 按同类 HITL 处理。
 - `tool_call`（含 `ask_user_information`）：工具行展示；**不**替代 HITL 块。
 - 子 Agent 内部 `done`：**不**转发到父 SSE（`node/internal/childagent/relay_hub.go`）。
 
@@ -250,7 +273,7 @@ async / trigger / a2a inbox 在 **任务未完成**（HITL、open batch、tool l
 
 **`implicit_turn` 语义**：**非**用户 `POST /v1/messages` 驱动的 turn。Client 收到 `side_effect_turn_start` 后应开启与 user submit 相同的 turn 栅栏（Go `TurnGate.BeginImplicitTurn`、Web `beginImplicitTurn`、Python `begin_implicit_turn`），以便接收后续 `assistant` / `done`。
 
-**Cancel 与缓冲**（`POST /v1/sessions/{id}/cancel`）：
+**Cancel 与缓冲**（`POST /v1/agents/{id}/cancel`）：
 
 | 条件 | 行为 |
 |------|------|
@@ -265,28 +288,26 @@ async / trigger / a2a inbox 在 **任务未完成**（HITL、open batch、tool l
 ### 2.5 Skills（可选 HTTP；也可仅 tool）
 
 ```http
-GET /v1/sessions/{session_id}/skills
-POST /v1/sessions/{session_id}/skills/load
-POST /v1/sessions/{session_id}/skills/unload
+GET /v1/agents/{agent_id}/skills
+POST /v1/agents/{agent_id}/skills/load
+POST /v1/agents/{agent_id}/skills/unload
 ```
 
 与工具 `load_skills` 语义一致；HTTP 供 Client 设置页使用。
 
-### 2.6 Policy（工具 / shell 黑白名单）
+### 2.6 Policy（工具 / shell；按 Agent）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/v1/policy` | 返回工具与 shell 策略快照；可选 `?shell=bash\|cmd\|powershell\|auto` |
-| PUT | `/v1/policy/tools` | 更新工具策略：`{"updates":[{"name":"read_file","decision":"allow_auto"}]}` |
-| PUT | `/v1/policy/shell/{bash\|cmd\|powershell}` | 更新 shell 命令策略：`{"updates":[{"command":"rm","decision":"deny"}]}` |
+| GET | `/v1/agents/{agent_id}/policy` | 返回该 Agent 的工具与 shell 策略快照 |
+| PUT | `/v1/agents/{agent_id}/policy/tools` | 更新工具策略：`{"updates":[{"name":"read_file","decision":"allow_auto"}]}` |
+| PUT | `/v1/agents/{agent_id}/policy/shell/{bash\|cmd\|powershell}` | 更新 shell 命令策略 |
 
 **`decision` 枚举**：`allow_auto`（白名单 / txt `never`）· `require_approval`（需审批 / txt `always`）· `deny`（黑名单 / txt `deny`）。
 
-**`platform`**：`goos` 为 Node 进程 OS；`default_shell` 与 `bash_run` 默认 shell 一致（Windows→`powershell`，其余→`bash`）。
+写盘后 Node 热更新该 Agent runtime 的 policy engine；`ask_user_information` 禁止设为 `deny`。全局 `/v1/policy*` 已移除（404）。
 
-写盘后 Node 热更新全部活跃 session 的 policy engine；`ask_user_information` 禁止设为 `deny`。
-
-Client 入口：`/policy` 全屏界面（Go bubbletea / Python Textual，Esc 返回）。
+Web UI：Agents 设置页 Policy 面板。
 
 ---
 
@@ -296,38 +317,20 @@ Client 入口：`/policy` 全屏界面（Go bubbletea / Python Textual，Esc 返
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/v1/sessions/{parent_session_id}/child-agents` | 列出该父 session 下**未交付**的活跃子 Agent |
-| GET | `/v1/sessions/{parent_session_id}/child-agents/{child_session_id}` | 查询单个子 Agent 状态 |
-| POST | `/v1/sessions/{parent_session_id}/child-agents/{child_session_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
+| GET | `/v1/agents/{parent_agent_id}/child-agents` | 列出该父 Agent 下**未交付**的活跃子 Agent |
+| GET | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}` | 查询单个子 Agent 状态 |
+| POST | `/v1/agents/{parent_agent_id}/child-agents/{child_agent_id}/cancel` | 用户/Client 停止临时 Agent（与工具 `cancel_temporary_agent` 等价） |
 
-- 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建（非 A2A），**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** session 的 `GET /v1/streams`。
+- 临时 Agent 由父 Agent 工具 **`create_temporary_agent`** 创建，**无**独立 SSE；事件 **`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`** 发往**父** Agent 的 `GET /v1/streams`。
 - 子 Agent **生命周期**在**向父 Agent 交付结果**后结束并回收；交付时发送结束类 SSE。
 
-父 Agent 工具（非 HTTP，非 A2A）：`create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent`。
+父 Agent 工具（非 HTTP）：`create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent`。
 
 ---
 
-## 3. A2A（经 Manage，无入站 API）
+## 3. 跨机协作（工作组）
 
-非子 Agent 的 A2A **不**在本 Node 暴露 HTTP 路由；由工具层调用 **Manage**（见 [a2a-via-manage.md](./a2a-via-manage.md)、[manage-api-sketch.md](./manage-api-sketch.md) §4）。
-
-| Node 内工具 | Manage API |
-|-------------|------------|
-| `agent_discover` | `GET /v1/registry/agents/discover` |
-| `agent_invoke` | `POST /v1/a2a/tasks` + 轮询 `GET /v1/a2a/tasks/{id}` |
-| `agent_notify` | `POST /v1/a2a/tasks`（`kind=notify`） |
-
-**Inbox long poll**（`node/internal/manage/inbox_poller.go`）：
-
-```http
-GET {manage_url}/v1/a2a/inbox?agent_id={self}&limit=10&wait=25
-```
-
-拉取到的 Task 入本地 **A2A session** 队列，走 turn loop；处理完成后：
-
-```http
-POST {manage_url}/v1/a2a/tasks/{task_id}/reply
-```
+非子 Agent 的跨机协作走 **工作组（Workgroup）**（见 [workgroup-and-node-gateway.md](../design/workgroup-and-node-gateway.md)、[handbook/05-Manage与A2A.md](../handbook/05-Manage与A2A.md)、[handbook/07-Workgroup协作.md](../handbook/07-Workgroup协作.md)）。本 Node 不提供 peer 直连派活的 HTTP 路由。
 
 ---
 
@@ -346,7 +349,7 @@ POST {manage_url}/v1/a2a/tasks/{task_id}/reply
 子 Agent turn 与工具执行共享：
 
 - 同一 FS 根 / shell 环境
-- 同一 LLM 客户端（审计日志带 `parent_session_id`、`child_agent_kind=temporary`）
+- 同一 LLM 客户端（审计日志带 `parent_agent_id`、`child_agent_kind=temporary`）
 
 ---
 
@@ -372,8 +375,8 @@ Node 内部分层（实现参考，非 HTTP）：
 ```text
 TurnOrchestrator
   → PolicyEngine（本地 + Manage 下发的静态策略文件）
-  → ToolRegistry（bash、fs、skills、triggers、agent_discover、agent_invoke、…）
-  → Executor（os/exec、fs、sandbox）
+  → ToolRegistry（bash、fs、skills、triggers、child_agents、…）
+  → Executor（os/exec、fs；工具边界见手册）
   → AuditReporter → Manage
 ```
 
@@ -381,13 +384,14 @@ TurnOrchestrator
 
 ## 6. 与 Manage 的出站调用（Node 作为客户端）
 
-见 [manage-api-sketch.md](./manage-api-sketch.md)：
+见 [manage-architecture.md](../design/manage-architecture.md) 与 [handbook/05](../handbook/05-Manage与A2A.md)：
 
-- `POST /v1/agents/register`、`POST /v1/agents/{id}/heartbeat`
-- `POST /v1/audit/events`
-- **A2A**：`GET /v1/registry/agents/discover`、`POST /v1/a2a/tasks`、`GET /v1/a2a/inbox`、`POST .../tasks/{id}/reply`、`GET /v1/a2a/tasks/{id}`
+- `POST /v1/registry/agents`、`POST /v1/registry/agents/{id}/heartbeat`
+- **Registry discover**（目录）：`GET /v1/registry/agents/discover`
+- **工作组**：经 Node 反代 / Dialer（见 handbook/05、07）
+- **Releases**：`GET /v1/releases/check`
 
-**无** WebSocket control channel；**无** peer Node 直连。
+**无** WebSocket control channel 作为 Node↔Node 信令；**无** peer Node 直连。
 
 ---
 
@@ -399,11 +403,11 @@ agent_id: ops-win-01
 listen:
   host: 127.0.0.1
   port: 18765
-expose_to_peers: true
-groups: [ops, windows]
 manage:
+  enabled: true
   url: https://manage.example.com
-  node_token: "${MANAGE_NODE_TOKEN}"
+  registration:
+    base_url: http://192.168.1.10:18765
 fs_root: D:\agent-workspace
 llm:
   provider: openai
@@ -424,7 +428,7 @@ local:
 
 | 优先级 | API |
 |--------|-----|
-| P0 | `/health`、`POST /v1/sessions`、`POST /v1/messages`、`GET /v1/streams` |
+| P0 | `/health`、`POST /v1/agents`、`POST /v1/messages`、`GET /v1/streams` |
 | P0 | Manage 注册/心跳/审计（出站） |
-| P1 | HITL resume、skills HTTP、A2A inbox 轮询 + Manage 工具 |
-| P2 | **临时子 Agent**（[child-agent-tools.md](./child-agent-tools.md)）、execution_progress 细粒度事件 |
+| P1 | HITL resume、skills HTTP、Workgroup / Manage 工具 |
+| P2 | **临时子 Agent**（[child-agent-tools.md](./child-agent-tools.md)）；execution_progress 细粒度事件仍为远期 |

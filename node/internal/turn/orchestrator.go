@@ -15,6 +15,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -52,8 +53,12 @@ type Orchestrator struct {
 	toolHooks    *hooks.Registry
 	toolExecLog  *hooks.ToolExecutionLog
 	skillAccess  SkillAccess
+	hookRuntimeCfg hooks.RuntimeConfig
+	hookHostCfg    HookHostConfig
+	hookHostState  *hookHostState
 	maxToolLoops int
 	promptCtx    *promptcontext.Reader
+	longTermStore LongTermStore
 	journal      *historypkg.Journal
 	logger       *slog.Logger
 
@@ -67,11 +72,43 @@ type Orchestrator struct {
 
 	enqueueToolResult   func(sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
+
+	multimodalEnabled bool
+	mediaReg          *media.Registry
+}
+
+// SetHookHostConfig 注入 Host 路径与配额配置。
+func (o *Orchestrator) SetHookHostConfig(cfg HookHostConfig) {
+	if o == nil {
+		return
+	}
+	o.hookHostCfg = cfg.normalized()
+	if o.hookHostState != nil {
+		o.hookHostState.mu.Lock()
+		o.hookHostState.fsRoot = o.fsRoot
+		o.hookHostState.mu.Unlock()
+	}
 }
 
 // SetSystemPromptBuilder 注入 system prompt 构造器；nil 时使用默认 BuildSystemPrompt。
 func (o *Orchestrator) SetSystemPromptBuilder(fn SystemPromptBuilder) {
 	o.systemPromptBuilder = fn
+}
+
+// SetMultimodalEnabled 控制 read_image 后的 vision user 消息注入。
+func (o *Orchestrator) SetMultimodalEnabled(enabled bool) {
+	if o == nil {
+		return
+	}
+	o.multimodalEnabled = enabled
+}
+
+// SetMediaRegistry 注入 session media registry（用户图 LLM 展开，F-M5）。
+func (o *Orchestrator) SetMediaRegistry(reg *media.Registry) {
+	if o == nil {
+		return
+	}
+	o.mediaReg = reg
 }
 
 // SetChildAgentManager 注入临时 Agent 管理器（仅父 session 调用）。
@@ -105,20 +142,30 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	ctx context.Context,
 	sessionID string,
 	history *[]llm.Message,
-	userText string,
-	userName string,
+	userMsg llm.Message,
 	setState StateSetter,
 ) StepOutcome {
 	if setState == nil {
 		setState = func(State) {}
 	}
-	o.appendHistory(sessionID, history, llm.UserMessage(userText, llm.NormalizeUserMessageName(userName)))
+	if userMsg.Role == "" {
+		userMsg.Role = "user"
+	}
+	o.appendHistory(sessionID, history, userMsg)
+	summary := llm.MessageTextSummary(userMsg)
+	o.runMessageEnqueuedPhase(ctx, sessionID, history, summary, map[string]any{
+		"source":       userMsg.Name,
+		"has_images":   llm.MessageHasImages(userMsg),
+		"content_len":  len(summary),
+	})
 	o.resetTurnUsage(sessionID)
 	o.resetContextMetrics(sessionID)
+	o.resetHookHostLLMQuota()
 	o.logger.Info("turn human message start",
 		"session_id", sessionID,
-		"content_len", len(userText),
-		"user_name", llm.NormalizeUserMessageName(userName),
+		"content_len", len(summary),
+		"has_images", llm.MessageHasImages(userMsg),
+		"user_name", llm.NormalizeUserMessageName(userMsg.Name),
 	)
 	return o.runOneStep(ctx, sessionID, history, setState, 0)
 }
@@ -157,9 +204,10 @@ func (o *Orchestrator) ContinueAfterResume(
 	if setState == nil {
 		setState = func(State) {}
 	}
+	resumeKind := strings.TrimSpace(fmt.Sprint(resumeValue["type"]))
+	o.runHITLAfterResumePhase(ctx, sessionID, history, resumeKind)
 	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
 	pendingToolCallID := ""
-	pending.Normalize()
 	pendingCount := len(pending.Items)
 	if pendingCount > 0 {
 		pendingToolCallID = pending.Items[0].ToolCall.ID
@@ -175,6 +223,8 @@ func (o *Orchestrator) ContinueAfterResume(
 	switch hitl.ResumeValueKind(resumeValue) {
 	case "user_information":
 		return o.continueAfterUserInformationResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
+	case "memory_conflict":
+		return o.continueAfterMemoryConflictResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
 	case "approval":
 		return o.continueAfterApprovalResume(ctx, sessionID, history, resumeValue, pending, toolLoopCount)
 	default:
@@ -214,20 +264,21 @@ func NewOrchestrator(
 		maxToolLoops = DefaultMaxToolLoops()
 	}
 	orch := &Orchestrator{
-		agentID:      agentID,
-		fsRoot:       fsRoot,
-		hub:          hub,
-		llm:          client,
-		tools:        toolExec,
-		policy:       policyEngine,
-		toolHooks:    toolHooks,
-		toolExecLog:  toolExecLog,
-		skillAccess:  skillAccess,
-		maxToolLoops: maxToolLoops,
-		promptCtx:    promptCtx,
-		journal:      journal,
-		logger:       logx.OrDefault(logger),
-		ctxMetrics:   newContextMetricsStore(),
+		agentID:        agentID,
+		fsRoot:         fsRoot,
+		hub:            hub,
+		llm:            client,
+		tools:          toolExec,
+		policy:         policyEngine,
+		toolHooks:      toolHooks,
+		toolExecLog:    toolExecLog,
+		skillAccess:    skillAccess,
+		hookRuntimeCfg: hookCfg,
+		maxToolLoops:   maxToolLoops,
+		promptCtx:      promptCtx,
+		journal:        journal,
+		logger:         logx.OrDefault(logger),
+		ctxMetrics:     newContextMetricsStore(),
 	}
 	registerSystemPromptBuildHook(orch)
 	return orch
@@ -235,15 +286,39 @@ func NewOrchestrator(
 
 // InterruptPending 在用户插入新 message 时打断 pending tool calls。
 func (o *Orchestrator) InterruptPending(sessionID string, history *[]llm.Message, pending *PendingHITL) {
+	o.InterruptPendingWithReason(
+		sessionID,
+		history,
+		pending,
+		ToolUserInterruptedMessage,
+		map[string]any{"interrupted_by_user_message": true},
+	)
+}
+
+// InterruptPendingWithReason 以自定义文案/元数据打断 pending tool calls。
+func (o *Orchestrator) InterruptPendingWithReason(
+	sessionID string,
+	history *[]llm.Message,
+	pending *PendingHITL,
+	message string,
+	meta map[string]any,
+) {
 	if pending == nil {
 		return
+	}
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		msg = ToolUserInterruptedMessage
+	}
+	if meta == nil {
+		meta = map[string]any{"interrupted_by_user_message": true}
 	}
 	o.insertMissingToolResponsesAfterAssistant(
 		sessionID,
 		history,
 		pending.AllToolCalls(),
-		ToolUserInterruptedMessage,
-		map[string]any{"interrupted_by_user_message": true},
+		msg,
+		meta,
 	)
 }
 
@@ -255,23 +330,34 @@ func (o *Orchestrator) runOneStep(
 	toolLoopCount int,
 ) StepOutcome {
 	o.RepairUnrespondedToolCalls(sessionID, history)
+	o.runTurnBeforeStepPhase(ctx, sessionID, history, "model_step", toolLoopCount)
 	finishReason := "stop"
 	var streamErr error
 	toolLoopCount++
 	o.recordToolLoop(sessionID, toolLoopCount)
-	if toolLoopCount > o.maxToolLoops {
-		o.publishError(sessionID, fmt.Sprintf("工具调用轮次超过上限：%d", o.maxToolLoops))
-		o.publishDone(sessionID, "error")
-		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("tool loop limit exceeded")}
-	}
+	// 超过 maxToolLoops 后不再硬失败：本步禁用 tools，若模型仍发起 tool_calls 则写入 soft tool_result，
+	// 让模型给出结论并询问用户；下一条 user 消息会重置 toolLoopCount。
+	overToolBudget := toolLoopCount > o.maxToolLoops
 
 	toolDefs := o.ToolDefinitions()
+	if overToolBudget {
+		toolDefs = nil
+	}
 	systemPrompt := o.buildSystemPrompt(sessionID)
+	msgs, systemPrompt, hookErr := o.runLLMBeforeCallPhase(ctx, sessionID, history, systemPrompt)
+	if hookErr != nil {
+		o.runTurnErrorPhase(ctx, sessionID, history, hookErr)
+		o.publishError(sessionID, hookErr.Error())
+		o.publishDone(sessionID, "error")
+		return StepOutcome{LoopCount: toolLoopCount, Err: hookErr}
+	}
+	*history = msgs
 	setState(StateModelStreaming)
 	publishedToolPartial := make(map[int]string)
+	llmMessages := media.ExpandMessagesForLLM(*history, o.mediaReg)
 	result, err := o.llm.StreamChat(ctx, llm.ChatRequest{
 		SystemPrompt: systemPrompt,
-		Messages:     *history,
+		Messages:     llmMessages,
 		Tools:        toolDefs,
 	}, llm.StreamHandler{
 		OnDelta: func(delta string) {
@@ -301,9 +387,11 @@ func (o *Orchestrator) runOneStep(
 		if errors.Is(err, context.Canceled) {
 			finishReason = "cancelled"
 			streamErr = err
+			o.runTurnCancelPhase(ctx, sessionID, history, "llm_stream_cancelled")
 			o.logger.Info("turn llm cancelled", "session_id", sessionID, "loop", toolLoopCount)
 			o.persistCancelledStream(sessionID, history, result)
 		} else {
+			o.runTurnErrorPhase(ctx, sessionID, history, err)
 			o.publishError(sessionID, err.Error())
 			finishReason = "error"
 			streamErr = err
@@ -316,8 +404,9 @@ func (o *Orchestrator) runOneStep(
 		return StepOutcome{LoopCount: toolLoopCount, Err: streamErr}
 	}
 
-	result, hookErr := o.runLLMAfterCallPhase(ctx, sessionID, result)
+	result, hookErr = o.runLLMAfterCallPhase(ctx, sessionID, result)
 	if hookErr != nil {
+		o.runTurnErrorPhase(ctx, sessionID, history, hookErr)
 		msg := hookErr.Error()
 		if isLLMAfterCallAbort(hookErr) {
 			o.logger.Warn("llm.after_call aborted turn", "session_id", sessionID, "error", hookErr)
@@ -338,14 +427,45 @@ func (o *Orchestrator) runOneStep(
 		return StepOutcome{LoopCount: toolLoopCount}
 	}
 
+	if toolLoopCount > o.maxToolLoops {
+		o.appendMissingToolResponses(
+			sessionID,
+			history,
+			result.ToolCalls,
+			ToolLoopLimitExceededMessage,
+			map[string]any{"tool_loop_limit_exceeded": true, "max_tool_loops": o.maxToolLoops},
+		)
+		o.logger.Info(
+			"tool loop soft limit",
+			"session_id", sessionID,
+			"loop", toolLoopCount,
+			"max_tool_loops", o.maxToolLoops,
+			"tool_calls", len(result.ToolCalls),
+		)
+		// 已超额一步仍反复 tool_calls 时收束，避免 soft-reject 死循环。
+		if toolLoopCount > o.maxToolLoops+1 {
+			o.publishDone(sessionID, finishReason)
+			return StepOutcome{LoopCount: toolLoopCount}
+		}
+		if o.enqueueToolResult != nil {
+			if err := o.enqueueToolResult(sessionID); err != nil {
+				return StepOutcome{LoopCount: toolLoopCount, Err: err}
+			}
+			return StepOutcome{LoopCount: toolLoopCount}
+		}
+		return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
+	}
+
 	setState(StateAwaitingTool)
 	pending, pauseReason, procErr := o.processToolCalls(ctx, sessionID, history, result.ToolCalls)
 	if procErr != nil {
 		if errors.Is(procErr, context.Canceled) {
 			finishReason = "cancelled"
+			o.runTurnCancelPhase(ctx, sessionID, history, "tool_processing_cancelled")
 			o.appendMissingToolResponses(sessionID, history, result.ToolCalls, ToolStreamInterruptedMessage, map[string]any{"interrupted_by_stream_cancel": true})
 			o.publishUsageIfAccumulated(sessionID, toolLoopCount)
 		} else {
+			o.runTurnErrorPhase(ctx, sessionID, history, procErr)
 			finishReason = "error"
 			o.publishError(sessionID, procErr.Error())
 		}
@@ -389,12 +509,23 @@ func (o *Orchestrator) ToolDefinitions() []tools.ToolDef {
 	return o.tools.Definitions()
 }
 
+// ToolRegistry 在 Executor 为 *tools.Registry 时返回，供 UI 同步控制 bash。
+func (o *Orchestrator) ToolRegistry() *tools.Registry {
+	if o == nil || o.tools == nil {
+		return nil
+	}
+	if reg, ok := o.tools.(*tools.Registry); ok {
+		return reg
+	}
+	return nil
+}
+
 func (o *Orchestrator) buildSystemPrompt(sessionID string) string {
 	if o.toolHooks == nil {
 		return o.composeSystemPrompt(sessionID)
 	}
 	hc := hooks.BuildPromptBuildContext(sessionID, o.agentID, "")
-	out, err := o.toolHooks.RunPhase(context.Background(), hooks.PhasePromptBuild, hc)
+	out, err := o.runPhase(context.Background(), hooks.PhasePromptBuild, hc, sessionID, nil, "")
 	if err != nil {
 		return o.composeSystemPrompt(sessionID)
 	}
@@ -410,7 +541,30 @@ func (o *Orchestrator) runTurnDonePhase(sessionID, finishReason string) {
 		return
 	}
 	hc := hooks.BuildTurnDoneContext(sessionID, o.agentID, finishReason)
-	_, _ = o.toolHooks.RunPhase(context.Background(), hooks.PhaseTurnDone, hc)
+	_, _ = o.runPhase(context.Background(), hooks.PhaseTurnDone, hc, sessionID, nil, finishReason)
+}
+
+// ReloadLongTermMemory 从持久化存储重新加载长期记忆并注入 prompt（清空上下文 / 首条交互 / 压缩完成后调用）。
+func (o *Orchestrator) ReloadLongTermMemory(ctx context.Context) {
+	if o == nil {
+		return
+	}
+	if o.longTermStore == nil {
+		if o.promptCtx != nil {
+			o.promptCtx.UpdateLongTerm("")
+		}
+		return
+	}
+	snap, err := o.longTermStore.ReadLongTerm(ctx)
+	if err != nil {
+		if o.logger != nil {
+			o.logger.Warn("reload long-term memory failed", "agent_id", o.agentID, "error", err)
+		}
+		return
+	}
+	if o.promptCtx != nil {
+		o.promptCtx.UpdateLongTerm(FormatLongTermEntries(snap.Entries))
+	}
 }
 
 func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
@@ -425,6 +579,7 @@ func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 		Catalog:   o.skillAccess.Catalog,
 		Loaded:    loaded,
 		PromptCtx: o.promptCtx,
+		IncludeHistoryJournal: o.journal != nil && o.journal.Enabled(),
 	}
 	if o.systemPromptBuilder != nil {
 		return o.systemPromptBuilder(in)

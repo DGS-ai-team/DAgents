@@ -21,7 +21,7 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	if prompt == "" {
 		t.Fatal("empty prompt")
 	}
-	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "prompt_context/", "最高优先级规则", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
+	if !containsAll(prompt, "ops-01", "memory/", "sessions.db", "data/", "临时工作区", "skills/", "数据库", "最高优先级规则", "sess-abc", "运行环境", "工作区目录", "相对路径均基于工作区根目录", "操作工作区内资源时请使用相对路径") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
@@ -32,24 +32,65 @@ func TestBuildSystemPrompt_includesAgentAndWorkspace(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPrompt_includesPromptContext(t *testing.T) {
+func TestBuildSystemPrompt_includesHistoryJournalWhenEnabled(t *testing.T) {
+	prompt := BuildSystemPrompt(SystemPromptInput{
+		AgentID:               "ops-01",
+		SessionID:             "sess-a",
+		IncludeHistoryJournal: true,
+	})
+	if !containsAll(prompt, "history/", "YYYYMMDD", "read_file") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestBuildSystemPrompt_omitsHistoryJournalWhenDisabled(t *testing.T) {
+	prompt := BuildSystemPrompt(SystemPromptInput{
+		AgentID:               "ops-01",
+		SessionID:             "sess-a",
+		IncludeHistoryJournal: false,
+	})
+	if contains(prompt, "history/") {
+		t.Fatalf("prompt should omit history journal section, got %q", prompt)
+	}
+}
+
+func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".runtime")
-	dir := filepath.Join(root, "prompt_context")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	cliDir := filepath.Join(root, "externaltools")
+	if err := os.MkdirAll(cliDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "user.md"), []byte("prefer concise"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "externaltools_menu.md"), []byte("# tools\n\n| x | y |\n| a | b |\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cliDir, "mycli"), []byte("#!/bin/sh\ntrue"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	hostsnapshot.CaptureAtStartup()
 	prompt := BuildSystemPrompt(SystemPromptInput{
+		AgentID: "ops-01",
+		FSRoot:  root,
+	})
+	if !containsAll(prompt, "外置 CLI 与工具", "mycli", "externaltools_menu.md", "编译好的二进制") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestBuildSystemPrompt_includesPreferredName(t *testing.T) {
+	hostsnapshot.CaptureAtStartup()
+	r := promptcontext.NewContentReader(promptcontext.Content{User: "legacy user.md ignored"})
+	r.SetPreferredName("小明")
+	prompt := BuildSystemPrompt(SystemPromptInput{
 		AgentID:   "ops-01",
 		FSRoot:    "/data/ws",
 		SessionID: "sess-x",
-		PromptCtx: promptcontext.NewReader(root),
+		PromptCtx: r,
 	})
-	if !containsAll(prompt, "用户信息与偏好", "prefer concise", "prompt_context") {
+	if !containsAll(prompt, "以下是用户信息", "请称呼用户为：小明") {
 		t.Fatalf("prompt = %q", prompt)
+	}
+	if contains(prompt, "legacy user.md") || contains(prompt, "用户信息与偏好") {
+		t.Fatalf("should not inject user.md sidecar, got %q", prompt)
 	}
 }
 
@@ -67,7 +108,7 @@ func TestBuildChildSystemPrompt_includesPurposeAndSkipsParentSections(t *testing
 	if contains(prompt, "FS_ROOT") || contains(prompt, "/data/ws") {
 		t.Fatalf("child prompt should not expose fs_root path, got %q", prompt)
 	}
-	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "用户信息与偏好") {
+	if contains(prompt, "打招呼") || contains(prompt, "可用技能的目录") || contains(prompt, "以下是用户信息") {
 		t.Fatalf("child prompt should omit parent sections, got %q", prompt)
 	}
 }
@@ -119,7 +160,7 @@ type promptInjectHook struct {
 
 func (h promptInjectHook) Name() string    { return "test.prompt.inject" }
 func (h promptInjectHook) Phases() []hooks.Phase { return []hooks.Phase{hooks.PhasePromptBuild} }
-func (h promptInjectHook) Run(_ context.Context, hc *hooks.Context) (hooks.Result, error) {
+func (h promptInjectHook) Run(_ context.Context, hc *hooks.Context, _ hooks.Host) (hooks.Result, error) {
 	base := ""
 	if hc.PromptBuild != nil {
 		base = hc.PromptBuild.SystemPrompt

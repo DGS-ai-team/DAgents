@@ -62,7 +62,7 @@ func runMessageTurnInline(
 	if setState == nil {
 		setState = func(State) {}
 	}
-	outcome := orch.RunHumanMessageTurn(ctx, sessionID, history, userText, llm.UserNameHuman, setState)
+	outcome := orch.RunHumanMessageTurn(ctx, sessionID, history, llm.UserMessage(userText, llm.UserNameHuman), setState)
 	if outcome.Err != nil {
 		return outcome.Pending, outcome.LoopCount, outcome.Err
 	}
@@ -114,7 +114,7 @@ func TestRunMessageTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) != 2 || history[1].Content != "hi" {
+	if len(history) != 3 || history[1].Content != "hi" || history[2].Content != "hi" {
 		t.Fatalf("history = %+v", history)
 	}
 
@@ -406,36 +406,43 @@ func TestRunMessageTurnMaxToolLoops(t *testing.T) {
 
 	done := make(chan struct{})
 	var turnErr error
+	var history []llm.Message
 	go func() {
 		defer close(done)
-		var history []llm.Message
 		_, _, turnErr = runMessageTurnInline(t, orch, context.Background(), "sess-1", &history, "loop", nil)
 	}()
 
 	deadline := time.After(3 * time.Second)
-	var gotError, gotDone bool
-	for !(gotError && gotDone) {
+	var gotDone bool
+	for !gotDone {
 		select {
 		case ev := <-ch:
 			switch ev.Type {
 			case "error":
-				if msg, ok := ev.Data["message"].(string); !ok || !strings.Contains(msg, "工具调用轮次超过上限") {
-					t.Fatalf("error payload = %+v", ev.Data)
-				}
-				gotError = true
+				t.Fatalf("unexpected error SSE: %+v", ev.Data)
 			case "done":
-				if reason, _ := ev.Data["finish_reason"].(string); reason != "error" {
-					t.Fatalf("done finish_reason = %q, want error", reason)
+				if reason, _ := ev.Data["finish_reason"].(string); reason != "stop" {
+					t.Fatalf("done finish_reason = %q, want stop", reason)
 				}
 				gotDone = true
 			}
 		case <-deadline:
-			t.Fatalf("timeout error=%v done=%v turnErr=%v", gotError, gotDone, turnErr)
+			t.Fatalf("timeout done=%v turnErr=%v", gotDone, turnErr)
 		}
 	}
 	<-done
-	if turnErr == nil || !strings.Contains(turnErr.Error(), "tool loop limit exceeded") {
-		t.Fatalf("runMessageTurnInline err = %v, want tool loop limit exceeded", turnErr)
+	if turnErr != nil {
+		t.Fatalf("runMessageTurnInline err = %v, want nil (soft tool_result)", turnErr)
+	}
+	gotSoft := false
+	for _, msg := range history {
+		if msg.Role == "tool" && strings.Contains(msg.Content, "已超过单轮工具调用次数") {
+			gotSoft = true
+			break
+		}
+	}
+	if !gotSoft {
+		t.Fatalf("history missing soft tool_result; history=%+v", history)
 	}
 }
 
@@ -693,10 +700,10 @@ func TestRunMessageTurnCancelledPersistsPartialAssistant(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
-	if len(history) != 2 {
+	if len(history) != 3 {
 		t.Fatalf("history = %+v", history)
 	}
-	assistant := history[1]
+	assistant := history[2]
 	if assistant.Role != "assistant" || assistant.Content != "partial answer" {
 		t.Fatalf("assistant = %+v", assistant)
 	}

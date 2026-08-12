@@ -22,8 +22,6 @@ func TestShouldStartSilentPendingDedup(t *testing.T) {
 }
 
 func TestShouldStartSilentCooldownBlocks(t *testing.T) {
-	t.Parallel()
-
 	prevDuration := SilentCooldownDuration
 	prevGrowth := SilentCooldownTokenGrowth
 	t.Cleanup(func() {
@@ -52,8 +50,6 @@ func TestShouldStartSilentCooldownBlocks(t *testing.T) {
 }
 
 func TestShouldStartSilentCooldownAllowsAfterTokenGrowth(t *testing.T) {
-	t.Parallel()
-
 	prevDuration := SilentCooldownDuration
 	prevGrowth := SilentCooldownTokenGrowth
 	t.Cleanup(func() {

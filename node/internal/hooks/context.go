@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"encoding/json"
+
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
 
@@ -10,7 +12,7 @@ type Context struct {
 	SessionID       string
 	AgentID         string
 	TurnID          string
-	ParentSessionID string
+	ParentAgentID string
 	Metadata        map[string]any
 
 	MessageEnqueued    *MessageEnqueuedPayload
@@ -31,6 +33,14 @@ type Context struct {
 	TurnError          *TurnErrorPayload
 	TurnCancel         *TurnCancelPayload
 	SessionLifecycle   *SessionLifecyclePayload
+
+	// 以下字段由 EnrichContext 从 Host 快照注入，供 in-process Hook 读取。
+	History      []llm.Message          `json:"history,omitempty"`
+	SystemPrompt string                 `json:"system_prompt,omitempty"`
+	LoadedSkills []LoadedSkillInfo      `json:"loaded_skills,omitempty"`
+	Runtime      RuntimeSummary         `json:"runtime"`
+	SessionStore map[string]json.RawMessage `json:"session_store,omitempty"`
+	FSPaths      *FSPaths               `json:"fs_paths,omitempty"`
 }
 
 // MessageEnqueuedPayload 对应 message.enqueued。

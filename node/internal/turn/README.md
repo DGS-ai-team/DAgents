@@ -52,7 +52,7 @@ sequenceDiagram
 - `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
 - `SetChildSession(true)`：子 session 禁止管理类工具与 `ask_user`
 
-`policy == nil` 时加载默认策略文件；`maxToolLoops <= 0` 时用默认 **16**。
+`policy == nil` 时加载默认策略文件；`maxToolLoops <= 0` 时用默认 **16**。超过上限时对后续 tool_calls 写入 soft `tool` 结果（见 `ToolLoopLimitExceededMessage`），不硬失败。
 
 ---
 
@@ -80,10 +80,11 @@ sequenceDiagram
 
 1. `staticSystemPrompt`（行为准则、保密说明；**不含**各工具用法，见 tool schema）
 2. 主机环境快照（`hostsnapshot`）+ Agent ID / session_id（**不含** FS_ROOT 绝对路径）
-3. 工作区子目录约定（`data/`、`memory/` 等；path 相对工作区根）
-4. `prompt_context` 稳定段（soul / user / long_term）
-5. 已加载 skills 正文（动态会话状态，非工具 catalog）
-6. `custom.md`
+3. 工作区子目录约定（`data/`、`memory/`、`externaltools/` 外置 CLI 等；path 相对工作区根）
+4. **外置 CLI 与工具**（`externaltools_menu.md` + `externaltools/` 可执行文件扫描，见 [`../externaltools/`](../externaltools/)）
+5. `prompt_context` 稳定段（soul / user / long_term）
+6. 已加载 skills 正文（动态会话状态，非工具 catalog）
+7. `custom.md`
 
 skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时注入 **`load_skills` 工具 description**（`Registry.SetSkillsCatalog`）。
 
@@ -95,13 +96,13 @@ skills **目录元数据**不再写入 system prompt；启用 `load_skills` 时�
 
 `processToolCalls` 按 `policy.DecideTool` 将 tool calls 分为：
 
-- **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 超时由 registry 自动降级；历史参数仍可走内部 `StartBackground`）
+- **auto**：`executeAutoBatch` 同步 `Execute`（`bash_run` 仅在显式 `timeout_seconds` 时超时降级；历史参数仍可走内部 `StartBackground`）
 - **HITL pending**：`ask_user_information` 与 `require_approval` 工具合并为 **`PendingHITL.Items[]`**（不再区分 `HITLKind`）
 - **SSE**：本地 turn 发 **`hitl_required`**（`items[]` 每项 `hitl_type`：`user_information` \| `execute_tool`）；`done` 为 `awaiting_hitl` / `awaiting=hitl`
 
 **分步 resume**：Client 按 item 类型提交 `resume`（`type=user_information` 或 `type=approval|selection`）；Node `ContinueAfterResume` 部分消 pending，全部 resolved 后 `ScheduleToolResult`。
 
-**仍用旧事件的路径**：A2A caller 中继（`approval_required` / `user_information_required`）、子 Agent 审批 relay（`approval_required` + `child_session_id`）。
+**仍用旧事件的路径**：A2A caller 中继（`approval_required` / `user_information_required`）、子 Agent 审批 relay（`approval_required` + `child_agent_id`）。
 
 临时 Agent 四类工具在父 session 转 `childagent.Manager.HandleParentTool`；子 session 调用管理类工具会被拒绝。
 

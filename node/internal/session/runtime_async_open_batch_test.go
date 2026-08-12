@@ -84,8 +84,9 @@ func TestAsyncToolResultDuringApprovalOpenBatchDoesNotViolateHistory(t *testing.
 	}
 }
 
-// 以下 helper 与 turn 包测试逻辑一致，避免 session 测试依赖未导出符号。
+// turnHistoryHasOpenToolBatchViolation 检测 assistant tool_calls 后是否存在未闭合 batch。
 func turnHistoryHasOpenToolBatchViolation(messages []llm.Message) bool {
+outer:
 	for i := 0; i < len(messages); i++ {
 		msg := messages[i]
 		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
@@ -107,7 +108,7 @@ func turnHistoryHasOpenToolBatchViolation(messages []llm.Message) bool {
 					return true
 				}
 				i = j - 1
-				break
+				continue outer
 			}
 		}
 	}

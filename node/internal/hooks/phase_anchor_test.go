@@ -11,7 +11,7 @@ func TestRunPhase_promptBuildMutation(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "inject.enterprise",
 		phases: []Phase{PhasePromptBuild},
-		fn: func(_ context.Context, hc *Context) (Result, error) {
+		fn: func(_ context.Context, hc *Context, _ Host) (Result, error) {
 			base := ""
 			if hc.PromptBuild != nil {
 				base = hc.PromptBuild.SystemPrompt
@@ -25,7 +25,7 @@ func TestRunPhase_promptBuildMutation(t *testing.T) {
 	}, RegisterOpts{Priority: 0})
 
 	hc := BuildPromptBuildContext("sess-1", "agent-1", "base prompt")
-	out, err := reg.RunPhase(context.Background(), PhasePromptBuild, hc)
+	out, err := reg.RunPhase(context.Background(), PhasePromptBuild, hc, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestRunPhase_turnDoneObservational(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "metrics.stub",
 		phases: []Phase{PhaseTurnDone},
-		fn: func(_ context.Context, hc *Context) (Result, error) {
+		fn: func(_ context.Context, hc *Context, _ Host) (Result, error) {
 			if hc.TurnDone != nil {
 				captured = hc.TurnDone.FinishReason
 			}
@@ -51,7 +51,7 @@ func TestRunPhase_turnDoneObservational(t *testing.T) {
 	}, RegisterOpts{Priority: 0})
 
 	hc := BuildTurnDoneContext("sess-2", "agent-2", "stop")
-	if _, err := reg.RunPhase(context.Background(), PhaseTurnDone, hc); err != nil {
+	if _, err := reg.RunPhase(context.Background(), PhaseTurnDone, hc, NoopHost()); err != nil {
 		t.Fatal(err)
 	}
 	if captured != "stop" {
@@ -81,7 +81,7 @@ func TestRunPhase_promptBuildNoExtraHooksIsNoop(t *testing.T) {
 	}
 	raw := strings.Repeat("x", 64)
 	hc := BuildPromptBuildContext("s", "a", raw)
-	out, err := reg.RunPhase(context.Background(), PhasePromptBuild, hc)
+	out, err := reg.RunPhase(context.Background(), PhasePromptBuild, hc, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestRunPhase_llmAfterCallMutation(t *testing.T) {
 	reg.RegisterPhaseHook(stubPhaseHook{
 		name:   "redact.stub",
 		phases: []Phase{PhaseLLMAfterCall},
-		fn: func(_ context.Context, hc *Context) (Result, error) {
+		fn: func(_ context.Context, hc *Context, _ Host) (Result, error) {
 			content := ""
 			if hc.LLMAfterCall != nil {
 				content = hc.LLMAfterCall.AssistantContent
@@ -112,7 +112,7 @@ func TestRunPhase_llmAfterCallMutation(t *testing.T) {
 		AssistantContent: "leaked SECRET token",
 		FinishReason:     "stop",
 	})
-	out, err := reg.RunPhase(context.Background(), PhaseLLMAfterCall, hc)
+	out, err := reg.RunPhase(context.Background(), PhaseLLMAfterCall, hc, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestRunPhase_llmAfterCallNoHooksIsNoop(t *testing.T) {
 	}
 	in := LLMAfterCallInput{AssistantContent: "hello", FinishReason: "stop"}
 	hc := BuildLLMAfterCallContext("s", "a", in)
-	out, err := reg.RunPhase(context.Background(), PhaseLLMAfterCall, hc)
+	out, err := reg.RunPhase(context.Background(), PhaseLLMAfterCall, hc, NoopHost())
 	if err != nil {
 		t.Fatal(err)
 	}

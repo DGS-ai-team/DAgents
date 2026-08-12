@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	clihitl "github.com/DGS-ai-team/DAgents/node/internal/hitl"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -49,6 +51,9 @@ type runtime struct {
 	// 上下文压缩逻辑
 	compression *compression.Coordinator
 
+	started bool
+	done    chan struct{}
+
 	mu            sync.Mutex           // 互斥锁
 	state         turn.State           // 状态
 	turnCancel    context.CancelFunc   // 取消 turn 上下文
@@ -57,12 +62,20 @@ type runtime struct {
 	pending       *turn.PendingHITL    // 暂停
 	toolLoopCount int                  // tool 循环计数
 	fsRoot        string               // 文件系统根路径
+	media         *media.Registry      // session 媒体索引（F-M1）
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
 	sideEffects *sideEffectStore // 旁路回灌缓冲（子 session 跳过）
 
 	childMeta *childRuntimeMeta // 子 Agent 元数据
+
+	idleAutoCompressApplied bool // 无动作自动压缩已完成；新对话时清除
+
+	notifySeq int // F-E13：最后需 Client 关注的 SSE seq
+	ackSeq    int // F-E13：Client 已确认看到的最大 SSE seq
+
+	configRevision int64 // Agent 配置版本（UpdatedAt UnixNano）
 }
 
 // newRuntime 创建新的 session runtime
@@ -78,11 +91,15 @@ func newRuntime(
 	loaded []skills.LoadedSkill,
 	initialPending *turn.PendingHITL,
 	initialLoopCount int,
+	initialHookStore map[string]json.RawMessage,
+	idleAutoCompressApplied bool,
+	initialNotifySeq int,
+	initialAckSeq int,
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
 	return newRuntimeWithPublisher(id, agentID, hub, hub, llmClient, registry, policyEngine, st, logger,
-		initial, loaded, initialPending, initialLoopCount, turnOpts, triggerDelivery)
+		initial, loaded, initialPending, initialLoopCount, initialHookStore, idleAutoCompressApplied, initialNotifySeq, initialAckSeq, turnOpts, triggerDelivery)
 }
 
 // newRuntimeWithPublisher 创建新的 session runtime，并设置 publisher
@@ -99,14 +116,22 @@ func newRuntimeWithPublisher(
 	loaded []skills.LoadedSkill,
 	initialPending *turn.PendingHITL,
 	initialLoopCount int,
+	initialHookStore map[string]json.RawMessage,
+	idleAutoCompressApplied bool,
+	initialNotifySeq int,
+	initialAckSeq int,
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
 	catalog := skills.NewCatalog(turnOpts.SkillsRoot, turnOpts.SkillsEnabled, turnOpts.SkillsMaxInPrompt)
+	if turnOpts.SkillsVisibleRestrict {
+		catalog.RestrictVisible(turnOpts.SkillsVisible)
+	}
 	journal := history.NewJournal(turnOpts.RawMessageHistoryEnabled, turnOpts.RawMessageHistoryDir, logger)
 	rt := &runtime{
 		session:       Session{ID: id, AgentID: agentID},
 		queue:         queue.NewMessageQueue(),
+		done:          make(chan struct{}),
 		store:         st,
 		hub:           eventHub,
 		agentID:       agentID,
@@ -115,17 +140,37 @@ func newRuntimeWithPublisher(
 		compression: func() *compression.Coordinator {
 			coord := compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking)
 			coord.SetLogger(logger)
+			coord.SetRawMessageHistoryEnabled(turnOpts.RawMessageHistoryEnabled)
 			return coord
 		}(),
-		state:           turn.StateIdle,
-		messages:        append([]llm.Message(nil), initial...),
-		loadedSkills:    append([]skills.LoadedSkill(nil), loaded...),
-		pending:         initialPending,
-		toolLoopCount:   initialLoopCount,
-		fsRoot:          turnOpts.FSRoot,
-		triggerDelivery: triggerDelivery,
-		sideEffects:     newSideEffectStore(),
+		state:                   turn.StateIdle,
+		messages:                append([]llm.Message(nil), initial...),
+		loadedSkills:            append([]skills.LoadedSkill(nil), loaded...),
+		pending:                 initialPending,
+		toolLoopCount:           initialLoopCount,
+		fsRoot:                  turnOpts.FSRoot,
+		triggerDelivery:         triggerDelivery,
+		sideEffects:             newSideEffectStore(),
+		idleAutoCompressApplied: idleAutoCompressApplied,
+		notifySeq:               initialNotifySeq,
+		ackSeq:                  initialAckSeq,
+		configRevision:          turnOpts.ConfigRevision,
 	}
+	if reg, err := media.NewRegistry(id, turnOpts.FSRoot); err == nil {
+		rt.media = reg
+	} else if logger != nil {
+		logger.Warn("session media registry init failed", "session_id", id, "error", err)
+	}
+	promptReader := promptcontext.NewReader(turnOpts.RuntimeDir)
+	if turnOpts.PromptContent != nil {
+		promptReader.SetContent(*turnOpts.PromptContent)
+	}
+	promptReader.SetPreferredName(turnOpts.PreferredName)
+	promptReader.SetFilter(promptcontext.Filter{
+		SoulEnabled:     turnOpts.PromptContext.SoulEnabled,
+		CustomEnabled:   turnOpts.PromptContext.CustomEnabled,
+		LongTermEnabled: turnOpts.PromptContext.LongTermEnabled,
+	})
 	// 创建编排器
 	rt.orch = turn.NewOrchestrator(
 		agentID,
@@ -140,7 +185,7 @@ func newRuntimeWithPublisher(
 			Set:     rt.setLoadedSkills,
 		},
 		turnOpts.MaxToolLoops,
-		promptcontext.NewReader(turnOpts.RuntimeDir),
+		promptReader,
 		journal,
 		hooks.RuntimeConfig{
 			Duplicate: hooks.DuplicateConfigOrDefault(turnOpts.DuplicateToolCall),
@@ -150,15 +195,24 @@ func newRuntimeWithPublisher(
 				Tools:                turnOpts.ToolResult.Tools,
 				FSRoot:               turnOpts.FSRoot,
 			}),
-			External: turnOpts.ExternalHooks,
-			ExternalDeps: hooks.ExternalDeps{
-				Logger: logger,
-			},
+			InjectTodayDate: hooks.InjectTodayDateConfigOrDefault(turnOpts.InjectTodayDate),
+			Plugins:         turnOpts.PluginHooks,
+			Logger:          logger,
 		},
 		logger,
 	)
+	rt.orch.SetHookHostConfig(turnOpts.HookHost)
+	rt.orch.SetMultimodalEnabled(turnOpts.MultimodalEnabled)
+	rt.orch.SetMediaRegistry(rt.media)
+	if len(initialHookStore) > 0 {
+		rt.orch.SetHookStore(initialHookStore)
+	}
 	// 设置工具结果入队器
 	rt.orch.SetToolResultEnqueuer(rt.enqueueToolResult)
+	if turnOpts.LongTermStore != nil {
+		rt.orch.SetLongTermStore(turnOpts.LongTermStore)
+	}
+	rt.orch.SyncLoadedSkillHooks(loaded)
 	// 返回 runtime
 	return rt
 }
@@ -180,6 +234,9 @@ func (r *runtime) setLoadedSkills(items []skills.LoadedSkill) {
 	r.mu.Lock()
 	r.loadedSkills = append([]skills.LoadedSkill(nil), items...)
 	r.mu.Unlock()
+	if r.orch != nil {
+		r.orch.SyncLoadedSkillHooks(items)
+	}
 }
 
 // setTriggerDelivery 设置 trigger 消息投递跟踪器
@@ -189,7 +246,18 @@ func (r *runtime) setTriggerDelivery(tracker triggers.DeliveryTracker) {
 
 // start 启动 session runtime
 func (r *runtime) start(parent context.Context) {
-	go r.consumeLoop(parent)
+	r.mu.Lock()
+	if r.started {
+		r.mu.Unlock()
+		return
+	}
+	r.started = true
+	done := r.done
+	r.mu.Unlock()
+	go func() {
+		defer close(done)
+		r.consumeLoop(parent)
+	}()
 }
 
 // consumeLoop 消费消息循环
@@ -202,17 +270,21 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		// Trigger delivery 在 Apply 成功时清除，不在 dequeue 时清除。
 		switch env.RequestType {
 		case queue.RequestTypeResume:
+			r.clearIdleAutoCompressMark()
 			r.logResumeDequeued(env.ResumeValue)
 			r.handleResume(ctx, env.ResumeValue)
 		case queue.RequestTypeAsyncToolResult:
+			r.clearIdleAutoCompressMark()
 			r.handleSideEffectProduceAsync(ctx, env.AsyncToolResult)
-		case queue.RequestTypeTriggerMessage, queue.RequestTypeA2AInboxMessage:
+		case queue.RequestTypeTriggerMessage:
+			r.clearIdleAutoCompressMark()
 			r.handleSideEffectProduceExternal(ctx, env)
 		case queue.RequestTypeSideEffectContinue:
 			r.handleSideEffectContinue(ctx, env.SideEffectContinueSource)
 		case queue.RequestTypeToolResult:
 			r.handleToolResult(ctx)
 		case queue.RequestTypeMessage, "":
+			r.clearIdleAutoCompressMark()
 			r.handleHumanMessage(ctx, env)
 		default:
 		}
@@ -246,8 +318,20 @@ func (r *runtime) applyStepOutcome(history *[]llm.Message, outcome turn.StepOutc
 }
 
 func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope) {
-	content := env.Content
 	userName := llm.NormalizeUserMessageName(env.UserName)
+	userMsg, err := llm.BuildUserMessage(env.Content, env.ContentParts, userName)
+	if err != nil {
+		r.logger.Warn("invalid user message", "session_id", r.session.ID, "error", err)
+		return
+	}
+	if r.media != nil && llm.MessageHasImages(userMsg) {
+		persisted, perr := media.PersistUserMessageImages(r.media, userMsg)
+		if perr != nil {
+			r.logger.Warn("persist user images failed", "session_id", r.session.ID, "error", perr)
+			return
+		}
+		userMsg = persisted
+	}
 	r.mu.Lock()
 	if r.pending != nil {
 		pending := r.pending
@@ -260,10 +344,15 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 		)
 	}
 	r.toolLoopCount = 0
+	firstInteraction := len(r.messages) == 0
 	r.mu.Unlock()
 
+	if firstInteraction && r.orch != nil {
+		r.orch.ReloadLongTermMemory(parent)
+	}
+
 	outcome, history := r.runTurnStepWithSideEffects(parent, turn.StateModelStreaming, true, func(ctx context.Context, history *[]llm.Message, setState turn.StateSetter) turn.StepOutcome {
-		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, content, userName, setState)
+		return r.orch.RunHumanMessageTurn(ctx, r.session.ID, history, userMsg, setState)
 	})
 	if outcome.Err != nil {
 		r.mu.Lock()
@@ -277,7 +366,13 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 	r.applyStepOutcome(&history, outcome)
 	r.mu.Unlock()
 	if outcome.ScheduleToolResult {
-		_ = r.scheduleToolResult()
+		if err := r.scheduleToolResult(); err != nil {
+			r.logger.Warn("schedule tool result failed",
+				"session_id", r.session.ID,
+				"error", err,
+			)
+			r.finishTurnIdle(outcome)
+		}
 	} else {
 		r.finishTurnIdle(outcome)
 	}
@@ -286,7 +381,13 @@ func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope)
 
 func (r *runtime) afterToolStep(outcome turn.StepOutcome) {
 	if outcome.ScheduleToolResult {
-		_ = r.scheduleToolResult()
+		if err := r.scheduleToolResult(); err != nil {
+			r.logger.Warn("schedule tool result failed",
+				"session_id", r.session.ID,
+				"error", err,
+			)
+			r.finishTurnIdle(outcome)
+		}
 	} else {
 		r.finishTurnIdle(outcome)
 	}
@@ -358,15 +459,22 @@ func (r *runtime) persist(ctx context.Context) {
 	loaded := append([]skills.LoadedSkill(nil), r.loadedSkills...)
 	pending := r.pending
 	loopCount := r.toolLoopCount
+	idleMarked := r.idleAutoCompressApplied
+	notifySeq := r.notifySeq
+	ackSeq := r.ackSeq
 	r.mu.Unlock()
 	_ = r.store.Save(ctx, store.Record{
-		SessionID:    r.session.ID,
-		AgentID:      r.session.AgentID,
+		AgentID:      r.session.ID,
+		NodeID:       r.session.AgentID,
 		Messages:     msgs,
 		LoadedSkills: loaded,
 		RuntimeState: store.RuntimeState{
-			Pending:       pending,
-			ToolLoopCount: loopCount,
+			Pending:                 pending,
+			ToolLoopCount:           loopCount,
+			HookStore:               hooks.CloneSessionStore(r.orch.HookStoreSnapshot()),
+			IdleAutoCompressApplied: idleMarked,
+			NotifySeq:               notifySeq,
+			AckSeq:                  ackSeq,
 		},
 	})
 }
@@ -384,6 +492,11 @@ func (r *runtime) clearMessages(ctx context.Context) {
 	r.pending = nil
 	r.toolLoopCount = 0
 	r.mu.Unlock()
+	if r.orch != nil {
+		r.orch.ClearHookStore()
+		r.orch.SyncLoadedSkillHooks(nil)
+		r.orch.ReloadLongTermMemory(ctx)
+	}
 	if r.store != nil {
 		_ = r.store.ClearMessages(ctx, r.session.ID)
 	}
@@ -459,6 +572,9 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	r.mu.Lock()
 	result := r.compression.ForceBlocking(ctx, r.session.ID, r.agentID, r.hub, &r.messages, prefix)
 	r.mu.Unlock()
+	if result.Status == "applied" && r.orch != nil {
+		r.orch.ReloadLongTermMemory(ctx)
+	}
 	if result.Status == "applied" {
 		r.persist(ctx)
 	}
@@ -613,7 +729,7 @@ func (r *runtime) cancelTurn() bool {
 	return false
 }
 
-func (r *runtime) stop() {
+func (r *runtime) requestStop() {
 	if r.compression != nil {
 		r.compression.CancelSession(r.session.ID)
 	}
@@ -621,6 +737,21 @@ func (r *runtime) stop() {
 		r.sideEffects.ClearSession(r.session.ID, r.orch, r.triggerDelivery)
 	}
 	r.queue.Close()
+}
+
+func (r *runtime) waitStopped() {
+	r.mu.Lock()
+	started := r.started
+	done := r.done
+	r.mu.Unlock()
+	if started {
+		<-done
+	}
+}
+
+func (r *runtime) stop() {
+	r.requestStop()
+	r.waitStopped()
 }
 
 func (r *runtime) setLoadedSkillsByName(names []string) []skills.LoadedSkill {

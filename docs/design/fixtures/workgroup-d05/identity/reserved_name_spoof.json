@@ -1,0 +1,19 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "reserved_name_spoof_rejected",
+  "given": {
+    "authenticated_node_id": "node_a",
+    "client_claimed_name": "leader"
+  },
+  "when": {
+    "op": "human.post",
+    "text": "hi",
+    "client_message_id": "01h0000000000000000000000d"
+  },
+  "then": {
+    "actor_kind": "human",
+    "protocol_name": "human_hu_01h00000000000000000000003",
+    "never_protocol_name": "leader"
+  }
+}

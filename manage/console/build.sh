@@ -7,4 +7,5 @@ if [[ ! -d node_modules ]]; then
   npm ci
 fi
 npm run build
+touch "${ROOT}/manage/console/static/.gitkeep"
 echo "Built -> ${ROOT}/manage/console/static/"

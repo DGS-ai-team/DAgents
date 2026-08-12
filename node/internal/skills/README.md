@@ -29,5 +29,6 @@ description: 单行摘要（做什么 + 何时用）
 
 - **`name`** 须与目录名一致；**`description`** 为模型选择依据。
 - 目录下所有含 `SKILL.md` 的子目录均参与元数据扫描（无 per-skill `enabled`）。
+- 可选 **`hooks/`** 子目录：`load_skills` 时 `plugin.Open` 其中 `*.so`（导出 `Register`）；`unload_skills` / `clear_skills` 时按 `skill/<name>/` 前缀移除。
 
 配置见 `shared/config.Config.Skills`（全局 `enabled`、`root`、`max_in_prompt`）。

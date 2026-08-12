@@ -1,18 +1,14 @@
-import { toolDisplayName, approvalItemDisplayName, parseToolArguments } from "./toolCalls.js";
+import { toolDisplayName, approvalItemDisplayName, approvalItemHint, approvalItemHintVisible, parseToolArguments } from "./toolCalls.js";
+import { truncateGraphemes } from "./textTruncate.js";
 import { parseTemporaryAgentToolResult } from "./temporaryAgentResults.js";
 
-export { toolDisplayName, approvalItemDisplayName };
+export { toolDisplayName, approvalItemDisplayName, approvalItemHint, approvalItemHintVisible };
 
-export function formatToolCallLine(entry, { a2a = false, peerSuffix = "" } = {}) {
+export function formatToolCallLine(entry) {
   const data = entry?.data || entry || {};
   const name = entry?.summary || data.summary || toolDisplayName(data.tool_name || data.name, data.arguments || {});
   const partial = entry?.partial || data.partial ? " …" : "";
-  const relay = a2a ? `${peerSuffix} · 待审批` : "";
-  return `▶ ${name}${relay || partial}`;
-}
-
-export function formatToolResultSummary(entry) {
-  return formatToolResultDisplay(entry).headline;
+  return `▶ ${name}${partial}`;
 }
 
 /** 对齐 Python format_tool_result / parse_temporary_agent_tool_result。 */
@@ -67,14 +63,29 @@ export function formatRelativeTime(iso) {
   return new Date(ts).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
-export function sessionRecordId(session) {
-  return String(session?.session_id || session?.SessionID || "").trim();
+/** 侧栏紧凑相对时间：1m / 9h / 2d */
+export function formatCompactRelativeTime(iso) {
+  if (!iso) return "";
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return "";
+  const diff = Math.max(0, Date.now() - ts);
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return "now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 48) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  if (day < 14) return `${day}d`;
+  return new Date(ts).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
-export function sessionDisplayTitle(session) {
-  const first = String(session?.first_user_message || session?.FirstUserMessage || "").trim();
-  if (first) return first.length > 48 ? `${first.slice(0, 48)}…` : first;
-  const id = sessionRecordId(session);
-  if (id) return `会话 ${id.slice(0, 8)}`;
-  return "新对话";
+export function agentRecordId(agent) {
+  return String(agent?.agent_id || agent?.AgentID || "").trim();
+}
+
+export function agentDisplayTitle(agent) {
+  const name = String(agent?.display_name || agent?.DisplayName || "").trim();
+  if (name) return name.length > 48 ? truncateGraphemes(name, 48) : name;
+  return "未命名 Agent";
 }

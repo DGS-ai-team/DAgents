@@ -29,16 +29,16 @@ func newChildRuntime(
 	restricted := childagent.NewRestrictedRegistry(baseRegistry, allowedTools)
 	// 创建子 Agent 消息中继
 	relay := &childagent.RelayHub{
-		Inner:           hub,
-		ParentSessionID: parentID,
-		AgentID:         agentID,
-		ChildSessionID:  id,
-		ChildPurpose:    purpose,
+		Inner:         hub,
+		ParentAgentID: parentID,
+		AgentID:       agentID,
+		ChildAgentID:  id,
+		ChildPurpose:  purpose,
 	}
 	// 创建子 runtime
 	rt := newRuntimeWithPublisher(
 		id, agentID, relay, hub, llmClient, restricted, policyEngine, nil, logger,
-		nil, initialLoaded, nil, 0, turnOpts, nil,
+		nil, initialLoaded, nil, 0, nil, false, 0, 0, turnOpts, nil,
 	)
 	// 设置子 runtime 元数据
 	rt.childMeta = &childRuntimeMeta{

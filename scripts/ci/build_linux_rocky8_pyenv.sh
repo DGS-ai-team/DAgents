@@ -2,7 +2,7 @@
 # 在 **Rocky Linux 8**（glibc **2.28**）容器内用 **gcc-toolset-13** + **pyenv** 源码编译 CPython，再执行 PyInstaller。
 #
 # 目的：
-# 1. Release CI 默认在 **Rocky Linux 8** 容器内构建 `dagents-cli`，在 **glibc 2.28** 上链接，覆盖 **RHEL 8 / Rocky 8 / Alma 8** 等宿主。
+# 1. Release CI 默认在 **Rocky Linux 8** 容器内构建 `dagents-browser`，在 **glibc 2.28** 上链接，覆盖 **RHEL 8 / Rocky 8 / Alma 8** 等宿主。
 # 2. 较新的 **Ubuntu 20.04 (focal)** 链（glibc 2.31）产物可能依赖 **GLIBC_2.30+**；旧环境请用本脚本而非 `build_linux_focal_pyenv.sh`。
 #
 # 硬边界：
@@ -11,10 +11,13 @@
 #
 # 约定（与 **`build_linux_focal_pyenv.sh`** 一致）：
 # - 工作区挂载为 **/src**；
-# - **CLI_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串。
+# - **BROWSER_PI_ARGS**：传给 **`python -m PyInstaller`** 的完整参数串。
 # - **PYENV_PYTHON_VERSION**：可选，默认 **3.13.2**。
 #
 # 副作用：首次编译 CPython 耗时长；workflow step 需足够 **timeout**。
+# 优化：
+# - SKIP_DNF=1：镜像已预装依赖（packaging/ci/Dockerfile.rocky8-browser）时跳过 dnf。
+# - 将 PYENV_ROOT（默认 /opt/pyenv）挂到宿主机缓存目录，可跨 CI 复用已编译的 CPython。
 
 set -euxo pipefail
 
@@ -22,13 +25,17 @@ PYENV_PYTHON_VERSION="${PYENV_PYTHON_VERSION:-3.13.2}"
 export PIP_ROOT_USER_ACTION=ignore
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
-dnf -y install \
-  ca-certificates curl git \
-  findutils tar gzip \
-  make patch pkg-config which \
-  gcc zlib-devel bzip2-devel readline-devel sqlite-devel openssl-devel xz xz-devel \
-  libffi-devel gdbm-devel \
-  gcc-toolset-13 gcc-toolset-13-gcc gcc-toolset-13-gcc-c++
+if [[ "${SKIP_DNF:-0}" != "1" ]]; then
+  dnf -y install \
+    ca-certificates curl git \
+    findutils tar gzip \
+    make patch pkg-config which \
+    gcc zlib-devel bzip2-devel readline-devel sqlite-devel openssl-devel xz xz-devel \
+    libffi-devel gdbm-devel \
+    gcc-toolset-13 gcc-toolset-13-gcc gcc-toolset-13-gcc-c++
+else
+  echo "[build_linux_rocky8_pyenv] SKIP_DNF=1 (using prebuilt builder image)"
+fi
 
 # Rocky 8 上启用较新 GCC，满足 CPython 3.13 源码构建要求；运行时仍只依赖系统 glibc 2.28。
 # shellcheck source=/dev/null
@@ -38,7 +45,9 @@ export PYENV_ROOT="${PYENV_ROOT:-/opt/pyenv}"
 export PATH="${PYENV_ROOT}/bin:${PATH}"
 
 if [ ! -x "${PYENV_ROOT}/bin/pyenv" ]; then
-  rm -rf "${PYENV_ROOT}"
+  # /opt/pyenv 常为 Docker 卷挂载点：不可 rm -rf 挂载根（Device or resource busy）。
+  mkdir -p "${PYENV_ROOT}"
+  find "${PYENV_ROOT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   git clone --depth 1 https://github.com/pyenv/pyenv.git "${PYENV_ROOT}"
 fi
 
@@ -67,10 +76,13 @@ fi
 cd /src
 "${PYENV_PYTHON}" -m pip install -r requirements.txt pyinstaller
 
-if [[ -z "${CLI_PI_ARGS:-}" ]]; then
-  echo "[build_linux_rocky8_pyenv] CLI_PI_ARGS is required" >&2
+if [[ -z "${BROWSER_PI_ARGS:-}" ]]; then
+  echo "[build_linux_rocky8_pyenv] BROWSER_PI_ARGS is required" >&2
   exit 1
 fi
-eval "${PYENV_PYTHON}" -m PyInstaller ${CLI_PI_ARGS}
+if [[ -n "${BROWSER_PI_ARGS:-}" ]]; then
+  "${PYENV_PYTHON}" -m pip install -r /src/browser-service/requirements.txt
+  eval "${PYENV_PYTHON}" -m PyInstaller ${BROWSER_PI_ARGS}
+fi
 
 echo "[build_linux_rocky8_pyenv] done: $(ls -la /src/dist/ 2>/dev/null || true)"

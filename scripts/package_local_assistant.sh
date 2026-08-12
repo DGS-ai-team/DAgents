@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 打包本地助手：Go dagents-node + PyInstaller dagents-cli（当前操作系统/架构）。
+# 打包本地助手：Go dagents-node + dagents-client + PyInstaller dagents-browser（当前操作系统/架构）。
 #
 # 用法（仓库根目录）：
 #   scripts/package_local_assistant.sh
@@ -41,7 +41,7 @@ mkdir -p "${REPO_ROOT}/dist"
 cp "${OUT_DIR}/bin/dagents-node${EXE}" "${REPO_ROOT}/dist/dagents-node${EXE}"
 cp "${OUT_DIR}/bin/dagents-client${EXE}" "${REPO_ROOT}/dist/dagents-client${EXE}"
 
-bash "${REPO_ROOT}/scripts/ci/build_dagents_cli.sh"
+bash "${REPO_ROOT}/scripts/ci/build_dagents_browser.sh"
 
 PLATFORM="${PLATFORM}" VERSION="${VERSION}" \
   bash "${REPO_ROOT}/scripts/ci/assemble_local_assistant_bundle.sh"

@@ -8,31 +8,40 @@ import (
 
 	"sync"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/a2aclient"
+	"github.com/DGS-ai-team/DAgents/node/internal/browser"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
+	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 )
 
-// Registry 注册内置工具并在 FS_ROOT 沙箱内执行。
+// Registry 注册内置工具并在 FS_ROOT 内执行。
 type Registry struct {
 	fsRoot              string
 	bashTimeout         int
+	bashHardLimitSec    int // 未传 timeout_seconds 时的硬上限（超时杀进程，不转后台）
 	shellOutputEncoding string
 	fileEncoding        string
 	bashCompress        BashCompressConfig
 	compressMu          sync.Mutex
 	bashCompressStats   map[string]*OutputCompressStats
+	visionMu            sync.Mutex
+	readImageVision     map[string]*ReadImageVisionPayload
 	bgJobs              *backgroundJobRegistry
+	syncShells          *syncShellTracker
 	triggerStore        *triggers.Store
 	triggerSched        *triggers.Scheduler
-	manageClient        *a2aclient.Client
-	a2aCallerHITL       a2aclient.A2ACallerHITLHandler
-	compliancePeer      string
 	agentID             string
 	skillsCatalogHolder
 	enabledOnly         map[string]struct{}
+	multimodalEnabled   bool
+	browser             *browser.Manager
+	browserCompanionExists BrowserCompanionExistsFunc
+	wecom               *wecom.Client
 	handlers            map[string]handler
 	pathEncMu           sync.Mutex
 	pathEncCache        map[string]pathEncodingEntry
+	mediaMu             sync.Mutex
+	mediaRegister       MediaRegisterFunc
+	toolResultMedia     map[string][]map[string]any
 }
 
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。
@@ -56,10 +65,12 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*R
 	r := &Registry{
 		fsRoot:              root,
 		bashTimeout:         bashTimeoutSeconds,
+		bashHardLimitSec:    maxBashTimeoutSec,
 		shellOutputEncoding: shellEnc,
 		fileEncoding:        fileEnc,
 		bashCompress:        DefaultBashCompressConfig(),
 		bgJobs:              newBackgroundJobRegistry(),
+		syncShells:          newSyncShellTracker(),
 		handlers:            make(map[string]handler),
 	}
 	r.registerBuiltins()
@@ -70,6 +81,12 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*R
 func (r *Registry) Definitions() []ToolDef {
 	base := []ToolDef{
 		readFileToolDef(),
+		showImageToolDef(),
+	}
+	if r.multimodalEnabled {
+		base = append(base, readImageToolDef())
+	}
+	base = append(base,
 		writeFileToolDef(),
 		globFilesToolDef(),
 		grepFileToolDef(),
@@ -79,6 +96,7 @@ func (r *Registry) Definitions() []ToolDef {
 		backgroundJobStatusToolDef(),
 		backgroundJobCancelToolDef(),
 		askUserInformationToolDef(),
+		rememberToolDef(),
 		loadSkillsToolDef(),
 		unloadSkillsToolDef(),
 		clearSkillsToolDef(),
@@ -87,16 +105,24 @@ func (r *Registry) Definitions() []ToolDef {
 		triggerCreateToolDef(),
 		triggerUpdateToolDef(),
 		triggerDeleteToolDef(),
+	)
+	if r.browserToolsEnabled() {
+		base = append(base, r.browserToolDefs()...)
 	}
-	if r.manageClient != nil {
-		base = append(base, manageA2AToolDefs()...)
+	if defs := r.wecomToolDefs(); len(defs) > 0 {
+		base = append(base, defs...)
 	}
 	base = append(base, childAgentToolDefs()...)
 	return r.enrichDefinitions(r.filterToolDefs(base))
 }
 
-// Execute 按名称 dispatch 工具；未知工具返回 error 文本。
+// Execute 按名称 dispatch 工具；未知工具或未启用工具返回 error 文本。
+// 子 Agent RestrictedRegistry 在通过自身 allowlist 后应使用 WithEnabledBypass，
+// 以免父 Agent 的 enabledOnly 误拦子会话允许的工具。
 func (r *Registry) Execute(ctx context.Context, name, arguments string) (string, error) {
+	if err := r.rejectIfDisabled(ctx, name); err != nil {
+		return "", err
+	}
 	h, ok := r.handlers[name]
 	if !ok {
 		return "", fmt.Errorf("unknown tool: %s", name)
@@ -106,6 +132,8 @@ func (r *Registry) Execute(ctx context.Context, name, arguments string) (string,
 
 func (r *Registry) registerBuiltins() {
 	r.handlers["read_file"] = r.execReadFile
+	r.handlers["show_image"] = r.execShowImage
+	r.handlers["read_image"] = r.execReadImage
 	r.handlers["write_file"] = r.execWriteFile
 	r.handlers["glob_files"] = r.execGlobFiles
 	r.handlers["grep_file"] = r.execGrepFile
@@ -117,6 +145,9 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["background_job_cancel"] = r.execBackgroundJobCancel
 	r.handlers["ask_user_information"] = func(context.Context, json.RawMessage) (string, error) {
 		return "", fmt.Errorf("ask_user_information must be handled by orchestrator")
+	}
+	r.handlers["remember"] = func(context.Context, json.RawMessage) (string, error) {
+		return "", fmt.Errorf("remember must be handled by orchestrator")
 	}
 	for _, name := range []string{"load_skills", "unload_skills", "clear_skills"} {
 		n := name

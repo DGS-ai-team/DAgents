@@ -18,12 +18,12 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 | 块 | 说明 |
 |----|------|
 | `listen` / `local` | Node 监听与 Client 连接 endpoint |
-| `llm` | 模型、mock、tool loop 上限 |
-| `fs_root` | 工作区根（缺省 `./.runtime`）；`data/`、`memory/`、`skills/`、`policy/` 等子路径硬编码相对此根 |
+| `llm` | 模型连接（迁移种子）；工具轮次上限见 Agent snapshot |
+| `fs_root` | **不可配置**；固定 `./.runtime`。`data/`、`memory/`、`skills/`、`policy/` 等子路径硬编码相对此根 |
 | `skills` | 技能开关与 prompt 上限（目录固定为 `{fs_root}/skills`） |
 | `compression` | 上下文压缩 token 阈值 |
 | `triggers` | 触发器调度（见下表） |
-| `tools` | 内置工具行为与允许列表（见下表） |
+| `tools` | 内置工具编码与 bash 压缩（工具组见 Agent 快照） |
 | `log` | Node stderr 日志级别 |
 | `ui` | 内嵌浏览器 Web UI（`GET /ui/`）；`enabled` 省略时默认 `true` |
 
@@ -31,30 +31,26 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 
 | 键 | 默认 | 说明 |
 |----|------|------|
-| `enabled_groups` | （省略=全部） | 内置工具**组**允许列表；组内工具一并启用/禁用；未知名在 `LoadFile` 校验失败 |
 | `bash_output_encoding` | 按平台 | `bash_run` 子进程 stdout/stderr 解码（如 `utf-8`、`gbk`） |
 | `file_encoding` | 按平台 | FS 工具读写磁盘默认编码；单次调用可用 `encoding` 参数覆盖 |
 | `bash_compress` | 见 example | `bash_run` 输出清洗与 rune 截断 |
 
-**`tools.enabled_groups` 语义**
+Node 级 `tools.enabled_groups` 已移除；工具组由各 Agent / 模板的 `defaults.tools.enabled_groups` 决定（空=不启用任何组）。组名与成员见 `ExpandBuiltinToolGroups` / `builtinToolGroups`。`tools.enabled` 仍会在加载时拒绝。
 
-- **省略或留空**：启用全部已注册内置工具（向后兼容）。
-- **非空列表**：仅列出组内全部工具对 LLM 可见/可调用；handler 仍注册（便于子 Agent 委托等内部调用）。
-- **校验**：组名须与 `shared/config/builtin_tools.go` 中 `builtinToolGroups` 一致；`tools.enabled` 已废弃。
-
-**可配置工具组（7 组）**
+**可配置工具组**
 
 | 组名 | 包含工具 |
 |------|----------|
 | `fs` | `read_file`、`write_file`、`glob_files`、`grep_file`、`grep_files`、`search_replace` |
 | `bash` | `bash_run`、`background_job_status`、`background_job_cancel` |
 | `hitl` | `ask_user_information` |
+| `memory` | `remember` |
 | `skills` | `load_skills`、`unload_skills`、`clear_skills` |
 | `triggers` | `trigger_list`、`trigger_get`、`trigger_create`、`trigger_update`、`trigger_delete` |
-| `a2a` | `agent_invoke`、`agent_discover`（须 `manage.enabled`） |
 | `child_agents` | `create_temporary_agent`、`wait_temporary_agents`、`temporary_agent_status`、`cancel_temporary_agent` |
+| `browser` | 任务级：`browser_run_task` / `browser_task_status` / `browser_task_cancel`（伴生 Chrome） |
 
-各工具作用见 [`docs/built-in-tools.md`](../../docs/built-in-tools.md) §0；示例见 [`packaging/agent-client/config.example.yaml`](../../packaging/agent-client/config.example.yaml)。
+各工具作用见 [handbook/04-能力与策略.md](../../docs/handbook/04-能力与策略.md) §1；示例见 [`packaging/agent-client/config.example.yaml`](../../packaging/agent-client/config.example.yaml)。
 
 ### `triggers`
 

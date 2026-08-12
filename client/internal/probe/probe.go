@@ -25,18 +25,19 @@ type LLMInfo struct {
 // Result 为一次 Node 探活的结果摘要。
 type Result struct {
 	Endpoint         string
-	AgentID          string
+	NodeID           string
 	Status           string
 	Version          string
-	ExposeToPeers    bool
 	ManageRegistered bool
 	Capabilities     []string
 	LLM              LLMInfo
+	// ProfilePending 表示 Node 已就绪但身份/LLM 首配尚未完成（agent/info 被门闸 403）。
+	ProfilePending bool
 }
 
 type healthPayload struct {
 	Status  string `json:"status"`
-	AgentID string `json:"agent_id"`
+	NodeID  string `json:"node_id"`
 	Version string `json:"version"`
 }
 
@@ -50,22 +51,15 @@ type llmInfoPayload struct {
 }
 
 type agentInfoPayload struct {
-	AgentID          string         `json:"agent_id"`
-	ExposeToPeers    bool           `json:"expose_to_peers"`
+	NodeID           string         `json:"node_id"`
 	Capabilities     []string       `json:"capabilities"`
 	ManageRegistered bool           `json:"manage_registered"`
 	LLM              llmInfoPayload `json:"llm"`
 }
 
-// Node 对 local.endpoint 执行 GET /health 与 GET /v1/agent/info，并可选校验配置中的 agent_id。
-
-// 逻辑：
-// 1. 规范化 endpoint 并 GET /health；
-// 2. status 非 ok 或 HTTP 非 200 则失败；
-// 3. GET /v1/agent/info 并解析；
-// 4. 若 cfg.Local.AgentID 非空且与响应不一致则失败。
-//
-// 异常：网络错误、非 200、JSON 解析失败、agent_id 不一致均返回 error。
+// Node 对 local.endpoint 执行 GET /health 与 GET /v1/agent/info，并可选校验配置中的 node_id。
+// 首配未完成时 agent/info 返回 403（node_profile_required）：仍视为探活成功（ProfilePending=true），
+// 避免 Linux/Windows 启动脚本误判「Node 未就绪」。
 func Node(ctx context.Context, cfg *config.Config, httpClient *http.Client) (*Result, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
@@ -80,28 +74,37 @@ func Node(ctx context.Context, cfg *config.Config, httpClient *http.Client) (*Re
 		return nil, fmt.Errorf("node unhealthy: status=%q", health.Status)
 	}
 
+	expectedID := strings.TrimSpace(cfg.Local.NodeID)
+	if expectedID == "" {
+		expectedID = strings.TrimSpace(cfg.NodeID)
+	}
+	if expectedID != "" && health.NodeID != expectedID {
+		return nil, fmt.Errorf("node_id mismatch: config %q, node %q", expectedID, health.NodeID)
+	}
+
 	info, err := fetchAgentInfo(ctx, httpClient, base)
 	if err != nil {
+		if isNodeProfileRequired(err) {
+			return &Result{
+				Endpoint:       base,
+				NodeID:         health.NodeID,
+				Status:         health.Status,
+				Version:        health.Version,
+				ProfilePending: true,
+			}, nil
+		}
 		return nil, err
 	}
 
-	expectedID := strings.TrimSpace(cfg.Local.AgentID)
-	if expectedID == "" {
-		expectedID = strings.TrimSpace(cfg.AgentID)
-	}
-	if expectedID != "" && health.AgentID != expectedID {
-		return nil, fmt.Errorf("agent_id mismatch: config %q, node %q", expectedID, health.AgentID)
-	}
-	if expectedID != "" && info.AgentID != expectedID {
-		return nil, fmt.Errorf("agent info agent_id mismatch: config %q, node %q", expectedID, info.AgentID)
+	if expectedID != "" && info.NodeID != expectedID {
+		return nil, fmt.Errorf("agent info node_id mismatch: config %q, node %q", expectedID, info.NodeID)
 	}
 
 	return &Result{
 		Endpoint:         base,
-		AgentID:          health.AgentID,
+		NodeID:           health.NodeID,
 		Status:           health.Status,
 		Version:          health.Version,
-		ExposeToPeers:    info.ExposeToPeers,
 		ManageRegistered: info.ManageRegistered,
 		Capabilities:     info.Capabilities,
 		LLM: LLMInfo{
@@ -113,6 +116,27 @@ func Node(ctx context.Context, cfg *config.Config, httpClient *http.Client) (*Re
 			ReasoningEffort:   info.LLM.ReasoningEffort,
 		},
 	}, nil
+}
+
+type httpStatusError struct {
+	path string
+	code int
+	body string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("GET %s: status %d: %s", e.path, e.code, strings.TrimSpace(e.body))
+}
+
+func isNodeProfileRequired(err error) bool {
+	he, ok := err.(*httpStatusError)
+	if !ok || he.code != http.StatusForbidden {
+		return false
+	}
+	body := strings.ToLower(he.body)
+	return strings.Contains(body, "node_profile_required") ||
+		strings.Contains(body, "node 身份") ||
+		strings.Contains(body, "请先完成")
 }
 
 func fetchHealth(ctx context.Context, client *http.Client, base string) (*healthPayload, error) {
@@ -127,7 +151,7 @@ func fetchHealth(ctx context.Context, client *http.Client, base string) (*health
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("GET /health: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &httpStatusError{path: "/health", code: resp.StatusCode, body: string(body)}
 	}
 	var payload healthPayload
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -148,7 +172,7 @@ func fetchAgentInfo(ctx context.Context, client *http.Client, base string) (*age
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("GET /v1/agent/info: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &httpStatusError{path: "/v1/agent/info", code: resp.StatusCode, body: string(body)}
 	}
 	var payload agentInfoPayload
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {

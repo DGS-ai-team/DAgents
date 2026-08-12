@@ -22,7 +22,7 @@
 
 ## `test_api_app.py`
 
-- **`FastApiRouteTests`**：使用 `AgentService` 替身验证 `/v1/sessions`、`/v1/messages`、`resume`、`cancel`、`release`、session context/skills 路由接线与默认 priority。
+- **`FastApiRouteTests`**：使用 `AgentService` 替身验证历史路由接线（含已下线的 `/v1/sessions`）与 `/v1/messages`、`resume`、`cancel`、`release`、context/skills 及默认 priority。
 - **`SseEncodingTests`**：验证 `_to_sse` 输出 `event:` / `data:` 与空行结尾格式。
 
 ## `test_agent_service.py`

@@ -41,7 +41,7 @@ function normalizeResult(item) {
     ? item.artifacts.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   return {
-    child_session_id: String(item.child_session_id || "").trim(),
+    child_agent_id: String(item.child_agent_id || "").trim(),
     status: String(item.status || "").trim(),
     summary: String(item.summary || "").trim(),
     error: String(item.error || "").trim(),
@@ -76,7 +76,7 @@ function formatBatchResult(toolName, results, timedOut = false) {
   }
   if (timedOut) summary += " · 超时";
   const lines = parsed.map((item, index) => {
-    const short = shortChildId(item.child_session_id);
+    const short = shortChildId(item.child_agent_id);
     const status = item.status || "unknown";
     const prefix = `[${index + 1}] ${short} · ${status}`;
     const hint = resultHint(item);
@@ -89,7 +89,7 @@ function formatCreateResult(payload) {
   const kind = String(payload.kind || "").trim();
   if (kind === "result") {
     const item = normalizeResult(payload);
-    const short = shortChildId(item.child_session_id);
+    const short = shortChildId(item.child_agent_id);
     const status = item.status || "unknown";
     const summary = short ? `✓ 临时 Agent 完成 · ${short} · ${status}` : `✓ 临时 Agent 完成 · ${status}`;
     const detailParts = [];
@@ -100,7 +100,7 @@ function formatCreateResult(payload) {
     return { summary, detail: detailParts.join("\n") };
   }
   const parts = ["✓ 已创建临时 Agent"];
-  const short = shortChildId(payload.child_session_id);
+  const short = shortChildId(payload.child_agent_id);
   const purpose = String(payload.purpose || "").trim();
   if (short) parts.push(short);
   if (purpose) parts.push(purpose);
@@ -139,7 +139,7 @@ export function parseTemporaryAgentToolResult(toolName, content) {
     }
   }
   if (name === "cancel_temporary_agent" && payload && typeof payload === "object") {
-    const short = shortChildId(payload.child_session_id);
+    const short = shortChildId(payload.child_agent_id);
     const status = String(payload.status || "cancelled").trim() || "cancelled";
     let summary = "✓ 已取消临时 Agent";
     if (short) summary += ` · ${short}`;

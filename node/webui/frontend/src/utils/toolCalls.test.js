@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   USER_INFORMATION_TOOL,
   approvalItemDisplayName,
+  approvalItemHintVisible,
   extractToolCallsFromEvent,
   normalizeToolCallItem,
   parseToolArguments,
+  resolveToolArgumentsFromData,
   toolDisplayName,
   toolCallParts,
-  resolveToolArgumentsFromData,
 } from "./toolCalls.js";
 
 describe("parseToolArguments", () => {
@@ -66,6 +67,16 @@ describe("resolveToolArgumentsFromData", () => {
       }),
     ).toEqual({ path: "/tmp/a" });
   });
+
+  it("falls back to raw_arguments when arguments map is empty", () => {
+    expect(
+      resolveToolArgumentsFromData({
+        tool_name: "read_file",
+        arguments: {},
+        raw_arguments: '{"path":"/tmp/a.txt"}',
+      }),
+    ).toEqual({ path: "/tmp/a.txt" });
+  });
 });
 
 describe("approvalItemDisplayName", () => {
@@ -75,6 +86,28 @@ describe("approvalItemDisplayName", () => {
       rawArgs: '{"call_purpose":"deploy"}',
     });
     expect(name).toBe("bash(deploy)");
+  });
+});
+
+describe("approvalItemHintVisible", () => {
+  it("hides hint when reason already contains the command", () => {
+    expect(
+      approvalItemHintVisible({
+        name: "bash_run",
+        arguments: { command: "rm -rf /tmp/x" },
+        reason: "策略要求审批：rm -rf /tmp/x",
+      }),
+    ).toBe(false);
+  });
+
+  it("shows hint when reason has no overlapping detail", () => {
+    expect(
+      approvalItemHintVisible({
+        name: "bash_run",
+        arguments: { command: "ls" },
+        reason: "高风险 shell 需确认",
+      }),
+    ).toBe(true);
   });
 });
 

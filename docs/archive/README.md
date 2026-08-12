@@ -1,16 +1,43 @@
-# `docs/archive/`
+# 文档归档
 
-已从现网移除或 superseded 的设计文档，仅供历史对照。
+本目录存放**不再作为现行产品说明**的材料，避免新人把过期叙事当现状。
 
-## 子目录
+## 原则
 
-| 目录 | 说明 |
+| 类别 | 处理 |
 |------|------|
-| [python-agent-runtime/](./python-agent-runtime/) | **已移除的 Python FastAPI Agent API**（`api-reference`、turn loop、`context-compression-and-state` 等） |
+| **现行** | `docs/handbook/`、现行 `docs/design/`、`docs/architecture/` |
+| **冻结契约** | `docs/design/workgroup-d05-contracts.md` + fixtures |
+| **归档** | 本目录；**不**链到根 README / handbook 主路径 |
+| **远期未落地** | `docs/future/`（仅索引；具体稿可迁入本目录） |
 
-## 单文件归档
+## 根目录迁入
 
-| 文件 | 说明 |
+| 文档 | 说明 |
 |------|------|
-| [builtin-tools-routing.md](./builtin-tools-routing.md) | 旧 `tool.kind=body`/Proxy 路由（Brain/Body 方案） |
-| [documentation-plan.md](./documentation-plan.md) | 旧文档迁移计划（职责已并入 `docs/README.md`） |
+| [manage-communication.md](./manage-communication.md) | Manage 通信长文（含已拆除 A2A）；现行见 handbook/05 |
+| [security-rollout.md](./security-rollout.md) | 早期安全分阶段验收；要点已并入 handbook/06 |
+| [os-compatibility.md](./os-compatibility.md) | CPython/PyInstaller 兼容矩阵（Python Agent 时代） |
+| [a2a-via-manage.md](./a2a-via-manage.md) | A2A Task 模型（已退役） |
+
+## `design/` 归档
+
+| 文档 | 说明 |
+|------|------|
+| [design/remote-agent-placement.md](./design/remote-agent-placement.md) | SUPERSEDED → Workgroup |
+| [design/node-centric-architecture-cleanup.md](./design/node-centric-architecture-cleanup.md) | 一次性清理清单 |
+| [design/v0.6.0-smoke-checklist.md](./design/v0.6.0-smoke-checklist.md) | 旧发版 smoke |
+| [design/v0.6.1-smoke-checklist.md](./design/v0.6.1-smoke-checklist.md) | 旧发版 smoke |
+| [design/v0.6.2-smoke-checklist.md](./design/v0.6.2-smoke-checklist.md) | 旧发版 smoke |
+| [design/v0.7.0-smoke-checklist.md](./design/v0.7.0-smoke-checklist.md) | 旧发版 smoke |
+
+已删除 stub：`design/major-changes.md`、`design/background-and-motivation.md`、`docs/triggers-design.md`（→ `node/internal/triggers/README.md`）。
+
+## 其它
+
+| 入口 | 说明 |
+|------|------|
+| [`../design/workgroup-and-node-gateway.md`](../design/workgroup-and-node-gateway.md) §15–§16 | 历史审核纪要 |
+| [`../future/`](../future/) | 远期索引（空壳时可删） |
+
+现行验收：[v0.9.1-smoke-checklist.md](../design/v0.9.1-smoke-checklist.md)。

@@ -18,11 +18,20 @@ func (r *runtime) runTurnStep(
 	compressBeforeStep := compressBefore && r.compression != nil && r.compression.Enabled() && !r.isChildSession()
 	var sidecarPrefix compression.SidecarPrefix
 	if compressBeforeStep {
+		// sidecarPrefix / RunTurnBeforeCompressPhase → composeSystemPrompt → getLoadedSkills 会抢 r.mu，须在持锁前执行。
 		sidecarPrefix = r.sidecarPrefix()
+		if r.orch != nil {
+			skip := r.orch.RunTurnBeforeCompressPhase(parent, r.session.ID, &r.messages, false)
+			if skip {
+				compressBeforeStep = false
+			}
+		}
 	}
 	r.mu.Lock()
 	if compressBeforeStep {
-		r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix)
+		if r.compression.MaybeHandle(parent, r.session.ID, r.agentID, r.hub, &r.messages, sidecarPrefix) && r.orch != nil {
+			r.orch.ReloadLongTermMemory(parent)
+		}
 	}
 	turnCtx, cancel := context.WithCancel(parent)
 	r.turnCancel = cancel

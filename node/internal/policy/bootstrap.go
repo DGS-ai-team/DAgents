@@ -22,15 +22,22 @@ var requiredPolicyFiles = []string{
 	filepath.Join("shell", "powershell.approval.txt"),
 }
 
-// EnsureRuntimePolicy 确保 `.runtime/policy` 目录与策略文件存在。
-
+// EnsureRuntimePolicy 确保 `.runtime/policy` 目录与策略文件存在，并把种子中缺失的工具模式合并进已有 tool.approval.txt。
+//
 // 逻辑：
 // 1. 创建 policy 与 shell 子目录；
 // 2. 缺失文件时从 `packaging/runtime/policy` 种子目录复制；
-// 3. 种子不可用时创建空文件（保守默认：未命中条目需审批）。
+// 3. 种子不可用时创建空文件（保守默认：未命中条目需审批）；
+// 4. 对已有 tool.approval.txt 仅追加种子缺项（不覆盖用户已改模式）。
 //
 // 副作用：可能创建目录并写入策略文件。
 func EnsureRuntimePolicy(runtimeDir string) error {
+	_, err := MergeMissingSeedIntoRuntimePolicy(runtimeDir)
+	return err
+}
+
+// ensureRuntimePolicyFiles 只负责目录与缺失文件补齐（不含种子缺项合并）。
+func ensureRuntimePolicyFiles(runtimeDir string) error {
 	policyDir := filepath.Join(runtimeDir, "policy")
 	shellDir := filepath.Join(policyDir, "shell")
 	if err := os.MkdirAll(shellDir, 0o755); err != nil {

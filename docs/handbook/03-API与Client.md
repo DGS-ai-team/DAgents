@@ -6,8 +6,10 @@
 
 - 查阅 Agent Node 对外 HTTP/SSE 契约并对照 `node/internal/api/` 实现  
 - 构造 HITL `resume` 请求  
-- 选择 Python Textual 或 Go Client，并理解二者差异  
-- 配置 `packaging/agent-client/config.yaml` 并联调  
+- 使用 **Web UI**（默认）并联调 Node  
+- 配置 `packaging/agent-client/config.yaml`  
+
+> 人机入口是 **内嵌 Web UI**（`/ui/`）。`dagents-client` 提供 probe / update / version 等运维命令。
 
 ---
 
@@ -15,33 +17,36 @@
 
 | 原则 | 说明 |
 |------|------|
-| **一进程一 `agent_id` 一端口** | 子 Agent 不单独暴露 HTTP |
-| **Client 只连 Node** | 默认同机 `127.0.0.1`；**前后端分离**时 Client 在较新机器、`local.endpoint` 指向目标机 Node（见 [01 §1.5](./01-愿景与架构.md)、§4.4） |
-| **思考与工具在 Node 内** | 无 Backend 代执行 |
-| **A2A 经 Manage** | Node 本地 API **不**接收 peer 入站 |
-| **会话态在 Node** | SQLite + 内存队列 |
+| **用户面 = Agent** | 1 Agent = 1 主对话；主路径 `/v1/agents/{agent_id}/...` |
+| **Policy / 侧车按 Agent** | SQLite（`agents.db`） |
+| **UI / 工具只连 Node** | 浏览器打开本机 `/ui/`；工具在 Node 内执行 |
+| **跨 Node = Workgroup** | 注册与 ACL 使用 `node_id` |
 
 ### 1.1 路径前缀
 
 | 前缀 | 调用方 |
 |------|--------|
 | `/health` | 探活 |
-| `/v1/...` | Client（session、messages、SSE、resume） |
-| `/v1/internal/...` | Node 进程内（子 Agent）；**不**对外 HTTP |
+| `/ui/` | 内嵌 Web UI 静态资源 |
+| `/v1/agents/...` | **主契约**（对话、策略、侧车、子 Agent） |
+| `/v1/workgroups/...` | 工作组（Node 反代 Manage；需启用 manage.workgroup） |
+| `/v1/...` | messages、streams、triggers、setup |
+
+权威契约：[agent-node-api.md](../architecture/agent-node-api.md) · OpenAPI：[openapi-node.yaml](../architecture/openapi-node.yaml)
 
 ### 1.2 通用错误体
 
 ```json
 {
   "error": {
-    "code": "session_not_found",
-    "message": "session sess-xxx 不存在",
-    "details": { "session_id": "sess-xxx" }
+    "code": "agent_not_found",
+    "message": "agent 不存在",
+    "details": { "agent_id": "agt-xxx" }
   }
 }
 ```
 
-常见 `code`：`invalid_session`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`。
+常见 `code`：`invalid_agent`、`agent_not_found`、`turn_busy`、`policy_denied`、`approval_required`、`llm_error`、`tool_error`。
 
 ---
 
@@ -51,23 +56,29 @@
 
 ```http
 GET /health
-→ { "status": "ok", "agent_id": "...", "version": "0.4.0" }
-
-GET /v1/agent/info
-→ { "agent_id", "expose_to_peers", "capabilities", "manage_registered" }
+→ { "status": "ok", "node_id": "...", "version": "0.9.5" }
 ```
 
-### 2.2 Session
+`version` 与 `node/internal/version/version.go` 及发版 tag 一致（全项目唯一语义化版本）。
+
+```http
+GET /v1/agent/info
+→ { "node_id", "capabilities", "manage_registered", "llm": { ... } }
+```
+
+### 2.2 Agents（主契约）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/v1/sessions` | 创建；`session_id` 可选 |
-| GET | `/v1/sessions` | 列表 |
-| DELETE | `/v1/sessions/{id}` | 删除 |
-| POST | `/v1/sessions/{id}/cancel` | 取消在途 turn |
-| POST | `/v1/sessions/{id}/clear-context` | 清空上下文 |
-| GET | `/v1/sessions/{id}/context` | token 估算 + system prompt 预览 |
-| GET | `/v1/sessions/{id}/child-agents` | 临时子 Agent 列表 |
+| POST | `/v1/agents` | 创建 Agent |
+| GET | `/v1/agents` | 列表 |
+| DELETE | `/v1/agents/{id}` | 归档 |
+| POST | `/v1/agents/{id}/ensure` | 装入运行时 |
+| GET | `/v1/agents/{id}/hydrate` | transcript + pending HITL |
+| POST | `/v1/agents/{id}/cancel` | 取消在途 turn |
+| POST | `/v1/agents/{id}/clear-context` | 清空对话上下文；同步取消未完成 bash/临时子 Agent（Activity 随之清空） |
+| GET | `/v1/agents/{id}/context` | token 估算 + system prompt 预览 |
+| GET | `/v1/agents/{id}/child-agents` | 临时子 Agent 列表 |
 
 ### 2.3 消息与 resume
 
@@ -76,7 +87,7 @@ POST /v1/messages
 Content-Type: application/json
 
 {
-  "session_id": "sess-...",
+  "agent_id": "agt-...",
   "request_type": "message",
   "content": "列出当前目录"
 }
@@ -88,7 +99,7 @@ Content-Type: application/json
 
 ```json
 {
-  "session_id": "sess-...",
+  "agent_id": "agt-...",
   "request_type": "resume",
   "resume": {
     "kind": "approval",
@@ -103,11 +114,11 @@ Content-Type: application/json
 ### 2.4 SSE 订阅
 
 ```http
-GET /v1/stream?after_seq=0
+GET /v1/streams?agent_id=agt-...
 ```
 
-- 单 TUI 通常 **一个 SSE 连接**；事件带 `session_id` 字段供过滤。  
-- `after_seq`：断点续传；见 [02 §4.6](./02-Agent-Node-核心.md)。  
+- Web UI 通常维持一条 SSE；可用 `agent_id` query 过滤。  
+- `Last-Event-ID` / `live=1`：断点与增量；见 [02 §4.6](./02-Agent-Node-核心.md)。  
 - 事件类型速查：[附录/SSE事件速查](./附录/SSE事件速查.md)。
 
 **关键事件**：
@@ -118,62 +129,38 @@ GET /v1/stream?after_seq=0
 | `reasoning_delta` | 推理链（若模型支持） |
 | `tool_call` / `tool_result` | 工具调用与结果 |
 | `hitl_required` | 本地 turn 统一 HITL（`items[]` 含 ask / 审批） |
-| `approval_required` | 需人工审批（A2A / 子 Agent） |
-| `user_information_required` | 需用户输入（A2A 中继） |
-| `usage` | token 统计（**独占一行**展示） |
+| `usage` | token 统计 |
 | `done` | 本步 turn 结束（**不等于**整个多步工具链结束） |
 
 ---
 
-## 3. Client 架构
+## 3. 人机入口
+
+### 3.1 现行：Web UI
 
 ```text
-┌──────────────────┐     HTTP/SSE      ┌─────────────────┐
-│ Python Textual   │ ────────────────► │                 │
-│ dagents chat     │                   │  Agent Node     │
-├──────────────────┤ ────────────────► │  127.0.0.1:port │
-│ Go bubbletea     │                   │  + /ui/ Web UI  │
-│ dagents-client   │                   └─────────────────┘
-├──────────────────┤ ────────────────►
-│ 浏览器 /ui/      │
-└──────────────────┘
+浏览器 ──HTTP/SSE──► Agent Node（:18765）
+                      ├── /ui/     Vue Workbench
+                      └── /v1/*    Agents · streams · workgroups 反代
 ```
 
-| 环境 | 推荐 | 命令 |
-|------|------|------|
-| WSL、新 Linux、Windows Terminal | Python Textual | `dagents chat` |
-| SSH 全屏、无 Python | Go full TUI | `dagents-client tui` |
-| RHEL6、`TERM=dumb` | Go plain REPL | `dagents-client tui --plain` |
-| 老 Windows + 浏览器 | Node Web UI | `http://127.0.0.1:<port>/ui/`（`ui.enabled: true`） |
-| 探活 | 任意 | `dagents-client probe` / `curl /health` |
+| 场景 | 入口 |
+|------|------|
+| 本机对话 / 设置 / 工作组 | `http://127.0.0.1:18765/ui/` |
+| 探活 | `curl /health` 或 `dagents-client probe` |
+| Manage 运维 Console | `http://127.0.0.1:8020/console/`（另起 Manage） |
 
-### 3.1 源码索引
+源码：`node/webui/frontend/`（构建产物 **不入库**；`go:embed`）。API 封装：`src/api/node.js`。
 
-| Client | 路径 | 要点 |
-|--------|------|------|
-| Python TUI | `app/cli/tui/app.py` | Textual 组件、HITL 弹窗 |
-| Python API | `app/cli/api_client.py` | SSE 按 session 过滤 |
-| Python HITL | `app/cli/hitl_batch.py` | `expand_hitl_required` |
-| Python A2A relay | `app/cli/child_agent.py` | `a2a_relay` 工具块样式 |
-| Go full TUI | `client/internal/tui/full/` | bubbletea、HITL 队列 |
-| Go HITL | `client/internal/hitl/` | `hitl_batch.go` 展开、`approval`、A2A relay |
-| Go A2A 展示 | `client/internal/tui/full/a2a_relay_tools.go` | `from <对端>` 标识 |
-| Go plain REPL | `client/internal/tui/repl/` | 行模式 |
-| Node Web UI | `node/webui/frontend/` | Vue 3 + Vite；`go:embed` 挂载 `/ui/` |
-| Web UI API | `node/webui/frontend/src/api/node.js` | 复用 `/v1` HTTP/SSE |
+### 3.2 HITL 行为（Web UI）
 
-### 3.2 HITL 与 Client 行为
+- 收到 **`hitl_required`** 后按 `items[]` 入队（ask / 审批）；用户分步 `POST resume`。  
+- 取消在途 turn：`POST /v1/agents/{id}/cancel`（或工作组 turn cancel）。  
+- 工作组信息型 HITL：见 [07-Workgroup协作](./07-Workgroup协作.md)。
 
-- Client 维护 **非阻塞 HITL 队列**；收到 **`hitl_required`** 后按 `hitl_type` 展开入队（先 ask_user，再 approval）；用户分步 `POST resume`（`user_information` / `approval`）。仍兼容 `approval_required` / `user_information_required`（A2A）。  
-- **Esc**：取消在途 turn（`POST .../cancel`），非 `/cancel` 斜杠。  
-- **A2A relay**（v0.3.9）：caller 侧收到 relay 审批后，提交 Manage `caller_resume`；TUI **不等**本地 `tool_result`，审批后直接终态（青点 → 灰点）。  
-- 源码：`client/internal/hitl/a2a.go`、`node/internal/session/a2a_caller_hitl.go`。
+### 3.3 辅助二进制
 
-### 3.3 转录展示约定
-
-- **usage** 独占一行（右对齐），不与 assistant 末行拼接。  
-- A2A 工具行带 **`from <callee_agent_id>`** 后缀与专用样式。  
-- Go：`client/internal/tui/shared/transcript*.go`；Python：`app/cli/tui/app.py`。
+`dagents-client`：**probe / update / version** 等运维命令。
 
 ---
 
@@ -183,64 +170,47 @@ GET /v1/stream?after_seq=0
 
 **路径**：`packaging/agent-client/config.yaml`（从 `config.example.yaml` 复制）
 
-**查找顺序**：CLI `-config` → 环境变量 `DAGENTS_CONFIG` → 默认 `packaging/agent-client/config.yaml`
+**查找顺序**：CLI `-config` → 环境变量 `DAGENTS_CONFIG` → 默认路径
 
 | 读者 | 常用键 |
 |------|--------|
-| Node | `listen`、`llm`、`fs_root`、`manage`、`expose_to_peers` |
-| Client | `local.endpoint` |
+| Node | `listen`、`manage`、`ui`（其余多在 SQLite / Web UI） |
 
-完整键表：[附录/配置项参考](./附录/配置项参考.md)。
+完整键表：[附录/配置项参考](./附录/配置项参考.md)。  
+运行时根固定 `./.runtime`（不可配置）。
 
-### 4.4 前后端分离（跨机 Client）
+### 4.2 跨机访问 Node（可选）
 
-老旧目标机上跑 **Node**，较新机器上跑 **Client** 时，需拆成两份配置（或同文件在不同机器各取所需段）：
-
-**目标机（后端）** — 仅运行 `dagents-node`：
+目标机跑 Node 且需从他机浏览器打开 `/ui/` 时：
 
 ```yaml
 listen:
-  host: 0.0.0.0          # 或内网 IP；勿在未加固环境裸奔公网
+  host: 0.0.0.0   # 或内网 IP；勿在未加固环境裸奔公网
   port: 18765
-local:
-  endpoint: http://10.0.1.50:18765   # 与 listen 一致，供 Manage registration.base_url 等
-fs_root: ./.runtime
-llm: { ... }
 ```
 
-**较新机器（前端）** — 仅运行 `dagents chat` 或 `dagents-client tui`：
+工具与 SQLite 仍在目标机 `fs_root`。建议防火墙白名单或 SSH 隧道。
 
-```yaml
-local:
-  endpoint: http://10.0.1.50:18765    # 指向目标机 Node
-# 无需 listen / llm / fs_root（Client 不执行工具）
-```
-
-工具、SQLite、policy 仍在**目标机** `fs_root` 上；前端只负责 HTTP/SSE 与 HITL UI。内网部署建议配合防火墙白名单；更严场景可用 SSH 本地转发（Client 仍连 `127.0.0.1`，隧道指向目标机）。
-
-设计背景：[01-愿景与架构 §1.5 策略 B](./01-愿景与架构.md)。
-
-### 4.5 工作区布局（相对 `fs_root`）
+### 4.3 工作区布局（相对 `fs_root`）
 
 | 子目录 | 用途 |
 |--------|------|
-| `memory/sessions.db` | SQLite |
-| `policy/` | 审批策略 |
+| `memory/` / `agents.db` | Agent 与消息持久化 |
+| `policy/` | 审批策略（可按 Agent） |
 | `skills/` | skills 目录 |
-| `history/` | 原始 message journal（可选） |
 | `triggers/` | trigger 持久化 |
-| `data/` | Agent 临时工作区 |
 | `prompt_context/` | soul / user / long_term |
+| `node/` | `node_id` 等 |
 
-### 4.6 发布形态
+### 4.4 发布形态
 
-- Release：`dagents-local-assistant-*`（Linux tarball / Windows zip / 安装包）  
-- `dagents chat|tui --withnode`：自动后台起 Node  
-- 详见 [06 §6.2](./06-运维与案例.md)
+- Release：`dagents-local-assistant-*`（Linux / Windows / 安装包）  
+- Desktop Shell（可选）：托盘启停 Node  
+- 详见 [06-运维与案例](./06-运维与案例.md)
 
 ---
 
-## 5. 源码与配置索引
+## 5. 源码索引
 
 | 概念 | 路径 |
 |------|------|
@@ -248,11 +218,10 @@ local:
 | 入队 messages | `node/internal/api/messages.go` |
 | resume 解析 | `node/internal/hitl/resume.go` |
 | SSE handler | `node/internal/api/stream.go` |
+| 工作组反代 | `node/internal/api/workgroup_api.go` |
 | 配置加载 | `shared/config/config.go` |
-| Python 入口 | `run_dagents_cli.py` |
-| Go Client 入口 | `client/cmd/dagents-client/` |
-
-模块 REFERENCE：`node/internal/api/REFERENCE.md`（若有）、`shared/config/REFERENCE.md`
+| Web UI | `node/webui/frontend/` |
+| 精简 client | `client/cmd/dagents-client/` |
 
 ---
 
@@ -261,19 +230,19 @@ local:
 ```bash
 cp packaging/agent-client/config.example.yaml packaging/agent-client/config.yaml
 
-# 终端 1
-go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
+# Web UI 静态资源不入库（Windows 可用 npm）
+npm run build --prefix node/webui/frontend
+# 或：bash node/webui/build.sh
 
-# 终端 2（任选）
-dagents chat
-# 或
-go run ./client/cmd/dagents-client tui -config packaging/agent-client/config.yaml
+go run ./node/cmd/dagents-node -config packaging/agent-client/config.yaml
+# 浏览器打开 http://127.0.0.1:18765/ui/
 ```
 
-默认 `llm.mock: true` 时可无 API Key 联调。
+默认可开 **mock LLM**（Web UI / `node_settings`）无 API Key 联调。
 
 ---
 
 ## 7. 下一章
 
-→ [04-能力与策略](./04-能力与策略.md)：内置工具、policy、skills、triggers、子 Agent、压缩。
+→ [04-能力与策略](./04-能力与策略.md)：内置工具、policy、skills、triggers、子 Agent、压缩。  
+→ [07-Workgroup协作](./07-Workgroup协作.md)：跨 Node 工作组。

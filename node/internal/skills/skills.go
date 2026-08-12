@@ -16,7 +16,7 @@ import (
 // CatalogBloatTokenThreshold 为 skills 元数据或任一 SKILL 正文估算 token 超过该值时 TUI 提示精简。
 const CatalogBloatTokenThreshold = 4000
 
-// LoadSkillsMetadataPrefix 为 tools enrich 附在 load_skills description 后的固定前缀（须与 registry_enrich 一致）。
+// LoadSkillsMetadataPrefix 为 tools enrich 附在 load_skills description 后的固定前缀（须与 tools.loadSkillsMetadataPrefix 一致）。
 const LoadSkillsMetadataPrefix = "\n\n可用 skills（name: description）：\n"
 
 // CatalogTokenStats 为 skills 目录 token 估算分项（避免把未加载正文与 system prompt 重复计数）。
@@ -46,6 +46,10 @@ type Catalog struct {
 	maxInPrompt int
 	enabled     bool
 
+	// restrictVisible 为 true 时仅暴露 visible 中的 skill；false 表示不限制（全部可见）。
+	restrictVisible bool
+	visible         map[string]struct{}
+
 	mu    sync.RWMutex
 	cache catalogListCache
 }
@@ -67,9 +71,44 @@ func NewCatalog(root string, enabled bool, maxInPrompt int) *Catalog {
 	}
 }
 
+// RestrictVisible 限制 List/Select 仅返回指定名称；names 非 nil 即开启限制（空切片=全部不可见）。
+// 传入 nil 表示取消限制（恢复全部可见）。返回接收者以便链式调用。
+func (c *Catalog) RestrictVisible(names []string) *Catalog {
+	if c == nil {
+		return c
+	}
+	if names == nil {
+		c.restrictVisible = false
+		c.visible = nil
+		return c
+	}
+	c.restrictVisible = true
+	c.visible = make(map[string]struct{}, len(names))
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name != "" {
+			c.visible[name] = struct{}{}
+		}
+	}
+	return c
+}
+
+// VisibleRestricted 表示是否启用了可见性白名单。
+func (c *Catalog) VisibleRestricted() bool {
+	return c != nil && c.restrictVisible
+}
+
 // Enabled 表示 skills 功能是否开启。
 func (c *Catalog) Enabled() bool {
 	return c != nil && c.enabled
+}
+
+// Root 返回 skills 目录根路径（{fs_root}/skills）。
+func (c *Catalog) Root() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.root)
 }
 
 // List 扫描 `{root}/*/SKILL.md` 并返回全部 skill 元数据与正文。
@@ -87,7 +126,7 @@ func (c *Catalog) List() []Definition {
 	if c.cache.sig == sig && c.cache.defs != nil {
 		out := cloneDefinitions(c.cache.defs)
 		c.mu.RUnlock()
-		return out
+		return c.applyVisible(out)
 	}
 	c.mu.RUnlock()
 
@@ -95,7 +134,7 @@ func (c *Catalog) List() []Definition {
 	c.mu.Lock()
 	c.cache = catalogListCache{sig: sig, defs: cloneDefinitions(out)}
 	c.mu.Unlock()
-	return out
+	return c.applyVisible(out)
 }
 
 // ListMetadata 返回 skill_name/description 列表。
@@ -114,12 +153,30 @@ func (c *Catalog) SelectByName(skillName string) (Definition, bool) {
 	if name == "" {
 		return Definition{}, false
 	}
+	if c.restrictVisible {
+		if _, ok := c.visible[name]; !ok {
+			return Definition{}, false
+		}
+	}
 	for _, d := range c.List() {
 		if d.SkillName == name {
 			return d, true
 		}
 	}
 	return Definition{}, false
+}
+
+func (c *Catalog) applyVisible(defs []Definition) []Definition {
+	if c == nil || !c.restrictVisible {
+		return defs
+	}
+	out := make([]Definition, 0, len(defs))
+	for _, d := range defs {
+		if _, ok := c.visible[d.SkillName]; ok {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // EstimateCatalogStats 估算 skills 目录 token 分项。

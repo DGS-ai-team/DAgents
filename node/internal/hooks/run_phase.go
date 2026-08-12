@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// DefaultInlineHookTimeout 为内置 / command hook 建议的单 hook 超时（设计 §5）。
+// DefaultInlineHookTimeout 为内置 / plugin hook 建议的单 hook 超时（设计 §5）。
 const DefaultInlineHookTimeout = 500 * time.Millisecond
 
 // PhaseAbortError 表示 Hook 链以 abort_* action 终止 phase。
@@ -61,15 +61,19 @@ func (r *Registry) SetExecutionJournal(j ExecutionJournal) {
 }
 
 // RunPhase 按 priority 顺序执行匹配 phase 的 Hook 链，合并 mutation 并处理 Action 语义。
-func (r *Registry) RunPhase(ctx context.Context, phase Phase, hc *Context) (Context, error) {
+func (r *Registry) RunPhase(ctx context.Context, phase Phase, hc *Context, host Host) (Context, error) {
 	if hc == nil {
 		return Context{}, fmt.Errorf("hooks: RunPhase requires non-nil Context")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if host == nil {
+		host = NoopHost()
+	}
 	out := *hc
 	out.Phase = phase
+	EnrichContext(&out, host)
 	if r == nil {
 		return out, nil
 	}
@@ -87,7 +91,7 @@ func (r *Registry) RunPhase(ctx context.Context, phase Phase, hc *Context) (Cont
 		if reg.timeoutDur > 0 {
 			hookCtx, cancel = context.WithTimeout(ctx, reg.timeoutDur)
 		}
-		result, err := reg.hook.Run(hookCtx, &out)
+		result, err := reg.hook.Run(hookCtx, &out, host)
 		if cancel != nil {
 			cancel()
 		}

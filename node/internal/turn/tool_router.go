@@ -27,6 +27,7 @@ func (o *Orchestrator) processToolCalls(
 	var autoCalls []llm.ToolCall
 	var approvalCalls []pendingApprovalCall
 	var userInfo *llm.ToolCall
+	var memoryConflicts []PendingHITLItem
 
 	for i, tc := range calls {
 		o.publishToolCall(sessionID, tc, false, i)
@@ -36,13 +37,13 @@ func (o *Orchestrator) processToolCalls(
 			if o.isChildSession {
 				msg := "rejected: child_forbidden"
 				o.publishToolResult(sessionID, tc, msg, true, nil)
-				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 				continue
 			}
 			if o.childMgr == nil || !o.childMgr.Enabled() {
 				output := "ERROR: child agents disabled"
 				o.publishToolResult(sessionID, tc, output, true, nil)
-				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 				continue
 			}
 			_, cleanedArgs := tools.ParseRunInBackground(tc.Function.Arguments)
@@ -51,7 +52,7 @@ func (o *Orchestrator) processToolCalls(
 				return nil, "", err
 			}
 			o.publishToolResult(sessionID, tc, output, strings.HasPrefix(output, "ERROR:"), nil)
-			o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 			continue
 		}
 
@@ -59,12 +60,22 @@ func (o *Orchestrator) processToolCalls(
 			if o.isChildSession {
 				msg := "rejected: ask_user_forbidden_for_child"
 				o.publishToolResult(sessionID, tc, msg, true, nil)
-				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 				continue
 			}
 			if userInfo == nil {
 				cp := tc
 				userInfo = &cp
+			}
+			continue
+		}
+		if tools.IsRemember(tc.Function.Name) {
+			conflictItem, err := o.executeRememberTool(ctx, sessionID, history, tc)
+			if err != nil {
+				return nil, "", err
+			}
+			if conflictItem != nil {
+				memoryConflicts = append(memoryConflicts, *conflictItem)
 			}
 			continue
 		}
@@ -74,12 +85,12 @@ func (o *Orchestrator) processToolCalls(
 			}
 			continue
 		}
-		decision := o.decideToolBeforeEach(ctx, sessionID, tc)
+		decision := o.decideToolBeforeEach(ctx, sessionID, history, tc)
 		switch decision.Action {
 		case policy.ActionDeny:
-			msg := "rejected: policy_denied"
+			msg := hooks.ToolDenyMessage(decision)
 			o.publishToolResult(sessionID, tc, msg, true, nil)
-			o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 		case policy.ActionRequireApproval:
 			item := pendingApprovalCall{tc: tc}
 			if decision.ApprovalSubtype == hooks.ApprovalSubtypeDuplicateToolCall && decision.DuplicateMeta != nil {
@@ -100,6 +111,7 @@ func (o *Orchestrator) processToolCalls(
 	if userInfo != nil {
 		pendingItems = append(pendingItems, PendingHITLItem{ToolCall: *userInfo})
 	}
+	pendingItems = append(pendingItems, memoryConflicts...)
 	for _, item := range approvalCalls {
 		pendingItem := PendingHITLItem{ToolCall: item.tc}
 		if item.duplicateMeta != nil {
@@ -113,10 +125,11 @@ func (o *Orchestrator) processToolCalls(
 	}
 	message, sseItems := buildHITLRequiredPayload(pendingItems)
 	o.publishHITLRequired(sessionID, newShortID("hitl-"), message, sseItems)
+	o.runHITLBeforePausePhase(ctx, sessionID, history, "awaiting_hitl")
 	return pendingFromItems(pendingItems), "awaiting_hitl", nil
 }
 
-func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID string, tc llm.ToolCall) hooks.ToolBeforeEachResult {
+func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID string, history *[]llm.Message, tc llm.ToolCall) hooks.ToolBeforeEachResult {
 	if o.toolHooks == nil {
 		action := o.policy.DecideTool(tc.Function.Name, parseJSONArgs(tc.Function.Arguments))
 		mode := policy.ModeRule
@@ -131,7 +144,7 @@ func (o *Orchestrator) decideToolBeforeEach(ctx context.Context, sessionID strin
 		ToolArgs:     parseJSONArgs(tc.Function.Arguments),
 		RawArguments: tc.Function.Arguments,
 	})
-	out, err := o.toolHooks.RunPhase(ctx, hooks.PhaseToolBeforeEach, hc)
+	out, err := o.runPhase(ctx, hooks.PhaseToolBeforeEach, hc, sessionID, history, "")
 	if err != nil {
 		return hooks.DefaultToolBeforeEachResult()
 	}
@@ -151,7 +164,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	if catalog == nil || !catalog.Enabled() {
 		output := "ERROR: skills 功能已禁用"
 		o.publishToolResult(sessionID, tc, output, true, nil)
-		o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+		o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 		return nil
 	}
 	loaded := []skills.LoadedSkill{}
@@ -194,7 +207,7 @@ func (o *Orchestrator) executeSkillTool(sessionID string, history *[]llm.Message
 	}
 	rejected := strings.HasPrefix(output, "ERROR:")
 	o.publishToolResult(sessionID, tc, output, rejected, nil)
-	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: output})
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, output))
 	return nil
 }
 
@@ -220,7 +233,9 @@ func stringSliceField(payload map[string]any, key string) []string {
 	}
 }
 
-// executeAutoBatch 并行执行一批免审批工具，按原始 tool_calls 顺序写回 history（对齐 Python gather）。
+// executeAutoBatch 并行执行一批免审批工具（对齐 Python gather）。
+// 每个工具完成后立刻推送 tool_result SSE，便于 UI 反映并行进度；
+// Wait 后按原始 tool_calls 顺序写入 history（不重复推送 SSE）。
 func (o *Orchestrator) executeAutoBatch(
 	ctx context.Context,
 	sessionID string,
@@ -238,20 +253,35 @@ func (o *Orchestrator) executeAutoBatch(
 		return o.executeTool(ctx, sessionID, history, autoCalls[0], plan)
 	}
 	type batchItem struct {
-		tc       llm.ToolCall
-		content  string
-		rejected bool
-		extra    map[string]any
+		tc         llm.ToolCall
+		rejected   bool
+		extra      map[string]any
+		forClient  string
+		forHistory string
+		spillPath  string
 	}
 	results := make([]batchItem, len(autoCalls))
 	var wg sync.WaitGroup
+	// split/publish 串行化：AfterEach hook 与 hub seq 需避免并发重入。
+	var publishMu sync.Mutex
 	for i := range autoCalls {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
 			tc := autoCalls[idx]
 			content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
-			results[idx] = batchItem{tc: tc, content: content, rejected: rejected, extra: extra}
+			publishMu.Lock()
+			forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
+			o.publishToolResult(sessionID, tc, forClient, rejected, extra)
+			publishMu.Unlock()
+			results[idx] = batchItem{
+				tc:         tc,
+				rejected:   rejected,
+				extra:      extra,
+				forClient:  forClient,
+				forHistory: forHistory,
+				spillPath:  spillPath,
+			}
 		}(i)
 	}
 	wg.Wait()
@@ -259,17 +289,42 @@ func (o *Orchestrator) executeAutoBatch(
 		return err
 	}
 	for _, item := range results {
-		forClient, forHistory, spillPath := o.splitToolResult(sessionID, item.tc, item.content)
-		o.publishToolResult(sessionID, item.tc, forClient, item.rejected, item.extra)
-		o.recordToolResult(sessionID, item.tc.Function.Name, item.tc.Function.Arguments, forHistory, spillPath, item.rejected)
-		o.recordToolExecutionSuccess(item.tc, forClient, item.rejected)
-		o.appendHistory(sessionID, history, llm.Message{
-			Role:       "tool",
-			ToolCallID: item.tc.ID,
-			Content:    forHistory,
-		})
+		o.persistToolResult(sessionID, history, item.tc, item.forClient, item.forHistory, item.spillPath, item.rejected)
 	}
 	return nil
+}
+
+func (o *Orchestrator) commitToolResult(
+	sessionID string,
+	history *[]llm.Message,
+	tc llm.ToolCall,
+	content string,
+	rejected bool,
+	extra map[string]any,
+) {
+	forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
+	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
+	o.persistToolResult(sessionID, history, tc, forClient, forHistory, spillPath, rejected)
+}
+
+// persistToolResult 将已推送（或即将仅落盘）的工具结果写入 metrics / history。
+func (o *Orchestrator) persistToolResult(
+	sessionID string,
+	history *[]llm.Message,
+	tc llm.ToolCall,
+	forClient, forHistory, spillPath string,
+	rejected bool,
+) {
+	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, rejected)
+	o.recordToolExecutionSuccess(tc, forClient, rejected)
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(
+		tc.ID,
+		tc.Function.Name,
+		forHistory,
+	))
+	if !rejected {
+		o.maybeAppendToolVisionUserMessage(sessionID, history, tc)
+	}
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (content string, rejected bool, extra map[string]any) {
@@ -288,7 +343,7 @@ func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.
 		output, execErr = o.tools.StartBackground(toolCtx, sessionID, tc.Function.Name, tc.ID, cleanedArgs)
 	} else {
 		output, execErr = o.tools.Execute(toolCtx, tc.Function.Name, cleanedArgs)
-		extra = o.tools.TakeBashCompressStatsForCall(tc.ID)
+		extra = mergeToolResultExtra(o.tools.TakeBashCompressStatsForCall(tc.ID), o.tools.TakeToolResultMediaForCall(tc.ID))
 	}
 	if execErr != nil {
 		return execErr.Error(), true, nil
@@ -305,11 +360,7 @@ func (o *Orchestrator) executeTool(
 ) error {
 	o.recordToolCall(sessionID, tc.Function.Name)
 	content, rejected, extra := o.invokeTool(ctx, sessionID, tc, plan)
-	forClient, forHistory, spillPath := o.splitToolResult(sessionID, tc, content)
-	o.publishToolResult(sessionID, tc, forClient, rejected, extra)
-	o.recordToolResult(sessionID, tc.Function.Name, tc.Function.Arguments, forHistory, spillPath, rejected)
-	o.recordToolExecutionSuccess(tc, forClient, rejected)
-	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: forHistory})
+	o.commitToolResult(sessionID, history, tc, content, rejected, extra)
 	return nil
 }
 
@@ -371,4 +422,20 @@ func newShortID(prefix string) string {
 	var b [6]byte
 	_, _ = rand.Read(b[:])
 	return prefix + hex.EncodeToString(b[:])
+}
+
+func mergeToolResultExtra(parts ...map[string]any) map[string]any {
+	var out map[string]any
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any, len(part))
+		}
+		for k, v := range part {
+			out[k] = v
+		}
+	}
+	return out
 }

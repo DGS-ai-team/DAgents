@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dagents.local/workgroup-d05/Assign.json",
+  "title": "Assign",
+  "type": "object",
+  "required": [
+    "assign_id",
+    "workgroup_id",
+    "member_id",
+    "leader_run_id",
+    "leader_tool_call_id",
+    "status",
+    "instruction",
+    "created_at"
+  ],
+  "properties": {
+    "assign_id": {
+      "type": "string",
+      "pattern": "^as_[0-9a-z]{26}$"
+    },
+    "workgroup_id": {
+      "type": "string",
+      "pattern": "^wg_[0-9a-z]{26}$"
+    },
+    "member_id": {
+      "type": "string",
+      "pattern": "^mb_[0-9a-z]{26}$"
+    },
+    "leader_run_id": {
+      "type": "string",
+      "pattern": "^rn_[0-9a-z]{26}$"
+    },
+    "leader_tool_call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "running",
+        "awaiting_hitl",
+        "succeeded",
+        "failed",
+        "canceled",
+        "indeterminate"
+      ]
+    },
+    "instruction": {
+      "type": "string"
+    },
+    "result_summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "error_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

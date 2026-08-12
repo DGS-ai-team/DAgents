@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// Hook 为通用 phase Hook 契约。
+// Hook 为通用 phase Hook 契约（内置与 in-process plugin 统一签名）。
 type Hook interface {
 	Name() string
 	Phases() []Phase
-	Run(ctx context.Context, hc *Context) (Result, error)
+	Run(ctx context.Context, hc *Context, host Host) (Result, error)
 }
 
 // OnErrorPolicy 控制 Hook 执行失败时的 fail-open / fail-closed 策略。

@@ -9,10 +9,16 @@ services:
       MANAGE_HOST: 0.0.0.0
       MANAGE_PORT: 8020
       MANAGE_DB_PATH: /data/manage.db
-      MANAGE_A2A_EXPIRE_SWEEP_SECONDS: ${MANAGE_A2A_EXPIRE_SWEEP_SECONDS:-30}
+      MANAGE_RELEASES_DIR: /data/releases
+      MANAGE_BLOB_DIR: /data/blobs
+      MANAGE_AUDIT_PATH: /data/audit.jsonl
+      MANAGE_SEED_BUNDLED_RELEASES: ${MANAGE_SEED_BUNDLED_RELEASES:-1}
+      MANAGE_BLOB_MAX_BYTES: ${MANAGE_BLOB_MAX_BYTES:-}
+      MANAGE_AUDIT_MAX_ENTRIES: ${MANAGE_AUDIT_MAX_ENTRIES:-500}
     volumes:
       - manage-data:/data
     restart: unless-stopped
 
 volumes:
   manage-data:
+    name: dagents-manage-data

@@ -13,15 +13,21 @@ const ToolUserInterruptedMessage = "用户需要补充信息，打断了工具�
 // ToolStreamInterruptedMessage 为流式 assistant 输出或工具执行被 cancel 时的 tool 结果文案。
 const ToolStreamInterruptedMessage = "流式输出被用户中断。"
 
+// ToolLoopLimitExceededMessage 为单轮工具调用次数用尽时写入的 tool 结果文案。
+// 模型应据此给出结论并询问用户是否继续；下一条 user 消息会重置累计次数。
+const ToolLoopLimitExceededMessage = "已超过单轮工具调用次数，请先给出当前结论以及进度，询问用户是否要继续后续的推进，下一轮开始时工具累计次数会重置。"
+
 const (
 	hitlTypeUserInformation = "user_information"
 	hitlTypeExecuteTool     = "execute_tool"
+	hitlTypeMemoryConflict  = "memory_conflict"
 )
 
 // PendingHITLItem 为单条待 HITL 的 tool call（类型由 tool name 推断，不再单独区分 kind）。
 type PendingHITLItem struct {
-	ToolCall      llm.ToolCall        `json:"tool_call"`
-	DuplicateMeta *hooks.DuplicateMeta `json:"duplicate_meta,omitempty"`
+	ToolCall       llm.ToolCall        `json:"tool_call"`
+	DuplicateMeta  *hooks.DuplicateMeta `json:"duplicate_meta,omitempty"`
+	MemoryConflict *MemoryConflictMeta `json:"memory_conflict,omitempty"`
 }
 
 // PendingHITL 保存 HITL 暂停时的待处理 tool call 批次。
@@ -61,16 +67,9 @@ func (p *PendingHITL) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Normalize 为 no-op（保留调用点以兼容旧代码路径）。
-func (p *PendingHITL) Normalize() {}
-
 // AllToolCalls 返回当前 pending 对应的 tool call 列表（用于打断补位）。
 func (p *PendingHITL) AllToolCalls() []llm.ToolCall {
-	if p == nil {
-		return nil
-	}
-	p.Normalize()
-	if len(p.Items) == 0 {
+	if p == nil || len(p.Items) == 0 {
 		return nil
 	}
 	out := make([]llm.ToolCall, 0, len(p.Items))
@@ -81,7 +80,9 @@ func (p *PendingHITL) AllToolCalls() []llm.ToolCall {
 }
 
 func (p *PendingHITL) findItem(toolCallID string) (PendingHITLItem, int, bool) {
-	p.Normalize()
+	if p == nil {
+		return PendingHITLItem{}, -1, false
+	}
 	for i, item := range p.Items {
 		if item.ToolCall.ID == toolCallID {
 			return item, i, true
@@ -103,21 +104,52 @@ func (p *PendingHITL) withoutIndex(idx int) *PendingHITL {
 }
 
 func (p *PendingHITL) approvalItems() []PendingHITLItem {
-	p.Normalize()
+	if p == nil {
+		return nil
+	}
 	out := make([]PendingHITLItem, 0, len(p.Items))
 	for _, item := range p.Items {
-		if !tools.IsAskUserInformation(item.ToolCall.Function.Name) {
+		if tools.IsAskUserInformation(item.ToolCall.Function.Name) || item.MemoryConflict != nil {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func (p *PendingHITL) userInformationItems() []PendingHITLItem {
+	if p == nil {
+		return nil
+	}
+	out := make([]PendingHITLItem, 0, len(p.Items))
+	for _, item := range p.Items {
+		if tools.IsAskUserInformation(item.ToolCall.Function.Name) {
 			out = append(out, item)
 		}
 	}
 	return out
 }
 
-func (p *PendingHITL) userInformationItems() []PendingHITLItem {
-	p.Normalize()
+func (p *PendingHITL) memoryConflictItems() []PendingHITLItem {
+	if p == nil {
+		return nil
+	}
 	out := make([]PendingHITLItem, 0, len(p.Items))
 	for _, item := range p.Items {
-		if tools.IsAskUserInformation(item.ToolCall.Function.Name) {
+		if item.MemoryConflict != nil {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func (p *PendingHITL) nonApprovalItems() []PendingHITLItem {
+	if p == nil {
+		return nil
+	}
+	out := make([]PendingHITLItem, 0, len(p.Items))
+	for _, item := range p.Items {
+		if tools.IsAskUserInformation(item.ToolCall.Function.Name) || item.MemoryConflict != nil {
 			out = append(out, item)
 		}
 	}

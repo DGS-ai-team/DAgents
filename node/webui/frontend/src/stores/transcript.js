@@ -8,29 +8,78 @@ import {
   USER_INFORMATION_TOOL,
 } from "../utils/toolCalls.js";
 import {
+  clearPartialToolIndex,
   forgetToolBlock,
   markToolBlockActive,
+  placeholderBlockIdForIndex,
   resolveToolBlockId,
 } from "./toolStream.js";
+import {
+  configureStreamReveal,
+  flushReveal,
+  markRevealStreaming,
+  resetRevealKind,
+  resetStreamReveal,
+  scheduleReveal,
+} from "./streamReveal.js";
+import { formatInlineUsage, parseUsageRound } from "../utils/usage.js";
+import {
+  attachBrowserRefsToAssistants,
+  collectBrowserRefsFromEntries,
+} from "../utils/browserRefs.js";
 
 let idSeq = 0;
+
+const SHOW_REASONING_KEY = "dagents_webui_show_reasoning";
+
+function readShowReasoningPref() {
+  try {
+    return localStorage.getItem(SHOW_REASONING_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 export const transcriptStore = reactive({
   entries: [],
   lastSeq: 0,
   assistantBuffer: "",
   reasoningBuffer: "",
-  showReasoning: false,
+  showReasoning: readShowReasoningPref(),
   toolFoldVerbose: false,
 });
+
+configureStreamReveal({
+  getSourceText(kind) {
+    if (kind === "assistant") return transcriptStore.assistantBuffer;
+    if (kind === "reasoning") return transcriptStore.reasoningBuffer;
+    return "";
+  },
+  onRevealText(kind, text, _flushed) {
+    upsertStreaming(kind, text);
+  },
+});
+
+export function hasStreamingKind(kind) {
+  return transcriptStore.entries.some((e) => e.streaming && e.kind === kind);
+}
+
+export function hasStreamingTextContent() {
+  return hasStreamingKind("assistant") || hasStreamingKind("reasoning");
+}
 
 export function noteSeq(seq) {
   if (seq > transcriptStore.lastSeq) transcriptStore.lastSeq = seq;
 }
 
-export function addUser(text) {
+export function addUser(text, images = []) {
   abortStreaming();
-  transcriptStore.entries.push({ id: ++idSeq, kind: "user", text });
+  transcriptStore.entries.push({
+    id: ++idSeq,
+    kind: "user",
+    text,
+    images: Array.isArray(images) ? images.filter(Boolean) : [],
+  });
 }
 
 export function addDeferredUser(text, userName = "", sideEffectSeq = 0) {
@@ -83,60 +132,69 @@ export function appendAssistant(delta) {
   if (!delta) return;
   finalizeReasoning();
   transcriptStore.assistantBuffer += delta;
-  upsertStreaming("assistant", transcriptStore.assistantBuffer);
+  if (!hasStreamingKind("assistant")) upsertStreaming("assistant", "");
+  markRevealStreaming("assistant", true);
+  scheduleReveal();
 }
 
 export function appendReasoning(delta) {
   if (!delta) return;
   finalizeAssistant();
-  if (!transcriptStore.showReasoning) return;
   transcriptStore.reasoningBuffer += delta;
-  upsertStreaming("reasoning", transcriptStore.reasoningBuffer);
+  if (!hasStreamingKind("reasoning")) upsertStreaming("reasoning", "");
+}
+
+export function resumeReasoningReveal() {
+  if (!transcriptStore.reasoningBuffer) return;
+  if (!hasStreamingKind("reasoning")) upsertStreaming("reasoning", "");
+}
+
+export function setShowReasoning(enabled) {
+  const on = !!enabled;
+  transcriptStore.showReasoning = on;
+  try {
+    if (on) localStorage.setItem(SHOW_REASONING_KEY, "1");
+    else localStorage.removeItem(SHOW_REASONING_KEY);
+  } catch {
+    /* ignore storage failures */
+  }
 }
 
 export function finalizeAssistant() {
+  flushReveal("assistant");
   const text = transcriptStore.assistantBuffer;
   const usage = pendingUsageSuffix;
-  removeStreaming("assistant");
+  const streamIdx = transcriptStore.entries.findIndex((e) => e.streaming && e.kind === "assistant");
+  if (streamIdx >= 0) transcriptStore.entries.splice(streamIdx, 1);
   transcriptStore.assistantBuffer = "";
   pendingUsageSuffix = "";
+  resetRevealKind("assistant");
   if (!text) return;
-  transcriptStore.entries.push({
+  const insertAt = streamIdx >= 0 ? streamIdx : transcriptStore.entries.length;
+  const browser_refs = collectBrowserRefsFromEntries(transcriptStore.entries, insertAt);
+  const row = {
     id: ++idSeq,
     kind: "assistant",
     text,
     usage,
-  });
+  };
+  if (browser_refs.length) row.browser_refs = browser_refs;
+  // 保留 streaming 条目原位，避免 partial tool_call 插在正文后、finalize 却把正文推到工具后面。
+  if (streamIdx >= 0) transcriptStore.entries.splice(streamIdx, 0, row);
+  else transcriptStore.entries.push(row);
 }
 
 export function finalizeReasoning() {
-  const text = transcriptStore.reasoningBuffer;
+  flushReveal("reasoning");
   removeStreaming("reasoning");
   transcriptStore.reasoningBuffer = "";
-  if (!text) return;
-  transcriptStore.entries.push({
-    id: ++idSeq,
-    kind: "reasoning",
-    text,
-  });
-}
-
-export function addAssistantFinal(text, usage = "") {
-  removeStreaming("assistant");
-  transcriptStore.assistantBuffer = "";
-  pendingUsageSuffix = "";
-  if (!text?.trim()) return;
-  transcriptStore.entries.push({
-    id: ++idSeq,
-    kind: "assistant",
-    text,
-    usage,
-  });
+  resetRevealKind("reasoning");
 }
 
 let pendingUsageSuffix = "";
 
 function abortStreaming() {
+  resetStreamReveal();
   removeStreaming("assistant");
   removeStreaming("reasoning");
   transcriptStore.assistantBuffer = "";
@@ -161,9 +219,14 @@ export function applyRoundUsage(data) {
 }
 
 export function upsertToolCallFromSSE(data) {
-  finalizeAssistant();
-  finalizeReasoning();
   const partial = !!data?.partial;
+  // partial tool_call 到达时正文可能仍在继续（token 边界如 Not|epad）。
+  // 提前 finalize 会把同一条回复拆成两个气泡，看起来像单词中间换行。
+  // 仅在最终 tool_call（或 tool_result / done 等）时封存助手文本。
+  if (!partial) {
+    finalizeAssistant();
+    finalizeReasoning();
+  }
   const toolIndex = toolIndexFromEvent(data);
   if (partial && toolIndex < 0 && !extractToolCallsFromEvent(data).some((c) => c.id)) {
     return;
@@ -193,7 +256,26 @@ export function upsertToolCallFromSSE(data) {
       codePreview: parts.codePreview,
       call,
     });
-    if (!partial) markToolBlockActive(blockId);
+    if (!partial) {
+      markToolBlockActive(blockId);
+      // 防御：index 映射曾被 reset 时，仍可能残留 partial-N
+      const placeholder = placeholderBlockIdForIndex(toolIndex);
+      if (placeholder && placeholder !== blockId) {
+        removeToolCallByBlockId(placeholder);
+        forgetToolBlock(placeholder);
+      }
+    }
+  }
+}
+
+/** turn 结束/取消时清除仍标记为 partial 的 tool_call，避免僵死「生成中」。 */
+export function finalizePartialToolCalls({ interrupted = false } = {}) {
+  for (const entry of transcriptStore.entries) {
+    if (entry.kind !== "tool_call" || !entry.partial) continue;
+    entry.partial = false;
+    if (interrupted) {
+      entry.data = { ...entry.data, interrupted: true };
+    }
   }
 }
 
@@ -230,6 +312,12 @@ export function applyToolResult(data) {
   finalizeAssistant();
   finalizeReasoning();
   const callId = String(data?.tool_call_id || data?.id || "").trim();
+  const toolIndex = toolIndexFromEvent(data);
+  const placeholder = placeholderBlockIdForIndex(toolIndex);
+  if (placeholder && placeholder !== callId) {
+    removeToolCallByBlockId(placeholder);
+    forgetToolBlock(placeholder);
+  }
   const idx = transcriptStore.entries.findIndex(
     (e) =>
       (e.kind === "tool_call" || e.kind === "tool_result") &&
@@ -278,18 +366,79 @@ export function applyToolResult(data) {
   if (callId) forgetToolBlock(callId);
 }
 
-/** @deprecated use upsertToolCallFromSSE */
-export function addToolCall(data) {
-  upsertToolCallFromSSE(data);
-}
-
-export function addToolResult(data) {
-  applyToolResult(data);
+/**
+ * 将已落库的 bash_run tool_result 中的 [BASH_RESULT] status=… 改写为终态。
+ * 后台任务完成后原气泡仍可能留着 RUNNING；终止/完成时用此更新 UI。
+ */
+export function patchBashResultStatus(toolCallId, status) {
+  const callId = String(toolCallId || "").trim();
+  const next = String(status || "").trim().toUpperCase();
+  if (!callId || !next) return false;
+  const idx = transcriptStore.entries.findIndex(
+    (e) =>
+      e.kind === "tool_result" &&
+      (e.blockId === callId || e.data?.tool_call_id === callId || e.data?.id === callId),
+  );
+  if (idx < 0) return false;
+  const prev = transcriptStore.entries[idx];
+  const content = String(prev.data?.content || "");
+  // 只推进 RUNNING → 终态，避免把 CANCELLED 覆盖成 SUCCEEDED。
+  if (!/\[BASH_RESULT\]\s+status=RUNNING\b/i.test(content)) return false;
+  const updated = content.replace(
+    /\[BASH_RESULT\]\s+status=RUNNING\b/i,
+    `[BASH_RESULT] status=${next}`,
+  );
+  if (updated === content) return false;
+  let nextContent = updated;
+  if (next === "CANCELLED" && !/命令已被用户终止/.test(nextContent)) {
+    nextContent = `${updated}\n命令已被用户终止。`;
+  }
+  transcriptStore.entries[idx] = {
+    ...prev,
+    data: {
+      ...prev.data,
+      content: nextContent,
+      interrupted: next === "CANCELLED" ? true : prev.data?.interrupted,
+    },
+  };
+  return true;
 }
 
 export function clearTranscript() {
   transcriptStore.entries = [];
   abortStreaming();
+}
+
+/** 从 hydrate API 快照灌入 transcript（F-H7）；替换当前 entries。 */
+export function loadTranscriptFromHydrate(entries) {
+  abortStreaming();
+  transcriptStore.entries = [];
+  if (!Array.isArray(entries)) return;
+  for (const raw of entries) {
+    if (!raw || typeof raw !== "object") continue;
+    const kind = String(raw.kind || "").trim();
+    if (!kind) continue;
+    if (kind === "reasoning") continue;
+    const row = {
+      ...raw,
+      id: ++idSeq,
+      kind,
+      partial: raw.partial === true,
+      streaming: false,
+    };
+    if (kind === "tool_call" || kind === "tool_result") {
+      const blockId = String(row.blockId || row.data?.tool_call_id || row.data?.id || "").trim();
+      if (blockId) row.blockId = blockId;
+    }
+    if (kind === "user" && !Array.isArray(row.images)) {
+      row.images = [];
+    }
+    transcriptStore.entries.push(row);
+    if (kind === "tool_call" && row.blockId) {
+      markToolBlockActive(row.blockId);
+    }
+  }
+  attachBrowserRefsToAssistants(transcriptStore.entries);
 }
 
 function upsertStreaming(kind, text) {
@@ -304,67 +453,3 @@ function removeStreaming(kind) {
   if (idx >= 0) transcriptStore.entries.splice(idx, 1);
 }
 
-function parseUsageRound(data) {
-  return parseUsageFields({
-    prompt_tokens: data.round_prompt_tokens,
-    completion_tokens: data.round_completion_tokens,
-    prompt_cache_hit_tokens: data.round_prompt_cache_hit_tokens,
-    prompt_cached_tokens: data.round_prompt_cached_tokens,
-    prompt_cache_hit_rate: data.round_prompt_cache_hit_rate,
-    reasoning_tokens: data.round_reasoning_tokens,
-    completion_tokens_details: data.round_completion_tokens_details,
-  });
-}
-
-function parseUsageStrip(data) {
-  return parseUsageFields(data);
-}
-
-function parseUsageFields(data) {
-  const prompt = intVal(data.prompt_tokens);
-  const completion = intVal(data.completion_tokens);
-  if (prompt <= 0 && completion <= 0) return null;
-  let hit = intVal(data.prompt_cache_hit_tokens);
-  const cached = intVal(data.prompt_cached_tokens);
-  if (hit <= 0 && cached > 0) hit = cached;
-  let rate = -1;
-  if (typeof data.prompt_cache_hit_rate === "number" && data.prompt_cache_hit_rate >= 0) {
-    rate = data.prompt_cache_hit_rate;
-  } else if (prompt > 0 && hit > 0) {
-    rate = Math.min(1, hit / prompt);
-  }
-  let reasoning = intVal(data.reasoning_tokens);
-  if (reasoning <= 0 && data.completion_tokens_details) {
-    reasoning = intVal(data.completion_tokens_details.reasoning_tokens);
-  }
-  return { prompt, completion, hit, rate, reasoning };
-}
-
-function intVal(v) {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
-}
-
-function formatCompact(n) {
-  if (n >= 10000) return `${(Math.round(n / 100) / 10).toFixed(1).replace(/\.0$/, "")}k`;
-  return n.toLocaleString("en-US");
-}
-
-function formatInlineUsage(snap) {
-  if (!snap) return "";
-  let t = ` · ↑${formatCompact(snap.prompt)} ↓${formatCompact(snap.completion)}`;
-  if (snap.reasoning > 0) t += ` · think ${formatCompact(snap.reasoning)}`;
-  return t;
-}
-
-export function formatInputStripUsage(snap) {
-  if (!snap) return "";
-  let t = `↑${formatCompact(snap.prompt)} ↓${formatCompact(snap.completion)}`;
-  if (snap.hit > 0) {
-    t += snap.rate >= 0 ? ` · hit ${formatCompact(snap.hit)} (${Math.round(snap.rate * 100)}%)` : ` · hit ${formatCompact(snap.hit)}`;
-  }
-  if (snap.reasoning > 0) t += ` · think ${formatCompact(snap.reasoning)}`;
-  return t;
-}
-
-export { parseUsageStrip, parseUsageRound };

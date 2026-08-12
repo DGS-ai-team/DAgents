@@ -1,11 +1,13 @@
-# manage — Node 向 Manage 出站 sidecar
+# manage
 
-| 组件 | 说明 |
+Node 向 Manage 控制面的出站集成：注册、Release 检查、制品上传、工作组客户端等。
+
+| 文件 | 说明 |
 |------|------|
-| `registrar.go` | 注册 / 心跳 / 注销（含 **Agent Card** 上报） |
-| `agentcard.go` | 加载 `agent-card.json` |
-| `inbox_poller.go` | A2A inbox long poll |
-| `compliance_executor.go` | 合规助手 inbox 处理（turn loop；`custom.md` 由 prompt 侧车注入） |
-| `task_replier.go` | inbox Task ack/reply 共用 HTTP |
+| `registrar.go` | 向 Manage 注册/心跳/deregister |
+| `registration_card.go` | `RegistrationCard` |
+| `control_client.go` / `workgroup_client.go` | Control / 工作组 HTTP |
+| `update_checker.go` | 周期查询 `/v1/releases/check` |
+| `package_uploader.go` | 向 Manage 上传 skill/plugin/externaltool 包 |
 
-符号索引见 [REFERENCE.md](./REFERENCE.md)。
+**已删除（2026-08）**：`inbox_poller.go` / `compliance_executor.go` / `task_replier.go`（A2A inbox callee）。跨机协作请用工作组 Dialer。

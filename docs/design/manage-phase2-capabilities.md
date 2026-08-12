@@ -1,7 +1,7 @@
 # Manage 后续能力规划（Phase 2+）
 
 > **状态**：规划稿（2026-06-18）  
-> **对齐**：[manage-architecture.md](./manage-architecture.md)、[manage-llm-skills-pageagent.md](./manage-llm-skills-pageagent.md)（PR #31 基线）  
+> **对齐**：[manage-architecture.md](./manage-architecture.md)  
 > **读者**：Manage / Node 开发者、PR #31 及后续迭代作者
 
 PR #31 交付 Manage 侧 **LLM 配置注册**、**Skills 精简分发**、**Blob API** 与 Console 管理页。本文定义 **Phase 2+** 四条主线，并要求在 PR #31 及后续实现中 **预留接口契约**，避免与「全量强推同步」绑死。
@@ -73,6 +73,8 @@ Node  GET /v1/marketplace/catalog（或 manifest）
 
 ## 2. 版本发布中枢（Release Hub）
 
+> **实现状态（2026-07）**：**Manage 侧已落地**（`manage/releases/`、`GET /v1/releases/check`、Console 版本发布页）；Node `UpdateChecker` 已对接。本文 §2.2 路径为早期草图，**现网 API 见 [release-update-hub.md](./release-update-hub.md) 与 [manage/README.md](../../manage/README.md)**。
+
 ### 2.1 定位
 
 Manage 登记 **DAgents 各组件**（`dagents-node`、`dagents-client`、`dagents-cli`、Manage 自身等）的 **发布版本元数据**；Node 启动或周期任务 **查询是否有新版本**，由运维 **确认是否升级**（非静默强制升级）。
@@ -84,7 +86,7 @@ Manage 登记 **DAgents 各组件**（`dagents-node`、`dagents-client`、`dagen
 | GET | `/v1/releases/latest` | `?component=dagents-node&platform=linux-amd64` → `{version, published_at, release_notes_url, assets[]}` |
 | GET | `/v1/releases` | Admin 列表历史版本 |
 | POST | `/v1/releases` | Admin 登记新版本（或 CI webhook 写入） |
-| GET | `/v1/releases/check` | Node 批量检查：`?components=node,client&current=0.4.0` → `[{component, current, latest, upgrade_available}]` |
+| GET | `/v1/releases/check` | Node 批量检查：`?components=node&current=0.5.1` → `[{component, current, latest, upgrade_available}]`（Phase 2；版本以 Node 为准，无独立 client 组件版本） |
 
 **资产**：`assets[]` 指向 GitHub Release URL 或企业内网镜像地址；Manage **可不托管二进制**，只做 **索引与策略**（哪些环境允许自动提示/禁止降级）。
 

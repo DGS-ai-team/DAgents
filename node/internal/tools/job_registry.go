@@ -34,6 +34,8 @@ type backgroundJob struct {
 	bashShellType      string
 	bashOutputEncoding string
 	compressStats      *OutputCompressStats
+	// notifyOnce 保证完成/取消只回灌一次（collector、cancel、降级竞态可并发触发）。
+	notifyOnce sync.Once
 }
 
 // BackgroundJobDone 为后台任务完成时的结构化回灌载荷（由 session 转为 async_tool_result 入队）。
@@ -78,6 +80,96 @@ func (reg *backgroundJobRegistry) get(id string) (*backgroundJob, bool) {
 	return job, ok
 }
 
+func (reg *backgroundJobRegistry) countRunning(sessionID string) int {
+	if reg == nil {
+		return 0
+	}
+	sid := strings.TrimSpace(sessionID)
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+	n := 0
+	for _, job := range reg.jobs {
+		if job == nil {
+			continue
+		}
+		job.mu.Lock()
+		running := job.status == "running"
+		jobSid := job.sessionID
+		job.mu.Unlock()
+		if !running {
+			continue
+		}
+		if sid == "" || jobSid == sid {
+			n++
+		}
+	}
+	return n
+}
+
+func (reg *backgroundJobRegistry) runningCallIDs(sessionID string) []string {
+	if reg == nil {
+		return nil
+	}
+	sid := strings.TrimSpace(sessionID)
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+	out := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, job := range reg.jobs {
+		if job == nil {
+			continue
+		}
+		job.mu.Lock()
+		running := job.status == "running"
+		jobSid := job.sessionID
+		callID := strings.TrimSpace(job.toolCallID)
+		job.mu.Unlock()
+		if !running || callID == "" {
+			continue
+		}
+		if sid != "" && jobSid != "" && jobSid != sid {
+			continue
+		}
+		if _, ok := seen[callID]; ok {
+			continue
+		}
+		seen[callID] = struct{}{}
+		out = append(out, callID)
+	}
+	return out
+}
+
+func (reg *backgroundJobRegistry) findRunningByToolCallID(sessionID, toolCallID string) (*backgroundJob, bool) {
+	if reg == nil {
+		return nil, false
+	}
+	sid := strings.TrimSpace(sessionID)
+	callID := strings.TrimSpace(toolCallID)
+	if callID == "" {
+		return nil, false
+	}
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+	for _, job := range reg.jobs {
+		if job == nil {
+			continue
+		}
+		job.mu.Lock()
+		running := job.status == "running"
+		jobSid := job.sessionID
+		jobCall := strings.TrimSpace(job.toolCallID)
+		job.mu.Unlock()
+		if !running || jobCall != callID {
+			continue
+		}
+		if sid != "" && jobSid != "" && jobSid != sid {
+			continue
+		}
+		return job, true
+	}
+	return nil, false
+}
+
 func newBackgroundJobRegistry() *backgroundJobRegistry {
 	return &backgroundJobRegistry{jobs: make(map[string]*backgroundJob)}
 }
@@ -89,6 +181,20 @@ func (reg *backgroundJobRegistry) notifyDone(sessionID string, done BackgroundJo
 	if fn != nil && sessionID != "" {
 		fn(sessionID, done)
 	}
+}
+
+// notifyJobDone 幂等回灌后台任务完成/取消结果。
+func (reg *backgroundJobRegistry) notifyJobDone(job *backgroundJob) {
+	if reg == nil || job == nil {
+		return
+	}
+	job.notifyOnce.Do(func() {
+		done := jobDonePayload(job)
+		job.mu.Lock()
+		sessionID := strings.TrimSpace(job.sessionID)
+		job.mu.Unlock()
+		reg.notifyDone(sessionID, done)
+	})
 }
 
 // jobDonePayloadLocked 在已持有 job.mu 时读取完成载荷。
@@ -133,12 +239,16 @@ func newJobID() string {
 }
 
 // StartBackground 在后台 goroutine 执行工具，并立即返回受理 ACK。
+// 未启用工具在受理前 soft reject，避免假后台任务。
 func (r *Registry) StartBackground(
 	parent context.Context,
 	sessionID, toolName, toolCallID, cleanedArgs string,
 ) (string, error) {
 	if r.bgJobs == nil {
 		return "", fmt.Errorf("background jobs not initialized")
+	}
+	if err := r.rejectIfDisabled(parent, toolName); err != nil {
+		return "", err
 	}
 	jobCtx, cancel := context.WithCancel(WithBackgroundExecution(WithToolCallID(WithSession(parent, sessionID), toolCallID)))
 	job := &backgroundJob{
@@ -180,10 +290,8 @@ func (r *Registry) StartBackground(
 			job.compressStats = outputCompressStatsFromSSEFields(stats)
 		}
 		job.finishedAt = nowMs()
-		donePayload := jobDonePayloadLocked(job)
-		session := job.sessionID
 		job.mu.Unlock()
-		r.bgJobs.notifyDone(session, donePayload)
+		r.bgJobs.notifyJobDone(job)
 	}()
 
 	return formatBackgroundJobAck(job), nil
@@ -204,17 +312,41 @@ func formatBackgroundJobAck(job *backgroundJob) string {
 	}, "\n")
 }
 
-func formatShellRunningResult(job *backgroundJob, params shellRunParams) string {
+func formatShellRunningResult(job *backgroundJob, params shellRunParams, reason string) string {
 	st := params.shellType
 	if job.bashShellType != "" {
 		st = shellType(job.bashShellType)
 	}
+	reasonLine := "命令超过同步等待时间，已自动降级为后台任务。"
+	if reason == "user" {
+		reasonLine = "已按用户请求转为后台任务。"
+	}
 	return strings.Join([]string{
 		fmt.Sprintf("[BASH_RESULT] status=RUNNING job_id=%s", job.id),
 		fmt.Sprintf("shell_type=%s", st),
-		"命令超过同步等待时间，已自动降级为后台任务。",
+		reasonLine,
 		backgroundJobAutoResultHint,
 		backgroundJobOptionalMgmtHint,
+	}, "\n")
+}
+
+func formatShellCancelledResult(job *backgroundJob, params shellRunParams) string {
+	st := params.shellType
+	if job != nil && job.bashShellType != "" {
+		st = shellType(job.bashShellType)
+	}
+	return strings.Join([]string{
+		"[BASH_RESULT] status=CANCELLED",
+		fmt.Sprintf("shell_type=%s", st),
+		"命令已被用户终止。",
+	}, "\n")
+}
+
+func formatShellHardTimeoutResult(timeoutSec int) string {
+	return strings.Join([]string{
+		"[BASH_RESULT] status=ERROR",
+		fmt.Sprintf("ERROR: 命令超过硬上限 %d 秒仍未结束，已终止（未转为后台）。", timeoutSec),
+		"若需超时后自动转后台，请显式传入 timeout_seconds；也可在执行中通过 UI「转后台」。",
 	}, "\n")
 }
 

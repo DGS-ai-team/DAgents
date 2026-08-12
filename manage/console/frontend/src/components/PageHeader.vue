@@ -1,40 +1,26 @@
 <script setup>
 defineProps({
-  breadcrumb: { type: String, required: true },
   title: { type: String, required: true },
-  subtitle: { type: String, required: true },
-  lastRefreshed: { type: String, default: "—" },
-  refreshing: { type: Boolean, default: false },
+  trail: { type: String, default: "" },
+  subtitle: { type: String, default: "" },
 });
-
-const emit = defineEmits(["refresh"]);
 </script>
 
 <template>
   <header class="page-header">
     <div class="page-header-text">
-      <p class="breadcrumb">Manage / <span>{{ breadcrumb }}</span></p>
-      <h1>{{ title }}</h1>
-      <p class="page-subtitle">{{ subtitle }}</p>
+      <h1>
+        <template v-if="trail">
+          <span class="page-header-crumb">{{ title }}</span>
+          <span class="page-header-sep" aria-hidden="true">›</span>
+          <span>{{ trail }}</span>
+        </template>
+        <template v-else>{{ title }}</template>
+      </h1>
+      <p v-if="subtitle" class="page-subtitle">{{ subtitle }}</p>
     </div>
-    <div class="page-header-actions">
-      <span class="last-refreshed" aria-live="polite">{{ lastRefreshed }}</span>
-      <button
-        type="button"
-        class="btn btn-primary"
-        :class="{ 'is-loading': refreshing }"
-        :disabled="refreshing"
-        @click="emit('refresh')"
-      >
-        <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path
-            fill-rule="evenodd"
-            d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-            clip-rule="evenodd"
-          />
-        </svg>
-        刷新
-      </button>
+    <div v-if="$slots.actions" class="page-header-actions">
+      <slot name="actions" />
     </div>
   </header>
 </template>

@@ -11,14 +11,13 @@ import (
 )
 
 func (o *Orchestrator) continueAfterUserInformationResume(
-	ctx context.Context,
+	_ context.Context,
 	sessionID string,
 	history *[]llm.Message,
 	resumeValue map[string]any,
 	pending *PendingHITL,
 	toolLoopCount int,
 ) StepOutcome {
-	pending.Normalize()
 	resumeToolCallID := strings.TrimSpace(fmt.Sprint(resumeValue["tool_call_id"]))
 	var targetIdx = -1
 	if resumeToolCallID != "" {
@@ -52,7 +51,7 @@ func (o *Orchestrator) continueAfterUserInformationResume(
 		content = err.Error()
 	}
 	o.publishToolResult(sessionID, tc, content, false, nil)
-	o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
+	o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, content))
 
 	remaining := pending.withoutIndex(targetIdx)
 	if remaining == nil {
@@ -69,7 +68,6 @@ func (o *Orchestrator) continueAfterApprovalResume(
 	pending *PendingHITL,
 	toolLoopCount int,
 ) StepOutcome {
-	pending.Normalize()
 	approvalItems := pending.approvalItems()
 	if len(approvalItems) == 0 {
 		return StepOutcome{LoopCount: toolLoopCount, Err: fmt.Errorf("no pending approval tool calls")}
@@ -86,7 +84,7 @@ func (o *Orchestrator) continueAfterApprovalResume(
 			tc := item.ToolCall
 			msg := "rejected: " + err.Error()
 			o.publishToolResult(sessionID, tc, msg, true, nil)
-			o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+			o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 		}
 	} else {
 		var approved []llm.ToolCall
@@ -97,7 +95,7 @@ func (o *Orchestrator) continueAfterApprovalResume(
 			} else {
 				msg := "rejected: user_rejected"
 				o.publishToolResult(sessionID, tc, msg, true, nil)
-				o.appendHistory(sessionID, history, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
+				o.appendHistory(sessionID, history, llm.ToolResultMessage(tc.ID, tc.Function.Name, msg))
 			}
 		}
 		if err := o.executeAutoBatch(ctx, sessionID, history, approved, &plan); err != nil {
@@ -105,7 +103,7 @@ func (o *Orchestrator) continueAfterApprovalResume(
 		}
 	}
 
-	remainingItems := pending.userInformationItems()
+	remainingItems := pending.nonApprovalItems()
 	if len(remainingItems) == 0 {
 		return StepOutcome{LoopCount: toolLoopCount, ScheduleToolResult: true}
 	}

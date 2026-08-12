@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/externaltools"
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
@@ -50,6 +51,8 @@ type SystemPromptInput struct {
 	Catalog   *skills.Catalog
 	Loaded    []skills.LoadedSkill
 	PromptCtx *promptcontext.Reader
+	// IncludeHistoryJournal 为 true 时在工作区说明中追加 history/ JSONL 审计目录约定。
+	IncludeHistoryJournal bool
 }
 
 // ChildSystemPromptInput 为 BuildChildSystemPrompt 所需上下文。
@@ -82,7 +85,11 @@ func BuildSystemPrompt(in SystemPromptInput) string {
 	})
 
 	b.WriteString("\n\n## 工作区目录\n\n")
-	b.WriteString(formatWorkspaceSubdirsSection())
+	b.WriteString(formatWorkspaceSubdirsSection(in.IncludeHistoryJournal))
+
+	if section := externaltools.NewCatalog(in.FSRoot).RenderPromptSection(); section != "" {
+		b.WriteString(section)
+	}
 
 	if in.PromptCtx != nil {
 		b.WriteString(in.PromptCtx.BuildStableContextSections())
@@ -122,7 +129,7 @@ func BuildChildSystemPrompt(in ChildSystemPromptInput) string {
 	})
 
 	b.WriteString("\n\n## 工作区目录\n\n")
-	b.WriteString(formatWorkspaceSubdirsSection())
+	b.WriteString(formatWorkspaceSubdirsSection(false))
 
 	return strings.TrimSpace(b.String())
 }
@@ -168,18 +175,26 @@ func appendEnvironmentSection(b *strings.Builder, in environmentSectionInput) {
 	}
 }
 
-func formatWorkspaceSubdirsSection() string {
-	return strings.Join([]string{
+func formatWorkspaceSubdirsSection(includeHistoryJournal bool) string {
+	lines := []string{
 		"所有工具的 path、directory、cwd 等路径参数：相对路径均基于工作区根目录（`.` 表示根）。" +
 			"操作工作区内资源时请使用相对路径；如需访问工作区外请使用绝对路径。",
 		"",
 		"以下为内置目录。",
 		"",
 		"- `data/`：临时工作区（输出、中间产物，可清理）",
-		"- `memory/`：持久化（会话库 sessions.db、可选长期记忆 long_term.md）",
-		"- `skills/`、`scripts/`：技能与脚本目录",
-		"- `prompt_context/`：侧车 Markdown 上下文（soul / user / custom）",
-	}, "\n")
+		"- `memory/`：持久化（会话库 sessions.db；长期记忆由 remember 工具写入数据库，不在此目录编辑）",
+		"- `skills/`：Agent 技能（`SKILL.md`）",
+		"- `externaltools/`：外置 CLI / 编译二进制 / shell 脚本（索引见 `externaltools_menu.md`；安装后多在 `PATH` 中）",
+	}
+	if includeHistoryJournal {
+		lines = append(lines,
+			"- `history/`：原始对话 JSONL 审计（按自然日分子目录 `history/YYYYMMDD/<session_id>.jsonl`；"+
+				"每行一条 JSON，含 `recorded_at` 与 `message`）。"+
+				"非 LLM 上下文的一部分；需复盘或检索历史 utterance 时可用 `grep_file`,`read_file`等工具 分页读取对应文件。",
+		)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // RunTurnPhase 将 Node turn 状态映射为 Python Backend 兼容的 run_turn_phase 名。

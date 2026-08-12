@@ -17,7 +17,7 @@ describe("parseTemporaryAgentToolResult", () => {
     const out = parseTemporaryAgentToolResult(
       "create_temporary_agent",
       JSON.stringify({
-        child_session_id: "child-session-id-1234567890",
+        child_agent_id: "child-session-id-1234567890",
         purpose: "summarize",
         max_turns: 3,
       }),
@@ -32,8 +32,8 @@ describe("parseTemporaryAgentToolResult", () => {
       "wait_temporary_agents",
       JSON.stringify({
         results: [
-          { child_session_id: "a", status: "completed", summary: "done" },
-          { child_session_id: "b", status: "failed", error: "timeout" },
+          { child_agent_id: "a", status: "completed", summary: "done" },
+          { child_agent_id: "b", status: "failed", error: "timeout" },
         ],
       }),
     );
@@ -51,7 +51,7 @@ describe("parseTemporaryAgentToolResult", () => {
   it("formats cancel_temporary_agent", () => {
     const out = parseTemporaryAgentToolResult(
       "cancel_temporary_agent",
-      JSON.stringify({ child_session_id: "abc", status: "cancelled" }),
+      JSON.stringify({ child_agent_id: "abc", status: "cancelled" }),
     );
     expect(out.summary).toContain("已取消临时 Agent");
     expect(out.summary).toContain("cancelled");

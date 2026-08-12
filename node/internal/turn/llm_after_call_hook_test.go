@@ -33,7 +33,7 @@ func (llmAfterCallRedactHook) Name() string { return "test.llm.redact" }
 
 func (llmAfterCallRedactHook) Phases() []hooks.Phase { return []hooks.Phase{hooks.PhaseLLMAfterCall} }
 
-func (llmAfterCallRedactHook) Run(_ context.Context, hc *hooks.Context) (hooks.Result, error) {
+func (llmAfterCallRedactHook) Run(_ context.Context, hc *hooks.Context, _ hooks.Host) (hooks.Result, error) {
 	content := ""
 	if hc.LLMAfterCall != nil {
 		content = hc.LLMAfterCall.AssistantContent

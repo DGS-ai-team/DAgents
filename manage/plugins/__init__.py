@@ -1,0 +1,1 @@
+"""Hook plugin package registry."""

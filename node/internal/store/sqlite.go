@@ -1,4 +1,4 @@
-// Package store 提供 session 对话历史的 SQLite 持久化（N5）。
+// Package store 提供 Agent 对话历史的 SQLite 持久化（N5）。
 package store
 
 import (
@@ -17,10 +17,11 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 )
 
-// Record 为 session 元数据与消息快照。
+// Record 为 Agent 运行时元数据与消息快照。
+// AgentID 为对话/Agent 实例 id（主键）；NodeID 为所属 Node 身份（历史列曾误名 agent_id）。
 type Record struct {
-	SessionID        string
 	AgentID          string
+	NodeID           string
 	Messages         []llm.Message
 	LoadedSkills     []skills.LoadedSkill
 	RuntimeState     RuntimeState
@@ -31,14 +32,14 @@ type Record struct {
 
 // Summary 为列表项摘要。
 type Summary struct {
-	SessionID        string
 	AgentID          string
+	NodeID           string
 	MessageCount     int
 	FirstUserMessage string
 	UpdatedAt        time.Time
 }
 
-// SQLiteStore 将会话消息存为单行 JSON 数组。
+// SQLiteStore 将 Agent 消息存为单行 JSON 数组。
 type SQLiteStore struct {
 	db *sql.DB
 }
@@ -75,27 +76,74 @@ func (s *SQLiteStore) Close() error {
 
 func (s *SQLiteStore) initSchema() error {
 	_, err := s.db.Exec(`
-CREATE TABLE IF NOT EXISTS sessions (
-  session_id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS agent_runtimes (
+  agent_id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL DEFAULT '',
   messages_json TEXT NOT NULL DEFAULT '[]',
   first_user_message TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  loaded_skills_json TEXT NOT NULL DEFAULT '[]',
+  runtime_state_json TEXT NOT NULL DEFAULT '{}'
 );
 `)
 	if err != nil {
 		return err
 	}
+	// 兼容极早版本仅建了空表后缺列的情况。
+	_, _ = s.db.Exec(`ALTER TABLE agent_runtimes ADD COLUMN loaded_skills_json TEXT NOT NULL DEFAULT '[]'`)
+	_, _ = s.db.Exec(`ALTER TABLE agent_runtimes ADD COLUMN runtime_state_json TEXT NOT NULL DEFAULT '{}'`)
+	_, _ = s.db.Exec(`ALTER TABLE agent_runtimes ADD COLUMN node_id TEXT NOT NULL DEFAULT ''`)
+	return s.migrateLegacySessionsTable()
+}
+
+func (s *SQLiteStore) tableExists(name string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// migrateLegacySessionsTable 将旧表 sessions(session_id, agent_id=NodeID) 迁到 agent_runtimes。
+func (s *SQLiteStore) migrateLegacySessionsTable() error {
+	exists, err := s.tableExists("sessions")
+	if err != nil || !exists {
+		return err
+	}
+	// 旧库可能缺列；先补齐再拷贝。
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN loaded_skills_json TEXT NOT NULL DEFAULT '[]'`)
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN runtime_state_json TEXT NOT NULL DEFAULT '{}'`)
+	_, err = s.db.Exec(`
+INSERT OR IGNORE INTO agent_runtimes(
+  agent_id, node_id, messages_json, loaded_skills_json, runtime_state_json,
+  first_user_message, created_at, updated_at
+)
+SELECT
+  session_id,
+  COALESCE(agent_id, ''),
+  COALESCE(messages_json, '[]'),
+  COALESCE(loaded_skills_json, '[]'),
+  COALESCE(runtime_state_json, '{}'),
+  COALESCE(first_user_message, ''),
+  created_at,
+  updated_at
+FROM sessions
+`)
+	if err != nil {
+		return fmt.Errorf("migrate sessions→agent_runtimes: %w", err)
+	}
+	if _, err := s.db.Exec(`DROP TABLE sessions`); err != nil {
+		return fmt.Errorf("drop legacy sessions: %w", err)
+	}
 	return nil
 }
 
-// Save 写入或更新 session 全量消息快照。
+// Save 写入或更新 Agent 全量消息快照。
 func (s *SQLiteStore) Save(ctx context.Context, rec Record) error {
-	if strings.TrimSpace(rec.SessionID) == "" {
-		return fmt.Errorf("session_id is required")
+	if strings.TrimSpace(rec.AgentID) == "" {
+		return fmt.Errorf("agent_id is required")
 	}
 	raw, err := json.Marshal(rec.Messages)
 	if err != nil {
@@ -123,33 +171,33 @@ func (s *SQLiteStore) Save(ctx context.Context, rec Record) error {
 		first = firstUserMessage(rec.Messages)
 	}
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO sessions(session_id, agent_id, messages_json, loaded_skills_json, runtime_state_json, first_user_message, created_at, updated_at)
+INSERT INTO agent_runtimes(agent_id, node_id, messages_json, loaded_skills_json, runtime_state_json, first_user_message, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(session_id) DO UPDATE SET
-  agent_id=excluded.agent_id,
+ON CONFLICT(agent_id) DO UPDATE SET
+  node_id=excluded.node_id,
   messages_json=excluded.messages_json,
   loaded_skills_json=excluded.loaded_skills_json,
   runtime_state_json=excluded.runtime_state_json,
-  first_user_message=CASE WHEN excluded.first_user_message != '' THEN excluded.first_user_message ELSE sessions.first_user_message END,
+  first_user_message=CASE WHEN excluded.first_user_message != '' THEN excluded.first_user_message ELSE agent_runtimes.first_user_message END,
   updated_at=excluded.updated_at
-`, rec.SessionID, rec.AgentID, string(raw), string(skillsRaw), string(runtimeRaw), first, created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano))
+`, rec.AgentID, rec.NodeID, string(raw), string(skillsRaw), string(runtimeRaw), first, created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano))
 	return err
 }
 
-// Load 读取 session；不存在时返回 nil, nil。
-func (s *SQLiteStore) Load(ctx context.Context, sessionID string) (*Record, error) {
-	sid := strings.TrimSpace(sessionID)
-	if sid == "" {
-		return nil, fmt.Errorf("session_id is required")
+// Load 读取 Agent 运行时；不存在时返回 nil, nil。
+func (s *SQLiteStore) Load(ctx context.Context, agentID string) (*Record, error) {
+	id := strings.TrimSpace(agentID)
+	if id == "" {
+		return nil, fmt.Errorf("agent_id is required")
 	}
 	row := s.db.QueryRowContext(ctx, `
-SELECT session_id, agent_id, messages_json, COALESCE(loaded_skills_json, '[]'), COALESCE(runtime_state_json, '{}'), first_user_message, created_at, updated_at
-FROM sessions WHERE session_id = ?
-`, sid)
+SELECT agent_id, node_id, messages_json, COALESCE(loaded_skills_json, '[]'), COALESCE(runtime_state_json, '{}'), first_user_message, created_at, updated_at
+FROM agent_runtimes WHERE agent_id = ?
+`, id)
 	var rec Record
 	var raw, skillsRaw, runtimeRaw string
 	var created, updated string
-	if err := row.Scan(&rec.SessionID, &rec.AgentID, &raw, &skillsRaw, &runtimeRaw, &rec.FirstUserMessage, &created, &updated); err != nil {
+	if err := row.Scan(&rec.AgentID, &rec.NodeID, &raw, &skillsRaw, &runtimeRaw, &rec.FirstUserMessage, &created, &updated); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -168,11 +216,11 @@ FROM sessions WHERE session_id = ?
 	return &rec, nil
 }
 
-// List 返回全部持久化 session 摘要（按 updated_at 降序）。
+// List 返回全部持久化 Agent 摘要（按 updated_at 降序）。
 func (s *SQLiteStore) List(ctx context.Context) ([]Summary, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT session_id, agent_id, messages_json, first_user_message, updated_at
-FROM sessions ORDER BY updated_at DESC
+SELECT agent_id, node_id, messages_json, first_user_message, updated_at
+FROM agent_runtimes ORDER BY updated_at DESC
 `)
 	if err != nil {
 		return nil, err
@@ -182,7 +230,7 @@ FROM sessions ORDER BY updated_at DESC
 	for rows.Next() {
 		var sum Summary
 		var raw, updated string
-		if err := rows.Scan(&sum.SessionID, &sum.AgentID, &raw, &sum.FirstUserMessage, &updated); err != nil {
+		if err := rows.Scan(&sum.AgentID, &sum.NodeID, &raw, &sum.FirstUserMessage, &updated); err != nil {
 			return nil, err
 		}
 		var msgs []llm.Message
@@ -194,9 +242,9 @@ FROM sessions ORDER BY updated_at DESC
 	return out, rows.Err()
 }
 
-// Delete 删除 session 行；返回是否删除成功。
-func (s *SQLiteStore) Delete(ctx context.Context, sessionID string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE session_id = ?`, strings.TrimSpace(sessionID))
+// Delete 删除 Agent 运行时行；返回是否删除成功。
+func (s *SQLiteStore) Delete(ctx context.Context, agentID string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM agent_runtimes WHERE agent_id = ?`, strings.TrimSpace(agentID))
 	if err != nil {
 		return false, err
 	}
@@ -204,12 +252,26 @@ func (s *SQLiteStore) Delete(ctx context.Context, sessionID string) (bool, error
 	return n > 0, nil
 }
 
-// ClearMessages 清空对话历史但保留 session 行。
-func (s *SQLiteStore) ClearMessages(ctx context.Context, sessionID string) error {
+// ClearMessages 清空对话历史但保留 Agent 行。
+func (s *SQLiteStore) ClearMessages(ctx context.Context, agentID string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := s.db.ExecContext(ctx, `
-UPDATE sessions SET messages_json = '[]', runtime_state_json = '{}', loaded_skills_json = '[]', updated_at = ? WHERE session_id = ?
-`, now, strings.TrimSpace(sessionID))
+UPDATE agent_runtimes SET messages_json = '[]', runtime_state_json = '{}', loaded_skills_json = '[]', updated_at = ? WHERE agent_id = ?
+`, now, strings.TrimSpace(agentID))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// BackdateUpdatedAt 显式设置 Agent updated_at（测试与 idle 自动压缩扫描）。
+func (s *SQLiteStore) BackdateUpdatedAt(ctx context.Context, agentID string, at time.Time) error {
+	now := at.UTC().Format(time.RFC3339Nano)
+	res, err := s.db.ExecContext(ctx, `UPDATE agent_runtimes SET updated_at = ? WHERE agent_id = ?`, now, strings.TrimSpace(agentID))
 	if err != nil {
 		return err
 	}
@@ -222,8 +284,14 @@ UPDATE sessions SET messages_json = '[]', runtime_state_json = '{}', loaded_skil
 
 func firstUserMessage(messages []llm.Message) string {
 	for _, m := range messages {
-		if m.Role == "user" && strings.TrimSpace(m.Content) != "" {
-			return m.Content
+		if m.Role != "user" {
+			continue
+		}
+		if summary := strings.TrimSpace(llm.MessageTextSummary(m)); summary != "" {
+			return summary
+		}
+		if llm.MessageHasImages(m) {
+			return "[image]"
 		}
 	}
 	return ""

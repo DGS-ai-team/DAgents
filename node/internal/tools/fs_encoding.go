@@ -3,7 +3,7 @@ package tools
 import (
 	"bytes"
 	"fmt"
-	"runtime"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -16,15 +16,12 @@ func fileEncodingToolProperty() map[string]any {
 	return map[string]any{
 		"type":        "string",
 		"enum":        []string{"utf-8", "gbk", "gb18030"},
-		"description": "可选；磁盘文件字节编码。省略时用 config.yaml tools.file_encoding 或平台默认（Windows 常见 gbk，其它 utf-8）。模型侧 content 始终为 UTF-8。",
+		"description": "可选；磁盘文件字节编码。省略时用 config.yaml tools.file_encoding 或默认 utf-8。模型侧 content 始终为 UTF-8。",
 	}
 }
 
-// defaultFileEncoding 为未配置时的平台默认文件编码。
+// defaultFileEncoding 为未配置时的默认文件编码（全平台 utf-8）。
 func defaultFileEncoding() string {
-	if runtime.GOOS == "windows" {
-		return "gbk"
-	}
 	return defaultOutputEnc
 }
 
@@ -62,6 +59,43 @@ func decodeFileContent(data []byte, enc string) (string, error) {
 }
 
 func encodeFileContent(text, enc string) ([]byte, error) {
+	return encodeFileContentWithBOM(text, enc, false)
+}
+
+// encodeFileContentWithBOM 编码文本；utf8BOM 为 true 且 enc=utf-8 时在字节前写入 EF BB BF。
+func encodeFileContentWithBOM(text, enc string, utf8BOM bool) ([]byte, error) {
+	out, err := encodeFileContentRaw(text, enc)
+	if err != nil {
+		return nil, err
+	}
+	if utf8BOM && normalizeOutputEncoding(enc) == "utf-8" {
+		return append(append([]byte(nil), utf8BOMPrefix...), out...), nil
+	}
+	return out, nil
+}
+
+var utf8BOMPrefix = []byte{0xEF, 0xBB, 0xBF}
+
+// fileNeedsUTF8BOM 为 Windows 脚本扩展名；PowerShell 5.1 / cmd 解析 UTF-8 源文件须 BOM。
+func fileNeedsUTF8BOM(relPath string) bool {
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(relPath)))
+	switch ext {
+	case ".ps1", ".cmd":
+		return true
+	default:
+		return false
+	}
+}
+
+// shouldWriteUTF8BOM 决定是否以 UTF-8 BOM 写盘（仅 enc=utf-8 时生效）。
+func shouldWriteUTF8BOM(relPath, enc string, hadBOM bool) bool {
+	if normalizeOutputEncoding(enc) != "utf-8" {
+		return false
+	}
+	return hadBOM || fileNeedsUTF8BOM(relPath)
+}
+
+func encodeFileContentRaw(text, enc string) ([]byte, error) {
 	enc = normalizeOutputEncoding(enc)
 	if enc == "" {
 		enc = defaultFileEncoding()

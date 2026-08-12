@@ -18,12 +18,36 @@ type sessionContextKey struct{}
 
 type triggerSessionTargetContextKey struct{}
 
+type enabledBypassContextKey struct{}
+
+// WithEnabledBypass 跳过 Registry.enabledOnly 检查（子 Agent 在自身 allowlist 校验后使用）。
+func WithEnabledBypass(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, enabledBypassContextKey{}, true)
+}
+
+// EnabledBypassFromContext 是否跳过 enabledOnly 门禁。
+func EnabledBypassFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(enabledBypassContextKey{}).(bool)
+	return v
+}
+
 // WithSession 将 session_id 写入 context，供后台任务完成回调使用。
 func WithSession(ctx context.Context, sessionID string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, sessionContextKey{}, strings.TrimSpace(sessionID))
+}
+
+// SessionIDFromContext 读取 context 中的 session_id。
+func SessionIDFromContext(ctx context.Context) string {
+	return sessionIDFromContext(ctx)
 }
 
 func sessionIDFromContext(ctx context.Context) string {

@@ -42,8 +42,8 @@ func (h *DuplicateToolCallHook) Name() string { return "builtin.duplicate_tool_c
 func (h *DuplicateToolCallHook) Phases() []Phase { return []Phase{PhaseToolBeforeEach} }
 
 // Run 实现通用 Hook，委托 RunToolBeforeEach。
-func (h *DuplicateToolCallHook) Run(ctx context.Context, hc *Context) (Result, error) {
-	return runToolBeforeEachHook(ctx, hc, h.Name(), h.RunToolBeforeEach)
+func (h *DuplicateToolCallHook) Run(ctx context.Context, hc *Context, host Host) (Result, error) {
+	return runToolBeforeEachHook(ctx, hc, host, h.Name(), h.RunToolBeforeEach)
 }
 
 // RunToolBeforeEach 在 rule+auto 时比对 fingerprint，命中则改为 duplicate 审批。

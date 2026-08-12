@@ -1,0 +1,84 @@
+name: Tauri Shell (Windows)
+
+# 构建 desktop/tray-tauri → dist/dagents-shell.exe（安装包唯一 Shell）。
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cargo-check-linux:
+    name: cargo check (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux Tauri deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/tray-tauri/src-tauri -> target
+
+      - name: cargo test
+        working-directory: desktop/tray-tauri/src-tauri
+        run: cargo test --locked
+
+  build-windows:
+    name: Build dagents-shell (windows-amd64)
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/tray-tauri/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/tray-tauri/src-tauri -> target
+
+      - name: Build Tauri shell
+        shell: bash
+        run: |
+          chmod +x scripts/ci/build_dagents_shell_tauri.sh
+          OUT_DIR="${GITHUB_WORKSPACE}/dist" bash scripts/ci/build_dagents_shell_tauri.sh
+          test -f dist/dagents-shell.exe
+          test -f dist/dagents-shell-tauri.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dagents-shell-tauri-windows-amd64
+          path: |
+            dist/dagents-shell.exe
+            dist/dagents-shell-tauri.exe
+          if-no-files-found: error

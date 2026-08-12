@@ -1,0 +1,24 @@
+{
+  "fixture_schema": "workgroup-d05-fixture/v1",
+  "compare": "exact_json_unless_noted",
+  "test": "open_tool_call_buffers_timeline",
+  "given": {
+    "actor_id": "mb_01h00000000000000000000002",
+    "open_tool_calls": [
+      "call_1"
+    ],
+    "incoming_timeline": {
+      "type": "human_message",
+      "seq": 50,
+      "protocol_name": "human_hu_01h00000000000000000000003",
+      "content_text": "插一句"
+    }
+  },
+  "when": {
+    "op": "project_while_tools_open"
+  },
+  "then": {
+    "inject_into_llm_context": false,
+    "buffered": true
+  }
+}

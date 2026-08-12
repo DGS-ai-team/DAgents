@@ -28,7 +28,6 @@ type MessageAdapter interface {
 	// MarshalChatRequestMessages 序列化出站 messages（已含 system）。
 	// ok=false 时由 OpenAIClient 使用 []Message 默认 JSON 编码；ok=true 时使用 payloads。
 	MarshalChatRequestMessages(messages []Message) (payloads []map[string]any, ok bool, err error)
-	RequestExtra() map[string]any
 }
 
 // NewMessageAdapter 根据 provider 字符串构造适配器；未知值回退 openai。

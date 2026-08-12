@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
 
 // Priority 为入队优先级标签。
@@ -25,6 +27,7 @@ const (
 type Envelope struct {
 	RequestType              string
 	Content                  string
+	ContentParts             []llm.ContentPart
 	UserName                 string // request_type=message 时写入 llm.Message.Name；空串由 runtime 规范为 human
 	ResumeValue              map[string]any
 	TriggerID                string // 非空表示 trigger fire 投递；Apply 成功后清除 pending 标记
@@ -132,6 +135,13 @@ func (q *MessageQueue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.items)
+}
+
+// TotalEnqueued 返回累计入队次数（含已被 consumer 取走的条目；测试断言「只入队一次」时用）。
+func (q *MessageQueue) TotalEnqueued() uint64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.seq
 }
 
 func priorityValue(p Priority) int {

@@ -28,7 +28,6 @@ export function computeStats(agents) {
     online: list.filter((a) => a.status === "online").length,
     offline: list.filter((a) => a.status === "offline").length,
     total: list.length,
-    peers: list.filter((a) => a.expose_to_peers && a.status === "online").length,
   };
 }
 
@@ -59,14 +58,11 @@ export function riskPillClass(level) {
   return "pill-risk-medium";
 }
 
-export function sortSessions(sessions) {
-  return [...(sessions || [])].sort((a, b) => {
-    if (Boolean(b.active) !== Boolean(a.active)) return Number(b.active) - Number(a.active);
-    if (Boolean(b.has_active_turn) !== Boolean(a.has_active_turn)) {
-      return Number(b.has_active_turn) - Number(a.has_active_turn);
-    }
-    return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
-  });
+export function riskLabel(level) {
+  if (level === "high") return "高";
+  if (level === "medium") return "中";
+  if (level === "low") return "低";
+  return level || "—";
 }
 
 export function touchLastRefreshedLabel() {
@@ -75,12 +71,40 @@ export function touchLastRefreshedLabel() {
 }
 
 export const VIEW_META = {
-  registry: {
-    title: "Agent 目录",
-    subtitle: "已注册 Agent Node 目录与 discovery 分组",
+  home: {
+    title: "首页",
+    subtitle: "运行概览与模块入口",
   },
-  inbox: {
-    title: "A2A Inbox",
-    subtitle: "A2A Task 只读观测（不会 deliver）",
+  workgroup: {
+    title: "工作组",
+    subtitle: "创建与管理协作组及配置",
+  },
+  chat: {
+    title: "对话",
+    subtitle: "与工作组 Supervisor 对话",
+  },
+  templates: {
+    title: "Agent 模板",
+    subtitle: "可复用的 Agent 蓝图；工作组新增成员时可快速选用",
+  },
+  marketplace: {
+    title: "能力市场",
+    subtitle: "浏览、上传与发布 Node 扩展能力包",
+  },
+  nodes: {
+    title: "Node 列表",
+    subtitle: "已注册 Node、在线状态与发现组",
+  },
+  permissions: {
+    title: "发现组",
+    subtitle: "创建组并关联 Node，控制登录后的可见范围",
+  },
+  settings: {
+    title: "配置",
+    subtitle: "管理台共享的 LLM、版本发布与案例库",
+  },
+  cases: {
+    title: "案例库",
+    subtitle: "演示会话 JSONL、关联 Skills / Plugins / External Tools",
   },
 };

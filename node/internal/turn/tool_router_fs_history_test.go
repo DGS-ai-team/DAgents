@@ -31,6 +31,10 @@ func (s stubReadFileExecutor) StartBackground(context.Context, string, string, s
 }
 
 func (s stubReadFileExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
+func (s stubReadFileExecutor) TakeToolResultMediaForCall(string) map[string]any    { return nil }
+func (s stubReadFileExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
+	return nil
+}
 
 func TestExecuteTool_readFileHistorySpillsButSSEFull(t *testing.T) {
 	root := t.TempDir()
@@ -173,13 +177,13 @@ func TestExecuteTool_globFilesHistorySpillsButSSEFull(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_agentInvokeHistorySpillsButSSEFull(t *testing.T) {
+func TestExecuteTool_bashRunHistorySpillsButSSEFull(t *testing.T) {
 	root := t.TempDir()
 	hub := stream.NewHub(8, logx.Discard())
 	long := strings.Repeat("a", 50000)
 	orch := NewOrchestrator(
 		"a1", root, hub, &llm.MockClient{},
-		stubToolOutputExecutor{toolName: "agent_invoke", output: long},
+		stubToolOutputExecutor{toolName: "bash_run", output: long},
 		nil, SkillAccess{}, DefaultMaxToolLoops(), nil, nil,
 		hooks.RuntimeConfig{
 			Duplicate:  hooks.DefaultDuplicateConfig(),
@@ -188,8 +192,8 @@ func TestExecuteTool_agentInvokeHistorySpillsButSSEFull(t *testing.T) {
 		logx.Discard(),
 	)
 	tc := llm.ToolCall{
-		ID: "c-ai", Type: "function",
-		Function: llm.ToolCallFunction{Name: "agent_invoke", Arguments: `{"call_purpose":"t","content":"task"}`},
+		ID: "c-br", Type: "function",
+		Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"call_purpose":"t","command":"echo hi"}`},
 	}
 	history := []llm.Message{{Role: "assistant", ToolCalls: []llm.ToolCall{tc}}}
 	if err := orch.executeTool(context.Background(), "s-ai", &history, tc, nil); err != nil {
@@ -226,3 +230,7 @@ func (s stubToolOutputExecutor) StartBackground(context.Context, string, string,
 }
 
 func (s stubToolOutputExecutor) TakeBashCompressStatsForCall(string) map[string]any { return nil }
+func (s stubToolOutputExecutor) TakeToolResultMediaForCall(string) map[string]any    { return nil }
+func (s stubToolOutputExecutor) TakeReadImageVisionForCall(string) *tools.ReadImageVisionPayload {
+	return nil
+}
