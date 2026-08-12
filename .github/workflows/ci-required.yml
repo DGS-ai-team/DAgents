@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-required-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    uses: ./.github/workflows/go-ac.yml
+
+  python:
+    name: Python
+    uses: ./.github/workflows/pr-tests.yml
+
+  tauri:
+    name: Tauri
+    uses: ./.github/workflows/tauri-shell.yml
+
+  required:
+    name: CI / required
+    if: ${{ always() }}
+    needs:
+      - go
+      - python
+      - tauri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "go=${{ needs.go.result }}"
+          echo "python=${{ needs.python.result }}"
+          echo "tauri=${{ needs.tauri.result }}"
+          [[ "${{ needs.go.result }}" == "success" ]]
+          [[ "${{ needs.python.result }}" == "success" ]]
+          [[ "${{ needs.tauri.result }}" == "success" ]]

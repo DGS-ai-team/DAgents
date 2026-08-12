@@ -53,6 +53,38 @@ class LeaderLoopTests(unittest.TestCase):
             # 无工具路径：不应写入 tool 消息
             self.assertEqual([m.role for m in hist.messages].count("tool"), 0)
 
+    def test_first_human_message_survives_ahead_watermark(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="Stale watermark",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            store.publish_workgroup(group.workgroup_id)
+            client = MockLLMClient()
+            kernel = TurnKernel(store, chat_client=client, mock_llm=True)
+            run = kernel.start_leader_run(group.workgroup_id)
+            # Simulate a reused interrupted run whose watermark is ahead of Timeline.
+            store.update_actor_run(run.run_id, timeline_watermark_seq=99)
+
+            text = "message must reach supervisor"
+            result = kernel.handle_human_message(
+                group.workgroup_id,
+                text=text,
+                from_node_id="node-a",
+                disable_tools=True,
+            )
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            first_request = client.calls[0]["messages"]
+            self.assertEqual(
+                [m.get("content") for m in first_request if m.get("role") == "user"],
+                ["当天日期为：20260812", text],
+            )
+
     def _ready_group(self, store: WorkGroupStore) -> tuple[str, str]:
         group, _ = store.create_workgroup(
             WorkGroupCreateRequest(

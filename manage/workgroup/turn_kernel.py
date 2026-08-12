@@ -623,7 +623,10 @@ class TurnKernel:
             loop_result: dict[str, Any] | None = None
             try:
                 for ev in self.run_leader_until_idle_events(
-                    workgroup_id, run.run_id, disable_tools=item.disable_tools
+                    workgroup_id,
+                    run.run_id,
+                    disable_tools=item.disable_tools,
+                    required_human_event=event,
                 ):
                     if ev.get("event") == "loop_final":
                         loop_result = ev.get("data") or {}
@@ -815,13 +818,32 @@ class TurnKernel:
             },
         }
 
-    def run_leader_until_idle(self, workgroup_id: str, run_id: str, *, disable_tools: bool = False) -> dict[str, Any]:
-        for ev in self.run_leader_until_idle_events(workgroup_id, run_id, disable_tools=disable_tools):
+    def run_leader_until_idle(
+        self,
+        workgroup_id: str,
+        run_id: str,
+        *,
+        disable_tools: bool = False,
+        required_human_event: Any | None = None,
+    ) -> dict[str, Any]:
+        for ev in self.run_leader_until_idle_events(
+            workgroup_id,
+            run_id,
+            disable_tools=disable_tools,
+            required_human_event=required_human_event,
+        ):
             if ev.get("event") == "loop_final":
                 return ev["data"]
         raise WorkgroupError("conflict", "leader loop produced no result", http_status=500)
 
-    def run_leader_until_idle_events(self, workgroup_id: str, run_id: str, *, disable_tools: bool = False):
+    def run_leader_until_idle_events(
+        self,
+        workgroup_id: str,
+        run_id: str,
+        *,
+        disable_tools: bool = False,
+        required_human_event: Any | None = None,
+    ):
         run = self._store.get_actor_run(run_id)
         if run is None or run.workgroup_id != workgroup_id:
             raise WorkgroupError("not_found", "actor run not found", http_status=404)
@@ -869,6 +891,12 @@ class TurnKernel:
             group = self._store.require_active(workgroup_id)
             system = build_leader_system_prompt(workgroup=group)
             messages = [{"role": "system", "content": system}] + list(projected["messages"])
+            if not projected["open_tool_calls"] and steps == 0:
+                messages = self._ensure_required_human_event(
+                    messages,
+                    required_human_event,
+                    projected_timeline_seqs=projected.get("projected_timeline_seqs") or [],
+                )
             messages = self._apply_today_date_hook(run_id, messages)
             yield {"event": "status", "data": {"phase": "thinking"}}
             # 超额后禁用 tools，迫使给出结论；若模型仍发起 tool_calls 则写入 soft tool_result。
@@ -1037,6 +1065,31 @@ class TurnKernel:
             wm = max((e.seq for e in self._store.list_timeline(workgroup_id)), default=wm)
             self._store.append_run_history(run_id, tool_msgs, timeline_watermark_seq=wm)
             run = self._store.get_actor_run(run_id) or run
+
+    @staticmethod
+    def _ensure_required_human_event(
+        messages: list[dict[str, Any]],
+        event: Any | None,
+        *,
+        projected_timeline_seqs: list[int],
+    ) -> list[dict[str, Any]]:
+        """Ensure the current human turn cannot disappear between Timeline and projection.
+
+        Human messages normally arrive through ``project_actor_context``.  The current
+        event is passed explicitly as a safety net because a reused run can have a
+        watermark that is ahead of the Timeline projection after an interrupted turn.
+        """
+        if event is None or str(getattr(event, "type", "")) != "human_message":
+            return messages
+        if int(getattr(event, "seq", 0) or 0) in {
+            int(seq) for seq in projected_timeline_seqs
+        }:
+            return messages
+        content = str(getattr(event, "text", "") or "")
+        name = str(getattr(event, "protocol_name", "") or "").strip()
+        if not name:
+            name = protocol_name_for_actor(str(getattr(event, "actor_id", "") or ""))
+        return [*messages, {"role": "user", "name": name, "content": content}]
 
     def run_member_until_idle(
         self,

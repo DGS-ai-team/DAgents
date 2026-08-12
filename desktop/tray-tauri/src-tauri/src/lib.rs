@@ -174,6 +174,10 @@ pub fn run() {
                 .resizable(true)
                 .visible(false)
                 .skip_taskbar(true)
+                .icon(
+                    tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
+                        .map_err(|e| format!("加载窗口图标失败: {e}"))?,
+                )?
                 .on_navigation(move |url| is_navigation_allowed(url, &allowed_endpoint))
                 .build()?;
 
@@ -252,9 +256,9 @@ pub fn run() {
                 let tray_shared = Arc::clone(&shared);
                 let menu_shared = Arc::clone(&shared);
                 let tray_app = app.handle().clone();
-                // 与 Go Shell（desktop/tray/assets/icon.ico）同源，避免 Tauri 默认/重编码图标不一致。
+                // 使用高分辨率 PNG，避免 Windows 从小尺寸 ICO 帧放大导致托盘/标题栏模糊。
                 let icon = tauri::image::Image::from_bytes(include_bytes!(
-                    "../../../tray/assets/icon.ico"
+                    "../icons/icon.png"
                 ))
                 .map_err(|e| format!("加载托盘图标失败: {e}"))?;
 
@@ -825,9 +829,9 @@ fn start_icon_blink(shared: &Arc<Shared>, app: &AppHandle) {
 
 fn set_tray_icon(app: &AppHandle, pending: bool) {
     let bytes = if pending {
-        include_bytes!("../../../tray/assets/icon_pending.ico").as_slice()
+        include_bytes!("../icons/icon_pending.png").as_slice()
     } else {
-        include_bytes!("../../../tray/assets/icon.ico").as_slice()
+        include_bytes!("../icons/icon.png").as_slice()
     };
     let Ok(icon) = tauri::image::Image::from_bytes(bytes) else {
         return;

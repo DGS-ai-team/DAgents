@@ -2,21 +2,7 @@ name: Tauri Shell (Windows)
 
 # 构建 desktop/tray-tauri → dist/dagents-shell.exe（安装包唯一 Shell）。
 on:
-  pull_request:
-    paths:
-      - "desktop/tray-tauri/**"
-      - "scripts/ci/build_dagents_shell.sh"
-      - "scripts/ci/build_dagents_shell_tauri.sh"
-      - ".github/workflows/tauri-shell.yml"
-  push:
-    branches:
-      - dev
-      - main
-    paths:
-      - "desktop/tray-tauri/**"
-      - "scripts/ci/build_dagents_shell.sh"
-      - "scripts/ci/build_dagents_shell_tauri.sh"
-      - ".github/workflows/tauri-shell.yml"
+  workflow_call:
   workflow_dispatch:
 
 permissions:

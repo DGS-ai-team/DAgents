@@ -17,7 +17,7 @@ OUT_DIRS = (
 )
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 CANVAS_SIZE = 256
-LOGO_SCALE = 0.82
+LOGO_SCALE = 0.94
 
 
 def build_icon() -> Image.Image:
@@ -35,15 +35,25 @@ def build_icon() -> Image.Image:
 def main() -> None:
     if not BRAND.is_file():
         raise FileNotFoundError(BRAND)
+    source = Image.open(BRAND).convert("RGBA")
     icon = build_icon()
+    # PNG consumers (Tauri window/tray and the executable bundle) can use the
+    # full-resolution source directly; keep the ICO canvas padded for small
+    # Windows tray slots so its edges are not clipped.
+    png_icon = source.resize((512, 512), Image.Resampling.LANCZOS)
     sizes = [(size, size) for size in ICON_SIZES]
     for out_dir in OUT_DIRS:
         out_dir.mkdir(parents=True, exist_ok=True)
         filenames = ("icon.ico", "icon_pending.ico")
         if out_dir.name == "icons":
-            filenames += ("tray-icon.ico",)
+            filenames += ("tray-icon.ico", "icon.png", "icon_pending.png")
         for filename in filenames:
-            icon.save(out_dir / filename, format="ICO", sizes=sizes)
+            if filename.endswith(".png"):
+                # Tauri uses the PNG directly for the tray/window icon. Keep a
+                # large source so Windows does not upscale a small ICO frame.
+                png_icon.save(out_dir / filename, format="PNG")
+            else:
+                icon.save(out_dir / filename, format="ICO", sizes=sizes)
     print("wrote shared Go and Tauri Windows tray icons")
 
 
