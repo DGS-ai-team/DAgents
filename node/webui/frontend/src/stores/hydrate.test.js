@@ -1,8 +1,21 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import * as api from "../api/node.js";
 import { transcriptStore, loadTranscriptFromHydrate } from "./transcript.js";
-import { consumeStartupURL, syncStatusAfterHydrate } from "./hydrate.js";
+import {
+  consumeStartupURL,
+  hydrateAgent,
+  invalidateHydration,
+  syncStatusAfterHydrate,
+} from "./hydrate.js";
 import { agentStore, persistAgentId } from "./agent.js";
+import { clearHitl, hitlStore } from "./hitl.js";
 import { hasStatus, resetStatusLines, startStatus, statusStore } from "./statusLines.js";
+
+vi.mock("../api/node.js", () => ({
+  ensureAgentRuntime: vi.fn(() => Promise.resolve({ ok: true })),
+  getAgentHydrate: vi.fn(),
+  postAgentAck: vi.fn(() => Promise.resolve({ ok: true })),
+}));
 
 describe("consumeStartupURL", () => {
   afterEach(() => {
@@ -69,6 +82,53 @@ describe("syncStatusAfterHydrate", () => {
     agentStore.awaitingTurn = true;
     syncStatusAfterHydrate("awaiting_tool_execution");
     expect(hasStatus("thinking")).toBe(false);
+  });
+});
+
+describe("hydrateAgent lifecycle", () => {
+  beforeEach(() => {
+    persistAgentId("agt-1");
+    clearHitl();
+    transcriptStore.entries = [];
+    transcriptStore.lastSeq = 0;
+    agentStore.awaitingTurn = false;
+    vi.mocked(api.getAgentHydrate).mockReset();
+    vi.mocked(api.postAgentAck).mockClear();
+    invalidateHydration();
+  });
+
+  afterEach(() => {
+    clearHitl();
+    persistAgentId("");
+    vi.mocked(api.getAgentHydrate).mockReset();
+  });
+
+  it("ignores a hydrate response invalidated while the chat is deactivated", async () => {
+    let resolveHydrate;
+    vi.mocked(api.getAgentHydrate).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveHydrate = resolve;
+      }),
+    );
+
+    const pending = hydrateAgent();
+    await vi.waitFor(() => expect(api.getAgentHydrate).toHaveBeenCalledWith("agt-1"));
+
+    // Simulates leaving the KeepAlive chat view for Agent settings.
+    invalidateHydration();
+    resolveHydrate({
+      transcript: [{ kind: "assistant", text: "stale" }],
+      pending_hitl: {
+        hitl_id: "hitl-1",
+        items: [{ hitl_type: "execute_tool", id: "call-1", tool_name: "bash_run" }],
+      },
+      sse_seq_hint: 10,
+      notify_seq: 10,
+    });
+
+    expect(await pending).toBeNull();
+    expect(transcriptStore.entries).toHaveLength(0);
+    expect(hitlStore.queue).toHaveLength(0);
   });
 });
 
