@@ -44,23 +44,23 @@ type SkillAccess struct {
 
 // Orchestrator 驱动 LLM + 工具循环并通过 Hub 推送 SSE。
 type Orchestrator struct {
-	llm          llm.Client
-	hub          stream.Publisher
-	agentID      string
-	fsRoot       string
-	tools        tools.Executor
-	policy       *policy.Engine
-	toolHooks    *hooks.Registry
-	toolExecLog  *hooks.ToolExecutionLog
-	skillAccess  SkillAccess
+	llm            llm.Client
+	hub            stream.Publisher
+	agentID        string
+	fsRoot         string
+	tools          tools.Executor
+	policy         *policy.Engine
+	toolHooks      *hooks.Registry
+	toolExecLog    *hooks.ToolExecutionLog
+	skillAccess    SkillAccess
 	hookRuntimeCfg hooks.RuntimeConfig
 	hookHostCfg    HookHostConfig
 	hookHostState  *hookHostState
-	maxToolLoops int
-	promptCtx    *promptcontext.Reader
-	longTermStore LongTermStore
-	journal      *historypkg.Journal
-	logger       *slog.Logger
+	maxToolLoops   int
+	promptCtx      *promptcontext.Reader
+	longTermStore  LongTermStore
+	journal        *historypkg.Journal
+	logger         *slog.Logger
 
 	childMgr       *childagent.Manager
 	isChildSession bool
@@ -70,7 +70,7 @@ type Orchestrator struct {
 
 	ctxMetrics *contextMetricsStore
 
-	enqueueToolResult   func(sessionID string) error
+	enqueueToolResult   func(ctx context.Context, sessionID string) error
 	systemPromptBuilder SystemPromptBuilder
 
 	multimodalEnabled bool
@@ -122,7 +122,7 @@ func (o *Orchestrator) SetChildSession(isChild bool) {
 }
 
 // SetToolResultEnqueuer 注入 tool_result 入队回调；生产 session 必须设置以对齐 Python 队列语义。
-func (o *Orchestrator) SetToolResultEnqueuer(fn func(sessionID string) error) {
+func (o *Orchestrator) SetToolResultEnqueuer(fn func(ctx context.Context, sessionID string) error) {
 	o.enqueueToolResult = fn
 }
 
@@ -154,9 +154,9 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	o.appendHistory(sessionID, history, userMsg)
 	summary := llm.MessageTextSummary(userMsg)
 	o.runMessageEnqueuedPhase(ctx, sessionID, history, summary, map[string]any{
-		"source":       userMsg.Name,
-		"has_images":   llm.MessageHasImages(userMsg),
-		"content_len":  len(summary),
+		"source":      userMsg.Name,
+		"has_images":  llm.MessageHasImages(userMsg),
+		"content_len": len(summary),
 	})
 	o.resetTurnUsage(sessionID)
 	o.resetContextMetrics(sessionID)
@@ -448,7 +448,7 @@ func (o *Orchestrator) runOneStep(
 			return StepOutcome{LoopCount: toolLoopCount}
 		}
 		if o.enqueueToolResult != nil {
-			if err := o.enqueueToolResult(sessionID); err != nil {
+			if err := o.enqueueToolResult(ctx, sessionID); err != nil {
 				return StepOutcome{LoopCount: toolLoopCount, Err: err}
 			}
 			return StepOutcome{LoopCount: toolLoopCount}
@@ -478,7 +478,7 @@ func (o *Orchestrator) runOneStep(
 		return StepOutcome{Pending: pending, LoopCount: toolLoopCount}
 	}
 	if o.enqueueToolResult != nil {
-		if err := o.enqueueToolResult(sessionID); err != nil {
+		if err := o.enqueueToolResult(ctx, sessionID); err != nil {
 			return StepOutcome{LoopCount: toolLoopCount, Err: err}
 		}
 		return StepOutcome{LoopCount: toolLoopCount}
@@ -573,12 +573,12 @@ func (o *Orchestrator) composeSystemPrompt(sessionID string) string {
 		loaded = o.skillAccess.Get()
 	}
 	in := SystemPromptInput{
-		AgentID:   o.agentID,
-		FSRoot:    o.fsRoot,
-		SessionID: sessionID,
-		Catalog:   o.skillAccess.Catalog,
-		Loaded:    loaded,
-		PromptCtx: o.promptCtx,
+		AgentID:               o.agentID,
+		FSRoot:                o.fsRoot,
+		SessionID:             sessionID,
+		Catalog:               o.skillAccess.Catalog,
+		Loaded:                loaded,
+		PromptCtx:             o.promptCtx,
 		IncludeHistoryJournal: o.journal != nil && o.journal.Enabled(),
 	}
 	if o.systemPromptBuilder != nil {

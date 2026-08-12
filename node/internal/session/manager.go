@@ -659,8 +659,7 @@ func (m *Manager) EnqueueToolResult(sessionID string) error {
 		m.logger.Warn("tool result enqueue skipped: session not found", "session_id", sessionID)
 		return fmt.Errorf("agent_not_found")
 	}
-	env := queue.Envelope{RequestType: queue.RequestTypeToolResult}
-	return rt.enqueue(env, queue.PriorityToolResult)
+	return rt.enqueueToolResult(nil, sessionID)
 }
 
 // CancelTurn 取消 session 当前在途 turn；无在途 turn 时返回 false。
