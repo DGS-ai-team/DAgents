@@ -1,0 +1,76 @@
+name: Packaging Smoke
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  manage-docker:
+    name: Manage Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Manage image
+        run: |
+          docker build \
+            --file packaging/manage/Dockerfile \
+            --build-arg VERSION=0.0.0-ci \
+            --tag dagents-manage:ci \
+            .
+
+      - name: Load Manage workgroup tool schema
+        run: |
+          docker run --rm dagents-manage:ci python -c "from manage.workgroup.native_tools import load_assign_workgroup_task_tool; tool = load_assign_workgroup_task_tool(); assert tool['function']['name'] == 'assign_workgroup_task'"
+
+  assistant-bundle:
+    name: Assistant bundle layout
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assemble bundle with contract binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          input_dir="${RUNNER_TEMP}/dagents-bundle-input"
+          mkdir -p "${input_dir}"
+          touch "${input_dir}/dagents-node" "${input_dir}/dagents-client"
+          chmod +x "${input_dir}/dagents-node" "${input_dir}/dagents-client"
+
+          PLATFORM=linux-amd64 \
+          VERSION=0.0.0-ci \
+          NODE_BIN="${input_dir}/dagents-node" \
+          CLIENT_BIN="${input_dir}/dagents-client" \
+          SKIP_BROWSER=1 \
+            bash scripts/ci/assemble_local_assistant_bundle.sh
+
+          bundle="dist/dagents-local-assistant-linux-amd64"
+          test -f "${bundle}/VERSION"
+          grep -Fxq "0.0.0-ci" "${bundle}/VERSION"
+          test -f "${bundle}/config.example.yaml"
+          test -f "${bundle}/bin/dagents-node"
+          test -f "${bundle}/bin/dagents-client"
+
+  installer-contract:
+    name: Windows installer contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify installer inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f packaging/windows/dagents-installer.iss
+          test -f packaging/windows/assets/wizard-sidebar.bmp
+          test -f packaging/windows/assets/wizard-small.bmp
+          test -f desktop/tray/assets/icon.ico
+          grep -Fq '#define MyAppVersion' packaging/windows/dagents-installer.iss
+          grep -Fq 'SetupIconFile=' packaging/windows/dagents-installer.iss

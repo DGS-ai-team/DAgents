@@ -6,8 +6,7 @@ on:
     inputs:
       version:
         description: "产物版本号后缀（写入 dagents-local-assistant-* / dagents-manage-bundle-{version}）"
-        required: false
-        default: "0.0.0-manual"
+        required: true
       skip_tests:
         description: "跳过构建前 Go/Python 单测（仅调试打包脚本时用）"
         type: boolean
@@ -19,13 +18,29 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PACKAGE_VERSION: ${{ inputs.version }}
   PYENV_PYTHON_VERSION: "3.13.2"
   BROWSER_PYINSTALLER_ARGS: --onefile --name dagents-browser --paths browser-service --collect-submodules browser_use --collect-submodules uvicorn --collect-submodules fastapi --collect-submodules pydantic --hidden-import=dagents_browser --hidden-import=dagents_browser.main --hidden-import=dagents_browser.server --hidden-import=dagents_browser.driver --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=uvicorn.lifespan --hidden-import=uvicorn.lifespan.on browser-service/run_dagents_browser.py
 
 jobs:
+  validate-version:
+    name: Validate package version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version input
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${PACKAGE_VERSION}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid package version: ${version}; expected SemVer" >&2
+            exit 1
+          fi
+
   test:
     name: Pre-build tests (Go + Python + Web UI)
-    if: ${{ !inputs.skip_tests }}
+    needs: validate-version
+    if: ${{ !inputs.skip_tests && needs.validate-version.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -80,8 +95,10 @@ jobs:
 
   build-linux-assistant:
     name: Build local assistant (linux-amd64)
-    needs: test
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    needs:
+      - validate-version
+      - test
+    if: ${{ always() && needs.validate-version.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -155,7 +172,7 @@ jobs:
       - name: Assemble release archive
         shell: bash
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="${PACKAGE_VERSION}"
           PLATFORM=linux-amd64 VERSION="${VERSION}" \
             bash scripts/ci/assemble_local_assistant_bundle.sh
           ls -la dist/dagents-local-assistant-*
@@ -169,8 +186,10 @@ jobs:
 
   build-windows-go:
     name: Build Windows Go binaries
-    needs: test
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    needs:
+      - validate-version
+      - test
+    if: ${{ always() && needs.validate-version.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: windows-2022
     steps:
       - name: Checkout
@@ -214,8 +233,10 @@ jobs:
 
   build-windows-shell:
     name: Build Windows shell (Tauri + legacy)
-    needs: test
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    needs:
+      - validate-version
+      - test
+    if: ${{ always() && needs.validate-version.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: windows-2022
     steps:
       - name: Checkout
@@ -271,8 +292,10 @@ jobs:
 
   build-windows-browser:
     name: Build Windows browser (PyInstaller)
-    needs: test
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    needs:
+      - validate-version
+      - test
+    if: ${{ always() && needs.validate-version.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: windows-2022
     steps:
       - name: Checkout
@@ -330,7 +353,7 @@ jobs:
       - name: Assemble release archive
         shell: bash
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="${PACKAGE_VERSION}"
           PLATFORM=windows-amd64 VERSION="${VERSION}" \
             bash scripts/ci/assemble_local_assistant_bundle.sh
           ls -la dist/dagents-local-assistant-*
@@ -342,7 +365,7 @@ jobs:
       - name: Build Windows installer (Inno)
         shell: bash
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="${PACKAGE_VERSION}"
           VERSION="${VERSION}" bash scripts/ci/build_windows_installer.sh
           ls -la dist-installer dist/dagents-local-assistant-windows-amd64-installer-*.exe
 
@@ -378,7 +401,7 @@ jobs:
       - name: Build Manage offline bundle
         shell: bash
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="${PACKAGE_VERSION}"
           chmod +x scripts/ci/build_manage_docker.sh scripts/ci/assemble_manage_bundle.sh
           VERSION="${VERSION}" bash scripts/ci/assemble_manage_bundle.sh
           ls -la dist/dagents-manage-bundle-*

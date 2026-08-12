@@ -94,10 +94,14 @@ func (m *Manager) StopChild(childSessionID string) {
 	m.mu.Lock()
 	rt, ok := m.sessions[childSessionID]
 	if ok {
-		rt.stop()
 		delete(m.sessions, childSessionID)
 	}
 	m.mu.Unlock()
+	if ok {
+		// StopChild may be called by the child consumeLoop itself after it
+		// reports completion; do not wait for that goroutine from itself.
+		rt.requestStop()
+	}
 }
 
 // EnqueueChildTask 向子 session 投递首条 task。
@@ -194,13 +198,13 @@ func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, err
 		}
 		out = append(out, ChildAgentView{
 			ChildAgentID: rec.ChildAgentID,
-			Status:         string(rec.Status),
-			Purpose:        rec.Purpose,
-			AllowedTools:   append([]string(nil), rec.AllowedTools...),
-			CreatedAt:      rec.CreatedAt,
-			ExpiresAt:      rec.ExpiresAt,
-			TurnCount:      turnCount,
-			MaxTurns:       rec.MaxTurns,
+			Status:       string(rec.Status),
+			Purpose:      rec.Purpose,
+			AllowedTools: append([]string(nil), rec.AllowedTools...),
+			CreatedAt:    rec.CreatedAt,
+			ExpiresAt:    rec.ExpiresAt,
+			TurnCount:    turnCount,
+			MaxTurns:     rec.MaxTurns,
 		})
 	}
 	return out, nil
@@ -217,13 +221,13 @@ func (m *Manager) CancelChildAgent(parentSessionID, childSessionID, reason strin
 // ChildAgentView 为 HTTP 列表项。
 type ChildAgentView struct {
 	ChildAgentID string    `json:"child_agent_id"`
-	Status         string    `json:"status"`
-	Purpose        string    `json:"purpose"`
-	AllowedTools   []string  `json:"allowed_tools"`
-	CreatedAt      time.Time `json:"created_at"`
-	ExpiresAt      time.Time `json:"expires_at"`
-	TurnCount      int       `json:"turn_count"`
-	MaxTurns       int       `json:"max_turns"`
+	Status       string    `json:"status"`
+	Purpose      string    `json:"purpose"`
+	AllowedTools []string  `json:"allowed_tools"`
+	CreatedAt    time.Time `json:"created_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	TurnCount    int       `json:"turn_count"`
+	MaxTurns     int       `json:"max_turns"`
 }
 
 func lastAssistantSummary(msgs []llm.Message) string {

@@ -28,6 +28,10 @@ jobs:
     name: Tauri
     uses: ./.github/workflows/tauri-shell.yml
 
+  packaging:
+    name: Packaging
+    uses: ./.github/workflows/packaging-smoke.yml
+
   required:
     name: CI / required
     if: ${{ always() }}
@@ -35,6 +39,7 @@ jobs:
       - go
       - python
       - tauri
+      - packaging
     runs-on: ubuntu-latest
     steps:
       - name: Verify required checks
@@ -44,6 +49,8 @@ jobs:
           echo "go=${{ needs.go.result }}"
           echo "python=${{ needs.python.result }}"
           echo "tauri=${{ needs.tauri.result }}"
+          echo "packaging=${{ needs.packaging.result }}"
           [[ "${{ needs.go.result }}" == "success" ]]
           [[ "${{ needs.python.result }}" == "success" ]]
           [[ "${{ needs.tauri.result }}" == "success" ]]
+          [[ "${{ needs.packaging.result }}" == "success" ]]

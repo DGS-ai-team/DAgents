@@ -14,7 +14,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 PLATFORM="${PLATFORM:-linux-amd64}"
-VERSION="${VERSION:-0.4.0}"
+VERSION="${VERSION:-}"
+
+if [[ -z "${VERSION}" ]]; then
+  echo "[assemble] VERSION is required; pass the release/package version explicitly" >&2
+  exit 1
+fi
 
 EXE=""
 if [[ "${PLATFORM}" == windows-* ]]; then

@@ -32,28 +32,28 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
-	FSRoot                   string
-	MaxToolLoops             int
-	SkillsRoot               string
-	SkillsEnabled            bool
-	SkillsMaxInPrompt        int
+	FSRoot            string
+	MaxToolLoops      int
+	SkillsRoot        string
+	SkillsEnabled     bool
+	SkillsMaxInPrompt int
 	// SkillsVisibleRestrict 为 true 时仅暴露 SkillsVisible 中的 skill（空切片=不可见）。
-	SkillsVisibleRestrict bool
-	SkillsVisible         []string
-	RuntimeDir               string
-	CompressionSilent             int
-	CompressionBlocking           int
-	IdleAutoCompressSeconds       int
-	IdleAutoCompressPollSeconds   int
-	IdleAutoCompressMinTokens     int
-	RawMessageHistoryEnabled      bool
-	RawMessageHistoryDir     string
-	DuplicateToolCall        hooks.DuplicateConfig
-	ToolResult               hooks.ToolResultConfig
-	InjectTodayDate          hooks.InjectTodayDateConfig
-	PluginHooks              hooks.PluginsConfig
-	HookHost                 turn.HookHostConfig
-	MultimodalEnabled        bool
+	SkillsVisibleRestrict       bool
+	SkillsVisible               []string
+	RuntimeDir                  string
+	CompressionSilent           int
+	CompressionBlocking         int
+	IdleAutoCompressSeconds     int
+	IdleAutoCompressPollSeconds int
+	IdleAutoCompressMinTokens   int
+	RawMessageHistoryEnabled    bool
+	RawMessageHistoryDir        string
+	DuplicateToolCall           hooks.DuplicateConfig
+	ToolResult                  hooks.ToolResultConfig
+	InjectTodayDate             hooks.InjectTodayDateConfig
+	PluginHooks                 hooks.PluginsConfig
+	HookHost                    turn.HookHostConfig
+	MultimodalEnabled           bool
 	// ConfigRevision 为装入本 runtime 时 agents.updated_at 的 UnixNano；用于配置变更检测。
 	ConfigRevision int64
 	// PromptContext 控制 soul/custom/long_term 侧车是否注入（缺省全开）。
@@ -162,9 +162,16 @@ func (m *Manager) Stop() {
 	m.logger.Info("session manager stopping")
 	m.cancel()
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	runtimes := make([]*runtime, 0, len(m.sessions))
 	for _, rt := range m.sessions {
-		rt.stop()
+		runtimes = append(runtimes, rt)
+	}
+	m.mu.Unlock()
+	for _, rt := range runtimes {
+		rt.requestStop()
+	}
+	for _, rt := range runtimes {
+		rt.waitStopped()
 	}
 }
 
@@ -522,12 +529,15 @@ func (m *Manager) Delete(sessionID string) (bool, error) {
 	}
 	wasActive := false
 	m.mu.Lock()
-	if rt, ok := m.sessions[sid]; ok {
+	rt, ok := m.sessions[sid]
+	if ok {
 		wasActive = true
-		rt.stop()
 		delete(m.sessions, sid)
 	}
 	m.mu.Unlock()
+	if ok {
+		rt.stop()
+	}
 	m.logger.Info("session deleted from memory", "session_id", sid, "was_active", wasActive)
 	if wasActive && m.OnReleased != nil {
 		m.OnReleased(sid)

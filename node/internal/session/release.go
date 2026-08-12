@@ -31,9 +31,9 @@ func (m *Manager) Release(sessionID string) (bool, error) {
 		m.mu.Unlock()
 		return false, nil
 	}
-	rt.stop()
 	delete(m.sessions, sid)
 	m.mu.Unlock()
+	rt.stop()
 	m.logger.Info("session released from memory", "session_id", sid)
 	if m.OnReleased != nil {
 		m.OnReleased(sid)
