@@ -169,9 +169,6 @@ func (o *Orchestrator) persistLongTermCAS(ctx context.Context, entries []LongTer
 	if err := o.longTermStore.SaveLongTerm(ctx, entries, expectedVersion); err != nil {
 		return err
 	}
-	if o.promptCtx != nil {
-		o.promptCtx.UpdateLongTerm(FormatLongTermEntries(entries))
-	}
 	return nil
 }
 
