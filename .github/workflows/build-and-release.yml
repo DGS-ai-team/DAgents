@@ -43,10 +43,10 @@ jobs:
             exit 1
           fi
 
-          git fetch --no-tags origin dev --depth=1
+          git fetch --no-tags origin main --depth=1
           if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
-            echo "Release tag ${GITHUB_REF_NAME} must point to the current origin/dev commit" >&2
-            echo "tag=$(git rev-parse HEAD) dev=$(git rev-parse FETCH_HEAD)" >&2
+            echo "Release tag ${GITHUB_REF_NAME} must point to the current origin/main commit" >&2
+            echo "tag=$(git rev-parse HEAD) main=$(git rev-parse FETCH_HEAD)" >&2
             exit 1
           fi
 

@@ -13,7 +13,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-VERSION="${VERSION:-0.0.0}"
+VERSION="${VERSION:-}"
+if [[ -z "${VERSION}" ]]; then
+  echo "[installer] VERSION is required; pass the release/package version explicitly" >&2
+  exit 1
+fi
 BUNDLE_SRC="${BUNDLE_SRC:-${REPO_ROOT}/dist/dagents-local-assistant-windows-amd64}"
 BUNDLE_DIR="${REPO_ROOT}/bundle"
 OUTPUT_DIR="${REPO_ROOT}/dist-installer"
