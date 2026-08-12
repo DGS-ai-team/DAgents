@@ -206,7 +206,6 @@ func TestPersistAfterTurn(t *testing.T) {
 	}
 
 	mgr.Stop()
-	time.Sleep(50 * time.Millisecond)
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

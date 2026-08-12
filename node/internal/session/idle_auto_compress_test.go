@@ -41,6 +41,7 @@ func TestIdleAutoCompressMarksAndSkipsRescan(t *testing.T) {
 		IdleAutoCompressSeconds:     1,
 		IdleAutoCompressPollSeconds: 1,
 	}, logx.Discard())
+	t.Cleanup(mgr.Stop)
 
 	sess, _, err := mgr.Create("sess-idle-1")
 	if err != nil {
@@ -99,6 +100,7 @@ func TestIdleAutoCompressSkipsBelowMinTokens(t *testing.T) {
 		IdleAutoCompressMinTokens:   1_000_000,
 		IdleAutoCompressPollSeconds: 1,
 	}, logx.Discard())
+	t.Cleanup(mgr.Stop)
 
 	sess, _, err := mgr.Create("sess-idle-3")
 	if err != nil {
@@ -153,6 +155,7 @@ func TestIdleAutoCompressClearsMarkOnUserMessage(t *testing.T) {
 		CompressionBlocking:     0,
 		IdleAutoCompressSeconds: 1,
 	}, logx.Discard())
+	t.Cleanup(mgr.Stop)
 
 	sess, _, err := mgr.Create("sess-idle-2")
 	if err != nil {

@@ -51,6 +51,9 @@ type runtime struct {
 	// 上下文压缩逻辑
 	compression *compression.Coordinator
 
+	started bool
+	done    chan struct{}
+
 	mu            sync.Mutex           // 互斥锁
 	state         turn.State           // 状态
 	turnCancel    context.CancelFunc   // 取消 turn 上下文
@@ -128,6 +131,7 @@ func newRuntimeWithPublisher(
 	rt := &runtime{
 		session:       Session{ID: id, AgentID: agentID},
 		queue:         queue.NewMessageQueue(),
+		done:          make(chan struct{}),
 		store:         st,
 		hub:           eventHub,
 		agentID:       agentID,
@@ -139,14 +143,14 @@ func newRuntimeWithPublisher(
 			coord.SetRawMessageHistoryEnabled(turnOpts.RawMessageHistoryEnabled)
 			return coord
 		}(),
-		state:           turn.StateIdle,
-		messages:        append([]llm.Message(nil), initial...),
-		loadedSkills:    append([]skills.LoadedSkill(nil), loaded...),
-		pending:         initialPending,
-		toolLoopCount:   initialLoopCount,
-		fsRoot:          turnOpts.FSRoot,
-		triggerDelivery: triggerDelivery,
-		sideEffects:     newSideEffectStore(),
+		state:                   turn.StateIdle,
+		messages:                append([]llm.Message(nil), initial...),
+		loadedSkills:            append([]skills.LoadedSkill(nil), loaded...),
+		pending:                 initialPending,
+		toolLoopCount:           initialLoopCount,
+		fsRoot:                  turnOpts.FSRoot,
+		triggerDelivery:         triggerDelivery,
+		sideEffects:             newSideEffectStore(),
 		idleAutoCompressApplied: idleAutoCompressApplied,
 		notifySeq:               initialNotifySeq,
 		ackSeq:                  initialAckSeq,
@@ -242,7 +246,18 @@ func (r *runtime) setTriggerDelivery(tracker triggers.DeliveryTracker) {
 
 // start 启动 session runtime
 func (r *runtime) start(parent context.Context) {
-	go r.consumeLoop(parent)
+	r.mu.Lock()
+	if r.started {
+		r.mu.Unlock()
+		return
+	}
+	r.started = true
+	done := r.done
+	r.mu.Unlock()
+	go func() {
+		defer close(done)
+		r.consumeLoop(parent)
+	}()
 }
 
 // consumeLoop 消费消息循环
@@ -714,7 +729,7 @@ func (r *runtime) cancelTurn() bool {
 	return false
 }
 
-func (r *runtime) stop() {
+func (r *runtime) requestStop() {
 	if r.compression != nil {
 		r.compression.CancelSession(r.session.ID)
 	}
@@ -722,6 +737,21 @@ func (r *runtime) stop() {
 		r.sideEffects.ClearSession(r.session.ID, r.orch, r.triggerDelivery)
 	}
 	r.queue.Close()
+}
+
+func (r *runtime) waitStopped() {
+	r.mu.Lock()
+	started := r.started
+	done := r.done
+	r.mu.Unlock()
+	if started {
+		<-done
+	}
+}
+
+func (r *runtime) stop() {
+	r.requestStop()
+	r.waitStopped()
 }
 
 func (r *runtime) setLoadedSkillsByName(names []string) []skills.LoadedSkill {
