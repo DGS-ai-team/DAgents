@@ -197,7 +197,7 @@ async function refresh({ force = true } = {}) {
   await Promise.all([refreshAgents({ force }), refreshWorkgroups({ force })]);
   // 已展开的工作组刷新成员
   await Promise.all(
-    [...expanded.value].map((id) => loadMembers(id, true)),
+    workgroups.value.map((wg) => loadMembers(wg.workgroup_id, true)),
   );
 }
 
@@ -587,7 +587,7 @@ defineExpose({
           title="刷新工作组"
           aria-label="刷新工作组"
           :disabled="loadingWgs"
-          @click.stop="refreshWorkgroups({ force: true })"
+          @click.stop="refresh({ force: true })"
         >
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
             <path
@@ -653,6 +653,11 @@ defineExpose({
               class="nav-rail__meta"
               :title="wg.status"
             >{{ wg.status === "configuring" ? "配置中" : wg.status }}</span>
+            <span
+              v-if="membersByWg[wg.workgroup_id]"
+              class="nav-rail__member-count"
+              :title="`成员数：${membersByWg[wg.workgroup_id].length}`"
+            >{{ membersByWg[wg.workgroup_id].length }}</span>
             <div class="nav-rail__item-actions" @click.stop>
               <button
                 type="button"
@@ -702,7 +707,15 @@ defineExpose({
                 @click="openWorkgroup(wg.workgroup_id)"
               >
                 <span class="nav-rail__member-mark" :data-status="m.status" aria-hidden="true">
-                  <img :src="brandIcon" alt="" />
+                  <svg viewBox="0 0 16 16" width="13" height="13" fill="none">
+                    <circle cx="8" cy="5.1" r="2.1" stroke="currentColor" stroke-width="1.2" />
+                    <path
+                      d="M3.1 13c.5-2.3 2.2-3.5 4.9-3.5s4.4 1.2 4.9 3.5"
+                      stroke="currentColor"
+                      stroke-width="1.2"
+                      stroke-linecap="round"
+                    />
+                  </svg>
                 </span>
                 <span class="nav-rail__item-title">{{ memberLabel(m) }}</span>
                 <span class="nav-rail__meta">{{ m.status }}</span>

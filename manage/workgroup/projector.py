@@ -71,6 +71,10 @@ def project_actor_context(
         "buffered_timeline": buffered,
         "timeline_event_count": len(events),
         "timeline_watermark_seq": watermark,
+        "projected_timeline_seqs": [
+            ev.seq for ev in window
+            if not (ev.assign_id and ev.assign_id in covered_assigns)
+        ] if not open_ids else [],
         "inject_into_llm_context": not bool(open_ids),
         "buffered": bool(open_ids and buffered),
     }
