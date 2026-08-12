@@ -1,6 +1,54 @@
 package turn
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
+)
+
+type rememberLongTermStore struct {
+	entries []LongTermEntry
+	saved   bool
+}
+
+func (s *rememberLongTermStore) ReadLongTerm(context.Context) (LongTermSnapshot, error) {
+	return LongTermSnapshot{Entries: append([]LongTermEntry(nil), s.entries...)}, nil
+}
+
+func (s *rememberLongTermStore) SaveLongTerm(_ context.Context, entries []LongTermEntry, _ time.Time) error {
+	s.entries = append([]LongTermEntry(nil), entries...)
+	s.saved = true
+	return nil
+}
+
+func TestPersistLongTermCAS_doesNotRefreshPromptImmediately(t *testing.T) {
+	reader := promptcontext.NewContentReader(promptcontext.Content{LongTerm: "old memory"})
+	store := &rememberLongTermStore{}
+	orch := &Orchestrator{longTermStore: store, promptCtx: reader}
+
+	if err := orch.persistLongTermCAS(context.Background(), []LongTermEntry{{ID: "lt-new", Content: "new memory"}}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if !store.saved {
+		t.Fatal("expected long-term store write")
+	}
+	if got := reader.ReadLongTermMemory(); got != "old memory" {
+		t.Fatalf("prompt memory = %q, want old memory until reload", got)
+	}
+}
+
+func TestReloadLongTermMemory_refreshesPrompt(t *testing.T) {
+	reader := promptcontext.NewContentReader(promptcontext.Content{LongTerm: "old memory"})
+	store := &rememberLongTermStore{entries: []LongTermEntry{{ID: "lt-new", Content: "new memory"}}}
+	orch := &Orchestrator{longTermStore: store, promptCtx: reader}
+
+	orch.ReloadLongTermMemory(context.Background())
+	if got := reader.ReadLongTermMemory(); got != "- [lt-new] new memory" {
+		t.Fatalf("prompt memory = %q, want reloaded memory", got)
+	}
+}
 
 func TestApplyRememberActionToEntries(t *testing.T) {
 	tests := []struct {
