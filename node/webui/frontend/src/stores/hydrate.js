@@ -14,6 +14,15 @@ import { loadTranscriptFromHydrate } from "./transcript.js";
 import { applyToolJobsSnapshot } from "./toolJobs.js";
 import { resetStatusLines, startStatus } from "./statusLines.js";
 
+// ChatView is KeepAlive-ed. A hydrate request can outlive the view that
+// started it (for example while navigating to Agent settings). Do not let a
+// response from that obsolete view overwrite a newer HITL/UI state.
+let hydrationGeneration = 0;
+
+export function invalidateHydration() {
+  hydrationGeneration += 1;
+}
+
 /**
  * hydrate 后复位 UI 状态相位。
  * model_streaming 时给 thinking 指示；工具执行中只锁 composer，不挂三点跳动。
@@ -28,8 +37,10 @@ export function syncStatusAfterHydrate(runTurnPhase = "") {
 
 /** ensureAgent → GET /v1/agents/{id}/hydrate → 灌 transcript + pending HITL + SSE 水位。 */
 export async function hydrateAgent() {
+  const generation = ++hydrationGeneration;
   const agentId = await ensureAgent();
   const data = await api.getAgentHydrate(agentId);
+  if (generation !== hydrationGeneration) return null;
   loadTranscriptFromHydrate(data?.transcript);
   applyToolJobsSnapshot(data?.tool_jobs);
   clearHitl();

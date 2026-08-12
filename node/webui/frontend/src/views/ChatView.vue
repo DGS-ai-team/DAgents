@@ -55,7 +55,7 @@ import {
   enqueueHitlRequired,
   shouldSkipChildRuntimeDisplay,
 } from "../stores/hitl.js";
-import { consumeStartupURL, hydrateAgent } from "../stores/hydrate.js";
+import { consumeStartupURL, hydrateAgent, invalidateHydration } from "../stores/hydrate.js";
 import {
   startDesktopFocusHeartbeat,
   stopDesktopFocusHeartbeat,
@@ -201,7 +201,8 @@ async function resyncAfterSSEGap(_reason) {
   const agentId = agentStore.agentId;
   turnWatchdog.noteActivity();
   try {
-    await hydrateAgent();
+    const data = await hydrateAgent();
+    if (data === null) return;
     if (token !== sseResyncToken || agentStore.agentId !== agentId) return;
     turnWatchdog.noteActivity();
     bumpActivityRefresh();
@@ -223,7 +224,8 @@ async function activateAgentStream() {
     return;
   }
   const prev = agentStore.agentId;
-  await hydrateAgent();
+  const data = await hydrateAgent();
+  if (data === null) return;
   if (agentStore.agentId !== prev || !streamHandle.value) {
     restartStream();
   }
@@ -674,6 +676,7 @@ async function onAgentCreated(created) {
 
 async function switchAgent(id) {
   // 先断开旧 SSE，避免切 Agent 间隙里旧连接继续改全局 status/transcript
+  invalidateHydration();
   sseResyncToken += 1;
   streamHandle.value?.close();
   streamHandle.value = null;
@@ -943,6 +946,8 @@ onActivated(() => {
 
 onDeactivated(() => {
   // KeepAlive 切到设置页时：停心跳/轮询/看门狗，并断开 SSE，避免焦点与状态串台
+  invalidateHydration();
+  sseResyncToken += 1;
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
   stopToolJobsPolling();
@@ -981,6 +986,8 @@ watch(
 );
 
 onUnmounted(() => {
+  invalidateHydration();
+  sseResyncToken += 1;
   turnWatchdog.stop();
   stopDesktopFocusHeartbeat();
   stopToolJobsPolling();
