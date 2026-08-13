@@ -2582,8 +2582,32 @@ select.settings-field__input {
   min-width: 0;
 }
 
+.chat__load-earlier {
+  align-self: center;
+  margin: 10px auto 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 999px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text-muted, #6b7280);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat__load-earlier:hover {
+  border-color: var(--color-primary, #0078d4);
+  color: var(--color-primary, #0078d4);
+}
+
+.nav-rail__item-title-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .nav-rail__item-title {
   display: block;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2592,6 +2616,16 @@ select.settings-field__input {
   font-weight: 500;
   line-height: 1.3;
   color: var(--color-text);
+}
+
+.nav-rail__unread-dot {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 0 2px var(--color-sidebar);
 }
 
 .nav-rail__member-mark {
@@ -2716,6 +2750,11 @@ select.settings-field__input {
   flex: 1 1 auto;
   min-width: 0;
   padding-right: 4px;
+}
+
+.nav-rail__folder-row .nav-rail__item-title-row {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .nav-rail__member-count {

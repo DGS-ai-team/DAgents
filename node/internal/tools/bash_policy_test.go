@@ -2,6 +2,7 @@ package tools
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -40,7 +41,7 @@ func TestBlockedSudoWithNonInteractiveAllowed(t *testing.T) {
 
 func TestResolveRunCWDDefaultAndSubdir(t *testing.T) {
 	root := t.TempDir()
-	sub := root + "/sub"
+	sub := filepath.Join(root, "sub")
 	if err := osMkdir(sub); err != nil {
 		t.Fatal(err)
 	}

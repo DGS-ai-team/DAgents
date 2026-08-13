@@ -66,10 +66,10 @@ func TestStoreApplyShellUpdatesRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.DecideTool("bash_run", map[string]any{"command": "rm x"}) != ActionDeny {
+	if e.DecideTool("bash_run", map[string]any{"command": "rm x", "shell_type": "bash"}) != ActionDeny {
 		t.Fatal("rm should deny")
 	}
-	if e.DecideTool("bash_run", map[string]any{"command": "ls"}) != ActionAuto {
+	if e.DecideTool("bash_run", map[string]any{"command": "ls", "shell_type": "bash"}) != ActionAuto {
 		t.Fatal("ls should auto")
 	}
 }
@@ -92,7 +92,7 @@ func TestStoreApplyShellPolicyChangesDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.DecideTool("bash_run", map[string]any{"command": "ls"}) != ActionRequireApproval {
+	if e.DecideTool("bash_run", map[string]any{"command": "ls", "shell_type": "bash"}) != ActionRequireApproval {
 		t.Fatal("deleted ls should fall back to require approval")
 	}
 }

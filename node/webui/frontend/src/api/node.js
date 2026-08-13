@@ -366,8 +366,10 @@ export function unsubscribeWorkgroup(workgroupId) {
   });
 }
 
-export function getWorkgroupTimeline(workgroupId) {
-  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/timeline`);
+export function getWorkgroupTimeline(workgroupId, { limit } = {}) {
+  return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/timeline`, {
+    params: { limit },
+  });
 }
 
 export function getWorkgroupEventsURL(workgroupId, afterSeq = 0) {

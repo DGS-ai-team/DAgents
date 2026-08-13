@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -247,9 +248,12 @@ func (c *ControlClient) UnsubscribeWorkgroup(ctx context.Context, workgroupID st
 }
 
 // GetWorkgroupTimeline 拉取公开 Timeline。
-func (c *ControlClient) GetWorkgroupTimeline(ctx context.Context, workgroupID string) (jsonArray, error) {
+func (c *ControlClient) GetWorkgroupTimeline(ctx context.Context, workgroupID string, limit ...int) (jsonArray, error) {
 	var out jsonArray
 	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/timeline"
+	if len(limit) > 0 && limit[0] > 0 {
+		path += "?limit=" + strconv.Itoa(limit[0])
+	}
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}

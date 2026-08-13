@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -82,7 +83,7 @@ class LeaderLoopTests(unittest.TestCase):
             first_request = client.calls[0]["messages"]
             self.assertEqual(
                 [m.get("content") for m in first_request if m.get("role") == "user"],
-                ["当天日期为：20260812", text],
+                [f"当天日期为：{datetime.now().strftime('%Y%m%d')}", text],
             )
 
     def _ready_group(self, store: WorkGroupStore) -> tuple[str, str]:

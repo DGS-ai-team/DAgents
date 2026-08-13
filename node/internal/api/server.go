@@ -41,25 +41,26 @@ import (
 
 // Server 承载 Agent Node HTTP 路由与运行时依赖。
 type Server struct {
-	cfg           *config.Config
-	configPath    string
-	llmRuntime    *llm.RuntimeSettings
-	logger        *slog.Logger
-	mux           *http.ServeMux
-	sessions      *session.Manager // per-session 队列与 turn consumer（过渡期与 agent_id 1:1）
-	agents        *store.AgentStore
-	llmConfigs    *store.LLMConfigStore
-	nodeSettings  *store.NodeSettingsStore
-	stream        *stream.Hub // 进程内 SSE 事件总线
+	cfg             *config.Config
+	configPath      string
+	llmRuntime      *llm.RuntimeSettings
+	logger          *slog.Logger
+	mux             *http.ServeMux
+	sessions        *session.Manager // per-session 队列与 turn consumer（过渡期与 agent_id 1:1）
+	agents          *store.AgentStore
+	llmConfigs      *store.LLMConfigStore
+	nodeSettings    *store.NodeSettingsStore
+	stream          *stream.Hub // 进程内 SSE 事件总线
 	workgroupStream *stream.Hub // Manage 工作组 Timeline + 实时协作事件
-	store         *store.SQLiteStore
-	triggerStore  *triggers.Store
-	triggerSched  *triggers.Scheduler
-	registrar     *manage.Registrar
+	store           *store.SQLiteStore
+	triggerStore    *triggers.Store
+	triggerSched    *triggers.Scheduler
+	registrar       *manage.Registrar
 	updateChecker   *manage.UpdateChecker
 	packageUploader *manage.PackageUploader
 	control         *manage.ControlClient
 	tools           *tools.Registry
+	backgroundJobs  *tools.BackgroundJobStore
 	browserMgr      *browser.Manager
 	mediaRegister   tools.MediaRegisterFunc
 	workgroupWorker *workgroup.Worker
@@ -173,6 +174,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		reg.SetSkillsCatalog(skills.NewCatalog(cfg.SkillsRoot(), true, cfg.Skills.MaxInPrompt))
 		o.tools = reg
 	}
+	var backgroundJobs *tools.BackgroundJobStore
+	if !o.skipStore {
+		opened, err := tools.OpenBackgroundJobStore(cfg.BackgroundJobsDBPath())
+		if err != nil {
+			logger.Error("background job store init failed", "error", err, "path", cfg.BackgroundJobsDBPath())
+		} else {
+			backgroundJobs = opened
+			if err := o.tools.WithBackgroundJobStore(backgroundJobs); err != nil {
+				logger.Error("default tools background job store bind failed", "error", err)
+			}
+		}
+	}
 	if o.policyEngine == nil {
 		o.policyEngine = policy.NewEngineFromMaps(policy.LoadSeedMaps())
 		logger.Info("policy default engine seeded (per-agent policy stored in agents.db)")
@@ -240,19 +253,19 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	injectTodayDateEnabled := cfg.InjectTodayDateHookEnabled()
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
 	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
-		FSRoot:                   cfg.FSRoot,
+		FSRoot: cfg.FSRoot,
 		// MaxToolLoops 由各 Agent config_snapshot（defaults.llm.max_tool_loops）在装入 runtime 时写入。
-		SkillsRoot:               cfg.SkillsRoot(),
-		SkillsEnabled:            cfg.Skills.Enabled,
-		SkillsMaxInPrompt:        cfg.Skills.MaxInPrompt,
-		RuntimeDir:               cfg.RuntimeDir(),
+		SkillsRoot:                  cfg.SkillsRoot(),
+		SkillsEnabled:               cfg.Skills.Enabled,
+		SkillsMaxInPrompt:           cfg.Skills.MaxInPrompt,
+		RuntimeDir:                  cfg.RuntimeDir(),
 		CompressionSilent:           cfg.Compression.SilentTriggerTokens,
 		CompressionBlocking:         cfg.Compression.BlockingTriggerTokens,
 		IdleAutoCompressSeconds:     cfg.Compression.IdleAutoCompressSeconds,
 		IdleAutoCompressPollSeconds: cfg.Compression.IdleAutoCompressPollSeconds,
 		IdleAutoCompressMinTokens:   cfg.Compression.IdleAutoCompressMinTokens,
 		RawMessageHistoryEnabled:    cfg.RawMessageHistoryEnabled(),
-		RawMessageHistoryDir:     cfg.RawMessageHistoryDir(),
+		RawMessageHistoryDir:        cfg.RawMessageHistoryDir(),
 		DuplicateToolCall: hooks.DuplicateConfig{
 			Enabled:       cfg.DuplicateToolCallHookEnabled(),
 			WindowSeconds: cfg.DuplicateToolCallWindowSeconds(),
@@ -264,7 +277,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			FSRoot:               cfg.FSRoot,
 		},
 		InjectTodayDate: hooks.InjectTodayDateConfig{Enabled: &injectTodayDateEnabled},
-		PluginHooks: hooks.PluginsConfigFromShared(cfg.Hooks, cfg.RuntimeDir()),
+		PluginHooks:     hooks.PluginsConfigFromShared(cfg.Hooks, cfg.RuntimeDir()),
 		HookHost: turn.HookHostConfig{
 			MaxLLMCalls:   cfg.HooksHostMaxLLMCalls(),
 			HistoryWindow: cfg.HooksHostHistoryWindow(),
@@ -355,9 +368,10 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			toolNames = mgr.ToolNames()
 		}
 		wgWorker = workgroup.NewWorker(workgroup.Config{
-			NodeID:        cfg.NodeID,
-			NodeToolNames: toolNames,
-			DataDir:       filepath.Join(cfg.RuntimeDir(), "workgroup-workers", "state"),
+			NodeID:             cfg.NodeID,
+			NodeToolNames:      toolNames,
+			DataDir:            filepath.Join(cfg.RuntimeDir(), "workgroup-workers", "state"),
+			BackgroundJobStore: backgroundJobs,
 		})
 		wgDialer = &workgroup.Dialer{
 			ManageURL: cfg.Manage.URL,
@@ -396,25 +410,26 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		logger.Info("workgroup dialer enabled", "manage_url", cfg.Manage.URL)
 	}
 	s := &Server{
-		cfg:           cfg,
-		configPath:    o.configPath,
-		llmRuntime:    llmRuntime,
-		logger:        logger,
-		mux:           http.NewServeMux(),
-		stream:        hub,
+		cfg:             cfg,
+		configPath:      o.configPath,
+		llmRuntime:      llmRuntime,
+		logger:          logger,
+		mux:             http.NewServeMux(),
+		stream:          hub,
 		workgroupStream: workgroupStream,
-		store:         st,
-		agents:        agentsStore,
-		llmConfigs:    llmConfigStore,
-		nodeSettings:  o.nodeSettings,
-		sessions:      mgr,
-		triggerStore:  triggerStore,
-		triggerSched:  triggerSched,
+		store:           st,
+		agents:          agentsStore,
+		llmConfigs:      llmConfigStore,
+		nodeSettings:    o.nodeSettings,
+		sessions:        mgr,
+		triggerStore:    triggerStore,
+		triggerSched:    triggerSched,
 		registrar:       registrar,
 		updateChecker:   updateChecker,
 		packageUploader: packageUploader,
 		control:         control,
 		tools:           o.tools,
+		backgroundJobs:  backgroundJobs,
 		browserMgr:      browserMgr,
 		mediaRegister:   mediaRegister,
 		workgroupWorker: wgWorker,
@@ -482,6 +497,17 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string) {
 	if s == nil || reg == nil {
 		return
+	}
+	if s.backgroundJobs != nil {
+		bindErr := error(nil)
+		if reg == s.tools {
+			bindErr = reg.WithBackgroundJobStore(s.backgroundJobs)
+		} else {
+			bindErr = reg.WithBackgroundJobStoreForSession(s.backgroundJobs, targetAgentID)
+		}
+		if bindErr != nil && s.logger != nil {
+			s.logger.Warn("agent tools background job store bind failed", "error", bindErr)
+		}
 	}
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
 	attachWeComRuntime(reg, s.cfg)
@@ -607,6 +633,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.tools != nil {
 			_ = s.tools.CloseBrowser()
 		}
+		if s.backgroundJobs != nil {
+			_ = s.backgroundJobs.Close()
+		}
 		if s.store != nil {
 			_ = s.store.Close()
 		}
@@ -675,6 +704,9 @@ func (s *Server) Close() {
 	}
 	if s.tools != nil {
 		_ = s.tools.CloseBrowser()
+	}
+	if s.backgroundJobs != nil {
+		_ = s.backgroundJobs.Close()
 	}
 	if s.store != nil {
 		_ = s.store.Close()
@@ -815,24 +847,24 @@ type contextMessagePreview struct {
 }
 
 type sessionContextResponse struct {
-	AgentID               string                  `json:"agent_id"`
-	MessagesCount         int                     `json:"messages_count"`
-	PendingToolCallsCount int                     `json:"pending_tool_calls_count"`
-	MessagesTotalTokens   int                     `json:"messages_total_tokens"`
-	ToolLoopCount         int                     `json:"tool_loop_count"`
-	QueuePending          int                     `json:"queue_pending"`
-	HasActiveTurn         bool                    `json:"has_active_turn"`
-	TurnState             string                  `json:"turn_state,omitempty"`
-	RunTurnPhase                   string                  `json:"run_turn_phase"`
-	SystemPrompt                   string                  `json:"system_prompt,omitempty"`
-	SystemPromptEstimatedTokens    int                     `json:"system_prompt_estimated_tokens"`
-	SkillsCatalogEstimatedTokens        int                     `json:"skills_catalog_estimated_tokens"`
-	SkillsCatalogMaxBodyEstimatedTokens int                     `json:"skills_catalog_max_body_estimated_tokens"`
-	SkillsCatalogBloatThreshold         int                     `json:"skills_catalog_bloat_threshold"`
-	LoadedSkills                   []skills.LoadedSkill    `json:"loaded_skills"`
-	RecentMessages                 []contextMessagePreview `json:"recent_messages"`
-	Messages                       *[]contextMessagePreview `json:"messages,omitempty"`
-	LastCompression                *compression.LastCompressionSnapshot `json:"last_compression,omitempty"`
+	AgentID                             string                               `json:"agent_id"`
+	MessagesCount                       int                                  `json:"messages_count"`
+	PendingToolCallsCount               int                                  `json:"pending_tool_calls_count"`
+	MessagesTotalTokens                 int                                  `json:"messages_total_tokens"`
+	ToolLoopCount                       int                                  `json:"tool_loop_count"`
+	QueuePending                        int                                  `json:"queue_pending"`
+	HasActiveTurn                       bool                                 `json:"has_active_turn"`
+	TurnState                           string                               `json:"turn_state,omitempty"`
+	RunTurnPhase                        string                               `json:"run_turn_phase"`
+	SystemPrompt                        string                               `json:"system_prompt,omitempty"`
+	SystemPromptEstimatedTokens         int                                  `json:"system_prompt_estimated_tokens"`
+	SkillsCatalogEstimatedTokens        int                                  `json:"skills_catalog_estimated_tokens"`
+	SkillsCatalogMaxBodyEstimatedTokens int                                  `json:"skills_catalog_max_body_estimated_tokens"`
+	SkillsCatalogBloatThreshold         int                                  `json:"skills_catalog_bloat_threshold"`
+	LoadedSkills                        []skills.LoadedSkill                 `json:"loaded_skills"`
+	RecentMessages                      []contextMessagePreview              `json:"recent_messages"`
+	Messages                            *[]contextMessagePreview             `json:"messages,omitempty"`
+	LastCompression                     *compression.LastCompressionSnapshot `json:"last_compression,omitempty"`
 }
 
 func buildContextMessagePreviews(messages []llm.Message, maxRunes int) []contextMessagePreview {
@@ -879,22 +911,22 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 	}
 	recent := buildContextMessagePreviews(view.Messages[start:], contextMessagePreviewRunes)
 	resp := sessionContextResponse{
-		AgentID:               view.SessionID,
-		MessagesCount:         view.MessagesCount,
-		PendingToolCallsCount: view.PendingToolCallsCount,
-		MessagesTotalTokens:   view.MessagesTotalTokens,
-		ToolLoopCount:         view.ToolLoopCount,
-		QueuePending:          view.QueuePending,
-		HasActiveTurn:         view.HasActiveTurn,
-		SystemPrompt:                 view.SystemPrompt,
-		SystemPromptEstimatedTokens:  view.SystemPromptEstimatedTokens,
+		AgentID:                             view.SessionID,
+		MessagesCount:                       view.MessagesCount,
+		PendingToolCallsCount:               view.PendingToolCallsCount,
+		MessagesTotalTokens:                 view.MessagesTotalTokens,
+		ToolLoopCount:                       view.ToolLoopCount,
+		QueuePending:                        view.QueuePending,
+		HasActiveTurn:                       view.HasActiveTurn,
+		SystemPrompt:                        view.SystemPrompt,
+		SystemPromptEstimatedTokens:         view.SystemPromptEstimatedTokens,
 		SkillsCatalogEstimatedTokens:        view.SkillsCatalogEstimatedTokens,
 		SkillsCatalogMaxBodyEstimatedTokens: view.SkillsCatalogMaxBodyEstimatedTokens,
 		SkillsCatalogBloatThreshold:         view.SkillsCatalogBloatThreshold,
-		LoadedSkills:                 view.LoadedSkills,
-		RecentMessages:               recent,
-		LastCompression:              view.LastCompression,
-		RunTurnPhase:                 turn.RunTurnPhase(view.TurnState),
+		LoadedSkills:                        view.LoadedSkills,
+		RecentMessages:                      recent,
+		LastCompression:                     view.LastCompression,
+		RunTurnPhase:                        turn.RunTurnPhase(view.TurnState),
 	}
 	if queryBoolParam(r, "full_messages") {
 		msgs := buildContextMessagePreviews(view.Messages, contextMessagePreviewRunes)

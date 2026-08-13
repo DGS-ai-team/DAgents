@@ -3,6 +3,8 @@ import DOMPurifyModule from "dompurify";
 import hljs from "highlight.js/lib/common";
 
 const renderer = new marked.Renderer();
+const MARKDOWN_CACHE_LIMIT = 256;
+const markdownCache = new Map();
 const sanitizer =
   typeof DOMPurifyModule === "function"
     ? typeof window !== "undefined"
@@ -50,10 +52,17 @@ marked.setOptions({
 
 export function renderMarkdown(text) {
   const source = String(text || "").replace(/\r\n?/g, "\n");
+  const cached = markdownCache.get(source);
+  if (cached !== undefined) return cached;
   const html = marked.parse(source);
-  return sanitizer
+  const rendered = sanitizer
     ? sanitizer.sanitize(html, { ADD_ATTR: ["target", "rel"] })
     : html;
+  markdownCache.set(source, rendered);
+  if (markdownCache.size > MARKDOWN_CACHE_LIMIT) {
+    markdownCache.delete(markdownCache.keys().next().value);
+  }
+  return rendered;
 }
 
 export function formatNumber(n) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 type backgroundJobIDArgs struct {
@@ -76,6 +77,7 @@ func (r *Registry) execBackgroundJobCancel(_ context.Context, raw json.RawMessag
 		return fmt.Sprintf("ERROR: 未找到后台任务：%q", args.JobID), nil
 	}
 	msg := job.cancelJob()
+	job.waitDone(5 * time.Second)
 	// 超时降级的 collector 在 cancelled 时不会 notifyDone；工具取消也必须回灌。
 	if r.bgJobs != nil {
 		r.bgJobs.notifyJobDone(job)

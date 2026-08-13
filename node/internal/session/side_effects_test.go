@@ -186,6 +186,65 @@ func TestSideEffectFIFOApplyOrder(t *testing.T) {
 	}
 }
 
+func TestDuplicateAsyncResultIsAppliedOnce(t *testing.T) {
+	mgr := testManager(t)
+	defer mgr.Stop()
+
+	sess, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := mgr.getRuntime(sess.ID)
+	rt.mu.Lock()
+	rt.messages = []llm.Message{
+		{Role: "user", Content: "run in background"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{
+			ID: "call-background-duplicate",
+			Function: llm.ToolCallFunction{
+				Name:      "bash_run",
+				Arguments: `{"run_in_background":true}`,
+			},
+		}}},
+		{Role: "tool", ToolCallID: "call-background-duplicate", Content: "[TOOL_BACKGROUND] job_id=job-duplicate"},
+	}
+	rt.mu.Unlock()
+
+	payload := queue.AsyncToolResultPayload{
+		JobID:      "job-duplicate",
+		ToolName:   "bash_run",
+		ToolCallID: "async-job-duplicate",
+		Status:     "succeeded",
+		ResultText: "done",
+	}
+	for i := 0; i < 2; i++ {
+		if err := mgr.EnqueueAsyncToolResult(sess.ID, payload); err != nil {
+			t.Fatalf("async result %d enqueue: %v", i+1, err)
+		}
+	}
+	waitQueueDrain(t, rt, 3*time.Second)
+	if rt.sideEffects.Len() != 1 {
+		t.Fatalf("buffer len=%d, want one callback after duplicate enqueue", rt.sideEffects.Len())
+	}
+
+	_ = mgr.CancelTurn(sess.ID)
+	waitQueueDrain(t, rt, 8*time.Second)
+
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.sideEffects.HasReady() {
+		t.Fatal("duplicate async result remained buffered")
+	}
+	callbackResults := 0
+	for _, msg := range rt.messages {
+		if strings.Contains(msg.Content, "[ASYNC_TOOL_RESULT]") && strings.Contains(msg.Content, "job_id=job-duplicate") {
+			callbackResults++
+		}
+	}
+	if callbackResults != 1 {
+		t.Fatalf("duplicate async result produced %d callback results, want 1", callbackResults)
+	}
+}
+
 func waitQueueDrain(t *testing.T, rt *runtime, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)

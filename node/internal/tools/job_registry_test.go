@@ -224,6 +224,18 @@ func TestBashRunBackgroundSyncViaUI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		reg.CancelAllSessionJobs("sess-bg-ui")
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			counts := reg.SessionToolJobCounts("sess-bg-ui")
+			if counts.Running == 0 && counts.Background == 0 {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Logf("background cleanup still pending: %+v", reg.SessionToolJobCounts("sess-bg-ui"))
+	}()
 	reg.bashHardLimitSec = 30
 	ctx := WithToolCallID(WithSession(context.Background(), "sess-bg-ui"), "call-bg-1")
 	done := make(chan string, 1)
@@ -473,5 +485,29 @@ func TestNotifyJobDoneIdempotent(t *testing.T) {
 	reg.notifyJobDone(job)
 	if n != 1 {
 		t.Fatalf("notify count=%d want 1", n)
+	}
+}
+
+func TestBackgroundJobTerminalStateCannotBeOverwritten(t *testing.T) {
+	job := &backgroundJob{status: jobStatusRunning}
+
+	job.mu.Lock()
+	if !job.transitionStatusLocked(jobStatusCancelled, "cancelled") {
+		job.mu.Unlock()
+		t.Fatal("expected running job to transition to cancelled")
+	}
+	if job.transitionStatusLocked(jobStatusSucceeded, "late success") {
+		job.mu.Unlock()
+		t.Fatal("terminal job accepted a late success transition")
+	}
+	status := job.status
+	result := job.result
+	job.mu.Unlock()
+
+	if status != jobStatusCancelled {
+		t.Fatalf("status=%q want cancelled", status)
+	}
+	if result != "cancelled" {
+		t.Fatalf("result=%q want cancelled", result)
 	}
 }
