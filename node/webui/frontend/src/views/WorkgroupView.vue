@@ -51,6 +51,8 @@ const scrollTail = createFollowTailController({ threshold: 80 });
 let timelineResizeObserver = null;
 /** 编排态：成员回报折叠展开态（key = assign_id / event_id） */
 const expandedMemberReports = ref({});
+/** 编排态：Supervisor 成员任务详情展开态（默认折叠） */
+const expandedAssignTasks = ref({});
 
 const memberModalOpen = ref(false);
 const memberModalMode = ref("create");
@@ -1077,6 +1079,12 @@ function previewMemberReport(text) {
   return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw;
 }
 
+function previewAssignTask(text) {
+  const raw = String(text || "").trim().replace(/\s+/g, " ");
+  if (!raw) return "分派任务";
+  return raw.length > 96 ? `${raw.slice(0, 96)}…` : raw;
+}
+
 /** 解析编排态 assign_started：新格式 `@名\\n任务`；兼容旧 `→ 名 · 摘要` */
 function parseAssignStartedText(text) {
   const raw = String(text || "").trim();
@@ -1157,6 +1165,23 @@ function toggleMemberReport(key) {
   };
 }
 
+function isAssignTaskExpanded(key) {
+  return Boolean(expandedAssignTasks.value[key]);
+}
+
+function toggleAssignTask(key) {
+  if (!key) return;
+  expandedAssignTasks.value = {
+    ...expandedAssignTasks.value,
+    [key]: !expandedAssignTasks.value[key],
+  };
+}
+
+function taskDetailsId(item) {
+  const key = String(item?.taskToggleKey || item?.key || "task").replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `wg-task-details-${key}`;
+}
+
 function parseNoticeTool(text) {
   const raw = String(text || "").trim();
   if (!raw) return { toolName: "tool", summary: "工具调用" };
@@ -1234,6 +1259,8 @@ function makeAssignItem(started, finished, notices, isDirect, memberFinal) {
     reportPreview: previewMemberReport(reportText),
     reportActorLabel,
     reportToggleKey: assignId || (started || finished)?.event_id || "",
+    taskPreview: previewAssignTask(taskText),
+    taskToggleKey: assignId || (started || finished)?.event_id || "",
   };
 }
 
@@ -1267,6 +1294,9 @@ function renderItemToken(item) {
   const expanded = item?.reportToggleKey
     ? expandedMemberReports.value[item.reportToggleKey] ? 1 : 0
     : 0;
+  const taskExpanded = item?.taskToggleKey
+    ? expandedAssignTasks.value[item.taskToggleKey] ? 1 : 0
+    : 0;
   return [
     item?.key,
     item?.kind,
@@ -1279,6 +1309,7 @@ function renderItemToken(item) {
     item?.tool,
     item?.reportText?.length || 0,
     expanded,
+    taskExpanded,
     lastStep?.key,
     lastStep?.statusText,
     lastStep?.inProgress ? 1 : 0,
@@ -1615,6 +1646,7 @@ watch(
     cancelling.value = false;
     statusWatermarkSeq.value = 0;
     expandedMemberReports.value = {};
+    expandedAssignTasks.value = {};
     clearLive();
     if (streamAbort) {
       try {
@@ -1853,7 +1885,30 @@ onUnmounted(() => {
                     </div>
                     <div class="wg-task__card">
                       <div class="wg-task__head">
-                        <span class="wg-task__label">任务</span>
+                        <button
+                          type="button"
+                          class="wg-task__toggle"
+                          :aria-expanded="isAssignTaskExpanded(item.taskToggleKey)"
+                          :aria-controls="taskDetailsId(item)"
+                          :aria-label="
+                            isAssignTaskExpanded(item.taskToggleKey)
+                              ? '收起任务详情'
+                              : '展开任务详情'
+                          "
+                          @click="toggleAssignTask(item.taskToggleKey)"
+                        >
+                          <span class="wg-task__label">任务</span>
+                          <span class="wg-task__preview">
+                            {{
+                              isAssignTaskExpanded(item.taskToggleKey)
+                                ? item.taskText
+                                : item.taskPreview
+                            }}
+                          </span>
+                          <span class="wg-task__chevron" aria-hidden="true">
+                            {{ isAssignTaskExpanded(item.taskToggleKey) ? "▾" : "▸" }}
+                          </span>
+                        </button>
                         <span class="wg-task__status">
                           <BrandActivityIndicator
                             v-if="!item.done"
@@ -1867,8 +1922,17 @@ onUnmounted(() => {
                           {{ item.statusText }}
                         </span>
                       </div>
-                      <div class="wg-task__body">{{ item.taskText }}</div>
-                      <div v-if="item.steps?.length" class="wg-task__steps">
+                      <div
+                        v-if="isAssignTaskExpanded(item.taskToggleKey)"
+                        :id="taskDetailsId(item)"
+                        class="wg-task__details"
+                      >
+                        <div class="wg-task__body">{{ item.taskText }}</div>
+                      </div>
+                      <div
+                        v-if="isAssignTaskExpanded(item.taskToggleKey) && item.steps?.length"
+                        class="wg-task__steps"
+                      >
                         <div
                           v-for="step in item.steps"
                           :key="step.key"
@@ -2743,6 +2807,29 @@ onUnmounted(() => {
   gap: 10px;
   padding: 8px 12px 0;
 }
+.wg-task__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wg-task__toggle:hover .wg-task__preview,
+.wg-task__toggle:focus-visible .wg-task__preview {
+  color: var(--color-primary, #0078d4);
+}
+.wg-task__toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary, #0078d4) 45%, transparent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
 .wg-task__label {
   flex: 0 0 auto;
   font-size: 11px;
@@ -2750,6 +2837,23 @@ onUnmounted(() => {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-text-subtle, #9ca3af);
+}
+.wg-task__preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted, #6b7280);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.12s ease;
+}
+.wg-task__chevron {
+  flex: 0 0 auto;
+  color: var(--color-text-subtle, #9ca3af);
+  font-size: 12px;
+  line-height: 1;
 }
 .wg-task__status {
   flex: 0 1 auto;
@@ -2780,6 +2884,12 @@ onUnmounted(() => {
   color: var(--color-text, #111827);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.wg-task__details {
+  border-top: 1px solid var(--color-border, #e5e7eb);
+}
+.wg-task__details .wg-task__body {
+  padding-top: 10px;
 }
 .wg-task__steps {
   display: flex;
