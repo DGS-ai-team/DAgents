@@ -764,13 +764,14 @@ defineExpose({
                 :title="`${memberLabel(m)} · ${m.status || ''}`"
                 @click="openWorkgroup(wg.workgroup_id)"
               >
-                <span class="nav-rail__member-mark" :data-status="m.status" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" width="13" height="13" fill="none">
-                    <circle cx="8" cy="5.1" r="2.1" stroke="currentColor" stroke-width="1.2" />
+                <span class="nav-rail__member-mark" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                    <rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.15" />
+                    <circle cx="8" cy="8" r="1.25" fill="currentColor" />
                     <path
-                      d="M3.1 13c.5-2.3 2.2-3.5 4.9-3.5s4.4 1.2 4.9 3.5"
+                      d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5"
                       stroke="currentColor"
-                      stroke-width="1.2"
+                      stroke-width="1.15"
                       stroke-linecap="round"
                     />
                   </svg>
