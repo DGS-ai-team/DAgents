@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
+	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 )
@@ -63,7 +63,9 @@ func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "externaltools_menu.md"), []byte("# tools\n\n| x | y |\n| a | b |\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cliDir, "mycli"), []byte("#!/bin/sh\ntrue"), 0o755); err != nil {
+	// On Windows executable discovery is extension-based, so use a portable
+	// command-file name instead of relying on POSIX executable permission bits.
+	if err := os.WriteFile(filepath.Join(cliDir, "mycli.cmd"), []byte("@echo off\r\nexit /b 0\r\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	hostsnapshot.CaptureAtStartup()
@@ -71,7 +73,7 @@ func TestBuildSystemPrompt_includesExternalTools(t *testing.T) {
 		AgentID: "ops-01",
 		FSRoot:  root,
 	})
-	if !containsAll(prompt, "外置 CLI 与工具", "mycli", "externaltools_menu.md", "编译好的二进制") {
+	if !containsAll(prompt, "外置 CLI 与工具", "mycli.cmd", "externaltools_menu.md", "编译好的二进制") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 }
@@ -158,7 +160,7 @@ type promptInjectHook struct {
 	t *testing.T
 }
 
-func (h promptInjectHook) Name() string    { return "test.prompt.inject" }
+func (h promptInjectHook) Name() string          { return "test.prompt.inject" }
 func (h promptInjectHook) Phases() []hooks.Phase { return []hooks.Phase{hooks.PhasePromptBuild} }
 func (h promptInjectHook) Run(_ context.Context, hc *hooks.Context, _ hooks.Host) (hooks.Result, error) {
 	base := ""

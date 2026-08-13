@@ -55,8 +55,8 @@ func TestPolicyToolHookModes(t *testing.T) {
 	}{
 		{"never read", "read_file", nil, policy.ModeNever, policy.ActionAuto},
 		{"always write", "write_file", map[string]any{"path": "x"}, policy.ModeAlways, policy.ActionRequireApproval},
-		{"rule bash auto", "bash_run", map[string]any{"command": "echo ok"}, policy.ModeRule, policy.ActionAuto},
-		{"rule bash require", "bash_run", map[string]any{"command": "git status"}, policy.ModeRule, policy.ActionRequireApproval},
+		{"rule bash auto", "bash_run", map[string]any{"command": "echo ok", "shell_type": "bash"}, policy.ModeRule, policy.ActionAuto},
+		{"rule bash require", "bash_run", map[string]any{"command": "git status", "shell_type": "bash"}, policy.ModeRule, policy.ActionRequireApproval},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

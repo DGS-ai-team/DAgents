@@ -715,6 +715,11 @@ func (c *Config) NodeSettingsDBPath() string {
 	return filepath.Join(c.RuntimeDir(), "node_settings.db")
 }
 
+// BackgroundJobsDBPath returns the persistent shell/background job database.
+func (c *Config) BackgroundJobsDBPath() string {
+	return filepath.Join(c.RuntimeDir(), "background_jobs.db")
+}
+
 // AgentsDir 返回 Agent 实例目录根（`<runtime>/agents`）。
 func (c *Config) AgentsDir() string {
 	return filepath.Join(c.RuntimeDir(), "agents")

@@ -53,13 +53,13 @@ func TestBashDenyPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.DecideTool("bash_run", map[string]any{"command": "rm -rf /tmp/x"}) != ActionDeny {
+	if e.DecideTool("bash_run", map[string]any{"command": "rm -rf /tmp/x", "shell_type": "bash"}) != ActionDeny {
 		t.Fatal("rm should deny")
 	}
-	if e.DecideTool("bash_run", map[string]any{"command": "echo ok && rm x"}) != ActionDeny {
+	if e.DecideTool("bash_run", map[string]any{"command": "echo ok && rm x", "shell_type": "bash"}) != ActionDeny {
 		t.Fatal("mixed pipeline with deny segment should deny")
 	}
-	if e.DecideTool("bash_run", map[string]any{"command": "echo ok"}) != ActionAuto {
+	if e.DecideTool("bash_run", map[string]any{"command": "echo ok", "shell_type": "bash"}) != ActionAuto {
 		t.Fatal("echo should auto")
 	}
 }

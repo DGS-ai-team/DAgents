@@ -25,7 +25,13 @@ const (
 
 // Envelope 为单条入队载荷。
 type Envelope struct {
-	RequestType              string
+	RequestType string
+	// SessionEpoch 用于使 clear-context 之前排队的事件失效。
+	SessionEpoch uint64
+	// TurnID/Generation 仅用于需要绑定当前 turn 的内部 continuation。
+	// 外部事实事件（async callback、trigger）只绑定 SessionEpoch。
+	TurnID                   string
+	Generation               uint64
 	Content                  string
 	ContentParts             []llm.ContentPart
 	UserName                 string // request_type=message 时写入 llm.Message.Name；空串由 runtime 规范为 human

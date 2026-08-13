@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // syncShellGate 允许 UI 在同步等待期间请求终止或转后台。
@@ -225,6 +226,7 @@ func (r *Registry) cancelBackgroundBashByToolCall(sessionID, toolCallID string) 
 		return ErrSyncShellNotBash
 	}
 	_ = job.cancelJob()
+	job.waitDone(5 * time.Second)
 	// collector 在 status=cancelled 时不会 notifyDone；此处一律回灌（幂等）。
 	r.bgJobs.notifyJobDone(job)
 	return nil

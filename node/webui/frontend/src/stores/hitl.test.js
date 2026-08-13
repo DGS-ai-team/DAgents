@@ -251,6 +251,38 @@ describe("approvalQueueKey", () => {
   });
 });
 
+describe("approval queue idempotence", () => {
+  it("collapses repeated SSE for the same approval batch", () => {
+    clearHitl();
+    const data = {
+      approval_id: "hitl-repeat",
+      approval_args: {
+        tool_calls: [{ id: "call-repeat", name: "bash_run", arguments: { command: "echo hi" } }],
+      },
+    };
+    enqueueHitl({ kind: "approval", data });
+    enqueueHitl({ kind: "approval", data: { ...data } });
+    expect(hitlStore.queue).toHaveLength(1);
+    expect(hitlStore.queue[0].data.approval_id).toBe("hitl-repeat");
+    clearHitl();
+  });
+
+  it("keeps multiple tool calls in one approval card", () => {
+    clearHitl();
+    const { approval } = expandHitlRequired({
+      hitl_id: "hitl-batch",
+      items: [
+        { hitl_type: "execute_tool", id: "call-a", name: "read_file", raw_arguments: "{}" },
+        { hitl_type: "execute_tool", id: "call-b", name: "bash_run", raw_arguments: "{}" },
+      ],
+    });
+    enqueueHitl({ kind: "approval", data: approval });
+    expect(hitlStore.queue).toHaveLength(1);
+    expect(extractToolApprovals(hitlStore.queue[0].data)).toHaveLength(2);
+    clearHitl();
+  });
+});
+
 describe("dequeueHitlAt", () => {
   it("removes the item at the given index", () => {
     clearHitl();

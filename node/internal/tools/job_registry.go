@@ -26,6 +26,7 @@ type backgroundJob struct {
 	// bash 超时自动降级：保留子进程由 collector 收割。
 	autoDegraded       bool
 	bashCmd            *exec.Cmd
+	processTree        processTreeHandle
 	bashCwd            string
 	bashTimeout        int
 	bashStdout         string
@@ -36,6 +37,59 @@ type backgroundJob struct {
 	compressStats      *OutputCompressStats
 	// notifyOnce 保证完成/取消只回灌一次（collector、cancel、降级竞态可并发触发）。
 	notifyOnce sync.Once
+}
+
+const (
+	jobStatusRunning   = "running"
+	jobStatusSucceeded = "succeeded"
+	jobStatusFailed    = "failed"
+	jobStatusCancelled = "cancelled"
+	jobStatusUnknown   = "unknown"
+)
+
+func isTerminalJobStatus(status string) bool {
+	switch status {
+	case jobStatusSucceeded, jobStatusFailed, jobStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+// transitionStatusLocked is the single terminal-state transition point.
+// Callers must hold job.mu. A terminal state cannot be overwritten by a
+// concurrent collector, timeout, or cancellation path.
+func (job *backgroundJob) transitionStatusLocked(next, result string) bool {
+	if job == nil || job.status != jobStatusRunning {
+		return false
+	}
+	if !isTerminalJobStatus(next) {
+		return false
+	}
+	job.status = next
+	if result != "" {
+		job.result = result
+	}
+	job.finishedAt = nowMs()
+	return true
+}
+
+func (job *backgroundJob) waitDone(timeout time.Duration) bool {
+	if job == nil || job.done == nil {
+		return true
+	}
+	if timeout <= 0 {
+		<-job.done
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-job.done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 // BackgroundJobDone 为后台任务完成时的结构化回灌载荷（由 session 转为 async_tool_result 入队）。
@@ -55,6 +109,7 @@ type backgroundJobRegistry struct {
 	mu     sync.RWMutex
 	jobs   map[string]*backgroundJob
 	onDone func(sessionID string, done BackgroundJobDone)
+	store  *BackgroundJobStore
 }
 
 // SetBackgroundJobNotifier 注册后台任务完成回调；session 层应转为 async_tool_result 入队。
@@ -71,6 +126,7 @@ func (reg *backgroundJobRegistry) put(job *backgroundJob) {
 	reg.mu.Lock()
 	reg.jobs[job.id] = job
 	reg.mu.Unlock()
+	reg.persist(job)
 }
 
 func (reg *backgroundJobRegistry) get(id string) (*backgroundJob, bool) {
@@ -93,7 +149,7 @@ func (reg *backgroundJobRegistry) countRunning(sessionID string) int {
 			continue
 		}
 		job.mu.Lock()
-		running := job.status == "running"
+		running := job.status == jobStatusRunning
 		jobSid := job.sessionID
 		job.mu.Unlock()
 		if !running {
@@ -120,7 +176,7 @@ func (reg *backgroundJobRegistry) runningCallIDs(sessionID string) []string {
 			continue
 		}
 		job.mu.Lock()
-		running := job.status == "running"
+		running := job.status == jobStatusRunning
 		jobSid := job.sessionID
 		callID := strings.TrimSpace(job.toolCallID)
 		job.mu.Unlock()
@@ -155,7 +211,7 @@ func (reg *backgroundJobRegistry) findRunningByToolCallID(sessionID, toolCallID 
 			continue
 		}
 		job.mu.Lock()
-		running := job.status == "running"
+		running := job.status == jobStatusRunning
 		jobSid := job.sessionID
 		jobCall := strings.TrimSpace(job.toolCallID)
 		job.mu.Unlock()
@@ -174,6 +230,39 @@ func newBackgroundJobRegistry() *backgroundJobRegistry {
 	return &backgroundJobRegistry{jobs: make(map[string]*backgroundJob)}
 }
 
+func newBackgroundJobRegistryWithStore(st *BackgroundJobStore, sessionID string) (*backgroundJobRegistry, error) {
+	reg := &backgroundJobRegistry{jobs: make(map[string]*backgroundJob), store: st}
+	if st == nil {
+		return reg, nil
+	}
+	jobs, err := st.load(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for _, job := range jobs {
+		if job != nil && strings.TrimSpace(job.id) != "" {
+			reg.jobs[job.id] = job
+		}
+	}
+	for _, job := range jobs {
+		if job != nil && job.status == jobStatusUnknown {
+			reg.persist(job)
+		}
+	}
+	return reg, nil
+}
+
+func (reg *backgroundJobRegistry) persist(job *backgroundJob) {
+	if reg == nil || reg.store == nil || job == nil {
+		return
+	}
+	if err := reg.store.save(job); err != nil {
+		// Persistence must not break command execution. The in-memory registry
+		// remains authoritative for the current process.
+		return
+	}
+}
+
 func (reg *backgroundJobRegistry) notifyDone(sessionID string, done BackgroundJobDone) {
 	reg.mu.RLock()
 	fn := reg.onDone
@@ -189,6 +278,7 @@ func (reg *backgroundJobRegistry) notifyJobDone(job *backgroundJob) {
 		return
 	}
 	job.notifyOnce.Do(func() {
+		reg.persist(job)
 		done := jobDonePayload(job)
 		job.mu.Lock()
 		sessionID := strings.TrimSpace(job.sessionID)
@@ -201,7 +291,7 @@ func (reg *backgroundJobRegistry) notifyJobDone(job *backgroundJob) {
 func jobDonePayloadLocked(job *backgroundJob) BackgroundJobDone {
 	result := job.result
 	errText := ""
-	if job.status == "failed" || job.status == "cancelled" {
+	if job.status == jobStatusFailed || job.status == jobStatusCancelled {
 		errText = result
 	}
 	done := BackgroundJobDone{
@@ -256,7 +346,7 @@ func (r *Registry) StartBackground(
 		sessionID:  sessionID,
 		toolName:   toolName,
 		toolCallID: toolCallID,
-		status:     "running",
+		status:     jobStatusRunning,
 		startedAt:  nowMs(),
 		done:       make(chan struct{}),
 		cancelFn:   cancel,
@@ -268,28 +358,24 @@ func (r *Registry) StartBackground(
 		defer cancel()
 		result, err := r.Execute(jobCtx, toolName, cleanedArgs)
 		job.mu.Lock()
-		if job.status == "cancelled" {
+		if job.status == jobStatusCancelled {
 			// cancelJob 已写入终态，不再覆盖。
 		} else if jobCtx.Err() == context.Canceled {
-			job.status = "cancelled"
+			job.transitionStatusLocked(jobStatusCancelled, "cancelled")
 			if job.result == "" {
 				job.result = "任务已取消。"
 			}
 		} else if err != nil {
-			job.result = err.Error()
-			if job.status == "running" {
-				job.status = "failed"
-			}
+			job.transitionStatusLocked(jobStatusFailed, err.Error())
 		} else {
-			job.result = result
-			if job.status == "running" {
-				job.status = "succeeded"
-			}
+			job.transitionStatusLocked(jobStatusSucceeded, result)
 		}
 		if stats := r.TakeBashCompressStatsForCall(toolCallID); stats != nil {
 			job.compressStats = outputCompressStatsFromSSEFields(stats)
 		}
-		job.finishedAt = nowMs()
+		if job.finishedAt == 0 && isTerminalJobStatus(job.status) {
+			job.finishedAt = nowMs()
+		}
 		job.mu.Unlock()
 		r.bgJobs.notifyJobDone(job)
 	}()
@@ -367,7 +453,7 @@ func (j *backgroundJob) statusText() string {
 	if j.autoDegraded {
 		lines = append(lines, "degraded_from_sync_timeout: true")
 	}
-	if j.status != "running" && j.result != "" {
+	if j.status != jobStatusRunning && j.result != "" {
 		preview, truncated := clipText(j.result, 2000)
 		lines = append(lines, "--- RESULT_PREVIEW ---", preview)
 		if truncated {
@@ -379,21 +465,33 @@ func (j *backgroundJob) statusText() string {
 
 func (j *backgroundJob) cancelJob() string {
 	j.mu.Lock()
-	defer j.mu.Unlock()
-	if j.status == "running" {
-		if j.bashCmd != nil && j.bashCmd.Process != nil && j.bashCmd.ProcessState == nil {
-			killShellProcess(j.bashCmd)
-		} else if j.cancelFn != nil {
-			j.cancelFn()
+	if j.status == jobStatusRunning {
+		if !j.transitionStatusLocked(jobStatusCancelled, "cancelled") {
+			status := j.status
+			j.mu.Unlock()
+			return fmt.Sprintf("[BACKGROUND_JOB_CANCELLED] job_id=%s status=%s", j.id, status)
 		}
-		j.status = "cancelled"
-		j.finishedAt = nowMs()
+		cmd := j.bashCmd
+		tree := j.processTree
+		cancel := j.cancelFn
+		id := j.id
+		j.mu.Unlock()
+		if cmd != nil && cmd.Process != nil && cmd.ProcessState == nil {
+			terminateProcessTree(cmd, tree)
+		} else if cancel != nil {
+			cancel()
+		}
+		j.mu.Lock()
 		if j.result == "" {
 			j.result = "任务已取消。"
 		}
-		return fmt.Sprintf("[BACKGROUND_JOB_CANCELLED] job_id=%s status=cancelled", j.id)
+		j.mu.Unlock()
+		return fmt.Sprintf("[BACKGROUND_JOB_CANCELLED] job_id=%s status=cancelled", id)
 	}
-	return fmt.Sprintf("[BACKGROUND_JOB_CANCELLED] job_id=%s status=%s", j.id, j.status)
+	id := j.id
+	status := j.status
+	j.mu.Unlock()
+	return fmt.Sprintf("[BACKGROUND_JOB_CANCELLED] job_id=%s status=%s", id, status)
 }
 
 func clipText(s string, limit int) (string, bool) {

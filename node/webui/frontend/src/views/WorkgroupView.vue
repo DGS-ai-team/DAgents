@@ -10,6 +10,7 @@ import { renderMarkdown } from "../utils/markdown.js";
 import { inferToolKind } from "../utils/toolSource.js";
 import { createFollowTailController, distanceFromTail } from "../utils/scrollTail.js";
 import brandIcon from "@dagents-brand/brand-icon.png";
+import { markWorkgroupRead, noteWorkgroupTimeline } from "../stores/unread.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -50,6 +51,8 @@ const scrollTail = createFollowTailController({ threshold: 80 });
 let timelineResizeObserver = null;
 /** 编排态：成员回报折叠展开态（key = assign_id / event_id） */
 const expandedMemberReports = ref({});
+/** 编排态：Supervisor 成员任务详情展开态（默认折叠） */
+const expandedAssignTasks = ref({});
 
 const memberModalOpen = ref(false);
 const memberModalMode = ref("create");
@@ -272,6 +275,12 @@ async function loadTimeline() {
     const res = await api.getWorkgroupTimeline(workgroupId.value);
     if (reqSeq !== timelineReqSeq) return;
     events.value = mergeTimelineEvents(res.events || []);
+    const latestSeq = events.value.reduce(
+      (max, event) => Math.max(max, Number(event?.seq || 0)),
+      0,
+    );
+    noteWorkgroupTimeline(workgroupId.value, latestSeq);
+    markWorkgroupRead(workgroupId.value, latestSeq);
     error.value = "";
   } catch (e) {
     if (reqSeq !== timelineReqSeq) return;
@@ -280,8 +289,17 @@ async function loadTimeline() {
 }
 
 function mergeTimelineEvents(incoming) {
+  const current = events.value || [];
+  const incomingList = Array.isArray(incoming) ? incoming : [];
+  if (incomingList.length === 1 && current.length) {
+    const next = incomingList[0];
+    const last = current[current.length - 1];
+    if (Number(next?.seq || 0) > Number(last?.seq || 0)) {
+      return [...current, next];
+    }
+  }
   const map = new Map();
-  for (const event of events.value || []) {
+  for (const event of current) {
     if (String(event?.workgroup_id || "").trim() !== workgroupId.value) continue;
     const key = String(event?.event_id || event?.seq || "").trim();
     if (key) map.set(key, event);
@@ -296,6 +314,9 @@ function mergeTimelineEvents(incoming) {
 function applyTimelineEvent(event) {
   if (!event || String(event?.workgroup_id || "").trim() !== workgroupId.value) return;
   events.value = mergeTimelineEvents([event]);
+  const seq = Number(event?.seq || 0);
+  noteWorkgroupTimeline(workgroupId.value, seq);
+  markWorkgroupRead(workgroupId.value, seq);
   if (
     !sending.value &&
     remoteSending.value &&
@@ -446,6 +467,7 @@ function maybeScrollTimelineTail() {
 }
 
 function scrollTimelineTail() {
+  renderWindowStart.value = Math.max(0, eventGroups.value.length - MAX_RENDERED_GROUPS);
   nextTick(() => {
     scrollTail.forcePin(timelineEl.value);
     updateScrollToTailVisibility();
@@ -1057,6 +1079,12 @@ function previewMemberReport(text) {
   return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw;
 }
 
+function previewAssignTask(text) {
+  const raw = String(text || "").trim().replace(/\s+/g, " ");
+  if (!raw) return "分派任务";
+  return raw.length > 96 ? `${raw.slice(0, 96)}…` : raw;
+}
+
 /** 解析编排态 assign_started：新格式 `@名\\n任务`；兼容旧 `→ 名 · 摘要` */
 function parseAssignStartedText(text) {
   const raw = String(text || "").trim();
@@ -1093,6 +1121,7 @@ function buildAssignIndex(list) {
   const finishedByAssign = {};
   const startedByAssign = {};
   const memberFinalByAssign = {};
+  const noticeIndexByEventId = {};
   for (const ev of list || []) {
     const t = String(ev?.type || "");
     const aid = String(ev?.assign_id || "").trim();
@@ -1106,6 +1135,7 @@ function buildAssignIndex(list) {
     } else if (t === "system_notice") {
       noticeByAssign[aid] = ev;
       if (!noticesByAssign[aid]) noticesByAssign[aid] = [];
+      if (ev.event_id) noticeIndexByEventId[ev.event_id] = noticesByAssign[aid].length;
       noticesByAssign[aid].push(ev);
     } else if (t === "actor_final_text") {
       const actor = String(ev?.actor_id || "").trim();
@@ -1119,6 +1149,7 @@ function buildAssignIndex(list) {
     finishedByAssign,
     startedByAssign,
     memberFinalByAssign,
+    noticeIndexByEventId,
   };
 }
 
@@ -1132,6 +1163,23 @@ function toggleMemberReport(key) {
     ...expandedMemberReports.value,
     [key]: !expandedMemberReports.value[key],
   };
+}
+
+function isAssignTaskExpanded(key) {
+  return Boolean(expandedAssignTasks.value[key]);
+}
+
+function toggleAssignTask(key) {
+  if (!key) return;
+  expandedAssignTasks.value = {
+    ...expandedAssignTasks.value,
+    [key]: !expandedAssignTasks.value[key],
+  };
+}
+
+function taskDetailsId(item) {
+  const key = String(item?.taskToggleKey || item?.key || "task").replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `wg-task-details-${key}`;
 }
 
 function parseNoticeTool(text) {
@@ -1211,6 +1259,8 @@ function makeAssignItem(started, finished, notices, isDirect, memberFinal) {
     reportPreview: previewMemberReport(reportText),
     reportActorLabel,
     reportToggleKey: assignId || (started || finished)?.event_id || "",
+    taskPreview: previewAssignTask(taskText),
+    taskToggleKey: assignId || (started || finished)?.event_id || "",
   };
 }
 
@@ -1230,6 +1280,49 @@ function makeDirectToolItem(ev, { assignFinished, isLast, failed }) {
   };
 }
 
+function mixRenderHash(hash, value) {
+  let next = hash >>> 0;
+  const raw = String(value ?? "");
+  for (let i = 0; i < raw.length; i += 1) {
+    next = Math.imul(next ^ raw.charCodeAt(i), 16777619) >>> 0;
+  }
+  return next;
+}
+
+function renderItemToken(item) {
+  const lastStep = item?.steps?.[item.steps.length - 1];
+  const expanded = item?.reportToggleKey
+    ? expandedMemberReports.value[item.reportToggleKey] ? 1 : 0
+    : 0;
+  const taskExpanded = item?.taskToggleKey
+    ? expandedAssignTasks.value[item.taskToggleKey] ? 1 : 0
+    : 0;
+  return [
+    item?.key,
+    item?.kind,
+    item?.text?.length || item?.ev?.text?.length || 0,
+    item?.statusText,
+    item?.done ? 1 : 0,
+    item?.failed ? 1 : 0,
+    item?.streaming ? 1 : 0,
+    item?.phase,
+    item?.tool,
+    item?.reportText?.length || 0,
+    expanded,
+    taskExpanded,
+    lastStep?.key,
+    lastStep?.statusText,
+    lastStep?.inProgress ? 1 : 0,
+    lastStep?.failed ? 1 : 0,
+  ].join("|");
+}
+
+function appendGroupItem(group, item) {
+  group.items.push(item);
+  group.renderHash = mixRenderHash(group.renderHash, renderItemToken(item));
+  group.renderKey = `${group.bucket}|${group.label}|${group.items.length}|${group.renderHash}`;
+}
+
 /** 先按 assign_id 全局收口，再按 actor 分组；直连不展示分派壳，改为工具行 */
 const eventGroups = computed(() => {
   const list = events.value || [];
@@ -1239,6 +1332,7 @@ const eventGroups = computed(() => {
     finishedByAssign,
     startedByAssign,
     memberFinalByAssign,
+    noticeIndexByEventId,
   } = buildAssignIndex(list);
   const consumedFinished = new Set();
 
@@ -1315,7 +1409,7 @@ const eventGroups = computed(() => {
       const actorId = String(ev?.actor_id || "").trim();
       if (aid && directAssignIds.has(aid)) {
         const chain = noticesByAssign[aid] || [];
-        const idx = chain.findIndex((n) => n === ev || n.event_id === ev.event_id);
+        const idx = ev.event_id ? noticeIndexByEventId[ev.event_id] ?? -1 : -1;
         const isLast = idx < 0 || idx === chain.length - 1;
         const finished = finishedByAssign[aid] || null;
         const failed = finished ? /失败|中断/.test(String(finished.text || "")) : false;
@@ -1402,19 +1496,48 @@ const eventGroups = computed(() => {
     const bucket = `${row.role}:${row.actorId || "_"}`;
     const last = groups[groups.length - 1];
     if (last && last.bucket === bucket) {
-      last.items.push(row.item);
+      appendGroupItem(last, row.item);
       continue;
     }
-    groups.push({
+    const group = {
       key: `${bucket}-${row.item.key}`,
       bucket,
       role: row.role,
       label: row.label,
       items: [row.item],
-    });
+      renderHash: mixRenderHash(2166136261, renderItemToken(row.item)),
+    };
+    group.renderKey = `${group.bucket}|${group.label}|1|${group.renderHash}`;
+    groups.push(group);
   }
   return groups;
 });
+
+const MAX_RENDERED_GROUPS = 180;
+const renderWindowStart = ref(0);
+const hasEarlierMessages = computed(
+  () => eventGroups.value.length > MAX_RENDERED_GROUPS && renderWindowStart.value > 0,
+);
+const earlierMessageCount = computed(() => Math.max(0, renderWindowStart.value));
+const renderedEventGroups = computed(() => {
+  const groups = eventGroups.value;
+  if (groups.length <= MAX_RENDERED_GROUPS) return groups;
+  const start = Math.min(
+    Math.max(0, renderWindowStart.value),
+    Math.max(0, groups.length - MAX_RENDERED_GROUPS),
+  );
+  return groups.slice(start, start + MAX_RENDERED_GROUPS);
+});
+
+function loadEarlierMessages() {
+  const el = timelineEl.value;
+  const beforeHeight = el?.scrollHeight || 0;
+  const beforeTop = el?.scrollTop || 0;
+  renderWindowStart.value = Math.max(0, renderWindowStart.value - MAX_RENDERED_GROUPS);
+  nextTick(() => {
+    if (el) el.scrollTop = beforeTop + Math.max(0, el.scrollHeight - beforeHeight);
+  });
+}
 
 const liveStatusLabel = computed(() => {
   if (!sending.value && !remoteSending.value) return "";
@@ -1489,12 +1612,28 @@ watch(timelineTailKey, () => {
   maybeScrollTimelineTail();
 });
 
+let previousEventGroupCount = 0;
+watch(eventGroups, (groups) => {
+  const count = groups.length;
+  if (scrollTail.follow && count > previousEventGroupCount) {
+    renderWindowStart.value = Math.max(0, count - MAX_RENDERED_GROUPS);
+  } else {
+    renderWindowStart.value = Math.min(
+      renderWindowStart.value,
+      Math.max(0, count - MAX_RENDERED_GROUPS),
+    );
+  }
+  previousEventGroupCount = count;
+}, { immediate: true });
+
 watch(
   workgroupId,
   async (id) => {
     closeModelMenu();
     stopWorkgroupEventStream();
     workgroupEventSeq = 0;
+    renderWindowStart.value = 0;
+    previousEventGroupCount = 0;
     stopPoll();
     stopWorkPoll();
     scrollTail.setFollow(true);
@@ -1507,6 +1646,7 @@ watch(
     cancelling.value = false;
     statusWatermarkSeq.value = 0;
     expandedMemberReports.value = {};
+    expandedAssignTasks.value = {};
     clearLive();
     if (streamAbort) {
       try {
@@ -1674,22 +1814,10 @@ onUnmounted(() => {
               aria-label="调试"
               @click="toggleDebugPanel"
             >
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                <path
-                  d="M6.2 2.5h3.6M8 2.5v2.2M4.4 6.2h7.2v5.6a1.6 1.6 0 0 1-1.6 1.6H6a1.6 1.6 0 0 1-1.6-1.6V6.2z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M4.4 8.2H2.8M13.2 8.2h-1.6M4.4 10.6H2.8M13.2 10.6h-1.6M6.4 12.2v1.3M9.6 12.2v1.3"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linecap="round"
-                />
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+                <path d="M7 4.5h10a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M8.5 8h7M8.5 11.5h7M8.5 15h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="m15.8 15.2 1.3 1.3 2.5-2.7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
           </div>
@@ -1711,9 +1839,18 @@ onUnmounted(() => {
             class="wg-chat__timeline chat__stream"
             @scroll="onTimelineScroll"
           >
+            <button
+              v-if="hasEarlierMessages"
+              type="button"
+              class="wg-chat__load-earlier"
+              @click="loadEarlierMessages"
+            >
+              加载更早的 {{ earlierMessageCount }} 条消息
+            </button>
             <article
-              v-for="group in eventGroups"
+              v-for="group in renderedEventGroups"
               :key="group.key"
+              v-memo="[group.renderKey]"
               class="msg"
               :class="[
                 group.role === 'user' ? 'msg--user' : 'msg--assistant',
@@ -1748,7 +1885,30 @@ onUnmounted(() => {
                     </div>
                     <div class="wg-task__card">
                       <div class="wg-task__head">
-                        <span class="wg-task__label">任务</span>
+                        <button
+                          type="button"
+                          class="wg-task__toggle"
+                          :aria-expanded="isAssignTaskExpanded(item.taskToggleKey)"
+                          :aria-controls="taskDetailsId(item)"
+                          :aria-label="
+                            isAssignTaskExpanded(item.taskToggleKey)
+                              ? '收起任务详情'
+                              : '展开任务详情'
+                          "
+                          @click="toggleAssignTask(item.taskToggleKey)"
+                        >
+                          <span class="wg-task__label">任务</span>
+                          <span class="wg-task__preview">
+                            {{
+                              isAssignTaskExpanded(item.taskToggleKey)
+                                ? item.taskText
+                                : item.taskPreview
+                            }}
+                          </span>
+                          <span class="wg-task__chevron" aria-hidden="true">
+                            {{ isAssignTaskExpanded(item.taskToggleKey) ? "▾" : "▸" }}
+                          </span>
+                        </button>
                         <span class="wg-task__status">
                           <BrandActivityIndicator
                             v-if="!item.done"
@@ -1762,8 +1922,17 @@ onUnmounted(() => {
                           {{ item.statusText }}
                         </span>
                       </div>
-                      <div class="wg-task__body">{{ item.taskText }}</div>
-                      <div v-if="item.steps?.length" class="wg-task__steps">
+                      <div
+                        v-if="isAssignTaskExpanded(item.taskToggleKey)"
+                        :id="taskDetailsId(item)"
+                        class="wg-task__details"
+                      >
+                        <div class="wg-task__body">{{ item.taskText }}</div>
+                      </div>
+                      <div
+                        v-if="isAssignTaskExpanded(item.taskToggleKey) && item.steps?.length"
+                        class="wg-task__steps"
+                      >
                         <div
                           v-for="step in item.steps"
                           :key="step.key"
@@ -2491,6 +2660,21 @@ onUnmounted(() => {
   min-height: 0;
   overflow: auto;
 }
+.wg-chat__load-earlier {
+  align-self: center;
+  margin: 10px auto 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 999px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text-muted, #6b7280);
+  font-size: 11px;
+  cursor: pointer;
+}
+.wg-chat__load-earlier:hover {
+  border-color: var(--color-primary, #0078d4);
+  color: var(--color-primary, #0078d4);
+}
 .wg-chat__timeline .msg__body {
   display: flex;
   flex-direction: column;
@@ -2623,6 +2807,29 @@ onUnmounted(() => {
   gap: 10px;
   padding: 8px 12px 0;
 }
+.wg-task__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wg-task__toggle:hover .wg-task__preview,
+.wg-task__toggle:focus-visible .wg-task__preview {
+  color: var(--color-primary, #0078d4);
+}
+.wg-task__toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary, #0078d4) 45%, transparent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
 .wg-task__label {
   flex: 0 0 auto;
   font-size: 11px;
@@ -2630,6 +2837,23 @@ onUnmounted(() => {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-text-subtle, #9ca3af);
+}
+.wg-task__preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted, #6b7280);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.12s ease;
+}
+.wg-task__chevron {
+  flex: 0 0 auto;
+  color: var(--color-text-subtle, #9ca3af);
+  font-size: 12px;
+  line-height: 1;
 }
 .wg-task__status {
   flex: 0 1 auto;
@@ -2660,6 +2884,12 @@ onUnmounted(() => {
   color: var(--color-text, #111827);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.wg-task__details {
+  border-top: 1px solid var(--color-border, #e5e7eb);
+}
+.wg-task__details .wg-task__body {
+  padding-top: 10px;
 }
 .wg-task__steps {
   display: flex;

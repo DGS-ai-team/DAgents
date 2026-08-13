@@ -101,6 +101,9 @@ func (r *runtime) handleSideEffectContinue(parent context.Context, source string
 		return
 	}
 	r.sideEffects.clearContinuePending()
+	// A side-effect continuation is created by enqueue(), which binds it to the
+	// current turn generation. If cancellation invalidated that generation, the
+	// envelope is discarded before this handler is reached.
 
 	if strings.TrimSpace(source) == "" {
 		source = "side_effect_continue"

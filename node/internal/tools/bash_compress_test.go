@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -95,7 +96,11 @@ func TestBashRunIntegrationCompress(t *testing.T) {
 	}
 	reg.SetBashCompress(DefaultBashCompressConfig())
 	ctx := WithToolCallID(t.Context(), "call-compress-test")
-	out, err := reg.Execute(ctx, "bash_run", `{"command":"printf '\\x1b[31mhello\\x1b[0m\\nworld\\n'"}`)
+	args := `{"command":"yes same | head -n 100","shell_type":"bash"}`
+	if runtime.GOOS == "windows" {
+		args = `{"command":"1..100 | ForEach-Object { Write-Output 'same' }","shell_type":"powershell"}`
+	}
+	out, err := reg.Execute(ctx, "bash_run", args)
 	if err != nil {
 		t.Fatal(err)
 	}
