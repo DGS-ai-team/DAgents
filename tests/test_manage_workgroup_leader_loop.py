@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from datetime import datetime
@@ -149,6 +150,159 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertIn("[scripted] 读 README", tool.content or "")
             self.assertIn("\"status\": \"succeeded\"", tool.content or "")
 
+    def test_supervisor_session_reuses_complete_history_across_turns(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.llm_chat import ChatResult, ChatToolCall
+
+            first_text = "先查看当前成员列表"
+            second_text = "请@worker读取 README"
+            client = MockLLMClient(
+                [
+                    ChatResult(
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_list_history",
+                                name="list_workgroup_members",
+                                arguments="{}",
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="成员列表已确认", finish_reason="stop"),
+                    ChatResult(
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_assign_history",
+                                name="assign_workgroup_task",
+                                arguments=json.dumps(
+                                    {"member_id": mid, "instruction": "读取 README"},
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="任务已完成", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(store, chat_client=client, mock_llm=True)
+
+            first = kernel.handle_human_message(wid, text=first_text, from_node_id="node-a")
+            second = kernel.handle_human_message(wid, text=second_text, from_node_id="node-a")
+
+            self.assertEqual(first["loop"]["status"], "succeeded")
+            self.assertEqual(second["loop"]["status"], "succeeded")
+            leader_runs = [r for r in store._runs.values() if r.actor_id == "leader"]  # noqa: SLF001
+            self.assertEqual(len(leader_runs), 1)
+            history = store.get_run_history(leader_runs[0].run_id)
+            assert history is not None
+            user_texts = [m.content for m in history.messages if m.role == "user"]
+            self.assertIn(first_text, user_texts)
+            self.assertIn(second_text, user_texts)
+            self.assertEqual(
+                [m.role for m in history.messages],
+                ["user", "user", "assistant", "tool", "assistant", "user", "assistant", "tool", "assistant"],
+            )
+
+            second_turn_messages = client.calls[2]["messages"]
+            second_turn_contents = [m.get("content") for m in second_turn_messages]
+            self.assertIn(first_text, second_turn_contents)
+            self.assertIn(second_text, second_turn_contents)
+            self.assertEqual(
+                [m.get("name") for m in second_turn_messages if m.get("role") == "tool"],
+                ["list_workgroup_members"],
+            )
+
+    def test_supervisor_keeps_current_input_through_tool_loop(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.llm_chat import ChatResult, ChatToolCall
+
+            human_text = "先看成员列表，再@worker读取 README"
+            client = MockLLMClient(
+                [
+                    ChatResult(
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_list_same_turn",
+                                name="list_workgroup_members",
+                                arguments="{}",
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_assign_same_turn",
+                                name="assign_workgroup_task",
+                                arguments=json.dumps(
+                                    {"member_id": mid, "instruction": "读取 README"},
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="任务已完成", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(store, chat_client=client, mock_llm=True)
+            result = kernel.handle_human_message(wid, text=human_text, from_node_id="node-a")
+
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            for call in client.calls:
+                self.assertIn(human_text, [m.get("content") for m in call["messages"]])
+            history = store.get_run_history(result["leader_run"].run_id)
+            assert history is not None
+            self.assertEqual(
+                [m.role for m in history.messages],
+                ["user", "user", "assistant", "tool", "assistant", "tool", "assistant"],
+            )
+
+    def test_supervisor_session_history_survives_store_reload(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            db_path = Path(tmp) / "m.db"
+            store1 = WorkGroupStore(db=SQLiteDatabase(db_path))
+            group, _ = store1.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="Reload",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            wid = group.workgroup_id
+            store1.publish_workgroup(wid)
+            first_client = MockLLMClient([ChatResult(content="第一轮", finish_reason="stop")])
+            first = TurnKernel(store1, chat_client=first_client, mock_llm=True).handle_human_message(
+                wid,
+                text="第一条消息",
+                from_node_id="node-a",
+                disable_tools=True,
+            )
+            first_run_id = first["leader_run"].run_id
+
+            store2 = WorkGroupStore(db=SQLiteDatabase(db_path))
+            second_client = MockLLMClient([ChatResult(content="第二轮", finish_reason="stop")])
+            second = TurnKernel(store2, chat_client=second_client, mock_llm=True).handle_human_message(
+                wid,
+                text="第二条消息",
+                from_node_id="node-a",
+                disable_tools=True,
+            )
+
+            self.assertEqual(second["leader_run"].run_id, first_run_id)
+            history = store2.get_run_history(first_run_id)
+            assert history is not None
+            user_texts = [m.content for m in history.messages if m.role == "user"]
+            self.assertIn("第一条消息", user_texts)
+            self.assertIn("第二条消息", user_texts)
+            self.assertIn("第一条消息", [m.get("content") for m in second_client.calls[0]["messages"]])
+
     def test_human_message_events_stream_deltas(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
@@ -208,6 +362,7 @@ class LeaderLoopTests(unittest.TestCase):
             member_script = mock_member_script_read_file_then_answer(
                 path="README",
                 final_text="标题是 Demo",
+                call_purpose="读取 README 的标题",
             )
             kernel = TurnKernel(
                 store,
@@ -241,6 +396,15 @@ class LeaderLoopTests(unittest.TestCase):
             ]
             self.assertTrue(any(event_type == "status" for event_type, _data in member_live))
             self.assertTrue(any(event_type == "delta" for event_type, _data in member_live))
+            tool_statuses = [
+                data for event_type, data in member_live if event_type == "status" and data.get("phase") == "tool"
+            ]
+            self.assertTrue(tool_statuses)
+            self.assertEqual(tool_statuses[0].get("purpose"), "读取 README 的标题")
+            self.assertNotIn("tool", tool_statuses[0])
+            self.assertNotIn("tool_name", tool_statuses[0])
+            notices = [e.text for e in timeline if e.type == "system_notice" and e.actor_id == mid]
+            self.assertEqual(notices, ["读取 README 的标题"])
 
             runs = [r for r in store._runs.values() if r.actor_id == mid]  # noqa: SLF001
             self.assertEqual(len(runs), 1)

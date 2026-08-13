@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 from manage.llm.store import LLMConfigStore
 from manage.workgroup.builtin_hooks import (
     TODAY_DATE_MESSAGE_NAME,
     ensure_today_date_in_messages,
+    format_today_date_message,
     package_tool_result,
 )
 from manage.workgroup.errors import WorkgroupError
@@ -26,13 +28,14 @@ from manage.workgroup.history import (
 from manage.workgroup.llm_chat import ChatResult, ChatToolCall, LLMChatClient, resolve_chat_client
 from manage.workgroup.member_tools import (
     build_member_system_prompt,
+    call_purpose_from_arguments,
     host_env_from_registry,
     member_openai_tools,
+    purpose_for_tool,
 )
 from manage.workgroup.mentions import resolve_direct_member
 from manage.workgroup.models import (
     ActorRun,
-    ActorRunCreateRequest,
     Assign,
     AssignCreateRequest,
     WorkGroup,
@@ -49,6 +52,17 @@ _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE = (
     "已超过单轮工具调用次数，请先给出当前结论以及进度，"
     "询问用户是否要继续后续的推进，下一轮开始时工具累计次数会重置。"
 )
+
+_LEADER_TOOL_PURPOSE = {
+    "list_workgroup_members": "查看成员",
+    "assign_workgroup_task": "分派成员任务",
+    "ask_workgroup_user": "询问用户",
+}
+
+
+def leader_tool_purpose(tool_name: str) -> str:
+    """Return a parameter-free purpose for a Supervisor progress bubble."""
+    return _LEADER_TOOL_PURPOSE.get((tool_name or "").strip(), "协调工作组")
 
 _LEADER_SYSTEM_RULES = (
     "你是工作组 Leader（Supervisor）。"
@@ -440,9 +454,11 @@ class TurnKernel:
         }
 
     def start_leader_run(self, workgroup_id: str, *, llm_profile_revision: str | None = None) -> ActorRun:
-        return self._store.create_actor_run(
+        """Return the workgroup's persistent Supervisor session."""
+        return self._store.get_or_create_actor_session(
             workgroup_id,
-            ActorRunCreateRequest(actor_id="leader", llm_profile_revision=llm_profile_revision),
+            actor_id="leader",
+            llm_profile_revision=llm_profile_revision,
         )
 
     def assign_member(self, workgroup_id: str, req: AssignCreateRequest) -> Assign:
@@ -591,6 +607,7 @@ class TurnKernel:
                 text=item.text,
                 client_message_id=item.client_message_id,
                 protocol_name=protocol_name_for_actor(item.from_node_id),
+                direct_member_id=item.direct_member_id,
             )
             yield {
                 "event": "human",
@@ -615,11 +632,23 @@ class TurnKernel:
                 queue_id=item.queue_id,
                 client_message_id=item.client_message_id,
             )
-            run = self._store.find_running_leader_run(workgroup_id) or self.start_leader_run(
-                workgroup_id
+            run = self._store.get_or_create_actor_session(
+                workgroup_id,
+                actor_id="leader",
             )
+            run = self._store.prepare_actor_session(run.run_id)
             self._update_turn(workgroup_id, leader_run_id=run.run_id)
             self._store.ensure_run_history(run)
+            self._heal_open_tool_calls(
+                run.run_id,
+                reason="previous leader tool turn interrupted; synthetic error result",
+            )
+            self._append_session_user_message(
+                run.run_id,
+                content=item.text,
+                name=event.protocol_name or protocol_name_for_actor(item.from_node_id),
+                timeline_event_seq=event.seq,
+            )
             loop_result: dict[str, Any] | None = None
             try:
                 for ev in self.run_leader_until_idle_events(
@@ -688,7 +717,7 @@ class TurnKernel:
         if turn_token:
             begin_kwargs["turn_token"] = turn_token
         self._begin_turn(workgroup_id, mode="direct", **begin_kwargs)
-        yield {"event": "status", "data": {"phase": "tool", "tool": "直达成员", "mode": "direct"}}
+        yield {"event": "status", "data": {"phase": "tool", "purpose": "直连成员", "mode": "direct"}}
 
         tool_call_id = "call_direct_1"
         assign = self._store.create_assign(
@@ -1007,18 +1036,14 @@ class TurnKernel:
 
             tool_msgs: list[RunHistoryMessage] = []
             for tc in result.tool_calls:
-                tool_label = tc.name
-                if tc.name == "assign_workgroup_task":
-                    tool_label = "成员执行任务"
-                elif tc.name == "ask_workgroup_user":
-                    tool_label = "询问用户"
                 yield {
                     "event": "status",
                     "data": {
                         "phase": "tool",
-                        "tool": tool_label,
-                        "tool_name": tc.name,
-                        "tool_call_id": tc.id,
+                        "purpose": call_purpose_from_arguments(
+                            tc.arguments,
+                            leader_tool_purpose(tc.name),
+                        ),
                     },
                 }
                 try:
@@ -1089,6 +1114,13 @@ class TurnKernel:
         name = str(getattr(event, "protocol_name", "") or "").strip()
         if not name:
             name = protocol_name_for_actor(str(getattr(event, "actor_id", "") or ""))
+        if any(
+            str(message.get("role") or "") == "user"
+            and str(message.get("content") or "") == content
+            and str(message.get("name") or "") == name
+            for message in messages
+        ):
+            return messages
         return [*messages, {"role": "user", "name": name, "content": content}]
 
     def run_member_until_idle(
@@ -1270,46 +1302,25 @@ class TurnKernel:
                     "status",
                     {
                         "phase": "tool",
-                        "tool": name,
+                        "purpose": call_purpose_from_arguments(
+                            tc.arguments,
+                            purpose_for_tool(name),
+                        ),
                         "mode": "member",
                         "member_id": member_id,
                     },
                     client_message_id=client_message_id,
                 )
-                # 轻量进度：公开 Timeline 只写工具名，不含参数/结果；名字由 UI 按 actor 聚合展示
+                # 轻量进度：公开 Timeline 只写脱敏 purpose，不含工具名、参数或结果。
                 try:
-                    hint = name
-                    if name in {
-                        "read_file",
-                        "write_file",
-                        "glob_files",
-                        "grep_file",
-                        "grep_files",
-                        "search_replace",
-                        "show_image",
-                        "read_image",
-                        "bash_run",
-                    }:
-                        try:
-                            args = json.loads(tc.arguments or "{}")
-                        except (TypeError, json.JSONDecodeError):
-                            args = {}
-                        path = str(
-                            args.get("path")
-                            or args.get("directory")
-                            or args.get("command")
-                            or args.get("pattern")
-                            or ""
-                        ).strip()
-                        if path:
-                            if len(path) > 48:
-                                path = path[:45] + "…"
-                            hint = f"{name} · {path}"
                     self._store.append_timeline(
                         workgroup_id,
                         type="system_notice",
                         actor_id=member_id,
-                        text=hint,
+                        text=call_purpose_from_arguments(
+                            tc.arguments,
+                            purpose_for_tool(name),
+                        ),
                         protocol_name=protocol_name_for_actor(member_id),
                         assign_id=run.assign_id,
                     )
@@ -1378,6 +1389,53 @@ class TurnKernel:
         )
         return messages
 
+    def _append_session_user_message(
+        self,
+        run_id: str,
+        *,
+        content: str,
+        name: str | None = None,
+        timeline_event_seq: int | None = None,
+        assign_id: str | None = None,
+    ) -> None:
+        """Append one durable actor input before starting/resuming a Turn.
+
+        A persistent session must never rely on the temporary provider
+        message list for the current input.  The date hook is persisted before
+        the user/task message so subsequent tool loops see the same ordering.
+        """
+        run = self._store.get_actor_run(run_id)
+        if run is None:
+            raise WorkgroupError("not_found", "actor run not found", http_status=404)
+        history = self._store.ensure_run_history(run)
+        if timeline_event_seq is not None and any(
+            m.timeline_event_seq == timeline_event_seq for m in history.messages
+        ):
+            return
+        if assign_id and any(m.assign_id == assign_id for m in history.messages):
+            return
+        today = format_today_date_message(datetime.now().strftime("%Y%m%d"))
+        if not any(
+            m.role == "user" and (m.content or "").strip() == today
+            for m in history.messages
+        ):
+            self._store.append_run_history(
+                run_id,
+                [RunHistoryMessage(role="user", name=TODAY_DATE_MESSAGE_NAME, content=today)],
+            )
+        self._store.append_run_history(
+            run_id,
+            [
+                RunHistoryMessage(
+                    role="user",
+                    name=name,
+                    content=(content or "").strip() or "(empty)",
+                    timeline_event_seq=timeline_event_seq,
+                    assign_id=assign_id,
+                )
+            ],
+        )
+
     @staticmethod
     def _package_tool_content(
         content: str,
@@ -1394,7 +1452,13 @@ class TurnKernel:
         )
         return packed.for_history
 
-    def _heal_open_tool_calls(self, run_id: str, *, reason: str) -> list[str]:
+    def _heal_open_tool_calls(
+        self,
+        run_id: str,
+        *,
+        reason: str,
+        preserve_assign_id: str | None = None,
+    ) -> list[str]:
         """为中断留下的未配对 tool_call 补失败 result，并释放对应 active assign。"""
         run = self._store.get_actor_run(run_id)
         if run is None:
@@ -1415,6 +1479,7 @@ class TurnKernel:
                 run.workgroup_id,
                 reason=reason,
                 error_code="canceled",
+                exclude_assign_ids={preserve_assign_id} if preserve_assign_id else None,
             )
         except Exception:  # noqa: BLE001
             pass
@@ -1463,7 +1528,7 @@ def _public_realtime_data(event_type: str, data: Any) -> dict[str, Any] | None:
     if event_type == "status":
         return {
             key: raw[key]
-            for key in ("phase", "tool", "tool_name", "mode", "member_id")
+            for key in ("phase", "purpose", "mode", "member_id")
             if key in raw
         }
     if event_type == "delta":
@@ -1518,12 +1583,16 @@ def mock_leader_script_assign_then_answer(
 def mock_member_script_read_file_then_answer(
     *,
     path: str = "README",
+    call_purpose: str = "",
     final_text: str = "已读完",
 ) -> list[ChatResult]:
     """测试用：Member 先 read_file，再终态文本。"""
     import json
 
-    args = json.dumps({"path": path}, ensure_ascii=False)
+    payload = {"path": path}
+    if call_purpose:
+        payload["call_purpose"] = call_purpose
+    args = json.dumps(payload, ensure_ascii=False)
     return [
         ChatResult(
             content="",

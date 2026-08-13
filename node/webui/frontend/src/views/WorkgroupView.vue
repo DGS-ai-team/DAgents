@@ -354,7 +354,7 @@ function applyRemoteRealtime(payload) {
     remoteClientMessageId.value = liveMessageId;
     if (isNewRemoteTurn) liveAssistant.value = null;
     streamPhase.value = String(data.phase || "thinking");
-    streamToolName.value = String(data.tool || "");
+    streamToolName.value = String(data.purpose || "");
     streamMode.value = String(data.mode || "leader");
     streamActorId.value = String(
       data.member_id || (streamMode.value === "leader" ? "leader" : streamActorId.value),
@@ -765,7 +765,7 @@ async function send() {
     0,
   );
 
-  liveUser.value = { id: `live-user-${clientMessageId}`, text };
+  liveUser.value = { id: `live-user-${clientMessageId}`, text, directMemberId: directId };
   liveAssistant.value = { id: `live-asst-${clientMessageId}`, text: "" };
   streamPhase.value = "thinking";
   streamToolName.value = "";
@@ -798,7 +798,7 @@ async function send() {
             const phase = String(data?.phase || "thinking");
             streamPhase.value =
               phase === "tool" ? "tool" : phase === "streaming" ? "streaming" : "thinking";
-            streamToolName.value = String(data?.tool || "");
+            streamToolName.value = String(data?.purpose || "");
             if (data?.mode) streamMode.value = String(data.mode);
             if (data?.member_id) streamActorId.value = String(data.member_id);
             else if (streamMode.value === "leader") streamActorId.value = "leader";
@@ -1045,21 +1045,27 @@ function isHumanEvent(ev) {
   return String(ev?.type || "") === "human_message";
 }
 
-/** 用户气泡内 @提及 拆段，便于着色 */
-function splitUserMentionParts(text) {
+/** 只有结构化直达事件才高亮 @成员；普通文本中的 @ 保持原样。 */
+function splitUserMentionParts(text, directMemberId = "") {
   const raw = String(text || "");
   if (!raw) return [{ type: "text", text: "" }];
+  const memberId = String(directMemberId || "").trim();
+  const displayName = memberNameById.value[memberId] || "";
+  const token = displayName ? `@${displayName}` : "";
+  if (!memberId || !token) return [{ type: "text", text: raw }];
   const parts = [];
-  const re = /@[^\s@]+/g;
   let last = 0;
-  let m = re.exec(raw);
-  while (m) {
-    if (m.index > last) {
-      parts.push({ type: "text", text: raw.slice(last, m.index) });
+  let index = raw.indexOf(token);
+  while (index >= 0) {
+    const before = index === 0 ? " " : raw[index - 1];
+    const afterIndex = index + token.length;
+    const after = afterIndex >= raw.length ? " " : raw[afterIndex];
+    if (/\s/.test(before) && /\s/.test(after)) {
+      if (index > last) parts.push({ type: "text", text: raw.slice(last, index) });
+      parts.push({ type: "mention", text: token });
+      last = afterIndex;
     }
-    parts.push({ type: "mention", text: m[0] });
-    last = m.index + m[0].length;
-    m = re.exec(raw);
+    index = raw.indexOf(token, Math.max(afterIndex, index + 1));
   }
   if (last < raw.length) parts.push({ type: "text", text: raw.slice(last) });
   if (!parts.length) parts.push({ type: "text", text: raw });
@@ -1184,13 +1190,35 @@ function taskDetailsId(item) {
 
 function parseNoticeTool(text) {
   const raw = String(text || "").trim();
-  if (!raw) return { toolName: "tool", summary: "工具调用" };
+  if (!raw) return { toolName: "tool", summary: "执行成员工具" };
   const parts = raw.split(/\s*·\s*/);
   const toolName = String(parts[0] || "tool").trim() || "tool";
-  const detail = parts.slice(1).join(" · ").trim();
+  const purposeByTool = {
+    read_file: "读取文件",
+    show_image: "展示图片",
+    read_image: "分析图片",
+    write_file: "写入文件",
+    glob_files: "查找文件",
+    grep_file: "搜索内容",
+    grep_files: "搜索内容",
+    search_replace: "替换内容",
+    bash_run: "执行命令",
+    background_job_status: "查看后台任务",
+    background_job_cancel: "取消后台任务",
+  };
+  const knownToolNames = new Set(Object.keys(purposeByTool));
+  const purpose =
+    purposeByTool[toolName] ||
+    (Object.values(purposeByTool).includes(toolName)
+      ? toolName
+      : knownToolNames.has(toolName)
+        ? "执行成员工具"
+        : parts.length === 1
+          ? toolName
+          : "执行成员工具");
   return {
     toolName,
-    summary: detail ? `${toolName} ${detail}` : toolName,
+    summary: purpose,
   };
 }
 
@@ -1199,6 +1227,7 @@ function toolKindLabel(toolName) {
   if (kind === "fs") return "fs";
   if (kind === "shell") return "shell";
   if (kind === "browser") return "browser";
+  if (kind === "mcp") return "mcp";
   return "tool";
 }
 
@@ -1465,11 +1494,12 @@ const eventGroups = computed(() => {
         role: "user",
         actorId,
         label: selfNodeName.value || actorId,
-        item: {
-          key: liveUser.value.id,
-          kind: "live_user",
-          text: liveUser.value.text,
-        },
+      item: {
+        key: liveUser.value.id,
+        kind: "live_user",
+        text: liveUser.value.text,
+        directMemberId: liveUser.value.directMemberId,
+      },
       });
     }
   }
@@ -1549,8 +1579,8 @@ const liveStatusLabel = computed(() => {
   }
   if (streamPhase.value === "tool") {
     const tool = String(streamToolName.value || "").trim();
-    if (tool === "成员执行任务" || tool === "assign_workgroup_task") return "成员执行任务…";
-    if (tool === "询问用户" || tool === "ask_workgroup_user") return "等待你的回答…";
+    if (tool === "分派成员任务") return "成员执行任务…";
+    if (tool === "询问用户") return "等待你的回答…";
     if (tool.startsWith("直达") || streamMode.value === "direct") return "直连成员工作中…";
     return tool ? `${tool}…` : "工具执行中…";
   }
@@ -1565,7 +1595,7 @@ const liveStatusLabel = computed(() => {
     const t = String(ev?.type || "");
     if (t === "assign_started" && isDirectAssignEvent(ev)) sawDirect = true;
     if (t === "system_notice") {
-      return String(ev?.text || "").trim() || "成员工作中…";
+      return parseNoticeTool(ev?.text).summary || "成员工作中…";
     }
     if (t === "assign_started") {
       const txt = String(ev?.text || "").trim();
@@ -1930,7 +1960,7 @@ onUnmounted(() => {
                         <div class="wg-task__body">{{ item.taskText }}</div>
                       </div>
                       <div
-                        v-if="isAssignTaskExpanded(item.taskToggleKey) && item.steps?.length"
+                        v-if="item.steps?.length"
                         class="wg-task__steps"
                       >
                         <div
@@ -1948,7 +1978,6 @@ onUnmounted(() => {
                               <span v-else-if="step.failed" class="wg-tool-row__mark">−</span>
                               <span v-else class="wg-tool-row__check">✓</span>
                             </span>
-                            <span class="wg-tool-row__kind">{{ step.toolKind || "tool" }}</span>
                             <span class="wg-tool-row__text">{{ step.summary }}</span>
                             <span class="wg-tool-row__status">
                               <BrandActivityIndicator
@@ -2008,7 +2037,6 @@ onUnmounted(() => {
                         <span v-else-if="item.failed" class="wg-tool-row__mark">−</span>
                         <span v-else class="wg-tool-row__check">✓</span>
                       </span>
-                      <span class="wg-tool-row__kind">{{ item.toolKind || "tool" }}</span>
                       <span class="wg-tool-row__text">{{ item.summary }}</span>
                       <span class="wg-tool-row__status">
                         <BrandActivityIndicator
@@ -2033,7 +2061,7 @@ onUnmounted(() => {
                     class="msg__bubble msg__bubble--user"
                   >
                     <template
-                      v-for="(part, pi) in splitUserMentionParts(item.text)"
+                      v-for="(part, pi) in splitUserMentionParts(item.text, item.directMemberId)"
                       :key="pi"
                     >
                       <span v-if="part.type === 'mention'" class="wg-msg-at">{{ part.text }}</span>
@@ -2070,7 +2098,7 @@ onUnmounted(() => {
                   >
                     <template v-if="isHumanEvent(item.ev)">
                       <template
-                        v-for="(part, pi) in splitUserMentionParts(item.ev.text)"
+                        v-for="(part, pi) in splitUserMentionParts(item.ev.text, item.ev.direct_member_id)"
                         :key="pi"
                       >
                         <span v-if="part.type === 'mention'" class="wg-msg-at">{{ part.text }}</span>

@@ -5,7 +5,7 @@ import { resolveToolVisual } from "../utils/toolSource.js";
 import { statusStore } from "../stores/statusLines.js";
 import { isReadFileTool } from "../utils/readFilePreview.js";
 import { toolDisplayName, resolveToolArgumentsFromData } from "../utils/toolCalls.js";
-import { toolStepUserSummary } from "../utils/toolUserLabel.js";
+import { resolveToolStepPhase, toolStepUserSummary } from "../utils/toolUserLabel.js";
 import ReadFileResultPreview from "./ReadFileResultPreview.vue";
 import ImageResultPreview from "./ImageResultPreview.vue";
 import { hasToolMedia, isShowImageTool } from "../utils/showImage.js";
@@ -98,16 +98,26 @@ const elapsedLive = computed(() => {
   if (!isCall.value || !props.entry.partial || !props.entry.startedAt) return "";
   return formatToolElapsed((Date.now() - props.entry.startedAt) / 1000);
 });
+const toolPhase = computed(() =>
+  resolveToolStepPhase({
+    callEntry: isCall.value ? props.entry : null,
+    resultEntry: isResult.value ? props.entry : null,
+  }),
+);
+const isGenerating = computed(() => toolPhase.value === "generating");
+const isInterrupted = computed(() => interrupted.value || toolPhase.value === "interrupted");
 const statusText = computed(() => {
   if (props.entry.sideEffectApplied) return "已入库";
   if (props.entry.sideEffectStale) return "已失效";
   if (isCall.value) {
-    if (interrupted.value) return "已中断";
-    if (props.entry.partial) return elapsedLive.value ? `生成中${elapsedLive.value}` : "生成中";
+    if (isInterrupted.value) return "已中断";
+    if (toolPhase.value === "generating") return elapsedLive.value ? `生成中${elapsedLive.value}` : "生成中";
+    if (toolPhase.value === "background") return "后台执行中";
+    if (toolPhase.value === "running") return "执行中";
     return "执行中";
   }
   if (rejected.value) return "已拒绝";
-  if (interrupted.value) return "已中断";
+  if (isInterrupted.value) return "已中断";
   const bashStatus = String(props.entry.data?.content || "").match(/\[BASH_RESULT\]\s+status=([A-Za-z_]+)/i);
   if (bashStatus && bashStatus[1].toUpperCase() === "CANCELLED") return "已终止";
   if (bashStatus && bashStatus[1].toUpperCase() === "RUNNING") return "后台执行中";
@@ -144,9 +154,9 @@ function toggleOutput() {
           <div class="tool-exec-bubble__head">
             <span class="tool-exec-bubble__name">{{ toolTitle }}</span>
             <span class="tool-exec-bubble__status">
-              <span v-if="isCall && entry.partial" class="tool-exec-spinner" aria-hidden="true" />
+              <span v-if="isGenerating" class="tool-exec-spinner" aria-hidden="true" />
               <span v-else class="tool-exec-status-icon tool-exec-status-icon--success" aria-hidden="true">{{
-                rejected || interrupted ? "−" : "✓"
+                rejected || isInterrupted ? "−" : "✓"
               }}</span>
               <span>{{ statusText }}</span>
             </span>

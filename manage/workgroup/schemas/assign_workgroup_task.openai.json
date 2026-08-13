@@ -7,10 +7,15 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "call_purpose",
         "member_id",
         "instruction"
       ],
       "properties": {
+        "call_purpose": {
+          "type": "string",
+          "description": "Required. Briefly explain the purpose of this tool call; shown in the workgroup progress UI."
+        },
         "member_id": {
           "type": "string",
           "pattern": "^mb_[0-9a-z]{26}$"

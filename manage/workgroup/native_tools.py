@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.history import build_assign_tool_result_content
+from manage.workgroup.member_tools import CALL_PURPOSE_KEY
 from manage.workgroup.models import AssignCreateRequest
 from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.store import WorkGroupStore
@@ -41,7 +42,13 @@ def leader_native_tools() -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "additionalProperties": False,
-                    "properties": {},
+                    "properties": {
+                        CALL_PURPOSE_KEY: {
+                            "type": "string",
+                            "description": "Required. Briefly explain the purpose of this tool call; shown in the workgroup progress UI.",
+                        },
+                    },
+                    "required": [CALL_PURPOSE_KEY],
                 },
             },
         },
@@ -60,9 +67,13 @@ def leader_native_tools() -> list[dict[str, Any]]:
                         "prompt": {
                             "type": "string",
                             "description": "Question shown to the user.",
-                        }
+                        },
+                        CALL_PURPOSE_KEY: {
+                            "type": "string",
+                            "description": "Required. Briefly explain the purpose of this tool call; shown in the workgroup progress UI.",
+                        },
                     },
-                    "required": ["prompt"],
+                    "required": [CALL_PURPOSE_KEY, "prompt"],
                 },
             },
         },

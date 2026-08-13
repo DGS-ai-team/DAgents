@@ -725,6 +725,156 @@ class WorkGroupStore:
             lim = max(1, min(int(limit or 20), 100))
             return rows[:lim]
 
+    def find_latest_actor_run(self, workgroup_id: str, *, actor_id: str) -> ActorRun | None:
+        """Return the persistent session for an actor, if one exists.
+
+        ActorRun is the on-disk session record in the current D0.5 model.  A
+        completed run remains reusable; only an active run is considered busy
+        by TurnKernel's turn gate.
+        """
+        with self._lock:
+            self._ensure_loaded()
+            aid = str(actor_id or "").strip()
+            rows = [
+                r
+                for r in self._runs.values()
+                if r.workgroup_id == workgroup_id and r.actor_id == aid
+            ]
+            if not rows:
+                return None
+            rows.sort(key=lambda r: (r.created_at, r.run_id), reverse=True)
+            return rows[0]
+
+    def get_or_create_actor_session(
+        self,
+        workgroup_id: str,
+        *,
+        actor_id: str,
+        llm_profile_revision: str | None = None,
+    ) -> ActorRun:
+        """Get the workgroup-local persistent session for one actor."""
+        with self._lock:
+            self._ensure_loaded()
+            existing = self.find_latest_actor_run(workgroup_id, actor_id=actor_id)
+            if existing is not None:
+                self._consolidate_actor_session_history_unlocked(
+                    workgroup_id,
+                    actor_id=actor_id,
+                    target=existing,
+                )
+                return existing
+            return self.create_actor_run(
+                workgroup_id,
+                ActorRunCreateRequest(
+                    actor_id=actor_id,
+                    llm_profile_revision=llm_profile_revision,
+                ),
+            )
+
+    def _consolidate_actor_session_history_unlocked(
+        self,
+        workgroup_id: str,
+        *,
+        actor_id: str,
+        target: ActorRun,
+    ) -> None:
+        """Lazily merge pre-session ActorRuns into the persistent session.
+
+        Older builds created one ActorRun per turn.  Keeping those records is
+        useful for audit, but the next persistent session must see their full
+        message sequence.  This migration is idempotent because the merged
+        sequence is written to the target history as one snapshot.
+        """
+        rows = [
+            r
+            for r in self._runs.values()
+            if r.workgroup_id == workgroup_id and r.actor_id == str(actor_id or "").strip()
+        ]
+        rows.sort(key=lambda r: (r.created_at, r.run_id))
+        current = self._run_histories.get(target.run_id)
+        if current is not None and current.legacy_runs_consolidated:
+            return
+        merged: list[RunHistoryMessage] = []
+        max_watermark = 0
+        human_events = []
+        if actor_id == "leader":
+            human_events = [
+                event
+                for event in self._timeline.get(workgroup_id, [])
+                if event.type == "human_message"
+            ]
+            human_events.sort(key=lambda event: event.seq)
+        for index, row in enumerate(rows):
+            if index < len(human_events):
+                event = human_events[index]
+                if not any(
+                    message.timeline_event_seq == event.seq
+                    or (
+                        message.role == "user"
+                        and message.content == event.text
+                        and message.name == event.protocol_name
+                    )
+                    for message in merged
+                ):
+                    merged.append(
+                        RunHistoryMessage(
+                            role="user",
+                            name=event.protocol_name,
+                            content=event.text,
+                            timeline_event_seq=event.seq,
+                        )
+                    )
+            history = self._run_histories.get(row.run_id)
+            if history is not None:
+                merged.extend(history.messages)
+                max_watermark = max(max_watermark, int(history.timeline_watermark_seq or 0))
+            max_watermark = max(max_watermark, int(row.timeline_watermark_seq or 0))
+        updated_history = ActorRunHistory(
+            run_id=target.run_id,
+            workgroup_id=workgroup_id,
+            actor_id=target.actor_id,
+            messages=merged,
+            timeline_watermark_seq=max_watermark,
+            legacy_runs_consolidated=True,
+        )
+        self._run_histories[target.run_id] = updated_history
+        self._put(
+            "actor_run_histories",
+            target.run_id,
+            updated_history.model_dump_json(),
+            workgroup_id=workgroup_id,
+        )
+        updated_run = target.model_copy(
+            update={
+                "timeline_watermark_seq": max_watermark,
+                "checkpoint_ordinal": max(target.checkpoint_ordinal, len(merged)),
+            }
+        )
+        self._runs[target.run_id] = updated_run
+        self._put(
+            "actor_runs",
+            target.run_id,
+            updated_run.model_dump_json(),
+            workgroup_id=workgroup_id,
+        )
+
+    def prepare_actor_session(
+        self,
+        run_id: str,
+        *,
+        assign_id: str | None = None,
+    ) -> ActorRun:
+        """Reopen a persistent actor session for the next Turn/Assign."""
+        with self._lock:
+            self._ensure_loaded()
+            run = self._runs.get(run_id)
+            if run is None:
+                raise WorkgroupError("not_found", "actor run not found", http_status=404)
+            updated = run.model_copy(update={"status": "running", "assign_id": assign_id})
+            self._runs[run_id] = updated
+            self._put("actor_runs", run_id, updated.model_dump_json(), workgroup_id=updated.workgroup_id)
+            return updated
+
     def update_actor_run(
         self,
         run_id: str,
@@ -818,7 +968,13 @@ class WorkGroupStore:
             ]
             new_msgs = list(hist.messages) + added
             wm = hist.timeline_watermark_seq if timeline_watermark_seq is None else timeline_watermark_seq
-            updated = hist.model_copy(update={"messages": new_msgs, "timeline_watermark_seq": wm})
+            updated = hist.model_copy(
+                update={
+                    "messages": new_msgs,
+                    "timeline_watermark_seq": wm,
+                    "legacy_runs_consolidated": True,
+                }
+            )
             self._run_histories[run_id] = updated
             self._put(
                 "actor_run_histories",
@@ -957,6 +1113,7 @@ class WorkGroupStore:
         reason: str = "assign interrupted",
         error_code: str = "canceled",
         leader_tool_call_ids: set[str] | None = None,
+        exclude_assign_ids: set[str] | None = None,
     ) -> list[str]:
         """将组内仍 active 的 Assign 置为 failed；可按 leader_tool_call_id 过滤。"""
         with self._lock:
@@ -966,6 +1123,8 @@ class WorkGroupStore:
                 if assign.workgroup_id != workgroup_id:
                     continue
                 if assign.status not in {"queued", "running", "awaiting_hitl"}:
+                    continue
+                if exclude_assign_ids and assign.assign_id in exclude_assign_ids:
                     continue
                 if leader_tool_call_ids is not None:
                     if (assign.leader_tool_call_id or "") not in leader_tool_call_ids:
@@ -1009,6 +1168,7 @@ class WorkGroupStore:
         client_message_id: str | None = None,
         protocol_name: str | None = None,
         assign_id: str | None = None,
+        direct_member_id: str | None = None,
     ) -> TimelineEvent:
         listener: Callable[[TimelineEvent], None] | None = None
         with self._lock:
@@ -1033,6 +1193,7 @@ class WorkGroupStore:
                 client_message_id=client_message_id,
                 protocol_name=pname,
                 assign_id=assign_id,
+                direct_member_id=direct_member_id,
             )
             events.append(event)
             frame = self._new_timeline_outbox_frame_unlocked(event)

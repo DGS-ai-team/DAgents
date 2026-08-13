@@ -95,6 +95,15 @@ describe("toolStepStatusText", () => {
     ).toBe("已终止");
   });
 
+  it("shows interrupted for a tool result created by stream cancellation", () => {
+    const result = {
+      kind: "tool_result",
+      data: { tool_name: "bash_run", content: "流式输出被用户中断。" },
+    };
+    expect(resolveToolStepPhase({ resultEntry: result })).toBe("interrupted");
+    expect(toolStepStatusText({ resultEntry: result })).toBe("已中断");
+  });
+
   it("shows running for parallel tool_call without result", () => {
     const call = { kind: "tool_call", data: { tool_name: "read_file", tool_call_id: "c2" } };
     expect(toolStepStatusText({ callEntry: call, resultEntry: null })).toBe("执行中");
@@ -136,5 +145,27 @@ describe("toolStepStatusText", () => {
     };
     applyToolJobsSnapshot({ background: 1, background_call_ids: ["c9"] });
     expect(toolStepStatusText({ resultEntry: result })).toBe("后台执行中");
+  });
+
+  it("prefers a real running job over a stale partial tool call", () => {
+    const call = {
+      kind: "tool_call",
+      partial: true,
+      data: { tool_name: "bash_run", tool_call_id: "c-partial-running" },
+    };
+    applyToolJobsSnapshot({ running: 1, running_call_ids: ["c-partial-running"] });
+    expect(resolveToolStepPhase({ callEntry: call })).toBe("running");
+    expect(toolStepStatusText({ callEntry: call })).toBe("执行中");
+  });
+
+  it("shows background execution for a partial call already detached", () => {
+    const call = {
+      kind: "tool_call",
+      partial: true,
+      data: { tool_name: "bash_run", tool_call_id: "c-partial-background" },
+    };
+    applyToolJobsSnapshot({ background: 1, background_call_ids: ["c-partial-background"] });
+    expect(resolveToolStepPhase({ callEntry: call })).toBe("background");
+    expect(toolStepStatusText({ callEntry: call })).toBe("后台执行中");
   });
 });

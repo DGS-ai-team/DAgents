@@ -167,6 +167,9 @@ func runShellUntilDoneWithRegistry(r *Registry, ctx context.Context, params shel
 	closeProcessTree(tree)
 	outText := decodeShellOutput(stdout.Bytes(), params.outputEncoding)
 	errText := decodeShellOutput(stderr.Bytes(), params.outputEncoding)
+	if params.shellType == shellPowerShell {
+		errText = decodePowerShellCLIXML(errText)
+	}
 	out, stats := formatShellCompletedOutput(params, outText, errText, cmd.ProcessState, runErr)
 	return out, stats, nil
 }
@@ -305,6 +308,9 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 		job.mu.Lock()
 		job.bashStdout = decodeShellOutput(stdoutBuf.Bytes(), params.outputEncoding)
 		job.bashStderr = decodeShellOutput(stderrBuf.Bytes(), params.outputEncoding)
+		if params.shellType == shellPowerShell {
+			job.bashStderr = decodePowerShellCLIXML(job.bashStderr)
+		}
 		if stdoutErr != nil && job.bashStdout == "" {
 			job.bashStdout = stdoutErr.Error()
 		}

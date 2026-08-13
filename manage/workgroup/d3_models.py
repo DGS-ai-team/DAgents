@@ -31,6 +31,8 @@ class TimelineEvent(BaseModel):
     protocol_name: str | None = None
     # 成员最终产出绑定的 Assign（用于 Leader 去重）
     assign_id: str | None = None
+    # 结构化直达关系；仅由成员选择器写入，不能从 text 中推断。
+    direct_member_id: str | None = None
 
 
 class OutboxFrame(BaseModel):

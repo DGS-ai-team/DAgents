@@ -49,3 +49,15 @@ func TestEntriesFromLegacyMarkdown(t *testing.T) {
 		t.Fatalf("got %d entries", len(entries))
 	}
 }
+
+func TestEntriesFromLegacyMarkdownStripsEntryDate(t *testing.T) {
+	now := time.Date(2026, time.August, 13, 0, 0, 0, 0, time.UTC)
+	entries := EntriesFromLegacyMarkdown("- [lt-1] [20260813] a", now)
+	if len(entries) != 1 || entries[0].Content != "a" {
+		t.Fatalf("entries = %+v", entries)
+	}
+	entryDate := time.Date(2026, time.August, 13, 0, 0, 0, 0, time.UTC)
+	if !entries[0].CreatedAt.Equal(entryDate) || !entries[0].UpdatedAt.Equal(entryDate) {
+		t.Fatalf("entry timestamps = %+v", entries[0])
+	}
+}

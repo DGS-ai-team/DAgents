@@ -147,6 +147,49 @@ func TestCancelTurn(t *testing.T) {
 	}
 }
 
+func TestCancelTurnCancelsDetachedBashJobs(t *testing.T) {
+	mgr := testManager(t)
+	defer mgr.Stop()
+
+	s, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := mgr.SessionTools(s.ID)
+	if reg == nil {
+		t.Fatal("session tool registry is nil")
+	}
+	if _, err := reg.StartBackground(tools.WithSession(context.Background(), s.ID), s.ID, "bash_run", "call-detached", `{"command":"sleep 30"}`); err != nil {
+		t.Fatalf("start background bash: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		counts := reg.SessionToolJobCounts(s.ID)
+		if counts.Background > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("background job not registered: %+v", counts)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if !mgr.CancelTurn(s.ID) {
+		t.Fatal("expected cancel true for detached background job")
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		counts := reg.SessionToolJobCounts(s.ID)
+		if counts.Running == 0 && counts.Background == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("background job still active after turn cancel: %+v", counts)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 type slowMockLLM struct {
 	delay time.Duration
 }

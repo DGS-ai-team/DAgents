@@ -89,7 +89,6 @@ export function isBashBackgroundActive({ callEntry, resultEntry } = {}) {
 export function bashControlMode({ callEntry, resultEntry } = {}) {
   const name = toolNameFromEntry(callEntry) || toolNameFromEntry(resultEntry);
   if (name !== "bash_run") return null;
-  if (callEntry?.partial) return null;
   const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
   if (!id) return null;
   if (toolJobsStore.runningCallIds.includes(id)) return "running";
