@@ -130,7 +130,37 @@ describe("hydrateAgent lifecycle", () => {
     expect(transcriptStore.entries).toHaveLength(0);
     expect(hitlStore.queue).toHaveLength(0);
   });
+
+  it("clears stale frontend approvals when hydrate reports no pending HITL", async () => {
+    enqueueStaleApprovalForHydrateTest();
+    expect(hitlStore.queue).toHaveLength(1);
+    vi.mocked(api.getAgentHydrate).mockResolvedValueOnce({
+      transcript: [{ kind: "assistant", text: "done" }],
+      pending_hitl: null,
+      run_turn_phase: "complete",
+      has_active_turn: false,
+      sse_seq_hint: 20,
+      notify_seq: 20,
+    });
+
+    const data = await hydrateAgent();
+    expect(data?.pending_hitl).toBeNull();
+    expect(hitlStore.queue).toHaveLength(0);
+    expect(agentStore.awaitingTurn).toBe(false);
+  });
 });
+
+function enqueueStaleApprovalForHydrateTest() {
+  hitlStore.queue.push({
+    kind: "approval",
+    data: {
+      approval_id: "stale-hitl",
+      approval_args: {
+        tool_calls: [{ id: "stale-call", name: "bash_run", arguments: {} }],
+      },
+    },
+  });
+}
 
 describe("loadTranscriptFromHydrate", () => {
   beforeEach(() => {

@@ -2,11 +2,14 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/compression"
 	"github.com/DGS-ai-team/DAgents/node/internal/history"
@@ -24,6 +27,21 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
+
+func newContinuationID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("turn-%d", time.Now().UnixNano())
+	}
+	return "turn-" + hex.EncodeToString(b[:])
+}
+
+type continuationContextKey struct{}
+
+type continuationRef struct {
+	turnID     string
+	generation uint64
+}
 
 // Session 表示对外可见的 session 元数据。
 type Session struct {
@@ -54,15 +72,21 @@ type runtime struct {
 	started bool
 	done    chan struct{}
 
-	mu            sync.Mutex           // 互斥锁
-	state         turn.State           // 状态
-	turnCancel    context.CancelFunc   // 取消 turn 上下文
-	messages      []llm.Message        // 交互消息列表
-	loadedSkills  []skills.LoadedSkill // 加载的技能列表
-	pending       *turn.PendingHITL    // 暂停
-	toolLoopCount int                  // tool 循环计数
-	fsRoot        string               // 文件系统根路径
-	media         *media.Registry      // session 媒体索引（F-M1）
+	mu         sync.Mutex         // 互斥锁
+	state      turn.State         // 状态
+	turnCancel context.CancelFunc // 取消 turn 上下文
+	// sessionEpoch invalidates events queued before clear-context/rebuild.
+	sessionEpoch uint64
+	// turnID/generation identify internal continuations belonging to the active turn.
+	turnID              string
+	generation          uint64
+	continuationPending bool
+	messages            []llm.Message        // 交互消息列表
+	loadedSkills        []skills.LoadedSkill // 加载的技能列表
+	pending             *turn.PendingHITL    // 暂停
+	toolLoopCount       int                  // tool 循环计数
+	fsRoot              string               // 文件系统根路径
+	media               *media.Registry      // session 媒体索引（F-M1）
 
 	triggerDelivery triggers.DeliveryTracker // trigger 消息投递跟踪器
 
@@ -267,6 +291,9 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
+		if !r.acceptEnvelope(env) {
+			continue
+		}
 		// Trigger delivery 在 Apply 成功时清除，不在 dequeue 时清除。
 		switch env.RequestType {
 		case queue.RequestTypeResume:
@@ -292,13 +319,61 @@ func (r *runtime) consumeLoop(ctx context.Context) {
 }
 
 // enqueueToolResult 将 tool 结果入队
-func (r *runtime) enqueueToolResult(_ string) error {
-	return r.enqueue(queue.Envelope{RequestType: queue.RequestTypeToolResult}, queue.PriorityToolResult)
+func (r *runtime) enqueueToolResult(ctx context.Context, _ string) error {
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	r.mu.Lock()
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			r.mu.Unlock()
+			return ctx.Err()
+		default:
+		}
+	}
+	if ctx != nil {
+		if ref, ok := ctx.Value(continuationContextKey{}).(continuationRef); ok {
+			if r.turnID != ref.turnID || r.generation != ref.generation {
+				// The step which owns this callback was cancelled or superseded. Do
+				// not let a late orchestrator callback create a new turn.
+				r.mu.Unlock()
+				return nil
+			}
+		}
+	}
+	if r.turnID == "" {
+		r.turnID = newContinuationID()
+		r.generation++
+	}
+	r.continuationPending = true
+	env := queue.Envelope{
+		RequestType:  queue.RequestTypeToolResult,
+		SessionEpoch: r.sessionEpoch,
+		TurnID:       r.turnID,
+		Generation:   r.generation,
+	}
+	r.mu.Unlock()
+	if err := r.enqueue(env, queue.PriorityToolResult); err != nil {
+		r.mu.Lock()
+		if r.turnID == env.TurnID && r.generation == env.Generation {
+			r.continuationPending = false
+			r.turnID = ""
+			r.generation++
+		}
+		r.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 // scheduleToolResult 调度 tool 结果入队
 func (r *runtime) scheduleToolResult() error {
-	return r.enqueueToolResult(r.session.ID)
+	return r.enqueueToolResult(nil, r.session.ID)
 }
 
 // applyStepOutcome 应用步骤结果
@@ -315,6 +390,38 @@ func (r *runtime) applyStepOutcome(history *[]llm.Message, outcome turn.StepOutc
 	} else {
 		r.toolLoopCount = 0
 	}
+}
+
+// acceptEnvelope filters stale internal continuations while preserving external
+// facts for side-effect reconciliation after a turn is cancelled.
+func (r *runtime) acceptEnvelope(env queue.Envelope) bool {
+	r.mu.Lock()
+	epoch, turnID, generation := r.sessionEpoch, r.turnID, r.generation
+	validEpoch := env.SessionEpoch == 0 || env.SessionEpoch == epoch
+	validTurn := true
+	switch env.RequestType {
+	case queue.RequestTypeToolResult, queue.RequestTypeResume, queue.RequestTypeSideEffectContinue:
+		validTurn = env.TurnID != "" && env.TurnID == turnID && env.Generation == generation
+	}
+	if validEpoch && validTurn {
+		switch env.RequestType {
+		case queue.RequestTypeToolResult, queue.RequestTypeResume, queue.RequestTypeSideEffectContinue:
+			r.continuationPending = false
+		}
+	}
+	r.mu.Unlock()
+	if !validEpoch {
+		r.logger.Info("stale session event dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_epoch", env.SessionEpoch, "session_epoch", epoch)
+		return false
+	}
+	switch env.RequestType {
+	case queue.RequestTypeToolResult, queue.RequestTypeResume, queue.RequestTypeSideEffectContinue:
+		if !validTurn {
+			r.logger.Info("stale turn continuation dropped", "session_id", r.session.ID, "request_type", env.RequestType, "event_turn_id", env.TurnID, "turn_id", turnID, "event_generation", env.Generation, "generation", generation)
+			return false
+		}
+	}
+	return true
 }
 
 func (r *runtime) handleHumanMessage(parent context.Context, env queue.Envelope) {
@@ -487,6 +594,10 @@ func (r *runtime) clearMessages(ctx context.Context) {
 		r.sideEffects.ClearSession(r.session.ID, r.orch, r.triggerDelivery)
 	}
 	r.mu.Lock()
+	r.sessionEpoch++
+	r.turnID = ""
+	r.generation++
+	r.continuationPending = false
 	r.messages = nil
 	r.loadedSkills = nil
 	r.pending = nil
@@ -613,9 +724,45 @@ func (r *runtime) contextView() *ContextView {
 }
 
 func (r *runtime) enqueue(env queue.Envelope, priority queue.Priority) error {
+	r.mu.Lock()
+	if env.SessionEpoch == 0 {
+		env.SessionEpoch = r.sessionEpoch
+	}
+	internalContinuation := false
+	if env.RequestType == queue.RequestTypeResume || env.RequestType == queue.RequestTypeSideEffectContinue {
+		internalContinuation = true
+		if env.TurnID == "" {
+			if r.turnID == "" {
+				r.turnID = newContinuationID()
+				r.generation++
+			}
+			env.TurnID = r.turnID
+			env.Generation = r.generation
+		}
+	}
+	if internalContinuation && (env.SessionEpoch != r.sessionEpoch || env.TurnID != r.turnID || env.Generation != r.generation) {
+		// The producer raced with cancel/clear-context after it captured the
+		// continuation identity. Do not re-arm continuationPending or enqueue a
+		// continuation that can only be rejected by the consumer.
+		r.mu.Unlock()
+		return nil
+	}
+	if env.RequestType == queue.RequestTypeAsyncToolResult || env.RequestType == queue.RequestTypeTriggerMessage {
+		// External facts are intentionally not bound to turnID/generation, but
+		// they still belong to the current session epoch. This lets a cancelled
+		// turn reconcile them later without allowing clear-context events back in.
+		internalContinuation = false
+	}
+	if internalContinuation {
+		r.continuationPending = true
+	}
+	r.mu.Unlock()
 	if env.RequestType == queue.RequestTypeResume {
 		before := r.resumeDiagSnapshot()
 		err := r.queue.Enqueue(env, priority)
+		if err != nil {
+			r.clearContinuationIfCurrent(env)
+		}
 		after := r.resumeDiagSnapshot()
 		r.logger.Info("resume enqueued",
 			"session_id", r.session.ID,
@@ -633,7 +780,19 @@ func (r *runtime) enqueue(env queue.Envelope, priority queue.Priority) error {
 		)
 		return err
 	}
-	return r.queue.Enqueue(env, priority)
+	err := r.queue.Enqueue(env, priority)
+	if err != nil && internalContinuation {
+		r.clearContinuationIfCurrent(env)
+	}
+	return err
+}
+
+func (r *runtime) clearContinuationIfCurrent(env queue.Envelope) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.turnID == env.TurnID && r.generation == env.Generation {
+		r.continuationPending = false
+	}
 }
 
 type resumeDiagSnapshot struct {
@@ -708,25 +867,60 @@ func (r *runtime) cancelTurn() bool {
 	r.mu.Lock()
 	cancel := r.turnCancel
 	state := r.state
-	if cancel != nil && state != turn.StateIdle {
+	pending := r.pending
+	continuationPending := r.continuationPending
+	active := cancel != nil && state != turn.StateIdle
+	changed := pending != nil || continuationPending || active
+	if pending != nil {
+		r.generation++
+		r.turnID = ""
+		r.pending = nil
+		r.continuationPending = false
+		r.orch.InterruptPendingWithReason(
+			r.session.ID,
+			&r.messages,
+			pending,
+			"工具调用已被用户取消。",
+			map[string]any{"cancelled_by_user": true},
+		)
+	}
+	if active {
+		// Advance generation immediately so queued continuations from this turn
+		// are stale when dequeued after cancellation.
+		r.generation++
+		r.turnID = ""
+		r.continuationPending = false
+	}
+	if continuationPending && !active && pending == nil {
+		// The model/tool step can have returned to idle while its tool_result is
+		// still queued. Treat that continuation as an in-flight turn as well.
+		r.generation++
+		r.turnID = ""
+		r.continuationPending = false
+	}
+	if active {
 		r.mu.Unlock()
 		cancel()
-		r.maybeScheduleContinueAfterCancel()
+		if pending == nil {
+			r.maybeScheduleContinueAfterCancel()
+		}
 		return true
 	}
 	repaired := r.orch.RepairUnrespondedToolCalls(r.session.ID, &r.messages)
-	if repaired {
+	if pending != nil || repaired {
 		r.pending = nil
 	}
 	r.mu.Unlock()
-	if repaired {
+	if changed || repaired {
 		r.logger.Info("repaired orphan tool_calls on idle cancel",
 			"session_id", r.session.ID,
 		)
 		r.persist(context.Background())
 	}
-	r.maybeScheduleContinueAfterCancel()
-	return false
+	if pending == nil {
+		r.maybeScheduleContinueAfterCancel()
+	}
+	return changed || repaired
 }
 
 func (r *runtime) requestStop() {

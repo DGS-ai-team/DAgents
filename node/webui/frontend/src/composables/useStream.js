@@ -47,6 +47,41 @@ function findMatchingToolResult(entries, startIdx, blockId) {
   return -1;
 }
 
+function buildToolResultMatches(entries) {
+  const matches = new Map();
+  let calls = [];
+  let results = new Map();
+
+  const flushSegment = () => {
+    for (const call of calls) {
+      const blockId = entryBlockId(call.entry);
+      const resultIdx = blockId ? results.get(blockId) : undefined;
+      if (resultIdx !== undefined && resultIdx > call.index) {
+        matches.set(call.index, resultIdx);
+      }
+    }
+    calls = [];
+    results = new Map();
+  };
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (!entry) continue;
+    if (!isSkippableBetweenTools(entry) && entry.kind !== "tool_result") {
+      flushSegment();
+      continue;
+    }
+    if (entry.kind === "tool_call") {
+      calls.push({ entry, index });
+    } else if (entry.kind === "tool_result") {
+      const blockId = entryBlockId(entry);
+      if (blockId && !results.has(blockId)) results.set(blockId, index);
+    }
+  }
+  flushSegment();
+  return matches;
+}
+
 function awaitingApprovalCallIds(hitlQueue = []) {
   const ids = new Set();
   if (!Array.isArray(hitlQueue)) return ids;
@@ -88,6 +123,7 @@ export function annotateToolExecutionHints(items, _jobs = toolJobsStore, hitlQue
 export function buildStream(entries, hitlQueue = [], jobs = toolJobsStore) {
   const items = [];
   const mergedResultIndices = new Set();
+  const toolResultMatches = buildToolResultMatches(entries);
 
   for (let i = 0; i < entries.length; i += 1) {
     if (mergedResultIndices.has(i)) continue;
@@ -96,7 +132,7 @@ export function buildStream(entries, hitlQueue = [], jobs = toolJobsStore) {
 
     if (entry.kind === "tool_call") {
       const blockId = entryBlockId(entry);
-      const resultIdx = findMatchingToolResult(entries, i, blockId);
+      const resultIdx = toolResultMatches.get(i) ?? -1;
       if (resultIdx >= 0) {
         mergedResultIndices.add(resultIdx);
         items.push({

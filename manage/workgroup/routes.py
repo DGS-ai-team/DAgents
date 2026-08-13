@@ -612,11 +612,14 @@ def build_workgroup_router(
         )
 
     @router.get("/{workgroup_id}/timeline", response_model=list[TimelineEvent])
-    def get_timeline(workgroup_id: str, request: Request) -> list[TimelineEvent]:
+    def get_timeline(workgroup_id: str, request: Request, limit: int = 0) -> list[TimelineEvent]:
         authenticate(request)
         if store.get_workgroup(workgroup_id) is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "workgroup not found"})
-        return _timeline_for_ui(store, store.list_timeline(workgroup_id))
+        events = _timeline_for_ui(store, store.list_timeline(workgroup_id))
+        if limit > 0:
+            events = events[-limit:]
+        return events
 
     @router.get("/{workgroup_id}/outbox", response_model=list[OutboxFrame])
     def get_outbox(

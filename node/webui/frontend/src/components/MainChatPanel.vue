@@ -82,6 +82,9 @@ function onUserInfoSelected(next) {
 const scrollTail = createFollowTailController();
 const showScrollToTail = ref(false);
 let streamResizeObserver = null;
+const MAX_RENDERED_STREAM_ITEMS = 180;
+const streamWindowStart = ref(0);
+let previousStreamItemCount = 0;
 
 const stream = computed(() => {
   // 依赖 tool-jobs，以便排队/执行中相位随 /tool-jobs 刷新
@@ -89,6 +92,41 @@ const stream = computed(() => {
   void toolJobsStore.backgroundCallIds;
   return buildStream(props.entries, props.hitlQueue, toolJobsStore);
 });
+
+const renderedStream = computed(() => {
+  if (stream.value.length <= MAX_RENDERED_STREAM_ITEMS) return stream.value;
+  const start = Math.min(
+    Math.max(0, streamWindowStart.value),
+    Math.max(0, stream.value.length - MAX_RENDERED_STREAM_ITEMS),
+  );
+  return stream.value.slice(start, start + MAX_RENDERED_STREAM_ITEMS);
+});
+const hasEarlierStreamItems = computed(
+  () => stream.value.length > MAX_RENDERED_STREAM_ITEMS && streamWindowStart.value > 0,
+);
+const earlierStreamItemCount = computed(() => Math.max(0, streamWindowStart.value));
+
+function streamItemMemo(item) {
+  const call = item?.callEntry;
+  const result = item?.resultEntry;
+  const entry = item?.entry;
+  const hitl = item?.hitl;
+  return [
+    item?.key,
+    item?.kind,
+    item?.executionHint,
+    call?.partial ? 1 : 0,
+    call?.text?.length || call?.data?.arguments?.length || 0,
+    result?.text?.length || result?.data?.content?.length || 0,
+    entry?.text?.length || 0,
+    entry?.streaming ? 1 : 0,
+    hitl?.data?.request_id || hitl?.data?.approval_id || "",
+    props.toolVerbose ? 1 : 0,
+    props.hitlBusy ? 1 : 0,
+    props.hitlBusyIndex,
+    JSON.stringify(userInfoSelected.value),
+  ].join("|");
+}
 
 const hasActiveToolStep = computed(() =>
   stream.value.some((item) => item?.kind === "tool_step" && item.executionHint === "active"),
@@ -276,9 +314,20 @@ function updateScrollToTailVisibility() {
 }
 
 function scrollToTail() {
+  streamWindowStart.value = Math.max(0, stream.value.length - MAX_RENDERED_STREAM_ITEMS);
   nextTick(() => {
     scrollTail.forcePin(streamRef.value);
     updateScrollToTailVisibility();
+  });
+}
+
+function loadEarlierStreamItems() {
+  const el = streamRef.value;
+  const beforeHeight = el?.scrollHeight || 0;
+  const beforeTop = el?.scrollTop || 0;
+  streamWindowStart.value = Math.max(0, streamWindowStart.value - MAX_RENDERED_STREAM_ITEMS);
+  nextTick(() => {
+    if (el) el.scrollTop = beforeTop + Math.max(0, el.scrollHeight - beforeHeight);
   });
 }
 
@@ -306,6 +355,30 @@ onBeforeUnmount(() => {
 
 watch(streamRef, (el) => {
   if (el) bindStreamResizeObserver();
+});
+
+watch(stream, (items) => {
+  if (scrollTail.follow && items.length > previousStreamItemCount) {
+    streamWindowStart.value = Math.max(0, items.length - MAX_RENDERED_STREAM_ITEMS);
+  } else {
+    streamWindowStart.value = Math.min(
+      streamWindowStart.value,
+      Math.max(0, items.length - MAX_RENDERED_STREAM_ITEMS),
+    );
+  }
+  previousStreamItemCount = items.length;
+}, { immediate: true });
+
+watch(stream, (items) => {
+  if (scrollTail.follow && items.length > previousStreamItemCount) {
+    streamWindowStart.value = Math.max(0, items.length - MAX_RENDERED_STREAM_ITEMS);
+  } else {
+    streamWindowStart.value = Math.min(
+      streamWindowStart.value,
+      Math.max(0, items.length - MAX_RENDERED_STREAM_ITEMS),
+    );
+  }
+  previousStreamItemCount = items.length;
 });
 
 async function submit() {
@@ -435,12 +508,22 @@ defineExpose({
           <div class="chat__empty-hint">输入消息与 Agent 协作，或在设置 › 帮助中查看命令</div>
         </div>
       </div>
-      <template v-for="item in stream" :key="item.key">
+      <button
+        v-if="hasEarlierStreamItems"
+        type="button"
+        class="chat__load-earlier"
+        @click="loadEarlierStreamItems"
+      >
+        加载更早的 {{ earlierStreamItemCount }} 条消息
+      </button>
+      <template v-for="item in renderedStream" :key="item.key">
         <MessageBubble
+          v-memo="[streamItemMemo(item)]"
           v-if="['user', 'assistant', 'reasoning', 'system'].includes(item.kind)"
           :entry="item.entry"
         />
         <ToolSummaryRow
+          v-memo="[streamItemMemo(item)]"
           v-else-if="item.kind === 'tool_step'"
           :call-entry="item.callEntry"
           :result-entry="item.resultEntry"
@@ -448,6 +531,7 @@ defineExpose({
           :verbose="toolVerbose"
         />
         <ApprovalBubble
+          v-memo="[streamItemMemo(item)]"
           v-else-if="item.kind === 'approval'"
           :data="item.hitl.data"
           :busy="hitlBusy && hitlBusyIndex === item.hitlIndex"
@@ -457,6 +541,7 @@ defineExpose({
           @reject-one="(id) => emit('reject-one', { index: item.hitlIndex, callId: id })"
         />
         <UserInfoBubble
+          v-memo="[streamItemMemo(item)]"
           v-else-if="item.kind === 'user_information'"
           :data="item.hitl.data"
           :selected="userInfoSelected"
@@ -465,6 +550,7 @@ defineExpose({
           @submit="emit('user-info-submit', item.hitlIndex)"
         />
         <MemoryConflictBubble
+          v-memo="[streamItemMemo(item)]"
           v-else-if="item.kind === 'memory_conflict'"
           :data="item.hitl.data"
           :busy="hitlBusy && hitlBusyIndex === item.hitlIndex"

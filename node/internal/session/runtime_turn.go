@@ -33,7 +33,12 @@ func (r *runtime) runTurnStep(
 			r.orch.ReloadLongTermMemory(parent)
 		}
 	}
+	if r.turnID == "" {
+		r.turnID = newContinuationID()
+		r.generation++
+	}
 	turnCtx, cancel := context.WithCancel(parent)
+	turnCtx = context.WithValue(turnCtx, continuationContextKey{}, continuationRef{turnID: r.turnID, generation: r.generation})
 	r.turnCancel = cancel
 	r.state = initialState
 	history := r.messages
@@ -57,8 +62,21 @@ func (r *runtime) runTurnStep(
 }
 
 func (r *runtime) finishTurnIdle(outcome turn.StepOutcome) {
-	if outcome.ScheduleToolResult {
+	if outcome.ScheduleToolResult || outcome.Pending != nil {
 		return
 	}
+	r.mu.Lock()
+	// The orchestrator may enqueue the next tool step directly and return an
+	// otherwise empty outcome (for example after a child-agent tool finishes).
+	// Keep the current turn identity alive until that continuation is consumed;
+	// otherwise the queue consumer would discard the freshly enqueued result as
+	// stale.
+	if r.continuationPending {
+		r.mu.Unlock()
+		return
+	}
+	r.turnID = ""
+	r.generation++
+	r.mu.Unlock()
 	r.tryCompleteChildIfIdle()
 }

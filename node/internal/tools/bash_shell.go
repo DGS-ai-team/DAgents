@@ -1,12 +1,14 @@
 package tools
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf16"
 )
 
 type shellType string
@@ -94,22 +96,36 @@ func wrapShellCommandForPipe(st shellType, command string) string {
 	return command
 }
 
+// encodePowerShellCommand converts a complete PowerShell script to the format
+// accepted by -EncodedCommand. This avoids concatenating a runner prefix and
+// user input into a command-line string, which otherwise creates a second
+// quoting layer for quotes, backticks, $, JSON and non-ASCII paths.
+func encodePowerShellCommand(script string) string {
+	units := utf16.Encode([]rune(script))
+	buf := make([]byte, len(units)*2)
+	for i, unit := range units {
+		buf[i*2] = byte(unit)
+		buf[i*2+1] = byte(unit >> 8)
+	}
+	return base64.StdEncoding.EncodeToString(buf)
+}
+
 // buildShellCommand 按 shell 类型构造 *exec.Cmd 参数（不含 Start）。
 
 // powershell 按 pwsh → powershell 顺序探测；均不存在时返回 error。
 func buildShellCommand(st shellType, command string) (*exec.Cmd, error) {
-	command = wrapShellCommandForPipe(st, command)
 	switch st {
 	case shellBash:
-		return exec.Command("bash", "-lc", command), nil
+		return exec.Command("bash", "-lc", wrapShellCommandForPipe(st, command)), nil
 	case shellCmd:
-		return exec.Command("cmd", "/C", command), nil
+		return exec.Command("cmd", "/C", wrapShellCommandForPipe(st, command)), nil
 	case shellPowerShell:
+		command = wrapShellCommandForPipe(st, command)
 		if path, err := exec.LookPath("pwsh"); err == nil {
-			return exec.Command(path, "-NoProfile", "-Command", command), nil
+			return exec.Command(path, "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(command)), nil
 		}
 		if path, err := exec.LookPath("powershell"); err == nil {
-			return exec.Command(path, "-NoProfile", "-Command", command), nil
+			return exec.Command(path, "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(command)), nil
 		}
 		return nil, fmt.Errorf("未找到 powershell/pwsh 可执行文件")
 	default:

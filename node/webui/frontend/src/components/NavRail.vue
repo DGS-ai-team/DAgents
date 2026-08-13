@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, watch } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { agentStore } from "../stores/agent.js";
@@ -15,6 +15,7 @@ import ActivityPanel from "./ActivityPanel.vue";
 import { transcriptStore } from "../stores/transcript.js";
 import { deriveActivityFromTranscript } from "../utils/workspaceActivity.js";
 import { activeChildCount, remoteWorkerStore } from "../stores/remoteWorkers.js";
+import { hasWorkgroupUnread, noteWorkgroupTimeline } from "../stores/unread.js";
 
 const RAIL_CACHE_TTL_MS = 5_000;
 const railCache = {
@@ -25,6 +26,7 @@ const railCache = {
   agentsInFlight: null,
   workgroupsInFlight: null,
 };
+let unreadRefreshTimer = null;
 
 const emit = defineEmits([
   "switch",
@@ -193,8 +195,28 @@ async function refreshWorkgroups({ force = false } = {}) {
   }
 }
 
+async function refreshWorkgroupUnread(workgroupList) {
+  await Promise.all(
+    (Array.isArray(workgroupList) ? workgroupList : []).map(async (wg) => {
+      const id = String(wg?.workgroup_id || "").trim();
+      if (!id) return;
+      try {
+        const res = await api.getWorkgroupTimeline(id, { limit: 1 });
+        const latestSeq = (Array.isArray(res?.events) ? res.events : []).reduce(
+          (max, event) => Math.max(max, Number(event?.seq || 0)),
+          0,
+        );
+        noteWorkgroupTimeline(id, latestSeq);
+      } catch {
+        // Keep an already-known unread state across transient refresh failures.
+      }
+    }),
+  );
+}
+
 async function refresh({ force = true } = {}) {
   await Promise.all([refreshAgents({ force }), refreshWorkgroups({ force })]);
+  await refreshWorkgroupUnread(workgroups.value);
   // 已展开的工作组刷新成员
   await Promise.all(
     workgroups.value.map((wg) => loadMembers(wg.workgroup_id, true)),
@@ -256,6 +278,15 @@ async function onWorkgroupRowClick(wgId) {
 }
 
 function selectAgent(id) {
+  const agentId = String(id || "").trim();
+  if (agentId) {
+    agents.value = agents.value.map((agent) =>
+      agentRecordId(agent) === agentId ? { ...agent, has_unread: false } : agent,
+    );
+    railCache.agents = railCache.agents.map((agent) =>
+      agentRecordId(agent) === agentId ? { ...agent, has_unread: false } : agent,
+    );
+  }
   emit("switch", id);
   if (route.name !== "agents") {
     router.push({ name: "agents", params: { agentId: id } });
@@ -397,6 +428,17 @@ watch(
 
 onMounted(() => {
   void refresh({ force: false });
+  unreadRefreshTimer = window.setInterval(() => {
+    void refreshAgents({ force: true });
+    void refreshWorkgroups({ force: true }).then(() => refreshWorkgroupUnread(workgroups.value));
+  }, RAIL_CACHE_TTL_MS);
+});
+
+onUnmounted(() => {
+  if (unreadRefreshTimer !== null) {
+    window.clearInterval(unreadRefreshTimer);
+    unreadRefreshTimer = null;
+  }
 });
 
 defineExpose({
@@ -462,21 +504,29 @@ defineExpose({
           @click="selectAgent(agentRecordId(a))"
         >
           <div class="nav-rail__item-main">
-            <input
-              v-if="renamingId === agentRecordId(a)"
-              v-model="renameDraft"
-              class="nav-rail__rename"
-              @click.stop
-              @keydown.enter.prevent="commitRename(a)"
-              @keydown.esc.prevent="renamingId = ''"
-              @blur="commitRename(a)"
-            />
-            <span
-              v-else
-              class="nav-rail__item-title"
-              :title="agentDisplayTitle(a)"
-              @dblclick.stop="startRename(a)"
-            >{{ agentDisplayTitle(a) }}</span>
+            <div class="nav-rail__item-title-row">
+              <input
+                v-if="renamingId === agentRecordId(a)"
+                v-model="renameDraft"
+                class="nav-rail__rename"
+                @click.stop
+                @keydown.enter.prevent="commitRename(a)"
+                @keydown.esc.prevent="renamingId = ''"
+                @blur="commitRename(a)"
+              />
+              <span
+                v-else
+                class="nav-rail__item-title"
+                :title="agentDisplayTitle(a)"
+                @dblclick.stop="startRename(a)"
+              >{{ agentDisplayTitle(a) }}</span>
+              <span
+                v-if="a.has_unread"
+                class="nav-rail__unread-dot"
+                title="有未读消息"
+                aria-label="有未读消息"
+              ></span>
+            </div>
           </div>
           <div class="nav-rail__item-trail">
             <span
@@ -645,8 +695,16 @@ defineExpose({
             :class="{ 'nav-rail__folder-row--active': wg.workgroup_id === activeWorkgroupId }"
             @click="onWorkgroupRowClick(wg.workgroup_id)"
           >
-            <span class="nav-rail__item-title" :title="wg.display_name || wg.workgroup_id">
-              {{ wg.display_name || wg.workgroup_id }}
+            <span class="nav-rail__item-title-row">
+              <span class="nav-rail__item-title" :title="wg.display_name || wg.workgroup_id">
+                {{ wg.display_name || wg.workgroup_id }}
+              </span>
+              <span
+                v-if="hasWorkgroupUnread(wg.workgroup_id)"
+                class="nav-rail__unread-dot"
+                title="有未读消息"
+                aria-label="有未读消息"
+              ></span>
             </span>
             <span
               v-if="wg.status && wg.status !== 'active'"
@@ -706,13 +764,14 @@ defineExpose({
                 :title="`${memberLabel(m)} · ${m.status || ''}`"
                 @click="openWorkgroup(wg.workgroup_id)"
               >
-                <span class="nav-rail__member-mark" :data-status="m.status" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" width="13" height="13" fill="none">
-                    <circle cx="8" cy="5.1" r="2.1" stroke="currentColor" stroke-width="1.2" />
+                <span class="nav-rail__member-mark" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                    <rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.15" />
+                    <circle cx="8" cy="8" r="1.25" fill="currentColor" />
                     <path
-                      d="M3.1 13c.5-2.3 2.2-3.5 4.9-3.5s4.4 1.2 4.9 3.5"
+                      d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5"
                       stroke="currentColor"
-                      stroke-width="1.2"
+                      stroke-width="1.15"
                       stroke-linecap="round"
                     />
                   </svg>
