@@ -72,6 +72,7 @@ class WorkGroupStore:
         self._outbox: dict[str, list[OutboxFrame]] = {}
         self._hitl: dict[str, HITLRequest] = {}
         self._hitl_waiters: dict[str, threading.Event] = {}
+        self._hitl_waiting: set[str] = set()
         self._human_queue: dict[str, list[QueuedHumanRecord]] = {}
         self._turn_checkpoints: dict[str, TurnCheckpoint] = {}
         # member_id → {workspace_path, tool_catalog_revision, provision_id}
@@ -1202,12 +1203,45 @@ class WorkGroupStore:
             self._ensure_loaded()
             run_ids: list[str] = []
             assign_ids: list[str] = []
+            hitl_recovery_run_ids: set[str] = set()
+            for hitl in self._hitl.values():
+                if not hitl.run_id or not hitl.tool_call_id:
+                    continue
+                if hitl.status == "pending":
+                    hitl_recovery_run_ids.add(str(hitl.run_id))
+                    continue
+                # A resolved HITL may have been committed just before the
+                # process died, before its synthetic tool result was appended.
+                # Keep that run recoverable; the kernel will append the result
+                # idempotently and continue it on startup.
+                history = self._run_histories.get(str(hitl.run_id))
+                has_result = bool(
+                    history
+                    and any(
+                        message.role == "tool"
+                        and message.tool_call_id == hitl.tool_call_id
+                        for message in history.messages
+                    )
+                )
+                if hitl.status == "resolved" and not has_result:
+                    hitl_recovery_run_ids.add(str(hitl.run_id))
             checkpoint_ids = list(self._turn_checkpoints.keys())
             for workgroup_id in checkpoint_ids:
                 self._turn_checkpoints.pop(workgroup_id, None)
                 self._delete("workgroup_turn_checkpoints", workgroup_id)
             for run in list(self._runs.values()):
                 if run.status not in {"running", "awaiting_hitl"}:
+                    continue
+                if run.run_id in hitl_recovery_run_ids:
+                    if run.status != "awaiting_hitl":
+                        waiting = run.model_copy(update={"status": "awaiting_hitl"})
+                        self._runs[run.run_id] = waiting
+                        self._put(
+                            "actor_runs",
+                            run.run_id,
+                            waiting.model_dump_json(),
+                            workgroup_id=run.workgroup_id,
+                        )
                     continue
                 updated = run.model_copy(update={"status": "indeterminate"})
                 self._runs[run.run_id] = updated
@@ -1555,7 +1589,15 @@ class WorkGroupStore:
                     return updated
             raise WorkgroupError("not_found", "outbox frame not found", http_status=404)
 
-    def create_hitl(self, workgroup_id: str, *, prompt: str) -> HITLRequest:
+    def create_hitl(
+        self,
+        workgroup_id: str,
+        *,
+        prompt: str,
+        run_id: str | None = None,
+        tool_call_id: str | None = None,
+        reserve_waiter: bool = False,
+    ) -> HITLRequest:
         with self._lock:
             self._ensure_loaded()
             if self.get_workgroup(workgroup_id) is None:
@@ -1567,6 +1609,8 @@ class WorkGroupStore:
                 prompt=prompt,
                 status="pending",
                 created_at=_now(),
+                run_id=(run_id or "").strip() or None,
+                tool_call_id=(tool_call_id or "").strip() or None,
             )
             self._hitl[hitl.hitl_id] = hitl
             self._put(
@@ -1576,6 +1620,10 @@ class WorkGroupStore:
                 workgroup_id=workgroup_id,
             )
             self._hitl_waiters.setdefault(hitl.hitl_id, threading.Event())
+            if reserve_waiter:
+                # Reserve the in-process path before the request can resolve.
+                # This closes the create -> wait race used by the native tool.
+                self._hitl_waiting.add(hitl.hitl_id)
             return hitl
 
     def get_hitl(self, hitl_id: str) -> HITLRequest | None:
@@ -1591,7 +1639,37 @@ class WorkGroupStore:
                 items = [h for h in items if h.status == "pending"]
             return sorted(items, key=lambda h: h.created_at, reverse=True)
 
-    def wait_hitl_resolved(self, hitl_id: str, *, timeout_s: float = 300.0) -> HITLRequest:
+    def list_pending_hitls(self) -> list[HITLRequest]:
+        with self._lock:
+            self._ensure_loaded()
+            return sorted(
+                [h for h in self._hitl.values() if h.status == "pending"],
+                key=lambda h: (h.created_at, h.hitl_id),
+            )
+
+    def list_resolved_bound_hitls(self) -> list[HITLRequest]:
+        """Return resolved in-loop HITLs that can be replayed after a restart."""
+        with self._lock:
+            self._ensure_loaded()
+            return sorted(
+                [
+                    h
+                    for h in self._hitl.values()
+                    if h.status == "resolved" and h.run_id and h.tool_call_id
+                ],
+                key=lambda h: (h.resolved_at or h.created_at, h.hitl_id),
+            )
+
+    def has_hitl_waiter(self, hitl_id: str) -> bool:
+        with self._lock:
+            return (hitl_id or "").strip() in self._hitl_waiting
+
+    def wait_hitl_resolved(
+        self,
+        hitl_id: str,
+        *,
+        timeout_s: float = 300.0,
+    ) -> HITLRequest:
         """阻塞直到 HITL 被 resolve（或超时）。供 Leader ask_workgroup_user 使用。"""
         hid = (hitl_id or "").strip()
         timeout = max(0.1, float(timeout_s))
@@ -1601,16 +1679,22 @@ class WorkGroupStore:
             if hitl is None:
                 raise WorkgroupError("not_found", "hitl not found", http_status=404)
             if hitl.status == "resolved":
+                self._hitl_waiting.discard(hid)
                 return hitl
             ev = self._hitl_waiters.setdefault(hid, threading.Event())
-        if not ev.wait(timeout):
-            raise WorkgroupError(
-                "conflict",
-                f"hitl timed out after {timeout:g}s",
-                http_status=409,
-                retryable=True,
-                details={"hitl_id": hid},
-            )
+            self._hitl_waiting.add(hid)
+        try:
+            if not ev.wait(timeout):
+                raise WorkgroupError(
+                    "conflict",
+                    f"hitl timed out after {timeout:g}s",
+                    http_status=409,
+                    retryable=True,
+                    details={"hitl_id": hid},
+                )
+        finally:
+            with self._lock:
+                self._hitl_waiting.discard(hid)
         with self._lock:
             hitl = self._hitl.get(hid)
             if hitl is None:
