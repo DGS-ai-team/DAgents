@@ -7,6 +7,9 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -21,6 +24,7 @@ from manage.workgroup.models import (  # noqa: E402
 )
 from manage.workgroup.store import WorkGroupStore  # noqa: E402
 from manage.workgroup.ws_hub import WorkgroupWSHub  # noqa: E402
+from manage.workgroup.ws_routes import build_workgroup_ws_router  # noqa: E402
 
 
 class WorkgroupWSHubTests(unittest.TestCase):
@@ -82,6 +86,95 @@ class WorkgroupWSHubTests(unittest.TestCase):
         hub.publish_timeline_event(event)
 
         self.assertEqual(sent_b[-1]["type"], "timeline.event")
+        conn_a = hub.get_connection("node_a")
+        self.assertIsNotNone(conn_a)
+        assert conn_a is not None
+        self.assertFalse(conn_a.active)
+
+    def test_stale_disconnect_cannot_close_new_connection(self) -> None:
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        first = hub.hello("node_a", send=lambda _message: None)
+        second = hub.hello("node_a", send=lambda _message: None)
+
+        self.assertFalse(hub.disconnect("node_a", first["payload"]["connection_generation"]))
+        current = hub.get_connection("node_a")
+        self.assertIsNotNone(current)
+        assert current is not None
+        self.assertTrue(current.active)
+        self.assertEqual(current.connection_generation, second["payload"]["connection_generation"])
+
+    def test_resume_cursor_is_scoped_per_workgroup(self) -> None:
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        group_a, _ = store.create_workgroup(
+            WorkGroupCreateRequest(display_name="room-a", created_by_node_id="node_a")
+        )
+        group_b, _ = store.create_workgroup(
+            WorkGroupCreateRequest(display_name="room-b", created_by_node_id="node_a")
+        )
+        store.enqueue_outbox(group_a.workgroup_id, type="timeline.event", payload={"room": "a"})
+        store.enqueue_outbox(group_b.workgroup_id, type="timeline.event", payload={"room": "b"})
+        hub.hello("node_a", send=lambda _message: None)
+        conn = hub.get_connection("node_a")
+        self.assertIsNotNone(conn)
+        assert conn is not None
+        hub.ack_delivery(
+            "node_a",
+            1,
+            connection_generation=conn.connection_generation,
+            workgroup_id=group_a.workgroup_id,
+        )
+
+        replay = hub.request_resume("node_a", group_b.workgroup_id)
+        self.assertIsNotNone(replay)
+        assert replay is not None
+        self.assertEqual(replay["complete"]["payload"]["replayed"], [1])
+
+    def test_stale_ws_result_is_fenced_before_callback(self) -> None:
+        app = FastAPI()
+        store = WorkGroupStore()
+        hub = WorkgroupWSHub(store=store)
+        inbound: list[tuple[str, str, dict]] = []
+        app.include_router(
+            build_workgroup_ws_router(
+                hub,
+                on_inbound=lambda node_id, message_type, payload: inbound.append(
+                    (node_id, message_type, payload)
+                ),
+            )
+        )
+
+        with TestClient(app) as client:
+            with client.websocket_connect(
+                "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+            ) as stale:
+                stale.send_json({"type": "session.hello", "payload": {"node_id": "node_a"}})
+                first_welcome = stale.receive_json()
+                first_generation = first_welcome["payload"]["connection_generation"]
+
+                with client.websocket_connect(
+                    "/v1/workgroups/ws", headers={"x-dagents-agent-id": "node_a"}
+                ) as current:
+                    current.send_json(
+                        {"type": "session.hello", "payload": {"node_id": "node_a"}}
+                    )
+                    current.receive_json()
+                    stale.send_json(
+                        {
+                            "type": "tool.result",
+                            "payload": {
+                                "workgroup_id": "wg_01h00000000000000000000001",
+                                "command_id": "cmd_stale",
+                                "connection_generation": first_generation,
+                            },
+                        }
+                    )
+                    error = stale.receive_json()
+                    self.assertEqual(error["type"], "session.error")
+                    self.assertEqual(error["payload"]["code"], "fencing_rejected")
+
+        self.assertEqual(inbound, [])
 
     def test_timeline_outbox_is_recovered_with_the_same_sqlite_commit(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

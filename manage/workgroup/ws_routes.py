@@ -76,6 +76,7 @@ def build_workgroup_ws_router(
                 await websocket.send_json(item)
 
         writer_task = asyncio.create_task(writer())
+        connection_generation: int | None = None
         try:
             while True:
                 raw = await websocket.receive_text()
@@ -105,7 +106,10 @@ def build_workgroup_ws_router(
                             )
                         nid = hello_node_id or node_id
                         last_ack = int(payload.get("last_ack_delivery_seq") or 0)
-                        hub.hello(nid, last_ack_delivery_seq=last_ack, send=sync_send)
+                        welcome = hub.hello(nid, last_ack_delivery_seq=last_ack, send=sync_send)
+                        connection_generation = int(
+                            (welcome.get("payload") or {}).get("connection_generation") or 0
+                        )
                     elif mtype == "resume.offer":
                         wid = str(payload.get("workgroup_id") or msg.get("workgroup_id") or "").strip()
                         last_ack = int(payload.get("last_ack_delivery_seq") or 0)
@@ -124,11 +128,18 @@ def build_workgroup_ws_router(
                             or 0
                         )
                         wid = payload.get("workgroup_id") or msg.get("workgroup_id")
-                        # 先落业务状态，避免 ack 校验失败时丢掉 provision/tool 结果
+                        # 业务回调前先做世代 fencing；旧连接的迟到结果不能改变任务状态。
                         if on_inbound is not None and mtype in {
                             "tool.result",
                             "member.provision_result",
                         }:
+                            if gen <= 0:
+                                raise WorkgroupError(
+                                    "schema_mismatch",
+                                    "connection_generation required",
+                                    http_status=400,
+                                )
+                            hub.assert_generation(node_id, gen)
                             on_inbound(node_id, mtype, dict(payload))
                         if seq > 0 and gen > 0:
                             hub.ack_delivery(
@@ -155,10 +166,8 @@ def build_workgroup_ws_router(
         except WebSocketDisconnect:
             pass
         finally:
-            conn = hub.get_connection(node_id)
-            if conn is not None:
-                conn.active = False
-                conn.send = None
+            if connection_generation is not None:
+                hub.disconnect(node_id, connection_generation)
             await outbound.put(None)
             try:
                 await writer_task

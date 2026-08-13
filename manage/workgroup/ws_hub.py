@@ -22,6 +22,7 @@ class NodeConnection:
     node_id: str
     connection_generation: int
     last_ack_delivery_seq: int = 0
+    last_ack_by_workgroup: dict[str, int] = field(default_factory=dict)
     send: SendFn | None = None
     active: bool = True
     # 旧连接被替换后仍保留世代，用于拒绝迟到帧
@@ -63,6 +64,7 @@ class WorkgroupWSHub:
                 node_id=node_id,
                 connection_generation=gen,
                 last_ack_delivery_seq=max(0, int(last_ack_delivery_seq)),
+                last_ack_by_workgroup={},
                 send=send,
                 active=True,
                 fenced=False,
@@ -77,7 +79,11 @@ class WorkgroupWSHub:
                 },
             }
             if send is not None:
-                send(welcome)
+                try:
+                    send(welcome)
+                except Exception:  # noqa: BLE001 - failed socket must not remain active
+                    conn.active = False
+                    conn.send = None
             return welcome
 
     def get_connection(self, node_id: str) -> NodeConnection | None:
@@ -113,6 +119,29 @@ class WorkgroupWSHub:
             return {"code": exc.code, "message": exc.message, "retryable": False}
         return {"code": "ok"}
 
+    def disconnect(self, node_id: str, connection_generation: int) -> bool:
+        """Close only the connection generation that owns this socket.
+
+        An older WebSocket can finish its cleanup after a newer connection has
+        already replaced it.  Never let that stale cleanup deactivate the new
+        connection.
+        """
+        with self._lock:
+            conn = self._conns.get(str(node_id or "").strip())
+            if conn is None or conn.connection_generation != int(connection_generation):
+                return False
+            conn.active = False
+            conn.send = None
+            return True
+
+    def _mark_send_failed(self, node_id: str, conn: NodeConnection) -> None:
+        with self._lock:
+            current = self._conns.get(node_id)
+            if current is conn:
+                current.active = False
+                current.fenced = True
+                current.send = None
+
     def wrap_outbox(self, frame: OutboxFrame, *, connection_generation: int | None = None) -> WSEnvelope:
         return WSEnvelope(
             envelope_id=ids.envelope_id(),
@@ -145,6 +174,17 @@ class WorkgroupWSHub:
         conn = self.get_connection(node_id)
         if conn is None or not conn.active:
             raise WorkgroupError("not_authorized", "hello required first", http_status=403)
+        wid = str(workgroup_id or "").strip()
+        if not wid:
+            raise WorkgroupError("schema_mismatch", "workgroup_id required")
+        with self._lock:
+            previous = int(conn.last_ack_by_workgroup.get(wid, 0))
+        if last_ack_delivery_seq < previous:
+            raise WorkgroupError(
+                "conflict",
+                f"delivery_seq regress {last_ack_delivery_seq} < {previous} for {wid}",
+                http_status=409,
+            )
         retention = self.outbox_retention_from
         if last_ack_delivery_seq + 1 < retention:
             err = {
@@ -162,7 +202,7 @@ class WorkgroupWSHub:
 
         frames = [
             frame
-            for frame in self.store.frames_after(workgroup_id, after_seq=last_ack_delivery_seq)
+            for frame in self.store.frames_after(wid, after_seq=last_ack_delivery_seq)
             if self._frame_belongs_to_node(frame, node_id)
         ]
         batch: list[dict[str, Any]] = []
@@ -170,7 +210,11 @@ class WorkgroupWSHub:
             env = self.wrap_outbox(frame, connection_generation=conn.connection_generation)
             batch.append(env.model_dump())
             if conn.send is not None:
-                conn.send(env.model_dump())
+                try:
+                    conn.send(env.model_dump())
+                except Exception:  # noqa: BLE001 - close and let Dialer reconnect
+                    self._mark_send_failed(node_id, conn)
+                    break
         complete = {
             "type": "resume.complete",
             "payload": {
@@ -179,9 +223,15 @@ class WorkgroupWSHub:
             },
         }
         if conn.send is not None:
-            conn.send(complete)
+            try:
+                conn.send(complete)
+            except Exception:  # noqa: BLE001 - close and let Dialer reconnect
+                self._mark_send_failed(node_id, conn)
         with self._lock:
-            conn.last_ack_delivery_seq = last_ack_delivery_seq
+            conn.last_ack_by_workgroup[wid] = last_ack_delivery_seq
+            conn.last_ack_delivery_seq = max(
+                int(conn.last_ack_delivery_seq or 0), last_ack_delivery_seq
+            )
         return {"type": "resume.batch", "envelopes": batch, "complete": complete}
 
     def ack_delivery(
@@ -193,12 +243,26 @@ class WorkgroupWSHub:
         workgroup_id: str | None = None,
     ) -> None:
         conn = self.assert_generation(node_id, connection_generation)
-        if delivery_seq < conn.last_ack_delivery_seq:
-            raise WorkgroupError("conflict", "delivery_seq regress", http_status=409)
+        wid = str(workgroup_id or "").strip()
+        with self._lock:
+            previous = int(
+                conn.last_ack_by_workgroup.get(wid, 0)
+                if wid
+                else conn.last_ack_delivery_seq
+            )
+        if delivery_seq < previous:
+            scope = f" for {wid}" if wid else ""
+            raise WorkgroupError(
+                "conflict",
+                f"delivery_seq regress {delivery_seq} < {previous}{scope}",
+                http_status=409,
+            )
         if workgroup_id:
             self.store.ack_outbox(workgroup_id, delivery_seq)
         with self._lock:
-            conn.last_ack_delivery_seq = delivery_seq
+            if wid:
+                conn.last_ack_by_workgroup[wid] = delivery_seq
+            conn.last_ack_delivery_seq = max(int(conn.last_ack_delivery_seq or 0), delivery_seq)
 
     def push_to_node(self, node_id: str, frame: OutboxFrame) -> WSEnvelope | None:
         """向已连接 Node 推送一帧；未连接则仅落库等待 resume。"""
@@ -211,6 +275,7 @@ class WorkgroupWSHub:
         try:
             send(env.model_dump())
         except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
+            self._mark_send_failed(node_id, conn)
             return None
         return env
 
@@ -224,6 +289,7 @@ class WorkgroupWSHub:
         try:
             send(dict(message))
         except Exception:  # noqa: BLE001 - one stale Node must not block fan-out
+            self._mark_send_failed(node_id, conn)
             return False
         return True
 
@@ -294,7 +360,7 @@ class WorkgroupWSHub:
         return self.resume_offer(
             nid,
             workgroup_id=wid,
-            last_ack_delivery_seq=int(conn.last_ack_delivery_seq or 0),
+            last_ack_delivery_seq=int(conn.last_ack_by_workgroup.get(wid, 0) or 0),
         )
 
     def reconcile_unacked(self, workgroup_id: str) -> list[OutboxFrame]:
