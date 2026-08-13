@@ -207,11 +207,17 @@ func EntriesFromLegacyMarkdown(md string, now time.Time) []LongTermEntry {
 	parts := strings.Split(md, "\n\n")
 	out := make([]LongTermEntry, 0, len(parts))
 	for _, part := range parts {
-		content := strings.TrimSpace(stripLongTermEntryPrefix(part))
+		content, entryDate, hasDate := parseLongTermEntryPrefix(part)
+		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		out = append(out, NewLongTermEntry(content, now))
+		entry := NewLongTermEntry(content, now)
+		if hasDate {
+			entry.CreatedAt = entryDate
+			entry.UpdatedAt = entryDate
+		}
+		out = append(out, entry)
 	}
 	if len(out) == 0 {
 		return []LongTermEntry{}
@@ -220,15 +226,38 @@ func EntriesFromLegacyMarkdown(md string, now time.Time) []LongTermEntry {
 }
 
 func stripLongTermEntryPrefix(line string) string {
+	content, _, _ := parseLongTermEntryPrefix(line)
+	return content
+}
+
+func parseLongTermEntryPrefix(line string) (string, time.Time, bool) {
 	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, "- [") {
-		return line
+		return line, time.Time{}, false
 	}
 	close := strings.Index(line, "] ")
 	if close < 0 {
-		return line
+		return line, time.Time{}, false
 	}
-	return strings.TrimSpace(line[close+2:])
+	line = strings.TrimSpace(line[close+2:])
+	if len(line) >= 10 && strings.HasPrefix(line, "[") && line[9] == ']' && isYYYYMMDD(line[1:9]) {
+		if entryDate, err := time.ParseInLocation("20060102", line[1:9], time.UTC); err == nil {
+			return strings.TrimSpace(line[10:]), entryDate, true
+		}
+	}
+	return line, time.Time{}, false
+}
+
+func isYYYYMMDD(value string) bool {
+	if len(value) != 8 {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // NewLongTermEntry 创建带 ID 的新条目。

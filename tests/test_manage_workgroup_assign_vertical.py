@@ -251,11 +251,85 @@ class AssignVerticalLoopTests(unittest.TestCase):
             self.assertEqual(sum(bridge.executions.values()), before)
 
             runs = [r for r in store._runs.values() if r.actor_id == mid]  # noqa: SLF001
-            last = sorted(runs, key=lambda r: r.created_at)[-1]
-            mhist = store.get_run_history(last.run_id)
+            self.assertEqual(len(runs), 1)
+            mhist = store.get_run_history(runs[0].run_id)
             assert mhist is not None
-            tool_msg = next(m for m in mhist.messages if m.role == "tool")
+            tool_msg = next(
+                m
+                for m in reversed(mhist.messages)
+                if m.role == "tool"
+            )
             self.assertIn("allowlist", (tool_msg.content or "").lower())
+
+    def test_member_session_reuses_complete_history_across_assigns(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, loop, bridge, wid, mid = self._ready(tmp, with_bridge=True)
+            assert bridge is not None
+            import json
+
+            from manage.workgroup.llm_chat import ChatResult, ChatToolCall, MockLLMClient
+            from manage.workgroup.turn_kernel import mock_leader_script_assign_then_answer
+
+            first_instruction = "读取 README"
+            second_instruction = "再次确认 README"
+            leader_client = MockLLMClient(
+                mock_leader_script_assign_then_answer(
+                    member_id=mid,
+                    instruction=first_instruction,
+                    final_text="第一项完成",
+                )
+                + mock_leader_script_assign_then_answer(
+                    member_id=mid,
+                    instruction=second_instruction,
+                    final_text="第二项完成",
+                )
+            )
+            member_client = MockLLMClient(
+                [
+                    ChatResult(
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_member_read_1",
+                                name="read_file",
+                                arguments=json.dumps({"path": "README"}),
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="第一次读取完成", finish_reason="stop"),
+                    ChatResult(content="第二次读取完成", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(
+                store,
+                chat_client=leader_client,
+                member_chat_client=member_client,
+            )
+            kernel.set_assign_completer(loop.make_assign_completer(kernel))
+
+            first = kernel.handle_human_message(wid, text="安排第一次读取", from_node_id="node-a")
+            second = kernel.handle_human_message(wid, text="安排第二次读取", from_node_id="node-a")
+
+            self.assertEqual(first["loop"]["status"], "succeeded")
+            self.assertEqual(second["loop"]["status"], "succeeded")
+            member_runs = [r for r in store._runs.values() if r.actor_id == mid]  # noqa: SLF001
+            self.assertEqual(len(member_runs), 1)
+            history = store.get_run_history(member_runs[0].run_id)
+            assert history is not None
+            user_texts = [m.content for m in history.messages if m.role == "user"]
+            self.assertIn(first_instruction, user_texts)
+            self.assertIn(second_instruction, user_texts)
+            self.assertGreaterEqual(sum(m.role == "assistant" for m in history.messages), 3)
+            self.assertGreaterEqual(sum(m.role == "tool" for m in history.messages), 1)
+
+            second_member_messages = member_client.calls[2]["messages"]
+            second_member_contents = [m.get("content") for m in second_member_messages]
+            self.assertIn(first_instruction, second_member_contents)
+            self.assertIn(second_instruction, second_member_contents)
+            self.assertEqual(
+                [m.get("name") for m in second_member_messages if m.get("role") == "tool"],
+                ["read_file"],
+            )
 
     def test_ws_inbound_tool_result_wakes_waiter(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

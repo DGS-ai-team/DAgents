@@ -47,6 +47,27 @@ def _catalog_entries() -> list[dict[str, Any]]:
 MEMBER_TOOL_SIDE_EFFECT: dict[str, str] = {}
 MEMBER_EXECUTABLE_TOOL_NAMES: list[str] = []
 
+# Keep this aligned with node/internal/tools.CallPurposeKey.  It is part of
+# every model-facing tool schema, but is removed by the Node tool runtime
+# before the concrete handler receives its arguments.
+CALL_PURPOSE_KEY = "call_purpose"
+
+# 仅用于工作组 Timeline / realtime 的用户可见进度文案。
+# 工具名和参数仍保留在 RunHistory 中供模型恢复，但不应进入工作组聊天气泡。
+MEMBER_TOOL_PURPOSE: dict[str, str] = {
+    "read_file": "读取文件",
+    "show_image": "展示图片",
+    "read_image": "分析图片",
+    "write_file": "写入文件",
+    "glob_files": "查找文件",
+    "grep_file": "搜索内容",
+    "grep_files": "搜索内容",
+    "search_replace": "替换内容",
+    "bash_run": "执行命令",
+    "background_job_status": "查看后台任务",
+    "background_job_cancel": "取消后台任务",
+}
+
 
 def _refresh_module_exports() -> None:
     global MEMBER_TOOL_SIDE_EFFECT, MEMBER_EXECUTABLE_TOOL_NAMES
@@ -90,14 +111,21 @@ def member_tool_catalog() -> dict[str, Any]:
 
 def _openai_from_entry(e: dict[str, Any]) -> dict[str, Any]:
     params = e.get("parameters") or {"type": "object", "properties": {}}
+    properties = dict(params.get("properties") or {})
+    properties[CALL_PURPOSE_KEY] = {
+        "type": "string",
+        "description": "Required. Briefly explain the purpose of this tool call; shown in the workgroup progress UI.",
+    }
+    required = [str(item) for item in (params.get("required") or []) if str(item).strip()]
+    if CALL_PURPOSE_KEY not in required:
+        required.insert(0, CALL_PURPOSE_KEY)
     # 确保 OpenAI function.parameters 形状
     parameters = {
         "type": params.get("type", "object"),
         "additionalProperties": params.get("additionalProperties", False),
-        "properties": params.get("properties") or {},
+        "properties": properties,
+        "required": required,
     }
-    if "required" in params:
-        parameters["required"] = params["required"]
     return {
         "type": "function",
         "function": {
@@ -132,6 +160,24 @@ def member_openai_tools(allow_names: list[str] | None) -> list[dict[str, Any]]:
 
 def side_effect_for_tool(tool_name: str) -> str:
     return MEMBER_TOOL_SIDE_EFFECT.get((tool_name or "").strip(), "other")
+
+
+def call_purpose_from_arguments(arguments_json: str, fallback: str = "") -> str:
+    """Read the Node-compatible ``call_purpose`` without exposing other args."""
+    try:
+        raw = json.loads(arguments_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        raw = {}
+    if isinstance(raw, dict):
+        purpose = str(raw.get(CALL_PURPOSE_KEY) or "").strip()
+        if purpose:
+            return purpose
+    return str(fallback or "").strip()
+
+
+def purpose_for_tool(tool_name: str) -> str:
+    """Return a safe, parameter-free purpose for a member tool progress bubble."""
+    return MEMBER_TOOL_PURPOSE.get((tool_name or "").strip(), "执行成员工具")
 
 
 # 对齐 Node Agent staticSystemPrompt / childStaticSystemPrompt 的核心约束（成员侧精简版）。

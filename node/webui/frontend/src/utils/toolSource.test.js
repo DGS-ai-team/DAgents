@@ -23,6 +23,10 @@ describe("inferToolKind", () => {
     expect(inferToolKind("unknown_custom_tool")).toBe("tool");
     expect(inferToolKind("")).toBe("tool");
   });
+
+  it("maps MCP tools to the MCP source kind", () => {
+    expect(inferToolKind("mcp__tencent-docs__doc_get")).toBe("mcp");
+  });
 });
 
 describe("resolveToolVisual", () => {
@@ -38,6 +42,14 @@ describe("resolveToolVisual", () => {
     expect(resolveToolVisual({ data: { tool_name: "load_skills" } })).toMatchObject({
       kind: "skills",
       label: "skills",
+    });
+  });
+
+  it("uses the MCP server name instead of the generic tool label", () => {
+    expect(resolveToolVisual({ data: { tool_name: "mcp__tencent-docs__doc_get" } })).toMatchObject({
+      kind: "mcp",
+      label: "tencent-docs",
+      short: "tencent-docs",
     });
   });
 });

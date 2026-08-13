@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from manage.workgroup.d3_models import QueuedHumanRecord
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -41,3 +43,30 @@ class QueuedHuman:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+    def to_record(self) -> QueuedHumanRecord:
+        return QueuedHumanRecord(
+            queue_id=self.queue_id,
+            workgroup_id=self.workgroup_id,
+            text=self.text,
+            from_node_id=self.from_node_id,
+            client_message_id=self.client_message_id,
+            direct_member_id=self.direct_member_id,
+            disable_tools=self.disable_tools,
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+        )
+
+    @classmethod
+    def from_record(cls, record: QueuedHumanRecord) -> "QueuedHuman":
+        return cls(
+            queue_id=record.queue_id,
+            workgroup_id=record.workgroup_id,
+            text=record.text,
+            from_node_id=record.from_node_id,
+            client_message_id=record.client_message_id,
+            direct_member_id=record.direct_member_id,
+            disable_tools=record.disable_tools,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )

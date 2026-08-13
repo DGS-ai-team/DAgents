@@ -23,6 +23,7 @@ class ManageNativeToolSchemaTests(unittest.TestCase):
         tool = load_assign_workgroup_task_tool()
         self.assertEqual(tool["function"]["name"], "assign_workgroup_task")
         self.assertEqual(tool["function"], raw["function"])
+        self.assertEqual(tool["function"]["parameters"]["required"][0], "call_purpose")
         self.assertNotIn("result_schema", tool)
 
 

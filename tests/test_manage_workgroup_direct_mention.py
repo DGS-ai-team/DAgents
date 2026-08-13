@@ -39,7 +39,6 @@ class MentionStripTests(unittest.TestCase):
             strip_member_mention("@Alice 抄送 @Bob", display_name="Alice"),
         )
 
-
 class DirectMemberRouteTests(unittest.TestCase):
     def _ready_group(self, tmp: str):
         store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
@@ -109,6 +108,7 @@ class DirectMemberRouteTests(unittest.TestCase):
             self.assertIn("assign_started", types)
             human = next(e for e in store.list_timeline(wid) if e.type == "human_message")
             self.assertIn("@Alice", human.text)
+            self.assertEqual(human.direct_member_id, member.member_id)
             started = next(e for e in store.list_timeline(wid) if e.type == "assign_started")
             self.assertTrue(started.text.startswith("直达"))
             self.assertEqual(started.actor_id, member.member_id)
@@ -120,6 +120,20 @@ class DirectMemberRouteTests(unittest.TestCase):
                     for e in store.list_timeline(wid)
                 )
             )
+
+    def test_manual_leading_mention_stays_with_leader(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, wid, _member = self._ready_group(tmp)
+            kernel = TurnKernel(store, mock_llm=True, assign_completer=scripted_assign_completer)
+            result = kernel.handle_human_message(
+                wid,
+                text="@Alice 请读 README",
+                from_node_id="node-a",
+            )
+            self.assertEqual(result.get("mode"), "leader")
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            human = next(e for e in store.list_timeline(wid) if e.type == "human_message")
+            self.assertIsNone(human.direct_member_id)
 
     def test_cancel_idle_orphan(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

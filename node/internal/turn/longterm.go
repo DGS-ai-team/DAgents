@@ -50,9 +50,28 @@ func FormatLongTermEntries(entries []LongTermEntry) string {
 		if content == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "- [%s] %s\n", strings.TrimSpace(e.ID), content)
+		date := longTermEntryDate(e)
+		if date == "" {
+			fmt.Fprintf(&b, "- [%s] %s\n", strings.TrimSpace(e.ID), content)
+			continue
+		}
+		fmt.Fprintf(&b, "- [%s] [%s] %s\n", strings.TrimSpace(e.ID), date, content)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// longTermEntryDate returns the date of the latest version of an entry.
+// UpdatedAt is preferred so replacements expose when the remembered fact was
+// last changed; legacy entries with only CreatedAt still get a stable date.
+func longTermEntryDate(entry LongTermEntry) string {
+	when := entry.UpdatedAt
+	if when.IsZero() {
+		when = entry.CreatedAt
+	}
+	if when.IsZero() {
+		return ""
+	}
+	return when.UTC().Format("20060102")
 }
 
 // ApplyRememberActionToEntries 根据 LLM 给出的 action 更新条目列表。
@@ -99,11 +118,17 @@ func EntriesFromFormattedConflict(text string) []LongTermEntry {
 	now := time.Now().UTC()
 	out := make([]LongTermEntry, 0, len(parts))
 	for _, part := range parts {
-		content := strings.TrimSpace(stripLongTermEntryPrefix(part))
+		content, entryDate, hasDate := parseLongTermEntryPrefix(part)
+		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		out = append(out, NewLongTermEntry(content, now))
+		entry := NewLongTermEntry(content, now)
+		if hasDate {
+			entry.CreatedAt = entryDate
+			entry.UpdatedAt = entryDate
+		}
+		out = append(out, entry)
 	}
 	return out
 }
@@ -122,15 +147,38 @@ func NewLongTermEntry(content string, now time.Time) LongTermEntry {
 }
 
 func stripLongTermEntryPrefix(line string) string {
+	content, _, _ := parseLongTermEntryPrefix(line)
+	return content
+}
+
+func parseLongTermEntryPrefix(line string) (string, time.Time, bool) {
 	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, "- [") {
-		return line
+		return line, time.Time{}, false
 	}
 	close := strings.Index(line, "] ")
 	if close < 0 {
-		return line
+		return line, time.Time{}, false
 	}
-	return strings.TrimSpace(line[close+2:])
+	line = strings.TrimSpace(line[close+2:])
+	if len(line) >= 10 && strings.HasPrefix(line, "[") && line[9] == ']' && isYYYYMMDD(line[1:9]) {
+		if entryDate, err := time.ParseInLocation("20060102", line[1:9], time.UTC); err == nil {
+			return strings.TrimSpace(line[10:]), entryDate, true
+		}
+	}
+	return line, time.Time{}, false
+}
+
+func isYYYYMMDD(value string) bool {
+	if len(value) != 8 {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func newLongTermEntryID() string {

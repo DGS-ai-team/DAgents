@@ -168,6 +168,24 @@ class WorkgroupStoreTests(unittest.TestCase):
                 kernel.resolve_hitl_cas("ht_test", resolution={"ok": False})
             self.assertEqual(ctx.exception.code, "already_resolved")
 
+    def test_kernel_hitl_cas_uses_durable_store(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = self._store(tmp)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="H", created_by_node_id="node-a")
+            )
+            hitl = store.create_hitl(group.workgroup_id, prompt="confirm")
+            kernel = TurnKernel(store)
+            resolved = kernel.resolve_hitl_cas(
+                hitl.hitl_id,
+                resolution={"answer": "yes"},
+            )
+            self.assertEqual(resolved["status"], "resolved")
+            self.assertEqual(store.get_hitl(hitl.hitl_id).resolution, {"answer": "yes"})
+            with self.assertRaises(WorkgroupError) as ctx:
+                kernel.resolve_hitl_cas(hitl.hitl_id, resolution={"answer": "no"})
+            self.assertEqual(ctx.exception.code, "already_resolved")
+
     def test_projector_empty_run(self) -> None:
         with TemporaryDirectory() as tmp:
             store = self._store(tmp)

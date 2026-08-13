@@ -25,9 +25,8 @@ from manage.workgroup.d3_models import (
 )
 from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
-from manage.workgroup.history import RunHistoryMessage
 from manage.workgroup.member_tools import side_effect_for_tool
-from manage.workgroup.models import ActorRunCreateRequest, AssignCreateRequest
+from manage.workgroup.models import AssignCreateRequest
 from manage.workgroup.store import WorkGroupStore
 
 if TYPE_CHECKING:
@@ -164,6 +163,7 @@ class VerticalLoop:
             actor_id=req.from_node_id,
             text=req.text,
             client_message_id=req.client_message_id,
+            direct_member_id=req.direct_member_id,
         )
 
     def enqueue_provision(self, workgroup_id: str, member_id: str) -> OutboxFrame:
@@ -637,22 +637,26 @@ class VerticalLoop:
             if spec is None:
                 raise WorkgroupError("not_found", "member spec not found", http_status=404)
 
-            run = self.store.create_actor_run(
+            run = self.store.get_or_create_actor_session(
                 workgroup_id,
-                ActorRunCreateRequest(
-                    actor_id=member_id,
-                    assign_id=assign_id,
-                    llm_profile_revision=spec.llm_profile_revision,
-                ),
+                actor_id=member_id,
+                llm_profile_revision=spec.llm_profile_revision,
             )
+            run = self.store.prepare_actor_session(run.run_id, assign_id=assign_id)
             try:
                 kernel._update_turn(workgroup_id, member_run_id=run.run_id)
             except Exception:  # noqa: BLE001
                 pass
             self.store.ensure_run_history(run)
-            self.store.append_run_history(
+            kernel._heal_open_tool_calls(
                 run.run_id,
-                [RunHistoryMessage(role="user", content=(instruction or "").strip() or "(empty)")],
+                reason="previous member tool turn interrupted; synthetic error result",
+                preserve_assign_id=assign_id,
+            )
+            kernel._append_session_user_message(
+                run.run_id,
+                content=instruction,
+                assign_id=assign_id,
             )
             out = kernel.run_member_until_idle(
                 workgroup_id,

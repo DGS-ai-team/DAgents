@@ -172,17 +172,32 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
   const entry = resultEntry || callEntry || {};
   if (entry.sideEffectApplied) return "completed";
   if (resultEntry?.data?.rejected || callEntry?.data?.rejected) return "rejected";
-  if (resultEntry?.data?.interrupted || callEntry?.data?.interrupted) return "interrupted";
+  if (
+    resultEntry?.data?.interrupted ||
+    callEntry?.data?.interrupted ||
+    resultEntry?.data?.interrupted_by_stream_cancel ||
+    resultEntry?.data?.interrupted_by_user_message ||
+    resultEntry?.data?.interrupted_by_toolset_change
+  ) {
+    return "interrupted";
+  }
 
+  const resultContent = String(resultEntry?.data?.content || "");
+  if (resultContent.includes("流式输出被用户中断")) return "interrupted";
   const bashStatus = parseBashResultStatus(resultEntry?.data?.content);
   if (bashStatus === "CANCELLED") return "cancelled";
-
-  if (callEntry?.partial) return "generating";
 
   const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
   if (id && toolJobsStore.runningCallIds.includes(id)) return "running";
   if (id && toolJobsStore.backgroundCallIds.includes(id)) return "background";
   if (isBashBackgroundActive({ callEntry, resultEntry })) return "background";
+
+  // A partial tool_call means the model is still assembling arguments only
+  // until the executor registers the call. Once a real job is visible above,
+  // execution state must win so the bubble cannot remain "生成中".
+  if (callEntry?.partial) {
+    return executionHint === "pending" ? "pending" : "generating";
+  }
 
   // 残留 RUNNING 但已不在后台队列 → 视为结束
   if (bashStatus === "RUNNING" || bashStatus === "SUCCEEDED") return "completed";
