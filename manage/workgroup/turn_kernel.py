@@ -15,7 +15,7 @@ from manage.workgroup.builtin_hooks import (
     format_today_date_message,
     package_tool_result,
 )
-from manage.workgroup.d3_models import TurnCheckpoint
+from manage.workgroup.d3_models import HITLRequest, TurnCheckpoint
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.human_queue import QueuedHuman
 from manage.workgroup import ids as wg_ids
@@ -41,7 +41,12 @@ from manage.workgroup.models import (
     AssignCreateRequest,
     WorkGroup,
 )
-from manage.workgroup.native_tools import AssignCompleter, NativeToolDispatcher, leader_native_tools
+from manage.workgroup.native_tools import (
+    AssignCompleter,
+    NativeToolDispatcher,
+    format_hitl_resolution,
+    leader_native_tools,
+)
 from manage.workgroup.projector import project_actor_context
 from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.store import WorkGroupStore
@@ -158,6 +163,8 @@ class TurnKernel:
         self._realtime_event_listener: Callable[
             [str, str, dict[str, Any], str | None], None
         ] | None = None
+        self._hitl_resume_lock = threading.Lock()
+        self._resuming_hitls: set[str] = set()
 
     def set_assign_completer(self, completer: AssignCompleter | None) -> None:
         self._assign_completer = completer
@@ -226,6 +233,114 @@ class TurnKernel:
             )
         except Exception:  # noqa: BLE001 - checkpoint must not break the turn
             pass
+
+    def _on_hitl_created(self, hitl: HITLRequest) -> None:
+        if not hitl.run_id:
+            return
+        run = self._store.get_actor_run(hitl.run_id)
+        if run is not None and run.status == "running":
+            self._store.update_actor_run(hitl.run_id, status="awaiting_hitl")
+
+    def _on_hitl_resolved(self, hitl: HITLRequest) -> None:
+        if not hitl.run_id:
+            return
+        run = self._store.get_actor_run(hitl.run_id)
+        if run is not None and run.status == "awaiting_hitl":
+            self._store.update_actor_run(hitl.run_id, status="running")
+
+    def resume_resolved_hitl(self, hitl: HITLRequest) -> dict[str, Any]:
+        """Continue a leader loop whose waiting thread was lost on restart."""
+        hid = str(hitl.hitl_id or "").strip()
+        run_id = str(hitl.run_id or "").strip()
+        tool_call_id = str(hitl.tool_call_id or "").strip()
+        if not run_id or not tool_call_id:
+            return {"scheduled": False, "reason": "hitl_not_bound_to_run"}
+        with self._hitl_resume_lock:
+            if hid in self._resuming_hitls:
+                return {"scheduled": False, "reason": "already_resuming"}
+            self._resuming_hitls.add(hid)
+        run = self._store.get_actor_run(run_id)
+        if run is None or run.actor_id != "leader":
+            with self._hitl_resume_lock:
+                self._resuming_hitls.discard(hid)
+            return {"scheduled": False, "reason": "run_not_found"}
+        if run.status not in {"running", "awaiting_hitl"}:
+            with self._hitl_resume_lock:
+                self._resuming_hitls.discard(hid)
+            return {"scheduled": False, "reason": "run_not_resumable"}
+        history = self._store.ensure_run_history(run)
+        has_tool_call = any(
+            message.role == "assistant"
+            and any(call.id == tool_call_id for call in (message.tool_calls or []))
+            for message in history.messages
+        )
+        if not has_tool_call:
+            with self._hitl_resume_lock:
+                self._resuming_hitls.discard(hid)
+            return {"scheduled": False, "reason": "tool_call_not_found"}
+        if not any(m.role == "tool" and m.tool_call_id == tool_call_id for m in history.messages):
+            content = self._package_tool_content(
+                format_hitl_resolution(hitl),
+                tool_name="ask_workgroup_user",
+                run_id=run_id,
+                tool_call_id=tool_call_id,
+            )
+            self._store.append_run_history(
+                run_id,
+                [
+                    RunHistoryMessage(
+                        role="tool",
+                        tool_call_id=tool_call_id,
+                        name="ask_workgroup_user",
+                        content=content,
+                    )
+                ],
+            )
+        self._store.update_actor_run(run_id, status="running")
+
+        def _worker() -> None:
+            try:
+                for _ in self.run_leader_until_idle_events(hitl.workgroup_id, run_id):
+                    pass
+            except Exception:  # noqa: BLE001 - durable state remains auditable
+                try:
+                    current = self._store.get_actor_run(run_id)
+                    if current is not None and current.status == "running":
+                        self._store.update_actor_run(run_id, status="indeterminate")
+                except Exception:  # noqa: BLE001
+                    pass
+            finally:
+                with self._hitl_resume_lock:
+                    self._resuming_hitls.discard(hid)
+
+        threading.Thread(
+            target=_worker,
+            name=f"wg-hitl-resume-{hid[-8:]}",
+            daemon=True,
+        ).start()
+        return {"scheduled": True, "run_id": run_id, "hitl_id": hid}
+
+    def resume_persisted_hitls(self) -> list[dict[str, Any]]:
+        """Resume resolved HITLs left behind by a crash before dispatch."""
+        resumed: list[dict[str, Any]] = []
+        for hitl in self._store.list_resolved_bound_hitls():
+            if self._store.has_hitl_waiter(hitl.hitl_id):
+                continue
+            if not hitl.run_id:
+                continue
+            run = self._store.get_actor_run(hitl.run_id)
+            if run is None or run.status not in {"running", "awaiting_hitl"}:
+                continue
+            history = self._store.get_run_history(hitl.run_id)
+            if history is not None and any(
+                message.role == "tool" and message.tool_call_id == hitl.tool_call_id
+                for message in history.messages
+            ):
+                continue
+            result = self.resume_resolved_hitl(hitl)
+            if result.get("scheduled"):
+                resumed.append(result)
+        return resumed
 
     def _end_turn(self, workgroup_id: str, *, turn_token: str | None = None) -> QueuedHuman | None:
         """结束当前 turn；若队列非空则在同一把锁内认领下一条并返回。"""
@@ -983,6 +1098,8 @@ class TurnKernel:
             leader_run_id=run_id,
             assign_completer=self._assign_completer,
             registry_store=self._registry_store,
+            on_hitl_created=self._on_hitl_created,
+            on_hitl_resolved=self._on_hitl_resolved,
         )
         tools = [] if disable_tools else leader_native_tools()
         steps = 0

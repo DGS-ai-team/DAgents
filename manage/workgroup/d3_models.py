@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 _WG = r"^wg_[0-9a-z]{26}$"
 _EV = r"^ev_[0-9a-z]{26}$"
 _HT = r"^ht_[0-9a-z]{26}$"
+_RN = r"^rn_[0-9a-z]{26}$"
 _QH = r"^qh_[0-9a-z]{26}$"
 _TURN = r"^[0-9a-zA-Z_-]{1,128}$"
 
@@ -55,6 +56,10 @@ class HITLRequest(BaseModel):
     created_at: str
     resolution: dict[str, Any] | None = None
     resolved_at: str | None = None
+    # Bind an in-loop HITL to the durable actor history.  Explicit API-created
+    # information requests may leave these fields empty.
+    run_id: str | None = Field(default=None, pattern=_RN)
+    tool_call_id: str | None = Field(default=None, min_length=1)
 
 
 class QueuedHumanRecord(BaseModel):

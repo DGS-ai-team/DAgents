@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
 from manage.workgroup.llm_chat import ChatResult, MockLLMClient  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
+    ActorRunCreateRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
@@ -474,6 +476,81 @@ class LeaderLoopTests(unittest.TestCase):
             tool = next(m for m in hist.messages if m.role == "tool")
             self.assertEqual(tool.tool_call_id, "call_orphan")
             self.assertIn("interrupted", tool.content or "")
+
+    def test_resolved_hitl_replays_tool_result_and_resumes_leader(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            store = WorkGroupStore(db=SQLiteDatabase(root / "m.db"))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="HITL resume",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            store.publish_workgroup(group.workgroup_id)
+            from manage.workgroup.history import RunHistoryMessage, ToolCall, ToolCallFunction
+
+            run = store.create_actor_run(
+                group.workgroup_id,
+                ActorRunCreateRequest(actor_id="leader"),
+            )
+            store.append_run_history(
+                run.run_id,
+                [
+                    RunHistoryMessage(
+                        role="assistant",
+                        name="leader",
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_hitl_resume",
+                                function=ToolCallFunction(
+                                    name="ask_workgroup_user",
+                                    arguments='{"prompt":"confirm"}',
+                                ),
+                            )
+                        ],
+                    )
+                ],
+            )
+            hitl = store.create_hitl(
+                group.workgroup_id,
+                prompt="confirm",
+                run_id=run.run_id,
+                tool_call_id="call_hitl_resume",
+            )
+            resolved = store.resolve_hitl_cas(
+                group.workgroup_id,
+                hitl.hitl_id,
+                resolution={"answer": "yes"},
+            )
+            restarted = WorkGroupStore(db=SQLiteDatabase(root / "m.db"))
+            restarted.reconcile_inflight_runs()
+            client = MockLLMClient([ChatResult(content="continued", finish_reason="stop")])
+            kernel = TurnKernel(restarted, chat_client=client, mock_llm=True)
+
+            scheduled = kernel.resume_persisted_hitls()
+            self.assertEqual(len(scheduled), 1)
+            self.assertTrue(scheduled[0]["scheduled"])
+            for _ in range(100):
+                current = restarted.get_actor_run(run.run_id)
+                if current is not None and current.status == "succeeded":
+                    break
+                time.sleep(0.01)
+            current = restarted.get_actor_run(run.run_id)
+            self.assertIsNotNone(current)
+            assert current is not None
+            self.assertEqual(current.status, "succeeded")
+            history = restarted.get_run_history(run.run_id)
+            assert history is not None
+            tool_results = [
+                m for m in history.messages if m.role == "tool" and m.tool_call_id == "call_hitl_resume"
+            ]
+            self.assertEqual(len(tool_results), 1)
+            self.assertIn('"answer": "yes"', tool_results[0].content or "")
+            self.assertEqual(history.messages[-1].content, "continued")
 
     def test_leader_tool_loop_soft_limit_returns_tool_result(self) -> None:
         """超限后若模型仍发起 tool_calls，写入 soft tool_result 并允许收尾结论。"""

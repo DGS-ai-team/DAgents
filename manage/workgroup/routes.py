@@ -92,6 +92,7 @@ def build_workgroup_router(
     # fence stale active records before accepting new turns; pending HITL rows
     # remain durable and visible for the explicit recovery path.
     store.reconcile_inflight_runs()
+    loop.set_turn_kernel(kernel)
     if hub is not None:
         store.reconcile_timeline_outbox()
         store.set_timeline_listener(hub.publish_timeline_event)
@@ -106,6 +107,7 @@ def build_workgroup_router(
     kernel.set_assign_completer(loop.make_assign_completer(kernel))
     kernel.set_command_cancel_hook(loop.cancel_pending_commands)
     kernel.resume_persisted_queues()
+    kernel.resume_persisted_hitls()
 
     @router.post("", response_model=dict)
     def create_workgroup(req: WorkGroupCreateRequest, request: Request) -> dict:

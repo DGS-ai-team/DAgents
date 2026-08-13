@@ -151,6 +151,10 @@ class VerticalLoop:
         self._command_results: dict[str, dict[str, Any]] = {}
         # workgroup_id -> command_id -> {assign_id, member_id, home_node_id}
         self._wg_pending_commands: dict[str, dict[str, dict[str, str]]] = {}
+        self._turn_kernel: TurnKernel | None = None
+
+    def set_turn_kernel(self, kernel: TurnKernel | None) -> None:
+        self._turn_kernel = kernel
 
     # --- Timeline / Outbox / HITL 委托 store ---
 
@@ -693,7 +697,11 @@ class VerticalLoop:
         return self.store.create_hitl(workgroup_id, prompt=req.prompt)
 
     def resolve_info_hitl(self, workgroup_id: str, hitl_id: str, req: HITLResolveRequest) -> HITLRequest:
-        return self.store.resolve_hitl_cas(workgroup_id, hitl_id, resolution=req.resolution)
+        had_waiter = self.store.has_hitl_waiter(hitl_id)
+        hitl = self.store.resolve_hitl_cas(workgroup_id, hitl_id, resolution=req.resolution)
+        if not had_waiter and self._turn_kernel is not None:
+            self._turn_kernel.resume_resolved_hitl(hitl)
+        return hitl
 
     def archive_with_tombstone(self, workgroup_id: str) -> dict[str, Any]:
         group = self.store.begin_archive(workgroup_id)
