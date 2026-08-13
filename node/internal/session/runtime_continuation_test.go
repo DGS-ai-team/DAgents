@@ -3,8 +3,11 @@ package session
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 func TestCancelInvalidatesQueuedToolResult(t *testing.T) {
@@ -93,4 +96,119 @@ func TestCancelDoesNotLetLateToolCallbackCreateContinuation(t *testing.T) {
 	if got := rt.queue.CountByRequestType(queue.RequestTypeToolResult); got != 1 {
 		t.Fatalf("unbound callback enqueued %d tool results, want 1", got)
 	}
+}
+
+func TestCancelPendingHITLRepairsToolResultOnce(t *testing.T) {
+	mgr := testManager(t)
+	defer mgr.Stop()
+
+	sess, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := mgr.getRuntime(sess.ID)
+	call := llm.ToolCall{
+		ID:   "call-pending-cancel",
+		Type: "function",
+		Function: llm.ToolCallFunction{
+			Name:      "bash_run",
+			Arguments: `{"command":"sleep 20"}`,
+		},
+	}
+	rt.mu.Lock()
+	rt.messages = []llm.Message{
+		{Role: "user", Content: "run a command"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{call}},
+	}
+	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: call}}}
+	rt.turnID = "turn-pending-cancel"
+	rt.generation = 3
+	rt.mu.Unlock()
+
+	if !mgr.CancelTurn(sess.ID) {
+		t.Fatal("expected pending HITL cancellation to report changed=true")
+	}
+	if mgr.CancelTurn(sess.ID) {
+		t.Fatal("second cancellation should be a no-op")
+	}
+
+	rt.mu.Lock()
+	msgs := append([]llm.Message(nil), rt.messages...)
+	pending := rt.pending
+	rt.mu.Unlock()
+	if pending != nil {
+		t.Fatalf("pending HITL was not cleared: %#v", pending)
+	}
+	if got := countToolResponsesForCall(msgs, call.ID); got != 1 {
+		t.Fatalf("tool result count=%d, want 1; messages=%+v", got, msgs)
+	}
+	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, queue.RequestTypeResume, "", nil, map[string]any{
+		"type":        "selection",
+		"approved":    []string{call.ID},
+		"rejected":    []string{},
+		"approval_id": "stale-after-cancel",
+	}, ""); err == nil {
+		t.Fatal("resume after cancellation should be rejected as no_pending_hitl")
+	} else if err.Error() != "no_pending_hitl" {
+		t.Fatalf("resume error=%q, want no_pending_hitl", err)
+	}
+}
+
+func TestDuplicateResumeQueueProducesOneToolResult(t *testing.T) {
+	mgr := testManager(t)
+	defer mgr.Stop()
+
+	sess, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := mgr.getRuntime(sess.ID)
+	call := llm.ToolCall{
+		ID:   "call-duplicate-resume",
+		Type: "function",
+		Function: llm.ToolCallFunction{
+			Name:      "read_file",
+			Arguments: `{"path":"missing-file-for-regression"}`,
+		},
+	}
+	rt.mu.Lock()
+	rt.messages = []llm.Message{
+		{Role: "user", Content: "read a file"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{call}},
+	}
+	rt.pending = &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: call}}}
+	rt.mu.Unlock()
+
+	resume := map[string]any{
+		"type":     "selection",
+		"approved": []string{},
+		"rejected": []string{call.ID},
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, queue.RequestTypeResume, "", nil, resume, ""); err != nil {
+			t.Fatalf("resume %d enqueue: %v", i+1, err)
+		}
+	}
+	waitQueueDrain(t, rt, 5*time.Second)
+
+	rt.mu.Lock()
+	msgs := append([]llm.Message(nil), rt.messages...)
+	pending := rt.pending
+	rt.mu.Unlock()
+	if pending != nil {
+		t.Fatalf("pending HITL remained after resume: %#v", pending)
+	}
+	if got := countToolResponsesForCall(msgs, call.ID); got != 1 {
+		t.Fatalf("duplicate resume produced %d tool results, want 1; messages=%+v", got, msgs)
+	}
+}
+
+func countToolResponsesForCall(messages []llm.Message, callID string) int {
+	n := 0
+	for _, msg := range messages {
+		if msg.Role == "tool" && msg.ToolCallID == callID {
+			n++
+		}
+	}
+	return n
 }

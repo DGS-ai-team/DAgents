@@ -63,7 +63,7 @@ func TestRunToolBeforeEachViaRunPhase_duplicate(t *testing.T) {
 
 	in := ToolBeforeEachInput{
 		ToolName:     "bash_run",
-		ToolArgs:     map[string]any{"command": "echo ok"},
+		ToolArgs:     map[string]any{"command": "echo ok", "shell_type": "bash"},
 		RawArguments: `{"command":"echo ok"}`,
 	}
 	out := registryToolBeforeEach(reg, in)

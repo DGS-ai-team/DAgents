@@ -148,7 +148,23 @@ func runShellUntilDoneWithRegistry(r *Registry, ctx context.Context, params shel
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	runErr := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return "", nil, err
+	}
+	tree, treeErr := attachProcessTree(cmd)
+	if treeErr != nil {
+		tree = nil
+	}
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+	var runErr error
+	select {
+	case runErr = <-waitErr:
+	case <-ctx.Done():
+		terminateProcessTree(cmd, tree)
+		runErr = <-waitErr
+	}
+	closeProcessTree(tree)
 	outText := decodeShellOutput(stdout.Bytes(), params.outputEncoding)
 	errText := decodeShellOutput(stderr.Bytes(), params.outputEncoding)
 	out, stats := formatShellCompletedOutput(params, outText, errText, cmd.ProcessState, runErr)
@@ -174,6 +190,11 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		return fmt.Sprintf("ERROR: bash_run 失败: %v", err), nil, nil
 	}
 
+	tree, treeErr := attachProcessTree(cmd)
+	if treeErr != nil {
+		tree = nil
+	}
+
 	sessionID := sessionIDFromContext(ctx)
 	toolCallID := toolCallIDFromContext(ctx)
 	job := &backgroundJob{
@@ -185,6 +206,7 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		startedAt:          nowMs(),
 		done:               make(chan struct{}),
 		bashCmd:            cmd,
+		processTree:        tree,
 		bashCwd:            params.cwd,
 		bashTimeout:        params.timeoutSec,
 		bashShellType:      string(params.shellType),
@@ -212,11 +234,11 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		status := job.status
 		preset := job.result
 		result, stats := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, cmd.ProcessState, nil)
-		if status != "cancelled" {
+		if status != jobStatusCancelled {
 			job.compressStats = stats
 		}
 		job.mu.Unlock()
-		if status == "cancelled" {
+		if status == jobStatusCancelled {
 			if strings.Contains(preset, "硬上限") {
 				return formatShellHardTimeoutResult(params.timeoutSec), nil, nil
 			}
@@ -230,13 +252,9 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 		return formatShellRunningResult(job, params, "user"), nil, nil
 	case <-gate.cancelCh:
 		job.mu.Lock()
-		job.status = "cancelled"
-		if job.result == "" {
-			job.result = "任务已取消。"
-		}
-		job.finishedAt = nowMs()
+		job.transitionStatusLocked(jobStatusCancelled, "cancelled")
 		job.mu.Unlock()
-		killShellProcess(cmd)
+		terminateProcessTree(cmd, tree)
 		<-collectDone
 		return formatShellCancelledResult(job, params), nil, nil
 	case <-timer.C:
@@ -246,15 +264,17 @@ func runShellSyncWithAutoDegrade(r *Registry, ctx context.Context, params shellR
 			return formatShellRunningResult(job, params, "timeout"), nil, nil
 		}
 		job.mu.Lock()
-		job.status = "cancelled"
-		job.result = formatShellHardTimeoutResult(params.timeoutSec)
-		job.finishedAt = nowMs()
+		job.transitionStatusLocked(jobStatusCancelled, formatShellHardTimeoutResult(params.timeoutSec))
 		job.mu.Unlock()
-		killShellProcess(cmd)
+		terminateProcessTree(cmd, tree)
 		<-collectDone
 		return formatShellHardTimeoutResult(params.timeoutSec), nil, nil
 	case <-ctx.Done():
-		killShellProcess(cmd)
+		job.mu.Lock()
+		job.transitionStatusLocked(jobStatusCancelled, ctx.Err().Error())
+		job.mu.Unlock()
+		terminateProcessTree(cmd, tree)
+		<-collectDone
 		return "", nil, ctx.Err()
 	}
 }
@@ -263,7 +283,10 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		defer close(job.done)
+		defer func() {
+			closeProcessTree(job.processTree)
+			close(job.done)
+		}()
 		var wg sync.WaitGroup
 		wg.Add(2)
 		var stdoutBuf, stderrBuf bytes.Buffer
@@ -288,7 +311,7 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 		if stderrErr != nil && job.bashStderr == "" {
 			job.bashStderr = stderrErr.Error()
 		}
-		if job.status == "cancelled" {
+		if job.status == jobStatusCancelled {
 			if job.finishedAt == 0 {
 				job.finishedAt = nowMs()
 			}
@@ -302,13 +325,13 @@ func (r *Registry) startShellOutputCollector(job *backgroundJob, params shellRun
 			code = 1
 		}
 		job.bashExitCode = &code
+		result, stats := formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, job.bashCmd.ProcessState, waitErr)
 		if code == 0 {
-			job.status = "succeeded"
+			job.transitionStatusLocked(jobStatusSucceeded, result)
 		} else {
-			job.status = "failed"
+			job.transitionStatusLocked(jobStatusFailed, result)
 		}
-		job.result, job.compressStats = formatShellCompletedOutput(params, job.bashStdout, job.bashStderr, job.bashCmd.ProcessState, waitErr)
-		job.finishedAt = nowMs()
+		job.compressStats = stats
 		autoDegraded := job.autoDegraded
 		job.mu.Unlock()
 

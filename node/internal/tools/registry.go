@@ -31,17 +31,66 @@ type Registry struct {
 	triggerSched        *triggers.Scheduler
 	agentID             string
 	skillsCatalogHolder
-	enabledOnly         map[string]struct{}
-	multimodalEnabled   bool
-	browser             *browser.Manager
+	enabledOnly            map[string]struct{}
+	multimodalEnabled      bool
+	browser                *browser.Manager
 	browserCompanionExists BrowserCompanionExistsFunc
-	wecom               *wecom.Client
-	handlers            map[string]handler
-	pathEncMu           sync.Mutex
-	pathEncCache        map[string]pathEncodingEntry
-	mediaMu             sync.Mutex
-	mediaRegister       MediaRegisterFunc
-	toolResultMedia     map[string][]map[string]any
+	wecom                  *wecom.Client
+	handlers               map[string]handler
+	pathEncMu              sync.Mutex
+	pathEncCache           map[string]pathEncodingEntry
+	mediaMu                sync.Mutex
+	mediaRegister          MediaRegisterFunc
+	toolResultMedia        map[string][]map[string]any
+}
+
+// WithBackgroundJobStore binds a persistent job store to a Registry. It is
+// intended for Node runtime construction; tests and embedded callers may omit
+// it to keep jobs in memory only.
+func (r *Registry) WithBackgroundJobStore(st *BackgroundJobStore) error {
+	return r.withBackgroundJobStore(st, "")
+}
+
+// WithBackgroundJobStoreForSession restores only jobs belonging to one
+// agent/session runtime, preventing per-agent registries from leaking job
+// metadata across agents.
+func (r *Registry) WithBackgroundJobStoreForSession(st *BackgroundJobStore, sessionID string) error {
+	return r.withBackgroundJobStore(st, sessionID)
+}
+
+func (r *Registry) withBackgroundJobStore(st *BackgroundJobStore, sessionID string) error {
+	if r == nil {
+		return fmt.Errorf("registry is nil")
+	}
+	jobs, err := newBackgroundJobRegistryWithStore(st, sessionID)
+	if err != nil {
+		return err
+	}
+	// Rebinding can happen while an Agent runtime is being rebuilt. Preserve
+	// in-process jobs (and their cancellation handles) instead of replacing
+	// them with only the rows loaded from SQLite.
+	if current := r.bgJobs; current != nil {
+		current.mu.RLock()
+		for id, job := range current.jobs {
+			if job == nil {
+				continue
+			}
+			job.mu.Lock()
+			jobSessionID := strings.TrimSpace(job.sessionID)
+			job.mu.Unlock()
+			if sessionID != "" && jobSessionID != "" && jobSessionID != sessionID {
+				continue
+			}
+			if _, exists := jobs.jobs[id]; !exists {
+				jobs.jobs[id] = job
+				jobs.persist(job)
+			}
+		}
+		jobs.onDone = current.onDone
+		current.mu.RUnlock()
+	}
+	r.bgJobs = jobs
+	return nil
 }
 
 // NewRegistry 创建工具表；fsRoot 为空时用当前目录。

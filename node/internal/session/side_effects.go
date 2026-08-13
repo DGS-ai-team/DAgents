@@ -1,6 +1,7 @@
 package session
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -25,10 +26,13 @@ type sideEffectStore struct {
 	seq             uint64
 	queue           []readySideEffect
 	continuePending bool
+	// asyncJobs is a session-scoped idempotency set. An async callback can be
+	// delivered more than once before the first one is applied to history.
+	asyncJobs map[string]struct{}
 }
 
 func newSideEffectStore() *sideEffectStore {
-	return &sideEffectStore{}
+	return &sideEffectStore{asyncJobs: make(map[string]struct{})}
 }
 
 func (s *sideEffectStore) HasReady() bool {
@@ -73,15 +77,37 @@ func (s *sideEffectStore) Produce(
 	messages []llm.Message,
 	in sideEffectProduceInput,
 ) {
+	var async queue.AsyncToolResultPayload
+	if in.Async != nil {
+		async = *in.Async
+	}
+	if in.Kind == turn.SideEffectAsync {
+		jobID := strings.TrimSpace(async.JobID)
+		if jobID != "" {
+			// History-level idempotence handles callbacks that arrive after the
+			// first callback was applied. This check handles duplicates that race
+			// before either callback reaches history.
+			if turn.SideEffectAlreadyApplied(messages, in.Kind, async, "", "") {
+				return
+			}
+			s.mu.Lock()
+			if s.asyncJobs == nil {
+				s.asyncJobs = make(map[string]struct{})
+			}
+			if _, exists := s.asyncJobs[jobID]; exists {
+				s.mu.Unlock()
+				return
+			}
+			s.asyncJobs[jobID] = struct{}{}
+			s.mu.Unlock()
+		}
+	}
+
 	s.mu.Lock()
 	s.seq++
 	seq := s.seq
 	s.mu.Unlock()
 
-	var async queue.AsyncToolResultPayload
-	if in.Async != nil {
-		async = *in.Async
-	}
 	built := orch.BuildSideEffectMessages(in.Kind, sessionID, messages, async, in.MessageContent, in.UserName)
 
 	switch in.Kind {
@@ -276,6 +302,7 @@ func (s *sideEffectStore) ClearSession(sessionID string, orch *turn.Orchestrator
 	items := append([]readySideEffect(nil), s.queue...)
 	s.queue = nil
 	s.continuePending = false
+	s.asyncJobs = make(map[string]struct{})
 	s.mu.Unlock()
 	seqs := make([]uint64, 0, len(items))
 	for _, e := range items {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -39,12 +40,14 @@ func TestSecretBoxRoundTrip(t *testing.T) {
 	if plain2 != "sk-test-secret" {
 		t.Fatalf("plain2 = %q", plain2)
 	}
-	info, err := os.Stat(filepath.Join(dir, secretKeyFileName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("key file perms too open: %v", info.Mode())
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filepath.Join(dir, secretKeyFileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			t.Fatalf("key file perms too open: %v", info.Mode())
+		}
 	}
 }
 
