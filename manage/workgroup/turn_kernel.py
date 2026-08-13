@@ -15,6 +15,7 @@ from manage.workgroup.builtin_hooks import (
     format_today_date_message,
     package_tool_result,
 )
+from manage.workgroup.d3_models import TurnCheckpoint
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup.human_queue import QueuedHuman
 from manage.workgroup import ids as wg_ids
@@ -140,13 +141,19 @@ class TurnKernel:
         self._registry_store = registry_store
         self._max_tool_loops = max(1, max_tool_loops)
         self._mock_llm = mock_llm
-        self._hitl_resolutions: dict[str, dict[str, Any]] = {}
+        # Compatibility for the old standalone CAS skeleton. Real HITL rows
+        # always use the durable Store path in resolve_hitl_cas below.
+        self._legacy_hitl_resolutions: dict[str, dict[str, Any]] = {}
         # workgroup_id -> cancel flag（用户中断当前 turn）
         self._cancel_flags: dict[str, threading.Event] = {}
         self._active_turn: dict[str, dict[str, Any]] = {}
         self._turn_lock = threading.Lock()
         # workgroup_id -> FIFO human 队列（进程内；对齐 Node MessageQueue 单飞）
-        self._human_queues: dict[str, list[QueuedHuman]] = {}
+        self._human_queues: dict[str, list[QueuedHuman]] = {
+            workgroup_id: [QueuedHuman.from_record(record) for record in records]
+            for workgroup_id in self._store.list_human_queue_workgroups()
+            for records in [self._store.list_human_queue_records(workgroup_id)]
+        }
         self._command_cancel_hook: Callable[[str], None] | None = None
         self._realtime_event_listener: Callable[
             [str, str, dict[str, Any], str | None], None
@@ -198,7 +205,27 @@ class TurnKernel:
         token = str(meta.get("turn_token") or wg_ids.new_ulid())
         with self._turn_lock:
             self._active_turn[workgroup_id] = {"mode": mode, "turn_token": token, **meta}
+            self._save_turn_checkpoint_unlocked(workgroup_id)
         return flag
+
+    def _save_turn_checkpoint_unlocked(self, workgroup_id: str) -> None:
+        meta = dict(self._active_turn.get(workgroup_id) or {})
+        token = str(meta.pop("turn_token", "") or "")
+        mode = str(meta.pop("mode", "") or "")
+        if not token or not mode:
+            return
+        try:
+            self._store.save_turn_checkpoint(
+                TurnCheckpoint(
+                    workgroup_id=workgroup_id,
+                    turn_token=token,
+                    mode=mode,
+                    metadata=meta,
+                    updated_at=datetime.now().astimezone().isoformat(),
+                )
+            )
+        except Exception:  # noqa: BLE001 - checkpoint must not break the turn
+            pass
 
     def _end_turn(self, workgroup_id: str, *, turn_token: str | None = None) -> QueuedHuman | None:
         """结束当前 turn；若队列非空则在同一把锁内认领下一条并返回。"""
@@ -208,6 +235,7 @@ class TurnKernel:
                 if turn_token and str(cur.get("turn_token") or "") != str(turn_token):
                     return None
                 self._active_turn.pop(workgroup_id, None)
+                self._store.clear_turn_checkpoint(workgroup_id)
             flag = self._cancel_flags.get(workgroup_id)
             if flag is not None:
                 flag.clear()
@@ -227,6 +255,7 @@ class TurnKernel:
                 "queue_id": item.queue_id,
                 "client_message_id": item.client_message_id,
             }
+            self._save_turn_checkpoint_unlocked(workgroup_id)
             item._claim_token = token  # type: ignore[attr-defined]
             return item
 
@@ -251,11 +280,48 @@ class TurnKernel:
         if nxt is not None:
             self._schedule_queued_human(nxt)
 
+    def resume_persisted_queues(self) -> int:
+        """Resume FIFO messages that survived a Manage restart.
+
+        The previous worker is fenced by WorkGroupStore before this method is
+        called. Only queued human messages are safe to retry; the interrupted
+        LLM/assign turn itself is never replayed automatically.
+        """
+        scheduled = 0
+        for workgroup_id in self._store.list_human_queue_workgroups():
+            group = self._store.get_workgroup(workgroup_id)
+            if group is None or group.status != "active":
+                continue
+            with self._turn_lock:
+                if workgroup_id in self._active_turn:
+                    continue
+                bucket = self._human_queues.get(workgroup_id) or []
+                if not bucket:
+                    continue
+                item = bucket.pop(0)
+                if bucket:
+                    self._human_queues[workgroup_id] = bucket
+                else:
+                    self._human_queues.pop(workgroup_id, None)
+                token = wg_ids.new_ulid()
+                self._active_turn[workgroup_id] = {
+                    "mode": "claiming",
+                    "turn_token": token,
+                    "queue_id": item.queue_id,
+                    "client_message_id": item.client_message_id,
+                }
+                self._save_turn_checkpoint_unlocked(workgroup_id)
+                item._claim_token = token  # type: ignore[attr-defined]
+            self._schedule_queued_human(item)
+            scheduled += 1
+        return scheduled
+
     def _update_turn(self, workgroup_id: str, **meta: Any) -> None:
         with self._turn_lock:
             cur = self._active_turn.get(workgroup_id)
             if cur is not None:
                 cur.update(meta)
+                self._save_turn_checkpoint_unlocked(workgroup_id)
 
     def _active_client_message_id(self, workgroup_id: str) -> str | None:
         with self._turn_lock:
@@ -300,6 +366,7 @@ class TurnKernel:
                     continue
                 item.text = body
                 item.updated_at = _now()
+                self._store.save_human_queue_record(item.to_record())
                 return item.to_public(idx + 1)
         raise WorkgroupError("not_found", "queued message not found", http_status=404)
 
@@ -315,6 +382,7 @@ class TurnKernel:
                     self._human_queues[workgroup_id] = items
                 else:
                     self._human_queues.pop(workgroup_id, None)
+                self._store.delete_human_queue_record(workgroup_id, qid)
                 return {"cancelled": True, "queue_id": qid, "depth": len(items)}
         raise WorkgroupError("not_found", "queued message not found", http_status=404)
 
@@ -354,6 +422,7 @@ class TurnKernel:
             pending = list(self._human_queues.get(workgroup_id) or [])
             if busy or pending:
                 pos = self._enqueue_human_unlocked(item)
+                self._store.save_human_queue_record(item.to_record())
                 return "queued", item, pos
             token = wg_ids.new_ulid()
             self._active_turn[workgroup_id] = {
@@ -362,6 +431,7 @@ class TurnKernel:
                 "queue_id": item.queue_id,
                 "client_message_id": item.client_message_id,
             }
+            self._save_turn_checkpoint_unlocked(workgroup_id)
             item_meta = item
             # stash token on item via active_turn only
             return "run", item_meta, 0
@@ -485,7 +555,20 @@ class TurnKernel:
         resolution: dict[str, Any],
     ) -> dict[str, Any]:
         """HITL 乐观 CAS 占位：同 id 二次决议 → already_resolved。"""
-        existing = self._hitl_resolutions.get(hitl_id)
+        durable = self._store.get_hitl(hitl_id)
+        if durable is not None:
+            if expected_status != "pending":
+                raise WorkgroupError(
+                    "conflict",
+                    f"unexpected HITL status={expected_status}",
+                    http_status=409,
+                )
+            return self._store.resolve_hitl_cas(
+                durable.workgroup_id,
+                hitl_id,
+                resolution=resolution,
+            ).model_dump(mode="json")
+        existing = self._legacy_hitl_resolutions.get(hitl_id)
         if existing is not None:
             raise WorkgroupError(
                 "already_resolved",
@@ -496,7 +579,7 @@ class TurnKernel:
         if expected_status != "pending":
             raise WorkgroupError("conflict", f"unexpected HITL status={expected_status}", http_status=409)
         stored = {"hitl_id": hitl_id, "status": "resolved", "resolution": resolution}
-        self._hitl_resolutions[hitl_id] = stored
+        self._legacy_hitl_resolutions[hitl_id] = stored
         return stored
 
     def handle_human_message(
@@ -609,6 +692,10 @@ class TurnKernel:
                 protocol_name=protocol_name_for_actor(item.from_node_id),
                 direct_member_id=item.direct_member_id,
             )
+            # Remove the durable queue item only after the human message has
+            # been committed to Timeline + outbox. A crash before this point
+            # leaves the message recoverable instead of silently dropping it.
+            self._store.delete_human_queue_record(workgroup_id, item.queue_id)
             yield {
                 "event": "human",
                 "data": {"timeline_event": event.model_dump(mode="json")},

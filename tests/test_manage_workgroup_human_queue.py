@@ -17,6 +17,7 @@ from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
 from manage.workgroup.llm_chat import ChatResult, MockLLMClient  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
+    AssignCreateRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
@@ -148,6 +149,58 @@ class HumanQueueTests(unittest.TestCase):
                 time.sleep(0.05)
             humans = [e for e in store.list_timeline(wid) if e.type == "human_message"]
             self.assertEqual([h.text for h in humans], ["first"])
+
+    def test_queued_message_survives_kernel_reload(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            path = Path(tmp) / "m.db"
+            store = WorkGroupStore(db=SQLiteDatabase(path))
+            wid = self._ready(store)
+            kernel = TurnKernel(store, mock_llm=True)
+            kernel._begin_turn(wid, mode="leader", client_message_id="first")
+            action, item, position = kernel._claim_or_enqueue(
+                wid,
+                text="survives restart",
+                from_node_id="node-a",
+                client_message_id="queued-1",
+                disable_tools=True,
+                direct_member_id=None,
+            )
+            self.assertEqual(action, "queued")
+            self.assertEqual(position, 1)
+
+            reloaded_store = WorkGroupStore(db=SQLiteDatabase(path))
+            reloaded_kernel = TurnKernel(reloaded_store, mock_llm=True)
+            queue = reloaded_kernel.list_human_queue(wid)
+            self.assertEqual(queue["depth"], 1)
+            self.assertEqual(queue["items"][0]["text"], "survives restart")
+            self.assertTrue(reloaded_store.get_turn_checkpoint(wid))
+
+    def test_restart_fences_active_runs_and_releases_member(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            path = Path(tmp) / "m.db"
+            store = WorkGroupStore(db=SQLiteDatabase(path))
+            wid = self._ready(store)
+            member, _ = store.create_member(
+                wid,
+                MemberCreateRequest(
+                    home_node_id="node-a",
+                    display_name="member-a",
+                    description="worker",
+                ),
+            )
+            assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=member.member_id, instruction="work"),
+            )
+            store.set_assign_status(assign.assign_id, "running")
+            store.mark_member_status(member.member_id, "busy", workgroup_id=wid)
+            run = store.get_actor_run(assign.leader_run_id)
+            self.assertIsNotNone(run)
+            result = store.reconcile_inflight_runs()
+            self.assertIn(assign.assign_id, result["assign_ids"])
+            self.assertEqual(store.get_assign(assign.assign_id).status, "indeterminate")
+            self.assertEqual(store.get_actor_run(assign.leader_run_id).status, "indeterminate")
+            self.assertEqual(store.get_member(member.member_id).status, "ready")
 
 
 if __name__ == "__main__":

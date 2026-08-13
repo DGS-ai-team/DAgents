@@ -12,7 +12,14 @@ from manage.storage.sqlite import SQLiteDatabase
 from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup import ids
-from manage.workgroup.d3_models import HITLRequest, OutboxFrame, Subscription, TimelineEvent
+from manage.workgroup.d3_models import (
+    HITLRequest,
+    OutboxFrame,
+    QueuedHumanRecord,
+    Subscription,
+    TimelineEvent,
+    TurnCheckpoint,
+)
 from manage.workgroup.history import ActorRunHistory, RunHistoryMessage
 from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.models import (
@@ -65,6 +72,8 @@ class WorkGroupStore:
         self._outbox: dict[str, list[OutboxFrame]] = {}
         self._hitl: dict[str, HITLRequest] = {}
         self._hitl_waiters: dict[str, threading.Event] = {}
+        self._human_queue: dict[str, list[QueuedHumanRecord]] = {}
+        self._turn_checkpoints: dict[str, TurnCheckpoint] = {}
         # member_id → {workspace_path, tool_catalog_revision, provision_id}
         self._member_runtime: dict[str, dict[str, str]] = {}
         # workgroup_id → {workspace_path} 组共享工作区（与 WorkGroup.workspace.path 同步）
@@ -161,6 +170,12 @@ class WorkGroupStore:
             self._outbox[wg] = sorted(frames, key=lambda f: f.delivery_seq)
         for h in self._load_all("workgroup_hitl", HITLRequest):
             self._hitl[h.hitl_id] = h
+        for item in self._load_all("workgroup_human_queue", QueuedHumanRecord):
+            self._human_queue.setdefault(item.workgroup_id, []).append(item)
+        for wg, items in self._human_queue.items():
+            self._human_queue[wg] = sorted(items, key=lambda item: (item.created_at, item.queue_id))
+        for checkpoint in self._load_all("workgroup_turn_checkpoints", TurnCheckpoint):
+            self._turn_checkpoints[checkpoint.workgroup_id] = checkpoint
         for sub in self._load_all("workgroup_subscriptions", Subscription):
             self._subscriptions.setdefault(sub.workgroup_id, {})[sub.node_id] = sub
 
@@ -1105,6 +1120,155 @@ class WorkGroupStore:
                 workgroup_id=updated.workgroup_id,
             )
             return updated
+
+    # --- Turn recovery / human queue persistence ---
+
+    def list_human_queue_records(self, workgroup_id: str) -> list[QueuedHumanRecord]:
+        with self._lock:
+            self._ensure_loaded()
+            return list(self._human_queue.get(workgroup_id) or [])
+
+    def list_human_queue_workgroups(self) -> list[str]:
+        with self._lock:
+            self._ensure_loaded()
+            return list(self._human_queue.keys())
+
+    def save_human_queue_record(self, record: QueuedHumanRecord) -> QueuedHumanRecord:
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(record.workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            bucket = self._human_queue.setdefault(record.workgroup_id, [])
+            for index, existing in enumerate(bucket):
+                if existing.queue_id == record.queue_id:
+                    bucket[index] = record
+                    break
+            else:
+                bucket.append(record)
+            bucket.sort(key=lambda item: (item.created_at, item.queue_id))
+            self._put(
+                "workgroup_human_queue",
+                record.queue_id,
+                record.model_dump_json(),
+                workgroup_id=record.workgroup_id,
+            )
+            return record
+
+    def delete_human_queue_record(self, workgroup_id: str, queue_id: str) -> None:
+        with self._lock:
+            self._ensure_loaded()
+            bucket = self._human_queue.get(workgroup_id) or []
+            bucket = [item for item in bucket if item.queue_id != queue_id]
+            if bucket:
+                self._human_queue[workgroup_id] = bucket
+            else:
+                self._human_queue.pop(workgroup_id, None)
+            self._delete("workgroup_human_queue", queue_id)
+
+    def save_turn_checkpoint(self, checkpoint: TurnCheckpoint) -> TurnCheckpoint:
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(checkpoint.workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            self._turn_checkpoints[checkpoint.workgroup_id] = checkpoint
+            self._put(
+                "workgroup_turn_checkpoints",
+                checkpoint.workgroup_id,
+                checkpoint.model_dump_json(),
+                workgroup_id=checkpoint.workgroup_id,
+            )
+            return checkpoint
+
+    def get_turn_checkpoint(self, workgroup_id: str) -> TurnCheckpoint | None:
+        with self._lock:
+            self._ensure_loaded()
+            return self._turn_checkpoints.get(workgroup_id)
+
+    def clear_turn_checkpoint(self, workgroup_id: str) -> None:
+        with self._lock:
+            self._ensure_loaded()
+            self._turn_checkpoints.pop(workgroup_id, None)
+            self._delete("workgroup_turn_checkpoints", workgroup_id)
+
+    def reconcile_inflight_runs(self) -> dict[str, Any]:
+        """Fence process-local work after a Manage restart.
+
+        ActorRun/Assign records are durable, but their worker threads and
+        command waiters are not.  Never leave those records looking active:
+        mark them indeterminate and release the member lease.  Pending HITL
+        rows are intentionally preserved for an explicit user decision.
+        """
+        with self._lock:
+            self._ensure_loaded()
+            run_ids: list[str] = []
+            assign_ids: list[str] = []
+            checkpoint_ids = list(self._turn_checkpoints.keys())
+            for workgroup_id in checkpoint_ids:
+                self._turn_checkpoints.pop(workgroup_id, None)
+                self._delete("workgroup_turn_checkpoints", workgroup_id)
+            for run in list(self._runs.values()):
+                if run.status not in {"running", "awaiting_hitl"}:
+                    continue
+                updated = run.model_copy(update={"status": "indeterminate"})
+                self._runs[run.run_id] = updated
+                self._put(
+                    "actor_runs",
+                    run.run_id,
+                    updated.model_dump_json(),
+                    workgroup_id=run.workgroup_id,
+                )
+                run_ids.append(run.run_id)
+            for member in list(self._members.values()):
+                if member.status != "busy":
+                    continue
+                active = self._assigns.get(member.active_assign_id or "")
+                if active is not None and active.status in {"queued", "running", "awaiting_hitl"}:
+                    continue
+                released = member.model_copy(update={"active_assign_id": None, "status": "ready"})
+                self._members[member.member_id] = released
+                self._put(
+                    "workgroup_members",
+                    member.member_id,
+                    released.model_dump_json(),
+                    workgroup_id=member.workgroup_id,
+                )
+            for assign in list(self._assigns.values()):
+                if assign.status not in {"queued", "running", "awaiting_hitl"}:
+                    continue
+                updated = assign.model_copy(
+                    update={
+                        "status": "indeterminate",
+                        "result_summary": "Manage restarted before the assignment completed",
+                        "error_code": "manage_restarted",
+                    }
+                )
+                self._assigns[assign.assign_id] = updated
+                self._put(
+                    "workgroup_assigns",
+                    assign.assign_id,
+                    updated.model_dump_json(),
+                    workgroup_id=assign.workgroup_id,
+                )
+                member = self._members.get(assign.member_id)
+                if member is not None and (
+                    member.active_assign_id == assign.assign_id or member.status == "busy"
+                ):
+                    released = member.model_copy(
+                        update={"active_assign_id": None, "status": "ready"}
+                    )
+                    self._members[member.member_id] = released
+                    self._put(
+                        "workgroup_members",
+                        member.member_id,
+                        released.model_dump_json(),
+                        workgroup_id=member.workgroup_id,
+                    )
+                assign_ids.append(assign.assign_id)
+            return {
+                "run_ids": run_ids,
+                "assign_ids": assign_ids,
+                "checkpoint_workgroup_ids": checkpoint_ids,
+            }
 
     def fail_active_assigns(
         self,

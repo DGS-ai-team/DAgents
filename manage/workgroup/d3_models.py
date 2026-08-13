@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 _WG = r"^wg_[0-9a-z]{26}$"
 _EV = r"^ev_[0-9a-z]{26}$"
 _HT = r"^ht_[0-9a-z]{26}$"
+_QH = r"^qh_[0-9a-z]{26}$"
+_TURN = r"^[0-9a-zA-Z_-]{1,128}$"
 
 
 class TimelineEvent(BaseModel):
@@ -53,6 +55,26 @@ class HITLRequest(BaseModel):
     created_at: str
     resolution: dict[str, Any] | None = None
     resolved_at: str | None = None
+
+
+class QueuedHumanRecord(BaseModel):
+    queue_id: str = Field(pattern=_QH)
+    workgroup_id: str = Field(pattern=_WG)
+    text: str = Field(min_length=1)
+    from_node_id: str = Field(min_length=1)
+    client_message_id: str | None = None
+    direct_member_id: str | None = None
+    disable_tools: bool = False
+    created_at: str
+    updated_at: str
+
+
+class TurnCheckpoint(BaseModel):
+    workgroup_id: str = Field(pattern=_WG)
+    turn_token: str = Field(pattern=_TURN)
+    mode: str = Field(min_length=1, max_length=64)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    updated_at: str
 
 
 class HumanPostRequest(BaseModel):
