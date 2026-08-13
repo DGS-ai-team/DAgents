@@ -66,6 +66,7 @@ import {
   startToolJobsPolling,
   stopToolJobsPolling,
 } from "../stores/toolJobs.js";
+import { classifyCancelOutcome } from "../stores/cancelState.js";
 import { createTurnWatchdog } from "../stores/turnWatchdog.js";
 import { COMPOSER_DRAFT_KEY } from "../utils/helpCommands.js";
 import {
@@ -892,15 +893,31 @@ async function cancelTurn() {
   cancelling.value = true;
   agentStore.error = "";
   try {
+    const response = await api.cancelAgentTurn(agentStore.agentId);
+    let hydrate = null;
+    try {
+      hydrate = await hydrateAgent();
+      await refreshToolJobs(agentStore.agentId);
+    } catch {
+      // The cancellation acknowledgement remains usable if reconciliation
+      // briefly fails; the next SSE/hydrate cycle will repair the view.
+    }
+    const outcome = classifyCancelOutcome(response, hydrate);
+    if (outcome === "not_cancelled") {
+      agentStore.error = hydrate
+        ? "turn 仍在执行，取消未生效，请稍后重试"
+        : "取消状态未确认，请稍后重试";
+      return;
+    }
+
     finishWaitingStatuses();
     finalizePartialToolCalls({ interrupted: true });
-    await api.cancelAgentTurn(agentStore.agentId);
     finishTurn();
     clearHitl();
     finalizeAssistant();
     finalizeReasoning();
     resetToolStream();
-    addSystem("turn 已取消");
+    addSystem(outcome === "cancelled" ? "turn 已取消" : "当前没有正在执行的 turn");
   } catch (e) {
     agentStore.error = e.message;
   } finally {
