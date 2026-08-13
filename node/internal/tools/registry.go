@@ -42,6 +42,7 @@ type Registry struct {
 	mediaMu                sync.Mutex
 	mediaRegister          MediaRegisterFunc
 	toolResultMedia        map[string][]map[string]any
+	mcpTools               map[string]MCPTool
 }
 
 // WithBackgroundJobStore binds a persistent job store to a Registry. It is
@@ -121,6 +122,7 @@ func NewRegistry(fsRoot string, bashTimeoutSeconds int, encodings ...string) (*R
 		bgJobs:              newBackgroundJobRegistry(),
 		syncShells:          newSyncShellTracker(),
 		handlers:            make(map[string]handler),
+		mcpTools:            make(map[string]MCPTool),
 	}
 	r.registerBuiltins()
 	return r, nil
@@ -162,6 +164,7 @@ func (r *Registry) Definitions() []ToolDef {
 		base = append(base, defs...)
 	}
 	base = append(base, childAgentToolDefs()...)
+	base = append(base, r.mcpToolDefs()...)
 	return r.enrichDefinitions(r.filterToolDefs(base))
 }
 

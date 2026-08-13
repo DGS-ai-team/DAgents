@@ -18,6 +18,7 @@ import { formatPolicyMode, policyModeClass } from "../utils/panelFormat.js";
 const props = defineProps({
   embedded: { type: Boolean, default: false },
   agentId: { type: String, default: "" },
+  refreshKey: { type: Number, default: 0 },
 });
 
 const emit = defineEmits(["close"]);
@@ -161,7 +162,7 @@ function isProtectedTool(name) {
   return String(name || "") === PROTECTED_POLICY_TOOL;
 }
 
-watch(resolvedAgentId, () => {
+watch([resolvedAgentId, () => props.refreshKey], () => {
   void load();
 });
 
@@ -174,8 +175,13 @@ onMounted(load);
       <div>
         <div class="panel__title">审批策略</div>
       </div>
-      <div v-if="!embedded" class="command-panel__header-actions">
-        <button type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">关闭</button>
+      <div class="command-panel__header-actions">
+        <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">
+          {{ loading ? "刷新中…" : "刷新" }}
+        </button>
+        <button v-if="!embedded" type="button" class="btn btn--ghost btn--sm" data-panel-close @click="emit('close')">
+          关闭
+        </button>
       </div>
     </header>
 

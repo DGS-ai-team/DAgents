@@ -82,6 +82,9 @@ func (r *Registry) toolEnabled(name string) bool {
 	if r == nil || r.enabledOnly == nil {
 		return true
 	}
+	if _, ok := r.mcpTools[name]; ok {
+		return true
+	}
 	_, ok := r.enabledOnly[name]
 	return ok
 }
@@ -113,7 +116,7 @@ var knownBuiltinTools = map[string]struct{}{
 	"background_job_status":  {},
 	"background_job_cancel":  {},
 	"ask_user_information":   {},
-	"remember":                 {},
+	"remember":               {},
 	"load_skills":            {},
 	"unload_skills":          {},
 	"clear_skills":           {},
