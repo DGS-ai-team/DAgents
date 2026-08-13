@@ -144,7 +144,10 @@ export async function cancelBashToolCall(agentId, toolCallId) {
   if (!id) return;
   toolJobsStore.busyCallIds[id] = "cancel";
   try {
-    await api.cancelAgentToolCall(agentId, id);
+    const response = await api.cancelAgentToolCall(agentId, id);
+    if (response?.cancelled !== true) {
+      throw new Error("工具终止状态未确认，请稍后重试");
+    }
     // 先改写气泡终态，再刷新队列，避免短暂仍显示「后台执行中」。
     patchBashResultStatus(id, "CANCELLED");
     await refreshToolJobs(agentId);
