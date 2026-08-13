@@ -403,7 +403,16 @@ func (s *Server) handleWorkgroupTimeline(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	wid := strings.TrimSpace(r.PathValue("workgroupId"))
-	events, err := s.control.GetWorkgroupTimeline(r.Context(), wid)
+	limit := 0
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsed, parseErr := strconv.Atoi(rawLimit)
+		if parseErr != nil || parsed < 0 {
+			writeAPIError(w, http.StatusBadRequest, "schema_mismatch", "limit must be a non-negative integer", nil)
+			return
+		}
+		limit = parsed
+	}
+	events, err := s.control.GetWorkgroupTimeline(r.Context(), wid, limit)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "manage_error", err.Error(), nil)
 		return

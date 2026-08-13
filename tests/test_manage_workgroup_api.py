@@ -138,6 +138,9 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 # human + Leader mock 终态（至少 1 条 human）
                 self.assertGreaterEqual(len(timeline.json()), 1)
                 self.assertEqual(timeline.json()[0]["type"], "human_message")
+                latest_timeline = client.get(f"/v1/workgroups/{wid}/timeline", params={"limit": 1})
+                self.assertEqual(latest_timeline.status_code, 200, latest_timeline.text)
+                self.assertEqual(len(latest_timeline.json()), 1)
 
                 hitl = client.post(
                     f"/v1/workgroups/{wid}/hitl",
