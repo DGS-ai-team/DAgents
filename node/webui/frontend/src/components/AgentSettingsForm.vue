@@ -278,20 +278,9 @@ const longTermScopeOptions = computed(() =>
 
     <template v-if="isFull">
       <section class="agent-settings-section agent-settings-section--flat">
-        <button
-          type="button"
-          class="agent-settings-disclosure"
-          :aria-expanded="advancedOpen ? 'true' : 'false'"
-          @click="advancedOpen = !advancedOpen"
-        >
-          <span class="agent-settings-section__title agent-settings-section__title--inline">能力与角色</span>
-          <span class="agent-settings-disclosure__chevron">{{ advancedOpen ? "▴" : "▾" }}</span>
-        </button>
-        <p v-if="!advancedOpen" class="agent-settings-hint agent-settings-hint--inline">
-          工具、技能、角色设定与长期记忆
-        </p>
+        <div class="agent-settings-section__title agent-settings-section__title--inline">能力与角色</div>
 
-        <div v-if="advancedOpen" class="agent-settings-advanced agent-settings-section__body">
+        <div class="agent-settings-advanced agent-settings-section__body">
           <div class="agent-settings-advanced__block">
             <h4 class="agent-settings-subsection__title">工具能力</h4>
             <p class="agent-settings-hint">点选启用；都不选则不开放任何工具。</p>

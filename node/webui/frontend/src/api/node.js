@@ -260,6 +260,56 @@ export function putAgentPromptContext(agentId, body) {
   });
 }
 
+export function listMcpServers() {
+  return apiFetch("/v1/mcp/servers");
+}
+
+export function getMcpConfig() {
+  return apiFetch("/v1/mcp/config");
+}
+
+export function saveMcpConfig(configText) {
+  return apiFetch("/v1/mcp/config", {
+    method: "PUT",
+    body: { config_text: String(configText || "") },
+  });
+}
+
+export function createMcpServer(payload = {}) {
+  return apiFetch("/v1/mcp/servers", { method: "POST", body: payload });
+}
+
+export function patchMcpServer(serverId, payload = {}) {
+  return apiFetch(`/v1/mcp/servers/${encodeURIComponent(serverId)}`, { method: "PATCH", body: payload });
+}
+
+export function deleteMcpServer(serverId) {
+  return apiFetch(`/v1/mcp/servers/${encodeURIComponent(serverId)}`, { method: "DELETE" });
+}
+
+export function testMcpServer(serverId) {
+  return apiFetch(`/v1/mcp/servers/${encodeURIComponent(serverId)}/test`, { method: "POST", body: {} });
+}
+
+export function refreshMcpServer(serverId) {
+  return apiFetch(`/v1/mcp/servers/${encodeURIComponent(serverId)}/refresh`, { method: "POST", body: {} });
+}
+
+export function getAgentMcp(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/mcp`);
+}
+
+export function putAgentMcp(agentId, bindings) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/mcp`, {
+    method: "PUT",
+    body: { bindings: Array.isArray(bindings) ? bindings : [] },
+  });
+}
+
+export function getAgentMcpEffectiveTools(agentId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/mcp/effective-tools`);
+}
+
 export function listTriggers() {
   return apiFetch("/v1/triggers");
 }
