@@ -4260,6 +4260,21 @@ code {
   word-break: break-word;
 }
 
+.wg-task__pre-tool {
+  padding: 2px 4px 6px;
+  color: var(--chat-text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.wg-task__pre-tool > :first-child {
+  margin-top: 0;
+}
+
+.wg-task__pre-tool > :last-child {
+  margin-bottom: 0;
+}
+
 .wg-task__steps {
   display: flex;
   flex-direction: column;
@@ -4812,6 +4827,10 @@ code {
 
 .chat__queue-btn--ghost {
   color: var(--chat-text-muted, #667);
+}
+
+.chat__queue-btn--send {
+  font-weight: 600;
 }
 
 .chat__composer-pill {

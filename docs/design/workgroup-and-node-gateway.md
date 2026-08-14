@@ -140,7 +140,9 @@ Node
 Node 只：宣告 **完整 tool JSON Schema** + 执行真实工具。  
 伪工具（`ask_user` / `remember` / skills / child-agent 等）：**v1 禁用或迁 Manage**，不得经 `tool.execute` 远程跑。
 
-v1：**全组最多一个 active assign**；Leader run 单写者。
+P1：不同成员允许并行 active assign；同一成员保持单飞，避免两个 LLM turn
+同时修改同一成员的会话历史或工作区。Leader run 仍保持单写者，并在一个
+assistant tool-call 批次内按原始 tool-call 顺序写入全部 tool result。
 
 ---
 
@@ -223,7 +225,7 @@ Timeline 按 `actor_kind` + `display_name_at_send` 着色；`date` 弱化。
 
 不变量：
 
-- v1 每组最多一个 active assign  
+- 不同成员可并行 active assign；同一成员最多一个 active assign
 - Timeline `seq` 在 Manage DB 事务内分配  
 - fencing：`lease_epoch` / `member_generation` / `connection_generation`；归档或撤权后旧 command 一律拒绝  
 - 已产生副作用只能取消/`indeterminate`，不能伪装未发生  

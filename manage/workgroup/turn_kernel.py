@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -14,6 +16,15 @@ from manage.workgroup.builtin_hooks import (
     ensure_today_date_in_messages,
     format_today_date_message,
     package_tool_result,
+)
+from manage.workgroup.context_compression import (
+    DEFAULT_CONTEXT_COMPRESSION_BLOCKING_TRIGGER_TOKENS,
+    DEFAULT_CONTEXT_COMPRESSION_KEEP_TOKENS,
+    DEFAULT_CONTEXT_COMPRESSION_TRIGGER_TOKENS,
+    build_compression_plan,
+    build_summary_request,
+    make_snapshot,
+    snapshot_is_current,
 )
 from manage.workgroup.d3_models import HITLRequest, TurnCheckpoint
 from manage.workgroup.errors import WorkgroupError
@@ -53,6 +64,7 @@ from manage.workgroup.store import WorkGroupStore
 
 
 _DEFAULT_MAX_TOOL_LOOPS = 16
+_MAX_PARALLEL_MEMBER_ASSIGNMENTS = 8
 
 _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE = (
     "已超过单轮工具调用次数，请先给出当前结论以及进度，"
@@ -137,6 +149,9 @@ class TurnKernel:
         registry_store: Any | None = None,
         max_tool_loops: int = _DEFAULT_MAX_TOOL_LOOPS,
         mock_llm: bool = False,
+        context_silent_trigger_tokens: int = DEFAULT_CONTEXT_COMPRESSION_TRIGGER_TOKENS,
+        context_blocking_trigger_tokens: int = DEFAULT_CONTEXT_COMPRESSION_BLOCKING_TRIGGER_TOKENS,
+        context_keep_tokens: int = DEFAULT_CONTEXT_COMPRESSION_KEEP_TOKENS,
     ) -> None:
         self._store = store
         self._llm_store = llm_store
@@ -146,6 +161,15 @@ class TurnKernel:
         self._registry_store = registry_store
         self._max_tool_loops = max(1, max_tool_loops)
         self._mock_llm = mock_llm
+        self._context_silent_trigger_tokens = max(0, int(context_silent_trigger_tokens))
+        self._context_blocking_trigger_tokens = max(0, int(context_blocking_trigger_tokens))
+        self._context_keep_tokens = max(0, int(context_keep_tokens))
+        if (
+            self._context_blocking_trigger_tokens > 0
+            and self._context_silent_trigger_tokens > 0
+            and self._context_blocking_trigger_tokens < self._context_silent_trigger_tokens
+        ):
+            raise ValueError("context_blocking_trigger_tokens must be >= context_silent_trigger_tokens")
         # Compatibility for the old standalone CAS skeleton. Real HITL rows
         # always use the durable Store path in resolve_hitl_cas below.
         self._legacy_hitl_resolutions: dict[str, dict[str, Any]] = {}
@@ -165,6 +189,9 @@ class TurnKernel:
         ] | None = None
         self._hitl_resume_lock = threading.Lock()
         self._resuming_hitls: set[str] = set()
+        self._context_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="wg-context")
+        self._context_task_lock = threading.Lock()
+        self._context_tasks: dict[str, Future[Any]] = {}
 
     def set_assign_completer(self, completer: AssignCompleter | None) -> None:
         self._assign_completer = completer
@@ -211,7 +238,12 @@ class TurnKernel:
         flag.clear()
         token = str(meta.get("turn_token") or wg_ids.new_ulid())
         with self._turn_lock:
-            self._active_turn[workgroup_id] = {"mode": mode, "turn_token": token, **meta}
+            self._active_turn[workgroup_id] = {
+                "mode": mode,
+                "turn_token": token,
+                "turn_started_at": time.monotonic(),
+                **meta,
+            }
             self._save_turn_checkpoint_unlocked(workgroup_id)
         return flag
 
@@ -354,25 +386,30 @@ class TurnKernel:
             flag = self._cancel_flags.get(workgroup_id)
             if flag is not None:
                 flag.clear()
-            bucket = self._human_queues.get(workgroup_id) or []
-            if not bucket:
-                self._human_queues.pop(workgroup_id, None)
-                return None
-            item = bucket.pop(0)
-            if bucket:
-                self._human_queues[workgroup_id] = bucket
-            else:
-                self._human_queues.pop(workgroup_id, None)
-            token = wg_ids.new_ulid()
-            self._active_turn[workgroup_id] = {
-                "mode": "claiming",
-                "turn_token": token,
-                "queue_id": item.queue_id,
-                "client_message_id": item.client_message_id,
-            }
-            self._save_turn_checkpoint_unlocked(workgroup_id)
-            item._claim_token = token  # type: ignore[attr-defined]
-            return item
+            return self._claim_next_human_unlocked(workgroup_id)
+
+    def _claim_next_human_unlocked(self, workgroup_id: str) -> QueuedHuman | None:
+        """Claim the next queued item; caller must hold ``_turn_lock``."""
+        bucket = self._human_queues.get(workgroup_id) or []
+        if not bucket:
+            self._human_queues.pop(workgroup_id, None)
+            return None
+        item = bucket.pop(0)
+        if bucket:
+            self._human_queues[workgroup_id] = bucket
+        else:
+            self._human_queues.pop(workgroup_id, None)
+        token = wg_ids.new_ulid()
+        self._active_turn[workgroup_id] = {
+            "mode": "claiming",
+            "turn_token": token,
+            "turn_started_at": time.monotonic(),
+            "queue_id": item.queue_id,
+            "client_message_id": item.client_message_id,
+        }
+        self._save_turn_checkpoint_unlocked(workgroup_id)
+        item._claim_token = token  # type: ignore[attr-defined]
+        return item
 
     def _schedule_queued_human(self, item: QueuedHuman) -> None:
         token = str(getattr(item, "_claim_token", "") or "")
@@ -392,8 +429,18 @@ class TurnKernel:
 
     def _finish_human_turn(self, workgroup_id: str, *, turn_token: str) -> None:
         nxt = self._end_turn(workgroup_id, turn_token=turn_token)
+        self._publish_queue_state(workgroup_id)
         if nxt is not None:
             self._schedule_queued_human(nxt)
+
+    def _publish_queue_state(self, workgroup_id: str) -> None:
+        """Broadcast the complete queue snapshot to every subscribed UI."""
+        self._publish_realtime(
+            workgroup_id,
+            "queue",
+            {"queue": self.list_human_queue(workgroup_id)},
+            client_message_id=None,
+        )
 
     def resume_persisted_queues(self) -> int:
         """Resume FIFO messages that survived a Manage restart.
@@ -437,6 +484,18 @@ class TurnKernel:
             if cur is not None:
                 cur.update(meta)
                 self._save_turn_checkpoint_unlocked(workgroup_id)
+
+    def _append_turn_meta(self, workgroup_id: str, key: str, value: Any) -> None:
+        """Append repeatable turn metadata without clobbering peer workers."""
+        with self._turn_lock:
+            cur = self._active_turn.get(workgroup_id)
+            if cur is None:
+                return
+            values = list(cur.get(key) or [])
+            if value not in values:
+                values.append(value)
+            cur[key] = values
+            self._save_turn_checkpoint_unlocked(workgroup_id)
 
     def _active_client_message_id(self, workgroup_id: str) -> str | None:
         with self._turn_lock:
@@ -482,8 +541,12 @@ class TurnKernel:
                 item.text = body
                 item.updated_at = _now()
                 self._store.save_human_queue_record(item.to_record())
-                return item.to_public(idx + 1)
-        raise WorkgroupError("not_found", "queued message not found", http_status=404)
+                out = item.to_public(idx + 1)
+                break
+            else:
+                raise WorkgroupError("not_found", "queued message not found", http_status=404)
+        self._publish_queue_state(workgroup_id)
+        return out
 
     def cancel_human_queue_item(self, workgroup_id: str, queue_id: str) -> dict[str, Any]:
         qid = (queue_id or "").strip()
@@ -498,8 +561,80 @@ class TurnKernel:
                 else:
                     self._human_queues.pop(workgroup_id, None)
                 self._store.delete_human_queue_record(workgroup_id, qid)
-                return {"cancelled": True, "queue_id": qid, "depth": len(items)}
-        raise WorkgroupError("not_found", "queued message not found", http_status=404)
+                out = {"cancelled": True, "queue_id": qid, "depth": len(items)}
+                break
+            else:
+                raise WorkgroupError("not_found", "queued message not found", http_status=404)
+        self._publish_queue_state(workgroup_id)
+        return out
+
+    def _active_turn_has_live_work(self, workgroup_id: str) -> bool:
+        """Return whether an active turn still has durable work to cancel."""
+        with self._turn_lock:
+            meta = dict(self._active_turn.get(workgroup_id) or {})
+        if not meta:
+            return False
+        if str(meta.get("mode") or "") == "claiming":
+            return True
+        if self._store.list_assigns(workgroup_id, active_only=True):
+            return True
+        if any(
+            run.status in {"running", "awaiting_hitl"}
+            for run in self._store.list_actor_runs(workgroup_id, limit=100)
+        ):
+            return True
+        if self._store.list_hitl(workgroup_id, pending_only=True):
+            return True
+        started = float(meta.get("turn_started_at") or 0)
+        if started and time.monotonic() - started < 1.0:
+            return True
+        return False
+
+    def send_human_queue_item_now(self, workgroup_id: str, queue_id: str) -> dict[str, Any]:
+        """Promote a queued message and interrupt the current turn for it."""
+        qid = (queue_id or "").strip()
+        if not qid:
+            raise WorkgroupError("invalid_argument", "queue_id required", http_status=400)
+        from manage.workgroup.human_queue import _now
+
+        with self._turn_lock:
+            items = self._human_queues.get(workgroup_id) or []
+            item = next((candidate for candidate in items if candidate.queue_id == qid), None)
+            if item is None:
+                raise WorkgroupError("not_found", "queued message not found", http_status=404)
+            item.priority = max((int(candidate.priority or 0) for candidate in items), default=0) + 1
+            item.updated_at = _now()
+            items.sort(
+                key=lambda candidate: (-int(candidate.priority or 0), candidate.created_at, candidate.queue_id)
+            )
+            self._human_queues[workgroup_id] = items
+            self._store.save_human_queue_record(item.to_record())
+            old_token = str((self._active_turn.get(workgroup_id) or {}).get("turn_token") or "")
+
+        was_live = self._active_turn_has_live_work(workgroup_id)
+        cancel_result = self.cancel_turn(workgroup_id)
+        claimed: QueuedHuman | None = None
+        if not was_live:
+            with self._turn_lock:
+                current = self._active_turn.get(workgroup_id)
+                current_token = str((current or {}).get("turn_token") or "")
+                if current is None or current_token == old_token:
+                    if current is not None:
+                        self._active_turn.pop(workgroup_id, None)
+                        self._store.clear_turn_checkpoint(workgroup_id)
+                    flag = self._cancel_flags.get(workgroup_id)
+                    if flag is not None:
+                        flag.clear()
+                    claimed = self._claim_next_human_unlocked(workgroup_id)
+        self._publish_queue_state(workgroup_id)
+        if claimed is not None:
+            self._schedule_queued_human(claimed)
+        return {
+            "sent_now": True,
+            "queue_id": qid,
+            "cancel": cancel_result,
+            "queue": self.list_human_queue(workgroup_id),
+        }
 
     def _enqueue_human_unlocked(self, item: QueuedHuman) -> int:
         """调用方须持有 _turn_lock。返回 1-based position。"""
@@ -606,14 +741,22 @@ class TurnKernel:
                 pass
         leader_run_id = meta.get("leader_run_id")
         member_run_id = meta.get("member_run_id")
-        for rid in (leader_run_id, member_run_id):
+        member_run_ids = list(meta.get("member_run_ids") or [])
+        if member_run_id:
+            member_run_ids.append(member_run_id)
+        seen_run_ids: set[str] = set()
+        for rid in [leader_run_id, *member_run_ids]:
             if not rid:
                 continue
+            rid = str(rid)
+            if rid in seen_run_ids:
+                continue
+            seen_run_ids.add(rid)
             try:
-                self._heal_open_tool_calls(str(rid), reason="turn cancelled by user")
-                run = self._store.get_actor_run(str(rid))
+                self._heal_open_tool_calls(rid, reason="turn cancelled by user")
+                run = self._store.get_actor_run(rid)
                 if run and run.status in {"running", "awaiting_hitl"}:
-                    self._store.update_actor_run(str(rid), status="canceled")
+                    self._store.update_actor_run(rid, status="canceled")
             except Exception:  # noqa: BLE001
                 pass
         for assign_id in failed_ids:
@@ -636,6 +779,7 @@ class TurnKernel:
             "failed_assign_ids": list(failed_ids),
             "leader_run_id": leader_run_id,
             "member_run_id": member_run_id,
+            "member_run_ids": member_run_ids,
         }
 
     def start_leader_run(self, workgroup_id: str, *, llm_profile_revision: str | None = None) -> ActorRun:
@@ -660,6 +804,183 @@ class TurnKernel:
             member=member,
             timeline_events=timeline,
             own_run_history=hist.messages if hist else [],
+            context_snapshot=self._store.get_context_snapshot(run_id) if run_id else None,
+        )
+
+    def _context_snapshot_for_request(
+        self,
+        *,
+        run: ActorRun,
+        history: list[RunHistoryMessage],
+        client: LLMChatClient,
+        actor_label: str,
+    ):
+        """Harvest a ready snapshot, then schedule silent or blocking work."""
+        snapshot = self._harvest_context_task(run)
+        if self._context_compression_blocked(run, history):
+            return snapshot
+
+        silent_plan = build_compression_plan(
+            history,
+            snapshot=snapshot,
+            trigger_tokens=self._context_silent_trigger_tokens,
+            keep_tokens=self._context_keep_tokens,
+        )
+        if silent_plan is None:
+            return snapshot
+        task = self._ensure_context_task(
+            run=run,
+            history=history,
+            snapshot=snapshot,
+            plan=silent_plan,
+            client=client,
+            actor_label=actor_label,
+        )
+        if self._context_blocking_trigger_tokens <= 0:
+            return snapshot
+
+        blocking_plan = build_compression_plan(
+            history,
+            snapshot=snapshot,
+            trigger_tokens=self._context_blocking_trigger_tokens,
+            keep_tokens=self._context_keep_tokens,
+        )
+        if blocking_plan is None:
+            return snapshot
+        if task is None:
+            task = self._ensure_context_task(
+                run=run,
+                history=history,
+                snapshot=snapshot,
+                plan=blocking_plan,
+                client=client,
+                actor_label=actor_label,
+            )
+        if task is None:
+            return snapshot
+        # The blocking tier only waits for the already-started snapshot task.
+        # It never directly mutates the primary message history.
+        try:
+            task.result()
+        except Exception:
+            return snapshot
+        # A silent task may have summarized an older prefix.  Harvest it and,
+        # if the current history still needs blocking compression, schedule a
+        # fresh task from the current source boundary and wait for that task.
+        snapshot = self._harvest_context_task(run)
+        current_history = self._store.get_run_history(run.run_id)
+        if current_history is None or self._context_compression_blocked(run, current_history.messages):
+            return snapshot
+        current_plan = build_compression_plan(
+            current_history.messages,
+            snapshot=snapshot,
+            trigger_tokens=self._context_blocking_trigger_tokens,
+            keep_tokens=self._context_keep_tokens,
+        )
+        if current_plan is None:
+            return snapshot
+        task = self._ensure_context_task(
+            run=run,
+            history=current_history.messages,
+            snapshot=snapshot,
+            plan=current_plan,
+            client=client,
+            actor_label=actor_label,
+        )
+        if task is None:
+            return snapshot
+        try:
+            task.result()
+        except Exception:
+            return snapshot
+        return self._harvest_context_task(run)
+
+    def _ensure_context_task(
+        self,
+        *,
+        run: ActorRun,
+        history: list[RunHistoryMessage],
+        snapshot: Any,
+        plan: Any,
+        client: LLMChatClient,
+        actor_label: str,
+    ) -> Future[Any] | None:
+        with self._context_task_lock:
+            existing = self._context_tasks.get(run.run_id)
+            if existing is not None and not existing.done():
+                return existing
+
+            frozen_history = list(history)
+            frozen_snapshot = snapshot
+
+            def summarize() -> Any:
+                result = client.chat(
+                    build_summary_request(
+                        frozen_history,
+                        plan,
+                        previous_summary=frozen_snapshot.summary_content if frozen_snapshot else "",
+                        actor_label=actor_label,
+                    )
+                )
+                summary = str(result.content or "").strip()
+                if not summary:
+                    return None
+                return make_snapshot(
+                    run_id=run.run_id,
+                    workgroup_id=run.workgroup_id,
+                    actor_id=run.actor_id,
+                    history=frozen_history,
+                    plan=plan,
+                    summary=summary,
+                    previous=frozen_snapshot,
+                    timeline_seq=max(
+                        (event.seq for event in self._store.list_timeline(run.workgroup_id)),
+                        default=0,
+                    ),
+                )
+
+            future = self._context_executor.submit(summarize)
+            self._context_tasks[run.run_id] = future
+            return future
+
+    def _harvest_context_task(self, run: ActorRun):
+        with self._context_task_lock:
+            task = self._context_tasks.get(run.run_id)
+            if task is None or not task.done():
+                return self._store.get_context_snapshot(run.run_id)
+            self._context_tasks.pop(run.run_id, None)
+        try:
+            candidate = task.result()
+        except Exception:
+            return self._store.get_context_snapshot(run.run_id)
+        if candidate is None:
+            return self._store.get_context_snapshot(run.run_id)
+        current_history = self._store.get_run_history(run.run_id)
+        if current_history is None or not snapshot_is_current(candidate, current_history.messages):
+            return self._store.get_context_snapshot(run.run_id)
+        current_snapshot = self._store.get_context_snapshot(run.run_id)
+        if current_snapshot is not None and current_snapshot.context_epoch >= candidate.context_epoch:
+            return current_snapshot
+        return self._store.save_context_snapshot(candidate)
+
+    def _context_compression_blocked(
+        self,
+        run: ActorRun,
+        history: list[RunHistoryMessage],
+    ) -> bool:
+        if open_tool_call_ids(history):
+            return True
+        if run.assign_id:
+            assign = self._store.get_assign(run.assign_id)
+            if assign is not None and assign.status in {"queued", "running", "awaiting_hitl"}:
+                return True
+        if run.actor_id == "leader" and self._store.list_assigns(run.workgroup_id, active_only=True):
+            return True
+        # Do not replace the context while a human decision can still add a
+        # tool result to this actor's message sequence.
+        return any(
+            hitl.status == "pending" and (not hitl.run_id or hitl.run_id == run.run_id)
+            for hitl in self._store.list_hitl(run.workgroup_id, pending_only=True)
         )
 
     def resolve_hitl_cas(
@@ -921,16 +1242,33 @@ class TurnKernel:
         self._begin_turn(workgroup_id, mode="direct", **begin_kwargs)
         yield {"event": "status", "data": {"phase": "tool", "purpose": "直连成员", "mode": "direct"}}
 
+        # A direct mention skips the Supervisor LLM, but it still belongs to
+        # the same persistent Supervisor session for future context.
+        leader_run = self._store.get_or_create_actor_session(
+            workgroup_id,
+            actor_id="leader",
+        )
         tool_call_id = "call_direct_1"
         assign = self._store.create_assign(
             workgroup_id,
             AssignCreateRequest(
                 member_id=mid,
+                leader_run_id=leader_run.run_id,
                 instruction=instruction,
                 leader_tool_call_id=tool_call_id,
             ),
         )
         self._store.set_assign_status(assign.assign_id, "running")
+        leader_run = self._store.prepare_actor_session(
+            leader_run.run_id,
+            assign_id=assign.assign_id,
+        )
+        self._append_session_user_message(
+            leader_run.run_id,
+            content=human_event.text,
+            name=human_event.protocol_name or protocol_name_for_actor(human_event.actor_id),
+            timeline_event_seq=human_event.seq,
+        )
         self._update_turn(workgroup_id, assign_id=assign.assign_id, leader_run_id=assign.leader_run_id)
 
         # Timeline 挂在成员下，不经 Supervisor 展示
@@ -1016,6 +1354,47 @@ class TurnKernel:
                 assign_id=assign.assign_id,
             )
             raise WorkgroupError("conflict", msg, http_status=500) from exc
+
+        # Direct member turns do not produce a Supervisor tool result. Record
+        # the member's terminal response in the canonical Supervisor history
+        # so the next Supervisor turn can reason over the completed task.
+        result_event = next(
+            (
+                event
+                for event in reversed(self._store.list_timeline(workgroup_id))
+                if event.assign_id == assign.assign_id
+                and event.type in {"actor_final_text", "assign_finished"}
+            ),
+            None,
+        )
+        leader_history = self._store.ensure_run_history(
+            self._store.get_actor_run(assign.leader_run_id)
+            or leader_run
+        )
+        if not any(
+            message.role == "user" and message.assign_id == assign.assign_id
+            for message in leader_history.messages
+        ):
+            self._store.append_run_history(
+                assign.leader_run_id,
+                [
+                    RunHistoryMessage(
+                        role="user",
+                        name=(
+                            result_event.protocol_name
+                            if result_event is not None and result_event.protocol_name
+                            else protocol_name_for_actor(mid)
+                        ),
+                        content=final_text,
+                        timeline_event_seq=(result_event.seq if result_event is not None else None),
+                        assign_id=assign.assign_id,
+                    )
+                ],
+                timeline_watermark_seq=max(
+                    (event.seq for event in self._store.list_timeline(workgroup_id)),
+                    default=0,
+                ),
+            )
 
         # 占位 leader run 仅内部收口，不写入 Timeline
         try:
@@ -1115,11 +1494,19 @@ class TurnKernel:
             if healed:
                 hist = self._store.ensure_run_history(run)
 
+            context_snapshot = self._context_snapshot_for_request(
+                run=run,
+                history=hist.messages,
+                client=client,
+                actor_label="Supervisor",
+            )
+
             projected = project_actor_context(
                 actor_id="leader",
                 run=run,
                 timeline_events=self._store.list_timeline(workgroup_id),
                 own_run_history=hist.messages,
+                context_snapshot=context_snapshot,
             )
             group = self._store.require_active(workgroup_id)
             system = build_leader_system_prompt(workgroup=group)
@@ -1191,6 +1578,16 @@ class TurnKernel:
                     http_status=409,
                 )
 
+            # A provider may return assistant content together with tool_calls.
+            # Persist that public text before dispatching the tool so the UI can
+            # keep the same order as the provider message: content -> tool.
+            self._append_assistant_content_timeline(
+                workgroup_id,
+                actor_id="leader",
+                content=result.content,
+                protocol_name="leader",
+            )
+
             if tool_loops > self._max_tool_loops:
                 soft = _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE
                 tool_msgs = [
@@ -1238,18 +1635,35 @@ class TurnKernel:
                     return
                 continue
 
-            tool_msgs: list[RunHistoryMessage] = []
-            for tc in result.tool_calls:
+            tool_calls = list(result.tool_calls)
+            for tc in tool_calls:
+                purpose = call_purpose_from_arguments(
+                    tc.arguments,
+                    leader_tool_purpose(tc.name),
+                )
+                # Supervisor-native tools are public orchestration progress, but
+                # their raw name/arguments/result must stay in RunHistory only.
+                # assign_workgroup_task already has its own assign card, so do
+                # not create a duplicate top-level tool bubble for it.
+                if tc.name != "assign_workgroup_task":
+                    try:
+                        self._store.append_timeline(
+                            workgroup_id,
+                            type="system_notice",
+                            actor_id="leader",
+                            text=purpose,
+                            protocol_name="leader",
+                        )
+                    except Exception:  # noqa: BLE001 - progress must not block the tool
+                        pass
                 yield {
                     "event": "status",
                     "data": {
                         "phase": "tool",
-                        "purpose": call_purpose_from_arguments(
-                            tc.arguments,
-                            leader_tool_purpose(tc.name),
-                        ),
+                        "purpose": purpose,
                     },
                 }
+            def dispatch_one(tc: ChatToolCall) -> RunHistoryMessage:
                 try:
                     content = dispatcher.dispatch(
                         workgroup_id=workgroup_id,
@@ -1273,14 +1687,36 @@ class TurnKernel:
                     run_id=run_id,
                     tool_call_id=tc.id,
                 )
-                tool_msgs.append(
-                    RunHistoryMessage(
-                        role="tool",
-                        tool_call_id=tc.id,
-                        name=tc.name,
-                        content=content,
-                    )
+                return RunHistoryMessage(
+                    role="tool",
+                    tool_call_id=tc.id,
+                    name=tc.name,
+                    content=content,
                 )
+            member_ids: list[str] = []
+            for tc in tool_calls:
+                try:
+                    member_ids.append(str(json.loads(tc.arguments or "{}").get("member_id") or ""))
+                except (TypeError, json.JSONDecodeError):
+                    member_ids.append("")
+            can_parallelize = (
+                len(tool_calls) > 1
+                and len(tool_calls) <= _MAX_PARALLEL_MEMBER_ASSIGNMENTS
+                and all(tc.name == "assign_workgroup_task" for tc in tool_calls)
+                and all(member_ids)
+                and len(member_ids) == len(set(member_ids))
+            )
+            if not can_parallelize:
+                tool_msgs = [dispatch_one(tool_calls[0])]
+                for tc in tool_calls[1:]:
+                    tool_msgs.append(dispatch_one(tc))
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=min(len(tool_calls), _MAX_PARALLEL_MEMBER_ASSIGNMENTS),
+                    thread_name_prefix="wg-leader-tool",
+                ) as executor:
+                    futures = [executor.submit(dispatch_one, tc) for tc in tool_calls]
+                    tool_msgs = [future.result() for future in futures]
             ok, wait = can_invoke_llm_after_tools(
                 [{"id": tc.id, "name": tc.name} for tc in result.tool_calls],
                 [{"tool_call_id": m.tool_call_id} for m in tool_msgs],
@@ -1390,12 +1826,20 @@ class TurnKernel:
             if healed:
                 hist = self._store.ensure_run_history(run)
 
+            context_snapshot = self._context_snapshot_for_request(
+                run=run,
+                history=hist.messages,
+                client=client,
+                actor_label=member.display_name or member_id,
+            )
+
             projected = project_actor_context(
                 actor_id=member_id,
                 run=run,
                 member=member,
                 timeline_events=self._store.list_timeline(workgroup_id),
                 own_run_history=hist.messages,
+                context_snapshot=context_snapshot,
             )
             messages = [{"role": "system", "content": system}] + list(projected["messages"])
             messages = self._apply_today_date_hook(run_id, messages)
@@ -1461,6 +1905,18 @@ class TurnKernel:
                     "member has no tools but model returned tool_calls",
                     http_status=409,
                 )
+
+            # Keep member pre-tool text in the public timeline as well as in
+            # RunHistory.  For direct mentions this event is rendered directly
+            # before the member's tool bubble; for assigned work it is attached
+            # to the assign and rendered before its tool steps.
+            self._append_assistant_content_timeline(
+                workgroup_id,
+                actor_id=member_id,
+                content=result.content,
+                protocol_name=protocol_name_for_actor(member_id),
+                assign_id=run.assign_id,
+            )
 
             if tool_loops > max_loops:
                 soft = _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE
@@ -1656,6 +2112,27 @@ class TurnKernel:
         )
         return packed.for_history
 
+    def _append_assistant_content_timeline(
+        self,
+        workgroup_id: str,
+        *,
+        actor_id: str,
+        content: str | None,
+        protocol_name: str | None = None,
+        assign_id: str | None = None,
+    ) -> Any | None:
+        text = str(content or "")
+        if not text.strip():
+            return None
+        return self._store.append_timeline(
+            workgroup_id,
+            type="assistant_content",
+            actor_id=actor_id,
+            text=text,
+            protocol_name=protocol_name,
+            assign_id=assign_id,
+        )
+
     def _heal_open_tool_calls(
         self,
         run_id: str,
@@ -1729,6 +2206,9 @@ def _public_realtime_data(event_type: str, data: Any) -> dict[str, Any] | None:
             for key in ("queue_id", "position", "text", "from_node_id", "client_message_id", "queue")
             if key in raw
         }
+    if event_type == "queue":
+        queue = raw.get("queue")
+        return {"queue": queue} if isinstance(queue, dict) else {"queue": {}}
     if event_type == "status":
         return {
             key: raw[key]
@@ -1788,6 +2268,7 @@ def mock_member_script_read_file_then_answer(
     *,
     path: str = "README",
     call_purpose: str = "",
+    first_content: str = "",
     final_text: str = "已读完",
 ) -> list[ChatResult]:
     """测试用：Member 先 read_file，再终态文本。"""
@@ -1799,7 +2280,7 @@ def mock_member_script_read_file_then_answer(
     args = json.dumps(payload, ensure_ascii=False)
     return [
         ChatResult(
-            content="",
+            content=first_content,
             tool_calls=[
                 ChatToolCall(
                     id="call_rf1",

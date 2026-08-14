@@ -21,6 +21,7 @@ from manage.workgroup.d3_models import (
     TurnCheckpoint,
 )
 from manage.workgroup.history import ActorRunHistory, RunHistoryMessage
+from manage.workgroup.context_compression import ActorContextSnapshot
 from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.models import (
     ActorRun,
@@ -68,6 +69,7 @@ class WorkGroupStore:
         self._assigns: dict[str, Assign] = {}
         self._runs: dict[str, ActorRun] = {}
         self._run_histories: dict[str, ActorRunHistory] = {}
+        self._context_snapshots: dict[str, ActorContextSnapshot] = {}
         self._timeline: dict[str, list[TimelineEvent]] = {}
         self._outbox: dict[str, list[OutboxFrame]] = {}
         self._hitl: dict[str, HITLRequest] = {}
@@ -160,6 +162,8 @@ class WorkGroupStore:
             self._runs[r.run_id] = r
         for h in self._load_all("actor_run_histories", ActorRunHistory):
             self._run_histories[h.run_id] = h
+        for snapshot in self._load_all("actor_context_snapshots", ActorContextSnapshot):
+            self._context_snapshots[snapshot.run_id] = snapshot
         for ev in self._load_all("workgroup_timeline", TimelineEvent):
             self._timeline.setdefault(ev.workgroup_id, []).append(ev)
         for wg, events in self._timeline.items():
@@ -174,7 +178,10 @@ class WorkGroupStore:
         for item in self._load_all("workgroup_human_queue", QueuedHumanRecord):
             self._human_queue.setdefault(item.workgroup_id, []).append(item)
         for wg, items in self._human_queue.items():
-            self._human_queue[wg] = sorted(items, key=lambda item: (item.created_at, item.queue_id))
+            self._human_queue[wg] = sorted(
+                items,
+                key=lambda item: (-int(item.priority or 0), item.created_at, item.queue_id),
+            )
         for checkpoint in self._load_all("workgroup_turn_checkpoints", TurnCheckpoint):
             self._turn_checkpoints[checkpoint.workgroup_id] = checkpoint
         for sub in self._load_all("workgroup_subscriptions", Subscription):
@@ -673,33 +680,33 @@ class WorkGroupStore:
                     f"member status={member.status}",
                     http_status=409,
                 )
-            # v1：全组最多一个 active assign
+            # P1：不同成员可以并行执行，但同一成员仍保持单飞，避免
+            # 两个 LLM turn 同时修改同一个成员会话/工作区。
             active = [
                 a
                 for a in self._assigns.values()
                 if a.workgroup_id == workgroup_id
+                and a.member_id == member.member_id
                 and a.status in {"queued", "running", "awaiting_hitl"}
             ]
             if active:
                 raise WorkgroupError(
                     "conflict",
-                    "workgroup already has an active assign",
+                    "member already has an active assign",
                     http_status=409,
                     details={"active_assign_id": active[0].assign_id},
                 )
-            leader_run_id = req.leader_run_id or ids.run_id()
             if req.leader_run_id is None:
-                # 骨架：自动创建一个 leader run 占位
-                leader = ActorRun(
-                    run_id=leader_run_id,
-                    workgroup_id=workgroup_id,
-                    actor_id="leader",
-                    status="running",
-                    llm_profile_revision=self._groups[workgroup_id].llm_profile_revision,
-                    created_at=_now(),
+                req = req.model_copy(
+                    update={
+                        "leader_run_id": self.get_or_create_actor_session(
+                            workgroup_id,
+                            actor_id="leader",
+                            llm_profile_revision=self._groups[workgroup_id].llm_profile_revision,
+                        ).run_id
+                    }
                 )
-                self._runs[leader_run_id] = leader
-                self._put("actor_runs", leader_run_id, leader.model_dump_json(), workgroup_id=workgroup_id)
+            leader_run_id = req.leader_run_id or ids.run_id()
             assign = Assign(
                 assign_id=ids.assign_id(),
                 workgroup_id=workgroup_id,
@@ -712,12 +719,35 @@ class WorkGroupStore:
             )
             self._assigns[assign.assign_id] = assign
             self._put("workgroup_assigns", assign.assign_id, assign.model_dump_json(), workgroup_id=workgroup_id)
+            # Keep the member occupancy durable from the moment the assign is
+            # created.  A queued assign must not race with another assign for
+            # the same member, even if its Home Node is temporarily offline.
+            if member.active_assign_id != assign.assign_id:
+                member_update: dict[str, Any] = {"active_assign_id": assign.assign_id}
+                if member.status == "ready":
+                    member_update["status"] = "busy"
+                occupied = member.model_copy(update=member_update)
+                self._members[member.member_id] = occupied
+                self._put(
+                    "workgroup_members",
+                    member.member_id,
+                    occupied.model_dump_json(),
+                    workgroup_id=workgroup_id,
+                )
             return assign
 
     def get_assign(self, assign_id: str) -> Assign | None:
         with self._lock:
             self._ensure_loaded()
             return self._assigns.get(assign_id)
+
+    def list_assigns(self, workgroup_id: str, *, active_only: bool = False) -> list[Assign]:
+        with self._lock:
+            self._ensure_loaded()
+            rows = [a for a in self._assigns.values() if a.workgroup_id == workgroup_id]
+            if active_only:
+                rows = [a for a in rows if a.status in {"queued", "running", "awaiting_hitl"}]
+            return sorted(rows, key=lambda a: (a.created_at, a.assign_id))
 
     def get_actor_run(self, run_id: str) -> ActorRun | None:
         with self._lock:
@@ -737,9 +767,66 @@ class WorkGroupStore:
             aid = str(actor_id or "").strip()
             if aid:
                 rows = [r for r in rows if r.actor_id == aid]
+            if aid == "leader" and rows:
+                # Supervisor is one persistent session. Legacy duplicate rows
+                # remain addressable by run id, but are not listed as sessions.
+                canonical = self._canonical_actor_run_unlocked(
+                    workgroup_id,
+                    actor_id="leader",
+                )
+                if canonical is not None:
+                    self._consolidate_actor_session_history_unlocked(
+                        workgroup_id,
+                        actor_id="leader",
+                        target=canonical,
+                    )
+                    canonical = self._runs.get(canonical.run_id) or canonical
+                rows = [canonical] if canonical is not None else []
+            elif not aid:
+                leader_rows = [row for row in rows if row.actor_id == "leader"]
+                if leader_rows:
+                    canonical = self._canonical_actor_run_unlocked(
+                        workgroup_id,
+                        actor_id="leader",
+                    )
+                    if canonical is not None:
+                        self._consolidate_actor_session_history_unlocked(
+                            workgroup_id,
+                            actor_id="leader",
+                            target=canonical,
+                        )
+                        canonical = self._runs.get(canonical.run_id) or canonical
+                        rows = [row for row in rows if row.actor_id != "leader"]
+                        rows.append(canonical)
             rows.sort(key=lambda r: r.created_at, reverse=True)
             lim = max(1, min(int(limit or 20), 100))
             return rows[:lim]
+
+    def _canonical_actor_run_unlocked(
+        self,
+        workgroup_id: str,
+        *,
+        actor_id: str,
+    ) -> ActorRun | None:
+        rows = [
+            r
+            for r in self._runs.values()
+            if r.workgroup_id == workgroup_id and r.actor_id == actor_id
+        ]
+        if not rows:
+            return None
+        rows.sort(key=lambda r: (r.created_at, r.run_id))
+        if actor_id != "leader":
+            return rows[-1]
+        # Pre-fix direct mentions could create an empty leader placeholder.
+        # Prefer the oldest row that has real history, otherwise the oldest row.
+        with_history = [
+            r
+            for r in rows
+            if self._run_histories.get(r.run_id) is not None
+            and bool(self._run_histories[r.run_id].messages)
+        ]
+        return (with_history or rows)[0]
 
     def find_latest_actor_run(self, workgroup_id: str, *, actor_id: str) -> ActorRun | None:
         """Return the persistent session for an actor, if one exists.
@@ -771,7 +858,7 @@ class WorkGroupStore:
         """Get the workgroup-local persistent session for one actor."""
         with self._lock:
             self._ensure_loaded()
-            existing = self.find_latest_actor_run(workgroup_id, actor_id=actor_id)
+            existing = self._canonical_actor_run_unlocked(workgroup_id, actor_id=actor_id)
             if existing is not None:
                 self._consolidate_actor_session_history_unlocked(
                     workgroup_id,
@@ -808,31 +895,62 @@ class WorkGroupStore:
         ]
         rows.sort(key=lambda r: (r.created_at, r.run_id))
         current = self._run_histories.get(target.run_id)
-        if current is not None and current.legacy_runs_consolidated:
-            return
         merged: list[RunHistoryMessage] = []
         max_watermark = 0
-        human_events = []
+        fingerprints: set[str] = set()
+
+        def add_message(message: RunHistoryMessage) -> None:
+            if message.timeline_event_seq is not None and any(
+                existing.timeline_event_seq == message.timeline_event_seq
+                for existing in merged
+            ):
+                return
+            if message.assign_id and any(
+                existing.assign_id == message.assign_id and existing.role == message.role
+                for existing in merged
+            ):
+                return
+            fingerprint = message.model_dump_json()
+            if fingerprint in fingerprints:
+                return
+            fingerprints.add(fingerprint)
+            merged.append(message)
+
+        for row in rows:
+            history = self._run_histories.get(row.run_id)
+            if history is not None:
+                for message in history.messages:
+                    add_message(message)
+                max_watermark = max(max_watermark, int(history.timeline_watermark_seq or 0))
+            max_watermark = max(max_watermark, int(row.timeline_watermark_seq or 0))
+
         if actor_id == "leader":
-            human_events = [
-                event
-                for event in self._timeline.get(workgroup_id, [])
-                if event.type == "human_message"
-            ]
-            human_events.sort(key=lambda event: event.seq)
-        for index, row in enumerate(rows):
-            if index < len(human_events):
-                event = human_events[index]
-                if not any(
-                    message.timeline_event_seq == event.seq
-                    or (
-                        message.role == "user"
-                        and message.content == event.text
-                        and message.name == event.protocol_name
-                    )
-                    for message in merged
-                ):
-                    merged.append(
+            timeline = sorted(
+                self._timeline.get(workgroup_id, []),
+                key=lambda event: event.seq,
+            )
+            from manage.workgroup.history import extract_assign_ids_from_tool_results
+
+            covered_assigns = {
+                message.assign_id
+                for message in merged
+                if message.assign_id
+            }
+            covered_assigns.update(extract_assign_ids_from_tool_results(merged))
+            for event in timeline:
+                if event.type == "human_message":
+                    if any(
+                        existing.timeline_event_seq == event.seq
+                        or (
+                            existing.timeline_event_seq is None
+                            and existing.role == "user"
+                            and existing.name == event.protocol_name
+                            and existing.content == event.text
+                        )
+                        for existing in merged
+                    ):
+                        continue
+                    add_message(
                         RunHistoryMessage(
                             role="user",
                             name=event.protocol_name,
@@ -840,11 +958,28 @@ class WorkGroupStore:
                             timeline_event_seq=event.seq,
                         )
                     )
-            history = self._run_histories.get(row.run_id)
-            if history is not None:
-                merged.extend(history.messages)
-                max_watermark = max(max_watermark, int(history.timeline_watermark_seq or 0))
-            max_watermark = max(max_watermark, int(row.timeline_watermark_seq or 0))
+                    continue
+                # Direct @member turns bypass Supervisor's tool call. Their
+                # member result must still be visible to future Supervisor
+                # turns; regular assignments already have a tool result.
+                if (
+                    event.type == "actor_final_text"
+                    and event.actor_id != "leader"
+                    and event.assign_id
+                    and event.assign_id not in covered_assigns
+                ):
+                    add_message(
+                        RunHistoryMessage(
+                            role="user",
+                            name=event.protocol_name,
+                            content=event.text,
+                            timeline_event_seq=event.seq,
+                            assign_id=event.assign_id,
+                        )
+                    )
+                    covered_assigns.add(event.assign_id)
+            max_watermark = max(max_watermark, max((event.seq for event in timeline), default=0))
+
         updated_history = ActorRunHistory(
             run_id=target.run_id,
             workgroup_id=workgroup_id,
@@ -853,6 +988,8 @@ class WorkGroupStore:
             timeline_watermark_seq=max_watermark,
             legacy_runs_consolidated=True,
         )
+        if current is not None and current.model_dump() == updated_history.model_dump():
+            return
         self._run_histories[target.run_id] = updated_history
         self._put(
             "actor_run_histories",
@@ -934,6 +1071,23 @@ class WorkGroupStore:
         with self._lock:
             self._ensure_loaded()
             return self._run_histories.get(run_id)
+
+    def get_context_snapshot(self, run_id: str) -> ActorContextSnapshot | None:
+        with self._lock:
+            self._ensure_loaded()
+            return self._context_snapshots.get(run_id)
+
+    def save_context_snapshot(self, snapshot: ActorContextSnapshot) -> ActorContextSnapshot:
+        with self._lock:
+            self._ensure_loaded()
+            self._context_snapshots[snapshot.run_id] = snapshot
+            self._put(
+                "actor_context_snapshots",
+                snapshot.run_id,
+                snapshot.model_dump_json(),
+                workgroup_id=snapshot.workgroup_id,
+            )
+            return snapshot
 
     def ensure_run_history(self, run: ActorRun) -> ActorRunHistory:
         with self._lock:
@@ -1120,6 +1274,20 @@ class WorkGroupStore:
                 updated.model_dump_json(),
                 workgroup_id=updated.workgroup_id,
             )
+            if status in {"succeeded", "failed", "indeterminate", "canceled"}:
+                member = self._members.get(updated.member_id)
+                if member is not None and member.active_assign_id == updated.assign_id:
+                    member_status = "ready" if member.status not in {"archived", "error"} else member.status
+                    released = member.model_copy(
+                        update={"active_assign_id": None, "status": member_status}
+                    )
+                    self._members[member.member_id] = released
+                    self._put(
+                        "workgroup_members",
+                        member.member_id,
+                        released.model_dump_json(),
+                        workgroup_id=member.workgroup_id,
+                    )
             return updated
 
     # --- Turn recovery / human queue persistence ---
@@ -1146,7 +1314,9 @@ class WorkGroupStore:
                     break
             else:
                 bucket.append(record)
-            bucket.sort(key=lambda item: (item.created_at, item.queue_id))
+            bucket.sort(
+                key=lambda item: (-int(item.priority or 0), item.created_at, item.queue_id)
+            )
             self._put(
                 "workgroup_human_queue",
                 record.queue_id,

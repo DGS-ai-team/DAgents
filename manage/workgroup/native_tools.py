@@ -245,11 +245,11 @@ class NativeToolDispatcher:
                 tool_call_id,
             )
             current = self.store.get_assign(assign.assign_id)
-            if current is not None and current.status in {"failed", "canceled"}:
+            if current is not None and current.status in {"failed", "canceled", "indeterminate"}:
                 terminal = True
                 return build_assign_tool_result_content(
                     assign_id=assign.assign_id,
-                    status="failed",
+                    status="canceled" if current.status == "canceled" else current.status,
                     summary=current.result_summary or "cancelled by user",
                     error_code=current.error_code or "canceled",
                 )
@@ -287,6 +287,15 @@ class NativeToolDispatcher:
                 summary=summary,
             )
         except WorkgroupError as exc:
+            current = self.store.get_assign(assign.assign_id)
+            if current is not None and current.status in {"canceled", "indeterminate"}:
+                terminal = True
+                return build_assign_tool_result_content(
+                    assign_id=assign.assign_id,
+                    status=current.status,
+                    summary=current.result_summary or exc.message,
+                    error_code=current.error_code or exc.code,
+                )
             assign = self.store.set_assign_status(
                 assign.assign_id,
                 "failed",
@@ -310,6 +319,15 @@ class NativeToolDispatcher:
             )
         except Exception as exc:  # noqa: BLE001 — 必须释放 active assign
             msg = str(exc) or exc.__class__.__name__
+            current = self.store.get_assign(assign.assign_id)
+            if current is not None and current.status in {"canceled", "indeterminate"}:
+                terminal = True
+                return build_assign_tool_result_content(
+                    assign_id=assign.assign_id,
+                    status=current.status,
+                    summary=current.result_summary or msg,
+                    error_code=current.error_code or "conflict",
+                )
             assign = self.store.set_assign_status(
                 assign.assign_id,
                 "failed",

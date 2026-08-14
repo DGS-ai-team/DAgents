@@ -33,6 +33,7 @@ class SchemaTest(unittest.TestCase):
                     "workgroup_assigns",
                     "actor_runs",
                     "actor_run_histories",
+                    "actor_context_snapshots",
                     "workgroup_timeline",
                     "workgroup_outbox",
                     "workgroup_hitl",
@@ -48,4 +49,4 @@ class SchemaTest(unittest.TestCase):
             with db.connect() as conn:
                 ver = conn.execute(
                     "SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
-            self.assertEqual(ver, "14")
+            self.assertEqual(ver, "15")

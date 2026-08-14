@@ -10,6 +10,7 @@ import {
   fetchWorkgroupHumanQueue,
   patchWorkgroupHumanQueueItem,
   cancelWorkgroupHumanQueueItem,
+  sendWorkgroupHumanQueueItemNow,
   postWorkgroupMessageStream,
   cancelWorkgroupTurn,
   listWorkgroupHITL,
@@ -288,6 +289,7 @@ function buildAssignIndex(list) {
   const finishedByAssign = {};
   const startedByAssign = {};
   const memberFinalByAssign = {};
+  const assistantContentByAssign = {};
   for (const ev of list || []) {
     const t = String(ev?.type || "");
     const aid = String(ev?.assign_id || "").trim();
@@ -305,6 +307,9 @@ function buildAssignIndex(list) {
     } else if (t === "actor_final_text") {
       const actor = String(ev?.actor_id || "").trim();
       if (actor && actor !== "leader") memberFinalByAssign[aid] = ev;
+    } else if (t === "assistant_content") {
+      if (!assistantContentByAssign[aid]) assistantContentByAssign[aid] = [];
+      assistantContentByAssign[aid].push(ev);
     }
   }
   return {
@@ -314,6 +319,7 @@ function buildAssignIndex(list) {
     finishedByAssign,
     startedByAssign,
     memberFinalByAssign,
+    assistantContentByAssign,
   };
 }
 
@@ -376,7 +382,7 @@ function toolKindLabel(toolName) {
   return "tool";
 }
 
-function makeAssignRow(started, finished, notices, isDirect, memberFinal) {
+function makeAssignRow(started, finished, notices, isDirect, memberFinal, assistantContents = []) {
   const noticeList = Array.isArray(notices) ? notices : notices ? [notices] : [];
   const lastNotice = noticeList.length ? noticeList[noticeList.length - 1] : null;
   const noticeText = lastNotice ? String(lastNotice.text || "").trim() : "";
@@ -411,6 +417,34 @@ function makeAssignRow(started, finished, notices, isDirect, memberFinal) {
       inProgress: !done,
     };
   });
+  const contentList = Array.isArray(assistantContents) ? assistantContents : [];
+  const activity = [
+    ...contentList.map((ev) => ({ kind: "content", ev })),
+    ...noticeList.map((ev) => ({ kind: "tool", ev })),
+  ].sort((a, b) => Number(a.ev?.seq || 0) - Number(b.ev?.seq || 0));
+  const stepByKey = new Map(steps.map((step) => [step.key, step]));
+  const renderedSteps = activity.flatMap((entry, index) => {
+    const ev = entry.ev;
+    if (entry.kind === "content") {
+      return [{
+        key: ev.event_id || `content-${ev.seq || index}`,
+        kind: "content",
+        text: String(ev.text || ""),
+      }];
+    }
+    const key = ev.event_id || `step-${ev.seq || index}`;
+    return [stepByKey.get(key) || {
+      key,
+      kind: "tool",
+      toolName: "tool",
+      toolKind: "tool",
+      summary: String(ev.text || ""),
+      statusText: "",
+      done: Boolean(finished),
+      failed: false,
+      inProgress: !finished,
+    }];
+  });
   return {
     key: anchor?.event_id || `assign-${anchor?.seq}`,
     kind: "assign",
@@ -423,7 +457,7 @@ function makeAssignRow(started, finished, notices, isDirect, memberFinal) {
     done: Boolean(finished),
     failed,
     direct: isDirect,
-    steps,
+    steps: renderedSteps,
     hasReport: Boolean(reportText),
     reportText,
     reportPreview: previewMemberReport(reportText),
@@ -459,6 +493,33 @@ function makeDirectToolRow(ev, { assignFinished, isLast, failed }) {
   };
 }
 
+function makeLeaderToolRow(ev) {
+  const parsed = parseNoticeTool(ev?.text);
+  const actorId = String(ev?.actor_id || "").trim();
+  const inProgress = Boolean(
+    sending.value &&
+      streamMode.value === "leader" &&
+      actorId === "leader" &&
+      streamPhase.value === "tool" &&
+      Number(ev?.seq || 0) > Number(statusWatermarkSeq.value || 0),
+  );
+  return {
+    key: ev.event_id || `leader-tool-${ev.seq}`,
+    kind: "tool",
+    toolName: parsed.toolName,
+    toolKind: toolKindLabel(parsed.toolName),
+    summary: parsed.summary,
+    statusText: inProgress ? "生成中" : "已完成",
+    done: !inProgress,
+    failed: false,
+    inProgress,
+    role: "assistant",
+    actorId,
+    streaming: false,
+    progress: false,
+  };
+}
+
 const displayGroups = computed(() => {
   const groups = [];
   const rawGroups = [];
@@ -469,6 +530,7 @@ const displayGroups = computed(() => {
     finishedByAssign,
     startedByAssign,
     memberFinalByAssign,
+    assistantContentByAssign,
   } = buildAssignIndex(list);
   const consumedFinished = new Set();
 
@@ -500,7 +562,14 @@ const displayGroups = computed(() => {
       const notices = aid ? noticesByAssign[aid] || [] : [];
       const memberFinal = aid ? memberFinalByAssign[aid] || null : null;
       const actorId = String(ev?.actor_id || "leader").trim() || "leader";
-      const row = makeAssignRow(ev, finished, notices, false, memberFinal);
+      const row = makeAssignRow(
+        ev,
+        finished,
+        notices,
+        false,
+        memberFinal,
+        aid ? assistantContentByAssign[aid] || [] : [],
+      );
       row.actorId = actorId;
       row.actor = eventActorLabel({ ...ev, actor_id: actorId, type: "assign_started" });
       pushRow("assistant", actorId, row.actor || "Supervisor", row);
@@ -515,7 +584,14 @@ const displayGroups = computed(() => {
       const actorId = String(ev?.actor_id || "leader").trim() || "leader";
       const notices = aid ? noticesByAssign[aid] || [] : [];
       const memberFinal = aid ? memberFinalByAssign[aid] || null : null;
-      const row = makeAssignRow(null, ev, notices, false, memberFinal);
+      const row = makeAssignRow(
+        null,
+        ev,
+        notices,
+        false,
+        memberFinal,
+        aid ? assistantContentByAssign[aid] || [] : [],
+      );
       row.actorId = actorId;
       row.actor = eventActorLabel({ ...ev, actor_id: actorId, type: "assign_finished" });
       pushRow("assistant", actorId, row.actor || "Supervisor", row);
@@ -527,6 +603,10 @@ const displayGroups = computed(() => {
       if (actor && actor !== "leader" && aid && !directAssignIds.has(aid)) {
         continue;
       }
+    }
+
+    if (t === "assistant_content" && aid && !directAssignIds.has(aid)) {
+      continue;
     }
 
     if (t === "system_notice") {
@@ -549,6 +629,10 @@ const displayGroups = computed(() => {
             failed,
           }),
         );
+        continue;
+      }
+      if (actorId === "leader") {
+        pushRow("assistant", actorId, eventActorLabel(ev), makeLeaderToolRow(ev));
         continue;
       }
       pushRow("assistant", actorId, eventActorLabel(ev), {
@@ -941,7 +1025,8 @@ function formatDebugMsg(m) {
   const role = String(m?.role || "");
   if (role === "assistant" && Array.isArray(m?.tool_calls) && m.tool_calls.length) {
     const names = m.tool_calls.map((tc) => tc?.function?.name || tc?.name || "?").join(", ");
-    return `tool_calls: ${names}`;
+    const body = String(m?.content || "").trim();
+    return body ? `${body}\n\ntool_calls: ${names}` : `tool_calls: ${names}`;
   }
   if (role === "tool") {
     const body = String(m?.content || "").trim();
@@ -1073,7 +1158,6 @@ function startQueuePoll() {
   stopQueuePoll();
   queuePollTimer = setInterval(() => {
     if (!props.active || !props.workgroupId) return;
-    if (!sending.value && !(humanQueueItems.value || []).length) return;
     void refreshHumanQueue();
     if (sending.value || (humanQueueItems.value || []).length) {
       void loadTimeline().catch(() => {});
@@ -1121,6 +1205,18 @@ async function removeQueued(item) {
     if (editingQueueId.value === qid) cancelEditQueued();
   } catch (err) {
     emit("toast", { message: err.message || "取消排队失败", type: "error" });
+  }
+}
+
+async function sendQueuedNow(item) {
+  const qid = String(item?.queue_id || "").trim();
+  if (!props.workgroupId || !qid) return;
+  try {
+    await sendWorkgroupHumanQueueItemNow(props.workgroupId, qid);
+    await refreshHumanQueue();
+    startQueuePoll();
+  } catch (err) {
+    emit("toast", { message: err.message || "send now failed", type: "error" });
   }
 }
 
@@ -1483,10 +1579,15 @@ onUnmounted(() => {
                     </div>
                     <div class="wg-task__body">{{ row.taskText }}</div>
                     <div v-if="row.steps?.length" class="wg-task__steps">
-                      <div
-                        v-for="step in row.steps"
-                        :key="step.key"
-                        class="wg-tool-row"
+                      <template v-for="step in row.steps" :key="step.key">
+                        <div
+                          v-if="step.kind === 'content'"
+                          class="wg-task__pre-tool tool-exec-bubble__markdown assistant-msg__md"
+                          v-html="renderMarkdown(step.text)"
+                        />
+                        <div
+                          v-else
+                          class="wg-tool-row"
                         :class="{
                           'wg-tool-row--progress': step.inProgress,
                           [`wg-tool-row--${step.toolKind || 'tool'}`]: true,
@@ -1510,7 +1611,8 @@ onUnmounted(() => {
                             {{ step.statusText }}
                           </span>
                         </div>
-                      </div>
+                        </div>
+                      </template>
                     </div>
                     <div v-if="row.hasReport" class="wg-task__report">
                       <button
@@ -1722,6 +1824,9 @@ onUnmounted(() => {
             </template>
             <template v-else>
               <span class="chat__queue-text" :title="item.text">{{ item.text }}</span>
+              <button type="button" class="chat__queue-btn chat__queue-btn--send" @click="sendQueuedNow(item)">
+                立即发送
+              </button>
               <button type="button" class="chat__queue-btn" @click="beginEditQueued(item)">修改</button>
               <button
                 type="button"

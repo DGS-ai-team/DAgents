@@ -20,6 +20,7 @@ class TimelineEvent(BaseModel):
     seq: int = Field(ge=1)
     type: Literal[
         "human_message",
+        "assistant_content",
         "actor_final_text",
         "system_notice",
         "assign_started",
@@ -70,6 +71,7 @@ class QueuedHumanRecord(BaseModel):
     client_message_id: str | None = None
     direct_member_id: str | None = None
     disable_tools: bool = False
+    priority: int = 0
     created_at: str
     updated_at: str
 
@@ -106,6 +108,7 @@ class TurnCancelResponse(BaseModel):
     failed_assign_ids: list[str] = Field(default_factory=list)
     leader_run_id: str | None = None
     member_run_id: str | None = None
+    member_run_ids: list[str] = Field(default_factory=list)
 
 
 class ProvisionCompleteRequest(BaseModel):

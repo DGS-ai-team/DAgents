@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from manage.workgroup.d3_models import TimelineEvent
+from manage.workgroup.context_compression import ActorContextSnapshot, context_messages
 from manage.workgroup.history import (
     RunHistoryMessage,
     extract_assign_ids_from_tool_results,
@@ -27,6 +28,7 @@ def project_actor_context(
     member: WorkGroupMember | None = None,
     timeline_events: list[TimelineEvent] | list[dict[str, Any]] | None = None,
     own_run_history: list[RunHistoryMessage] | list[dict[str, Any]] | None = None,
+    context_snapshot: ActorContextSnapshot | None = None,
 ) -> dict[str, Any]:
     """构造 Actor 相对 LLM 上下文。
 
@@ -74,7 +76,7 @@ def project_actor_context(
                 continue
             projected_timeline.append(_project_timeline_event(ev))
 
-    messages = to_provider_messages(history) + projected_timeline
+    messages = context_messages(history, context_snapshot) + projected_timeline
     return {
         "actor_id": actor_id,
         "run_id": run.run_id if run else None,
