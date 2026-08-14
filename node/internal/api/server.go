@@ -22,6 +22,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hostsnapshot"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
+	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
 	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
@@ -48,6 +49,8 @@ type Server struct {
 	mux             *http.ServeMux
 	sessions        *session.Manager // per-session 队列与 turn consumer（过渡期与 agent_id 1:1）
 	agents          *store.AgentStore
+	mcpServers      *store.MCPServerStore
+	mcpManager      *mcp.Manager
 	llmConfigs      *store.LLMConfigStore
 	nodeSettings    *store.NodeSettingsStore
 	stream          *stream.Hub // 进程内 SSE 事件总线
@@ -203,6 +206,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		}
 	}
 	var agentsStore *store.AgentStore
+	var mcpServerStore *store.MCPServerStore
+	mcpManager := mcp.NewManager(logger)
 	if !o.skipStore {
 		opened, err := store.OpenAgents(cfg.AgentsDBPath())
 		if err != nil {
@@ -219,6 +224,17 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 			} else if result.AgentsTouched > 0 {
 				logger.Info("agent policy seed merge applied",
 					"agents", result.AgentsTouched, "tools_added", result.ToolsAdded)
+			}
+		}
+		openedMCP, err := store.OpenMCPServers(filepath.Join(cfg.RuntimeDir(), "mcp_servers.db"))
+		if err != nil {
+			logger.Error("mcp server store init failed", "error", err)
+		} else {
+			mcpServerStore = openedMCP
+			if configs, loadErr := mcpServerStore.List(context.Background()); loadErr != nil {
+				logger.Error("mcp server config load failed", "error", loadErr)
+			} else if configureErr := mcpManager.Configure(configs); configureErr != nil {
+				logger.Error("mcp server manager configure failed", "error", configureErr)
 			}
 		}
 	}
@@ -419,6 +435,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		workgroupStream: workgroupStream,
 		store:           st,
 		agents:          agentsStore,
+		mcpServers:      mcpServerStore,
+		mcpManager:      mcpManager,
 		llmConfigs:      llmConfigStore,
 		nodeSettings:    o.nodeSettings,
 		sessions:        mgr,
@@ -475,6 +493,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
 	s.registerAgentRoutes()
+	s.registerMCPRoutes()
 	s.registerWorkgroupRoutes()
 	s.registerScreenRoutes()
 	s.registerToolCallControlRoutes()
@@ -648,6 +667,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if s.nodeSettings != nil {
 			_ = s.nodeSettings.Close()
 		}
+		if s.mcpManager != nil {
+			s.mcpManager.Close()
+		}
+		if s.mcpServers != nil {
+			_ = s.mcpServers.Close()
+		}
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}
@@ -719,6 +744,12 @@ func (s *Server) Close() {
 	}
 	if s.nodeSettings != nil {
 		_ = s.nodeSettings.Close()
+	}
+	if s.mcpManager != nil {
+		s.mcpManager.Close()
+	}
+	if s.mcpServers != nil {
+		_ = s.mcpServers.Close()
 	}
 }
 

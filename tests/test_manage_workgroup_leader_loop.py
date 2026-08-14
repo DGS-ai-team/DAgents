@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import threading
 import sys
+import time
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +19,7 @@ from manage.storage.sqlite import SQLiteDatabase  # noqa: E402
 from manage.workgroup.llm_chat import ChatResult, MockLLMClient  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
+    ActorRunCreateRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
@@ -149,6 +153,254 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertIn("[scripted] 读 README", tool.content or "")
             self.assertIn("\"status\": \"succeeded\"", tool.content or "")
 
+    def test_tool_call_content_is_persisted_before_assign_timeline_event(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.llm_chat import ChatResult, ChatToolCall
+
+            args = json.dumps({"member_id": mid, "instruction": "read README"})
+            client = MockLLMClient(
+                [
+                    ChatResult(
+                        content="Supervisor pre-tool content",
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_content_assign",
+                                name="assign_workgroup_task",
+                                arguments=args,
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="done", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(store, chat_client=client, mock_llm=True)
+            result = kernel.handle_human_message(wid, text="assign", from_node_id="node-a")
+
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            timeline = store.list_timeline(wid)
+            pre_tool = next(e for e in timeline if e.type == "assistant_content")
+            assign_started = next(e for e in timeline if e.type == "assign_started")
+            self.assertEqual(pre_tool.text, "Supervisor pre-tool content")
+            self.assertLess(pre_tool.seq, assign_started.seq)
+            history = store.get_run_history(result["leader_run"].run_id)
+            assert history is not None
+            assistant = next(m for m in history.messages if m.tool_calls)
+            self.assertEqual(assistant.content, "Supervisor pre-tool content")
+
+    def test_supervisor_non_assign_tool_is_published_as_safe_timeline_notice(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="Visible supervisor tool",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            store.publish_workgroup(group.workgroup_id)
+            from manage.workgroup.llm_chat import ChatToolCall
+
+            client = MockLLMClient(
+                [
+                    ChatResult(
+                        content="Supervisor pre-tool content",
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_visible_members",
+                                name="list_workgroup_members",
+                                arguments=json.dumps(
+                                    {
+                                        "purpose": "查看成员",
+                                        "secret": "must stay private",
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="成员列表已确认", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(store, chat_client=client, mock_llm=True)
+            result = kernel.handle_human_message(
+                group.workgroup_id,
+                text="查看当前成员",
+                from_node_id="node-a",
+            )
+
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            timeline = store.list_timeline(group.workgroup_id)
+            pre_tool = next(e for e in timeline if e.type == "assistant_content")
+            notice = next(
+                e
+                for e in timeline
+                if e.type == "system_notice" and e.actor_id == "leader"
+            )
+            final = next(e for e in timeline if e.type == "actor_final_text")
+            self.assertEqual(notice.text, "查看成员")
+            self.assertLess(pre_tool.seq, notice.seq)
+            self.assertLess(notice.seq, final.seq)
+            self.assertNotIn("list_workgroup_members", notice.text)
+            self.assertNotIn("must stay private", notice.text)
+
+    def test_supervisor_session_reuses_complete_history_across_turns(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.llm_chat import ChatResult, ChatToolCall
+
+            first_text = "先查看当前成员列表"
+            second_text = "请@worker读取 README"
+            client = MockLLMClient(
+                [
+                    ChatResult(
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_list_history",
+                                name="list_workgroup_members",
+                                arguments="{}",
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="成员列表已确认", finish_reason="stop"),
+                    ChatResult(
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_assign_history",
+                                name="assign_workgroup_task",
+                                arguments=json.dumps(
+                                    {"member_id": mid, "instruction": "读取 README"},
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="任务已完成", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(store, chat_client=client, mock_llm=True)
+
+            first = kernel.handle_human_message(wid, text=first_text, from_node_id="node-a")
+            second = kernel.handle_human_message(wid, text=second_text, from_node_id="node-a")
+
+            self.assertEqual(first["loop"]["status"], "succeeded")
+            self.assertEqual(second["loop"]["status"], "succeeded")
+            leader_runs = [r for r in store._runs.values() if r.actor_id == "leader"]  # noqa: SLF001
+            self.assertEqual(len(leader_runs), 1)
+            history = store.get_run_history(leader_runs[0].run_id)
+            assert history is not None
+            user_texts = [m.content for m in history.messages if m.role == "user"]
+            self.assertIn(first_text, user_texts)
+            self.assertIn(second_text, user_texts)
+            self.assertEqual(
+                [m.role for m in history.messages],
+                ["user", "user", "assistant", "tool", "assistant", "user", "assistant", "tool", "assistant"],
+            )
+
+            second_turn_messages = client.calls[2]["messages"]
+            second_turn_contents = [m.get("content") for m in second_turn_messages]
+            self.assertIn(first_text, second_turn_contents)
+            self.assertIn(second_text, second_turn_contents)
+            self.assertEqual(
+                [m.get("name") for m in second_turn_messages if m.get("role") == "tool"],
+                ["list_workgroup_members"],
+            )
+
+    def test_supervisor_keeps_current_input_through_tool_loop(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.llm_chat import ChatResult, ChatToolCall
+
+            human_text = "先看成员列表，再@worker读取 README"
+            client = MockLLMClient(
+                [
+                    ChatResult(
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_list_same_turn",
+                                name="list_workgroup_members",
+                                arguments="{}",
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_assign_same_turn",
+                                name="assign_workgroup_task",
+                                arguments=json.dumps(
+                                    {"member_id": mid, "instruction": "读取 README"},
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="任务已完成", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(store, chat_client=client, mock_llm=True)
+            result = kernel.handle_human_message(wid, text=human_text, from_node_id="node-a")
+
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            for call in client.calls:
+                self.assertIn(human_text, [m.get("content") for m in call["messages"]])
+            history = store.get_run_history(result["leader_run"].run_id)
+            assert history is not None
+            self.assertEqual(
+                [m.role for m in history.messages],
+                ["user", "user", "assistant", "tool", "assistant", "tool", "assistant"],
+            )
+
+    def test_supervisor_session_history_survives_store_reload(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            db_path = Path(tmp) / "m.db"
+            store1 = WorkGroupStore(db=SQLiteDatabase(db_path))
+            group, _ = store1.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="Reload",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            wid = group.workgroup_id
+            store1.publish_workgroup(wid)
+            first_client = MockLLMClient([ChatResult(content="第一轮", finish_reason="stop")])
+            first = TurnKernel(store1, chat_client=first_client, mock_llm=True).handle_human_message(
+                wid,
+                text="第一条消息",
+                from_node_id="node-a",
+                disable_tools=True,
+            )
+            first_run_id = first["leader_run"].run_id
+
+            store2 = WorkGroupStore(db=SQLiteDatabase(db_path))
+            second_client = MockLLMClient([ChatResult(content="第二轮", finish_reason="stop")])
+            second = TurnKernel(store2, chat_client=second_client, mock_llm=True).handle_human_message(
+                wid,
+                text="第二条消息",
+                from_node_id="node-a",
+                disable_tools=True,
+            )
+
+            self.assertEqual(second["leader_run"].run_id, first_run_id)
+            history = store2.get_run_history(first_run_id)
+            assert history is not None
+            user_texts = [m.content for m in history.messages if m.role == "user"]
+            self.assertIn("第一条消息", user_texts)
+            self.assertIn("第二条消息", user_texts)
+            self.assertIn("第一条消息", [m.get("content") for m in second_client.calls[0]["messages"]])
+
     def test_human_message_events_stream_deltas(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
@@ -207,7 +459,9 @@ class LeaderLoopTests(unittest.TestCase):
             )
             member_script = mock_member_script_read_file_then_answer(
                 path="README",
+                first_content="member pre-tool content",
                 final_text="标题是 Demo",
+                call_purpose="读取 README 的标题",
             )
             kernel = TurnKernel(
                 store,
@@ -241,6 +495,24 @@ class LeaderLoopTests(unittest.TestCase):
             ]
             self.assertTrue(any(event_type == "status" for event_type, _data in member_live))
             self.assertTrue(any(event_type == "delta" for event_type, _data in member_live))
+            tool_statuses = [
+                data for event_type, data in member_live if event_type == "status" and data.get("phase") == "tool"
+            ]
+            self.assertTrue(tool_statuses)
+            self.assertEqual(tool_statuses[0].get("purpose"), "读取 README 的标题")
+            self.assertNotIn("tool", tool_statuses[0])
+            self.assertNotIn("tool_name", tool_statuses[0])
+            notices = [e.text for e in timeline if e.type == "system_notice" and e.actor_id == mid]
+            pre_tool = [
+                e for e in timeline
+                if e.type == "assistant_content" and e.actor_id == mid
+            ]
+            self.assertEqual([e.text for e in pre_tool], ["member pre-tool content"])
+            self.assertLess(
+                pre_tool[0].seq,
+                next(e for e in timeline if e.type == "system_notice").seq,
+            )
+            self.assertEqual(notices, ["读取 README 的标题"])
 
             runs = [r for r in store._runs.values() if r.actor_id == mid]  # noqa: SLF001
             self.assertEqual(len(runs), 1)
@@ -310,6 +582,81 @@ class LeaderLoopTests(unittest.TestCase):
             tool = next(m for m in hist.messages if m.role == "tool")
             self.assertEqual(tool.tool_call_id, "call_orphan")
             self.assertIn("interrupted", tool.content or "")
+
+    def test_resolved_hitl_replays_tool_result_and_resumes_leader(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            store = WorkGroupStore(db=SQLiteDatabase(root / "m.db"))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="HITL resume",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            store.publish_workgroup(group.workgroup_id)
+            from manage.workgroup.history import RunHistoryMessage, ToolCall, ToolCallFunction
+
+            run = store.create_actor_run(
+                group.workgroup_id,
+                ActorRunCreateRequest(actor_id="leader"),
+            )
+            store.append_run_history(
+                run.run_id,
+                [
+                    RunHistoryMessage(
+                        role="assistant",
+                        name="leader",
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_hitl_resume",
+                                function=ToolCallFunction(
+                                    name="ask_workgroup_user",
+                                    arguments='{"prompt":"confirm"}',
+                                ),
+                            )
+                        ],
+                    )
+                ],
+            )
+            hitl = store.create_hitl(
+                group.workgroup_id,
+                prompt="confirm",
+                run_id=run.run_id,
+                tool_call_id="call_hitl_resume",
+            )
+            resolved = store.resolve_hitl_cas(
+                group.workgroup_id,
+                hitl.hitl_id,
+                resolution={"answer": "yes"},
+            )
+            restarted = WorkGroupStore(db=SQLiteDatabase(root / "m.db"))
+            restarted.reconcile_inflight_runs()
+            client = MockLLMClient([ChatResult(content="continued", finish_reason="stop")])
+            kernel = TurnKernel(restarted, chat_client=client, mock_llm=True)
+
+            scheduled = kernel.resume_persisted_hitls()
+            self.assertEqual(len(scheduled), 1)
+            self.assertTrue(scheduled[0]["scheduled"])
+            for _ in range(100):
+                current = restarted.get_actor_run(run.run_id)
+                if current is not None and current.status == "succeeded":
+                    break
+                time.sleep(0.01)
+            current = restarted.get_actor_run(run.run_id)
+            self.assertIsNotNone(current)
+            assert current is not None
+            self.assertEqual(current.status, "succeeded")
+            history = restarted.get_run_history(run.run_id)
+            assert history is not None
+            tool_results = [
+                m for m in history.messages if m.role == "tool" and m.tool_call_id == "call_hitl_resume"
+            ]
+            self.assertEqual(len(tool_results), 1)
+            self.assertIn('"answer": "yes"', tool_results[0].content or "")
+            self.assertEqual(history.messages[-1].content, "continued")
 
     def test_leader_tool_loop_soft_limit_returns_tool_result(self) -> None:
         """超限后若模型仍发起 tool_calls，写入 soft tool_result 并允许收尾结论。"""
@@ -392,7 +739,7 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertEqual(result["loop"]["status"], "succeeded")
             self.assertEqual(store.get_assign(stuck.assign_id).status, "failed")
 
-    def test_single_active_assign_enforced(self) -> None:
+    def test_same_member_active_assign_enforced(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
             wid, mid = self._ready_group(store)
@@ -403,6 +750,158 @@ class LeaderLoopTests(unittest.TestCase):
             with self.assertRaises(WorkgroupError) as ctx:
                 store.create_assign(wid, AssignCreateRequest(member_id=mid, instruction="b"))
             self.assertEqual(ctx.exception.code, "conflict")
+
+    def test_different_members_can_run_assigns_in_parallel(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, first_mid = self._ready_group(store)
+            store.patch_acl(
+                wid,
+                ACLPatchRequest(collaborators=["node-c"], expected_revision=2),
+            )
+            second, _ = store.create_member(
+                wid,
+                MemberCreateRequest(
+                    home_node_id="node-c",
+                    display_name="worker-c",
+                    allow_tool_names=[],
+                ),
+            )
+            store.mark_member_status(second.member_id, "ready", workgroup_id=wid)
+
+            from manage.workgroup.llm_chat import ChatToolCall
+
+            calls = [
+                ChatToolCall(
+                    id="call_parallel_a",
+                    name="assign_workgroup_task",
+                    arguments=json.dumps(
+                        {"member_id": first_mid, "instruction": "task-a"},
+                        ensure_ascii=False,
+                    ),
+                ),
+                ChatToolCall(
+                    id="call_parallel_b",
+                    name="assign_workgroup_task",
+                    arguments=json.dumps(
+                        {"member_id": second.member_id, "instruction": "task-b"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            ]
+            entered: set[str] = set()
+            lock = threading.Lock()
+            both_entered = threading.Event()
+
+            def completer(_wid: str, assign_id: str, member_id: str, instruction: str, _call_id: str = "") -> str:
+                with lock:
+                    entered.add(member_id)
+                    if len(entered) == 2:
+                        both_entered.set()
+                self.assertTrue(both_entered.wait(2), "assigns did not overlap")
+                return f"done:{instruction}"
+
+            client = MockLLMClient(
+                [
+                    ChatResult(tool_calls=calls, finish_reason="tool_calls"),
+                    ChatResult(content="both done", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(
+                store,
+                chat_client=client,
+                assign_completer=completer,
+                mock_llm=True,
+            )
+            result = kernel.handle_human_message(
+                wid,
+                text="run both workers",
+                from_node_id="node-a",
+            )
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            history = store.get_run_history(result["leader_run"].run_id)
+            assert history is not None
+            tool_messages = [m for m in history.messages if m.role == "tool"]
+            self.assertEqual(
+                [m.tool_call_id for m in tool_messages],
+                ["call_parallel_a", "call_parallel_b"],
+            )
+            self.assertIn("done:task-a", tool_messages[0].content or "")
+            self.assertIn("done:task-b", tool_messages[1].content or "")
+            self.assertEqual(store.get_member(first_mid).status, "ready")
+            self.assertEqual(store.get_member(second.member_id).status, "ready")
+
+    def test_same_member_cannot_have_parallel_assigns(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.models import AssignCreateRequest
+            from manage.workgroup.errors import WorkgroupError
+
+            first = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="first"),
+            )
+            self.assertEqual(store.get_member(mid).status, "busy")
+            with self.assertRaises(WorkgroupError) as ctx:
+                store.create_assign(
+                    wid,
+                    AssignCreateRequest(member_id=mid, instruction="second"),
+                )
+            self.assertEqual(ctx.exception.code, "conflict")
+            store.set_assign_status(first.assign_id, "canceled", error_code="canceled")
+            self.assertEqual(store.get_member(mid).status, "ready")
+
+    def test_cancel_turn_cancels_all_parallel_member_runs(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, first_mid = self._ready_group(store)
+            store.patch_acl(
+                wid,
+                ACLPatchRequest(collaborators=["node-c"], expected_revision=2),
+            )
+            second, _ = store.create_member(
+                wid,
+                MemberCreateRequest(home_node_id="node-c", display_name="worker-c"),
+            )
+            store.mark_member_status(second.member_id, "ready", workgroup_id=wid)
+            from manage.workgroup.models import ActorRunCreateRequest, AssignCreateRequest
+
+            first_assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=first_mid, instruction="first"),
+            )
+            second_assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=second.member_id, instruction="second"),
+            )
+            first_run = store.create_actor_run(
+                wid,
+                ActorRunCreateRequest(actor_id=first_mid, assign_id=first_assign.assign_id),
+            )
+            second_run = store.create_actor_run(
+                wid,
+                ActorRunCreateRequest(actor_id=second.member_id, assign_id=second_assign.assign_id),
+            )
+            kernel = TurnKernel(store, mock_llm=True)
+            leader_run = kernel.start_leader_run(wid)
+            kernel._begin_turn(
+                wid,
+                mode="leader",
+                leader_run_id=leader_run.run_id,
+                member_run_ids=[first_run.run_id, second_run.run_id],
+            )
+            result = kernel.cancel_turn(wid)
+            self.assertEqual(
+                set(result["failed_assign_ids"]),
+                {first_assign.assign_id, second_assign.assign_id},
+            )
+            self.assertEqual(
+                {store.get_actor_run(first_run.run_id).status, store.get_actor_run(second_run.run_id).status},
+                {"canceled"},
+            )
+            self.assertEqual(store.get_member(first_mid).status, "ready")
+            self.assertEqual(store.get_member(second.member_id).status, "ready")
 
 
 if __name__ == "__main__":

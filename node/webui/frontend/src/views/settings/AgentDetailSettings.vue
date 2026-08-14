@@ -1,9 +1,10 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import AgentSettingsForm from "../../components/AgentSettingsForm.vue";
 import PolicyPanel from "../../components/PolicyPanel.vue";
+import McpAgentPanel from "../../components/McpAgentPanel.vue";
 import {
   buildPatchAgentPayload,
   draftFromAgentView,
@@ -11,6 +12,7 @@ import {
   pruneDraftToolGroups,
   toolGroupsFromSetup,
 } from "../../utils/agentTemplateForm.js";
+import { notifyConfigurationChanged, onConfigurationChanged } from "../../utils/configurationEvents.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -21,7 +23,7 @@ const reloading = ref(false);
 const error = ref("");
 const statusMessage = ref("");
 const showAdvanced = ref(true);
-const showPolicy = ref(true);
+const policyRefreshKey = ref(0);
 const llmProfiles = ref([]);
 const availableToolGroups = ref([]);
 const agentMeta = ref(null);
@@ -99,6 +101,8 @@ async function save() {
       long_term_scope: draft.promptLongTermScope === "global" ? "global" : "agent",
     });
     await api.reloadAgentRuntime(agentId.value);
+    policyRefreshKey.value += 1;
+    notifyConfigurationChanged("tools");
     statusMessage.value = "已保存并应用到该智能体。";
   } catch (e) {
     error.value = e.message || "保存失败";
@@ -113,6 +117,7 @@ async function reloadRuntime() {
   statusMessage.value = "";
   try {
     await api.reloadAgentRuntime(agentId.value);
+    policyRefreshKey.value += 1;
     statusMessage.value = "已重新加载运行中的配置。";
   } catch (e) {
     error.value = e.message || "刷新失败";
@@ -125,11 +130,24 @@ function backToList() {
   router.push({ name: "settings-agents" });
 }
 
+function refreshPolicy() {
+  policyRefreshKey.value += 1;
+}
+
 watch(agentId, () => {
   void load();
 });
 
-onMounted(load);
+let stopConfigurationEvents = () => {};
+onMounted(() => {
+  void load();
+  stopConfigurationEvents = onConfigurationChanged((change) => {
+    if (change?.kind === "mcp" || change?.kind === "mcp-catalog" || change?.kind === "tools") {
+      policyRefreshKey.value += 1;
+    }
+  });
+});
+onUnmounted(() => stopConfigurationEvents());
 </script>
 
 <template>
@@ -167,22 +185,15 @@ onMounted(load);
           {{ reloading ? "加载中…" : "重新加载" }}
         </button>
       </div>
+      <McpAgentPanel :agent-id="agentId" @changed="refreshPolicy" />
       <p v-if="statusMessage" class="agent-detail__ok">{{ statusMessage }}</p>
       <p v-if="error" class="agent-detail__error">{{ error }}</p>
       <p class="agent-detail__hint">保存后立即生效。工具审批可在下方单独调整。</p>
 
       <section class="agent-detail__policy">
-        <button
-          type="button"
-          class="agent-detail__policy-toggle"
-          :aria-expanded="showPolicy ? 'true' : 'false'"
-          @click="showPolicy = !showPolicy"
-        >
-          <span class="agent-detail__policy-title">工具审批</span>
-          <span class="agent-detail__policy-chevron">{{ showPolicy ? "▴" : "▾" }}</span>
-        </button>
-        <div v-if="showPolicy" class="agent-detail__policy-body">
-          <PolicyPanel embedded :agent-id="agentId" @close="() => {}" />
+        <div class="agent-detail__policy-title">工具审批</div>
+        <div class="agent-detail__policy-body">
+          <PolicyPanel embedded :agent-id="agentId" :refresh-key="policyRefreshKey" @close="() => {}" />
         </div>
       </section>
     </template>

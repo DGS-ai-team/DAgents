@@ -70,7 +70,8 @@ func bashRunToolDescription(isWindows bool) string {
 	if isWindows {
 		return "执行 PowerShell 命令；cwd 省略时默认为工作区根。" +
 			" 当前环境为 Windows，省略 shell_type 时默认 powershell。" +
-			" command 须使用 PowerShell 语法（如 Get-ChildItem、Copy-Item），勿使用 cmd.exe 语法（如 dir、copy、type）。" + tail
+			" command 须使用 PowerShell 语法（如 Get-ChildItem、Copy-Item），勿使用 cmd.exe 语法（如 dir、copy、type）。" +
+			" 除非确实需要启动嵌套 PowerShell 进程，否则不要生成 powershell -c 或 powershell -Command 包装；直接执行 PowerShell 语句，避免额外的 Windows 引号解析层。路径优先使用单引号和 -LiteralPath。" + tail
 	}
 	return "执行 bash 命令；cwd 省略时默认为工作区根。" +
 		" 当前环境非 Windows，省略 shell_type 时默认 bash。" +

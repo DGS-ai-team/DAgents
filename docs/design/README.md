@@ -38,3 +38,6 @@
 过期设计、superseded 稿与旧版 smoke 见 [../archive/design/](../archive/design/)。
 
 新正文优先写入 **handbook**；工作组契约变更写入 **workgroup-d05** / CHANGELOG。
+# Linux channel design
+
+See [linux-channel-plan.md](./linux-channel-plan.md) for the Node-side Linux SSH channel design.

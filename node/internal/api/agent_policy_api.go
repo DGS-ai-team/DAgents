@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
+	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/promptcontext"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
@@ -76,6 +77,9 @@ func (s *Server) handleGetAgentPolicy(w http.ResponseWriter, r *http.Request) {
 	parsed, _ := agentruntime.ParseSnapshot(rec.ConfigSnapshot)
 	groups := agentruntime.EnabledToolGroups(parsed)
 	enabledNames := config.ExpandBuiltinToolGroups(groups)
+	if s.mcpManager != nil {
+		enabledNames = append(enabledNames, s.mcpManager.ToolNames(mcp.BindingsFromDefaults(parsed.Defaults))...)
+	}
 	enabledSet := make(map[string]struct{}, len(enabledNames))
 	for _, name := range enabledNames {
 		enabledSet[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
@@ -217,8 +221,10 @@ func (s *Server) handlePutAgentShellPolicy(w http.ResponseWriter, r *http.Reques
 }
 
 type longTermEntryView struct {
-	ID      string `json:"id"`
-	Content string `json:"content"`
+	ID        string `json:"id"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 type agentPromptContextView struct {
@@ -299,9 +305,9 @@ func (s *Server) handlePutAgentPromptContext(w http.ResponseWriter, r *http.Requ
 	if body.LongTermEntries != nil {
 		entries := longTermViewsToEntries(*body.LongTermEntries)
 		ltRec := store.LongTermRecord{
-			Scope:   scope,
-			AgentID: id,
-			Entries: entries,
+			Scope:     scope,
+			AgentID:   id,
+			Entries:   entries,
 			UpdatedAt: time.Now().UTC(),
 		}
 		if err := s.agents.SaveLongTermRecordOverwrite(r.Context(), ltRec); err != nil {
@@ -385,7 +391,12 @@ func longTermEntriesToViews(entries []store.LongTermEntry) []longTermEntryView {
 		if content == "" {
 			continue
 		}
-		out = append(out, longTermEntryView{ID: strings.TrimSpace(e.ID), Content: content})
+		out = append(out, longTermEntryView{
+			ID:        strings.TrimSpace(e.ID),
+			Content:   content,
+			CreatedAt: formatLongTermDate(e.CreatedAt),
+			UpdatedAt: formatLongTermDate(e.UpdatedAt),
+		})
 	}
 	return out
 }
@@ -403,9 +414,32 @@ func longTermViewsToEntries(views []longTermEntryView) []store.LongTermEntry {
 			out = append(out, store.NewLongTermEntry(content, now))
 			continue
 		}
-		out = append(out, store.LongTermEntry{ID: id, Content: content, CreatedAt: now, UpdatedAt: now})
+		createdAt := parseLongTermDate(v.CreatedAt, now)
+		updatedAt := parseLongTermDate(v.UpdatedAt, createdAt)
+		out = append(out, store.LongTermEntry{ID: id, Content: content, CreatedAt: createdAt, UpdatedAt: updatedAt})
 	}
 	return out
+}
+
+func formatLongTermDate(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format("20060102")
+}
+
+func parseLongTermDate(value string, fallback time.Time) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	if parsed, err := time.Parse("20060102", value); err == nil {
+		return parsed.UTC()
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed.UTC()
+	}
+	return fallback
 }
 
 func promptContentFromRecord(rec *store.AgentPromptContextRecord) *promptcontext.Content {

@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from manage.workgroup.d3_models import TimelineEvent
+from manage.workgroup.context_compression import ActorContextSnapshot, context_messages
 from manage.workgroup.history import (
     RunHistoryMessage,
     extract_assign_ids_from_tool_results,
@@ -27,6 +28,7 @@ def project_actor_context(
     member: WorkGroupMember | None = None,
     timeline_events: list[TimelineEvent] | list[dict[str, Any]] | None = None,
     own_run_history: list[RunHistoryMessage] | list[dict[str, Any]] | None = None,
+    context_snapshot: ActorContextSnapshot | None = None,
 ) -> dict[str, Any]:
     """构造 Actor 相对 LLM 上下文。
 
@@ -40,6 +42,16 @@ def project_actor_context(
     watermark = run.timeline_watermark_seq if run is not None else 0
     open_ids = open_tool_call_ids(history)
     covered_assigns = extract_assign_ids_from_tool_results(history)
+    # Persistent actor sessions already contain their own human/task inputs.
+    # Do not project the corresponding public Timeline event a second time.
+    history_event_seqs = {
+        int(m.timeline_event_seq)
+        for raw in history
+        for m in [
+            raw if isinstance(raw, RunHistoryMessage) else RunHistoryMessage.model_validate(raw)
+        ]
+        if m.timeline_event_seq is not None
+    }
 
     buffered: list[dict[str, Any]] = []
     projected_timeline: list[dict[str, Any]] = []
@@ -52,7 +64,10 @@ def project_actor_context(
         candidates = [
             ev
             for ev in events
-            if ev.seq > watermark and _is_other_actor(ev, actor_id) and ev.type in {"human_message", "actor_final_text"}
+            if ev.seq > watermark
+            and ev.seq not in history_event_seqs
+            and _is_other_actor(ev, actor_id)
+            and ev.type in {"human_message", "actor_final_text"}
         ]
         candidates.sort(key=lambda e: e.seq)
         window = candidates[-_TIMELINE_WINDOW:]
@@ -61,7 +76,7 @@ def project_actor_context(
                 continue
             projected_timeline.append(_project_timeline_event(ev))
 
-    messages = to_provider_messages(history) + projected_timeline
+    messages = context_messages(history, context_snapshot) + projected_timeline
     return {
         "actor_id": actor_id,
         "run_id": run.run_id if run else None,
@@ -135,6 +150,7 @@ def _event_brief(ev: TimelineEvent) -> dict[str, Any]:
         "assign_id": ev.assign_id,
         "protocol_name": ev.protocol_name or protocol_name_for_actor(ev.actor_id),
         "content_text": ev.text,
+        "direct_member_id": ev.direct_member_id,
     }
 
 

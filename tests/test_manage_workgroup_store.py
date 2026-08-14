@@ -17,6 +17,7 @@ from manage.workgroup.errors import WorkgroupError  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     AssignCreateRequest,
     ACLPatchRequest,
+    ActorRunCreateRequest,
     MemberCreateRequest,
     MemberPatchRequest,
     WorkGroupCreateRequest,
@@ -167,6 +168,70 @@ class WorkgroupStoreTests(unittest.TestCase):
             with self.assertRaises(WorkgroupError) as ctx:
                 kernel.resolve_hitl_cas("ht_test", resolution={"ok": False})
             self.assertEqual(ctx.exception.code, "already_resolved")
+
+    def test_kernel_hitl_cas_uses_durable_store(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = self._store(tmp)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="H", created_by_node_id="node-a")
+            )
+            hitl = store.create_hitl(group.workgroup_id, prompt="confirm")
+            kernel = TurnKernel(store)
+            resolved = kernel.resolve_hitl_cas(
+                hitl.hitl_id,
+                resolution={"answer": "yes"},
+            )
+            self.assertEqual(resolved["status"], "resolved")
+            self.assertEqual(store.get_hitl(hitl.hitl_id).resolution, {"answer": "yes"})
+            with self.assertRaises(WorkgroupError) as ctx:
+                kernel.resolve_hitl_cas(hitl.hitl_id, resolution={"answer": "no"})
+            self.assertEqual(ctx.exception.code, "already_resolved")
+
+    def test_bound_pending_hitl_survives_restart_and_marks_run_awaiting(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            path = root / "manage.db"
+            ws_dir = root / "workgroup-workspaces"
+            store = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(display_name="HITL restart", created_by_node_id="node-a")
+            )
+            store.publish_workgroup(group.workgroup_id)
+            run = store.create_actor_run(
+                group.workgroup_id,
+                ActorRunCreateRequest(actor_id="leader"),
+            )
+            hitl = store.create_hitl(
+                group.workgroup_id,
+                prompt="confirm",
+                run_id=run.run_id,
+                tool_call_id="call_hitl_restart",
+            )
+
+            restarted = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
+            loaded = restarted.get_hitl(hitl.hitl_id)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded.run_id, run.run_id)
+            self.assertEqual(loaded.tool_call_id, "call_hitl_restart")
+            restarted.reconcile_inflight_runs()
+            recovered_run = restarted.get_actor_run(run.run_id)
+            self.assertIsNotNone(recovered_run)
+            assert recovered_run is not None
+            self.assertEqual(recovered_run.status, "awaiting_hitl")
+
+            resolved = restarted.resolve_hitl_cas(
+                group.workgroup_id,
+                hitl.hitl_id,
+                resolution={"answer": "yes"},
+            )
+            self.assertEqual(resolved.status, "resolved")
+            restarted_again = WorkGroupStore(db=SQLiteDatabase(path), workspaces_dir=ws_dir)
+            restarted_again.reconcile_inflight_runs()
+            crash_window_run = restarted_again.get_actor_run(run.run_id)
+            self.assertIsNotNone(crash_window_run)
+            assert crash_window_run is not None
+            self.assertEqual(crash_window_run.status, "awaiting_hitl")
 
     def test_projector_empty_run(self) -> None:
         with TemporaryDirectory() as tmp:

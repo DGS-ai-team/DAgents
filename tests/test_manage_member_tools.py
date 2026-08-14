@@ -8,10 +8,12 @@ from types import SimpleNamespace
 from manage.workgroup.member_tools import (
     MEMBER_EXECUTABLE_TOOL_NAMES,
     build_member_system_prompt,
+    call_purpose_from_arguments,
     default_allow_tool_names,
     host_env_from_registry,
     member_openai_tools,
     member_tool_catalog,
+    purpose_for_tool,
     side_effect_for_tool,
 )
 from manage.workgroup.models import WorkGroup, WorkgroupWorkspace
@@ -47,12 +49,28 @@ class MemberToolCatalogTests(unittest.TestCase):
         self.assertEqual(len(tools), len(MEMBER_EXECUTABLE_TOOL_NAMES))
         names = [t["function"]["name"] for t in tools]
         self.assertEqual(names, MEMBER_EXECUTABLE_TOOL_NAMES)
+        for tool in tools:
+            params = tool["function"]["parameters"]
+            self.assertIn("call_purpose", params["properties"])
+            self.assertEqual(params["required"][0], "call_purpose")
 
     def test_side_effects(self) -> None:
         self.assertEqual(side_effect_for_tool("read_file"), "fs_read")
         self.assertEqual(side_effect_for_tool("search_replace"), "fs_write")
         self.assertEqual(side_effect_for_tool("bash_run"), "shell")
         self.assertEqual(side_effect_for_tool("unknown_x"), "other")
+
+    def test_progress_purpose_does_not_expose_tool_name(self) -> None:
+        self.assertEqual(purpose_for_tool("read_file"), "读取文件")
+        self.assertEqual(purpose_for_tool("bash_run"), "执行命令")
+        self.assertEqual(purpose_for_tool("unknown_x"), "执行成员工具")
+
+    def test_progress_uses_call_purpose_from_tool_arguments(self) -> None:
+        self.assertEqual(
+            call_purpose_from_arguments('{"call_purpose":"查找 README 的标题"}', "执行成员工具"),
+            "查找 README 的标题",
+        )
+        self.assertEqual(call_purpose_from_arguments('{"path":"README"}', "读取文件"), "读取文件")
 
     def test_unknown_names_skipped(self) -> None:
         tools = member_openai_tools(["read_file", "not_a_tool", "bash_run"])

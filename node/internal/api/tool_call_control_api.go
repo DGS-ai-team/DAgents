@@ -40,6 +40,7 @@ func (s *Server) handleAgentToolCallCancel(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
+		"cancelled":    true,
 		"agent_id":     agentID,
 		"tool_call_id": toolCallID,
 		"action":       "cancel",

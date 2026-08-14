@@ -27,6 +27,11 @@ class RunHistoryMessage(BaseModel):
     name: str | None = None
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
+    # Optional provenance fields kept out of provider messages.  They make
+    # replay/idempotency possible when a persistent actor session receives a
+    # Timeline event or a new assignment more than once.
+    timeline_event_seq: int | None = None
+    assign_id: str | None = None
 
 
 class ActorRunHistory(BaseModel):
@@ -36,6 +41,7 @@ class ActorRunHistory(BaseModel):
     messages: list[RunHistoryMessage] = Field(default_factory=list)
     # Timeline seq 已消费上限（投影 watermark 可与 ActorRun 同步）
     timeline_watermark_seq: int = 0
+    legacy_runs_consolidated: bool = False
 
 
 def open_tool_call_ids(messages: list[RunHistoryMessage] | list[dict[str, Any]]) -> list[str]:

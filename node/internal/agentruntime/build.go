@@ -1,9 +1,11 @@
 package agentruntime
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/mcp"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
@@ -20,6 +22,7 @@ type BuildParams struct {
 	AgentID     string
 	Snapshot    Snapshot
 	BashTimeout int
+	MCP         *mcp.Manager
 }
 
 // Built 为 per-agent 运行时产物。
@@ -54,6 +57,24 @@ func Build(p BuildParams) (Built, error) {
 		}
 		if err := reg.SetBuiltinEnabled(config.ExpandBuiltinToolGroups(groups)); err != nil {
 			return Built{}, err
+		}
+	}
+	if p.MCP != nil {
+		effective, err := p.MCP.EffectiveTools(context.Background(), mcp.BindingsFromDefaults(p.Snapshot.Defaults))
+		if err != nil {
+			return Built{}, fmt.Errorf("build MCP tools: %w", err)
+		}
+		remoteTools := make([]tools.MCPTool, 0, len(effective))
+		for _, remote := range effective {
+			remoteTools = append(remoteTools, tools.MCPTool{
+				Name:        remote.QualifiedName,
+				Description: remote.Description,
+				Parameters:  remote.InputSchema,
+				Call:        remote.Call,
+			})
+		}
+		if err := reg.SetMCPTools(remoteTools); err != nil {
+			return Built{}, fmt.Errorf("register MCP tools: %w", err)
 		}
 	}
 	mm := EffectiveMultimodalEnabled(p.NodeCFG, p.Snapshot)

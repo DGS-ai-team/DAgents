@@ -1,4 +1,5 @@
 const USER_INFORMATION_TOOL = "ask_user_information";
+const MCP_TOOL_PREFIX = "mcp__";
 
 const CHILD_AGENT_TOOLS = new Set([
   "create_temporary_agent",
@@ -23,6 +24,7 @@ const SHELL_TOOLS = new Set(["bash_run", "bash", "background_job_status", "backg
 const SKILLS_TOOLS = new Set(["load_skills", "unload_skills", "clear_skills"]);
 
 const KIND_META = {
+  mcp: { label: "mcp", short: "mcp", icon: "M" },
   shell: { label: "shell", short: "shell", icon: "$" },
   fs: { label: "fs", short: "fs", icon: "F" },
   browser: { label: "browser", short: "browser", icon: "◉" },
@@ -38,6 +40,7 @@ const KIND_META = {
 /** 根据 tool 名推断工具组（对齐 Agent defaults.tools.enabled_groups）。 */
 export function inferToolKind(name, data = {}) {
   const n = String(name || "").trim();
+  if (n.startsWith(MCP_TOOL_PREFIX)) return "mcp";
   if (data?.child_agent_id || CHILD_AGENT_TOOLS.has(n)) return "child";
   if (n.startsWith("browser_")) return "browser";
   if (n.startsWith("wecom_")) return "wecom";
@@ -60,5 +63,12 @@ function visualForKind(kind) {
 export function resolveToolVisual(entry) {
   const data = entry?.data || entry || {};
   const name = String(data.tool_name || data.name || entry?.tool_name || "").trim();
-  return visualForKind(inferToolKind(name, data));
+  const kind = inferToolKind(name, data);
+  if (kind === "mcp") {
+    const qualified = name.slice(MCP_TOOL_PREFIX.length);
+    const separator = qualified.indexOf("__");
+    const serverName = separator > 0 ? qualified.slice(0, separator) : "mcp";
+    return { kind, label: serverName, short: serverName, icon: KIND_META.mcp.icon };
+  }
+  return visualForKind(kind);
 }

@@ -88,6 +88,11 @@ def build_workgroup_router(
         registry_store=registry_store,
         mock_llm=mock_llm,
     )
+    # ActorRun/Assign workers are process-local.  On a fresh Manage process,
+    # fence stale active records before accepting new turns; pending HITL rows
+    # remain durable and visible for the explicit recovery path.
+    store.reconcile_inflight_runs()
+    loop.set_turn_kernel(kernel)
     if hub is not None:
         store.reconcile_timeline_outbox()
         store.set_timeline_listener(hub.publish_timeline_event)
@@ -101,6 +106,8 @@ def build_workgroup_router(
         )
     kernel.set_assign_completer(loop.make_assign_completer(kernel))
     kernel.set_command_cancel_hook(loop.cancel_pending_commands)
+    kernel.resume_persisted_queues()
+    kernel.resume_persisted_hitls()
 
     @router.post("", response_model=dict)
     def create_workgroup(req: WorkGroupCreateRequest, request: Request) -> dict:
@@ -544,6 +551,20 @@ def build_workgroup_router(
         )
         return out
 
+    @router.post("/{workgroup_id}/human-queue/{queue_id}/send-now")
+    def send_human_queue_item_now(workgroup_id: str, queue_id: str, request: Request) -> dict:
+        auth = authenticate(request)
+        try:
+            out = kernel.send_human_queue_item_now(workgroup_id, queue_id)
+        except WorkgroupError as exc:
+            raise _http_error(exc) from exc
+        audit.record(
+            actor=audit_actor(request, auth),
+            action="workgroup.human_queue.send_now",
+            target_agent_id=workgroup_id,
+        )
+        return out
+
     @router.post("/{workgroup_id}/turn/cancel", response_model=TurnCancelResponse)
     def cancel_workgroup_turn(
         workgroup_id: str, request: Request, req: TurnCancelRequest | None = None
@@ -569,15 +590,16 @@ def build_workgroup_router(
         ensure_node_identity(request, req.from_node_id, auth)
 
         def event_gen():
+            events = kernel.handle_human_message_events(
+                workgroup_id,
+                text=req.text,
+                from_node_id=req.from_node_id,
+                client_message_id=req.client_message_id,
+                disable_tools=req.disable_tools,
+                direct_member_id=req.direct_member_id,
+            )
             try:
-                for item in kernel.handle_human_message_events(
-                    workgroup_id,
-                    text=req.text,
-                    from_node_id=req.from_node_id,
-                    client_message_id=req.client_message_id,
-                    disable_tools=req.disable_tools,
-                    direct_member_id=req.direct_member_id,
-                ):
+                for item in events:
                     ev = str(item.get("event") or "message")
                     raw = item.get("data")
                     if hasattr(raw, "model_dump"):
@@ -595,6 +617,10 @@ def build_workgroup_router(
                 yield _sse_pack("error", exc.as_body())
             except Exception as exc:  # noqa: BLE001 — 流式通道需收口
                 yield _sse_pack("error", {"code": "internal", "message": str(exc)})
+            finally:
+                close = getattr(events, "close", None)
+                if callable(close):
+                    close()
 
         audit.record(
             actor=audit_actor(request, auth, fallback_agent_id=req.from_node_id),

@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field
 _WG = r"^wg_[0-9a-z]{26}$"
 _EV = r"^ev_[0-9a-z]{26}$"
 _HT = r"^ht_[0-9a-z]{26}$"
+_RN = r"^rn_[0-9a-z]{26}$"
+_QH = r"^qh_[0-9a-z]{26}$"
+_TURN = r"^[0-9a-zA-Z_-]{1,128}$"
 
 
 class TimelineEvent(BaseModel):
@@ -17,6 +20,7 @@ class TimelineEvent(BaseModel):
     seq: int = Field(ge=1)
     type: Literal[
         "human_message",
+        "assistant_content",
         "actor_final_text",
         "system_notice",
         "assign_started",
@@ -31,6 +35,8 @@ class TimelineEvent(BaseModel):
     protocol_name: str | None = None
     # 成员最终产出绑定的 Assign（用于 Leader 去重）
     assign_id: str | None = None
+    # 结构化直达关系；仅由成员选择器写入，不能从 text 中推断。
+    direct_member_id: str | None = None
 
 
 class OutboxFrame(BaseModel):
@@ -51,6 +57,31 @@ class HITLRequest(BaseModel):
     created_at: str
     resolution: dict[str, Any] | None = None
     resolved_at: str | None = None
+    # Bind an in-loop HITL to the durable actor history.  Explicit API-created
+    # information requests may leave these fields empty.
+    run_id: str | None = Field(default=None, pattern=_RN)
+    tool_call_id: str | None = Field(default=None, min_length=1)
+
+
+class QueuedHumanRecord(BaseModel):
+    queue_id: str = Field(pattern=_QH)
+    workgroup_id: str = Field(pattern=_WG)
+    text: str = Field(min_length=1)
+    from_node_id: str = Field(min_length=1)
+    client_message_id: str | None = None
+    direct_member_id: str | None = None
+    disable_tools: bool = False
+    priority: int = 0
+    created_at: str
+    updated_at: str
+
+
+class TurnCheckpoint(BaseModel):
+    workgroup_id: str = Field(pattern=_WG)
+    turn_token: str = Field(pattern=_TURN)
+    mode: str = Field(min_length=1, max_length=64)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    updated_at: str
 
 
 class HumanPostRequest(BaseModel):
@@ -77,6 +108,7 @@ class TurnCancelResponse(BaseModel):
     failed_assign_ids: list[str] = Field(default_factory=list)
     leader_run_id: str | None = None
     member_run_id: str | None = None
+    member_run_ids: list[str] = Field(default_factory=list)
 
 
 class ProvisionCompleteRequest(BaseModel):

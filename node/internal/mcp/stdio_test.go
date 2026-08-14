@@ -1,0 +1,181 @@
+package mcp
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestMCPStdioHelper(t *testing.T) {
+	if os.Getenv("DAGENTS_MCP_HELPER") != "1" {
+		return
+	}
+	decoder := bufio.NewScanner(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+	for decoder.Scan() {
+		var request map[string]any
+		if err := json.Unmarshal(decoder.Bytes(), &request); err != nil {
+			continue
+		}
+		method, _ := request["method"].(string)
+		id := request["id"]
+		if id == nil {
+			continue
+		}
+		var result any
+		switch method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": ProtocolVersion, "capabilities": map[string]any{}, "serverInfo": map[string]any{"name": "fake"}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{
+				"name": "echo", "description": "Echo text", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}},
+			}}}
+		case "tools/call":
+			params, _ := request["params"].(map[string]any)
+			args, _ := params["arguments"].(map[string]any)
+			text, _ := args["text"].(string)
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}}
+		default:
+			result = map[string]any{}
+		}
+		_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
+	}
+}
+
+func fakeConfig(t *testing.T) ServerConfig {
+	t.Helper()
+	t.Setenv("DAGENTS_MCP_HELPER", "1")
+	return ServerConfig{
+		ID:           "fake",
+		Command:      os.Args[0],
+		Args:         []string{"-test.run=TestMCPStdioHelper", "--"},
+		EnvRefs:      map[string]string{"DAGENTS_MCP_HELPER": "DAGENTS_MCP_HELPER"},
+		EnabledTools: []string{"echo"},
+		Enabled:      true,
+	}
+}
+
+func TestStdioClientInitializeListAndCall(t *testing.T) {
+	client, err := NewStdioClient(fakeConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tools, err := client.ListTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 1 || tools[0].Name != "echo" {
+		t.Fatalf("unexpected tools: %#v", tools)
+	}
+	result, err := client.CallTool(ctx, "echo", json.RawMessage(`{"text":"hello"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Content) != 1 || result.Content[0].Text != "hello" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestManagerEffectiveToolsNamespacedAndAllowlisted(t *testing.T) {
+	mgr := NewManager(nil)
+	if err := mgr.Configure([]ServerConfig{fakeConfig(t)}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	defs, err := mgr.EffectiveTools(ctx, []Binding{{ServerID: "fake", Enabled: true, ToolAllowlist: []string{"echo"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 || defs[0].QualifiedName != "mcp__fake__echo" {
+		t.Fatalf("unexpected effective tools: %#v", defs)
+	}
+	result, err := defs[0].Call(ctx, json.RawMessage(`{"text":"ok"}`))
+	if err != nil || len(result.Content) != 1 || result.Content[0].Text != "ok" {
+		t.Fatalf("call failed: result=%#v err=%v", result, err)
+	}
+}
+
+func TestManagerServiceToolAllowlistIsFailClosed(t *testing.T) {
+	mgr := NewManager(nil)
+	cfg := fakeConfig(t)
+	cfg.EnabledTools = nil
+	if err := mgr.Configure([]ServerConfig{cfg}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	defs, err := mgr.EffectiveTools(ctx, []Binding{{ServerID: "fake", Enabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 0 {
+		t.Fatalf("expected no tools before service enablement, got %#v", defs)
+	}
+	cfg.EnabledTools = []string{"echo"}
+	if err := mgr.Configure([]ServerConfig{cfg}); err != nil {
+		t.Fatal(err)
+	}
+	defs, err = mgr.EffectiveTools(ctx, []Binding{{ServerID: "fake", Enabled: true}})
+	if err != nil || len(defs) != 1 || defs[0].RemoteName != "echo" {
+		t.Fatalf("expected enabled echo tool, defs=%#v err=%v", defs, err)
+	}
+}
+
+func TestManagerCallRejectsDisabledToolBeforeConnecting(t *testing.T) {
+	mgr := NewManager(nil)
+	cfg := fakeConfig(t)
+	cfg.EnabledTools = nil
+	if err := mgr.Configure([]ServerConfig{cfg}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := mgr.Call(ctx, "fake", "echo", json.RawMessage(`{"text":"should-not-run"}`)); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("expected disabled-tool error before connect, got %v", err)
+	}
+}
+
+func TestValidateServerConfigRejectsRawUnsupportedTransport(t *testing.T) {
+	_, err := ValidateServerConfig(ServerConfig{ID: "x", Transport: "ftp", Command: "x"})
+	if err == nil || !strings.Contains(err.Error(), "unsupported mcp transport") {
+		t.Fatalf("expected transport error, got %v", err)
+	}
+}
+
+func TestValidateServerConfigInfersRemoteTransportFromURL(t *testing.T) {
+	cfg, err := ValidateServerConfig(ServerConfig{ID: "remote", URL: "https://example.com/mcp", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Transport != TransportStreamableHTTP {
+		t.Fatalf("expected inferred streamable http transport, got %q", cfg.Transport)
+	}
+}
+
+func TestQualifiedToolNameRejectsUnsafeNames(t *testing.T) {
+	if _, err := QualifiedToolName("server", "has/slash"); err == nil {
+		t.Fatal("expected unsafe tool name error")
+	}
+	if _, err := QualifiedToolName("server", fmt.Sprintf("%060s", "tool")); err == nil {
+		t.Fatal("expected long tool name error")
+	}
+}
+
+func TestQualifiedToolNameNormalizesDotsForLLMProviders(t *testing.T) {
+	got, err := QualifiedToolName("tencent-docs", "doc.get")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "mcp__tencent-docs__doc_get" {
+		t.Fatalf("qualified name = %q", got)
+	}
+}

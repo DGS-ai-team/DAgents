@@ -668,7 +668,15 @@ func (m *Manager) CancelTurn(sessionID string) bool {
 	if rt == nil {
 		return false
 	}
-	return rt.cancelTurn()
+	// Canceling the composer turn must also cancel bash jobs that already
+	// detached from the turn after timeout auto-degradation. Otherwise the UI
+	// reports a canceled turn while the shell keeps running in the background.
+	turnCancelled := rt.cancelTurn()
+	jobsCancelled := false
+	if reg := m.SessionTools(sessionID); reg != nil {
+		jobsCancelled = reg.CancelAllSessionJobs(sessionID) > 0
+	}
+	return turnCancelled || jobsCancelled
 }
 
 // ListSessionSkills 返回 session 已加载与可用 skills。

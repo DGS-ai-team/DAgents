@@ -491,3 +491,13 @@ func (c *ControlClient) CancelWorkgroupHumanQueueItem(ctx context.Context, workg
 	}
 	return out, nil
 }
+
+// SendWorkgroupHumanQueueItemNow cancels the active turn and promotes one queued message.
+func (c *ControlClient) SendWorkgroupHumanQueueItemNow(ctx context.Context, workgroupID, queueID string) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/workgroups/" + strings.TrimSpace(workgroupID) + "/human-queue/" + strings.TrimSpace(queueID) + "/send-now"
+	if err := c.doJSON(ctx, http.MethodPost, path, map[string]any{}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

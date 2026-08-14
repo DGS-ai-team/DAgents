@@ -627,6 +627,7 @@ func (s *Server) reloadAgentRuntime(ctx context.Context, rec store.AgentRecord) 
 		BaseTurn: s.sessions.DefaultTurnOptions(),
 		AgentID:  id,
 		Snapshot: snapParsed,
+		MCP:      s.mcpManager,
 	})
 	if err != nil {
 		return fmt.Errorf("build agent runtime: %w", err)

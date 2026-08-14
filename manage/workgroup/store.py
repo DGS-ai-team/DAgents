@@ -12,8 +12,16 @@ from manage.storage.sqlite import SQLiteDatabase
 from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
 from manage.workgroup import ids
-from manage.workgroup.d3_models import HITLRequest, OutboxFrame, Subscription, TimelineEvent
+from manage.workgroup.d3_models import (
+    HITLRequest,
+    OutboxFrame,
+    QueuedHumanRecord,
+    Subscription,
+    TimelineEvent,
+    TurnCheckpoint,
+)
 from manage.workgroup.history import ActorRunHistory, RunHistoryMessage
+from manage.workgroup.context_compression import ActorContextSnapshot
 from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.models import (
     ActorRun,
@@ -61,10 +69,14 @@ class WorkGroupStore:
         self._assigns: dict[str, Assign] = {}
         self._runs: dict[str, ActorRun] = {}
         self._run_histories: dict[str, ActorRunHistory] = {}
+        self._context_snapshots: dict[str, ActorContextSnapshot] = {}
         self._timeline: dict[str, list[TimelineEvent]] = {}
         self._outbox: dict[str, list[OutboxFrame]] = {}
         self._hitl: dict[str, HITLRequest] = {}
         self._hitl_waiters: dict[str, threading.Event] = {}
+        self._hitl_waiting: set[str] = set()
+        self._human_queue: dict[str, list[QueuedHumanRecord]] = {}
+        self._turn_checkpoints: dict[str, TurnCheckpoint] = {}
         # member_id → {workspace_path, tool_catalog_revision, provision_id}
         self._member_runtime: dict[str, dict[str, str]] = {}
         # workgroup_id → {workspace_path} 组共享工作区（与 WorkGroup.workspace.path 同步）
@@ -150,6 +162,8 @@ class WorkGroupStore:
             self._runs[r.run_id] = r
         for h in self._load_all("actor_run_histories", ActorRunHistory):
             self._run_histories[h.run_id] = h
+        for snapshot in self._load_all("actor_context_snapshots", ActorContextSnapshot):
+            self._context_snapshots[snapshot.run_id] = snapshot
         for ev in self._load_all("workgroup_timeline", TimelineEvent):
             self._timeline.setdefault(ev.workgroup_id, []).append(ev)
         for wg, events in self._timeline.items():
@@ -161,6 +175,15 @@ class WorkGroupStore:
             self._outbox[wg] = sorted(frames, key=lambda f: f.delivery_seq)
         for h in self._load_all("workgroup_hitl", HITLRequest):
             self._hitl[h.hitl_id] = h
+        for item in self._load_all("workgroup_human_queue", QueuedHumanRecord):
+            self._human_queue.setdefault(item.workgroup_id, []).append(item)
+        for wg, items in self._human_queue.items():
+            self._human_queue[wg] = sorted(
+                items,
+                key=lambda item: (-int(item.priority or 0), item.created_at, item.queue_id),
+            )
+        for checkpoint in self._load_all("workgroup_turn_checkpoints", TurnCheckpoint):
+            self._turn_checkpoints[checkpoint.workgroup_id] = checkpoint
         for sub in self._load_all("workgroup_subscriptions", Subscription):
             self._subscriptions.setdefault(sub.workgroup_id, {})[sub.node_id] = sub
 
@@ -657,33 +680,33 @@ class WorkGroupStore:
                     f"member status={member.status}",
                     http_status=409,
                 )
-            # v1：全组最多一个 active assign
+            # P1：不同成员可以并行执行，但同一成员仍保持单飞，避免
+            # 两个 LLM turn 同时修改同一个成员会话/工作区。
             active = [
                 a
                 for a in self._assigns.values()
                 if a.workgroup_id == workgroup_id
+                and a.member_id == member.member_id
                 and a.status in {"queued", "running", "awaiting_hitl"}
             ]
             if active:
                 raise WorkgroupError(
                     "conflict",
-                    "workgroup already has an active assign",
+                    "member already has an active assign",
                     http_status=409,
                     details={"active_assign_id": active[0].assign_id},
                 )
-            leader_run_id = req.leader_run_id or ids.run_id()
             if req.leader_run_id is None:
-                # 骨架：自动创建一个 leader run 占位
-                leader = ActorRun(
-                    run_id=leader_run_id,
-                    workgroup_id=workgroup_id,
-                    actor_id="leader",
-                    status="running",
-                    llm_profile_revision=self._groups[workgroup_id].llm_profile_revision,
-                    created_at=_now(),
+                req = req.model_copy(
+                    update={
+                        "leader_run_id": self.get_or_create_actor_session(
+                            workgroup_id,
+                            actor_id="leader",
+                            llm_profile_revision=self._groups[workgroup_id].llm_profile_revision,
+                        ).run_id
+                    }
                 )
-                self._runs[leader_run_id] = leader
-                self._put("actor_runs", leader_run_id, leader.model_dump_json(), workgroup_id=workgroup_id)
+            leader_run_id = req.leader_run_id or ids.run_id()
             assign = Assign(
                 assign_id=ids.assign_id(),
                 workgroup_id=workgroup_id,
@@ -696,12 +719,35 @@ class WorkGroupStore:
             )
             self._assigns[assign.assign_id] = assign
             self._put("workgroup_assigns", assign.assign_id, assign.model_dump_json(), workgroup_id=workgroup_id)
+            # Keep the member occupancy durable from the moment the assign is
+            # created.  A queued assign must not race with another assign for
+            # the same member, even if its Home Node is temporarily offline.
+            if member.active_assign_id != assign.assign_id:
+                member_update: dict[str, Any] = {"active_assign_id": assign.assign_id}
+                if member.status == "ready":
+                    member_update["status"] = "busy"
+                occupied = member.model_copy(update=member_update)
+                self._members[member.member_id] = occupied
+                self._put(
+                    "workgroup_members",
+                    member.member_id,
+                    occupied.model_dump_json(),
+                    workgroup_id=workgroup_id,
+                )
             return assign
 
     def get_assign(self, assign_id: str) -> Assign | None:
         with self._lock:
             self._ensure_loaded()
             return self._assigns.get(assign_id)
+
+    def list_assigns(self, workgroup_id: str, *, active_only: bool = False) -> list[Assign]:
+        with self._lock:
+            self._ensure_loaded()
+            rows = [a for a in self._assigns.values() if a.workgroup_id == workgroup_id]
+            if active_only:
+                rows = [a for a in rows if a.status in {"queued", "running", "awaiting_hitl"}]
+            return sorted(rows, key=lambda a: (a.created_at, a.assign_id))
 
     def get_actor_run(self, run_id: str) -> ActorRun | None:
         with self._lock:
@@ -721,9 +767,266 @@ class WorkGroupStore:
             aid = str(actor_id or "").strip()
             if aid:
                 rows = [r for r in rows if r.actor_id == aid]
+            if aid == "leader" and rows:
+                # Supervisor is one persistent session. Legacy duplicate rows
+                # remain addressable by run id, but are not listed as sessions.
+                canonical = self._canonical_actor_run_unlocked(
+                    workgroup_id,
+                    actor_id="leader",
+                )
+                if canonical is not None:
+                    self._consolidate_actor_session_history_unlocked(
+                        workgroup_id,
+                        actor_id="leader",
+                        target=canonical,
+                    )
+                    canonical = self._runs.get(canonical.run_id) or canonical
+                rows = [canonical] if canonical is not None else []
+            elif not aid:
+                leader_rows = [row for row in rows if row.actor_id == "leader"]
+                if leader_rows:
+                    canonical = self._canonical_actor_run_unlocked(
+                        workgroup_id,
+                        actor_id="leader",
+                    )
+                    if canonical is not None:
+                        self._consolidate_actor_session_history_unlocked(
+                            workgroup_id,
+                            actor_id="leader",
+                            target=canonical,
+                        )
+                        canonical = self._runs.get(canonical.run_id) or canonical
+                        rows = [row for row in rows if row.actor_id != "leader"]
+                        rows.append(canonical)
             rows.sort(key=lambda r: r.created_at, reverse=True)
             lim = max(1, min(int(limit or 20), 100))
             return rows[:lim]
+
+    def _canonical_actor_run_unlocked(
+        self,
+        workgroup_id: str,
+        *,
+        actor_id: str,
+    ) -> ActorRun | None:
+        rows = [
+            r
+            for r in self._runs.values()
+            if r.workgroup_id == workgroup_id and r.actor_id == actor_id
+        ]
+        if not rows:
+            return None
+        rows.sort(key=lambda r: (r.created_at, r.run_id))
+        if actor_id != "leader":
+            return rows[-1]
+        # Pre-fix direct mentions could create an empty leader placeholder.
+        # Prefer the oldest row that has real history, otherwise the oldest row.
+        with_history = [
+            r
+            for r in rows
+            if self._run_histories.get(r.run_id) is not None
+            and bool(self._run_histories[r.run_id].messages)
+        ]
+        return (with_history or rows)[0]
+
+    def find_latest_actor_run(self, workgroup_id: str, *, actor_id: str) -> ActorRun | None:
+        """Return the persistent session for an actor, if one exists.
+
+        ActorRun is the on-disk session record in the current D0.5 model.  A
+        completed run remains reusable; only an active run is considered busy
+        by TurnKernel's turn gate.
+        """
+        with self._lock:
+            self._ensure_loaded()
+            aid = str(actor_id or "").strip()
+            rows = [
+                r
+                for r in self._runs.values()
+                if r.workgroup_id == workgroup_id and r.actor_id == aid
+            ]
+            if not rows:
+                return None
+            rows.sort(key=lambda r: (r.created_at, r.run_id), reverse=True)
+            return rows[0]
+
+    def get_or_create_actor_session(
+        self,
+        workgroup_id: str,
+        *,
+        actor_id: str,
+        llm_profile_revision: str | None = None,
+    ) -> ActorRun:
+        """Get the workgroup-local persistent session for one actor."""
+        with self._lock:
+            self._ensure_loaded()
+            existing = self._canonical_actor_run_unlocked(workgroup_id, actor_id=actor_id)
+            if existing is not None:
+                self._consolidate_actor_session_history_unlocked(
+                    workgroup_id,
+                    actor_id=actor_id,
+                    target=existing,
+                )
+                return existing
+            return self.create_actor_run(
+                workgroup_id,
+                ActorRunCreateRequest(
+                    actor_id=actor_id,
+                    llm_profile_revision=llm_profile_revision,
+                ),
+            )
+
+    def _consolidate_actor_session_history_unlocked(
+        self,
+        workgroup_id: str,
+        *,
+        actor_id: str,
+        target: ActorRun,
+    ) -> None:
+        """Lazily merge pre-session ActorRuns into the persistent session.
+
+        Older builds created one ActorRun per turn.  Keeping those records is
+        useful for audit, but the next persistent session must see their full
+        message sequence.  This migration is idempotent because the merged
+        sequence is written to the target history as one snapshot.
+        """
+        rows = [
+            r
+            for r in self._runs.values()
+            if r.workgroup_id == workgroup_id and r.actor_id == str(actor_id or "").strip()
+        ]
+        rows.sort(key=lambda r: (r.created_at, r.run_id))
+        current = self._run_histories.get(target.run_id)
+        merged: list[RunHistoryMessage] = []
+        max_watermark = 0
+        fingerprints: set[str] = set()
+
+        def add_message(message: RunHistoryMessage) -> None:
+            if message.timeline_event_seq is not None and any(
+                existing.timeline_event_seq == message.timeline_event_seq
+                for existing in merged
+            ):
+                return
+            if message.assign_id and any(
+                existing.assign_id == message.assign_id and existing.role == message.role
+                for existing in merged
+            ):
+                return
+            fingerprint = message.model_dump_json()
+            if fingerprint in fingerprints:
+                return
+            fingerprints.add(fingerprint)
+            merged.append(message)
+
+        for row in rows:
+            history = self._run_histories.get(row.run_id)
+            if history is not None:
+                for message in history.messages:
+                    add_message(message)
+                max_watermark = max(max_watermark, int(history.timeline_watermark_seq or 0))
+            max_watermark = max(max_watermark, int(row.timeline_watermark_seq or 0))
+
+        if actor_id == "leader":
+            timeline = sorted(
+                self._timeline.get(workgroup_id, []),
+                key=lambda event: event.seq,
+            )
+            from manage.workgroup.history import extract_assign_ids_from_tool_results
+
+            covered_assigns = {
+                message.assign_id
+                for message in merged
+                if message.assign_id
+            }
+            covered_assigns.update(extract_assign_ids_from_tool_results(merged))
+            for event in timeline:
+                if event.type == "human_message":
+                    if any(
+                        existing.timeline_event_seq == event.seq
+                        or (
+                            existing.timeline_event_seq is None
+                            and existing.role == "user"
+                            and existing.name == event.protocol_name
+                            and existing.content == event.text
+                        )
+                        for existing in merged
+                    ):
+                        continue
+                    add_message(
+                        RunHistoryMessage(
+                            role="user",
+                            name=event.protocol_name,
+                            content=event.text,
+                            timeline_event_seq=event.seq,
+                        )
+                    )
+                    continue
+                # Direct @member turns bypass Supervisor's tool call. Their
+                # member result must still be visible to future Supervisor
+                # turns; regular assignments already have a tool result.
+                if (
+                    event.type == "actor_final_text"
+                    and event.actor_id != "leader"
+                    and event.assign_id
+                    and event.assign_id not in covered_assigns
+                ):
+                    add_message(
+                        RunHistoryMessage(
+                            role="user",
+                            name=event.protocol_name,
+                            content=event.text,
+                            timeline_event_seq=event.seq,
+                            assign_id=event.assign_id,
+                        )
+                    )
+                    covered_assigns.add(event.assign_id)
+            max_watermark = max(max_watermark, max((event.seq for event in timeline), default=0))
+
+        updated_history = ActorRunHistory(
+            run_id=target.run_id,
+            workgroup_id=workgroup_id,
+            actor_id=target.actor_id,
+            messages=merged,
+            timeline_watermark_seq=max_watermark,
+            legacy_runs_consolidated=True,
+        )
+        if current is not None and current.model_dump() == updated_history.model_dump():
+            return
+        self._run_histories[target.run_id] = updated_history
+        self._put(
+            "actor_run_histories",
+            target.run_id,
+            updated_history.model_dump_json(),
+            workgroup_id=workgroup_id,
+        )
+        updated_run = target.model_copy(
+            update={
+                "timeline_watermark_seq": max_watermark,
+                "checkpoint_ordinal": max(target.checkpoint_ordinal, len(merged)),
+            }
+        )
+        self._runs[target.run_id] = updated_run
+        self._put(
+            "actor_runs",
+            target.run_id,
+            updated_run.model_dump_json(),
+            workgroup_id=workgroup_id,
+        )
+
+    def prepare_actor_session(
+        self,
+        run_id: str,
+        *,
+        assign_id: str | None = None,
+    ) -> ActorRun:
+        """Reopen a persistent actor session for the next Turn/Assign."""
+        with self._lock:
+            self._ensure_loaded()
+            run = self._runs.get(run_id)
+            if run is None:
+                raise WorkgroupError("not_found", "actor run not found", http_status=404)
+            updated = run.model_copy(update={"status": "running", "assign_id": assign_id})
+            self._runs[run_id] = updated
+            self._put("actor_runs", run_id, updated.model_dump_json(), workgroup_id=updated.workgroup_id)
+            return updated
 
     def update_actor_run(
         self,
@@ -768,6 +1071,23 @@ class WorkGroupStore:
         with self._lock:
             self._ensure_loaded()
             return self._run_histories.get(run_id)
+
+    def get_context_snapshot(self, run_id: str) -> ActorContextSnapshot | None:
+        with self._lock:
+            self._ensure_loaded()
+            return self._context_snapshots.get(run_id)
+
+    def save_context_snapshot(self, snapshot: ActorContextSnapshot) -> ActorContextSnapshot:
+        with self._lock:
+            self._ensure_loaded()
+            self._context_snapshots[snapshot.run_id] = snapshot
+            self._put(
+                "actor_context_snapshots",
+                snapshot.run_id,
+                snapshot.model_dump_json(),
+                workgroup_id=snapshot.workgroup_id,
+            )
+            return snapshot
 
     def ensure_run_history(self, run: ActorRun) -> ActorRunHistory:
         with self._lock:
@@ -818,7 +1138,13 @@ class WorkGroupStore:
             ]
             new_msgs = list(hist.messages) + added
             wm = hist.timeline_watermark_seq if timeline_watermark_seq is None else timeline_watermark_seq
-            updated = hist.model_copy(update={"messages": new_msgs, "timeline_watermark_seq": wm})
+            updated = hist.model_copy(
+                update={
+                    "messages": new_msgs,
+                    "timeline_watermark_seq": wm,
+                    "legacy_runs_consolidated": True,
+                }
+            )
             self._run_histories[run_id] = updated
             self._put(
                 "actor_run_histories",
@@ -948,7 +1274,205 @@ class WorkGroupStore:
                 updated.model_dump_json(),
                 workgroup_id=updated.workgroup_id,
             )
+            if status in {"succeeded", "failed", "indeterminate", "canceled"}:
+                member = self._members.get(updated.member_id)
+                if member is not None and member.active_assign_id == updated.assign_id:
+                    member_status = "ready" if member.status not in {"archived", "error"} else member.status
+                    released = member.model_copy(
+                        update={"active_assign_id": None, "status": member_status}
+                    )
+                    self._members[member.member_id] = released
+                    self._put(
+                        "workgroup_members",
+                        member.member_id,
+                        released.model_dump_json(),
+                        workgroup_id=member.workgroup_id,
+                    )
             return updated
+
+    # --- Turn recovery / human queue persistence ---
+
+    def list_human_queue_records(self, workgroup_id: str) -> list[QueuedHumanRecord]:
+        with self._lock:
+            self._ensure_loaded()
+            return list(self._human_queue.get(workgroup_id) or [])
+
+    def list_human_queue_workgroups(self) -> list[str]:
+        with self._lock:
+            self._ensure_loaded()
+            return list(self._human_queue.keys())
+
+    def save_human_queue_record(self, record: QueuedHumanRecord) -> QueuedHumanRecord:
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(record.workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            bucket = self._human_queue.setdefault(record.workgroup_id, [])
+            for index, existing in enumerate(bucket):
+                if existing.queue_id == record.queue_id:
+                    bucket[index] = record
+                    break
+            else:
+                bucket.append(record)
+            bucket.sort(
+                key=lambda item: (-int(item.priority or 0), item.created_at, item.queue_id)
+            )
+            self._put(
+                "workgroup_human_queue",
+                record.queue_id,
+                record.model_dump_json(),
+                workgroup_id=record.workgroup_id,
+            )
+            return record
+
+    def delete_human_queue_record(self, workgroup_id: str, queue_id: str) -> None:
+        with self._lock:
+            self._ensure_loaded()
+            bucket = self._human_queue.get(workgroup_id) or []
+            bucket = [item for item in bucket if item.queue_id != queue_id]
+            if bucket:
+                self._human_queue[workgroup_id] = bucket
+            else:
+                self._human_queue.pop(workgroup_id, None)
+            self._delete("workgroup_human_queue", queue_id)
+
+    def save_turn_checkpoint(self, checkpoint: TurnCheckpoint) -> TurnCheckpoint:
+        with self._lock:
+            self._ensure_loaded()
+            if self.get_workgroup(checkpoint.workgroup_id) is None:
+                raise WorkgroupError("not_found", "workgroup not found", http_status=404)
+            self._turn_checkpoints[checkpoint.workgroup_id] = checkpoint
+            self._put(
+                "workgroup_turn_checkpoints",
+                checkpoint.workgroup_id,
+                checkpoint.model_dump_json(),
+                workgroup_id=checkpoint.workgroup_id,
+            )
+            return checkpoint
+
+    def get_turn_checkpoint(self, workgroup_id: str) -> TurnCheckpoint | None:
+        with self._lock:
+            self._ensure_loaded()
+            return self._turn_checkpoints.get(workgroup_id)
+
+    def clear_turn_checkpoint(self, workgroup_id: str) -> None:
+        with self._lock:
+            self._ensure_loaded()
+            self._turn_checkpoints.pop(workgroup_id, None)
+            self._delete("workgroup_turn_checkpoints", workgroup_id)
+
+    def reconcile_inflight_runs(self) -> dict[str, Any]:
+        """Fence process-local work after a Manage restart.
+
+        ActorRun/Assign records are durable, but their worker threads and
+        command waiters are not.  Never leave those records looking active:
+        mark them indeterminate and release the member lease.  Pending HITL
+        rows are intentionally preserved for an explicit user decision.
+        """
+        with self._lock:
+            self._ensure_loaded()
+            run_ids: list[str] = []
+            assign_ids: list[str] = []
+            hitl_recovery_run_ids: set[str] = set()
+            for hitl in self._hitl.values():
+                if not hitl.run_id or not hitl.tool_call_id:
+                    continue
+                if hitl.status == "pending":
+                    hitl_recovery_run_ids.add(str(hitl.run_id))
+                    continue
+                # A resolved HITL may have been committed just before the
+                # process died, before its synthetic tool result was appended.
+                # Keep that run recoverable; the kernel will append the result
+                # idempotently and continue it on startup.
+                history = self._run_histories.get(str(hitl.run_id))
+                has_result = bool(
+                    history
+                    and any(
+                        message.role == "tool"
+                        and message.tool_call_id == hitl.tool_call_id
+                        for message in history.messages
+                    )
+                )
+                if hitl.status == "resolved" and not has_result:
+                    hitl_recovery_run_ids.add(str(hitl.run_id))
+            checkpoint_ids = list(self._turn_checkpoints.keys())
+            for workgroup_id in checkpoint_ids:
+                self._turn_checkpoints.pop(workgroup_id, None)
+                self._delete("workgroup_turn_checkpoints", workgroup_id)
+            for run in list(self._runs.values()):
+                if run.status not in {"running", "awaiting_hitl"}:
+                    continue
+                if run.run_id in hitl_recovery_run_ids:
+                    if run.status != "awaiting_hitl":
+                        waiting = run.model_copy(update={"status": "awaiting_hitl"})
+                        self._runs[run.run_id] = waiting
+                        self._put(
+                            "actor_runs",
+                            run.run_id,
+                            waiting.model_dump_json(),
+                            workgroup_id=run.workgroup_id,
+                        )
+                    continue
+                updated = run.model_copy(update={"status": "indeterminate"})
+                self._runs[run.run_id] = updated
+                self._put(
+                    "actor_runs",
+                    run.run_id,
+                    updated.model_dump_json(),
+                    workgroup_id=run.workgroup_id,
+                )
+                run_ids.append(run.run_id)
+            for member in list(self._members.values()):
+                if member.status != "busy":
+                    continue
+                active = self._assigns.get(member.active_assign_id or "")
+                if active is not None and active.status in {"queued", "running", "awaiting_hitl"}:
+                    continue
+                released = member.model_copy(update={"active_assign_id": None, "status": "ready"})
+                self._members[member.member_id] = released
+                self._put(
+                    "workgroup_members",
+                    member.member_id,
+                    released.model_dump_json(),
+                    workgroup_id=member.workgroup_id,
+                )
+            for assign in list(self._assigns.values()):
+                if assign.status not in {"queued", "running", "awaiting_hitl"}:
+                    continue
+                updated = assign.model_copy(
+                    update={
+                        "status": "indeterminate",
+                        "result_summary": "Manage restarted before the assignment completed",
+                        "error_code": "manage_restarted",
+                    }
+                )
+                self._assigns[assign.assign_id] = updated
+                self._put(
+                    "workgroup_assigns",
+                    assign.assign_id,
+                    updated.model_dump_json(),
+                    workgroup_id=assign.workgroup_id,
+                )
+                member = self._members.get(assign.member_id)
+                if member is not None and (
+                    member.active_assign_id == assign.assign_id or member.status == "busy"
+                ):
+                    released = member.model_copy(
+                        update={"active_assign_id": None, "status": "ready"}
+                    )
+                    self._members[member.member_id] = released
+                    self._put(
+                        "workgroup_members",
+                        member.member_id,
+                        released.model_dump_json(),
+                        workgroup_id=member.workgroup_id,
+                    )
+                assign_ids.append(assign.assign_id)
+            return {
+                "run_ids": run_ids,
+                "assign_ids": assign_ids,
+                "checkpoint_workgroup_ids": checkpoint_ids,
+            }
 
     def fail_active_assigns(
         self,
@@ -957,6 +1481,7 @@ class WorkGroupStore:
         reason: str = "assign interrupted",
         error_code: str = "canceled",
         leader_tool_call_ids: set[str] | None = None,
+        exclude_assign_ids: set[str] | None = None,
     ) -> list[str]:
         """将组内仍 active 的 Assign 置为 failed；可按 leader_tool_call_id 过滤。"""
         with self._lock:
@@ -966,6 +1491,8 @@ class WorkGroupStore:
                 if assign.workgroup_id != workgroup_id:
                     continue
                 if assign.status not in {"queued", "running", "awaiting_hitl"}:
+                    continue
+                if exclude_assign_ids and assign.assign_id in exclude_assign_ids:
                     continue
                 if leader_tool_call_ids is not None:
                     if (assign.leader_tool_call_id or "") not in leader_tool_call_ids:
@@ -1009,6 +1536,7 @@ class WorkGroupStore:
         client_message_id: str | None = None,
         protocol_name: str | None = None,
         assign_id: str | None = None,
+        direct_member_id: str | None = None,
     ) -> TimelineEvent:
         listener: Callable[[TimelineEvent], None] | None = None
         with self._lock:
@@ -1033,6 +1561,7 @@ class WorkGroupStore:
                 client_message_id=client_message_id,
                 protocol_name=pname,
                 assign_id=assign_id,
+                direct_member_id=direct_member_id,
             )
             events.append(event)
             frame = self._new_timeline_outbox_frame_unlocked(event)
@@ -1230,7 +1759,15 @@ class WorkGroupStore:
                     return updated
             raise WorkgroupError("not_found", "outbox frame not found", http_status=404)
 
-    def create_hitl(self, workgroup_id: str, *, prompt: str) -> HITLRequest:
+    def create_hitl(
+        self,
+        workgroup_id: str,
+        *,
+        prompt: str,
+        run_id: str | None = None,
+        tool_call_id: str | None = None,
+        reserve_waiter: bool = False,
+    ) -> HITLRequest:
         with self._lock:
             self._ensure_loaded()
             if self.get_workgroup(workgroup_id) is None:
@@ -1242,6 +1779,8 @@ class WorkGroupStore:
                 prompt=prompt,
                 status="pending",
                 created_at=_now(),
+                run_id=(run_id or "").strip() or None,
+                tool_call_id=(tool_call_id or "").strip() or None,
             )
             self._hitl[hitl.hitl_id] = hitl
             self._put(
@@ -1251,6 +1790,10 @@ class WorkGroupStore:
                 workgroup_id=workgroup_id,
             )
             self._hitl_waiters.setdefault(hitl.hitl_id, threading.Event())
+            if reserve_waiter:
+                # Reserve the in-process path before the request can resolve.
+                # This closes the create -> wait race used by the native tool.
+                self._hitl_waiting.add(hitl.hitl_id)
             return hitl
 
     def get_hitl(self, hitl_id: str) -> HITLRequest | None:
@@ -1266,7 +1809,37 @@ class WorkGroupStore:
                 items = [h for h in items if h.status == "pending"]
             return sorted(items, key=lambda h: h.created_at, reverse=True)
 
-    def wait_hitl_resolved(self, hitl_id: str, *, timeout_s: float = 300.0) -> HITLRequest:
+    def list_pending_hitls(self) -> list[HITLRequest]:
+        with self._lock:
+            self._ensure_loaded()
+            return sorted(
+                [h for h in self._hitl.values() if h.status == "pending"],
+                key=lambda h: (h.created_at, h.hitl_id),
+            )
+
+    def list_resolved_bound_hitls(self) -> list[HITLRequest]:
+        """Return resolved in-loop HITLs that can be replayed after a restart."""
+        with self._lock:
+            self._ensure_loaded()
+            return sorted(
+                [
+                    h
+                    for h in self._hitl.values()
+                    if h.status == "resolved" and h.run_id and h.tool_call_id
+                ],
+                key=lambda h: (h.resolved_at or h.created_at, h.hitl_id),
+            )
+
+    def has_hitl_waiter(self, hitl_id: str) -> bool:
+        with self._lock:
+            return (hitl_id or "").strip() in self._hitl_waiting
+
+    def wait_hitl_resolved(
+        self,
+        hitl_id: str,
+        *,
+        timeout_s: float = 300.0,
+    ) -> HITLRequest:
         """阻塞直到 HITL 被 resolve（或超时）。供 Leader ask_workgroup_user 使用。"""
         hid = (hitl_id or "").strip()
         timeout = max(0.1, float(timeout_s))
@@ -1276,16 +1849,22 @@ class WorkGroupStore:
             if hitl is None:
                 raise WorkgroupError("not_found", "hitl not found", http_status=404)
             if hitl.status == "resolved":
+                self._hitl_waiting.discard(hid)
                 return hitl
             ev = self._hitl_waiters.setdefault(hid, threading.Event())
-        if not ev.wait(timeout):
-            raise WorkgroupError(
-                "conflict",
-                f"hitl timed out after {timeout:g}s",
-                http_status=409,
-                retryable=True,
-                details={"hitl_id": hid},
-            )
+            self._hitl_waiting.add(hid)
+        try:
+            if not ev.wait(timeout):
+                raise WorkgroupError(
+                    "conflict",
+                    f"hitl timed out after {timeout:g}s",
+                    http_status=409,
+                    retryable=True,
+                    details={"hitl_id": hid},
+                )
+        finally:
+            with self._lock:
+                self._hitl_waiting.discard(hid)
         with self._lock:
             hitl = self._hitl.get(hid)
             if hitl is None:

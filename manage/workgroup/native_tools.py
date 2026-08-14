@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from manage.workgroup.errors import WorkgroupError
+from manage.workgroup.d3_models import HITLRequest
 from manage.workgroup.history import build_assign_tool_result_content
+from manage.workgroup.member_tools import CALL_PURPOSE_KEY
 from manage.workgroup.models import AssignCreateRequest
 from manage.workgroup.protocol_names import protocol_name_for_actor
 from manage.workgroup.store import WorkGroupStore
@@ -41,7 +43,13 @@ def leader_native_tools() -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "additionalProperties": False,
-                    "properties": {},
+                    "properties": {
+                        CALL_PURPOSE_KEY: {
+                            "type": "string",
+                            "description": "Required. Briefly explain the purpose of this tool call; shown in the workgroup progress UI.",
+                        },
+                    },
+                    "required": [CALL_PURPOSE_KEY],
                 },
             },
         },
@@ -60,9 +68,13 @@ def leader_native_tools() -> list[dict[str, Any]]:
                         "prompt": {
                             "type": "string",
                             "description": "Question shown to the user.",
-                        }
+                        },
+                        CALL_PURPOSE_KEY: {
+                            "type": "string",
+                            "description": "Required. Briefly explain the purpose of this tool call; shown in the workgroup progress UI.",
+                        },
                     },
-                    "required": ["prompt"],
+                    "required": [CALL_PURPOSE_KEY, "prompt"],
                 },
             },
         },
@@ -85,6 +97,31 @@ def scripted_assign_completer(
     return f"[scripted] {instruction.strip()[:500]}"
 
 
+def format_hitl_resolution(resolved: HITLRequest) -> str:
+    """Encode a resolved HITL exactly as the native tool would return it."""
+    resolution = dict(resolved.resolution or {})
+    if resolution.get("canceled"):
+        return json.dumps(
+            {
+                "hitl_id": resolved.hitl_id,
+                "status": "canceled",
+                "answer": "",
+            },
+            ensure_ascii=False,
+        )
+    answer = str(resolution.get("answer") or "").strip()
+    if not answer and resolution:
+        answer = json.dumps(resolution, ensure_ascii=False)
+    return json.dumps(
+        {
+            "hitl_id": resolved.hitl_id,
+            "status": "answered",
+            "answer": answer,
+        },
+        ensure_ascii=False,
+    )
+
+
 class NativeToolDispatcher:
     def __init__(
         self,
@@ -93,11 +130,15 @@ class NativeToolDispatcher:
         leader_run_id: str,
         assign_completer: AssignCompleter | None = None,
         registry_store: Any | None = None,
+        on_hitl_created: Callable[[HITLRequest], None] | None = None,
+        on_hitl_resolved: Callable[[HITLRequest], None] | None = None,
     ) -> None:
         self.store = store
         self.leader_run_id = leader_run_id
         self.assign_completer = assign_completer or scripted_assign_completer
         self.registry_store = registry_store
+        self.on_hitl_created = on_hitl_created
+        self.on_hitl_resolved = on_hitl_resolved
 
     def _host_ips_for_node(self, home_node_id: str) -> str:
         node_id = (home_node_id or "").strip()
@@ -135,12 +176,12 @@ class NativeToolDispatcher:
                 )
             return json.dumps({"members": payload}, ensure_ascii=False)
         if name == "ask_workgroup_user":
-            return self._ask_user(workgroup_id, arguments_json)
+            return self._ask_user(workgroup_id, arguments_json, tool_call_id=tool_call_id)
         if name == "assign_workgroup_task":
             return self._assign(workgroup_id, tool_call_id, arguments_json)
         raise WorkgroupError("invalid_tool", f"unknown manage-native tool: {name}")
 
-    def _ask_user(self, workgroup_id: str, arguments_json: str) -> str:
+    def _ask_user(self, workgroup_id: str, arguments_json: str, *, tool_call_id: str = "") -> str:
         try:
             args = json.loads(arguments_json or "{}")
         except json.JSONDecodeError as exc:
@@ -148,29 +189,19 @@ class NativeToolDispatcher:
         prompt = str(args.get("prompt") or args.get("question") or "").strip()
         if not prompt:
             raise WorkgroupError("invalid_request", "prompt required")
-        hitl = self.store.create_hitl(workgroup_id, prompt=prompt)
-        resolved = self.store.wait_hitl_resolved(hitl.hitl_id, timeout_s=300.0)
-        resolution = dict(resolved.resolution or {})
-        if resolution.get("canceled"):
-            return json.dumps(
-                {
-                    "hitl_id": hitl.hitl_id,
-                    "status": "canceled",
-                    "answer": "",
-                },
-                ensure_ascii=False,
-            )
-        answer = str(resolution.get("answer") or "").strip()
-        if not answer and resolution:
-            answer = json.dumps(resolution, ensure_ascii=False)
-        return json.dumps(
-            {
-                "hitl_id": hitl.hitl_id,
-                "status": "answered",
-                "answer": answer,
-            },
-            ensure_ascii=False,
+        hitl = self.store.create_hitl(
+            workgroup_id,
+            prompt=prompt,
+            run_id=self.leader_run_id,
+            tool_call_id=tool_call_id,
+            reserve_waiter=True,
         )
+        if self.on_hitl_created is not None:
+            self.on_hitl_created(hitl)
+        resolved = self.store.wait_hitl_resolved(hitl.hitl_id, timeout_s=300.0)
+        if self.on_hitl_resolved is not None:
+            self.on_hitl_resolved(resolved)
+        return format_hitl_resolution(resolved)
 
     def _assign(self, workgroup_id: str, tool_call_id: str, arguments_json: str) -> str:
         try:
@@ -214,11 +245,11 @@ class NativeToolDispatcher:
                 tool_call_id,
             )
             current = self.store.get_assign(assign.assign_id)
-            if current is not None and current.status in {"failed", "canceled"}:
+            if current is not None and current.status in {"failed", "canceled", "indeterminate"}:
                 terminal = True
                 return build_assign_tool_result_content(
                     assign_id=assign.assign_id,
-                    status="failed",
+                    status="canceled" if current.status == "canceled" else current.status,
                     summary=current.result_summary or "cancelled by user",
                     error_code=current.error_code or "canceled",
                 )
@@ -256,6 +287,15 @@ class NativeToolDispatcher:
                 summary=summary,
             )
         except WorkgroupError as exc:
+            current = self.store.get_assign(assign.assign_id)
+            if current is not None and current.status in {"canceled", "indeterminate"}:
+                terminal = True
+                return build_assign_tool_result_content(
+                    assign_id=assign.assign_id,
+                    status=current.status,
+                    summary=current.result_summary or exc.message,
+                    error_code=current.error_code or exc.code,
+                )
             assign = self.store.set_assign_status(
                 assign.assign_id,
                 "failed",
@@ -279,6 +319,15 @@ class NativeToolDispatcher:
             )
         except Exception as exc:  # noqa: BLE001 — 必须释放 active assign
             msg = str(exc) or exc.__class__.__name__
+            current = self.store.get_assign(assign.assign_id)
+            if current is not None and current.status in {"canceled", "indeterminate"}:
+                terminal = True
+                return build_assign_tool_result_content(
+                    assign_id=assign.assign_id,
+                    status=current.status,
+                    summary=current.result_summary or msg,
+                    error_code=current.error_code or "conflict",
+                )
             assign = self.store.set_assign_status(
                 assign.assign_id,
                 "failed",

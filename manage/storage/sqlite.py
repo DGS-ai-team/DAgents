@@ -48,7 +48,7 @@ class SQLiteDatabase:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
-                INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '13');
+                INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '15');
 
                 CREATE TABLE IF NOT EXISTS registry_agents (
                     agent_id TEXT PRIMARY KEY,
@@ -124,6 +124,11 @@ class SQLiteDatabase:
                     workgroup_id TEXT NOT NULL,
                     payload_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS actor_context_snapshots (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
                 -- Workgroup D3：Timeline / Outbox / HITL
                 CREATE TABLE IF NOT EXISTS workgroup_timeline (
                     id TEXT PRIMARY KEY,
@@ -136,6 +141,16 @@ class SQLiteDatabase:
                     payload_json TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS workgroup_hitl (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_human_queue (
+                    id TEXT PRIMARY KEY,
+                    workgroup_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workgroup_turn_checkpoints (
                     id TEXT PRIMARY KEY,
                     workgroup_id TEXT NOT NULL,
                     payload_json TEXT NOT NULL
@@ -155,7 +170,7 @@ class SQLiteDatabase:
                 """
             )
             conn.execute(
-                "INSERT INTO schema_meta(key,value) VALUES('schema_version','13') "
-                "ON CONFLICT(key) DO UPDATE SET value='13'"
+                "INSERT INTO schema_meta(key,value) VALUES('schema_version','15') "
+                "ON CONFLICT(key) DO UPDATE SET value='15'"
             )
             conn.commit()

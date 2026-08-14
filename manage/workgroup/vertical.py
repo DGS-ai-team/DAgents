@@ -25,9 +25,8 @@ from manage.workgroup.d3_models import (
 )
 from manage.workgroup.digest import sha256_digest
 from manage.workgroup.errors import WorkgroupError
-from manage.workgroup.history import RunHistoryMessage
 from manage.workgroup.member_tools import side_effect_for_tool
-from manage.workgroup.models import ActorRunCreateRequest, AssignCreateRequest
+from manage.workgroup.models import AssignCreateRequest
 from manage.workgroup.store import WorkGroupStore
 
 if TYPE_CHECKING:
@@ -152,6 +151,10 @@ class VerticalLoop:
         self._command_results: dict[str, dict[str, Any]] = {}
         # workgroup_id -> command_id -> {assign_id, member_id, home_node_id}
         self._wg_pending_commands: dict[str, dict[str, dict[str, str]]] = {}
+        self._turn_kernel: TurnKernel | None = None
+
+    def set_turn_kernel(self, kernel: TurnKernel | None) -> None:
+        self._turn_kernel = kernel
 
     # --- Timeline / Outbox / HITL 委托 store ---
 
@@ -164,6 +167,7 @@ class VerticalLoop:
             actor_id=req.from_node_id,
             text=req.text,
             client_message_id=req.client_message_id,
+            direct_member_id=req.direct_member_id,
         )
 
     def enqueue_provision(self, workgroup_id: str, member_id: str) -> OutboxFrame:
@@ -236,7 +240,9 @@ class VerticalLoop:
         member = self.store.get_member(member_id)
         if member is None or member.workgroup_id != workgroup_id:
             raise WorkgroupError("not_found", "member not found", http_status=404)
-        if member.status != "ready":
+        if member.status != "ready" and not (
+            member.status == "busy" and member.active_assign_id == assign.assign_id
+        ):
             raise WorkgroupError("conflict", "member not ready", http_status=409)
         ctx = self.store.member_execution_context(member_id)
         allow = {str(n) for n in (ctx.get("tool_allow_names") or [])}
@@ -631,28 +637,35 @@ class VerticalLoop:
             member = self.store.get_member(member_id)
             if member is None or member.workgroup_id != workgroup_id:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
-            if member.status != "ready":
+            if member.status != "ready" and not (
+                member.status == "busy" and member.active_assign_id == assign_id
+            ):
                 raise WorkgroupError("conflict", "member not ready", http_status=409)
             spec = self.store.get_spec(member_id)
             if spec is None:
                 raise WorkgroupError("not_found", "member spec not found", http_status=404)
 
-            run = self.store.create_actor_run(
+            run = self.store.get_or_create_actor_session(
                 workgroup_id,
-                ActorRunCreateRequest(
-                    actor_id=member_id,
-                    assign_id=assign_id,
-                    llm_profile_revision=spec.llm_profile_revision,
-                ),
+                actor_id=member_id,
+                llm_profile_revision=spec.llm_profile_revision,
             )
+            run = self.store.prepare_actor_session(run.run_id, assign_id=assign_id)
             try:
+                kernel._append_turn_meta(workgroup_id, "member_run_ids", run.run_id)
                 kernel._update_turn(workgroup_id, member_run_id=run.run_id)
             except Exception:  # noqa: BLE001
                 pass
             self.store.ensure_run_history(run)
-            self.store.append_run_history(
+            kernel._heal_open_tool_calls(
                 run.run_id,
-                [RunHistoryMessage(role="user", content=(instruction or "").strip() or "(empty)")],
+                reason="previous member tool turn interrupted; synthetic error result",
+                preserve_assign_id=assign_id,
+            )
+            kernel._append_session_user_message(
+                run.run_id,
+                content=instruction,
+                assign_id=assign_id,
             )
             out = kernel.run_member_until_idle(
                 workgroup_id,
@@ -689,7 +702,11 @@ class VerticalLoop:
         return self.store.create_hitl(workgroup_id, prompt=req.prompt)
 
     def resolve_info_hitl(self, workgroup_id: str, hitl_id: str, req: HITLResolveRequest) -> HITLRequest:
-        return self.store.resolve_hitl_cas(workgroup_id, hitl_id, resolution=req.resolution)
+        had_waiter = self.store.has_hitl_waiter(hitl_id)
+        hitl = self.store.resolve_hitl_cas(workgroup_id, hitl_id, resolution=req.resolution)
+        if not had_waiter and self._turn_kernel is not None:
+            self._turn_kernel.resume_resolved_hitl(hitl)
+        return hitl
 
     def archive_with_tombstone(self, workgroup_id: str) -> dict[str, Any]:
         group = self.store.begin_archive(workgroup_id)

@@ -325,7 +325,8 @@ Turn = 单次模型往返（含其 tool_calls 收集）。`status`：`open` | `c
 }
 ```
 
-不变量：**每组最多一个** `status ∈ {queued,running,awaiting_hitl}` 的 assign（v1）。
+不变量：不同成员可以并行存在 `status ∈ {queued,running,awaiting_hitl}` 的 assign；
+同一成员最多一个 active assign（P1）。
 
 ### 2.8.1 Manage-native 工具：`assign_workgroup_task`
 
@@ -337,7 +338,6 @@ Turn = 单次模型往返（含其 tool_calls 收集）。`status`：`open` | `c
 |------|------|------|
 | `member_id` | 是 | `^mb_[0-9a-z]{26}$` |
 | `instruction` | 是 | 1…16000 字符 |
-| `context_hint` | 否 | ≤2000；不替代 Projector 的 ≤10 Timeline 快照 |
 
 **同步语义**：调用阻塞至该 assign 进入终态 `succeeded|failed|canceled|indeterminate`。
 
