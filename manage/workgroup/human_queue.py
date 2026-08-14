@@ -26,6 +26,7 @@ class QueuedHuman:
     client_message_id: str | None = None
     direct_member_id: str | None = None
     disable_tools: bool = False
+    priority: int = 0
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
 
@@ -39,6 +40,7 @@ class QueuedHuman:
             "client_message_id": self.client_message_id,
             "direct_member_id": self.direct_member_id,
             "disable_tools": self.disable_tools,
+            "priority": self.priority,
             "position": max(1, int(position)),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -53,6 +55,7 @@ class QueuedHuman:
             client_message_id=self.client_message_id,
             direct_member_id=self.direct_member_id,
             disable_tools=self.disable_tools,
+            priority=self.priority,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -67,6 +70,7 @@ class QueuedHuman:
             client_message_id=record.client_message_id,
             direct_member_id=record.direct_member_id,
             disable_tools=record.disable_tools,
+            priority=record.priority,
             created_at=record.created_at,
             updated_at=record.updated_at,
         )

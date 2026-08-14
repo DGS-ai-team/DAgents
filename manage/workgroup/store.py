@@ -178,7 +178,10 @@ class WorkGroupStore:
         for item in self._load_all("workgroup_human_queue", QueuedHumanRecord):
             self._human_queue.setdefault(item.workgroup_id, []).append(item)
         for wg, items in self._human_queue.items():
-            self._human_queue[wg] = sorted(items, key=lambda item: (item.created_at, item.queue_id))
+            self._human_queue[wg] = sorted(
+                items,
+                key=lambda item: (-int(item.priority or 0), item.created_at, item.queue_id),
+            )
         for checkpoint in self._load_all("workgroup_turn_checkpoints", TurnCheckpoint):
             self._turn_checkpoints[checkpoint.workgroup_id] = checkpoint
         for sub in self._load_all("workgroup_subscriptions", Subscription):
@@ -1311,7 +1314,9 @@ class WorkGroupStore:
                     break
             else:
                 bucket.append(record)
-            bucket.sort(key=lambda item: (item.created_at, item.queue_id))
+            bucket.sort(
+                key=lambda item: (-int(item.priority or 0), item.created_at, item.queue_id)
+            )
             self._put(
                 "workgroup_human_queue",
                 record.queue_id,

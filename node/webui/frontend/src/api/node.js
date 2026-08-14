@@ -564,6 +564,13 @@ export function cancelWorkgroupHumanQueueItem(workgroupId, queueId) {
   );
 }
 
+export function sendWorkgroupHumanQueueItemNow(workgroupId, queueId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/human-queue/${encodeURIComponent(queueId)}/send-now`,
+    { method: "POST", body: {} },
+  );
+}
+
 export function listWorkgroupMembers(workgroupId) {
   return apiFetch(`/v1/workgroups/${encodeURIComponent(workgroupId)}/members`);
 }

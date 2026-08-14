@@ -442,6 +442,14 @@ export async function cancelWorkgroupHumanQueueItem(workgroupId, queueId) {
   );
 }
 
+export async function sendWorkgroupHumanQueueItemNow(workgroupId, queueId) {
+  return apiFetch(
+    `/v1/workgroups/${encodeURIComponent(workgroupId)}/human-queue/${encodeURIComponent(queueId)}/send-now`,
+    {},
+    { method: "POST", body: {} },
+  );
+}
+
 /**
  * 工作组消息 SSE；onEvent(eventName, data)。可传 signal 以中断读取。
  * @returns {Promise<{ finalText?: string }>}

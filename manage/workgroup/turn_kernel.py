@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from collections.abc import Callable
 from datetime import datetime
@@ -237,7 +238,12 @@ class TurnKernel:
         flag.clear()
         token = str(meta.get("turn_token") or wg_ids.new_ulid())
         with self._turn_lock:
-            self._active_turn[workgroup_id] = {"mode": mode, "turn_token": token, **meta}
+            self._active_turn[workgroup_id] = {
+                "mode": mode,
+                "turn_token": token,
+                "turn_started_at": time.monotonic(),
+                **meta,
+            }
             self._save_turn_checkpoint_unlocked(workgroup_id)
         return flag
 
@@ -380,25 +386,30 @@ class TurnKernel:
             flag = self._cancel_flags.get(workgroup_id)
             if flag is not None:
                 flag.clear()
-            bucket = self._human_queues.get(workgroup_id) or []
-            if not bucket:
-                self._human_queues.pop(workgroup_id, None)
-                return None
-            item = bucket.pop(0)
-            if bucket:
-                self._human_queues[workgroup_id] = bucket
-            else:
-                self._human_queues.pop(workgroup_id, None)
-            token = wg_ids.new_ulid()
-            self._active_turn[workgroup_id] = {
-                "mode": "claiming",
-                "turn_token": token,
-                "queue_id": item.queue_id,
-                "client_message_id": item.client_message_id,
-            }
-            self._save_turn_checkpoint_unlocked(workgroup_id)
-            item._claim_token = token  # type: ignore[attr-defined]
-            return item
+            return self._claim_next_human_unlocked(workgroup_id)
+
+    def _claim_next_human_unlocked(self, workgroup_id: str) -> QueuedHuman | None:
+        """Claim the next queued item; caller must hold ``_turn_lock``."""
+        bucket = self._human_queues.get(workgroup_id) or []
+        if not bucket:
+            self._human_queues.pop(workgroup_id, None)
+            return None
+        item = bucket.pop(0)
+        if bucket:
+            self._human_queues[workgroup_id] = bucket
+        else:
+            self._human_queues.pop(workgroup_id, None)
+        token = wg_ids.new_ulid()
+        self._active_turn[workgroup_id] = {
+            "mode": "claiming",
+            "turn_token": token,
+            "turn_started_at": time.monotonic(),
+            "queue_id": item.queue_id,
+            "client_message_id": item.client_message_id,
+        }
+        self._save_turn_checkpoint_unlocked(workgroup_id)
+        item._claim_token = token  # type: ignore[attr-defined]
+        return item
 
     def _schedule_queued_human(self, item: QueuedHuman) -> None:
         token = str(getattr(item, "_claim_token", "") or "")
@@ -418,8 +429,18 @@ class TurnKernel:
 
     def _finish_human_turn(self, workgroup_id: str, *, turn_token: str) -> None:
         nxt = self._end_turn(workgroup_id, turn_token=turn_token)
+        self._publish_queue_state(workgroup_id)
         if nxt is not None:
             self._schedule_queued_human(nxt)
+
+    def _publish_queue_state(self, workgroup_id: str) -> None:
+        """Broadcast the complete queue snapshot to every subscribed UI."""
+        self._publish_realtime(
+            workgroup_id,
+            "queue",
+            {"queue": self.list_human_queue(workgroup_id)},
+            client_message_id=None,
+        )
 
     def resume_persisted_queues(self) -> int:
         """Resume FIFO messages that survived a Manage restart.
@@ -520,8 +541,12 @@ class TurnKernel:
                 item.text = body
                 item.updated_at = _now()
                 self._store.save_human_queue_record(item.to_record())
-                return item.to_public(idx + 1)
-        raise WorkgroupError("not_found", "queued message not found", http_status=404)
+                out = item.to_public(idx + 1)
+                break
+            else:
+                raise WorkgroupError("not_found", "queued message not found", http_status=404)
+        self._publish_queue_state(workgroup_id)
+        return out
 
     def cancel_human_queue_item(self, workgroup_id: str, queue_id: str) -> dict[str, Any]:
         qid = (queue_id or "").strip()
@@ -536,8 +561,80 @@ class TurnKernel:
                 else:
                     self._human_queues.pop(workgroup_id, None)
                 self._store.delete_human_queue_record(workgroup_id, qid)
-                return {"cancelled": True, "queue_id": qid, "depth": len(items)}
-        raise WorkgroupError("not_found", "queued message not found", http_status=404)
+                out = {"cancelled": True, "queue_id": qid, "depth": len(items)}
+                break
+            else:
+                raise WorkgroupError("not_found", "queued message not found", http_status=404)
+        self._publish_queue_state(workgroup_id)
+        return out
+
+    def _active_turn_has_live_work(self, workgroup_id: str) -> bool:
+        """Return whether an active turn still has durable work to cancel."""
+        with self._turn_lock:
+            meta = dict(self._active_turn.get(workgroup_id) or {})
+        if not meta:
+            return False
+        if str(meta.get("mode") or "") == "claiming":
+            return True
+        if self._store.list_assigns(workgroup_id, active_only=True):
+            return True
+        if any(
+            run.status in {"running", "awaiting_hitl"}
+            for run in self._store.list_actor_runs(workgroup_id, limit=100)
+        ):
+            return True
+        if self._store.list_hitl(workgroup_id, pending_only=True):
+            return True
+        started = float(meta.get("turn_started_at") or 0)
+        if started and time.monotonic() - started < 1.0:
+            return True
+        return False
+
+    def send_human_queue_item_now(self, workgroup_id: str, queue_id: str) -> dict[str, Any]:
+        """Promote a queued message and interrupt the current turn for it."""
+        qid = (queue_id or "").strip()
+        if not qid:
+            raise WorkgroupError("invalid_argument", "queue_id required", http_status=400)
+        from manage.workgroup.human_queue import _now
+
+        with self._turn_lock:
+            items = self._human_queues.get(workgroup_id) or []
+            item = next((candidate for candidate in items if candidate.queue_id == qid), None)
+            if item is None:
+                raise WorkgroupError("not_found", "queued message not found", http_status=404)
+            item.priority = max((int(candidate.priority or 0) for candidate in items), default=0) + 1
+            item.updated_at = _now()
+            items.sort(
+                key=lambda candidate: (-int(candidate.priority or 0), candidate.created_at, candidate.queue_id)
+            )
+            self._human_queues[workgroup_id] = items
+            self._store.save_human_queue_record(item.to_record())
+            old_token = str((self._active_turn.get(workgroup_id) or {}).get("turn_token") or "")
+
+        was_live = self._active_turn_has_live_work(workgroup_id)
+        cancel_result = self.cancel_turn(workgroup_id)
+        claimed: QueuedHuman | None = None
+        if not was_live:
+            with self._turn_lock:
+                current = self._active_turn.get(workgroup_id)
+                current_token = str((current or {}).get("turn_token") or "")
+                if current is None or current_token == old_token:
+                    if current is not None:
+                        self._active_turn.pop(workgroup_id, None)
+                        self._store.clear_turn_checkpoint(workgroup_id)
+                    flag = self._cancel_flags.get(workgroup_id)
+                    if flag is not None:
+                        flag.clear()
+                    claimed = self._claim_next_human_unlocked(workgroup_id)
+        self._publish_queue_state(workgroup_id)
+        if claimed is not None:
+            self._schedule_queued_human(claimed)
+        return {
+            "sent_now": True,
+            "queue_id": qid,
+            "cancel": cancel_result,
+            "queue": self.list_human_queue(workgroup_id),
+        }
 
     def _enqueue_human_unlocked(self, item: QueuedHuman) -> int:
         """调用方须持有 _turn_lock。返回 1-based position。"""
@@ -1481,6 +1578,16 @@ class TurnKernel:
                     http_status=409,
                 )
 
+            # A provider may return assistant content together with tool_calls.
+            # Persist that public text before dispatching the tool so the UI can
+            # keep the same order as the provider message: content -> tool.
+            self._append_assistant_content_timeline(
+                workgroup_id,
+                actor_id="leader",
+                content=result.content,
+                protocol_name="leader",
+            )
+
             if tool_loops > self._max_tool_loops:
                 soft = _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE
                 tool_msgs = [
@@ -1530,14 +1637,30 @@ class TurnKernel:
 
             tool_calls = list(result.tool_calls)
             for tc in tool_calls:
+                purpose = call_purpose_from_arguments(
+                    tc.arguments,
+                    leader_tool_purpose(tc.name),
+                )
+                # Supervisor-native tools are public orchestration progress, but
+                # their raw name/arguments/result must stay in RunHistory only.
+                # assign_workgroup_task already has its own assign card, so do
+                # not create a duplicate top-level tool bubble for it.
+                if tc.name != "assign_workgroup_task":
+                    try:
+                        self._store.append_timeline(
+                            workgroup_id,
+                            type="system_notice",
+                            actor_id="leader",
+                            text=purpose,
+                            protocol_name="leader",
+                        )
+                    except Exception:  # noqa: BLE001 - progress must not block the tool
+                        pass
                 yield {
                     "event": "status",
                     "data": {
                         "phase": "tool",
-                        "purpose": call_purpose_from_arguments(
-                            tc.arguments,
-                            leader_tool_purpose(tc.name),
-                        ),
+                        "purpose": purpose,
                     },
                 }
             def dispatch_one(tc: ChatToolCall) -> RunHistoryMessage:
@@ -1783,6 +1906,18 @@ class TurnKernel:
                     http_status=409,
                 )
 
+            # Keep member pre-tool text in the public timeline as well as in
+            # RunHistory.  For direct mentions this event is rendered directly
+            # before the member's tool bubble; for assigned work it is attached
+            # to the assign and rendered before its tool steps.
+            self._append_assistant_content_timeline(
+                workgroup_id,
+                actor_id=member_id,
+                content=result.content,
+                protocol_name=protocol_name_for_actor(member_id),
+                assign_id=run.assign_id,
+            )
+
             if tool_loops > max_loops:
                 soft = _TOOL_LOOP_LIMIT_EXCEEDED_MESSAGE
                 tool_msgs = [
@@ -1977,6 +2112,27 @@ class TurnKernel:
         )
         return packed.for_history
 
+    def _append_assistant_content_timeline(
+        self,
+        workgroup_id: str,
+        *,
+        actor_id: str,
+        content: str | None,
+        protocol_name: str | None = None,
+        assign_id: str | None = None,
+    ) -> Any | None:
+        text = str(content or "")
+        if not text.strip():
+            return None
+        return self._store.append_timeline(
+            workgroup_id,
+            type="assistant_content",
+            actor_id=actor_id,
+            text=text,
+            protocol_name=protocol_name,
+            assign_id=assign_id,
+        )
+
     def _heal_open_tool_calls(
         self,
         run_id: str,
@@ -2050,6 +2206,9 @@ def _public_realtime_data(event_type: str, data: Any) -> dict[str, Any] | None:
             for key in ("queue_id", "position", "text", "from_node_id", "client_message_id", "queue")
             if key in raw
         }
+    if event_type == "queue":
+        queue = raw.get("queue")
+        return {"queue": queue} if isinstance(queue, dict) else {"queue": {}}
     if event_type == "status":
         return {
             key: raw[key]
@@ -2109,6 +2268,7 @@ def mock_member_script_read_file_then_answer(
     *,
     path: str = "README",
     call_purpose: str = "",
+    first_content: str = "",
     final_text: str = "已读完",
 ) -> list[ChatResult]:
     """测试用：Member 先 read_file，再终态文本。"""
@@ -2120,7 +2280,7 @@ def mock_member_script_read_file_then_answer(
     args = json.dumps(payload, ensure_ascii=False)
     return [
         ChatResult(
-            content="",
+            content=first_content,
             tool_calls=[
                 ChatToolCall(
                     id="call_rf1",

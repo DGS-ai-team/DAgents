@@ -14,6 +14,18 @@
 
 可以概括为：DeepSeek Harness 强在可组合性，Codex 强在代码执行环境，DAgents 强在企业部署、治理和跨机器协作。
 
+## 1.1 本报告的对标口径
+
+后续比较不把 DAgents 作为一个不可拆分的整体，而采用分层对标：
+
+```text
+DAgents Node + Web UI  ↔  DeepSeek Harness
+DAgents 执行层         ↔  Codex exec-server
+DAgents Manage         ↔  DAgents 自有的企业控制面
+```
+
+原因是三者的产品边界不同：`Node + Web UI` 都是本机 Agent Runtime/Harness；Codex 的主要可借鉴价值集中在 Shell、PTY、Filesystem、进程生命周期、Sandbox 和 SSH 执行层；Manage 则负责 Registry、Workgroup、Release、审计和运营，不应直接拿来与 Harness 的 Web UI 或 Codex CLI 比较。
+
 ## 2. 技术与架构对比
 
 | 方面 | DAgents | DeepSeek Harness | Codex |
@@ -190,5 +202,7 @@ fs/list
 8. 验证方式、风险和下一次复查时间。
 
 ## 9. 结论
+
+限定在 `DAgents Node + Web UI` 范围内，DAgents 更接近 DeepSeek Harness；DAgents 的 Shell、PTY、Filesystem、进程生命周期、SSH 和 sandbox 执行层更适合参考 Codex。Manage 则应作为 DAgents 自有的企业控制面继续演进。
 
 DAgents 不应简单复制 Codex 或 Harness。推荐保留 Node + Manage + Workgroup 的企业架构，吸收 Harness 的 provider/plugin 抽象，并引入 Codex 风格的 Exec Server、PTY、SSH 和 sandbox 执行协议。这样既能提升本项目质量，也能形成对两个上游项目有价值的独立适配器、测试、文档和协议贡献。

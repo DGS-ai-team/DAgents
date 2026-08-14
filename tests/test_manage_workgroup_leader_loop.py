@@ -153,6 +153,101 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertIn("[scripted] 读 README", tool.content or "")
             self.assertIn("\"status\": \"succeeded\"", tool.content or "")
 
+    def test_tool_call_content_is_persisted_before_assign_timeline_event(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.llm_chat import ChatResult, ChatToolCall
+
+            args = json.dumps({"member_id": mid, "instruction": "read README"})
+            client = MockLLMClient(
+                [
+                    ChatResult(
+                        content="Supervisor pre-tool content",
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_content_assign",
+                                name="assign_workgroup_task",
+                                arguments=args,
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="done", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(store, chat_client=client, mock_llm=True)
+            result = kernel.handle_human_message(wid, text="assign", from_node_id="node-a")
+
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            timeline = store.list_timeline(wid)
+            pre_tool = next(e for e in timeline if e.type == "assistant_content")
+            assign_started = next(e for e in timeline if e.type == "assign_started")
+            self.assertEqual(pre_tool.text, "Supervisor pre-tool content")
+            self.assertLess(pre_tool.seq, assign_started.seq)
+            history = store.get_run_history(result["leader_run"].run_id)
+            assert history is not None
+            assistant = next(m for m in history.messages if m.tool_calls)
+            self.assertEqual(assistant.content, "Supervisor pre-tool content")
+
+    def test_supervisor_non_assign_tool_is_published_as_safe_timeline_notice(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            group, _ = store.create_workgroup(
+                WorkGroupCreateRequest(
+                    display_name="Visible supervisor tool",
+                    created_by_node_id="node-a",
+                    llm_profile_id="mock",
+                    llm_profile_revision="1",
+                )
+            )
+            store.publish_workgroup(group.workgroup_id)
+            from manage.workgroup.llm_chat import ChatToolCall
+
+            client = MockLLMClient(
+                [
+                    ChatResult(
+                        content="Supervisor pre-tool content",
+                        tool_calls=[
+                            ChatToolCall(
+                                id="call_visible_members",
+                                name="list_workgroup_members",
+                                arguments=json.dumps(
+                                    {
+                                        "purpose": "查看成员",
+                                        "secret": "must stay private",
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatResult(content="成员列表已确认", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(store, chat_client=client, mock_llm=True)
+            result = kernel.handle_human_message(
+                group.workgroup_id,
+                text="查看当前成员",
+                from_node_id="node-a",
+            )
+
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            timeline = store.list_timeline(group.workgroup_id)
+            pre_tool = next(e for e in timeline if e.type == "assistant_content")
+            notice = next(
+                e
+                for e in timeline
+                if e.type == "system_notice" and e.actor_id == "leader"
+            )
+            final = next(e for e in timeline if e.type == "actor_final_text")
+            self.assertEqual(notice.text, "查看成员")
+            self.assertLess(pre_tool.seq, notice.seq)
+            self.assertLess(notice.seq, final.seq)
+            self.assertNotIn("list_workgroup_members", notice.text)
+            self.assertNotIn("must stay private", notice.text)
+
     def test_supervisor_session_reuses_complete_history_across_turns(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
@@ -364,6 +459,7 @@ class LeaderLoopTests(unittest.TestCase):
             )
             member_script = mock_member_script_read_file_then_answer(
                 path="README",
+                first_content="member pre-tool content",
                 final_text="标题是 Demo",
                 call_purpose="读取 README 的标题",
             )
@@ -407,6 +503,15 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertNotIn("tool", tool_statuses[0])
             self.assertNotIn("tool_name", tool_statuses[0])
             notices = [e.text for e in timeline if e.type == "system_notice" and e.actor_id == mid]
+            pre_tool = [
+                e for e in timeline
+                if e.type == "assistant_content" and e.actor_id == mid
+            ]
+            self.assertEqual([e.text for e in pre_tool], ["member pre-tool content"])
+            self.assertLess(
+                pre_tool[0].seq,
+                next(e for e in timeline if e.type == "system_notice").seq,
+            )
             self.assertEqual(notices, ["读取 README 的标题"])
 
             runs = [r for r in store._runs.values() if r.actor_id == mid]  # noqa: SLF001

@@ -27,6 +27,7 @@ const editingQueueId = ref("");
 const editQueueDraft = ref("");
 let queuePollTimer = null;
 const error = ref("");
+const workgroupAccessError = ref("");
 const notice = ref("");
 const mentionOpen = ref(false);
 const mentionQuery = ref("");
@@ -84,6 +85,25 @@ const debugLlm = ref(null);
 const debugSelectedRunId = ref("");
 const debugHistory = ref(null);
 const debugError = ref("");
+
+function friendlyWorkgroupError(error, fallback = "操作失败") {
+  const raw = String(error?.message || error || "").trim();
+  if (/node not in workgroup ACL|not_authorized/i.test(raw)) {
+    return "发送失败：当前 Node 未加入该工作组的访问控制列表，请在 Manage 的工作组 ACL 中将本机 Node 添加为协作者后重试。";
+  }
+  if (/workgroup is not subscribed|not_subscribed/i.test(raw)) {
+    return "发送失败：当前 Node 尚未订阅该工作组，请先在 Manage 中完成订阅后重试。";
+  }
+  return raw || fallback;
+}
+
+function setWorkgroupError(source, fallback = "操作失败") {
+  const message = friendlyWorkgroupError(source, fallback);
+  if (/node not in workgroup ACL|not_authorized/i.test(String(source?.message || source || ""))) {
+    workgroupAccessError.value = message;
+  }
+  error.value = message;
+}
 
 let timelineReqSeq = 0;
 let pollInFlight = false;
@@ -160,7 +180,8 @@ function formatDebugMsg(m) {
   const role = String(m?.role || "");
   if (role === "assistant" && Array.isArray(m?.tool_calls) && m.tool_calls.length) {
     const names = m.tool_calls.map((tc) => tc?.function?.name || tc?.name || "?").join(", ");
-    return `tool_calls: ${names}`;
+    const body = String(m?.content || "").trim();
+    return body ? `${body}\n\ntool_calls: ${names}` : `tool_calls: ${names}`;
   }
   if (role === "tool") {
     const body = String(m?.content || "").trim();
@@ -282,7 +303,7 @@ async function loadTimeline() {
     );
     noteWorkgroupTimeline(workgroupId.value, latestSeq);
     markWorkgroupRead(workgroupId.value, latestSeq);
-    error.value = "";
+    if (!workgroupAccessError.value) error.value = "";
   } catch (e) {
     if (reqSeq !== timelineReqSeq) return;
     error.value = e?.message || "加载 Timeline 失败";
@@ -346,7 +367,7 @@ function applyRemoteRealtime(payload) {
     return;
   }
   const isNewRemoteTurn = remoteClientMessageId.value !== liveMessageId;
-  if (eventType === "queued") {
+  if (eventType === "queued" || eventType === "queue") {
     applyQueuePayload(data);
     return;
   }
@@ -448,6 +469,7 @@ function startWorkgroupEventStream() {
     if (workgroupEventSource !== source) return;
     source.close();
     void loadTimeline().catch(() => {});
+    void refreshHumanQueue();
     window.setTimeout(() => {
       if (workgroupEventSource === source && workgroupId.value) startWorkgroupEventStream();
     }, 1200);
@@ -715,6 +737,43 @@ async function removeQueued(item) {
   }
 }
 
+async function loadWorkgroupAccess() {
+  workgroupAccessError.value = "";
+  if (!workgroupId.value || !selfNodeId.value) {
+    return;
+  }
+  try {
+    const acl = await api.getWorkgroupACL(workgroupId.value);
+    const owners = Array.isArray(acl?.owners) ? acl.owners : [];
+    const collaborators = Array.isArray(acl?.collaborators) ? acl.collaborators : [];
+    if (
+      String(workgroupMeta.value?.status || "") === "active" &&
+      !owners.includes(selfNodeId.value) &&
+      !collaborators.includes(selfNodeId.value)
+    ) {
+      workgroupAccessError.value = friendlyWorkgroupError(
+        new Error("not_authorized: node not in workgroup ACL"),
+      );
+      error.value = workgroupAccessError.value;
+    }
+  } catch {
+    // ACL reads can be unavailable for older Manage deployments; sending will
+    // still surface the normalized authorization error from the POST path.
+  }
+}
+
+async function sendQueuedNow(item) {
+  const qid = String(item?.queue_id || "").trim();
+  if (!workgroupId.value || !qid) return;
+  try {
+    await api.sendWorkgroupHumanQueueItemNow(workgroupId.value, qid);
+    await refreshHumanQueue();
+    startQueuePoll();
+  } catch (e) {
+    setWorkgroupError(e, "立即发送失败");
+  }
+}
+
 async function send() {
   let text = draft.value.trim();
   if (!text || !workgroupId.value) return;
@@ -755,7 +814,7 @@ async function send() {
       await refreshHumanQueue();
       startQueuePoll();
     } catch (e) {
-      error.value = e?.message || "入队失败";
+      setWorkgroupError(e, "入队失败");
       draft.value = stripLeadingMention(text, sentDirect?.display_name);
       directMember.value = sentDirect;
     }
@@ -847,7 +906,7 @@ async function send() {
     const aborted = e?.name === "AbortError" || /abort/i.test(String(e?.message || ""));
     clearLive();
     if (!aborted) {
-      error.value = e?.message || "发送失败";
+      setWorkgroupError(e, "发送失败");
       draft.value = stripLeadingMention(text, sentDirect?.display_name);
       directMember.value = sentDirect;
     }
@@ -1030,7 +1089,7 @@ function eventLabel(ev) {
     }
     return actor || "human";
   }
-  if (type === "actor_final_text") {
+  if (type === "actor_final_text" || type === "assistant_content") {
     if (actor === "leader") return "Supervisor";
     if (actor && memberNameById.value[actor]) return memberNameById.value[actor];
     return actor || "member";
@@ -1129,6 +1188,7 @@ function buildAssignIndex(list) {
   const finishedByAssign = {};
   const startedByAssign = {};
   const memberFinalByAssign = {};
+  const assistantContentByAssign = {};
   const noticeIndexByEventId = {};
   for (const ev of list || []) {
     const t = String(ev?.type || "");
@@ -1148,6 +1208,9 @@ function buildAssignIndex(list) {
     } else if (t === "actor_final_text") {
       const actor = String(ev?.actor_id || "").trim();
       if (actor && actor !== "leader") memberFinalByAssign[aid] = ev;
+    } else if (t === "assistant_content") {
+      if (!assistantContentByAssign[aid]) assistantContentByAssign[aid] = [];
+      assistantContentByAssign[aid].push(ev);
     }
   }
   return {
@@ -1157,6 +1220,7 @@ function buildAssignIndex(list) {
     finishedByAssign,
     startedByAssign,
     memberFinalByAssign,
+    assistantContentByAssign,
     noticeIndexByEventId,
   };
 }
@@ -1233,7 +1297,7 @@ function toolKindLabel(toolName) {
   return "tool";
 }
 
-function makeAssignItem(started, finished, notices, isDirect, memberFinal) {
+function makeAssignItem(started, finished, notices, isDirect, memberFinal, assistantContents = []) {
   const noticeList = Array.isArray(notices) ? notices : notices ? [notices] : [];
   const lastNotice = noticeList.length ? noticeList[noticeList.length - 1] : null;
   const noticeText = lastNotice ? String(lastNotice.text || "").trim() : "";
@@ -1255,12 +1319,30 @@ function makeAssignItem(started, finished, notices, isDirect, memberFinal) {
     reportActorLabel ||
     "";
   const failed = finished ? /失败|中断/.test(String(finished.text || "")) : false;
-  const steps = noticeList.map((ev, idx) => {
+  const contentList = Array.isArray(assistantContents) ? assistantContents : [];
+  const activity = [
+    ...contentList.map((ev) => ({ kind: "content", ev })),
+    ...noticeList.map((ev) => ({ kind: "tool", ev })),
+  ].sort((a, b) => Number(a.ev?.seq || 0) - Number(b.ev?.seq || 0));
+  const lastToolIndex = activity.reduce(
+    (last, entry, index) => (entry.kind === "tool" ? index : last),
+    -1,
+  );
+  const steps = activity.flatMap((entry, idx) => {
+    const ev = entry.ev;
+    if (entry.kind === "content") {
+      return [{
+        key: ev.event_id || `content-${ev.seq || idx}`,
+        kind: "content",
+        text: String(ev.text || ""),
+      }];
+    }
     const p = parseNoticeTool(ev?.text);
-    const isLast = idx === noticeList.length - 1;
+    const isLast = idx === lastToolIndex;
     const done = Boolean(finished) || !isLast;
     return {
       key: ev.event_id || `step-${ev.seq || idx}`,
+      kind: "tool",
       toolName: p.toolName,
       toolKind: toolKindLabel(p.toolName),
       summary: p.summary,
@@ -1308,6 +1390,28 @@ function makeDirectToolItem(ev, { assignFinished, isLast, failed }) {
     done,
     failed: Boolean(failed && done && isLast),
     inProgress: !done,
+  };
+}
+
+function makeLeaderToolItem(ev) {
+  const parsed = parseNoticeTool(ev?.text);
+  const inProgress = Boolean(
+    sending.value &&
+      streamMode.value === "leader" &&
+      streamActorId.value === "leader" &&
+      streamPhase.value === "tool" &&
+      Number(ev?.seq || 0) > Number(statusWatermarkSeq.value || 0),
+  );
+  return {
+    key: ev.event_id || `leader-tool-${ev.seq}`,
+    kind: "tool",
+    toolName: parsed.toolName,
+    toolKind: toolKindLabel(parsed.toolName),
+    summary: parsed.summary,
+    statusText: inProgress ? "生成中" : "已完成",
+    done: !inProgress,
+    failed: false,
+    inProgress,
   };
 }
 
@@ -1363,6 +1467,7 @@ const eventGroups = computed(() => {
     finishedByAssign,
     startedByAssign,
     memberFinalByAssign,
+    assistantContentByAssign,
     noticeIndexByEventId,
   } = buildAssignIndex(list);
   const consumedFinished = new Set();
@@ -1385,7 +1490,14 @@ const eventGroups = computed(() => {
         role: "assistant",
         actorId,
         label: eventLabel({ ...ev, actor_id: actorId, type: "assign_started" }),
-        item: makeAssignItem(ev, finished, notices, false, memberFinal),
+        item: makeAssignItem(
+          ev,
+          finished,
+          notices,
+          false,
+          memberFinal,
+          aid ? assistantContentByAssign[aid] || [] : [],
+        ),
       });
       continue;
     }
@@ -1402,12 +1514,23 @@ const eventGroups = computed(() => {
         role: "assistant",
         actorId,
         label: eventLabel({ ...ev, actor_id: actorId, type: "assign_finished" }),
-        item: makeAssignItem(null, ev, notices, false, memberFinal),
+        item: makeAssignItem(
+          null,
+          ev,
+          notices,
+          false,
+          memberFinal,
+          aid ? assistantContentByAssign[aid] || [] : [],
+        ),
       });
       continue;
     }
 
     // 编排态成员回报并入分派气泡折叠展示；直连仍走普通消息
+    if (t === "assistant_content" && aid && !directAssignIds.has(aid)) {
+      continue;
+    }
+
     if (t === "actor_final_text") {
       const actor = String(ev?.actor_id || "").trim();
       if (actor && actor !== "leader" && aid && !directAssignIds.has(aid)) {
@@ -1436,6 +1559,15 @@ const eventGroups = computed(() => {
             isLast,
             failed,
           }),
+        });
+        continue;
+      }
+      if (actorId === "leader") {
+        flat.push({
+          role: "assistant",
+          actorId,
+          label: eventLabel(ev),
+          item: makeLeaderToolItem(ev),
         });
         continue;
       }
@@ -1681,7 +1813,16 @@ watch(
     debugHistory.value = null;
     debugError.value = "";
     error.value = "";
-    await Promise.all([loadTimeline(), loadWorkgroupMeta(), loadMembers(), loadPendingHitl()]);
+    workgroupAccessError.value = "";
+    await Promise.all([
+      loadSelf(),
+      loadTimeline(),
+      loadWorkgroupMeta(),
+      loadMembers(),
+      loadPendingHitl(),
+      refreshHumanQueue(),
+    ]);
+    await loadWorkgroupAccess();
     scrollTimelineTail();
     if (id) {
       startPoll();
@@ -1714,7 +1855,6 @@ watch(
 );
 
 onMounted(() => {
-  loadSelf();
   bindTimelineResizeObserver();
   document.addEventListener("pointerdown", onModelMenuPointerDown, true);
   document.addEventListener("keydown", onModelMenuKeydown, true);
@@ -1949,15 +2089,20 @@ onUnmounted(() => {
                         v-if="item.steps?.length"
                         class="wg-task__steps"
                       >
-                        <div
-                          v-for="step in item.steps"
-                          :key="step.key"
-                          class="wg-tool-row"
-                          :class="{
-                            'wg-tool-row--progress': step.inProgress,
-                            [`wg-tool-row--${step.toolKind || 'tool'}`]: true,
-                          }"
-                        >
+                        <template v-for="step in item.steps" :key="step.key">
+                          <div
+                            v-if="step.kind === 'content'"
+                            class="wg-task__pre-tool tool-exec-bubble__markdown assistant-msg__md"
+                            v-html="renderMarkdown(step.text)"
+                          />
+                          <div
+                            v-else
+                            class="wg-tool-row"
+                            :class="{
+                              'wg-tool-row--progress': step.inProgress,
+                              [`wg-tool-row--${step.toolKind || 'tool'}`]: true,
+                            }"
+                          >
                           <div class="wg-tool-row__bar">
                             <span class="wg-tool-row__glyph" aria-hidden="true">
                               <span v-if="step.inProgress" class="tool-exec-spinner" />
@@ -1976,7 +2121,8 @@ onUnmounted(() => {
                               {{ step.statusText }}
                             </span>
                           </div>
-                        </div>
+                          </div>
+                        </template>
                       </div>
                       <div v-if="item.hasReport" class="wg-task__report">
                         <button
@@ -2227,6 +2373,9 @@ onUnmounted(() => {
               </template>
               <template v-else>
                 <span class="chat__queue-text" :title="item.text">{{ item.text }}</span>
+                <button type="button" class="chat__queue-btn chat__queue-btn--send" @click="sendQueuedNow(item)">
+                  立即发送
+                </button>
                 <button type="button" class="chat__queue-btn" @click="beginEditQueued(item)">修改</button>
                 <button
                   type="button"
@@ -2931,6 +3080,18 @@ onUnmounted(() => {
   margin: 0;
   background: color-mix(in srgb, var(--color-text, #111827) 1.5%, var(--color-surface, #fff));
 }
+.wg-task__pre-tool {
+  padding: 2px 4px 6px;
+  color: var(--color-text, #111827);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.wg-task__pre-tool > :first-child {
+  margin-top: 0;
+}
+.wg-task__pre-tool > :last-child {
+  margin-bottom: 0;
+}
 .wg-task__report {
   border-top: 1px solid var(--color-border, #e5e7eb);
 }
@@ -3186,6 +3347,9 @@ onUnmounted(() => {
 }
 .chat__queue-btn--ghost {
   color: var(--color-text-muted, #6b7280);
+}
+.chat__queue-btn--send {
+  font-weight: 600;
 }
 .wg-chat :deep(.chat__composer-pill) {
   padding-left: 16px;

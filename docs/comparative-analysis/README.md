@@ -12,6 +12,8 @@
 
 ## 文档约定
 
+本目录的主要对标口径是：`DAgents Node + Web UI` 对标 DeepSeek Harness，DAgents 执行层对标 Codex，Manage 作为 DAgents 自有的企业控制面单独分析。
+
 - `baseline-2026-08.md`：当前基线对比报告。
 - 后续报告建议按 `YYYY-MM.md` 或 `YYYY-MM-DD.md` 命名。
 - 每次更新至少包含：

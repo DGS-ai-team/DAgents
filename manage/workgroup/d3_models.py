@@ -20,6 +20,7 @@ class TimelineEvent(BaseModel):
     seq: int = Field(ge=1)
     type: Literal[
         "human_message",
+        "assistant_content",
         "actor_final_text",
         "system_notice",
         "assign_started",
@@ -70,6 +71,7 @@ class QueuedHumanRecord(BaseModel):
     client_message_id: str | None = None
     direct_member_id: str | None = None
     disable_tools: bool = False
+    priority: int = 0
     created_at: str
     updated_at: str
 
