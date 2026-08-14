@@ -141,10 +141,15 @@ impl Server {
         } else {
             DEFAULT_TTL
         };
-        self.ui_focus.report(&parsed.agent_id, ttl);
+        self.ui_focus
+            .report(&parsed.source_id, &parsed.agent_id, ttl);
         json_response(
             StatusCode(200),
-            &json!({ "ok": true, "agent_id": parsed.agent_id }),
+            &json!({
+                "ok": true,
+                "agent_id": parsed.agent_id,
+                "source_id": parsed.source_id,
+            }),
         )
     }
 }
@@ -347,6 +352,8 @@ struct ApplyResponse {
 struct UIFocusRequest {
     #[serde(default)]
     agent_id: String,
+    #[serde(default)]
+    source_id: String,
     #[serde(default)]
     ttl_seconds: i32,
 }
