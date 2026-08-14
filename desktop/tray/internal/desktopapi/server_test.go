@@ -80,7 +80,7 @@ func TestClipboardFilesEndpoint(t *testing.T) {
 func TestUIFocusEndpoint(t *testing.T) {
 	focus := uifocus.NewStore()
 	srv := New(nil, nil, focus)
-	body := strings.NewReader(`{"agent_id":"sess-1","ttl_seconds":60}`)
+	body := strings.NewReader(`{"agent_id":"sess-1","source_id":"tab-1","ttl_seconds":60}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/desktop/ui/focus", body)
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)
@@ -89,6 +89,9 @@ func TestUIFocusEndpoint(t *testing.T) {
 	}
 	if !focus.IsFocused("sess-1") {
 		t.Fatal("expected session focused")
+	}
+	if focus.FocusedSession() != "sess-1" {
+		t.Fatal("expected focused session from source claim")
 	}
 }
 

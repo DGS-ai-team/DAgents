@@ -63,7 +63,10 @@ describe("desktopFocus", () => {
 
     startDesktopFocusHeartbeat(() => "agt-b");
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledWith("agt-b", { ttlSeconds: 90 });
+    expect(reportDesktopUIFocus).toHaveBeenCalledWith(
+      "agt-b",
+      expect.objectContaining({ ttlSeconds: 90, sourceId: expect.any(String) }),
+    );
   });
 
   it("clears focus on stop", async () => {
@@ -73,7 +76,10 @@ describe("desktopFocus", () => {
 
     stopDesktopFocusHeartbeat();
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledWith("", { ttlSeconds: 90 });
+    expect(reportDesktopUIFocus).toHaveBeenCalledWith(
+      "",
+      expect.objectContaining({ ttlSeconds: 90, sourceId: expect.any(String) }),
+    );
   });
 
   it("pauses heartbeat and clears focus when document hidden", async () => {
@@ -85,7 +91,10 @@ describe("desktopFocus", () => {
     document.addEventListener.mock.calls
       .find(([event]) => event === "visibilitychange")?.[1]();
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledWith("", { ttlSeconds: 90 });
+    expect(reportDesktopUIFocus).toHaveBeenCalledWith(
+      "",
+      expect.objectContaining({ ttlSeconds: 90, sourceId: expect.any(String) }),
+    );
 
     vi.mocked(reportDesktopUIFocus).mockClear();
     await vi.advanceTimersByTimeAsync(30_000);
@@ -95,7 +104,10 @@ describe("desktopFocus", () => {
     document.addEventListener.mock.calls
       .find(([event]) => event === "visibilitychange")?.[1]();
     await Promise.resolve();
-    expect(reportDesktopUIFocus).toHaveBeenCalledWith("agt-a", { ttlSeconds: 90 });
+    expect(reportDesktopUIFocus).toHaveBeenCalledWith(
+      "agt-a",
+      expect.objectContaining({ ttlSeconds: 90, sourceId: expect.any(String) }),
+    );
     document.visibilityState = "visible";
   });
 });

@@ -763,7 +763,12 @@ fn sync_notifier(shared: &Shared, entries: &[pending::Entry]) {
     let mut retain = HashSet::new();
     let mut toast_entries = Vec::new();
     for entry in entries {
-        if shared.ui_focus.is_focused(&entry.session_id) {
+        let focus_id = if entry.agent_id.trim().is_empty() {
+            entry.session_id.trim()
+        } else {
+            entry.agent_id.trim()
+        };
+        if shared.ui_focus.is_focused(focus_id) {
             retain.insert(entry.session_id.clone());
         } else {
             toast_entries.push(entry.clone());

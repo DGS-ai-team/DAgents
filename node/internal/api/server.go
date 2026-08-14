@@ -4,10 +4,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -489,6 +491,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		mgr.OnStreamEvent(ev)
 	})
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("POST /v1/desktop/ui/focus", s.handleDesktopUIFocus)
 	s.mux.HandleFunc("GET /v1/agent/info", s.handleAgentInfo)
 	s.mux.HandleFunc("GET /v1/agent/update", s.handleAgentUpdate)
 	s.mux.HandleFunc("GET /v1/agent/upgrade-readiness", s.handleAgentUpgradeReadiness)
@@ -510,6 +513,50 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 	s.mux.Handle("GET /ui/", webui.Handler())
 	s.mux.HandleFunc("GET /ui", webui.RedirectHandler())
 	return s
+}
+
+const desktopFocusRelayURL = "http://127.0.0.1:18767/v1/desktop/ui/focus"
+
+// handleDesktopUIFocus relays focus claims from a remote browser to the Shell
+// running beside this Node. The Web UI first tries the browser-local Shell API;
+// this same-origin fallback covers a browser connected to a remote Node host.
+func (s *Server) handleDesktopUIFocus(w http.ResponseWriter, r *http.Request) {
+	var body io.Reader = http.NoBody
+	if r.Body != nil {
+		body = io.LimitReader(r.Body, 16<<10)
+	}
+	payload, err := io.ReadAll(body)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_focus_request", err.Error(), nil)
+		return
+	}
+	request, err := http.NewRequestWithContext(
+		r.Context(),
+		http.MethodPost,
+		desktopFocusRelayURL,
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "desktop_relay_failed", err.Error(), nil)
+		return
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "desktop_unavailable", "Shell desktop API is unavailable", nil)
+		return
+	}
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 32<<10))
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "desktop_relay_failed", err.Error(), nil)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(response.StatusCode)
+	_, _ = w.Write(responseBody)
 }
 
 // attachNodeRuntimeDeps 将 Node 级运行时依赖挂到工具 Registry（默认表与 per-agent 共用）。

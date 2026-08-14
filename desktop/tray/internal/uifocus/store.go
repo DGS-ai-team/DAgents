@@ -1,5 +1,4 @@
-// Package uifocus 记录 Web UI 当前聚焦的 Agent（F-E9），用于抑制同 Agent 新 Toast。
-// 线协议字段为 agent_id（Agent 实例 UUID）。
+// Package uifocus records Web UI focus claims used to suppress duplicate toasts.
 package uifocus
 
 import (
@@ -8,43 +7,50 @@ import (
 	"time"
 )
 
-// DefaultTTL 为 focus 上报默认有效期；Web UI 应周期性续期。
+// DefaultTTL is the default lifetime of a focus claim.
 const DefaultTTL = 90 * time.Second
 
-// Store 线程安全地保存 UI 聚焦 Agent 及过期时间。
 type Store struct {
-	mu        sync.Mutex
-	sessionID string
+	mu     sync.Mutex
+	claims map[string]claim
+}
+
+type claim struct {
+	agentID   string
 	expiresAt time.Time
 }
 
-// NewStore 构造 focus 存储。
 func NewStore() *Store {
-	return &Store{}
+	return &Store{claims: make(map[string]claim)}
 }
 
-// Report 设置或清除聚焦 Agent；agentID 为空表示清除。
-func (s *Store) Report(agentID string, ttl time.Duration) {
+// Report sets or clears a focus claim owned by one Web UI source.
+// An empty source_id is kept as a legacy claim for older Web UI clients.
+func (s *Store) Report(sourceID, agentID string, ttl time.Duration) {
 	if s == nil {
 		return
 	}
 	if ttl <= 0 {
 		ttl = DefaultTTL
 	}
+	sourceID = strings.TrimSpace(sourceID)
 	agentID = strings.TrimSpace(agentID)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureClaimsLocked()
+	s.pruneExpiredLocked()
+	if sourceID == "" {
+		sourceID = "legacy"
+	}
 	if agentID == "" {
-		s.sessionID = ""
-		s.expiresAt = time.Time{}
+		delete(s.claims, sourceID)
 		return
 	}
-	s.sessionID = agentID
-	s.expiresAt = time.Now().Add(ttl)
+	s.claims[sourceID] = claim{agentID: agentID, expiresAt: time.Now().Add(ttl)}
 }
 
-// IsFocused 判断 Agent 是否处于 UI 聚焦抑制窗口内。
+// IsFocused reports whether any live Web UI source is viewing the Agent.
 func (s *Store) IsFocused(agentID string) bool {
 	if s == nil {
 		return false
@@ -55,21 +61,42 @@ func (s *Store) IsFocused(agentID string) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.sessionID == "" || s.sessionID != agentID {
-		return false
+	s.ensureClaimsLocked()
+	s.pruneExpiredLocked()
+	for _, item := range s.claims {
+		if item.agentID == agentID {
+			return true
+		}
 	}
-	return time.Now().Before(s.expiresAt)
+	return false
 }
 
-// FocusedSession 返回当前聚焦 session（测试用）；过期时返回空串。
+// FocusedSession returns one live focused Agent for diagnostics and tests.
 func (s *Store) FocusedSession() string {
 	if s == nil {
 		return ""
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.sessionID == "" || time.Now().After(s.expiresAt) {
-		return ""
+	s.ensureClaimsLocked()
+	s.pruneExpiredLocked()
+	for _, item := range s.claims {
+		return item.agentID
 	}
-	return s.sessionID
+	return ""
+}
+
+func (s *Store) ensureClaimsLocked() {
+	if s.claims == nil {
+		s.claims = make(map[string]claim)
+	}
+}
+
+func (s *Store) pruneExpiredLocked() {
+	now := time.Now()
+	for sourceID, item := range s.claims {
+		if !now.Before(item.expiresAt) {
+			delete(s.claims, sourceID)
+		}
+	}
 }
