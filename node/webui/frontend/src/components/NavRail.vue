@@ -156,7 +156,7 @@ async function refreshAgents({ force = false } = {}) {
     await railCache.agentsInFlight;
     agents.value = [...railCache.agents];
   } catch {
-    agents.value = [];
+    // Keep the last successful list during transient refresh failures.
   } finally {
     loadingAgents.value = false;
     emit("agents-updated", agents.value.slice());
@@ -189,7 +189,7 @@ async function refreshWorkgroups({ force = false } = {}) {
     await railCache.workgroupsInFlight;
     workgroups.value = [...railCache.workgroups];
   } catch {
-    workgroups.value = [];
+    // Keep the last successful list during transient refresh failures.
   } finally {
     loadingWgs.value = false;
   }
@@ -219,7 +219,9 @@ async function refresh({ force = true } = {}) {
   await refreshWorkgroupUnread(workgroups.value);
   // 已展开的工作组刷新成员
   await Promise.all(
-    workgroups.value.map((wg) => loadMembers(wg.workgroup_id, true)),
+    workgroups.value
+      .filter((wg) => expanded.value.has(wg.workgroup_id))
+      .map((wg) => loadMembers(wg.workgroup_id, true)),
   );
 }
 
@@ -494,8 +496,7 @@ defineExpose({
       </header>
 
       <div v-if="sectionOpen.agents">
-      <div v-if="loadingAgents" class="nav-rail__hint">加载中…</div>
-      <ul v-else class="nav-rail__list">
+      <ul class="nav-rail__list" :aria-busy="loadingAgents">
         <li
           v-for="a in sortedAgents"
           :key="agentRecordId(a)"
@@ -589,7 +590,8 @@ defineExpose({
             </button>
           </div>
         </li>
-        <li v-if="!sortedAgents.length" class="nav-rail__empty">暂无智能体</li>
+        <li v-if="!sortedAgents.length && loadingAgents" class="nav-rail__hint">加载中…</li>
+        <li v-else-if="!sortedAgents.length" class="nav-rail__empty">暂无智能体</li>
       </ul>
       </div>
     </section>
@@ -683,8 +685,7 @@ defineExpose({
         </div>
       </form>
 
-      <div v-if="loadingWgs" class="nav-rail__hint">加载中…</div>
-      <ul v-else class="nav-rail__list">
+      <ul class="nav-rail__list" :aria-busy="loadingWgs">
         <li
           v-for="wg in workgroups"
           :key="wg.workgroup_id"
@@ -829,7 +830,8 @@ defineExpose({
             </template>
           </ul>
         </li>
-        <li v-if="!workgroups.length" class="nav-rail__empty">暂无工作组</li>
+        <li v-if="!workgroups.length && loadingWgs" class="nav-rail__hint">加载中…</li>
+        <li v-else-if="!workgroups.length" class="nav-rail__empty">暂无工作组</li>
       </ul>
       </div>
     </section>

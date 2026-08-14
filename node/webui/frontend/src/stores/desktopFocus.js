@@ -1,8 +1,26 @@
 import { reportDesktopUIFocus } from "../api/desktop.js";
 
-/** Shell focus TTL 90s；心跳 30s 续期（F-X5 / F-E9）。 */
+/** Shell focus TTL 90s; heartbeat 30s. */
 export const DESKTOP_FOCUS_HEARTBEAT_MS = 30_000;
 const FOCUS_TTL_SECONDS = 90;
+const FOCUS_SOURCE_STORAGE_KEY = "dagents_desktop_focus_source";
+
+function createFocusSourceId() {
+  try {
+    const existing = window.sessionStorage?.getItem(FOCUS_SOURCE_STORAGE_KEY);
+    if (existing) return existing;
+    const generated =
+      globalThis.crypto?.randomUUID?.() ||
+      `webui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    window.sessionStorage?.setItem(FOCUS_SOURCE_STORAGE_KEY, generated);
+    return generated;
+  } catch {
+    return `webui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
+// Each tab owns an independent claim, so a hidden tab cannot clear a visible tab.
+const FOCUS_SOURCE_ID = createFocusSourceId();
 
 let heartbeatId = null;
 let getAgentIdFn = () => "";
@@ -11,7 +29,7 @@ let lastSentAt = 0;
 let paused = false;
 let visibilityListener = null;
 
-/** 合并 mount/hydrate/switch 的瞬时重复上报；心跳 30s 间隔不受影响。 */
+/** Merge mount/hydrate/switch reports while keeping the heartbeat interval. */
 const MIN_REPORT_INTERVAL_MS = 1_000;
 
 function isDocumentVisible() {
@@ -26,7 +44,10 @@ async function sendFocus(agentId, { force = false } = {}) {
   }
   lastSentAgentId = id;
   lastSentAt = now;
-  await reportDesktopUIFocus(id, { ttlSeconds: FOCUS_TTL_SECONDS });
+  await reportDesktopUIFocus(id, {
+    ttlSeconds: FOCUS_TTL_SECONDS,
+    sourceId: FOCUS_SOURCE_ID,
+  });
 }
 
 function onVisibilityChange() {
@@ -39,13 +60,13 @@ function onVisibilityChange() {
   }
 }
 
-/** 立即上报当前 Agent（切换时调用）。 */
+/** Immediately report the current Agent, for route switches. */
 export function pulseDesktopFocus() {
   if (paused) return;
   void sendFocus(getAgentIdFn(), { force: true });
 }
 
-/** 聊天页可见时启动 30s 心跳；首次立即上报。 */
+/** Start the heartbeat while a chat page is visible. */
 export function startDesktopFocusHeartbeat(getAgentId) {
   stopDesktopFocusHeartbeat({ clearRemote: false });
   getAgentIdFn = getAgentId ?? (() => "");
@@ -66,7 +87,7 @@ export function startDesktopFocusHeartbeat(getAgentId) {
   }
 }
 
-/** 离开聊天页时停止心跳并清除 Shell focus。 */
+/** Stop the heartbeat and clear only this tab's Shell focus claim. */
 export function stopDesktopFocusHeartbeat({ clearRemote = true } = {}) {
   if (heartbeatId != null) {
     clearInterval(heartbeatId);

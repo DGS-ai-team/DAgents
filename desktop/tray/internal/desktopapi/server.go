@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/clipboard"
-	shellupdate "github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
 	"github.com/DGS-ai-team/DAgents/desktop/tray/internal/uifocus"
+	shellupdate "github.com/DGS-ai-team/DAgents/desktop/tray/internal/update"
 	sharedupdate "github.com/DGS-ai-team/DAgents/shared/update"
 )
 
@@ -135,11 +135,12 @@ func (s *Server) handleUIFocus(w http.ResponseWriter, r *http.Request) {
 		ttl = time.Duration(req.TTLSeconds) * time.Second
 	}
 	if s.uiFocus != nil {
-		s.uiFocus.Report(req.AgentID, ttl)
+		s.uiFocus.Report(req.SourceID, req.AgentID, ttl)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":       true,
-		"agent_id": req.AgentID,
+		"ok":        true,
+		"agent_id":  req.AgentID,
+		"source_id": req.SourceID,
 	})
 }
 
@@ -185,5 +186,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 type uiFocusRequest struct {
 	AgentID    string `json:"agent_id"`
+	SourceID   string `json:"source_id,omitempty"`
 	TTLSeconds int    `json:"ttl_seconds,omitempty"`
 }

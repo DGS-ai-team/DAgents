@@ -47,14 +47,47 @@ export async function getDesktopClipboardFiles() {
   return desktopFetch("/v1/desktop/clipboard/files");
 }
 
+async function relayDesktopFocus(body) {
+  const resp = await fetch(new URL("/v1/desktop/ui/focus", window.location.origin), {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status}`);
+  }
+  return resp.json();
+}
+
+let lastFocusWarning = "";
+
 /** F-X5 / F-E9：上报 Web UI 当前聚焦 Agent；空串清除。 */
-export async function reportDesktopUIFocus(agentId, { ttlSeconds = 90 } = {}) {
+export async function reportDesktopUIFocus(
+  agentId,
+  { ttlSeconds = 90, sourceId = "" } = {},
+) {
+  const body = {
+    agent_id: agentId || "",
+    ttl_seconds: ttlSeconds,
+    source_id: sourceId || "",
+  };
   try {
     await desktopFetch("/v1/desktop/ui/focus", {
       method: "POST",
-      body: { agent_id: agentId || "", ttl_seconds: ttlSeconds },
+      body,
     });
-  } catch {
-    /* Shell unavailable */
+    return "shell";
+  } catch (directError) {
+    try {
+      await relayDesktopFocus(body);
+      return "node-relay";
+    } catch (relayError) {
+      const message = relayError?.message || directError?.message || "Shell unavailable";
+      if (message !== lastFocusWarning) {
+        console.warn("DAgents desktop focus unavailable:", message);
+        lastFocusWarning = message;
+      }
+      return "unavailable";
+    }
   }
 }

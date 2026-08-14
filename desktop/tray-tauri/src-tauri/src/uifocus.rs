@@ -1,5 +1,6 @@
 //! Web UI 聚焦 Agent 记录，用于抑制同 Agent Toast。
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -12,8 +13,13 @@ pub struct Store {
 
 #[derive(Debug, Default)]
 struct FocusState {
+    claims: HashMap<String, FocusClaim>,
+}
+
+#[derive(Debug)]
+struct FocusClaim {
     agent_id: String,
-    expires_at: Option<Instant>,
+    expires_at: Instant,
 }
 
 impl Store {
@@ -21,19 +27,26 @@ impl Store {
         Self::default()
     }
 
-    pub fn report(&self, agent_id: &str, ttl: Duration) {
+    pub fn report(&self, source_id: &str, agent_id: &str, ttl: Duration) {
         let ttl = if ttl.is_zero() { DEFAULT_TTL } else { ttl };
+        let source_id = source_id.trim();
         let agent_id = agent_id.trim();
         let Ok(mut state) = self.inner.lock() else {
             return;
         };
+        prune_expired(&mut state.claims);
+        let source_id = if source_id.is_empty() { "legacy" } else { source_id };
         if agent_id.is_empty() {
-            state.agent_id.clear();
-            state.expires_at = None;
+            state.claims.remove(source_id);
             return;
         }
-        state.agent_id = agent_id.to_string();
-        state.expires_at = Some(Instant::now() + ttl);
+        state.claims.insert(
+            source_id.to_string(),
+            FocusClaim {
+                agent_id: agent_id.to_string(),
+                expires_at: Instant::now() + ttl,
+            },
+        );
     }
 
     pub fn is_focused(&self, agent_id: &str) -> bool {
@@ -41,31 +54,31 @@ impl Store {
         if agent_id.is_empty() {
             return false;
         }
-        let Ok(state) = self.inner.lock() else {
+        let Ok(mut state) = self.inner.lock() else {
             return false;
         };
-        state.agent_id == agent_id
-            && state
-                .expires_at
-                .map(|expires_at| Instant::now() < expires_at)
-                .unwrap_or(false)
+        prune_expired(&mut state.claims);
+        state.claims.values().any(|claim| claim.agent_id == agent_id)
     }
 
     #[cfg(test)]
     pub fn focused_session(&self) -> String {
-        let Ok(state) = self.inner.lock() else {
+        let Ok(mut state) = self.inner.lock() else {
             return String::new();
         };
-        if state
-            .expires_at
-            .map(|expires_at| Instant::now() < expires_at)
-            .unwrap_or(false)
-        {
-            state.agent_id.clone()
-        } else {
-            String::new()
-        }
+        prune_expired(&mut state.claims);
+        state
+            .claims
+            .values()
+            .next()
+            .map(|claim| claim.agent_id.clone())
+            .unwrap_or_default()
     }
+}
+
+fn prune_expired(claims: &mut HashMap<String, FocusClaim>) {
+    let now = Instant::now();
+    claims.retain(|_, claim| now < claim.expires_at);
 }
 
 #[cfg(test)]
@@ -75,7 +88,7 @@ mod tests {
     #[test]
     fn reports_and_expires_focus() {
         let store = Store::new();
-        store.report(" a1 ", Duration::from_millis(20));
+        store.report("tab-a", " a1 ", Duration::from_millis(20));
         assert!(store.is_focused("a1"));
         std::thread::sleep(Duration::from_millis(30));
         assert!(!store.is_focused("a1"));
@@ -84,8 +97,19 @@ mod tests {
     #[test]
     fn clears_empty_focus() {
         let store = Store::new();
-        store.report("a1", DEFAULT_TTL);
-        store.report("", DEFAULT_TTL);
+        store.report("tab-a", "a1", DEFAULT_TTL);
+        store.report("tab-a", "", DEFAULT_TTL);
         assert_eq!(store.focused_session(), "");
+    }
+
+    #[test]
+    fn clearing_one_source_does_not_clear_another() {
+        let store = Store::new();
+        store.report("tab-a", "a1", DEFAULT_TTL);
+        store.report("tab-b", "a1", DEFAULT_TTL);
+        store.report("tab-a", "", DEFAULT_TTL);
+        assert!(store.is_focused("a1"));
+        store.report("tab-b", "", DEFAULT_TTL);
+        assert!(!store.is_focused("a1"));
     }
 }
