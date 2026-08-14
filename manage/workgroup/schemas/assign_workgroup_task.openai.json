@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "assign_workgroup_task",
-    "description": "Synchronously assign work to one workgroup member. Blocks until assign reaches a terminal status. v1 member tools are limited to read_file on workspace-relative paths (e.g. README); do not ask members to open host absolute paths.",
+    "description": "Assign work to one workgroup member and wait until it reaches a terminal status. Multiple assignments to different members may run concurrently; the same member remains single-flight. v1 member tools are limited to read_file on workspace-relative paths (e.g. README); do not ask members to open host absolute paths.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
@@ -25,10 +25,6 @@
           "minLength": 1,
           "maxLength": 16000,
           "description": "Task for the member. For file reads, prefer relative paths under the member workspace."
-        },
-        "context_hint": {
-          "type": "string",
-          "maxLength": 2000
         }
       }
     }
@@ -95,7 +91,7 @@
     ]
   },
   "invariants": [
-    "exactly_one_active_assign_per_workgroup_v1",
+    "at_most_one_active_assign_per_member",
     "tool_result_exactly_one_per_tool_call_id",
     "timeline_actor_final_text_deduped_by_assign_id_for_leader_context"
   ]

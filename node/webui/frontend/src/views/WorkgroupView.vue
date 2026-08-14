@@ -221,6 +221,7 @@ function clearLive() {
   streamToolName.value = "";
   streamMode.value = "";
   streamActorId.value = "";
+  statusWatermarkSeq.value = 0;
 }
 
 const memberNameById = computed(() => {
@@ -352,16 +353,19 @@ function applyRemoteRealtime(payload) {
   if (eventType === "status") {
     remoteSending.value = true;
     remoteClientMessageId.value = liveMessageId;
-    if (isNewRemoteTurn) liveAssistant.value = null;
+    if (isNewRemoteTurn) {
+      liveAssistant.value = null;
+      statusWatermarkSeq.value = (events.value || []).reduce(
+        (max, event) => Math.max(max, Number(event?.seq || 0)),
+        0,
+      );
+    }
     streamPhase.value = String(data.phase || "thinking");
     streamToolName.value = String(data.purpose || "");
     streamMode.value = String(data.mode || "leader");
     streamActorId.value = String(
       data.member_id || (streamMode.value === "leader" ? "leader" : streamActorId.value),
     );
-    if (streamPhase.value === "tool" && liveAssistant.value) {
-      liveAssistant.value = { ...liveAssistant.value, text: "" };
-    }
   } else if (eventType === "delta") {
     remoteSending.value = true;
     remoteClientMessageId.value = liveMessageId;
@@ -401,6 +405,7 @@ function applyRemoteRealtime(payload) {
     remoteSending.value = false;
     remoteClientMessageId.value = "";
     liveAssistant.value = null;
+    statusWatermarkSeq.value = 0;
     streamPhase.value = "";
     streamToolName.value = "";
     streamActorId.value = "";
@@ -802,9 +807,6 @@ async function send() {
             if (data?.mode) streamMode.value = String(data.mode);
             if (data?.member_id) streamActorId.value = String(data.member_id);
             else if (streamMode.value === "leader") streamActorId.value = "leader";
-            if (phase === "tool" && liveAssistant.value) {
-              liveAssistant.value = { ...liveAssistant.value, text: "" };
-            }
             if (phase === "tool") {
               await loadTimeline().catch(() => {});
               await loadPendingHitl();
@@ -1411,23 +1413,6 @@ const eventGroups = computed(() => {
       if (actor && actor !== "leader" && aid && !directAssignIds.has(aid)) {
         continue;
       }
-      // 流式打字机进行中：Supervisor 终稿由 live 气泡展示，避免双份
-      if (
-        actor === "leader" &&
-        sending.value &&
-        liveAssistant.value &&
-        streamMode.value !== "direct"
-      ) {
-        continue;
-      }
-      if (
-        (sending.value || remoteSending.value) &&
-        liveAssistant.value &&
-        actor &&
-        actor === streamActorId.value
-      ) {
-        continue;
-      }
     }
 
     if (t === "system_notice") {
@@ -1863,12 +1848,13 @@ onUnmounted(() => {
         </div>
 
         <div class="wg-chat__body" :class="{ 'wg-chat__body--debug': debugOpen }">
-          <ScrollToTailButton :visible="showScrollToTail" @click="scrollTimelineTail" />
-          <div
-            ref="timelineEl"
-            class="wg-chat__timeline chat__stream"
-            @scroll="onTimelineScroll"
-          >
+          <div class="wg-chat__timeline-wrap">
+            <ScrollToTailButton :visible="showScrollToTail" @click="scrollTimelineTail" />
+            <div
+              ref="timelineEl"
+              class="wg-chat__timeline chat__stream"
+              @scroll="onTimelineScroll"
+            >
             <button
               v-if="hasEarlierMessages"
               type="button"
@@ -2162,6 +2148,7 @@ onUnmounted(() => {
                 <div class="chat__empty-title">开始对话</div>
                 <div class="chat__empty-hint">向工作组发言，Leader 会编排成员协作</div>
               </div>
+            </div>
             </div>
           </div>
           <aside v-if="debugOpen" class="wg-debug" aria-label="RunHistory 调试">
@@ -2556,11 +2543,18 @@ onUnmounted(() => {
   min-height: 0;
   background: var(--color-editor, #fff);
 }
-.wg-chat__body--debug .wg-chat__timeline {
-  flex: 1 1 58%;
+.wg-chat__timeline-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
 }
-.wg-chat__body--debug :deep(.chat__scroll-tail) {
-  right: calc(38% + 24px);
+.wg-chat__body--debug .wg-chat__timeline {
+  flex: 1 1 auto;
+}
+.wg-chat__body--debug .wg-chat__timeline-wrap {
+  flex: 1 1 58%;
 }
 .wg-debug {
   flex: 0 0 320px;
@@ -2833,7 +2827,10 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 12px 0;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px 12px;
 }
 .wg-task__toggle {
   display: flex;
@@ -2889,8 +2886,11 @@ onUnmounted(() => {
   align-items: center;
   gap: 5px;
   min-width: 0;
+  max-width: min(9rem, 42%);
+  overflow: hidden;
   font-size: 11px;
   color: var(--color-text-subtle, #9ca3af);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .wg-task__dots {

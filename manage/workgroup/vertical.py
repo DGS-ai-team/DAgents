@@ -240,7 +240,9 @@ class VerticalLoop:
         member = self.store.get_member(member_id)
         if member is None or member.workgroup_id != workgroup_id:
             raise WorkgroupError("not_found", "member not found", http_status=404)
-        if member.status != "ready":
+        if member.status != "ready" and not (
+            member.status == "busy" and member.active_assign_id == assign.assign_id
+        ):
             raise WorkgroupError("conflict", "member not ready", http_status=409)
         ctx = self.store.member_execution_context(member_id)
         allow = {str(n) for n in (ctx.get("tool_allow_names") or [])}
@@ -635,7 +637,9 @@ class VerticalLoop:
             member = self.store.get_member(member_id)
             if member is None or member.workgroup_id != workgroup_id:
                 raise WorkgroupError("not_found", "member not found", http_status=404)
-            if member.status != "ready":
+            if member.status != "ready" and not (
+                member.status == "busy" and member.active_assign_id == assign_id
+            ):
                 raise WorkgroupError("conflict", "member not ready", http_status=409)
             spec = self.store.get_spec(member_id)
             if spec is None:
@@ -648,6 +652,7 @@ class VerticalLoop:
             )
             run = self.store.prepare_actor_session(run.run_id, assign_id=assign_id)
             try:
+                kernel._append_turn_meta(workgroup_id, "member_run_ids", run.run_id)
                 kernel._update_turn(workgroup_id, member_run_id=run.run_id)
             except Exception:  # noqa: BLE001
                 pass

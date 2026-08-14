@@ -17,9 +17,13 @@ from manage.workgroup.errors import WorkgroupError  # noqa: E402
 from manage.workgroup.mentions import resolve_direct_member, strip_member_mention  # noqa: E402
 from manage.workgroup.models import (  # noqa: E402
     ACLPatchRequest,
+    ActorRunCreateRequest,
     MemberCreateRequest,
     WorkGroupCreateRequest,
 )
+from manage.workgroup.history import RunHistoryMessage  # noqa: E402
+from manage.workgroup import ids  # noqa: E402
+from manage.workgroup.llm_chat import ChatResult, MockLLMClient  # noqa: E402
 from manage.workgroup.native_tools import scripted_assign_completer  # noqa: E402
 from manage.workgroup.store import WorkGroupStore  # noqa: E402
 from manage.workgroup.turn_kernel import TurnKernel  # noqa: E402
@@ -120,6 +124,102 @@ class DirectMemberRouteTests(unittest.TestCase):
                     for e in store.list_timeline(wid)
                 )
             )
+
+    def test_direct_mention_reuses_supervisor_session_and_records_result(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, wid, member = self._ready_group(tmp)
+            client = MockLLMClient([ChatResult(content="follow-up", finish_reason="stop")])
+            kernel = TurnKernel(
+                store,
+                chat_client=client,
+                mock_llm=True,
+                assign_completer=scripted_assign_completer,
+            )
+
+            direct = kernel.handle_human_message(
+                wid,
+                text="@Alice 检查 README",
+                from_node_id="node-a",
+                direct_member_id=member.member_id,
+            )
+            leader_run_id = direct["leader_run"].run_id
+            leader_runs = store.list_actor_runs(wid, actor_id="leader")
+            self.assertEqual([run.run_id for run in leader_runs], [leader_run_id])
+
+            history = store.get_run_history(leader_run_id)
+            assert history is not None
+            self.assertIn("@Alice 检查 README", [m.content for m in history.messages])
+            self.assertIn(
+                "[scripted] 检查 README",
+                [m.content for m in history.messages],
+            )
+
+            follow_up = kernel.handle_human_message(
+                wid,
+                text="总结刚才的结果",
+                from_node_id="node-a",
+                disable_tools=True,
+            )
+            self.assertEqual(follow_up["leader_run"].run_id, leader_run_id)
+            self.assertEqual(len(store.list_actor_runs(wid, actor_id="leader")), 1)
+            self.assertIn(
+                "@Alice 检查 README",
+                [m.get("content") for m in client.calls[0]["messages"]],
+            )
+            self.assertIn(
+                "[scripted] 检查 README",
+                [m.get("content") for m in client.calls[0]["messages"]],
+            )
+
+    def test_legacy_duplicate_supervisor_runs_are_consolidated(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, wid, _member = self._ready_group(tmp)
+            first = store.create_actor_run(
+                wid,
+                ActorRunCreateRequest(actor_id="leader"),
+            )
+            second = store.create_actor_run(
+                wid,
+                ActorRunCreateRequest(actor_id="leader"),
+            )
+            store.append_run_history(
+                first.run_id,
+                [RunHistoryMessage(role="assistant", content="first session")],
+                timeline_watermark_seq=1,
+            )
+            store.append_run_history(
+                second.run_id,
+                [RunHistoryMessage(role="assistant", content="second session")],
+                timeline_watermark_seq=3,
+            )
+            store.append_timeline(
+                wid,
+                type="human_message",
+                actor_id="node-a",
+                text="@Alice legacy request",
+                protocol_name="human_node-a",
+            )
+            assign_id = ids.assign_id()
+            store.append_timeline(
+                wid,
+                type="actor_final_text",
+                actor_id="legacy-member",
+                text="legacy member result",
+                protocol_name="member_legacy-member",
+                assign_id=assign_id,
+            )
+
+            listed = store.list_actor_runs(wid, actor_id="leader")
+            self.assertEqual(len(listed), 1)
+            merged = store.get_run_history(listed[0].run_id)
+            assert merged is not None
+            contents = [m.content for m in merged.messages]
+            self.assertIn("first session", contents)
+            self.assertIn("second session", contents)
+            self.assertIn("@Alice legacy request", contents)
+            self.assertIn("legacy member result", contents)
+            all_listed = store.list_actor_runs(wid)
+            self.assertEqual(sum(run.actor_id == "leader" for run in all_listed), 1)
 
     def test_manual_leading_mention_stays_with_leader(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

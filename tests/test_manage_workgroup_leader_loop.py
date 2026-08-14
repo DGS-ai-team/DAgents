@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import sys
 import time
 import unittest
@@ -633,7 +634,7 @@ class LeaderLoopTests(unittest.TestCase):
             self.assertEqual(result["loop"]["status"], "succeeded")
             self.assertEqual(store.get_assign(stuck.assign_id).status, "failed")
 
-    def test_single_active_assign_enforced(self) -> None:
+    def test_same_member_active_assign_enforced(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
             wid, mid = self._ready_group(store)
@@ -644,6 +645,158 @@ class LeaderLoopTests(unittest.TestCase):
             with self.assertRaises(WorkgroupError) as ctx:
                 store.create_assign(wid, AssignCreateRequest(member_id=mid, instruction="b"))
             self.assertEqual(ctx.exception.code, "conflict")
+
+    def test_different_members_can_run_assigns_in_parallel(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, first_mid = self._ready_group(store)
+            store.patch_acl(
+                wid,
+                ACLPatchRequest(collaborators=["node-c"], expected_revision=2),
+            )
+            second, _ = store.create_member(
+                wid,
+                MemberCreateRequest(
+                    home_node_id="node-c",
+                    display_name="worker-c",
+                    allow_tool_names=[],
+                ),
+            )
+            store.mark_member_status(second.member_id, "ready", workgroup_id=wid)
+
+            from manage.workgroup.llm_chat import ChatToolCall
+
+            calls = [
+                ChatToolCall(
+                    id="call_parallel_a",
+                    name="assign_workgroup_task",
+                    arguments=json.dumps(
+                        {"member_id": first_mid, "instruction": "task-a"},
+                        ensure_ascii=False,
+                    ),
+                ),
+                ChatToolCall(
+                    id="call_parallel_b",
+                    name="assign_workgroup_task",
+                    arguments=json.dumps(
+                        {"member_id": second.member_id, "instruction": "task-b"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            ]
+            entered: set[str] = set()
+            lock = threading.Lock()
+            both_entered = threading.Event()
+
+            def completer(_wid: str, assign_id: str, member_id: str, instruction: str, _call_id: str = "") -> str:
+                with lock:
+                    entered.add(member_id)
+                    if len(entered) == 2:
+                        both_entered.set()
+                self.assertTrue(both_entered.wait(2), "assigns did not overlap")
+                return f"done:{instruction}"
+
+            client = MockLLMClient(
+                [
+                    ChatResult(tool_calls=calls, finish_reason="tool_calls"),
+                    ChatResult(content="both done", finish_reason="stop"),
+                ]
+            )
+            kernel = TurnKernel(
+                store,
+                chat_client=client,
+                assign_completer=completer,
+                mock_llm=True,
+            )
+            result = kernel.handle_human_message(
+                wid,
+                text="run both workers",
+                from_node_id="node-a",
+            )
+            self.assertEqual(result["loop"]["status"], "succeeded")
+            history = store.get_run_history(result["leader_run"].run_id)
+            assert history is not None
+            tool_messages = [m for m in history.messages if m.role == "tool"]
+            self.assertEqual(
+                [m.tool_call_id for m in tool_messages],
+                ["call_parallel_a", "call_parallel_b"],
+            )
+            self.assertIn("done:task-a", tool_messages[0].content or "")
+            self.assertIn("done:task-b", tool_messages[1].content or "")
+            self.assertEqual(store.get_member(first_mid).status, "ready")
+            self.assertEqual(store.get_member(second.member_id).status, "ready")
+
+    def test_same_member_cannot_have_parallel_assigns(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, mid = self._ready_group(store)
+            from manage.workgroup.models import AssignCreateRequest
+            from manage.workgroup.errors import WorkgroupError
+
+            first = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=mid, instruction="first"),
+            )
+            self.assertEqual(store.get_member(mid).status, "busy")
+            with self.assertRaises(WorkgroupError) as ctx:
+                store.create_assign(
+                    wid,
+                    AssignCreateRequest(member_id=mid, instruction="second"),
+                )
+            self.assertEqual(ctx.exception.code, "conflict")
+            store.set_assign_status(first.assign_id, "canceled", error_code="canceled")
+            self.assertEqual(store.get_member(mid).status, "ready")
+
+    def test_cancel_turn_cancels_all_parallel_member_runs(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store = WorkGroupStore(db=SQLiteDatabase(Path(tmp) / "m.db"))
+            wid, first_mid = self._ready_group(store)
+            store.patch_acl(
+                wid,
+                ACLPatchRequest(collaborators=["node-c"], expected_revision=2),
+            )
+            second, _ = store.create_member(
+                wid,
+                MemberCreateRequest(home_node_id="node-c", display_name="worker-c"),
+            )
+            store.mark_member_status(second.member_id, "ready", workgroup_id=wid)
+            from manage.workgroup.models import ActorRunCreateRequest, AssignCreateRequest
+
+            first_assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=first_mid, instruction="first"),
+            )
+            second_assign = store.create_assign(
+                wid,
+                AssignCreateRequest(member_id=second.member_id, instruction="second"),
+            )
+            first_run = store.create_actor_run(
+                wid,
+                ActorRunCreateRequest(actor_id=first_mid, assign_id=first_assign.assign_id),
+            )
+            second_run = store.create_actor_run(
+                wid,
+                ActorRunCreateRequest(actor_id=second.member_id, assign_id=second_assign.assign_id),
+            )
+            kernel = TurnKernel(store, mock_llm=True)
+            leader_run = kernel.start_leader_run(wid)
+            kernel._begin_turn(
+                wid,
+                mode="leader",
+                leader_run_id=leader_run.run_id,
+                member_run_ids=[first_run.run_id, second_run.run_id],
+            )
+            result = kernel.cancel_turn(wid)
+            self.assertEqual(
+                set(result["failed_assign_ids"]),
+                {first_assign.assign_id, second_assign.assign_id},
+            )
+            self.assertEqual(
+                {store.get_actor_run(first_run.run_id).status, store.get_actor_run(second_run.run_id).status},
+                {"canceled"},
+            )
+            self.assertEqual(store.get_member(first_mid).status, "ready")
+            self.assertEqual(store.get_member(second.member_id).status, "ready")
 
 
 if __name__ == "__main__":

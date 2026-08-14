@@ -106,6 +106,7 @@ class TurnCancelResponse(BaseModel):
     failed_assign_ids: list[str] = Field(default_factory=list)
     leader_run_id: str | None = None
     member_run_id: str | None = None
+    member_run_ids: list[str] = Field(default_factory=list)
 
 
 class ProvisionCompleteRequest(BaseModel):
