@@ -1,4 +1,4 @@
-# 宿主机 Client / TUI 连接 Docker 映射端口（容器内 Node 见 config.yaml）
+# 宿主机运维 Client 连接 Docker 映射端口（容器内 Node 见 config.yaml）
 agent_id: case-write-skill
 
 local:

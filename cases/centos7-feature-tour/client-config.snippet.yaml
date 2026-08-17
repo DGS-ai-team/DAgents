@@ -1,4 +1,0 @@
-# 已迁移至 local-run/client.yaml；TUI 请使用：
-#   go run ./client/cmd/dagents-client --config cases/centos7-feature-tour/local-run/client.yaml tui
-local:
-  endpoint: http://127.0.0.1:18765

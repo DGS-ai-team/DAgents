@@ -234,7 +234,7 @@ Last-Event-ID: 42
 - `tool_call`（含 `ask_user_information`）：工具行展示；**不**替代 HITL 块。
 - 子 Agent 内部 `done`：**不**转发到父 SSE（`node/internal/childagent/relay_hub.go`）。
 
-**Client**（Go / Python Textual / Web UI）：收到 `hitl_required` 后展开为 HITL 队列（先 user_information item，再 execute_tool 合并为 approval 面板）；每步 resume 后 Node 可部分消 pending，全部 resolved 才续跑 tool loop。`submit_message` 后 `wait_user_turn` 等待语义 B 的 `done`（`turn_complete=false` 时 HITL 暂停正常结束等待）。
+**Web UI 等交互客户端**：收到 `hitl_required` 后展开为 HITL 队列（先 user_information item，再 execute_tool 合并为 approval 面板）；每步 resume 后 Node 可部分消 pending，全部 resolved 才续跑 tool loop。`submit_message` 后等待语义 B 的 `done`（`turn_complete=false` 时 HITL 暂停正常结束等待）。
 
 #### 2.4.2 `hitl_required` 载荷（本地 turn）
 

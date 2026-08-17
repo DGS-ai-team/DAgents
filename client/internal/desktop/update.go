@@ -63,7 +63,7 @@ func ResolveAgentUpdate(ctx context.Context, node *nodeapi.Client, httpClient *h
 	return agentStatusToShared(status), nil
 }
 
-// ToAgentUpdateStatus 将共享 Status 转为 Node API 视图（TUI 等复用）。
+// ToAgentUpdateStatus 将共享 Status 转为 Node API 视图（桌面 Shell 等复用）。
 func ToAgentUpdateStatus(status *update.Status) *nodeapi.AgentUpdateStatus {
 	if status == nil {
 		return nil

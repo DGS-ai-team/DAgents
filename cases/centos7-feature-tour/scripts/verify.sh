@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CentOS 7 特性冒烟（HTTP，无需 TUI / API Key）
+# CentOS 7 特性冒烟（HTTP，无需交互 UI / API Key）
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
