@@ -206,6 +206,7 @@ func (w *Worker) DispatchEnvelope(env WSEnvelope) (*DispatchResult, error) {
 				"type": "workgroup.tombstone_ack",
 				"payload": map[string]any{
 					"workgroup_id":          t.WorkgroupID,
+					"member_id":             t.MemberID,
 					"delivery_seq":          env.DeliverySeq,
 					"connection_generation": w.Session.Generation(),
 				},

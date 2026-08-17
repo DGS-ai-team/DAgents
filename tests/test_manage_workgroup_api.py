@@ -212,6 +212,42 @@ class ManageWorkgroupAPITests(unittest.TestCase):
                 self.assertEqual(all_hitl.status_code, 200, all_hitl.text)
                 self.assertEqual(len(all_hitl.json()), 1)
 
+    def test_archive_member_enqueues_member_tombstone(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")
+            app = create_app(settings)
+            with TestClient(app) as client:
+                created = client.post(
+                    "/v1/workgroups",
+                    json={
+                        "display_name": "Archive API",
+                        "created_by_node_id": "node-a",
+                        "llm_profile_id": "default",
+                        "llm_profile_revision": "1",
+                    },
+                    headers={"x-dagents-agent-id": "node-a"},
+                )
+                self.assertEqual(created.status_code, 200, created.text)
+                wid = created.json()["workgroup"]["workgroup_id"]
+                created_member = client.post(
+                    f"/v1/workgroups/{wid}/members",
+                    json={"home_node_id": "node-a", "display_name": "remove-me"},
+                )
+                self.assertEqual(created_member.status_code, 200, created_member.text)
+                mid = created_member.json()["member"]["member_id"]
+
+                archived = client.post(f"/v1/workgroups/{wid}/members/{mid}/archive")
+                self.assertEqual(archived.status_code, 200, archived.text)
+                self.assertEqual(archived.json()["status"], "archived")
+                self.assertEqual(client.get(f"/v1/workgroups/{wid}/members").json(), [])
+
+                outbox = client.get(f"/v1/workgroups/{wid}/outbox").json()
+                tombstones = [
+                    frame for frame in outbox if frame["type"] == "workgroup.tombstone"
+                ]
+                self.assertTrue(tombstones)
+                self.assertEqual(tombstones[-1]["payload"]["member_id"], mid)
+
     def test_member_tool_catalog(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             settings = ManageSettings.for_test(db_path=Path(tmp) / "manage.db")

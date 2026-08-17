@@ -3,8 +3,8 @@ package workgroup
 import (
 	"context"
 	"errors"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,11 +18,12 @@ type CommandHandler struct {
 	ConnectionGeneration int64
 	CatalogRevision      string // 当前 Node manifest revision；空则跳过 catalog 检查
 	Tombstones           map[string]ArchiveTombstone
+	MemberTombstones     map[string]ArchiveTombstone
 	// Executor 可选；nil 时 D2 仅 accept 不执行（仍计 executions=0→1 在 MarkRunning）
 	Executor CommandExecutor
 
-	mu       sync.Mutex
-	running  map[string]context.CancelFunc // command_id → cancel（运行中可打断）
+	mu      sync.Mutex
+	running map[string]context.CancelFunc // command_id → cancel（运行中可打断）
 }
 
 // AcceptResult 为 accept 结果。
@@ -371,6 +372,25 @@ func (h *CommandHandler) reject(cmd ToolCommand, ferr error) (*AcceptResult, err
 func (h *CommandHandler) ApplyArchiveTombstone(t ArchiveTombstone, bindings BindingStore) error {
 	if h.Tombstones == nil {
 		h.Tombstones = map[string]ArchiveTombstone{}
+	}
+	if strings.TrimSpace(t.MemberID) != "" {
+		if h.MemberTombstones == nil {
+			h.MemberTombstones = map[string]ArchiveTombstone{}
+		}
+		h.MemberTombstones[memberTombstoneKey(t.WorkgroupID, t.MemberID)] = t
+		binding, err := bindings.Get(t.MemberID)
+		if err != nil {
+			return err
+		}
+		if binding == nil || binding.WorkgroupID != t.WorkgroupID {
+			return nil
+		}
+		binding.Status = "archived"
+		if t.LeaseEpochAtArchive > binding.LeaseEpoch {
+			binding.LeaseEpoch = t.LeaseEpochAtArchive
+		}
+		binding.UpdatedAt = time.Now().UTC()
+		return bindings.Put(*binding)
 	}
 	h.Tombstones[t.WorkgroupID] = t
 	list, err := bindings.List()
