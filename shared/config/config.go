@@ -331,7 +331,7 @@ func (c *Config) ToolResultSpillThresholdTokens() int {
 // defaultToolResultHookTools 与 node/internal/toolresult.DefaultToolResultTools 保持一致。
 func defaultToolResultHookTools() []string {
 	return []string{
-		"bash_run", "read_file", "grep_file", "grep_files",
+		"bash_run", "linux_exec", "read_file", "grep_file", "grep_files",
 		"search_replace", "glob_files",
 	}
 }

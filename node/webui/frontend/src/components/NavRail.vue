@@ -27,9 +27,16 @@ const railCache = {
   workgroupsInFlight: null,
 };
 let unreadRefreshTimer = null;
+let terminalLoadToken = 0;
+
+const props = defineProps({
+  terminalRevision: { type: Number, default: 0 },
+  selectedTerminalId: { type: String, default: "" },
+});
 
 const emit = defineEmits([
   "switch",
+  "terminal-selected",
   "create",
   "delete",
   "agents-updated",
@@ -44,6 +51,9 @@ const agents = ref([]);
 const workgroups = ref([]);
 const loadingAgents = ref(false);
 const loadingWgs = ref(false);
+const terminals = ref([]);
+const loadingTerminals = ref(false);
+const terminalError = ref("");
 const deletingId = ref("");
 const renamingId = ref("");
 const renameDraft = ref("");
@@ -51,6 +61,7 @@ const renameDraft = ref("");
 /** 分区展开：智能体 / 工作组 / 活动 */
 const sectionOpen = ref({
   agents: true,
+  terminals: true,
   workgroups: true,
   activity: true,
 });
@@ -101,6 +112,63 @@ const activeAgentId = computed(() => {
   if (route.name !== "agents") return "";
   return String(agentStore.agentId || "").trim();
 });
+
+async function loadTerminals() {
+  const agentId = String(activeAgentId.value || "").trim();
+  const token = ++terminalLoadToken;
+  if (!agentId) {
+    terminals.value = [];
+    terminalError.value = "";
+    return;
+  }
+  loadingTerminals.value = true;
+  terminalError.value = "";
+  try {
+    const result = await api.listAgentTerminals(agentId);
+    if (token !== terminalLoadToken || agentId !== activeAgentId.value) return;
+    terminals.value = Array.isArray(result?.terminals) ? result.terminals : [];
+    const selected = terminals.value.find(
+      (item) => String(item?.terminal_id || "") === String(props.selectedTerminalId || ""),
+    );
+    if (props.selectedTerminalId && !selected) {
+      emit("terminal-selected", null);
+    } else if (selected) {
+      // 刷新后同步最新状态、cwd 和目标信息到主区域。
+      emit("terminal-selected", selected);
+    }
+  } catch (e) {
+    if (token !== terminalLoadToken) return;
+    terminalError.value = e.message || "加载终端列表失败";
+  } finally {
+    if (token === terminalLoadToken) loadingTerminals.value = false;
+  }
+}
+
+function terminalLabel(item) {
+  const shell = String(item?.shell || "终端").trim();
+  const target = String(item?.target_kind || "local").trim() === "linux_channel"
+    ? String(item?.target_id || "Linux").trim()
+    : "本机";
+  return `${shell} · ${target}`;
+}
+
+function terminalStatusLabel(status) {
+  switch (String(status || "").trim()) {
+    case "running":
+      return "运行中";
+    case "exited":
+      return "已退出";
+    case "closed":
+      return "已关闭";
+    default:
+      return String(status || "未知");
+  }
+}
+
+function selectTerminal(item) {
+  if (!item?.terminal_id) return;
+  emit("terminal-selected", item);
+}
 const activeWorkgroupId = computed(() =>
   route.name === "workgroups" ? String(route.params.workgroupId || "").trim() : "",
 );
@@ -428,6 +496,14 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => [activeAgentId.value, props.terminalRevision],
+  () => {
+    void loadTerminals();
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   void refresh({ force: false });
   unreadRefreshTimer = window.setInterval(() => {
@@ -452,6 +528,7 @@ defineExpose({
   loadMembers,
   expandSection,
   toggleSection,
+  loadTerminals,
 });
 </script>
 
@@ -593,6 +670,75 @@ defineExpose({
         <li v-if="!sortedAgents.length && loadingAgents" class="nav-rail__hint">加载中…</li>
         <li v-else-if="!sortedAgents.length" class="nav-rail__empty">暂无智能体</li>
       </ul>
+      </div>
+    </section>
+
+    <!-- Terminals -->
+    <section v-if="activeAgentId" class="nav-rail__section">
+      <header class="nav-rail__section-head">
+        <button
+          type="button"
+          class="nav-rail__section-toggle"
+          :aria-expanded="sectionOpen.terminals"
+          @click="toggleSection('terminals')"
+        >
+          <span class="nav-rail__section-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <rect x="2.25" y="3" width="11.5" height="10" rx="1.5" stroke="currentColor" stroke-width="1.15" />
+              <path d="m5 6 2 2-2 2M8.5 10h2.5" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+          <span class="nav-rail__section-title">终端</span>
+          <span v-if="terminals.length" class="nav-rail__section-count">{{ terminals.length }}</span>
+        </button>
+        <button
+          type="button"
+          class="nav-rail__icon-btn"
+          :class="{ 'nav-rail__icon-btn--spinning': loadingTerminals }"
+          title="刷新终端清单"
+          aria-label="刷新终端清单"
+          :disabled="loadingTerminals"
+          @click.stop="loadTerminals"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+            <path
+              d="M13 5.6A5.5 5.5 0 104.1 12M13 5.6V2.4m0 3.2H9.8"
+              stroke="currentColor"
+              stroke-width="1.35"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      </header>
+      <div v-if="sectionOpen.terminals">
+        <p v-if="loadingTerminals && !terminals.length" class="nav-rail__hint">加载终端…</p>
+        <p v-else-if="terminalError" class="nav-rail__error">{{ terminalError }}</p>
+        <ul v-else class="nav-rail__list nav-rail__terminal-list">
+          <li
+            v-for="item in terminals"
+            :key="item.terminal_id"
+            class="nav-rail__item nav-rail__terminal-item"
+            :class="{ 'nav-rail__item--active': item.terminal_id === props.selectedTerminalId }"
+            :title="`${terminalLabel(item)} · ${item.terminal_id}`"
+            @click="selectTerminal(item)"
+          >
+            <span class="nav-rail__terminal-mark" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path d="m3.5 4.5 2.5 2-2.5 2M7.5 9h4" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+            <span class="nav-rail__terminal-main">
+              <span class="nav-rail__terminal-title">{{ terminalLabel(item) }}</span>
+              <span class="nav-rail__terminal-meta">
+                <span class="nav-rail__terminal-status-dot" :class="`nav-rail__terminal-status-dot--${item.status}`"></span>
+                {{ terminalStatusLabel(item.status) }}
+                <span v-if="item.config_id" class="nav-rail__terminal-config">{{ item.config_id }}</span>
+              </span>
+            </span>
+          </li>
+          <li v-if="!terminals.length" class="nav-rail__empty">暂无打开的终端</li>
+        </ul>
       </div>
     </section>
 

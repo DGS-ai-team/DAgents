@@ -18,6 +18,9 @@ func TestLoadFileDefaults(t *testing.T) {
 	if e.Decide("bash_run") != ActionRequireApproval {
 		t.Fatal("bash_run without args should require approval")
 	}
+	if e.Decide("linux_exec") != ActionRequireApproval {
+		t.Fatal("linux_exec should require approval by default")
+	}
 }
 
 func TestLoadFileLegacyYAML(t *testing.T) {
@@ -91,6 +94,9 @@ func TestLoadRuntimeSeedsFromPackaging(t *testing.T) {
 	}
 	if e.DecideTool("bash_run", map[string]any{"command": "git status"}) != ActionRequireApproval {
 		t.Fatal("seeded bash policy should require git")
+	}
+	if e.Decide("linux_exec") != ActionRequireApproval {
+		t.Fatal("seeded linux policy should require approval")
 	}
 }
 

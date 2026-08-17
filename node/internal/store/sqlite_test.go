@@ -105,6 +105,51 @@ func TestList(t *testing.T) {
 	}
 }
 
+func TestExecutionEventsPersistAndList(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessions.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	code := 0
+	ctx := context.Background()
+	if err := s.AppendExecutionEvent(ctx, ExecutionEventRecord{
+		AgentID:        "agent-1",
+		SessionID:      "session-1",
+		ProcessID:      "local-process-1",
+		ProcessSeq:     1,
+		EventType:      "process_started",
+		ToolCallID:     "call-1",
+		TargetKind:     "local",
+		PolicyDecision: "auto",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendExecutionEvent(ctx, ExecutionEventRecord{
+		AgentID:    "agent-1",
+		SessionID:  "session-1",
+		ProcessID:  "local-process-1",
+		ProcessSeq: 2,
+		EventType:  "process_exited",
+		ToolCallID: "call-1",
+		ExitCode:   &code,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.ListExecutionEvents(ctx, "session-1", 10)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("events=%+v err=%v", events, err)
+	}
+	if events[0].ProcessSeq != 1 || events[1].ProcessSeq != 2 {
+		t.Fatalf("events not ordered: %+v", events)
+	}
+	if events[1].ExitCode == nil || *events[1].ExitCode != 0 {
+		t.Fatalf("exit code=%v", events[1].ExitCode)
+	}
+}
+
 func TestMigrateLegacySessionsTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.db")
 	db, err := sql.Open("sqlite", path)

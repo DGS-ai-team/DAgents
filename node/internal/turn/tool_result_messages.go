@@ -6,6 +6,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/toolresult"
 )
 
 type toolResultTailKind string
@@ -119,7 +120,7 @@ func (o *Orchestrator) buildAsyncToolMessages(sessionID string, history []llm.Me
 				},
 			}},
 		},
-		ToolMessage: llm.ToolResultMessage(toolCallID, toolName, toolText),
+		ToolMessage:            llm.ToolResultMessage(toolCallID, toolName, toolText),
 		ForClientContent:       fullForClient,
 		ToolName:               toolName,
 		ToolCallID:             toolCallID,
@@ -149,6 +150,10 @@ func shouldContinueAfterAsyncTool(tail toolResultTailKind) bool {
 
 func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw string) (forClient, forHistory, spillPath string) {
 	if o.toolHooks == nil {
+		if toolresult.IsTerminalOutputTool(tc.Function.Name) {
+			client, history, _ := toolresult.PackageTerminal(raw, toolresult.DefaultTerminalHistoryMaxBytes)
+			return client, history, ""
+		}
 		return raw, raw, ""
 	}
 	hc := hooks.BuildToolAfterEachContext(hooks.ToolAfterEachInput{
@@ -161,8 +166,16 @@ func (o *Orchestrator) splitToolResult(sessionID string, tc llm.ToolCall, raw st
 	})
 	out, err := o.runPhase(context.Background(), hooks.PhaseToolAfterEach, hc, sessionID, nil, "")
 	if err != nil {
+		if toolresult.IsTerminalOutputTool(tc.Function.Name) {
+			client, history, _ := toolresult.PackageTerminal(raw, toolresult.DefaultTerminalHistoryMaxBytes)
+			return client, history, ""
+		}
 		return raw, raw, ""
 	}
 	split := hooks.ToolAfterEachOutputFrom(out)
+	if toolresult.IsTerminalOutputTool(tc.Function.Name) {
+		_, history, _ := toolresult.PackageTerminal(split.ForHistory, toolresult.DefaultTerminalHistoryMaxBytes)
+		split.ForHistory = history
+	}
 	return split.ForClient, split.ForHistory, split.SpillPath
 }

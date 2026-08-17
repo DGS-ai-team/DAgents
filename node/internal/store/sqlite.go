@@ -94,6 +94,9 @@ CREATE TABLE IF NOT EXISTS agent_runtimes (
 	_, _ = s.db.Exec(`ALTER TABLE agent_runtimes ADD COLUMN loaded_skills_json TEXT NOT NULL DEFAULT '[]'`)
 	_, _ = s.db.Exec(`ALTER TABLE agent_runtimes ADD COLUMN runtime_state_json TEXT NOT NULL DEFAULT '{}'`)
 	_, _ = s.db.Exec(`ALTER TABLE agent_runtimes ADD COLUMN node_id TEXT NOT NULL DEFAULT ''`)
+	if err := s.initExecutionEventSchema(); err != nil {
+		return err
+	}
 	return s.migrateLegacySessionsTable()
 }
 

@@ -1292,6 +1292,7 @@ function toolKindLabel(toolName) {
   const kind = inferToolKind(toolName);
   if (kind === "fs") return "fs";
   if (kind === "shell") return "shell";
+  if (kind === "terminal") return "terminal";
   if (kind === "browser") return "browser";
   if (kind === "mcp") return "mcp";
   return "tool";

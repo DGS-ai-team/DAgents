@@ -25,6 +25,7 @@ const SKILLS_TOOLS = new Set(["load_skills", "unload_skills", "clear_skills"]);
 
 const KIND_META = {
   mcp: { label: "mcp", short: "mcp", icon: "M" },
+  terminal: { label: "terminal", short: "terminal", icon: ">_" },
   shell: { label: "shell", short: "shell", icon: "$" },
   fs: { label: "fs", short: "fs", icon: "F" },
   browser: { label: "browser", short: "browser", icon: "◉" },
@@ -45,6 +46,7 @@ export function inferToolKind(name, data = {}) {
   if (n.startsWith("browser_")) return "browser";
   if (n.startsWith("wecom_")) return "wecom";
   if (n.startsWith("trigger_")) return "triggers";
+  if (n.startsWith("terminal_")) return "terminal";
   if (SKILLS_TOOLS.has(n)) return "skills";
   if (SHELL_TOOLS.has(n) || n.startsWith("background_job_")) return "shell";
   if (FS_TOOLS.has(n)) return "fs";

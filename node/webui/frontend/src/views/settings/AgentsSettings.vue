@@ -88,14 +88,20 @@ onMounted(load);
 
 <template>
   <div class="settings-page settings-embedded">
-    <h1 class="settings-page__title">智能体</h1>
-    <p class="settings-page__desc">管理本机智能体的名称、模型与能力；创建请在对话页进行。</p>
+    <header class="settings-page__header">
+      <div class="settings-page__header-main">
+        <h1 class="settings-page__title">智能体</h1>
+        <p class="settings-page__desc">管理本机智能体的名称、模型与能力；创建请在对话页进行。</p>
+      </div>
+    </header>
 
     <section class="agents-settings__section">
-      <h2 class="agents-settings__section-title">已创建</h2>
+      <div class="settings-section__head agents-settings__section-head">
+        <h2 class="agents-settings__section-title">已创建</h2>
+      </div>
       <p v-if="loading" class="agents-settings__status">加载中…</p>
       <p v-else-if="error" class="agents-settings__error">{{ error }}</p>
-      <p v-else-if="!agents.length" class="agents-settings__status">
+      <p v-else-if="!agents.length" class="agents-settings__status settings-empty-state">
         还没有智能体，请先回到对话页创建。
       </p>
 
@@ -116,7 +122,7 @@ onMounted(load);
     </section>
 
     <section class="agents-settings__section">
-      <div class="agents-settings__section-head">
+      <div class="settings-section__head agents-settings__section-head">
         <div>
           <h2 class="agents-settings__section-title">模板</h2>
           <p class="agents-settings__section-desc">
@@ -130,7 +136,7 @@ onMounted(load);
 
       <p v-if="templatesLoading" class="agents-settings__status">加载中…</p>
       <p v-else-if="templatesError" class="agents-settings__error">{{ templatesError }}</p>
-      <p v-else-if="!templates.length" class="agents-settings__status">
+      <p v-else-if="!templates.length" class="agents-settings__status settings-empty-state">
         暂无模板；可新建自定义模板，或在对话页用空白配置创建。
       </p>
 
@@ -165,13 +171,6 @@ onMounted(load);
 </template>
 
 <style scoped>
-.settings-page__desc {
-  margin: 0 0 12px;
-  font-size: 13px;
-  color: var(--color-text-muted);
-  line-height: 1.5;
-}
-
 .agents-settings__section {
   margin-top: 20px;
 }
@@ -206,6 +205,10 @@ onMounted(load);
   margin: 10px 0;
   font-size: 13px;
   color: var(--color-text-muted);
+}
+
+.agents-settings__status.settings-empty-state {
+  margin: 16px 0 0;
 }
 
 .agents-settings__error {

@@ -13,6 +13,12 @@ describe("inferToolKind", () => {
     expect(inferToolKind("background_job_status")).toBe("shell");
   });
 
+  it("maps interactive terminal tools to the terminal source", () => {
+    expect(inferToolKind("terminal_open")).toBe("terminal");
+    expect(inferToolKind("terminal_read")).toBe("terminal");
+    expect(inferToolKind("terminal_terminate")).toBe("terminal");
+  });
+
   it("maps triggers and browser by prefix", () => {
     expect(inferToolKind("trigger_list")).toBe("triggers");
     expect(inferToolKind("browser_navigate")).toBe("browser");
@@ -42,6 +48,10 @@ describe("resolveToolVisual", () => {
     expect(resolveToolVisual({ data: { tool_name: "load_skills" } })).toMatchObject({
       kind: "skills",
       label: "skills",
+    });
+    expect(resolveToolVisual({ data: { tool_name: "terminal_read" } })).toMatchObject({
+      kind: "terminal",
+      label: "terminal",
     });
   });
 
