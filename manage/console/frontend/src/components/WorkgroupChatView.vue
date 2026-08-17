@@ -73,7 +73,8 @@ const liveUser = ref(null);
 const liveAssistant = ref(null);
 const streamPhase = ref(""); // thinking | streaming | tool
 const streamToolName = ref("");
-const streamMode = ref(""); // leader | direct
+const streamMode = ref(""); // leader | direct | member
+const streamActorId = ref("");
 /** 发送开始时的 Timeline 水位，仅用之后的里程碑驱动 live status */
 const statusWatermarkSeq = ref(0);
 
@@ -690,14 +691,24 @@ const displayGroups = computed(() => {
     }
   }
 
-  if (liveAssistant.value && streamMode.value !== "direct") {
-    pushRow("assistant", "leader", "Supervisor", {
+  // Assigned member content is already represented by the task card. Direct
+  // @member turns remain a normal streaming reply because there is no
+  // Supervisor task-card narrative to show in their place.
+  if (liveAssistant.value && streamMode.value !== "member") {
+    const actorId =
+      streamMode.value === "direct" ? streamActorId.value || "member" : "leader";
+    const actorLabel =
+      actorId === "leader"
+        ? "Supervisor"
+        : (members.value || []).find((m) => String(m?.member_id || "") === actorId)
+              ?.display_name || actorId;
+    pushRow("assistant", actorId, actorLabel, {
       key: liveAssistant.value.id,
       kind: "message",
       role: "assistant",
       text: liveAssistant.value.text || "",
-      actor: "Supervisor",
-      actorId: "leader",
+      actor: actorLabel,
+      actorId,
       streaming: true,
       phase: streamPhase.value,
       tool: streamToolName.value,
@@ -1104,6 +1115,7 @@ function clearLive() {
   streamPhase.value = "";
   streamToolName.value = "";
   streamMode.value = "";
+  streamActorId.value = "";
   statusWatermarkSeq.value = 0;
 }
 
@@ -1288,6 +1300,7 @@ async function sendMessage() {
   streamPhase.value = "thinking";
   streamToolName.value = "";
   streamMode.value = directId ? "direct" : "leader";
+  streamActorId.value = directId || "leader";
   streamAbort = new AbortController();
   startWorkPoll();
   startQueuePoll();
@@ -1318,6 +1331,8 @@ async function sendMessage() {
             streamPhase.value = phase === "tool" ? "tool" : phase === "streaming" ? "streaming" : "thinking";
             streamToolName.value = String(data?.purpose || "");
             if (data?.mode) streamMode.value = String(data.mode);
+            if (data?.member_id) streamActorId.value = String(data.member_id);
+            else if (streamMode.value === "leader") streamActorId.value = "leader";
             if (phase === "tool" && liveAssistant.value) {
               liveAssistant.value = { ...liveAssistant.value, text: "" };
             }
@@ -1328,6 +1343,9 @@ async function sendMessage() {
             const piece = String(data?.text || "");
             if (!piece || !liveAssistant.value) return;
             streamPhase.value = "streaming";
+            if (data?.mode) streamMode.value = String(data.mode);
+            if (data?.member_id) streamActorId.value = String(data.member_id);
+            else if (streamMode.value === "leader") streamActorId.value = "leader";
             liveAssistant.value = {
               ...liveAssistant.value,
               text: `${liveAssistant.value.text || ""}${piece}`,
@@ -1335,6 +1353,8 @@ async function sendMessage() {
           } else if (eventName === "assistant_final") {
             const finalText = String(data?.text || "").trim();
             if (data?.mode) streamMode.value = String(data.mode);
+            if (data?.member_id) streamActorId.value = String(data.member_id);
+            else if (streamMode.value === "leader") streamActorId.value = "leader";
             if (liveAssistant.value && finalText) {
               liveAssistant.value = { ...liveAssistant.value, text: finalText };
             }
@@ -1375,6 +1395,7 @@ async function sendMessage() {
     streamPhase.value = "";
     streamToolName.value = "";
     streamMode.value = "";
+    streamActorId.value = "";
     void refreshHumanQueue();
   }
 }

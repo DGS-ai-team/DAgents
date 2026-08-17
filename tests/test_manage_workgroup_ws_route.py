@@ -109,7 +109,7 @@ class WorkgroupWSRouteTests(unittest.TestCase):
 
                     ws.send_json(
                         {
-                            "type": "delivery.ack",
+                            "type": "workgroup.tombstone_ack",
                             "payload": {
                                 "delivery_seq": frame.delivery_seq,
                                 "connection_generation": gen,

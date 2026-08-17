@@ -291,7 +291,11 @@ def build_workgroup_router(
     def archive_member(workgroup_id: str, member_id: str, request: Request) -> WorkGroupMember:
         auth = authenticate(request)
         try:
+            existing = store.get_member(member_id)
+            was_archived = existing is not None and existing.status == "archived"
             member = store.archive_member(workgroup_id, member_id)
+            if not was_archived:
+                loop.enqueue_member_tombstone(workgroup_id, member_id)
         except WorkgroupError as exc:
             raise _http_error(exc) from exc
         audit.record(

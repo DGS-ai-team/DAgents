@@ -9,14 +9,15 @@ import (
 
 // Worker 聚合 D2 骨架能力：provision / journal / fencing / manifest / session。
 type Worker struct {
-	mu         sync.Mutex
-	NodeID     string
-	Bindings   BindingStore
-	Journal    CommandJournal
-	Session    Session
-	Provision  *Provisioner
-	Commands   *CommandHandler
-	Tombstones map[string]ArchiveTombstone
+	mu               sync.Mutex
+	NodeID           string
+	Bindings         BindingStore
+	Journal          CommandJournal
+	Session          Session
+	Provision        *Provisioner
+	Commands         *CommandHandler
+	Tombstones       map[string]ArchiveTombstone
+	MemberTombstones map[string]ArchiveTombstone
 	// OnTimelineEvent forwards public Manage Timeline frames to the local Web UI.
 	OnTimelineEvent func(WSEnvelope)
 }
@@ -64,23 +65,26 @@ func NewWorker(cfg Config) *Worker {
 		journal = NewMemoryJournal()
 	}
 	w := &Worker{
-		NodeID:     cfg.NodeID,
-		Bindings:   bindings,
-		Journal:    journal,
-		Tombstones: map[string]ArchiveTombstone{},
+		NodeID:           cfg.NodeID,
+		Bindings:         bindings,
+		Journal:          journal,
+		Tombstones:       map[string]ArchiveTombstone{},
+		MemberTombstones: map[string]ArchiveTombstone{},
 	}
 	// 工作区工具由 Worker Executor 提供，不依赖本地 Agent Registry 枚举名。
 	nodeTools := mergeToolNames(cfg.NodeToolNames, WorkspaceExecutableToolNames())
 	w.Provision = &Provisioner{
-		NodeID:        cfg.NodeID,
-		Bindings:      bindings,
-		NodeToolNames: nodeTools,
+		NodeID:           cfg.NodeID,
+		Bindings:         bindings,
+		MemberTombstones: w.MemberTombstones,
+		NodeToolNames:    nodeTools,
 	}
 	w.Commands = &CommandHandler{
 		Bindings:             bindings,
 		Journal:              journal,
 		ConnectionGeneration: 0,
 		Tombstones:           w.Tombstones,
+		MemberTombstones:     w.MemberTombstones,
 		Executor:             NewWorkspaceToolExecutorWithBackgroundJobStore(bindings, cfg.BackgroundJobStore),
 	}
 	return w
