@@ -58,7 +58,7 @@ jobs:
 
       - name: Static build smoke
         run: |
-          # dagents-client: probe/update only (Phase 4; no terminal TUI)
+          # dagents-client: probe/update/version 运维入口
           BUILD_CLIENT=1 SKIP_WEBUI_BUILD=1 bash scripts/ci/build_go_linux_static.sh
           test -x dist/go-linux-amd64/bin/dagents-node
           test -x dist/go-linux-amd64/bin/dagents-client

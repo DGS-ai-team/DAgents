@@ -6,7 +6,6 @@ CI 专用脚本（本地亦可手动在同类容器内调试）。
 |------|------|
 | **`build_go_static.sh`** | Go `dagents-node` 静态交叉编译；`BUILD_CLIENT=1` 时额外编 `dagents-client`（probe/update） |
 | **`build_go_linux_static.sh`** | 兼容入口（等同 `GOOS=linux`） |
-| **`build_dagents_cli.sh`** | **已移除（Phase 4）**；原 PyInstaller `dagents-cli`（Textual TUI） |
 | **`build_dagents_browser.sh`** | PyInstaller 单文件 **`dagents-browser`**（browser-use 薄服务） |
 | **`build_linux_rocky8_pyenv.sh`** | **Release CI 默认**：Rocky Linux 8 容器（glibc **2.28**）内 pyenv + PyInstaller（`BROWSER_PI_ARGS`）；`SKIP_DNF=1` 配合预装镜像 |
 | **`../packaging/ci/Dockerfile.rocky8-browser`** | Rocky8 + gcc-toolset-13 预装依赖（CI Buildx + GHA cache）；pyenv 目录另做 actions/cache |

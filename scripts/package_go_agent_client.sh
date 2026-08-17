@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 兼容入口：本地助手打包（Go Node + Textual dagents-cli）。
+# 兼容入口：本地助手打包（Go Node + 内嵌 Web UI + 可选浏览器/运维 Client）。
 #
 # 用法：
 #   scripts/package_go_agent_client.sh   # 已废弃命名，委托 package_local_assistant

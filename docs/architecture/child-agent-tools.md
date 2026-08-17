@@ -450,7 +450,7 @@ Node 逻辑：
 
 父 session HITL 的 `done` 带 `turn_complete` / `awaiting`，语义见 [agent-node-api.md §2.4.1](./agent-node-api.md)。
 
-Client（Go full / Python Textual）在收到带 `child_agent_id` 的 `approval_required` 时，展示时标注「子任务：{purpose}」，**SubmitResume 仍用父 session_id**，并在 `resume_value` 中回传 `child_agent_id`。
+Web UI 在收到带 `child_agent_id` 的 `approval_required` 时，展示时标注「子任务：{purpose}」，**SubmitResume 仍用父 session_id**，并在 `resume_value` 中回传 `child_agent_id`。
 
 ### 14.5 用户拒绝 / 超时
 
